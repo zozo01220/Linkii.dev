@@ -49,6 +49,7 @@ builder.Services.AddSingleton<IAppProvider, WebPageProvider>();
 builder.Services.AddSingleton<IAppProvider, YouTubeProvider>();
 builder.Services.AddSingleton<AppProviders>();
 builder.Services.AddSingleton<GoogleAuth>();   // « Se connecter avec Google » (Calendar et Drive, lecture seule)
+builder.Services.AddSingleton<MicrosoftAuth>();   // « Se connecter avec Microsoft » (agendas Microsoft 365 et OneDrive / SharePoint, lecture seule)
 builder.Services.AddSingleton<DriveService>();
 builder.Services.AddHostedService<DriveSyncWorker>();   // dossiers des Drives : synchronisés toutes les 15 minutes
 builder.Services.AddScoped<AppService>();
@@ -114,6 +115,8 @@ Seed.PurgeRetiredApps(store0, app.Services.GetRequiredService<AppCatalog>(), sto
 Seed.PurgeOldCalendars(store0, store0.Path, app.Logger);
 app.Logger.LogInformation("Google (Calendar, Drive) : « Se connecter avec Google » {State}.", app.Services.GetRequiredService<GoogleAuth>().IsConfigured
     ? "disponible" : "indisponible (Linkii:Google:ClientId et Linkii:Google:ClientSecret absents de la configuration)");
+app.Logger.LogInformation("Microsoft (Microsoft 365, OneDrive) : « Se connecter avec Microsoft » {State}.", app.Services.GetRequiredService<MicrosoftAuth>().IsConfigured
+    ? "disponible" : "indisponible (Linkii:Microsoft:ClientId et Linkii:Microsoft:ClientSecret absents de la configuration)");
 
 // une conversion vidéo interrompue par un arrêt du serveur ne reprend pas : on la marque en échec
 store0.Write(d =>
@@ -200,6 +203,7 @@ app.Use(async (ctx, next) =>
                || p.StartsWithSegments("/internal") || p.StartsWithSegments("/media")   // /media fait son propre contrôle d'accès
                || p.StartsWithSegments("/canva/callback")   // retour de Canva : identifié par son « state », sur le domaine principal
                || p.StartsWithSegments("/google/callback")  // retour de Google (Drive) : idem
+               || p.StartsWithSegments("/microsoft/callback")  // retour de Microsoft : idem
                || p.StartsWithSegments("/manifest.webmanifest");   // le navigateur le demande sans cookie de session
     if (!open && ctx.User.Identity?.IsAuthenticated != true)
     {
@@ -258,6 +262,20 @@ app.MapGet("/google/connect", (HttpContext ctx, GoogleAuth google) =>
 });
 app.MapGet("/google/callback", async (HttpRequest req, GoogleAuth google) =>
     Results.Redirect(await google.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
+
+// Compte Microsoft : « Se connecter avec Microsoft » depuis Intégrations › Microsoft 365 (?for=calendar) ou OneDrive et SharePoint (?for=drive),
+// application Entra ID de la plateforme, lecture seule. Un seul compte par organisation ; chaque intégration ajoute son accès.
+app.MapGet("/microsoft/connect", (HttpContext ctx, MicrosoftAuth microsoft) =>
+{
+    var cid = ctx.User.GetGuid(Claims.Client);
+    if (cid == null) return Results.Redirect("/");
+    var purpose = ctx.Request.Query["for"] == "calendar" ? "calendar" : "drive";
+    if (!microsoft.IsConfigured) return Results.Redirect($"/integrations?for={purpose}&microsoft=unconfigured");
+    var here = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
+    return Results.Redirect(microsoft.StartAuthorization(cid.Value, purpose, here + "/integrations", here));
+});
+app.MapGet("/microsoft/callback", async (HttpRequest req, MicrosoftAuth microsoft) =>
+    Results.Redirect(await microsoft.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"], req.Query["error_description"])));
 
 app.MapPost("/logout", async (HttpContext ctx) =>
 {

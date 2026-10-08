@@ -6,6 +6,7 @@
 @inject Toaster Toast
 @inject CanvaService Canva
 @inject GoogleAuth GoogleAuth
+@inject MicrosoftAuth MsAuth
 
 <div class="page-head">
     <div>
@@ -212,9 +213,11 @@ else
         var acc = SharedCalendarSources.Account(tenant, s.Id);
         var on = acc?.Enabled == true;
         var google = s.Id == "google";   // compte Google de l'organisation (« Se connecter avec Google »), partagé avec Google Drive
+        var microsoft = s.Id == "m365";  // compte Microsoft de l'organisation (« Se connecter avec Microsoft »), partagé avec OneDrive et SharePoint
         (string status, string css, string? why) = google && !GoogleAuth.IsConfigured ? ("Indisponible", "inactif", "Connexion Google de la plateforme non configurée (administrateur Linkii)")
+            : microsoft && !MsAuth.IsConfigured ? ("Indisponible", "inactif", "Connexion Microsoft de la plateforme non configurée (administrateur Linkii)")
             : !on ? ("Inactive", "inactif", (string?)null)
-            : google && !SharedCalendarSources.Configured(tenant, s.Id) ? ("À connecter", "mise-a-jour", (string?)null)
+            : (google || microsoft) && !SharedCalendarSources.Configured(tenant, s.Id) ? ("À connecter", "mise-a-jour", (string?)null)
             : !SharedCalendarSources.Configured(tenant, s.Id) ? ("À configurer", "mise-a-jour", (string?)null)
             : acc!.LastError.Length > 0 ? ("Erreur de connexion", "hors-ligne", acc.LastError)
             : s.Id == "ics" ? ("Active", "en-ligne", (string?)null) : ("Connecté", "en-ligne", (string?)null);
@@ -225,12 +228,11 @@ else
     {
         var on = DriveSources.Enabled(tenant, s.Id);
         var failed = tenant.DriveFolders.FirstOrDefault(f => f.Source == s.Id && f.LastError.Length > 0);
-        var google = s.Id == "gdrive";   // compte Google connecté par l'organisation, avec l'accès à Drive
-        var connected = GoogleAuth.Has(tenant, GoogleAuth.DriveScope);
+        var google = s.Id == "gdrive";   // compte Google ou Microsoft connecté par l'organisation, avec l'accès aux fichiers
         (string status, string css, string? why) = google && !GoogleAuth.IsConfigured ? ("Indisponible", "inactif", "Connexion Google de la plateforme non configurée (administrateur Linkii)")
+            : !google && !MsAuth.IsConfigured ? ("Indisponible", "inactif", "Connexion Microsoft de la plateforme non configurée (administrateur Linkii)")
             : !on ? ("Inactive", "inactif", (string?)null)
-            : google && GoogleAuth.IsConfigured && !connected ? ("À connecter", "mise-a-jour", (string?)null)
-            : !DriveSources.Configured(tenant, s.Id) ? ("À configurer", "mise-a-jour", (string?)null)
+            : !DriveSources.Configured(tenant, s.Id) ? ("À connecter", "mise-a-jour", (string?)null)
             : failed != null ? ("Erreur de synchronisation", "hors-ligne", $"{failed.Name} : {failed.LastError}")
             : ("Connecté", "en-ligne", (string?)null);
         return new("drv-" + s.Id, s.Name, "Drive", s.Summary, "drv-" + s.Id, null, status, css, !on, why);
@@ -242,6 +244,7 @@ else
         var def = DriveSources.Find(src)!;
         var on = !DriveSources.Enabled(tenant, src);
         if (on && src == "gdrive" && !GoogleAuth.IsConfigured) { Toast.Error("Google Drive n'est pas encore disponible sur cette plateforme (connexion Google à configurer sur le serveur)."); return; }
+        if (on && src == "onedrive" && !MsAuth.IsConfigured) { Toast.Error("OneDrive et SharePoint ne sont pas encore disponibles sur cette plateforme (connexion Microsoft à configurer sur le serveur)."); return; }
         Svc.SetDriveSource(src, on);
         Load();
         if (on && !DriveSources.Configured(tenant, src)) { driveSource = src; Toast.Ok($"« {def.Name} » activée : configurez sa connexion."); }
@@ -253,6 +256,7 @@ else
         Load();
         CanvaReturn();
         GoogleReturn();
+        MicrosoftReturn();
     }
 
     private void Load()
@@ -281,6 +285,7 @@ else
         var def = SharedCalendarSources.Find(src)!;
         var on = !SharedCalendarSources.Enabled(tenant, src);
         if (on && src == "google" && !GoogleAuth.IsConfigured) { Toast.Error("Google Calendar n'est pas encore disponible sur cette plateforme (connexion Google à configurer sur le serveur)."); return; }
+        if (on && src == "m365" && !MsAuth.IsConfigured) { Toast.Error("Microsoft 365 n'est pas encore disponible sur cette plateforme (connexion Microsoft à configurer sur le serveur)."); return; }
         Svc.SetCalendarSource(src, on);
         Load();
         if (on && !SharedCalendarSources.Configured(tenant, src)) { calSource = src; Toast.Ok($"« {def.Name} » activée : configurez sa connexion."); }
@@ -327,6 +332,33 @@ else
             case "expired": Toast.Error("La demande de connexion à Google a expiré. Recommencez."); break;
             case "unconfigured": Toast.Error("La connexion Google n'est pas encore configurée sur cette plateforme."); break;
             default: Toast.Error("Google a refusé la connexion. Réessayez dans un instant."); break;
+        }
+    }
+
+    // Retour de « Se connecter avec Microsoft » (/microsoft/callback) : même principe que Google. Microsoft 365 (agendas) ou
+    // OneDrive et SharePoint (fichiers) est activé et sa fenêtre rouverte pour ajouter des agendas ou des dossiers.
+    private void MicrosoftReturn()
+    {
+        var query = System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query);
+        var q = query["microsoft"];
+        if (q == null) return;
+        var calendar = query["for"] == "calendar";
+        var name = calendar ? "Microsoft 365" : "OneDrive et SharePoint";
+        switch (q)
+        {
+            case "ok":
+                if (calendar && !SharedCalendarSources.Enabled(tenant, "m365")) { Svc.SetCalendarSource("m365", true); Load(); }
+                if (!calendar && !DriveSources.Enabled(tenant, "onedrive")) { Svc.SetDriveSource("onedrive", true); Load(); }
+                Toast.Ok($"{name} connecté{(tenant.MsUser.Length > 0 ? $" ({tenant.MsUser})" : "")}. Ajoutez vos {(calendar ? "agendas" : "dossiers")}.");
+                if (calendar) calSource = "m365"; else driveSource = "onedrive";
+                break;
+            case "denied": Toast.Error("Connexion à Microsoft annulée."); break;
+            case "admin": Toast.Error("Votre organisation demande l'approbation de Linkii par son administrateur Microsoft 365. Transmettez-lui la demande, puis recommencez."); break;
+            case "scope": Toast.Error(calendar ? "L'accès à vos agendas n'a pas été autorisé : reconnectez-vous en acceptant l'accès aux agendas."
+                                               : "L'accès à vos fichiers n'a pas été autorisé : reconnectez-vous en acceptant l'accès aux fichiers."); break;
+            case "expired": Toast.Error("La demande de connexion à Microsoft a expiré. Recommencez."); break;
+            case "unconfigured": Toast.Error("La connexion Microsoft n'est pas encore configurée sur cette plateforme."); break;
+            default: Toast.Error("Microsoft a refusé la connexion. Réessayez dans un instant."); break;
         }
     }
 

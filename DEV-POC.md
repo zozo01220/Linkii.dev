@@ -167,12 +167,12 @@ Chaque usage est un **widget lié à une source**, posé dans une playlist comme
 | **B2** | **Menu du restaurant** | **CSV** importé (page Données) | Menu du jour par catégorie, prix, allergènes ; à défaut, prochain jour renseigné | Pleine page, angles |
 | **B3** | **Horaires du jour** · **Agenda de la semaine** | ICS ou Microsoft 365 | Liste du jour (en cours surligné, passé estompé) · événements groupés par jour | Pleine page, angles |
 | **B4** | **Prochains départs** | API ouverte des transports publics suisses (transport.opendata.ch) | Ligne, destination, quai, « dans 4′ », retard en rouge | Pleine page, angles |
-| **B5** | **Connecteur Microsoft 365** | Application Entra ID (OAuth 2.0 *client credentials*) | Annuaire des salles dans le sélecteur, calendriers lus sans lien ICS | — |
+| **B5** | **Connecteur Microsoft 365** | « Se connecter avec Microsoft » (OAuth 2.0 + PKCE, permissions déléguées en lecture seule) | Agendas du compte et annuaire des salles dans le sélecteur, calendriers lus sans lien ICS | — |
 
 ### Comment ça marche
 - **Les sources sont lues côté serveur**, avec un cache de 30 à 45 s ; les écrans ne voient jamais l'URL ICS (souvent secrète) ni les identifiants Microsoft. Le player appelle `GET /api/data/{id}` avec son jeton d'écran.
 - **ICS** : lecture avec la bibliothèque **Ical.Net** — récurrences (RRULE), fuseaux horaires, événements annulés ou « libres » ignorés. Liens `webcal://` acceptés.
-- **Microsoft 365** : jeton d'application, lecture de `calendarView` par boîte aux lettres, annuaire via `places/microsoft.graph.room`. Permissions d'application à accorder avec consentement administrateur : `Calendars.Read` et `Place.Read.All` (procédure affichée dans la page Données). Recommandé : limiter l'application aux salles avec une *Application Access Policy*.
+- **Microsoft 365** : compte Microsoft connecté par l'organisation (`MicrosoftAuth`, même principe que `GoogleAuth`), jeton de renouvellement chiffré et renouvelé à chaque emploi. Lecture de `calendarView` (`/me/calendars/{id}` pour un agenda du compte, `/users/{adresse}` pour une salle ou une boîte), annuaire via `places/microsoft.graph.room`. Permissions déléguées en lecture seule : `Calendars.Read`, `Calendars.Read.Shared`, `Place.Read.All` ; OneDrive et SharePoint : `Files.Read.All`, `Sites.Read.All`. Le client ne configure rien : un bouton, la page de connexion Microsoft, et c'est tout.
 - **CSV du menu** : colonnes `date; categorie; plat; prix; allergenes` (séparateur `;` ou `,`, dates `2026-10-12` ou `12.10.2026`, en-têtes français ou anglais) ; un nouvel import remplace le menu ; les lignes invalides sont signalées sans bloquer le reste. Modèle téléchargeable.
 - **Confidentialité** : pour une porte de salle, l'option « Afficher l'intitulé des réunions » (sinon « Réservé ») est appliquée **sur le serveur** : l'intitulé ne quitte pas le serveur.
 - **Hors ligne** : le player garde la dernière réponse et **calcule l'état Libre / Occupé avec sa propre horloge** toutes les 15 s. Après 10 min sans données, un avertissement « Données de HH:MM » s'affiche ; après 30 min, la salle passe en gris « Indisponible » (jamais de faux « Libre »).
@@ -186,19 +186,16 @@ Chaque usage est un **widget lié à une source**, posé dans une playlist comme
 - **Vérifié** : conversion VLC d'un AVI (MPEG-4) et d'un MKV (H.264) en MP4 lu par Chrome ; lecture en boucle de la vidéo **serveur coupé** (bordure rouge + pastille Hors ligne affichées).
 - **Pour un vrai lecteur natif multi-formats** (sans conversion, hors ligne) : intégrer **LibVLC** (gratuit, LGPL) dans l'application Android de la clé / tablette. À prévoir avec l'APK.
 
-### Obtenir les identifiants Microsoft 365 (ID du locataire, ID de l'application, secret client)
-À faire une fois, dans le portail **Microsoft Entra** (https://entra.microsoft.com), avec un compte administrateur ou un droit de créer des inscriptions d'applications.
+### Configurer « Se connecter avec Microsoft » (administrateur Linkii, une seule fois pour toute la plateforme)
+Les clients n'ont rien à créer ni à saisir : l'application Entra ID est celle de la plateforme.
 
-1. **Identité › Applications › Inscriptions d'applications › Nouvelle inscription** : nom `Linkii`, type de compte « Comptes dans cet annuaire organisationnel uniquement », pas d'URI de redirection.
-2. Sur la page **Vue d'ensemble** de l'application :
-   - **ID de l'application (client)** → champ *ID de l'application (Client ID)* de la fenêtre Intégrations › Microsoft 365 › Gérer ;
-   - **ID de l'annuaire (locataire)** → champ *ID du locataire (Directory / Tenant ID)*.
-3. **Certificats et secrets › Nouveau secret client** : choisir une durée, puis copier **immédiatement la colonne « Valeur »** (affichée une seule fois ; ce n'est pas la colonne « ID du secret ») → champ *Secret client*. Noter la date d'expiration pour le renouveler à temps.
-4. **Autorisations d'API › Ajouter une autorisation › Microsoft Graph › Autorisations de l'application** : cocher `Calendars.Read` et `Place.Read.All`, puis **Accorder le consentement administrateur**. Sans ce consentement, la connexion réussit mais la lecture des calendriers est refusée.
-5. Recommandé : limiter l'application aux boîtes des salles avec `New-ApplicationAccessPolicy` (Exchange Online), car elle peut sinon lire tous les calendriers de l'organisation.
-6. Dans Linkii (**Intégrations › Microsoft 365 › Gérer**), cliquer sur **Tester la connexion** : elle vérifie l'authentification et liste les salles trouvées.
+1. **Portail Entra** (https://entra.microsoft.com) › **Identité › Applications › Inscriptions d'applications › Nouvelle inscription** : nom `Linkii`, type de compte « Comptes dans un annuaire d'organisation (multilocataire) », URI de redirection de type *Web* : `https://<domaine>/microsoft/callback` (en local : `http://localhost:<port>/microsoft/callback`).
+2. **Certificats et secrets › Nouveau secret client** (24 mois au plus) : copier la *valeur* tout de suite, et noter la date d'expiration (à l'expiration, toutes les connexions Microsoft s'arrêtent).
+3. **Autorisations d'API › Microsoft Graph › Autorisations déléguées** : `User.Read`, `offline_access`, `Calendars.Read`, `Calendars.Read.Shared`, `Place.Read.All`, `Files.Read.All`, `Sites.Read.All`. Ne pas accorder le consentement administrateur pour le locataire de Linkii : chaque client consent à sa connexion.
+4. **Image de marque et propriétés** : logo, page d'accueil, conditions d'utilisation, politique de confidentialité ; puis vérification de l'éditeur (Microsoft Cloud Partner Program), faute de quoi les utilisateurs d'autres organisations ne peuvent pas consentir eux-mêmes.
+5. **Configuration du serveur** : `Linkii:Microsoft:ClientId`, `Linkii:Microsoft:ClientSecret` (variable d'environnement `Linkii__Microsoft__ClientSecret` en production) et `Linkii:Microsoft:RedirectUri` (identique à l'adresse déclarée à l'étape 1 ; à défaut, l'adresse du back-office + `/microsoft/callback`).
 
-Le consentement administrateur demande un rôle de type Administrateur général ou Administrateur d'application cloud : si le compte n'a pas ces droits, la demande passe par la DSI.
+Si l'organisation d'un client interdit le consentement des utilisateurs, Linkii affiche « Votre organisation demande l'approbation de Linkii par son administrateur Microsoft 365 » : l'administrateur du client approuve l'application une fois (rôle Administrateur général ou Administrateur d'application cloud), puis l'utilisateur recommence.
 
 ### Obtenir un lien ICS (alternative sans compte d'application)
 Il faut **publier le calendrier** ; le lien est collé dans le widget (Porte de salle, Horaires, Agenda).
@@ -222,7 +219,7 @@ Renommé **Matériel** : téléviseur, moniteur, totem / borne, **tablette Andro
 ### Limites connues
 - **Vidéos hors ligne** : lecture depuis le cache en blob (voir ci-dessus) ; le service worker sert aussi les requêtes `Range` par tranches (plus de chargement complet en mémoire). Les très gros fichiers restent limités par le quota de stockage de la clé ; la conversion plafonne à 1080p / 3,5 Mb/s avec VLC.
 - **YouTube** : pas de lecture hors ligne (ni cache), pas de son, et certaines vidéos refusent l'intégration (le lecteur affiche alors une erreur). Une page sans référent HTTP provoque l'« erreur 153 » (le lien d'intégration ouvert seul dans un onglet l'affiche : normal). Vérifier les conditions d'utilisation de YouTube pour un usage d'affichage public.
-- **Connecteur Microsoft 365 non testé contre un vrai locataire** : l'authentification a été vérifiée jusqu'à la réponse d'erreur de Microsoft (identifiants factices), pas la lecture des calendriers ni de l'annuaire. À valider avec la DSI de l'UNIL (consentement administrateur).
+- **Connexion Microsoft non testée contre un vrai compte** : l'adresse de consentement, les retours d'erreur et la déconnexion sont couverts par des tests (`MicrosoftAuthTests`), mais ni l'échange du code, ni la lecture des agendas, de l'annuaire ou des fichiers n'ont été vérifiés avec un vrai compte Microsoft 365. À valider une fois l'application Entra créée.
 - Les données sont **rafraîchies par sondage** (30 s pour une salle, 60 s ailleurs), pas poussées par SignalR.
 - Le secret client Microsoft est stocké **en clair** dans `data.json`.
 - Pas de réservation depuis la tablette (catégorie C), pas de Google Calendar (hors lien ICS).
@@ -339,7 +336,7 @@ Déposer un manifeste dans `Apps/`. Si elle lit des données : implémenter `IAp
 ### Reste à faire
 - Migrer les 4 anciennes apps de données (porte de salle, horaires, menu, départs) : leur éditeur et l'assistant de démarrage ont été retirés, elles ne se créent plus ; d'éventuels éléments existants continuent de s'afficher par l'ancien chemin (`AppKind`).
 - Console Linkii : gestion du catalogue (publier une app / version, la réserver à une formule) ; masquer des apps par revendeur.
-- Connexion au niveau de l'installation (identifiants partagés par les instances) : les connexions de calendrier sont désormais réglées une fois par source (Intégrations › Calendriers partagés). Le secret Microsoft 365 reste stocké en clair.
+- Connexion au niveau de l'installation (identifiants partagés par les instances) : les connexions de calendrier sont désormais réglées une fois par source (Intégrations › Calendriers partagés). Microsoft 365 et OneDrive passent par « Se connecter avec Microsoft » (plus de secret par client) ; le secret de l'application Entra de la plateforme est dans la configuration du serveur.
 - Aperçu du rendu dans l'éditeur ; mise à jour de version d'une app (instances épinglées sur leur version).
 - Derrière un proxy d'entreprise, les appels sortants échouent (le contrôle d'adresse impose la connexion directe).
 

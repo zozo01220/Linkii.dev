@@ -61,47 +61,15 @@ public class CalendarService(IEnumerable<ICalendarConnector> connectors, Provide
 }
 
 // =====================================================================================
-//  Microsoft 365 via Microsoft Graph — application Entra ID, flux « client credentials »
-//  Permissions d'application à accorder (consentement administrateur) : Calendars.Read, Place.Read.All
+//  Microsoft 365 via Microsoft Graph — compte Microsoft connecté par l'organisation (MicrosoftAuth), permissions déléguées en lecture seule
+//  Agendas : Calendars.Read, Calendars.Read.Shared, Place.Read.All ; fichiers : Files.Read.All, Sites.Read.All
 // =====================================================================================
-public class GraphService(IHttpClientFactory httpFactory)
+public class GraphService(IHttpClientFactory httpFactory, MicrosoftAuth auth)
 {
-    private (string Key, string Token, DateTime Expires)? _token;
-    private readonly SemaphoreSlim _lock = new(1, 1);
+    /// <summary>Préfixe d'une référence de calendrier du compte connecté (sinon : adresse e-mail d'une boîte ou d'une salle).</summary>
+    public const string CalendarRefPrefix = "cal:";
 
-    public static bool Configured(Tenant t) =>
-        !string.IsNullOrWhiteSpace(t.MsTenantId) && !string.IsNullOrWhiteSpace(t.MsClientId) && !string.IsNullOrWhiteSpace(t.MsClientSecret);
-
-    private async Task<string> Token(Tenant t)
-    {
-        if (!Configured(t)) throw new InvalidOperationException("Connexion Microsoft 365 non configurée (Intégrations › Calendriers partagés › Microsoft 365).");
-        var key = t.MsTenantId + t.MsClientId + t.MsClientSecret;
-        await _lock.WaitAsync();
-        try
-        {
-            if (_token is { } tk && tk.Key == key && tk.Expires > DateTime.UtcNow.AddMinutes(2)) return tk.Token;
-            var http = httpFactory.CreateClient();
-            http.Timeout = TimeSpan.FromSeconds(10);
-            var resp = await http.PostAsync($"https://login.microsoftonline.com/{Uri.EscapeDataString(t.MsTenantId.Trim())}/oauth2/v2.0/token",
-                new FormUrlEncodedContent(new Dictionary<string, string>
-                {
-                    ["client_id"] = t.MsClientId.Trim(),
-                    ["client_secret"] = t.MsClientSecret.Trim(),
-                    ["scope"] = "https://graph.microsoft.com/.default",
-                    ["grant_type"] = "client_credentials",
-                }));
-            var body = await resp.Content.ReadAsStringAsync();
-            if (!resp.IsSuccessStatusCode) throw new InvalidOperationException("Authentification Microsoft refusée : " + Describe(body));
-            using var doc = JsonDocument.Parse(body);
-            var token = doc.RootElement.GetProperty("access_token").GetString()!;
-            var secs = doc.RootElement.TryGetProperty("expires_in", out var e) ? e.GetInt32() : 3000;
-            _token = (key, token, DateTime.UtcNow.AddSeconds(secs));
-            return token;
-        }
-        finally { _lock.Release(); }
-    }
-
-    private static string Describe(string body)
+    public static string Describe(string body)
     {
         try
         {
@@ -113,13 +81,16 @@ public class GraphService(IHttpClientFactory httpFactory)
         return body.Length > 200 ? body[..200] : body;
     }
 
-    /// <summary>Lecture Graph avec le jeton de l'application (calendriers, annuaire, fichiers des Drives).</summary>
+    /// <summary>Lecture Graph avec le compte Microsoft connecté (calendriers, annuaire des salles, fichiers des Drives).</summary>
     public async Task<JsonDocument> Get(Tenant t, string url, bool utcPrefer = false)
     {
+        string token;
+        try { token = await auth.AccessToken(t); }
+        catch (MicrosoftAuth.MicrosoftAuthException ex) { throw new InvalidOperationException(ex.Message); }
         var http = httpFactory.CreateClient();
         http.Timeout = TimeSpan.FromSeconds(12);
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
-        req.Headers.Authorization = new("Bearer", await Token(t));
+        req.Headers.Authorization = new("Bearer", token);
         if (utcPrefer) req.Headers.Add("Prefer", "outlook.timezone=\"UTC\"");
         var resp = await http.SendAsync(req);
         var body = await resp.Content.ReadAsStringAsync();
@@ -127,10 +98,14 @@ public class GraphService(IHttpClientFactory httpFactory)
         return JsonDocument.Parse(body);
     }
 
-    public async Task<List<EventDto>> GetEvents(Tenant t, string mailbox, DateTime fromUtc, DateTime toUtc)
+    /// <param name="calendarRef">« cal:{id} » : un calendrier du compte connecté ; sinon l'adresse d'une boîte ou d'une salle.</param>
+    public async Task<List<EventDto>> GetEvents(Tenant t, string calendarRef, DateTime fromUtc, DateTime toUtc)
     {
-        var url = $"https://graph.microsoft.com/v1.0/users/{Uri.EscapeDataString(mailbox.Trim())}/calendarView" +
-                  $"?startDateTime={fromUtc:yyyy-MM-ddTHH:mm:ss}Z&endDateTime={toUtc:yyyy-MM-ddTHH:mm:ss}Z" +
+        var r = calendarRef.Trim();
+        var root = r.StartsWith(CalendarRefPrefix, StringComparison.Ordinal)
+            ? $"https://graph.microsoft.com/v1.0/me/calendars/{Uri.EscapeDataString(r[CalendarRefPrefix.Length..])}"
+            : $"https://graph.microsoft.com/v1.0/users/{Uri.EscapeDataString(r)}";
+        var url = root + $"/calendarView?startDateTime={fromUtc:yyyy-MM-ddTHH:mm:ss}Z&endDateTime={toUtc:yyyy-MM-ddTHH:mm:ss}Z" +
                   "&$select=subject,start,end,isAllDay,isCancelled,showAs,location&$orderby=start/dateTime&$top=100";
         using var doc = await Get(t, url, utcPrefer: true);
         var list = new List<EventDto>();
@@ -144,6 +119,24 @@ public class GraphService(IHttpClientFactory httpFactory)
                 e.TryGetProperty("isAllDay", out var ad) && ad.GetBoolean(), loc));
         }
         return list;
+    }
+
+    public record CalendarInfo(string Id, string Name, string? Owner, bool IsDefault);
+
+    /// <summary>Agendas du compte connecté : les siens et ceux partagés avec lui.</summary>
+    public async Task<List<CalendarInfo>> ListCalendars(Tenant t)
+    {
+        using var doc = await Get(t, "https://graph.microsoft.com/v1.0/me/calendars?$select=id,name,isDefaultCalendar,owner&$top=100");
+        var list = new List<CalendarInfo>();
+        foreach (var c in doc.RootElement.GetProperty("value").EnumerateArray())
+        {
+            var id = c.TryGetProperty("id", out var i) ? i.GetString() : null;
+            if (string.IsNullOrEmpty(id)) continue;
+            var owner = c.TryGetProperty("owner", out var o) && o.ValueKind == JsonValueKind.Object && o.TryGetProperty("address", out var ad) ? ad.GetString() : null;
+            list.Add(new CalendarInfo(id, c.TryGetProperty("name", out var n) ? n.GetString() ?? "Agenda" : "Agenda", owner,
+                c.TryGetProperty("isDefaultCalendar", out var d) && d.ValueKind == JsonValueKind.True));
+        }
+        return list.OrderByDescending(c => c.IsDefault).ThenBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
 
     public record RoomInfo(string Name, string Email, int? Capacity, string? Building);
@@ -164,18 +157,19 @@ public class GraphService(IHttpClientFactory httpFactory)
         return rooms.OrderBy(r => r.Name).ToList();
     }
 
-    /// <summary>Vérifie la configuration : obtention du jeton, puis lecture de l'annuaire des salles.</summary>
+    /// <summary>Vérifie la connexion : lecture des agendas du compte, puis de l'annuaire des salles.</summary>
     public async Task<string> Test(Tenant t)
     {
-        await Token(t);
+        var cals = await ListCalendars(t);
+        var who = t.MsUser.Length > 0 ? t.MsUser : "le compte connecté";
         try
         {
             var rooms = await ListRooms(t);
-            return $"Connexion réussie · {rooms.Count} salle(s) trouvée(s).";
+            return $"Connexion réussie · {cals.Count} agenda{(cals.Count > 1 ? "s" : "")} pour {who}, {rooms.Count} salle{(rooms.Count > 1 ? "s" : "")} dans l'annuaire.";
         }
-        catch (Exception ex)
+        catch (InvalidOperationException)
         {
-            return "Jeton obtenu, mais l'annuaire des salles est inaccessible (" + ex.Message + "). Les calendriers peuvent fonctionner si Calendars.Read est accordé.";
+            return $"Connexion réussie · {cals.Count} agenda{(cals.Count > 1 ? "s" : "")} pour {who}. L'annuaire des salles n'est pas accessible : saisissez l'adresse d'une salle.";
         }
     }
 }

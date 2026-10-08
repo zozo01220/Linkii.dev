@@ -99,7 +99,6 @@ public class Tenant
     public string DefaultOrientation { get; set; } = "landscape";
     public string DefaultResolution { get; set; } = "1920x1080";
 
-    // Connecteur Microsoft 365 (application Entra ID, flux client credentials). POC : stocké en clair dans data.json.
     // Connexion Canva (Connect API) : jeton de renouvellement chiffré (SecretBox), à usage unique (renouvelé à chaque emploi).
     public string CanvaClientId { get; set; } = "";       // intégration Canva de l'organisation (portail développeurs)
     public string CanvaClientSecret { get; set; } = "";   // chiffré (SecretBox)
@@ -108,9 +107,13 @@ public class Tenant
     public string CanvaUser { get; set; } = "";
     public DateTime? CanvaConnectedUtc { get; set; }
 
-    public string MsTenantId { get; set; } = "";
-    public string MsClientId { get; set; } = "";
-    public string MsClientSecret { get; set; } = "";
+    // Compte Microsoft connecté par l'organisation (« Se connecter avec Microsoft », lecture seule), partagé par Microsoft 365 (agendas) et
+    // OneDrive / SharePoint. MsScopes : accès accordés (noms courts Graph). Jeton de renouvellement chiffré (SecretBox).
+    // Les anciens champs MsTenantId / MsClientId / MsClientSecret (application Entra ID de chaque client) ne sont plus lus.
+    public string MsRefreshToken { get; set; } = "";
+    public string MsScopes { get; set; } = "";
+    public string MsUser { get; set; } = "";
+    public DateTime? MsConnectedUtc { get; set; }
 
     // Calendriers partagés (Intégrations) : une connexion par source, puis les calendriers proposés dans les listes de lecture.
     public List<CalendarAccount> CalendarAccounts { get; set; } = new();

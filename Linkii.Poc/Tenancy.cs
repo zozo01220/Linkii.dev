@@ -313,7 +313,6 @@ public static class Seed
             foreach (var c in db.Clients.Where(c => Untouched(db, c)))
             {
                 c.CalendarAccounts.Add(new CalendarAccount { Source = "ics", Enabled = true });
-                if (GraphService.Configured(c)) c.CalendarAccounts.Add(new CalendarAccount { Source = "m365", Enabled = true });
             }
             return ids.Count;
         });
@@ -369,8 +368,7 @@ public static class Seed
             {
                 Id = old.Id, ResellerId = def.Id, Name = old.Name, Timezone = old.Timezone, DefaultDurationSec = old.DefaultDurationSec,
                 ReloadHour = old.ReloadHour,
-                DefaultScreenType = old.DefaultScreenType, DefaultOrientation = old.DefaultOrientation, DefaultResolution = old.DefaultResolution,
-                MsTenantId = old.MsTenantId, MsClientId = old.MsClientId, MsClientSecret = old.MsClientSecret
+                DefaultScreenType = old.DefaultScreenType, DefaultOrientation = old.DefaultOrientation, DefaultResolution = old.DefaultResolution
             };
             db.Clients.Add(client);
             if (!string.IsNullOrEmpty(old.PasswordHash))

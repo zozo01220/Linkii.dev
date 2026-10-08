@@ -4,6 +4,7 @@
 @inject CalendarService Calendars
 @inject AppService Svc
 @inject GoogleAuth GoogleAuth
+@inject MicrosoftAuth MsAuth
 @inject GoogleConnector Google
 @inject Toaster Toast
 
@@ -26,17 +27,45 @@
             @switch (Source)
             {
                 case "m365":
-                    <ol class="cvs-steps">
-                        <li>Entra ID › <b>Inscriptions d'applications</b> › Nouvelle inscription (comptes de ce locataire uniquement).</li>
-                        <li><b>Autorisations d'API</b> › Microsoft Graph › <i>Autorisations de l'application</i> : <code>Calendars.Read</code> et <code>Place.Read.All</code>, puis <b>Accorder le consentement administrateur</b>.</li>
-                        <li><b>Certificats et secrets</b> › Nouveau secret client : copiez sa <i>valeur</i> ci-dessous.</li>
-                    </ol>
-                    <div class="dw">
-                        <div class="dw-field"><label for="csd-tenant">ID du locataire (Tenant ID)</label><input id="csd-tenant" class="mono" @bind="url" spellcheck="false" placeholder="00000000-0000-0000-0000-000000000000" /></div>
-                        <div class="dw-field"><label for="csd-client">ID de l'application (Client ID)</label><input id="csd-client" class="mono" @bind="user" spellcheck="false" placeholder="00000000-0000-0000-0000-000000000000" /></div>
-                        <div class="dw-field"><label for="csd-secret">Secret client</label><input id="csd-secret" type="password" @bind="secret" autocomplete="new-password" placeholder="@SecretPlaceholder" /></div>
-                    </div>
-                    <p class="csd-shared"><Ico Name="link" Size="14" /> Connexion partagée avec OneDrive et SharePoint (Intégrations › Drives) : la modifier ici la modifie aussi pour vos dossiers.</p>
+                    @* compte Microsoft de l'organisation (« Se connecter avec Microsoft »), partagé avec OneDrive et SharePoint *@
+                    @if (configured)
+                    {
+                        <div class="cvs-account">
+                            <span class="cat-avatar gd-avatar">@MsInitial</span>
+                            <div class="grow">
+                                <b>@(ms.User.Length > 0 ? ms.User : "Compte Microsoft")</b>
+                                <small>Connecté@(ms.Since is { } since ? $" le {since.ToLocalTime():dd.MM.yyyy}" : "") · lecture seule : rien n'est modifié dans vos agendas.</small>
+                            </div>
+                            <button type="button" class="btn ghost sm" @onclick="DisconnectMicrosoft">Déconnecter</button>
+                        </div>
+                        <p class="csd-shared"><Ico Name="link" Size="14" /> Compte partagé avec OneDrive et SharePoint : le déconnecter arrête aussi la synchronisation de vos dossiers.</p>
+                    }
+                    else if (ms.Connected)
+                    {
+                        <div class="cvs-account">
+                            <span class="cat-avatar gd-avatar">@MsInitial</span>
+                            <div class="grow">
+                                <b>@(ms.User.Length > 0 ? ms.User : "Compte Microsoft")</b>
+                                <small>Connecté pour OneDrive et SharePoint. Autorisez aussi la lecture de vos agendas (l'accès aux fichiers est conservé).</small>
+                            </div>
+                            <a class="btn sm" href="/microsoft/connect?for=calendar" target="_top">Autoriser les agendas</a>
+                        </div>
+                    }
+                    else if (MsAuth.IsConfigured)
+                    {
+                        <div class="cvs-account">
+                            <div class="grow">
+                                <b>Aucun compte connecté</b>
+                                <small>Connectez le compte Microsoft qui a accès à vos agendas. Linkii demande uniquement un accès en lecture.</small>
+                            </div>
+                            <a class="btn sm" href="/microsoft/connect?for=calendar" target="_top">Se connecter avec Microsoft</a>
+                        </div>
+                        <p class="csd-shared"><Ico Name="lock" Size="14" /> Vous passez par la page de connexion Microsoft : Linkii ne voit jamais votre mot de passe.</p>
+                    }
+                    else
+                    {
+                        <div class="dw-note">Microsoft 365 n'est pas encore disponible : la connexion Microsoft de la plateforme doit d'abord être configurée sur le serveur par l'administrateur Linkii.</div>
+                    }
                     break;
                 case "google":
                     @* compte Google de l'organisation (« Se connecter avec Google »), partagé avec Google Drive *@
@@ -119,6 +148,13 @@
             }
             @if (cals.Count == 0) { <div class="cal-empty">Aucun calendrier pour l'instant. Ajoutez le premier ci-dessous.</div> }
             <div class="cal-add">
+                @if (Source == "m365" && FreeMsCalendars.Any())
+                {
+                    <select aria-label="Agenda du compte Microsoft" @onchange="PickMsCalendar">
+                        <option value="">— Choisir un agenda du compte Microsoft —</option>
+                        @foreach (var c in FreeMsCalendars) { <option value="@c.Id">@c.Name@(c.IsDefault ? " (agenda principal)" : c.Owner is { Length: > 0 } o && !string.Equals(o, ms.User, StringComparison.OrdinalIgnoreCase) ? $" · {o}" : "")</option> }
+                    </select>
+                }
                 @if (Source == "m365" && FreeRooms.Any())
                 {
                     <select aria-label="Salle de l'annuaire" @onchange="PickRoom">
@@ -143,8 +179,8 @@
     <div class="modal-foot">
         <button class="btn ghost" disabled="@testing" @onclick="Test">@(testing ? "Test en cours…" : "Tester la connexion")</button>
         <span class="grow"></span>
-        @* liens ICS et compte Google (connecté par OAuth) : rien à enregistrer ici *@
-        @if (Source is "ics" or "google") { <button class="btn" @onclick="Close">Fermer</button> }
+        @* liens ICS et comptes Google / Microsoft (connectés par OAuth) : rien à enregistrer ici *@
+        @if (Source is "ics" or "google" or "m365") { <button class="btn" @onclick="Close">Fermer</button> }
         else
         {
             <button class="btn ghost" @onclick="Close">Fermer</button>
@@ -179,8 +215,16 @@
     private string GoogleInitial => google.User.Length > 0 ? char.ToUpperInvariant(google.User[0]).ToString() : "G";
     private IEnumerable<GoogleConnector.GoogleCalendarInfo> FreeGoogleCalendars => googleCalendars.Where(g => !cals.Any(c => string.Equals(c.Ref, g.Id, StringComparison.OrdinalIgnoreCase)));
 
+    // Microsoft 365 : compte Microsoft de l'organisation (partagé avec OneDrive et SharePoint) et ses agendas
+    private MicrosoftAuth.Connection ms = new(false, "", null);
+    private List<GraphService.CalendarInfo> msCalendars = new();
+    private string newHint = "";
+    private string MsInitial => ms.User.Length > 0 ? char.ToUpperInvariant(ms.User[0]).ToString() : "M";
+    private IEnumerable<GraphService.CalendarInfo> FreeMsCalendars => msCalendars.Where(m => !cals.Any(c => string.Equals(c.Ref, GraphService.CalendarRefPrefix + m.Id, StringComparison.Ordinal)));
+
     private string HeadLine =>
         Source == "google" && !configured ? (GoogleAuth.IsConfigured ? "Connectez votre compte Google, puis ajoutez vos agendas" : "Pas encore disponible sur cette plateforme")
+        : Source == "m365" && !configured ? (MsAuth.IsConfigured ? "Connectez votre compte Microsoft, puis ajoutez vos agendas" : "Pas encore disponible sur cette plateforme")
         : !configured ? "Connexion à configurer, puis ajoutez vos calendriers"
         : lastError.Length > 0 ? "Le dernier test de connexion a échoué"
         : Def.Summary;
@@ -189,11 +233,13 @@
     {
         var t = Store.Read(d => d.Tenant);
         var a = SharedCalendarSources.Account(t, Source);
-        if (Source == "m365") { url = t.MsTenantId; user = t.MsClientId; hasSecret = t.MsClientSecret.Length > 0; }
-        else { url = a?.Url ?? ""; user = a?.User ?? ""; hasSecret = a is { Secret.Length: > 0 }; label = a?.Label ?? ""; }
+        url = a?.Url ?? ""; user = a?.User ?? ""; hasSecret = a is { Secret.Length: > 0 }; label = a?.Label ?? "";
         Load();
         if (Source == "m365" && configured)
-            try { rooms = await Graph.ListRooms(t); } catch { /* annuaire inaccessible : saisie de l'adresse */ }
+        {
+            try { msCalendars = await Graph.ListCalendars(t); } catch (InvalidOperationException) { /* liste indisponible : saisie de l'adresse */ }
+            try { rooms = await Graph.ListRooms(t); } catch (InvalidOperationException) { /* annuaire inaccessible : saisie de l'adresse */ }
+        }
         if (Source == "google" && configured)
             try { googleCalendars = await Google.ListCalendars(t); } catch (InvalidOperationException) { /* liste indisponible : saisie de l'ID */ }
     }
@@ -203,6 +249,7 @@
         var t = Store.Read(d => d.Tenant);
         configured = SharedCalendarSources.Configured(t, Source);
         google = GoogleAuth.ConnectionOf(t);
+        ms = MicrosoftAuth.ConnectionOf(t);
         lastError = SharedCalendarSources.Account(t, Source)?.LastError ?? "";
         cals = t.SharedCalendars.Where(c => c.Source == Source).OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
         uses = Store.Read(d =>
@@ -230,11 +277,8 @@
 
         switch (Source)
         {
-            case "m365":
-                if (SharedConnections.CheckM365(u, usr, s, hasSecret) is { } m365Error) { Toast.Error(m365Error); return false; }
-                break;
-            case "google":
-                return true;   // compte Google connecté par OAuth : rien à enregistrer ici
+            case "google" or "m365":
+                return true;   // compte Google ou Microsoft connecté par OAuth : rien à enregistrer ici
             case "caldav":
                 if (u.Length > 0 && !AppCatalog.IsHttpUrl(u)) { Toast.Error("L'adresse du serveur doit commencer par https:// (ou http://)."); return false; }
                 break;
@@ -248,15 +292,11 @@
         Store.Write(d =>
         {
             var t = d.Tenant;
-            if (Source == "m365") SharedConnections.SaveM365(t, u, usr, s);           // partagée avec OneDrive et SharePoint
-            else
-            {
-                var a = t.CalendarAccounts.FirstOrDefault(x => x.Source == Source);
-                if (a == null) t.CalendarAccounts.Add(a = new CalendarAccount { Source = Source });
-                a.Url = u; a.User = usr;
-                if (s.Length > 0) a.Secret = Box.Protect(s);
-                a.LastError = "";   // nouvelle connexion : résultat inconnu jusqu'au prochain test
-            }
+            var a = t.CalendarAccounts.FirstOrDefault(x => x.Source == Source);
+            if (a == null) t.CalendarAccounts.Add(a = new CalendarAccount { Source = Source });
+            a.Url = u; a.User = usr;
+            if (s.Length > 0) a.Secret = Box.Protect(s);
+            a.LastError = "";   // nouvelle connexion : résultat inconnu jusqu'au prochain test
         });
         if (s.Length > 0) hasSecret = true;
         secret = "";
@@ -273,6 +313,7 @@
         var t = Store.Read(d => d.Tenant);
         var list = t.SharedCalendars.Where(c => c.Source == Source).ToList();
         if (Source == "google" && !configured) { Toast.Error("Connectez d'abord votre compte Google."); return; }
+        if (Source == "m365" && !configured) { Toast.Error("Connectez d'abord votre compte Microsoft."); return; }
         if (list.Count == 0 && Source is not ("m365" or "google")) { Toast.Error("Ajoutez un calendrier pour tester la connexion."); return; }
         testing = true;
         StateHasChanged();
@@ -325,6 +366,14 @@
         newName = r.Name;
     }
 
+    private void PickMsCalendar(ChangeEventArgs e)
+    {
+        if (msCalendars.FirstOrDefault(c => c.Id == e.Value?.ToString()) is not { } c) return;
+        newRef = GraphService.CalendarRefPrefix + c.Id;
+        newName = c.Name;
+        newHint = c.Owner is { Length: > 0 } o ? o : ms.User;
+    }
+
     private void PickGoogleCalendar(ChangeEventArgs e)
     {
         if (googleCalendars.FirstOrDefault(g => g.Id == e.Value?.ToString()) is not { } g) return;
@@ -341,6 +390,15 @@
         Toast.Ok("Compte Google déconnecté. Les agendas ne sont plus lus et les dossiers Drive ne sont plus synchronisés.");
     }
 
+    /// <summary>Oublie le compte Microsoft : Microsoft 365 et OneDrive / SharePoint s'arrêtent (contenus et fichiers déjà en place conservés).</summary>
+    private async Task DisconnectMicrosoft()
+    {
+        MsAuth.Disconnect(Store.ClientId);
+        msCalendars = new(); rooms = new();
+        await Changed();
+        Toast.Ok("Compte Microsoft déconnecté. Les agendas ne sont plus lus et les dossiers OneDrive ne sont plus synchronisés.");
+    }
+
     private async Task Add()
     {
         var r = newRef.Trim();
@@ -349,7 +407,8 @@
         if (r.Length == 0) { Toast.Error($"Renseignez le champ « {Def.RefLabel} »."); return; }
         switch (Source)
         {
-            case "m365" or "ews" when !r.Contains('@'):
+            case "ews" when !r.Contains('@'):
+            case "m365" when !r.Contains('@') && !r.StartsWith(GraphService.CalendarRefPrefix, StringComparison.Ordinal):
                 Toast.Error("Saisissez une adresse e-mail (ex. salle-a101@organisation.ch)."); return;
             case "ics" when !AppCatalog.IsHttpUrl(r):
                 Toast.Error("Le lien ICS doit commencer par https:// (ou http://)."); return;
@@ -369,11 +428,11 @@
         {
             Source = Source, Name = name,
             Ref = Source == "ics" ? Box.Protect(r) : r,   // un lien ICS donne accès au calendrier : chiffré, jamais réaffiché
-            Hint = Source == "ics" ? SharedCalendarSources.ShortLink(r) : r
+            Hint = Source == "ics" ? SharedCalendarSources.ShortLink(r) : newHint.Length > 0 ? newHint : r
         };
         Store.Write(d => d.Tenant.SharedCalendars.Add(cal));
         if (!SharedCalendarSources.Enabled(t, Source)) Svc.SetCalendarSource(Source, true);
-        newName = newRef = "";
+        newName = newRef = newHint = "";
         await Changed();
         Toast.Ok($"« {name} » ajouté : il est proposé dans l'app Calendrier partagé des listes de lecture.");
     }

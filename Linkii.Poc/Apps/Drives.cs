@@ -28,10 +28,10 @@ public static class DriveSources
 
     /// <summary>
     /// Google Drive : compte Google connecté par l'organisation, avec l'accès à Drive ;
-    /// OneDrive : connexion Microsoft 365 du client (partagée avec les calendriers).
+    /// OneDrive : compte Microsoft connecté par l'organisation, avec l'accès aux fichiers (partagé avec les calendriers).
     /// </summary>
     public static bool Configured(Tenant t, string source) =>
-        source == "gdrive" ? GoogleAuth.Has(t, GoogleAuth.DriveScope) : GraphService.Configured(t);
+        source == "gdrive" ? GoogleAuth.Has(t, GoogleAuth.DriveScope) : MicrosoftAuth.Has(t, MicrosoftAuth.DriveScope);
 
     /// <summary>Dossiers proposés pour un nouveau contenu : ceux des sources actives et configurées.</summary>
     public static IEnumerable<DriveFolder> Offered(Tenant t) => t.DriveFolders
@@ -126,8 +126,9 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
             using var me = await GoogleGet(t, "https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)", new());
             return $"Connexion réussie : Google Drive répond pour {(t.GoogleUser.Length > 0 ? t.GoogleUser : "le compte connecté")}. Ajoutez vos dossiers.";
         }
-        using var _ = await GraphGet(t, "https://graph.microsoft.com/v1.0/sites/root/drive?$select=id");   // avec Sites.Selected, seul l'ajout d'un dossier autorisé peut le confirmer
-        return "Connexion réussie : OneDrive et SharePoint sont accessibles. Ajoutez vos dossiers.";
+        if (!MicrosoftAuth.Has(t, MicrosoftAuth.DriveScope)) return "Ajoutez un dossier : son lien est vérifié à l'ajout.";
+        using var _ = await GraphGet(t, "https://graph.microsoft.com/v1.0/me/drive?$select=id");
+        return $"Connexion réussie : OneDrive et SharePoint répondent pour {(t.MsUser.Length > 0 ? t.MsUser : "le compte connecté")}. Ajoutez vos dossiers.";
     }
 
     // ---------- Synchronisation ----------
@@ -330,11 +331,11 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
         try { return await graph.Get(t, url); }
         catch (InvalidOperationException ex) when (ex.Message.Contains("(403)") || ex.Message.Contains("(401)"))
         {
-            throw new InvalidOperationException("Accès refusé : ajoutez l'autorisation d'application Files.Read.All (ou Sites.Selected) à l'application Entra ID, puis le consentement administrateur.");
+            throw new InvalidOperationException($"Accès refusé : vérifiez que le compte {(t.MsUser.Length > 0 ? t.MsUser : "Microsoft connecté")} a accès à ce dossier, ou reconnectez-le dans Intégrations › OneDrive et SharePoint.");
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("(404)"))
         {
-            throw new InvalidOperationException("Dossier introuvable : vérifiez le lien de partage.");
+            throw new InvalidOperationException($"Dossier introuvable : vérifiez le lien de partage et que le compte {(t.MsUser.Length > 0 ? t.MsUser : "Microsoft connecté")} y a accès.");
         }
     }
 }

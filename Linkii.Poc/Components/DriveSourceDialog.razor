@@ -2,11 +2,12 @@
 @inject DriveService Drives
 @inject AppService Svc
 @inject GoogleAuth GoogleAuth
+@inject MicrosoftAuth MsAuth
 @inject Toaster Toast
 
 @* Intégrations › Drives › Gérer : la connexion de la source, puis ses dossiers synchronisés.
    Google Drive : aucun compte, les dossiers sont partagés par lien et lus avec la clé d'API de la plateforme.
-   OneDrive et SharePoint : application Microsoft 365, enregistrée une seule fois et partagée avec les calendriers.
+   OneDrive et SharePoint : compte Microsoft de l'organisation (« Se connecter avec Microsoft »), partagé avec les calendriers Microsoft 365.
    Un dossier ajouté est synchronisé aussitôt, puis toutes les 15 minutes ; les écrans suivent sans republier. *@
 <div class="modal-backdrop" @onclick="Close"></div>
 <div class="modal app-modal wide" role="dialog" aria-modal="true" aria-labelledby="dsd-title">
@@ -63,19 +64,48 @@
         }
         else
         {
-            <h4 class="pe-sub csd-first">Connexion</h4>
-            <ol class="cvs-steps">
-                <li>Entra ID › <b>Inscriptions d'applications</b> › Nouvelle inscription (comptes de ce locataire uniquement).</li>
-                <li><b>Autorisations d'API</b> › Microsoft Graph › <i>Autorisations de l'application</i> : <code>Files.Read.All</code> (ou <code>Sites.Selected</code> pour la limiter à certains sites), puis <b>Accorder le consentement administrateur</b>.</li>
-                <li><b>Certificats et secrets</b> › Nouveau secret client : copiez sa <i>valeur</i> ci-dessous.</li>
-            </ol>
-            <div class="dw">
-                <div class="dw-field"><label for="dsd-tenant">ID du locataire (Tenant ID)</label><input id="dsd-tenant" class="mono" @bind="tenantId" spellcheck="false" placeholder="00000000-0000-0000-0000-000000000000" /></div>
-                <div class="dw-field"><label for="dsd-client">ID de l'application (Client ID)</label><input id="dsd-client" class="mono" @bind="clientId" spellcheck="false" placeholder="00000000-0000-0000-0000-000000000000" /></div>
-                <div class="dw-field"><label for="dsd-secret">Secret client</label><input id="dsd-secret" type="password" @bind="secret" autocomplete="new-password" placeholder="@(hasSecret ? "•••••• enregistré — laisser vide pour le conserver" : "")" /></div>
-            </div>
-            <p class="csd-shared"><Ico Name="link" Size="14" /> Connexion partagée avec Microsoft 365 (Calendriers partagés) : la modifier ici la modifie aussi pour vos calendriers et salles.</p>
+            <h4 class="pe-sub csd-first">Compte Microsoft</h4>
+            @if (configured)
+            {
+                <div class="cvs-account">
+                    <span class="cat-avatar gd-avatar">@MsInitial</span>
+                    <div class="grow">
+                        <b>@(ms.User.Length > 0 ? ms.User : "Compte Microsoft")</b>
+                        <small>Connecté@(ms.Since is { } since ? $" le {since.ToLocalTime():dd.MM.yyyy}" : "") · lecture seule : rien n'est modifié dans vos fichiers.</small>
+                    </div>
+                    <button type="button" class="btn ghost sm" @onclick="DisconnectMicrosoft">Déconnecter</button>
+                </div>
+                <p class="csd-shared"><Ico Name="folder" Size="14" /> Collez le lien de partage de n'importe quel dossier accessible à ce compte : OneDrive, bibliothèque SharePoint ou dossier partagé avec lui.</p>
+                <p class="csd-shared"><Ico Name="link" Size="14" /> Compte partagé avec Microsoft 365 (agendas) : le déconnecter arrête aussi la lecture de vos agendas Microsoft.</p>
+            }
+            else if (ms.Connected && MsAuth.IsConfigured)
+            {
+                <div class="cvs-account">
+                    <span class="cat-avatar gd-avatar">@MsInitial</span>
+                    <div class="grow">
+                        <b>@(ms.User.Length > 0 ? ms.User : "Compte Microsoft")</b>
+                        <small>Connecté pour les agendas Microsoft 365. Autorisez aussi la lecture de vos fichiers (l'accès aux agendas est conservé).</small>
+                    </div>
+                    <a class="btn sm" href="/microsoft/connect?for=drive" target="_top">Autoriser les fichiers</a>
+                </div>
+            }
+            else if (MsAuth.IsConfigured)
+            {
+                <div class="cvs-account">
+                    <div class="grow">
+                        <b>Aucun compte connecté</b>
+                        <small>Connectez le compte Microsoft qui a accès à vos dossiers. Linkii demande uniquement un accès en lecture.</small>
+                    </div>
+                    <a class="btn sm" href="/microsoft/connect?for=drive" target="_top">Se connecter avec Microsoft</a>
+                </div>
+                <p class="csd-shared"><Ico Name="lock" Size="14" /> Vous passez par la page de connexion Microsoft : Linkii ne voit jamais votre mot de passe.</p>
+            }
+            else
+            {
+                <div class="dw-note">OneDrive et SharePoint ne sont pas encore disponibles : la connexion Microsoft de la plateforme doit d'abord être configurée sur le serveur par l'administrateur Linkii.</div>
+            }
         }
+
 
         <h4 class="pe-sub">Dossiers <span class="cat-count">@folders.Count</span></h4>
         <div class="cal-list">
@@ -112,15 +142,10 @@
         </div>
     </div>
     <div class="modal-foot">
-        @if (!IsGoogle || hasDrive) { <button class="btn ghost" disabled="@busy" @onclick="Test">@(testing ? "Test en cours…" : "Tester la connexion")</button> }
+        @if (IsGoogle ? hasDrive : configured) { <button class="btn ghost" disabled="@busy" @onclick="Test">@(testing ? "Test en cours…" : "Tester la connexion")</button> }
         <button class="btn ghost" disabled="@(busy || folders.Count == 0)" @onclick="SyncAll"><Ico Name="refresh" Size="16" /> @(syncing ? "Synchronisation…" : "Synchroniser maintenant")</button>
         <span class="grow"></span>
-        @if (IsGoogle) { <button class="btn" @onclick="Close">Fermer</button> }
-        else
-        {
-            <button class="btn ghost" @onclick="Close">Fermer</button>
-            <button class="btn" @onclick="() => SaveConnection(false)">Enregistrer la connexion</button>
-        }
+        <button class="btn" @onclick="Close">Fermer</button>
     </div>
 </div>
 
@@ -131,42 +156,38 @@
     [Parameter] public EventCallback OnChanged { get; set; }
 
     private DriveSourceDef Def => DriveSources.Find(Source)!;
-    private bool IsGoogle => Source == "gdrive";   // compte Google connecté (« Se connecter avec Google ») : rien à saisir
+    private bool IsGoogle => Source == "gdrive";   // sinon OneDrive et SharePoint : compte Microsoft connecté (« Se connecter avec Microsoft »), rien à saisir
 
-    // Connexion Microsoft 365 en cours de saisie (OneDrive et SharePoint)
-    private string tenantId = "", clientId = "", secret = "";
-    private bool hasSecret, configured, testing, syncing;
+    private bool configured, testing, syncing;   // configured : le compte connecté a l'accès aux fichiers (Drive ou OneDrive)
     private GoogleAuth.Connection google = new(false, "", null);
+    private MicrosoftAuth.Connection ms = new(false, "", null);
     private bool hasDrive;   // le compte Google connecté a autorisé la lecture des fichiers Drive
 
     private string GoogleInitial => google.User.Length > 0 ? char.ToUpperInvariant(google.User[0]).ToString() : "G";
+    private string MsInitial => ms.User.Length > 0 ? char.ToUpperInvariant(ms.User[0]).ToString() : "M";
 
     private string HeadLine => configured ? "Dossiers copiés dans la médiathèque et lus même hors ligne"
         : IsGoogle ? (GoogleAuth.IsConfigured ? "Connectez votre compte Google, puis ajoutez vos dossiers" : "Pas encore disponible sur cette plateforme")
-        : "Connexion à configurer, puis ajoutez vos dossiers";
+        : MsAuth.IsConfigured ? "Connectez votre compte Microsoft, puis ajoutez vos dossiers" : "Pas encore disponible sur cette plateforme";
 
     /// <summary>Pourquoi on ne peut pas encore ajouter de dossier.</summary>
-    private string NotReady => !IsGoogle ? "Enregistrez d'abord la connexion, puis ajoutez vos dossiers."
-        : GoogleAuth.IsConfigured ? "Connectez d'abord votre compte Google." : "Google Drive n'est pas encore disponible sur cette plateforme.";
+    private string NotReady => IsGoogle
+        ? (GoogleAuth.IsConfigured ? "Connectez d'abord votre compte Google." : "Google Drive n'est pas encore disponible sur cette plateforme.")
+        : (MsAuth.IsConfigured ? "Connectez d'abord votre compte Microsoft." : "OneDrive et SharePoint ne sont pas encore disponibles sur cette plateforme.");
     private bool busy => testing || syncing;
     private List<DriveFolder> folders = new();
     private Dictionary<string, (int Contents, int Lists)> uses = new();   // par dossier : contenus qui l'affichent, listes de lecture qui les contiennent
     private string newName = "", newLink = "";
     private Guid? confirmId;
 
-    protected override void OnInitialized()
-    {
-        var t = Store.Read(d => d.Tenant);
-        tenantId = t.MsTenantId; clientId = t.MsClientId;
-        hasSecret = t.MsClientSecret.Length > 0;
-        Load();
-    }
+    protected override void OnInitialized() => Load();
 
     private void Load()
     {
         var t = Store.Read(d => d.Tenant);
         configured = DriveSources.Configured(t, Source);
         google = GoogleAuth.ConnectionOf(t);
+        ms = MicrosoftAuth.ConnectionOf(t);
         hasDrive = GoogleAuth.Has(t, GoogleAuth.DriveScope);
         folders = t.DriveFolders.Where(f => f.Source == Source).OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
         uses = Store.Read(d =>
@@ -194,18 +215,12 @@
 
     // ---------- Connexion ----------
 
-    /// <summary>OneDrive : contrôle et enregistre la connexion Microsoft 365 (partagée avec les calendriers) ; active la source si besoin.</summary>
-    private async Task<bool> SaveConnection(bool quiet)
+    /// <summary>Oublie le compte Microsoft : la synchronisation s'arrête, les fichiers déjà copiés restent sur les écrans.</summary>
+    private async Task DisconnectMicrosoft()
     {
-        var s = secret.Trim();
-        if (SharedConnections.CheckM365(tenantId.Trim(), clientId.Trim(), s, hasSecret) is { } error) { Toast.Error(error); return false; }
-        Store.Write(d => SharedConnections.SaveM365(d.Tenant, tenantId.Trim(), clientId.Trim(), s));
-        if (s.Length > 0) hasSecret = true;
-        secret = "";
-        if (!DriveSources.Enabled(Store.Read(d => d.Tenant), Source)) Svc.SetDriveSource(Source, true);
+        MsAuth.Disconnect(Store.ClientId);
         await Changed();
-        if (!quiet) Toast.Ok($"Connexion « {Def.Name} » enregistrée.");
-        return true;
+        Toast.Ok("Compte Microsoft déconnecté. Les fichiers déjà copiés restent sur les écrans mais ne sont plus synchronisés, et les agendas Microsoft ne sont plus lus.");
     }
 
     /// <summary>Oublie le compte Google : la synchronisation s'arrête, les fichiers déjà copiés restent sur les écrans.</summary>
@@ -218,7 +233,6 @@
 
     private async Task Test()
     {
-        if (!IsGoogle && !await SaveConnection(true)) return;
         testing = true;
         StateHasChanged();
         try { Toast.Ok(await Drives.TestConnection(Store.Read(d => d.Tenant), Source)); }
