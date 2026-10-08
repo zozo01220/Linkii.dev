@@ -1,0 +1,49 @@
+@page "/apps/{AppId}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@inject AppService Svc
+@inject NavigationManager Nav
+
+@if (app == null)
+{
+    <div class="empty"><div class="big">App introuvable</div><a class="btn" href="/integrations">Retour aux intégrations</a></div>
+}
+else
+{
+    <div class="page-head">
+        <div class="row" style="gap:16px">
+            <AppIcon Id="@app.Id" />
+            <div>
+                <h1>@app.Name</h1>
+                <p class="sub">@app.Category · version @app.Version</p>
+            </div>
+        </div>
+        <div class="row">
+            <a class="btn ghost" href="@Back">@(app.ScreenWidget ? "Retour aux widgets" : "Retour aux intégrations")</a>
+            @if (!installed) { <button class="btn" @onclick="Install">@(app.ScreenWidget ? "Activer le widget" : "Activer l'intégration")</button> }
+            else if (app.ScreenWidget) { <a class="btn" href="/">Placer sur un écran</a> }
+            else { <a class="btn" href="/playlists">Utiliser dans une liste de lecture</a> }
+        </div>
+    </div>
+
+    <div class="card" style="max-width:720px"><AppDetailBody App="app" /></div>
+}
+
+@code {
+    [Parameter] public string AppId { get; set; } = "";
+    private AppManifest? app;
+    private bool installed;
+
+    private string Back => app?.ScreenWidget == true ? "/widgets" : "/integrations";
+
+    protected override void OnParametersSet()
+    {
+        app = Svc.Find(AppId);
+        installed = app != null && Svc.IsInstalled(app.Id);
+    }
+
+    private void Install()
+    {
+        Svc.Install(AppId);
+        installed = true;   // elle apparaît maintenant dans le panneau Apps des listes de lecture (ou dans l'édition des écrans)
+    }
+}

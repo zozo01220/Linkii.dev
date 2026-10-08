@@ -1,0 +1,183 @@
+@inject CanvaService Canva
+@inject TenantStore Store
+@inject MediaLibrary Library
+@inject Toaster Toast
+
+@* Champ « canva » de l'app Canva : choix d'un design du compte Canva connecté, exporté aussitôt dans la médiathèque
+   (une image par page, ou une vidéo). Valeurs remplies : design (identifiant), designTitle, kind, pages | video. *@
+<div class="cv">
+    @if (!Canva.IsConfigured(Store.ClientId))
+    {
+        <div class="dw-note">L'intégration Canva n'est pas encore configurée : renseignez-la dans Intégrations › Canva › Gérer.</div>
+    }
+    else if (!connection.Connected)
+    {
+        <div class="cv-connect">
+            <span class="app-ico sm" style="--app-c:#00A3B4"><Ico Name="palette" Size="17" /></span>
+            <span class="grow">Connectez d'abord votre compte Canva pour choisir vos designs.</span>
+            <a class="btn sm" href="/canva/connect" target="_top" data-enhance-nav="false">Connecter Canva</a>
+        </div>
+    }
+    else
+    {
+        <div class="cv-kind" role="radiogroup" aria-label="Format d'export">
+            <label class="@(Kind == "images" ? "on" : "")"><input type="radio" name="cv-kind-@Field.Key" checked="@(Kind == "images")" disabled="@busy" @onchange='() => SetKind("images")' /> Pages en images <small>diaporama, une image par page</small></label>
+            <label class="@(Kind == "video" ? "on" : "")"><input type="radio" name="cv-kind-@Field.Key" checked="@(Kind == "video")" disabled="@busy" @onchange='() => SetKind("video")' /> Vidéo <small>design animé, en MP4</small></label>
+        </div>
+
+        @if (DesignId.Length > 0)
+        {
+            <div class="cv-current">
+                <span class="cv-th">
+                    @if (Files.FirstOrDefault() is { } first) { <MediaThumb Media="first" /> }
+                    else { <Ico Name="palette" Size="22" /> }
+                </span>
+                <span class="grow" style="min-width:0">
+                    <b title="@Title">@Title</b>
+                    <small>@(Files.Count == 0 ? "Pas encore exporté" : Kind == "video" ? "Vidéo exportée dans la médiathèque" : $"{Files.Count} page{(Files.Count > 1 ? "s" : "")} exportée{(Files.Count > 1 ? "s" : "")} dans la médiathèque")</small>
+                </span>
+                <button type="button" class="btn ghost sm" disabled="@busy" title="Exporter à nouveau la dernière version du design" @onclick="Refresh"><Ico Name="download" Size="14" /> Mettre à jour depuis Canva</button>
+                <button type="button" class="btn ghost sm" disabled="@busy" @onclick="OpenPicker">Changer</button>
+            </div>
+        }
+        else
+        {
+            <button type="button" class="btn ghost" disabled="@busy" @onclick="OpenPicker"><Ico Name="palette" Size="16" /> Choisir un design Canva</button>
+        }
+        @if (busy) { <div class="cv-busy"><span class="spinner"></span> @status</div> }
+        @if (error != null) { <div class="err">@error</div> }
+        <small>Connecté à Canva@(connection.User.Length > 0 ? $" ({connection.User})" : ""). Après une modification dans Canva : « Mettre à jour depuis Canva », enregistrez, puis publiez l'écran.</small>
+    }
+</div>
+
+@if (picking)
+{
+    @* rendu dans la mise en page : la fenêtre de l'app, centrée par transform, décalerait et rognerait la galerie *@
+    <SectionContent SectionName="overlay">
+        <div class="modal-backdrop picker-backdrop" @onclick="() => picking = false"></div>
+        <div class="modal app-modal picker cv-picker" role="dialog" aria-modal="true" aria-labelledby="cv-title">
+            <div class="modal-head">
+                <span class="app-ico" style="--app-c:#00A3B4"><Ico Name="palette" Size="22" /></span>
+                <div class="grow">
+                    <h3 id="cv-title">Vos designs Canva</h3>
+                    <small>@(Kind == "video" ? "Le design choisi sera exporté en vidéo." : "Chaque page du design choisi devient une image du diaporama.")</small>
+                </div>
+                <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => picking = false"><Ico Name="x" Size="20" /></button>
+            </div>
+            <div class="modal-body">
+                <form class="search-box" @onsubmit="Search" @onsubmit:preventDefault>
+                    <Ico Name="search" Size="16" />
+                    <input placeholder="Rechercher un design (Entrée)" aria-label="Rechercher un design Canva" @bind="query" />
+                </form>
+                @if (listError != null) { <div class="err" style="margin-top:12px">@listError</div> }
+                <div class="cv-grid">
+                    @foreach (var d in designs)
+                    {
+                        var design = d;
+                        <button type="button" class="cv-tile @(design.Id == DesignId ? "picked" : "")" @onclick="() => Pick(design)">
+                            <span class="cv-tile-th">@if (design.Thumbnail != null) { <img src="@design.Thumbnail" alt="" loading="lazy" referrerpolicy="no-referrer" /> }</span>
+                            <span class="cv-tile-name" title="@design.Title">@design.Title</span>
+                            <small>@(design.Pages is > 1 ? $"{design.Pages} pages · " : "")@(design.Updated?.ToLocalTime().ToString("dd.MM.yyyy") ?? "")</small>
+                        </button>
+                    }
+                </div>
+                @if (loading) { <div class="cv-busy" style="margin-top:14px"><span class="spinner"></span> Chargement des designs…</div> }
+                else if (designs.Count == 0 && listError == null) { <div class="empty" style="padding:28px 10px"><div class="big">Aucun design</div><p>@(query.Length > 0 ? "Aucun design ne correspond à cette recherche." : "Créez un design dans Canva, puis revenez ici.")</p></div> }
+                @if (continuation != null && !loading) { <div style="text-align:center;margin-top:14px"><button type="button" class="btn ghost" @onclick="More">Plus de designs</button></div> }
+            </div>
+        </div>
+    </SectionContent>
+}
+
+@code {
+    [Parameter, EditorRequired] public AppField Field { get; set; } = default!;
+    [Parameter, EditorRequired] public Dictionary<string, string> Values { get; set; } = default!;
+    /// <summary>Le formulaire se redessine : le choix images / vidéo change les champs affichés.</summary>
+    [Parameter] public EventCallback OnChange { get; set; }
+
+    private CanvaService.Connection connection = new(false, "", null);
+    private List<CanvaService.Design> designs = new();
+    private string? continuation, listError, error;
+    private string query = "", status = "";
+    private bool picking, loading, busy;
+    private CanvaService.Design? current;   // design choisi pendant cette édition (dimensions connues pour l'export)
+
+    private string DesignId => Values.GetValueOrDefault(Field.Key) ?? "";
+    private string Title => Values.GetValueOrDefault("designTitle") is { Length: > 0 } t ? t : "Design Canva";
+    private string Kind => Values.GetValueOrDefault("kind") == "video" ? "video" : "images";
+    private string FilesKey => Kind == "video" ? "video" : "pages";
+    private List<MediaItem> Files
+    {
+        get
+        {
+            var ids = AppField.MediaIds(Values.GetValueOrDefault(FilesKey));
+            var all = Library.Files();
+            return ids.Select(id => all.FirstOrDefault(m => m.Id == id)).OfType<MediaItem>().ToList();
+        }
+    }
+
+    protected override void OnInitialized() => connection = Canva.ConnectionOf(Store.ClientId);
+
+    private async Task OpenPicker()
+    {
+        picking = true; error = null;
+        if (designs.Count == 0) await Load(reset: true);
+    }
+
+    private Task Search() => Load(reset: true);
+    private Task More() => Load(reset: false);
+
+    private async Task Load(bool reset)
+    {
+        loading = true; listError = null;
+        if (reset) { designs = new(); continuation = null; }
+        StateHasChanged();
+        try
+        {
+            var page = await Canva.ListDesigns(Store.ClientId, query, reset ? null : continuation);
+            designs.AddRange(page.Items.Where(i => designs.All(d => d.Id != i.Id)));
+            continuation = page.Continuation;
+        }
+        catch (CanvaService.CanvaException ex) { listError = ex.Message; }
+        catch (HttpRequestException) { listError = "Canva est injoignable. Réessayez dans un instant."; }
+        finally { loading = false; }
+        connection = Canva.ConnectionOf(Store.ClientId);   // une connexion expirée a pu être retirée
+    }
+
+    private async Task Pick(CanvaService.Design d)
+    {
+        picking = false;
+        current = d;
+        await Export(d);
+    }
+
+    // Même design, dernière version : les pages ou la vidéo sont exportées à nouveau.
+    private Task Refresh() => Export(current?.Id == DesignId ? current : new CanvaService.Design(DesignId, Title, null, null, null, null, null));
+
+    private async Task SetKind(string kind)
+    {
+        if (kind == Kind) return;
+        Values["kind"] = kind;
+        await OnChange.InvokeAsync();
+        if (DesignId.Length > 0) await Refresh();   // autre format : le design est exporté à nouveau
+    }
+
+    private async Task Export(CanvaService.Design d)
+    {
+        busy = true; error = null; status = "Export demandé à Canva…";
+        StateHasChanged();
+        try
+        {
+            var res = await Canva.Export(Store.ClientId, d, Kind, new Progress<string>(s => { status = s; _ = InvokeAsync(StateHasChanged); }));
+            if (res.Error != null) { error = res.Error; Toast.Error(res.Error); return; }
+            // Les fichiers remplacés sont retirés de la médiathèque à l'enregistrement du contenu (s'ils ne servent nulle part ailleurs).
+            Values[Field.Key] = d.Id;
+            Values["designTitle"] = d.Title;
+            Values[FilesKey] = string.Join(",", res.Files.Select(f => f.Id));
+            Values[Kind == "video" ? "pages" : "video"] = "";
+            Toast.Ok(Kind == "video" ? $"« {d.Title} » exporté en vidéo." : $"« {d.Title} » exporté : {res.Files.Count} page{(res.Files.Count > 1 ? "s" : "")}.");
+            await OnChange.InvokeAsync();
+        }
+        finally { busy = false; }
+    }
+}

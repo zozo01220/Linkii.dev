@@ -1,0 +1,89 @@
+@page "/reseller/team"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ResellerSpace")]
+@inject JsonStore Root
+@inject Mailer Mail
+@inject ResellerResolver Resolver
+@inject NavigationManager Nav
+@inject TenantContext Ctx
+@inject Toaster Toast
+
+<div class="page-head">
+    <div>
+        <h1>Équipe</h1>
+        <p class="sub">Les administrateurs de votre espace revendeur.</p>
+    </div>
+    <button class="btn" @onclick="() => showAdd = !showAdd">+ Ajouter un membre</button>
+</div>
+
+@if (showAdd)
+{
+    <div class="card" style="margin-bottom:18px">
+        <h3>Nouveau membre</h3>
+        <div class="form-grid">
+            <div><label class="lbl">Nom</label><input class="full" @bind="name" /></div>
+            <div><label class="lbl">E-mail</label><input class="full" type="email" @bind="email" autocomplete="off" /></div>
+            <div>
+                <label class="lbl">Mot de passe provisoire <small>(envoyé par e-mail, à changer à la 1re connexion)</small></label>
+                <div class="row" style="gap:6px"><input class="full mono" @bind="pwd" autocomplete="off" spellcheck="false" /><button type="button" class="btn ghost" title="Générer un autre mot de passe" @onclick="() => pwd = Passwords.Generate()">Générer</button></div>
+            </div>
+        </div>
+        <div style="margin-top:12px"><button class="btn" @onclick="Add">Ajouter</button></div>
+    </div>
+}
+
+<table class="tbl">
+    <thead><tr><th>Nom</th><th>E-mail</th><th>État</th><th></th></tr></thead>
+    <tbody>
+    @foreach (var u in users)
+    {
+        <tr>
+            <td><b>@u.Name</b></td><td>@u.Email</td>
+            <td><span class="pill @(u.Disabled ? "bad" : "ok")">@(u.Disabled ? "Désactivé" : "Actif")</span></td>
+            <td>@if (u.Id != Ctx.UserId) { <button class="btn ghost" @onclick="() => Toggle(u)">@(u.Disabled ? "Réactiver" : "Désactiver")</button> }</td>
+        </tr>
+    }
+    </tbody>
+</table>
+
+@code {
+    private List<User> users = new();
+    private bool showAdd;
+    private string name = "", email = "", pwd = "";
+
+    protected override void OnInitialized() { Load(); pwd = Passwords.Generate(); }
+
+    private void Load()
+    {
+        var rid = Ctx.RequireResellerId();
+        users = Root.Read(d => d.Users.Where(u => u.ResellerId == rid && u.Role == Roles.ResellerAdmin).OrderBy(u => u.Name).ToList());
+    }
+
+    // Le membre reçoit un mot de passe provisoire par e-mail ; il devra le changer à la première connexion.
+    private async Task Add()
+    {
+        var rid = Ctx.RequireResellerId();
+        var mail = email.Trim().ToLowerInvariant();
+        if (mail.Length == 0 || pwd.Length < 8) { Toast.Error("E-mail et mot de passe (8 caractères minimum) obligatoires."); return; }
+        Reseller? reseller = null;
+        var err = Root.Write(d =>
+        {
+            if (d.Users.Any(u => u.Email == mail && (u.ResellerId == rid || u.ResellerId == null))) return "Cette adresse e-mail est déjà utilisée.";
+            d.Users.Add(new User { Email = mail, Name = name.Trim(), PasswordHash = Passwords.Hash(pwd), Role = Roles.ResellerAdmin, ResellerId = rid, MustChangePassword = true });
+            reseller = d.Resellers.First(r => r.Id == rid);
+            return null;
+        });
+        if (err != null) { Toast.Error(err); return; }
+        var (person, temp) = (name, pwd);
+        name = email = ""; pwd = Passwords.Generate(); showAdd = false; Load();
+        var mailErr = await Mail.SendWelcome(reseller!, Resolver.LoginUrl(reseller!, Nav.BaseUri), $"Vous avez été ajouté à l'équipe de l'espace revendeur « {reseller!.DisplayName} ».", person, mail, temp);
+        if (mailErr == null) Toast.Ok($"Membre ajouté. Ses identifiants ont été envoyés à {mail}.");
+        else Toast.Error($"Membre ajouté, mais l'e-mail n'a pas pu être envoyé : {mailErr}. Communiquez vous-même le mot de passe provisoire à {mail} : {temp}");
+    }
+
+    private void Toggle(User u)
+    {
+        var rid = Ctx.RequireResellerId();
+        Root.Write(d => { var x = d.Users.First(y => y.Id == u.Id && y.ResellerId == rid && y.Id != Ctx.UserId); x.Disabled = !x.Disabled; });
+        Load();
+    }
+}

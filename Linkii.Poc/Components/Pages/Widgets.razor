@@ -1,0 +1,91 @@
+@page "/widgets"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@inject TenantStore Store
+@inject AppService Svc
+@inject Toaster Toast
+
+<div class="page-head">
+    <div>
+        <h1>Widgets</h1>
+        <p class="sub">Des éléments posés par-dessus l'écran, toujours visibles, quelle que soit la liste de lecture en cours. Placez-les depuis l'édition de chaque écran.</p>
+    </div>
+</div>
+
+<div class="lib-tools">
+    <div class="search-box grow" style="margin:0">
+        <Ico Name="search" Size="16" />
+        <input placeholder="Rechercher un widget" aria-label="Rechercher un widget" @bind="search" @bind:event="oninput" />
+    </div>
+    <select @bind="filter" aria-label="Filtrer les widgets">
+        <option value="">Tous</option>
+        <option value="on">Actifs</option>
+        <option value="off">Inactifs</option>
+    </select>
+    <ViewToggle StorageKey="widgets" @bind-Value="view" />
+</div>
+
+@if (Groups[0].Items.Count == 0)
+{
+    <div class="card empty"><div class="big">Aucun widget trouvé</div></div>
+}
+else
+{
+    <CatalogView Groups="Groups" View="@view" Noun="Widget" UsageLabel="Utilisé sur">
+        <Usage>
+            @{ var n = screens.GetValueOrDefault(context.Id); }
+            <span class="cat-used"><Ico Name="monitor" Size="14" /> @(n == 0 ? "Aucun écran" : $"{n} écran{(n > 1 ? "s" : "")}")</span>
+        </Usage>
+        <Actions>
+            <button type="button" class="switch @(context.Off ? "" : "on")" role="switch" aria-checked="@(context.Off ? "false" : "true")" aria-label="@context.Name actif" @onclick="() => Toggle(context)"><span></span></button>
+        </Actions>
+        <Preview>
+            @switch (context.Id)
+            {
+                case "clock":
+                    <span class="cat-pv-clock">14:32</span>
+                    break;
+                case "weather":
+                    <span class="cat-pv-weather"><Ico Name="sun" Size="12" /> 17°</span>
+                    break;
+                case "text":
+                    <span class="cat-pv-band">Réunion générale jeudi 9 h</span>
+                    break;
+            }
+        </Preview>
+    </CatalogView>
+}
+
+@code {
+    private string search = "", filter = "", view = "cards";   // view : cards | list (mémorisé dans le navigateur)
+    private HashSet<string> enabled = new();
+    private Dictionary<string, int> screens = new();   // écrans qui portent au moins un widget de ce type
+
+    private List<CatalogView.Group> Groups => new()
+    {
+        new(null, Svc.Catalog.Where(a => a.ScreenWidget)
+            .Where(a => filter == "" || (filter == "on") == enabled.Contains(a.Id))
+            .Where(a => search.Length == 0 || (a.Name + " " + a.Summary).Contains(search, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase)
+            .Select(a => enabled.Contains(a.Id) ? CatalogView.Entry.Of(a, "Actif", "en-ligne", false) : CatalogView.Entry.Of(a, "Inactif", "inactif", true))
+            .ToList())
+    };
+
+    protected override void OnInitialized() => Load();
+
+    private void Load()
+    {
+        enabled = Svc.Installed().Select(a => a.AppId).ToHashSet();
+        screens = Store.Read(d => d.Screens.SelectMany(s => s.Widgets.Select(w => w.AppId).Distinct()).GroupBy(id => id).ToDictionary(g => g.Key, g => g.Count()));
+    }
+
+    // Enregistré immédiatement : seul le choix proposé dans l'édition des écrans change ; les widgets déjà posés restent affichés.
+    private void Toggle(CatalogView.Entry a)
+    {
+        var on = !enabled.Contains(a.Id);
+        if (on) Svc.Enable(a.Id); else Svc.Disable(a.Id);
+        var n = screens.GetValueOrDefault(a.Id);
+        var still = n == 0 ? "" : n == 1 ? " Il reste affiché sur 1 écran tant que vous ne l'en retirez pas." : $" Il reste affiché sur {n} écrans tant que vous ne l'en retirez pas.";
+        Toast.Ok(on ? $"« {a.Name} » activé : il est proposé dans l'édition des écrans." : $"« {a.Name} » désactivé.{still}");
+        Load();
+    }
+}

@@ -1,0 +1,55 @@
+@page "/admin/screens"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "PlatformAdmin")]
+@implements IDisposable
+@inject JsonStore Root
+
+<div class="page-head">
+    <div>
+        <h1>Supervision</h1>
+        <p class="sub">Tous les écrans de la plateforme, tous revendeurs et clients confondus (rafraîchi toutes les 10 secondes).</p>
+    </div>
+</div>
+
+<div class="row" style="gap:10px;margin-bottom:14px">
+    <span class="pill ok">@rows.Count(r => r.Status == "En ligne") en ligne</span>
+    <span class="pill warn">@rows.Count(r => r.Status == "Mise à jour") en mise à jour</span>
+    <span class="pill bad">@rows.Count(r => r.Status == "Hors ligne") hors ligne</span>
+</div>
+
+<table class="tbl">
+    <thead><tr><th>Écran</th><th>Client</th><th>Revendeur</th><th>État</th><th>Dernier signe de vie</th><th>Résolution</th></tr></thead>
+    <tbody>
+    @foreach (var r in rows)
+    {
+        <tr>
+            <td><b>@r.Screen.Name</b></td><td>@r.Client</td><td>@r.Reseller</td>
+            <td><span class="pill @(r.Status == "En ligne" ? "ok" : r.Status == "Hors ligne" ? "bad" : "warn")">@r.Status</span></td>
+            <td>@(r.Screen.LastSeenUtc?.ToString("yyyy-MM-dd HH:mm:ss") ?? "jamais")</td>
+            <td>@(r.Screen.DetectedW is { } w ? $"{w}×{r.Screen.DetectedH}" : "—")</td>
+        </tr>
+    }
+    @if (rows.Count == 0) { <tr><td colspan="6">Aucun écran appairé.</td></tr> }
+    </tbody>
+</table>
+
+@code {
+    private record Row(Screen Screen, string Client, string Reseller, string Status);
+    private List<Row> rows = new();
+    private Timer? timer;
+
+    protected override void OnInitialized()
+    {
+        Load();
+        timer = new Timer(_ => InvokeAsync(() => { Load(); StateHasChanged(); }), null, 10000, 10000);
+    }
+
+    private void Load() => rows = Root.Read(d => d.Screens.Where(s => s.Token != null).Select(s =>
+    {
+        var c = d.Clients.FirstOrDefault(x => x.Id == s.ClientId);
+        var r = c == null ? null : d.Resellers.FirstOrDefault(x => x.Id == c.ResellerId);
+        var status = c == null ? "Hors ligne" : Helpers.Status(s, d.Playlists.FirstOrDefault(p => p.Id == s.PlaylistId && p.ClientId == s.ClientId), c, r);
+        return new Row(s, c?.Name ?? "?", r?.Name ?? "?", status);
+    }).OrderBy(x => x.Reseller).ThenBy(x => x.Client).ThenBy(x => x.Screen.Name).ToList());
+
+    public void Dispose() => timer?.Dispose();
+}

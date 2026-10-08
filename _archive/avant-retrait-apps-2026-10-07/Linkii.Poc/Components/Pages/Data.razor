@@ -1,0 +1,72 @@
+@page "/data"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@inject TenantStore Store
+@inject GraphService Graph
+
+<div class="page-head">
+    <div>
+        <h1>Données</h1>
+        <p class="sub">Connecteurs utilisés par les apps. Microsoft 365 : lecture des calendriers et des salles.</p>
+    </div>
+</div>
+
+<div class="settings-grid">
+    <div class="card" style="grid-column: 1 / -1">
+        <h3>Microsoft 365</h3>
+        <p class="hint">Permet de lire les calendriers des salles et d'en afficher l'annuaire, sans lien ICS à publier. Connexion « application » (OAuth 2.0, client credentials) : à configurer une fois par un administrateur Microsoft 365.</p>
+
+        <ol class="steps-doc">
+            <li>Entra ID › <b>Inscriptions d'applications</b> › Nouvelle inscription (compte de ce locataire uniquement).</li>
+            <li><b>Autorisations d'API</b> › Microsoft Graph › <i>Autorisations de l'application</i> : <code>Calendars.Read</code> et <code>Place.Read.All</code>, puis <b>Accorder le consentement administrateur</b>.</li>
+            <li><b>Certificats et secrets</b> › Nouveau secret client. Copiez sa <i>valeur</i> ci-dessous.</li>
+            <li>Recommandé : limiter l'application aux boîtes des salles (<code>New-ApplicationAccessPolicy</code> sous Exchange Online).</li>
+        </ol>
+
+        <div class="ms-grid">
+            <div><label class="lbl">ID du locataire (Directory / Tenant ID)</label><input class="full" @bind="msTenant" placeholder="00000000-0000-0000-0000-000000000000" /></div>
+            <div><label class="lbl">ID de l'application (Client ID)</label><input class="full" @bind="msClient" placeholder="00000000-0000-0000-0000-000000000000" /></div>
+            <div><label class="lbl">Secret client @(hasSecret ? "(déjà enregistré — laisser vide pour le conserver)" : "")</label><input class="full" type="password" @bind="msSecret" autocomplete="off" /></div>
+        </div>
+        <div class="row" style="margin-top:14px">
+            <button class="btn" @onclick="SaveMs">Enregistrer</button>
+            <button class="btn ghost" disabled="@msTesting" @onclick="TestMs">@(msTesting ? "Test en cours…" : "Tester la connexion")</button>
+        </div>
+        @if (msOk != null) { <div class="msg">@msOk</div> }
+        @if (msErr != null) { <div class="err">@msErr</div> }
+        <small>POC : le secret est stocké en clair dans <code>data.json</code>.</small>
+    </div>
+</div>
+
+@code {
+    private string msTenant = "", msClient = "", msSecret = "";
+    private bool hasSecret, msTesting;
+    private string? msOk, msErr;
+
+    protected override void OnInitialized()
+    {
+        var t = Store.Read(d => d.Tenant);
+        msTenant = t.MsTenantId; msClient = t.MsClientId; hasSecret = !string.IsNullOrEmpty(t.MsClientSecret);
+    }
+
+    private void SaveMs()
+    {
+        msOk = msErr = null;
+        Store.Write(d =>
+        {
+            d.Tenant.MsTenantId = msTenant.Trim();
+            d.Tenant.MsClientId = msClient.Trim();
+            if (!string.IsNullOrWhiteSpace(msSecret)) d.Tenant.MsClientSecret = msSecret.Trim();
+        });
+        if (!string.IsNullOrWhiteSpace(msSecret)) { hasSecret = true; msSecret = ""; }
+        msOk = "Paramètres Microsoft 365 enregistrés.";
+    }
+
+    private async Task TestMs()
+    {
+        SaveMs();
+        msOk = msErr = null; msTesting = true; StateHasChanged();
+        try { msOk = await Graph.Test(Store.Read(d => d.Tenant)); }
+        catch (Exception ex) { msErr = ex.Message; }
+        finally { msTesting = false; }
+    }
+}

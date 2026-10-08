@@ -1,0 +1,39 @@
+@page "/account"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject JsonStore Root
+@inject TenantContext Ctx
+
+<div class="page-head">
+    <div>
+        <h1>Mon compte</h1>
+        <p class="sub">@Ctx.Email</p>
+    </div>
+</div>
+@if (msg != null) { <div class="msg" style="margin:-10px 0 16px">@msg</div> }
+@if (error != null) { <div class="err" style="margin:-10px 0 16px">@error</div> }
+
+<div class="card" style="max-width:460px">
+    <h3>Mot de passe</h3>
+    <label class="lbl">Mot de passe actuel</label>
+    <input class="full" type="password" @bind="oldPwd" autocomplete="current-password" />
+    <label class="lbl">Nouveau mot de passe <small>(8 caractères minimum)</small></label>
+    <input class="full" type="password" @bind="newPwd" autocomplete="new-password" />
+    <div style="margin-top:12px"><button class="btn" @onclick="Change">Changer le mot de passe</button></div>
+</div>
+
+@code {
+    private string oldPwd = "", newPwd = "";
+    private string? msg, error;
+
+    private void Change()
+    {
+        error = msg = null;
+        var uid = Ctx.UserId;
+        var hash = Root.Read(d => d.Users.FirstOrDefault(u => u.Id == uid)?.PasswordHash ?? "");
+        if (Ctx.IsImpersonating || !Passwords.Verify(hash, oldPwd)) { error = "Mot de passe actuel incorrect."; return; }
+        if (newPwd.Length < 8) { error = "Le nouveau mot de passe est trop court (8 caractères minimum)."; return; }
+        Root.Write(d => { d.Users.First(u => u.Id == uid).PasswordHash = Passwords.Hash(newPwd); });
+        oldPwd = newPwd = "";
+        msg = "Mot de passe modifié.";
+    }
+}

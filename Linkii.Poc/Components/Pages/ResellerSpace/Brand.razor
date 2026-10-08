@@ -1,0 +1,110 @@
+@page "/reseller/brand"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ResellerSpace")]
+@inject JsonStore Root
+@inject TenantContext Ctx
+@inject Notifier Notifier
+@inject IConfiguration Config
+@inject NavigationManager Nav
+@inject Toaster Toast
+
+<div class="page-head">
+    <div>
+        <h1>Marque</h1>
+        <p class="sub">Le back-office et le player (écran d'appairage compris) sont habillés à vos couleurs.</p>
+    </div>
+    <button class="btn" @onclick="Save">Enregistrer</button>
+</div>
+
+<div class="settings-grid">
+    <div class="card">
+        <h3>Identité</h3>
+        <label class="lbl">Nom affiché</label>
+        <input class="full" @bind="brandName" />
+        <label class="lbl">Couleur principale</label>
+        <div class="row"><input type="color" @bind="color" style="padding:2px;width:52px;height:38px" /><small>@color</small></div>
+        <label class="lbl">Logo <small>(PNG, JPEG ou WebP, 1 Mo maximum)</small></label>
+        @if (logoUrl != null) { <img class="logo-prev" src="@logoUrl" alt="Logo" /> }
+        <InputFile OnChange="OnLogo" accept="image/png,image/jpeg,image/webp" />
+        @if (logoUrl != null) { <div><button class="btn ghost" style="margin-top:8px" @onclick="RemoveLogo">Retirer le logo</button></div> }
+    </div>
+
+    <div class="card">
+        <h3>Adresse et e-mails</h3>
+        <label class="lbl">Adresse du back-office</label>
+        <input class="full" value="@(slug + "." + BaseDomain)" disabled />
+        @if (!string.IsNullOrEmpty(domain))
+        {
+            <label class="lbl">Domaine propre</label>
+            <input class="full" value="@domain" disabled />
+            <small>Créez chez votre hébergeur DNS un enregistrement <b>CNAME</b> : <code>@domain</code> → <code>@CnameTarget</code>. Le certificat HTTPS est généré automatiquement.</small>
+        }
+        else
+        {
+            <small>Pour utiliser votre propre domaine (ex. affichage.votre-entreprise.ch), demandez à Linkii de l'activer.</small>
+        }
+        <label class="lbl">Adresse e-mail d'envoi</label>
+        <input class="full" type="email" @bind="sender" placeholder="no-reply@votre-entreprise.ch" />
+        <label class="lbl"><input type="checkbox" @bind="powered" /> Afficher la mention « Propulsé par Linkii »</label>
+    </div>
+</div>
+
+@code {
+    private string brandName = "", color = "#0B1F3A", sender = "", slug = "", domain = "";
+    private string? logoUrl;
+    private bool powered = true;
+    private string BaseDomain => Config["Linkii:BaseDomain"] ?? "linkii.com";
+    private string CnameTarget => Config["Linkii:CnameTarget"] ?? "app." + BaseDomain;
+    private static readonly string[] Allowed = { "image/png", "image/jpeg", "image/webp" };
+
+    protected override void OnInitialized()
+    {
+        var r = Ctx.Reseller!;
+        brandName = r.DisplayName; color = r.BrandColor; sender = r.SenderEmail; powered = r.ShowPoweredBy;
+        slug = r.Slug; domain = r.CustomDomain ?? ""; logoUrl = r.LogoUrl;
+        if (Nav.Uri.Contains("saved=1")) Toast.Ok("Marque enregistrée.");
+    }
+
+    private async Task OnLogo(InputFileChangeEventArgs e)
+    {
+        var f = e.File;
+        if (!Allowed.Contains(f.ContentType)) { Toast.Error("Format non pris en charge (PNG, JPEG ou WebP)."); return; }
+        if (f.Size > 1_000_000) { Toast.Error("Logo trop lourd (1 Mo maximum)."); return; }
+        var ext = f.ContentType switch { "image/png" => ".png", "image/jpeg" => ".jpg", _ => ".webp" };
+        var rid = Ctx.RequireResellerId();
+        var file = $"{rid:N}-{Guid.NewGuid():N}{ext}";
+        await using (var fs = File.Create(Path.Combine(AppPaths.BrandDir, file)))
+            await f.OpenReadStream(1_000_000).CopyToAsync(fs);
+        var old = Root.Write(d => { var r = d.Resellers.First(x => x.Id == rid); var o = r.LogoFile; r.LogoFile = file; return o; });
+        DeleteLogoFile(old);
+        logoUrl = "/brand/" + file;
+        await Notifier.NotifyReseller(rid);
+    }
+
+    private async Task RemoveLogo()
+    {
+        var rid = Ctx.RequireResellerId();
+        var old = Root.Write(d => { var r = d.Resellers.First(x => x.Id == rid); var o = r.LogoFile; r.LogoFile = null; return o; });
+        DeleteLogoFile(old);
+        logoUrl = null;
+        await Notifier.NotifyReseller(rid);
+    }
+
+    private static void DeleteLogoFile(string? f)
+    {
+        if (!string.IsNullOrEmpty(f) && f == Path.GetFileName(f)) try { File.Delete(Path.Combine(AppPaths.BrandDir, f)); } catch { }
+    }
+
+    private async Task Save()
+    {
+        if (string.IsNullOrWhiteSpace(brandName)) { Toast.Error("Le nom affiché est obligatoire."); return; }
+        if (!System.Text.RegularExpressions.Regex.IsMatch(color, "^#[0-9a-fA-F]{6}$")) { Toast.Error("Couleur invalide."); return; }
+        var rid = Ctx.RequireResellerId();
+        Root.Write(d =>
+        {
+            var r = d.Resellers.First(x => x.Id == rid);
+            r.BrandName = brandName.Trim(); r.BrandColor = color; r.SenderEmail = sender.Trim(); r.ShowPoweredBy = powered;
+        });
+        await Notifier.NotifyReseller(rid);   // les écrans de tous les clients reprennent la nouvelle marque
+        Nav.NavigateTo("/reseller/brand?saved=1", forceLoad: true);
+    }
+}

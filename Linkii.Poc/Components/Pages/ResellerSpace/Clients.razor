@@ -1,0 +1,94 @@
+@page "/reseller"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ResellerSpace")]
+@inject JsonStore Root
+@inject Mailer Mail
+@inject ResellerResolver Resolver
+@inject NavigationManager Nav
+@inject TenantContext Ctx
+@inject Toaster Toast
+
+<div class="page-head">
+    <div>
+        <h1>Clients</h1>
+        <p class="sub">Vos clients (écoles, commerces, associations). Chacun a son propre espace, isolé des autres.</p>
+    </div>
+    <button class="btn" @onclick="() => showAdd = !showAdd">+ Ajouter un client</button>
+</div>
+
+@if (showAdd)
+{
+    <div class="card" style="margin-bottom:18px">
+        <h3>Nouveau client</h3>
+        <div class="form-grid">
+            <div><label class="lbl">Nom du client</label><input class="full" @bind="clientName" placeholder="Ex. : École du Midi" /></div>
+            <div><label class="lbl">Administrateur : nom</label><input class="full" @bind="adminName" /></div>
+            <div><label class="lbl">Administrateur : e-mail</label><input class="full" type="email" @bind="adminEmail" autocomplete="off" /></div>
+            <div>
+                        <label class="lbl">Mot de passe provisoire <small>(envoyé par e-mail, à changer à la 1re connexion)</small></label>
+                        <div class="row" style="gap:6px"><input class="full mono" @bind="adminPwd" autocomplete="off" spellcheck="false" /><button type="button" class="btn ghost" title="Générer un autre mot de passe" @onclick="() => adminPwd = Passwords.Generate()">Générer</button></div>
+                    </div>
+        </div>
+        <div style="margin-top:12px"><button class="btn" @onclick="Add">Créer le client</button></div>
+    </div>
+}
+
+<table class="tbl">
+    <thead><tr><th>Client</th><th class="num">Écrans</th><th>État</th><th></th></tr></thead>
+    <tbody>
+    @foreach (var c in clients)
+    {
+        <tr>
+            <td><b>@c.Client.Name</b></td>
+            <td class="num">@c.Screens</td>
+            <td><span class="pill @(c.Client.Suspended ? "bad" : "ok")">@(c.Client.Suspended ? "Suspendu" : "Actif")</span></td>
+            <td>
+                <form method="post" action="/space/enter"><input type="hidden" name="clientId" value="@c.Client.Id" /><button class="btn ghost" type="submit">Entrer</button></form>
+                <button class="btn ghost" @onclick="() => Toggle(c.Client)">@(c.Client.Suspended ? "Activer" : "Suspendre")</button>
+            </td>
+        </tr>
+    }
+    @if (clients.Count == 0) { <tr><td colspan="4">Aucun client pour l'instant.</td></tr> }
+    </tbody>
+</table>
+
+@code {
+    private record Row(Tenant Client, int Screens);
+    private List<Row> clients = new();
+    private bool showAdd;
+    private string clientName = "", adminName = "", adminEmail = "", adminPwd = "";
+
+    protected override void OnInitialized() { Load(); adminPwd = Passwords.Generate(); }
+
+    private void Load()
+    {
+        var rid = Ctx.RequireResellerId();
+        clients = Root.Read(d => d.Clients.Where(c => c.ResellerId == rid).OrderBy(c => c.Name)
+            .Select(c => new Row(c, d.Screens.Count(s => s.ClientId == c.Id && s.Token != null))).ToList());
+    }
+
+    // Le compte est créé avec un mot de passe provisoire, envoyé par e-mail ; il devra être changé à la première connexion.
+    private async Task Add()
+    {
+        var rid = Ctx.RequireResellerId();
+        Reseller? reseller = null;
+        var err = Root.Write(d =>
+        {
+            reseller = d.Resellers.First(x => x.Id == rid);
+            return Tenancy.CreateClient(d, reseller, clientName, adminName, adminEmail, adminPwd, mustChangePassword: true).Error;
+        });
+        if (err != null) { Toast.Error(err); return; }
+        var (name, person, email, pwd) = (clientName.Trim(), adminName, adminEmail.Trim().ToLowerInvariant(), adminPwd);
+        clientName = adminName = adminEmail = ""; adminPwd = Passwords.Generate(); showAdd = false;
+        Load();
+        var mailErr = await Mail.SendWelcome(reseller!, Resolver.LoginUrl(reseller!, Nav.BaseUri), $"Votre espace « {name} » est prêt.", person, email, pwd);
+        if (mailErr == null) Toast.Ok($"Client « {name} » créé. Ses identifiants ont été envoyés à {email}.");
+        else Toast.Error($"Client « {name} » créé, mais l'e-mail n'a pas pu être envoyé : {mailErr}. Communiquez vous-même le mot de passe provisoire à {email} : {pwd}");
+    }
+
+    private void Toggle(Tenant c)
+    {
+        var rid = Ctx.RequireResellerId();
+        Root.Write(d => { var x = d.Clients.First(y => y.Id == c.Id && y.ResellerId == rid); x.Suspended = !x.Suspended; });
+        Load();
+    }
+}

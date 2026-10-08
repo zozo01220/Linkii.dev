@@ -1,0 +1,339 @@
+@page "/"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@implements IDisposable
+@inject TenantStore Store
+@inject Notifier Notifier
+@inject Toaster Toast
+
+<div class="page-head">
+    <div>
+        <h1>Vos écrans</h1>
+        <p class="sub">Choisissez la liste de lecture et les widgets de chaque écran, puis publiez : chaque écran se met à jour indépendamment.</p>
+    </div>
+    <div class="row head-actions">
+        <button class="btn ghost" @onclick="OpenPair"><Ico Name="plus" Size="16" /> Connecter un écran</button>
+        <button class="btn" disabled="@(selectedIds.Count == 0 || bulkPublishing)" title="@(selectedIds.Count == 0 ? "Cochez un ou plusieurs écrans" : null)" @onclick="() => AskPublish(selectedIds.ToList())">
+            <Ico Name="upload" Size="16" /> @(bulkPublishing ? "Publication…" : selectedIds.Count == 0 ? "Publier" : $"Publier ({selectedIds.Count})")
+        </button>
+    </div>
+</div>
+
+@if (screens.Count > 0)
+{
+    <div class="sel-line" role="region" aria-label="Sélection d'écrans" aria-live="polite">
+        @if (selectedIds.Count > 0)
+        {
+            <span>@selectedIds.Count écran@(selectedIds.Count > 1 ? "s" : "") sélectionné@(selectedIds.Count > 1 ? "s" : "")</span>
+            <button type="button" class="linklike" @onclick="() => selectedIds.Clear()">Désélectionner</button>
+        }
+        @if (selectedIds.Count < screens.Count) { <button type="button" class="linklike" @onclick="SelectAll">Tout sélectionner</button> }
+        <span class="grow"></span>
+        <ViewToggle StorageKey="screens" @bind-Value="view" />
+    </div>
+}
+
+<div class="pl-grid @(view == "list" ? "list" : "")">
+    @foreach (var s in screens)
+    {
+        var sc = s;
+        var st = Status(sc);
+        var cls = st == "En ligne" ? "en-ligne" : st == "Mise à jour" ? "mise-a-jour" : "hors-ligne";
+        var pending = Helpers.HasPending(sc, playlists);
+        <div class="pl-card sc-card @(selectedIds.Contains(sc.Id) ? "picked" : "")">
+            <div class="sc-head">
+                <div class="pl-title">
+                    <input type="checkbox" class="sc-check" aria-label="Sélectionner @sc.Name" checked="@selectedIds.Contains(sc.Id)" @onchange="() => ToggleSelect(sc.Id)" />
+                    <span class="sc-dot @cls" title="@st"><span class="sr-only">@st</span></span>
+                    <button type="button" class="pl-name linklike-name" title="Paramètres de l'écran « @sc.Name »" @onclick="() => Edit(sc)">@sc.Name</button>
+                    <div class="kebab">
+                        <button type="button" class="kebab-btn" aria-label="Actions pour @sc.Name" aria-haspopup="menu" aria-expanded="@(menuFor == sc.Id ? "true" : "false")"
+                                @onclick="() => menuFor = menuFor == sc.Id ? null : sc.Id"><Ico Name="dots-v" Size="18" /></button>
+                        @if (menuFor == sc.Id)
+                        {
+                            <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                            <div class="kebab-menu" role="menu">
+                                <button type="button" role="menuitem" @onclick="() => Edit(sc)"><Ico Name="pencil-square" Size="16" /> Éditer</button>
+                                <button type="button" role="menuitem" @onclick="() => OpenRename(sc)"><Ico Name="edit" Size="16" /> Renommer</button>
+                                <button type="button" role="menuitem" @onclick="() => AskPublish(new() { sc.Id })"><Ico Name="upload" Size="16" /> Publier</button>
+                                <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = sc; }"><Ico Name="trash" Size="16" /> Supprimer</button>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+            <button type="button" class="sc-visual" tabindex="-1" aria-hidden="true" @onclick="() => Edit(sc)">
+                <span class="sc-monitor @(sc.Orientation == "portrait" ? "portrait" : "")">
+                    @* une vignette par zone du découpage, à ses proportions *@
+                    <span class="sc-zones @(sc.Orientation == "portrait" ? "dir-col" : "dir-row")">
+                        @for (var z = 0; z < sc.ZoneCount; z++)
+                        {
+                            var zp = playlists.FirstOrDefault(p => p.Id == sc.ZonePlaylist(z));
+                            var zt = ZoneThumb(zp);
+                            <span class="sc-zone" style="flex:@(ScreenLayouts.Find(sc.Layout).Sizes[z].ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)) 1 0">
+                                @if (zt != null) { <MediaThumb Media="zt" All="media" /> }
+                                else { <span class="sc-empty">@(zp == null ? (sc.ZoneCount > 1 ? "+" : "Aucune liste de lecture") : zp.Name)</span> }
+                            </span>
+                        }
+                    </span>
+                </span>
+                <span class="sc-stand"></span>
+                @if (pending) { <span class="badge mise-a-jour sc-pending" title="Liste de lecture, widgets ou choix de liste de lecture modifiés depuis la dernière publication">À publier</span> }
+            </button>
+            <div class="sc-foot">
+                @if (sc.ZoneCount == 1)
+                {
+                    <label class="sc-lbl" for="pl-@sc.Id">Défaut</label>
+                    <select id="pl-@sc.Id" class="sc-select" @onchange="e => Assign(sc, e)">
+                    <option value="" selected="@(sc.PlaylistId == null)">— Aucune liste de lecture —</option>
+                    @foreach (var p in playlists) { <option value="@p.Id" selected="@(p.Id == sc.PlaylistId)">@p.Name</option> }
+                    </select>
+                }
+                else
+                {
+                    @* écran découpé : une liste de lecture par zone, choisie dans l'édition de l'écran *@
+                    <span class="sc-lbl">@sc.ZoneCount zones</span>
+                    <button type="button" class="sc-select sc-zones-btn" title="Choisir la liste de lecture de chaque zone" @onclick="() => Edit(sc)">@ZonesSummary(sc)</button>
+                }
+            </div>
+        </div>
+    }
+    <button class="pl-card pl-add" @onclick="OpenPair">
+        <span class="pl-plus"><Ico Name="plus" Size="28" /></span>
+        <span>Connecter un écran</span>
+    </button>
+</div>
+
+@if (showPair)
+{
+    <div class="modal-backdrop" @onclick="() => showPair = false"></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pair-title">
+        <h3 id="pair-title">Connecter un écran</h3>
+        <p class="hint">Allumez l'écran, puis saisissez le code à 6 chiffres affiché. <a href="/player/" target="_blank">Ouvrir un écran de test</a></p>
+        <div class="dw">
+            <div class="dw-field"><label for="pair-code">Code</label><input id="pair-code" class="pair-code" @bind="code" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="off" /></div>
+            <div class="dw-field"><label for="pair-name">Nom de l'écran</label><input id="pair-name" @bind="name" placeholder="Ex. Accueil, salle de pause" /></div>
+            <div class="dw-field">
+                <label for="pair-pl">Liste de lecture</label>
+                <select id="pair-pl" @bind="playlistId">
+                    <option value="">— Aucune liste de lecture —</option>
+                    @foreach (var p in playlists) { <option value="@p.Id">@p.Name</option> }
+                </select>
+            </div>
+        </div>
+        <p class="hint" style="margin:12px 0 0">Format par défaut : celui des Réglages, modifiable ensuite dans l'édition de l'écran.</p>
+        @if (error != null) { <div class="err">@error</div> }
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => showPair = false">Annuler</button>
+            <button class="btn" @onclick="Pair">Connecter</button>
+        </div>
+    </div>
+}
+
+@if (renamingScreen != null)
+{
+    <div class="modal-backdrop" @onclick="() => renamingScreen = null"></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="ren-title">
+        <h3 id="ren-title">Renommer l'écran</h3>
+        <p class="hint">Le nom sert à repérer l'écran dans le back-office ; il n'est pas affiché sur l'écran.</p>
+        <input style="width:100%;margin-top:10px" maxlength="80" @ref="renameInput" @bind="renameValue" @bind:event="oninput" @onkeydown="OnRenameKey" aria-label="Nom de l'écran" />
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => renamingScreen = null">Annuler</button>
+            <button class="btn" disabled="@string.IsNullOrWhiteSpace(renameValue)" @onclick="RenameScreen">Renommer</button>
+        </div>
+    </div>
+}
+
+@if (deleting != null)
+{
+    var d = deleting;
+    <div class="modal-backdrop" @onclick="() => deleting = null"></div>
+    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="del-title">
+        <h3 id="del-title">Supprimer « @d.Name » ?</h3>
+        <p class="hint">L'écran sera déconnecté et affichera de nouveau un code d'appairage. Sa liste de lecture n'est pas supprimée.</p>
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => deleting = null">Annuler</button>
+            <button class="btn danger-solid" @onclick="() => Remove(d)">Supprimer</button>
+        </div>
+    </div>
+}
+
+@if (confirmIds is { } cids)
+{
+    var targets = screens.Where(s => cids.Contains(s.Id)).ToList();
+    <div class="modal-backdrop" @onclick="() => confirmIds = null"></div>
+    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="pub-title" aria-describedby="pub-desc">
+        <h3 id="pub-title">Publier sur @(targets.Count > 1 ? $"{targets.Count} écrans" : "cet écran") ?</h3>
+        <p class="hint" id="pub-desc">Chaque écran affichera immédiatement sa liste de lecture et ses widgets dans leur état actuel.</p>
+        <ul class="pub-list">
+            @foreach (var t in targets)
+            {
+                var tp = ZonesSummary(t);
+                <li>
+                    <b>@t.Name</b>
+                    <span>@tp@(t.Widgets.Count > 0 ? $" · {t.Widgets.Count} widget{(t.Widgets.Count > 1 ? "s" : "")}" : "")</span>
+                    @if (!Helpers.HasPending(t, playlists)) { <small>déjà à jour</small> }
+                </li>
+            }
+        </ul>
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => confirmIds = null">Annuler</button>
+            <button class="btn" disabled="@bulkPublishing" @onclick="ConfirmPublish"><Ico Name="upload" Size="16" /> @(bulkPublishing ? "Publication…" : "Publier")</button>
+        </div>
+    </div>
+}
+
+@if (editing is { } eid)
+{
+    <ScreenEditor ScreenId="eid" OnClose="CloseEdit" />
+}
+
+@code {
+    private List<Screen> screens = new();
+    private List<Playlist> playlists = new();
+    private List<MediaItem> media = new();
+    private Tenant tenant = new();
+    private string code = "", name = "";
+    private Guid? playlistId;
+    private string? error;
+    private bool showPair;
+    private Timer? timer;
+    private Guid? menuFor, editing;
+    private Screen? deleting;
+    private string view = "cards";   // cards | list (mémorisé dans le navigateur)
+
+    protected override void OnInitialized()
+    {
+        tenant = Store.Read(d => d.Tenant);
+        Reload();
+        timer = new Timer(_ => InvokeAsync(() => { Reload(); StateHasChanged(); }), null, 3000, 3000);   // état en ligne / hors ligne
+    }
+
+    private string Status(Screen s) => Store.Read(d => d.Status(s));
+
+    // Premier contenu plein écran d'une liste de lecture : vignette de sa zone sur la carte.
+    private MediaItem? ZoneThumb(Playlist? p) =>
+        p?.Draft.Where(i => i.Placement == "full").Select(i => media.FirstOrDefault(m => m.Id == i.MediaId)).FirstOrDefault(m => m != null);
+
+    // « Accueil · Menus · — » : playlist de chaque zone, dans l'ordre.
+    private string ZonesSummary(Screen s)
+    {
+        var names = s.ZonePlaylists().Select(id => playlists.FirstOrDefault(p => p.Id == id)?.Name ?? "—").ToList();
+        return names.All(n => n == "—") ? "Aucune liste de lecture" : string.Join(" · ", names);
+    }
+
+    private void Reload()
+    {
+        screens = Store.Read(d => d.Screens.Where(s => s.Token != null).OrderBy(s => s.Name).ToList());
+        playlists = Store.Read(d => d.Playlists.OrderBy(p => p.Name).ToList());
+        media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
+    }
+
+    private void OpenPair() { code = name = ""; playlistId = null; error = null; showPair = true; }
+
+    private void Edit(Screen s) { menuFor = null; editing = s.Id; }
+
+    private void CloseEdit() { editing = null; Reload(); }
+
+    private async Task Pair()
+    {
+        error = null;
+        var spec = ScreenSpec.From(tenant);
+        var pid = playlistId;
+        var screenName = name;
+        var id = Store.Write(d =>
+        {
+            var s = d.ClaimScreen(code.Trim());
+            if (s == null) return (Guid?)null;
+            s.Name = string.IsNullOrWhiteSpace(screenName) ? "Écran " + code : screenName.Trim();
+            s.PlaylistId = pid;
+            s.ScreenType = spec.Type; s.Orientation = spec.Orientation; s.Resolution = spec.Resolution;
+            s.Token = Guid.NewGuid().ToString("N");
+            s.PairingCode = null;
+            return s.Id;
+        });
+        if (id == null) { error = "Code inconnu."; return; }
+        await Notifier.PublishScreen(id.Value);   // l'écran appairé diffuse aussitôt sa liste de lecture
+        showPair = false;
+        Toast.Ok($"Écran « {(string.IsNullOrWhiteSpace(screenName) ? "Écran " + code : screenName.Trim())} » connecté.");
+        Reload();
+    }
+
+    // ---------- Sélection multiple et publication ----------
+    private readonly HashSet<Guid> selectedIds = new();
+    private bool bulkPublishing;
+    private List<Guid>? confirmIds;   // écrans à publier, en attente de confirmation
+
+    private void ToggleSelect(Guid id) { if (!selectedIds.Remove(id)) selectedIds.Add(id); }
+
+    private void SelectAll() { foreach (var s in screens) selectedIds.Add(s.Id); }
+
+    private void AskPublish(List<Guid> ids)
+    {
+        menuFor = null;
+        if (ids.Count > 0) confirmIds = ids;
+    }
+
+    // Chaque écran reçoit sa propre publication (sa liste de lecture et ses widgets, dans leur état actuel). Les autres écrans ne changent pas.
+    private async Task ConfirmPublish()
+    {
+        if (confirmIds is not { } ids) return;
+        bulkPublishing = true;
+        try { foreach (var id in ids) await Notifier.PublishScreen(id); }
+        finally { bulkPublishing = false; }
+        confirmIds = null;
+        foreach (var id in ids) selectedIds.Remove(id);
+        Toast.Ok($"Publié sur {ids.Count} écran{(ids.Count > 1 ? "s" : "")} à {DateTime.Now:HH:mm}.");
+        Reload();
+    }
+
+    // Playlist par défaut de l'écran : enregistrée tout de suite, diffusée à la prochaine publication (confirmée) de l'écran.
+    private void Assign(Screen s, ChangeEventArgs e)
+    {
+        var pid = Guid.TryParse(e.Value?.ToString(), out var g) ? g : (Guid?)null;
+        Store.Write(d => { if (d.Screens.FirstOrDefault(x => x.Id == s.Id) is { } sc) sc.PlaylistId = pid; });
+        Toast.Ok(pid == null ? $"Aucune liste de lecture pour « {s.Name} ». Publiez l'écran pour l'appliquer." : $"Liste de lecture « {playlists.FirstOrDefault(p => p.Id == pid)?.Name} » choisie pour « {s.Name} ». Publiez l'écran pour la diffuser.");
+        Reload();
+    }
+
+    // ---------- Renommer (menu ⋮) ----------
+    private Screen? renamingScreen;
+    private string renameValue = "";
+    private ElementReference renameInput;
+    private bool focusRename;
+
+    private void OpenRename(Screen s) { menuFor = null; renamingScreen = s; renameValue = s.Name; focusRename = true; }
+
+    private void OnRenameKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") RenameScreen();
+        else if (e.Key == "Escape") renamingScreen = null;
+    }
+
+    // Le nom n'est pas diffusé : rien à publier.
+    private void RenameScreen()
+    {
+        if (renamingScreen is not { } s || string.IsNullOrWhiteSpace(renameValue)) return;
+        var name = renameValue.Trim();
+        if (name.Length > 80) name = name[..80];
+        Store.Write(d => { if (d.Screens.FirstOrDefault(x => x.Id == s.Id) is { } sc) sc.Name = name; });
+        renamingScreen = null;
+        Toast.Ok($"Écran renommé en « {name} ».");
+        Reload();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusRename && renamingScreen != null) { focusRename = false; await renameInput.FocusAsync(); }
+    }
+
+    private void Remove(Screen s)
+    {
+        selectedIds.Remove(s.Id);
+        Store.Write(d => { d.Screens.RemoveAll(x => x.Id == s.Id); });
+        Toast.Ok($"Écran « {s.Name} » supprimé.");
+        deleting = null;
+        Reload();
+    }
+
+    public void Dispose() => timer?.Dispose();
+}

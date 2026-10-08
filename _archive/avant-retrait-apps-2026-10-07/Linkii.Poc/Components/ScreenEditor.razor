@@ -1,0 +1,263 @@
+@using Microsoft.JSInterop
+@implements IDisposable
+@inject TenantStore Store
+@inject AppService Svc
+@inject Notifier Notifier
+@inject IJSRuntime JS
+
+@* Édition d'un écran : nom, playlist, format et widgets (horloge, météo) posés librement sur un aperçu à l'échelle.
+   La playlist et les widgets partent sur l'écran à la publication ; le format s'applique dès l'enregistrement. *@
+<div class="modal-backdrop" @onclick="Close"></div>
+<div class="modal app-modal wg-modal" role="dialog" aria-modal="true" aria-labelledby="se-title">
+    <div class="modal-head">
+        <span class="app-ico"><Ico Name="monitor" Size="22" /></span>
+        <div class="grow">
+            <h3 id="se-title">@(string.IsNullOrWhiteSpace(name) ? "Écran" : name)</h3>
+            <small>Modifier l'écran</small>
+        </div>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="modal-body wg-body">
+        <div class="wg-stage-wrap">
+            <div class="wg-stage @(spec.Orientation == "portrait" ? "portrait" : "")" @ref="canvas">
+                <span class="wg-stage-label">@(playlists.FirstOrDefault(p => p.Id == playlistId)?.Name ?? "Aucune playlist")</span>
+                @foreach (var w in widgets)
+                {
+                    var wid = w;
+                    <div class="wg-item @(selected == wid.Id ? "sel" : "")" data-wid="@wid.Id" tabindex="0" role="button"
+                         aria-label="@Label(wid) — flèches pour déplacer"
+                         style="left:@Pct(wid.X);top:@Pct(wid.Y);--s:@wid.Scale.ToString(Inv)"
+                         @onclick="() => Select(wid)" @onfocus="() => Select(wid)">
+                        @if (wid.AppId == "clock")
+                        {
+                            <div class="wg-time">@ClockText(wid)</div>
+                            @if (wid.Settings.GetValueOrDefault("showDate") != "false") { <div class="wg-sub">@DateTime.Now.ToString("dddd d MMMM", Fr)</div> }
+                        }
+                        else
+                        {
+                            <div class="wg-row"><span class="wg-ico">⛅</span><span class="wg-temp">18°</span></div>
+                            <div class="wg-sub">@(string.IsNullOrWhiteSpace(wid.Settings.GetValueOrDefault("city")) ? "Ville ?" : wid.Settings["city"])</div>
+                        }
+                    </div>
+                }
+            </div>
+            <p class="hint" style="margin-top:8px">Aperçu à l'échelle. Faites glisser un widget pour le placer ; au clavier, flèches (Maj + flèches : pas de 5 %).</p>
+        </div>
+
+        <div class="wg-side">
+            <div class="seg se-tabs" role="tablist">
+                <button type="button" role="tab" aria-selected="@(tab == "screen" ? "true" : "false")" class="@(tab == "screen" ? "on" : "")" @onclick='() => tab = "screen"'>Écran</button>
+                <button type="button" role="tab" aria-selected="@(tab == "widgets" ? "true" : "false")" class="@(tab == "widgets" ? "on" : "")" @onclick='() => tab = "widgets"'>Widgets <small>@widgets.Count</small></button>
+            </div>
+
+            @if (tab == "screen")
+            {
+                <div class="dw">
+                    <div class="dw-field">
+                        <label for="se-name">Nom</label>
+                        <input id="se-name" type="text" maxlength="80" @bind="name" @bind:event="oninput" />
+                    </div>
+                    <div class="dw-field">
+                        <label for="se-pl">Playlist</label>
+                        <select id="se-pl" @bind="playlistId">
+                            <option value="">— Aucune playlist —</option>
+                            @foreach (var p in playlists) { <option value="@p.Id">@p.Name</option> }
+                        </select>
+                    </div>
+                </div>
+                <h4 class="pe-sub">Format</h4>
+                <ScreenFormat Spec="spec" OnChange="StateHasChanged" />
+                @if (detected != null) { <p class="hint" style="margin-top:8px">Résolution détectée sur l'écran : @detected</p> }
+            }
+            else
+            {
+                <div class="wg-add">
+                    @foreach (var a in available)
+                    {
+                        var app = a;
+                        <button type="button" class="pe-app" @onclick="() => Add(app)">
+                            <AppIcon Id="@app.Id" Small="true" Size="18" />
+                            <span><b>@app.Name</b><small>Ajouter</small></span>
+                            <Ico Name="plus" Size="16" />
+                        </button>
+                    }
+                </div>
+
+                @if (Sel is { } sw && manifests.GetValueOrDefault(sw.AppId) is { } m)
+                {
+                    <div class="wg-props">
+                        <div class="row" style="margin-bottom:6px">
+                            <h4 class="grow" style="margin:0">@m.Name</h4>
+                            <button type="button" class="btn danger sm" @onclick="() => Remove(sw)"><Ico Name="trash" Size="14" /> Retirer</button>
+                        </div>
+                        <div class="dw">
+                            <div class="dw-field">
+                                <label>Taille</label>
+                                <select value="@sw.Scale.ToString(Inv)" @onchange="e => SetScale(sw, e)">
+                                    @foreach (var (v, l) in Sizes) { <option value="@v.ToString(Inv)" selected="@(Math.Abs(sw.Scale - v) < 0.01)">@l</option> }
+                                </select>
+                            </div>
+                            <AppForm @key="sw.Id" Manifest="m" Values="sw.Settings" />
+                        </div>
+                    </div>
+                }
+                else if (widgets.Count > 0)
+                {
+                    <p class="hint">Sélectionnez un widget sur l'aperçu pour le régler.</p>
+                }
+                else
+                {
+                    <p class="hint">Ajoutez une horloge ou la météo : elles restent affichées par-dessus la playlist.</p>
+                }
+            }
+            @foreach (var e in errors) { <div class="err">@e</div> }
+        </div>
+    </div>
+    <div class="modal-foot">
+        @if (confirmPublish)
+        {
+            <span class="confirm-line" role="alert">Publier maintenant ? L'écran affichera aussitôt « @(playlists.FirstOrDefault(p => p.Id == playlistId)?.Name ?? "aucune playlist") »@(widgets.Count > 0 ? $" et {widgets.Count} widget{(widgets.Count > 1 ? "s" : "")}" : "").</span>
+            <button class="btn ghost" @onclick="() => confirmPublish = false">Retour</button>
+            <button class="btn" disabled="@saving" @onclick="() => Save(true)"><Ico Name="upload" Size="16" /> Confirmer la publication</button>
+        }
+        else
+        {
+            <button class="btn ghost" @onclick="Close">Annuler</button>
+            <button class="btn ghost" disabled="@saving" @onclick="() => Save(false)">Enregistrer</button>
+            <button class="btn" disabled="@saving" @onclick="() => confirmPublish = true">Enregistrer et publier</button>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid ScreenId { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private static readonly System.Globalization.CultureInfo Fr = new("fr-CH");
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+    private static readonly (double Value, string Label)[] Sizes = { (0.6, "Petite"), (1, "Moyenne"), (1.5, "Grande"), (2.2, "Très grande") };
+
+    private ElementReference canvas;
+    private DotNetObjectReference<ScreenEditor>? self;
+    private List<ScreenWidget> widgets = new();
+    private List<AppManifest> available = new();
+    private Dictionary<string, AppManifest> manifests = new();
+    private List<Playlist> playlists = new();
+    private Guid? selected, playlistId;
+    private List<string> errors = new();
+    private string name = "", tab = "screen";
+    private string? detected;
+    private ScreenSpec spec = new();
+    private bool saving, confirmPublish;
+
+    private ScreenWidget? Sel => widgets.FirstOrDefault(w => w.Id == selected);
+
+    protected override void OnInitialized()
+    {
+        available = Svc.Catalog.Where(a => a.ScreenWidget).OrderBy(a => a.Name).ToList();
+        manifests = available.ToDictionary(a => a.Id);
+        var s = Store.Read(d => d.Screens.First(x => x.Id == ScreenId));
+        playlists = Store.Read(d => d.Playlists.OrderBy(p => p.Name).ToList());
+        name = s.Name; playlistId = s.PlaylistId;
+        spec = new ScreenSpec { Type = s.ScreenType, Orientation = s.Orientation, Resolution = s.Resolution };
+        if (s.DetectedW > 0) detected = $"{s.DetectedW}×{s.DetectedH}";
+        // copie de travail : rien n'est enregistré avant « Enregistrer »
+        widgets = s.Widgets.Select(w => new ScreenWidget { Id = w.Id, AppId = w.AppId, X = w.X, Y = w.Y, Scale = w.Scale, Settings = new(w.Settings) }).ToList();
+        foreach (var w in widgets) if (manifests.GetValueOrDefault(w.AppId) is { } m) w.Settings = AppCatalog.WithDefaults(m, w.Settings);
+        selected = widgets.FirstOrDefault()?.Id;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        self = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("linkiiWidgets.attach", canvas, self);
+    }
+
+    [JSInvokable]
+    public Task Moved(string id, double x, double y)
+    {
+        if (Guid.TryParse(id, out var g) && widgets.FirstOrDefault(w => w.Id == g) is { } w) { w.X = x; w.Y = y; selected = g; }
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private static string Pct(double v) => v.ToString("0.#", Inv) + "%";
+
+    private string Label(ScreenWidget w) => manifests.GetValueOrDefault(w.AppId)?.Name ?? w.AppId;
+
+    private static string ClockText(ScreenWidget w)
+    {
+        var now = DateTime.Now;
+        var twelve = w.Settings.GetValueOrDefault("format") == "12";
+        var secs = w.Settings.GetValueOrDefault("showSeconds") == "true";
+        return now.ToString((twelve ? "h:mm" : "HH:mm") + (secs ? ":ss" : "") + (twelve ? " tt" : ""), twelve ? Inv : Fr);
+    }
+
+    private void Select(ScreenWidget w) { selected = w.Id; tab = "widgets"; }
+
+    // Nouveau widget : en haut à droite pour une horloge, en haut à gauche sinon, décalé s'il y en a déjà un.
+    private void Add(AppManifest a)
+    {
+        var n = widgets.Count;
+        var w = new ScreenWidget { AppId = a.Id, Settings = AppCatalog.WithDefaults(a, null), X = a.Id == "clock" ? 72 : 4, Y = 4 + n * 6 % 60, Scale = 1 };
+        widgets.Add(w);
+        selected = w.Id;
+        errors.Clear();
+    }
+
+    private void Remove(ScreenWidget w)
+    {
+        widgets.Remove(w);
+        selected = widgets.FirstOrDefault()?.Id;
+    }
+
+    private void SetScale(ScreenWidget w, ChangeEventArgs e)
+    {
+        if (double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float, Inv, out var v)) w.Scale = v;
+    }
+
+    private async Task Save(bool publish)
+    {
+        errors = new(); confirmPublish = false;
+        if (string.IsNullOrWhiteSpace(name)) { errors.Add("Donnez un nom à l'écran."); tab = "screen"; return; }
+        foreach (var w in widgets)
+        {
+            if (manifests.GetValueOrDefault(w.AppId) is not { } m) continue;
+            var errs = AppCatalog.Validate(m, w.Settings, new HashSet<string>());
+            if (errs.Count > 0) { errors = errs.Select(x => $"{m.Name} : {x}").ToList(); selected = w.Id; tab = "widgets"; return; }
+        }
+        var list = widgets.Select(w => new ScreenWidget
+        {
+            Id = w.Id, AppId = w.AppId, X = w.X, Y = w.Y, Scale = w.Scale,
+            Settings = manifests.GetValueOrDefault(w.AppId) is { } m
+                ? m.Settings.Where(f => !f.IsSecret && AppCatalog.IsVisible(f, w.Settings)).ToDictionary(f => f.Key, f => (w.Settings.GetValueOrDefault(f.Key) ?? "").Trim())
+                : new(w.Settings)
+        }).ToList();
+        var newName = name.Trim(); var pid = playlistId; var sp = spec;
+        saving = true;
+        try
+        {
+            var formatChanged = Store.Write(d =>
+            {
+                var s = d.Screens.First(x => x.Id == ScreenId);
+                var changed = s.ScreenType != sp.Type || s.Orientation != sp.Orientation || s.Resolution != sp.Resolution;
+                s.Name = newName;
+                s.PlaylistId = pid;   // une autre playlist = modification à publier
+                s.ScreenType = sp.Type; s.Orientation = sp.Orientation; s.Resolution = sp.Resolution;
+                if (!WidgetsEqual(s.Widgets, list)) { s.Widgets = list; s.WidgetsRevision++; }   // modification à publier
+                return changed;
+            });
+            if (publish) await Notifier.PublishScreen(ScreenId);
+            else if (formatChanged) await Notifier.NotifyScreen(ScreenId);   // le format s'applique sans attendre la publication
+        }
+        finally { saving = false; }
+        await OnClose.InvokeAsync();
+    }
+
+    private static bool WidgetsEqual(List<ScreenWidget> a, List<ScreenWidget> b) =>
+        System.Text.Json.JsonSerializer.Serialize(a) == System.Text.Json.JsonSerializer.Serialize(b);
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    public void Dispose() => self?.Dispose();
+}

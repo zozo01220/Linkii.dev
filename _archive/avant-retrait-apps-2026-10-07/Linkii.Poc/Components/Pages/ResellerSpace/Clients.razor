@@ -1,0 +1,86 @@
+@page "/reseller"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ResellerSpace")]
+@inject JsonStore Root
+@inject TenantContext Ctx
+
+<div class="page-head">
+    <div>
+        <h1>Clients</h1>
+        <p class="sub">Vos clients (écoles, commerces, associations). Chacun a son propre espace, isolé des autres.</p>
+    </div>
+    <button class="btn" @onclick="() => showAdd = !showAdd">+ Ajouter un client</button>
+</div>
+@if (msg != null) { <div class="msg" style="margin:-10px 0 16px">@msg</div> }
+@if (error != null) { <div class="err" style="margin:-10px 0 16px">@error</div> }
+
+@if (showAdd)
+{
+    <div class="card" style="margin-bottom:18px">
+        <h3>Nouveau client</h3>
+        <div class="form-grid">
+            <div><label class="lbl">Nom du client</label><input class="full" @bind="clientName" placeholder="Ex. : École du Midi" /></div>
+            <div><label class="lbl">Administrateur : nom</label><input class="full" @bind="adminName" /></div>
+            <div><label class="lbl">Administrateur : e-mail</label><input class="full" type="email" @bind="adminEmail" autocomplete="off" /></div>
+            <div><label class="lbl">Mot de passe initial <small>(8 caractères minimum)</small></label><input class="full" type="password" @bind="adminPwd" autocomplete="new-password" /></div>
+        </div>
+        <div style="margin-top:12px"><button class="btn" @onclick="Add">Créer le client</button></div>
+    </div>
+}
+
+<table class="tbl">
+    <thead><tr><th>Client</th><th class="num">Écrans</th><th>État</th><th></th></tr></thead>
+    <tbody>
+    @foreach (var c in clients)
+    {
+        <tr>
+            <td><b>@c.Client.Name</b></td>
+            <td class="num">@c.Screens</td>
+            <td><span class="pill @(c.Client.Suspended ? "bad" : "ok")">@(c.Client.Suspended ? "Suspendu" : "Actif")</span></td>
+            <td>
+                <form method="post" action="/space/enter"><input type="hidden" name="clientId" value="@c.Client.Id" /><button class="btn ghost" type="submit">Entrer</button></form>
+                <button class="btn ghost" @onclick="() => Toggle(c.Client)">@(c.Client.Suspended ? "Activer" : "Suspendre")</button>
+            </td>
+        </tr>
+    }
+    @if (clients.Count == 0) { <tr><td colspan="4">Aucun client pour l'instant.</td></tr> }
+    </tbody>
+</table>
+
+@code {
+    private record Row(Tenant Client, int Screens);
+    private List<Row> clients = new();
+    private bool showAdd;
+    private string clientName = "", adminName = "", adminEmail = "", adminPwd = "";
+    private string? msg, error;
+
+    protected override void OnInitialized() => Load();
+
+    private void Load()
+    {
+        var rid = Ctx.RequireResellerId();
+        clients = Root.Read(d => d.Clients.Where(c => c.ResellerId == rid).OrderBy(c => c.Name)
+            .Select(c => new Row(c, d.Screens.Count(s => s.ClientId == c.Id && s.Token != null))).ToList());
+    }
+
+    private void Add()
+    {
+        error = msg = null;
+        var rid = Ctx.RequireResellerId();
+        var err = Root.Write(d =>
+        {
+            var r = d.Resellers.First(x => x.Id == rid);
+            return Tenancy.CreateClient(d, r, clientName, adminName, adminEmail, adminPwd).Error;
+        });
+        if (err != null) { error = err; return; }
+        msg = $"Client « {clientName.Trim()} » créé.";
+        clientName = adminName = adminEmail = adminPwd = ""; showAdd = false;
+        Load();
+    }
+
+    private void Toggle(Tenant c)
+    {
+        var rid = Ctx.RequireResellerId();
+        Root.Write(d => { var x = d.Clients.First(y => y.Id == c.Id && y.ResellerId == rid); x.Suspended = !x.Suspended; });
+        Load();
+    }
+}

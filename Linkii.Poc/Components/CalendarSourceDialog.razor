@@ -1,0 +1,395 @@
+@inject TenantStore Store
+@inject SecretBox Box
+@inject GraphService Graph
+@inject CalendarService Calendars
+@inject AppService Svc
+@inject GoogleAuth GoogleAuth
+@inject GoogleConnector Google
+@inject Toaster Toast
+
+@* Intégrations › Calendriers partagés › Gérer : la connexion d'une source (réglée une seule fois), puis ses calendriers.
+   Les contenus « Calendrier partagé » ne désignent qu'un calendrier : changer la connexion vaut pour tous, sans republier. *@
+<div class="modal-backdrop" @onclick="Close"></div>
+<div class="modal app-modal wide" role="dialog" aria-modal="true" aria-labelledby="csd-title">
+    <div class="modal-head">
+        <AppIcon Id="@("cal-" + Source)" />
+        <div class="grow">
+            <h3 id="csd-title">@Def.Name</h3>
+            <small>@HeadLine</small>
+        </div>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="modal-body">
+        @if (Source != "ics")
+        {
+            <h4 class="pe-sub csd-first">Connexion</h4>
+            @switch (Source)
+            {
+                case "m365":
+                    <ol class="cvs-steps">
+                        <li>Entra ID › <b>Inscriptions d'applications</b> › Nouvelle inscription (comptes de ce locataire uniquement).</li>
+                        <li><b>Autorisations d'API</b> › Microsoft Graph › <i>Autorisations de l'application</i> : <code>Calendars.Read</code> et <code>Place.Read.All</code>, puis <b>Accorder le consentement administrateur</b>.</li>
+                        <li><b>Certificats et secrets</b> › Nouveau secret client : copiez sa <i>valeur</i> ci-dessous.</li>
+                    </ol>
+                    <div class="dw">
+                        <div class="dw-field"><label for="csd-tenant">ID du locataire (Tenant ID)</label><input id="csd-tenant" class="mono" @bind="url" spellcheck="false" placeholder="00000000-0000-0000-0000-000000000000" /></div>
+                        <div class="dw-field"><label for="csd-client">ID de l'application (Client ID)</label><input id="csd-client" class="mono" @bind="user" spellcheck="false" placeholder="00000000-0000-0000-0000-000000000000" /></div>
+                        <div class="dw-field"><label for="csd-secret">Secret client</label><input id="csd-secret" type="password" @bind="secret" autocomplete="new-password" placeholder="@SecretPlaceholder" /></div>
+                    </div>
+                    <p class="csd-shared"><Ico Name="link" Size="14" /> Connexion partagée avec OneDrive et SharePoint (Intégrations › Drives) : la modifier ici la modifie aussi pour vos dossiers.</p>
+                    break;
+                case "google":
+                    @* compte Google de l'organisation (« Se connecter avec Google »), partagé avec Google Drive *@
+                    @if (configured)
+                    {
+                        <div class="cvs-account">
+                            <span class="cat-avatar gd-avatar">@GoogleInitial</span>
+                            <div class="grow">
+                                <b>@(google.User.Length > 0 ? google.User : "Compte Google")</b>
+                                <small>Connecté@(google.Since is { } since ? $" le {since.ToLocalTime():dd.MM.yyyy}" : "") · lecture seule : rien n'est modifié dans vos agendas.</small>
+                            </div>
+                            <button type="button" class="btn ghost sm" @onclick="DisconnectGoogle">Déconnecter</button>
+                        </div>
+                        <p class="csd-shared"><Ico Name="link" Size="14" /> Compte partagé avec Google Drive : le déconnecter arrête aussi la synchronisation de vos dossiers Drive.</p>
+                    }
+                    else if (google.Connected)
+                    {
+                        <div class="cvs-account">
+                            <span class="cat-avatar gd-avatar">@GoogleInitial</span>
+                            <div class="grow">
+                                <b>@(google.User.Length > 0 ? google.User : "Compte Google")</b>
+                                <small>Connecté pour Google Drive. Autorisez aussi la lecture de vos agendas (l'accès à Drive est conservé).</small>
+                            </div>
+                            <a class="btn sm" href="/google/connect?for=calendar" target="_top">Autoriser les agendas</a>
+                        </div>
+                    }
+                    else if (GoogleAuth.IsConfigured)
+                    {
+                        <div class="cvs-account">
+                            <div class="grow">
+                                <b>Aucun compte connecté</b>
+                                <small>Connectez le compte Google qui a accès à vos agendas. Linkii demande uniquement un accès en lecture.</small>
+                            </div>
+                            <a class="btn sm" href="/google/connect?for=calendar" target="_top">Se connecter avec Google</a>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="dw-note">Google Calendar n'est pas encore disponible : la connexion Google de la plateforme doit d'abord être configurée sur le serveur par l'administrateur Linkii.</div>
+                    }
+                    break;
+                case "caldav":
+                    <div class="dw">
+                        <div class="dw-field"><label for="csd-url">Adresse du serveur</label><input id="csd-url" class="mono" @bind="url" spellcheck="false" placeholder="https://cloud.organisation.ch/remote.php/dav/" /><small>Facultatif si chaque calendrier porte son adresse complète.</small></div>
+                        <div class="dw-field"><label for="csd-user">Identifiant</label><input id="csd-user" @bind="user" autocomplete="off" /></div>
+                        <div class="dw-field"><label for="csd-pwd">Mot de passe</label><input id="csd-pwd" type="password" @bind="secret" autocomplete="new-password" placeholder="@SecretPlaceholder" /><small>iCloud, Nextcloud : utilisez un mot de passe d'application. Laissez vide pour des calendriers publics.</small></div>
+                    </div>
+                    break;
+                case "ews":
+                    <div class="dw">
+                        <div class="dw-field"><label for="csd-url">Adresse du service EWS</label><input id="csd-url" class="mono" @bind="url" spellcheck="false" placeholder="https://mail.organisation.ch/EWS/Exchange.asmx" /><small>Le serveur Exchange doit être joignable depuis internet.</small></div>
+                        <div class="dw-field"><label for="csd-user">Compte de service</label><input id="csd-user" @bind="user" autocomplete="off" placeholder="ORGANISATION\linkii ou linkii@organisation.ch" /></div>
+                        <div class="dw-field"><label for="csd-pwd">Mot de passe</label><input id="csd-pwd" type="password" @bind="secret" autocomplete="new-password" placeholder="@SecretPlaceholder" /></div>
+                    </div>
+                    break;
+            }
+            @if (lastError.Length > 0) { <div class="err">Dernier test en échec : @lastError</div> }
+        }
+
+        <h4 class="pe-sub @(Source == "ics" ? "csd-first" : "")">Calendriers <span class="cat-count">@cals.Count</span></h4>
+        <div class="cal-list">
+            @foreach (var c in cals)
+            {
+                var cal = c;
+                var (contents, lists) = uses.GetValueOrDefault(cal.Id.ToString());
+                <div class="cal-row">
+                    <Ico Name="calendar" Size="16" />
+                    <div class="cal-id"><b>@cal.Name</b><small title="@cal.Hint">@cal.Hint</small></div>
+                    <span class="badge neutre">@(lists > 0 ? $"{lists} liste{(lists > 1 ? "s" : "")}" : contents > 0 ? $"{contents} contenu{(contents > 1 ? "s" : "")}" : "Non utilisé")</span>
+                    <button type="button" class="kebab-btn" title="Retirer" aria-label="Retirer @cal.Name" @onclick="() => confirmId = cal.Id"><Ico Name="trash" Size="16" /></button>
+                    @if (confirmId == cal.Id)
+                    {
+                        <div class="cal-confirm" role="alert">
+                            <span class="grow">@ConfirmText(contents)</span>
+                            <button type="button" class="btn ghost sm" @onclick="() => confirmId = null">Annuler</button>
+                            <button type="button" class="btn danger sm" @onclick="() => Remove(cal)">Retirer</button>
+                        </div>
+                    }
+                </div>
+            }
+            @if (cals.Count == 0) { <div class="cal-empty">Aucun calendrier pour l'instant. Ajoutez le premier ci-dessous.</div> }
+            <div class="cal-add">
+                @if (Source == "m365" && FreeRooms.Any())
+                {
+                    <select aria-label="Salle de l'annuaire" @onchange="PickRoom">
+                        <option value="">— Choisir une salle de l'annuaire —</option>
+                        @foreach (var r in FreeRooms) { <option value="@r.Email">@r.Name@(r.Capacity > 0 ? $" · {r.Capacity} pl." : "")</option> }
+                    </select>
+                }
+                @if (Source == "google" && FreeGoogleCalendars.Any())
+                {
+                    <select aria-label="Agenda du compte Google" @onchange="PickGoogleCalendar">
+                        <option value="">— Choisir un agenda du compte Google —</option>
+                        @foreach (var g in FreeGoogleCalendars) { <option value="@g.Id">@g.Name@(g.Primary ? " (agenda principal)" : "")</option> }
+                    </select>
+                }
+                <input aria-label="Nom affiché" placeholder="Nom affiché" maxlength="80" @bind="newName" />
+                <input aria-label="@Def.RefLabel" class="mono" placeholder="@Def.RefPlaceholder" @bind="newRef" spellcheck="false" autocomplete="off" />
+                <button type="button" class="btn ghost sm" @onclick="Add"><Ico Name="plus" Size="14" /> Ajouter</button>
+                <small>@Def.RefLabel : @Def.RefHelp</small>
+            </div>
+        </div>
+    </div>
+    <div class="modal-foot">
+        <button class="btn ghost" disabled="@testing" @onclick="Test">@(testing ? "Test en cours…" : "Tester la connexion")</button>
+        <span class="grow"></span>
+        @* liens ICS et compte Google (connecté par OAuth) : rien à enregistrer ici *@
+        @if (Source is "ics" or "google") { <button class="btn" @onclick="Close">Fermer</button> }
+        else
+        {
+            <button class="btn ghost" @onclick="Close">Fermer</button>
+            <button class="btn" @onclick="() => SaveConnection(false)">Enregistrer la connexion</button>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Source { get; set; } = "";
+    [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>Connexion ou calendriers modifiés : la page Intégrations se met à jour.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private CalendarSourceDef Def => SharedCalendarSources.Find(Source)!;
+
+    // Connexion en cours de saisie. Microsoft 365 : url = Tenant ID, user = Client ID (champs Ms* du client).
+    private string url = "", user = "", secret = "", label = "", lastError = "";
+    private bool hasSecret, configured, testing;
+    private List<SharedCalendar> cals = new();
+    private Dictionary<string, (int Contents, int Lists)> uses = new();   // par calendrier : contenus qui le désignent, listes de lecture qui les contiennent
+    private List<GraphService.RoomInfo> rooms = new();
+    private string newName = "", newRef = "";
+    private Guid? confirmId;
+
+    private string SecretPlaceholder => hasSecret ? "•••••• enregistré — laisser vide pour le conserver" : "";
+    private IEnumerable<GraphService.RoomInfo> FreeRooms => rooms.Where(r => !cals.Any(c => string.Equals(c.Ref, r.Email, StringComparison.OrdinalIgnoreCase)));
+
+    // Google Calendar : compte Google de l'organisation (partagé avec Google Drive) et ses agendas
+    private GoogleAuth.Connection google = new(false, "", null);
+    private List<GoogleConnector.GoogleCalendarInfo> googleCalendars = new();
+    private string GoogleInitial => google.User.Length > 0 ? char.ToUpperInvariant(google.User[0]).ToString() : "G";
+    private IEnumerable<GoogleConnector.GoogleCalendarInfo> FreeGoogleCalendars => googleCalendars.Where(g => !cals.Any(c => string.Equals(c.Ref, g.Id, StringComparison.OrdinalIgnoreCase)));
+
+    private string HeadLine =>
+        Source == "google" && !configured ? (GoogleAuth.IsConfigured ? "Connectez votre compte Google, puis ajoutez vos agendas" : "Pas encore disponible sur cette plateforme")
+        : !configured ? "Connexion à configurer, puis ajoutez vos calendriers"
+        : lastError.Length > 0 ? "Le dernier test de connexion a échoué"
+        : Def.Summary;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var t = Store.Read(d => d.Tenant);
+        var a = SharedCalendarSources.Account(t, Source);
+        if (Source == "m365") { url = t.MsTenantId; user = t.MsClientId; hasSecret = t.MsClientSecret.Length > 0; }
+        else { url = a?.Url ?? ""; user = a?.User ?? ""; hasSecret = a is { Secret.Length: > 0 }; label = a?.Label ?? ""; }
+        Load();
+        if (Source == "m365" && configured)
+            try { rooms = await Graph.ListRooms(t); } catch { /* annuaire inaccessible : saisie de l'adresse */ }
+        if (Source == "google" && configured)
+            try { googleCalendars = await Google.ListCalendars(t); } catch (InvalidOperationException) { /* liste indisponible : saisie de l'ID */ }
+    }
+
+    private void Load()
+    {
+        var t = Store.Read(d => d.Tenant);
+        configured = SharedCalendarSources.Configured(t, Source);
+        google = GoogleAuth.ConnectionOf(t);
+        lastError = SharedCalendarSources.Account(t, Source)?.LastError ?? "";
+        cals = t.SharedCalendars.Where(c => c.Source == Source).OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        uses = Store.Read(d =>
+        {
+            var byCal = d.Media.Where(m => m.AppId == "agenda" && m.Settings.GetValueOrDefault("calendar") is { Length: > 0 })
+                .GroupBy(m => m.Settings["calendar"]).ToDictionary(g => g.Key, g => g.Select(m => m.Id).ToHashSet());
+            return byCal.ToDictionary(kv => kv.Key, kv => (kv.Value.Count, d.Playlists.Count(p => p.Draft.Any(i => kv.Value.Contains(i.MediaId)))));
+        });
+    }
+
+    private async Task Changed()
+    {
+        Load();
+        await OnChanged.InvokeAsync();
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    // ---------- Connexion ----------
+
+    /// <summary>Contrôle et enregistre la connexion ; active la source si besoin. Retourne false (et affiche l'erreur) si la saisie est invalide.</summary>
+    private async Task<bool> SaveConnection(bool quiet)
+    {
+        var u = url.Trim(); var usr = user.Trim(); var s = secret.Trim();
+
+        switch (Source)
+        {
+            case "m365":
+                if (SharedConnections.CheckM365(u, usr, s, hasSecret) is { } m365Error) { Toast.Error(m365Error); return false; }
+                break;
+            case "google":
+                return true;   // compte Google connecté par OAuth : rien à enregistrer ici
+            case "caldav":
+                if (u.Length > 0 && !AppCatalog.IsHttpUrl(u)) { Toast.Error("L'adresse du serveur doit commencer par https:// (ou http://)."); return false; }
+                break;
+            case "ews":
+                if (!AppCatalog.IsHttpUrl(u)) { Toast.Error("L'adresse du service EWS doit commencer par https:// (ou http://)."); return false; }
+                if (usr.Length == 0) { Toast.Error("Renseignez le compte de service Exchange."); return false; }
+                if (s.Length == 0 && !hasSecret) { Toast.Error("Renseignez le mot de passe du compte Exchange."); return false; }
+                break;
+        }
+
+        Store.Write(d =>
+        {
+            var t = d.Tenant;
+            if (Source == "m365") SharedConnections.SaveM365(t, u, usr, s);           // partagée avec OneDrive et SharePoint
+            else
+            {
+                var a = t.CalendarAccounts.FirstOrDefault(x => x.Source == Source);
+                if (a == null) t.CalendarAccounts.Add(a = new CalendarAccount { Source = Source });
+                a.Url = u; a.User = usr;
+                if (s.Length > 0) a.Secret = Box.Protect(s);
+                a.LastError = "";   // nouvelle connexion : résultat inconnu jusqu'au prochain test
+            }
+        });
+        if (s.Length > 0) hasSecret = true;
+        secret = "";
+        if (!SharedCalendarSources.Enabled(Store.Read(d => d.Tenant), Source)) Svc.SetCalendarSource(Source, true);
+        await Changed();
+        if (!quiet) Toast.Ok($"Connexion « {Def.Name} » enregistrée.");
+        return true;
+    }
+
+    /// <summary>Enregistre la saisie, puis lit chaque calendrier de la source (ou l'annuaire Microsoft 365 s'il n'y en a pas encore).</summary>
+    private async Task Test()
+    {
+        if (Source != "ics" && !await SaveConnection(true)) return;
+        var t = Store.Read(d => d.Tenant);
+        var list = t.SharedCalendars.Where(c => c.Source == Source).ToList();
+        if (Source == "google" && !configured) { Toast.Error("Connectez d'abord votre compte Google."); return; }
+        if (list.Count == 0 && Source is not ("m365" or "google")) { Toast.Error("Ajoutez un calendrier pour tester la connexion."); return; }
+        testing = true;
+        StateHasChanged();
+        try
+        {
+            string msg;
+            if (list.Count == 0 && Source == "m365") msg = await Graph.Test(t);
+            else if (list.Count == 0)   // Google : la liste des agendas du compte prouve la connexion
+            {
+                googleCalendars = await Google.ListCalendars(t);
+                msg = $"Connexion réussie · {googleCalendars.Count} agenda{(googleCalendars.Count > 1 ? "s" : "")} trouvé{(googleCalendars.Count > 1 ? "s" : "")} pour {(google.User.Length > 0 ? google.User : "le compte connecté")}.";
+            }
+            else
+            {
+                var from = DateTime.UtcNow.Date;
+                var total = 0;
+                foreach (var c in list)
+                {
+                    try { total += (await Calendars.GetEvents(SharedCalendarSources.Resolve(t, c.Id, Box), t, from, from.AddDays(7))).Count; }
+                    catch (Exception ex) { throw new InvalidOperationException($"« {c.Name} » : {ex.Message}", ex); }
+                }
+                msg = $"Connexion réussie · {list.Count} calendrier{(list.Count > 1 ? "s" : "")} lu{(list.Count > 1 ? "s" : "")}, {total} événement{(total > 1 ? "s" : "")} sur 7 jours.";
+            }
+            Record("");
+            Toast.Ok(msg);
+        }
+        catch (Exception ex)
+        {
+            Record(ex.Message);
+            Toast.Error("Échec : " + ex.Message);
+        }
+        finally { testing = false; }
+        await Changed();
+    }
+
+    private void Record(string error) => Store.Write(d =>
+    {
+        var a = d.Tenant.CalendarAccounts.FirstOrDefault(x => x.Source == Source);
+        if (a == null) d.Tenant.CalendarAccounts.Add(a = new CalendarAccount { Source = Source });
+        a.LastError = error;
+        a.CheckedUtc = DateTime.UtcNow;
+    });
+
+    // ---------- Calendriers ----------
+
+    private void PickRoom(ChangeEventArgs e)
+    {
+        if (rooms.FirstOrDefault(r => r.Email == e.Value?.ToString()) is not { } r) return;
+        newRef = r.Email;
+        newName = r.Name;
+    }
+
+    private void PickGoogleCalendar(ChangeEventArgs e)
+    {
+        if (googleCalendars.FirstOrDefault(g => g.Id == e.Value?.ToString()) is not { } g) return;
+        newRef = g.Id;
+        newName = g.Name;
+    }
+
+    /// <summary>Oublie le compte Google : Google Calendar et Google Drive s'arrêtent (contenus et fichiers déjà en place conservés).</summary>
+    private async Task DisconnectGoogle()
+    {
+        await GoogleAuth.Disconnect(Store.ClientId);
+        googleCalendars = new();
+        await Changed();
+        Toast.Ok("Compte Google déconnecté. Les agendas ne sont plus lus et les dossiers Drive ne sont plus synchronisés.");
+    }
+
+    private async Task Add()
+    {
+        var r = newRef.Trim();
+        var name = newName.Trim();
+        if (r.StartsWith("webcal://", StringComparison.OrdinalIgnoreCase)) r = "https://" + r["webcal://".Length..];   // liens « webcal » d'Apple et de Google
+        if (r.Length == 0) { Toast.Error($"Renseignez le champ « {Def.RefLabel} »."); return; }
+        switch (Source)
+        {
+            case "m365" or "ews" when !r.Contains('@'):
+                Toast.Error("Saisissez une adresse e-mail (ex. salle-a101@organisation.ch)."); return;
+            case "ics" when !AppCatalog.IsHttpUrl(r):
+                Toast.Error("Le lien ICS doit commencer par https:// (ou http://)."); return;
+            case "caldav" when r.Contains("://") && !AppCatalog.IsHttpUrl(r):
+                Toast.Error("L'adresse du calendrier doit commencer par https:// (ou http://)."); return;
+            case "caldav" when !AppCatalog.IsHttpUrl(r) && !AppCatalog.IsHttpUrl(url.Trim()):
+                Toast.Error("Saisissez l'adresse complète du calendrier, ou l'adresse du serveur dans Connexion."); return;
+        }
+        var t = Store.Read(d => d.Tenant);
+        var same = t.SharedCalendars.Where(c => c.Source == Source).Any(c =>
+            string.Equals(Source == "ics" ? Box.Unprotect(c.Ref) : c.Ref, r, StringComparison.OrdinalIgnoreCase));
+        if (same) { Toast.Error("Ce calendrier est déjà dans la liste."); return; }
+        if (name.Length == 0) name = Source == "ics" ? (Uri.TryCreate(r, UriKind.Absolute, out var link) ? link.Host : "Lien ICS") : r;
+        if (name.Length > 80) name = name[..80];
+
+        var cal = new SharedCalendar
+        {
+            Source = Source, Name = name,
+            Ref = Source == "ics" ? Box.Protect(r) : r,   // un lien ICS donne accès au calendrier : chiffré, jamais réaffiché
+            Hint = Source == "ics" ? SharedCalendarSources.ShortLink(r) : r
+        };
+        Store.Write(d => d.Tenant.SharedCalendars.Add(cal));
+        if (!SharedCalendarSources.Enabled(t, Source)) Svc.SetCalendarSource(Source, true);
+        newName = newRef = "";
+        await Changed();
+        Toast.Ok($"« {name} » ajouté : il est proposé dans l'app Calendrier partagé des listes de lecture.");
+    }
+
+    private static string ConfirmText(int contents) => contents switch
+    {
+        0 => "Retirer ce calendrier ?",
+        1 => "Utilisé par 1 contenu, qui n'affichera plus d'événements. Retirer ce calendrier ?",
+        _ => $"Utilisé par {contents} contenus, qui n'afficheront plus d'événements. Retirer ce calendrier ?"
+    };
+
+    private async Task Remove(SharedCalendar c)
+    {
+        Store.Write(d => { d.Tenant.SharedCalendars.RemoveAll(x => x.Id == c.Id); });
+        confirmId = null;
+        await Changed();
+        Toast.Ok($"« {c.Name} » retiré des calendriers partagés.");
+    }
+}

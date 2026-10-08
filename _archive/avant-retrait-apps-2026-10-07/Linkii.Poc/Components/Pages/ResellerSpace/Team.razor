@@ -1,0 +1,80 @@
+@page "/reseller/team"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ResellerSpace")]
+@inject JsonStore Root
+@inject TenantContext Ctx
+
+<div class="page-head">
+    <div>
+        <h1>Équipe</h1>
+        <p class="sub">Les administrateurs de votre espace revendeur.</p>
+    </div>
+    <button class="btn" @onclick="() => showAdd = !showAdd">+ Ajouter un membre</button>
+</div>
+@if (msg != null) { <div class="msg" style="margin:-10px 0 16px">@msg</div> }
+@if (error != null) { <div class="err" style="margin:-10px 0 16px">@error</div> }
+
+@if (showAdd)
+{
+    <div class="card" style="margin-bottom:18px">
+        <h3>Nouveau membre</h3>
+        <div class="form-grid">
+            <div><label class="lbl">Nom</label><input class="full" @bind="name" /></div>
+            <div><label class="lbl">E-mail</label><input class="full" type="email" @bind="email" autocomplete="off" /></div>
+            <div><label class="lbl">Mot de passe initial <small>(8 caractères minimum)</small></label><input class="full" type="password" @bind="pwd" autocomplete="new-password" /></div>
+        </div>
+        <div style="margin-top:12px"><button class="btn" @onclick="Add">Ajouter</button></div>
+    </div>
+}
+
+<table class="tbl">
+    <thead><tr><th>Nom</th><th>E-mail</th><th>État</th><th></th></tr></thead>
+    <tbody>
+    @foreach (var u in users)
+    {
+        <tr>
+            <td><b>@u.Name</b></td><td>@u.Email</td>
+            <td><span class="pill @(u.Disabled ? "bad" : "ok")">@(u.Disabled ? "Désactivé" : "Actif")</span></td>
+            <td>@if (u.Id != Ctx.UserId) { <button class="btn ghost" @onclick="() => Toggle(u)">@(u.Disabled ? "Réactiver" : "Désactiver")</button> }</td>
+        </tr>
+    }
+    </tbody>
+</table>
+
+@code {
+    private List<User> users = new();
+    private bool showAdd;
+    private string name = "", email = "", pwd = "";
+    private string? msg, error;
+
+    protected override void OnInitialized() => Load();
+
+    private void Load()
+    {
+        var rid = Ctx.RequireResellerId();
+        users = Root.Read(d => d.Users.Where(u => u.ResellerId == rid && u.Role == Roles.ResellerAdmin).OrderBy(u => u.Name).ToList());
+    }
+
+    private void Add()
+    {
+        error = msg = null;
+        var rid = Ctx.RequireResellerId();
+        var mail = email.Trim().ToLowerInvariant();
+        if (mail.Length == 0 || pwd.Length < 8) { error = "E-mail et mot de passe (8 caractères minimum) obligatoires."; return; }
+        var err = Root.Write(d =>
+        {
+            if (d.Users.Any(u => u.Email == mail && (u.ResellerId == rid || u.ResellerId == null))) return "Cette adresse e-mail est déjà utilisée.";
+            d.Users.Add(new User { Email = mail, Name = name.Trim(), PasswordHash = Passwords.Hash(pwd), Role = Roles.ResellerAdmin, ResellerId = rid });
+            return null;
+        });
+        if (err != null) { error = err; return; }
+        msg = "Membre ajouté.";
+        name = email = pwd = ""; showAdd = false; Load();
+    }
+
+    private void Toggle(User u)
+    {
+        var rid = Ctx.RequireResellerId();
+        Root.Write(d => { var x = d.Users.First(y => y.Id == u.Id && y.ResellerId == rid && y.Id != Ctx.UserId); x.Disabled = !x.Disabled; });
+        Load();
+    }
+}

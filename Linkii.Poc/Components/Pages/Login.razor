@@ -1,0 +1,124 @@
+@page "/login"
+@layout AuthLayout
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@inject JsonStore Store
+@inject NavigationManager Nav
+
+<PageTitle>@(Host?.DisplayName ?? "Linkii") · Connexion</PageTitle>
+
+@if (Host == null || !Host.Active)
+{
+    <h1>Service suspendu</h1>
+    <p class="lead">Ce service est momentanément indisponible. Contactez votre administrateur.</p>
+}
+else if (signup)
+{
+    <h1>Créez votre espace</h1>
+    <p class="lead">Créez le compte administrateur de votre organisation.</p>
+
+    <EditForm Model="Signup" FormName="signup" OnValidSubmit="DoSignup" method="post" class="auth-form">
+        <DataAnnotationsValidator />
+        <label>Organisation</label>
+        <InputText @bind-Value="Signup!.Organisation" placeholder="Ex. : UNIL" />
+        <label>Votre nom</label>
+        <InputText @bind-Value="Signup.Name" placeholder="Prénom Nom" />
+        <label>E-mail professionnel</label>
+        <InputText @bind-Value="Signup.Email" type="email" placeholder="vous@organisation.ch" autocomplete="username" />
+        <label>Mot de passe <small>(8 caractères minimum)</small></label>
+        <InputText @bind-Value="Signup.Password" type="password" autocomplete="new-password" />
+        <ValidationSummary />
+        @if (error != null) { <div class="err">@error</div> }
+        <button class="btn" type="submit">Créer mon espace</button>
+    </EditForm>
+    <p class="auth-alt"><a href="/login">J'ai déjà un compte</a></p>
+}
+else
+{
+    <h1>Bon retour</h1>
+    <p class="lead">Connectez-vous à votre espace @Host.DisplayName.</p>
+
+    <EditForm Model="Credentials" FormName="login" OnValidSubmit="DoLogin" method="post" class="auth-form">
+        <label>E-mail</label>
+        <InputText @bind-Value="Credentials!.Email" type="email" placeholder="vous@organisation.ch" autocomplete="username" />
+        <label>Mot de passe</label>
+        <InputText @bind-Value="Credentials.Password" type="password" autocomplete="current-password" />
+        @if (error != null) { <div class="err">@error</div> }
+        <button class="btn" type="submit">Se connecter</button>
+    </EditForm>
+    @if (Host.AllowSelfSignup)
+    {
+        <p class="auth-alt"><a href="/login?signup=1">Créer un espace</a></p>
+    }
+}
+
+@code {
+    [CascadingParameter] private HttpContext? Http { get; set; }
+    [SupplyParameterFromForm(FormName = "login")] private LoginModel? Credentials { get; set; }
+    [SupplyParameterFromForm(FormName = "signup")] private SignupModel? Signup { get; set; }
+    [SupplyParameterFromQuery(Name = "signup")] private string? SignupQuery { get; set; }
+
+    private Reseller? Host => Http?.Items["reseller"] as Reseller;
+    private bool signup => SignupQuery != null && Host is { Active: true, AllowSelfSignup: true };
+    private string? error;
+
+    public class LoginModel
+    {
+        public string Email { get; set; } = "";
+        public string Password { get; set; } = "";
+    }
+
+    public class SignupModel
+    {
+        public string Organisation { get; set; } = "";
+        public string Name { get; set; } = "";
+        [EmailAddress(ErrorMessage = "E-mail invalide.")] public string Email { get; set; } = "";
+        public string Password { get; set; } = "";
+    }
+
+    protected override void OnInitialized()
+    {
+        Credentials ??= new();
+        Signup ??= new();
+        if (Http?.User.Identity?.IsAuthenticated == true) Nav.NavigateTo(Claims.Home(Http.User), forceLoad: true);
+    }
+
+    private async Task DoSignup()
+    {
+        error = null;
+        var host = Host!;
+        var (client, err) = Store.Write(d => Tenancy.CreateClient(d, host, Signup!.Organisation, Signup.Name, Signup.Email, Signup.Password));
+        if (client == null) { error = err; return; }
+        await SignIn(Signup!.Email.Trim().ToLowerInvariant());
+    }
+
+    private async Task DoLogin()
+    {
+        error = null;
+        var host = Host!;
+        var email = Credentials!.Email.Trim().ToLowerInvariant();
+        var pwd = Credentials.Password;
+        var result = Store.Read(d =>
+        {
+            var u = d.Users.FirstOrDefault(x => x.Email == email && Tenancy.HostAllows(x, host));
+            if (u == null || u.Disabled || !Passwords.Verify(u.PasswordHash, pwd)) return "E-mail ou mot de passe incorrect.";
+            if (u.ClientId != null && d.Clients.FirstOrDefault(c => c.Id == u.ClientId)?.Suspended != false) return "Cet espace est suspendu. Contactez votre revendeur.";
+            return null;
+        });
+        if (result != null) { error = result; return; }
+        await SignIn(email);
+    }
+
+    private async Task SignIn(string email)
+    {
+        var host = Host!;
+        var (principal, mustChange) = Store.Read(d =>
+        {
+            var u = d.Users.First(x => x.Email == email && Tenancy.HostAllows(x, host));
+            return (Claims.Build(d, u), u.MustChangePassword);
+        });
+        await Http!.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal, new AuthenticationProperties { IsPersistent = true });
+        Nav.NavigateTo(mustChange ? "/login/password" : Claims.Home(principal), forceLoad: true);   // mot de passe provisoire : à remplacer d'abord
+    }
+}

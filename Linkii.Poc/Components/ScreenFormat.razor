@@ -1,0 +1,97 @@
+<div class="fmt">
+    <div class="fmt-block">
+        <label for="fmt-type">Matériel</label>
+        <select id="fmt-type" value="@Spec.Type" @onchange="SetType">
+            @foreach (var t in ScreenOptions.Types)
+            {
+                <option value="@t.Id" selected="@(t.Id == Spec.Type)">@t.Icon @t.Label</option>
+            }
+        </select>
+    </div>
+
+    <div class="fmt-block">
+        <label for="fmt-orient">Format d'affichage</label>
+        <select id="fmt-orient" value="@Spec.Orientation" @onchange="SetOrientation">
+            <option value="landscape" selected="@(Spec.Orientation == "landscape")">Paysage</option>
+            <option value="portrait" selected="@(Spec.Orientation == "portrait")">Portrait</option>
+        </select>
+    </div>
+
+    @if (Layout != null)
+    {
+        @* découpage de l'écran : chaque zone reçoit sa propre playlist (le « + » de chaque zone sur l'aperçu) *@
+        <div class="fmt-block">
+            <label for="fmt-layout">Découpage de l'écran</label>
+            <select id="fmt-layout" value="@Layout" @onchange="SetLayout">
+                @foreach (var l in ScreenLayouts.For(Spec))
+                {
+                    <option value="@l.Id" selected="@(l.Id == Layout)">@l.Label</option>
+                }
+            </select>
+            <small>@LayoutHint</small>
+        </div>
+    }
+
+    <div class="fmt-block">
+        <label for="fmt-res">Résolution</label>
+        <select id="fmt-res" value="@Spec.Resolution" @onchange="SetResolution">
+            @foreach (var r in ScreenOptions.Resolutions)
+            {
+                <option value="@r.Id" selected="@(r.Id == Spec.Resolution)">@Label(r)</option>
+            }
+        </select>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ScreenSpec Spec { get; set; } = new();
+    [Parameter] public EventCallback OnChange { get; set; }
+    /// <summary>Découpage de l'écran (édition d'un écran) ; null : non proposé (format par défaut des nouveaux écrans).</summary>
+    [Parameter] public string? Layout { get; set; }
+    [Parameter] public EventCallback<string> LayoutChanged { get; set; }
+
+    // Ce que permet le format, en une phrase.
+    private string LayoutHint =>
+        Spec.Type == "phone" ? "Un smartphone n'est pas découpé : l'écran est trop petit."
+        : Spec.Type == "tablet" ? "Une tablette se découpe en 2 zones au plus."
+        : Spec.Orientation == "portrait" ? (ScreenLayouts.For(Spec).Length < 3 ? "Portrait HD : 2 zones égales au plus, empilées de haut en bas." : "En portrait, 2 zones au plus, empilées de haut en bas.")
+        : ScreenLayouts.For(Spec).Length < 4 ? "Écran HD : 2 zones au plus, côte à côte." : "En paysage, les zones sont côte à côte, de gauche à droite.";
+
+    // Format modifié : un découpage devenu trop serré est ramené au plus proche permis.
+    private async Task Changed()
+    {
+        if (Layout != null && ScreenLayouts.Fit(Layout, Spec) is var fit && fit != Layout) await LayoutChanged.InvokeAsync(fit);
+        await OnChange.InvokeAsync();
+    }
+
+    // En portrait, la résolution s'affiche à l'envers (1080×1920).
+    private string Label(Option r) =>
+        r.Id == "auto" ? r.Label : Spec.Orientation == "portrait" ? r.Label.Split('·')[0] + "· " + ScreenOptions.ResolutionLabel(r.Id, "portrait") : r.Label;
+
+    private Task SetType(ChangeEventArgs e)
+    {
+        var id = e.Value?.ToString() ?? "tv";
+        Spec.Type = id;
+        Spec.Orientation = ScreenOptions.Types.Where(t => t.Id == id).Select(t => t.Orientation).FirstOrDefault() ?? Spec.Orientation;   // suggestion : un totem est vertical
+        if (id == "phone") Spec.Resolution = "auto";   // un téléphone s'adapte à sa propre taille d'écran
+        return Changed();
+    }
+
+    private Task SetOrientation(ChangeEventArgs e)
+    {
+        Spec.Orientation = e.Value?.ToString() == "portrait" ? "portrait" : "landscape";
+        return Changed();
+    }
+
+    private async Task SetLayout(ChangeEventArgs e)
+    {
+        await LayoutChanged.InvokeAsync(ScreenLayouts.Find(e.Value?.ToString()).Id);
+        await OnChange.InvokeAsync();
+    }
+
+    private Task SetResolution(ChangeEventArgs e)
+    {
+        Spec.Resolution = e.Value?.ToString() ?? "auto";
+        return Changed();
+    }
+}

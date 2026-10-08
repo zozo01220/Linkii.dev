@@ -1,0 +1,145 @@
+@page "/admin"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "PlatformAdmin")]
+@inject JsonStore Root
+@inject Notifier Notifier
+@inject IConfiguration Config
+
+<div class="page-head">
+    <div>
+        <h1>Revendeurs</h1>
+        <p class="sub">Une seule instance sert tous les revendeurs : l'adresse de chaque requête détermine la marque et les clients.</p>
+    </div>
+    <button class="btn" @onclick="Open">+ Ajouter un revendeur</button>
+</div>
+@if (msg != null) { <div class="msg" style="margin:-10px 0 16px">@msg</div> }
+@if (error != null) { <div class="err" style="margin:-10px 0 16px">@error</div> }
+
+@if (showAdd)
+{
+    <div class="modal-backdrop" @onclick="Close"></div>
+    <div class="modal app-modal" role="dialog" aria-modal="true" aria-labelledby="add-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="add-title">Nouveau revendeur</h3></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+        </div>
+        <EditForm Model="this" OnSubmit="Add" class="modal-form">
+            <div class="modal-body">
+                <div class="form-grid">
+                    <div><label class="lbl">Nom</label><input class="full" @bind="name" placeholder="Ex. : Acme Affichage" /></div>
+                    <div><label class="lbl">Sous-domaine <small>(.@(BaseDomain))</small></label><input class="full" @bind="slug" placeholder="acme" /></div>
+                    <div><label class="lbl">Domaine propre <small>(facultatif)</small></label><input class="full" @bind="domain" placeholder="affichage.acme.ch" /></div>
+                    <div><label class="lbl">Administrateur : nom</label><input class="full" @bind="adminName" /></div>
+                    <div><label class="lbl">Administrateur : e-mail</label><input class="full" type="email" @bind="adminEmail" autocomplete="off" /></div>
+                    <div><label class="lbl">Mot de passe initial <small>(8 caractères minimum)</small></label><input class="full" type="password" @bind="adminPwd" autocomplete="new-password" /></div>
+                </div>
+                @if (formError != null) { <div class="err">@formError</div> }
+            </div>
+            <div class="modal-foot">
+                <button type="button" class="btn ghost" @onclick="Close">Annuler</button>
+                <button type="submit" class="btn">Créer le revendeur</button>
+            </div>
+        </EditForm>
+    </div>
+}
+
+<table class="tbl">
+    <thead><tr><th>Revendeur</th><th>Adresse</th><th class="num">Clients</th><th class="num">Écrans</th><th>État</th><th></th></tr></thead>
+    <tbody>
+    @foreach (var r in rows)
+    {
+        <tr>
+            <td><b>@r.R.Name</b>@if (r.R.IsDefault) { <span class="pill" style="margin-left:6px">Linkii</span> }</td>
+            <td>
+                @if (editId == r.R.Id)
+                {
+                    <input @bind="editDomain" placeholder="affichage.acme.ch" style="width:200px" />
+                    <button class="btn ghost" @onclick="() => SaveDomain(r.R)">OK</button>
+                }
+                else
+                {
+                    <div>@(r.R.Slug + "." + BaseDomain)</div>
+                    @if (!string.IsNullOrEmpty(r.R.CustomDomain)) { <small>@r.R.CustomDomain</small> }
+                    <a href="#" @onclick="() => Edit(r.R)" @onclick:preventDefault>domaine propre…</a>
+                }
+            </td>
+            <td class="num">@r.Clients</td>
+            <td class="num">@r.Screens</td>
+            <td><span class="pill @(r.R.Active ? "ok" : "bad")">@(r.R.Active ? "Actif" : "Suspendu")</span></td>
+            <td>
+                @if (!r.R.IsDefault)
+                {
+                    <button class="btn ghost" @onclick="() => Toggle(r.R)">@(r.R.Active ? "Suspendre" : "Activer")</button>
+                }
+            </td>
+        </tr>
+    }
+    </tbody>
+</table>
+
+@code {
+    private record Row(Reseller R, int Clients, int Screens);
+    private List<Row> rows = new();
+    private bool showAdd;
+    private string name = "", slug = "", domain = "", adminName = "", adminEmail = "", adminPwd = "";
+    private string? msg, error, formError, editDomain;
+    private Guid? editId;
+    private string BaseDomain => Config["Linkii:BaseDomain"] ?? "linkii.com";
+
+    protected override void OnInitialized() => Load();
+
+    private void Load() => rows = Root.Read(d => d.Resellers.OrderBy(r => r.Name).Select(r =>
+    {
+        var ids = d.Clients.Where(c => c.ResellerId == r.Id).Select(c => c.Id).ToHashSet();
+        return new Row(r, ids.Count, d.Screens.Count(s => s.Token != null && ids.Contains(s.ClientId)));
+    }).ToList());
+
+    private void Open() { formError = error = null; showAdd = true; }
+    private void Close() => showAdd = false;
+
+    private void Add()
+    {
+        formError = error = msg = null;
+        var s = Tenancy.Slugify(slug.Length > 0 ? slug : name);
+        var dom = domain.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(name)) { formError = "Le nom est obligatoire."; return; }
+        if (!Tenancy.IsValidSlug(s)) { formError = "Sous-domaine invalide ou réservé (lettres, chiffres et tirets, 2 à 40 caractères)."; return; }
+        var email = adminEmail.Trim().ToLowerInvariant();
+        if (email.Length == 0 || adminPwd.Length < 8) { formError = "E-mail et mot de passe (8 caractères minimum) de l'administrateur obligatoires."; return; }
+        var err = Root.Write(d =>
+        {
+            if (d.Resellers.Any(r => r.Slug == s)) return "Ce sous-domaine est déjà pris.";
+            if (dom.Length > 0 && d.Resellers.Any(r => string.Equals(r.CustomDomain, dom, StringComparison.OrdinalIgnoreCase))) return "Ce domaine est déjà attribué.";
+            if (d.Users.Any(u => u.Email == email && (u.ResellerId == null || u.ResellerId == d.Resellers.FirstOrDefault(r => r.Slug == s)?.Id))) return "Cet e-mail est déjà utilisé.";
+            var r = new Reseller { Name = name.Trim(), Slug = s, BrandName = name.Trim(), CustomDomain = dom.Length > 0 ? dom : null };
+            d.Resellers.Add(r);
+            d.Users.Add(new User { Email = email, Name = adminName.Trim(), PasswordHash = Passwords.Hash(adminPwd), Role = Roles.ResellerAdmin, ResellerId = r.Id });
+            return null;
+        });
+        if (err != null) { formError = err; return; }
+        msg = $"Revendeur « {name.Trim()} » créé : {s}.{BaseDomain}";
+        name = slug = domain = adminName = adminEmail = adminPwd = ""; showAdd = false;
+        Load();
+    }
+
+    private void SaveDomain(Reseller r)
+    {
+        error = msg = null;
+        var dom = (editDomain ?? "").Trim().ToLowerInvariant();
+        var err = Root.Write(d =>
+        {
+            if (dom.Length > 0 && d.Resellers.Any(x => x.Id != r.Id && string.Equals(x.CustomDomain, dom, StringComparison.OrdinalIgnoreCase))) return "Ce domaine est déjà attribué.";
+            d.Resellers.First(x => x.Id == r.Id).CustomDomain = dom.Length > 0 ? dom : null;
+            return null;
+        });
+        if (err != null) error = err; else msg = "Domaine enregistré. Le revendeur doit créer un enregistrement DNS (CNAME) vers Linkii.";
+        editId = null; Load();
+    }
+
+    private void Edit(Reseller r) { editId = r.Id; editDomain = r.CustomDomain ?? ""; }
+
+    private void Toggle(Reseller r)
+    {
+        Root.Write(d => { var x = d.Resellers.First(y => y.Id == r.Id); x.Active = !x.Active; });
+        Load();
+    }
+}

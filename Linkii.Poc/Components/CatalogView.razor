@@ -1,0 +1,67 @@
+@* Pages Intégrations et Widgets : éléments regroupés, en cartes ou en liste (choix mémorisé par ViewToggle). *@
+@if (View == "list")
+{
+    <div class="cat-list">
+        <div class="cat-row cat-head" aria-hidden="true"><span></span><span>@Noun</span><span>État</span><span>@UsageLabel</span><span></span></div>
+        @foreach (var g in Groups)
+        {
+            @if (g.Title != null) { <div class="cat-subhead">@g.Title</div> }
+            @foreach (var e in g.Items)
+            {
+                <div class="cat-row @(e.Off ? "off" : "")">
+                    <AppIcon Id="@e.Icon" Small="true" />
+                    <div class="cat-id">@Name(e)<small>@e.Summary</small></div>
+                    <span><span class="badge @e.StatusCss" title="@e.StatusTitle">@e.Status</span></span>
+                    <div class="cat-meta">@Usage(e)</div>
+                    <div class="cat-actions">@Actions(e)</div>
+                </div>
+            }
+        }
+    </div>
+}
+else
+{
+    @foreach (var g in Groups)
+    {
+        @if (g.Title != null) { <h2 class="cat-group">@g.Title <span class="cat-count">@g.Items.Count</span></h2> }
+        <div class="cat-grid">
+            @foreach (var e in g.Items)
+            {
+                <article class="cat-card @(e.Off ? "off" : "")">
+                    @if (Preview != null) { <div class="cat-pv" aria-hidden="true"><span class="cat-pv-zone"></span>@Preview(e)</div> }
+                    <div class="cat-top">
+                        <AppIcon Id="@e.Icon" />
+                        <div class="cat-id">@Name(e)<small>@e.Caption</small></div>
+                        <span class="badge @e.StatusCss" title="@e.StatusTitle">@e.Status</span>
+                    </div>
+                    <p class="cat-desc">@e.Summary</p>
+                    <div class="cat-foot"><div class="cat-meta">@Usage(e)</div><div class="cat-actions">@Actions(e)</div></div>
+                </article>
+            }
+        </div>
+    }
+}
+
+@code {
+    /// <summary>Un élément affiché : une app du catalogue (<see cref="Of"/>) ou une source de calendriers partagés.</summary>
+    public record Entry(string Id, string Name, string Caption, string Summary, string Icon, string? Href, string Status, string StatusCss, bool Off, string? StatusTitle = null)
+    {
+        public static Entry Of(AppManifest a, string status, string css, bool off) =>
+            new(a.Id, a.Name, a.Category, a.Summary, a.Id, "/apps/" + a.Id, status, css, off);
+    }
+    public record Group(string? Title, List<Entry> Items);
+
+    [Parameter, EditorRequired] public List<Group> Groups { get; set; } = new();
+    [Parameter] public string View { get; set; } = "cards";
+    /// <summary>En-têtes de la liste : nom de l'élément (« Intégration ») et de la colonne d'usage.</summary>
+    [Parameter] public string Noun { get; set; } = "";
+    [Parameter] public string UsageLabel { get; set; } = "";
+    [Parameter, EditorRequired] public RenderFragment<Entry> Usage { get; set; } = default!;
+    [Parameter, EditorRequired] public RenderFragment<Entry> Actions { get; set; } = default!;
+    /// <summary>Widgets : mini-écran montrant où l'élément se pose (cartes uniquement).</summary>
+    [Parameter] public RenderFragment<Entry>? Preview { get; set; }
+
+    private static RenderFragment Name(Entry e) => e.Href != null
+        ? @<a class="cat-name" href="@e.Href">@e.Name</a>
+        : @<span class="cat-name">@e.Name</span>;
+}

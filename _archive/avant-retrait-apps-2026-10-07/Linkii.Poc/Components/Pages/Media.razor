@@ -1,0 +1,206 @@
+@page "/media"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@implements IDisposable
+@inject MediaLibrary Library
+
+<div class="page-head">
+    <div>
+        <h1>Médiathèque</h1>
+        <p class="sub">Vos images et vidéos. Utilisez-les dans les apps Image, Vidéo et Diaporama de vos playlists.</p>
+    </div>
+    <button class="btn" @onclick="() => showUpload = !showUpload" aria-expanded="@(showUpload ? "true" : "false")">
+        <Ico Name="upload" Size="16" /> Téléverser des médias
+    </button>
+</div>
+
+@if (showUpload || files.Count == 0)
+{
+    <div class="card lib-upload">
+        <MediaUploader OnImported="Imported" />
+    </div>
+}
+
+@if (files.Count > 0)
+{
+    <div class="lib-tools">
+        <label class="lib-all">
+            <input type="checkbox" class="sc-check" checked="@(Visible.Any() && Visible.All(m => picked.Contains(m.Id)))" @onchange="ToggleAll" aria-label="Tout sélectionner" />
+            @if (picked.Count > 0) { <span>@picked.Count sélectionné@(picked.Count > 1 ? "s" : "")</span> }
+        </label>
+        @if (picked.Count > 0)
+        {
+            <button class="btn danger sm" @onclick="() => confirmDelete = picked.ToList()"><Ico Name="trash" Size="14" /> Supprimer</button>
+        }
+        <div class="seg" role="tablist" aria-label="Type de fichier">
+            <button type="button" class="@(filter == "" ? "on" : "")" @onclick='() => filter = ""'>Tous <small>@files.Count</small></button>
+            <button type="button" class="@(filter == "image" ? "on" : "")" @onclick='() => filter = "image"'>Images <small>@files.Count(m => m.Type == "image")</small></button>
+            <button type="button" class="@(filter == "video" ? "on" : "")" @onclick='() => filter = "video"'>Vidéos <small>@files.Count(m => m.Type == "video")</small></button>
+        </div>
+        <div class="search-box grow" style="margin:0">
+            <Ico Name="search" Size="16" />
+            <input placeholder="Rechercher des médias" aria-label="Rechercher des médias" @bind="search" @bind:event="oninput" />
+        </div>
+        <select @bind="sort" aria-label="Trier">
+            <option value="date">Plus récents</option>
+            <option value="name">Nom</option>
+            <option value="size">Taille</option>
+        </select>
+        <ViewToggle StorageKey="media" @bind-Value="view" />
+    </div>
+
+    @if (!Visible.Any()) { <div class="empty"><div class="big">Aucun média trouvé</div></div> }
+
+    <div class="lib-grid @(view == "list" ? "list" : "")">
+        @foreach (var m in Visible)
+        {
+            var item = m;
+            var on = picked.Contains(item.Id);
+            <div class="lib-card @(on ? "picked" : "") @(item.Status == "failed" ? "failed" : "")">
+                <div class="lib-th">
+                    @if (item.Status == "processing") { <span class="spinner-lg"></span><small class="lib-proc">Conversion en MP4…</small> }
+                    else if (item.Status == "failed") { <Ico Name="x" Size="26" /><small class="lib-proc" title="@item.Error">@item.Error</small> }
+                    else { <MediaThumb Media="item" /> }
+                    <input type="checkbox" class="sc-check lib-check" checked="@on" @onchange="() => Toggle(item.Id)" aria-label="Sélectionner @item.Name" />
+                    <span class="lib-type" title="@(item.Type == "video" ? "Vidéo" : "Image")"><Ico Name="@(item.Type == "video" ? "video" : "image")" Size="15" /></span>
+                </div>
+                <div class="lib-body">
+                    <div class="lib-text">
+                        <span class="lib-name" title="@item.Name">@item.Name</span>
+                        <small class="lib-size">@(item.Size is { } s ? Helpers.FormatSize(s) : "—")</small>
+                    </div>
+                    <span class="lib-col">@(item.Type == "video" ? "Vidéo" : "Image")</span>
+                    <span class="lib-col">@(item.AddedUtc?.ToLocalTime().ToString("dd.MM.yyyy") ?? "—")</span>
+                    <div class="kebab">
+                        <button type="button" class="kebab-btn" aria-label="Actions pour @item.Name" aria-haspopup="menu" aria-expanded="@(menuFor == item.Id ? "true" : "false")"
+                                @onclick="() => menuFor = menuFor == item.Id ? null : item.Id"><Ico Name="dots-v" Size="18" /></button>
+                        @if (menuFor == item.Id)
+                        {
+                            <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                            <div class="kebab-menu" role="menu">
+                                <button type="button" role="menuitem" @onclick="() => OpenRename(item)"><Ico Name="edit" Size="16" /> Renommer</button>
+                                @if (item.FileName != null) { <a role="menuitem" href="/media/@item.FileName" download="@item.Name" @onclick="() => menuFor = null"><Ico Name="download" Size="16" /> Télécharger</a> }
+                                <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; confirmDelete = new() { item.Id }; }"><Ico Name="trash" Size="16" /> Supprimer</button>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@if (renaming != null)
+{
+    <div class="modal-backdrop" @onclick="() => renaming = null"></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="ren-title">
+        <h3 id="ren-title">Renommer le média</h3>
+        <input style="width:100%;margin-top:10px" @bind="renameValue" @bind:event="oninput" @onkeydown="OnRenameKey" aria-label="Nom du média" />
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => renaming = null">Annuler</button>
+            <button class="btn" disabled="@string.IsNullOrWhiteSpace(renameValue)" @onclick="Rename">Renommer</button>
+        </div>
+    </div>
+}
+
+@if (confirmDelete is { Count: > 0 } del)
+{
+    var used = del.SelectMany(Library.UsedBy).Distinct().ToList();
+    <div class="modal-backdrop" @onclick="() => confirmDelete = null"></div>
+    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="mdel-title">
+        <h3 id="mdel-title">Supprimer @(del.Count > 1 ? $"{del.Count} médias" : $"« {files.FirstOrDefault(f => f.Id == del[0])?.Name} »") ?</h3>
+        @if (used.Count == 0)
+        {
+            <p class="hint">@(del.Count > 1 ? "Ils ne sont utilisés" : "Il n'est utilisé") par aucune app. Cette action est définitive.</p>
+        }
+        else
+        {
+            <p class="hint">@(del.Count > 1 ? "Ils seront retirés" : "Il sera retiré") de : <b>@string.Join(", ", used)</b>. Les écrans concernés auront une mise à jour à publier. Cette action est définitive.</p>
+        }
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => confirmDelete = null">Annuler</button>
+            <button class="btn danger-solid" @onclick="Delete">Supprimer</button>
+        </div>
+    </div>
+}
+
+@code {
+    private List<MediaItem> files = new();
+    private readonly HashSet<Guid> picked = new();
+    private string filter = "", search = "", sort = "date";
+    private bool showUpload;
+    private string view = "cards";   // cards | list (liste : PC seulement ; sur mobile, toujours en cartes)
+    private Guid? menuFor;
+    private MediaItem? renaming;
+    private string renameValue = "";
+    private List<Guid>? confirmDelete;
+    private System.Threading.Timer? refreshTimer;
+
+    private IEnumerable<MediaItem> Visible
+    {
+        get
+        {
+            var q = files.Where(m => filter == "" || m.Type == filter)
+                         .Where(m => search.Length == 0 || m.Name.Contains(search, StringComparison.OrdinalIgnoreCase));
+            return sort switch
+            {
+                "name" => q.OrderBy(m => m.Name, StringComparer.CurrentCultureIgnoreCase),
+                "size" => q.OrderByDescending(m => m.Size ?? 0),
+                _ => q   // déjà triés du plus récent au plus ancien
+            };
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Reload();
+        // pendant une conversion vidéo, la liste se rafraîchit seule
+        refreshTimer = new System.Threading.Timer(_ => InvokeAsync(() =>
+        {
+            if (files.Any(m => m.Status == "processing")) { Reload(); StateHasChanged(); }
+        }), null, 2000, 2000);
+    }
+
+    private void Reload()
+    {
+        files = Library.Files();
+        picked.IntersectWith(files.Select(f => f.Id));
+    }
+
+    private void Imported(MediaItem m) => Reload();
+
+
+    private void Toggle(Guid id) { if (!picked.Remove(id)) picked.Add(id); }
+
+    private void ToggleAll()
+    {
+        var vis = Visible.Select(m => m.Id).ToList();
+        if (vis.All(picked.Contains)) picked.ExceptWith(vis); else picked.UnionWith(vis);
+    }
+
+    private void OpenRename(MediaItem m) { menuFor = null; renaming = m; renameValue = m.Name; }
+
+    private void OnRenameKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") Rename();
+        else if (e.Key == "Escape") renaming = null;
+    }
+
+    private void Rename()
+    {
+        if (renaming == null || string.IsNullOrWhiteSpace(renameValue)) return;
+        Library.Rename(renaming.Id, renameValue);
+        renaming = null;
+        Reload();
+    }
+
+    private void Delete()
+    {
+        if (confirmDelete == null) return;
+        Library.Delete(confirmDelete);
+        picked.ExceptWith(confirmDelete);
+        confirmDelete = null;
+        Reload();
+    }
+
+    public void Dispose() => refreshTimer?.Dispose();
+}

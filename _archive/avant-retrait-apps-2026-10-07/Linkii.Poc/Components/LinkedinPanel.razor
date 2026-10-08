@@ -1,0 +1,181 @@
+@inject LinkedinService Li
+@inject TenantContext Ctx
+@inject JsonStore Root
+@inject SecretBox Box
+@inject NavigationManager Nav
+
+@* Connexion LinkedIn d'une instance (mode « Page entreprise ») : connexion OAuth, choix de la page, validation des publications.
+   Le jeton reste chiffré sur le serveur ; ce panneau n'en voit que la date d'expiration. *@
+<div class="li-panel">
+    @if (flashError != null) { <div class="err">@flashError</div> }
+    @if (flashOk) { <div class="msg">Compte LinkedIn connecté. Choisissez la page à afficher, puis enregistrez.</div> }
+
+    @if (token == null)
+    {
+        <details class="li-guide" open="@(!hasApp)">
+            <summary><b>Comment obtenir l'identifiant et la clé LinkedIn ?</b> (à faire une seule fois)</summary>
+            <ol style="margin:8px 0 8px 18px;padding:0">
+                <li>Ouvrez <a href="https://www.linkedin.com/developers/apps" target="_blank" rel="noopener">linkedin.com/developers/apps</a> avec votre compte LinkedIn et cliquez sur <b>Create app</b>. Donnez un nom, choisissez <b>votre page LinkedIn</b>, ajoutez un logo et validez.</li>
+                <li>Onglet <b>Products</b> : demandez <b>Community Management API</b>. LinkedIn examine la demande avant de l'accorder (cela peut prendre du temps).</li>
+                <li>Onglet <b>Auth</b> : copiez le <b>Client ID</b> et le <b>Primary Client Secret</b> dans les deux champs ci-dessus.</li>
+                <li>Toujours dans l'onglet <b>Auth</b>, rubrique <b>Authorized redirect URLs</b>, ajoutez exactement cette adresse :
+                    <input type="text" readonly value="@RedirectUrl" onclick="this.select()" style="width:100%;margin-top:4px;font-family:var(--mono,monospace)" /></li>
+                <li>Cliquez sur <b>Enregistrer</b> ici : le bouton « Se connecter avec LinkedIn » apparaît.</li>
+            </ol>
+            @if (!RedirectUrl.StartsWith("https://")) { <small>LinkedIn n'accepte que des adresses sécurisées (https). Cette adresse fonctionnera une fois l'application publiée sur un domaine en https.</small> }
+        </details>
+    }
+
+    @if (InstanceId == null)
+    {
+        <div class="dw-note">Enregistrez d'abord ce contenu, puis rouvrez ses paramètres pour connecter votre compte LinkedIn.</div>
+    }
+    else if (!hasApp)
+    {
+        <div class="dw-note">Saisissez l'identifiant et la clé de votre application LinkedIn dans les deux champs ci-dessus, puis cliquez sur <b>Enregistrer</b>. Le bouton de connexion apparaîtra ici.</div>
+    }
+    else if (token == null)
+    {
+        <p class="muted" style="margin:0 0 8px">Connectez un compte LinkedIn <b>administrateur de la page</b> à afficher. Vous serez redirigé vers LinkedIn : enregistrez vos autres modifications avant.</p>
+        <a class="btn" href="/linkedin/connect?instance=@InstanceId">Se connecter avec LinkedIn</a>
+    }
+    else
+    {
+        var days = (int)Math.Floor((token.ExpiresUtc - DateTime.UtcNow).TotalDays);
+        <div class="row" style="gap:10px;align-items:center">
+            @if (token.Expired) { <span class="err" style="margin:0">Connexion expirée</span> }
+            else if (days <= 10) { <span class="dw-note" style="margin:0">Connecté · expire dans @days jour(s)</span> }
+            else { <span class="msg" style="margin:0">Connecté · valable jusqu'au @token.ExpiresUtc.ToLocalTime().ToString("dd.MM.yyyy")</span> }
+            <a class="btn ghost sm" href="/linkedin/connect?instance=@InstanceId">@(token.Expired || days <= 10 ? "Se reconnecter" : "Changer de compte")</a>
+            <button type="button" class="linklike" @onclick="Disconnect">Déconnecter</button>
+        </div>
+        <small>LinkedIn limite la validité d'une connexion à 60 jours : il faut la renouveler avant cette date (un rappel apparaît ici et dans « Tester »).</small>
+
+        @if (!token.Expired)
+        {
+            <div class="dw-field" style="margin-top:12px">
+                <label>Page LinkedIn</label>
+                @if (orgs == null && orgError == null) { <small>Chargement des pages que vous administrez…</small> }
+                else if (orgError != null) { <div class="err">@orgError</div> }
+                else if (orgs!.Count == 0) { <div class="dw-note">Ce compte n'administre aucune page LinkedIn.</div> }
+                else
+                {
+                    <select value="@Values["orgUrn"]" @onchange="OrgChanged">
+                        <option value="">— Choisir une page —</option>
+                        @foreach (var o in orgs) { <option value="@o.Urn" selected="@(o.Urn == Values["orgUrn"])">@o.Name</option> }
+                    </select>
+                }
+            </div>
+
+            @if (!string.IsNullOrEmpty(Values["orgUrn"]) && Values.GetValueOrDefault("approval") != "false")
+            {
+                <div class="dw-field">
+                    <label>Publications autorisées à l'écran</label>
+                    @if (posts == null && postError == null) { <small>Chargement des publications…</small> }
+                    else if (postError != null) { <div class="err">@postError</div> }
+                    else if (posts!.Count == 0) { <small>Aucune publication publique trouvée sur cette page.</small> }
+                    else
+                    {
+                        @foreach (var p in posts)
+                        {
+                            var split = LinkedinProvider.Split(p);
+                            <label class="dw-check" style="align-items:flex-start">
+                                <input type="checkbox" checked="@approved.Contains(p.Id)" @onchange="e => Toggle(p.Id, (bool)e.Value!)" />
+                                <span><b>@split.Title</b><br /><small>@(p.PublishedUtc?.ToLocalTime().ToString("dd.MM.yyyy") ?? "")@(p.ImageUrn != null ? " · avec image" : "")</small></span>
+                            </label>
+                        }
+                        <small>Cochez les publications à diffuser. La sélection est prise en compte à la prochaine publication sur chaque écran.</small>
+                    }
+                </div>
+            }
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Dictionary<string, string> Values { get; set; } = default!;
+    [Parameter] public Guid? InstanceId { get; set; }
+
+    private LinkedinToken? token;
+    private bool hasApp;
+    private List<LinkedinOrg>? orgs;
+    private List<LinkedinPost>? posts;
+    private HashSet<string> approved = new();
+    private string? flashError, orgError, postError;
+    private bool flashOk;
+    private string? loadedOrg;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var q = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
+        if (q.TryGetValue("linkedin", out var flag))
+        {
+            if (flag == "ok") flashOk = true;
+            else flashError = q.TryGetValue("detail", out var d) && d.ToString().Length > 0 ? d.ToString() : "La connexion à LinkedIn a échoué.";
+        }
+        Values.TryAdd("orgUrn", ""); Values.TryAdd("orgName", ""); Values.TryAdd("approved", "");
+        approved = Values["approved"].Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
+        hasApp = HasApp();
+        await Reload();
+    }
+
+    private string RedirectUrl => Li.Options.RedirectUri.Length > 0 ? Li.Options.RedirectUri : new Uri(new Uri(Nav.BaseUri), "linkedin/callback").ToString();
+
+    protected override void OnParametersSet() => hasApp = HasApp();
+
+    private bool HasApp()
+    {
+        if (InstanceId is not { } id) return false;
+        var cid = Ctx.RequireClientId();
+        var m = Root.Read(db => db.Media.FirstOrDefault(x => x.Id == id && x.ClientId == cid));
+        return m != null && Li.AppFor(m.Settings, m.Secrets, Box) != null;
+    }
+
+    private LinkedinToken? ReadToken()
+    {
+        if (InstanceId is not { } id) return null;
+        var cid = Ctx.RequireClientId();
+        var enc = Root.Read(db => db.Media.FirstOrDefault(m => m.Id == id && m.ClientId == cid)?.Secrets.GetValueOrDefault(LinkedinService.AuthKey));
+        try { return enc == null ? null : LinkedinService.ReadAuth(Box.Unprotect(enc)); } catch { return null; }
+    }
+
+    private async Task Reload()
+    {
+        token = ReadToken();
+        if (token == null || token.Expired) return;
+        try { orgs = await Li.Organizations(token.Access); }
+        catch (Exception ex) { orgError = ex.Message; }
+        await LoadPosts();
+    }
+
+    private async Task LoadPosts()
+    {
+        var org = Values["orgUrn"];
+        if (token == null || org.Length == 0 || loadedOrg == org) return;
+        loadedOrg = org; posts = null; postError = null;
+        try { posts = await Li.Posts(token.Access, org, 30); }
+        catch (Exception ex) { postError = ex.Message; }
+    }
+
+    private async Task OrgChanged(ChangeEventArgs e)
+    {
+        var urn = e.Value?.ToString() ?? "";
+        Values["orgUrn"] = urn;
+        Values["orgName"] = orgs?.FirstOrDefault(o => o.Urn == urn)?.Name ?? "";
+        approved.Clear(); Values["approved"] = "";   // autre page : les validations précédentes ne valent plus
+        await LoadPosts();
+    }
+
+    private void Toggle(string id, bool on)
+    {
+        if (on) approved.Add(id); else approved.Remove(id);
+        Values["approved"] = string.Join(",", approved);
+    }
+
+    private void Disconnect()
+    {
+        if (InstanceId is { } id) LinkedinService.StoreAuth(Root, Ctx.RequireClientId(), id, null);
+        token = null; orgs = null; posts = null; loadedOrg = null;
+        Values["orgUrn"] = ""; Values["orgName"] = ""; Values["approved"] = ""; approved.Clear();
+    }
+}

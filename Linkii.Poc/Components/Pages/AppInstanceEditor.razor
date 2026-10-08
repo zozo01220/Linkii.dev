@@ -1,0 +1,73 @@
+@page "/apps/{AppId}/new"
+@page "/apps/instance/{InstanceId:guid}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@inject AppService Svc
+@inject NavigationManager Nav
+
+<div class="page-head">
+    <div class="row" style="gap:16px">
+        <AppIcon Id="@manifest?.Id" />
+        <div>
+            <h1>@(InstanceId == null ? "Nouveau contenu" : "Paramètres")@(manifest != null ? " · " + manifest.Name : "")</h1>
+            <p class="sub">Les modifications n'atteignent un écran qu'une fois publiées sur cet écran (page Écrans).</p>
+        </div>
+    </div>
+    <a class="btn ghost" href="/media">← Médiathèque</a>
+</div>
+
+<div class="card" style="max-width:720px">
+    @if (manifest != null)
+    {
+        <AppInstanceForm @key="(AppId, InstanceId)" AppId="@manifest.Id" InstanceId="InstanceId" SaveLabel="Enregistrer" OnSaved="Saved" OnCancel="Cancel" />
+    }
+    else
+    {
+        <div class="err">Instance introuvable.</div>
+    }
+</div>
+
+@if (saved != null)
+{
+    var playlists = Svc.PlaylistsUsing(saved.Id);
+    <div class="card" style="max-width:720px;margin-top:16px">
+        <h3>✓ « @saved.Name » enregistré</h3>
+        @if (playlists.Count == 0)
+        {
+            <p>Ajoutez-le à une liste de lecture pour l'afficher : <a href="/playlists">ouvrir les listes de lecture</a>.</p>
+        }
+        else
+        {
+            <p>Il est utilisé par : <b>@string.Join(", ", playlists.Select(p => p.Name))</b>. Les écrans affichent l'ancienne version jusqu'à leur prochaine publication.</p>
+            <a class="btn" href="/">Publier depuis la page Écrans</a>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public string? AppId { get; set; }
+    [Parameter] public Guid? InstanceId { get; set; }
+
+    private AppManifest? manifest;
+    private MediaItem? saved;
+
+    protected override void OnParametersSet()
+    {
+        if (InstanceId is { } id)
+        {
+            var inst = Svc.Instance(id);
+            manifest = Svc.Find(inst?.AppId);
+        }
+        else manifest = Svc.Find(AppId);
+        if (Nav.Uri.Contains("saved=1") && InstanceId is { } sid)
+            saved = Svc.Instance(sid);
+    }
+
+    private void Saved(MediaItem item)
+    {
+        if (InstanceId == null) { Nav.NavigateTo($"/apps/instance/{item.Id}?saved=1"); return; }   // la nouvelle instance s'ouvre en mode édition
+        saved = item;
+    }
+
+    private void Cancel() => Nav.NavigateTo("/media");
+
+}

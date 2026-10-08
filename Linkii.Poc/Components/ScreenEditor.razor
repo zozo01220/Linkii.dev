@@ -1,0 +1,385 @@
+@using Microsoft.JSInterop
+@implements IDisposable
+@inject TenantStore Store
+@inject AppService Svc
+@inject Notifier Notifier
+@inject Toaster Toast
+@inject IJSRuntime JS
+
+@* Édition d'un écran : nom, playlist, format et widgets (horloge, météo) posés librement sur un aperçu à l'échelle.
+   La liste de lecture et les widgets partent sur l'écran à la publication ; le format s'applique dès l'enregistrement. *@
+<div class="modal-backdrop" @onclick="Close"></div>
+<div class="modal app-modal wg-modal" role="dialog" aria-modal="true" aria-labelledby="se-title">
+    <div class="modal-head">
+        <span class="app-ico" style="--app-c:#0B1F3A"><Ico Name="monitor" Size="22" /></span>
+        <div class="grow" style="min-width:0">
+            @if (headRename)
+            {
+                @* renommage direct : enregistré aussitôt (le nom n'est pas diffusé) *@
+                <div class="row se-rename">
+                    <input class="grow" maxlength="80" @ref="headInput" @bind="headValue" @bind:event="oninput" @onkeydown="OnHeadKey" aria-label="Nom de l'écran" />
+                    <button type="button" class="btn sm" disabled="@string.IsNullOrWhiteSpace(headValue)" @onclick="SaveHeadRename">Renommer</button>
+                    <button type="button" class="btn ghost sm" @onclick="() => headRename = false">Annuler</button>
+                </div>
+            }
+            else
+            {
+                <div class="row" style="gap:8px;flex-wrap:nowrap">
+                    <h3 id="se-title" class="se-title">@(string.IsNullOrWhiteSpace(name) ? "Écran" : name)</h3>
+                    <button type="button" class="btn ghost sm icon" title="Renommer l'écran" aria-label="Renommer l'écran" @onclick="StartHeadRename"><Ico Name="edit" Size="15" /></button>
+                </div>
+            }
+            <small>Modifier l'écran</small>
+        </div>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="modal-body wg-body">
+        <div class="wg-stage-wrap">
+            <div class="wg-stage @(spec.Orientation == "portrait" ? "portrait" : "")" @ref="canvas">
+                @* Zones du découpage, sous les widgets : chacune reçoit sa liste de lecture par son « + » *@
+                <div class="wg-zones @(spec.Orientation == "portrait" ? "dir-col" : "dir-row")">
+                    @for (var z = 0; z < Def.Sizes.Length; z++)
+                    {
+                        var zone = z;
+                        var zp = playlists.FirstOrDefault(p => p.Id == zonePl[zone]);
+                        <div class="wg-zone @(zp == null ? "empty" : "")" style="flex:@Def.Sizes[zone].ToString("0.##", Inv) 1 0">
+                            @if (Def.Sizes.Length > 1) { <span class="wg-zone-n">Zone @(zone + 1)</span> }
+                            @if (zp == null)
+                            {
+                                <button type="button" class="wg-zone-add" title="Choisir la liste de lecture de la zone @(zone + 1)" @onclick="() => pickZone = pickZone == zone ? null : zone">
+                                    <Ico Name="plus" Size="22" /><span>Liste de lecture</span>
+                                </button>
+                            }
+                            else
+                            {
+                                <button type="button" class="wg-zone-pl" title="Changer la liste de lecture de la zone @(zone + 1)" @onclick="() => pickZone = pickZone == zone ? null : zone">
+                                    <Ico Name="menu" Size="14" /> @zp.Name
+                                </button>
+                            }
+                            @if (pickZone == zone)
+                            {
+                                <div class="kebab-backdrop" @onclick="() => pickZone = null"></div>
+                                <div class="kebab-menu wg-zone-menu" role="menu">
+                                    @foreach (var p in playlists)
+                                    {
+                                        var pl = p;
+                                        <button type="button" role="menuitem" class="@(pl.Id == zonePl[zone] ? "on" : "")" @onclick="() => SetZone(zone, pl.Id)"><Ico Name="menu" Size="16" /> @pl.Name</button>
+                                    }
+                                    @if (playlists.Count == 0) { <span class="hint" style="padding:8px 10px">Aucune liste de lecture. Créez-en une dans Listes de lecture.</span> }
+                                    @if (zp != null) { <button type="button" role="menuitem" class="danger" @onclick="() => SetZone(zone, null)"><Ico Name="x" Size="16" /> Vider la zone</button> }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+                @foreach (var w in widgets)
+                {
+                    var wid = w;
+                    <div class="wg-item @(selected == wid.Id ? "sel" : "")" data-wid="@wid.Id" tabindex="0" role="button"
+                         aria-label="@Label(wid) — flèches pour déplacer"
+                         style="left:@Pct(wid.X);top:@Pct(wid.Y);--s:@wid.Scale.ToString(Inv);@TextStyle(wid)"
+                         @onclick="() => Select(wid)" @onfocus="() => Select(wid)">
+                        @if (wid.AppId == "clock")
+                        {
+                            <div class="wg-time">@ClockText(wid)</div>
+                            @if (wid.Settings.GetValueOrDefault("showDate") != "false") { <div class="wg-sub">@DateTime.Now.ToString("dddd d MMMM", Fr)</div> }
+                        }
+                        else if (wid.AppId == "text")
+                        {
+                            @* texte libre : mêmes tailles que sur l'écran (apps.js « text ») *@
+                            var title = wid.Settings.GetValueOrDefault("title") ?? "";
+                            var body = wid.Settings.GetValueOrDefault("body") is { Length: > 0 } bt ? bt : "Votre texte…";
+                            @if (wid.Settings.GetValueOrDefault("scroll") == "loop")
+                            {
+                                <div class="wg-tk"><span class="wg-tk-run" style="animation-duration:@(ScrollSeconds(wid))s">@if (title.Length > 0) { <b>@title</b><span class="wg-tk-sep">·</span> }@body.ReplaceLineEndings(" · ")</span></div>
+                            }
+                            else
+                            {
+                                @if (title.Length > 0) { <div class="wg-tx-t">@title</div> }
+                                <div class="wg-tx-b">@body</div>
+                            }
+                        }
+                        else
+                        {
+                            @* même mise en page que le widget de l'écran (apps.js « weather ») ; valeurs d'exemple *@
+                            <div class="wg-wx">
+                                <span class="wg-ico">⛅</span><span class="wg-temp">18°</span>
+                                <span class="wg-info"><b class="wg-city">@(string.IsNullOrWhiteSpace(wid.Settings.GetValueOrDefault("city")) ? "Ville ?" : wid.Settings["city"])</b><span class="wg-rng">↓ 12°  ↑ 20°  ·  💨 8 km/h</span></span>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+            <p class="hint" style="margin-top:8px">Aperçu à l'échelle. Faites glisser un widget pour le placer ; au clavier, flèches (Maj + flèches : pas de 5 %).</p>
+        </div>
+
+        <div class="wg-side">
+            <div class="seg se-tabs" role="tablist">
+                <button type="button" role="tab" aria-selected="@(tab == "screen" ? "true" : "false")" class="@(tab == "screen" ? "on" : "")" @onclick='() => tab = "screen"'>Écran</button>
+                <button type="button" role="tab" aria-selected="@(tab == "widgets" ? "true" : "false")" class="@(tab == "widgets" ? "on" : "")" @onclick='() => tab = "widgets"'>Widgets <small>@widgets.Count</small></button>
+            </div>
+
+            @if (tab == "screen")
+            {
+                <div class="dw">
+                    <div class="dw-field">
+                        <label for="se-name">Nom</label>
+                        <input id="se-name" type="text" maxlength="80" @bind="name" @bind:event="oninput" />
+                    </div>
+                </div>
+                <h4 class="pe-sub">Format</h4>
+                <ScreenFormat Spec="spec" Layout="@layoutId" LayoutChanged="SetLayout" OnChange="StateHasChanged" />
+                @if (detected != null) { <p class="hint" style="margin-top:8px">Résolution détectée sur l'écran : @detected</p> }
+            }
+            else
+            {
+                <div class="wg-add">
+                    @foreach (var a in available)
+                    {
+                        var app = a;
+                        <button type="button" class="pe-app" @onclick="() => Add(app)">
+                            <AppIcon Id="@app.Id" Small="true" Size="18" />
+                            <span><b>@app.Name</b><small>Ajouter</small></span>
+                            <Ico Name="plus" Size="16" />
+                        </button>
+                    }
+                </div>
+                @if (available.Count == 0) { <p class="hint">Aucun widget actif. <a href="/widgets">Activez-les dans la page Widgets</a>.</p> }
+
+                @if (Sel is { } sw && manifests.GetValueOrDefault(sw.AppId) is { } m)
+                {
+                    <div class="wg-props">
+                        <div class="row" style="margin-bottom:6px">
+                            <h4 class="grow" style="margin:0">@m.Name</h4>
+                            <button type="button" class="btn danger sm" @onclick="() => Remove(sw)"><Ico Name="trash" Size="14" /> Retirer</button>
+                        </div>
+                        <div class="dw">
+                            <div class="dw-field">
+                                <label>Taille</label>
+                                <select value="@sw.Scale.ToString(Inv)" @onchange="e => SetScale(sw, e)">
+                                    @foreach (var (v, l) in Sizes) { <option value="@v.ToString(Inv)" selected="@(Math.Abs(sw.Scale - v) < 0.01)">@l</option> }
+                                </select>
+                            </div>
+                            <AppForm @key="sw.Id" Manifest="m" Values="sw.Settings" />
+                        </div>
+                    </div>
+                }
+                else if (widgets.Count > 0)
+                {
+                    <p class="hint">Sélectionnez un widget sur l'aperçu pour le régler.</p>
+                }
+                else
+                {
+                    <p class="hint">Ajoutez une horloge, la météo ou un texte libre : ils restent affichés par-dessus les listes de lecture.</p>
+                }
+            }
+            @foreach (var e in errors) { <div class="err">@e</div> }
+        </div>
+    </div>
+    <div class="modal-foot">
+        @if (confirmPublish)
+        {
+            <span class="confirm-line" role="alert">Publier maintenant ? L'écran affichera aussitôt « @ZonesText »@(widgets.Count > 0 ? $" et {widgets.Count} widget{(widgets.Count > 1 ? "s" : "")}" : "").</span>
+            <button class="btn ghost" @onclick="() => confirmPublish = false">Retour</button>
+            <button class="btn" disabled="@saving" @onclick="() => Save(true)"><Ico Name="upload" Size="16" /> Confirmer la publication</button>
+        }
+        else
+        {
+            <button class="btn ghost" @onclick="Close">Annuler</button>
+            <button class="btn ghost" disabled="@saving" @onclick="() => Save(false)">Enregistrer</button>
+            <button class="btn" disabled="@saving" @onclick="() => confirmPublish = true">Enregistrer et publier</button>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid ScreenId { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private static readonly System.Globalization.CultureInfo Fr = new("fr-CH");
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+    private static readonly (double Value, string Label)[] Sizes = { (0.6, "Petite"), (1, "Moyenne"), (1.5, "Grande"), (2.2, "Très grande") };
+
+    private ElementReference canvas;
+    private DotNetObjectReference<ScreenEditor>? self;
+    private List<ScreenWidget> widgets = new();
+    private List<AppManifest> available = new();
+    private Dictionary<string, AppManifest> manifests = new();
+    private List<Playlist> playlists = new();
+    private Guid? selected;
+    private string layoutId = ScreenLayouts.Full;
+    private readonly List<Guid?> zonePl = new() { null, null, null };   // playlist de chaque zone (copie de travail)
+    private int? pickZone;   // zone dont le choix de liste de lecture est ouvert
+
+    private ScreenLayouts.Def Def => ScreenLayouts.Find(layoutId);
+
+    // « Accueil » ou « Accueil · Menus · — » : ce que l'écran diffusera, zone par zone
+    private string ZonesText => Def.Sizes.Length == 1
+        ? playlists.FirstOrDefault(p => p.Id == zonePl[0])?.Name ?? "aucune liste de lecture"
+        : string.Join(" · ", Enumerable.Range(0, Def.Sizes.Length).Select(z => playlists.FirstOrDefault(p => p.Id == zonePl[z])?.Name ?? "—"));
+    private List<string> errors = new();
+    private string name = "", tab = "screen";
+    private string? detected;
+    private ScreenSpec spec = new();
+    private bool saving, confirmPublish;
+
+    private ScreenWidget? Sel => widgets.FirstOrDefault(w => w.Id == selected);
+
+    protected override void OnInitialized()
+    {
+        // Proposés : les widgets actifs (page Widgets). Un widget désactivé déjà posé reste réglable.
+        manifests = Svc.Catalog.Where(a => a.ScreenWidget).ToDictionary(a => a.Id);
+        var on = Svc.Installed().Select(a => a.AppId).ToHashSet();
+        available = manifests.Values.Where(a => on.Contains(a.Id)).OrderBy(a => a.Name).ToList();
+        var s = Store.Read(d => d.Screens.First(x => x.Id == ScreenId));
+        playlists = Store.Read(d => d.Playlists.OrderBy(p => p.Name).ToList());
+        name = s.Name;
+        for (var z = 0; z < zonePl.Count; z++) zonePl[z] = s.ZonePlaylist(z);
+        spec = new ScreenSpec { Type = s.ScreenType, Orientation = s.Orientation, Resolution = s.Resolution };
+        layoutId = ScreenLayouts.Fit(ScreenLayouts.Find(s.Layout).Id, spec);   // découpage encore permis par le format
+        if (s.DetectedW > 0) detected = $"{s.DetectedW}×{s.DetectedH}";
+        // copie de travail : rien n'est enregistré avant « Enregistrer »
+        widgets = s.Widgets.Select(w => new ScreenWidget { Id = w.Id, AppId = w.AppId, X = w.X, Y = w.Y, Scale = w.Scale, Settings = new(w.Settings) }).ToList();
+        foreach (var w in widgets) if (manifests.GetValueOrDefault(w.AppId) is { } m) w.Settings = AppCatalog.WithDefaults(m, w.Settings);
+        selected = widgets.FirstOrDefault()?.Id;
+    }
+
+    // ---------- Renommer depuis l'en-tête ----------
+    private bool headRename, focusHead;
+    private string headValue = "";
+    private ElementReference headInput;
+
+    private void StartHeadRename() { headValue = name; headRename = true; focusHead = true; }
+
+    private void OnHeadKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") SaveHeadRename();
+        else if (e.Key == "Escape") headRename = false;
+    }
+
+    private void SaveHeadRename()
+    {
+        var n = headValue.Trim();
+        if (n.Length == 0) return;
+        if (n.Length > 80) n = n[..80];
+        Store.Write(d => { d.Screens.First(x => x.Id == ScreenId).Name = n; });
+        name = n;   // le champ « Nom » de l'onglet Écran suit
+        headRename = false;
+        Toast.Ok($"Écran renommé en « {n} ».");
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusHead && headRename) { focusHead = false; await headInput.FocusAsync(); }
+        if (!firstRender) return;
+        self = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("linkiiWidgets.attach", canvas, self);
+    }
+
+    [JSInvokable]
+    public Task Moved(string id, double x, double y)
+    {
+        if (Guid.TryParse(id, out var g) && widgets.FirstOrDefault(w => w.Id == g) is { } w) { w.X = x; w.Y = y; selected = g; }
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private static string Pct(double v) => v.ToString("0.#", Inv) + "%";
+
+    private string Label(ScreenWidget w) => manifests.GetValueOrDefault(w.AppId)?.Name ?? w.AppId;
+
+    // Texte libre : largeur, couleurs et alignement choisis (couleurs vérifiées : on les écrit dans un style).
+    private static string TextStyle(ScreenWidget w)
+    {
+        if (w.AppId != "text") return "";
+        static string Color(string? c, string fallback) => System.Text.RegularExpressions.Regex.IsMatch(c ?? "", "^#[0-9A-Fa-f]{6}$") ? c! : fallback;
+        var width = int.TryParse(w.Settings.GetValueOrDefault("width"), out var pw) ? Math.Clamp(pw, 10, 100) : 40;
+        var scroll = w.Settings.GetValueOrDefault("scroll") == "loop";
+        return $"width:{width}%;background:{Color(w.Settings.GetValueOrDefault("bg"), "#0B1F3A")};color:{Color(w.Settings.GetValueOrDefault("fg"), "#ffffff")};border-color:transparent;"
+             + (scroll ? "white-space:nowrap;overflow:hidden;padding:.5em .8em" : $"white-space:normal;text-align:{(w.Settings.GetValueOrDefault("align") == "left" ? "left" : "center")}");
+    }
+
+    private static int ScrollSeconds(ScreenWidget w) =>
+        (int)Math.Round(Math.Max(8, (w.Settings.GetValueOrDefault("body")?.Length ?? 20) * 0.22) * (w.Settings.GetValueOrDefault("scrollSpeed") switch { "slow" => 1.6, "fast" => 0.6, _ => 1.0 }));
+
+    private static string ClockText(ScreenWidget w)
+    {
+        var now = DateTime.Now;
+        var twelve = w.Settings.GetValueOrDefault("format") == "12";
+        var secs = w.Settings.GetValueOrDefault("showSeconds") == "true";
+        return now.ToString((twelve ? "h:mm" : "HH:mm") + (secs ? ":ss" : "") + (twelve ? " tt" : ""), twelve ? Inv : Fr);
+    }
+
+    private void Select(ScreenWidget w) { selected = w.Id; tab = "widgets"; }
+
+    private void SetLayout(string id) { layoutId = id; pickZone = null; }
+
+    private void SetZone(int zone, Guid? playlistId) { zonePl[zone] = playlistId; pickZone = null; }
+
+    // Nouveau widget : en haut à droite pour une horloge, en haut à gauche sinon, décalé s'il y en a déjà un.
+    private void Add(AppManifest a)
+    {
+        var n = widgets.Count;
+        var w = new ScreenWidget { AppId = a.Id, Settings = AppCatalog.WithDefaults(a, null), X = a.Id == "clock" ? 72 : 4, Y = a.Id == "text" ? 80 : 4 + n * 6 % 60, Scale = 1 };
+        widgets.Add(w);
+        selected = w.Id;
+        errors.Clear();
+    }
+
+    private void Remove(ScreenWidget w)
+    {
+        widgets.Remove(w);
+        selected = widgets.FirstOrDefault()?.Id;
+    }
+
+    private void SetScale(ScreenWidget w, ChangeEventArgs e)
+    {
+        if (double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float, Inv, out var v)) w.Scale = v;
+    }
+
+    private async Task Save(bool publish)
+    {
+        errors = new(); confirmPublish = false;
+        if (string.IsNullOrWhiteSpace(name)) { errors.Add("Donnez un nom à l'écran."); Toast.Error(errors[0]); tab = "screen"; return; }
+        foreach (var w in widgets)
+        {
+            if (manifests.GetValueOrDefault(w.AppId) is not { } m) continue;
+            var errs = AppCatalog.Validate(m, w.Settings, new HashSet<string>());
+            if (errs.Count > 0) { errors = errs.Select(x => $"{m.Name} : {x}").ToList(); Toast.Error(errors[0]); selected = w.Id; tab = "widgets"; return; }
+        }
+        var list = widgets.Select(w => new ScreenWidget
+        {
+            Id = w.Id, AppId = w.AppId, X = w.X, Y = w.Y, Scale = w.Scale,
+            Settings = manifests.GetValueOrDefault(w.AppId) is { } m
+                ? m.Settings.Where(f => !f.IsSecret && AppCatalog.IsVisible(f, w.Settings)).ToDictionary(f => f.Key, f => (w.Settings.GetValueOrDefault(f.Key) ?? "").Trim())
+                : new(w.Settings)
+        }).ToList();
+        var newName = name.Trim(); var sp = spec; var lay = layoutId; var zones = zonePl.ToList();
+        saving = true;
+        try
+        {
+            var formatChanged = Store.Write(d =>
+            {
+                var s = d.Screens.First(x => x.Id == ScreenId);
+                var changed = s.ScreenType != sp.Type || s.Orientation != sp.Orientation || s.Resolution != sp.Resolution;
+                s.Name = newName;
+                s.Layout = lay;   // autre découpage ou autre playlist dans une zone = modification à publier
+                for (var z = 0; z < zones.Count; z++) s.SetZonePlaylist(z, zones[z]);
+                s.ScreenType = sp.Type; s.Orientation = sp.Orientation; s.Resolution = sp.Resolution;
+                if (!WidgetsEqual(s.Widgets, list)) { s.Widgets = list; s.WidgetsRevision++; }   // modification à publier
+                return changed;
+            });
+            if (publish) await Notifier.PublishScreen(ScreenId);
+            else if (formatChanged) await Notifier.NotifyScreen(ScreenId);   // le format s'applique sans attendre la publication
+        }
+        finally { saving = false; }
+        Toast.Ok(publish ? $"Écran « {newName} » enregistré et publié." : $"Écran « {newName} » enregistré.");
+        await OnClose.InvokeAsync();
+    }
+
+    private static bool WidgetsEqual(List<ScreenWidget> a, List<ScreenWidget> b) =>
+        System.Text.Json.JsonSerializer.Serialize(a) == System.Text.Json.JsonSerializer.Serialize(b);
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    public void Dispose() => self?.Dispose();
+}

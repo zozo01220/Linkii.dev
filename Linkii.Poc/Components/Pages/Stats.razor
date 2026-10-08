@@ -1,0 +1,282 @@
+@page "/stats"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@implements IDisposable
+@inject TenantStore Store
+@inject AppService Svc
+@inject PlayLog PlayLog
+
+@* Vue d'ensemble de l'espace : parc d'écrans, playlists, contenus et médiathèque. Se rafraîchit seule (état des écrans). *@
+<div class="page-head">
+    <div>
+        <h1>Statistiques</h1>
+        <p class="sub">L'état de votre parc d'écrans et l'utilisation de vos contenus.</p>
+    </div>
+</div>
+
+<div class="stats">
+    <div class="stat"><div class="n">@screens.Count</div><div class="l">Écran@(screens.Count > 1 ? "s" : "") connecté@(screens.Count > 1 ? "s" : "")</div></div>
+    <div class="stat"><div class="n ok">@online</div><div class="l">En ligne</div></div>
+    <div class="stat"><div class="n @(offline > 0 ? "bad" : "")">@offline</div><div class="l">Hors ligne</div></div>
+    <div class="stat"><div class="n @(pending > 0 ? "warn" : "")">@pending</div><div class="l">À publier</div></div>
+</div>
+<div class="stats">
+    <div class="stat"><div class="n">@playlists.Count</div><div class="l">Liste@(playlists.Count > 1 ? "s" : "") de lecture</div></div>
+    <div class="stat"><div class="n">@contents.Count</div><div class="l">Contenu@(contents.Count > 1 ? "s" : "") d'apps</div></div>
+    <div class="stat"><div class="n">@files.Count(m => m.Type == "image") <small>/ @files.Count(m => m.Type == "video")</small></div><div class="l">Images / vidéos</div></div>
+    <div class="stat"><div class="n">@Helpers.FormatSize(files.Sum(m => m.Size ?? 0))</div><div class="l">Espace de la médiathèque</div></div>
+</div>
+
+<section class="card st-hist">
+    <div class="st-hist-head">
+        <h3>Historique de diffusion</h3>
+        <div class="seg" role="tablist" aria-label="Période">
+            @foreach (var (key, label) in Periods)
+            {
+                var k = key;
+                <button type="button" class="@(period == k ? "on" : "")" @onclick="() => { period = k; LoadPlays(); }">@label</button>
+            }
+        </div>
+        <select @bind="screenFilter" @bind:after="LoadPlays" aria-label="Écran">
+            <option value="">Tous les écrans</option>
+            @foreach (var s in screens) { <option value="@s.Id">@s.Name</option> }
+        </select>
+    </div>
+
+    @if (plays.Count == 0)
+    {
+        <p class="hint">Aucune diffusion enregistrée sur cette période. Les écrans envoient leur historique chaque minute ; un écran hors ligne l'envoie à son retour.</p>
+    }
+    else
+    {
+        <div class="stats st-mini">
+            <div class="stat"><div class="n">@plays.Count.ToString("N0")</div><div class="l">Diffusions</div></div>
+            <div class="stat"><div class="n">@Human(plays.Sum(p => p.Seconds))</div><div class="l">Temps d'affichage</div></div>
+            <div class="stat"><div class="n">@byContent.Count</div><div class="l">Contenus diffusés</div></div>
+            <div class="stat"><div class="n">@plays.Select(p => p.ScreenId).Distinct().Count()</div><div class="l">Écrans actifs</div></div>
+        </div>
+
+        @* Répartition dans le temps : par heure (aujourd'hui) ou par jour *@
+        var maxBucket = Math.Max(1, buckets.Max(b => b.Count));
+        <div class="st-chart" role="img" aria-label="Diffusions @(period == "today" ? "par heure" : "par jour")">
+            @foreach (var b in buckets)
+            {
+                <div class="st-col" title="@b.Label : @b.Count diffusion@(b.Count > 1 ? "s" : "")">
+                    <span class="st-col-bar" style="height:@(b.Count == 0 ? 0 : Math.Max(3, b.Count * 100 / maxBucket))%"></span>
+                    <span class="st-col-lbl">@b.Short</span>
+                </div>
+            }
+        </div>
+
+        <div class="st-grid st-hist-grid">
+            <div>
+                <h4 class="st-sub">Par contenu</h4>
+                <table class="tbl st-tbl">
+                    <thead><tr><th>Contenu</th><th class="num">Diffusions</th><th class="num">Temps</th><th>Dernière</th></tr></thead>
+                    <tbody>
+                    @foreach (var c in byContent)
+                    {
+                        <tr>
+                            <td><span class="st-content"><AppIcon Id="@c.AppId" Small="true" /> <b>@c.Name</b></span></td>
+                            <td class="num">@c.Count</td>
+                            <td class="num">@Human(c.Seconds)</td>
+                            <td>@Local(c.Last).ToString(period == "today" ? "HH:mm" : "dd.MM HH:mm")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+            <div>
+                <h4 class="st-sub">Dernières diffusions</h4>
+                <ul class="st-recent">
+                    @foreach (var p in plays.AsEnumerable().Reverse().Take(25))
+                    {
+                        <li>
+                            <span class="mono">@Local(p.StartUtc).ToString(period == "today" ? "HH:mm:ss" : "dd.MM HH:mm")</span>
+                            <span class="st-recent-txt"><b>@p.Name</b><small>@(screens.FirstOrDefault(s => s.Id == p.ScreenId)?.Name ?? "Écran supprimé") · @Human(p.Seconds)</small></span>
+                        </li>
+                    }
+                </ul>
+            </div>
+        </div>
+    }
+</section>
+
+<div class="st-grid">
+    <section class="card">
+        <h3>Écrans</h3>
+        @if (screens.Count == 0) { <p class="hint">Aucun écran connecté pour l'instant.</p> }
+        else
+        {
+            <table class="tbl st-tbl">
+                <thead><tr><th>Écran</th><th>État</th><th>Liste de lecture</th><th>Dernier contact</th><th>Publié</th></tr></thead>
+                <tbody>
+                @foreach (var s in screens)
+                {
+                    var st = Status(s);
+                    <tr>
+                        <td><b>@s.Name</b></td>
+                        <td><span class="badge @(st == "En ligne" ? "en-ligne" : st == "Mise à jour" ? "mise-a-jour" : "hors-ligne")">@st</span></td>
+                        <td>@(string.Join(" · ", s.ZonePlaylists().Select(id => playlists.FirstOrDefault(p => p.Id == id)?.Name).OfType<string>()) is { Length: > 0 } names ? names : "—")</td>
+                        <td>@Ago(s.LastSeenUtc)</td>
+                        <td>@Ago(s.PublishedUtc)@if (Helpers.HasPending(s, playlists)) { <span class="badge mise-a-jour st-pending">À publier</span> }</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </section>
+
+    <section class="card">
+        <h3>Applications les plus utilisées</h3>
+        @if (appUsage.Count == 0) { <p class="hint">Aucun contenu dans vos listes de lecture.</p> }
+        else
+        {
+            var max = appUsage.Max(a => a.Count);
+            <ul class="st-bars">
+                @foreach (var a in appUsage)
+                {
+                    <li>
+                        <AppIcon Id="@a.AppId" Small="true" />
+                        <span class="st-bar-txt">
+                            <span class="st-bar-head"><b>@(Svc.Find(a.AppId)?.Name ?? a.AppId)</b><span class="mono">@a.Count</span></span>
+                            <span class="st-bar"><span style="width:@(Math.Max(4, a.Count * 100 / max))%"></span></span>
+                        </span>
+                    </li>
+                }
+            </ul>
+            <p class="hint" style="margin-top:12px">Nombre de passages dans l'ensemble des listes de lecture.</p>
+        }
+    </section>
+
+    <section class="card st-wide">
+        <h3>Listes de lecture</h3>
+        @if (playlists.Count == 0) { <p class="hint">Aucune liste de lecture.</p> }
+        else
+        {
+            <table class="tbl st-tbl">
+                <thead><tr><th>Liste de lecture</th><th class="num">Contenus</th><th class="num">Durée de la boucle</th><th class="num">Écrans</th></tr></thead>
+                <tbody>
+                @foreach (var p in playlists)
+                {
+                    var used = screens.Count(s => s.ZonePlaylists().Contains(p.Id));
+                    <tr>
+                        <td><a href="/playlists/@p.Id"><b>@p.Name</b></a></td>
+                        <td class="num">@p.Draft.Count</td>
+                        <td class="num">@(LoopSeconds(p) is > 0 and var t ? Helpers.FormatDuration(t) : "—")</td>
+                        <td class="num">@(used > 0 ? used.ToString() : "—")</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    </section>
+</div>
+
+@code {
+    private List<Screen> screens = new();
+    private List<Playlist> playlists = new();
+    private List<MediaItem> files = new(), contents = new(), media = new();
+    private List<(string AppId, int Count)> appUsage = new();
+    private int online, offline, pending;
+    private System.Threading.Timer? timer;
+
+    protected override void OnInitialized()
+    {
+        Load();
+        // l'état des écrans (en ligne / hors ligne) évolue tout seul
+        timer = new System.Threading.Timer(_ => InvokeAsync(() => { Load(); StateHasChanged(); }), null, 15000, 15000);
+    }
+
+    private void Load()
+    {
+        screens = Store.Read(d => d.Screens.Where(s => s.Token != null).OrderBy(s => s.Name).ToList());
+        playlists = Store.Read(d => d.Playlists.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
+        media = Store.Read(d => d.Media.ToList());
+        files = media.Where(m => m.Type is "image" or "video" && m.AppId == null && m.Status != "failed").ToList();
+        contents = media.Where(m => m.AppId != null).ToList();
+
+        var statuses = screens.Select(Status).ToList();
+        online = statuses.Count(s => s != "Hors ligne");
+        offline = statuses.Count(s => s == "Hors ligne");
+        pending = screens.Count(s => Helpers.HasPending(s, playlists));
+
+        var byId = media.ToDictionary(m => m.Id);
+        appUsage = playlists.SelectMany(p => p.Draft)
+            .Select(i => byId.GetValueOrDefault(i.MediaId)?.AppId)
+            .OfType<string>()
+            .GroupBy(a => a)
+            .Select(g => (g.Key, g.Count()))
+            .OrderByDescending(x => x.Item2).ThenBy(x => x.Key)
+            .ToList();
+
+        LoadPlays();
+    }
+
+    private string Status(Screen s) => Store.Read(d => d.Status(s));
+
+    // ---------- Historique de diffusion (remonté par les players, voir PlayLog) ----------
+    private static readonly (string Key, string Label)[] Periods = { ("today", "Aujourd'hui"), ("7", "7 jours"), ("30", "30 jours"), ("90", "90 jours") };
+    private string period = "7", screenFilter = "";
+    private List<PlayEntry> plays = new();
+    private List<(Guid? MediaId, string? AppId, string Name, int Count, int Seconds, DateTime Last)> byContent = new();
+    private List<(string Label, string Short, int Count)> buckets = new();
+    private TimeZoneInfo zone = TimeZoneInfo.Local;
+
+    private DateTime Local(DateTime utc) => TimeZoneInfo.ConvertTimeFromUtc(utc, zone);
+
+    private void LoadPlays()
+    {
+        var tzId = Store.Read(d => d.Tenant.Timezone);
+        try { zone = TimeZoneInfo.FindSystemTimeZoneById(tzId); } catch (Exception) { zone = TimeZoneInfo.Local; }
+        var today = Local(DateTime.UtcNow).Date;
+        var firstDay = period == "today" ? today : today.AddDays(1 - int.Parse(period));
+        var since = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(firstDay, DateTimeKind.Unspecified), zone);
+
+        plays = PlayLog.Read(Store.ClientId, since);
+        if (Guid.TryParse(screenFilter, out var sid)) plays = plays.Where(p => p.ScreenId == sid).ToList();
+
+        // le nom courant d'un contenu renommé prime sur celui noté à la diffusion
+        var names = media.ToDictionary(m => m.Id, m => m.Name);
+        byContent = plays.GroupBy(p => (p.MediaId, p.AppId))
+            .Select(g => (g.Key.MediaId, g.Key.AppId,
+                g.Key.MediaId is { } id && names.TryGetValue(id, out var n) ? n : g.Last().Name,
+                g.Count(), g.Sum(p => p.Seconds), g.Max(p => p.StartUtc)))
+            .OrderByDescending(c => c.Item4).ThenByDescending(c => c.Item5)
+            .ToList();
+
+        if (period == "today")
+            buckets = Enumerable.Range(0, 24).Select(h => ($"{h:00}h", h % 3 == 0 ? $"{h}h" : "", plays.Count(p => Local(p.StartUtc).Hour == h))).ToList();
+        else
+        {
+            var days = int.Parse(period);
+            var culture = System.Globalization.CultureInfo.GetCultureInfo("fr-CH");
+            buckets = Enumerable.Range(0, days).Select(i => firstDay.AddDays(i)).Select(d => (
+                d.ToString("dddd d MMMM", culture),
+                days <= 7 ? d.ToString("ddd", culture) : d.Day == 1 || d == firstDay || d.Day % 7 == 1 ? d.ToString("d.M") : "",
+                plays.Count(p => Local(p.StartUtc).Date == d))).ToList();
+        }
+    }
+
+    // 45 s, 12 min, 3 h 05
+    private static string Human(int sec) =>
+        sec < 60 ? $"{sec} s" : sec < 3600 ? $"{sec / 60} min" : $"{sec / 3600} h {sec % 3600 / 60:00}";
+
+    private int LoopSeconds(Playlist p) => p.Draft.Where(i => i.Placement == "full").Sum(i =>
+    {
+        var m = media.FirstOrDefault(x => x.Id == i.MediaId);
+        return Svc.Find(m?.AppId)?.Duration == "content" && i.DurationMode != "fixed" ? Helpers.VideoSeconds(m) ?? i.DurationSec : i.DurationSec;
+    });
+
+    private static string Ago(DateTime? utc)
+    {
+        if (utc is not { } at) return "Jamais";
+        var ago = DateTime.UtcNow - at;
+        return ago.TotalMinutes < 1 ? "À l'instant"
+            : ago.TotalHours < 1 ? $"Il y a {(int)ago.TotalMinutes} min"
+            : ago.TotalDays < 1 ? $"Il y a {(int)ago.TotalHours} h"
+            : ago.TotalDays < 2 ? "Hier"
+            : at.ToLocalTime().ToString("dd.MM.yyyy");
+    }
+
+    public void Dispose() => timer?.Dispose();
+}

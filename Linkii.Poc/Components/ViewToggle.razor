@@ -1,0 +1,29 @@
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+
+@* Choix d'affichage cartes / liste, mémorisé dans le navigateur (une clé par page). Masqué sur mobile : cartes uniquement. *@
+<div class="view-toggle" role="group" aria-label="Affichage">
+    <button type="button" class="@(Value == "cards" ? "on" : "")" aria-pressed="@(Value == "cards" ? "true" : "false")" title="Cartes" @onclick='() => Set("cards")'><Ico Name="grid" Size="16" /><span class="sr-only">Cartes</span></button>
+    <button type="button" class="@(Value == "list" ? "on" : "")" aria-pressed="@(Value == "list" ? "true" : "false")" title="Liste" @onclick='() => Set("list")'><Ico Name="menu" Size="16" /><span class="sr-only">Liste</span></button>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string StorageKey { get; set; } = "";
+    [Parameter] public string Value { get; set; } = "cards";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        string? saved = null;
+        try { saved = await JS.InvokeAsync<string?>("linkiiPrefs.get", "view-" + StorageKey); } catch (JSException) { } catch (InvalidOperationException) { }
+        if (saved is "cards" or "list" && saved != Value) await ValueChanged.InvokeAsync(saved);
+    }
+
+    private async Task Set(string v)
+    {
+        if (v == Value) return;
+        await ValueChanged.InvokeAsync(v);
+        try { await JS.InvokeVoidAsync("linkiiPrefs.set", "view-" + StorageKey, v); } catch (JSException) { }
+    }
+}

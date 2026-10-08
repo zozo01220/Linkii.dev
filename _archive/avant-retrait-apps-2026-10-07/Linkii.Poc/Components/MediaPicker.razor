@@ -1,0 +1,87 @@
+@inject MediaLibrary Library
+
+@* Choix de fichiers dans la médiathèque (au-dessus de la fenêtre de l'app). On peut aussi téléverser sur place : les fichiers importés sont cochés d'office. *@
+<div class="modal-backdrop picker-backdrop" @onclick="Close"></div>
+<div class="modal app-modal picker" role="dialog" aria-modal="true" aria-labelledby="picker-title">
+    <div class="modal-head">
+        <span class="app-ico"><Ico Name="@(Accept == "video" ? "video" : "image")" Size="22" /></span>
+        <div class="grow">
+            <h3 id="picker-title">Médiathèque · @(Accept == "video" ? "vidéos" : "images")</h3>
+            <small>@(Multiple ? "Cochez un ou plusieurs fichiers, dans l'ordre voulu." : "Choisissez un fichier.")</small>
+        </div>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="modal-body">
+        <MediaUploader Accept="@Accept" OnImported="Imported" />
+        <div class="search-box" style="margin-top:14px">
+            <Ico Name="search" Size="16" />
+            <input placeholder="Rechercher" aria-label="Rechercher dans la médiathèque" @bind="search" @bind:event="oninput" />
+        </div>
+        @if (!Visible.Any())
+        {
+            <div class="empty" style="padding:28px 10px"><div class="big">Aucun@(Accept == "video" ? "e vidéo" : "e image")</div><p>Téléversez-en depuis votre ordinateur ou une adresse web.</p></div>
+        }
+        <div class="lib-grid sm">
+            @foreach (var m in Visible)
+            {
+                var item = m;
+                var order = picked.IndexOf(item.Id);
+                <button type="button" class="lib-card @(order >= 0 ? "picked" : "")" aria-pressed="@(order >= 0 ? "true" : "false")" @onclick="() => Toggle(item)">
+                    <span class="lib-th">
+                        @if (item.Status == "processing") { <span class="spinner-lg"></span> }
+                        else { <MediaThumb Media="item" /> }
+                        @if (order >= 0) { <span class="lib-order">@(Multiple ? (order + 1).ToString() : "✓")</span> }
+                    </span>
+                    <span class="lib-name" title="@item.Name">@item.Name</span>
+                    <small class="lib-size">@(item.Size is { } s ? Helpers.FormatSize(s) : "")@(item.Status == "processing" ? " · conversion…" : "")</small>
+                </button>
+            }
+        </div>
+    </div>
+    <div class="modal-foot">
+        <button class="btn ghost" @onclick="Close">Annuler</button>
+        <button class="btn" disabled="@(picked.Count == 0)" @onclick="Confirm">@(Multiple && picked.Count > 1 ? $"Ajouter {picked.Count} fichiers" : "Choisir")</button>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Accept { get; set; } = "image";
+    [Parameter] public bool Multiple { get; set; }
+    [Parameter] public ISet<Guid> Exclude { get; set; } = new HashSet<Guid>();
+    [Parameter] public EventCallback<List<MediaItem>> OnPicked { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private List<MediaItem> files = new();
+    private readonly List<Guid> picked = new();
+    private string search = "";
+
+    // Les fichiers déjà choisis ne sont pas reproposés (choix multiple) ; un fichier en échec de conversion n'est pas proposé.
+    private IEnumerable<MediaItem> Visible => files
+        .Where(m => m.Type == Accept && m.Status != "failed" && !(Multiple && Exclude.Contains(m.Id)))
+        .Where(m => search.Length == 0 || m.Name.Contains(search, StringComparison.OrdinalIgnoreCase));
+
+    protected override void OnInitialized() => files = Library.Files();
+
+    private void Toggle(MediaItem m)
+    {
+        if (picked.Remove(m.Id)) return;
+        if (!Multiple) picked.Clear();
+        picked.Add(m.Id);
+    }
+
+    private void Imported(MediaItem m)
+    {
+        files = Library.Files();
+        if (m.Type != Accept) return;
+        if (!Multiple) picked.Clear();
+        if (!picked.Contains(m.Id)) picked.Add(m.Id);
+    }
+
+    private async Task Confirm()
+    {
+        var byId = files.ToDictionary(f => f.Id);
+        await OnPicked.InvokeAsync(picked.Where(byId.ContainsKey).Select(id => byId[id]).ToList());
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+}

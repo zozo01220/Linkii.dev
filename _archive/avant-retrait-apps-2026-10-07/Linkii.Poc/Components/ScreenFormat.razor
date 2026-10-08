@@ -1,0 +1,65 @@
+<div class="fmt">
+    <div class="fmt-block">
+        <label>Matériel</label>
+        <div class="seg">
+            @foreach (var t in ScreenOptions.Types)
+            {
+                var id = t.Id;
+                <button type="button" class="@(Spec.Type == id ? "on" : "")" @onclick="() => SetType(id)">
+                    <span class="ic">@t.Icon</span> @t.Label
+                </button>
+            }
+        </div>
+    </div>
+
+    <div class="fmt-block">
+        <label>Format d'affichage</label>
+        <div class="seg">
+            <button type="button" class="@(Spec.Orientation == "landscape" ? "on" : "")" @onclick='() => SetOrientation("landscape")'>
+                <span class="shape land"></span> Paysage
+            </button>
+            <button type="button" class="@(Spec.Orientation == "portrait" ? "on" : "")" @onclick='() => SetOrientation("portrait")'>
+                <span class="shape port"></span> Portrait
+            </button>
+        </div>
+    </div>
+
+    <div class="fmt-block">
+        <label>Résolution</label>
+        <select value="@Spec.Resolution" @onchange="SetResolution">
+            @foreach (var r in ScreenOptions.Resolutions)
+            {
+                <option value="@r.Id" selected="@(r.Id == Spec.Resolution)">@Label(r)</option>
+            }
+        </select>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ScreenSpec Spec { get; set; } = new();
+    [Parameter] public EventCallback OnChange { get; set; }
+
+    // En portrait, la résolution s'affiche à l'envers (1080×1920).
+    private string Label(Option r) =>
+        r.Id == "auto" ? r.Label : Spec.Orientation == "portrait" ? r.Label.Split('·')[0] + "· " + ScreenOptions.ResolutionLabel(r.Id, "portrait") : r.Label;
+
+    private Task SetType(string id)
+    {
+        Spec.Type = id;
+        Spec.Orientation = ScreenOptions.Types.First(t => t.Id == id).Orientation;   // suggestion : un totem est vertical
+        if (id == "phone") Spec.Resolution = "auto";   // un téléphone s'adapte à sa propre taille d'écran
+        return OnChange.InvokeAsync();
+    }
+
+    private Task SetOrientation(string o)
+    {
+        Spec.Orientation = o;
+        return OnChange.InvokeAsync();
+    }
+
+    private Task SetResolution(ChangeEventArgs e)
+    {
+        Spec.Resolution = e.Value?.ToString() ?? "auto";
+        return OnChange.InvokeAsync();
+    }
+}

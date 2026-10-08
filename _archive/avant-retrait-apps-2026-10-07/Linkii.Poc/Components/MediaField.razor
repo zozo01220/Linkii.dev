@@ -1,0 +1,74 @@
+@inject MediaLibrary Library
+
+@* Champ « media » (un fichier) ou « medias » (plusieurs, ordonnés) d'une app : fichiers choisis dans la médiathèque.
+   La valeur est la liste des identifiants, séparés par des virgules. *@
+<div class="mf">
+    @if (selected.Count > 0)
+    {
+        <ul class="mf-list">
+            @for (var i = 0; i < selected.Count; i++)
+            {
+                var idx = i;
+                var m = selected[idx];
+                <li>
+                    <span class="mf-th">
+                        @if (m.Status == null && m.FileName != null) { <MediaThumb Media="m" /> }
+                        else { <Ico Name="@(m.Type == "video" ? "video" : "image")" Size="18" /> }
+                    </span>
+                    <span class="mf-name" title="@m.Name">@m.Name@if (m.Status == "processing") { <small> · conversion…</small> }</span>
+                    @if (Multiple)
+                    {
+                        <button type="button" class="btn ghost sm icon" aria-label="Monter" disabled="@(idx == 0)" @onclick="() => Move(idx, -1)">↑</button>
+                        <button type="button" class="btn ghost sm icon" aria-label="Descendre" disabled="@(idx == selected.Count - 1)" @onclick="() => Move(idx, 1)">↓</button>
+                    }
+                    <button type="button" class="btn ghost sm icon" aria-label="Retirer @m.Name" @onclick="() => Remove(idx)"><Ico Name="x" Size="14" /></button>
+                </li>
+            }
+        </ul>
+    }
+    @if (missing > 0) { <small class="upl-err">@missing fichier@(missing > 1 ? "s ont" : " a") été supprimé@(missing > 1 ? "s" : "") de la médiathèque.</small> }
+    <button type="button" class="btn ghost sm" @onclick="() => picking = true">
+        <Ico Name="@(Field.Accept == "video" ? "video" : "image")" Size="15" />
+        @(selected.Count == 0 ? (Multiple ? "Choisir dans la médiathèque" : $"Choisir {(Field.Accept == "video" ? "une vidéo" : "une image")}") : Multiple ? "Ajouter depuis la médiathèque" : "Remplacer")
+    </button>
+</div>
+
+@if (picking)
+{
+    @* rendu dans la mise en page (SectionOutlet « overlay ») : sinon la fenêtre de l'app, centrée par transform, la décale et la rogne *@
+    <SectionContent SectionName="overlay">
+        <MediaPicker Accept="@(Field.Accept ?? "image")" Multiple="Multiple" Exclude="@selected.Select(m => m.Id).ToHashSet()" OnPicked="Picked" OnClose="() => picking = false" />
+    </SectionContent>
+}
+
+@code {
+    [Parameter, EditorRequired] public AppField Field { get; set; } = default!;
+    [Parameter, EditorRequired] public Dictionary<string, string> Values { get; set; } = default!;
+
+    private List<MediaItem> selected = new();
+    private int missing;
+    private bool picking;
+    private bool Multiple => Field.Type == "medias";
+
+    protected override void OnParametersSet()
+    {
+        var all = Library.Files().ToDictionary(m => m.Id);
+        var ids = AppField.MediaIds(Values.GetValueOrDefault(Field.Key));
+        selected = ids.Where(all.ContainsKey).Select(id => all[id]).ToList();
+        missing = ids.Count - selected.Count;
+    }
+
+    private void Save() { Values[Field.Key] = string.Join(",", selected.Select(m => m.Id)); missing = 0; }
+
+    private void Picked(List<MediaItem> items)
+    {
+        picking = false;
+        if (Multiple) selected.AddRange(items.Where(i => selected.All(s => s.Id != i.Id)));
+        else if (items.Count > 0) selected = new() { items[0] };
+        Save();
+    }
+
+    private void Remove(int i) { selected.RemoveAt(i); Save(); }
+
+    private void Move(int i, int delta) { (selected[i], selected[i + delta]) = (selected[i + delta], selected[i]); Save(); }
+}

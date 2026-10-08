@@ -1,0 +1,62 @@
+@inject AppService Svc
+@* Icône d'une app : pastille ronde de couleur et pictogramme blanc (Tile), ou pictogramme seul (vignettes sur fond sombre).
+   Une app sans pictogramme connu garde l'emoji de son manifeste, sur fond neutre. *@
+@if (Tile)
+{
+    <span class="app-ico @(Small ? "sm" : "")" style="--app-c:@Look.Color">@Glyph@if (Connected is { } c) { <span class="app-dot @(c ? "ok" : "off")" title="@(c ? "Connectée" : "Non connectée")"><span class="sr-only">@(c ? "Connectée" : "Non connectée")</span></span> }</span>
+}
+else
+{
+    @Glyph
+}
+
+@code {
+    [Parameter] public string? Id { get; set; }
+    [Parameter] public bool Tile { get; set; } = true;
+    [Parameter] public bool Small { get; set; }
+    [Parameter] public int Size { get; set; } = 24;
+    /// <summary>App reliée à un compte externe (Canva…) : pastille verte si connectée, rouge sinon ; null : pas de pastille.</summary>
+    [Parameter] public bool? Connected { get; set; }
+
+    // Couleur de la pastille et pictogramme (Ico) de chaque app du catalogue.
+    private static (string Color, string? Icon) LookOf(string? id) => id switch
+    {
+        "text" => ("#4F6BED", "type"),
+        "rss" => ("#F2541B", "rss"),
+        "agenda" => ("#2FA66A", "calendar"),
+        "clock" => ("#0B1F3A", "clock"),
+        "weather" => ("#3D63F2", "sun"),
+        "webpage" => ("#3A9399", "globe"),
+        "image" => ("#F0A92E", "image"),
+        "slideshow-images" => ("#F0A92E", "images"),
+        "video" => ("#7B5CC4", "play"),
+        "slideshow-videos" => ("#7B5CC4", "play-box"),
+        "youtube" => ("#E3261D", "play"),
+        "canva" => ("#00A3B4", "palette"),
+        // sources des calendriers partagés : la couleur de l'app Calendrier partagé, le pictogramme de la source
+        "cal-m365" => ("#2FA66A", "windows"),
+        "cal-google" => ("#2FA66A", "google"),
+        "cal-caldav" => ("#2FA66A", "server"),
+        "cal-ics" => ("#2FA66A", "link"),
+        "cal-ews" => ("#2FA66A", "mail"),
+        // Drives : l'app Dossier Drive et ses sources
+        "drive" => ("#0F6CBD", "folder"),
+        "drv-gdrive" => ("#0F6CBD", "google"),
+        "drv-onedrive" => ("#0F6CBD", "cloud"),
+        _ => ("#5A6B80", null)
+    };
+
+    private (string Color, string? Icon) Look => LookOf(Id);
+
+    private RenderFragment Glyph => b =>
+    {
+        if (Look.Icon is { } name)
+        {
+            b.OpenComponent<Ico>(1);
+            b.AddComponentParameter(2, nameof(Ico.Name), name);
+            b.AddComponentParameter(3, nameof(Ico.Size), Tile ? (Small ? 17 : 22) : Size);
+            b.CloseComponent();
+        }
+        else b.AddContent(4, Svc.Find(Id)?.Icon ?? "🧩");
+    };
+}

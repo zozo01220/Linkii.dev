@@ -1,0 +1,125 @@
+@inherits LayoutComponentBase
+@inject JsonStore Root
+@inject TenantContext Ctx
+
+<HeadContent>
+    <style>:root { --brand: @brand; }</style>
+</HeadContent>
+
+<div class="shell">
+    @if (navOpen) { <div class="nav-backdrop" @onclick="() => { navOpen = false; open = false; }"></div> }
+    <aside class="sidebar @(navOpen ? "open" : "")" @onclick="() => { navOpen = false; open = false; }">
+        <div class="brand"><BrandMark R="reseller" Size="30" /></div>
+
+        @if (Ctx.ClientId != null)
+        {
+            <NavLink class="nav" href="" Match="NavLinkMatch.All">
+                <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></svg> Écrans
+            </NavLink>
+            <NavLink class="nav" href="playlists">
+                <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg> Listes de lecture
+            </NavLink>
+            <NavLink class="nav" href="media">
+                <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg> Médiathèque
+            </NavLink>
+            <div class="nav-sep" role="separator"></div>
+            <NavLink class="nav" href="stats">
+                <svg viewBox="0 0 24 24"><path d="M3 3v18h18" /><path d="M7 15l4-4 3 3 6-6" /></svg> Statistiques
+            </NavLink>
+        }
+        else if (Ctx.IsPlatformAdmin)
+        {
+            <NavLink class="nav" href="admin" Match="NavLinkMatch.All">Revendeurs</NavLink>
+            <NavLink class="nav" href="admin/clients">Clients et accès</NavLink>
+            <NavLink class="nav" href="admin/screens">Supervision</NavLink>
+            <NavLink class="nav" href="admin/billing">Facturation</NavLink>
+        }
+        else if (Ctx.IsResellerAdmin)
+        {
+            <NavLink class="nav" href="reseller" Match="NavLinkMatch.All">Clients</NavLink>
+            <NavLink class="nav" href="reseller/brand">Marque</NavLink>
+            <NavLink class="nav" href="reseller/team">Équipe</NavLink>
+            <NavLink class="nav" href="reseller/subscription">Abonnement</NavLink>
+        }
+
+        <div class="spacer"></div>
+        @if (Ctx.ClientId != null)
+        {
+            @* Sources de contenus et éléments d'écran : en bas, juste au-dessus du compte. *@
+            <NavLink class="nav" href="integrations">
+                <svg viewBox="0 0 24 24"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0V8zM12 17v5" /></svg> Intégrations
+            </NavLink>
+            <NavLink class="nav" href="widgets">
+                <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" /></svg> Widgets
+            </NavLink>
+            <div class="nav-sep" role="separator"></div>
+            <NavLink class="nav" href="settings">
+                <Ico Name="gear" Size="18" /> Réglages
+            </NavLink>
+        }
+        @* Compte : en bas du menu latéral ; le menu s'ouvre vers le haut. *@
+        <div class="user side-user" @onclick:stopPropagation="true">
+            <button type="button" class="user-btn" @onclick="() => open = !open" aria-haspopup="true" aria-expanded="@(open ? "true" : "false")">
+                <span class="avatar">@Initials</span>
+                <span class="who"><b title="@orgName">@orgName</b><small title="@userEmail">@userEmail</small></span>
+                <svg class="chev" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6" /></svg>
+            </button>
+            @if (open)
+            {
+                <div class="menu-backdrop" @onclick="() => open = false"></div>
+                <div class="menu" role="menu">
+                    @if (Ctx.ClientId == null)
+                    {
+                        <a href="account" role="menuitem" @onclick="() => { open = false; navOpen = false; }"><Ico Name="user" Size="16" /> Mon compte</a>
+                    }
+                    <button type="button" role="menuitem" class="install-item" data-install @onclick="() => open = false"><Ico Name="download" Size="16" /> Installer l'application</button>
+                    <form method="post" action="/logout">
+                        <button type="submit" role="menuitem" class="logout"><Ico Name="logout" Size="16" /> Se déconnecter</button>
+                    </form>
+                </div>
+            }
+        </div>
+        @if (reseller is { ShowPoweredBy: true, IsDefault: false })
+        {
+            <div class="powered">Propulsé par Linkii</div>
+        }
+    </aside>
+
+    <div class="main-col">
+        @if (Ctx.IsImpersonating)
+        {
+            <div class="impersonation">
+                <span>Vous êtes dans l'espace de <b>@orgName</b> (accès journalisé).</span>
+                <form method="post" action="/space/exit"><button type="submit">Quitter l'espace client</button></form>
+            </div>
+        }
+        <header class="topbar">
+            <button type="button" class="nav-toggle" aria-label="Menu" aria-expanded="@(navOpen ? "true" : "false")" @onclick="() => { navOpen = !navOpen; open = false; }"><Ico Name="menu" Size="22" /></button>
+            <div class="org">@orgName</div>
+        </header>
+        <main class="content">@Body</main>
+        @* Fenêtres empilées au-dessus d'une autre (sélecteur de médias) : rendues ici, hors de la fenêtre parente (son transform décalerait position: fixed). *@
+        <SectionOutlet SectionName="overlay" />
+        <Toasts />
+    </div>
+</div>
+
+@code {
+    private bool open, navOpen;
+    private string brand = "#0B1F3A", orgName = "", userName = "", userEmail = "";
+    private Reseller? reseller;
+
+    private string Initials =>
+        string.Concat((orgName.Length > 0 ? orgName : userName).Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => char.ToUpperInvariant(w[0])));
+
+    protected override void OnInitialized()
+    {
+        reseller = Ctx.Reseller;
+        brand = reseller?.BrandColor ?? brand;
+        var cid = Ctx.ClientId;
+        orgName = cid != null ? Root.Read(d => d.Clients.FirstOrDefault(c => c.Id == cid)?.Name ?? "")
+                : Ctx.IsPlatformAdmin ? "Console administrateur Linkii" : reseller?.Name ?? "";
+        userEmail = Ctx.Email;
+        userName = string.IsNullOrWhiteSpace(Ctx.DisplayName) ? userEmail : Ctx.DisplayName;
+    }
+}

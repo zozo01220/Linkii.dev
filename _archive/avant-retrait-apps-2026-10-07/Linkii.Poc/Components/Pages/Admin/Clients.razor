@@ -1,0 +1,122 @@
+@page "/admin/clients"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "PlatformAdmin")]
+@inject JsonStore Root
+
+<div class="page-head">
+    <div>
+        <h1>Clients et accès</h1>
+        <p class="sub">Créez un client chez un revendeur, ou entrez dans son espace pour l'aider. Chaque entrée est journalisée.</p>
+    </div>
+    <button class="btn" @onclick="Open">+ Ajouter un client</button>
+</div>
+@if (msg != null) { <div class="msg" style="margin:-10px 0 16px">@msg</div> }
+@if (error != null) { <div class="err" style="margin:-10px 0 16px">@error</div> }
+
+@if (showAdd)
+{
+    <div class="modal-backdrop" @onclick="Close"></div>
+    <div class="modal app-modal" role="dialog" aria-modal="true" aria-labelledby="add-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="add-title">Nouveau client</h3></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+        </div>
+        <EditForm Model="this" OnSubmit="Add" class="modal-form">
+            <div class="modal-body">
+                <div class="form-grid">
+                    <div>
+                        <label class="lbl">Revendeur</label>
+                        <select class="full" @bind="resellerId">
+                            @foreach (var r in resellers) { <option value="@r.Id">@r.Name</option> }
+                        </select>
+                    </div>
+                    <div><label class="lbl">Nom du client</label><input class="full" @bind="clientName" placeholder="Ex. : UNIL" /></div>
+                    <div><label class="lbl">Administrateur : nom</label><input class="full" @bind="adminName" /></div>
+                    <div><label class="lbl">Administrateur : e-mail</label><input class="full" type="email" @bind="adminEmail" autocomplete="off" /></div>
+                    <div><label class="lbl">Mot de passe initial</label><input class="full" type="password" @bind="adminPwd" autocomplete="new-password" /></div>
+                </div>
+                @if (formError != null) { <div class="err">@formError</div> }
+            </div>
+            <div class="modal-foot">
+                <button type="button" class="btn ghost" @onclick="Close">Annuler</button>
+                <button type="submit" class="btn">Créer le client</button>
+            </div>
+        </EditForm>
+    </div>
+}
+
+<table class="tbl">
+    <thead><tr><th>Client</th><th>Revendeur</th><th class="num">Écrans</th><th>État</th><th></th></tr></thead>
+    <tbody>
+    @foreach (var c in clients)
+    {
+        <tr>
+            <td><b>@c.Client.Name</b></td>
+            <td>@c.Reseller</td>
+            <td class="num">@c.Screens</td>
+            <td><span class="pill @(c.Client.Suspended ? "bad" : "ok")">@(c.Client.Suspended ? "Suspendu" : "Actif")</span></td>
+            <td>
+                <form method="post" action="/space/enter"><input type="hidden" name="clientId" value="@c.Client.Id" /><button class="btn ghost" type="submit">Entrer</button></form>
+                <button class="btn ghost" @onclick="() => Toggle(c.Client)">@(c.Client.Suspended ? "Activer" : "Suspendre")</button>
+            </td>
+        </tr>
+    }
+    @if (clients.Count == 0) { <tr><td colspan="5">Aucun client pour l'instant.</td></tr> }
+    </tbody>
+</table>
+
+<h2 style="margin:28px 0 10px">Journal des accès</h2>
+<table class="tbl">
+    <thead><tr><th>Date (UTC)</th><th>Utilisateur</th><th>Client</th><th>Action</th></tr></thead>
+    <tbody>
+    @foreach (var l in log)
+    {
+        <tr><td>@l.AtUtc.ToString("yyyy-MM-dd HH:mm:ss")</td><td>@l.UserEmail <small>(@l.Role)</small></td><td>@l.ClientName</td><td>@(l.Action == "enter" ? "Entrée" : "Sortie")</td></tr>
+    }
+    @if (log.Count == 0) { <tr><td colspan="4">Aucun accès enregistré.</td></tr> }
+    </tbody>
+</table>
+
+@code {
+    private record Row(Tenant Client, string Reseller, int Screens);
+    private List<Row> clients = new();
+    private List<Reseller> resellers = new();
+    private List<AccessLogEntry> log = new();
+    private bool showAdd;
+    private Guid resellerId;
+    private string clientName = "", adminName = "", adminEmail = "", adminPwd = "";
+    private string? msg, error, formError;
+
+    protected override void OnInitialized() { Load(); resellerId = resellers.FirstOrDefault()?.Id ?? Guid.Empty; }
+
+    private void Load()
+    {
+        resellers = Root.Read(d => d.Resellers.Where(r => r.Active).OrderBy(r => r.Name).ToList());
+        clients = Root.Read(d => d.Clients.OrderBy(c => c.Name)
+            .Select(c => new Row(c, d.Resellers.FirstOrDefault(r => r.Id == c.ResellerId)?.Name ?? "?", d.Screens.Count(s => s.ClientId == c.Id && s.Token != null))).ToList());
+        log = Root.Read(d => d.AccessLog.OrderByDescending(l => l.AtUtc).Take(50).ToList());
+    }
+
+    private void Open() { formError = null; showAdd = true; }
+    private void Close() => showAdd = false;
+
+    private void Add()
+    {
+        formError = error = msg = null;
+        var err = Root.Write(d =>
+        {
+            var r = d.Resellers.FirstOrDefault(x => x.Id == resellerId);
+            if (r == null) return "Choisissez un revendeur.";
+            return Tenancy.CreateClient(d, r, clientName, adminName, adminEmail, adminPwd).Error;
+        });
+        if (err != null) { formError = err; return; }
+        msg = $"Client « {clientName.Trim()} » créé.";
+        clientName = adminName = adminEmail = adminPwd = ""; showAdd = false;
+        Load();
+    }
+
+    private void Toggle(Tenant c)
+    {
+        Root.Write(d => { var x = d.Clients.First(y => y.Id == c.Id); x.Suspended = !x.Suspended; });
+        Load();
+    }
+}

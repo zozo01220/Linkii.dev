@@ -1,0 +1,100 @@
+@inject MediaLibrary Library
+@inject IJSRuntime JS
+@using Microsoft.JSInterop
+@implements IDisposable
+
+@* Champ « media » (un fichier) ou « medias » (plusieurs, ordonnés) d'une app : fichiers choisis dans la médiathèque.
+   La valeur est la liste des identifiants, séparés par des virgules. *@
+<div class="mf">
+    @if (selected.Count > 0)
+    {
+        <ul class="mf-list @(Multiple && selected.Count > 1 ? "sortable" : "")" @ref="listRef">
+            @for (var i = 0; i < selected.Count; i++)
+            {
+                var idx = i;
+                var m = selected[idx];
+                <li @key="m.Id" data-sort-row>
+                    @if (Multiple && selected.Count > 1) { <span class="grip" title="Glisser pour déplacer"><Ico Name="grip" Size="16" /></span> }
+                    <span class="mf-th">
+                        @if (m.Status == null && m.FileName != null) { <MediaThumb Media="m" /> }
+                        else { <Ico Name="@(m.Type == "video" ? "video" : "image")" Size="18" /> }
+                    </span>
+                    <span class="mf-name" title="@m.Name">@m.Name@if (m.Status == "processing") { <small> · conversion…</small> }</span>
+                    <button type="button" class="btn ghost sm icon" aria-label="Retirer @m.Name" @onclick="() => Remove(idx)"><Ico Name="x" Size="14" /></button>
+                </li>
+            }
+        </ul>
+    }
+    @if (missing > 0) { <small class="upl-err">@missing fichier@(missing > 1 ? "s ont" : " a") été supprimé@(missing > 1 ? "s" : "") de la médiathèque.</small> }
+    <button type="button" class="btn ghost sm" @onclick="() => picking = true">
+        <Ico Name="@(Field.Accept == "video" ? "video" : "image")" Size="15" />
+        @(selected.Count == 0 ? (Multiple ? "Choisir dans la médiathèque" : $"Choisir {(Field.Accept == "video" ? "une vidéo" : "une image")}") : Multiple ? "Ajouter depuis la médiathèque" : "Remplacer")
+    </button>
+</div>
+
+@if (picking)
+{
+    @* rendu dans la mise en page (SectionOutlet « overlay ») : sinon la fenêtre de l'app, centrée par transform, la décale et la rogne *@
+    <SectionContent SectionName="overlay">
+        <MediaPicker Accept="@(Field.Accept ?? "image")" Multiple="Multiple" Exclude="@selected.Select(m => m.Id).ToHashSet()" OnPicked="Picked" OnClose="() => picking = false" />
+    </SectionContent>
+}
+
+@code {
+    [Parameter, EditorRequired] public AppField Field { get; set; } = default!;
+    [Parameter, EditorRequired] public Dictionary<string, string> Values { get; set; } = default!;
+
+    private List<MediaItem> selected = new();
+    private int missing;
+    private bool picking;
+    private bool Multiple => Field.Type == "medias";
+
+    protected override void OnParametersSet()
+    {
+        var all = Library.Files().ToDictionary(m => m.Id);
+        var ids = AppField.MediaIds(Values.GetValueOrDefault(Field.Key));
+        selected = ids.Where(all.ContainsKey).Select(id => all[id]).ToList();
+        missing = ids.Count - selected.Count;
+    }
+
+    private void Save() { Values[Field.Key] = string.Join(",", selected.Select(m => m.Id)); missing = 0; }
+
+    private void Picked(List<MediaItem> items)
+    {
+        picking = false;
+        if (Multiple) selected.AddRange(items.Where(i => selected.All(s => s.Id != i.Id)));
+        else if (items.Count > 0) selected = new() { items[0] };
+        Save();
+    }
+
+    private void Remove(int i) { selected.RemoveAt(i); Save(); }
+
+    // ---------- Ordre des fichiers : glisser-déposer (sort-list.js, qui rappelle Reorder au lâcher) ----------
+    private ElementReference listRef;
+    private string? sortedListId;
+    private DotNetObjectReference<MediaField>? selfRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // la liste est recréée quand elle se vide puis se remplit : on branche le tri sur chaque nouvel élément
+        if (!Multiple || listRef.Context == null || listRef.Id == sortedListId) return;
+        sortedListId = listRef.Id;
+        selfRef ??= DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("linkiiSort.init", listRef, selfRef);
+    }
+
+    [JSInvokable]
+    public Task Reorder(int from, int to)
+    {
+        if (from != to && from >= 0 && from < selected.Count && to >= 0 && to < selected.Count)
+        {
+            var m = selected[from];
+            selected.RemoveAt(from);
+            selected.Insert(to, m);
+            Save();
+        }
+        return InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => selfRef?.Dispose();
+}

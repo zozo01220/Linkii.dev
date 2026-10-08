@@ -1,0 +1,340 @@
+@page "/playlists/{Id:guid}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@inject TenantStore Store
+@inject AppService Svc
+
+<div class="page-head">
+    <div class="grow" style="min-width:0">
+        <a class="back" href="/playlists">← Playlists</a>
+        @if (renaming && Current is { } rp)
+        {
+            <div class="row rename-row">
+                <input class="grow" style="min-width:0" @ref="renameInput" @bind="renameValue" @bind:event="oninput" @onkeydown="e => OnRenameKey(e, rp)" aria-label="Nom de la playlist" />
+                <button class="btn sm" @onclick="() => Rename(rp)">Enregistrer</button>
+                <button class="btn ghost sm" @onclick="() => renaming = false">Annuler</button>
+            </div>
+        }
+        else
+        {
+            <div class="row" style="gap:12px">
+                <h1>@(Current?.Name ?? "Playlist")</h1>
+                @if (Current is { } cp) { <button class="btn ghost sm" @onclick="() => StartRename(cp)"><Ico Name="edit" Size="15" /> Renommer</button> }
+            </div>
+        }
+        <p class="sub">Composez la boucle de contenus. La diffusion se publie écran par écran, depuis la page Écrans.</p>
+    </div>
+</div>
+
+<YoutubeDurations Items="media" OnUpdated="Refresh" />
+
+<div class="pe-layout">
+    @if (Current is { } pl)
+    {
+        <div class="card">
+            <h3 style="margin-bottom:14px">@pl.Draft.Count contenu@(pl.Draft.Count > 1 ? "s" : "")</h3>
+
+            @if (pl.Draft.Count == 0)
+            {
+                <div class="empty"><div class="big">Playlist vide</div><p>Ajoutez une app depuis le panneau de droite : Image, Vidéo et Diaporamas utilisent les fichiers de la médiathèque.</p></div>
+            }
+            @for (var i = 0; i < pl.Draft.Count; i++)
+            {
+                var idx = i;
+                var it = pl.Draft[idx];
+                var m = media.FirstOrDefault(x => x.Id == it.MediaId);
+                <div class="item-row">
+                    <div class="idx">@(idx + 1)</div>
+                    <div class="th">
+                        @if (m != null) { <MediaThumb Media="m" All="media" /> }
+                        @if (Helpers.YoutubeBadge(m) is { } badge) { <span class="dur">@badge</span> }
+                    </div>
+                    <div><b>@(m?.Name ?? "(supprimé)")</b><br /><small>@(it.Placement != "full" ? "incrusté en permanence" : m?.AppId != null ? "app · " + Svc.Find(m.AppId)?.Name : m?.Type == "video" ? "vidéo" : "image")</small></div>
+                    <div class="summary"><small>@Summary(it, m)</small></div>
+                    <div class="row" style="gap:4px">
+                        <button class="btn ghost sm" disabled="@(m == null)" title="Paramètres de ce contenu" @onclick="() => OpenSettings(pl, it, m)">⚙ Paramètres</button>
+                        <button class="btn ghost sm icon" disabled="@(idx == 0)" @onclick="() => Move(pl, idx, -1)">↑</button>
+                        <button class="btn ghost sm icon" disabled="@(idx == pl.Draft.Count - 1)" @onclick="() => Move(pl, idx, 1)">↓</button>
+                        <button class="btn danger sm icon" @onclick="() => RemoveItem(pl, it)">✕</button>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <aside class="card pe-side">
+            <h3>Apps</h3>
+            @if (enabledApps.Count == 0)
+            {
+                <p class="hint">Aucune application activée. <a href="/settings?tab=applications">Choisissez-les dans Réglages › Applications</a>.</p>
+            }
+            else
+            {
+                <div class="search-box">
+                    <Ico Name="search" Size="16" />
+                    <input placeholder="Rechercher" aria-label="Rechercher une app" @bind="appSearch" @bind:event="oninput" />
+                </div>
+                <div class="pe-apps">
+                    @foreach (var a in enabledApps.Where(a => appSearch.Length == 0 || a.Name.Contains(appSearch, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        var app = a;
+                        <button type="button" class="pe-app" title="Ajouter « @app.Name » à la playlist" @onclick="() => newApp = app">
+                            <AppIcon Id="@app.Id" Small="true" Size="18" />
+                            <span><b>@app.Name</b><small>@app.Category</small></span>
+                        </button>
+                    }
+                </div>
+            }
+        </aside>
+    }
+    else
+    {
+        <div class="card empty"><div class="big">Playlist introuvable</div><p>Elle a peut-être été supprimée. <a href="/playlists">Revenir aux playlists</a></p></div>
+    }
+</div>
+
+@if (newApp != null && Current is { } target)
+{
+    var a = newApp;
+    <div class="modal-backdrop" @onclick="() => newApp = null"></div>
+    <div class="modal app-modal wide" role="dialog" aria-modal="true" aria-labelledby="new-app-title">
+        <div class="modal-head">
+            <AppIcon Id="@a.Id" />
+            <div class="grow">
+                <h3 id="new-app-title">@a.Name</h3>
+                <small>Ajout à « @target.Name »</small>
+            </div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => newApp = null"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            <AppInstanceForm @key="a.Id" AppId="@a.Id" ShowActions="false" OnSaved="item => AddApp(target, item)" @ref="newForm" />
+        </div>
+        <div class="modal-foot">
+            <button class="btn ghost" @onclick="() => newApp = null">Annuler</button>
+            @if (a.Provider != null) { <button class="btn ghost" @onclick="() => newForm!.Test()">Tester</button> }
+            <button class="btn" @onclick="() => newForm!.Save()">Ajouter à la playlist</button>
+        </div>
+    </div>
+}
+
+@if (mItem != null && mPlaylist != null)
+{
+    var isApp = mMedia?.AppId != null;
+    <div class="modal-backdrop" @onclick="CloseSettings"></div>
+    <div class="modal @(isApp ? "app-modal wide" : "")" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        @if (isApp)
+        {
+            <div class="modal-head">
+                <AppIcon Id="@mMedia!.AppId" />
+                <div class="grow">
+                    <h3 id="modal-title">@mMedia.Name</h3>
+                    <small>@Svc.Find(mMedia.AppId)?.Name</small>
+                </div>
+                <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseSettings"><Ico Name="x" Size="20" /></button>
+            </div>
+        }
+        else
+        {
+            <h3 id="modal-title">Paramètres du contenu</h3>
+            <p class="hint"><b>@mMedia?.Name</b> · @(mMedia?.Type == "video" ? "vidéo" : "image")</p>
+        }
+        <div class="@(isApp ? "modal-body" : "")">
+        @if (isApp)
+        {
+            <AppInstanceForm @key="mMedia!.Id" AppId="@(mMedia!.AppId!)" InstanceId="mMedia!.Id" ShowActions="false" OnSaved="_ => SaveSettings()" @ref="itemForm" />
+            <h4 class="pe-sub">Dans cette playlist</h4>
+        }
+        <div class="dw">
+            @if (mMedia?.Type == "app")
+            {
+                <div class="dw-field">
+                    <label>Position à l'écran</label>
+                    <select @bind="mPlacement">
+                        @foreach (var o in PlacementsFor(mMedia)) { <option value="@o.Id">@o.Label</option> }
+                    </select>
+                    <small>Pleine page : le contenu passe à son tour dans la boucle. Angle ou bandeau : il reste affiché en permanence.</small>
+                </div>
+            }
+            @if (mPlacement != "full")
+            {
+                <div class="dw-note">Ce contenu reste affiché en permanence pendant toute la boucle : il n'a pas de durée.</div>
+            }
+            else if (ContentDuration(mMedia))
+            {
+                <div class="dw-field">
+                    <label>Durée d'affichage</label>
+                    <select value="@mMode" @onchange="ChangeMode">
+                        <option value="content" selected="@(mMode == "content")">Jusqu'à la fin du contenu</option>
+                        <option value="fixed" selected="@(mMode == "fixed")">Durée fixe</option>
+                    </select>
+                    @if (Helpers.VideoSeconds(mMedia) is { } vs) { <small>Durée de la vidéo : @Helpers.FormatDuration(vs).</small> }
+                    <small>« Jusqu'à la fin » passe au contenu suivant à la fin de la vidéo (dans la limite de la durée maximale de l'app). « Durée fixe » coupe ou rejoue la vidéo à ce terme.</small>
+                </div>
+                @if (mMode == "fixed")
+                {
+                    <div class="dw-field"><label>Durée fixe (secondes)</label><input type="number" min="1" max="86400" @bind="mSeconds" /></div>
+                }
+            }
+            else
+            {
+                <div class="dw-field"><label>Durée d'affichage (secondes)</label><input type="number" min="1" max="86400" @bind="mSeconds" /></div>
+            }
+        </div>
+        @if (mError != null) { <div class="err">@mError</div> }
+        </div>
+        <div class="@(isApp ? "modal-foot" : "modal-actions")">
+            <button class="btn ghost" @onclick="CloseSettings">Annuler</button>
+            @if (isApp && Svc.Find(mMedia!.AppId)?.Provider != null) { <button class="btn ghost" @onclick="() => itemForm!.Test()">Tester</button> }
+            <button class="btn" @onclick="SaveAll">Enregistrer</button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private List<Playlist> playlists = new();
+    private List<MediaItem> media = new();
+
+
+    // Panneau Apps : seules les apps activées dans Réglages › Applications sont proposées.
+    private List<AppManifest> enabledApps = new();
+    private string appSearch = "";
+    private AppManifest? newApp;
+    private AppInstanceForm? newForm, itemForm;
+
+    private IEnumerable<Option> PlacementsFor(MediaItem? m) =>
+        Svc.Find(m?.AppId) is { } app ? ScreenOptions.Placements.Where(o => app.Placements.Contains(o.Id)) : ScreenOptions.PlacementsFor(m);
+
+    // Une app « content » (YouTube) décide elle-même de sa durée : fin de la vidéo, plafonnée par son paramètre.
+    private bool ContentDuration(MediaItem? m) => Svc.Find(m?.AppId)?.Duration == "content";
+
+    private Playlist? Current => playlists.FirstOrDefault(p => p.Id == Id);
+
+    protected override void OnParametersSet() { Reload(); renaming = false; }
+
+    private async Task Refresh() { Reload(); await InvokeAsync(StateHasChanged); }
+
+    private void Reload()
+    {
+        playlists = Store.Read(d => d.Playlists.ToList());
+        media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());   // hors vidéos en conversion / en échec
+        enabledApps = Svc.Installed().Select(i => Svc.Find(i.AppId)).OfType<AppManifest>().Where(a => !a.ScreenWidget).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+    }
+
+    // Le contenu de l'app vient d'être créé avec ses réglages : il rejoint la fin de la playlist.
+    private void AddApp(Playlist pl, MediaItem item)
+    {
+        var dur = Store.Read(d => d.Tenant.DefaultDurationSec);
+        var placement = PlacementsFor(item).Select(o => o.Id).DefaultIfEmpty("full").Contains("full") ? "full" : PlacementsFor(item).First().Id;
+        Store.Write(d => { pl.Draft.Add(new PlaylistItem { MediaId = item.Id, DurationSec = dur, Placement = placement }); pl.Touch(); });
+        newApp = null;
+        Reload();
+    }
+
+    // App : ses réglages sont enregistrés d'abord (validation comprise), puis la position et la durée dans la playlist.
+    private async Task SaveAll()
+    {
+        if (mMedia?.AppId != null && itemForm != null) await itemForm.Save();
+        else SaveSettings();
+    }
+
+    // Un contenu d'app n'existe que pour ses playlists : retiré de la dernière, il est supprimé (les fichiers de la médiathèque restent).
+    private void RemoveItem(Playlist pl, PlaylistItem it)
+    {
+        Store.Write(d => { pl.Draft.Remove(it); pl.Touch(); });
+        var m = media.FirstOrDefault(x => x.Id == it.MediaId);
+        if (m?.AppId != null && Svc.PlaylistsUsing(m.Id).Count == 0) Svc.DeleteInstance(m.Id);
+        Reload();
+    }
+
+    private void Move(Playlist pl, int idx, int delta)
+    {
+        Store.Write(d =>
+        {
+            (pl.Draft[idx], pl.Draft[idx + delta]) = (pl.Draft[idx + delta], pl.Draft[idx]);
+            pl.Touch();
+        });
+        Reload();
+    }
+
+    // ---------- Paramètres d'un élément (fenêtre modale) ----------
+    private PlaylistItem? mItem;
+    private Playlist? mPlaylist;
+    private MediaItem? mMedia;
+    private string mPlacement = "full", mMode = "content";
+    private int mSeconds = 8;
+    private string? mError;
+
+    private void OpenSettings(Playlist pl, PlaylistItem it, MediaItem? m)
+    {
+        mPlaylist = pl; mItem = it; mMedia = m;
+        mPlacement = it.Placement;
+        mMode = it.DurationMode == "fixed" ? "fixed" : "content";
+        mSeconds = it.DurationSec;
+        mError = null;
+    }
+
+    private void CloseSettings() { mItem = null; mPlaylist = null; mMedia = null; }
+
+    private void ChangeMode(ChangeEventArgs e)
+    {
+        mMode = e.Value?.ToString() == "fixed" ? "fixed" : "content";
+        if (mMode == "fixed") mSeconds = Helpers.VideoSeconds(mMedia) ?? 30;   // départ : la durée de la vidéo si elle est connue
+    }
+
+    private void SaveSettings()
+    {
+        if (mItem is not { } item || mPlaylist is not { } pl) return;
+        var content = ContentDuration(mMedia);
+        var needsSeconds = mPlacement == "full" && (!content || mMode == "fixed");
+        if (needsSeconds && (mSeconds < 1 || mSeconds > 86400)) { mError = "La durée doit être comprise entre 1 et 86 400 secondes."; return; }
+        var placement = mPlacement; var mode = mMode; var seconds = mSeconds;
+        Store.Write(d =>
+        {
+            item.Placement = placement;
+            if (content) item.DurationMode = mode;
+            if (needsSeconds) item.DurationSec = seconds;
+            pl.Touch();   // à publier depuis la page Écrans
+        });
+        CloseSettings();
+        Reload();
+    }
+
+    // Résumé affiché dans la ligne ; le détail se règle dans la fenêtre « Paramètres ».
+    private string Summary(PlaylistItem it, MediaItem? m)
+    {
+        if (m == null) return "";
+        var place = ScreenOptions.Placements.FirstOrDefault(o => o.Id == it.Placement)?.Label ?? "Pleine page";
+        if (it.Placement != "full") return place + " · permanent";
+        if (ContentDuration(m) && it.DurationMode != "fixed") return place + " · jusqu'à la fin";
+        return $"{place} · {it.DurationSec} s";
+    }
+
+    private bool renaming;
+    private string renameValue = "";
+
+    private ElementReference renameInput;
+    private bool focusRename;
+
+    private void StartRename(Playlist pl) { renameValue = pl.Name; renaming = true; focusRename = true; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusRename && renaming) { focusRename = false; await renameInput.FocusAsync(); }
+    }
+
+    private void OnRenameKey(KeyboardEventArgs e, Playlist pl)
+    {
+        if (e.Key == "Enter") Rename(pl);
+        else if (e.Key == "Escape") renaming = false;
+    }
+
+    private void Rename(Playlist pl)
+    {
+        var name = renameValue.Trim();
+        if (name.Length == 0) return;
+        Store.Write(d => { pl.Name = name; pl.UpdatedAt = DateTime.UtcNow; });   // le nom n'est pas publié : aucun écran à notifier
+        renaming = false;
+        Reload();
+    }
+
+}

@@ -1,0 +1,20 @@
+@* Vignette d'un contenu : image, première image de la vidéo, miniature YouTube ; pour les apps Image / Vidéo / Diaporama,
+   premier fichier choisi dans la médiathèque (si All est fourni) ; sinon icône de l'app. *@
+@if (Source is { } f && f.FileName != null && f.Status == null)
+{
+    if (f.Type == "image") { <img src="/media/@f.FileName" alt="" loading="lazy" /> }
+    else { <video src="/media/@(f.FileName)#t=1" muted preload="metadata"></video> }
+}
+else if (Media.AppId == "youtube" && YouTube.ExtractId(Media.Settings.GetValueOrDefault("url")) is { } yt) { <img src="https://i.ytimg.com/vi/@yt/hqdefault.jpg" alt="" loading="lazy" /> }
+else { <span class="pl-app"><AppIcon Id="@Media.AppId" Tile="false" Size="30" /></span> }
+
+@code {
+    [Parameter, EditorRequired] public MediaItem Media { get; set; } = default!;
+    /// <summary>Médias du client : permet d'afficher le fichier choisi par une app de la médiathèque.</summary>
+    [Parameter] public IReadOnlyList<MediaItem>? All { get; set; }
+
+    private MediaItem? Source => Media.AppId == null
+        ? Media
+        : All == null ? null
+        : AppField.MediaIds(Media.Settings.GetValueOrDefault("media") ?? Media.Settings.GetValueOrDefault("medias")).Select(id => All.FirstOrDefault(x => x.Id == id)).FirstOrDefault(x => x != null);
+}

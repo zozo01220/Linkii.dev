@@ -1,0 +1,289 @@
+@inject TenantStore Store
+@inject DriveService Drives
+@inject AppService Svc
+@inject GoogleAuth GoogleAuth
+@inject Toaster Toast
+
+@* Intégrations › Drives › Gérer : la connexion de la source, puis ses dossiers synchronisés.
+   Google Drive : aucun compte, les dossiers sont partagés par lien et lus avec la clé d'API de la plateforme.
+   OneDrive et SharePoint : application Microsoft 365, enregistrée une seule fois et partagée avec les calendriers.
+   Un dossier ajouté est synchronisé aussitôt, puis toutes les 15 minutes ; les écrans suivent sans republier. *@
+<div class="modal-backdrop" @onclick="Close"></div>
+<div class="modal app-modal wide" role="dialog" aria-modal="true" aria-labelledby="dsd-title">
+    <div class="modal-head">
+        <AppIcon Id="@("drv-" + Source)" />
+        <div class="grow">
+            <h3 id="dsd-title">@Def.Name</h3>
+            <small>@HeadLine</small>
+        </div>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="modal-body">
+        @if (IsGoogle)
+        {
+            <h4 class="pe-sub csd-first">Compte Google</h4>
+            @if (google.Connected && hasDrive)
+            {
+                <div class="cvs-account">
+                    <span class="cat-avatar gd-avatar">@GoogleInitial</span>
+                    <div class="grow">
+                        <b>@(google.User.Length > 0 ? google.User : "Compte Google")</b>
+                        <small>Connecté@(google.Since is { } since ? $" le {since.ToLocalTime():dd.MM.yyyy}" : "") · lecture seule : rien n'est modifié dans votre Drive.</small>
+                    </div>
+                    <button type="button" class="btn ghost sm" @onclick="DisconnectGoogle">Déconnecter</button>
+                </div>
+                <p class="csd-shared"><Ico Name="folder" Size="14" /> Collez le lien de n'importe quel dossier accessible à ce compte : ses dossiers, ceux partagés avec lui ou un Drive partagé. Aucun partage public n'est nécessaire.</p>
+                <p class="csd-shared"><Ico Name="link" Size="14" /> Compte partagé avec Google Calendar : le déconnecter arrête aussi la lecture de vos agendas Google.</p>
+            }
+            else if (google.Connected && GoogleAuth.IsConfigured)
+            {
+                <div class="cvs-account">
+                    <span class="cat-avatar gd-avatar">@GoogleInitial</span>
+                    <div class="grow">
+                        <b>@(google.User.Length > 0 ? google.User : "Compte Google")</b>
+                        <small>Connecté pour Google Calendar. Autorisez aussi la lecture de vos fichiers Drive (l'accès aux agendas est conservé).</small>
+                    </div>
+                    <a class="btn sm" href="/google/connect?for=drive" target="_top">Autoriser Drive</a>
+                </div>
+            }
+            else if (GoogleAuth.IsConfigured)
+            {
+                <div class="cvs-account">
+                    <div class="grow">
+                        <b>Aucun compte connecté</b>
+                        <small>Connectez le compte Google qui a accès à vos dossiers. Linkii demande uniquement un accès en lecture.</small>
+                    </div>
+                    <a class="btn sm" href="/google/connect?for=drive" target="_top">Se connecter avec Google</a>
+                </div>
+            }
+            else
+            {
+                <div class="dw-note">Google Drive n'est pas encore disponible : la connexion Google de la plateforme doit d'abord être configurée sur le serveur par l'administrateur Linkii.</div>
+            }
+        }
+        else
+        {
+            <h4 class="pe-sub csd-first">Connexion</h4>
+            <ol class="cvs-steps">
+                <li>Entra ID › <b>Inscriptions d'applications</b> › Nouvelle inscription (comptes de ce locataire uniquement).</li>
+                <li><b>Autorisations d'API</b> › Microsoft Graph › <i>Autorisations de l'application</i> : <code>Files.Read.All</code> (ou <code>Sites.Selected</code> pour la limiter à certains sites), puis <b>Accorder le consentement administrateur</b>.</li>
+                <li><b>Certificats et secrets</b> › Nouveau secret client : copiez sa <i>valeur</i> ci-dessous.</li>
+            </ol>
+            <div class="dw">
+                <div class="dw-field"><label for="dsd-tenant">ID du locataire (Tenant ID)</label><input id="dsd-tenant" class="mono" @bind="tenantId" spellcheck="false" placeholder="00000000-0000-0000-0000-000000000000" /></div>
+                <div class="dw-field"><label for="dsd-client">ID de l'application (Client ID)</label><input id="dsd-client" class="mono" @bind="clientId" spellcheck="false" placeholder="00000000-0000-0000-0000-000000000000" /></div>
+                <div class="dw-field"><label for="dsd-secret">Secret client</label><input id="dsd-secret" type="password" @bind="secret" autocomplete="new-password" placeholder="@(hasSecret ? "•••••• enregistré — laisser vide pour le conserver" : "")" /></div>
+            </div>
+            <p class="csd-shared"><Ico Name="link" Size="14" /> Connexion partagée avec Microsoft 365 (Calendriers partagés) : la modifier ici la modifie aussi pour vos calendriers et salles.</p>
+        }
+
+        <h4 class="pe-sub">Dossiers <span class="cat-count">@folders.Count</span></h4>
+        <div class="cal-list">
+            @foreach (var f in folders)
+            {
+                var folder = f;
+                var (contents, lists) = uses.GetValueOrDefault(folder.Id.ToString());
+                <div class="cal-row">
+                    <Ico Name="folder" Size="16" />
+                    <div class="cal-id">
+                        <b>@folder.Name</b>
+                        <small title="@folder.Location">@folder.Location · @folder.FileCount fichier@(folder.FileCount > 1 ? "s" : "") · synchronisé @DriveSources.Ago(folder.SyncedUtc)</small>
+                        @if (folder.LastError.Length > 0) { <small class="cal-err" title="@folder.LastError">@folder.LastError</small> }
+                    </div>
+                    <span class="badge neutre">@(lists > 0 ? $"{lists} liste{(lists > 1 ? "s" : "")}" : contents > 0 ? $"{contents} contenu{(contents > 1 ? "s" : "")}" : "Non utilisé")</span>
+                    <button type="button" class="kebab-btn" title="Retirer" aria-label="Retirer @folder.Name" @onclick="() => confirmId = folder.Id"><Ico Name="trash" Size="16" /></button>
+                    @if (confirmId == folder.Id)
+                    {
+                        <div class="cal-confirm" role="alert">
+                            <span class="grow">@ConfirmText(contents)</span>
+                            <button type="button" class="btn ghost sm" @onclick="() => confirmId = null">Annuler</button>
+                            <button type="button" class="btn danger sm" @onclick="() => Remove(folder)">Retirer</button>
+                        </div>
+                    }
+                </div>
+            }
+            @if (folders.Count == 0) { <div class="cal-empty">@(configured ? "Aucun dossier pour l'instant. Ajoutez le premier ci-dessous." : NotReady)</div> }
+            <div class="cal-add">
+                <input aria-label="Nom affiché" placeholder="Nom affiché (facultatif)" maxlength="80" @bind="newName" />
+                <input aria-label="Lien de partage du dossier" class="mono" placeholder="@Def.LinkPlaceholder" @bind="newLink" spellcheck="false" autocomplete="off" />
+                <button type="button" class="btn ghost sm" disabled="@busy" @onclick="Add"><Ico Name="plus" Size="14" /> Ajouter</button>
+                <small>Collez le lien de partage du dossier. Ses images et vidéos sont affichées (les sous-dossiers ne sont pas parcourus), @DriveService.MaxFiles fichiers au plus.</small>
+            </div>
+        </div>
+    </div>
+    <div class="modal-foot">
+        @if (!IsGoogle || hasDrive) { <button class="btn ghost" disabled="@busy" @onclick="Test">@(testing ? "Test en cours…" : "Tester la connexion")</button> }
+        <button class="btn ghost" disabled="@(busy || folders.Count == 0)" @onclick="SyncAll"><Ico Name="refresh" Size="16" /> @(syncing ? "Synchronisation…" : "Synchroniser maintenant")</button>
+        <span class="grow"></span>
+        @if (IsGoogle) { <button class="btn" @onclick="Close">Fermer</button> }
+        else
+        {
+            <button class="btn ghost" @onclick="Close">Fermer</button>
+            <button class="btn" @onclick="() => SaveConnection(false)">Enregistrer la connexion</button>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Source { get; set; } = "";
+    [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>Connexion ou dossiers modifiés : la page Intégrations se met à jour.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private DriveSourceDef Def => DriveSources.Find(Source)!;
+    private bool IsGoogle => Source == "gdrive";   // compte Google connecté (« Se connecter avec Google ») : rien à saisir
+
+    // Connexion Microsoft 365 en cours de saisie (OneDrive et SharePoint)
+    private string tenantId = "", clientId = "", secret = "";
+    private bool hasSecret, configured, testing, syncing;
+    private GoogleAuth.Connection google = new(false, "", null);
+    private bool hasDrive;   // le compte Google connecté a autorisé la lecture des fichiers Drive
+
+    private string GoogleInitial => google.User.Length > 0 ? char.ToUpperInvariant(google.User[0]).ToString() : "G";
+
+    private string HeadLine => configured ? "Dossiers copiés dans la médiathèque et lus même hors ligne"
+        : IsGoogle ? (GoogleAuth.IsConfigured ? "Connectez votre compte Google, puis ajoutez vos dossiers" : "Pas encore disponible sur cette plateforme")
+        : "Connexion à configurer, puis ajoutez vos dossiers";
+
+    /// <summary>Pourquoi on ne peut pas encore ajouter de dossier.</summary>
+    private string NotReady => !IsGoogle ? "Enregistrez d'abord la connexion, puis ajoutez vos dossiers."
+        : GoogleAuth.IsConfigured ? "Connectez d'abord votre compte Google." : "Google Drive n'est pas encore disponible sur cette plateforme.";
+    private bool busy => testing || syncing;
+    private List<DriveFolder> folders = new();
+    private Dictionary<string, (int Contents, int Lists)> uses = new();   // par dossier : contenus qui l'affichent, listes de lecture qui les contiennent
+    private string newName = "", newLink = "";
+    private Guid? confirmId;
+
+    protected override void OnInitialized()
+    {
+        var t = Store.Read(d => d.Tenant);
+        tenantId = t.MsTenantId; clientId = t.MsClientId;
+        hasSecret = t.MsClientSecret.Length > 0;
+        Load();
+    }
+
+    private void Load()
+    {
+        var t = Store.Read(d => d.Tenant);
+        configured = DriveSources.Configured(t, Source);
+        google = GoogleAuth.ConnectionOf(t);
+        hasDrive = GoogleAuth.Has(t, GoogleAuth.DriveScope);
+        folders = t.DriveFolders.Where(f => f.Source == Source).OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        uses = Store.Read(d =>
+        {
+            var byFolder = d.Media.Where(m => m.AppId == "drive" && m.Settings.GetValueOrDefault("folder") is { Length: > 0 })
+                .GroupBy(m => m.Settings["folder"]).ToDictionary(g => g.Key, g => g.Select(m => m.Id).ToHashSet());
+            return byFolder.ToDictionary(kv => kv.Key, kv => (kv.Value.Count, d.Playlists.Count(p => p.Draft.Any(i => kv.Value.Contains(i.MediaId)))));
+        });
+    }
+
+    private async Task Changed()
+    {
+        Load();
+        await OnChanged.InvokeAsync();
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private static string ConfirmText(int contents) => contents switch
+    {
+        0 => "Retirer ce dossier ? Ses fichiers quittent le serveur (rien n'est supprimé du Drive).",
+        1 => "Utilisé par 1 contenu, qui n'affichera plus rien. Retirer ce dossier ?",
+        _ => $"Utilisé par {contents} contenus, qui n'afficheront plus rien. Retirer ce dossier ?"
+    };
+
+    // ---------- Connexion ----------
+
+    /// <summary>OneDrive : contrôle et enregistre la connexion Microsoft 365 (partagée avec les calendriers) ; active la source si besoin.</summary>
+    private async Task<bool> SaveConnection(bool quiet)
+    {
+        var s = secret.Trim();
+        if (SharedConnections.CheckM365(tenantId.Trim(), clientId.Trim(), s, hasSecret) is { } error) { Toast.Error(error); return false; }
+        Store.Write(d => SharedConnections.SaveM365(d.Tenant, tenantId.Trim(), clientId.Trim(), s));
+        if (s.Length > 0) hasSecret = true;
+        secret = "";
+        if (!DriveSources.Enabled(Store.Read(d => d.Tenant), Source)) Svc.SetDriveSource(Source, true);
+        await Changed();
+        if (!quiet) Toast.Ok($"Connexion « {Def.Name} » enregistrée.");
+        return true;
+    }
+
+    /// <summary>Oublie le compte Google : la synchronisation s'arrête, les fichiers déjà copiés restent sur les écrans.</summary>
+    private async Task DisconnectGoogle()
+    {
+        await GoogleAuth.Disconnect(Store.ClientId);
+        await Changed();
+        Toast.Ok("Compte Google déconnecté. Les fichiers déjà copiés restent sur les écrans mais ne sont plus synchronisés, et les agendas Google ne sont plus lus.");
+    }
+
+    private async Task Test()
+    {
+        if (!IsGoogle && !await SaveConnection(true)) return;
+        testing = true;
+        StateHasChanged();
+        try { Toast.Ok(await Drives.TestConnection(Store.Read(d => d.Tenant), Source)); }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or System.Text.Json.JsonException or KeyNotFoundException or TaskCanceledException)
+        {
+            Toast.Error("Échec : " + ex.Message);
+        }
+        finally { testing = false; }
+    }
+
+    // ---------- Dossiers ----------
+
+    private async Task Add()
+    {
+        if (!configured) { Toast.Error(NotReady); return; }
+        var link = newLink.Trim();
+        if (link.Length == 0) { Toast.Error("Collez le lien de partage du dossier."); return; }
+        syncing = true;
+        StateHasChanged();
+        try
+        {
+            var t = Store.Read(d => d.Tenant);
+            var (remoteId, name, location) = await Drives.Resolve(t, Source, link);
+            if (t.DriveFolders.Any(f => f.Source == Source && f.RemoteId == remoteId)) { Toast.Error("Ce dossier est déjà dans la liste."); return; }
+            var display = newName.Trim().Length > 0 ? newName.Trim() : name;
+            var folder = new DriveFolder { Source = Source, Name = display.Length > 80 ? display[..80] : display, RemoteId = remoteId, Location = location };
+            Store.Write(d => d.Tenant.DriveFolders.Add(folder));
+            if (!DriveSources.Enabled(t, Source)) Svc.SetDriveSource(Source, true);
+            newName = newLink = "";
+            await Changed();
+            StateHasChanged();
+            var error = await Drives.Sync(Store.ClientId, folder.Id);
+            await Changed();
+            var n = folders.FirstOrDefault(f => f.Id == folder.Id)?.FileCount ?? 0;
+            if (error == null) Toast.Ok($"« {folder.Name} » ajouté : {n} fichier{(n > 1 ? "s" : "")} synchronisé{(n > 1 ? "s" : "")}.");
+            else Toast.Error($"« {folder.Name} » ajouté, mais la synchronisation a échoué : {error}");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or System.Text.Json.JsonException or KeyNotFoundException)
+        {
+            Toast.Error(ex.Message);
+        }
+        finally { syncing = false; }
+    }
+
+    private async Task SyncAll()
+    {
+        syncing = true;
+        StateHasChanged();
+        try
+        {
+            var errors = new List<string>();
+            foreach (var f in folders.ToList())
+                if (await Drives.Sync(Store.ClientId, f.Id) is { } e) errors.Add($"« {f.Name} » : {e}");
+            await Changed();
+            if (errors.Count == 0) Toast.Ok("Dossiers synchronisés. Les écrans concernés se mettent à jour.");
+            else Toast.Error(errors[0]);
+        }
+        finally { syncing = false; }
+    }
+
+    private async Task Remove(DriveFolder f)
+    {
+        confirmId = null;
+        await Drives.RemoveFolder(Store.ClientId, f.Id);
+        await Changed();
+        Toast.Ok($"« {f.Name} » retiré des Drives.");
+    }
+}

@@ -1,0 +1,35 @@
+@using Microsoft.JSInterop
+@implements IDisposable
+@inject AppService Svc
+@inject IJSRuntime JS
+
+@* Sans affichage : lit, une fois, la durée des vidéos YouTube dont elle n'est pas encore connue (API IFrame de YouTube, dans le navigateur). *@
+
+@code {
+    [Parameter] public IEnumerable<MediaItem> Items { get; set; } = Array.Empty<MediaItem>();
+    [Parameter] public EventCallback OnUpdated { get; set; }
+
+    private readonly CancellationTokenSource cts = new();
+    private readonly HashSet<Guid> tried = new();   // une seule tentative par instance et par affichage de page
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        var missing = Items
+            .Where(m => m.AppId == "youtube" && Helpers.VideoSeconds(m) == null && tried.Add(m.Id) && YouTube.ExtractId(m.Settings.GetValueOrDefault("url")) != null)
+            .Select(m => (m.Id, Video: YouTube.ExtractId(m.Settings.GetValueOrDefault("url"))!))
+            .ToList();
+        foreach (var (id, video) in missing)
+        {
+            try
+            {
+                var seconds = await JS.InvokeAsync<int>("linkiiYt.duration", cts.Token, video);
+                if (seconds <= 0) continue;
+                Svc.SetInfo(id, "durationSec", seconds.ToString());
+                await OnUpdated.InvokeAsync();
+            }
+            catch (Exception) { /* page quittée, circuit coupé ou API injoignable : pas de durée */ }
+        }
+    }
+
+    public void Dispose() { cts.Cancel(); cts.Dispose(); }
+}

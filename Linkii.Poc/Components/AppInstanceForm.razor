@@ -1,0 +1,89 @@
+@inject AppService Apps
+@inject Toaster Toast
+
+@* Création / modification d'une instance d'app : nom + formulaire du manifeste + test. Réutilisé par la page d'édition et par l'assistant. *@
+@if (manifest == null)
+{
+    <div class="err">App introuvable.</div>
+}
+else if (!installed)
+{
+    <div class="dw-note">Cette app n'est pas activée pour votre espace. <a href="/integrations">Activez-la dans la page Intégrations</a>.</div>
+}
+else
+{
+    <div class="dw">
+        <div class="dw-field">
+            <label>Nom du contenu *</label>
+            <input type="text" maxlength="80" @bind="name" @bind:event="oninput" placeholder="@manifest.Name" />
+            <small>Le nom sous lequel vous le retrouverez dans la médiathèque et les listes de lecture.</small>
+        </div>
+
+        <AppForm Manifest="manifest" Values="values" StoredSecrets="storedSecrets" InstanceId="instance?.Id" />
+
+        @foreach (var e in errors) { <div class="err">@e</div> }
+        @if (test != null) { <div class="@(test.Value.Ok ? (test.Value.Message.StartsWith("⚠") ? "dw-note" : "msg") : "err")">@test.Value.Message</div> }
+
+        @if (testing) { <div class="dw-note">Test en cours…</div> }
+
+        @if (ShowActions)
+        {
+            <div class="row" style="margin-top:14px">
+                <button type="button" class="btn" @onclick="Save">@SaveLabel</button>
+                @if (manifest.Provider != null)
+                {
+                    <button type="button" class="btn ghost" disabled="@testing" @onclick="Test">@(testing ? "Test…" : "Tester")</button>
+                }
+                @if (OnCancel.HasDelegate) { <button type="button" class="linklike" @onclick="OnCancel">Annuler</button> }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public string AppId { get; set; } = "";
+    [Parameter] public Guid? InstanceId { get; set; }
+    [Parameter] public string SaveLabel { get; set; } = "Enregistrer";
+    [Parameter] public EventCallback<MediaItem> OnSaved { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+    /// <summary>false : les boutons sont fournis par l'appelant (pied d'une fenêtre modale) via Save() et Test().</summary>
+    [Parameter] public bool ShowActions { get; set; } = true;
+
+    private AppManifest? manifest;
+    private MediaItem? instance;
+    private Dictionary<string, string> values = new();
+    private HashSet<string> storedSecrets = new();
+    private string name = "";
+    private List<string> errors = new();
+    private (bool Ok, string Message)? test;
+    private bool installed, testing;
+
+    protected override void OnInitialized()
+    {
+        manifest = Apps.Find(AppId);
+        if (manifest == null) return;
+        installed = InstanceId != null || Apps.IsInstalled(AppId);   // un contenu existant reste modifiable même si l'app a été désactivée
+        if (InstanceId is { } id) instance = Apps.Instances(AppId).FirstOrDefault(m => m.Id == id);
+        values = AppCatalog.WithDefaults(manifest, instance?.Settings);
+        storedSecrets = instance?.Secrets.Keys.ToHashSet() ?? new();
+        name = instance?.Name ?? manifest.Name;
+    }
+
+    public async Task Save()
+    {
+        errors = new(); test = null;
+        var (item, errs) = Apps.SaveInstance(AppId, instance?.Id, name, values);
+        if (item == null) { errors = errs; Toast.Error(errs.Count > 1 ? $"{errs.Count} champs à corriger : {errs[0]}" : errs.FirstOrDefault()); return; }
+        instance = item;
+        storedSecrets = item.Secrets.Keys.ToHashSet();
+        foreach (var f in manifest!.Settings.Where(f => f.IsSecret)) values[f.Key] = "";   // un secret saisi n'est jamais réaffiché
+        await OnSaved.InvokeAsync(item);
+    }
+
+    public async Task Test()
+    {
+        errors = new(); test = null; testing = true; StateHasChanged();
+        try { test = await Apps.Test(manifest!, values, instance); }
+        finally { testing = false; }
+    }
+}

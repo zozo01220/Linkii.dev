@@ -1,0 +1,239 @@
+@page "/playlists"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@inject TenantStore Store
+@inject AppService Svc
+@inject NavigationManager Nav
+@inject Toaster Toast
+
+<div class="page-head">
+    <div>
+        <h1>Vos listes de lecture</h1>
+        <p class="sub">Composez vos boucles de contenus, puis choisissez-les et publiez-les écran par écran.</p>
+    </div>
+    <button class="btn" @onclick="OpenCreate">
+        <svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg> Nouvelle liste de lecture
+    </button>
+</div>
+
+@if (playlists.Count > 0)
+{
+    <div class="pl-tools">
+        <label for="pl-sort">Trier par</label>
+        <select id="pl-sort" @bind="sort">
+            <option value="recent">Plus récentes</option>
+            <option value="name">Nom</option>
+        </select>
+        <span class="grow"></span>
+        <ViewToggle StorageKey="playlists" @bind-Value="view" />
+    </div>
+}
+
+<div class="pl-grid @(view == "list" ? "list" : "")">
+    @foreach (var p in Sorted)
+    {
+        var tiles = p.Draft.Where(i => i.Placement == "full").Select(i => media.FirstOrDefault(m => m.Id == i.MediaId)).Where(m => m != null).Take(3).ToList();
+        var pl = p;
+        var onScreens = screens.Count(s => s.ZonePlaylists().Contains(pl.Id));
+        <div class="pl-card">
+            <a class="pl-cover @(tiles.Count <= 1 ? "single" : "")" href="/playlists/@pl.Id" tabindex="-1" aria-hidden="true">
+                @foreach (var m in tiles) { <div class="pl-tile"><MediaThumb Media="m!" All="media" /></div> }
+                @if (tiles.Count == 0)
+                {
+                    <div class="pl-tile pl-void"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg></div>
+                }
+                <span class="pl-count">@pl.Draft.Count contenu@(pl.Draft.Count > 1 ? "s" : "")</span>
+            </a>
+            <div class="pl-body">
+                <div class="pl-title">
+                    <a class="pl-name" href="/playlists/@pl.Id">@pl.Name</a>
+                    <div class="kebab">
+                        <button type="button" class="kebab-btn" aria-label="Actions pour @pl.Name" aria-haspopup="menu" aria-expanded="@(menuFor == pl.Id ? "true" : "false")"
+                                @onclick="() => menuFor = menuFor == pl.Id ? null : pl.Id"><Ico Name="dots-v" Size="18" /></button>
+                        @if (menuFor == pl.Id)
+                        {
+                            <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                            <div class="kebab-menu" role="menu">
+                                <a role="menuitem" href="/playlists/@pl.Id"><Ico Name="pencil-square" Size="16" /> Éditer</a>
+                                <button type="button" role="menuitem" @onclick="() => OpenRename(pl)"><Ico Name="edit" Size="16" /> Renommer</button>
+                                <button type="button" role="menuitem" @onclick="() => Duplicate(pl)"><Ico Name="copy" Size="16" /> Dupliquer</button>
+                                <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = pl; }"><Ico Name="trash" Size="16" /> Supprimer</button>
+                            </div>
+                        }
+                    </div>
+                </div>
+                <div class="pl-meta">
+                    @{ var mod = Modified(pl); var total = TotalSeconds(pl); }
+                    <span>@mod@if (total > 0) { @(mod != null ? " · " : "")<span class="mono" title="Durée de la boucle">@Helpers.FormatDuration(total)</span> }</span>
+                    @if (onScreens > 0) { <span class="badge neutre" title="Écrans qui diffusent cette liste de lecture"><Ico Name="monitor" Size="13" /> @onScreens écran@(onScreens > 1 ? "s" : "")</span> }
+                </div>
+            </div>
+        </div>
+    }
+    <button class="pl-card pl-add" @onclick="OpenCreate">
+        <span class="pl-plus"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16" /></svg></span>
+        <span>Créer une liste de lecture</span>
+    </button>
+</div>
+
+@if (creating)
+{
+    <div class="modal-backdrop" @onclick="CloseName"></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="create-title">
+        <h3 id="create-title">@(renamingPl == null ? "Nouvelle liste de lecture" : "Renommer la liste de lecture")</h3>
+        <p class="hint">@(renamingPl == null ? "Donnez-lui un nom, vous ajouterez les contenus ensuite." : "Le nouveau nom s'affiche dans le back-office uniquement.")</p>
+        <input style="width:100%" @ref="nameInput" @bind="newName" @bind:event="oninput" @onkeydown="OnCreateKey" placeholder="Ex. Accueil, vitrine, salle d'attente" />
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="CloseName">Annuler</button>
+            <button class="btn" disabled="@string.IsNullOrWhiteSpace(newName)" @onclick="SubmitName">@(renamingPl == null ? "Créer" : "Renommer")</button>
+        </div>
+    </div>
+}
+
+@if (deleting != null)
+{
+    var d = deleting;
+    var used = screens.Where(s => s.ZonePlaylists().Contains(d.Id)).ToList();
+    <div class="modal-backdrop" @onclick="() => deleting = null"></div>
+    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="del-title">
+        <h3 id="del-title">Supprimer « @d.Name » ?</h3>
+        @if (used.Count == 0)
+        {
+            <p class="hint">Aucun écran ne l'utilise. Les contenus restent dans la médiathèque.</p>
+        }
+        else
+        {
+            <p class="hint">Elle est choisie sur : <b>@string.Join(", ", used.Select(s => s.Name))</b>. Ces écrans gardent ce qu'ils diffusent jusqu'à leur prochaine publication, puis n'auront plus de liste de lecture.</p>
+        }
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => deleting = null">Annuler</button>
+            <button class="btn danger-solid" @onclick="() => Delete(d)">Supprimer</button>
+        </div>
+    </div>
+}
+
+@code {
+    private List<Playlist> playlists = new();
+    private List<MediaItem> media = new();
+    private string sort = "recent";
+    private string view = "cards";   // cards | list (mémorisé dans le navigateur)
+    private bool creating;
+    private string newName = "";
+    private ElementReference nameInput;
+    private bool focusName;
+
+    private List<Screen> screens = new();
+    private Guid? menuFor;
+    private Playlist? renamingPl, deleting;
+
+    protected override void OnInitialized() => Load();
+
+    private void Load()
+    {
+        playlists = Store.Read(d => d.Playlists.ToList());
+        media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
+        screens = Store.Read(d => d.Screens.Where(s => s.Token != null).ToList());
+    }
+
+    private IEnumerable<Playlist> Sorted => sort == "name"
+        ? playlists.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)
+        : playlists.OrderByDescending(p => p.UpdatedAt ?? DateTime.MinValue).ThenBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase);
+
+    private void OpenCreate() { renamingPl = null; newName = ""; creating = true; focusName = true; }
+
+    private void OpenRename(Playlist p) { menuFor = null; renamingPl = p; newName = p.Name; creating = true; focusName = true; }
+
+    private void CloseName() { creating = false; renamingPl = null; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusName && creating) { focusName = false; await nameInput.FocusAsync(); }
+    }
+
+    private void OnCreateKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") SubmitName();
+        else if (e.Key == "Escape") CloseName();
+    }
+
+    private void SubmitName()
+    {
+        var name = newName.Trim();
+        if (name.Length == 0) return;
+        if (renamingPl is { } r)
+        {
+            Store.Write(d => { var p = d.Playlists.FirstOrDefault(x => x.Id == r.Id); if (p != null) { p.Name = name; p.UpdatedAt = DateTime.UtcNow; } });   // le nom n'est pas diffusé
+            Toast.Ok($"Liste de lecture renommée en « {name} ».");
+            CloseName();
+            Load();
+            return;
+        }
+        var created = new Playlist { Name = name, UpdatedAt = DateTime.UtcNow };
+        Store.Write(d => { d.Playlists.Add(created); });
+        Toast.Ok($"Liste de lecture « {name} » créée.");
+        Nav.NavigateTo($"/playlists/{created.Id}");
+    }
+
+    // Copie du contenu (nouveaux identifiants d'éléments) ; la copie n'est choisie sur aucun écran.
+    private void Duplicate(Playlist src)
+    {
+        menuFor = null;
+        Store.Write(d =>
+        {
+            var p = d.Playlists.FirstOrDefault(x => x.Id == src.Id);
+            if (p == null) return;
+            var names = d.Playlists.Select(x => x.Name).ToHashSet(StringComparer.CurrentCultureIgnoreCase);
+            var name = p.Name + " (copie)";
+            for (var n = 2; names.Contains(name); n++) name = $"{p.Name} (copie {n})";
+            d.Playlists.Add(new Playlist
+            {
+                Name = name, UpdatedAt = DateTime.UtcNow,
+                Draft = p.Draft.Select(i => new PlaylistItem { MediaId = i.MediaId, DurationSec = i.DurationSec, DurationMode = i.DurationMode, Placement = i.Placement }).ToList()
+            });
+        });
+        Toast.Ok($"Liste de lecture « {src.Name} » dupliquée.");
+        Load();
+    }
+
+    // Les écrans qui la diffusent gardent leur instantané publié ; elle n'est simplement plus choisie (modification en attente sur ces écrans).
+    private void Delete(Playlist p)
+    {
+        Store.Write(d =>
+        {
+            foreach (var s in d.Screens.Where(s => s.PlaylistId == p.Id))
+            {
+                if (s.PublishedVersion == 0 && d.Playlists.FirstOrDefault(x => x.Id == p.Id) is { } old)   // écran jamais publié depuis : il garde l'ancien instantané
+                {
+                    s.Published = old.Published.ToList();
+                    s.PublishedVersion = 1;
+                }
+                s.PlaylistId = null;
+            }
+            foreach (var s in d.Screens)   // zones 2 et 3 des écrans découpés
+                for (var z = 0; z < s.ZonePlaylistIds.Count; z++) if (s.ZonePlaylistIds[z] == p.Id) s.ZonePlaylistIds[z] = null;
+            d.Playlists.RemoveAll(x => x.Id == p.Id);
+        });
+        Toast.Ok($"Liste de lecture « {p.Name} » supprimée.");
+        deleting = null;
+        Load();
+    }
+
+
+    // Durée d'une boucle : les contenus « jusqu'à la fin » comptent pour la durée de la vidéo quand elle est connue.
+    private int TotalSeconds(Playlist p) => p.Draft.Where(i => i.Placement == "full").Sum(i =>
+    {
+        var m = media.FirstOrDefault(x => x.Id == i.MediaId);
+        return Svc.Find(m?.AppId)?.Duration == "content" && i.DurationMode != "fixed" ? Helpers.VideoSeconds(m) ?? i.DurationSec : i.DurationSec;
+    });
+
+    private static string? Modified(Playlist p)
+    {
+        if (p.UpdatedAt is not { } at) return null;   // playlists créées avant le suivi des modifications
+        var ago = DateTime.UtcNow - at;
+        return ago.TotalMinutes < 1 ? "Modifiée à l'instant"
+            : ago.TotalHours < 1 ? $"Modifiée il y a {(int)ago.TotalMinutes} min"
+            : ago.TotalDays < 1 ? $"Modifiée il y a {(int)ago.TotalHours} h"
+            : ago.TotalDays < 2 ? "Modifiée hier"
+            : ago.TotalDays < 30 ? $"Modifiée il y a {(int)ago.TotalDays} j"
+            : $"Modifiée le {at.ToLocalTime():d MMM yyyy}";
+    }
+}

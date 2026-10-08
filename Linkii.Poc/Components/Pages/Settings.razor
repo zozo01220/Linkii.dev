@@ -1,0 +1,146 @@
+@page "/settings"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@inject TenantStore Store
+@inject JsonStore Root
+@inject TenantContext Ctx
+@inject Notifier Notifier
+@inject NavigationManager Nav
+@inject Toaster Toast
+
+<div class="page-head">
+    <div>
+        <h1>Réglages</h1>
+        <p class="sub">Paramètres globaux de votre organisation. Ils s'appliquent à tous les écrans.</p>
+    </div>
+    @if (Tab is "organisation" or "parametres") { <button class="btn" @onclick="Save">Enregistrer</button> }
+</div>
+
+<nav class="tabs" aria-label="Sections des réglages">
+    @foreach (var (id, label) in Tabs)
+    {
+        <a class="@(Tab == id ? "on" : "")" href="/settings?tab=@id" aria-current="@(Tab == id ? "page" : null)">@label</a>
+    }
+</nav>
+
+
+@switch (Tab)
+{
+    case "organisation":
+        <div class="settings-grid">
+            <div class="card">
+                <h3>Organisation</h3>
+                <p class="hint">Nom affiché dans le back-office. La couleur et le logo sont ceux de votre revendeur.</p>
+                <label class="lbl">Nom de l'organisation</label>
+                <input class="full" @bind="name" />
+                <label class="lbl">Fuseau horaire <small>(horloge des écrans)</small></label>
+                <select class="full" @bind="timezone">
+                    @foreach (var tz in Timezones) { <option value="@tz">@tz</option> }
+                </select>
+            </div>
+        </div>
+        break;
+
+    case "parametres":
+        <div class="settings-grid">
+            <div class="card">
+                <h3>Diffusion</h3>
+                <p class="hint">Valeurs par défaut pour les contenus et les players.</p>
+                <label class="lbl">Durée par défaut d'un contenu (secondes)</label>
+                <input class="full" type="number" min="1" max="600" @bind="duration" />
+                <label class="lbl">Redémarrage nocturne des players</label>
+                <select class="full" @bind="reloadHour">
+                    @for (var h = 0; h < 24; h++) { <option value="@h">@($"{h:00}:00")</option> }
+                </select>
+                <small>Évite les fuites de mémoire sur les clés HDMI.</small>
+            </div>
+
+            <div class="card">
+                <h3>Nouveaux écrans</h3>
+                <p class="hint">Préréglage à la création d'un écran (modifiable écran par écran).</p>
+                <ScreenFormat Spec="spec" />
+            </div>
+        </div>
+        break;
+
+    case "compte":
+        @if (Ctx.IsImpersonating)
+        {
+            <div class="card empty"><div class="big">Compte non modifiable</div><p>Vous consultez cet espace en tant qu'administrateur : le mot de passe reste celui du client.</p></div>
+        }
+        else
+        {
+            <div class="settings-grid">
+                <div class="card">
+                    <h3>Compte administrateur</h3>
+                    <p class="hint">@email</p>
+                    <label class="lbl">Mot de passe actuel</label>
+                    <input class="full" type="password" @bind="oldPwd" autocomplete="current-password" />
+                    <label class="lbl">Nouveau mot de passe <small>(8 caractères minimum)</small></label>
+                    <input class="full" type="password" @bind="newPwd" autocomplete="new-password" />
+                    <div style="margin-top:12px"><button class="btn ghost" @onclick="ChangePassword">Changer le mot de passe</button></div>
+                </div>
+            </div>
+        }
+        break;
+}
+
+
+@code {
+    [SupplyParameterFromQuery(Name = "tab")] public string? TabParam { get; set; }
+
+    private static readonly (string Id, string Label)[] Tabs =
+    {
+        ("organisation", "Organisation"), ("parametres", "Paramètres"), ("compte", "Compte"),
+    };
+
+    private static readonly string[] Timezones =
+    {
+        "Europe/Zurich", "Europe/Paris", "Europe/Brussels", "Europe/London", "Europe/Berlin", "Europe/Rome",
+        "America/Montreal", "America/New_York", "Africa/Casablanca", "UTC"
+    };
+
+    private string Tab => Tabs.Any(t => t.Id == TabParam) ? TabParam! : "organisation";
+
+    private string name = "", timezone = "", email = "";
+    private int duration, reloadHour;
+    private string oldPwd = "", newPwd = "";
+    private ScreenSpec spec = new();
+
+    protected override void OnInitialized()
+    {
+        // Ancien onglet « Applications » (liens enregistrés, retour de Canva) : devenu la page Intégrations.
+        if (TabParam == "applications") { Nav.NavigateTo("/integrations" + new Uri(Nav.Uri).Query.Replace("tab=applications&", "").Replace("?tab=applications", ""), replace: true); return; }
+        var t = Store.Read(d => d.Tenant);
+        name = t.Name; timezone = t.Timezone; duration = t.DefaultDurationSec; reloadHour = t.ReloadHour;
+        if (Nav.Uri.Contains("saved=1")) Toast.Ok("Réglages enregistrés.");
+        email = Ctx.Email;
+        spec = ScreenSpec.From(t);
+    }
+
+    private async Task Save()
+    {
+        if (string.IsNullOrWhiteSpace(name)) { Toast.Error("Le nom de l'organisation est obligatoire."); return; }
+        if (duration < 1) { Toast.Error("La durée par défaut doit être d'au moins 1 seconde."); return; }
+
+        Store.Write(d =>
+        {
+            var t = d.Tenant;
+            t.Name = name.Trim(); t.Timezone = timezone;
+            t.DefaultDurationSec = duration; t.ReloadHour = reloadHour;
+            t.DefaultScreenType = spec.Type; t.DefaultOrientation = spec.Orientation; t.DefaultResolution = spec.Resolution;
+        });
+        await Notifier.NotifyClient(Store.ClientId);   // fuseau / redémarrage : les écrans rechargent leur configuration
+        Nav.NavigateTo($"/settings?tab={Tab}&saved=1", forceLoad: true);
+    }
+
+    private void ChangePassword()
+    {
+        var uid = Ctx.UserId;
+        var hash = Root.Read(d => d.Users.FirstOrDefault(u => u.Id == uid)?.PasswordHash ?? "");
+        if (Ctx.IsImpersonating || !Passwords.Verify(hash, oldPwd)) { Toast.Error("Mot de passe actuel incorrect."); return; }
+        if (newPwd.Length < 8) { Toast.Error("Le nouveau mot de passe est trop court (8 caractères minimum)."); return; }
+        Root.Write(d => { d.Users.First(u => u.Id == uid).PasswordHash = Passwords.Hash(newPwd); });
+        oldPwd = newPwd = "";
+        Toast.Ok("Mot de passe modifié.");
+    }
+}

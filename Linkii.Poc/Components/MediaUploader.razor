@@ -1,0 +1,163 @@
+@implements IDisposable
+@inject MediaImporter Importer
+@inject TenantStore Store
+
+@* Téléversement vers la médiathèque : depuis l'ordinateur (bouton ou glisser-déposer) ou depuis une adresse web.
+   Une barre de progression par fichier (ou, avec ShowJobs=false, le parent affiche le pourcentage lui-même). Utilisé par la page Médiathèque et par le sélecteur de médias des apps. *@
+<div class="upl">
+    <label class="upl-drop @(dragging ? "over" : "")" @ondragenter="() => dragging = true" @ondragleave="() => dragging = false" @ondrop="() => dragging = false">
+        <InputFile OnChange="OnFiles" multiple accept="@AcceptAttr" />
+        <Ico Name="upload" Size="22" />
+        <span><b>Glissez-déposez @What ici</b> ou <u>parcourez votre ordinateur</u></span>
+        <small>@Formats · 2 Go maximum par fichier</small>
+    </label>
+
+    <form class="upl-url" @onsubmit="ImportUrl" @onsubmit:preventDefault>
+        <input type="url" placeholder="Ou collez l'adresse d'une @(Accept == "video" ? "vidéo" : Accept == "image" ? "image" : "image ou d'une vidéo") (https://…)" @bind="url" @bind:event="oninput" aria-label="Adresse web du fichier" />
+        <button type="submit" class="btn ghost" disabled="@(string.IsNullOrWhiteSpace(url))"><Ico Name="link" Size="15" /> Importer</button>
+    </form>
+
+    @if (ShowJobs && jobs.Count > 0)
+    {
+        <ul class="upl-jobs" aria-live="polite">
+            @foreach (var j in jobs)
+            {
+                var job = j;
+                <li class="@job.State">
+                    <div class="upl-row">
+                        <span class="upl-name" title="@job.Name">@job.Name</span>
+                        <span class="upl-num">@JobText(job)</span>
+                        @if (job.State == "running") { <button type="button" class="upl-x" aria-label="Annuler l'import de @job.Name" @onclick="() => job.Cts.Cancel()"><Ico Name="x" Size="14" /></button> }
+                        else { <button type="button" class="upl-x" aria-label="Retirer de la liste" @onclick="() => jobs.Remove(job)"><Ico Name="x" Size="14" /></button> }
+                    </div>
+                    <div class="upl-bar @(job.Total is null && job.State == "running" ? "indet" : "")" role="progressbar" aria-label="@job.Name" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@Pct(job)">
+                        <span style="width:@(Pct(job))%"></span>
+                    </div>
+                    @if (job.Error != null) { <small class="upl-err">@job.Error</small> }
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    /// <summary>image, video, ou null pour les deux.</summary>
+    [Parameter] public string? Accept { get; set; }
+    [Parameter] public EventCallback<MediaItem> OnImported { get; set; }
+    /// <summary>false : pas de liste de progression ici, le parent l’affiche lui-même (Jobs) ; il est prévenu par Changed.</summary>
+    [Parameter] public bool ShowJobs { get; set; } = true;
+    [Parameter] public EventCallback Changed { get; set; }
+
+    /// <summary>Imports en cours ou en échec, du plus récent au plus ancien.</summary>
+    public IReadOnlyList<UploadJob> Jobs => jobs;
+
+    public class UploadJob
+    {
+        public string Name { get; set; } = "";
+        public long Done { get; set; }
+        public long? Total { get; set; }
+        public string State { get; set; } = "running";   // running | done | processing | error
+        public string? Error { get; set; }
+        internal int LastPct = -1;
+        public CancellationTokenSource Cts { get; } = new();
+    }
+
+    private readonly List<UploadJob> jobs = new();
+    private string url = "";
+    private bool dragging;
+
+    private string What => Accept == "video" ? "vos vidéos" : Accept == "image" ? "vos images" : "vos images et vidéos";
+    private string Formats => Accept == "video" ? "MP4, MOV, AVI, MKV, WEBM…" : Accept == "image" ? "JPG, PNG, GIF, WEBP, SVG" : "Images JPG, PNG, GIF, WEBP, SVG · vidéos MP4, MOV, AVI, MKV…";
+    private string AcceptAttr => string.Join(",", (Accept == "video" ? Array.Empty<string>() : VideoConverter.ImageExts)
+        .Concat(Accept == "image" ? Array.Empty<string>() : VideoConverter.VideoExts.Prepend("video/*")));
+
+    public static int Pct(UploadJob j) => j.State is "done" or "processing" ? 100 : j.Total is > 0 ? (int)Math.Min(100, j.Done * 100 / j.Total.Value) : 0;
+
+    private static string JobText(UploadJob j) => j.State switch
+    {
+        "done" => "Terminé",
+        "processing" => "Conversion en MP4…",
+        "error" => "Échec",
+        _ => j.Total is > 0 ? $"{Helpers.FormatSize(j.Done)} / {Helpers.FormatSize(j.Total.Value)} · {Pct(j)} %" : Helpers.FormatSize(j.Done)
+    };
+
+    private bool Allowed(string name)
+    {
+        var ext = Path.GetExtension(name).ToLowerInvariant();
+        return Accept switch
+        {
+            "image" => VideoConverter.ImageExts.Contains(ext),
+            "video" => VideoConverter.IsVideo(ext),
+            _ => MediaImporter.IsSupported(name)
+        };
+    }
+
+    private async Task OnFiles(InputFileChangeEventArgs e)
+    {
+        dragging = false;
+        var files = e.GetMultipleFiles(50);
+        var queue = files.Select(f => (f, job: new UploadJob { Name = f.Name, Total = f.Size })).ToList();
+        foreach (var (_, job) in queue) jobs.Insert(0, job);
+        foreach (var (f, job) in queue)   // un fichier à la fois : la progression reste lisible et le serveur n'est pas saturé
+        {
+            if (!Allowed(f.Name)) { Fail(job, Accept == "video" ? "Ce n'est pas une vidéo." : Accept == "image" ? "Ce n'est pas une image." : "Format non supporté."); await Refresh(); continue; }
+            await Run(job, () => Importer.Import(f, Store.ClientId, new Progress<long>(n => { job.Done = n; _ = InvokeAsync(() => Notify(job)); }), job.Cts.Token));
+        }
+    }
+
+    private async Task ImportUrl()
+    {
+        var u = url.Trim();
+        if (u.Length == 0) return;
+        url = "";
+        var job = new UploadJob { Name = u, Total = null };
+        jobs.Insert(0, job);
+        await Run(job, () => Importer.ImportUrl(u, Store.ClientId, (n, total) => { job.Done = n; job.Total = total; _ = InvokeAsync(() => Notify(job)); }, job.Cts.Token), checkType: true);
+    }
+
+    private async Task Run(UploadJob job, Func<Task<MediaImporter.Result>> import, bool checkType = false)
+    {
+        await Refresh();
+        try
+        {
+            var res = await import();
+            if (res.Error != null) Fail(job, res.Error);
+            else if (checkType && Accept != null && res.Item!.Type != Accept) { job.Name = res.Item.Name; Fail(job, $"Importé dans la médiathèque, mais ce n'est pas une {(Accept == "video" ? "vidéo" : "image")}."); }
+            else
+            {
+                var item = res.Item!;
+                job.Name = item.Name;
+                job.State = item.Status == "processing" ? "processing" : "done";
+                if (!ShowJobs) jobs.Remove(job);   // la carte du média prend le relais
+                await OnImported.InvokeAsync(item);
+            }
+        }
+        catch (OperationCanceledException) { Fail(job, "Import annulé."); }
+        catch (Exception ex) { Fail(job, ex.Message); }
+        await Refresh();
+    }
+
+    private static void Fail(UploadJob job, string message) { job.State = "error"; job.Error = message; }
+
+    private Task Refresh()
+    {
+        if (ShowJobs) { StateHasChanged(); return Task.CompletedTask; }
+        return Changed.InvokeAsync();
+    }
+
+    // Progression : sans liste intégrée (page Médiathèque), le parent n'est prévenu qu'à chaque pour-cent gagné
+    // (ou chaque Mo, si la taille finale est inconnue).
+    private Task Notify(UploadJob job)
+    {
+        if (ShowJobs) { StateHasChanged(); return Task.CompletedTask; }
+        var step = job.Total is > 0 ? Pct(job) : (int)(job.Done >> 20);
+        if (step == job.LastPct) return Task.CompletedTask;
+        job.LastPct = step;
+        return Changed.InvokeAsync();
+    }
+
+    public void Cancel(UploadJob job) => job.Cts.Cancel();
+    public void Dismiss(UploadJob job) { jobs.Remove(job); _ = Changed.InvokeAsync(); }
+
+    public void Dispose() { foreach (var j in jobs.Where(j => j.State == "running")) j.Cts.Cancel(); }
+}

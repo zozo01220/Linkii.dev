@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Linkii Player</title>
+<!-- Installable en plein écran sur Android et iPhone (icône distincte de celle du back-office) -->
+<link rel="manifest" href="/player/manifest.webmanifest">
+<meta name="theme-color" content="#0B1F3A">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Écran">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" type="image/png" href="/icons/player-192.png">
+<link rel="apple-touch-icon" href="/icons/player-apple-touch-icon.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none;
+               font-family: "IBM Plex Sans", "Segoe UI", Arial, sans-serif; color: #fff;
+               /* téléphone : ni défilement élastique, ni « tirer pour actualiser », ni zoom, ni sélection, ni menu de pression longue */
+               overscroll-behavior: none; touch-action: none; -webkit-user-select: none; user-select: none;
+               -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+  b { font-weight: 500; }
+
+  /* Scène : canvas à la résolution cible, mis à l'échelle / pivoté par player.js.
+     1em = 1 % de la largeur de la scène : tout le dimensionnement des widgets est en em. */
+  #stage { position: absolute; left: 50%; top: 50%; overflow: hidden; background: #000; transform-origin: center center; }
+  #content { position: absolute; left: 0; right: 0; top: 0; bottom: 0; overflow: hidden; }
+  .layer { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0;
+           transition: opacity .35s; background: #000; display: flex; align-items: center; justify-content: center; }
+  .layer.on { opacity: 1; }
+  .layer img, .layer video { width: 100%; height: 100%; object-fit: contain; }
+  #stage.phone .layer img, #stage.phone .layer video { object-fit: cover; }
+  #overlays { position: absolute; left: 0; top: 0; right: 0; bottom: 0; pointer-events: none; z-index: 5; }
+
+  /* ---------- Widgets ---------- */
+  .widget { position: absolute; color: #fff; display: flex; align-items: center; justify-content: center; box-sizing: border-box; font-size: 1em; }
+  .widget .time { font-weight: 500; letter-spacing: -.02em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .widget .date { color: #9AAABD; text-transform: capitalize; }
+  .widget .ico { line-height: 1; }
+  .widget .temp { font-weight: 500; line-height: 1; letter-spacing: -.03em; }
+  .widget .info { display: flex; flex-direction: column; gap: .2em; }
+  .widget .city { font-weight: 500; }
+  .widget .rng { color: #9AAABD; }
+
+  /* Zones de surimpression : les widgets d une même position s empilent au lieu de se chevaucher */
+  .zone { position: absolute; display: flex; gap: 1.2em; }
+  .z-top-left { left: 1.8em; top: 1.8em; flex-direction: column; align-items: flex-start; }
+  .z-top-right { right: 1.8em; top: 1.8em; flex-direction: column; align-items: flex-end; }
+  .z-bottom-left { left: 1.8em; bottom: 1.8em; flex-direction: column; align-items: flex-start; }
+  .z-bottom-right { right: 1.8em; bottom: 1.8em; flex-direction: column; align-items: flex-end; }
+  .z-top, .z-bottom { left: 0; right: 0; flex-direction: row; justify-content: center; align-items: center; gap: 4em;
+                      padding: .9em 3em; background: rgba(11,31,58,.86); }
+  .z-top { top: 0; border-bottom: .1em solid #23395A; }
+  .z-bottom { bottom: 0; border-top: .1em solid #23395A; }
+
+  /* Carte compacte (angles) ; en bandeau, c est la zone qui porte le fond */
+  .widget { position: relative; }
+  .widget:not(.p-full) { gap: 1.4em; }
+  .p-top-left, .p-top-right, .p-bottom-left, .p-bottom-right, .p-free { background: rgba(11,31,58,.86); border: .1em solid #23395A;
+                      border-radius: .4em; padding: 1.1em 1.9em; }
+
+  .p-top-left .time, .p-top-right .time, .p-bottom-left .time, .p-bottom-right .time, .p-free .time { font-size: 4.2em; }
+  /* Widgets d écran : position libre (en % de l écran) et échelle choisies dans le back-office */
+  .z-free { position: absolute; display: block; }
+  .p-free { white-space: nowrap; }
+  .p-top .time, .p-bottom .time { font-size: 3.4em; }
+  .widget:not(.p-full) .date { font-size: 1.5em; }
+  .widget:not(.p-full) .ico { font-size: 3.6em; }
+  .widget:not(.p-full) .temp { font-size: 3.6em; }
+  .widget:not(.p-full) .city { font-size: 1.7em; } .widget:not(.p-full) .rng { font-size: 1.4em; }
+  .p-top.k-clock, .p-bottom.k-clock { flex-direction: row; }
+  .p-free.k-clock { flex-direction: column; align-items: flex-start; gap: .35em; }   /* widget d écran : heure, puis date en dessous */
+
+  /* Pleine page */
+  .p-full { position: absolute; left: 0; top: 0; right: 0; bottom: 0; flex-direction: column; gap: 1.2em; background: #0B1F3A; }
+  .p-full .time { font-size: 15em; } .p-full .date { font-size: 3.4em; }
+  .p-full .ico { font-size: 13em; } .p-full .temp { font-size: 12em; }
+  .p-full .info { align-items: center; } .p-full .city { font-size: 4em; } .p-full .rng { font-size: 2.6em; }
+
+  /* ---------- Vidéo YouTube ---------- */
+  .k-youtube { background: #000; }
+  .k-youtube iframe { width: 100%; height: 100%; border: 0; display: block; }
+  .yt-note { position: absolute; left: 0; right: 0; bottom: 0; background: #C8372D; color: #fff; font-size: 2.2em; padding: .5em 1em; text-align: center; }
+  .widget.k-youtube:not(.p-full) { width: 34em; height: 19.2em; padding: 0; overflow: hidden; border-radius: .4em; }
+
+  /* ---------- Widgets de données ---------- */
+  .dl .stale { font-size: 1.6em; color: #E0B45C; margin-top: 1em; }
+  .dl:not(.p-full) { flex-direction: column; align-items: flex-start; min-width: 20em; }
+  .dl:not(.p-full) .info { gap: .35em; }
+  .dl:not(.p-full) .city { font-size: 1.7em; } .dl:not(.p-full) .rng { font-size: 1.35em; color: #C5CED9; }
+  .dl:not(.p-full) .rng b { color: #fff; background: #23395A; border-radius: .2em; padding: 0 .35em; }
+
+  /* Porte de salle : compact = pastille d état ; pleine page = écran vert / rouge / orange */
+  .rm:not(.p-full) { flex-direction: row; align-items: center; }
+  .rm .dot { width: 2em; height: 2em; border-radius: 50%; background: #5A6B80; flex: none; }
+  .rm[data-state=free] .dot { background: #1E8E5A; } .rm[data-state=busy] .dot { background: #C8372D; } .rm[data-state=soon] .dot { background: #B7791F; }
+  .p-full.rm { justify-content: center; text-align: center; padding: 3em 6em; box-sizing: border-box; }
+  .p-full.rm[data-state=free] { background: #1E8E5A; }
+  .p-full.rm[data-state=busy] { background: #C8372D; }
+  .p-full.rm[data-state=soon] { background: #B7791F; }
+  .p-full.rm[data-state=unknown] { background: #0B1F3A; }
+  /* compact (angles, bandeaux) : même code couleur, fond plein */
+  .rm:not(.p-full)[data-state=free] { background: #1E8E5A; border-color: #155A38; }
+  .rm:not(.p-full)[data-state=busy] { background: #C8372D; border-color: #8A231C; }
+  .rm:not(.p-full)[data-state=soon] { background: #B7791F; border-color: #7A4F12; }
+  .rm:not(.p-full)[data-state] .dot { background: #fff; }
+  .rm:not(.p-full)[data-state] .rng { color: #fff; }
+  .rm-cap { font-size: 2.4em; opacity: .85; margin-top: .5em; }
+  .rm-name { font-size: 4.6em; font-weight: 500; opacity: .92; }
+  .rm-state { font-size: 13em; font-weight: 500; line-height: 1; letter-spacing: -.03em; }
+  .rm-sub { font-size: 3.4em; opacity: .95; margin-top: .3em; }
+  .rm-next { margin-top: 1.6em; width: 100%; max-width: 70em; background: rgba(0,0,0,.18); border-radius: .4em; padding: 1em 2em; text-align: left; box-sizing: border-box; }
+  .rm-h { font-size: 1.6em; letter-spacing: .02em; opacity: .8; margin-bottom: .4em; }
+  .rm-next .r { display: flex; gap: 1.6em; font-size: 2.6em; padding: .15em 0; }
+  .rm-next .r b { min-width: 6.4em; font-family: "JetBrains Mono", monospace; }
+
+  /* Météo : prévisions */
+  .wf:not(.p-full) { flex-direction: column; align-items: stretch; min-width: 22em; gap: .2em; }
+  .p-full.wf { justify-content: center; align-items: stretch; padding: 4em 8em; box-sizing: border-box; gap: .2em; }
+  .wf-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: .5em; }
+  .wf-city { font-size: 5.4em; font-weight: 500; letter-spacing: -.02em; }
+  .wf-now { font-size: 5.4em; font-weight: 500; }
+  .wf-row { display: flex; align-items: center; gap: 1.2em; font-size: 3.4em; padding: .28em 0; border-bottom: .06em solid #23395A; }
+  .wf-day { flex: 1; } .wf-ico { width: 1.6em; text-align: center; }
+  .wf-t b { font-weight: 500; } .wf-t i { font-style: normal; color: #9AAABD; margin-left: .4em; }
+  .wf-r { min-width: 4.6em; text-align: right; color: #8DB8E3; font-size: .8em; }
+  .wf:not(.p-full) .wf-city { font-size: 1.7em; }
+  .wf:not(.p-full) .wf-row { font-size: 1.5em; padding: .15em 0; gap: .8em; border-bottom: 0; }
+
+  /* Listes pleine page (agenda, menu) */
+  .p-full.dl:not(.rm) { justify-content: flex-start; align-items: stretch; padding: 4em 7em; box-sizing: border-box; overflow: hidden;
+                        background: #0B1F3A; gap: .3em; }
+  .dl-h { font-size: 5.4em; font-weight: 500; letter-spacing: -.02em; margin-bottom: .35em; display: flex; align-items: baseline; gap: .6em; flex-wrap: wrap; }
+  .dl-h small { font-size: .42em; font-weight: 400; color: #9AAABD; }
+  .dl-empty { font-size: 3.4em; opacity: .7; margin-top: 1em; }
+  .p-full.dl .row { display: flex; gap: 1.6em; font-size: 3em; padding: .28em 0; border-bottom: .06em solid #23395A; }
+  .p-full.dl .row b { min-width: 7.2em; font-family: "JetBrains Mono", monospace; font-weight: 500; color: #8DB8E3; }
+  .p-full.dl .row span { flex: 1; } .p-full.dl .row i { display: block; font-style: normal; font-size: .55em; color: #9AAABD; }
+  .p-full.dl .day { font-size: 2.6em; font-weight: 500; color: #8DB8E3; margin-top: .6em; }
+  .p-full.dl .cat { font-size: 2.4em; letter-spacing: .02em; color: #8DB8E3; margin-top: .7em; }
+  .p-full.dl .dish { display: flex; justify-content: space-between; gap: 2em; font-size: 3.4em; padding: .18em 0; }
+  .p-full.dl .dish i { display: block; font-style: normal; font-size: .45em; color: #9AAABD; }
+  .p-full.dl .dish b { color: #8DB8E3; font-weight: 500; }
+
+  /* ---------- Écrans d'état (appairage / connecté / en attente) ---------- */
+  .screen { position: absolute; left: 0; top: 0; right: 0; bottom: 0; display: none; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 10; text-align: center; overflow: hidden; background: #0B1F3A; }
+
+  /* Marque : wordmark Linkii (points carrés, second en Signal) ou logo / initiale du revendeur */
+  .brand { display: flex; align-items: center; gap: 2vmin; font-size: 6vmin; font-weight: 500; letter-spacing: -.01em; }
+  .wm { display: inline-flex; align-items: baseline; font-size: 9vmin; font-weight: 500; letter-spacing: -.03em; line-height: 1; }
+  .wm .i { display: inline-block; width: .095em; height: .5em; background: currentColor; margin-left: .07em; position: relative; }
+  .wm .i + .i { margin-left: .1em; }
+  .wm .i::before { content: ""; position: absolute; left: 0; top: -.2em; width: .095em; height: .095em; background: currentColor; }
+  .wm .i.s::before { background: #3B82C4; }
+  .mark { width: 8vmin; height: 8vmin; border-radius: .6vmin; background: var(--accent, #0B1F3A); border: .2vmin solid #23395A; display: flex; align-items: center; justify-content: center; }
+  .tag { margin-top: 2.4vmin; font-size: 2.8vmin; color: #9AAABD; }
+
+  #code { display: flex; gap: 1.6vmin; margin: 6vmin 0 4vmin; font-family: "JetBrains Mono", Consolas, monospace; }
+  #code span { width: 11vmin; height: 15vmin; border-radius: .6vmin; border: .25vmin solid #23395A;
+               display: flex; align-items: center; justify-content: center; font-size: 9vmin; font-weight: 500; animation: pop .4s both; }
+  #code span:nth-child(3) { margin-right: 2vmin; }
+  @keyframes pop { from { opacity: 0; transform: translateY(1vmin); } to { opacity: 1; transform: none; } }
+  .hint { font-size: 2.6vmin; color: #9AAABD; padding: 0 4vmin; }
+  .hint b { color: #fff; }
+
+  #ok .tick { width: 16vmin; height: 16vmin; border-radius: 50%; background: #1E8E5A; display: flex; align-items: center; justify-content: center; animation: pop .4s both; }
+  #ok .tick svg { width: 8vmin; height: 8vmin; stroke: #fff; fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  #ok h1 { font-size: 5vmin; font-weight: 500; margin: 4vmin 0 1vmin; }
+  #ok p, #idle p { font-size: 2.8vmin; color: #9AAABD; margin: 0; }
+  /* Indicateur hors ligne : bordure rouge autour de l écran + pastille en bas à droite */
+  #offline { display: none; position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 50; pointer-events: none;
+             box-shadow: inset 0 0 0 .35vmin #C8372D; animation: blink 2.4s ease-in-out infinite; }
+  #offline .badge { position: absolute; right: 2vmin; bottom: 2vmin; display: flex; align-items: center; gap: 1.2vmin;
+             background: #C8372D; color: #fff; padding: .8vmin 2vmin; border-radius: .5vmin; font-weight: 500; font-size: 2.4vmin; }
+  #offline svg { width: 3.4vmin; height: 3.4vmin; stroke: #fff; fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+  #idle h1 { font-size: 5vmin; font-weight: 500; margin: 3vmin 0 1vmin; }
+
+  /* ---------- Apps : texte / annonce, flux RSS, page web ---------- */
+  .ann { flex-direction: column; box-sizing: border-box; }
+  .ann.p-full { padding: 3em 8em; }
+  .ann-t { font-weight: 500; letter-spacing: -.02em; line-height: 1.1; margin-bottom: .4em; }
+  .ann-b { white-space: pre-line; line-height: 1.25; }
+  .ann.p-top, .ann.p-bottom { width: 100%; flex-direction: row; gap: 1em; justify-content: center; padding: .3em 1em; border-radius: .6em; }
+  .ann.p-top .ann-t, .ann.p-bottom .ann-t { margin: 0; }
+  .ann.p-top-left, .ann.p-top-right, .ann.p-bottom-left, .ann.p-bottom-right { max-width: 40em; }
+  .k-rss.p-top, .k-rss.p-bottom, .k-agenda.p-top, .k-agenda.p-bottom { width: 100%; padding: 0; overflow: hidden; }
+  .tk { overflow: hidden; width: 100%; white-space: nowrap; font-size: 2.6em; line-height: 1.6; }
+  .tk-track { display: inline-block; }
+  .tk-track.run { animation: tkmove linear infinite; }
+  .tk-track.run span { padding-right: 4em; }
+  .tk b { color: #8DB8E3; font-weight: 500; } .tk em { font-style: normal; color: #9AAABD; font-size: .8em; }
+  .tk .sep { font-style: normal; opacity: .6; margin: 0 1em; }
+  .tk .tk-h { color: #8DB8E3; }
+  @keyframes tkmove { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+  /* LinkedIn : publications choisies */
+  .k-linkedin { flex-direction: column; align-items: stretch; justify-content: flex-start; box-sizing: border-box; overflow: hidden; text-align: left; }
+  .k-linkedin.p-full { background: #0B1F3A; padding: 4em 7em; gap: .4em; }
+  .k-linkedin.p-top, .k-linkedin.p-bottom { width: 100%; padding: 0; }
+  .lk-h { display: flex; align-items: center; gap: .6em; }
+  .lk-in { display: inline-grid; place-items: center; background: #fff; color: #0B1F3A; font-weight: 500; border-radius: .2em; width: 1.6em; height: 1.6em; font-size: 1.6em; flex: none; }
+  .lk-t { font-size: 5.4em; font-weight: 500; letter-spacing: -.02em; line-height: 1.1; }
+  .lk-s { font-size: 2.2em; color: #9AAABD; }
+  .lk-row { display: flex; align-items: center; gap: 1.6em; border: .06em solid #23395A; border-radius: .2em; margin-top: .6em; overflow: hidden; }
+  .lk-row .lk-img { width: 12em; align-self: stretch; flex: none; }
+  .lk-img { background: #16304F; overflow: hidden; } .lk-img img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .lk-col { padding: .5em 0; min-width: 0; }
+  .lk-row .lk-col { padding: .6em 1em .6em 0; }
+  .lk-row:not(:has(.lk-img)) .lk-col { padding-left: 1em; }
+  .lk-pt { font-size: 3em; line-height: 1.25; }
+  .lk-d { font-size: 1.8em; color: #9AAABD; margin-top: .3em; }
+  .lk-b { font-size: 2.2em; color: #9AAABD; white-space: pre-line; margin-top: .6em; line-height: 1.45; }
+  .lk-l { font-size: 2.2em; margin-top: .8em; padding-top: .6em; border-top: .06em solid #23395A; font-family: "JetBrains Mono", monospace; }
+  .lk-empty { font-size: 3.4em; opacity: .7; margin-top: 1em; }
+  .k-linkedin.p-full.lk-single { flex-direction: row; align-items: center; gap: 4em; padding: 0; }
+  .lk-single .lk-img { align-self: stretch; width: 50%; flex: none; }
+  .lk-single .lk-col { padding: 3em 7em 3em 0; flex: 1; }
+  .lk-single:not(:has(.lk-img)) .lk-col { padding: 3em 8em; }
+  .lk-single .lk-t { font-size: 2.2em; color: #9AAABD; font-weight: 400; letter-spacing: 0; }
+  .lk-single .lk-pt { font-size: 4.4em; letter-spacing: -.01em; line-height: 1.15; margin-top: .5em; }
+  .k-linkedin:not(.p-full):not(.p-top):not(.p-bottom) { background: #0B1F3A; width: 40em; padding: 1.2em; }
+  .k-linkedin.p-full.lk-embed { flex-direction: row; justify-content: center; align-items: center; gap: 4em; padding: 0; }
+  .k-linkedin.lk-el { background: #EEF2F7; color: #0B1F3A; }
+  .lk-el .lk-qr span { color: #5A6B80; }
+  .lk-ebox { position: relative; overflow: hidden; background: #fff; border-radius: .3em; flex: none; }
+  .lk-el .lk-ebox { border: .06em solid #DDE3EA; }
+  .lk-frame { position: absolute; left: 0; top: 0; border: 0; background: #fff; transform-origin: 0 0; }
+  .lk-qr { display: flex; align-items: center; gap: 1em; margin-top: 1.2em; }
+  .lk-qr svg { width: 9em; height: 9em; flex: none; border-radius: .2em; display: block; }
+  .lk-qr span { font-size: 1.8em; color: #9AAABD; max-width: 9em; line-height: 1.3; }
+  .lk-qr.v { flex-direction: column; align-items: flex-start; margin: 0; }
+  .lk-qr.v svg { width: 12em; height: 12em; } .lk-qr.v span { font-size: 1.8em; max-width: 8em; }
+  .lk-row .lk-col { flex: 1; } .lk-qr.sm { margin: 0 1em 0 auto; flex: none; } .lk-qr.sm svg { width: 6.4em; height: 6.4em; }
+  .lk-card { display: flex; flex-direction: column; gap: .6em; }
+  .lk-card .lk-t { font-size: 1.5em; color: #9AAABD; font-weight: 400; letter-spacing: 0; }
+  .lk-card .lk-in { font-size: 1.1em; }
+  .lk-card .lk-img { aspect-ratio: 16 / 9; border: .06em solid #23395A; }
+  .lk-card .lk-pt { font-size: 1.9em; } .lk-card .lk-d { font-size: 1.3em; margin-top: 0; }
+  .k-webpage { background: #fff; padding: 0; }
+  .k-webpage iframe { display: block; }
+  /* Apps de la médiathèque (image, vidéo, diaporamas) */
+  .widget.mlib { position: relative; overflow: hidden; background: #000; padding: 0; }
+  .widget.mlib.p-full { position: absolute; inset: 0; }
+  .widget.mlib:not(.p-full) { width: 32em; height: 18em; border-radius: .4em; }
+  .mlib img, .mlib video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .mlib.fit-cover img, .mlib.fit-cover video { object-fit: cover; }
+  .mlib .mlib-slide { opacity: 0; transition: opacity .8s; }
+  .mlib .mlib-slide.on { opacity: 1; }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <!-- #content = zone de diffusion ; elle se réduit pour laisser la place aux bandeaux haut/bas (rien ne se superpose) -->
+    <div id="content">
+      <div id="layerA" class="layer"></div>
+      <div id="layerB" class="layer"></div>
+    </div>
+    <div id="overlays"></div>
+  </div>
+
+  <div id="offline" aria-hidden="true">
+    <div class="badge"><svg viewBox="0 0 24 24"><path d="M1 1l22 22M16.7 11.1A11 11 0 0121 13.6M5 12.9a11 11 0 015.2-2.7M10.7 5.1A16 16 0 0122.6 9M1.4 9a16 16 0 014.7-2.9M8.5 16.4a6 6 0 016.9-.7M12 20h.01"/></svg> Hors ligne</div>
+  </div>
+
+  <div id="idle" class="screen">
+    <div class="brand">__LOGO__</div>
+    <h1>Écran prêt</h1>
+    <p>En attente d'un contenu publié depuis le back-office.</p>
+  </div>
+
+  <div id="suspended" class="screen" style="z-index:60">
+    <h1 style="font-size:5vmin;font-weight:500;margin:0 0 1vmin">Service suspendu</h1>
+    <p style="font-size:2.8vmin;color:#9AAABD;margin:0">Contactez votre administrateur.</p>
+  </div>
+
+  <div id="ok" class="screen">
+    <div class="tick"><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg></div>
+    <h1>Écran connecté</h1>
+    <p>La diffusion démarre…</p>
+  </div>
+
+  <div id="pairing" class="screen">
+    <div class="brand">__LOGO__</div>
+    <div class="tag" id="powered">Affichage dynamique en libre-service</div>
+    <div id="code"></div>
+    <div class="hint">Saisissez ce code dans le back-office · <b>Connecter un écran</b></div>
+    <!-- Téléphone : installation en plein écran (rempli par player.js, seulement si l'installation est possible) -->
+    <div id="install" class="hint" style="display:none;margin-top:5vmin"></div>
+  </div>
+
+  <!-- Client SignalR (CDN). Mis en cache par le service worker pour un démarrage hors ligne. -->
+  <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
+  <script>
+    // logo inline (évite un fichier de plus)
+    var LOGO = '<span class="wm" aria-label="Linkii">link<span class="i"></span><span class="i s"></span></span>';
+    var b = document.querySelectorAll('.brand');
+    for (var i = 0; i < b.length; i++) b[i].innerHTML = b[i].innerHTML.replace('__LOGO__', LOGO);
+  </script>
+  <script src="qr.js"></script>
+  <script src="apps.js"></script>
+  <script src="player.js"></script>
+</body>
+</html>

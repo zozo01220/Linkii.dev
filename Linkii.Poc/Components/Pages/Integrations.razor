@@ -1,0 +1,363 @@
+@page "/integrations"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@inject TenantStore Store
+@inject AppService Svc
+@inject NavigationManager Nav
+@inject Toaster Toast
+@inject CanvaService Canva
+@inject GoogleAuth GoogleAuth
+
+<div class="page-head">
+    <div>
+        <h1>Intégrations</h1>
+        <p class="sub">Les sources de contenus proposées dans vos listes de lecture. Leur paramétrage se fait dans la liste, après les avoir ajoutées.</p>
+    </div>
+</div>
+
+<div class="lib-tools">
+    <div class="search-box grow" style="margin:0">
+        <Ico Name="search" Size="16" />
+        <input placeholder="Rechercher une intégration" aria-label="Rechercher une intégration" @bind="search" @bind:event="oninput" />
+    </div>
+    <select @bind="filter" aria-label="Filtrer les intégrations">
+        <option value="">Toutes</option>
+        <option value="on">Actives</option>
+        <option value="off">Inactives</option>
+    </select>
+    <ViewToggle StorageKey="integrations" @bind-Value="view" />
+</div>
+
+@if (Groups.Count == 0)
+{
+    <div class="card empty"><div class="big">Aucune intégration trouvée</div></div>
+}
+else
+{
+    <CatalogView Groups="Groups" View="@view" Noun="Intégration" UsageLabel="Utilisation">
+        <Usage>
+            @if (CalSource(context) is { } src)
+            {
+                var n = tenant.SharedCalendars.Count(c => c.Source == src);
+                <span>@(n == 0 ? "Aucun calendrier" : $"{n} calendrier{(n > 1 ? "s" : "")}")</span>
+            }
+            else if (DrvSource(context) is { } drv)
+            {
+                var n = tenant.DriveFolders.Count(f => f.Source == drv);
+                <span>@(n == 0 ? "Aucun dossier" : $"{n} dossier{(n > 1 ? "s" : "")}")</span>
+            }
+            else if (context.Id == "canva" && canva.Connected)
+            {
+                <span class="cat-account"><span class="cat-avatar">@CanvaInitial</span><span>@(canva.User.Length > 0 ? canva.User : "Compte Canva")</span></span>
+            }
+            else
+            {
+                var n = counts.GetValueOrDefault(context.Id);
+                <span>@(n == 0 ? "Aucun contenu" : $"{n} contenu{(n > 1 ? "s" : "")}")</span>
+            }
+        </Usage>
+        <Actions>
+            @if (CalSource(context) is { } src)
+            {
+                <button type="button" class="btn ghost sm" @onclick="() => calSource = src">Gérer</button>
+                <button type="button" class="switch @(context.Off ? "" : "on")" role="switch" aria-checked="@(context.Off ? "false" : "true")" aria-label="@context.Name active" @onclick="() => ToggleSource(src)"><span></span></button>
+            }
+            else if (DrvSource(context) is { } drv)
+            {
+                <button type="button" class="btn ghost sm" @onclick="() => driveSource = drv">Gérer</button>
+                <button type="button" class="switch @(context.Off ? "" : "on")" role="switch" aria-checked="@(context.Off ? "false" : "true")" aria-label="@context.Name active" @onclick="() => ToggleDrive(drv)"><span></span></button>
+            }
+            else
+            {
+                @if (context.Id == "canva") { <button type="button" class="btn ghost sm" @onclick="OpenCanva">Gérer</button> }
+                <button type="button" class="switch @(context.Off ? "" : "on")" role="switch" aria-checked="@(context.Off ? "false" : "true")" aria-label="@context.Name active" @onclick="() => Toggle(context)"><span></span></button>
+            }
+        </Actions>
+    </CatalogView>
+}
+
+@if (calSource != null)
+{
+    <CalendarSourceDialog Source="@calSource" OnClose="() => calSource = null" OnChanged="Load" />
+}
+
+@if (driveSource != null)
+{
+    <DriveSourceDialog Source="@driveSource" OnClose="() => driveSource = null" OnChanged="Load" />
+}
+
+@if (cvOpen)
+{
+    @* Canva : connexion du compte et intégration de l'organisation (identifiants du portail développeurs Canva) *@
+    <div class="modal-backdrop" @onclick="() => cvOpen = false"></div>
+    <div class="modal app-modal wide" role="dialog" aria-modal="true" aria-labelledby="cvs-title">
+        <div class="modal-head">
+            <AppIcon Id="canva" Connected="@canva.Connected" />
+            <div class="grow">
+                <h3 id="cvs-title">Canva</h3>
+                <small>@(canva.Connected ? $"Connecté{(canva.User.Length > 0 ? $" ({canva.User})" : "")}" : canvaReady ? "Intégration configurée : connectez votre compte Canva" : "Étape 1 : configurez l'intégration, puis connectez votre compte")</small>
+            </div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => cvOpen = false"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            <div class="cvs-account">
+                <div class="grow">
+                    <b>Compte Canva</b>
+                    <small>@(canva.Connected ? "Vos designs se choisissent depuis une liste de lecture." : "Nécessaire pour choisir vos designs dans les listes de lecture.")</small>
+                </div>
+                @if (canva.Connected) { <button type="button" class="btn ghost sm" @onclick="DisconnectCanva">Déconnecter</button> }
+                else if (canvaReady) { <a class="btn sm" href="/canva/connect" target="_top">Connecter Canva</a> }
+            </div>
+
+            <h4 class="pe-sub">Intégration de l'organisation</h4>
+            <ol class="cvs-steps">
+                <li>Sur <a href="https://www.canva.com/developers/" target="_blank" rel="noopener">le portail développeurs Canva</a>, créez une intégration Connect API (l'authentification à deux facteurs de votre compte Canva doit être activée).</li>
+                <li>Dans <b>Configuration › Scopes</b>, cochez en lecture : <code>design:meta</code>, <code>design:content</code> et <code>profile</code>.</li>
+                <li>Dans <b>Redirect URLs › URL 1</b>, collez exactement l'adresse de retour ci-dessous.</li>
+                <li>Dans <b>Configuration › Credentials</b>, cliquez sur « Generate secret », puis recopiez ici le Client ID et le secret.</li>
+            </ol>
+            <div class="dw">
+                <div class="dw-field">
+                    <label for="cvs-redirect">Adresse de retour (à déclarer chez Canva)</label>
+                    <input id="cvs-redirect" class="mono" @bind="cvRedirect" spellcheck="false" />
+                    <small>Elle doit être identique chez Canva. En local, Canva refuse « localhost » : gardez 127.0.0.1.</small>
+                </div>
+                <div class="dw-field">
+                    <label for="cvs-id">Client ID</label>
+                    <input id="cvs-id" class="mono" @bind="cvId" autocomplete="off" spellcheck="false" placeholder="OC-…" />
+                </div>
+                <div class="dw-field">
+                    <label for="cvs-secret">Client secret</label>
+                    <input id="cvs-secret" type="password" @bind="cvSecret" autocomplete="new-password" placeholder="@(cvHasSecret ? "•••••• enregistré — laisser vide pour le conserver" : "Collez le secret généré par Canva")" />
+                    <small>Conservé chiffré ; il n'est jamais réaffiché.</small>
+                </div>
+            </div>
+            @if (cvFromServer) { <div class="dw-note">Une intégration est déjà configurée sur le serveur. Celle saisie ici la remplace pour votre organisation.</div> }
+        </div>
+        <div class="modal-foot">
+            <button class="btn ghost" @onclick="() => cvOpen = false">Fermer</button>
+            <button class="btn" @onclick="SaveCanvaSetup">Enregistrer l'intégration</button>
+        </div>
+    </div>
+}
+
+@code {
+    // Groupes affichés, dans l'ordre : catégorie du manifeste → titre du groupe. Calendriers partagés et Drives sont des familles de sources, pas des apps.
+    private const string CalendarsGroup = "@calendriers", DrivesGroup = "@drives";
+    private static readonly (string Category, string Title)[] Sections =
+    {
+        ("Médiathèque", "Médias de la médiathèque"), (CalendarsGroup, "Calendriers partagés"), (DrivesGroup, "Drives"),
+        ("Service connecté", "Comptes connectés"), ("Web", "Contenus web"),
+    };
+
+    // Ordre des cartes dans leur groupe (les apps absentes de la liste suivent, par nom).
+    private static readonly string[] Order = { "image", "slideshow-images", "video", "slideshow-videos", "canva", "youtube", "rss", "webpage" };
+
+    private string search = "", filter = "", view = "cards";   // view : cards | list (mémorisé dans le navigateur)
+    private HashSet<string> enabled = new();
+    private Dictionary<string, int> counts = new();   // contenus créés, par app
+    private CanvaService.Connection canva = new(false, "", null);
+    private Tenant tenant = new();
+    private string? calSource;     // source de calendriers dont la fenêtre « Gérer » est ouverte
+    private string? driveSource;   // source Drive dont la fenêtre « Gérer » est ouverte
+
+    private string CanvaInitial => canva.User.Length > 0 ? char.ToUpperInvariant(canva.User[0]).ToString() : "C";
+    private static string? CalSource(CatalogView.Entry e) => e.Id.StartsWith("cal-") ? e.Id[4..] : null;
+    private static string? DrvSource(CatalogView.Entry e) => e.Id.StartsWith("drv-") ? e.Id[4..] : null;
+
+    private bool Shown(string text, bool on) =>
+        (filter == "" || (filter == "on") == on) && (search.Length == 0 || text.Contains(search, StringComparison.OrdinalIgnoreCase));
+
+    private List<CatalogView.Group> Groups
+    {
+        get
+        {
+            // les apps « Calendrier partagé » et « Dossier Drive » n'ont pas de carte : elles suivent leurs sources (actives dès qu'une source l'est)
+            var apps = Svc.Catalog.Where(a => !a.ScreenWidget && a.Id is not ("agenda" or "drive"))
+                .Where(a => Shown(a.Name + " " + a.Summary + " " + a.Category, enabled.Contains(a.Id)))
+                .OrderBy(a => Array.IndexOf(Order, a.Id) is var i && i >= 0 ? i : int.MaxValue)
+                .ThenBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+            var sources = SharedCalendarSources.All
+                .Where(s => Shown(s.Name + " " + s.Summary + " calendrier partagé", SharedCalendarSources.Enabled(tenant, s.Id)))
+                .Select(SourceEntry);
+            var drives = DriveSources.All
+                .Where(s => Shown(s.Name + " " + s.Summary + " drive dossier", DriveSources.Enabled(tenant, s.Id)))
+                .Select(DriveEntry);
+            var known = Sections.Select(s => s.Category).ToHashSet();
+            return Sections.Select(s => (s.Title, Items: s.Category switch
+                {
+                    CalendarsGroup => sources,
+                    DrivesGroup => drives,
+                    _ => apps.Where(a => a.Category == s.Category).Select(Entry)
+                }))
+                .Append(("Autres", apps.Where(a => !known.Contains(a.Category)).Select(Entry)))
+                .Select(g => new CatalogView.Group(g.Item1, g.Item2.ToList()))
+                .Where(g => g.Items.Count > 0)
+                .ToList();
+        }
+    }
+
+    private CatalogView.Entry Entry(AppManifest a)
+    {
+        var on = enabled.Contains(a.Id);
+        if (!on) return CatalogView.Entry.Of(a, "Inactive", "inactif", true);
+        if (a.Id == "canva")
+            return canva.Connected ? CatalogView.Entry.Of(a, "Connecté", "en-ligne", false)
+                 : CatalogView.Entry.Of(a, canvaReady ? "À connecter" : "À configurer", "mise-a-jour", false);
+        return CatalogView.Entry.Of(a, "Active", "en-ligne", false);
+    }
+
+    private CatalogView.Entry SourceEntry(CalendarSourceDef s)
+    {
+        var acc = SharedCalendarSources.Account(tenant, s.Id);
+        var on = acc?.Enabled == true;
+        var google = s.Id == "google";   // compte Google de l'organisation (« Se connecter avec Google »), partagé avec Google Drive
+        (string status, string css, string? why) = google && !GoogleAuth.IsConfigured ? ("Indisponible", "inactif", "Connexion Google de la plateforme non configurée (administrateur Linkii)")
+            : !on ? ("Inactive", "inactif", (string?)null)
+            : google && !SharedCalendarSources.Configured(tenant, s.Id) ? ("À connecter", "mise-a-jour", (string?)null)
+            : !SharedCalendarSources.Configured(tenant, s.Id) ? ("À configurer", "mise-a-jour", (string?)null)
+            : acc!.LastError.Length > 0 ? ("Erreur de connexion", "hors-ligne", acc.LastError)
+            : s.Id == "ics" ? ("Active", "en-ligne", (string?)null) : ("Connecté", "en-ligne", (string?)null);
+        return new("cal-" + s.Id, s.Name, "Calendrier partagé", s.Summary, "cal-" + s.Id, null, status, css, !on, why);
+    }
+
+    private CatalogView.Entry DriveEntry(DriveSourceDef s)
+    {
+        var on = DriveSources.Enabled(tenant, s.Id);
+        var failed = tenant.DriveFolders.FirstOrDefault(f => f.Source == s.Id && f.LastError.Length > 0);
+        var google = s.Id == "gdrive";   // compte Google connecté par l'organisation, avec l'accès à Drive
+        var connected = GoogleAuth.Has(tenant, GoogleAuth.DriveScope);
+        (string status, string css, string? why) = google && !GoogleAuth.IsConfigured ? ("Indisponible", "inactif", "Connexion Google de la plateforme non configurée (administrateur Linkii)")
+            : !on ? ("Inactive", "inactif", (string?)null)
+            : google && GoogleAuth.IsConfigured && !connected ? ("À connecter", "mise-a-jour", (string?)null)
+            : !DriveSources.Configured(tenant, s.Id) ? ("À configurer", "mise-a-jour", (string?)null)
+            : failed != null ? ("Erreur de synchronisation", "hors-ligne", $"{failed.Name} : {failed.LastError}")
+            : ("Connecté", "en-ligne", (string?)null);
+        return new("drv-" + s.Id, s.Name, "Drive", s.Summary, "drv-" + s.Id, null, status, css, !on, why);
+    }
+
+    // Source Drive : ses dossiers sont proposés et synchronisés, ou non ; les contenus existants restent diffusés (fichiers du moment).
+    private void ToggleDrive(string src)
+    {
+        var def = DriveSources.Find(src)!;
+        var on = !DriveSources.Enabled(tenant, src);
+        if (on && src == "gdrive" && !GoogleAuth.IsConfigured) { Toast.Error("Google Drive n'est pas encore disponible sur cette plateforme (connexion Google à configurer sur le serveur)."); return; }
+        Svc.SetDriveSource(src, on);
+        Load();
+        if (on && !DriveSources.Configured(tenant, src)) { driveSource = src; Toast.Ok($"« {def.Name} » activée : configurez sa connexion."); }
+        else Toast.Ok(on ? $"« {def.Name} » activée : ses dossiers sont proposés dans les listes de lecture." : $"« {def.Name} » désactivée. Les contenus existants restent diffusés.");
+    }
+
+    protected override void OnInitialized()
+    {
+        Load();
+        CanvaReturn();
+        GoogleReturn();
+    }
+
+    private void Load()
+    {
+        enabled = Svc.Installed().Select(a => a.AppId).ToHashSet();
+        counts = Store.Read(d => d.Media.Where(m => m.AppId != null).GroupBy(m => m.AppId!).ToDictionary(g => g.Key, g => g.Count()));
+        tenant = Store.Read(d => d.Tenant);
+        canva = Canva.ConnectionOf(Store.ClientId);
+        canvaReady = Canva.IsConfigured(Store.ClientId);
+    }
+
+    // Enregistré immédiatement : seul le choix proposé dans les listes de lecture change, les écrans ne sont pas concernés.
+    private void Toggle(CatalogView.Entry a)
+    {
+        var on = !enabled.Contains(a.Id);
+        if (on) Svc.Enable(a.Id); else Svc.Disable(a.Id);
+        var n = counts.GetValueOrDefault(a.Id);
+        Toast.Ok(on ? $"« {a.Name} » activée : elle est proposée dans les listes de lecture."
+                    : $"« {a.Name} » désactivée.{(n > 0 ? $" Ses {n} contenu{(n > 1 ? "s" : "")} restent diffusé{(n > 1 ? "s" : "")}." : "")}");
+        Load();
+    }
+
+    // Source de calendriers : ses calendriers sont proposés (ou non) pour les nouveaux contenus ; les contenus existants restent diffusés.
+    private void ToggleSource(string src)
+    {
+        var def = SharedCalendarSources.Find(src)!;
+        var on = !SharedCalendarSources.Enabled(tenant, src);
+        if (on && src == "google" && !GoogleAuth.IsConfigured) { Toast.Error("Google Calendar n'est pas encore disponible sur cette plateforme (connexion Google à configurer sur le serveur)."); return; }
+        Svc.SetCalendarSource(src, on);
+        Load();
+        if (on && !SharedCalendarSources.Configured(tenant, src)) { calSource = src; Toast.Ok($"« {def.Name} » activée : configurez sa connexion."); }
+        else Toast.Ok(on ? $"« {def.Name} » activée : ses calendriers sont proposés dans les listes de lecture." : $"« {def.Name} » désactivée. Les contenus existants restent diffusés.");
+    }
+
+    // Retour de la connexion Canva (/canva/callback) : résultat affiché, et l'intégration activée si besoin.
+    private void CanvaReturn()
+    {
+        var q = System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query)["canva"];
+        switch (q)
+        {
+            case "ok":
+                if (!enabled.Contains("canva")) { Svc.Enable("canva"); Load(); }
+                Toast.Ok($"Canva connecté{(canva.User.Length > 0 ? $" ({canva.User})" : "")}. Ajoutez vos designs depuis une liste de lecture.");
+                break;
+            case "denied": Toast.Error("Connexion à Canva annulée."); break;
+            case "expired": Toast.Error("La demande de connexion à Canva a expiré. Recommencez."); break;
+            case "error": Toast.Error("Canva a refusé la connexion. Vérifiez la configuration de l'intégration et réessayez."); break;
+            case "unconfigured": Toast.Error("Configurez d'abord l'intégration Canva (bouton « Gérer »)."); break;
+        }
+    }
+
+    // Retour de « Se connecter avec Google » (/google/callback) : l'intégration qui a lancé la connexion (Calendar ou Drive)
+    // est activée et sa fenêtre rouverte pour ajouter des agendas ou des dossiers.
+    private void GoogleReturn()
+    {
+        var query = System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query);
+        var q = query["google"];
+        if (q == null) return;
+        var calendar = query["for"] == "calendar";
+        var name = calendar ? "Google Calendar" : "Google Drive";
+        switch (q)
+        {
+            case "ok":
+                if (calendar && !SharedCalendarSources.Enabled(tenant, "google")) { Svc.SetCalendarSource("google", true); Load(); }
+                if (!calendar && !DriveSources.Enabled(tenant, "gdrive")) { Svc.SetDriveSource("gdrive", true); Load(); }
+                Toast.Ok($"{name} connecté{(tenant.GoogleUser.Length > 0 ? $" ({tenant.GoogleUser})" : "")}. Ajoutez vos {(calendar ? "agendas" : "dossiers")}.");
+                if (calendar) calSource = "google"; else driveSource = "gdrive";
+                break;
+            case "denied": Toast.Error("Connexion à Google annulée."); break;
+            case "scope": Toast.Error(calendar ? "L'accès à vos agendas n'a pas été autorisé : reconnectez-vous en cochant l'accès à Google Calendar."
+                                               : "L'accès à Google Drive n'a pas été autorisé : reconnectez-vous en cochant l'accès à vos fichiers Drive."); break;
+            case "expired": Toast.Error("La demande de connexion à Google a expiré. Recommencez."); break;
+            case "unconfigured": Toast.Error("La connexion Google n'est pas encore configurée sur cette plateforme."); break;
+            default: Toast.Error("Google a refusé la connexion. Réessayez dans un instant."); break;
+        }
+    }
+
+    // ---------- Canva : compte et intégration de l'organisation ----------
+    private bool cvOpen, canvaReady, cvHasSecret, cvFromServer;
+    private string cvId = "", cvSecret = "", cvRedirect = "";
+
+    private void OpenCanva()
+    {
+        var s = Canva.SettingsOf(Store.ClientId);
+        cvId = s.ClientId; cvHasSecret = s.HasSecret; cvFromServer = s.FromServer; cvSecret = "";
+        cvRedirect = s.RedirectUri.Length > 0 ? s.RedirectUri : CanvaService.SuggestedRedirect(Nav.BaseUri);
+        cvOpen = true;
+    }
+
+    private void SaveCanvaSetup()
+    {
+        if (string.IsNullOrWhiteSpace(cvId)) { Toast.Error("Collez le Client ID de votre intégration Canva."); return; }
+        if (string.IsNullOrWhiteSpace(cvSecret) && !cvHasSecret) { Toast.Error("Collez le Client secret généré par Canva."); return; }
+        if (!Uri.TryCreate(cvRedirect.Trim(), UriKind.Absolute, out var r) || r.Scheme is not ("http" or "https") || r.AbsolutePath != "/canva/callback")
+        { Toast.Error("L'adresse de retour doit être une adresse complète se terminant par /canva/callback."); return; }
+        Canva.SaveSettings(Store.ClientId, cvId, cvSecret, cvRedirect);
+        cvHasSecret = true; cvSecret = "";
+        Load();
+        Toast.Ok("Intégration Canva enregistrée. Connectez maintenant votre compte Canva.");
+    }
+
+    private void DisconnectCanva()
+    {
+        Canva.Disconnect(Store.ClientId);
+        Load();
+        Toast.Ok("Canva déconnecté. Les designs déjà exportés restent dans la médiathèque et sur les écrans.");
+    }
+}

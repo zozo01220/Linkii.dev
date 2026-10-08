@@ -1,0 +1,192 @@
+@inject TenantStore Store
+@inject GraphService Graph
+
+@* Formulaire de paramétrage généré à partir du manifeste de l'app. Values : une entrée par champ. *@
+<div class="dw">
+    @foreach (var f in Manifest.Settings)
+    {
+        if (!AppCatalog.IsVisible(f, Values) || f.Type == "hidden" || f.Managed) continue;
+        var k = f.Key;
+        <div class="dw-field">
+            @if (f.Type == "bool")
+            {
+                <label class="dw-check"><input type="checkbox" checked="@(Values[k] == "true")" @onchange='e => Values[k] = (bool)e.Value! ? "true" : "false"' /> @f.Label</label>
+            }
+            else
+            {
+                <label>@f.Label@(f.Required ? " *" : "")</label>
+                @switch (f.Type)
+                {
+                    case "textarea":
+                        <textarea rows="4" maxlength="@f.MaxLength" placeholder="@f.Placeholder" @bind="Values[k]" @bind:event="oninput"></textarea>
+                        break;
+                    case "number":
+                        <input type="number" min="@f.Min" max="@f.Max" @bind="Values[k]" @bind:event="oninput" />
+                        break;
+                    case "select":
+                        <select @bind="Values[k]">
+                            @foreach (var o in f.Options) { <option value="@o.Value">@o.Label</option> }
+                        </select>
+                        break;
+                    case "calendar":
+                        @if (calendars.Count == 0)
+                        {
+                            <div class="dw-note">Aucun calendrier disponible. <a href="/integrations">Ajoutez-en dans Intégrations › Calendriers partagés</a>.</div>
+                        }
+                        else
+                        {
+                            <select @bind="Values[k]">
+                                <option value="">— Choisir un calendrier —</option>
+                                @foreach (var g in calendars.GroupBy(c => c.Source))
+                                {
+                                    <optgroup label="@(SharedCalendarSources.Find(g.Key)?.Name ?? g.Key)">
+                                        @foreach (var c in g) { <option value="@c.Id">@c.Name</option> }
+                                    </optgroup>
+                                }
+                            </select>
+                            <small>Un calendrier manque ? <a href="/integrations">Gérez les calendriers partagés dans Intégrations</a>.</small>
+                        }
+                        break;
+                    case "drive":
+                        @if (folders.Count == 0)
+                        {
+                            <div class="dw-note">Aucun dossier disponible. <a href="/integrations">Ajoutez-en dans Intégrations › Drives</a>.</div>
+                        }
+                        else
+                        {
+                            <select @bind="Values[k]">
+                                <option value="">— Choisir un dossier —</option>
+                                @foreach (var g in folders.GroupBy(x => x.Source))
+                                {
+                                    <optgroup label="@(DriveSources.Find(g.Key)?.Name ?? g.Key)">
+                                        @foreach (var x in g) { <option value="@x.Id">@x.Name</option> }
+                                    </optgroup>
+                                }
+                            </select>
+                            @if (folders.FirstOrDefault(x => x.Id.ToString() == Values[k]) is { } chosen)
+                            {
+                                <small>@chosen.Location · @chosen.FileCount fichier@(chosen.FileCount > 1 ? "s" : "") · synchronisé @DriveSources.Ago(chosen.SyncedUtc). Un fichier ajouté au dossier apparaît sur les écrans à la synchronisation suivante, sans republier.</small>
+                            }
+                            else
+                            {
+                                <small>Un dossier manque ? <a href="/integrations">Gérez les Drives dans Intégrations</a>.</small>
+                            }
+                        }
+                        break;
+                    case "color":
+                        <input type="color" style="padding:2px;width:64px;height:38px" @bind="Values[k]" @bind:event="oninput" />
+                        break;
+                    case "date":
+                        <input type="date" value="@Values[k]" @onchange='e => Values[k] = e.Value?.ToString() ?? string.Empty' />
+                        break;
+                    case "secret":
+                        <input type="password" autocomplete="off" maxlength="@f.MaxLength" placeholder="@(StoredSecrets.Contains(k) ? "•••••• enregistré — laisser vide pour le conserver" : f.Placeholder)" @bind="Values[k]" @bind:event="oninput" />
+                        break;
+                    case "textfile":
+                        <div class="file-pick">
+                            <label class="btn ghost sm file-btn">
+                                <InputFile OnChange="e => LoadFile(f, e)" accept=".csv,.txt,text/csv,text/plain" />
+                                @(string.IsNullOrEmpty(Values[k]) && !StoredSecrets.Contains(k) ? "Choisir un fichier" : "Remplacer le fichier")
+                            </label>
+                            @if (!string.IsNullOrEmpty(Values[k])) { <span class="msg">Fichier prêt : @LineCount(Values[k]) ligne(s). Enregistrez pour l'appliquer.</span> }
+                            else if (StoredSecrets.Contains(k)) { <span class="muted">Un fichier est enregistré (il n'est pas réaffiché).</span> }
+                            @if (!string.IsNullOrEmpty(f.Template) && f.Template.StartsWith('/') && !f.Template.StartsWith("//")) { <a href="@f.Template" download>Télécharger un modèle</a> }
+                        </div>
+                        @if (fileErrors.TryGetValue(k, out var fe)) { <div class="err">@fe</div> }
+                        break;
+                    case "media" or "medias":
+                        <MediaField Field="f" Values="Values" />
+                        break;
+                    case "canva":
+                        <CanvaField Field="f" Values="Values" OnChange="StateHasChanged" />
+                        break;
+                    case "mailbox":
+                        @if (rooms.Count > 0)
+                        {
+                            <select value="@Values[k]" @onchange="e => Values[k] = e.Value?.ToString() ?? string.Empty">
+                                <option value="">— Choisir une salle / un calendrier —</option>
+                                @foreach (var r in rooms)
+                                {
+                                    <option value="@r.Email" selected="@(r.Email == Values[k])">@r.Name@(r.Capacity > 0 ? $" · {r.Capacity} pl." : "")</option>
+                                }
+                            </select>
+                        }
+                        else
+                        {
+                            <input type="text" maxlength="@f.MaxLength" placeholder="@f.Placeholder" @bind="Values[k]" @bind:event="oninput" />
+                            @if (!msConfigured) { <small>Le connecteur Microsoft 365 n'est pas encore configuré : <a href="/integrations">le configurer dans Intégrations › Microsoft 365</a>, ou saisissez l'adresse du calendrier.</small> }
+                        }
+                        break;
+                    default:   // text, url
+                        <input type="text" maxlength="@f.MaxLength" placeholder="@f.Placeholder" @bind="Values[k]" @bind:event="oninput" />
+                        break;
+                }
+            }
+            @if (!string.IsNullOrEmpty(f.Help)) { <small>@f.Help</small> }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public AppManifest Manifest { get; set; } = default!;
+    [Parameter, EditorRequired] public Dictionary<string, string> Values { get; set; } = default!;
+    [Parameter] public ISet<string> StoredSecrets { get; set; } = new HashSet<string>();
+    /// <summary>Instance en cours de modification (null : pas encore enregistrée).</summary>
+    [Parameter] public Guid? InstanceId { get; set; }
+
+    private List<GraphService.RoomInfo> rooms = new();
+    private readonly Dictionary<string, string> fileErrors = new();
+
+    private static int LineCount(string text) => text.Split((char)10).Count(l => !string.IsNullOrWhiteSpace(l));
+
+    // Lit le fichier choisi : UTF-8, ou ISO-8859-1 pour les exports Excel (« é » correct dans les deux cas).
+    private async Task LoadFile(AppField f, InputFileChangeEventArgs e)
+    {
+        fileErrors.Remove(f.Key);
+        try
+        {
+            await using var s = e.File.OpenReadStream(f.MaxLength * 4L);
+            using var ms = new MemoryStream();
+            await s.CopyToAsync(ms);
+            var bytes = ms.ToArray();
+            string text;
+            try { text = new System.Text.UTF8Encoding(false, true).GetString(bytes); }
+            catch (System.Text.DecoderFallbackException) { text = System.Text.Encoding.Latin1.GetString(bytes); }
+            text = text.TrimStart((char)0xFEFF);
+            if (text.Length > f.MaxLength) { fileErrors[f.Key] = $"Fichier trop volumineux ({f.MaxLength:N0} caractères maximum)."; return; }
+            if (string.IsNullOrWhiteSpace(text)) { fileErrors[f.Key] = "Le fichier est vide."; return; }
+            Values[f.Key] = text;
+        }
+        catch (IOException) { fileErrors[f.Key] = "Fichier trop volumineux."; }
+    }
+    private bool msConfigured;
+    private List<SharedCalendar> calendars = new();
+    private List<DriveFolder> folders = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Manifest.Settings.FirstOrDefault(f => f.Type == "drive") is { } df)
+        {
+            // dossiers des sources actives ; le dossier déjà choisi reste affiché même si sa source a été désactivée
+            var t = Store.Read(d => d.Tenant);
+            var current = Values.GetValueOrDefault(df.Key);
+            folders = DriveSources.Offered(t).ToList();
+            if (t.DriveFolders.FirstOrDefault(x => x.Id.ToString() == current) is { } chosen && !folders.Contains(chosen)) folders.Insert(0, chosen);
+        }
+        if (Manifest.Settings.FirstOrDefault(f => f.Type == "calendar") is { } cf)
+        {
+            // calendriers des sources actives ; le calendrier déjà choisi reste affiché même si sa source a été désactivée
+            var t = Store.Read(d => d.Tenant);
+            var current = Values.GetValueOrDefault(cf.Key);
+            calendars = SharedCalendarSources.Offered(t).ToList();
+            if (t.SharedCalendars.FirstOrDefault(c => c.Id.ToString() == current) is { } chosen && !calendars.Contains(chosen)) calendars.Insert(0, chosen);
+        }
+        if (!Manifest.Settings.Any(f => f.Type == "mailbox")) return;
+        var tenant = Store.Read(d => d.Tenant);
+        msConfigured = GraphService.Configured(tenant);
+        if (msConfigured)
+        {
+            try { rooms = await Graph.ListRooms(tenant); } catch { /* annuaire inaccessible : saisie libre */ }
+        }
+    }
+}
