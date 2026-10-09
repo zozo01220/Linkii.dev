@@ -3,10 +3,13 @@
 @inject TenantStore Store
 @inject PreviewGrants Grants
 @inject IJSRuntime JS
+@inject Notifier Notifier
+@inject Toaster Toast
 
 @* Simulateur : le player des écrans en mode aperçu (sim.js), réduit dans une fenêtre. Trois usages :
    un écran (sa publication, au même moment s'il est synchronisé), un mur entier (une seule image, cadres tracés par-dessus),
-   ou une liste de lecture essayée avant publication (format et date au choix). Sans aucun effet sur les écrans. *@
+   ou une liste de lecture essayée avant publication (format et date au choix). Sans aucun effet sur les écrans,
+   sauf « Appliquer » des réglages du mur : mêmes réglages (format, matériel, résolution) sur tous ses écrans. *@
 <div class="modal-backdrop @(Stacked ? "picker-backdrop" : "")" @onclick="Close"></div>
 <div class="modal app-modal sim-dlg" role="dialog" aria-modal="true" aria-labelledby="sim-title">
     <div class="modal-head">
@@ -24,7 +27,10 @@
         }
         else
         {
-            <div class="sim-host" @ref="host"></div>
+            <div class="sim-main">
+                @if (WallPending) { <span class="badge mise-a-jour sim-ribbon">Aperçu des nouveaux réglages · pas encore appliqués</span> }
+                <div class="sim-host" @ref="host"></div>
+            </div>
         }
         <aside class="sim-side">
             @if (PlaylistId != null)
@@ -63,6 +69,37 @@
             }
             else if (WallZoneId != null)
             {
+                <div class="sim-tabs" role="tablist" aria-label="Simulateur du mur">
+                    <button type="button" role="tab" aria-selected="@(tab == "aff" ? "true" : "false")" class="@(tab == "aff" ? "on" : "")" @onclick='() => tab = "aff"'>Affichage</button>
+                    <button type="button" role="tab" aria-selected="@(tab == "reg" ? "true" : "false")" class="@(tab == "reg" ? "on" : "")" @onclick='() => tab = "reg"'><span>Réglages du mur</span>@if (WallPending || diffs.Count > 0) { <span class="sim-dot" title="@(WallPending ? "Réglages pas encore appliqués" : "Écrans aux réglages différents")"></span> }</button>
+                </div>
+            }
+            @if (WallZoneId != null && tab == "reg")
+            {
+                @if (diffs.Count > 0 && !WallPending)
+                {
+                    <div class="wall-note warn" style="margin:0 0 14px">
+                        <b>Les écrans n'ont pas tous les mêmes réglages.</b>
+                        <ul class="sim-diffs">@foreach (var d in diffs) { <li>@d</li> }</ul>
+                        @(canManage ? "« Appliquer » les aligne sur les réglages ci-dessous." : "")
+                    </div>
+                }
+                <section>
+                    <h4>Réglages des @wallCount écrans</h4>
+                    @* mêmes choix que la fiche d'un écran, sans découpage (un mur est toujours en écran plein) *@
+                    <fieldset class="sim-fmt" disabled="@(!canManage)">
+                        <ScreenFormat Spec="wallSpec" Compact="true" OnChange="WallSpecChanged" />
+                    </fieldset>
+                    @if (!canManage) { <p class="muted sim-hint">Seuls les gestionnaires des zones de l'aire peuvent modifier les réglages du mur.</p> }
+                </section>
+                <section>
+                    @{ var (nw, nh) = Size(); }
+                    <div class="wall-note" style="margin:0">Pour une image nette : créez vos contenus en <b class="mono">@(nw * cols) × @(nh * rows)</b> px.</div>
+                    <p class="muted sim-hint">« Appliquer » enregistre ces réglages sur les @wallCount écrans du mur ; ils se rechargent aussitôt. La liste ne change pas, rien n'est republié.</p>
+                </section>
+            }
+            else if (WallZoneId != null)
+            {
                 <section>
                     <h4>Vue</h4>
                     <div class="sim-chips" role="group" aria-label="Vue">
@@ -98,12 +135,28 @@
                 </section>
             }
             @if (warn != null) { <div class="wall-note warn" style="margin:0 0 12px">@warn</div> }
-            <div class="wall-note" style="margin:0">Aperçu sans effet : il ne compte pas dans les statistiques et ne change pas l'état de l'écran.</div>
+            @if (WallZoneId == null || tab != "reg") { <div class="wall-note" style="margin:0">Aperçu sans effet : il ne compte pas dans les statistiques et ne change pas l'état de l'écran.</div> }
         </aside>
     </div>
     <div class="modal-foot">
-        <span class="muted grow sim-foot">@foot</span>
-        <button type="button" class="btn" @onclick="Close">Fermer</button>
+        @if (confirmClose)
+        {
+            <span class="grow sim-confirm">Fermer sans appliquer ? Les nouveaux réglages ne seront pas enregistrés.</span>
+            <button type="button" class="btn ghost" @onclick="() => confirmClose = false">Continuer</button>
+            <button type="button" class="btn" @onclick="() => OnClose.InvokeAsync()">Fermer sans appliquer</button>
+        }
+        else if (WallZoneId != null && canManage && (WallPending || diffs.Count > 0))
+        {
+            <span class="muted grow sim-foot">@(WallPending ? "Pas encore appliqué : les écrans affichent toujours les anciens réglages." : $"« Appliquer » aligne les {wallCount} écrans sur ces réglages.")</span>
+            @if (WallPending) { <button type="button" class="btn ghost" @onclick="UndoWall">Annuler les changements</button> }
+            <button type="button" class="btn ghost" @onclick="Close">Fermer</button>
+            <button type="button" class="btn" disabled="@applying" @onclick="ApplyWall">@(applying ? "Application…" : $"Appliquer aux {wallCount} écrans")</button>
+        }
+        else
+        {
+            <span class="muted grow sim-foot">@foot</span>
+            <button type="button" class="btn" @onclick="Close">Fermer</button>
+        }
     </div>
 </div>
 
@@ -205,9 +258,19 @@
                 return at == null ? ("empty", label + " : place libre")
                     : (d.Status(at) is "En ligne" or "Mise à jour" ? "ok" : "off", label + " : " + at.Name);
             }).ToList();
+            // écrans dont les réglages diffèrent de ceux du premier : « 3 · droite : Moniteur, WXGA · 1366×768 »
+            var diffs = first == null ? new List<string>() : inWall.Where(s => s.WallPos != null && s.Id != first.Id).OrderBy(s => s.WallPos)
+                .Select(s => (s, what: string.Join(", ", new[]
+                {
+                    s.ScreenType != first.ScreenType ? ScreenOptions.TypeLabel(s.ScreenType) : null,
+                    s.Orientation != first.Orientation ? (s.Orientation == "portrait" ? "portrait" : "paysage") : null,
+                    s.Resolution != first.Resolution ? (ScreenOptions.Resolutions.FirstOrDefault(r => r.Id == s.Resolution)?.Label ?? s.Resolution) : null
+                }.OfType<string>())))
+                .Where(x => x.what.Length > 0)
+                .Select(x => $"{Helpers.WallLabel(x.s.WallPos!.Value, z.WallCols, z.WallRows)} ({x.s.Name}) : {x.what}").ToList();
             return new
             {
-                z.Name, z.WallCols, z.WallRows, First = first, States = states,
+                z.Name, z.WallCols, z.WallRows, First = first, States = states, Count = inWall.Count, Diffs = diffs, Manage = d.Access.ManagesCurrent,
                 Playlist = d.Playlists.FirstOrDefault(p => p.Id == z.PlaylistId)?.Name,
                 Pending = inWall.Any(s => Helpers.HasPending(s, d.Playlists))
             };
@@ -215,16 +278,81 @@
         if (info == null || info.First == null) { missing = true; title = "Simuler le mur"; return; }
         title = "Simuler · " + info.Name;
         cols = info.WallCols; rows = info.WallRows;
-        orientation = info.First.Orientation; resolution = PlayerFeed.Resolution(info.First);
+        wallFirst = info.First;
+        wallCount = info.Count;
+        diffs = info.Diffs;
+        canManage = info.Manage;
+        wallSaved = new ScreenSpec { Type = info.First.ScreenType, Orientation = info.First.Orientation, Resolution = info.First.Resolution };
+        wallSpec = new ScreenSpec { Type = wallSaved.Type, Orientation = wallSaved.Orientation, Resolution = wallSaved.Resolution };
+        orientation = wallSpec.Orientation; resolution = PlayerFeed.Resolution(info.First, wallSpec.Resolution);
         cells = info.States.Select(x => (object)new { state = x.Item1, title = x.Item2 }).ToList();
         var online = info.States.Count(x => x.Item1 == "ok");
-        var (w, h) = Size();
         badges.Add(("sync", $"Mur d'écrans {cols} × {rows}", null));
         badges.Add((online == cols * rows ? "en-ligne" : "hors-ligne", online == cols * rows ? $"{online} sur {online} en ligne" : "Mur incomplet", $"{online} écran{(online > 1 ? "s" : "")} en ligne sur {cols * rows} places"));
-        badges.Add(("neutre", $"{w * cols} × {h * rows}", "Taille de l'image du mur, en pixels"));
+        badges.Add(WallSizeBadge());
         facts.Add(("Liste", info.Playlist ?? "aucune"));
         if (info.Pending) warn = "Des modifications ne sont pas encore publiées sur le mur : le simulateur montre ce qu'il affiche.";
         foot = "Les contenus d'un mur sont pensés pour toute sa surface : le texte traverse les cadres.";
+    }
+
+    // ---------- Réglages du mur : essayés dans le simulateur, puis appliqués à tous ses écrans ----------
+    private string tab = "aff";   // aff | reg
+    private Screen? wallFirst;
+    private ScreenSpec wallSpec = new(), wallSaved = new();
+    private List<string> diffs = new();
+    private int wallCount;
+    private bool canManage, confirmClose, applying;
+
+    private bool WallPending => WallZoneId != null && wallFirst != null
+        && (wallSpec.Type != wallSaved.Type || wallSpec.Orientation != wallSaved.Orientation || wallSpec.Resolution != wallSaved.Resolution);
+
+    private (string, string, string?) WallSizeBadge()
+    {
+        var (w, h) = Size();
+        return ("neutre", $"{w * cols} × {h * rows}", "Taille de l'image du mur, en pixels");
+    }
+
+    // Un réglage changé : seul le simulateur le montre (nouveau jeton d'aperçu au format essayé).
+    private void WallSpecChanged()
+    {
+        if (wallFirst == null) return;
+        confirmClose = false;
+        orientation = wallSpec.Orientation;
+        resolution = PlayerFeed.Resolution(wallFirst, wallSpec.Resolution);
+        if (badges.Count > 2) badges[2] = WallSizeBadge();
+        NewToken();
+    }
+
+    private void UndoWall()
+    {
+        wallSpec = new ScreenSpec { Type = wallSaved.Type, Orientation = wallSaved.Orientation, Resolution = wallSaved.Resolution };
+        WallSpecChanged();
+    }
+
+    // Mêmes réglages sur tous les écrans du mur ; ils rechargent leur configuration (comme un changement de format dans la fiche).
+    private async Task ApplyWall()
+    {
+        if (applying || WallZoneId is not { } zid) return;
+        applying = true;
+        var spec = new ScreenSpec { Type = wallSpec.Type, Orientation = wallSpec.Orientation, Resolution = wallSpec.Resolution };
+        var ids = Store.Write(d =>
+        {
+            if (!d.Access.ManagesCurrent) return null;
+            var list = d.Screens.Where(s => s.ZoneId == zid && s.Token != null).ToList();
+            foreach (var s in list)
+            {
+                s.ScreenType = spec.Type; s.Orientation = spec.Orientation; s.Resolution = spec.Resolution;
+                s.Layout = ScreenLayouts.Fit(s.Layout, spec);
+            }
+            return list.Select(s => s.Id).ToList();
+        });
+        if (ids == null) { applying = false; Toast.Error("Seuls les gestionnaires des zones de l'aire peuvent modifier les réglages du mur."); return; }
+        foreach (var id in ids) await Notifier.NotifyScreen(id);
+        Toast.Ok($"Réglages appliqués aux {ids.Count} écrans du mur. Ils se rechargent.");
+        applying = false;
+        badges.Clear(); facts.Clear(); warn = null;
+        LoadWall();
+        NewToken();
     }
 
     private void LoadPlaylist()
@@ -326,7 +454,12 @@
         catch (JSDisconnectedException) { }
     }
 
-    private Task Close() => OnClose.InvokeAsync();
+    // Réglages du mur essayés mais pas appliqués : confirmation avant de fermer.
+    private Task Close()
+    {
+        if (WallPending && canManage && !confirmClose) { confirmClose = true; tab = "reg"; return Task.CompletedTask; }
+        return OnClose.InvokeAsync();
+    }
 
     public async ValueTask DisposeAsync()
     {

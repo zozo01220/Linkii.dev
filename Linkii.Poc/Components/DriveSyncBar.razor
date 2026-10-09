@@ -1,0 +1,54 @@
+@implements IDisposable
+@inject DriveService Drives
+@inject TenantStore Store
+
+@* Import d'un dossier Drive en cours : le travail se fait sur le serveur, ceci le rend visible (barre, nombre de fichiers, octets).
+   Affiché dans la médiathèque et dans la fenêtre des Drives, pour toute synchronisation (ajout, sous-dossiers, « Synchroniser », toutes les 15 minutes). *@
+@foreach (var p in running)
+{
+    var f = p.Fraction;
+    <div class="dsb" role="status" aria-live="polite">
+        <span class="dsb-spin" aria-hidden="true"></span>
+        <div class="dsb-body">
+            <b>@Title(p)</b>
+            <div class="upl-bar @(f == null ? "indet" : "")" aria-hidden="true"><span style="width:@(f == null ? 35 : (int)Math.Round(f.Value * 100))%"></span></div>
+            <small>@Detail(p)</small>
+            @if (p.Phase == "importing" && p.Videos > 0)
+            {
+                <small class="dsb-hint">@(p.Videos > 1 ? $"{p.Videos} vidéos" : "1 vidéo") : le téléchargement puis la conversion en 1080p peuvent prendre plusieurs minutes. Vous pouvez continuer à travailler, l'import se poursuit.</small>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<DriveService.SyncProgress> running = Array.Empty<DriveService.SyncProgress>();
+
+    protected override void OnInitialized()
+    {
+        running = Drives.Running(Store.ClientId);
+        Drives.ProgressChanged += OnProgress;
+    }
+
+    private void OnProgress(Guid clientId)
+    {
+        if (clientId != Store.ClientId) return;
+        _ = InvokeAsync(() => { running = Drives.Running(Store.ClientId); StateHasChanged(); });
+    }
+
+    private static string Title(DriveService.SyncProgress p) => p.Phase switch
+    {
+        "listing" => $"Lecture du dossier « {p.Folder} »…",
+        "updating" => $"« {p.Folder} » : mise à jour des écrans…",
+        _ => $"Import du dossier « {p.Folder} » : {p.Done} sur {p.Total} fichier{(p.Total > 1 ? "s" : "")}"
+    };
+
+    private static string Detail(DriveService.SyncProgress p) => p.Phase switch
+    {
+        "listing" => "Recherche des images et vidéos, sous-dossiers compris. Cela peut durer un moment pour un grand dossier.",
+        "updating" => "Presque terminé.",
+        _ => (p.BytesTotal > 0 ? $"{Helpers.FormatSize(p.Bytes)} sur {Helpers.FormatSize(p.BytesTotal)}" : "") + (p.Current.Length > 0 ? (p.BytesTotal > 0 ? " · " : "") + p.Current : "")
+    };
+
+    public void Dispose() => Drives.ProgressChanged -= OnProgress;
+}

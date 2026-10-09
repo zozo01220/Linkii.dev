@@ -2,6 +2,7 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
 @implements IDisposable
 @inject MediaLibrary Library
+@inject DriveService Drives
 @inject TenantStore Store
 @inject Toaster Toast
 
@@ -14,6 +15,8 @@
         <Ico Name="upload" Size="16" /> Téléverser des médias
     </button>
 </div>
+
+<DriveSyncBar />
 
 @* Toujours présent (masqué quand le panneau est replié) : refermer le panneau n'interrompt pas les imports en cours. *@
 <div class="card lib-upload" style="@(showUpload || (files.Count == 0 && Jobs.Count == 0) ? "" : "display:none")">
@@ -102,7 +105,7 @@
                 <div class="lib-body">
                     <div class="lib-text">
                         <span class="lib-name" title="@item.Name">@item.Name</span>
-                        <small class="lib-size">@(item.Size is { } s ? Helpers.FormatSize(s) : "—")</small>
+                        <small class="lib-size" title="@(item.Width is > 0 ? $"{item.Width}×{item.Height} px" : null)">@(item.Size is { } s ? Helpers.FormatSize(s) : "—")@(MediaProbe.Label(item) is { } fmt ? " · " + fmt : "")</small>
                     </div>
                     <span class="lib-col">@(item.Type == "video" ? "Vidéo" : "Image")</span>
                     <span class="lib-col">@(item.AddedUtc?.ToLocalTime().ToString("dd.MM.yyyy") ?? "—")</span>
@@ -231,8 +234,9 @@
         // pendant une conversion vidéo, la liste se rafraîchit seule
         refreshTimer = new System.Threading.Timer(_ => InvokeAsync(() =>
         {
-            if (files.Any(m => m.Status == "processing")) { Reload(); StateHasChanged(); }
+            if (files.Any(m => m.Status == "processing") || Drives.Running(Store.ClientId).Count > 0) { Reload(); StateHasChanged(); }   // import de dossier Drive : les fichiers arrivent au fil de l'eau
         }), null, 2000, 2000);
+        Drives.ProgressChanged += OnDriveProgress;
     }
 
     private MediaItem? moving;
@@ -290,5 +294,16 @@
         Reload();
     }
 
-    public void Dispose() => refreshTimer?.Dispose();
+    // Fin d'un import de dossier : la liste est relue aussitôt
+    private void OnDriveProgress(Guid clientId)
+    {
+        if (clientId != Store.ClientId || Drives.Running(clientId).Count > 0) return;
+        _ = InvokeAsync(() => { Reload(); StateHasChanged(); });
+    }
+
+    public void Dispose()
+    {
+        Drives.ProgressChanged -= OnDriveProgress;
+        refreshTimer?.Dispose();
+    }
 }

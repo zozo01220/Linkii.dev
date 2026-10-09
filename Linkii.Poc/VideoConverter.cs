@@ -4,7 +4,7 @@ using System.Text;
 namespace Linkii.Poc;
 
 /// <summary>
-/// Convertit n'importe quelle vidéo (MKV, AVI, MOV, WMV, FLV, MPEG, WebM, 3GP, HEVC…) en MP4 H.264 sans son, 1080p max :
+/// Convertit n'importe quelle vidéo (MKV, AVI, MOV, WMV, FLV, MPEG, WebM, 3GP, HEVC…) en MP4 H.264 sans son, 1080p max (les MP4 plus grands sont aussi réduits) :
 /// le seul format que tous les navigateurs et toutes les clés HDMI lisent, et qui se met en cache pour la lecture hors ligne.
 /// Outils gratuits utilisés côté serveur : ffmpeg (préféré) ou VLC en ligne de commande.
 /// Un « plugin » VLC dans le navigateur n'existe plus (NPAPI supprimé de tous les navigateurs depuis 2015).
@@ -23,6 +23,15 @@ public class VideoConverter
     };
 
     public static bool IsVideo(string ext) => VideoExts.Contains(ext);
+
+    /// <summary>Taille maximale publiée : 1920×1080 en paysage, 1080×1920 en portrait. Au-delà (2K, 4K), les écrans et boîtiers courants saccadent.</summary>
+    public const int MaxLong = 1920, MaxShort = 1080;
+
+    public static bool FitsLimit(int w, int h) => Math.Max(w, h) <= MaxLong && Math.Min(w, h) <= MaxShort;
+
+    // Réduit au besoin pour tenir dans la boîte (jamais d'agrandissement), proportions gardées, dimensions paires
+    private const string ScaleFilter =
+        "scale=w='min(iw,if(gt(iw,ih),1920,1080))':h='min(ih,if(gt(iw,ih),1080,1920))':force_original_aspect_ratio=decrease:force_divisible_by=2";
 
     /// <summary>MP4/M4V sont publiés tels quels (on suppose du H.264) sauf si l'on force la conversion (H.265, 4K…).</summary>
     public static bool NeedsConversion(string ext, bool force) => force || ext is not ".mp4" and not ".m4v";
@@ -82,6 +91,11 @@ public class VideoConverter
         paths.AddRange(Candidates("vlc.exe", "vlc", "cvlc"));
         foreach (var p in paths.Where(File.Exists))
         {
+            // Sous Windows, vlc.exe n'écrit rien dans la console pour --version (il dépose un vlc-help.txt) : on lit la version du fichier
+            var info = FileVersionInfo.GetVersionInfo(p);
+            if ((info.ProductName ?? "").Contains("VLC", StringComparison.OrdinalIgnoreCase))
+                return new Tool("VLC", p, (info.ProductVersion ?? "").Replace(',', '.').Replace(" ", ""));
+
             var v = Run(p, new[] { "--version", "-I", "dummy" }, 15, out _);
             // « VLC media player 3.0.20 Vetinari (revision …) »
             var line = v?.Split('\n').FirstOrDefault(l => l.Contains("VLC", StringComparison.OrdinalIgnoreCase) && l.Contains("version", StringComparison.OrdinalIgnoreCase))
@@ -97,7 +111,8 @@ public class VideoConverter
 
     // ---------- Conversion ----------
     /// <summary>Convertit <paramref name="input"/> vers <paramref name="output"/> (MP4). Renvoie null si OK, sinon le message d'erreur.</summary>
-    public async Task<string?> ConvertAsync(string input, string output, CancellationToken ct = default)
+    /// <param name="size">Taille connue de la source (MP4) : permet à VLC, qui n'a pas de « tenir dans une boîte », de calculer le bon facteur de réduction.</param>
+    public async Task<string?> ConvertAsync(string input, string output, (int W, int H)? size = null, CancellationToken ct = default)
     {
         var tool = Find();
         if (tool == null) return "Aucun convertisseur vidéo (ffmpeg ou VLC) n'est installé sur le serveur.";
@@ -109,15 +124,22 @@ public class VideoConverter
             {
                 "-y", "-hide_banner", "-loglevel", "error", "-i", input,
                 "-an",                                             // l'écran est muet : on économise la place
-                "-vf", "scale='min(1920,iw)':-2",                  // 1080p maximum, hauteur paire
+                "-vf", ScaleFilter,                                // 1080p maximum (1920×1080 en paysage, 1080×1920 en portrait)
                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
-                "-movflags", "+faststart", output,
+                "-movflags", "+faststart", "-f", "mp4", output,
             };
         }
         else
         {
             var dst = output.Replace('\\', '/');
-            var sout = "#transcode{vcodec=h264,vb=3500,maxwidth=1920,maxheight=1080,venc=x264{preset=veryfast}}:std{access=file,mux=mp4,dst=\"" + dst + "\"}";
+            string fit;
+            if (size is { } s)
+            {
+                var factor = Math.Min(1.0, Math.Min((double)MaxLong / Math.Max(s.W, s.H), (double)MaxShort / Math.Min(s.W, s.H)));
+                fit = factor < 1 ? "scale=" + factor.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) + "," : "";
+            }
+            else fit = "maxwidth=1920,maxheight=1080,";   // taille inconnue : on suppose un format paysage
+            var sout = "#transcode{vcodec=h264,vb=3500," + fit + "venc=x264{preset=veryfast}}:std{access=file,mux=mp4,dst=\"" + dst + "\"}";
             args = new[] { "-I", "dummy", "--dummy-quiet", "--no-sout-audio", "--no-spu", input, "--sout", sout, "vlc://quit" };
         }
 
@@ -176,5 +198,60 @@ public class VideoConverter
             return sb.ToString();
         }
         catch { return null; }
+    }
+}
+
+/// <summary>Lit la taille affichée d'un MP4 (boîte « tkhd » de la piste vidéo, rotation comprise) sans outil externe.</summary>
+public static class Mp4Probe
+{
+    public static (int W, int H)? Size(string path)
+    {
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            return Walk(fs, 0, fs.Length);
+        }
+        catch { return null; }
+    }
+
+    private static (int, int)? Walk(FileStream fs, long start, long end)
+    {
+        var pos = start;
+        var h = new byte[16];
+        while (pos + 8 <= end)
+        {
+            fs.Position = pos;
+            var got = fs.Read(h, 0, 16);
+            if (got < 8) return null;
+            long size = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(h);
+            var type = Encoding.Latin1.GetString(h, 4, 4);
+            long hl = 8;
+            if (size == 1 && got >= 16) { size = (long)System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(h.AsSpan(8)); hl = 16; }
+            else if (size == 0) size = end - pos;
+            if (size < hl) return null;
+
+            if (type is "moov" or "trak")
+            {
+                if (Walk(fs, pos + hl, pos + size) is { } r) return r;
+            }
+            else if (type == "tkhd")
+            {
+                var b = new byte[100];
+                fs.Position = pos + hl;
+                fs.Read(b, 0, b.Length);
+                var wide = b[0] == 1;
+                int sizeOff = wide ? 88 : 76, matrixOff = wide ? 52 : 40;
+                var w = (int)(System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(b.AsSpan(sizeOff)) >> 16);
+                var hh = (int)(System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(b.AsSpan(sizeOff + 4)) >> 16);
+                if (w > 0 && hh > 0)
+                {
+                    var a = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(b.AsSpan(matrixOff));
+                    var bb = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(b.AsSpan(matrixOff + 4));
+                    return a == 0 && bb != 0 ? (hh, w) : (w, hh);   // vidéo de téléphone tournée de 90° : largeur et hauteur échangées
+                }
+            }
+            pos += size;
+        }
+        return null;
     }
 }

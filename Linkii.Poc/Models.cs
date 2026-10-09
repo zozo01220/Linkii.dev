@@ -462,6 +462,8 @@ public class MediaItem : IClientOwned, IAreaOwned
     public string? Status { get; set; }            // null = prêt | processing (conversion vidéo) | failed
     public string? Error { get; set; }             // message si la conversion a échoué
     public long? Size { get; set; }                // octets (images et vidéos) ; complété à la lecture pour les fichiers importés avant
+    public int? Width { get; set; }                // pixels (images et vidéos) ; lus dans le fichier pour ceux importés avant
+    public int? Height { get; set; }
     public DateTime? AddedUtc { get; set; }
 }
 

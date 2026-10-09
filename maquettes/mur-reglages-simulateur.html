@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Réglages du mur dans le simulateur</title>
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--row:#EDF1F5;--brand:#0B1F3A;--signal:#3B82C4;--ok:#1E8E5A;--ok-bg:#E1F0E8;--ok-ink:#155A38;--warn:#B7791F;--warn-bg:#FBF0DC;--warn-ink:#7A4F12;--danger:#C8372D;--danger-bg:#FBE4E2;--danger-ink:#8A231C;--radius:4px;--mono:"JetBrains Mono",ui-monospace,Consolas,monospace}
+*{box-sizing:border-box}html,body{margin:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
+h1,h2,h3,h4,p{margin:0;font-weight:500}p{font-weight:400}b{font-weight:500}button,select{font:inherit}
+.mock{background:#fff;border-bottom:1px dashed var(--line-2);padding:10px 24px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:30}
+.mock span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-right:6px}
+.mock button{border:1px solid var(--line-2);background:#fff;padding:5px 12px;border-radius:var(--radius);cursor:pointer;color:var(--ink)}
+.mock button.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+.annot{background:#FFF8E1;border:1px dashed #E0B84A;border-radius:var(--radius);padding:8px 12px;font-size:13px;color:#6B5200;margin:0 auto 16px;max-width:1180px}
+.veil{background:rgba(11,31,58,.45);min-height:calc(100vh - 53px);padding:24px 20px}
+.modal{background:#fff;border-radius:10px;max-width:1180px;margin:0 auto;border:1px solid var(--line)}
+.modal header{padding:14px 22px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.modal header h2{font-size:18px;margin-right:4px}.modal header .x{margin-left:auto;border:0;background:none;font-size:20px;color:var(--muted);cursor:pointer}
+.ico{width:38px;height:38px;border-radius:50%;background:var(--ink);color:#fff;display:grid;place-items:center;font-size:17px;flex:none}
+.body{padding:16px 22px;display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:22px}
+.modal footer{padding:12px 22px;border-top:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--bg);border-radius:0 0 10px 10px}
+.grow{flex:1}
+.btn{font-weight:500;cursor:pointer;border:1px solid var(--brand);border-radius:var(--radius);padding:9px 16px;background:var(--brand);color:#fff;display:inline-flex;align-items:center;gap:8px}
+.btn.ghost{background:#fff;color:var(--ink);border-color:var(--line-2)}.btn.sm{padding:5px 10px;font-size:13px}
+.btn:disabled{opacity:.45;cursor:default}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:var(--radius);font-size:12px;font-weight:500;white-space:nowrap}
+.badge::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.badge.ok{color:var(--ok-ink);background:var(--ok-bg)}.badge.warn{color:var(--warn-ink);background:var(--warn-bg)}.badge.ko{color:var(--danger-ink);background:var(--danger-bg)}
+.badge.sync{color:#1F5C93;background:#E4EEF8}.badge.sync::before,.badge.neutre::before{display:none}.badge.neutre{color:var(--muted);background:var(--row);font-weight:400}
+.badge.live{color:#fff;background:var(--danger)}.badge.live::before{background:#fff;animation:blink 1.4s infinite}
+@keyframes blink{50%{opacity:.2}}
+.hint{color:var(--muted);font-size:13px}
+.kpi{font-family:var(--mono)}
+/* simulateur */
+.box{background:#E9EDF2;border-radius:8px;padding:16px;display:grid;place-items:center;position:relative}
+.frame{position:relative;background:#000;overflow:hidden;transition:width .3s}
+.stage{position:absolute;inset:0;background:linear-gradient(110deg,#0B1F3A 0%,#1C4C84 55%,#3B82C4 100%);color:#fff;container-type:size;display:flex;align-items:center;padding:0 6cqw}
+.stage h3{font-size:16cqh;font-weight:500;letter-spacing:-.02em;line-height:1}
+.stage p{font-size:5cqh;color:#C9D6E6;margin-top:3cqh}
+.stage .sq{position:absolute;right:6cqw;top:50%;transform:translateY(-50%);display:flex;gap:4cqh}
+.stage .sq i{width:22cqh;height:22cqh;background:#fff;animation:bob 3s ease-in-out infinite alternate}.stage .sq i+i{background:#3B82C4;outline:1cqh solid #fff;animation-delay:-1.5s}
+@keyframes bob{to{transform:translateY(-6cqh)}}
+.grid{position:absolute;inset:0;display:grid}
+.cell{position:relative;box-shadow:inset 0 0 0 3px #050B16}
+.cell .n{position:absolute;left:8px;top:6px;font-family:var(--mono);font-size:12px;background:rgba(11,31,58,.8);color:#fff;padding:0 6px;border-radius:3px}
+.cell .diff{position:absolute;right:8px;top:6px;font-size:11px;background:var(--warn);color:#fff;padding:0 6px;border-radius:3px}
+.box{display:flex;flex-direction:column;align-items:center;gap:10px}
+.ribbon{align-self:flex-start}
+.bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.sb{border:1px solid var(--line-2);background:#fff;border-radius:var(--radius);height:32px;min-width:34px;padding:0 9px;cursor:pointer;color:var(--ink);font-size:13px}
+.tl{display:flex;gap:3px;margin-top:10px}
+.seg{position:relative;border:1px solid var(--line);background:#fff;border-radius:var(--radius);padding:6px 8px;font-size:12px;overflow:hidden}
+.seg.on{border-color:var(--signal);box-shadow:0 0 0 1px var(--signal)}
+.seg i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+.seg small{display:block;color:var(--muted);font-family:var(--mono)}
+.seg .fill{position:absolute;left:0;top:0;bottom:0;width:40%;background:#E4EEF8;z-index:0}.seg span{position:relative}
+/* panneau */
+.tabs{display:flex;border-bottom:1px solid var(--line);margin-bottom:14px}
+.tabs button{border:0;background:none;padding:8px 12px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;font-size:14px}
+.tabs button.on{color:var(--ink);border-bottom-color:var(--ink);font-weight:500}
+.tabs button .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--warn);margin-left:6px;vertical-align:1px}
+.side section{padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid var(--line)}
+.side section:last-child{border:0;margin:0}
+.side h4{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line-2);background:#fff;border-radius:var(--radius);padding:6px 11px;font-size:13px;cursor:pointer;color:var(--ink)}
+.chip.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.fseg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.fseg button{border:1px solid var(--line-2);background:#fff;border-radius:var(--radius);padding:9px 10px;cursor:pointer;display:flex;gap:8px;align-items:center;justify-content:center;color:var(--ink)}
+.fseg button.on{border-color:var(--signal);box-shadow:0 0 0 1px var(--signal);font-weight:500}
+.fseg .mon{width:20px;height:12px;border:2px solid currentColor;border-radius:2px}.fseg .mon.p{width:12px;height:20px}
+details{border:1px solid var(--line);border-radius:var(--radius);padding:8px 12px;margin-top:12px}
+summary{cursor:pointer;font-size:14px;font-weight:500}
+summary small{display:block;font-weight:400;color:var(--muted);font-size:12px;margin-top:2px}
+label.f{display:flex;flex-direction:column;gap:5px;font-size:13px;color:var(--muted);font-weight:500;margin-top:10px}
+select{padding:7px 10px;border:1px solid var(--line-2);border-radius:var(--radius);background:#fff;color:var(--ink);font-size:14px}
+.chg{outline:2px solid var(--warn);outline-offset:1px}
+.note{border-radius:var(--radius);padding:9px 12px;font-size:13px;background:#E4EEF8;color:#1F5C93}
+.note.warn{background:var(--warn-bg);color:var(--warn-ink)}
+.note ul{margin:6px 0 0;padding-left:18px}
+.chk{display:flex;gap:8px;font-size:14px;margin-top:10px}
+.toast{position:fixed;right:20px;top:70px;background:var(--ok-bg);color:var(--ok-ink);border:1px solid #BFDCCB;border-radius:6px;padding:10px 14px;font-size:14px;z-index:40}
+.doc{max-width:1060px;margin:0 auto;padding:30px 24px 60px}
+.doc h1{font-size:28px;margin-bottom:6px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
+.card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+.card h3{font-size:16px;margin-bottom:8px}.card ol,.card ul{margin:0;padding-left:20px;font-size:14px;color:var(--muted)}.card li{margin-bottom:6px}.card li b{color:var(--ink)}
+.hidden{display:none!important}
+@media (max-width:860px){.body{grid-template-columns:minmax(0,1fr)}.cols{grid-template-columns:1fr}.veil{padding:12px}.body,.modal header,.modal footer{padding-left:14px;padding-right:14px}}
+</style>
+</head>
+<body>
+<div class="mock"><span>Réglages du mur</span>
+  <button data-v="a" class="on">1 · Écrans identiques</button>
+  <button data-v="b">2 · Écrans différents</button>
+  <button data-v="d">3 · Fonctionnement et décisions</button>
+</div>
+
+<div id="sim" class="veil">
+  <div class="annot" id="annot"></div>
+  <div class="modal">
+    <header>
+      <span class="ico">▦</span><h2>Simuler · Mur 3 × 1</h2>
+      <span class="badge sync">Mur d'écrans 3 × 1</span><span class="badge ok">3 sur 3 en ligne</span><span class="badge neutre kpi" id="hres">5760 × 1080</span>
+      <button class="x" title="Fermer">✕</button>
+    </header>
+    <div class="body">
+      <div>
+        <div class="box">
+          <span class="badge warn ribbon hidden" id="ribbon">Aperçu des nouveaux réglages · pas encore appliqués</span>
+          <div class="frame" id="frame"><div class="stage"><div><h3>Bienvenue</h3><p>Accueil ouvert de 8 h à 18 h</p></div><div class="sq"><i></i><i></i></div></div><div class="grid" id="grid"></div></div>
+        </div>
+        <div class="bar">
+          <button class="sb">⏮</button><button class="sb">⏸</button><button class="sb">⏭</button>
+          <span class="badge live">En direct · comme l'écran</span><span class="grow"></span>
+          <span class="kpi hint">0:05 / 0:38</span><button class="sb">🔇 Son coupé</button><button class="sb">⛶ Plein écran</button>
+        </div>
+        <div class="tl">
+          <div class="seg on" style="flex:8"><div class="fill"></div><span><i style="background:#F0A92E"></i>Bienvenue<small>8 s</small></span></div>
+          <div class="seg" style="flex:8"><span><i style="background:#2FA66A"></i>Agenda du jour<small>8 s</small></span></div>
+          <div class="seg" style="flex:12"><span><i style="background:#7B5CC4"></i>Vidéo de présentation<small>12 s</small></span></div>
+          <div class="seg" style="flex:10"><span><i style="background:#F2541B"></i>Actualités<small>10 s</small></span></div>
+        </div>
+      </div>
+      <aside class="side">
+        <div class="tabs"><button data-t="aff">Affichage</button><button data-t="reg" class="on">Réglages du mur<span class="dot hidden" id="tdot"></span></button></div>
+        <div id="t-aff" class="hidden">
+          <section><h4>Vue</h4><div class="chips"><button class="chip on">Image du mur</button><button class="chip">Écrans séparés</button></div></section>
+          <section><h4>Cadres des écrans</h4><div class="chips"><button class="chip">Aucun</button><button class="chip on">Fins</button><button class="chip">Épais</button></div>
+            <label class="chk"><input type="checkbox" checked> Numéros des écrans</label><label class="chk"><input type="checkbox"> Montrer l'état réel</label></section>
+        </div>
+        <div id="t-reg">
+          <div class="note warn hidden" id="mixed" style="margin-bottom:14px"><b>Les écrans n'ont pas tous les mêmes réglages.</b>
+            <ul><li>3 · Écran droite : <b>WXGA 1366 × 768</b>, moniteur</li></ul>
+            <div style="margin-top:6px">« Appliquer » les aligne sur les réglages ci-dessous.</div></div>
+          <section>
+            <h4>Orientation des écrans</h4>
+            <div class="fseg" id="orient"><button data-o="landscape" class="on"><span class="mon"></span>Paysage</button><button data-o="portrait"><span class="mon p"></span>Portrait</button></div>
+            <details id="adv">
+              <summary>⚙ Réglages avancés<small id="advsum">Téléviseur · Full HD 1920 × 1080</small></summary>
+              <label class="f">Matériel<select id="type"><option value="tv">📺 Téléviseur</option><option value="monitor">🖥️ Moniteur</option><option value="totem">🪧 Totem / borne</option></select></label>
+              <label class="f">Résolution de chaque écran<select id="res">
+                <option value="auto">Auto (résolution de chaque appareil)</option><option value="1280x720">HD · 1280 × 720</option><option value="1366x768">WXGA · 1366 × 768</option>
+                <option value="1920x1080" selected>Full HD · 1920 × 1080</option><option value="2560x1440">QHD · 2560 × 1440</option><option value="3840x2160">4K UHD · 3840 × 2160</option></select></label>
+            </details>
+          </section>
+          <section>
+            <div class="note">Pour une image nette : créez vos contenus en <b class="kpi" id="net">5760 × 1080</b> px.</div>
+          </section>
+          <section><p class="hint" id="regnote">Les réglages s'appliquent aux 3 écrans du mur. Ils se rechargent aussitôt ; la liste ne change pas, rien n'est republié.</p></section>
+        </div>
+      </aside>
+    </div>
+    <footer>
+      <span class="hint grow" id="fhint">Changez un réglage : le simulateur le montre avant que vous l'appliquiez.</span>
+      <button class="btn ghost hidden" id="undo">Annuler les changements</button>
+      <button class="btn" id="apply" disabled>Appliquer aux 3 écrans</button>
+      <button class="btn ghost" id="close">Fermer</button>
+    </footer>
+  </div>
+</div>
+
+<div id="d" class="hidden"><div class="doc">
+  <h1>Fonctionnement et décisions</h1>
+  <p class="hint" style="font-size:15px">Les réglages se changent dans le simulateur du mur, s'essaient en direct, puis s'appliquent d'un coup à tous les écrans du mur.</p>
+  <div class="cols">
+    <div class="card"><h3>Ce qui se passe</h3><ol>
+      <li>Un onglet <b>Réglages du mur</b> s'ajoute à côté de l'onglet <b>Affichage</b> (vue, cadres, numéros).</li>
+      <li>Changer un réglage met <b>seulement le simulateur</b> à jour : bandeau « Aperçu des nouveaux réglages », point orange sur l'onglet.</li>
+      <li><b>Appliquer aux 3 écrans</b> enregistre les mêmes réglages sur chaque écran du mur. Les écrans se rechargent aussitôt (comme un changement de format dans la fiche) ; ni la liste ni la publication ne changent.</li>
+      <li>Fermer avec des changements non appliqués demande confirmation.</li></ol></div>
+    <div class="card"><h3>Réglages proposés</h3><ul>
+      <li><b>De base</b> : orientation (paysage / portrait).</li>
+      <li><b>Avancés</b> (repliés) : matériel, résolution de chaque écran.</li>
+      <li><b>Pas de découpage en zones</b> : un mur est toujours en écran plein.</li>
+      <li><b>Pas de widgets</b> : un mur n'en affiche pas.</li>
+      <li>La taille d'image conseillée (« créez vos contenus en … px ») suit les réglages.</li></ul></div>
+    <div class="card"><h3>Décisions à prendre</h3><ol>
+      <li><b>Un seul réglage pour tout le mur</b> (proposé) : les écrans d'un mur doivent être identiques pour une image nette. Pas de réglage écran par écran dans le mur.</li>
+      <li>Écrans différents à l'ouverture : <b>avertissement</b> avec la liste des écarts ; le formulaire montre les réglages du premier écran ; « Appliquer » aligne tout le monde (proposé).</li>
+      <li>Réservé à qui peut <b>gérer les zones</b> (comme « Réorganiser » le mur) ; les autres voient l'onglet en lecture seule (proposé).</li>
+      <li>Écran seul : <b>pas de réglages dans son simulateur</b> (ils sont déjà dans sa fiche) (proposé).</li></ol></div>
+    <div class="card"><h3>Ce qui ne change pas</h3><ul>
+      <li>La fenêtre « Assembler en mur » et « Réorganiser » gardent la grille et l'ordre des écrans.</li>
+      <li>Le simulateur reste sans effet tant qu'on n'a pas cliqué « Appliquer ».</li>
+      <li>La résolution « Auto » prend celle de chaque appareil ; le simulateur montre alors celle détectée sur le premier écran.</li></ul></div>
+  </div>
+</div></div>
+<div class="toast hidden" id="toast">✓ Réglages appliqués aux 3 écrans du mur. Ils se rechargent.</div>
+
+<script>
+const RES={auto:[1920,1080],'1280x720':[1280,720],'1366x768':[1366,768],'1920x1080':[1920,1080],'2560x1440':[2560,1440],'3840x2160':[3840,2160]};
+const LBL={auto:'résolution auto','1280x720':'HD 1280 × 720','1366x768':'WXGA 1366 × 768','1920x1080':'Full HD 1920 × 1080','2560x1440':'QHD 2560 × 1440','3840x2160':'4K 3840 × 2160'};
+const TYPES={tv:'Téléviseur',monitor:'Moniteur',totem:'Totem / borne'};
+let saved={o:'landscape',type:'tv',res:'1920x1080'}, cur={...saved}, mixed=false;
+const $=id=>document.getElementById(id);
+function dims(){const [a,b]=RES[cur.res];return cur.o==='portrait'?[b,a]:[a,b];}
+function draw(){
+  const [w,h]=dims(),cols=3,rows=1,ratio=w*cols/(h*rows);
+  const f=$('frame');f.style.aspectRatio=ratio;f.style.width='min(100%, calc(52vh * '+ratio+'))';
+  $('grid').style.gridTemplateColumns='repeat(3,1fr)';
+  $('grid').innerHTML=[1,2,3].map(n=>'<span class="cell"><span class="n">'+n+'</span>'+(mixed&&n===3&&!changed()?'<span class="diff">1366 × 768</span>':'')+'</span>').join('');
+  $('hres').textContent=(w*3)+' × '+h;$('net').textContent=(w*3)+' × '+h;
+  document.querySelectorAll('#orient button').forEach(b=>b.classList.toggle('on',b.dataset.o===cur.o));
+  $('type').value=cur.type;$('res').value=cur.res;
+  $('advsum').textContent=TYPES[cur.type]+' · '+LBL[cur.res];
+  const ch=changed()||mixed;
+  $('ribbon').classList.toggle('hidden',!changed());$('tdot').classList.toggle('hidden',!changed());
+  $('apply').disabled=!ch;$('undo').classList.toggle('hidden',!changed());
+  $('orient').classList.toggle('chg',cur.o!==saved.o);$('type').classList.toggle('chg',cur.type!==saved.type);$('res').classList.toggle('chg',cur.res!==saved.res);
+  $('fhint').textContent=changed()?'Pas encore appliqué : les écrans affichent toujours les anciens réglages.':mixed?'« Appliquer » aligne les 3 écrans sur ces réglages.':'Changez un réglage : le simulateur le montre avant que vous l\'appliquiez.';
+}
+function changed(){return cur.o!==saved.o||cur.type!==saved.type||cur.res!==saved.res;}
+document.querySelectorAll('#orient button').forEach(b=>b.onclick=()=>{cur.o=b.dataset.o;if(cur.o==='portrait'&&cur.type==='tv')cur.type='totem';if(cur.o==='landscape'&&cur.type==='totem')cur.type='tv';draw();});
+$('type').onchange=e=>{cur.type=e.target.value;draw();};
+$('res').onchange=e=>{cur.res=e.target.value;draw();};
+$('undo').onclick=()=>{cur={...saved};draw();};
+$('apply').onclick=()=>{saved={...cur};mixed=false;$('mixed').classList.add('hidden');draw();const t=$('toast');t.classList.remove('hidden');setTimeout(()=>t.classList.add('hidden'),3000);};
+$('close').onclick=()=>{if(changed())alert('Fermer sans appliquer ? Les nouveaux réglages ne seront pas enregistrés.');};
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));$('t-aff').classList.toggle('hidden',b.dataset.t!=='aff');$('t-reg').classList.toggle('hidden',b.dataset.t!=='reg');});
+const ANN={
+ a:'Les 3 écrans ont les mêmes réglages. Essayez <b>Portrait</b>, puis ouvrez <b>Réglages avancés</b> et changez la résolution : le simulateur change tout de suite, un bandeau indique que rien n\'est encore appliqué, puis <b>Appliquer aux 3 écrans</b>.',
+ b:'À l\'ouverture, un écran du mur n\'a pas les mêmes réglages : un avertissement liste les écarts et l\'écran est marqué dans le simulateur. « Appliquer » est actif d\'emblée pour aligner les 3 écrans.'};
+function show(v){document.querySelectorAll('.mock button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+ $('sim').classList.toggle('hidden',v==='d');$('d').classList.toggle('hidden',v!=='d');
+ if(v!=='d'){mixed=v==='b';saved={o:'landscape',type:'tv',res:'1920x1080'};cur={...saved};$('mixed').classList.toggle('hidden',!mixed);$('annot').innerHTML=ANN[v];draw();}}
+document.querySelectorAll('.mock button').forEach(b=>b.onclick=()=>show(b.dataset.v));
+show('a');
+</script>
+</body>
+</html>

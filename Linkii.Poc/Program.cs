@@ -600,7 +600,8 @@ static (Dictionary<string, object?> Feed, List<PublishedItem> Items)? PreviewFee
         : db.Screens.FirstOrDefault(x => x.Id == g.ScreenId && x.ClientId == g.ClientId && x.Token != null);
     if (s == null) return null;
     var feed = PlayerFeed.ForScreen(db, s, whole: g.WallZoneId != null);
-    feed["screen"] = new { orientation = s.Orientation, resolution = PlayerFeed.Resolution(s) };
+    // mur : format du jeton (réglages du mur essayés dans le simulateur, pas forcément encore appliqués)
+    feed["screen"] = g.WallZoneId != null ? new { orientation = g.Orientation, resolution = g.Resolution } : new { orientation = s.Orientation, resolution = PlayerFeed.Resolution(s) };
     return (feed, PlayerFeed.AllItems(db, s));
 }
 

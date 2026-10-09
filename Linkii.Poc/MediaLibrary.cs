@@ -24,6 +24,10 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
         {
             try { var fi = new FileInfo(Path.Combine(AppPaths.MediaDir, m.FileName!)); if (fi.Exists) m.Size = fi.Length; } catch { }
         }
+        foreach (var m in list.Where(m => m.Width == null && m.FileName != null && m.Status == null))
+        {
+            if (MediaProbe.Size(Path.Combine(AppPaths.MediaDir, m.FileName!)) is { } d) { m.Width = d.W; m.Height = d.H; }
+        }
         return list.OrderByDescending(m => m.AddedUtc ?? DateTime.MinValue).ThenBy(m => m.Name).ToList();
     }
 

@@ -1,7 +1,7 @@
 # Linkii — Dev POC (jetable)
 
 > **Statut : test / prototype voué à mourir.** But : prouver la chaîne *back-office → serveur → SignalR → player* et la promesse produit **« écran en service en moins de 2 minutes »**. Le code n'est pas destiné à être réutilisé : on privilégie la vitesse.
-> Source : *Linkii — Spécification produit (v1)*. Dernière mise à jour : 5 octobre 2026.
+> Source : *Linkii — Spécification produit (v1)*. Dernière mise à jour : 10 octobre 2026.
 
 > **Apps retirées le 7 octobre 2026** (on y reviendra plus tard) : **LinkedIn**, **Menu restaurant (API)**, **Menu restaurant (CSV)**, **Météo : prévisions**, **Occupation de salle**. Manifestes, fournisseurs serveur, rendus du player, connexion OAuth LinkedIn, import CSV des menus, bibliothèque QR et tests correspondants sont supprimés ; leurs contenus existants sont purgés au démarrage (`Seed.PurgeRetiredApps`, sauvegarde `data.json.pre-apps-retirees.bak`). **Le code complet d’avant le retrait est conservé dans `_archive/avant-retrait-apps-2026-10-07/`.** Les sections de ce document qui décrivent ces apps (porte de salle, menus, LinkedIn) sont historiques. Le connecteur Microsoft 365 (page Données) reste : il sert à l’app Agenda.
 
@@ -99,7 +99,8 @@ Linkii.Poc/
 ├── JsonStore.cs             # persistance data.json
 ├── Notifier.cs              # publication + notifications SignalR
 ├── WeatherService.cs        # Open-Meteo + cache
-├── VideoConverter.cs        # détection ffmpeg / VLC + conversion en MP4 H.264
+├── VideoConverter.cs        # détection ffmpeg / VLC + conversion en MP4 H.264 1080p max (+ Mp4Probe)
+├── MediaProbe.cs            # dimensions des images et vidéos (format affiché en médiathèque)
 ├── MediaImporter.cs         # import des médias, conversion vidéo en arrière-plan
 ├── DataServices.cs          # calendriers (ICS), Microsoft Graph, transports, import CSV du menu
 ├── Passwords.cs             # hachage PBKDF2
@@ -198,7 +199,7 @@ Chaque usage est un **widget lié à une source**, posé dans une playlist comme
 ### Vidéos : tous formats, lecture hors ligne
 - **Un « plugin VLC » dans le navigateur n'est pas possible** : NPAPI/ActiveX ont été supprimés de tous les navigateurs (Chrome 2015). On utilise donc **ffmpeg ou VLC (gratuits) côté serveur** : à l'import, toute vidéo qui n'est pas un MP4 est convertie en **MP4 H.264, sans son, 1080p maximum**, le seul format lu partout (Chrome, WebView Android, Raspberry Pi) et mis en cache pour le hors ligne.
 - **Détection automatique** : ffmpeg (PATH ou variable `LINKII_FFMPEG`) est préféré, sinon VLC (installation standard, PATH ou variable `LINKII_VLC`). La Médiathèque indique l'outil utilisé ; sans outil, seuls les MP4 H.264 sont acceptés et le message l'explique.
-- **Conversion en arrière-plan** : la tuile affiche « Conversion en cours… » puis la vidéo devient disponible ; en cas d'échec (fichier corrompu, format inconnu) la tuile reste en erreur avec le motif. Une vidéo en cours de conversion ou en échec n'est ni publiable ni proposée dans les playlists. Case « Convertir aussi les MP4 » pour les H.265 / 4K.
+- **Conversion en arrière-plan** : la tuile affiche « Conversion en cours… » puis la vidéo devient disponible ; en cas d'échec (fichier corrompu, format inconnu) la tuile reste en erreur avec le motif. Une vidéo en cours de conversion ou en échec n'est ni publiable ni proposée dans les playlists. Les MP4 plus grands que 1080p (2K, 4K) sont aussi convertis (§20).
 - **Lecture hors ligne côté écran** : le player télécharge la vidéo dans le cache du navigateur **avant** d'appliquer la playlist, puis la relit depuis ce cache sous forme de blob (`blob:`) — sans réseau et **sans dépendre du service worker**. Il redemande le stockage persistant et re-télécharge seul tout média purgé du cache.
 - **Vérifié** : conversion VLC d'un AVI (MPEG-4) et d'un MKV (H.264) en MP4 lu par Chrome ; lecture en boucle de la vidéo **serveur coupé** (bordure rouge + pastille Hors ligne affichées).
 - **Pour un vrai lecteur natif multi-formats** (sans conversion, hors ligne) : intégrer **LibVLC** (gratuit, LGPL) dans l'application Android de la clé / tablette. À prévoir avec l'APK.
@@ -258,9 +259,9 @@ Renommé **Matériel** : téléviseur, moniteur, totem / borne, **tablette Andro
 ## 10. Points ouverts (techniques)
 - [ ] Apps : voir §12 (« Reste à faire »).
 - [ ] Clé HDMI à tester en premier : Fire TV, Android TV ou Raspberry Pi ? (étape APK)
-- [ ] Application Android (WebView / APK, mode kiosque, éventuellement LibVLC) pour la tablette de porte de salle.
+- [x] Application Android (WebView, kiosque, hors ligne) : `Linkii.Android/`, §19. Reste : essai sur un vrai boîtier (fluidité des vidéos), publication Google Play, PIN piloté depuis le back-office.
 - [ ] Tester le redémarrage hors ligne du player (service worker) dans un vrai Chrome / WebView.
-- [ ] Installer ffmpeg sur le serveur de production (meilleur rendu et plus rapide que VLC).
+- [ ] Installer ffmpeg sur le serveur de production srvweb01 (Debian 12 : `apt install -y ffmpeg`, puis redémarrer Linkii) : meilleur rendu et plus rapide que VLC, et seul outil détecté sur Linux (§20).
 - [ ] Tester le connecteur Microsoft 365 sur un vrai locataire (voir §9, limites connues).
 - [ ] Indicateur hors ligne : le rendre configurable (aucun / icône / bordure) dans les Réglages ? Une bordure rouge visible du public n'est pas toujours souhaitable.
 - [ ] Les widgets d'angle réservent une rangée en haut / en bas ; alternative possible : colonnes latérales.
@@ -446,12 +447,45 @@ Maquette validée : `maquettes/simulateur-ecrans.html`. Le simulateur ne redessi
 
 - **Simuler un écran** : bouton « Simuler » sur la vignette de la carte (au survol, toujours visible au doigt), menu ⋮ de la carte et fiche de l'écran. On voit la **dernière publication** de l'écran (format, découpage, widgets, apps). Écran d'une zone synchronisée : badge **En direct · comme l'écran** (même contenu, au même moment) ; pause, précédent / suivant ou un clic sur la frise passent en **lecture libre** (l'écran, lui, continue), « Revenir au direct » réaligne. Modifications non publiées : un avertissement le signale.
 - **Simuler un mur** : depuis le mur (page Écrans). Le player dessine **tout le mur en une seule image** (`wall.whole` : pas de recadrage sur une place), les cadres et numéros des écrans sont tracés par-dessus (`sim-grid`) : léger même pour 16 écrans. Options : *Image du mur* / *Écrans séparés*, cadres aucun / fins / épais (simple affichage, pas de compensation des bordures), numéros, *Montrer l'état réel* (écrans hors ligne, places libres hachurés). La publication et la grille sont celles du premier écran placé.
+- **Réglages du mur** (onglet du simulateur du mur, à côté de *Affichage* ; maquette `maquettes/mur-reglages-simulateur.html`) : orientation, puis matériel et résolution (« Réglages avancés »), avec le même formulaire que la fiche d'un écran (`ScreenFormat`, sans découpage). Un réglage changé ne modifie que le simulateur (jeton d'aperçu au format essayé, bandeau « pas encore appliqués ») ; **Appliquer aux N écrans** enregistre les mêmes réglages sur tous les écrans du mur et les prévient (`Notifier.NotifyScreen`) : ils se rechargent, sans republier. Un seul réglage pour tout le mur ; si ses écrans diffèrent, un avertissement liste les écarts et « Appliquer » les aligne. Réservé à qui gère les zones de l'aire (lecture seule sinon) ; fermer sans appliquer demande confirmation. Le simulateur d'un écran seul n'a pas de réglages (ils sont dans sa fiche).
 - **Essayer une liste** (« Essayer sur… », éditeur de la liste et menu ⋮ des cartes de listes) : joue la liste **dans son état actuel, même non publiée** (`Notifier.Items`, l'instantané qu'une publication figerait), sur un format au choix (paysage, portrait, mur 2 × 2 ou 3 × 1, ou comme un écran ou un mur existant) et, sur option, à une **date et heure choisies** (heure de l'organisation) : les contenus hors de leur période de validité sont sautés et listés sous la frise. Rien n'est envoyé aux écrans.
 - **Jeton d'aperçu** (`PreviewGrants`, singleton) : créé par le back-office pour une personne qui a accès à l'écran, au mur ou à la liste (`TenantStore`), désigne exactement ce qu'il montre (`PreviewGrant` : écran, mur ou liste, format), gardé **en mémoire**, valable 1 h après sa dernière utilisation. Après un redémarrage du serveur, le simulateur affiche « Aperçu expiré » : il suffit de le rouvrir. Les médias sont servis par la session du back-office (`/media` accepte déjà un utilisateur de l'organisation).
 - **Mode aperçu du player** (`/player/?preview=jeton`, `&at=ms` date simulée, `&sound=1`) : mémoire en RAM au lieu du `localStorage` (aucun conflit avec un écran appairé sur le même poste), ni service worker, ni cache des médias, ni accusé de réception, ni diffusions comptées, ni connexion au hub (aucun ordre reçu : désappairer, recharger, identifier) ; l'écran n'est pas marqué « vu ». Les publications sont reprises en relisant toutes les 20 s. Date simulée : `Date` est décalé dans la page du player (horloges, « aujourd'hui », périodes de validité) ; les données des apps (agendas…) restent celles du moment réel.
 - **Échanges** (`postMessage`, même origine) : le player envoie son état (contenus, contenu affiché, temps restant, direct / libre / pause, contenus sautés) ; le simulateur envoie `pause`, `play`, `goto`, `next`, `prev`, `live`. La pause arrête l'enchaînement et les vidéos du contenu affiché ; les diaporamas internes d'une app et YouTube continuent.
 - **Son** : coupé à l'ouverture (`sound` des contenus forcé à faux) ; l'activer recharge le player (en direct, il reprend au même moment).
 - **Code partagé** : `PlayerFeed` (`Preview.cs`) construit la réponse de `/api/player/playlist` pour un écran (`ForScreen`) et pour une liste essayée (`ForPlaylist`) ; `PlayerFeed.AllItems` sert aussi `/api/data/{id}`.
+
+## 19. Application Android du player (9 octobre 2026)
+
+Maquette validée : `maquettes/player-android.html`. Projet `Linkii.Android/` (Kotlin, **aucune dépendance**, pas d'AndroidX) : une coquille native autour du player web. Le player garde l'appairage par code, la diffusion et le cache hors ligne (service worker + Cache Storage, §7) ; l'application ajoute ce que le navigateur ne peut pas faire.
+
+- **Lancement** : démarrage au boot et après une mise à jour (`BootReceiver`, nécessite l'autorisation « par-dessus les autres applications » sur Android 10+ ; menu technicien › *Autoriser le démarrage automatique*), ou **écran d'accueil de l'appareil** (filtre `HOME`, recommandé sur un boîtier). Plein écran immersif permanent, écran jamais en veille, bouton Retour sans effet. Verrouillage kiosque (`startLockTask`) seulement si l'appareil est géré (MDM) : sinon Android demanderait une confirmation à chaque lancement.
+- **Appairage** : celui du player (code à 6 chiffres affiché, saisi dans *Écrans › Connecter un écran*) ; rien à développer côté back-office. L'agent utilisateur du WebView se termine par `LinkiiPlayer/<version> Android`.
+- **Pannes** : serveur injoignable au lancement (ni réseau ni cache) → page de secours (`assets/offline.html`) puis nouvel essai toutes les 10 s ; processus de rendu tué par Android → la vue est recréée et le player rechargé.
+- **Menu technicien** : 5 appuis sur OK (télécommande) ou 5 touchers dans le coin supérieur droit, en moins de 3 s. Code PIN (**9999 par défaut**, local à l'appareil) puis diagnostic (serveur, version, réseau, stockage libre) et actions : reprendre, recharger le player, changer de serveur, définir le PIN, autoriser le démarrage, désappairer (efface `lk_token`, `lk_screen`, `lk_playlist`, `lk_acked`, `lk_brand`, comme `unpair()` du player), quitter.
+- **Serveur** : `https://linkii.duckdns.org` par défaut (`-PserverUrl=…` à la compilation, modifiable dans le menu). **HTTPS obligatoire** (sans lui, pas de service worker donc pas de hors ligne) ; seuls `localhost` et `10.0.2.2` sont admis en HTTP (`network_security.xml`).
+- **Compiler** : `Linkii.Android/gradlew :app:assembleDebug` (APK) ou `:app:bundleRelease` (`.aab` pour Google Play, signature par `LINKII_KEYSTORE*` dans `~/.gradle/gradle.properties`). AGP 9.4.1, Gradle 9.7.1, JDK 17+ (celui d'Android Studio convient), SDK 35 ; minSdk 24. Détails et publication Play Store : `Linkii.Android/README.md`.
+- **Vérifié sur l'émulateur Android TV** (image `android-36;android-tv`) : installation, affichage du code d'appairage du serveur, appairage, diffusion, menu technicien (PIN 9999), redémarrage de l'application avec la diffusion reprise depuis le cache. Les vidéos y saccadent (décodeur logiciel de l'émulateur, 1,5 Go de RAM d'origine) : **la fluidité reste à confirmer sur un vrai boîtier**. Le test « hors ligne » n'est pas concluant (réseau de l'émulateur pas réellement coupé, `ping` bloqué).
+- **Limites connues** : cache hors ligne = celui du WebView (quota géré par Android, plan B : téléchargement natif des médias) ; PIN non piloté depuis le back-office ; l'indicateur « Réseau » du menu ne vérifie pas l'accès à Internet ; icône et bannière TV provisoires.
+
+## 20. Vidéos limitées à 1080p et format affiché (10 octobre 2026)
+
+- **Limite à l'import** (téléversement, adresse web, **Drives**, Canva : tout passe par `MediaImporter`) : une vidéo plus grande que **1920×1080** (paysage) ou **1080×1920** (portrait), par exemple en 2K ou 4K, est convertie en MP4 H.264 1080p. Un MP4 déjà dans la limite est publié tel quel, sans réencodage. Sans convertisseur, un MP4 trop grand est publié tel quel plutôt que refusé. Les vidéos déjà importées ne sont pas converties (les réimporter).
+- **Taille lue sans outil** (`Mp4Probe`, piste vidéo de la boîte `tkhd`, rotation de 90° comprise ; `MediaProbe` pour les images : PNG, GIF, JPEG, WEBP, SVG).
+- **ffmpeg** : filtre `scale` qui tient dans la boîte 1920×1080 / 1080×1920 sans jamais agrandir, dimensions paires, sortie `-f mp4`. **VLC** n'a pas de « tenir dans une boîte » : le facteur de réduction est calculé (`scale=`) à partir de la taille lue ; taille inconnue → `maxwidth=1920,maxheight=1080` (paysage supposé).
+- **Détection de VLC sous Windows** : `vlc.exe` n'écrit rien pour `--version` (il dépose un `vlc-help.txt` dans le dossier courant) ; la version est lue dans les propriétés du fichier. Sans cela, VLC n'était pas détecté sur Windows.
+- **Serveur Linux** : installer **ffmpeg** (`apt install -y ffmpeg` sur Debian/Ubuntu), puis redémarrer Linkii (la détection est faite une fois). Au besoin `LINKII_FFMPEG=/usr/bin/ffmpeg` dans l'unité systemd. Le dépôt `packages.microsoft.com` non signé fait échouer `apt update` sans empêcher l'installation depuis Debian.
+- **Format dans la médiathèque** (`MediaItem.Width` / `Height`, `MediaProbe.Label`) : à côté de la taille en octets, « **1080p** » pour une vidéo (côté court ; « 4K » à partir de 2160), « **1920×1080** » pour une image ; info-bulle avec les pixels exacts. Affiché sur les cartes de `/media` et dans le sélecteur de médias. Les fichiers importés avant sont lus à la première ouverture.
+- **Vérifié** : conversion réelle d'un MP4 2560×1440 en 1920×1080 (VLC, environ 40 s) ; tests `VideoLimitTests` et `MediaProbeTests`.
+
+## 21. Indicateur d'import d'un dossier Drive (10 octobre 2026)
+
+L'import d'un dossier Drive (surtout avec des vidéos) tourne sur le serveur sans rien montrer : un bandeau d'avancement (`DriveSyncBar`) le rend visible, pour **toute synchronisation** (ajout d'un dossier, sous-dossiers, *Synchroniser maintenant*, passage automatique toutes les 15 minutes).
+
+- **Phases** (`DriveService.SyncProgress`) : *Lecture du dossier* (barre indéterminée), *Import* (« 12 sur 45 fichiers », barre à l'octet près, fichier en cours), *Mise à jour des écrans*. Si le dossier contient des vidéos, une ligne prévient que téléchargement puis conversion en 1080p peuvent durer plusieurs minutes.
+- **Où** : sous le titre de `/media` (la page se rafraîchit seule pendant l'import et relit la liste à la fin) et dans la fenêtre *Intégrations › Drives › Gérer*. Visible de toute personne du client qui ouvre la page, même pour une synchronisation automatique.
+- **Technique** : avancement **en mémoire** (`DriveService.Running(clientId)`, événement `ProgressChanged` limité à ~4 par seconde) ; `MediaImporter.ImportStream` rend les octets reçus. Perdu si le serveur redémarre en cours de synchronisation (reprise à la suivante). La conversion vidéo qui suit reste signalée par la carte « Conversion… » de la médiathèque.
+- **Non vérifié contre un vrai Drive** (bandeau jamais vu à l'écran) ; tests `DriveProgressTests` sur le calcul d'avancement.
 
 ## LinkedIn : mise en service (source « Page entreprise »)
 

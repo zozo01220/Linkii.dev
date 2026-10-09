@@ -109,8 +109,9 @@ public static class PlayerFeed
             color = Components.AppIcon.LookOf(i.AppId ?? i.Type).Color
         });
 
-    /// <summary>Résolution d'un écran pour le simulateur : « Auto » prend la taille constatée de l'appareil, sinon Full HD.</summary>
-    public static string Resolution(Screen s) =>
-        s.Resolution != "auto" ? s.Resolution
+    /// <summary>Résolution d'un écran pour le simulateur : « Auto » prend la taille constatée de l'appareil, sinon Full HD.
+    /// resolution : réglage essayé à la place de celui de l'écran (réglages du mur pas encore appliqués).</summary>
+    public static string Resolution(Screen s, string? resolution = null) =>
+        (resolution ?? s.Resolution) is var r && r != "auto" ? r
         : s.DetectedW is int w and > 0 && s.DetectedH is int h and > 0 ? $"{Math.Max(w, h)}x{Math.Min(w, h)}" : "1920x1080";
 }

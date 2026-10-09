@@ -5,7 +5,7 @@ namespace Linkii.Poc;
 
 /// <summary>
 /// Import des fichiers de la médiathèque (images et vidéos uniquement), depuis l'ordinateur ou depuis une adresse web.
-/// Les images et les MP4 sont publiés tels quels ; toute autre vidéo est convertie en arrière-plan en MP4 H.264 (statut « processing » puis prête).
+/// Les images et les MP4 d'au plus 1080p sont publiés tels quels ; toute autre vidéo (autre format, ou plus grande que 1080p) est convertie en arrière-plan en MP4 H.264 1080p max (statut « processing » puis prête).
 /// La progression est rapportée en octets reçus.
 /// </summary>
 public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp http)
@@ -48,7 +48,7 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
     }
 
     /// <summary>Fichier lu par le serveur (synchronisation d'un Drive) : mêmes règles que l'import, conversion vidéo comprise.</summary>
-    public Task<Result> ImportStream(Stream input, string name, Guid clientId, CancellationToken ct) => Import(input, name, clientId, null, ct, null);   // fichiers d'un dossier Drive : communs à toutes les aires
+    public Task<Result> ImportStream(Stream input, string name, Guid clientId, CancellationToken ct, IProgress<long>? progress = null) => Import(input, name, clientId, progress, ct, null);   // fichiers d'un dossier Drive : communs à toutes les aires
 
     // Nom du fichier : en-tête Content-Disposition, sinon fin de l'adresse ; extension déduite du type si elle manque.
     private static string FileNameFor(HttpResponseMessage res, string url)
@@ -86,7 +86,7 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
             return new(null, $"« {name} » doit être converti, mais aucun convertisseur n'est installé sur le serveur (ffmpeg ou VLC). Importez un MP4 H.264 ou installez-en un.");
 
         var id = Guid.NewGuid().ToString("N");
-        var source = Path.Combine(AppPaths.MediaDir, id + ext);
+        var source = Path.Combine(AppPaths.MediaDir, id + ext);   // chemin du fichier reçu
         long written = 0;
         try
         {
@@ -109,25 +109,36 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
             throw;
         }
 
+        // Un MP4 plus grand que 1080p (2K, 4K) est aussi converti, si un convertisseur est disponible
+        (int W, int H)? dim = isVideo && ext is ".mp4" or ".m4v" ? Mp4Probe.Size(source) : null;
+        if (isVideo && !needsConversion && converter.Find() != null && dim is { } d0 && !VideoConverter.FitsLimit(d0.W, d0.H))
+        {
+            needsConversion = true;
+            var original = Path.Combine(AppPaths.MediaDir, id + "-source" + ext);   // la version convertie prendra le nom id.mp4
+            File.Move(source, original);
+            source = original;
+        }
+
         var title = Path.GetFileNameWithoutExtension(name);
         if (!needsConversion)
         {
-            var item = new MediaItem { ClientId = clientId, AreaId = areaId ?? Guid.Empty, Name = title, Type = isVideo ? "video" : "image", FileName = id + ext, Size = written, AddedUtc = DateTime.UtcNow };
+            var px = dim ?? MediaProbe.Size(source);
+            var item = new MediaItem { ClientId = clientId, AreaId = areaId ?? Guid.Empty, Name = title, Type = isVideo ? "video" : "image", FileName = id + ext, Size = written, Width = px?.W, Height = px?.H, AddedUtc = DateTime.UtcNow };
             store.Write(d => { d.Media.Add(item); });
             return new(item, null);
         }
 
         var pending = new MediaItem { ClientId = clientId, AreaId = areaId ?? Guid.Empty, Name = title, Type = "video", FileName = null, Status = "processing", Size = written, AddedUtc = DateTime.UtcNow };
         store.Write(d => { d.Media.Add(pending); });
-        _ = Task.Run(() => ConvertInBackground(pending, source, id));
+        _ = Task.Run(() => ConvertInBackground(pending, source, id, dim));
         return new(pending, null);
     }
 
-    private async Task ConvertInBackground(MediaItem item, string source, string id)
+    private async Task ConvertInBackground(MediaItem item, string source, string id, (int W, int H)? dim)
     {
         var output = Path.Combine(AppPaths.MediaDir, id + ".mp4");
         string? error;
-        try { error = await converter.ConvertAsync(source, output + ".part"); }
+        try { error = await converter.ConvertAsync(source, output + ".part", dim); }
         catch (Exception ex) { error = ex.Message; }
 
         if (error == null)
@@ -138,7 +149,8 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
         {
             try { File.Delete(source); } catch { }   // on ne garde que le MP4
             var size = new FileInfo(output).Length;
-            store.Write(d => { item.FileName = id + ".mp4"; item.Status = null; item.Error = null; item.Size = size; });
+            var px = MediaProbe.Size(output);
+            store.Write(d => { item.FileName = id + ".mp4"; item.Status = null; item.Error = null; item.Size = size; item.Width = px?.W; item.Height = px?.H; });
         }
         else
         {

@@ -141,61 +141,7 @@
         <ViewToggle StorageKey="screens" @bind-Value="view" />
     </div>
 
-    @* Zone choisie : une ligne d'information et un menu d'actions *@
-    @if (OpenZone is { IsWall: true } wz)
-    {
-        var inW = InZone;
-        var online = inW.Count(x => !IsOffline(x));
-        var complete = online == wz.WallCols * wz.WallRows;
-        var wpl = playlists.FirstOrDefault(p => p.Id == wz.PlaylistId);
-        <div class="zline" role="region" aria-label="Mur @wz.Name">
-            <div class="wall-prev mini" style="grid-template-columns:repeat(@wz.WallCols, 1fr)">
-                @foreach (var cell in WallCells(wz, inW))
-                {
-                    var c = cell;
-                    <button type="button" class="@c.Css" disabled="@(c.Screen == null)" title="@c.Title" @onclick="() => { if (c.Screen != null) Edit(c.Screen); }">@c.Number</button>
-                }
-            </div>
-            <span><b>Mur d'écrans @wz.WallCols × @wz.WallRows</b> · liste « @(wpl?.Name ?? "aucune") »</span>
-            <span class="zstate @(complete ? "ok" : "ko")">@(complete ? $"{online} sur {online} en ligne" : "Mur incomplet")</span>
-            <div class="grow"></div>
-            @if (dissolveFor != wz.Id && inW.Any(x => x.WallPos != null))
-            {
-                <button type="button" class="btn ghost sm" title="Voir ce qu'affiche le mur" @onclick="() => simWall = wz.Id"><Ico Name="play" Size="14" /> Simuler le mur</button>
-            }
-            @if (dissolveFor == wz.Id)
-            {
-                <span class="confirm-line">Dissoudre le mur ? Ses écrans retournent dans « @(zones.FirstOrDefault(z => z.IsDefault)?.Name ?? Zone.DefaultName) » et gardent la liste.</span>
-                <button type="button" class="btn danger sm" @onclick="() => Dissolve(wz)">Dissoudre</button>
-                <button type="button" class="btn ghost sm" @onclick="() => dissolveFor = null">Annuler</button>
-            }
-            else if (manageZones)
-            {
-                <div class="kebab dd">
-                    <button type="button" class="dd-btn" aria-haspopup="menu" aria-expanded="@(openMenu == "wall" ? "true" : "false")" @onclick='() => Toggle("wall")'>Actions du mur <Ico Name="chevron" Size="14" /></button>
-                    @if (openMenu == "wall")
-                    {
-                        <div class="kebab-backdrop" @onclick="CloseMenu"></div>
-                        <div class="kebab-menu dd-menu right" role="menu">
-                            <span class="dd-h">Liste de lecture du mur</span>
-                            @foreach (var p in playlists)
-                            {
-                                var pl = p;
-                                <button type="button" role="menuitemradio" aria-checked="@(pl.Id == wz.PlaylistId ? "true" : "false")" class="@(pl.Id == wz.PlaylistId ? "sel" : "")" @onclick="() => { CloseMenu(); SetWallPlaylist(wz, pl.Id); }">@pl.Name</button>
-                            }
-                            @if (playlists.Count == 0) { <span class="kebab-note">Aucune liste de lecture dans cette aire.</span> }
-                            <hr />
-                            <button type="button" role="menuitem" @onclick="() => { CloseMenu(); AskPublish(inW.Select(x => x.Id).ToList()); }"><Ico Name="upload" Size="16" /> Publier le mur</button>
-                            <button type="button" role="menuitem" @onclick="() => { CloseMenu(); wallEdit = wz.Id; }"><Ico Name="grid" Size="16" /> Réorganiser…</button>
-                            <button type="button" role="menuitem" @onclick="() => IdentifyWall(wz, inW)"><Ico Name="monitor" Size="16" /> Identifier sur les écrans</button>
-                            <hr />
-                            <button type="button" role="menuitem" class="danger" @onclick="() => { CloseMenu(); dissolveFor = wz.Id; }"><Ico Name="trash" Size="16" /> Dissoudre le mur…</button>
-                        </div>
-                    }
-                </div>
-            }
-        </div>
-    }
+    @* Zone libre choisie : une ligne d'information et un menu d'actions (un mur a tout cela dans sa carte) *@
     @if (OpenZone is { IsWall: false } oz)
     {
         var inZ = InZone;
@@ -226,9 +172,115 @@
 }
 
 <div class="pl-grid @(view == "list" ? "list" : "")">
-    @foreach (var s in Shown)
+    @foreach (var entry in Entries)
     {
-        var sc = s;
+        if (entry.Wall is { } wl)
+        {
+            @* Mur d'écrans : une seule carte, ses écrans collés et l'image répartie dessus *@
+            var w = wl;
+            var members = WallMembers(w);
+            var cells = WallCells(w, members);
+            var places = w.WallCols * w.WallRows;
+            var onl = members.Count(x => !IsOffline(x));
+            var full = onl == places;
+            var wpl = playlists.FirstOrDefault(p => p.Id == w.PlaylistId);
+            var wthumb = ZoneThumb(wpl);
+            var allPicked = members.Count > 0 && members.All(x => selectedIds.Contains(x.Id));
+            var wpending = members.Any(x => Helpers.HasPending(x, playlists));
+            var portrait = members.Count > 0 && members.All(x => x.Orientation == "portrait");
+            var placed = members.Any(x => x.WallPos != null);
+            var opened = OpenZone?.Id == w.Id;
+            var wmenu = "wall:" + w.Id;
+            <div class="pl-card sc-card wall-card @(w.WallCols >= 4 ? "w4" : "") @(opened ? "wide" : "") @(allPicked ? "picked" : "")" style="--cols:@w.WallCols" role="group" aria-label="Mur d'écrans @w.Name">
+                <div class="sc-head">
+                    <div class="pl-title">
+                        <input type="checkbox" class="sc-check" aria-label="Sélectionner les @members.Count écrans du mur @w.Name" checked="@allPicked" @onchange="() => ToggleWall(members)" />
+                        <span class="wc-ico" aria-hidden="true"><Ico Name="grid" Size="18" /></span>
+                        @if (opened) { <span class="pl-name">@w.Name</span> }
+                        else { <button type="button" class="pl-name linklike-name" title="N'afficher que le mur « @w.Name »" @onclick="() => PickZone(w)">@w.Name</button> }
+                        <span class="badge @(full ? "en-ligne" : "hors-ligne") wc-state">@(full ? $"{onl} sur {places} en ligne" : $"Mur incomplet · {onl} sur {places}")</span>
+                        <div class="kebab">
+                            <button type="button" class="kebab-btn" aria-label="Actions du mur @w.Name" aria-haspopup="menu" aria-expanded="@(openMenu == wmenu ? "true" : "false")"
+                                    @onclick="() => Toggle(wmenu)"><Ico Name="dots-v" Size="18" /></button>
+                            @if (openMenu == wmenu)
+                            {
+                                <div class="kebab-backdrop" @onclick="CloseMenu"></div>
+                                <div class="kebab-menu" role="menu">
+                                    <button type="button" role="menuitem" @onclick="() => { CloseMenu(); AskPublish(members.Select(x => x.Id).ToList()); }"><Ico Name="upload" Size="16" /> Publier le mur</button>
+                                    @if (placed) { <button type="button" role="menuitem" @onclick="() => { CloseMenu(); simWall = w.Id; }"><Ico Name="play" Size="16" /> Simuler le mur</button> }
+                                    <button type="button" role="menuitem" @onclick="() => IdentifyWall(w, members)"><Ico Name="monitor" Size="16" /> Identifier sur les écrans</button>
+                                    @if (manageZones)
+                                    {
+                                        <button type="button" role="menuitem" @onclick="() => { CloseMenu(); wallEdit = w.Id; }"><Ico Name="grid" Size="16" /> Réorganiser…</button>
+                                        <hr />
+                                        <button type="button" role="menuitem" class="danger" @onclick="() => { CloseMenu(); dissolveFor = w.Id; }"><Ico Name="trash" Size="16" /> Dissoudre le mur…</button>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                    <div class="sc-zone-name">Mur d'écrans @w.WallCols × @w.WallRows · @members.Count écran@(members.Count > 1 ? "s" : "")</div>
+                </div>
+                <div class="sc-vwrap">
+                    <div class="wc-vis">
+                        <div class="wc-frame">
+                            @foreach (var cell in cells)
+                            {
+                                var c = cell;
+                                var cx = (c.Number - 1) % w.WallCols;
+                                var cy = (c.Number - 1) / w.WallCols;
+                                <button type="button" class="wc-tile @c.Css @(portrait ? "portrait" : "")" disabled="@(c.Screen == null)" title="@c.Title" @onclick="() => { if (c.Screen != null) Edit(c.Screen); }">
+                                    @* la même vignette, découpée à la place de l'écran *@
+                                    @if (wthumb != null) { <span class="wc-img" style="width:@(w.WallCols * 100)%;height:@(w.WallRows * 100)%;left:-@(cx * 100)%;top:-@(cy * 100)%"><MediaThumb Media="wthumb" All="media" /></span> }
+                                    <span class="wc-n">@c.Number</span>
+                                    @if (c.Screen == null) { <span class="wc-off">Place libre</span> }
+                                    else if (c.Css == "off") { <span class="wc-off">Hors ligne</span> }
+                                </button>
+                            }
+                            @if (wthumb == null) { <span class="wc-label">@(wpl?.Name ?? "Aucune liste de lecture")</span> }
+                        </div>
+                        <div class="wc-stands">@for (var i = 0; i < w.WallCols; i++) { <span class="sc-stand"></span> }</div>
+                        @if (wpending) { <span class="badge mise-a-jour sc-pending" title="Liste du mur ou contenus modifiés depuis la dernière publication">À publier</span> }
+                    </div>
+                    @if (placed) { <button type="button" class="sc-sim" title="Voir ce qu'affiche le mur" aria-label="Simuler le mur « @w.Name »" @onclick="() => simWall = w.Id"><Ico Name="play" Size="14" /> Simuler le mur</button> }
+                </div>
+                <div class="wc-members">
+                    @foreach (var cell in cells.Where(x => x.Screen != null))
+                    {
+                        var m = cell.Screen!;
+                        var mst = Status(m);
+                        <button type="button" class="wc-chip" title="Paramètres de l'écran « @m.Name » (@Helpers.WallLabel(cell.Number - 1, w.WallCols, w.WallRows))" @onclick="() => Edit(m)">
+                            <span class="wc-cn">@cell.Number</span>
+                            <span class="sc-dot @(mst == "En ligne" ? "en-ligne" : mst == "Mise à jour" ? "mise-a-jour" : "hors-ligne")"><span class="sr-only">@mst</span></span>
+                            <span class="wc-cname">@m.Name</span>
+                        </button>
+                    }
+                </div>
+                <div class="sc-foot">
+                    @if (dissolveFor == w.Id)
+                    {
+                        <span class="confirm-line">Dissoudre le mur ? Ses écrans retournent dans « @(zones.FirstOrDefault(z => z.IsDefault)?.Name ?? Zone.DefaultName) » et gardent la liste.</span>
+                        <button type="button" class="btn danger sm" @onclick="() => Dissolve(w)">Dissoudre</button>
+                        <button type="button" class="btn ghost sm" @onclick="() => dissolveFor = null">Annuler</button>
+                    }
+                    else
+                    {
+                        <label class="sc-lbl" for="wpl-@w.Id">Liste du mur</label>
+                        @if (manageZones)
+                        {
+                            <select id="wpl-@w.Id" class="sc-select" @onchange="e => SetWallPlaylist(w, Guid.TryParse(e.Value?.ToString(), out var g) ? g : null)">
+                                <option value="" selected="@(w.PlaylistId == null)">— Aucune liste de lecture —</option>
+                                @foreach (var p in playlists) { <option value="@p.Id" selected="@(p.Id == w.PlaylistId)">@p.Name</option> }
+                            </select>
+                        }
+                        else { <span class="sc-select">@(wpl?.Name ?? "Aucune liste de lecture")</span> }
+                        <button type="button" class="btn ghost sm wc-pub" title="Publier sur les @members.Count écrans du mur" @onclick="() => AskPublish(members.Select(x => x.Id).ToList())"><Ico Name="upload" Size="14" /> Publier le mur</button>
+                    }
+                </div>
+            </div>
+            continue;
+        }
+        var sc = entry.Screen!;
         var st = Status(sc);
         var cls = st == "En ligne" ? "en-ligne" : st == "Mise à jour" ? "mise-a-jour" : "hors-ligne";
         var pending = Helpers.HasPending(sc, playlists);
@@ -259,11 +311,7 @@
                 {
                     <div class="sc-zone-name">@(ZoneOf(sc)?.Name ?? Zone.DefaultName)</div>
                 }
-                @if (ZoneOf(sc) is { IsWall: true } scw)
-                {
-                    <div class="sc-sync"><span class="badge sync" title="Place dans le mur « @scw.Name »"><Ico Name="grid" Size="12" /> @(sc.WallPos is { } wp ? Helpers.WallLabel(wp, scw.WallCols, scw.WallRows) : "Mur")</span></div>
-                }
-                else if (ZoneOf(sc) is { Sync: true })
+                @if (ZoneOf(sc) is { Sync: true })
                 {
                     @if (synced.Contains(sc.Id)) { <div class="sc-sync"><span class="badge sync" title="Cet écran affiche le même contenu, au même moment, que les autres écrans de la zone qui jouent cette liste"><Ico Name="link" Size="12" /> Synchronisé</span></div> }
                     else { <div class="sc-sync"><span class="badge neutre" title="Aucun autre écran de la zone ne joue cette liste publiée : l'écran reste indépendant">Indépendant</span></div> }
@@ -291,13 +339,7 @@
             <button type="button" class="sc-sim" title="Voir ce qu'affiche l'écran" aria-label="Simuler « @sc.Name »" @onclick="() => simScreen = sc.Id"><Ico Name="play" Size="14" /> Simuler</button>
             </div>
             <div class="sc-foot">
-                @if (ZoneOf(sc) is { IsWall: true } fw)
-                {
-                    @* écran d'un mur : la liste est celle du mur, choisie dans le bandeau du mur *@
-                    <span class="sc-lbl">Mur</span>
-                    <button type="button" class="sc-select sc-zones-btn" title="La liste de lecture se choisit pour tout le mur" @onclick="() => zoneFilter = fw.Id.ToString()">@(playlists.FirstOrDefault(p => p.Id == fw.PlaylistId)?.Name ?? "Aucune liste de lecture")</button>
-                }
-                else if (sc.ZoneCount == 1)
+                @if (sc.ZoneCount == 1)
                 {
                     <label class="sc-lbl" for="pl-@sc.Id">Défaut</label>
                     <select id="pl-@sc.Id" class="sc-select" @onchange="e => Assign(sc, e)">
@@ -599,6 +641,34 @@ else if (wallEdit is { } wid)
                 : new WallCell(pos + 1, at, IsOffline(at) ? "off" : "", label + " : " + at.Name + (IsOffline(at) ? " (hors ligne)" : ""));
         }).ToList();
 
+    // Cartes affichées : un mur prend une seule carte, à la place de son premier écran retenu par les filtres et le tri.
+    private record Entry(Zone? Wall, Screen? Screen);
+
+    private List<Entry> Entries
+    {
+        get
+        {
+            var list = new List<Entry>();
+            var walls = new HashSet<Guid>();
+            foreach (var s in Shown)
+            {
+                if (ZoneOf(s) is { IsWall: true } w) { if (walls.Add(w.Id)) list.Add(new(w, null)); }
+                else list.Add(new(null, s));
+            }
+            return list;
+        }
+    }
+
+    private List<Screen> WallMembers(Zone wall) => screens.Where(x => ZoneOf(x)?.Id == wall.Id).OrderBy(x => x.WallPos ?? int.MaxValue).ToList();
+
+    // Case du mur : coche ou décoche tous ses écrans, dans l'ordre de leurs places.
+    private void ToggleWall(List<Screen> members)
+    {
+        var ids = members.Select(x => x.Id).ToList();
+        if (ids.All(selectedIds.Contains)) { selectedIds.ExceptWith(ids); pickOrder.RemoveAll(ids.Contains); }
+        else foreach (var id in ids.Where(id => !selectedIds.Contains(id))) { selectedIds.Add(id); pickOrder.Add(id); }
+    }
+
     private List<Guid> PickedInOrder() =>
         pickOrder.Where(selectedIds.Contains).Concat(screens.Select(s => s.Id).Where(selectedIds.Contains)).Distinct().ToList();   // chaque écran une seule fois
 
@@ -615,7 +685,7 @@ else if (wallEdit is { } wid)
     }
 
     // ---------- Barre de filtres : listes déroulantes ----------
-    private string? openMenu;   // sel | zone | state | sort | wall | zact
+    private string? openMenu;   // sel | zone | state | sort | zact | wall:<id du mur>
     private void Toggle(string menu) => openMenu = openMenu == menu ? null : menu;
     private void CloseMenu() => openMenu = null;
 

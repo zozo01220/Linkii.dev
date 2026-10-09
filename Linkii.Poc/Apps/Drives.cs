@@ -115,6 +115,40 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _locks = new();   // un dossier n'est jamais synchronisé deux fois en même temps
 
     /// <summary>
+    /// Avancement d'une synchronisation en cours, pour l'afficher à l'écran. Phase : « listing » (lecture du dossier, durée inconnue),
+    /// « importing » (téléchargement des fichiers, avec leur nombre et leurs octets), « updating » (mise à jour des écrans).
+    /// </summary>
+    public record SyncProgress(Guid ClientId, Guid FolderId, string Folder, string Phase, int Done, int Total, long Bytes, long BytesTotal, int Videos, string Current, DateTime Started)
+    {
+        /// <summary>Part réalisée (0 à 1), à l'octet près quand les tailles sont connues ; null tant que la durée est inconnue.</summary>
+        public double? Fraction => Phase != "importing" ? null : BytesTotal > 0 ? Math.Min(1, (double)Bytes / BytesTotal) : Total > 0 ? (double)Done / Total : null;
+    }
+
+    private readonly ConcurrentDictionary<Guid, SyncProgress> _running = new();
+    private long _lastRaiseTicks;
+
+    /// <summary>Levé (avec l'identifiant du client) à chaque changement d'avancement ; au plus quelques fois par seconde.</summary>
+    public event Action<Guid>? ProgressChanged;
+
+    /// <summary>Synchronisations en cours d'un client, les plus anciennes d'abord.</summary>
+    public IReadOnlyList<SyncProgress> Running(Guid clientId) => _running.Values.Where(p => p.ClientId == clientId).OrderBy(p => p.Started).ToList();
+
+    private void Report(SyncProgress p, bool force = true)
+    {
+        _running[p.FolderId] = p;
+        var now = Environment.TickCount64;
+        if (!force && now - Interlocked.Read(ref _lastRaiseTicks) < 250) return;   // le détail d'un gros fichier ne doit pas saturer l'interface
+        Interlocked.Exchange(ref _lastRaiseTicks, now);
+        try { ProgressChanged?.Invoke(p.ClientId); } catch { }
+    }
+
+    private void EndReport(Guid clientId, Guid folderId)
+    {
+        _running.TryRemove(folderId, out _);
+        try { ProgressChanged?.Invoke(clientId); } catch { }
+    }
+
+    /// <summary>
     /// Un élément d'un Drive. Ref : de quoi relire un dossier ou télécharger un fichier — Google : « id » ou « id/resourceKey »
     /// (clé de sécurité de certains liens partagés avant 2021, à renvoyer avec chaque appel) ; Microsoft : « driveId/itemId ».
     /// Where : emplacement du parent (Microsoft) ; Path : chemin dans le dossier synchronisé (« 2026/affiche.jpg »).
@@ -275,66 +309,81 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
             });
             if (t == null || folder == null) return null;   // dossier retiré entre-temps
 
-            Listed listed;
-            try { listed = await List(t, folder); }
-            catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or JsonException or KeyNotFoundException or TaskCanceledException)
+            var started = DateTime.UtcNow;
+            Report(new(clientId, folderId, folder.Name, "listing", 0, 0, 0, 0, 0, "", started));
+            try
             {
-                Record(clientId, folderId, ex.Message, null);
-                return ex.Message;
-            }
-            var remote = listed.Files;
-
-            var key = folderId.ToString();
-            var local = store.Read(db => db.Media.Where(m => m.ClientId == clientId && m.Info.GetValueOrDefault("drive") == key).ToList());
-            var changed = false;
-            string? error = null;
-
-            // retirés du dossier, ou modifiés (remplacés ci-dessous)
-            var keep = remote.ToDictionary(f => f.Id, f => f.Version);
-            var stale = local.Where(m => !keep.TryGetValue(m.Info.GetValueOrDefault("driveFile") ?? "", out var v) || v != m.Info.GetValueOrDefault("driveVer")).ToList();
-            if (stale.Count > 0) { Delete(stale); changed = true; }
-
-            // déplacés d'un sous-dossier à l'autre : même fichier, autre chemin (l'ordre « par nom » en dépend)
-            var paths = remote.ToDictionary(f => f.Id, f => f.Path);
-            var moved = local.Except(stale).Where(m => paths.GetValueOrDefault(m.Info.GetValueOrDefault("driveFile") ?? "") is { } p && m.Info.GetValueOrDefault("drivePath") != p)
-                .Select(m => m.Id).ToHashSet();
-            if (moved.Count > 0)
-            {
-                store.Write(db => { foreach (var m in db.Media.Where(m => moved.Contains(m.Id))) m.Info["drivePath"] = paths[m.Info["driveFile"]]; });
-                changed = true;
-            }
-
-            var present = local.Except(stale).Select(m => m.Info.GetValueOrDefault("driveFile")).ToHashSet();
-            foreach (var f in remote.Where(f => !present.Contains(f.Id)))
-            {
-                if (ct.IsCancellationRequested) break;
-                try
+                Listed listed;
+                try { listed = await List(t, folder); }
+                catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or JsonException or KeyNotFoundException or TaskCanceledException)
                 {
-                    var parts = f.Ref.Split('/');
-                    using var res = f.DownloadUrl != null
-                        ? await http.Download(f.DownloadUrl, ct)   // Microsoft : adresse de téléchargement déjà authentifiée
-                        : await GoogleDownload(t, $"{GoogleApi}/{f.Id}?alt=media&supportsAllDrives=true", Keys(f.Id, parts.Length > 1 ? parts[1] : null), ct);
-                    if (!res.IsSuccessStatusCode) throw new InvalidOperationException($"« {f.Name} » : téléchargement refusé ({(int)res.StatusCode}).");
-                    await using var s = await res.Content.ReadAsStreamAsync(ct);
-                    var imported = await importer.ImportStream(s, f.Name, clientId, ct);
-                    if (imported.Item is not { } item) throw new InvalidOperationException(imported.Error ?? $"« {f.Name} » : import impossible.");
-                    store.Write(db =>
-                    {
-                        item.Info["drive"] = key; item.Info["driveFile"] = f.Id; item.Info["driveVer"] = f.Version;
-                        item.Info["driveName"] = f.Name; item.Info["drivePath"] = f.Path; item.Info["driveTime"] = f.Time;
-                    });
+                    Record(clientId, folderId, ex.Message, null);
+                    return ex.Message;
+                }
+                var remote = listed.Files;
+
+                var key = folderId.ToString();
+                var local = store.Read(db => db.Media.Where(m => m.ClientId == clientId && m.Info.GetValueOrDefault("drive") == key).ToList());
+                var changed = false;
+                string? error = null;
+
+                // retirés du dossier, ou modifiés (remplacés ci-dessous)
+                var keep = remote.ToDictionary(f => f.Id, f => f.Version);
+                var stale = local.Where(m => !keep.TryGetValue(m.Info.GetValueOrDefault("driveFile") ?? "", out var v) || v != m.Info.GetValueOrDefault("driveVer")).ToList();
+                if (stale.Count > 0) { Delete(stale); changed = true; }
+
+                // déplacés d'un sous-dossier à l'autre : même fichier, autre chemin (l'ordre « par nom » en dépend)
+                var paths = remote.ToDictionary(f => f.Id, f => f.Path);
+                var moved = local.Except(stale).Where(m => paths.GetValueOrDefault(m.Info.GetValueOrDefault("driveFile") ?? "") is { } p && m.Info.GetValueOrDefault("drivePath") != p)
+                    .Select(m => m.Id).ToHashSet();
+                if (moved.Count > 0)
+                {
+                    store.Write(db => { foreach (var m in db.Media.Where(m => moved.Contains(m.Id))) m.Info["drivePath"] = paths[m.Info["driveFile"]]; });
                     changed = true;
                 }
-                catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or IOException or TaskCanceledException && !ct.IsCancellationRequested)
-                {
-                    error ??= ex.Message;   // un fichier en échec n'empêche pas les autres ; il sera retenté à la synchronisation suivante
-                    log.LogWarning("Drive {Folder} : {Error}", folderId, ex.Message);
-                }
-            }
 
-            Record(clientId, folderId, error ?? "", listed);
-            if (changed) await notifier.RefreshDrive(clientId, folderId);
-            return error;
+                var present = local.Except(stale).Select(m => m.Info.GetValueOrDefault("driveFile")).ToHashSet();
+                var todo = remote.Where(f => !present.Contains(f.Id)).ToList();
+                var progress = new SyncProgress(clientId, folderId, folder.Name, "importing", 0, todo.Count, 0, todo.Sum(f => f.Size), todo.Count(f => f.Mime.StartsWith("video/")), "", started);
+                long bytesDone = 0;
+                foreach (var f in todo)
+                {
+                    if (ct.IsCancellationRequested) break;
+                    progress = progress with { Current = f.Name };
+                    Report(progress);
+                    try
+                    {
+                        var parts = f.Ref.Split('/');
+                        using var res = f.DownloadUrl != null
+                            ? await http.Download(f.DownloadUrl, ct)   // Microsoft : adresse de téléchargement déjà authentifiée
+                            : await GoogleDownload(t, $"{GoogleApi}/{f.Id}?alt=media&supportsAllDrives=true", Keys(f.Id, parts.Length > 1 ? parts[1] : null), ct);
+                        if (!res.IsSuccessStatusCode) throw new InvalidOperationException($"« {f.Name} » : téléchargement refusé ({(int)res.StatusCode}).");
+                        await using var s = await res.Content.ReadAsStreamAsync(ct);
+                        var imported = await importer.ImportStream(s, f.Name, clientId, ct, new Progress<long>(n => Report(progress with { Bytes = bytesDone + Math.Min(n, f.Size) }, force: false)));
+                        if (imported.Item is not { } item) throw new InvalidOperationException(imported.Error ?? $"« {f.Name} » : import impossible.");
+                        store.Write(db =>
+                        {
+                            item.Info["drive"] = key; item.Info["driveFile"] = f.Id; item.Info["driveVer"] = f.Version;
+                            item.Info["driveName"] = f.Name; item.Info["drivePath"] = f.Path; item.Info["driveTime"] = f.Time;
+                        });
+                        changed = true;
+                    }
+                    catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or IOException or TaskCanceledException && !ct.IsCancellationRequested)
+                    {
+                        error ??= ex.Message;   // un fichier en échec n'empêche pas les autres ; il sera retenté à la synchronisation suivante
+                        log.LogWarning("Drive {Folder} : {Error}", folderId, ex.Message);
+                    }
+                    bytesDone += f.Size;
+                    progress = progress with { Done = progress.Done + 1, Bytes = bytesDone };
+                    Report(progress);
+                }
+
+                Report(progress with { Phase = "updating", Current = "" });
+                Record(clientId, folderId, error ?? "", listed);
+                if (changed) await notifier.RefreshDrive(clientId, folderId);
+                return error;
+            }
+            finally { EndReport(clientId, folderId); }
         }
         finally { gate.Release(); }
     }

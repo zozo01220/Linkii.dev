@@ -1015,7 +1015,7 @@
     if (!PREVIEW || window.parent === window) return;
     var pl = state.current, meta = (pl && pl.meta) || {};
     var all = pl ? pl.items.filter(isSlide) : [], slides = all.filter(isValidNow), item = state.shownItem;
-    var sync = !!(pl && pl.sync && slides.length > 1);
+    var sync = !!(pl && pl.sync && slides.length);   // un seul contenu synchronisé se déroule aussi à l'heure commune
     function info(i) {
       var m = meta[i.id] || {};
       return { name: m.name || 'Contenu', color: m.color || '#5A6B80', sec: i.durationSec, content: i.durationMode === 'content', from: i.validFrom || null, to: i.validTo || null };
