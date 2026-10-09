@@ -144,6 +144,8 @@ PlaylistItem  { MediaId; DurationSec; Placement (full|top-left|top-right|bottom-
 | `POST` | `/api/player/ack` (`X-Token`) | Confirme la version reçue + résolution détectée |
 | `GET` | `/api/weather?city=&unit=` (`X-Token`) | Météo (cache serveur 10 min) |
 | `GET` | `/api/data/{id}` (`X-Token`) | Données d'un widget (salle, horaires, agenda, menu, départs) ; 502 + message si la source est injoignable |
+| `GET` | `/api/preview/playlist` (`X-Preview`) | Simulateur : même réponse que `/api/player/playlist` pour l'écran, le mur ou la liste du jeton d'aperçu, plus `meta` (nom et couleur de chaque contenu) ; 401 si le jeton a expiré (voir §18) |
+| `GET` | `/api/preview/data/{id}` (`X-Preview`) | Simulateur : données d'une app, comme `/api/data/{id}` |
 | `POST` | `/logout` | Déconnexion du back-office |
 
 **Hub SignalR** `/hubs/screen` : le player rejoint le groupe de son écran ; le serveur envoie `PlaylistChanged(version)` à la publication, au changement de playlist, de format ou de réglage. Reconnexion à délai croissant ; sondage toutes les 60 s en filet de sécurité ; ping de vie toutes les 15 s.
@@ -437,6 +439,19 @@ Maquette validée : `maquettes/drive-parcourir.html`. Aucune nouvelle autorisati
 - **Menu ⋮ d'un dossier** : inclure les sous-dossiers, renommer (sur la ligne), ouvrir dans Google Drive / OneDrive (`DriveFolder.WebUrl`, déduite de l'identifiant pour Google si absente), retirer.
 - **Modèle** : `DriveFolder` gagne `WebUrl`, `Subfolders`, `Skipped`, `SubfolderCount` (sous-dossiers vus à la dernière synchronisation ; sans l'option, les directs seulement).
 - **Non vérifié contre les vrais comptes** dans le navigateur (connexion au back-office requise) : à tester avec un compte Google et un compte Microsoft connectés.
+
+## 18. Simulateur d'écrans (9 octobre 2026)
+
+Maquette validée : `maquettes/simulateur-ecrans.html`. Le simulateur ne redessine rien lui-même : il affiche **le player des écrans en mode aperçu** dans une fenêtre intégrée, réduite (`SimulatorDialog`, `wwwroot/sim.js`). Fonction de base, sans option dans Réglages.
+
+- **Simuler un écran** : bouton « Simuler » sur la vignette de la carte (au survol, toujours visible au doigt), menu ⋮ de la carte et fiche de l'écran. On voit la **dernière publication** de l'écran (format, découpage, widgets, apps). Écran d'une zone synchronisée : badge **En direct · comme l'écran** (même contenu, au même moment) ; pause, précédent / suivant ou un clic sur la frise passent en **lecture libre** (l'écran, lui, continue), « Revenir au direct » réaligne. Modifications non publiées : un avertissement le signale.
+- **Simuler un mur** : depuis le mur (page Écrans). Le player dessine **tout le mur en une seule image** (`wall.whole` : pas de recadrage sur une place), les cadres et numéros des écrans sont tracés par-dessus (`sim-grid`) : léger même pour 16 écrans. Options : *Image du mur* / *Écrans séparés*, cadres aucun / fins / épais (simple affichage, pas de compensation des bordures), numéros, *Montrer l'état réel* (écrans hors ligne, places libres hachurés). La publication et la grille sont celles du premier écran placé.
+- **Essayer une liste** (« Essayer sur… », éditeur de la liste et menu ⋮ des cartes de listes) : joue la liste **dans son état actuel, même non publiée** (`Notifier.Items`, l'instantané qu'une publication figerait), sur un format au choix (paysage, portrait, mur 2 × 2 ou 3 × 1, ou comme un écran ou un mur existant) et, sur option, à une **date et heure choisies** (heure de l'organisation) : les contenus hors de leur période de validité sont sautés et listés sous la frise. Rien n'est envoyé aux écrans.
+- **Jeton d'aperçu** (`PreviewGrants`, singleton) : créé par le back-office pour une personne qui a accès à l'écran, au mur ou à la liste (`TenantStore`), désigne exactement ce qu'il montre (`PreviewGrant` : écran, mur ou liste, format), gardé **en mémoire**, valable 1 h après sa dernière utilisation. Après un redémarrage du serveur, le simulateur affiche « Aperçu expiré » : il suffit de le rouvrir. Les médias sont servis par la session du back-office (`/media` accepte déjà un utilisateur de l'organisation).
+- **Mode aperçu du player** (`/player/?preview=jeton`, `&at=ms` date simulée, `&sound=1`) : mémoire en RAM au lieu du `localStorage` (aucun conflit avec un écran appairé sur le même poste), ni service worker, ni cache des médias, ni accusé de réception, ni diffusions comptées, ni connexion au hub (aucun ordre reçu : désappairer, recharger, identifier) ; l'écran n'est pas marqué « vu ». Les publications sont reprises en relisant toutes les 20 s. Date simulée : `Date` est décalé dans la page du player (horloges, « aujourd'hui », périodes de validité) ; les données des apps (agendas…) restent celles du moment réel.
+- **Échanges** (`postMessage`, même origine) : le player envoie son état (contenus, contenu affiché, temps restant, direct / libre / pause, contenus sautés) ; le simulateur envoie `pause`, `play`, `goto`, `next`, `prev`, `live`. La pause arrête l'enchaînement et les vidéos du contenu affiché ; les diaporamas internes d'une app et YouTube continuent.
+- **Son** : coupé à l'ouverture (`sound` des contenus forcé à faux) ; l'activer recharge le player (en direct, il reprend au même moment).
+- **Code partagé** : `PlayerFeed` (`Preview.cs`) construit la réponse de `/api/player/playlist` pour un écran (`ForScreen`) et pour une liste essayée (`ForPlaylist`) ; `PlayerFeed.AllItems` sert aussi `/api/data/{id}`.
 
 ## LinkedIn : mise en service (source « Page entreprise »)
 

@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Simulateur d'écrans</title>
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--row:#EDF1F5;--brand:#0B1F3A;--brand-tint:#EBEDF0;--signal:#3B82C4;--ok:#1E8E5A;--ok-bg:#E1F0E8;--ok-ink:#155A38;--warn:#B7791F;--warn-bg:#FBF0DC;--warn-ink:#7A4F12;--danger:#C8372D;--danger-bg:#FBE4E2;--danger-ink:#8A231C;--radius:4px;--mono:"JetBrains Mono",ui-monospace,Consolas,monospace}
+*{box-sizing:border-box}html,body{margin:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
+h1,h2,h3,p{margin:0;font-weight:500}p{font-weight:400}b{font-weight:500}button{font:inherit}
+.mock{background:#fff;border-bottom:1px dashed var(--line-2);padding:10px 24px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:30}
+.mock span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-right:6px}
+.mock button{border:1px solid var(--line-2);background:#fff;padding:5px 12px;border-radius:var(--radius);cursor:pointer;color:var(--ink)}
+.mock button.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.grow{flex:1}
+.btn{font-weight:500;cursor:pointer;border:1px solid var(--brand);border-radius:var(--radius);padding:9px 16px;background:var(--brand);color:#fff;display:inline-flex;align-items:center;gap:8px}
+.btn.ghost{background:#fff;color:var(--ink);border-color:var(--line-2)}.btn.sm{padding:5px 10px;font-size:13px}
+.btn.acc{background:#fff;color:var(--signal);border-color:var(--signal)}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:var(--radius);font-size:12px;font-weight:500;white-space:nowrap}
+.badge::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.badge.ok{color:var(--ok-ink);background:var(--ok-bg)}.badge.warn{color:var(--warn-ink);background:var(--warn-bg)}.badge.ko{color:var(--danger-ink);background:var(--danger-bg)}
+.badge.sync{color:#1F5C93;background:#E4EEF8}.badge.sync::before{display:none}.badge.neutre{color:var(--muted);background:var(--row)}.badge.neutre::before{display:none}
+.hint{color:var(--muted);font-size:13px;font-weight:400}
+.kpi{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.annot{background:#FFF8E1;border:1px dashed #E0B84A;border-radius:var(--radius);padding:8px 12px;font-size:13px;color:#6B5200;margin:0 auto 16px;max-width:1160px}
+.veil{background:rgba(11,31,58,.45);min-height:calc(100vh - 53px);padding:24px 20px}
+.modal{background:#fff;border-radius:10px;max-width:1160px;margin:0 auto;border:1px solid var(--line)}
+.modal header{padding:14px 22px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.modal header h2{font-size:19px}.modal header .x{margin-left:auto;border:0;background:none;font-size:20px;color:var(--muted);cursor:pointer}
+.modal .body{padding:16px 22px;display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:22px}
+.modal footer{padding:14px 22px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px;align-items:center;flex-wrap:wrap}
+.side h3{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:0 0 8px}
+.side section{padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid var(--line)}.side section:last-child{border:0;margin:0}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:14px}.kv dt{color:var(--muted)}.kv dd{margin:0}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:var(--radius);overflow:hidden}
+.seg button{border:0;background:#fff;padding:5px 11px;font-size:13px;cursor:pointer;color:var(--ink);border-right:1px solid var(--line-2)}
+.seg button:last-child{border-right:0}.seg button.on{background:var(--brand);color:#fff}
+.chk{display:flex;gap:8px;align-items:center;font-size:14px;margin-top:8px;cursor:pointer}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line-2);background:#fff;border-radius:var(--radius);padding:4px 10px;font-size:13px;cursor:pointer;color:var(--ink)}
+.chip.on{border-color:var(--signal);box-shadow:0 0 0 1px var(--signal);background:#F6FAFE}
+.note{border-radius:var(--radius);padding:9px 12px;font-size:13px;display:flex;gap:10px;background:#E4EEF8;color:#1F5C93}
+.note.warn{background:var(--warn-bg);color:var(--warn-ink)}
+input[type=datetime-local],select{font:inherit;font-size:14px;padding:6px 10px;border:1px solid var(--line-2);border-radius:var(--radius);background:#fff;color:var(--ink);width:100%}
+.hidden{display:none!important}
+
+/* ---------- Simulateur ---------- */
+.screenbox{background:#E9EDF2;border-radius:8px;padding:18px;--maxh:52vh;display:grid;place-items:center}
+.screenbox:fullscreen{--maxh:100vh;background:#000;padding:0}
+.wallgrid{display:grid;max-width:100%}
+.win{position:relative;overflow:hidden;background:#000;container-type:inline-size}
+.win::after{content:"";position:absolute;inset:0;box-shadow:inset 0 0 0 var(--bz,0px) #050B16;pointer-events:none;z-index:5}
+.wallgrid.sep .win{border-radius:3px;box-shadow:0 2px 0 #B7C1CD}
+.stage{position:absolute;container-type:size}
+.num{position:absolute;left:8px;top:6px;z-index:6;font-family:var(--mono);font-size:12px;color:#fff;background:rgba(11,31,58,.75);padding:0 6px;border-radius:3px}
+.offmask{position:absolute;inset:0;z-index:4;display:grid;place-items:center;color:#fff;font-size:13px;font-weight:500;
+  background:repeating-linear-gradient(45deg,rgba(40,48,60,.92) 0 10px,rgba(60,70,84,.92) 10px 20px)}
+.offmask span{background:var(--danger);padding:2px 10px;border-radius:3px}
+.wclock{position:absolute;right:3%;top:4%;z-index:3;font-family:var(--mono);color:#fff;background:rgba(11,31,58,.55);padding:.4% 1.4%;border-radius:4px;font-size:3.2cqw}
+
+.transport{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.tbtn{border:1px solid var(--line-2);background:#fff;border-radius:var(--radius);padding:4px 10px;cursor:pointer;color:var(--ink);font-size:14px;min-width:36px}
+.link{border:0;background:none;color:var(--signal);cursor:pointer;font-size:13px;padding:0 4px}
+.badge.live{color:#fff;background:var(--danger)}.badge.live::before{background:#fff;animation:blink 1.4s infinite}
+.badge.free{color:var(--warn-ink);background:var(--warn-bg)}
+@keyframes blink{50%{opacity:.2}}
+.tl{display:flex;gap:3px;margin-top:10px}
+.seg-it{position:relative;background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:6px 8px;font-size:12px;cursor:pointer;min-width:0;overflow:hidden}
+.seg-it .lbl{display:flex;gap:6px;align-items:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative}
+.seg-it .ap{width:10px;height:10px;border-radius:50%;flex:none}
+.seg-it .d{color:var(--muted);font-family:var(--mono);position:relative}
+.seg-it .fill{position:absolute;left:0;top:0;bottom:0;background:#E4EEF8;width:0}
+.seg-it.on{border-color:var(--signal);box-shadow:0 0 0 1px var(--signal)}
+.skipped{margin-top:8px;font-size:13px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.skipped s{color:var(--ink)}
+
+/* ---------- Contenus simulés (dessinés par le « player ») ---------- */
+.slide{position:absolute;inset:0;opacity:0;transition:opacity .5s;overflow:hidden}
+.slide.on{opacity:1}
+.s-welcome{background:linear-gradient(135deg,#0B1F3A,#1C4C84 62%,#3B82C4);color:#fff;display:flex;flex-direction:column;justify-content:center;padding:0 8cqw}
+.s-welcome h3{font-size:13cqmin;font-weight:500;letter-spacing:-.02em;line-height:1}
+.s-welcome p{font-size:4.2cqmin;color:#C9D6E6;margin-top:3cqmin}
+.s-welcome .dots{position:absolute;right:9cqw;top:50%;transform:translateY(-50%);display:flex;gap:6cqmin}
+.s-welcome .dots i{width:16cqmin;height:16cqmin;background:#fff;opacity:.9;animation:bob 4s ease-in-out infinite alternate}
+.s-welcome .dots i+i{background:#3B82C4;outline:1cqmin solid #fff;animation-delay:-2s}
+@keyframes bob{to{transform:translateY(-6cqmin)}}
+.s-agenda{background:#fff;color:#0B1F3A;padding:6cqmin 7cqw}
+.s-agenda .hd{display:flex;align-items:center;gap:2.5cqmin;font-size:6cqmin;border-bottom:.6cqmin solid #2FA66A;padding-bottom:2cqmin;margin-bottom:1.5cqmin}
+.s-agenda .hd i{width:5cqmin;height:5cqmin;border-radius:50%;background:#2FA66A}
+.s-agenda .hd small{margin-left:auto;font-size:3.6cqmin;color:#5A6B80}
+.s-agenda .ev{display:flex;gap:4cqmin;font-size:4cqmin;padding:2cqmin 0;border-bottom:.2cqmin solid #DDE3EA}
+.s-agenda .ev b{font-family:var(--mono);color:#1E8E5A;min-width:22cqmin}
+.s-agenda .ev span{color:#5A6B80;margin-left:auto}
+.s-video{background:#140E28;color:#fff}
+.s-video .blob{position:absolute;border-radius:50%;filter:blur(1.5cqmin);opacity:.85;animation:float 7s ease-in-out infinite alternate}
+@keyframes float{to{transform:translate(18cqw,-10cqh) scale(1.25)}}
+.s-video .cap{position:absolute;left:6cqw;bottom:12cqmin;font-size:6cqmin;display:flex;gap:2.5cqmin;align-items:center}
+.s-video .cap i{width:7cqmin;height:7cqmin;border-radius:50%;background:#7B5CC4;display:grid;place-items:center;font-style:normal;font-size:3.4cqmin}
+.s-video .vprog{position:absolute;left:6cqw;right:6cqw;bottom:6cqmin;height:1cqmin;background:rgba(255,255,255,.25)}
+.s-video .vprog i{display:block;height:100%;width:0;background:#fff}
+.s-po{background:linear-gradient(135deg,#F0A92E,#E07B1A);color:#0B1F3A;display:flex;flex-direction:column;justify-content:center;padding:0 8cqw}
+.s-po h3{font-size:11cqmin;font-weight:500;line-height:1.05}.s-po p{font-size:5cqmin;margin-top:3cqmin}
+.s-rss{background:#F5F7FA;color:#0B1F3A;padding:5cqmin 6cqw 0}
+.s-rss .hd{display:flex;gap:2.5cqmin;align-items:center;font-size:6cqmin;margin-bottom:3cqmin}.s-rss .hd i{width:5cqmin;height:5cqmin;border-radius:50%;background:#F2541B}
+.s-rss .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:3cqmin}
+.s-rss .c{background:#fff;border:.25cqmin solid #DDE3EA;border-top:1cqmin solid #F2541B;padding:3cqmin;font-size:3.6cqmin;line-height:1.3}
+.s-rss .c small{display:block;color:#5A6B80;font-size:2.8cqmin;margin-top:2cqmin}
+.s-rss .tick{position:absolute;left:0;right:0;bottom:0;background:#0B1F3A;color:#fff;font-size:3.4cqmin;padding:1.6cqmin 0;white-space:nowrap;overflow:hidden}
+.s-rss .tick span{display:inline-block;padding-left:100%;animation:tick 14s linear infinite}
+@keyframes tick{to{transform:translateX(-100%)}}
+@container (orientation: portrait){.s-rss .cards{grid-template-columns:1fr}.s-welcome .dots{top:auto;bottom:12cqh;right:auto;left:8cqw;transform:none}}
+
+/* ---------- Page 4 ---------- */
+.doc{max-width:1060px;margin:0 auto;padding:30px 24px 60px}
+.doc h1{font-size:28px;margin-bottom:4px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
+.box{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+.box h3{font-size:16px;margin-bottom:8px}.box ol,.box ul{margin:0;padding-left:20px;font-size:14px;color:var(--muted)}.box li{margin-bottom:6px}.box li b{color:var(--ink)}
+.dec{counter-reset:d;list-style:none;padding:0!important}
+.dec li{counter-increment:d;padding-left:30px;position:relative}
+.dec li::before{content:counter(d);position:absolute;left:0;top:1px;width:20px;height:20px;border-radius:4px;background:var(--brand);color:#fff;font-size:12px;display:grid;place-items:center;font-family:var(--mono)}
+@media (max-width:860px){.modal .body{grid-template-columns:minmax(0,1fr);padding:14px}.modal header,.modal footer{padding:12px 14px}.tl .d{display:none}.cols{grid-template-columns:1fr}.veil{padding:16px}}
+</style>
+</head>
+<body>
+<div class="mock"><span>Simulateur</span>
+  <button data-v="v1" class="on">1 · Simuler un écran</button>
+  <button data-v="v2">2 · Simuler un mur</button>
+  <button data-v="v3">3 · Essayer une liste (étape 2)</button>
+  <button data-v="v4">4 · Fonctionnement et décisions</button>
+</div>
+
+<!-- 1 · un écran -->
+<div id="v1" class="veil">
+  <div class="annot">Entrée : bouton <b>▶ Simuler</b> sur chaque carte d'écran et dans la fiche de l'écran. On voit <b>le vrai player</b>, réduit, au même moment de lecture que l'écran (heure commune). Essayez pause, suivant, et un clic sur un contenu de la frise.</div>
+  <div class="modal">
+    <header><h2>Simuler · Hall 1</h2><span class="badge ok">En ligne</span><span class="badge neutre">Paysage · 1920 × 1080</span><span class="badge sync">Zone Défaut · synchronisée</span><button class="x" title="Fermer">✕</button></header>
+    <div class="body">
+      <div id="sim1"></div>
+      <div class="side">
+        <section><h3>Écran</h3><dl class="kv"><dt>Liste</dt><dd><b>Accueil</b> · version publiée</dd><dt>Boucle</dt><dd class="kpi" id="loop1">0:38</dd><dt>Widgets</dt><dd>Horloge</dd></dl></section>
+        <section><h3>Affichage</h3>
+          <label class="chk"><input type="checkbox" checked data-o="widgets"> Widgets de l'écran</label>
+          <p class="hint" style="margin-top:8px">Taille réduite pour tenir dans la fenêtre ; « Plein écran » montre l'écran à sa vraie proportion.</p></section>
+        <section><div class="note"><span>ℹ</span><span>Aperçu sans effet : il ne compte pas dans les statistiques et ne change pas l'état de l'écran.</span></div></section>
+      </div>
+    </div>
+    <footer><button class="btn ghost">Ouvrir la fiche de l'écran</button><button class="btn">Fermer</button></footer>
+  </div>
+</div>
+
+<!-- 2 · un mur -->
+<div id="v2" class="veil hidden">
+  <div class="annot">Entrée : <b>▶ Simuler le mur</b> dans le bandeau de la zone mur (à côté de « Publier le mur »). Le player dessine <b>une seule image</b> pour tout le mur ; les cadres sont tracés par-dessus. C'est léger, même pour 16 écrans.</div>
+  <div class="modal">
+    <header><h2>Simuler · Mur 2 × 2</h2><span class="badge sync">▦ Mur d'écrans</span><span class="badge ok" id="online2">4 sur 4 en ligne</span><span class="badge neutre" id="res2">3840 × 2160</span><button class="x" title="Fermer">✕</button></header>
+    <div class="body">
+      <div id="sim2"></div>
+      <div class="side">
+        <section><h3>Vue</h3>
+          <div class="seg" data-g="view"><button class="on" data-val="img">Image du mur</button><button data-val="sep">Écrans séparés</button></div>
+          <p class="hint" style="margin-top:6px">« Écrans séparés » écarte les écrans pour vérifier ce que chacun affiche.</p></section>
+        <section><h3>Cadres des écrans</h3>
+          <div class="seg" data-g="bz"><button data-val="0">Aucun</button><button class="on" data-val="3">Fins</button><button data-val="8">Épais</button></div>
+          <label class="chk"><input type="checkbox" checked data-o="nums"> Numéros des écrans</label>
+          <label class="chk"><input type="checkbox" data-o="off"> Montrer l'état réel (un écran hors ligne)</label></section>
+        <section><h3>Forme <span style="text-transform:none;letter-spacing:0">(pour la maquette)</span></h3>
+          <div class="chips" data-g="shape"><button class="chip on" data-val="2x2">2 × 2</button><button class="chip" data-val="3x1">3 × 1</button><button class="chip" data-val="3x3">3 × 3</button><button class="chip" data-val="4x4">4 × 4</button></div></section>
+      </div>
+    </div>
+    <footer><span class="hint grow">Les contenus d'un mur sont pensés pour toute sa surface : le texte traverse les cadres.</span><button class="btn ghost">Réorganiser…</button><button class="btn">Fermer</button></footer>
+  </div>
+</div>
+
+<!-- 3 · essayer une liste -->
+<div id="v3" class="veil hidden">
+  <div class="annot">Étape 2. Entrée : <b>▶ Essayer sur…</b> dans une liste de lecture. Joue le <b>brouillon</b> (non publié), sur un format au choix et à une date choisie : les contenus hors de leur période de validité sont sautés. Changez la date au 16 octobre pour voir « Journée portes ouvertes » apparaître.</div>
+  <div class="modal">
+    <header><h2>Essayer · Liste « Accueil »</h2><span class="badge warn">Brouillon non publié</span><span class="badge neutre" id="fmt3">Paysage · 1920 × 1080</span><button class="x" title="Fermer">✕</button></header>
+    <div class="body">
+      <div id="sim3"></div>
+      <div class="side">
+        <section><h3>Format</h3>
+          <div class="chips" data-g="fmt">
+            <button class="chip on" data-val="land">Paysage</button><button class="chip" data-val="port">Portrait</button>
+            <button class="chip" data-val="2x2">Mur 2 × 2</button><button class="chip" data-val="3x1">Mur 3 × 1</button></div>
+          <label style="display:block;margin-top:10px" class="hint">ou comme un écran existant
+            <select data-g="as"><option value="">— Choisir un écran —</option><option value="land">Hall 1 · paysage</option><option value="port">Entrée · portrait</option><option value="2x2">Mur 2 × 2 · 4 écrans</option></select></label></section>
+        <section><h3>Date et heure</h3>
+          <div class="seg" data-g="when"><button class="on" data-val="now">Maintenant</button><button data-val="pick">Choisir…</button></div>
+          <input type="datetime-local" id="dt3" value="2026-10-16T09:00" class="hidden" style="margin-top:8px">
+          <p class="hint" style="margin-top:8px" id="sum3"></p></section>
+        <section><h3>Version</h3>
+          <div class="seg" data-g="ver"><button class="on" data-val="draft">Brouillon</button><button data-val="pub">Publiée</button></div></section>
+      </div>
+    </div>
+    <footer><span class="hint grow">Rien n'est envoyé aux écrans tant que la liste n'est pas publiée.</span><button class="btn ghost">Fermer</button><button class="btn">Publier la liste</button></footer>
+  </div>
+</div>
+
+<!-- 4 · fonctionnement -->
+<div id="v4" class="hidden"><div class="doc">
+  <h1>Fonctionnement et décisions</h1>
+  <p class="hint" style="font-size:15px">Le simulateur ne redessine rien lui-même : il affiche le player des écrans dans une fenêtre intégrée, en « mode aperçu ».</p>
+  <div class="cols">
+    <div class="box"><h3>Comment ça marche</h3><ol>
+      <li>Le back-office ouvre le player avec un <b>jeton d'aperçu</b> : lecture seule, valable 1 h, limité à cet écran ou à ce mur.</li>
+      <li>Le player dessine exactement ce que dessine l'écran (format, découpage, widgets, applications), puis la page le <b>réduit</b> pour qu'il tienne.</li>
+      <li><b>Mur</b> : une seule image pour tout le mur, découpée par les cadres. Pas une fenêtre par écran (16 vidéos à la fois, ce serait trop lourd).</li>
+      <li><b>En direct</b> : même heure commune que les écrans, donc même contenu au même moment. Pause ou suivant : lecture libre, puis « Revenir au direct ».</li></ol></div>
+    <div class="box"><h3>Ce que l'aperçu ne fait jamais</h3><ul>
+      <li>Compter des diffusions dans les <b>statistiques</b>.</li>
+      <li>Faire passer l'écran pour <b>en ligne</b>, ni changer sa dernière synchro.</li>
+      <li>Réagir aux <b>ordres envoyés aux écrans</b> : désappairer, recharger, identifier.</li>
+      <li>Écrire dans la <b>mémoire du navigateur</b> : aucun conflit avec un écran appairé sur le même poste.</li></ul></div>
+    <div class="box"><h3>Décisions à prendre</h3><ol class="dec">
+      <li>Nom du bouton : <b>« Simuler »</b> (proposé, court) ou « Aperçu en direct ».</li>
+      <li>Son : <b>coupé à l'ouverture</b>, bouton pour l'activer (proposé).</li>
+      <li>Cadres du mur : <b>simple affichage</b>. Le mur ne compense pas encore les bordures ; si un jour il le fait, le simulateur le montrera tout seul.</li>
+      <li>Fonction de base, <b>sans option dans Réglages</b> (proposé) : elle ne change rien pour qui ne s'en sert pas.</li>
+      <li>Lien d'aperçu à partager (avec un client, sans compte) : <b>plus tard</b> ?</li></ol></div>
+    <div class="box"><h3>Étapes</h3><ol>
+      <li><b>Étape 1</b> : mode aperçu du player, « Simuler » sur un écran et sur un mur (vues 1 et 2).</li>
+      <li><b>Étape 2</b> : « Essayer sur… » une liste : brouillon, format au choix, date choisie (vue 3). Même mode aperçu, avec en plus une date imposée et une liste non publiée.</li></ol>
+      <p class="hint" style="margin-top:10px">La fiche de l'écran garde son aperçu à l'échelle, qui sert à placer les widgets. Le simulateur est en plus : il <b>joue</b> la liste.</p></div>
+  </div>
+</div></div>
+
+<script>
+/* ---------- Contenus de la liste « Accueil » ---------- */
+const ITEMS=[
+ {id:'welcome',name:'Bienvenue',kind:'Image',color:'#F0A92E',dur:8},
+ {id:'agenda',name:'Agenda du jour',kind:'Calendrier',color:'#2FA66A',dur:8},
+ {id:'video',name:'Vidéo de présentation',kind:'Vidéo',color:'#7B5CC4',dur:12},
+ {id:'po',name:'Journée portes ouvertes',kind:'Image',color:'#F0A92E',dur:8,from:'2026-10-15',to:'2026-10-18'},
+ {id:'rss',name:'Actualités',kind:'Flux RSS',color:'#F2541B',dur:10},
+];
+const EPOCH=Date.UTC(2026,9,1);
+const SLIDES={
+ welcome:'<div class="slide s-welcome" data-id="welcome"><h3>Bienvenue</h3><p>Accueil ouvert de 8 h à 18 h</p><div class="dots"><i></i><i></i></div></div>',
+ agenda:'<div class="slide s-agenda" data-id="agenda"><div class="hd"><i></i>Agenda du jour<small>jeudi 9 octobre</small></div>'+
+  [['08:30','Réunion d\'équipe','Salle 2'],['10:00','Formation sécurité','Auditoire A'],['12:15','Repas partagé','Cafétéria'],['14:00','Visite des locaux','Accueil'],['16:30','Point hebdomadaire','Salle 4']]
+  .map(e=>'<div class="ev"><b>'+e[0]+'</b>'+e[1]+'<span>'+e[2]+'</span></div>').join('')+'</div>',
+ video:'<div class="slide s-video" data-id="video"><div class="blob" style="width:40cqmin;height:40cqmin;left:10cqw;top:15cqh;background:#7B5CC4"></div><div class="blob" style="width:55cqmin;height:55cqmin;left:45cqw;top:30cqh;background:#3B82C4;animation-delay:-3s"></div><div class="blob" style="width:30cqmin;height:30cqmin;left:70cqw;top:5cqh;background:#E3261D;animation-delay:-5s"></div><div class="cap"><i>▶</i>Vidéo de présentation</div><div class="vprog"><i></i></div></div>',
+ po:'<div class="slide s-po" data-id="po"><h3>Journée portes ouvertes</h3><p>Samedi 17 octobre · 10 h – 16 h</p></div>',
+ rss:'<div class="slide s-rss" data-id="rss"><div class="hd"><i></i>Actualités</div><div class="cards"><div class="c">Nouveaux horaires d\'ouverture dès novembre<small>il y a 2 h</small></div><div class="c">Le parking est accessible par l\'entrée nord<small>hier</small></div><div class="c">Inscriptions ouvertes pour les ateliers<small>il y a 3 jours</small></div></div><div class="tick"><span>Fermeture exceptionnelle le 1er novembre · Travaux dans le hall jusqu\'au 20 octobre · Pensez à badger en entrant</span></div></div>',
+};
+const fmtMs=ms=>{const s=Math.floor(ms/1000);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
+const fmtDate=d=>d.toLocaleDateString('fr-CH',{weekday:'long',day:'numeric',month:'long'});
+
+/* ---------- Simulateur : même rôle que le player en mode aperçu ---------- */
+class Sim{
+ constructor(el,o){
+  this.el=el;this.o=Object.assign({cols:1,rows:1,portrait:false,gap:0,bz:0,nums:false,off:[],widgets:false,mode:'live',date:null},o);
+  this.live=this.o.mode==='live';this.playing=true;this.t=0;this.cur=-1;this.last=Date.now();this.sound=false;
+  this.setClock();this.build();
+ }
+ setClock(){this.base=Date.now();this.origin=this.o.date?this.o.date.getTime():Date.now();}
+ now(){return new Date(this.origin+(Date.now()-this.base));}
+ set(p){Object.assign(this.o,p);if('date' in p)this.setClock();this.cur=-1;this.build();}
+ compute(){
+  const d=this.now();
+  this.items=ITEMS.map(it=>({...it,skip:!!(it.from&&(d<new Date(it.from+'T00:00')||d>new Date(it.to+'T23:59')))}));
+  this.play=this.items.filter(i=>!i.skip);
+  let a=0;this.play.forEach(i=>{i.start=a;a+=i.dur*1000;});this.total=a;
+ }
+ build(){
+  this.compute();
+  const o=this.o,ar=o.portrait?[9,16]:[16,9],n=o.cols*o.rows;
+  const aspect=(o.cols*ar[0])/(o.rows*ar[1]);
+  const slides=ITEMS.map(i=>SLIDES[i.id]).join('');
+  let cells='';
+  for(let i=0;i<n;i++){
+   const c=i%o.cols,r=Math.floor(i/o.cols),off=o.off.includes(i);
+   cells+='<div class="win" style="aspect-ratio:'+ar[0]+'/'+ar[1]+';--bz:'+(n>1?o.bz:0)+'px">'
+    +'<div class="stage" style="width:'+o.cols*100+'%;height:'+o.rows*100+'%;left:'+(-c*100)+'%;top:'+(-r*100)+'%">'+slides+'</div>'
+    +(o.widgets&&n===1?'<div class="wclock">--:--</div>':'')
+    +(o.nums&&n>1?'<span class="num">'+(i+1)+'</span>':'')
+    +(off?'<div class="offmask"><span>Hors ligne</span></div>':'')+'</div>';
+  }
+  this.el.innerHTML='<div class="screenbox"><div class="wallgrid'+(o.gap?' sep':'')+'" style="grid-template-columns:repeat('+o.cols+',1fr);gap:'+o.gap+'px;width:min(100%, calc(var(--maxh) * '+aspect.toFixed(4)+'))">'+cells+'</div></div>'
+   +'<div class="transport"><button class="tbtn" data-a="prev" title="Précédent">⏮</button><button class="tbtn" data-a="play" title="Pause">⏸</button><button class="tbtn" data-a="next" title="Suivant">⏭</button>'
+   +'<span class="badge" data-r="state"></span><button class="link" data-a="live"></button><span class="grow"></span>'
+   +'<span class="kpi hint" data-r="time"></span><button class="tbtn" data-a="sound">🔇 Son coupé</button><button class="tbtn" data-a="fs">⛶ Plein écran</button></div>'
+   +'<div class="tl">'+this.play.map((it,k)=>'<div class="seg-it" data-k="'+k+'" style="flex:'+it.dur+'" title="'+it.name+' · '+it.kind+'"><div class="fill"></div><div class="lbl"><span class="ap" style="background:'+it.color+'"></span>'+it.name+'</div><div class="d">'+it.dur+' s</div></div>').join('')+'</div>'
+   +'<div class="skipped">'+this.items.filter(i=>i.skip).map(i=>'<span>Sauté à cette date : <s>'+i.name+'</s> · valable du 15 au 18 oct.</span>').join('')+'</div>';
+  this.el.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>this.act(b.dataset.a));
+  this.el.querySelectorAll('.seg-it').forEach(s=>s.onclick=()=>{this.t=this.play[+s.dataset.k].start;this.live=false;this.playing=true;});
+  this.ui();
+ }
+ pos(){return this.live?(((this.now()-EPOCH)%this.total)+this.total)%this.total:this.t;}
+ idxAt(p){let k=0;this.play.forEach((it,i)=>{if(p>=it.start)k=i;});return k;}
+ act(a){
+  const p=this.pos(),k=this.idxAt(p);
+  if(a==='play'){if(this.playing){this.t=p;this.live=false;this.playing=false;}else this.playing=true;}
+  if(a==='prev'||a==='next'){const j=(k+(a==='next'?1:-1)+this.play.length)%this.play.length;this.t=this.play[j].start;this.live=false;}
+  if(a==='live'){if(this.o.mode==='live'){this.live=true;this.playing=true;}else{this.t=0;this.playing=true;}}
+  if(a==='sound'){this.sound=!this.sound;}
+  if(a==='fs'){const b=this.el.querySelector('.screenbox');if(b.requestFullscreen)b.requestFullscreen();}
+  this.ui();
+ }
+ ui(){
+  const st=this.el.querySelector('[data-r=state]'),lk=this.el.querySelector('[data-a=live]');
+  this.el.querySelector('[data-a=play]').textContent=this.playing?'⏸':'▶';
+  this.el.querySelector('[data-a=sound]').textContent=this.sound?'🔊 Son':'🔇 Son coupé';
+  if(this.o.mode==='live'){
+   st.className='badge '+(this.live?'live':'free');st.textContent=this.live?'En direct · comme l\'écran':(this.playing?'Lecture libre':'En pause · l\'écran continue');
+   lk.textContent=this.live?'':'Revenir au direct';
+  }else{st.className='badge neutre';st.textContent=this.playing?'Essai en cours':'En pause';lk.textContent='Recommencer';}
+ }
+ tick(){
+  const nowMs=Date.now(),dt=nowMs-this.last;this.last=nowMs;
+  if(!this.total)return;
+  if(!this.live&&this.playing){this.t=(this.t+dt)%this.total;}
+  const p=this.pos(),k=this.idxAt(p),it=this.play[k],prog=(p-it.start)/(it.dur*1000);
+  if(k!==this.cur){
+   this.cur=k;
+   this.el.querySelectorAll('.slide').forEach(s=>s.classList.toggle('on',s.dataset.id===it.id));
+   this.el.querySelectorAll('.seg-it').forEach(s=>{s.classList.toggle('on',+s.dataset.k===k);s.querySelector('.fill').style.width='0';});
+  }
+  const f=this.el.querySelector('.seg-it.on .fill');if(f)f.style.width=(prog*100)+'%';
+  this.el.querySelectorAll('.vprog i').forEach(v=>v.style.width=(it.id==='video'?prog*100:0)+'%');
+  const d=this.now(),hm=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  this.el.querySelectorAll('.wclock').forEach(c=>c.textContent=hm);
+  this.el.querySelector('[data-r=time]').textContent=fmtMs(p)+' / '+fmtMs(this.total);
+ }
+}
+
+const sims={
+ v1:new Sim(document.getElementById('sim1'),{widgets:true}),
+ v2:new Sim(document.getElementById('sim2'),{cols:2,rows:2,bz:3,nums:true}),
+ v3:new Sim(document.getElementById('sim3'),{mode:'try'}),
+};
+document.getElementById('loop1').textContent=fmtMs(sims.v1.total);
+let active='v1';
+setInterval(()=>{const s=sims[active];if(s)s.tick();},100);
+
+/* ---------- Navigation de la maquette ---------- */
+const V=['v1','v2','v3','v4'];
+function show(id){active=id;V.forEach(v=>document.getElementById(v).classList.toggle('hidden',v!==id));document.querySelectorAll('.mock button[data-v]').forEach(b=>b.classList.toggle('on',b.dataset.v===id));if(sims[id])sims[id].cur=-1;}
+document.querySelectorAll('.mock button[data-v]').forEach(b=>b.onclick=()=>show(b.dataset.v));
+function group(root,g,fn){const el=root.querySelector('[data-g='+g+']');el.querySelectorAll('button').forEach(b=>b.onclick=()=>{el.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));fn(b.dataset.val);});}
+
+/* Vue 1 */
+document.querySelector('#v1 [data-o=widgets]').onchange=e=>sims.v1.set({widgets:e.target.checked});
+
+/* Vue 2 */
+const v2=document.getElementById('v2');let shape=[2,2];
+function upd2(){
+ const off=v2.querySelector('[data-o=off]').checked,n=shape[0]*shape[1];
+ v2.querySelector('#online2').className='badge '+(off?'warn':'ok');
+ v2.querySelector('#online2').textContent=(off?n-1:n)+' sur '+n+' en ligne';
+ v2.querySelector('#res2').textContent=(shape[0]*1920)+' × '+(shape[1]*1080);
+ v2.querySelector('h2').textContent='Simuler · Mur '+shape[0]+' × '+shape[1];
+ sims.v2.set({cols:shape[0],rows:shape[1],nums:v2.querySelector('[data-o=nums]').checked,off:off?[Math.min(3,n-1)]:[]});
+}
+group(v2,'view',v=>sims.v2.set({gap:v==='sep'?14:0}));
+group(v2,'bz',v=>sims.v2.set({bz:+v}));
+group(v2,'shape',v=>{shape=v.split('x').map(Number);upd2();});
+v2.querySelectorAll('[data-o]').forEach(c=>c.onchange=upd2);
+
+/* Vue 3 */
+const v3=document.getElementById('v3'),dt3=document.getElementById('dt3');
+const FMT={land:{cols:1,rows:1,portrait:false,l:'Paysage · 1920 × 1080'},port:{cols:1,rows:1,portrait:true,l:'Portrait · 1080 × 1920'},'2x2':{cols:2,rows:2,portrait:false,l:'Mur 2 × 2 · 3840 × 2160'},'3x1':{cols:3,rows:1,portrait:false,l:'Mur 3 × 1 · 5760 × 1080'}};
+function setFmt(k){const f=FMT[k];v3.querySelector('#fmt3').textContent=f.l;sims.v3.set({cols:f.cols,rows:f.rows,portrait:f.portrait,bz:3,nums:f.cols>1});
+ v3.querySelectorAll('[data-g=fmt] .chip').forEach(b=>b.classList.toggle('on',b.dataset.val===k));sum3();}
+function sum3(){const s=sims.v3,sk=s.items.filter(i=>i.skip).length;
+ v3.querySelector('#sum3').innerHTML='Le '+fmtDate(s.now())+' : <b>'+s.play.length+' contenus joués</b>'+(sk?', '+sk+' sauté (hors période)':'')+' · boucle '+fmtMs(s.total)+'.';}
+group(v3,'fmt',setFmt);
+v3.querySelector('[data-g=as]').onchange=e=>{if(e.target.value)setFmt(e.target.value);};
+group(v3,'when',v=>{dt3.classList.toggle('hidden',v!=='pick');sims.v3.set({date:v==='pick'?new Date(dt3.value):null});sum3();});
+dt3.onchange=()=>{sims.v3.set({date:new Date(dt3.value)});sum3();};
+group(v3,'ver',v=>{const b=v3.querySelector('header .badge');b.className='badge '+(v==='draft'?'warn':'ok');b.textContent=v==='draft'?'Brouillon non publié':'Version publiée';});
+sum3();
+</script>
+</body>
+</html>

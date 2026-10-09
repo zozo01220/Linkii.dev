@@ -1,0 +1,338 @@
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject TenantStore Store
+@inject PreviewGrants Grants
+@inject IJSRuntime JS
+
+@* Simulateur : le player des écrans en mode aperçu (sim.js), réduit dans une fenêtre. Trois usages :
+   un écran (sa publication, au même moment s'il est synchronisé), un mur entier (une seule image, cadres tracés par-dessus),
+   ou une liste de lecture essayée avant publication (format et date au choix). Sans aucun effet sur les écrans. *@
+<div class="modal-backdrop @(Stacked ? "picker-backdrop" : "")" @onclick="Close"></div>
+<div class="modal app-modal sim-dlg" role="dialog" aria-modal="true" aria-labelledby="sim-title">
+    <div class="modal-head">
+        <span class="app-ico" style="--app-c:#0B1F3A"><Ico Name="@(PlaylistId != null ? "play-box" : WallZoneId != null ? "grid" : "monitor")" Size="22" /></span>
+        <div class="grow sim-head">
+            <h3 id="sim-title">@title</h3>
+            @foreach (var (css, text, tip) in badges) { <span class="badge @css" title="@tip">@text</span> }
+        </div>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="modal-body sim-body">
+        @if (missing)
+        {
+            <div class="empty"><div class="big">Rien à simuler</div><p>Cet écran, ce mur ou cette liste n'existe plus.</p></div>
+        }
+        else
+        {
+            <div class="sim-host" @ref="host"></div>
+        }
+        <aside class="sim-side">
+            @if (PlaylistId != null)
+            {
+                <section>
+                    <h4>Format</h4>
+                    <div class="sim-chips" role="group" aria-label="Format">
+                        @foreach (var (key, label, _, _, _, _) in Formats)
+                        {
+                            var k = key;
+                            <button type="button" class="chip @(fmt == k ? "on" : "")" @onclick="() => SetFormat(k)">@label</button>
+                        }
+                    </div>
+                    @if (likes.Count > 0)
+                    {
+                        <label class="lbl" for="sim-like">ou comme un écran existant</label>
+                        <select id="sim-like" class="full" value="@(fmt.StartsWith("like:") ? fmt : "")" @onchange='e => SetFormat(e.Value?.ToString() ?? "")'>
+                            <option value="">— Choisir un écran —</option>
+                            @foreach (var l in likes) { <option value="@l.Key">@l.Label</option> }
+                        </select>
+                    }
+                </section>
+                <section>
+                    <h4>Date et heure</h4>
+                    <div class="sim-chips" role="group" aria-label="Date et heure">
+                        <button type="button" class="chip @(!pickDate ? "on" : "")" @onclick="() => SetWhen(false)">Maintenant</button>
+                        <button type="button" class="chip @(pickDate ? "on" : "")" @onclick="() => SetWhen(true)">Choisir…</button>
+                    </div>
+                    @if (pickDate)
+                    {
+                        <input type="datetime-local" class="full" style="margin-top:8px" aria-label="Date et heure simulées" value="@when" @onchange="SetDate" />
+                        <p class="muted sim-hint">Heure de l'organisation (@tz). Les contenus hors de leur période de validité sont sautés.</p>
+                    }
+                </section>
+                <section><div class="wall-note" style="margin:0">Joue la liste <b>dans son état actuel</b>, même non publiée. Rien n'est envoyé aux écrans.</div></section>
+            }
+            else if (WallZoneId != null)
+            {
+                <section>
+                    <h4>Vue</h4>
+                    <div class="sim-chips" role="group" aria-label="Vue">
+                        <button type="button" class="chip @(view == "img" ? "on" : "")" @onclick='() => Set(() => view = "img")'>Image du mur</button>
+                        <button type="button" class="chip @(view == "sep" ? "on" : "")" @onclick='() => Set(() => view = "sep")'>Écrans séparés</button>
+                    </div>
+                    <p class="muted sim-hint">« Écrans séparés » écarte les écrans pour vérifier ce que chacun affiche.</p>
+                </section>
+                <section>
+                    <h4>Cadres des écrans</h4>
+                    <div class="sim-chips" role="group" aria-label="Cadres des écrans">
+                        @foreach (var (px, label) in new[] { (0, "Aucun"), (3, "Fins"), (8, "Épais") })
+                        {
+                            var v = px;
+                            <button type="button" class="chip @(bezel == v ? "on" : "")" disabled="@(view == "sep")" @onclick="() => Set(() => bezel = v)">@label</button>
+                        }
+                    </div>
+                    <label class="sim-check"><input type="checkbox" checked="@nums" @onchange="e => Set(() => nums = e.Value is true)" /> Numéros des écrans</label>
+                    <label class="sim-check"><input type="checkbox" checked="@real" @onchange="e => Set(() => real = e.Value is true)" /> Montrer l'état réel (écrans hors ligne, places libres)</label>
+                </section>
+                <section>
+                    <dl class="sim-kv">
+                        @foreach (var (k, v) in facts) { <dt>@k</dt><dd>@v</dd> }
+                    </dl>
+                </section>
+            }
+            else
+            {
+                <section>
+                    <dl class="sim-kv">
+                        @foreach (var (k, v) in facts) { <dt>@k</dt><dd>@v</dd> }
+                    </dl>
+                </section>
+            }
+            @if (warn != null) { <div class="wall-note warn" style="margin:0 0 12px">@warn</div> }
+            <div class="wall-note" style="margin:0">Aperçu sans effet : il ne compte pas dans les statistiques et ne change pas l'état de l'écran.</div>
+        </aside>
+    </div>
+    <div class="modal-foot">
+        <span class="muted grow sim-foot">@foot</span>
+        <button type="button" class="btn" @onclick="Close">Fermer</button>
+    </div>
+</div>
+
+@code {
+    /// <summary>Un écran (sa publication).</summary>
+    [Parameter] public Guid? ScreenId { get; set; }
+    /// <summary>Un mur entier (zone de type mur).</summary>
+    [Parameter] public Guid? WallZoneId { get; set; }
+    /// <summary>Une liste de lecture, essayée avant publication.</summary>
+    [Parameter] public Guid? PlaylistId { get; set; }
+    /// <summary>Ouvert au-dessus d'une autre fenêtre (fiche de l'écran).</summary>
+    [Parameter] public bool Stacked { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private ElementReference host;
+    private bool missing, mounted, dirty = true;
+    private string title = "", foot = "", token = "";
+    private string? warn;
+    private readonly List<(string Css, string Text, string? Tip)> badges = new();
+    private readonly List<(string K, string V)> facts = new();
+
+    // format affiché : un écran de ce format, ou une grille de cols × rows écrans
+    private string orientation = "landscape", resolution = "1920x1080";
+    private int cols = 1, rows = 1;
+    private Guid clientId;
+
+    // mur
+    private string view = "img";
+    private int bezel = 3;
+    private bool nums = true, real;
+    private List<object> cells = new();
+
+    // liste de lecture : format, date simulée (heure de l'organisation)
+    private string fmt = "land", when = "", tz = "Europe/Zurich";
+    private bool pickDate;
+    private List<(string Key, string Label, string Orientation, string Resolution, int Cols, int Rows)> likes = new();
+
+    private static readonly (string Key, string Label, string Orientation, string Resolution, int Cols, int Rows)[] Formats =
+    {
+        ("land", "Paysage", "landscape", "1920x1080", 1, 1),
+        ("port", "Portrait", "portrait", "1920x1080", 1, 1),
+        ("2x2", "Mur 2 × 2", "landscape", "1920x1080", 2, 2),
+        ("3x1", "Mur 3 × 1", "landscape", "1920x1080", 3, 1),
+    };
+
+    protected override void OnInitialized()
+    {
+        clientId = Store.ClientId;
+        if (PlaylistId != null) LoadPlaylist();
+        else if (WallZoneId != null) LoadWall();
+        else LoadScreen();
+        if (!missing) NewToken();
+    }
+
+    private static string FormatLabel(string orientation, string resolution) =>
+        (orientation == "portrait" ? "Portrait" : "Paysage") + " · " + ScreenOptions.ResolutionLabel(resolution, orientation).Replace("×", " × ");
+
+    private void LoadScreen()
+    {
+        var info = Store.Read(d =>
+        {
+            var s = d.Screens.FirstOrDefault(x => x.Id == ScreenId && x.Token != null);
+            if (s == null) return null;
+            var zone = Helpers.ZoneOf(d.Areas, s);
+            var lists = string.Join(" · ", s.ZonePlaylists().Select(id => d.Playlists.FirstOrDefault(p => p.Id == id)?.Name ?? "—"));
+            return new
+            {
+                s.Name, Status = d.Status(s), s.Orientation, Res = PlayerFeed.Resolution(s), Zone = zone, Wall = Helpers.Wall(d.Areas, s),
+                Pending = Helpers.HasPending(s, d.Playlists), Lists = lists, Widgets = s.Widgets.Count, s.PublishedUtc,
+                Synced = zone is { Sync: true } && Helpers.SyncedScreens(d.Screens.Where(x => x.ZoneId == s.ZoneId)).Contains(s.Id)
+            };
+        });
+        if (info == null) { missing = true; title = "Simuler"; return; }
+        title = "Simuler · " + info.Name;
+        orientation = info.Orientation; resolution = info.Res;
+        badges.Add((info.Status switch { "En ligne" => "en-ligne", "Mise à jour" => "mise-a-jour", _ => "hors-ligne" }, info.Status, null));
+        badges.Add(("neutre", FormatLabel(orientation, resolution), null));
+        if (info.Wall is { } w) badges.Add(("sync", $"Mur · place {Helpers.WallLabel(w.Row * w.Cols + w.Col, w.Cols, w.Rows)}", "L'écran affiche sa portion de l'image du mur"));
+        else if (info.Synced) badges.Add(("sync", "Synchronisé", "Même contenu, au même moment, que les autres écrans de la zone qui jouent cette liste"));
+        facts.Add(("Liste", info.Wall != null ? info.Lists + " (liste du mur)" : info.Lists));
+        if (info.Widgets > 0 && info.Wall == null) facts.Add(("Widgets", info.Widgets.ToString()));
+        facts.Add(("Publiée", info.PublishedUtc is { } at ? at.ToLocalTime().ToString("d MMM 'à' HH:mm", new System.Globalization.CultureInfo("fr-CH")) : "jamais"));
+        if (info.Pending) warn = "Des modifications ne sont pas encore publiées : le simulateur montre ce que l'écran affiche. Pour essayer les modifications, ouvrez la liste de lecture et « Essayer sur… ».";
+        foot = "Le simulateur montre la dernière publication de l'écran.";
+    }
+
+    private void LoadWall()
+    {
+        var info = Store.Read(d =>
+        {
+            var z = d.Areas.SelectMany(a => a.Zones).FirstOrDefault(x => x.Id == WallZoneId && x.IsWall);
+            if (z == null) return null;
+            var inWall = d.Screens.Where(s => s.ZoneId == z.Id && s.Token != null).ToList();
+            var first = inWall.Where(s => s.WallPos != null).OrderBy(s => s.WallPos).FirstOrDefault();
+            var states = Enumerable.Range(0, z.WallCols * z.WallRows).Select(pos =>
+            {
+                var at = inWall.FirstOrDefault(x => x.WallPos == pos);
+                var label = Helpers.WallLabel(pos, z.WallCols, z.WallRows);
+                return at == null ? ("empty", label + " : place libre")
+                    : (d.Status(at) is "En ligne" or "Mise à jour" ? "ok" : "off", label + " : " + at.Name);
+            }).ToList();
+            return new
+            {
+                z.Name, z.WallCols, z.WallRows, First = first, States = states,
+                Playlist = d.Playlists.FirstOrDefault(p => p.Id == z.PlaylistId)?.Name,
+                Pending = inWall.Any(s => Helpers.HasPending(s, d.Playlists))
+            };
+        });
+        if (info == null || info.First == null) { missing = true; title = "Simuler le mur"; return; }
+        title = "Simuler · " + info.Name;
+        cols = info.WallCols; rows = info.WallRows;
+        orientation = info.First.Orientation; resolution = PlayerFeed.Resolution(info.First);
+        cells = info.States.Select(x => (object)new { state = x.Item1, title = x.Item2 }).ToList();
+        var online = info.States.Count(x => x.Item1 == "ok");
+        var (w, h) = Size();
+        badges.Add(("sync", $"Mur d'écrans {cols} × {rows}", null));
+        badges.Add((online == cols * rows ? "en-ligne" : "hors-ligne", online == cols * rows ? $"{online} sur {online} en ligne" : "Mur incomplet", $"{online} écran{(online > 1 ? "s" : "")} en ligne sur {cols * rows} places"));
+        badges.Add(("neutre", $"{w * cols} × {h * rows}", "Taille de l'image du mur, en pixels"));
+        facts.Add(("Liste", info.Playlist ?? "aucune"));
+        if (info.Pending) warn = "Des modifications ne sont pas encore publiées sur le mur : le simulateur montre ce qu'il affiche.";
+        foot = "Les contenus d'un mur sont pensés pour toute sa surface : le texte traverse les cadres.";
+    }
+
+    private void LoadPlaylist()
+    {
+        var info = Store.Read(d =>
+        {
+            var p = d.Playlists.FirstOrDefault(x => x.Id == PlaylistId);
+            if (p == null) return null;
+            var screens = d.Screens.Where(s => s.Token != null && Helpers.ZoneOf(d.Areas, s) is not { IsWall: true })
+                .OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+            var walls = d.Areas.SelectMany(a => a.Zones).Where(z => z.IsWall && z.WallCols > 0 && z.WallRows > 0)
+                .Select(z => (Zone: z, First: d.Screens.Where(s => s.ZoneId == z.Id && s.Token != null && s.WallPos != null).OrderBy(s => s.WallPos).FirstOrDefault()))
+                .Where(x => x.First != null).ToList();
+            return new { p.Name, d.Tenant.Timezone, Screens = screens, Walls = walls };
+        });
+        if (info == null) { missing = true; title = "Essayer"; return; }
+        title = $"Essayer · « {info.Name} »";
+        tz = info.Timezone;
+        likes = info.Screens.Select(s => ($"like:{s.Id}", $"{s.Name} · {(s.Orientation == "portrait" ? "portrait" : "paysage")}", s.Orientation, PlayerFeed.Resolution(s), 1, 1))
+            .Concat(info.Walls.Select(x => ($"like:{x.Zone.Id}", $"{x.Zone.Name} · mur {x.Zone.WallCols} × {x.Zone.WallRows}", x.First!.Orientation, PlayerFeed.Resolution(x.First), x.Zone.WallCols, x.Zone.WallRows)))
+            .ToList();
+        when = LocalNow().ToString("yyyy-MM-dd'T'HH:mm");
+        ApplyFormat();
+        foot = "La diffusion se publie écran par écran, depuis la page Écrans.";
+    }
+
+    private TimeZoneInfo Zone() { try { return TimeZoneInfo.FindSystemTimeZoneById(tz); } catch { return TimeZoneInfo.Local; } }
+    private DateTime LocalNow() => TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, Zone());
+
+    private void SetFormat(string key)
+    {
+        if (key.Length == 0 || key == fmt) return;
+        fmt = key;
+        ApplyFormat();
+        NewToken();
+    }
+
+    private void ApplyFormat()
+    {
+        var f = Formats.Concat(likes).FirstOrDefault(x => x.Key == fmt);
+        if (f.Key == null) f = Formats[0];
+        (orientation, resolution, cols, rows) = (f.Orientation, f.Resolution, f.Cols, f.Rows);
+        var (w, h) = Size();
+        badges.Clear();
+        badges.Add(("neutre", cols * rows > 1 ? $"Mur {cols} × {rows} · {w * cols} × {h * rows}" : FormatLabel(orientation, resolution), null));
+        cells = Enumerable.Range(0, cols * rows).Select(_ => (object)new { state = "ok", title = "" }).ToList();
+    }
+
+    private void SetWhen(bool pick) { if (pickDate == pick) return; pickDate = pick; dirty = true; }
+
+    private void SetDate(ChangeEventArgs e)
+    {
+        if (e.Value?.ToString() is { Length: > 0 } v) { when = v; dirty = true; }
+    }
+
+    private void Set(Action change) { change(); dirty = true; }
+
+    // Largeur et hauteur d'un écran, en pixels, dans son sens.
+    private (int W, int H) Size()
+    {
+        var p = resolution.Split('x');
+        int a = int.TryParse(p[0], out var x) ? x : 1920, b = p.Length > 1 && int.TryParse(p[1], out var y) ? y : 1080;
+        return orientation == "portrait" ? (Math.Min(a, b), Math.Max(a, b)) : (Math.Max(a, b), Math.Min(a, b));
+    }
+
+    private void NewToken()
+    {
+        token = Grants.Create(new PreviewGrant(clientId, PlaylistId == null && WallZoneId == null ? ScreenId : null, WallZoneId, PlaylistId, orientation, resolution, cols, rows));
+        dirty = true;
+    }
+
+    private string Src()
+    {
+        var src = "/player/?preview=" + token;
+        if (PlaylistId != null && pickDate && DateTime.TryParse(when, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var local))
+        {
+            var utc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), Zone());
+            src += "&at=" + new DateTimeOffset(utc).ToUnixTimeMilliseconds();
+        }
+        return src;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (missing || !dirty) return;
+        dirty = false;
+        var (w, h) = Size();
+        var opts = new
+        {
+            src = Src(), cols, rows, ratio = (double)w / h, mode = PlaylistId != null ? "try" : "live",
+            view, bezel, nums, real = WallZoneId != null && real, cells
+        };
+        try
+        {
+            await JS.InvokeVoidAsync(mounted ? "linkiiSim.update" : "linkiiSim.mount", host, opts);
+            mounted = true;
+        }
+        catch (JSException) { }
+        catch (JSDisconnectedException) { }
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    public async ValueTask DisposeAsync()
+    {
+        if (!mounted) return;
+        try { await JS.InvokeVoidAsync("linkiiSim.unmount", host); }
+        catch (JSException) { }
+        catch (JSDisconnectedException) { }
+    }
+}

@@ -23,6 +23,7 @@ builder.Services.AddSingleton<CanvaService>();
 builder.Services.AddScoped<TenantContext>();
 builder.Services.AddScoped<TenantStore>();
 builder.Services.AddSingleton<Notifier>();
+builder.Services.AddSingleton<PreviewGrants>();   // jetons d'aperçu du simulateur
 builder.Services.AddSingleton<VideoConverter>();
 builder.Services.AddSingleton<MediaImporter>();
 builder.Services.AddSingleton<WeatherService>();
@@ -491,39 +492,7 @@ api.MapGet("/player/playlist", (HttpRequest req, JsonStore store) => store.Read(
 {
     var s = Auth(req, db);
     if (Gate(s, db) is { } denied) return denied;
-    var t = db.Clients.First(c => c.Id == s!.ClientId);
-    var reseller = db.Resellers.FirstOrDefault(r => r.Id == t.ResellerId);
-    var p = db.Playlists.FirstOrDefault(x => x.Id == s!.PlaylistId && x.ClientId == s.ClientId);
-    // zone synchronisée : origine commune de la boucle ; les durées « jusqu'à la fin » sont fixées pour que tous les écrans bouclent pareil
-    var epoch = Helpers.SyncEpoch(db.Areas, s!);
-    var clientMedia = epoch == null ? null : db.Media.Where(m => m.ClientId == s!.ClientId).ToList();
-    // mur d'écrans : pas de widgets d'écran (position libre), même publiés avant l'entrée dans le mur
-    var inWall = Helpers.Wall(db.Areas, s!) != null;
-    List<PublishedItem> Sync(List<PublishedItem> l)
-    {
-        if (inWall) l = l.Where(i => i.Placement != "free").ToList();
-        return clientMedia == null ? l : Helpers.FixedForSync(l, clientMedia);
-    }
-    return Results.Ok(new
-    {
-        version = Helpers.Revision(p, s!, t, reseller, Helpers.SyncStamp(db.Areas, s!)),
-        serverNow = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-        sync = epoch is { } e ? new { epoch = Helpers.EpochMs(e) } : null,
-        // mur d'écrans : l'écran n'affiche que sa portion (colonne, ligne) de l'image de tout le mur
-        wall = Helpers.Wall(db.Areas, s!) is { } w ? new { cols = w.Cols, rows = w.Rows, col = w.Col, row = w.Row } : null,
-        items = Sync(s!.PublishedVersion > 0 ? s!.Published : p?.Published ?? new List<PublishedItem>()).Select(i => i.ForPlayer()),   // repli : écran jamais publié depuis le passage à la publication par écran
-        // découpage publié : tailles des zones (en %), côte à côte en paysage, empilées en portrait ; zones 2 et 3 avec leur propre liste
-        layout = new
-        {
-            id = ScreenLayouts.Find(s.PublishedVersion > 0 ? s.PublishedLayout : null).Id,
-            dir = s.Orientation == "portrait" ? "col" : "row",
-            sizes = ScreenLayouts.Find(s.PublishedVersion > 0 ? s.PublishedLayout : null).Sizes
-        },
-        zones = (s.PublishedVersion > 0 ? s.PublishedZones : new List<List<PublishedItem>>()).Select(z => Sync(z).Select(i => i.ForPlayer())),
-        screen = new { orientation = s!.Orientation, resolution = s.Resolution },
-        settings = new { timezone = t.Timezone, reloadHour = t.ReloadHour },
-        brand = BrandDto.From(reseller)
-    });
+    return Results.Ok(PlayerFeed.ForScreen(db, s!));
 }));
 
 // build : empreinte du code du player (wwwroot/player) ; un écran ouvert se recharge quand elle change (nouvelle version de Linkii).
@@ -590,14 +559,16 @@ api.MapGet("/data/{id:guid}", async (HttpRequest req, Guid id, JsonStore store, 
         var s = Auth(req, db);
         var gate = Gate(s, db);
         if (gate != null) return (gate, null!, null);
-        var list = s!.PublishedVersion > 0 ? s.Published.Concat(s.PublishedZones.SelectMany(z => z)).ToList()   // toutes les zones de l'écran
-                 : db.Playlists.FirstOrDefault(p => p.Id == s.PlaylistId && p.ClientId == s.ClientId)?.Published;
-        var pub = list?.FirstOrDefault(x => x.Id == id && x.AppId != null);
+        var pub = PlayerFeed.AllItems(db, s!).FirstOrDefault(x => x.Id == id && x.AppId != null);   // toutes les zones de l'écran
         return ((IResult?)null, db.Clients.First(c => c.Id == s!.ClientId), pub);
     });
     if (denied != null) return denied;
     if (published == null) return Results.NotFound();
+    return await AppData(published, tenant, catalog, providers, box);
+});
 
+static async Task<IResult> AppData(PublishedItem published, Tenant tenant, AppCatalog catalog, AppProviders providers, SecretBox box)
+{
     var app = catalog.Find(published.AppId);
     var provider = app is { Data: true } ? providers.Find(app.Provider) : null;
     if (provider == null) return Results.NotFound();
@@ -609,6 +580,48 @@ api.MapGet("/data/{id:guid}", async (HttpRequest req, Guid id, JsonStore store, 
         return data == null ? Results.NotFound() : Results.Ok(data);
     }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+}
+
+// ---------- Simulateur du back-office : le player en mode aperçu ----------
+// Jeton d'aperçu (en-tête X-Preview) créé par le back-office pour un écran, un mur ou une liste de lecture auxquels la personne a accès.
+// Mêmes données que l'écran, sans effet : l'écran n'est pas marqué « vu », aucune diffusion n'est comptée, aucun ordre n'est reçu.
+static (Dictionary<string, object?> Feed, List<PublishedItem> Items)? PreviewFeed(Db db, PreviewGrant g, Notifier notifier)
+{
+    if (!db.Clients.Any(c => c.Id == g.ClientId)) return null;
+    if (g.PlaylistId is { } pid)
+    {
+        var p = db.Playlists.FirstOrDefault(x => x.Id == pid && x.ClientId == g.ClientId);
+        if (p == null) return null;
+        var items = notifier.Items(db, p);   // état actuel de la liste, même non publié
+        return (PlayerFeed.ForPlaylist(db, p, items, g), items);
+    }
+    var s = g.WallZoneId is { } zid   // mur : le premier écran placé donne la publication et la grille
+        ? db.Screens.Where(x => x.ClientId == g.ClientId && x.ZoneId == zid && x.Token != null && x.WallPos != null).OrderBy(x => x.WallPos).FirstOrDefault()
+        : db.Screens.FirstOrDefault(x => x.Id == g.ScreenId && x.ClientId == g.ClientId && x.Token != null);
+    if (s == null) return null;
+    var feed = PlayerFeed.ForScreen(db, s, whole: g.WallZoneId != null);
+    feed["screen"] = new { orientation = s.Orientation, resolution = PlayerFeed.Resolution(s) };
+    return (feed, PlayerFeed.AllItems(db, s));
+}
+
+api.MapGet("/preview/playlist", (HttpRequest req, JsonStore store, PreviewGrants grants, Notifier notifier, AppCatalog catalog) =>
+{
+    if (grants.Find(req.Headers["X-Preview"]) is not { } g) return Results.Unauthorized();
+    return store.Read(db =>
+    {
+        if (PreviewFeed(db, g, notifier) is not { } f) return Results.NotFound();
+        f.Feed["meta"] = PlayerFeed.Meta(db, f.Items, catalog);   // noms et couleurs : frise du simulateur
+        return Results.Ok(f.Feed);
+    });
+});
+
+api.MapGet("/preview/data/{id:guid}", async (HttpRequest req, Guid id, JsonStore store, PreviewGrants grants, Notifier notifier, AppCatalog catalog, AppProviders providers, SecretBox box) =>
+{
+    if (grants.Find(req.Headers["X-Preview"]) is not { } g) return Results.Unauthorized();
+    var (tenant, published) = store.Read(db => (db.Clients.FirstOrDefault(c => c.Id == g.ClientId),
+        PreviewFeed(db, g, notifier)?.Items.FirstOrDefault(x => x.Id == id && x.AppId != null)));
+    if (tenant == null || published == null) return Results.NotFound();
+    return await AppData(published, tenant, catalog, providers, box);
 });
 
 app.MapHub<ScreenHub>("/hubs/screen");

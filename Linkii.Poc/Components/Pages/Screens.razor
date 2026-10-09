@@ -159,6 +159,10 @@
             <span><b>Mur d'écrans @wz.WallCols × @wz.WallRows</b> · liste « @(wpl?.Name ?? "aucune") »</span>
             <span class="zstate @(complete ? "ok" : "ko")">@(complete ? $"{online} sur {online} en ligne" : "Mur incomplet")</span>
             <div class="grow"></div>
+            @if (dissolveFor != wz.Id && inW.Any(x => x.WallPos != null))
+            {
+                <button type="button" class="btn ghost sm" title="Voir ce qu'affiche le mur" @onclick="() => simWall = wz.Id"><Ico Name="play" Size="14" /> Simuler le mur</button>
+            }
             @if (dissolveFor == wz.Id)
             {
                 <span class="confirm-line">Dissoudre le mur ? Ses écrans retournent dans « @(zones.FirstOrDefault(z => z.IsDefault)?.Name ?? Zone.DefaultName) » et gardent la liste.</span>
@@ -242,6 +246,7 @@
                             <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
                             <div class="kebab-menu" role="menu">
                                 <button type="button" role="menuitem" @onclick="() => Edit(sc)"><Ico Name="pencil-square" Size="16" /> Éditer</button>
+                                <button type="button" role="menuitem" @onclick="() => { menuFor = null; simScreen = sc.Id; }"><Ico Name="play" Size="16" /> Simuler</button>
                                 <button type="button" role="menuitem" @onclick="() => OpenRename(sc)"><Ico Name="edit" Size="16" /> Renommer</button>
                                 <button type="button" role="menuitem" @onclick="() => AskPublish(new() { sc.Id })"><Ico Name="upload" Size="16" /> Publier</button>
                                 @if (otherAreas.Count > 0) { <button type="button" role="menuitem" @onclick="() => OpenAreaMove(sc)"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
@@ -264,6 +269,7 @@
                     else { <div class="sc-sync"><span class="badge neutre" title="Aucun autre écran de la zone ne joue cette liste publiée : l'écran reste indépendant">Indépendant</span></div> }
                 }
             </div>
+            <div class="sc-vwrap">
             <button type="button" class="sc-visual" tabindex="-1" aria-hidden="true" @onclick="() => Edit(sc)">
                 <span class="sc-monitor @(sc.Orientation == "portrait" ? "portrait" : "")">
                     @* une vignette par zone du découpage, à ses proportions *@
@@ -282,6 +288,8 @@
                 <span class="sc-stand"></span>
                 @if (pending) { <span class="badge mise-a-jour sc-pending" title="Liste de lecture, widgets ou choix de liste de lecture modifiés depuis la dernière publication">À publier</span> }
             </button>
+            <button type="button" class="sc-sim" title="Voir ce qu'affiche l'écran" aria-label="Simuler « @sc.Name »" @onclick="() => simScreen = sc.Id"><Ico Name="play" Size="14" /> Simuler</button>
+            </div>
             <div class="sc-foot">
                 @if (ZoneOf(sc) is { IsWall: true } fw)
                 {
@@ -440,6 +448,15 @@
     <ScreenEditor ScreenId="eid" OnClose="CloseEdit" />
 }
 
+@if (simScreen is { } simId)
+{
+    <SimulatorDialog ScreenId="simId" OnClose="() => simScreen = null" />
+}
+else if (simWall is { } simZ)
+{
+    <SimulatorDialog WallZoneId="simZ" OnClose="() => simWall = null" />
+}
+
 @if (wallCreate)
 {
     <WallDialog ScreenIds="PickedInOrder()" OnClose="WallClosed" />
@@ -460,6 +477,7 @@ else if (wallEdit is { } wid)
     private bool showPair;
     private Timer? timer;
     private Guid? menuFor, editing;
+    private Guid? simScreen, simWall;   // simulateur ouvert : un écran, ou un mur entier
     private List<Screen>? deleting;   // écrans en attente de confirmation de suppression
     private string view = "cards";   // cards | list (mémorisé dans le navigateur)
 

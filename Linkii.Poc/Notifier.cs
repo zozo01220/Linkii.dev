@@ -42,7 +42,8 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
         if (ok) await NotifyScreen(screenId);
     }
 
-    private List<PublishedItem> Items(Db db, Playlist p) => p.Draft
+    /// <summary>Ce qu'une publication figerait de la playlist (aussi joué tel quel par le simulateur « Essayer »).</summary>
+    public List<PublishedItem> Items(Db db, Playlist p) => p.Draft
         .Select(i => (i, m: db.Media.FirstOrDefault(x => x.Id == i.MediaId && x.ClientId == p.ClientId)))   // jamais un média d'un autre client
         .Where(t => t.m != null && t.m.Status == null)   // une vidéo en cours de conversion n'est pas publiée
         .Select(t => Snapshot(db, t.i, t.m!))

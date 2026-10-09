@@ -2,7 +2,36 @@
 (function () {
   'use strict';
 
-  var LS = window.localStorage;
+  /* ---------- Mode aperçu (simulateur du back-office) ----------
+     /player/?preview=jeton : le player est affiché dans le back-office. Il lit les mêmes données que l'écran avec un jeton d'aperçu,
+     mais n'écrit rien dans la mémoire du navigateur (un écran appairé sur le même poste n'est pas touché), ne compte aucune diffusion,
+     n'accuse aucune réception et ne reçoit pas les ordres envoyés aux écrans. &at=ms : date et heure simulées. &sound=1 : son permis. */
+  var Q = location.search;
+  var PREVIEW = (/[?&]preview=([A-Za-z0-9_-]+)/.exec(Q) || [])[1] || null;
+  var SIM_AT = PREVIEW ? parseInt((/[?&]at=(\d+)/.exec(Q) || [])[1] || '0', 10) : 0;
+  var SOUND = !PREVIEW || /[?&]sound=1/.test(Q);
+  function memoryStore() {
+    var m = {};
+    return {
+      getItem: function (k) { return Object.prototype.hasOwnProperty.call(m, k) ? m[k] : null; },
+      setItem: function (k, v) { m[k] = String(v); },
+      removeItem: function (k) { delete m[k]; }
+    };
+  }
+  // Date simulée : toute la page (horloges, agendas, périodes de validité) vit à cette date, l'heure continue d'avancer.
+  if (SIM_AT) (function (D, delta) {
+    function SimDate() {
+      var a = [null].concat(Array.prototype.slice.call(arguments));
+      var d = arguments.length ? new (Function.prototype.bind.apply(D, a))() : new D(D.now() + delta);
+      return this instanceof SimDate ? d : d.toString();
+    }
+    SimDate.prototype = D.prototype;
+    SimDate.now = function () { return D.now() + delta; };
+    SimDate.parse = D.parse; SimDate.UTC = D.UTC;
+    window.Date = SimDate;
+  })(window.Date, SIM_AT - Date.now());
+
+  var LS = PREVIEW ? memoryStore() : window.localStorage;
   var CACHE = 'linkii-media-v1';
   var state = {
     screenId: LS.getItem('lk_screen'),
@@ -31,16 +60,25 @@
   function setOnline(ok) { netFails = ok ? 0 : netFails + 1; showOffline(); }
   function markOffline() { netFails = 2; showOffline(); }
   window.addEventListener("offline", markOffline);
-  window.addEventListener("online", function () { api("/api/player/version").catch(function () {}); });
+  window.addEventListener("online", function () { if (PREVIEW) refresh(); else api("/api/player/version").catch(function () {}); });
 
   /* ---------- HTTP ---------- */
+  var PLAYLIST_API = PREVIEW ? '/api/preview/playlist' : '/api/player/playlist';
+  var DATA_API = PREVIEW ? '/api/preview/data/' : '/api/data/';
   function api(path, opts) {
     opts = opts || {};
     opts.headers = opts.headers || {};
     if (state.token) opts.headers['X-Token'] = state.token;
+    if (PREVIEW) opts.headers['X-Preview'] = PREVIEW;
     var t0 = Date.now();
     return fetch(path, opts).then(function (r) { setOnline(true); return r; }, function (e) { setOnline(false); throw e; }).then(function (r) {
-      if (r.status === 401) { unpair(); throw new Error('401'); }
+      if (PREVIEW && (r.status === 401 || r.status === 404) && path === PLAYLIST_API) {   // aperçu expiré, ou écran / liste supprimés
+        $('suspended-title').textContent = r.status === 401 ? 'Aperçu expiré' : 'Plus rien à simuler';
+        $('suspended-text').textContent = r.status === 401 ? 'Fermez puis rouvrez le simulateur.' : "Cet écran ou cette liste n'existe plus.";
+        $('suspended').style.display = 'flex';
+        throw new Error(String(r.status));
+      }
+      if (r.status === 401 && !PREVIEW) { unpair(); throw new Error('401'); }
       if (r.status === 403) {   // client ou revendeur suspendu, ou essai gratuit terminé
         return r.json().catch(function () { return {}; }).then(function (d) {
           var trial = d && d.reason === 'trial';
@@ -123,7 +161,7 @@
   }
 
   /* ---------- Service worker (démarrage hors ligne) ---------- */
-  if ('serviceWorker' in navigator) {
+  if ('serviceWorker' in navigator && !PREVIEW) {
     navigator.serviceWorker.register('sw.js').catch(function () {});
   }
 
@@ -138,14 +176,14 @@
 
   // L'écran ne doit pas s'éteindre (nécessite https). Le verrou saute quand la page passe en arrière-plan : on le redemande au retour.
   function keepAwake() {
-    if (!navigator.wakeLock || document.visibilityState !== 'visible') return;
+    if (PREVIEW || !navigator.wakeLock || document.visibilityState !== 'visible') return;
     navigator.wakeLock.request('screen').catch(function () {});
   }
   keepAwake();
   document.addEventListener('visibilitychange', keepAwake);
 
   // Hors application installée, un toucher passe en plein écran (Android ; Safari iPhone ne le permet pas : il faut installer).
-  if (!installed() && ('ontouchstart' in window || navigator.maxTouchPoints > 0)) {
+  if (!PREVIEW && !installed() && ('ontouchstart' in window || navigator.maxTouchPoints > 0)) {
     document.addEventListener('click', function () {
       var el = document.documentElement, rq = el.requestFullscreen || el.webkitRequestFullscreen;
       if (rq && !document.fullscreenElement && !document.webkitFullscreenElement) {
@@ -160,7 +198,7 @@
   function showInstall() {
     var el = $('install');
     if (!el) return;
-    if (installed() || (!installEvent && !isIos())) { el.style.display = 'none'; return; }
+    if (PREVIEW || installed() || (!installEvent && !isIos())) { el.style.display = 'none'; return; }
     el.style.display = 'block';
     el.innerHTML = installEvent
       ? '<button type="button" id="installBtn" style="font:inherit;color:#fff;background:transparent;border:.25vmin solid #3B82C4;border-radius:.6vmin;padding:1.6vmin 3vmin">Installer en plein écran</button>'
@@ -171,7 +209,7 @@
       ev.prompt();
     };
   }
-  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); installEvent = e; showInstall(); });
+  window.addEventListener('beforeinstallprompt', function (e) { if (PREVIEW) return; e.preventDefault(); installEvent = e; showInstall(); });
   window.addEventListener('appinstalled', function () { installEvent = null; showInstall(); });
   showInstall();
 
@@ -181,7 +219,7 @@
     var vw = window.innerWidth, vh = window.innerHeight;
     var portrait = cfg.orientation === 'portrait';
     // écran physiquement dans l'autre sens que le format demandé : on pivote la scène
-    var rot = (portrait && vw > vh) ? 90 : (!portrait && vh > vw) ? -90 : 0;
+    var rot = PREVIEW ? 0 : (portrait && vw > vh) ? 90 : (!portrait && vh > vw) ? -90 : 0;   // aperçu : la fenêtre a déjà le format de l'écran
     var availW = rot ? vh : vw, availH = rot ? vw : vh;
     var W, H, phone = false;
     if (cfg.resolution && cfg.resolution !== 'auto') {
@@ -203,8 +241,11 @@
     var wall = cfg.wall, SW = W, SH = H, dx = 0, dy = 0;
     if (wall && wall.cols > 0 && wall.rows > 0) {
       SW = W * wall.cols; SH = H * wall.rows;
-      dx = W * (wall.cols - 1 - 2 * wall.col) / 2;
-      dy = H * (wall.rows - 1 - 2 * wall.row) / 2;
+      if (wall.whole) s = Math.min(availW / SW, availH / SH);   // simulateur du mur : tout le mur dans la fenêtre
+      else {
+        dx = W * (wall.cols - 1 - 2 * wall.col) / 2;
+        dy = H * (wall.rows - 1 - 2 * wall.row) / 2;
+      }
     }
     stage.style.width = SW + 'px';
     stage.style.height = SH + 'px';
@@ -283,7 +324,7 @@
 
   /* ---------- Cache des médias ---------- */
   function prefetch(items) {
-    if (!window.caches) return Promise.resolve();
+    if (!window.caches || PREVIEW) return Promise.resolve();   // aperçu : lecture en ligne, le cache d'un écran du même poste n'est pas touché
     return caches.open(CACHE).then(function (cache) {
       var urls = [];
       items.forEach(function (i) { if (i.url) urls.push(i.url); (i.urls || []).forEach(function (u) { if (urls.indexOf(u) === -1) urls.push(u); }); });   // apps de la médiathèque : tous leurs fichiers
@@ -309,8 +350,8 @@
   // Le média téléchargé est relu depuis le cache du navigateur sous forme de blob : lecture hors ligne fiable,
   // sans réseau ni service worker, pour les images comme pour les vidéos (tous formats convertis en MP4 H.264 par le serveur).
   function mediaSrc(url) {
-    var online = url + '?t=' + encodeURIComponent(state.token || '');   // repli en ligne : jeton de l'écran dans l'adresse
-    if (!window.caches || !window.URL || !URL.createObjectURL) return Promise.resolve({ src: online, revoke: function () {} });
+    var online = PREVIEW ? url : url + '?t=' + encodeURIComponent(state.token || '');   // repli en ligne : jeton de l'écran dans l'adresse (aperçu : session du back-office)
+    if (PREVIEW || !window.caches || !window.URL || !URL.createObjectURL) return Promise.resolve({ src: online, revoke: function () {} });
     return caches.open(CACHE).then(function (c) { return c.match(url); }).then(function (hit) {
       if (!hit) return { src: online, revoke: function () {} };
       return hit.blob().then(function (b) {
@@ -325,7 +366,8 @@
   function refresh() {
     if (refreshing) return;
     refreshing = true;
-    api('/api/player/playlist').then(function (pl) {
+    api(PLAYLIST_API).then(function (pl) {
+      if (PREVIEW) previewPrepare(pl);
       applyBrand(pl.brand);
       if (state.current && pl.version === state.current.version && !state.pending) return prefetch(pl.items);   // même version : on re-télécharge seulement ce que le navigateur aurait purgé du cache
       if (state.pending && pl.version === state.pending.version) return;
@@ -338,7 +380,7 @@
   }
 
   function ack() {
-    if (!state.current || state.acked === state.current.version) return;
+    if (PREVIEW || !state.current || state.acked === state.current.version) return;
     var v = state.current.version, d = deviceSize();
     api('/api/player/ack', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: v, w: d.w, h: d.h }) })
       .then(function () { state.acked = v; LS.setItem('lk_acked', v); }).catch(function () {});
@@ -424,7 +466,7 @@
       if (!compact) setTimeout(function () { fitList(el); }, 0);
     };
     var load = function () {
-      api('/api/data/' + item.dataId).then(function (d) { data = d; LS.setItem(key, JSON.stringify(d)); draw(); })
+      api(DATA_API + item.dataId).then(function (d) { data = d; LS.setItem(key, JSON.stringify(d)); draw(); })
         .catch(function () { draw(); });
     };
     draw(); load();
@@ -571,7 +613,7 @@
         try { data = JSON.parse(LS.getItem(key) || 'null'); } catch (e) {}
         var run = function (fresh) { try { draw(data, fresh === true); } catch (e) {} };   // fresh : données tout juste reçues du serveur (et non relues du cache)
         var load = function () {
-          api('/api/data/' + item.dataId)
+          api(DATA_API + item.dataId)
             .then(function (d) { data = d; try { LS.setItem(key, JSON.stringify(d)); } catch (e) {} run(true); })
             .catch(function () { run(); });
         };
@@ -694,7 +736,7 @@
     if (!p) return;
     var sec = Math.round((Date.now() - p.start) / 1000);
     delete playing[key];
-    if (sec < 1) return;
+    if (sec < 1 || PREVIEW) return;   // aperçu : aucune diffusion comptée
     var q = loadPlays();
     q.push({ mediaId: p.mediaId, appId: p.appId, start: p.start, sec: sec });
     if (q.length > 2000) q = q.slice(q.length - 2000);
@@ -716,6 +758,7 @@
   /* ---------- Diffusion (double buffer) ---------- */
   function next() {
     clearTimeout(state.timer); state.timer = null;
+    if (state.paused) return;   // simulateur en pause
 
     if (state.pending) {            // remplacement entre deux contenus
       state.current = state.pending; state.pending = null; state.index = 0;
@@ -733,11 +776,13 @@
       playEnd();
       $('idle').style.display = hasOverlay ? 'none' : 'flex';
       state.timer = setTimeout(next, 5000);
+      previewReport();
       return;
     }
     $('idle').style.display = 'none';
 
-    var epoch = pl.sync && slides.length > 1 ? pl.sync.epoch : null;   // zone synchronisée : le contenu et sa durée se déduisent de l'heure commune
+    // zone synchronisée : le contenu et sa durée se déduisent de l'heure commune (simulateur en lecture libre : ordre de la liste)
+    var epoch = pl.sync && slides.length > 1 && !state.free ? pl.sync.epoch : null;
     var item;
     if (epoch != null) {
       var pick = syncPick(slides, epoch);
@@ -753,6 +798,8 @@
     if (slides.length === 1 && state.shownItem === item) {
       playStart(item);   // un tour de plus : une diffusion de plus
       state.timer = setTimeout(next, Math.max(1, item.durationSec) * 1000);
+      state.slideEnd = Date.now() + Math.max(1, item.durationSec) * 1000;
+      previewReport();
       return;
     }
 
@@ -771,10 +818,12 @@
       var ms = epoch != null ? syncLeft(slides, item, epoch) : Math.max(1, item.durationSec) * 1000;
       // durationMode « content » : l'app décide (fin de la vidéo) ; durationSec est le plafond de sécurité
       state.timer = setTimeout(next, ms);
+      state.slideEnd = Date.now() + ms;
+      previewReport();
     }
     function skip() { if (!shown) { shown = true; state.timer = setTimeout(next, 1000); } }
 
-    var origin = epoch != null ? pick.start : pl.sync ? pl.sync.epoch : null;   // un seul contenu synchronisé : il se déroule depuis l'origine de la zone
+    var origin = epoch != null ? pick.start : pl.sync && !state.free ? pl.sync.epoch : null;   // un seul contenu synchronisé : il se déroule depuis l'origine de la zone
     renderSlide(layer, item, slideOpts(item, origin,
       function () { if (slides.length > 1 && state.shownItem === item) next(); else if (slides.length <= 1 && state.shownItem === item) restartYoutube(layer); },
       function () { if (state.shownItem === item) next(); }
@@ -953,7 +1002,75 @@
     nightlyReload();
   }
 
+  /* ---------- Simulateur : état envoyé au back-office, commandes reçues (pause, contenu choisi, retour au direct) ---------- */
+  // Son coupé tant que le simulateur ne l'a pas activé (&sound=1) : vidéos et YouTube démarrent muets.
+  function previewPrepare(pl) {
+    if (SOUND) return;
+    var lists = [pl.items || []].concat(pl.zones || []);
+    for (var i = 0; i < lists.length; i++)
+      for (var k = 0; k < lists[i].length; k++) { var s = lists[i][k].settings; if (s && s.sound) s.sound = 'false'; }
+  }
+
+  function previewReport() {
+    if (!PREVIEW || window.parent === window) return;
+    var pl = state.current, meta = (pl && pl.meta) || {};
+    var all = pl ? pl.items.filter(isSlide) : [], slides = all.filter(isValidNow), item = state.shownItem;
+    var sync = !!(pl && pl.sync && slides.length > 1);
+    function info(i) {
+      var m = meta[i.id] || {};
+      return { name: m.name || 'Contenu', color: m.color || '#5A6B80', sec: i.durationSec, content: i.durationMode === 'content', from: i.validFrom || null, to: i.validTo || null };
+    }
+    window.parent.postMessage({
+      lk: 'sim', ev: 'state', items: slides.map(info), skipped: all.filter(function (i) { return !isValidNow(i); }).map(info),
+      index: item ? slides.indexOf(item) : -1,
+      left: state.paused ? state.pausedLeft : Math.max(0, (state.slideEnd || 0) - Date.now()),
+      dur: item ? Math.max(1, item.durationSec) * 1000 : 0,
+      synced: sync, live: sync && !state.free, paused: !!state.paused, today: todayIso()
+    }, location.origin);
+  }
+
+  function mediaIn(layerId, action) {
+    var vs = $(layerId).querySelectorAll('video');
+    for (var i = 0; i < vs.length; i++) { try { var p = vs[i][action](); if (p && p.catch) p.catch(function () {}); } catch (e) {} }
+  }
+
+  function previewControl(e) {
+    if (e.origin !== location.origin || !e.data || e.data.lk !== 'sim' || !state.current) return;
+    var c = e.data.cmd, slides = state.current.items.filter(isSlide).filter(isValidNow);
+    if (c === 'pause' && !state.paused) {   // l'écran, lui, continue : le simulateur passe en lecture libre
+      state.pausedLeft = Math.max(1, (state.slideEnd || 0) - Date.now());
+      state.paused = true; state.free = true;
+      clearTimeout(state.timer); state.timer = null;
+      mediaIn(state.active, 'pause');
+    } else if (c === 'play' && state.paused) {
+      state.paused = false;
+      mediaIn(state.active, 'play');
+      state.slideEnd = Date.now() + state.pausedLeft;
+      state.timer = setTimeout(next, state.pausedLeft);
+    } else if ((c === 'goto' || c === 'next' || c === 'prev') && slides.length) {
+      var cur = slides.indexOf(state.shownItem);
+      var i = c === 'goto' ? +e.data.index : cur + (c === 'next' ? 1 : -1);
+      state.index = ((i % slides.length) + slides.length) % slides.length;
+      state.free = true; state.paused = false; state.shownItem = null;
+      next();
+    } else if (c === 'live') {   // retour au direct : même contenu, au même moment, que l'écran
+      state.free = false; state.paused = false; state.shownItem = null;
+      next();
+    }
+    previewReport();
+  }
+
+  function startPreview() {
+    document.body.style.cursor = 'default';
+    $('idle').querySelector('h1').textContent = 'Rien à afficher';
+    $('idle').querySelector('p').textContent = 'Aucun contenu à diffuser à ce moment.';
+    window.addEventListener('message', previewControl);
+    layout();
+    refresh();
+    setInterval(refresh, 20000);   // pas d'ordres reçus : les publications sont reprises en relisant régulièrement
+  }
+
   /* ---------- Démarrage ---------- */
   layout();
-  if (state.token) startPlayback(); else startPairing();
+  if (PREVIEW) startPreview(); else if (state.token) startPlayback(); else startPairing();
 })();
