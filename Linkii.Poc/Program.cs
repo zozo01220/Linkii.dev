@@ -281,7 +281,7 @@ app.MapGet("/google/connect", (HttpContext ctx, GoogleAuth google) =>
 });
 app.MapGet("/google/callback", async (HttpRequest req, GoogleAuth google, ExternalLogin sso) =>
     Results.Redirect(sso.Owns(req.Query["state"])   // « Continuer avec Google » de la page de connexion : même adresse de retour
-        ? await sso.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])
+        ? await sso.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"], req.Query["error_description"])
         : await google.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
 
 // Compte Microsoft : « Se connecter avec Microsoft » depuis Intégrations › Microsoft 365 (?for=calendar), OneDrive et SharePoint (?for=drive)
@@ -298,15 +298,15 @@ app.MapGet("/microsoft/connect", (HttpContext ctx, MicrosoftAuth microsoft) =>
 });
 app.MapGet("/microsoft/callback", async (HttpRequest req, MicrosoftAuth microsoft, ExternalLogin sso) =>
     Results.Redirect(sso.Owns(req.Query["state"])   // « Continuer avec Microsoft » de la page de connexion : même adresse de retour
-        ? await sso.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])
+        ? await sso.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"], req.Query["error_description"])
         : await microsoft.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"], req.Query["error_description"])));
 
 // ---------- Création de compte et connexion : Microsoft / Google / LinkedIn / GitHub, confirmation de l'adresse e-mail ----------
 
 app.MapGet("/linkedin/callback", async (HttpRequest req, ExternalLogin sso) =>
-    Results.Redirect(await sso.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
+    Results.Redirect(await sso.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"], req.Query["error_description"])));
 app.MapGet("/github/callback", async (HttpRequest req, ExternalLogin sso) =>
-    Results.Redirect(await sso.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
+    Results.Redirect(await sso.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"], req.Query["error_description"])));
 
 // Départ : ?mode=signup (créer un espace) ou login. Le retour passe par /google/callback ou /microsoft/callback, puis /login/sso/finish.
 app.MapGet("/login/sso/{provider}", (HttpContext ctx, string provider, ExternalLogin sso) =>
@@ -346,8 +346,10 @@ app.MapGet("/login/sso/finish", async (HttpContext ctx, string? t, ExternalLogin
         sso.Consume(t);
         return Results.Redirect(await SessionCookie.SignIn(ctx, store, uid));
     }
-    if (problem == "nolink" && ticket.Mode == ExternalLogin.SignupMode && host is { Active: true, AllowSelfSignup: true })
-        return Results.Redirect("/login?signup=1&ext=" + Uri.EscapeDataString(t!));   // nouvel espace : le ticket reste valable pour la dernière étape
+    // Aucun compte pour cette identité : les mêmes boutons servent à se connecter et à s'inscrire. Si l'inscription libre est ouverte,
+    // on passe à la dernière étape de la création d'un espace (le ticket reste valable) ; sinon, message « aucun espace ».
+    if (problem == "nolink" && host is { Active: true, AllowSelfSignup: true })
+        return Results.Redirect("/login?signup=1&ext=" + Uri.EscapeDataString(t!));
     sso.Consume(t);
     return Results.Redirect($"/login?sso={problem}&p={id.Provider}");
 });

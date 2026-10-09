@@ -68,12 +68,20 @@ public class ExternalLogin(IConfiguration config, IHttpClientFactory httpFactory
     public bool Owns(string? state) => !string.IsNullOrEmpty(state) && pending.ContainsKey(state);
 
     /// <summary>Retour du fournisseur : rend l'adresse où renvoyer le navigateur (ticket sur le domaine d'origine, ou page de connexion avec l'erreur).</summary>
-    public async Task<string> CompleteAsync(string? state, string? code, string? error)
+    /// errorDescription : explication du fournisseur (ex. LinkedIn : produit « Sign In with LinkedIn using OpenID Connect » non ajouté), journalisée et affichée.
+    public async Task<string> CompleteAsync(string? state, string? code, string? error, string? errorDescription = null)
     {
         if (string.IsNullOrEmpty(state) || !pending.TryRemove(state, out var pd) || pd.Expires < DateTime.UtcNow) return "/login?sso=expired";
-        var back = pd.Origin + "/login" + (pd.Mode == SignupMode ? "?signup=1&sso=" : "?sso=");
-        if (!string.IsNullOrEmpty(error) || string.IsNullOrEmpty(code)) return back + "denied";
+        var back = pd.Origin + "/login" + (pd.Mode == SignupMode ? "?signup=1&p=" : "?p=") + pd.Provider + "&sso=";
         var p = Find(pd.Provider)!;
+        if (!string.IsNullOrEmpty(error) || string.IsNullOrEmpty(code))
+        {
+            // Annulation par la personne, ou refus du fournisseur (application mal configurée) : le motif est gardé pour le diagnostic.
+            if (error is null or "" or "access_denied" or "user_cancelled_login" or "user_cancelled_authorize") return back + "denied";
+            log.LogWarning("Connexion {Provider} refusée par le fournisseur : {Error} {Description}", p.Id, error, errorDescription);
+            var why = string.IsNullOrWhiteSpace(errorDescription) ? error : error + " : " + errorDescription;
+            return back + "refused&why=" + Uri.EscapeDataString(why.Length > 200 ? why[..200] : why);
+        }
         try
         {
             var form = new Dictionary<string, string>

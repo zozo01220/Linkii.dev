@@ -24,10 +24,6 @@ else
             <h1>Bon retour</h1>
             <p class="lead">Connectez-vous à votre espace @Host.DisplayName.</p>
             @if (ssoError != null && !signup) { <div class="err">@ssoError</div> }
-            @if (!signup && SsoQuery == "nolink" && Host.AllowSelfSignup && ProviderQuery is SignupSources.Google or SignupSources.Microsoft or SignupSources.LinkedIn or SignupSources.GitHub)
-            {
-                <p class="auth-alt left"><a href="/login/sso/@ProviderQuery?mode=signup" data-enhance-nav="false">Créer un espace avec mon compte @SignupSources.Label(ProviderQuery)</a></p>
-            }
 
             <EditForm Model="Credentials" FormName="login" OnValidSubmit="DoLogin" method="post" class="auth-form">
                 <label>E-mail</label>
@@ -46,7 +42,7 @@ else
         {
             <aside class="split-side" aria-label="Connexion rapide">
                 <h2>Connexion rapide</h2>
-                <p>Utilisez un compte que vous avez déjà.</p>
+                <p>@(Host.AllowSelfSignup ? "Connectez-vous avec un compte que vous avez déjà. Pas encore d'espace ? Il est créé en une étape." : "Connectez-vous avec un compte que vous avez déjà.")</p>
                 <SsoButtons Mode="login" WithGoogle="@ShowGoogle" WithMicrosoft="@ShowMicrosoft" WithLinkedIn="@ShowLinkedIn" WithGitHub="@ShowGitHub" />
             </aside>
         }
@@ -78,7 +74,7 @@ else
                     @if (error != null) { <div class="err">@error</div> }
                     <button class="btn" type="submit" data-needs-terms>Créer mon espace</button>
                 </EditForm>
-                <p class="auth-alt"><a href="/login?signup=1" data-enhance-nav="false">Utiliser un autre compte</a></p>
+                <p class="auth-alt"><a href="/login" data-enhance-nav="false">Utiliser un autre compte</a></p>
             }
             else
             {
@@ -87,11 +83,6 @@ else
                     <span class="trial-tag">Essai gratuit · @trialDays jours · sans carte bancaire</span>
                 </div>
 
-                @if (anySso)
-                {
-                    <SsoButtons Mode="signup" Icons="true" WithGoogle="@ShowGoogle" WithMicrosoft="@ShowMicrosoft" WithLinkedIn="@ShowLinkedIn" WithGitHub="@ShowGitHub" />
-                    <div class="auth-or">ou avec votre e-mail</div>
-                }
                 @if (ssoError != null) { <div class="err">@ssoError</div> }
 
                 <EditForm Model="EmailSignup" FormName="signup" OnSubmit="DoSignup" method="post" class="auth-form" id="signup-form">
@@ -124,6 +115,7 @@ else
     [SupplyParameterFromQuery(Name = "ext")] private string? Ext { get; set; }
     [SupplyParameterFromQuery(Name = "sso")] private string? SsoQuery { get; set; }
     [SupplyParameterFromQuery(Name = "p")] private string? ProviderQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "why")] private string? WhyQuery { get; set; }
 
     private Reseller? Host => Http?.Items["reseller"] as Reseller;
     private bool signup => SignupQuery != null && Host is { Active: true, AllowSelfSignup: true };
@@ -163,7 +155,7 @@ else
         trialDays = Store.Read(d => d.Platform.TrialDays);
         if (signup && Ext != null)
         {
-            ticket = Sso.Peek(Ext) is { Mode: ExternalLogin.SignupMode } t ? t : null;
+            ticket = Sso.Peek(Ext);   // connexion ou inscription : les mêmes boutons servent aux deux
             if (ticket == null) ssoError = "La connexion a expiré. Recommencez.";
             else if (SsoSignup == null)
             {
@@ -177,9 +169,10 @@ else
         {
             null => null,
             "denied" => "Connexion annulée.",
+            "refused" => $"{provider} a refusé la connexion" + (string.IsNullOrWhiteSpace(WhyQuery) ? "." : $" ({WhyQuery})."),
             "noemail" => $"{provider} n'a pas transmis d'adresse e-mail vérifiée. Utilisez votre e-mail.",
             "expired" => "La connexion a expiré. Recommencez.",
-            "nolink" => $"Aucun espace n'est associé à ce compte {provider}." + (Host?.AllowSelfSignup == true ? " Créez un espace ou connectez-vous avec votre e-mail." : ""),
+            "nolink" => $"Aucun espace n'est associé à ce compte {provider}. Demandez une invitation à votre administrateur ou connectez-vous avec votre e-mail.",   // inscription libre fermée
             "taken" => "Cette adresse a déjà un espace : connectez-vous avec votre e-mail et votre mot de passe.",
             "suspended" => "Cet espace est suspendu. Contactez votre revendeur.",
             "unconfigured" => "Cette connexion n'est pas encore disponible sur ce serveur. Utilisez votre e-mail.",
