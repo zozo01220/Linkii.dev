@@ -11,6 +11,7 @@ public class Db
     public List<Playlist> Playlists { get; set; } = new();
     public List<AccessLogEntry> AccessLog { get; set; } = new();
     public List<AppInstall> AppInstalls { get; set; } = new();   // apps du catalogue ajoutées par chaque client
+    public List<Area> Areas { get; set; } = new();               // aires de gestion des clients
 
     /// <summary>Ancien format mono-client (avant le multi-tenant) : lu une fois pour migration, jamais réécrit.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
@@ -20,11 +21,26 @@ public class Db
 /// <summary>Toute donnée qui appartient à un client : isolée par le filtre global de <see cref="ScopedList{T}"/>.</summary>
 public interface IClientOwned { Guid ClientId { get; set; } }
 
+/// <summary>Donnée rangée dans une aire de gestion (écran, liste de lecture, média) : partagée par les membres de l'aire, invisible des autres aires.</summary>
+public interface IAreaOwned { Guid AreaId { get; set; } }
+
 public static class Roles
 {
     public const string PlatformAdmin = "PlatformAdmin";   // équipe Linkii : console administrateur
     public const string ResellerAdmin = "ResellerAdmin";   // revendeur : clients, marque, équipe
-    public const string ClientAdmin = "ClientAdmin";       // client du revendeur : back-office
+    public const string ClientAdmin = "ClientAdmin";       // administrateur de l'organisation (client du revendeur) : toutes les aires, réglages
+    public const string ClientMember = "ClientMember";     // membre de l'organisation : un rôle par aire (User.AreaRoles)
+
+    public static bool IsClient(string role) => role is ClientAdmin or ClientMember;
+}
+
+/// <summary>Rôle d'un membre dans une aire de gestion.</summary>
+public static class AreaRoles
+{
+    public const string Admin = "admin";   // contenus de l'aire, zones et membres de l'aire
+    public const string User = "user";     // contenus de l'aire (écrans, listes de lecture, médias) : modifier et publier
+
+    public static string Label(string? role) => role == Admin ? "Administrateur" : role == User ? "Utilisateur" : "Aucun accès";
 }
 
 /// <summary>Le revendeur : l'entreprise qui revend Linkii sous sa marque. Résolu à partir du nom de domaine de chaque requête.</summary>
@@ -60,10 +76,47 @@ public class User
     public string PasswordHash { get; set; } = "";
     public string Role { get; set; } = Roles.ClientAdmin;
     public Guid? ResellerId { get; set; }   // null pour l'équipe Linkii
-    public Guid? ClientId { get; set; }     // seulement pour un administrateur de client
+    public Guid? ClientId { get; set; }     // seulement pour un compte d'organisation (administrateur ou membre)
     public bool Disabled { get; set; }
     /// <summary>Mot de passe provisoire (envoyé par e-mail) : à remplacer à la prochaine connexion.</summary>
     public bool MustChangePassword { get; set; }
+
+    /// <summary>Membre (<see cref="Roles.ClientMember"/>) : son rôle dans chaque aire. Un administrateur de l'organisation a accès à toutes les aires.</summary>
+    public List<AreaRole> AreaRoles { get; set; } = new();
+    /// <summary>Dernière aire ouverte, par organisation (l'équipe Linkii et les revendeurs visitent plusieurs organisations).</summary>
+    public Dictionary<Guid, Guid> LastAreas { get; set; } = new();
+    public DateTime? CreatedUtc { get; set; }
+    public DateTime? LastLoginUtc { get; set; }
+    public DateTime? LastActiveUtc { get; set; }   // dernière requête, mise à jour au plus une fois par heure : utilisateurs actifs sur 30 jours
+
+    /// <summary>Invité qui ne s'est encore jamais connecté.</summary>
+    public bool IsInvited => MustChangePassword && LastLoginUtc == null;
+    public bool ActiveSince(DateTime utc) => !Disabled && (LastActiveUtc ?? LastLoginUtc) >= utc;
+    public string? RoleIn(Guid areaId) => AreaRoles.FirstOrDefault(r => r.AreaId == areaId)?.Role;
+    public string Label => string.IsNullOrWhiteSpace(Name) ? Email : Name;
+}
+
+public class AreaRole
+{
+    public Guid AreaId { get; set; }
+    public string Role { get; set; } = Linkii.Poc.AreaRoles.User;
+}
+
+/// <summary>Aire de gestion d'une organisation : ses écrans, listes de lecture et médias, partagés par ses membres. Les zones classent ses écrans.</summary>
+public class Area : IClientOwned
+{
+    public Guid ClientId { get; set; }
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Name { get; set; } = "";
+    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+    public List<Zone> Zones { get; set; } = new();
+}
+
+/// <summary>Zone d'une aire : sert seulement à classer les écrans (aucun effet sur les droits).</summary>
+public class Zone
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Name { get; set; } = "";
 }
 
 /// <summary>Journal des entrées dans l'espace d'un client (assistance).</summary>
@@ -100,9 +153,6 @@ public class Tenant
     public string DefaultResolution { get; set; } = "1920x1080";
 
     // Connexion Canva (Connect API) : jeton de renouvellement chiffré (SecretBox), à usage unique (renouvelé à chaque emploi).
-    public string CanvaClientId { get; set; } = "";       // intégration Canva de l'organisation (portail développeurs)
-    public string CanvaClientSecret { get; set; } = "";   // chiffré (SecretBox)
-    public string CanvaRedirectUri { get; set; } = "";
     public string CanvaRefreshToken { get; set; } = "";
     public string CanvaUser { get; set; } = "";
     public DateTime? CanvaConnectedUtc { get; set; }
@@ -183,10 +233,12 @@ public class LegacyTenant : Tenant
     public string PasswordHash { get; set; } = "";
 }
 
-public class Screen : IClientOwned
+public class Screen : IClientOwned, IAreaOwned
 {
     public Guid ClientId { get; set; }
     public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid AreaId { get; set; }
+    public Guid? ZoneId { get; set; }          // zone de son aire (classement seulement)
     public string Name { get; set; } = "";
     public string? PairingCode { get; set; }   // non null tant que l'écran n'est pas appairé
     public string? Token { get; set; }         // non null une fois appairé
@@ -283,10 +335,11 @@ public class ScreenWidget
     public double Scale { get; set; } = 1;               // 0,6 petit · 1 moyen · 1,5 grand
 }
 
-public class MediaItem : IClientOwned
+public class MediaItem : IClientOwned, IAreaOwned
 {
     public Guid ClientId { get; set; }
     public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid AreaId { get; set; }          // vide : fichier d'un dossier Drive, commun à toutes les aires (les connexions sont celles de l'organisation)
     public string Name { get; set; } = "";
     public string Type { get; set; } = "image";   // image | video | app
     public string? FileName { get; set; }
@@ -303,10 +356,11 @@ public class MediaItem : IClientOwned
     public DateTime? AddedUtc { get; set; }
 }
 
-public class Playlist : IClientOwned
+public class Playlist : IClientOwned, IAreaOwned
 {
     public Guid ClientId { get; set; }
     public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid AreaId { get; set; }
     public string Name { get; set; } = "";
     public int PublishedVersion { get; set; }                      // ancien instantané au niveau de la playlist (écrans jamais publiés depuis)
     public bool DraftChanged { get; set; }

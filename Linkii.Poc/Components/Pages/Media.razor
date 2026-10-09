@@ -2,6 +2,7 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
 @implements IDisposable
 @inject MediaLibrary Library
+@inject TenantStore Store
 @inject Toaster Toast
 
 <div class="page-head">
@@ -28,6 +29,7 @@
         </label>
         @if (picked.Count > 0)
         {
+            @if (canMove) { <button class="btn ghost sm" @onclick="() => bulkMove = true"><Ico Name="move" Size="14" /> Déplacer vers une autre aire…</button> }
             <button class="btn danger sm" @onclick="() => confirmDelete = picked.ToList()"><Ico Name="trash" Size="14" /> Supprimer</button>
         }
         <div class="seg" role="tablist" aria-label="Type de fichier">
@@ -82,6 +84,7 @@
                     else if (item.Status == "failed") { <Ico Name="x" Size="26" /><small class="lib-proc" title="@item.Error">@item.Error</small> }
                     else { <MediaThumb Media="item" /> }
                     @if (!MediaLibrary.IsDrive(item)) { <input type="checkbox" class="sc-check lib-check" checked="@on" @onchange="() => Toggle(item.Id)" aria-label="Sélectionner @item.Name" /> }
+                    else { <input type="checkbox" class="sc-check lib-check" disabled title="Fichier synchronisé depuis un Drive : commun à toutes les aires, ni déplaçable ni supprimable d'ici" aria-label="@item.Name ne peut pas être sélectionné" /> }
                     <span class="lib-type" title="@(item.Type == "video" ? "Vidéo" : "Image")"><Ico Name="@(item.Type == "video" ? "video" : "image")" Size="15" /></span>
                     @if (MediaLibrary.IsDrive(item))
                     {
@@ -111,6 +114,10 @@
                                     <button type="button" role="menuitem" @onclick="() => OpenRename(item)"><Ico Name="edit" Size="16" /> Renommer</button>
                                 }
                                 @if (item.FileName != null) { <a role="menuitem" href="/media/@item.FileName" download="@item.Name" @onclick="() => menuFor = null"><Ico Name="download" Size="16" /> Télécharger</a> }
+                                @if (!MediaLibrary.IsDrive(item) && canMove)
+                                {
+                                    <button type="button" role="menuitem" @onclick="() => { menuFor = null; moving = item; }"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button>
+                                }
                                 @if (!MediaLibrary.IsDrive(item))
                                 {
                                     <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; confirmDelete = new() { item.Id }; }"><Ico Name="trash" Size="16" /> Supprimer</button>
@@ -122,6 +129,15 @@
             </div>
         }
     </div>
+}
+
+@if (moving is { } mv)
+{
+    <AreaMoveDialog Kind="media" Items="new() { (mv.Id, mv.Name) }" OnClose="moved => { moving = null; if (moved) Reload(); }" />
+}
+@if (bulkMove)
+{
+    <AreaMoveDialog Kind="media" Items="files.Where(f => picked.Contains(f.Id)).Select(f => (f.Id, f.Name)).ToList()" OnClose="moved => { bulkMove = false; if (moved) Reload(); }" />
 }
 
 @if (renaming != null)
@@ -199,8 +215,13 @@
         }), null, 2000, 2000);
     }
 
+    private MediaItem? moving;
+    private bool bulkMove;
+    private bool canMove;  // administrateur de l'organisation, avec au moins une autre aire
+
     private void Reload()
     {
+        canMove = Store.Read(d => d.Access.IsOrgAdmin && d.Area != null && d.Access.OrgAreaCount > 1);
         files = Library.Files();
         drives = Library.DriveFolders();
         picked.IntersectWith(files.Where(f => !MediaLibrary.IsDrive(f)).Select(f => f.Id));

@@ -76,9 +76,10 @@
                 {
                     var wid = w;
                     <div class="wg-item @(selected == wid.Id ? "sel" : "")" data-wid="@wid.Id" tabindex="0" role="button"
-                         aria-label="@Label(wid) — flèches pour déplacer"
+                         aria-label="@Label(wid) — flèches pour déplacer, Entrée pour régler"
                          style="left:@Pct(wid.X);top:@Pct(wid.Y);--s:@wid.Scale.ToString(Inv);@TextStyle(wid)"
-                         @onclick="() => Select(wid)" @onfocus="() => Select(wid)">
+                         @onclick="() => OpenSettings(wid)" @onfocus="() => selected = wid.Id" @onkeydown="e => OnItemKey(e, wid)">
+                        <button type="button" class="wg-gear" title="Régler « @Label(wid) »" aria-label="Régler « @Label(wid) »" @onclick="() => OpenSettings(wid)" @onclick:stopPropagation="true"><Ico Name="sliders" Size="14" /></button>
                         @if (wid.AppId == "clock")
                         {
                             <div class="wg-time">@ClockText(wid)</div>
@@ -99,6 +100,32 @@
                                 <div class="wg-tx-b">@body</div>
                             }
                         }
+                        else if (wid.AppId == "qrcode")
+                        {
+                            @* même tracé que sur l'écran (calculé par QrCodes) *@
+                            if (QrCodes.Build(wid.Settings.GetValueOrDefault("content") is { Length: > 0 } qc ? qc : "https://linkii.ch") is { } qr)
+                            {
+                                <svg class="wg-qr" viewBox="0 0 @qr.Size @qr.Size" shape-rendering="crispEdges" aria-hidden="true"><path d="@qr.Path" fill="#0B1F3A" /></svg>
+                            }
+                            @if (wid.Settings.GetValueOrDefault("label") is { Length: > 0 } ql) { <div class="wg-ql">@ql</div> }
+                        }
+                        else if (wid.AppId == "countdown")
+                        {
+                            var cd = Countdown.Compute(DateTime.Now, wid.Settings.GetValueOrDefault("date"), wid.Settings.GetValueOrDefault("format") == "detailed", wid.Settings.GetValueOrDefault("after") != "keep", wid.Settings.GetValueOrDefault("doneText"));
+                            <div class="wg-cd @(cd.Hidden ? "off" : "")">
+                                <div class="wg-cd-l">@(wid.Settings.GetValueOrDefault("label") is { Length: > 0 } cl ? cl : "Intitulé ?")</div>
+                                <div class="wg-cd-n @(cd.Unit.Length == 0 ? "txt" : "")">@cd.Big</div>
+                                @if (cd.Unit.Length > 0) { <div class="wg-cd-u">@cd.Unit</div> }
+                                @if (cd.Hidden) { <div class="wg-cd-u">(masqué : date passée)</div> }
+                            </div>
+                        }
+                        else if (wid.AppId == "quote")
+                        {
+                            var qs = Quotes.Parse(wid.Settings.GetValueOrDefault("quotes"));
+                            var q = qs.Count == 0 ? ("Votre citation…", (string?)null) : qs[Quotes.Index(DateTime.Now, wid.Settings.GetValueOrDefault("mode"), int.TryParse(wid.Settings.GetValueOrDefault("interval"), out var qi) ? qi : 30, qs.Count)];
+                            <div class="wg-q-t">“@q.Item1”</div>
+                            @if (q.Item2 is { Length: > 0 }) { <div class="wg-q-a">— @q.Item2</div> }
+                        }
                         else
                         {
                             @* même mise en page que le widget de l'écran (apps.js « weather ») ; valeurs d'exemple *@
@@ -110,7 +137,7 @@
                     </div>
                 }
             </div>
-            <p class="hint" style="margin-top:8px">Aperçu à l'échelle. Faites glisser un widget pour le placer ; au clavier, flèches (Maj + flèches : pas de 5 %).</p>
+            <p class="hint" style="margin-top:8px">Aperçu à l'échelle. Faites glisser un widget de la liste vers l'écran, ou déplacez-le sur l'aperçu ; cliquez dessus pour le régler. Au clavier : flèches (Maj + flèches : pas de 5 %), Entrée pour les réglages.</p>
         </div>
 
         <div class="wg-side">
@@ -121,57 +148,58 @@
 
             @if (tab == "screen")
             {
-                <div class="dw">
-                    <div class="dw-field">
-                        <label for="se-name">Nom</label>
-                        <input id="se-name" type="text" maxlength="80" @bind="name" @bind:event="oninput" />
+                @if (zones.Count > 0)
+                {
+                    @* zone de son aire : classement seulement, rien à publier *@
+                    <div class="dw">
+                        <div class="dw-field">
+                            <label for="se-zone">Zone</label>
+                            <select id="se-zone" @bind="zoneValue">
+                                <option value="">— Sans zone —</option>
+                                @foreach (var z in zones) { <option value="@z.Id">@z.Name</option> }
+                            </select>
+                        </div>
                     </div>
-                </div>
-                <h4 class="pe-sub">Format</h4>
-                <ScreenFormat Spec="spec" Layout="@layoutId" LayoutChanged="SetLayout" OnChange="StateHasChanged" />
-                @if (detected != null) { <p class="hint" style="margin-top:8px">Résolution détectée sur l'écran : @detected</p> }
+                }
+                <ScreenFormat Spec="spec" Layout="@layoutId" LayoutChanged="SetLayout" OnChange="StateHasChanged" Compact="true" Detected="@detected" />
             }
             else
             {
-                <div class="wg-add">
-                    @foreach (var a in available)
-                    {
-                        var app = a;
-                        <button type="button" class="pe-app" @onclick="() => Add(app)">
-                            <AppIcon Id="@app.Id" Small="true" Size="18" />
-                            <span><b>@app.Name</b><small>Ajouter</small></span>
-                            <Ico Name="plus" Size="16" />
-                        </button>
-                    }
-                </div>
-                @if (available.Count == 0) { <p class="hint">Aucun widget actif. <a href="/widgets">Activez-les dans la page Widgets</a>.</p> }
-
-                @if (Sel is { } sw && manifests.GetValueOrDefault(sw.AppId) is { } m)
+                @if (widgets.Count > 0)
                 {
-                    <div class="wg-props">
-                        <div class="row" style="margin-bottom:6px">
-                            <h4 class="grow" style="margin:0">@m.Name</h4>
-                            <button type="button" class="btn danger sm" @onclick="() => Remove(sw)"><Ico Name="trash" Size="14" /> Retirer</button>
-                        </div>
-                        <div class="dw">
-                            <div class="dw-field">
-                                <label>Taille</label>
-                                <select value="@sw.Scale.ToString(Inv)" @onchange="e => SetScale(sw, e)">
-                                    @foreach (var (v, l) in Sizes) { <option value="@v.ToString(Inv)" selected="@(Math.Abs(sw.Scale - v) < 0.01)">@l</option> }
-                                </select>
-                            </div>
-                            <AppForm @key="sw.Id" Manifest="m" Values="sw.Settings" />
+                    <div class="fmt-block">
+                        <label>Sur l'écran <small>@widgets.Count</small></label>
+                        <div class="wg-placed">
+                            @foreach (var w in widgets)
+                            {
+                                var wid = w;
+                                <div class="wg-placed-row @(selected == wid.Id ? "sel" : "")">
+                                    <button type="button" class="wg-placed-main" title="Régler « @Label(wid) »" @onclick="() => OpenSettings(wid)">
+                                        <AppIcon Id="@wid.AppId" Small="true" Size="16" /> <span>@Label(wid)</span>
+                                    </button>
+                                    <button type="button" class="btn ghost sm icon" title="Retirer « @Label(wid) »" aria-label="Retirer « @Label(wid) »" @onclick="() => Remove(wid)"><Ico Name="trash" Size="15" /></button>
+                                </div>
+                            }
                         </div>
                     </div>
                 }
-                else if (widgets.Count > 0)
-                {
-                    <p class="hint">Sélectionnez un widget sur l'aperçu pour le régler.</p>
-                }
-                else
-                {
-                    <p class="hint">Ajoutez une horloge, la météo ou un texte libre : ils restent affichés par-dessus les listes de lecture.</p>
-                }
+                <div class="fmt-block">
+                    <label for="wg-search">Ajouter un widget</label>
+                    @if (available.Count > 6) { <input id="wg-search" type="text" placeholder="Rechercher" @bind="search" @bind:event="oninput" style="margin-bottom:8px" /> }
+                    <div class="wg-add">
+                        @foreach (var a in available.Where(x => string.IsNullOrWhiteSpace(search) || x.Name.Contains(search.Trim(), StringComparison.CurrentCultureIgnoreCase)))
+                        {
+                            var app = a;
+                            <button type="button" class="wg-tile" draggable="true" title="Glissez vers l'écran, ou cliquez pour ajouter" @onclick="() => Add(app)"
+                                    ondragstart="event.dataTransfer.setData('text/plain', '@app.Id'); event.dataTransfer.effectAllowed = 'copy';">
+                                <AppIcon Id="@app.Id" Small="true" Size="16" />
+                                <span>@app.Name</span>
+                            </button>
+                        }
+                    </div>
+                </div>
+                @if (available.Count == 0) { <p class="hint">Aucun widget actif. <a href="/widgets">Activez-les dans la page Widgets</a>.</p> }
+                else if (widgets.Count == 0) { <p class="hint">Ils restent affichés par-dessus les listes de lecture. Glissez-les sur l'aperçu ou cliquez pour les ajouter.</p> }
             }
             @foreach (var e in errors) { <div class="err">@e</div> }
         </div>
@@ -192,6 +220,35 @@
     </div>
 </div>
 
+@if (settingsOpen && Sel is { } sw && manifests.GetValueOrDefault(sw.AppId) is { } m)
+{
+    @* réglages du widget : fenêtre au-dessus de l'éditeur ; les valeurs s'écrivent dans la copie de travail, rien n'est enregistré avant « Enregistrer » *@
+    <div class="modal-backdrop picker-backdrop" @onclick="CloseSettings"></div>
+    <div class="modal app-modal sm wg-settings" role="dialog" aria-modal="true" aria-label="Réglages : @m.Name">
+        <div class="modal-head">
+            <AppIcon Id="@m.Id" Small="true" Size="18" />
+            <div class="grow" style="min-width:0"><h3>@m.Name</h3><small>Réglages du widget</small></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseSettings"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            <div class="dw">
+                <div class="dw-field">
+                    <label>Taille</label>
+                    <select value="@sw.Scale.ToString(Inv)" @onchange="e => SetScale(sw, e)">
+                        @foreach (var (v, l) in Sizes) { <option value="@v.ToString(Inv)" selected="@(Math.Abs(sw.Scale - v) < 0.01)">@l</option> }
+                    </select>
+                </div>
+                <AppForm @key="sw.Id" Manifest="m" Values="sw.Settings" />
+            </div>
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn danger" @onclick="() => Remove(sw)"><Ico Name="trash" Size="16" /> Retirer</button>
+            <span class="grow"></span>
+            <button type="button" class="btn" @onclick="CloseSettings">OK</button>
+        </div>
+    </div>
+}
+
 @code {
     [Parameter, EditorRequired] public Guid ScreenId { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
@@ -206,6 +263,8 @@
     private List<AppManifest> available = new();
     private Dictionary<string, AppManifest> manifests = new();
     private List<Playlist> playlists = new();
+    private List<Zone> zones = new();
+    private string zoneValue = "";
     private Guid? selected;
     private string layoutId = ScreenLayouts.Full;
     private readonly List<Guid?> zonePl = new() { null, null, null };   // playlist de chaque zone (copie de travail)
@@ -220,6 +279,7 @@
     private List<string> errors = new();
     private string name = "", tab = "screen";
     private string? detected;
+    private string search = "";
     private ScreenSpec spec = new();
     private bool saving, confirmPublish;
 
@@ -233,6 +293,8 @@
         available = manifests.Values.Where(a => on.Contains(a.Id)).OrderBy(a => a.Name).ToList();
         var s = Store.Read(d => d.Screens.First(x => x.Id == ScreenId));
         playlists = Store.Read(d => d.Playlists.OrderBy(p => p.Name).ToList());
+        zones = Store.Read(d => d.Area?.Zones.OrderBy(z => z.Name, StringComparer.CurrentCultureIgnoreCase).ToList() ?? new());
+        zoneValue = s.ZoneId?.ToString() ?? "";
         name = s.Name;
         for (var z = 0; z < zonePl.Count; z++) zonePl[z] = s.ZonePlaylist(z);
         spec = new ScreenSpec { Type = s.ScreenType, Orientation = s.Orientation, Resolution = s.Resolution };
@@ -290,6 +352,12 @@
     // Texte libre : largeur, couleurs et alignement choisis (couleurs vérifiées : on les écrit dans un style).
     private static string TextStyle(ScreenWidget w)
     {
+        if (w.AppId == "qrcode") return "background:#fff;color:#0B1F3A;border-color:transparent;padding:.9em;";
+        if (w.AppId is "quote" or "countdown")
+        {
+            var qw = w.AppId == "quote" && int.TryParse(w.Settings.GetValueOrDefault("width"), out var q) ? Math.Clamp(q, 10, 100) : 0;
+            return "white-space:normal;" + (qw > 0 ? $"width:{qw}%;" : "text-align:center;");
+        }
         if (w.AppId != "text") return "";
         static string Color(string? c, string fallback) => System.Text.RegularExpressions.Regex.IsMatch(c ?? "", "^#[0-9A-Fa-f]{6}$") ? c! : fallback;
         var width = int.TryParse(w.Settings.GetValueOrDefault("width"), out var pw) ? Math.Clamp(pw, 10, 100) : 40;
@@ -309,26 +377,47 @@
         return now.ToString((twelve ? "h:mm" : "HH:mm") + (secs ? ":ss" : "") + (twelve ? " tt" : ""), twelve ? Inv : Fr);
     }
 
-    private void Select(ScreenWidget w) { selected = w.Id; tab = "widgets"; }
+    private bool settingsOpen;
+
+    private void OpenSettings(ScreenWidget w) { selected = w.Id; tab = "widgets"; settingsOpen = true; }
+
+    private void CloseSettings() => settingsOpen = false;
+
+    private void OnItemKey(KeyboardEventArgs e, ScreenWidget w)
+    {
+        if (e.Key == "Enter") OpenSettings(w);
+    }
+
+    // Widget glissé depuis la liste vers l'aperçu : posé sous le curseur (point de dépôt = centre approximatif du widget).
+    [JSInvokable]
+    public Task Dropped(string appId, double x, double y)
+    {
+        if (manifests.GetValueOrDefault(appId) is { } a && available.Any(v => v.Id == appId)) Add(a, Math.Clamp(x - 8, 0, 90), Math.Clamp(y - 6, 0, 90));
+        return InvokeAsync(StateHasChanged);
+    }
 
     private void SetLayout(string id) { layoutId = id; pickZone = null; }
 
     private void SetZone(int zone, Guid? playlistId) { zonePl[zone] = playlistId; pickZone = null; }
 
     // Nouveau widget : en haut à droite pour une horloge, en haut à gauche sinon, décalé s'il y en a déjà un.
-    private void Add(AppManifest a)
+    private void Add(AppManifest a) => Add(a, null, null);
+
+    private void Add(AppManifest a, double? x, double? y)
     {
         var n = widgets.Count;
-        var w = new ScreenWidget { AppId = a.Id, Settings = AppCatalog.WithDefaults(a, null), X = a.Id == "clock" ? 72 : 4, Y = a.Id == "text" ? 80 : 4 + n * 6 % 60, Scale = 1 };
+        var w = new ScreenWidget { AppId = a.Id, Settings = AppCatalog.WithDefaults(a, null), X = x ?? (a.Id == "clock" ? 72 : 4), Y = y ?? (a.Id == "text" ? 80 : 4 + n * 6 % 60), Scale = 1 };
         widgets.Add(w);
         selected = w.Id;
         errors.Clear();
+        settingsOpen = a.Settings.Any(f => f.Required && string.IsNullOrEmpty(f.Default));   // un réglage obligatoire (ex. la ville) : on l'ouvre aussitôt
     }
 
     private void Remove(ScreenWidget w)
     {
         widgets.Remove(w);
         selected = widgets.FirstOrDefault()?.Id;
+        settingsOpen = false;
     }
 
     private void SetScale(ScreenWidget w, ChangeEventArgs e)
@@ -344,7 +433,7 @@
         {
             if (manifests.GetValueOrDefault(w.AppId) is not { } m) continue;
             var errs = AppCatalog.Validate(m, w.Settings, new HashSet<string>());
-            if (errs.Count > 0) { errors = errs.Select(x => $"{m.Name} : {x}").ToList(); Toast.Error(errors[0]); selected = w.Id; tab = "widgets"; return; }
+            if (errs.Count > 0) { errors = errs.Select(x => $"{m.Name} : {x}").ToList(); Toast.Error(errors[0]); selected = w.Id; tab = "widgets"; settingsOpen = true; return; }
         }
         var list = widgets.Select(w => new ScreenWidget
         {
@@ -353,6 +442,7 @@
                 ? m.Settings.Where(f => !f.IsSecret && AppCatalog.IsVisible(f, w.Settings)).ToDictionary(f => f.Key, f => (w.Settings.GetValueOrDefault(f.Key) ?? "").Trim())
                 : new(w.Settings)
         }).ToList();
+        Guid? zid = Guid.TryParse(zoneValue, out var zg) && this.zones.Any(z => z.Id == zg) ? zg : null;
         var newName = name.Trim(); var sp = spec; var lay = layoutId; var zones = zonePl.ToList();
         saving = true;
         try
@@ -362,6 +452,7 @@
                 var s = d.Screens.First(x => x.Id == ScreenId);
                 var changed = s.ScreenType != sp.Type || s.Orientation != sp.Orientation || s.Resolution != sp.Resolution;
                 s.Name = newName;
+                s.ZoneId = zid;
                 s.Layout = lay;   // autre découpage ou autre playlist dans une zone = modification à publier
                 for (var z = 0; z < zones.Count; z++) s.SetZonePlaylist(z, zones[z]);
                 s.ScreenType = sp.Type; s.Orientation = sp.Orientation; s.Resolution = sp.Resolution;

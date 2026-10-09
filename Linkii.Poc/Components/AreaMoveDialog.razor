@@ -1,0 +1,80 @@
+@* Déplacer un ou plusieurs écrans, listes de lecture ou fichiers vers une autre aire (administrateur de l'organisation). *@
+@inject TenantStore Store
+@inject Toaster Toast
+
+<div class="modal-backdrop" @onclick="Close"></div>
+<div class="modal" role="dialog" aria-modal="true" aria-labelledby="amd-title">
+    <h3 id="amd-title">Déplacer @Title vers une autre aire</h3>
+    <p class="hint">@Hint</p>
+    @if (!done)
+    {
+        <div class="dw"><div class="dw-field"><label for="amd-area">Aire</label>
+            <select id="amd-area" @bind="target">@foreach (var a in areas) { <option value="@a.Id">@a.Name</option> }</select>
+        </div></div>
+    }
+    @if (error != null) { <div class="err">@error</div> }
+    @if (failures.Count > 0)
+    {
+        <div class="err">
+            @moved déplacé@(moved > 1 ? "s" : ""), @failures.Count refusé@(failures.Count > 1 ? "s" : "") :
+            <ul style="margin:6px 0 0;padding-left:18px">@foreach (var f in failures) { <li><b>@f.Name</b> — @f.Error</li> }</ul>
+        </div>
+    }
+    <div class="modal-actions">
+        @if (done) { <button class="btn" @onclick="Close">Fermer</button> }
+        else
+        {
+            <button class="btn ghost" @onclick="Close">Annuler</button>
+            <button class="btn" @onclick="Move">Déplacer</button>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Kind { get; set; } = "playlist";   // screen | playlist | media
+    [Parameter] public List<(Guid Id, string Name)> Items { get; set; } = new();
+    [Parameter] public EventCallback<bool> OnClose { get; set; }
+
+    private List<Area> areas = new();
+    private string target = "";
+    private string? error;
+    private bool done;
+    private int moved;
+    private List<(string Name, string Error)> failures = new();
+
+    private string Title => Items.Count == 1 ? $"« {Items[0].Name} »"
+        : Items.Count + " " + (Kind == "screen" ? "écrans" : Kind == "playlist" ? "listes de lecture" : "fichiers");
+
+    private string Hint => Kind switch
+    {
+        "screen" => "Les écrans continuent d'afficher ce qui y est publié. Leurs listes de lecture restent dans l'aire actuelle : choisissez-leur ensuite une liste de leur nouvelle aire, puis publiez.",
+        "playlist" => "Une liste part avec les contenus qu'elle utilise, s'ils ne servent à aucune autre liste de cette aire. Les écrans de cette aire qui la diffusaient gardent leur publication, sans liste choisie.",
+        _ => "Un fichier ne part que si aucun contenu ni aucune liste de cette aire ne l'utilise."
+    };
+
+    protected override void OnInitialized()
+    {
+        areas = Store.Read(d => d.Area is { } cur ? d.Areas.Where(a => a.Id != cur.Id).OrderBy(a => a.Name).ToList() : new());
+        target = areas.FirstOrDefault()?.Id.ToString() ?? "";
+    }
+
+    private Task Close() => OnClose.InvokeAsync(moved > 0);
+
+    private async Task Move()
+    {
+        if (!Guid.TryParse(target, out var to)) { error = "Choisissez une aire."; return; }
+        error = null;
+        var results = Store.Write(d => Items.Select(i => (i.Name, Error: Kind switch
+        {
+            "screen" => AreaOps.MoveScreen(d, i.Id, to),
+            "playlist" => AreaOps.MovePlaylist(d, i.Id, to),
+            _ => AreaOps.MoveMedia(d, i.Id, to)
+        })).ToList());
+        failures = results.Where(r => r.Error != null).Select(r => (r.Name, r.Error!)).ToList();
+        moved = results.Count - failures.Count;
+        var areaName = areas.First(a => a.Id == to).Name;
+        if (moved > 0) Toast.Ok(moved == 1 && Items.Count == 1 ? $"« {Items[0].Name} » déplacé vers l'aire « {areaName} »." : $"{moved} élément{(moved > 1 ? "s" : "")} déplacé{(moved > 1 ? "s" : "")} vers l'aire « {areaName} ».");
+        if (failures.Count == 0) await OnClose.InvokeAsync(true);
+        else done = true;
+    }
+}

@@ -21,15 +21,15 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
     }
 
     /// <summary>Fichier choisi ou déposé dans le navigateur.</summary>
-    public async Task<Result> Import(IBrowserFile f, Guid clientId, IProgress<long>? progress = null, CancellationToken ct = default)
+    public async Task<Result> Import(IBrowserFile f, Guid clientId, IProgress<long>? progress = null, CancellationToken ct = default, Guid? areaId = null)
     {
         if (f.Size > MaxBytes) return new(null, $"« {f.Name} » dépasse la taille maximale (2 Go).");
         await using var s = f.OpenReadStream(MaxBytes, ct);
-        return await Import(s, f.Name, clientId, progress, ct);
+        return await Import(s, f.Name, clientId, progress, ct, areaId);
     }
 
     /// <summary>Fichier téléchargé par le serveur depuis une adresse publique (jamais le réseau interne : <see cref="SafeHttp"/>).</summary>
-    public async Task<Result> ImportUrl(string url, Guid clientId, Action<long, long?>? progress = null, CancellationToken ct = default)
+    public async Task<Result> ImportUrl(string url, Guid clientId, Action<long, long?>? progress = null, CancellationToken ct = default, Guid? areaId = null)
     {
         HttpResponseMessage res;
         try { res = await http.Download(url, ct); }
@@ -43,12 +43,12 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
             var name = FileNameFor(res, url);
             if (!IsSupported(name)) return new(null, "Cette adresse ne mène pas à une image ou une vidéo (formats acceptés : JPG, PNG, GIF, WEBP, SVG, MP4, MOV, AVI, MKV…).");
             await using var s = await res.Content.ReadAsStreamAsync(ct);
-            return await Import(s, name, clientId, progress == null ? null : new Progress<long>(n => progress(n, total)), ct);
+            return await Import(s, name, clientId, progress == null ? null : new Progress<long>(n => progress(n, total)), ct, areaId);
         }
     }
 
     /// <summary>Fichier lu par le serveur (synchronisation d'un Drive) : mêmes règles que l'import, conversion vidéo comprise.</summary>
-    public Task<Result> ImportStream(Stream input, string name, Guid clientId, CancellationToken ct) => Import(input, name, clientId, null, ct);
+    public Task<Result> ImportStream(Stream input, string name, Guid clientId, CancellationToken ct) => Import(input, name, clientId, null, ct, null);   // fichiers d'un dossier Drive : communs à toutes les aires
 
     // Nom du fichier : en-tête Content-Disposition, sinon fin de l'adresse ; extension déduite du type si elle manque.
     private static string FileNameFor(HttpResponseMessage res, string url)
@@ -73,7 +73,8 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
         _ => null
     };
 
-    private async Task<Result> Import(Stream input, string name, Guid clientId, IProgress<long>? progress, CancellationToken ct)
+    /// <param name="areaId">Aire de gestion du fichier (celle ouverte par la personne qui importe).</param>
+    private async Task<Result> Import(Stream input, string name, Guid clientId, IProgress<long>? progress, CancellationToken ct, Guid? areaId)
     {
         var ext = Path.GetExtension(name).ToLowerInvariant();
         var isImage = VideoConverter.ImageExts.Contains(ext);
@@ -111,12 +112,12 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
         var title = Path.GetFileNameWithoutExtension(name);
         if (!needsConversion)
         {
-            var item = new MediaItem { ClientId = clientId, Name = title, Type = isVideo ? "video" : "image", FileName = id + ext, Size = written, AddedUtc = DateTime.UtcNow };
+            var item = new MediaItem { ClientId = clientId, AreaId = areaId ?? Guid.Empty, Name = title, Type = isVideo ? "video" : "image", FileName = id + ext, Size = written, AddedUtc = DateTime.UtcNow };
             store.Write(d => { d.Media.Add(item); });
             return new(item, null);
         }
 
-        var pending = new MediaItem { ClientId = clientId, Name = title, Type = "video", FileName = null, Status = "processing", Size = written, AddedUtc = DateTime.UtcNow };
+        var pending = new MediaItem { ClientId = clientId, AreaId = areaId ?? Guid.Empty, Name = title, Type = "video", FileName = null, Status = "processing", Size = written, AddedUtc = DateTime.UtcNow };
         store.Write(d => { d.Media.Add(pending); });
         _ = Task.Run(() => ConvertInBackground(pending, source, id));
         return new(pending, null);

@@ -7,25 +7,28 @@ using System.Text.Json.Serialization;
 namespace Linkii.Poc;
 
 /// <summary>
-/// Compte Microsoft 365 d'une organisation (« Se connecter avec Microsoft », OAuth 2 + PKCE, permissions déléguées en lecture seule),
+/// Compte Microsoft (professionnel, scolaire ou personnel) d'une organisation (« Se connecter avec Microsoft », OAuth 2 + PKCE, permissions déléguées en lecture seule),
 /// partagé par les calendriers Microsoft 365 et OneDrive / SharePoint. Même principe que <see cref="GoogleAuth"/> : chaque intégration
 /// demande son accès (agendas, fichiers) ; les accès déjà accordés sont conservés.
-/// L'application Entra ID est celle de la plateforme Linkii (multilocataire) : Linkii:Microsoft:ClientId, Linkii:Microsoft:ClientSecret et,
+/// L'application Entra ID est celle de la plateforme Linkii (multilocataire, comptes personnels acceptés) : Linkii:Microsoft:ClientId, Linkii:Microsoft:ClientSecret et,
 /// en production, Linkii:Microsoft:RedirectUri (adresse déclarée dans Entra ; à défaut, l'adresse du back-office + /microsoft/callback).
 /// </summary>
 public class MicrosoftAuth(IConfiguration config, JsonStore store, SecretBox box, IHttpClientFactory httpFactory, ILogger<MicrosoftAuth> log)
 {
-    // « organizations » : comptes professionnels ou scolaires de n'importe quelle organisation (pas les comptes personnels)
-    private const string Authority = "https://login.microsoftonline.com/organizations/oauth2/v2.0";
+    // « common » : comptes professionnels ou scolaires de n'importe quelle organisation, et comptes personnels (outlook.com, hotmail, live)
+    private const string Authority = "https://login.microsoftonline.com/common/oauth2/v2.0";
     private const string GraphPrefix = "https://graph.microsoft.com/";
     public const string DriveScope = "Files.Read.All";
-    public const string SitesScope = "Sites.Read.All";
     public const string CalendarScope = "Calendars.Read";
 
-    /// <summary>Accès demandés selon l'intégration qui lance la connexion (« drive » ou « calendar »). Tous en lecture seule.</summary>
+    /// <summary>
+    /// Accès demandés selon l'intégration qui lance la connexion (« drive » ou « calendar »). Tous en lecture seule, et tous disponibles
+    /// pour les comptes personnels : ni Place.Read.All (annuaire des salles) ni Sites.Read.All (bibliothèques SharePoint) n'existent pour eux,
+    /// et les demander ferait refuser la connexion. Files.Read.All couvre les fichiers SharePoint auxquels le compte a accès.
+    /// </summary>
     public static string[] ScopesFor(string purpose) => purpose == "calendar"
-        ? [CalendarScope, "Calendars.Read.Shared", "Place.Read.All"]
-        : [DriveScope, SitesScope];
+        ? [CalendarScope, "Calendars.Read.Shared"]
+        : [DriveScope];
 
     /// <summary>L'accès sans lequel l'intégration ne peut pas fonctionner.</summary>
     public static string RequiredScope(string purpose) => purpose == "calendar" ? CalendarScope : DriveScope;

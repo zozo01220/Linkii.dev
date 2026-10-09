@@ -10,8 +10,8 @@ namespace Linkii.Poc;
 /// <summary>
 /// Canva (Connect API) : connexion du compte Canva d'un client (OAuth 2 + PKCE), liste de ses designs,
 /// export d'un design (PNG par page ou MP4) importé dans la médiathèque pour une lecture hors ligne.
-/// Intégration : saisie par l'organisation dans Réglages › Applications (identifiant, secret chiffré, adresse de retour),
-/// à défaut Linkii:Canva:ClientId, Linkii:Canva:ClientSecret, Linkii:Canva:RedirectUri sur le serveur.
+/// L'intégration Canva est celle de la plateforme Linkii : Linkii:Canva:ClientId, Linkii:Canva:ClientSecret et, en production,
+/// Linkii:Canva:RedirectUri (adresse déclarée chez Canva ; à défaut, https://{Linkii:BaseDomain}/canva/callback).
 /// </summary>
 public class CanvaService(IConfiguration config, JsonStore store, SecretBox box, IHttpClientFactory httpFactory, MediaImporter importer, ILogger<CanvaService> log)
 {
@@ -19,59 +19,16 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
     private const string Api = "https://api.canva.com/rest/v1";
     private const string Scopes = "design:meta:read design:content:read profile:read";
 
-    // Intégration Canva (portail développeurs) : saisie par l'organisation dans Réglages › Applications,
-    // à défaut celle du serveur (Linkii:Canva:ClientId / ClientSecret / RedirectUri).
+    // Intégration Canva (portail développeurs) : celle de la plateforme Linkii, identique pour tous les clients
+    // (Linkii:Canva:ClientId / ClientSecret / RedirectUri sur le serveur).
     private record Creds(string Id, string Secret, string Redirect);
 
-    private Creds CredsOf(Guid clientId)
-    {
-        var (id, secret, redirect) = store.Read(d => d.Clients.FirstOrDefault(c => c.Id == clientId) is { } t
-            ? (t.CanvaClientId, t.CanvaClientSecret, t.CanvaRedirectUri) : ("", "", ""));
-        if (id.Length > 0 && secret.Length > 0)
-            return new Creds(id, box.Unprotect(secret), redirect.Length > 0 ? redirect : ServerRedirect);
-        return new Creds(config["Linkii:Canva:ClientId"] ?? "", config["Linkii:Canva:ClientSecret"] ?? "", ServerRedirect);
-    }
+    private Creds PlatformCreds => new(config["Linkii:Canva:ClientId"] ?? "", config["Linkii:Canva:ClientSecret"] ?? "", ServerRedirect);
 
     private string ServerRedirect => config["Linkii:Canva:RedirectUri"] is { Length: > 0 } r ? r : $"https://{config["Linkii:BaseDomain"] ?? "linkii.com"}/canva/callback";
 
-    /// <summary>Intégration utilisable : identifiant et secret connus (organisation ou serveur).</summary>
-    public bool IsConfigured(Guid clientId) => CredsOf(clientId) is { Id.Length: > 0, Secret.Length: > 0 };
-
-    public record IntegrationSettings(string ClientId, bool HasSecret, string RedirectUri, bool FromServer);
-
-    /// <summary>Réglages affichés dans le formulaire (le secret n'est jamais renvoyé).</summary>
-    public IntegrationSettings SettingsOf(Guid clientId)
-    {
-        var t = store.Read(d => d.Clients.First(c => c.Id == clientId));
-        var server = t.CanvaClientId.Length == 0 && (config["Linkii:Canva:ClientId"] ?? "").Length > 0;
-        return new IntegrationSettings(t.CanvaClientId, t.CanvaClientSecret.Length > 0, t.CanvaRedirectUri, server);
-    }
-
-    /// <summary>Enregistre l'intégration de l'organisation ; secret vide : le secret enregistré est conservé.
-    /// Changer d'intégration oublie la connexion en cours (ses jetons appartiennent à l'ancienne).</summary>
-    public void SaveSettings(Guid clientId, string id, string? secret, string redirect)
-    {
-        var protectedSecret = string.IsNullOrWhiteSpace(secret) ? null : box.Protect(secret.Trim());
-        var changed = store.Write(d =>
-        {
-            var t = d.Clients.First(c => c.Id == clientId);
-            var diff = t.CanvaClientId != id.Trim() || protectedSecret != null;
-            t.CanvaClientId = id.Trim();
-            if (protectedSecret != null) t.CanvaClientSecret = protectedSecret;
-            if (t.CanvaClientId.Length == 0) t.CanvaClientSecret = "";
-            t.CanvaRedirectUri = redirect.Trim();
-            return diff;
-        });
-        if (changed) Disconnect(clientId);
-    }
-
-    /// <summary>Adresse de retour proposée pour ce back-office (Canva refuse « localhost » : 127.0.0.1 à la place).</summary>
-    public static string SuggestedRedirect(string baseUri)
-    {
-        var u = new Uri(baseUri);
-        var host = u.Host == "localhost" ? "127.0.0.1" : u.Host;
-        return $"{u.Scheme}://{host}{(u.IsDefaultPort ? "" : ":" + u.Port)}/canva/callback";
-    }
+    /// <summary>Intégration de la plateforme utilisable : identifiant et secret présents dans la configuration du serveur.</summary>
+    public bool IsConfigured => PlatformCreds is { Id.Length: > 0, Secret.Length: > 0 };
 
     public record Connection(bool Connected, string User, DateTime? Since);
     public record Design(string Id, string Title, string? Thumbnail, int? Pages, DateTime? Updated, int? Width, int? Height);
@@ -92,7 +49,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
         var verifier = Base64Url(RandomNumberGenerator.GetBytes(64));
         var challenge = Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
         var state = Base64Url(RandomNumberGenerator.GetBytes(32));
-        var creds = CredsOf(clientId);
+        var creds = PlatformCreds;
         pending[state] = new Pending(clientId, verifier, returnUrl, creds.Redirect, DateTime.UtcNow.AddMinutes(15));
         return AuthorizeUrl + "?" + string.Join("&", new Dictionary<string, string>
         {
@@ -206,8 +163,8 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
 
     private async Task<TokenResponse> TokenRequest(Guid clientId, Dictionary<string, string> form)
     {
-        var creds = CredsOf(clientId);
-        if (creds.Id.Length == 0 || creds.Secret.Length == 0) throw new CanvaException("L'intégration Canva n'est pas configurée (Réglages › Applications › Canva).");
+        var creds = PlatformCreds;
+        if (creds.Id.Length == 0 || creds.Secret.Length == 0) throw new CanvaException("La connexion Canva de la plateforme n'est pas configurée (administrateur Linkii).");
         using var req = new HttpRequestMessage(HttpMethod.Post, Api + "/oauth/token") { Content = new FormUrlEncodedContent(form) };
         req.Headers.Authorization = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{creds.Id}:{creds.Secret}")));
         using var res = await Http.SendAsync(req);
@@ -272,7 +229,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
     /// Exporte un design (images : une PNG par page ; video : un MP4) et importe les fichiers dans la médiathèque du client.
     /// Les fichiers sont marqués comme venant de ce design (Info["canva"]) et nommés d'après lui.
     /// </summary>
-    public async Task<ExportResult> Export(Guid clientId, Design design, string kind, IProgress<string>? progress = null, CancellationToken ct = default)
+    public async Task<ExportResult> Export(Guid clientId, Design design, string kind, IProgress<string>? progress = null, CancellationToken ct = default, Guid? areaId = null)
     {
         try
         {
@@ -315,7 +272,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
             for (var n = 0; n < urls.Count; n++)
             {
                 progress?.Report(urls.Count > 1 ? $"Import dans la médiathèque : page {n + 1} / {urls.Count}…" : "Import dans la médiathèque…");
-                var res = await importer.ImportUrl(urls[n], clientId, null, ct);
+                var res = await importer.ImportUrl(urls[n], clientId, null, ct, areaId);
                 if (res.Item is not { } item)
                 {
                     DeleteFiles(clientId, files.Select(f => f.Id));   // export incomplet : rien n'est gardé

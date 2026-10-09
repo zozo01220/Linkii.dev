@@ -19,7 +19,7 @@
 
     canvas.addEventListener('pointerdown', function (e) {
       var el = e.target.closest('[data-wid]');
-      if (!el || !canvas.contains(el) || e.button > 0) return;
+      if (!el || !canvas.contains(el) || e.button > 0 || e.target.closest('.wg-gear')) return;
       e.preventDefault();
       el.setPointerCapture(e.pointerId);
       drag = { el: el, dx: e.clientX - el.offsetLeft, dy: e.clientY - el.offsetTop, moved: false, p: null };
@@ -38,8 +38,22 @@
       if (!drag) return;
       var d = drag; drag = null;
       d.el.classList.remove('dragging');
-      if (d.moved && d.p) dotnet.invokeMethodAsync('Moved', d.el.getAttribute('data-wid'), d.p.x, d.p.y);
+      if (d.moved && d.p) { justDragged = true; setTimeout(function () { justDragged = false; }, 0); dotnet.invokeMethodAsync('Moved', d.el.getAttribute('data-wid'), d.p.x, d.p.y); }
     }
+    // Le clic qui suit un déplacement ne doit pas ouvrir les réglages du widget
+    var justDragged = false;
+    canvas.addEventListener('click', function (e) { if (justDragged) { e.stopPropagation(); e.preventDefault(); } }, true);
+
+    // Dépôt d'un widget glissé depuis la liste : dotnet.Dropped(appId, x, y), point de dépôt en % du canevas.
+    canvas.addEventListener('dragover', function (e) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; canvas.classList.add('drop'); });
+    canvas.addEventListener('dragleave', function (e) { if (!canvas.contains(e.relatedTarget)) canvas.classList.remove('drop'); });
+    canvas.addEventListener('drop', function (e) {
+      e.preventDefault(); canvas.classList.remove('drop');
+      var id = e.dataTransfer.getData('text/plain');
+      if (!id) return;
+      var r = canvas.getBoundingClientRect();
+      dotnet.invokeMethodAsync('Dropped', id, clamp((e.clientX - r.left) / r.width * 100, 0, 100), clamp((e.clientY - r.top) / r.height * 100, 0, 100));
+    });
     canvas.addEventListener('pointerup', end);
     canvas.addEventListener('pointercancel', end);
 

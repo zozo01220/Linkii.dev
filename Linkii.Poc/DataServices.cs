@@ -62,7 +62,7 @@ public class CalendarService(IEnumerable<ICalendarConnector> connectors, Provide
 
 // =====================================================================================
 //  Microsoft 365 via Microsoft Graph — compte Microsoft connecté par l'organisation (MicrosoftAuth), permissions déléguées en lecture seule
-//  Agendas : Calendars.Read, Calendars.Read.Shared, Place.Read.All ; fichiers : Files.Read.All, Sites.Read.All
+//  Agendas : Calendars.Read, Calendars.Read.Shared ; fichiers : Files.Read.All (comptes professionnels, scolaires ou personnels)
 // =====================================================================================
 public class GraphService(IHttpClientFactory httpFactory, MicrosoftAuth auth)
 {
@@ -141,7 +141,7 @@ public class GraphService(IHttpClientFactory httpFactory, MicrosoftAuth auth)
 
     public record RoomInfo(string Name, string Email, int? Capacity, string? Building);
 
-    /// <summary>Annuaire des salles de l'organisation (Place.Read.All).</summary>
+    /// <summary>Annuaire des salles de l'organisation. Demande Place.Read.All, que la connexion ne réclame plus (inexistant pour les comptes personnels) : sans lui, la liste reste vide et l'adresse de la salle se saisit.</summary>
     public async Task<List<RoomInfo>> ListRooms(Tenant t)
     {
         using var doc = await Get(t, "https://graph.microsoft.com/v1.0/places/microsoft.graph.room?$top=200");

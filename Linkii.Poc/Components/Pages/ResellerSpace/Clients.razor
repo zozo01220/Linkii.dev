@@ -33,12 +33,14 @@
 }
 
 <table class="tbl">
-    <thead><tr><th>Client</th><th class="num">Écrans</th><th>État</th><th></th></tr></thead>
+    <thead><tr><th>Client</th><th>Utilisateurs</th><th class="num">Aires</th><th class="num">Écrans</th><th>État</th><th></th></tr></thead>
     <tbody>
     @foreach (var c in clients)
     {
         <tr>
             <td><b>@c.Client.Name</b></td>
+            <td><span class="mono">@c.Users.Total</span> <small class="muted">@c.Users.Breakdown · @c.Users.Active30 actif@(c.Users.Active30 > 1 ? "s" : "") sur 30 j</small></td>
+            <td class="num">@c.Users.Areas</td>
             <td class="num">@c.Screens</td>
             <td><span class="pill @(c.Client.Suspended ? "bad" : "ok")">@(c.Client.Suspended ? "Suspendu" : "Actif")</span></td>
             <td>
@@ -47,12 +49,12 @@
             </td>
         </tr>
     }
-    @if (clients.Count == 0) { <tr><td colspan="4">Aucun client pour l'instant.</td></tr> }
+    @if (clients.Count == 0) { <tr><td colspan="6">Aucun client pour l'instant.</td></tr> }
     </tbody>
 </table>
 
 @code {
-    private record Row(Tenant Client, int Screens);
+    private record Row(Tenant Client, int Screens, UserStats Users);
     private List<Row> clients = new();
     private bool showAdd;
     private string clientName = "", adminName = "", adminEmail = "", adminPwd = "";
@@ -63,7 +65,7 @@
     {
         var rid = Ctx.RequireResellerId();
         clients = Root.Read(d => d.Clients.Where(c => c.ResellerId == rid).OrderBy(c => c.Name)
-            .Select(c => new Row(c, d.Screens.Count(s => s.ClientId == c.Id && s.Token != null))).ToList());
+            .Select(c => new Row(c, d.Screens.Count(s => s.ClientId == c.Id && s.Token != null), UserStats.Of(d, c))).ToList());
     }
 
     // Le compte est créé avec un mot de passe provisoire, envoyé par e-mail ; il devra être changé à la première connexion.

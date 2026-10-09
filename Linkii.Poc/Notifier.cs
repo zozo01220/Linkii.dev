@@ -53,11 +53,13 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
     {
         var app = catalog.Find(w.AppId);
         if (app == null) return null;
+        var settings = new Dictionary<string, string>(w.Settings);
+        if (app.Id == "qrcode") settings["qr"] = QrCodes.Encode(w.Settings.GetValueOrDefault("content")) ?? "";   // tracé calculé ici : l'écran ne dessine que le résultat
         return new PublishedItem
         {
             Id = w.Id, Type = "app", AppId = app.Id, AppVersion = app.Version,
             Placement = "free", X = Math.Clamp(w.X, 0, 100), Y = Math.Clamp(w.Y, 0, 100), Scale = Math.Clamp(w.Scale, 0.4, 3),
-            Settings = new(w.Settings), DataId = app.Data ? w.Id.ToString() : null,
+            Settings = settings, DataId = app.Data ? w.Id.ToString() : null,
             // texte libre : période de validité (l'écran l'affiche puis le retire tout seul)
             ValidFrom = app.Validity && w.Settings.GetValueOrDefault("validFrom") is { Length: > 0 } f ? f : null,
             ValidTo = app.Validity && w.Settings.GetValueOrDefault("validTo") is { Length: > 0 } t ? t : null

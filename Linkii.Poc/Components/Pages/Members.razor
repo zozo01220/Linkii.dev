@@ -1,0 +1,321 @@
+@page "/members"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@inject TenantStore Store
+@inject TenantContext Ctx
+@inject Mailer Mail
+@inject ResellerResolver Resolver
+@inject NavigationManager Nav
+@inject Toaster Toast
+
+<div class="page-head">
+    <div>
+        <h1>Membres</h1>
+        <p class="sub">Les personnes qui gèrent les écrans de @orgName. Chacune a un rôle dans chaque aire : Utilisateur (écrans, listes de lecture, médias de l'aire) ou Administrateur (en plus : zones et membres de l'aire).</p>
+    </div>
+    @if (manageable.Count > 0) { <button class="btn" @onclick="OpenInvite"><Ico Name="plus" Size="16" /> Inviter une personne</button> }
+</div>
+
+@if (manageable.Count == 0)
+{
+    <div class="card empty"><div class="big">Réservé aux administrateurs</div><p>Seuls les administrateurs d'une aire ou de l'organisation gèrent les membres.</p></div>
+}
+else
+{
+    var since = DateTime.UtcNow.AddDays(-30);
+    var invited = people.Count(u => u.IsInvited && !u.Disabled);
+    <div class="stats">
+        <div class="stat"><div class="n">@people.Count</div><div class="l">personnes</div></div>
+        <div class="stat"><div class="n">@people.Count(u => u.ActiveSince(since))</div><div class="l">actives sur 30 jours</div></div>
+        <div class="stat"><div class="n">@people.Count(u => u.Role == Roles.ClientAdmin)</div><div class="l">administrateur@(people.Count(u => u.Role == Roles.ClientAdmin) > 1 ? "s" : "") de l'organisation</div></div>
+        <div class="stat"><div class="n">@invited</div><div class="l">invitation@(invited > 1 ? "s" : "") en attente</div></div>
+    </div>
+
+    <table class="tbl">
+        <thead><tr><th style="min-width:220px">Personne</th>@foreach (var a in manageable) { <th>@a.Name</th> }<th>État</th><th></th></tr></thead>
+        <tbody>
+        @foreach (var u in people)
+        {
+            var p = u;
+            <tr class="@(CanEdit(p) ? "clickable" : "") @(p.Disabled ? "dim" : "")" @onclick="() => OpenEdit(p)">
+                <td>
+                    <div class="who-cell">
+                        <span class="avatar @(p.Disabled ? "off" : "")">@Initials(p)</span>
+                        <div class="who-txt"><b>@p.Label</b><small>@p.Email@(p.Id == Ctx.UserId ? " · vous" : "")</small></div>
+                    </div>
+                </td>
+                @foreach (var a in manageable)
+                {
+                    <td>
+                        @if (p.Role == Roles.ClientAdmin) { <span class="pill dark">Organisation</span> }
+                        else if (p.RoleIn(a.Id) is { } r) { <span class="pill @(r == AreaRoles.Admin ? "dark" : "blue")">@AreaRoles.Label(r)</span> }
+                        else { <span class="muted">—</span> }
+                    </td>
+                }
+                <td>
+                    <span class="pill @(p.Disabled ? "" : p.IsInvited ? "warn" : "ok")">@(p.Disabled ? "Désactivé" : p.IsInvited ? "Invité" : "Actif")</span>
+                    @if (p.Role == Roles.ClientMember && p.AreaRoles.Count == 0) { <small class="muted" style="display:block">aucune aire</small> }
+                </td>
+                <td @onclick:stopPropagation="true">
+                    @if (CanEdit(p))
+                    {
+                        <div class="kebab">
+                            <button type="button" class="kebab-btn" aria-label="Actions pour @p.Email" aria-haspopup="menu" aria-expanded="@(menuFor == p.Id ? "true" : "false")" @onclick="() => menuFor = menuFor == p.Id ? null : p.Id"><Ico Name="dots-v" Size="18" /></button>
+                            @if (menuFor == p.Id)
+                            {
+                                <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                                <div class="kebab-menu" role="menu">
+                                    <button type="button" role="menuitem" @onclick="() => OpenEdit(p)"><Ico Name="edit" Size="16" /> Modifier</button>
+                                    @if (p.IsInvited && !p.Disabled) { <button type="button" role="menuitem" @onclick="() => Resend(p)"><Ico Name="mail" Size="16" /> Renvoyer l'invitation</button> }
+                                    @if (orgAdmin && p.Id != Ctx.UserId)
+                                    {
+                                        <button type="button" role="menuitem" @onclick="() => Ask(p, p.Disabled ? EnableAction : DisableAction)"><Ico Name="@(p.Disabled ? "check" : "lock")" Size="16" /> @(p.Disabled ? "Réactiver" : "Désactiver")</button>
+                                        <button type="button" role="menuitem" class="danger" @onclick="() => Ask(p, DeleteAction)"><Ico Name="trash" Size="16" /> Supprimer</button>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+
+@if (form != null)
+{
+    var f = form;
+    var isNew = f.Id == null;
+    <div class="modal-backdrop" @onclick="() => form = null"></div>
+    <div class="modal app-modal" role="dialog" aria-modal="true" aria-labelledby="m-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="m-title">@(isNew ? "Inviter une personne" : "Modifier « " + f.OldName + " »")</h3></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => form = null"><Ico Name="x" Size="20" /></button>
+        </div>
+        <EditForm Model="f" OnSubmit="Save" class="modal-form">
+            <div class="modal-body">
+                <div class="form-grid">
+                    <div><label class="lbl" for="m-name">Nom</label><input id="m-name" class="full" maxlength="80" @bind="f.Name" placeholder="Prénom Nom" /></div>
+                    <div><label class="lbl" for="m-mail">E-mail</label><input id="m-mail" class="full" type="email" maxlength="120" @bind="f.Email" disabled="@(!isNew)" autocomplete="off" placeholder="prenom.nom@organisation.ch" /></div>
+                </div>
+
+                @if (orgAdmin)
+                {
+                    <label class="org-admin-check">
+                        <input type="checkbox" checked="@f.OrgAdmin" disabled="@(f.Id == Ctx.UserId)" @onchange="e => { f.OrgAdmin = e.Value is true; formError = null; }" />
+                        <span><b>Administrateur de l'organisation</b><small class="muted">Toutes les aires, création des aires, déplacements entre aires, réglages et intégrations.</small></span>
+                    </label>
+                }
+
+                @if (!f.OrgAdmin)
+                {
+                    <label class="lbl">Rôle dans chaque aire</label>
+                    <div class="role-rows">
+                        @foreach (var a in manageable)
+                        {
+                            var area = a;
+                            <div class="role-row">
+                                <Ico Name="map-pin" Size="15" />
+                                <span>@area.Name</span>
+                                <select value="@(f.Roles.GetValueOrDefault(area.Id) ?? "")" aria-label="Rôle dans @area.Name" @onchange="e => SetRole(area.Id, e.Value?.ToString())">
+                                    <option value="">Aucun accès</option>
+                                    <option value="@AreaRoles.User">Utilisateur</option>
+                                    <option value="@AreaRoles.Admin">Administrateur</option>
+                                </select>
+                            </div>
+                        }
+                    </div>
+                    @if (!orgAdmin && f.OtherAreas > 0) { <p class="hint" style="margin:8px 0 0">Cette personne a aussi accès à @f.OtherAreas autre(s) aire(s), gérée(s) par d'autres administrateurs.</p> }
+                }
+                @if (isNew) { <p class="hint" style="margin:12px 0 0">Elle reçoit par e-mail un mot de passe provisoire, à changer à la première connexion.</p> }
+                @if (formError != null) { <div class="err">@formError</div> }
+            </div>
+            <div class="modal-foot">
+                <button type="button" class="btn ghost" @onclick="() => form = null">Annuler</button>
+                <button type="submit" class="btn" disabled="@busy">@(isNew ? (busy ? "Envoi…" : "Envoyer l'invitation") : "Enregistrer")</button>
+            </div>
+        </EditForm>
+    </div>
+}
+
+@if (confirm is { } c)
+{
+    <div class="modal-backdrop" @onclick="() => confirm = null"></div>
+    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="cf-title">
+        <h3 id="cf-title">@(c.Action == DeleteAction ? $"Supprimer le compte de {c.User.Label} ?" : c.Action == DisableAction ? $"Désactiver {c.User.Label} ?" : $"Réactiver {c.User.Label} ?")</h3>
+        <p class="hint">@(c.Action == DeleteAction ? "La personne ne pourra plus se connecter. Les écrans, listes de lecture et médias restent dans leurs aires." : c.Action == DisableAction ? "La personne ne pourra plus se connecter. Ses rôles sont conservés ; vous pourrez la réactiver." : "La personne pourra de nouveau se connecter, avec les mêmes rôles.")</p>
+        @if (confirmError != null) { <div class="err">@confirmError</div> }
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => confirm = null">Annuler</button>
+            <button class="btn @(c.Action == DeleteAction ? "danger-solid" : "")" @onclick="Confirm">@(c.Action == DeleteAction ? "Supprimer" : c.Action == DisableAction ? "Désactiver" : "Réactiver")</button>
+        </div>
+    </div>
+}
+
+@code {
+    private const string EnableAction = "enable", DisableAction = "disable", DeleteAction = "delete";
+    private List<User> people = new();
+    private List<Area> manageable = new();   // aires dont la personne connectée gère les membres
+    private bool orgAdmin, busy;
+    private string orgName = "";
+    private Guid? menuFor;
+    private MemberForm? form;
+    private string? formError, confirmError;
+    private (User User, string Action)? confirm;
+
+    private class MemberForm
+    {
+        public Guid? Id; public string OldName = "", Name = "", Email = "";
+        public bool OrgAdmin; public int OtherAreas;
+        public Dictionary<Guid, string> Roles = new();
+    }
+
+    protected override void OnInitialized() => Load();
+
+    private void Load()
+    {
+        (orgName, orgAdmin, manageable) = Store.Read(d => (d.Tenant.Name, d.Access.IsOrgAdmin, d.Areas.OrderBy(a => a.CreatedUtc).ToList().Where(a => d.Access.CanManage(a.Id)).ToList()));
+        people = Store.Read(d => d.Users.OrderBy(u => u.Role == Roles.ClientAdmin ? 0 : 1).ThenBy(u => u.Label, StringComparer.CurrentCultureIgnoreCase).ToList());
+        if (!orgAdmin)   // un administrateur d'aire voit les membres de ses aires (et les administrateurs de l'organisation)
+        {
+            var mine = manageable.Select(a => a.Id).ToHashSet();
+            people = people.Where(u => u.Role == Roles.ClientAdmin || u.Id == Ctx.UserId || u.AreaRoles.Any(r => mine.Contains(r.AreaId))).ToList();
+        }
+    }
+
+    private bool CanEdit(User u) => orgAdmin || u.Role == Roles.ClientMember && u.Id != Ctx.UserId;
+
+    private static string Initials(User u) => string.Concat(u.Label.Split(' ', '.', '@').Where(w => w.Length > 0).Take(2).Select(w => char.ToUpperInvariant(w[0])));
+
+    private void SetRole(Guid areaId, string? role)
+    {
+        if (form == null) return;
+        formError = null;
+        if (string.IsNullOrEmpty(role)) form.Roles.Remove(areaId); else form.Roles[areaId] = role;
+    }
+
+    private void OpenInvite() { formError = null; form = new MemberForm(); }
+
+    private void OpenEdit(User u)
+    {
+        if (!CanEdit(u)) return;
+        menuFor = null; formError = null;
+        var mine = manageable.Select(a => a.Id).ToHashSet();
+        form = new MemberForm
+        {
+            Id = u.Id, OldName = u.Label, Name = u.Name, Email = u.Email, OrgAdmin = u.Role == Roles.ClientAdmin,
+            Roles = u.AreaRoles.Where(r => mine.Contains(r.AreaId)).ToDictionary(r => r.AreaId, r => r.Role),
+            OtherAreas = u.AreaRoles.Count(r => !mine.Contains(r.AreaId))
+        };
+    }
+
+    private static string? KeepsAnOrgAdmin(IEnumerable<User> all, Guid changing) =>
+        all.Any(u => u.Id != changing && u.Role == Roles.ClientAdmin && !u.Disabled) ? null : "L'organisation doit garder au moins un autre administrateur actif.";
+
+    // Un administrateur d'aire ne touche qu'aux rôles des aires qu'il gère ; les autres rôles de la personne sont conservés.
+    private static void ApplyRoles(User u, Dictionary<Guid, string> roles, HashSet<Guid> managed)
+    {
+        u.AreaRoles.RemoveAll(r => managed.Contains(r.AreaId));
+        u.AreaRoles.AddRange(roles.Where(r => managed.Contains(r.Key)).Select(r => new AreaRole { AreaId = r.Key, Role = r.Value }));
+    }
+
+    private async Task Save()
+    {
+        if (form is not { } f || busy) return;
+        formError = null;
+        var name = f.Name.Trim();
+        var email = f.Email.Trim().ToLowerInvariant();
+        if (name.Length == 0) { formError = "Saisissez le nom."; return; }
+        if (f.Id == null && !System.Text.RegularExpressions.Regex.IsMatch(email, @"^[^@\s]+@[^@\s]+\.[^@\s]+$")) { formError = "Saisissez une adresse e-mail valide."; return; }
+        var makeOrgAdmin = orgAdmin && f.OrgAdmin;
+        if (!makeOrgAdmin && f.Id == null && f.Roles.Count == 0) { formError = "Donnez un rôle dans au moins une aire" + (orgAdmin ? ", ou faites-en un administrateur de l'organisation." : "."); return; }
+
+        if (f.Id is { } id)
+        {
+            formError = Store.Write(d =>
+            {
+                var managed = d.Areas.ToList().Where(a => d.Access.CanManage(a.Id)).Select(a => a.Id).ToHashSet();
+                var u = d.Users.FirstOrDefault(x => x.Id == id);
+                if (u == null) return "Compte introuvable.";
+                if (!d.Access.IsOrgAdmin && u.Role != Roles.ClientMember) return "Seul un administrateur de l'organisation modifie ce compte.";
+                if (d.Access.IsOrgAdmin && u.Role == Roles.ClientAdmin && !makeOrgAdmin)
+                {
+                    if (u.Id == Ctx.UserId) return "Vous ne pouvez pas vous retirer ce rôle : demandez-le à un autre administrateur de l'organisation.";
+                    if (KeepsAnOrgAdmin(d.Users, u.Id) is { } e) return e;
+                }
+                u.Name = name;
+                if (d.Access.IsOrgAdmin) u.Role = makeOrgAdmin ? Roles.ClientAdmin : Roles.ClientMember;
+                if (u.Role == Roles.ClientMember) ApplyRoles(u, f.Roles, managed);
+                return null;
+            });
+            if (formError != null) return;
+            Toast.Ok($"Accès de {name} enregistrés.");
+            form = null;
+            Load();
+            return;
+        }
+
+        // Invitation : mot de passe provisoire envoyé par e-mail, à changer à la première connexion.
+        var pwd = Passwords.Generate();
+        Reseller? reseller = null;
+        formError = Store.Write(d =>
+        {
+            if (d.EmailTaken(email)) return d.Users.Any(u => u.Email == email) ? "Cette personne fait déjà partie de l'organisation : modifiez ses rôles dans la liste." : "Cette adresse e-mail est déjà utilisée.";
+            var managed = d.Areas.ToList().Where(a => d.Access.CanManage(a.Id)).Select(a => a.Id).ToHashSet();
+            var u = new User { Email = email, Name = name, PasswordHash = Passwords.Hash(pwd), Role = makeOrgAdmin ? Roles.ClientAdmin : Roles.ClientMember, MustChangePassword = true, CreatedUtc = DateTime.UtcNow };
+            if (!makeOrgAdmin) ApplyRoles(u, f.Roles, managed);
+            d.AddUser(u);
+            reseller = d.Reseller;
+            return null;
+        });
+        if (formError != null) return;
+        busy = true;
+        try
+        {
+            var mailErr = await Mail.SendWelcome(reseller!, Resolver.LoginUrl(reseller!, Nav.BaseUri), $"Vous avez été invité à gérer les écrans de « {orgName} ».", name, email, pwd);
+            if (mailErr == null) Toast.Ok($"Invitation envoyée à {email}.");
+            else Toast.Error($"Compte créé, mais l'e-mail n'a pas pu être envoyé : {mailErr}. Communiquez vous-même le mot de passe provisoire à {email} : {pwd}");
+        }
+        finally { busy = false; }
+        form = null;
+        Load();   // pas de rechargement : le message (avec le mot de passe provisoire si l'e-mail n'est pas parti) doit rester affiché
+    }
+
+    // Nouveau mot de passe provisoire, renvoyé par e-mail.
+    private async Task Resend(User u)
+    {
+        menuFor = null;
+        var pwd = Passwords.Generate();
+        var reseller = Store.Write(d =>
+        {
+            if (d.Users.FirstOrDefault(x => x.Id == u.Id) is { } x) { x.PasswordHash = Passwords.Hash(pwd); x.MustChangePassword = true; }
+            return d.Reseller;
+        });
+        var mailErr = await Mail.SendWelcome(reseller!, Resolver.LoginUrl(reseller!, Nav.BaseUri), $"Vous avez été invité à gérer les écrans de « {orgName} ».", u.Name, u.Email, pwd);
+        if (mailErr == null) Toast.Ok($"Invitation renvoyée à {u.Email}.");
+        else Toast.Error($"L'e-mail n'a pas pu être envoyé : {mailErr}. Communiquez vous-même le nouveau mot de passe provisoire à {u.Email} : {pwd}");
+        Load();
+    }
+
+    private void Ask(User u, string action) { menuFor = null; confirm = (u, action); confirmError = null; }
+
+    private void Confirm()
+    {
+        if (confirm is not { } c) return;
+        confirmError = Store.Write(d =>
+        {
+            if (!d.Access.IsOrgAdmin) return "Seul un administrateur de l'organisation désactive ou supprime un compte.";
+            var u = d.Users.FirstOrDefault(x => x.Id == c.User.Id);
+            if (u == null) return "Compte introuvable.";
+            if (u.Id == Ctx.UserId) return "Vous ne pouvez pas modifier votre propre accès ici.";
+            if (c.Action != EnableAction && u.Role == Roles.ClientAdmin && !u.Disabled && KeepsAnOrgAdmin(d.Users, u.Id) is { } e) return e;
+            if (c.Action == DeleteAction) d.RemoveUser(u.Id);
+            else u.Disabled = c.Action == DisableAction;
+            return null;
+        });
+        if (confirmError != null) return;
+        Toast.Ok(c.Action == DeleteAction ? $"Compte de {c.User.Label} supprimé." : c.Action == DisableAction ? $"{c.User.Label} est désactivé." : $"{c.User.Label} est réactivé.");
+        confirm = null;
+        Load();
+    }
+}

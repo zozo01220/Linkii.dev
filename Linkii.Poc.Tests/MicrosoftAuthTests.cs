@@ -58,7 +58,7 @@ public class MicrosoftAuthTests : IDisposable
     public void Consent_url_asks_read_only_calendar_access_with_pkce()
     {
         var url = Auth().StartAuthorization(tenant.Id, "calendar", "https://app.test/integrations", "https://app.test/");
-        Assert.StartsWith("https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?", url);
+        Assert.StartsWith("https://login.microsoftonline.com/common/oauth2/v2.0/authorize?", url);   // comptes personnels acceptés
         var q = Query(url);
         Assert.Equal("app-id", q["client_id"]);
         Assert.Equal("code", q["response_type"]);
@@ -69,6 +69,16 @@ public class MicrosoftAuthTests : IDisposable
         Assert.Contains("offline_access", scopes);
         Assert.DoesNotContain(scopes, s => s.Contains("Files."));
         Assert.DoesNotContain(scopes, s => s.Contains("ReadWrite"));
+    }
+
+    [Theory]
+    [InlineData("calendar")]
+    [InlineData("drive")]
+    public void Consent_url_asks_only_scopes_personal_accounts_support(string purpose)
+    {
+        // Place.Read.All et Sites.Read.All n'existent pas pour les comptes outlook.com : les demander ferait refuser la connexion
+        var scopes = Query(Auth().StartAuthorization(tenant.Id, purpose, "https://app.test/integrations", "https://app.test"))["scope"]!.Split(' ');
+        Assert.DoesNotContain(scopes, s => s.Contains("Place.") || s.Contains("Sites."));
     }
 
     [Fact]

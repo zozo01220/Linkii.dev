@@ -9,7 +9,7 @@
 <div class="page-head">
     <div>
         <h1>Clients et accès</h1>
-        <p class="sub">Créez un client chez un revendeur, ou entrez dans son espace pour l'aider. Chaque entrée est journalisée.</p>
+        <p class="sub">Créez un client chez un revendeur, ou entrez dans son espace pour l'aider. Chaque entrée est journalisée. Cliquez sur le nombre d'utilisateurs pour voir les comptes.</p>
     </div>
     <button class="btn" @onclick="Open">+ Ajouter un client</button>
 </div>
@@ -49,14 +49,44 @@
     </div>
 }
 
+@{
+    var totalUsers = clients.Sum(c => c.Users.Total);
+    var active = clients.Sum(c => c.Users.Active30);
+    var invited = clients.Sum(c => c.Users.Invited);
+    var maxUsers = Math.Max(1, clients.Select(c => c.Users.Total).DefaultIfEmpty(0).Max());
+}
+<div class="stats">
+    <div class="stat"><div class="n">@clients.Count</div><div class="l">organisations</div></div>
+    <div class="stat"><div class="n">@totalUsers</div><div class="l">utilisateurs · @(clients.Count == 0 ? "0" : (totalUsers / (double)clients.Count).ToString("0.0", Fr)) par organisation</div></div>
+    <div class="stat"><div class="n">@(totalUsers == 0 ? 0 : (int)Math.Round(active * 100.0 / totalUsers)) %</div><div class="l">actifs sur 30 jours · @invited invitation@(invited > 1 ? "s" : "") en attente</div></div>
+    <div class="stat"><div class="n">@clients.Sum(c => c.Users.Areas)</div><div class="l">aires de gestion</div></div>
+</div>
+
 <table class="tbl">
-    <thead><tr><th>Client</th><th>Revendeur</th><th class="num">Écrans</th><th>État</th><th></th></tr></thead>
+    <thead><tr>
+        <th><button type="button" class="th-sort @(sort == SortName ? "on" : "")" @onclick="() => sort = SortName">Client</button></th>
+        <th>Revendeur</th>
+        <th><button type="button" class="th-sort @(sort == SortUsers ? "on" : "")" @onclick="() => sort = SortUsers">Utilisateurs</button></th>
+        <th class="num">Actifs 30 j</th>
+        <th class="num">Aires</th>
+        <th class="num"><button type="button" class="th-sort @(sort == SortScreens ? "on" : "")" @onclick="() => sort = SortScreens">Écrans</button></th>
+        <th>État</th><th></th>
+    </tr></thead>
     <tbody>
-    @foreach (var c in clients)
+    @foreach (var c in Sorted)
     {
+        var row = c;
         <tr>
             <td><b>@c.Client.Name</b></td>
             <td>@c.Reseller</td>
+            <td>
+                <button type="button" class="linklike bar-btn" title="Voir les utilisateurs de @c.Client.Name" @onclick="() => OpenUsers(row)">
+                    <span class="bar-cell"><span class="n">@c.Users.Total</span><span class="bar-track"><span style="width:@((int)Math.Round(c.Users.Total * 100.0 / maxUsers))%"></span></span></span>
+                    <small>@c.Users.Breakdown</small>
+                </button>
+            </td>
+            <td class="num">@c.Users.Active30</td>
+            <td class="num">@c.Users.Areas</td>
             <td class="num">@c.Screens</td>
             <td><span class="pill @(c.Client.Suspended ? "bad" : "ok")">@(c.Client.Suspended ? "Suspendu" : "Actif")</span></td>
             <td>
@@ -65,9 +95,40 @@
             </td>
         </tr>
     }
-    @if (clients.Count == 0) { <tr><td colspan="5">Aucun client pour l'instant.</td></tr> }
+    @if (clients.Count == 0) { <tr><td colspan="8">Aucun client pour l'instant.</td></tr> }
     </tbody>
 </table>
+
+@if (usersOf is { } uo)
+{
+    <div class="modal-backdrop" @onclick="() => usersOf = null"></div>
+    <div class="modal app-modal wide" role="dialog" aria-modal="true" aria-labelledby="cu-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="cu-title">Utilisateurs de @uo.Client.Name</h3><small class="muted">@uo.Users.Breakdown · @uo.Users.Active30 actif@(uo.Users.Active30 > 1 ? "s" : "") sur 30 jours · @uo.Users.Areas aire@(uo.Users.Areas > 1 ? "s" : "") de gestion</small></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => usersOf = null"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            <table class="tbl">
+                <thead><tr><th>Nom</th><th>Rôle</th><th>Dernière activité</th><th>État</th></tr></thead>
+                <tbody>
+                @foreach (var u in clientUsers)
+                {
+                    <tr>
+                        <td><b>@u.Label</b><br /><small class="muted">@u.Email</small></td>
+                        <td>@(u.Role == Roles.ClientAdmin ? "Administrateur de l'organisation" : string.Join(", ", u.AreaRoles.Select(r => (clientAreas.FirstOrDefault(a => a.Id == r.AreaId)?.Name ?? "?") + " (" + AreaRoles.Label(r.Role).ToLowerInvariant() + ")")) is { Length: > 0 } t ? t : "Aucune aire")</td>
+                        <td>@((u.LastActiveUtc ?? u.LastLoginUtc)?.ToLocalTime().ToString("d MMM yyyy HH:mm") ?? "jamais")</td>
+                        <td><span class="pill @(u.Disabled ? "" : u.IsInvited ? "warn" : "ok")">@(u.Disabled ? "Désactivé" : u.IsInvited ? "Invité" : "Actif")</span></td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+        <div class="modal-foot">
+            <form method="post" action="/space/enter"><input type="hidden" name="clientId" value="@uo.Client.Id" /><button class="btn ghost" type="submit">Entrer dans l'espace</button></form>
+            <button type="button" class="btn" @onclick="() => usersOf = null">Fermer</button>
+        </div>
+    </div>
+}
 
 <h2 style="margin:28px 0 10px">Journal des accès</h2>
 <table class="tbl">
@@ -82,7 +143,29 @@
 </table>
 
 @code {
-    private record Row(Tenant Client, string Reseller, int Screens);
+    private record Row(Tenant Client, string Reseller, int Screens, UserStats Users);
+    private static readonly System.Globalization.CultureInfo Fr = new("fr-CH");
+    private const string SortName = "name", SortUsers = "users", SortScreens = "screens";
+    private string sort = SortUsers;
+    private Row? usersOf;
+    private List<User> clientUsers = new();
+    private List<Area> clientAreas = new();
+
+    private IEnumerable<Row> Sorted => sort switch
+    {
+        SortUsers => clients.OrderByDescending(c => c.Users.Total).ThenBy(c => c.Client.Name),
+        SortScreens => clients.OrderByDescending(c => c.Screens).ThenBy(c => c.Client.Name),
+        _ => clients
+    };
+
+    // Détail en lecture seule : l'équipe Linkii voit tous les comptes de l'organisation et leurs rôles.
+    private void OpenUsers(Row r)
+    {
+        clientUsers = Root.Read(d => d.Users.Where(u => u.ClientId == r.Client.Id && Roles.IsClient(u.Role))
+            .OrderBy(u => u.Role == Roles.ClientAdmin ? 0 : 1).ThenBy(u => u.Name).ToList());
+        clientAreas = Root.Read(d => d.Areas.Where(a => a.ClientId == r.Client.Id).ToList());
+        usersOf = r;
+    }
     private List<Row> clients = new();
     private List<Reseller> resellers = new();
     private List<AccessLogEntry> log = new();
@@ -97,7 +180,7 @@
     {
         resellers = Root.Read(d => d.Resellers.Where(r => r.Active).OrderBy(r => r.Name).ToList());
         clients = Root.Read(d => d.Clients.OrderBy(c => c.Name)
-            .Select(c => new Row(c, d.Resellers.FirstOrDefault(r => r.Id == c.ResellerId)?.Name ?? "?", d.Screens.Count(s => s.ClientId == c.Id && s.Token != null))).ToList());
+            .Select(c => new Row(c, d.Resellers.FirstOrDefault(r => r.Id == c.ResellerId)?.Name ?? "?", d.Screens.Count(s => s.ClientId == c.Id && s.Token != null), UserStats.Of(d, c))).ToList());
         log = Root.Read(d => d.AccessLog.OrderByDescending(l => l.AtUtc).Take(50).ToList());
     }
 

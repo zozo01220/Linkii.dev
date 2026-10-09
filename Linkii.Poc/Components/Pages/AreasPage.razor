@@ -1,0 +1,210 @@
+@page "/areas"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientAdmin")]
+@inject TenantStore Store
+@inject NavigationManager Nav
+@inject Toaster Toast
+
+<div class="page-head">
+    <div>
+        <h1>Aires de gestion</h1>
+        <p class="sub">Chaque aire a ses écrans, ses listes de lecture, ses médias et ses membres. Ses zones classent ses écrans.</p>
+    </div>
+    <button class="btn" @onclick="OpenNew"><Ico Name="plus" Size="16" /> Nouvelle aire</button>
+</div>
+
+<table class="tbl">
+    <thead><tr><th>Aire</th><th>Zones</th><th class="num">Écrans</th><th class="num">Listes</th><th class="num">Médias</th><th>Membres</th><th></th></tr></thead>
+    <tbody>
+    @foreach (var r in rows)
+    {
+        var row = r;
+        <tr class="clickable" @onclick="() => OpenEdit(row)">
+            <td><b>@row.Area.Name</b> @if (row.Area.Id == currentId) { <span class="pill blue">ouverte</span> }</td>
+            <td>@(row.Area.Zones.Count == 0 ? "—" : string.Join(", ", row.Area.Zones.Select(z => z.Name)))</td>
+            <td class="num">@row.Screens</td>
+            <td class="num">@row.Playlists</td>
+            <td class="num">@row.Media</td>
+            <td>
+                @if (row.Members.Count == 0) { <span class="muted">Administrateurs de l'organisation</span> }
+                else
+                {
+                    <span class="avatars">
+                        @foreach (var m in row.Members.Take(4)) { <span class="avatar" title="@m.Label (@AreaRoles.Label(m.RoleIn(row.Area.Id)))">@Initials(m)</span> }
+                        <small class="muted">@row.Members.Count membre@(row.Members.Count > 1 ? "s" : "")</small>
+                    </span>
+                }
+            </td>
+            <td @onclick:stopPropagation="true">
+                <div class="kebab">
+                    <button type="button" class="kebab-btn" aria-label="Actions pour @row.Area.Name" aria-haspopup="menu" aria-expanded="@(menuFor == row.Area.Id ? "true" : "false")" @onclick="() => menuFor = menuFor == row.Area.Id ? null : row.Area.Id"><Ico Name="dots-v" Size="18" /></button>
+                    @if (menuFor == row.Area.Id)
+                    {
+                        <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                        <div class="kebab-menu" role="menu">
+                            <button type="button" role="menuitem" @onclick="() => Open(row.Area)"><Ico Name="monitor" Size="16" /> Ouvrir ses écrans</button>
+                            <button type="button" role="menuitem" @onclick="() => OpenEdit(row)"><Ico Name="edit" Size="16" /> Renommer, zones</button>
+                            <a role="menuitem" href="/members"><Ico Name="users" Size="16" /> Membres</a>
+                            <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = row; deleteError = null; }"><Ico Name="trash" Size="16" /> Supprimer</button>
+                        </div>
+                    }
+                </div>
+            </td>
+        </tr>
+    }
+    </tbody>
+</table>
+<p class="hint" style="margin-top:12px">Les administrateurs de l'organisation voient toutes les aires. Pour donner accès à une aire, invitez une personne dans <a href="/members">Membres</a> avec le rôle Utilisateur ou Administrateur de cette aire.</p>
+
+@if (creating)
+{
+    <div class="modal-backdrop" @onclick="() => creating = false"></div>
+    <div class="modal app-modal sm" role="dialog" aria-modal="true" aria-labelledby="na-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="na-title">Nouvelle aire de gestion</h3></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => creating = false"><Ico Name="x" Size="20" /></button>
+        </div>
+        <EditForm Model="this" OnSubmit="Create" class="modal-form">
+            <div class="modal-body">
+                <label class="lbl" for="na-name" style="margin-top:0">Nom</label>
+                <input id="na-name" class="full" maxlength="60" @bind="newName" @bind:event="oninput" placeholder="Ex. : Site de Genève, Bâtiment B" />
+                @if (members.Count > 0)
+                {
+                    <label class="lbl" for="na-adm">Administrateur de l'aire <small>(facultatif)</small></label>
+                    <select id="na-adm" class="full" @bind="newAdmin">
+                        <option value="">— Plus tard —</option>
+                        @foreach (var m in members) { <option value="@m.Id">@m.Label</option> }
+                    </select>
+                }
+                <p class="hint" style="margin:12px 0 0">L'aire démarre vide : connectez-y des écrans, créez-y des listes de lecture et des médias, ou déplacez-en depuis une autre aire.</p>
+                @if (formError != null) { <div class="err">@formError</div> }
+            </div>
+            <div class="modal-foot">
+                <button type="button" class="btn ghost" @onclick="() => creating = false">Annuler</button>
+                <button type="submit" class="btn">Créer l'aire</button>
+            </div>
+        </EditForm>
+    </div>
+}
+
+@if (editing is { } ed)
+{
+    <div class="modal-backdrop" @onclick="CloseEdit"></div>
+    <div class="modal app-modal sm" role="dialog" aria-modal="true" aria-labelledby="ea-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="ea-title">Aire « @ed.Area.Name »</h3></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseEdit"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            <label class="lbl" for="ea-name" style="margin-top:0">Nom</label>
+            <div class="row" style="flex-wrap:nowrap"><input id="ea-name" class="full" maxlength="60" @bind="editName" @bind:event="oninput" @onkeydown="OnRenameKey" /><button type="button" class="btn ghost" @onclick="Rename">Renommer</button></div>
+            <label class="lbl">Zones <small>(elles classent les écrans de l'aire, sans effet sur les droits)</small></label>
+            <AreaZones AreaId="ed.Area.Id" OnChanged="Load" />
+            @if (formError != null) { <div class="err">@formError</div> }
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn" @onclick="CloseEdit">Fermer</button>
+        </div>
+    </div>
+}
+
+@if (deleting is { } del)
+{
+    <div class="modal-backdrop" @onclick="() => deleting = null"></div>
+    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="da-title">
+        <h3 id="da-title">Supprimer l'aire « @del.Area.Name » ?</h3>
+        <p class="hint">Une aire ne se supprime que vide. Ses zones disparaissent, et ses membres perdent cet accès.</p>
+        @if (deleteError != null) { <div class="err">@deleteError</div> }
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => deleting = null">Annuler</button>
+            <button class="btn danger-solid" @onclick="Delete">Supprimer</button>
+        </div>
+    </div>
+}
+
+@code {
+    private record Row(Area Area, int Screens, int Playlists, int Media, List<User> Members);
+    private List<Row> rows = new();
+    private List<User> members = new();
+    private Guid? currentId, menuFor;
+    private bool creating;
+    private string newName = "", newAdmin = "", editName = "";
+    private string? formError, deleteError;
+    private Row? editing, deleting;
+
+    [SupplyParameterFromQuery(Name = "created")] public string? Created { get; set; }
+    [SupplyParameterFromQuery(Name = "deleted")] public string? Deleted { get; set; }
+
+    protected override void OnInitialized()
+    {
+        if (Created != null) Toast.Ok($"Aire « {Created} » créée.");
+        if (Deleted != null) Toast.Ok($"Aire « {Deleted} » supprimée.");
+        Load();
+    }
+
+    private void Load()
+    {
+        (rows, members, currentId) = Store.Read(d =>
+        {
+            var users = d.Users.ToList();
+            var list = d.Areas.OrderBy(a => a.CreatedUtc).ToList().Select(a =>
+            {
+                var (s, p, m) = AreaOps.Contents(d, a.Id);
+                return new Row(a, s, p, m, users.Where(u => u.Role == Roles.ClientMember && u.RoleIn(a.Id) != null).ToList());
+            }).ToList();
+            return (list, users.Where(u => u.Role == Roles.ClientMember && !u.Disabled).OrderBy(u => u.Label).ToList(), d.Area?.Id);
+        });
+        if (editing != null) editing = rows.FirstOrDefault(r => r.Area.Id == editing.Area.Id);
+    }
+
+    private static string Initials(User u) => string.Concat(u.Label.Split(' ', '.', '@').Where(w => w.Length > 0).Take(2).Select(w => char.ToUpperInvariant(w[0])));
+
+    private void OpenNew() { formError = null; newName = newAdmin = ""; creating = true; }
+
+    private void Create()
+    {
+        var name = newName; Guid? adm = Guid.TryParse(newAdmin, out var g) ? g : null;
+        Area? created = null;
+        formError = Store.Write(d =>
+        {
+            var (a, err) = AreaOps.Create(d, name);
+            if (a == null) return err;
+            created = a;
+            if (adm != null && d.Users.FirstOrDefault(u => u.Id == adm && u.Role == Roles.ClientMember) is { } u)
+                u.AreaRoles.Add(new AreaRole { AreaId = a.Id, Role = AreaRoles.Admin });
+            return null;
+        });
+        if (formError != null) return;
+        creating = false;
+        Nav.NavigateTo("/areas?created=" + Uri.EscapeDataString(created!.Name), forceLoad: true);   // le menu affiche le sélecteur d'aire dès la deuxième
+    }
+
+    private void OpenEdit(Row r) { menuFor = null; formError = null; editing = r; editName = r.Area.Name; }
+
+    private void CloseEdit() { editing = null; Nav.NavigateTo("/areas", forceLoad: true); }   // le sélecteur d'aire du menu se met à jour
+
+    private void Rename()
+    {
+        if (editing is not { } ed) return;
+        var n = editName;
+        formError = Store.Write(d => AreaOps.Rename(d, ed.Area.Id, n));
+        if (formError == null) Toast.Ok($"Aire renommée en « {n.Trim()} ».");
+        Load();
+    }
+
+    private void OnRenameKey(KeyboardEventArgs e) { if (e.Key == "Enter") Rename(); }
+
+    private void Open(Area a)
+    {
+        menuFor = null;
+        if (Store.SwitchArea(a.Id)) Nav.NavigateTo("/", forceLoad: true);
+    }
+
+    private void Delete()
+    {
+        if (deleting is not { } del) return;
+        deleteError = Store.Write(d => AreaOps.Delete(d, del.Area.Id));
+        if (deleteError != null) return;
+        deleting = null;
+        Nav.NavigateTo("/areas?deleted=" + Uri.EscapeDataString(del.Area.Name), forceLoad: true);
+    }
+}

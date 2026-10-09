@@ -1,47 +1,104 @@
-<div class="fmt">
-    <div class="fmt-block">
-        <label for="fmt-type">Matériel</label>
-        <select id="fmt-type" value="@Spec.Type" @onchange="SetType">
-            @foreach (var t in ScreenOptions.Types)
-            {
-                <option value="@t.Id" selected="@(t.Id == Spec.Type)">@t.Icon @t.Label</option>
-            }
-        </select>
-    </div>
-
-    <div class="fmt-block">
-        <label for="fmt-orient">Format d'affichage</label>
-        <select id="fmt-orient" value="@Spec.Orientation" @onchange="SetOrientation">
-            <option value="landscape" selected="@(Spec.Orientation == "landscape")">Paysage</option>
-            <option value="portrait" selected="@(Spec.Orientation == "portrait")">Portrait</option>
-        </select>
-    </div>
-
-    @if (Layout != null)
-    {
-        @* découpage de l'écran : chaque zone reçoit sa propre playlist (le « + » de chaque zone sur l'aperçu) *@
+@if (Compact)
+{
+    @* éditeur d'écran : orientation et découpage en choix visuels ; matériel et résolution repliés *@
+    <div class="fmt">
         <div class="fmt-block">
-            <label for="fmt-layout">Découpage de l'écran</label>
-            <select id="fmt-layout" value="@Layout" @onchange="SetLayout">
-                @foreach (var l in ScreenLayouts.For(Spec))
+            <label id="fmt-orient-l">Orientation</label>
+            <div class="fmt-seg" role="group" aria-labelledby="fmt-orient-l">
+                <button type="button" class="@(Spec.Orientation != "portrait" ? "on" : "")" aria-pressed="@(Spec.Orientation != "portrait" ? "true" : "false")" @onclick='() => SetOrient("landscape")'><Ico Name="monitor" Size="16" /> Paysage</button>
+                <button type="button" class="@(Spec.Orientation == "portrait" ? "on" : "")" aria-pressed="@(Spec.Orientation == "portrait" ? "true" : "false")" @onclick='() => SetOrient("portrait")'><Ico Name="monitor" Size="16" /> Portrait</button>
+            </div>
+        </div>
+
+        @if (Layout != null)
+        {
+            <div class="fmt-block">
+                <label id="fmt-layout-l">Découpage</label>
+                <div class="fmt-thumbs" role="group" aria-labelledby="fmt-layout-l">
+                    @foreach (var l in ScreenLayouts.For(Spec))
+                    {
+                        var def = l;
+                        <button type="button" class="@(def.Id == Layout ? "on" : "")" aria-pressed="@(def.Id == Layout ? "true" : "false")" title="@def.Label" @onclick="() => PickLayout(def.Id)">
+                            <span class="fmt-mini @(Spec.Orientation == "portrait" ? "col" : "")">@foreach (var z in def.Sizes) { <i style="flex:@z.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) 1 0"></i> }</span>
+                            @(def.Sizes.Length == 1 ? "1 zone" : def.Sizes.Distinct().Count() == 1 ? $"{def.Sizes.Length} zones" : "2/3 + 1/3")
+                        </button>
+                    }
+                </div>
+                <small>@LayoutHint</small>
+            </div>
+        }
+
+        <details class="fmt-adv">
+            <summary><Ico Name="sliders" Size="15" /> Réglages avancés</summary>
+            <small class="fmt-sum">@(ScreenOptions.Types.Where(t => t.Id == Spec.Type).Select(t => t.Label).FirstOrDefault() ?? Spec.Type) · @(Spec.Resolution == "auto" ? "résolution auto" : Spec.Resolution)@(Detected != null ? $" ({Detected})" : "")</small>
+            <div class="fmt-block">
+                <label for="fmt-type">Matériel</label>
+                <select id="fmt-type" value="@Spec.Type" @onchange="SetType">
+                    @foreach (var t in ScreenOptions.Types)
+                    {
+                        <option value="@t.Id" selected="@(t.Id == Spec.Type)">@t.Icon @t.Label</option>
+                    }
+                </select>
+            </div>
+            <div class="fmt-block">
+                <label for="fmt-res">Résolution</label>
+                <select id="fmt-res" value="@Spec.Resolution" @onchange="SetResolution">
+                    @foreach (var r in ScreenOptions.Resolutions)
+                    {
+                        <option value="@r.Id" selected="@(r.Id == Spec.Resolution)">@Label(r)</option>
+                    }
+                </select>
+            </div>
+        </details>
+    </div>
+}
+else
+{
+    <div class="fmt">
+        <div class="fmt-block">
+            <label for="fmt-type">Matériel</label>
+            <select id="fmt-type" value="@Spec.Type" @onchange="SetType">
+                @foreach (var t in ScreenOptions.Types)
                 {
-                    <option value="@l.Id" selected="@(l.Id == Layout)">@l.Label</option>
+                    <option value="@t.Id" selected="@(t.Id == Spec.Type)">@t.Icon @t.Label</option>
                 }
             </select>
-            <small>@LayoutHint</small>
         </div>
-    }
 
-    <div class="fmt-block">
-        <label for="fmt-res">Résolution</label>
-        <select id="fmt-res" value="@Spec.Resolution" @onchange="SetResolution">
-            @foreach (var r in ScreenOptions.Resolutions)
-            {
-                <option value="@r.Id" selected="@(r.Id == Spec.Resolution)">@Label(r)</option>
-            }
-        </select>
+        <div class="fmt-block">
+            <label for="fmt-orient">Format d'affichage</label>
+            <select id="fmt-orient" value="@Spec.Orientation" @onchange="SetOrientation">
+                <option value="landscape" selected="@(Spec.Orientation == "landscape")">Paysage</option>
+                <option value="portrait" selected="@(Spec.Orientation == "portrait")">Portrait</option>
+            </select>
+        </div>
+
+        @if (Layout != null)
+        {
+            @* découpage de l'écran : chaque zone reçoit sa propre playlist (le « + » de chaque zone sur l'aperçu) *@
+            <div class="fmt-block">
+                <label for="fmt-layout">Découpage de l'écran</label>
+                <select id="fmt-layout" value="@Layout" @onchange="SetLayout">
+                    @foreach (var l in ScreenLayouts.For(Spec))
+                    {
+                        <option value="@l.Id" selected="@(l.Id == Layout)">@l.Label</option>
+                    }
+                </select>
+                <small>@LayoutHint</small>
+            </div>
+        }
+
+        <div class="fmt-block">
+            <label for="fmt-res">Résolution</label>
+            <select id="fmt-res" value="@Spec.Resolution" @onchange="SetResolution">
+                @foreach (var r in ScreenOptions.Resolutions)
+                {
+                    <option value="@r.Id" selected="@(r.Id == Spec.Resolution)">@Label(r)</option>
+                }
+            </select>
+        </div>
     </div>
-</div>
+}
 
 @code {
     [Parameter, EditorRequired] public ScreenSpec Spec { get; set; } = new();
@@ -49,6 +106,10 @@
     /// <summary>Découpage de l'écran (édition d'un écran) ; null : non proposé (format par défaut des nouveaux écrans).</summary>
     [Parameter] public string? Layout { get; set; }
     [Parameter] public EventCallback<string> LayoutChanged { get; set; }
+    /// <summary>Présentation de l'éditeur d'écran : orientation et découpage en choix visuels, matériel et résolution repliés.</summary>
+    [Parameter] public bool Compact { get; set; }
+    /// <summary>Résolution détectée sur l'écran (« 1920×1080 »), rappelée dans le résumé des réglages avancés.</summary>
+    [Parameter] public string? Detected { get; set; }
 
     // Ce que permet le format, en une phrase.
     private string LayoutHint =>
@@ -77,10 +138,18 @@
         return Changed();
     }
 
-    private Task SetOrientation(ChangeEventArgs e)
+    private Task SetOrientation(ChangeEventArgs e) => SetOrient(e.Value?.ToString() == "portrait" ? "portrait" : "landscape");
+
+    private Task SetOrient(string orientation)
     {
-        Spec.Orientation = e.Value?.ToString() == "portrait" ? "portrait" : "landscape";
+        Spec.Orientation = orientation;
         return Changed();
+    }
+
+    private async Task PickLayout(string id)
+    {
+        await LayoutChanged.InvokeAsync(ScreenLayouts.Find(id).Id);
+        await OnChange.InvokeAsync();
     }
 
     private async Task SetLayout(ChangeEventArgs e)

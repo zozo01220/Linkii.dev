@@ -1,5 +1,5 @@
 @page "/integrations"
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientAdmin")]
 @inject TenantStore Store
 @inject AppService Svc
 @inject NavigationManager Nav
@@ -88,14 +88,14 @@ else
 
 @if (cvOpen)
 {
-    @* Canva : connexion du compte et intégration de l'organisation (identifiants du portail développeurs Canva) *@
+    @* Canva : connexion du compte Canva de l'organisation (intégration de la plateforme, configurée sur le serveur) *@
     <div class="modal-backdrop" @onclick="() => cvOpen = false"></div>
-    <div class="modal app-modal wide" role="dialog" aria-modal="true" aria-labelledby="cvs-title">
+    <div class="modal app-modal" role="dialog" aria-modal="true" aria-labelledby="cvs-title">
         <div class="modal-head">
             <AppIcon Id="canva" Connected="@canva.Connected" />
             <div class="grow">
                 <h3 id="cvs-title">Canva</h3>
-                <small>@(canva.Connected ? $"Connecté{(canva.User.Length > 0 ? $" ({canva.User})" : "")}" : canvaReady ? "Intégration configurée : connectez votre compte Canva" : "Étape 1 : configurez l'intégration, puis connectez votre compte")</small>
+                <small>@(canva.Connected ? $"Connecté{(canva.User.Length > 0 ? $" ({canva.User})" : "")}" : canvaReady ? "Connectez votre compte Canva" : "Pas encore disponible sur cette plateforme")</small>
             </div>
             <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => cvOpen = false"><Ico Name="x" Size="20" /></button>
         </div>
@@ -109,34 +109,10 @@ else
                 else if (canvaReady) { <a class="btn sm" href="/canva/connect" target="_top">Connecter Canva</a> }
             </div>
 
-            <h4 class="pe-sub">Intégration de l'organisation</h4>
-            <ol class="cvs-steps">
-                <li>Sur <a href="https://www.canva.com/developers/" target="_blank" rel="noopener">le portail développeurs Canva</a>, créez une intégration Connect API (l'authentification à deux facteurs de votre compte Canva doit être activée).</li>
-                <li>Dans <b>Configuration › Scopes</b>, cochez en lecture : <code>design:meta</code>, <code>design:content</code> et <code>profile</code>.</li>
-                <li>Dans <b>Redirect URLs › URL 1</b>, collez exactement l'adresse de retour ci-dessous.</li>
-                <li>Dans <b>Configuration › Credentials</b>, cliquez sur « Generate secret », puis recopiez ici le Client ID et le secret.</li>
-            </ol>
-            <div class="dw">
-                <div class="dw-field">
-                    <label for="cvs-redirect">Adresse de retour (à déclarer chez Canva)</label>
-                    <input id="cvs-redirect" class="mono" @bind="cvRedirect" spellcheck="false" />
-                    <small>Elle doit être identique chez Canva. En local, Canva refuse « localhost » : gardez 127.0.0.1.</small>
-                </div>
-                <div class="dw-field">
-                    <label for="cvs-id">Client ID</label>
-                    <input id="cvs-id" class="mono" @bind="cvId" autocomplete="off" spellcheck="false" placeholder="OC-…" />
-                </div>
-                <div class="dw-field">
-                    <label for="cvs-secret">Client secret</label>
-                    <input id="cvs-secret" type="password" @bind="cvSecret" autocomplete="new-password" placeholder="@(cvHasSecret ? "•••••• enregistré — laisser vide pour le conserver" : "Collez le secret généré par Canva")" />
-                    <small>Conservé chiffré ; il n'est jamais réaffiché.</small>
-                </div>
-            </div>
-            @if (cvFromServer) { <div class="dw-note">Une intégration est déjà configurée sur le serveur. Celle saisie ici la remplace pour votre organisation.</div> }
+            @if (!canvaReady) { <div class="dw-note">Canva n'est pas encore disponible sur cette plateforme (connexion Canva à configurer par l'administrateur Linkii).</div> }
         </div>
         <div class="modal-foot">
             <button class="btn ghost" @onclick="() => cvOpen = false">Fermer</button>
-            <button class="btn" @onclick="SaveCanvaSetup">Enregistrer l'intégration</button>
         </div>
     </div>
 }
@@ -204,7 +180,7 @@ else
         if (!on) return CatalogView.Entry.Of(a, "Inactive", "inactif", true);
         if (a.Id == "canva")
             return canva.Connected ? CatalogView.Entry.Of(a, "Connecté", "en-ligne", false)
-                 : CatalogView.Entry.Of(a, canvaReady ? "À connecter" : "À configurer", "mise-a-jour", false);
+                 : CatalogView.Entry.Of(a, canvaReady ? "À connecter" : "Indisponible", canvaReady ? "mise-a-jour" : "inactif", false);
         return CatalogView.Entry.Of(a, "Active", "en-ligne", false);
     }
 
@@ -265,7 +241,7 @@ else
         counts = Store.Read(d => d.Media.Where(m => m.AppId != null).GroupBy(m => m.AppId!).ToDictionary(g => g.Key, g => g.Count()));
         tenant = Store.Read(d => d.Tenant);
         canva = Canva.ConnectionOf(Store.ClientId);
-        canvaReady = Canva.IsConfigured(Store.ClientId);
+        canvaReady = Canva.IsConfigured;
     }
 
     // Enregistré immédiatement : seul le choix proposé dans les listes de lecture change, les écrans ne sont pas concernés.
@@ -304,8 +280,8 @@ else
                 break;
             case "denied": Toast.Error("Connexion à Canva annulée."); break;
             case "expired": Toast.Error("La demande de connexion à Canva a expiré. Recommencez."); break;
-            case "error": Toast.Error("Canva a refusé la connexion. Vérifiez la configuration de l'intégration et réessayez."); break;
-            case "unconfigured": Toast.Error("Configurez d'abord l'intégration Canva (bouton « Gérer »)."); break;
+            case "error": Toast.Error("Canva a refusé la connexion. Réessayez dans un instant."); break;
+            case "unconfigured": Toast.Error("La connexion Canva n'est pas encore configurée sur cette plateforme."); break;
         }
     }
 
@@ -362,29 +338,10 @@ else
         }
     }
 
-    // ---------- Canva : compte et intégration de l'organisation ----------
-    private bool cvOpen, canvaReady, cvHasSecret, cvFromServer;
-    private string cvId = "", cvSecret = "", cvRedirect = "";
+    // ---------- Canva : compte Canva de l'organisation (intégration de la plateforme) ----------
+    private bool cvOpen, canvaReady;
 
-    private void OpenCanva()
-    {
-        var s = Canva.SettingsOf(Store.ClientId);
-        cvId = s.ClientId; cvHasSecret = s.HasSecret; cvFromServer = s.FromServer; cvSecret = "";
-        cvRedirect = s.RedirectUri.Length > 0 ? s.RedirectUri : CanvaService.SuggestedRedirect(Nav.BaseUri);
-        cvOpen = true;
-    }
-
-    private void SaveCanvaSetup()
-    {
-        if (string.IsNullOrWhiteSpace(cvId)) { Toast.Error("Collez le Client ID de votre intégration Canva."); return; }
-        if (string.IsNullOrWhiteSpace(cvSecret) && !cvHasSecret) { Toast.Error("Collez le Client secret généré par Canva."); return; }
-        if (!Uri.TryCreate(cvRedirect.Trim(), UriKind.Absolute, out var r) || r.Scheme is not ("http" or "https") || r.AbsolutePath != "/canva/callback")
-        { Toast.Error("L'adresse de retour doit être une adresse complète se terminant par /canva/callback."); return; }
-        Canva.SaveSettings(Store.ClientId, cvId, cvSecret, cvRedirect);
-        cvHasSecret = true; cvSecret = "";
-        Load();
-        Toast.Ok("Intégration Canva enregistrée. Connectez maintenant votre compte Canva.");
-    }
+    private void OpenCanva() => cvOpen = true;
 
     private void DisconnectCanva()
     {

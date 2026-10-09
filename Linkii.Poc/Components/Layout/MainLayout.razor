@@ -1,6 +1,8 @@
 @inherits LayoutComponentBase
 @inject JsonStore Root
 @inject TenantContext Ctx
+@inject IServiceProvider Services
+@inject NavigationManager Nav
 
 <HeadContent>
     <style>:root { --brand: @brand; }</style>
@@ -11,6 +13,31 @@
     <aside class="sidebar @(navOpen ? "open" : "")" @onclick="() => { navOpen = false; open = false; }">
         <div class="brand"><BrandMark R="reseller" Size="30" /></div>
 
+        @if (Ctx.ClientId != null && multi && areas.Count > 0)
+        {
+            @* Aire de gestion ouverte : tout le back-office (écrans, listes, médias) ne montre que son contenu. *@
+            <div class="area-pick" @onclick:stopPropagation="true">
+                <button type="button" class="area-btn" aria-haspopup="menu" aria-expanded="@(areaMenu ? "true" : "false")" disabled="@(areas.Count < 2)" title="@(areas.Count < 2 ? "Votre aire de gestion" : "Changer d'aire de gestion")" @onclick="() => areaMenu = !areaMenu">
+                    <Ico Name="map-pin" Size="16" />
+                    <span class="area-txt"><b>@(currentArea?.Name ?? "Aucune aire")</b><small>Aire de gestion</small></span>
+                    @if (areas.Count > 1) { <Ico Name="chevron" Size="16" /> }
+                </button>
+                @if (areaMenu)
+                {
+                    <div class="menu-backdrop" @onclick="() => areaMenu = false"></div>
+                    <div class="area-menu" role="menu">
+                        @foreach (var a in areas)
+                        {
+                            var ar = a;
+                            <button type="button" role="menuitem" class="@(ar.Id == currentArea?.Id ? "on" : "")" @onclick="() => SwitchArea(ar.Id)">
+                                <Ico Name="map-pin" Size="15" /><span class="grow">@ar.Name</span><small>@(orgAdmin ? "" : AreaRoles.Label(roles.GetValueOrDefault(ar.Id)))</small>
+                            </button>
+                        }
+                        @if (orgAdmin) { <a href="areas" role="menuitem" class="area-manage" @onclick="() => areaMenu = false"><Ico Name="gear" Size="15" /> Gérer les aires</a> }
+                    </div>
+                }
+            </div>
+        }
         @if (Ctx.ClientId != null)
         {
             <NavLink class="nav" href="" Match="NavLinkMatch.All">
@@ -43,9 +70,22 @@
         }
 
         <div class="spacer"></div>
-        @if (Ctx.ClientId != null)
+        @if (Ctx.ClientId != null && multi && (orgAdmin || managesAny))
         {
-            @* Sources de contenus et éléments d'écran : en bas, juste au-dessus du compte. *@
+            @if (orgAdmin)
+            {
+                <NavLink class="nav" href="areas">
+                    <Ico Name="map-pin" Size="18" /> Aires de gestion
+                </NavLink>
+            }
+            <NavLink class="nav" href="members">
+                <Ico Name="users" Size="18" /> Membres
+            </NavLink>
+            <div class="nav-sep" role="separator"></div>
+        }
+        @if (Ctx.ClientId != null && orgAdmin)
+        {
+            @* Sources de contenus et éléments d'écran : en bas, juste au-dessus du compte (administrateurs de l'organisation). *@
             <NavLink class="nav" href="integrations">
                 <svg viewBox="0 0 24 24"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0V8zM12 17v5" /></svg> Intégrations
             </NavLink>
@@ -68,7 +108,7 @@
             {
                 <div class="menu-backdrop" @onclick="() => open = false"></div>
                 <div class="menu" role="menu">
-                    @if (Ctx.ClientId == null)
+                    @if (Ctx.ClientId == null || Ctx.IsClientMember && !Ctx.IsImpersonating)
                     {
                         <a href="account" role="menuitem" @onclick="() => { open = false; navOpen = false; }"><Ico Name="user" Size="16" /> Mon compte</a>
                     }
@@ -105,7 +145,25 @@
 </div>
 
 @code {
-    private bool open, navOpen;
+    private bool open, navOpen, areaMenu, multi, orgAdmin = true, managesAny;
+    private List<Area> areas = new();
+    private Area? currentArea;
+    private Dictionary<Guid, string> roles = new();
+
+    // Aires visibles dès qu'il y en a deux, ou dès qu'une personne a été invitée : une organisation seule ne voit rien de nouveau.
+    private void LoadAreas()
+    {
+        var store = Services.GetRequiredService<TenantStore>();
+        (areas, currentArea, roles, orgAdmin, managesAny, multi) = store.Read(d => (d.Access.Areas, d.Access.Current, d.Access.Roles, d.Access.IsOrgAdmin, d.Access.ManagesAnyArea,
+            d.Access.OrgAreaCount > 1 || d.Users.Any(u => u.Role == Roles.ClientMember)));
+    }
+
+    private void SwitchArea(Guid id)
+    {
+        areaMenu = false;
+        if (id == currentArea?.Id) return;
+        if (Services.GetRequiredService<TenantStore>().SwitchArea(id)) Nav.NavigateTo(Nav.Uri.Contains("/playlists/") ? "/playlists" : Nav.Uri, forceLoad: true);   // tout est relu dans la nouvelle aire
+    }
     private string brand = "#0B1F3A", orgName = "", userName = "", userEmail = "";
     private Reseller? reseller;
 
@@ -119,6 +177,7 @@
         var cid = Ctx.ClientId;
         orgName = cid != null ? Root.Read(d => d.Clients.FirstOrDefault(c => c.Id == cid)?.Name ?? "")
                 : Ctx.IsPlatformAdmin ? "Console administrateur Linkii" : reseller?.Name ?? "";
+        if (cid != null) LoadAreas();
         userEmail = Ctx.Email;
         userName = string.IsNullOrWhiteSpace(Ctx.DisplayName) ? userEmail : Ctx.DisplayName;
     }

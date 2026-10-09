@@ -5,32 +5,32 @@
 <div class="page-head">
     <div>
         <h1>Facturation</h1>
-        <p class="sub">Comptage des écrans appairés par revendeur et par client. Les montants seront traités plus tard.</p>
+        <p class="sub">Comptage des écrans appairés et des utilisateurs (comptes non désactivés) par revendeur et par client. Les montants seront traités plus tard.</p>
     </div>
 </div>
 
 <table class="tbl">
-    <thead><tr><th>Revendeur</th><th>Client</th><th class="num">Écrans appairés</th></tr></thead>
+    <thead><tr><th>Revendeur</th><th>Client</th><th class="num">Utilisateurs</th><th class="num">Écrans appairés</th></tr></thead>
     <tbody>
     @foreach (var g in groups)
     {
-        <tr style="background:#F5F7FA"><td><b>@g.Reseller</b></td><td></td><td class="num"><b>@g.Clients.Sum(c => c.Screens)</b></td></tr>
+        <tr style="background:#F5F7FA"><td><b>@g.Reseller</b></td><td></td><td class="num"><b>@g.Clients.Sum(c => c.Users)</b></td><td class="num"><b>@g.Clients.Sum(c => c.Screens)</b></td></tr>
         @foreach (var c in g.Clients)
         {
-            <tr><td></td><td>@c.Name @if (c.Suspended) { <span class="pill bad">Suspendu</span> }</td><td class="num">@c.Screens</td></tr>
+            <tr><td></td><td>@c.Name @if (c.Suspended) { <span class="pill bad">Suspendu</span> }</td><td class="num">@c.Users</td><td class="num">@c.Screens</td></tr>
         }
     }
-    <tr><td><b>Total plateforme</b></td><td></td><td class="num"><b>@groups.Sum(g => g.Clients.Sum(c => c.Screens))</b></td></tr>
+    <tr><td><b>Total plateforme</b></td><td></td><td class="num"><b>@groups.Sum(g => g.Clients.Sum(c => c.Users))</b></td><td class="num"><b>@groups.Sum(g => g.Clients.Sum(c => c.Screens))</b></td></tr>
     </tbody>
 </table>
 
 @code {
-    private record ClientRow(string Name, bool Suspended, int Screens);
+    private record ClientRow(string Name, bool Suspended, int Screens, int Users);
     private record Group(string Reseller, List<ClientRow> Clients);
     private List<Group> groups = new();
 
     protected override void OnInitialized() => groups = Root.Read(d => d.Resellers.OrderBy(r => r.Name)
         .Select(r => new Group(r.Name, d.Clients.Where(c => c.ResellerId == r.Id).OrderBy(c => c.Name)
-            .Select(c => new ClientRow(c.Name, c.Suspended, d.Screens.Count(s => s.ClientId == c.Id && s.Token != null))).ToList()))
+            .Select(c => new ClientRow(c.Name, c.Suspended, d.Screens.Count(s => s.ClientId == c.Id && s.Token != null), d.Users.Count(u => u.ClientId == c.Id && Roles.IsClient(u.Role) && !u.Disabled))).ToList()))
         .ToList());
 }

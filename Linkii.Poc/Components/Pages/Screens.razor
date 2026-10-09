@@ -11,13 +11,49 @@
         <p class="sub">Choisissez la liste de lecture et les widgets de chaque écran, puis publiez : chaque écran se met à jour indépendamment.</p>
     </div>
     <div class="row head-actions">
-        <button class="btn ghost" @onclick="OpenPair"><Ico Name="plus" Size="16" /> Connecter un écran</button>
-        <button class="btn" disabled="@(selectedIds.Count == 0 || bulkPublishing)" title="@(selectedIds.Count == 0 ? "Cochez un ou plusieurs écrans" : null)" @onclick="() => AskPublish(selectedIds.ToList())">
+        <button class="btn ghost" disabled="@(selectedIds.Count == 0 || bulkPublishing)" title="@(selectedIds.Count == 0 ? "Cochez un ou plusieurs écrans" : null)" @onclick="() => AskPublish(selectedIds.ToList())">
             <Ico Name="upload" Size="16" /> @(bulkPublishing ? "Publication…" : selectedIds.Count == 0 ? "Publier" : $"Publier ({selectedIds.Count})")
         </button>
+        @if (area != null && manageZones)
+        {
+            <div class="kebab add-menu">
+                <button class="btn" aria-haspopup="menu" aria-expanded="@(addMenu ? "true" : "false")" @onclick="() => addMenu = !addMenu"><Ico Name="plus" Size="16" /> Ajouter <Ico Name="chevron" Size="14" /></button>
+                @if (addMenu)
+                {
+                    <div class="kebab-backdrop" @onclick="() => addMenu = false"></div>
+                    <div class="kebab-menu" role="menu">
+                        <button type="button" role="menuitem" @onclick="() => { addMenu = false; OpenPair(); }"><Ico Name="monitor" Size="20" /><span><b>Connecter un écran</b><small>Saisir le code à 6 chiffres affiché</small></span></button>
+                        <button type="button" role="menuitem" @onclick="() => { addMenu = false; showZones = true; }"><Ico Name="box" Size="20" /><span><b>@(zones.Count == 0 ? "Créer des zones" : "Gérer les zones")</b><small>Classer vos écrans : salle, bar, vitrine</small></span></button>
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <button class="btn" @onclick="OpenPair"><Ico Name="plus" Size="16" /> Connecter un écran</button>
+        }
     </div>
 </div>
 
+@if (noArea)
+{
+    <div class="card empty"><div class="big">Aucune aire de gestion ne vous est confiée</div><p>Demandez à un administrateur de votre organisation de vous donner un rôle dans une aire.</p></div>
+}
+@if (area != null && zones.Count > 0)
+{
+    <div class="zone-bar" role="group" aria-label="Zones">
+        <button type="button" class="chip @(zoneFilter == null ? "on" : "")" @onclick="() => zoneFilter = null">Toutes les zones <small>@screens.Count</small></button>
+        @foreach (var z in zones)
+        {
+            var zone = z;
+            <button type="button" class="chip @(zoneFilter == zone.Id.ToString() ? "on" : "")" @onclick="() => zoneFilter = zone.Id.ToString()"><Ico Name="box" Size="14" /> @zone.Name <small>@screens.Count(x => x.ZoneId == zone.Id)</small></button>
+        }
+        @if (zones.Count > 0 && screens.Any(x => ZoneOf(x) == null))
+        {
+            <button type="button" class="chip @(zoneFilter == "none" ? "on" : "")" @onclick='() => zoneFilter = "none"'>Sans zone <small>@screens.Count(x => ZoneOf(x) == null)</small></button>
+        }
+    </div>
+}
 @if (screens.Count > 0)
 {
     <div class="sel-line" role="region" aria-label="Sélection d'écrans" aria-live="polite">
@@ -26,14 +62,16 @@
             <span>@selectedIds.Count écran@(selectedIds.Count > 1 ? "s" : "") sélectionné@(selectedIds.Count > 1 ? "s" : "")</span>
             <button type="button" class="linklike" @onclick="() => selectedIds.Clear()">Désélectionner</button>
         }
-        @if (selectedIds.Count < screens.Count) { <button type="button" class="linklike" @onclick="SelectAll">Tout sélectionner</button> }
+        @if (zones.Count > 0 && selectedIds.Count > 0) { <button type="button" class="linklike" @onclick="OpenZoneMove">Changer de zone…</button> }
+        @if (otherAreas.Count > 0 && selectedIds.Count > 0) { <button class="btn ghost sm" @onclick="OpenBulkAreaMove"><Ico Name="move" Size="14" /> Déplacer vers une autre aire…</button> }
+        @if (selectedIds.Count < Shown.Count) { <button type="button" class="linklike" @onclick="SelectAll">Tout sélectionner</button> }
         <span class="grow"></span>
         <ViewToggle StorageKey="screens" @bind-Value="view" />
     </div>
 }
 
 <div class="pl-grid @(view == "list" ? "list" : "")">
-    @foreach (var s in screens)
+    @foreach (var s in Shown)
     {
         var sc = s;
         var st = Status(sc);
@@ -55,11 +93,16 @@
                                 <button type="button" role="menuitem" @onclick="() => Edit(sc)"><Ico Name="pencil-square" Size="16" /> Éditer</button>
                                 <button type="button" role="menuitem" @onclick="() => OpenRename(sc)"><Ico Name="edit" Size="16" /> Renommer</button>
                                 <button type="button" role="menuitem" @onclick="() => AskPublish(new() { sc.Id })"><Ico Name="upload" Size="16" /> Publier</button>
+                                @if (otherAreas.Count > 0) { <button type="button" role="menuitem" @onclick="() => OpenAreaMove(sc)"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
                                 <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = sc; }"><Ico Name="trash" Size="16" /> Supprimer</button>
                             </div>
                         }
                     </div>
                 </div>
+                @if (zones.Count > 0 && zoneFilter == null)
+                {
+                    <div class="sc-zone-name">@(ZoneOf(sc)?.Name ?? "Sans zone")</div>
+                }
             </div>
             <button type="button" class="sc-visual" tabindex="-1" aria-hidden="true" @onclick="() => Edit(sc)">
                 <span class="sc-monitor @(sc.Orientation == "portrait" ? "portrait" : "")">
@@ -119,6 +162,16 @@
                     @foreach (var p in playlists) { <option value="@p.Id">@p.Name</option> }
                 </select>
             </div>
+            @if (zones.Count > 0)
+            {
+                <div class="dw-field">
+                    <label for="pair-zone">Zone</label>
+                    <select id="pair-zone" @bind="pairZone">
+                        <option value="">— Sans zone —</option>
+                        @foreach (var z in zones) { <option value="@z.Id">@z.Name</option> }
+                    </select>
+                </div>
+            }
         </div>
         <p class="hint" style="margin:12px 0 0">Format par défaut : celui des Réglages, modifiable ensuite dans l'édition de l'écran.</p>
         @if (error != null) { <div class="err">@error</div> }
@@ -182,6 +235,40 @@
     </div>
 }
 
+@if (showZones && area != null)
+{
+    <div class="modal-backdrop" @onclick="CloseZones"></div>
+    <div class="modal app-modal sm" role="dialog" aria-modal="true" aria-labelledby="zones-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="zones-title">Zones de l'aire « @area.Name »</h3><small class="muted">Elles classent les écrans de l'aire, sans effet sur les droits.</small></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseZones"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body"><AreaZones AreaId="area.Id" OnChanged="Reload" /></div>
+        <div class="modal-foot"><button type="button" class="btn" @onclick="CloseZones">Fermer</button></div>
+    </div>
+}
+
+@if (zoneMove)
+{
+    <div class="modal-backdrop" @onclick="() => zoneMove = false"></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="zm-title">
+        <h3 id="zm-title">Changer la zone de @selectedIds.Count écran@(selectedIds.Count > 1 ? "s" : "")</h3>
+        <p class="hint">La zone sert seulement à classer : rien n'est republié.</p>
+        <div class="dw"><div class="dw-field"><label for="zm-zone">Zone</label>
+            <select id="zm-zone" @bind="zoneTo"><option value="">— Sans zone —</option>@foreach (var z in zones) { <option value="@z.Id">@z.Name</option> }</select>
+        </div></div>
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => zoneMove = false">Annuler</button>
+            <button class="btn" @onclick="MoveToZone">Enregistrer</button>
+        </div>
+    </div>
+}
+
+@if (areaMove is { Count: > 0 } am)
+{
+    <AreaMoveDialog Kind="screen" Items="am" OnClose="AreaMoved" />
+}
+
 @if (editing is { } eid)
 {
     <ScreenEditor ScreenId="eid" OnClose="CloseEdit" />
@@ -221,14 +308,59 @@
         return names.All(n => n == "—") ? "Aucune liste de lecture" : string.Join(" · ", names);
     }
 
+    // ---------- Aire de gestion ouverte, zones, déplacements ----------
+    private Area? area;
+    private List<Zone> zones = new();
+    private List<Area> otherAreas = new();   // déplacement : administrateur de l'organisation, vers une autre aire
+    private bool manageZones, showZones, zoneMove, noArea, addMenu;
+    private string? zoneFilter;   // null : toutes les zones ; "none" : sans zone ; sinon l'Id de la zone
+    private string pairZone = "", zoneTo = "";
+    private List<(Guid Id, string Name)>? areaMove;   // écrans à déplacer vers une autre aire
+
+    private Zone? ZoneOf(Screen s) => zones.FirstOrDefault(z => z.Id == s.ZoneId);
+
+    private List<Screen> Shown => zoneFilter == null ? screens
+        : zoneFilter == "none" ? screens.Where(x => ZoneOf(x) == null).ToList()
+        : screens.Where(x => x.ZoneId?.ToString() == zoneFilter).ToList();
+
+    private void CloseZones() { showZones = false; Reload(); }
+
+    private void OpenZoneMove() { zoneTo = zoneFilter is { } z && z != "none" ? z : ""; zoneMove = true; }
+
+    private void MoveToZone()
+    {
+        Guid? zid = Guid.TryParse(zoneTo, out var g) && zones.Any(z => z.Id == g) ? g : null;
+        var ids = selectedIds.ToList();
+        Store.Write(d => { foreach (var sc in d.Screens.Where(x => ids.Contains(x.Id))) sc.ZoneId = zid; });
+        Toast.Ok($"{ids.Count} écran{(ids.Count > 1 ? "s" : "")} {(zid == null ? "sans zone" : "dans la zone « " + zones.First(z => z.Id == zid).Name + " »")}.");
+        zoneMove = false;
+        selectedIds.Clear();
+        Reload();
+    }
+
+    private void OpenAreaMove(Screen s) { menuFor = null; areaMove = new() { (s.Id, s.Name) }; }
+
+    private void OpenBulkAreaMove() => areaMove = screens.Where(s => selectedIds.Contains(s.Id)).Select(s => (s.Id, s.Name)).ToList();
+
+    private void AreaMoved(bool moved)
+    {
+        areaMove = null;
+        if (moved) Reload();   // les écrans déplacés ne sont plus de cette aire : ils sortent aussi de la sélection
+    }
+
     private void Reload()
     {
+        (area, manageZones, noArea) = Store.Read(d => (d.Area, d.Access.ManagesCurrent, d.Access.OrgAreaCount > 0 && d.Area == null));
+        zones = area?.Zones.OrderBy(z => z.Name, StringComparer.CurrentCultureIgnoreCase).ToList() ?? new();
+        otherAreas = Store.Read(d => d.Access.IsOrgAdmin && d.Area is { } cur ? d.Areas.Where(a => a.Id != cur.Id).OrderBy(a => a.Name).ToList() : new());
+        if (zoneFilter != null && zoneFilter != "none" && !zones.Any(z => z.Id.ToString() == zoneFilter)) zoneFilter = null;
         screens = Store.Read(d => d.Screens.Where(s => s.Token != null).OrderBy(s => s.Name).ToList());
+        selectedIds.IntersectWith(screens.Select(s => s.Id));
         playlists = Store.Read(d => d.Playlists.OrderBy(p => p.Name).ToList());
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
     }
 
-    private void OpenPair() { code = name = ""; playlistId = null; error = null; showPair = true; }
+    private void OpenPair() { code = name = ""; playlistId = null; error = null; pairZone = zoneFilter is { } z && z != "none" ? z : ""; showPair = true; }
 
     private void Edit(Screen s) { menuFor = null; editing = s.Id; }
 
@@ -240,12 +372,15 @@
         var spec = ScreenSpec.From(tenant);
         var pid = playlistId;
         var screenName = name;
+        Guid? zid = Guid.TryParse(pairZone, out var zg) && zones.Any(z => z.Id == zg) ? zg : null;
+        if (noArea) { error = "Aucune aire de gestion ne vous est confiée."; return; }
         var id = Store.Write(d =>
         {
             var s = d.ClaimScreen(code.Trim());
             if (s == null) return (Guid?)null;
             s.Name = string.IsNullOrWhiteSpace(screenName) ? "Écran " + code : screenName.Trim();
             s.PlaylistId = pid;
+            s.ZoneId = zid;
             s.ScreenType = spec.Type; s.Orientation = spec.Orientation; s.Resolution = spec.Resolution;
             s.Token = Guid.NewGuid().ToString("N");
             s.PairingCode = null;
@@ -265,7 +400,7 @@
 
     private void ToggleSelect(Guid id) { if (!selectedIds.Remove(id)) selectedIds.Add(id); }
 
-    private void SelectAll() { foreach (var s in screens) selectedIds.Add(s.Id); }
+    private void SelectAll() { foreach (var s in Shown) selectedIds.Add(s.Id); }
 
     private void AskPublish(List<Guid> ids)
     {

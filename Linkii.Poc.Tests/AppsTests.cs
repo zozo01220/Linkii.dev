@@ -65,7 +65,7 @@ public class AppsTests(Platform p)
     public void Catalog_contains_the_phase_1_apps_with_valid_manifests()
     {
         var catalog = p.Services.GetRequiredService<AppCatalog>();
-        Assert.Equal(new[] { "agenda", "canva", "clock", "image", "rss", "slideshow-images", "slideshow-videos", "text", "video", "weather", "webpage", "youtube" }, catalog.All.Select(a => a.Id).OrderBy(x => x).ToArray());
+        Assert.Equal(new[] { "agenda", "canva", "clock", "countdown", "drive", "image", "qrcode", "quote", "rss", "slideshow-images", "slideshow-videos", "text", "video", "weather", "webpage", "youtube" }, catalog.All.Select(a => a.Id).OrderBy(x => x).ToArray());
         Assert.All(catalog.All, a => Assert.Empty(AppCatalog.Check(a)));
         Assert.Equal(new[] { "rss", "text", "webpage" }, catalog.All.Where(a => a.IsNoCode).Select(a => a.Id).OrderBy(x => x).ToArray());
     }

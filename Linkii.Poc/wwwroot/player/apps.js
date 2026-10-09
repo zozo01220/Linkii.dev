@@ -110,6 +110,64 @@
     h.fit();
   });
 
+  /* ---------- QR code : le serveur calcule le tracé (« côté|tracé »), l'écran le dessine sans bibliothèque ---------- */
+  A.register('qrcode', function (h) {
+    var s = h.settings, parts = (s.qr || '').split('|');
+    var n = parseInt(parts[0], 10), path = parts[1] || '';
+    if (!(n > 0) || !/^[0-9MhvzH\- ]+$/.test(path)) return;
+    h.el.innerHTML = '<svg viewBox="0 0 ' + n + ' ' + n + '" shape-rendering="crispEdges" aria-hidden="true"><path d="' + path + '" fill="#0B1F3A"/></svg>';
+    if (s.label) {
+      var l = document.createElement('div');
+      l.className = 'q-l'; l.textContent = s.label;
+      h.el.appendChild(l);
+    }
+  });
+
+  /* ---------- Compte à rebours (même règle que WidgetLogic.cs « Countdown ») ---------- */
+  A.register('countdown', function (h) {
+    var s = h.settings, el = h.el;
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.date || '');
+    if (!m) return;
+    var detailed = s.format === 'detailed', done = s.doneText || 'C\'est le grand jour !';
+    el.innerHTML = '<div class="cd-l"></div><div class="cd-n"></div><div class="cd-u"></div>';
+    var l = el.querySelector('.cd-l'), n = el.querySelector('.cd-n'), u = el.querySelector('.cd-u');
+    l.textContent = s.label || '';
+    function p2(v) { return v < 10 ? '0' + v : '' + v; }
+    var tick = function () {
+      var now = new Date(), t = new Date(+m[1], +m[2] - 1, +m[3]), today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      var days = Math.round((t - today) / 864e5), big, unit = '', hidden = false;
+      if (detailed && now < t) {
+        var left = t - now, d = Math.floor(left / 864e5), hh = Math.floor(left / 36e5) % 24, mm = Math.floor(left / 6e4) % 60, ss = Math.floor(left / 1e3) % 60;
+        big = d >= 1 ? d + ' j ' + p2(hh) + ' h ' + p2(mm) + ' min' : p2(hh) + ':' + p2(mm) + ':' + p2(ss);
+      } else if (!detailed && days > 0) { big = '' + days; unit = days === 1 ? 'jour' : 'jours'; }
+      else { big = done; hidden = days < 0 && s.after !== 'keep'; }
+      el.style.display = hidden ? 'none' : '';
+      n.textContent = big; u.textContent = unit;
+      n.className = 'cd-n' + (unit ? '' : ' txt');
+    };
+    tick(); h.every(tick, detailed ? 1000 : 30000);
+  });
+
+  /* ---------- Citation du jour (même règle que WidgetLogic.cs « Quotes ») ---------- */
+  A.register('quote', function (h) {
+    var s = h.settings, el = h.el;
+    var list = (s.quotes || '').split('\n').map(function (x) { return x.trim(); }).filter(function (x) { return x; }).map(function (x) {
+      var m = /^(.*\S)\s+[—–-]\s+(\S.*)$/.exec(x);
+      return m ? { t: m[1], a: m[2] } : { t: x, a: '' };
+    });
+    if (!list.length) return;
+    el.innerHTML = '<div class="q-t"></div><div class="q-a"></div>';
+    var t = el.querySelector('.q-t'), a = el.querySelector('.q-a');
+    var rotate = s.mode === 'rotate', every = Math.max(5, +s.interval || 30);
+    var tick = function () {
+      var now = new Date(), i;
+      if (rotate) i = Math.floor(now.getTime() / 1000 / every) % list.length;
+      else i = Math.floor(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) / 864e5) % list.length;
+      t.textContent = '“' + list[i].t + '”'; a.textContent = list[i].a ? '— ' + list[i].a : '';
+    };
+    tick(); h.every(tick, rotate ? 1000 : 60000);
+  });
+
   /* ---------- Flux RSS / actualités ---------- */
   A.register('rss', function (h) {
     var s = h.settings, el = h.el;

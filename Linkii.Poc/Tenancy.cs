@@ -8,45 +8,120 @@ namespace Linkii.Poc;
 /// Filtre global d'isolation : cette liste ne voit, n'ajoute et ne supprime que les lignes de son client.
 /// Tout le code du back-office passe par elle (via <see cref="ClientDb"/>), jamais par la liste brute.
 /// </summary>
-public class ScopedList<T>(List<T> root, Guid clientId) : IEnumerable<T> where T : IClientOwned
+public class ScopedList<T>(List<T> root, Guid clientId, Guid? areaId = null) : IEnumerable<T> where T : IClientOwned
 {
-    public IEnumerator<T> GetEnumerator() => root.Where(x => x.ClientId == clientId).GetEnumerator();
+    // Avec une aire ouverte, les écrans, listes de lecture et médias des autres aires sont invisibles.
+    private bool In(T x) => x.ClientId == clientId && (areaId == null || x is not IAreaOwned a || a.AreaId == areaId || Shared(x));
+
+    /// <summary>Fichiers des dossiers Drive : les connexions sont celles de l'organisation, ils sont communs à toutes les aires.</summary>
+    private static bool Shared(T x) => x is MediaItem m && m.AreaId == Guid.Empty && m.Info.ContainsKey("drive");
+
+    public IEnumerator<T> GetEnumerator() => root.Where(In).GetEnumerator();
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-    public int Count => root.Count(x => x.ClientId == clientId);
-    public void Add(T item) { item.ClientId = clientId; root.Add(item); }
-    public int RemoveAll(Predicate<T> match) => root.RemoveAll(x => x.ClientId == clientId && match(x));
+    public int Count => root.Count(In);
+
+    /// <summary>Ajoute une ligne au client, rangée dans l'aire ouverte.</summary>
+    public void Add(T item)
+    {
+        item.ClientId = clientId;
+        if (areaId is { } a && item is IAreaOwned o && o.AreaId == Guid.Empty && !Shared(item)) o.AreaId = a;
+        root.Add(item);
+    }
+    public int RemoveAll(Predicate<T> match) => root.RemoveAll(x => In(x) && match(x));
 }
 
-/// <summary>Vue de <see cref="Db"/> limitée à un client : mêmes noms que la racine, mais isolés.</summary>
+/// <summary>
+/// Aires de gestion de la personne connectée dans une organisation : un administrateur de l'organisation (ou l'équipe Linkii, un revendeur
+/// qui entre dans l'espace) les a toutes ; un membre a celles où il a un rôle. <see cref="Current"/> est l'aire ouverte.
+/// </summary>
+public class AreaAccess
+{
+    public Guid? UserId { get; init; }
+    public bool IsOrgAdmin { get; init; } = true;
+    /// <summary>Rôle dans chaque aire accessible (administrateur pour toutes, pour un administrateur de l'organisation).</summary>
+    public Dictionary<Guid, string> Roles { get; init; } = new();
+    /// <summary>Aires accessibles, de la plus ancienne à la plus récente.</summary>
+    public List<Area> Areas { get; init; } = new();
+    public Area? Current { get; init; }
+    /// <summary>Nombre d'aires de l'organisation (toutes, accessibles ou non).</summary>
+    public int OrgAreaCount { get; init; }
+
+    /// <summary>Traitements internes et tests (aucune personne connectée) : aucun filtre d'aire.</summary>
+    public static readonly AreaAccess System = new();
+
+    public bool CanManage(Guid areaId) => IsOrgAdmin || Roles.GetValueOrDefault(areaId) == AreaRoles.Admin;
+    /// <summary>Zones et membres de l'aire ouverte.</summary>
+    public bool ManagesCurrent => Current != null && CanManage(Current.Id);
+    public bool ManagesAnyArea => IsOrgAdmin || Roles.ContainsValue(AreaRoles.Admin);
+
+    public static AreaAccess For(Db db, Guid clientId, Guid? userId)
+    {
+        var areas = db.Areas.Where(a => a.ClientId == clientId).OrderBy(a => a.CreatedUtc).ToList();
+        var u = db.Users.FirstOrDefault(x => x.Id == userId);
+        var org = u?.Role != Linkii.Poc.Roles.ClientMember;
+        var roles = org ? areas.ToDictionary(a => a.Id, _ => AreaRoles.Admin)
+            : u!.AreaRoles.Where(r => areas.Any(a => a.Id == r.AreaId)).GroupBy(r => r.AreaId).ToDictionary(g => g.Key, g => g.First().Role);
+        var mine = areas.Where(a => roles.ContainsKey(a.Id)).ToList();
+        Guid? last = u != null && u.LastAreas.TryGetValue(clientId, out var l) ? l : null;
+        return new AreaAccess
+        {
+            UserId = userId, IsOrgAdmin = org, Roles = roles, Areas = mine, OrgAreaCount = areas.Count,
+            Current = mine.FirstOrDefault(a => a.Id == last) ?? mine.FirstOrDefault()
+        };
+    }
+}
+
+/// <summary>Vue de <see cref="Db"/> limitée à un client (et à l'aire ouverte, s'il y en a une) : mêmes noms que la racine, mais isolés.</summary>
 public class ClientDb
 {
     private readonly Db _root;
     public Guid ClientId { get; }
+    public AreaAccess Access { get; }
 
-    public ClientDb(Db root, Guid clientId)
+    /// <summary>Aire qui ne correspond à rien : un membre sans aire ne voit aucun écran, aucune liste, aucun média.</summary>
+    private static readonly Guid NoArea = new("00000000-0000-0000-0000-00000000a0e0");
+
+    public ClientDb(Db root, Guid clientId, AreaAccess? access = null)
     {
         _root = root;
         ClientId = clientId;
-        Screens = new(root.Screens, clientId);
-        Media = new(root.Media, clientId);
-        Playlists = new(root.Playlists, clientId);
+        Access = access ?? AreaAccess.System;
+        // Sans personne connectée (traitements internes, tests) ou pour une organisation encore sans aire : pas de filtre d'aire.
+        Guid? area = Access == AreaAccess.System || Access.OrgAreaCount == 0 ? null : Access.Current?.Id ?? NoArea;
+        Screens = new(root.Screens, clientId, area);
+        Media = new(root.Media, clientId, area);
+        Playlists = new(root.Playlists, clientId, area);
         AppInstalls = new(root.AppInstalls, clientId);
+        Areas = new(root.Areas, clientId);
     }
 
+    internal Db Root => _root;
     public Tenant Tenant => _root.Clients.First(c => c.Id == ClientId);
     public Reseller? Reseller => _root.Resellers.FirstOrDefault(r => r.Id == Tenant.ResellerId);
     public ScopedList<Screen> Screens { get; }
     public ScopedList<MediaItem> Media { get; }
     public ScopedList<Playlist> Playlists { get; }
     public ScopedList<AppInstall> AppInstalls { get; }
+    /// <summary>Toutes les aires de l'organisation (pages réservées aux administrateurs).</summary>
+    public ScopedList<Area> Areas { get; }
+    /// <summary>Aire ouverte (null : membre sans aire, ou organisation sans aire).</summary>
+    public Area? Area => Access.Current is { } a ? _root.Areas.FirstOrDefault(x => x.Id == a.Id) : null;
 
-    /// <summary>Le code à 6 chiffres affiché par un écran non appairé identifie le client : il en prend possession.</summary>
+    /// <summary>Comptes de l'organisation (administrateurs et membres).</summary>
+    public IEnumerable<User> Users => _root.Users.Where(u => u.ClientId == ClientId && Roles.IsClient(u.Role));
+    public void AddUser(User u) { u.ClientId = ClientId; u.ResellerId = Tenant.ResellerId; _root.Users.Add(u); }
+    public int RemoveUser(Guid id) => _root.Users.RemoveAll(u => u.Id == id && u.ClientId == ClientId && Roles.IsClient(u.Role));
+    /// <summary>Adresse déjà prise chez ce revendeur (ou par l'équipe Linkii) : un compte se connecte par son e-mail sur le domaine du revendeur.</summary>
+    public bool EmailTaken(string email) => _root.Users.Any(u => u.Email == email && (u.ResellerId == Tenant.ResellerId || u.ResellerId == null));
+
+    /// <summary>Le code à 6 chiffres affiché par un écran non appairé identifie le client : il en prend possession, dans l'aire ouverte.</summary>
     public Screen? ClaimScreen(string code)
     {
         var s = _root.Screens.FirstOrDefault(x => x.Token == null && x.PairingCode == code);
         if (s == null) return null;
         s.ClientId = ClientId;
+        if (Area is { } a) s.AreaId = a.Id;
         return s;
     }
 
@@ -99,6 +174,8 @@ public class TenantContext(AuthenticationStateProvider auth, JsonStore store)
     public bool IsImpersonating => User.HasClaim(c => c.Type == Claims.Impersonating);
     public bool IsPlatformAdmin => User.IsInRole(Roles.PlatformAdmin);
     public bool IsResellerAdmin => User.IsInRole(Roles.ResellerAdmin);
+    /// <summary>Membre d'une organisation (rôle par aire) ; sinon administrateur de l'espace ouvert.</summary>
+    public bool IsClientMember => User.IsInRole(Roles.ClientMember);
     public string Email => User.FindFirst(ClaimTypes.Email)?.Value ?? "";
     public string DisplayName => User.Identity?.Name ?? Email;
 
@@ -114,9 +191,24 @@ public class TenantStore(JsonStore root, TenantContext ctx)
 {
     public Guid ClientId => ctx.RequireClientId();
 
-    public T Read<T>(Func<ClientDb, T> f) { var cid = ClientId; return root.Read(db => f(new ClientDb(db, cid))); }
-    public T Write<T>(Func<ClientDb, T> f) { var cid = ClientId; return root.Write(db => f(new ClientDb(db, cid))); }
-    public void Write(Action<ClientDb> a) { var cid = ClientId; root.Write(db => a(new ClientDb(db, cid))); }
+    public Guid? UserId => ctx.UserId;
+    /// <summary>Aire de gestion ouverte (null : organisation sans aire, ou membre sans aire).</summary>
+    public Guid? AreaId => Read(d => d.Area?.Id);
+
+    // Aires et rôles relus à chaque accès : un changement d'aire ou de rôle s'applique aussitôt.
+    private ClientDb Open(Db db, Guid cid) => new(db, cid, AreaAccess.For(db, cid, ctx.UserId));
+
+    public T Read<T>(Func<ClientDb, T> f) { var cid = ClientId; return root.Read(db => f(Open(db, cid))); }
+    public T Write<T>(Func<ClientDb, T> f) { var cid = ClientId; return root.Write(db => f(Open(db, cid))); }
+    public void Write(Action<ClientDb> a) { var cid = ClientId; root.Write(db => a(Open(db, cid))); }
+
+    /// <summary>Ouvre une autre aire (mémorisée pour la personne connectée). Retourne false si elle ne lui est pas accessible.</summary>
+    public bool SwitchArea(Guid areaId) => Write(d =>
+    {
+        if (!d.Access.Areas.Any(a => a.Id == areaId) || d.Root.Users.FirstOrDefault(u => u.Id == ctx.UserId) is not { } me) return false;
+        me.LastAreas[d.ClientId] = areaId;
+        return true;
+    });
 }
 
 /// <summary>Résolution du revendeur à partir du nom de domaine de la requête : créer un revendeur ne demande aucun déploiement.</summary>
@@ -179,6 +271,21 @@ public record BrandDto(string Name, string Color, string? LogoUrl, bool PoweredB
         : new(r.DisplayName, r.BrandColor, r.LogoUrl, r.ShowPoweredBy && !r.IsDefault);
 }
 
+/// <summary>Comptes et aires d'une organisation, pour la console Linkii, l'espace revendeur et la facturation.</summary>
+public record UserStats(int Total, int Admins, int Members, int Active30, int Invited, int Areas)
+{
+    public static UserStats Of(Db db, Tenant c)
+    {
+        var list = db.Users.Where(u => u.ClientId == c.Id && Roles.IsClient(u.Role)).ToList();
+        var since = DateTime.UtcNow.AddDays(-30);
+        return new(list.Count, list.Count(u => u.Role == Roles.ClientAdmin), list.Count(u => u.Role == Roles.ClientMember),
+            list.Count(u => u.ActiveSince(since)), list.Count(u => u.IsInvited && !u.Disabled), db.Areas.Count(a => a.ClientId == c.Id));
+    }
+
+    /// <summary>« 1 administrateur · 4 membres ».</summary>
+    public string Breakdown => $"{Admins} administrateur{(Admins > 1 ? "s" : "")}" + (Members > 0 ? $" · {Members} membre{(Members > 1 ? "s" : "")}" : "");
+}
+
 public static class Tenancy
 {
     /// <summary>Un écran ne diffuse que si son client, puis son revendeur, sont actifs.</summary>
@@ -213,8 +320,9 @@ public static class Tenancy
         if (db.Users.Any(u => u.Email == email && (u.ResellerId == reseller.Id || u.ResellerId == null)))
             return (null, "Cette adresse e-mail est déjà utilisée.");
         var client = new Tenant { ResellerId = reseller.Id, Name = clientName.Trim() };
+        db.Areas.Add(new Area { ClientId = client.Id, Name = Seed.DefaultAreaName });   // une aire dès le départ : invisible tant qu'elle est seule
         db.Clients.Add(client);
-        db.Users.Add(new User { Email = email, Name = adminName.Trim(), PasswordHash = Passwords.Hash(password), Role = Roles.ClientAdmin, ResellerId = reseller.Id, ClientId = client.Id, MustChangePassword = mustChangePassword });
+        db.Users.Add(new User { Email = email, Name = adminName.Trim(), PasswordHash = Passwords.Hash(password), Role = Roles.ClientAdmin, ResellerId = reseller.Id, ClientId = client.Id, MustChangePassword = mustChangePassword, CreatedUtc = DateTime.UtcNow });
         return (client, null);
     }
 }
@@ -236,6 +344,7 @@ public static class Seed
             MigrateLegacy(db, def, dataPath, log);
             PurgeWidgets(db, dataPath, log);
             MigrateGoogleAccount(db);
+            EnsureAreas(db);
 
             if (!db.Users.Any(u => u.Role == Roles.PlatformAdmin))
             {
@@ -323,6 +432,24 @@ public static class Seed
     /// Compte Google : la connexion d'abord réservée à Google Drive (GoogleDrive*) devient le compte Google de l'organisation,
     /// partagé avec Google Calendar. Son accès Drive est conservé ; l'accès aux agendas se demande depuis Google Calendar.
     /// </summary>
+    public const string DefaultAreaName = "Principale";
+
+    /// <summary>
+    /// Aires de gestion : chaque organisation en a au moins une. Les écrans, listes de lecture et médias sans aire (données d'avant les aires)
+    /// rejoignent la plus ancienne ; les fichiers des dossiers Drive restent communs à toutes les aires.
+    /// </summary>
+    public static void EnsureAreas(Db db)
+    {
+        foreach (var c in db.Clients)
+        {
+            var first = db.Areas.Where(a => a.ClientId == c.Id).OrderBy(a => a.CreatedUtc).FirstOrDefault();
+            if (first == null) db.Areas.Add(first = new Area { ClientId = c.Id, Name = DefaultAreaName, CreatedUtc = c.CreatedUtc });
+            foreach (var s in db.Screens.Where(x => x.ClientId == c.Id && x.AreaId == Guid.Empty)) s.AreaId = first.Id;
+            foreach (var p in db.Playlists.Where(x => x.ClientId == c.Id && x.AreaId == Guid.Empty)) p.AreaId = first.Id;
+            foreach (var m in db.Media.Where(x => x.ClientId == c.Id && x.AreaId == Guid.Empty && !x.Info.ContainsKey("drive"))) m.AreaId = first.Id;
+        }
+    }
+
     private static void MigrateGoogleAccount(Db db)
     {
         foreach (var c in db.Clients.Where(c => c.GoogleDriveRefreshToken != null))

@@ -26,6 +26,15 @@
         <span class="grow"></span>
         <ViewToggle StorageKey="playlists" @bind-Value="view" />
     </div>
+    <div class="sel-line" role="region" aria-label="Sélection de listes de lecture" aria-live="polite">
+        @if (picked.Count > 0)
+        {
+            <span>@picked.Count liste@(picked.Count > 1 ? "s" : "") sélectionnée@(picked.Count > 1 ? "s" : "")</span>
+            <button type="button" class="linklike" @onclick="() => picked.Clear()">Désélectionner</button>
+            @if (canMove) { <button class="btn ghost sm" @onclick="() => bulkMove = true"><Ico Name="move" Size="14" /> Déplacer vers une autre aire…</button> }
+        }
+        @if (picked.Count < playlists.Count) { <button type="button" class="linklike" @onclick="() => picked.UnionWith(playlists.Select(x => x.Id))">Tout sélectionner</button> }
+    </div>
 }
 
 <div class="pl-grid @(view == "list" ? "list" : "")">
@@ -34,7 +43,8 @@
         var tiles = p.Draft.Where(i => i.Placement == "full").Select(i => media.FirstOrDefault(m => m.Id == i.MediaId)).Where(m => m != null).Take(3).ToList();
         var pl = p;
         var onScreens = screens.Count(s => s.ZonePlaylists().Contains(pl.Id));
-        <div class="pl-card">
+        <div class="pl-card sc-card @(picked.Contains(pl.Id) ? "picked" : "")">
+            <input type="checkbox" class="sc-check pl-check" aria-label="Sélectionner @pl.Name" checked="@picked.Contains(pl.Id)" @onchange="() => { if (!picked.Remove(pl.Id)) picked.Add(pl.Id); }" />
             <a class="pl-cover @(tiles.Count <= 1 ? "single" : "")" href="/playlists/@pl.Id" tabindex="-1" aria-hidden="true">
                 @foreach (var m in tiles) { <div class="pl-tile"><MediaThumb Media="m!" All="media" /></div> }
                 @if (tiles.Count == 0)
@@ -56,6 +66,7 @@
                                 <a role="menuitem" href="/playlists/@pl.Id"><Ico Name="pencil-square" Size="16" /> Éditer</a>
                                 <button type="button" role="menuitem" @onclick="() => OpenRename(pl)"><Ico Name="edit" Size="16" /> Renommer</button>
                                 <button type="button" role="menuitem" @onclick="() => Duplicate(pl)"><Ico Name="copy" Size="16" /> Dupliquer</button>
+                                @if (canMove) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; moving = pl; }"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
                                 <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = pl; }"><Ico Name="trash" Size="16" /> Supprimer</button>
                             </div>
                         }
@@ -87,6 +98,15 @@
             <button class="btn" disabled="@string.IsNullOrWhiteSpace(newName)" @onclick="SubmitName">@(renamingPl == null ? "Créer" : "Renommer")</button>
         </div>
     </div>
+}
+
+@if (moving is { } mv)
+{
+    <AreaMoveDialog Kind="playlist" Items="new() { (mv.Id, mv.Name) }" OnClose="moved => { moving = null; if (moved) Load(); }" />
+}
+@if (bulkMove)
+{
+    <AreaMoveDialog Kind="playlist" Items="playlists.Where(x => picked.Contains(x.Id)).Select(x => (x.Id, x.Name)).ToList()" OnClose="moved => { bulkMove = false; if (moved) Load(); }" />
 }
 
 @if (deleting != null)
@@ -127,11 +147,18 @@
 
     protected override void OnInitialized() => Load();
 
+    private Playlist? moving;
+    private bool bulkMove;
+    private readonly HashSet<Guid> picked = new();
+    private bool canMove;  // administrateur de l'organisation, avec au moins une autre aire
+
     private void Load()
     {
+        canMove = Store.Read(d => d.Access.IsOrgAdmin && d.Area != null && d.Access.OrgAreaCount > 1);
         playlists = Store.Read(d => d.Playlists.ToList());
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
         screens = Store.Read(d => d.Screens.Where(s => s.Token != null).ToList());
+        picked.IntersectWith(playlists.Select(x => x.Id));
     }
 
     private IEnumerable<Playlist> Sorted => sort == "name"
@@ -214,6 +241,7 @@
         });
         Toast.Ok($"Liste de lecture « {p.Name} » supprimée.");
         deleting = null;
+        picked.Remove(p.Id);
         Load();
     }
 

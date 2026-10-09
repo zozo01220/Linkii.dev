@@ -1,0 +1,68 @@
+@* Zones d'une aire (corps de fenêtre) : renommer, supprimer, ajouter. Chaque action est enregistrée aussitôt. Les zones classent les écrans, sans effet sur les droits. *@
+@inject TenantStore Store
+@inject Toaster Toast
+
+<div class="zone-rows">
+    @foreach (var z in zones)
+    {
+        var zone = z;
+        <div class="zone-row">
+            <Ico Name="box" Size="16" />
+            <input maxlength="60" value="@zone.Name" aria-label="Nom de la zone" @onchange="e => Rename(zone, e.Value?.ToString() ?? zone.Name)" />
+            <span class="n">@counts.GetValueOrDefault(zone.Id) écran@(counts.GetValueOrDefault(zone.Id) > 1 ? "s" : "")</span>
+            <button type="button" class="btn ghost icon" title="Supprimer la zone (ses écrans restent dans l'aire, sans zone)" aria-label="Supprimer la zone @zone.Name" @onclick="() => Delete(zone)"><Ico Name="trash" Size="15" /></button>
+        </div>
+    }
+    @if (zones.Count == 0) { <p class="hint" style="margin:0">Aucune zone pour l'instant.</p> }
+    <div class="zone-row">
+        <Ico Name="plus" Size="16" />
+        <input maxlength="60" placeholder="Nouvelle zone (ex. : Accueil, Bâtiment B)" @bind="newName" @bind:event="oninput" @onkeydown="OnKey" aria-label="Nouvelle zone" />
+        <button type="button" class="btn ghost sm" @onclick="Add">Ajouter</button>
+    </div>
+    @if (error != null) { <div class="err">@error</div> }
+</div>
+
+@code {
+    [Parameter] public Guid AreaId { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private List<Zone> zones = new();
+    private Dictionary<Guid, int> counts = new();
+    private string newName = "";
+    private string? error;
+
+    protected override void OnParametersSet() => Load();
+
+    private void Load()
+    {
+        zones = Store.Read(d => d.Areas.FirstOrDefault(a => a.Id == AreaId)?.Zones.Select(z => new Zone { Id = z.Id, Name = z.Name }).ToList() ?? new());
+        counts = Store.Read(d => d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.AreaId == AreaId && s.Token != null && s.ZoneId != null)
+            .GroupBy(s => s.ZoneId!.Value).ToDictionary(g => g.Key, g => g.Count()));
+    }
+
+    private async Task Done(string? err, string? ok = null)
+    {
+        error = err;
+        if (err == null && ok != null) Toast.Ok(ok);
+        Load();
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task Add()
+    {
+        var n = newName;
+        var (_, err) = Store.Write(d => AreaOps.AddZone(d, AreaId, n));
+        if (err == null) newName = "";
+        await Done(err, err == null ? $"Zone « {n.Trim()} » ajoutée." : null);
+    }
+
+    private async Task OnKey(KeyboardEventArgs e) { if (e.Key == "Enter") await Add(); }
+
+    private async Task Rename(Zone z, string name)
+    {
+        if (name.Trim() == z.Name) return;
+        await Done(Store.Write(d => AreaOps.RenameZone(d, AreaId, z.Id, name)), $"Zone renommée en « {name.Trim()} ».");
+    }
+
+    private async Task Delete(Zone z) => await Done(Store.Write(d => AreaOps.DeleteZone(d, AreaId, z.Id)), $"Zone « {z.Name} » supprimée.");
+}

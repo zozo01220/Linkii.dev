@@ -76,6 +76,8 @@ static bool NoClient(ClaimsPrincipal u) => u.GetGuid(Claims.Client) == null;
 builder.Services.AddAuthorization(o =>
 {
     o.AddPolicy("ClientSpace", p => p.RequireClaim(Claims.Client));
+    // Réglages, intégrations, widgets, aires : administrateurs de l'organisation (et équipe Linkii / revendeur qui entrent dans l'espace), pas les membres
+    o.AddPolicy("ClientAdmin", p => p.RequireAssertion(c => c.User.GetGuid(Claims.Client) != null && !c.User.IsInRole(Roles.ClientMember)));
     o.AddPolicy("PlatformAdmin", p => p.RequireAssertion(c => c.User.IsInRole(Roles.PlatformAdmin) && NoClient(c.User)));
     o.AddPolicy("ResellerSpace", p => p.RequireAssertion(c => c.User.IsInRole(Roles.ResellerAdmin) && NoClient(c.User)));
 });
@@ -117,6 +119,8 @@ app.Logger.LogInformation("Google (Calendar, Drive) : « Se connecter avec Googl
     ? "disponible" : "indisponible (Linkii:Google:ClientId et Linkii:Google:ClientSecret absents de la configuration)");
 app.Logger.LogInformation("Microsoft (Microsoft 365, OneDrive) : « Se connecter avec Microsoft » {State}.", app.Services.GetRequiredService<MicrosoftAuth>().IsConfigured
     ? "disponible" : "indisponible (Linkii:Microsoft:ClientId et Linkii:Microsoft:ClientSecret absents de la configuration)");
+app.Logger.LogInformation("Canva : « Connecter Canva » {State}.", app.Services.GetRequiredService<CanvaService>().IsConfigured
+    ? "disponible" : "indisponible (Linkii:Canva:ClientId et Linkii:Canva:ClientSecret absents de la configuration)");
 
 // une conversion vidéo interrompue par un arrêt du serveur ne reprend pas : on la marque en échec
 store0.Write(d =>
@@ -165,23 +169,33 @@ app.Use(async (ctx, next) =>
         var uid = ctx.User.GetGuid(ClaimTypes.NameIdentifier);
         var cid = ctx.User.GetGuid(Claims.Client);
         var store = ctx.RequestServices.GetRequiredService<JsonStore>();
-        bool mustChange = false;
+        bool mustChange = false, roleChanged = false, stale = false;
         var ok = store.Read(db =>
         {
             var u = db.Users.FirstOrDefault(x => x.Id == uid && !x.Disabled);
             if (u == null || !Tenancy.HostAllows(u, host)) return false;
             mustChange = u.MustChangePassword && !ctx.User.HasClaim(c => c.Type == Claims.Impersonating);
+            roleChanged = !ctx.User.IsInRole(u.Role);   // administrateur de l'organisation ↔ membre : le cookie est refait
+            stale = u.LastActiveUtc == null || DateTime.UtcNow - u.LastActiveUtc > TimeSpan.FromHours(1);
             if (u.Role != Roles.PlatformAdmin && db.Resellers.FirstOrDefault(r => r.Id == u.ResellerId)?.Active != true) return false;
             if (cid == null) return true;
             var c = db.Clients.FirstOrDefault(x => x.Id == cid);
             if (c == null) return false;
             return u.Role == Roles.PlatformAdmin || u.Role == Roles.ResellerAdmin && c.ResellerId == u.ResellerId
-                   || u.Role == Roles.ClientAdmin && u.ClientId == c.Id && !c.Suspended;
+                   || Roles.IsClient(u.Role) && u.ClientId == c.Id && !c.Suspended;
         });
         if (!ok)
         {
             await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
             ctx.Response.Redirect("/login");
+            return;
+        }
+        if (stale) store.Write(db => { if (db.Users.FirstOrDefault(x => x.Id == uid) is { } u) u.LastActiveUtc = DateTime.UtcNow; });   // utilisateurs actifs (console)
+        if (roleChanged && !ctx.User.HasClaim(c => c.Type == Claims.Impersonating) && !p.StartsWithSegments("/_blazor") && !p.StartsWithSegments("/_framework") && HttpMethods.IsGet(ctx.Request.Method))
+        {
+            var fresh = store.Read(db => Claims.Build(db, db.Users.First(x => x.Id == uid)));
+            await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, fresh, new AuthenticationProperties { IsPersistent = true });
+            ctx.Response.Redirect(p + ctx.Request.QueryString);
             return;
         }
         // Mot de passe provisoire : rien d'autre n'est accessible tant qu'il n'a pas été remplacé.
@@ -242,7 +256,7 @@ app.MapGet("/canva/connect", (HttpContext ctx, CanvaService canva) =>
 {
     var cid = ctx.User.GetGuid(Claims.Client);
     if (cid == null) return Results.Redirect("/");
-    if (!canva.IsConfigured(cid.Value)) return Results.Redirect("/integrations?canva=unconfigured");
+    if (!canva.IsConfigured) return Results.Redirect("/integrations?canva=unconfigured");
     var back = $"{ctx.Request.Scheme}://{ctx.Request.Host}/integrations";
     return Results.Redirect(canva.StartAuthorization(cid.Value, back));
 });

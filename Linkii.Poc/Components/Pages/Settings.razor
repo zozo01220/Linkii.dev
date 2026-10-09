@@ -1,5 +1,5 @@
 @page "/settings"
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientAdmin")]
 @inject TenantStore Store
 @inject JsonStore Root
 @inject TenantContext Ctx
@@ -36,6 +36,14 @@
                 <select class="full" @bind="timezone">
                     @foreach (var tz in Timezones) { <option value="@tz">@tz</option> }
                 </select>
+            </div>
+            <div class="card">
+                <h3>Aires de gestion et membres</h3>
+                <p class="hint">Répartissez vos écrans, listes de lecture et médias en aires (un site, un bâtiment, un service…) et invitez des personnes avec un rôle dans chaque aire. Tant qu'il n'y a qu'une aire et aucun membre, rien ne change.</p>
+                <ul class="opt-list">
+                    <li><Ico Name="map-pin" Size="16" /> <span class="grow">@areaCount aire@(areaCount > 1 ? "s" : "") de gestion</span><a href="/areas">@(areaCount > 1 ? "Gérer les aires et les zones" : "Créer une aire, des zones")</a></li>
+                    <li><Ico Name="users" Size="16" /> <span class="grow">@memberCount membre@(memberCount > 1 ? "s" : "") en plus des administrateurs</span><a href="/members">@(memberCount > 0 ? "Gérer les membres" : "Inviter une personne")</a></li>
+                </ul>
             </div>
         </div>
         break;
@@ -105,6 +113,7 @@
     private int duration, reloadHour;
     private string oldPwd = "", newPwd = "";
     private ScreenSpec spec = new();
+    private int areaCount, memberCount;
 
     protected override void OnInitialized()
     {
@@ -114,6 +123,7 @@
         name = t.Name; timezone = t.Timezone; duration = t.DefaultDurationSec; reloadHour = t.ReloadHour;
         if (Nav.Uri.Contains("saved=1")) Toast.Ok("Réglages enregistrés.");
         email = Ctx.Email;
+        (areaCount, memberCount) = Store.Read(d => (d.Areas.Count, d.Users.Count(u => u.Role == Roles.ClientMember)));
         spec = ScreenSpec.From(t);
     }
 
