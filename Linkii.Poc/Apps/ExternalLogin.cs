@@ -6,7 +6,7 @@ using System.Text.Json;
 namespace Linkii.Poc;
 
 /// <summary>
-/// « Continuer avec Microsoft / Google » sur la page de connexion : création d'un espace ou connexion, identité seulement (openid, e-mail, nom),
+/// « Continuer avec Microsoft / Google / LinkedIn / GitHub » sur la page de connexion : création d'un espace ou connexion, identité seulement (openid, e-mail, nom),
 /// aucun accès aux fichiers ni aux agendas (ceux-ci restent demandés dans Intégrations).
 /// Réutilise les applications OAuth de la plateforme et leurs adresses de retour (/google/callback, /microsoft/callback) : aucune déclaration
 /// supplémentaire chez Google ni dans Entra. Le retour peut arriver sur le domaine principal : l'identité est confiée à un ticket à usage unique,
@@ -16,12 +16,15 @@ public class ExternalLogin(IConfiguration config, IHttpClientFactory httpFactory
 {
     public const string Login = "login", SignupMode = "signup";
 
-    private record Provider(string Id, string AuthorizeUrl, string TokenUrl, string Scope, string ConfigKey, string Callback);
+    private record Provider(string Id, string AuthorizeUrl, string TokenUrl, string Scope, string ConfigKey, string Callback, bool Pkce = true, bool AccountPicker = true);
 
     private static readonly Provider[] Providers =
     {
         new(SignupSources.Google, "https://accounts.google.com/o/oauth2/v2/auth", "https://oauth2.googleapis.com/token", "openid email profile", "Google", "/google/callback"),
         new(SignupSources.Microsoft, "https://login.microsoftonline.com/common/oauth2/v2.0/authorize", "https://login.microsoftonline.com/common/oauth2/v2.0/token", "openid email profile", "Microsoft", "/microsoft/callback"),
+        // LinkedIn (OpenID Connect) et GitHub : pas de PKCE ni de sélecteur de compte. Adresse de retour : une seule, déclarée chez eux.
+        new(SignupSources.LinkedIn, "https://www.linkedin.com/oauth/v2/authorization", "https://www.linkedin.com/oauth/v2/accessToken", "openid profile email", "LinkedIn", "/linkedin/callback", Pkce: false, AccountPicker: false),
+        new(SignupSources.GitHub, "https://github.com/login/oauth/authorize", "https://github.com/login/oauth/access_token", "read:user user:email", "GitHub", "/github/callback", Pkce: false, AccountPicker: false),
     };
 
     private static Provider? Find(string? id) => Providers.FirstOrDefault(p => p.Id == id);
@@ -48,17 +51,17 @@ public class ExternalLogin(IConfiguration config, IHttpClientFactory httpFactory
         var state = Base64Url(RandomNumberGenerator.GetBytes(32));
         var redirect = config[$"Linkii:{p.ConfigKey}:RedirectUri"] is { Length: > 0 } r ? r : origin.TrimEnd('/') + p.Callback;
         pending[state] = new Pending(p.Id, mode == SignupMode ? SignupMode : Login, verifier, origin.TrimEnd('/'), redirect, DateTime.UtcNow.AddMinutes(15));
-        return p.AuthorizeUrl + "?" + string.Join("&", new Dictionary<string, string>
+        var query = new Dictionary<string, string>
         {
             ["response_type"] = "code",
             ["client_id"] = ClientId(p),
             ["redirect_uri"] = redirect,
             ["scope"] = p.Scope,
-            ["prompt"] = "select_account",
-            ["code_challenge"] = Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(verifier))),
-            ["code_challenge_method"] = "S256",
             ["state"] = state
-        }.Select(kv => kv.Key + "=" + Uri.EscapeDataString(kv.Value)));
+        };
+        if (p.AccountPicker) query["prompt"] = "select_account";
+        if (p.Pkce) { query["code_challenge"] = Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(verifier))); query["code_challenge_method"] = "S256"; }
+        return p.AuthorizeUrl + "?" + string.Join("&", query.Select(kv => kv.Key + "=" + Uri.EscapeDataString(kv.Value)));
     }
 
     /// <summary>Ce retour (state) appartient à une connexion de la page de connexion, pas à une intégration.</summary>
@@ -73,20 +76,30 @@ public class ExternalLogin(IConfiguration config, IHttpClientFactory httpFactory
         var p = Find(pd.Provider)!;
         try
         {
-            using var res = await Http.PostAsync(p.TokenUrl, new FormUrlEncodedContent(new Dictionary<string, string>
+            var form = new Dictionary<string, string>
             {
                 ["grant_type"] = "authorization_code",
                 ["code"] = code,
-                ["code_verifier"] = pd.Verifier,
                 ["redirect_uri"] = pd.Redirect,
                 ["client_id"] = ClientId(p),
-                ["client_secret"] = ClientSecret(p),
-                ["scope"] = p.Scope
-            }));
+                ["client_secret"] = ClientSecret(p)
+            };
+            if (p.Pkce) { form["code_verifier"] = pd.Verifier; form["scope"] = p.Scope; }
+            using var req = new HttpRequestMessage(HttpMethod.Post, p.TokenUrl) { Content = new FormUrlEncodedContent(form) };
+            req.Headers.Accept.ParseAdd("application/json");   // GitHub répond sinon en formulaire
+            using var res = await Http.SendAsync(req);
             var body = await res.Content.ReadAsStringAsync();
             if (!res.IsSuccessStatusCode) { log.LogWarning("Connexion {Provider} refusée ({Status}) : {Body}", p.Id, (int)res.StatusCode, body); return back + "error"; }
             using var doc = JsonDocument.Parse(body);
-            var id = Identity(p.Id, doc.RootElement.TryGetProperty("id_token", out var t) ? t.GetString() ?? "" : "");
+            ExternalIdentity? id;
+            if (p.Id is SignupSources.LinkedIn or SignupSources.GitHub)
+            {
+                // Pas de jeton d'identité fiable : l'identité se lit chez le fournisseur avec le jeton d'accès.
+                var access = doc.RootElement.TryGetProperty("access_token", out var at) ? at.GetString() ?? "" : "";
+                if (access.Length == 0) { log.LogWarning("Connexion {Provider} sans jeton d'accès : {Body}", p.Id, body); return back + "error"; }
+                id = p.Id == SignupSources.LinkedIn ? await LinkedInIdentity(access) : await GitHubIdentity(access);
+            }
+            else id = Identity(p.Id, doc.RootElement.TryGetProperty("id_token", out var t) ? t.GetString() ?? "" : "");
             if (id == null) return back + "noemail";
             var ticket = Base64Url(RandomNumberGenerator.GetBytes(32));
             tickets[ticket] = new Ticket(id, pd.Mode, DateTime.UtcNow.AddMinutes(20));
@@ -126,6 +139,51 @@ public class ExternalLogin(IConfiguration config, IHttpClientFactory httpFactory
             return new ExternalIdentity(provider, sub, email, S("name"));
         }
         catch (Exception ex) when (ex is FormatException or JsonException) { return null; }
+    }
+
+    private async Task<JsonDocument?> GetJson(string url, string accessToken)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+        req.Headers.Accept.ParseAdd("application/json");
+        req.Headers.UserAgent.ParseAdd("Linkii");   // exigé par l'API GitHub
+        using var res = await Http.SendAsync(req);
+        if (!res.IsSuccessStatusCode) { log.LogWarning("Lecture de {Url} refusée ({Status})", url, (int)res.StatusCode); return null; }
+        return JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+    }
+
+    /// <summary>LinkedIn (OpenID Connect) : sub, name, email, email_verified. L'adresse doit être vérifiée.</summary>
+    private async Task<ExternalIdentity?> LinkedInIdentity(string accessToken)
+    {
+        using var doc = await GetJson("https://api.linkedin.com/v2/userinfo", accessToken);
+        if (doc == null) return null;
+        var r = doc.RootElement;
+        string S(string k) => r.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+        var verified = r.TryGetProperty("email_verified", out var ev) && (ev.ValueKind == JsonValueKind.True || ev.ValueKind == JsonValueKind.String && ev.GetString() == "true");
+        var email = S("email").Trim().ToLowerInvariant();
+        if (!verified || S("sub").Length == 0 || !System.Net.Mail.MailAddress.TryCreate(email, out _)) return null;
+        return new ExternalIdentity(SignupSources.LinkedIn, S("sub"), email, S("name"));
+    }
+
+    /// <summary>GitHub : identifiant numérique et nom du profil ; adresse = l'adresse principale vérifiée (à défaut, une autre adresse vérifiée).</summary>
+    private async Task<ExternalIdentity?> GitHubIdentity(string accessToken)
+    {
+        using var user = await GetJson("https://api.github.com/user", accessToken);
+        using var emails = await GetJson("https://api.github.com/user/emails", accessToken);
+        if (user == null || emails == null || emails.RootElement.ValueKind != JsonValueKind.Array) return null;
+        var u = user.RootElement;
+        if (!u.TryGetProperty("id", out var idEl)) return null;
+        var id = idEl.ToString();
+        string S(string k) => u.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+        var verified = emails.RootElement.EnumerateArray()
+            .Where(e => e.TryGetProperty("verified", out var v) && v.ValueKind == JsonValueKind.True && e.TryGetProperty("email", out var m) && m.ValueKind == JsonValueKind.String)
+            .Select(e => (Email: e.GetProperty("email").GetString()!, Primary: e.TryGetProperty("primary", out var p) && p.ValueKind == JsonValueKind.True))
+            .Where(e => !e.Email.EndsWith("@users.noreply.github.com", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(e => e.Primary).ToList();
+        if (verified.Count == 0) return null;
+        var email = verified[0].Email.Trim().ToLowerInvariant();
+        if (!System.Net.Mail.MailAddress.TryCreate(email, out _)) return null;
+        return new ExternalIdentity(SignupSources.GitHub, id, email, S("name") is { Length: > 0 } n ? n : S("login"));
     }
 
     private void Sweep()

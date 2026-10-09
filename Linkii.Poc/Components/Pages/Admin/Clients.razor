@@ -372,10 +372,10 @@
             return (u, c, d.Resellers.First(x => x.Id == c.ResellerId));
         });
         Load();
-        if (!SignupSources.IsSelfService(client.SignupSource)) { Toast.Ok($"Compte de « {client.Name} » validé."); return; }
+        if (!SignupSources.IsSelfService(client.SignupSource) || user.WelcomeSentUtc != null) { Toast.Ok($"Compte de « {client.Name} » validé."); return; }
         var err = await Mail.SendSignupWelcome(reseller, AppBase(reseller.Id), user.Name, user.Email, client.Name, trialDays,
             client.TrialEndsUtc is { } end ? Signup.Day(client, end) : null, Signup.SignInHint(user));
-        if (err == null) Toast.Ok($"Compte de « {client.Name} » validé. L'e-mail de bienvenue a été envoyé.");
+        if (err == null) { Root.Write(d => { if (d.Users.FirstOrDefault(u => u.Id == user.Id) is { } u) u.WelcomeSentUtc = DateTime.UtcNow; }); Toast.Ok($"Compte de « {client.Name} » validé. L'e-mail de bienvenue a été envoyé."); }
         else Toast.Error($"Compte validé, mais l'e-mail de bienvenue n'a pas pu être envoyé : {err}.");
     }
 

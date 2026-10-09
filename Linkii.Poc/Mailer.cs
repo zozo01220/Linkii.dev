@@ -139,14 +139,16 @@ public class Mailer(IConfiguration config, JsonStore store, SecretBox box, ILogg
 
     /// <summary>Bienvenue à l'administrateur, une fois son compte entièrement validé. trialEnd : fin de l'essai gratuit (date affichable), ou null.
     /// signIn : comment se connecter (« votre e-mail et votre mot de passe », « le bouton Continuer avec Microsoft »).</summary>
-    public Task<string?> SendSignupWelcome(Reseller r, string appUrl, string name, string email, string org, int trialDays, string? trialEnd, string signIn)
+    public Task<string?> SendSignupWelcome(Reseller r, string appUrl, string name, string email, string org, int trialDays, string? trialEnd, string signIn, bool pending = false)
     {
         var brand = BrandOf(r);
         var who = string.IsNullOrWhiteSpace(name) ? "" : " " + name.Trim().Split(' ')[0];
         var trial = trialEnd == null ? null : $"Essai gratuit : {trialDays} jours, jusqu'au {trialEnd}";
         var text =
             $"Bienvenue{who},\n\n" +
-            $"Votre adresse est confirmée et votre espace « {org} » est prêt. Vous en êtes l'administrateur.\n\n" +
+            (pending
+                ? $"Votre espace « {org} » est créé et vous en êtes l'administrateur. Il vous reste à confirmer votre adresse e-mail avec le lien que vous venez de recevoir : l'essai gratuit ({trialDays} jours) démarre à la confirmation.\n\n"
+                : $"Votre adresse est confirmée et votre espace « {org} » est prêt. Vous en êtes l'administrateur.\n\n") +
             (trial == null ? "" : trial + "\n") +
             $"Adresse de votre espace : {appUrl}\n" +
             $"Connexion : {signIn}\n\n" +
@@ -154,7 +156,7 @@ public class Mailer(IConfiguration config, JsonStore store, SecretBox box, ILogg
             $"Une question ? Répondez simplement à cet e-mail.\n\n— L'équipe {brand}";
         var body = $"""
             <p style="margin:0 0 14px;font-size:19px;font-weight:600">Bienvenue{E(who)}</p>
-            <p style="margin:0 0 16px">Votre adresse est confirmée et votre espace <b>{E(org)}</b> est prêt. Vous en êtes l'administrateur.</p>
+            <p style="margin:0 0 16px">{(pending ? $"Votre espace <b>{E(org)}</b> est créé et vous en êtes l'administrateur. Il vous reste à <b>confirmer votre adresse e-mail</b> avec le lien que vous venez de recevoir : l'essai gratuit ({trialDays} jours) démarre à la confirmation." : $"Votre adresse est confirmée et votre espace <b>{E(org)}</b> est prêt. Vous en êtes l'administrateur.")}</p>
             <table role="presentation" style="width:100%;background:#F4F6F8;border-radius:4px;font-size:14px;margin:0 0 18px">
               {(trial == null ? "" : $"""<tr><td style="padding:10px 14px 0">Essai gratuit : <b>{trialDays} jours</b>, jusqu'au <b>{E(trialEnd!)}</b></td></tr>""")}
               <tr><td style="padding:10px 14px 0">Adresse de votre espace : <a href="{E(appUrl)}" style="color:#3B82C4">{E(appUrl.Replace("https://", "").Replace("http://", ""))}</a></td></tr>
@@ -169,7 +171,7 @@ public class Mailer(IConfiguration config, JsonStore store, SecretBox box, ILogg
             {Button(r, appUrl, "Accéder à mon espace")}
             <p style="margin:0;color:#5A6B80;font-size:13px">Une question ? Répondez simplement à cet e-mail.</p>
             """;
-        return Send(email, $"Bienvenue sur {brand}, votre espace {org} est prêt", Frame(r, body), text, brand, r.SenderEmail);
+        return Send(email, pending ? $"Bienvenue sur {brand}, votre espace {org} est créé" : $"Bienvenue sur {brand}, votre espace {org} est prêt", Frame(r, body), text, brand, r.SenderEmail);
     }
 
     /// <summary>Rappel : l'essai gratuit se termine bientôt (envoyé 2 jours avant).</summary>

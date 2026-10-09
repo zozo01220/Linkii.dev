@@ -14,81 +14,104 @@
     <h1>Service suspendu</h1>
     <p class="lead">Ce service est momentanément indisponible. Contactez votre administrateur.</p>
 }
-else if (signup && ticket != null)
-{
-    @* Retour de Microsoft / Google : l'adresse est prouvée, il ne manque que l'organisation et les consentements. *@
-    <h1>Dernière étape</h1>
-    <p class="lead">Nommez votre organisation pour créer votre espace.</p>
-
-    <div class="sso-who">
-        <ProviderLogo Provider="@ticket.Identity.Provider" />
-        <div class="grow"><b>@(ticket.Identity.Name is { Length: > 0 } n ? n : ticket.Identity.Email)</b><small>@ticket.Identity.Email</small></div>
-        <span class="pill ok">Adresse vérifiée</span>
-    </div>
-
-    <EditForm Model="SsoSignup" FormName="signup-sso" OnSubmit="DoSsoSignup" method="post" class="auth-form" id="signup-form">
-        <label>Organisation</label>
-        <InputText @bind-Value="SsoSignup!.Organisation" placeholder="Ex. : Horizon SA" />
-        <label>Votre nom</label>
-        <InputText @bind-Value="SsoSignup.Name" placeholder="Prénom Nom" />
-        <ConsentSwitches Model="SsoSignup!" Prefix="SsoSignup" />
-        @if (error != null) { <div class="err">@error</div> }
-        <button class="btn" type="submit" data-needs-terms>Créer mon espace</button>
-    </EditForm>
-    <p class="auth-alt"><a href="/login?signup=1" data-enhance-nav="false">Utiliser un autre compte</a></p>
-    <TermsDialog />
-}
-else if (signup)
-{
-    <span class="trial-tag">Essai gratuit · @trialDays jours · sans carte bancaire</span>
-    <h1>Créez votre espace</h1>
-    <p class="lead">Vous serez l'administrateur de votre organisation.</p>
-
-    <SsoButtons Mode="signup" WithGoogle="@ShowGoogle" WithMicrosoft="@ShowMicrosoft" />
-    @if (ShowGoogle || ShowMicrosoft) { <div class="auth-or">ou avec votre e-mail</div> }
-    @if (ssoError != null) { <div class="err">@ssoError</div> }
-
-    <EditForm Model="EmailSignup" FormName="signup" OnSubmit="DoSignup" method="post" class="auth-form" id="signup-form">
-        <label>Organisation</label>
-        <InputText @bind-Value="EmailSignup!.Organisation" placeholder="Ex. : Horizon SA" />
-        <label>Votre nom</label>
-        <InputText @bind-Value="EmailSignup.Name" placeholder="Prénom Nom" />
-        <label>E-mail professionnel</label>
-        <InputText @bind-Value="EmailSignup.Email" type="email" placeholder="vous@organisation.ch" autocomplete="username" />
-        <label>Mot de passe <small>(8 caractères minimum)</small></label>
-        <InputText @bind-Value="EmailSignup.Password" type="password" autocomplete="new-password" />
-        <ConsentSwitches Model="EmailSignup!" Prefix="EmailSignup" />
-        @if (error != null) { <div class="err">@error</div> }
-        <button class="btn" type="submit" data-needs-terms>Créer mon espace</button>
-        <p class="terms-hint">Acceptez les conditions générales pour continuer.</p>
-    </EditForm>
-    <p class="auth-alt"><a href="/login">J'ai déjà un compte</a></p>
-    <TermsDialog />
-}
 else
 {
-    <h1>Bon retour</h1>
-    <p class="lead">Connectez-vous à votre espace @Host.DisplayName.</p>
+    @* Page en deux parties : connexion par e-mail à gauche, connexion rapide (Microsoft, Google, LinkedIn, GitHub) dans un panneau à droite.
+       La création d'un espace s'ouvre dans une fenêtre par-dessus (?signup=1) ; on la ferme en revenant sur /login. *@
+    var anySso = ShowGoogle || ShowMicrosoft || ShowLinkedIn || ShowGitHub;
+    <div class="auth-split @(anySso ? "with-side" : "")" inert="@signup">
+        <div class="split-main">
+            <h1>Bon retour</h1>
+            <p class="lead">Connectez-vous à votre espace @Host.DisplayName.</p>
+            @if (ssoError != null && !signup) { <div class="err">@ssoError</div> }
+            @if (!signup && SsoQuery == "nolink" && Host.AllowSelfSignup && ProviderQuery is SignupSources.Google or SignupSources.Microsoft or SignupSources.LinkedIn or SignupSources.GitHub)
+            {
+                <p class="auth-alt left"><a href="/login/sso/@ProviderQuery?mode=signup" data-enhance-nav="false">Créer un espace avec mon compte @SignupSources.Label(ProviderQuery)</a></p>
+            }
 
-    <SsoButtons Mode="login" WithGoogle="@ShowGoogle" WithMicrosoft="@ShowMicrosoft" />
-    @if (ShowGoogle || ShowMicrosoft) { <div class="auth-or">ou avec votre e-mail</div> }
-    @if (ssoError != null) { <div class="err">@ssoError</div> }
-    @if (SsoQuery == "nolink" && Host.AllowSelfSignup && ProviderQuery is SignupSources.Google or SignupSources.Microsoft)
-    {
-        <p class="auth-alt"><a href="/login/sso/@ProviderQuery?mode=signup" data-enhance-nav="false">Créer un espace avec mon compte @SignupSources.Label(ProviderQuery)</a></p>
-    }
+            <EditForm Model="Credentials" FormName="login" OnValidSubmit="DoLogin" method="post" class="auth-form">
+                <label>E-mail</label>
+                <InputText @bind-Value="Credentials!.Email" type="email" placeholder="vous@organisation.ch" autocomplete="username" />
+                <label>Mot de passe</label>
+                <InputText @bind-Value="Credentials.Password" type="password" autocomplete="current-password" />
+                @if (error != null && !signup) { <div class="err">@error</div> }
+                <button class="btn" type="submit">Se connecter</button>
+            </EditForm>
+            @if (Host.AllowSelfSignup)
+            {
+                <p class="auth-alt left">Pas encore d'espace ? <a href="/login?signup=1">Créer un espace</a></p>
+            }
+        </div>
+        @if (anySso)
+        {
+            <aside class="split-side" aria-label="Connexion rapide">
+                <h2>Connexion rapide</h2>
+                <p>Utilisez un compte que vous avez déjà.</p>
+                <SsoButtons Mode="login" WithGoogle="@ShowGoogle" WithMicrosoft="@ShowMicrosoft" WithLinkedIn="@ShowLinkedIn" WithGitHub="@ShowGitHub" />
+            </aside>
+        }
+    </div>
 
-    <EditForm Model="Credentials" FormName="login" OnValidSubmit="DoLogin" method="post" class="auth-form">
-        <label>E-mail</label>
-        <InputText @bind-Value="Credentials!.Email" type="email" placeholder="vous@organisation.ch" autocomplete="username" />
-        <label>Mot de passe</label>
-        <InputText @bind-Value="Credentials.Password" type="password" autocomplete="current-password" />
-        @if (error != null) { <div class="err">@error</div> }
-        <button class="btn" type="submit">Se connecter</button>
-    </EditForm>
-    @if (Host.AllowSelfSignup)
+    @if (signup)
     {
-        <p class="auth-alt"><a href="/login?signup=1">Créer un espace</a></p>
+        <a class="auth-modal-backdrop" href="/login" aria-label="Fermer" tabindex="-1"></a>
+        <div class="auth-modal" role="dialog" aria-modal="true" aria-labelledby="signup-title">
+            <a class="auth-close modal-x" href="/login" aria-label="Fermer"><Ico Name="x" Size="20" /></a>
+            @if (ticket != null)
+            {
+                @* Retour de Microsoft / Google / LinkedIn / GitHub : l'adresse est prouvée, il ne manque que l'organisation et les consentements. *@
+                <h1 id="signup-title">Dernière étape</h1>
+                <p class="lead">Nommez votre organisation pour créer votre espace.</p>
+
+                <div class="sso-who">
+                    <ProviderLogo Provider="@ticket.Identity.Provider" />
+                    <div class="grow"><b>@(ticket.Identity.Name is { Length: > 0 } n ? n : ticket.Identity.Email)</b><small>@ticket.Identity.Email</small></div>
+                    <span class="pill ok">Adresse vérifiée</span>
+                </div>
+
+                <EditForm Model="SsoSignup" FormName="signup-sso" OnSubmit="DoSsoSignup" method="post" class="auth-form" id="signup-form">
+                    <div class="auth-cols">
+                        <div><label>Organisation</label><InputText @bind-Value="SsoSignup!.Organisation" placeholder="Ex. : Horizon SA" autofocus /></div>
+                        <div><label>Votre nom</label><InputText @bind-Value="SsoSignup.Name" placeholder="Prénom Nom" /></div>
+                    </div>
+                    <ConsentSwitches Model="SsoSignup!" Prefix="SsoSignup" />
+                    @if (error != null) { <div class="err">@error</div> }
+                    <button class="btn" type="submit" data-needs-terms>Créer mon espace</button>
+                </EditForm>
+                <p class="auth-alt"><a href="/login?signup=1" data-enhance-nav="false">Utiliser un autre compte</a></p>
+            }
+            else
+            {
+                <div class="auth-modal-head">
+                    <h1 id="signup-title">Créez votre espace</h1>
+                    <span class="trial-tag">Essai gratuit · @trialDays jours · sans carte bancaire</span>
+                </div>
+
+                @if (anySso)
+                {
+                    <SsoButtons Mode="signup" Icons="true" WithGoogle="@ShowGoogle" WithMicrosoft="@ShowMicrosoft" WithLinkedIn="@ShowLinkedIn" WithGitHub="@ShowGitHub" />
+                    <div class="auth-or">ou avec votre e-mail</div>
+                }
+                @if (ssoError != null) { <div class="err">@ssoError</div> }
+
+                <EditForm Model="EmailSignup" FormName="signup" OnSubmit="DoSignup" method="post" class="auth-form" id="signup-form">
+                    <div class="auth-cols">
+                        <div><label>Organisation</label><InputText @bind-Value="EmailSignup!.Organisation" placeholder="Ex. : Horizon SA" autofocus /></div>
+                        <div><label>Votre nom</label><InputText @bind-Value="EmailSignup.Name" placeholder="Prénom Nom" /></div>
+                        <div class="span-2"><label>E-mail professionnel</label><InputText @bind-Value="EmailSignup.Email" type="email" placeholder="vous@organisation.ch" autocomplete="username" /></div>
+                        <div><label>Mot de passe <small>(8 car. min.)</small></label><InputText @bind-Value="EmailSignup.Password" type="password" autocomplete="new-password" minlength="8" data-pwd /></div>
+                        <div><label>Confirmation</label><InputText @bind-Value="EmailSignup.PasswordConfirm" type="password" autocomplete="new-password" data-pwd-confirm aria-describedby="pwd-match" /></div>
+                        <small class="pwd-match span-2" id="pwd-match" aria-live="polite"></small>
+                    </div>
+                    <ConsentSwitches Model="EmailSignup!" Prefix="EmailSignup" />
+                    @if (error != null) { <div class="err">@error</div> }
+                    <button class="btn" type="submit" data-needs-terms>Créer mon espace</button>
+                    <p class="terms-hint">Acceptez les conditions générales pour continuer.</p>
+                </EditForm>
+                <p class="auth-alt"><a href="/login">J'ai déjà un compte</a></p>
+            }
+        </div>
+        <TermsDialog />
     }
 }
 
@@ -111,6 +134,8 @@ else
     // Boutons Microsoft / Google : proposés quand l'application OAuth de la plateforme est configurée (toujours en développement, pour essayer l'écran).
     private bool ShowGoogle => Sso.IsConfigured(SignupSources.Google) || Env.IsDevelopment();
     private bool ShowMicrosoft => Sso.IsConfigured(SignupSources.Microsoft) || Env.IsDevelopment();
+    private bool ShowLinkedIn => Sso.IsConfigured(SignupSources.LinkedIn) || Env.IsDevelopment();
+    private bool ShowGitHub => Sso.IsConfigured(SignupSources.GitHub) || Env.IsDevelopment();
 
     public class LoginModel
     {
@@ -124,6 +149,7 @@ else
         public string Name { get; set; } = "";
         public string Email { get; set; } = "";
         public string Password { get; set; } = "";
+        public string PasswordConfirm { get; set; } = "";
         public bool Terms { get; set; }
         public bool Marketing { get; set; }
         public bool News { get; set; }
@@ -145,7 +171,7 @@ else
             }
         }
         SsoSignup ??= new();
-        var provider = SignupSources.Label(ProviderQuery is SignupSources.Google or SignupSources.Microsoft ? ProviderQuery : null);
+        var provider = SignupSources.Label(ProviderQuery is SignupSources.Google or SignupSources.Microsoft or SignupSources.LinkedIn or SignupSources.GitHub ? ProviderQuery : null);
         provider = provider == SignupSources.Label(null) ? "ce fournisseur" : provider;
         ssoError ??= SsoQuery switch
         {
@@ -177,13 +203,24 @@ else
         error = null;
         var m = EmailSignup!;
         if (string.IsNullOrWhiteSpace(m.Organisation) || string.IsNullOrWhiteSpace(m.Email)) { error = "Organisation et e-mail obligatoires."; return; }
+        if (m.Password != m.PasswordConfirm) { error = "Les deux mots de passe ne correspondent pas."; m.Password = m.PasswordConfirm = ""; return; }
         var now = DateTime.UtcNow;
         var (client, admin, token, err) = Store.Write(d => Signup.Create(d, Host!, m.Organisation, m.Name, m.Email, m.Password, null, ConsentsOf(m), now));
         if (client == null) { error = err; return; }
         var link = $"{Http!.Request.Scheme}://{Http.Request.Host}/login/verify/confirm?t={Uri.EscapeDataString(token!)}";
         var mailErr = await Mail.SendVerification(Host!, link, admin!.Name, admin.Email, client.Name, Store.Read(d => d.Platform.VerifyLinkHours));
         if (mailErr != null) Log.LogWarning("Lien de confirmation non envoyé à {Email} : {Error}", admin.Email, mailErr);
+        else await SendWelcome(client, admin, pending: true);
         Nav.NavigateTo(await SessionCookie.SignIn(Http, Store, admin.Id) + (mailErr != null ? "?mail=failed" : ""), forceLoad: true);
+    }
+
+    /// <summary>E-mail de bienvenue de l'administrateur, une seule fois par compte. pending : adresse pas encore confirmée (inscription par e-mail).</summary>
+    private async Task SendWelcome(Tenant client, User admin, bool pending)
+    {
+        var mailErr = await Mail.SendSignupWelcome(Host!, $"{Http!.Request.Scheme}://{Http.Request.Host}/", admin.Name, admin.Email, client.Name,
+            Store.Read(d => d.Platform.TrialDays), client.TrialEndsUtc is { } end ? Signup.Day(client, end) : null, Signup.SignInHint(admin), pending);
+        if (mailErr != null) { Log.LogWarning("E-mail de bienvenue non envoyé à {Email} : {Error}", admin.Email, mailErr); return; }
+        Store.Write(d => { if (d.Users.FirstOrDefault(u => u.Id == admin.Id) is { } u) u.WelcomeSentUtc = DateTime.UtcNow; });
     }
 
     private async Task DoSsoSignup()
@@ -197,9 +234,7 @@ else
         var (client, admin, _, err) = Store.Write(d => Signup.Create(d, Host!, m.Organisation, string.IsNullOrWhiteSpace(m.Name) ? id.Name : m.Name, id.Email, null, id, ConsentsOf(m), now));
         if (client == null) { error = err; return; }
         Sso.Consume(Ext);
-        var mailErr = await Mail.SendSignupWelcome(Host!, $"{Http!.Request.Scheme}://{Http.Request.Host}/", admin!.Name, admin.Email, client.Name,
-            Store.Read(d => d.Platform.TrialDays), client.TrialEndsUtc is { } end ? Signup.Day(client, end) : null, Signup.SignInHint(admin));
-        if (mailErr != null) Log.LogWarning("E-mail de bienvenue non envoyé à {Email} : {Error}", admin.Email, mailErr);
+        await SendWelcome(client, admin!, pending: false);
         await SessionCookie.SignIn(Http, Store, admin.Id);
         Nav.NavigateTo("/login/verify/done", forceLoad: true);
     }

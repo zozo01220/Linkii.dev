@@ -50,15 +50,17 @@ public static class SignupSources
     public const string Email = "email";
     public const string Google = "google";
     public const string Microsoft = "microsoft";
+    public const string LinkedIn = "linkedin";
+    public const string GitHub = "github";
     public const string Reseller = "reseller";
     public const string Console = "console";
 
-    public static readonly string[] All = { Email, Google, Microsoft, Reseller, Console };
-    public static bool IsSelfService(string? s) => s is Email or Google or Microsoft;
+    public static readonly string[] All = { Email, Google, Microsoft, LinkedIn, GitHub, Reseller, Console };
+    public static bool IsSelfService(string? s) => s is Email or Google or Microsoft or LinkedIn or GitHub;
 
     public static string Label(string? s) => s switch
     {
-        Email => "E-mail", Google => "Google", Microsoft => "Microsoft",
+        Email => "E-mail", Google => "Google", Microsoft => "Microsoft", LinkedIn => "LinkedIn", GitHub => "GitHub",
         Reseller => "Revendeur", Console => "Linkii", _ => "Non renseignée"
     };
 }
@@ -147,6 +149,7 @@ public class User
     public DateTime? NewsOptInUtc { get; set; }
 
     public DateTime? LastLoginUtc { get; set; }
+    public DateTime? WelcomeSentUtc { get; set; }   // e-mail de bienvenue envoyé (une seule fois par compte)
     public DateTime? LastActiveUtc { get; set; }   // dernière requête, mise à jour au plus une fois par heure : utilisateurs actifs sur 30 jours
 
     /// <summary>Inscription par e-mail dont l'adresse n'est pas encore confirmée : seul l'écran « Vérifiez votre e-mail » est accessible.</summary>

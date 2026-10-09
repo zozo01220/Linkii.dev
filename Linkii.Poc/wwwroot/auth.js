@@ -34,6 +34,19 @@
       }, 1000);
     });
   }
+  // Création d'un espace : les deux mots de passe doivent être identiques (contrôlé aussi par le serveur)
+  document.addEventListener('input', function (e) {
+    if (!e.target.matches('[data-pwd], [data-pwd-confirm]')) return;
+    var f = e.target.form, a = f && f.querySelector('[data-pwd]'), b = f && f.querySelector('[data-pwd-confirm]'), out = f && f.querySelector('.pwd-match');
+    if (!a || !b) return;
+    var mismatch = b.value.length > 0 && a.value !== b.value;
+    b.setCustomValidity(mismatch ? 'Les deux mots de passe ne correspondent pas.' : '');
+    if (out) {
+      out.textContent = !b.value ? '' : mismatch ? 'Les deux mots de passe ne correspondent pas.' : a.value.length < 8 ? 'Identiques, mais 8 caractères minimum.' : '✓ Les mots de passe correspondent.';
+      out.className = 'pwd-match span-2 ' + (!b.value ? '' : mismatch || a.value.length < 8 ? 'bad' : 'ok');
+    }
+  });
+
   if (location.pathname.indexOf('/login') !== 0) return;   // le back-office (interactif) n'en a pas besoin
   countdowns();
   new MutationObserver(countdowns).observe(document.documentElement, { childList: true, subtree: true });

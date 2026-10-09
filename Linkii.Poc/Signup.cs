@@ -190,6 +190,8 @@ public static class Signup
     {
         SignupSources.Microsoft => "le bouton « Continuer avec Microsoft »",
         SignupSources.Google => "le bouton « Continuer avec Google »",
+        SignupSources.LinkedIn => "le bouton « Continuer avec LinkedIn »",
+        SignupSources.GitHub => "le bouton « Continuer avec GitHub »",
         _ => "votre adresse e-mail et votre mot de passe"
     };
 

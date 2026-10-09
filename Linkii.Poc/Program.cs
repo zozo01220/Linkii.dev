@@ -221,6 +221,7 @@ app.Use(async (ctx, next) =>
                || p.StartsWithSegments("/canva/callback")   // retour de Canva : identifié par son « state », sur le domaine principal
                || p.StartsWithSegments("/google/callback")  // retour de Google (Drive) : idem
                || p.StartsWithSegments("/microsoft/callback")  // retour de Microsoft : idem
+               || p.StartsWithSegments("/linkedin/callback") || p.StartsWithSegments("/github/callback")  // retours de LinkedIn et GitHub (connexion seulement)
                || p.StartsWithSegments("/manifest.webmanifest");   // le navigateur le demande sans cookie de session
     if (!open && ctx.User.Identity?.IsAuthenticated != true)
     {
@@ -300,7 +301,12 @@ app.MapGet("/microsoft/callback", async (HttpRequest req, MicrosoftAuth microsof
         ? await sso.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])
         : await microsoft.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"], req.Query["error_description"])));
 
-// ---------- Création de compte et connexion : Microsoft / Google, confirmation de l'adresse e-mail ----------
+// ---------- Création de compte et connexion : Microsoft / Google / LinkedIn / GitHub, confirmation de l'adresse e-mail ----------
+
+app.MapGet("/linkedin/callback", async (HttpRequest req, ExternalLogin sso) =>
+    Results.Redirect(await sso.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
+app.MapGet("/github/callback", async (HttpRequest req, ExternalLogin sso) =>
+    Results.Redirect(await sso.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
 
 // Départ : ?mode=signup (créer un espace) ou login. Le retour passe par /google/callback ou /microsoft/callback, puis /login/sso/finish.
 app.MapGet("/login/sso/{provider}", (HttpContext ctx, string provider, ExternalLogin sso) =>
@@ -356,11 +362,12 @@ app.MapGet("/login/verify/confirm", async (HttpContext ctx, string? t, JsonStore
         return (r, u, c, db.Resellers.FirstOrDefault(x => x.Id == c?.ResellerId));
     });
     if (result != Signup.ConfirmResult.Ok) return Results.Redirect("/login/verify/done?state=" + (result == Signup.ConfirmResult.Expired ? "expired" : "invalid"));
-    if (reseller != null)
+    if (reseller != null && user!.WelcomeSentUtc == null)
     {
         var err = await mail.SendSignupWelcome(reseller, $"{ctx.Request.Scheme}://{ctx.Request.Host}/", user!.Name, user.Email, client!.Name,
             store.Read(db => db.Platform.TrialDays), client.TrialEndsUtc is { } end ? Signup.Day(client, end) : null, Signup.SignInHint(user));
         if (err != null) log.LogWarning("E-mail de bienvenue non envoyé à {Email} : {Error}", user.Email, err);
+        else store.Write(db => { if (db.Users.FirstOrDefault(u => u.Id == user.Id) is { } u) u.WelcomeSentUtc = DateTime.UtcNow; });
     }
     await SessionCookie.SignIn(ctx, store, user!.Id);
     return Results.Redirect("/login/verify/done");
