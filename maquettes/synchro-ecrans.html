@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Lecture synchronisée</title>
+<style>
+:root{--bg:#F5F7FA;--surface:#fff;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--row:#EDF1F5;--brand:#0B1F3A;--brand-tint:#EBEDF0;--signal:#3B82C4;--ok:#1E8E5A;--ok-bg:#E1F0E8;--ok-ink:#155A38;--warn:#B7791F;--warn-bg:#FBF0DC;--warn-ink:#7A4F12;--danger:#C8372D;--danger-bg:#FBE4E2;--danger-ink:#8A231C;--radius:4px;--mono:"JetBrains Mono",ui-monospace,Consolas,monospace}
+*{box-sizing:border-box}html,body{margin:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
+h1,h2,h3,p{margin:0;font-weight:500}p{font-weight:400}b{font-weight:500}
+button{font:inherit}
+/* barre de maquette */
+.mock{background:#fff;border-bottom:1px dashed var(--line-2);padding:10px 24px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:20}
+.mock span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-right:6px}
+.mock button{border:1px solid var(--line-2);background:#fff;padding:5px 12px;border-radius:var(--radius);cursor:pointer;color:var(--ink)}
+.mock button.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+.shell{display:flex;min-height:calc(100vh - 53px)}
+.sidebar{width:220px;background:#fff;border-right:1px solid var(--line);padding:22px 14px;flex:none}
+.sidebar .wm{font-size:26px;font-weight:500;letter-spacing:-.03em;padding:0 10px 22px}
+.sidebar .wm i{color:var(--signal);font-style:normal}
+.nav{display:block;padding:8px 12px;color:var(--muted);border-radius:var(--radius)}
+.nav.active{background:var(--brand-tint);color:var(--ink);font-weight:500;box-shadow:inset 2px 0 0 var(--brand);border-radius:0 4px 4px 0}
+main{flex:1;padding:32px 40px 60px;min-width:0}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap}
+.page-head h1{font-size:28px;letter-spacing:-.01em;line-height:1.2}
+.sub{color:var(--muted);margin-top:4px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.grow{flex:1}
+.btn{font-weight:500;cursor:pointer;border:1px solid var(--brand);border-radius:var(--radius);padding:9px 16px;background:var(--brand);color:#fff;display:inline-flex;align-items:center;gap:8px}
+.btn.ghost{background:#fff;color:var(--ink);border-color:var(--line-2)}
+.btn.danger{background:#fff;color:var(--danger);border-color:#EBC2BE}
+.btn.sm{padding:5px 10px;font-size:13px}.btn:disabled{opacity:.45;cursor:not-allowed}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:var(--radius);font-size:12px;font-weight:500;white-space:nowrap}
+.badge::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.badge.ok{color:var(--ok-ink);background:var(--ok-bg)}.badge.warn{color:var(--warn-ink);background:var(--warn-bg)}.badge.ko{color:var(--danger-ink);background:var(--danger-bg)}
+.badge.sync{color:#1F5C93;background:#E4EEF8}.badge.sync::before{display:none}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:var(--radius);background:#fff;overflow:hidden}
+.seg button{border:0;background:none;padding:7px 16px;cursor:pointer;color:var(--muted)}
+.seg button.on{background:var(--brand);color:#fff}
+.seg small{opacity:.7;margin-left:4px}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.chip{border:1px solid var(--line-2);background:#fff;border-radius:999px;padding:4px 12px;font-size:13px;color:var(--ink)}
+.chip.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:16px}
+.card{background:#fff;border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column}
+.card:hover{border-color:var(--signal)}
+.card .head{padding:12px 14px 8px;display:flex;align-items:center;gap:8px}
+.card .head .name{font-weight:500;flex:1}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--ok);flex:none}.dot.off{background:var(--danger)}
+.zone{padding:0 14px;color:var(--muted);font-size:12px}
+.visual{padding:10px 14px}
+.mon{aspect-ratio:16/9;background:#1a2a44;border:3px solid #0B1F3A;border-radius:4px;display:grid;place-items:center;color:#9fb3cc;font-size:12px;position:relative;overflow:hidden}
+.mon.p{aspect-ratio:9/16;max-height:150px;margin:0 auto}
+.foot{border-top:1px solid var(--line);padding:10px 14px;display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--muted);gap:8px;flex-wrap:wrap}
+.link{display:inline-flex;gap:5px;align-items:center}
+.gcard{padding:16px;gap:12px}
+.gcard h3{font-size:16px}
+.mini{display:flex;gap:6px}
+.mini .mon{flex:1;aspect-ratio:16/10;font-size:11px}
+.meta{display:flex;gap:16px;color:var(--muted);font-size:13px;flex-wrap:wrap}
+.kpi{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.plus{border:1.5px dashed var(--line-2);background:transparent;display:grid;place-items:center;min-height:200px;color:var(--muted);cursor:pointer;border-radius:10px;text-align:center;padding:20px}
+.plus b{display:block;color:var(--ink)}
+/* modale */
+.veil{background:rgba(11,31,58,.45);min-height:calc(100vh - 53px);padding:40px 20px;display:flex;justify-content:center;align-items:flex-start}
+.modal{background:#fff;border-radius:10px;width:640px;max-width:100%;border:1px solid var(--line)}
+.modal header{padding:18px 22px;border-bottom:1px solid var(--line)}
+.modal header h2{font-size:19px}.modal .body{padding:18px 22px;display:flex;flex-direction:column;gap:16px}
+.modal footer{padding:14px 22px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:10px}
+label.f{display:flex;flex-direction:column;gap:5px;font-weight:500;font-size:14px}
+input[type=text],select{font:inherit;padding:9px 12px;border:1px solid var(--line-2);border-radius:var(--radius);background:#fff;color:var(--ink)}
+.hint{color:var(--muted);font-size:13px;font-weight:400}
+.pick{border:1px solid var(--line);border-radius:var(--radius);max-height:230px;overflow:auto}
+.pick label{display:flex;gap:10px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--row);cursor:pointer}
+.pick label:last-child{border:0}.pick label.dis{opacity:.55;cursor:not-allowed}
+.pick .sp{flex:1}
+.modes{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.mode{border:1px solid var(--line-2);border-radius:var(--radius);padding:12px;display:flex;flex-direction:column;gap:3px}
+.mode.on{border-color:var(--signal);box-shadow:0 0 0 1px var(--signal);background:#F6FAFE}
+.mode.dis{opacity:.55;background:var(--bg)}
+.note{border-radius:var(--radius);padding:10px 12px;font-size:13px;display:flex;gap:10px}
+.note.warn{background:var(--warn-bg);color:var(--warn-ink)}.note.info{background:#E4EEF8;color:#1F5C93}
+/* détail */
+.crumb{color:var(--muted);font-size:13px;margin-bottom:8px}
+.panel{background:#fff;border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:16px}
+.panel h3{font-size:16px;margin-bottom:2px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.stat{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:14px 18px}
+.stat .n{font-size:26px;font-weight:500;font-variant-numeric:tabular-nums}.stat .l{color:var(--muted);font-size:13px}
+.tl{display:flex;height:54px;border-radius:var(--radius);overflow:hidden;border:1px solid var(--line-2);position:relative;margin-top:14px}
+.seg-i{display:grid;place-items:center;font-size:12px;color:#fff;border-right:2px solid #fff;overflow:hidden;white-space:nowrap;padding:0 4px}
+.cur{position:absolute;top:-6px;bottom:-6px;width:2px;background:var(--danger);left:0}
+.cur::before{content:"";position:absolute;top:-4px;left:-4px;width:10px;height:10px;background:var(--danger);border-radius:50%}
+.tl-l{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;margin-top:6px}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:500;padding:8px 10px;border-bottom:1px solid var(--line)}
+td{padding:11px 10px;border-bottom:1px solid var(--row);vertical-align:middle}
+tr:last-child td{border:0}
+.bar{position:relative;height:8px;background:var(--row);border-radius:4px;width:150px}
+.bar i{position:absolute;top:-3px;width:3px;height:14px;background:var(--ok);border-radius:1px;left:50%}
+.bar:after{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line-2)}
+.bar.w i{background:var(--warn)}
+.zonebar{position:absolute;left:25%;right:25%;top:0;bottom:0;background:#e1f0e8;border-radius:4px}
+.hidden{display:none}
+.annot{background:#FFF8E1;border:1px dashed #E0B84A;border-radius:var(--radius);padding:8px 12px;font-size:13px;color:#6B5200;margin-bottom:18px}
+</style>
+</head>
+<body>
+<div class="mock">
+  <span>Maquette — lecture synchronisée</span>
+  <button data-v="v1" class="on">1 · Page Écrans</button>
+  <button data-v="v2">2 · Créer un groupe</button>
+  <button data-v="v3">3 · Détail d’un groupe</button>
+</div>
+
+<!-- ============ 1. PAGE ÉCRANS ============ -->
+<div id="v1" class="shell">
+  <aside class="sidebar"><div class="wm">linkii<i></i></div><a class="nav active">Écrans</a><a class="nav">Médiathèque</a><a class="nav">Listes de lecture</a><a class="nav">Widgets</a><a class="nav">Intégrations</a><a class="nav">Réglages</a></aside>
+  <main>
+    <div class="page-head">
+      <div><h1>Vos écrans</h1><p class="sub">Choisissez la liste de lecture de chaque écran, puis publiez.</p></div>
+      <div class="row"><button class="btn ghost">Publier</button><button class="btn">+ Ajouter ▾</button></div>
+    </div>
+    <div class="annot">Nouveau : un sélecteur <b>Écrans | Groupes synchronisés</b> en tête de page. Il n’apparaît que si la fonction est activée dans <b>Réglages › Fonctions avancées</b>. Les écrans d’un groupe portent une pastille « Groupe… ».</div>
+    <div class="row" style="margin-bottom:16px">
+      <div class="seg" id="tabs"><button class="on" data-t="ecrans">Écrans <small>6</small></button><button data-t="groupes">Groupes synchronisés <small>2</small></button></div>
+    </div>
+
+    <div id="t-ecrans">
+      <div class="chips"><span class="chip on">Toutes les zones 6</span><span class="chip">Accueil 3</span><span class="chip">Cafétéria 2</span><span class="chip">Sans zone 1</span></div>
+      <div class="row" style="margin-bottom:14px">
+        <label class="row" style="gap:8px"><input type="checkbox" checked> <span>2 sélectionnés</span></label>
+        <button class="btn ghost sm">Changer de zone…</button>
+        <button class="btn sm" style="background:#fff;color:var(--signal);border-color:var(--signal)">⛓ Synchroniser ces écrans…</button>
+        <button class="btn danger sm">Supprimer</button>
+      </div>
+      <div class="grid">
+        <div class="card"><div class="head"><input type="checkbox" checked><span class="dot"></span><span class="name">Hall — gauche</span></div><div class="zone">Accueil</div><div class="visual"><div class="mon">Affiches du semestre</div></div><div class="foot"><span class="badge sync">⛓ Groupe Hall d’accueil</span><span class="badge ok">En ligne</span></div></div>
+        <div class="card"><div class="head"><input type="checkbox" checked><span class="dot"></span><span class="name">Hall — droite</span></div><div class="zone">Accueil</div><div class="visual"><div class="mon">Affiches du semestre</div></div><div class="foot"><span class="badge sync">⛓ Groupe Hall d’accueil</span><span class="badge ok">En ligne</span></div></div>
+        <div class="card"><div class="head"><input type="checkbox"><span class="dot"></span><span class="name">Entrée principale</span></div><div class="zone">Accueil</div><div class="visual"><div class="mon">Affiches du semestre</div></div><div class="foot"><span class="badge sync">⛓ Groupe Hall d’accueil</span><span class="badge warn">Mise à jour</span></div></div>
+        <div class="card"><div class="head"><input type="checkbox"><span class="dot"></span><span class="name">Cafétéria 1</span></div><div class="zone">Cafétéria</div><div class="visual"><div class="mon">Menu du jour</div></div><div class="foot"><span class="badge sync">⛓ Groupe Cafétéria</span><span class="badge ok">En ligne</span></div></div>
+        <div class="card"><div class="head"><input type="checkbox"><span class="dot"></span><span class="name">Cafétéria 2</span></div><div class="zone">Cafétéria</div><div class="visual"><div class="mon">Menu du jour</div></div><div class="foot"><span class="badge sync">⛓ Groupe Cafétéria</span><span class="badge ok">En ligne</span></div></div>
+        <div class="card"><div class="head"><input type="checkbox"><span class="dot off"></span><span class="name">Salle B12</span></div><div class="zone">Sans zone</div><div class="visual"><div class="mon p" style="max-height:110px">Planning</div></div><div class="foot"><span>Lecture indépendante</span><span class="badge ko">Hors ligne</span></div></div>
+      </div>
+    </div>
+
+    <div id="t-groupes" class="hidden">
+      <div class="grid">
+        <div class="card gcard"><div class="row"><h3 class="grow">Hall d’accueil</h3><span class="badge ok">Synchronisé</span></div>
+          <div class="mini"><div class="mon">Hall G</div><div class="mon">Hall D</div><div class="mon">Entrée</div></div>
+          <div class="meta"><span>3 écrans</span><span>Liste : Affiches du semestre</span><span>Boucle <span class="kpi">2:40</span></span></div>
+          <div class="foot" style="border:0;padding:0"><span>Écart max <b class="kpi">0,2 s</b></span><button class="btn ghost sm" data-go="v3">Ouvrir</button></div></div>
+        <div class="card gcard"><div class="row"><h3 class="grow">Cafétéria</h3><span class="badge ok">Synchronisé</span></div>
+          <div class="mini"><div class="mon">Caf. 1</div><div class="mon">Caf. 2</div></div>
+          <div class="meta"><span>2 écrans</span><span>Liste : Menu du jour</span><span>Boucle <span class="kpi">1:20</span></span></div>
+          <div class="foot" style="border:0;padding:0"><span>Écart max <b class="kpi">0,1 s</b></span><button class="btn ghost sm" data-go="v3">Ouvrir</button></div></div>
+        <div class="plus" data-go="v2"><div><b>+ Nouveau groupe</b><span class="hint">Faire jouer plusieurs écrans<br>en même temps</span></div></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ============ 2. CRÉER UN GROUPE ============ -->
+<div id="v2" class="hidden">
+ <div class="veil">
+  <div class="modal">
+    <header><h2>Nouveau groupe synchronisé</h2><p class="hint" style="margin-top:2px">Les écrans du groupe affichent la même diapo en même temps (à une demi-seconde près).</p></header>
+    <div class="body">
+      <label class="f">Nom du groupe<input type="text" value="Hall d’accueil"></label>
+      <label class="f">Liste de lecture<select><option>Affiches du semestre — 8 contenus · 2:40</option><option>Menu du jour</option><option>Planning salles</option></select>
+        <span class="hint">Tous les écrans du groupe jouent cette liste. Leur liste actuelle sera remplacée à la publication.</span></label>
+      <div>
+        <div class="row" style="margin-bottom:6px"><b class="grow">Écrans du groupe</b><span class="hint">3 sélectionnés</span></div>
+        <div class="pick">
+          <label><input type="checkbox" checked><span class="dot"></span><span><b>Hall — gauche</b><br><span class="hint">Accueil · 1920×1080</span></span><span class="sp"></span><span class="badge ok">En ligne</span></label>
+          <label><input type="checkbox" checked><span class="dot"></span><span><b>Hall — droite</b><br><span class="hint">Accueil · 1920×1080</span></span><span class="sp"></span><span class="badge ok">En ligne</span></label>
+          <label><input type="checkbox" checked><span class="dot"></span><span><b>Entrée principale</b><br><span class="hint">Accueil · 3840×2160</span></span><span class="sp"></span><span class="badge ok">En ligne</span></label>
+          <label><input type="checkbox"><span class="dot"></span><span><b>Cafétéria 1</b><br><span class="hint">Cafétéria · dans le groupe « Cafétéria »</span></span><span class="sp"></span><span class="badge sync">Déjà groupé</span></label>
+          <label class="dis"><input type="checkbox" disabled><span class="dot off"></span><span><b>Salle B12</b><br><span class="hint">Sans zone · portrait</span></span><span class="sp"></span><span class="badge ko">Hors ligne</span></label>
+        </div>
+        <span class="hint">Un écran ne peut être que dans un groupe. Un écran hors ligne rejoindra la lecture dès son retour.</span>
+      </div>
+      <div>
+        <b>Mode de synchronisation</b>
+        <div class="modes" style="margin-top:6px">
+          <div class="mode on"><b>● Même contenu</b><span class="hint">Chaque écran affiche la même chose, au même moment.</span></div>
+          <div class="mode dis"><b>○ Mur d’écrans</b><span class="hint">Une seule image répartie sur plusieurs écrans.</span><span class="badge sync" style="align-self:flex-start;margin-top:4px">Prochainement</span></div>
+        </div>
+      </div>
+      <div class="note warn"><span>⚠</span><span><b>2 contenus ont une durée variable</b> dans « Affiches du semestre » : vidéo YouTube (3:42) et vidéo d’accueil (0:48). Dans un groupe, leur durée est <b>fixée</b> pour que tous les écrans restent alignés. Vous pourrez l’ajuster.</span></div>
+    </div>
+    <footer><button class="btn ghost">Annuler</button><button class="btn">Créer le groupe</button></footer>
+  </div>
+ </div>
+</div>
+
+<!-- ============ 3. DÉTAIL D'UN GROUPE ============ -->
+<div id="v3" class="shell hidden">
+  <aside class="sidebar"><div class="wm">linkii<i></i></div><a class="nav active">Écrans</a><a class="nav">Médiathèque</a><a class="nav">Listes de lecture</a><a class="nav">Widgets</a><a class="nav">Intégrations</a><a class="nav">Réglages</a></aside>
+  <main>
+    <div class="crumb">Écrans › Groupes synchronisés ›</div>
+    <div class="page-head">
+      <div><div class="row"><h1>Hall d’accueil</h1><span class="badge ok">Synchronisé</span></div><p class="sub">3 écrans jouent « Affiches du semestre » en même temps.</p></div>
+      <div class="row"><button class="btn ghost">Renommer</button><button class="btn ghost">Modifier la liste</button><button class="btn">Publier pour le groupe</button></div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="n">3 / 3</div><div class="l">Écrans en ligne</div></div>
+      <div class="stat"><div class="n kpi" id="maxd">0,2 s</div><div class="l">Écart maximal</div></div>
+      <div class="stat"><div class="n kpi">2:40</div><div class="l">Durée de la boucle</div></div>
+      <div class="stat"><div class="n">v12</div><div class="l">Publication en cours</div></div>
+    </div>
+
+    <div class="panel">
+      <h3>Lecture en cours</h3>
+      <p class="hint" style="color:var(--muted);font-size:13px">Le curseur est la position commune du groupe. Chaque écran s’y recale automatiquement.</p>
+      <div class="tl" id="tl">
+        <div class="seg-i" style="flex:20;background:#3B82C4">Affiche rentrée</div>
+        <div class="seg-i" style="flex:15;background:#0B1F3A">Plan du campus</div>
+        <div class="seg-i" style="flex:35;background:#5A6B80">YouTube 3:42 → fixé 1:00</div>
+        <div class="seg-i" style="flex:12;background:#3B82C4">Horaires</div>
+        <div class="seg-i" style="flex:18;background:#0B1F3A">Remerciement</div>
+        <div class="cur" id="cur"></div>
+      </div>
+      <div class="tl-l"><span class="kpi">0:00</span><span id="now" class="kpi">Maintenant : diapo 3 · 1:12</span><span class="kpi">2:40</span></div>
+    </div>
+
+    <div class="panel">
+      <div class="row" style="margin-bottom:6px"><h3 class="grow">Écrans du groupe</h3><button class="btn ghost sm">+ Ajouter un écran</button></div>
+      <table>
+        <thead><tr><th>Écran</th><th>État</th><th>Écart avec le groupe</th><th>Dernier recalage</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><b>Hall — gauche</b><br><span class="hint" style="font-size:12px;color:var(--muted)">1920×1080</span></td><td><span class="badge ok">Synchronisé</span></td><td><div class="row"><div class="bar"><i class="d" style="left:52%"></i></div><span class="kpi dv">+0,1 s</span></div></td><td class="hint" style="color:var(--muted)">il y a 12 s</td><td><button class="btn ghost sm">Retirer</button></td></tr>
+          <tr><td><b>Hall — droite</b><br><span class="hint" style="font-size:12px;color:var(--muted)">1920×1080</span></td><td><span class="badge ok">Synchronisé</span></td><td><div class="row"><div class="bar"><i class="d" style="left:46%"></i></div><span class="kpi dv">−0,2 s</span></div></td><td class="hint" style="color:var(--muted)">il y a 4 s</td><td><button class="btn ghost sm">Retirer</button></td></tr>
+          <tr><td><b>Entrée principale</b><br><span class="hint" style="font-size:12px;color:var(--muted)">3840×2160</span></td><td><span class="badge warn">Recalage…</span></td><td><div class="row"><div class="bar w"><i class="d" style="left:69%"></i></div><span class="kpi dv">+0,4 s</span></div></td><td class="hint" style="color:var(--muted)">en cours</td><td><button class="btn ghost sm">Retirer</button></td></tr>
+        </tbody>
+      </table>
+      <p class="hint" style="margin-top:10px;color:var(--muted);font-size:13px">Objectif : moins de <b>0,5 s</b> d’écart. Au-delà, l’écran est signalé « Recalage… » et rattrape le groupe sans coupure visible.</p>
+    </div>
+
+    <div class="note info" style="margin-bottom:16px"><span>ℹ</span><span><b>Si un écran perd le réseau</b>, il continue la lecture avec sa propre horloge puis se recale au retour de la connexion. Un écran qui s’allume en retard rejoint directement la bonne diapo.</span></div>
+    <div class="row"><button class="btn danger sm">Dissoudre le groupe</button><span class="hint" style="color:var(--muted);font-size:13px">Les écrans gardent la liste de lecture et jouent chacun de leur côté.</span></div>
+  </main>
+</div>
+
+<script>
+const views=['v1','v2','v3'];
+function show(id){views.forEach(v=>document.getElementById(v).classList.toggle('hidden',v!==id));
+ document.querySelectorAll('.mock button').forEach(b=>b.classList.toggle('on',b.dataset.v===id));}
+document.querySelectorAll('.mock button').forEach(b=>b.onclick=()=>show(b.dataset.v));
+document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>show(b.dataset.go));
+document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{
+ document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x===b));
+ document.getElementById('t-ecrans').classList.toggle('hidden',b.dataset.t!=='ecrans');
+ document.getElementById('t-groupes').classList.toggle('hidden',b.dataset.t!=='groupes');});
+// curseur de lecture animé
+const total=160, segs=[20,15,35,12,18], sum=100; let t=72;
+setInterval(()=>{t=(t+1)%total;
+ const p=t/total*100; document.getElementById('cur').style.left=p+'%';
+ let acc=0,i=0;for(;i<segs.length;i++){acc+=segs[i];if(p<acc)break;}
+ document.getElementById('now').textContent='Maintenant : diapo '+(i+1)+' · '+Math.floor(t/60)+':'+String(t%60).padStart(2,'0');
+ const d=[...document.querySelectorAll('.d')], v=[...document.querySelectorAll('.dv')];
+ const base=[.1,-.2,.4]; let m=0;
+ d.forEach((el,k)=>{const x=base[k]+(Math.random()-.5)*.1;m=Math.max(m,Math.abs(x));
+  el.style.left=(50+x*50)+'%';v[k].textContent=(x>=0?'+':'−')+Math.abs(x).toFixed(1).replace('.',',')+' s';});
+ document.getElementById('maxd').textContent=m.toFixed(1).replace('.',',')+' s';},1000);
+</script>
+</body>
+</html>

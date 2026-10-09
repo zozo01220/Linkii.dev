@@ -410,10 +410,16 @@ api.MapGet("/player/playlist", (HttpRequest req, JsonStore store) => store.Read(
     var t = db.Clients.First(c => c.Id == s!.ClientId);
     var reseller = db.Resellers.FirstOrDefault(r => r.Id == t.ResellerId);
     var p = db.Playlists.FirstOrDefault(x => x.Id == s!.PlaylistId && x.ClientId == s.ClientId);
+    // zone synchronisée : origine commune de la boucle ; les durées « jusqu'à la fin » sont fixées pour que tous les écrans bouclent pareil
+    var epoch = Helpers.SyncEpoch(db.Areas, s!);
+    var clientMedia = epoch == null ? null : db.Media.Where(m => m.ClientId == s.ClientId).ToList();
+    List<PublishedItem> Sync(List<PublishedItem> l) => clientMedia == null ? l : Helpers.FixedForSync(l, clientMedia);
     return Results.Ok(new
     {
-        version = Helpers.Revision(p, s!, t, reseller),
-        items = (s.PublishedVersion > 0 ? s.Published : p?.Published ?? new List<PublishedItem>()).Select(i => i.ForPlayer()),   // repli : écran jamais publié depuis le passage à la publication par écran
+        version = Helpers.Revision(p, s!, t, reseller, Helpers.SyncStamp(db.Areas, s)),
+        serverNow = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+        sync = epoch is { } e ? new { epoch = Helpers.EpochMs(e) } : null,
+        items = Sync(s.PublishedVersion > 0 ? s.Published : p?.Published ?? new List<PublishedItem>()).Select(i => i.ForPlayer()),   // repli : écran jamais publié depuis le passage à la publication par écran
         // découpage publié : tailles des zones (en %), côte à côte en paysage, empilées en portrait ; zones 2 et 3 avec leur propre liste
         layout = new
         {
@@ -421,7 +427,7 @@ api.MapGet("/player/playlist", (HttpRequest req, JsonStore store) => store.Read(
             dir = s.Orientation == "portrait" ? "col" : "row",
             sizes = ScreenLayouts.Find(s.PublishedVersion > 0 ? s.PublishedLayout : null).Sizes
         },
-        zones = (s.PublishedVersion > 0 ? s.PublishedZones : new List<List<PublishedItem>>()).Select(z => z.Select(i => i.ForPlayer())),
+        zones = (s.PublishedVersion > 0 ? s.PublishedZones : new List<List<PublishedItem>>()).Select(z => Sync(z).Select(i => i.ForPlayer())),
         screen = new { orientation = s!.Orientation, resolution = s.Resolution },
         settings = new { timezone = t.Timezone, reloadHour = t.ReloadHour },
         brand = BrandDto.From(reseller)
@@ -434,7 +440,7 @@ api.MapGet("/player/version", (HttpRequest req, JsonStore store) => store.Read(d
 {
     var s = Auth(req, db);
     if (Gate(s, db) is { } denied) return denied;
-    return Results.Ok(new { version = Notifier.Revision(db, s!), build = playerBuild });
+    return Results.Ok(new { version = Notifier.Revision(db, s!), build = playerBuild, serverNow = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });   // serverNow : horloge de référence du player (lecture synchronisée)
 }));
 
 static string PlayerBuild(string webRoot)

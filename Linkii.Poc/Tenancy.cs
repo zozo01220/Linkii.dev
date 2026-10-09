@@ -121,11 +121,11 @@ public class ClientDb
         var s = _root.Screens.FirstOrDefault(x => x.Token == null && x.PairingCode == code);
         if (s == null) return null;
         s.ClientId = ClientId;
-        if (Area is { } a) s.AreaId = a.Id;
+        if (Area is { } a) { s.AreaId = a.Id; s.ZoneId = AreaOps.EnsureDefaultZone(a).Id; }   // zone par défaut ; l'appairage peut en choisir une autre
         return s;
     }
 
-    public string Status(Screen s) => Helpers.Status(s, Playlists.FirstOrDefault(p => p.Id == s.PlaylistId), Tenant, Reseller);
+    public string Status(Screen s) => Helpers.Status(s, Playlists.FirstOrDefault(p => p.Id == s.PlaylistId), Tenant, Reseller, Helpers.SyncStamp(_root.Areas, s));
 }
 
 public static class Claims
@@ -320,7 +320,9 @@ public static class Tenancy
         if (db.Users.Any(u => u.Email == email && (u.ResellerId == reseller.Id || u.ResellerId == null)))
             return (null, "Cette adresse e-mail est déjà utilisée.");
         var client = new Tenant { ResellerId = reseller.Id, Name = clientName.Trim() };
-        db.Areas.Add(new Area { ClientId = client.Id, Name = Seed.DefaultAreaName });   // une aire dès le départ : invisible tant qu'elle est seule
+        var firstArea = new Area { ClientId = client.Id, Name = Seed.DefaultAreaName };   // une aire dès le départ : invisible tant qu'elle est seule
+        AreaOps.EnsureDefaultZone(firstArea);
+        db.Areas.Add(firstArea);
         db.Clients.Add(client);
         db.Users.Add(new User { Email = email, Name = adminName.Trim(), PasswordHash = Passwords.Hash(password), Role = Roles.ClientAdmin, ResellerId = reseller.Id, ClientId = client.Id, MustChangePassword = mustChangePassword, CreatedUtc = DateTime.UtcNow });
         return (client, null);
@@ -333,6 +335,9 @@ public static class Seed
     public static void Run(JsonStore store, IConfiguration config, string dataPath, ILogger log)
     {
         var banner = (string?)null;
+        // zone par défaut dans chaque aire (ajoutée le 9 octobre 2026) : sauvegarde avant la première migration
+        if (store.Read(db => db.Areas.Any(a => !a.Zones.Any(z => z.IsDefault))) && File.Exists(dataPath))
+            try { File.Copy(dataPath, dataPath + ".pre-zone-defaut.bak", overwrite: false); } catch { }
         store.Write(db =>
         {
             if (db.Resellers.Count == 0)
@@ -447,6 +452,12 @@ public static class Seed
             foreach (var s in db.Screens.Where(x => x.ClientId == c.Id && x.AreaId == Guid.Empty)) s.AreaId = first.Id;
             foreach (var p in db.Playlists.Where(x => x.ClientId == c.Id && x.AreaId == Guid.Empty)) p.AreaId = first.Id;
             foreach (var m in db.Media.Where(x => x.ClientId == c.Id && x.AreaId == Guid.Empty && !x.Info.ContainsKey("drive"))) m.AreaId = first.Id;
+        }
+        // Chaque aire a sa zone par défaut ; tout écran de l'aire est dans une zone de l'aire (sinon : la zone par défaut).
+        foreach (var a in db.Areas)
+        {
+            var def = AreaOps.EnsureDefaultZone(a);
+            foreach (var s in db.Screens.Where(x => x.AreaId == a.Id && !a.Zones.Any(z => z.Id == x.ZoneId))) s.ZoneId = def.Id;
         }
     }
 

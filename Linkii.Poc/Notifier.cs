@@ -117,6 +117,9 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
 
     public Task NotifyScreen(Guid screenId) => NotifyWhere(s => s.Id == screenId);
 
+    /// <summary>Synchro d'une zone activée ou coupée : ses écrans rechargent leur configuration (origine commune de la boucle).</summary>
+    public Task NotifyZone(Guid zoneId) => NotifyWhere(s => s.ZoneId == zoneId);
+
     /// <summary>
     /// Dossier Drive synchronisé : les éléments déjà publiés qui l'affichent reçoivent la nouvelle liste de fichiers, sans republier.
     /// Seuls les écrans dont la liste a changé sont prévenus (ils préchargent les nouveaux fichiers pour la lecture hors ligne).
@@ -176,6 +179,6 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
     public static string Revision(Db db, Screen s)
     {
         var t = db.Clients.First(c => c.Id == s.ClientId);
-        return Helpers.Revision(db.Playlists.FirstOrDefault(p => p.Id == s.PlaylistId && p.ClientId == s.ClientId), s, t, db.Resellers.FirstOrDefault(r => r.Id == t.ResellerId));
+        return Helpers.Revision(db.Playlists.FirstOrDefault(p => p.Id == s.PlaylistId && p.ClientId == s.ClientId), s, t, db.Resellers.FirstOrDefault(r => r.Id == t.ResellerId), Helpers.SyncStamp(db.Areas, s));
     }
 }

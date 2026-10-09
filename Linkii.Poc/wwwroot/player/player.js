@@ -38,13 +38,50 @@
     opts = opts || {};
     opts.headers = opts.headers || {};
     if (state.token) opts.headers['X-Token'] = state.token;
+    var t0 = Date.now();
     return fetch(path, opts).then(function (r) { setOnline(true); return r; }, function (e) { setOnline(false); throw e; }).then(function (r) {
       if (r.status === 401) { unpair(); throw new Error('401'); }
       if (r.status === 403) { $('suspended').style.display = 'flex'; throw new Error('403'); }   // client ou revendeur suspendu
       $('suspended').style.display = 'none';
       if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.text().then(function (t) { return t ? JSON.parse(t) : null; });
+      return r.text().then(function (t) {
+        var d = t ? JSON.parse(t) : null;
+        if (d && d.serverNow) noteClock(t0, Date.now(), d.serverNow);
+        return d;
+      });
     });
+  }
+
+  /* ---------- Horloge du serveur (lecture synchronisée entre écrans) ----------
+     Chaque réponse du serveur donne son heure : l'écart avec l'horloge de l'appareil est estimé au milieu de l'aller-retour.
+     On garde la mesure la plus fiable (aller-retour le plus court) et on la renouvelle toutes les 2 minutes. Sans réseau, la dernière estimation reste valable. */
+  var clock = { offset: parseFloat(LS.getItem('lk_clock')) || 0, rtt: 1e9, at: 0 };
+  function noteClock(t0, t1, srv) {
+    var rtt = t1 - t0, now = Date.now();
+    if (rtt > 3000) return;   // réponse trop lente : mesure inutilisable
+    if (rtt <= clock.rtt + 20 || now - clock.at > 120000) {
+      clock.offset = srv - (t0 + t1) / 2; clock.rtt = rtt; clock.at = now;
+      try { LS.setItem('lk_clock', String(clock.offset)); } catch (e) {}
+    }
+  }
+  function serverNow() { return Date.now() + clock.offset; }
+
+  // Position commune dans une boucle de contenus : se déduit de l'heure du serveur et de l'origine de la zone. { index, left } (ms restantes sur le contenu).
+  function syncPick(slides, epoch) {
+    var total = 0, k;
+    for (k = 0; k < slides.length; k++) total += Math.max(1, slides[k].durationSec) * 1000;
+    var t = (((serverNow() - epoch) % total) + total) % total, acc = 0;
+    for (k = 0; k < slides.length; k++) {
+      var d = Math.max(1, slides[k].durationSec) * 1000;
+      if (t < acc + d) return { index: k, left: acc + d - t };
+      acc += d;
+    }
+    return { index: 0, left: total };
+  }
+  // Durée à laisser à un contenu affiché : jusqu'à la fin de son créneau commun (1 ms s'il est déjà en retard : le suivant le remplace aussitôt).
+  function syncLeft(slides, item, epoch) {
+    var p = syncPick(slides, epoch);
+    return slides[p.index] === item ? p.left : 1;
   }
 
   /* ---------- Marque du revendeur (white-label) : écran d'appairage compris, mémorisée pour un démarrage hors ligne ---------- */
@@ -658,8 +695,17 @@
     }
     $('idle').style.display = 'none';
 
-    var item = slides[state.index % slides.length];
-    state.index++;
+    var epoch = pl.sync && slides.length > 1 ? pl.sync.epoch : null;   // zone synchronisée : le contenu et sa durée se déduisent de l'heure commune
+    var item;
+    if (epoch != null) {
+      var pick = syncPick(slides, epoch);
+      if (pick.left < 80) { state.timer = setTimeout(next, pick.left + 5); return; }   // à quelques ms d'une frontière : on attend qu'elle passe
+      item = slides[pick.index];
+      state.index = pick.index + 1;
+    } else {
+      item = slides[state.index % slides.length];
+      state.index++;
+    }
     ack();
     // un seul contenu (ex. porte de salle) : on ne le redessine pas à chaque tour, il se met à jour seul
     if (slides.length === 1 && state.shownItem === item) {
@@ -680,7 +726,7 @@
       state.active = layerId; state.cleanup = newCleanup;
       state.shownItem = item;
       playStart(item);
-      var ms = Math.max(1, item.durationSec) * 1000;
+      var ms = epoch != null ? syncLeft(slides, item, epoch) : Math.max(1, item.durationSec) * 1000;
       // durationMode « content » : l'app décide (fin de la vidéo) ; durationSec est le plafond de sécurité
       state.timer = setTimeout(next, ms);
     }
@@ -737,7 +783,7 @@
 
   function applyZones(pl) {
     var zones = (pl && pl.zones) || [];
-    var sig = JSON.stringify([pl && pl.layout, zones]);
+    var sig = JSON.stringify([pl && pl.layout, zones, pl && pl.sync]);
     if (sig === zoneSig) { sizeZones(); return; }   // même découpage, mêmes contenus : les zones continuent sans recommencer
     zoneSig = sig;
     zoneLoops.forEach(function (z) { z.stop(); if (z.el.parentNode) z.el.parentNode.removeChild(z.el); });
@@ -745,12 +791,12 @@
       var el = document.createElement('div');
       el.className = 'pzone';
       $('content').appendChild(el);
-      return zoneLoop(el, items, 'z' + (i + 1));
+      return zoneLoop(el, items, 'z' + (i + 1), pl && pl.sync);
     });
     sizeZones();
   }
 
-  function zoneLoop(el, items, key) {
+  function zoneLoop(el, items, key, sync) {
     el.innerHTML = '<div class="layer"></div><div class="layer"></div>';
     var layers = [el.firstChild, el.lastChild], active = 0, idx = 0, timer = null, cleanup = null, shownItem = null, dead = false;
     function step() {
@@ -758,8 +804,13 @@
       if (dead) return;
       var slides = items.filter(isSlide).filter(isValidNow);
       if (!slides.length) { playEnd(key); timer = setTimeout(step, 5000); return; }
-      var item = slides[idx % slides.length];
-      idx++;
+      var epoch = sync && slides.length > 1 ? sync.epoch : null;   // zone synchronisée : même position que les autres écrans qui jouent cette liste
+      var item;
+      if (epoch != null) {
+        var pick = syncPick(slides, epoch);
+        if (pick.left < 80) { timer = setTimeout(step, pick.left + 5); return; }
+        item = slides[pick.index]; idx = pick.index + 1;
+      } else { item = slides[idx % slides.length]; idx++; }
       if (slides.length === 1 && shownItem === item) {   // un seul contenu : il continue (une vidéo seule boucle d'elle-même)
         playStart(item, key);
         timer = setTimeout(step, Math.max(1, item.durationSec) * 1000);
@@ -776,7 +827,7 @@
         setTimeout(function () { if (oldCleanup) oldCleanup(); old.innerHTML = ''; }, 400);
         active = 1 - active; cleanup = c; shownItem = item;
         playStart(item, key);
-        timer = setTimeout(step, Math.max(1, item.durationSec) * 1000);
+        timer = setTimeout(step, epoch != null ? syncLeft(slides, item, epoch) : Math.max(1, item.durationSec) * 1000);
       }, function () { if (!shown) { shown = true; timer = setTimeout(step, 1000); } });
     }
     step();

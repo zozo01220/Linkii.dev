@@ -112,11 +112,21 @@ public class Area : IClientOwned
     public List<Zone> Zones { get; set; } = new();
 }
 
-/// <summary>Zone d'une aire : sert seulement à classer les écrans (aucun effet sur les droits).</summary>
+/// <summary>
+/// Zone d'une aire : classe les écrans (aucun effet sur les droits) et, si <see cref="Sync"/> est actif, aligne la lecture de ceux qui jouent la même liste.
+/// Chaque aire a une zone par défaut (<see cref="IsDefault"/>) : tout écran est dans une zone.
+/// </summary>
 public class Zone
 {
+    public const string DefaultName = "Défaut";
+    public const string Free = "free";   // zone libre : écrans de tout type, une liste par écran. (« wall » : mur d'écrans, prévu ensuite)
+
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "";
+    public bool IsDefault { get; set; }
+    public string Kind { get; set; } = Free;
+    public bool Sync { get; set; }               // lecture synchronisée (désactivée par défaut)
+    public DateTime SyncEpochUtc { get; set; }   // origine commune de la boucle : la position se déduit de l'heure du serveur
 }
 
 /// <summary>Journal des entrées dans l'espace d'un client (assistance).</summary>
@@ -238,7 +248,7 @@ public class Screen : IClientOwned, IAreaOwned
     public Guid ClientId { get; set; }
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid AreaId { get; set; }
-    public Guid? ZoneId { get; set; }          // zone de son aire (classement seulement)
+    public Guid? ZoneId { get; set; }          // zone de son aire (jamais vide une fois migré : par défaut, la zone « Défaut » de l'aire)
     public string Name { get; set; } = "";
     public string? PairingCode { get; set; }   // non null tant que l'écran n'est pas appairé
     public string? Token { get; set; }         // non null une fois appairé
@@ -406,6 +416,8 @@ public class PublishedItem
     public double? Scale { get; set; }
     public List<string>? Urls { get; set; }   // apps de la médiathèque (image, vidéo, diaporamas) : fichiers résolus à la publication, dans l'ordre
 
+    public PublishedItem Clone() => (PublishedItem)MemberwiseClone();
+
     /// <summary>Ce que reçoit le player : jamais les secrets.</summary>
     public object ForPlayer() => new
     {
@@ -525,14 +537,49 @@ public static class Helpers
     public static bool HasPending(Screen s, IEnumerable<Playlist> playlists) => s.PublishedStamp != PublishStamp(s, playlists);
 
     /// <summary>Identifie ce que l'écran doit afficher : playlist publiée + configuration (format, fuseau, redémarrage).</summary>
-    public static string Revision(Playlist? p, Screen s, Tenant t, Reseller? r) =>
-        $"{(s.PublishedVersion > 0 ? "s" + s.PublishedVersion : p == null ? "none" : p.Id.ToString("N") + ":" + p.PublishedVersion)}|{s.Orientation}|{s.Resolution}|{t.Timezone}|{t.ReloadHour}|{r?.BrandStamp}";
+    public static string Revision(Playlist? p, Screen s, Tenant t, Reseller? r, string sync = "") =>
+        $"{(s.PublishedVersion > 0 ? "s" + s.PublishedVersion : p == null ? "none" : p.Id.ToString("N") + ":" + p.PublishedVersion)}|{s.Orientation}|{s.Resolution}|{t.Timezone}|{t.ReloadHour}|{r?.BrandStamp}{sync}";
 
-    public static string Status(Screen s, Playlist? p, Tenant t, Reseller? r)
+    public static string Status(Screen s, Playlist? p, Tenant t, Reseller? r, string sync = "")
     {
         if (s.LastSeenUtc is null || DateTime.UtcNow - s.LastSeenUtc > TimeSpan.FromSeconds(90)) return "Hors ligne";
-        return s.AppliedRevision != Revision(p, s, t, r) ? "Mise à jour" : "En ligne";
+        return s.AppliedRevision != Revision(p, s, t, r, sync) ? "Mise à jour" : "En ligne";
     }
+
+    /// <summary>Zone de l'écran, si elle existe encore dans son aire.</summary>
+    public static Zone? ZoneOf(IEnumerable<Area> areas, Screen s) =>
+        areas.FirstOrDefault(a => a.Id == s.AreaId)?.Zones.FirstOrDefault(z => z.Id == s.ZoneId);
+
+    /// <summary>Origine de la boucle commune si la zone de l'écran est synchronisée.</summary>
+    public static DateTime? SyncEpoch(IEnumerable<Area> areas, Screen s) => ZoneOf(areas, s) is { Sync: true } z ? z.SyncEpochUtc : null;
+
+    /// <summary>Fait partie de la révision de l'écran : activer ou couper la synchro de sa zone le fait recharger sa configuration.</summary>
+    public static string SyncStamp(IEnumerable<Area> areas, Screen s) => SyncEpoch(areas, s) is { } e ? "|y" + e.Ticks : "";
+
+    public static long EpochMs(DateTime utc) => new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+
+    /// <summary>
+    /// Dans une zone synchronisée, la boucle doit durer pareil sur tous les écrans : une app qui décide de sa durée (vidéo YouTube « jusqu'à la fin »)
+    /// reçoit la durée constatée de la vidéo (60 s si elle est inconnue), fixe.
+    /// </summary>
+    public static List<PublishedItem> FixedForSync(IEnumerable<PublishedItem> items, IEnumerable<MediaItem> media) =>
+        items.Select(i =>
+        {
+            if (i.DurationMode != "content") return i;
+            var c = i.Clone();
+            c.DurationMode = "fixed";
+            c.DurationSec = VideoSeconds(media.FirstOrDefault(m => m.Id == i.MediaId)) ?? 60;
+            return c;
+        }).ToList();
+
+    /// <summary>Signature de la boucle d'un écran (contenus plein écran et durées) : deux écrans ne sont alignés que si elle est identique.</summary>
+    public static string LoopKey(Screen s) =>
+        s.PlaylistId + "|" + string.Join(",", s.Published.Where(i => i.Placement == "full").Select(i => i.Id.ToString("N")[..8] + ":" + i.DurationSec + i.DurationMode));
+
+    /// <summary>Écrans de la zone alignés avec d'autres : même liste de lecture, même boucle publiée. Un écran seul sur sa liste ou sur une autre boucle reste indépendant.</summary>
+    public static HashSet<Guid> SyncedScreens(IEnumerable<Screen> inZone) =>
+        inZone.Where(s => s.Token != null && s.PublishedVersion > 0 && s.PlaylistId != null)
+            .GroupBy(LoopKey).Where(g => g.Count() > 1).SelectMany(g => g.Select(s => s.Id)).ToHashSet();
 }
 
 public static class YouTube

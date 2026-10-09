@@ -15,8 +15,22 @@ public static class AreaOps
         var n = name.Trim();
         if (d.Areas.Any(a => a.Name.Equals(n, StringComparison.CurrentCultureIgnoreCase))) return (null, "Une aire porte déjà ce nom.");
         var area = new Area { Name = n };
+        EnsureDefaultZone(area);
         d.Areas.Add(area);
         return (area, null);
+    }
+
+    /// <summary>
+    /// La zone par défaut de l'aire (créée au besoin) : tout écran est dans une zone. Si l'aire a déjà une zone nommée « Défaut », c'est elle qui le devient.
+    /// </summary>
+    public static Zone EnsureDefaultZone(Area a)
+    {
+        var z = a.Zones.FirstOrDefault(x => x.IsDefault)
+            ?? a.Zones.FirstOrDefault(x => x.Name.Equals(Zone.DefaultName, StringComparison.CurrentCultureIgnoreCase));
+        if (z == null) a.Zones.Insert(0, z = new Zone { Name = Zone.DefaultName });
+        z.IsDefault = true;
+        z.Kind = Zone.Free;
+        return z;
     }
 
     public static string? Rename(ClientDb d, Guid areaId, string name)
@@ -82,13 +96,32 @@ public static class AreaOps
         return null;
     }
 
-    /// <summary>Ses écrans restent dans l'aire, sans zone.</summary>
+    /// <summary>Ses écrans retournent dans la zone par défaut de l'aire. La zone par défaut ne se supprime pas.</summary>
     public static string? DeleteZone(ClientDb d, Guid areaId, Guid zoneId)
     {
         var (a, err) = Managed(d, areaId);
         if (a == null) return err;
-        if (a.Zones.RemoveAll(z => z.Id == zoneId) == 0) return "Zone introuvable.";
-        foreach (var s in d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.ZoneId == zoneId)) s.ZoneId = null;
+        if (a.Zones.FirstOrDefault(z => z.Id == zoneId) is not { } zone) return "Zone introuvable.";
+        if (zone.IsDefault) return "La zone par défaut ne se supprime pas.";
+        a.Zones.Remove(zone);
+        var fallback = EnsureDefaultZone(a).Id;
+        foreach (var s in d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.ZoneId == zoneId)) s.ZoneId = fallback;
+        return null;
+    }
+
+    /// <summary>
+    /// Active ou coupe la lecture synchronisée d'une zone. L'origine de la boucle est fixée à l'activation : tous les écrans de la zone la partagent.
+    /// (Aucune republication : la durée des contenus « jusqu'à la fin » est fixée à l'envoi vers l'écran.)
+    /// </summary>
+    public static string? SetZoneSync(ClientDb d, Guid areaId, Guid zoneId, bool on)
+    {
+        var (a, err) = Managed(d, areaId);
+        if (a == null) return err;
+        if (a.Zones.FirstOrDefault(z => z.Id == zoneId) is not { } zone) return "Zone introuvable.";
+        if (zone.Kind != Zone.Free) return "Cette zone ne se synchronise pas ainsi.";
+        if (zone.Sync == on) return null;
+        zone.Sync = on;
+        if (on) zone.SyncEpochUtc = DateTime.UtcNow;
         return null;
     }
 
@@ -109,7 +142,7 @@ public static class AreaOps
         if (s == null) return "Écran introuvable.";
         if (s.AreaId == target) return null;
         s.AreaId = target;
-        s.ZoneId = null;
+        s.ZoneId = EnsureDefaultZone(d.Areas.First(a => a.Id == target)).Id;   // zone par défaut de l'aire d'arrivée
         bool Elsewhere(Guid? id) => id is { } pid && d.Root.Playlists.FirstOrDefault(p => p.Id == pid)?.AreaId != target;
         if (Elsewhere(s.PlaylistId)) s.PlaylistId = null;
         for (var z = 0; z < s.ZonePlaylistIds.Count; z++) if (Elsewhere(s.ZonePlaylistIds[z])) s.ZonePlaylistIds[z] = null;

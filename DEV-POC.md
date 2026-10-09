@@ -54,6 +54,14 @@ dotnet run --urls http://localhost:5080
 - Le player travaille sur une scène à la résolution cible, mise à l'échelle et **pivotée** si l'écran est physiquement dans l'autre sens. Résolution réelle de l'appareil remontée au back-office.
 - Le *matériel* n'est qu'un libellé + une suggestion d'orientation (un totem → portrait) : il ne change pas le comportement. L'**usage** (contenus, porte de salle…) vient du widget placé dans la playlist.
 
+### Zones et lecture synchronisée (9 octobre 2026)
+- **Zone par défaut** : chaque aire a une zone « Défaut » (`Zone.IsDefault`, renommable, non supprimable) ; **tout écran est dans une zone**. Migration au démarrage (`Seed.EnsureAreas`, sauvegarde `data.json.pre-zone-defaut.bak`) : les écrans sans zone passent dans le Défaut de leur aire. Un écran déplacé vers une autre aire arrive dans son Défaut ; supprimer une zone renvoie ses écrans dans Défaut. La barre des zones n'apparaît que s'il y a une zone en plus de Défaut (ou une synchro active).
+- **Type de zone** : `Zone.Kind` (« free » seul pour l'instant ; « wall », le mur d'écrans, viendra ensuite : une liste portée par la zone, position de chaque écran dans une grille).
+- **Lecture synchronisée** (`Zone.Sync`, désactivée par défaut, interrupteur dans *Gérer les zones* et dans le bandeau de la zone) : les écrans de la zone **qui jouent la même liste publiée** affichent le même contenu au même moment (±0,5 s visé). Aucun objet « groupe » : `Helpers.SyncedScreens` repère les écrans alignés (même liste, même boucle publiée) pour le badge *Synchronisé* / *Indépendant*.
+- **Principe** : la position dans la boucle se déduit de l'heure du serveur : `(heure serveur − Zone.SyncEpochUtc) mod durée de la boucle`. L'API player ajoute `serverNow` à `/api/player/playlist` et `/api/player/version`, et `sync: { epoch }` à la playlist ; le player estime son écart d'horloge (milieu de l'aller-retour, mesure la plus courte, dernière valeur gardée hors ligne dans `lk_clock`) et recalcule le contenu courant à chaque changement de diapo (`syncPick` / `syncLeft` dans `player.js`, aussi pour les zones 2 et 3 d'un écran découpé). Un écran qui démarre tard ou revient d'une coupure rejoint la bonne diapo.
+- **Durées** : en zone synchronisée, une app « jusqu'à la fin » (YouTube) reçoit une durée fixe = durée constatée de la vidéo (60 s si inconnue), calculée à l'envoi (`Helpers.FixedForSync`) : aucune republication nécessaire. Activer ou couper la synchro fait partie de la révision de l'écran (`Helpers.SyncStamp`) : ses écrans se rechargent aussitôt.
+- Non fait : mesure de l'écart réel remonté au back-office (la maquette montrait « +0,2 s »), avertissement dans l'éditeur de liste quand elle contient une durée variable.
+
 ## 3. Hors périmètre (volontairement)
 
 | Exclu | Pourquoi |

@@ -1,5 +1,7 @@
-@* Zones d'une aire (corps de fenêtre) : renommer, supprimer, ajouter. Chaque action est enregistrée aussitôt. Les zones classent les écrans, sans effet sur les droits. *@
+@* Zones d'une aire (corps de fenêtre) : renommer, supprimer, ajouter, synchroniser. Chaque action est enregistrée aussitôt. Les zones classent les écrans, sans effet sur les droits.
+   La zone par défaut est dans chaque aire : elle se renomme mais ne se supprime pas. Dans une zone synchronisée, les écrans qui jouent la même liste sont alignés. *@
 @inject TenantStore Store
+@inject Notifier Notifier
 @inject Toaster Toast
 
 <div class="zone-rows">
@@ -10,15 +12,27 @@
             <Ico Name="box" Size="16" />
             <input maxlength="60" value="@zone.Name" aria-label="Nom de la zone" @onchange="e => Rename(zone, e.Value?.ToString() ?? zone.Name)" />
             <span class="n">@counts.GetValueOrDefault(zone.Id) écran@(counts.GetValueOrDefault(zone.Id) > 1 ? "s" : "")</span>
-            <button type="button" class="btn ghost icon" title="Supprimer la zone (ses écrans restent dans l'aire, sans zone)" aria-label="Supprimer la zone @zone.Name" @onclick="() => Delete(zone)"><Ico Name="trash" Size="15" /></button>
+            <span class="badge neutre zone-kind" title="Écrans de tout type, chacun avec sa liste de lecture">Zone libre</span>
+            <span class="zone-sync" title="Les écrans de la zone qui jouent la même liste affichent le même contenu au même moment">
+                <small>Synchro</small>
+                <button type="button" class="switch @(zone.Sync ? "on" : "")" role="switch" aria-checked="@(zone.Sync ? "true" : "false")" aria-label="Lecture synchronisée de la zone @zone.Name" @onclick="() => ToggleSync(zone)"><span></span></button>
+            </span>
+            @if (zone.IsDefault)
+            {
+                <span class="zone-del" title="La zone par défaut ne se supprime pas"></span>
+            }
+            else
+            {
+                <button type="button" class="btn ghost icon" title="Supprimer la zone (ses écrans passent dans « @DefaultName »)" aria-label="Supprimer la zone @zone.Name" @onclick="() => Delete(zone)"><Ico Name="trash" Size="15" /></button>
+            }
         </div>
     }
-    @if (zones.Count == 0) { <p class="hint" style="margin:0">Aucune zone pour l'instant.</p> }
     <div class="zone-row">
         <Ico Name="plus" Size="16" />
         <input maxlength="60" placeholder="Nouvelle zone (ex. : Accueil, Bâtiment B)" @bind="newName" @bind:event="oninput" @onkeydown="OnKey" aria-label="Nouvelle zone" />
         <button type="button" class="btn ghost sm" @onclick="Add">Ajouter</button>
     </div>
+    <p class="hint zone-note">La synchronisation ne change aucune liste de lecture : elle aligne seulement les écrans de la zone qui jouent déjà la même liste. Supprimer une zone renvoie ses écrans dans « @DefaultName ».</p>
     @if (error != null) { <div class="err">@error</div> }
 </div>
 
@@ -31,11 +45,16 @@
     private string newName = "";
     private string? error;
 
+    private string DefaultName => zones.FirstOrDefault(z => z.IsDefault)?.Name ?? Zone.DefaultName;
+
     protected override void OnParametersSet() => Load();
 
     private void Load()
     {
-        zones = Store.Read(d => d.Areas.FirstOrDefault(a => a.Id == AreaId)?.Zones.Select(z => new Zone { Id = z.Id, Name = z.Name }).ToList() ?? new());
+        // la zone par défaut d'abord, puis les autres par nom
+        zones = Store.Read(d => d.Areas.FirstOrDefault(a => a.Id == AreaId)?.Zones
+            .OrderByDescending(z => z.IsDefault).ThenBy(z => z.Name, StringComparer.CurrentCultureIgnoreCase)
+            .Select(z => new Zone { Id = z.Id, Name = z.Name, IsDefault = z.IsDefault, Kind = z.Kind, Sync = z.Sync, SyncEpochUtc = z.SyncEpochUtc }).ToList() ?? new());
         counts = Store.Read(d => d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.AreaId == AreaId && s.Token != null && s.ZoneId != null)
             .GroupBy(s => s.ZoneId!.Value).ToDictionary(g => g.Key, g => g.Count()));
     }
@@ -64,5 +83,19 @@
         await Done(Store.Write(d => AreaOps.RenameZone(d, AreaId, z.Id, name)), $"Zone renommée en « {name.Trim()} ».");
     }
 
-    private async Task Delete(Zone z) => await Done(Store.Write(d => AreaOps.DeleteZone(d, AreaId, z.Id)), $"Zone « {z.Name} » supprimée.");
+    private async Task Delete(Zone z)
+    {
+        var ids = Store.Read(d => d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.ZoneId == z.Id).Select(s => s.Id).ToList());
+        var err = Store.Write(d => AreaOps.DeleteZone(d, AreaId, z.Id));
+        if (err == null) foreach (var id in ids) await Notifier.NotifyScreen(id);   // leur zone change : la synchro peut changer
+        await Done(err, $"Zone « {z.Name} » supprimée.");
+    }
+
+    private async Task ToggleSync(Zone z)
+    {
+        var on = !z.Sync;
+        var err = Store.Write(d => AreaOps.SetZoneSync(d, AreaId, z.Id, on));
+        if (err == null) await Notifier.NotifyZone(z.Id);   // les écrans de la zone rechargent leur configuration
+        await Done(err, err == null ? (on ? $"Lecture synchronisée dans la zone « {z.Name} »." : $"Synchronisation coupée dans la zone « {z.Name} ».") : null);
+    }
 }

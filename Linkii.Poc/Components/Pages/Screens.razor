@@ -39,20 +39,37 @@
 {
     <div class="card empty"><div class="big">Aucune aire de gestion ne vous est confiée</div><p>Demandez à un administrateur de votre organisation de vous donner un rôle dans une aire.</p></div>
 }
-@if (area != null && zones.Count > 0)
+@if (area != null && ShowZones)
 {
     <div class="zone-bar" role="group" aria-label="Zones">
         <button type="button" class="chip @(zoneFilter == null ? "on" : "")" @onclick="() => zoneFilter = null">Toutes les zones <small>@screens.Count</small></button>
         @foreach (var z in zones)
         {
             var zone = z;
-            <button type="button" class="chip @(zoneFilter == zone.Id.ToString() ? "on" : "")" @onclick="() => zoneFilter = zone.Id.ToString()"><Ico Name="box" Size="14" /> @zone.Name <small>@screens.Count(x => x.ZoneId == zone.Id)</small></button>
-        }
-        @if (zones.Count > 0 && screens.Any(x => ZoneOf(x) == null))
-        {
-            <button type="button" class="chip @(zoneFilter == "none" ? "on" : "")" @onclick='() => zoneFilter = "none"'>Sans zone <small>@screens.Count(x => ZoneOf(x) == null)</small></button>
+            <button type="button" class="chip @(zoneFilter == zone.Id.ToString() ? "on" : "")" @onclick="() => zoneFilter = zone.Id.ToString()"><Ico Name="@(zone.Sync ? "link" : "box")" Size="14" /> @zone.Name <small>@screens.Count(x => ZoneOf(x)?.Id == zone.Id)</small></button>
         }
     </div>
+    @if (zoneFilter != null && zones.FirstOrDefault(z => z.Id.ToString() == zoneFilter) is { } oz)
+    {
+        var inZ = InZone;
+        <div class="zone-strip" role="region" aria-label="Zone @oz.Name">
+            <div class="t">
+                <b>Zone « @oz.Name » <span class="badge neutre" style="margin-left:6px">Zone libre</span></b>
+                <small>@(oz.Sync ? "Les écrans sur la même liste de lecture jouent le même contenu en même temps." : "Les écrans de la zone sont indépendants.")</small>
+            </div>
+            <div class="grow"></div>
+            @if (oz.Sync)
+            {
+                <div class="t"><small>Synchronisés</small><b>@inZ.Count(x => synced.Contains(x.Id)) sur @inZ.Count écran@(inZ.Count > 1 ? "s" : "")</b></div>
+            }
+            @if (manageZones)
+            {
+                <span class="zs-sync"><small class="muted">Synchro</small>
+                    <button type="button" class="switch @(oz.Sync ? "on" : "")" role="switch" aria-checked="@(oz.Sync ? "true" : "false")" aria-label="Lecture synchronisée de la zone @oz.Name" @onclick="() => ToggleSync(oz)"><span></span></button>
+                </span>
+            }
+        </div>
+    }
 }
 @if (screens.Count > 0)
 {
@@ -116,9 +133,14 @@
                         }
                     </div>
                 </div>
-                @if (zones.Count > 0 && zoneFilter == null)
+                @if (ShowZones && zoneFilter == null)
                 {
-                    <div class="sc-zone-name">@(ZoneOf(sc)?.Name ?? "Sans zone")</div>
+                    <div class="sc-zone-name">@(ZoneOf(sc)?.Name ?? Zone.DefaultName)</div>
+                }
+                @if (ZoneOf(sc) is { Sync: true })
+                {
+                    @if (synced.Contains(sc.Id)) { <div class="sc-sync"><span class="badge sync" title="Cet écran affiche le même contenu, au même moment, que les autres écrans de la zone qui jouent cette liste"><Ico Name="link" Size="12" /> Synchronisé</span></div> }
+                    else { <div class="sc-sync"><span class="badge neutre" title="Aucun autre écran de la zone ne joue cette liste publiée : l'écran reste indépendant">Indépendant</span></div> }
                 }
             </div>
             <button type="button" class="sc-visual" tabindex="-1" aria-hidden="true" @onclick="() => Edit(sc)">
@@ -179,12 +201,11 @@
                     @foreach (var p in playlists) { <option value="@p.Id">@p.Name</option> }
                 </select>
             </div>
-            @if (zones.Count > 0)
+            @if (zones.Count > 1)
             {
                 <div class="dw-field">
                     <label for="pair-zone">Zone</label>
                     <select id="pair-zone" @bind="pairZone">
-                        <option value="">— Sans zone —</option>
                         @foreach (var z in zones) { <option value="@z.Id">@z.Name</option> }
                     </select>
                 </div>
@@ -256,9 +277,9 @@
 @if (showZones && area != null)
 {
     <div class="modal-backdrop" @onclick="CloseZones"></div>
-    <div class="modal app-modal sm" role="dialog" aria-modal="true" aria-labelledby="zones-title">
+    <div class="modal app-modal" role="dialog" aria-modal="true" aria-labelledby="zones-title">
         <div class="modal-head">
-            <div class="grow"><h3 id="zones-title">Zones de l'aire « @area.Name »</h3><small class="muted">Elles classent les écrans de l'aire, sans effet sur les droits.</small></div>
+            <div class="grow"><h3 id="zones-title">Zones de l'aire « @area.Name »</h3><small class="muted">Elles classent les écrans de l'aire et peuvent aligner leur lecture.</small></div>
             <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseZones"><Ico Name="x" Size="20" /></button>
         </div>
         <div class="modal-body"><AreaZones AreaId="area.Id" OnChanged="Reload" /></div>
@@ -271,9 +292,9 @@
     <div class="modal-backdrop" @onclick="() => zoneMove = false"></div>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="zm-title">
         <h3 id="zm-title">Changer la zone de @selectedIds.Count écran@(selectedIds.Count > 1 ? "s" : "")</h3>
-        <p class="hint">La zone sert seulement à classer : rien n'est republié.</p>
+        <p class="hint">La zone classe les écrans (et aligne leur lecture si elle est synchronisée) : rien n'est republié.</p>
         <div class="dw"><div class="dw-field"><label for="zm-zone">Zone</label>
-            <select id="zm-zone" @bind="zoneTo"><option value="">— Sans zone —</option>@foreach (var z in zones) { <option value="@z.Id">@z.Name</option> }</select>
+            <select id="zm-zone" @bind="zoneTo">@foreach (var z in zones) { <option value="@z.Id">@z.Name</option> }</select>
         </div></div>
         <div class="modal-actions">
             <button class="btn ghost" @onclick="() => zoneMove = false">Annuler</button>
@@ -331,20 +352,22 @@
     private List<Zone> zones = new();
     private List<Area> otherAreas = new();   // déplacement : administrateur de l'organisation, vers une autre aire
     private bool manageZones, showZones, zoneMove, noArea, addMenu;
-    private string? zoneFilter;   // null : toutes les zones ; "none" : sans zone ; sinon l'Id de la zone
+    private string? zoneFilter;   // null : toutes les zones ; sinon l'Id de la zone
     private string pairZone = "", zoneTo = "";
     private List<(Guid Id, string Name)>? areaMove;   // écrans à déplacer vers une autre aire
 
-    private Zone? ZoneOf(Screen s) => zones.FirstOrDefault(z => z.Id == s.ZoneId);
+    private Zone? ZoneOf(Screen s) => zones.FirstOrDefault(z => z.Id == s.ZoneId) ?? zones.FirstOrDefault(z => z.IsDefault);
+
+    // La barre des zones n'apparaît que s'il y a de quoi choisir : une zone en plus de la zone par défaut, ou une synchro active.
+    private bool ShowZones => zones.Count > 1 || zones.Any(z => z.Sync);
+    private HashSet<Guid> synced = new();   // écrans alignés avec au moins un autre (zone synchronisée, même liste publiée)
 
     private string statusFilter = "", search = "", sort = "name";   // statusFilter : "" | online | offline | pending
 
     private bool IsOffline(Screen s) => Status(s) is not ("En ligne" or "Mise à jour");
 
     // Écrans de la zone ouverte : base des compteurs du filtre d'état.
-    private List<Screen> InZone => zoneFilter == null ? screens
-        : zoneFilter == "none" ? screens.Where(x => ZoneOf(x) == null).ToList()
-        : screens.Where(x => x.ZoneId?.ToString() == zoneFilter).ToList();
+    private List<Screen> InZone => zoneFilter == null ? screens : screens.Where(x => ZoneOf(x)?.Id.ToString() == zoneFilter).ToList();
 
     private List<Screen> Shown
     {
@@ -374,16 +397,30 @@
 
     private void CloseZones() { showZones = false; Reload(); }
 
-    private void OpenZoneMove() { zoneTo = zoneFilter is { } z && z != "none" ? z : ""; zoneMove = true; }
+    private void OpenZoneMove() { zoneTo = zoneFilter ?? zones.FirstOrDefault(z => z.IsDefault)?.Id.ToString() ?? ""; zoneMove = true; }
 
-    private void MoveToZone()
+    private async Task MoveToZone()
     {
-        Guid? zid = Guid.TryParse(zoneTo, out var g) && zones.Any(z => z.Id == g) ? g : null;
+        var zid = Guid.TryParse(zoneTo, out var g) && zones.Any(z => z.Id == g) ? g : zones.First(z => z.IsDefault).Id;
         var ids = selectedIds.ToList();
         Store.Write(d => { foreach (var sc in d.Screens.Where(x => ids.Contains(x.Id))) sc.ZoneId = zid; });
-        Toast.Ok($"{ids.Count} écran{(ids.Count > 1 ? "s" : "")} {(zid == null ? "sans zone" : "dans la zone « " + zones.First(z => z.Id == zid).Name + " »")}.");
+        Toast.Ok($"{ids.Count} écran{(ids.Count > 1 ? "s" : "")} dans la zone « {zones.First(z => z.Id == zid).Name} ».");
         zoneMove = false;
+        foreach (var id in ids) await Notifier.NotifyScreen(id);   // leur zone change : la synchro peut changer
         selectedIds.Clear();
+        Reload();
+    }
+
+    // Synchro d'une zone (bandeau de la zone ouverte) : les écrans de la zone rechargent leur configuration.
+    private async Task ToggleSync(Zone z)
+    {
+        if (area == null) return;
+        var on = !z.Sync;
+        var aid = area.Id;
+        var err = Store.Write(d => AreaOps.SetZoneSync(d, aid, z.Id, on));
+        if (err != null) { Toast.Error(err); return; }
+        await Notifier.NotifyZone(z.Id);
+        Toast.Ok(on ? $"Lecture synchronisée dans la zone « {z.Name} »." : $"Synchronisation coupée dans la zone « {z.Name} ».");
         Reload();
     }
 
@@ -400,16 +437,17 @@
     private void Reload()
     {
         (area, manageZones, noArea) = Store.Read(d => (d.Area, d.Access.ManagesCurrent, d.Access.OrgAreaCount > 0 && d.Area == null));
-        zones = area?.Zones.OrderBy(z => z.Name, StringComparer.CurrentCultureIgnoreCase).ToList() ?? new();
+        zones = area?.Zones.OrderByDescending(z => z.IsDefault).ThenBy(z => z.Name, StringComparer.CurrentCultureIgnoreCase).ToList() ?? new();
         otherAreas = Store.Read(d => d.Access.IsOrgAdmin && d.Area is { } cur ? d.Areas.Where(a => a.Id != cur.Id).OrderBy(a => a.Name).ToList() : new());
-        if (zoneFilter != null && zoneFilter != "none" && !zones.Any(z => z.Id.ToString() == zoneFilter)) zoneFilter = null;
+        if (zoneFilter != null && !zones.Any(z => z.Id.ToString() == zoneFilter)) zoneFilter = null;
         screens = Store.Read(d => d.Screens.Where(s => s.Token != null).OrderBy(s => s.Name).ToList());
         selectedIds.IntersectWith(screens.Select(s => s.Id));
+        synced = zones.Where(z => z.Sync).SelectMany(z => Helpers.SyncedScreens(screens.Where(s => ZoneOf(s)?.Id == z.Id))).ToHashSet();
         playlists = Store.Read(d => d.Playlists.OrderBy(p => p.Name).ToList());
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
     }
 
-    private void OpenPair() { code = name = ""; playlistId = null; error = null; pairZone = zoneFilter is { } z && z != "none" ? z : ""; showPair = true; }
+    private void OpenPair() { code = name = ""; playlistId = null; error = null; pairZone = zoneFilter ?? zones.FirstOrDefault(z => z.IsDefault)?.Id.ToString() ?? ""; showPair = true; }
 
     private void Edit(Screen s) { menuFor = null; editing = s.Id; }
 
@@ -421,7 +459,7 @@
         var spec = ScreenSpec.From(tenant);
         var pid = playlistId;
         var screenName = name;
-        Guid? zid = Guid.TryParse(pairZone, out var zg) && zones.Any(z => z.Id == zg) ? zg : null;
+        Guid? zid = Guid.TryParse(pairZone, out var zg) && zones.Any(z => z.Id == zg) ? zg : zones.FirstOrDefault(z => z.IsDefault)?.Id;
         if (noArea) { error = "Aucune aire de gestion ne vous est confiée."; return; }
         var id = Store.Write(d =>
         {

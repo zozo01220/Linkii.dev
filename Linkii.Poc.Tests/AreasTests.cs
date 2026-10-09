@@ -105,7 +105,7 @@ public class AreasTests
     }
 
     [Fact]
-    public void Zones_are_managed_by_area_admins_and_deleting_one_keeps_its_screens()
+    public void Zones_are_managed_by_area_admins_and_deleting_one_sends_its_screens_to_the_default_zone()
     {
         Assert.NotNull(As(sofia).Access.Current);
         Assert.NotNull(AreaOps.AddZone(As(sofia), geneva.Id, "Hall").Error);   // utilisatrice : refusé
@@ -115,7 +115,7 @@ public class AreasTests
         var screen = db.Screens.First(s => s.Name == "Accueil Lausanne");
         screen.ZoneId = zone!.Id;
         Assert.Null(AreaOps.DeleteZone(As(marco), lausanne.Id, zone.Id));
-        Assert.Null(screen.ZoneId);
+        Assert.Equal(lausanne.Zones.Single(z => z.IsDefault).Id, screen.ZoneId);   // retour dans la zone par défaut
         Assert.Equal(lausanne.Id, screen.AreaId);
     }
 
