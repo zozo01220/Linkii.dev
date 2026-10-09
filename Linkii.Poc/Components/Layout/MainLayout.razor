@@ -60,6 +60,7 @@
             <NavLink class="nav" href="admin/clients">Clients et accès</NavLink>
             <NavLink class="nav" href="admin/screens">Supervision</NavLink>
             <NavLink class="nav" href="admin/billing">Facturation</NavLink>
+            <NavLink class="nav" href="admin/settings">Réglages</NavLink>
         }
         else if (Ctx.IsResellerAdmin)
         {
@@ -133,6 +134,18 @@
                 <form method="post" action="/space/exit"><button type="submit">Quitter l'espace client</button></form>
             </div>
         }
+        @if (trialEnd is { } end)
+        {
+            var left = (int)Math.Ceiling((end - DateTime.UtcNow).TotalDays);
+            @if (left <= 0)
+            {
+                <div class="trial-bar ended"><Ico Name="hourglass" Size="16" /><span><b>Votre essai gratuit est terminé.</b> Vos écrans affichent « Essai terminé ». <a href="@siteUrl" target="_blank" rel="noopener">Contactez-nous</a> pour vous abonner.</span></div>
+            }
+            else
+            {
+                <div class="trial-bar @(left <= 2 ? "soon" : "")"><Ico Name="hourglass" Size="16" /><span>Essai gratuit : <b>@left jour@(left > 1 ? "s" : "") restant@(left > 1 ? "s" : "")</b>, jusqu'au @trialEndLabel.</span></div>
+            }
+        }
         <header class="topbar">
             <button type="button" class="nav-toggle" aria-label="Menu" aria-expanded="@(navOpen ? "true" : "false")" @onclick="() => { navOpen = !navOpen; open = false; }"><Ico Name="menu" Size="22" /></button>
             <div class="org">@orgName</div>
@@ -165,6 +178,8 @@
         if (Services.GetRequiredService<TenantStore>().SwitchArea(id)) Nav.NavigateTo(Nav.Uri.Contains("/playlists/") ? "/playlists" : Nav.Uri, forceLoad: true);   // tout est relu dans la nouvelle aire
     }
     private string brand = "#0B1F3A", orgName = "", userName = "", userEmail = "";
+    private DateTime? trialEnd;   // essai gratuit de l'organisation ouverte (bandeau)
+    private string trialEndLabel = "", siteUrl = "";
     private Reseller? reseller;
 
     private string Initials =>
@@ -177,6 +192,12 @@
         var cid = Ctx.ClientId;
         orgName = cid != null ? Root.Read(d => d.Clients.FirstOrDefault(c => c.Id == cid)?.Name ?? "")
                 : Ctx.IsPlatformAdmin ? "Console administrateur Linkii" : reseller?.Name ?? "";
+        if (cid != null && Root.Read(d => d.Clients.FirstOrDefault(c => c.Id == cid)) is { TrialEndsUtc: { } end } client)
+        {
+            trialEnd = end;
+            trialEndLabel = Signup.Day(client, end);
+            siteUrl = Services.GetRequiredService<Mailer>().SiteUrl;
+        }
         if (cid != null) LoadAreas();
         userEmail = Ctx.Email;
         userName = string.IsNullOrWhiteSpace(Ctx.DisplayName) ? userEmail : Ctx.DisplayName;

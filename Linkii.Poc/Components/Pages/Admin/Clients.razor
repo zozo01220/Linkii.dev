@@ -5,11 +5,12 @@
 @inject ResellerResolver Resolver
 @inject NavigationManager Nav
 @inject Toaster Toast
+@inject Notifier Screens
 
 <div class="page-head">
     <div>
         <h1>Clients et accès</h1>
-        <p class="sub">Créez un client chez un revendeur, ou entrez dans son espace pour l'aider. Chaque entrée est journalisée. Cliquez sur le nombre d'utilisateurs pour voir les comptes.</p>
+        <p class="sub">Comptes créés en libre-service, par un revendeur ou par Linkii. Une inscription libre est « à valider » jusqu'à la confirmation de son adresse, puis profite de @trialDays jours d'essai (<a href="admin/settings">Réglages</a>). Entrer dans un espace est journalisé.</p>
     </div>
     <button class="btn" @onclick="Open">+ Ajouter un client</button>
 </div>
@@ -53,7 +54,6 @@
     var totalUsers = clients.Sum(c => c.Users.Total);
     var active = clients.Sum(c => c.Users.Active30);
     var invited = clients.Sum(c => c.Users.Invited);
-    var maxUsers = Math.Max(1, clients.Select(c => c.Users.Total).DefaultIfEmpty(0).Max());
 }
 <div class="stats">
     <div class="stat"><div class="n">@clients.Count</div><div class="l">organisations</div></div>
@@ -61,43 +61,163 @@
     <div class="stat"><div class="n">@(totalUsers == 0 ? 0 : (int)Math.Round(active * 100.0 / totalUsers)) %</div><div class="l">actifs sur 30 jours · @invited invitation@(invited > 1 ? "s" : "") en attente</div></div>
     <div class="stat"><div class="n">@clients.Sum(c => c.Users.Areas)</div><div class="l">aires de gestion</div></div>
 </div>
+@{
+    var pendingCount = clients.Count(c => Is(c, FPending));
+    var trialCount = clients.Count(c => Is(c, FTrial));
+    var endingSoon = clients.Count(c => c.Client.InTrial(now) && c.Client.TrialEndsUtc - now <= TimeSpan.FromDays(3));
+    var endedCount = clients.Count(c => Is(c, FEnded));
+    var signups30 = clients.Count(c => SignupSources.IsSelfService(c.Client.SignupSource) && c.Client.CreatedUtc >= now.AddDays(-30));
+}
+<div class="stats">
+    <div class="stat"><div class="n @(pendingCount > 0 ? "warn" : "")">@pendingCount</div><div class="l">compte@(pendingCount > 1 ? "s" : "") à valider</div></div>
+    <div class="stat"><div class="n">@trialCount</div><div class="l">en essai · @endingSoon se termine@(endingSoon > 1 ? "nt" : "") sous 3 jours</div></div>
+    <div class="stat"><div class="n @(endedCount > 0 ? "bad" : "")">@endedCount</div><div class="l">essai@(endedCount > 1 ? "s" : "") terminé@(endedCount > 1 ? "s" : "")</div></div>
+    <div class="stat"><div class="n">@signups30</div><div class="l">inscriptions libres sur 30 jours</div></div>
+</div>
 
-<table class="tbl">
+<div class="sc-bar clients-bar">
+    <div class="seg" role="tablist" aria-label="État du compte">
+        @foreach (var (id, label) in StateFilters)
+        {
+            var f = id;
+            <button type="button" class="@(state == f ? "on" : "")" @onclick="() => state = f">@label <small>@clients.Count(c => Is(c, f))</small></button>
+        }
+    </div>
+    <select @bind="source" aria-label="Type d'inscription">
+        <option value="">Toutes les inscriptions</option>
+        @foreach (var s in SignupSources.All) { <option value="@s">@SignupSources.Label(s) (@clients.Count(c => c.Client.SignupSource == s))</option> }
+        @if (clients.Any(c => c.Client.SignupSource == null)) { <option value="none">Non renseignée (@clients.Count(c => c.Client.SignupSource == null))</option> }
+    </select>
+    <div class="search-box grow" style="margin:0">
+        <Ico Name="search" Size="16" />
+        <input placeholder="Rechercher une organisation, un e-mail…" aria-label="Rechercher" @bind="search" @bind:event="oninput" />
+    </div>
+    <select @bind="sort" aria-label="Trier">
+        <option value="@SortCreated">Plus récentes</option>
+        <option value="@SortName">Nom</option>
+        <option value="@SortUsers">Utilisateurs</option>
+        <option value="@SortScreens">Écrans</option>
+    </select>
+</div>
+
+<div class="tbl-scroll">
+<table class="tbl clients-tbl">
     <thead><tr>
-        <th><button type="button" class="th-sort @(sort == SortName ? "on" : "")" @onclick="() => sort = SortName">Client</button></th>
-        <th>Revendeur</th>
-        <th><button type="button" class="th-sort @(sort == SortUsers ? "on" : "")" @onclick="() => sort = SortUsers">Utilisateurs</button></th>
-        <th class="num">Actifs 30 j</th>
-        <th class="num">Aires</th>
-        <th class="num"><button type="button" class="th-sort @(sort == SortScreens ? "on" : "")" @onclick="() => sort = SortScreens">Écrans</button></th>
-        <th>État</th><th></th>
+        <th>Organisation</th>
+        <th>Administrateur</th>
+        <th>Inscription</th>
+        <th>Créé le</th>
+        <th>État</th>
+        <th>Essai</th>
+        <th>E-mails</th>
+        <th></th>
     </tr></thead>
     <tbody>
     @foreach (var c in Sorted)
     {
         var row = c;
+        var o = c.Owner;
+        var verified = Signup.IsVerified(o);
         <tr>
-            <td><b>@c.Client.Name</b></td>
-            <td>@c.Reseller</td>
             <td>
-                <button type="button" class="linklike bar-btn" title="Voir les utilisateurs de @c.Client.Name" @onclick="() => OpenUsers(row)">
-                    <span class="bar-cell"><span class="n">@c.Users.Total</span><span class="bar-track"><span style="width:@((int)Math.Round(c.Users.Total * 100.0 / maxUsers))%"></span></span></span>
-                    <small>@c.Users.Breakdown</small>
-                </button>
+                <b>@c.Client.Name</b>
+                <small class="cell-sub">@c.Reseller</small>
+                <small class="cell-sub"><button type="button" class="linkish" title="Voir les utilisateurs de @c.Client.Name" @onclick="() => OpenUsers(row)">@c.Users.Total utilisateur@(c.Users.Total > 1 ? "s" : "")</button> · @c.Screens écran@(c.Screens > 1 ? "s" : "")</small>
             </td>
-            <td class="num">@c.Users.Active30</td>
-            <td class="num">@c.Users.Areas</td>
-            <td class="num">@c.Screens</td>
-            <td><span class="pill @(c.Client.Suspended ? "bad" : "ok")">@(c.Client.Suspended ? "Suspendu" : "Actif")</span></td>
+            <td><span class="cell-mail" title="@o?.Email">@(o?.Email ?? "—")</span><small class="cell-sub">@o?.Name</small></td>
+            <td><span class="src"><ProviderLogo Provider="@c.Client.SignupSource" Size="14" />@SignupSources.Label(c.Client.SignupSource)</span></td>
+            <td>@Day(c.Client.CreatedUtc)<small class="cell-sub">@(verified ? $"validé le {o!.EmailVerifiedUtc!.Value.ToLocalTime().ToString("d MMM", Fr)}" : Ago(c.Client.CreatedUtc))</small></td>
             <td>
-                <form method="post" action="/space/enter"><input type="hidden" name="clientId" value="@c.Client.Id" /><button class="btn ghost" type="submit">Entrer</button></form>
-                <button class="btn ghost" @onclick="() => Toggle(c.Client)">@(c.Client.Suspended ? "Activer" : "Suspendre")</button>
+                <span class="pill @(verified ? "ok" : "warn")">@(verified ? "Validé" : "À valider")</span>
+                @if (c.Client.Suspended) { <span class="pill bad">Suspendu</span> }
+                @if (!verified && o?.AwaitsVerification == true)
+                {
+                    @if (o.VerifySends.Count > 0) { <small class="cell-sub">lien envoyé @o.VerifySends.Max().ToLocalTime().ToString("d MMM HH:mm", Fr)</small> }
+                    <small class="cell-sub">suppression dans @PurgeIn(o) j</small>
+                }
+                else if (!verified) { <small class="cell-sub">première connexion attendue</small> }
             </td>
+            <td class="trial-cell">
+                @if (c.Client.TrialEndsUtc is { } end)
+                {
+                    @if (c.Client.TrialEnded(now))
+                    {
+                        <span class="pill bad">Essai terminé</span><small class="cell-sub">le @Day(end)</small>
+                    }
+                    else
+                    {
+                        var left = c.Client.TrialDaysLeft(now);
+                        <b>@left j</b> <span class="muted">restant@(left > 1 ? "s" : "")</span>
+                        <small class="cell-sub">jusqu'au @end.ToLocalTime().ToString("d MMM", Fr)</small>
+                        <span class="trial-track"><span class="@(left <= 2 ? "low" : "")" style="width:@((int)Math.Round(Math.Min(1, (end - now).TotalDays / Math.Max(1, trialDays)) * 100))%"></span></span>
+                    }
+                }
+                else if (!verified && SignupSources.IsSelfService(c.Client.SignupSource)) { <small class="muted wrap">démarre à la validation</small> }
+                else { <span class="muted">—</span> }
+            </td>
+            <td class="consent-cell">
+                <span class="@(o?.MarketingOptIn == true ? "yes" : "no")" title="Offres commerciales">@(o?.MarketingOptIn == true ? "✓" : "—") Offres</span>
+                <span class="@(o?.NewsOptIn == true ? "yes" : "no")" title="Nouveautés et astuces">@(o?.NewsOptIn == true ? "✓" : "—") Nouveautés</span>
+            </td>
+            <td class="acts"><div class="acts-in">
+                @if (!verified && o != null)
+                {
+                    @if (o.AwaitsVerification) { <button class="icon-act" title="Renvoyer le lien de confirmation" aria-label="Renvoyer le lien de confirmation" @onclick="() => ResendLink(row)"><Ico Name="mail-send" Size="16" /></button> }
+                    <button class="icon-act" title="Valider l'adresse sans attendre le lien" aria-label="Valider l'adresse" @onclick="() => ValidateNow(row)"><Ico Name="check" Size="16" /></button>
+                }
+                @if (c.Client.TrialEndsUtc != null) { <button class="icon-act" title="Prolonger ou terminer l'essai" aria-label="Essai gratuit" @onclick="() => OpenTrial(row)"><Ico Name="hourglass" Size="16" /></button> }
+                <form method="post" action="/space/enter"><input type="hidden" name="clientId" value="@c.Client.Id" /><button class="icon-act" type="submit" title="Entrer dans l'espace (journalisé)" aria-label="Entrer dans l'espace"><Ico Name="logout" Size="16" /></button></form>
+                <button class="icon-act danger" title="Supprimer le client" aria-label="Supprimer le client" @onclick="() => deleteOf = row"><Ico Name="trash" Size="16" /></button>
+                <button class="icon-act @(c.Client.Suspended ? "on" : "")" title="@(c.Client.Suspended ? "Réactiver l'organisation" : "Suspendre l'organisation")" aria-label="@(c.Client.Suspended ? "Réactiver" : "Suspendre")" @onclick="() => Toggle(c.Client)"><Ico Name="lock" Size="16" /></button>
+            </div></td>
         </tr>
     }
-    @if (clients.Count == 0) { <tr><td colspan="8">Aucun client pour l'instant.</td></tr> }
+    @if (!Sorted.Any()) { <tr><td colspan="8">@(clients.Count == 0 ? "Aucun client pour l'instant." : "Aucune organisation ne correspond à ces filtres.")</td></tr> }
     </tbody>
 </table>
+</div>
+
+@if (deleteOf is { } del)
+{
+    <div class="modal-backdrop" @onclick="() => deleteOf = null"></div>
+    <div class="modal app-modal sm" role="dialog" aria-modal="true" aria-labelledby="del-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="del-title">Supprimer « @del.Client.Name » ?</h3></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => deleteOf = null"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            <p>Cette action est <b>définitive</b> : les @del.Users.Total utilisateur@(del.Users.Total > 1 ? "s" : ""), les @del.Screens écran@(del.Screens > 1 ? "s" : "") connecté@(del.Screens > 1 ? "s" : ""), les listes de lecture, les contenus et les fichiers de la médiathèque sont effacés. Les écrans cesseront d'afficher leur contenu.</p>
+            <label class="lbl">Tapez le nom du client pour confirmer</label>
+            <input class="full" @bind="deleteConfirm" @bind:event="oninput" placeholder="@del.Client.Name" autocomplete="off" />
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn ghost" @onclick="() => deleteOf = null">Annuler</button>
+            <button type="button" class="btn danger-solid" disabled="@(!string.Equals(deleteConfirm.Trim(), del.Client.Name, StringComparison.OrdinalIgnoreCase))" @onclick="() => Delete(del)">Supprimer définitivement</button>
+        </div>
+    </div>
+}
+
+@if (trialOf is { } tr)
+{
+    <div class="modal-backdrop" @onclick="() => trialOf = null"></div>
+    <div class="modal app-modal" role="dialog" aria-modal="true" aria-labelledby="trial-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="trial-title">Essai gratuit de @tr.Client.Name</h3>
+                <small class="muted">@(tr.Client.TrialEnded(now) ? $"Terminé le {Day(tr.Client.TrialEndsUtc!.Value)} : les écrans affichent « Essai terminé »." : $"{tr.Client.TrialDaysLeft(now)} j restants, jusqu'au {Day(tr.Client.TrialEndsUtc!.Value)}.")</small></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => trialOf = null"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            <label class="lbl">Prolonger de</label>
+            <div class="row" style="gap:8px"><input type="number" min="1" max="365" class="mono" style="width:90px" @bind="extendDays" /> <span class="muted">jours, à partir de @(tr.Client.TrialEnded(now) ? "aujourd'hui" : "la fin actuelle")</span></div>
+            <p class="hint" style="margin-top:14px">Client abonné : mettez fin à l'essai. Les écrans diffusent sans limite de durée et l'essai disparaît de son espace.</p>
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn ghost" @onclick="() => EndTrial(tr)">Mettre fin à l'essai (abonné)</button>
+            <span class="grow"></span>
+            <button type="button" class="btn" @onclick="() => Extend(tr)">Prolonger</button>
+        </div>
+    </div>
+}
 
 @if (usersOf is { } uo)
 {
@@ -143,20 +263,121 @@
 </table>
 
 @code {
-    private record Row(Tenant Client, string Reseller, int Screens, UserStats Users);
+    private record Row(Tenant Client, string Reseller, int Screens, UserStats Users, User? Owner);
     private static readonly System.Globalization.CultureInfo Fr = new("fr-CH");
-    private const string SortName = "name", SortUsers = "users", SortScreens = "screens";
-    private string sort = SortUsers;
+    private const string SortName = "name", SortUsers = "users", SortScreens = "screens", SortCreated = "created";
+    private string sort = SortCreated;
     private Row? usersOf;
+    private Row? deleteOf { get => _deleteOf; set { _deleteOf = value; deleteConfirm = ""; } }
+    private Row? _deleteOf;
+    private string deleteConfirm = "";
     private List<User> clientUsers = new();
     private List<Area> clientAreas = new();
 
+    // Filtres : état du compte administrateur (À valider / Validé) et de l'essai, type d'inscription, recherche
+    private const string FAll = "", FPending = "pending", FVerified = "verified", FTrial = "trial", FEnded = "ended";
+    private static readonly (string Id, string Label)[] StateFilters =
+        { (FAll, "Tous"), (FPending, "À valider"), (FVerified, "Validé"), (FTrial, "En essai"), (FEnded, "Essai terminé") };
+    private string state = FAll, source = "", search = "";
+    private DateTime now = DateTime.UtcNow;
+    private int trialDays = 7, purgeDays = 7;
+
+    private bool Is(Row r, string f) => f switch
+    {
+        FPending => !Signup.IsVerified(r.Owner),
+        FVerified => Signup.IsVerified(r.Owner),
+        FTrial => r.Client.InTrial(now),
+        FEnded => r.Client.TrialEnded(now),
+        _ => true
+    };
+
+    private IEnumerable<Row> Filtered => clients.Where(c => Is(c, state)
+        && (source == "" || (source == "none" ? c.Client.SignupSource == null : c.Client.SignupSource == source))
+        && (search.Trim() is not { Length: > 0 } q || c.Client.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || c.Owner?.Email.Contains(q, StringComparison.OrdinalIgnoreCase) == true || c.Reseller.Contains(q, StringComparison.OrdinalIgnoreCase)));
+
     private IEnumerable<Row> Sorted => sort switch
     {
-        SortUsers => clients.OrderByDescending(c => c.Users.Total).ThenBy(c => c.Client.Name),
-        SortScreens => clients.OrderByDescending(c => c.Screens).ThenBy(c => c.Client.Name),
-        _ => clients
+        SortUsers => Filtered.OrderByDescending(c => c.Users.Total).ThenBy(c => c.Client.Name),
+        SortScreens => Filtered.OrderByDescending(c => c.Screens).ThenBy(c => c.Client.Name),
+        SortCreated => Filtered.OrderByDescending(c => c.Client.CreatedUtc),
+        _ => Filtered
     };
+
+    private static string Day(DateTime utc) => utc.ToLocalTime().ToString("d MMM yyyy", Fr);
+    private string Ago(DateTime utc)
+    {
+        var d = now - utc;
+        return d.TotalHours < 1 ? "il y a < 1 h" : d.TotalDays < 1 ? $"il y a {(int)d.TotalHours} h" : $"il y a {(int)d.TotalDays} j";
+    }
+    private int PurgeIn(User u) => Math.Max(0, (int)Math.Ceiling(((u.CreatedUtc ?? now).AddDays(purgeDays) - now).TotalDays));
+
+    // ---------- Validation et essai ----------
+
+    private Row? trialOf;
+    private int extendDays = 7;
+
+    private void OpenTrial(Row r) { extendDays = trialDays; trialOf = r; }
+
+    private async Task Extend(Row r)
+    {
+        var days = Math.Clamp(extendDays, 1, 365);
+        Root.Write(d => { if (d.Clients.FirstOrDefault(c => c.Id == r.Client.Id) is { } c) Signup.Extend(c, days, DateTime.UtcNow); });
+        trialOf = null;
+        Load();
+        await Screens.NotifyClient(r.Client.Id);   // écrans en « Essai terminé » : la diffusion reprend
+        Toast.Ok($"Essai de « {r.Client.Name} » prolongé de {days} jour{(days > 1 ? "s" : "")}.");
+    }
+
+    private async Task EndTrial(Row r)
+    {
+        Root.Write(d => { if (d.Clients.FirstOrDefault(c => c.Id == r.Client.Id) is { } c) { c.TrialEndsUtc = null; c.TrialReminderSentUtc = null; c.TrialEndedNotifiedUtc = null; } });
+        trialOf = null;
+        Load();
+        await Screens.NotifyClient(r.Client.Id);
+        Toast.Ok($"« {r.Client.Name} » n'est plus en essai.");
+    }
+
+    private string AppBase(Guid resellerId)
+    {
+        var r = Root.Read(d => d.Resellers.First(x => x.Id == resellerId));
+        return Resolver.LoginUrl(r, Nav.BaseUri)[..^"login".Length];
+    }
+
+    private async Task ResendLink(Row r)
+    {
+        var nowUtc = DateTime.UtcNow;
+        var (token, reseller, hours) = Root.Write(d =>
+        {
+            var u = d.Users.FirstOrDefault(x => x.Id == r.Owner!.Id);
+            return u is { AwaitsVerification: true } ? (Signup.NewToken(u, d.Platform.VerifyLinkHours, nowUtc), d.Resellers.First(x => x.Id == r.Client.ResellerId), d.Platform.VerifyLinkHours) : (null, null, 0);
+        });
+        if (token == null) { Load(); return; }
+        var link = AppBase(r.Client.ResellerId) + "login/verify/confirm?t=" + Uri.EscapeDataString(token);
+        var err = await Mail.SendVerification(reseller!, link, r.Owner!.Name, r.Owner.Email, r.Client.Name, hours);
+        Load();
+        if (err == null) Toast.Ok($"Nouveau lien de confirmation envoyé à {r.Owner.Email}.");
+        else Toast.Error($"Le lien n'a pas pu être envoyé : {err}.");
+    }
+
+    // Adresse vérifiée par l'équipe Linkii (ex. confirmée par téléphone) : l'essai démarre et l'e-mail de bienvenue part.
+    private async Task ValidateNow(Row r)
+    {
+        var nowUtc = DateTime.UtcNow;
+        var (user, client, reseller) = Root.Write(d =>
+        {
+            var u = d.Users.First(x => x.Id == r.Owner!.Id);
+            var c = d.Clients.First(x => x.Id == r.Client.Id);
+            Signup.Verify(d, u, c, nowUtc);
+            return (u, c, d.Resellers.First(x => x.Id == c.ResellerId));
+        });
+        Load();
+        if (!SignupSources.IsSelfService(client.SignupSource)) { Toast.Ok($"Compte de « {client.Name} » validé."); return; }
+        var err = await Mail.SendSignupWelcome(reseller, AppBase(reseller.Id), user.Name, user.Email, client.Name, trialDays,
+            client.TrialEndsUtc is { } end ? Signup.Day(client, end) : null, Signup.SignInHint(user));
+        if (err == null) Toast.Ok($"Compte de « {client.Name} » validé. L'e-mail de bienvenue a été envoyé.");
+        else Toast.Error($"Compte validé, mais l'e-mail de bienvenue n'a pas pu être envoyé : {err}.");
+    }
 
     // Détail en lecture seule : l'équipe Linkii voit tous les comptes de l'organisation et leurs rôles.
     private void OpenUsers(Row r)
@@ -179,8 +400,10 @@
     private void Load()
     {
         resellers = Root.Read(d => d.Resellers.Where(r => r.Active).OrderBy(r => r.Name).ToList());
+        now = DateTime.UtcNow;
+        (trialDays, purgeDays) = Root.Read(d => (d.Platform.TrialDays, d.Platform.PurgeUnverifiedDays));
         clients = Root.Read(d => d.Clients.OrderBy(c => c.Name)
-            .Select(c => new Row(c, d.Resellers.FirstOrDefault(r => r.Id == c.ResellerId)?.Name ?? "?", d.Screens.Count(s => s.ClientId == c.Id && s.Token != null), UserStats.Of(d, c))).ToList());
+            .Select(c => new Row(c, d.Resellers.FirstOrDefault(r => r.Id == c.ResellerId)?.Name ?? "?", d.Screens.Count(s => s.ClientId == c.Id && s.Token != null), UserStats.Of(d, c), Signup.OwnerOf(d, c))).ToList());
         log = Root.Read(d => d.AccessLog.OrderByDescending(l => l.AtUtc).Take(50).ToList());
     }
 
@@ -196,7 +419,7 @@
         {
             reseller = d.Resellers.FirstOrDefault(x => x.Id == resellerId);
             if (reseller == null) return "Choisissez un revendeur.";
-            return Tenancy.CreateClient(d, reseller, clientName, adminName, adminEmail, adminPwd, mustChangePassword: true).Error;
+            return Tenancy.CreateClient(d, reseller, clientName, adminName, adminEmail, adminPwd, mustChangePassword: true, source: SignupSources.Console).Error;
         });
         if (err != null) { formError = err; return; }
         var (name, person, email, pwd) = (clientName.Trim(), adminName, adminEmail.Trim().ToLowerInvariant(), adminPwd);
@@ -205,6 +428,17 @@
         var mailErr = await Mail.SendWelcome(reseller!, Resolver.LoginUrl(reseller!, Nav.BaseUri), $"Votre espace « {name} » est prêt.", person, email, pwd);
         if (mailErr == null) Toast.Ok($"Client « {name} » créé. Ses identifiants ont été envoyés à {email}.");
         else Toast.Error($"Client « {name} » créé, mais l'e-mail n'a pas pu être envoyé : {mailErr}. Communiquez vous-même le mot de passe provisoire à {email} : {pwd}");
+    }
+
+    private async Task Delete(Row r)
+    {
+        if (!string.Equals(deleteConfirm.Trim(), r.Client.Name, StringComparison.OrdinalIgnoreCase)) return;
+        await Screens.NotifyClient(r.Client.Id);   // les écrans sont prévenus avant que l'organisation disparaisse
+        var files = Root.Write(d => Signup.RemoveClient(d, r.Client.Id));
+        foreach (var f in files) try { File.Delete(Path.Combine(AppPaths.MediaDir, Path.GetFileName(f))); } catch (IOException) { }
+        deleteOf = null;
+        Load();
+        Toast.Ok($"Client « {r.Client.Name} » supprimé.");
     }
 
     private void Toggle(Tenant c)

@@ -288,12 +288,15 @@ public record UserStats(int Total, int Admins, int Members, int Active30, int In
 
 public static class Tenancy
 {
-    /// <summary>Un écran ne diffuse que si son client, puis son revendeur, sont actifs.</summary>
-    public static bool IsActive(Db db, Screen s)
+    /// <summary>Un écran ne diffuse que si son client, puis son revendeur, sont actifs, et que l'essai gratuit du client n'est pas terminé.</summary>
+    public static bool IsActive(Db db, Screen s) => Blocked(db, s) == null;
+
+    /// <summary>Pourquoi un écran ne diffuse pas : « trial » (essai gratuit terminé), « suspended » (client ou revendeur suspendu), sinon null.</summary>
+    public static string? Blocked(Db db, Screen s)
     {
         var c = db.Clients.FirstOrDefault(x => x.Id == s.ClientId);
-        if (c == null || c.Suspended) return false;
-        return db.Resellers.FirstOrDefault(r => r.Id == c.ResellerId)?.Active == true;
+        if (c == null || c.Suspended || db.Resellers.FirstOrDefault(r => r.Id == c.ResellerId)?.Active != true) return "suspended";
+        return c.TrialEnded(DateTime.UtcNow) ? "trial" : null;
     }
 
     /// <summary>Un administrateur ne se connecte que sur le domaine de son revendeur ; l'équipe Linkii sur le domaine principal.</summary>
@@ -311,20 +314,21 @@ public static class Tenancy
     public static bool IsValidSlug(string s) =>
         s.Length is >= 2 and <= 40 && s == Slugify(s) && !ReservedSlugs.Contains(s);
 
-    /// <summary>Crée un client et son premier administrateur. Retourne null avec un message si l'e-mail est déjà pris chez ce revendeur.</summary>
-    public static (Tenant? Client, string? Error) CreateClient(Db db, Reseller reseller, string clientName, string adminName, string email, string password, bool mustChangePassword = false)
+    /// <summary>Crée un client et son premier administrateur. Retourne null avec un message si l'e-mail est déjà pris chez ce revendeur.
+    /// password null : compte Microsoft ou Google, sans mot de passe Linkii. source : voir <see cref="SignupSources"/>.</summary>
+    public static (Tenant? Client, string? Error) CreateClient(Db db, Reseller reseller, string clientName, string adminName, string email, string? password, bool mustChangePassword = false, string? source = null)
     {
         email = email.Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(clientName) || string.IsNullOrWhiteSpace(email)) return (null, "Nom du client et e-mail obligatoires.");
-        if (password.Length < 8) return (null, "Mot de passe trop court (8 caractères minimum).");
+        if (password != null && password.Length < 8) return (null, "Mot de passe trop court (8 caractères minimum).");
         if (db.Users.Any(u => u.Email == email && (u.ResellerId == reseller.Id || u.ResellerId == null)))
             return (null, "Cette adresse e-mail est déjà utilisée.");
-        var client = new Tenant { ResellerId = reseller.Id, Name = clientName.Trim() };
+        var client = new Tenant { ResellerId = reseller.Id, Name = clientName.Trim(), SignupSource = source };
         var firstArea = new Area { ClientId = client.Id, Name = Seed.DefaultAreaName };   // une aire dès le départ : invisible tant qu'elle est seule
         AreaOps.EnsureDefaultZone(firstArea);
         db.Areas.Add(firstArea);
         db.Clients.Add(client);
-        db.Users.Add(new User { Email = email, Name = adminName.Trim(), PasswordHash = Passwords.Hash(password), Role = Roles.ClientAdmin, ResellerId = reseller.Id, ClientId = client.Id, MustChangePassword = mustChangePassword, CreatedUtc = DateTime.UtcNow });
+        db.Users.Add(new User { Email = email, Name = adminName.Trim(), PasswordHash = password == null ? "" : Passwords.Hash(password), Role = Roles.ClientAdmin, ResellerId = reseller.Id, ClientId = client.Id, MustChangePassword = mustChangePassword, CreatedUtc = DateTime.UtcNow });
         return (client, null);
     }
 }
@@ -350,6 +354,7 @@ public static class Seed
             PurgeWidgets(db, dataPath, log);
             MigrateGoogleAccount(db);
             EnsureAreas(db);
+            Signup.MarkVerified(db);
 
             if (!db.Users.Any(u => u.Role == Roles.PlatformAdmin))
             {

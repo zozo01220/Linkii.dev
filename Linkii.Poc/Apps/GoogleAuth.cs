@@ -20,8 +20,13 @@ public class GoogleAuth(IConfiguration config, JsonStore store, SecretBox box, I
     public const string DriveScope = "https://www.googleapis.com/auth/drive.readonly";
     public const string CalendarScope = "https://www.googleapis.com/auth/calendar.readonly";
 
-    /// <summary>Accès demandé selon l'intégration qui lance la connexion (« drive » ou « calendar »).</summary>
-    public static string ScopeFor(string purpose) => purpose == "calendar" ? CalendarScope : DriveScope;
+    /// <summary>Accès demandés selon ce qui lance la connexion : une intégration (« drive » ou « calendar ») ou Comptes connectés (« all » : les deux).</summary>
+    public static string[] ScopesFor(string purpose) => purpose switch
+    {
+        AccountPurposes.Calendar => [CalendarScope],
+        AccountPurposes.All => [CalendarScope, DriveScope],
+        _ => [DriveScope]
+    };
 
     /// <summary>Le compte connecté a accordé cet accès.</summary>
     public static bool Has(Tenant t, string scope) => t.GoogleRefreshToken.Length > 0 && t.GoogleScopes.Split(' ').Contains(scope);
@@ -57,7 +62,7 @@ public class GoogleAuth(IConfiguration config, JsonStore store, SecretBox box, I
             ["response_type"] = "code",
             ["client_id"] = ClientId,
             ["redirect_uri"] = redirect,
-            ["scope"] = ScopeFor(purpose) + " openid email",   // email : afficher quel compte est connecté
+            ["scope"] = string.Join(' ', ScopesFor(purpose)) + " openid email",   // email : afficher quel compte est connecté
             ["access_type"] = "offline",                       // jeton de renouvellement : synchronisation sans l'utilisateur
             ["prompt"] = "consent select_account",
             ["include_granted_scopes"] = "true",               // l'accès déjà accordé à l'autre intégration est conservé
@@ -82,8 +87,8 @@ public class GoogleAuth(IConfiguration config, JsonStore store, SecretBox box, I
                 ["code_verifier"] = p.Verifier,
                 ["redirect_uri"] = p.Redirect
             });
-            // consentement granulaire : l'utilisateur peut décocher l'accès demandé
-            if (!t.Scope.Split(' ').Contains(ScopeFor(p.Purpose))) return back + "scope";
+            // consentement granulaire : l'utilisateur peut décocher les accès demandés (depuis Comptes connectés, un seul suffit)
+            if (!ScopesFor(p.Purpose).Any(t.Scope.Split(' ').Contains)) return back + "scope";
             if (t.RefreshToken.Length == 0) return back + "error";
             access[p.ClientId] = new Access(t.AccessToken, DateTime.UtcNow.AddSeconds(Math.Max(60, t.ExpiresIn) - 60));
             var refresh = box.Protect(t.RefreshToken);
@@ -95,6 +100,7 @@ public class GoogleAuth(IConfiguration config, JsonStore store, SecretBox box, I
                 c.GoogleScopes = t.Scope;
                 c.GoogleUser = email;
                 c.GoogleConnectedUtc = DateTime.UtcNow;
+                c.GoogleLostUtc = null;
             });
             return back + "ok";
         }
@@ -113,10 +119,21 @@ public class GoogleAuth(IConfiguration config, JsonStore store, SecretBox box, I
         {
             var c = d.Clients.First(x => x.Id == clientId);
             var s = c.GoogleRefreshToken;
-            c.GoogleRefreshToken = ""; c.GoogleScopes = ""; c.GoogleUser = ""; c.GoogleConnectedUtc = null;
+            c.GoogleRefreshToken = ""; c.GoogleScopes = ""; c.GoogleUser = ""; c.GoogleConnectedUtc = null; c.GoogleLostUtc = null;
             return s;
         });
         if (stored.Length > 0) await Revoke(box.Unprotect(stored));
+    }
+
+    /// <summary>Google refuse le jeton : le compte reste affiché (adresse, accès d'avant) comme « à reconnecter » dans Comptes connectés.</summary>
+    private void Expire(Guid clientId)
+    {
+        access.TryRemove(clientId, out _);
+        store.Write(d =>
+        {
+            var c = d.Clients.First(x => x.Id == clientId);
+            c.GoogleRefreshToken = ""; c.GoogleLostUtc = DateTime.UtcNow;
+        });
     }
 
     // ---------- Jetons : jeton d'accès en mémoire, jeton de renouvellement chiffré ----------
@@ -144,13 +161,13 @@ public class GoogleAuth(IConfiguration config, JsonStore store, SecretBox box, I
         {
             if (access.TryGetValue(t.Id, out a) && a.Expires > DateTime.UtcNow) return a.Token;   // renouvelé entre-temps
             var stored = store.Read(d => d.Clients.FirstOrDefault(c => c.Id == t.Id)?.GoogleRefreshToken ?? "");
-            if (stored.Length == 0) throw new GoogleAuthException("Aucun compte Google connecté : connectez-le dans Intégrations (Google Calendar ou Google Drive).");
+            if (stored.Length == 0) throw new GoogleAuthException("Aucun compte Google connecté : connectez-le dans Intégrations › Comptes connectés.");
             TokenResponse r;
             try { r = await TokenRequest(new() { ["grant_type"] = "refresh_token", ["refresh_token"] = box.Unprotect(stored) }); }
             catch (GoogleAuthException)
             {
-                await Disconnect(t.Id);   // accès retiré dans le compte Google, ou mot de passe changé : il faut se reconnecter
-                throw new GoogleAuthException("La connexion au compte Google a expiré. Reconnectez-le dans Intégrations (Google Calendar ou Google Drive).");
+                Expire(t.Id);   // accès retiré dans le compte Google, ou mot de passe changé : il faut se reconnecter
+                throw new GoogleAuthException("La connexion au compte Google a expiré. Reconnectez-le dans Intégrations › Comptes connectés.");
             }
             access[t.Id] = new Access(r.AccessToken, DateTime.UtcNow.AddSeconds(Math.Max(60, r.ExpiresIn) - 60));
             return r.AccessToken;

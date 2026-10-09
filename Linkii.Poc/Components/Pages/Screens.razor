@@ -11,9 +11,13 @@
         <p class="sub">Choisissez la liste de lecture et les widgets de chaque écran, puis publiez : chaque écran se met à jour indépendamment.</p>
     </div>
     <div class="row head-actions">
-        <button class="btn ghost" disabled="@(selectedIds.Count == 0 || bulkPublishing)" title="@(selectedIds.Count == 0 ? "Cochez un ou plusieurs écrans" : null)" @onclick="() => AskPublish(selectedIds.ToList())">
-            <Ico Name="upload" Size="16" /> @(bulkPublishing ? "Publication…" : "Publier")
-        </button>
+        @* Publier : seulement s'il y a des modifications à publier (écrans affichés), en couleur avec leur nombre *@
+        @if (PendingShown.Count > 0)
+        {
+            <button class="btn publish-btn" disabled="@bulkPublishing" title="Publier les modifications en attente sur @PendingShown.Count écran@(PendingShown.Count > 1 ? "s" : "")" @onclick="() => AskPublish(PendingShown)">
+                <Ico Name="upload" Size="16" /> @(bulkPublishing ? "Publication…" : "Publier") <span class="cnt">@PendingShown.Count</span>
+            </button>
+        }
         @if (area != null && manageZones)
         {
             <div class="kebab add-menu">
@@ -39,113 +43,181 @@
 {
     <div class="card empty"><div class="big">Aucune aire de gestion ne vous est confiée</div><p>Demandez à un administrateur de votre organisation de vous donner un rôle dans une aire.</p></div>
 }
-@if (area != null && ShowZones)
+@if (screens.Count > 0)
 {
-    <div class="zone-bar" role="group" aria-label="Zones">
-        <button type="button" class="chip @(zoneFilter == null ? "on" : "")" @onclick="() => zoneFilter = null">Toutes les zones <small>@screens.Count</small></button>
-        @foreach (var z in zones)
+    @* Une seule barre : tout sélectionner, actions de la sélection, zone, état, recherche, tri, affichage *@
+    <div class="sc-bar" role="region" aria-label="Filtres et sélection" aria-live="polite">
+        <label class="lib-all" title="Tout sélectionner">
+            <input type="checkbox" class="sc-check" checked="@(Shown.Count > 0 && Shown.All(s => selectedIds.Contains(s.Id)))" @onchange="ToggleAll" aria-label="Tout sélectionner" />
+            @if (selectedIds.Count == 0) { <span>Tout sélectionner</span> }
+        </label>
+        @if (selectedIds.Count > 0)
         {
-            var zone = z;
-            <button type="button" class="chip @(zoneFilter == zone.Id.ToString() ? "on" : "")" @onclick="() => zoneFilter = zone.Id.ToString()"><Ico Name="@(zone.IsWall ? "grid" : zone.Sync ? "link" : "box")" Size="14" /> @zone.Name <small>@screens.Count(x => ZoneOf(x)?.Id == zone.Id)</small></button>
-        }
-    </div>
-    @if (OpenZone is { IsWall: true } wz)
-    {
-        var inW = InZone;
-        var online = inW.Count(x => !IsOffline(x));
-        var wpl = playlists.FirstOrDefault(p => p.Id == wz.PlaylistId);
-        <div class="zone-strip" role="region" aria-label="Mur @wz.Name">
-            <div class="t" style="flex:1;min-width:260px">
-                <b>@wz.Name <span class="badge sync" style="margin-left:6px"><Ico Name="grid" Size="12" /> Mur d'écrans · @wz.WallCols × @wz.WallRows</span>
-                    <span class="badge @(online == wz.WallCols * wz.WallRows ? "en-ligne" : "hors-ligne")" style="margin-left:4px">@(online == wz.WallCols * wz.WallRows ? $"{online} sur {online} en ligne" : "Mur incomplet")</span></b>
-                <small>Liste : @(wpl?.Name ?? "aucune") · une seule image sur tous les écrans, lecture synchronisée</small>
-                @if (manageZones)
+            <div class="kebab dd">
+                <button type="button" class="dd-btn dark" aria-haspopup="menu" aria-expanded="@(openMenu == "sel" ? "true" : "false")" @onclick='() => Toggle("sel")'>
+                    @selectedIds.Count sélectionné@(selectedIds.Count > 1 ? "s" : "") · Actions <Ico Name="chevron" Size="14" />
+                </button>
+                @if (openMenu == "sel")
                 {
-                    <div class="wall-actions">
-                        <select aria-label="Liste de lecture du mur" @onchange="e => ChangeWallPlaylist(wz, e)">
-                            <option value="" selected="@(wz.PlaylistId == null)">— Aucune liste de lecture —</option>
-                            @foreach (var p in playlists) { <option value="@p.Id" selected="@(p.Id == wz.PlaylistId)">@p.Name</option> }
-                        </select>
-                        <button type="button" class="btn ghost sm" @onclick="() => AskPublish(inW.Select(x => x.Id).ToList())"><Ico Name="upload" Size="14" /> Publier le mur</button>
-                        <button type="button" class="btn ghost sm" @onclick="() => wallEdit = wz.Id"><Ico Name="grid" Size="14" /> Réorganiser…</button>
-                        @if (dissolveFor == wz.Id)
+                    <div class="kebab-backdrop" @onclick="CloseMenu"></div>
+                    <div class="kebab-menu dd-menu" role="menu">
+                        <button type="button" role="menuitem" @onclick="() => { CloseMenu(); AskPublish(selectedIds.ToList()); }"><Ico Name="upload" Size="16" /> Publier</button>
+                        @if (zones.Count > 1) { <button type="button" role="menuitem" @onclick="() => { CloseMenu(); OpenZoneMove(); }"><Ico Name="box" Size="16" /> Changer de zone…</button> }
+                        @if (CanAssemble) { <button type="button" role="menuitem" @onclick="() => { CloseMenu(); OpenWall(); }"><Ico Name="grid" Size="16" /> Assembler en mur…</button> }
+                        @if (otherAreas.Count > 0) { <button type="button" role="menuitem" @onclick="() => { CloseMenu(); OpenBulkAreaMove(); }"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
+                        <button type="button" role="menuitem" class="danger" @onclick="() => { CloseMenu(); deleting = screens.Where(s => selectedIds.Contains(s.Id)).ToList(); }"><Ico Name="trash" Size="16" /> Supprimer</button>
+                        <hr />
+                        <button type="button" role="menuitem" @onclick="() => { CloseMenu(); selectedIds.Clear(); pickOrder.Clear(); }"><Ico Name="x" Size="16" /> Tout désélectionner</button>
+                    </div>
+                }
+            </div>
+        }
+        @if (area != null && ShowZones)
+        {
+            <div class="kebab dd">
+                <button type="button" class="dd-btn @(zoneFilter != null ? "act" : "")" aria-haspopup="menu" aria-expanded="@(openMenu == "zone" ? "true" : "false")" @onclick='() => Toggle("zone")'>
+                    <span class="k">Zone</span>
+                    @if (OpenZone is { } zsel) { <Ico Name="@ZoneIcon(zsel)" Size="14" /> <b>@zsel.Name</b> }
+                    else { <b>Toutes</b> }
+                    <small class="c">@InZone.Count</small> <Ico Name="chevron" Size="14" />
+                </button>
+                @if (openMenu == "zone")
+                {
+                    <div class="kebab-backdrop" @onclick="CloseMenu"></div>
+                    <div class="kebab-menu dd-menu" role="menu">
+                        <button type="button" role="menuitemradio" aria-checked="@(zoneFilter == null ? "true" : "false")" class="@(zoneFilter == null ? "sel" : "")" @onclick="() => PickZone(null)">Toutes les zones <small class="n">@screens.Count</small></button>
+                        <hr />
+                        @foreach (var z in zones)
                         {
-                            <span class="confirm-line">Dissoudre le mur ? Ses écrans retournent dans « @(zones.FirstOrDefault(z => z.IsDefault)?.Name ?? Zone.DefaultName) » et gardent la liste.</span>
-                            <button type="button" class="btn danger sm" @onclick="() => Dissolve(wz)">Dissoudre</button>
-                            <button type="button" class="btn ghost sm" @onclick="() => dissolveFor = null">Annuler</button>
+                            var zone = z;
+                            var on = zoneFilter == zone.Id.ToString();
+                            <button type="button" role="menuitemradio" aria-checked="@(on ? "true" : "false")" class="@(on ? "sel" : "")" @onclick="() => PickZone(zone)"><Ico Name="@ZoneIcon(zone)" Size="16" /> @zone.Name <small class="n">@screens.Count(x => ZoneOf(x)?.Id == zone.Id)</small></button>
                         }
-                        else
+                        @if (manageZones)
                         {
-                            <button type="button" class="btn ghost sm" @onclick="() => dissolveFor = wz.Id">Dissoudre…</button>
+                            <hr />
+                            <button type="button" role="menuitem" @onclick="() => { CloseMenu(); showZones = true; }"><Ico Name="gear" Size="16" /> Gérer les zones…</button>
                         }
                     </div>
                 }
             </div>
-            <div>
-                <div class="wall-prev" style="grid-template-columns:repeat(@wz.WallCols, 1fr)">
-                    @foreach (var cell in WallCells(wz, inW))
+        }
+        <div class="kebab dd">
+            <button type="button" class="dd-btn @(statusFilter != "" ? "act" : "")" aria-haspopup="menu" aria-expanded="@(openMenu == "state" ? "true" : "false")" @onclick='() => Toggle("state")'>
+                <span class="k">État</span> <b>@StateLabel(statusFilter)</b> <Ico Name="chevron" Size="14" />
+            </button>
+            @if (openMenu == "state")
+            {
+                <div class="kebab-backdrop" @onclick="CloseMenu"></div>
+                <div class="kebab-menu dd-menu" role="menu">
+                    @foreach (var (key, count) in new[] { ("", InZone.Count), ("online", InZone.Count(s => !IsOffline(s))), ("offline", InZone.Count(IsOffline)), ("pending", InZone.Count(s => Helpers.HasPending(s, playlists))) })
                     {
-                        var c = cell;
-                        <button type="button" class="@c.Css" disabled="@(c.Screen == null)" title="@c.Title" @onclick="() => { if (c.Screen != null) Edit(c.Screen); }">@c.Number</button>
+                        var k = key;
+                        <button type="button" role="menuitemradio" aria-checked="@(statusFilter == k ? "true" : "false")" class="@(statusFilter == k ? "sel" : "")" @onclick="() => { statusFilter = k; CloseMenu(); }">@StateLabel(k) <small class="n">@count</small></button>
                     }
                 </div>
-                <small class="muted">Un clic sur une case ouvre l'écran</small>
-            </div>
-        </div>
-    }
-    @if (OpenZone is { IsWall: false } oz)
-    {
-        var inZ = InZone;
-        <div class="zone-strip" role="region" aria-label="Zone @oz.Name">
-            <div class="t">
-                <b>Zone « @oz.Name » <span class="badge neutre" style="margin-left:6px">Zone libre</span></b>
-                <small>@(oz.Sync ? "Les écrans sur la même liste de lecture jouent le même contenu en même temps." : "Les écrans de la zone sont indépendants.")</small>
-            </div>
-            <div class="grow"></div>
-            @if (oz.Sync)
-            {
-                <div class="t"><small>Synchronisés</small><b>@inZ.Count(x => synced.Contains(x.Id)) sur @inZ.Count écran@(inZ.Count > 1 ? "s" : "")</b></div>
             }
-            @if (manageZones)
-            {
-                <span class="zs-sync"><small class="muted">Synchro</small>
-                    <button type="button" class="switch @(oz.Sync ? "on" : "")" role="switch" aria-checked="@(oz.Sync ? "true" : "false")" aria-label="Lecture synchronisée de la zone @oz.Name" @onclick="() => ToggleSync(oz)"><span></span></button>
-                </span>
-            }
-        </div>
-    }
-}
-@if (screens.Count > 0)
-{
-    <div class="lib-tools" role="region" aria-label="Filtres et sélection" aria-live="polite">
-        <label class="lib-all">
-            <input type="checkbox" class="sc-check" checked="@(Shown.Count > 0 && Shown.All(s => selectedIds.Contains(s.Id)))" @onchange="ToggleAll" aria-label="Tout sélectionner" />
-            @if (selectedIds.Count > 0) { <span>@selectedIds.Count sélectionné@(selectedIds.Count > 1 ? "s" : "")</span> }
-        </label>
-        @if (selectedIds.Count > 0)
-        {
-            @if (zones.Count > 0) { <button type="button" class="btn ghost sm" @onclick="OpenZoneMove"><Ico Name="box" Size="14" /> Changer de zone…</button> }
-            @if (CanAssemble) { <button type="button" class="btn ghost sm wall-btn" @onclick="OpenWall"><Ico Name="grid" Size="14" /> Assembler en mur…</button> }
-            @if (otherAreas.Count > 0) { <button class="btn ghost sm" @onclick="OpenBulkAreaMove"><Ico Name="move" Size="14" /> Déplacer vers une autre aire…</button> }
-            <button class="btn danger sm" @onclick="() => deleting = screens.Where(s => selectedIds.Contains(s.Id)).ToList()"><Ico Name="trash" Size="14" /> Supprimer</button>
-        }
-        <div class="seg" role="tablist" aria-label="État des écrans">
-            <button type="button" class="@(statusFilter == "" ? "on" : "")" @onclick='() => statusFilter = ""'>Tous <small>@InZone.Count</small></button>
-            <button type="button" class="@(statusFilter == "online" ? "on" : "")" @onclick='() => statusFilter = "online"'>En ligne <small>@InZone.Count(s => !IsOffline(s))</small></button>
-            <button type="button" class="@(statusFilter == "offline" ? "on" : "")" @onclick='() => statusFilter = "offline"'>Hors ligne <small>@InZone.Count(IsOffline)</small></button>
-            <button type="button" class="@(statusFilter == "pending" ? "on" : "")" @onclick='() => statusFilter = "pending"'>À publier <small>@InZone.Count(s => Helpers.HasPending(s, playlists))</small></button>
         </div>
         <div class="search-box grow" style="margin:0">
             <Ico Name="search" Size="16" />
             <input placeholder="Rechercher des écrans" aria-label="Rechercher des écrans" @bind="search" @bind:event="oninput" />
         </div>
-        <select @bind="sort" aria-label="Trier">
-            <option value="name">Nom</option>
-            <option value="status">État</option>
-            <option value="pending">À publier d'abord</option>
-        </select>
+        <div class="kebab dd">
+            <button type="button" class="dd-btn @(sort != "name" ? "act" : "")" aria-haspopup="menu" aria-expanded="@(openMenu == "sort" ? "true" : "false")" @onclick='() => Toggle("sort")'>
+                <span class="k">Tri</span> <b>@SortLabel(sort)</b> <Ico Name="chevron" Size="14" />
+            </button>
+            @if (openMenu == "sort")
+            {
+                <div class="kebab-backdrop" @onclick="CloseMenu"></div>
+                <div class="kebab-menu dd-menu right" role="menu">
+                    @foreach (var key in new[] { "name", "status", "pending" })
+                    {
+                        var k = key;
+                        <button type="button" role="menuitemradio" aria-checked="@(sort == k ? "true" : "false")" class="@(sort == k ? "sel" : "")" @onclick="() => { sort = k; CloseMenu(); }">@SortLabel(k)</button>
+                    }
+                </div>
+            }
+        </div>
         <ViewToggle StorageKey="screens" @bind-Value="view" />
     </div>
+
+    @* Zone choisie : une ligne d'information et un menu d'actions *@
+    @if (OpenZone is { IsWall: true } wz)
+    {
+        var inW = InZone;
+        var online = inW.Count(x => !IsOffline(x));
+        var complete = online == wz.WallCols * wz.WallRows;
+        var wpl = playlists.FirstOrDefault(p => p.Id == wz.PlaylistId);
+        <div class="zline" role="region" aria-label="Mur @wz.Name">
+            <div class="wall-prev mini" style="grid-template-columns:repeat(@wz.WallCols, 1fr)">
+                @foreach (var cell in WallCells(wz, inW))
+                {
+                    var c = cell;
+                    <button type="button" class="@c.Css" disabled="@(c.Screen == null)" title="@c.Title" @onclick="() => { if (c.Screen != null) Edit(c.Screen); }">@c.Number</button>
+                }
+            </div>
+            <span><b>Mur d'écrans @wz.WallCols × @wz.WallRows</b> · liste « @(wpl?.Name ?? "aucune") »</span>
+            <span class="zstate @(complete ? "ok" : "ko")">@(complete ? $"{online} sur {online} en ligne" : "Mur incomplet")</span>
+            <div class="grow"></div>
+            @if (dissolveFor == wz.Id)
+            {
+                <span class="confirm-line">Dissoudre le mur ? Ses écrans retournent dans « @(zones.FirstOrDefault(z => z.IsDefault)?.Name ?? Zone.DefaultName) » et gardent la liste.</span>
+                <button type="button" class="btn danger sm" @onclick="() => Dissolve(wz)">Dissoudre</button>
+                <button type="button" class="btn ghost sm" @onclick="() => dissolveFor = null">Annuler</button>
+            }
+            else if (manageZones)
+            {
+                <div class="kebab dd">
+                    <button type="button" class="dd-btn" aria-haspopup="menu" aria-expanded="@(openMenu == "wall" ? "true" : "false")" @onclick='() => Toggle("wall")'>Actions du mur <Ico Name="chevron" Size="14" /></button>
+                    @if (openMenu == "wall")
+                    {
+                        <div class="kebab-backdrop" @onclick="CloseMenu"></div>
+                        <div class="kebab-menu dd-menu right" role="menu">
+                            <span class="dd-h">Liste de lecture du mur</span>
+                            @foreach (var p in playlists)
+                            {
+                                var pl = p;
+                                <button type="button" role="menuitemradio" aria-checked="@(pl.Id == wz.PlaylistId ? "true" : "false")" class="@(pl.Id == wz.PlaylistId ? "sel" : "")" @onclick="() => { CloseMenu(); SetWallPlaylist(wz, pl.Id); }">@pl.Name</button>
+                            }
+                            @if (playlists.Count == 0) { <span class="kebab-note">Aucune liste de lecture dans cette aire.</span> }
+                            <hr />
+                            <button type="button" role="menuitem" @onclick="() => { CloseMenu(); AskPublish(inW.Select(x => x.Id).ToList()); }"><Ico Name="upload" Size="16" /> Publier le mur</button>
+                            <button type="button" role="menuitem" @onclick="() => { CloseMenu(); wallEdit = wz.Id; }"><Ico Name="grid" Size="16" /> Réorganiser…</button>
+                            <button type="button" role="menuitem" @onclick="() => IdentifyWall(wz, inW)"><Ico Name="monitor" Size="16" /> Identifier sur les écrans</button>
+                            <hr />
+                            <button type="button" role="menuitem" class="danger" @onclick="() => { CloseMenu(); dissolveFor = wz.Id; }"><Ico Name="trash" Size="16" /> Dissoudre le mur…</button>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+    @if (OpenZone is { IsWall: false } oz)
+    {
+        var inZ = InZone;
+        <div class="zline" role="region" aria-label="Zone @oz.Name">
+            <span><b>@oz.Name</b> · zone libre</span>
+            @if (oz.Sync)
+            {
+                <span class="zstate sync"><Ico Name="link" Size="13" /> Lecture synchronisée · @inZ.Count(x => synced.Contains(x.Id)) sur @inZ.Count alignés</span>
+            }
+            <div class="grow"></div>
+            @if (manageZones)
+            {
+                <div class="kebab dd">
+                    <button type="button" class="dd-btn" aria-haspopup="menu" aria-expanded="@(openMenu == "zact" ? "true" : "false")" @onclick='() => Toggle("zact")'>Actions de la zone <Ico Name="chevron" Size="14" /></button>
+                    @if (openMenu == "zact")
+                    {
+                        <div class="kebab-backdrop" @onclick="CloseMenu"></div>
+                        <div class="kebab-menu dd-menu right" role="menu">
+                            <button type="button" role="menuitem" @onclick="async () => { CloseMenu(); await ToggleSync(oz); }"><Ico Name="link" Size="16" /> @(oz.Sync ? "Couper la synchronisation" : "Synchroniser la lecture")</button>
+                            <button type="button" role="menuitem" @onclick="() => { CloseMenu(); showZones = true; }"><Ico Name="gear" Size="16" /> Gérer les zones…</button>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
     @if (Shown.Count == 0) { <div class="empty"><div class="big">Aucun écran trouvé</div></div> }
 }
 
@@ -524,10 +596,31 @@ else if (wallEdit is { } wid)
             zoneFilter = last.Id.ToString();   // on ouvre le mur qui vient d'être créé
     }
 
-    private void ChangeWallPlaylist(Zone wall, ChangeEventArgs e)
+    // ---------- Barre de filtres : listes déroulantes ----------
+    private string? openMenu;   // sel | zone | state | sort | wall | zact
+    private void Toggle(string menu) => openMenu = openMenu == menu ? null : menu;
+    private void CloseMenu() => openMenu = null;
+
+    private void PickZone(Zone? z) { zoneFilter = z?.Id.ToString(); dissolveFor = null; CloseMenu(); }
+
+    private static string ZoneIcon(Zone z) => z.IsWall ? "grid" : z.Sync ? "link" : "box";
+
+    private static string StateLabel(string key) => key switch { "online" => "En ligne", "offline" => "Hors ligne", "pending" => "À publier", _ => "Tous" };
+    private static string SortLabel(string key) => key switch { "status" => "État", "pending" => "À publier d'abord", _ => "Nom" };
+
+    // Écrans affichés (zone ouverte) qui ont des modifications à publier : le bouton Publier n'apparaît que s'il y en a.
+    private List<Guid> PendingShown => InZone.Where(s => Helpers.HasPending(s, playlists)).Select(s => s.Id).ToList();
+
+    private async Task IdentifyWall(Zone wall, List<Screen> inWall)
+    {
+        CloseMenu();
+        await Notifier.Identify(inWall.OrderBy(s => s.WallPos ?? int.MaxValue).Select(s => s.Id).ToList());
+        Toast.Ok("Chaque écran du mur affiche son numéro pendant 5 secondes.");
+    }
+
+    private void SetWallPlaylist(Zone wall, Guid? pid)
     {
         if (area == null) return;
-        Guid? pid = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null;
         var aid = area.Id;
         var err = Store.Write(d => AreaOps.SetWallPlaylist(d, aid, wall.Id, pid));
         if (err != null) { Toast.Error(err); return; }

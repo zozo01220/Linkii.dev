@@ -81,12 +81,20 @@
                 <div class="card">
                     <h3>Compte administrateur</h3>
                     <p class="hint">@email</p>
-                    <label class="lbl">Mot de passe actuel</label>
-                    <input class="full" type="password" @bind="oldPwd" autocomplete="current-password" />
-                    <label class="lbl">Nouveau mot de passe <small>(8 caractères minimum)</small></label>
-                    <input class="full" type="password" @bind="newPwd" autocomplete="new-password" />
-                    <div style="margin-top:12px"><button class="btn ghost" @onclick="ChangePassword">Changer le mot de passe</button></div>
+                    @if (externalProvider != null)
+                    {
+                        <p class="sso-note"><ProviderLogo Provider="@externalProvider" Size="16" /> Connexion avec le bouton « Continuer avec @SignupSources.Label(externalProvider) » : pas de mot de passe Linkii.</p>
+                    }
+                    else
+                    {
+                        <label class="lbl">Mot de passe actuel</label>
+                        <input class="full" type="password" @bind="oldPwd" autocomplete="current-password" />
+                        <label class="lbl">Nouveau mot de passe <small>(8 caractères minimum)</small></label>
+                        <input class="full" type="password" @bind="newPwd" autocomplete="new-password" />
+                        <div style="margin-top:12px"><button class="btn ghost" @onclick="ChangePassword">Changer le mot de passe</button></div>
+                    }
                 </div>
+                <ConsentPrefs />
             </div>
         }
         break;
@@ -112,6 +120,7 @@
     private string name = "", timezone = "", email = "";
     private int duration, reloadHour;
     private string oldPwd = "", newPwd = "";
+    private string? externalProvider;   // compte Microsoft ou Google, sans mot de passe Linkii
     private ScreenSpec spec = new();
     private int areaCount, memberCount;
 
@@ -123,6 +132,8 @@
         name = t.Name; timezone = t.Timezone; duration = t.DefaultDurationSec; reloadHour = t.ReloadHour;
         if (Nav.Uri.Contains("saved=1")) Toast.Ok("Réglages enregistrés.");
         email = Ctx.Email;
+        var uid = Ctx.UserId;
+        externalProvider = Root.Read(d => d.Users.FirstOrDefault(u => u.Id == uid) is { HasPassword: false } u ? u.ExternalProvider : null);
         (areaCount, memberCount) = Store.Read(d => (d.Areas.Count, d.Users.Count(u => u.Role == Roles.ClientMember)));
         spec = ScreenSpec.From(t);
     }

@@ -41,7 +41,15 @@
     var t0 = Date.now();
     return fetch(path, opts).then(function (r) { setOnline(true); return r; }, function (e) { setOnline(false); throw e; }).then(function (r) {
       if (r.status === 401) { unpair(); throw new Error('401'); }
-      if (r.status === 403) { $('suspended').style.display = 'flex'; throw new Error('403'); }   // client ou revendeur suspendu
+      if (r.status === 403) {   // client ou revendeur suspendu, ou essai gratuit terminé
+        return r.json().catch(function () { return {}; }).then(function (d) {
+          var trial = d && d.reason === 'trial';
+          $('suspended-title').textContent = trial ? 'Essai terminé' : 'Service suspendu';
+          $('suspended-text').textContent = trial ? "L'essai gratuit de cet espace est terminé. Contactez votre administrateur." : 'Contactez votre administrateur.';
+          $('suspended').style.display = 'flex';
+          throw new Error('403');
+        });
+      }
       $('suspended').style.display = 'none';
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.text().then(function (t) {

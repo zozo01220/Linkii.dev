@@ -1,0 +1,52 @@
+@page "/login/verify/done"
+@layout AuthLayout
+@using System.Security.Claims
+@inject JsonStore Store
+
+@* Après le lien de confirmation (ou la création d'un espace avec Microsoft / Google) : espace prêt, essai gratuit.
+   Variantes : lien expiré, ou lien inconnu (déjà utilisé, remplacé par un envoi plus récent). *@
+<PageTitle>@(Host?.DisplayName ?? "Linkii") · @(State == null ? "Adresse confirmée" : "Lien de confirmation")</PageTitle>
+
+@if (State == "expired")
+{
+    <h1>Ce lien a expiré</h1>
+    <p class="lead">Les liens de confirmation sont valables @hours heures. Connectez-vous pour en recevoir un nouveau.</p>
+    <a class="btn block" href="/login/verify" data-enhance-nav="false">Recevoir un nouveau lien</a>
+}
+else if (State != null || client == null)
+{
+    <h1>Ce lien n'est plus valable</h1>
+    <p class="lead">Il a déjà été utilisé, ou remplacé par un envoi plus récent. Utilisez le dernier e-mail reçu, ou connectez-vous.</p>
+    <a class="btn block" href="/login" data-enhance-nav="false">Se connecter</a>
+}
+else
+{
+    <div class="auth-ico ok"><Ico Name="check" Size="26" /></div>
+    <h1>@(sso ? "Votre espace est prêt" : "Adresse confirmée")</h1>
+    <p class="lead">Votre espace <b>@client.Name</b> est prêt. Un e-mail de bienvenue vient de vous être envoyé.</p>
+    @if (client.TrialEndsUtc is { } end)
+    {
+        <div class="sso-who"><div class="grow"><b>Essai gratuit</b><small>@trialDays jours, jusqu'au @Signup.Day(client, end)</small></div><span class="pill ok">Validé</span></div>
+    }
+    <a class="btn block" href="/" data-enhance-nav="false">Accéder à mon espace</a>
+}
+
+@code {
+    [CascadingParameter] private HttpContext? Http { get; set; }
+    [SupplyParameterFromQuery(Name = "state")] private string? State { get; set; }
+
+    private Reseller? Host => Http?.Items["reseller"] as Reseller;
+    private Tenant? client;
+    private bool sso;
+    private int hours, trialDays;
+
+    protected override void OnInitialized()
+    {
+        var uid = Http?.User.GetGuid(ClaimTypes.NameIdentifier);
+        (client, sso, hours, trialDays) = Store.Read(d =>
+        {
+            var u = d.Users.FirstOrDefault(x => x.Id == uid && x.EmailVerifiedUtc != null);
+            return (d.Clients.FirstOrDefault(c => c.Id == u?.ClientId), u?.ExternalProvider != null, d.Platform.VerifyLinkHours, d.Platform.TrialDays);
+        });
+    }
+}

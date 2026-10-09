@@ -1,0 +1,47 @@
+@inject JsonStore Root
+@inject TenantContext Ctx
+@inject Toaster Toast
+
+@* E-mails de Linkii acceptés par la personne connectée (donnés à l'inscription) : modifiables à tout moment. *@
+<div class="card">
+    <h3>E-mails de Linkii</h3>
+    <p class="hint">Les e-mails liés à votre compte (confirmation, sécurité, fin d'essai) sont toujours envoyés.</p>
+    <div class="pref-row">
+        <span class="grow">Offres commerciales</span>
+        <button type="button" class="switch @(marketing ? "on" : "")" role="switch" aria-checked="@(marketing ? "true" : "false")" aria-label="Offres commerciales" disabled="@Ctx.IsImpersonating" @onclick="() => Set(m: !marketing)"><span></span></button>
+    </div>
+    <div class="pref-row">
+        <span class="grow">Nouveautés et astuces</span>
+        <button type="button" class="switch @(news ? "on" : "")" role="switch" aria-checked="@(news ? "true" : "false")" aria-label="Nouveautés et astuces" disabled="@Ctx.IsImpersonating" @onclick="() => Set(n: !news)"><span></span></button>
+    </div>
+    @if (termsVersion != null) { <small>Conditions générales acceptées (version @termsVersion) le @termsDate.</small> }
+</div>
+
+@code {
+    private bool marketing, news;
+    private string? termsVersion;
+    private string termsDate = "";
+
+    protected override void OnInitialized()
+    {
+        var uid = Ctx.UserId;
+        var u = Root.Read(d => d.Users.FirstOrDefault(x => x.Id == uid));
+        if (u == null) return;
+        (marketing, news, termsVersion) = (u.MarketingOptIn, u.NewsOptIn, u.TermsVersion);
+        termsDate = u.TermsAcceptedUtc?.ToLocalTime().ToString("d MMMM yyyy", Signup.Fr) ?? "";
+    }
+
+    private void Set(bool? m = null, bool? n = null)
+    {
+        if (Ctx.IsImpersonating) return;   // consentement personnel : jamais modifié par l'équipe Linkii ou un revendeur
+        var uid = Ctx.UserId;
+        var now = DateTime.UtcNow;
+        Root.Write(d =>
+        {
+            var u = d.Users.First(x => x.Id == uid);
+            if (m is { } mv) { u.MarketingOptIn = mv; u.MarketingOptInUtc = mv ? now : null; marketing = mv; }
+            if (n is { } nv) { u.NewsOptIn = nv; u.NewsOptInUtc = nv ? now : null; news = nv; }
+        });
+        Toast.Ok("Préférences enregistrées.");
+    }
+}

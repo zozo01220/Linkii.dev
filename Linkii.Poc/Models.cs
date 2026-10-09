@@ -12,6 +12,7 @@ public class Db
     public List<AccessLogEntry> AccessLog { get; set; } = new();
     public List<AppInstall> AppInstalls { get; set; } = new();   // apps du catalogue ajoutées par chaque client
     public List<Area> Areas { get; set; } = new();               // aires de gestion des clients
+    public PlatformSettings Platform { get; set; } = new();      // réglages communs à toutes les organisations (console › Réglages)
 
     /// <summary>Ancien format mono-client (avant le multi-tenant) : lu une fois pour migration, jamais réécrit.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
@@ -23,6 +24,44 @@ public interface IClientOwned { Guid ClientId { get; set; } }
 
 /// <summary>Donnée rangée dans une aire de gestion (écran, liste de lecture, média) : partagée par les membres de l'aire, invisible des autres aires.</summary>
 public interface IAreaOwned { Guid AreaId { get; set; } }
+
+/// <summary>Réglages de la plateforme, communs à toutes les organisations quel que soit leur revendeur (console Linkii › Réglages).</summary>
+public class PlatformSettings
+{
+    /// <summary>Durée de l'essai gratuit d'une organisation créée en libre-service, à partir de la validation de son adresse e-mail.</summary>
+    public int TrialDays { get; set; } = 7;
+    /// <summary>Validité du lien de confirmation de l'adresse e-mail.</summary>
+    public int VerifyLinkHours { get; set; } = 48;
+    /// <summary>Un compte jamais validé est supprimé après ce délai (libère une adresse mal saisie ou fausse).</summary>
+    public int PurgeUnverifiedDays { get; set; } = 7;
+
+    // Envoi d'e-mails (SMTP), commun à toutes les organisations. Vide : repli sur la configuration du serveur (Linkii:Smtp:*).
+    public string SmtpHost { get; set; } = "";
+    public int SmtpPort { get; set; } = 587;
+    public bool SmtpSsl { get; set; } = true;
+    public string SmtpUser { get; set; } = "";
+    public string SmtpPassword { get; set; } = "";   // chiffré (SecretBox), jamais réaffiché
+    public string SmtpFrom { get; set; } = "";       // adresse d'expédition
+}
+
+/// <summary>Comment une organisation a été créée : inscription libre (e-mail, Google, Microsoft), par un revendeur ou par l'équipe Linkii.</summary>
+public static class SignupSources
+{
+    public const string Email = "email";
+    public const string Google = "google";
+    public const string Microsoft = "microsoft";
+    public const string Reseller = "reseller";
+    public const string Console = "console";
+
+    public static readonly string[] All = { Email, Google, Microsoft, Reseller, Console };
+    public static bool IsSelfService(string? s) => s is Email or Google or Microsoft;
+
+    public static string Label(string? s) => s switch
+    {
+        Email => "E-mail", Google => "Google", Microsoft => "Microsoft",
+        Reseller => "Revendeur", Console => "Linkii", _ => "Non renseignée"
+    };
+}
 
 public static class Roles
 {
@@ -86,8 +125,33 @@ public class User
     /// <summary>Dernière aire ouverte, par organisation (l'équipe Linkii et les revendeurs visitent plusieurs organisations).</summary>
     public Dictionary<Guid, Guid> LastAreas { get; set; } = new();
     public DateTime? CreatedUtc { get; set; }
+
+    /// <summary>Adresse prouvée : lien de confirmation cliqué, connexion Microsoft ou Google, ou première connexion avec le mot de passe provisoire reçu par e-mail.</summary>
+    public DateTime? EmailVerifiedUtc { get; set; }
+    /// <summary>Inscription par e-mail en attente : empreinte du lien de confirmation en cours (le lien lui-même n'est jamais stocké).</summary>
+    public string? VerifyTokenHash { get; set; }
+    public DateTime? VerifyExpiresUtc { get; set; }
+    /// <summary>Envois du lien sur la dernière heure (renvoi limité).</summary>
+    public List<DateTime> VerifySends { get; set; } = new();
+
+    /// <summary>Compte créé avec « Continuer avec Microsoft / Google » : fournisseur et identifiant stable du compte chez lui (pas de mot de passe Linkii).</summary>
+    public string? ExternalProvider { get; set; }
+    public string? ExternalId { get; set; }
+
+    // Consentements donnés à l'inscription (modifiables ensuite dans Mon compte ou Réglages › Compte)
+    public string? TermsVersion { get; set; }
+    public DateTime? TermsAcceptedUtc { get; set; }
+    public bool MarketingOptIn { get; set; }        // démarches commerciales (offres)
+    public DateTime? MarketingOptInUtc { get; set; }
+    public bool NewsOptIn { get; set; }             // nouveautés et astuces
+    public DateTime? NewsOptInUtc { get; set; }
+
     public DateTime? LastLoginUtc { get; set; }
     public DateTime? LastActiveUtc { get; set; }   // dernière requête, mise à jour au plus une fois par heure : utilisateurs actifs sur 30 jours
+
+    /// <summary>Inscription par e-mail dont l'adresse n'est pas encore confirmée : seul l'écran « Vérifiez votre e-mail » est accessible.</summary>
+    public bool AwaitsVerification => EmailVerifiedUtc == null && VerifyTokenHash != null;
+    public bool HasPassword => PasswordHash.Length > 0;
 
     /// <summary>Invité qui ne s'est encore jamais connecté.</summary>
     public bool IsInvited => MustChangePassword && LastLoginUtc == null;
@@ -156,6 +220,19 @@ public class Tenant
     public Guid ResellerId { get; set; }
     public bool Suspended { get; set; }
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+
+    /// <summary>Voir <see cref="SignupSources"/> ; null pour une organisation créée avant le 9 octobre 2026.</summary>
+    public string? SignupSource { get; set; }
+    /// <summary>Fin de l'essai gratuit (validation + durée réglée dans la console). null : pas d'essai (créée par un revendeur ou Linkii, ou abonnée).</summary>
+    public DateTime? TrialEndsUtc { get; set; }
+    public DateTime? TrialReminderSentUtc { get; set; }   // rappel envoyé 2 jours avant la fin
+    public DateTime? TrialEndedNotifiedUtc { get; set; }  // écrans prévenus de la fin de l'essai
+
+    public bool TrialEnded(DateTime now) => TrialEndsUtc is { } end && end <= now;
+    public bool InTrial(DateTime now) => TrialEndsUtc is { } end && end > now;
+    /// <summary>Jours entamés restants : « 3 j » jusqu'à la dernière minute du troisième jour.</summary>
+    public int TrialDaysLeft(DateTime now) => TrialEndsUtc is { } end && end > now ? (int)Math.Ceiling((end - now).TotalDays) : 0;
+
     /// <summary>Apps « activées par défaut » déjà activées une fois pour ce client : s'il les désactive ensuite, elles ne se réactivent pas.</summary>
     public List<string> DefaultAppsApplied { get; set; } = new();
 
@@ -174,6 +251,8 @@ public class Tenant
     public string CanvaRefreshToken { get; set; } = "";
     public string CanvaUser { get; set; } = "";
     public DateTime? CanvaConnectedUtc { get; set; }
+    /// <summary>Accès retiré par Canva (jeton refusé) : le compte reste affiché « à reconnecter » dans Comptes connectés.</summary>
+    public DateTime? CanvaLostUtc { get; set; }
 
     // Compte Microsoft connecté par l'organisation (« Se connecter avec Microsoft », lecture seule), partagé par Microsoft 365 (agendas) et
     // OneDrive / SharePoint. MsScopes : accès accordés (noms courts Graph). Jeton de renouvellement chiffré (SecretBox).
@@ -182,6 +261,8 @@ public class Tenant
     public string MsScopes { get; set; } = "";
     public string MsUser { get; set; } = "";
     public DateTime? MsConnectedUtc { get; set; }
+    /// <summary>Accès retiré par Microsoft (jeton refusé) : le compte reste affiché « à reconnecter », avec ses accès d'avant.</summary>
+    public DateTime? MsLostUtc { get; set; }
 
     // Calendriers partagés (Intégrations) : une connexion par source, puis les calendriers proposés dans les listes de lecture.
     public List<CalendarAccount> CalendarAccounts { get; set; } = new();
@@ -197,6 +278,8 @@ public class Tenant
     public string GoogleScopes { get; set; } = "";
     public string GoogleUser { get; set; } = "";
     public DateTime? GoogleConnectedUtc { get; set; }
+    /// <summary>Accès retiré par Google (jeton refusé) : le compte reste affiché « à reconnecter », avec ses accès d'avant.</summary>
+    public DateTime? GoogleLostUtc { get; set; }
 
     /// <summary>Ancien nom (connexion Google réservée à Drive, 8 octobre 2026) : repris dans GoogleRefreshToken au démarrage, jamais réécrit.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]

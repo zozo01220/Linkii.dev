@@ -1,0 +1,115 @@
+@page "/login/verify"
+@layout AuthLayout
+@using System.Security.Claims
+@inject JsonStore Store
+@inject NavigationManager Nav
+@inject Mailer Mail
+@inject ILogger<VerifyEmail> Log
+
+@* Inscription par e-mail : seule page accessible tant que l'adresse n'est pas confirmée. Renvoyer le lien, corriger une faute de frappe,
+   ou fermer (déconnexion). Sous /login : rendu statique. *@
+<PageTitle>@(Host?.DisplayName ?? "Linkii") · Vérifiez votre e-mail</PageTitle>
+
+<form method="post" action="/logout" class="auth-close"><button type="submit" class="modal-x" aria-label="Fermer" title="Fermer"><Ico Name="x" Size="20" /></button></form>
+
+<div class="auth-ico"><Ico Name="mail" Size="26" /></div>
+<h1>Vérifiez votre e-mail</h1>
+<p class="lead" style="margin-bottom:10px">Pour activer votre espace, cliquez sur le lien que nous venons d'envoyer à :</p>
+
+@if (editing)
+{
+    <EditForm Model="Change" FormName="verify-email" OnSubmit="DoChange" method="post" class="addr-edit">
+        <InputText @bind-Value="Change!.Email" type="email" autocomplete="email" aria-label="Adresse e-mail" />
+        <button type="submit" class="btn">Envoyer</button>
+    </EditForm>
+    <p class="auth-alt" style="margin:0 0 12px;text-align:left"><a href="/login/verify">Annuler</a></p>
+}
+else
+{
+    <div class="addr"><span>@email</span><a class="btn ghost sm" href="/login/verify?edit=1">Corriger</a></div>
+}
+
+@if (notice != null) { <div class="ok-msg">@notice</div> }
+@if (error != null) { <div class="err">@error</div> }
+
+<p class="hint-text">Le lien est valable @hours heures. Pensez à regarder dans les courriers indésirables.</p>
+
+<EditForm Model="Resend" FormName="verify-resend" OnSubmit="DoResend" method="post" class="resend-row">
+    <button type="submit" class="btn ghost" disabled="@(wait != null)" data-countdown="@((int)Math.Ceiling(wait?.TotalSeconds ?? 0))">Renvoyer l'e-mail</button>
+    @if (wait != null) { <span class="muted" data-countdown-text>Nouvel envoi possible dans @Signup.Wait(wait.Value)</span> }
+</EditForm>
+
+<ul class="verify-steps">
+    <li class="done"><i>✓</i>Espace créé</li>
+    <li class="cur"><i>2</i>Adresse e-mail à confirmer</li>
+    <li><i>3</i>Essai gratuit de @trialDays jours, dès la confirmation</li>
+</ul>
+
+@code {
+    [CascadingParameter] private HttpContext? Http { get; set; }
+    [SupplyParameterFromForm(FormName = "verify-email")] private ChangeModel? Change { get; set; }
+    [SupplyParameterFromForm(FormName = "verify-resend")] private ResendModel? Resend { get; set; }
+    [SupplyParameterFromQuery(Name = "edit")] private string? Edit { get; set; }
+    [SupplyParameterFromQuery(Name = "mail")] private string? MailQuery { get; set; }
+
+    private Reseller? Host => Http?.Items["reseller"] as Reseller;
+    private Guid? uid;
+    private string email = "", org = "";
+    private string? error, notice;
+    private bool editing;
+    private int hours, trialDays;
+    private TimeSpan? wait;
+
+    public class ChangeModel { public string Email { get; set; } = ""; }
+    public class ResendModel { }
+
+    protected override void OnInitialized()
+    {
+        Resend ??= new();
+        uid = Http?.User.GetGuid(ClaimTypes.NameIdentifier);
+        var state = Store.Read(d => d.Users.FirstOrDefault(u => u.Id == uid) is { } u
+            ? (u.AwaitsVerification, u.Email, d.Clients.FirstOrDefault(c => c.Id == u.ClientId)?.Name ?? "", Signup.ResendWait(u, DateTime.UtcNow), d.Platform.VerifyLinkHours, d.Platform.TrialDays)
+            : (false, "", "", null, 0, 0));
+        if (!state.Item1) { Nav.NavigateTo(uid == null ? "/login" : "/", forceLoad: true); return; }   // déjà confirmée (ou pas connecté)
+        (_, email, org, wait, hours, trialDays) = state;
+        editing = Edit != null;
+        Change ??= new() { Email = email };
+        if (MailQuery == "failed") error = "L'e-mail n'a pas pu être envoyé. Vérifiez l'adresse ou réessayez dans un instant.";
+    }
+
+    private async Task DoChange()
+    {
+        var now = DateTime.UtcNow;
+        var (token, err) = Store.Write(d => d.Users.FirstOrDefault(u => u.Id == uid) is { } u ? Signup.ChangeEmail(d, u, Change!.Email, now) : (null, "Compte introuvable."));
+        if (token == null) { error = err; editing = true; return; }
+        email = Change!.Email.Trim().ToLowerInvariant();
+        editing = false;
+        await Send(token, "Adresse corrigée. Un nouveau lien vient d'être envoyé.");
+        // l'adresse fait partie du cookie : il est refait
+        await SessionCookie.SignIn(Http!, Store, uid!.Value);
+    }
+
+    private async Task DoResend()
+    {
+        var now = DateTime.UtcNow;
+        var (token, w) = Store.Write(d =>
+        {
+            var u = d.Users.FirstOrDefault(x => x.Id == uid);
+            if (u == null || !u.AwaitsVerification) return ((string?)null, (TimeSpan?)null);
+            if (Signup.ResendWait(u, now) is { } left) return (null, left);
+            return (Signup.NewToken(u, d.Platform.VerifyLinkHours, now), null);
+        });
+        if (token == null) { if (w != null) error = $"Patientez {Signup.Wait(w.Value)} avant un nouvel envoi."; wait = w; return; }
+        await Send(token, "Nouveau lien envoyé. L'ancien ne fonctionne plus.");
+    }
+
+    private async Task Send(string token, string ok)
+    {
+        var link = $"{Http!.Request.Scheme}://{Http.Request.Host}/login/verify/confirm?t={Uri.EscapeDataString(token)}";
+        var name = Store.Read(d => d.Users.FirstOrDefault(u => u.Id == uid)?.Name ?? "");
+        var err = await Mail.SendVerification(Host!, link, name, email, org, hours);
+        if (err != null) { Log.LogWarning("Lien de confirmation non envoyé à {Email} : {Error}", email, err); error = "L'e-mail n'a pas pu être envoyé. Réessayez dans un instant."; }
+        else notice = ok;
+        wait = TimeSpan.FromMinutes(1);
+    }
+}

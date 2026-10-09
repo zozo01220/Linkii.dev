@@ -1,0 +1,115 @@
+@page "/admin/settings"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "PlatformAdmin")]
+@inject JsonStore Root
+@inject Toaster Toast
+@inject SecretBox Box
+@inject Mailer Mail
+
+<div class="page-head">
+    <div>
+        <h1>Réglages de la plateforme</h1>
+        <p class="sub">Paramètres communs à toutes les organisations, quel que soit leur revendeur.</p>
+    </div>
+    <button class="btn" @onclick="Save">Enregistrer</button>
+</div>
+
+<div class="settings-grid">
+    <div class="card">
+        <h3>Essai gratuit</h3>
+        <p class="hint">Proposé à chaque organisation créée en libre-service (e-mail, Microsoft ou Google). Il commence à la validation de l'adresse e-mail.
+            Une modification s'applique aux nouveaux comptes : les essais en cours gardent leur date de fin (prolongation au cas par cas dans Clients et accès).</p>
+        <label class="lbl">Durée de l'essai</label>
+        <div class="row" style="gap:8px"><input type="number" min="1" max="365" class="mono" style="width:100px" @bind="trialDays" /><span class="muted">jours</span></div>
+        <p class="hint" style="margin-top:12px">Un rappel part 2 jours avant la fin. À la fin, les écrans affichent « Essai terminé » ; le back-office reste accessible.</p>
+    </div>
+
+    <div class="card">
+        <h3>Confirmation de l'adresse e-mail</h3>
+        <p class="hint">Inscription par e-mail : le compte reste « à valider » tant que le lien envoyé n'a pas été cliqué.</p>
+        <label class="lbl">Validité du lien de confirmation</label>
+        <div class="row" style="gap:8px"><input type="number" min="1" max="720" class="mono" style="width:100px" @bind="linkHours" /><span class="muted">heures</span></div>
+        <label class="lbl">Suppression des comptes jamais validés</label>
+        <div class="row" style="gap:8px"><input type="number" min="1" max="365" class="mono" style="width:100px" @bind="purgeDays" /><span class="muted">jours après l'inscription</span></div>
+        <small>Libère les adresses fausses ou mal saisies.</small>
+    </div>
+
+    <div class="card">
+        <h3>Envoi d'e-mails (SMTP)</h3>
+        <p class="hint">Un seul serveur d'envoi pour toute la plateforme : confirmations d'adresse, mots de passe provisoires, invitations et rappels de tous les administrateurs d'organisation.
+            @(Mail.Configured ? "" : "Aucun e-mail ne part tant que ce n'est pas renseigné.")</p>
+        <label class="lbl">Serveur et port</label>
+        <div class="row" style="gap:8px"><input class="full" @bind="smtpHost" placeholder="smtp.exemple.ch" autocomplete="off" /><input type="number" min="1" max="65535" class="mono" style="width:90px" @bind="smtpPort" aria-label="Port" /></div>
+        <label class="lbl"><input type="checkbox" @bind="smtpSsl" /> Connexion chiffrée (SSL/TLS)</label>
+        <label class="lbl">Identifiant</label>
+        <input class="full" @bind="smtpUser" autocomplete="off" />
+        <label class="lbl">Mot de passe</label>
+        <input class="full" type="password" @bind="smtpPassword" autocomplete="new-password" placeholder="@(hasPassword ? "Enregistré : laisser vide pour le conserver" : "")" />
+        <label class="lbl">Adresse d'expédition</label>
+        <input class="full" type="email" @bind="smtpFrom" placeholder="no-reply@exemple.ch" autocomplete="off" />
+        <label class="lbl">Envoyer un e-mail de test à</label>
+        <div class="row" style="gap:8px">
+            <input class="full" type="email" @bind="testTo" placeholder="vous@organisation.ch" autocomplete="off" />
+            <button type="button" class="btn ghost" @onclick="SendTest" disabled="@sending">Enregistrer et tester</button>
+        </div>
+        <small>Indiquez une vraie adresse e-mail (celle de votre compte plateforme n'est peut-être pas une boîte réelle). Sans serveur renseigné ici, la configuration du serveur (Linkii:Smtp) est utilisée.</small>
+    </div>
+
+    <div class="card">
+        <h3>Conditions générales</h3>
+        <p class="hint">Texte affiché dans une fenêtre sur la page de création d'un espace. Version acceptée et date enregistrées pour chaque administrateur.</p>
+        <ul class="opt-list">
+            <li><Ico Name="lock" Size="16" /> <span class="grow">Version @Terms.Version, publiée le @Terms.PublishedUtc.ToString("d MMMM yyyy", Signup.Fr) · acceptée par @accepted compte@(accepted > 1 ? "s" : "")</span><button type="button" class="linkish" data-open-dialog="terms-dialog">Aperçu</button></li>
+        </ul>
+    </div>
+</div>
+
+<TermsDialog Accept="false" />
+
+@code {
+    private int trialDays, linkHours, purgeDays, accepted, smtpPort = 587;
+    private string smtpHost = "", smtpUser = "", smtpPassword = "", smtpFrom = "";
+    private bool smtpSsl = true, hasPassword, sending;
+    private string testTo = "";
+
+    protected override void OnInitialized()
+    {
+        (trialDays, linkHours, purgeDays, accepted) = Root.Read(d => (d.Platform.TrialDays, d.Platform.VerifyLinkHours, d.Platform.PurgeUnverifiedDays,
+            d.Users.Count(u => u.TermsVersion == Terms.Version)));
+        var p = Root.Read(d => d.Platform);
+        (smtpHost, smtpPort, smtpSsl, smtpUser, smtpFrom, hasPassword) = (p.SmtpHost, p.SmtpPort > 0 ? p.SmtpPort : 587, p.SmtpSsl, p.SmtpUser, p.SmtpFrom, p.SmtpPassword != "");
+    }
+
+    private void Save() => SaveCore(true);
+
+    private bool SaveCore(bool toast)
+    {
+        if (trialDays is < 1 or > 365) { Toast.Error("La durée de l'essai doit être comprise entre 1 et 365 jours."); return false; }
+        if (linkHours is < 1 or > 720) { Toast.Error("La validité du lien doit être comprise entre 1 et 720 heures."); return false; }
+        if (purgeDays is < 1 or > 365) { Toast.Error("Le délai de suppression doit être compris entre 1 et 365 jours."); return false; }
+        if (smtpPort is < 1 or > 65535) { Toast.Error("Le port du serveur d'e-mails doit être compris entre 1 et 65535."); return false; }
+        if (smtpHost.Trim() != "" && !smtpFrom.Contains('@') && !smtpUser.Contains('@')) { Toast.Error("Indiquez l'adresse d'expédition des e-mails."); return false; }
+        var encrypted = smtpPassword == "" ? null : Box.Protect(smtpPassword);
+        Root.Write(d =>
+        {
+            var p = d.Platform;
+            p.TrialDays = trialDays; p.VerifyLinkHours = linkHours; p.PurgeUnverifiedDays = purgeDays;
+            p.SmtpHost = smtpHost.Trim(); p.SmtpPort = smtpPort; p.SmtpSsl = smtpSsl; p.SmtpUser = smtpUser.Trim(); p.SmtpFrom = smtpFrom.Trim();
+            if (p.SmtpHost == "") p.SmtpPassword = ""; else if (encrypted != null) p.SmtpPassword = encrypted;
+            hasPassword = p.SmtpPassword != "";
+        });
+        smtpPassword = "";
+        if (toast) Toast.Ok("Réglages de la plateforme enregistrés.");
+        return true;
+    }
+
+    private async Task SendTest()
+    {
+        if (!SaveCore(false)) return;
+        var email = testTo.Trim();
+        if (!System.Net.Mail.MailAddress.TryCreate(email, out _)) { Toast.Error("Indiquez l'adresse qui doit recevoir l'e-mail de test."); return; }
+        sending = true; StateHasChanged();
+        var err = await Mail.Send(email, "Test d'envoi Linkii", "<p>Cet e-mail confirme que l'envoi depuis Linkii fonctionne.</p>", "Cet e-mail confirme que l'envoi depuis Linkii fonctionne.");
+        sending = false;
+        if (err == null) Toast.Ok($"Réglages enregistrés. E-mail de test envoyé à {email}."); else Toast.Error($"Réglages enregistrés, mais l'envoi a échoué : {err}.");
+    }
+}

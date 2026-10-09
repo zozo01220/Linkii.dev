@@ -11,108 +11,294 @@
 <div class="page-head">
     <div>
         <h1>Intégrations</h1>
-        <p class="sub">Les sources de contenus proposées dans vos listes de lecture. Leur paramétrage se fait dans la liste, après les avoir ajoutées.</p>
+        <p class="sub">Les sources de contenus proposées dans vos listes de lecture, et les comptes qui leur donnent accès. Le paramétrage des contenus se fait dans la liste, après les avoir ajoutés.</p>
     </div>
+    @if (Addable.Any())
+    {
+        <div class="kebab add-menu">
+            <button class="btn" aria-haspopup="menu" aria-expanded="@(addMenu ? "true" : "false")" @onclick="() => addMenu = !addMenu"><Ico Name="plus" Size="16" /> Connecter un compte <Ico Name="chevron" Size="14" /></button>
+            @if (addMenu)
+            {
+                <div class="kebab-backdrop" @onclick="() => addMenu = false"></div>
+                <div class="kebab-menu" role="menu">
+                    @foreach (var k in Addable)
+                    {
+                        var kind = k;
+                        var ready = Available(kind.Id);
+                        @if (kind.Id == ConnectedAccounts.Canva && ready)
+                        {
+                            <a role="menuitem" href="@ConnectedAccounts.ConnectUrl(kind.Id)" target="_top"><AccountLogo Kind="@kind.Id" Size="20" /><span><b>@kind.Name</b><small>@kind.Summary</small></span></a>
+                        }
+                        else
+                        {
+                            <button type="button" role="menuitem" disabled="@(!ready)" @onclick="() => StartConnect(kind.Id)"><AccountLogo Kind="@kind.Id" Size="20" /><span><b>@kind.Name</b><small>@(ready ? kind.Summary : "Pas encore disponible sur cette plateforme")</small></span></button>
+                        }
+                    }
+                </div>
+            }
+        </div>
+    }
 </div>
 
-<div class="lib-tools">
-    <div class="search-box grow" style="margin:0">
-        <Ico Name="search" Size="16" />
-        <input placeholder="Rechercher une intégration" aria-label="Rechercher une intégration" @bind="search" @bind:event="oninput" />
-    </div>
-    <select @bind="filter" aria-label="Filtrer les intégrations">
-        <option value="">Toutes</option>
-        <option value="on">Actives</option>
-        <option value="off">Inactives</option>
-    </select>
-    <ViewToggle StorageKey="integrations" @bind-Value="view" />
-</div>
+<nav class="tabs" role="tablist" aria-label="Intégrations et comptes connectés">
+    <button type="button" role="tab" class="@(accountsTab ? "" : "on")" aria-selected="@(accountsTab ? "false" : "true")" @onclick="() => accountsTab = false">Intégrations</button>
+    <button type="button" role="tab" class="@(accountsTab ? "on" : "")" aria-selected="@(accountsTab ? "true" : "false")" @onclick="() => accountsTab = true">
+        Comptes connectés <span class="cat-count">@accounts.Count</span>
+        @if (accounts.Any(a => AccState(a).Css == "hors-ligne")) { <span class="tab-alert" title="Un compte doit être reconnecté"><span class="sr-only">Un compte doit être reconnecté</span></span> }
+    </button>
+</nav>
 
-@if (Groups.Count == 0)
+@if (!accountsTab)
 {
-    <div class="card empty"><div class="big">Aucune intégration trouvée</div></div>
+    <div class="lib-tools">
+        <div class="search-box grow" style="margin:0">
+            <Ico Name="search" Size="16" />
+            <input placeholder="Rechercher une intégration" aria-label="Rechercher une intégration" @bind="search" @bind:event="oninput" />
+        </div>
+        <select @bind="filter" aria-label="Filtrer les intégrations">
+            <option value="">Toutes</option>
+            <option value="on">Actives</option>
+            <option value="off">Inactives</option>
+        </select>
+        <ViewToggle StorageKey="integrations" @bind-Value="view" />
+    </div>
+
+    @if (Groups.Count == 0)
+    {
+        <div class="card empty"><div class="big">Aucune intégration trouvée</div></div>
+    }
+    else
+    {
+        <CatalogView Groups="Groups" View="@view" Noun="Intégration" UsageLabel="Utilisation">
+            <Usage><span>@UsageText(context.Id)</span></Usage>
+            <Detail>
+                @if (ConnectedAccounts.For(context.Id) is not { } kind)
+                {
+                    <span class="acc-none">Sans compte</span>
+                }
+                else if (accounts.FirstOrDefault(a => a.Id == kind) is { } acc)
+                {
+                    <button type="button" class="acc-chip @(acc.Lost ? "lost" : "")" title="Voir le compte @acc.Kind" @onclick="() => ShowAccount(kind)">
+                        <AccountLogo Kind="@kind" Size="16" /><span>@acc.User</span>@if (acc.Lost) { <span class="acc-chip-note">à reconnecter</span> }
+                    </button>
+                }
+                else
+                {
+                    <span class="acc-none">Aucun compte connecté</span>
+                }
+            </Detail>
+            <Actions>
+                @if (CalSource(context) is { } src)
+                {
+                    <button type="button" class="btn ghost sm" @onclick="() => calSource = src">Gérer</button>
+                    <button type="button" class="switch @(context.Off ? "" : "on")" role="switch" aria-checked="@(context.Off ? "false" : "true")" aria-label="@context.Name active" @onclick="() => ToggleSource(src)"><span></span></button>
+                }
+                else if (DrvSource(context) is { } drv)
+                {
+                    <button type="button" class="btn ghost sm" @onclick="() => driveSource = drv">Gérer</button>
+                    <button type="button" class="switch @(context.Off ? "" : "on")" role="switch" aria-checked="@(context.Off ? "false" : "true")" aria-label="@context.Name active" @onclick="() => ToggleDrive(drv)"><span></span></button>
+                }
+                else
+                {
+                    @if (context.Id == "canva") { <button type="button" class="btn ghost sm" @onclick="() => cvOpen = true">Gérer</button> }
+                    <button type="button" class="switch @(context.Off ? "" : "on")" role="switch" aria-checked="@(context.Off ? "false" : "true")" aria-label="@context.Name active" @onclick="() => Toggle(context)"><span></span></button>
+                }
+            </Actions>
+        </CatalogView>
+    }
 }
 else
 {
-    <CatalogView Groups="Groups" View="@view" Noun="Intégration" UsageLabel="Utilisation">
-        <Usage>
-            @if (CalSource(context) is { } src)
-            {
-                var n = tenant.SharedCalendars.Count(c => c.Source == src);
-                <span>@(n == 0 ? "Aucun calendrier" : $"{n} calendrier{(n > 1 ? "s" : "")}")</span>
-            }
-            else if (DrvSource(context) is { } drv)
-            {
-                var n = tenant.DriveFolders.Count(f => f.Source == drv);
-                <span>@(n == 0 ? "Aucun dossier" : $"{n} dossier{(n > 1 ? "s" : "")}")</span>
-            }
-            else if (context.Id == "canva" && canva.Connected)
-            {
-                <span class="cat-account"><span class="cat-avatar">@CanvaInitial</span><span>@(canva.User.Length > 0 ? canva.User : "Compte Canva")</span></span>
-            }
-            else
-            {
-                var n = counts.GetValueOrDefault(context.Id);
-                <span>@(n == 0 ? "Aucun contenu" : $"{n} contenu{(n > 1 ? "s" : "")}")</span>
-            }
-        </Usage>
-        <Actions>
-            @if (CalSource(context) is { } src)
-            {
-                <button type="button" class="btn ghost sm" @onclick="() => calSource = src">Gérer</button>
-                <button type="button" class="switch @(context.Off ? "" : "on")" role="switch" aria-checked="@(context.Off ? "false" : "true")" aria-label="@context.Name active" @onclick="() => ToggleSource(src)"><span></span></button>
-            }
-            else if (DrvSource(context) is { } drv)
-            {
-                <button type="button" class="btn ghost sm" @onclick="() => driveSource = drv">Gérer</button>
-                <button type="button" class="switch @(context.Off ? "" : "on")" role="switch" aria-checked="@(context.Off ? "false" : "true")" aria-label="@context.Name active" @onclick="() => ToggleDrive(drv)"><span></span></button>
-            }
-            else
-            {
-                @if (context.Id == "canva") { <button type="button" class="btn ghost sm" @onclick="OpenCanva">Gérer</button> }
-                <button type="button" class="switch @(context.Off ? "" : "on")" role="switch" aria-checked="@(context.Off ? "false" : "true")" aria-label="@context.Name active" @onclick="() => Toggle(context)"><span></span></button>
-            }
-        </Actions>
-    </CatalogView>
+    @if (accounts.Count == 0)
+    {
+        <div class="card empty">
+            <div class="big">Aucun compte connecté</div>
+            <p>Connectez un compte Microsoft, Google ou Canva, ou un serveur d'agendas : ses agendas, dossiers ou designs seront proposés dans vos listes de lecture.</p>
+        </div>
+    }
+    <div class="acc-list">
+        @foreach (var acc in accounts)
+        {
+            var a = acc;
+            var state = AccState(a);
+            var oauth = a.Id is ConnectedAccounts.Microsoft or ConnectedAccounts.Google or ConnectedAccounts.Canva;
+            <article class="acc-card @(flash == a.Id ? "flash" : "")" tabindex="-1" @ref="accRefs[a.Id]" aria-labelledby="acc-@a.Id">
+                <div class="acc-head">
+                    <AccountLogo Kind="@a.Id" Size="28" />
+                    <div class="acc-id">
+                        <b id="acc-@a.Id">@a.Kind <span class="badge @state.Css">@state.Label</span></b>
+                        <small class="acc-user">@a.User</small>
+                        <small>@SinceLine(a)</small>
+                    </div>
+                    <div class="kebab">
+                        <button type="button" class="kebab-btn" aria-haspopup="menu" aria-expanded="@(accMenu == a.Id ? "true" : "false")" aria-label="Actions pour le compte @a.Kind" @onclick="() => accMenu = accMenu == a.Id ? null : a.Id"><Ico Name="dots-v" Size="18" /></button>
+                        @if (accMenu == a.Id)
+                        {
+                            <div class="kebab-backdrop" @onclick="() => accMenu = null"></div>
+                            <div class="kebab-menu" role="menu">
+                                @if (oauth)
+                                {
+                                    <a role="menuitem" href="@ReconnectUrl(a)" target="_top"><Ico Name="refresh" Size="16" /> Reconnecter ou changer de compte</a>
+                                }
+                                else
+                                {
+                                    <button type="button" role="menuitem" @onclick="() => { accMenu = null; calSource = a.Id; }"><Ico Name="edit" Size="16" /> Modifier la connexion</button>
+                                }
+                                <button type="button" role="menuitem" class="danger" @onclick="() => { accMenu = null; disconnectId = a.Id; }"><Ico Name="logout" Size="16" /> Déconnecter…</button>
+                            </div>
+                        }
+                    </div>
+                </div>
+                @if (a.Lost)
+                {
+                    <div class="acc-alert">
+                        <span class="grow">La connexion à ce compte a expiré ou a été retirée chez @a.Kind : ses contenus ne sont plus mis à jour.</span>
+                        <a class="btn danger sm" href="@ReconnectUrl(a)" target="_top">Reconnecter @a.Kind</a>
+                    </div>
+                }
+                else if (a.Error.Length > 0)
+                {
+                    <div class="acc-alert">
+                        <span class="grow">Dernier test en échec : @a.Error</span>
+                        <button type="button" class="btn danger sm" @onclick="() => calSource = a.Id">Vérifier la connexion</button>
+                    </div>
+                }
+                <div class="acc-body">
+                    <div>
+                        <h4>Autorisations</h4>
+                        @foreach (var p in a.Permissions)
+                        {
+                            var needed = !p.Granted && p.Purpose != null && Enabled(IntegrationFor(a.Id, p.Purpose));
+                            <div class="acc-perm @(p.Granted ? "" : needed ? "warn" : "no")">
+                                <Ico Name="@(p.Granted ? "check" : "x")" Size="15" />
+                                <span class="grow">@p.Label@(p.Granted ? "" : " · non autorisé")</span>
+                                @if (!p.Granted && p.Purpose != null && !a.Lost)
+                                {
+                                    <a class="btn ghost sm" href="@ConnectedAccounts.ConnectUrl(a.Id, p.Purpose)" target="_top">Autoriser</a>
+                                }
+                            </div>
+                        }
+                    </div>
+                    <div>
+                        <h4>Utilisé par</h4>
+                        @foreach (var id in ConnectedAccounts.Kind(a.Id).Integrations)
+                        {
+                            var intId = id;
+                            <button type="button" class="acc-use" title="Gérer @IntegrationName(intId)" @onclick="() => Manage(intId)">
+                                <AppIcon Id="@intId" Small="true" />
+                                <span class="grow">@IntegrationName(intId)</span>
+                                <small>@(Enabled(intId) ? UsageText(intId) : "Inactive")</small>
+                            </button>
+                        }
+                    </div>
+                </div>
+            </article>
+        }
+    </div>
+    <p class="acc-aside"><Ico Name="lock" Size="14" /><span>Ces comptes appartiennent à l'organisation et ne donnent qu'un accès en lecture. Se connecter à Linkii avec Google ou Microsoft est autre chose : cela se règle dans <a href="account">Mon compte</a> et ne donne accès à aucun fichier ni agenda.</span></p>
 }
 
 @if (calSource != null)
 {
-    <CalendarSourceDialog Source="@calSource" OnClose="() => calSource = null" OnChanged="Load" />
+    <CalendarSourceDialog Source="@calSource" OnClose="CloseCalendar" OnChanged="CalendarChanged" OnShowAccount="ShowAccount" />
 }
 
 @if (driveSource != null)
 {
-    <DriveSourceDialog Source="@driveSource" OnClose="() => driveSource = null" OnChanged="Load" />
+    <DriveSourceDialog Source="@driveSource" OnClose="() => driveSource = null" OnChanged="Load" OnShowAccount="ShowAccount" />
 }
 
 @if (cvOpen)
 {
-    @* Canva : connexion du compte Canva de l'organisation (intégration de la plateforme, configurée sur le serveur) *@
+    @* Canva : le compte se gère dans Comptes connectés ; ici, son état et l'accès à la connexion *@
+    var cv = accounts.FirstOrDefault(a => a.Id == ConnectedAccounts.Canva);
     <div class="modal-backdrop" @onclick="() => cvOpen = false"></div>
     <div class="modal app-modal" role="dialog" aria-modal="true" aria-labelledby="cvs-title">
         <div class="modal-head">
-            <AppIcon Id="canva" Connected="@canva.Connected" />
+            <AppIcon Id="canva" />
             <div class="grow">
                 <h3 id="cvs-title">Canva</h3>
-                <small>@(canva.Connected ? $"Connecté{(canva.User.Length > 0 ? $" ({canva.User})" : "")}" : canvaReady ? "Connectez votre compte Canva" : "Pas encore disponible sur cette plateforme")</small>
+                <small>@(cv is { Lost: false } ? "Vos designs se choisissent depuis une liste de lecture." : canvaReady ? "Connectez votre compte Canva" : "Pas encore disponible sur cette plateforme")</small>
             </div>
             <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => cvOpen = false"><Ico Name="x" Size="20" /></button>
         </div>
         <div class="modal-body">
             <div class="cvs-account">
+                <AccountLogo Kind="@ConnectedAccounts.Canva" />
                 <div class="grow">
-                    <b>Compte Canva</b>
-                    <small>@(canva.Connected ? "Vos designs se choisissent depuis une liste de lecture." : "Nécessaire pour choisir vos designs dans les listes de lecture.")</small>
+                    <b>@(cv?.User ?? "Aucun compte connecté")</b>
+                    <small>@(cv == null ? "Nécessaire pour choisir vos designs dans les listes de lecture." : cv.Lost ? "Connexion expirée : reconnectez le compte." : SinceLine(cv))</small>
                 </div>
-                @if (canva.Connected) { <button type="button" class="btn ghost sm" @onclick="DisconnectCanva">Déconnecter</button> }
+                @if (cv != null) { <button type="button" class="btn ghost sm" @onclick="() => ShowAccount(ConnectedAccounts.Canva)">Voir le compte</button> }
                 else if (canvaReady) { <a class="btn sm" href="/canva/connect" target="_top">Connecter Canva</a> }
             </div>
-
             @if (!canvaReady) { <div class="dw-note">Canva n'est pas encore disponible sur cette plateforme (connexion Canva à configurer par l'administrateur Linkii).</div> }
         </div>
         <div class="modal-foot">
             <button class="btn ghost" @onclick="() => cvOpen = false">Fermer</button>
+        </div>
+    </div>
+}
+
+@if (connectKind != null)
+{
+    @* Microsoft ou Google depuis Comptes connectés : choix des accès demandés, puis page de connexion du fournisseur *@
+    var def = ConnectedAccounts.Kind(connectKind);
+    var ms = connectKind == ConnectedAccounts.Microsoft;
+    <div class="modal-backdrop" @onclick="() => connectKind = null"></div>
+    <div class="modal app-modal" role="dialog" aria-modal="true" aria-labelledby="acn-title">
+        <div class="modal-head">
+            <AccountLogo Kind="@connectKind" Size="28" />
+            <div class="grow">
+                <h3 id="acn-title">Connecter un compte @def.Name</h3>
+                <small>Vous passez par la page de connexion @def.Name : Linkii ne voit jamais votre mot de passe.</small>
+            </div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => connectKind = null"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body acc-connect">
+            <p>Ce que Linkii pourra lire, sans jamais rien modifier :</p>
+            <label class="acc-choice"><input type="checkbox" @bind="wantCalendars" /><span><b>Agendas</b><small>@(ms ? "Microsoft 365 : agendas Outlook, salles et boîtes partagées" : "Google Calendar : agendas du compte, ou partagés avec lui")</small></span></label>
+            <label class="acc-choice"><input type="checkbox" @bind="wantFiles" /><span><b>Fichiers</b><small>@(ms ? "OneDrive et SharePoint : dossiers d'images et de vidéos" : "Google Drive : dossiers d'images et de vidéos, Drive partagés compris")</small></span></label>
+            @if (ms) { <p class="acc-hint">Certaines organisations demandent l'approbation de leur administrateur Microsoft 365.</p> }
+        </div>
+        <div class="modal-foot">
+            <button class="btn ghost" @onclick="() => connectKind = null">Annuler</button>
+            @if (wantCalendars || wantFiles)
+            {
+                <a class="btn" href="@ConnectedAccounts.ConnectUrl(connectKind, wantCalendars && wantFiles ? AccountPurposes.All : wantCalendars ? AccountPurposes.Calendar : AccountPurposes.Drive)" target="_top">Continuer avec @def.Name</a>
+            }
+            else { <button class="btn" disabled>Continuer avec @def.Name</button> }
+        </div>
+    </div>
+}
+
+@if (disconnectId != null && accounts.FirstOrDefault(a => a.Id == disconnectId) is { } gone)
+{
+    var impacted = ConnectedAccounts.Kind(gone.Id).Integrations.Where(Enabled).ToList();
+    <div class="modal-backdrop" @onclick="() => disconnectId = null"></div>
+    <div class="modal app-modal" role="dialog" aria-modal="true" aria-labelledby="acd-title">
+        <div class="modal-head">
+            <AccountLogo Kind="@gone.Id" Size="28" />
+            <div class="grow">
+                <h3 id="acd-title">Déconnecter @gone.Kind ?</h3>
+                <small>@gone.User</small>
+            </div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => disconnectId = null"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body acc-connect">
+            @if (impacted.Count > 0)
+            {
+                <div class="acc-impact">
+                    <b>Ne seront plus mis à jour :</b>
+                    <ul>@foreach (var i in impacted) { <li>@IntegrationName(i) — @UsageText(i)</li> }</ul>
+                </div>
+            }
+            <p>@(gone.Id == ConnectedAccounts.Canva ? "Les designs déjà exportés restent dans la médiathèque et sur les écrans." : "Les contenus restent dans vos listes de lecture, avec leur dernière version.") Vous pourrez reconnecter ce compte, ou un autre, à tout moment.</p>
+            @if (gone.Id == ConnectedAccounts.Microsoft) { <p class="acc-hint">Microsoft ne permet pas à Linkii de retirer lui-même l'autorisation : pour la retirer aussi chez Microsoft, passez par « Mes applications » de votre compte.</p> }
+        </div>
+        <div class="modal-foot">
+            <button class="btn ghost" @onclick="() => disconnectId = null">Annuler</button>
+            <button class="btn danger" @onclick="Disconnect">Déconnecter</button>
         </div>
     </div>
 }
@@ -123,21 +309,31 @@ else
     private static readonly (string Category, string Title)[] Sections =
     {
         ("Médiathèque", "Médias de la médiathèque"), (CalendarsGroup, "Calendriers partagés"), (DrivesGroup, "Drives"),
-        ("Service connecté", "Comptes connectés"), ("Web", "Contenus web"),
+        ("Service en ligne", "Services en ligne"), ("Web", "Contenus web"),
     };
 
     // Ordre des cartes dans leur groupe (les apps absentes de la liste suivent, par nom).
     private static readonly string[] Order = { "image", "slideshow-images", "video", "slideshow-videos", "canva", "youtube", "rss", "webpage" };
 
+    [SupplyParameterFromQuery(Name = "tab")] public string? TabParam { get; set; }
+
     private string search = "", filter = "", view = "cards";   // view : cards | list (mémorisé dans le navigateur)
     private HashSet<string> enabled = new();
     private Dictionary<string, int> counts = new();   // contenus créés, par app
-    private CanvaService.Connection canva = new(false, "", null);
     private Tenant tenant = new();
+    private List<ConnectedAccount> accounts = new();
+    private bool accountsTab, addMenu, cvOpen, canvaReady;
     private string? calSource;     // source de calendriers dont la fenêtre « Gérer » est ouverte
     private string? driveSource;   // source Drive dont la fenêtre « Gérer » est ouverte
+    private string? accMenu;       // compte dont le menu ⋯ est ouvert
+    private string? disconnectId;  // compte dont la déconnexion est à confirmer
+    private string? connectKind;   // Microsoft ou Google : choix des accès avant la connexion
+    private bool wantCalendars = true, wantFiles = true;
+    private string? connectingServer;   // serveur CalDAV ou Exchange ajouté depuis « Connecter un compte » : source activée une fois configurée
+    private string? flash;              // compte mis en évidence après « Voir le compte »
+    private bool focusPending;
+    private readonly Dictionary<string, ElementReference> accRefs = new();
 
-    private string CanvaInitial => canva.User.Length > 0 ? char.ToUpperInvariant(canva.User[0]).ToString() : "C";
     private static string? CalSource(CatalogView.Entry e) => e.Id.StartsWith("cal-") ? e.Id[4..] : null;
     private static string? DrvSource(CatalogView.Entry e) => e.Id.StartsWith("drv-") ? e.Id[4..] : null;
 
@@ -174,13 +370,27 @@ else
         }
     }
 
+    private ConnectedAccount? AccountOf(string kind) => accounts.FirstOrDefault(a => a.Id == kind);
+
+    /// <summary>État d'une intégration qui passe par un compte Google, Microsoft ou Canva (null : le compte est en ordre).</summary>
+    private (string, string, string?)? AccountProblem(string kind, bool configured) => AccountOf(kind) switch
+    {
+        { Lost: true } a => ("Compte à reconnecter", "hors-ligne", $"La connexion au compte {a.Kind} a expiré : reconnectez-le dans Comptes connectés."),
+        null => ("À connecter", "mise-a-jour", (string?)null),
+        _ when !configured => ("Accès à autoriser", "mise-a-jour", "Le compte connecté n'a pas encore accordé cet accès : autorisez-le dans Comptes connectés."),
+        _ => null
+    };
+
     private CatalogView.Entry Entry(AppManifest a)
     {
         var on = enabled.Contains(a.Id);
         if (!on) return CatalogView.Entry.Of(a, "Inactive", "inactif", true);
         if (a.Id == "canva")
-            return canva.Connected ? CatalogView.Entry.Of(a, "Connecté", "en-ligne", false)
-                 : CatalogView.Entry.Of(a, canvaReady ? "À connecter" : "Indisponible", canvaReady ? "mise-a-jour" : "inactif", false);
+        {
+            if (!canvaReady) return CatalogView.Entry.Of(a, "Indisponible", "inactif", false);
+            if (AccountProblem(ConnectedAccounts.Canva, true) is { } p) return CatalogView.Entry.Of(a, p.Item1, p.Item2, false) with { StatusTitle = p.Item3 };
+            return CatalogView.Entry.Of(a, "Connecté", "en-ligne", false);
+        }
         return CatalogView.Entry.Of(a, "Active", "en-ligne", false);
     }
 
@@ -188,13 +398,14 @@ else
     {
         var acc = SharedCalendarSources.Account(tenant, s.Id);
         var on = acc?.Enabled == true;
-        var google = s.Id == "google";   // compte Google de l'organisation (« Se connecter avec Google »), partagé avec Google Drive
-        var microsoft = s.Id == "m365";  // compte Microsoft de l'organisation (« Se connecter avec Microsoft »), partagé avec OneDrive et SharePoint
+        var configured = SharedCalendarSources.Configured(tenant, s.Id);
+        var google = s.Id == "google";   // compte Google de l'organisation, partagé avec Google Drive
+        var microsoft = s.Id == "m365";  // compte Microsoft de l'organisation, partagé avec OneDrive et SharePoint
         (string status, string css, string? why) = google && !GoogleAuth.IsConfigured ? ("Indisponible", "inactif", "Connexion Google de la plateforme non configurée (administrateur Linkii)")
             : microsoft && !MsAuth.IsConfigured ? ("Indisponible", "inactif", "Connexion Microsoft de la plateforme non configurée (administrateur Linkii)")
             : !on ? ("Inactive", "inactif", (string?)null)
-            : (google || microsoft) && !SharedCalendarSources.Configured(tenant, s.Id) ? ("À connecter", "mise-a-jour", (string?)null)
-            : !SharedCalendarSources.Configured(tenant, s.Id) ? ("À configurer", "mise-a-jour", (string?)null)
+            : (google || microsoft) && AccountProblem(google ? ConnectedAccounts.Google : ConnectedAccounts.Microsoft, configured) is { } problem ? problem
+            : !configured ? ("À configurer", "mise-a-jour", (string?)null)
             : acc!.LastError.Length > 0 ? ("Erreur de connexion", "hors-ligne", acc.LastError)
             : s.Id == "ics" ? ("Active", "en-ligne", (string?)null) : ("Connecté", "en-ligne", (string?)null);
         return new("cal-" + s.Id, s.Name, "Calendrier partagé", s.Summary, "cal-" + s.Id, null, status, css, !on, why);
@@ -208,27 +419,132 @@ else
         (string status, string css, string? why) = google && !GoogleAuth.IsConfigured ? ("Indisponible", "inactif", "Connexion Google de la plateforme non configurée (administrateur Linkii)")
             : !google && !MsAuth.IsConfigured ? ("Indisponible", "inactif", "Connexion Microsoft de la plateforme non configurée (administrateur Linkii)")
             : !on ? ("Inactive", "inactif", (string?)null)
-            : !DriveSources.Configured(tenant, s.Id) ? ("À connecter", "mise-a-jour", (string?)null)
+            : AccountProblem(google ? ConnectedAccounts.Google : ConnectedAccounts.Microsoft, DriveSources.Configured(tenant, s.Id)) is { } problem ? problem
             : failed != null ? ("Erreur de synchronisation", "hors-ligne", $"{failed.Name} : {failed.LastError}")
             : ("Connecté", "en-ligne", (string?)null);
         return new("drv-" + s.Id, s.Name, "Drive", s.Summary, "drv-" + s.Id, null, status, css, !on, why);
     }
 
-    // Source Drive : ses dossiers sont proposés et synchronisés, ou non ; les contenus existants restent diffusés (fichiers du moment).
-    private void ToggleDrive(string src)
+    // ---------- Intégrations utilisées par les comptes ----------
+
+    private bool Enabled(string integrationId) =>
+        integrationId.StartsWith("cal-") ? SharedCalendarSources.Enabled(tenant, integrationId[4..])
+        : integrationId.StartsWith("drv-") ? DriveSources.Enabled(tenant, integrationId[4..])
+        : enabled.Contains(integrationId);
+
+    private string IntegrationName(string integrationId) =>
+        integrationId.StartsWith("cal-") ? SharedCalendarSources.Find(integrationId[4..])?.Name ?? integrationId
+        : integrationId.StartsWith("drv-") ? DriveSources.Find(integrationId[4..])?.Name ?? integrationId
+        : Svc.Catalog.FirstOrDefault(a => a.Id == integrationId)?.Name ?? integrationId;
+
+    /// <summary>Microsoft et Google : l'intégration qui demande cet accès (agendas, fichiers).</summary>
+    private static string IntegrationFor(string kind, string purpose) => ConnectedAccounts.Kind(kind).Integrations[purpose == AccountPurposes.Calendar ? 0 : 1];
+
+    private string UsageText(string integrationId)
     {
-        var def = DriveSources.Find(src)!;
-        var on = !DriveSources.Enabled(tenant, src);
-        if (on && src == "gdrive" && !GoogleAuth.IsConfigured) { Toast.Error("Google Drive n'est pas encore disponible sur cette plateforme (connexion Google à configurer sur le serveur)."); return; }
-        if (on && src == "onedrive" && !MsAuth.IsConfigured) { Toast.Error("OneDrive et SharePoint ne sont pas encore disponibles sur cette plateforme (connexion Microsoft à configurer sur le serveur)."); return; }
-        Svc.SetDriveSource(src, on);
-        Load();
-        if (on && !DriveSources.Configured(tenant, src)) { driveSource = src; Toast.Ok($"« {def.Name} » activée : configurez sa connexion."); }
-        else Toast.Ok(on ? $"« {def.Name} » activée : ses dossiers sont proposés dans les listes de lecture." : $"« {def.Name} » désactivée. Les contenus existants restent diffusés.");
+        if (integrationId.StartsWith("cal-"))
+        {
+            var n = tenant.SharedCalendars.Count(c => c.Source == integrationId[4..]);
+            return n == 0 ? "Aucun calendrier" : $"{n} calendrier{(n > 1 ? "s" : "")}";
+        }
+        if (integrationId.StartsWith("drv-"))
+        {
+            var n = tenant.DriveFolders.Count(f => f.Source == integrationId[4..]);
+            return n == 0 ? "Aucun dossier" : $"{n} dossier{(n > 1 ? "s" : "")}";
+        }
+        var c = counts.GetValueOrDefault(integrationId);
+        return c == 0 ? "Aucun contenu" : $"{c} contenu{(c > 1 ? "s" : "")}";
     }
+
+    private void Manage(string integrationId)
+    {
+        if (integrationId.StartsWith("cal-")) calSource = integrationId[4..];
+        else if (integrationId.StartsWith("drv-")) driveSource = integrationId[4..];
+        else if (integrationId == "canva") cvOpen = true;
+    }
+
+    // ---------- Comptes connectés ----------
+
+    private (string Label, string Css) AccState(ConnectedAccount a) =>
+        a.Lost ? ("Reconnexion nécessaire", "hors-ligne")
+        : a.Error.Length > 0 ? ("Erreur de connexion", "hors-ligne")
+        : a.Permissions.Any(p => !p.Granted && p.Purpose != null && Enabled(IntegrationFor(a.Id, p.Purpose))) ? ("Autorisation à compléter", "mise-a-jour")
+        : ("Connecté", "en-ligne");
+
+    private static string SinceLine(ConnectedAccount a) =>
+        a.Detail.Length > 0 ? a.Detail
+        : a.Since is { } since ? $"Connecté le {since.ToLocalTime():dd.MM.yyyy}" : "";
+
+    private static string ReconnectUrl(ConnectedAccount a) => ConnectedAccounts.ConnectUrl(a.Id, ConnectedAccounts.ReconnectPurpose(a));
+
+    /// <summary>Types de comptes proposés par « Connecter un compte » : ceux qui ne sont pas encore là.</summary>
+    private IEnumerable<ConnectedAccounts.KindDef> Addable => ConnectedAccounts.Kinds.Where(k => accounts.All(a => a.Id != k.Id));
+
+    private bool Available(string kind) => kind switch
+    {
+        ConnectedAccounts.Microsoft => MsAuth.IsConfigured,
+        ConnectedAccounts.Google => GoogleAuth.IsConfigured,
+        ConnectedAccounts.Canva => canvaReady,
+        _ => true
+    };
+
+    private void StartConnect(string kind)
+    {
+        addMenu = false;
+        if (kind is ConnectedAccounts.Microsoft or ConnectedAccounts.Google) { wantCalendars = wantFiles = true; connectKind = kind; return; }
+        connectingServer = kind;   // CalDAV ou Exchange : la connexion se saisit dans la fenêtre de la source
+        calSource = kind;
+    }
+
+    private void ShowAccount(string kind)
+    {
+        calSource = driveSource = null;
+        cvOpen = false;
+        accountsTab = true;
+        flash = kind;
+        focusPending = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!focusPending || flash == null || !accRefs.TryGetValue(flash, out var el)) return;
+        focusPending = false;
+        try { await el.FocusAsync(); } catch (InvalidOperationException) { return; /* carte pas encore affichée */ }
+        // la mise en évidence s'efface après un instant (sauf si un autre compte a été montré entre-temps)
+        var shown = flash;
+        await Task.Delay(1800);
+        if (flash == shown) { flash = null; StateHasChanged(); }
+    }
+
+    private async Task Disconnect()
+    {
+        var id = disconnectId;
+        disconnectId = null;
+        var name = AccountOf(id!)?.Kind ?? "";
+        switch (id)
+        {
+            case ConnectedAccounts.Microsoft: MsAuth.Disconnect(Store.ClientId); break;
+            case ConnectedAccounts.Google: await GoogleAuth.Disconnect(Store.ClientId); break;
+            case ConnectedAccounts.Canva: Canva.Disconnect(Store.ClientId); break;
+            default:
+                Store.Write(d =>
+                {
+                    if (d.Tenant.CalendarAccounts.FirstOrDefault(x => x.Source == id) is { } a)
+                    {
+                        a.Url = ""; a.User = ""; a.Secret = ""; a.Label = ""; a.LastError = ""; a.CheckedUtc = null;
+                    }
+                });
+                break;
+        }
+        Load();
+        Toast.Ok($"{name} déconnecté. Ses contenus ne sont plus mis à jour.");
+    }
+
+    // ---------- Chargement et bascules ----------
 
     protected override void OnInitialized()
     {
+        accountsTab = TabParam == ConnectedAccounts.Tab;
         Load();
         CanvaReturn();
         GoogleReturn();
@@ -240,7 +556,7 @@ else
         enabled = Svc.Installed().Select(a => a.AppId).ToHashSet();
         counts = Store.Read(d => d.Media.Where(m => m.AppId != null).GroupBy(m => m.AppId!).ToDictionary(g => g.Key, g => g.Count()));
         tenant = Store.Read(d => d.Tenant);
-        canva = Canva.ConnectionOf(Store.ClientId);
+        accounts = ConnectedAccounts.Of(tenant);
         canvaReady = Canva.IsConfigured;
     }
 
@@ -268,6 +584,38 @@ else
         else Toast.Ok(on ? $"« {def.Name} » activée : ses calendriers sont proposés dans les listes de lecture." : $"« {def.Name} » désactivée. Les contenus existants restent diffusés.");
     }
 
+    // Source Drive : ses dossiers sont proposés et synchronisés, ou non ; les contenus existants restent diffusés (fichiers du moment).
+    private void ToggleDrive(string src)
+    {
+        var def = DriveSources.Find(src)!;
+        var on = !DriveSources.Enabled(tenant, src);
+        if (on && src == "gdrive" && !GoogleAuth.IsConfigured) { Toast.Error("Google Drive n'est pas encore disponible sur cette plateforme (connexion Google à configurer sur le serveur)."); return; }
+        if (on && src == "onedrive" && !MsAuth.IsConfigured) { Toast.Error("OneDrive et SharePoint ne sont pas encore disponibles sur cette plateforme (connexion Microsoft à configurer sur le serveur)."); return; }
+        Svc.SetDriveSource(src, on);
+        Load();
+        if (on && !DriveSources.Configured(tenant, src)) { driveSource = src; Toast.Ok($"« {def.Name} » activée : configurez sa connexion."); }
+        else Toast.Ok(on ? $"« {def.Name} » activée : ses dossiers sont proposés dans les listes de lecture." : $"« {def.Name} » désactivée. Les contenus existants restent diffusés.");
+    }
+
+    // Serveur CalDAV ou Exchange ajouté depuis « Connecter un compte » : sa source est activée dès que la connexion est enregistrée.
+    private void CalendarChanged()
+    {
+        Load();
+        if (connectingServer is { } src && accounts.Any(a => a.Id == src))
+        {
+            if (!SharedCalendarSources.Enabled(tenant, src)) { Svc.SetCalendarSource(src, true); Load(); }
+            connectingServer = null;
+        }
+    }
+
+    private void CloseCalendar()
+    {
+        calSource = null;
+        connectingServer = null;
+    }
+
+    // ---------- Retours de connexion ----------
+
     // Retour de la connexion Canva (/canva/callback) : résultat affiché, et l'intégration activée si besoin.
     private void CanvaReturn()
     {
@@ -276,7 +624,9 @@ else
         {
             case "ok":
                 if (!enabled.Contains("canva")) { Svc.Enable("canva"); Load(); }
-                Toast.Ok($"Canva connecté{(canva.User.Length > 0 ? $" ({canva.User})" : "")}. Ajoutez vos designs depuis une liste de lecture.");
+                var user = AccountOf(ConnectedAccounts.Canva)?.User;
+                Toast.Ok($"Canva connecté{(user is { Length: > 0 } ? $" ({user})" : "")}. Ajoutez vos designs depuis une liste de lecture.");
+                if (accountsTab) ShowAccount(ConnectedAccounts.Canva);
                 break;
             case "denied": Toast.Error("Connexion à Canva annulée."); break;
             case "expired": Toast.Error("La demande de connexion à Canva a expiré. Recommencez."); break;
@@ -285,68 +635,73 @@ else
         }
     }
 
-    // Retour de « Se connecter avec Google » (/google/callback) : l'intégration qui a lancé la connexion (Calendar ou Drive)
-    // est activée et sa fenêtre rouverte pour ajouter des agendas ou des dossiers.
+    /// <summary>
+    /// Connexion Google ou Microsoft réussie : les intégrations dont l'accès a été accordé sont activées.
+    /// Lancée depuis une intégration : sa fenêtre est rouverte pour ajouter des agendas ou des dossiers ; depuis Comptes connectés : le compte est montré.
+    /// </summary>
+    private void Connected(string kind, string purpose, string user, string calendarSource, string driveSourceId, bool hasCalendars, bool hasFiles)
+    {
+        if (purpose != AccountPurposes.Drive && hasCalendars && !SharedCalendarSources.Enabled(tenant, calendarSource)) Svc.SetCalendarSource(calendarSource, true);
+        if (purpose != AccountPurposes.Calendar && hasFiles && !DriveSources.Enabled(tenant, driveSourceId)) Svc.SetDriveSource(driveSourceId, true);
+        Load();
+        var name = ConnectedAccounts.Kind(kind).Name;
+        var granted = string.Join(" et ", new[] { hasCalendars ? "agendas" : null, hasFiles ? "fichiers" : null }.OfType<string>());
+        Toast.Ok($"Compte {name} connecté{(user.Length > 0 ? $" ({user})" : "")}{(granted.Length > 0 ? $" : {granted} autorisés" : "")}.");
+        if (accountsTab) ShowAccount(kind);
+        else if (purpose == AccountPurposes.Calendar) calSource = calendarSource;
+        else driveSource = driveSourceId;
+    }
+
+    // Retour de « Se connecter avec Google » (/google/callback) : Google Calendar, Google Drive ou les deux (Comptes connectés).
     private void GoogleReturn()
     {
         var query = System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query);
         var q = query["google"];
         if (q == null) return;
-        var calendar = query["for"] == "calendar";
-        var name = calendar ? "Google Calendar" : "Google Drive";
+        var purpose = AccountPurposes.Parse(query["for"]);
         switch (q)
         {
             case "ok":
-                if (calendar && !SharedCalendarSources.Enabled(tenant, "google")) { Svc.SetCalendarSource("google", true); Load(); }
-                if (!calendar && !DriveSources.Enabled(tenant, "gdrive")) { Svc.SetDriveSource("gdrive", true); Load(); }
-                Toast.Ok($"{name} connecté{(tenant.GoogleUser.Length > 0 ? $" ({tenant.GoogleUser})" : "")}. Ajoutez vos {(calendar ? "agendas" : "dossiers")}.");
-                if (calendar) calSource = "google"; else driveSource = "gdrive";
+                Connected(ConnectedAccounts.Google, purpose, tenant.GoogleUser, "google", "gdrive",
+                          GoogleAuth.Has(tenant, GoogleAuth.CalendarScope), GoogleAuth.Has(tenant, GoogleAuth.DriveScope));
                 break;
             case "denied": Toast.Error("Connexion à Google annulée."); break;
-            case "scope": Toast.Error(calendar ? "L'accès à vos agendas n'a pas été autorisé : reconnectez-vous en cochant l'accès à Google Calendar."
-                                               : "L'accès à Google Drive n'a pas été autorisé : reconnectez-vous en cochant l'accès à vos fichiers Drive."); break;
+            case "scope": Toast.Error(purpose switch
+            {
+                AccountPurposes.Calendar => "L'accès à vos agendas n'a pas été autorisé : reconnectez-vous en cochant l'accès à Google Calendar.",
+                AccountPurposes.Drive => "L'accès à Google Drive n'a pas été autorisé : reconnectez-vous en cochant l'accès à vos fichiers Drive.",
+                _ => "Aucun accès n'a été autorisé : reconnectez-vous en cochant l'accès à vos agendas ou à vos fichiers Drive."
+            }); break;
             case "expired": Toast.Error("La demande de connexion à Google a expiré. Recommencez."); break;
             case "unconfigured": Toast.Error("La connexion Google n'est pas encore configurée sur cette plateforme."); break;
             default: Toast.Error("Google a refusé la connexion. Réessayez dans un instant."); break;
         }
     }
 
-    // Retour de « Se connecter avec Microsoft » (/microsoft/callback) : même principe que Google. Microsoft 365 (agendas) ou
-    // OneDrive et SharePoint (fichiers) est activé et sa fenêtre rouverte pour ajouter des agendas ou des dossiers.
+    // Retour de « Se connecter avec Microsoft » (/microsoft/callback) : même principe que Google (Microsoft 365, OneDrive et SharePoint, ou les deux).
     private void MicrosoftReturn()
     {
         var query = System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query);
         var q = query["microsoft"];
         if (q == null) return;
-        var calendar = query["for"] == "calendar";
-        var name = calendar ? "Microsoft 365" : "OneDrive et SharePoint";
+        var purpose = AccountPurposes.Parse(query["for"]);
         switch (q)
         {
             case "ok":
-                if (calendar && !SharedCalendarSources.Enabled(tenant, "m365")) { Svc.SetCalendarSource("m365", true); Load(); }
-                if (!calendar && !DriveSources.Enabled(tenant, "onedrive")) { Svc.SetDriveSource("onedrive", true); Load(); }
-                Toast.Ok($"{name} connecté{(tenant.MsUser.Length > 0 ? $" ({tenant.MsUser})" : "")}. Ajoutez vos {(calendar ? "agendas" : "dossiers")}.");
-                if (calendar) calSource = "m365"; else driveSource = "onedrive";
+                Connected(ConnectedAccounts.Microsoft, purpose, tenant.MsUser, "m365", "onedrive",
+                          MicrosoftAuth.Has(tenant, MicrosoftAuth.CalendarScope), MicrosoftAuth.Has(tenant, MicrosoftAuth.DriveScope));
                 break;
             case "denied": Toast.Error("Connexion à Microsoft annulée."); break;
             case "admin": Toast.Error("Votre organisation demande l'approbation de Linkii par son administrateur Microsoft 365. Transmettez-lui la demande, puis recommencez."); break;
-            case "scope": Toast.Error(calendar ? "L'accès à vos agendas n'a pas été autorisé : reconnectez-vous en acceptant l'accès aux agendas."
-                                               : "L'accès à vos fichiers n'a pas été autorisé : reconnectez-vous en acceptant l'accès aux fichiers."); break;
+            case "scope": Toast.Error(purpose switch
+            {
+                AccountPurposes.Calendar => "L'accès à vos agendas n'a pas été autorisé : reconnectez-vous en acceptant l'accès aux agendas.",
+                AccountPurposes.Drive => "L'accès à vos fichiers n'a pas été autorisé : reconnectez-vous en acceptant l'accès aux fichiers.",
+                _ => "Aucun accès n'a été autorisé : reconnectez-vous en acceptant l'accès aux agendas ou aux fichiers."
+            }); break;
             case "expired": Toast.Error("La demande de connexion à Microsoft a expiré. Recommencez."); break;
             case "unconfigured": Toast.Error("La connexion Microsoft n'est pas encore configurée sur cette plateforme."); break;
             default: Toast.Error("Microsoft a refusé la connexion. Réessayez dans un instant."); break;
         }
-    }
-
-    // ---------- Canva : compte Canva de l'organisation (intégration de la plateforme) ----------
-    private bool cvOpen, canvaReady;
-
-    private void OpenCanva() => cvOpen = true;
-
-    private void DisconnectCanva()
-    {
-        Canva.Disconnect(Store.ClientId);
-        Load();
-        Toast.Ok("Canva déconnecté. Les designs déjà exportés restent dans la médiathèque et sur les écrans.");
     }
 }

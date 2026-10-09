@@ -33,10 +33,18 @@
             <button class="btn danger sm" @onclick="() => confirmDelete = picked.ToList()"><Ico Name="trash" Size="14" /> Supprimer</button>
         }
         <div class="seg" role="tablist" aria-label="Type de fichier">
-            <button type="button" class="@(filter == "" ? "on" : "")" @onclick='() => filter = ""'>Tous <small>@files.Count</small></button>
-            <button type="button" class="@(filter == "image" ? "on" : "")" @onclick='() => filter = "image"'>Images <small>@files.Count(m => m.Type == "image")</small></button>
-            <button type="button" class="@(filter == "video" ? "on" : "")" @onclick='() => filter = "video"'>Vidéos <small>@files.Count(m => m.Type == "video")</small></button>
+            <button type="button" class="@(filter == "" ? "on" : "")" @onclick='() => filter = ""'>Tous <small>@BySource.Count()</small></button>
+            <button type="button" class="@(filter == "image" ? "on" : "")" @onclick='() => filter = "image"'>Images <small>@BySource.Count(m => m.Type == "image")</small></button>
+            <button type="button" class="@(filter == "video" ? "on" : "")" @onclick='() => filter = "video"'>Vidéos <small>@BySource.Count(m => m.Type == "video")</small></button>
         </div>
+        <select @bind="source" aria-label="Source">
+            <option value="">Toutes les sources</option>
+            @foreach (var (key, label) in Sources)
+            {
+                var n = ByType.Count(m => SourceOf(m) == key);
+                @if (n > 0 || source == key) { <option value="@key">@label (@n)</option> }
+            }
+        </select>
         <div class="search-box grow" style="margin:0">
             <Ico Name="search" Size="16" />
             <input placeholder="Rechercher des médias" aria-label="Rechercher des médias" @bind="search" @bind:event="oninput" />
@@ -177,7 +185,7 @@
 @code {
     private List<MediaItem> files = new();
     private readonly HashSet<Guid> picked = new();
-    private string filter = "", search = "", sort = "date";
+    private string filter = "", source = "", search = "", sort = "date";
     private bool showUpload;
     private string view = "cards";   // cards | list (liste : PC seulement ; sur mobile, toujours en cartes)
     private Guid? menuFor;
@@ -190,12 +198,24 @@
     // Imports en cours ou en échec : affichés comme des cartes en tête de la grille, avec leur pourcentage.
     private IReadOnlyList<MediaUploader.UploadJob> Jobs => uploader?.Jobs ?? Array.Empty<MediaUploader.UploadJob>();
 
+    // Provenance d'un fichier : téléversé ici, exporté depuis Canva, ou synchronisé depuis un dossier Drive.
+    private static readonly (string Key, string Label)[] Sources =
+        { ("upload", "Téléversés"), ("canva", "Canva"), ("gdrive", "Google Drive"), ("onedrive", "OneDrive") };
+
+    private string SourceOf(MediaItem m) =>
+        MediaLibrary.IsDrive(m) ? (drives.GetValueOrDefault(m.Info["drive"])?.Source == "onedrive" ? "onedrive" : "gdrive")
+        : m.Info.ContainsKey("canva") ? "canva" : "upload";
+
+    // Les compteurs de chaque filtre tiennent compte de l'autre (type × source).
+    private IEnumerable<MediaItem> ByType => files.Where(m => filter == "" || m.Type == filter);
+    private IEnumerable<MediaItem> BySource => files.Where(m => source == "" || SourceOf(m) == source);
+
     private IEnumerable<MediaItem> Visible
     {
         get
         {
-            var q = files.Where(m => filter == "" || m.Type == filter)
-                         .Where(m => search.Length == 0 || m.Name.Contains(search, StringComparison.OrdinalIgnoreCase));
+            var q = ByType.Where(m => source == "" || SourceOf(m) == source)
+                          .Where(m => search.Length == 0 || m.Name.Contains(search, StringComparison.OrdinalIgnoreCase));
             return sort switch
             {
                 "name" => q.OrderBy(m => m.Name, StringComparer.CurrentCultureIgnoreCase),

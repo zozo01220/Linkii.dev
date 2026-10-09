@@ -91,6 +91,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
                 var t = d.Clients.First(c => c.Id == p.ClientId);
                 t.CanvaUser = user;
                 t.CanvaConnectedUtc = DateTime.UtcNow;
+                t.CanvaLostUtc = null;
             });
             return back + "canva=ok";
         }
@@ -114,7 +115,18 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
         store.Write(d =>
         {
             var t = d.Clients.First(c => c.Id == clientId);
-            t.CanvaRefreshToken = ""; t.CanvaUser = ""; t.CanvaConnectedUtc = null;
+            t.CanvaRefreshToken = ""; t.CanvaUser = ""; t.CanvaConnectedUtc = null; t.CanvaLostUtc = null;
+        });
+    }
+
+    /// <summary>Canva refuse le jeton : le compte reste affiché comme « à reconnecter » dans Comptes connectés.</summary>
+    private void Expire(Guid clientId)
+    {
+        access.TryRemove(clientId, out _);
+        store.Write(d =>
+        {
+            var t = d.Clients.First(c => c.Id == clientId);
+            t.CanvaRefreshToken = ""; t.CanvaLostUtc = DateTime.UtcNow;
         });
     }
 
@@ -147,13 +159,13 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
         {
             if (access.TryGetValue(clientId, out a) && a.Expires > DateTime.UtcNow) return a.Token;   // renouvelé entre-temps
             var stored = store.Read(d => d.Clients.FirstOrDefault(c => c.Id == clientId)?.CanvaRefreshToken ?? "");
-            if (stored.Length == 0) throw new CanvaException("Canva n'est pas connecté. Connectez-le dans Réglages › Applications.");
+            if (stored.Length == 0) throw new CanvaException("Canva n'est pas connecté. Connectez-le dans Intégrations › Comptes connectés.");
             TokenResponse t;
             try { t = await TokenRequest(clientId, new() { ["grant_type"] = "refresh_token", ["refresh_token"] = box.Unprotect(stored) }); }
             catch (CanvaException)
             {
-                Disconnect(clientId);   // accès retiré dans Canva, ou jeton déjà utilisé : il faut se reconnecter
-                throw new CanvaException("La connexion à Canva a expiré. Reconnectez Canva dans Réglages › Applications.");
+                Expire(clientId);   // accès retiré dans Canva, ou jeton déjà utilisé : il faut se reconnecter
+                throw new CanvaException("La connexion à Canva a expiré. Reconnectez Canva dans Intégrations › Comptes connectés.");
             }
             Remember(clientId, t);
             return t.AccessToken;
@@ -187,7 +199,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
         if (body != null) req.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
         using var res = await Http.SendAsync(req);
         var text = await res.Content.ReadAsStringAsync();
-        if ((int)res.StatusCode == 401) { access.TryRemove(clientId, out _); throw new CanvaException("Canva a refusé l'accès. Reconnectez Canva dans Réglages › Applications."); }
+        if ((int)res.StatusCode == 401) { access.TryRemove(clientId, out _); throw new CanvaException("Canva a refusé l'accès. Reconnectez Canva dans Intégrations › Comptes connectés."); }
         if ((int)res.StatusCode == 429) throw new CanvaException("Trop de demandes envoyées à Canva. Réessayez dans une minute.");
         if (!res.IsSuccessStatusCode) throw new CanvaException($"Canva a répondu {(int)res.StatusCode}{MessageOf(text)}.");
         return JsonDocument.Parse(text);

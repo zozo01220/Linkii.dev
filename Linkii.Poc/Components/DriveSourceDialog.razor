@@ -31,10 +31,9 @@
                         <b>@(google.User.Length > 0 ? google.User : "Compte Google")</b>
                         <small>Connecté@(google.Since is { } since ? $" le {since.ToLocalTime():dd.MM.yyyy}" : "") · lecture seule : rien n'est modifié dans votre Drive.</small>
                     </div>
-                    <button type="button" class="btn ghost sm" @onclick="DisconnectGoogle">Déconnecter</button>
+                    <button type="button" class="btn ghost sm" @onclick="() => OnShowAccount.InvokeAsync(ConnectedAccounts.Google)">Voir le compte</button>
                 </div>
                 <p class="csd-shared"><Ico Name="folder" Size="14" /> Collez le lien de n'importe quel dossier accessible à ce compte : ses dossiers, ceux partagés avec lui ou un Drive partagé. Aucun partage public n'est nécessaire.</p>
-                <p class="csd-shared"><Ico Name="link" Size="14" /> Compte partagé avec Google Calendar : le déconnecter arrête aussi la lecture de vos agendas Google.</p>
             }
             else if (google.Connected && GoogleAuth.IsConfigured)
             {
@@ -73,10 +72,9 @@
                         <b>@(ms.User.Length > 0 ? ms.User : "Compte Microsoft")</b>
                         <small>Connecté@(ms.Since is { } since ? $" le {since.ToLocalTime():dd.MM.yyyy}" : "") · lecture seule : rien n'est modifié dans vos fichiers.</small>
                     </div>
-                    <button type="button" class="btn ghost sm" @onclick="DisconnectMicrosoft">Déconnecter</button>
+                    <button type="button" class="btn ghost sm" @onclick="() => OnShowAccount.InvokeAsync(ConnectedAccounts.Microsoft)">Voir le compte</button>
                 </div>
                 <p class="csd-shared"><Ico Name="folder" Size="14" /> Collez le lien de partage de n'importe quel dossier accessible à ce compte : OneDrive, bibliothèque SharePoint ou dossier partagé avec lui.</p>
-                <p class="csd-shared"><Ico Name="link" Size="14" /> Compte partagé avec Microsoft 365 (agendas) : le déconnecter arrête aussi la lecture de vos agendas Microsoft.</p>
             }
             else if (ms.Connected && MsAuth.IsConfigured)
             {
@@ -154,6 +152,8 @@
     [Parameter] public EventCallback OnClose { get; set; }
     /// <summary>Connexion ou dossiers modifiés : la page Intégrations se met à jour.</summary>
     [Parameter] public EventCallback OnChanged { get; set; }
+    /// <summary>« Voir le compte » : le compte Google ou Microsoft s'affiche dans Intégrations › Comptes connectés (connexion, accès, déconnexion).</summary>
+    [Parameter] public EventCallback<string> OnShowAccount { get; set; }
 
     private DriveSourceDef Def => DriveSources.Find(Source)!;
     private bool IsGoogle => Source == "gdrive";   // sinon OneDrive et SharePoint : compte Microsoft connecté (« Se connecter avec Microsoft »), rien à saisir
@@ -214,22 +214,6 @@
     };
 
     // ---------- Connexion ----------
-
-    /// <summary>Oublie le compte Microsoft : la synchronisation s'arrête, les fichiers déjà copiés restent sur les écrans.</summary>
-    private async Task DisconnectMicrosoft()
-    {
-        MsAuth.Disconnect(Store.ClientId);
-        await Changed();
-        Toast.Ok("Compte Microsoft déconnecté. Les fichiers déjà copiés restent sur les écrans mais ne sont plus synchronisés, et les agendas Microsoft ne sont plus lus.");
-    }
-
-    /// <summary>Oublie le compte Google : la synchronisation s'arrête, les fichiers déjà copiés restent sur les écrans.</summary>
-    private async Task DisconnectGoogle()
-    {
-        await GoogleAuth.Disconnect(Store.ClientId);
-        await Changed();
-        Toast.Ok("Compte Google déconnecté. Les fichiers déjà copiés restent sur les écrans mais ne sont plus synchronisés, et les agendas Google ne sont plus lus.");
-    }
 
     private async Task Test()
     {

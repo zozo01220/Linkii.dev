@@ -36,9 +36,8 @@
                                 <b>@(ms.User.Length > 0 ? ms.User : "Compte Microsoft")</b>
                                 <small>Connecté@(ms.Since is { } since ? $" le {since.ToLocalTime():dd.MM.yyyy}" : "") · lecture seule : rien n'est modifié dans vos agendas.</small>
                             </div>
-                            <button type="button" class="btn ghost sm" @onclick="DisconnectMicrosoft">Déconnecter</button>
+                            <button type="button" class="btn ghost sm" @onclick="() => OnShowAccount.InvokeAsync(ConnectedAccounts.Microsoft)">Voir le compte</button>
                         </div>
-                        <p class="csd-shared"><Ico Name="link" Size="14" /> Compte partagé avec OneDrive et SharePoint : le déconnecter arrête aussi la synchronisation de vos dossiers.</p>
                     }
                     else if (ms.Connected)
                     {
@@ -77,9 +76,8 @@
                                 <b>@(google.User.Length > 0 ? google.User : "Compte Google")</b>
                                 <small>Connecté@(google.Since is { } since ? $" le {since.ToLocalTime():dd.MM.yyyy}" : "") · lecture seule : rien n'est modifié dans vos agendas.</small>
                             </div>
-                            <button type="button" class="btn ghost sm" @onclick="DisconnectGoogle">Déconnecter</button>
+                            <button type="button" class="btn ghost sm" @onclick="() => OnShowAccount.InvokeAsync(ConnectedAccounts.Google)">Voir le compte</button>
                         </div>
-                        <p class="csd-shared"><Ico Name="link" Size="14" /> Compte partagé avec Google Drive : le déconnecter arrête aussi la synchronisation de vos dossiers Drive.</p>
                     }
                     else if (google.Connected)
                     {
@@ -194,6 +192,8 @@
     [Parameter] public EventCallback OnClose { get; set; }
     /// <summary>Connexion ou calendriers modifiés : la page Intégrations se met à jour.</summary>
     [Parameter] public EventCallback OnChanged { get; set; }
+    /// <summary>« Voir le compte » : le compte Google ou Microsoft s'affiche dans Intégrations › Comptes connectés (connexion, accès, déconnexion).</summary>
+    [Parameter] public EventCallback<string> OnShowAccount { get; set; }
 
     private CalendarSourceDef Def => SharedCalendarSources.Find(Source)!;
 
@@ -379,24 +379,6 @@
         if (googleCalendars.FirstOrDefault(g => g.Id == e.Value?.ToString()) is not { } g) return;
         newRef = g.Id;
         newName = g.Name;
-    }
-
-    /// <summary>Oublie le compte Google : Google Calendar et Google Drive s'arrêtent (contenus et fichiers déjà en place conservés).</summary>
-    private async Task DisconnectGoogle()
-    {
-        await GoogleAuth.Disconnect(Store.ClientId);
-        googleCalendars = new();
-        await Changed();
-        Toast.Ok("Compte Google déconnecté. Les agendas ne sont plus lus et les dossiers Drive ne sont plus synchronisés.");
-    }
-
-    /// <summary>Oublie le compte Microsoft : Microsoft 365 et OneDrive / SharePoint s'arrêtent (contenus et fichiers déjà en place conservés).</summary>
-    private async Task DisconnectMicrosoft()
-    {
-        MsAuth.Disconnect(Store.ClientId);
-        msCalendars = new(); rooms = new();
-        await Changed();
-        Toast.Ok("Compte Microsoft déconnecté. Les agendas ne sont plus lus et les dossiers OneDrive ne sont plus synchronisés.");
     }
 
     private async Task Add()

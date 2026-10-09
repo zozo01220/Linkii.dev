@@ -1,43 +1,82 @@
 @page "/login"
 @layout AuthLayout
-@using System.ComponentModel.DataAnnotations
-@using Microsoft.AspNetCore.Authentication
-@using Microsoft.AspNetCore.Authentication.Cookies
 @inject JsonStore Store
 @inject NavigationManager Nav
+@inject Mailer Mail
+@inject ExternalLogin Sso
+@inject IWebHostEnvironment Env
+@inject ILogger<Login> Log
 
-<PageTitle>@(Host?.DisplayName ?? "Linkii") · Connexion</PageTitle>
+<PageTitle>@(Host?.DisplayName ?? "Linkii") · @(signup ? "Créer un espace" : "Connexion")</PageTitle>
 
 @if (Host == null || !Host.Active)
 {
     <h1>Service suspendu</h1>
     <p class="lead">Ce service est momentanément indisponible. Contactez votre administrateur.</p>
 }
+else if (signup && ticket != null)
+{
+    @* Retour de Microsoft / Google : l'adresse est prouvée, il ne manque que l'organisation et les consentements. *@
+    <h1>Dernière étape</h1>
+    <p class="lead">Nommez votre organisation pour créer votre espace.</p>
+
+    <div class="sso-who">
+        <ProviderLogo Provider="@ticket.Identity.Provider" />
+        <div class="grow"><b>@(ticket.Identity.Name is { Length: > 0 } n ? n : ticket.Identity.Email)</b><small>@ticket.Identity.Email</small></div>
+        <span class="pill ok">Adresse vérifiée</span>
+    </div>
+
+    <EditForm Model="SsoSignup" FormName="signup-sso" OnSubmit="DoSsoSignup" method="post" class="auth-form" id="signup-form">
+        <label>Organisation</label>
+        <InputText @bind-Value="SsoSignup!.Organisation" placeholder="Ex. : Horizon SA" />
+        <label>Votre nom</label>
+        <InputText @bind-Value="SsoSignup.Name" placeholder="Prénom Nom" />
+        <ConsentSwitches Model="SsoSignup!" Prefix="SsoSignup" />
+        @if (error != null) { <div class="err">@error</div> }
+        <button class="btn" type="submit" data-needs-terms>Créer mon espace</button>
+    </EditForm>
+    <p class="auth-alt"><a href="/login?signup=1" data-enhance-nav="false">Utiliser un autre compte</a></p>
+    <TermsDialog />
+}
 else if (signup)
 {
+    <span class="trial-tag">Essai gratuit · @trialDays jours · sans carte bancaire</span>
     <h1>Créez votre espace</h1>
-    <p class="lead">Créez le compte administrateur de votre organisation.</p>
+    <p class="lead">Vous serez l'administrateur de votre organisation.</p>
 
-    <EditForm Model="Signup" FormName="signup" OnValidSubmit="DoSignup" method="post" class="auth-form">
-        <DataAnnotationsValidator />
+    <SsoButtons Mode="signup" WithGoogle="@ShowGoogle" WithMicrosoft="@ShowMicrosoft" />
+    @if (ShowGoogle || ShowMicrosoft) { <div class="auth-or">ou avec votre e-mail</div> }
+    @if (ssoError != null) { <div class="err">@ssoError</div> }
+
+    <EditForm Model="EmailSignup" FormName="signup" OnSubmit="DoSignup" method="post" class="auth-form" id="signup-form">
         <label>Organisation</label>
-        <InputText @bind-Value="Signup!.Organisation" placeholder="Ex. : UNIL" />
+        <InputText @bind-Value="EmailSignup!.Organisation" placeholder="Ex. : Horizon SA" />
         <label>Votre nom</label>
-        <InputText @bind-Value="Signup.Name" placeholder="Prénom Nom" />
+        <InputText @bind-Value="EmailSignup.Name" placeholder="Prénom Nom" />
         <label>E-mail professionnel</label>
-        <InputText @bind-Value="Signup.Email" type="email" placeholder="vous@organisation.ch" autocomplete="username" />
+        <InputText @bind-Value="EmailSignup.Email" type="email" placeholder="vous@organisation.ch" autocomplete="username" />
         <label>Mot de passe <small>(8 caractères minimum)</small></label>
-        <InputText @bind-Value="Signup.Password" type="password" autocomplete="new-password" />
-        <ValidationSummary />
+        <InputText @bind-Value="EmailSignup.Password" type="password" autocomplete="new-password" />
+        <ConsentSwitches Model="EmailSignup!" Prefix="EmailSignup" />
         @if (error != null) { <div class="err">@error</div> }
-        <button class="btn" type="submit">Créer mon espace</button>
+        <button class="btn" type="submit" data-needs-terms>Créer mon espace</button>
+        <p class="terms-hint">Acceptez les conditions générales pour continuer.</p>
     </EditForm>
     <p class="auth-alt"><a href="/login">J'ai déjà un compte</a></p>
+    <TermsDialog />
 }
 else
 {
     <h1>Bon retour</h1>
     <p class="lead">Connectez-vous à votre espace @Host.DisplayName.</p>
+
+    <SsoButtons Mode="login" WithGoogle="@ShowGoogle" WithMicrosoft="@ShowMicrosoft" />
+    @if (ShowGoogle || ShowMicrosoft) { <div class="auth-or">ou avec votre e-mail</div> }
+    @if (ssoError != null) { <div class="err">@ssoError</div> }
+    @if (SsoQuery == "nolink" && Host.AllowSelfSignup && ProviderQuery is SignupSources.Google or SignupSources.Microsoft)
+    {
+        <p class="auth-alt"><a href="/login/sso/@ProviderQuery?mode=signup" data-enhance-nav="false">Créer un espace avec mon compte @SignupSources.Label(ProviderQuery)</a></p>
+    }
 
     <EditForm Model="Credentials" FormName="login" OnValidSubmit="DoLogin" method="post" class="auth-form">
         <label>E-mail</label>
@@ -56,12 +95,22 @@ else
 @code {
     [CascadingParameter] private HttpContext? Http { get; set; }
     [SupplyParameterFromForm(FormName = "login")] private LoginModel? Credentials { get; set; }
-    [SupplyParameterFromForm(FormName = "signup")] private SignupModel? Signup { get; set; }
+    [SupplyParameterFromForm(FormName = "signup")] private SignupModel? EmailSignup { get; set; }
+    [SupplyParameterFromForm(FormName = "signup-sso")] private SignupModel? SsoSignup { get; set; }
     [SupplyParameterFromQuery(Name = "signup")] private string? SignupQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "ext")] private string? Ext { get; set; }
+    [SupplyParameterFromQuery(Name = "sso")] private string? SsoQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "p")] private string? ProviderQuery { get; set; }
 
     private Reseller? Host => Http?.Items["reseller"] as Reseller;
     private bool signup => SignupQuery != null && Host is { Active: true, AllowSelfSignup: true };
-    private string? error;
+    private ExternalLogin.Ticket? ticket;
+    private string? error, ssoError;
+    private int trialDays;
+
+    // Boutons Microsoft / Google : proposés quand l'application OAuth de la plateforme est configurée (toujours en développement, pour essayer l'écran).
+    private bool ShowGoogle => Sso.IsConfigured(SignupSources.Google) || Env.IsDevelopment();
+    private bool ShowMicrosoft => Sso.IsConfigured(SignupSources.Microsoft) || Env.IsDevelopment();
 
     public class LoginModel
     {
@@ -73,24 +122,86 @@ else
     {
         public string Organisation { get; set; } = "";
         public string Name { get; set; } = "";
-        [EmailAddress(ErrorMessage = "E-mail invalide.")] public string Email { get; set; } = "";
+        public string Email { get; set; } = "";
         public string Password { get; set; } = "";
+        public bool Terms { get; set; }
+        public bool Marketing { get; set; }
+        public bool News { get; set; }
     }
 
     protected override void OnInitialized()
     {
         Credentials ??= new();
-        Signup ??= new();
-        if (Http?.User.Identity?.IsAuthenticated == true) Nav.NavigateTo(Claims.Home(Http.User), forceLoad: true);
+        EmailSignup ??= new();
+        if (Http?.User.Identity?.IsAuthenticated == true) { Nav.NavigateTo(Claims.Home(Http.User), forceLoad: true); return; }
+        trialDays = Store.Read(d => d.Platform.TrialDays);
+        if (signup && Ext != null)
+        {
+            ticket = Sso.Peek(Ext) is { Mode: ExternalLogin.SignupMode } t ? t : null;
+            if (ticket == null) ssoError = "La connexion a expiré. Recommencez.";
+            else if (SsoSignup == null)
+            {
+                SsoSignup = new() { Name = ticket.Identity.Name, Organisation = OrgFromDomain(ticket.Identity.Email) };
+            }
+        }
+        SsoSignup ??= new();
+        var provider = SignupSources.Label(ProviderQuery is SignupSources.Google or SignupSources.Microsoft ? ProviderQuery : null);
+        provider = provider == SignupSources.Label(null) ? "ce fournisseur" : provider;
+        ssoError ??= SsoQuery switch
+        {
+            null => null,
+            "denied" => "Connexion annulée.",
+            "noemail" => $"{provider} n'a pas transmis d'adresse e-mail vérifiée. Utilisez votre e-mail.",
+            "expired" => "La connexion a expiré. Recommencez.",
+            "nolink" => $"Aucun espace n'est associé à ce compte {provider}." + (Host?.AllowSelfSignup == true ? " Créez un espace ou connectez-vous avec votre e-mail." : ""),
+            "taken" => "Cette adresse a déjà un espace : connectez-vous avec votre e-mail et votre mot de passe.",
+            "suspended" => "Cet espace est suspendu. Contactez votre revendeur.",
+            "unconfigured" => "Cette connexion n'est pas encore disponible sur ce serveur. Utilisez votre e-mail.",
+            _ => $"La connexion avec {provider} a échoué. Réessayez."
+        };
     }
+
+    /// <summary>« marie@horizon-sa.ch » → « Horizon Sa » (suggestion modifiable) ; rien pour une messagerie grand public.</summary>
+    private static string OrgFromDomain(string email)
+    {
+        var domain = email.Split('@').LastOrDefault() ?? "";
+        var label = domain.Split('.').FirstOrDefault() ?? "";
+        if (label is "gmail" or "googlemail" or "outlook" or "hotmail" or "live" or "msn" or "yahoo" or "icloud" or "me" or "bluewin" or "gmx" or "protonmail" or "proton") return "";
+        return string.Join(' ', label.Split('-', StringSplitOptions.RemoveEmptyEntries).Select(w => char.ToUpperInvariant(w[0]) + w[1..]));
+    }
+
+    private Consents ConsentsOf(SignupModel m) => new(m.Terms, m.Marketing, m.News);
 
     private async Task DoSignup()
     {
         error = null;
-        var host = Host!;
-        var (client, err) = Store.Write(d => Tenancy.CreateClient(d, host, Signup!.Organisation, Signup.Name, Signup.Email, Signup.Password));
+        var m = EmailSignup!;
+        if (string.IsNullOrWhiteSpace(m.Organisation) || string.IsNullOrWhiteSpace(m.Email)) { error = "Organisation et e-mail obligatoires."; return; }
+        var now = DateTime.UtcNow;
+        var (client, admin, token, err) = Store.Write(d => Signup.Create(d, Host!, m.Organisation, m.Name, m.Email, m.Password, null, ConsentsOf(m), now));
         if (client == null) { error = err; return; }
-        await SignIn(Signup!.Email.Trim().ToLowerInvariant());
+        var link = $"{Http!.Request.Scheme}://{Http.Request.Host}/login/verify/confirm?t={Uri.EscapeDataString(token!)}";
+        var mailErr = await Mail.SendVerification(Host!, link, admin!.Name, admin.Email, client.Name, Store.Read(d => d.Platform.VerifyLinkHours));
+        if (mailErr != null) Log.LogWarning("Lien de confirmation non envoyé à {Email} : {Error}", admin.Email, mailErr);
+        Nav.NavigateTo(await SessionCookie.SignIn(Http, Store, admin.Id) + (mailErr != null ? "?mail=failed" : ""), forceLoad: true);
+    }
+
+    private async Task DoSsoSignup()
+    {
+        error = null;
+        var m = SsoSignup!;
+        if (ticket == null) { error = "La connexion a expiré. Recommencez."; return; }
+        if (string.IsNullOrWhiteSpace(m.Organisation)) { error = "Le nom de l'organisation est obligatoire."; return; }
+        var now = DateTime.UtcNow;
+        var id = ticket.Identity;
+        var (client, admin, _, err) = Store.Write(d => Signup.Create(d, Host!, m.Organisation, string.IsNullOrWhiteSpace(m.Name) ? id.Name : m.Name, id.Email, null, id, ConsentsOf(m), now));
+        if (client == null) { error = err; return; }
+        Sso.Consume(Ext);
+        var mailErr = await Mail.SendSignupWelcome(Host!, $"{Http!.Request.Scheme}://{Http.Request.Host}/", admin!.Name, admin.Email, client.Name,
+            Store.Read(d => d.Platform.TrialDays), client.TrialEndsUtc is { } end ? Signup.Day(client, end) : null, Signup.SignInHint(admin));
+        if (mailErr != null) Log.LogWarning("E-mail de bienvenue non envoyé à {Email} : {Error}", admin.Email, mailErr);
+        await SessionCookie.SignIn(Http, Store, admin.Id);
+        Nav.NavigateTo("/login/verify/done", forceLoad: true);
     }
 
     private async Task DoLogin()
@@ -99,27 +210,16 @@ else
         var host = Host!;
         var email = Credentials!.Email.Trim().ToLowerInvariant();
         var pwd = Credentials.Password;
-        var result = Store.Read(d =>
+        var (userId, result) = Store.Read(d =>
         {
             var u = d.Users.FirstOrDefault(x => x.Email == email && Tenancy.HostAllows(x, host));
-            if (u == null || u.Disabled || !Passwords.Verify(u.PasswordHash, pwd)) return "E-mail ou mot de passe incorrect.";
-            if (u.ClientId != null && d.Clients.FirstOrDefault(c => c.Id == u.ClientId)?.Suspended != false) return "Cet espace est suspendu. Contactez votre revendeur.";
-            return null;
+            if (u is { Disabled: false, HasPassword: false, ExternalProvider: { } p })
+                return ((Guid?)null, (string?)$"Ce compte se connecte avec le bouton « Continuer avec {SignupSources.Label(p)} ».");
+            if (u == null || u.Disabled || !Passwords.Verify(u.PasswordHash, pwd)) return (null, "E-mail ou mot de passe incorrect.");
+            if (u.ClientId != null && d.Clients.FirstOrDefault(c => c.Id == u.ClientId)?.Suspended != false) return (null, "Cet espace est suspendu. Contactez votre revendeur.");
+            return (u.Id, (string?)null);
         });
         if (result != null) { error = result; return; }
-        await SignIn(email);
-    }
-
-    private async Task SignIn(string email)
-    {
-        var host = Host!;
-        var (principal, mustChange) = Store.Write(d =>
-        {
-            var u = d.Users.First(x => x.Email == email && Tenancy.HostAllows(x, host));
-            u.LastLoginUtc = u.LastActiveUtc = DateTime.UtcNow;
-            return (Claims.Build(d, u), u.MustChangePassword);
-        });
-        await Http!.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal, new AuthenticationProperties { IsPersistent = true });
-        Nav.NavigateTo(mustChange ? "/login/password" : Claims.Home(principal), forceLoad: true);   // mot de passe provisoire : à remplacer d'abord
+        Nav.NavigateTo(await SessionCookie.SignIn(Http!, Store, userId!.Value), forceLoad: true);   // adresse à confirmer, mot de passe provisoire, ou accueil
     }
 }

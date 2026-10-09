@@ -50,6 +50,8 @@ builder.Services.AddSingleton<IAppProvider, YouTubeProvider>();
 builder.Services.AddSingleton<AppProviders>();
 builder.Services.AddSingleton<GoogleAuth>();   // « Se connecter avec Google » (Calendar et Drive, lecture seule)
 builder.Services.AddSingleton<MicrosoftAuth>();   // « Se connecter avec Microsoft » (agendas Microsoft 365 et OneDrive / SharePoint, lecture seule)
+builder.Services.AddSingleton<ExternalLogin>();   // « Continuer avec Microsoft / Google » sur la page de connexion (identité seulement)
+builder.Services.AddHostedService<SignupWorker>();   // inscriptions non validées supprimées, rappel et fin des essais gratuits
 builder.Services.AddSingleton<DriveService>();
 builder.Services.AddHostedService<DriveSyncWorker>();   // dossiers des Drives : synchronisés toutes les 15 minutes
 builder.Services.AddScoped<AppService>();
@@ -169,12 +171,13 @@ app.Use(async (ctx, next) =>
         var uid = ctx.User.GetGuid(ClaimTypes.NameIdentifier);
         var cid = ctx.User.GetGuid(Claims.Client);
         var store = ctx.RequestServices.GetRequiredService<JsonStore>();
-        bool mustChange = false, roleChanged = false, stale = false;
+        bool mustChange = false, roleChanged = false, stale = false, awaitsVerification = false;
         var ok = store.Read(db =>
         {
             var u = db.Users.FirstOrDefault(x => x.Id == uid && !x.Disabled);
             if (u == null || !Tenancy.HostAllows(u, host)) return false;
             mustChange = u.MustChangePassword && !ctx.User.HasClaim(c => c.Type == Claims.Impersonating);
+            awaitsVerification = u.AwaitsVerification;
             roleChanged = !ctx.User.IsInRole(u.Role);   // administrateur de l'organisation ↔ membre : le cookie est refait
             stale = u.LastActiveUtc == null || DateTime.UtcNow - u.LastActiveUtc > TimeSpan.FromHours(1);
             if (u.Role != Roles.PlatformAdmin && db.Resellers.FirstOrDefault(r => r.Id == u.ResellerId)?.Active != true) return false;
@@ -198,10 +201,10 @@ app.Use(async (ctx, next) =>
             ctx.Response.Redirect(p + ctx.Request.QueryString);
             return;
         }
-        // Mot de passe provisoire : rien d'autre n'est accessible tant qu'il n'a pas été remplacé.
-        if (mustChange && !p.StartsWithSegments("/login") && !p.StartsWithSegments("/_framework") && !p.StartsWithSegments("/_blazor"))
+        // Inscription par e-mail non confirmée, puis mot de passe provisoire : rien d'autre n'est accessible avant.
+        if ((awaitsVerification || mustChange) && !p.StartsWithSegments("/login") && !p.StartsWithSegments("/_framework") && !p.StartsWithSegments("/_blazor"))
         {
-            ctx.Response.Redirect("/login/password");
+            ctx.Response.Redirect(awaitsVerification ? "/login/verify" : "/login/password");
             return;
         }
     }
@@ -257,39 +260,111 @@ app.MapGet("/canva/connect", (HttpContext ctx, CanvaService canva) =>
     var cid = ctx.User.GetGuid(Claims.Client);
     if (cid == null) return Results.Redirect("/");
     if (!canva.IsConfigured) return Results.Redirect("/integrations?canva=unconfigured");
-    var back = $"{ctx.Request.Scheme}://{ctx.Request.Host}/integrations";
+    var back = $"{ctx.Request.Scheme}://{ctx.Request.Host}" + AccountPurposes.ReturnPage(ctx.Request);
     return Results.Redirect(canva.StartAuthorization(cid.Value, back));
 });
 app.MapGet("/canva/callback", async (HttpRequest req, CanvaService canva) =>
     Results.Redirect(await canva.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
 
-// Compte Google : « Se connecter avec Google » depuis Intégrations › Google Calendar (?for=calendar) ou Google Drive (?for=drive),
+// Compte Google : « Se connecter avec Google » depuis Intégrations › Google Calendar (?for=calendar), Google Drive (?for=drive)
+// ou Comptes connectés (?for=all&tab=comptes : retour sur cet onglet),
 // application OAuth de la plateforme, lecture seule. Un seul compte par organisation ; chaque intégration ajoute son accès.
 app.MapGet("/google/connect", (HttpContext ctx, GoogleAuth google) =>
 {
     var cid = ctx.User.GetGuid(Claims.Client);
     if (cid == null) return Results.Redirect("/");
-    var purpose = ctx.Request.Query["for"] == "calendar" ? "calendar" : "drive";
+    var purpose = AccountPurposes.Parse(ctx.Request.Query["for"]);
     if (!google.IsConfigured) return Results.Redirect($"/integrations?for={purpose}&google=unconfigured");
     var here = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
-    return Results.Redirect(google.StartAuthorization(cid.Value, purpose, here + "/integrations", here));
+    return Results.Redirect(google.StartAuthorization(cid.Value, purpose, here + AccountPurposes.ReturnPage(ctx.Request), here));
 });
-app.MapGet("/google/callback", async (HttpRequest req, GoogleAuth google) =>
-    Results.Redirect(await google.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
+app.MapGet("/google/callback", async (HttpRequest req, GoogleAuth google, ExternalLogin sso) =>
+    Results.Redirect(sso.Owns(req.Query["state"])   // « Continuer avec Google » de la page de connexion : même adresse de retour
+        ? await sso.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])
+        : await google.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
 
-// Compte Microsoft : « Se connecter avec Microsoft » depuis Intégrations › Microsoft 365 (?for=calendar) ou OneDrive et SharePoint (?for=drive),
+// Compte Microsoft : « Se connecter avec Microsoft » depuis Intégrations › Microsoft 365 (?for=calendar), OneDrive et SharePoint (?for=drive)
+// ou Comptes connectés (?for=all&tab=comptes : retour sur cet onglet),
 // application Entra ID de la plateforme, lecture seule. Un seul compte par organisation ; chaque intégration ajoute son accès.
 app.MapGet("/microsoft/connect", (HttpContext ctx, MicrosoftAuth microsoft) =>
 {
     var cid = ctx.User.GetGuid(Claims.Client);
     if (cid == null) return Results.Redirect("/");
-    var purpose = ctx.Request.Query["for"] == "calendar" ? "calendar" : "drive";
+    var purpose = AccountPurposes.Parse(ctx.Request.Query["for"]);
     if (!microsoft.IsConfigured) return Results.Redirect($"/integrations?for={purpose}&microsoft=unconfigured");
     var here = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
-    return Results.Redirect(microsoft.StartAuthorization(cid.Value, purpose, here + "/integrations", here));
+    return Results.Redirect(microsoft.StartAuthorization(cid.Value, purpose, here + AccountPurposes.ReturnPage(ctx.Request), here));
 });
-app.MapGet("/microsoft/callback", async (HttpRequest req, MicrosoftAuth microsoft) =>
-    Results.Redirect(await microsoft.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"], req.Query["error_description"])));
+app.MapGet("/microsoft/callback", async (HttpRequest req, MicrosoftAuth microsoft, ExternalLogin sso) =>
+    Results.Redirect(sso.Owns(req.Query["state"])   // « Continuer avec Microsoft » de la page de connexion : même adresse de retour
+        ? await sso.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])
+        : await microsoft.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"], req.Query["error_description"])));
+
+// ---------- Création de compte et connexion : Microsoft / Google, confirmation de l'adresse e-mail ----------
+
+// Départ : ?mode=signup (créer un espace) ou login. Le retour passe par /google/callback ou /microsoft/callback, puis /login/sso/finish.
+app.MapGet("/login/sso/{provider}", (HttpContext ctx, string provider, ExternalLogin sso) =>
+{
+    var signup = ctx.Request.Query["mode"] == ExternalLogin.SignupMode;
+    var url = sso.Start(provider, signup ? ExternalLogin.SignupMode : ExternalLogin.Login, $"{ctx.Request.Scheme}://{ctx.Request.Host}");
+    return Results.Redirect(url ?? (signup ? "/login?signup=1&sso=unconfigured" : "/login?sso=unconfigured"));
+});
+
+// Identité reçue : connexion d'un compte existant, ou dernière étape de la création d'un espace (nom de l'organisation, consentements).
+app.MapGet("/login/sso/finish", async (HttpContext ctx, string? t, ExternalLogin sso, JsonStore store) =>
+{
+    var ticket = sso.Peek(t);
+    if (ticket == null) return Results.Redirect("/login?sso=expired");
+    var host = (Reseller)ctx.Items["reseller"]!;
+    var id = ticket.Identity;
+    var (userId, problem) = store.Write(db =>
+    {
+        var u = db.Users.FirstOrDefault(x => x.ExternalProvider == id.Provider && x.ExternalId == id.Id && Tenancy.HostAllows(x, host));
+        // Google garantit l'adresse (email_verified) : un compte existant avec cette adresse est relié. Microsoft ne la garantit pas
+        // pour tous les annuaires : pas de rattachement par e-mail, le compte se connecte avec son mot de passe.
+        if (u == null && id.Provider == SignupSources.Google)
+        {
+            u = db.Users.FirstOrDefault(x => x.Email == id.Email && x.ExternalProvider == null && Tenancy.HostAllows(x, host));
+            if (u != null)
+            {
+                u.ExternalProvider = id.Provider; u.ExternalId = id.Id;
+                if (u.EmailVerifiedUtc == null) Signup.Verify(db, u, db.Clients.FirstOrDefault(c => c.Id == u.ClientId), DateTime.UtcNow);
+            }
+        }
+        if (u == null) return ((Guid?)null, (string?)(db.Users.Any(x => x.Email == id.Email && Tenancy.HostAllows(x, host)) ? "taken" : "nolink"));
+        if (u.Disabled || u.ClientId != null && db.Clients.FirstOrDefault(c => c.Id == u.ClientId)?.Suspended != false) return (null, "suspended");
+        return (u.Id, null);
+    });
+    if (userId is { } uid)
+    {
+        sso.Consume(t);
+        return Results.Redirect(await SessionCookie.SignIn(ctx, store, uid));
+    }
+    if (problem == "nolink" && ticket.Mode == ExternalLogin.SignupMode && host is { Active: true, AllowSelfSignup: true })
+        return Results.Redirect("/login?signup=1&ext=" + Uri.EscapeDataString(t!));   // nouvel espace : le ticket reste valable pour la dernière étape
+    sso.Consume(t);
+    return Results.Redirect($"/login?sso={problem}&p={id.Provider}");
+});
+
+// Lien de l'e-mail de confirmation : l'adresse est validée, l'essai démarre, l'e-mail de bienvenue part.
+app.MapGet("/login/verify/confirm", async (HttpContext ctx, string? t, JsonStore store, Mailer mail, ILogger<Program> log) =>
+{
+    var now = DateTime.UtcNow;
+    var (result, user, client, reseller) = store.Write(db =>
+    {
+        var (r, u, c) = Signup.Confirm(db, t, now);
+        return (r, u, c, db.Resellers.FirstOrDefault(x => x.Id == c?.ResellerId));
+    });
+    if (result != Signup.ConfirmResult.Ok) return Results.Redirect("/login/verify/done?state=" + (result == Signup.ConfirmResult.Expired ? "expired" : "invalid"));
+    if (reseller != null)
+    {
+        var err = await mail.SendSignupWelcome(reseller, $"{ctx.Request.Scheme}://{ctx.Request.Host}/", user!.Name, user.Email, client!.Name,
+            store.Read(db => db.Platform.TrialDays), client.TrialEndsUtc is { } end ? Signup.Day(client, end) : null, Signup.SignInHint(user));
+        if (err != null) log.LogWarning("E-mail de bienvenue non envoyé à {Email} : {Error}", user.Email, err);
+    }
+    await SessionCookie.SignIn(ctx, store, user!.Id);
+    return Results.Redirect("/login/verify/done");
+});
 
 app.MapPost("/logout", async (HttpContext ctx) =>
 {
@@ -399,9 +474,9 @@ static Screen? Auth(HttpRequest r, Db db)
     return s;
 }
 
-/// <summary>401 si le jeton est inconnu, 403 si le client ou le revendeur de l'écran est suspendu.</summary>
+/// <summary>401 si le jeton est inconnu, 403 si le client ou le revendeur de l'écran est suspendu, ou l'essai gratuit terminé (reason : suspended | trial).</summary>
 static IResult? Gate(Screen? s, Db db) =>
-    s == null ? Results.Unauthorized() : !Tenancy.IsActive(db, s) ? Results.StatusCode(403) : null;
+    s == null ? Results.Unauthorized() : Tenancy.Blocked(db, s) is { } why ? Results.Json(new { reason = why }, statusCode: 403) : null;
 
 api.MapGet("/player/playlist", (HttpRequest req, JsonStore store) => store.Read(db =>
 {
@@ -426,8 +501,8 @@ api.MapGet("/player/playlist", (HttpRequest req, JsonStore store) => store.Read(
         serverNow = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
         sync = epoch is { } e ? new { epoch = Helpers.EpochMs(e) } : null,
         // mur d'écrans : l'écran n'affiche que sa portion (colonne, ligne) de l'image de tout le mur
-        wall = Helpers.Wall(db.Areas, s) is { } w ? new { cols = w.Cols, rows = w.Rows, col = w.Col, row = w.Row } : null,
-        items = Sync(s.PublishedVersion > 0 ? s.Published : p?.Published ?? new List<PublishedItem>()).Select(i => i.ForPlayer()),   // repli : écran jamais publié depuis le passage à la publication par écran
+        wall = Helpers.Wall(db.Areas, s!) is { } w ? new { cols = w.Cols, rows = w.Rows, col = w.Col, row = w.Row } : null,
+        items = Sync(s!.PublishedVersion > 0 ? s!.Published : p?.Published ?? new List<PublishedItem>()).Select(i => i.ForPlayer()),   // repli : écran jamais publié depuis le passage à la publication par écran
         // découpage publié : tailles des zones (en %), côte à côte en paysage, empilées en portrait ; zones 2 et 3 avec leur propre liste
         layout = new
         {
