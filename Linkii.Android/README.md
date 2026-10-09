@@ -1,0 +1,47 @@
+# Linkii Player — application Android
+
+Coquille native autour du player web (`Linkii.Poc/wwwroot/player`). Le player garde l'appairage par code, la diffusion
+et le cache hors ligne (service worker + Cache Storage) ; l'application ajoute le démarrage automatique, le plein écran
+permanent, l'écran toujours allumé, la relance en cas de panne et un menu technicien. Aucune dépendance (pas d'AndroidX).
+
+Visuel validé : `maquettes/player-android.html`.
+
+## Compiler
+
+JDK 17 ou plus (celui d'Android Studio convient), SDK Android 35.
+
+```bash
+cd Linkii.Android
+./gradlew :app:assembleDebug          # app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:bundleRelease          # app/build/outputs/bundle/release/app-release.aab (Google Play)
+```
+
+Adresse du serveur par défaut : `-PserverUrl=https://app.exemple.ch` (modifiable ensuite sur l'appareil).
+Le serveur doit être en **HTTPS** : sans cela le service worker ne démarre pas et il n'y a pas de mode hors ligne
+(seuls `localhost` et `10.0.2.2` sont admis en HTTP, pour le développement).
+
+## Publier sur Google Play
+
+1. Créer une clé d'envoi (`keytool -genkeypair -v -keystore linkii-upload.jks -alias linkii -keyalg RSA -keysize 2048 -validity 10000`) et la garder hors du dépôt.
+2. Dans `~/.gradle/gradle.properties` : `LINKII_KEYSTORE`, `LINKII_KEYSTORE_PASSWORD`, `LINKII_KEY_ALIAS`, `LINKII_KEY_PASSWORD`.
+3. `./gradlew :app:bundleRelease`, puis envoyer le `.aab` dans la Play Console (compte développeur requis, 25 USD une fois).
+4. Fiche : catégorie « Professionnel », politique de confidentialité obligatoire, formulaire « Sécurité des données ».
+   Pour Android TV : ajouter des captures 1920×1080 et une bannière 1280×720 (la bannière du dépôt est provisoire).
+
+## Menu technicien
+
+Cinq appuis sur OK (télécommande) ou cinq touchers dans le coin supérieur droit, en moins de 3 secondes.
+Code PIN par défaut : 9999 (modifiable depuis le menu ; vide = menu sans code).
+
+## Démarrage automatique
+
+- Définir Linkii comme **écran d'accueil** de l'appareil (recommandé sur un boîtier) : lancement direct à l'allumage.
+- Ou activer *Autoriser le démarrage automatique* dans le menu technicien (affichage par-dessus les autres applications, requis par Android 10+).
+- Verrouillage kiosque (`startLockTask`) : automatique si l'appareil est géré (MDM / propriétaire de l'appareil).
+
+## Limites connues
+
+- Le cache hors ligne est celui du WebView (quota géré par Android, effaçable par le système en cas de manque d'espace).
+  Si l'usage montre des pertes de médias, passer à un téléchargement natif des médias (`DownloadManager` + serveur local).
+- Le PIN n'est pas encore défini depuis le back-office.
+- Icône et bannière provisoires (vectorielles).
