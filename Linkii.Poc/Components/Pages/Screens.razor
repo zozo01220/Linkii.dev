@@ -12,7 +12,7 @@
     </div>
     <div class="row head-actions">
         <button class="btn ghost" disabled="@(selectedIds.Count == 0 || bulkPublishing)" title="@(selectedIds.Count == 0 ? "Cochez un ou plusieurs écrans" : null)" @onclick="() => AskPublish(selectedIds.ToList())">
-            <Ico Name="upload" Size="16" /> @(bulkPublishing ? "Publication…" : selectedIds.Count == 0 ? "Publier" : $"Publier ({selectedIds.Count})")
+            <Ico Name="upload" Size="16" /> @(bulkPublishing ? "Publication…" : "Publier")
         </button>
         @if (area != null && manageZones)
         {
@@ -56,18 +56,35 @@
 }
 @if (screens.Count > 0)
 {
-    <div class="sel-line" role="region" aria-label="Sélection d'écrans" aria-live="polite">
+    <div class="lib-tools" role="region" aria-label="Filtres et sélection" aria-live="polite">
+        <label class="lib-all">
+            <input type="checkbox" class="sc-check" checked="@(Shown.Count > 0 && Shown.All(s => selectedIds.Contains(s.Id)))" @onchange="ToggleAll" aria-label="Tout sélectionner" />
+            @if (selectedIds.Count > 0) { <span>@selectedIds.Count sélectionné@(selectedIds.Count > 1 ? "s" : "")</span> }
+        </label>
         @if (selectedIds.Count > 0)
         {
-            <span>@selectedIds.Count écran@(selectedIds.Count > 1 ? "s" : "") sélectionné@(selectedIds.Count > 1 ? "s" : "")</span>
-            <button type="button" class="linklike" @onclick="() => selectedIds.Clear()">Désélectionner</button>
+            @if (zones.Count > 0) { <button type="button" class="btn ghost sm" @onclick="OpenZoneMove"><Ico Name="box" Size="14" /> Changer de zone…</button> }
+            @if (otherAreas.Count > 0) { <button class="btn ghost sm" @onclick="OpenBulkAreaMove"><Ico Name="move" Size="14" /> Déplacer vers une autre aire…</button> }
+            <button class="btn danger sm" @onclick="() => deleting = screens.Where(s => selectedIds.Contains(s.Id)).ToList()"><Ico Name="trash" Size="14" /> Supprimer</button>
         }
-        @if (zones.Count > 0 && selectedIds.Count > 0) { <button type="button" class="linklike" @onclick="OpenZoneMove">Changer de zone…</button> }
-        @if (otherAreas.Count > 0 && selectedIds.Count > 0) { <button class="btn ghost sm" @onclick="OpenBulkAreaMove"><Ico Name="move" Size="14" /> Déplacer vers une autre aire…</button> }
-        @if (selectedIds.Count < Shown.Count) { <button type="button" class="linklike" @onclick="SelectAll">Tout sélectionner</button> }
-        <span class="grow"></span>
+        <div class="seg" role="tablist" aria-label="État des écrans">
+            <button type="button" class="@(statusFilter == "" ? "on" : "")" @onclick='() => statusFilter = ""'>Tous <small>@InZone.Count</small></button>
+            <button type="button" class="@(statusFilter == "online" ? "on" : "")" @onclick='() => statusFilter = "online"'>En ligne <small>@InZone.Count(s => !IsOffline(s))</small></button>
+            <button type="button" class="@(statusFilter == "offline" ? "on" : "")" @onclick='() => statusFilter = "offline"'>Hors ligne <small>@InZone.Count(IsOffline)</small></button>
+            <button type="button" class="@(statusFilter == "pending" ? "on" : "")" @onclick='() => statusFilter = "pending"'>À publier <small>@InZone.Count(s => Helpers.HasPending(s, playlists))</small></button>
+        </div>
+        <div class="search-box grow" style="margin:0">
+            <Ico Name="search" Size="16" />
+            <input placeholder="Rechercher des écrans" aria-label="Rechercher des écrans" @bind="search" @bind:event="oninput" />
+        </div>
+        <select @bind="sort" aria-label="Trier">
+            <option value="name">Nom</option>
+            <option value="status">État</option>
+            <option value="pending">À publier d'abord</option>
+        </select>
         <ViewToggle StorageKey="screens" @bind-Value="view" />
     </div>
+    @if (Shown.Count == 0) { <div class="empty"><div class="big">Aucun écran trouvé</div></div> }
 }
 
 <div class="pl-grid @(view == "list" ? "list" : "")">
@@ -94,7 +111,7 @@
                                 <button type="button" role="menuitem" @onclick="() => OpenRename(sc)"><Ico Name="edit" Size="16" /> Renommer</button>
                                 <button type="button" role="menuitem" @onclick="() => AskPublish(new() { sc.Id })"><Ico Name="upload" Size="16" /> Publier</button>
                                 @if (otherAreas.Count > 0) { <button type="button" role="menuitem" @onclick="() => OpenAreaMove(sc)"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
-                                <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = sc; }"><Ico Name="trash" Size="16" /> Supprimer</button>
+                                <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = new() { sc }; }"><Ico Name="trash" Size="16" /> Supprimer</button>
                             </div>
                         }
                     </div>
@@ -196,16 +213,17 @@
     </div>
 }
 
-@if (deleting != null)
+@if (deleting is { Count: > 0 } del)
 {
-    var d = deleting;
+    var many = del.Count > 1;
     <div class="modal-backdrop" @onclick="() => deleting = null"></div>
     <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="del-title">
-        <h3 id="del-title">Supprimer « @d.Name » ?</h3>
-        <p class="hint">L'écran sera déconnecté et affichera de nouveau un code d'appairage. Sa liste de lecture n'est pas supprimée.</p>
+        <h3 id="del-title">Supprimer @(many ? $"{del.Count} écrans" : $"« {del[0].Name} »") ?</h3>
+        @if (many) { <p class="hint"><b>@string.Join(", ", del.Select(s => s.Name))</b></p> }
+        <p class="hint">@(many ? "Les écrans seront déconnectés et afficheront" : "L'écran sera déconnecté et affichera") de nouveau un code d'appairage. @(many ? "Leurs listes de lecture ne sont pas supprimées." : "Sa liste de lecture n'est pas supprimée.")</p>
         <div class="modal-actions">
             <button class="btn ghost" @onclick="() => deleting = null">Annuler</button>
-            <button class="btn danger-solid" @onclick="() => Remove(d)">Supprimer</button>
+            <button class="btn danger-solid" @onclick="() => Remove(del)">Supprimer</button>
         </div>
     </div>
 }
@@ -285,7 +303,7 @@
     private bool showPair;
     private Timer? timer;
     private Guid? menuFor, editing;
-    private Screen? deleting;
+    private List<Screen>? deleting;   // écrans en attente de confirmation de suppression
     private string view = "cards";   // cards | list (mémorisé dans le navigateur)
 
     protected override void OnInitialized()
@@ -319,9 +337,40 @@
 
     private Zone? ZoneOf(Screen s) => zones.FirstOrDefault(z => z.Id == s.ZoneId);
 
-    private List<Screen> Shown => zoneFilter == null ? screens
+    private string statusFilter = "", search = "", sort = "name";   // statusFilter : "" | online | offline | pending
+
+    private bool IsOffline(Screen s) => Status(s) is not ("En ligne" or "Mise à jour");
+
+    // Écrans de la zone ouverte : base des compteurs du filtre d'état.
+    private List<Screen> InZone => zoneFilter == null ? screens
         : zoneFilter == "none" ? screens.Where(x => ZoneOf(x) == null).ToList()
         : screens.Where(x => x.ZoneId?.ToString() == zoneFilter).ToList();
+
+    private List<Screen> Shown
+    {
+        get
+        {
+            var q = InZone.Where(s => statusFilter switch
+            {
+                "online" => !IsOffline(s),
+                "offline" => IsOffline(s),
+                "pending" => Helpers.HasPending(s, playlists),
+                _ => true
+            }).Where(s => search.Length == 0 || s.Name.Contains(search, StringComparison.OrdinalIgnoreCase));
+            return (sort switch
+            {
+                "status" => q.OrderBy(s => IsOffline(s)).ThenBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase),
+                "pending" => q.OrderByDescending(s => Helpers.HasPending(s, playlists)).ThenBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase),
+                _ => q.OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase)
+            }).ToList();
+        }
+    }
+
+    private void ToggleAll()
+    {
+        var vis = Shown.Select(s => s.Id).ToList();
+        if (vis.All(selectedIds.Contains)) selectedIds.ExceptWith(vis); else selectedIds.UnionWith(vis);
+    }
 
     private void CloseZones() { showZones = false; Reload(); }
 
@@ -400,7 +449,6 @@
 
     private void ToggleSelect(Guid id) { if (!selectedIds.Remove(id)) selectedIds.Add(id); }
 
-    private void SelectAll() { foreach (var s in Shown) selectedIds.Add(s.Id); }
 
     private void AskPublish(List<Guid> ids)
     {
@@ -461,11 +509,12 @@
         if (focusRename && renamingScreen != null) { focusRename = false; await renameInput.FocusAsync(); }
     }
 
-    private void Remove(Screen s)
+    private void Remove(List<Screen> list)
     {
-        selectedIds.Remove(s.Id);
-        Store.Write(d => { d.Screens.RemoveAll(x => x.Id == s.Id); });
-        Toast.Ok($"Écran « {s.Name} » supprimé.");
+        var ids = list.Select(x => x.Id).ToHashSet();
+        selectedIds.ExceptWith(ids);
+        Store.Write(d => { d.Screens.RemoveAll(x => ids.Contains(x.Id)); });
+        Toast.Ok(list.Count > 1 ? $"{list.Count} écrans supprimés." : $"Écran « {list[0].Name} » supprimé.");
         deleting = null;
         Reload();
     }

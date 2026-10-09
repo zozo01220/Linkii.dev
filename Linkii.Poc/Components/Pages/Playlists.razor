@@ -17,24 +17,33 @@
 
 @if (playlists.Count > 0)
 {
-    <div class="pl-tools">
-        <label for="pl-sort">Trier par</label>
-        <select id="pl-sort" @bind="sort">
-            <option value="recent">Plus récentes</option>
-            <option value="name">Nom</option>
-        </select>
-        <span class="grow"></span>
-        <ViewToggle StorageKey="playlists" @bind-Value="view" />
-    </div>
-    <div class="sel-line" role="region" aria-label="Sélection de listes de lecture" aria-live="polite">
+    <div class="lib-tools" role="region" aria-label="Filtres et sélection" aria-live="polite">
+        <label class="lib-all">
+            <input type="checkbox" class="sc-check" checked="@(Sorted.Any() && Sorted.All(p => picked.Contains(p.Id)))" @onchange="ToggleAll" aria-label="Tout sélectionner" />
+            @if (picked.Count > 0) { <span>@picked.Count sélectionnée@(picked.Count > 1 ? "s" : "")</span> }
+        </label>
         @if (picked.Count > 0)
         {
-            <span>@picked.Count liste@(picked.Count > 1 ? "s" : "") sélectionnée@(picked.Count > 1 ? "s" : "")</span>
-            <button type="button" class="linklike" @onclick="() => picked.Clear()">Désélectionner</button>
             @if (canMove) { <button class="btn ghost sm" @onclick="() => bulkMove = true"><Ico Name="move" Size="14" /> Déplacer vers une autre aire…</button> }
+            <button class="btn danger sm" @onclick="() => deleting = playlists.Where(x => picked.Contains(x.Id)).ToList()"><Ico Name="trash" Size="14" /> Supprimer</button>
         }
-        @if (picked.Count < playlists.Count) { <button type="button" class="linklike" @onclick="() => picked.UnionWith(playlists.Select(x => x.Id))">Tout sélectionner</button> }
+        <div class="seg" role="tablist" aria-label="Utilisation des listes de lecture">
+            <button type="button" class="@(filter == "" ? "on" : "")" @onclick='() => filter = ""'>Toutes <small>@playlists.Count</small></button>
+            <button type="button" class="@(filter == "used" ? "on" : "")" @onclick='() => filter = "used"'>Utilisées <small>@playlists.Count(IsUsed)</small></button>
+            <button type="button" class="@(filter == "unused" ? "on" : "")" @onclick='() => filter = "unused"'>Non utilisées <small>@playlists.Count(p => !IsUsed(p))</small></button>
+        </div>
+        <div class="search-box grow" style="margin:0">
+            <Ico Name="search" Size="16" />
+            <input placeholder="Rechercher des listes de lecture" aria-label="Rechercher des listes de lecture" @bind="search" @bind:event="oninput" />
+        </div>
+        <select @bind="sort" aria-label="Trier">
+            <option value="recent">Plus récentes</option>
+            <option value="name">Nom</option>
+            <option value="used">Plus utilisées</option>
+        </select>
+        <ViewToggle StorageKey="playlists" @bind-Value="view" />
     </div>
+    @if (!Sorted.Any()) { <div class="empty"><div class="big">Aucune liste de lecture trouvée</div></div> }
 }
 
 <div class="pl-grid @(view == "list" ? "list" : "")">
@@ -67,7 +76,7 @@
                                 <button type="button" role="menuitem" @onclick="() => OpenRename(pl)"><Ico Name="edit" Size="16" /> Renommer</button>
                                 <button type="button" role="menuitem" @onclick="() => Duplicate(pl)"><Ico Name="copy" Size="16" /> Dupliquer</button>
                                 @if (canMove) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; moving = pl; }"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
-                                <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = pl; }"><Ico Name="trash" Size="16" /> Supprimer</button>
+                                <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = new() { pl }; }"><Ico Name="trash" Size="16" /> Supprimer</button>
                             </div>
                         }
                     </div>
@@ -109,24 +118,25 @@
     <AreaMoveDialog Kind="playlist" Items="playlists.Where(x => picked.Contains(x.Id)).Select(x => (x.Id, x.Name)).ToList()" OnClose="moved => { bulkMove = false; if (moved) Load(); }" />
 }
 
-@if (deleting != null)
+@if (deleting is { Count: > 0 } del)
 {
-    var d = deleting;
-    var used = screens.Where(s => s.ZonePlaylists().Contains(d.Id)).ToList();
+    var ids = del.Select(x => x.Id).ToHashSet();
+    var used = screens.Where(s => s.ZonePlaylists().Any(z => z is { } zid && ids.Contains(zid))).ToList();
+    var many = del.Count > 1;
     <div class="modal-backdrop" @onclick="() => deleting = null"></div>
     <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="del-title">
-        <h3 id="del-title">Supprimer « @d.Name » ?</h3>
+        <h3 id="del-title">Supprimer @(many ? $"{del.Count} listes de lecture" : $"« {del[0].Name} »") ?</h3>
         @if (used.Count == 0)
         {
-            <p class="hint">Aucun écran ne l'utilise. Les contenus restent dans la médiathèque.</p>
+            <p class="hint">Aucun écran @(many ? "ne les utilise" : "ne l'utilise"). Les contenus restent dans la médiathèque.</p>
         }
         else
         {
-            <p class="hint">Elle est choisie sur : <b>@string.Join(", ", used.Select(s => s.Name))</b>. Ces écrans gardent ce qu'ils diffusent jusqu'à leur prochaine publication, puis n'auront plus de liste de lecture.</p>
+            <p class="hint">@(many ? "Elles sont choisies" : "Elle est choisie") sur : <b>@string.Join(", ", used.Select(s => s.Name))</b>. Ces écrans gardent ce qu'ils diffusent jusqu'à leur prochaine publication, puis n'auront plus de liste de lecture.</p>
         }
         <div class="modal-actions">
             <button class="btn ghost" @onclick="() => deleting = null">Annuler</button>
-            <button class="btn danger-solid" @onclick="() => Delete(d)">Supprimer</button>
+            <button class="btn danger-solid" @onclick="() => Delete(del)">Supprimer</button>
         </div>
     </div>
 }
@@ -143,7 +153,8 @@
 
     private List<Screen> screens = new();
     private Guid? menuFor;
-    private Playlist? renamingPl, deleting;
+    private Playlist? renamingPl;
+    private List<Playlist>? deleting;   // listes en attente de confirmation de suppression
 
     protected override void OnInitialized() => Load();
 
@@ -161,9 +172,31 @@
         picked.IntersectWith(playlists.Select(x => x.Id));
     }
 
-    private IEnumerable<Playlist> Sorted => sort == "name"
-        ? playlists.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)
-        : playlists.OrderByDescending(p => p.UpdatedAt ?? DateTime.MinValue).ThenBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase);
+    private string filter = "", search = "";   // filter : "" | used | unused
+
+    private bool IsUsed(Playlist p) => screens.Any(s => s.ZonePlaylists().Contains(p.Id));
+
+    // Filtrées (usage, recherche) puis triées ; les listes sélectionnées mais masquées par un filtre restent sélectionnées.
+    private IEnumerable<Playlist> Sorted
+    {
+        get
+        {
+            var q = playlists.Where(p => filter == "" || IsUsed(p) == (filter == "used"))
+                             .Where(p => search.Length == 0 || p.Name.Contains(search, StringComparison.OrdinalIgnoreCase));
+            return sort switch
+            {
+                "name" => q.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase),
+                "used" => q.OrderByDescending(p => screens.Count(s => s.ZonePlaylists().Contains(p.Id))).ThenBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase),
+                _ => q.OrderByDescending(p => p.UpdatedAt ?? DateTime.MinValue).ThenBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)
+            };
+        }
+    }
+
+    private void ToggleAll()
+    {
+        var vis = Sorted.Select(p => p.Id).ToList();
+        if (vis.All(picked.Contains)) picked.ExceptWith(vis); else picked.UnionWith(vis);
+    }
 
     private void OpenCreate() { renamingPl = null; newName = ""; creating = true; focusName = true; }
 
@@ -222,13 +255,14 @@
     }
 
     // Les écrans qui la diffusent gardent leur instantané publié ; elle n'est simplement plus choisie (modification en attente sur ces écrans).
-    private void Delete(Playlist p)
+    private void Delete(List<Playlist> list)
     {
+        var ids = list.Select(x => x.Id).ToHashSet();
         Store.Write(d =>
         {
-            foreach (var s in d.Screens.Where(s => s.PlaylistId == p.Id))
+            foreach (var s in d.Screens.Where(s => s.PlaylistId is { } pid && ids.Contains(pid)))
             {
-                if (s.PublishedVersion == 0 && d.Playlists.FirstOrDefault(x => x.Id == p.Id) is { } old)   // écran jamais publié depuis : il garde l'ancien instantané
+                if (s.PublishedVersion == 0 && d.Playlists.FirstOrDefault(x => x.Id == s.PlaylistId) is { } old)   // écran jamais publié depuis : il garde l'ancien instantané
                 {
                     s.Published = old.Published.ToList();
                     s.PublishedVersion = 1;
@@ -236,12 +270,12 @@
                 s.PlaylistId = null;
             }
             foreach (var s in d.Screens)   // zones 2 et 3 des écrans découpés
-                for (var z = 0; z < s.ZonePlaylistIds.Count; z++) if (s.ZonePlaylistIds[z] == p.Id) s.ZonePlaylistIds[z] = null;
-            d.Playlists.RemoveAll(x => x.Id == p.Id);
+                for (var z = 0; z < s.ZonePlaylistIds.Count; z++) if (s.ZonePlaylistIds[z] is { } zid && ids.Contains(zid)) s.ZonePlaylistIds[z] = null;
+            d.Playlists.RemoveAll(x => ids.Contains(x.Id));
         });
-        Toast.Ok($"Liste de lecture « {p.Name} » supprimée.");
+        Toast.Ok(list.Count > 1 ? $"{list.Count} listes de lecture supprimées." : $"Liste de lecture « {list[0].Name} » supprimée.");
         deleting = null;
-        picked.Remove(p.Id);
+        picked.ExceptWith(ids);
         Load();
     }
 
