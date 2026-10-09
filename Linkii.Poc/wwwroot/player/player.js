@@ -17,7 +17,7 @@
     cleanup: null,
     overlayStops: []
   };
-  var cfg = { orientation: 'landscape', resolution: 'auto', timezone: null, reloadHour: 4 };
+  var cfg = { orientation: 'landscape', resolution: 'auto', timezone: null, reloadHour: 4, wall: null };   // wall : place de l'écran dans un mur {cols, rows, col, row}
 
   function $(id) { return document.getElementById(id); }
   function deviceSize() {
@@ -67,16 +67,24 @@
   function serverNow() { return Date.now() + clock.offset; }
 
   // Position commune dans une boucle de contenus : se déduit de l'heure du serveur et de l'origine de la zone. { index, left } (ms restantes sur le contenu).
+  // start : heure commune du début de ce créneau (origine de la lecture du contenu, pour les apps).
   function syncPick(slides, epoch) {
-    var total = 0, k;
+    var total = 0, k, now = serverNow();
     for (k = 0; k < slides.length; k++) total += Math.max(1, slides[k].durationSec) * 1000;
-    var t = (((serverNow() - epoch) % total) + total) % total, acc = 0;
+    var t = (((now - epoch) % total) + total) % total, acc = 0;
     for (k = 0; k < slides.length; k++) {
       var d = Math.max(1, slides[k].durationSec) * 1000;
-      if (t < acc + d) return { index: k, left: acc + d - t };
+      if (t < acc + d) return { index: k, left: acc + d - t, start: now - (t - acc) };
       acc += d;
     }
-    return { index: 0, left: total };
+    return { index: 0, left: total, start: now - t };
+  }
+
+  // Options passées au rendu d'un contenu. Zone synchronisée : origine commune (le contenu se déroule à l'heure commune,
+  // sans fin anticipée : c'est le créneau qui le remplace). Sinon : fin décidée par l'app pour une durée « content ».
+  function slideOpts(item, origin, onEnded, onFailed) {
+    if (origin != null) return { sync: { origin: origin, now: serverNow } };
+    return item.durationMode === 'content' ? { onEnded: onEnded, onFailed: onFailed } : null;
   }
   // Durée à laisser à un contenu affiché : jusqu'à la fin de son créneau commun (1 ms s'il est déjà en retard : le suivant le remplace aussitôt).
   function syncLeft(slides, item, epoch) {
@@ -182,11 +190,19 @@
     } else { W = availW; H = availH; }
     stage.classList.toggle('phone', phone);   // images et vidéos remplissent l'écran du téléphone (recadrées) au lieu de laisser des bandes
     var s = Math.min(availW / W, availH / H);
-    stage.style.width = W + 'px';
-    stage.style.height = H + 'px';
-    stage.style.fontSize = (W / 100) + 'px';   // 1em = 1 % de la largeur de la scène
+    // Mur d'écrans : la scène est l'image de tout le mur (colonnes × lignes écrans) ; elle est décalée pour que seule
+    // la portion de cet écran (sa colonne, sa ligne) soit au centre de l'écran. Le reste déborde, hors de la vue.
+    var wall = cfg.wall, SW = W, SH = H, dx = 0, dy = 0;
+    if (wall && wall.cols > 0 && wall.rows > 0) {
+      SW = W * wall.cols; SH = H * wall.rows;
+      dx = W * (wall.cols - 1 - 2 * wall.col) / 2;
+      dy = H * (wall.rows - 1 - 2 * wall.row) / 2;
+    }
+    stage.style.width = SW + 'px';
+    stage.style.height = SH + 'px';
+    stage.style.fontSize = (SW / 100) + 'px';   // 1em = 1 % de la largeur de la scène
     stage.style.webkitTransform = stage.style.transform =
-      'translate(-50%, -50%) rotate(' + rot + 'deg) scale(' + s + ')';
+      'translate(-50%, -50%) rotate(' + rot + 'deg) scale(' + s + ')' + (dx || dy ? ' translate(' + dx + 'px, ' + dy + 'px)' : '');
     sizeZones();
   }
   window.addEventListener('resize', layout);
@@ -195,7 +211,25 @@
     if (!pl) return;
     if (pl.screen) { cfg.orientation = pl.screen.orientation || 'landscape'; cfg.resolution = pl.screen.resolution || 'auto'; }
     if (pl.settings) { cfg.timezone = pl.settings.timezone || null; if (pl.settings.reloadHour != null) cfg.reloadHour = pl.settings.reloadHour; }
+    cfg.wall = pl.wall || null;
     layout();
+  }
+
+  /* ---------- Identification (assemblage d'un mur) : grand numéro pendant 5 s ---------- */
+  var identTimer = null;
+  function identify(label) {
+    var el = $('ident');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'ident';
+      el.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:1000;display:flex;align-items:center;justify-content:center;' +
+        'background:rgba(11,31,58,.92);color:#fff;font-weight:500;font-size:60vmin;line-height:1;font-family:"IBM Plex Sans","Segoe UI",Arial,sans-serif';
+      document.body.appendChild(el);
+    }
+    el.textContent = label;
+    el.style.display = 'flex';
+    clearTimeout(identTimer);
+    identTimer = setTimeout(function () { el.style.display = 'none'; }, 5000);
   }
 
   /* ---------- Appairage ---------- */
@@ -732,10 +766,11 @@
     }
     function skip() { if (!shown) { shown = true; state.timer = setTimeout(next, 1000); } }
 
-    renderSlide(layer, item, item.durationMode === 'content' ? {
-      onEnded: function () { if (slides.length > 1 && state.shownItem === item) next(); else if (slides.length <= 1 && state.shownItem === item) restartYoutube(layer); },
-      onFailed: function () { if (state.shownItem === item) next(); }
-    } : null, function (cleanup) { newCleanup = cleanup; show(); }, skip);
+    var origin = epoch != null ? pick.start : pl.sync ? pl.sync.epoch : null;   // un seul contenu synchronisé : il se déroule depuis l'origine de la zone
+    renderSlide(layer, item, slideOpts(item, origin,
+      function () { if (slides.length > 1 && state.shownItem === item) next(); else if (slides.length <= 1 && state.shownItem === item) restartYoutube(layer); },
+      function () { if (state.shownItem === item) next(); }
+    ), function (cleanup) { newCleanup = cleanup; show(); }, skip);
   }
 
   // Affiche un contenu dans un calque : onShow(nettoyage) quand il est prêt, onSkip s'il est illisible.
@@ -750,7 +785,19 @@
     } else if (item.type === 'video') {
       var v = document.createElement('video'), vSrc = null;
       v.muted = true; v.loop = true; v.autoplay = true; v.setAttribute('playsinline', '');
-      var vClean = function () { try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {} if (vSrc) vSrc.revoke(); };
+      var vSync = appOpts && appOpts.sync, vAlign = null;
+      var vClean = function () { clearInterval(vAlign); try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {} if (vSrc) vSrc.revoke(); };
+      if (vSync) {   // zone synchronisée : position de la vidéo = temps écoulé depuis l'origine commune (modulo sa durée)
+        var vWant = function () { return ((vSync.now() - vSync.origin) / 1000) % v.duration; };
+        v.onloadedmetadata = function () { try { v.currentTime = vWant(); } catch (e) {} };
+        vAlign = setInterval(function () {
+          if (!v.duration || !isFinite(v.duration)) return;
+          var diff = v.currentTime - vWant();
+          if (diff > v.duration / 2) diff -= v.duration; else if (diff < -v.duration / 2) diff += v.duration;
+          if (Math.abs(diff) > 0.5) { try { v.currentTime = vWant(); } catch (e) {} v.playbackRate = 1; }
+          else v.playbackRate = Math.abs(diff) > 0.04 ? (diff > 0 ? 0.95 : 1.05) : 1;
+        }, 1000);
+      }
       v.oncanplay = function () { onShow(vClean); try { v.play(); } catch (e) {} };
       v.onerror = onSkip;
       layer.appendChild(v);
@@ -818,10 +865,11 @@
       }
       var layer = layers[1 - active], old = layers[active], oldCleanup = cleanup, shown = false;
       layer.innerHTML = '';
-      renderSlide(layer, item, item.durationMode === 'content' && slides.length > 1 ? {
-        onEnded: function () { if (shownItem === item) step(); },
-        onFailed: function () { if (shownItem === item) step(); }
-      } : null, function (c) {
+      var origin = epoch != null ? pick.start : sync ? sync.epoch : null;
+      renderSlide(layer, item, origin != null || slides.length > 1 ? slideOpts(item, origin,
+        function () { if (shownItem === item) step(); },
+        function () { if (shownItem === item) step(); }
+      ) : null, function (c) {
         if (shown || dead) return; shown = true;
         layer.classList.add('on'); old.classList.remove('on');
         setTimeout(function () { if (oldCleanup) oldCleanup(); old.innerHTML = ''; }, 400);
@@ -846,6 +894,7 @@
       .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
       .build();
     conn.on('PlaylistChanged', function () { refresh(); });
+    conn.on('Identify', function (label) { identify(String(label)); });
     conn.onreconnecting(markOffline);
     conn.onreconnected(function () { setOnline(true); refresh(); });
     function start() {

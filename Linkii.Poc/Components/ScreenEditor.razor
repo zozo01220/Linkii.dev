@@ -143,19 +143,23 @@
         <div class="wg-side">
             <div class="seg se-tabs" role="tablist">
                 <button type="button" role="tab" aria-selected="@(tab == "screen" ? "true" : "false")" class="@(tab == "screen" ? "on" : "")" @onclick='() => tab = "screen"'>Écran</button>
-                <button type="button" role="tab" aria-selected="@(tab == "widgets" ? "true" : "false")" class="@(tab == "widgets" ? "on" : "")" @onclick='() => tab = "widgets"'>Widgets <small>@widgets.Count</small></button>
+                @if (wall == null) { <button type="button" role="tab" aria-selected="@(tab == "widgets" ? "true" : "false")" class="@(tab == "widgets" ? "on" : "")" @onclick='() => tab = "widgets"'>Widgets <small>@widgets.Count</small></button> }
             </div>
 
             @if (tab == "screen")
             {
-                @if (zones.Count > 1)
+                @if (wall != null)
+                {
+                    <p class="hint wall-note">Cet écran est la place @(screenWallPos is { } wp ? Helpers.WallLabel(wp, wall.WallCols, wall.WallRows) : "?") du mur « @wall.Name » : il joue la liste du mur, en écran plein. Pour le sortir du mur, dissolvez le mur depuis la page Écrans.</p>
+                }
+                else if (zones.Count(z => !z.IsWall) > 1)
                 {
                     @* zone de son aire : classement seulement, rien à publier *@
                     <div class="dw">
                         <div class="dw-field">
                             <label for="se-zone">Zone</label>
                             <select id="se-zone" @bind="zoneValue">
-                                @foreach (var z in zones) { <option value="@z.Id">@z.Name</option> }
+                                @foreach (var z in zones.Where(z => !z.IsWall)) { <option value="@z.Id">@z.Name</option> }
                             </select>
                         </div>
                     </div>
@@ -264,6 +268,8 @@
     private List<Playlist> playlists = new();
     private List<Zone> zones = new();
     private string zoneValue = "";
+    private Zone? wall;          // mur dont l'écran fait partie (sa liste et son découpage sont ceux du mur)
+    private int? screenWallPos;
     private Guid? selected;
     private string layoutId = ScreenLayouts.Full;
     private readonly List<Guid?> zonePl = new() { null, null, null };   // playlist de chaque zone (copie de travail)
@@ -293,6 +299,8 @@
         var s = Store.Read(d => d.Screens.First(x => x.Id == ScreenId));
         playlists = Store.Read(d => d.Playlists.OrderBy(p => p.Name).ToList());
         zones = Store.Read(d => d.Area?.Zones.OrderByDescending(z => z.IsDefault).ThenBy(z => z.Name, StringComparer.CurrentCultureIgnoreCase).ToList() ?? new());
+        wall = zones.FirstOrDefault(z => z.Id == s.ZoneId && z.IsWall);
+        screenWallPos = s.WallPos;
         zoneValue = (zones.FirstOrDefault(z => z.Id == s.ZoneId) ?? zones.FirstOrDefault(z => z.IsDefault))?.Id.ToString() ?? "";
         name = s.Name;
         for (var z = 0; z < zonePl.Count; z++) zonePl[z] = s.ZonePlaylist(z);
@@ -300,7 +308,7 @@
         layoutId = ScreenLayouts.Fit(ScreenLayouts.Find(s.Layout).Id, spec);   // découpage encore permis par le format
         if (s.DetectedW > 0) detected = $"{s.DetectedW}×{s.DetectedH}";
         // copie de travail : rien n'est enregistré avant « Enregistrer »
-        widgets = s.Widgets.Select(w => new ScreenWidget { Id = w.Id, AppId = w.AppId, X = w.X, Y = w.Y, Scale = w.Scale, Settings = new(w.Settings) }).ToList();
+        widgets = wall != null ? new() : s.Widgets.Select(w => new ScreenWidget { Id = w.Id, AppId = w.AppId, X = w.X, Y = w.Y, Scale = w.Scale, Settings = new(w.Settings) }).ToList();
         foreach (var w in widgets) if (manifests.GetValueOrDefault(w.AppId) is { } m) w.Settings = AppCatalog.WithDefaults(m, w.Settings);
         selected = widgets.FirstOrDefault()?.Id;
     }
@@ -449,11 +457,22 @@
             var formatChanged = Store.Write(d =>
             {
                 var s = d.Screens.First(x => x.Id == ScreenId);
+                var inWall = AreaOps.WallOf(d, s);
+                if (inWall != null) zid = s.ZoneId;   // un écran de mur n'en sort que par la dissolution du mur
                 var changed = s.ScreenType != sp.Type || s.Orientation != sp.Orientation || s.Resolution != sp.Resolution || s.ZoneId != zid;   // la zone peut changer la synchro
                 s.Name = newName;
                 s.ZoneId = zid;
-                s.Layout = lay;   // autre découpage ou autre playlist dans une zone = modification à publier
-                for (var z = 0; z < zones.Count; z++) s.SetZonePlaylist(z, zones[z]);
+                if (inWall != null)
+                {
+                    s.Layout = ScreenLayouts.Full;   // écran du mur : écran plein, liste du mur
+                    s.PlaylistId = inWall.PlaylistId;
+                    s.ZonePlaylistIds.Clear();
+                }
+                else
+                {
+                    s.Layout = lay;   // autre découpage ou autre playlist dans une zone = modification à publier
+                    for (var z = 0; z < zones.Count; z++) s.SetZonePlaylist(z, zones[z]);
+                }
                 s.ScreenType = sp.Type; s.Orientation = sp.Orientation; s.Resolution = sp.Resolution;
                 if (!WidgetsEqual(s.Widgets, list)) { s.Widgets = list; s.WidgetsRevision++; }   // modification à publier
                 return changed;

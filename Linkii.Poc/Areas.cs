@@ -105,7 +105,7 @@ public static class AreaOps
         if (zone.IsDefault) return "La zone par défaut ne se supprime pas.";
         a.Zones.Remove(zone);
         var fallback = EnsureDefaultZone(a).Id;
-        foreach (var s in d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.ZoneId == zoneId)) s.ZoneId = fallback;
+        foreach (var s in d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.ZoneId == zoneId)) { s.ZoneId = fallback; s.WallPos = null; }
         return null;
     }
 
@@ -125,6 +125,110 @@ public static class AreaOps
         return null;
     }
 
+    // ---------- Mur d'écrans (administrateurs de l'aire) ----------
+
+    /// <summary>
+    /// Assemble des écrans de l'aire en mur : une zone de type mur est créée, chaque écran y prend sa place dans l'ordre donné
+    /// (de gauche à droite, puis de haut en bas) et joue la liste du mur, en écran plein. La lecture est synchronisée d'office.
+    /// À publier ensuite sur chaque écran (l'appelant s'en charge).
+    /// </summary>
+    public static (Zone? Zone, string? Error) CreateWall(ClientDb d, Guid areaId, IList<Guid> screenIds, int cols, int rows, Guid? playlistId, string name)
+    {
+        var (a, err) = Managed(d, areaId);
+        if (a == null) return (null, err);
+        var (screens, e) = WallScreens(d, a, screenIds, cols, rows, null);
+        if (screens == null) return (null, e);
+        if (playlistId is { } pid && !d.Root.Playlists.Any(p => p.Id == pid && p.ClientId == d.ClientId && p.AreaId == areaId)) return (null, "Liste de lecture introuvable.");
+        var n = (name ?? "").Trim();
+        if (n.Length == 0) n = $"Mur {cols} × {rows}";
+        if (CheckName(n) is { } ne) return (null, ne);
+
+        var zone = new Zone { Name = UniqueName(a, n, Guid.Empty), Kind = Zone.Wall, Sync = true, SyncEpochUtc = DateTime.UtcNow, WallCols = cols, WallRows = rows, PlaylistId = playlistId };
+        a.Zones.Add(zone);
+        for (var i = 0; i < screens.Count; i++)
+        {
+            var s = screens[i];
+            s.ZoneId = zone.Id;
+            s.WallPos = i;
+            JoinWall(s, playlistId);
+        }
+        return (zone, null);
+    }
+
+    /// <summary>Réorganise un mur : autre grille et/ou autre ordre, avec les mêmes écrans.</summary>
+    public static string? ArrangeWall(ClientDb d, Guid areaId, Guid zoneId, IList<Guid> screenIds, int cols, int rows)
+    {
+        var (a, err) = Managed(d, areaId);
+        if (a == null) return err;
+        if (a.Zones.FirstOrDefault(z => z.Id == zoneId) is not { IsWall: true } zone) return "Mur introuvable.";
+        var (screens, e) = WallScreens(d, a, screenIds, cols, rows, zone.Id);
+        if (screens == null) return e;
+        if (d.Root.Screens.Any(s => s.ClientId == d.ClientId && s.ZoneId == zone.Id && !screenIds.Contains(s.Id))) return "Tous les écrans du mur doivent garder une place.";
+        zone.WallCols = cols;
+        zone.WallRows = rows;
+        if (System.Text.RegularExpressions.Regex.IsMatch(zone.Name, @"^Mur \d+ × \d+( \(\d+\))?$")) zone.Name = UniqueName(a, $"Mur {cols} × {rows}", zone.Id);   // nom proposé : suit la grille
+        for (var i = 0; i < screens.Count; i++) screens[i].WallPos = i;
+        return null;
+    }
+
+    /// <summary>Liste de lecture du mur : tous ses écrans la jouent (à publier ensuite).</summary>
+    public static string? SetWallPlaylist(ClientDb d, Guid areaId, Guid zoneId, Guid? playlistId)
+    {
+        var (a, err) = Managed(d, areaId);
+        if (a == null) return err;
+        if (a.Zones.FirstOrDefault(z => z.Id == zoneId) is not { IsWall: true } zone) return "Mur introuvable.";
+        if (playlistId is { } pid && !d.Root.Playlists.Any(p => p.Id == pid && p.ClientId == d.ClientId && p.AreaId == areaId)) return "Liste de lecture introuvable.";
+        zone.PlaylistId = playlistId;
+        foreach (var s in d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.ZoneId == zone.Id)) JoinWall(s, playlistId);
+        return null;
+    }
+
+    /// <summary>Dissout un mur : ses écrans retournent dans la zone par défaut et gardent la liste du mur (chacun la joue en entier).</summary>
+    public static string? DissolveWall(ClientDb d, Guid areaId, Guid zoneId)
+    {
+        var (a, err) = Managed(d, areaId);
+        if (a == null) return err;
+        if (a.Zones.FirstOrDefault(z => z.Id == zoneId) is not { IsWall: true }) return "Mur introuvable.";
+        return DeleteZone(d, areaId, zoneId);
+    }
+
+    /// <summary>Écran du mur : écran plein, liste du mur, sans widgets (ils seraient coupés ou répétés sur la grande image).</summary>
+    private static void JoinWall(Screen s, Guid? playlistId)
+    {
+        s.PlaylistId = playlistId;
+        s.Layout = ScreenLayouts.Full;
+        s.ZonePlaylistIds.Clear();
+        if (s.Widgets.Count > 0) { s.Widgets.Clear(); s.WidgetsRevision++; }
+    }
+
+    private static (List<Screen>? Screens, string? Error) WallScreens(ClientDb d, Area a, IList<Guid> ids, int cols, int rows, Guid? wallId)
+    {
+        if (ids.Count < 2) return (null, "Un mur réunit au moins 2 écrans.");
+        if (ids.Distinct().Count() != ids.Count) return (null, "Un écran ne prend qu'une place.");
+        if (cols < 1 || rows < 1 || cols * rows != ids.Count) return (null, $"La grille {cols} × {rows} ne correspond pas aux {ids.Count} écrans.");
+        var screens = new List<Screen>();
+        foreach (var id in ids)
+        {
+            var s = d.Root.Screens.FirstOrDefault(x => x.Id == id && x.ClientId == d.ClientId && x.AreaId == a.Id && x.Token != null);
+            if (s == null) return (null, "Écran introuvable dans cette aire.");
+            if (s.ZoneId != wallId && a.Zones.FirstOrDefault(z => z.Id == s.ZoneId) is { IsWall: true } other)
+                return (null, $"« {s.Name} » fait déjà partie du mur « {other.Name} ».");
+            screens.Add(s);
+        }
+        return (screens, null);
+    }
+
+    private static string UniqueName(Area a, string n, Guid self)
+    {
+        var unique = n;
+        for (var i = 2; a.Zones.Any(z => z.Id != self && z.Name.Equals(unique, StringComparison.CurrentCultureIgnoreCase)); i++) unique = $"{n} ({i})";
+        return unique;
+    }
+
+    /// <summary>Écran déjà placé dans un mur : il n'en sort que par la dissolution du mur.</summary>
+    public static Zone? WallOf(ClientDb d, Screen s) =>
+        d.Root.Areas.FirstOrDefault(x => x.Id == s.AreaId)?.Zones.FirstOrDefault(z => z.Id == s.ZoneId && z.IsWall);
+
     // ---------- Déplacements entre aires (administrateur de l'organisation) ----------
 
     private static string? CheckTarget(ClientDb d, Guid target) =>
@@ -141,7 +245,9 @@ public static class AreaOps
         var s = d.Root.Screens.FirstOrDefault(x => x.Id == screenId && x.ClientId == d.ClientId);
         if (s == null) return "Écran introuvable.";
         if (s.AreaId == target) return null;
+        if (WallOf(d, s) is { } wall) return $"« {s.Name} » fait partie du mur « {wall.Name} » : dissolvez d'abord le mur.";
         s.AreaId = target;
+        s.WallPos = null;
         s.ZoneId = EnsureDefaultZone(d.Areas.First(a => a.Id == target)).Id;   // zone par défaut de l'aire d'arrivée
         bool Elsewhere(Guid? id) => id is { } pid && d.Root.Playlists.FirstOrDefault(p => p.Id == pid)?.AreaId != target;
         if (Elsewhere(s.PlaylistId)) s.PlaylistId = null;

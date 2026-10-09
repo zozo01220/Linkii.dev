@@ -1,0 +1,172 @@
+@* Assembler des écrans en mur (ou réorganiser un mur) : une seule fenêtre. Grille suggérée d'après le nombre d'écrans,
+   ordre repris de la sélection (de gauche à droite, puis de haut en bas), deux clics sur des cases pour les échanger,
+   « Identifier » affiche le numéro de chaque case sur l'écran physique. *@
+@inject TenantStore Store
+@inject Notifier Notifier
+@inject Toaster Toast
+
+<div class="modal-backdrop" @onclick="() => OnClose.InvokeAsync(false)"></div>
+<div class="modal app-modal wall-dlg" role="dialog" aria-modal="true" aria-labelledby="wall-title">
+    <div class="modal-head">
+        <div class="grow">
+            <h3 id="wall-title">@(ZoneId == null ? $"Assembler {order.Count} écrans en mur" : $"Réorganiser « {zoneName} »")</h3>
+            <small class="muted">De gauche à droite, puis de haut en bas. Cliquez deux cases pour les échanger.</small>
+        </div>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => OnClose.InvokeAsync(false)"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="modal-body wall-body">
+        <div>
+            <div class="wall-shapes" role="group" aria-label="Grille">
+                @foreach (var sh in shapes)
+                {
+                    var shape = sh;
+                    <button type="button" class="chip @(shape.Cols == cols && shape.Rows == rows ? "on" : "")" @onclick="() => SetShape(shape)">@shape.Cols × @shape.Rows</button>
+                }
+            </div>
+            <div class="wall-box">
+                <div class="wall-grid" style="grid-template-columns:repeat(@cols, 1fr)">
+                    @for (var i = 0; i < order.Count; i++)
+                    {
+                        var idx = i;
+                        var s = screens.First(x => x.Id == order[idx]);
+                        <button type="button" class="wall-cell @(swap == idx ? "sel" : "")" title="Place @Helpers.WallLabel(idx, cols, rows)" @onclick="() => Cell(idx)">
+                            <span class="n">@(idx + 1)</span>
+                            <b>@s.Name</b>
+                            @if (s.Orientation == "portrait") { <small>portrait</small> }
+                        </button>
+                    }
+                </div>
+            </div>
+            <div class="row" style="margin-top:10px">
+                <button type="button" class="btn ghost sm" disabled="@identifying" @onclick="Identify"><Ico Name="monitor" Size="14" /> Identifier sur les écrans</button>
+                <small class="muted">Chaque écran allumé affiche son numéro pendant 5 s.</small>
+            </div>
+        </div>
+        <div>
+            @if (ZoneId == null)
+            {
+                <label class="lbl" for="wall-pl" style="margin-top:0">Liste de lecture du mur</label>
+                <select id="wall-pl" class="full" @bind="playlistValue">
+                    <option value="">— Aucune liste de lecture —</option>
+                    @foreach (var p in playlists) { <option value="@p.Id">@p.Name</option> }
+                </select>
+                <label class="lbl" for="wall-name">Nom de la zone</label>
+                <input id="wall-name" class="full" maxlength="60" @bind="name" @bind:event="oninput" placeholder="@DefaultName" />
+            }
+            <div class="wall-note">Pour une image nette, créez vos contenus en <b class="mono">@(unitW * cols) × @(unitH * rows)</b> px.</div>
+            @if (mixed)
+            {
+                <div class="wall-note warn">Les écrans n'ont pas tous le même format : le mur sera plus net avec des écrans identiques.</div>
+            }
+            @if (ZoneId == null)
+            {
+                <small class="muted">Les écrans jouent la liste du mur, en écran plein, et sont publiés aussitôt. Dissoudre le mur les remet dans la zone « @Zone.DefaultName ».</small>
+            }
+            @if (error != null) { <div class="err">@error</div> }
+        </div>
+    </div>
+    <div class="modal-foot">
+        <small class="muted grow">@order.Count écrans · @cols × @rows</small>
+        <button type="button" class="btn ghost" @onclick="() => OnClose.InvokeAsync(false)">Annuler</button>
+        <button type="button" class="btn" disabled="@saving" @onclick="Save">@(ZoneId == null ? "Créer le mur" : "Enregistrer")</button>
+    </div>
+</div>
+
+@code {
+    /// <summary>Écrans, dans l'ordre de sélection (création) ; ignoré en réorganisation (les écrans du mur, dans leur ordre).</summary>
+    [Parameter] public List<Guid> ScreenIds { get; set; } = new();
+    /// <summary>Mur à réorganiser (null : création).</summary>
+    [Parameter] public Guid? ZoneId { get; set; }
+    [Parameter] public EventCallback<bool> OnClose { get; set; }
+
+    private List<Screen> screens = new();
+    private List<Guid> order = new();
+    private List<Playlist> playlists = new();
+    private List<(int Cols, int Rows)> shapes = new();
+    private int cols, rows, unitW = 1920, unitH = 1080;
+    private int? swap;
+    private bool mixed, saving, identifying;
+    private string name = "", playlistValue = "", zoneName = "";
+    private string? error;
+    private Guid areaId;
+
+    private string DefaultName => $"Mur {cols} × {rows}";
+
+    protected override void OnInitialized()
+    {
+        (areaId, playlists) = Store.Read(d => (d.Area?.Id ?? Guid.Empty, d.Playlists.OrderBy(p => p.Name).ToList()));
+        if (ZoneId is { } zid)
+        {
+            var zone = Store.Read(d => d.Area?.Zones.FirstOrDefault(z => z.Id == zid));
+            zoneName = zone?.Name ?? "";
+            screens = Store.Read(d => d.Screens.Where(s => s.Token != null && s.ZoneId == zid).OrderBy(s => s.WallPos ?? int.MaxValue).ToList());
+            if (zone != null && zone.WallCols * zone.WallRows == screens.Count) (cols, rows) = (zone.WallCols, zone.WallRows);
+        }
+        else
+        {
+            var all = Store.Read(d => d.Screens.Where(s => s.Token != null).ToList());
+            screens = ScreenIds.Distinct().Select(id => all.FirstOrDefault(s => s.Id == id)).OfType<Screen>().ToList();   // un écran = une place
+            var first = screens.FirstOrDefault()?.PlaylistId;
+            playlistValue = playlists.Any(p => p.Id == first) ? first.ToString()! : "";
+        }
+        order = screens.Select(s => s.Id).ToList();
+        shapes = Helpers.WallShapes(order.Count);
+        if (!shapes.Contains((cols, rows))) (cols, rows) = shapes.FirstOrDefault((order.Count, 1));
+        mixed = screens.Select(s => (s.Orientation, s.Resolution)).Distinct().Count() > 1;
+        (unitW, unitH) = UnitSize(screens.FirstOrDefault());
+    }
+
+    // Taille d'un écran (pour la résolution conseillée) : sa résolution réglée, sinon détectée, sinon Full HD ; dans le sens de l'écran.
+    private static (int W, int H) UnitSize(Screen? s)
+    {
+        int a = 1920, b = 1080;
+        if (s?.Resolution is { } r && r.Split('x') is [var x, var y] && int.TryParse(x, out var px) && int.TryParse(y, out var py)) (a, b) = (px, py);
+        else if (s?.DetectedW is int dw && s.DetectedH is int dh) (a, b) = (dw, dh);
+        var (big, small) = (Math.Max(a, b), Math.Min(a, b));
+        return s?.Orientation == "portrait" ? (small, big) : (big, small);
+    }
+
+    private void SetShape((int Cols, int Rows) s) { (cols, rows) = s; swap = null; }
+
+    private void Cell(int i)
+    {
+        if (swap is not { } j) { swap = i; return; }
+        (order[i], order[j]) = (order[j], order[i]);
+        swap = null;
+    }
+
+    private async Task Identify()
+    {
+        identifying = true;
+        try { await Notifier.Identify(order); }
+        finally { identifying = false; }
+    }
+
+    private async Task Save()
+    {
+        error = null;
+        saving = true;
+        try
+        {
+            var ids = order.ToList(); var c = cols; var r = rows; var aid = areaId;
+            if (ZoneId is { } zid)
+            {
+                error = Store.Write(d => AreaOps.ArrangeWall(d, aid, zid, ids, c, r));
+                if (error != null) return;
+                await Notifier.NotifyZone(zid);   // nouvelle place : chaque écran recadre sa portion
+                Toast.Ok("Mur réorganisé.");
+            }
+            else
+            {
+                Guid? pl = Guid.TryParse(playlistValue, out var g) ? g : null;
+                var n = name.Trim().Length > 0 ? name : DefaultName;
+                var (zone, err) = Store.Write(d => AreaOps.CreateWall(d, aid, ids, c, r, pl, n));
+                if (zone == null) { error = err; return; }
+                foreach (var id in ids) await Notifier.PublishScreen(id);   // la liste du mur part aussitôt sur chaque écran
+                Toast.Ok($"Mur « {zone.Name} » créé : {ids.Count} écrans.");
+            }
+            await OnClose.InvokeAsync(true);
+        }
+        finally { saving = false; }
+    }
+}

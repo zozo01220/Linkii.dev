@@ -119,14 +119,22 @@ public class Area : IClientOwned
 public class Zone
 {
     public const string DefaultName = "Défaut";
-    public const string Free = "free";   // zone libre : écrans de tout type, une liste par écran. (« wall » : mur d'écrans, prévu ensuite)
+    public const string Free = "free";   // zone libre : écrans de tout type, une liste par écran
+    public const string Wall = "wall";   // mur d'écrans : une seule image répartie sur une grille d'écrans, une liste portée par la zone
 
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "";
     public bool IsDefault { get; set; }
     public string Kind { get; set; } = Free;
-    public bool Sync { get; set; }               // lecture synchronisée (désactivée par défaut)
+    public bool Sync { get; set; }               // lecture synchronisée (désactivée par défaut ; toujours active pour un mur)
     public DateTime SyncEpochUtc { get; set; }   // origine commune de la boucle : la position se déduit de l'heure du serveur
+
+    // Mur d'écrans : grille et liste de lecture. La place de chaque écran est Screen.WallPos (0 = en haut à gauche, de gauche à droite puis de haut en bas).
+    public int WallCols { get; set; }
+    public int WallRows { get; set; }
+    public Guid? PlaylistId { get; set; }
+
+    public bool IsWall => Kind == Wall;
 }
 
 /// <summary>Journal des entrées dans l'espace d'un client (assistance).</summary>
@@ -248,6 +256,7 @@ public class Screen : IClientOwned, IAreaOwned
     public Guid ClientId { get; set; }
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid AreaId { get; set; }
+    public int? WallPos { get; set; }          // place dans la grille si sa zone est un mur (0 = en haut à gauche)
     public Guid? ZoneId { get; set; }          // zone de son aire (jamais vide une fois migré : par défaut, la zone « Défaut » de l'aire)
     public string Name { get; set; } = "";
     public string? PairingCode { get; set; }   // non null tant que l'écran n'est pas appairé
@@ -554,13 +563,37 @@ public static class Helpers
     public static DateTime? SyncEpoch(IEnumerable<Area> areas, Screen s) => ZoneOf(areas, s) is { Sync: true } z ? z.SyncEpochUtc : null;
 
     /// <summary>Fait partie de la révision de l'écran : activer ou couper la synchro de sa zone le fait recharger sa configuration.</summary>
-    public static string SyncStamp(IEnumerable<Area> areas, Screen s) => SyncEpoch(areas, s) is { } e ? "|y" + e.Ticks : "";
+    public static string SyncStamp(IEnumerable<Area> areas, Screen s) =>
+        (SyncEpoch(areas, s) is { } e ? "|y" + e.Ticks : "") + (Wall(areas, s) is { } w ? $"|w{w.Cols}x{w.Rows}@{w.Col},{w.Row}" : "");   // un mur réorganisé recharge ses écrans
+
+    public record WallPlace(int Cols, int Rows, int Col, int Row);
+
+    /// <summary>Place de l'écran dans son mur (null s'il n'est pas dans un mur).</summary>
+    public static WallPlace? Wall(IEnumerable<Area> areas, Screen s) =>
+        ZoneOf(areas, s) is { IsWall: true, WallCols: > 0, WallRows: > 0 } z && s.WallPos is { } p && p >= 0 && p < z.WallCols * z.WallRows
+            ? new WallPlace(z.WallCols, z.WallRows, p % z.WallCols, p / z.WallCols) : null;
+
+    /// <summary>« 2 · haut droite » : place lisible d'un écran dans une grille.</summary>
+    public static string WallLabel(int pos, int cols, int rows)
+    {
+        int c = pos % cols, r = pos / cols;
+        var v = rows == 1 ? "" : r == 0 ? "haut" : r == rows - 1 ? "bas" : rows == 3 ? "milieu" : $"ligne {r + 1}";
+        var h = cols == 1 ? "" : c == 0 ? "gauche" : c == cols - 1 ? "droite" : cols == 3 ? "centre" : $"colonne {c + 1}";
+        var where = string.Join(" ", new[] { v, h }.Where(x => x.Length > 0));
+        return $"{pos + 1}" + (where.Length > 0 ? " · " + where : "");
+    }
+
+    /// <summary>Grilles possibles pour n écrans (colonnes × lignes = n), la plus proche d'une image 16/9 d'abord.</summary>
+    public static List<(int Cols, int Rows)> WallShapes(int n) =>
+        Enumerable.Range(1, Math.Max(1, n)).Where(r => n % r == 0).Select(r => (Cols: n / r, Rows: r))
+            .OrderBy(s => Math.Abs(Math.Log(s.Cols * 16.0 / (s.Rows * 9.0) / (16.0 / 9.0)))).ThenByDescending(s => s.Cols).Take(4).ToList();
 
     public static long EpochMs(DateTime utc) => new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
 
     /// <summary>
-    /// Dans une zone synchronisée, la boucle doit durer pareil sur tous les écrans : une app qui décide de sa durée (vidéo YouTube « jusqu'à la fin »)
-    /// reçoit la durée constatée de la vidéo (60 s si elle est inconnue), fixe.
+    /// Dans une zone synchronisée, la boucle doit durer pareil sur tous les écrans : une app qui décide de sa durée reçoit une durée fixe :
+    /// un diaporama d'images, le nombre d'images × la durée de chaque image ; une vidéo YouTube, sa durée constatée ; sinon 60 s.
+    /// (Pendant ce créneau, l'écran déroule le contenu à l'heure commune : apps.js « syncedList ».)
     /// </summary>
     public static List<PublishedItem> FixedForSync(IEnumerable<PublishedItem> items, IEnumerable<MediaItem> media) =>
         items.Select(i =>
@@ -568,9 +601,21 @@ public static class Helpers
             if (i.DurationMode != "content") return i;
             var c = i.Clone();
             c.DurationMode = "fixed";
-            c.DurationSec = VideoSeconds(media.FirstOrDefault(m => m.Id == i.MediaId)) ?? 60;
+            c.DurationSec = ImagesSeconds(i) ?? VideoSeconds(media.FirstOrDefault(m => m.Id == i.MediaId)) ?? 60;
             return c;
         }).ToList();
+
+    private static readonly System.Text.RegularExpressions.Regex VideoFile = new(@"\.(mp4|m4v|webm|mov|ogv)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    /// <summary>Durée d'un diaporama fait seulement d'images (diaporama, Canva en pages, dossier Drive sans vidéo) ; null sinon.</summary>
+    public static int? ImagesSeconds(PublishedItem i)
+    {
+        if (i.Urls is not { Count: > 0 } urls || urls.Any(u => VideoFile.IsMatch(u))) return null;
+        var images = i.AppId is "slideshow-images" or "drive" || (i.AppId == "canva" && i.Settings.GetValueOrDefault("kind") != "video");
+        if (!images) return null;
+        var each = int.TryParse(i.Settings.GetValueOrDefault("interval"), out var s) ? Math.Clamp(s, 2, 600) : 8;
+        return urls.Count * each;
+    }
 
     /// <summary>Signature de la boucle d'un écran (contenus plein écran et durées) : deux écrans ne sont alignés que si elle est identique.</summary>
     public static string LoopKey(Screen s) =>

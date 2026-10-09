@@ -412,13 +412,21 @@ api.MapGet("/player/playlist", (HttpRequest req, JsonStore store) => store.Read(
     var p = db.Playlists.FirstOrDefault(x => x.Id == s!.PlaylistId && x.ClientId == s.ClientId);
     // zone synchronisée : origine commune de la boucle ; les durées « jusqu'à la fin » sont fixées pour que tous les écrans bouclent pareil
     var epoch = Helpers.SyncEpoch(db.Areas, s!);
-    var clientMedia = epoch == null ? null : db.Media.Where(m => m.ClientId == s.ClientId).ToList();
-    List<PublishedItem> Sync(List<PublishedItem> l) => clientMedia == null ? l : Helpers.FixedForSync(l, clientMedia);
+    var clientMedia = epoch == null ? null : db.Media.Where(m => m.ClientId == s!.ClientId).ToList();
+    // mur d'écrans : pas de widgets d'écran (position libre), même publiés avant l'entrée dans le mur
+    var inWall = Helpers.Wall(db.Areas, s!) != null;
+    List<PublishedItem> Sync(List<PublishedItem> l)
+    {
+        if (inWall) l = l.Where(i => i.Placement != "free").ToList();
+        return clientMedia == null ? l : Helpers.FixedForSync(l, clientMedia);
+    }
     return Results.Ok(new
     {
-        version = Helpers.Revision(p, s!, t, reseller, Helpers.SyncStamp(db.Areas, s)),
+        version = Helpers.Revision(p, s!, t, reseller, Helpers.SyncStamp(db.Areas, s!)),
         serverNow = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
         sync = epoch is { } e ? new { epoch = Helpers.EpochMs(e) } : null,
+        // mur d'écrans : l'écran n'affiche que sa portion (colonne, ligne) de l'image de tout le mur
+        wall = Helpers.Wall(db.Areas, s) is { } w ? new { cols = w.Cols, rows = w.Rows, col = w.Col, row = w.Row } : null,
         items = Sync(s.PublishedVersion > 0 ? s.Published : p?.Published ?? new List<PublishedItem>()).Select(i => i.ForPlayer()),   // repli : écran jamais publié depuis le passage à la publication par écran
         // découpage publié : tailles des zones (en %), côte à côte en paysage, empilées en portrait ; zones 2 et 3 avec leur propre liste
         layout = new

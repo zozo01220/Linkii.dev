@@ -9,6 +9,7 @@
      host.youtube(o), host.note(text)    lecteur YouTube (API IFrame) et message d'erreur
      host.media(url) -> Promise {src, revoke}   fichier de la médiathèque (copie locale hors ligne) ; host.onStop(fn) nettoyage
      host.opts.onEnded()                 durée « content » : à appeler quand le contenu est terminé (sinon l'app boucle)
+     host.opts.sync {origin, now()}      zone synchronisée ou mur : heure commune (now) et origine du contenu ; la lecture s'en déduit
      host.esc, host.pad, host.shortDate  utilitaires                                                                 */
 (function (w) {
   'use strict';
@@ -207,7 +208,11 @@
     h.el.className += ' mlib fit-' + (h.settings.fit === 'cover' ? 'cover' : 'contain');
     var urls = (h.item.urls || []).slice();
     if (h.settings.shuffle === 'true') {
-      for (var i = urls.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = urls[i]; urls[i] = urls[j]; urls[j] = t; }
+      // lecture synchronisée : même ordre « aléatoire » sur tous les écrans (tirage déterminé par l'identifiant du contenu)
+      var seed = 0, sid = h.opts && h.opts.sync ? String(h.item.id || '') : null;
+      if (sid) for (var c = 0; c < sid.length; c++) seed = (seed * 31 + sid.charCodeAt(c)) >>> 0;
+      var rnd = sid ? function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; } : Math.random;
+      for (var i = urls.length - 1; i > 0; i--) { var j = Math.floor(rnd() * (i + 1)); var t = urls[i]; urls[i] = urls[j]; urls[j] = t; }
     }
     var srcs = [];
     h.onStop(function () { for (var k = 0; k < srcs.length; k++) srcs[k].revoke(); });
@@ -230,6 +235,85 @@
     return v;
   }
 
+  /* ---------- Lecture synchronisée (zone synchronisée, mur d'écrans) ----------
+     Tous les écrans du groupe partagent l'heure du serveur et l'origine du contenu : le fichier affiché et la position
+     dans une vidéo s'en déduisent, sans échange entre écrans. Une image dure « interval » ; une vidéo, sa durée réelle
+     (lue dans ses métadonnées : la même partout, puisque ce sont les mêmes fichiers). La liste boucle sans fin :
+     c'est la liste de lecture qui passe au contenu suivant, à l'heure commune. */
+  function syncOf(h) { return h.opts && h.opts.sync ? h.opts.sync : null; }
+
+  // Recale une vidéo sur la position voulue : petit écart -> vitesse ajustée (invisible), grand écart -> saut.
+  function align(v, want) {
+    if (!v.duration || !isFinite(v.duration) || v.readyState < 1) return;
+    var diff = v.currentTime - want;
+    if (diff > v.duration / 2) diff -= v.duration; else if (diff < -v.duration / 2) diff += v.duration;   // passage de la boucle
+    if (Math.abs(diff) > 0.5) { try { v.currentTime = want; } catch (e) {} v.playbackRate = 1; }
+    else if (Math.abs(diff) > 0.04) v.playbackRate = diff > 0 ? 0.95 : 1.05;
+    else v.playbackRate = 1;
+    if (v.paused) { var p = v.play(); if (p && p.catch) p.catch(function () {}); }
+  }
+
+  function syncedList(h, b, imgMs, isVideo) {
+    var sync = syncOf(h), swap = swapper(h, imgMs ? imgMs * 0.6 : 800);
+    var n = b.urls.length, durs = [], srcs = [], pending = n, cur = -1, curVideo = null, lastAlign = 0;
+    function done() { if (--pending === 0) { tick(); h.every(tick, 100); } }
+    b.urls.forEach(function (u, i) {
+      b.load(u, function (src) {
+        srcs[i] = src;
+        if (!isVideo(u)) { durs[i] = imgMs; done(); return; }
+        var probe = document.createElement('video');
+        probe.preload = 'metadata'; probe.muted = true;
+        probe.onloadedmetadata = function () { durs[i] = isFinite(probe.duration) && probe.duration > 0 ? probe.duration * 1000 : 0; probe.removeAttribute('src'); done(); };
+        probe.onerror = function () { durs[i] = 0; done(); };   // vidéo illisible : sautée
+        probe.src = src;
+      });
+    });
+    // Fichier en cours et position dedans, à l'heure commune
+    function where() {
+      var total = 0, k;
+      for (k = 0; k < n; k++) total += durs[k] || 0;
+      if (!total) return null;
+      var t = (((sync.now() - sync.origin) % total) + total) % total, acc = 0;
+      for (k = 0; k < n; k++) {
+        if (durs[k] && t < acc + durs[k]) return { i: k, off: t - acc };
+        acc += durs[k] || 0;
+      }
+      return null;
+    }
+    function tick() {
+      var w = where();
+      if (!w) return;
+      if (w.i !== cur) { cur = w.i; show(w.i, w.off); return; }
+      if (curVideo && Date.now() - lastAlign > 1000) { lastAlign = Date.now(); align(curVideo, w.off / 1000); }
+    }
+    function show(i, off) {
+      if (isVideo(b.urls[i])) {
+        var v = document.createElement('video'), shown = false;
+        v.muted = h.settings.sound !== 'true'; v.autoplay = true; v.loop = n === 1; v.setAttribute('playsinline', '');
+        v.className = 'mlib-slide';
+        var reveal = function () { if (shown) return; shown = true; swap(v, stopMedia); };
+        v.addEventListener('loadedmetadata', function () { var w = where(); try { v.currentTime = (w && w.i === i ? w.off : off) / 1000; } catch (e) {} });
+        v.addEventListener('playing', reveal);
+        setTimeout(reveal, 1500);
+        v.src = srcs[i];
+        h.el.appendChild(v);
+        var p = v.play();
+        if (p && p.catch) p.catch(function () { v.muted = true; v.play().catch(function () {}); });
+        curVideo = v; lastAlign = Date.now();
+      } else {
+        curVideo = null;
+        var img = new Image();
+        img.className = 'mlib-slide';
+        img.onload = function () { h.el.appendChild(img); swap(img, stopMedia); };
+        img.src = srcs[i];
+      }
+    }
+    function stopMedia(old) { try { if (old.pause) { old.pause(); old.removeAttribute('src'); old.load(); } } catch (e) {} }
+    h.onStop(function () { if (curVideo) stopMedia(curVideo); });
+  }
+  function always() { return true; }
+  function never() { return false; }
+
   A.register('image', function (h) {
     var b = mediaBox(h);
     if (!b.urls.length) { h.note('Image introuvable dans la médiathèque — republiez l\'écran'); return; }
@@ -242,6 +326,7 @@
   A.register('video', function (h) {
     var b = mediaBox(h);
     if (!b.urls.length) { h.note('Vidéo introuvable dans la médiathèque — republiez l\'écran'); return; }
+    if (syncOf(h)) { syncedList(h, { urls: b.urls.slice(0, 1), load: b.load }, 0, always); return; }
     b.load(b.urls[0], function (src) {
       var v = makeVideo(h, src, function () { if (!b.ended()) { v.currentTime = 0; v.play().catch(function () {}); } }, b.failed);
       h.el.appendChild(v);
@@ -273,6 +358,7 @@
     var b = mediaBox(h);
     if (!b.urls.length) { h.note('Images introuvables dans la médiathèque — republiez l\'écran'); return; }
     var ms = Math.max(2, parseInt(h.settings.interval, 10) || 8) * 1000;
+    if (syncOf(h)) { syncedList(h, b, ms, never); return; }
     var swap = swapper(h, ms * 0.6);
     var idx = 0;
     function show() {
@@ -292,6 +378,7 @@
   A.register('slideshow-videos', function (h) {
     var b = mediaBox(h);
     if (!b.urls.length) { h.note('Vidéos introuvables dans la médiathèque — republiez l\'écran'); return; }
+    if (syncOf(h)) { syncedList(h, b, 0, always); return; }
     var swap = swapper(h);
     var idx = 0;
     function play() {
@@ -341,6 +428,7 @@
       return;
     }
     var ms = Math.max(2, parseInt(h.settings.interval, 10) || 8) * 1000;
+    if (syncOf(h)) { syncedList(h, b, ms, function (u) { return VIDEO_EXT.test(u); }); return; }
     var swap = swapper(h, ms * 0.6);
     var idx = 0, timer = null;
     h.onStop(function () { clearTimeout(timer); });

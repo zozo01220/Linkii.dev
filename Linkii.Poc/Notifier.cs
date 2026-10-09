@@ -30,7 +30,8 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
             if (s == null) return false;
             var own = db.Playlists.Where(x => x.ClientId == s.ClientId).ToList();
             List<PublishedItem> Zone(Guid? id) => own.FirstOrDefault(x => x.Id == id) is { } p ? Items(db, p) : new();
-            s.Published = Zone(s.PlaylistId).Concat(s.Widgets.Select(Widget).OfType<PublishedItem>()).ToList();
+            var wall = Helpers.Wall(db.Areas, s) != null;   // écran d'un mur : jamais de widgets
+            s.Published = Zone(s.PlaylistId).Concat(wall ? Enumerable.Empty<PublishedItem>() : s.Widgets.Select(Widget).OfType<PublishedItem>()).ToList();
             s.PublishedLayout = ScreenLayouts.Find(s.Layout).Id;
             s.PublishedZones = s.ZonePlaylists().Skip(1).Select(Zone).ToList();   // zones 2 et 3 du découpage
             s.PublishedVersion++;
@@ -116,6 +117,13 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
     }
 
     public Task NotifyScreen(Guid screenId) => NotifyWhere(s => s.Id == screenId);
+
+    /// <summary>Identifier les écrans : chacun affiche son numéro en très grand pendant 5 s (assemblage d'un mur).</summary>
+    public async Task Identify(IReadOnlyList<Guid> screenIds)
+    {
+        for (var i = 0; i < screenIds.Count; i++)
+            await hub.Clients.Group(ScreenHub.Group(screenIds[i])).SendAsync("Identify", (i + 1).ToString());
+    }
 
     /// <summary>Synchro d'une zone activée ou coupée : ses écrans rechargent leur configuration (origine commune de la boucle).</summary>
     public Task NotifyZone(Guid zoneId) => NotifyWhere(s => s.ZoneId == zoneId);
