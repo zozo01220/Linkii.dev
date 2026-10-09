@@ -6,8 +6,9 @@
 @inject Toaster Toast
 
 @* Intégrations › Drives › Gérer : la connexion de la source, puis ses dossiers synchronisés.
-   Google Drive : aucun compte, les dossiers sont partagés par lien et lus avec la clé d'API de la plateforme.
+   Google Drive : compte Google de l'organisation (« Se connecter avec Google »), partagé avec Google Calendar.
    OneDrive et SharePoint : compte Microsoft de l'organisation (« Se connecter avec Microsoft »), partagé avec les calendriers Microsoft 365.
+   Un dossier se choisit en parcourant le compte (DriveFolderPicker) ou en collant son lien de partage ; ses sous-dossiers peuvent être inclus.
    Un dossier ajouté est synchronisé aussitôt, puis toutes les 15 minutes ; les écrans suivent sans republier. *@
 <div class="modal-backdrop" @onclick="Close"></div>
 <div class="modal app-modal wide" role="dialog" aria-modal="true" aria-labelledby="dsd-title">
@@ -106,20 +107,45 @@
 
 
         <h4 class="pe-sub">Dossiers <span class="cat-count">@folders.Count</span></h4>
-        <div class="cal-list">
+        <div class="cal-list dsd-list">
             @foreach (var f in folders)
             {
                 var folder = f;
                 var (contents, lists) = uses.GetValueOrDefault(folder.Id.ToString());
-                <div class="cal-row">
+                var web = DriveSources.WebUrl(folder);
+                <div class="cal-row @(flashId == folder.Id ? "flash" : "")">
                     <Ico Name="folder" Size="16" />
                     <div class="cal-id">
-                        <b>@folder.Name</b>
+                        @if (renameId == folder.Id)
+                        {
+                            <input class="dsd-rename" maxlength="80" aria-label="Nom affiché" @bind="renameText" @bind:event="oninput" @onkeydown="e => OnRenameKey(e, folder)" @onblur="() => Rename(folder)" autofocus />
+                        }
+                        else { <b>@folder.Name</b> }
                         <small title="@folder.Location">@folder.Location · @folder.FileCount fichier@(folder.FileCount > 1 ? "s" : "") · synchronisé @DriveSources.Ago(folder.SyncedUtc)</small>
+                        @if (folder.Subfolders) { <span class="dsd-tags"><span class="badge dsd-sub"><Ico Name="subfolders" Size="12" /> Avec sous-dossiers@(folder.SubfolderCount > 0 ? $" · {folder.SubfolderCount}" : "")</span></span> }
+                        @if (folder.Skipped > 0)
+                        {
+                            <small class="dsd-warn">Limite de @DriveService.MaxFiles fichiers atteinte : @folder.Skipped fichier@(folder.Skipped > 1 ? "s" : "") ne @(folder.Skipped > 1 ? "sont" : "est") pas affiché@(folder.Skipped > 1 ? "s" : "").@(folder.Subfolders ? " Choisissez un sous-dossier plus précis, ou retirez l'option des sous-dossiers." : "")</small>
+                        }
                         @if (folder.LastError.Length > 0) { <small class="cal-err" title="@folder.LastError">@folder.LastError</small> }
                     </div>
                     <span class="badge neutre">@(lists > 0 ? $"{lists} liste{(lists > 1 ? "s" : "")}" : contents > 0 ? $"{contents} contenu{(contents > 1 ? "s" : "")}" : "Non utilisé")</span>
-                    <button type="button" class="kebab-btn" title="Retirer" aria-label="Retirer @folder.Name" @onclick="() => confirmId = folder.Id"><Ico Name="trash" Size="16" /></button>
+                    <div class="kebab">
+                        <button type="button" class="kebab-btn" aria-label="Actions pour @folder.Name" aria-haspopup="menu" aria-expanded="@(menuId == folder.Id ? "true" : "false")"
+                                @onclick="() => menuId = menuId == folder.Id ? null : folder.Id"><Ico Name="dots-v" Size="18" /></button>
+                        @if (menuId == folder.Id)
+                        {
+                            <div class="kebab-backdrop" @onclick="() => menuId = null"></div>
+                            <div class="kebab-menu" role="menu">
+                                <button type="button" role="menuitemcheckbox" aria-checked="@(folder.Subfolders ? "true" : "false")" disabled="@busy" @onclick="() => ToggleSubfolders(folder)">
+                                    <span class="dsd-chk">@if (folder.Subfolders) { <Ico Name="check" Size="16" /> }</span> Inclure les sous-dossiers
+                                </button>
+                                <button type="button" role="menuitem" @onclick="() => StartRename(folder)"><Ico Name="edit" Size="16" /> Renommer</button>
+                                @if (web.Length > 0) { <a role="menuitem" href="@web" target="_blank" rel="noopener" @onclick="() => menuId = null"><Ico Name="external" Size="16" /> Ouvrir dans @(IsGoogle ? "Google Drive" : "OneDrive")</a> }
+                                <button type="button" role="menuitem" class="danger" @onclick="() => { menuId = null; confirmId = folder.Id; }"><Ico Name="trash" Size="16" /> Retirer</button>
+                            </div>
+                        }
+                    </div>
                     @if (confirmId == folder.Id)
                     {
                         <div class="cal-confirm" role="alert">
@@ -131,11 +157,20 @@
                 </div>
             }
             @if (folders.Count == 0) { <div class="cal-empty">@(configured ? "Aucun dossier pour l'instant. Ajoutez le premier ci-dessous." : NotReady)</div> }
-            <div class="cal-add">
-                <input aria-label="Nom affiché" placeholder="Nom affiché (facultatif)" maxlength="80" @bind="newName" />
-                <input aria-label="Lien de partage du dossier" class="mono" placeholder="@Def.LinkPlaceholder" @bind="newLink" spellcheck="false" autocomplete="off" />
-                <button type="button" class="btn ghost sm" disabled="@busy" @onclick="Add"><Ico Name="plus" Size="14" /> Ajouter</button>
-                <small>Collez le lien de partage du dossier. Ses images et vidéos sont affichées (les sous-dossiers ne sont pas parcourus), @DriveService.MaxFiles fichiers au plus.</small>
+            <div class="dsd-add">
+                <div class="dsd-add-line">
+                    <button type="button" class="btn ghost sm" disabled="@(busy || !configured)" @onclick="() => picking = true"><Ico Name="folder" Size="14" /> Choisir un dossier…</button>
+                    <button type="button" class="dsd-or" @onclick="() => pasteOpen = !pasteOpen">@(pasteOpen ? "masquer le lien" : "ou coller un lien de partage")</button>
+                </div>
+                @if (pasteOpen)
+                {
+                    <div class="cal-add">
+                        <input aria-label="Nom affiché" placeholder="Nom affiché (facultatif)" maxlength="80" @bind="newName" />
+                        <input aria-label="Lien de partage du dossier" class="mono" placeholder="@Def.LinkPlaceholder" @bind="newLink" spellcheck="false" autocomplete="off" />
+                        <button type="button" class="btn ghost sm" disabled="@busy" @onclick="Add"><Ico Name="plus" Size="14" /> Ajouter</button>
+                    </div>
+                }
+                <small>Les images et vidéos du dossier sont affichées, et celles de ses sous-dossiers si vous le demandez : @DriveService.MaxFiles fichiers au plus. Les dossiers sont synchronisés toutes les 15 minutes.</small>
             </div>
         </div>
     </div>
@@ -146,6 +181,11 @@
         <button class="btn" @onclick="Close">Fermer</button>
     </div>
 </div>
+
+@if (picking)
+{
+    <DriveFolderPicker Source="@Source" Existing="@folders.Select(f => f.RemoteId).ToList()" OnPicked="Picked" OnClose="() => picking = false" />
+}
 
 @code {
     [Parameter, EditorRequired] public string Source { get; set; } = "";
@@ -177,8 +217,9 @@
     private bool busy => testing || syncing;
     private List<DriveFolder> folders = new();
     private Dictionary<string, (int Contents, int Lists)> uses = new();   // par dossier : contenus qui l'affichent, listes de lecture qui les contiennent
-    private string newName = "", newLink = "";
-    private Guid? confirmId;
+    private string newName = "", newLink = "", renameText = "";
+    private Guid? confirmId, menuId, renameId, flashId;
+    private bool picking, pasteOpen;   // sélecteur de dossier ouvert ; champ « lien de partage » affiché
 
     protected override void OnInitialized() => Load();
 
@@ -229,6 +270,7 @@
 
     // ---------- Dossiers ----------
 
+    /// <summary>Lien de partage collé : vérifié, puis ajouté comme un dossier choisi.</summary>
     private async Task Add()
     {
         if (!configured) { Toast.Error(NotReady); return; }
@@ -238,27 +280,91 @@
         StateHasChanged();
         try
         {
-            var t = Store.Read(d => d.Tenant);
-            var (remoteId, name, location) = await Drives.Resolve(t, Source, link);
-            if (t.DriveFolders.Any(f => f.Source == Source && f.RemoteId == remoteId)) { Toast.Error("Ce dossier est déjà dans la liste."); return; }
+            var (remoteId, name, location, web) = await Drives.Resolve(Store.Read(d => d.Tenant), Source, link);
             var display = newName.Trim().Length > 0 ? newName.Trim() : name;
-            var folder = new DriveFolder { Source = Source, Name = display.Length > 80 ? display[..80] : display, RemoteId = remoteId, Location = location };
-            Store.Write(d => d.Tenant.DriveFolders.Add(folder));
-            if (!DriveSources.Enabled(t, Source)) Svc.SetDriveSource(Source, true);
-            newName = newLink = "";
-            await Changed();
-            StateHasChanged();
-            var error = await Drives.Sync(Store.ClientId, folder.Id);
-            await Changed();
-            var n = folders.FirstOrDefault(f => f.Id == folder.Id)?.FileCount ?? 0;
-            if (error == null) Toast.Ok($"« {folder.Name} » ajouté : {n} fichier{(n > 1 ? "s" : "")} synchronisé{(n > 1 ? "s" : "")}.");
-            else Toast.Error($"« {folder.Name} » ajouté, mais la synchronisation a échoué : {error}");
+            if (await AddFolder(new(remoteId, display, location, web, false))) newName = newLink = "";
         }
         catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or System.Text.Json.JsonException or KeyNotFoundException)
         {
             Toast.Error(ex.Message);
         }
         finally { syncing = false; }
+    }
+
+    /// <summary>Dossier choisi dans le sélecteur.</summary>
+    private async Task Picked(DriveFolderPicker.Picked p)
+    {
+        picking = false;
+        syncing = true;
+        StateHasChanged();
+        try { await AddFolder(p); }
+        finally { syncing = false; }
+    }
+
+    /// <summary>Ajoute le dossier, active la source au besoin, puis le synchronise aussitôt. Rend false s'il était déjà là.</summary>
+    private async Task<bool> AddFolder(DriveFolderPicker.Picked p)
+    {
+        var t = Store.Read(d => d.Tenant);
+        if (t.DriveFolders.Any(f => f.Source == Source && DriveSources.SameRemote(Source, f.RemoteId, p.RemoteId))) { Toast.Error("Ce dossier est déjà dans la liste."); return false; }
+        var folder = new DriveFolder
+        {
+            Source = Source, Name = p.Name.Length > 80 ? p.Name[..80] : p.Name, RemoteId = p.RemoteId,
+            Location = p.Location, WebUrl = p.WebUrl, Subfolders = p.Subfolders
+        };
+        Store.Write(d => d.Tenant.DriveFolders.Add(folder));
+        if (!DriveSources.Enabled(t, Source)) Svc.SetDriveSource(Source, true);
+        flashId = folder.Id;
+        await Changed();
+        StateHasChanged();
+        var error = await Drives.Sync(Store.ClientId, folder.Id);
+        await Changed();
+        var n = folders.FirstOrDefault(f => f.Id == folder.Id)?.FileCount ?? 0;
+        if (error == null) Toast.Ok($"« {folder.Name} » ajouté{(folder.Subfolders ? " avec ses sous-dossiers" : "")} : {n} fichier{(n > 1 ? "s" : "")} synchronisé{(n > 1 ? "s" : "")}.");
+        else Toast.Error($"« {folder.Name} » ajouté, mais la synchronisation a échoué : {error}");
+        return true;
+    }
+
+    /// <summary>Inclut ou retire les sous-dossiers, puis resynchronise : les fichiers concernés arrivent ou partent des écrans.</summary>
+    private async Task ToggleSubfolders(DriveFolder f)
+    {
+        menuId = null;
+        var on = !f.Subfolders;
+        Store.Write(d => { if (d.Tenant.DriveFolders.FirstOrDefault(x => x.Id == f.Id) is { } x) x.Subfolders = on; });
+        syncing = true;
+        await Changed();
+        StateHasChanged();
+        try
+        {
+            var error = await Drives.Sync(Store.ClientId, f.Id);
+            await Changed();
+            if (error != null) Toast.Error($"« {f.Name} » : {error}");
+            else Toast.Ok(on ? $"« {f.Name} » : les images et vidéos des sous-dossiers sont ajoutées." : $"« {f.Name} » : seuls les fichiers du dossier lui-même restent affichés.");
+        }
+        finally { syncing = false; }
+    }
+
+    private void StartRename(DriveFolder f)
+    {
+        menuId = null;
+        renameId = f.Id;
+        renameText = f.Name;
+    }
+
+    private async Task OnRenameKey(KeyboardEventArgs e, DriveFolder f)
+    {
+        if (e.Key == "Enter") await Rename(f);
+        else if (e.Key == "Escape") renameId = null;
+    }
+
+    private async Task Rename(DriveFolder f)
+    {
+        if (renameId != f.Id) return;
+        renameId = null;
+        var name = renameText.Trim();
+        if (name.Length == 0 || name == f.Name) return;
+        if (name.Length > 80) name = name[..80];
+        Store.Write(d => { if (d.Tenant.DriveFolders.FirstOrDefault(x => x.Id == f.Id) is { } x) x.Name = name; });
+        await Changed();
     }
 
     private async Task SyncAll()

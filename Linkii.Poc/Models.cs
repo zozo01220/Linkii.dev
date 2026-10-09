@@ -301,7 +301,11 @@ public class DriveFolder
     public string Name { get; set; } = "";
     public string RemoteId { get; set; } = "";    // Google : ID du dossier ; Microsoft : « driveId/itemId »
     public string Location { get; set; } = "";    // affichage : emplacement du dossier
+    public string WebUrl { get; set; } = "";      // « Ouvrir dans… » ; vide pour les dossiers ajoutés avant (Google : déduite de RemoteId)
+    public bool Subfolders { get; set; }          // fichiers des sous-dossiers compris, tous niveaux
     public int FileCount { get; set; }
+    public int Skipped { get; set; }              // fichiers laissés de côté au-delà de DriveService.MaxFiles
+    public int SubfolderCount { get; set; }       // sous-dossiers vus à la dernière synchronisation (directs seulement sans Subfolders)
     public DateTime? SyncedUtc { get; set; }
     public string LastError { get; set; } = "";   // dernière synchronisation en échec ; vide si elle a réussi
 }

@@ -1,0 +1,323 @@
+@inject TenantStore Store
+@inject DriveService Drives
+@implements IDisposable
+
+@* Choix d'un dossier Drive en parcourant le compte connecté (au-dessus de la fenêtre « Gérer »).
+   Un clic sélectionne un dossier, la flèche (ou un double-clic) l'ouvre ; sans sélection, c'est le dossier ouvert qui est ajouté.
+   SharePoint : on colle le lien d'une bibliothèque, puis on la parcourt (lister les sites demanderait un accès de plus). *@
+<div class="modal-backdrop picker-backdrop" @onclick="Close"></div>
+<div class="modal app-modal picker dfp" role="dialog" aria-modal="true" aria-labelledby="dfp-title">
+    <div class="modal-head">
+        <AppIcon Id="@("drv-" + Source)" />
+        <div class="grow">
+            <h3 id="dfp-title">Choisir un dossier</h3>
+            <small>@DriveSources.Find(Source)?.Name · @Account</small>
+        </div>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="dfp-body">
+        <nav class="dfp-roots" aria-label="Emplacements">
+            @for (var i = 0; i < roots.Length; i++)
+            {
+                var idx = i;
+                <button type="button" class="@(idx == rootIdx && !Searching ? "on" : "")" @onclick="() => SetRoot(idx)"><Ico Name="@roots[idx].Icon" Size="16" /> @roots[idx].Label</button>
+            }
+        </nav>
+        <div class="dfp-pane">
+            <div class="dfp-tools">
+                <div class="dfp-crumbs">
+                    @if (Searching) { <span class="dfp-muted">Recherche dans @DriveSources.Find(Source)?.Name</span> }
+                    else
+                    {
+                        @if (rootIdx < 0) { <span class="dfp-muted">Recherche</span><span class="sep">›</span> }
+                        @for (var i = 0; i < path.Count; i++)
+                        {
+                            var idx = i;
+                            if (idx > 0) { <span class="sep">›</span> }
+                            <button type="button" @onclick="() => GoTo(idx)">@path[idx].Name</button>
+                        }
+                    }
+                </div>
+                <label class="search-box dfp-search">
+                    <Ico Name="search" Size="16" />
+                    <input placeholder="Rechercher un dossier" aria-label="Rechercher un dossier" value="@query" @oninput="OnSearch" />
+                </label>
+            </div>
+            <div class="dfp-items">
+                @if (error != null)
+                {
+                    <div class="dfp-empty err">@error</div>
+                }
+                else if (Searching)
+                {
+                    @if (results == null) { <div class="dfp-empty">Recherche…</div> }
+                    else if (results.Count == 0) { <div class="dfp-empty">Aucun dossier ne contient « @query.Trim() ».</div> }
+                    else
+                    {
+                        <div class="dfp-sect">Résultats · @results.Count@(Source == "onedrive" ? " (OneDrive du compte)" : "")</div>
+                        @foreach (var r in results) { @Row(r, r.Location ?? r.Name) }
+                    }
+                }
+                else if (Root.Link && path.Count == 1)
+                {
+                    <div class="dfp-sp">
+                        <b>Bibliothèque SharePoint</b>
+                        <p>Collez le lien d'une bibliothèque ou d'un dossier SharePoint : vous pourrez ensuite parcourir ses sous-dossiers ici. Les dossiers SharePoint partagés avec @Account figurent aussi dans « Partagés avec moi ».</p>
+                        <div class="dfp-sp-line">
+                            <input class="mono" placeholder="https://organisation.sharepoint.com/sites/…" aria-label="Lien SharePoint" @bind="spLink" @bind:event="oninput" spellcheck="false" autocomplete="off" />
+                            <button type="button" class="btn ghost sm" disabled="@(spLink.Trim().Length == 0 || loading)" @onclick="OpenLink">@(loading ? "Ouverture…" : "Ouvrir")</button>
+                        </div>
+                    </div>
+                }
+                else if (listing == null) { <div class="dfp-empty">Chargement…</div> }
+                else
+                {
+                    @if (listing.Folders.Count > 0)
+                    {
+                        <div class="dfp-sect">Dossiers · @listing.Folders.Count@(listing.More ? "+" : "")</div>
+                        @foreach (var f in listing.Folders) { @Row(f, Current.Location + " › " + f.Name) }
+                    }
+                    else if (listing.Ref == null) { <div class="dfp-empty">Aucun dossier ici.</div> }
+                    else { <div class="dfp-empty">Aucun sous-dossier.</div> }
+                    @if (listing.Ref != null && (listing.Files.Count > 0 || listing.Others > 0))
+                    {
+                        <div class="dfp-sect">Images et vidéos de ce dossier · @listing.Files.Count</div>
+                        @if (listing.Files.Count > 0)
+                        {
+                            <div class="dfp-files">
+                                @foreach (var file in listing.Files.Take(10))
+                                {
+                                    <span class="dfp-file" title="@file.Name"><span class="dfp-thumb @file.Kind"><Ico Name="@(file.Kind == "video" ? "play" : "image")" Size="12" /></span><span>@file.Name</span></span>
+                                }
+                                @if (listing.Files.Count > 10) { <span class="dfp-file more">+ @(listing.Files.Count - 10) autres</span> }
+                            </div>
+                        }
+                        @if (listing.Others > 0)
+                        {
+                            <div class="dfp-ignored">@Plural(listing.Others, "autre fichier") ignoré@(listing.Others > 1 ? "s" : "") (PDF, documents…) : les écrans n'affichent que les images et vidéos.</div>
+                        }
+                    }
+                }
+            </div>
+        </div>
+    </div>
+    <div class="modal-foot dfp-foot">
+        <div class="dfp-chosen">
+            @if (Target is { } t)
+            {
+                <b>@t.Name</b> <span>· @TargetCount@(Added(t.Ref) ? " · déjà ajouté" : "")</span>
+                <span class="loc" title="@t.Location">@t.Location</span>
+            }
+            else { <span>@(Root.Link && path.Count == 1 && !Searching ? "Collez un lien SharePoint pour commencer." : "Ouvrez ou sélectionnez un dossier.")</span> }
+        </div>
+        <label class="dfp-opt @(HasSubs ? "" : "dis")">
+            <input type="checkbox" checked="@(sub && HasSubs)" disabled="@(!HasSubs)" @onchange="e => sub = e.Value is true" />
+            <span>
+                <b>Inclure les sous-dossiers</b>
+                <small>@SubHint</small>
+            </span>
+        </label>
+        <div class="dfp-acts">
+            <button type="button" class="btn ghost" @onclick="Close">Annuler</button>
+            <button type="button" class="btn" disabled="@(Target is not { } tt || Added(tt.Ref))" @onclick="Pick">@(Target is { } t2 ? $"Ajouter « {t2.Name} »" : "Ajouter")</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    /// <summary>Le dossier choisi, prêt à être ajouté.</summary>
+    public record Picked(string RemoteId, string Name, string Location, string WebUrl, bool Subfolders);
+
+    [Parameter, EditorRequired] public string Source { get; set; } = "";
+    /// <summary>Dossiers déjà ajoutés (<see cref="DriveFolder.RemoteId"/>) : marqués « Déjà ajouté ».</summary>
+    [Parameter] public IReadOnlyCollection<string> Existing { get; set; } = Array.Empty<string>();
+    [Parameter] public EventCallback<Picked> OnPicked { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    /// <summary>Un dossier du fil d'Ariane. Ref null : l'emplacement de départ (sa liste dit s'il peut être ajouté).</summary>
+    private record Crumb(string? Ref, string Name, string Location, string WebUrl = "");
+    private record Choice(string Ref, string Name, string Location, string WebUrl);
+
+    private DriveRoot[] roots = Array.Empty<DriveRoot>();
+    private int rootIdx;                                  // -1 : dossier ouvert depuis une recherche
+    private List<Crumb> path = new();
+    private DriveListing? listing;                        // contenu du dossier ouvert
+    private DriveNode? sel;                               // dossier sélectionné dans la liste
+    private string? selLocation;
+    private DriveListing? selListing;                     // son contenu, lu à la sélection (compte et sous-dossiers)
+    private readonly Dictionary<string, DriveListing> cache = new();
+    private string query = "", spLink = "";
+    private List<DriveNode>? results;
+    private string? error;
+    private bool loading, sub;
+    private CancellationTokenSource? searchCts;
+
+    private DriveRoot Root => roots[Math.Max(rootIdx, 0)];
+    private Crumb Current => path[^1];
+    private bool Searching => query.Trim().Length > 0;
+    private string Account
+    {
+        get
+        {
+            var t = Store.Read(d => d.Tenant);
+            var user = Source == "gdrive" ? t.GoogleUser : t.MsUser;
+            return user.Length > 0 ? user : "le compte connecté";
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        roots = DriveSources.Roots(Source);
+        await SetRoot(0);
+    }
+
+    // ---------- Navigation ----------
+
+    private async Task SetRoot(int i)
+    {
+        rootIdx = i;
+        query = "";
+        results = null;
+        path = new() { new(null, roots[i].Label, roots[i].Location) };
+        await Open();
+    }
+
+    private async Task GoTo(int i)
+    {
+        if (i == path.Count - 1 && sel == null) return;
+        path = path.Take(i + 1).ToList();
+        await Open();
+    }
+
+    private async Task Enter(DriveNode f, string location)
+    {
+        if (Searching) { rootIdx = -1; query = ""; results = null; path = new(); }
+        path.Add(new(f.Ref, f.Name, location, f.WebUrl));
+        await Open();
+    }
+
+    /// <summary>Lit le dossier ouvert (ou l'emplacement de départ) ; la sélection est remise à zéro.</summary>
+    private async Task Open()
+    {
+        sel = null; selListing = null; selLocation = null; error = null; sub = false;
+        listing = null;
+        if (rootIdx >= 0 && Root.Link && path.Count == 1) return;   // SharePoint : on attend un lien
+        var key = CacheKey(Current.Ref);
+        if (cache.TryGetValue(key, out var hit)) { listing = hit; return; }
+        StateHasChanged();
+        try { listing = cache[key] = await Drives.Browse(Store.Read(d => d.Tenant), Source, Root.Key, Current.Ref); }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or System.Text.Json.JsonException or KeyNotFoundException or TaskCanceledException)
+        {
+            error = ex.Message;
+        }
+    }
+
+    private string CacheKey(string? folderRef) => folderRef ?? "root:" + Root.Key;
+
+    private async Task Select(DriveNode f, string location)
+    {
+        if (Added(f.Ref)) return;
+        if (sel?.Ref == f.Ref) { sel = null; selListing = null; return; }
+        sel = f; selLocation = location; selListing = null; sub = false;
+        if (cache.TryGetValue(f.Ref, out var hit)) { selListing = hit; return; }
+        StateHasChanged();
+        try
+        {
+            var l = await Drives.Browse(Store.Read(d => d.Tenant), Source, Root.Key, f.Ref);
+            cache[f.Ref] = l;
+            if (sel?.Ref == f.Ref) selListing = l;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or System.Text.Json.JsonException or KeyNotFoundException or TaskCanceledException)
+        {
+            if (sel?.Ref == f.Ref) error = ex.Message;
+        }
+    }
+
+    private async Task OpenLink()
+    {
+        loading = true;
+        error = null;
+        try
+        {
+            var (remoteId, name, location, web) = await Drives.Resolve(Store.Read(d => d.Tenant), Source, spLink);
+            spLink = "";
+            path.Add(new(remoteId, name, location, web));
+            await Open();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or System.Text.Json.JsonException or KeyNotFoundException or TaskCanceledException)
+        {
+            error = ex.Message;
+        }
+        finally { loading = false; }
+    }
+
+    // ---------- Recherche ----------
+
+    private async Task OnSearch(ChangeEventArgs e)
+    {
+        query = e.Value?.ToString() ?? "";
+        sel = null; selListing = null; error = null; results = null;
+        searchCts?.Cancel();
+        if (!Searching) return;
+        var cts = searchCts = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(350, cts.Token);
+            var found = await Drives.SearchFolders(Store.Read(d => d.Tenant), Source, query);
+            if (!cts.IsCancellationRequested) results = found;
+        }
+        catch (TaskCanceledException) { }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or System.Text.Json.JsonException or KeyNotFoundException)
+        {
+            if (!cts.IsCancellationRequested) error = ex.Message;
+        }
+    }
+
+    // ---------- Choix ----------
+
+    /// <summary>Ce qui sera ajouté : le dossier sélectionné, sinon le dossier ouvert (s'il peut l'être).</summary>
+    private Choice? Target => sel != null ? new(sel.Ref, sel.Name, selLocation ?? sel.Name, sel.WebUrl)
+        : !Searching && listing?.Ref is { } r ? new(r, Current.Name, Current.Location, listing.WebUrl.Length > 0 ? listing.WebUrl : Current.WebUrl) : null;
+    private DriveListing? TargetListing => sel != null ? selListing : Searching ? null : listing;
+    private bool HasSubs => TargetListing?.Folders.Count > 0;
+
+    private string TargetCount => TargetListing is not { } l ? "lecture…"
+        : l.Files.Count == 0 ? "aucune image ni vidéo"
+        : l.Files.Count > 1 ? $"{l.Files.Count}{(l.More ? "+" : "")} images ou vidéos" : "1 image ou vidéo";
+
+    private string SubHint => TargetListing is not { } l ? "Lecture du dossier…"
+        : l.Folders.Count == 0 ? "Ce dossier n'a pas de sous-dossier."
+        : sub ? $"Les images et vidéos de ses {Plural(l.Folders.Count, "sous-dossier")}, et de leurs propres sous-dossiers, sont ajoutées : {DriveService.MaxFiles} fichiers au plus au total. Le total exact est connu à la synchronisation."
+        : $"Ce dossier a {Plural(l.Folders.Count, "sous-dossier")}. Sans l'option, seuls ses propres fichiers sont affichés.";
+
+    private bool Added(string remoteId) => Existing.Any(r => DriveSources.SameRemote(Source, r, remoteId));
+
+    private async Task Pick()
+    {
+        if (Target is not { } t || Added(t.Ref)) return;
+        await OnPicked.InvokeAsync(new(t.Ref, t.Name, t.Location, t.WebUrl, sub && HasSubs));
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private static string Plural(int n, string word) => $"{n} {word}{(n > 1 ? "s" : "")}";
+
+    public void Dispose() => searchCts?.Cancel();
+
+    private RenderFragment Row(DriveNode f, string location) => __builder =>
+    {
+        var added = Added(f.Ref);
+        <div class="dfp-it @(sel?.Ref == f.Ref ? "sel" : "") @(added ? "added" : "")">
+            <button type="button" class="dfp-pick" aria-pressed="@(sel?.Ref == f.Ref ? "true" : "false")" disabled="@added"
+                    @onclick="() => Select(f, location)" @ondblclick="() => Enter(f, location)">
+                <Ico Name="folder" Size="18" />
+                <span class="dfp-nm">
+                    <b>@f.Name</b>
+                    <small>@(Searching ? location : f.Info)</small>
+                </span>
+                @if (added) { <span class="badge neutre">Déjà ajouté</span> }
+            </button>
+            <button type="button" class="dfp-open" aria-label="Ouvrir @f.Name" title="Ouvrir" @onclick="() => Enter(f, location)"><Ico Name="chevron-right" Size="18" /></button>
+        </div>
+    };
+}

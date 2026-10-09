@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Parcourir les Drives</title>
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--row:#EDF1F5;--brand:#0B1F3A;--brand-tint:#EBEDF0;--signal:#3B82C4;--signal-tint:#EAF2FA;--ok:#1E8E5A;--ok-bg:#E1F0E8;--ok-ink:#155A38;--warn:#B7791F;--warn-bg:#FBF0DC;--warn-ink:#7A4F12;--danger:#C8372D;--danger-bg:#FBE4E2;--danger-ink:#8A231C;--radius:4px;--mono:"JetBrains Mono",ui-monospace,Consolas,monospace}
+*{box-sizing:border-box}html,body{margin:0}[hidden]{display:none!important}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
+h1,h2,h3,h4,p{margin:0;font-weight:500}p{font-weight:400}b{font-weight:500}button,select,input{font:inherit;color:inherit}
+a{color:var(--signal);cursor:pointer;text-decoration:none}a:hover{text-decoration:underline}
+.grow{flex:1}
+svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+/* barre de maquette */
+.mock{background:#fff;border-bottom:1px dashed var(--line-2);padding:10px 24px;display:flex;gap:18px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:200}
+.mock span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.mock label{font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer}
+.mock .grp{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+
+/* page derrière */
+.shell{display:flex;min-height:calc(100vh - 49px)}
+.sidebar{width:230px;background:#fff;border-right:1px solid var(--line);padding:22px 14px;flex:none}
+.sidebar .wm{font-size:28px;font-weight:500;letter-spacing:-.03em;padding:0 10px 26px}
+.nav{display:block;padding:9px 12px;color:var(--muted);font-size:16px}
+.nav.active{background:var(--brand-tint);color:var(--ink);font-weight:500;box-shadow:inset 2px 0 0 var(--brand);border-radius:0 4px 4px 0}
+main{flex:1;padding:32px 44px 90px;min-width:0}
+main h1{font-size:28px;line-height:1.2}
+main .sub{color:var(--muted);margin-top:4px}
+.note{background:#FFF8E1;border:1px dashed #E0B84A;border-radius:var(--radius);padding:10px 14px;font-size:13px;color:#6B5200;margin:22px 0 12px;max-width:900px}
+.note ul{margin:6px 0 0;padding-left:18px}
+.note li + li{margin-top:3px}
+@media (max-width:800px){.sidebar{display:none}main{padding:20px 16px 60px}}
+
+/* boutons */
+.btn{font-weight:500;cursor:pointer;border:1px solid var(--brand);border-radius:var(--radius);padding:9px 16px;background:var(--brand);color:#fff;display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.btn.ghost{background:#fff;color:var(--ink);border-color:var(--line-2)}
+.btn.sm{padding:5px 11px;font-size:13px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline-offset:1px}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:var(--radius);font-size:12px;white-space:nowrap;color:var(--muted);background:var(--row)}
+.badge.sig{color:var(--signal);background:var(--signal-tint)}
+
+/* fenêtres */
+.backdrop{position:fixed;inset:0;background:rgba(11,31,58,.45);z-index:100}
+.backdrop.b2{z-index:110}
+.modal{position:fixed;z-index:101;left:50%;top:50%;transform:translate(-50%,-50%);background:#fff;border:1px solid var(--line);border-radius:8px;display:flex;flex-direction:column;overflow:hidden;max-height:calc(100vh - 48px)}
+.modal.wide{width:min(760px,calc(100vw - 32px))}
+.modal.picker{z-index:111;width:min(880px,calc(100vw - 32px));height:min(640px,calc(100vh - 40px))}
+.modal-head{display:flex;align-items:center;gap:12px;padding:16px 18px;border-bottom:1px solid var(--line)}
+.modal-head h3{font-size:18px;line-height:1.3}
+.modal-head small{display:block;color:var(--muted);font-size:13px}
+.modal-x{background:none;border:0;cursor:pointer;color:var(--muted);padding:6px;border-radius:var(--radius);display:grid;margin:-6px -6px -6px 0}
+.modal-x:hover{background:var(--bg);color:var(--ink)}
+.modal-body{padding:16px 18px;overflow-y:auto;flex:1;min-height:0}
+.modal-foot{display:flex;gap:10px;align-items:center;justify-content:flex-end;padding:12px 18px;border-top:1px solid var(--line);background:var(--bg);flex-wrap:wrap}
+.ic{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;flex:none;background:#0F6CBD}
+.ic svg{width:18px;height:18px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+@media (max-width:640px){
+  .modal.wide,.modal.picker{left:0;right:0;top:auto;bottom:0;transform:none;width:100%;max-height:94vh;border-radius:12px 12px 0 0}
+  .modal.picker{height:94vh}
+  .modal-foot{flex-direction:column-reverse;align-items:stretch}.modal-foot .btn{justify-content:center}
+}
+
+/* fenêtre « Gérer » : compte et dossiers (comme DriveSourceDialog) */
+.pe-sub{font-size:15px;font-weight:500;margin:22px 0 10px;padding-top:16px;border-top:1px solid var(--line);display:flex;align-items:center;gap:6px}
+.pe-sub.first{margin-top:0;padding-top:0;border-top:0}
+.cat-count{font-size:12px;font-weight:400;color:var(--muted);background:var(--row);border-radius:10px;padding:0 8px;line-height:20px}
+.account{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--radius)}
+.account small{display:block;color:var(--muted);font-size:13px}
+.avatar{width:22px;height:22px;border-radius:50%;background:#0F6CBD;color:#fff;font-size:11px;display:grid;place-items:center;flex:none}
+.list{border:1px solid var(--line);border-radius:var(--radius)}
+.frow{display:grid;grid-template-columns:18px minmax(0,1fr) auto 32px;align-items:center;gap:12px;padding:8px 8px 8px 12px;border-bottom:1px solid var(--row);position:relative;transition:background .4s}
+.frow.flash{background:var(--signal-tint)}
+.frow > .i{color:var(--muted)}
+.fid{min-width:0;display:grid;gap:1px}
+.fid b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fid small{font-family:var(--mono);font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fid .tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}
+.fid .warn{font-family:inherit;color:var(--warn-ink);white-space:normal;font-size:12px}
+.kebab{background:none;border:0;cursor:pointer;color:var(--muted);padding:6px;border-radius:var(--radius);display:grid}
+.kebab:hover{background:var(--bg);color:var(--ink)}
+.menu{position:absolute;right:8px;top:calc(100% - 6px);background:#fff;border:1px solid var(--line);border-radius:6px;box-shadow:0 8px 24px rgba(11,31,58,.12);min-width:250px;padding:4px;z-index:5}
+.menu button{display:flex;width:100%;text-align:left;gap:10px;align-items:center;padding:8px 10px;border:0;background:none;border-radius:4px;cursor:pointer;font-size:14px}
+.menu button:hover{background:var(--bg)}
+.menu .chk{width:16px;color:var(--ok)}
+.menu .danger{color:var(--danger)}
+.menu hr{border:0;border-top:1px solid var(--row);margin:4px 0}
+.add{padding:12px;background:#FAFBFC;display:grid;gap:10px}
+.add .line{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.add small{color:var(--muted);font-size:12px;line-height:1.45}
+.add .or{background:none;border:0;padding:0;color:var(--signal);cursor:pointer;font-size:13px}
+.add .paste{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
+.add input,.pk-tools input,.sp input{border:1px solid var(--line-2);border-radius:var(--radius);padding:7px 10px;background:#fff;min-width:0}
+.mono{font-family:var(--mono);font-size:13px}
+
+/* sélecteur de dossier */
+.pk{display:grid;grid-template-columns:210px minmax(0,1fr);flex:1;min-height:0}
+.roots{border-right:1px solid var(--line);padding:10px 8px;display:flex;flex-direction:column;gap:2px;background:#FAFBFC;overflow-y:auto}
+.roots button{display:flex;align-items:center;gap:10px;padding:8px 10px;border:0;background:none;border-radius:var(--radius);cursor:pointer;text-align:left;color:var(--muted);font-size:14px}
+.roots button:hover{background:var(--row);color:var(--ink)}
+.roots button.on{background:var(--brand-tint);color:var(--ink);font-weight:500;box-shadow:inset 2px 0 0 var(--brand);border-radius:0 4px 4px 0}
+.roots .acct{margin-top:auto;padding:10px;font-size:12px;color:var(--muted);border-top:1px solid var(--line);overflow:hidden;text-overflow:ellipsis}
+.pane{display:flex;flex-direction:column;min-width:0;min-height:0}
+.pk-tools{display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.crumbs{display:flex;align-items:center;gap:2px;min-width:0;flex:1;flex-wrap:wrap;font-size:14px}
+.crumbs button{border:0;background:none;padding:3px 6px;border-radius:var(--radius);cursor:pointer;color:var(--muted)}
+.crumbs button:hover{background:var(--row);color:var(--ink)}
+.crumbs button:last-child{color:var(--ink);font-weight:500}
+.crumbs .sep{color:var(--line-2)}
+.search{display:flex;align-items:center;gap:6px;border:1px solid var(--line-2);border-radius:var(--radius);padding:0 0 0 9px;background:#fff;color:var(--muted);width:220px}
+.search input{border:0;outline:0;padding:6px 8px 6px 0;width:100%}
+.items{overflow-y:auto;flex:1;min-height:0}
+.sect{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;padding:12px 14px 6px}
+.it{display:grid;grid-template-columns:20px minmax(0,1fr) auto 34px;gap:10px;align-items:center;padding:0 8px 0 14px;border-bottom:1px solid var(--row);cursor:pointer;min-height:46px}
+.it:hover{background:#FAFBFC}
+.it.sel{background:var(--signal-tint);box-shadow:inset 2px 0 0 var(--signal)}
+.it .i{color:#0F6CBD}
+.it .nm{min-width:0;padding:6px 0}
+.it .nm b{display:block;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.it.sel .nm b{font-weight:500}
+.it .nm small{display:block;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.it .open{background:none;border:0;cursor:pointer;color:var(--muted);padding:6px;border-radius:var(--radius);display:grid}
+.it .open:hover{background:var(--row);color:var(--ink)}
+.it.added{cursor:default}
+.it.added .nm b{color:var(--muted)}
+.files{display:flex;flex-wrap:wrap;gap:6px;padding:4px 14px 10px}
+.file{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:var(--radius);padding:3px 9px 3px 3px;font-size:13px;color:var(--muted);max-width:220px}
+.file span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.thumb{width:22px;height:22px;border-radius:3px;display:grid;place-items:center;flex:none}
+.thumb svg{width:12px;height:12px;stroke:#fff;fill:none;stroke-width:2}
+.ignored{font-size:12px;color:var(--muted);padding:0 14px 14px}
+.empty{padding:28px 14px;color:var(--muted);font-size:14px;text-align:center}
+.sp{padding:22px 18px;display:grid;gap:12px;max-width:560px}
+.sp p{color:var(--muted);font-size:14px}
+.sp .line{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
+.pk-foot{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 16px;align-items:center}
+.chosen{grid-column:1 / -1;min-width:0;font-size:13px;color:var(--muted)}
+.chosen b{color:var(--ink);font-weight:500}
+.chosen .loc{display:block;font-family:var(--mono);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.opt{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius);background:#fff;cursor:pointer}
+.opt input{margin:3px 0 0;accent-color:var(--brand);width:16px;height:16px;flex:none}
+.opt small{display:block;color:var(--muted);font-size:12px}
+.opt.dis{opacity:.5;cursor:not-allowed}
+.acts{display:flex;gap:10px;justify-content:flex-end}
+@media (max-width:640px){
+  .pk{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
+  .roots{flex-direction:row;border-right:0;border-bottom:1px solid var(--line);overflow-x:auto;padding:8px;scrollbar-width:none}
+  .roots button{white-space:nowrap}
+  .roots button.on{box-shadow:inset 0 -2px 0 var(--brand);border-radius:4px 4px 0 0}
+  .roots .acct{display:none}
+  .search{width:100%}
+  .pk-foot{grid-template-columns:1fr}
+  .acts{flex-direction:column-reverse}.acts .btn{justify-content:center}
+}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:var(--radius);font-size:14px;z-index:300;display:none;max-width:calc(100vw - 32px)}
+</style>
+</head>
+<body>
+
+<div class="mock">
+  <span>Maquette</span>
+  <div class="grp">
+    <label><input type="radio" name="src" value="gdrive" checked> Google Drive</label>
+    <label><input type="radio" name="src" value="onedrive"> OneDrive et SharePoint</label>
+  </div>
+  <div class="grp">
+    <label><input type="checkbox" id="limit"> Limite de 300 fichiers atteinte</label>
+  </div>
+  <button class="btn ghost sm" id="reopen">Rouvrir « Gérer »</button>
+</div>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="wm">linkii</div>
+    <a class="nav">Écrans</a><a class="nav">Listes de lecture</a><a class="nav">Médiathèque</a><a class="nav">Planning</a>
+    <a class="nav active">Intégrations</a><a class="nav">Réglages</a>
+  </aside>
+  <main>
+    <h1>Intégrations</h1>
+    <p class="sub">Les sources de contenus proposées dans vos listes de lecture, et les comptes qui leur donnent accès.</p>
+    <div class="note"><b>Ce qui change</b>
+      <ul>
+        <li>Dans « Gérer » d'un Drive, <b>« Choisir un dossier… »</b> ouvre un sélecteur. On y parcourt les dossiers du compte connecté sans copier de lien. Coller un lien de partage reste possible (« ou coller un lien »).</li>
+        <li>Le sélecteur affiche les images et vidéos du dossier, c'est-à-dire ce que les écrans montreront. Les autres fichiers (PDF, documents) sont seulement comptés.</li>
+        <li>Option <b>« Inclure les sous-dossiers »</b> au moment de l'ajout, modifiable ensuite dans le menu ⋯ du dossier. Tous les niveaux sont parcourus, avec au plus 300 fichiers au total.</li>
+        <li>Pas de nouvelle autorisation : la lecture seule déjà accordée (Drive, Files.Read.All) suffit pour parcourir.</li>
+      </ul>
+    </div>
+    <div class="note"><b>À trancher</b>
+      <ul>
+        <li><b>SharePoint</b> : pour lister les sites, il faut l'accès « Sites.Read.All », donc reconnecter le compte Microsoft. Dans cette maquette, on colle le lien d'une bibliothèque, et les dossiers SharePoint partagés avec le compte apparaissent dans « Partagés avec moi ».</li>
+        <li>Avec les sous-dossiers, l'ordre « par nom » trie par <b>chemin</b> (2025/… avant 2026/…). C'est la proposition ; l'autre choix serait de trier par nom de fichier seul.</li>
+        <li>Profondeur : tous les niveaux (proposé) ou seulement le premier niveau ?</li>
+      </ul>
+    </div>
+  </main>
+</div>
+
+<div class="backdrop" id="bd1"></div>
+<div class="modal wide" id="manage" role="dialog" aria-modal="true" aria-labelledby="m-title"></div>
+<div class="backdrop b2" id="bd2" hidden></div>
+<div class="modal picker" id="picker" role="dialog" aria-modal="true" aria-labelledby="p-title" hidden></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const I = {
+  folder:'<path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  chev:'<path d="m9 6 6 6-6 6"/>',
+  x:'<path d="M18 6 6 18M6 6l12 12"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  image:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/>',
+  video:'<path d="m8 5 11 7-11 7z"/>',
+  drive:'<path d="M3 16h18M5 16l4-11h6l4 11-2 3H7z"/>',
+  users:'<circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0M16 5a3 3 0 0 1 0 6M21 20a6 6 0 0 0-4-5.6"/>',
+  team:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M9 5v14"/>',
+  cloud:'<path d="M7 18a5 5 0 1 1 1-9.9A6 6 0 0 1 19 10a4 4 0 0 1 0 8z"/>',
+  site:'<path d="M4 20V8l8-4 8 4v12M9 20v-6h6v6"/>',
+  google:'<path d="M20 12a8 8 0 1 1-2.3-5.6M20 12h-8"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  link:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  refresh:'<path d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4"/>',
+  sub:'<path d="M6 4v10a2 2 0 0 0 2 2h10M14 12l4 4-4 4"/>',
+  check:'<path d="m5 12 5 5 9-10"/>',
+  edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/>',
+  ext:'<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  trash:'<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>'
+};
+const ico = (k, cls = 'i') => `<svg class="${cls}" viewBox="0 0 24 24">${I[k]}</svg>`;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// ---------- Arbres fictifs ----------
+// F(nom, modifié, sous-dossiers, images, vidéos, autres fichiers, préfixe des noms de fichiers)
+const F = (n, d, k = [], img = 0, vid = 0, other = 0, px) => ({n, d, k, img, vid, other, px: px || n.toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')});
+const V = (k) => ({virtual: true, k});
+
+const SRC = {
+  gdrive: {
+    name:'Google Drive', glyph:'google', user:'communication@organisation.ch', ext:'Ouvrir dans Google Drive',
+    roots: [
+      {id:'my', n:'Mon Drive', ic:'drive', node: F('Mon Drive', '', [
+        F('Communication', '01.10.2026', [
+          F('Affiches', '07.10.2026', [F('2025', '12.12.2025', [], 31, 0, 2), F('2026', '07.10.2026', [F('Automne', '07.10.2026', [], 9, 1)], 22, 0, 1)], 18, 2, 3),
+          F('Logos', '14.03.2026', [], 6, 0, 4),
+          F('Photos événements', '28.09.2026', [F('Journée portes ouvertes', '28.09.2026', [], 48, 3), F('Soirée annuelle', '15.06.2026', [], 37, 1)], 0, 0, 1, 'photo'),
+        ], 2, 0, 5),
+        F('Direction', '22.09.2026', [F('Rapports', '22.09.2026', [], 0, 0, 12)], 0, 0, 8),
+        F('Vidéos institutionnelles', '03.09.2026', [], 0, 7, 0, 'film'),
+      ], 4, 0, 11)},
+      {id:'shared', n:'Partagés avec moi', ic:'users', node: V([
+        Object.assign(F('Visuels RH', '05.10.2026', [F('Recrutement', '05.10.2026', [], 8, 0)], 12, 1, 2), {by:'rh@organisation.ch'}),
+        Object.assign(F('Photos du site', '19.08.2026', [], 64, 0, 0, 'site'), {by:'technique@organisation.ch'}),
+      ])},
+      {id:'drives', n:'Drive partagés', ic:'team', node: V([
+        F('Cafétéria', '06.10.2026', [F('Menus', '06.10.2026', [], 5, 0, 1, 'menu'), F('Promotions', '30.09.2026', [], 7, 2)], 0, 0, 2),
+        F('Accueil', '02.10.2026', [F('Écran du hall', '02.10.2026', [], 14, 4, 0, 'hall')], 0, 0, 0),
+      ])},
+    ],
+    folders: [
+      {name:'Affiches', loc:'Mon Drive › Communication › Affiches', n:96, sub:true, subs:3, ago:'il y a 6 min', use:'2 listes'},
+      {name:'Menus', loc:'Drive partagés › Cafétéria › Menus', n:5, sub:false, ago:'il y a 6 min', use:'1 contenu'},
+    ]
+  },
+  onedrive: {
+    name:'OneDrive et SharePoint', glyph:'cloud', user:'affichage@organisation.ch', ext:'Ouvrir dans OneDrive',
+    roots: [
+      {id:'my', n:'Mon OneDrive', ic:'cloud', node: F('Mon OneDrive', '', [
+        F('Affichage', '08.10.2026', [F('Hall', '08.10.2026', [F('Événements', '01.10.2026', [], 11, 2)], 16, 3, 1, 'hall'), F('Cafétéria', '07.10.2026', [], 9, 0, 0, 'cafet')], 0, 0, 1),
+        F('Documents', '25.09.2026', [], 0, 0, 34),
+        F('Images', '11.09.2026', [F('Captures d\'écran', '11.09.2026', [], 27, 0, 0, 'capture')], 41, 0, 0, 'img'),
+      ], 0, 0, 3)},
+      {id:'shared', n:'Partagés avec moi', ic:'users', node: V([
+        Object.assign(F('Communication interne', '04.10.2026', [F('Bannières', '04.10.2026', [], 10, 0)], 6, 1, 3), {by:'SharePoint · site Communication'}),
+        Object.assign(F('Présentations clients', '29.09.2026', [], 0, 2, 9, 'pres'), {by:'ventes@organisation.ch'}),
+      ])},
+      {id:'sp', n:'SharePoint', ic:'site', link: true},
+    ],
+    folders: [
+      {name:'Affichage / Hall', loc:'OneDrive › Affichage › Hall', n:19, sub:false, ago:'il y a 4 min', use:'1 liste'},
+      {name:'Affichage / Cafétéria', loc:'OneDrive › Affichage › Cafétéria', n:9, sub:false, ago:'il y a 4 min', use:'Non utilisé'},
+    ]
+  }
+};
+
+let src = 'gdrive', menuAt = -1, pasteOpen = false;
+const P = {root: 0, path: [], sel: null, sub: false, q: ''};   // état du sélecteur
+
+const $ = id => document.getElementById(id);
+const S = () => SRC[src];
+
+// ---------- Fenêtre « Gérer » ----------
+function renderManage() {
+  const s = S(), limit = $('limit').checked;
+  $('manage').innerHTML = `
+    <div class="modal-head">
+      <span class="ic">${ico(s.glyph, '')}</span>
+      <div class="grow"><h3 id="m-title">${s.name}</h3><small>Dossiers copiés dans la médiathèque et lus même hors ligne</small></div>
+      <button class="modal-x" aria-label="Fermer" onclick="toast('Maquette : la fenêtre reste ouverte.')">${ico('x')}</button>
+    </div>
+    <div class="modal-body">
+      <h4 class="pe-sub first">Compte ${src === 'gdrive' ? 'Google' : 'Microsoft'}</h4>
+      <div class="account">
+        <span class="avatar">${s.user[0].toUpperCase()}</span>
+        <div class="grow"><b>${s.user}</b><small>Connecté le 02.10.2026 · lecture seule : rien n'est modifié dans vos fichiers.</small></div>
+        <button class="btn ghost sm">Voir le compte</button>
+      </div>
+
+      <h4 class="pe-sub">Dossiers <span class="cat-count">${s.folders.length}</span></h4>
+      <div class="list">
+        ${s.folders.map((f, i) => `
+          <div class="frow" data-i="${i}">
+            ${ico('folder')}
+            <div class="fid">
+              <b>${esc(f.name)}</b>
+              <small title="${esc(f.loc)}">${esc(f.loc)} · ${limit && f.sub && i === 0 ? 300 : f.n} fichier${f.n > 1 ? 's' : ''} · synchronisé ${f.ago}</small>
+              ${f.sub ? `<div class="tags"><span class="badge sig">${ico('sub')} Avec sous-dossiers${f.subs ? ` · ${f.subs}` : ''}</span></div>` : ''}
+              ${f.sub && limit && i === 0 ? `<small class="warn">Limite de 300 fichiers atteinte : 42 fichiers des sous-dossiers ne sont pas affichés. Choisissez un sous-dossier plus précis, ou retirez l'option.</small>` : ''}
+            </div>
+            <span class="badge">${f.use}</span>
+            <button class="kebab" aria-label="Actions sur ${esc(f.name)}" onclick="event.stopPropagation();menuAt=menuAt===${i}?-1:${i};renderManage()">${ico('more')}</button>
+            ${menuAt === i ? `<div class="menu" onclick="event.stopPropagation()">
+              <button onclick="toggleSub(${i})"><span class="chk">${f.sub ? ico('check') : ''}</span>Inclure les sous-dossiers</button>
+              <button onclick="toast('Renommer : champ en place sur la ligne.')"><span class="chk"></span>Renommer</button>
+              <button onclick="toast('S\\'ouvre dans un nouvel onglet.')"><span class="chk"></span>${s.ext}</button>
+              <hr><button class="danger" onclick="toast('Confirmation « Retirer ce dossier ? » sur la ligne, comme aujourd\\'hui.')"><span class="chk"></span>Retirer</button>
+            </div>` : ''}
+          </div>`).join('')}
+        <div class="add">
+          <div class="line">
+            <button class="btn ghost sm" onclick="openPicker()">${ico('folder')} Choisir un dossier…</button>
+            <button class="or" onclick="pasteOpen=!pasteOpen;renderManage()">${pasteOpen ? 'masquer le lien' : 'ou coller un lien de partage'}</button>
+          </div>
+          ${pasteOpen ? `<div class="paste">
+            <input class="mono" placeholder="${src === 'gdrive' ? 'https://drive.google.com/drive/folders/…' : 'https://organisation.sharepoint.com/:f:/s/…'}" aria-label="Lien de partage du dossier">
+            <button class="btn ghost sm" onclick="toast('Le lien est vérifié puis le dossier ajouté, comme aujourd\\'hui.')">${ico('plus')} Ajouter</button>
+          </div>` : ''}
+          <small>Les images et vidéos du dossier sont affichées, 300 fichiers au plus. Les dossiers sont synchronisés toutes les 15 minutes.</small>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost">Tester la connexion</button>
+      <button class="btn ghost">${ico('refresh')} Synchroniser maintenant</button>
+      <span class="grow"></span>
+      <button class="btn">Fermer</button>
+    </div>`;
+}
+function toggleSub(i) {
+  const f = S().folders[i];
+  f.sub = !f.sub; menuAt = -1; renderManage();
+  toast(f.sub ? `« ${f.name} » : les sous-dossiers seront inclus à la prochaine synchronisation (lancée maintenant).` : `« ${f.name} » : seuls les fichiers du dossier lui-même restent affichés.`);
+}
+
+// ---------- Sélecteur ----------
+const root = () => S().roots[P.root];
+const cur = () => P.path.length ? P.path[P.path.length - 1] : root().node;
+const locOf = (r, path) => [r.id === 'my' && src === 'onedrive' ? 'OneDrive' : r.n, ...path.map(n => n.n)].join(' › ');
+const isAdded = (r, path) => S().folders.some(f => f.loc === locOf(r, path));
+const media = n => n.img + n.vid;
+const plural = (n, w) => `${n} ${w}${n > 1 ? 's' : ''}`;
+const mlabel = n => n > 1 ? `${n} images ou vidéos` : `${n} image ou vidéo`;
+
+function openPicker() {
+  Object.assign(P, {root: 0, path: [], sel: null, sub: false, q: ''});
+  $('bd2').hidden = $('picker').hidden = false;
+  renderPicker();
+}
+function closePicker() { $('bd2').hidden = $('picker').hidden = true; }
+
+// tous les dossiers (pour la recherche) : {r, path}
+function walk() {
+  const out = [];
+  S().roots.forEach((r, ri) => {
+    if (r.link) return;
+    const go = (n, path) => n.k.forEach(c => { const p = [...path, c]; out.push({ri, path: p}); go(c, p); });
+    go(r.node, []);
+  });
+  return out;
+}
+
+function renderPicker() {
+  const s = S(), r = root(), node = r.link ? null : cur();
+  const q = P.q.trim().toLowerCase();
+  let body;
+
+  if (q) {
+    const hits = walk().filter(h => h.path[h.path.length - 1].n.toLowerCase().includes(q));
+    body = hits.length ? `<div class="sect">Résultats · ${hits.length}</div>` + hits.map((h, i) => {
+      const n = h.path[h.path.length - 1], rr = s.roots[h.ri], added = isAdded(rr, h.path);
+      const sel = P.sel && P.sel.n === n;
+      return `<div class="it ${sel ? 'sel' : ''} ${added ? 'added' : ''}" onclick="${added ? '' : `pickHit(${i})`}" ondblclick="openHit(${i})">
+        ${ico('folder')}
+        <div class="nm"><b>${esc(n.n)}</b><small>${esc(locOf(rr, h.path.slice(0, -1)))}</small></div>
+        ${added ? '<span class="badge">Déjà ajouté</span>' : '<span></span>'}
+        <button class="open" aria-label="Ouvrir ${esc(n.n)}" onclick="event.stopPropagation();openHit(${i})">${ico('chev')}</button>
+      </div>`;
+    }).join('') : `<div class="empty">Aucun dossier ne contient « ${esc(P.q)} ».</div>`;
+    window._hits = hits;
+  } else if (r.link) {
+    body = `<div class="sp">
+      <b>Bibliothèque SharePoint</b>
+      <p>Pour parcourir les sites SharePoint, Linkii a besoin d'un accès de plus (lecture de la liste des sites). En attendant, collez le lien d'une bibliothèque ou d'un dossier SharePoint : vous pourrez ensuite parcourir ses sous-dossiers ici.</p>
+      <div class="line"><input class="mono" placeholder="https://organisation.sharepoint.com/sites/…" aria-label="Lien SharePoint"><button class="btn ghost sm" onclick="spOpen()">Ouvrir</button></div>
+      <p>Les dossiers SharePoint partagés avec ${esc(s.user)} figurent aussi dans <a onclick="setRoot(1)">Partagés avec moi</a>.</p>
+    </div>`;
+  } else {
+    const kids = node.k;
+    body = kids.length
+      ? `<div class="sect">Dossiers · ${kids.length}</div>` + kids.map((c, i) => {
+          const added = isAdded(r, [...P.path, c]), sel = P.sel === c;
+          const info = c.by ? `Partagé par ${c.by}` : `Modifié le ${c.d}`;
+          const cnt = [media(c) ? mlabel(media(c)) : '', c.k.length ? plural(c.k.length, 'sous-dossier') : ''].filter(Boolean).join(' · ');
+          return `<div class="it ${sel ? 'sel' : ''} ${added ? 'added' : ''}" onclick="${added ? '' : `pick(${i})`}" ondblclick="enter(${i})">
+            ${ico('folder')}
+            <div class="nm"><b>${esc(c.n)}</b><small>${info}${cnt ? ' · ' + cnt : ''}</small></div>
+            ${added ? '<span class="badge">Déjà ajouté</span>' : '<span></span>'}
+            <button class="open" aria-label="Ouvrir ${esc(c.n)}" onclick="event.stopPropagation();enter(${i})">${ico('chev')}</button>
+          </div>`;
+        }).join('')
+      : (node.virtual ? '' : `<div class="empty">Aucun sous-dossier.</div>`);
+    if (!node.virtual) {
+      const files = [];
+      for (let i = 1; i <= node.img; i++) files.push(['image', `${node.px}-${String(i).padStart(2, '0')}.jpg`]);
+      for (let i = 1; i <= node.vid; i++) files.push(['video', `${node.px}-${String(i).padStart(2, '0')}.mp4`]);
+      const shown = files.slice(0, 10);
+      body += media(node) || node.other ? `<div class="sect">Images et vidéos de ce dossier · ${media(node)}</div>` : '';
+      body += shown.length ? `<div class="files">${shown.map(([t, n]) => `<span class="file"><span class="thumb" style="background:${t === 'image' ? '#F0A92E' : '#7B5CC4'}">${ico(t, '')}</span><span>${n}</span></span>`).join('')}${files.length > 10 ? `<span class="file" style="padding-left:9px">+ ${files.length - 10} autres</span>` : ''}</div>` : (media(node) || !node.other ? '' : `<div class="ignored">Aucune image ni vidéo ici.</div>`);
+      body += node.other ? `<div class="ignored">${plural(node.other, 'autre fichier')} ignoré${node.other > 1 ? 's' : ''} (PDF, documents…) : les écrans n'affichent que les images et vidéos.</div>` : '';
+    }
+  }
+
+  // ce qui sera ajouté : le dossier sélectionné, sinon le dossier ouvert
+  const target = P.sel ? P.sel : (r.link || node.virtual ? null : node);
+  const tPath = P.sel ? (P.selPath || [...P.path, P.sel]) : P.path;
+  const tRoot = P.sel && P.selRoot != null ? s.roots[P.selRoot] : r;
+  const added = target && isAdded(tRoot, tPath);
+  const canAdd = target && !added;
+  const hasSubs = target && target.k.length > 0;
+  const crumbs = [`<button onclick="goTo(-1)">${esc(r.n)}</button>`, ...P.path.map((n, i) => `<span class="sep">›</span><button onclick="goTo(${i})">${esc(n.n)}</button>`)].join('');
+
+  $('picker').innerHTML = `
+    <div class="modal-head">
+      <span class="ic">${ico(s.glyph, '')}</span>
+      <div class="grow"><h3 id="p-title">Choisir un dossier</h3><small>${s.name} · ${esc(s.user)}</small></div>
+      <button class="modal-x" aria-label="Fermer" onclick="closePicker()">${ico('x')}</button>
+    </div>
+    <div class="pk">
+      <nav class="roots" aria-label="Emplacements">
+        ${s.roots.map((x, i) => `<button class="${i === P.root && !q ? 'on' : ''}" onclick="setRoot(${i})">${ico(x.ic)} ${x.n}</button>`).join('')}
+        <div class="acct" title="${esc(s.user)}">${esc(s.user)}</div>
+      </nav>
+      <div class="pane">
+        <div class="pk-tools">
+          <div class="crumbs">${q ? `<span style="color:var(--muted)">Recherche dans ${s.name}</span>` : crumbs}</div>
+          <label class="search">${ico('search')}<input id="pq" placeholder="Rechercher un dossier" aria-label="Rechercher un dossier" value="${esc(P.q)}" oninput="P.q=this.value;P.sel=null;renderPicker();const e=$('pq');e.focus();e.setSelectionRange(e.value.length,e.value.length)"></label>
+        </div>
+        <div class="items">${body}</div>
+      </div>
+    </div>
+    <div class="modal-foot pk-foot">
+      <div class="chosen">${target
+        ? `<b>${esc(target.n)}</b>${media(target) ? ` · ${mlabel(media(target))}` : ' · aucune image ni vidéo'}${added ? ' · déjà ajouté' : ''}<span class="loc" title="${esc(locOf(tRoot, tPath))}">${esc(locOf(tRoot, tPath))}</span>`
+        : (r.link ? 'Collez un lien SharePoint pour commencer.' : 'Ouvrez ou sélectionnez un dossier.')}</div>
+      <label class="opt ${hasSubs ? '' : 'dis'}">
+        <input type="checkbox" ${P.sub && hasSubs ? 'checked' : ''} ${hasSubs ? '' : 'disabled'} onchange="P.sub=this.checked;renderPicker()">
+        <span><b>Inclure les sous-dossiers</b>
+        <small>${hasSubs
+          ? (P.sub ? `Les images et vidéos des ${plural(target.k.length, 'sous-dossier')} (et de leurs propres sous-dossiers) sont ajoutées, 300 fichiers au plus au total. Le total exact est connu à la synchronisation.`
+                   : `Ce dossier a ${plural(target.k.length, 'sous-dossier')}. Sans l'option, seuls ses propres fichiers sont affichés.`)
+          : 'Ce dossier n\'a pas de sous-dossier.'}</small></span>
+      </label>
+      <div class="acts">
+        <button class="btn ghost" onclick="closePicker()">Annuler</button>
+        <button class="btn" ${canAdd ? '' : 'disabled'} onclick="addChosen()">Ajouter${target ? ` « ${esc(target.n)} »` : ''}</button>
+      </div>
+    </div>`;
+}
+
+function setRoot(i) { Object.assign(P, {root: i, path: [], sel: null, selPath: null, selRoot: null, q: ''}); renderPicker(); }
+function pick(i) { const c = cur().k[i]; P.sel = P.sel === c ? null : c; P.selPath = null; P.selRoot = null; renderPicker(); }
+function enter(i) { P.path.push(cur().k[i]); P.sel = null; P.selPath = null; P.selRoot = null; renderPicker(); }
+function goTo(i) { P.path = P.path.slice(0, i + 1); P.sel = null; renderPicker(); }
+function pickHit(i) { const h = _hits[i]; const n = h.path[h.path.length - 1]; if (P.sel === n) { P.sel = null; } else { P.sel = n; P.selPath = h.path; P.selRoot = h.ri; } renderPicker(); }
+function openHit(i) { const h = _hits[i]; Object.assign(P, {root: h.ri, path: h.path, sel: null, selPath: null, selRoot: null, q: ''}); renderPicker(); }
+function spOpen() {
+  // maquette : le lien ouvre une bibliothèque fictive, parcourue comme les autres
+  const lib = F('Documents partagés', '06.10.2026', [F('Affichage', '06.10.2026', [F('Accueil', '06.10.2026', [], 8, 1)], 12, 0, 2)], 0, 0, 6);
+  const r = S().roots[2]; r.node = lib; r.link = false; r.n = 'Site Communication'; r.ic = 'site';
+  P.path = []; P.sel = null; renderPicker();
+}
+function addChosen() {
+  const s = S(), r = root();
+  const target = P.sel || cur();
+  const path = P.sel ? (P.selPath || [...P.path, P.sel]) : P.path;
+  const rr = P.sel && P.selRoot != null ? s.roots[P.selRoot] : r;
+  const sub = P.sub && target.k.length > 0;
+  const n = sub ? Math.min(300, total(target)) : media(target);
+  s.folders.push({name: target.n, loc: locOf(rr, path), n, sub, subs: sub ? count(target) : 0, ago: 'à l\'instant', use: 'Non utilisé'});
+  closePicker(); renderManage();
+  const row = document.querySelector(`.frow[data-i="${s.folders.length - 1}"]`);
+  row.classList.add('flash'); row.scrollIntoView({block: 'nearest'}); setTimeout(() => row.classList.remove('flash'), 1600);
+  toast(`« ${target.n} » ajouté${sub ? ' avec ses sous-dossiers' : ''} : ${plural(n, 'fichier')} synchronisé${n > 1 ? 's' : ''}.`);
+}
+const total = n => media(n) + n.k.reduce((a, c) => a + total(c), 0);
+const count = n => n.k.length + n.k.reduce((a, c) => a + count(c), 0);
+
+let tt;
+function toast(m) { const t = $('toast'); t.textContent = m; t.style.display = 'block'; clearTimeout(tt); tt = setTimeout(() => t.style.display = 'none', 3200); }
+
+document.querySelectorAll('[name=src]').forEach(e => e.onchange = () => { src = e.value; menuAt = -1; pasteOpen = false; closePicker(); renderManage(); });
+$('limit').onchange = renderManage;
+$('reopen').onclick = () => { closePicker(); renderManage(); };
+document.addEventListener('click', () => { if (menuAt >= 0) { menuAt = -1; renderManage(); } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('picker').hidden) closePicker(); });
+renderManage();
+</script>
+</body>
+</html>
