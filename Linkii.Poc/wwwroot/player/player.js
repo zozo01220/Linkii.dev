@@ -1016,8 +1016,40 @@
       if (N && typeof N.capture === 'function') {
         try { N.capture(c.id, location.origin + '/api/player/capture?cmd=' + c.id, state.token || ''); }
         catch (e) { cmdAck(c.id, 'failed', 'Capture impossible'); }
-      } else cmdAck(c.id, 'failed', "Aperçu disponible avec l'application Android seulement");
+      } else webCapture(c.id);
     } else cmdAck(c.id, 'failed', 'Commande inconnue');
+  }
+  // Aperçu depuis un navigateur : le contenu (images, vidéos) est dessiné dans un canvas, dans le sens de la scène et sans miroir
+  // (le serveur ne remet rien à l'endroit : ?plain=1). Les widgets, YouTube et pages web intégrées ne sont pas dessinés.
+  function webCapture(id) {
+    try {
+      var st = $('stage'), W = cell.w || st.offsetWidth, H = cell.h || st.offsetHeight;
+      var wl = cfg.wall && cfg.wall.cols > 0 ? cfg.wall : null, ox = wl ? wl.col * W : 0, oy = wl ? wl.row * H : 0;
+      var k = Math.min(1, 1280 / W), cv = document.createElement('canvas');
+      cv.width = Math.round(W * k); cv.height = Math.round(H * k);
+      var g = cv.getContext('2d');
+      g.fillStyle = '#000'; g.fillRect(0, 0, cv.width, cv.height);
+      var cover = st.classList.contains('phone'), drawn = 0;
+      Array.prototype.forEach.call(st.querySelectorAll('#content img, #content video'), function (m) {
+        var l = m.closest('.layer'); if (l && !l.classList.contains('on')) return;
+        var mw = m.videoWidth || m.naturalWidth, mh = m.videoHeight || m.naturalHeight;
+        if (!mw || !mh || !m.offsetWidth) return;
+        var x = 0, y = 0, e = m;
+        while (e && e !== st) { x += e.offsetLeft; y += e.offsetTop; e = e.offsetParent; }
+        var w = m.offsetWidth, h = m.offsetHeight, r = (cover ? Math.max : Math.min)(w / mw, h / mh);
+        var dw = mw * r, dh = mh * r;
+        g.save();
+        g.beginPath(); g.rect((x - ox) * k, (y - oy) * k, w * k, h * k); g.clip();
+        g.drawImage(m, (x - ox + (w - dw) / 2) * k, (y - oy + (h - dh) / 2) * k, dw * k, dh * k);
+        g.restore(); drawn++;
+      });
+      cv.toBlob(function (b) {
+        if (!b) return cmdAck(id, 'failed', 'Image vide (canvas)');
+        api('/api/player/capture?plain=true&cmd=' + id, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: b })
+          .then(function (r) { if (!r.ok) cmdAck(id, 'failed', 'Capture refusée par le serveur'); })
+          .catch(function (e) { cmdAck(id, 'failed', "Envoi de l'aperçu impossible (" + (e && e.message || 'réseau') + ')'); });
+      }, 'image/jpeg', 0.8);
+    } catch (e) { cmdAck(id, 'failed', 'Dessin impossible (' + (e && e.name || 'erreur') + ')'); }
   }
   // L'application Android rend compte d'un aperçu qu'elle n'a pas pu réaliser (réussi : le serveur voit l'image arriver).
   window.lkCaptureFailed = function (id, why) { cmdAck(id, 'failed', why || 'Capture impossible'); };

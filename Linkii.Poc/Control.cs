@@ -109,14 +109,15 @@ public class ScreenControl(JsonStore store, IHubContext<ScreenHub> hub)
     }
 
     /// <summary>Aperçu reçu de l'écran : image gardée (la dernière seulement) avec l'état du miroir à cet instant ; la commande est exécutée.</summary>
-    public static bool SaveCapture(Db db, Screen s, byte[] jpeg, Guid? cmd, DateTime now)
+    /// <summary>plain : image dessinée par le navigateur dans le sens de la scène, sans le miroir (rien à remettre à l'endroit).</summary>
+    public static bool SaveCapture(Db db, Screen s, byte[] jpeg, Guid? cmd, DateTime now, bool plain = false)
     {
         if (jpeg.Length < 4 || jpeg[0] != 0xFF || jpeg[1] != 0xD8) return false;   // pas un JPEG
         Directory.CreateDirectory(AppPaths.CaptureDir);
         File.WriteAllBytes(CapturePath(s.Id), jpeg);
         s.CaptureUtc = now;
         (s.CaptureW, s.CaptureH) = JpegSize(jpeg);
-        (s.CaptureMirrorH, s.CaptureMirrorV) = Helpers.Mirror(db.Areas, s);
+        (s.CaptureMirrorH, s.CaptureMirrorV) = plain ? (false, false) : Helpers.Mirror(db.Areas, s);
         if (cmd != null && s.Commands.FirstOrDefault(c => c.Id == cmd) is { } c) { c.Status = ScreenCommand.Done; }
         return true;
     }

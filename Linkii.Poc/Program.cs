@@ -536,7 +536,7 @@ api.MapPost("/player/command-ack", (HttpRequest req, CommandAckDto body, JsonSto
 }));
 
 // Aperçu du direct : l'application Android envoie l'image (JPEG) de l'écran ; la dernière seule est gardée.
-api.MapPost("/player/capture", async (HttpRequest req, Guid? cmd, JsonStore store) =>
+api.MapPost("/player/capture", async (HttpRequest req, Guid? cmd, bool? plain, JsonStore store) =>
 {
     if (req.ContentLength is > 2_000_000) return Results.StatusCode(413);
     using var ms = new MemoryStream();
@@ -547,7 +547,7 @@ api.MapPost("/player/capture", async (HttpRequest req, Guid? cmd, JsonStore stor
     {
         var s = Auth(req, db);
         if (Gate(s, db) is { } denied) return denied;
-        return ScreenControl.SaveCapture(db, s!, bytes, cmd, DateTime.UtcNow) ? Results.Ok() : Results.BadRequest();
+        return ScreenControl.SaveCapture(db, s!, bytes, cmd, DateTime.UtcNow, plain == true) ? Results.Ok() : Results.BadRequest();
     });
 });
 
