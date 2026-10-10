@@ -28,7 +28,8 @@ public record ConnectedAccount(string Id, string Kind, string User, string Detai
 /// </summary>
 public static class ConnectedAccounts
 {
-    public const string Microsoft = "microsoft", Google = "google", Canva = "canva", CalDav = "caldav", Exchange = "ews";
+    public const string Microsoft = "microsoft", Google = "google", Canva = "canva", CalDav = "caldav", Exchange = "ews",
+                        Nextcloud = "nextcloud", Sftp = "sftp", Dropbox = "dropbox";
 
     /// <summary>Onglet de la page Intégrations (?tab=comptes).</summary>
     public const string Tab = "comptes";
@@ -43,6 +44,9 @@ public static class ConnectedAccounts
         new(Canva, "Canva", "Vos designs Canva", ["canva"]),
         new(CalDav, "Serveur CalDAV", "Nextcloud, iCloud, Zimbra, SOGo, Synology…", ["cal-caldav"]),
         new(Exchange, "Exchange sur site", "Serveur Exchange (EWS)", ["cal-ews"]),
+        new(Nextcloud, "Nextcloud", "Dossiers d'un serveur Nextcloud ou ownCloud", ["drv-nextcloud"]),
+        new(Sftp, "Serveur SFTP", "Dossiers d'un serveur SFTP", ["drv-sftp"]),
+        new(Dropbox, "Dropbox", "Dossiers de votre compte Dropbox", ["drv-dropbox"]),
     };
 
     public static KindDef Kind(string id) => Kinds.First(k => k.Id == id);
@@ -82,8 +86,20 @@ public static class ConnectedAccounts
         if (SharedCalendarSources.Configured(t, Exchange) && SharedCalendarSources.Account(t, Exchange) is { } ews)
             list.Add(new(Exchange, "Exchange sur site", ews.User, ews.Url, null, false, ews.LastError,
                 [new("Agendas (lecture)", true, null)]));
+        if (DriveSources.Account(t, Nextcloud) is { Url.Length: > 0 } nc)
+            list.Add(new(Nextcloud, "Nextcloud", nc.User.Length > 0 ? nc.User : "Sans identifiant", nc.Url, null, false, nc.LastError,
+                [new("Fichiers (lecture)", true, null)]));
+        if (DriveSources.Account(t, Sftp) is { Url.Length: > 0 } sftp)
+            list.Add(new(Sftp, "Serveur SFTP", sftp.User.Length > 0 ? sftp.User : "Sans identifiant", sftp.Url + (sftp.Port is > 0 and not 22 ? ":" + sftp.Port : ""), null, false, sftp.LastError,
+                [new("Fichiers (lecture)", true, null)]));
+        if (DriveSources.Account(t, Dropbox) is { } dbx && (dbx.Secret.Length > 0 || dbx.LostUtc != null))
+            list.Add(new(Dropbox, "Dropbox", dbx.User.Length > 0 ? dbx.User : "Compte Dropbox", "", dbx.ConnectedUtc, dbx.Secret.Length == 0, "",
+                [new("Fichiers (lecture)", true, null)]));
         return list;
     }
+
+    /// <summary>Comptes dont la connexion se saisit dans la fenêtre de leur Drive (identifiants), plutôt que chez un fournisseur.</summary>
+    public static bool IsDriveForm(string kind) => kind is Nextcloud or Sftp;
 
     /// <summary>Accès à redemander pour reconnecter un compte Google ou Microsoft : ceux qu'il avait, ou les deux s'il n'en avait aucun.</summary>
     public static string ReconnectPurpose(ConnectedAccount a)
@@ -96,6 +112,7 @@ public static class ConnectedAccounts
     public static string ConnectUrl(string kind, string purpose = AccountPurposes.All) => kind switch
     {
         Canva => "/canva/connect?tab=" + Tab,
+        Dropbox => "/dropbox/connect?tab=" + Tab,
         _ => $"/{kind}/connect?for={purpose}&tab={Tab}"
     };
 }

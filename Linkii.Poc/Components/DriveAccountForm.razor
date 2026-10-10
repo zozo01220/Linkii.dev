@@ -1,0 +1,159 @@
+@inject TenantStore Store
+@inject SecretBox Box
+@inject DriveService Drives
+@inject AppService Svc
+@inject Toaster Toast
+
+@* Intégrations › Drives › Gérer › Connexion d'un serveur Nextcloud ou SFTP : adresse, identifiant et secret saisis une fois pour l'organisation.
+   Les secrets sont chiffrés, jamais réaffichés (champ laissé vide = inchangé) ; « Enregistrer et tester » enregistre puis vérifie la connexion.
+   SFTP : l'empreinte du serveur est retenue à la première connexion, puis exigée ; « Oublier l'empreinte » après un changement voulu du serveur. *@
+@if (account != null && !editing)
+{
+    <div class="cvs-account">
+        <Ico Name="@(Sftp ? "server" : "cloud")" Size="22" />
+        <div class="grow">
+            <b>@account.User</b>
+            <small>@Where@(account.ConnectedUtc is { } since ? $" · enregistré le {since.ToLocalTime():dd.MM.yyyy}" : "") · lecture seule : rien n'est modifié sur le serveur.</small>
+            @if (Sftp && account.HostKey.Length > 0) { <small class="mono" title="Empreinte du serveur, retenue à la première connexion">@account.HostKey</small> }
+        </div>
+        <button type="button" class="btn ghost sm" @onclick="() => OnShowAccount.InvokeAsync(Source)">Voir le compte</button>
+        <button type="button" class="btn ghost sm" @onclick="StartEdit">Modifier</button>
+    </div>
+    @if (account.LastError.Length > 0)
+    {
+        <div class="err">Dernier test en échec : @account.LastError@if (Sftp && account.LastError.Contains("empreinte")) { <text> </text><button type="button" class="btn ghost sm" @onclick="ForgetKey">Oublier l'empreinte</button> }</div>
+    }
+}
+else
+{
+    <div class="dw">
+        @if (Sftp)
+        {
+            <div class="dw-field"><label for="daf-url">Serveur</label><input id="daf-url" class="mono" @bind="url" spellcheck="false" autocomplete="off" placeholder="sftp.organisation.ch" /></div>
+            <div class="dw-field"><label for="daf-port">Port</label><input id="daf-port" type="number" min="1" max="65535" @bind="port" /></div>
+            <div class="dw-field"><label for="daf-user">Identifiant</label><input id="daf-user" @bind="user" autocomplete="off" /></div>
+            <div class="dw-field"><label for="daf-pwd">Mot de passe</label><input id="daf-pwd" type="password" @bind="password" autocomplete="new-password" placeholder="@SecretPlaceholder" /></div>
+            <div class="dw-field"><label for="daf-key">Clé privée (facultatif)</label><textarea id="daf-key" class="mono" rows="4" @bind="key" spellcheck="false" autocomplete="off" placeholder="@(account is { Secret.Length: > 0 } ? "Laissez vide pour garder la clé enregistrée" : "-----BEGIN OPENSSH PRIVATE KEY-----")"></textarea><small>Mot de passe, clé privée, ou les deux : Linkii essaie la clé d'abord.</small></div>
+            <div class="dw-field"><label for="daf-pass">Phrase secrète de la clé</label><input id="daf-pass" type="password" @bind="passphrase" autocomplete="new-password" placeholder="@SecretPlaceholder" /></div>
+        }
+        else
+        {
+            <div class="dw-field"><label for="daf-url">Adresse du serveur</label><input id="daf-url" class="mono" @bind="url" spellcheck="false" autocomplete="off" placeholder="https://cloud.organisation.ch" /><small>L'adresse de Nextcloud, sans /remote.php.</small></div>
+            <label class="dw-check"><input type="checkbox" class="ios" @bind="allowHttp" /> Autoriser HTTP (connexion non chiffrée)</label>
+            @if (allowHttp) { <div class="dw-note">Avec http://, l'identifiant et le mot de passe d'application circulent en clair sur le réseau. À réserver à un essai ; repassez en https:// ensuite.</div> }
+            <div class="dw-field"><label for="daf-user">Identifiant</label><input id="daf-user" @bind="user" autocomplete="off" /></div>
+            <div class="dw-field"><label for="daf-pwd">Mot de passe d'application</label><input id="daf-pwd" type="password" @bind="password" autocomplete="new-password" placeholder="@SecretPlaceholder" /><small>Nextcloud › Paramètres › Sécurité › Créer un nouveau mot de passe d'application : il fonctionne même avec la double authentification et se révoque à tout moment.</small></div>
+        }
+        <div class="dw-actions">
+            @if (account != null) { <button type="button" class="btn ghost sm" disabled="@busy" @onclick="() => editing = false">Annuler</button> }
+            <button type="button" class="btn sm" disabled="@busy" @onclick="Save">@(busy ? "Test en cours…" : "Enregistrer et tester")</button>
+        </div>
+    </div>
+    <p class="csd-shared"><Ico Name="lock" Size="14" /> Identifiants chiffrés sur le serveur Linkii. @(Sftp ? "Le serveur doit être joignable depuis internet." : "Le serveur doit être joignable depuis internet (en HTTPS, sauf si vous autorisez HTTP).")</p>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Source { get; set; } = "";   // nextcloud | sftp
+    /// <summary>Connexion enregistrée ou modifiée : la fenêtre et la page Intégrations se mettent à jour.</summary>
+    [Parameter] public EventCallback OnSaved { get; set; }
+    [Parameter] public EventCallback<string> OnShowAccount { get; set; }
+
+    private bool Sftp => Source == "sftp";
+    private DriveAccount? account;
+    private bool editing, busy;
+    private string url = "", user = "", password = "", key = "", passphrase = "";
+    private bool allowHttp;
+    private int port = 22;
+
+    private string SecretPlaceholder => account is { Secret.Length: > 0 } ? "Laissez vide pour garder le secret enregistré" : "";
+    private string Where => Sftp ? account!.Url + (account.Port is > 0 and not 22 ? ":" + account.Port : "") : account!.Url;
+
+    protected override void OnParametersSet() => Load();
+
+    private void Load()
+    {
+        account = Store.Read(d => d.Tenant.DriveAccounts.FirstOrDefault(a => a.Source == Source));
+        if (account is not { Url.Length: > 0 }) { account = null; editing = true; }
+    }
+
+    private void StartEdit()
+    {
+        url = account!.Url; user = account.User; port = account.Port > 0 ? account.Port : 22; allowHttp = account.AllowHttp;
+        password = key = passphrase = "";
+        editing = true;
+    }
+
+    private async Task ForgetKey()
+    {
+        Store.Write(d => { if (d.Tenant.DriveAccounts.FirstOrDefault(a => a.Source == Source) is { } a) { a.HostKey = ""; a.LastError = ""; } });
+        Load();
+        await OnSaved.InvokeAsync();
+        Toast.Ok("Empreinte oubliée : elle sera retenue de nouveau à la prochaine connexion. Testez la connexion.");
+    }
+
+    /// <summary>Serveur saisi : nom d'hôte seul pour SFTP, adresse https pour Nextcloud. Null si invalide.</summary>
+    private string? CleanUrl()
+    {
+        var v = url.Trim();
+        if (Sftp)
+        {
+            if (v.StartsWith("sftp://", StringComparison.OrdinalIgnoreCase)) v = v[7..];
+            v = v.TrimEnd('/');
+            return v.Length > 0 && v.All(c => char.IsLetterOrDigit(c) || c is '.' or '-' or ':' or '[' or ']') ? v : null;
+        }
+        var scheme = allowHttp ? v.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || v.StartsWith("https://", StringComparison.OrdinalIgnoreCase) : v.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+        return scheme && AppCatalog.IsHttpUrl(v) ? v.TrimEnd('/') : null;
+    }
+
+    private async Task Save()
+    {
+        var server = CleanUrl();
+        if (server == null) { Toast.Error(Sftp ? "Saisissez le nom du serveur (sftp.organisation.ch)." : "Saisissez l'adresse du serveur en https:// (https://cloud.organisation.ch), ou activez « Autoriser HTTP »."); return; }
+        if (user.Trim().Length == 0) { Toast.Error("Saisissez l'identifiant."); return; }
+        if (Sftp && port is < 1 or > 65535) { Toast.Error("Le port doit être compris entre 1 et 65535."); return; }
+        var current = account;
+        string secret;
+        if (Sftp)
+        {
+            var old = current is { Secret.Length: > 0 } ? SftpCredentials.Parse(Box.Unprotect(current.Secret)) : new("", "", "");
+            var creds = new SftpCredentials(password.Length > 0 ? password : old.Password, key.Trim().Length > 0 ? key.Trim() : old.Key,
+                                            passphrase.Length > 0 ? passphrase : old.Passphrase);
+            if (!creds.Any) { Toast.Error("Saisissez un mot de passe ou collez une clé privée."); return; }
+            secret = Box.Protect(creds.ToJson());
+        }
+        else
+        {
+            if (password.Length == 0 && current is not { Secret.Length: > 0 }) { Toast.Error("Saisissez le mot de passe d'application."); return; }
+            secret = password.Length > 0 ? Box.Protect(password) : current!.Secret;
+        }
+
+        var moved = current == null || current.Url != server || current.Port != (Sftp ? port : 0) || current.User != user.Trim();
+        Store.Write(d =>
+        {
+            var a = d.Tenant.DriveAccounts.FirstOrDefault(x => x.Source == Source);
+            if (a == null) d.Tenant.DriveAccounts.Add(a = new DriveAccount { Source = Source });
+            a.Url = server; a.AllowHttp = !Sftp && allowHttp; a.Port = Sftp ? port : 0; a.User = user.Trim(); a.Secret = secret; a.ConnectedUtc = DateTime.UtcNow; a.LastError = "";
+            if (moved) a.HostKey = "";   // autre serveur : autre empreinte
+        });
+        password = key = passphrase = "";
+        busy = true;
+        StateHasChanged();
+        try
+        {
+            var message = await Drives.TestConnection(Store.Read(d => d.Tenant), Source);
+            Store.Write(d => { if (d.Tenant.DriveAccounts.FirstOrDefault(x => x.Source == Source) is { } a) a.LastError = ""; });
+            if (!Store.Read(d => DriveSources.Enabled(d.Tenant, Source))) Svc.SetDriveSource(Source, true);
+            Toast.Ok(message);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or System.Text.Json.JsonException or TaskCanceledException)
+        {
+            var text = ex.Message;
+            Store.Write(d => { if (d.Tenant.DriveAccounts.FirstOrDefault(x => x.Source == Source) is { } a) a.LastError = text; });
+            Toast.Error("Connexion enregistrée, mais le test a échoué : " + text);
+        }
+        finally { busy = false; }
+        editing = false;
+        Load();
+        await OnSaved.InvokeAsync();
+    }
+}

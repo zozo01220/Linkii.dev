@@ -55,6 +55,8 @@ builder.Services.AddSingleton<ExternalLogin>();   // « Continuer avec Microsoft
 builder.Services.AddSingleton<ScreenControl>();   // contrôle du direct (Growth) : pause, redémarrage, aperçu
 builder.Services.AddHostedService<ScreenWatchWorker>();   // commandes sans réponse, pauses terminées, alertes « écran hors ligne »
 builder.Services.AddHostedService<SignupWorker>();   // inscriptions non validées supprimées, rappel et fin des essais gratuits
+builder.Services.AddSingleton<DropboxAuth>();   // « Se connecter avec Dropbox » (lecture seule)
+builder.Services.AddSingleton<RemoteDrives>();   // sessions Nextcloud (WebDAV), SFTP et Dropbox
 builder.Services.AddSingleton<DriveService>();
 builder.Services.AddHostedService<DriveSyncWorker>();   // dossiers des Drives : synchronisés toutes les 15 minutes
 builder.Services.AddScoped<AppService>();
@@ -226,6 +228,7 @@ app.Use(async (ctx, next) =>
                || p.StartsWithSegments("/internal") || p.StartsWithSegments("/media")   // /media fait son propre contrôle d'accès
                || p.StartsWithSegments("/canva/callback")   // retour de Canva : identifié par son « state », sur le domaine principal
                || p.StartsWithSegments("/google/callback")  // retour de Google (Drive) : idem
+               || p.StartsWithSegments("/dropbox/callback")  // retour de Dropbox : idem
                || p.StartsWithSegments("/microsoft/callback")  // retour de Microsoft : idem
                || p.StartsWithSegments("/linkedin/callback") || p.StartsWithSegments("/github/callback")  // retours de LinkedIn et GitHub (connexion seulement)
                || p.StartsWithSegments("/manifest.webmanifest");   // le navigateur le demande sans cookie de session
@@ -289,6 +292,19 @@ app.MapGet("/google/callback", async (HttpRequest req, GoogleAuth google, Extern
     Results.Redirect(sso.Owns(req.Query["state"])   // « Continuer avec Google » de la page de connexion : même adresse de retour
         ? await sso.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"], req.Query["error_description"])
         : await google.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
+
+// Compte Dropbox : « Se connecter avec Dropbox » depuis Intégrations › Dropbox ou Comptes connectés (?tab=comptes : retour sur cet onglet),
+// application OAuth de la plateforme, lecture seule. Un seul compte par organisation.
+app.MapGet("/dropbox/connect", (HttpContext ctx, DropboxAuth dropbox) =>
+{
+    var cid = ctx.User.GetGuid(Claims.Client);
+    if (cid == null) return Results.Redirect("/");
+    if (!dropbox.IsConfigured) return Results.Redirect("/integrations?dropbox=unconfigured");
+    var here = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
+    return Results.Redirect(dropbox.StartAuthorization(cid.Value, here + AccountPurposes.ReturnPage(ctx.Request), here));
+});
+app.MapGet("/dropbox/callback", async (HttpRequest req, DropboxAuth dropbox) =>
+    Results.Redirect(await dropbox.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
 
 // Compte Microsoft : « Se connecter avec Microsoft » depuis Intégrations › Microsoft 365 (?for=calendar), OneDrive et SharePoint (?for=drive)
 // ou Comptes connectés (?for=all&tab=comptes : retour sur cet onglet),
@@ -565,11 +581,18 @@ static string PlayerBuild(string webRoot)
     return Convert.ToHexString(sha.Hash!)[..12];
 }
 
-api.MapPost("/player/ack", (HttpRequest req, AckDto body, JsonStore store) => store.Read(db =>
+// Accusé de publication : stage « downloading » / « ready » (étapes avant l'affichage), sinon la version est affichée.
+api.MapPost("/player/ack", (HttpRequest req, AckDto body, JsonStore store) => store.Write(db =>
 {
     var s = Auth(req, db);
     if (Gate(s, db) is { } denied) return denied;
-    s!.AppliedRevision = body.Version;
+    if (body.Stage is "downloading" or "ready")
+    {
+        s!.DeliveryRevision = body.Version; s.DeliveryStage = body.Stage; s.DeliveryUtc = DateTime.UtcNow;
+        return Results.Ok();
+    }
+    if (s!.AppliedRevision != body.Version) s.AppliedUtc = DateTime.UtcNow;
+    s.AppliedRevision = body.Version;
     if (body.W > 0 && body.H > 0) { s.DetectedW = body.W; s.DetectedH = body.H; }
     return Results.Ok();
 }));
@@ -692,7 +715,7 @@ app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 
 app.Run();
 
-record AckDto(string Version, int? W, int? H);
+record AckDto(string Version, int? W, int? H, string? Stage = null);
 record PlayDto(Guid? MediaId, string? AppId, long Start, int Sec);
 record StartDto(int? W, int? H);
 record DeviceDto(string? Kind, string? Os, string? Model, string? App, long? BootMs);

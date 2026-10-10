@@ -198,7 +198,7 @@
     if (!v && !l) { h.note('YouTube : lien de vidéo manquant — republiez la liste de lecture'); return; }
     h.youtube({
       videoId: v ? v[1] : null, playlistId: !v && l ? l[1] : null,
-      sound: s.sound === 'true', start: parseInt(s.startAt, 10) || 0, end: parseInt(s.endAt, 10) || 0
+      sound: s.sound === 'true', hide: s.hideOverlays === 'true', start: parseInt(s.startAt, 10) || 0, end: parseInt(s.endAt, 10) || 0
     });
   });
 

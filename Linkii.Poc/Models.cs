@@ -291,6 +291,8 @@ public class Tenant
     // Drives (Intégrations) : sources actives (gdrive | onedrive) et dossiers synchronisés. La connexion est celle des calendriers (Google, Microsoft 365).
     public List<string> DrivesEnabled { get; set; } = new();
     public List<DriveFolder> DriveFolders { get; set; } = new();
+    /// <summary>Connexions des Drives qui n'ont pas de compte Google ou Microsoft : Nextcloud, SFTP (identifiants saisis), Dropbox (OAuth).</summary>
+    public List<DriveAccount> DriveAccounts { get; set; } = new();
 
     // Compte Google connecté par l'organisation (« Se connecter avec Google », lecture seule), partagé par Google Calendar et Google Drive.
     // GoogleScopes : accès accordés (agendas, fichiers Drive). Jeton de renouvellement chiffré (SecretBox).
@@ -310,13 +312,33 @@ public class Tenant
     public DateTime? GoogleDriveConnectedUtc { get; set; }
 }
 
-/// <summary>Un dossier Google Drive ou OneDrive / SharePoint, copié dans la médiathèque (fichiers masqués, Info["drive"] = Id) et affiché par l'app « Dossier Drive ».</summary>
+/// <summary>
+/// Connexion d'un Drive Nextcloud, SFTP ou Dropbox (une par source et par client). Nextcloud : Url = adresse du serveur, User, Secret = mot de passe
+/// d'application. SFTP : Url = serveur, Port, User, Secret = JSON chiffré {password, key, passphrase}, HostKey = empreinte du serveur (SHA-256) retenue à la
+/// première connexion. Dropbox : Secret = jeton de renouvellement, User = adresse du compte.
+/// </summary>
+public class DriveAccount
+{
+    public string Source { get; set; } = "";      // nextcloud | sftp | dropbox
+    public string Url { get; set; } = "";
+    public int Port { get; set; }
+    public string User { get; set; } = "";
+    public string Secret { get; set; } = "";      // chiffré (SecretBox), jamais réaffiché
+    public string HostKey { get; set; } = "";     // SFTP : empreinte du serveur
+    public bool AllowHttp { get; set; }           // Nextcloud : accepte une adresse http:// (identifiants non chiffrés sur le réseau), sur interrupteur
+    public string LastError { get; set; } = "";   // dernier test en échec ; vide si le dernier test a réussi
+    public DateTime? ConnectedUtc { get; set; }
+    /// <summary>Dropbox : accès retiré (jeton refusé) ; le compte reste affiché « à reconnecter ».</summary>
+    public DateTime? LostUtc { get; set; }
+}
+
+/// <summary>Un dossier d'un Drive (Google Drive, OneDrive / SharePoint, Nextcloud, SFTP, Dropbox), copié dans la médiathèque (fichiers masqués, Info["drive"] = Id) et affiché par l'app « Dossier Drive ».</summary>
 public class DriveFolder
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    public string Source { get; set; } = "";      // gdrive | onedrive
+    public string Source { get; set; } = "";      // gdrive | onedrive | nextcloud | sftp | dropbox
     public string Name { get; set; } = "";
-    public string RemoteId { get; set; } = "";    // Google : ID du dossier ; Microsoft : « driveId/itemId »
+    public string RemoteId { get; set; } = "";    // Google : ID du dossier ; Microsoft : « driveId/itemId » ; Nextcloud et SFTP : chemin ; Dropbox : « id:… »
     public string Location { get; set; } = "";    // affichage : emplacement du dossier
     public string WebUrl { get; set; } = "";      // « Ouvrir dans… » ; vide pour les dossiers ajoutés avant (Google : déduite de RemoteId)
     public bool Subfolders { get; set; }          // fichiers des sous-dossiers compris, tous niveaux
@@ -370,6 +392,10 @@ public class Screen : IClientOwned, IAreaOwned
     public string? Token { get; set; }         // non null une fois appairé
     public Guid? PlaylistId { get; set; }
     public string? AppliedRevision { get; set; }
+    public DateTime? AppliedUtc { get; set; }          // l'écran a commencé à afficher AppliedRevision à cette date
+    public string? DeliveryRevision { get; set; }      // dernière version dont l'écran a signalé la réception (étape avant l'affichage)
+    public string? DeliveryStage { get; set; }         // downloading | ready
+    public DateTime? DeliveryUtc { get; set; }
     public DateTime? LastSeenUtc { get; set; }
 
     public string ScreenType { get; set; } = "tv";
@@ -719,6 +745,31 @@ public static class Helpers
     {
         if (s.LastSeenUtc is null || DateTime.UtcNow - s.LastSeenUtc > TimeSpan.FromSeconds(90)) return "Hors ligne";
         return s.AppliedRevision != Revision(p, s, t, r, sync) ? "Mise à jour" : "En ligne";
+    }
+
+    public record DeliveryInfo(string State, string Label, string? Detail);   // State : ok | wip | late
+
+    /// <summary>Où en est la dernière publication de l'écran : affichée, en cours d'arrivée, ou jamais arrivée. Null si l'écran n'a jamais été publié.</summary>
+    public static DeliveryInfo? Delivery(Screen s, Playlist? p, Tenant t, Reseller? r, string sync, DateTime now)
+    {
+        if (s.PublishedUtc is not { } pub || s.Token == null) return null;
+        var rev = Revision(p, s, t, r, sync);
+        string At(DateTime u) => (u.Kind == DateTimeKind.Utc ? u.ToLocalTime() : u).ToString("HH:mm");
+        string Ago(DateTime u) { var m = (int)(now - u).TotalMinutes; return m < 1 ? "à l'instant" : m < 60 ? $"depuis {m} min" : m < 1440 ? $"depuis {m / 60} h" : $"depuis {m / 1440} j"; }
+        var online = s.LastSeenUtc is { } ls && now - ls <= TimeSpan.FromSeconds(90);
+        if (s.AppliedRevision == rev)
+            return new("ok", s.AppliedUtc is { } au && au >= pub ? $"Affichée à {At(au)}" : "À jour", s.AppliedUtc is { } a2 && a2 >= pub ? $"Publiée à {At(pub)}, affichée à {At(a2)}" : $"Publiée à {At(pub)}");
+        if (!online)
+            return new("late", "Pas encore reçue", $"Publiée à {At(pub)} : l'écran est hors ligne{(s.LastSeenUtc is { } l ? " (vu pour la dernière fois à " + At(l) + ")" : "")}. Elle arrivera dès qu'il se reconnecte.");
+        var stage = s.DeliveryRevision == rev ? s.DeliveryStage : null;
+        if (now - pub > TimeSpan.FromMinutes(10) && stage != "ready")
+            return new("late", "Reçue ? Non confirmée", $"Publiée à {At(pub)} ({Ago(pub)}) : l'écran est en ligne mais n'a rien confirmé. Vérifiez l'écran ou son réseau.");
+        return stage switch
+        {
+            "ready" => new("wip", "Reçue, bientôt affichée", $"Publiée à {At(pub)} : téléchargée, affichée à la fin du contenu en cours."),
+            "downloading" => new("wip", "Téléchargement en cours", $"Publiée à {At(pub)} : l'écran télécharge les fichiers."),
+            _ => new("wip", "Envoi en cours", $"Publiée à {At(pub)} : l'écran va la recevoir dans quelques secondes.")
+        };
     }
 
     /// <summary>Zone de l'écran, si elle existe encore dans son aire.</summary>

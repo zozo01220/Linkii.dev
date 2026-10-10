@@ -3,6 +3,7 @@
 @inject AppService Svc
 @inject GoogleAuth GoogleAuth
 @inject MicrosoftAuth MsAuth
+@inject DropboxAuth DropboxAuth
 @inject Toaster Toast
 
 @* Intégrations › Drives › Gérer : la connexion de la source, puis ses dossiers synchronisés.
@@ -62,7 +63,7 @@
                 <div class="dw-note">Google Drive n'est pas encore disponible : la connexion Google de la plateforme doit d'abord être configurée sur le serveur par l'administrateur Linkii.</div>
             }
         }
-        else
+        else if (Source == "onedrive")
         {
             <h4 class="pe-sub csd-first">Compte Microsoft</h4>
             @if (configured)
@@ -104,6 +105,42 @@
                 <div class="dw-note">OneDrive et SharePoint ne sont pas encore disponibles : la connexion Microsoft de la plateforme doit d'abord être configurée sur le serveur par l'administrateur Linkii.</div>
             }
         }
+        else if (Source == "dropbox")
+        {
+            <h4 class="pe-sub csd-first">Compte Dropbox</h4>
+            @if (configured)
+            {
+                <div class="cvs-account">
+                    <Ico Name="folder" Size="22" />
+                    <div class="grow">
+                        <b>@(dropboxUser.Length > 0 ? dropboxUser : "Compte Dropbox")</b>
+                        <small>Connecté · lecture seule : rien n'est modifié dans votre Dropbox.</small>
+                    </div>
+                    <button type="button" class="btn ghost sm" @onclick="() => OnShowAccount.InvokeAsync(ConnectedAccounts.Dropbox)">Voir le compte</button>
+                </div>
+                <p class="csd-shared"><Ico Name="folder" Size="14" /> Parcourez votre Dropbox, ou saisissez le chemin d'un dossier (/Affichage/Hall).</p>
+            }
+            else if (DropboxAuth.IsConfigured)
+            {
+                <div class="cvs-account">
+                    <div class="grow">
+                        <b>@(dropboxLost ? "Connexion expirée" : "Aucun compte connecté")</b>
+                        <small>@(dropboxLost ? "Reconnectez votre compte Dropbox : ses dossiers ne sont plus mis à jour." : "Connectez le compte Dropbox qui a accès à vos dossiers. Linkii demande uniquement un accès en lecture.")</small>
+                    </div>
+                    <a class="btn sm" href="/dropbox/connect" target="_top">@(dropboxLost ? "Reconnecter Dropbox" : "Se connecter avec Dropbox")</a>
+                </div>
+                <p class="csd-shared"><Ico Name="lock" Size="14" /> Vous passez par la page de connexion Dropbox : Linkii ne voit jamais votre mot de passe.</p>
+            }
+            else
+            {
+                <div class="dw-note">Dropbox n'est pas encore disponible : la connexion Dropbox de la plateforme doit d'abord être configurée sur le serveur par l'administrateur Linkii.</div>
+            }
+        }
+        else
+        {
+            <h4 class="pe-sub csd-first">Connexion</h4>
+            <DriveAccountForm Source="@Source" OnSaved="Changed" OnShowAccount="OnShowAccount" />
+        }
 
 
         <DriveSyncBar />
@@ -142,7 +179,7 @@
                                     <span class="dsd-chk">@if (folder.Subfolders) { <Ico Name="check" Size="16" /> }</span> Inclure les sous-dossiers
                                 </button>
                                 <button type="button" role="menuitem" @onclick="() => StartRename(folder)"><Ico Name="edit" Size="16" /> Renommer</button>
-                                @if (web.Length > 0) { <a role="menuitem" href="@web" target="_blank" rel="noopener" @onclick="() => menuId = null"><Ico Name="external" Size="16" /> Ouvrir dans @(IsGoogle ? "Google Drive" : "OneDrive")</a> }
+                                @if (web.Length > 0) { <a role="menuitem" href="@web" target="_blank" rel="noopener" @onclick="() => menuId = null"><Ico Name="external" Size="16" /> Ouvrir dans @OpenIn</a> }
                                 <button type="button" role="menuitem" class="danger" @onclick="() => { menuId = null; confirmId = folder.Id; }"><Ico Name="trash" Size="16" /> Retirer</button>
                             </div>
                         }
@@ -161,13 +198,13 @@
             <div class="dsd-add">
                 <div class="dsd-add-line">
                     <button type="button" class="btn ghost sm" disabled="@(busy || !configured)" @onclick="() => picking = true"><Ico Name="folder" Size="14" /> Choisir un dossier…</button>
-                    <button type="button" class="dsd-or" @onclick="() => pasteOpen = !pasteOpen">@(pasteOpen ? "masquer le lien" : "ou coller un lien de partage")</button>
+                    <button type="button" class="dsd-or" @onclick="() => pasteOpen = !pasteOpen">@(pasteOpen ? "masquer" : Def.PasteLabel)</button>
                 </div>
                 @if (pasteOpen)
                 {
                     <div class="cal-add">
                         <input aria-label="Nom affiché" placeholder="Nom affiché (facultatif)" maxlength="80" @bind="newName" />
-                        <input aria-label="Lien de partage du dossier" class="mono" placeholder="@Def.LinkPlaceholder" @bind="newLink" spellcheck="false" autocomplete="off" />
+                        <input aria-label="@Def.PasteAria" class="mono" placeholder="@Def.LinkPlaceholder" @bind="newLink" spellcheck="false" autocomplete="off" />
                         <button type="button" class="btn ghost sm" disabled="@busy" @onclick="Add"><Ico Name="plus" Size="14" /> Ajouter</button>
                     </div>
                 }
@@ -209,12 +246,23 @@
 
     private string HeadLine => configured ? "Dossiers copiés dans la médiathèque et lus même hors ligne"
         : IsGoogle ? (GoogleAuth.IsConfigured ? "Connectez votre compte Google, puis ajoutez vos dossiers" : "Pas encore disponible sur cette plateforme")
+        : Source == "dropbox" ? (DropboxAuth.IsConfigured ? "Connectez votre compte Dropbox, puis ajoutez vos dossiers" : "Pas encore disponible sur cette plateforme")
+        : Source is "nextcloud" or "sftp" ? "Renseignez la connexion au serveur, puis ajoutez vos dossiers"
         : MsAuth.IsConfigured ? "Connectez votre compte Microsoft, puis ajoutez vos dossiers" : "Pas encore disponible sur cette plateforme";
 
     /// <summary>Pourquoi on ne peut pas encore ajouter de dossier.</summary>
-    private string NotReady => IsGoogle
-        ? (GoogleAuth.IsConfigured ? "Connectez d'abord votre compte Google." : "Google Drive n'est pas encore disponible sur cette plateforme.")
-        : (MsAuth.IsConfigured ? "Connectez d'abord votre compte Microsoft." : "OneDrive et SharePoint ne sont pas encore disponibles sur cette plateforme.");
+    private string NotReady => Source switch
+    {
+        "gdrive" => GoogleAuth.IsConfigured ? "Connectez d'abord votre compte Google." : "Google Drive n'est pas encore disponible sur cette plateforme.",
+        "dropbox" => DropboxAuth.IsConfigured ? "Connectez d'abord votre compte Dropbox." : "Dropbox n'est pas encore disponible sur cette plateforme.",
+        "nextcloud" or "sftp" => "Renseignez d'abord la connexion au serveur.",
+        _ => MsAuth.IsConfigured ? "Connectez d'abord votre compte Microsoft." : "OneDrive et SharePoint ne sont pas encore disponibles sur cette plateforme."
+    };
+
+    /// <summary>« Ouvrir dans … » : le service du dossier.</summary>
+    private string OpenIn => Source switch { "gdrive" => "Google Drive", "onedrive" => "OneDrive", _ => Def.Name };
+    private string dropboxUser = "";
+    private bool dropboxLost;
     private bool busy => testing || syncing;
     private List<DriveFolder> folders = new();
     private Dictionary<string, (int Contents, int Lists)> uses = new();   // par dossier : contenus qui l'affichent, listes de lecture qui les contiennent
@@ -231,6 +279,8 @@
         google = GoogleAuth.ConnectionOf(t);
         ms = MicrosoftAuth.ConnectionOf(t);
         hasDrive = GoogleAuth.Has(t, GoogleAuth.DriveScope);
+        dropboxUser = DriveSources.Account(t, "dropbox")?.User ?? "";
+        dropboxLost = DriveSources.Account(t, "dropbox")?.LostUtc != null;
         folders = t.DriveFolders.Where(f => f.Source == Source).OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
         uses = Store.Read(d =>
         {
@@ -276,7 +326,7 @@
     {
         if (!configured) { Toast.Error(NotReady); return; }
         var link = newLink.Trim();
-        if (link.Length == 0) { Toast.Error("Collez le lien de partage du dossier."); return; }
+        if (link.Length == 0) { Toast.Error(DriveSources.IsRemote(Source) ? "Saisissez le chemin du dossier." : "Collez le lien de partage du dossier."); return; }
         syncing = true;
         StateHasChanged();
         try

@@ -7,6 +7,7 @@
 @inject CanvaService Canva
 @inject GoogleAuth GoogleAuth
 @inject MicrosoftAuth MsAuth
+@inject DropboxAuth DropboxAuth
 
 <div class="page-head">
     <div>
@@ -25,7 +26,7 @@
                     {
                         var kind = k;
                         var ready = Available(kind.Id);
-                        @if (kind.Id == ConnectedAccounts.Canva && ready)
+                        @if (kind.Id is ConnectedAccounts.Canva or ConnectedAccounts.Dropbox && ready)
                         {
                             <a role="menuitem" href="@ConnectedAccounts.ConnectUrl(kind.Id)" target="_top"><AccountLogo Kind="@kind.Id" Size="20" /><span><b>@kind.Name</b><small>@kind.Summary</small></span></a>
                         }
@@ -113,7 +114,7 @@ else
     {
         <div class="card empty">
             <div class="big">Aucun compte connecté</div>
-            <p>Connectez un compte Microsoft, Google ou Canva, ou un serveur d'agendas : ses agendas, dossiers ou designs seront proposés dans vos listes de lecture.</p>
+            <p>Connectez un compte Microsoft, Google, Canva ou Dropbox, ou un serveur (agendas, Nextcloud, SFTP) : ses agendas, dossiers ou designs seront proposés dans vos listes de lecture.</p>
         </div>
     }
     <div class="acc-list">
@@ -121,7 +122,7 @@ else
         {
             var a = acc;
             var state = AccState(a);
-            var oauth = a.Id is ConnectedAccounts.Microsoft or ConnectedAccounts.Google or ConnectedAccounts.Canva;
+            var oauth = a.Id is ConnectedAccounts.Microsoft or ConnectedAccounts.Google or ConnectedAccounts.Canva or ConnectedAccounts.Dropbox;
             <article class="acc-card @(flash == a.Id ? "flash" : "")" tabindex="-1" @ref="accRefs[a.Id]" aria-labelledby="acc-@a.Id">
                 <div class="acc-head">
                     <AccountLogo Kind="@a.Id" Size="28" />
@@ -142,7 +143,7 @@ else
                                 }
                                 else
                                 {
-                                    <button type="button" role="menuitem" @onclick="() => { accMenu = null; calSource = a.Id; }"><Ico Name="edit" Size="16" /> Modifier la connexion</button>
+                                    <button type="button" role="menuitem" @onclick="() => { accMenu = null; EditConnection(a.Id); }"><Ico Name="edit" Size="16" /> Modifier la connexion</button>
                                 }
                                 <button type="button" role="menuitem" class="danger" @onclick="() => { accMenu = null; disconnectId = a.Id; }"><Ico Name="logout" Size="16" /> Déconnecter…</button>
                             </div>
@@ -160,7 +161,7 @@ else
                 {
                     <div class="acc-alert">
                         <span class="grow">Dernier test en échec : @a.Error</span>
-                        <button type="button" class="btn danger sm" @onclick="() => calSource = a.Id">Vérifier la connexion</button>
+                        <button type="button" class="btn danger sm" @onclick="() => EditConnection(a.Id)">Vérifier la connexion</button>
                     </div>
                 }
                 <div class="acc-body">
@@ -257,8 +258,8 @@ else
         </div>
         <div class="modal-body acc-connect">
             <p>Ce que Linkii pourra lire, sans jamais rien modifier :</p>
-            <label class="acc-choice"><input type="checkbox" @bind="wantCalendars" /><span><b>Agendas</b><small>@(ms ? "Microsoft 365 : agendas Outlook, salles et boîtes partagées" : "Google Calendar : agendas du compte, ou partagés avec lui")</small></span></label>
-            <label class="acc-choice"><input type="checkbox" @bind="wantFiles" /><span><b>Fichiers</b><small>@(ms ? "OneDrive et SharePoint : dossiers d'images et de vidéos" : "Google Drive : dossiers d'images et de vidéos, Drive partagés compris")</small></span></label>
+            <label class="acc-choice"><input type="checkbox" class="ios" @bind="wantCalendars" /><span><b>Agendas</b><small>@(ms ? "Microsoft 365 : agendas Outlook, salles et boîtes partagées" : "Google Calendar : agendas du compte, ou partagés avec lui")</small></span></label>
+            <label class="acc-choice"><input type="checkbox" class="ios" @bind="wantFiles" /><span><b>Fichiers</b><small>@(ms ? "OneDrive et SharePoint : dossiers d'images et de vidéos" : "Google Drive : dossiers d'images et de vidéos, Drive partagés compris")</small></span></label>
             @if (ms) { <p class="acc-hint">Certaines organisations demandent l'approbation de leur administrateur Microsoft 365.</p> }
         </div>
         <div class="modal-foot">
@@ -415,11 +416,10 @@ else
     {
         var on = DriveSources.Enabled(tenant, s.Id);
         var failed = tenant.DriveFolders.FirstOrDefault(f => f.Source == s.Id && f.LastError.Length > 0);
-        var google = s.Id == "gdrive";   // compte Google ou Microsoft connecté par l'organisation, avec l'accès aux fichiers
-        (string status, string css, string? why) = google && !GoogleAuth.IsConfigured ? ("Indisponible", "inactif", "Connexion Google de la plateforme non configurée (administrateur Linkii)")
-            : !google && !MsAuth.IsConfigured ? ("Indisponible", "inactif", "Connexion Microsoft de la plateforme non configurée (administrateur Linkii)")
+        var kind = ConnectedAccounts.For("drv-" + s.Id)!;   // compte Google, Microsoft, Dropbox ou serveur utilisé par la source
+        (string status, string css, string? why) = !Available(kind) ? ("Indisponible", "inactif", $"Connexion {ConnectedAccounts.Kind(kind).Name} de la plateforme non configurée (administrateur Linkii)")
             : !on ? ("Inactive", "inactif", (string?)null)
-            : AccountProblem(google ? ConnectedAccounts.Google : ConnectedAccounts.Microsoft, DriveSources.Configured(tenant, s.Id)) is { } problem ? problem
+            : AccountProblem(kind, DriveSources.Configured(tenant, s.Id)) is { } problem ? problem
             : failed != null ? ("Erreur de synchronisation", "hors-ligne", $"{failed.Name} : {failed.LastError}")
             : ("Connecté", "en-ligne", (string?)null);
         return new("drv-" + s.Id, s.Name, "Drive", s.Summary, "drv-" + s.Id, null, status, css, !on, why);
@@ -485,6 +485,7 @@ else
         ConnectedAccounts.Microsoft => MsAuth.IsConfigured,
         ConnectedAccounts.Google => GoogleAuth.IsConfigured,
         ConnectedAccounts.Canva => canvaReady,
+        ConnectedAccounts.Dropbox => DropboxAuth.IsConfigured,
         _ => true
     };
 
@@ -492,8 +493,16 @@ else
     {
         addMenu = false;
         if (kind is ConnectedAccounts.Microsoft or ConnectedAccounts.Google) { wantCalendars = wantFiles = true; connectKind = kind; return; }
+        if (ConnectedAccounts.IsDriveForm(kind)) { driveSource = kind; return; }   // Nextcloud, SFTP : la connexion se saisit dans la fenêtre du Drive (activé une fois testée)
         connectingServer = kind;   // CalDAV ou Exchange : la connexion se saisit dans la fenêtre de la source
         calSource = kind;
+    }
+
+    /// <summary>« Modifier la connexion » d'un serveur : la fenêtre de sa source (agendas, ou Drive pour Nextcloud et SFTP).</summary>
+    private void EditConnection(string kind)
+    {
+        if (ConnectedAccounts.IsDriveForm(kind)) driveSource = kind;
+        else calSource = kind;
     }
 
     private void ShowAccount(string kind)
@@ -526,6 +535,8 @@ else
             case ConnectedAccounts.Microsoft: MsAuth.Disconnect(Store.ClientId); break;
             case ConnectedAccounts.Google: await GoogleAuth.Disconnect(Store.ClientId); break;
             case ConnectedAccounts.Canva: Canva.Disconnect(Store.ClientId); break;
+            case ConnectedAccounts.Dropbox: await DropboxAuth.Disconnect(Store.ClientId); break;
+            case ConnectedAccounts.Nextcloud or ConnectedAccounts.Sftp: Store.Write(d => d.Tenant.DriveAccounts.RemoveAll(x => x.Source == id)); break;
             default:
                 Store.Write(d =>
                 {
@@ -549,6 +560,7 @@ else
         CanvaReturn();
         GoogleReturn();
         MicrosoftReturn();
+        DropboxReturn();
     }
 
     private void Load()
@@ -591,6 +603,7 @@ else
         var on = !DriveSources.Enabled(tenant, src);
         if (on && src == "gdrive" && !GoogleAuth.IsConfigured) { Toast.Error("Google Drive n'est pas encore disponible sur cette plateforme (connexion Google à configurer sur le serveur)."); return; }
         if (on && src == "onedrive" && !MsAuth.IsConfigured) { Toast.Error("OneDrive et SharePoint ne sont pas encore disponibles sur cette plateforme (connexion Microsoft à configurer sur le serveur)."); return; }
+        if (on && src == "dropbox" && !DropboxAuth.IsConfigured) { Toast.Error("Dropbox n'est pas encore disponible sur cette plateforme (connexion Dropbox à configurer sur le serveur)."); return; }
         Svc.SetDriveSource(src, on);
         Load();
         if (on && !DriveSources.Configured(tenant, src)) { driveSource = src; Toast.Ok($"« {def.Name} » activée : configurez sa connexion."); }
@@ -675,6 +688,27 @@ else
             case "expired": Toast.Error("La demande de connexion à Google a expiré. Recommencez."); break;
             case "unconfigured": Toast.Error("La connexion Google n'est pas encore configurée sur cette plateforme."); break;
             default: Toast.Error("Google a refusé la connexion. Réessayez dans un instant."); break;
+        }
+    }
+
+    // Retour de « Se connecter avec Dropbox » (/dropbox/callback) : la source Dropbox est activée, et sa fenêtre rouverte pour ajouter des dossiers.
+    private void DropboxReturn()
+    {
+        var q = System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query)["dropbox"];
+        switch (q)
+        {
+            case "ok":
+                if (!DriveSources.Enabled(tenant, "dropbox")) Svc.SetDriveSource("dropbox", true);
+                Load();
+                var user = AccountOf(ConnectedAccounts.Dropbox)?.User;
+                Toast.Ok($"Dropbox connecté{(user is { Length: > 0 } ? $" ({user})" : "")}. Ajoutez vos dossiers.");
+                if (accountsTab) ShowAccount(ConnectedAccounts.Dropbox); else driveSource = "dropbox";
+                break;
+            case "denied": Toast.Error("Connexion à Dropbox annulée."); break;
+            case "scope": Toast.Error("Les autorisations de lecture des fichiers n'ont pas été accordées : vérifiez les permissions de l'application Dropbox (files.metadata.read, files.content.read)."); break;
+            case "expired": Toast.Error("La demande de connexion à Dropbox a expiré. Recommencez."); break;
+            case "unconfigured": Toast.Error("La connexion Dropbox n'est pas encore configurée sur cette plateforme."); break;
+            case not null: Toast.Error("Dropbox a refusé la connexion. Réessayez dans un instant."); break;
         }
     }
 

@@ -3,11 +3,16 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Item = Linkii.Poc.DriveItem;
 
 namespace Linkii.Poc;
 
-/// <summary>Une source Drive : ce qu'on affiche dans Intégrations.</summary>
-public record DriveSourceDef(string Id, string Name, string Summary, string LinkPlaceholder);
+/// <summary>
+/// Une source Drive : ce qu'on affiche dans Intégrations. PasteLabel et PasteAria : le champ qui ajoute un dossier sans le parcourir
+/// (lien de partage, ou chemin pour Nextcloud, SFTP et Dropbox).
+/// </summary>
+public record DriveSourceDef(string Id, string Name, string Summary, string LinkPlaceholder,
+                             string PasteLabel = "ou coller un lien de partage", string PasteAria = "Lien de partage du dossier");
 
 /// <summary>Un emplacement de départ du sélecteur de dossier (« Mon Drive », « Partagés avec moi »…).</summary>
 /// <param name="Location">Début de l'emplacement des dossiers qu'on y trouve (« Mon Drive › … »).</param>
@@ -35,7 +40,21 @@ public static class DriveSources
             "https://drive.google.com/drive/folders/…"),
         new("onedrive", "OneDrive et SharePoint", "Dossiers OneDrive ou bibliothèques SharePoint de votre organisation.",
             "https://organisation.sharepoint.com/:f:/s/…"),
+        new("nextcloud", "Nextcloud", "Dossiers d'un serveur Nextcloud ou ownCloud, par WebDAV (lecture seule).",
+            "/Affichage/Hall", "ou saisir un chemin", "Chemin du dossier"),
+        new("sftp", "SFTP", "Dossiers d'un serveur SFTP : mot de passe ou clé privée (lecture seule).",
+            "/home/affichage/images", "ou saisir un chemin", "Chemin du dossier sur le serveur"),
+        new("dropbox", "Dropbox", "Dossiers de votre compte Dropbox (lecture seule).",
+            "/Affichage/Hall", "ou saisir un chemin", "Chemin du dossier"),
     };
+
+    /// <summary>Source sans compte Google ou Microsoft : serveur Nextcloud, SFTP ou Dropbox, lue par <see cref="RemoteSession"/>.</summary>
+    public static bool IsRemote(string source) => source is "nextcloud" or "sftp" or "dropbox";
+
+    /// <summary>Le sélecteur sait chercher un dossier par son nom (pas Nextcloud ni SFTP : on les parcourt).</summary>
+    public static bool CanSearch(string source) => source is not ("nextcloud" or "sftp");
+
+    public static DriveAccount? Account(Tenant t, string source) => t.DriveAccounts.FirstOrDefault(a => a.Source == source);
 
     public static DriveSourceDef? Find(string? id) => All.FirstOrDefault(s => s.Id == id);
     public static int Order(string source) => Array.FindIndex(All, s => s.Id == source);
@@ -45,16 +64,27 @@ public static class DriveSources
     /// Emplacements du sélecteur. SharePoint : lister les sites demanderait un accès de plus (Sites.Read.All) ;
     /// on colle le lien d'une bibliothèque, puis on la parcourt. Les dossiers SharePoint partagés avec le compte sont dans « Partagés avec moi ».
     /// </summary>
-    public static DriveRoot[] Roots(string source) => source == "gdrive"
-        ? new DriveRoot[] { new("my", "Mon Drive", "drive", "Mon Drive"), new("shared", "Partagés avec moi", "users", "Partagés avec moi"), new("drives", "Drive partagés", "team", "Drive partagés") }
-        : new DriveRoot[] { new("my", "Mon OneDrive", "cloud", "OneDrive"), new("shared", "Partagés avec moi", "users", "Partagés avec moi"), new("sp", "SharePoint", "site", "SharePoint", Link: true) };
+    public static DriveRoot[] Roots(string source) => source switch
+    {
+        "gdrive" => new DriveRoot[] { new("my", "Mon Drive", "drive", "Mon Drive"), new("shared", "Partagés avec moi", "users", "Partagés avec moi"), new("drives", "Drive partagés", "team", "Drive partagés") },
+        "nextcloud" => new DriveRoot[] { new("my", "Mes fichiers", "cloud", "Nextcloud") },
+        "sftp" => new DriveRoot[] { new("my", "Dossier de départ", "server", "Serveur SFTP") },
+        "dropbox" => new DriveRoot[] { new("my", "Mes fichiers", "cloud", "Dropbox") },
+        _ => new DriveRoot[] { new("my", "Mon OneDrive", "cloud", "OneDrive"), new("shared", "Partagés avec moi", "users", "Partagés avec moi"), new("sp", "SharePoint", "site", "SharePoint", Link: true) },
+    };
 
     /// <summary>
     /// Google Drive : compte Google connecté par l'organisation, avec l'accès à Drive ;
-    /// OneDrive : compte Microsoft connecté par l'organisation, avec l'accès aux fichiers (partagé avec les calendriers).
+    /// OneDrive : compte Microsoft connecté par l'organisation, avec l'accès aux fichiers (partagé avec les calendriers) ;
+    /// Nextcloud : adresse, identifiant et mot de passe d'application ; SFTP : serveur, identifiant, mot de passe ou clé ; Dropbox : compte connecté.
     /// </summary>
-    public static bool Configured(Tenant t, string source) =>
-        source == "gdrive" ? GoogleAuth.Has(t, GoogleAuth.DriveScope) : MicrosoftAuth.Has(t, MicrosoftAuth.DriveScope);
+    public static bool Configured(Tenant t, string source) => source switch
+    {
+        "gdrive" => GoogleAuth.Has(t, GoogleAuth.DriveScope),
+        "nextcloud" or "sftp" => Account(t, source) is { Url.Length: > 0, User.Length: > 0, Secret.Length: > 0 },
+        "dropbox" => DropboxAuth.Has(t),
+        _ => MicrosoftAuth.Has(t, MicrosoftAuth.DriveScope),
+    };
 
     /// <summary>Dossiers proposés pour un nouveau contenu : ceux des sources actives et configurées.</summary>
     public static IEnumerable<DriveFolder> Offered(Tenant t) => t.DriveFolders
@@ -100,7 +130,7 @@ public static class DriveSources
 
 /// <summary>Lecture des Drives (Google Drive API v3, Microsoft Graph) et synchronisation des dossiers dans la médiathèque.</summary>
 public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService graph, SafeHttp http,
-                          MediaImporter importer, Notifier notifier, ILogger<DriveService> log)
+                          MediaImporter importer, Notifier notifier, RemoteDrives remotes, ILogger<DriveService> log)
 {
     public const int MaxFiles = 300;              // par dossier, sous-dossiers compris
     public const long MaxFileBytes = 1_000_000_000;
@@ -148,14 +178,6 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
         try { ProgressChanged?.Invoke(clientId); } catch { }
     }
 
-    /// <summary>
-    /// Un élément d'un Drive. Ref : de quoi relire un dossier ou télécharger un fichier — Google : « id » ou « id/resourceKey »
-    /// (clé de sécurité de certains liens partagés avant 2021, à renvoyer avec chaque appel) ; Microsoft : « driveId/itemId ».
-    /// Where : emplacement du parent (Microsoft) ; Path : chemin dans le dossier synchronisé (« 2026/affiche.jpg »).
-    /// </summary>
-    private record Item(string Id, string Ref, string Name, bool Folder, string Mime, long Size, string Version, string Time,
-                        string? DownloadUrl, string WebUrl, string SharedBy, string Where = "", string Path = "");
-
     /// <summary>Fichiers retenus d'un dossier synchronisé, ceux laissés de côté au-delà de <see cref="MaxFiles"/>, sous-dossiers vus.</summary>
     private record Listed(List<Item> Files, int Skipped, int Subfolders);
 
@@ -168,6 +190,11 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
     public async Task<(string RemoteId, string Name, string Location, string WebUrl)> Resolve(Tenant t, string source, string link)
     {
         link = link.Trim();
+        if (DriveSources.IsRemote(source))
+        {
+            using var session = await remotes.Open(t, source);
+            return await session.Resolve(link, default);
+        }
         if (source == "gdrive")
         {
             var id = Regex.Match(link, @"/folders/([\w-]{10,})").Groups[1].Value;
@@ -198,6 +225,11 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
     /// </summary>
     public async Task<string> TestConnection(Tenant t, string source)
     {
+        if (DriveSources.IsRemote(source))   // Nextcloud, SFTP, Dropbox : c'est la connexion qu'on teste, pas un dossier
+        {
+            using var session = await remotes.Open(t, source);
+            return await session.Test(default);
+        }
         if (t.DriveFolders.FirstOrDefault(f => f.Source == source) is { } first)
         {
             var n = (await List(t, first)).Files.Count;
@@ -226,7 +258,13 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
         var web = "";
         List<Item> items;
         bool more;
-        if (folderRef != null) (items, more) = await Children(t, source, folderRef, BrowseMax);
+        if (DriveSources.IsRemote(source))   // un seul emplacement de départ : la session sert à le trouver puis à le lire
+        {
+            using var session = await remotes.Open(t, source);
+            self = folderRef ?? await session.Root(default);
+            (items, more) = await session.Children(self, BrowseMax, default);
+        }
+        else if (folderRef != null) (items, more) = await Children(t, source, folderRef, BrowseMax);
         else if (source == "gdrive")
         {
             (items, more) = root switch
@@ -259,6 +297,13 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
     {
         text = text.Trim();
         if (text.Length == 0) return new();
+        if (DriveSources.IsRemote(source))
+        {
+            using var session = await remotes.Open(t, source);
+            var name = DriveSources.Find(source)!.Name;
+            return (await session.SearchFolders(text, default))
+                .Select(i => Node(i) with { Location = string.Join(" › ", new[] { name, i.Where, i.Name }.Where(x => x.Length > 0)) }).ToList();
+        }
         if (source == "gdrive")
         {
             var q = text.Replace("\\", "\\\\").Replace("'", "\\'");
@@ -346,6 +391,9 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
                 var todo = remote.Where(f => !present.Contains(f.Id)).ToList();
                 var progress = new SyncProgress(clientId, folderId, folder.Name, "importing", 0, todo.Count, 0, todo.Sum(f => f.Size), todo.Count(f => f.Mime.StartsWith("video/")), "", started);
                 long bytesDone = 0;
+                RemoteSession? session = null;   // Nextcloud, SFTP, Dropbox : une connexion pour tous les fichiers du dossier
+                try
+                {
                 foreach (var f in todo)
                 {
                     if (ct.IsCancellationRequested) break;
@@ -353,12 +401,8 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
                     Report(progress);
                     try
                     {
-                        var parts = f.Ref.Split('/');
-                        using var res = f.DownloadUrl != null
-                            ? await http.Download(f.DownloadUrl, ct)   // Microsoft : adresse de téléchargement déjà authentifiée
-                            : await GoogleDownload(t, $"{GoogleApi}/{f.Id}?alt=media&supportsAllDrives=true", Keys(f.Id, parts.Length > 1 ? parts[1] : null), ct);
-                        if (!res.IsSuccessStatusCode) throw new InvalidOperationException($"« {f.Name} » : téléchargement refusé ({(int)res.StatusCode}).");
-                        await using var s = await res.Content.ReadAsStreamAsync(ct);
+                        if (DriveSources.IsRemote(folder.Source)) session ??= await remotes.Open(t, folder.Source);
+                        await using var s = session != null ? await session.Open(f, ct) : await OpenFile(t, f, ct);
                         var imported = await importer.ImportStream(s, f.Name, clientId, ct, new Progress<long>(n => Report(progress with { Bytes = bytesDone + Math.Min(n, f.Size) }, force: false)));
                         if (imported.Item is not { } item) throw new InvalidOperationException(imported.Error ?? $"« {f.Name} » : import impossible.");
                         store.Write(db =>
@@ -368,7 +412,7 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
                         });
                         changed = true;
                     }
-                    catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or IOException or TaskCanceledException && !ct.IsCancellationRequested)
+                    catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or IOException or Renci.SshNet.Common.SshException or TaskCanceledException && !ct.IsCancellationRequested)
                     {
                         error ??= ex.Message;   // un fichier en échec n'empêche pas les autres ; il sera retenté à la synchronisation suivante
                         log.LogWarning("Drive {Folder} : {Error}", folderId, ex.Message);
@@ -377,6 +421,8 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
                     progress = progress with { Done = progress.Done + 1, Bytes = bytesDone };
                     Report(progress);
                 }
+                }
+                finally { session?.Dispose(); }
 
                 Report(progress with { Phase = "updating", Current = "" });
                 Record(clientId, folderId, error ?? "", listed);
@@ -430,9 +476,12 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
         var queue = new Queue<(string Ref, string Path)>();
         queue.Enqueue((folder.RemoteId, ""));
         int subfolders = 0, entries = 0;
+        using var remote = DriveSources.IsRemote(folder.Source) ? await remotes.Open(t, folder.Source) : null;   // une connexion pour tout le parcours
         while (queue.TryDequeue(out var next) && entries < MaxEntries)
         {
-            var (items, _) = await Children(t, folder.Source, next.Ref, MaxEntries - entries);
+            var (items, _) = remote != null
+                ? await remote.Children(next.Ref, MaxEntries - entries, default)
+                : await Children(t, folder.Source, next.Ref, MaxEntries - entries);
             entries += items.Count;
             foreach (var i in items)
             {
@@ -452,11 +501,27 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
     /// <summary>Images et vidéos lisibles par les écrans (formats de la médiathèque), taille plafonnée.</summary>
     private static bool Playable(Item f, string source) =>
         (f.Mime.StartsWith("image/") || f.Mime.StartsWith("video/")) && MediaImporter.IsSupported(f.Name) && f.Size <= MaxFileBytes
-        && (f.DownloadUrl != null || source == "gdrive");
+        && (f.DownloadUrl != null || source == "gdrive" || DriveSources.IsRemote(source));
+
+    /// <summary>Contenu d'un fichier Google Drive ou Microsoft (adresse de téléchargement déjà authentifiée), à lire puis fermer.</summary>
+    private async Task<Stream> OpenFile(Tenant t, Item f, CancellationToken ct)
+    {
+        var parts = f.Ref.Split('/');
+        var res = f.DownloadUrl != null
+            ? await http.Download(f.DownloadUrl, ct)
+            : await GoogleDownload(t, $"{GoogleApi}/{f.Id}?alt=media&supportsAllDrives=true", Keys(f.Id, parts.Length > 1 ? parts[1] : null), ct);
+        if (!res.IsSuccessStatusCode) { res.Dispose(); throw new InvalidOperationException($"« {f.Name} » : téléchargement refusé ({(int)res.StatusCode})."); }
+        return new ResponseStream(res, await res.Content.ReadAsStreamAsync(ct));
+    }
 
     /// <summary>Ce que contient un dossier (dossiers puis fichiers), au plus <paramref name="limit"/> éléments environ.</summary>
     private async Task<(List<Item> Items, bool More)> Children(Tenant t, string source, string folderRef, int limit)
     {
+        if (DriveSources.IsRemote(source))
+        {
+            using var session = await remotes.Open(t, source);
+            return await session.Children(folderRef, limit, default);
+        }
         var parts = folderRef.Split('/');
         return source == "gdrive"
             ? await GoogleItems(t, $"'{parts[0]}' in parents and trashed = false", Keys(parts[0], parts.Length > 1 ? parts[1] : null), limit, "&orderBy=folder,name")

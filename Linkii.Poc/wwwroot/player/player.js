@@ -413,12 +413,20 @@
       applyBrand(pl.brand);
       if (state.current && pl.version === state.current.version && !state.pending) return prefetch(pl.items);   // même version : on re-télécharge seulement ce que le navigateur aurait purgé du cache
       if (state.pending && pl.version === state.pending.version) return;
+      stage(pl.version, 'downloading');
       return prefetch(pl.items).then(function () {
         state.pending = pl;
         LS.setItem('lk_playlist', JSON.stringify(pl));
+        stage(pl.version, 'ready');
         if (!state.timer) next(); // rien ne tourne : on démarre tout de suite
       });
     }).catch(function () {}).then(function () { refreshing = false; });
+  }
+
+  // Étape de réception d'une nouvelle version (téléchargement, prête à afficher) : le back-office suit l'arrivée d'une publication.
+  function stage(v, name) {
+    if (PREVIEW || v === state.acked) return;
+    api('/api/player/ack', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: v, stage: name }) }).catch(function () {});
   }
 
   function ack() {
@@ -540,7 +548,19 @@
     var host = document.createElement('div');
     host.id = 'yt' + Math.random().toString(36).slice(2, 9);
     host.style.cssText = 'width:100%;height:100%';
-    el.appendChild(host);
+    var cover = null, coverTimer = null;
+    if (o.hide) {   // « Masquer les overlays » : recadrage + voile noir (voir .yt-crop / .yt-cover)
+      el.classList.add('yt-hide');
+      var crop = document.createElement('div');
+      crop.className = 'yt-crop';
+      crop.appendChild(host);
+      el.appendChild(crop);
+      cover = document.createElement('div');
+      cover.className = 'yt-cover';
+      el.appendChild(cover);
+    } else el.appendChild(host);
+    function coverOn() { clearTimeout(coverTimer); if (cover) cover.classList.remove('off'); }
+    function coverOff(delay) { if (!cover) return; clearTimeout(coverTimer); coverTimer = setTimeout(function () { if (!dead) cover.classList.add('off'); }, delay); }
     function note(text) {
       var n = document.createElement('div');
       n.className = 'yt-note'; n.textContent = text;
@@ -556,6 +576,7 @@
       fr.setAttribute('frameborder', '0');
       fr.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
       host.appendChild(fr);
+      coverOff(4500);   // sans l'API, l'état de lecture est inconnu : le voile ne couvre que le titre du début
     }
     function restart(p) {
       try { if (o.playlistId) p.playVideoAt(0); else p.seekTo(o.start || 0); p.playVideo(); } catch (x) {}
@@ -587,7 +608,9 @@
           }, 2500);
         },
         onStateChange: function (e) {
-          if (e.data === 0) {                       // terminée
+          if (e.data === 1) coverOff(1500);   // en lecture : le titre du début disparaît seul après quelques secondes
+          else coverOn();                     // pause, chargement, fin (suggestions) : voile noir
+          if (e.data === 0) {                     // terminée
             if (opts && opts.onEnded) opts.onEnded(); // diaporama : on passe au contenu suivant
             else restart(e.target);                 // seule / en incrustation : boucle
           } else if (e.data === 5 || (e.data === -1 && !o.sound)) {   // prête mais pas lancée : on insiste
@@ -601,7 +624,7 @@
       };
       ytp = new YT.Player(host, params);
     }
-    return function () { dead = true; try { if (ytp && ytp.destroy) ytp.destroy(); } catch (x) {} };
+    return function () { dead = true; clearTimeout(coverTimer); try { if (ytp && ytp.destroy) ytp.destroy(); } catch (x) {} };
   }
 
   // App du catalogue : son rendu vient de apps.js (LinkiiApps) ; l'agenda réutilise le moteur des listes de données.

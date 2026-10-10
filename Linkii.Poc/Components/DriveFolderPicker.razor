@@ -38,10 +38,13 @@
                         }
                     }
                 </div>
+                @if (DriveSources.CanSearch(Source))
+                {
                 <label class="search-box dfp-search">
                     <Ico Name="search" Size="16" />
                     <input placeholder="Rechercher un dossier" aria-label="Rechercher un dossier" value="@query" @oninput="OnSearch" />
                 </label>
+                }
             </div>
             <div class="dfp-items">
                 @if (error != null)
@@ -111,7 +114,7 @@
             else { <span>@(Root.Link && path.Count == 1 && !Searching ? "Collez un lien SharePoint pour commencer." : "Ouvrez ou sélectionnez un dossier.")</span> }
         </div>
         <label class="dfp-opt @(HasSubs ? "" : "dis")">
-            <input type="checkbox" checked="@(sub && HasSubs)" disabled="@(!HasSubs)" @onchange="e => sub = e.Value is true" />
+            <input type="checkbox" class="ios" checked="@(sub && HasSubs)" disabled="@(!HasSubs)" @onchange="e => sub = e.Value is true" />
             <span>
                 <b>Inclure les sous-dossiers</b>
                 <small>@SubHint</small>
@@ -160,7 +163,12 @@
         get
         {
             var t = Store.Read(d => d.Tenant);
-            var user = Source == "gdrive" ? t.GoogleUser : t.MsUser;
+            var user = Source switch
+            {
+                "gdrive" => t.GoogleUser,
+                "onedrive" => t.MsUser,
+                _ => DriveSources.Account(t, Source) is { } a ? (Source == "dropbox" ? a.User : a.Url) : ""
+            };
             return user.Length > 0 ? user : "le compte connecté";
         }
     }
