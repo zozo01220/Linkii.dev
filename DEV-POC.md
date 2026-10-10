@@ -540,12 +540,23 @@ Trois sources de plus dans Intégrations › Drives, avec le même sélecteur de
 - **YouTube › Masquer les overlays** (réglage `hideOverlays` de l'app, désactivé par défaut) : le lecteur est recadré (≈ 9 % en haut et en bas hors champ, sans interaction) et un voile noir couvre le titre du début, la pause, le chargement et les suggestions de fin ; il se lève 1,5 s après le début de la lecture (4,5 s si l'API YouTube n'est pas disponible). L'image est légèrement recadrée.
 - **Interrupteurs** : les cases à cocher des formulaires utilisent la classe `ios` (interrupteur Linkii) : réglages d'app (`AppForm`), SSL/TLS (SMTP de la plateforme), « Propulsé par Linkii » (marque du revendeur), simulateur, membres, « Autoriser HTTP » de la connexion Nextcloud (§26). Seules les cases de sélection des tableaux (Écrans, Médiathèque, Listes de lecture) restent des cases.
 
+## 28. Vignettes des vidéos de la médiathèque (12 octobre 2026)
+
+- **Problème** : chaque vidéo des listes (médiathèque, sélecteurs, éditeur de liste, vignettes d'écrans) était un `<video preload="metadata">` : un décodeur et un téléchargement par vidéo, d'où un défilement saccadé.
+- **Correction** : `MediaThumb` affiche une **image** pour les vidéos quand ffmpeg est installé sur le serveur (`VideoConverter.CanPoster`). `/media/{fichier}?w=320` renvoie alors une vignette JPEG (`Thumbnails.GetVideo`, `VideoConverter.Poster` : image à 1 s, sinon la première, 160 / 320 / 640 px), créée à la première demande, gardée dans `thumbs/` et supprimée avec la vidéo. Au plus 2 extractions ffmpeg en parallèle ; `loading="lazy"`. Sans ffmpeg (VLC ne sait pas extraire une image) : ancien comportement, un lecteur par vidéo.
+- **À valider** : l'extraction n'a pas pu être essayée (pas de ffmpeg sur le poste de développement) ; à vérifier sur le serveur après déploiement. Une vidéo dont l'extraction échoue renvoie 404 (vignette vide).
+
+## 29. Piste : intégration PDF (à faire, 13 octobre 2026)
+
+Pas codée. Option retenue : **convertir le PDF en images sur le serveur** (une page = une image 1080p), traité comme un diaporama (durée par page, pages de début et de fin), sur le modèle de la conversion vidéo (arrière-plan, progression). Moteur de rendu à choisir : PDFium (ex. Docnet.Core, sans outil externe) ou `pdftoppm` / Ghostscript ; SkiaSharp ne lit pas les PDF. Limites prévues : ~50 pages, PDF protégé refusé. Deuxième temps : les PDF des dossiers Drive (aujourd'hui ignorés comme « autres fichiers »). Écartés : pdf.js dans le player (lourd en WebView Android et hors ligne), lien PDF dans « Page web » (pas fiable). Une maquette de l'écran « document / pages » sera validée avant le code.
+
 ## Plans et prochaines étapes
 
 - Android : tester l'app 1.1.0 (aperçu du direct, redémarrage, version remontée) sur un vrai boîtier ; PIN du menu technicien à définir depuis le back-office ; icône définitive.
 - Valider un vrai Drive pour le bandeau d'import (§ 21) et la conversion 1080p sur serveur Linux.
 - Supervision : statistiques de diffusion annoncées avec Growth, non codées.
 - Reconnexion : tester l'arrêt/redémarrage du site en conditions réelles.
+- Vignettes de vidéos : vérifier l'extraction ffmpeg sur le serveur (§ 28). Drives Nextcloud, SFTP, Dropbox : essai sur de vrais serveurs (§ 26). PDF : maquette puis code (§ 29).
 ## LinkedIn : mise en service (source « Page entreprise »)
 
 Le mode « Publications choisies » ne demande aucune configuration. Le mode « Page entreprise » utilise l API officielle de LinkedIn :

@@ -449,7 +449,7 @@ app.MapGet("/internal/tls-allow", (string domain, ResellerResolver resolver) =>
 // Autorisé : un écran du client propriétaire (en-tête X-Token ou ?t=) ou un utilisateur connecté sur l'espace de ce client.
 // Tout le reste reçoit 404, pour ne pas révéler l'existence d'un fichier d'un autre client.
 var mediaTypes = new FileExtensionContentTypeProvider();
-app.MapGet("/media/{file}", (HttpContext ctx, string file, JsonStore store) =>
+app.MapGet("/media/{file}", async (HttpContext ctx, string file, JsonStore store, VideoConverter converter) =>
 {
     if (file != Path.GetFileName(file)) return Results.NotFound();
     var token = ctx.Request.Headers["X-Token"].ToString();
@@ -470,6 +470,12 @@ app.MapGet("/media/{file}", (HttpContext ctx, string file, JsonStore store) =>
     {
         ctx.Response.Headers.CacheControl = "private, max-age=86400";
         return Results.File(thumbPath, "image/webp");
+    }
+    if (tw > 0 && VideoConverter.IsVideo(Path.GetExtension(file).ToLowerInvariant()))   // vignette d'une vidéo : une image, pas le fichier
+    {
+        if (await Thumbnails.GetVideo(converter, file, Thumbnails.Snap(tw), ctx.RequestAborted) is not { } poster) return Results.NotFound();
+        ctx.Response.Headers.CacheControl = "private, max-age=86400";
+        return Results.File(poster, "image/jpeg");
     }
     ctx.Response.Headers.CacheControl = "private, max-age=300";
     return Results.File(path, type, enableRangeProcessing: true);

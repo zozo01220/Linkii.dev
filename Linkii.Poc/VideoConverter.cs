@@ -178,6 +178,28 @@ public class VideoConverter
         return null;
     }
 
+
+    // ---------- Vignette d'une vidéo ----------
+    /// <summary>
+    /// Image d'une vidéo (JPEG réduit, à une seconde du début, sinon la première image) : les listes affichent une image au lieu d'un lecteur par vidéo.
+    /// Rend false si ffmpeg n'est pas installé (VLC ne sait pas extraire une image) ou si l'extraction échoue.
+    /// </summary>
+    public bool Poster(string input, string output, int width)
+    {
+        if (Find() is not { Kind: "ffmpeg" } tool) return false;
+        foreach (var start in new[] { "1", "0" })
+        {
+            TryDelete(output);
+            Run(tool.Path, new[] { "-y", "-hide_banner", "-loglevel", "error", "-ss", start, "-i", input, "-frames:v", "1", "-an",
+                                   "-vf", $"scale='min({width},iw)':-2", "-q:v", "5", output }, 30, out var code);
+            if (code == 0 && File.Exists(output) && new FileInfo(output).Length > 0) return true;
+        }
+        TryDelete(output);
+        return false;
+    }
+
+    /// <summary>La vignette d'images est possible (ffmpeg présent).</summary>
+    public bool CanPoster => Find()?.Kind == "ffmpeg";
     private static void TryDelete(string p) { try { if (File.Exists(p)) File.Delete(p); } catch { } }
 
     private static string? Run(string exe, string[] args, int timeoutSec, out int exitCode)

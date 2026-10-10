@@ -43,12 +43,34 @@ public static class Thumbnails
         catch { return null; }
     }
 
+    private static readonly SemaphoreSlim PosterSlots = new(2);   // au plus deux extractions ffmpeg à la fois : une grille entière demande ses vignettes d'un coup
+
+    /// <summary>Chemin de la vignette d'une vidéo (créée si besoin), ou null si ffmpeg est absent ou l'extraction échoue.</summary>
+    public static async Task<string?> GetVideo(VideoConverter converter, string file, int width, CancellationToken ct)
+    {
+        if (!converter.CanPoster || !VideoConverter.IsVideo(Path.GetExtension(file).ToLowerInvariant())) return null;
+        var source = Path.Combine(AppPaths.MediaDir, file);
+        var thumb = Path.Combine(AppPaths.ThumbDir, $"{Path.GetFileNameWithoutExtension(file)}-{width}.jpg");
+        if (File.Exists(thumb) && File.GetLastWriteTimeUtc(thumb) >= File.GetLastWriteTimeUtc(source)) return thumb;
+        await PosterSlots.WaitAsync(ct);
+        try
+        {
+            if (File.Exists(thumb) && File.GetLastWriteTimeUtc(thumb) >= File.GetLastWriteTimeUtc(source)) return thumb;   // créée entre-temps
+            var tmp = thumb + ".tmp.jpg";
+            if (!await Task.Run(() => converter.Poster(source, tmp, width), ct)) return null;
+            File.Move(tmp, thumb, true);
+            return thumb;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+        finally { PosterSlots.Release(); }
+    }
+
     /// <summary>Supprime les miniatures d'un fichier (lors de sa suppression).</summary>
     public static void Delete(string file)
     {
         try
         {
-            foreach (var t in Directory.EnumerateFiles(AppPaths.ThumbDir, Path.GetFileNameWithoutExtension(file) + "-*.webp")) File.Delete(t);
+            foreach (var t in Directory.EnumerateFiles(AppPaths.ThumbDir, Path.GetFileNameWithoutExtension(file) + "-*.*")) File.Delete(t);
         }
         catch { }
     }
