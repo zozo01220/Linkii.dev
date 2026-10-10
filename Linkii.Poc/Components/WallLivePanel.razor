@@ -1,0 +1,240 @@
+@implements IDisposable
+@inject TenantStore Store
+@inject ScreenControl Control
+@inject TenantContext Ctx
+@inject Toaster Toast
+
+@* Panneau de contrôle d'un mur d'écrans (licence Growth) : l'aperçu reconstitue le mur entier à partir de la capture de chaque écran,
+   la pause, la reprise, le rechargement et le redémarrage s'appliquent à tous les écrans en ligne du mur. *@
+<div class="modal-backdrop" @onclick="Close"></div>
+<aside class="lp" role="dialog" aria-modal="true" aria-labelledby="wlp-title">
+    <div class="lp-head">
+        <span class="wc-ico" aria-hidden="true"><Ico Name="grid" Size="18" /></span>
+        <h2 id="wlp-title">@v.Name</h2>
+        <span class="badge @(Online.Count == v.Members.Count && v.Members.Count > 0 ? "en-ligne" : "hors-ligne")">@Online.Count sur @v.Members.Count en ligne</span>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+
+    <div class="lp-body">
+        @if (Online.Count < v.Members.Count)
+        {
+            <div class="lp-offline" role="status">@(v.Members.Count - Online.Count) écran@(v.Members.Count - Online.Count > 1 ? "s" : "") hors ligne : les commandes ne partent que vers les écrans en ligne.</div>
+        }
+
+        <section class="lp-sect">
+            <h3>Aperçu du mur</h3>
+            <div class="lp-wall" style="grid-template-columns:repeat(@v.Cols, 1fr)">
+                @foreach (var m in v.Members)
+                {
+                    <div class="lp-cell @(Portrait ? "portrait" : "")" title="@m.Name">
+                        @if (m.CaptureUtc != null)
+                        {
+                            <img src="/screens/@m.Id/capture.jpg?v=@m.CaptureUtc.Value.Ticks" alt="Aperçu de @m.Name" style="@LivePanel.ImgStyle(m.Turn, m.MirrorH, m.MirrorV)" />
+                        }
+                        <span class="lp-cell-n">@m.Label</span>
+                        @if (!m.Online) { <span class="lp-cell-off">Hors ligne</span> }
+                    </div>
+                }
+            </div>
+            <div class="lp-bar">
+                <span class="grow">
+                    @if (Loading) { <span class="lp-inline-wait"><span class="lp-spin small" aria-hidden="true"></span> Demande envoyée aux écrans… jusqu'à 10 secondes.</span> }
+                    else if (shotError != null) { <span class="lp-err">@shotError</span> }
+                    else if (LastShot is { } ls) { <text>Capturé à <b class="mono">@Local(ls, "HH:mm:ss")</b> · @Ago(ls)</text> }
+                    else { <text>Voyez ce que le mur affiche en ce moment.</text> }
+                </span>
+                <button type="button" class="btn sm" disabled="@(Online.Count == 0 || Loading || busy)" @onclick="Shoot"><Ico Name="camera" Size="15" /> @(Loading ? "Capture en cours…" : "Aperçu du direct")</button>
+            </div>
+            @if (Loading) { <div class="lp-progress"><i></i></div> }
+            <p class="lp-note">L'aperçu montre chaque écran dans le sens du mur, sans les miroirs. Un contenu protégé (certaines vidéos) peut apparaître noir.</p>
+        </section>
+
+        <section class="lp-sect">
+            <h3>Affichage</h3>
+            @if (PausedCount > 0)
+            {
+                <div class="lp-state paused"><Ico Name="pause" Size="16" /><span class="grow">@(PausedCount == v.Members.Count ? "Mur en pause" : $"{PausedCount} écran{(PausedCount > 1 ? "s" : "")} en pause")</span></div>
+                <div class="row" style="margin-top:12px">
+                    <button type="button" class="btn" disabled="@(Online.Count == 0 || busy)" @onclick='() => RunAll(ScreenCommand.Resume)'><Ico Name="play" Size="15" /> Reprendre le mur</button>
+                </div>
+            }
+            else
+            {
+                <div class="lp-state"><span class="sc-dot en-ligne"></span><span class="grow">Lecture en cours</span></div>
+            }
+            @if (PausedCount < v.Members.Count)
+            {
+                <div class="row" style="margin-top:12px">
+                    <label class="lp-field">Reprise après
+                        <select @bind="pauseMin">
+                            @foreach (var choice in Pauses) { <option value="@choice.Min">@choice.Label</option> }
+                        </select>
+                    </label>
+                    <button type="button" class="btn" style="align-self:flex-end" disabled="@(Online.Count == 0 || busy)" @onclick='() => RunAll(ScreenCommand.Pause, pauseMin)'><Ico Name="pause" Size="15" /> Mettre le mur en pause</button>
+                </div>
+            }
+            <p class="lp-note">Tous les écrans du mur se mettent en pause en même temps et affichent le visuel défini dans Réglages › Supervision.</p>
+        </section>
+
+        <section class="lp-sect">
+            <h3>Application</h3>
+            <div class="row">
+                <button type="button" class="btn ghost" disabled="@(Online.Count == 0 || busy)" @onclick='() => RunAll(ScreenCommand.Reload)'><Ico Name="refresh" Size="15" /> Recharger les listes</button>
+                <button type="button" class="btn danger" disabled="@(Online.Count == 0 || busy)" @onclick="() => confirmRestart = true"><Ico Name="power" Size="15" /> Redémarrer les applications</button>
+            </div>
+            @if (confirmRestart)
+            {
+                <div class="lp-confirm" role="alertdialog" aria-label="Confirmer le redémarrage">
+                    Redémarrer l'application sur les @Online.Count écran@(Online.Count > 1 ? "s" : "") en ligne du mur « @v.Name » ? Ils seront noirs quelques secondes, puis reprendront l'affichage.
+                    <div class="row" style="margin-top:8px">
+                        <button type="button" class="btn danger-solid sm" disabled="@busy" @onclick="Restart">Redémarrer</button>
+                        <button type="button" class="btn ghost sm" @onclick="() => confirmRestart = false">Annuler</button>
+                    </div>
+                </div>
+            }
+        </section>
+
+        <section class="lp-sect">
+            <h3>Écrans du mur</h3>
+            <div class="lp-hist">
+                @foreach (var m in v.Members)
+                {
+                    <div>
+                        <span class="sc-dot @(m.Online ? "en-ligne" : "hors-ligne")"><span class="sr-only">@(m.Online ? "En ligne" : "Hors ligne")</span></span>
+                        <span class="grow"><b>@m.Label</b> · @m.Name<small>@(m.Os ?? "Appareil non renseigné")@(m.App is { Length: > 0 } a && a != "web" ? " · App " + a : "")@(m.Paused ? " · en pause" : "")</small></span>
+                        <DeviceLogo Kind="@m.Kind" Size="20" />
+                        @if (m.Last is { } c) { <span class="badge @StatusClass(c)" title="@ScreenCommand.Label(c.Kind)">@StatusLabel(c)</span> }
+                    </div>
+                }
+            </div>
+        </section>
+    </div>
+</aside>
+
+@code {
+    [Parameter, EditorRequired] public Guid ZoneId { get; set; }
+    /// <summary>Action lancée à l'ouverture : « preview » (aperçu) ou « restart » (demande de confirmation).</summary>
+    [Parameter] public string? Action { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private record Member(Guid Id, string Name, string Label, bool Online, bool Paused, DateTime? CaptureUtc, int Turn, bool MirrorH, bool MirrorV, bool Portrait,
+        string? Kind, string? Os, string? App, List<ScreenCommand> Cmds)
+    {
+        public ScreenCommand? Last => Cmds.LastOrDefault();
+    }
+
+    private record View(string Name, int Cols, int Rows, List<Member> Members, string Timezone, int DefaultPause);
+
+    private View v = new("", 1, 1, new(), "UTC", 60);
+    private Timer? timer;
+    private readonly Dictionary<Guid, Guid> shots = new();   // écran → commande d'aperçu en attente
+    private string? shotError;
+    private bool busy, confirmRestart;
+    private int pauseMin;
+
+    private static readonly (int Min, string Label)[] Pauses = { (15, "15 minutes"), (30, "30 minutes"), (60, "1 heure"), (240, "4 heures"), (0, "Reprise manuelle") };
+
+    private List<Member> Online => v.Members.Where(m => m.Online).ToList();
+    private int PausedCount => v.Members.Count(m => m.Paused);
+    private bool Portrait => v.Members.Count > 0 && v.Members.All(m => m.Portrait);
+    private DateTime? LastShot => v.Members.Where(m => m.CaptureUtc != null).Select(m => m.CaptureUtc).Max();
+    private bool Loading => shots.Count > 0;
+
+    protected override void OnInitialized()
+    {
+        Refresh();
+        pauseMin = Pauses.Any(p => p.Min == v.DefaultPause) ? v.DefaultPause : 60;
+        confirmRestart = Action == "restart";
+        timer = new Timer(_ => InvokeAsync(() => { Refresh(); StateHasChanged(); }), null, 800, 800);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && Action == "preview" && Online.Count > 0) await Shoot();
+    }
+
+    private void Refresh()
+    {
+        var now = DateTime.UtcNow;
+        var r = Store.Read(d =>
+        {
+            var zone = d.Area?.Zones.FirstOrDefault(z => z.Id == ZoneId && z.IsWall);
+            if (zone == null) return null;
+            var members = d.Screens.Where(s => s.Token != null && s.ZoneId == ZoneId).OrderBy(s => s.WallPos ?? int.MaxValue).ToList();
+            foreach (var s in members) ScreenControl.Expire(s, now);
+            return new View(zone.Name, Math.Max(1, zone.WallCols), Math.Max(1, zone.WallRows),
+                members.Select(s => new Member(s.Id, s.Name, s.WallPos is { } p ? Helpers.WallLabel(p, zone.WallCols, zone.WallRows) : "?", ScreenControl.Online(s, now), s.IsPaused(now),
+                    s.CaptureUtc, ScreenControl.CaptureTurn(s), s.CaptureMirrorH, s.CaptureMirrorV, s.Orientation == "portrait", s.DeviceKind, s.DeviceOs, s.DeviceApp, s.Commands.ToList())).ToList(),
+                d.Tenant.Timezone, d.Tenant.PauseResumeMinutes);
+        });
+        if (r == null) { _ = OnClose.InvokeAsync(); return; }   // mur dissous
+        v = r;
+        foreach (var (screen, cmd) in shots.ToList())   // un aperçu terminé (ou perdu) sort de l'attente
+        {
+            var m = v.Members.FirstOrDefault(x => x.Id == screen);
+            var c = m?.Cmds.FirstOrDefault(x => x.Id == cmd);
+            if (c == null || !c.Open) { shots.Remove(screen); if (c is { Status: ScreenCommand.Failed }) shotError = $"Aperçu impossible pour « {m!.Name} » : {c.Detail ?? "pas de réponse"}"; }
+        }
+    }
+
+    // Une commande par écran en ligne ; un refus (déjà en cours…) est signalé sans arrêter les autres.
+    private async Task<int> SendAll(string kind, int minutes, Action<Guid, Guid>? onSent = null)
+    {
+        var errors = new List<string>();
+        var sent = 0;
+        foreach (var m in Online)
+        {
+            var r = await Control.Send(Store.ClientId, m.Id, kind, Ctx.DisplayName, minutes);
+            if (r.Ok) { sent++; onSent?.Invoke(m.Id, r.Id!.Value); }
+            else errors.Add($"« {m.Name} » : {r.Error}");
+        }
+        if (errors.Count > 0) Toast.Error(string.Join(" · ", errors));
+        return sent;
+    }
+
+    private async Task RunAll(string kind, int minutes = 0)
+    {
+        busy = true;
+        try { await SendAll(kind, minutes); Refresh(); }
+        finally { busy = false; }
+    }
+
+    private async Task Shoot()
+    {
+        shotError = null;
+        busy = true;
+        try { await SendAll(ScreenCommand.Capture, 0, (screen, cmd) => shots[screen] = cmd); Refresh(); }
+        finally { busy = false; }
+    }
+
+    private async Task Restart()
+    {
+        busy = true;
+        try
+        {
+            var n = await SendAll(ScreenCommand.Restart, 0);
+            if (n > 0) Toast.Ok($"Redémarrage demandé sur {n} écran{(n > 1 ? "s" : "")}.");
+        }
+        finally { busy = false; confirmRestart = false; }
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private static string StatusLabel(ScreenCommand c) => c.Status switch { ScreenCommand.Sent => "Envoyée", ScreenCommand.Received => "Reçue", ScreenCommand.Done => "Exécutée", _ => "Échec" };
+    private static string StatusClass(ScreenCommand c) => c.Status switch { ScreenCommand.Done => "en-ligne", ScreenCommand.Failed => "hors-ligne", _ => "mise-a-jour" };
+
+    private string Local(DateTime utc, string format)
+    {
+        try { utc = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), TimeZoneInfo.FindSystemTimeZoneById(v.Timezone)); }
+        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException) { }
+        return utc.ToString(format);
+    }
+
+    private static string Ago(DateTime utc)
+    {
+        var t = DateTime.UtcNow - utc;
+        return t.TotalSeconds < 60 ? $"il y a {Math.Max(1, (int)t.TotalSeconds)} s" : t.TotalMinutes < 60 ? $"il y a {(int)t.TotalMinutes} min" : $"il y a {(int)t.TotalHours} h";
+    }
+
+    public void Dispose() => timer?.Dispose();
+}

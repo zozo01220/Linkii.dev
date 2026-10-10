@@ -487,6 +487,33 @@ L'import d'un dossier Drive (surtout avec des vidéos) tourne sur le serveur san
 - **Technique** : avancement **en mémoire** (`DriveService.Running(clientId)`, événement `ProgressChanged` limité à ~4 par seconde) ; `MediaImporter.ImportStream` rend les octets reçus. Perdu si le serveur redémarre en cours de synchronisation (reprise à la suivante). La conversion vidéo qui suit reste signalée par la carte « Conversion… » de la médiathèque.
 - **Non vérifié contre un vrai Drive** (bandeau jamais vu à l'écran) ; tests `DriveProgressTests` sur le calcul d'avancement.
 
+## 22. Licences Base et Growth (10 octobre 2026)
+
+- **Deux licences par organisation** (`Client.Plan`, classe `Plans`) : **Base** (affichage : écrans, médiathèque, apps, aires, zones) et **Growth** (en plus : contrôle du direct, supervision, murs d'écrans). Réglée par l'administrateur Linkii dans *Admin › Clients*. Les fonctions Growth restent visibles mais verrouillées (« Disponible avec la licence Growth ») en Base.
+- Note : le mur d'écrans (§ Zones) est réservé à Growth ; vérifier ce périmètre avant toute vente.
+
+## 23. Contrôle du direct et supervision (Growth, 10 octobre 2026)
+
+- **Commandes vers l'écran** (`Control.cs`, `ScreenControl`, `ScreenCommand`) : *Pause* (durée réglable ou reprise manuelle, `PauseResumeMinutes`), *Reprise*, *Redémarrer l'application*, *Recharger les listes*, *Aperçu du direct*. Envoi par SignalR (`ScreenHub`) avec secours dans la réponse du sondage du player ; accusés `sent → received → done/failed` (`POST /api/player/command-ack`) ; sans accusé après 2 min : échec. Refusée si l'écran est hors ligne, si la licence n'est pas Growth, ou si une commande identique est en cours. Les 20 dernières commandes sont gardées par écran.
+- **Aperçu du direct** : le player (web et Android, `Capture.kt`) envoie une capture (`POST /api/player/capture`, fichier `captures/{id}.jpg`, servi par `/screens/{id}/capture.jpg`). Un contenu protégé (certaines vidéos) peut apparaître noir. L'aperçu est remis dans le sens configuré (rotation, miroir). Pour un mur : `WallLivePanel` montre chaque écran à sa place, sans les miroirs.
+- **Panneaux** : `LivePanel` (écran) et `WallLivePanel` (mur) dans l'éditeur ; `DeviceLogo` affiche le type d'appareil.
+- **Pause** : visuel de pause = image de la médiathèque (`PauseMediaId`) ou visuel Linkii ; tous les écrans d'un mur se mettent en pause ensemble.
+- **Alerte hors ligne** (`AlertOffline`, `AlertOfflineMinutes`, `AlertEmail`, `Mailer.cs`) : un e-mail par panne quand un écran est hors ligne depuis N minutes (destinataire : l'adresse réglée, sinon les administrateurs). Réglages › Supervision.
+- **Appareil remonté par le player** : `DeviceKind` (androidtv / android / web), système, modèle, version de l'application, dernier démarrage.
+- **Miroir** (écran et mur : `MirrorH`, `MirrorV`) : pour un écran vu dans un miroir ; combiné par OU exclusif écran/mur ; ne demande aucune publication mais recharge les écrans (`SyncStamp`). Maquette : `maquettes/direct-ecrans.html`.
+- **Médiathèque** : miniatures WEBP 320 px générées dans `Linkii.Poc/thumbs/` (données d'exécution, ignorées par git).
+- Tests : `Linkii.Poc.Tests/ControlTests.cs`. Non vérifié sur un parc réel d'appareils.
+
+## 24. Reconnexion automatique du back-office (10 octobre 2026)
+
+Après un arrêt/redémarrage du serveur, le circuit Blazor est perdu et la page restait bloquée sur « Could not reconnect to the server ». `wwwroot/reconnect.js` (Blazor démarré avec `autostart="false"` dans `App.razor`) remplace l'écran par défaut : bandeau « Connexion perdue, reconnexion en cours… », sondage du serveur toutes les 2 s (sans limite), **rechargement automatique** dès qu'il répond, ou au retour du réseau / de l'onglet. Non vérifié par un vrai redémarrage.
+
+## Plans et prochaines étapes
+
+- Android : tester l'app 1.1.0 (aperçu du direct, redémarrage, version remontée) sur un vrai boîtier ; PIN du menu technicien à définir depuis le back-office ; icône définitive.
+- Valider un vrai Drive pour le bandeau d'import (§ 21) et la conversion 1080p sur serveur Linux.
+- Supervision : statistiques de diffusion annoncées avec Growth, non codées.
+- Reconnexion : tester l'arrêt/redémarrage du site en conditions réelles.
 ## LinkedIn : mise en service (source « Page entreprise »)
 
 Le mode « Publications choisies » ne demande aucune configuration. Le mode « Page entreprise » utilise l API officielle de LinkedIn :

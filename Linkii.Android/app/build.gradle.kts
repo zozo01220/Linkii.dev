@@ -10,8 +10,8 @@ android {
         applicationId = "ch.linkii.player"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
 
         // Adresse neutre du serveur Linkii (modifiable sur l'appareil dans le menu technicien).
         // Surcharge possible : gradlew bundleRelease -PserverUrl=https://app.exemple.ch

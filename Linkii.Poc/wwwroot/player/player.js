@@ -46,7 +46,7 @@
     cleanup: null,
     overlayStops: []
   };
-  var cfg = { orientation: 'landscape', resolution: 'auto', timezone: null, reloadHour: 4, wall: null };   // wall : place de l'écran dans un mur {cols, rows, col, row}
+  var cfg = { orientation: 'landscape', resolution: 'auto', timezone: null, reloadHour: 4, wall: null, mirrorH: false, mirrorV: false };   // wall : place de l'écran dans un mur {cols, rows, col, row}
 
   function $(id) { return document.getElementById(id); }
   function deviceSize() {
@@ -250,15 +250,33 @@
     stage.style.width = SW + 'px';
     stage.style.height = SH + 'px';
     stage.style.fontSize = (SW / 100) + 'px';   // 1em = 1 % de la largeur de la scène
+    // Miroir (écran monté à l'envers, vu dans un miroir) : appliqué en dernier, sur ce que l'écran affiche physiquement. Pas dans l'aperçu du back-office.
+    var mirror = !PREVIEW && (cfg.mirrorH || cfg.mirrorV) ? ' scale(' + (cfg.mirrorH ? -1 : 1) + ', ' + (cfg.mirrorV ? -1 : 1) + ')' : '';
     stage.style.webkitTransform = stage.style.transform =
-      'translate(-50%, -50%) rotate(' + rot + 'deg) scale(' + s + ')' + (dx || dy ? ' translate(' + dx + 'px, ' + dy + 'px)' : '');
+      'translate(-50%, -50%)' + mirror + ' rotate(' + rot + 'deg) scale(' + s + ')' + (dx || dy ? ' translate(' + dx + 'px, ' + dy + 'px)' : '');
+    cell.w = W; cell.h = H;
     sizeZones();
+    placePause();
   }
   window.addEventListener('resize', layout);
 
+  // Visuel de pause : chaque écran d'un mur affiche le visuel en entier dans sa propre case, pas une tranche du visuel du mur.
+  var cell = { w: 1920, h: 1080 };   // taille de la scène d'un écran (un mur en compte colonnes × lignes)
+  function placePause() {
+    var el = $('pauseview'), w = cfg.wall, st;
+    if (!el) return;
+    st = el.style;
+    if (w && w.cols > 0 && !w.whole) { st.left = (w.col * cell.w) + 'px'; st.top = (w.row * cell.h) + 'px'; st.width = cell.w + 'px'; st.height = cell.h + 'px'; st.right = st.bottom = 'auto'; }
+    else { st.left = st.top = st.right = st.bottom = '0'; st.width = st.height = ''; }
+    st.fontSize = (cell.w / 100) + 'px';   // 1em = 1 % de la largeur d'un écran
+  }
+
   function applyConfig(pl) {
     if (!pl) return;
-    if (pl.screen) { cfg.orientation = pl.screen.orientation || 'landscape'; cfg.resolution = pl.screen.resolution || 'auto'; }
+    if (pl.screen) {
+      cfg.orientation = pl.screen.orientation || 'landscape'; cfg.resolution = pl.screen.resolution || 'auto';
+      cfg.mirrorH = !!pl.screen.mirrorH; cfg.mirrorV = !!pl.screen.mirrorV;
+    }
     if (pl.settings) { cfg.timezone = pl.settings.timezone || null; if (pl.settings.reloadHour != null) cfg.reloadHour = pl.settings.reloadHour; }
     cfg.wall = pl.wall || null;
     layout();
@@ -782,7 +800,7 @@
   /* ---------- Diffusion (double buffer) ---------- */
   function next() {
     clearTimeout(state.timer); state.timer = null;
-    if (state.paused) return;   // simulateur en pause
+    if (state.paused || state.hold) return;   // simulateur en pause, ou écran mis en pause depuis le back-office
 
     if (state.pending) {            // remplacement entre deux contenus
       state.current = state.pending; state.pending = null; state.index = 0;
@@ -967,6 +985,134 @@
     };
   }
 
+  /* ---------- Contrôle du direct (back-office, licence Growth) : pause, reprise, redémarrage, aperçu ---------- */
+  var cmdDone = [];
+  try { cmdDone = JSON.parse(LS.getItem('lk_cmds') || '[]'); } catch (e) {}
+
+  function cmdAck(id, status, detail) {
+    api('/api/player/command-ack', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id, status: status, detail: detail || null }) }).catch(function () {});
+  }
+
+  function handleCommand(c) {
+    if (PREVIEW || !c || !c.id || cmdDone.indexOf(c.id) !== -1) return;
+    cmdDone.push(c.id); if (cmdDone.length > 30) cmdDone.shift();   // retenu avant d'agir : un redémarrage ne rejoue jamais l'ordre
+    try { LS.setItem('lk_cmds', JSON.stringify(cmdDone)); } catch (e) {}
+    cmdAck(c.id, 'received');
+    var a = c.args || {}, N = window.LinkiiNative;
+    if (c.kind === 'pause') {
+      pausePlayer({ until: parseInt(a.until || '0', 10) || 0, image: a.image || null });
+      cmdAck(c.id, 'done');
+    } else if (c.kind === 'resume') {
+      resumePlayer();
+      cmdAck(c.id, 'done');
+    } else if (c.kind === 'reload') {
+      cmdAck(c.id, 'done');
+      setTimeout(function () { location.reload(); }, 600);
+    } else if (c.kind === 'restart') {
+      if (N && typeof N.restart === 'function') {   // application Android : le serveur voit l'exécution quand l'écran se reconnecte
+        setTimeout(function () { try { N.restart(); } catch (e) { cmdAck(c.id, 'failed', "Redémarrage refusé par l'appareil"); } }, 800);
+      } else { cmdAck(c.id, 'done', 'Page rechargée (hors application Android)'); setTimeout(function () { location.reload(); }, 600); }
+    } else if (c.kind === 'capture') {
+      if (N && typeof N.capture === 'function') {
+        try { N.capture(c.id, location.origin + '/api/player/capture?cmd=' + c.id, state.token || ''); }
+        catch (e) { cmdAck(c.id, 'failed', 'Capture impossible'); }
+      } else cmdAck(c.id, 'failed', "Aperçu disponible avec l'application Android seulement");
+    } else cmdAck(c.id, 'failed', 'Commande inconnue');
+  }
+  // L'application Android rend compte d'un aperçu qu'elle n'a pas pu réaliser (réussi : le serveur voit l'image arriver).
+  window.lkCaptureFailed = function (id, why) { cmdAck(id, 'failed', why || 'Capture impossible'); };
+
+  var pauseTimer = null;
+  function stopContent() {
+    for (var k in playing) playEnd(k);
+    if (state.cleanup) { try { state.cleanup(); } catch (e) {} state.cleanup = null; }
+    ['layerA', 'layerB'].forEach(function (id) { var l = $(id); l.classList.remove('on'); l.innerHTML = ''; });
+    state.shownItem = null;
+    zoneLoops.forEach(function (z) { z.stop(); if (z.el.parentNode) z.el.parentNode.removeChild(z.el); });
+    zoneLoops = []; zoneSig = null;
+    setOverlays([]);
+  }
+
+  // Visuel de la pause, dans la scène (il suit le miroir et l'orientation de l'écran) : image choisie, sinon visuel Linkii.
+  function showPauseView(p) {
+    var el = $('pauseview');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'pauseview';
+      el.style.cssText = 'position:absolute;left:0;top:0;right:0;bottom:0;z-index:30;background:#0B1F3A;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden';
+      $('stage').appendChild(el);
+    }
+    // Visuel par défaut : une tasse qui fume, pour une pause plus sympathique qu'un écran noir
+    el.innerHTML = '<style>@keyframes lkSteam{0%{opacity:0;transform:translateY(6px)}30%{opacity:.9}100%{opacity:0;transform:translateY(-14px)}}' +
+      '@keyframes lkBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.5px)}}' +
+      '#pauseview .st{animation:lkSteam 2.8s ease-in infinite}#pauseview .st2{animation-delay:.9s}#pauseview .st3{animation-delay:1.8s}#pauseview .cup{animation:lkBob 3.2s ease-in-out infinite}</style>' +
+      '<svg viewBox="0 0 120 100" style="width:22em;height:auto" aria-hidden="true">' +
+      '<g fill="none" stroke="#3B82C4" stroke-width="3" stroke-linecap="round">' +
+      '<path class="st" d="M44 36c-5-6 5-10 0-17"/><path class="st st2" d="M60 36c-5-6 5-10 0-17"/><path class="st st3" d="M76 36c-5-6 5-10 0-17"/></g>' +
+      '<g class="cup"><path d="M30 44h60v22a24 24 0 0 1-24 24h-12a24 24 0 0 1-24-24z" fill="#fff"/>' +
+      '<path d="M90 50h6a10 10 0 0 1 0 20h-8" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>' +
+      '<path d="M30 52h60" stroke="#3B82C4" stroke-width="3"/>' +
+      '<ellipse cx="60" cy="94" rx="38" ry="4" fill="#23395A"/></g></svg>' +
+      '<div style="margin-top:.8em;font-size:5.2em;font-weight:500;letter-spacing:-.02em;line-height:1.1">Petite pause</div>' +
+      '<div style="margin-top:.7em;font-size:2.4em;color:#9AAABD">On revient dans un instant</div>' +
+      '<div style="position:absolute;bottom:2.5em;font-size:2.2em;font-weight:500;letter-spacing:-.03em;color:#5A6B80">linkii<span style="color:#3B82C4">.</span></div>';
+    el.style.display = 'flex';
+    placePause();
+    if (p.image) {
+      var img = new Image();
+      img.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain';
+      img.onload = function () { el.innerHTML = ''; el.appendChild(img); };
+      mediaSrc(p.image).then(function (m) { img.src = m.src; });
+    }
+  }
+
+  function pausePlayer(p) {
+    try { LS.setItem('lk_pause', JSON.stringify(p)); } catch (e) {}
+    state.hold = true;
+    clearTimeout(state.timer); state.timer = null;
+    stopContent();
+    $('idle').style.display = 'none';   // « Écran prêt » (aucun contenu) ne doit pas recouvrir le visuel de pause
+    showPauseView(p);
+    clearTimeout(pauseTimer);
+    if (p.until > 0) pauseTimer = setTimeout(resumePlayer, Math.max(0, p.until - serverNow()));   // reprise automatique, même sans réseau
+  }
+
+  function resumePlayer() {
+    clearTimeout(pauseTimer);
+    try { LS.removeItem('lk_pause'); } catch (e) {}
+    if (!state.hold) return;
+    state.hold = false;
+    var el = $('pauseview'); if (el) el.style.display = 'none';
+    next();
+  }
+
+  function restorePause() {
+    if (PREVIEW) return;
+    var p = null;
+    try { p = JSON.parse(LS.getItem('lk_pause') || 'null'); } catch (e) {}
+    if (!p) return;
+    if (p.until > 0 && p.until <= serverNow()) { try { LS.removeItem('lk_pause'); } catch (e) {} return; }
+    pausePlayer(p);
+  }
+
+  // Appareil : application Android (système, modèle, version), sinon le navigateur.
+  function webDevice() {
+    var ua = navigator.userAgent || '', os = 'Navigateur', m;
+    if ((m = /Android (\d+(?:\.\d+)?)/.exec(ua))) os = 'Android ' + m[1];
+    else if (/iPhone|iPad|iPod/.test(ua)) os = 'iOS';
+    else if (/Windows/.test(ua)) os = 'Windows';
+    else if (/Mac OS X/.test(ua)) os = 'macOS';
+    else if (/Linux/.test(ua)) os = 'Linux';
+    var br = (m = /(Edg|Chrome|Firefox)\/(\d+)/.exec(ua) || /(Version)\/(\d+)/.exec(ua)) ? { Edg: 'Edge', Chrome: 'Chrome', Firefox: 'Firefox', Version: 'Safari' }[m[1]] + ' ' + m[2] : '';   // Chrome avant Version : un WebView Android porte les deux
+    return { kind: /Android/.test(ua) ? 'android' : 'web', os: os, model: br || null, app: 'web', bootMs: null };   // ancienne application Android : le logo Android quand même
+  }
+  function reportDevice() {
+    if (PREVIEW) return;
+    var d = null;
+    try { if (window.LinkiiNative && typeof window.LinkiiNative.deviceInfo === 'function') d = JSON.parse(window.LinkiiNative.deviceInfo()); } catch (e) {}
+    api('/api/player/device', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d || webDevice()) }).catch(function () {});
+  }
+
   /* ---------- Temps réel : SignalR + filet de sécurité 60 s ---------- */
   function connectHub() {
     if (!window.signalR) return;  // pas de lib (CDN injoignable et pas en cache) -> sondage seul
@@ -976,6 +1122,7 @@
       .build();
     conn.on('PlaylistChanged', function () { refresh(); });
     conn.on('Identify', function (label) { identify(String(label)); });
+    conn.on('Command', function (c) { handleCommand(c); });
     conn.onreconnecting(markOffline);
     conn.onreconnected(function () { setOnline(true); refresh(); });
     function start() {
@@ -997,6 +1144,7 @@
       var cur = state.pending ? state.pending.version : (state.current && state.current.version);
       if (d.version !== cur) refresh();
       ack();
+      (d.commands || []).forEach(handleCommand);   // ordres du back-office que le temps réel n'a pas livrés
     }).catch(function () {});
   }
 
@@ -1010,6 +1158,7 @@
 
   function startPlayback() {
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+    restorePause();   // une pause demandée depuis le back-office survit à un redémarrage
     // démarrage immédiat sur la dernière playlist connue (fonctionne sans réseau)
     try {
       var saved = JSON.parse(LS.getItem('lk_playlist') || 'null');
@@ -1024,6 +1173,8 @@
     setInterval(flushPlays, 60000);
     setInterval(function () { api("/api/player/version").catch(function () {}); }, 15000);   // détecte vite une coupure
     nightlyReload();
+    reportDevice();
+    setInterval(reportDevice, 300000);
   }
 
   /* ---------- Simulateur : état envoyé au back-office, commandes reçues (pause, contenu choisi, retour au direct) ---------- */

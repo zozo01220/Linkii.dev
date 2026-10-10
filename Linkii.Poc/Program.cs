@@ -52,6 +52,8 @@ builder.Services.AddSingleton<AppProviders>();
 builder.Services.AddSingleton<GoogleAuth>();   // « Se connecter avec Google » (Calendar et Drive, lecture seule)
 builder.Services.AddSingleton<MicrosoftAuth>();   // « Se connecter avec Microsoft » (agendas Microsoft 365 et OneDrive / SharePoint, lecture seule)
 builder.Services.AddSingleton<ExternalLogin>();   // « Continuer avec Microsoft / Google » sur la page de connexion (identité seulement)
+builder.Services.AddSingleton<ScreenControl>();   // contrôle du direct (Growth) : pause, redémarrage, aperçu
+builder.Services.AddHostedService<ScreenWatchWorker>();   // commandes sans réponse, pauses terminées, alertes « écran hors ligne »
 builder.Services.AddHostedService<SignupWorker>();   // inscriptions non validées supprimées, rappel et fin des essais gratuits
 builder.Services.AddSingleton<DriveService>();
 builder.Services.AddHostedService<DriveSyncWorker>();   // dossiers des Drives : synchronisés toutes les 15 minutes
@@ -112,6 +114,7 @@ var dataDir = app.Configuration["Linkii:DataDir"] ?? app.Environment.ContentRoot
 AppPaths.MediaDir = Path.Combine(dataDir, "media");
 AppPaths.BrandDir = Path.Combine(dataDir, "brand");
 AppPaths.ThumbDir = Path.Combine(dataDir, "thumbs");
+AppPaths.CaptureDir = Path.Combine(dataDir, "captures");
 Directory.CreateDirectory(AppPaths.MediaDir);
 Directory.CreateDirectory(AppPaths.BrandDir);
 Directory.CreateDirectory(AppPaths.ThumbDir);
@@ -508,8 +511,45 @@ api.MapGet("/player/version", (HttpRequest req, JsonStore store) => store.Read(d
 {
     var s = Auth(req, db);
     if (Gate(s, db) is { } denied) return denied;
-    return Results.Ok(new { version = Notifier.Revision(db, s!), build = playerBuild, serverNow = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });   // serverNow : horloge de référence du player (lecture synchronisée)
+    // serverNow : horloge de référence du player (lecture synchronisée) ; commands : ordres du back-office pas encore accusés (filet si SignalR est coupé)
+    return Results.Ok(new { version = Notifier.Revision(db, s!), build = playerBuild, serverNow = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), commands = ScreenControl.Pending(s!, DateTime.UtcNow) });
 }));
+
+// Appareil : système, modèle et version de l'application, remontés au démarrage puis régulièrement.
+api.MapPost("/player/device", (HttpRequest req, DeviceDto body, JsonStore store) => store.Write(db =>
+{
+    var s = Auth(req, db);
+    if (Gate(s, db) is { } denied) return denied;
+    static string? Clean(string? v, int max) => string.IsNullOrWhiteSpace(v) ? null : (v.Trim().Length > max ? v.Trim()[..max] : v.Trim());
+    s!.DeviceKind = body.Kind is "androidtv" or "android" ? body.Kind : "web";
+    s.DeviceOs = Clean(body.Os, 40); s.DeviceModel = Clean(body.Model, 60); s.DeviceApp = Clean(body.App, 20);
+    if (body.BootMs is > 0) s.DeviceBootUtc = DateTimeOffset.FromUnixTimeMilliseconds(body.BootMs.Value).UtcDateTime;
+    return Results.Ok();
+}));
+
+// Accusé d'une commande du back-office : reçue, exécutée ou en échec.
+api.MapPost("/player/command-ack", (HttpRequest req, CommandAckDto body, JsonStore store) => store.Write(db =>
+{
+    var s = Auth(req, db);
+    if (Gate(s, db) is { } denied) return denied;
+    return ScreenControl.Ack(s!, body.Id, body.Status ?? "", body.Detail) ? Results.Ok() : Results.NotFound();
+}));
+
+// Aperçu du direct : l'application Android envoie l'image (JPEG) de l'écran ; la dernière seule est gardée.
+api.MapPost("/player/capture", async (HttpRequest req, Guid? cmd, JsonStore store) =>
+{
+    if (req.ContentLength is > 2_000_000) return Results.StatusCode(413);
+    using var ms = new MemoryStream();
+    await req.Body.CopyToAsync(ms);
+    if (ms.Length > 2_000_000) return Results.StatusCode(413);
+    var bytes = ms.ToArray();
+    return store.Write(db =>
+    {
+        var s = Auth(req, db);
+        if (Gate(s, db) is { } denied) return denied;
+        return ScreenControl.SaveCapture(db, s!, bytes, cmd, DateTime.UtcNow) ? Results.Ok() : Results.BadRequest();
+    });
+});
 
 static string PlayerBuild(string webRoot)
 {
@@ -632,6 +672,19 @@ api.MapGet("/preview/data/{id:guid}", async (HttpRequest req, Guid id, JsonStore
     return await AppData(published, tenant, catalog, providers, box);
 });
 
+// Dernier aperçu du direct d'un écran, pour les personnes qui ont accès à l'écran (jamais mis en cache).
+app.MapGet("/screens/{id:guid}/capture.jpg", (HttpContext ctx, Guid id, JsonStore store) =>
+{
+    var cid = ctx.User.GetGuid(Claims.Client);
+    var uid = ctx.User.GetGuid(ClaimTypes.NameIdentifier);
+    if (cid == null) return Results.Unauthorized();
+    var ok = store.Read(db => new ClientDb(db, cid.Value, AreaAccess.For(db, cid.Value, uid)).Screens.Any(s => s.Id == id && s.CaptureUtc != null));
+    var path = ScreenControl.CapturePath(id);
+    if (!ok || !File.Exists(path)) return Results.NotFound();
+    ctx.Response.Headers.CacheControl = "no-store";
+    return Results.File(path, "image/jpeg");
+}).RequireAuthorization("ClientSpace");
+
 app.MapHub<ScreenHub>("/hubs/screen");
 
 // ---------- Back-office Blazor ----------
@@ -642,5 +695,7 @@ app.Run();
 record AckDto(string Version, int? W, int? H);
 record PlayDto(Guid? MediaId, string? AppId, long Start, int Sec);
 record StartDto(int? W, int? H);
+record DeviceDto(string? Kind, string? Os, string? Model, string? App, long? BootMs);
+record CommandAckDto(Guid Id, string? Status, string? Detail);
 
 public partial class Program;

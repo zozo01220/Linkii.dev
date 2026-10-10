@@ -14,6 +14,8 @@ public class ScreenHub(JsonStore store) : Hub
         Context.Items["sid"] = id.Value;
         await Groups.AddToGroupAsync(Context.ConnectionId, Group(id.Value));
         Touch();
+        // l'écran se reconnecte : un redémarrage demandé est exécuté
+        store.Write(db => { if (db.Screens.FirstOrDefault(x => x.Id == id.Value) is { } s) ScreenControl.CompleteRestarts(s, DateTime.UtcNow); });
         await base.OnConnectedAsync();
     }
 

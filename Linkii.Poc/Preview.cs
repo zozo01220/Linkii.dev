@@ -62,6 +62,7 @@ public static class PlayerFeed
             return clientMedia == null ? l : Helpers.FixedForSync(l, clientMedia);
         }
         var lay = ScreenLayouts.Find(s.PublishedVersion > 0 ? s.PublishedLayout : null);
+        var mirror = Helpers.Mirror(db.Areas, s);   // miroir de l'écran, combiné à celui de son mur
         return new()
         {
             ["version"] = Helpers.Revision(p, s, t, reseller, Helpers.SyncStamp(db.Areas, s)) + (whole ? "|whole" : ""),
@@ -73,7 +74,7 @@ public static class PlayerFeed
             // découpage publié : tailles des zones (en %), côte à côte en paysage, empilées en portrait ; zones 2 et 3 avec leur propre liste
             ["layout"] = new { id = lay.Id, dir = s.Orientation == "portrait" ? "col" : "row", sizes = lay.Sizes },
             ["zones"] = (s.PublishedVersion > 0 ? s.PublishedZones : new List<List<PublishedItem>>()).Select(z => Sync(z).Select(i => i.ForPlayer())),
-            ["screen"] = new { orientation = s.Orientation, resolution = s.Resolution },
+            ["screen"] = new { orientation = s.Orientation, resolution = s.Resolution, mirrorH = mirror.H, mirrorV = mirror.V },
             ["settings"] = new { timezone = t.Timezone, reloadHour = t.ReloadHour },
             ["brand"] = BrandDto.From(reseller)
         };

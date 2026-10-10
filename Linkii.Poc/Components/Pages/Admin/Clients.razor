@@ -130,6 +130,9 @@
             <td>
                 <span class="pill @(verified ? "ok" : "warn")">@(verified ? "Validé" : "À valider")</span>
                 @if (c.Client.Suspended) { <span class="pill bad">Suspendu</span> }
+                <select class="plan-sel" aria-label="Licence de @c.Client.Name" title="Licence : Growth ajoute le contrôle du direct, la supervision et les murs d'écrans" @onchange="e => SetPlan(c.Client, e.Value?.ToString())">
+                    @foreach (var p in Plans.All) { <option value="@p" selected="@(c.Client.Plan == p)">@Plans.Label(p)</option> }
+                </select>
                 @if (!verified && o?.AwaitsVerification == true)
                 {
                     @if (o.VerifySends.Count > 0) { <small class="cell-sub">lien envoyé @o.VerifySends.Max().ToLocalTime().ToString("d MMM HH:mm", Fr)</small> }
@@ -439,6 +442,13 @@
         deleteOf = null;
         Load();
         Toast.Ok($"Client « {r.Client.Name} » supprimé.");
+    }
+
+    private void SetPlan(Tenant c, string? plan)
+    {
+        if (plan is not (Plans.Base or Plans.Growth)) return;
+        Root.Write(d => { d.Clients.First(y => y.Id == c.Id).Plan = plan; });
+        Toast.Ok($"Licence « {Plans.Label(plan)} » pour {c.Name}.");
     }
 
     private void Toggle(Tenant c)

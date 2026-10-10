@@ -193,6 +193,34 @@ public class Mailer(IConfiguration config, JsonStore store, SecretBox box, ILogg
         return Send(email, $"Votre essai {brand} se termine {left}", Frame(r, body), text, brand, r.SenderEmail);
     }
 
+    /// <summary>Alerte de supervision : écrans hors ligne depuis le délai choisi, et/ou revenus en ligne. down : nom et heure du dernier contact.</summary>
+    public Task<string?> SendScreenAlert(Reseller r, string appUrl, string org, string name, string email, List<(string Name, string Since)> down, List<string> back, int minutes)
+    {
+        var brand = BrandOf(r);
+        var hello = Hello(name);
+        var title = down.Count > 0
+            ? (down.Count == 1 ? $"L'écran « {down[0].Name} » est hors ligne" : $"{down.Count} écrans sont hors ligne")
+            : (back.Count == 1 ? $"L'écran « {back[0]} » est de nouveau en ligne" : $"{back.Count} écrans sont de nouveau en ligne");
+        var text = $"{hello}\n\n";
+        var html = $"""<p style="margin:0 0 14px">{E(hello)}</p>""";
+        if (down.Count > 0)
+        {
+            text += $"Dans votre espace « {org} », {(down.Count == 1 ? "cet écran ne répond plus" : "ces écrans ne répondent plus")} depuis plus de {minutes} minutes :\n" +
+                string.Concat(down.Select(d => $"- {d.Name} (dernier contact à {d.Since})\n")) + "\n";
+            var items = string.Concat(down.Select(d => "<li><b>" + E(d.Name) + "</b> <span style='color:#5A6B80'>(dernier contact à " + E(d.Since) + ")</span></li>"));
+            var who = down.Count == 1 ? "cet écran ne répond plus" : "ces écrans ne répondent plus";
+            html += $"""<p style="margin:0 0 10px">Dans votre espace <b>{E(org)}</b>, {who} depuis plus de {minutes} minutes :</p><ul style="margin:0 0 16px;padding-left:20px">{items}</ul>""";
+        }
+        if (back.Count > 0)
+        {
+            text += (back.Count == 1 ? "De nouveau en ligne : " : "De nouveau en ligne : ") + string.Join(", ", back) + "\n\n";
+            html += $"""<p style="margin:0 0 16px">De nouveau en ligne : <b>{E(string.Join(", ", back))}</b></p>""";
+        }
+        text += $"Vérifiez l'alimentation et le réseau de l'écran. Votre espace : {appUrl}\n\n— L'équipe {brand}\n(Alertes réglables dans Réglages › Supervision.)";
+        html += $"""<p style="margin:0 0 6px;color:#5A6B80;font-size:13px">Vérifiez l'alimentation et le réseau de l'écran.</p>{Button(r, appUrl, "Ouvrir mes écrans")}<p style="margin:0;color:#5A6B80;font-size:12px">Alertes réglables dans Réglages › Supervision.</p>""";
+        return Send(email, $"{brand} · {title}", Frame(r, html), text, brand, r.SenderEmail);
+    }
+
     private static string E(string s) => WebUtility.HtmlEncode(s);
     private static string BrandOf(Reseller r) => r.DisplayName is { Length: > 0 } b ? b : "Linkii";
     private static string Hello(string name) => string.IsNullOrWhiteSpace(name) ? "Bonjour," : $"Bonjour {name.Trim().Split(' ')[0]},";

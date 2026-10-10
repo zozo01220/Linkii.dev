@@ -200,6 +200,9 @@ public class Zone
     public int WallCols { get; set; }
     public int WallRows { get; set; }
     public Guid? PlaylistId { get; set; }
+    /// <summary>Miroir du mur entier : les colonnes (ou les lignes) sont inversées et chaque image retournée.</summary>
+    public bool MirrorH { get; set; }
+    public bool MirrorV { get; set; }
 
     public bool IsWall => Kind == Wall;
 }
@@ -245,6 +248,20 @@ public class Tenant
 
     public int DefaultDurationSec { get; set; } = 8;     // durée d'un contenu ajouté à une playlist
     public int ReloadHour { get; set; } = 4;             // rechargement nocturne des players
+
+    /// <summary>Licence de l'organisation (voir <see cref="Plans"/>) : Growth ajoute le contrôle du direct, la supervision et les murs d'écrans.</summary>
+    public string Plan { get; set; } = Plans.Base;
+    public bool IsGrowth => Plan == Plans.Growth;
+
+    // Supervision (Growth) : e-mail quand un écran tombe, pause des écrans
+    public bool AlertOffline { get; set; }
+    public int AlertOfflineMinutes { get; set; } = 10;
+    /// <summary>Destinataire des alertes ; vide : tous les administrateurs de l'organisation.</summary>
+    public string AlertEmail { get; set; } = "";
+    /// <summary>Une pause se termine seule après ce délai (0 : reprise manuelle seulement).</summary>
+    public int PauseResumeMinutes { get; set; } = 60;
+    /// <summary>Image de la médiathèque affichée pendant une pause (null : visuel Linkii par défaut).</summary>
+    public Guid? PauseMediaId { get; set; }
 
     public string DefaultScreenType { get; set; } = "tv";
     public string DefaultOrientation { get; set; } = "landscape";
@@ -361,6 +378,30 @@ public class Screen : IClientOwned, IAreaOwned
     public int? DetectedW { get; set; }
     public int? DetectedH { get; set; }
 
+    /// <summary>Miroir de l'affichage (écran monté à l'envers, vu dans un miroir) : les deux ensemble = retournement à 180°. Ne demande aucune publication.</summary>
+    public bool MirrorH { get; set; }
+    public bool MirrorV { get; set; }
+
+    // Appareil, remonté par le player (Android : système, modèle, version de l'application)
+    public string? DeviceKind { get; set; }        // androidtv | android | web
+    public string? DeviceOs { get; set; }          // « Android 14 »
+    public string? DeviceModel { get; set; }
+    public string? DeviceApp { get; set; }         // version de l'application Linkii Player
+    public DateTime? DeviceBootUtc { get; set; }   // dernier démarrage de l'appareil
+
+    // Contrôle du direct (licence Growth)
+    public DateTime? PausedUtc { get; set; }       // pause en cours depuis…
+    public DateTime? PausedUntilUtc { get; set; }  // …jusqu'à (null : reprise manuelle)
+    public DateTime? CaptureUtc { get; set; }      // dernier aperçu du direct (fichier captures/{id}.jpg)
+    public int CaptureW { get; set; }              // taille de l'image : l'aperçu est remis dans le sens configuré (écran tourné dans la scène)
+    public int CaptureH { get; set; }
+    public bool CaptureMirrorH { get; set; }       // miroir actif lors de la capture : l'aperçu est remis à l'endroit
+    public bool CaptureMirrorV { get; set; }
+    public List<ScreenCommand> Commands { get; set; } = new();   // les dernières commandes envoyées à l'écran
+    public DateTime? OfflineAlertUtc { get; set; }              // alerte « écran hors ligne » envoyée à cette date (une seule par panne)
+
+    public bool IsPaused(DateTime now) => PausedUtc != null && (PausedUntilUtc == null || PausedUntilUtc > now);
+
     // Widgets posés sur l'écran (horloge, météo) : position libre, en % de l'écran. Ne partent sur l'écran qu'à la publication.
     public List<ScreenWidget> Widgets { get; set; } = new();
     public int WidgetsRevision { get; set; }
@@ -392,6 +433,39 @@ public class Screen : IClientOwned, IAreaOwned
         while (ZonePlaylistIds.Count < zone) ZonePlaylistIds.Add(null);
         ZonePlaylistIds[zone - 1] = playlistId;
     }
+}
+
+/// <summary>Une commande envoyée à un écran depuis le back-office : pause, reprise, redémarrage, aperçu du direct…</summary>
+public class ScreenCommand
+{
+    public const string Pause = "pause", Resume = "resume", Restart = "restart", Reload = "reload", Capture = "capture";
+    public const string Sent = "sent", Received = "received", Done = "done", Failed = "failed";
+
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Kind { get; set; } = "";
+    public DateTime SentUtc { get; set; } = DateTime.UtcNow;
+    public string Status { get; set; } = Sent;     // envoyée → reçue par l'écran → exécutée (ou échec)
+    public string? Detail { get; set; }            // raison d'un échec, durée d'une pause…
+    public string By { get; set; } = "";
+    public Dictionary<string, string> Args { get; set; } = new();
+
+    public bool Open => Status is Sent or Received;
+
+    public static string Label(string kind) => kind switch
+    {
+        Pause => "Pause", Resume => "Reprise de l'affichage", Restart => "Redémarrage de l'application",
+        Reload => "Rechargement des listes", Capture => "Aperçu du direct", _ => kind
+    };
+}
+
+/// <summary>Licences : Base (affichage) et Growth (en plus : contrôle du direct, supervision, statistiques, murs d'écrans).</summary>
+public static class Plans
+{
+    public const string Base = "base";
+    public const string Growth = "growth";
+    public static readonly string[] All = { Base, Growth };
+    public static string Label(string? p) => p == Growth ? "Growth" : "Base";
+    public const string LockedHint = "Disponible avec la licence Growth";
 }
 
 /// <summary>Découpages proposés pour un écran. Tailles en % de la largeur (paysage) ou de la hauteur (portrait) :
@@ -655,15 +729,26 @@ public static class Helpers
     public static DateTime? SyncEpoch(IEnumerable<Area> areas, Screen s) => ZoneOf(areas, s) is { Sync: true } z ? z.SyncEpochUtc : null;
 
     /// <summary>Fait partie de la révision de l'écran : activer ou couper la synchro de sa zone le fait recharger sa configuration.</summary>
-    public static string SyncStamp(IEnumerable<Area> areas, Screen s) =>
-        (SyncEpoch(areas, s) is { } e ? "|y" + e.Ticks : "") + (Wall(areas, s) is { } w ? $"|w{w.Cols}x{w.Rows}@{w.Col},{w.Row}" : "");   // un mur réorganisé recharge ses écrans
+    public static string SyncStamp(IEnumerable<Area> areas, Screen s)
+    {
+        var m = Mirror(areas, s);
+        return (SyncEpoch(areas, s) is { } e ? "|y" + e.Ticks : "") + (Wall(areas, s) is { } w ? $"|w{w.Cols}x{w.Rows}@{w.Col},{w.Row}" : "")   // un mur réorganisé recharge ses écrans
+            + (m.H ? "|mh" : "") + (m.V ? "|mv" : "");   // un miroir changé aussi
+    }
 
     public record WallPlace(int Cols, int Rows, int Col, int Row);
 
-    /// <summary>Place de l'écran dans son mur (null s'il n'est pas dans un mur).</summary>
+    /// <summary>Place de l'écran dans son mur (null s'il n'est pas dans un mur). Avec un miroir du mur, les colonnes (lignes) sont inversées.</summary>
     public static WallPlace? Wall(IEnumerable<Area> areas, Screen s) =>
         ZoneOf(areas, s) is { IsWall: true, WallCols: > 0, WallRows: > 0 } z && s.WallPos is { } p && p >= 0 && p < z.WallCols * z.WallRows
-            ? new WallPlace(z.WallCols, z.WallRows, p % z.WallCols, p / z.WallCols) : null;
+            ? new WallPlace(z.WallCols, z.WallRows, z.MirrorH ? z.WallCols - 1 - p % z.WallCols : p % z.WallCols, z.MirrorV ? z.WallRows - 1 - p / z.WallCols : p / z.WallCols) : null;
+
+    /// <summary>Miroir réellement appliqué à l'image de l'écran : le sien, combiné (OU exclusif) à celui de son mur.</summary>
+    public static (bool H, bool V) Mirror(IEnumerable<Area> areas, Screen s)
+    {
+        var z = Wall(areas, s) != null ? ZoneOf(areas, s) : null;
+        return (s.MirrorH ^ (z?.MirrorH ?? false), s.MirrorV ^ (z?.MirrorV ?? false));
+    }
 
     /// <summary>« 2 · haut droite » : place lisible d'un écran dans une grille.</summary>
     public static string WallLabel(int pos, int cols, int rows)
@@ -779,4 +864,5 @@ public static class AppPaths
     public static string MediaDir = "media";
     public static string BrandDir = "brand";
     public static string ThumbDir = "thumbs";
+    public static string CaptureDir = "captures";   // dernier aperçu du direct de chaque écran
 }

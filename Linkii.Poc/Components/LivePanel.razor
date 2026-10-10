@@ -1,0 +1,249 @@
+@implements IDisposable
+@inject TenantStore Store
+@inject ScreenControl Control
+@inject TenantContext Ctx
+@inject Toaster Toast
+
+@* Panneau de contrôle du direct d'un écran (licence Growth) : aperçu, pause, redémarrage, informations de l'appareil, dernières commandes.
+   Chaque commande est suivie jusqu'à son accusé : envoyée, reçue par l'écran, exécutée ou en échec. *@
+<div class="modal-backdrop" @onclick="Close"></div>
+<aside class="lp" role="dialog" aria-modal="true" aria-labelledby="lp-title">
+    <div class="lp-head">
+        <span class="sc-dot @(v.Online ? "en-ligne" : "hors-ligne")"><span class="sr-only">@(v.Online ? "En ligne" : "Hors ligne")</span></span>
+        <h2 id="lp-title">@v.Name</h2>
+        <span class="badge @(v.Online ? "en-ligne" : "hors-ligne")">@(v.Online ? "En ligne" : "Hors ligne")</span>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+
+    <div class="lp-body">
+        @if (!v.Online)
+        {
+            <div class="lp-offline" role="status">Écran hors ligne@(v.LastSeen is { } ls ? $" depuis {Ago(ls)}" : ""). Les commandes sont indisponibles tant qu'il ne répond pas.</div>
+        }
+
+        <section class="lp-sect">
+            <h3>Aperçu du direct</h3>
+            @* cadre au format configuré de l'écran ; l'image est remise dans ce sens (téléphone tenu à plat pour un écran portrait) et à l'endroit (miroir) *@
+            <div class="lp-frame @(v.Portrait ? "portrait" : "") @(Loading ? "loading" : "")">
+                @if (v.CaptureUtc != null)
+                {
+                    <img src="/screens/@ScreenId/capture.jpg?v=@v.CaptureUtc.Value.Ticks" alt="Dernier aperçu de l'écran" style="@ImgStyle(v.Turn, v.CaptureMirrorH, v.CaptureMirrorV)" />
+                }
+                else if (!Loading)
+                {
+                    <div class="lp-ph"><Ico Name="monitor" Size="30" /><span>Aucune capture pour l'instant.</span></div>
+                }
+                @if (Loading)
+                {
+                    <div class="lp-wait" role="status" aria-live="polite"><span class="lp-spin" aria-hidden="true"></span><span>Demande envoyée à l'écran…</span></div>
+                }
+            </div>
+            <div class="lp-bar">
+                <span class="grow">
+                    @if (Loading) { <text>Un instant : la capture peut prendre jusqu'à 10 secondes.</text> }
+                    else if (shotError != null) { <span class="lp-err">@shotError</span> }
+                    else if (v.CaptureUtc is { } cu) { <text>Capturé à <b class="mono">@Local(cu, "HH:mm:ss")</b> · @Ago(cu)</text> }
+                    else { <text>Voyez ce que l'écran affiche en ce moment.</text> }
+                </span>
+                <button type="button" class="btn sm" disabled="@(!v.Online || Loading || busy)" @onclick="Shoot"><Ico Name="camera" Size="15" /> @(Loading ? "Capture en cours…" : "Aperçu du direct")</button>
+            </div>
+            @if (Loading) { <div class="lp-progress"><i></i></div> }
+            <p class="lp-note">Un contenu protégé (certaines vidéos) peut apparaître noir sur la capture.</p>
+        </section>
+
+        <section class="lp-sect">
+            <h3>Affichage</h3>
+            @if (v.Paused)
+            {
+                <div class="lp-state paused"><Ico Name="pause" Size="16" /><span class="grow">En pause@(v.PausedUntil is { } pu ? Markup(" · reprise automatique à ", Local(pu, "HH:mm")) : new MarkupString(" · reprise manuelle"))</span></div>
+                <div class="row" style="margin-top:12px">
+                    <button type="button" class="btn" disabled="@(!v.Online || busy)" @onclick='() => Run(ScreenCommand.Resume)'><Ico Name="play" Size="15" /> Reprendre maintenant</button>
+                </div>
+            }
+            else
+            {
+                <div class="lp-state"><span class="sc-dot en-ligne"></span><span class="grow">Lecture en cours</span></div>
+                <div class="row" style="margin-top:12px">
+                    <label class="lp-field">Reprise après
+                        <select @bind="pauseMin">
+                            @foreach (var choice in PauseChoices) { <option value="@choice.Min">@choice.Label</option> }
+                        </select>
+                    </label>
+                    <button type="button" class="btn" style="align-self:flex-end" disabled="@(!v.Online || busy)" @onclick='() => Run(ScreenCommand.Pause, pauseMin)'><Ico Name="pause" Size="15" /> Mettre en pause</button>
+                </div>
+            }
+            <p class="lp-note">Pendant la pause, l'écran affiche le visuel défini dans Réglages › Supervision.</p>
+        </section>
+
+        <section class="lp-sect">
+            <h3>Application</h3>
+            <div class="row">
+                <button type="button" class="btn ghost" disabled="@(!v.Online || busy)" @onclick='() => Run(ScreenCommand.Reload)'><Ico Name="refresh" Size="15" /> Recharger les listes</button>
+                <button type="button" class="btn danger" disabled="@(!v.Online || busy)" @onclick="() => confirmRestart = true"><Ico Name="power" Size="15" /> Redémarrer l'application</button>
+            </div>
+            @if (confirmRestart)
+            {
+                <div class="lp-confirm" role="alertdialog" aria-label="Confirmer le redémarrage">
+                    Redémarrer l'application sur « @v.Name » ? L'écran sera noir quelques secondes, puis reprendra l'affichage.
+                    <div class="row" style="margin-top:8px">
+                        <button type="button" class="btn danger-solid sm" disabled="@busy" @onclick="Restart">Redémarrer</button>
+                        <button type="button" class="btn ghost sm" @onclick="() => confirmRestart = false">Annuler</button>
+                    </div>
+                </div>
+            }
+        </section>
+
+        <section class="lp-sect">
+            <h3>Appareil</h3>
+            <dl class="lp-kv">
+                <dt>Système</dt><dd><DeviceLogo Kind="@v.Kind" Size="18" /> @(v.Os ?? "Pas encore remonté")</dd>
+                <dt>Modèle</dt><dd>@(v.Model ?? "—")</dd>
+                <dt>Application</dt><dd>@(v.App is { Length: > 0 } a ? (v.Kind == "web" ? "Navigateur" : "Linkii Player " + a) : "—")</dd>
+                <dt>Résolution</dt><dd>@v.Resolution</dd>
+                <dt>Allumé depuis</dt><dd>@(v.Boot is { } b ? Uptime(DateTime.UtcNow - b) : "—")</dd>
+                <dt>Dernier contact</dt><dd>@(v.LastSeen is { } l ? Ago(l) : "jamais")</dd>
+            </dl>
+        </section>
+
+        <section class="lp-sect">
+            <h3>Dernières commandes</h3>
+            @if (v.Cmds.Count == 0) { <p class="lp-note" style="margin:0">Aucune commande envoyée à cet écran.</p> }
+            else
+            {
+                <div class="lp-hist">
+                    @foreach (var c in v.Cmds.AsEnumerable().Reverse().Take(6))
+                    {
+                        <div>
+                            <time>@Local(c.SentUtc, DateTime.UtcNow - c.SentUtc < TimeSpan.FromHours(20) ? "HH:mm" : "dd.MM HH:mm")</time>
+                            <span class="grow">@ScreenCommand.Label(c.Kind)@(c.Detail is { Length: > 0 } d ? $" · {d}" : "")<small>@c.By</small></span>
+                            <span class="badge @StatusClass(c)">@StatusLabel(c)</span>
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+    </div>
+</aside>
+
+@code {
+    [Parameter, EditorRequired] public Guid ScreenId { get; set; }
+    /// <summary>Action lancée à l'ouverture : « preview » (aperçu) ou « restart » (demande de confirmation).</summary>
+    [Parameter] public string? Action { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private record View(string Name, bool Online, bool Paused, DateTime? PausedUntil, DateTime? CaptureUtc, bool CaptureMirrorH, bool CaptureMirrorV,
+        string? Kind, string? Os, string? Model, string? App, DateTime? Boot, DateTime? LastSeen, string Resolution, List<ScreenCommand> Cmds, string Timezone, int DefaultPause, bool Portrait, int Turn);
+
+    private View v = new("", false, false, null, null, false, false, null, null, null, null, null, null, "", new(), "UTC", 60, false, 0);
+    private Timer? timer;
+    private Guid? shotId;
+    private string? shotError;
+    private bool busy, confirmRestart;
+    private int pauseMin;
+
+    private static readonly (int Min, string Label)[] Pauses = { (15, "15 minutes"), (30, "30 minutes"), (60, "1 heure"), (240, "4 heures"), (0, "Reprise manuelle") };
+    private IEnumerable<(int Min, string Label)> PauseChoices => Pauses;
+
+    private bool Loading => shotId is { } id && v.Cmds.FirstOrDefault(c => c.Id == id) is { Open: true } || shotId != null && v.Cmds.All(c => c.Id != shotId);
+
+    protected override void OnInitialized()
+    {
+        Refresh();
+        pauseMin = Pauses.Any(p => p.Min == v.DefaultPause) ? v.DefaultPause : 60;
+        confirmRestart = Action == "restart";
+        timer = new Timer(_ => InvokeAsync(() => { Refresh(); StateHasChanged(); }), null, 800, 800);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && Action == "preview" && v.Online) await Shoot();
+    }
+
+    private void Refresh()
+    {
+        var now = DateTime.UtcNow;
+        var r = Store.Read(d =>
+        {
+            var s = d.Screens.FirstOrDefault(x => x.Id == ScreenId);
+            if (s == null) return null;
+            ScreenControl.Expire(s, now);
+            var res = s.Resolution == "auto" ? (s.DetectedW > 0 ? $"{s.DetectedW} × {s.DetectedH}" : "Auto") : ScreenOptions.ResolutionLabel(s.Resolution, s.Orientation).Replace("×", " × ");
+            return new View(s.Name, ScreenControl.Online(s, now), s.IsPaused(now), s.PausedUntilUtc, s.CaptureUtc, s.CaptureMirrorH, s.CaptureMirrorV,
+                s.DeviceKind, s.DeviceOs, s.DeviceModel, s.DeviceApp, s.DeviceBootUtc, s.LastSeenUtc, res, s.Commands.ToList(), d.Tenant.Timezone, d.Tenant.PauseResumeMinutes, s.Orientation == "portrait", ScreenControl.CaptureTurn(s));
+        });
+        if (r == null) { _ = OnClose.InvokeAsync(); return; }   // écran supprimé
+        v = r;
+        if (shotId is { } id && v.Cmds.FirstOrDefault(c => c.Id == id) is { Open: false } c)
+        {
+            shotId = null;
+            shotError = c.Status == ScreenCommand.Failed ? "Aperçu impossible : " + (c.Detail ?? "l'écran n'a pas répondu") : null;
+        }
+    }
+
+    private async Task<bool> Run(string kind, int minutes = 0)
+    {
+        busy = true;
+        try
+        {
+            var r = await Control.Send(Store.ClientId, ScreenId, kind, Ctx.DisplayName, minutes);
+            if (!r.Ok) Toast.Error(r.Error ?? "Commande refusée.");
+            Refresh();
+            return r.Ok;
+        }
+        finally { busy = false; }
+    }
+
+    private async Task Shoot()
+    {
+        shotError = null;
+        busy = true;
+        try
+        {
+            var r = await Control.Send(Store.ClientId, ScreenId, ScreenCommand.Capture, Ctx.DisplayName);
+            if (!r.Ok) { shotError = r.Error; return; }
+            shotId = r.Id;
+            Refresh();
+        }
+        finally { busy = false; }
+    }
+
+    private async Task Restart()
+    {
+        if (await Run(ScreenCommand.Restart)) Toast.Ok($"Redémarrage de « {v.Name} » demandé.");
+        confirmRestart = false;
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    /// <summary>Style de l'aperçu : remis à l'endroit (miroir) puis tourné dans le sens configuré ; tourné, il occupe le cadre dans l'autre sens.</summary>
+    public static string ImgStyle(int turn, bool mirrorH, bool mirrorV)
+    {
+        var flip = $"scale({(mirrorH ? -1 : 1)},{(mirrorV ? -1 : 1)})";
+        return turn == 0 ? $"transform:{flip}"
+            : $"position:absolute;left:50%;top:50%;width:100cqh;height:100cqw;transform:translate(-50%,-50%) rotate({turn}deg) {flip}";
+    }
+
+    private static string StatusLabel(ScreenCommand c) => c.Status switch { ScreenCommand.Sent => "Envoyée", ScreenCommand.Received => "Reçue", ScreenCommand.Done => "Exécutée", _ => "Échec" };
+    private static string StatusClass(ScreenCommand c) => c.Status switch { ScreenCommand.Done => "en-ligne", ScreenCommand.Failed => "hors-ligne", _ => "mise-a-jour" };
+
+    private string Local(DateTime utc, string format)
+    {
+        try { utc = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), TimeZoneInfo.FindSystemTimeZoneById(v.Timezone)); }
+        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException) { }
+        return utc.ToString(format);
+    }
+
+    private static MarkupString Markup(string text, string bold) => new(System.Net.WebUtility.HtmlEncode(text) + "<b>" + System.Net.WebUtility.HtmlEncode(bold) + "</b>");
+
+    private static string Ago(DateTime utc)
+    {
+        var t = DateTime.UtcNow - utc;
+        return t.TotalSeconds < 60 ? $"il y a {Math.Max(1, (int)t.TotalSeconds)} s" : t.TotalMinutes < 60 ? $"il y a {(int)t.TotalMinutes} min"
+            : t.TotalHours < 48 ? $"il y a {(int)t.TotalHours} h" : $"il y a {(int)t.TotalDays} j";
+    }
+
+    private static string Uptime(TimeSpan t) =>
+        t.TotalDays >= 1 ? $"{(int)t.TotalDays} j {t.Hours} h" : t.TotalHours >= 1 ? $"{(int)t.TotalHours} h {t.Minutes} min" : $"{Math.Max(1, (int)t.TotalMinutes)} min";
+
+    public void Dispose() => timer?.Dispose();
+}

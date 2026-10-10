@@ -201,6 +201,33 @@ class MainActivity : Activity() {
             store.sync((0 until a.length()).map { a.getString(it) }, token)
         }
 
+        /** Appareil, remonté au back-office : { kind: androidtv | android, os, model, app, bootMs }. */
+        @JavascriptInterface
+        fun deviceInfo(): String {
+            val tv = (getSystemService(Context.UI_MODE_SERVICE) as android.app.UiModeManager).currentModeType == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
+            val model = if (Build.MODEL.startsWith(Build.MANUFACTURER, ignoreCase = true)) Build.MODEL else "${Build.MANUFACTURER} ${Build.MODEL}"
+            return org.json.JSONObject()
+                .put("kind", if (tv) "androidtv" else "android").put("os", "Android ${Build.VERSION.RELEASE}")
+                .put("model", model.replaceFirstChar { it.uppercase() }).put("app", BuildConfig.VERSION_NAME)
+                .put("bootMs", System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime()).toString()
+        }
+
+        /** Redémarrage de l'application demandé depuis le back-office. */
+        @JavascriptInterface
+        fun restart() { runOnUiThread { restartApp() } }
+
+        /** Aperçu du direct demandé depuis le back-office : capture l'écran et l'envoie à l'adresse donnée ; en cas d'échec, le player en rend compte. */
+        @JavascriptInterface
+        fun capture(commandId: String, uploadUrl: String, token: String) {
+            fun fail(why: String) { runOnUiThread { web?.evaluateJavascript("window.lkCaptureFailed && window.lkCaptureFailed(${org.json.JSONObject.quote(commandId)}, ${org.json.JSONObject.quote(why)})", null) } }
+            runOnUiThread {
+                Capture.grab(this@MainActivity) { jpeg, why ->
+                    if (jpeg == null) fail(why ?: "Capture impossible")
+                    else Thread { Capture.upload(uploadUrl, token, jpeg)?.let { fail(it) } }.start()
+                }
+            }
+        }
+
         /** { busy: téléchargement en cours, pending: fichiers manquants, ready, total, bytes } */
         @JavascriptInterface
         fun status(): String {
@@ -261,6 +288,8 @@ class MainActivity : Activity() {
         val actions = listOf(
             "Reprendre la diffusion" to { },
             "Recharger le player" to { web?.loadUrl(prefs.playerUrl()) },
+            "Redémarrer l'application" to { restartApp() },
+            "Test de capture d'écran" to { CaptureTest.run(this, root) },
             "Changer de serveur" to { askServer() },
             "Définir le code PIN" to { askNewPin() },
             "Autoriser le démarrage automatique" to { requestOverlayPermission() },
@@ -360,6 +389,13 @@ class MainActivity : Activity() {
         } else {
             Toast.makeText(this, "Démarrage automatique déjà autorisé.", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    /** Relance l'application dans un nouveau processus : un relais (RestartActivity, autre processus) la redémarre une fois celui-ci terminé. */
+    private fun restartApp() {
+        val launch = packageManager.getLaunchIntentForPackage(packageName)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK) ?: return
+        startActivity(Intent(this, RestartActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("next", launch))
+        Runtime.getRuntime().exit(0)
     }
 
     private fun quit() {

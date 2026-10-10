@@ -53,6 +53,12 @@
                 <label class="lbl" for="wall-name">Nom de la zone</label>
                 <input id="wall-name" class="full" maxlength="60" @bind="name" @bind:event="oninput" placeholder="@DefaultName" />
             }
+            <div class="mirror-opts">
+                <label class="lbl" style="margin-top:0">Miroir du mur</label>
+                <label class="mirror-row"><button type="button" class="switch @(mirrorH ? "on" : "")" role="switch" aria-checked="@(mirrorH ? "true" : "false")" aria-label="Miroir horizontal du mur" @onclick="() => mirrorH = !mirrorH"><span></span></button> <span><b>Horizontal</b><small>Inverse la gauche et la droite du mur entier.</small></span></label>
+                <label class="mirror-row"><button type="button" class="switch @(mirrorV ? "on" : "")" role="switch" aria-checked="@(mirrorV ? "true" : "false")" aria-label="Miroir vertical du mur" @onclick="() => mirrorV = !mirrorV"><span></span></button> <span><b>Vertical</b><small>Inverse le haut et le bas du mur entier.</small></span></label>
+                <small class="muted">Pour un mur vu par réflexion. Un seul écran monté à l'envers se règle dans son édition.</small>
+            </div>
             <div class="wall-note">Pour une image nette, créez vos contenus en <b class="mono">@(unitW * cols) × @(unitH * rows)</b> px.</div>
             @if (mixed)
             {
@@ -85,7 +91,7 @@
     private List<(int Cols, int Rows)> shapes = new();
     private int cols, rows, unitW = 1920, unitH = 1080;
     private int? swap;
-    private bool mixed, saving, identifying;
+    private bool mixed, saving, identifying, mirrorH, mirrorV;
     private string name = "", playlistValue = "", zoneName = "";
     private string? error;
     private Guid areaId;
@@ -99,6 +105,7 @@
         {
             var zone = Store.Read(d => d.Area?.Zones.FirstOrDefault(z => z.Id == zid));
             zoneName = zone?.Name ?? "";
+            (mirrorH, mirrorV) = (zone?.MirrorH ?? false, zone?.MirrorV ?? false);
             screens = Store.Read(d => d.Screens.Where(s => s.Token != null && s.ZoneId == zid).OrderBy(s => s.WallPos ?? int.MaxValue).ToList());
             if (zone != null && zone.WallCols * zone.WallRows == screens.Count) (cols, rows) = (zone.WallCols, zone.WallRows);
         }
@@ -142,6 +149,13 @@
         finally { identifying = false; }
     }
 
+    // Miroir du mur : les écrans le reçoivent avec leur place (révision), sans republier.
+    private void SetMirror(Guid zoneId)
+    {
+        var (h, v) = (mirrorH, mirrorV);
+        Store.Write(d => { if (d.Area?.Zones.FirstOrDefault(z => z.Id == zoneId) is { } z) { z.MirrorH = h; z.MirrorV = v; } });
+    }
+
     private async Task Save()
     {
         error = null;
@@ -153,6 +167,7 @@
             {
                 error = Store.Write(d => AreaOps.ArrangeWall(d, aid, zid, ids, c, r));
                 if (error != null) return;
+                SetMirror(zid);
                 await Notifier.NotifyZone(zid);   // nouvelle place : chaque écran recadre sa portion
                 Toast.Ok("Mur réorganisé.");
             }
@@ -162,6 +177,7 @@
                 var n = name.Trim().Length > 0 ? name : DefaultName;
                 var (zone, err) = Store.Write(d => AreaOps.CreateWall(d, aid, ids, c, r, pl, n));
                 if (zone == null) { error = err; return; }
+                if (mirrorH || mirrorV) SetMirror(zone.Id);
                 foreach (var id in ids) await Notifier.PublishScreen(id);   // la liste du mur part aussitôt sur chaque écran
                 Toast.Ok($"Mur « {zone.Name} » créé : {ids.Count} écrans.");
             }

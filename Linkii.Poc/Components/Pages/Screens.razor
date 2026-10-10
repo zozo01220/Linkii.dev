@@ -277,6 +277,13 @@
                         <button type="button" class="btn ghost sm wc-pub" title="Publier sur les @members.Count écrans du mur" @onclick="() => AskPublish(members.Select(x => x.Id).ToList())"><Ico Name="upload" Size="14" /> Publier le mur</button>
                     }
                 </div>
+                @* contrôle du direct du mur (Growth) : s'applique à tous ses écrans en ligne *@
+                @{ var wOnline = members.Any(x => ScreenControl.Online(x, DateTime.UtcNow)); var wPaused = members.Count > 0 && members.All(x => x.IsPaused(DateTime.UtcNow)); }
+                <div class="sc-live" role="group" aria-label="Contrôle du direct du mur @w.Name">
+                    <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth && !wOnline ? "Aucun écran du mur n'est en ligne" : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !wOnline)" @onclick='() => OpenWallLive(w, "preview")'><Ico Name="eye" Size="15" /> <span>Aperçu</span>@if (!Growth) { @LockIcon }</button>
+                    <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth && !wOnline ? "Aucun écran du mur n'est en ligne" : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !wOnline)" @onclick='() => OpenWallLive(w, null)'><Ico Name="@(wPaused ? "play" : "pause")" Size="15" /> <span>@(wPaused ? "Reprendre" : "Pause")</span>@if (!Growth) { @LockIcon }</button>
+                    <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth && !wOnline ? "Aucun écran du mur n'est en ligne" : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !wOnline)" @onclick='() => OpenWallLive(w, "restart")'><Ico Name="power" Size="15" /> <span>Redémarrer</span>@if (!Growth) { @LockIcon }</button>
+                </div>
             </div>
             continue;
         }
@@ -284,12 +291,16 @@
         var st = Status(sc);
         var cls = st == "En ligne" ? "en-ligne" : st == "Mise à jour" ? "mise-a-jour" : "hors-ligne";
         var pending = Helpers.HasPending(sc, playlists);
+        var now = DateTime.UtcNow;
+        var online = ScreenControl.Online(sc, now);
+        var paused = sc.IsPaused(now);
         <div class="pl-card sc-card @(selectedIds.Contains(sc.Id) ? "picked" : "")">
             <div class="sc-head">
                 <div class="pl-title">
                     <input type="checkbox" class="sc-check" aria-label="Sélectionner @sc.Name" checked="@selectedIds.Contains(sc.Id)" @onchange="() => ToggleSelect(sc.Id)" />
                     <span class="sc-dot @cls" title="@st"><span class="sr-only">@st</span></span>
                     <button type="button" class="pl-name linklike-name" title="Paramètres de l'écran « @sc.Name »" @onclick="() => Edit(sc)">@sc.Name</button>
+                    @if (paused) { <span class="badge mise-a-jour sc-paused-badge" title="@(sc.PausedUntilUtc is { } pu ? "Reprise automatique à " + LocalTime(pu) : "Reprise manuelle")">En pause</span> }
                     <div class="kebab">
                         <button type="button" class="kebab-btn" aria-label="Actions pour @sc.Name" aria-haspopup="menu" aria-expanded="@(menuFor == sc.Id ? "true" : "false")"
                                 @onclick="() => menuFor = menuFor == sc.Id ? null : sc.Id"><Ico Name="dots-v" Size="18" /></button>
@@ -316,10 +327,25 @@
                     @if (synced.Contains(sc.Id)) { <div class="sc-sync"><span class="badge sync" title="Cet écran affiche le même contenu, au même moment, que les autres écrans de la zone qui jouent cette liste"><Ico Name="link" Size="12" /> Synchronisé</span></div> }
                     else { <div class="sc-sync"><span class="badge neutre" title="Aucun autre écran de la zone ne joue cette liste publiée : l'écran reste indépendant">Indépendant</span></div> }
                 }
+                @* appareil remonté par l'écran : logo (Android TV…), système et version de l'application ; toutes licences *@
+                <div class="sc-device @(online ? "" : "off")">
+                    @if (sc.DeviceKind != null)
+                    {
+                        <DeviceLogo Kind="@sc.DeviceKind" Size="22" />
+                        <span><b>@(sc.DeviceOs ?? "Appareil")</b>@if (sc.DeviceApp is { Length: > 0 } da && sc.DeviceApp != "web") { <text> <span class="sep">·</span> App <span class="mono">@da</span></text> }@if (sc.DeviceKind == "web" && sc.DeviceModel != null) { <text> <span class="sep">·</span> @sc.DeviceModel</text> }</span>
+                    }
+                    else { <span class="muted">Appareil : en attente des informations de l'écran</span> }
+                </div>
             </div>
             <div class="sc-vwrap">
             <button type="button" class="sc-visual" tabindex="-1" aria-hidden="true" @onclick="() => Edit(sc)">
                 <span class="sc-monitor @(sc.Orientation == "portrait" ? "portrait" : "")">
+                    @if (paused)
+                    {
+                        <span class="sc-pause-art"><b>☕</b><small>Petite pause</small></span>
+                    }
+                    else
+                    {
                     @* une vignette par zone du découpage, à ses proportions *@
                     <span class="sc-zones @(sc.Orientation == "portrait" ? "dir-col" : "dir-row")">
                         @for (var z = 0; z < sc.ZoneCount; z++)
@@ -332,6 +358,7 @@
                             </span>
                         }
                     </span>
+                    }
                 </span>
                 <span class="sc-stand"></span>
                 @if (pending) { <span class="badge mise-a-jour sc-pending" title="Liste de lecture, widgets ou choix de liste de lecture modifiés depuis la dernière publication">À publier</span> }
@@ -354,6 +381,12 @@
                     <button type="button" class="sc-select sc-zones-btn" title="Choisir la liste de lecture de chaque zone" @onclick="() => Edit(sc)">@ZonesSummary(sc)</button>
                 }
             </div>
+            @* contrôle du direct (Growth) : verrouillé en licence de base, avec une bulle au survol *@
+            <div class="sc-live" role="group" aria-label="Contrôle du direct de @sc.Name">
+                <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth && !online ? "L'écran est hors ligne" : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !online)" @onclick='() => OpenLive(sc, "preview")'><Ico Name="eye" Size="15" /> <span>Aperçu</span>@if (!Growth) { @LockIcon }</button>
+                <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth && !online ? "L'écran est hors ligne" : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !online)" @onclick='() => OpenLive(sc, null)'><Ico Name="@(paused ? "play" : "pause")" Size="15" /> <span>@(paused ? "Reprendre" : "Pause")</span>@if (!Growth) { @LockIcon }</button>
+                <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth && !online ? "L'écran est hors ligne" : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !online)" @onclick='() => OpenLive(sc, "restart")'><Ico Name="power" Size="15" /> <span>Redémarrer</span>@if (!Growth) { @LockIcon }</button>
+            </div>
         </div>
     }
     <button class="pl-card pl-add" @onclick="OpenPair">
@@ -365,19 +398,20 @@
 @if (showPair)
 {
     <div class="modal-backdrop" @onclick="() => showPair = false"></div>
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pair-title">
+    <div class="modal pair-modal" role="dialog" aria-modal="true" aria-labelledby="pair-title">
         <h3 id="pair-title">Connecter un écran</h3>
         <p class="hint">Allumez l'écran, puis saisissez le code à 6 chiffres affiché. <a href="/player/" target="_blank">Ouvrir un écran de test</a></p>
-        <div class="dw">
+        <div class="dw pair-grid">
             <div class="dw-field"><label for="pair-code">Code</label><input id="pair-code" class="pair-code" @bind="code" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="off" /></div>
             <div class="dw-field"><label for="pair-name">Nom de l'écran</label><input id="pair-name" @bind="name" placeholder="Ex. Accueil, salle de pause" /></div>
-            <div class="dw-field">
+            <div class="dw-field @(FreeZones.Count > 1 ? "" : "wide")">
                 <label for="pair-pl">Liste de lecture</label>
                 <select id="pair-pl" @bind="playlistId">
                     <option value="">— Aucune liste de lecture —</option>
                     @foreach (var p in playlists) { <option value="@p.Id">@p.Name</option> }
                 </select>
             </div>
+            <div class="dw-field wide"><ScreenFormat Spec="pairSpec" /></div>
             @if (FreeZones.Count > 1)
             {
                 <div class="dw-field">
@@ -388,7 +422,7 @@
                 </div>
             }
         </div>
-        <p class="hint" style="margin:12px 0 0">Format par défaut : celui des Réglages, modifiable ensuite dans l'édition de l'écran.</p>
+        <p class="hint" style="margin:12px 0 0">Matériel et format viennent des Réglages ; la résolution est celle de l'appareil par défaut. Tout reste modifiable ensuite dans l'édition de l'écran.</p>
         @if (error != null) { <div class="err">@error</div> }
         <div class="modal-actions">
             <button class="btn ghost" @onclick="() => showPair = false">Annuler</button>
@@ -490,6 +524,15 @@
     <ScreenEditor ScreenId="eid" OnClose="CloseEdit" />
 }
 
+@if (liveFor is { } liveId)
+{
+    <LivePanel ScreenId="liveId" Action="@liveAction" OnClose="CloseLive" />
+}
+else if (liveWall is { } liveWallId)
+{
+    <WallLivePanel ZoneId="liveWallId" Action="@liveAction" OnClose="CloseLive" />
+}
+
 @if (simScreen is { } simId)
 {
     <SimulatorDialog ScreenId="simId" OnClose="() => simScreen = null" />
@@ -532,6 +575,27 @@ else if (wallEdit is { } wid)
 
     private string Status(Screen s) => Store.Read(d => d.Status(s));
 
+    // ---------- Contrôle du direct (Growth) ----------
+    private bool Growth => tenant.IsGrowth;
+    private Guid? liveFor;
+    private string? liveAction;
+    private static readonly MarkupString LockIcon = new("<svg class=\"lk\" width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><rect x=\"5\" y=\"11\" width=\"14\" height=\"9\" rx=\"2\"/><path d=\"M8 11V8a4 4 0 0 1 8 0v3\"/></svg>");
+
+    // En licence de base le bouton ne fait rien (il est verrouillé : la bulle explique pourquoi).
+    private void OpenLive(Screen s, string? action) { if (Growth) { liveFor = s.Id; liveAction = action; } }
+
+    private Guid? liveWall;
+    private void OpenWallLive(Zone wall, string? action) { if (Growth) { liveWall = wall.Id; liveAction = action; } }
+
+    private void CloseLive() { liveFor = null; liveWall = null; liveAction = null; Reload(); }
+
+    private string LocalTime(DateTime utc)
+    {
+        try { utc = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), TimeZoneInfo.FindSystemTimeZoneById(tenant.Timezone)); }
+        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException) { }
+        return utc.ToString("HH:mm");
+    }
+
     // Premier contenu plein écran d'une liste de lecture : vignette de sa zone sur la carte.
     private MediaItem? ZoneThumb(Playlist? p) =>
         p?.Draft.Where(i => i.Placement == "full").Select(i => media.FirstOrDefault(m => m.Id == i.MediaId)).FirstOrDefault(m => m != null);
@@ -550,6 +614,7 @@ else if (wallEdit is { } wid)
     private bool manageZones, showZones, zoneMove, noArea, addMenu;
     private string? zoneFilter;   // null : toutes les zones ; sinon l'Id de la zone
     private string pairZone = "", zoneTo = "";
+    private ScreenSpec pairSpec = new();
     private List<(Guid Id, string Name)>? areaMove;   // écrans à déplacer vers une autre aire
 
     private Zone? ZoneOf(Screen s) => zones.FirstOrDefault(z => z.Id == s.ZoneId) ?? zones.FirstOrDefault(z => z.IsDefault);
@@ -626,7 +691,7 @@ else if (wallEdit is { } wid)
     private Zone? OpenZone => zoneFilter == null ? null : zones.FirstOrDefault(z => z.Id.ToString() == zoneFilter);
 
     // « Assembler en mur… » : au moins 2 écrans cochés, aucun déjà dans un mur, gestion des zones permise.
-    private bool CanAssemble => manageZones && area != null && selectedIds.Count >= 2
+    private bool CanAssemble => Growth && manageZones && area != null && selectedIds.Count >= 2   // les murs d'écrans : licence Growth
         && !screens.Any(s => selectedIds.Contains(s.Id) && ZoneOf(s) is { IsWall: true });
 
     private record WallCell(int Number, Screen? Screen, string Css, string Title);
@@ -755,6 +820,7 @@ else if (wallEdit is { } wid)
 
     private void Reload()
     {
+        tenant = Store.Read(d => d.Tenant);   // licence : peut changer pendant que la page est ouverte
         (area, manageZones, noArea) = Store.Read(d => (d.Area, d.Access.ManagesCurrent, d.Access.OrgAreaCount > 0 && d.Area == null));
         zones = area?.Zones.OrderByDescending(z => z.IsDefault).ThenBy(z => z.Name, StringComparer.CurrentCultureIgnoreCase).ToList() ?? new();
         otherAreas = Store.Read(d => d.Access.IsOrgAdmin && d.Area is { } cur ? d.Areas.Where(a => a.Id != cur.Id).OrderBy(a => a.Name).ToList() : new());
@@ -766,7 +832,7 @@ else if (wallEdit is { } wid)
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
     }
 
-    private void OpenPair() { code = name = ""; playlistId = null; error = null; pairZone = (FreeZones.FirstOrDefault(z => z.Id.ToString() == zoneFilter) ?? zones.FirstOrDefault(z => z.IsDefault))?.Id.ToString() ?? ""; showPair = true; }
+    private void OpenPair() { code = name = ""; playlistId = null; error = null; pairSpec = ScreenSpec.From(tenant); pairSpec.Resolution = "auto"; pairZone = (FreeZones.FirstOrDefault(z => z.Id.ToString() == zoneFilter) ?? zones.FirstOrDefault(z => z.IsDefault))?.Id.ToString() ?? ""; showPair = true; }
 
     private void Edit(Screen s) { menuFor = null; editing = s.Id; }
 
@@ -775,7 +841,7 @@ else if (wallEdit is { } wid)
     private async Task Pair()
     {
         error = null;
-        var spec = ScreenSpec.From(tenant);
+        var spec = pairSpec;
         var pid = playlistId;
         var screenName = name;
         Guid? zid = Guid.TryParse(pairZone, out var zg) && zones.Any(z => z.Id == zg) ? zg : zones.FirstOrDefault(z => z.IsDefault)?.Id;

@@ -49,6 +49,9 @@ Le player passe par le pont `window.LinkiiNative` ; dans un navigateur il garde 
 - Ou activer *Autoriser le démarrage automatique* dans le menu technicien (affichage par-dessus les autres applications, requis par Android 10+).
 - Verrouillage kiosque (`startLockTask`) : automatique si l'appareil est géré (MDM / propriétaire de l'appareil).
 
+## Version 1.1.0 : contrôle du direct
+
+L'app remonte son modèle, la version Android et la version de l'application, et exécute les commandes du back-office (licence Growth) : aperçu du direct (`Capture.kt`, test `CaptureTest.kt`), redémarrage de l'application (`RestartActivity.kt`), pause, rechargement. À valider sur un appareil réel.
 ## Limites connues
 
 - Le PIN n'est pas encore défini depuis le back-office.

@@ -166,6 +166,13 @@
                     </div>
                 }
                 <ScreenFormat Spec="spec" Layout="@layoutId" LayoutChanged="SetLayout" OnChange="StateHasChanged" Compact="true" Detected="@detected" />
+                @* Miroir : écran monté à l'envers ou vu dans un miroir ; s'applique dès l'enregistrement, sans publier *@
+                <div class="fmt-block mirror-opts">
+                    <label>Miroir de l'affichage</label>
+                    <label class="mirror-row"><button type="button" class="switch @(mirrorH ? "on" : "")" role="switch" aria-checked="@(mirrorH ? "true" : "false")" aria-label="Miroir horizontal" @onclick="() => mirrorH = !mirrorH"><span></span></button> <span><b>Horizontal</b><small>Inverse la gauche et la droite.</small></span></label>
+                    <label class="mirror-row"><button type="button" class="switch @(mirrorV ? "on" : "")" role="switch" aria-checked="@(mirrorV ? "true" : "false")" aria-label="Miroir vertical" @onclick="() => mirrorV = !mirrorV"><span></span></button> <span><b>Vertical</b><small>Inverse le haut et le bas.</small></span></label>
+                    <small class="muted">Les deux ensemble retournent l'image à 180° : pratique pour un écran fixé à l'envers, sans le démonter.@(wall != null ? " Dans un mur, le miroir de l'écran s'ajoute à celui du mur." : "")</small>
+                </div>
             }
             else
             {
@@ -292,7 +299,7 @@
     private string? detected;
     private string search = "";
     private ScreenSpec spec = new();
-    private bool saving, confirmPublish;
+    private bool saving, confirmPublish, mirrorH, mirrorV;
 
     private ScreenWidget? Sel => widgets.FirstOrDefault(w => w.Id == selected);
 
@@ -309,6 +316,7 @@
         screenWallPos = s.WallPos;
         zoneValue = (zones.FirstOrDefault(z => z.Id == s.ZoneId) ?? zones.FirstOrDefault(z => z.IsDefault))?.Id.ToString() ?? "";
         name = s.Name;
+        (mirrorH, mirrorV) = (s.MirrorH, s.MirrorV);
         for (var z = 0; z < zonePl.Count; z++) zonePl[z] = s.ZonePlaylist(z);
         spec = new ScreenSpec { Type = s.ScreenType, Orientation = s.Orientation, Resolution = s.Resolution };
         layoutId = ScreenLayouts.Fit(ScreenLayouts.Find(s.Layout).Id, spec);   // découpage encore permis par le format
@@ -457,7 +465,7 @@
                 : new(w.Settings)
         }).ToList();
         Guid? zid = Guid.TryParse(zoneValue, out var zg) && this.zones.Any(z => z.Id == zg) ? zg : this.zones.FirstOrDefault(z => z.IsDefault)?.Id;
-        var newName = name.Trim(); var sp = spec; var lay = layoutId; var zones = zonePl.ToList();
+        var newName = name.Trim(); var sp = spec; var lay = layoutId; var zones = zonePl.ToList(); var (mh, mv) = (mirrorH, mirrorV);
         saving = true;
         try
         {
@@ -466,8 +474,10 @@
                 var s = d.Screens.First(x => x.Id == ScreenId);
                 var inWall = AreaOps.WallOf(d, s);
                 if (inWall != null) zid = s.ZoneId;   // un écran de mur n'en sort que par la dissolution du mur
-                var changed = s.ScreenType != sp.Type || s.Orientation != sp.Orientation || s.Resolution != sp.Resolution || s.ZoneId != zid;   // la zone peut changer la synchro
+                var changed = s.ScreenType != sp.Type || s.Orientation != sp.Orientation || s.Resolution != sp.Resolution || s.ZoneId != zid
+                    || s.MirrorH != mh || s.MirrorV != mv;   // la zone peut changer la synchro ; le miroir s'applique aussitôt
                 s.Name = newName;
+                s.MirrorH = mh; s.MirrorV = mv;
                 s.ZoneId = zid;
                 if (inWall != null)
                 {

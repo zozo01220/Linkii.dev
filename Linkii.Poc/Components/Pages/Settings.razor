@@ -12,7 +12,7 @@
         <h1>Réglages</h1>
         <p class="sub">Paramètres globaux de votre organisation. Ils s'appliquent à tous les écrans.</p>
     </div>
-    @if (Tab is "organisation" or "parametres") { <button class="btn" @onclick="Save">Enregistrer</button> }
+    @if (Tab is "organisation" or "parametres" || Tab == "supervision" && growth) { <button class="btn" @onclick="Save">Enregistrer</button> }
 </div>
 
 <nav class="tabs" aria-label="Sections des réglages">
@@ -70,6 +70,62 @@
         </div>
         break;
 
+    case "supervision":
+        @* Contrôle du direct et alertes : licence Growth. En licence de base, tout est visible mais verrouillé (bulle au survol). *@
+        @if (!growth)
+        {
+            <div class="sv-upsell"><Ico Name="lock" Size="18" /><span class="grow">La supervision, le contrôle du direct (aperçu, pause, redémarrage) et les murs d'écrans sont inclus dans la licence <b>Growth</b>.</span></div>
+        }
+        <div class="settings-grid">
+            <div class="card">
+                <h3>Alertes par e-mail</h3>
+                <p class="hint">Soyez prévenu quand un écran ne répond plus, sans ouvrir le back-office.</p>
+                <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
+                    <div class="t"><b>Prévenir par e-mail quand un écran tombe</b><small>Un seul e-mail par panne, puis un second quand l'écran revient en ligne.</small></div>
+                    <div class="ctl"><button type="button" class="switch @(alertOffline ? "on" : "")" role="switch" aria-checked="@(alertOffline ? "true" : "false")" aria-label="Alertes e-mail" disabled="@(!growth)" @onclick="() => alertOffline = !alertOffline"><span></span></button></div>
+                </div>
+                <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
+                    <div class="t"><b>Délai avant l'alerte</b><small>Durée pendant laquelle un écran doit rester hors ligne avant l'envoi de l'e-mail.</small></div>
+                    <div class="ctl">
+                        <select class="full" style="width:160px" @bind="alertMinutes" disabled="@(!growth || !alertOffline)">
+                            @foreach (var (m, l) in AlertDelays) { <option value="@m">@l</option> }
+                        </select>
+                    </div>
+                </div>
+                <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
+                    <div class="t"><b>Destinataires</b><small>Par défaut, tous les administrateurs de l'organisation.</small></div>
+                    <div class="ctl" style="flex-direction:column;align-items:stretch;width:260px">
+                        <select class="full" @bind="alertTarget" disabled="@(!growth || !alertOffline)">
+                            <option value="admins">Tous les administrateurs</option>
+                            <option value="custom">Une adresse dédiée…</option>
+                        </select>
+                        @if (alertTarget == "custom") { <input class="full" type="email" placeholder="alertes@exemple.ch" aria-label="Adresse des alertes" @bind="alertEmail" disabled="@(!growth || !alertOffline)" /> }
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <h3>Pause des écrans</h3>
+                <p class="hint">Une pause se lance depuis la carte d'un écran (bouton Pause).</p>
+                <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
+                    <div class="t"><b>Reprise automatique après</b><small>Un écran en pause reprend seul au bout de ce délai : il ne reste jamais figé par oubli. Modifiable à chaque pause.</small></div>
+                    <div class="ctl">
+                        <select class="full" style="width:190px" @bind="pauseMinutes" disabled="@(!growth)">
+                            @foreach (var (m, l) in PauseDelays) { <option value="@m">@l</option> }
+                        </select>
+                    </div>
+                </div>
+                <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
+                    <div class="t"><b>Visuel affiché pendant la pause</b><small>Une image de votre médiathèque, sinon le visuel Linkii par défaut.</small></div>
+                    <div class="ctl" style="flex:1;min-width:0">@if (growth) { <MediaField Field="pauseField" Values="pauseValues" /> } else { <span class="muted">Visuel Linkii par défaut</span> }</div>
+                </div>
+            </div>
+            <div class="card">
+                <h3>Appareil des écrans</h3>
+                <p class="hint">Chaque écran remonte son système (par exemple Android 14), son modèle et la version de l'application. Ces informations s'affichent sur sa carte, dans toutes les licences.</p>
+            </div>
+        </div>
+        break;
+
     case "compte":
         @if (Ctx.IsImpersonating)
         {
@@ -106,8 +162,18 @@
 
     private static readonly (string Id, string Label)[] Tabs =
     {
-        ("organisation", "Organisation"), ("parametres", "Paramètres"), ("compte", "Compte"),
+        ("organisation", "Organisation"), ("parametres", "Paramètres"), ("supervision", "Supervision"), ("compte", "Compte"),
     };
+
+    private static readonly (int Min, string Label)[] AlertDelays = { (5, "5 minutes"), (10, "10 minutes"), (15, "15 minutes"), (30, "30 minutes"), (60, "1 heure") };
+    private static readonly (int Min, string Label)[] PauseDelays = { (15, "15 minutes"), (30, "30 minutes"), (60, "1 heure"), (240, "4 heures"), (0, "Jamais (reprise manuelle)") };
+
+    // Supervision (Growth)
+    private bool growth, alertOffline;
+    private int alertMinutes = 10, pauseMinutes = 60;
+    private string alertTarget = "admins", alertEmail = "";
+    private readonly AppField pauseField = new() { Key = "pause", Type = "media", Accept = "image", Label = "Visuel de pause" };
+    private Dictionary<string, string> pauseValues = new() { ["pause"] = "" };
 
     private static readonly string[] Timezones =
     {
@@ -130,6 +196,10 @@
         if (TabParam == "applications") { Nav.NavigateTo("/integrations" + new Uri(Nav.Uri).Query.Replace("tab=applications&", "").Replace("?tab=applications", ""), replace: true); return; }
         var t = Store.Read(d => d.Tenant);
         name = t.Name; timezone = t.Timezone; duration = t.DefaultDurationSec; reloadHour = t.ReloadHour;
+        growth = t.IsGrowth; alertOffline = t.AlertOffline; alertMinutes = AlertDelays.Any(a => a.Min == t.AlertOfflineMinutes) ? t.AlertOfflineMinutes : 10;
+        alertTarget = t.AlertEmail.Length > 0 ? "custom" : "admins"; alertEmail = t.AlertEmail;
+        pauseMinutes = PauseDelays.Any(p => p.Min == t.PauseResumeMinutes) ? t.PauseResumeMinutes : 60;
+        pauseValues["pause"] = t.PauseMediaId?.ToString() ?? "";
         if (Nav.Uri.Contains("saved=1")) Toast.Ok("Réglages enregistrés.");
         email = Ctx.Email;
         var uid = Ctx.UserId;
@@ -142,6 +212,9 @@
     {
         if (string.IsNullOrWhiteSpace(name)) { Toast.Error("Le nom de l'organisation est obligatoire."); return; }
         if (duration < 1) { Toast.Error("La durée par défaut doit être d'au moins 1 seconde."); return; }
+        var target = alertTarget == "custom" ? alertEmail.Trim() : "";
+        if (growth && alertOffline && alertTarget == "custom" && !System.Net.Mail.MailAddress.TryCreate(target, out _)) { Toast.Error("L'adresse des alertes n'est pas valide."); return; }
+        var pauseImage = AppField.MediaIds(pauseValues.GetValueOrDefault("pause")) is { Count: > 0 } ids ? ids[0] : (Guid?)null;
 
         Store.Write(d =>
         {
@@ -149,6 +222,12 @@
             t.Name = name.Trim(); t.Timezone = timezone;
             t.DefaultDurationSec = duration; t.ReloadHour = reloadHour;
             t.DefaultScreenType = spec.Type; t.DefaultOrientation = spec.Orientation; t.DefaultResolution = spec.Resolution;
+            if (t.IsGrowth)   // supervision : licence Growth (contrôlée ici aussi, pas seulement dans l'interface)
+            {
+                t.AlertOffline = alertOffline; t.AlertOfflineMinutes = alertMinutes; t.AlertEmail = target;
+                t.PauseResumeMinutes = pauseMinutes;
+                t.PauseMediaId = pauseImage is { } pm && d.Media.Any(m => m.Id == pm && m.Type == "image") ? pauseImage : null;
+            }
         });
         await Notifier.NotifyClient(Store.ClientId);   // fuseau / redémarrage : les écrans rechargent leur configuration
         Nav.NavigateTo($"/settings?tab={Tab}&saved=1", forceLoad: true);
