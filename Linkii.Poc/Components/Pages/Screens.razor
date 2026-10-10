@@ -1,4 +1,4 @@
-@page "/"
+﻿@page "/"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
 @implements IDisposable
 @inject TenantStore Store
@@ -172,6 +172,11 @@
 }
 
 <div class="pl-grid @(view == "list" ? "list" : "")">
+    @if (view == "list")
+    {
+        @* en-têtes des colonnes (PC) ; masqués au téléphone *@
+        <div class="sc-listhead" aria-hidden="true"><span></span><span>Aperçu</span><span></span><span>Écran</span><span>État</span><span>En diffusion</span><span></span><span></span></div>
+    }
     @foreach (var entry in Entries)
     {
         if (entry.Wall is { } wl)
@@ -191,14 +196,18 @@
             var placed = members.Any(x => x.WallPos != null);
             var opened = OpenZone?.Id == w.Id;
             var wmenu = "wall:" + w.Id;
-            <div class="pl-card sc-card wall-card @(w.WallCols >= 4 ? "w4" : "") @(opened ? "wide" : "") @(allPicked ? "picked" : "")" style="--cols:@w.WallCols" role="group" aria-label="Mur d'écrans @w.Name">
+            var wOnl = members.Any(x => ScreenControl.Online(x, DateTime.UtcNow));
+            var wExpanded = expandedWalls.Contains(w.Id);
+            var wAr = ((double)w.WallCols * (portrait ? 9 : 16) / ((double)w.WallRows * (portrait ? 16 : 9))).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
+            <div class="pl-card sc-card scr-card wall-card @(w.WallCols >= 4 ? "w4" : "") @(opened ? "wide" : "") @(allPicked ? "picked" : "") @(wOnl ? "" : "is-off")" style="--cols:@w.WallCols;--rows:@w.WallRows;--ar:@wAr" role="group" aria-label="Mur d'écrans @w.Name">
                 <div class="sc-head">
                     <div class="pl-title">
                         <input type="checkbox" class="sc-check" aria-label="Sélectionner les @members.Count écrans du mur @w.Name" checked="@allPicked" @onchange="() => ToggleWall(members)" />
                         <span class="wc-ico" aria-hidden="true"><Ico Name="grid" Size="18" /></span>
+                        <button type="button" class="wc-chev" aria-expanded="@(wExpanded ? "true" : "false")" aria-label="@(wExpanded ? "Masquer" : "Voir") les écrans du mur @w.Name" @onclick="() => ToggleWallMembers(w.Id)"><Ico Name="chevron" Size="14" /></button>
                         @if (opened) { <span class="pl-name">@w.Name</span> }
                         else { <button type="button" class="pl-name linklike-name" title="N'afficher que le mur « @w.Name »" @onclick="() => PickZone(w)">@w.Name</button> }
-                        <span class="badge @(full ? "en-ligne" : "hors-ligne") wc-state">@(full ? $"{onl} sur {places} en ligne" : $"Mur incomplet · {onl} sur {places}")</span>
+                        <span class="badge @(full ? "en-ligne" : "hors-ligne") wc-state @(!full && onl > 0 ? "partial" : "")">@(full ? $"{onl} sur {places} en ligne" : $"Mur incomplet · {onl} sur {places}")</span>
                         <div class="kebab">
                             <button type="button" class="kebab-btn" aria-label="Actions du mur @w.Name" aria-haspopup="menu" aria-expanded="@(openMenu == wmenu ? "true" : "false")"
                                     @onclick="() => Toggle(wmenu)"><Ico Name="dots-v" Size="18" /></button>
@@ -209,6 +218,7 @@
                                     <button type="button" role="menuitem" @onclick="() => { CloseMenu(); AskPublish(members.Select(x => x.Id).ToList()); }"><Ico Name="upload" Size="16" /> Publier le mur</button>
                                     @if (placed) { <button type="button" role="menuitem" @onclick="() => { CloseMenu(); simWall = w.Id; }"><Ico Name="play" Size="16" /> Simuler le mur</button> }
                                     <button type="button" role="menuitem" @onclick="() => IdentifyWall(w, members)"><Ico Name="monitor" Size="16" /> Identifier sur les écrans</button>
+                                    <button type="button" role="menuitem" disabled="@(!Growth || !wOnl)" title="@(!Growth ? Plans.LockedHint : !wOnl ? "Aucun écran du mur n'est en ligne" : null)" @onclick='() => { CloseMenu(); OpenWallLive(w, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer les écrans</button>
                                     @if (manageZones)
                                     {
                                         <button type="button" role="menuitem" @onclick="() => { CloseMenu(); wallEdit = w.Id; }"><Ico Name="grid" Size="16" /> Réorganiser…</button>
@@ -219,11 +229,11 @@
                             }
                         </div>
                     </div>
-                    <div class="sc-zone-name">Mur d'écrans @w.WallCols × @w.WallRows · @members.Count écran@(members.Count > 1 ? "s" : "")</div>
+                    <div class="sc-zone-name">Mur d'écrans @w.WallCols × @w.WallRows · @members.Count écran@(members.Count > 1 ? "s" : "")@if (wpending) { <span class="badge mise-a-jour sc-pending-l" title="Liste du mur ou contenus modifiés depuis la dernière publication">À publier</span> }</div>
                 </div>
                 <div class="sc-vwrap">
                     <div class="wc-vis">
-                        <div class="wc-frame">
+                        <div class="wc-frame @(portrait ? "portrait" : "")">
                             @foreach (var cell in cells)
                             {
                                 var c = cell;
@@ -244,7 +254,38 @@
                     </div>
                     @if (placed) { <button type="button" class="sc-sim" title="Voir ce qu'affiche le mur" aria-label="Simuler le mur « @w.Name »" @onclick="() => simWall = w.Id"><Ico Name="play" Size="14" /> Simuler le mur</button> }
                 </div>
-                <div class="wc-members">
+                @* en vignettes : une rangée de pastilles d'état ; dépliable en liste des écrans (en affichage liste, toujours dépliée) *@
+                <button type="button" class="wc-dots" aria-expanded="@(wExpanded ? "true" : "false")" title="@(wExpanded ? "Masquer les écrans du mur" : "Voir les écrans du mur")" @onclick="() => ToggleWallMembers(w.Id)">
+                    @foreach (var cell in cells.Where(x => x.Screen != null))
+                    {
+                        var mst2 = Status(cell.Screen!);
+                        <span class="sc-dot @(mst2 == "En ligne" ? "en-ligne" : mst2 == "Mise à jour" ? "mise-a-jour" : "hors-ligne")"></span>
+                    }
+                    <span>@members.Count écran@(members.Count > 1 ? "s" : "")</span>
+                    <Ico Name="chevron" Size="14" />
+                </button>
+                @if (wExpanded)
+                {
+                    @* affichage liste : les écrans du mur en lignes, sur les colonnes de la liste *@
+                    <div class="wc-kids">
+                        @foreach (var kc in cells.Where(x => x.Screen != null))
+                        {
+                            var km = kc.Screen!;
+                            var kst = Status(km);
+                            <div class="wc-kid @(IsOffline(km) ? "off" : "")">
+                                <input type="checkbox" class="sc-check" aria-label="Sélectionner @km.Name" checked="@selectedIds.Contains(km.Id)" @onchange="() => ToggleSelect(km.Id)" />
+                                <span class="wc-cn">@kc.Number</span>
+                                <span class="wc-kname">
+                                    <button type="button" class="linklike-name" title="Paramètres de l'écran « @km.Name »" @onclick="() => Edit(km)">@km.Name</button>
+                                    <small>@(km.DeviceOs ?? "Appareil")@(km.DeviceApp is { Length: > 0 } kda && km.DeviceApp != "web" ? " · v" + kda : "") · @Helpers.WallLabel(kc.Number - 1, w.WallCols, w.WallRows)</small>
+                                </span>
+                                <span class="wc-kst"><span class="sc-dot @(kst == "En ligne" ? "en-ligne" : kst == "Mise à jour" ? "mise-a-jour" : "hors-ligne")"></span>@kst</span>
+                                <span class="wc-kmut">Contenu du mur</span>
+                            </div>
+                        }
+                    </div>
+                }
+                <div class="wc-members @(wExpanded ? "open" : "")">
                     @foreach (var cell in cells.Where(x => x.Screen != null))
                     {
                         var m = cell.Screen!;
@@ -266,7 +307,7 @@
                     }
                     else
                     {
-                        <label class="sc-lbl" for="wpl-@w.Id">Liste du mur</label>
+                        <label class="sc-lbl" for="wpl-@w.Id">En diffusion sur le mur</label>
                         @if (manageZones)
                         {
                             <select id="wpl-@w.Id" class="sc-select" @onchange="e => SetWallPlaylist(w, Guid.TryParse(e.Value?.ToString(), out var g) ? g : null)">
@@ -275,15 +316,13 @@
                             </select>
                         }
                         else { <span class="sc-select">@(wpl?.Name ?? "Aucune liste de lecture")</span> }
-                        <button type="button" class="btn ghost sm wc-pub" title="Publier sur les @members.Count écrans du mur" @onclick="() => AskPublish(members.Select(x => x.Id).ToList())"><Ico Name="upload" Size="14" /> Publier le mur</button>
                     }
                 </div>
                 @* contrôle du direct du mur (Growth) : s'applique à tous ses écrans en ligne *@
                 @{ var wOnline = members.Any(x => ScreenControl.Online(x, DateTime.UtcNow)); var wPaused = members.Count > 0 && members.All(x => x.IsPaused(DateTime.UtcNow)); }
                 <div class="sc-live" role="group" aria-label="Contrôle du direct du mur @w.Name">
-                    <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth && !wOnline ? "Aucun écran du mur n'est en ligne" : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !wOnline)" @onclick='() => OpenWallLive(w, "preview")'><Ico Name="eye" Size="15" /> <span>Aperçu</span>@if (!Growth) { @LockIcon }</button>
-                    <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth && !wOnline ? "Aucun écran du mur n'est en ligne" : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !wOnline)" @onclick='() => OpenWallLive(w, null)'><Ico Name="@(wPaused ? "play" : "pause")" Size="15" /> <span>@(wPaused ? "Reprendre" : "Pause")</span>@if (!Growth) { @LockIcon }</button>
-                    <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth && !wOnline ? "Aucun écran du mur n'est en ligne" : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !wOnline)" @onclick='() => OpenWallLive(w, "restart")'><Ico Name="power" Size="15" /> <span>Redémarrer</span>@if (!Growth) { @LockIcon }</button>
+                    <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth ? (wOnline ? "Aperçu" : "Aucun écran du mur n'est en ligne") : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !wOnline)" @onclick='() => OpenWallLive(w, "preview")'><Ico Name="eye" Size="15" /> <span>Aperçu</span>@if (!Growth) { @LockIcon }</button>
+                    <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth ? (wOnline ? (wPaused ? "Reprendre" : "Pause") : "Aucun écran du mur n'est en ligne") : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !wOnline)" @onclick='() => OpenWallLive(w, null)'><Ico Name="@(wPaused ? "play" : "pause")" Size="15" /> <span>@(wPaused ? "Reprendre" : "Pause")</span>@if (!Growth) { @LockIcon }</button>
                 </div>
             </div>
             continue;
@@ -295,11 +334,11 @@
         var now = DateTime.UtcNow;
         var online = ScreenControl.Online(sc, now);
         var paused = sc.IsPaused(now);
-        <div class="pl-card sc-card @(selectedIds.Contains(sc.Id) ? "picked" : "")">
+        <div class="pl-card sc-card scr-card @(selectedIds.Contains(sc.Id) ? "picked" : "") @(online ? "" : "is-off") @(paused ? "is-paused" : "")">
             <div class="sc-head">
                 <div class="pl-title">
                     <input type="checkbox" class="sc-check" aria-label="Sélectionner @sc.Name" checked="@selectedIds.Contains(sc.Id)" @onchange="() => ToggleSelect(sc.Id)" />
-                    <span class="sc-dot @cls" title="@st"><span class="sr-only">@st</span></span>
+                    <span class="sc-dot @cls @(paused ? "paused" : "")" title="@st"><span class="sr-only sc-st">@(paused ? "En pause" : st)</span></span>
                     <button type="button" class="pl-name linklike-name" title="Paramètres de l'écran « @sc.Name »" @onclick="() => Edit(sc)">@sc.Name</button>
                     @if (paused) { <span class="badge mise-a-jour sc-paused-badge" title="@(sc.PausedUntilUtc is { } pu ? "Reprise automatique à " + LocalTime(pu) : "Reprise manuelle")">En pause</span> }
                     <div class="kebab">
@@ -313,12 +352,14 @@
                                 <button type="button" role="menuitem" @onclick="() => { menuFor = null; simScreen = sc.Id; }"><Ico Name="play" Size="16" /> Simuler</button>
                                 <button type="button" role="menuitem" @onclick="() => OpenRename(sc)"><Ico Name="edit" Size="16" /> Renommer</button>
                                 <button type="button" role="menuitem" @onclick="() => AskPublish(new() { sc.Id })"><Ico Name="upload" Size="16" /> Publier</button>
+                                <button type="button" role="menuitem" disabled="@(!Growth || !online)" title="@(!Growth ? Plans.LockedHint : !online ? "L'écran est hors ligne" : null)" @onclick='() => { menuFor = null; OpenLive(sc, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer</button>
                                 @if (otherAreas.Count > 0) { <button type="button" role="menuitem" @onclick="() => OpenAreaMove(sc)"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
                                 <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = new() { sc }; }"><Ico Name="trash" Size="16" /> Supprimer</button>
                             </div>
                         }
                     </div>
                 </div>
+                <div class="sc-meta">
                 @if (ShowZones && zoneFilter == null)
                 {
                     <div class="sc-zone-name">@(ZoneOf(sc)?.Name ?? Zone.DefaultName)</div>
@@ -336,6 +377,8 @@
                         <span><b>@(sc.DeviceOs ?? "Appareil")</b>@if (sc.DeviceApp is { Length: > 0 } da && sc.DeviceApp != "web") { <text> <span class="sep">·</span> App <span class="mono">@da</span></text> }@if (sc.DeviceKind == "web" && sc.DeviceModel != null) { <text> <span class="sep">·</span> @sc.DeviceModel</text> }</span>
                     }
                     else { <span class="muted">Appareil : en attente des informations de l'écran</span> }
+                </div>
+                @if (pending) { <span class="badge mise-a-jour sc-pending-l" title="Liste de lecture, widgets ou choix de liste de lecture modifiés depuis la dernière publication">À publier</span> }
                 </div>
             </div>
             <div class="sc-vwrap">
@@ -369,7 +412,7 @@
             <div class="sc-foot">
                 @if (sc.ZoneCount == 1)
                 {
-                    <label class="sc-lbl" for="pl-@sc.Id">Défaut</label>
+                    <label class="sc-lbl" for="pl-@sc.Id">En diffusion</label>
                     <select id="pl-@sc.Id" class="sc-select" @onchange="e => Assign(sc, e)">
                     <option value="" selected="@(sc.PlaylistId == null)">— Aucune liste de lecture —</option>
                     @foreach (var p in playlists) { <option value="@p.Id" selected="@(p.Id == sc.PlaylistId)">@p.Name</option> }
@@ -378,15 +421,14 @@
                 else
                 {
                     @* écran découpé : une liste de lecture par zone, choisie dans l'édition de l'écran *@
-                    <span class="sc-lbl">@sc.ZoneCount zones</span>
-                    <button type="button" class="sc-select sc-zones-btn" title="Choisir la liste de lecture de chaque zone" @onclick="() => Edit(sc)">@ZonesSummary(sc)</button>
+                    <span class="sc-lbl">En diffusion · @sc.ZoneCount zones</span>
+                    <button type="button" class="sc-select sc-zones-btn" title="Choisir la liste de lecture de chaque zone" @onclick="() => Edit(sc)"><span class="zc">@sc.ZoneCount zones · </span>@ZonesSummary(sc)</button>
                 }
             </div>
             @* contrôle du direct (Growth) : verrouillé en licence de base, avec une bulle au survol *@
             <div class="sc-live" role="group" aria-label="Contrôle du direct de @sc.Name">
-                <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth && !online ? "L'écran est hors ligne" : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !online)" @onclick='() => OpenLive(sc, "preview")'><Ico Name="eye" Size="15" /> <span>Aperçu</span>@if (!Growth) { @LockIcon }</button>
-                <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth && !online ? "L'écran est hors ligne" : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !online)" @onclick='() => OpenLive(sc, null)'><Ico Name="@(paused ? "play" : "pause")" Size="15" /> <span>@(paused ? "Reprendre" : "Pause")</span>@if (!Growth) { @LockIcon }</button>
-                <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth && !online ? "L'écran est hors ligne" : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !online)" @onclick='() => OpenLive(sc, "restart")'><Ico Name="power" Size="15" /> <span>Redémarrer</span>@if (!Growth) { @LockIcon }</button>
+                <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth ? (online ? "Aperçu" : "L'écran est hors ligne") : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !online)" @onclick='() => OpenLive(sc, "preview")'><Ico Name="eye" Size="15" /> <span>Aperçu</span>@if (!Growth) { @LockIcon }</button>
+                <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth ? (online ? (paused ? "Reprendre" : "Pause") : "L'écran est hors ligne") : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !online)" @onclick='() => OpenLive(sc, null)'><Ico Name="@(paused ? "play" : "pause")" Size="15" /> <span>@(paused ? "Reprendre" : "Pause")</span>@if (!Growth) { @LockIcon }</button>
             </div>
         </div>
     }
@@ -566,6 +608,8 @@ else if (wallEdit is { } wid)
     private Guid? simScreen, simWall;   // simulateur ouvert : un écran, ou un mur entier
     private List<Screen>? deleting;   // écrans en attente de confirmation de suppression
     private string view = "cards";   // cards | list (mémorisé dans le navigateur)
+    private readonly HashSet<Guid> expandedWalls = new();   // murs dont la liste d'écrans est dépliée (vignettes)
+    private void ToggleWallMembers(Guid id) { if (!expandedWalls.Remove(id)) expandedWalls.Add(id); }
 
     protected override void OnInitialized()
     {

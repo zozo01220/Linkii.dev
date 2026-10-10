@@ -510,6 +510,17 @@ L'import d'un dossier Drive (surtout avec des vidéos) tourne sur le serveur san
 
 Après un arrêt/redémarrage du serveur, le circuit Blazor est perdu et la page restait bloquée sur « Could not reconnect to the server ». `wwwroot/reconnect.js` (Blazor démarré avec `autostart="false"` dans `App.razor`) remplace l'écran par défaut : bandeau « Connexion perdue, reconnexion en cours… », sondage du serveur toutes les 2 s (sans limite), **rechargement automatique** dès qu'il répond, ou au retour du réseau / de l'onglet. Non vérifié par un vrai redémarrage.
 
+## 25. Refonte des cartes et de la liste des écrans (10 octobre 2026)
+
+Page *Écrans* (`Components/Pages/Screens.razor`, styles en fin de `wwwroot/app.css`). Maquettes validées en conversation (aperçu en en-tête, orientations, murs, liste PC).
+
+- **Classe `scr-card`** : réservée aux cartes d'écrans et de murs. Les cartes de listes de lecture partagent `sc-card` : ne jamais styler la refonte avec `.sc-card` (cela cassait la page *Listes de lecture*).
+- **Vignettes (variante A)** : l'aperçu est l'en-tête, une *scène* sombre à hauteur fixe (`--stage-h`, 128 px ; 150 px en une colonne ; 260/200 px pour un mur ouvert) où l'écran ou le mur s'ajuste à ses vraies proportions (paysage ou portrait, `--ar` et `--rows` pour un mur). Écran indépendant : la ligne du titre (case, point d'état, nom, menu ⋯) reste au-dessus de la scène ; dessous, une ligne *appareil · zone · synchro* (`.sc-meta`), le sélecteur « En diffusion » pleine largeur, puis **Aperçu** et **Pause/Reprendre**. **Redémarrer** passe dans le menu ⋯ (grisé hors ligne ou sans licence Growth). Hors ligne : aperçu grisé.
+- **Mur en vignettes** : case, badge d'état (« n sur m en ligne », jaune si incomplet) et menu ⋯ posés sur la scène ; écrans repliés en une rangée de pastilles d'état, dépliable (`expandedWalls`) ; « Redémarrer les écrans » dans le menu, le bouton « Publier le mur » de la carte est retiré (déjà au menu). Un mur de moins de 4 colonnes occupe une colonne de la grille.
+- **Liste PC** (≥ 641 px) : grille de colonnes alignées avec en-têtes (`.sc-listhead`) : case, aperçu, chevron du mur, écran, état (pastille + texte), en diffusion, actions en icônes, menu. Un mur est une ligne de groupe ; ses écrans se déplient en lignes sur les mêmes colonnes (sous-grille, `.wc-kids`), avec case et nom cliquable (pas de menu par écran).
+- **Mobile** : cartes uniquement ; les règles sont dupliquées pour une vue « liste » mémorisée depuis un PC.
+- Non vérifié visuellement dans le navigateur (données réelles) ; à relire après redémarrage de l'application.
+
 ## Plans et prochaines étapes
 
 - Android : tester l'app 1.1.0 (aperçu du direct, redémarrage, version remontée) sur un vrai boîtier ; PIN du menu technicien à définir depuis le back-office ; icône définitive.
