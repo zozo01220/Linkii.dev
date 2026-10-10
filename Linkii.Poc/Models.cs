@@ -778,4 +778,5 @@ public static class AppPaths
 {
     public static string MediaDir = "media";
     public static string BrandDir = "brand";
+    public static string ThumbDir = "thumbs";
 }

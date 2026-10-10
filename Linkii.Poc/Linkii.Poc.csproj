@@ -1,14 +1,38 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- Sortie de `dotnet publish -o publish` : ne pas la réinclure comme contenu à chaque publication. -->
     <DefaultItemExcludes>$(DefaultItemExcludes);publish/**</DefaultItemExcludes>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <UserSecretsId>a5904561-d775-4099-b301-632966b7154f</UserSecretsId>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Ical.Net" Version="5.2.3" />
     <PackageReference Include="QRCoder" Version="1.6.0" />
+    <PackageReference Include="SkiaSharp" Version="2.88.9" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="2.88.9" />
   </ItemGroup>
+
+  <!-- Version automatique : 1.<nombre de commits>.0 + empreinte du commit. Sans git (ou hors dépôt), la version par défaut est conservée. -->
+  <Target Name="GitVersion" BeforeTargets="GetAssemblyVersion;GenerateAssemblyInfo;GetAssemblyAttributes">
+    <Exec Command="git rev-list --count HEAD" ConsoleToMSBuild="true" IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low" WorkingDirectory="$(MSBuildProjectDirectory)">
+      <Output TaskParameter="ConsoleOutput" PropertyName="GitCount" />
+      <Output TaskParameter="ExitCode" PropertyName="GitCountExit" />
+    </Exec>
+    <Exec Command="git rev-parse --short HEAD" ConsoleToMSBuild="true" IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low" WorkingDirectory="$(MSBuildProjectDirectory)">
+      <Output TaskParameter="ConsoleOutput" PropertyName="GitHash" />
+    </Exec>
+    <Exec Command="git status --porcelain" ConsoleToMSBuild="true" IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low" WorkingDirectory="$(MSBuildProjectDirectory)">
+      <Output TaskParameter="ConsoleOutput" PropertyName="GitDirty" />
+    </Exec>
+    <PropertyGroup Condition="'$(GitCountExit)' == '0' And '$(GitCount)' != ''">
+      <Version>1.$(GitCount).0</Version>
+      <AssemblyVersion>1.$(GitCount).0.0</AssemblyVersion>
+      <FileVersion>1.$(GitCount).0.0</FileVersion>
+      <InformationalVersion>1.$(GitCount).0+$(GitHash)</InformationalVersion>
+      <InformationalVersion Condition="'$(GitDirty)' != ''">1.$(GitCount).0+$(GitHash)-modifie</InformationalVersion>
+    </PropertyGroup>
+  </Target>
 </Project>

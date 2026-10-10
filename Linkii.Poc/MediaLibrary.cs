@@ -78,6 +78,7 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
         foreach (var f in files)
         {
             try { File.Delete(Path.Combine(AppPaths.MediaDir, f)); } catch { }   // déjà absent : sans conséquence
+            Thumbnails.Delete(f);
         }
         return files.Count;
     }

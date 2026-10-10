@@ -111,8 +111,10 @@ app.UseForwardedHeaders();
 var dataDir = app.Configuration["Linkii:DataDir"] ?? app.Environment.ContentRootPath;
 AppPaths.MediaDir = Path.Combine(dataDir, "media");
 AppPaths.BrandDir = Path.Combine(dataDir, "brand");
+AppPaths.ThumbDir = Path.Combine(dataDir, "thumbs");
 Directory.CreateDirectory(AppPaths.MediaDir);
 Directory.CreateDirectory(AppPaths.BrandDir);
+Directory.CreateDirectory(AppPaths.ThumbDir);
 
 var store0 = app.Services.GetRequiredService<JsonStore>();
 Seed.Run(store0, app.Configuration, store0.Path, app.Logger);
@@ -445,6 +447,11 @@ app.MapGet("/media/{file}", (HttpContext ctx, string file, JsonStore store) =>
     var path = Path.Combine(AppPaths.MediaDir, file);
     if (!allowed || !File.Exists(path)) return Results.NotFound();
     if (!mediaTypes.TryGetContentType(file, out var type)) type = "application/octet-stream";
+    if (int.TryParse(ctx.Request.Query["w"], out var tw) && tw > 0 && Thumbnails.Get(file, Thumbnails.Snap(tw)) is { } thumbPath)
+    {
+        ctx.Response.Headers.CacheControl = "private, max-age=86400";
+        return Results.File(thumbPath, "image/webp");
+    }
     ctx.Response.Headers.CacheControl = "private, max-age=300";
     return Results.File(path, type, enableRangeProcessing: true);
 });
