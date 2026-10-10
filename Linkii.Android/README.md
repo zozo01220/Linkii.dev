@@ -33,6 +33,16 @@ Le serveur doit être en **HTTPS** : sans cela le service worker ne démarre pas
 Cinq appuis sur OK (télécommande) ou cinq touchers dans le coin supérieur droit, en moins de 3 secondes.
 Code PIN par défaut : 9999 (modifiable depuis le menu ; vide = menu sans code).
 
+## Médias hors ligne
+
+Les fichiers de la liste de lecture (images, vidéos, fichiers des apps : tout ce que le player met dans `url` / `urls`) sont téléchargés
+par l'app dans son stockage privé (`MediaStore.kt`), sans quota du WebView ni purge par le système. Téléchargement un fichier à la fois,
+avec reprise après coupure, nouvel essai toutes les 30 s et retrait des fichiers qui ne sont plus utilisés ; il reprend dès le démarrage
+de l'app. Le WebView lit ensuite ces fichiers depuis le disque (requêtes Range comprises), en ligne comme hors ligne.
+Une petite icône de progression (anneau + flèche, puis coche) s'affiche en bas à droite pendant les téléchargements.
+Le menu technicien indique le nombre de médias en local. YouTube et les données en direct (agenda…) restent en ligne.
+Le player passe par le pont `window.LinkiiNative` ; dans un navigateur il garde son cache habituel.
+
 ## Démarrage automatique
 
 - Définir Linkii comme **écran d'accueil** de l'appareil (recommandé sur un boîtier) : lancement direct à l'allumage.
@@ -41,7 +51,5 @@ Code PIN par défaut : 9999 (modifiable depuis le menu ; vide = menu sans code).
 
 ## Limites connues
 
-- Le cache hors ligne est celui du WebView (quota géré par Android, effaçable par le système en cas de manque d'espace).
-  Si l'usage montre des pertes de médias, passer à un téléchargement natif des médias (`DownloadManager` + serveur local).
 - Le PIN n'est pas encore défini depuis le back-office.
 - Icône et bannière provisoires (vectorielles).

@@ -18,10 +18,15 @@ import android.os.StatFs
 import android.provider.Settings
 import android.text.InputType
 import android.view.KeyEvent
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.webkit.JavascriptInterface
 import android.webkit.RenderProcessGoneDetail
+import android.webkit.ServiceWorkerClient
+import android.webkit.ServiceWorkerController
+import android.webkit.WebResourceResponse
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -45,6 +50,9 @@ import android.widget.Toast
 class MainActivity : Activity() {
     private lateinit var prefs: Prefs
     private lateinit var root: FrameLayout
+    private lateinit var store: MediaStore
+    private lateinit var badge: DownloadBadge
+    private var downloading = false
     private var web: WebView? = null
     private val handler = Handler(Looper.getMainLooper())
 
@@ -67,7 +75,24 @@ class MainActivity : Activity() {
         )
         root = FrameLayout(this).apply { setBackgroundColor(NAVY) }
         setContentView(root)
+
+        // Médiathèque locale : le téléchargement reprend dès le démarrage, avant même que la page ne soit chargée
+        store = MediaStore(this, prefs)
+        badge = DownloadBadge(this)
+        store.onChange = { s ->
+            if (s.active) { downloading = true; badge.showProgress(s.fraction) }
+            else if (downloading) { downloading = false; badge.showDone() }
+        }
+        if (Build.VERSION.SDK_INT >= 24) {
+            // Les requêtes du service worker du player (/media/…) passent aussi par la médiathèque locale
+            ServiceWorkerController.getInstance().setServiceWorkerClient(object : ServiceWorkerClient() {
+                override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? = store.serve(request)
+            })
+        }
         createWebView()
+        val margin = (24 * resources.displayMetrics.density).toInt()
+        root.addView(badge, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, margin, margin) })
+        store.resume()
     }
 
     override fun onResume() {
@@ -86,6 +111,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         handler.removeCallbacks(retry)
+        store.onChange = null
         web?.destroy()
         web = null
         super.onDestroy()
@@ -135,6 +161,9 @@ class MainActivity : Activity() {
                 return !(request.url.host == host || request.url.scheme == "file")
             }
 
+            // Médias déjà téléchargés : servis depuis le disque (hors ligne comme en ligne)
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? = store.serve(request)
+
             override fun onPageFinished(view: WebView, url: String) {
                 if (!url.startsWith("file:")) handler.removeCallbacks(retry)
             }
@@ -155,11 +184,31 @@ class MainActivity : Activity() {
                 return true
             }
         }
+        wv.addJavascriptInterface(NativeBridge(), "LinkiiNative")   // le player y confie la liste des médias à garder en local
         web?.let { root.removeView(it); it.destroy() }
         web = wv
-        root.addView(wv, FrameLayout.LayoutParams(-1, -1))
+        root.addView(wv, 0, FrameLayout.LayoutParams(-1, -1))   // sous l'icône de téléchargement
         wv.requestFocus()
         wv.loadUrl(prefs.playerUrl())
+    }
+
+    /** Pont JavaScript du player (window.LinkiiNative) : n'existe que dans l'app, le player web garde sinon son cache du navigateur. */
+    private inner class NativeBridge {
+        /** Liste JSON des adresses à garder en local (`/media/…`) ; les autres fichiers sont supprimés. */
+        @JavascriptInterface
+        fun sync(urlsJson: String, token: String) {
+            val a = org.json.JSONArray(urlsJson)
+            store.sync((0 until a.length()).map { a.getString(it) }, token)
+        }
+
+        /** { busy: téléchargement en cours, pending: fichiers manquants, ready, total, bytes } */
+        @JavascriptInterface
+        fun status(): String {
+            val s = store.snapshot()
+            return org.json.JSONObject()
+                .put("busy", store.isBusy()).put("pending", s.pending).put("ready", s.ready)
+                .put("total", s.total).put("bytes", s.bytes).toString()
+        }
     }
 
     /* ---------- Gestes du menu technicien ---------- */
@@ -243,7 +292,10 @@ class MainActivity : Activity() {
         val online = cm.activeNetworkInfo?.isConnected == true
         val st = StatFs(Environment.getDataDirectory().path)
         val freeGb = st.availableBytes / 1_073_741_824.0
+        val ms = store.snapshot()
         return "Serveur : ${prefs.serverUrl}\n" +
+            "Médias : ${ms.ready}/${ms.total} en local (${"%.0f".format(ms.bytes / 1_048_576.0)} Mo)" +
+            (if (ms.pending > 0) " — ${ms.pending} à télécharger" else "") + "\n" +
             "Version : ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})\n" +
             "Réseau : ${if (online) "connecté" else "hors ligne"}\n" +
             "Stockage libre : ${"%.1f".format(freeGb)} Go\n" +
@@ -286,6 +338,8 @@ class MainActivity : Activity() {
             .setTitle("Désappairer cet écran")
             .setMessage("Cet écran affichera de nouveau un code d'appairage. Sa liste de lecture n'est pas supprimée dans le back-office.")
             .setPositiveButton("Désappairer") { _, _ ->
+                store.clear()
+                badge.dismissNow()
                 // Mêmes clés que la fonction unpair() du player web
                 web?.evaluateJavascript(
                     "['lk_token','lk_screen','lk_playlist','lk_acked','lk_brand'].forEach(function(k){localStorage.removeItem(k)});location.reload()",

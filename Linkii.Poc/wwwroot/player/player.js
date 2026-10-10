@@ -323,11 +323,34 @@
   }
 
   /* ---------- Cache des médias ---------- */
+  // Application Android : la médiathèque locale est gérée par l'app (stockage privé, reprise, relance auto) ; le player lui donne la liste
+  // et attend la fin du téléchargement avant de basculer sur la nouvelle liste. L'app sert ensuite les fichiers depuis le disque.
+  var NATIVE = !PREVIEW && !!(window.LinkiiNative && typeof window.LinkiiNative.sync === 'function');
+  if (NATIVE && window.caches) { try { caches.delete(CACHE); } catch (e) {} }   // ancien cache du navigateur : plus utilisé, on rend la place
+
+  function mediaUrls(items) {
+    var urls = [];
+    items.forEach(function (i) { if (i.url) urls.push(i.url); (i.urls || []).forEach(function (u) { if (urls.indexOf(u) === -1) urls.push(u); }); });   // apps de la médiathèque : tous leurs fichiers
+    return urls;
+  }
+
+  function prefetchNative(items) {
+    return new Promise(function (resolve) {
+      try { window.LinkiiNative.sync(JSON.stringify(mediaUrls(items)), state.token || ''); } catch (e) { return resolve(); }
+      (function wait() {
+        var s;
+        try { s = JSON.parse(window.LinkiiNative.status()); } catch (e) { return resolve(); }
+        if (!s.busy) return resolve();
+        setTimeout(wait, 700);
+      })();
+    });
+  }
+
   function prefetch(items) {
+    if (NATIVE) return prefetchNative(items);
     if (!window.caches || PREVIEW) return Promise.resolve();   // aperçu : lecture en ligne, le cache d'un écran du même poste n'est pas touché
     return caches.open(CACHE).then(function (cache) {
-      var urls = [];
-      items.forEach(function (i) { if (i.url) urls.push(i.url); (i.urls || []).forEach(function (u) { if (urls.indexOf(u) === -1) urls.push(u); }); });   // apps de la médiathèque : tous leurs fichiers
+      var urls = mediaUrls(items);
       var adds = urls.map(function (u) {
         return cache.match(u).then(function (hit) {
           if (hit) return;
@@ -351,6 +374,7 @@
   // sans réseau ni service worker, pour les images comme pour les vidéos (tous formats convertis en MP4 H.264 par le serveur).
   function mediaSrc(url) {
     var online = PREVIEW ? url : url + '?t=' + encodeURIComponent(state.token || '');   // repli en ligne : jeton de l'écran dans l'adresse (aperçu : session du back-office)
+    if (NATIVE) return Promise.resolve({ src: online, revoke: function () {} });   // l'app sert le fichier local s'il existe (le jeton ne sert qu'en repli en ligne)
     if (PREVIEW || !window.caches || !window.URL || !URL.createObjectURL) return Promise.resolve({ src: online, revoke: function () {} });
     return caches.open(CACHE).then(function (c) { return c.match(url); }).then(function (hit) {
       if (!hit) return { src: online, revoke: function () {} };
@@ -995,7 +1019,7 @@
     next();
     refresh();
     connectHub();
-    setInterval(poll, 60000);
+    setInterval(poll, 5000);   // filet si le temps réel (SignalR) est coupé ou injoignable : une publication arrive en 5 s au plus
     flushPlays();
     setInterval(flushPlays, 60000);
     setInterval(function () { api("/api/player/version").catch(function () {}); }, 15000);   // détecte vite une coupure
