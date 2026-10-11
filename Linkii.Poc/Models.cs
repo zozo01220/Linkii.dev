@@ -212,6 +212,9 @@ public class Zone
     public bool MirrorV { get; set; }
 
     public bool IsWall => Kind == Wall;
+
+    /// <summary>Planning de diffusion de la zone (voir <see cref="Planning"/>) : valable pour tous ses écrans (un mur compris). Vide : ils jouent leur liste en permanence.</summary>
+    public List<Slot> Slots { get; set; } = new();
 }
 
 /// <summary>Journal des entrées dans l'espace d'un client (assistance).</summary>
@@ -444,6 +447,14 @@ public class Screen : IClientOwned, IAreaOwned
     public bool ForcedSleep { get; set; }                       // mise en veille manuelle (menu ⋮ « Mettre en veille ») : l'écran dort jusqu'à « Réveiller », quelles que soient ses plages
     public DateTime? WakeUntilUtc { get; set; }               // réveil manuel : l'écran reste éveillé jusque-là malgré ses plages de veille (voir Sleep)
     public DateTime? OfflineAlertUtc { get; set; }              // alerte « écran hors ligne » envoyée à cette date (une seule par panne)
+
+    /// <summary>Planning de diffusion propre à l'écran (<see cref="Slots"/>, prioritaires sur ceux de sa zone) ; sinon il suit celui de sa zone. Voir <see cref="Planning"/>.</summary>
+    public bool OwnPlanning { get; set; }
+    public List<Slot> Slots { get; set; } = new();
+    /// <summary>Instantané, par liste de lecture, des contenus que l'écran peut jouer selon son planning (publication de l'écran ou du planning).</summary>
+    public Dictionary<Guid, List<PublishedItem>> PublishedLists { get; set; } = new();
+    public Dictionary<Guid, int> PublishedListRevs { get; set; } = new();   // révision de chaque liste au moment de l'instantané : une liste modifiée ensuite est « à publier »
+    public int PlanningRevision { get; set; }                  // augmente à chaque instantané : l'écran relit ses listes
 
     public bool IsPaused(DateTime now) => PausedUtc != null && (PausedUntilUtc == null || PausedUntilUtc > now);
 
@@ -754,7 +765,9 @@ public static class Helpers
     }
 
     /// <summary>L'écran diffuse une version antérieure à sa configuration actuelle (playlist modifiée, autre playlist, découpage, widgets).</summary>
-    public static bool HasPending(Screen s, IEnumerable<Playlist> playlists) => s.PublishedStamp != PublishStamp(s, playlists);
+    public static bool HasPending(Screen s, IEnumerable<Playlist> playlists) =>
+        s.PublishedStamp != PublishStamp(s, playlists)
+        || s.PublishedListRevs.Any(kv => playlists.FirstOrDefault(p => p.Id == kv.Key) is { } p && p.Revision != kv.Value);   // une liste du planning a changé depuis son instantané
 
     /// <summary>Identifie ce que l'écran doit afficher : playlist publiée + configuration (format, fuseau, redémarrage).</summary>
     public static string Revision(Playlist? p, Screen s, Tenant t, Reseller? r, string sync = "") =>
@@ -805,7 +818,8 @@ public static class Helpers
         return (SyncEpoch(areas, s) is { } e ? "|y" + e.Ticks : "") + (Wall(areas, s) is { } w ? $"|w{w.Cols}x{w.Rows}@{w.Col},{w.Row}" : "")   // un mur réorganisé recharge ses écrans
             + (m.H ? "|mh" : "") + (m.V ? "|mv" : "")   // un miroir changé aussi
             + Sleep.Stamp(areas, s)                       // une plage de mise en veille changée aussi
-            + Dim.Stamp(areas, s);                        // et un réglage de luminosité ou de contraste
+            + Dim.Stamp(areas, s)                         // et un réglage de luminosité ou de contraste
+            + Planning.Stamp(areas, s);                   // et un créneau du planning
     }
 
     public record WallPlace(int Cols, int Rows, int Col, int Row);

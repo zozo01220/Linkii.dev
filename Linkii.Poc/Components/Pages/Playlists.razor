@@ -178,12 +178,14 @@
         playlists = Store.Read(d => d.Playlists.ToList());
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
         screens = Store.Read(d => d.Screens.Where(s => s.Token != null).ToList());
+        scheduled = Store.Read(d => (d.Area?.Zones.SelectMany(z => z.Slots) ?? Enumerable.Empty<Slot>()).Concat(d.Screens.SelectMany(s => s.Slots)).Select(x => x.PlaylistId).ToHashSet());
         picked.IntersectWith(playlists.Select(x => x.Id));
     }
 
     private string filter = "", search = "";   // filter : "" | used | unused
 
-    private bool IsUsed(Playlist p) => screens.Any(s => s.ZonePlaylists().Contains(p.Id));
+    private bool IsUsed(Playlist p) => screens.Any(s => s.ZonePlaylists().Contains(p.Id)) || scheduled.Contains(p.Id);
+    private HashSet<Guid> scheduled = new();   // listes programmées dans un planning (zone ou écran)
 
     // Filtrées (usage, recherche) puis triées ; les listes sélectionnées mais masquées par un filtre restent sélectionnées.
     private IEnumerable<Playlist> Sorted
@@ -280,6 +282,8 @@
             }
             foreach (var s in d.Screens)   // zones 2 et 3 des écrans découpés
                 for (var z = 0; z < s.ZonePlaylistIds.Count; z++) if (s.ZonePlaylistIds[z] is { } zid && ids.Contains(zid)) s.ZonePlaylistIds[z] = null;
+            foreach (var z in d.Areas.SelectMany(a => a.Zones)) z.Slots.RemoveAll(x => ids.Contains(x.PlaylistId));   // plus programmées dans un planning
+            foreach (var s in d.Screens) s.Slots.RemoveAll(x => ids.Contains(x.PlaylistId));
             d.Playlists.RemoveAll(x => ids.Contains(x.Id));
         });
         Toast.Ok(list.Count > 1 ? $"{list.Count} listes de lecture supprimées." : $"Liste de lecture « {list[0].Name} » supprimée.");

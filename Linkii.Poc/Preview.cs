@@ -42,8 +42,9 @@ public static class PlayerFeed
 {
     /// <summary>Contenus publiés sur l'écran, toutes zones (repli : ancien instantané de sa liste s'il n'a jamais été publié).</summary>
     public static List<PublishedItem> AllItems(Db db, Screen s) =>
-        s.PublishedVersion > 0 ? s.Published.Concat(s.PublishedZones.SelectMany(z => z)).ToList()
-        : db.Playlists.FirstOrDefault(p => p.Id == s.PlaylistId && p.ClientId == s.ClientId)?.Published ?? new();
+        (s.PublishedVersion > 0 ? s.Published.Concat(s.PublishedZones.SelectMany(z => z))
+        : db.Playlists.FirstOrDefault(p => p.Id == s.PlaylistId && p.ClientId == s.ClientId)?.Published ?? new())
+        .Concat(s.PublishedLists.Values.SelectMany(l => l)).ToList();   // + listes du planning
 
     /// <summary>Configuration et contenus publiés d'un écran. whole : le simulateur montre tout le mur dont l'écran fait partie.</summary>
     public static Dictionary<string, object?> ForScreen(Db db, Screen s, bool whole = false)
@@ -76,6 +77,7 @@ public static class PlayerFeed
             ["zones"] = (s.PublishedVersion > 0 ? s.PublishedZones : new List<List<PublishedItem>>()).Select(z => Sync(z).Select(i => i.ForPlayer())),
             ["screen"] = new { orientation = s.Orientation, resolution = s.Resolution, mirrorH = mirror.H, mirrorV = mirror.V },
             ["settings"] = new { timezone = t.Timezone, reloadHour = t.ReloadHour },
+            ["schedule"] = Planning.ForPlayer(t, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, Sync),   // créneaux du planning de diffusion (null : aucun)
             ["sleep"] = Sleep.ForPlayer(t, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, wall != null),   // plages de mise en veille (null : aucune)
             ["dim"] = Dim.ForPlayer(t, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, wall != null),   // luminosité et contraste selon l'heure (null : aucun réglage)
             ["brand"] = BrandDto.From(reseller)

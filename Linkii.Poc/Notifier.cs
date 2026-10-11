@@ -34,12 +34,37 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
             s.Published = Zone(s.PlaylistId).Concat(wall ? Enumerable.Empty<PublishedItem>() : s.Widgets.Select(Widget).OfType<PublishedItem>()).ToList();
             s.PublishedLayout = ScreenLayouts.Find(s.Layout).Id;
             s.PublishedZones = s.ZonePlaylists().Skip(1).Select(Zone).ToList();   // zones 2 et 3 du découpage
+            SnapshotLists(db, s);   // listes du planning : leur contenu du moment
             s.PublishedVersion++;
             s.PublishedStamp = Helpers.PublishStamp(s, own);
             s.PublishedUtc = DateTime.UtcNow;
             return true;
         });
         if (ok) await NotifyScreen(screenId);
+    }
+
+    /// <summary>
+    /// Planning modifié : les écrans touchés prennent un instantané des listes de leurs créneaux et les reçoivent aussitôt.
+    /// Leur liste par défaut n'est pas republiée (seule la publication de l'écran la fait) ; ni les modifications en attente.
+    /// </summary>
+    public async Task PublishPlanning(IEnumerable<Guid> screenIds)
+    {
+        var ids = screenIds.ToHashSet();
+        if (ids.Count == 0) return;
+        store.Write(db => { foreach (var s in db.Screens.Where(x => ids.Contains(x.Id))) SnapshotLists(db, s); });
+        await NotifyWhere(s => ids.Contains(s.Id));
+    }
+
+    /// <summary>Instantané des listes que le planning de l'écran peut faire jouer (une liste supprimée n'y figure plus).</summary>
+    private void SnapshotLists(Db db, Screen s)
+    {
+        var area = db.Areas.FirstOrDefault(a => a.Id == s.AreaId);
+        var own = db.Playlists.Where(x => x.ClientId == s.ClientId).ToList();
+        s.PublishedLists = Planning.Effective(area, s).Select(x => x.PlaylistId).Distinct()
+            .Select(id => own.FirstOrDefault(p => p.Id == id)).OfType<Playlist>()
+            .ToDictionary(p => p.Id, p => Items(db, p));
+        s.PublishedListRevs = s.PublishedLists.Keys.ToDictionary(id => id, id => own.First(p => p.Id == id).Revision);
+        s.PlanningRevision++;
     }
 
     /// <summary>Ce qu'une publication figerait de la playlist (aussi joué tel quel par le simulateur « Essayer »).</summary>

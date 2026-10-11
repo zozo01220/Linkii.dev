@@ -353,7 +353,38 @@
   function allItems(pl) {
     var l = (pl.items || []).slice();
     (pl.zones || []).forEach(function (z) { (z || []).forEach(function (i) { l.push(i); }); });
+    ((pl.schedule && pl.schedule.slots) || []).forEach(function (s) { (s.items || []).forEach(function (i) { l.push(i); }); });   // listes du planning : tous leurs fichiers aussi, pour tourner hors ligne
     return l;
+  }
+
+  /* ---------- Planning de diffusion ----------
+     Le serveur envoie { tz, slots: [{ days, from, to, dateFrom, dateTo, items }] } dans l'ordre de priorité : le premier créneau actif remplace la liste
+     par défaut (les widgets d'écran, eux, restent). Heures et dates sont celles du fuseau du planning (celui de l'aire). */
+  function slotIndex(pl) {
+    var sc = pl && pl.schedule;
+    if (!sc || !sc.slots || !sc.slots.length) return -1;
+    var ms = Date.now(), w = localWeekMinute(ms, sc.tz), day = Math.floor(w / 1440), min = w % 1440, iso;
+    try { iso = new Date(ms).toLocaleDateString('sv-SE', { timeZone: sc.tz }); } catch (e) { iso = todayIso(); }
+    for (var i = 0; i < sc.slots.length; i++) {
+      var s = sc.slots[i];
+      if (!((s.days >> day) & 1) || min < s.from || min >= s.to) continue;
+      if (s.dateFrom && iso < s.dateFrom || s.dateTo && iso > s.dateTo) continue;
+      return i;
+    }
+    return -1;
+  }
+  // Contenus à jouer maintenant : ceux du créneau actif (plus les widgets), sinon la liste par défaut.
+  function itemsOf(pl, at) {
+    var i = at === undefined ? slotIndex(pl) : at;
+    if (i < 0) return pl.items || [];
+    return (pl.items || []).filter(function (x) { return x.placement === 'free'; }).concat(pl.schedule.slots[i].items || []);
+  }
+  // Un créneau commence ou se termine : on change de liste tout de suite, sans attendre la fin du contenu en cours.
+  function scheduleTick() {
+    if (PREVIEW && state.free) return;
+    if (!state.current || !state.current.schedule || state.slotUsed === slotIndex(state.current) || state.paused || state.hold || state.asleep) return;
+    state.shownItem = null;
+    next();
   }
 
   // Anneau de l'app Android : tourne dès qu'une publication arrive, jusqu'à ce qu'elle soit prête.
@@ -848,13 +879,15 @@
     if (state.pending) {            // remplacement entre deux contenus
       state.current = state.pending; state.pending = null; state.index = 0;
       applyConfig(state.current);
-      setOverlays(state.current.items);
+      setOverlays(itemsOf(state.current));
       applyZones(state.current);
     }
     var pl = state.current;
-    if (pl && overlaySig(pl.items) !== state.ovSig) setOverlays(pl.items);   // une app permanente entre ou sort de sa période de validité
-    var slides = pl ? pl.items.filter(isSlide).filter(isValidNow) : [];
-    var hasOverlay = pl ? pl.items.some(function (i) { return !isSlide(i) && isValidNow(i); }) : false;
+    var slot = pl ? slotIndex(pl) : -1, cur = pl ? itemsOf(pl, slot) : [];   // contenus du créneau actif du planning, sinon de la liste par défaut
+    if (slot !== state.slotUsed) { state.slotUsed = slot; state.index = 0; state.shownItem = null; }   // autre liste : on repart de son premier contenu
+    if (pl && overlaySig(cur) !== state.ovSig) setOverlays(cur);   // une app permanente entre ou sort de sa période de validité
+    var slides = cur.filter(isSlide).filter(isValidNow);
+    var hasOverlay = cur.some(function (i) { return !isSlide(i) && isValidNow(i); });
     if (zoneLoops.some(function (z) { return z.hasSlides(); })) hasOverlay = true;   // écran découpé : les autres zones diffusent
 
     if (!slides.length) {
@@ -1323,6 +1356,7 @@
     nightlyReload();
     setInterval(sleepTick, 15000);
     setInterval(dimTick, 15000);
+    setInterval(scheduleTick, 10000);   // début ou fin d'un créneau du planning
     reportDevice();
     setInterval(reportDevice, 300000);
   }
@@ -1331,7 +1365,7 @@
   // Son coupé tant que le simulateur ne l'a pas activé (&sound=1) : vidéos et YouTube démarrent muets.
   function previewPrepare(pl) {
     if (SOUND) return;
-    var lists = [pl.items || []].concat(pl.zones || []);
+    var lists = [pl.items || []].concat(pl.zones || []).concat(((pl.schedule && pl.schedule.slots) || []).map(function (s) { return s.items || []; }));
     for (var i = 0; i < lists.length; i++)
       for (var k = 0; k < lists[i].length; k++) { var s = lists[i][k].settings; if (s && s.sound) s.sound = 'false'; }
   }
@@ -1339,7 +1373,7 @@
   function previewReport() {
     if (!PREVIEW || window.parent === window) return;
     var pl = state.current, meta = (pl && pl.meta) || {};
-    var all = pl ? pl.items.filter(isSlide) : [], slides = all.filter(isValidNow), item = state.shownItem;
+    var all = pl ? itemsOf(pl).filter(isSlide) : [], slides = all.filter(isValidNow), item = state.shownItem;
     var sync = !!(pl && pl.sync && slides.length);   // un seul contenu synchronisé se déroule aussi à l'heure commune
     function info(i) {
       var m = meta[i.id] || {};
@@ -1361,7 +1395,7 @@
 
   function previewControl(e) {
     if (e.origin !== location.origin || !e.data || e.data.lk !== 'sim' || !state.current) return;
-    var c = e.data.cmd, slides = state.current.items.filter(isSlide).filter(isValidNow);
+    var c = e.data.cmd, slides = itemsOf(state.current).filter(isSlide).filter(isValidNow);
     if (c === 'pause' && !state.paused) {   // l'écran, lui, continue : le simulateur passe en lecture libre
       state.pausedLeft = Math.max(1, (state.slideEnd || 0) - Date.now());
       state.paused = true; state.free = true;
@@ -1392,6 +1426,7 @@
     window.addEventListener('message', previewControl);
     layout();
     refresh();
+    setInterval(scheduleTick, 10000);
     setInterval(refresh, 20000);   // pas d'ordres reçus : les publications sont reprises en relisant régulièrement
   }
 

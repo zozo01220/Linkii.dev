@@ -1,0 +1,519 @@
+@page "/planning"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@using System.Globalization
+@using Plan = Linkii.Poc.Planning
+@inject TenantStore Store
+@inject Notifier Notifier
+@inject NavigationManager Nav
+@inject Toaster Toast
+
+@* Planning de diffusion : quelle liste de lecture passe, quand, sur chaque zone ou écran de l'aire. Facultatif : sans créneau, l'écran joue sa liste en permanence.
+   Le calendrier passe en premier (toute la hauteur) ; « Que voit l'écran ? » est un tiroir ouvert à la demande. *@
+
+@if (area == null)
+{
+    <div class="page-head"><div><h1>Planning</h1></div></div>
+    <div class="card empty"><div class="big">Aucune aire de gestion ne vous est confiée</div><p>Demandez à un administrateur de votre organisation de vous donner un rôle dans une aire.</p></div>
+}
+else
+{
+    <div class="page-head pn-head">
+        <div>
+            <h1>Planning</h1>
+            <p class="sub">Programmez quelle liste de lecture passe, quand, sur chaque zone ou écran. En dehors des créneaux, l'écran affiche sa liste par défaut.</p>
+        </div>
+        <div class="row head-actions">
+            @if (playlists.Count > 0 && !FollowsZone)
+            {
+                <button class="btn" @onclick="() => OpenNew(null, null)"><Ico Name="plus" Size="16" /> Programmer</button>
+            }
+        </div>
+    </div>
+
+    @* ligne 2 : la cible (zone ou écran) *@
+    <div class="pn-row">
+        <div class="pn-target">
+            <button type="button" class="pn-tbtn" aria-haspopup="menu" aria-expanded="@(menuOpen ? "true" : "false")" @onclick="() => menuOpen = !menuOpen">
+                <span class="n">@(S != null ? Z.Name + " › " + S.Name : Z.Name)</span>
+                <small>@(S != null ? (S.OwnPlanning ? "planning propre" : "suit la zone") : ZoneSummary(Z))</small>
+                <Ico Name="chevron" Size="14" />
+            </button>
+            @if (menuOpen)
+            {
+                <div class="pn-bk" @onclick="() => menuOpen = false"></div>
+                <div class="pn-menu" role="menu">
+                    <div class="g">Zones</div>
+                    @foreach (var z in zones)
+                    {
+                        var zone = z;
+                        <button type="button" role="menuitem" class="o @(zone.Id == zoneId && screenId == null ? "sel" : "")" @onclick="() => PickFromMenu(zone.Id, null)">@zone.Name@if (zone.IsWall) { <span class="badge neutre">Mur</span> }<small>@ZoneSummary(zone)</small></button>
+                        @if (!zone.IsWall)
+                        {
+                            @foreach (var s in screens.Where(s => ZoneIdOf(s) == zone.Id))
+                            {
+                                var sc = s;
+                                <button type="button" role="menuitem" class="o sub @(screenId == sc.Id ? "sel" : "")" @onclick="() => PickFromMenu(zone.Id, sc.Id)">@if (sc.OwnPlanning) { <i class="dot"></i> }@sc.Name<small>@(sc.OwnPlanning ? "planning propre" : "suit la zone")</small></button>
+                            }
+                        }
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    @* ligne 3 : navigation, aperçu, affichage *@
+    <div class="pn-row pn-row3">
+        @if (view == "day")
+        {
+            <div class="pn-nav">
+                <button class="btn ghost sm" aria-label="Jour précédent" @onclick="() => dayDate = dayDate.AddDays(-1)">‹</button>
+                <b>@DayLabel(dayDate)</b>
+                <button class="btn ghost sm" aria-label="Jour suivant" @onclick="() => dayDate = dayDate.AddDays(1)">›</button>
+                <button class="btn link sm" @onclick="() => dayDate = today">Aujourd'hui</button>
+            </div>
+        }
+        else
+        {
+            <div class="pn-nav">
+                <button class="btn ghost sm" aria-label="Semaine précédente" @onclick="() => weekStart = weekStart.AddDays(-7)">‹</button>
+                <b>@WeekLabel</b>
+                <button class="btn ghost sm" aria-label="Semaine suivante" @onclick="() => weekStart = weekStart.AddDays(7)">›</button>
+                <button class="btn link sm" @onclick="GoToday">Aujourd'hui</button>
+            </div>
+        }
+        <button type="button" class="btn ghost sm" @onclick="() => pvOpen = true"><Ico Name="eye" Size="15" /> Que voit l'écran ?</button>
+        <div class="seg pn-view" role="tablist" aria-label="Affichage du planning">
+            <button type="button" class="@(view == "week" ? "on" : "")" @onclick='() => view = "week"'>Semaine</button>
+            <button type="button" class="@(view == "day" ? "on" : "")" @onclick='() => view = "day"'>Journée</button>
+        </div>
+    </div>
+
+    @if (view == "week" && S is { } scr)
+    {
+        if (!scr.OwnPlanning)
+        {
+            <div class="pn-banner"><Ico Name="calendar" Size="16" /><span><b>@scr.Name</b> suit le planning de sa zone « @Z.Name ».</span><span class="grow"></span>
+                <button class="btn ghost sm" @onclick="() => CreateOwn(scr)">Créer un planning propre</button></div>
+        }
+        else
+        {
+            <div class="pn-banner own"><Ico Name="calendar" Size="16" /><span><b>@scr.Name</b> a son propre planning : ses créneaux (en couleur) passent devant ceux de la zone (hachurés).</span><span class="grow"></span>
+                @if (confirmRevert) { <button class="btn danger sm" @onclick="() => Revert(scr)">Supprimer ses créneaux ?</button> <button class="btn ghost sm" @onclick="() => confirmRevert = false">Non</button> }
+                else { <button class="btn ghost sm" @onclick="() => confirmRevert = true">Revenir au planning de la zone</button> }</div>
+        }
+    }
+
+    @if (playlists.Count == 0)
+    {
+        <div class="card empty"><div class="big">Aucune liste de lecture dans cette aire</div><p>Créez d'abord les listes de lecture à programmer, puis revenez ici.</p><a class="btn" href="playlists">Aller aux listes de lecture</a></div>
+    }
+    else if (view == "day")
+    {
+        <div class="pn-cal pn-fill">
+            <div class="pn-dr pn-dh"><div></div><div class="pn-axis">@foreach (var h in AxisHours) { <span style="left:@(Pct(h * 60))%">@h.ToString("00")h</span> }</div></div>
+            <div class="pn-dayrows">
+                @foreach (var row in DayRows)
+                {
+                    var r = row;
+                    <div class="pn-dr @(r.Screen != null ? "sub" : "")" role="button" tabindex="0" @onclick="() => Pick(r.Zone.Id, r.Screen?.Id)" title="Ouvrir le planning">
+                        <div class="pn-dl">@(r.Screen != null ? "↳ " + r.Screen.Name : r.Zone.Name)<small>@(r.Screen != null ? (r.Screen.OwnPlanning ? "Planning propre" : "Suit la zone") : "Zone · " + ScreenCount(r.Zone) + " écran" + (ScreenCount(r.Zone) > 1 ? "s" : ""))</small></div>
+                        <div class="pn-dt">
+                            @foreach (var sg in Plan.Segments(r.Slots, dayDate))
+                            {
+                                if (sg.To <= HS * 60 || sg.From >= HE * 60) { continue; }
+                                var from = Math.Max(sg.From, HS * 60); var to = Math.Min(sg.To, HE * 60);
+                                <div class="pn-seg @(sg.Slot == null ? "def" : Color(sg.Slot.PlaylistId))" style="left:@(Pct(from))%;width:@(PctW(from, to))%">@(sg.Slot == null ? DefaultName(r) : PlaylistName(sg.Slot.PlaylistId))</div>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+            <div class="pn-legend"><span>Cliquez sur une ligne pour ouvrir son planning. Les plages hachurées diffusent la liste par défaut de la zone ou de l'écran.</span></div>
+        </div>
+    }
+    else
+    {
+        <div class="pn-cal pn-fill">
+            <div class="pn-ch"><div></div>@for (var d = 0; d < 7; d++) { var day = weekStart.AddDays(d); <div class="@(day == today ? "today" : "")">@Plan.DayNames[d]<b>@day.Day</b></div> }</div>
+            <div class="pn-cb">
+                <div class="pn-hrs">@for (var h = HS; h <= HE; h++) { <span style="top:@(Pct(h * 60))%">@h.ToString("00"):00</span> }</div>
+                @for (var d = 0; d < 7; d++)
+                {
+                    var di = d; var date = weekStart.AddDays(d);
+                    <div class="pn-col @(FollowsZone ? "ro" : "")" style="--rows:@Rows">
+                        @if (!FollowsZone) { for (var q = HS * 2; q < HE * 2; q++) { var qm = q * 30; <div class="pn-cell" @onclick="() => OpenNew(di, qm)"></div> } }
+                        @if (OwnScreen) { foreach (var g in Z.Slots.Where(x => Plan.Matches(x, date, x.From))) { <div class="pn-ev ghost" style="@Pos(g)"><b>@PlaylistName(g.PlaylistId) (zone)</b><small>@Plan.Hm(g.From) – @Plan.Hm(g.To)</small></div> } }
+                        @foreach (var s in Shown.Where(x => Plan.Matches(x, date, x.From)))
+                        {
+                            var slot = s;
+                            <div class="pn-ev @Color(slot.PlaylistId) @(FollowsZone ? "inh" : "") @(draft?.Id == slot.Id ? "sel" : "")" style="@Pos(slot)" role="button" tabindex="0" @onclick="() => OpenEdit(slot)" @onclick:stopPropagation>
+                                <b>@PlaylistName(slot.PlaylistId)</b><small>@Plan.Hm(slot.From) – @Plan.Hm(slot.To)@(slot.Dated ? " · " + Plan.Period(slot) : "")</small>
+                            </div>
+                        }
+                    </div>
+                }
+                @if (weekStart <= today && today < weekStart.AddDays(7) && nowMin >= HS * 60 && nowMin <= HE * 60) { <div class="pn-now" style="top:@(Pct(nowMin))%"></div> }
+            </div>
+            <div class="pn-legend">
+                @foreach (var p in UsedPlaylists) { <span><i class="@Color(p.Id)"></i>@p.Name</span> }
+                @if (OwnScreen) { <span><i class="hatch"></i>Hérité de la zone</span> }
+                <span class="pn-dflt"><i class="hatch"></i>Hors créneau : <b>@DefaultName()</b>
+                    @if (S != null) { <text> · </text><button type="button" class="btn link sm" @onclick="() => editing = S.Id">Modifier</button> }
+                    else if (Z.IsWall) { <text> · </text><a class="btn link sm" href="">Modifier</a> }</span>
+            </div>
+        </div>
+    }
+
+    @if (pvOpen)
+    {
+        <div class="pn-bk" @onclick="() => pvOpen = false"></div>
+        <aside class="pn-drawer" role="dialog" aria-label="Que voit l'écran ?">
+            <div class="pn-dh2"><h3>Que voit l'écran ?</h3><button type="button" class="modal-x" aria-label="Fermer" @onclick="() => pvOpen = false"><Ico Name="x" Size="20" /></button></div>
+            <div class="pn-row2">
+                <select aria-label="Jour" @onchange="OnPvDay">
+                    @for (var d = 0; d < 7; d++) { var day = weekStart.AddDays(d); <option value="@day.ToString("yyyy-MM-dd")" selected="@(day == PvDate)">@Plan.DayNames[d] @day.Day</option> }
+                </select>
+                <input type="time" aria-label="Heure" value="@Plan.Hm(pvMin)" @onchange="OnPvTime" />
+            </div>
+            <div class="pn-stage">
+                <span class="lab">@((S?.Name ?? Z.Name).ToUpperInvariant()) · @Plan.DayNames[((int)PvDate.DayOfWeek + 6) % 7].ToUpperInvariant() @PvDate.Day · @Plan.Hm(pvMin)</span>
+                <span class="pl"><i class="@(Pv.Slot != null ? Color(Pv.Slot.PlaylistId) : "")"></i>@Pv.Name</span>
+                <span class="why">@Pv.Why</span>
+            </div>
+            <input class="pn-range" type="range" min="0" max="1439" step="15" value="@pvMin" aria-label="Heure" @oninput="OnPvRange" />
+            <div class="pn-tl"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
+        </aside>
+    }
+}
+
+@if (draft != null)
+{
+    @* formulaire du créneau en fenêtre : Enregistrer l'applique aux écrans concernés, Annuler laisse le planning comme il était *@
+    <div class="modal-backdrop" @onclick="CloseEditor"></div>
+    <div class="modal app-modal pn-modal" role="dialog" aria-modal="true" aria-labelledby="pn-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="pn-title">@(isNew ? "Nouveau créneau" : "Modifier le créneau")</h3><small>@(S != null ? "Écran « " + S.Name + " »" : "Zone « " + Z.Name + " »")</small></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseEditor"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            <div class="pn-f"><label class="lbl" for="pn-list">Liste de lecture à diffuser</label>
+                <select id="pn-list" @bind="draft.PlaylistId">
+                    @foreach (var p in playlists) { <option value="@p.Id">@p.Name</option> }
+                    @if (playlists.All(p => p.Id != draft.PlaylistId)) { <option value="@draft.PlaylistId">(liste supprimée)</option> }
+                </select></div>
+            <div class="pn-f"><label class="lbl">Jours</label>
+                <div class="pn-days">@for (var d = 0; d < 7; d++) { var di = d; <button type="button" class="@(Plan.HasDay(draft.Days, di) ? "on" : "")" aria-pressed="@(Plan.HasDay(draft.Days, di) ? "true" : "false")" @onclick="() => draft.Days ^= Plan.Bit(di)">@Plan.DayNames[d]</button> }</div></div>
+            <div class="pn-f pn-row2"><div><label class="lbl" for="pn-from">De</label><input id="pn-from" type="time" value="@fromText" @onchange="OnFrom" /></div><div><label class="lbl" for="pn-to">À</label><input id="pn-to" type="time" value="@toText" @onchange="OnTo" /></div></div>
+            <div class="pn-f"><label class="lbl">Période</label>
+                <label class="pn-chk"><input type="radio" name="pn-per" checked="@(period == "all")" @onchange='() => period = "all"' /> Toute l'année</label>
+                <label class="pn-chk"><input type="radio" name="pn-per" checked="@(period == "dates")" @onchange='() => period = "dates"' /> Du … au …</label>
+                @if (period == "dates") { <div class="pn-row2"><input type="date" aria-label="Premier jour" value="@draft.DateFrom" @onchange="OnDateFrom" /><input type="date" aria-label="Dernier jour" value="@draft.DateTo" @onchange="OnDateTo" /></div> }
+            </div>
+            @if (S == null && OtherZones.Count > 0)
+            {
+                <div class="pn-f"><label class="lbl">S'applique à</label>
+                    <div class="pn-apply">
+                        <label class="pn-chk"><input type="checkbox" checked disabled /> Zone « @Z.Name »</label>
+                        @foreach (var oz in OtherZones) { var o = oz; <label class="pn-chk"><input type="checkbox" checked="@also.Contains(o.Id)" @onchange="e => ToggleAlso(o.Id, e)" /> Aussi la zone « @o.Name »</label> }
+                    </div>
+                    <p class="hint">Un même créneau peut servir plusieurs zones, sans le recréer.</p></div>
+            }
+            @if (OverlapWith(draft) is { } over) { <div class="pn-warn">Ce créneau en chevauche « @PlaylistName(over.PlaylistId) » (@Plan.Describe(over)). @(draft.Dated != over.Dated ? "Le créneau daté est prioritaire." : "Le premier créé est prioritaire.")</div> }
+            @if (error != null) { <div class="err">@error</div> }
+        </div>
+        <div class="modal-foot pn-foot">
+            @if (!isNew) { <button type="button" class="btn danger" @onclick="DeleteDraft">Supprimer</button> }
+            <span class="grow"></span>
+            <button type="button" class="btn ghost" @onclick="CloseEditor">Annuler</button>
+            <button type="button" class="btn" @onclick="SaveDraft">Enregistrer</button>
+        </div>
+    </div>
+}
+
+@if (editing is { } eid)
+{
+    <ScreenEditor ScreenId="eid" OnClose="CloseScreenEditor" />
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "zone")] public string? ZoneParam { get; set; }
+    [SupplyParameterFromQuery(Name = "screen")] public string? ScreenParam { get; set; }
+
+    private static readonly CultureInfo Fr = CultureInfo.GetCultureInfo("fr-CH");
+
+    private Tenant tenant = null!;
+    private Area? area;
+    private List<Zone> zones = new();
+    private List<Screen> screens = new();
+    private List<Playlist> playlists = new();
+
+    private Guid zoneId;
+    private Guid? screenId;
+    private string view = "week";   // week | day
+    private DateOnly today, weekStart, dayDate, pvDate;
+    private int nowMin, pvMin = 12 * 60;
+
+    private Slot? draft;
+    private bool isNew;
+    private string fromText = "11:00", toText = "14:00", period = "all";
+    private readonly HashSet<Guid> also = new();
+    private string? error;
+    private bool confirmRevert;
+    private Guid? editing;   // fenêtre d'édition de l'écran (liste par défaut)
+    private string? lastQuery;
+    private bool menuOpen, pvOpen;   // menu « Zone / écran » ; tiroir « Que voit l'écran ? »
+
+    private record DayRow(Zone Zone, Screen? Screen, List<Slot> Slots);
+
+    protected override void OnInitialized()
+    {
+        Load();
+        weekStart = today.AddDays(-(((int)today.DayOfWeek + 6) % 7));
+        dayDate = pvDate = today;
+        // première cible : la zone qui a déjà un planning, sinon une zone autre que « Défaut »
+        zoneId = (zones.FirstOrDefault(z => z.Slots.Count > 0) ?? zones.FirstOrDefault(z => !z.IsDefault) ?? zones.FirstOrDefault())?.Id ?? Guid.Empty;
+    }
+
+    protected override void OnParametersSet()
+    {
+        var q = ZoneParam + "|" + ScreenParam;
+        if (q == lastQuery || zones.Count == 0) return;
+        lastQuery = q;
+        if (Guid.TryParse(ScreenParam, out var sid) && screens.FirstOrDefault(s => s.Id == sid) is { } sc) { zoneId = ZoneIdOf(sc); screenId = sc.Id; }
+        else if (Guid.TryParse(ZoneParam, out var zid) && zones.Any(z => z.Id == zid)) { zoneId = zid; screenId = null; }
+    }
+
+    private void Load()
+    {
+        var (t, a, zs, sc, pl) = Store.Read(d => (d.Tenant, d.Area,
+            d.Area?.Zones.OrderByDescending(z => z.IsDefault).ThenBy(z => z.Name, StringComparer.CurrentCultureIgnoreCase).ToList() ?? new List<Zone>(),
+            d.Screens.Where(s => s.Token != null).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
+            d.Playlists.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList()));
+        (tenant, area, zones, screens, playlists) = (t, a, zs, sc, pl);
+        var l = Plan.LocalNow(tenant, area, DateTime.UtcNow);
+        today = DateOnly.FromDateTime(l);
+        nowMin = l.Hour * 60 + l.Minute;
+        if (zones.All(z => z.Id != zoneId)) { zoneId = zones.FirstOrDefault()?.Id ?? Guid.Empty; screenId = null; }
+        if (screenId != null && screens.All(s => s.Id != screenId)) screenId = null;
+    }
+
+    // ---------- Cible : zone ou écran ----------
+
+    private Zone Z => zones.FirstOrDefault(z => z.Id == zoneId) ?? zones.First();
+    private Screen? S => screenId is { } id ? screens.FirstOrDefault(s => s.Id == id) : null;
+    private bool OwnScreen => S is { OwnPlanning: true };
+    private bool FollowsZone => S is { OwnPlanning: false };
+    private IEnumerable<Slot> Shown => S is { OwnPlanning: true } s ? s.Slots : Z.Slots;
+
+    private Guid ZoneIdOf(Screen s) => zones.Any(z => z.Id == s.ZoneId) ? s.ZoneId!.Value : zones.FirstOrDefault(z => z.IsDefault)?.Id ?? Guid.Empty;
+    private int ScreenCount(Zone z) => screens.Count(s => ZoneIdOf(s) == z.Id);
+    private List<Screen> ZoneScreens => Z.IsWall ? new() : screens.Where(s => ZoneIdOf(s) == zoneId).ToList();   // un mur a un seul planning, celui de la zone
+    private List<Zone> OtherZones => zones.Where(z => z.Id != zoneId).ToList();
+
+    private void PickFromMenu(Guid zid, Guid? sid) { menuOpen = false; Pick(zid, sid); }
+
+    private string ZoneSummary(Zone z) => $"{ScreenCount(z)} écran{(ScreenCount(z) > 1 ? "s" : "")} · {(z.Slots.Count == 0 ? "aucun planning" : z.Slots.Count + " créneau" + (z.Slots.Count > 1 ? "x" : ""))}";
+
+    private void Pick(Guid zid, Guid? sid)
+    {
+        zoneId = zid; screenId = sid; view = "week";
+        CloseEditor(); confirmRevert = false;
+    }
+
+    // ---------- Noms et couleurs ----------
+
+    private string PlaylistName(Guid? id) => playlists.FirstOrDefault(p => p.Id == id)?.Name ?? "(liste supprimée)";
+
+    private string Color(Guid playlistId) => "c" + (Math.Max(0, playlists.FindIndex(p => p.Id == playlistId)) % 6 + 1);
+
+    private string DefaultName(Screen? s, Zone zone) =>
+        zone.IsWall ? (zone.PlaylistId is { } zp ? PlaylistName(zp) : "Aucune liste")
+        : s == null ? "Liste propre à chaque écran"
+        : s.PlaylistId is { } sp ? PlaylistName(sp) : "Aucune liste";
+
+    private string DefaultName() => DefaultName(S, Z);
+    private string DefaultName(DayRow r) => DefaultName(r.Screen, r.Zone);
+
+    private IEnumerable<Playlist> UsedPlaylists
+    {
+        get
+        {
+            var ids = Shown.Select(s => s.PlaylistId).Concat(OwnScreen ? Z.Slots.Select(s => s.PlaylistId) : Enumerable.Empty<Guid>()).ToHashSet();
+            return playlists.Where(p => ids.Contains(p.Id));
+        }
+    }
+
+    // ---------- Grille ----------
+
+    private IEnumerable<Slot> AllSlots => zones.SelectMany(z => z.Slots).Concat(screens.Where(s => s.OwnPlanning).SelectMany(s => s.Slots));
+    private int HS => Math.Min(7, AllSlots.Select(s => s.From / 60).DefaultIfEmpty(7).Min());
+    private int HE => Math.Min(24, Math.Max(23, AllSlots.Select(s => (s.To + 59) / 60).DefaultIfEmpty(23).Max()));
+    private int Rows => HE - HS;
+    private IEnumerable<int> AxisHours => Enumerable.Range(HS, Rows + 1).Where(h => (h - HS) % 2 == 0);
+
+    private static string Inv(double v) => v.ToString("0.###", CultureInfo.InvariantCulture);
+    private string Pct(int min) => Inv((min - HS * 60) * 100.0 / (Rows * 60));
+    private string PctW(int from, int to) => Inv((to - from) * 100.0 / (Rows * 60));
+    private static string Pct24(int minutes) => Inv(minutes * 100.0 / 1440);
+
+    private string Pos(Slot s) => $"top:{Pct(s.From)}%;height:{Inv(Math.Max(2.0, (s.To - s.From) * 100.0 / (Rows * 60)))}%";
+
+    private string WeekLabel
+    {
+        get
+        {
+            var end = weekStart.AddDays(6);
+            return weekStart.Month == end.Month ? $"{weekStart.Day} – {end.Day} {end.ToString("MMMM yyyy", Fr)}" : $"{weekStart.Day} {weekStart.ToString("MMM", Fr)} – {end.Day} {end.ToString("MMM yyyy", Fr)}";
+        }
+    }
+
+    private static string DayLabel(DateOnly d) { var s = d.ToString("dddd d MMMM yyyy", Fr); return char.ToUpper(s[0], Fr) + s[1..]; }
+
+    private void GoToday() { weekStart = today.AddDays(-(((int)today.DayOfWeek + 6) % 7)); pvDate = today; }
+
+    private List<DayRow> DayRows
+    {
+        get
+        {
+            var rows = new List<DayRow>();
+            foreach (var z in zones)
+            {
+                rows.Add(new DayRow(z, null, Plan.Order(z.Slots)));
+                foreach (var s in screens.Where(s => ZoneIdOf(s) == z.Id && s.OwnPlanning)) rows.Add(new DayRow(z, s, Plan.Effective(area, s)));
+            }
+            return rows;
+        }
+    }
+
+    // ---------- Que voit l'écran à… ----------
+
+    private DateOnly PvDate => pvDate >= weekStart && pvDate < weekStart.AddDays(7) ? pvDate : today >= weekStart && today < weekStart.AddDays(7) ? today : weekStart;
+
+    private (Slot? Slot, string Name, string Why) Pv
+    {
+        get
+        {
+            var date = PvDate;
+            if (S is { } sc)
+            {
+                var hit = Plan.Pick(Plan.Effective(area, sc), date, pvMin);
+                if (hit == null) return (null, DefaultName(), "Aucun créneau : liste par défaut");
+                return (hit, PlaylistName(hit.PlaylistId), sc.Slots.Contains(hit) ? "Planning propre de l'écran" : $"Hérité de la zone « {Z.Name} »");
+            }
+            var ordered = Plan.Order(Z.Slots);
+            var z = Plan.Pick(ordered, date, pvMin);
+            if (z == null) return (null, DefaultName(), "Aucun créneau : liste par défaut");
+            var several = ordered.Count(x => Plan.Matches(x, date, pvMin)) > 1;
+            return (z, PlaylistName(z.PlaylistId), several ? "Deux créneaux se chevauchent : le créneau daté (ou le premier créé) est prioritaire." : $"Créneau {Plan.Hm(z.From)} – {Plan.Hm(z.To)}");
+        }
+    }
+
+    private void OnPvTime(ChangeEventArgs e) { if (Plan.TryHm(e.Value?.ToString(), out var m)) pvMin = m; }
+    private void OnPvRange(ChangeEventArgs e) { if (int.TryParse(e.Value?.ToString(), out var m)) pvMin = Math.Clamp(m, 0, 1439); }
+    private void OnPvDay(ChangeEventArgs e) { if (DateOnly.TryParseExact(e.Value?.ToString(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)) pvDate = d; }
+
+    // ---------- Créneau : création, modification, suppression ----------
+
+    private void OpenNew(int? day, int? minute)
+    {
+        if (FollowsZone || playlists.Count == 0) return;
+        var from = minute ?? 11 * 60;
+        draft = new Slot { PlaylistId = playlists[0].Id, Days = day is { } d ? Plan.Bit(d) : 0b0011111, From = from, To = Math.Min(from + 120, Plan.Day) };
+        Edit(true);
+    }
+
+    private void OpenEdit(Slot s)
+    {
+        if (FollowsZone) return;
+        draft = s.Copy();
+        Edit(false);
+    }
+
+    private void Edit(bool create)
+    {
+        isNew = create; error = null; also.Clear();
+        fromText = Plan.Hm(draft!.From);
+        toText = Plan.Hm(draft.To % Plan.Day);   // minuit s'écrit 00:00
+        period = draft.Dated ? "dates" : "all";
+    }
+
+    private void CloseEditor() { draft = null; error = null; }
+
+    private void OnFrom(ChangeEventArgs e) => fromText = e.Value?.ToString() ?? "";
+    private void OnTo(ChangeEventArgs e) => toText = e.Value?.ToString() ?? "";
+    private void OnDateFrom(ChangeEventArgs e) { if (draft != null) draft.DateFrom = e.Value?.ToString(); }
+    private void OnDateTo(ChangeEventArgs e) { if (draft != null) draft.DateTo = e.Value?.ToString(); }
+
+    private void ToggleAlso(Guid id, ChangeEventArgs e) { if (e.Value is true) also.Add(id); else also.Remove(id); }
+
+    /// <summary>Le créneau en cours de saisie, avec ses heures lues (null si elles sont illisibles).</summary>
+    private Slot? Parsed()
+    {
+        if (draft == null || !Plan.TryHm(fromText, out var f) || !Plan.TryHm(toText, out var t)) return null;
+        var c = draft.Copy();
+        c.From = f; c.To = t == 0 ? Plan.Day : t;
+        if (period == "all") { c.DateFrom = null; c.DateTo = null; }
+        return c;
+    }
+
+    private Slot? OverlapWith(Slot d) =>
+        Parsed() is { } c && Plan.Check(c) == null ? Shown.FirstOrDefault(o => o.Id != c.Id && Plan.Overlap(o, c)) : null;
+
+    private async Task SaveDraft()
+    {
+        if (Parsed() is not { } slot) { error = "Heures invalides."; return; }
+        var (a, target, onScreen, extra) = (area!, S?.Id ?? Z.Id, S != null, also.ToList());
+        var (err, ids) = Store.Write(d =>
+        {
+            var e = PlanOps.Save(d, a.Id, target, onScreen, slot, onScreen ? null : extra);
+            var touched = new List<Guid>();
+            if (e == null)
+            {
+                if (onScreen) touched.Add(target);
+                else foreach (var zid in extra.Prepend(target)) touched.AddRange(Plan.Affected(d, a.Id, zid, null).Select(s => s.Id));
+            }
+            return (e, touched);
+        });
+        if (err != null) { error = err; return; }
+        await Notifier.PublishPlanning(ids);
+        Load(); CloseEditor();
+        Toast.Ok(ids.Count > 0 ? $"Créneau enregistré : {ids.Count} écran{(ids.Count > 1 ? "s" : "")} mis à jour." : "Créneau enregistré.");
+    }
+
+    private async Task DeleteDraft()
+    {
+        if (draft == null) return;
+        var (a, target, onScreen, sid) = (area!, S?.Id ?? Z.Id, S != null, draft.Id);
+        var (err, ids) = Store.Write(d =>
+        {
+            var e = PlanOps.Delete(d, a.Id, target, onScreen, sid);
+            return (e, e != null ? new List<Guid>() : onScreen ? new List<Guid> { target } : Plan.Affected(d, a.Id, target, null).Select(s => s.Id).ToList());
+        });
+        if (err != null) { error = err; return; }
+        await Notifier.PublishPlanning(ids);
+        Load(); CloseEditor();
+        Toast.Ok("Créneau supprimé.");
+    }
+
+    private void CreateOwn(Screen s)
+    {
+        var (a, id) = (area!, s.Id);
+        var err = Store.Write(d => PlanOps.CreateOwn(d, a.Id, id));
+        if (err != null) { Toast.Error(err); return; }
+        Load();
+        Toast.Ok($"« {s.Name} » a maintenant son propre planning.");
+    }
+
+    private async Task Revert(Screen s)
+    {
+        var (a, id) = (area!, s.Id);
+        var err = Store.Write(d => PlanOps.RevertToZone(d, a.Id, id));
+        if (err != null) { Toast.Error(err); return; }
+        confirmRevert = false;
+        await Notifier.PublishPlanning(new[] { id });
+        Load(); CloseEditor();
+        Toast.Ok($"« {s.Name} » suit de nouveau le planning de sa zone.");
+    }
+
+    private void CloseScreenEditor() { editing = null; Load(); }
+}

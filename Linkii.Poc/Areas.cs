@@ -248,6 +248,7 @@ public static class AreaOps
         if (WallOf(d, s) is { } wall) return $"« {s.Name} » fait partie du mur « {wall.Name} » : dissolvez d'abord le mur.";
         s.AreaId = target;
         s.WallPos = null;
+        s.OwnPlanning = false; s.Slots.Clear();   // ses créneaux visaient des listes de l'ancienne aire
         s.ZoneId = EnsureDefaultZone(d.Areas.First(a => a.Id == target)).Id;   // zone par défaut de l'aire d'arrivée
         bool Elsewhere(Guid? id) => id is { } pid && d.Root.Playlists.FirstOrDefault(p => p.Id == pid)?.AreaId != target;
         if (Elsewhere(s.PlaylistId)) s.PlaylistId = null;
@@ -284,7 +285,9 @@ public static class AreaOps
         {
             if (s.PlaylistId == pl.Id) s.PlaylistId = null;
             for (var z = 0; z < s.ZonePlaylistIds.Count; z++) if (s.ZonePlaylistIds[z] == pl.Id) s.ZonePlaylistIds[z] = null;
+            s.Slots.RemoveAll(x => x.PlaylistId == pl.Id);   // plus programmée dans l'ancienne aire (l'instantané de l'écran reste jusqu'à sa prochaine publication)
         }
+        foreach (var z in d.Areas.Where(a => a.Id == source).SelectMany(a => a.Zones)) z.Slots.RemoveAll(x => x.PlaylistId == pl.Id);
         return null;
     }
 

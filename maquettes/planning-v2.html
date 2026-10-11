@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette – Planning par zone et par écran</title>
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--row:#EDF1F5;--brand:#0B1F3A;--brand-tint:#EBEDF0;--signal:#3B82C4;--ok:#1E8E5A;--ok-bg:#E1F0E8;--ok-ink:#155A38;--warn:#B7791F;--warn-bg:#FBF0DC;--warn-ink:#7A4F12;--danger:#C8372D;--radius:4px;--card:10px;
+  --c1:#3B82C4;--c2:#1E8E5A;--c3:#B7791F;--c4:#7B5EA7}
+*{box-sizing:border-box}html,body{margin:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
+h1,h2,h3,p{margin:0;font-weight:500}p{font-weight:400}b{font-weight:500}button,select,input{font:inherit;color:inherit}
+
+/* barre de démo */
+.mock{background:#fff;border-bottom:1px dashed var(--line-2);padding:10px 24px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:60}
+.mock span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:0 4px 0 12px}
+.mock span:first-child{margin-left:0}
+.mock button{border:1px solid var(--line-2);background:#fff;padding:4px 11px;border-radius:var(--radius);cursor:pointer;font-size:14px}
+.mock button.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+
+/* coque */
+.shell{display:flex;min-height:calc(100vh - 51px)}
+.sidebar{width:230px;background:#fff;border-right:1px solid var(--line);padding:24px 14px;flex:none;position:relative}
+.sidebar .wm{font-size:30px;font-weight:500;letter-spacing:-.03em;padding:0 12px 14px}
+.areasw{margin:0 0 14px;border:1px solid var(--line-2);border-radius:var(--radius);padding:7px 10px;font-size:14px;display:flex;justify-content:space-between;align-items:center}
+.areasw small{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em;line-height:1.2}
+.nav{display:flex;gap:12px;align-items:center;padding:10px 12px;color:var(--muted);font-size:16px;position:relative}
+.nav.active{background:var(--brand-tint);color:var(--ink);font-weight:500;box-shadow:inset 3px 0 0 var(--brand);border-radius:0 4px 4px 0}
+.nav svg{width:20px;height:20px}
+.sidebar hr{border:0;border-top:1px solid var(--line);margin:10px 12px}
+.nav.hl{outline:2px solid var(--signal);outline-offset:-2px;border-radius:4px;background:#EAF2FA;color:var(--ink);font-weight:500}
+.nav .new{margin-left:auto;font-size:10px;background:var(--signal);color:#fff;border-radius:99px;padding:1px 7px;letter-spacing:.04em}
+main{flex:1;padding:30px 36px 60px;min-width:0}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+.page-head h1{font-size:30px;line-height:1.2}.sub{color:var(--muted);margin-top:6px;font-size:15px;max-width:700px}
+.btn{font-weight:500;cursor:pointer;border:1px solid var(--brand);border-radius:var(--radius);padding:9px 16px;background:var(--brand);color:#fff;display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.btn.ghost{background:#fff;color:var(--ink);border-color:var(--line-2)}
+.btn.sm{padding:5px 11px;font-size:13px}.btn.link{background:none;border-color:transparent;color:var(--signal);padding:5px 8px}
+.t{margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.annot{background:#FFF8E1;border:1px dashed #E0B84A;border-radius:var(--radius);padding:9px 13px;font-size:13.5px;color:#6B5200;margin-bottom:16px}
+.annot ul{margin:4px 0 0;padding-left:18px}
+.card{background:#fff;border:1px solid var(--line);border-radius:var(--card);padding:14px}
+.hidden{display:none!important}
+.badge{font-size:11px;padding:2px 8px;border-radius:99px;background:var(--ok-bg);color:var(--ok-ink);font-weight:500;white-space:nowrap}
+.badge.blue{background:#EAF2FA;color:#245A8C}.badge.grey{background:var(--row);color:var(--muted)}.badge.warn{background:var(--warn-bg);color:var(--warn-ink)}
+
+/* ===== Vue 1 : emplacement ===== */
+.v1{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+@media(max-width:1100px){.v1{grid-template-columns:1fr}}
+.pin{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--signal);color:#fff;font-size:12px;font-weight:600;flex:none}
+.acc{display:grid;gap:10px}
+.acc .it{display:flex;gap:12px;align-items:flex-start}
+.acc .it p{font-size:14.5px;color:var(--muted)} .acc .it b{color:var(--ink)}
+.mini-zone{border:1px solid var(--line);border-radius:var(--card);background:#fff;padding:12px;margin-top:6px}
+.mini-zone .zh{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line-2);border-radius:99px;padding:3px 10px;font-size:13px;color:var(--muted);background:#fff}
+.chip.hl{border-color:var(--signal);color:#245A8C;background:#EAF2FA;outline:2px solid #BBD7F0}
+.chip svg{width:14px;height:14px}
+.scr{display:flex;gap:8px;flex-wrap:wrap}
+.scr .s{width:150px;border:1px solid var(--line);border-radius:var(--card);overflow:hidden;background:#fff}
+.scr .s .im{aspect-ratio:16/9;background:var(--brand);color:#fff;font-size:12px;display:grid;place-items:center}
+.scr .s .bd{padding:7px 9px;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:4px}
+.menu-pop{position:relative;border:1px solid var(--line-2);border-radius:var(--radius);background:#fff;box-shadow:0 8px 24px rgba(11,31,58,.14);width:210px;font-size:14px;margin-top:6px}
+.menu-pop div{padding:7px 12px;display:flex;gap:8px;align-items:center}.menu-pop div.hl{background:#EAF2FA;outline:2px solid #BBD7F0;outline-offset:-2px}
+.menu-pop hr{margin:2px 0;border:0;border-top:1px solid var(--line)}
+.ed-head{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:var(--radius);padding:8px 12px;background:#fff;margin-top:6px;flex-wrap:wrap}
+.ibtn{width:34px;height:34px;border:1px solid var(--line-2);border-radius:var(--radius);display:grid;place-items:center;color:var(--muted);background:#fff}
+.ibtn.hl{border-color:var(--signal);color:var(--signal);background:#EAF2FA;outline:2px solid #BBD7F0}
+.ibtn svg{width:18px;height:18px}
+
+/* ===== Vue 2 : planning ===== */
+.zbar{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px}
+@media(max-width:900px){.zbar{grid-template-columns:1fr}}
+.zc{background:#fff;border:1px solid var(--line);border-radius:var(--card);padding:10px 14px;cursor:pointer;position:relative}
+.zc.on{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.zc .n{font-weight:500;display:flex;align-items:center;gap:8px}
+.zc small{display:block;color:var(--muted);font-size:13px}
+.zc .bars{display:flex;height:8px;gap:1px;margin-top:8px;border-radius:2px;overflow:hidden;background:var(--row)}
+.zc .bars i{display:block;height:100%}
+.sbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:14px;padding:8px 12px;background:#fff;border:1px solid var(--line);border-radius:var(--card)}
+.sbar .k{font-size:13px;color:var(--muted);margin-right:4px}
+.sc{border:1px solid var(--line-2);border-radius:99px;padding:3px 12px;font-size:14px;cursor:pointer;background:#fff;display:inline-flex;align-items:center;gap:6px}
+.sc.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.sc .dot{width:8px;height:8px;border-radius:50%;background:var(--signal)}
+.banner{display:flex;gap:10px;align-items:center;background:#EAF2FA;color:#245A8C;border-radius:var(--radius);padding:9px 12px;font-size:14px;margin-bottom:12px;flex-wrap:wrap}
+.banner.own{background:var(--warn-bg);color:var(--warn-ink)}
+.banner .sp{flex:1}
+.lay{display:grid;grid-template-columns:1fr 330px;gap:16px;align-items:start}
+@media(max-width:1180px){.lay{grid-template-columns:1fr}}
+.nav2{display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap}.nav2 b{min-width:170px;text-align:center}.nav2 .sp{flex:1}
+.cal{background:#fff;border:1px solid var(--line);border-radius:var(--card);overflow:hidden}
+.ch{display:grid;grid-template-columns:48px repeat(7,1fr);background:var(--bg);border-bottom:1px solid var(--line)}
+.ch div{padding:6px 4px;text-align:center;font-size:12.5px;color:var(--muted);border-left:1px solid var(--line)}.ch div:first-child{border-left:0}.ch b{display:block;color:var(--ink);font-size:14px}
+.ch .today,.ch .today b{color:var(--signal)}
+.cb{display:grid;grid-template-columns:48px repeat(7,1fr);position:relative;height:512px}
+.hrs{position:relative}.hrs span{position:absolute;right:6px;font-size:10.5px;color:var(--muted);transform:translateY(-50%)}
+.col{position:relative;border-left:1px solid var(--line);cursor:cell;background-image:repeating-linear-gradient(to bottom,transparent 0 31px,var(--line) 31px 32px);background-size:100% 32px}
+.col.ro{cursor:default}
+.ev{position:absolute;left:3px;right:3px;border-radius:6px;padding:3px 6px;font-size:11.5px;line-height:1.25;color:#fff;overflow:hidden;cursor:pointer;border:2px solid transparent}
+.ev b{display:block;font-weight:600;font-size:12px}.ev small{opacity:.9;font-size:10.5px}
+.ev.c1{background:var(--c1)}.ev.c2{background:var(--c2)}.ev.c3{background:var(--c3)}.ev.c4{background:var(--c4)}
+.ev.sel{border-color:var(--ink)}
+.ev.ghost{background:repeating-linear-gradient(135deg,#fff 0 6px,#F1F4F8 6px 12px)!important;color:var(--muted);border:1px dashed var(--line-2);cursor:default;z-index:0}
+.ev.ghost b{font-weight:500}
+.ev.inh{opacity:.55;cursor:default}
+.ev .rep{position:absolute;right:5px;top:3px;font-size:10.5px}
+.ev.own::after{content:"propre";position:absolute;right:5px;bottom:2px;font-size:9px;background:rgba(0,0,0,.28);border-radius:3px;padding:0 4px}
+.now{position:absolute;left:48px;right:0;border-top:2px solid var(--danger);z-index:5;pointer-events:none}
+.now::before{content:"";position:absolute;left:-5px;top:-6px;width:10px;height:10px;border-radius:50%;background:var(--danger)}
+.scrub{position:absolute;border-top:2px dashed var(--ink);z-index:4;pointer-events:none}
+.legend{display:flex;gap:12px;flex-wrap:wrap;padding:9px 12px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.side{display:grid;gap:14px}
+.stage{aspect-ratio:16/9;background:var(--brand);border-radius:4px;display:grid;place-items:center;position:relative;color:#fff;padding:10px}
+.stage .lab{position:absolute;left:8px;top:6px;font-size:10.5px;letter-spacing:.08em;color:rgba(255,255,255,.55)}
+.stage .pl{display:inline-flex;gap:8px;align-items:center;border:1px solid rgba(255,255,255,.4);border-radius:99px;padding:7px 14px;font-weight:500;font-size:14px}
+.stage .pl i{width:10px;height:10px;border-radius:50%}
+.stage .why{position:absolute;left:8px;right:8px;bottom:5px;font-size:11px;color:rgba(255,255,255,.72)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.row2>*{min-width:0}
+select,input[type=time],input[type=date]{font-size:14px;padding:7px 10px;border:1px solid var(--line-2);border-radius:var(--radius);background:#fff;width:100%}
+.slider{width:100%;margin:10px 0 2px;accent-color:var(--brand)}
+.tl{display:flex;justify-content:space-between;font-size:11px;color:var(--muted)}
+label.l{display:block;font-size:13px;font-weight:500;color:var(--muted);margin-bottom:5px}
+.field{margin-bottom:12px}
+.days{display:flex;gap:4px}.days span{flex:1;text-align:center;padding:6px 0;border:1px solid var(--line-2);border-radius:4px;font-size:13px;color:var(--muted);cursor:pointer;user-select:none}.days span.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.chk{display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:5px}.chk input{width:auto;accent-color:var(--brand)}
+.apply{border:1px solid var(--line);border-radius:var(--radius);padding:8px 10px;background:var(--bg)}
+.hint{margin:6px 0 0;font-size:12.5px;color:var(--muted)}
+.actions{display:flex;gap:8px;justify-content:space-between;margin-top:12px}
+.li{display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid var(--line);border-radius:4px;font-size:14px}
+.li i{width:10px;height:10px;border-radius:3px;flex:none}.li .g{flex:1}.li small{display:block;color:var(--muted);font-size:12px}
+
+/* ===== Vue 3 : journée ===== */
+.dh{display:grid;grid-template-columns:210px 1fr;}
+.dh .axis{position:relative;height:24px;border-bottom:1px solid var(--line)}
+.dh .axis span{position:absolute;transform:translateX(-50%);font-size:11px;color:var(--muted);top:4px}
+.dr{display:grid;grid-template-columns:210px 1fr;border-bottom:1px solid var(--line);align-items:stretch}
+.dr:last-child{border-bottom:0}
+.dr .lbl{padding:10px 12px;font-size:14px;border-right:1px solid var(--line);background:#fff}
+.dr .lbl small{display:block;color:var(--muted);font-size:12px}
+.dr.sub .lbl{padding-left:30px;background:var(--bg)}
+.dr .trk{position:relative;min-height:56px;background:repeating-linear-gradient(to right,transparent 0 calc(100%/16 - 1px),var(--line) calc(100%/16 - 1px) calc(100%/16))}
+.seg{position:absolute;top:8px;bottom:8px;border-radius:6px;color:#fff;font-size:12px;padding:3px 8px;overflow:hidden;white-space:nowrap}
+.seg.c1{background:var(--c1)}.seg.c2{background:var(--c2)}.seg.c3{background:var(--c3)}.seg.c4{background:var(--c4)}
+.seg.def{background:repeating-linear-gradient(135deg,#fff 0 6px,#F1F4F8 6px 12px);border:1px dashed var(--line-2);color:var(--muted)}
+.dvs{position:absolute;top:0;bottom:0;border-left:2px dashed var(--ink);z-index:4;pointer-events:none}
+.dwrap{position:relative}
+</style>
+</head>
+<body>
+
+<div class="mock">
+  <span>Écran</span>
+  <button id="b1" class="on">1 · Où est le menu ?</button>
+  <button id="b2">2 · Planning d'une zone / d'un écran</button>
+  <button id="b3">3 · Vue journée (toutes les zones)</button>
+  <span id="shortcuts" class="hidden">Raccourcis</span>
+  <button id="s1" class="hidden">Zone Stand service</button>
+  <button id="s2" class="hidden">Écran « Grill » (planning propre)</button>
+  <button id="s3" class="hidden">Écran « Wok » (suit la zone)</button>
+</div>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="wm">linkii</div>
+    <div class="areasw"><div><small>Aire</small>Restaurant Lac</div><span>▾</span></div>
+    <a class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>Écrans</a>
+    <a class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>Listes de lecture</a>
+    <a class="nav" id="navPlan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Planning</a>
+    <a class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>Médiathèque</a>
+    <hr>
+    <a class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 6-6"/></svg>Statistiques</a>
+    <hr>
+    <a class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>Membres</a>
+    <a class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Widgets</a>
+    <a class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>Réglages</a>
+  </aside>
+
+  <main>
+
+  <!-- ================= VUE 1 ================= -->
+  <section id="v1">
+    <div class="page-head"><div><h1>Où se trouve le Planning ?</h1><p class="sub">Une entrée dans le menu, toujours présente, et trois raccourcis là où l'on gère déjà ses écrans.</p></div></div>
+    <div class="annot">Rien à activer dans les Réglages : « Planning » est dans le menu de base. Tant qu'une zone ou un écran n'a aucun créneau, il affiche sa liste de lecture en permanence, exactement comme aujourd'hui.</div>
+    <div class="v1">
+      <div class="card acc">
+        <div class="t">Les 4 accès</div>
+        <div class="it"><span class="pin">1</span><div><b>Menu latéral · « Planning »</b><p>Entre « Listes de lecture » et « Médiathèque » (surligné à gauche). C'est le lieu principal : on y voit et on y modifie tous les plannings de l'aire.</p></div></div>
+        <div class="it"><span class="pin">2</span><div><b>Page Écrans · en-tête de chaque zone</b><p>Une pastille « Planning · 3 créneaux » ouvre directement le planning de la zone.</p></div></div>
+        <div class="it"><span class="pin">3</span><div><b>Page Écrans · menu ⋮ d'un écran</b><p>« Planning de cet écran… » pour lui donner un planning propre.</p></div></div>
+        <div class="it"><span class="pin">4</span><div><b>Édition d'un écran · bandeau d'icônes</b><p>À côté de la luminosité et de la mise en veille : une icône calendrier.</p></div></div>
+        <div class="annot" style="margin:6px 0 0"><b>Planning facultatif.</b> Sans créneau, l'écran affiche en continu la liste qui lui est assignée dans l'édition de l'écran (ou de sa zone) : c'est la « liste par défaut », qui ne se modifie qu'à cet endroit. Le planning ne fait que la remplacer pendant ses créneaux.</div>
+        <div class="annot" style="margin:6px 0 0">Les écrans <b>à planning propre</b> prennent le dessus sur leur zone ; les autres suivent la zone. Si l'aire n'a qu'une zone Défaut, tout reste valable : un seul planning pour tous les écrans.</div>
+      </div>
+
+      <div>
+        <div class="t">Page « Écrans » (aperçu)</div>
+        <div class="mini-zone">
+          <div class="zh"><b>Stand service</b><span class="badge grey">4 écrans</span><span class="chip hl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Planning · 3 créneaux</span><span class="pin">2</span></div>
+          <div class="scr">
+            <div class="s"><div class="im">Menu + prix</div><div class="bd">Wok <span style="color:var(--muted)">⋮</span></div></div>
+            <div class="s"><div class="im">Plat du jour</div><div class="bd">Grill <span class="chip" style="padding:0 7px;font-size:11px">propre</span><span style="color:var(--muted)">⋮</span></div></div>
+          </div>
+          <div class="menu-pop" style="margin-left:178px;margin-top:-14px"><div>Modifier l'écran</div><div>Simuler cet écran</div><div class="hl"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Planning de cet écran… <span class="pin" style="margin-left:auto">3</span></div><hr><div>Réveiller / mettre en veille</div></div>
+        </div>
+        <div class="t" style="margin-top:18px">Fenêtre d'édition d'un écran (bandeau)</div>
+        <div class="ed-head">
+          <b>Grill</b><span style="color:var(--muted);font-size:13px">Stand service</span>
+          <span style="flex:1"></span>
+          <span class="ibtn" title="Luminosité"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></span>
+          <span class="ibtn" title="Mise en veille"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg></span>
+          <span class="ibtn hl" title="Planning"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></span>
+          <span class="pin">4</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= VUE 2 ================= -->
+  <section id="v2" class="hidden">
+    <div class="page-head">
+      <div><h1>Planning</h1><p class="sub">Choisissez quelle liste de lecture passe, quand, sur chaque zone ou écran de l'aire. En dehors des créneaux, l'écran affiche sa liste par défaut.</p></div>
+      <div style="display:flex;gap:8px"><button class="btn" id="add">+ Programmer</button></div>
+    </div>
+
+    <div class="t">Zones de l'aire « Restaurant Lac »</div>
+    <div class="zbar" id="zbar"></div>
+    <div class="sbar" id="sbar"></div>
+    <div id="banner"></div>
+
+    <div class="lay">
+      <div>
+        <div class="nav2"><button class="btn ghost sm">‹</button><b>12 – 18 octobre 2026</b><button class="btn ghost sm">›</button><button class="btn link sm">Aujourd'hui</button><span class="sp"></span><span id="calTitle" style="color:var(--muted);font-size:14px"></span></div>
+        <div class="cal"><div class="ch" id="ch"></div><div class="cb" id="cb"></div><div class="legend" id="legend"></div></div>
+      </div>
+      <div class="side">
+        <div class="card hidden" id="editor">
+          <div class="t" id="edTitle">Nouveau créneau</div>
+          <div class="field"><label class="l">Liste de lecture à diffuser</label>
+            <select id="edList"><option value="c1">Menu + prix</option><option value="c2">Menu + pub</option><option value="c4">Carte du soir + prix</option><option value="c3">Plat du jour (Grill)</option></select></div>
+          <div class="field"><label class="l">Jours</label><div class="days" id="edDays"></div></div>
+          <div class="field row2"><div><label class="l">De</label><input type="time" id="edFrom" value="11:00"></div><div><label class="l">À</label><input type="time" id="edTo" value="14:00"></div></div>
+          <div class="field"><label class="l">Période</label>
+            <div class="chk"><input type="radio" name="per" id="perAll" checked><label for="perAll">Toute l'année</label></div>
+            <div class="chk"><input type="radio" name="per" id="perD"><label for="perD">Du … au …</label></div>
+            <div class="row2 hidden" id="dates"><input type="date" value="2026-12-20"><input type="date" value="2026-12-31"></div></div>
+          <div class="field"><label class="l">S'applique à</label>
+            <div class="apply">
+              <div class="chk"><input type="checkbox" checked disabled><span id="edTarget">Zone « Stand service »</span></div>
+              <div class="chk"><input type="checkbox" id="x1"><label for="x1">Aussi la zone « Entrée »</label></div>
+              <div class="chk"><input type="checkbox" id="x2"><label for="x2">Aussi la zone « Défaut »</label></div>
+            </div><p class="hint">Un même créneau peut servir plusieurs zones, sans le recréer.</p></div>
+          <div class="actions"><button class="btn sm ghost" style="color:var(--danger)">Supprimer</button><span><button class="btn sm ghost" id="edCancel">Annuler</button> <button class="btn sm">Enregistrer</button></span></div>
+        </div>
+
+        <div class="card">
+          <div class="t">Que voit l'écran à…</div>
+          <div class="row2" style="margin-bottom:10px"><select id="pvDay"></select><input type="time" id="pvTime" value="12:00"></div>
+          <div class="stage"><span class="lab" id="pvLab"></span><span class="pl" id="pvPl"><i></i><span></span></span><span class="why" id="pvWhy"></span></div>
+          <input class="slider" id="pvRange" type="range" min="0" max="1439" step="15" value="720">
+          <div class="tl"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
+        </div>
+
+        <div class="card">
+          <div class="t">Liste de lecture par défaut</div>
+          <div class="li"><i style="background:repeating-linear-gradient(135deg,var(--line-2) 0 3px,#fff 3px 6px);border:1px solid var(--line-2)"></i><div class="g" id="defName">Accueil<small>Affichée en dehors de tout créneau</small></div><button class="btn link sm" id="defEdit">Modifier dans la zone</button></div>
+          <p class="hint">Cette liste se choisit dans l'édition de l'écran (ou de la zone), pas ici : une seule source. Le planning ne fait que la remplacer pendant ses créneaux.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= VUE 3 ================= -->
+  <section id="v3" class="hidden">
+    <div class="page-head"><div><h1>Planning · Vue journée</h1><p class="sub">Toutes les zones et écrans de l'aire sur une même ligne de temps : on voit d'un coup d'œil ce que chacun diffuse et on repère les trous.</p></div>
+      <div style="display:flex;gap:8px;align-items:center"><select id="dvDay" style="width:auto"></select></div></div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <div class="dh"><div style="background:var(--bg);border-bottom:1px solid var(--line)"></div><div class="axis" id="axis" style="background:var(--bg)"></div></div>
+      <div class="dwrap" id="rows"></div>
+    </div>
+    <div class="row2" style="margin-top:14px;grid-template-columns:1fr 330px;align-items:center">
+      <div class="annot" style="margin:0">Cliquer sur une ligne ouvre son planning (vue 2). Les zones sans créneau apparaissent hachurées : elles diffusent leur liste par défaut.</div>
+      <div class="card"><div class="row2"><div><label class="l">Heure</label><input type="time" id="dvTime" value="12:00"></div><div style="padding-top:26px"><span class="badge blue">Trait pointillé = heure choisie</span></div></div><input class="slider" id="dvRange" type="range" min="420" max="1380" step="15" value="720"></div>
+    </div>
+  </section>
+
+  </main>
+</div>
+
+<script>
+const D=['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'], DN=[12,13,14,15,16,17,18], TODAY=2;
+const H0=7,H1=23,PX=32;
+const L={c1:'Menu + prix',c2:'Menu + pub',c3:'Plat du jour (Grill)',c4:'Carte du soir + prix'};
+const hh=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+const tm=s=>{const [h,m]=s.split(':').map(Number);return h*60+m};
+const y=m=>(m/60-H0)*PX;
+
+// cibles : zones et écrans
+const T={
+ entree:{kind:'zone',name:'Entrée',scr:'2 écrans',def:'Accueil',screens:[],ev:[
+   {id:1,c:'c2',days:[0,1,2,3,4],from:660,to:840,rep:1},
+   {id:2,c:'c2',days:[5,6],from:690,to:900,rep:1},
+   {id:3,c:'c2',days:[0,1,2,3,4,5],from:1050,to:1320,rep:1}]},
+ stand:{kind:'zone',name:'Stand service',scr:'4 écrans',def:'Accueil',screens:['grill','wok','pizza','dessert'],ev:[
+   {id:4,c:'c1',days:[0,1,2,3,4],from:660,to:840,rep:1},
+   {id:5,c:'c1',days:[5,6],from:690,to:900,rep:1},
+   {id:6,c:'c4',days:[0,1,2,3,4,5],from:1050,to:1320,rep:1}]},
+ defaut:{kind:'zone',name:'Défaut',scr:'1 écran',def:'Accueil',screens:[],ev:[]},
+ grill:{kind:'screen',name:'Grill',parent:'stand',own:true,def:'Accueil',ev:[
+   {id:7,c:'c3',days:[0,1,2,3,4],from:720,to:840,rep:1}]},
+ wok:{kind:'screen',name:'Wok',parent:'stand',own:false,def:'Accueil',ev:[]},
+ pizza:{kind:'screen',name:'Pizza',parent:'stand',own:false,def:'Accueil',ev:[]},
+ dessert:{kind:'screen',name:'Desserts',parent:'stand',own:false,def:'Accueil',ev:[]}
+};
+let zone='stand', target='stand', sel=null;
+
+/* effectif d'un écran/zone : propres > zone > défaut */
+const own=t=>T[t].ev;
+const inh=t=>T[t].kind==='screen'?T[T[t].parent].ev:[];
+function resolve(t,d,m){
+  const hit=(arr)=>arr.filter(e=>e.days.includes(d)&&m>=e.from&&m<e.to)[0];
+  const o=hit(own(t)); if(o)return {e:o,why:T[t].kind==='screen'?'Planning propre de l\'écran':'Créneau '+hh(o.from)+' – '+hh(o.to)};
+  const p=hit(inh(t)); if(p)return {e:p,why:'Hérité de la zone « '+T[T[t].parent].name+' »'};
+  return {e:null,why:'Aucun créneau : liste par défaut'};
+}
+
+/* ---------- barres de cible ---------- */
+function barsHTML(t){const evs=T[t].ev.filter(e=>e.days.includes(TODAY)).sort((a,b)=>a.from-b.from);let out='',cur=420;
+  evs.forEach(e=>{if(e.from>cur)out+=`<i style="width:${(e.from-cur)/960*100}%"></i>`;out+=`<i style="width:${(e.to-e.from)/960*100}%;background:var(--${e.c})"></i>`;cur=e.to});
+  if(cur<1380)out+=`<i style="width:${(1380-cur)/960*100}%"></i>`;return out}
+function drawZones(){
+  zbar.innerHTML=['entree','stand','defaut'].map(k=>`<div class="zc ${zone===k?'on':''}" data-z="${k}"><div class="n">${T[k].name}${k==='defaut'?'<span class="badge grey">non supprimable</span>':''}</div><small>${T[k].scr} · ${T[k].ev.length?T[k].ev.length+' créneaux':'aucun planning'}</small><div class="bars">${barsHTML(k)}</div></div>`).join('');
+  zbar.querySelectorAll('.zc').forEach(el=>el.onclick=()=>{zone=el.dataset.z;target=zone;sel=null;hideEditor();draw()});
+  const sc=T[zone].screens;
+  sbar.style.display=sc.length?'flex':'none';
+  sbar.innerHTML=`<span class="k">Écrans de la zone :</span><span class="sc ${target===zone?'on':''}" data-t="${zone}">Toute la zone</span>`+sc.map(s=>`<span class="sc ${target===s?'on':''}" data-t="${s}">${T[s].own?'<i class="dot" style="background:var(--c3)"></i>':''}${T[s].name}${T[s].own?' · planning propre':''}</span>`).join('');
+  sbar.querySelectorAll('.sc').forEach(el=>el.onclick=()=>{target=el.dataset.t;sel=null;hideEditor();draw()});
+}
+function drawBanner(){
+  const t=T[target];
+  if(t.kind==='screen'&&!t.own) banner.innerHTML=`<div class="banner"><span>ⓘ</span><span><b>${t.name}</b> suit le planning de sa zone « ${T[t.parent].name} ». Les créneaux ci-dessous sont ceux de la zone.</span><span class="sp"></span><button class="btn ghost sm" id="mkOwn">Créer un planning propre à cet écran</button></div>`;
+  else if(t.kind==='screen') banner.innerHTML=`<div class="banner own"><span>★</span><span><b>${t.name}</b> a son propre planning : ses créneaux (en couleur) prennent le dessus sur ceux de la zone (hachurés) aux mêmes heures.</span><span class="sp"></span><button class="btn ghost sm">Revenir au planning de la zone</button></div>`;
+  else banner.innerHTML='';
+  const m=document.getElementById('mkOwn');if(m)m.onclick=()=>{T[target].own=true;draw()};
+}
+
+/* ---------- semaine ---------- */
+ch.innerHTML='<div></div>'+D.map((d,i)=>`<div class="${i===TODAY?'today':''}">${d}<b>${DN[i]}</b></div>`).join('');
+let h='<div class="hrs">';for(let k=H0;k<=H1;k++)h+=`<span style="top:${(k-H0)*PX}px">${String(k).padStart(2,'0')}:00</span>`;h+='</div>';
+D.forEach((d,i)=>h+=`<div class="col" data-d="${i}"></div>`);cb.innerHTML=h;
+const cols=[...cb.querySelectorAll('.col')];
+function place(el,e,d,cls){el.className='ev '+e.c+' '+cls;el.style.top=y(e.from)+'px';el.style.height=(y(e.to)-y(e.from)-2)+'px';
+  el.innerHTML=`<b>${L[e.c]}</b><small>${hh(e.from)} – ${hh(e.to)}</small>`+(e.rep?'<span class="rep">↻</span>':'');}
+function drawCal(){
+  const t=T[target], isOwnScreen=t.kind==='screen'&&t.own, isInhScreen=t.kind==='screen'&&!t.own;
+  cols.forEach(c=>{c.innerHTML='';c.classList.toggle('ro',isInhScreen)});
+  if(isOwnScreen) T[t.parent].ev.forEach(e=>e.days.forEach(d=>{const el=document.createElement('div');place(el,e,d,'ghost');el.querySelector('b').textContent=L[e.c]+' (zone)';cols[d].appendChild(el)}));
+  const list=isInhScreen?T[t.parent].ev:t.ev;
+  list.forEach(e=>e.days.forEach(d=>{const el=document.createElement('div');place(el,e,d,(isInhScreen?'inh':'')+(sel===e.id?' sel':'')+(isOwnScreen?' own':''));
+    if(!isInhScreen)el.onclick=ev=>{ev.stopPropagation();openEditor(e)};cols[d].appendChild(el)}));
+  cb.querySelectorAll('.now,.scrub').forEach(n=>n.remove());
+  const n=document.createElement('div');n.className='now';n.style.top=y(620)+'px';cb.appendChild(n);
+  const s=document.createElement('div');s.className='scrub';s.id='scrub';cb.appendChild(s);
+  calTitle.textContent=(t.kind==='zone'?'Zone « ':'Écran « ')+t.name+' »';
+  defName.innerHTML=t.def+'<small>Affichée en dehors de tout créneau</small>';
+  defEdit.textContent=t.kind==='zone'?'Modifier dans la zone':'Modifier dans l\'écran';
+  preview();
+}
+legend.innerHTML=Object.entries(L).map(([k,n])=>`<span><i style="background:var(--${k})"></i>${n}</span>`).join('')+'<span><i style="background:repeating-linear-gradient(135deg,#fff 0 3px,#E2E8EF 3px 6px);border:1px dashed var(--line-2)"></i>Hérité de la zone</span><span>↻ récurrent</span>';
+
+/* ---------- éditeur ---------- */
+const edDays=document.getElementById('edDays');edDays.innerHTML=D.map((d,i)=>`<span data-d="${i}">${d}</span>`).join('');
+edDays.onclick=e=>e.target.dataset.d!==undefined&&e.target.classList.toggle('on');
+const setDays=a=>[...edDays.children].forEach((s,i)=>s.classList.toggle('on',a.includes(i)));
+function hideEditor(){editor.classList.add('hidden')}
+function openEditor(e,day){
+  sel=e?e.id:null;editor.classList.remove('hidden');
+  edTitle.textContent=e?'Modifier le créneau':'Nouveau créneau';
+  edTarget.textContent=(T[target].kind==='zone'?'Zone « ':'Écran « ')+T[target].name+' »';
+  document.getElementById('x1').parentElement.classList.toggle('hidden',T[target].kind==='screen'||target==='entree');
+  document.getElementById('x2').parentElement.classList.toggle('hidden',T[target].kind==='screen'||target==='defaut');
+  if(e){edList.value=e.c;setDays(e.days);edFrom.value=hh(e.from);edTo.value=hh(e.to)}else{setDays(day!==undefined?[day]:[])}
+  drawCal();
+}
+edCancel.onclick=()=>{sel=null;hideEditor();drawCal()};
+document.querySelectorAll('input[name=per]').forEach(r=>r.onchange=()=>dates.classList.toggle('hidden',!perD.checked));
+cols.forEach(c=>c.onclick=ev=>{if(c.classList.contains('ro'))return;const r=c.getBoundingClientRect();const m=Math.round(((ev.clientY-r.top)/PX+H0)*4)/4*60;
+  openEditor(null,+c.dataset.d);edFrom.value=hh(m);edTo.value=hh(Math.min(m+120,1380))});
+add.onclick=()=>openEditor(null);
+
+/* ---------- Que voit l'écran ---------- */
+pvDay.innerHTML=D.map((d,i)=>`<option value="${i}" ${i===TODAY?'selected':''}>${d} ${DN[i]}</option>`).join('');
+function preview(){
+  const d=+pvDay.value,m=tm(pvTime.value),r=resolve(target,d,m);
+  pvPl.querySelector('i').style.background=r.e?`var(--${r.e.c})`:'var(--line-2)';
+  pvPl.querySelector('span').textContent=r.e?L[r.e.c]:T[target].def;
+  pvLab.textContent=`${T[target].name.toUpperCase()} · ${D[d].toUpperCase()} ${pvTime.value}`;pvWhy.textContent=r.why;
+  const s=document.getElementById('scrub');if(s){const w=cb.clientWidth-48;s.style.top=Math.max(0,Math.min(512,y(m)))+'px';s.style.left=(48+d/7*w)+'px';s.style.width=(w/7)+'px'}
+  pvRange.value=m;
+}
+pvDay.onchange=preview;pvTime.oninput=preview;pvRange.oninput=()=>{pvTime.value=hh(+pvRange.value);preview()};
+
+function draw(){drawZones();drawBanner();drawCal()}
+
+/* ---------- vue journée ---------- */
+dvDay.innerHTML=D.map((d,i)=>`<option value="${i}" ${i===TODAY?'selected':''}>${D[i]} ${DN[i]} octobre</option>`).join('');
+axis.innerHTML=[7,9,11,13,15,17,19,21,23].map(k=>`<span style="left:${(k-7)/16*100}%">${String(k).padStart(2,'0')}h</span>`).join('');
+function segs(arr,d,def){
+  const e=arr.filter(x=>x.days.includes(d)).sort((a,b)=>a.from-b.from);let out='',cur=420;
+  const pos=(a,b)=>`left:${(a-420)/960*100}%;width:${(b-a)/960*100}%`;
+  e.forEach(x=>{if(x.from>cur)out+=`<div class="seg def" style="${pos(cur,x.from)}">${def}</div>`;out+=`<div class="seg ${x.c}" style="${pos(x.from,x.to)}">${L[x.c]}</div>`;cur=x.to});
+  if(cur<1380)out+=`<div class="seg def" style="${pos(cur,1380)}">${def}</div>`;return out}
+function drawDay(){
+  const d=+dvDay.value;
+  const rows=[['entree',0],['stand',0],['grill',1],['wok',1],['defaut',0]];
+  rowsEl.innerHTML=rows.map(([k,sub])=>{const t=T[k];
+    const arr=t.kind==='screen'&&!t.own?T[t.parent].ev:t.ev;
+    const lbl=t.kind==='zone'?`${t.name}<small>Zone · ${t.scr}</small>`:`↳ ${t.name}<small>${t.own?'Planning propre':'Suit la zone'}</small>`;
+    let tr=segs(arr,d,t.def);
+    if(t.kind==='screen'&&t.own){const base=segs(T[t.parent].ev,d,t.def);tr=base.replace(/class="seg /g,'class="seg opacity ')+segs(t.ev,d,t.def).replace(/<div class="seg def"[^>]*>[^<]*<\/div>/g,'')}
+    return `<div class="dr ${sub?'sub':''}" data-k="${k}"><div class="lbl">${lbl}</div><div class="trk" ${t.kind==='screen'&&t.own?'':''}>${tr}</div></div>`}).join('')+'<div class="dvs" id="dvs"></div>';
+  rowsEl.querySelectorAll('.seg.opacity').forEach(s=>s.style.opacity='.35');
+  rowsEl.querySelectorAll('.dr').forEach(r=>r.onclick=()=>{zone=T[r.dataset.k].kind==='zone'?r.dataset.k:T[r.dataset.k].parent;target=r.dataset.k;go(2)});
+  dvMark();
+}
+const rowsEl=document.getElementById('rows');
+function dvMark(){const m=tm(dvTime.value),s=document.getElementById('dvs');if(!s)return;
+  const total=rowsEl.clientWidth-210;s.style.left=(210+(m-420)/960*total)+'px';dvRange.value=m}
+dvDay.onchange=drawDay;dvTime.oninput=()=>{dvMark()};dvRange.oninput=()=>{dvTime.value=hh(+dvRange.value);dvMark()};
+
+/* ---------- navigation de démo ---------- */
+function go(n){
+  [1,2,3].forEach(i=>{document.getElementById('v'+i).classList.toggle('hidden',i!==n);document.getElementById('b'+i).classList.toggle('on',i===n)});
+  ['s1','s2','s3','shortcuts'].forEach(i=>document.getElementById(i).classList.toggle('hidden',n!==2));
+  navPlan.classList.toggle('active',n!==1);navPlan.classList.toggle('hl',n===1);
+  if(n===1&&!navPlan.querySelector('.new'))navPlan.insertAdjacentHTML('beforeend','<span class="new">NOUVEAU</span>');
+  if(n!==1){const x=navPlan.querySelector('.new');if(x)x.remove()}
+  if(n===2)draw();if(n===3)drawDay();
+}
+b1.onclick=()=>go(1);b2.onclick=()=>go(2);b3.onclick=()=>go(3);
+s1.onclick=()=>{zone='stand';target='stand';sel=null;hideEditor();draw()};
+s2.onclick=()=>{zone='stand';target='grill';sel=null;hideEditor();draw()};
+s3.onclick=()=>{zone='stand';target='wok';sel=null;hideEditor();draw()};
+go(1);
+</script>
+</body>
+</html>

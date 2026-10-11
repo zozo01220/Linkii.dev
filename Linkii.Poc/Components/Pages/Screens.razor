@@ -4,6 +4,7 @@
 @inject TenantStore Store
 @inject Notifier Notifier
 @inject Toaster Toast
+@inject NavigationManager Nav
 
 <div class="page-head">
     <div>
@@ -102,6 +103,10 @@
                     </div>
                 }
             </div>
+            @if (OpenZone is { } pz)
+            {
+                <a class="dd-btn" href="planning?zone=@pz.Id" title="Planning de diffusion de @(pz.IsWall ? "ce mur" : "cette zone")"><Ico Name="calendar" Size="14" /> <b>Planning</b> @if (pz.Slots.Count > 0) { <small class="c">@pz.Slots.Count</small> }</a>
+            }
         }
         <div class="kebab dd">
             <button type="button" class="dd-btn @(statusFilter != "" ? "act" : "")" aria-haspopup="menu" aria-expanded="@(openMenu == "state" ? "true" : "false")" @onclick='() => Toggle("state")'>
@@ -372,6 +377,7 @@
                                 else if (tenant.SleepEnabled) { <button type="button" role="menuitem" @onclick="async () => { menuFor = null; await SleepNow(new[] { gs }); }"><Ico Name="moon" Size="16" /> Mettre en veille</button> }
                                 <button type="button" role="menuitem" @onclick="() => Edit(gs)"><Ico Name="pencil-square" Size="16" /> Éditer</button>
                                 <button type="button" role="menuitem" @onclick="() => { menuFor = null; simScreen = gs.Id; }"><Ico Name="play" Size="16" /> Simuler</button>
+                                <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"planning?screen={gs.Id}")'><Ico Name="calendar" Size="16" /> Planning de cet écran…</button>
                                 <button type="button" role="menuitem" @onclick="() => OpenRename(gs)"><Ico Name="edit" Size="16" /> Renommer</button>
                                 <button type="button" role="menuitem" @onclick="() => AskPublish(new() { gs.Id })"><Ico Name="upload" Size="16" /> Publier</button>
                                 <button type="button" role="menuitem" disabled="@(!Growth || !gonline)" title="@(!Growth ? Plans.LockedHint : !gonline ? "L'écran est hors ligne" : null)" @onclick='() => { menuFor = null; OpenLive(gs, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer</button>
@@ -483,6 +489,7 @@
                                     @if (tenant.SleepEnabled && members.Any(x => !IsAsleep(x, true))) { <button type="button" role="menuitem" @onclick="async () => { CloseMenu(); await SleepNow(members); }"><Ico Name="moon" Size="16" /> Mettre en veille les écrans</button> }
                                     <button type="button" role="menuitem" @onclick="() => { CloseMenu(); AskPublish(members.Select(x => x.Id).ToList()); }"><Ico Name="upload" Size="16" /> Publier le mur</button>
                                     @if (placed) { <button type="button" role="menuitem" @onclick="() => { CloseMenu(); simWall = w.Id; }"><Ico Name="play" Size="16" /> Simuler le mur</button> }
+                                    <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"planning?zone={w.Id}")'><Ico Name="calendar" Size="16" /> Planning du mur…</button>
                                     <button type="button" role="menuitem" @onclick="() => IdentifyWall(w, members)"><Ico Name="monitor" Size="16" /> Identifier sur les écrans</button>
                                     <button type="button" role="menuitem" disabled="@(!Growth || !wOnl)" title="@(!Growth ? Plans.LockedHint : !wOnl ? "Aucun écran du mur n'est en ligne" : null)" @onclick='() => { CloseMenu(); OpenWallLive(w, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer les écrans</button>
                                     @if (manageZones)
@@ -618,6 +625,7 @@
                                 else if (tenant.SleepEnabled) { <button type="button" role="menuitem" @onclick="async () => { menuFor = null; await SleepNow(new[] { sc }); }"><Ico Name="moon" Size="16" /> Mettre en veille</button> }
                                 <button type="button" role="menuitem" @onclick="() => Edit(sc)"><Ico Name="pencil-square" Size="16" /> Éditer</button>
                                 <button type="button" role="menuitem" @onclick="() => { menuFor = null; simScreen = sc.Id; }"><Ico Name="play" Size="16" /> Simuler</button>
+                                <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"planning?screen={sc.Id}")'><Ico Name="calendar" Size="16" /> Planning de cet écran…</button>
                                 <button type="button" role="menuitem" @onclick="() => OpenRename(sc)"><Ico Name="edit" Size="16" /> Renommer</button>
                                 <button type="button" role="menuitem" @onclick="() => AskPublish(new() { sc.Id })"><Ico Name="upload" Size="16" /> Publier</button>
                                 <button type="button" role="menuitem" disabled="@(!Growth || !online)" title="@(!Growth ? Plans.LockedHint : !online ? "L'écran est hors ligne" : null)" @onclick='() => { menuFor = null; OpenLive(sc, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer</button>
@@ -1070,7 +1078,8 @@ else if (wallEdit is { } wid)
         Store.Write(d => { foreach (var sc in d.Screens.Where(x => ids.Contains(x.Id))) sc.ZoneId = zid; });
         Toast.Ok($"{ids.Count} écran{(ids.Count > 1 ? "s" : "")} dans la zone « {zones.First(z => z.Id == zid).Name} ».");
         zoneMove = false;
-        foreach (var id in ids) await Notifier.NotifyScreen(id);   // leur zone change : la synchro peut changer
+        await Notifier.PublishPlanning(ids);   // leur zone change : elles reçoivent les listes du planning de la nouvelle zone (et la synchro peut changer)
+        foreach (var id in ids) await Notifier.NotifyScreen(id);
         selectedIds.Clear();
         Reload();
     }
