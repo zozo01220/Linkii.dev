@@ -26,12 +26,13 @@
             {
                 <div class="row" style="gap:8px;flex-wrap:nowrap">
                     <h3 id="se-title" class="se-title">@(string.IsNullOrWhiteSpace(name) ? "Écran" : name)</h3>
-                    <button type="button" class="btn ghost sm icon" title="Renommer l'écran" aria-label="Renommer l'écran" @onclick="StartHeadRename"><Ico Name="edit" Size="15" /></button>
+                    <button type="button" class="btn ghost sm" title="Renommer l'écran" @onclick="StartHeadRename"><Ico Name="edit" Size="15" /> Renommer</button>
                 </div>
             }
             <small>Modifier l'écran</small>
         </div>
         <button type="button" class="btn ghost sm" title="Voir ce qu'affiche l'écran (dernière publication)" @onclick="() => simulate = true"><Ico Name="play" Size="14" /> Simuler</button>
+        <button type="button" class="modal-x" aria-label="Options avancées" title="Options avancées" @onclick="OpenAdvanced"><Ico Name="sliders" Size="20" /></button>
         <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
     </div>
     <div class="modal-body wg-body">
@@ -138,48 +139,64 @@
                     </div>
                 }
             </div>
-            <p class="hint" style="margin-top:8px">Aperçu à l'échelle. Faites glisser un widget de la liste vers l'écran, ou déplacez-le sur l'aperçu ; cliquez dessus pour le régler. Au clavier : flèches (Maj + flèches : pas de 5 %), Entrée pour les réglages.</p>
+            <p class="hint se-hint" style="margin-top:8px">Glissez un widget sur l'aperçu pour le placer ; cliquez dessus pour le régler. <span class="se-info" tabindex="0" title="Au clavier : flèches pour déplacer (Maj + flèches : pas de 5 %), Entrée pour les réglages.">i</span></p>
         </div>
 
         <div class="wg-side">
-            <div class="seg se-tabs" role="tablist">
-                <button type="button" role="tab" aria-selected="@(tab == "screen" ? "true" : "false")" class="@(tab == "screen" ? "on" : "")" @onclick='() => tab = "screen"'>Écran</button>
-                @if (wall == null) { <button type="button" role="tab" aria-selected="@(tab == "widgets" ? "true" : "false")" class="@(tab == "widgets" ? "on" : "")" @onclick='() => tab = "widgets"'>Widgets <small>@widgets.Count</small></button> }
-            </div>
-
-            @if (tab == "screen")
+            @if (wall != null)
             {
-                @if (wall != null)
-                {
-                    <p class="hint wall-note">Cet écran est la place @(screenWallPos is { } wp ? Helpers.WallLabel(wp, wall.WallCols, wall.WallRows) : "?") du mur « @wall.Name » : il joue la liste du mur, en écran plein. Pour le sortir du mur, dissolvez le mur depuis la page Écrans.</p>
-                }
-                else if (zones.Count(z => !z.IsWall) > 1)
-                {
-                    @* zone de son aire : classement seulement, rien à publier *@
-                    <div class="dw">
-                        <div class="dw-field">
-                            <label for="se-zone">Zone</label>
-                            <select id="se-zone" @bind="zoneValue">
-                                @foreach (var z in zones.Where(z => !z.IsWall)) { <option value="@z.Id">@z.Name</option> }
-                            </select>
-                        </div>
+                <p class="hint wall-note">Cet écran est la place @(screenWallPos is { } wp ? Helpers.WallLabel(wp, wall.WallCols, wall.WallRows) : "?") du mur « @wall.Name » : il joue la liste du mur, en écran plein. Pour le sortir du mur, dissolvez le mur depuis la page Écrans.</p>
+            }
+            else if (zones.Count(z => !z.IsWall) > 1)
+            {
+                @* zone de son aire : classement seulement, rien à publier *@
+                <div class="dw">
+                    <div class="dw-field">
+                        <label for="se-zone">Zone</label>
+                        <select id="se-zone" @bind="zoneValue">
+                            @foreach (var z in zones.Where(z => !z.IsWall)) { <option value="@z.Id">@z.Name</option> }
+                        </select>
                     </div>
-                }
-                <ScreenFormat Spec="spec" Layout="@layoutId" LayoutChanged="SetLayout" OnChange="StateHasChanged" Compact="true" Detected="@detected" />
-                @* Miroir : écran monté à l'envers ou vu dans un miroir ; s'applique dès l'enregistrement, sans publier *@
-                <div class="fmt-block mirror-opts">
-                    <label>Miroir de l'affichage</label>
-                    <label class="mirror-row"><button type="button" class="switch @(mirrorH ? "on" : "")" role="switch" aria-checked="@(mirrorH ? "true" : "false")" aria-label="Miroir horizontal" @onclick="() => mirrorH = !mirrorH"><span></span></button> <span><b>Horizontal</b><small>Inverse la gauche et la droite.</small></span></label>
-                    <label class="mirror-row"><button type="button" class="switch @(mirrorV ? "on" : "")" role="switch" aria-checked="@(mirrorV ? "true" : "false")" aria-label="Miroir vertical" @onclick="() => mirrorV = !mirrorV"><span></span></button> <span><b>Vertical</b><small>Inverse le haut et le bas.</small></span></label>
-                    <small class="muted">Les deux ensemble retournent l'image à 180° : pratique pour un écran fixé à l'envers, sans le démonter.@(wall != null ? " Dans un mur, le miroir de l'écran s'ajoute à celui du mur." : "")</small>
                 </div>
             }
-            else
+            <h4 class="ci-t" style="margin:0">Configuration</h4>
+            <ScreenFormat Spec="spec" Layout="@layoutId" LayoutChanged="SetLayout" OnChange="StateHasChanged" Compact="true" />
+
+            @if (wall == null)
             {
-                @if (widgets.Count > 0)
-                {
-                    <div class="fmt-block">
-                        <label>Sur l'écran <small>@widgets.Count</small></label>
+                @* widgets : section de la colonne (plus d'onglet) ; le menu « Ajouter » liste les widgets actifs *@
+                <div class="se-wsec">
+                    <div class="se-wtop">
+                        <h4 class="ci-t" style="margin:0">Widgets · @widgets.Count</h4>
+                        <div class="se-add">
+                            <button type="button" class="btn sm" aria-haspopup="menu" aria-expanded="@(addOpen ? "true" : "false")" @onclick="() => addOpen = !addOpen"><Ico Name="plus" Size="14" /> Ajouter</button>
+                            @if (addOpen)
+                            {
+                                <div class="kebab-backdrop" @onclick="() => addOpen = false"></div>
+                                <div class="se-add-menu" role="menu">
+                                    @if (available.Count == 0)
+                                    {
+                                        <p class="hint" style="margin:0;padding:6px 10px">Aucun widget actif. <a href="/widgets">Activez-les dans la page Widgets</a>.</p>
+                                    }
+                                    else
+                                    {
+                                        <small class="muted">Glissez-les sur l'aperçu, ou cliquez pour les ajouter.</small>
+                                        @if (available.Count > 6) { <input type="text" placeholder="Rechercher" aria-label="Rechercher un widget" @bind="search" @bind:event="oninput" /> }
+                                        @foreach (var a in available.Where(x => string.IsNullOrWhiteSpace(search) || x.Name.Contains(search.Trim(), StringComparison.CurrentCultureIgnoreCase)))
+                                        {
+                                            var app = a;
+                                            <button type="button" role="menuitem" class="se-add-item" draggable="true" title="Glissez vers l'écran, ou cliquez pour ajouter" @onclick="() => { Add(app); addOpen = false; }"
+                                                    ondragstart="event.dataTransfer.setData('text/plain', '@app.Id'); event.dataTransfer.effectAllowed = 'copy';">
+                                                <AppIcon Id="@app.Id" Small="true" Size="16" /> <span>@app.Name</span>
+                                            </button>
+                                        }
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                    @if (widgets.Count > 0)
+                    {
                         <div class="wg-placed">
                             @foreach (var w in widgets)
                             {
@@ -188,31 +205,15 @@
                                     <button type="button" class="wg-placed-main" title="Régler « @Label(wid) »" @onclick="() => OpenSettings(wid)">
                                         <AppIcon Id="@wid.AppId" Small="true" Size="16" /> <span>@Label(wid)</span>
                                     </button>
+                                    <button type="button" class="btn ghost sm icon" title="Régler « @Label(wid) »" aria-label="Régler « @Label(wid) »" @onclick="() => OpenSettings(wid)"><Ico Name="sliders" Size="15" /></button>
                                     <button type="button" class="btn ghost sm icon" title="Retirer « @Label(wid) »" aria-label="Retirer « @Label(wid) »" @onclick="() => Remove(wid)"><Ico Name="trash" Size="15" /></button>
                                 </div>
                             }
                         </div>
-                    </div>
-                }
-                <div class="fmt-block">
-                    <label for="wg-search">Ajouter un widget</label>
-                    @if (available.Count > 6) { <input id="wg-search" type="text" placeholder="Rechercher" @bind="search" @bind:event="oninput" style="margin-bottom:8px" /> }
-                    <div class="wg-add">
-                        @foreach (var a in available.Where(x => string.IsNullOrWhiteSpace(search) || x.Name.Contains(search.Trim(), StringComparison.CurrentCultureIgnoreCase)))
-                        {
-                            var app = a;
-                            <button type="button" class="wg-tile" draggable="true" title="Glissez vers l'écran, ou cliquez pour ajouter" @onclick="() => Add(app)"
-                                    ondragstart="event.dataTransfer.setData('text/plain', '@app.Id'); event.dataTransfer.effectAllowed = 'copy';">
-                                <AppIcon Id="@app.Id" Small="true" Size="16" />
-                                <span>@app.Name</span>
-                            </button>
-                        }
-                    </div>
+                    }
+                    else { <p class="hint" style="margin:0">Ils restent affichés par-dessus les listes de lecture.</p> }
                 </div>
-                @if (available.Count == 0) { <p class="hint">Aucun widget actif. <a href="/widgets">Activez-les dans la page Widgets</a>.</p> }
-                else if (widgets.Count == 0) { <p class="hint">Ils restent affichés par-dessus les listes de lecture. Glissez-les sur l'aperçu ou cliquez pour les ajouter.</p> }
-            }
-            @foreach (var e in errors) { <div class="err">@e</div> }
+            }            @foreach (var e in errors) { <div class="err">@e</div> }
         </div>
     </div>
     <div class="modal-foot">
@@ -231,6 +232,30 @@
     </div>
 </div>
 
+@if (advanced)
+{
+    @* options avancées de l'écran : matériel, résolution et miroir ; Annuler rétablit les valeurs d'ouverture *@
+    <div class="modal-backdrop picker-backdrop" @onclick="CancelAdvanced"></div>
+    <div class="modal app-modal ci-adv" role="dialog" aria-modal="true" aria-labelledby="se-adv-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="se-adv-title">Options avancées</h3><small>@name</small></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="CancelAdvanced"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            <ScreenFormat Spec="spec" Layout="@layoutId" LayoutChanged="SetLayout" OnChange="StateHasChanged" Compact="true" AdvancedOnly="true" Detected="@detected" />
+            @* Miroir : écran monté à l'envers ou vu dans un miroir ; s'applique dès l'enregistrement, sans publier *@
+            <div class="fmt-block mirror-opts">
+                <label>Miroir de l'affichage</label>
+                <label class="mirror-row"><button type="button" class="switch @(mirrorH ? "on" : "")" role="switch" aria-checked="@(mirrorH ? "true" : "false")" aria-label="Miroir horizontal" @onclick="() => mirrorH = !mirrorH"><span></span></button> <span><b>Horizontal</b><small>Inverse la gauche et la droite.</small></span></label>
+                <label class="mirror-row"><button type="button" class="switch @(mirrorV ? "on" : "")" role="switch" aria-checked="@(mirrorV ? "true" : "false")" aria-label="Miroir vertical" @onclick="() => mirrorV = !mirrorV"><span></span></button> <span><b>Vertical</b><small>Inverse le haut et le bas. Les deux ensemble : écran fixé à l'envers.@(wall != null ? " Dans un mur, le miroir de l'écran s'ajoute à celui du mur." : "")</small></span></label>
+            </div>
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn ghost" @onclick="CancelAdvanced">Annuler</button>
+            <button type="button" class="btn" @onclick="() => advanced = false">Valider</button>
+        </div>
+    </div>
+}
 @if (simulate)
 {
     <SimulatorDialog ScreenId="ScreenId" Stacked="true" OnClose="() => simulate = false" />
@@ -418,6 +443,20 @@
         return InvokeAsync(StateHasChanged);
     }
 
+    private bool advanced, addOpen;
+    private (string Type, string Orientation, string Resolution, string Layout, bool H, bool V)? advSnap;
+
+    private void OpenAdvanced()
+    {
+        advSnap = (spec.Type, spec.Orientation, spec.Resolution, layoutId, mirrorH, mirrorV);
+        advanced = true;
+    }
+
+    private void CancelAdvanced()
+    {
+        if (advSnap is { } v) { spec.Type = v.Type; spec.Orientation = v.Orientation; spec.Resolution = v.Resolution; layoutId = v.Layout; mirrorH = v.H; mirrorV = v.V; }
+        advanced = false;
+    }
     private void SetLayout(string id) { layoutId = id; pickZone = null; }
 
     private void SetZone(int zone, Guid? playlistId) { zonePl[zone] = playlistId; pickZone = null; }
