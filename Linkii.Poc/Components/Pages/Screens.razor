@@ -179,6 +179,260 @@
     }
     @foreach (var entry in Entries)
     {
+        if (view != "list")
+        {
+            @* Vue cartes : carte à plat (aperçu, état, nom, appareil, puces, liste de lecture déroulante) ; la vue liste garde le balisage d'origine *@
+            if (entry.Wall is { } gw)
+            {
+                var gm = WallMembers(gw);
+                var gcells = WallCells(gw, gm);
+                var gplaces = gw.WallCols * gw.WallRows;
+                var gonl = gm.Count(x => !IsOffline(x));
+                var gfull = gonl == gplaces;
+                var gwpl = playlists.FirstOrDefault(p => p.Id == gw.PlaylistId);
+                var gthumb = ZoneThumb(gwpl);
+                var gpicked = gm.Count > 0 && gm.All(x => selectedIds.Contains(x.Id));
+                var gpend = gm.Any(x => Helpers.HasPending(x, playlists));
+                var gport = gm.Count > 0 && gm.All(x => x.Orientation == "portrait");
+                var gplaced = gm.Any(x => x.WallPos != null);
+                var gmenu = "wall:" + gw.Id;
+                var gwonline = gm.Any(x => ScreenControl.Online(x, DateTime.UtcNow));
+                var gwpaused = gm.Count > 0 && gm.All(x => x.IsPaused(DateTime.UtcNow));
+                var gopen = expandedWalls.Contains(gw.Id);
+                var gar = ((double)gw.WallCols * (gport ? 9 : 16) / ((double)gw.WallRows * (gport ? 16 : 9))).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
+                <div class="pl-card gc gc-wall @(gpicked ? "picked" : "") @(gwonline ? "" : "is-off")" style="--cols:@gw.WallCols;--rows:@gw.WallRows;--ar:@gar" role="group" aria-label="Mur d'écrans @gw.Name">
+                    <div class="gc-top">
+                        <div class="gc-stage">
+                            <div class="gc-frame @(gport ? "portrait" : "")">
+                                @foreach (var cell in gcells)
+                                {
+                                    var c = cell;
+                                    var cx = (c.Number - 1) % gw.WallCols;
+                                    var cy = (c.Number - 1) / gw.WallCols;
+                                    <button type="button" class="gc-tile @c.Css" title="@(c.Screen == null ? c.Title : c.Title + " : paramètres de l'écran")" tabindex="@(c.Screen == null ? -1 : 0)" @onclick="() => { if (c.Screen != null) Edit(c.Screen); else if (manageZones) wallEdit = gw.Id; }">
+                                        @if (gthumb != null) { <span class="wc-img" style="width:@(gw.WallCols * 100)%;height:@(gw.WallRows * 100)%;left:-@(cx * 100)%;top:-@(cy * 100)%"><MediaThumb Media="gthumb" All="media" /></span> }
+                                        <span class="gc-tn">@c.Number</span>
+                                        @if (c.Screen == null) { <span class="gc-toff">Place libre</span> }
+                                        else if (c.Css == "off") { <span class="gc-toff">Hors ligne</span> }
+                                    </button>
+                                }
+                                @if (gthumb == null) { <span class="wc-label">@(gwpl?.Name ?? "Aucune liste de lecture")</span> }
+                            </div>
+                            @if (manageZones) { <button type="button" class="gc-hit" tabindex="-1" aria-hidden="true" title="Réorganiser le mur" @onclick="() => wallEdit = gw.Id"></button> }
+                            <span class="gc-pill"><span class="gc-d @(gfull ? "ok" : gonl > 0 ? "warn" : "bad")"></span>@(gfull ? $"{gonl} sur {gplaces} en ligne" : $"Mur incomplet · {gonl} sur {gplaces}")</span>
+                            @if (gpend) { <span class="gc-pills-r"><span class="gc-pill warn" title="Liste du mur ou contenus modifiés depuis la dernière publication">À publier</span></span> }
+                        </div>
+                        <input type="checkbox" class="sc-check" aria-label="Sélectionner les @gm.Count écrans du mur @gw.Name" checked="@gpicked" @onchange="() => ToggleWall(gm)" />
+                        <div class="kebab">
+                            <button type="button" class="kebab-btn" aria-label="Actions du mur @gw.Name" aria-haspopup="menu" aria-expanded="@(openMenu == gmenu ? "true" : "false")" @onclick="() => Toggle(gmenu)"><Ico Name="dots-v" Size="18" /></button>
+                            @if (openMenu == gmenu)
+                            {
+                                <div class="kebab-backdrop" @onclick="CloseMenu"></div>
+                                <div class="kebab-menu" role="menu">
+                                    <button type="button" role="menuitem" @onclick="() => { CloseMenu(); AskPublish(gm.Select(x => x.Id).ToList()); }"><Ico Name="upload" Size="16" /> Publier le mur</button>
+                                    @if (gplaced) { <button type="button" role="menuitem" @onclick="() => { CloseMenu(); simWall = gw.Id; }"><Ico Name="play" Size="16" /> Simuler le mur</button> }
+                                    <button type="button" role="menuitem" @onclick="() => IdentifyWall(gw, gm)"><Ico Name="monitor" Size="16" /> Identifier sur les écrans</button>
+                                    <button type="button" role="menuitem" disabled="@(!Growth || !gwonline)" title="@(!Growth ? Plans.LockedHint : !gwonline ? "Aucun écran du mur n'est en ligne" : null)" @onclick='() => { CloseMenu(); OpenWallLive(gw, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer les écrans</button>
+                                    @if (manageZones)
+                                    {
+                                        <button type="button" role="menuitem" @onclick="() => { CloseMenu(); wallEdit = gw.Id; }"><Ico Name="grid" Size="16" /> Réorganiser…</button>
+                                        <hr />
+                                        <button type="button" role="menuitem" class="danger" @onclick="() => { CloseMenu(); dissolveFor = gw.Id; }"><Ico Name="trash" Size="16" /> Dissoudre le mur…</button>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                    <div class="gc-body">
+                        <div class="gc-name">
+                            @if (OpenZone?.Id == gw.Id) { <span class="gc-nm">@gw.Name</span> }
+                            else { <button type="button" class="gc-nm linklike-name" title="N'afficher que le mur « @gw.Name »" @onclick="() => PickZone(gw)">@gw.Name</button> }
+                            <span class="gc-ico" aria-hidden="true"><Ico Name="grid" Size="18" /></span>
+                        </div>
+                        <div class="gc-sub">Mur d'écrans @gw.WallCols × @gw.WallRows</div>
+                        <div class="gc-chips">
+                            <div class="gc-anchor">
+                                <button type="button" class="gc-chip btn-chip" aria-expanded="@(gopen ? "true" : "false")" title="Voir les écrans du mur" @onclick="() => ToggleWallMembers(gw.Id)">
+                                    @foreach (var cell in gcells.Where(x => x.Screen != null))
+                                    {
+                                        var gst2 = Status(cell.Screen!);
+                                        <span class="sc-dot @(gst2 == "En ligne" ? "en-ligne" : gst2 == "Mise à jour" ? "mise-a-jour" : "hors-ligne")"></span>
+                                    }
+                                    <span>@gm.Count écran@(gm.Count > 1 ? "s" : "")</span> <Ico Name="chevron" Size="12" />
+                                </button>
+                                @if (gopen)
+                                {
+                                    <div class="kebab-backdrop" @onclick="() => ToggleWallMembers(gw.Id)"></div>
+                                    <div class="kebab-menu gc-pop" role="dialog" aria-label="Écrans du mur @gw.Name">
+                                        @foreach (var kc in gcells.Where(x => x.Screen != null))
+                                        {
+                                            var km = kc.Screen!;
+                                            var kst = Status(km);
+                                            <button type="button" class="gc-mrow @(IsOffline(km) ? "off" : "")" title="Paramètres de l'écran « @km.Name »" @onclick="() => Edit(km)">
+                                                <span class="wc-cn">@kc.Number</span>
+                                                <span class="gc-mname"><b>@km.Name</b><small>@(km.DeviceOs ?? "Appareil")@(km.DeviceApp is { Length: > 0 } kda && km.DeviceApp != "web" ? " · v" + kda : "") · @Helpers.WallLabel(kc.Number - 1, gw.WallCols, gw.WallRows)</small></span>
+                                                <span class="gc-mst"><span class="sc-dot @(kst == "En ligne" ? "en-ligne" : kst == "Mise à jour" ? "mise-a-jour" : "hors-ligne")"></span>@kst</span>
+                                            </button>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                        @if (dissolveFor == gw.Id)
+                        {
+                            <div class="gc-confirm">
+                                <span class="confirm-line">Dissoudre le mur ? Ses écrans retournent dans « @(zones.FirstOrDefault(z => z.IsDefault)?.Name ?? Zone.DefaultName) » et gardent la liste.</span>
+                                <button type="button" class="btn danger sm" @onclick="() => Dissolve(gw)">Dissoudre</button>
+                                <button type="button" class="btn ghost sm" @onclick="() => dissolveFor = null">Annuler</button>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="gc-plrow">
+                                <div class="gc-sel">
+                                    <Ico Name="play-box" Size="16" />
+                                    @if (manageZones)
+                                    {
+                                        <select aria-label="Liste de lecture du mur @gw.Name" @onchange="e => SetWallPlaylist(gw, Guid.TryParse(e.Value?.ToString(), out var g) ? g : null)">
+                                            <option value="" selected="@(gw.PlaylistId == null)">— Aucune liste de lecture —</option>
+                                            @foreach (var p in playlists) { <option value="@p.Id" selected="@(p.Id == gw.PlaylistId)">@p.Name</option> }
+                                        </select>
+                                        <span class="gc-chev"><Ico Name="chevron" Size="14" /></span>
+                                    }
+                                    else { <span class="gc-selro">@(gwpl?.Name ?? "Aucune liste de lecture")</span> }
+                                </div>
+                                <div class="sc-live gc-live" role="group" aria-label="Contrôle du direct du mur @gw.Name">
+                                    <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth ? (gwonline ? "Aperçu" : "Aucun écran du mur n'est en ligne") : null)" aria-label="Aperçu" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !gwonline)" @onclick='() => OpenWallLive(gw, "preview")'><Ico Name="eye" Size="16" />@if (!Growth) { @LockIcon }</button>
+                                    <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth ? (gwonline ? (gwpaused ? "Reprendre" : "Pause") : "Aucun écran du mur n'est en ligne") : null)" aria-label="@(gwpaused ? "Reprendre" : "Pause")" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !gwonline)" @onclick='() => OpenWallLive(gw, null)'><Ico Name="@(gwpaused ? "play" : "pause")" Size="16" />@if (!Growth) { @LockIcon }</button>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+                continue;
+            }
+            var gs = entry.Screen!;
+            var gst = Status(gs);
+            var gpending = Helpers.HasPending(gs, playlists);
+            var gnow = DateTime.UtcNow;
+            var gonline = ScreenControl.Online(gs, gnow);
+            var gpaused = gs.IsPaused(gnow);
+            var gzone = ZoneOf(gs);
+            var gdl = Store.Read(d => d.Delivery(gs));
+            var gcls = gpaused ? "warn" : gst == "En ligne" ? "ok" : gst == "Mise à jour" ? "warn" : "bad";
+            <div class="pl-card gc @(selectedIds.Contains(gs.Id) ? "picked" : "") @(gonline ? "" : "is-off") @(gpaused ? "is-paused" : "")">
+                <div class="gc-top">
+                    <div class="gc-stage">
+                        <div class="gc-mon @(gs.Orientation == "portrait" ? "portrait" : "")">
+                            @if (gpaused)
+                            {
+                                <span class="sc-pause-art"><b>☕</b><small>Petite pause</small></span>
+                            }
+                            else
+                            {
+                                <span class="sc-zones @(gs.Orientation == "portrait" ? "dir-col" : "dir-row")">
+                                    @for (var z = 0; z < gs.ZoneCount; z++)
+                                    {
+                                        var zp = playlists.FirstOrDefault(p => p.Id == gs.ZonePlaylist(z));
+                                        var zt = ZoneThumb(zp);
+                                        <span class="sc-zone" style="flex:@(ScreenLayouts.Find(gs.Layout).Sizes[z].ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)) 1 0">
+                                            @if (zt != null) { <MediaThumb Media="zt" All="media" /> }
+                                            else { <span class="sc-empty">@(zp == null ? (gs.ZoneCount > 1 ? "+" : "Aucune liste de lecture") : zp.Name)</span> }
+                                        </span>
+                                    }
+                                </span>
+                            }
+                        </div>
+                        <button type="button" class="gc-hit" tabindex="-1" aria-hidden="true" @onclick="() => Edit(gs)"></button>
+                        <span class="gc-pill" title="@gst"><span class="gc-d @gcls"></span>@(gpaused ? "En pause" + (gs.PausedUntilUtc is { } pu ? " · reprise " + LocalTime(pu) : "") : gst)</span>
+                        @if (gpending || gdl != null)
+                        {
+                            <span class="gc-pills-r">
+                                @if (gdl is { } gd) { <span class="gc-pill dl @gd.State" role="status" title="@gd.Detail"><span class="gc-d"></span>@gd.Label</span> }
+                                @if (gpending) { <span class="gc-pill warn" title="Liste de lecture, widgets ou choix de liste de lecture modifiés depuis la dernière publication">À publier</span> }
+                            </span>
+                        }
+                    </div>
+                    <input type="checkbox" class="sc-check" aria-label="Sélectionner @gs.Name" checked="@selectedIds.Contains(gs.Id)" @onchange="() => ToggleSelect(gs.Id)" />
+                    <div class="kebab">
+                        <button type="button" class="kebab-btn" aria-label="Actions pour @gs.Name" aria-haspopup="menu" aria-expanded="@(menuFor == gs.Id ? "true" : "false")" @onclick="() => menuFor = menuFor == gs.Id ? null : gs.Id"><Ico Name="dots-v" Size="18" /></button>
+                        @if (menuFor == gs.Id)
+                        {
+                            <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                            <div class="kebab-menu" role="menu">
+                                <button type="button" role="menuitem" @onclick="() => Edit(gs)"><Ico Name="pencil-square" Size="16" /> Éditer</button>
+                                <button type="button" role="menuitem" @onclick="() => { menuFor = null; simScreen = gs.Id; }"><Ico Name="play" Size="16" /> Simuler</button>
+                                <button type="button" role="menuitem" @onclick="() => OpenRename(gs)"><Ico Name="edit" Size="16" /> Renommer</button>
+                                <button type="button" role="menuitem" @onclick="() => AskPublish(new() { gs.Id })"><Ico Name="upload" Size="16" /> Publier</button>
+                                <button type="button" role="menuitem" disabled="@(!Growth || !gonline)" title="@(!Growth ? Plans.LockedHint : !gonline ? "L'écran est hors ligne" : null)" @onclick='() => { menuFor = null; OpenLive(gs, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer</button>
+                                @if (otherAreas.Count > 0) { <button type="button" role="menuitem" @onclick="() => OpenAreaMove(gs)"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
+                                <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = new() { gs }; }"><Ico Name="trash" Size="16" /> Supprimer</button>
+                            </div>
+                        }
+                    </div>
+                </div>
+                <div class="gc-body">
+                    <div class="gc-name">
+                        <button type="button" class="gc-nm linklike-name" title="Paramètres de l'écran « @gs.Name »" @onclick="() => Edit(gs)">@gs.Name</button>
+                        @if (gs.DeviceKind != null) { <DeviceLogo Kind="@gs.DeviceKind" Size="20" /> }
+                    </div>
+                    <div class="gc-sub">
+                        @if (gs.DeviceKind != null)
+                        {
+                            <b>@(gs.DeviceOs ?? "Appareil")</b>@if (gs.DeviceApp is { Length: > 0 } gda && gs.DeviceApp != "web") { <text> <span class="sep">·</span> App <span class="mono">@gda</span></text> }@if (gs.DeviceKind == "web" && gs.DeviceModel != null) { <text> <span class="sep">·</span> @gs.DeviceModel</text> }
+                        }
+                        else { <span>En attente des informations de l'écran</span> }
+                    </div>
+                    <div class="gc-chips">
+                        @if (ShowZones && zoneFilter == null) { <span class="gc-chip">@(gzone?.Name ?? Zone.DefaultName)</span> }
+                        @if (gzone is { Sync: true })
+                        {
+                            @if (synced.Contains(gs.Id)) { <span class="gc-chip sync" title="Cet écran affiche le même contenu, au même moment, que les autres écrans de la zone qui jouent cette liste"><Ico Name="link" Size="12" /> Synchronisé</span> }
+                            else { <span class="gc-chip" title="Aucun autre écran de la zone ne joue cette liste publiée : l'écran reste indépendant">Indépendant</span> }
+                        }
+                    </div>
+                    <div class="gc-plrow">
+                        <div class="gc-sel">
+                            <Ico Name="play-box" Size="16" />
+                            @if (gs.ZoneCount == 1)
+                            {
+                                <select aria-label="Liste de lecture de @gs.Name" @onchange="e => Assign(gs, e)">
+                                    <option value="" selected="@(gs.PlaylistId == null)">— Aucune liste de lecture —</option>
+                                    @foreach (var p in playlists) { <option value="@p.Id" selected="@(p.Id == gs.PlaylistId)">@p.Name</option> }
+                                </select>
+                                <span class="gc-chev"><Ico Name="chevron" Size="14" /></span>
+                            }
+                            else
+                            {
+                                <button type="button" class="gc-zbtn" aria-expanded="@(plPop == gs.Id ? "true" : "false")" title="Choisir la liste de lecture de chaque zone" @onclick="() => plPop = plPop == gs.Id ? null : gs.Id">@ZonesSummary(gs)<span class="zc"> · @gs.ZoneCount zones</span></button>
+                                <span class="gc-chev"><Ico Name="chevron" Size="14" /></span>
+                                @if (plPop == gs.Id)
+                                {
+                                    <div class="kebab-backdrop" @onclick="() => plPop = null"></div>
+                                    <div class="kebab-menu gc-pop gc-zpop" role="dialog" aria-label="Une liste de lecture par zone">
+                                        @for (var z = 0; z < gs.ZoneCount; z++)
+                                        {
+                                            var zi = z;
+                                            <label class="gc-zrow"><b>Zone @(zi + 1)</b>
+                                                <select aria-label="Liste de lecture de la zone @(zi + 1)" @onchange="e => AssignZone(gs, zi, e)">
+                                                    <option value="" selected="@(gs.ZonePlaylist(zi) == null)">— Aucune liste de lecture —</option>
+                                                    @foreach (var p in playlists) { <option value="@p.Id" selected="@(p.Id == gs.ZonePlaylist(zi))">@p.Name</option> }
+                                                </select>
+                                            </label>
+                                        }
+                                    </div>
+                                }
+                            }
+                        </div>
+                        <div class="sc-live gc-live" role="group" aria-label="Contrôle du direct de @gs.Name">
+                            <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth ? (gonline ? "Aperçu" : "L'écran est hors ligne") : null)" aria-label="Aperçu" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !gonline)" @onclick='() => OpenLive(gs, "preview")'><Ico Name="eye" Size="16" />@if (!Growth) { @LockIcon }</button>
+                            <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth ? (gonline ? (gpaused ? "Reprendre" : "Pause") : "L'écran est hors ligne") : null)" aria-label="@(gpaused ? "Reprendre" : "Pause")" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !gonline)" @onclick='() => OpenLive(gs, null)'><Ico Name="@(gpaused ? "play" : "pause")" Size="16" />@if (!Growth) { @LockIcon }</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            continue;
+        }
         if (entry.Wall is { } wl)
         {
             @* Mur d'écrans : une seule carte, ses écrans collés et l'image répartie dessus *@
@@ -948,6 +1202,16 @@ else if (wallEdit is { } wid)
         var pid = Guid.TryParse(e.Value?.ToString(), out var g) ? g : (Guid?)null;
         Store.Write(d => { if (d.Screens.FirstOrDefault(x => x.Id == s.Id) is { } sc) sc.PlaylistId = pid; });
         Toast.Ok(pid == null ? $"Aucune liste de lecture pour « {s.Name} ». Publiez l'écran pour l'appliquer." : $"Liste de lecture « {playlists.FirstOrDefault(p => p.Id == pid)?.Name} » choisie pour « {s.Name} ». Publiez l'écran pour la diffuser.");
+        Reload();
+    }
+
+    // Écran découpé (vue cartes) : liste de lecture d'une zone, même règle que dans l'éditeur (diffusée à la prochaine publication).
+    private Guid? plPop;
+    private void AssignZone(Screen s, int zone, ChangeEventArgs e)
+    {
+        var pid = Guid.TryParse(e.Value?.ToString(), out var g) ? g : (Guid?)null;
+        Store.Write(d => { if (d.Screens.FirstOrDefault(x => x.Id == s.Id) is { } sc) sc.SetZonePlaylist(zone, pid); });
+        Toast.Ok($"Zone {zone + 1} de « {s.Name} » : {(pid == null ? "aucune liste de lecture" : "« " + playlists.FirstOrDefault(p => p.Id == pid)?.Name + " »")}. Publiez l'écran pour l'appliquer.");
         Reload();
     }
 
