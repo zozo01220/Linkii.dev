@@ -81,20 +81,61 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
     }
 
     /// <summary>Retire l'app et ses instances. Les playlists qui les utilisent passent en « brouillon non publié » ; l'écran ne change qu'à la prochaine publication.</summary>
-    public int Uninstall(string appId) => store.Write(d =>
+    public int Uninstall(string appId)
     {
-        var ids = d.Media.Where(m => m.AppId == appId).Select(m => m.Id).ToHashSet();
-        foreach (var id in ids) RemoveFromDrafts(d, id);
-        d.Media.RemoveAll(m => m.AppId == appId);
-        d.AppInstalls.RemoveAll(a => a.AppId == appId);
-        return ids.Count;
-    });
+        var orphans = new List<MediaItem>();
+        var count = store.Write(d =>
+        {
+            var instances = d.Media.Where(m => m.AppId == appId).ToList();
+            var ids = instances.Select(m => m.Id).ToHashSet();
+            foreach (var id in ids) RemoveFromDrafts(d, id);
+            d.Media.RemoveAll(m => m.AppId == appId);
+            d.AppInstalls.RemoveAll(a => a.AppId == appId);
+            orphans = PurgeExports(d, instances);
+            return ids.Count;
+        });
+        DeleteFiles(orphans);
+        return count;
+    }
 
-    public void DeleteInstance(Guid mediaId) => store.Write(d =>
+    public void DeleteInstance(Guid mediaId)
     {
-        RemoveFromDrafts(d, mediaId);
-        d.Media.RemoveAll(m => m.Id == mediaId && m.AppId != null);
-    });
+        var pdfs = new List<string>();
+        var orphans = store.Write(d =>
+        {
+            RemoveFromDrafts(d, mediaId);
+            var instances = d.Media.Where(m => m.Id == mediaId && m.AppId != null).ToList();
+            d.Media.RemoveAll(m => m.Id == mediaId && m.AppId != null);
+            pdfs.AddRange(instances.Where(i => i.AppId == "pdf").Select(i => i.Settings.GetValueOrDefault("pdf") ?? ""));
+            return PurgeExports(d, instances);
+        });
+        DeleteFiles(orphans);
+        foreach (var p in pdfs) PdfService.Delete(p);   // le PDF d'origine suit son contenu
+    }
+
+    /// <summary>
+    /// Exports Canva que ces contenus utilisaient : retirés de la médiathèque s'ils ne servent plus nulle part, y compris sur les écrans
+    /// (un export encore diffusé reste jusqu'à la prochaine publication ; « Nettoyer les exports Canva » le retrouvera ensuite).
+    /// </summary>
+    private static List<MediaItem> PurgeExports(ClientDb d, IEnumerable<MediaItem> removedInstances)
+    {
+        var referenced = removedInstances.SelectMany(i => i.Settings.Values.SelectMany(AppField.MediaIds)).ToHashSet();
+        if (referenced.Count == 0) return new();
+        var orphans = MediaLibrary.UnusedCanva(d.Media, d.Playlists, d.Screens).Concat(MediaLibrary.UnusedExports(d.Media, d.Playlists, d.Screens, "pdf"))
+            .Where(m => referenced.Contains(m.Id)).ToList();
+        var ids = orphans.Select(m => m.Id).ToHashSet();
+        d.Media.RemoveAll(m => ids.Contains(m.Id));
+        return orphans;
+    }
+
+    private static void DeleteFiles(IEnumerable<MediaItem> items)
+    {
+        foreach (var o in items.Where(o => o.FileName != null))
+        {
+            try { File.Delete(Path.Combine(AppPaths.MediaDir, o.FileName!)); } catch (IOException) { }
+            Thumbnails.Delete(o.FileName!);
+        }
+    }
 
     private static void RemoveFromDrafts(ClientDb d, Guid mediaId)
     {
@@ -123,6 +164,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         if (name.Trim().Length > 80) return (null, new() { "Le nom est trop long (80 caractères maximum)." });
 
         var orphans = new List<MediaItem>();
+        var oldPdfs = new List<string>();
         var result = store.Write<(MediaItem?, List<string>)>(d =>
         {
             if (instanceId == null && !d.AppInstalls.Any(a => a.AppId == appId)) return (null, new List<string> { "Activez d'abord cette intégration dans la page Intégrations." });   // une app désactivée garde ses contenus modifiables
@@ -150,10 +192,11 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
             {
                 var stillUsed = d.Media.Where(x => x.AppId != null && x.Id != item.Id && catalog.Find(x.AppId) != null)
                     .SelectMany(x => MediaIdsOf(catalog.Find(x.AppId)!, x.Settings)).ToHashSet();
-                orphans = d.Media.Where(x => dropped.Contains(x.Id) && x.Info.ContainsKey("canva") && !stillUsed.Contains(x.Id)).ToList();
+                orphans = d.Media.Where(x => dropped.Contains(x.Id) && (x.Info.ContainsKey("canva") || x.Info.ContainsKey("pdf")) && !stillUsed.Contains(x.Id)).ToList();
                 var orphanIds = orphans.Select(o => o.Id).ToHashSet();
                 d.Media.RemoveAll(x => orphanIds.Contains(x.Id));
             }
+            if (appId == "pdf" && item.Settings.GetValueOrDefault("pdf") is { Length: > 0 } oldPdf && oldPdf != settings.GetValueOrDefault("pdf")) oldPdfs.Add(oldPdf);   // autre PDF : l'ancien n'est plus utile
             item.Name = name.Trim();
             item.AppVersion = m.Version;
             item.Settings = settings;
@@ -164,6 +207,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         });
         foreach (var o in orphans.Where(o => o.FileName != null))
             try { File.Delete(Path.Combine(AppPaths.MediaDir, o.FileName!)); } catch (IOException) { }
+        foreach (var p in oldPdfs) PdfService.Delete(p);
         return result;
     }
 

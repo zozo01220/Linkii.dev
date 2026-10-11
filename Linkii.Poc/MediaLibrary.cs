@@ -83,6 +83,44 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
         return files.Count;
     }
 
+    /// <summary>Fichiers exportés depuis Canva (Info["canva"]) que plus rien n'utilise.</summary>
+    public List<MediaItem> UnusedCanva() => store.Read(d => UnusedCanva(d.Media, d.Playlists, d.Screens));
+
+    /// <summary>
+    /// Exports Canva sans emploi : ni dans un contenu, ni dans une liste de lecture, ni dans ce que les écrans ou les listes ont publié
+    /// (un fichier encore diffusé n'est jamais proposé). Les exports en cours de conversion sont ignorés.
+    /// </summary>
+    public static List<MediaItem> UnusedCanva(IEnumerable<MediaItem> media, IEnumerable<Playlist> playlists, IEnumerable<Screen> screens) =>
+        UnusedExports(media, playlists, screens, "canva");
+
+    /// <summary>Même recherche pour les fichiers produits par une app (Info[key] : « canva », « pdf »).</summary>
+    public static List<MediaItem> UnusedExports(IEnumerable<MediaItem> media, IEnumerable<Playlist> playlists, IEnumerable<Screen> screens, string key)
+    {
+        var mediaList = media.ToList();
+        var candidates = mediaList.Where(m => IsFile(m) && m.Info.ContainsKey(key) && m.Status != "processing").ToList();
+        if (candidates.Count == 0) return candidates;
+
+        var used = new HashSet<Guid>();
+        foreach (var inst in mediaList.Where(m => m.AppId != null)) used.UnionWith(inst.Settings.Values.SelectMany(AppField.MediaIds));
+        var lists = playlists.ToList();
+        foreach (var p in lists) used.UnionWith(p.Draft.Select(i => i.MediaId));
+
+        var published = lists.SelectMany(p => p.Published)
+            .Concat(screens.SelectMany(s => s.Published.Concat(s.PublishedZones.SelectMany(z => z)).Concat(s.PublishedLists.Values.SelectMany(l => l))))
+            .ToList();
+        foreach (var i in published)
+        {
+            if (i.MediaId is { } id) used.Add(id);
+            used.UnionWith(i.Settings.Values.SelectMany(AppField.MediaIds));
+        }
+        var urls = published.SelectMany(i => (i.Urls ?? new()).Append(i.Url ?? "")).Where(u => u.Length > 0).ToList();
+
+        return candidates.Where(m => !used.Contains(m.Id) && (m.FileName == null || !urls.Any(u => u.Contains(m.FileName)))).ToList();
+    }
+
+    /// <summary>Retire de la médiathèque les exports Canva sans emploi (voir <see cref="UnusedCanva()"/>), fichiers sur le disque compris. Rend leur nombre.</summary>
+    public int DeleteUnusedCanva() => Delete(UnusedCanva().Select(m => m.Id).ToList());
+
     private IEnumerable<string> MediaFields(MediaItem instance) =>
         catalog.Find(instance.AppId)?.Settings.Where(f => f.IsMedia).Select(f => f.Key) ?? Enumerable.Empty<string>();
 }

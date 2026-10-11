@@ -294,11 +294,33 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
                 store.Write(d => { item.Name = name.Length > 120 ? name[..120] : name; item.Info["canva"] = design.Id; });
                 files.Add(item);
             }
+            PurgeUnused(clientId, design.Id, files.Select(f => f.Id).ToHashSet());
             return new(files, null);
         }
         catch (CanvaException ex) { return new(new(), ex.Message); }
         catch (HttpRequestException) { return new(new(), "Canva est injoignable. Vérifiez la connexion du serveur et réessayez."); }
         catch (KeyNotFoundException) { return new(new(), "Réponse de Canva inattendue."); }
+    }
+
+    /// <summary>
+    /// Un nouvel export remplace les précédents du même design : ceux que rien n'utilise (export abandonné avant l'enregistrement,
+    /// contenu supprimé) sont retirés. Ceux d'un contenu enregistré le sont à son enregistrement (<see cref="AppService.Save"/>).
+    /// </summary>
+    private void PurgeUnused(Guid clientId, string designId, HashSet<Guid> keep)
+    {
+        var removed = store.Write(d =>
+        {
+            var unused = MediaLibrary.UnusedCanva(d.Media.Where(m => m.ClientId == clientId), d.Playlists.Where(p => p.ClientId == clientId), d.Screens.Where(s => s.ClientId == clientId))
+                .Where(m => m.Info["canva"] == designId && !keep.Contains(m.Id)).ToList();
+            var ids = unused.Select(m => m.Id).ToHashSet();
+            d.Media.RemoveAll(m => ids.Contains(m.Id));
+            return unused;
+        });
+        foreach (var f in removed.Where(m => m.FileName != null))
+        {
+            try { File.Delete(Path.Combine(AppPaths.MediaDir, f.FileName!)); } catch (IOException) { }
+            Thumbnails.Delete(f.FileName!);
+        }
     }
 
     /// <summary>Retire de la médiathèque des fichiers exportés depuis Canva (fichiers sur disque compris).</summary>

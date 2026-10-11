@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette – Intégration PDF</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --nuit:#0B1F3A; --acier:#5A6B80; --brume:#DDE3EA; --fond:#F5F7FA; --signal:#3B82C4; --bord2:#C5CED9; --ok-bg:#E1F0E8; --ok-tx:#155A38; --ok-dot:#1E8E5A; --warn-bg:#FFF1DB; --warn-tx:#7A4A00; --err-bg:#FBE4E4; --err-tx:#8A1F1F; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; font:400 15px/1.5 "IBM Plex Sans",sans-serif; color:var(--nuit); background:#8d97a6; display:grid; place-items:center; padding:84px 24px 24px; }
+  .demo { position:fixed; top:0; left:0; right:0; z-index:20; background:#fff; border-bottom:1px solid var(--bord2); padding:10px 14px; display:flex; gap:6px; align-items:center; flex-wrap:wrap; font-size:13px; color:var(--acier); }
+  .demo button { font:inherit; font-size:13px; padding:5px 12px; border-radius:99px; border:1px solid var(--bord2); background:#fff; color:var(--acier); cursor:pointer; }
+  .demo button.on { background:var(--nuit); border-color:var(--nuit); color:#fff; }
+
+  .modal { width:min(920px,100%); background:#fff; border-radius:6px; overflow:hidden; box-shadow:0 20px 60px rgba(11,31,58,.35); position:relative; }
+  .head { display:flex; align-items:center; gap:12px; padding:14px 18px; border-bottom:1px solid var(--brume); }
+  .logo { width:40px; height:40px; border-radius:50%; background:#C0392B; color:#fff; display:grid; place-items:center; flex:none; font-weight:600; font-size:12px; letter-spacing:.02em; }
+  .ttl { flex:1; min-width:0; }
+  .ttl .r { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .ttl h1 { margin:0; font-size:18px; font-weight:600; }
+  .ttl small { color:var(--acier); font-size:13px; }
+  .btn { font:inherit; font-weight:500; padding:9px 16px; border-radius:4px; border:1px solid var(--bord2); background:#fff; color:var(--nuit); cursor:pointer; white-space:nowrap; display:inline-flex; align-items:center; gap:8px; }
+  .btn.sm { padding:5px 12px; font-size:14px; }
+  .btn.pri { background:var(--nuit); border-color:var(--nuit); color:#fff; }
+  .btn[disabled] { opacity:.45; cursor:not-allowed; }
+  .x { border:0; background:none; color:var(--acier); font-size:22px; line-height:1; cursor:pointer; padding:6px; border-radius:4px; }
+
+  /* Source : UNE ligne */
+  .src { background:var(--fond); border-bottom:1px solid var(--brume); padding:14px 18px; }
+  .src .lab { display:flex; align-items:center; justify-content:space-between; font-size:13px; font-weight:500; color:var(--acier); margin-bottom:6px; }
+  .chip { display:inline-flex; align-items:center; gap:6px; font-weight:400; font-size:12.5px; color:var(--acier); }
+  .chip::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--ok-dot); }
+  .pick { display:flex; align-items:center; gap:10px; background:#fff; border:1px solid var(--bord2); border-radius:4px; padding:7px 8px 7px 12px; min-height:42px; color:var(--acier); }
+  .pick b { color:var(--nuit); font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pick .sp { flex:1; }
+  .pdfico { width:22px; height:26px; border-radius:2px; background:#C0392B; color:#fff; font-size:8px; font-weight:700; display:grid; place-items:end center; padding-bottom:3px; flex:none; }
+
+  .cols { display:grid; grid-template-columns:1.15fr 1fr; gap:24px; padding:18px; }
+  .t { margin:0 0 10px; font-size:12px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--acier); display:flex; justify-content:space-between; align-items:center; }
+  .t .lnk { text-transform:none; letter-spacing:0; font-weight:500; color:var(--signal); cursor:pointer; font-size:13px; }
+
+  /* Aperçu : scène 16:9 + carrousel 3D de pages portrait */
+  .stage { aspect-ratio:16/9; border-radius:4px; background:#0b1f3a; position:relative; overflow:hidden; perspective:900px; }
+  .car { position:absolute; inset:0; transform-style:preserve-3d; }
+  .pg { position:absolute; top:50%; left:50%; height:86%; aspect-ratio:210/297; background:#fff; border-radius:2px; box-shadow:0 6px 24px rgba(0,0,0,.45); padding:7% 8%; display:flex; flex-direction:column; gap:5px; transition:transform .45s ease, opacity .45s; cursor:pointer; overflow:hidden; }
+  .pg i { display:block; height:4px; background:#c8d0da; border-radius:2px; }
+  .pg i.h { height:9px; width:60%; background:#0B1F3A; margin-bottom:5px; }
+  .pg i.s { width:70%; } .pg i.m { width:85%; }
+  .pg .blk { height:26%; background:linear-gradient(135deg,#9fc4e6,#3B82C4); border-radius:2px; margin:4px 0; }
+  .pg .no { position:absolute; bottom:4px; right:6px; font-size:7px; color:#8a97a6; }
+  .nav { position:absolute; top:50%; transform:translateY(-50%); width:30px; height:30px; border-radius:50%; border:0; background:rgba(255,255,255,.18); color:#fff; font-size:16px; cursor:pointer; z-index:3; }
+  .nav.l { left:8px } .nav.r { right:8px }
+  .counter { position:absolute; bottom:8px; left:0; right:0; text-align:center; color:#cfd8e3; font-size:12px; z-index:3; }
+  .below { display:flex; align-items:center; gap:10px; margin-top:10px; flex-wrap:wrap; }
+  .below small { color:var(--acier); font-size:12.5px; flex:1; min-width:180px; }
+  .badge { display:inline-flex; align-items:center; gap:6px; padding:2px 10px; border-radius:99px; font-size:12.5px; background:var(--ok-bg); color:var(--ok-tx); }
+  .badge.warn { background:var(--warn-bg); color:var(--warn-tx); }
+
+  /* États */
+  .empty { aspect-ratio:16/9; display:none; place-content:center; justify-items:center; gap:4px; text-align:center; border:2px dashed var(--bord2); border-radius:4px; background:var(--fond); color:var(--acier); padding:16px; }
+  .empty b { color:var(--nuit); font-weight:500; }
+  .prog { aspect-ratio:16/9; display:none; place-content:center; justify-items:center; gap:10px; text-align:center; border-radius:4px; background:var(--fond); border:1px solid var(--brume); color:var(--acier); padding:16px; }
+  .bar { width:240px; height:8px; border-radius:99px; background:var(--brume); overflow:hidden; } .bar span { display:block; height:100%; width:55%; background:var(--signal); border-radius:99px; }
+  .alert { display:none; margin-top:10px; padding:9px 12px; border-radius:4px; font-size:13.5px; }
+  .alert.err { background:var(--err-bg); color:var(--err-tx); } .alert.warn { background:var(--warn-bg); color:var(--warn-tx); }
+  body.s-ok .stage { display:block; }
+  body:not(.s-ok) .stage, body:not(.s-ok) .below { display:none; }
+  body.s-vide .empty, body.s-conv .prog { display:grid; }
+  body.s-vide .conf, body.s-conv .conf, body.s-err .conf { opacity:.45; pointer-events:none; }
+  body.s-err .empty { display:grid; } body.s-err .alert.err { display:block; }
+  body.s-trop .alert.warn { display:block; }
+  body.s-vide .meta, body.s-conv .meta, body.s-err .meta { display:none; }
+
+  .conf { display:grid; gap:16px; align-content:start; }
+  label.l { display:block; font-size:13px; font-weight:500; color:var(--acier); margin-bottom:6px; }
+  .unit { position:relative; } .unit input { width:100%; font:inherit; padding:10px 84px 10px 12px; border:1px solid var(--bord2); border-radius:4px; }
+  .unit::after { content:attr(data-u); position:absolute; right:12px; top:50%; transform:translateY(-50%); color:var(--acier); font-size:13px; }
+  select, .txt { width:100%; font:inherit; padding:10px 12px; border:1px solid var(--bord2); border-radius:4px; background:#fff; }
+  .seg { display:flex; border:1px solid var(--bord2); border-radius:4px; overflow:hidden; background:#fff; }
+  .seg label { position:relative; flex:1; text-align:center; } .seg input { position:absolute; inset:0; opacity:0; cursor:pointer; margin:0; }
+  .seg span { display:block; padding:9px 14px; font-size:14px; color:var(--acier); border-left:1px solid var(--bord2); white-space:nowrap; }
+  .seg label:first-child span { border-left:0; } .seg input:checked + span { background:var(--nuit); color:#fff; }
+  .foot { display:flex; justify-content:flex-end; gap:10px; padding:12px 18px; background:var(--fond); border-top:1px solid var(--brume); }
+
+  /* Options avancées */
+  .ov { position:absolute; inset:0; background:rgba(11,31,58,.45); display:none; place-items:center; z-index:10; padding:20px; }
+  .ov.on { display:grid; }
+  .adv { width:min(520px,100%); background:#fff; border-radius:6px; box-shadow:0 20px 60px rgba(11,31,58,.4); overflow:hidden; }
+  .adv .head { padding:12px 18px; } .adv .head h2 { margin:0; font-size:16px; flex:1; }
+  .adv .body { padding:18px; display:grid; gap:16px; }
+  .sw { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .sw small { display:block; color:var(--acier); font-size:12.5px; }
+  .sw input { appearance:none; width:40px; height:22px; border-radius:99px; background:var(--bord2); position:relative; cursor:pointer; flex:none; transition:.15s; }
+  .sw input::after { content:""; position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%; background:#fff; transition:.15s; }
+  .sw input:checked { background:var(--nuit); } .sw input:checked::after { left:20px; }
+  .note { max-width:920px; margin:18px auto 0; color:#fff; font-size:13px; opacity:.9; }
+  @media (max-width:720px){ .cols{grid-template-columns:1fr} }
+</style>
+</head>
+<body class="s-ok">
+<div class="demo">État de la fenêtre :
+  <button data-s="ok" class="on">PDF prêt</button>
+  <button data-s="vide">Aucun PDF</button>
+  <button data-s="conv">Conversion en cours</button>
+  <button data-s="trop">PDF trop long</button>
+  <button data-s="err">PDF refusé</button>
+  <span style="margin-left:6px">·</span>
+  <button id="bAdv">Options avancées</button>
+  <button id="bLand">Écran : paysage / portrait</button>
+</div>
+
+<div class="modal" id="modal">
+  <div class="head">
+    <div class="logo">PDF</div>
+    <div class="ttl"><div class="r"><h1>Document PDF</h1><button class="btn sm">✎ Renommer</button></div><small>Ajout à « UNIL Youtube »</small></div>
+    <button class="x" id="gear" title="Options avancées" aria-label="Options avancées"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></button>
+    <button class="x" aria-label="Fermer">×</button>
+  </div>
+
+  <!-- Source : une seule ligne -->
+  <div class="src">
+    <div class="lab"><span>Fichier PDF *</span><span class="chip meta">Converti en images 1080p · lecture hors ligne</span></div>
+    <div class="pick" id="pick"></div>
+  </div>
+
+  <div class="cols">
+    <section>
+      <h2 class="t">Aperçu <span class="lnk meta" id="grid">Grille</span></h2>
+      <div class="stage" id="stage">
+        <div class="car" id="car"></div>
+        <button class="nav l" id="prev" aria-label="Page précédente">‹</button>
+        <button class="nav r" id="next" aria-label="Page suivante">›</button>
+        <div class="counter" id="cnt"></div>
+      </div>
+      <div class="empty" id="empty"><b>Aucun aperçu</b><span id="emptyTxt">Choisissez ou déposez un fichier PDF ci-dessus.</span></div>
+      <div class="prog"><b style="color:var(--nuit);font-weight:500">Conversion des pages…</b><div class="bar"><span></span></div><span>page 7 sur 12 · vous pouvez fermer la fenêtre</span></div>
+      <div class="alert err">Ce PDF est protégé par un mot de passe : retirez la protection, puis choisissez-le à nouveau.</div>
+      <div class="alert warn">Ce document compte 84 pages ; seules les <b>50 premières</b> seront affichées. Les options avancées permettent de choisir les pages.</div>
+      <div class="below meta">
+        <span class="badge" id="badge">12 pages · portrait A4</span>
+        <small>Après une modification du document : remplacez le fichier, enregistrez, puis publiez l'écran.</small>
+      </div>
+    </section>
+
+    <section class="conf">
+      <h2 class="t" style="margin:0">Configuration</h2>
+      <div><label class="l">Durée de chaque page *</label><div class="unit" data-u="secondes"><input type="number" value="10"></div></div>
+      <div><label class="l">Cadrage</label>
+        <div class="seg"><label><input type="radio" name="f" checked><span>Page entière</span></label><label><input type="radio" name="f"><span>Remplir l'écran</span></label></div>
+      </div>
+      <div><label class="l">Transition entre les pages</label><select><option>Fondu enchaîné</option><option>Glissement (de droite à gauche)</option><option>Zoom avant en fondu</option><option>Aucune (coupure franche)</option></select></div>
+    </section>
+  </div>
+  <div class="foot"><button class="btn">Annuler</button><button class="btn pri" id="add">Ajouter à la liste de lecture</button></div>
+
+  <!-- Options avancées (fenêtre par-dessus, comme le standard §30) -->
+  <div class="ov" id="ov">
+    <div class="adv">
+      <div class="head"><h2>Options avancées</h2><button class="x" id="advX" aria-label="Fermer">×</button></div>
+      <div class="body">
+        <div><label class="l">Pages à afficher</label><input class="txt" placeholder="Toutes · ou par exemple 1-5, 8, 10-12" value=""><small style="color:var(--acier);font-size:12.5px">Laisser vide pour tout afficher (50 pages au maximum).</small></div>
+        <div><label class="l">Fond autour de la page</label>
+          <div class="seg"><label><input type="radio" name="b" checked><span>Noir</span></label><label><input type="radio" name="b"><span>Blanc</span></label><label><input type="radio" name="b"><span>Page floutée</span></label></div>
+        </div>
+        <div><label class="l">Sens de l'écran</label><div class="seg"><label><input type="radio" name="c" checked><span>Paysage</span></label><label><input type="radio" name="c"><span>Portrait</span></label></div></div>
+        <div><label class="l">Vitesse de la transition</label><select><option>Normale (0,8 s)</option><option>Rapide (0,4 s)</option><option>Lente (1,5 s)</option><option>Très lente (3 s)</option></select></div>
+      </div>
+      <div class="foot"><button class="btn" id="advC">Annuler</button><button class="btn pri" id="advV">Valider</button></div>
+    </div>
+  </div>
+</div>
+<p class="note">Mêmes zones que le standard §30 : source sur une ligne · aperçu à gauche (carrousel 3D) · configuration à droite · réglages rares dans l'icône « Options avancées ».</p>
+
+<script>
+  var N = 12, cur = 0, wide = true;
+  var car = document.getElementById('car'), pick = document.getElementById('pick');
+  function build() {
+    car.innerHTML = '';
+    for (var i = 0; i < N; i++) {
+      var d = document.createElement('div'); d.className = 'pg';
+      d.innerHTML = '<i class="h"></i><i class="m"></i><i></i><i class="s"></i><div class="blk"></div><i class="m"></i><i></i><i class="s"></i><i></i><i class="m"></i><span class="no">' + (i + 1) + '</span>';
+      (function (k) { d.onclick = function () { cur = k; place(); }; })(i);
+      car.appendChild(d);
+    }
+    place();
+  }
+  function place() {
+    var pgs = car.children, n = pgs.length;
+    for (var i = 0; i < n; i++) {
+      var o = i - cur, a = Math.abs(o), s = o < 0 ? -1 : 1;
+      var p = pgs[i];
+      if (a > 3) { p.style.opacity = 0; p.style.pointerEvents = 'none'; continue; }
+      p.style.opacity = 1; p.style.pointerEvents = '';
+      p.style.zIndex = 10 - a;
+      p.style.transform = 'translate(-50%,-50%) translateX(' + (o * 34) + '%) translateZ(' + (-a * 90) + 'px) rotateY(' + (-s * Math.min(a, 1) * 42) + 'deg) scale(' + (wide ? 1 : 1.0) + ')';
+    }
+    document.getElementById('cnt').textContent = 'Page ' + (cur + 1) + ' sur ' + n;
+  }
+  document.getElementById('prev').onclick = function () { cur = Math.max(0, cur - 1); place(); };
+  document.getElementById('next').onclick = function () { cur = Math.min(car.children.length - 1, cur + 1); place(); };
+
+  var picks = {
+    ok:  '<span class="pdfico">PDF</span><b>Programme du semestre.pdf</b><span>· 12 pages · 2,4 Mo</span><span class="sp"></span><button class="btn sm">Remplacer</button>',
+    trop:'<span class="pdfico">PDF</span><b>Rapport annuel 2025.pdf</b><span>· 84 pages · 18 Mo</span><span class="sp"></span><button class="btn sm">Remplacer</button>',
+    vide:'<span>Aucun fichier choisi</span><span class="sp"></span><button class="btn sm pri">Choisir un PDF</button>',
+    conv:'<span class="pdfico">PDF</span><b>Programme du semestre.pdf</b><span>· 12 pages · 2,4 Mo</span><span class="sp"></span><span class="badge warn">Conversion…</span>',
+    err: '<span class="pdfico">PDF</span><b>Contrat confidentiel.pdf</b><span>· refusé</span><span class="sp"></span><button class="btn sm pri">Choisir un autre PDF</button>'
+  };
+  function setState(s) {
+    document.body.className = 's-' + (s === 'trop' ? 'ok s-trop' : s).replace('s-ok s-trop', 'ok s-trop');
+    if (s === 'trop') document.body.className = 's-ok s-trop';
+    pick.innerHTML = picks[s];
+    document.getElementById('add').disabled = (s !== 'ok' && s !== 'trop');
+    document.getElementById('badge').className = 'badge' + (s === 'trop' ? ' warn' : '');
+    document.getElementById('badge').textContent = s === 'trop' ? '50 pages sur 84 · portrait A4' : '12 pages · portrait A4';
+    N = s === 'trop' ? 20 : 12; cur = 0; build();
+    document.querySelectorAll('.demo button[data-s]').forEach(function (b) { b.className = b.dataset.s === s ? 'on' : ''; });
+  }
+  document.querySelectorAll('.demo button[data-s]').forEach(function (b) { b.onclick = function () { setState(b.dataset.s); }; });
+  var ov = document.getElementById('ov');
+  function adv(on) { ov.classList.toggle('on', on); }
+  ['gear', 'bAdv'].forEach(function (id) { document.getElementById(id).onclick = function () { adv(true); }; });
+  ['advX', 'advC', 'advV'].forEach(function (id) { document.getElementById(id).onclick = function () { adv(false); }; });
+  document.getElementById('bLand').onclick = function () {
+    var st = document.getElementById('stage');
+    wide = !wide; st.style.aspectRatio = wide ? '16/9' : '9/16'; st.style.maxWidth = wide ? '' : '240px'; st.style.margin = wide ? '' : '0 auto';
+    this.className = wide ? '' : 'on'; place();
+  };
+  setState('ok');
+</script>
+</body>
+</html>

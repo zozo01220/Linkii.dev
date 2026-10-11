@@ -416,6 +416,12 @@
     if (r) r(h);
   });
 
+  /* ---------- Document PDF : pages converties en images par le serveur (diaporama) ---------- */
+  A.register('pdf', function (h) {
+    var r = A.get('slideshow-images');
+    if (r) r(h);
+  });
+
   /* ---------- Dossier Drive : images et vidéos d'un dossier synchronisé ----------
      Les fichiers (item.urls) sont copiés sur le serveur et tenus à jour à chaque synchronisation : l'écran reçoit
      une nouvelle version (préchargée) quand le dossier change. Une image reste « interval » secondes, une vidéo jusqu'à sa fin. */

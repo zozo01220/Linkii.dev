@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Linkii.Poc.Tests;
 
+[Collection("platform")]   // AppPaths est statique : sérialisé avec les autres tests qui s'en servent
 public class ThumbnailsTests : IDisposable
 {
     private readonly string dir = Path.Combine(Path.GetTempPath(), "linkii-thumbs-" + Guid.NewGuid().ToString("N"));

@@ -20,6 +20,7 @@ builder.Services.AddSingleton<Mailer>();
 builder.Services.AddScoped<Toaster>();
 builder.Services.AddSingleton<PlayLog>();
 builder.Services.AddSingleton<CanvaService>();
+builder.Services.AddSingleton<PdfService>();
 builder.Services.AddScoped<TenantContext>();
 builder.Services.AddScoped<TenantStore>();
 builder.Services.AddSingleton<Notifier>();
@@ -116,10 +117,12 @@ var dataDir = app.Configuration["Linkii:DataDir"] ?? app.Environment.ContentRoot
 AppPaths.MediaDir = Path.Combine(dataDir, "media");
 AppPaths.BrandDir = Path.Combine(dataDir, "brand");
 AppPaths.ThumbDir = Path.Combine(dataDir, "thumbs");
+AppPaths.PdfDir = Path.Combine(dataDir, "pdf");
 AppPaths.CaptureDir = Path.Combine(dataDir, "captures");
 Directory.CreateDirectory(AppPaths.MediaDir);
 Directory.CreateDirectory(AppPaths.BrandDir);
 Directory.CreateDirectory(AppPaths.ThumbDir);
+Directory.CreateDirectory(AppPaths.PdfDir);
 
 var store0 = app.Services.GetRequiredService<JsonStore>();
 Seed.Run(store0, app.Configuration, store0.Path, app.Logger);

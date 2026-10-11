@@ -1,3 +1,5 @@
+@inject PdfService Pdf
+@inject TenantStore Store
 @inject AppService Apps
 @inject Toaster Toast
 
@@ -117,7 +119,7 @@ else
                 </div>
                 <div class="modal-foot">
                     <button type="button" class="btn ghost" @onclick="CancelAdvanced">Annuler</button>
-                    <button type="button" class="btn" @onclick="() => advanced = false">Valider</button>
+                    <button type="button" class="btn" @onclick="ApplyAdvanced">Valider</button>
                 </div>
             </div>
         </SectionContent>
@@ -141,7 +143,7 @@ else
     private HashSet<string> storedSecrets = new();
     private string name = "";
     private List<string> errors = new();
-    private bool installed, testing, advanced, renaming;
+    private bool installed, testing, advanced, renaming, converting;
     private string renameDraft = "";
     private ContentPreview? previewRef;
     private Dictionary<string, string>? advancedBackup;
@@ -188,6 +190,7 @@ else
     {
         if (errors.Count > 0) return ("bad", errors.Count > 1 ? $"{errors.Count} champs à corriger : {string.Join(" · ", errors)}" : errors[0]);
         if (testing) return ("info", "Test en cours…");
+        if (converting) return ("info", "Conversion du PDF…");
         return null;
     }
 
@@ -215,6 +218,29 @@ else
         if (manifest == null || !manifest.HasAdvanced) return;
         advancedBackup = manifest.InZone("advanced").ToDictionary(f => f.Key, f => values.GetValueOrDefault(f.Key) ?? "");
         advanced = true;
+    }
+
+    // Valider les options avancées. Document PDF : les pages à afficher et le fond sont appliqués à la conversion, le PDF gardé est donc converti à nouveau.
+    private async Task ApplyAdvanced()
+    {
+        advanced = false;
+        if (manifest?.Id != "pdf" || advancedBackup == null) return;
+        if (!PdfService.RenderKeys.Any(k => (advancedBackup.GetValueOrDefault(k) ?? "") != (values.GetValueOrDefault(k) ?? ""))) return;
+        if (PdfService.SourceOf(values) is not { } source) return;   // pas encore de PDF : les réglages serviront à la première conversion
+        converting = true; StateHasChanged();
+        try
+        {
+            var res = await Pdf.Convert(Store.ClientId, Store.AreaId, source, PdfService.Options.From(values));
+            if (res.Error != null)
+            {
+                foreach (var k in PdfService.RenderKeys) if (advancedBackup.TryGetValue(k, out var old)) values[k] = old;   // réglages précédents conservés
+                Toast.Error(res.Error);
+                return;
+            }
+            PdfService.Apply(values, source, res);
+            Toast.Ok(res.Truncated ? $"PDF converti : {res.Selected} premières pages sur {source.Pages}." : $"PDF converti : {res.Selected} page{(res.Selected > 1 ? "s" : "")}.");
+        }
+        finally { converting = false; }
     }
 
     private void CancelAdvanced()

@@ -1,0 +1,75 @@
+@inject PdfService Pdf
+@inject AppService Apps
+@inject TenantStore Store
+@inject MediaLibrary Library
+@inject Toaster Toast
+
+@* Champ « pdf » de l'app Document PDF : fichier PDF choisi sur l'ordinateur, gardé sur le serveur puis converti en images (une par page) dans la médiathèque.
+   Valeurs remplies : pdf (identifiant du fichier gardé), pdfTitle, pdfPages (pages du document), pages (identifiants des images). Une seule ligne (DEV-POC.md §30). *@
+<div class="cv">
+    <div class="ci-pick">
+        <span class="ci-pick-sum">
+            @if (SourceId.Length > 0)
+            {
+                <span class="pdf-ico" aria-hidden="true">PDF</span>
+                <b title="@Title">@(Title).pdf</b>
+                <span class="muted">· @Summary</span>
+            }
+            else { <span class="muted">Aucun fichier choisi</span> }
+        </span>
+        <label class="btn @(SourceId.Length > 0 ? "ghost" : "") file-btn @(busy ? "disabled" : "")">
+            <InputFile OnChange="Picked" accept=".pdf,application/pdf" disabled="@busy" />
+            <Ico Name="@(SourceId.Length > 0 ? "refresh" : "upload")" Size="15" />
+            @(SourceId.Length > 0 ? "Remplacer" : "Choisir un PDF")
+        </label>
+    </div>
+    @if (busy) { <div class="cv-busy"><span class="spinner"></span> @status</div> }
+    @if (error != null) { <div class="err">@error</div> }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public AppField Field { get; set; } = default!;
+    [Parameter, EditorRequired] public Dictionary<string, string> Values { get; set; } = default!;
+    /// <summary>Contenu en cours de modification (null : nouveau) : son PDF enregistré ne doit pas être supprimé quand on en choisit un autre.</summary>
+    [Parameter] public Guid? InstanceId { get; set; }
+    /// <summary>Le formulaire se redessine : l'aperçu montre les nouvelles pages.</summary>
+    [Parameter] public EventCallback OnChange { get; set; }
+
+    private bool busy;
+    private string status = "";
+    private string? error;
+
+    private string SourceId => Values.GetValueOrDefault(Field.Key) ?? "";
+    private string Title => Values.GetValueOrDefault("pdfTitle") is { Length: > 0 } t ? t : "Document";
+    private int Total => int.TryParse(Values.GetValueOrDefault("pdfPages"), out var n) ? n : 0;
+    private int Converted => AppField.MediaIds(Values.GetValueOrDefault("pages")).Count;
+
+    private string Summary => Converted == 0 ? "pas encore converti"
+        : Total > Converted ? $"{Converted} page{(Converted > 1 ? "s" : "")} sur {Total}"
+        : $"{Converted} page{(Converted > 1 ? "s" : "")}";
+
+    private async Task Picked(InputFileChangeEventArgs e)
+    {
+        busy = true; error = null; status = "Envoi du PDF…";
+        StateHasChanged();
+        try
+        {
+            var saved = await Pdf.SaveSource(e.File);
+            if (saved.Source is not { } source) { Fail(saved.Error ?? "PDF refusé."); return; }
+            var res = await Pdf.Convert(Store.ClientId, Store.AreaId, source, PdfService.Options.From(Values), new Progress<string>(s => { status = s; _ = InvokeAsync(StateHasChanged); }));
+            if (res.Error != null) { PdfService.Delete(source.Id); Fail(res.Error); return; }
+
+            var previous = SourceId;
+            var storedId = InstanceId is { } id ? Apps.Instances("pdf").FirstOrDefault(m => m.Id == id)?.Settings.GetValueOrDefault(Field.Key) : null;
+            PdfService.Apply(Values, source, res);
+            if (previous.Length > 0 && previous != storedId) PdfService.Delete(previous);   // choisi pendant cette édition puis remplacé
+            Toast.Ok(res.Truncated ? $"« {source.Title} » converti : {res.Selected} premières pages sur {source.Pages}."
+                : $"« {source.Title} » converti : {res.Selected} page{(res.Selected > 1 ? "s" : "")}.");
+            await OnChange.InvokeAsync();
+        }
+        catch (IOException) { Fail("Le fichier n'a pas pu être lu. Réessayez."); }
+        finally { busy = false; }
+    }
+
+    private void Fail(string message) { error = message; Toast.Error(message); }
+}

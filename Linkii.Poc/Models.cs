@@ -874,7 +874,7 @@ public static class Helpers
     public static int? ImagesSeconds(PublishedItem i)
     {
         if (i.Urls is not { Count: > 0 } urls || urls.Any(u => VideoFile.IsMatch(u))) return null;
-        var images = i.AppId is "slideshow-images" or "drive" || (i.AppId == "canva" && i.Settings.GetValueOrDefault("kind") != "video");
+        var images = i.AppId is "slideshow-images" or "drive" or "pdf" || (i.AppId == "canva" && i.Settings.GetValueOrDefault("kind") != "video");
         if (!images) return null;
         var each = int.TryParse(i.Settings.GetValueOrDefault("interval"), out var s) ? Math.Clamp(s, 2, 600) : 8;
         return urls.Count * each;
@@ -950,5 +950,6 @@ public static class AppPaths
     public static string MediaDir = "media";
     public static string BrandDir = "brand";
     public static string ThumbDir = "thumbs";
+    public static string PdfDir = "pdf";   // PDF d'origine de l'app Document PDF (jamais servis)
     public static string CaptureDir = "captures";   // dernier aperçu du direct de chaque écran
 }

@@ -90,7 +90,7 @@ public class AppCatalog
 {
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
     private static readonly string[] AllPlacements = { "full", "top-left", "top-right", "bottom-left", "bottom-right", "top", "bottom" };
-    private static readonly string[] FieldTypes = { "text", "textarea", "number", "select", "bool", "color", "url", "secret", "date", "mailbox", "youtube", "textfile", "hidden", "media", "medias", "canva", "calendar", "drive" };
+    private static readonly string[] FieldTypes = { "text", "textarea", "number", "select", "bool", "color", "url", "secret", "date", "mailbox", "youtube", "textfile", "hidden", "media", "medias", "canva", "pdf", "calendar", "drive" };
     private readonly List<AppManifest> _apps = new();
 
     public IReadOnlyList<AppManifest> All => _apps;
@@ -209,6 +209,10 @@ public class AppCatalog
                 case "canva":   // le design doit avoir été exporté (pages en images, ou vidéo)
                     if (AppField.MediaIds(values.GetValueOrDefault(values.GetValueOrDefault("kind") == "video" ? "video" : "pages")).Count == 0)
                         errors.Add("Choisissez un design Canva : il est exporté dans la médiathèque à la sélection.");
+                    break;
+                case "pdf":   // le PDF doit avoir été converti en pages (images de la médiathèque)
+                    if (!PdfService.Exists(v) || AppField.MediaIds(values.GetValueOrDefault("pages")).Count == 0)
+                        errors.Add("Choisissez un fichier PDF : il est converti en images à la sélection.");
                     break;
                 case "media" or "medias":
                     var parts = v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
