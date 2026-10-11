@@ -1,0 +1,52 @@
+@* Grille hebdomadaire des plages de mise en veille : 7 jours × 24 heures, on clique ou on glisse pour peindre (voir Sleep). *@
+<div class="sl-grid" role="group" aria-label="Plages de mise en veille" @onmouseup="Stop" @onmouseleave="Stop">
+    <span></span>
+    @for (var h = 0; h < 24; h++) { <span class="sl-h">@(h % 3 == 0 ? h.ToString() : "")</span> }
+    @for (var d = 0; d < 7; d++)
+    {
+        var day = d;
+        <span class="sl-d">@Days[day]</span>
+        @for (var h = 0; h < 24; h++)
+        {
+            var hour = h;
+            var i = day * 24 + hour;
+            <button type="button" class="sl-c @(cells[i] == '1' ? "on" : "")" aria-pressed="@(cells[i] == '1' ? "true" : "false")" aria-label="@Days[day] @(hour):00"
+                    @onmousedown="() => Start(i)" @onmousedown:preventDefault @onmouseover="() => Over(i)"></button>
+        }
+    }
+</div>
+<div class="sl-legend">
+    <span><i class="sl-key"></i> Écran éteint (veille)</span>
+    <span class="grow"></span>
+    <button type="button" class="linklike" @onclick="Suggest">Nuits et week-ends</button>
+    <button type="button" class="linklike" @onclick="Clear">Tout effacer</button>
+</div>
+
+@code {
+    [Parameter] public string? Grid { get; set; }
+    [Parameter] public EventCallback<string> GridChanged { get; set; }
+
+    private static readonly string[] Days = { "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim" };
+    private char[] cells = new string('0', Sleep.Cells).ToCharArray();
+    private bool? paint;   // glisser : true = on veille, false = on réveille
+
+    protected override void OnParametersSet()
+    {
+        if (paint == null) cells = (Sleep.Valid(Grid) ? Grid! : new string('0', Sleep.Cells)).ToCharArray();
+    }
+
+    private Task Start(int i) { paint = cells[i] != '1'; return Set(i); }
+    private Task Over(int i) => paint != null ? Set(i) : Task.CompletedTask;
+    private void Stop() => paint = null;
+
+    private async Task Set(int i)
+    {
+        var c = paint == true ? '1' : '0';
+        if (cells[i] == c) return;
+        cells[i] = c;
+        await GridChanged.InvokeAsync(new string(cells));
+    }
+
+    private Task Suggest() => GridChanged.InvokeAsync(Sleep.Suggested());
+    private Task Clear() => GridChanged.InvokeAsync(new string('0', Sleep.Cells));
+}

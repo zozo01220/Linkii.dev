@@ -67,6 +67,46 @@
                 <p class="hint">Préréglage à la création d'un écran (modifiable écran par écran).</p>
                 <ScreenFormat Spec="spec" />
             </div>
+
+            <div class="card">
+                <h3>Mise en veille</h3>
+                <p class="hint">Éteint les écrans pendant des plages horaires (nuit, week-end). Le réglage se fait par aire, et chaque écran peut le remplacer.</p>
+                <div class="sv-row">
+                    <div class="t"><b>Plages de mise en veille</b><small>Fonction avancée, désactivée par défaut.</small></div>
+                    <div class="ctl"><button type="button" class="switch @(sleepEnabled ? "on" : "")" role="switch" aria-checked="@(sleepEnabled ? "true" : "false")" aria-label="Plages de mise en veille" @onclick="() => sleepEnabled = !sleepEnabled"><span></span></button></div>
+                </div>
+                @if (sleepEnabled)
+                {
+                    @if (areaCount == 1 && soleAreaId != Guid.Empty)
+                    {
+                        <AreaSleep AreaId="soleAreaId" />
+                    }
+                    else
+                    {
+                        <p class="hint" style="margin:12px 0 0">Enregistrez, puis réglez les plages de chaque aire dans <a href="/areas">Aires de gestion</a>.</p>
+                    }
+                }
+            </div>
+
+            <div class="card">
+                <h3>Luminosité et contraste</h3>
+                <p class="hint">Règle la luminosité et le contraste des écrans de l'app Android selon l'heure (jour, soirée, nuit). Le réglage se fait par aire, et chaque écran peut le remplacer ; par défaut, aucun écran n'est réglé.</p>
+                <div class="sv-row">
+                    <div class="t"><b>Luminosité et contraste selon l'heure</b><small>Fonction avancée, désactivée par défaut.</small></div>
+                    <div class="ctl"><button type="button" class="switch @(dimEnabled ? "on" : "")" role="switch" aria-checked="@(dimEnabled ? "true" : "false")" aria-label="Luminosité et contraste selon l'heure" @onclick="() => dimEnabled = !dimEnabled"><span></span></button></div>
+                </div>
+                @if (dimEnabled)
+                {
+                    @if (areaCount == 1 && soleAreaId != Guid.Empty)
+                    {
+                        <AreaDim AreaId="soleAreaId" />
+                    }
+                    else
+                    {
+                        <p class="hint" style="margin:12px 0 0">Enregistrez, puis réglez la luminosité de chaque aire dans <a href="/areas">Aires de gestion</a>.</p>
+                    }
+                }
+            </div>
         </div>
         break;
 
@@ -189,6 +229,8 @@
     private string? externalProvider;   // compte Microsoft ou Google, sans mot de passe Linkii
     private ScreenSpec spec = new();
     private int areaCount, memberCount;
+    private bool sleepEnabled, dimEnabled;
+    private Guid soleAreaId;   // l'aire, quand il n'y en a qu'une : ses plages se règlent ici
 
     protected override void OnInitialized()
     {
@@ -205,6 +247,8 @@
         var uid = Ctx.UserId;
         externalProvider = Root.Read(d => d.Users.FirstOrDefault(u => u.Id == uid) is { HasPassword: false } u ? u.ExternalProvider : null);
         (areaCount, memberCount) = Store.Read(d => (d.Areas.Count, d.Users.Count(u => u.Role == Roles.ClientMember)));
+        (sleepEnabled, dimEnabled) = (t.SleepEnabled, t.DimEnabled);
+        soleAreaId = areaCount == 1 ? Store.Read(d => d.Areas.First().Id) : Guid.Empty;
         spec = ScreenSpec.From(t);
     }
 
@@ -221,6 +265,7 @@
             var t = d.Tenant;
             t.Name = name.Trim(); t.Timezone = timezone;
             t.DefaultDurationSec = duration; t.ReloadHour = reloadHour;
+            t.SleepEnabled = sleepEnabled; t.DimEnabled = dimEnabled;
             t.DefaultScreenType = spec.Type; t.DefaultOrientation = spec.Orientation; t.DefaultResolution = spec.Resolution;
             if (t.IsGrowth)   // supervision : licence Growth (contrôlée ici aussi, pas seulement dans l'interface)
             {

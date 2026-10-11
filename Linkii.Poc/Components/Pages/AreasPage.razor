@@ -89,7 +89,7 @@
 @if (editing is { } ed)
 {
     <div class="modal-backdrop" @onclick="CloseEdit"></div>
-    <div class="modal app-modal sm" role="dialog" aria-modal="true" aria-labelledby="ea-title">
+    <div class="modal app-modal @(sleepOn || dimOn ? "" : "sm")" role="dialog" aria-modal="true" aria-labelledby="ea-title">
         <div class="modal-head">
             <div class="grow"><h3 id="ea-title">Aire « @ed.Area.Name »</h3></div>
             <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseEdit"><Ico Name="x" Size="20" /></button>
@@ -99,6 +99,16 @@
             <div class="row" style="flex-wrap:nowrap"><input id="ea-name" class="full" maxlength="60" @bind="editName" @bind:event="oninput" @onkeydown="OnRenameKey" /><button type="button" class="btn ghost" @onclick="Rename">Renommer</button></div>
             <label class="lbl">Zones <small>(elles classent les écrans de l'aire, sans effet sur les droits)</small></label>
             <AreaZones AreaId="ed.Area.Id" OnChanged="Load" />
+            @if (sleepOn)
+            {
+                <label class="lbl">Mise en veille <small>(plages et fuseau de l'aire)</small></label>
+                <AreaSleep AreaId="ed.Area.Id" />
+            }
+            @if (dimOn)
+            {
+                <label class="lbl">Luminosité et contraste <small>(écrans Android, selon l'heure)</small></label>
+                <AreaDim AreaId="ed.Area.Id" />
+            }
             @if (formError != null) { <div class="err">@formError</div> }
         </div>
         <div class="modal-foot">
@@ -126,7 +136,7 @@
     private List<Row> rows = new();
     private List<User> members = new();
     private Guid? currentId, menuFor;
-    private bool creating;
+    private bool creating, sleepOn, dimOn;
     private string newName = "", newAdmin = "", editName = "";
     private string? formError, deleteError;
     private Row? editing, deleting;
@@ -138,6 +148,7 @@
     {
         if (Created != null) Toast.Ok($"Aire « {Created} » créée.");
         if (Deleted != null) Toast.Ok($"Aire « {Deleted} » supprimée.");
+        (sleepOn, dimOn) = Store.Read(d => (d.Tenant.SleepEnabled, d.Tenant.DimEnabled));
         Load();
     }
 

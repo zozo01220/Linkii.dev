@@ -1,0 +1,36 @@
+@* Choix de la mise en veille d'un écran : suit son aire, jamais, ou grille propre. Utilisé par l'éditeur d'écran et l'action groupée. *@
+<div class="cseg" role="radiogroup" aria-label="Mise en veille">
+    @foreach (var (key, label) in Modes)
+    {
+        var k = key;
+        <label><input type="radio" name="@Name" checked="@(Mode == k)" @onchange="() => Pick(k)" /><span>@label</span></label>
+    }
+</div>
+@if (Mode == Sleep.Own)
+{
+    <div style="margin-top:12px"><SleepGrid Grid="@Grid" GridChanged="GridChanged" /></div>
+    <small class="muted">Les heures suivent le fuseau de l'aire.</small>
+}
+else
+{
+    <p class="hint" style="margin:10px 0 0">@(Mode == Sleep.Never ? "L'écran reste allumé en permanence, même si son aire se met en veille." : Inherited)</p>
+}
+
+@code {
+    [Parameter] public string Mode { get; set; } = Sleep.Inherit;
+    [Parameter] public EventCallback<string> ModeChanged { get; set; }
+    [Parameter] public string? Grid { get; set; }
+    [Parameter] public EventCallback<string> GridChanged { get; set; }
+    /// <summary>Phrase affichée quand l'écran suit son aire (ce que fait l'aire).</summary>
+    [Parameter] public string Inherited { get; set; } = "L'écran suit les plages de son aire.";
+    [Parameter] public string Name { get; set; } = "sleep-mode";
+
+    private static readonly (string, string)[] Modes = { (Sleep.Inherit, "Suit l'aire"), (Sleep.Never, "Jamais en veille"), (Sleep.Own, "Personnalisée") };
+
+    private async Task Pick(string mode)
+    {
+        Mode = mode;
+        if (mode == Sleep.Own && !Sleep.Any(Grid)) { Grid = Sleep.Suggested(); await GridChanged.InvokeAsync(Grid); }
+        await ModeChanged.InvokeAsync(mode);
+    }
+}

@@ -1,0 +1,38 @@
+@* Choix de la luminosité et du contraste d'un écran : aucun réglage (par défaut), comme l'aire, ou réglage propre. *@
+<div class="cseg" role="radiogroup" aria-label="Luminosité et contraste">
+    @foreach (var (key, label) in Modes)
+    {
+        var k = key;
+        <label><input type="radio" name="@Name" checked="@(Mode == k)" @onchange="() => Pick(k)" /><span>@label</span></label>
+    }
+</div>
+@if (Mode == Dim.Own)
+{
+    <div style="margin-top:12px"><DimEditor Plan="Plan" PlanChanged="PlanChanged" Asleep="@Asleep" /></div>
+    <small class="muted">Les heures suivent le fuseau de l'aire.</small>
+}
+else
+{
+    <p class="hint" style="margin:10px 0 0">@(Mode == Dim.Never ? "L'image est affichée telle quelle, quelle que soit l'heure." : Inherited)</p>
+}
+
+@code {
+    [Parameter] public string Mode { get; set; } = Dim.Never;
+    [Parameter] public EventCallback<string> ModeChanged { get; set; }
+    [Parameter] public DimPlan? Plan { get; set; }
+    [Parameter] public EventCallback<DimPlan?> PlanChanged { get; set; }
+    /// <summary>Phrase affichée quand l'écran suit son aire (ce que fait l'aire).</summary>
+    [Parameter] public string Inherited { get; set; } = "L'écran suit le réglage de son aire.";
+    /// <summary>Grille de veille qui s'applique à l'écran, pour hachurer ces heures dans l'éditeur.</summary>
+    [Parameter] public string? Asleep { get; set; }
+    [Parameter] public string Name { get; set; } = "dim-mode";
+
+    private static readonly (string, string)[] Modes = { (Dim.Never, "Aucun réglage"), (Dim.Inherit, "Suit l'aire"), (Dim.Own, "Personnalisé") };
+
+    private async Task Pick(string mode)
+    {
+        Mode = mode;
+        if (mode == Dim.Own && !Dim.Valid(Plan)) { Plan = Dim.Suggested(); await PlanChanged.InvokeAsync(Plan); }
+        await ModeChanged.InvokeAsync(mode);
+    }
+}

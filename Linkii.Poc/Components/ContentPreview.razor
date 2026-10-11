@@ -28,7 +28,6 @@
             {
                 <Carousel3D Items="files" Fit="@Fit" @key="files.Count" />
             }
-            @if (kind == "drive" && driveInfo != null) { <div class="cp-info"><span class="cp-pill ok">@driveInfo</span></div> }
             break;
 
         case "provider":
@@ -82,7 +81,6 @@
                         @if (list.Count == 0) { <div class="cp-row">Aucun événement à venir sur cette période.</div> }
                     </div>
                 }
-                <div class="cp-info"><span class="cp-pill @(!result.Ok ? "bad" : result.Message.StartsWith("⚠") ? "warn" : "ok")">@result.Message</span></div>
             }
             break;
     }
@@ -95,6 +93,9 @@
     [Parameter, EditorRequired] public Dictionary<string, string> Values { get; set; } = default!;
     /// <summary>Contenu déjà enregistré (ses secrets servent au test) ; null pour un nouveau contenu.</summary>
     [Parameter] public MediaItem? Instance { get; set; }
+    /// <summary>Résultat de la recherche (ok / warn / bad) ou état du dossier Drive : la fenêtre l'affiche en bandeau, en haut, sans défilement.</summary>
+    [Parameter] public EventCallback<(string Kind, string Text)> OnNotice { get; set; }
+    private string? lastDriveInfo;
 
     // Cadrage choisi (réglage « fit » de l'app) : l'aperçu le reproduit.
     private string Fit => Values.GetValueOrDefault("fit") == "cover" ? "cover" : "contain";
@@ -128,6 +129,7 @@
         loading = true; loaded = false; StateHasChanged();
         try { result = await Apps.Preview(Manifest, Values, Instance); loaded = true; }
         finally { loading = false; }
+        await OnNotice.InvokeAsync((!result.Ok ? "bad" : result.Message.StartsWith("⚠") ? "warn" : "ok", result.Message));
     }
 
     // Fichiers à montrer : champs « média » visibles (Canva : pages ou vidéo selon l'export) ou fichiers du dossier Drive choisi.
@@ -152,6 +154,8 @@
                 .Take(24).ToList();
             driveInfo = Library.DriveFolders().TryGetValue(folder, out var f)
                 ? $"{f.FileCount} fichier{(f.FileCount > 1 ? "s" : "")} · synchronisé {DriveSources.Ago(f.SyncedUtc)}" : null;
+            if (driveInfo != null && driveInfo != lastDriveInfo) _ = OnNotice.InvokeAsync(("ok", driveInfo));
+            lastDriveInfo = driveInfo;
         }
     }
 

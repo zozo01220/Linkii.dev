@@ -65,6 +65,23 @@ class MainActivity : Activity() {
 
     private val retry = Runnable { web?.loadUrl(prefs.playerUrl()) }
 
+    // Mise en veille : l'appareil applique seul les plages du back-office (voir SleepController) ; ici, le repli sans droit d'administrateur
+    private lateinit var sleeper: SleepController
+    private var blackout: View? = null
+    private var dimPercent = 100   // luminosité demandée par le back-office (100 : celle de l'appareil)
+
+    private fun isTv() = (getSystemService(Context.UI_MODE_SERVICE) as android.app.UiModeManager).currentModeType == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
+
+    /** Luminosité réelle de la fenêtre : celle demandée, ou celle de l'appareil à 100 %. */
+    private fun applyDim() {
+        window.attributes = window.attributes.apply {
+            screenBrightness = if (dimPercent >= 100) WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE else dimPercent / 100f
+        }
+    }
+    private val sleepTick = object : Runnable {
+        override fun run() { sleeper.apply(); handler.postDelayed(this, SLEEP_CHECK_MS) }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
@@ -93,6 +110,25 @@ class MainActivity : Activity() {
         val margin = (24 * resources.displayMetrics.density).toInt()
         root.addView(badge, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply { setMargins(0, 0, margin, margin) })
         store.resume()
+        sleeper = SleepController(applicationContext, prefs)
+        SleepController.listener = { on -> runOnUiThread { setBlackout(on) } }
+        handler.post(sleepTick)
+    }
+
+    /** Repli de la veille (pas administrateur de l'appareil) : écran noir, luminosité minimale, et l'écran n'est plus forcé allumé. */
+    private fun setBlackout(on: Boolean) {
+        if (on == (blackout != null)) return
+        if (on) {
+            blackout = View(this).apply { setBackgroundColor(Color.BLACK); isClickable = true }
+            root.addView(blackout, FrameLayout.LayoutParams(-1, -1))
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            window.attributes = window.attributes.apply { screenBrightness = 0f }
+        } else {
+            blackout?.let { root.removeView(it) }
+            blackout = null
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            applyDim()
+        }
     }
 
     override fun onResume() {
@@ -111,6 +147,8 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         handler.removeCallbacks(retry)
+        handler.removeCallbacks(sleepTick)
+        SleepController.listener = null
         store.onChange = null
         web?.destroy()
         web = null
@@ -212,6 +250,21 @@ class MainActivity : Activity() {
                 .put("bootMs", System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime()).toString()
         }
 
+        /** Plages de mise en veille du serveur : { tz, ranges } ou chaîne vide (aucune). L'appareil les garde et les applique seul. */
+        @JavascriptInterface
+        fun sleepSchedule(json: String) { sleeper.setSchedule(json) }
+
+        /**
+         * Luminosité demandée par le back-office, en % (10 à 100). Smartphone et tablette : réglée pour de bon sur la fenêtre, renvoie true.
+         * Android TV : le rétroéclairage dépend du téléviseur, rien n'est fait et le player simule par un filtre (renvoie false).
+         */
+        @JavascriptInterface
+        fun setBrightness(percent: Int): Boolean {
+            if (isTv()) return false
+            runOnUiThread { dimPercent = percent.coerceIn(10, 100); if (blackout == null) applyDim() }
+            return true
+        }
+
         /** Redémarrage de l'application demandé depuis le back-office. */
         @JavascriptInterface
         fun restart() { runOnUiThread { restartApp() } }
@@ -293,6 +346,7 @@ class MainActivity : Activity() {
             "Changer de serveur" to { askServer() },
             "Définir le code PIN" to { askNewPin() },
             "Autoriser le démarrage automatique" to { requestOverlayPermission() },
+            "Activer la mise en veille de l'écran" to { requestSleepAdmin() },
             "Désappairer cet écran" to { confirmUnpair() },
             "Quitter l'application" to { quit() }
         )
@@ -327,6 +381,7 @@ class MainActivity : Activity() {
             (if (ms.pending > 0) " — ${ms.pending} à télécharger" else "") + "\n" +
             "Version : ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})\n" +
             "Réseau : ${if (online) "connecté" else "hors ligne"}\n" +
+            "Mise en veille : ${if (prefs.sleepJson.isEmpty()) "aucune plage" else "plages reçues"}, écran ${if (SleepController.isAdmin(this)) "éteint pour de bon" else "noir seulement (droit non activé)"}\n" +
             "Stockage libre : ${"%.1f".format(freeGb)} Go\n" +
             "PIN : ${if (prefs.pin.isEmpty()) "non défini" else "défini"}"
     }
@@ -391,6 +446,22 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Droit de verrouiller l'écran pour la mise en veille (administrateur de l'appareil). Sans lui, la veille se limite à un écran noir. */
+    private fun requestSleepAdmin() {
+        if (SleepController.isAdmin(this)) { Toast.makeText(this, "Mise en veille de l'écran déjà activée.", Toast.LENGTH_SHORT).show(); return }
+        try {
+            startActivity(Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+                .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, SleepController.admin(this))
+                .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Permet d'éteindre l'écran pendant les plages de veille définies dans Linkii."))
+        } catch (_: Exception) {
+            AlertDialog.Builder(this)
+                .setTitle("Activer la mise en veille de l'écran")
+                .setMessage("Cet appareil n'affiche pas l'écran de confirmation. Depuis un ordinateur relié en ADB :\n\nadb shell dpm set-active-admin ch.linkii.player/.SleepAdmin")
+                .setPositiveButton("OK", null)
+                .show()
+        }
+    }
+
     /** Relance l'application dans un nouveau processus : un relais (RestartActivity, autre processus) la redémarre une fois celui-ci terminé. */
     private fun restartApp() {
         val launch = packageManager.getLaunchIntentForPackage(packageName)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK) ?: return
@@ -406,5 +477,6 @@ class MainActivity : Activity() {
     private companion object {
         val NAVY = Color.parseColor("#0B1F3A")
         const val RETRY_MS = 10_000L
+        const val SLEEP_CHECK_MS = 15_000L
     }
 }

@@ -63,6 +63,7 @@
                     <div class="kebab-menu dd-menu" role="menu">
                         <button type="button" role="menuitem" @onclick="() => { CloseMenu(); AskPublish(selectedIds.ToList()); }"><Ico Name="upload" Size="16" /> Publier</button>
                         @if (zones.Count > 1) { <button type="button" role="menuitem" @onclick="() => { CloseMenu(); OpenZoneMove(); }"><Ico Name="box" Size="16" /> Changer de zone…</button> }
+                        @if (tenant.SleepEnabled) { <button type="button" role="menuitem" @onclick="() => { CloseMenu(); OpenSleep(); }"><Ico Name="moon" Size="16" /> Mise en veille…</button> }
                         @if (CanAssemble) { <button type="button" role="menuitem" @onclick="() => { CloseMenu(); OpenWall(); }"><Ico Name="grid" Size="16" /> Assembler en mur…</button> }
                         @if (otherAreas.Count > 0) { <button type="button" role="menuitem" @onclick="() => { CloseMenu(); OpenBulkAreaMove(); }"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
                         <button type="button" role="menuitem" class="danger" @onclick="() => { CloseMenu(); deleting = screens.Where(s => selectedIds.Contains(s.Id)).ToList(); }"><Ico Name="trash" Size="16" /> Supprimer</button>
@@ -319,12 +320,17 @@
             var gpaused = gs.IsPaused(gnow);
             var gzone = ZoneOf(gs);
             var gdl = Store.Read(d => d.Delivery(gs));
-            var gcls = gpaused ? "warn" : gst == "En ligne" ? "ok" : gst == "Mise à jour" ? "warn" : "bad";
-            <div class="pl-card gc @(selectedIds.Contains(gs.Id) ? "picked" : "") @(gonline ? "" : "is-off") @(gpaused ? "is-paused" : "")">
+            var gsl = Sleep.State(tenant, area, gs, false, gnow);   // en veille : écran éteint, il ne dialogue plus
+            var gcls = gsl.Asleep ? "sleep" : gpaused ? "warn" : gst == "En ligne" ? "ok" : gst == "Mise à jour" ? "warn" : "bad";
+            <div class="pl-card gc @(selectedIds.Contains(gs.Id) ? "picked" : "") @(gonline || gsl.Asleep ? "" : "is-off") @(gpaused ? "is-paused" : "")">
                 <div class="gc-top">
                     <div class="gc-stage">
                         <div class="gc-mon @(gs.Orientation == "portrait" ? "portrait" : "")">
-                            @if (gpaused)
+                            @if (gsl.Asleep)
+                            {
+                                <span class="sc-pause-art sc-sleep-art"><small>Écran éteint</small></span>
+                            }
+                            else if (gpaused)
                             {
                                 <span class="sc-pause-art"><b>☕</b><small>Petite pause</small></span>
                             }
@@ -344,7 +350,7 @@
                             }
                         </div>
                         <button type="button" class="gc-hit" tabindex="-1" aria-hidden="true" @onclick="() => Edit(gs)"></button>
-                        <span class="gc-pill" title="@gst"><span class="gc-d @gcls"></span>@(gpaused ? "En pause" + (gs.PausedUntilUtc is { } pu ? " · reprise " + LocalTime(pu) : "") : gst)</span>
+                        <span class="gc-pill" title="@(gsl.Asleep ? "Mise en veille : l'écran est éteint" : gst)"><span class="gc-d @gcls"></span>@(gsl.Asleep ? "En veille" + (gsl.Wake is { } wake ? " · réveil " + wake : "") : gpaused ? "En pause" + (gs.PausedUntilUtc is { } pu ? " · reprise " + LocalTime(pu) : "") : gst)</span>
                         @if (gpending || gdl != null)
                         {
                             <span class="gc-pills-r">
@@ -816,6 +822,25 @@
     </div>
 }
 
+@if (sleepDlg)
+{
+    @* action groupée : mise en veille des écrans cochés (leur réglage actuel est remplacé) ; s'applique aussitôt, sans publier *@
+    <div class="modal-backdrop" @onclick="() => sleepDlg = false"></div>
+    <div class="modal app-modal" role="dialog" aria-modal="true" aria-labelledby="sl-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="sl-title">Mise en veille de @selectedIds.Count écran@(selectedIds.Count > 1 ? "s" : "")</h3><small>@SleepNames</small></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => sleepDlg = false"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            <SleepChoice @bind-Mode="sleepMode" @bind-Grid="sleepGrid" Inherited="Les écrans suivent les plages de leur aire. Leur réglage actuel est remplacé." Name="bulk-sleep" />
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn ghost" @onclick="() => sleepDlg = false">Annuler</button>
+            <button type="button" class="btn" @onclick="ApplySleep">Appliquer</button>
+        </div>
+    </div>
+}
+
 @if (areaMove is { Count: > 0 } am)
 {
     <AreaMoveDialog Kind="screen" Items="am" OnClose="AreaMoved" />
@@ -972,6 +997,38 @@ else if (wallEdit is { } wid)
         }
         zoneTo = (FreeZones.FirstOrDefault(z => z.Id.ToString() == zoneFilter) ?? zones.FirstOrDefault(z => z.IsDefault))?.Id.ToString() ?? "";
         zoneMove = true;
+    }
+
+    // ---------- Mise en veille (action groupée) ----------
+    private bool sleepDlg;
+    private string sleepMode = Sleep.Inherit;
+    private string? sleepGrid;
+
+    private string SleepNames => string.Join(", ", screens.Where(s => selectedIds.Contains(s.Id)).Select(s => s.Name).Take(6)) + (selectedIds.Count > 6 ? "…" : "");
+
+    private void OpenSleep()
+    {
+        // les écrans d'un mur suivent la mise en veille de leur aire : ils ne se règlent pas un par un
+        if (screens.FirstOrDefault(s => selectedIds.Contains(s.Id) && ZoneOf(s) is { IsWall: true }) is { } inWall)
+        {
+            Toast.Error($"« {inWall.Name} » fait partie du mur « {ZoneOf(inWall)!.Name} » : il suit la mise en veille de son aire.");
+            return;
+        }
+        (sleepMode, sleepGrid) = (Sleep.Inherit, null);
+        sleepDlg = true;
+    }
+
+    private async Task ApplySleep()
+    {
+        var ids = selectedIds.ToList();
+        var (mode, grid) = (sleepMode, Sleep.Valid(sleepGrid) ? sleepGrid : null);
+        if (mode == Sleep.Own && !Sleep.Any(grid)) { Toast.Error("Peignez au moins une plage de veille, ou choisissez « Jamais en veille »."); return; }
+        Store.Write(d => { foreach (var sc in d.Screens.Where(x => ids.Contains(x.Id))) { sc.SleepMode = mode; sc.SleepGrid = mode == Sleep.Own ? grid : null; } });
+        Toast.Ok($"Mise en veille appliquée à {ids.Count} écran{(ids.Count > 1 ? "s" : "")}.");
+        sleepDlg = false;
+        foreach (var id in ids) await Notifier.NotifyScreen(id);   // les écrans rechargent leur configuration
+        selectedIds.Clear();
+        Reload();
     }
 
     private async Task MoveToZone()

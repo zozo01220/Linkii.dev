@@ -279,7 +279,10 @@
     }
     if (pl.settings) { cfg.timezone = pl.settings.timezone || null; if (pl.settings.reloadHour != null) cfg.reloadHour = pl.settings.reloadHour; }
     cfg.wall = pl.wall || null;
+    if (pl.dim !== undefined) cfg.dim = pl.dim || null;
     layout();
+    sleepTick();
+    dimTick();
   }
 
   /* ---------- Identification (assemblage d'un mur) : grand numéro pendant 5 s ---------- */
@@ -823,7 +826,7 @@
   /* ---------- Diffusion (double buffer) ---------- */
   function next() {
     clearTimeout(state.timer); state.timer = null;
-    if (state.paused || state.hold) return;   // simulateur en pause, ou écran mis en pause depuis le back-office
+    if (state.paused || state.hold || state.asleep) return;   // simulateur en pause, écran mis en pause depuis le back-office, ou en veille
 
     if (state.pending) {            // remplacement entre deux contenus
       state.current = state.pending; state.pending = null; state.index = 0;
@@ -1077,6 +1080,78 @@
   // L'application Android rend compte d'un aperçu qu'elle n'a pas pu réaliser (réussi : le serveur voit l'image arriver).
   window.lkCaptureFailed = function (id, why) { cmdAck(id, 'failed', why || 'Capture impossible'); };
 
+  /* ---------- Mise en veille : plages horaires (fuseau de l'aire) ----------
+     Le serveur envoie { tz, ranges: [[début, fin], …] } en minutes depuis le lundi 00 h (une fin au-delà de 10 080 franchit la fin de semaine).
+     Dans l'application Android, la veille est confiée à l'appareil (LinkiiNative.sleepSchedule : écran éteint, réveil par alarme, même si le
+     player est suspendu). Ici, le player s'y plie aussi : écran noir, rien n'est lu ni téléchargé. */
+  var WEEK_MIN = 10080, sleepSig = '';
+  function localWeekMinute(ms, tz) {
+    try {
+      var o = {};
+      new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+        .formatToParts(new Date(ms)).forEach(function (x) { o[x.type] = x.value; });
+      return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(o.weekday) * 1440 + (+o.hour % 24) * 60 + (+o.minute);
+    } catch (e) { var d = new Date(ms); return ((d.getDay() + 6) % 7) * 1440 + d.getHours() * 60 + d.getMinutes(); }
+  }
+  function isAsleep(sl, ms) {
+    var w = localWeekMinute(ms, sl.tz);
+    return sl.ranges.some(function (r) { return (w >= r[0] && w < r[1]) || (w + WEEK_MIN >= r[0] && w + WEEK_MIN < r[1]); });
+  }
+  function sleepTick() {
+    if (PREVIEW) return;
+    // une nouvelle plage s'applique aussitôt, sans attendre la fin du contenu en cours
+    if (state.pending && state.pending.sleep !== undefined) cfg.sleep = state.pending.sleep || null;
+    var sl = cfg.sleep, sig = sl ? JSON.stringify(sl) : '';
+    if (sig !== sleepSig && window.LinkiiNative && typeof window.LinkiiNative.sleepSchedule === 'function') {
+      sleepSig = sig;
+      try { window.LinkiiNative.sleepSchedule(sig); } catch (e) {}
+    }
+    var want = !!sl && isAsleep(sl, serverNow());
+    if (want === !!state.asleep) return;
+    state.asleep = want;
+    var el = $('sleepview');
+    if (want) {
+      clearTimeout(state.timer); state.timer = null;
+      stopContent();
+      $('idle').style.display = 'none';
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'sleepview';
+        el.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:2000;background:#000;cursor:none';
+        document.body.appendChild(el);
+      }
+      el.style.display = 'block';
+    } else {
+      if (el) el.style.display = 'none';
+      if (!state.hold) next();
+    }
+  }
+
+  /* ---------- Luminosité et contraste selon l'heure (fuseau de l'aire) ----------
+     Le serveur envoie { tz, profiles: [{ b, c }, …], grid } : grid a un chiffre par heure de la semaine (lundi 00 h en premier), l'indice du profil.
+     Contraste : toujours un filtre sur la scène. Luminosité : dans l'application Android, LinkiiNative.setBrightness règle la vraie luminosité de
+     l'écran (smartphone, tablette) et renvoie true ; sinon (Android TV, navigateur, aperçu), un filtre assombrit l'image. */
+  var dimSig = '';
+  function dimTick() {
+    if (state.pending && state.pending.dim !== undefined) cfg.dim = state.pending.dim || null;   // un nouveau réglage s'applique aussitôt
+    var d = cfg.dim, b = 100, c = 100;
+    if (d && d.profiles && d.profiles.length && d.grid) {
+      var p = d.profiles[+d.grid.charAt(Math.floor(localWeekMinute(serverNow(), d.tz) / 60))] || d.profiles[0];
+      b = p.b; c = p.c;
+    }
+    var sig = b + ',' + c;
+    if (sig === dimSig) return;
+    dimSig = sig;
+    var real = false;
+    if (!PREVIEW && window.LinkiiNative && typeof window.LinkiiNative.setBrightness === 'function') {
+      try { real = !!window.LinkiiNative.setBrightness(b); } catch (e) {}
+    }
+    var f = [];
+    if (b < 100 && !real) f.push('brightness(' + (b / 100) + ')');
+    if (c !== 100) f.push('contrast(' + (c / 100) + ')');
+    $('stage').style.filter = f.join(' ');
+  }
+
   var pauseTimer = null;
   function stopContent() {
     for (var k in playing) playEnd(k);
@@ -1228,6 +1303,8 @@
     setInterval(flushPlays, 60000);
     setInterval(function () { api("/api/player/version").catch(function () {}); }, 15000);   // détecte vite une coupure
     nightlyReload();
+    setInterval(sleepTick, 15000);
+    setInterval(dimTick, 15000);
     reportDevice();
     setInterval(reportDevice, 300000);
   }

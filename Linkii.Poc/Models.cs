@@ -177,6 +177,13 @@ public class Area : IClientOwned
     public string Name { get; set; } = "";
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public List<Zone> Zones { get; set; } = new();
+
+    /// <summary>Mise en veille (voir <see cref="Sleep"/>) : grille de 168 « 0 » / « 1 » par défaut des écrans de l'aire, et son fuseau (vide : celui de l'organisation).</summary>
+    public string? SleepGrid { get; set; }
+    public string? SleepTz { get; set; }
+
+    /// <summary>Luminosité et contraste selon l'heure (voir <see cref="Dim"/>), par défaut des écrans Android de l'aire ; null : aucun réglage.</summary>
+    public DimPlan? Dimming { get; set; }
 }
 
 /// <summary>
@@ -248,6 +255,10 @@ public class Tenant
 
     public int DefaultDurationSec { get; set; } = 8;     // durée d'un contenu ajouté à une playlist
     public int ReloadHour { get; set; } = 4;             // rechargement nocturne des players
+    /// <summary>Fonction avancée « Plages de mise en veille » activée dans Réglages (voir <see cref="Sleep"/>).</summary>
+    public bool SleepEnabled { get; set; }
+    /// <summary>Fonction avancée « Luminosité et contraste » activée dans Réglages (voir <see cref="Dim"/>).</summary>
+    public bool DimEnabled { get; set; }
 
     /// <summary>Licence de l'organisation (voir <see cref="Plans"/>) : Growth ajoute le contrôle du direct, la supervision et les murs d'écrans.</summary>
     public string Plan { get; set; } = Plans.Base;
@@ -388,6 +399,12 @@ public class Screen : IClientOwned, IAreaOwned
     public int? WallPos { get; set; }          // place dans la grille si sa zone est un mur (0 = en haut à gauche)
     public Guid? ZoneId { get; set; }          // zone de son aire (jamais vide une fois migré : par défaut, la zone « Défaut » de l'aire)
     public string Name { get; set; } = "";
+    /// <summary>Mise en veille : suit son aire (inherit), jamais (never) ou grille propre (own, SleepGrid). Voir <see cref="Sleep"/>.</summary>
+    public string SleepMode { get; set; } = Sleep.Inherit;
+    public string? SleepGrid { get; set; }
+    /// <summary>Luminosité et contraste : aucun réglage (never, par défaut), comme l'aire (inherit) ou réglage propre (own, Dimming). Voir <see cref="Dim"/>.</summary>
+    public string DimMode { get; set; } = Dim.Never;
+    public DimPlan? Dimming { get; set; }
     public string? PairingCode { get; set; }   // non null tant que l'écran n'est pas appairé
     public string? Token { get; set; }         // non null une fois appairé
     public Guid? PlaylistId { get; set; }
@@ -739,7 +756,7 @@ public static class Helpers
 
     /// <summary>Identifie ce que l'écran doit afficher : playlist publiée + configuration (format, fuseau, redémarrage).</summary>
     public static string Revision(Playlist? p, Screen s, Tenant t, Reseller? r, string sync = "") =>
-        $"{(s.PublishedVersion > 0 ? "s" + s.PublishedVersion : p == null ? "none" : p.Id.ToString("N") + ":" + p.PublishedVersion)}|{s.Orientation}|{s.Resolution}|{t.Timezone}|{t.ReloadHour}|{r?.BrandStamp}{sync}";
+        $"{(s.PublishedVersion > 0 ? "s" + s.PublishedVersion : p == null ? "none" : p.Id.ToString("N") + ":" + p.PublishedVersion)}|{s.Orientation}|{s.Resolution}|{t.Timezone}|{t.ReloadHour}|{r?.BrandStamp}{(t.SleepEnabled ? "|sl" : "")}{(t.DimEnabled ? "|dm" : "")}{sync}";
 
     public static string Status(Screen s, Playlist? p, Tenant t, Reseller? r, string sync = "")
     {
@@ -784,7 +801,9 @@ public static class Helpers
     {
         var m = Mirror(areas, s);
         return (SyncEpoch(areas, s) is { } e ? "|y" + e.Ticks : "") + (Wall(areas, s) is { } w ? $"|w{w.Cols}x{w.Rows}@{w.Col},{w.Row}" : "")   // un mur réorganisé recharge ses écrans
-            + (m.H ? "|mh" : "") + (m.V ? "|mv" : "");   // un miroir changé aussi
+            + (m.H ? "|mh" : "") + (m.V ? "|mv" : "")   // un miroir changé aussi
+            + Sleep.Stamp(areas, s)                       // une plage de mise en veille changée aussi
+            + Dim.Stamp(areas, s);                        // et un réglage de luminosité ou de contraste
     }
 
     public record WallPlace(int Cols, int Rows, int Col, int Row);

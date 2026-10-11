@@ -19,6 +19,14 @@ else
     var sources = manifest.InZone("source").ToList();
     var hasPreview = ContentPreview.Has(manifest);
     <div class="ci">
+        @* résultats de recherche, d'import, de test, erreurs : un bandeau collé en haut de la fenêtre, visible sans défilement *@
+        @if (Banner() is { } bn)
+        {
+            <div class="ci-notice @bn.Kind" role="status" aria-live="polite">
+                <span>@bn.Text</span>
+                @if (!testing) { <button type="button" class="ci-notice-x" aria-label="Fermer le message" @onclick="ClearNotice"><Ico Name="x" Size="16" /></button> }
+            </div>
+        }
         @if (ShowActions)
         {
             @* page d'édition : pas de bandeau de fenêtre, la barre porte le nom (modifiable) et l'icône « Options avancées » *@
@@ -47,18 +55,16 @@ else
             {
                 <section class="ci-prev" aria-label="Aperçu">
                     <h4 class="ci-t">Aperçu</h4>
-                    <ContentPreview @ref="previewRef" Manifest="manifest" Values="values" Instance="instance" />
+                    <ContentPreview @ref="previewRef" Manifest="manifest" Values="values" Instance="instance" OnNotice="OnPreviewNotice" />
                 </section>
             }
             <section class="ci-conf" aria-label="Configuration">
                 <h4 class="ci-t">Configuration</h4>
                 <AppForm Manifest="manifest" Values="values" StoredSecrets="storedSecrets" InstanceId="instance?.Id" Zone="main" OnChange="Touch" />
+                @* réglages propres à l'appelant (ex. « Dans cette liste de lecture »), à droite de l'aperçu *@
+                @Extra
             </section>
         </div>
-
-        @foreach (var e in errors) { <div class="err">@e</div> }
-        @if (test != null) { <div class="@(test.Value.Ok ? (test.Value.Message.StartsWith("⚠") ? "dw-note" : "msg") : "err")">@test.Value.Message</div> }
-        @if (testing) { <div class="dw-note">Test en cours…</div> }
 
         @if (ShowActions)
         {
@@ -135,7 +141,6 @@ else
     private HashSet<string> storedSecrets = new();
     private string name = "";
     private List<string> errors = new();
-    private (bool Ok, string Message)? test;
     private bool installed, testing, advanced, renaming;
     private string renameDraft = "";
     private ContentPreview? previewRef;
@@ -166,7 +171,25 @@ else
             await previewRef.Refresh();
     }
 
-    private Task Search() => previewRef?.Refresh() ?? Task.CompletedTask;
+    private Task Search() { errors = new(); return previewRef?.Refresh() ?? Task.CompletedTask; }
+
+    /// <summary>Réglages de l'appelant, affichés sous la configuration (colonne de droite).</summary>
+    [Parameter] public RenderFragment? Extra { get; set; }
+
+    // Résultat de la recherche, du test ou du dossier : une notification (toast) comme partout dans l'app, qui disparaît seule.
+    private Task OnPreviewNotice((string Kind, string Text) n) { Notify(n.Kind != "bad", n.Text); return Task.CompletedTask; }
+
+    private void Notify(bool ok, string text) { if (ok) Toast.Ok(text); else Toast.Error(text); }
+
+    private void ClearNotice() { errors = new(); }
+
+    // Le bandeau ne garde que ce qui doit rester visible : erreurs de saisie à corriger et « Test en cours… ».
+    private (string Kind, string Text)? Banner()
+    {
+        if (errors.Count > 0) return ("bad", errors.Count > 1 ? $"{errors.Count} champs à corriger : {string.Join(" · ", errors)}" : errors[0]);
+        if (testing) return ("info", "Test en cours…");
+        return null;
+    }
 
     /// <summary>Nom du contenu (le nom n'est plus un champ de la configuration : il se modifie par le bouton « Éditer » du bandeau).</summary>
     public string Name => name;
@@ -202,7 +225,7 @@ else
 
     public async Task Save()
     {
-        errors = new(); test = null;
+        errors = new();
         var (item, errs) = Apps.SaveInstance(AppId, instance?.Id, name, values);
         if (item == null) { errors = errs; Toast.Error(errs.Count > 1 ? $"{errs.Count} champs à corriger : {errs[0]}" : errs.FirstOrDefault()); return; }
         instance = item;
@@ -213,8 +236,8 @@ else
 
     public async Task Test()
     {
-        errors = new(); test = null; testing = true; StateHasChanged();
-        try { test = await Apps.Test(manifest!, values, instance); }
+        errors = new(); testing = true; StateHasChanged();
+        try { var r = await Apps.Test(manifest!, values, instance); Notify(r.Ok, r.Message); }
         finally { testing = false; }
     }
 }

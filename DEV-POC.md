@@ -1,7 +1,7 @@
 ﻿# Linkii — Dev POC (jetable)
 
 > **Statut : test / prototype voué à mourir.** But : prouver la chaîne *back-office → serveur → SignalR → player* et la promesse produit **« écran en service en moins de 2 minutes »**. Le code n'est pas destiné à être réutilisé : on privilégie la vitesse.
-> Source : *Linkii — Spécification produit (v1)*. Dernière mise à jour : 10 octobre 2026.
+> Source : *Linkii — Spécification produit (v1)*. Dernière mise à jour : 11 octobre 2026.
 
 > **Apps retirées le 7 octobre 2026** (on y reviendra plus tard) : **LinkedIn**, **Menu restaurant (API)**, **Menu restaurant (CSV)**, **Météo : prévisions**, **Occupation de salle**. Manifestes, fournisseurs serveur, rendus du player, connexion OAuth LinkedIn, import CSV des menus, bibliothèque QR et tests correspondants sont supprimés ; leurs contenus existants sont purgés au démarrage (`Seed.PurgeRetiredApps`, sauvegarde `data.json.pre-apps-retirees.bak`). **Le code complet d’avant le retrait est conservé dans `_archive/avant-retrait-apps-2026-10-07/`.** Les sections de ce document qui décrivent ces apps (porte de salle, menus, LinkedIn) sont historiques. Le connecteur Microsoft 365 (page Données) reste : il sert à l’app Agenda.
 
@@ -583,7 +583,34 @@ Nouvelle carte pour la **vue cartes** de la page *Écrans* (`Screens.razor`, bra
 - **Clics** : aperçu d'un écran → paramètres de l'écran ; **un écran du mur → paramètres de cet écran** ; reste de l'aperçu du mur ou place libre → fenêtre **Réorganiser** (si on gère les zones). **Pas de bouton Simuler au survol** (retiré à la demande) : Simuler reste dans le menu ⋮. Au survol, l'écran (ou la tuile du mur) est mis en surbrillance (contour bleu et éclaircissement).
 - **Non vérifié** dans le navigateur : l'application tournait pendant les modifications (seule la compilation a été contrôlée) ; à relire au redémarrage : hauteurs égales écran / mur, fenêtres des écrans du mur et des zones, mur 4 colonnes (n'occupe plus deux colonnes), états de livraison.
 
+## 33. Mise en veille des écrans (11 octobre 2026)
+
+Plages horaires pendant lesquelles les écrans sont éteints (nuit, week-end). **Fonction avancée, désactivée par défaut** : interrupteur *Plages de mise en veille* dans Réglages › Paramètres (`Tenant.SleepEnabled`) ; avec une seule aire, la grille se règle dans la même carte, sinon dans la fenêtre de l'aire (Aires de gestion). Tout est dans `Sleep.cs`.
+
+- **Grille** : 7 jours × 24 heures, une chaîne de 168 caractères « 0 » / « 1 » (lundi 00 h en premier, « 1 » = en veille). On clique ou on glisse pour peindre (`SleepGrid`) ; le bouton « Nuits et week-ends » propose 19 h – 7 h en semaine et le week-end entier (`Sleep.Suggested`).
+- **Niveaux** : l'aire porte la grille par défaut de ses écrans et **son fuseau** (`Area.SleepGrid`, `Area.SleepTz`, à défaut le fuseau de l'organisation) ; chaque écran peut la suivre (`inherit`, défaut), ne jamais s'éteindre (`never`) ou avoir la sienne (`own`) : `Screen.SleepMode`, `Screen.SleepGrid`, composant `SleepChoice` dans l'édition de l'écran. **Pas de niveau zone.** Un écran d'un **mur** suit toujours son aire (le mur s'éteint d'un bloc).
+- **Action groupée** : *Mise en veille…* dans le menu des écrans sélectionnés (`Screens.razor`, `ApplySleep`) ; elle remplace le réglage de chaque écran choisi.
+- **Serveur** : `Sleep.ForPlayer` envoie au player `sleep: { tz, ranges }`, des plages en minutes depuis le lundi 00 h (une fin au-delà de 10 080 franchit la fin de semaine) ; `null` s'il n'y a rien à appliquer. `Sleep.Stamp` entre dans la révision de l'écran (`Helpers.SyncStamp`) : changer une plage fait recharger la configuration aussitôt, **sans publier**.
+- **Back-office** : la carte d'un écran en veille affiche « En veille · réveil HH:mm » (`Sleep.State`) et « Écran éteint ». La **supervision** ne le compte pas comme une panne : pas d'alerte hors ligne pendant la veille ni dans les 5 minutes qui suivent le réveil (`Control.cs`).
+- **Player** (`sleepTick` dans `player.js`, toutes les 15 s) : pendant une plage, écran noir (`#sleepview`), rien n'est lu ni téléchargé ; au réveil, la lecture reprend. Dans l'app Android, le player confie ses plages à l'appareil (`LinkiiNative.sleepSchedule`).
+- **App Android** (`SleepController.kt`, version 1.2.0) : l'appareil applique seul les plages, même si le WebView est suspendu ou le réseau coupé. Une alarme exacte (`AlarmManager.setAlarmClock`) est programmée à chaque début et fin de plage. Début : écran verrouillé (`DevicePolicyManager.lockNow`) si l'app est **administrateur de l'appareil**, sinon repli « écran noir, luminosité minimale ». Fin : écran rallumé et app ramenée au premier plan. Droit administrateur (`SleepAdmin`, `res/xml/device_admin.xml`) : menu technicien › *Activer la mise en veille de l'écran*, ou `adb shell dpm set-active-admin ch.linkii.player/.SleepAdmin` si l'appareil n'affiche pas la confirmation. Le menu technicien indique si des plages ont été reçues et si l'extinction est réelle ou en repli.
+- **Non vérifié** : jamais testée sur un vrai appareil (extinction réelle, réveil, Android TV). L'extinction réelle dépend du boîtier et du droit administrateur.
+
+## 34. Luminosité et contraste selon l'heure (11 octobre 2026)
+
+Réglage de la luminosité et du contraste des écrans de l'**app Android** selon l'heure (jour, soirée, nuit). Même principe que la mise en veille. **Fonction avancée, désactivée par défaut** (`Tenant.DimEnabled`, interrupteur dans Réglages › Paramètres). Maquette validée : `Linkii.Poc/brand/maquette-luminosite.html`. Code serveur : `Dim.cs`.
+
+- **Modèle** : `DimPlan` = des profils (`DimProfile` : nom, luminosité 10 – 100 %, contraste 50 – 150 %, 100 % = image inchangée) et une grille de 168 chiffres (un par heure de la semaine, indice du profil). Trois profils proposés : Jour 100/100, Soirée 60/110, Nuit 25/120 ; le bouton « Jour, soirée et nuit » peint soirée 17 h – 19 h et nuit 19 h – 7 h. Stocké sur l'aire (`Area.Dimming`, par défaut de ses écrans) et sur l'écran (`Screen.DimMode`, `Screen.Dimming`).
+- **Par défaut : « Aucun réglage »** sur chaque écran (`Dim.Never`) ; l'écran peut suivre son aire (`inherit`) ou avoir le sien (`own`), composant `DimChoice`. Un écran d'un mur suit toujours son aire. Un réglage dont tous les profils utilisés valent 100/100 est ignoré (`Dim.Active`).
+- **Interface** : `DimEditor` (profils réglables, semaine peinte, courbe de luminosité du jour choisi, aperçu au survol d'une case, encadré des capacités par appareil), `AreaDim` (fenêtre de l'aire et Réglages, avec son interrupteur) ; les heures de veille y sont hachurées et non modifiables. Les heures suivent le fuseau de l'aire (`Area.SleepTz`, à défaut celui de l'organisation).
+- **Serveur → player** : `Dim.ForPlayer` envoie `dim: { tz, profiles: [{ b, c }], grid }` (`Preview.cs`, donc aussi dans le simulateur) ; `Dim.Stamp` entre dans la révision de l'écran : un changement est appliqué aussitôt, sans publier.
+- **Player** (`dimTick` dans `player.js`, toutes les 15 s) : le **contraste** est toujours un filtre CSS sur la scène (`#stage`). La **luminosité** passe par `LinkiiNative.setBrightness(%)` dans l'app Android : réelle sur **smartphone et tablette** (luminosité de la fenêtre, `MainActivity.kt`), l'appel renvoie `true` ; sur **Android TV** il renvoie `false` (le rétroéclairage dépend du téléviseur) et le player assombrit par filtre. Navigateur et simulateur : filtre seulement. 100 % rend la luminosité à l'appareil ; le repli de la veille la rétablit au réveil.
+- **Non fait** : action groupée sur plusieurs écrans, remontée au back-office de ce que l'appareil sait faire (l'encadré est un texte fixe), ajout ou suppression de profils (trois fixes), luminosité réelle d'un téléviseur (SDK constructeur).
+- **Non vérifié** : le projet web compile ; l'interface n'a pas été essayée dans le navigateur, ni le code Kotlin compilé ou essayé sur un appareil.
+
 ## Plans et prochaines étapes
+
+- Mise en veille et luminosité : tester sur une tablette et une Android TV (extinction réelle, réveil, luminosité) ; voir §33 et §34.
 
 - Android : tester l'app 1.1.0 (aperçu du direct, redémarrage, version remontée) sur un vrai boîtier ; PIN du menu technicien à définir depuis le back-office ; icône définitive.
 - Valider un vrai Drive pour le bandeau d'import (§ 21) et la conversion 1080p sur serveur Linux.

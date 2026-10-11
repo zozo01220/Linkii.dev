@@ -167,6 +167,9 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
     /// <summary>Paramètres du client modifiés : tous ses écrans rechargent leur configuration.</summary>
     public Task NotifyClient(Guid clientId) => NotifyWhere(s => s.ClientId == clientId);
 
+    /// <summary>Réglage d'une aire modifié (mise en veille) : ses écrans rechargent leur configuration.</summary>
+    public Task NotifyArea(Guid areaId) => NotifyWhere(s => s.AreaId == areaId);
+
     /// <summary>Marque du revendeur modifiée : les écrans de tous ses clients se mettent à jour.</summary>
     public Task NotifyReseller(Guid resellerId)
     {

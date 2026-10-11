@@ -1,0 +1,55 @@
+@inject TenantStore Store
+@inject Notifier Notifier
+@inject Toaster Toast
+
+@* Mise en veille d'une aire : son fuseau horaire et ses plages, par défaut de tous ses écrans (chacun peut les remplacer). Voir Sleep. *@
+@if (loaded)
+{
+    <label class="lbl" for="sl-tz" style="margin-top:0">Fuseau horaire des plages</label>
+    <select id="sl-tz" class="full" @bind="tz">
+        <option value="">Celui de l'organisation (@orgTz)</option>
+        @foreach (var z in Zones) { <option value="@z">@z</option> }
+    </select>
+    <label class="lbl">Plages de veille <small>(cliquez ou glissez pour peindre)</small></label>
+    <SleepGrid @bind-Grid="grid" />
+    <div style="margin-top:14px"><button type="button" class="btn" @onclick="Save">Enregistrer la mise en veille</button></div>
+    <p class="hint" style="margin:10px 0 0">Les écrans de l'aire s'éteignent pendant ces plages. Un écran peut suivre l'aire, ne jamais s'éteindre ou avoir ses propres plages (fenêtre de l'écran).</p>
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid AreaId { get; set; }
+    /// <summary>Appelé après l'enregistrement (la page appelante se met à jour).</summary>
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    internal static readonly string[] Zones =
+    {
+        "Europe/Zurich", "Europe/Paris", "Europe/Brussels", "Europe/London", "Europe/Berlin", "Europe/Rome",
+        "America/Montreal", "America/New_York", "Africa/Casablanca", "UTC"
+    };
+
+    private bool loaded;
+    private string? grid;
+    private string tz = "", orgTz = "";
+
+    protected override void OnInitialized()
+    {
+        (grid, tz, orgTz) = Store.Read(d => (d.Areas.FirstOrDefault(a => a.Id == AreaId)?.SleepGrid, d.Areas.FirstOrDefault(a => a.Id == AreaId)?.SleepTz ?? "", d.Tenant.Timezone));
+        if (!Sleep.Any(grid)) grid = Sleep.Suggested();   // première ouverture : nuits et week-ends, à ajuster
+        loaded = true;
+    }
+
+    private async Task Save()
+    {
+        var g = Sleep.Valid(grid) ? grid! : new string('0', Sleep.Cells);
+        var z = tz;
+        Store.Write(d =>
+        {
+            if (d.Areas.FirstOrDefault(a => a.Id == AreaId) is not { } a) return;
+            a.SleepGrid = Sleep.Any(g) ? g : null;
+            a.SleepTz = string.IsNullOrEmpty(z) ? null : z;
+        });
+        await Notifier.NotifyArea(AreaId);   // les écrans de l'aire rechargent leur configuration
+        Toast.Ok("Mise en veille enregistrée.");
+        await OnSaved.InvokeAsync();
+    }
+}

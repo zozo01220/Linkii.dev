@@ -1,0 +1,151 @@
+@using System.Globalization
+@* Éditeur de luminosité et de contraste : profils, semaine peinte avec le profil choisi, courbe du jour et aperçu (voir Dim). *@
+@if (Plan != null)
+{
+    <div class="dm-cols">
+        <div>
+            <label class="lbl" style="margin-top:0">Profils <small>(cliquez pour le régler et le choisir comme pinceau)</small></label>
+            <div class="dm-profs">
+                @for (var i = 0; i < Plan.Profiles.Count; i++)
+                {
+                    var idx = i; var p = Plan.Profiles[i];
+                    <div class="dm-prof @(idx == brush ? "sel" : "")" @onclick="() => brush = idx">
+                        <div class="dm-prof-h"><span class="dm-chip" style="background:@Shade(p)"></span><span class="n">@p.Name</span><span class="v">@p.Brightness % · @p.Contrast %</span></div>
+                        @if (idx == brush)
+                        {
+                            <div class="dm-prof-b">
+                                <input type="text" class="full" maxlength="20" value="@p.Name" aria-label="Nom du profil" @oninput="e => SetName(p, e)" />
+                                <div class="dm-rng"><span>Luminosité</span><input type="range" min="@Dim.MinBrightness" max="@Dim.MaxBrightness" value="@p.Brightness" aria-label="Luminosité" @oninput="e => SetB(p, e)" /><output>@p.Brightness %</output></div>
+                                <div class="dm-rng"><span>Contraste</span><input type="range" min="@Dim.MinContrast" max="@Dim.MaxContrast" value="@p.Contrast" aria-label="Contraste" @oninput="e => SetC(p, e)" /><output>@p.Contrast %</output></div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            <label class="lbl">Semaine <small>(cliquez ou glissez pour peindre avec le profil choisi)</small></label>
+            <div class="dm-grid" role="group" aria-label="Profil de chaque heure de la semaine" @onmouseup="Stop" @onmouseleave="Stop">
+                <span></span>
+                @for (var h = 0; h < 24; h++) { <span class="sl-h">@(h % 3 == 0 ? h.ToString() : "")</span> }
+                @for (var d = 0; d < 7; d++)
+                {
+                    var dd = d;
+                    <span class="sl-d dm-day @(dd == day ? "sel" : "")" @onclick="() => day = dd">@Days[dd]</span>
+                    @for (var h = 0; h < 24; h++)
+                    {
+                        var hour = h; var k = dd * 24 + hour;
+                        var asleep = IsAsleep(k);
+                        <button type="button" class="dm-c @(asleep ? "asleep" : "")" style="@(asleep ? "" : "background:" + Shade(Profile(k)))" tabindex="-1" aria-label="@Days[dd] @(hour) h : @(asleep ? "veille" : Profile(k).Name)"
+                                @onmousedown="() => Start(k)" @onmousedown:preventDefault @onmouseover="() => Over(k)"></button>
+                    }
+                }
+            </div>
+            <div class="sl-legend">
+                @if (Asleep != null) { <span><i class="sl-key dm-hatch"></i> Veille (réglée dans « Mise en veille »)</span> }
+                <span class="grow"></span>
+                <button type="button" class="linklike" @onclick="Suggest">Jour, soirée et nuit</button>
+                <button type="button" class="linklike" @onclick="Clear">Tout en « @Plan.Profiles[0].Name »</button>
+            </div>
+
+            <div class="dm-curve">
+                <label class="lbl" style="margin-top:0">Courbe du @DayNames[day] <small>(cliquez un jour dans la grille)</small></label>
+                <svg viewBox="0 0 720 120" preserveAspectRatio="none" aria-hidden="true">
+                    @foreach (var v in new[] { 0, 50, 100 })
+                    {
+                        <line x1="0" x2="720" y1="@Y(v)" y2="@Y(v)" stroke="var(--line)" stroke-width="1" />
+                    }
+                    @for (var i = 0; i < 24; i++)
+                    {
+                        if (IsAsleep(day * 24 + i)) { <rect x="@((i * 30).ToString(Inv))" y="0" width="30" height="120" fill="var(--line)" opacity=".5" /> }
+                    }
+                    <path d="@CurvePath()" fill="none" stroke="var(--signal)" stroke-width="2" vector-effect="non-scaling-stroke" />
+                </svg>
+                <div class="dm-ticks"><span>0 h</span><span>6 h</span><span>12 h</span><span>18 h</span><span>24 h</span></div>
+            </div>
+        </div>
+
+        <div>
+            <label class="lbl" style="margin-top:0">Aperçu <small>(survolez une case)</small></label>
+            <div class="dm-tv"><div class="dm-scr"><div class="dm-in" style="filter:@(IsAsleep(hover) ? "brightness(.08)" : Filter(Profile(hover)))">
+                <div class="dm-ph"></div><div class="dm-tx"><b>Accueil — bienvenue</b><i></i><i></i><i></i></div>
+            </div></div></div>
+            <div class="dm-cap"><span class="mono">@Days[hover / 24] @((hover % 24).ToString("00")) h</span><span>@(IsAsleep(hover) ? "En veille" : Profile(hover).Name + " · " + Profile(hover).Brightness + " % · " + Profile(hover).Contrast + " %")</span></div>
+            <div class="dm-caps">
+                <b>Ce qui s'applique selon l'appareil</b>
+                <div><span>Smartphone, tablette</span><span>luminosité réelle, contraste simulé</span></div>
+                <div><span>Android TV, box</span><span>luminosité et contraste simulés</span></div>
+                <div><span>Autres players (PC, web)</span><span>sans effet sur l'écran</span></div>
+            </div>
+            <p class="hint">« Simulé » : l'image est assombrie ou contrastée, mais le rétroéclairage ne change pas.</p>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public DimPlan? Plan { get; set; }
+    [Parameter] public EventCallback<DimPlan> PlanChanged { get; set; }
+    /// <summary>Grille de veille qui s'applique (168 « 0 » / « 1 »), pour hachurer ces heures ; null : pas de veille.</summary>
+    [Parameter] public string? Asleep { get; set; }
+
+    private static readonly string[] Days = { "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim" };
+    private static readonly string[] DayNames = { "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche" };
+    private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
+    private int brush, day, hover = 9;   // pinceau (profil), jour de la courbe, case survolée
+    private bool painting;
+
+    private bool IsAsleep(int k) => Sleep.Valid(Asleep) && Asleep![k] == '1';
+    private DimProfile Profile(int k) => Plan!.Profiles[Math.Min(Plan.Grid[k] - '0', Plan.Profiles.Count - 1)];
+    private static int Num(ChangeEventArgs e, int fallback) => int.TryParse(e.Value?.ToString(), out var n) ? n : fallback;
+    private static string Filter(DimProfile p) => $"brightness({(p.Brightness / 100.0).ToString(Inv)}) contrast({(p.Contrast / 100.0).ToString(Inv)})";
+
+    /// <summary>Teinte d'une case : d'autant plus foncée que la luminosité est basse (du blanc à la nuit de la charte).</summary>
+    private static string Shade(DimProfile p)
+    {
+        var a = (100 - p.Brightness) / 100.0;
+        return $"rgb({(int)Math.Round(255 - a * 244)},{(int)Math.Round(255 - a * 224)},{(int)Math.Round(255 - a * 197)})";
+    }
+
+    private static string Y(int v) => (18 + 84 * (1 - v / 100.0)).ToString("0.#", Inv);
+
+    /// <summary>Courbe de luminosité du jour choisi, en paliers d'une heure, interrompue pendant la veille.</summary>
+    private string CurvePath()
+    {
+        var sb = new System.Text.StringBuilder();
+        var prevAsleep = true;
+        for (var i = 0; i < 24; i++)
+        {
+            var k = day * 24 + i;
+            if (IsAsleep(k)) { prevAsleep = true; continue; }
+            var y = Y(Profile(k).Brightness);
+            sb.Append(prevAsleep ? "M" : "L").Append((i * 30).ToString(Inv)).Append(',').Append(y).Append(" L").Append(((i + 1) * 30).ToString(Inv)).Append(',').Append(y).Append(' ');
+            prevAsleep = false;
+        }
+        return sb.ToString();
+    }
+
+    private Task Changed() => PlanChanged.InvokeAsync(Plan!);
+    private Task SetName(DimProfile p, ChangeEventArgs e) { p.Name = e.Value?.ToString() ?? ""; return Changed(); }
+    private Task SetB(DimProfile p, ChangeEventArgs e) { p.Brightness = Math.Clamp(Num(e, p.Brightness), Dim.MinBrightness, Dim.MaxBrightness); return Changed(); }
+    private Task SetC(DimProfile p, ChangeEventArgs e) { p.Contrast = Math.Clamp(Num(e, p.Contrast), Dim.MinContrast, Dim.MaxContrast); return Changed(); }
+
+    private Task Start(int k) { if (IsAsleep(k)) return Task.CompletedTask; painting = true; hover = k; return Paint(k); }
+    private Task Over(int k) { hover = k; return painting ? Paint(k) : Task.CompletedTask; }
+    private void Stop() => painting = false;
+
+    private Task Paint(int k)
+    {
+        if (IsAsleep(k) || Plan!.Grid[k] - '0' == brush) return Task.CompletedTask;
+        var c = Plan.Grid.ToCharArray(); c[k] = (char)('0' + brush);
+        Plan.Grid = new string(c);
+        return Changed();
+    }
+
+    private Task Suggest()
+    {
+        while (Plan!.Profiles.Count < 3) Plan.Profiles.Add(new DimProfile { Name = "Profil " + (Plan.Profiles.Count + 1) });
+        Plan.Grid = Dim.SuggestedGrid();
+        return Changed();
+    }
+
+    private Task Clear() { Plan!.Grid = new string('0', Sleep.Cells); return Changed(); }
+}

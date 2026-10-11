@@ -24,6 +24,16 @@ class Prefs(context: Context) {
         get() = sp.getString("media_token", "") ?: ""
         set(v) = sp.edit().putString("media_token", v).apply()
 
+    /** Plages de mise en veille reçues du serveur ({"tz":…,"ranges":[[début,fin],…]}, vide : aucune) : gardées ici, l'appareil les applique seul, même hors ligne. */
+    var sleepJson: String
+        get() = sp.getString("sleep_json", "") ?: ""
+        set(v) = sp.edit().putString("sleep_json", v).apply()
+
+    /** L'appareil a déjà été mis en veille (écran verrouillé) pour la plage en cours : évite de le refaire à chaque contrôle. */
+    var sleepApplied: Boolean
+        get() = sp.getBoolean("sleep_applied", false)
+        set(v) = sp.edit().putBoolean("sleep_applied", v).apply()
+
     /** Adresse complète du player : l'adresse du serveur, suivie de /player/ sauf si elle le contient déjà. */
     fun playerUrl(): String {
         val base = serverUrl

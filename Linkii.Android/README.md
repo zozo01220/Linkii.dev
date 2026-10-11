@@ -52,6 +52,14 @@ Le player passe par le pont `window.LinkiiNative` ; dans un navigateur il garde 
 ## Version 1.1.0 : contrôle du direct
 
 L'app remonte son modèle, la version Android et la version de l'application, et exécute les commandes du back-office (licence Growth) : aperçu du direct (`Capture.kt`, test `CaptureTest.kt`), redémarrage de l'application (`RestartActivity.kt`), pause, rechargement. À valider sur un appareil réel.
+## Version 1.2.0 : mise en veille et luminosité
+
+- **Mise en veille** (`SleepController.kt`) : le player confie les plages du back-office à l'app (`LinkiiNative.sleepSchedule`) ; l'appareil les applique seul, par alarme exacte, même si le WebView est suspendu ou le réseau coupé. Début de plage : écran verrouillé si l'app est administrateur de l'appareil (`SleepAdmin`), sinon repli écran noir et luminosité minimale. Fin : écran rallumé et app au premier plan.
+  Activer le droit : menu technicien › *Activer la mise en veille de l'écran*, ou, si l'appareil n'affiche pas la confirmation, depuis un ordinateur relié en ADB :
+  `adb shell dpm set-active-admin ch.linkii.player/.SleepAdmin`. Le menu technicien indique si des plages ont été reçues et si l'extinction est réelle ou en repli.
+- **Luminosité** (`LinkiiNative.setBrightness`, `MainActivity.kt`) : le back-office règle la luminosité selon l'heure. Smartphone et tablette : luminosité de la fenêtre de l'app (10 à 100 %, 100 % = celle de l'appareil), l'appel renvoie `true`. Android TV : rien n'est modifié et l'appel renvoie `false`, le player assombrit alors l'image par filtre. Le contraste est toujours un filtre dans le player.
+- À valider sur un appareil réel (tablette et Android TV).
+
 ## Limites connues
 
 - Le PIN n'est pas encore défini depuis le back-office.

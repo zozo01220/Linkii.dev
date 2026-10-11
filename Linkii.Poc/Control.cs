@@ -176,7 +176,11 @@ public static class ScreenAlerts
             var delay = TimeSpan.FromMinutes(Math.Clamp(c.AlertOfflineMinutes, 1, 1440));
             if (now - startedUtc < delay) continue;
             var screens = db.Screens.Where(s => s.ClientId == c.Id && s.Token != null && s.LastSeenUtc != null).ToList();
-            var down = screens.Where(s => s.OfflineAlertUtc == null && now - s.LastSeenUtc > delay).ToList();
+            // un écran en veille ne dialogue plus (veille matérielle) : ce n'est pas une panne, ni les 5 minutes qui suivent son réveil
+            bool Sleeping(Screen s) =>
+                Sleep.State(c, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, Helpers.Wall(db.Areas, s) != null, now).Asleep
+                || Sleep.State(c, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, Helpers.Wall(db.Areas, s) != null, now.AddMinutes(-5)).Asleep;
+            var down = screens.Where(s => s.OfflineAlertUtc == null && now - s.LastSeenUtc > delay && !Sleeping(s)).ToList();
             var back = screens.Where(s => s.OfflineAlertUtc != null && ScreenControl.Online(s, now)).ToList();
             foreach (var s in down) s.OfflineAlertUtc = now;
             foreach (var s in back) s.OfflineAlertUtc = null;

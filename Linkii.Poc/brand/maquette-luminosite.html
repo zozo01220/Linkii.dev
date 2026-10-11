@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Maquette luminosité et contraste</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --nuit: #0B1F3A; --acier: #5A6B80; --brume: #DDE3EA; --fond: #F5F7FA;
+    --blanc: #FFFFFF; --signal: #3B82C4; --bord2: #C5CED9;
+    --ok-dot: #1E8E5A; --ok-bg: #E1F0E8; --ok-tx: #155A38;
+    --maj-dot: #B7791F; --maj-bg: #FBF0DC; --maj-tx: #7A4F12;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 15px; color: var(--nuit); background: var(--fond); padding: 32px 40px 64px; }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  .note { font-size: 13px; color: var(--acier); margin-bottom: 24px; }
+  .note b { color: var(--nuit); font-weight: 500; }
+  h2 { font-size: 20px; font-weight: 500; margin-bottom: 4px; }
+  .sub { font-size: 13px; color: var(--acier); margin-bottom: 16px; }
+  .panel { background: var(--blanc); border: 1px solid var(--brume); border-radius: 4px; padding: 22px 24px; margin-bottom: 32px; }
+  .tag { display: inline-block; font-size: 12px; color: var(--acier); margin-bottom: 8px; }
+  .lbl { display: block; font-size: 13px; color: var(--acier); margin: 18px 0 6px; }
+  .lbl small { font-size: 12px; }
+  .lbl:first-child { margin-top: 0; }
+
+  .switch { display: flex; align-items: center; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--brume); margin-bottom: 4px; }
+  .switch .sw { position: relative; width: 36px; height: 20px; border-radius: 10px; background: var(--bord2); flex: none; cursor: pointer; border: 0; }
+  .switch .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--blanc); transition: left .15s; }
+  .switch .sw.on { background: var(--signal); }
+  .switch .sw.on::after { left: 18px; }
+  .switch span small { display: block; font-size: 12px; color: var(--acier); }
+
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 28px; align-items: start; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+
+  /* Profils */
+  .profs { display: flex; flex-direction: column; gap: 8px; }
+  .prof { border: 1px solid var(--brume); border-radius: 4px; padding: 10px 12px; cursor: pointer; background: var(--blanc); }
+  .prof.sel { border-color: var(--signal); box-shadow: inset 2px 0 0 var(--signal); }
+  .prof-h { display: flex; align-items: center; gap: 10px; }
+  .chip { width: 22px; height: 22px; border-radius: 3px; border: 1px solid var(--bord2); flex: none; }
+  .prof-h .n { font-weight: 500; flex: 1; }
+  .prof-h .v { font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--acier); }
+  .prof-b { display: none; margin-top: 10px; }
+  .prof.sel .prof-b { display: block; }
+  .rng { display: grid; grid-template-columns: 82px 1fr 46px; align-items: center; gap: 10px; font-size: 13px; color: var(--acier); margin-top: 6px; }
+  .rng output { font-family: "JetBrains Mono", monospace; font-size: 12px; color: var(--nuit); text-align: right; }
+  input[type=range] { width: 100%; accent-color: var(--signal); }
+  .prof-b input[type=text] { font: inherit; font-size: 13px; width: 100%; border: 1px solid var(--bord2); border-radius: 4px; padding: 5px 8px; color: var(--nuit); }
+
+  /* Grille semaine */
+  .gw { overflow-x: auto; }
+  .g { display: grid; grid-template-columns: 34px repeat(24, minmax(14px, 1fr)); gap: 2px; min-width: 520px; user-select: none; }
+  .g .h { font-size: 11px; color: var(--acier); text-align: left; height: 14px; font-family: "JetBrains Mono", monospace; }
+  .g .d { font-size: 12px; color: var(--acier); display: flex; align-items: center; cursor: pointer; }
+  .g .d.sel { color: var(--nuit); font-weight: 500; }
+  .c { height: 24px; border-radius: 2px; border: 1px solid rgba(11,31,58,.12); cursor: crosshair; position: relative; }
+  .c.sleep { background: repeating-linear-gradient(135deg, #fff 0 3px, #E8EDF3 3px 6px) !important; border-color: var(--brume); cursor: not-allowed; }
+  .c:hover:not(.sleep) { outline: 2px solid var(--signal); outline-offset: -1px; z-index: 1; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--acier); margin-top: 12px; }
+  .legend i { display: inline-block; width: 14px; height: 14px; border-radius: 2px; vertical-align: -3px; margin-right: 5px; border: 1px solid var(--bord2); }
+  .legend .hatch { background: repeating-linear-gradient(135deg, #fff 0 3px, #E8EDF3 3px 6px); }
+  .legend .grow { flex: 1; }
+  .linklike { font: inherit; font-size: 12px; color: var(--signal); background: none; border: 0; cursor: pointer; padding: 0; }
+
+  /* Courbe */
+  .curve { margin-top: 20px; border-top: 1px solid var(--brume); padding-top: 14px; }
+  .curve svg { width: 100%; height: 120px; display: block; }
+  .curve .ax { font-family: "JetBrains Mono", monospace; font-size: 10px; fill: var(--acier); }
+
+  /* Aperçu */
+  .tv { background: var(--nuit); border: 1px solid var(--nuit); border-radius: 4px; padding: 6px; }
+  .scr { aspect-ratio: 16/9; border-radius: 2px; overflow: hidden; position: relative; background: #fff; }
+  .scr .in { position: absolute; inset: 0; transition: filter .2s; }
+  .slide { width: 100%; height: 100%; display: grid; grid-template-columns: 1.4fr 1fr; }
+  .slide .ph { background: linear-gradient(160deg, #7FA7CF 0%, #3B6C9E 55%, #1D3F66 100%); position: relative; }
+  .slide .ph::after { content: ""; position: absolute; left: 14%; right: 14%; bottom: 14%; height: 34%; background: #F2D98C; clip-path: polygon(0 100%, 35% 30%, 55% 62%, 78% 10%, 100% 100%); }
+  .slide .tx { background: #F5F7FA; padding: 12% 10%; display: flex; flex-direction: column; gap: 8%; }
+  .slide .tx b { font-size: 13px; font-weight: 500; color: var(--nuit); }
+  .slide .tx i { display: block; height: 5px; background: #9AAABD; border-radius: 1px; }
+  .slide .tx i:nth-child(3) { width: 70%; } .slide .tx i:nth-child(4) { width: 85%; }
+  .cap { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--acier); margin-top: 8px; gap: 8px; }
+  .cap .mono { font-family: "JetBrains Mono", monospace; color: var(--nuit); }
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 9px; border-radius: 4px; background: var(--ok-bg); color: var(--ok-tx); }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ok-dot); }
+  .pill.sim { background: var(--maj-bg); color: var(--maj-tx); }
+  .pill.sim::before { background: var(--maj-dot); }
+  .pill.zzz { background: #E8EDF3; color: var(--acier); }
+  .pill.zzz::before { background: var(--acier); }
+
+  /* Capacités */
+  .caps { margin-top: 18px; border-top: 1px solid var(--brume); padding-top: 14px; font-size: 13px; }
+  .caps h3 { font-size: 13px; font-weight: 500; margin-bottom: 8px; }
+  .cap-r { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--brume); color: var(--acier); }
+  .cap-r:last-child { border: 0; }
+  .cap-r span:first-child { color: var(--nuit); }
+
+  .hint { font-size: 12px; color: var(--acier); margin-top: 10px; line-height: 1.5; }
+  .btn { font: inherit; font-weight: 500; border-radius: 4px; padding: 10px 18px; border: 1px solid var(--nuit); background: var(--nuit); color: var(--blanc); cursor: pointer; margin-top: 18px; }
+  .btn.sec { background: var(--blanc); border-color: var(--bord2); color: var(--nuit); }
+
+  /* Fenêtre écran */
+  .win { max-width: 560px; }
+  .radio { display: flex; flex-direction: column; gap: 8px; }
+  .opt { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--brume); border-radius: 4px; padding: 10px 12px; cursor: pointer; }
+  .opt.sel { border-color: var(--signal); box-shadow: inset 2px 0 0 var(--signal); }
+  .opt input { margin-top: 3px; accent-color: var(--signal); }
+  .opt b { font-weight: 500; display: block; }
+  .opt small { font-size: 12px; color: var(--acier); }
+  .own { display: none; margin-top: 14px; }
+  .own.show { display: block; }
+  .wall { font-size: 13px; background: #EAF2FA; border-radius: 4px; padding: 10px 12px; color: var(--nuit); margin-top: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="note"><b>Maquette — luminosité et contraste.</b> Seulement pour l'app Android (smartphone, tablette, Android TV). Tout est cliquable : activez, choisissez un profil puis peignez la grille, survolez une case pour voir le rendu.</p>
+
+  <!-- ================= 1. Fenêtre de l'aire ================= -->
+  <span class="tag">1 · Fenêtre d'une aire (à côté de la mise en veille)</span>
+  <div class="panel">
+    <h2>Luminosité et contraste</h2>
+    <p class="sub">Réglage par défaut des écrans Android de l'aire « Hall d'accueil ». Chaque écran peut le remplacer.</p>
+
+    <div class="switch">
+      <button type="button" class="sw on" id="sw" aria-pressed="true" aria-label="Activer"></button>
+      <span>Adapter l'image selon l'heure<small>Désactivé : l'image est affichée telle quelle, sans réglage.</small></span>
+    </div>
+
+    <div id="body">
+    <div class="cols">
+      <div>
+        <label class="lbl">Profils <small>(cliquez pour le régler et le choisir comme pinceau)</small></label>
+        <div class="profs" id="profs"></div>
+
+        <label class="lbl">Semaine <small>(cliquez ou glissez pour peindre avec le profil choisi)</small></label>
+        <div class="gw"><div class="g" id="grid"></div></div>
+        <div class="legend">
+          <span class="hatch-w"><i class="hatch"></i>Veille (réglée dans « Mise en veille »)</span>
+          <span class="grow"></span>
+          <button type="button" class="linklike" id="sug">Jour, soirée et nuit</button>
+          <button type="button" class="linklike" id="clr">Tout en « Jour »</button>
+        </div>
+
+        <div class="curve">
+          <label class="lbl" style="margin-top:0">Courbe du <b id="cd" style="color:var(--nuit);font-weight:500">lundi</b> <small>(cliquez un jour dans la grille)</small></label>
+          <svg viewBox="0 0 720 120" preserveAspectRatio="none" id="svg"></svg>
+        </div>
+      </div>
+
+      <div>
+        <label class="lbl" style="margin-top:0">Aperçu <small>(survolez une case)</small></label>
+        <div class="tv"><div class="scr"><div class="in" id="in"><div class="slide"><div class="ph"></div><div class="tx"><b>Accueil — bienvenue</b><i></i><i></i><i></i></div></div></div></div></div>
+        <div class="cap"><span id="when" class="mono">Lun 09 h</span><span id="state"></span></div>
+
+        <div class="caps">
+          <h3>Ce qui s'applique selon l'appareil</h3>
+          <div class="cap-r"><span>Smartphone, tablette</span><span>luminosité réelle + contraste simulé</span></div>
+          <div class="cap-r"><span>Android TV, box</span><span>luminosité et contraste simulés</span></div>
+          <div class="cap-r"><span>Autres players (PC, web)</span><span>non concernés</span></div>
+        </div>
+        <p class="hint">« Simulé » : l'image est assombrie ou contrastée à l'écran, mais le rétroéclairage ne change pas. Chaque écran indique ce qu'il sait faire.</p>
+      </div>
+    </div>
+    <button type="button" class="btn">Enregistrer</button>
+    </div>
+  </div>
+
+  <!-- ================= 2. Fenêtre de l'écran ================= -->
+  <span class="tag">2 · Fenêtre d'un écran (onglet « Affichage »)</span>
+  <div class="panel win">
+    <h2>Luminosité et contraste</h2>
+    <p class="sub">Écran « Tablette salle B12 » · Android, tablette · luminosité réelle disponible</p>
+    <div class="radio" id="mode">
+      <label class="opt sel"><input type="radio" name="m" value="inherit" checked /><span><b>Comme l'aire</b><small>Suit les profils de « Hall d'accueil ».</small></span></label>
+      <label class="opt"><input type="radio" name="m" value="own" /><span><b>Réglage propre</b><small>Ses propres profils et sa propre semaine.</small></span></label>
+      <label class="opt"><input type="radio" name="m" value="never" /><span><b>Aucun réglage</b><small>Image affichée telle quelle, quelle que soit l'heure.</small></span></label>
+    </div>
+    <div class="own" id="own">
+      <p class="hint" style="margin-top:0">Même éditeur que celui de l'aire (profils, semaine, courbe).</p>
+      <button type="button" class="btn sec" style="margin-top:10px">Partir de ceux de l'aire</button>
+    </div>
+    <div class="wall"><b style="font-weight:500">Écran d'un mur :</b> il suit toujours le réglage de son aire, pour que l'image reste homogène sur tout le mur. Le choix ci-dessus n'est alors pas proposé.</div>
+  </div>
+</div>
+
+<script>
+const DAYS = ["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
+// Veille de l'exemple : nuits 19 h–7 h en semaine, week-end entier (comme Sleep.Suggested)
+const sleep = (d,h) => d >= 5 || h < 7 || h >= 19;
+let profs = [
+  { n: "Jour",   b: 100, c: 100 },
+  { n: "Soirée", b: 60,  c: 110 },
+  { n: "Nuit",   b: 25,  c: 120 }
+];
+const SUG = (d,h) => h >= 17 && h < 19 ? 1 : 0;      // Jour toute la journée, soirée 17-19 h
+let cells = Array.from({length:168}, (_,i) => SUG(Math.floor(i/24), i%24));
+let brush = 0, day = 0, paint = null, hover = {d:0, h:9};
+
+const $ = s => document.querySelector(s);
+const cellBg = p => { const a = (100 - p.b) / 100; return `rgb(${Math.round(255 - a*244)},${Math.round(255 - a*224)},${Math.round(255 - a*197)})`; };
+const filt = p => `brightness(${p.b/100}) contrast(${p.c/100})`;
+
+function renderProfs() {
+  $("#profs").innerHTML = profs.map((p,i) => `
+    <div class="prof ${i===brush?'sel':''}" data-i="${i}">
+      <div class="prof-h"><span class="chip" style="background:${cellBg(p)}"></span><span class="n">${p.n}</span><span class="v">${p.b} % · ${p.c} %</span></div>
+      <div class="prof-b">
+        <input type="text" value="${p.n}" data-f="n" aria-label="Nom" />
+        <div class="rng"><span>Luminosité</span><input type="range" min="10" max="100" value="${p.b}" data-f="b"><output>${p.b} %</output></div>
+        <div class="rng"><span>Contraste</span><input type="range" min="50" max="150" value="${p.c}" data-f="c"><output>${p.c} %</output></div>
+      </div>
+    </div>`).join("");
+}
+$("#profs").addEventListener("click", e => {
+  const el = e.target.closest(".prof"); if (!el || e.target.closest(".prof-b")) return;
+  brush = +el.dataset.i; renderProfs();
+});
+$("#profs").addEventListener("input", e => {
+  const el = e.target.closest(".prof"), f = e.target.dataset.f; if (!f) return;
+  const p = profs[+el.dataset.i];
+  p[f] = f === "n" ? e.target.value : +e.target.value;
+  if (f !== "n") { el.querySelector(".v").textContent = `${p.b} % · ${p.c} %`; e.target.nextElementSibling.textContent = e.target.value + " %"; el.querySelector(".chip").style.background = cellBg(p); }
+  else el.querySelector(".n").textContent = p.n;
+  renderGrid(); renderCurve(); preview();
+});
+
+function renderGrid() {
+  let h = `<span></span>` + [...Array(24).keys()].map(i => `<span class="h">${i%3===0?i:""}</span>`).join("");
+  for (let d = 0; d < 7; d++) {
+    h += `<span class="d ${d===day?'sel':''}" data-day="${d}">${DAYS[d]}</span>`;
+    for (let i = 0; i < 24; i++) {
+      const k = d*24+i, s = sleep(d,i);
+      h += `<span class="c ${s?'sleep':''}" data-k="${k}" ${s?'':`style="background:${cellBg(profs[cells[k]])}"`} title="${DAYS[d]} ${i} h"></span>`;
+    }
+  }
+  $("#grid").innerHTML = h;
+}
+$("#grid").addEventListener("mousedown", e => {
+  const dl = e.target.closest(".d"); if (dl) { day = +dl.dataset.day; $("#cd").textContent = ["lundi","mardi","mercredi","jeudi","vendredi","samedi","dimanche"][day]; renderGrid(); renderCurve(); return; }
+  const c = e.target.closest(".c"); if (!c || c.classList.contains("sleep")) return;
+  paint = true; setCell(+c.dataset.k); e.preventDefault();
+});
+$("#grid").addEventListener("mouseover", e => {
+  const c = e.target.closest(".c"); if (!c) return;
+  const k = +c.dataset.k; hover = {d: Math.floor(k/24), h: k%24};
+  if (paint && !c.classList.contains("sleep")) setCell(k);
+  preview();
+});
+addEventListener("mouseup", () => paint = null);
+function setCell(k) {
+  if (cells[k] === brush) return;
+  cells[k] = brush;
+  const el = document.querySelector(`.c[data-k="${k}"]`); el.style.background = cellBg(profs[brush]);
+  renderCurve(); preview();
+}
+
+function renderCurve() {
+  const W = 720, H = 120, pad = 18, y = v => pad + (H - 2*pad) * (1 - (v - 0) / 100);
+  let g = "";
+  [0, 50, 100].forEach(v => g += `<line x1="0" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="#DDE3EA" stroke-width="1"/><text class="ax" x="2" y="${y(v)-3}">${v} %</text>`);
+  let pts = "", sl = "";
+  for (let i = 0; i < 24; i++) {
+    const x0 = i * W/24, x1 = (i+1) * W/24, p = profs[cells[day*24+i]];
+    if (sleep(day, i)) { sl += `<rect x="${x0}" y="0" width="${W/24}" height="${H}" fill="#E8EDF3" opacity=".8"/>`; continue; }
+    pts += `${pts ? "L" : "M"}${x0},${y(p.b)} L${x1},${y(p.b)} `;
+  }
+  // une rupture de ligne à chaque plage de veille : on trace par segments continus
+  let d = "", prevSleep = true;
+  for (let i = 0; i < 24; i++) {
+    const x0 = i*W/24, x1 = (i+1)*W/24, p = profs[cells[day*24+i]];
+    if (sleep(day,i)) { prevSleep = true; continue; }
+    d += (prevSleep ? "M" : "L") + `${x0},${y(p.b)} L${x1},${y(p.b)} `; prevSleep = false;
+  }
+  let ax = ""; for (let h = 0; h <= 24; h += 6) ax += `<text class="ax" x="${Math.min(h*W/24, W-16)}" y="${H-3}">${h} h</text>`;
+  $("#svg").innerHTML = sl + g + `<path d="${d}" fill="none" stroke="#3B82C4" stroke-width="2" vector-effect="non-scaling-stroke"/>` + ax;
+}
+
+function preview() {
+  const {d, h} = hover, s = sleep(d, h), p = profs[cells[d*24+h]];
+  $("#in").style.filter = s ? "brightness(.08)" : filt(p);
+  $("#when").textContent = `${DAYS[d]} ${String(h).padStart(2,"0")} h`;
+  $("#state").innerHTML = s ? `<span class="pill zzz">En veille</span>` : `<span class="pill sim">${p.n} · ${p.b} % · ${p.c} %</span>`;
+}
+
+$("#sug").onclick = () => { cells = Array.from({length:168}, (_,i) => { const h = i%24; return h >= 17 && h < 19 ? 1 : (h >= 6 && h < 7) || h >= 19 ? 2 : 0; }); renderGrid(); renderCurve(); preview(); };
+$("#clr").onclick = () => { cells.fill(0); renderGrid(); renderCurve(); preview(); };
+$("#sw").onclick = e => {
+  const on = !e.target.classList.toggle("on") ? false : true; e.target.setAttribute("aria-pressed", on);
+  $("#body").style.display = on ? "" : "none";
+};
+document.querySelectorAll("#mode .opt").forEach(o => o.addEventListener("click", () => {
+  document.querySelectorAll("#mode .opt").forEach(x => x.classList.toggle("sel", x === o));
+  $("#own").classList.toggle("show", o.querySelector("input").value === "own");
+}));
+
+renderProfs(); renderGrid(); renderCurve(); preview();
+</script>
+</body>
+</html>

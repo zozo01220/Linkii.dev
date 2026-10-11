@@ -45,7 +45,11 @@
                     {
                         var idx = i;
                         var s = screens.First(x => x.Id == order[idx]);
-                        <button type="button" class="wall-cell @(swap == idx ? "sel" : "")" title="@s.Name · place @Helpers.WallLabel(idx, cols, rows)" @onclick="() => Cell(idx)">
+                        var cx = idx % cols;
+                        var cy = idx / cols;
+                        <button type="button" class="wall-cell @(thumb != null ? "has-img" : "") @(swap == idx ? "sel" : "")" title="@s.Name · place @Helpers.WallLabel(idx, cols, rows)" @onclick="() => Cell(idx)">
+                            @* reflet de ce que la place affichera : la vignette de la liste du mur, découpée à la place de l'écran *@
+                            @if (thumb != null) { <span class="wc-img" style="width:@(cols * 100)%;height:@(rows * 100)%;left:-@(cx * 100)%;top:-@(cy * 100)%"><MediaThumb Media="thumb" All="media" /></span> }
                             <span class="n">@(idx + 1)</span>
                             <b>@s.Name</b>
                             @if (s.Orientation == "portrait") { <small>portrait</small> }
@@ -132,6 +136,8 @@
 
     private string? error;
     private Guid areaId;
+    private List<MediaItem> media = new();
+    private MediaItem? thumb;   // premier contenu plein écran de la liste du mur : l'image que le mur affichera, répartie sur les places
 
     private string DefaultName => $"Mur {cols} × {rows}";
     private string Title => renamed && name.Trim().Length > 0 ? name.Trim() : ZoneId == null ? DefaultName : zoneName;
@@ -172,6 +178,9 @@
             var first = screens.FirstOrDefault()?.PlaylistId;
             playlistValue = playlists.Any(p => p.Id == first) ? first.ToString()! : "";
         }
+        media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
+        var wallPlId = ZoneId is { } wz ? Store.Read(d => d.Area?.Zones.FirstOrDefault(z => z.Id == wz)?.PlaylistId) : Guid.TryParse(playlistValue, out var wp) ? wp : (Guid?)null;
+        thumb = playlists.FirstOrDefault(p => p.Id == wallPlId)?.Draft.Where(i => i.Placement == "full").Select(i => media.FirstOrDefault(m => m.Id == i.MediaId)).FirstOrDefault(m => m != null);
         order = screens.Select(s => s.Id).ToList();
         shapes = Helpers.WallShapes(order.Count);
         if (!shapes.Contains((cols, rows))) (cols, rows) = shapes.FirstOrDefault((order.Count, 1));

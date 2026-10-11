@@ -44,7 +44,10 @@
                     {
                         var zone = z;
                         var zp = playlists.FirstOrDefault(p => p.Id == zonePl[zone]);
-                        <div class="wg-zone @(zp == null ? "empty" : "")" style="flex:@Def.Sizes[zone].ToString("0.##", Inv) 1 0">
+                        var zt = ZoneThumb(zp);
+                        <div class="wg-zone @(zp == null ? "empty" : "") @(zt != null ? "has-img" : "")" style="flex:@Def.Sizes[zone].ToString("0.##", Inv) 1 0">
+                            @* reflet de ce que la zone affichera : le premier contenu plein écran de sa liste de lecture *@
+                            @if (zt != null) { <span class="wg-zone-img"><MediaThumb Media="zt" All="media" /></span> }
                             @if (Def.Sizes.Length > 1) { <span class="wg-zone-n">Zone @(zone + 1)</span> }
                             @if (zp == null)
                             {
@@ -170,6 +173,22 @@
             @if (tab == "screen" || wall != null)
             {
                 <ScreenFormat Spec="spec" Layout="@layoutId" LayoutChanged="SetLayout" OnChange="StateHasChanged" Compact="true" />
+                @if (sleepOn && wall == null)
+                {
+                    @* mise en veille (fonction activée dans Réglages) : s'applique dès l'enregistrement, sans publier *@
+                    <div class="fmt-block">
+                        <label>Mise en veille</label>
+                        <SleepChoice @bind-Mode="sleepMode" @bind-Grid="sleepGrid" Inherited="@sleepInherited" Name="se-sleep" />
+                    </div>
+                }
+                @if (dimOn && wall == null)
+                {
+                    @* luminosité et contraste selon l'heure (fonction activée dans Réglages ; écrans Android) : s'applique dès l'enregistrement, sans publier *@
+                    <div class="fmt-block">
+                        <label>Luminosité et contraste <small>app Android</small></label>
+                        <DimChoice @bind-Mode="dimMode" @bind-Plan="dimPlan" Inherited="@dimInherited" Asleep="@DimAsleep" Name="se-dim" />
+                    </div>
+                }
             }
             else
             {
@@ -301,6 +320,11 @@
     private List<AppManifest> available = new();
     private Dictionary<string, AppManifest> manifests = new();
     private List<Playlist> playlists = new();
+    private List<MediaItem> media = new();
+
+    // Premier contenu plein écran d'une liste de lecture : ce que la zone affichera au démarrage.
+    private MediaItem? ZoneThumb(Playlist? p) =>
+        p?.Draft.Where(i => i.Placement == "full").Select(i => media.FirstOrDefault(m => m.Id == i.MediaId)).FirstOrDefault(m => m != null);
     private List<Zone> zones = new();
     private string zoneValue = "";
     private Zone? wall;          // mur dont l'écran fait partie (sa liste et son découpage sont ceux du mur)
@@ -322,6 +346,18 @@
     private string search = "";
     private ScreenSpec spec = new();
     private bool saving, confirmPublish, mirrorH, mirrorV;
+    private bool sleepOn;                       // fonction « Plages de mise en veille » activée dans Réglages
+    private string sleepMode = Sleep.Inherit;
+    private string? sleepGrid;
+    private string sleepInherited = "";
+    private bool dimOn;                         // fonction « Luminosité et contraste » activée dans Réglages
+    private string dimMode = Dim.Never;
+    private DimPlan? dimPlan;
+    private string dimInherited = "";
+    private string? areaSleepGrid;
+
+    /// <summary>Veille qui s'applique à l'écran (pour hachurer ces heures dans l'éditeur de luminosité).</summary>
+    private string? DimAsleep => !sleepOn ? null : sleepMode switch { Sleep.Never => null, Sleep.Own => Sleep.Any(sleepGrid) ? sleepGrid : null, _ => Sleep.Any(areaSleepGrid) ? areaSleepGrid : null };
 
     private ScreenWidget? Sel => widgets.FirstOrDefault(w => w.Id == selected);
 
@@ -333,14 +369,25 @@
         available = manifests.Values.Where(a => on.Contains(a.Id)).OrderBy(a => a.Name).ToList();
         var s = Store.Read(d => d.Screens.First(x => x.Id == ScreenId));
         playlists = Store.Read(d => d.Playlists.OrderBy(p => p.Name).ToList());
+        media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
         zones = Store.Read(d => d.Area?.Zones.OrderByDescending(z => z.IsDefault).ThenBy(z => z.Name, StringComparer.CurrentCultureIgnoreCase).ToList() ?? new());
         wall = zones.FirstOrDefault(z => z.Id == s.ZoneId && z.IsWall);
         screenWallPos = s.WallPos;
         zoneValue = (zones.FirstOrDefault(z => z.Id == s.ZoneId) ?? zones.FirstOrDefault(z => z.IsDefault))?.Id.ToString() ?? "";
         name = s.Name;
         (mirrorH, mirrorV) = (s.MirrorH, s.MirrorV);
+        (sleepOn, sleepMode, sleepGrid) = (Store.Read(d => d.Tenant.SleepEnabled), Sleep.Mode(s), s.SleepGrid);
+        var ar = Store.Read(d => d.Areas.FirstOrDefault(a => a.Id == s.AreaId));
+        sleepInherited = Sleep.Any(ar?.SleepGrid)
+            ? $"L'écran suit les plages de l'aire « {ar!.Name} » ({Math.Round(ar.SleepGrid!.Count(c => c == '1') / 7.0, 1).ToString("0.#", Fr)} h de veille par jour en moyenne)."
+            : $"L'aire « {ar?.Name} » n'a pas de plage : l'écran reste allumé.";
+        (dimOn, dimMode, dimPlan) = (Store.Read(d => d.Tenant.DimEnabled), Dim.Mode(s), s.Dimming?.Clone());
+        areaSleepGrid = ar?.SleepGrid;
+        dimInherited = Dim.Active(ar?.Dimming)
+            ? $"L'écran suit le réglage de l'aire « {ar!.Name} »."
+            : $"L'aire « {ar?.Name} » n'a pas de réglage : l'image est affichée telle quelle.";
         for (var z = 0; z < zonePl.Count; z++) zonePl[z] = s.ZonePlaylist(z);
-        spec = new ScreenSpec { Type = s.ScreenType, Orientation = s.Orientation, Resolution = s.Resolution };
+        spec =new ScreenSpec { Type = s.ScreenType, Orientation = s.Orientation, Resolution = s.Resolution };
         layoutId = ScreenLayouts.Fit(ScreenLayouts.Find(s.Layout).Id, spec);   // découpage encore permis par le format
         if (s.DetectedW > 0) detected = $"{s.DetectedW}×{s.DetectedH}";
         // copie de travail : rien n'est enregistré avant « Enregistrer »
@@ -502,6 +549,9 @@
         }).ToList();
         Guid? zid = Guid.TryParse(zoneValue, out var zg) && this.zones.Any(z => z.Id == zg) ? zg : this.zones.FirstOrDefault(z => z.IsDefault)?.Id;
         var newName = name.Trim(); var sp = spec; var lay = layoutId; var zones = zonePl.ToList(); var (mh, mv) = (mirrorH, mirrorV);
+        var (slMode, slGrid) = (sleepMode, Sleep.Valid(sleepGrid) ? sleepGrid : null);
+        var (dmMode, dmPlan) = (dimMode, Dim.Valid(dimPlan) ? dimPlan!.Clone() : null);
+        if (dimOn && wall == null && dmMode == Dim.Own && dmPlan == null) { Toast.Error("Réglage de luminosité invalide : vérifiez les profils."); return; }
         saving = true;
         try
         {
@@ -511,8 +561,15 @@
                 var inWall = AreaOps.WallOf(d, s);
                 if (inWall != null) zid = s.ZoneId;   // un écran de mur n'en sort que par la dissolution du mur
                 var changed = s.ScreenType != sp.Type || s.Orientation != sp.Orientation || s.Resolution != sp.Resolution || s.ZoneId != zid
-                    || s.MirrorH != mh || s.MirrorV != mv;   // la zone peut changer la synchro ; le miroir s'applique aussitôt
+                    || s.MirrorH != mh || s.MirrorV != mv   // la zone peut changer la synchro ; le miroir s'applique aussitôt
+                    || Sleep.Mode(s) != slMode || (slMode == Sleep.Own && s.SleepGrid != slGrid);   // la mise en veille aussi
                 s.Name = newName;
+                if (inWall == null) { s.SleepMode = slMode; s.SleepGrid = slMode == Sleep.Own ? slGrid : s.SleepGrid; }
+                if (inWall == null && d.Tenant.DimEnabled)
+                {
+                    changed |= Dim.Mode(s) != dmMode || (dmMode == Dim.Own && !Dim.Same(s.Dimming, dmPlan));   // la luminosité aussi
+                    s.DimMode = dmMode; if (dmMode == Dim.Own) s.Dimming = dmPlan;
+                }
                 s.MirrorH = mh; s.MirrorV = mv;
                 s.ZoneId = zid;
                 if (inWall != null)
