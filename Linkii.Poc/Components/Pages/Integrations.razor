@@ -131,9 +131,8 @@ else
                 <div class="acc-head">
                     <AccountLogo Kind="@a.Id" Size="28" />
                     <div class="acc-id">
-                        <b id="acc-@a.Id">@a.Kind <span class="badge @state.Css">@state.Label</span></b>
-                        <small class="acc-user">@a.User</small>
-                        <small>@SinceLine(a)</small>
+                        <b id="acc-@a.Id">@a.Kind</b>
+                        <small class="acc-user"><span class="acc-dot @state.Css" title="@state.Label"></span><span class="sr-only">@state.Label : </span>@a.User</small>
                     </div>
                     <div class="kebab">
                         <button type="button" class="kebab-btn" aria-haspopup="menu" aria-expanded="@(accMenu == a.Id ? "true" : "false")" aria-label="Actions pour le compte @a.Kind" @onclick="() => accMenu = accMenu == a.Id ? null : a.Id"><Ico Name="dots-v" Size="18" /></button>
@@ -168,34 +167,32 @@ else
                         <button type="button" class="btn danger sm" @onclick="() => EditConnection(a.Id)">Vérifier la connexion</button>
                     </div>
                 }
-                <div class="acc-body">
-                    <div>
-                        <h4>Autorisations</h4>
+                @foreach (var p in a.Permissions.Where(p => !p.Granted && p.Purpose != null && !a.Lost))
+                {
+                    <div class="acc-alert">
+                        <span class="grow">@PermName(p) : accès non autorisé</span>
+                        <a class="btn danger sm" href="@ConnectedAccounts.ConnectUrl(a.Id, p.Purpose)" target="_top">Autoriser</a>
+                    </div>
+                }
+                <div class="acc-uses">
+                    @foreach (var id in ConnectedAccounts.Kind(a.Id).Integrations)
+                    {
+                        var intId = id;
+                        <button type="button" class="acc-use" title="Gérer @IntegrationName(intId)" @onclick="() => Manage(intId)">
+                            <AppIcon Id="@intId" Small="true" />
+                            <span class="grow">@IntegrationName(intId)</span>
+                            <small>@(Enabled(intId) ? UsageText(intId) : "Inactive")</small>
+                        </button>
+                    }
+                </div>
+                <div class="acc-foot">
+                    <span class="acc-perms">Lecture :
                         @foreach (var p in a.Permissions)
                         {
-                            var needed = !p.Granted && p.Purpose != null && Enabled(IntegrationFor(a.Id, p.Purpose));
-                            <div class="acc-perm @(p.Granted ? "" : needed ? "warn" : "no")">
-                                <Ico Name="@(p.Granted ? "check" : "x")" Size="15" />
-                                <span class="grow">@p.Label@(p.Granted ? "" : " · non autorisé")</span>
-                                @if (!p.Granted && p.Purpose != null && !a.Lost)
-                                {
-                                    <a class="btn ghost sm" href="@ConnectedAccounts.ConnectUrl(a.Id, p.Purpose)" target="_top">Autoriser</a>
-                                }
-                            </div>
+                            <span class="acc-perm @(p.Granted ? "" : "no")" title="@p.Label"><Ico Name="@(p.Granted ? "check" : "x")" Size="14" />@PermName(p)</span>
                         }
-                    </div>
-                    <div>
-                        <h4>Utilisé par</h4>
-                        @foreach (var id in ConnectedAccounts.Kind(a.Id).Integrations)
-                        {
-                            var intId = id;
-                            <button type="button" class="acc-use" title="Gérer @IntegrationName(intId)" @onclick="() => Manage(intId)">
-                                <AppIcon Id="@intId" Small="true" />
-                                <span class="grow">@IntegrationName(intId)</span>
-                                <small>@(Enabled(intId) ? UsageText(intId) : "Inactive")</small>
-                            </button>
-                        }
-                    </div>
+                    </span>
+                    <small>@SinceLine(a)</small>
                 </div>
             </article>
         }
@@ -474,6 +471,9 @@ else
         : a.Error.Length > 0 ? ("Erreur de connexion", "hors-ligne")
         : a.Permissions.Any(p => !p.Granted && p.Purpose != null && Enabled(IntegrationFor(a.Id, p.Purpose))) ? ("Autorisation à compléter", "mise-a-jour")
         : ("Connecté", "en-ligne");
+
+    /// <summary>Libellé court d'une autorisation : « Fichiers Drive (lecture) » devient « Fichiers Drive ».</summary>
+    private static string PermName(AccountPermission p) => p.Label.Split(" (")[0];
 
     private static string SinceLine(ConnectedAccount a) =>
         a.Detail.Length > 0 ? a.Detail
