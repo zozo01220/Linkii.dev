@@ -315,6 +315,132 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
             .Select(i => Node(i) with { Location = string.Join(" › ", new[] { "OneDrive", i.Where, i.Name }.Where(x => x.Length > 0)) }).ToList();
     }
 
+    // ---------- Fichiers à convertir en images (Google Slides, Google Docs, Microsoft PowerPoint) : sélecteur, informations et export PDF ----------
+
+    public const string SlidesMime = "application/vnd.google-apps.presentation";
+    public const string DocsMime = "application/vnd.google-apps.document";
+
+    /// <summary>Un fichier choisi : référence (Google : identifiant avec clé de sécurité éventuelle ; Microsoft : « lecteur/élément »), nom, date de dernière modification, adresse web.</summary>
+    public record CloudFile(string Ref, string Name, string Modified, string WebUrl);
+
+    /// <summary>
+    /// Contenu d'un dossier du Drive du compte connecté (ou d'un emplacement de départ) pour choisir un fichier : sous-dossiers, et fichiers du type
+    /// demandé rendus dans <see cref="DriveListing.Files"/>. « Partagés avec moi » liste directement les fichiers. <see cref="DriveListing.Others"/> :
+    /// fichiers voisins que l'export ne sait pas traiter (.pptx ou .docx dans Google Drive).
+    /// </summary>
+    public Task<DriveListing> BrowseFiles(Tenant t, CloudFileKind kind, string root, string? folderRef) =>
+        kind.IsGoogle ? BrowseGoogleFiles(t, kind, root, folderRef) : BrowseMicrosoftFiles(t, kind, root, folderRef);
+
+    private async Task<DriveListing> BrowseGoogleFiles(Tenant t, CloudFileKind kind, string root, string? folderRef)
+    {
+        string? self = folderRef;
+        var web = "";
+        List<Item> items;
+        bool more;
+        if (folderRef != null) (items, more) = await Children(t, "gdrive", folderRef, BrowseMax);
+        else if (root == "shared") (items, more) = await GoogleItems(t, $"sharedWithMe = true and (mimeType = '{FolderMime}' or mimeType = '{kind.Mime}') and trashed = false", new(), BrowseMax, "");
+        else if (root == "drives") (items, more) = await SharedDrives(t);
+        else { (items, more) = await Children(t, "gdrive", "root", BrowseMax); (self, web) = ("root", "https://drive.google.com/drive/my-drive"); }
+
+        var byName = StringComparer.CurrentCultureIgnoreCase;
+        var folders = items.Where(i => i.Folder).OrderBy(i => i.Name, byName).Select(Node).ToList();
+        var files = items.Where(i => !i.Folder && i.Mime == kind.Mime).OrderBy(i => i.Name, byName).Select(i => Node(i) with { Ref = i.Ref, Kind = "file" }).ToList();
+        var office = kind.Mime == SlidesMime
+            ? new[] { "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.ms-powerpoint" }
+            : new[] { "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword" };
+        return new(self, web, folders, files, items.Count(i => !i.Folder && office.Contains(i.Mime)), more);
+    }
+
+    private async Task<DriveListing> BrowseMicrosoftFiles(Tenant t, CloudFileKind kind, string root, string? folderRef)
+    {
+        string? self = folderRef;
+        var web = "";
+        List<Item> items;
+        bool more;
+        if (folderRef != null) (items, more) = await Children(t, "onedrive", folderRef, BrowseMax);
+        else if (root == "shared") (items, more) = await GraphItems(t, $"{Graph}/me/drive/sharedWithMe?$top=200", BrowseMax);
+        else if (root == "my")
+        {
+            using var doc = await GraphGet(t, $"{Graph}/me/drive/root?$select=id,parentReference,webUrl");
+            self = doc.RootElement.GetProperty("parentReference").GetProperty("driveId").GetString() + "/" + doc.RootElement.GetProperty("id").GetString();
+            web = Str(doc.RootElement, "webUrl");
+            (items, more) = await Children(t, "onedrive", self, BrowseMax);
+        }
+        else (items, more) = (new(), false);   // SharePoint : on part du lien d'une bibliothèque
+
+        var byName = StringComparer.CurrentCultureIgnoreCase;
+        var folders = items.Where(i => i.Folder).OrderBy(i => i.Name, byName).Select(Node).ToList();
+        var files = items.Where(i => !i.Folder && kind.Matches(i.Name)).OrderBy(i => i.Name, byName).Select(i => Node(i) with { Ref = i.Ref, Kind = "file" }).ToList();
+        return new(self, web, folders, files, 0, more);
+    }
+
+    /// <summary>Fichiers du type demandé dont le nom contient <paramref name="text"/>, dans tout le Drive du compte (Microsoft : OneDrive du compte).</summary>
+    public async Task<List<DriveNode>> SearchFiles(Tenant t, CloudFileKind kind, string text)
+    {
+        text = text.Trim();
+        if (text.Length == 0) return new();
+        if (!kind.IsGoogle)
+        {
+            var (hits, _) = await GraphItems(t, $"{Graph}/me/drive/root/search(q='{Uri.EscapeDataString(text.Replace("'", "''"))}')?$top=50", 50);
+            return hits.Where(i => !i.Folder && kind.Matches(i.Name)).Select(i => Node(i) with { Ref = i.Ref, Kind = "file" }).ToList();
+        }
+        var q = text.Replace("\\", "\\\\").Replace("'", "\\'");
+        var (found, _) = await GoogleItems(t, $"mimeType = '{kind.Mime}' and name contains '{q}' and trashed = false", new(), 50, "&corpora=allDrives");
+        return found.Select(i => Node(i) with { Ref = i.Ref, Kind = "file" }).ToList();
+    }
+
+    /// <summary>Nom et date de modification d'un fichier ; refuse un fichier qui n'est pas du type attendu (présentation, document).</summary>
+    public async Task<CloudFile> CloudFileInfo(Tenant t, CloudFileKind kind, string fileRef)
+    {
+        var parts = fileRef.Split('/');
+        if (!kind.IsGoogle)
+        {
+            using var item = await GraphGet(t, $"{Graph}/drives/{parts[0]}/items/{parts[^1]}?$select=id,name,lastModifiedDateTime,webUrl,file", "Fichier");
+            var m = item.RootElement;
+            if (!m.TryGetProperty("file", out _) || !kind.Matches(Str(m, "name"))) throw new InvalidOperationException("Ce fichier n'est pas une présentation PowerPoint.");
+            return new(fileRef, Path.GetFileNameWithoutExtension(Str(m, "name")), Str(m, "lastModifiedDateTime"), Str(m, "webUrl"));
+        }
+        using var doc = await GoogleGet(t, $"{GoogleApi}/{parts[0]}?fields=id,name,mimeType,modifiedTime,webViewLink&supportsAllDrives=true", Keys(parts[0], parts.Length > 1 ? parts[1] : null), "Fichier");
+        var r = doc.RootElement;
+        if (Str(r, "mimeType") != kind.Mime) throw new InvalidOperationException(kind.Mime == SlidesMime ? "Ce fichier n'est pas une présentation Google Slides." : "Ce fichier n'est pas un document Google Docs.");
+        return new(fileRef, Str(r, "name"), Str(r, "modifiedTime"), Str(r, "webViewLink"));
+    }
+
+    /// <summary>Le fichier exporté en PDF par Google (10 Mo au plus) ou converti par Microsoft Graph, à lire puis fermer.</summary>
+    public async Task<Stream> ExportPdf(Tenant t, CloudFileKind kind, string fileRef, CancellationToken ct)
+    {
+        var parts = fileRef.Split('/');
+        string provider, user;
+        HttpResponseMessage res;
+        if (kind.IsGoogle)
+        {
+            (provider, user) = ("Google", t.GoogleUser.Length > 0 ? t.GoogleUser : "Google connecté");
+            res = await GoogleDownload(t, $"{GoogleApi}/{parts[0]}/export?mimeType=application%2Fpdf", Keys(parts[0], parts.Length > 1 ? parts[1] : null), ct);
+        }
+        else
+        {
+            (provider, user) = ("Microsoft", t.MsUser.Length > 0 ? t.MsUser : "Microsoft connecté");
+            var token = await graph.Token(t);
+            // Graph convertit lui-même (PowerPoint → PDF) et redirige vers le fichier ; le jeton n'est pas transmis à l'hôte de la redirection
+            res = await http.Download($"{Graph}/drives/{parts[0]}/items/{parts[^1]}/content?format=pdf", new Dictionary<string, string> { ["Authorization"] = "Bearer " + token }, ct);
+        }
+        if (!res.IsSuccessStatusCode)
+        {
+            var body = await res.Content.ReadAsStringAsync(ct);
+            var status = (int)res.StatusCode;
+            res.Dispose();
+            throw new InvalidOperationException(status switch
+            {
+                403 when body.Contains("exportSizeLimitExceeded") => "Ce fichier est trop volumineux pour être exporté par Google (10 Mo au plus).",
+                403 => $"{provider} refuse l'export de ce fichier : le propriétaire a peut-être interdit le téléchargement, ou le compte {user} n'y a pas accès.",
+                404 => $"Fichier introuvable : vérifiez qu'il existe et que le compte {user} y a accès.",
+                401 => $"{provider} a refusé l'accès : reconnectez votre compte dans Intégrations › Comptes connectés.",
+                400 or 415 when !kind.IsGoogle => "Microsoft n'a pas pu convertir ce fichier en PDF (format non pris en charge, ou fichier protégé).",
+                _ => $"{provider} n'a pas pu exporter le fichier ({status})."
+            });
+        }
+        return new ResponseStream(res, await res.Content.ReadAsStreamAsync(ct));
+    }
     private static DriveNode Node(Item i)
     {
         var info = i.SharedBy.Length > 0 ? "Partagé par " + i.SharedBy
@@ -622,11 +748,11 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
     private async Task<HttpResponseMessage> GoogleDownload(Tenant t, string url, Dictionary<string, string> headers, CancellationToken ct) =>
         await http.Download(url, await GoogleHeaders(t, headers), ct);
 
-    private async Task<JsonDocument> GoogleGet(Tenant t, string url, Dictionary<string, string> headers)
+    private async Task<JsonDocument> GoogleGet(Tenant t, string url, Dictionary<string, string> headers, string what = "Dossier")
     {
         var (status, text) = await http.Request(HttpMethod.Get, url, headers: await GoogleHeaders(t, headers), maxBytes: 4_000_000);
         if (status is 404 or 403 && !text.Contains("accessNotConfigured") && !text.Contains("insufficient") && !text.Contains("rateLimit"))
-            throw new InvalidOperationException($"Dossier introuvable : vérifiez le lien et que le compte {(t.GoogleUser.Length > 0 ? t.GoogleUser : "Google connecté")} y a accès.");
+            throw new InvalidOperationException($"{what} introuvable : vérifiez le lien et que le compte {(t.GoogleUser.Length > 0 ? t.GoogleUser : "Google connecté")} y a accès.");
         if (status == 401) throw new InvalidOperationException("Google a refusé l'accès : reconnectez votre compte dans Intégrations › Google Drive.");
         if (status == 403 && text.Contains("accessNotConfigured")) throw new InvalidOperationException("L'API Google Drive n'est pas activée pour l'application Google de la plateforme (administrateur Linkii).");
         if (status == 403 && text.Contains("insufficient")) throw new InvalidOperationException("Accès à Drive non accordé : reconnectez votre compte dans Intégrations › Google Drive.");
@@ -634,7 +760,7 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
         return JsonDocument.Parse(text);
     }
 
-    private async Task<JsonDocument> GraphGet(Tenant t, string url)
+    private async Task<JsonDocument> GraphGet(Tenant t, string url, string what = "Dossier")
     {
         try { return await graph.Get(t, url); }
         catch (InvalidOperationException ex) when (ex.Message.Contains("(403)") || ex.Message.Contains("(401)"))
@@ -643,7 +769,7 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("(404)"))
         {
-            throw new InvalidOperationException($"Dossier introuvable : vérifiez le lien de partage et que le compte {(t.MsUser.Length > 0 ? t.MsUser : "Microsoft connecté")} y a accès.");
+            throw new InvalidOperationException($"{what} introuvable : vérifiez le lien de partage et que le compte {(t.MsUser.Length > 0 ? t.MsUser : "Microsoft connecté")} y a accès.");
         }
     }
 }

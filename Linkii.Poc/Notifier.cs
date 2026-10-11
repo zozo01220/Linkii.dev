@@ -189,6 +189,47 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
         foreach (var id in screens) await NotifyScreen(id);
     }
 
+    /// <summary>
+    /// Contenu Google Slides ou Google Docs mis à jour (nouvelles images) : les éléments déjà publiés qui l'affichent reçoivent les nouvelles images,
+    /// sans republier ; les autres réglages non publiés de l'instance restent en brouillon.
+    /// </summary>
+    public async Task RefreshPages(Guid clientId, Guid mediaId)
+    {
+        var screens = store.Write(db =>
+        {
+            var ids = new HashSet<Guid>();
+            var m = db.Media.FirstOrDefault(x => x.Id == mediaId && x.ClientId == clientId);
+            if (m == null || catalog.Find(m.AppId) is not { } app || app.Settings.FirstOrDefault(f => f.IsMedia && AppCatalog.IsVisible(f, m.Settings)) is not { } mf) return ids;
+            var urls = AppField.MediaIds(m.Settings.GetValueOrDefault(mf.Key))
+                .Select(id => db.Media.FirstOrDefault(x => x.Id == id && x.ClientId == clientId && x.Status == null && x.Type == mf.Accept && x.FileName != null))
+                .OfType<MediaItem>().Select(x => "/media/" + x.FileName).ToList();
+            if (urls.Count == 0) return ids;
+
+            bool Update(IEnumerable<PublishedItem> items)
+            {
+                var n = 0;
+                foreach (var pi in items.Where(x => x.MediaId == mediaId))
+                {
+                    if (pi.Urls != null && urls.SequenceEqual(pi.Urls)) continue;
+                    pi.Urls = urls;
+                    pi.Settings[mf.Key] = m.Settings.GetValueOrDefault(mf.Key) ?? "";
+                    n++;
+                }
+                return n > 0;
+            }
+            foreach (var s in db.Screens.Where(s => s.ClientId == clientId))
+                if (Update(s.Published.Concat(s.PublishedZones.SelectMany(z => z)))) { s.PublishedVersion++; ids.Add(s.Id); }
+            foreach (var p in db.Playlists.Where(p => p.ClientId == clientId))   // ancien instantané de liste (écrans jamais publiés depuis)
+                if (Update(p.Published))
+                {
+                    p.PublishedVersion++;
+                    foreach (var s in db.Screens.Where(s => s.PlaylistId == p.Id && s.PublishedVersion == 0)) ids.Add(s.Id);
+                }
+            return ids;
+        });
+        foreach (var id in screens) await NotifyScreen(id);
+    }
+
     /// <summary>Paramètres du client modifiés : tous ses écrans rechargent leur configuration.</summary>
     public Task NotifyClient(Guid clientId) => NotifyWhere(s => s.ClientId == clientId);
 

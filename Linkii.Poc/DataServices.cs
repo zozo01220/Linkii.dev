@@ -81,6 +81,13 @@ public class GraphService(IHttpClientFactory httpFactory, MicrosoftAuth auth)
         return body.Length > 200 ? body[..200] : body;
     }
 
+    /// <summary>Jeton d'accès du compte Microsoft connecté, pour un téléchargement authentifié (conversion d'un fichier en PDF).</summary>
+    public async Task<string> Token(Tenant t)
+    {
+        try { return await auth.AccessToken(t); }
+        catch (MicrosoftAuth.MicrosoftAuthException ex) { throw new InvalidOperationException(ex.Message); }
+    }
+
     /// <summary>Lecture Graph avec le compte Microsoft connecté (calendriers, annuaire des salles, fichiers des Drives).</summary>
     public async Task<JsonDocument> Get(Tenant t, string url, bool utcPrefer = false)
     {

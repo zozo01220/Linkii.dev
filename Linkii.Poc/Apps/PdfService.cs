@@ -23,10 +23,12 @@ public class PdfService(JsonStore store, ILogger<PdfService> log)
 
     public record Source(string Id, string Title, int Pages);
     public record SourceResult(Source? Source, string? Error);
-    public record Options(string Range, string Background, string Canvas)
+    /// <param name="Unit">Nom d'une page dans le nom des images (« page », ou « diapositive » pour Google Slides).</param>
+    public record Options(string Range, string Background, string Canvas, string Unit = "page")
     {
         public static Options From(IReadOnlyDictionary<string, string> v) =>
-            new(v.GetValueOrDefault("range") ?? "", v.GetValueOrDefault("background") ?? "none", v.GetValueOrDefault("canvas") ?? "landscape");
+            new(v.GetValueOrDefault("range") ?? "", v.GetValueOrDefault("background") ?? "none", v.GetValueOrDefault("canvas") ?? "landscape",
+                v.GetValueOrDefault("gkind") == "slides" ? "diapositive" : "page");
     }
     public record ConvertResult(List<MediaItem> Files, int Selected, bool Truncated, string? Error);
 
@@ -58,22 +60,35 @@ public class PdfService(JsonStore store, ILogger<PdfService> log)
     {
         if (!file.Name.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)) return new(null, "Choisissez un fichier PDF (.pdf).");
         if (file.Size > MaxBytes) return new(null, $"« {file.Name} » dépasse la taille maximale ({MaxBytes / 1_000_000} Mo).");
-        var id = Guid.NewGuid().ToString("N");
-        var path = PathOf(id);
+        await using var input = file.OpenReadStream(MaxBytes, ct);
+        return await SaveStream(input, Path.GetFileNameWithoutExtension(file.Name), null, ct);
+    }
+
+    /// <summary>
+    /// Garde un PDF lu dans un flux (envoi, ou export Google Slides / Docs) après avoir vérifié qu'il s'ouvre.
+    /// <paramref name="id"/> : remplace le contenu d'un PDF déjà gardé (mise à jour d'un document Google) ; sinon un nouvel identifiant.
+    /// En cas d'échec, un PDF gardé sous cet identifiant est conservé tel qu'il était.
+    /// </summary>
+    public async Task<SourceResult> SaveStream(Stream input, string title, string? id = null, CancellationToken ct = default)
+    {
+        var reuse = id != null && ValidId(id);
+        var target = reuse ? id! : Guid.NewGuid().ToString("N");
+        var path = PathOf(target);
+        var temp = PathOf(Guid.NewGuid().ToString("N"));   // lu et vérifié avant de remplacer quoi que ce soit
         try
         {
-            await using (var input = file.OpenReadStream(MaxBytes, ct))
-            await using (var fs = File.Create(path)) await input.CopyToAsync(fs, ct);
-            var pages = await Count(path, ct);
-            if (pages == 0) { Delete(id); return new(null, "Ce document n'a aucune page."); }
-            var title = Path.GetFileNameWithoutExtension(file.Name);
-            return new(new Source(id, title.Length > 120 ? title[..120] : title, pages), null);
+            await using (var fs = File.Create(temp)) await input.CopyToAsync(fs, ct);
+            var pages = await Count(temp, ct);
+            if (pages == 0) { File.Delete(temp); return new(null, "Ce document n'a aucune page."); }
+            File.Move(temp, path, overwrite: true);
+            title = title.Trim();
+            return new(new Source(target, title.Length > 120 ? title[..120] : title, pages), null);
         }
-        catch (OperationCanceledException) { Delete(id); throw; }
+        catch (OperationCanceledException) { try { File.Delete(temp); } catch (IOException) { } throw; }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            log.LogWarning(ex, "PDF illisible : {Name}", file.Name);
-            Delete(id);
+            log.LogWarning(ex, "PDF illisible : {Title}", title);
+            try { File.Delete(temp); } catch (IOException) { }
             return new(null, "Ce fichier n'est pas un PDF lisible (il est peut-être protégé par un mot de passe ou abîmé).");
         }
     }
@@ -144,7 +159,7 @@ public class PdfService(JsonStore store, ILogger<PdfService> log)
                     var jpeg = RenderPage(path, pages[n] - 1, sizes[n].W, sizes[n].H, options, out var w, out var h);
                     var file = Guid.NewGuid().ToString("N") + ".jpg";
                     File.WriteAllBytes(Path.Combine(AppPaths.MediaDir, file), jpeg);
-                    var name = pages.Count > 1 ? $"{source.Title} — page {pages[n]}" : source.Title;
+                    var name = pages.Count > 1 ? $"{source.Title} — {options.Unit} {pages[n]}" : source.Title;
                     var item = new MediaItem
                     {
                         ClientId = clientId, AreaId = areaId ?? Guid.Empty, Name = name.Length > 120 ? name[..120] : name, Type = "image",
@@ -218,7 +233,7 @@ public class PdfService(JsonStore store, ILogger<PdfService> log)
     }
 
     /// <summary>Images d'une conversion précédente du même PDF que rien n'utilise : retirées de la médiathèque, fichiers compris.</summary>
-    private void PurgeUnused(Guid clientId, string sourceId, HashSet<Guid> keep)
+    public void PurgeUnused(Guid clientId, string sourceId, HashSet<Guid> keep)
     {
         var removed = store.Write(d =>
         {

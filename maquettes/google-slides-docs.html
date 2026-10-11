@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette – Google Slides et Google Docs</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --nuit:#0B1F3A; --acier:#5A6B80; --brume:#DDE3EA; --fond:#F5F7FA; --signal:#3B82C4; --bord2:#C5CED9; --ok-bg:#E1F0E8; --ok-tx:#155A38; --ok-dot:#1E8E5A; --warn-bg:#FFF1DB; --warn-tx:#7A4A00; --err-bg:#FBE4E4; --err-tx:#8A1F1F; --gc:#F4B400; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; font:400 15px/1.5 "IBM Plex Sans",sans-serif; color:var(--nuit); background:#8d97a6; display:grid; place-items:center; padding:120px 24px 24px; }
+  .demo { position:fixed; top:0; left:0; right:0; z-index:20; background:#fff; border-bottom:1px solid var(--bord2); padding:10px 14px; display:grid; gap:8px; font-size:13px; color:var(--acier); }
+  .demo .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .demo button { font:inherit; font-size:13px; padding:5px 12px; border-radius:99px; border:1px solid var(--bord2); background:#fff; color:var(--acier); cursor:pointer; }
+  .demo button.on { background:var(--nuit); border-color:var(--nuit); color:#fff; }
+
+  .modal { width:min(920px,100%); background:#fff; border-radius:6px; overflow:hidden; box-shadow:0 20px 60px rgba(11,31,58,.35); position:relative; }
+  .head { display:flex; align-items:center; gap:12px; padding:14px 18px; border-bottom:1px solid var(--brume); }
+  .logo { width:40px; height:40px; border-radius:50%; background:var(--gc); color:#fff; display:grid; place-items:center; flex:none; }
+  .ttl { flex:1; min-width:0; }
+  .ttl .r { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .ttl h1 { margin:0; font-size:18px; font-weight:600; }
+  .ttl small { color:var(--acier); font-size:13px; }
+  .btn { font:inherit; font-weight:500; padding:9px 16px; border-radius:4px; border:1px solid var(--bord2); background:#fff; color:var(--nuit); cursor:pointer; white-space:nowrap; display:inline-flex; align-items:center; gap:8px; }
+  .btn.sm { padding:5px 12px; font-size:14px; }
+  .btn.pri { background:var(--nuit); border-color:var(--nuit); color:#fff; }
+  .btn[disabled] { opacity:.45; cursor:not-allowed; }
+  .x { border:0; background:none; color:var(--acier); font-size:22px; line-height:1; cursor:pointer; padding:6px; border-radius:4px; }
+
+  .src { background:var(--fond); border-bottom:1px solid var(--brume); padding:14px 18px; }
+  .src .lab { display:flex; align-items:center; justify-content:space-between; font-size:13px; font-weight:500; color:var(--acier); margin-bottom:6px; }
+  .chip { display:inline-flex; align-items:center; gap:6px; font-weight:400; font-size:12.5px; color:var(--acier); }
+  .chip::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--ok-dot); }
+  .pick { display:flex; align-items:center; gap:10px; background:#fff; border:1px solid var(--bord2); border-radius:4px; padding:7px 8px 7px 12px; min-height:42px; color:var(--acier); }
+  .pick b { color:var(--nuit); font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pick .sp { flex:1; }
+  .ico { width:20px; height:26px; border-radius:2px; background:var(--gc); flex:none; position:relative; }
+  .ico::after { content:''; position:absolute; left:4px; right:4px; top:9px; bottom:6px; border:1.5px solid #fff; border-radius:1px; }
+  body.docs .ico { width:20px; } body.docs .ico::after { top:6px; bottom:6px; border:0; border-top:2px solid #fff; border-bottom:2px solid #fff; border-radius:0; }
+  .gl { width:18px; height:18px; border-radius:50%; background:#fff; border:1px solid var(--bord2); display:grid; place-items:center; font-weight:600; font-size:11px; color:#4285F4; flex:none; }
+  .acc { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:var(--acier); }
+
+  .cols { display:grid; grid-template-columns:1.15fr 1fr; gap:24px; padding:18px; }
+  .t { margin:0 0 10px; font-size:12px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--acier); display:flex; justify-content:space-between; align-items:center; }
+  .t .lnk { text-transform:none; letter-spacing:0; font-weight:500; color:var(--signal); cursor:pointer; font-size:13px; }
+
+  .stage { aspect-ratio:16/9; border-radius:4px; background:#0b1f3a; position:relative; overflow:hidden; perspective:900px; }
+  .car { position:absolute; inset:0; transform-style:preserve-3d; }
+  .pg { position:absolute; top:50%; left:50%; background:#fff; border-radius:2px; box-shadow:0 6px 24px rgba(0,0,0,.45); display:flex; flex-direction:column; gap:5px; transition:transform .45s ease, opacity .45s; cursor:pointer; overflow:hidden; }
+  body.slides .pg { width:58%; aspect-ratio:16/9; padding:6% 7%; }
+  body.docs .pg { height:86%; aspect-ratio:210/297; padding:7% 8%; }
+  .pg i { display:block; height:4px; background:#c8d0da; border-radius:2px; }
+  .pg i.h { height:9px; width:55%; background:#0B1F3A; margin-bottom:4px; }
+  .pg i.s { width:65%; } .pg i.m { width:80%; }
+  .pg .blk { background:#9fc4e6; border-radius:2px; }
+  body.slides .pg .blk { position:absolute; right:7%; bottom:12%; width:32%; height:40%; }
+  body.docs .pg .blk { height:22%; margin:4px 0; }
+  .pg .no { position:absolute; bottom:3px; right:6px; font-size:7px; color:#8a97a6; }
+  .nav { position:absolute; top:50%; transform:translateY(-50%); width:30px; height:30px; border-radius:50%; border:0; background:rgba(255,255,255,.18); color:#fff; font-size:16px; cursor:pointer; z-index:3; }
+  .nav.l { left:8px } .nav.r { right:8px }
+  .counter { position:absolute; bottom:8px; left:0; right:0; text-align:center; color:#cfd8e3; font-size:12px; z-index:3; }
+  .below { display:flex; align-items:center; gap:10px; margin-top:10px; flex-wrap:wrap; }
+  .below small { color:var(--acier); font-size:12.5px; flex:1; min-width:180px; }
+  .badge { display:inline-flex; align-items:center; gap:6px; padding:2px 10px; border-radius:99px; font-size:12.5px; background:var(--ok-bg); color:var(--ok-tx); }
+  .badge.warn { background:var(--warn-bg); color:var(--warn-tx); }
+
+  .empty { aspect-ratio:16/9; display:none; place-content:center; justify-items:center; gap:4px; text-align:center; border:2px dashed var(--bord2); border-radius:4px; background:var(--fond); color:var(--acier); padding:16px; }
+  .empty b { color:var(--nuit); font-weight:500; }
+  .prog { aspect-ratio:16/9; display:none; place-content:center; justify-items:center; gap:10px; text-align:center; border-radius:4px; background:var(--fond); border:1px solid var(--brume); color:var(--acier); padding:16px; }
+  .bar { width:240px; height:8px; border-radius:99px; background:var(--brume); overflow:hidden; } .bar span { display:block; height:100%; width:55%; background:var(--signal); border-radius:99px; }
+  .alert { display:none; margin-top:10px; padding:9px 12px; border-radius:4px; font-size:13.5px; }
+  .alert.err { background:var(--err-bg); color:var(--err-tx); } .alert.warn { background:var(--warn-bg); color:var(--warn-tx); }
+  .alert a { color:inherit; font-weight:500; text-decoration:underline; cursor:pointer; }
+  body.s-ok .stage { display:block; }
+  body:not(.s-ok) .stage, body:not(.s-ok) .below { display:none; }
+  body.s-vide .empty, body.s-nolink .empty, body.s-conv .prog { display:grid; }
+  body.s-vide .conf, body.s-nolink .conf, body.s-conv .conf, body.s-err .conf { opacity:.45; pointer-events:none; }
+  body.s-err .empty { display:grid; } body.s-err .alert.err { display:block; }
+  body.s-trop .alert.warn, body.s-maj .alert.warn { display:block; }
+  body.s-vide .meta, body.s-nolink .meta, body.s-conv .meta, body.s-err .meta { display:none; }
+  body.docs .only-slides, body.slides .only-docs { display:none; }
+
+  .conf { display:grid; gap:16px; align-content:start; }
+  label.l { display:block; font-size:13px; font-weight:500; color:var(--acier); margin-bottom:6px; }
+  .unit { position:relative; } .unit input { width:100%; font:inherit; padding:10px 84px 10px 12px; border:1px solid var(--bord2); border-radius:4px; }
+  .unit::after { content:attr(data-u); position:absolute; right:12px; top:50%; transform:translateY(-50%); color:var(--acier); font-size:13px; }
+  select, .txt { width:100%; font:inherit; padding:10px 12px; border:1px solid var(--bord2); border-radius:4px; background:#fff; }
+  .seg { display:flex; border:1px solid var(--bord2); border-radius:4px; overflow:hidden; background:#fff; }
+  .seg label { position:relative; flex:1; text-align:center; } .seg input { position:absolute; inset:0; opacity:0; cursor:pointer; margin:0; }
+  .seg span { display:block; padding:9px 14px; font-size:14px; color:var(--acier); border-left:1px solid var(--bord2); white-space:nowrap; }
+  .seg label:first-child span { border-left:0; } .seg input:checked + span { background:var(--nuit); color:#fff; }
+  .foot { display:flex; justify-content:flex-end; gap:10px; padding:12px 18px; background:var(--fond); border-top:1px solid var(--brume); }
+
+  .ov { position:absolute; inset:0; background:rgba(11,31,58,.45); display:none; place-items:center; z-index:10; padding:20px; }
+  .ov.on { display:grid; }
+  .adv { width:min(520px,100%); background:#fff; border-radius:6px; box-shadow:0 20px 60px rgba(11,31,58,.4); overflow:hidden; }
+  .adv .head { padding:12px 18px; } .adv .head h2 { margin:0; font-size:16px; flex:1; }
+  .adv .body { padding:18px; display:grid; gap:16px; }
+  .sw { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .sw small { display:block; color:var(--acier); font-size:12.5px; }
+  .sw input { appearance:none; width:40px; height:22px; border-radius:99px; background:var(--bord2); position:relative; cursor:pointer; flex:none; transition:.15s; }
+  .sw input::after { content:""; position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%; background:#fff; transition:.15s; }
+  .sw input:checked { background:var(--nuit); } .sw input:checked::after { left:20px; }
+
+  .flow { width:min(920px,100%); margin:22px 0 0; display:flex; align-items:stretch; gap:8px; flex-wrap:wrap; }
+  .flow div { flex:1; min-width:120px; background:rgba(255,255,255,.14); color:#fff; border-radius:6px; padding:9px 12px; font-size:13px; }
+  .flow b { display:block; font-weight:600; font-size:13px; }
+  .flow span.ar { align-self:center; color:#fff; opacity:.7; }
+  .note { max-width:920px; margin:14px auto 0; color:#fff; font-size:13px; opacity:.9; }
+  @media (max-width:720px){ .cols{grid-template-columns:1fr} }
+</style>
+</head>
+<body class="slides s-ok">
+<div class="demo">
+  <div class="row">Intégration :
+    <button data-t="slides" class="on">Google Slides</button>
+    <button data-t="docs">Google Docs</button>
+    <span style="margin-left:6px">·</span>
+    <button id="bAdv">Options avancées</button>
+  </div>
+  <div class="row">État de la fenêtre :
+    <button data-s="ok" class="on">Prêt</button>
+    <button data-s="nolink">Compte non connecté</button>
+    <button data-s="vide">Aucun fichier</button>
+    <button data-s="conv">Export en cours</button>
+    <button data-s="maj">Modifié dans Google</button>
+    <button data-s="trop">Trop long</button>
+    <button data-s="err">Accès refusé</button>
+  </div>
+</div>
+
+<div class="modal">
+  <div class="head">
+    <div class="logo" id="logo"></div>
+    <div class="ttl"><div class="r"><h1 id="h1"></h1><button class="btn sm">✎ Renommer</button></div><small>Ajout à « UNIL Youtube »</small></div>
+    <button class="x" id="gear" title="Options avancées" aria-label="Options avancées"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></button>
+    <button class="x" aria-label="Fermer">×</button>
+  </div>
+
+  <div class="src">
+    <div class="lab"><span id="srcLab"></span><span class="chip meta">Exporté en images 1080p · lecture hors ligne</span></div>
+    <div class="pick" id="pick"></div>
+  </div>
+
+  <div class="cols">
+    <section>
+      <h2 class="t">Aperçu <span class="lnk meta">Grille</span></h2>
+      <div class="stage"><div class="car" id="car"></div>
+        <button class="nav l" id="prev" aria-label="Précédent">‹</button>
+        <button class="nav r" id="next" aria-label="Suivant">›</button>
+        <div class="counter" id="cnt"></div>
+      </div>
+      <div class="empty"><b id="emptyT">Aucun aperçu</b><span id="emptyTxt"></span></div>
+      <div class="prog"><b style="color:var(--nuit);font-weight:500" id="progT"></b><div class="bar"><span></span></div><span id="progS"></span></div>
+      <div class="alert err" id="errTxt"></div>
+      <div class="alert warn" id="warn"></div>
+      <div class="below meta">
+        <span class="badge" id="badge"></span>
+        <small id="below"></small>
+      </div>
+    </section>
+
+    <section class="conf">
+      <h2 class="t" style="margin:0">Configuration</h2>
+      <div><label class="l" id="durLab"></label><div class="unit" data-u="secondes"><input type="number" id="dur" value="10"></div></div>
+      <div><label class="l">Cadrage</label>
+        <div class="seg"><label><input type="radio" name="f" checked><span id="fit1"></span></label><label><input type="radio" name="f"><span>Remplir l'écran</span></label></div>
+      </div>
+      <div><label class="l" id="trLab"></label><select><option>Fondu enchaîné</option><option>Glissement (de droite à gauche)</option><option>Zoom avant en fondu</option><option>Aucune (coupure franche)</option></select></div>
+    </section>
+  </div>
+  <div class="foot"><button class="btn">Annuler</button><button class="btn pri" id="add">Ajouter à la liste de lecture</button></div>
+
+  <div class="ov" id="ov">
+    <div class="adv">
+      <div class="head"><h2>Options avancées</h2><button class="x" id="advX" aria-label="Fermer">×</button></div>
+      <div class="body">
+        <div><label class="l" id="rngLab"></label><input class="txt" placeholder="Toutes · ou par exemple 1-5, 8, 10-12"><small style="color:var(--acier);font-size:12.5px" id="rngSm"></small></div>
+        <div class="sw"><div>Mettre à jour quand le fichier change<small>Linkii vérifie la date de modification, puis reconvertit.</small></div><input type="checkbox" checked></div>
+        <div><label class="l">Fréquence de vérification</label><select><option>Toutes les heures</option><option>Toutes les 15 minutes</option><option>Une fois par jour</option></select></div>
+        <div><label class="l" id="bgLab"></label>
+          <div class="seg"><label><input type="radio" name="b" checked><span>Noir</span></label><label><input type="radio" name="b"><span>Blanc</span></label><label><input type="radio" name="b"><span id="blur"></span></label></div>
+        </div>
+        <div><label class="l">Sens de l'écran</label><div class="seg"><label><input type="radio" name="c" checked><span>Paysage</span></label><label><input type="radio" name="c"><span>Portrait</span></label></div><small style="color:var(--acier);font-size:12.5px">Le fond (noir, blanc ou flou) est ajouté aux images selon le sens de l'écran.</small></div>
+        <div><label class="l">Vitesse de la transition</label><select><option>Normale (0,8 s)</option><option>Rapide (0,4 s)</option><option>Lente (1,5 s)</option></select></div>
+      </div>
+      <div class="foot"><button class="btn" id="advC">Annuler</button><button class="btn pri" id="advV">Valider</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="flow">
+  <div><b>1. Google Drive</b>fichier choisi, compte connecté</div><span class="ar">→</span>
+  <div><b>2. Export PDF</b>par Google, à la demande</div><span class="ar">→</span>
+  <div><b>3. Images</b>PDFium, 1080p, à l'import</div><span class="ar">→</span>
+  <div><b>4. Diaporama</b>comme un PDF : hors ligne, zones, simulateur</div><span class="ar">→</span>
+  <div><b>5. Mise à jour</b>date de modification, toutes les heures</div>
+</div>
+<p class="note">Deux intégrations distinctes (Google Slides, Google Docs) dans la catégorie Médiathèque, sur le même standard que le PDF (§30). Elles partagent le compte Google, le sélecteur Drive et le moteur d'export ; seuls les libellés, les réglages et le format des pages changent.</p>
+
+<script>
+  var T = {
+    slides: { logo: '#F4B400', h1: 'Google Slides', lab: 'Présentation Google *', unit: 'diapositive', units: 'diapositives', Unit: 'Diapositive', dur: 10, fit1: 'Diapo entière', tr: 'Transition entre les diapositives', rng: 'Diapositives à afficher', bg: 'Fond autour de la diapositive', blur: 'Diapo floutée', file: 'Journée portes ouvertes', fmt: '16:9', fmtL: '16:9', pick: 'Choisir dans Drive', icon: '<rect x="4" y="6" width="16" height="12" rx="1"/>', noData: 'Choisissez une présentation dans votre Google Drive ci-dessus.', def: 'Toutes · 50 diapositives au maximum', big: 'Rapport annuel 2025', err: 'Budget direction' },
+    docs:   { logo: '#4285F4', h1: 'Google Docs', lab: 'Document Google *', unit: 'page', units: 'pages', Unit: 'Page', dur: 15, fit1: 'Page entière', tr: 'Transition entre les pages', rng: 'Pages à afficher', bg: 'Fond autour de la page', blur: 'Page floutée', file: 'Règlement intérieur', fmt: 'portrait A4', pick: 'Choisir dans Drive', icon: '<path d="M7 4h7l4 4v12H7z"/><path d="M14 4v4h4M10 12h5M10 15h5"/>', noData: 'Choisissez un document dans votre Google Drive ci-dessus.', big: 'Guide de l’étudiant 2025', err: 'Contrat confidentiel' }
+  };
+  var type = 'slides', state = 'ok', N = 12, cur = 0;
+  var car = document.getElementById('car'), pick = document.getElementById('pick');
+  function build() {
+    car.innerHTML = '';
+    for (var i = 0; i < N; i++) {
+      var d = document.createElement('div'); d.className = 'pg';
+      d.innerHTML = '<i class="h"></i><i class="m"></i><i class="s"></i><i class="m"></i>' + (type === 'docs' ? '<div class="blk"></div><i class="m"></i><i></i><i class="s"></i><i></i><i class="m"></i>' : '<div class="blk"></div>') + '<span class="no">' + (i + 1) + '</span>';
+      (function (k) { d.onclick = function () { cur = k; place(); }; })(i);
+      car.appendChild(d);
+    }
+    place();
+  }
+  function place() {
+    var pgs = car.children, n = pgs.length, w = type === 'docs' ? 34 : 48;
+    for (var i = 0; i < n; i++) {
+      var o = i - cur, a = Math.abs(o), s = o < 0 ? -1 : 1, p = pgs[i];
+      if (a > (type === 'docs' ? 3 : 2)) { p.style.opacity = 0; p.style.pointerEvents = 'none'; continue; }
+      p.style.opacity = 1; p.style.pointerEvents = ''; p.style.zIndex = 10 - a;
+      p.style.transform = 'translate(-50%,-50%) translateX(' + (o * w) + '%) translateZ(' + (-a * 90) + 'px) rotateY(' + (-s * Math.min(a, 1) * 40) + 'deg)';
+    }
+    document.getElementById('cnt').textContent = T[type].Unit + ' ' + (cur + 1) + ' sur ' + n;
+  }
+  document.getElementById('prev').onclick = function () { cur = Math.max(0, cur - 1); place(); };
+  document.getElementById('next').onclick = function () { cur = Math.min(car.children.length - 1, cur + 1); place(); };
+
+  var acct = '<span class="gl">G</span><span class="acc">prieur@unil.ch</span>';
+  function file(n, d, end) { return '<span class="ico"></span><b>' + n + '</b><span>· ' + d + '</span><span class="sp"></span>' + acct + (end || '<button class="btn sm">Changer</button>'); }
+  function render() {
+    var t = T[type], s = state, b = document.body;
+    b.className = type + ' ' + ((s === 'trop' || s === 'maj') ? 's-ok s-' + s : 's-' + s);
+    document.getElementById('logo').style.background = t.logo;
+    document.getElementById('logo').innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">' + t.icon + '</svg>';
+    document.querySelectorAll('.ico').forEach(function () {});
+    b.style.setProperty('--gc', t.logo);
+    document.getElementById('h1').textContent = t.h1;
+    document.getElementById('srcLab').textContent = t.lab;
+    document.getElementById('durLab').textContent = 'Durée de chaque ' + t.unit + ' *';
+    document.getElementById('dur').value = t.dur;
+    document.getElementById('fit1').textContent = t.fit1;
+    document.getElementById('trLab').textContent = t.tr;
+    document.getElementById('rngLab').textContent = t.rng;
+    document.getElementById('rngSm').textContent = 'Laisser vide pour tout afficher (50 ' + t.units + ' au maximum).';
+    document.getElementById('bgLab').textContent = t.bg;
+    document.getElementById('blur').textContent = t.blur;
+    var n = state === 'trop' ? 84 : 12, fmt = n + ' ' + t.units + ' · ' + t.fmt;
+    var mod = type === 'docs' ? 'modifié' : 'modifiée';
+    var picks = {
+      ok: file(t.file, '12 ' + t.units + ' · ' + mod + ' il y a 2 h'),
+      maj: file(t.file, '12 ' + t.units + ' · ' + mod + ' à l’instant'),
+      trop: file(t.big, '84 ' + t.units),
+      conv: file(t.file, '12 ' + t.units, '<span class="badge warn">Export…</span>'),
+      vide: '<span class="gl">G</span><span class="acc">prieur@unil.ch</span><span class="sp"></span><button class="btn sm pri">' + t.pick + '</button>',
+      nolink: '<span>Aucun compte Google connecté</span><span class="sp"></span><button class="btn sm pri">Connecter un compte Google</button>',
+      err: '<span class="ico"></span><b>' + t.err + '</b><span>· accès refusé</span><span class="sp"></span><button class="btn sm pri">Choisir un autre fichier</button>'
+    };
+    pick.innerHTML = picks[s];
+    var warns = {
+      trop: 'Ce fichier compte 84 ' + t.units + ' ; seul' + (type === 'docs' ? 'es' : 'es') + ' les <b>50 premières</b> seront affichées. Les options avancées permettent de choisir lesquelles.',
+      maj: 'Le fichier a changé dans Google. <a>Mettre à jour maintenant</a> (sinon, mise à jour automatique dans l’heure).'
+    };
+    document.getElementById('warn').innerHTML = warns[s] || '';
+    document.getElementById('errTxt').textContent = 'Vous n’avez pas accès à ce fichier avec le compte prieur@unil.ch. Demandez l’accès à son propriétaire ou choisissez-en un autre.';
+    document.getElementById('add').disabled = !(s === 'ok' || s === 'trop' || s === 'maj');
+    var bd = document.getElementById('badge'); bd.className = 'badge' + (s === 'trop' ? ' warn' : '');
+    bd.textContent = s === 'trop' ? '50 ' + t.units + ' sur 84 · ' + t.fmt : fmt;
+    document.getElementById('below').textContent = (type === 'docs' ? 'Modifié dans Google Docs ? Linkii le' : 'Modifiée dans Google Slides ? Linkii la') + ' met à jour tout seul (réglage dans les options avancées).';
+    document.getElementById('emptyT').textContent = s === 'nolink' ? 'Connectez votre compte Google' : 'Aucun aperçu';
+    document.getElementById('emptyTxt').textContent = s === 'nolink' ? 'Une seule fois : le compte sert à toutes les intégrations Google (Drive, Agenda…).' : t.noData;
+    document.getElementById('progT').textContent = 'Export des ' + t.units + '…';
+    document.getElementById('progS').textContent = t.unit + ' 7 sur 12 · vous pouvez fermer la fenêtre';
+    N = s === 'trop' ? 20 : 12; cur = 0; build();
+    document.querySelectorAll('.demo button[data-t]').forEach(function (x) { x.className = x.dataset.t === type ? 'on' : ''; });
+    document.querySelectorAll('.demo button[data-s]').forEach(function (x) { x.className = x.dataset.s === state ? 'on' : ''; });
+  }
+  document.querySelectorAll('.demo button[data-t]').forEach(function (x) { x.onclick = function () { type = x.dataset.t; render(); }; });
+  document.querySelectorAll('.demo button[data-s]').forEach(function (x) { x.onclick = function () { state = x.dataset.s; render(); }; });
+  var ov = document.getElementById('ov');
+  function adv(on) { ov.classList.toggle('on', on); }
+  ['gear', 'bAdv'].forEach(function (id) { document.getElementById(id).onclick = function () { adv(true); }; });
+  ['advX', 'advC', 'advV'].forEach(function (id) { document.getElementById(id).onclick = function () { adv(false); }; });
+  render();
+</script>
+</body>
+</html>

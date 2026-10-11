@@ -39,8 +39,9 @@ public static class ConnectedAccounts
     /// <summary>Types de comptes, dans l'ordre d'affichage, avec les intégrations qui les utilisent (identifiants des cartes d'Intégrations).</summary>
     public static readonly KindDef[] Kinds =
     {
-        new(Microsoft, "Microsoft", "Microsoft 365, OneDrive et SharePoint", ["cal-m365", "drv-onedrive"]),
-        new(Google, "Google", "Google Calendar et Google Drive", ["cal-google", "drv-gdrive"]),
+        new(Microsoft, "Microsoft", "Microsoft 365, OneDrive, SharePoint et PowerPoint", ["cal-m365", "drv-onedrive", "ms-powerpoint"]),
+        // l'ordre compte : Integrations[0] = agendas, [1] = fichiers Drive (IntegrationFor) ; Slides, Docs et PowerPoint lisent des fichiers du Drive
+        new(Google, "Google", "Google Calendar, Google Drive, Google Slides et Google Docs", ["cal-google", "drv-gdrive", "google-slides", "google-docs"]),
         new(Canva, "Canva", "Vos designs Canva", ["canva"]),
         new(CalDav, "Serveur CalDAV", "Nextcloud, iCloud, Zimbra, SOGo, Synology…", ["cal-caldav"]),
         new(Exchange, "Exchange sur site", "Serveur Exchange (EWS)", ["cal-ews"]),

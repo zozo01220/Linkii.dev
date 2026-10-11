@@ -59,6 +59,8 @@ builder.Services.AddHostedService<SignupWorker>();   // inscriptions non validé
 builder.Services.AddSingleton<DropboxAuth>();   // « Se connecter avec Dropbox » (lecture seule)
 builder.Services.AddSingleton<RemoteDrives>();   // sessions Nextcloud (WebDAV), SFTP et Dropbox
 builder.Services.AddSingleton<DriveService>();
+builder.Services.AddSingleton<CloudFileService>();
+builder.Services.AddHostedService<CloudFilesWorker>();   // Google Slides, Docs et Microsoft PowerPoint : mise à jour quand le fichier change (réglage de chaque contenu, une heure par défaut)
 builder.Services.AddHostedService<DriveSyncWorker>();   // dossiers des Drives : synchronisés toutes les 15 minutes
 builder.Services.AddScoped<AppService>();
 builder.Services.AddScoped<MediaLibrary>();

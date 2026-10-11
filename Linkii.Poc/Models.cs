@@ -874,7 +874,7 @@ public static class Helpers
     public static int? ImagesSeconds(PublishedItem i)
     {
         if (i.Urls is not { Count: > 0 } urls || urls.Any(u => VideoFile.IsMatch(u))) return null;
-        var images = i.AppId is "slideshow-images" or "drive" or "pdf" || (i.AppId == "canva" && i.Settings.GetValueOrDefault("kind") != "video");
+        var images = i.AppId is "slideshow-images" or "drive" or "pdf" or "google-slides" or "google-docs" or "ms-powerpoint" || (i.AppId == "canva" && i.Settings.GetValueOrDefault("kind") != "video");
         if (!images) return null;
         var each = int.TryParse(i.Settings.GetValueOrDefault("interval"), out var s) ? Math.Clamp(s, 2, 600) : 8;
         return urls.Count * each;

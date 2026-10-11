@@ -1,0 +1,132 @@
+@inject CloudFileService Cloud
+@inject AppService Apps
+@inject TenantStore Store
+@inject Toaster Toast
+
+@* Champ « gfile » des apps Google Slides, Google Docs et Microsoft PowerPoint : fichier choisi dans le Drive du compte connecté (Google Drive ou OneDrive
+   et SharePoint), converti en PDF (export Google, conversion Microsoft), gardé sur le serveur puis converti en images dans la médiathèque
+   (une par diapositive ou page). Une seule ligne (DEV-POC.md §30, §39 et §40).
+   Valeurs remplies : gfile (référence du fichier), gfileName, gfileMod, pdf, pdfTitle, pdfPages, pages. *@
+<div class="cv">
+    @if (!Connected)
+    {
+        <div class="cv-connect">
+            <span class="app-ico sm" style="--app-c:@Look.Color"><Ico Name="@ProviderIcon" Size="17" /></span>
+            <span class="grow">Connectez d'abord un compte @Provider (avec l'accès aux fichiers @(Kind.IsGoogle ? "Drive" : "OneDrive et SharePoint")) pour choisir @Noun.</span>
+            <a class="btn sm" href="/integrations">Connecter un compte @Provider</a>
+        </div>
+    }
+    else
+    {
+        <span class="cv-chip" title="Compte @Provider connecté">@(User.Length > 0 ? User : "Compte connecté")</span>
+        <div class="cv-line">
+            <div class="ci-pick-sum cv-pick">
+                @if (FileRef.Length > 0)
+                {
+                    <span class="gf-ico" style="--gc:@Look.Color" aria-hidden="true"></span>
+                    <b title="@Name">@Name</b>
+                    <span class="muted">· @Summary</span>
+                    <span class="grow"></span>
+                    <button type="button" class="btn ghost sm" disabled="@busy" title="Convertir à nouveau la dernière version du fichier" @onclick="() => Run(FileRef)"><Ico Name="refresh" Size="14" /> Mettre à jour</button>
+                    <button type="button" class="btn ghost sm" disabled="@busy" @onclick="() => picking = true">Changer</button>
+                }
+                else
+                {
+                    <span class="muted">Aucun fichier choisi</span>
+                    <span class="grow"></span>
+                    <button type="button" class="btn sm" disabled="@busy" @onclick="() => picking = true"><Ico Name="@ProviderIcon" Size="15" /> @(Kind.IsGoogle ? "Choisir dans Drive" : "Choisir dans OneDrive")</button>
+                }
+            </div>
+        </div>
+        @if (busy) { <div class="cv-busy"><span class="spinner"></span> @status</div> }
+        @if (error != null) { <div class="err">@error</div> }
+        else if (changed && !busy) { <div class="gf-warn">Le fichier a changé. <button type="button" class="linklike" @onclick="() => Run(FileRef)">Mettre à jour maintenant</button> (sinon, mise à jour automatique selon les options avancées).</div> }
+    }
+</div>
+
+@if (picking)
+{
+    @* rendu dans la mise en page : la fenêtre de l'app, centrée par transform, décalerait et rognerait le sélecteur *@
+    <SectionContent SectionName="overlay">
+        <CloudFilePicker Kind="Kind" OnPicked="Picked" OnClose="() => picking = false" />
+    </SectionContent>
+}
+
+@code {
+    [Parameter, EditorRequired] public AppField Field { get; set; } = default!;
+    [Parameter, EditorRequired] public Dictionary<string, string> Values { get; set; } = default!;
+    /// <summary>Contenu en cours de modification (null : nouveau) : son PDF enregistré ne doit pas être supprimé quand on en choisit un autre.</summary>
+    [Parameter] public Guid? InstanceId { get; set; }
+    /// <summary>Le formulaire se redessine : l'aperçu montre les nouvelles images.</summary>
+    [Parameter] public EventCallback OnChange { get; set; }
+
+    private bool busy, picking, changed;
+    private string status = "";
+    private string? error;
+
+    private CloudFileKind Kind => CloudFileKind.FromAccept(Field.Accept);
+    private string Provider => Kind.IsGoogle ? "Google" : "Microsoft";
+    private string ProviderIcon => Kind.IsGoogle ? "google" : "windows";
+    private string Noun => Kind == CloudFileKind.Docs ? "un document" : Kind == CloudFileKind.PowerPoint ? "une présentation PowerPoint" : "une présentation";
+    private string Unit => Kind == CloudFileKind.Docs ? "page" : "diapositive";
+    private (string Color, string? Icon) Look => AppIcon.LookOf(Kind.AppId);
+
+    private Tenant Tenant => Store.Read(d => d.Tenant);
+    private bool Connected => Kind.Connected(Tenant);
+    private string User => Kind.User(Tenant);
+
+    private string FileRef => Values.GetValueOrDefault(Field.Key) ?? "";
+    private string Name => Values.GetValueOrDefault("gfileName") is { Length: > 0 } n ? n : "Fichier";
+    private int Total => int.TryParse(Values.GetValueOrDefault("pdfPages"), out var n) ? n : 0;
+    private int Converted => AppField.MediaIds(Values.GetValueOrDefault("pages")).Count;
+
+    private string Summary
+    {
+        get
+        {
+            var s = Converted == 0 ? "pas encore converti"
+                : Total > Converted ? $"{Converted} {Plural(Unit, Converted)} sur {Total}"
+                : $"{Converted} {Plural(Unit, Converted)}";
+            return DateTime.TryParse(Values.GetValueOrDefault("gfileMod"), null, System.Globalization.DateTimeStyles.AdjustToUniversal, out var m)
+                ? $"{s} · {(Kind == CloudFileKind.Docs ? "modifié" : "modifiée")} le {m.ToLocalTime():dd.MM.yyyy HH:mm}" : s;
+        }
+    }
+
+    private static string Plural(string word, int n) => n > 1 ? word + "s" : word;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // le fichier a-t-il changé depuis le dernier export ? (une lecture, sans rien modifier)
+        if (FileRef.Length == 0 || !Connected) return;
+        var (c, _) = await Cloud.HasChanged(Tenant, Kind, Values);
+        changed = c;
+    }
+
+    private Task Picked(DriveNode node) { picking = false; return Run(node.Ref); }
+
+    /// <summary>Convertit le fichier (nouveau, ou le même à nouveau) puis le passe en images.</summary>
+    private async Task Run(string fileRef)
+    {
+        busy = true; error = null; changed = false; status = "Conversion du fichier…";
+        StateHasChanged();
+        try
+        {
+            var previous = Values.GetValueOrDefault("pdf") ?? "";
+            var sameFile = fileRef == FileRef;
+            var (done, err) = await Cloud.Import(Tenant, Store.ClientId, Store.AreaId, Kind, fileRef, sameFile && previous.Length > 0 ? previous : null,
+                PdfService.Options.From(Values), new Progress<string>(s => { status = s; _ = InvokeAsync(StateHasChanged); }));
+            if (done == null) { Fail(err ?? "Conversion impossible."); return; }
+
+            var storedId = InstanceId is { } id ? Apps.Instances(Kind.AppId).FirstOrDefault(m => m.Id == id)?.Settings.GetValueOrDefault("pdf") : null;
+            CloudFileService.Apply(Values, done);
+            if (previous.Length > 0 && previous != done.Source.Id && previous != storedId) PdfService.Delete(previous);   // choisi pendant cette édition puis remplacé
+            var n = done.Result.Selected;
+            Toast.Ok(done.Result.Truncated ? $"« {done.Source.Title} » converti : {n} premières {Plural(Unit, n)} sur {done.Source.Pages}."
+                : $"« {done.Source.Title} » converti : {n} {Plural(Unit, n)}.");
+            await OnChange.InvokeAsync();
+        }
+        finally { busy = false; }
+    }
+
+    private void Fail(string message) { error = message; Toast.Error(message); }
+}

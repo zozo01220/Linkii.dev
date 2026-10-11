@@ -106,7 +106,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
             RemoveFromDrafts(d, mediaId);
             var instances = d.Media.Where(m => m.Id == mediaId && m.AppId != null).ToList();
             d.Media.RemoveAll(m => m.Id == mediaId && m.AppId != null);
-            pdfs.AddRange(instances.Where(i => i.AppId == "pdf").Select(i => i.Settings.GetValueOrDefault("pdf") ?? ""));
+            pdfs.AddRange(instances.Where(i => i.AppId == "pdf" || CloudFileKind.IsCloudApp(i.AppId)).Select(i => i.Settings.GetValueOrDefault("pdf") ?? ""));
             return PurgeExports(d, instances);
         });
         DeleteFiles(orphans);
@@ -196,7 +196,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
                 var orphanIds = orphans.Select(o => o.Id).ToHashSet();
                 d.Media.RemoveAll(x => orphanIds.Contains(x.Id));
             }
-            if (appId == "pdf" && item.Settings.GetValueOrDefault("pdf") is { Length: > 0 } oldPdf && oldPdf != settings.GetValueOrDefault("pdf")) oldPdfs.Add(oldPdf);   // autre PDF : l'ancien n'est plus utile
+            if ((appId == "pdf" || CloudFileKind.IsCloudApp(appId)) && item.Settings.GetValueOrDefault("pdf") is { Length: > 0 } oldPdf && oldPdf != settings.GetValueOrDefault("pdf")) oldPdfs.Add(oldPdf);   // autre PDF : l'ancien n'est plus utile
             item.Name = name.Trim();
             item.AppVersion = m.Version;
             item.Settings = settings;

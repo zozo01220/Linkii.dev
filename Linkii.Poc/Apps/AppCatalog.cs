@@ -8,7 +8,7 @@ public class AppField
 {
     public string Key { get; set; } = "";
     public string Label { get; set; } = "";
-    /// <summary>text | textarea | number | select | bool | color | url | secret | date | mailbox | calendar (un calendrier partagé, voir Intégrations) | drive (un dossier synchronisé d'un Drive) | youtube | textfile (fichier texte importé) | hidden (valeur gérée par un composant, jamais affichée) | media (un fichier de la médiathèque) | medias (plusieurs, dans l'ordre)</summary>
+    /// <summary>gfile (un fichier Google Slides, Google Docs ou PowerPoint : Accept = presentation | document | powerpoint) | text | textarea | number | select | bool | color | url | secret | date | mailbox | calendar (un calendrier partagé, voir Intégrations) | drive (un dossier synchronisé d'un Drive) | youtube | textfile (fichier texte importé) | hidden (valeur gérée par un composant, jamais affichée) | media (un fichier de la médiathèque) | medias (plusieurs, dans l'ordre)</summary>
     public string Type { get; set; } = "text";
     public string? Help { get; set; }
     public string? Placeholder { get; set; }
@@ -22,7 +22,7 @@ public class AppField
     public int MaxLength { get; set; } = 2000;
     /// <summary>textfile : adresse (du site) d'un fichier modèle à télécharger.</summary>
     public string? Template { get; set; }
-    /// <summary>media / medias : type de fichier accepté (image ou video). Valeur : identifiants des médias, séparés par des virgules.</summary>
+    /// <summary>media / medias : type de fichier accepté (image ou video). Valeur : identifiants des médias, séparés par des virgules. gfile : presentation, document ou powerpoint.</summary>
     public string? Accept { get; set; }
     /// <summary>Rempli par un autre champ (ex. fichiers exportés par le champ « canva ») : jamais affiché dans le formulaire.</summary>
     public bool Managed { get; set; }
@@ -90,7 +90,7 @@ public class AppCatalog
 {
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
     private static readonly string[] AllPlacements = { "full", "top-left", "top-right", "bottom-left", "bottom-right", "top", "bottom" };
-    private static readonly string[] FieldTypes = { "text", "textarea", "number", "select", "bool", "color", "url", "secret", "date", "mailbox", "youtube", "textfile", "hidden", "media", "medias", "canva", "pdf", "calendar", "drive" };
+    private static readonly string[] FieldTypes = { "text", "textarea", "number", "select", "bool", "color", "url", "secret", "date", "mailbox", "youtube", "textfile", "hidden", "media", "medias", "canva", "pdf", "gfile", "calendar", "drive" };
     private readonly List<AppManifest> _apps = new();
 
     public IReadOnlyList<AppManifest> All => _apps;
@@ -132,6 +132,7 @@ public class AppCatalog
             if (!FieldTypes.Contains(f.Type)) p.Add($"type inconnu : {f.Type}");
             if (f.Type == "select" && f.Options.Count == 0) p.Add($"choix sans options : {f.Key}");
             if (f.IsMedia && f.Accept is not ("image" or "video")) p.Add($"médias sans type accepté (image ou video) : {f.Key}");
+            if (f.Type == "gfile" && f.Accept is not ("presentation" or "document" or "powerpoint")) p.Add($"fichier sans type accepté (presentation, document ou powerpoint) : {f.Key}");
             if (f.Zone is not ("source" or "main" or "advanced")) p.Add($"zone inconnue (source, main ou advanced) : {f.Key}");
             if (f.Ui != null && !(f.Ui == "segmented" && f.Type == "select")) p.Add($"« ui » n'existe que pour un select segmented : {f.Key}");
         }
@@ -213,6 +214,10 @@ public class AppCatalog
                 case "pdf":   // le PDF doit avoir été converti en pages (images de la médiathèque)
                     if (!PdfService.Exists(v) || AppField.MediaIds(values.GetValueOrDefault("pages")).Count == 0)
                         errors.Add("Choisissez un fichier PDF : il est converti en images à la sélection.");
+                    break;
+                case "gfile":   // le fichier doit avoir été exporté puis converti en pages (images de la médiathèque)
+                    if (!PdfService.Exists(values.GetValueOrDefault("pdf")) || AppField.MediaIds(values.GetValueOrDefault("pages")).Count == 0)
+                        errors.Add($"« {f.Label} » : choisissez un fichier dans votre Drive, il est converti en images à la sélection.");
                     break;
                 case "media" or "medias":
                     var parts = v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
