@@ -159,14 +159,15 @@
         <div class="modal-head">
             <AppIcon Id="@a.Id" />
             <div class="grow">
-                <h3 id="new-app-title">@a.Name</h3>
+                <h3 id="new-app-title">@(newName ?? a.Name)</h3>
                 <small>Ajout à « @target.Name »</small>
             </div>
+            <button type="button" class="modal-x" aria-label="Renommer" title="Renommer" @onclick="() => newForm?.OpenRename()"><Ico Name="edit" Size="20" /></button>
             @if (a.HasAdvanced) { <button type="button" class="modal-x" aria-label="Options avancées" title="Options avancées" @onclick="() => newForm?.OpenAdvanced()"><Ico Name="sliders" Size="20" /></button> }
             <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => newApp = null"><Ico Name="x" Size="20" /></button>
         </div>
         <div class="modal-body">
-            <AppInstanceForm @key="a.Id" AppId="@a.Id" ShowActions="false" OnSaved="item => AddApp(target, item)" @ref="newForm" />
+            <AppInstanceForm @key="a.Id" AppId="@a.Id" ShowActions="false" OnSaved="item => AddApp(target, item)" OnRenamed="n => newName = n" @ref="newForm" />
         </div>
         <div class="modal-foot">
             <button class="btn ghost" @onclick="() => newApp = null">Annuler</button>
@@ -186,9 +187,10 @@
             <div class="modal-head">
                 <AppIcon Id="@mMedia!.AppId" />
                 <div class="grow">
-                    <h3 id="modal-title">@mMedia.Name</h3>
+                    <h3 id="modal-title">@(itemName ?? mMedia.Name)</h3>
                     <small>@Svc.Find(mMedia.AppId)?.Name</small>
                 </div>
+                <button type="button" class="modal-x" aria-label="Renommer" title="Renommer" @onclick="() => itemForm?.OpenRename()"><Ico Name="edit" Size="20" /></button>
                 @if (Svc.Find(mMedia.AppId) is { HasAdvanced: true }) { <button type="button" class="modal-x" aria-label="Options avancées" title="Options avancées" @onclick="() => itemForm?.OpenAdvanced()"><Ico Name="sliders" Size="20" /></button> }
                 <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseSettings"><Ico Name="x" Size="20" /></button>
             </div>
@@ -201,7 +203,7 @@
         <div class="@(isApp ? "modal-body" : "")">
         @if (isApp)
         {
-            <AppInstanceForm @key="mMedia!.Id" AppId="@(mMedia!.AppId!)" InstanceId="mMedia!.Id" ShowActions="false" OnSaved="_ => SaveSettings()" @ref="itemForm" />
+            <AppInstanceForm @key="mMedia!.Id" AppId="@(mMedia!.AppId!)" InstanceId="mMedia!.Id" ShowActions="false" OnSaved="_ => SaveSettings()" OnRenamed="n => itemName = n" @ref="itemForm" />
             <h4 class="pe-sub">Dans cette liste de lecture</h4>
         }
         <div class="dw">
@@ -270,6 +272,7 @@
     private ElementReference pickSearch;
     private AppManifest? newApp;
     private AppInstanceForm? newForm, itemForm;
+    private string? newName, itemName;   // nom modifié par le bouton « Renommer » du bandeau (titre de la fenêtre)
 
     private IEnumerable<AppManifest> PickerApps => enabledApps
         .Where(a => appCat == "" || a.Category == appCat)
@@ -277,7 +280,7 @@
 
     private void OpenPicker(int? at) { insertAt = at; appSearch = ""; appCat = ""; picking = true; focusPicker = true; }
 
-    private void PickApp(AppManifest app) { picking = false; newApp = app; }
+    private void PickApp(AppManifest app) { picking = false; newApp = app; newName = null; }
 
     // Durée d'un tour de boucle : contenus pleine page (une vidéo « jusqu'à la fin » compte pour sa durée connue).
     private int LoopSeconds(Playlist p) => p.Draft.Where(i => i.Placement == "full").Sum(i =>
@@ -354,7 +357,7 @@
 
     private void OpenSettings(Playlist pl, PlaylistItem it, MediaItem? m)
     {
-        mPlaylist = pl; mItem = it; mMedia = m;
+        mPlaylist = pl; mItem = it; mMedia = m; itemName = null;
         mPlacement = it.Placement;
         mMode = it.DurationMode == "fixed" ? "fixed" : "content";
         mSeconds = it.DurationSec;

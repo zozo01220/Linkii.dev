@@ -19,9 +19,14 @@ else
     var sources = manifest.InZone("source").ToList();
     var hasPreview = ContentPreview.Has(manifest);
     <div class="ci">
-        @if (ShowActions && manifest.HasAdvanced)
+        @if (ShowActions)
         {
-            <div class="ci-bar"><button type="button" class="ci-gear" aria-label="Options avancées" title="Options avancées" @onclick="OpenAdvanced"><Ico Name="sliders" Size="20" /></button></div>
+            @* page d'édition : pas de bandeau de fenêtre, la barre porte le nom (modifiable) et l'icône « Options avancées » *@
+            <div class="ci-bar">
+                <span class="ci-name" title="@name">@name</span>
+                <button type="button" class="ci-gear" aria-label="Renommer le contenu" title="Renommer" @onclick="OpenRename"><Ico Name="edit" Size="18" /></button>
+                @if (manifest.HasAdvanced) { <button type="button" class="ci-gear" aria-label="Options avancées" title="Options avancées" @onclick="OpenAdvanced"><Ico Name="sliders" Size="20" /></button> }
+            </div>
         }
 
         @if (sources.Count > 0)
@@ -47,12 +52,6 @@ else
             }
             <section class="ci-conf" aria-label="Configuration">
                 <h4 class="ci-t">Configuration</h4>
-                <div class="dw">
-                    <div class="dw-field">
-                        <label>Nom dans la médiathèque *</label>
-                        <input type="text" maxlength="80" @bind="name" @bind:event="oninput" placeholder="@manifest.Name" />
-                    </div>
-                </div>
                 <AppForm Manifest="manifest" Values="values" StoredSecrets="storedSecrets" InstanceId="instance?.Id" Zone="main" OnChange="Touch" />
             </section>
         </div>
@@ -73,6 +72,29 @@ else
             </div>
         }
     </div>
+
+    @if (renaming)
+    {
+        <SectionContent SectionName="overlay">
+            <div class="modal-backdrop picker-backdrop" @onclick="() => renaming = false"></div>
+            <div class="modal app-modal ci-adv" role="dialog" aria-modal="true" aria-labelledby="ci-ren-title">
+                <div class="modal-head">
+                    <div class="grow"><h3 id="ci-ren-title">Renommer le contenu</h3><small>Le nom sous lequel vous le retrouverez dans la médiathèque et les listes de lecture.</small></div>
+                    <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => renaming = false"><Ico Name="x" Size="20" /></button>
+                </div>
+                <div class="modal-body">
+                    <div class="dw"><div class="dw-field">
+                        <label>Nom *</label>
+                        <input type="text" maxlength="80" placeholder="@manifest.Name" @bind="renameDraft" @bind:event="oninput" @onkeydown="RenameKey" />
+                    </div></div>
+                </div>
+                <div class="modal-foot">
+                    <button type="button" class="btn ghost" @onclick="() => renaming = false">Annuler</button>
+                    <button type="button" class="btn" @onclick="ApplyRename">Valider</button>
+                </div>
+            </div>
+        </SectionContent>
+    }
 
     @if (advanced)
     {
@@ -102,6 +124,8 @@ else
     [Parameter] public string SaveLabel { get; set; } = "Enregistrer";
     [Parameter] public EventCallback<MediaItem> OnSaved { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
+    /// <summary>Le nom a été modifié (bouton « Éditer » du bandeau) : la fenêtre appelante met son titre à jour.</summary>
+    [Parameter] public EventCallback<string> OnRenamed { get; set; }
     /// <summary>false : les boutons sont fournis par l'appelant (pied d'une fenêtre modale) via Save(), et l'icône « Options avancées » par son bandeau (OpenAdvanced).</summary>
     [Parameter] public bool ShowActions { get; set; } = true;
 
@@ -112,7 +136,8 @@ else
     private string name = "";
     private List<string> errors = new();
     private (bool Ok, string Message)? test;
-    private bool installed, testing, advanced;
+    private bool installed, testing, advanced, renaming;
+    private string renameDraft = "";
     private ContentPreview? previewRef;
     private Dictionary<string, string>? advancedBackup;
 
@@ -142,6 +167,24 @@ else
     }
 
     private Task Search() => previewRef?.Refresh() ?? Task.CompletedTask;
+
+    /// <summary>Nom du contenu (le nom n'est plus un champ de la configuration : il se modifie par le bouton « Éditer » du bandeau).</summary>
+    public string Name => name;
+
+    /// <summary>Ouvre la petite fenêtre « Renommer » (bouton du bandeau).</summary>
+    public void OpenRename() { renameDraft = name; renaming = true; }
+
+    private async Task ApplyRename()
+    {
+        if (!string.IsNullOrWhiteSpace(renameDraft)) { name = renameDraft.Trim(); await OnRenamed.InvokeAsync(name); }
+        renaming = false;
+    }
+
+    private async Task RenameKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await ApplyRename();
+        else if (e.Key == "Escape") renaming = false;
+    }
 
     /// <summary>Ouvre la fenêtre « Options avancées » (icône du bandeau).</summary>
     public void OpenAdvanced()
