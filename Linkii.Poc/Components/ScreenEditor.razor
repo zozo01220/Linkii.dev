@@ -159,44 +159,25 @@
                     </div>
                 </div>
             }
-            <h4 class="ci-t" style="margin:0">Configuration</h4>
-            <ScreenFormat Spec="spec" Layout="@layoutId" LayoutChanged="SetLayout" OnChange="StateHasChanged" Compact="true" />
-
             @if (wall == null)
             {
-                @* widgets : section de la colonne (plus d'onglet) ; le menu « Ajouter » liste les widgets actifs *@
-                <div class="se-wsec">
-                    <div class="se-wtop">
-                        <h4 class="ci-t" style="margin:0">Widgets · @widgets.Count</h4>
-                        <div class="se-add">
-                            <button type="button" class="btn sm" aria-haspopup="menu" aria-expanded="@(addOpen ? "true" : "false")" @onclick="() => addOpen = !addOpen"><Ico Name="plus" Size="14" /> Ajouter</button>
-                            @if (addOpen)
-                            {
-                                <div class="kebab-backdrop" @onclick="() => addOpen = false"></div>
-                                <div class="se-add-menu" role="menu">
-                                    @if (available.Count == 0)
-                                    {
-                                        <p class="hint" style="margin:0;padding:6px 10px">Aucun widget actif. <a href="/widgets">Activez-les dans la page Widgets</a>.</p>
-                                    }
-                                    else
-                                    {
-                                        <small class="muted">Glissez-les sur l'aperçu, ou cliquez pour les ajouter.</small>
-                                        @if (available.Count > 6) { <input type="text" placeholder="Rechercher" aria-label="Rechercher un widget" @bind="search" @bind:event="oninput" /> }
-                                        @foreach (var a in available.Where(x => string.IsNullOrWhiteSpace(search) || x.Name.Contains(search.Trim(), StringComparison.CurrentCultureIgnoreCase)))
-                                        {
-                                            var app = a;
-                                            <button type="button" role="menuitem" class="se-add-item" draggable="true" title="Glissez vers l'écran, ou cliquez pour ajouter" @onclick="() => { Add(app); addOpen = false; }"
-                                                    ondragstart="event.dataTransfer.setData('text/plain', '@app.Id'); event.dataTransfer.effectAllowed = 'copy';">
-                                                <AppIcon Id="@app.Id" Small="true" Size="16" /> <span>@app.Name</span>
-                                            </button>
-                                        }
-                                    }
-                                </div>
-                            }
-                        </div>
-                    </div>
-                    @if (widgets.Count > 0)
-                    {
+                <div class="seg se-tabs" role="tablist">
+                    <button type="button" role="tab" aria-selected="@(tab == "screen" ? "true" : "false")" class="@(tab == "screen" ? "on" : "")" @onclick='() => tab = "screen"'>Écran</button>
+                    <button type="button" role="tab" aria-selected="@(tab == "widgets" ? "true" : "false")" class="@(tab == "widgets" ? "on" : "")" @onclick='() => tab = "widgets"'>Widgets <small>@widgets.Count</small></button>
+                </div>
+            }
+
+            @if (tab == "screen" || wall != null)
+            {
+                <ScreenFormat Spec="spec" Layout="@layoutId" LayoutChanged="SetLayout" OnChange="StateHasChanged" Compact="true" />
+            }
+            else
+            {
+                @* widgets : posés sur l'aperçu par glisser-déposer (ou un clic) ; la liste du dessus permet de les régler ou de les retirer *@
+                @if (widgets.Count > 0)
+                {
+                    <div class="fmt-block">
+                        <label>Sur l'écran <small>@widgets.Count</small></label>
                         <div class="wg-placed">
                             @foreach (var w in widgets)
                             {
@@ -210,9 +191,25 @@
                                 </div>
                             }
                         </div>
-                    }
-                    else { <p class="hint" style="margin:0">Ils restent affichés par-dessus les listes de lecture.</p> }
+                    </div>
+                }
+                <div class="fmt-block">
+                    <label for="wg-search">Ajouter un widget</label>
+                    @if (available.Count > 6) { <input id="wg-search" type="text" placeholder="Rechercher" @bind="search" @bind:event="oninput" style="margin-bottom:8px" /> }
+                    <div class="wg-add">
+                        @foreach (var a in available.Where(x => string.IsNullOrWhiteSpace(search) || x.Name.Contains(search.Trim(), StringComparison.CurrentCultureIgnoreCase)))
+                        {
+                            var app = a;
+                            <button type="button" class="wg-tile" draggable="true" title="Glissez vers l'écran, ou cliquez pour ajouter" @onclick="() => Add(app)"
+                                    ondragstart="event.dataTransfer.setData('text/plain', '@app.Id'); event.dataTransfer.effectAllowed = 'copy';">
+                                <AppIcon Id="@app.Id" Small="true" Size="16" />
+                                <span>@app.Name</span>
+                            </button>
+                        }
+                    </div>
                 </div>
+                @if (available.Count == 0) { <p class="hint">Aucun widget actif. <a href="/widgets">Activez-les dans la page Widgets</a>.</p> }
+                else if (widgets.Count == 0) { <p class="hint">Ils restent affichés par-dessus les listes de lecture. Glissez-les sur l'aperçu ou cliquez pour les ajouter.</p> }
             }            @foreach (var e in errors) { <div class="err">@e</div> }
         </div>
     </div>
