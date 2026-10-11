@@ -6,30 +6,41 @@
 @* Champ « media » (un fichier) ou « medias » (plusieurs, ordonnés) d'une app : fichiers choisis dans la médiathèque.
    La valeur est la liste des identifiants, séparés par des virgules. *@
 <div class="mf">
-    @if (selected.Count > 0)
-    {
-        <ul class="mf-list @(Multiple && selected.Count > 1 ? "sortable" : "")" @ref="listRef">
-            @for (var i = 0; i < selected.Count; i++)
-            {
-                var idx = i;
-                var m = selected[idx];
-                <li @key="m.Id" data-sort-row>
-                    @if (Multiple && selected.Count > 1) { <span class="grip" title="Glisser pour déplacer"><Ico Name="grip" Size="16" /></span> }
-                    <span class="mf-th">
-                        @if (m.Status == null && m.FileName != null) { <MediaThumb Media="m" /> }
-                        else { <Ico Name="@(m.Type == "video" ? "video" : "image")" Size="18" /> }
-                    </span>
-                    <span class="mf-name" title="@m.Name">@m.Name@if (m.Status == "processing") { <small> · conversion…</small> }</span>
-                    <button type="button" class="btn ghost sm icon" aria-label="Retirer @m.Name" @onclick="() => Remove(idx)"><Ico Name="x" Size="14" /></button>
-                </li>
-            }
-        </ul>
-    }
+    @* Barre de choix (ligne « source » de la fenêtre de configuration) : résumé + bouton ; l'aperçu montre les fichiers, la liste ne sert qu'à l'ordre et au retrait. *@
+    <div class="ci-pick">
+        <span class="ci-pick-sum">
+            @if (selected.Count == 0) { <span class="muted">Aucun fichier choisi</span> }
+            else if (Multiple) { <b>@selected.Count @(Field.Accept == "video" ? "vidéo" : "image")@(selected.Count > 1 ? "s" : "")</b> }
+            else { <b title="@selected[0].Name">@selected[0].Name</b>@if (selected[0].Status == "processing") { <small> · conversion…</small> } }
+        </span>
+        <button type="button" class="btn @(selected.Count == 0 ? "" : "ghost")" @onclick="() => picking = true">
+            <Ico Name="@(Field.Accept == "video" ? "video" : "image")" Size="15" />
+            @(selected.Count == 0 ? (Multiple ? "Choisir dans la médiathèque" : $"Choisir {(Field.Accept == "video" ? "une vidéo" : "une image")}") : Multiple ? "Ajouter depuis la médiathèque" : "Remplacer")
+        </button>
+    </div>
     @if (missing > 0) { <small class="upl-err">@missing fichier@(missing > 1 ? "s ont" : " a") été supprimé@(missing > 1 ? "s" : "") de la médiathèque.</small> }
-    <button type="button" class="btn ghost sm" @onclick="() => picking = true">
-        <Ico Name="@(Field.Accept == "video" ? "video" : "image")" Size="15" />
-        @(selected.Count == 0 ? (Multiple ? "Choisir dans la médiathèque" : $"Choisir {(Field.Accept == "video" ? "une vidéo" : "une image")}") : Multiple ? "Ajouter depuis la médiathèque" : "Remplacer")
-    </button>
+    @if (Multiple && selected.Count > 0)
+    {
+        <details class="mf-manage">
+            <summary>Ordre et retrait des fichiers</summary>
+            <ul class="mf-list @(selected.Count > 1 ? "sortable" : "")" @ref="listRef">
+                @for (var i = 0; i < selected.Count; i++)
+                {
+                    var idx = i;
+                    var m = selected[idx];
+                    <li @key="m.Id" data-sort-row>
+                        @if (selected.Count > 1) { <span class="grip" title="Glisser pour déplacer"><Ico Name="grip" Size="16" /></span> }
+                        <span class="mf-th">
+                            @if (m.Status == null && m.FileName != null) { <MediaThumb Media="m" /> }
+                            else { <Ico Name="@(m.Type == "video" ? "video" : "image")" Size="18" /> }
+                        </span>
+                        <span class="mf-name" title="@m.Name">@m.Name@if (m.Status == "processing") { <small> · conversion…</small> }</span>
+                        <button type="button" class="btn ghost sm icon" aria-label="Retirer @m.Name" @onclick="() => Remove(idx)"><Ico Name="x" Size="14" /></button>
+                    </li>
+                }
+            </ul>
+        </details>
+    }
 </div>
 
 @if (picking)
@@ -43,6 +54,8 @@
 @code {
     [Parameter, EditorRequired] public AppField Field { get; set; } = default!;
     [Parameter, EditorRequired] public Dictionary<string, string> Values { get; set; } = default!;
+    /// <summary>La sélection a changé (ajout, retrait, ordre) : l'aperçu de la fenêtre de configuration se met à jour.</summary>
+    [Parameter] public EventCallback OnChange { get; set; }
 
     private List<MediaItem> selected = new();
     private int missing;
@@ -57,7 +70,7 @@
         missing = ids.Count - selected.Count;
     }
 
-    private void Save() { Values[Field.Key] = string.Join(",", selected.Select(m => m.Id)); missing = 0; }
+    private void Save() { Values[Field.Key] = string.Join(",", selected.Select(m => m.Id)); missing = 0; _ = OnChange.InvokeAsync(); }
 
     private void Picked(List<MediaItem> items)
     {

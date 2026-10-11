@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette – Configuration des contenus</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --nuit: #0B1F3A; --acier: #5A6B80; --brume: #DDE3EA; --fond: #F5F7FA;
+    --blanc: #FFFFFF; --signal: #3B82C4; --bord2: #C5CED9;
+    --ok-dot: #1E8E5A; --ok-bg: #E1F0E8; --ok-tx: #155A38;
+    --maj-bg: #FBF0DC; --maj-tx: #7A4F12;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; font: 400 15px/1.5 "IBM Plex Sans", sans-serif; color: var(--nuit);
+         background: #8d97a6; display: grid; place-items: center; padding: 64px 24px 24px; }
+
+  /* Sélecteur de type (maquette uniquement) */
+  .tabs { position: fixed; top: 0; left: 0; right: 0; z-index: 5; display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 14px;
+          background: #fff; border-bottom: 1px solid var(--bord2); }
+  .tabs button { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 99px; border: 1px solid var(--bord2); background: #fff; color: var(--acier); cursor: pointer; }
+  .tabs button.on { background: var(--nuit); border-color: var(--nuit); color: #fff; }
+
+  .modal { width: min(880px, 100%); background: var(--blanc); border-radius: 12px; overflow: hidden; box-shadow: 0 20px 60px rgba(11,31,58,.35); }
+  .modal[hidden] { display: none; }
+
+  .head { display: flex; align-items: center; gap: 12px; padding: 16px 22px; border-bottom: 1px solid var(--brume); }
+  .logo { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: none; font-size: 16px; color: #fff; }
+  .head h1 { flex: 1; margin: 0; font-size: 17px; font-weight: 600; }
+  .x { border: 0; background: none; font-size: 22px; line-height: 1; color: var(--acier); cursor: pointer; }
+  .x.ico { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; }
+  .x.ico:hover { background: var(--brume); color: var(--nuit); }
+
+  /* Ligne 1 */
+  .search { padding: 18px 22px; background: var(--fond); border-bottom: 1px solid var(--brume); }
+  .bar { display: flex; gap: 10px; align-items: center; }
+  .bar input, .bar .pick { flex: 1; }
+  .hint { margin: 6px 0 0; font-size: 12.5px; color: var(--acier); }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--acier); }
+  .chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ok-dot); }
+  .pick { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--bord2); border-radius: 8px; background: #fff; color: var(--acier); min-height: 42px; }
+  .pick b { color: var(--nuit); font-weight: 500; }
+
+  /* Ligne 2 */
+  .cols { display: grid; grid-template-columns: 1.15fr 1fr; gap: 24px; padding: 22px; }
+  .col-title { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--acier); margin: 0 0 10px; }
+  .stage { aspect-ratio: 16/9; border-radius: 10px; position: relative; overflow: hidden; background: #0b1f3a; }
+  .stage .img { position: absolute; inset: 0; }
+  .g1 { background: linear-gradient(135deg, #1d3a63, #3B82C4 60%, #8fc1ea); }
+  .g2 { background: linear-gradient(135deg, #6b3a1d, #d98a3b 60%, #f2cf8f); }
+  .g3 { background: linear-gradient(135deg, #1d5a45, #3bc48f 60%, #a5ead0); }
+  .g4 { background: linear-gradient(135deg, #4a1d63, #a03bc4 60%, #dba5ea); }
+  .g5 { background: linear-gradient(135deg, #7d2b46, #e2587c 60%, #f4b6c6); }
+  .play { position: absolute; inset: 0; margin: auto; width: 54px; height: 54px; border-radius: 50%; background: rgba(255,255,255,.92); }
+  .play::before { content: ""; position: absolute; left: 21px; top: 16px; border-left: 17px solid var(--nuit); border-top: 11px solid transparent; border-bottom: 11px solid transparent; }
+  .dur { position: absolute; right: 10px; bottom: 10px; font-size: 12px; color: #fff; background: rgba(0,0,0,.72); padding: 1px 7px; border-radius: 4px; }
+  .stage.bands { background: #000; }
+  .stage.bands .img { inset: 0 12%; }
+  .info { margin-top: 12px; }
+  .info b { display: block; font-weight: 600; font-size: 14.5px; line-height: 1.35; }
+  .info span { font-size: 13px; color: var(--acier); }
+  .ok { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 2px 9px; border-radius: 99px; background: var(--ok-bg); color: var(--ok-tx); font-size: 12px; font-weight: 500; }
+  .ok::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ok-dot); }
+  .warn { display: inline-block; margin-top: 8px; padding: 6px 10px; border-radius: 8px; background: var(--maj-bg); color: var(--maj-tx); font-size: 12.5px; }
+
+  /* Bande de vignettes (diaporamas, Canva) */
+  .strip { display: flex; gap: 8px; margin-top: 12px; overflow: hidden; }
+  .strip .t { width: 72px; flex: none; aspect-ratio: 16/9; border-radius: 6px; position: relative; border: 2px solid transparent; }
+  .strip .t.sel { border-color: var(--signal); }
+  .strip .t em { position: absolute; left: 3px; top: 3px; font-style: normal; font-size: 10px; background: rgba(0,0,0,.65); color: #fff; border-radius: 3px; padding: 0 4px; }
+  .strip .add { width: 72px; flex: none; aspect-ratio: 16/9; border-radius: 6px; border: 2px dashed var(--bord2); display: grid; place-items: center; color: var(--acier); font-size: 20px; }
+
+  /* Grille de fichiers (Drive) */
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+  .grid .t { aspect-ratio: 16/9; border-radius: 6px; position: relative; }
+  .grid .t i { position: absolute; right: 4px; bottom: 4px; font-style: normal; font-size: 10px; background: rgba(0,0,0,.65); color: #fff; border-radius: 3px; padding: 0 4px; }
+
+  /* Carrousel 3D (dès qu'il y a plus d'un contenu) */
+  .car { position: relative; }
+  .car-view { position: relative; aspect-ratio: 16/9; border-radius: 10px; background: radial-gradient(ellipse at center, #1a3355, #0b1f3a 75%);
+              perspective: 900px; overflow: hidden; touch-action: pan-y; cursor: grab; user-select: none; }
+  .car-view.drag { cursor: grabbing; }
+  .car-item { position: absolute; top: 50%; left: 50%; width: 58%; aspect-ratio: 16/9; margin: calc(58% * 9 / 16 / -2) 0 0 -29%;
+              border-radius: 8px; border: 2px solid rgba(255,255,255,.18); box-shadow: 0 10px 24px rgba(0,0,0,.45);
+              transition: transform .45s cubic-bezier(.2,.7,.2,1), opacity .45s, filter .45s; cursor: pointer; }
+  .car-item.on { border-color: #fff; }
+  .car-item em { position: absolute; left: 6px; top: 6px; font-style: normal; font-size: 11px; background: rgba(0,0,0,.65); color: #fff; border-radius: 3px; padding: 0 6px; }
+  .car-item .play { width: 40px; height: 40px; }
+  .car-item .play::before { left: 15px; top: 11px; border-left-width: 13px; border-top-width: 9px; border-bottom-width: 9px; }
+  .car-nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 99; width: 32px; height: 32px; border-radius: 50%; border: 0;
+             background: rgba(255,255,255,.92); color: var(--nuit); font-size: 18px; line-height: 1; cursor: pointer; }
+  .car-nav.p { left: 8px; } .car-nav.n { right: 8px; }
+  .car-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; font-size: 13px; color: var(--acier); }
+  .dots { display: flex; gap: 6px; }
+  .dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--bord2); cursor: pointer; }
+  .dots i.on { background: var(--signal); }
+  .car-mode { font: inherit; font-size: 12.5px; color: var(--acier); background: none; border: 1px solid var(--bord2); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+  /* Mode grille : même contenu, à plat */
+  .car.flat .car-view { perspective: none; aspect-ratio: auto; background: var(--fond); display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 10px; cursor: default; }
+  .car.flat .car-item { position: relative; top: 0; left: 0; width: auto; margin: 0; transform: none !important; opacity: 1 !important; filter: none !important; }
+  .car.flat .car-nav { display: none; }
+
+  /* Rendu texte (calendrier, RSS, page web) */
+  .paper { aspect-ratio: 16/9; border-radius: 10px; background: #fff; border: 1px solid var(--brume); padding: 14px 18px; overflow: hidden; box-shadow: inset 0 0 0 4px var(--fond); }
+  .paper h3 { margin: 0 0 8px; font-size: 14px; }
+  .paper .it { display: flex; gap: 10px; font-size: 12px; padding: 5px 0; border-top: 1px solid var(--brume); }
+  .paper .it b { width: 78px; flex: none; color: var(--signal); font-weight: 600; }
+  .paper .it span { color: var(--nuit); }
+  .paper .it small { display: block; color: var(--acier); font-size: 11px; }
+  .paper .day { font-size: 11px; font-weight: 600; color: var(--acier); text-transform: uppercase; letter-spacing: .05em; margin-top: 6px; }
+  .browser { aspect-ratio: 16/9; border-radius: 10px; border: 1px solid var(--bord2); overflow: hidden; background: #fff; }
+  .browser .url { height: 26px; background: var(--fond); border-bottom: 1px solid var(--brume); padding: 4px 10px; font-size: 11px; color: var(--acier); }
+  .browser .pg { padding: 16px; display: grid; gap: 8px; }
+  .browser .pg div { height: 10px; background: var(--brume); border-radius: 4px; }
+  .browser .pg .hd { height: 70px; background: linear-gradient(135deg, #1d3a63, #3B82C4); border-radius: 6px; }
+
+  /* Configuration */
+  .conf { display: grid; gap: 18px; align-content: start; }
+  label.lbl { display: block; font-size: 13px; font-weight: 500; color: var(--acier); margin-bottom: 6px; }
+  input[type=text], input[type=number], input[type=url], select {
+    width: 100%; font: inherit; color: var(--nuit); padding: 10px 12px; border: 1px solid var(--bord2); border-radius: 8px; background: #fff; }
+  input:focus, select:focus { outline: 2px solid var(--signal); border-color: var(--signal); }
+  .unit { position: relative; }
+  .unit input { padding-right: 70px; }
+  .unit::after { content: attr(data-u); position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: var(--acier); font-size: 13px; pointer-events: none; }
+
+  .seg { display: flex; border: 1px solid var(--bord2); border-radius: 8px; overflow: hidden; }
+  .seg label { flex: 1; text-align: center; position: relative; }
+  .seg input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .seg span { display: block; padding: 8px 6px; font-size: 13.5px; color: var(--acier); border-left: 1px solid var(--bord2); }
+  .seg label:first-child span { border-left: 0; }
+  .seg input:checked + span { background: var(--nuit); color: #fff; }
+  .seg input:focus-visible + span { outline: 2px solid var(--signal); outline-offset: -2px; }
+
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .row .t b { display: block; font-weight: 500; font-size: 14.5px; }
+  .row .t span { font-size: 12.5px; color: var(--acier); }
+  .sw { position: relative; width: 44px; height: 26px; flex: none; }
+  .sw input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; z-index: 1; }
+  .sw s { position: absolute; inset: 0; border-radius: 99px; background: var(--bord2); transition: .15s; }
+  .sw s::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: .15s; }
+  .sw input:checked + s { background: var(--signal); }
+  .sw input:checked + s::after { left: 21px; }
+  .sw input:focus-visible + s { outline: 2px solid var(--nuit); outline-offset: 2px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  .btn { font: inherit; font-weight: 500; padding: 9px 18px; border-radius: 8px; border: 1px solid var(--bord2); background: #fff; color: var(--nuit); cursor: pointer; white-space: nowrap; }
+  .btn.pri { background: var(--nuit); border-color: var(--nuit); color: #fff; }
+  .btn.sm { padding: 6px 12px; font-size: 13px; margin-top: 10px; }
+  .foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 22px; background: var(--fond); border-top: 1px solid var(--brume); }
+
+  dialog { width: min(460px, calc(100% - 32px)); padding: 0; border: 0; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 60px rgba(11,31,58,.45); color: var(--nuit); font: inherit; }
+  dialog::backdrop { background: rgba(11,31,58,.45); }
+  .advbody { display: grid; gap: 20px; padding: 22px; }
+
+  @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<nav class="tabs" id="tabs"></nav>
+
+<!-- ============ 1. IMAGE ============ -->
+<div class="modal" data-name="Image" id="m-image">
+  <div class="head"><div class="logo" style="background:#3B82C4">🖼</div><h1>Ajouter une image</h1><button class="x" aria-label="Fermer">×</button></div>
+  <div class="search">
+    <label class="lbl">Image</label>
+    <div class="bar"><div class="pick"><b>affiche-rentree.jpg</b> · 1920 × 1080 · 840 Ko</div><button class="btn">Médiathèque</button><button class="btn pri">Importer</button></div>
+    <p class="hint">Choisissez une image de la médiathèque ou importez-en une.</p>
+  </div>
+  <div class="cols">
+    <section><h2 class="col-title">Aperçu</h2>
+      <div class="stage"><div class="img g2"></div></div>
+      <div class="info"><b>affiche-rentree.jpg</b><span>Format 16:9</span><br><span class="ok">Prête à diffuser</span></div>
+    </section>
+    <section class="conf"><h2 class="col-title" style="margin:0">Configuration</h2>
+      <div><label class="lbl">Nom dans la médiathèque</label><input type="text" value="Affiche de rentrée"></div>
+      <div><label class="lbl">Cadrage</label>
+        <div class="seg"><label><input type="radio" name="f1" checked><span>Image entière</span></label><label><input type="radio" name="f1"><span>Remplir l'écran</span></label></div>
+        <p class="hint">« Remplir » rogne les bords ; « entière » ajoute des bandes si besoin.</p></div>
+    </section>
+  </div>
+  <div class="foot"><button class="btn">Annuler</button><button class="btn pri">Enregistrer</button></div>
+</div>
+
+<!-- ============ 2. VIDÉO ============ -->
+<div class="modal" data-name="Vidéo" id="m-video" hidden>
+  <div class="head"><div class="logo" style="background:#3B82C4">🎬</div><h1>Ajouter une vidéo</h1><button class="x" aria-label="Fermer">×</button></div>
+  <div class="search">
+    <label class="lbl">Vidéo</label>
+    <div class="bar"><div class="pick"><b>presentation-campus.mp4</b> · 3:42 · 48 Mo</div><button class="btn">Médiathèque</button><button class="btn pri">Importer</button></div>
+    <p class="hint">Choisissez une vidéo de la médiathèque ou importez-en une.</p>
+  </div>
+  <div class="cols">
+    <section><h2 class="col-title">Aperçu</h2>
+      <div class="stage"><div class="img g1"></div><div class="play"></div><div class="dur">3:42</div></div>
+      <div class="info"><b>presentation-campus.mp4</b><span>Lue jusqu'à la fin, disponible hors connexion</span><br><span class="ok">Prête à diffuser</span></div>
+    </section>
+    <section class="conf"><h2 class="col-title" style="margin:0">Configuration</h2>
+      <div><label class="lbl">Nom dans la médiathèque</label><input type="text" value="Présentation du campus"></div>
+      <div class="row"><div class="t"><b>Activer le son</b><span>Si le navigateur bloque le son, la vidéo démarre muette.</span></div><label class="sw"><input type="checkbox"><s></s></label></div>
+      <div><label class="lbl">Cadrage</label>
+        <div class="seg"><label><input type="radio" name="f2" checked><span>Vidéo entière</span></label><label><input type="radio" name="f2"><span>Remplir l'écran</span></label></div></div>
+    </section>
+  </div>
+  <div class="foot"><button class="btn">Annuler</button><button class="btn pri">Enregistrer</button></div>
+</div>
+
+<!-- ============ 3. DIAPORAMA IMAGES ============ -->
+<div class="modal" data-name="Diaporama images" id="m-ssi" hidden>
+  <div class="head"><div class="logo" style="background:#3B82C4">🖼</div><h1>Nouveau diaporama d'images</h1>
+    <button class="x ico adv" aria-label="Options avancées" title="Options avancées"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg></button>
+    <button class="x" aria-label="Fermer">×</button></div>
+  <div class="search">
+    <label class="lbl">Images</label>
+    <div class="bar"><div class="pick"><b>5 images</b> · durée totale 40 s</div><button class="btn">Ajouter depuis la médiathèque</button><button class="btn pri">Importer</button></div>
+    <p class="hint">Glissez les vignettes pour changer l'ordre.</p>
+  </div>
+  <div class="cols">
+    <section><h2 class="col-title">Aperçu</h2>
+      <div class="car" data-g="g1 g2 g3 g4 g5"></div>
+    </section>
+    <section class="conf"><h2 class="col-title" style="margin:0">Configuration</h2>
+      <div><label class="lbl">Nom dans la médiathèque</label><input type="text" value="Actualités de la semaine"></div>
+      <div><label class="lbl">Durée de chaque image</label><div class="unit" data-u="secondes"><input type="number" value="8" min="2" max="600"></div></div>
+      <div><label class="lbl">Transition</label><select><option>Fondu enchaîné</option><option>Glissement</option><option>Zoom avant en fondu</option><option>Aucune</option></select></div>
+      <div><label class="lbl">Cadrage</label><div class="seg"><label><input type="radio" name="f3" checked><span>Images entières</span></label><label><input type="radio" name="f3"><span>Remplir l'écran</span></label></div></div>
+    </section>
+  </div>
+  <div class="foot"><button class="btn">Annuler</button><button class="btn pri">Enregistrer</button></div>
+  <dialog><div class="head"><h1>Options avancées</h1><button class="x close" aria-label="Fermer">×</button></div>
+    <div class="advbody">
+      <div><label class="lbl">Vitesse de la transition</label><select><option>Rapide (0,4 s)</option><option selected>Normale (0,8 s)</option><option>Lente (1,5 s)</option><option>Très lente (3 s)</option></select></div>
+      <div class="row"><div class="t"><b>Ordre aléatoire</b><span>Mélange les images à chaque passage.</span></div><label class="sw"><input type="checkbox"><s></s></label></div>
+    </div>
+    <div class="foot"><button class="btn close">Annuler</button><button class="btn pri close">Valider</button></div></dialog>
+</div>
+
+<!-- ============ 4. DIAPORAMA VIDÉOS ============ -->
+<div class="modal" data-name="Diaporama vidéos" id="m-ssv" hidden>
+  <div class="head"><div class="logo" style="background:#3B82C4">🎞</div><h1>Nouveau diaporama de vidéos</h1>
+    <button class="x ico adv" aria-label="Options avancées" title="Options avancées"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg></button>
+    <button class="x" aria-label="Fermer">×</button></div>
+  <div class="search">
+    <label class="lbl">Vidéos</label>
+    <div class="bar"><div class="pick"><b>3 vidéos</b> · durée totale 9:15</div><button class="btn">Ajouter depuis la médiathèque</button><button class="btn pri">Importer</button></div>
+    <p class="hint">Glissez les vignettes pour changer l'ordre.</p>
+  </div>
+  <div class="cols">
+    <section><h2 class="col-title">Aperçu</h2>
+      <div class="car" data-g="g3 g4 g5" data-v="1"></div>
+    </section>
+    <section class="conf"><h2 class="col-title" style="margin:0">Configuration</h2>
+      <div><label class="lbl">Nom dans la médiathèque</label><input type="text" value="Vidéos d'accueil"></div>
+      <div class="row"><div class="t"><b>Activer le son</b><span>Si le navigateur bloque le son, les vidéos démarrent muettes.</span></div><label class="sw"><input type="checkbox"><s></s></label></div>
+      <div><label class="lbl">Transition</label><select><option>Fondu enchaîné</option><option>Glissement</option><option>Zoom avant en fondu</option><option>Aucune</option></select></div>
+      <div><label class="lbl">Cadrage</label><div class="seg"><label><input type="radio" name="f4" checked><span>Vidéos entières</span></label><label><input type="radio" name="f4"><span>Remplir l'écran</span></label></div></div>
+    </section>
+  </div>
+  <div class="foot"><button class="btn">Annuler</button><button class="btn pri">Enregistrer</button></div>
+  <dialog><div class="head"><h1>Options avancées</h1><button class="x close" aria-label="Fermer">×</button></div>
+    <div class="advbody">
+      <div><label class="lbl">Vitesse de la transition</label><select><option>Rapide (0,4 s)</option><option selected>Normale (0,8 s)</option><option>Lente (1,5 s)</option><option>Très lente (3 s)</option></select></div>
+      <div class="row"><div class="t"><b>Ordre aléatoire</b><span>Mélange les vidéos à chaque passage.</span></div><label class="sw"><input type="checkbox"><s></s></label></div>
+    </div>
+    <div class="foot"><button class="btn close">Annuler</button><button class="btn pri close">Valider</button></div></dialog>
+</div>
+
+<!-- ============ 5. CANVA ============ -->
+<div class="modal" data-name="Canva" id="m-canva" hidden>
+  <div class="head"><div class="logo" style="background:#7D2AE8">C</div><h1>Ajouter un design Canva</h1>
+    <button class="x ico adv" aria-label="Options avancées" title="Options avancées"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg></button>
+    <button class="x" aria-label="Fermer">×</button></div>
+  <div class="search">
+    <label class="lbl">Design Canva</label>
+    <div class="bar"><div class="pick"><b>Journée portes ouvertes</b> · 6 pages</div><button class="btn pri">Choisir un design</button></div>
+    <p class="hint"><span class="chip">Compte connecté : service@unil.ch</span></p>
+  </div>
+  <div class="cols">
+    <section><h2 class="col-title">Aperçu</h2>
+      <div class="car" data-g="g4 g5 g1 g2 g3 g4"></div>
+      <button class="btn sm">↻ Mettre à jour depuis Canva</button>
+    </section>
+    <section class="conf"><h2 class="col-title" style="margin:0">Configuration</h2>
+      <div><label class="lbl">Nom dans la médiathèque</label><input type="text" value="Journée portes ouvertes"></div>
+      <div><label class="lbl">Durée de chaque page</label><div class="unit" data-u="secondes"><input type="number" value="8" min="2" max="600"></div></div>
+      <div><label class="lbl">Transition entre les pages</label><select><option>Fondu enchaîné</option><option>Glissement</option><option>Zoom avant en fondu</option><option>Aucune</option></select></div>
+      <div><label class="lbl">Cadrage</label><div class="seg"><label><input type="radio" name="f5" checked><span>Design entier</span></label><label><input type="radio" name="f5"><span>Remplir l'écran</span></label></div></div>
+    </section>
+  </div>
+  <div class="foot"><button class="btn">Annuler</button><button class="btn pri">Enregistrer</button></div>
+  <dialog><div class="head"><h1>Options avancées</h1><button class="x close" aria-label="Fermer">×</button></div>
+    <div class="advbody">
+      <div><label class="lbl">Vitesse de la transition</label><select><option>Rapide (0,4 s)</option><option selected>Normale (0,8 s)</option><option>Lente (1,5 s)</option><option>Très lente (3 s)</option></select></div>
+      <p class="hint" style="margin:0">Pour un design animé (export vidéo), la durée et la transition sont remplacées par « Activer le son ».</p>
+    </div>
+    <div class="foot"><button class="btn close">Annuler</button><button class="btn pri close">Valider</button></div></dialog>
+</div>
+
+<!-- ============ 6. CALENDRIER ============ -->
+<div class="modal" data-name="Calendrier" id="m-agenda" hidden>
+  <div class="head"><div class="logo" style="background:#1E8E5A">📅</div><h1>Ajouter un calendrier partagé</h1><button class="x" aria-label="Fermer">×</button></div>
+  <div class="search">
+    <label class="lbl">Calendrier</label>
+    <div class="bar"><select style="flex:1"><option>Salles de réunion — Microsoft 365</option><option>Événements du campus — Google Calendar</option></select></div>
+    <p class="hint">Les calendriers se connectent une seule fois, dans Intégrations.</p>
+  </div>
+  <div class="cols">
+    <section><h2 class="col-title">Aperçu</h2>
+      <div class="paper"><h3>Agenda de la semaine</h3>
+        <div class="day">Lundi 12 octobre</div>
+        <div class="it"><b>09:00 – 10:30</b><span>Comité de direction<small>Salle Mont-Blanc</small></span></div>
+        <div class="it"><b>14:00 – 15:00</b><span>Accueil des nouveaux<small>Auditoire 2</small></span></div>
+        <div class="day">Mardi 13 octobre</div>
+        <div class="it"><b>10:00 – 12:00</b><span>Conférence publique<small>Grande salle</small></span></div>
+      </div>
+      <div class="info"><span class="ok">12 événements à venir</span></div>
+    </section>
+    <section class="conf"><h2 class="col-title" style="margin:0">Configuration</h2>
+      <div><label class="lbl">Nom dans la médiathèque</label><input type="text" value="Agenda des salles"></div>
+      <div><label class="lbl">Titre affiché</label><input type="text" value="Agenda de la semaine"></div>
+      <div><label class="lbl">Jours affichés</label><div class="unit" data-u="jours"><input type="number" value="7" min="1" max="14"></div></div>
+    </section>
+  </div>
+  <div class="foot"><button class="btn">Annuler</button><button class="btn pri">Enregistrer</button></div>
+</div>
+
+<!-- ============ 7. FLUX RSS ============ -->
+<div class="modal" data-name="Flux RSS" id="m-rss" hidden>
+  <div class="head"><div class="logo" style="background:#E07B1F">📰</div><h1>Ajouter un flux RSS</h1><button class="x" aria-label="Fermer">×</button></div>
+  <div class="search">
+    <label class="lbl" for="rss">Adresse du flux</label>
+    <div class="bar"><input type="url" id="rss" value="https://www.unil.ch/actualites/rss.xml" placeholder="https://www.example.org/rss.xml"><button class="btn pri">Rechercher</button></div>
+    <p class="hint">Collez l'adresse d'un flux RSS ou Atom ; il est relu toutes les 5 minutes.</p>
+  </div>
+  <div class="cols">
+    <section><h2 class="col-title">Aperçu</h2>
+      <div class="paper"><h3>Actualités</h3>
+        <div class="it"><span><strong>Ouverture de la bibliothèque le dimanche</strong><small>Dès le 1er novembre, les horaires évoluent pour…</small></span></div>
+        <div class="it"><span><strong>Résultats du concours photo</strong><small>Les lauréats ont été annoncés ce matin lors de…</small></span></div>
+        <div class="it"><span><strong>Travaux sur le pont : déviation</strong><small>Un itinéraire de remplacement est proposé aux…</small></span></div>
+      </div>
+      <div class="info"><span class="ok">Flux valide · 20 articles</span></div>
+    </section>
+    <section class="conf"><h2 class="col-title" style="margin:0">Configuration</h2>
+      <div><label class="lbl">Nom dans la médiathèque</label><input type="text" value="Actualités"></div>
+      <div><label class="lbl">Titre affiché <span style="font-weight:400">(facultatif)</span></label><input type="text" placeholder="Titre du flux"></div>
+      <div><label class="lbl">Nombre d'articles</label><div class="unit" data-u="articles"><input type="number" value="8" min="1" max="20"></div></div>
+      <div class="row"><div class="t"><b>Afficher les résumés</b><span>En pleine page uniquement.</span></div><label class="sw"><input type="checkbox" checked><s></s></label></div>
+    </section>
+  </div>
+  <div class="foot"><button class="btn">Annuler</button><button class="btn pri">Enregistrer</button></div>
+</div>
+
+<!-- ============ 8. DRIVE ============ -->
+<div class="modal" data-name="Drive" id="m-drive" hidden>
+  <div class="head"><div class="logo" style="background:#1B6EC2">📁</div><h1>Ajouter un dossier Drive</h1>
+    <button class="x ico adv" aria-label="Options avancées" title="Options avancées"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg></button>
+    <button class="x" aria-label="Fermer">×</button></div>
+  <div class="search">
+    <label class="lbl">Dossier</label>
+    <div class="bar"><div class="pick"><b>Communication / Affichage</b> · OneDrive</div><button class="btn pri">Parcourir…</button></div>
+    <p class="hint"><label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" checked> Inclure les sous-dossiers</label></p>
+  </div>
+  <div class="cols">
+    <section><h2 class="col-title">Aperçu</h2>
+      <div class="car" data-g="g3 g1 g2 g4 g5 g1 g3 g2" data-vids="2 6"></div>
+      <div class="info"><span class="ok">48 fichiers · mis à jour il y a 4 min</span></div>
+    </section>
+    <section class="conf"><h2 class="col-title" style="margin:0">Configuration</h2>
+      <div><label class="lbl">Nom dans la médiathèque</label><input type="text" value="Affichage communication"></div>
+      <div><label class="lbl">Fichiers affichés</label><div class="seg"><label><input type="radio" name="k8" checked><span>Tout</span></label><label><input type="radio" name="k8"><span>Images</span></label><label><input type="radio" name="k8"><span>Vidéos</span></label></div></div>
+      <div><label class="lbl">Durée de chaque image</label><div class="unit" data-u="secondes"><input type="number" value="8" min="2" max="600"></div></div>
+      <div><label class="lbl">Transition</label><select><option>Fondu enchaîné</option><option>Glissement</option><option>Zoom avant en fondu</option><option>Aucune</option></select></div>
+    </section>
+  </div>
+  <div class="foot"><button class="btn">Annuler</button><button class="btn pri">Enregistrer</button></div>
+  <dialog><div class="head"><h1>Options avancées</h1><button class="x close" aria-label="Fermer">×</button></div>
+    <div class="advbody">
+      <div><label class="lbl">Ordre</label><select><option>Par nom de fichier</option><option>Les plus récents d'abord</option></select></div>
+      <div class="row"><div class="t"><b>Ordre aléatoire</b><span>Mélange les fichiers à chaque passage.</span></div><label class="sw"><input type="checkbox"><s></s></label></div>
+      <div><label class="lbl">Cadrage</label><div class="seg"><label><input type="radio" name="f8" checked><span>Fichiers entiers</span></label><label><input type="radio" name="f8"><span>Remplir l'écran</span></label></div></div>
+      <div><label class="lbl">Vitesse de la transition</label><select><option>Rapide (0,4 s)</option><option selected>Normale (0,8 s)</option><option>Lente (1,5 s)</option><option>Très lente (3 s)</option></select></div>
+      <div class="row"><div class="t"><b>Son des vidéos</b><span>Si le navigateur bloque le son, elles démarrent muettes.</span></div><label class="sw"><input type="checkbox"><s></s></label></div>
+    </div>
+    <div class="foot"><button class="btn close">Annuler</button><button class="btn pri close">Valider</button></div></dialog>
+</div>
+
+<!-- ============ 9. PAGE WEB ============ -->
+<div class="modal" data-name="Page web" id="m-web" hidden>
+  <div class="head"><div class="logo" style="background:#5A6B80">🌐</div><h1>Ajouter une page web</h1><button class="x" aria-label="Fermer">×</button></div>
+  <div class="search">
+    <label class="lbl" for="web">Adresse de la page</label>
+    <div class="bar"><input type="url" id="web" value="https://www.meteosuisse.admin.ch" placeholder="https://…"><button class="btn pri">Tester</button></div>
+    <p class="hint">La page nécessite une connexion internet sur l'écran.</p>
+  </div>
+  <div class="cols">
+    <section><h2 class="col-title">Aperçu</h2>
+      <div class="browser"><div class="url">www.meteosuisse.admin.ch</div><div class="pg"><div class="hd"></div><div></div><div style="width:70%"></div><div style="width:85%"></div></div></div>
+      <div class="info"><span class="ok">La page peut être affichée</span></div>
+    </section>
+    <section class="conf"><h2 class="col-title" style="margin:0">Configuration</h2>
+      <div><label class="lbl">Nom dans la médiathèque</label><input type="text" value="MétéoSuisse"></div>
+      <div><label class="lbl">Recharger la page</label><select><option>Jamais</option><option>Toutes les 5 minutes</option><option>Toutes les 15 minutes</option><option>Toutes les heures</option></select>
+        <p class="hint">Utile pour un tableau de bord qui ne se met pas à jour seul.</p></div>
+    </section>
+  </div>
+  <div class="foot"><button class="btn">Annuler</button><button class="btn pri">Enregistrer</button></div>
+</div>
+
+<script>
+  var modals = [].slice.call(document.querySelectorAll('.modal'));
+  var tabs = document.getElementById('tabs');
+  modals.forEach(function (m, i) {
+    var b = document.createElement('button');
+    b.textContent = m.dataset.name;
+    b.onclick = function () { show(i); };
+    tabs.appendChild(b);
+  });
+  function show(i) {
+    modals.forEach(function (m, j) { m.hidden = i !== j; tabs.children[j].className = i === j ? 'on' : ''; });
+    location.hash = modals[i].id;
+  }
+  var start = modals.findIndex(function (m) { return '#' + m.id === location.hash; });
+  show(start < 0 ? 0 : start);
+  // Carrousel 3D
+  document.querySelectorAll('.car').forEach(function (car) {
+    var gs = car.dataset.g.split(' '), vids = (car.dataset.vids || '').split(' ').map(Number), allVid = !!car.dataset.v;
+    var cur = 0, n = gs.length;
+    car.innerHTML = '<div class="car-view"><button class="car-nav p" aria-label="Précédent">‹</button><button class="car-nav n" aria-label="Suivant">›</button></div>'
+      + '<div class="car-foot"><span class="cnt"></span><span class="dots"></span><button class="car-mode">Grille</button></div>';
+    var view = car.querySelector('.car-view'), items = [];
+    gs.forEach(function (g, i) {
+      var d = document.createElement('div');
+      d.className = 'car-item ' + g;
+      d.innerHTML = '<em>' + (i + 1) + '</em>' + ((allVid || vids.indexOf(i + 1) > -1) ? '<div class="play"></div>' : '');
+      d.onclick = function () { cur = i; render(); };
+      view.appendChild(d); items.push(d);
+    });
+    var dots = car.querySelector('.dots');
+    gs.forEach(function (g, i) { var s = document.createElement('i'); s.onclick = function () { cur = i; render(); }; dots.appendChild(s); });
+    function render() {
+      items.forEach(function (d, i) {
+        var o = i - cur;
+        if (o > n / 2) o -= n; if (o < -n / 2) o += n;        // rotation circulaire
+        var a = Math.abs(o), s = o === 0 ? 0 : (o > 0 ? 1 : -1);
+        d.style.transform = 'translateX(' + (o * 52) + '%) translateZ(' + (-a * 90) + 'px) rotateY(' + (-s * Math.min(a, 2) * 38) + 'deg)';
+        d.style.opacity = a > 2 ? 0 : 1 - a * .22;
+        d.style.filter = a ? 'brightness(' + (1 - a * .18) + ')' : 'none';
+        d.style.zIndex = 50 - a;
+        d.style.pointerEvents = a > 2 ? 'none' : 'auto';
+        d.classList.toggle('on', o === 0);
+      });
+      dots.querySelectorAll('i').forEach(function (s, i) { s.className = i === cur ? 'on' : ''; });
+      car.querySelector('.cnt').textContent = (cur + 1) + ' / ' + n;
+    }
+    function go(d) { cur = (cur + d + n) % n; render(); }
+    car.querySelector('.p').onclick = function (e) { e.stopPropagation(); go(-1); };
+    car.querySelector('.n').onclick = function (e) { e.stopPropagation(); go(1); };
+    view.addEventListener('wheel', function (e) {                // défilement horizontal
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY) && Math.abs(e.deltaX) > 8) { e.preventDefault(); go(e.deltaX > 0 ? 1 : -1); }
+    }, { passive: false });
+    var sx = null;                                               // glisser à la souris / au doigt
+    view.addEventListener('pointerdown', function (e) { sx = e.clientX; view.classList.add('drag'); });
+    window.addEventListener('pointerup', function (e) {
+      if (sx === null) return; var dx = e.clientX - sx; sx = null; view.classList.remove('drag');
+      if (Math.abs(dx) > 40) go(dx < 0 ? 1 : -1);
+    });
+    car.querySelector('.car-mode').onclick = function () {
+      var flat = car.classList.toggle('flat'); this.textContent = flat ? 'Carrousel 3D' : 'Grille';
+    };
+    render();
+  });
+  document.querySelectorAll('.adv').forEach(function (b) {
+    b.onclick = function () { b.closest('.modal').querySelector('dialog').showModal(); };
+  });
+  document.querySelectorAll('dialog .close').forEach(function (b) {
+    b.onclick = function () { b.closest('dialog').close(); };
+  });
+</script>
+</body>
+</html>

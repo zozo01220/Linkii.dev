@@ -187,6 +187,23 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         return v;
     }
 
+    /// <summary>
+    /// Aperçu d'une configuration non enregistrée (zone « Aperçu » de la fenêtre de configuration) : le résultat du test et, si le fournisseur
+    /// en a, les données que recevrait l'écran (articles, événements…). Les erreurs deviennent un message, jamais une exception.
+    /// </summary>
+    public async Task<(bool Ok, string Message, System.Text.Json.JsonElement? Data)> Preview(AppManifest m, IReadOnlyDictionary<string, string> values, MediaItem? instance)
+    {
+        var (ok, message) = await Test(m, values, instance);
+        if (!ok || providers.Find(m.Provider) is not { } provider || !m.Data) return (ok, message, null);
+        try
+        {
+            var tenant = store.Read(d => d.Tenant);
+            var data = await provider.Fetch(new AppRuntime(tenant, RuntimeValues(m, values, instance)));
+            return (true, message, data == null ? null : System.Text.Json.JsonSerializer.SerializeToElement(data));
+        }
+        catch (Exception ex) { return (false, "Échec : " + ex.Message, null); }
+    }
+
     /// <summary>Teste une configuration non enregistrée. Retourne (réussi, message).</summary>
     public async Task<(bool Ok, string Message)> Test(AppManifest m, IReadOnlyDictionary<string, string> values, MediaItem? instance)
     {

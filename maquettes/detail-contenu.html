@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette – Détail d'un contenu (YouTube)</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --nuit: #0B1F3A; --acier: #5A6B80; --brume: #DDE3EA; --fond: #F5F7FA;
+    --blanc: #FFFFFF; --signal: #3B82C4; --bord2: #C5CED9;
+    --ok-dot: #1E8E5A; --ok-bg: #E1F0E8; --ok-tx: #155A38;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; font: 400 15px/1.5 "IBM Plex Sans", sans-serif; color: var(--nuit);
+         background: #8d97a6; display: grid; place-items: center; padding: 24px; }
+
+  .modal { width: min(880px, 100%); background: var(--blanc); border-radius: 12px; overflow: hidden;
+           box-shadow: 0 20px 60px rgba(11,31,58,.35); }
+
+  .head { display: flex; align-items: center; gap: 12px; padding: 16px 22px; border-bottom: 1px solid var(--brume); }
+  .logo { width: 34px; height: 34px; border-radius: 50%; background: #E62117; display: grid; place-items: center; flex: none; }
+  .logo svg { width: 13px; height: 13px; fill: none; stroke: #fff; stroke-width: 2; }
+  .head h1 { flex: 1; margin: 0; font-size: 17px; font-weight: 600; }
+  .x { border: 0; background: none; font-size: 22px; line-height: 1; color: var(--acier); cursor: pointer; }
+
+  /* Ligne 1 : recherche */
+  .search { padding: 18px 22px; background: var(--fond); border-bottom: 1px solid var(--brume); }
+  .search .bar { display: flex; gap: 10px; }
+  .search input { flex: 1; }
+  .hint { margin: 6px 0 0; font-size: 12.5px; color: var(--acier); }
+
+  /* Ligne 2 : deux colonnes */
+  .cols { display: grid; grid-template-columns: 1.15fr 1fr; gap: 24px; padding: 22px; }
+  .col-title { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--acier); margin: 0 0 10px; }
+
+  /* Zone d'aperçu */
+  .stage { aspect-ratio: 16/9; border-radius: 10px; position: relative; overflow: hidden; background: #000; }
+  .stage .img { position: absolute; inset: 0; background: linear-gradient(135deg, #1d3a63, #3B82C4 60%, #8fc1ea); }
+  .stage .play { position: absolute; inset: 0; margin: auto; width: 54px; height: 54px; border-radius: 50%; background: rgba(255,255,255,.92); }
+  .stage .play::before { content: ""; position: absolute; left: 21px; top: 16px;
+                         border-left: 17px solid var(--nuit); border-top: 11px solid transparent; border-bottom: 11px solid transparent; }
+  .stage .dur { position: absolute; right: 10px; bottom: 10px; font-size: 12px; color: #fff; background: rgba(0,0,0,.72); padding: 1px 7px; border-radius: 4px; }
+  .empty { display: none; position: absolute; inset: 0; place-content: center; text-align: center; gap: 6px;
+           background: var(--fond); border: 2px dashed var(--bord2); border-radius: 10px; color: var(--acier); font-size: 14px; }
+  body.vide .empty { display: grid; }
+  body.vide .img, body.vide .play, body.vide .dur { display: none; }
+  .info { margin-top: 12px; }
+  .info b { display: block; font-weight: 600; font-size: 14.5px; line-height: 1.35; }
+  .info span { font-size: 13px; color: var(--acier); }
+  .ok { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 2px 9px; border-radius: 99px;
+        background: var(--ok-bg); color: var(--ok-tx); font-size: 12px; font-weight: 500; }
+  .ok::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ok-dot); }
+  body.vide .info { visibility: hidden; }
+
+  /* Configuration */
+  .conf { display: grid; gap: 18px; align-content: start; }
+  label.lbl { display: block; font-size: 13px; font-weight: 500; color: var(--acier); margin-bottom: 6px; }
+  input[type=text], input[type=number] {
+    width: 100%; font: inherit; color: var(--nuit); padding: 10px 12px;
+    border: 1px solid var(--bord2); border-radius: 8px; background: #fff;
+  }
+  input:focus { outline: 2px solid var(--signal); border-color: var(--signal); }
+  body.vide .conf { opacity: .45; pointer-events: none; }
+
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .row .t b { display: block; font-weight: 500; font-size: 14.5px; }
+  .row .t span { font-size: 12.5px; color: var(--acier); }
+  .sw { position: relative; width: 44px; height: 26px; flex: none; }
+  .sw input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; z-index: 1; }
+  .sw s { position: absolute; inset: 0; border-radius: 99px; background: var(--bord2); transition: .15s; }
+  .sw s::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: .15s; }
+  .sw input:checked + s { background: var(--signal); }
+  .sw input:checked + s::after { left: 21px; }
+  .sw input:focus-visible + s { outline: 2px solid var(--nuit); outline-offset: 2px; }
+
+  details { border-top: 1px solid var(--brume); padding-top: 14px; }
+  summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; color: var(--acier); }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: ""; width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+                    transform: rotate(-45deg); transition: .15s; margin-right: 2px; }
+  details[open] summary::before { transform: rotate(45deg); }
+  summary small { font-weight: 400; font-size: 12.5px; }
+  .adv { display: grid; gap: 16px; padding-top: 16px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  .x.ico { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 8px; }
+  .x.ico:hover { background: var(--brume); color: var(--nuit); }
+  .advbtn { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; text-align: left;
+            font: inherit; color: var(--nuit); background: #fff; border: 1px solid var(--bord2); border-radius: 8px;
+            padding: 10px 14px; cursor: pointer; }
+  .advbtn:hover { border-color: var(--signal); }
+  .advbtn b { display: block; font-weight: 500; font-size: 14.5px; }
+  .advbtn small { font-size: 12.5px; color: var(--acier); }
+  .advbtn i { font-style: normal; font-size: 22px; color: var(--acier); }
+  dialog { width: min(460px, calc(100% - 32px)); padding: 0; border: 0; border-radius: 12px; overflow: hidden;
+           box-shadow: 0 20px 60px rgba(11,31,58,.45); color: var(--nuit); font: inherit; }
+  dialog::backdrop { background: rgba(11,31,58,.45); }
+  .advbody { display: grid; gap: 20px; padding: 22px; }
+  .foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 22px; background: var(--fond); border-top: 1px solid var(--brume); }
+  .btn { font: inherit; font-weight: 500; padding: 9px 18px; border-radius: 8px; border: 1px solid var(--bord2); background: #fff; color: var(--nuit); cursor: pointer; }
+  .btn.pri { background: var(--nuit); border-color: var(--nuit); color: #fff; }
+  body.vide .btn.pri { opacity: .4; pointer-events: none; }
+
+  .demo { position: fixed; left: 12px; bottom: 12px; background: #fff; border: 1px solid var(--bord2); border-radius: 8px;
+          padding: 6px 10px; font-size: 12px; color: var(--acier); }
+  .demo button { font: inherit; margin-left: 6px; cursor: pointer; }
+
+  @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="modal" role="dialog" aria-labelledby="ttl">
+  <div class="head">
+    <div class="logo" aria-hidden="true"><svg viewBox="0 0 14 14"><path d="M3 1.5v11l9-5.5z"/></svg></div>
+    <h1 id="ttl">Ajouter une vidéo YouTube</h1>
+    <button class="x ico" aria-label="Options avancées" title="Options avancées" onclick="document.getElementById('adv').showModal()">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+        <path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>
+      </svg>
+    </button>
+    <button class="x" aria-label="Fermer">×</button>
+  </div>
+
+  <!-- Ligne 1 : recherche de la vidéo -->
+  <div class="search">
+    <label class="lbl" for="url">Vidéo ou playlist</label>
+    <div class="bar">
+      <input type="text" id="url" value="https://www.youtube.com/watch?v=kFZ0iU3qovo" placeholder="Collez un lien YouTube">
+      <button class="btn pri">Rechercher</button>
+    </div>
+    <p class="hint">Collez le lien de la vidéo ou de la playlist ; l'aperçu s'affiche automatiquement.</p>
+  </div>
+
+  <!-- Ligne 2 : aperçu à gauche, configuration à droite -->
+  <div class="cols">
+    <section aria-label="Aperçu">
+      <h2 class="col-title">Aperçu</h2>
+      <div class="stage">
+        <div class="img"></div><div class="play"></div><div class="dur">3:42</div>
+        <div class="empty"><b>Aucune vidéo</b><span>Collez un lien ci-dessus</span></div>
+      </div>
+      <div class="info">
+        <b>Titre de la vidéo récupéré automatiquement</b>
+        <span>Nom de la chaîne</span><br>
+        <span class="ok">Lien valide</span>
+      </div>
+    </section>
+
+    <section class="conf" aria-label="Configuration">
+      <h2 class="col-title" style="margin:0">Configuration</h2>
+      <div>
+        <label class="lbl" for="nom">Nom dans la médiathèque</label>
+        <input type="text" id="nom" value="Titre de la vidéo récupéré automatiquement">
+      </div>
+      <div class="row">
+        <div class="t"><b>Activer le son</b><span>Si le navigateur bloque le son, la vidéo démarre muette.</span></div>
+        <label class="sw"><input type="checkbox" checked aria-label="Activer le son"><s></s></label>
+      </div>
+    </section>
+  </div>
+
+  <div class="foot">
+    <button class="btn">Annuler</button>
+    <button class="btn pri">Enregistrer</button>
+  </div>
+</div>
+
+<dialog id="adv" aria-labelledby="advt">
+  <div class="head">
+    <h1 id="advt">Options avancées</h1>
+    <button class="x" aria-label="Fermer" onclick="document.getElementById('adv').close()">×</button>
+  </div>
+  <div class="advbody">
+    <div class="row">
+      <div class="t"><b>Masquer les overlays</b><span>Retire titre, logo et suggestions ; image légèrement recadrée en haut et en bas.</span></div>
+      <label class="sw"><input type="checkbox" checked aria-label="Masquer les overlays"><s></s></label>
+    </div>
+    <div class="two">
+      <div><label class="lbl" for="d">Démarrer à (secondes)</label><input type="number" id="d" value="0" min="0"><p class="hint">0 : depuis le début.</p></div>
+      <div><label class="lbl" for="f">Arrêter à (secondes)</label><input type="number" id="f" placeholder="Fin de la vidéo" min="0"><p class="hint">Vide : jusqu'à la fin.</p></div>
+    </div>
+  </div>
+  <div class="foot">
+    <button class="btn" onclick="document.getElementById('adv').close()">Annuler</button>
+    <button class="btn pri" onclick="document.getElementById('adv').close()">Valider</button>
+  </div>
+</dialog>
+
+<div class="demo">Maquette :
+  <button onclick="document.body.classList.remove('vide')">Lien reconnu</button>
+  <button onclick="document.body.classList.add('vide')">Avant recherche</button>
+</div>
+</body>
+</html>

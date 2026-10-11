@@ -26,6 +26,17 @@ public class AppField
     public string? Accept { get; set; }
     /// <summary>Rempli par un autre champ (ex. fichiers exportés par le champ « canva ») : jamais affiché dans le formulaire.</summary>
     public bool Managed { get; set; }
+    /// <summary>
+    /// Où le champ s'affiche dans la fenêtre de configuration (voir DEV-POC.md, « Standard de configuration d'un contenu ») :
+    /// « source » = ligne du haut (ce qu'on va afficher : lien, fichiers, dossier, calendrier…) ;
+    /// « main » (défaut) = colonne de configuration, à droite de l'aperçu ;
+    /// « advanced » = fenêtre « Options avancées » (icône dans le bandeau).
+    /// </summary>
+    public string Zone { get; set; } = "main";
+    /// <summary>select : « segmented » affiche les choix côte à côte (2 ou 3 choix courts) au lieu d'une liste déroulante.</summary>
+    public string? Ui { get; set; }
+    /// <summary>number : unité affichée à droite du champ (« secondes », « jours »…).</summary>
+    public string? Unit { get; set; }
 
     public bool IsMedia => Type is "media" or "medias";
 
@@ -68,6 +79,10 @@ public class AppManifest
     public List<AppField> Settings { get; set; } = new();
 
     public bool IsNoCode => Kind == "nocode";
+
+    /// <summary>Champs d'une zone de la fenêtre de configuration (hors champs masqués ou gérés par un autre champ).</summary>
+    public IEnumerable<AppField> InZone(string zone) => Settings.Where(f => f.Zone == zone && f.Type != "hidden" && !f.Managed);
+    public bool HasAdvanced => InZone("advanced").Any();
 }
 
 /// <summary>Le catalogue (« store ») : les manifestes chargés au démarrage depuis le dossier Apps/.</summary>
@@ -117,6 +132,8 @@ public class AppCatalog
             if (!FieldTypes.Contains(f.Type)) p.Add($"type inconnu : {f.Type}");
             if (f.Type == "select" && f.Options.Count == 0) p.Add($"choix sans options : {f.Key}");
             if (f.IsMedia && f.Accept is not ("image" or "video")) p.Add($"médias sans type accepté (image ou video) : {f.Key}");
+            if (f.Zone is not ("source" or "main" or "advanced")) p.Add($"zone inconnue (source, main ou advanced) : {f.Key}");
+            if (f.Ui != null && !(f.Ui == "segmented" && f.Type == "select")) p.Add($"« ui » n'existe que pour un select segmented : {f.Key}");
         }
         return p;
     }

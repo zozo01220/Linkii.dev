@@ -1,0 +1,94 @@
+@using System.Globalization
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+@implements IDisposable
+
+@* Aperçu en carrousel 3D : affichage standard de plusieurs images / vidéos (diaporamas, Canva, Drive…), dès qu'il y a plus d'un contenu.
+   L'élément du centre est de face ; les voisins sont inclinés, assombris et s'estompent. Flèches, clic, clavier, glisser ou défilement
+   horizontal font tourner (circulaire). « Grille » affiche les mêmes éléments à plat. Un seul élément : voir ContentPreview (image fixe). *@
+<div class="car @(flat ? "flat" : "")">
+    <div class="car-view" @ref="view" tabindex="0" role="group" aria-roledescription="carrousel" aria-label="Aperçu : @Items.Count éléments" @onkeydown="Key">
+        @for (var i = 0; i < Items.Count; i++)
+        {
+            var idx = i;
+            var m = Items[idx];
+            <div class="car-item @(idx == cur ? "on" : "")" style="@Style(idx)" role="button" aria-label="Élément @(idx + 1) : @m.Name" @onclick="() => cur = idx">
+                <MediaThumb Media="m" />
+                <em>@(idx + 1)</em>
+                @if (m.Type == "video") { <span class="car-play" aria-hidden="true"></span> }
+            </div>
+        }
+        @if (!flat)
+        {
+            <button type="button" class="car-nav p" aria-label="Précédent" @onclick="() => Step(-1)">‹</button>
+            <button type="button" class="car-nav n" aria-label="Suivant" @onclick="() => Step(1)">›</button>
+        }
+    </div>
+    <div class="car-foot">
+        <span aria-live="polite">@(cur + 1) / @Items.Count</span>
+        @if (Items.Count <= 12)
+        {
+            <span class="dots" aria-hidden="true">
+                @for (var i = 0; i < Items.Count; i++) { var idx = i; <i class="@(idx == cur ? "on" : "")" @onclick="() => cur = idx"></i> }
+            </span>
+        }
+        <button type="button" class="car-mode" @onclick="() => flat = !flat">@(flat ? "Carrousel 3D" : "Grille")</button>
+    </div>
+</div>
+
+@code {
+    /// <summary>Éléments à montrer, dans l'ordre de passage à l'écran.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<MediaItem> Items { get; set; } = Array.Empty<MediaItem>();
+
+    private int cur;
+    private bool flat;
+    private ElementReference view;
+    private DotNetObjectReference<Carousel3D>? selfRef;
+    private bool wired;
+
+    protected override void OnParametersSet() { if (cur >= Items.Count) cur = 0; }
+
+    // Distance circulaire à l'élément du centre : -n/2 … +n/2.
+    private int Offset(int i)
+    {
+        var o = i - cur;
+        var n = Items.Count;
+        if (o > n / 2.0) o -= n;
+        if (o < -n / 2.0) o += n;
+        return o;
+    }
+
+    private string Style(int i)
+    {
+        if (flat) return "";
+        var o = Offset(i);
+        var a = Math.Abs(o);
+        var s = Math.Sign(o);
+        var opacity = a > 2 ? 0 : 1 - a * .22;
+        return string.Create(CultureInfo.InvariantCulture,
+            $"transform:translateX({o * 52}%) translateZ({-a * 90}px) rotateY({-s * Math.Min(a, 2) * 38}deg);opacity:{opacity:0.##};filter:brightness({1 - a * .18:0.##});z-index:{50 - a};pointer-events:{(a > 2 ? "none" : "auto")}");
+    }
+
+    private void Key(KeyboardEventArgs e)
+    {
+        if (e.Key == "ArrowLeft") Step(-1);
+        else if (e.Key == "ArrowRight") Step(1);
+    }
+
+    [JSInvokable]
+    public Task Step(int d)
+    {
+        if (Items.Count > 0) cur = ((cur + d) % Items.Count + Items.Count) % Items.Count;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (wired) return;
+        wired = true;
+        selfRef = DotNetObjectReference.Create(this);
+        try { await JS.InvokeVoidAsync("linkiiCarousel.init", view, selfRef); } catch (JSDisconnectedException) { }
+    }
+
+    public void Dispose() => selfRef?.Dispose();
+}

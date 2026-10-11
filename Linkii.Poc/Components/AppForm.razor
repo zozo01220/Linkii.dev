@@ -6,6 +6,7 @@
     @foreach (var f in Manifest.Settings)
     {
         if (!AppCatalog.IsVisible(f, Values) || f.Type == "hidden" || f.Managed) continue;
+        if (Zone != null && f.Zone != Zone) continue;
         var k = f.Key;
         <div class="dw-field">
             @if (f.Type == "bool")
@@ -21,10 +22,21 @@
                         <textarea rows="4" maxlength="@f.MaxLength" placeholder="@f.Placeholder" @bind="Values[k]" @bind:event="oninput"></textarea>
                         break;
                     case "number":
-                        <input type="number" min="@f.Min" max="@f.Max" @bind="Values[k]" @bind:event="oninput" />
+                        <div class="@(f.Unit != null ? "unit" : "")" data-u="@f.Unit">
+                            <input type="number" min="@f.Min" max="@f.Max" @bind="Values[k]" @bind:event="oninput" />
+                        </div>
+                        break;
+                    case "select" when f.Ui == "segmented":
+                        <div class="seg" role="radiogroup" aria-label="@f.Label">
+                            @foreach (var o in f.Options)
+                            {
+                                var opt = o;
+                                <label><input type="radio" name="seg-@Manifest.Id-@k" checked="@(Values[k] == opt.Value)" @onchange="() => Pick(k, opt.Value)" /><span>@opt.Label</span></label>
+                            }
+                        </div>
                         break;
                     case "select":
-                        <select @bind="Values[k]">
+                        <select @bind="Values[k]" @bind:after="Changed">
                             @foreach (var o in f.Options) { <option value="@o.Value">@o.Label</option> }
                         </select>
                         break;
@@ -54,7 +66,7 @@
                         }
                         else
                         {
-                            <select @bind="Values[k]">
+                            <select @bind="Values[k]" @bind:after="Changed">
                                 <option value="">— Choisir un dossier —</option>
                                 @foreach (var g in folders.GroupBy(x => x.Source))
                                 {
@@ -95,10 +107,10 @@
                         @if (fileErrors.TryGetValue(k, out var fe)) { <div class="err">@fe</div> }
                         break;
                     case "media" or "medias":
-                        <MediaField Field="f" Values="Values" />
+                        <MediaField Field="f" Values="Values" OnChange="Changed" />
                         break;
                     case "canva":
-                        <CanvaField Field="f" Values="Values" OnChange="StateHasChanged" />
+                        <CanvaField Field="f" Values="Values" OnChange="CanvaChanged" />
                         break;
                     case "mailbox":
                         @if (rooms.Count > 0)
@@ -133,6 +145,14 @@
     [Parameter] public ISet<string> StoredSecrets { get; set; } = new HashSet<string>();
     /// <summary>Instance en cours de modification (null : pas encore enregistrée).</summary>
     [Parameter] public Guid? InstanceId { get; set; }
+    /// <summary>Seulement les champs de cette zone (source | main | advanced) ; null : tous (voir AppField.Zone).</summary>
+    [Parameter] public string? Zone { get; set; }
+    /// <summary>Une valeur a changé : la fenêtre de configuration met l'aperçu à jour.</summary>
+    [Parameter] public EventCallback OnChange { get; set; }
+
+    private Task Changed() => OnChange.InvokeAsync();
+    private Task Pick(string key, string value) { Values[key] = value; return Changed(); }
+    private Task CanvaChanged() { StateHasChanged(); return Changed(); }
 
     private List<GraphService.RoomInfo> rooms = new();
     private readonly Dictionary<string, string> fileErrors = new();

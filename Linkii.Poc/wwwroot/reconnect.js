@@ -1,25 +1,59 @@
 // Reconnexion automatique : après un arrêt/redémarrage du serveur, le circuit Blazor est perdu.
 // On sonde le serveur et on recharge la page dès qu'il répond, sans intervention de l'utilisateur.
 (function () {
-    var banner = null, timer = null, down = false;
+    var banner = null, title = null, desc = null, timer = null, down = false, found = false, blocked = [];
+
+    var CSS = '.lk-lock{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:16px;'
+        + 'background:rgba(11,31,58,.62);backdrop-filter:blur(3px);cursor:wait;font:400 15px/1.5 "IBM Plex Sans",sans-serif;color:#0B1F3A}'
+        + '.lk-box{width:min(420px,100%);background:#fff;border-radius:14px;padding:32px 28px 26px;text-align:center;'
+        + 'box-shadow:0 20px 60px rgba(11,31,58,.35)}'
+        + '.lk-spin{width:44px;height:44px;margin:0 auto 18px;border-radius:50%;border:4px solid #DDE3EA;'
+        + 'border-top-color:#3B82C4;animation:lk-spin .9s linear infinite}'
+        + '@keyframes lk-spin{to{transform:rotate(360deg)}}'
+        + '.lk-box h2{font-size:19px;font-weight:600;margin:0 0 6px}'
+        + '.lk-box p{margin:0;color:#5A6B80;font-size:14px}'
+        + '.lk-box .lk-note{margin-top:18px;padding:8px 12px;border-radius:8px;font-size:13px;background:#FBF0DC;color:#7A4F12}';
+
+    function setText(isFound) {
+        title.textContent = isFound ? 'Serveur retrouvé' : 'Connexion perdue';
+        desc.textContent = isFound ? 'Rechargement de la page…' : 'Reconnexion en cours… la page se rechargera d’elle-même.';
+    }
 
     function show() {
         if (banner) return;
+        var style = document.createElement('style');
+        style.textContent = CSS;
         banner = document.createElement('div');
-        banner.setAttribute('role', 'status');
-        banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;padding:8px 16px;'
-            + 'background:#0B1F3A;color:#fff;font:500 14px/1.4 "IBM Plex Sans",sans-serif;text-align:center';
-        banner.textContent = 'Connexion perdue, reconnexion en cours…';
+        banner.className = 'lk-lock';
+        banner.setAttribute('role', 'alertdialog');
+        banner.setAttribute('aria-modal', 'true');
+        banner.setAttribute('aria-live', 'assertive');
+        banner.innerHTML = '<div class="lk-box"><div class="lk-spin" aria-hidden="true"></div><h2></h2><p></p>'
+            + '<div class="lk-note">Merci de ne pas fermer cette page.</div></div>';
+        banner.appendChild(style);
+        title = banner.querySelector('h2');
+        desc = banner.querySelector('p');
+        setText(false);
+        // Le reste de la page devient inerte : ni clic, ni tabulation, ni lecteur d'écran.
+        blocked = Array.prototype.slice.call(document.body.children);
+        blocked.forEach(function (el) { el.inert = true; });
         document.body.appendChild(banner);
     }
 
     function hide() {
+        blocked.forEach(function (el) { el.inert = false; });
+        blocked = [];
         if (banner) { banner.remove(); banner = null; }
     }
 
     function probe() {
         fetch('/', { method: 'HEAD', cache: 'no-store' })
-            .then(function (r) { if (r.ok || r.status < 500) location.reload(); })
+            .then(function (r) {
+                if (!(r.ok || r.status < 500) || found) return;
+                found = true;
+                if (title) setText(true);
+                setTimeout(function () { location.reload(); }, 600);
+            })
             .catch(function () { });
     }
 

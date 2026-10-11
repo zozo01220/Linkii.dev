@@ -1,0 +1,163 @@
+﻿@using System.Globalization
+@using System.Text.Json
+@inject AppService Apps
+@inject MediaLibrary Library
+@inject TenantStore Store
+
+@* Zone « Aperçu » de la fenêtre de configuration d'un contenu (standard Linkii, voir DEV-POC.md) : montre ce que le contenu affichera.
+   - fichiers (Image, Vidéo, diaporamas, Canva) et dossier Drive : une image fixe pour un seul élément, carrousel 3D dès qu'il y en a plusieurs ;
+   - apps à fournisseur (YouTube, flux RSS, calendrier, page web) : rendu des données lues par le serveur, avec le résultat du test en dessous. *@
+<div class="cp">
+    @switch (kind)
+    {
+        case "media" or "drive":
+            @if (files.Count == 0)
+            {
+                <div class="cp-empty"><b>Aucun aperçu</b><span>@(kind == "drive" ? "Choisissez un dossier ci-dessus." : "Choisissez un fichier ci-dessus.")</span></div>
+            }
+            else if (files.Count == 1)
+            {
+                <div class="cp-stage">
+                    @if (files[0].FileName != null && files[0].Status == null && (files[0].Type == "image" || Converter.CanPoster)) { <img src="/media/@files[0].FileName?w=640" alt="@files[0].Name" /> }
+                    else { <MediaThumb Media="files[0]" /> }
+                    @if (files[0].Type == "video") { <span class="car-play" aria-hidden="true"></span> }
+                </div>
+                <div class="cp-info"><b>@files[0].Name</b><span>@(files[0].Type == "video" ? "Vidéo" : "Image")</span></div>
+            }
+            else
+            {
+                <Carousel3D Items="files" @key="files.Count" />
+            }
+            @if (kind == "drive" && driveInfo != null) { <div class="cp-info"><span class="cp-pill ok">@driveInfo</span></div> }
+            break;
+
+        case "provider":
+            @if (loading)
+            {
+                <div class="cp-empty"><span class="spinner"></span><span>Recherche en cours…</span></div>
+            }
+            else if (!loaded)
+            {
+                <div class="cp-empty"><b>Aucun aperçu</b><span>@EmptyHint</span></div>
+            }
+            else
+            {
+                @if (Manifest.Id == "youtube" && YouTube.ExtractId(SourceValue) is { } yt)
+                {
+                    <div class="cp-stage"><img src="https://i.ytimg.com/vi/@yt/hqdefault.jpg" alt="" /><span class="car-play" aria-hidden="true"></span></div>
+                }
+                else if (Manifest.Id == "webpage")
+                {
+                    <div class="cp-browser"><div class="cp-url">@SourceValue</div><div class="cp-pg"><i></i><i></i><i></i><i></i></div></div>
+                }
+                else if (result.Data is { } d && d.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
+                {
+                    <div class="cp-paper">
+                        <h4>@Str(d, "title")</h4>
+                        @foreach (var it in items.EnumerateArray().Take(4))
+                        {
+                            <div class="cp-row"><span><b>@Str(it, "title")</b>@if (Str(it, "summary") is { Length: > 0 } su) { <small>@su</small> }</span></div>
+                        }
+                    </div>
+                }
+                else if (result.Data is { } dd && dd.TryGetProperty("events", out var evs) && evs.ValueKind == JsonValueKind.Array)
+                {
+                    var tz = Zone();
+                    string? lastDay = null;
+                    var list = evs.EnumerateArray().Take(4).ToList();
+                    <div class="cp-paper">
+                        <h4>@Str(dd, "title")</h4>
+                        @foreach (var e in list)
+                        {
+                            var start = TimeZoneInfo.ConvertTimeFromUtc(e.GetProperty("start").GetDateTime().ToUniversalTime(), tz);
+                            var day = start.ToString("dddd d MMMM", CultureInfo.GetCultureInfo("fr-CH"));
+                            var newDay = day != lastDay;
+                            lastDay = day;
+                            @if (newDay) { <div class="cp-day">@day</div> }
+                            <div class="cp-row">
+                                <em>@(e.TryGetProperty("allDay", out var ad) && ad.ValueKind == JsonValueKind.True ? "Journée" : start.ToString("HH:mm"))</em>
+                                <span><b>@Str(e, "title")</b>@if (Str(e, "location") is { Length: > 0 } loc) { <small>@loc</small> }</span>
+                            </div>
+                        }
+                        @if (list.Count == 0) { <div class="cp-row">Aucun événement à venir sur cette période.</div> }
+                    </div>
+                }
+                <div class="cp-info"><span class="cp-pill @(!result.Ok ? "bad" : result.Message.StartsWith("⚠") ? "warn" : "ok")">@result.Message</span></div>
+            }
+            break;
+    }
+</div>
+
+@code {
+    [Inject] private VideoConverter Converter { get; set; } = default!;
+
+    [Parameter, EditorRequired] public AppManifest Manifest { get; set; } = default!;
+    [Parameter, EditorRequired] public Dictionary<string, string> Values { get; set; } = default!;
+    /// <summary>Contenu déjà enregistré (ses secrets servent au test) ; null pour un nouveau contenu.</summary>
+    [Parameter] public MediaItem? Instance { get; set; }
+
+    private string kind = "none";
+    private List<MediaItem> files = new();
+    private string? driveInfo;
+    private bool loading, loaded;
+    private (bool Ok, string Message, JsonElement? Data) result;
+
+    private string EmptyHint => Manifest.Settings.FirstOrDefault(f => f.Zone == "source")?.Type is "calendar"
+        ? "Choisissez un calendrier ci-dessus." : "Saisissez l'adresse ci-dessus, puis cliquez sur « Rechercher ».";
+
+    /// <summary>Un aperçu existe pour cette app (sinon la fenêtre n'affiche que la configuration, sur toute la largeur).</summary>
+    public static bool Has(AppManifest m) => m.Settings.Any(f => f.IsMedia || f.Type == "drive") || m.Provider != null && m.Settings.Any(f => f.Zone == "source");
+
+    protected override async Task OnInitializedAsync()
+    {
+        kind = Manifest.Settings.Any(f => f.Type == "drive") ? "drive"
+             : Manifest.Settings.Any(f => f.IsMedia) ? "media"
+             : Manifest.Provider != null ? "provider" : "none";
+        if (kind == "provider" && Instance != null) await Refresh();   // contenu existant : aperçu d'emblée
+    }
+
+    protected override void OnParametersSet() => Collect();
+
+    /// <summary>(Re)charge l'aperçu d'une app à fournisseur : test + données lues par le serveur. Appelé par « Rechercher ».</summary>
+    public async Task Refresh()
+    {
+        if (kind != "provider") return;
+        loading = true; loaded = false; StateHasChanged();
+        try { result = await Apps.Preview(Manifest, Values, Instance); loaded = true; }
+        finally { loading = false; }
+    }
+
+    // Fichiers à montrer : champs « média » visibles (Canva : pages ou vidéo selon l'export) ou fichiers du dossier Drive choisi.
+    private void Collect()
+    {
+        if (kind == "media")
+        {
+            var all = Library.Files().ToDictionary(m => m.Id);
+            files = Manifest.Settings.Where(f => f.IsMedia && AppCatalog.IsVisible(f, Values))
+                .SelectMany(f => AppField.MediaIds(Values.GetValueOrDefault(f.Key)))
+                .Where(all.ContainsKey).Select(id => all[id]).ToList();
+        }
+        else if (kind == "drive")
+        {
+            var folder = Values.GetValueOrDefault("folder") ?? "";
+            var kinds = Values.GetValueOrDefault("kinds") ?? "all";
+            var list = Library.Files().Where(m => m.Info.GetValueOrDefault("drive") == folder && m.Status == null && m.FileName != null
+                                                  && (kinds == "all" || m.Type == (kinds == "videos" ? "video" : "image"))).ToList();
+            files = (Values.GetValueOrDefault("order") == "date"
+                    ? list.OrderByDescending(m => m.Info.GetValueOrDefault("driveTime"), StringComparer.Ordinal)
+                    : list.OrderBy(m => m.Info.GetValueOrDefault("drivePath") ?? m.Info.GetValueOrDefault("driveName") ?? m.Name, StringComparer.CurrentCultureIgnoreCase))
+                .Take(24).ToList();
+            driveInfo = Library.DriveFolders().TryGetValue(folder, out var f)
+                ? $"{f.FileCount} fichier{(f.FileCount > 1 ? "s" : "")} · synchronisé {DriveSources.Ago(f.SyncedUtc)}" : null;
+        }
+    }
+
+    private string SourceValue => Values.GetValueOrDefault(Manifest.Settings.FirstOrDefault(f => f.Zone == "source")?.Key ?? "url") ?? "";
+
+    private static string Str(JsonElement e, string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+
+    private TimeZoneInfo Zone()
+    {
+        try { return TimeZoneInfo.FindSystemTimeZoneById(Store.Read(d => d.Tenant.Timezone)); } catch { return TimeZoneInfo.Utc; }
+    }
+}

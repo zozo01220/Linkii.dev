@@ -1,4 +1,4 @@
-# Linkii — Dev POC (jetable)
+﻿# Linkii — Dev POC (jetable)
 
 > **Statut : test / prototype voué à mourir.** But : prouver la chaîne *back-office → serveur → SignalR → player* et la promesse produit **« écran en service en moins de 2 minutes »**. Le code n'est pas destiné à être réutilisé : on privilégie la vitesse.
 > Source : *Linkii — Spécification produit (v1)*. Dernière mise à jour : 10 octobre 2026.
@@ -353,6 +353,8 @@ Les bandeaux haut et bas (agenda, flux RSS) passent par `host.ticker` (`player.j
 ### Ajouter une app
 Déposer un manifeste dans `Apps/`. Si elle lit des données : implémenter `IAppProvider` (`Fetch`, `Test`), l'enregistrer dans `Program.cs`, et ajouter son rendu dans `wwwroot/player/apps.js` (`LinkiiApps.register`). Une app « sans code » n'a besoin que du manifeste et d'un rendu générique.
 
+Toute nouvelle app suit le **standard de configuration d'un contenu** (§30) : classer ses champs en zones (source, main, dvanced) dans le manifeste.
+
 ### Reste à faire
 - Migrer les 4 anciennes apps de données (porte de salle, horaires, menu, départs) : leur éditeur et l'assistant de démarrage ont été retirés, elles ne se créent plus ; d'éventuels éléments existants continuent de s'afficher par l'ancien chemin (`AppKind`).
 - Console Linkii : gestion du catalogue (publier une app / version, la réserver à une formule) ; masquer des apps par revendeur.
@@ -508,7 +510,7 @@ L'import d'un dossier Drive (surtout avec des vidéos) tourne sur le serveur san
 
 ## 24. Reconnexion automatique du back-office (10 octobre 2026)
 
-Après un arrêt/redémarrage du serveur, le circuit Blazor est perdu et la page restait bloquée sur « Could not reconnect to the server ». `wwwroot/reconnect.js` (Blazor démarré avec `autostart="false"` dans `App.razor`) remplace l'écran par défaut : bandeau « Connexion perdue, reconnexion en cours… », sondage du serveur toutes les 2 s (sans limite), **rechargement automatique** dès qu'il répond, ou au retour du réseau / de l'onglet. Non vérifié par un vrai redémarrage.
+Après un arrêt/redémarrage du serveur, le circuit Blazor est perdu et la page restait bloquée sur « Could not reconnect to the server ». `wwwroot/reconnect.js` (Blazor démarré avec `autostart="false"` dans `App.razor`) remplace l'écran par défaut : **écran bloquant** (voile bleu nuit flouté sur toute la page, inert sur le reste de l'application, carte centrée « Connexion perdue / Reconnexion en cours… / Merci de ne pas fermer cette page »), sondage du serveur toutes les 2 s (sans limite), puis « Serveur retrouvé » et **rechargement automatique** dès qu'il répond, ou au retour du réseau / de l'onglet. Maquette : maquettes/reconnexion.html. Non vérifié par un vrai redémarrage.
 
 ## 25. Refonte des cartes et de la liste des écrans (10 octobre 2026)
 
@@ -550,6 +552,19 @@ Trois sources de plus dans Intégrations › Drives, avec le même sélecteur de
 
 Pas codée. Option retenue : **convertir le PDF en images sur le serveur** (une page = une image 1080p), traité comme un diaporama (durée par page, pages de début et de fin), sur le modèle de la conversion vidéo (arrière-plan, progression). Moteur de rendu à choisir : PDFium (ex. Docnet.Core, sans outil externe) ou `pdftoppm` / Ghostscript ; SkiaSharp ne lit pas les PDF. Limites prévues : ~50 pages, PDF protégé refusé. Deuxième temps : les PDF des dossiers Drive (aujourd'hui ignorés comme « autres fichiers »). Écartés : pdf.js dans le player (lourd en WebView Android et hors ligne), lien PDF dans « Page web » (pas fiable). Une maquette de l'écran « document / pages » sera validée avant le code.
 
+## 30. Standard de configuration d'un contenu (11 octobre 2026)
+
+Toute fenêtre de création / modification d'un contenu (`Components/AppInstanceForm.razor`, ouverte depuis la liste de lecture et la page d'édition) suit la **même mise en page**, pilotée par le manifeste de l'app. Maquettes validées : `maquettes/contenus.html` (les 8 types, avec sélecteur) et `maquettes/detail-contenu.html` (YouTube, référence).
+
+- **Bandeau** : icône de l'app, titre, **icône « Options avancées »** (`sliders`, seulement si l'app a des champs avancés), croix.
+- **Ligne 1, source** : ce qu'on va afficher (lien, fichiers de la médiathèque, design Canva, dossier Drive, calendrier). Fond grisé. Pour un lien (RSS, YouTube, page web) : bouton **Rechercher**, qui charge l'aperçu ; pour un calendrier, l'aperçu se charge au choix.
+- **Ligne 2, deux colonnes** : à gauche **Aperçu** (`ContentPreview`), à droite **Configuration** (nom dans la médiathèque + champs « main »).
+- **Options avancées** : fenêtre par-dessus (`ci-adv`) avec Annuler (restaure les valeurs à l'ouverture) / Valider. Les apps sans champ avancé n'ont pas l'icône : rien de caché.
+- **Aperçu** : une image fixe pour **un seul** élément ; **carrousel 3D** (`Carousel3D`, `wwwroot/carousel3d.js`) **dès qu'il y a plus d'un élément** (diaporamas, pages Canva, fichiers d'un dossier Drive) : élément central de face, voisins inclinés ; flèches, clic, clavier, glisser, défilement horizontal ; bouton « Grille » pour la vue à plat. Apps à fournisseur : rendu des données lues par le serveur (`AppService.Preview` = test + `Fetch`) : miniature YouTube, articles RSS, événements du calendrier, cadre de page web ; sous l'aperçu, le résultat du test (vert / ⚠ orange / rouge). Le bouton « Tester » du pied de fenêtre n'existe plus que pour une app à fournisseur **sans** aperçu (ex. météo : `AppInstanceForm.NeedsTest`).
+- **Manifeste** (`AppField`) : `zone` = `source` | `main` (défaut) | `advanced` ; `ui: "segmented"` (select de 2 à 3 choix courts affichés côte à côte, ex. Cadrage) ; `unit` (unité d'un champ number : « secondes », « jours »…). `AppCatalog.Check` refuse une zone inconnue ou un `ui` hors select. `AppManifest.InZone(zone)`, `HasAdvanced`.
+- **Règles pour une nouvelle intégration** : un seul champ source (ou un champ média / drive / canva) en zone `source` ; les réglages que presque tout le monde regarde en `main` (nom, durée, transition, cadrage, son) ; tout le reste en `advanced` ; interrupteurs pour les oui/non ; choix courts en `segmented` ; unités dans `unit`, pas dans le libellé. L'aperçu vient de la nature de la source : champs `media` / `medias` / `canva` / `drive` → fichiers (image fixe ou carrousel), fournisseur avec une source → rendu des données ; un nouveau rendu s'ajoute dans `ContentPreview`.
+- **Composants** : `AppForm` (paramètre `Zone`, `OnChange` pour rafraîchir l'aperçu), `MediaField` (barre de choix + liste d'ordre repliée), `CanvaField`, `ContentPreview`, `Carousel3D`. Styles `.ci-*`, `.cp-*`, `.car-*`, `.seg`, `.unit` en fin de `app.css`.
+- **Non vérifié** : le rendu complet dans le navigateur (carrousel avec de vraies images, aperçus RSS / calendrier / YouTube, fenêtre d'options avancées) n'a pas été contrôlé de bout en bout ; à relire au premier lancement. Les 5 tests `AppsTests` qui échouent (agenda v1 : `icsUrl`, `mailbox`) étaient déjà cassés avant ce changement.
 ## Plans et prochaines étapes
 
 - Android : tester l'app 1.1.0 (aperçu du direct, redémarrage, version remontée) sur un vrai boîtier ; PIN du menu technicien à définir depuis le back-office ; icône définitive.

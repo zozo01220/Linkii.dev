@@ -1,7 +1,11 @@
 @inject AppService Apps
 @inject Toaster Toast
 
-@* Création / modification d'une instance d'app : nom + formulaire du manifeste + test. Réutilisé par la page d'édition et par l'assistant. *@
+@* Création / modification d'une instance d'app : fenêtre de configuration standard de tous les contenus (voir DEV-POC.md,
+   « Standard de configuration d'un contenu »). Réutilisé par la page d'édition et par l'assistant.
+   Ligne 1 : la source (lien, fichiers, dossier, calendrier : champs « source » du manifeste) ;
+   ligne 2, à gauche : l'aperçu (carrousel 3D dès plusieurs éléments) ; à droite : la configuration (champs « main ») ;
+   les champs « advanced » sont dans la fenêtre « Options avancées » (icône du bandeau, voir OpenAdvanced). *@
 @if (manifest == null)
 {
     <div class="err">App introuvable.</div>
@@ -12,25 +16,56 @@ else if (!installed)
 }
 else
 {
-    <div class="dw">
-        <div class="dw-field">
-            <label>Nom du contenu *</label>
-            <input type="text" maxlength="80" @bind="name" @bind:event="oninput" placeholder="@manifest.Name" />
-            <small>Le nom sous lequel vous le retrouverez dans la médiathèque et les listes de lecture.</small>
-        </div>
+    var sources = manifest.InZone("source").ToList();
+    var hasPreview = ContentPreview.Has(manifest);
+    <div class="ci">
+        @if (ShowActions && manifest.HasAdvanced)
+        {
+            <div class="ci-bar"><button type="button" class="ci-gear" aria-label="Options avancées" title="Options avancées" @onclick="OpenAdvanced"><Ico Name="sliders" Size="20" /></button></div>
+        }
 
-        <AppForm Manifest="manifest" Values="values" StoredSecrets="storedSecrets" InstanceId="instance?.Id" />
+        @if (sources.Count > 0)
+        {
+            <div class="ci-src">
+                <div class="ci-src-row">
+                    <AppForm Manifest="manifest" Values="values" StoredSecrets="storedSecrets" InstanceId="instance?.Id" Zone="source" OnChange="SourceChanged" />
+                    @if (hasPreview && manifest.Provider != null && sources[0].Type is not ("calendar" or "mailbox"))
+                    {
+                        <button type="button" class="btn" @onclick="Search">Rechercher</button>
+                    }
+                </div>
+            </div>
+        }
+
+        <div class="ci-cols @(hasPreview ? "" : "one")">
+            @if (hasPreview)
+            {
+                <section class="ci-prev" aria-label="Aperçu">
+                    <h4 class="ci-t">Aperçu</h4>
+                    <ContentPreview @ref="previewRef" Manifest="manifest" Values="values" Instance="instance" />
+                </section>
+            }
+            <section class="ci-conf" aria-label="Configuration">
+                <h4 class="ci-t">Configuration</h4>
+                <div class="dw">
+                    <div class="dw-field">
+                        <label>Nom dans la médiathèque *</label>
+                        <input type="text" maxlength="80" @bind="name" @bind:event="oninput" placeholder="@manifest.Name" />
+                    </div>
+                </div>
+                <AppForm Manifest="manifest" Values="values" StoredSecrets="storedSecrets" InstanceId="instance?.Id" Zone="main" OnChange="Touch" />
+            </section>
+        </div>
 
         @foreach (var e in errors) { <div class="err">@e</div> }
         @if (test != null) { <div class="@(test.Value.Ok ? (test.Value.Message.StartsWith("⚠") ? "dw-note" : "msg") : "err")">@test.Value.Message</div> }
-
         @if (testing) { <div class="dw-note">Test en cours…</div> }
 
         @if (ShowActions)
         {
             <div class="row" style="margin-top:14px">
                 <button type="button" class="btn" @onclick="Save">@SaveLabel</button>
-                @if (manifest.Provider != null)
+                @if (NeedsTestButton)
                 {
                     <button type="button" class="btn ghost" disabled="@testing" @onclick="Test">@(testing ? "Test…" : "Tester")</button>
                 }
@@ -38,6 +73,27 @@ else
             </div>
         }
     </div>
+
+    @if (advanced)
+    {
+        @* rendu dans la mise en page (SectionOutlet « overlay ») : la fenêtre de l'app, centrée par transform, décalerait et rognerait celle-ci *@
+        <SectionContent SectionName="overlay">
+            <div class="modal-backdrop picker-backdrop" @onclick="CancelAdvanced"></div>
+            <div class="modal app-modal ci-adv" role="dialog" aria-modal="true" aria-labelledby="ci-adv-title">
+                <div class="modal-head">
+                    <div class="grow"><h3 id="ci-adv-title">Options avancées</h3><small>@manifest.Name</small></div>
+                    <button type="button" class="modal-x" aria-label="Fermer" @onclick="CancelAdvanced"><Ico Name="x" Size="20" /></button>
+                </div>
+                <div class="modal-body">
+                    <AppForm Manifest="manifest" Values="values" StoredSecrets="storedSecrets" InstanceId="instance?.Id" Zone="advanced" OnChange="Touch" />
+                </div>
+                <div class="modal-foot">
+                    <button type="button" class="btn ghost" @onclick="CancelAdvanced">Annuler</button>
+                    <button type="button" class="btn" @onclick="() => advanced = false">Valider</button>
+                </div>
+            </div>
+        </SectionContent>
+    }
 }
 
 @code {
@@ -46,7 +102,7 @@ else
     [Parameter] public string SaveLabel { get; set; } = "Enregistrer";
     [Parameter] public EventCallback<MediaItem> OnSaved { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
-    /// <summary>false : les boutons sont fournis par l'appelant (pied d'une fenêtre modale) via Save() et Test().</summary>
+    /// <summary>false : les boutons sont fournis par l'appelant (pied d'une fenêtre modale) via Save(), et l'icône « Options avancées » par son bandeau (OpenAdvanced).</summary>
     [Parameter] public bool ShowActions { get; set; } = true;
 
     private AppManifest? manifest;
@@ -56,7 +112,13 @@ else
     private string name = "";
     private List<string> errors = new();
     private (bool Ok, string Message)? test;
-    private bool installed, testing;
+    private bool installed, testing, advanced;
+    private ContentPreview? previewRef;
+    private Dictionary<string, string>? advancedBackup;
+
+    /// <summary>Le bouton « Tester » reste pour les apps à fournisseur qui n'ont pas d'aperçu (ex. météo) ; sinon l'aperçu fait le test.</summary>
+    public static bool NeedsTest(AppManifest m) => m.Provider != null && !ContentPreview.Has(m);
+    private bool NeedsTestButton => manifest != null && NeedsTest(manifest);
 
     protected override void OnInitialized()
     {
@@ -67,6 +129,32 @@ else
         values = AppCatalog.WithDefaults(manifest, instance?.Settings);
         storedSecrets = instance?.Secrets.Keys.ToHashSet() ?? new();
         name = instance?.Name ?? manifest.Name;
+    }
+
+    private void Touch() { }   // une valeur a changé : le formulaire (donc l'aperçu) se redessine
+
+    // Source modifiée : un calendrier (liste de choix) met l'aperçu à jour d'emblée ; un lien attend « Rechercher ».
+    private async Task SourceChanged()
+    {
+        if (previewRef != null && manifest!.Provider != null && manifest.InZone("source").FirstOrDefault()?.Type is "calendar" or "mailbox"
+            && !string.IsNullOrEmpty(values.GetValueOrDefault(manifest.InZone("source").First().Key)))
+            await previewRef.Refresh();
+    }
+
+    private Task Search() => previewRef?.Refresh() ?? Task.CompletedTask;
+
+    /// <summary>Ouvre la fenêtre « Options avancées » (icône du bandeau).</summary>
+    public void OpenAdvanced()
+    {
+        if (manifest == null || !manifest.HasAdvanced) return;
+        advancedBackup = manifest.InZone("advanced").ToDictionary(f => f.Key, f => values.GetValueOrDefault(f.Key) ?? "");
+        advanced = true;
+    }
+
+    private void CancelAdvanced()
+    {
+        if (advancedBackup != null) foreach (var (k, v) in advancedBackup) values[k] = v;
+        advanced = false;
     }
 
     public async Task Save()
