@@ -1,8 +1,9 @@
 /* Service worker du player : permet de redémarrer sans réseau.
    - /media/*  : cache-first (le cache est rempli par player.js), avec support des requêtes Range
-   - le reste (page, JS, lib SignalR) : réseau d'abord, repli sur le cache */
+   - le reste (page, JS, lib SignalR) : réseau d'abord, repli sur le cache s'il ne répond pas en NET_WAIT ms ou échoue */
 var STATIC = 'linkii-static-v1';
 var MEDIA = 'linkii-media-v1';
+var NET_WAIT = 4000;   // au-delà, la page et les scripts du player démarrent sur la copie locale
 
 self.addEventListener('install', function () { self.skipWaiting(); });
 self.addEventListener('activate', function (e) { e.waitUntil(self.clients.claim()); });
@@ -48,14 +49,18 @@ self.addEventListener('fetch', function (e) {
   var isSignalR = url.hostname === 'cdn.jsdelivr.net';
   if (isPlayerAsset || isSignalR) {
     e.respondWith(
-      fetch(req).then(function (res) {
-        if (res && (res.ok || res.type === 'opaque')) {
-          var copy = res.clone();
-          caches.open(STATIC).then(function (c) { c.put(req, copy); });
-        }
-        return res;
-      }).catch(function () {
-        return caches.open(STATIC).then(function (c) { return c.match(req, { ignoreSearch: true }); });
+      caches.open(STATIC).then(function (c) {
+        var fromCache = function () { return c.match(req, { ignoreSearch: true }); };
+        var net = fetch(req).then(function (res) {
+          if (res && (res.ok || res.type === 'opaque')) c.put(req, res.clone());
+          return res;
+        });
+        // le réseau gagne s'il répond à temps ; sinon la copie locale (si elle existe) ; sans copie, on attend le réseau
+        var timer, late = new Promise(function (resolve) {
+          timer = setTimeout(function () { fromCache().then(function (hit) { if (hit) resolve(hit); }); }, NET_WAIT);
+        });
+        var failed = net.catch(function () { return fromCache().then(function (hit) { if (hit) return hit; throw new Error('offline'); }); });
+        return Promise.race([failed, late]).then(function (r) { clearTimeout(timer); return r; }, function (err) { clearTimeout(timer); throw err; });
       })
     );
   }

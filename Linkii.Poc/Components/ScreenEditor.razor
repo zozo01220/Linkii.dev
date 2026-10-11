@@ -31,14 +31,13 @@
             }
             <small>Modifier l'écran</small>
         </div>
-        <button type="button" class="btn ghost sm" title="Voir ce qu'affiche l'écran (dernière publication)" @onclick="() => simulate = true"><Ico Name="play" Size="14" /> Simuler</button>
         @if (wall == null && dimOn)
         {
-            <button type="button" class="modal-x @(dimMode != Dim.Never ? "set" : "")" aria-label="Luminosité et contraste" title="Luminosité et contraste : @DimSummary" @onclick="OpenDimDialog"><Ico Name="sun" Size="20" /></button>
+            <button type="button" class="modal-x @(DimActive ? "set" : "")" aria-label="Luminosité et contraste" title="Luminosité et contraste : @DimSummary" @onclick="OpenDimDialog"><Ico Name="@(DimActive ? "sun" : "sun-off")" Size="20" /></button>
         }
         @if (wall == null && sleepOn)
         {
-            <button type="button" class="modal-x @(sleepMode != Sleep.Inherit ? "set" : "")" aria-label="Mise en veille" title="Mise en veille : @SleepSummary" @onclick="OpenSleepDialog"><Ico Name="moon" Size="20" /></button>
+            <button type="button" class="modal-x @(DimAsleep != null ? "set" : "")" aria-label="Mise en veille" title="Mise en veille : @SleepSummary" @onclick="OpenSleepDialog"><Ico Name="@(DimAsleep != null ? "moon" : "moon-off")" Size="20" /></button>
         }
         <button type="button" class="modal-x" aria-label="Options avancées" title="Options avancées" @onclick="OpenAdvanced"><Ico Name="sliders" Size="20" /></button>
         <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
@@ -149,8 +148,8 @@
                         }
                     </div>
                 }
+                <button type="button" class="wg-sim" title="Voir ce qu'affiche l'écran (dernière publication)" @onclick="() => simulate = true" @onclick:stopPropagation="true" @onpointerdown:stopPropagation="true"><Ico Name="play" Size="14" /> Simuler</button>
             </div>
-            <p class="hint se-hint" style="margin-top:8px">Glissez un widget sur l'aperçu pour le placer ; cliquez dessus pour le régler. <span class="se-info" tabindex="0" title="Au clavier : flèches pour déplacer (Maj + flèches : pas de 5 %), Entrée pour les réglages.">i</span></p>
         </div>
 
         <div class="wg-side">
@@ -172,9 +171,9 @@
             }
             @if (wall == null)
             {
-                <div class="seg se-tabs" role="tablist">
-                    <button type="button" role="tab" aria-selected="@(tab == "screen" ? "true" : "false")" class="@(tab == "screen" ? "on" : "")" @onclick='() => tab = "screen"'>Écran</button>
-                    <button type="button" role="tab" aria-selected="@(tab == "widgets" ? "true" : "false")" class="@(tab == "widgets" ? "on" : "")" @onclick='() => tab = "widgets"'>Widgets <small>@widgets.Count</small></button>
+                <div class="se-utabs" role="tablist">
+                    <button type="button" role="tab" aria-selected="@(tab == "screen" ? "true" : "false")" class="@(tab == "screen" ? "on" : "")" @onclick='() => tab = "screen"'><Ico Name="monitor" Size="18" /> Écran</button>
+                    <button type="button" role="tab" aria-selected="@(tab == "widgets" ? "true" : "false")" class="@(tab == "widgets" ? "on" : "")" @onclick='() => tab = "widgets"'><Ico Name="grid" Size="18" /> Widgets <small>@widgets.Count</small></button>
                 </div>
             }
 
@@ -185,42 +184,35 @@
             else
             {
                 @* widgets : posés sur l'aperçu par glisser-déposer (ou un clic) ; la liste du dessus permet de les régler ou de les retirer *@
-                @if (widgets.Count > 0)
+                @* une seule liste : d'abord les widgets déjà sur l'écran (régler, retirer), puis ceux qu'on peut ajouter (+) *@
+                var free = available.Where(x => widgets.All(w => w.AppId != x.Id)).ToList();
+                @if (free.Count > 6) { <input id="wg-search" type="text" placeholder="Rechercher" aria-label="Rechercher un widget" @bind="search" @bind:event="oninput" style="margin-bottom:8px" /> }
+                @if (widgets.Count + free.Count > 0)
                 {
-                    <div class="fmt-block">
-                        <label>Sur l'écran <small>@widgets.Count</small></label>
-                        <div class="wg-placed">
-                            @foreach (var w in widgets)
-                            {
-                                var wid = w;
-                                <div class="wg-placed-row @(selected == wid.Id ? "sel" : "")">
-                                    <button type="button" class="wg-placed-main" title="Régler « @Label(wid) »" @onclick="() => OpenSettings(wid)">
-                                        <AppIcon Id="@wid.AppId" Small="true" Size="16" /> <span>@Label(wid)</span>
-                                    </button>
-                                    <button type="button" class="btn ghost sm icon" title="Régler « @Label(wid) »" aria-label="Régler « @Label(wid) »" @onclick="() => OpenSettings(wid)"><Ico Name="sliders" Size="15" /></button>
-                                    <button type="button" class="btn ghost sm icon" title="Retirer « @Label(wid) »" aria-label="Retirer « @Label(wid) »" @onclick="() => Remove(wid)"><Ico Name="trash" Size="15" /></button>
-                                </div>
-                            }
-                        </div>
-                    </div>
-                }
-                <div class="fmt-block">
-                    <label for="wg-search">Ajouter un widget</label>
-                    @if (available.Count > 6) { <input id="wg-search" type="text" placeholder="Rechercher" @bind="search" @bind:event="oninput" style="margin-bottom:8px" /> }
-                    <div class="wg-add">
-                        @foreach (var a in available.Where(x => string.IsNullOrWhiteSpace(search) || x.Name.Contains(search.Trim(), StringComparison.CurrentCultureIgnoreCase)))
+                    <div class="wg-list">
+                        @foreach (var w in widgets)
+                        {
+                            var wid = w;
+                            <div class="wg-lrow on @(selected == wid.Id ? "sel" : "")">
+                                <button type="button" class="wg-lmain" title="Régler « @Label(wid) »" @onclick="() => OpenSettings(wid)">
+                                    <AppIcon Id="@wid.AppId" Small="true" Size="16" /> <span class="wg-placed-t"><b>@Label(wid)</b><small>@Where(wid)</small></span>
+                                </button>
+                                <button type="button" class="btn ghost sm icon" title="Régler « @Label(wid) »" aria-label="Régler « @Label(wid) »" @onclick="() => OpenSettings(wid)"><Ico Name="sliders" Size="15" /></button>
+                                <button type="button" class="btn ghost sm icon" title="Retirer « @Label(wid) »" aria-label="Retirer « @Label(wid) »" @onclick="() => Remove(wid)"><Ico Name="trash" Size="15" /></button>
+                            </div>
+                        }
+                        @foreach (var a in free.Where(x => string.IsNullOrWhiteSpace(search) || x.Name.Contains(search.Trim(), StringComparison.CurrentCultureIgnoreCase)))
                         {
                             var app = a;
-                            <button type="button" class="wg-tile" draggable="true" title="Glissez vers l'écran, ou cliquez pour ajouter" @onclick="() => Add(app)"
-                                    ondragstart="event.dataTransfer.setData('text/plain', '@app.Id'); event.dataTransfer.effectAllowed = 'copy';">
-                                <AppIcon Id="@app.Id" Small="true" Size="16" />
-                                <span>@app.Name</span>
-                            </button>
+                            <div class="wg-lrow" draggable="true" title="Glissez vers l'aperçu, ou cliquez sur + pour ajouter"
+                                 ondragstart="event.dataTransfer.setData('text/plain', '@app.Id'); event.dataTransfer.effectAllowed = 'copy';">
+                                <span class="wg-lmain"><AppIcon Id="@app.Id" Small="true" Size="16" /> <span class="wg-placed-t"><b>@app.Name</b></span></span>
+                                <button type="button" class="btn sm icon" title="Ajouter « @app.Name »" aria-label="Ajouter « @app.Name »" @onclick="() => Add(app)"><Ico Name="plus" Size="15" /></button>
+                            </div>
                         }
                     </div>
-                </div>
-                @if (available.Count == 0) { <p class="hint">Aucun widget actif. <a href="/widgets">Activez-les dans la page Widgets</a>.</p> }
-                else if (widgets.Count == 0) { <p class="hint">Ils restent affichés par-dessus les listes de lecture. Glissez-les sur l'aperçu ou cliquez pour les ajouter.</p> }
+                }
+                @if (available.Count == 0 && widgets.Count == 0) { <p class="hint">Aucun widget actif. <a href="/widgets">Activez-les dans la page Widgets</a>.</p> }
             }            @foreach (var e in errors) { <div class="err">@e</div> }
         </div>
     </div>
@@ -443,6 +435,10 @@
     private DimPlan? dimPlan;
     private string dimInherited = "";
     private string? areaSleepGrid;
+    private bool areaDimActive;
+
+    /// <summary>Un réglage de luminosité s'applique à l'écran (le sien ou celui de son aire).</summary>
+    private bool DimActive => dimMode switch { Dim.Never => false, Dim.Own => true, _ => areaDimActive };
 
     /// <summary>Veille qui s'applique à l'écran (pour hachurer ces heures dans l'éditeur de luminosité).</summary>
     private string? DimAsleep => !sleepOn ? null : sleepMode switch { Sleep.Never => null, Sleep.Own => Sleep.Any(sleepGrid) ? sleepGrid : null, _ => Sleep.Any(areaSleepGrid) ? areaSleepGrid : null };
@@ -471,6 +467,7 @@
             : $"L'aire « {ar?.Name} » n'a pas de plage : l'écran reste allumé.";
         (dimOn, dimMode, dimPlan) = (Store.Read(d => d.Tenant.DimEnabled), Dim.Mode(s), s.Dimming?.Clone());
         areaSleepGrid = ar?.SleepGrid;
+        areaDimActive = Dim.Active(ar?.Dimming);
         dimInherited = Dim.Active(ar?.Dimming)
             ? $"L'écran suit le réglage de l'aire « {ar!.Name} »."
             : $"L'aire « {ar?.Name} » n'a pas de réglage : l'image est affichée telle quelle.";
@@ -525,6 +522,21 @@
     }
 
     private static string Pct(double v) => v.ToString("0.#", Inv) + "%";
+
+    /// <summary>Emplacement d'un widget en clair : « Haut gauche · Zone 1 » (la zone seulement si l'écran est découpé).</summary>
+    private string Where(ScreenWidget w)
+    {
+        static string Third(double v, string a, string b, string c) => v < 100.0 / 3 ? a : v < 200.0 / 3 ? b : c;
+        var v = Third(w.Y, "Haut", "Milieu", "Bas");
+        var h = Third(w.X, "gauche", "centre", "droite");
+        var pos = v == "Milieu" && h == "centre" ? "Centre" : v == "Milieu" ? "Milieu " + h : v + (h == "centre" ? " centre" : " " + h);
+        if (Def.Sizes.Length < 2) return pos;
+        var along = spec.Orientation == "portrait" ? w.Y : w.X;
+        double total = Def.Sizes.Sum(), acc = 0;
+        var zone = Def.Sizes.Length;
+        for (var i = 0; i < Def.Sizes.Length; i++) { acc += Def.Sizes[i]; if (along < acc / total * 100) { zone = i + 1; break; } }
+        return $"{pos} · Zone {zone}";
+    }
 
     private string Label(ScreenWidget w) => manifests.GetValueOrDefault(w.AppId)?.Name ?? w.AppId;
 
