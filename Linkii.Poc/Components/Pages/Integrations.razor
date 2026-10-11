@@ -12,10 +12,11 @@
 <div class="page-head">
     <div>
         <h1>Intégrations</h1>
-        <p class="sub">Les sources de contenus proposées dans vos listes de lecture, et les comptes qui leur donnent accès. Le paramétrage des contenus se fait dans la liste, après les avoir ajoutés.</p>
+        <p class="sub">Les sources de contenus de vos listes de lecture et les comptes qui y donnent accès.</p>
     </div>
     @if (Addable.Any())
     {
+      <div class="row head-actions">
         <div class="kebab add-menu">
             <button class="btn" aria-haspopup="menu" aria-expanded="@(addMenu ? "true" : "false")" @onclick="() => addMenu = !addMenu"><Ico Name="plus" Size="16" /> Connecter un compte <Ico Name="chevron" Size="14" /></button>
             @if (addMenu)
@@ -38,6 +39,7 @@
                 </div>
             }
         </div>
+      </div>
     }
 </div>
 
@@ -56,10 +58,12 @@
             <Ico Name="search" Size="16" />
             <input placeholder="Rechercher une intégration" aria-label="Rechercher une intégration" @bind="search" @bind:event="oninput" />
         </div>
-        <select @bind="filter" aria-label="Filtrer les intégrations">
-            <option value="">Toutes</option>
-            <option value="on">Actives</option>
-            <option value="off">Inactives</option>
+        <select @bind="filter" aria-label="Filtrer par catégorie">
+            <option value="">Toutes les catégories</option>
+            @foreach (var s in Sections)
+            {
+                <option value="@s.Category">@s.Title</option>
+            }
         </select>
         <ViewToggle StorageKey="integrations" @bind-Value="view" />
     </div>
@@ -70,7 +74,7 @@
     }
     else
     {
-        <CatalogView Groups="Groups" View="@view" Noun="Intégration" UsageLabel="Utilisation">
+        <CatalogView Groups="Groups" View="@view" Compact="true" Noun="Intégration" UsageLabel="Utilisation">
             <Usage><span>@UsageText(context.Id)</span></Usage>
             <Detail>
                 @if (ConnectedAccounts.For(context.Id) is not { } kind)
@@ -339,7 +343,7 @@ else
     private static string? DrvSource(CatalogView.Entry e) => e.Id.StartsWith("drv-") ? e.Id[4..] : null;
 
     private bool Shown(string text, bool on) =>
-        (filter == "" || (filter == "on") == on) && (search.Length == 0 || text.Contains(search, StringComparison.OrdinalIgnoreCase));
+        search.Length == 0 || text.Contains(search, StringComparison.OrdinalIgnoreCase);
 
     private List<CatalogView.Group> Groups
     {
@@ -358,13 +362,13 @@ else
                 .Where(s => Shown(s.Name + " " + s.Summary + " drive dossier", DriveSources.Enabled(tenant, s.Id)))
                 .Select(DriveEntry);
             var known = Sections.Select(s => s.Category).ToHashSet();
-            return Sections.Select(s => (s.Title, Items: s.Category switch
+            return Sections.Where(s => filter == "" || filter == s.Category).Select(s => (s.Title, Items: s.Category switch
                 {
                     CalendarsGroup => sources,
                     DrivesGroup => drives,
                     _ => apps.Where(a => a.Category == s.Category).Select(Entry)
                 }))
-                .Append(("Autres", apps.Where(a => !known.Contains(a.Category)).Select(Entry)))
+                .Concat(filter == "" ? new[] { ("Autres", apps.Where(a => !known.Contains(a.Category)).Select(Entry)) } : [])
                 .Select(g => new CatalogView.Group(g.Item1, g.Item2.ToList()))
                 .Where(g => g.Items.Count > 0)
                 .ToList();
