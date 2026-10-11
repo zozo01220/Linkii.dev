@@ -26,7 +26,10 @@ import java.util.concurrent.Executors
  */
 class MediaStore(context: Context, private val prefs: Prefs) {
     /** État pour l'affichage : `active` = téléchargement en cours (l'icône de progression est visible). */
-    data class Snapshot(val active: Boolean, val fraction: Float, val pending: Int, val ready: Int, val total: Int, val bytes: Long)
+    data class Snapshot(
+        val active: Boolean, val fraction: Float, val pending: Int, val ready: Int, val total: Int, val bytes: Long,
+        val videosReady: Int = 0, val videosTotal: Int = 0, val videoBytes: Long = 0L, val lastError: String = ""
+    )
 
     @Volatile var onChange: ((Snapshot) -> Unit)? = null
 
@@ -43,6 +46,7 @@ class MediaStore(context: Context, private val prefs: Prefs) {
     @Volatile private var passActive = false   // un passage de téléchargement est en cours (le player attend sa fin)
     @Volatile private var visible = false      // des octets arrivent : l'icône s'affiche (pas pendant les essais sans réseau)
     @Volatile private var fraction = 0f
+    @Volatile private var lastError = ""       // dernière raison d'échec d'un téléchargement (vide si tout va bien)
 
     /** Reprend la dernière liste connue (démarrage de l'app, avant même que la page ne soit chargée). */
     fun resume() {
@@ -75,10 +79,16 @@ class MediaStore(context: Context, private val prefs: Prefs) {
         val list = synchronized(lock) { wanted }
         val ready = list.count { localExists(it) }
         val bytes = dir.listFiles()?.filter { !it.name.endsWith(".part") }?.sumOf { it.length() } ?: 0L
-        return Snapshot(visible && passActive, fraction, list.size - ready, ready, list.size, bytes)
+        val videos = list.filter(::isVideo)
+        val videoBytes = videos.sumOf { fileFor(it).takeIf { f -> f.isFile }?.length() ?: 0L }
+        return Snapshot(visible && passActive, fraction, list.size - ready, ready, list.size, bytes,
+            videos.count { localExists(it) }, videos.size, videoBytes, if (list.size == ready) "" else lastError)
     }
 
     fun isBusy() = passActive
+
+    /** Octets présents sur le disque, fichiers partiels compris : sert à savoir si un téléchargement avance. */
+    fun diskBytes() = dir.listFiles()?.sumOf { it.length() } ?: 0L
 
     /* ---------- Téléchargement ---------- */
 
@@ -124,11 +134,11 @@ class MediaStore(context: Context, private val prefs: Prefs) {
                 if (have > 0) setRequestProperty("Range", "bytes=$have-")
             }
             val code = conn.responseCode
-            if (code != 200 && code != 206) { if (code == 404 || code == 410) part.delete(); return false }
+            if (code != 200 && code != 206) { lastError = "HTTP $code : ${path.substringAfterLast('/')}"; if (code == 404 || code == 410) part.delete(); return false }
             if (code == 200) have = 0L   // le serveur ignore la reprise : on repart de zéro
             val total = if (code == 206) Regex("/(\\d+)$").find(conn.getHeaderField("Content-Range") ?: "")?.groupValues?.get(1)?.toLongOrNull() ?: -1L
                         else conn.contentLengthLong
-            if (total > 0 && dir.usableSpace < total - have + RESERVE) { part.delete(); return false }   // pas assez de place
+            if (total > 0 && dir.usableSpace < total - have + RESERVE) { lastError = "espace insuffisant pour ${path.substringAfterLast('/')}"; part.delete(); return false }   // pas assez de place
             visible = true
             var written = have
             conn.inputStream.use { input ->
@@ -155,7 +165,8 @@ class MediaStore(context: Context, private val prefs: Prefs) {
             fraction = (doneBefore + 1f) / count
             emit()
             return true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            lastError = "${path.substringAfterLast('/')} : ${e.javaClass.simpleName}"
             return false
         } finally {
             conn?.disconnect()
@@ -187,6 +198,8 @@ class MediaStore(context: Context, private val prefs: Prefs) {
         val ext = path.substringAfterLast('/').substringAfterLast('.', "").takeIf { it.length in 1..5 && it.all(Char::isLetterOrDigit) }
         return File(dir, if (ext != null) "$h.$ext" else h)
     }
+
+    private fun isVideo(path: String) = path.substringAfterLast('.', "").lowercase() in setOf("mp4", "m4v", "webm", "mov", "ogv")
 
     private fun localExists(path: String) = fileFor(path).isFile
 

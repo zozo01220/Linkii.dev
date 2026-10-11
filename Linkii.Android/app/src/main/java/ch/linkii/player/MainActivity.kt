@@ -53,6 +53,7 @@ class MainActivity : Activity() {
     private lateinit var store: MediaStore
     private lateinit var badge: DownloadBadge
     private var downloading = false
+    private var working = false   // le player traite une nouvelle publication : l'anneau tourne même avant le premier octet
     private var web: WebView? = null
     private val handler = Handler(Looper.getMainLooper())
 
@@ -105,7 +106,7 @@ class MainActivity : Activity() {
         badge = DownloadBadge(this)
         store.onChange = { s ->
             if (s.active) { downloading = true; badge.showProgress(s.fraction) }
-            else if (downloading) { downloading = false; badge.showDone() }
+            else if (downloading && !working) { downloading = false; badge.showDone() }
         }
         if (Build.VERSION.SDK_INT >= 24) {
             // Les requêtes du service worker du player (/media/…) passent aussi par la médiathèque locale
@@ -246,6 +247,16 @@ class MainActivity : Activity() {
             store.sync((0 until a.length()).map { a.getString(it) }, token)
         }
 
+        /** Le player reçoit (true) ou a fini de recevoir (false) une nouvelle publication : l'anneau tourne pendant tout ce temps. */
+        @JavascriptInterface
+        fun working(on: Boolean) {
+            runOnUiThread {
+                working = on
+                if (on) { if (!downloading) { downloading = true; badge.showProgress(0f) } }
+                else if (downloading && !store.snapshot().active) { downloading = false; badge.showDone() }
+            }
+        }
+
         /** Appareil, remonté au back-office : { kind: androidtv | android, os, model, app, bootMs }. */
         @JavascriptInterface
         fun deviceInfo(): String {
@@ -294,7 +305,7 @@ class MainActivity : Activity() {
             val s = store.snapshot()
             return org.json.JSONObject()
                 .put("busy", store.isBusy()).put("pending", s.pending).put("ready", s.ready)
-                .put("total", s.total).put("bytes", s.bytes).toString()
+                .put("total", s.total).put("bytes", s.bytes).put("progress", store.diskBytes()).toString()
         }
     }
 
@@ -386,6 +397,8 @@ class MainActivity : Activity() {
         return "Serveur : ${prefs.serverUrl}\n" +
             "Médias : ${ms.ready}/${ms.total} en local (${"%.0f".format(ms.bytes / 1_048_576.0)} Mo)" +
             (if (ms.pending > 0) " — ${ms.pending} à télécharger" else "") + "\n" +
+            "  dont images : ${ms.ready - ms.videosReady}/${ms.total - ms.videosTotal}, vidéos : ${ms.videosReady}/${ms.videosTotal} (${"%.0f".format(ms.videoBytes / 1_048_576.0)} Mo)\n" +
+            (if (ms.lastError.isNotEmpty()) "  dernier échec : ${ms.lastError}\n" else "") +
             "Version : ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})\n" +
             "Réseau : ${if (online) "connecté" else "hors ligne"}\n" +
             "Mise en veille : ${if (prefs.sleepJson.isEmpty()) "aucune plage" else "plages reçues"}, écran ${if (SleepController.isAdmin(this)) "éteint pour de bon" else "noir seulement (droit non activé)"}, alarmes ${if (sleeper.exactAlarms()) "exactes" else "approximatives"}\n" +

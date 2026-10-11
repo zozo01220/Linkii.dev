@@ -20,6 +20,27 @@ Adresse du serveur par défaut : `-PserverUrl=https://app.exemple.ch` (modifiabl
 Le serveur doit être en **HTTPS** : sans cela le service worker ne démarre pas et il n'y a pas de mode hors ligne
 (seuls `localhost` et `10.0.2.2` sont admis en HTTP, pour le développement).
 
+## Mettre à jour l'app sur un appareil (Android TV, ADB)
+
+Le player (`wwwroot/player`) est servi par le serveur : un changement de `player.js` ne demande qu'un redéploiement. Un changement du code Kotlin
+(menu technicien, téléchargements, anneau, veille…) demande de recompiler et de réinstaller l'APK.
+
+1. Compiler avec un JDK 17 ou plus (le JDK par défaut de la machine de développement est le 11) :
+   ```bash
+   cd Linkii.Android
+   JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" ./gradlew :app:assembleDebug
+   ```
+2. Sur l'appareil : Paramètres › Système › À propos, 7 appuis sur « Version » ; puis Options pour les développeurs › débogage ADB / réseau (redémarrer l'appareil si besoin).
+3. Installer depuis PowerShell (le `&` est obligatoire devant un chemin entre guillemets) :
+   ```powershell
+   $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
+   & $adb connect 192.168.x.x:5555        # accepter « Autoriser le débogage ? » sur l'appareil
+   & $adb devices                         # doit afficher « device » (pas « unauthorized »)
+   & $adb install -r app\build\outputs\apk\debug\app-debug.apk
+   ```
+   `-r` garde l'appairage, les réglages et les médias déjà téléchargés. Erreurs : `INSTALL_FAILED_UPDATE_INCOMPATIBLE` (autre signature : désinstaller d'abord, l'appairage est perdu), `INSTALL_FAILED_VERSION_DOWNGRADE` (ajouter `-d`), `no devices/emulators found` (`connect` pas fait ou ADB réseau inactif).
+4. Contrôler : republier l'écran, puis menu technicien (« dont images… vidéos… »), puis couper le réseau.
+
 ## Publier sur Google Play
 
 1. Créer une clé d'envoi (`keytool -genkeypair -v -keystore linkii-upload.jks -alias linkii -keyalg RSA -keysize 2048 -validity 10000`) et la garder hors du dépôt.
@@ -39,8 +60,12 @@ Les fichiers de la liste de lecture (images, vidéos, fichiers des apps : tout c
 par l'app dans son stockage privé (`MediaStore.kt`), sans quota du WebView ni purge par le système. Téléchargement un fichier à la fois,
 avec reprise après coupure, nouvel essai toutes les 30 s et retrait des fichiers qui ne sont plus utilisés ; il reprend dès le démarrage
 de l'app. Le WebView lit ensuite ces fichiers depuis le disque (requêtes Range comprises), en ligne comme hors ligne.
-Une petite icône de progression (anneau + flèche, puis coche) s'affiche en bas à droite pendant les téléchargements.
-Le menu technicien indique le nombre de médias en local. YouTube et les données en direct (agenda…) restent en ligne.
+Une petite icône de progression (anneau + flèche, puis coche) s'affiche en bas à droite : dès que le player reçoit une nouvelle publication
+(`LinkiiNative.working(true)`, anneau qui tourne avant même le premier octet), puis pendant les téléchargements, et jusqu'à ce que la nouvelle liste soit prête.
+Le player donne à l'app les fichiers de **toutes les zones** (première zone et zones 2 et 3 d'un écran découpé). Si plus aucun octet n'arrive pendant 90 s
+(fichier en échec, espace plein), la nouvelle liste s'applique quand même et l'app réessaie toutes les 30 s.
+Le menu technicien indique le nombre de médias en local, dont images et vidéos (nombre et poids), et le dernier échec de téléchargement
+(code HTTP, espace insuffisant, erreur réseau). YouTube et les données en direct (agenda…) restent en ligne.
 Le player passe par le pont `window.LinkiiNative` ; dans un navigateur il garde son cache habituel.
 
 ## Démarrage automatique

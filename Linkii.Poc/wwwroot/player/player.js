@@ -349,6 +349,16 @@
   var NATIVE = !PREVIEW && !!(window.LinkiiNative && typeof window.LinkiiNative.sync === 'function');
   if (NATIVE && window.caches) { try { caches.delete(CACHE); } catch (e) {} }   // ancien cache du navigateur : plus utilisé, on rend la place
 
+  // Tous les contenus d'une publication : première zone et zones 2 et 3 (leurs fichiers aussi doivent être gardés en local).
+  function allItems(pl) {
+    var l = (pl.items || []).slice();
+    (pl.zones || []).forEach(function (z) { (z || []).forEach(function (i) { l.push(i); }); });
+    return l;
+  }
+
+  // Anneau de l'app Android : tourne dès qu'une publication arrive, jusqu'à ce qu'elle soit prête.
+  function working(on) { if (NATIVE && typeof window.LinkiiNative.working === 'function') { try { window.LinkiiNative.working(!!on); } catch (e) {} } }
+
   function mediaUrls(items) {
     var urls = [];
     items.forEach(function (i) { if (i.url) urls.push(i.url); (i.urls || []).forEach(function (u) { if (urls.indexOf(u) === -1) urls.push(u); }); });   // apps de la médiathèque : tous leurs fichiers
@@ -358,10 +368,15 @@
   function prefetchNative(items) {
     return new Promise(function (resolve) {
       try { window.LinkiiNative.sync(JSON.stringify(mediaUrls(items)), state.token || ''); } catch (e) { return resolve(); }
+      var lastBytes = -1, lastMove = Date.now();
       (function wait() {
         var s;
         try { s = JSON.parse(window.LinkiiNative.status()); } catch (e) { return resolve(); }
         if (!s.busy) return resolve();
+        // plus aucun octet depuis 90 s (fichier en échec, espace plein) : on bascule quand même, l'app réessaie en arrière-plan
+        var moved = s.progress != null ? s.progress : s.bytes;   // octets sur le disque, fichiers partiels compris
+        if (moved !== lastBytes) { lastBytes = moved; lastMove = Date.now(); }
+        else if (Date.now() - lastMove > 90000) return resolve();
         setTimeout(wait, 700);
       })();
     });
@@ -414,15 +429,17 @@
     api(PLAYLIST_API).then(function (pl) {
       if (PREVIEW) previewPrepare(pl);
       applyBrand(pl.brand);
-      if (state.current && pl.version === state.current.version && !state.pending) return prefetch(pl.items);   // même version : on re-télécharge seulement ce que le navigateur aurait purgé du cache
+      if (state.current && pl.version === state.current.version && !state.pending) return prefetch(allItems(pl));   // même version : on re-télécharge seulement ce que le navigateur aurait purgé du cache
       if (state.pending && pl.version === state.pending.version) return;
       stage(pl.version, 'downloading');
-      return prefetch(pl.items).then(function () {
+      working(true);
+      return prefetch(allItems(pl)).then(function () {
         state.pending = pl;
         LS.setItem('lk_playlist', JSON.stringify(pl));
         stage(pl.version, 'ready');
+        working(false);
         if (!state.timer) next(); // rien ne tourne : on démarre tout de suite
-      });
+      }, function (e) { working(false); throw e; });
     }).catch(function () {}).then(function () { refreshing = false; });
   }
 
