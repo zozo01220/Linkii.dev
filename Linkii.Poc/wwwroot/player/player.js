@@ -1084,7 +1084,7 @@
      Le serveur envoie { tz, ranges: [[début, fin], …] } en minutes depuis le lundi 00 h (une fin au-delà de 10 080 franchit la fin de semaine).
      Dans l'application Android, la veille est confiée à l'appareil (LinkiiNative.sleepSchedule : écran éteint, réveil par alarme, même si le
      player est suspendu). Ici, le player s'y plie aussi : écran noir, rien n'est lu ni téléchargé. */
-  var WEEK_MIN = 10080, sleepSig = '';
+  var WEEK_MIN = 10080, sleepSig = null;   // null : rien n'a encore été confié à l'appareil (même « aucune plage » lui est envoyé, pour effacer d'anciennes plages)
   function localWeekMinute(ms, tz) {
     try {
       var o = {};

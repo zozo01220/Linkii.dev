@@ -32,6 +32,14 @@
             <small>Modifier l'écran</small>
         </div>
         <button type="button" class="btn ghost sm" title="Voir ce qu'affiche l'écran (dernière publication)" @onclick="() => simulate = true"><Ico Name="play" Size="14" /> Simuler</button>
+        @if (wall == null && dimOn)
+        {
+            <button type="button" class="modal-x @(dimMode != Dim.Never ? "set" : "")" aria-label="Luminosité et contraste" title="Luminosité et contraste : @DimSummary" @onclick="OpenDimDialog"><Ico Name="sun" Size="20" /></button>
+        }
+        @if (wall == null && sleepOn)
+        {
+            <button type="button" class="modal-x @(sleepMode != Sleep.Inherit ? "set" : "")" aria-label="Mise en veille" title="Mise en veille : @SleepSummary" @onclick="OpenSleepDialog"><Ico Name="moon" Size="20" /></button>
+        }
         <button type="button" class="modal-x" aria-label="Options avancées" title="Options avancées" @onclick="OpenAdvanced"><Ico Name="sliders" Size="20" /></button>
         <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
     </div>
@@ -173,22 +181,6 @@
             @if (tab == "screen" || wall != null)
             {
                 <ScreenFormat Spec="spec" Layout="@layoutId" LayoutChanged="SetLayout" OnChange="StateHasChanged" Compact="true" />
-                @if (sleepOn && wall == null)
-                {
-                    @* mise en veille (fonction activée dans Réglages) : s'applique dès l'enregistrement, sans publier *@
-                    <div class="fmt-block">
-                        <label>Mise en veille</label>
-                        <SleepChoice @bind-Mode="sleepMode" @bind-Grid="sleepGrid" Inherited="@sleepInherited" Name="se-sleep" />
-                    </div>
-                }
-                @if (dimOn && wall == null)
-                {
-                    @* luminosité et contraste selon l'heure (fonction activée dans Réglages ; écrans Android) : s'applique dès l'enregistrement, sans publier *@
-                    <div class="fmt-block">
-                        <label>Luminosité et contraste <small>app Android</small></label>
-                        <DimChoice @bind-Mode="dimMode" @bind-Plan="dimPlan" Inherited="@dimInherited" Asleep="@DimAsleep" Name="se-dim" />
-                    </div>
-                }
             }
             else
             {
@@ -247,6 +239,44 @@
         }
     </div>
 </div>
+
+@if (dimDlg)
+{
+    @* formulaire de luminosité et contraste de l'écran : Valider garde le réglage, Annuler le laisse comme il était *@
+    <div class="modal-backdrop picker-backdrop" @onclick="CancelDimDialog"></div>
+    <div class="modal app-modal sl-dlg" role="dialog" aria-modal="true" aria-labelledby="se-dm-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="se-dm-title">Luminosité et contraste</h3><small>@name</small></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="CancelDimDialog"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            <DimChoice @bind-Mode="draftDimMode" @bind-Plan="draftDimPlan" Inherited="@dimInherited" Asleep="@DimAsleep" Name="se-dim-dlg" />
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn ghost" @onclick="CancelDimDialog">Annuler</button>
+            <button type="button" class="btn" @onclick="ValidateDimDialog">Valider</button>
+        </div>
+    </div>
+}
+
+@if (sleepDlg)
+{
+    @* formulaire de la mise en veille propre à l'écran : Valider garde le réglage, Annuler le laisse comme il était *@
+    <div class="modal-backdrop picker-backdrop" @onclick="CancelSleepDialog"></div>
+    <div class="modal app-modal sl-dlg" role="dialog" aria-modal="true" aria-labelledby="se-sl-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="se-sl-title">Mise en veille</h3><small>@name</small></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="CancelSleepDialog"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            <SleepChoice @bind-Mode="draftMode" @bind-Grid="draftGrid" Inherited="@sleepInherited" Name="se-sleep-dlg" />
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn ghost" @onclick="CancelSleepDialog">Annuler</button>
+            <button type="button" class="btn" @onclick="ValidateSleepDialog">Valider</button>
+        </div>
+    </div>
+}
 
 @if (advanced)
 {
@@ -346,6 +376,64 @@
     private string search = "";
     private ScreenSpec spec = new();
     private bool saving, confirmPublish, mirrorH, mirrorV;
+    private bool dimDlg;
+    private string draftDimMode = Dim.Own;      // copie de travail du formulaire de luminosité
+    private DimPlan? draftDimPlan;
+
+    private string DimSummary => dimMode switch
+    {
+        Dim.Own => "Réglage propre à cet écran.",
+        Dim.Inherit => dimInherited,
+        _ => "L'image est affichée telle quelle, quelle que soit l'heure."
+    };
+
+    // Le réglage ne change qu'à « Valider ».
+    private void OpenDimDialog()
+    {
+        draftDimMode = dimMode;
+        draftDimPlan = Dim.Valid(dimPlan) ? dimPlan!.Clone() : Dim.Suggested();
+        dimDlg = true;
+    }
+
+    private void CancelDimDialog() => dimDlg = false;
+
+    private void ValidateDimDialog()
+    {
+        if (draftDimMode == Dim.Own && !Dim.Valid(draftDimPlan)) { Toast.Error("Réglage de luminosité invalide : vérifiez les profils."); return; }
+        dimMode = draftDimMode;
+        if (draftDimMode == Dim.Own) dimPlan = draftDimPlan!.Clone();
+        dimDlg = false;
+    }
+
+    private bool sleepDlg;
+    private string draftMode = Sleep.Own;       // copie de travail du formulaire de mise en veille
+    private string? draftGrid;
+
+    private string SleepSummary => sleepMode switch
+    {
+        Sleep.Never => "L'écran reste allumé en permanence.",
+        Sleep.Own => $"Plages propres à l'écran · {(Sleep.Valid(sleepGrid) ? Math.Round(sleepGrid!.Count(c => c == '1') / 7.0, 1).ToString("0.#", Fr) : "0")} h de veille par jour en moyenne.",
+        _ => sleepInherited + " Pour qu'il ait son propre réglage ou ne s'éteigne jamais, choisissez-le ici."
+    };
+
+    // Le réglage ne change qu'à « Valider ».
+    private void OpenSleepDialog()
+    {
+        draftMode = sleepMode;
+        draftGrid = Sleep.Any(sleepGrid) ? sleepGrid : Sleep.Suggested();
+        sleepDlg = true;
+    }
+
+    private void CancelSleepDialog() => sleepDlg = false;
+
+    private void ValidateSleepDialog()
+    {
+        if (draftMode == Sleep.Own && !Sleep.Any(draftGrid)) { Toast.Error("Peignez au moins une plage de veille, ou choisissez « Jamais en veille »."); return; }
+        sleepMode = draftMode;
+        if (draftMode == Sleep.Own) sleepGrid = draftGrid;
+        sleepDlg = false;
+    }
+
     private bool sleepOn;                       // fonction « Plages de mise en veille » activée dans Réglages
     private string sleepMode = Sleep.Inherit;
     private string? sleepGrid;

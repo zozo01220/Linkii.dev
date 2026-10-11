@@ -72,6 +72,10 @@ class SleepController(private val ctx: Context, private val prefs: Prefs) {
 
     /** Aligne l'appareil sur les plages : à appeler au démarrage, à chaque réception de plages, à chaque réveil programmé et régulièrement. */
     fun apply() {
+        try { applyNow() } catch (e: Exception) { android.util.Log.w("Linkii", "Mise en veille : $e") }   // la veille ne doit jamais faire tomber le player
+    }
+
+    private fun applyNow() {
         val p = plan()
         val now = System.currentTimeMillis()
         val sleeping = p != null && asleepAt(p, weekMinute(p.tz, now))
@@ -114,8 +118,19 @@ class SleepController(private val ctx: Context, private val prefs: Prefs) {
         val intoMinute = c.get(Calendar.SECOND) * 1000L + c.get(Calendar.MILLISECOND)
         val at = now - intoMinute + minutesToNextChange(p, w) * 60_000L
         val show = PendingIntent.getActivity(ctx, 42, Intent(ctx, MainActivity::class.java), flags)
-        am.setAlarmClock(AlarmManager.AlarmClockInfo(at, show), op)   // exact, sans autorisation particulière, actif en économie d'énergie
+        // Exact et actif en économie d'énergie si l'appareil accorde les « alarmes exactes » (Android 12+ : à autoriser, voir le menu technicien) ;
+        // sinon alarme approximative : le contrôle toutes les 15 s de l'activité prend le relais tant que le player tourne.
+        // Jamais d'exception ici : un refus ne doit pas faire planter le player.
+        try {
+            if (Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()) am.setAlarmClock(AlarmManager.AlarmClockInfo(at, show), op)
+            else am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, op)
+        } catch (_: Exception) {
+            try { am.set(AlarmManager.RTC_WAKEUP, at, op) } catch (_: Exception) {}
+        }
     }
+
+    /** Les alarmes sont-elles exactes sur cet appareil ? (information du menu technicien) */
+    fun exactAlarms(): Boolean = Build.VERSION.SDK_INT < 31 || (ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager).canScheduleExactAlarms()
 }
 
 /** Réveil programmé : début ou fin d'une plage de veille. */

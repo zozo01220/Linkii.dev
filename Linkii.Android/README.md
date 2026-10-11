@@ -56,7 +56,8 @@ L'app remonte son modèle, la version Android et la version de l'application, et
 
 - **Mise en veille** (`SleepController.kt`) : le player confie les plages du back-office à l'app (`LinkiiNative.sleepSchedule`) ; l'appareil les applique seul, par alarme exacte, même si le WebView est suspendu ou le réseau coupé. Début de plage : écran verrouillé si l'app est administrateur de l'appareil (`SleepAdmin`), sinon repli écran noir et luminosité minimale. Fin : écran rallumé et app au premier plan.
   Activer le droit : menu technicien › *Activer la mise en veille de l'écran*, ou, si l'appareil n'affiche pas la confirmation, depuis un ordinateur relié en ADB :
-  `adb shell dpm set-active-admin ch.linkii.player/.SleepAdmin`. Le menu technicien indique si des plages ont été reçues et si l'extinction est réelle ou en repli.
+  `adb shell dpm set-active-admin ch.linkii.player/.SleepAdmin`. Le menu technicien indique si des plages ont été reçues, si l'extinction est réelle ou en repli, et si les alarmes sont exactes ou approximatives.
+  Android 12 et plus : le réveil à la minute près demande l'autorisation « alarmes exactes » (`SCHEDULE_EXACT_ALARM`, à accorder dans les réglages de l'appareil) ; sans elle, l'app programme une alarme approximative et le contrôle toutes les 15 s de l'activité prend le relais tant que le player tourne.
 - **Luminosité** (`LinkiiNative.setBrightness`, `MainActivity.kt`) : le back-office règle la luminosité selon l'heure. Smartphone et tablette : luminosité de la fenêtre de l'app (10 à 100 %, 100 % = celle de l'appareil), l'appel renvoie `true`. Android TV : rien n'est modifié et l'appel renvoie `false`, le player assombrit alors l'image par filtre. Le contraste est toujours un filtre dans le player.
 - À valider sur un appareil réel (tablette et Android TV).
 

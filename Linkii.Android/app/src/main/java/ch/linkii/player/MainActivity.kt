@@ -381,7 +381,7 @@ class MainActivity : Activity() {
             (if (ms.pending > 0) " — ${ms.pending} à télécharger" else "") + "\n" +
             "Version : ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})\n" +
             "Réseau : ${if (online) "connecté" else "hors ligne"}\n" +
-            "Mise en veille : ${if (prefs.sleepJson.isEmpty()) "aucune plage" else "plages reçues"}, écran ${if (SleepController.isAdmin(this)) "éteint pour de bon" else "noir seulement (droit non activé)"}\n" +
+            "Mise en veille : ${if (prefs.sleepJson.isEmpty()) "aucune plage" else "plages reçues"}, écran ${if (SleepController.isAdmin(this)) "éteint pour de bon" else "noir seulement (droit non activé)"}, alarmes ${if (sleeper.exactAlarms()) "exactes" else "approximatives"}\n" +
             "Stockage libre : ${"%.1f".format(freeGb)} Go\n" +
             "PIN : ${if (prefs.pin.isEmpty()) "non défini" else "défini"}"
     }
