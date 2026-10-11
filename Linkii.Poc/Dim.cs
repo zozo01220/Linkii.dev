@@ -63,7 +63,7 @@ public static class Dim
             new() { Name = "Soirée", Brightness = 60, Contrast = 110 },
             new() { Name = "Nuit", Brightness = 25, Contrast = 120 }
         },
-        Grid = new string('0', Sleep.Cells)
+        Grid = SuggestedGrid()   // dès l'activation, le soir et la nuit sont déjà peints : sinon tout resterait en « Jour » et rien ne changerait
     };
 
     /// <summary>Semaine proposée par « Jour, soirée et nuit » : soirée de 17 h à 19 h, nuit de 19 h à 7 h.</summary>

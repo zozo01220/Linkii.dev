@@ -30,6 +30,7 @@ class SleepController(private val ctx: Context, private val prefs: Prefs) {
     /** Repli sans droit d'administrateur : l'activité passe à l'écran noir (true) ou le quitte (false). */
     companion object {
         @Volatile var listener: ((Boolean) -> Unit)? = null
+        private const val POLL_WAKE_MS = 60_000L   // pendant la veille : une demande au serveur par minute
 
         fun admin(ctx: Context) = ComponentName(ctx, SleepAdmin::class.java)
         fun isAdmin(ctx: Context) = (ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager).isAdminActive(admin(ctx))
@@ -43,7 +44,8 @@ class SleepController(private val ctx: Context, private val prefs: Prefs) {
         apply()
     }
 
-    private class Plan(val tz: TimeZone, val ranges: List<IntArray>)
+    /** wake : fin d'un réveil manuel demandé depuis le back-office (ms, 0 : aucun) ; l'appareil reste éveillé jusque-là malgré les plages. */
+    private class Plan(val tz: TimeZone, val ranges: List<IntArray>, val wake: Long)
 
     private fun plan(): Plan? {
         val raw = prefs.sleepJson
@@ -51,8 +53,29 @@ class SleepController(private val ctx: Context, private val prefs: Prefs) {
         return try {
             val o = JSONObject(raw)
             val a = o.getJSONArray("ranges")
-            Plan(TimeZone.getTimeZone(o.getString("tz")), (0 until a.length()).map { i -> a.getJSONArray(i).let { intArrayOf(it.getInt(0), it.getInt(1)) } })
+            Plan(TimeZone.getTimeZone(o.getString("tz")), (0 until a.length()).map { i -> a.getJSONArray(i).let { intArrayOf(it.getInt(0), it.getInt(1)) } }, maxOf(o.optLong("wakeUntil", 0), prefs.wakeUntilMs))
         } catch (_: Exception) { null }
+    }
+
+    /**
+     * Réveil manuel : pendant la veille matérielle, l'appareil ne dialogue plus avec le serveur ; il demande donc lui-même, à chaque réveil
+     * programmé (chaque minute tant qu'il dort), si le back-office a demandé de l'éveiller. À appeler hors du fil principal.
+     */
+    fun pollWake() {
+        val token = prefs.mediaToken
+        if (token.isEmpty() || !asleep()) return
+        try {
+            val u = java.net.URL(prefs.serverUrl.substringBefore("/player").trimEnd('/') + "/api/player/version")
+            (u.openConnection() as java.net.HttpURLConnection).run {
+                connectTimeout = 8000; readTimeout = 8000; setRequestProperty("X-Token", token)
+                try {
+                    if (responseCode == 200) {
+                        val until = JSONObject(inputStream.bufferedReader().readText()).optLong("wakeUntil", 0)
+                        if (until > System.currentTimeMillis() && until != prefs.wakeUntilMs) prefs.wakeUntilMs = until
+                    }
+                } finally { disconnect() }
+            }
+        } catch (_: Exception) {}
     }
 
     /** Minutes écoulées depuis le lundi 00 h, à l'heure du fuseau des plages. */
@@ -64,11 +87,14 @@ class SleepController(private val ctx: Context, private val prefs: Prefs) {
 
     private fun asleepAt(p: Plan, w: Int) = p.ranges.any { (w >= it[0] && w < it[1]) || (w + week >= it[0] && w + week < it[1]) }
 
+    /** Dans une plage de veille, et pas réveillé à la main. */
+    private fun sleepingAt(p: Plan, now: Long) = now >= p.wake && asleepAt(p, weekMinute(p.tz, now))
+
     /** Dans combien de minutes l'état change-t-il (début ou fin d'une plage) ? */
     private fun minutesToNextChange(p: Plan, w: Int): Int =
         p.ranges.flatMap { listOf(it[0] % week, it[1] % week) }.map { ((it - w) % week + week) % week }.filter { it > 0 }.minOrNull() ?: week
 
-    fun asleep(): Boolean = plan()?.let { asleepAt(it, weekMinute(it.tz, System.currentTimeMillis())) } ?: false
+    fun asleep(): Boolean = plan()?.let { sleepingAt(it, System.currentTimeMillis()) } ?: false
 
     /** Aligne l'appareil sur les plages : à appeler au démarrage, à chaque réception de plages, à chaque réveil programmé et régulièrement. */
     fun apply() {
@@ -78,7 +104,7 @@ class SleepController(private val ctx: Context, private val prefs: Prefs) {
     private fun applyNow() {
         val p = plan()
         val now = System.currentTimeMillis()
-        val sleeping = p != null && asleepAt(p, weekMinute(p.tz, now))
+        val sleeping = p != null && sleepingAt(p, now)
         val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
         if (sleeping) {
             // verrouille à l'entrée dans la plage, et si quelqu'un a rallumé l'écran pendant la plage
@@ -116,7 +142,9 @@ class SleepController(private val ctx: Context, private val prefs: Prefs) {
         // à la minute pile : on retire les secondes déjà écoulées dans la minute en cours
         val c = Calendar.getInstance(p.tz).apply { timeInMillis = now }
         val intoMinute = c.get(Calendar.SECOND) * 1000L + c.get(Calendar.MILLISECOND)
-        val at = now - intoMinute + minutesToNextChange(p, w) * 60_000L
+        var at = now - intoMinute + minutesToNextChange(p, w) * 60_000L
+        if (p.wake > now) at = minOf(at, p.wake)                                   // fin d'un réveil manuel : l'appareil se rendort
+        if (sleepingAt(p, now)) at = minOf(at, now + POLL_WAKE_MS)                 // pendant la veille : on demande chaque minute si un réveil est demandé
         val show = PendingIntent.getActivity(ctx, 42, Intent(ctx, MainActivity::class.java), flags)
         // Exact et actif en économie d'énergie si l'appareil accorde les « alarmes exactes » (Android 12+ : à autoriser, voir le menu technicien) ;
         // sinon alarme approximative : le contrôle toutes les 15 s de l'activité prend le relais tant que le player tourne.
@@ -133,10 +161,18 @@ class SleepController(private val ctx: Context, private val prefs: Prefs) {
     fun exactAlarms(): Boolean = Build.VERSION.SDK_INT < 31 || (ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager).canScheduleExactAlarms()
 }
 
-/** Réveil programmé : début ou fin d'une plage de veille. */
+/** Réveil programmé : début ou fin d'une plage de veille, fin d'un réveil manuel, ou (pendant la veille) contrôle d'une demande de réveil. */
 class SleepReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        SleepController(context.applicationContext, Prefs(context)).apply()
+        val app = context.applicationContext
+        val pending = goAsync()   // la demande au serveur se fait hors du fil principal
+        Thread {
+            try {
+                val controller = SleepController(app, Prefs(app))
+                controller.pollWake()
+                controller.apply()
+            } catch (_: Exception) {} finally { pending.finish() }
+        }.start()
     }
 }
 

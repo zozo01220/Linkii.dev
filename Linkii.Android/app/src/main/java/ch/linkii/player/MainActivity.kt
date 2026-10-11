@@ -70,7 +70,14 @@ class MainActivity : Activity() {
     private var blackout: View? = null
     private var dimPercent = 100   // luminosité demandée par le back-office (100 : celle de l'appareil)
 
-    private fun isTv() = (getSystemService(Context.UI_MODE_SERVICE) as android.app.UiModeManager).currentModeType == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
+    /** Téléviseur ou boîtier relié à un écran : mode « télévision », interface Leanback ou pas d'écran tactile (le rétroéclairage n'est alors pas à nous). */
+    private fun isTv(): Boolean {
+        val pm = packageManager
+        return (getSystemService(Context.UI_MODE_SERVICE) as android.app.UiModeManager).currentModeType == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
+            || pm.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK)
+            || pm.hasSystemFeature("android.hardware.type.television")
+            || !pm.hasSystemFeature(android.content.pm.PackageManager.FEATURE_TOUCHSCREEN)
+    }
 
     /** Luminosité réelle de la fenêtre : celle demandée, ou celle de l'appareil à 100 %. */
     private fun applyDim() {

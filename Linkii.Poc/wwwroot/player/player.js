@@ -1094,6 +1094,7 @@
     } catch (e) { var d = new Date(ms); return ((d.getDay() + 6) % 7) * 1440 + d.getHours() * 60 + d.getMinutes(); }
   }
   function isAsleep(sl, ms) {
+    if (sl.wakeUntil && ms < sl.wakeUntil) return false;   // réveil manuel demandé depuis le back-office
     var w = localWeekMinute(ms, sl.tz);
     return sl.ranges.some(function (r) { return (w >= r[0] && w < r[1]) || (w + WEEK_MIN >= r[0] && w + WEEK_MIN < r[1]); });
   }

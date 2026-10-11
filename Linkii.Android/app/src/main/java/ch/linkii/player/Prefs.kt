@@ -29,6 +29,11 @@ class Prefs(context: Context) {
         get() = sp.getString("sleep_json", "") ?: ""
         set(v) = sp.edit().putString("sleep_json", v).apply()
 
+    /** Fin du dernier réveil manuel demandé depuis le back-office (ms, 0 : aucun) ; relevée par l'appareil pendant la veille, où le player ne dialogue plus. */
+    var wakeUntilMs: Long
+        get() = sp.getLong("wake_until", 0L)
+        set(v) = sp.edit().putLong("wake_until", v).apply()
+
     /** L'appareil a déjà été mis en veille (écran verrouillé) pour la plage en cours : évite de le refaire à chaque contrôle. */
     var sleepApplied: Boolean
         get() = sp.getBoolean("sleep_applied", false)

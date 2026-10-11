@@ -441,6 +441,8 @@ public class Screen : IClientOwned, IAreaOwned
     public bool CaptureMirrorH { get; set; }       // miroir actif lors de la capture : l'aperçu est remis à l'endroit
     public bool CaptureMirrorV { get; set; }
     public List<ScreenCommand> Commands { get; set; } = new();   // les dernières commandes envoyées à l'écran
+    public bool ForcedSleep { get; set; }                       // mise en veille manuelle (menu ⋮ « Mettre en veille ») : l'écran dort jusqu'à « Réveiller », quelles que soient ses plages
+    public DateTime? WakeUntilUtc { get; set; }               // réveil manuel : l'écran reste éveillé jusque-là malgré ses plages de veille (voir Sleep)
     public DateTime? OfflineAlertUtc { get; set; }              // alerte « écran hors ligne » envoyée à cette date (une seule par panne)
 
     public bool IsPaused(DateTime now) => PausedUtc != null && (PausedUntilUtc == null || PausedUntilUtc > now);

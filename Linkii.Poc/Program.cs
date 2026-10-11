@@ -534,7 +534,7 @@ api.MapGet("/player/version", (HttpRequest req, JsonStore store) => store.Read(d
     var s = Auth(req, db);
     if (Gate(s, db) is { } denied) return denied;
     // serverNow : horloge de référence du player (lecture synchronisée) ; commands : ordres du back-office pas encore accusés (filet si SignalR est coupé)
-    return Results.Ok(new { version = Notifier.Revision(db, s!), build = playerBuild, serverNow = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), commands = ScreenControl.Pending(s!, DateTime.UtcNow) });
+    return Results.Ok(new { version = Notifier.Revision(db, s!), build = playerBuild, serverNow = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), commands = ScreenControl.Pending(s!, DateTime.UtcNow), wakeUntil = Sleep.Woken(s!, DateTime.UtcNow) ? Helpers.EpochMs(s!.WakeUntilUtc!.Value) : 0L });   // wakeUntil : réveil manuel demandé (l'app Android le sonde pendant la veille)
 }));
 
 // Appareil : système, modèle et version de l'application, remontés au démarrage puis régulièrement.
