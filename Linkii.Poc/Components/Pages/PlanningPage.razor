@@ -118,6 +118,7 @@ else
                     <div class="pn-dr @(r.Screen != null ? "sub" : "")" role="button" tabindex="0" @onclick="() => Pick(r.Zone.Id, r.Screen?.Id)" title="Ouvrir le planning">
                         <div class="pn-dl">@(r.Screen != null ? "↳ " + r.Screen.Name : r.Zone.Name)<small>@(r.Screen != null ? (r.Screen.OwnPlanning ? "Planning propre" : "Suit la zone") : "Zone · " + ScreenCount(r.Zone) + " écran" + (ScreenCount(r.Zone) > 1 ? "s" : ""))</small></div>
                         <div class="pn-dt">
+                            @foreach (var sb in SleepBlocks(SleepGrid(r.Screen), DayIndex(dayDate))) { <div class="pn-sleep" style="left:@(Pct(sb.From))%;width:@(PctW(sb.From, sb.To))%;top:0;height:100%" title="En veille"></div> }
                             @foreach (var sg in Plan.Segments(r.Slots, dayDate))
                             {
                                 if (sg.To <= HS * 60 || sg.From >= HE * 60) { continue; }
@@ -133,15 +134,17 @@ else
     }
     else
     {
+        var sleepGrid = SleepGrid(S);
         <div class="pn-cal pn-fill">
             <div class="pn-ch"><div></div>@for (var d = 0; d < 7; d++) { var day = weekStart.AddDays(d); <div class="@(day == today ? "today" : "")">@Plan.DayNames[d]<b>@day.Day</b></div> }</div>
             <div class="pn-cb">
-                <div class="pn-hrs">@for (var h = HS; h <= HE; h++) { <span style="top:@(Pct(h * 60))%">@h.ToString("00"):00</span> }</div>
+                <div class="pn-hrs">@for (var h = HS; h < HE; h++) { <span style="top:@(Pct(h * 60))%">@h.ToString("00"):00</span> }</div>
                 @for (var d = 0; d < 7; d++)
                 {
                     var di = d; var date = weekStart.AddDays(d);
                     <div class="pn-col @(FollowsZone ? "ro" : "")" style="--rows:@Rows">
                         @if (!FollowsZone) { for (var q = HS * 2; q < HE * 2; q++) { var qm = q * 30; <div class="pn-cell" @onclick="() => OpenNew(di, qm)"></div> } }
+                        @foreach (var sb in SleepBlocks(sleepGrid, DayIndex(date))) { <div class="pn-sleep" style="top:@(Pct(sb.From))%;height:@(PctW(sb.From, sb.To))%" title="En veille"></div> }
                         @if (OwnScreen) { foreach (var g in Z.Slots.Where(x => Plan.Matches(x, date, x.From))) { <div class="pn-ev ghost" style="@Pos(g)"><b>@PlaylistName(g.PlaylistId) (zone)</b><small>@Plan.Hm(g.From) – @Plan.Hm(g.To)</small></div> } }
                         @foreach (var s in Shown.Where(x => Plan.Matches(x, date, x.From)))
                         {
@@ -155,6 +158,7 @@ else
                 @if (weekStart <= today && today < weekStart.AddDays(7) && nowMin >= HS * 60 && nowMin <= HE * 60) { <div class="pn-now" style="top:@(Pct(nowMin))%"></div> }
             </div>
             <div class="pn-legend">
+                @if (sleepGrid != null) { <span><i class="sleep"></i>En veille</span> }
                 @foreach (var p in UsedPlaylists) { <span><i class="@Color(p.Id)"></i>@p.Name</span> }
                 @if (OwnScreen) { <span><i class="hatch"></i>Hérité de la zone</span> }
                 <span class="pn-dflt"><i class="hatch"></i>Hors créneau : <b>@DefaultName()</b>
@@ -345,11 +349,28 @@ else
 
     // ---------- Grille ----------
 
-    private IEnumerable<Slot> AllSlots => zones.SelectMany(z => z.Slots).Concat(screens.Where(s => s.OwnPlanning).SelectMany(s => s.Slots));
-    private int HS => Math.Min(7, AllSlots.Select(s => s.From / 60).DefaultIfEmpty(7).Min());
-    private int HE => Math.Min(24, Math.Max(23, AllSlots.Select(s => (s.To + 59) / 60).DefaultIfEmpty(23).Max()));
+    private const int HS = 0, HE = 24;   // le calendrier couvre toute la journée : un affichage peut tourner la nuit
     private int Rows => HE - HS;
-    private IEnumerable<int> AxisHours => Enumerable.Range(HS, Rows + 1).Where(h => (h - HS) % 2 == 0);
+    private IEnumerable<int> AxisHours => Enumerable.Range(HS, Rows + 1).Where(h => h % 3 == 0);
+
+    /// <summary>Grille de veille qui s'applique à la cible (null : fonction désactivée ou aucune plage) : celle de l'écran, sinon celle de l'aire.</summary>
+    private string? SleepGrid(Screen? s) =>
+        !tenant.SleepEnabled ? null : s != null ? Sleep.EffectiveGrid(tenant, area, s, ZoneIdOf(s) is var zid && zones.FirstOrDefault(z => z.Id == zid)?.IsWall == true) : Sleep.Any(area?.SleepGrid) ? area!.SleepGrid : null;
+
+    /// <summary>Plages de veille d'un jour (minutes), les heures consécutives regroupées.</summary>
+    private static List<(int From, int To)> SleepBlocks(string? grid, int day)
+    {
+        var res = new List<(int, int)>();
+        if (!Sleep.Valid(grid)) return res;
+        for (var h = 0; h < 24; h++)
+        {
+            if (grid![day * 24 + h] != '1') continue;
+            if (res.Count > 0 && res[^1].Item2 == h * 60) res[^1] = (res[^1].Item1, (h + 1) * 60); else res.Add((h * 60, (h + 1) * 60));
+        }
+        return res;
+    }
+
+    private static int DayIndex(DateOnly d) => ((int)d.DayOfWeek + 6) % 7;
 
     private static string Inv(double v) => v.ToString("0.###", CultureInfo.InvariantCulture);
     private string Pct(int min) => Inv((min - HS * 60) * 100.0 / (Rows * 60));
