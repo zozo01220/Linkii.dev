@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette – Mur d'écrans compact</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --nuit:#0B1F3A; --acier:#5A6B80; --brume:#DDE3EA; --fond:#F5F7FA; --signal:#3B82C4; --bord2:#C5CED9; --maj-bg:#FBF0DC; --maj-tx:#7A4F12; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; font:400 15px/1.5 "IBM Plex Sans",sans-serif; color:var(--nuit); background:#8d97a6; display:grid; place-items:center; padding:64px 24px 24px; }
+  .demo { position:fixed; top:0; left:0; right:0; z-index:50; background:#fff; border-bottom:1px solid var(--bord2); padding:10px 14px; display:flex; gap:6px; align-items:center; flex-wrap:wrap; font-size:13px; color:var(--acier); }
+  .demo button { font:inherit; font-size:13px; padding:5px 12px; border-radius:99px; border:1px solid var(--bord2); background:#fff; color:var(--acier); cursor:pointer; }
+  .demo button.on { background:var(--nuit); border-color:var(--nuit); color:#fff; }
+
+  .modal { width:min(620px,100%); background:#fff; border-radius:6px; overflow:hidden; box-shadow:0 20px 60px rgba(11,31,58,.35); }
+  .head { display:flex; align-items:center; gap:12px; padding:14px 18px; border-bottom:1px solid var(--brume); }
+  .ttl { flex:1; min-width:0; }
+  .ttl .r { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .ttl h1 { margin:0; font-size:18px; font-weight:600; }
+  .btn { font:inherit; font-weight:500; padding:9px 16px; border-radius:4px; border:1px solid var(--bord2); background:#fff; color:var(--nuit); cursor:pointer; white-space:nowrap; display:inline-flex; align-items:center; gap:8px; }
+  .btn.sm { padding:5px 12px; font-size:14px; }
+  .btn.pri { background:var(--nuit); border-color:var(--nuit); color:#fff; }
+  .x { border:0; background:none; color:var(--acier); font-size:22px; line-height:1; cursor:pointer; padding:6px; border-radius:4px; display:grid; place-items:center; }
+
+  /* Corps : 2 colonnes, hauteur fixe, plus de bandeau « source » */
+  .body { display:grid; gap:16px; padding:18px; }
+  .t { margin:0 0 10px; font-size:12px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--acier); }
+
+  .stage { background:var(--nuit); border-radius:4px; display:grid; place-items:center; padding:12px; --maxh:230px; }
+  .wall { display:grid; gap:5px; width:min(100%, calc(var(--maxh) * var(--ar))); aspect-ratio:var(--ar); }   /* ratio réel du mur : borné par la largeur ET par la hauteur, jamais de défilement */
+  .cell { border:2px solid rgba(255,255,255,.25); border-radius:3px; background:#13294a; color:#fff; cursor:pointer; position:relative; display:grid; place-content:center; font:inherit; padding:2px 6px; min-width:0; }
+  .cell:hover { border-color:rgba(255,255,255,.6); }
+  .cell.sel { border-color:var(--signal); background:#1b3a66; }
+  .cell .n { position:absolute; left:5px; top:2px; font-size:11px; color:rgba(255,255,255,.55); }
+  .cell b { font-weight:500; font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+  .under { display:flex; align-items:center; gap:10px; margin-top:10px; flex-wrap:wrap; font-size:12.5px; color:var(--acier); }
+  .info { width:18px; height:18px; border-radius:50%; border:1px solid var(--bord2); display:inline-grid; place-items:center; font-size:11px; font-style:normal; cursor:help; }
+
+  .opts { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  label.l { display:block; font-size:13px; font-weight:500; color:var(--acier); margin-bottom:6px; }
+  select { width:100%; font:inherit; padding:10px 12px; border:1px solid var(--bord2); border-radius:4px; background:#fff; color:var(--nuit); }
+  .chips { display:flex; gap:8px; flex-wrap:wrap; }
+  .chips button { font:inherit; font-size:14px; padding:6px 14px; border:1px solid var(--bord2); border-radius:4px; background:#fff; color:var(--acier); cursor:pointer; }
+  .chips button.on { background:var(--nuit); border-color:var(--nuit); color:#fff; }
+  .reso { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--acier); background:#EAF2FA; border-radius:4px; padding:7px 10px; }
+  .reso b { font-family:ui-monospace,Consolas,monospace; color:#1F4E7E; font-weight:600; }
+  .warn { background:var(--maj-bg); color:var(--maj-tx); border-radius:4px; padding:7px 10px; font-size:13px; }
+
+  .foot { display:flex; align-items:center; justify-content:flex-end; gap:10px; padding:12px 18px; background:var(--fond); border-top:1px solid var(--brume); }
+  .foot small { margin-right:auto; color:var(--acier); }
+  @media (max-width:760px){ .body{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+<div class="demo">Grille :
+  <button data-c="3" data-r="1" class="on">3 × 1</button><button data-c="1" data-r="3">1 × 3</button><button data-c="2" data-r="2">2 × 2</button>
+  <span style="margin-left:10px">Une colonne, aucun défilement : le mur garde ses vraies proportions et tient dans la fenêtre. Cliquez deux places pour les échanger.</span>
+</div>
+
+<div class="modal">
+  <div class="head">
+    <div class="ttl"><div class="r"><h1 id="ttl">Mur 3 × 1</h1><button class="btn sm">✎ Renommer</button></div></div>
+    <button class="x" title="Options avancées (miroir)" aria-label="Options avancées"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg></button>
+    <button class="x" aria-label="Fermer">×</button>
+  </div>
+
+  <div class="body">
+    <div class="opts">
+      <div class="grp"><label class="l">Grille</label>
+        <div class="chips" id="chips"><button data-c="3" data-r="1" class="on">3 × 1</button><button data-c="1" data-r="3">1 × 3</button></div>
+      </div>
+      <div class="reso" id="reso">Contenus à créer en <b>5760 × 1080</b> px</div>
+    </div>
+    <div class="warn" id="warn" hidden>Les écrans n'ont pas tous le même format : le mur sera plus net avec des écrans identiques.</div>
+
+    <section>
+      <h2 class="t">Disposition</h2>
+      <div class="stage"><div class="wall" id="wall"></div></div>
+      <div class="under">
+        <button class="btn sm">◉ Identifier sur les écrans</button>
+        <span>Ordre : gauche → droite, haut → bas</span>
+        <i class="info" title="Cliquez deux places pour les échanger. « Identifier » affiche le numéro de chaque place sur l'écran physique pendant 5 s.">i</i>
+      </div>
+    </section>
+  </div>
+  <div class="foot"><small id="cnt">3 écrans · 3 × 1</small><button class="btn">Annuler</button><button class="btn pri">Enregistrer</button></div>
+</div>
+
+<script>
+  var names = ['Ecran gauche', 'Ecran central', 'Ecran droite'], cols = 3, rows = 1, sel = null;
+  var wall = document.getElementById('wall');
+  function draw() {
+    var n = names.length;
+    if (cols * rows !== n) { names = ['Ecran gauche', 'Ecran central', 'Ecran droite', 'Ecran 4'].slice(0, cols * rows); n = names.length; }
+    wall.style.gridTemplateColumns = 'repeat(' + cols + ',1fr)';
+    wall.style.setProperty('--ar', (16 * cols) / (9 * rows));   // proportions réelles : 3×1 large, 1×3 haut et étroit
+    wall.innerHTML = '';
+    names.forEach(function (nm, i) {
+      var b = document.createElement('button');
+      b.className = 'cell' + (sel === i ? ' sel' : '');
+      b.innerHTML = '<span class="n">' + (i + 1) + '</span><b>' + nm + '</b>';
+      b.onclick = function () { if (sel === null) sel = i; else { var t = names[i]; names[i] = names[sel]; names[sel] = t; sel = null; } draw(); };
+      wall.appendChild(b);
+    });
+    document.getElementById('ttl').textContent = 'Mur ' + cols + ' × ' + rows;
+    document.getElementById('cnt').textContent = n + ' écrans · ' + cols + ' × ' + rows;
+    document.getElementById('reso').innerHTML = 'Contenus à créer en <b>' + (1920 * cols) + ' × ' + (1080 * rows) + '</b> px';
+    document.querySelectorAll('.demo button').forEach(function (x) { x.className = (+x.dataset.c === cols && +x.dataset.r === rows) ? 'on' : ''; });
+    document.querySelectorAll('#chips button').forEach(function (x) { x.className = (+x.dataset.c === cols && +x.dataset.r === rows) ? 'on' : ''; });
+  }
+  document.querySelectorAll('[data-c]').forEach(function (b) { b.onclick = function () { cols = +b.dataset.c; rows = +b.dataset.r; sel = null; draw(); }; });
+  draw();
+</script>
+</body>
+</html>

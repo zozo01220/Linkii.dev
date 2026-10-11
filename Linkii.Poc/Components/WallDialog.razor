@@ -17,69 +17,53 @@
         <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => OnClose.InvokeAsync(false)"><Ico Name="x" Size="20" /></button>
     </div>
     <div class="modal-body">
-        <div class="ci-src">
-            <div class="dw"><div class="dw-field">
-                <label for="wall-pl">Liste de lecture du mur</label>
-                <select id="wall-pl" @bind="playlistValue">
-                    <option value="">— Aucune liste de lecture —</option>
-                    @foreach (var p in playlists) { <option value="@p.Id">@p.Name</option> }
-                </select>
-            </div></div>
+        @* une colonne, sans défilement : grille et conseil de résolution en haut, puis le mur à ses vraies proportions (borné en largeur et en hauteur) *@
+        <div class="wall-opts">
+            <div>
+                <label class="lbl" style="margin-top:0">Grille</label>
+                <div class="wall-shapes" role="group" aria-label="Grille">
+                    @foreach (var sh in shapes)
+                    {
+                        var shape = sh;
+                        <button type="button" class="chip @(shape.Cols == cols && shape.Rows == rows ? "on" : "")" @onclick="() => SetShape(shape)">@shape.Cols × @shape.Rows</button>
+                    }
+                </div>
+            </div>
+            <span class="wall-note">Contenus à créer en <b class="mono">@(unitW * cols) × @(unitH * rows)</b> px</span>
         </div>
+        @if (mixed)
+        {
+            <div class="wall-note warn">Les écrans n'ont pas tous le même format : le mur sera plus net avec des écrans identiques.</div>
+        }
+        @if (error != null) { <div class="err">@error</div> }
 
-        <div class="ci-cols">
-            <section aria-label="Disposition">
-                <h4 class="ci-t">Disposition</h4>
-                <div class="wall-box">
-                    <div class="wall-grid" style="grid-template-columns:repeat(@cols, 1fr)">
-                        @for (var i = 0; i < order.Count; i++)
-                        {
-                            var idx = i;
-                            var s = screens.First(x => x.Id == order[idx]);
-                            <button type="button" class="wall-cell @(swap == idx ? "sel" : "")" title="Place @Helpers.WallLabel(idx, cols, rows)" @onclick="() => Cell(idx)">
-                                <span class="n">@(idx + 1)</span>
-                                <b>@s.Name</b>
-                                @if (s.Orientation == "portrait") { <small>portrait</small> }
-                            </button>
-                        }
-                    </div>
+        <section aria-label="Disposition">
+            <h4 class="ci-t">Disposition</h4>
+            <div class="wall-box wall-stage">
+                <div class="wall-grid" style="grid-template-columns:repeat(@cols, 1fr);--ar:@((16.0 * cols / (9.0 * rows)).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture))">
+                    @for (var i = 0; i < order.Count; i++)
+                    {
+                        var idx = i;
+                        var s = screens.First(x => x.Id == order[idx]);
+                        <button type="button" class="wall-cell @(swap == idx ? "sel" : "")" title="@s.Name · place @Helpers.WallLabel(idx, cols, rows)" @onclick="() => Cell(idx)">
+                            <span class="n">@(idx + 1)</span>
+                            <b>@s.Name</b>
+                            @if (s.Orientation == "portrait") { <small>portrait</small> }
+                        </button>
+                    }
                 </div>
-                <div class="row" style="margin-top:10px;gap:10px;flex-wrap:wrap">
-                    <button type="button" class="btn ghost sm" disabled="@identifying" @onclick="Identify"><Ico Name="monitor" Size="14" /> Identifier sur les écrans</button>
-                    <small class="muted">De gauche à droite, puis de haut en bas.</small>
-                    <span class="se-info" tabindex="0" title="Cliquez deux places pour les échanger. « Identifier » affiche le numéro de chaque place sur l'écran physique pendant 5 s.">i</span>
-                </div>
-            </section>
-
-            <section class="ci-conf" aria-label="Configuration">
-                <h4 class="ci-t">Configuration</h4>
-                <div>
-                    <label class="lbl" style="margin-top:0">Grille</label>
-                    <div class="wall-shapes" role="group" aria-label="Grille">
-                        @foreach (var sh in shapes)
-                        {
-                            var shape = sh;
-                            <button type="button" class="chip @(shape.Cols == cols && shape.Rows == rows ? "on" : "")" @onclick="() => SetShape(shape)">@shape.Cols × @shape.Rows</button>
-                        }
-                    </div>
-                </div>
-                <div>
-                    <label class="lbl" style="margin-top:0">Résolution conseillée des contenus</label>
-                    <span class="wall-note" style="display:inline-block">Créez vos contenus en <b class="mono">@(unitW * cols) × @(unitH * rows)</b> px</span>
-                </div>
-                @if (mixed)
-                {
-                    <div class="wall-note warn">Les écrans n'ont pas tous le même format : le mur sera plus net avec des écrans identiques.</div>
-                }
-                @if (ZoneId == null)
-                {
-                    <small class="muted">Les écrans jouent la liste du mur, en écran plein, et sont publiés aussitôt. Dissoudre le mur les remet dans la zone « @Zone.DefaultName ».</small>
-                }
-                @if (error != null) { <div class="err">@error</div> }
-            </section>
-        </div>
-    </div>
-    <div class="modal-foot">
+            </div>
+            <div class="row" style="margin-top:10px;gap:10px;flex-wrap:wrap">
+                <button type="button" class="btn ghost sm" disabled="@identifying" @onclick="Identify"><Ico Name="monitor" Size="14" /> Identifier sur les écrans</button>
+                <small class="muted">Ordre : gauche → droite, haut → bas</small>
+                <span class="se-info" tabindex="0" title="Cliquez deux places pour les échanger. « Identifier » affiche le numéro de chaque place sur l'écran physique pendant 5 s.">i</span>
+            </div>
+        </section>
+        @if (ZoneId == null)
+        {
+            <small class="muted" style="display:block;margin-top:12px">Les écrans jouent la liste du mur, en écran plein, et sont publiés aussitôt. Dissoudre le mur les remet dans la zone « @Zone.DefaultName ».</small>
+        }
+    </div>    <div class="modal-foot">
         <small class="muted grow">@order.Count écrans · @cols × @rows</small>
         <button type="button" class="btn ghost" @onclick="() => OnClose.InvokeAsync(false)">Annuler</button>
         <button type="button" class="btn" disabled="@saving" @onclick="Save">@(ZoneId == null ? "Créer le mur" : "Enregistrer")</button>
@@ -145,7 +129,7 @@
     private bool mixed, saving, identifying, mirrorH, mirrorV;
     private string name = "", playlistValue = "", zoneName = "", renameDraft = "";
     private bool renaming, advanced, renamed, mirrorBackH, mirrorBackV;   // renamed : nom choisi par l'utilisateur (le nom proposé suit la grille)
-    private Guid? playlistInitial;
+
     private string? error;
     private Guid areaId;
 
@@ -178,8 +162,6 @@
             var zone = Store.Read(d => d.Area?.Zones.FirstOrDefault(z => z.Id == zid));
             zoneName = zone?.Name ?? "";
             (mirrorH, mirrorV) = (zone?.MirrorH ?? false, zone?.MirrorV ?? false);
-            playlistInitial = zone?.PlaylistId;
-            playlistValue = zone?.PlaylistId?.ToString() ?? "";
             screens = Store.Read(d => d.Screens.Where(s => s.Token != null && s.ZoneId == zid).OrderBy(s => s.WallPos ?? int.MaxValue).ToList());
             if (zone != null && zone.WallCols * zone.WallRows == screens.Count) (cols, rows) = (zone.WallCols, zone.WallRows);
         }
@@ -239,18 +221,15 @@
             var ids = order.ToList(); var c = cols; var r = rows; var aid = areaId;
             if (ZoneId is { } zid)
             {
-                Guid? newPl = Guid.TryParse(playlistValue, out var pg) ? pg : null;
                 var newName = name.Trim();
                 error = Store.Write(d =>
                 {
                     var e = AreaOps.ArrangeWall(d, aid, zid, ids, c, r);
                     if (e == null && renamed && newName.Length > 0) e = AreaOps.RenameZone(d, aid, zid, newName);
-                    if (e == null && newPl != playlistInitial) e = AreaOps.SetWallPlaylist(d, aid, zid, newPl);
                     return e;
                 });
                 if (error != null) return;
                 SetMirror(zid);
-                if (newPl != playlistInitial) foreach (var id in ids) await Notifier.PublishScreen(id);   // la nouvelle liste part aussitôt sur chaque écran
                 await Notifier.NotifyZone(zid);   // nouvelle place : chaque écran recadre sa portion
                 Toast.Ok("Mur réorganisé.");
             }
