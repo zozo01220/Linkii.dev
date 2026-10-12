@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette – Intégration Facebook (publications de Page)</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { --nuit:#0B1F3A; --acier:#5A6B80; --brume:#DDE3EA; --fond:#F5F7FA; --signal:#3B82C4; --bord2:#C5CED9; --fb:#1877F2; --ok-bg:#E1F0E8; --ok-tx:#155A38; --warn-bg:#FFF1DB; --warn-tx:#7A4A00; --err-bg:#FBE4E4; --err-tx:#8A1F1F; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:400 15px/1.5 "IBM Plex Sans",sans-serif; color:var(--nuit); background:var(--fond); }
+  main { max-width:1040px; margin:0 auto; padding:28px 20px 60px; }
+  h1 { font-size:24px; margin:0 0 4px; font-weight:600; }
+  .sub { color:var(--acier); margin:0 0 24px; }
+  h2 { font-size:17px; margin:34px 0 12px; font-weight:600; padding-bottom:8px; border-bottom:1px solid var(--brume); }
+  h3 { font-size:14px; margin:0 0 8px; font-weight:600; }
+  p { margin:0 0 10px; }
+  .card { background:#fff; border:1px solid var(--brume); border-radius:6px; padding:16px 18px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  table { width:100%; border-collapse:collapse; background:#fff; border:1px solid var(--brume); border-radius:6px; overflow:hidden; font-size:14px; }
+  th, td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--brume); vertical-align:top; }
+  th { background:var(--fond); color:var(--acier); font-weight:600; font-size:12.5px; text-transform:uppercase; letter-spacing:.05em; }
+  tr:last-child td { border-bottom:0; }
+  .tag { display:inline-block; padding:2px 9px; border-radius:99px; font-size:12.5px; white-space:nowrap; }
+  .ok { background:var(--ok-bg); color:var(--ok-tx); }
+  .warn { background:var(--warn-bg); color:var(--warn-tx); }
+  .err { background:var(--err-bg); color:var(--err-tx); }
+  .muted { color:var(--acier); font-size:13px; }
+  .steps { counter-reset:s; list-style:none; padding:0; margin:0; display:grid; gap:10px; }
+  .steps li { counter-increment:s; display:grid; grid-template-columns:28px 1fr; gap:10px; align-items:start; background:#fff; border:1px solid var(--brume); border-radius:6px; padding:12px 14px; }
+  .steps li::before { content:counter(s); width:28px; height:28px; border-radius:50%; background:var(--nuit); color:#fff; display:grid; place-items:center; font-size:13px; font-weight:600; }
+  .steps b { font-weight:500; }
+  code { font-family:Consolas,monospace; font-size:13px; background:var(--brume); padding:1px 5px; border-radius:3px; }
+
+  /* Visuel 1 : écran de configuration */
+  .cfg { background:#fff; border:1px solid var(--bord2); border-radius:6px; overflow:hidden; box-shadow:0 8px 28px rgba(11,31,58,.12); }
+  .cfg-head { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid var(--brume); }
+  .cfg-head .fbi { width:28px; height:28px; border-radius:6px; background:var(--fb); color:#fff; display:grid; place-items:center; font-weight:700; font-size:17px; }
+  .cfg-head b { font-weight:600; flex:1; }
+  .cfg-body { display:grid; grid-template-columns:1fr 1fr; gap:0; }
+  .cfg-col { padding:16px; }
+  .cfg-col + .cfg-col { border-left:1px solid var(--brume); background:var(--fond); }
+  .lbl { display:block; font-size:12.5px; font-weight:500; color:var(--acier); margin:10px 0 5px; }
+  .fld { border:1px solid var(--bord2); border-radius:4px; padding:8px 10px; background:#fff; font-size:14px; color:var(--nuit); }
+  .fld.mask { color:var(--acier); letter-spacing:.15em; }
+  .seg { display:flex; border:1px solid var(--bord2); border-radius:4px; overflow:hidden; background:#fff; margin-top:4px; }
+  .seg span { flex:1; text-align:center; padding:7px 8px; font-size:13.5px; color:var(--acier); }
+  .seg span + span { border-left:1px solid var(--bord2); }
+  .seg span.on { background:var(--nuit); color:#fff; }
+  .pill { display:inline-block; font-size:12.5px; padding:2px 9px; border-radius:99px; background:var(--ok-bg); color:var(--ok-tx); margin-top:6px; }
+  .btn { display:inline-block; margin-top:12px; padding:8px 14px; border-radius:4px; background:var(--nuit); color:#fff; font-size:14px; }
+  .btn.ghost { background:#fff; color:var(--nuit); border:1px solid var(--bord2); }
+  .cfg-foot { display:flex; justify-content:flex-end; gap:8px; padding:10px 16px; border-top:1px solid var(--brume); background:var(--fond); }
+  .hint { font-size:12.5px; color:var(--acier); margin-top:6px; }
+
+  /* Visuel 2 : aperçu du widget */
+  .scr { background:#0B1F3A; border-radius:8px; padding:18px; }
+  .scr-wall { display:grid; grid-template-columns:1.25fr 1fr; gap:12px; height:340px; }
+  .pst { background:#fff; border-radius:6px; overflow:hidden; display:flex; flex-direction:column; }
+  .pst .img { background:linear-gradient(135deg,#9fc4e6,#3B82C4); flex:1; position:relative; }
+  .pst .img span { position:absolute; left:10px; bottom:8px; color:#fff; font-size:13px; font-weight:600; text-shadow:0 1px 4px rgba(0,0,0,.35); }
+  .pst .txt { padding:10px 12px; font-size:13px; }
+  .pst .meta { display:flex; align-items:center; gap:6px; color:var(--acier); font-size:12px; margin-bottom:4px; }
+  .pst .meta i { width:18px; height:18px; border-radius:50%; background:var(--fb); display:inline-block; }
+  .pst .txt p { margin:0; color:var(--nuit); line-height:1.4; }
+  .pst .react { margin-top:6px; color:var(--acier); font-size:12px; }
+  .pst.text .img { display:none; }
+  .pst.text { background:#fff; }
+  .pst.text .body { padding:14px; font-size:15px; color:var(--nuit); flex:1; }
+  .pst.text .bar { height:6px; background:var(--signal); }
+  .scr-cap { display:flex; justify-content:space-between; color:#cfd8e3; font-size:12.5px; margin-top:10px; }
+  .dots { display:flex; gap:6px; justify-content:center; margin-top:8px; }
+  .dots i { width:7px; height:7px; border-radius:50%; background:rgba(255,255,255,.3); }
+  .dots i.on { background:#fff; }
+
+  /* Visuel 3 : parcours de connexion */
+  .flow { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+  .flow div { background:#fff; border:1px solid var(--brume); border-radius:6px; padding:12px; font-size:13.5px; }
+  .flow b { display:block; font-weight:600; margin-bottom:4px; color:var(--nuit); }
+  .flow .arr { display:none; }
+
+  /* Visuel 4 : états */
+  .st { border-radius:6px; padding:12px 14px; font-size:14px; }
+  .st b { display:block; margin-bottom:2px; font-weight:600; }
+
+  @media (max-width:760px) { .grid2, .grid3, .cfg-body, .flow { grid-template-columns:1fr; } .cfg-col + .cfg-col { border-left:0; border-top:1px solid var(--brume); } .scr-wall { grid-template-columns:1fr; height:auto; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Intégration Facebook : publications d'une Page</h1>
+  <p class="sub">Analyse de faisabilité et maquettes. Rien n'est codé à ce stade.</p>
+
+  <h2>1. Analyse</h2>
+  <p>L'intégration lit les publications d'une <b>Page Facebook</b> via l'API Graph de Meta, avec un jeton de Page. Elle n'affiche pas le fil d'un profil personnel ni celui d'un groupe, et ne fonctionne que pour une Page dont l'administrateur a autorisé l'application.</p>
+
+  <table>
+    <tr><th>Point</th><th>Évaluation</th><th>Détail</th></tr>
+    <tr><td>Coût</td><td><span class="tag ok">Gratuit</span></td><td>Pas de licence. Création d'une application sur le portail développeur Meta (gratuite).</td></tr>
+    <tr><td>Page administrée par le client</td><td><span class="tag ok">Faisable</span></td><td>Jeton de Page longue durée, lecture des publications et des photos.</td></tr>
+    <tr><td>Page d'un tiers</td><td><span class="tag err">Non</span></td><td>Sans autorisation de l'administrateur, aucune lecture possible.</td></tr>
+    <tr><td>Vérification Meta</td><td><span class="tag warn">À prévoir</span></td><td>Certaines permissions (<code>pages_read_engagement</code>) demandent une revue de l'application, de quelques jours à plusieurs semaines.</td></tr>
+    <tr><td>Maintenance</td><td><span class="tag warn">Régulière</span></td><td>Versions de l'API changées environ deux fois par an. Le jeton peut être révoqué si le mot de passe de l'administrateur change.</td></tr>
+    <tr><td>Affichage public</td><td><span class="tag warn">À vérifier</span></td><td>Les conditions Meta encadrent la diffusion de contenus tiers sur écran public. À confirmer avant un usage commercial.</td></tr>
+    <tr><td>Effort de développement</td><td><span class="tag ok">Modéré</span></td><td>Un connecteur côté serveur (cache des publications), un widget d'affichage, un écran de configuration. Pas de donnée sensible stockée.</td></tr>
+  </table>
+
+  <h3 style="margin-top:18px">Deux variantes possibles</h3>
+  <div class="grid2">
+    <div class="card">
+      <h3>A. API Graph (recommandée)</h3>
+      <p class="muted">Publications mises en cache côté Linkii, affichées en mur ou en carte unique. Contrôle total sur la mise en forme et la fréquence.</p>
+      <p class="muted"><b>Inconvénient :</b> demande un compte développeur et la vérification de l'application.</p>
+    </div>
+    <div class="card">
+      <h3>B. Plugin Page (iframe)</h3>
+      <p class="muted">Intégration officielle de Facebook, sans compte développeur. Se place dans l'app « Page web / iframe ».</p>
+      <p class="muted"><b>Inconvénient :</b> mise en forme imposée par Meta, pas de carte personnalisée, peut être bloquée par certains navigateurs.</p>
+    </div>
+  </div>
+
+  <h2>2. Écran de configuration</h2>
+  <p class="muted" style="margin-bottom:12px">Standard « source / aperçu / config / ⚙ avancées ». Le choix de la variante se fait en haut de l'écran.</p>
+
+  <div class="cfg">
+    <div class="cfg-head">
+      <span class="fbi">f</span>
+      <b>Publications Facebook</b>
+      <span class="pill">Connecté</span>
+    </div>
+    <div class="cfg-body">
+      <div class="cfg-col">
+        <span class="lbl">Mode d'affichage</span>
+        <div class="seg"><span class="on">Mur</span><span>Carte unique</span><span>Dernière publication</span></div>
+
+        <span class="lbl">Page</span>
+        <div class="fld">Commune de Lausanne (exemple)</div>
+        <span class="hint">Page dont vous êtes administrateur.</span>
+
+        <span class="lbl">Publications affichées</span>
+        <div class="fld">6</div>
+
+        <span class="lbl">Afficher</span>
+        <div class="fld">Texte, photos, vidéos, date</div>
+
+        <span class="lbl">Actualisation</span>
+        <div class="fld">Toutes les 30 minutes</div>
+      </div>
+      <div class="cfg-col">
+        <span class="lbl">Jeton d'accès de la Page</span>
+        <div class="fld mask">••••••••••••••••</div>
+        <span class="hint">Jeton de Page longue durée. Stocké chiffré, jamais affiché.</span>
+        <span class="btn ghost">Remplacer le jeton</span>
+
+        <span class="lbl">Dernière synchronisation</span>
+        <div class="fld">Il y a 12 minutes · 6 publications</div>
+
+        <span class="btn ghost">Actualiser maintenant</span>
+        <p class="hint" style="margin-top:14px">Variante B (plugin Page) : remplacer les champs ci-dessus par une seule URL de Page.</p>
+      </div>
+    </div>
+    <div class="cfg-foot">
+      <span class="btn ghost">Annuler</span>
+      <span class="btn">Enregistrer</span>
+    </div>
+  </div>
+
+  <h2>3. Aperçu du widget</h2>
+  <p class="muted" style="margin-bottom:12px">Mode « Mur » sur un écran de 16:9. La carte de gauche est la plus récente.</p>
+  <div class="scr">
+    <div class="scr-wall">
+      <div class="pst">
+        <div class="img"><span>Fête de quartier, samedi 14 h</span></div>
+        <div class="txt">
+          <div class="meta"><i></i>Commune · il y a 2 h</div>
+          <p>Venez nombreux au parc du Bois-de-Vaux pour la fête de quartier. Animations et buvette.</p>
+          <div class="react">👍 128 · 💬 14 · ↗ 9</div>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-rows:1fr 1fr; gap:12px;">
+        <div class="pst text">
+          <div class="bar"></div>
+          <div class="body">
+            <div class="meta" style="font-size:12px;color:var(--acier)"><i></i>Commune · hier</div>
+            Travaux de la rue du Midi : circulation déviée jusqu'au 25 octobre.
+          </div>
+        </div>
+        <div class="pst">
+          <div class="img" style="background:linear-gradient(135deg,#dde3ea,#5A6B80)"><span>Collecte des déchets</span></div>
+          <div class="txt"><div class="meta"><i></i>Commune · 2 j</div><p>Nouveau calendrier de collecte disponible.</p></div>
+        </div>
+      </div>
+    </div>
+    <div class="dots"><i class="on"></i><i></i><i></i></div>
+    <div class="scr-cap"><span>Défilement automatique, 12 s par publication</span><span>Logo et nom de la Page affichés</span></div>
+  </div>
+
+  <h2>4. Parcours de connexion (administrateur)</h2>
+  <ol class="steps">
+    <li><span><b>Créer l'application</b> sur le portail développeur Meta, une seule fois pour Linkii (gratuit).</span></li>
+    <li><span><b>Ajouter les permissions</b> <code>pages_show_list</code> et <code>pages_read_engagement</code>. Une revue Meta est demandée.</span></li>
+    <li><span><b>Se connecter avec Facebook</b> depuis Linkii. L'administrateur choisit la Page à lier.</span></li>
+    <li><span><b>Linkii enregistre le jeton de Page</b> et lance une première synchronisation. Le widget apparaît dans la liste des contenus.</span></li>
+  </ol>
+
+  <h2>5. États à prévoir</h2>
+  <div class="grid3">
+    <div class="st ok"><b>Connecté</b>Publications à jour, dernière synchronisation affichée.</div>
+    <div class="st warn"><b>Jeton à renouveler</b>Message dans la configuration, l'écran garde la dernière version des publications.</div>
+    <div class="st err"><b>Page non autorisée</b>Aucune publication affichée, le technicien est invité à relier un autre compte.</div>
+  </div>
+
+  <h2>Décisions à prendre</h2>
+  <p>1. Variante A (API, plus de contrôle) ou B (plugin Page, sans compte développeur) ?<br>
+  2. Quelle Page doit être liée en premier, et qui en est l'administrateur ?<br>
+  3. Faut-il une publication « à la une » épinglée par le client, ou seulement les plus récentes ?</p>
+</main>
+</body>
+</html>

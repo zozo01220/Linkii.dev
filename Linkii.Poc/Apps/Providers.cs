@@ -1,6 +1,9 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
@@ -242,5 +245,147 @@ public class YouTubeProvider(SafeHttp http) : IAppProvider
             default:
                 throw new InvalidOperationException($"YouTube répond avec une erreur (HTTP {status}).");
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+public record FacebookPost(string Id, string? Message, DateTime? Created, string? Picture);
+public record FacebookPage(string Name, List<FacebookPost> Posts);
+
+/// <summary>
+/// Facebook : publications d'une Page que le client administre, lues avec l'API Graph de Meta. Le jeton de Page est celui du compte connecté
+/// (<see cref="FacebookAuth"/>) ou, à défaut, un jeton collé dans les options avancées ; c'est un secret conservé sur le serveur (envoyé dans un en-tête,
+/// jamais dans l'adresse) : le player ne reçoit que le texte, la date et l'adresse de la photo de chaque publication.
+/// Les publications sont gardées 15 minutes ; si Facebook est indisponible, la dernière version connue est servie.
+/// </summary>
+public class FacebookProvider(SafeHttp http, FacebookAuth account) : IAppProvider
+{
+    public string Id => "facebook";
+    private const string GraphUrl = "https://graph.facebook.com/v21.0/";
+    private const string Fields = "message,created_time,full_picture,from{name}";
+    private static readonly Regex TokenPattern = new(@"^[A-Za-z0-9_\-|.]{20,1000}$");
+    private static readonly Regex PagePattern = new(@"^[A-Za-z0-9.\-]{3,100}$");
+    private readonly ConcurrentDictionary<string, (DateTime At, FacebookPage Page)> _cache = new();
+
+    private async Task<FacebookPage> Load(AppRuntime rt, bool fresh = false)
+    {
+        var page = PageRef(rt.Get("pageId")) ?? throw new InvalidOperationException("Page Facebook non reconnue : collez son identifiant ou son adresse (facebook.com/NomDeLaPage).");
+        var token = rt.Get("token");   // jeton collé à la main : prioritaire
+        var fromAccount = false;
+        if (token.Length == 0 && account.PageToken(rt.Client, page) is { Length: > 0 } own) { token = own; fromAccount = true; }
+        if (token.Length == 0)
+            throw new InvalidOperationException(FacebookAuth.Has(rt.Client)
+                ? "Cette Page n'est pas administrée par le compte Facebook connecté : choisissez une de ses Pages, ou collez un jeton dans les options avancées."
+                : "Aucun compte Facebook connecté : connectez-le dans Intégrations › Comptes connectés, ou collez un jeton de Page dans les options avancées.");
+        if (!TokenPattern.IsMatch(token)) throw new InvalidOperationException("Jeton d'accès invalide.");
+        var count = rt.GetInt("count", 6, 1, 12);
+        var key = $"{page}|{count}|{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)))[..16]}";   // le jeton fait partie de la clé : un autre client n'hérite pas des publications d'un autre
+        (DateTime At, FacebookPage Page) hit = default;
+        if (!fresh && _cache.TryGetValue(key, out hit) && DateTime.UtcNow - hit.At < TimeSpan.FromMinutes(15)) return hit.Page;
+        try
+        {
+            var url = $"{GraphUrl}{page}/published_posts?fields={Uri.EscapeDataString(Fields)}&limit={count}";
+            var (status, body) = await http.Request(HttpMethod.Get, url, headers: new Dictionary<string, string> { ["Authorization"] = "OAuth " + token });
+            if (status != 200)
+            {
+                if (fromAccount && ErrorCode(body) == 190) account.MarkLost(rt.Client.Id);   // accès retiré chez Facebook : le compte passe en « à reconnecter »
+                throw new InvalidOperationException(Describe(status, body));
+            }
+            var feed = Parse(body);
+            _cache[key] = (DateTime.UtcNow, feed);
+            return feed;
+        }
+        catch when (!fresh && hit.Page != null) { return hit.Page; }
+    }
+
+    public async Task<object?> Fetch(AppRuntime rt)
+    {
+        var page = await Load(rt);
+        var media = rt.Get("showMedia", "true") != "false";
+        return new
+        {
+            kind = "facebook", page = page.Name, fetchedAt = DateTime.UtcNow,
+            posts = page.Posts.Select(p => new { id = p.Id, message = p.Message, created = p.Created, picture = media ? p.Picture : null })
+        };
+    }
+
+    public async Task<string> Test(AppRuntime rt)
+    {
+        var page = await Load(rt, fresh: true);
+        if (page.Posts.Count == 0) return $"⚠ Connexion réussie, mais « {page.Name} » n'a aucune publication lisible pour le moment.";
+        var first = page.Posts[0].Message ?? "(photo)";
+        return $"Page lue : « {page.Name} » · {page.Posts.Count} publication(s) · la plus récente : {(first.Length > 60 ? first[..57] + "…" : first)}";
+    }
+
+    /// <summary>Identifiant de la Page à partir de ce que le client colle : identifiant, nom ou adresse (facebook.com/Nom, /pages/Nom/123, profile.php?id=123). Null si rien d'exploitable.</summary>
+    public static string? PageRef(string? input)
+    {
+        var v = (input ?? "").Trim().TrimStart('@');
+        if (v.Length == 0) return null;
+        if (v.Contains('/') || v.Contains('?'))
+        {
+            if (!Uri.TryCreate(v.Contains("://") ? v : "https://" + v, UriKind.Absolute, out var u)) return null;
+            var host = u.Host.ToLowerInvariant();
+            if (host is not ("facebook.com" or "fb.com") && !host.EndsWith(".facebook.com")) return null;
+            var parts = u.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0) return null;
+            v = parts[0].Equals("profile.php", StringComparison.OrdinalIgnoreCase) ? System.Web.HttpUtility.ParseQueryString(u.Query)["id"] ?? ""
+              : parts[0].Equals("pages", StringComparison.OrdinalIgnoreCase) ? parts.LastOrDefault(p => p.All(char.IsDigit)) ?? ""
+              : parts[0];
+        }
+        return PagePattern.IsMatch(v) ? v : null;
+    }
+
+    /// <summary>Code d'erreur Meta d'une réponse de l'API Graph (190 : jeton expiré ou retiré), ou null si la réponse n'est pas une erreur lisible.</summary>
+    public static int? ErrorCode(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("error", out var e) && e.TryGetProperty("code", out var c) && c.TryGetInt32(out var n)) return n;
+        }
+        catch (JsonException) { }
+        return null;
+    }
+
+    /// <summary>Explique une erreur de l'API Graph (code d'erreur Meta) sans reprendre son texte brut.</summary>
+    public static string Describe(int status, string body)
+    {
+        return ErrorCode(body) switch
+        {
+            190 => "Le jeton d'accès est expiré ou invalide : générez-en un nouveau pour la Page.",
+            10 or >= 200 and <= 299 => "Ce jeton n'a pas l'autorisation de lire les publications de la Page (permission pages_read_engagement).",
+            100 or 803 => "Page introuvable : vérifiez son identifiant, et que le jeton est bien celui de cette Page.",
+            4 or 17 or 32 or 613 => "Facebook limite temporairement les requêtes : réessayez dans quelques minutes.",
+            _ => $"Facebook répond avec une erreur (HTTP {status})."
+        };
+    }
+
+    /// <summary>Lit la réponse de /published_posts. Une publication sans texte ni photo (partage vide, événement) est ignorée ; seules les photos en https sont gardées.</summary>
+    public static FacebookPage Parse(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var posts = new List<FacebookPost>();
+        string? name = null;
+        if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
+            foreach (var e in data.EnumerateArray())
+            {
+                string? Str(string prop) => e.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+                if (name == null && e.TryGetProperty("from", out var from) && from.TryGetProperty("name", out var fn) && fn.ValueKind == JsonValueKind.String) name = fn.GetString();
+                var message = Clean(Str("message"));
+                var picture = Str("full_picture") is { } p && p.StartsWith("https://", StringComparison.OrdinalIgnoreCase) && AppCatalog.IsHttpUrl(p) ? p : null;
+                if (message == null && picture == null) continue;
+                var created = DateTimeOffset.TryParse(Str("created_time"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var d) ? d.UtcDateTime : (DateTime?)null;
+                posts.Add(new FacebookPost(Str("id") ?? "", message, created, picture));
+            }
+        name = name?.Trim();
+        return new FacebookPage(string.IsNullOrEmpty(name) ? "Facebook" : name.Length > 100 ? name[..100] : name, posts);
+    }
+
+    private static string? Clean(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var t = Regex.Replace(text, @"\s+", " ").Trim();
+        return t.Length > 400 ? t[..399].TrimEnd() + "…" : t;
     }
 }

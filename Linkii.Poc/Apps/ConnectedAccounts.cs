@@ -29,7 +29,7 @@ public record ConnectedAccount(string Id, string Kind, string User, string Detai
 public static class ConnectedAccounts
 {
     public const string Microsoft = "microsoft", Google = "google", Canva = "canva", CalDav = "caldav", Exchange = "ews",
-                        Nextcloud = "nextcloud", Sftp = "sftp", Dropbox = "dropbox";
+                        Nextcloud = "nextcloud", Sftp = "sftp", Dropbox = "dropbox", Facebook = "facebook";
 
     /// <summary>Onglet de la page Intégrations (?tab=comptes).</summary>
     public const string Tab = "comptes";
@@ -43,6 +43,7 @@ public static class ConnectedAccounts
         // l'ordre compte : Integrations[0] = agendas, [1] = fichiers Drive (IntegrationFor) ; Slides, Docs et PowerPoint lisent des fichiers du Drive
         new(Google, "Google", "Google Calendar, Google Drive, Google Slides et Google Docs", ["cal-google", "drv-gdrive", "google-slides", "google-docs"]),
         new(Canva, "Canva", "Vos designs Canva", ["canva"]),
+        new(Facebook, "Facebook", "Les publications des Pages que vous administrez", ["facebook"]),
         new(CalDav, "Serveur CalDAV", "Nextcloud, iCloud, Zimbra, SOGo, Synology…", ["cal-caldav"]),
         new(Exchange, "Exchange sur site", "Serveur Exchange (EWS)", ["cal-ews"]),
         new(Nextcloud, "Nextcloud", "Dossiers d'un serveur Nextcloud ou ownCloud", ["drv-nextcloud"]),
@@ -81,6 +82,13 @@ public static class ConnectedAccounts
         if (t.CanvaRefreshToken.Length > 0 || t.CanvaLostUtc != null)
             list.Add(new(Canva, "Canva", t.CanvaUser.Length > 0 ? t.CanvaUser : "Compte Canva", "", t.CanvaConnectedUtc, t.CanvaRefreshToken.Length == 0, "",
                 [new("Designs (lecture et export)", true, null)]));
+        if (t.FacebookConnectedUtc != null)
+        {
+            var n = t.FacebookPages.Count;
+            list.Add(new(Facebook, "Facebook", t.FacebookUser.Length > 0 ? t.FacebookUser : "Compte Facebook",
+                n == 0 ? "Aucune Page administrée" : $"{n} Page{(n > 1 ? "s" : "")} · {string.Join(", ", t.FacebookPages.Take(3).Select(p => p.Name))}{(n > 3 ? "…" : "")}",
+                t.FacebookConnectedUtc, t.FacebookLostUtc != null, "", [new("Pages et publications (lecture)", true, null)]));
+        }
         if (SharedCalendarSources.Account(t, CalDav) is { } dav && (dav.Url.Length > 0 || dav.User.Length > 0))
             list.Add(new(CalDav, "Serveur CalDAV", dav.User.Length > 0 ? dav.User : "Sans identifiant", dav.Url, null, false, dav.LastError,
                 [new("Agendas (lecture)", true, null)]));
@@ -114,6 +122,7 @@ public static class ConnectedAccounts
     {
         Canva => "/canva/connect?tab=" + Tab,
         Dropbox => "/dropbox/connect?tab=" + Tab,
+        Facebook => "/facebook/connect?tab=" + Tab,
         _ => $"/{kind}/connect?for={purpose}&tab={Tab}"
     };
 }

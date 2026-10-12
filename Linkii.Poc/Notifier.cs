@@ -68,12 +68,16 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
     }
 
     /// <summary>Ce qu'une publication figerait de la playlist (aussi joué tel quel par le simulateur « Essayer »).</summary>
-    public List<PublishedItem> Items(Db db, Playlist p) => p.Draft
-        .Select(i => (i, m: db.Media.FirstOrDefault(x => x.Id == i.MediaId && x.ClientId == p.ClientId)))   // jamais un média d'un autre client
-        .Where(t => t.m != null && t.m.Status == null)   // une vidéo en cours de conversion n'est pas publiée
-        .Select(t => Snapshot(db, t.i, t.m!))
-        .OfType<PublishedItem>()
-        .ToList();
+    public List<PublishedItem> Items(Db db, Playlist p)
+    {
+        var growth = db.Clients.FirstOrDefault(c => c.Id == p.ClientId)?.IsGrowth == true;   // QR code de comptage des scans : licence Growth
+        return p.Draft
+            .Select(i => (i, m: db.Media.FirstOrDefault(x => x.Id == i.MediaId && x.ClientId == p.ClientId)))   // jamais un média d'un autre client
+            .Where(t => t.m != null && t.m.Status == null)   // une vidéo en cours de conversion n'est pas publiée
+            .Select(t => Snapshot(db, t.i, t.m!, growth))
+            .OfType<PublishedItem>()
+            .ToList();
+    }
 
     /// <summary>Widget d'écran : app en surimpression permanente, à la position libre choisie dans l'éditeur de l'écran.</summary>
     private PublishedItem? Widget(ScreenWidget w)
@@ -97,14 +101,14 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
     /// Instantané d'un élément de playlist à la publication. Pour une app : paramètres (publics et secrets) figés tels qu'ils sont à cet instant ;
     /// les modifications faites ensuite sur l'instance n'atteignent les écrans qu'à la publication suivante.
     /// </summary>
-    private PublishedItem? Snapshot(Db db, PlaylistItem i, MediaItem m)
+    private PublishedItem? Snapshot(Db db, PlaylistItem i, MediaItem m, bool growth)
     {
         if (m.Type == "app" && string.IsNullOrEmpty(m.AppId)) return null;   // reste d'un ancien widget : jamais publié
         if (string.IsNullOrEmpty(m.AppId))
             return new PublishedItem
             {
                 Id = i.Id, Type = m.Type, Url = m.FileName == null ? null : "/media/" + m.FileName, MediaId = m.Id,
-                Placement = "full", DurationSec = i.DurationSec
+                Placement = "full", DurationSec = i.DurationSec, Qr = QrTracking.Overlay(i, growth, "full")
             };
 
         var app = catalog.Find(m.AppId);
@@ -118,6 +122,7 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
             Settings = new(m.Settings), Secrets = new(m.Secrets),
             DataId = app.Data ? i.Id.ToString() : null
         };
+        pi.Qr = QrTracking.Overlay(i, growth, pi.Placement);
         if (app.Duration == "content" && i.DurationMode == "fixed")   // durée choisie pour cet élément de playlist : la vidéo est coupée ou rejouée à ce terme
             pi.DurationMode = "fixed";
         else if (app.Duration == "content")   // l'app décide de la durée (fin de la vidéo) ; la durée maximale limite la boucle

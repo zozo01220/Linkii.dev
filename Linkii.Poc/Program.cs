@@ -47,6 +47,7 @@ builder.Services.AddSingleton<SafeHttp>();
 builder.Services.AddSingleton<IAppProvider, WeatherProvider>();
 builder.Services.AddSingleton<IAppProvider, CalendarProvider>();
 builder.Services.AddSingleton<IAppProvider, RssProvider>();
+builder.Services.AddSingleton<IAppProvider, FacebookProvider>();
 builder.Services.AddSingleton<IAppProvider, WebPageProvider>();
 builder.Services.AddSingleton<IAppProvider, YouTubeProvider>();
 builder.Services.AddSingleton<AppProviders>();
@@ -57,11 +58,13 @@ builder.Services.AddSingleton<ScreenControl>();   // contrôle du direct (Growth
 builder.Services.AddHostedService<ScreenWatchWorker>();   // commandes sans réponse, pauses terminées, alertes « écran hors ligne »
 builder.Services.AddHostedService<SignupWorker>();   // inscriptions non validées supprimées, rappel et fin des essais gratuits
 builder.Services.AddSingleton<DropboxAuth>();   // « Se connecter avec Dropbox » (lecture seule)
+builder.Services.AddSingleton<FacebookAuth>();   // « Se connecter avec Facebook » (Pages administrées, lecture seule)
 builder.Services.AddSingleton<RemoteDrives>();   // sessions Nextcloud (WebDAV), SFTP et Dropbox
 builder.Services.AddSingleton<DriveService>();
 builder.Services.AddSingleton<CloudFileService>();
 builder.Services.AddHostedService<CloudFilesWorker>();   // Google Slides, Docs et Microsoft PowerPoint : mise à jour quand le fichier change (réglage de chaque contenu, une heure par défaut)
 builder.Services.AddHostedService<DriveSyncWorker>();   // dossiers des Drives : synchronisés toutes les 15 minutes
+builder.Services.AddSingleton<ScanLog>();   // scans des QR codes de comptage (Growth) : journal par client, 90 jours
 builder.Services.AddScoped<AppService>();
 builder.Services.AddScoped<MediaLibrary>();
 
@@ -231,9 +234,11 @@ app.Use(async (ctx, next) =>
     var open = p.StartsWithSegments("/login") || p.StartsWithSegments("/api") || p.StartsWithSegments("/hubs")
                || p.StartsWithSegments("/_framework") || p.StartsWithSegments("/_blazor") || p.StartsWithSegments("/logout")
                || p.StartsWithSegments("/internal") || p.StartsWithSegments("/media")   // /media fait son propre contrôle d'accès
+               || p.StartsWithSegments("/q")   // adresse courte des QR codes de comptage : scannée par le téléphone d'un visiteur, sans compte
                || p.StartsWithSegments("/canva/callback")   // retour de Canva : identifié par son « state », sur le domaine principal
                || p.StartsWithSegments("/google/callback")  // retour de Google (Drive) : idem
                || p.StartsWithSegments("/dropbox/callback")  // retour de Dropbox : idem
+               || p.StartsWithSegments("/facebook/callback")  // retour de Facebook : idem
                || p.StartsWithSegments("/microsoft/callback")  // retour de Microsoft : idem
                || p.StartsWithSegments("/linkedin/callback") || p.StartsWithSegments("/github/callback")  // retours de LinkedIn et GitHub (connexion seulement)
                || p.StartsWithSegments("/manifest.webmanifest");   // le navigateur le demande sans cookie de session
@@ -310,6 +315,19 @@ app.MapGet("/dropbox/connect", (HttpContext ctx, DropboxAuth dropbox) =>
 });
 app.MapGet("/dropbox/callback", async (HttpRequest req, DropboxAuth dropbox) =>
     Results.Redirect(await dropbox.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
+
+// Compte Facebook : « Se connecter avec Facebook » depuis Intégrations › Comptes connectés (retour sur cet onglet) ou la fenêtre d'un contenu Facebook,
+// application Meta de la plateforme, lecture seule des Pages administrées. Un seul compte par organisation.
+app.MapGet("/facebook/connect", (HttpContext ctx, FacebookAuth facebook) =>
+{
+    var cid = ctx.User.GetGuid(Claims.Client);
+    if (cid == null) return Results.Redirect("/");
+    if (!facebook.IsConfigured) return Results.Redirect("/integrations?facebook=unconfigured");
+    var here = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
+    return Results.Redirect(facebook.StartAuthorization(cid.Value, here + AccountPurposes.ReturnPage(ctx.Request), here));
+});
+app.MapGet("/facebook/callback", async (HttpRequest req, FacebookAuth facebook) =>
+    Results.Redirect(await facebook.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
 
 // Compte Microsoft : « Se connecter avec Microsoft » depuis Intégrations › Microsoft 365 (?for=calendar), OneDrive et SharePoint (?for=drive)
 // ou Comptes connectés (?for=all&tab=comptes : retour sur cet onglet),
@@ -447,6 +465,30 @@ app.MapPost("/space/exit", async (HttpContext ctx, JsonStore store) =>
 }).RequireAuthorization().DisableAntiforgery();
 
 // Caddy / Traefik (certificat à la demande) : n'émettre un certificat que pour un domaine déclaré par un revendeur actif.
+// QR code de comptage : le scan est compté (licence Growth, contenu activé, pas un robot) puis le visiteur est redirigé vers la destination.
+// La redirection a toujours lieu tant que le contenu existe, même si le suivi est coupé : un QR encore affiché ne doit jamais être cassé.
+app.MapGet("/q/{code}", (string code, HttpContext ctx, JsonStore store, ScanLog scans) =>
+{
+    if (!QrTracking.IsCode(code)) return Results.NotFound();
+    var hit = store.Read(db =>
+    {
+        foreach (var p in db.Playlists)
+            if (p.Draft.FirstOrDefault(x => x.QrCode == code) is { } it)
+            {
+                var client = db.Clients.FirstOrDefault(c => c.Id == p.ClientId);
+                return new QrHit(p.ClientId, it.Id, QrTracking.Destination(it.QrUrl), it.QrOn && client is { IsGrowth: true, Suspended: false });
+            }
+        return null;
+    });
+    if (hit?.Destination == null) return Results.NotFound();
+    var ua = ctx.Request.Headers.UserAgent.ToString();
+    if (hit.Counts && !QrTracking.LooksLikeBot(ua, ctx.Request.Method))
+        scans.Append(hit.ClientId, new ScanEntry(DateTime.UtcNow, hit.ItemId, scans.Visitor(ctx.Connection.RemoteIpAddress?.ToString(), ua, DateTime.UtcNow)));
+    ctx.Response.Headers.CacheControl = "no-store";   // chaque scan doit passer par le serveur
+    ctx.Response.Headers["Referrer-Policy"] = "no-referrer";
+    return Results.Redirect(hit.Destination);   // 302
+});
+
 app.MapGet("/internal/tls-allow", (string domain, ResellerResolver resolver) =>
     resolver.IsKnownDomain(domain) ? Results.Ok() : Results.StatusCode(403));
 
@@ -727,6 +769,7 @@ app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 app.Run();
 
 record AckDto(string Version, int? W, int? H, string? Stage = null);
+record QrHit(Guid ClientId, Guid ItemId, string? Destination, bool Counts);
 record PlayDto(Guid? MediaId, string? AppId, long Start, int Sec);
 record StartDto(int? W, int? H);
 record DeviceDto(string? Kind, string? Os, string? Model, string? App, long? BootMs);

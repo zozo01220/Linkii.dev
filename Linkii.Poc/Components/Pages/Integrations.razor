@@ -8,6 +8,7 @@
 @inject GoogleAuth GoogleAuth
 @inject MicrosoftAuth MsAuth
 @inject DropboxAuth DropboxAuth
+@inject FacebookAuth FacebookAuth
 
 <div class="page-head">
     <div>
@@ -27,7 +28,7 @@
                     {
                         var kind = k;
                         var ready = Available(kind.Id);
-                        @if (kind.Id is ConnectedAccounts.Canva or ConnectedAccounts.Dropbox && ready)
+                        @if (kind.Id is ConnectedAccounts.Canva or ConnectedAccounts.Dropbox or ConnectedAccounts.Facebook && ready)
                         {
                             <a role="menuitem" href="@ConnectedAccounts.ConnectUrl(kind.Id)" target="_top"><AccountLogo Kind="@kind.Id" Size="20" /><span><b>@kind.Name</b><small>@kind.Summary</small></span></a>
                         }
@@ -118,7 +119,7 @@ else
     {
         <div class="card empty">
             <div class="big">Aucun compte connecté</div>
-            <p>Connectez un compte Microsoft, Google, Canva ou Dropbox, ou un serveur (agendas, Nextcloud, SFTP) : ses agendas, dossiers ou designs seront proposés dans vos listes de lecture.</p>
+            <p>Connectez un compte Microsoft, Google, Canva, Dropbox ou Facebook, ou un serveur (agendas, Nextcloud, SFTP) : ses agendas, dossiers ou designs seront proposés dans vos listes de lecture.</p>
         </div>
     }
     <div class="acc-list">
@@ -126,7 +127,7 @@ else
         {
             var a = acc;
             var state = AccState(a);
-            var oauth = a.Id is ConnectedAccounts.Microsoft or ConnectedAccounts.Google or ConnectedAccounts.Canva or ConnectedAccounts.Dropbox;
+            var oauth = a.Id is ConnectedAccounts.Microsoft or ConnectedAccounts.Google or ConnectedAccounts.Canva or ConnectedAccounts.Dropbox or ConnectedAccounts.Facebook;
             <article class="acc-card @(flash == a.Id ? "flash" : "")" tabindex="-1" @ref="accRefs[a.Id]" aria-labelledby="acc-@a.Id">
                 <div class="acc-head">
                     <AccountLogo Kind="@a.Id" Size="28" />
@@ -315,7 +316,7 @@ else
     };
 
     // Ordre des cartes dans leur groupe (les apps absentes de la liste suivent, par nom).
-    private static readonly string[] Order = { "image", "slideshow-images", "video", "slideshow-videos", "canva", "pdf", "google-slides", "google-docs", "ms-powerpoint", "youtube", "rss", "webpage" };
+    private static readonly string[] Order = { "image", "slideshow-images", "video", "slideshow-videos", "canva", "pdf", "google-slides", "google-docs", "ms-powerpoint", "youtube", "rss", "facebook", "webpage" };
 
     [SupplyParameterFromQuery(Name = "tab")] public string? TabParam { get; set; }
 
@@ -393,6 +394,8 @@ else
             if (AccountProblem(ConnectedAccounts.Canva, true) is { } p) return CatalogView.Entry.Of(a, p.Item1, p.Item2, false) with { StatusTitle = p.Item3 };
             return CatalogView.Entry.Of(a, "Connecté", "en-ligne", false);
         }
+        if (a.Id == "facebook" && AccountOf(ConnectedAccounts.Facebook) is { Lost: true } fb)   // sans compte, l'intégration marche encore avec un jeton collé à la main
+            return CatalogView.Entry.Of(a, "Compte à reconnecter", "hors-ligne", false) with { StatusTitle = $"La connexion au compte {fb.Kind} a expiré : reconnectez-le dans Comptes connectés." };
         return CatalogView.Entry.Of(a, "Active", "en-ligne", false);
     }
 
@@ -490,6 +493,7 @@ else
         ConnectedAccounts.Google => GoogleAuth.IsConfigured,
         ConnectedAccounts.Canva => canvaReady,
         ConnectedAccounts.Dropbox => DropboxAuth.IsConfigured,
+        ConnectedAccounts.Facebook => FacebookAuth.IsConfigured,
         _ => true
     };
 
@@ -540,6 +544,7 @@ else
             case ConnectedAccounts.Google: await GoogleAuth.Disconnect(Store.ClientId); break;
             case ConnectedAccounts.Canva: Canva.Disconnect(Store.ClientId); break;
             case ConnectedAccounts.Dropbox: await DropboxAuth.Disconnect(Store.ClientId); break;
+            case ConnectedAccounts.Facebook: FacebookAuth.Disconnect(Store.ClientId); break;
             case ConnectedAccounts.Nextcloud or ConnectedAccounts.Sftp: Store.Write(d => d.Tenant.DriveAccounts.RemoveAll(x => x.Source == id)); break;
             default:
                 Store.Write(d =>
@@ -565,6 +570,7 @@ else
         GoogleReturn();
         MicrosoftReturn();
         DropboxReturn();
+        FacebookReturn();
     }
 
     private void Load()
@@ -713,6 +719,27 @@ else
             case "expired": Toast.Error("La demande de connexion à Dropbox a expiré. Recommencez."); break;
             case "unconfigured": Toast.Error("La connexion Dropbox n'est pas encore configurée sur cette plateforme."); break;
             case not null: Toast.Error("Dropbox a refusé la connexion. Réessayez dans un instant."); break;
+        }
+    }
+
+    // Retour de « Se connecter avec Facebook » (/facebook/callback) : l'intégration Facebook est activée et le compte montré.
+    private void FacebookReturn()
+    {
+        var q = System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query)["facebook"];
+        switch (q)
+        {
+            case "ok" or "nopages":
+                if (!enabled.Contains("facebook")) { Svc.Enable("facebook"); }
+                Load();
+                var user = AccountOf(ConnectedAccounts.Facebook)?.User;
+                if (q == "ok") Toast.Ok($"Facebook connecté{(user is { Length: > 0 } ? $" ({user})" : "")}. Choisissez une de ses Pages depuis une liste de lecture.");
+                else Toast.Error("Facebook est connecté, mais ce compte n'administre aucune Page (ou n'a pas accordé l'accès aux Pages). Reconnectez-vous en cochant vos Pages.");
+                if (accountsTab) ShowAccount(ConnectedAccounts.Facebook);
+                break;
+            case "denied": Toast.Error("Connexion à Facebook annulée."); break;
+            case "expired": Toast.Error("La demande de connexion à Facebook a expiré. Recommencez."); break;
+            case "unconfigured": Toast.Error("La connexion Facebook n'est pas encore configurée sur cette plateforme."); break;
+            case not null: Toast.Error("Facebook a refusé la connexion. Réessayez dans un instant."); break;
         }
     }
 

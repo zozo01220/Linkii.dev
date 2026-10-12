@@ -118,6 +118,21 @@
                     case "gfile":
                         <CloudFileField Field="f" Values="Values" InstanceId="InstanceId" OnChange="CanvaChanged" />
                         break;
+                    case "facebookpage":
+                        @if (fbPages.Count > 0)
+                        {
+                            <select @bind="Values[k]" @bind:after="Changed">
+                                <option value="">— Choisir une Page —</option>
+                                @foreach (var pg in fbPages) { <option value="@pg.Id">@pg.Name</option> }
+                                @if (Values[k].Length > 0 && fbPages.All(x => x.Id != Values[k])) { <option value="@Values[k]">@Values[k]</option> }
+                            </select>
+                        }
+                        else
+                        {
+                            <input type="text" maxlength="@f.MaxLength" placeholder="@f.Placeholder" @bind="Values[k]" @bind:event="oninput" />
+                            <small>@(fbLost ? "Le compte Facebook est à reconnecter" : "Aucun compte Facebook connecté") : <a href="/integrations?tab=comptes">connectez-le dans Intégrations › Comptes connectés</a>, ou saisissez la Page ici et collez son jeton dans les options avancées.</small>
+                        }
+                        break;
                     case "mailbox":
                         @if (rooms.Count > 0)
                         {
@@ -188,9 +203,18 @@
     private bool msConfigured;
     private List<SharedCalendar> calendars = new();
     private List<DriveFolder> folders = new();
+    private List<FacebookPageAccess> fbPages = new();
+    private bool fbLost;
 
     protected override async Task OnInitializedAsync()
     {
+        if (Manifest.Settings.Any(f => f.Type == "facebookpage"))
+        {
+            // Pages du compte Facebook connecté ; la Page déjà choisie reste affichée si le compte a changé
+            var t = Store.Read(d => d.Tenant);
+            fbPages = FacebookAuth.Pages(t);
+            fbLost = t.FacebookLostUtc != null;
+        }
         if (Manifest.Settings.FirstOrDefault(f => f.Type == "drive") is { } df)
         {
             // dossiers des sources actives ; le dossier déjà choisi reste affiché même si sa source a été désactivée

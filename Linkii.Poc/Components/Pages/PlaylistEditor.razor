@@ -4,6 +4,8 @@
 @inject AppService Svc
 @inject CanvaService Canva
 @inject IJSRuntime JS
+@inject ScanLog Scans
+@inject NavigationManager Nav
 @inject Toaster Toast
 @using Microsoft.JSInterop
 @implements IDisposable
@@ -64,6 +66,7 @@
                     <div class="th">
                         @if (m != null) { <MediaThumb Media="m" All="media" /> }
                         @if (Helpers.YoutubeBadge(m) is { } badge) { <span class="dur">@badge</span> }
+                        <QrBadge Qr="RowQr(it)" Mini="true" />
                     </div>
                     @{ var kind = m?.AppId != null ? Svc.Find(m.AppId)?.Name ?? "App" : m?.Type == "video" ? "Vidéo" : "Image"; }
                     @if (m != null)
@@ -75,7 +78,15 @@
                         </button>
                     }
                     else { <div><b>(supprimé)</b></div> }
-                    <div class="dur-cell mono" title="Temps alloué à ce contenu">@Duration(it, m)</div>
+                    <div class="dur-cell">
+                        @if (growth && it.QrOn && it.Placement == "full" && m != null)
+                        {
+                            @* scans du QR code (90 derniers jours) : un clic ouvre le réglage, onglet « QR code » *@
+                            var scans = scanCounts.TryGetValue(it.Id, out var sc) ? sc.Scans : 0;
+                            <button type="button" class="item-qr" title="Scans du QR code ces 90 derniers jours : ouvrir le réglage" @onclick='() => OpenSettings(pl, it, m, "qr")'><Ico Name="qr" Size="13" /> <b>@scans</b> scan@(scans > 1 ? "s" : "")</button>
+                        }
+                        <span class="mono" title="Temps alloué à ce contenu">@Duration(it, m)</span>
+                    </div>
                     <div class="kebab">
                         <button type="button" class="kebab-btn" aria-label="Actions pour @(m?.Name ?? "ce contenu")" aria-haspopup="menu" aria-expanded="@(menuFor == it ? "true" : "false")"
                                 @onclick="() => menuFor = menuFor == it ? null : it"><Ico Name="dots-v" Size="18" /></button>
@@ -151,6 +162,41 @@
 }
 
 
+@{
+    // Onglets « Contenu / QR code » de la fenêtre d'un contenu, en tête de la colonne de droite (comme « Écran / Widgets » de l'éditeur d'écran).
+    // Partagés par la création (galerie → fenêtre de l'app) et par la fenêtre de réglage d'un contenu existant.
+    var qrAngle = mPlacement != "full";   // un contenu en angle ou en bandeau n'a pas de QR code : l'onglet est grisé
+    var qrScans = mItem != null && scanCounts.TryGetValue(mItem.Id, out var qc) ? qc.Scans : 0;
+    RenderFragment qrTabs = @<div class="se-utabs" role="tablist" aria-label="Réglage du contenu">
+        <button type="button" role="tab" aria-selected="@(mTab == "content" ? "true" : "false")" class="@(mTab == "content" ? "on" : "")" @onclick='() => mTab = "content"'><Ico Name="monitor" Size="18" /> Contenu</button>
+        <button type="button" role="tab" aria-selected="@(mTab == "qr" ? "true" : "false")" class="@(mTab == "qr" && !qrAngle ? "on" : "")" disabled="@qrAngle"
+                title="@(qrAngle ? "Le QR code n'est disponible que pour un contenu en pleine page." : "")" @onclick='() => mTab = "qr"'>
+            <Ico Name="qr" Size="18" /> QR code
+            @if (!growth) { <span class="tab-lock"><Ico Name="lock" Size="12" /> Growth</span> }
+            else if (mQrOn && qrScans > 0) { <small class="on-badge">@qrScans</small> }
+        </button>
+    </div>;
+    RenderFragment qrPreview = @<div>
+        <h4 class="ci-t">Aperçu de l'écran</h4>
+        <QrPlacer Media="(newForm ?? itemForm)?.PickedMedia() ?? mMedia" Fit="@((newForm ?? itemForm)?.PreviewFit ?? "contain")" All="media" Text="@(growth && mQrOn ? QrText : null)" X="mQrX" Y="mQrY" Size="mQrSize" Label="@mQrLabel" OnMoved="QrMoved" />
+    </div>;
+    RenderFragment qrPane = @<div class="ci-qr">
+        <div class="ci-qr-master">
+            <div><b>Compter les scans du QR code</b><small>Un QR code est ajouté au contenu ; chaque scan est comptabilisé.</small></div>
+            <input type="checkbox" class="ios" checked="@(growth && mQrOn)" disabled="@(!growth)" aria-label="Compter les scans du QR code" @onchange="e => ToggleQr(e.Value is true)" />
+        </div>
+        @if (!growth) { <div class="ci-qr-locked">@Plans.LockedHint.</div> }
+        else
+        {
+            <div class="qr-fields @(mQrOn ? "" : "off")" inert="@(!mQrOn)">
+                <div class="dw-field"><label for="qr-url">Adresse de destination *</label><input id="qr-url" type="text" inputmode="url" maxlength="@QrTracking.UrlMax" placeholder="https://…" @bind="mQrUrl" @bind:event="oninput" /></div>
+                <div class="dw-field"><label for="qr-lbl">Texte sous le QR code</label><input id="qr-lbl" type="text" maxlength="@QrTracking.LabelMax" @bind="mQrLabel" @bind:event="oninput" /></div>
+                <div class="dw-field"><label for="qr-size">Taille <span class="mono">@Math.Round(mQrSize) %</span></label><input id="qr-size" type="range" min="@QrTracking.MinSize" max="@QrTracking.MaxSize" step="1" value="@Math.Round(mQrSize)" @oninput="ChangeQrSize" /></div>
+            </div>
+        }
+    </div>;
+}
+
 @if (newApp != null && Current is { } target)
 {
     var a = newApp;
@@ -166,12 +212,13 @@
             <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => newApp = null"><Ico Name="x" Size="20" /></button>
         </div>
         <div class="modal-body">
-            <AppInstanceForm @key="a.Id" AppId="@a.Id" ShowActions="false" OnSaved="item => AddApp(target, item)" OnRenamed="n => newName = n" @ref="newForm" />
+            <AppInstanceForm @key="a.Id" AppId="@a.Id" ShowActions="false" OnSaved="item => AddApp(target, item)" OnRenamed="n => newName = n" @ref="newForm"
+                             ConfTabs="qrTabs" OtherTab="@(mTab == "qr" && !qrAngle)" OtherPane="qrPane" OtherPreview="qrPreview" PreviewQr="PreviewQr" />
         </div>
         <div class="modal-foot">
             <button class="btn ghost" @onclick="() => newApp = null">Annuler</button>
             @if (AppInstanceForm.NeedsTest(a)) { <button class="btn ghost" @onclick="() => newForm!.Test()">Tester</button> }
-            <button class="btn" @onclick="() => newForm!.Save()">Ajouter à la liste de lecture</button>
+            <button class="btn" @onclick="SaveNew">Ajouter à la liste de lecture</button>
         </div>
     </div>
 }
@@ -241,7 +288,7 @@
         @if (isApp)
         {
             <div class="modal-body">
-                <AppInstanceForm @key="mMedia!.Id" AppId="@(mMedia!.AppId!)" InstanceId="mMedia!.Id" ShowActions="false" OnSaved="_ => SaveSettings()" OnRenamed="n => itemName = n" Extra="appExtra" @ref="itemForm" />
+                <AppInstanceForm @key="mMedia!.Id" AppId="@(mMedia!.AppId!)" InstanceId="mMedia!.Id" ShowActions="false" OnSaved="_ => SaveSettings()" OnRenamed="n => itemName = n" Extra="appExtra" ConfTabs="qrTabs" OtherTab="@(mTab == "qr" && !qrAngle)" OtherPane="qrPane" OtherPreview="qrPreview" PreviewQr="PreviewQr" @ref="itemForm" />
             </div>
         }
         else { @listSettings }
@@ -282,7 +329,26 @@
 
     private void OpenPicker(int? at) { insertAt = at; appSearch = ""; appCat = ""; picking = true; focusPicker = true; }
 
-    private void PickApp(AppManifest app) { picking = false; newApp = app; newName = null; }
+    private void PickApp(AppManifest app)
+    {
+        picking = false; newApp = app; newName = null;
+        // réglages du QR code pour le nouveau contenu : mêmes champs que la fenêtre d'un contenu, réinitialisés
+        mItem = null; mPlaylist = null; mMedia = null; mPlacement = "full";
+        mTab = "content"; mQrOn = false; mQrCode = null; mQrUrl = ""; mQrLabel = "";
+        mQrSize = QrTracking.DefaultSize; (mQrX, mQrY) = (QrTracking.DefaultX, QrTracking.DefaultY);
+    }
+
+    // Ajout d'un contenu : le QR code (licence Growth) est vérifié avant tout enregistrement, comme pour un contenu existant.
+    private async Task SaveNew()
+    {
+        if (growth && mQrOn && mPlacement == "full" && QrTracking.Destination(mQrUrl) == null)
+        {
+            mTab = "qr";
+            Toast.Error("Saisissez l'adresse de destination du QR code (adresse web complète, par exemple https://www.exemple.ch).");
+            return;
+        }
+        await newForm!.Save();
+    }
 
     // Durée d'un tour de boucle : contenus pleine page (une vidéo « jusqu'à la fin » compte pour sa durée connue).
     private int LoopSeconds(Playlist p) => p.Draft.Where(i => i.Placement == "full").Sum(i =>
@@ -308,6 +374,8 @@
         playlists = Store.Read(d => d.Playlists.ToList());
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());   // hors vidéos en conversion / en échec
         enabledApps = Svc.Installed().Select(i => Svc.Find(i.AppId)).OfType<AppManifest>().Where(a => !a.ScreenWidget).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        growth = Store.Read(d => d.Tenant.IsGrowth);
+        scanCounts = growth ? Scans.Counts(Store.ClientId, DateTime.UtcNow.AddDays(-ScanLog.RetentionDays)) : new();
     }
 
     // Le contenu de l'app vient d'être créé avec ses réglages : il rejoint la liste de lecture à l'endroit choisi (par défaut, à la fin).
@@ -316,7 +384,20 @@
         var dur = Store.Read(d => d.Tenant.DefaultDurationSec);
         var placement = PlacementsFor(item).Select(o => o.Id).DefaultIfEmpty("full").Contains("full") ? "full" : PlacementsFor(item).First().Id;
         var at = insertAt is { } i && i >= 0 && i < pl.Draft.Count ? i : pl.Draft.Count;
-        Store.Write(d => { pl.Draft.Insert(at, new PlaylistItem { MediaId = item.Id, DurationSec = dur, Placement = placement }); pl.Touch(); });
+        // QR code de comptage : réglé dans l'onglet « QR code » de la fenêtre de création (licence Growth, contenu en pleine page)
+        var qr = growth && mQrOn && placement == "full";
+        var qrCode = qr ? mQrCode ?? QrTracking.NewCode() : null; var qrUrl = QrTracking.Destination(mQrUrl) ?? mQrUrl.Trim();
+        var qrLabel = QrTracking.CleanLabel(mQrLabel); var qrBase = QrTracking.Origin(Nav.BaseUri);
+        var (qx, qy, qs) = (mQrX, mQrY, mQrSize);
+        Store.Write(d =>
+        {
+            pl.Draft.Insert(at, new PlaylistItem
+            {
+                MediaId = item.Id, DurationSec = dur, Placement = placement,
+                QrOn = qr, QrCode = qrCode, QrUrl = qr ? qrUrl : null, QrLabel = qrLabel, QrBase = qrBase, QrX = qx, QrY = qy, QrSize = qs
+            });
+            pl.Touch();
+        });
         insertAt = null;
         newApp = null;
         Toast.Ok($"« {item.Name} » ajouté à la liste de lecture.");
@@ -326,6 +407,13 @@
     // App : ses réglages sont enregistrés d'abord (validation comprise), puis la position et la durée dans la liste de lecture.
     private async Task SaveAll()
     {
+        // QR code activé : une destination valide est nécessaire (vérifié avant d'enregistrer quoi que ce soit)
+        if (growth && mMedia?.AppId != null && mPlacement == "full" && mQrOn && QrTracking.Destination(mQrUrl) == null)
+        {
+            mTab = "qr";
+            Toast.Error("Saisissez l'adresse de destination du QR code (adresse web complète, par exemple https://www.exemple.ch).");
+            return;
+        }
         if (mMedia?.AppId != null && itemForm != null) await itemForm.Save();
         else SaveSettings();
     }
@@ -357,15 +445,52 @@
     private string mPlacement = "full", mMode = "content";
     private int mSeconds = 8;
 
-    private void OpenSettings(Playlist pl, PlaylistItem it, MediaItem? m)
+    // QR code de comptage des scans (onglet « QR code », licence Growth) : réglages en cours d'édition, enregistrés avec la fenêtre
+    private string mTab = "content";
+    private bool mQrOn;
+    private string mQrUrl = "", mQrLabel = "";
+    private string? mQrCode;
+    private double mQrX = QrTracking.DefaultX, mQrY = QrTracking.DefaultY, mQrSize = QrTracking.DefaultSize;
+    private bool growth;
+    private Dictionary<Guid, (int Scans, int Visitors)> scanCounts = new();
+
+    private void OpenSettings(Playlist pl, PlaylistItem it, MediaItem? m, string tab = "content")
     {
         mPlaylist = pl; mItem = it; mMedia = m; itemName = null;
         mPlacement = it.Placement;
         mMode = it.DurationMode == "fixed" ? "fixed" : "content";
         mSeconds = it.DurationSec;
+        mTab = growth && tab == "qr" && it.Placement == "full" ? "qr" : "content";
+        mQrOn = it.QrOn; mQrCode = it.QrCode; mQrUrl = it.QrUrl ?? ""; mQrLabel = it.QrLabel ?? "";
+        mQrSize = QrTracking.ClampSize(it.QrSize);
+        (mQrX, mQrY) = QrTracking.ClampPos(it.QrX, it.QrY, mQrSize);
     }
 
-    private void CloseSettings() { mItem = null; mPlaylist = null; mMedia = null; }
+    private void CloseSettings() { mItem = null; mPlaylist = null; mMedia = null; mTab = "content"; }
+
+    // Adresse encodée dans le QR code de l'aperçu : l'adresse courte réelle (code déjà créé) ou un exemple tant que le contenu n'est pas enregistré.
+    private string? QrText => QrTracking.ShortUrl(QrTracking.Origin(Nav.BaseUri), mQrCode ?? "XXXXXXXX");
+
+    // QR dessiné sur les aperçus de la fenêtre (image, carrousel, grille) : réglages en cours, seulement si le contenu est en pleine page
+    private PublishedQr? PreviewQr => growth && mQrOn && mPlacement == "full" && !string.IsNullOrWhiteSpace(mQrUrl) ? QrTracking.Build(QrText, mQrX, mQrY, mQrSize, mQrLabel) : null;
+
+    // QR de la vignette d'une ligne : celui qui sera publié (réglages enregistrés)
+    private PublishedQr? RowQr(PlaylistItem it) => growth ? QrTracking.Overlay(it, true, it.Placement) : null;
+
+    private void ToggleQr(bool on)
+    {
+        mQrOn = on;
+        if (on) mQrCode ??= QrTracking.NewCode();   // le code ne change plus ensuite : le QR affiché sur l'écran reste valable
+    }
+
+    private void ChangeQrSize(ChangeEventArgs e)
+    {
+        if (!double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v)) return;
+        mQrSize = QrTracking.ClampSize(v);
+        (mQrX, mQrY) = QrTracking.ClampPos(mQrX, mQrY, mQrSize);
+    }
+
+    private void QrMoved((double X, double Y) p) => (mQrX, mQrY) = QrTracking.ClampPos(p.X, p.Y, mQrSize);
 
     private void ChangeMode(ChangeEventArgs e)
     {
@@ -380,11 +505,20 @@
         var needsSeconds = mPlacement == "full" && (!content || mMode == "fixed");
         if (needsSeconds && (mSeconds < 1 || mSeconds > 86400)) { Toast.Error("La durée doit être comprise entre 1 et 86 400 secondes."); return; }
         var placement = mPlacement; var mode = mMode; var seconds = mSeconds;
+        var qr = mMedia?.AppId != null && growth;   // le QR code ne se règle que pour un contenu d'app, avec la licence Growth
+        var qrOn = mQrOn; var qrUrl = QrTracking.Destination(mQrUrl) ?? mQrUrl.Trim(); var qrLabel = QrTracking.CleanLabel(mQrLabel);
+        var qrCode = qrOn ? mQrCode ?? QrTracking.NewCode() : mQrCode ?? item.QrCode; var qrBase = QrTracking.Origin(Nav.BaseUri);
+        double qx = mQrX, qy = mQrY, qs = mQrSize;
         Store.Write(d =>
         {
             item.Placement = placement;
             if (content) item.DurationMode = mode;
             if (needsSeconds) item.DurationSec = seconds;
+            if (qr)
+            {
+                item.QrOn = qrOn; item.QrCode = qrCode; item.QrUrl = qrUrl; item.QrLabel = qrLabel; item.QrBase = qrBase;
+                item.QrX = qx; item.QrY = qy; item.QrSize = qs;
+            }
             pl.Touch();   // à publier depuis la page Écrans
         });
         Toast.Ok("Paramètres enregistrés.");

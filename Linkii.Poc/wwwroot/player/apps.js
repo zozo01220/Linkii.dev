@@ -191,6 +191,71 @@
     }, 5 * 60 * 1000);
   });
 
+  /* ---------- Facebook : publications d'une Page (mur de 4, carte unique, dernière publication) ---------- */
+  A.register('facebook', function (h) {
+    var s = h.settings, el = h.el, mode = s.mode === 'single' || s.mode === 'latest' ? s.mode : 'wall';
+    var posts = [], name = 'Facebook', page = 0, sig = null, per = mode === 'wall' ? 4 : 1;
+    var pageCount = function () { return Math.max(1, Math.ceil((mode === 'latest' ? Math.min(1, posts.length) : posts.length) / per)); };
+
+    function card(p) {
+      var c = document.createElement('div');
+      c.className = 'fb-card' + (p.picture ? '' : ' txt');
+      if (p.picture) {
+        var img = document.createElement('img');
+        img.alt = ''; img.src = p.picture;
+        img.onerror = function () { img.remove(); c.className += ' txt'; };   // photo expirée ou hors ligne : la carte garde son texte
+        c.appendChild(img);
+      }
+      var t = document.createElement('div'); t.className = 'fb-t';
+      var m = document.createElement('div'); m.className = 'fb-x'; m.textContent = p.message || '';
+      var d = document.createElement('div'); d.className = 'fb-m';
+      d.textContent = name + (p.created ? ' · ' + h.shortDate(Date.parse(p.created)) : '');
+      t.appendChild(m); t.appendChild(d); c.appendChild(t);
+      return c;
+    }
+
+    function draw() {
+      var list = mode === 'latest' ? posts.slice(0, 1) : posts.slice(page * per, page * per + per);
+      var key = page + '|' + name + '|' + list.map(function (p) { return p.id + p.picture; }).join(',');
+      if (key === sig) return;   // rien de changé : pas de redessin (les photos ne clignotent pas)
+      sig = key;
+      if (h.compact) {   // bandeau : textes défilants
+        var txt = posts.filter(function (p) { return p.message; }).map(function (p) { return h.esc(p.message); }).join('<i class="sep">•</i>');
+        h.ticker(txt || h.esc('Aucune publication'), true, 1.6);
+        return;
+      }
+      el.textContent = '';
+      var head = document.createElement('div'); head.className = 'fb-h';
+      var logo = document.createElement('b'); logo.textContent = 'f';
+      var title = document.createElement('span'); title.textContent = name;
+      head.appendChild(logo); head.appendChild(title); el.appendChild(head);
+      if (!list.length) {
+        var e = document.createElement('div'); e.className = 'dl-empty'; e.textContent = 'Aucune publication'; el.appendChild(e);
+        return;
+      }
+      var grid = document.createElement('div');
+      var rows = Math.max(1, list.length - 1);
+      grid.className = 'fb-grid' + (list.length === 1 ? ' one' : '');
+      if (list.length > 1) grid.style.gridTemplateRows = 'repeat(' + rows + ', minmax(0, 1fr))';
+      for (var i = 0; i < list.length; i++) {
+        var c = card(list[i]);
+        if (i === 0 && list.length > 1) c.style.gridRow = '1 / span ' + rows;
+        grid.appendChild(c);
+      }
+      el.appendChild(grid);
+    }
+
+    h.data(function (d) {
+      posts = (d && d.posts) || [];
+      name = (d && d.page) || 'Facebook';
+      if (page >= pageCount()) page = 0;
+      draw();
+    }, 15 * 60 * 1000);
+    if (mode !== 'latest') h.every(function () {
+      if (pageCount() > 1) { page = (page + 1) % pageCount(); draw(); }
+    }, Math.max(5, parseInt(s.interval, 10) || 12) * 1000);
+  });
+
   /* ---------- YouTube : API IFrame (lecture automatique, enchaînement à la fin, erreurs visibles) ---------- */
   A.register('youtube', function (h) {
     var s = h.settings, u = s.url || '';

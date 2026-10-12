@@ -1,0 +1,76 @@
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject VideoConverter Converter
+@* Aperçu de l'écran où l'on place le QR code de comptage des scans : même image et même cadrage que l'aperçu de l'onglet « Contenu »
+   (balisage ContentPreview, classes cp-stage / fit-cover), le QR code au premier plan, à glisser à la souris ou au doigt ; il s'aimante aux axes du centre.
+   Position et largeur en % de l'écran, comme le player. Le glisser est géré par qr-place.js ; Blazor est prévenu au lâcher. *@
+<div class="cp-stage qr-stage @(Fit == "cover" ? "fit-cover" : "")" @ref="stage" aria-label="Aperçu de l'écran">
+    @if (Media != null && Media.FileName != null && Media.Status == null && (Media.Type == "image" || Converter.CanPoster))
+    {
+        <img src="/media/@Media.FileName?w=640" alt="" />
+    }
+    else if (Media != null)
+    {
+        <div class="qr-bg"><MediaThumb Media="Media" All="All" Wide="true" /></div>
+    }
+    <i class="qr-guide v" aria-hidden="true"></i><i class="qr-guide h" aria-hidden="true"></i>
+    @if (qrN > 0)
+    {
+        <div class="qr-box" @ref="box" tabindex="0" role="slider" aria-label="QR code : glisser pour le déplacer, flèches du clavier pour l'ajuster"
+             aria-valuetext="@Math.Round(X) % depuis la gauche, @Math.Round(Y) % depuis le haut" title="Glisser pour déplacer"
+             style="left:@Pct(X);top:@Pct(Y);width:@Pct(Size)">
+            <svg viewBox="0 0 @qrN @qrN" shape-rendering="crispEdges" aria-hidden="true"><path d="@qrPath" fill="#0B1F3A" /></svg>
+            @if (!string.IsNullOrWhiteSpace(Label)) { <span class="qr-lbl" style="font-size:@LabelFont">@Label</span> }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public MediaItem? Media { get; set; }
+    [Parameter] public IReadOnlyList<MediaItem>? All { get; set; }
+    /// <summary>Cadrage de l'aperçu « contain » (entier) ou « cover » (rogné), comme l'onglet Contenu.</summary>
+    [Parameter] public string Fit { get; set; } = "contain";
+    /// <summary>Texte encodé dans le QR dessiné (l'adresse courte réelle une fois le code créé).</summary>
+    [Parameter] public string? Text { get; set; }
+    [Parameter] public double X { get; set; }
+    [Parameter] public double Y { get; set; }
+    [Parameter] public double Size { get; set; }
+    [Parameter] public string? Label { get; set; }
+    [Parameter] public EventCallback<(double X, double Y)> OnMoved { get; set; }
+
+    private ElementReference stage, box;
+    private int qrN;
+    private string qrPath = "";
+    private string? drawn;
+    private DotNetObjectReference<QrPlacer>? self;
+    private bool attached;
+
+    private static string Pct(double v, bool plain = false) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + (plain ? "" : "%");
+
+    // Même règle que le player (addQr) : texte = 11 % de la largeur du QR code ; 1cqw = 1 % de la largeur de l'aperçu (1em dans le player)
+    private string LabelFont => $"calc({Pct(Size * 0.11, true)} * 1cqw)";
+
+    protected override void OnParametersSet()
+    {
+        if (Text == drawn) return;
+        drawn = Text;
+        (qrN, qrPath) = QrCodes.Build(Text) is { } q ? (q.Size, q.Path) : (0, "");
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (qrN == 0) attached = false;   // le QR code a disparu (suivi coupé) : le suivant est un nouvel élément à brancher
+        if (qrN > 0 && !attached && box.Context != null)
+        {
+            attached = true;
+            self ??= DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("linkiiQr.init", stage, box, self);
+        }
+    }
+
+    [JSInvokable]
+    public Task Moved(double x, double y) => OnMoved.InvokeAsync((x, y));
+
+    public ValueTask DisposeAsync() { self?.Dispose(); return ValueTask.CompletedTask; }
+}

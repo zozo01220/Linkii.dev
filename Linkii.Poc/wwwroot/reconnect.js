@@ -57,8 +57,18 @@
             .catch(function () { });
     }
 
+    // L'utilisateur quitte la page (lien vers « Se connecter avec Facebook », Google…) : le circuit se ferme de lui-même, ce n'est pas une panne.
+    // Sans cela, le rechargement de la page annulerait la navigation en cours vers le fournisseur.
+    var leaving = false, leavingTimer = null;
+    window.addEventListener('beforeunload', function () {
+        leaving = true;
+        clearTimeout(leavingTimer);
+        leavingTimer = setTimeout(function () { leaving = false; }, 15000);   // navigation annulée ou téléchargement : la page reste, la surveillance reprend
+    });
+    window.addEventListener('pageshow', function () { leaving = false; });
+
     function start() {
-        if (down) return;
+        if (down || leaving) return;
         down = true;
         show();
         probe();

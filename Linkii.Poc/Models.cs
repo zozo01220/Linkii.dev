@@ -288,6 +288,14 @@ public class Tenant
     /// <summary>Accès retiré par Canva (jeton refusé) : le compte reste affiché « à reconnecter » dans Comptes connectés.</summary>
     public DateTime? CanvaLostUtc { get; set; }
 
+    // Compte Facebook connecté par l'organisation (« Se connecter avec Facebook », lecture seule) : seules les Pages qu'il administre sont gardées,
+    // chacune avec son jeton de Page chiffré (SecretBox). Le jeton de l'utilisateur n'est pas conservé.
+    public string FacebookUser { get; set; } = "";
+    public DateTime? FacebookConnectedUtc { get; set; }
+    /// <summary>Accès retiré par Facebook (jeton de Page refusé) : le compte reste affiché « à reconnecter » dans Comptes connectés.</summary>
+    public DateTime? FacebookLostUtc { get; set; }
+    public List<FacebookPageAccess> FacebookPages { get; set; } = new();
+
     // Compte Microsoft connecté par l'organisation (« Se connecter avec Microsoft », lecture seule), partagé par Microsoft 365 (agendas) et
     // OneDrive / SharePoint. MsScopes : accès accordés (noms courts Graph). Jeton de renouvellement chiffré (SecretBox).
     // Les anciens champs MsTenantId / MsClientId / MsClientSecret (application Entra ID de chaque client) ne sont plus lus.
@@ -344,6 +352,14 @@ public class DriveAccount
     public DateTime? ConnectedUtc { get; set; }
     /// <summary>Dropbox : accès retiré (jeton refusé) ; le compte reste affiché « à reconnecter ».</summary>
     public DateTime? LostUtc { get; set; }
+}
+
+/// <summary>Une Page Facebook administrée par le compte connecté, avec son jeton de Page (chiffré, SecretBox ; il n'expire pas tant que l'accès n'est pas retiré).</summary>
+public class FacebookPageAccess
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Token { get; set; } = "";
 }
 
 /// <summary>Un dossier d'un Drive (Google Drive, OneDrive / SharePoint, Nextcloud, SFTP, Dropbox), copié dans la médiathèque (fichiers masqués, Info["drive"] = Id) et affiché par l'app « Dossier Drive ».</summary>
@@ -622,6 +638,26 @@ public class PlaylistItem
     /// <summary>Apps dont la durée dépend du contenu (YouTube) : « content » = jusqu'à la fin (défaut), « fixed » = DurationSec.</summary>
     public string DurationMode { get; set; } = "content";
     public string Placement { get; set; } = "full";   // full = diapo ; sinon app en surimpression permanente
+
+    // Comptage des scans (licence Growth, contenus pleine page) : un QR code au premier plan, dont l'adresse courte /q/{code} compte puis redirige (voir QrTracking)
+    public bool QrOn { get; set; }
+    public string? QrCode { get; set; }       // code de l'adresse courte, créé à la première activation et jamais changé (le QR affiché reste valable)
+    public string? QrUrl { get; set; }        // destination du visiteur
+    public string? QrLabel { get; set; }      // texte sous le QR code
+    public string? QrBase { get; set; }       // https://domaine de l'application, relevé à l'enregistrement
+    public double QrX { get; set; } = QrTracking.DefaultX;       // position du coin haut gauche, en % de la zone du contenu
+    public double QrY { get; set; } = QrTracking.DefaultY;
+    public double QrSize { get; set; } = QrTracking.DefaultSize;  // largeur, en % de la zone du contenu
+}
+
+/// <summary>QR code publié avec un contenu : tracé calculé par le serveur, position et taille en % de la zone du contenu.</summary>
+public class PublishedQr
+{
+    public string Data { get; set; } = "";   // « côté|tracé » (voir QrCodes.Encode)
+    public double X { get; set; }
+    public double Y { get; set; }
+    public double Size { get; set; }
+    public string? Label { get; set; }
 }
 
 public class PublishedItem
@@ -646,6 +682,7 @@ public class PublishedItem
     public double? Y { get; set; }
     public double? Scale { get; set; }
     public List<string>? Urls { get; set; }   // apps de la médiathèque (image, vidéo, diaporamas) : fichiers résolus à la publication, dans l'ordre
+    public PublishedQr? Qr { get; set; }      // QR code de comptage des scans, affiché au premier plan du contenu (pleine page)
 
     public PublishedItem Clone() => (PublishedItem)MemberwiseClone();
 
@@ -653,7 +690,8 @@ public class PublishedItem
     public object ForPlayer() => new
     {
         id = Id, type = Type, url = Url, durationSec = DurationSec, durationMode = DurationMode, placement = Placement, dataId = DataId,
-        appId = AppId, appVersion = AppVersion, mediaId = MediaId, settings = Settings, validFrom = ValidFrom, validTo = ValidTo, x = X, y = Y, scale = Scale, urls = Urls
+        appId = AppId, appVersion = AppVersion, mediaId = MediaId, settings = Settings, validFrom = ValidFrom, validTo = ValidTo, x = X, y = Y, scale = Scale, urls = Urls,
+        qr = Qr == null ? null : new { d = Qr.Data, x = Qr.X, y = Qr.Y, size = Qr.Size, label = Qr.Label }
     };
 }
 

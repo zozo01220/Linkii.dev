@@ -100,7 +100,16 @@
   /* QR incrusté dans l'aperçu */
   .qrbox { position:absolute; background:#fff; border-radius:3px; padding:5px; display:none; flex-direction:column; align-items:center; gap:3px; width:19%; z-index:2; }
   .qrbox.show { display:flex; } .qrbox svg { width:100%; display:block; } .qrbox span { font-size:8px; color:var(--ink); text-align:center; line-height:1.15; }
-  .pos-br { right:3%; bottom:5%; } .pos-bl { left:3%; bottom:5%; } .pos-tr { right:3%; top:5%; } .pos-tl { left:3%; top:5%; }
+  /* QR déplaçable : position (left/top) en % de l'écran, comme le player la rejouera à toute résolution */
+  .qrbox { left:78%; top:70%; cursor:grab; touch-action:none; user-select:none; outline:2px dashed transparent; outline-offset:2px; transition:outline-color .12s; }
+  .qrbox:hover, .qrbox.drag { outline-color:var(--signal); } .qrbox.drag { cursor:grabbing; box-shadow:0 6px 18px rgba(0,0,0,.45); }
+  .qrbox svg, .qrbox span { pointer-events:none; }
+  .qrbox { z-index:5; box-shadow:0 2px 8px rgba(0,0,0,.35); }   /* premier plan, fond blanc opaque : recouvre ce qui est dessous */
+  .orig { position:absolute; right:7%; bottom:5%; width:26%; aspect-ratio:1; background:#fff; border:1px solid #c8d0da; padding:2%; }
+  .orig svg { width:100%; display:block; }
+  .guide { position:absolute; background:rgba(59,130,196,.9); display:none; z-index:1; } .guide.v { top:0; bottom:0; width:1px; left:50%; } .guide.h { left:0; right:0; height:1px; top:50%; }
+  .cp-stage.dragging .guide.on { display:block; }
+  .pos-hint { display:inline-flex; align-items:center; gap:8px; color:var(--muted); font-size:13px; }
 
   /* Licence Base */
   .lock-pill { display:none; align-items:center; gap:5px; font-size:12px; font-weight:500; color:var(--muted); background:#fff; border:1px solid var(--line-2); border-radius:99px; padding:0 8px; white-space:nowrap; }
@@ -175,8 +184,10 @@
       <section aria-label="Aperçu">
         <h4 class="ci-t">Aperçu</h4>
         <div class="cp-stage">
-          <div class="pg"><i class="h"></i><i class="m"></i><i></i><i class="s"></i><div class="blk"></div><i class="m"></i><i></i><i class="s"></i></div>
-          <div class="qrbox pos-br" id="qrb"><svg id="qrsvg" viewBox="0 0 25 25" shape-rendering="crispEdges"></svg><span id="qrl">Inscrivez-vous</span></div>
+          <div class="pg"><i class="h"></i><i class="m"></i><i></i><i class="s"></i><div class="blk"></div><i class="m"></i><i></i><i class="s"></i>
+            <div class="orig" title="QR code déjà présent dans le contenu"><svg id="qrsvg2" viewBox="0 0 25 25" shape-rendering="crispEdges"></svg></div></div>
+          <i class="guide v" id="gv"></i><i class="guide h" id="gh"></i>
+          <div class="qrbox" id="qrb" title="Glisser pour déplacer"><svg id="qrsvg" viewBox="0 0 25 25" shape-rendering="crispEdges"></svg><span id="qrl">Inscrivez-vous</span></div>
         </div>
         <div class="cp-info"><span class="cp-pill">12 pages · portrait A4</span></div>
       </section>
@@ -206,12 +217,10 @@
           </div>
           <div class="locknote">Disponible avec la licence Growth.</div>
           <div class="qr-fields" id="qrf">
-            <div class="dw-field"><label>Adresse de destination *</label><input type="text" value="https://www.unil.ch/portesouvertes/inscription"><small>Là où le visiteur arrive après le scan. Modifiable à tout moment sans changer le QR affiché.</small></div>
+            <div class="dw-field"><label>Adresse de destination *</label><input type="text" value="https://www.unil.ch/portesouvertes/inscription"></div>
             <div class="dw-field"><label>Texte sous le QR code</label><input type="text" id="lbl" value="Inscrivez-vous"></div>
-            <div class="dw-field"><label>Position</label>
-              <div class="seg"><label><input type="radio" name="pos" value="pos-tl"><span>↖ Haut gauche</span></label><label><input type="radio" name="pos" value="pos-tr"><span>↗ Haut droite</span></label><label><input type="radio" name="pos" value="pos-bl"><span>↙ Bas gauche</span></label><label><input type="radio" name="pos" value="pos-br" checked><span>↘ Bas droite</span></label></div></div>
-            <div class="dw-field"><label>Adresse encodée dans le QR code</label><div class="link">https://<b>affichage.unil.ch/q/k7Xa2P</b></div><small>Adresse courte et stable : elle compte le scan, puis redirige.</small></div>
-            <div class="dw-note">128 scans depuis le 14 septembre · <a href="#">Voir les statistiques</a></div>
+            <div class="dw-field"><label>Taille <span class="mono" id="szv" style="color:var(--ink);font-weight:400">19 %</span></label>
+              <input type="range" id="sz" min="8" max="45" value="19" style="width:100%;padding:0;border:0;box-shadow:none;accent-color:var(--signal)"></div>
           </div>
         </div>
       </section>
@@ -240,7 +249,29 @@
   document.querySelectorAll('.se-utabs button').forEach(function (b) { b.onclick = function () { tab(b.dataset.t); }; });
   document.querySelectorAll('[data-open]').forEach(function (b) { b.onclick = function () { body.classList.add('open'); tab(b.dataset.open); }; });
   document.getElementById('x').onclick = document.getElementById('cancel').onclick = document.getElementById('save').onclick = document.getElementById('bd').onclick = function () { body.classList.remove('open'); setDemo('liste'); };
-  document.querySelectorAll('input[name=pos]').forEach(function (i) { i.onchange = function () { document.getElementById('qrb').className = 'qrbox show ' + i.value; }; });
+  // Déplacement à la souris (ou au doigt) : position en % de l'aperçu, bornée à l'écran, aimantée aux axes du centre
+  (function () {
+    var q = document.getElementById('qrb'), st = q.parentNode, gv = document.getElementById('gv'), gh = document.getElementById('gh');
+    var x = 78, y = 70, dx = 0, dy = 0;
+    function put() { q.style.left = x + '%'; q.style.top = y + '%'; }
+    q.addEventListener('pointerdown', function (e) {
+      var r = st.getBoundingClientRect(), b = q.getBoundingClientRect();
+      dx = e.clientX - b.left; dy = e.clientY - b.top;
+      q.setPointerCapture(e.pointerId); q.classList.add('drag'); st.classList.add('dragging'); e.preventDefault();
+    });
+    q.addEventListener('pointermove', function (e) {
+      if (!q.classList.contains('drag')) return;
+      var r = st.getBoundingClientRect(), w = q.offsetWidth / r.width * 100, h = q.offsetHeight / r.height * 100;
+      x = (e.clientX - dx - r.left) / r.width * 100; y = (e.clientY - dy - r.top) / r.height * 100;
+      x = Math.max(0, Math.min(100 - w, x)); y = Math.max(0, Math.min(100 - h, y));
+      var cx = x + w / 2, cy = y + h / 2, sx = Math.abs(cx - 50) < 2, sy = Math.abs(cy - 50) < 2;
+      if (sx) x = 50 - w / 2; if (sy) y = 50 - h / 2;
+      gv.classList.toggle('on', sx); gh.classList.toggle('on', sy); put();
+    });
+    function end() { q.classList.remove('drag'); st.classList.remove('dragging'); gv.classList.remove('on'); gh.classList.remove('on'); }
+    q.addEventListener('pointerup', end); q.addEventListener('pointercancel', end);
+    document.getElementById('sz').oninput = function () { q.style.width = this.value + '%'; document.getElementById('szv').textContent = this.value + ' %'; x = Math.min(x, 100 - this.value); put(); };
+  })();
   document.getElementById('lbl').oninput = function () { document.getElementById('qrl').textContent = this.value; };
 
   function setDemo(s) {
@@ -258,7 +289,9 @@
     function r() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
     function finder(x, y) { var o = ''; for (var i = 0; i < 7; i++) for (var j = 0; j < 7; j++) { var e = i == 0 || i == 6 || j == 0 || j == 6, c = i >= 2 && i <= 4 && j >= 2 && j <= 4; if (e || c) o += 'M' + (x + j) + ' ' + (y + i) + 'h1v1h-1z'; } return o; }
     for (var y = 0; y < n; y++) for (var x = 0; x < n; x++) { if ((x < 8 && y < 8) || (x > n - 9 && y < 8) || (x < 8 && y > n - 9)) continue; if (r() > .52) s += 'M' + x + ' ' + y + 'h1v1h-1z'; }
-    document.getElementById('qrsvg').innerHTML = '<path d="' + s + finder(0, 0) + finder(n - 7, 0) + finder(0, n - 7) + '" fill="#0B1F3A"/>';
+    var path = '<path d="' + s + finder(0, 0) + finder(n - 7, 0) + finder(0, n - 7) + '" fill="#0B1F3A"/>';
+    document.getElementById('qrsvg').innerHTML = path;
+    document.getElementById('qrsvg2').innerHTML = path.replace('#0B1F3A', '#444');
   })();
   setDemo('qr');
 </script>

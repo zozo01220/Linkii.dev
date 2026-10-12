@@ -52,19 +52,29 @@ else
             </div>
         }
 
-        <div class="ci-cols @(hasPreview ? "" : "one")">
+        <div class="ci-cols @(hasPreview || OtherTab ? "" : "one")">
+            @* autre onglet de l'appelant (ex. « QR code ») : sa propre colonne d'aperçu ; l'aperçu du contenu est seulement masqué, il garde son état *@
+            @if (OtherTab && OtherPreview != null)
+            {
+                <section class="ci-prev" aria-label="Aperçu de l'écran">@OtherPreview</section>
+            }
             @if (hasPreview)
             {
-                <section class="ci-prev" aria-label="Aperçu">
+                <section class="ci-prev" aria-label="Aperçu" hidden="@(OtherTab && OtherPreview != null)">
                     <h4 class="ci-t">Aperçu</h4>
-                    <ContentPreview @ref="previewRef" Manifest="manifest" Values="values" Instance="instance" OnNotice="OnPreviewNotice" />
+                    <ContentPreview @ref="previewRef" Manifest="manifest" Values="values" Instance="instance" Qr="PreviewQr" OnNotice="OnPreviewNotice" />
                 </section>
             }
             <section class="ci-conf" aria-label="Configuration">
-                <h4 class="ci-t">Configuration</h4>
-                <AppForm Manifest="manifest" Values="values" StoredSecrets="storedSecrets" InstanceId="instance?.Id" Zone="main" OnChange="Touch" />
-                @* réglages propres à l'appelant (ex. « Dans cette liste de lecture »), à droite de l'aperçu *@
-                @Extra
+                @* onglets de l'appelant, en tête de la colonne de droite (même emplacement que « Écran / Widgets » de l'éditeur d'écran) *@
+                @ConfTabs
+                @if (OtherTab) { @OtherPane }
+                <div class="ci-conf-main" hidden="@OtherTab">
+                    @if (ConfTabs == null) { <h4 class="ci-t">Configuration</h4> }
+                    <AppForm Manifest="manifest" Values="values" StoredSecrets="storedSecrets" InstanceId="instance?.Id" Zone="main" OnChange="Touch" />
+                    @* réglages propres à l'appelant (ex. « Dans cette liste de lecture »), à droite de l'aperçu *@
+                    @Extra
+                </div>
             </section>
         </div>
 
@@ -165,10 +175,22 @@ else
 
     private void Touch() { }   // une valeur a changé : le formulaire (donc l'aperçu) se redessine
 
-    // Source modifiée : un calendrier (liste de choix) met l'aperçu à jour d'emblée ; un lien attend « Rechercher ».
+    /// <summary>Cadrage de l'aperçu (réglage « fit » de l'app), comme l'onglet Contenu.</summary>
+    public string PreviewFit => values.GetValueOrDefault("fit") == "cover" ? "cover" : "contain";
+
+    /// <summary>Premier fichier choisi dans le formulaire (image de fond de l'aperçu du QR code, avant que le contenu soit créé).</summary>
+    public MediaItem? PickedMedia()
+    {
+        if (manifest == null) return null;
+        var ids = manifest.Settings.Where(f => f.IsMedia && AppCatalog.IsVisible(f, values))
+            .SelectMany(f => AppField.MediaIds(values.GetValueOrDefault(f.Key))).ToList();
+        return ids.Count == 0 ? null : Store.Read(d => d.Media.FirstOrDefault(x => x.Id == ids[0]));
+    }
+
+    // Source modifiée : un calendrier ou une Page Facebook (liste de choix) met l'aperçu à jour d'emblée ; un lien attend « Rechercher ».
     private async Task SourceChanged()
     {
-        if (previewRef != null && manifest!.Provider != null && manifest.InZone("source").FirstOrDefault()?.Type is "calendar" or "mailbox"
+        if (previewRef != null && manifest!.Provider != null && manifest.InZone("source").FirstOrDefault()?.Type is "calendar" or "mailbox" or "facebookpage"
             && !string.IsNullOrEmpty(values.GetValueOrDefault(manifest.InZone("source").First().Key)))
             await previewRef.Refresh();
     }
@@ -178,6 +200,16 @@ else
     /// <summary>Réglages de l'appelant, affichés sous la configuration (colonne de droite).</summary>
     [Parameter] public RenderFragment? Extra { get; set; }
 
+    /// <summary>Onglets de l'appelant, en tête de la colonne de droite. Le premier onglet est la configuration de l'app.</summary>
+    [Parameter] public RenderFragment? ConfTabs { get; set; }
+    /// <summary>Un autre onglet est affiché : sa colonne de droite (<see cref="OtherPane"/>) remplace la configuration, masquée sans perdre l'état du formulaire.</summary>
+    [Parameter] public bool OtherTab { get; set; }
+    [Parameter] public RenderFragment? OtherPane { get; set; }
+    /// <summary>Colonne de gauche de l'autre onglet (à la place de l'aperçu du contenu).</summary>
+    [Parameter] public RenderFragment? OtherPreview { get; set; }
+    /// <summary>QR code de comptage des scans, dessiné sur l'aperçu du contenu.</summary>
+    [Parameter] public PublishedQr? PreviewQr { get; set; }
+
     // Résultat de la recherche, du test ou du dossier : une notification (toast) comme partout dans l'app, qui disparaît seule.
     private Task OnPreviewNotice((string Kind, string Text) n) { Notify(n.Kind != "bad", n.Text); return Task.CompletedTask; }
 
@@ -185,10 +217,9 @@ else
 
     private void ClearNotice() { errors = new(); }
 
-    // Le bandeau ne garde que ce qui doit rester visible : erreurs de saisie à corriger et « Test en cours… ».
+    // Le bandeau ne garde que les états en cours (« Test en cours… ») ; les erreurs de saisie passent par la notification (toast), sans doublon.
     private (string Kind, string Text)? Banner()
     {
-        if (errors.Count > 0) return ("bad", errors.Count > 1 ? $"{errors.Count} champs à corriger : {string.Join(" · ", errors)}" : errors[0]);
         if (testing) return ("info", "Test en cours…");
         if (converting) return ("info", "Conversion du PDF…");
         return null;
@@ -253,7 +284,7 @@ else
     {
         errors = new();
         var (item, errs) = Apps.SaveInstance(AppId, instance?.Id, name, values);
-        if (item == null) { errors = errs; Toast.Error(errs.Count > 1 ? $"{errs.Count} champs à corriger : {errs[0]}" : errs.FirstOrDefault()); return; }
+        if (item == null) { errors = errs; Toast.Error(errs.Count > 1 ? $"{errs.Count} champs à corriger : {string.Join(" · ", errs)}" : errs.FirstOrDefault()); return; }
         instance = item;
         storedSecrets = item.Secrets.Keys.ToHashSet();
         foreach (var f in manifest!.Settings.Where(f => f.IsSecret)) values[f.Key] = "";   // un secret saisi n'est jamais réaffiché

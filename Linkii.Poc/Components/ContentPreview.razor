@@ -21,12 +21,13 @@
                     @if (files[0].FileName != null && files[0].Status == null && (files[0].Type == "image" || Converter.CanPoster)) { <img src="/media/@files[0].FileName?w=640" alt="@files[0].Name" /> }
                     else { <MediaThumb Media="files[0]" /> }
                     @if (files[0].Type == "video") { <span class="car-play" aria-hidden="true"></span> }
+                    <QrBadge Qr="Qr" />
                 </div>
                 <div class="cp-info"><b>@files[0].Name</b><span>@(files[0].Type == "video" ? "Vidéo" : "Image")</span></div>
             }
             else
             {
-                <Carousel3D Items="files" Fit="@Fit" @key="files.Count" />
+                <Carousel3D Items="files" Fit="@Fit" Qr="Qr" @key="files.Count" />
             }
             break;
 
@@ -43,11 +44,29 @@
             {
                 @if (Manifest.Id == "youtube" && YouTube.ExtractId(SourceValue) is { } yt)
                 {
-                    <div class="cp-stage"><img src="https://i.ytimg.com/vi/@yt/hqdefault.jpg" alt="" /><span class="car-play" aria-hidden="true"></span></div>
+                    <div class="cp-stage"><img src="https://i.ytimg.com/vi/@yt/hqdefault.jpg" alt="" /><span class="car-play" aria-hidden="true"></span><QrBadge Qr="Qr" /></div>
                 }
                 else if (Manifest.Id == "webpage")
                 {
-                    <div class="cp-browser"><div class="cp-url">@SourceValue</div><div class="cp-pg"><i></i><i></i><i></i><i></i></div></div>
+                    <div class="cp-browser"><div class="cp-url">@SourceValue</div><div class="cp-pg"><i></i><i></i><i></i><i></i></div><QrBadge Qr="Qr" /></div>
+                }
+                else if (result.Data is { } fb && fb.TryGetProperty("posts", out var posts) && posts.ValueKind == JsonValueKind.Array)
+                {
+                    var shown = posts.EnumerateArray().Take(4).ToList();
+                    <div class="cp-fb">
+                        <div class="cp-fb-h"><b aria-hidden="true">f</b><span>@Str(fb, "page")</span></div>
+                        <div class="cp-fb-grid">
+                            @foreach (var p in shown)
+                            {
+                                <div class="cp-fb-post">
+                                    @if (Str(p, "picture") is { Length: > 0 } pic) { <img src="@pic" alt="" /> }
+                                    <div class="cp-fb-t">@Str(p, "message")</div>
+                                </div>
+                            }
+                        </div>
+                        @if (shown.Count == 0) { <div class="cp-row">Aucune publication lisible pour le moment.</div> }
+                        <QrBadge Qr="Qr" />
+                    </div>
                 }
                 else if (result.Data is { } d && d.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
                 {
@@ -57,6 +76,7 @@
                         {
                             <div class="cp-row"><span><b>@Str(it, "title")</b>@if (Str(it, "summary") is { Length: > 0 } su) { <small>@su</small> }</span></div>
                         }
+                        <QrBadge Qr="Qr" />
                     </div>
                 }
                 else if (result.Data is { } dd && dd.TryGetProperty("events", out var evs) && evs.ValueKind == JsonValueKind.Array)
@@ -79,6 +99,7 @@
                             </div>
                         }
                         @if (list.Count == 0) { <div class="cp-row">Aucun événement à venir sur cette période.</div> }
+                        <QrBadge Qr="Qr" />
                     </div>
                 }
             }
@@ -95,6 +116,8 @@
     [Parameter] public MediaItem? Instance { get; set; }
     /// <summary>Résultat de la recherche (ok / warn / bad) ou état du dossier Drive : la fenêtre l'affiche en bandeau, en haut, sans défilement.</summary>
     [Parameter] public EventCallback<(string Kind, string Text)> OnNotice { get; set; }
+    /// <summary>QR code de comptage des scans de ce contenu (réglages en cours) : dessiné sur l'image et sur chaque diapositive, comme sur l'écran.</summary>
+    [Parameter] public PublishedQr? Qr { get; set; }
     private string? lastDriveInfo;
 
     // Cadrage choisi (réglage « fit » de l'app) : l'aperçu le reproduit.
@@ -106,8 +129,12 @@
     private bool loading, loaded;
     private (bool Ok, string Message, JsonElement? Data) result;
 
-    private string EmptyHint => Manifest.Settings.FirstOrDefault(f => f.Zone == "source")?.Type is "calendar"
-        ? "Choisissez un calendrier ci-dessus." : "Saisissez l'adresse ci-dessus, puis cliquez sur « Rechercher ».";
+    private string EmptyHint => Manifest.Settings.FirstOrDefault(f => f.Zone == "source")?.Type switch
+    {
+        "calendar" => "Choisissez un calendrier ci-dessus.",
+        "facebookpage" => "Choisissez une Page ci-dessus : son aperçu s'affiche aussitôt.",
+        _ => "Saisissez l'adresse ci-dessus, puis cliquez sur « Rechercher »."
+    };
 
     /// <summary>Un aperçu existe pour cette app (sinon la fenêtre n'affiche que la configuration, sur toute la largeur).</summary>
     public static bool Has(AppManifest m) => m.Settings.Any(f => f.IsMedia || f.Type == "drive") || m.Provider != null && m.Settings.Any(f => f.Zone == "source");
