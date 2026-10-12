@@ -724,6 +724,16 @@ Demande : connaître le nombre de « vues » d'un contenu par scan de QR code, a
 - **Maquette (fidèle à l'application)** : fenêtre `.modal.app-modal.ci-modal` (bandeau icône + titre + « Renommer » + options avancées + croix ; ligne source grise ; aperçu à gauche, configuration à droite ; pied « Annuler / Enregistrer »). Onglets **« Contenu » / « QR code »** (style `.se-utabs` de l'éditeur d'écran) en **haut de la colonne de droite**, l'aperçu restant à gauche avec le QR incrusté en direct. « Contenu » = configuration de l'app + « Dans cette liste de lecture » ; « QR code » = interrupteur (`input.ios`), destination, texte, position, adresse courte, lien vers les statistiques. Dans la liste, pastille « 128 scans » sur la ligne du contenu (ouvre l'onglet). Cinq états de démo dont QR désactivé et licence Base.
 - **Reste à décider** : emplacement des onglets (colonne de droite, comme dans l'éditeur d'écran, ou pleine largeur sous le bandeau) ; scans par écran (QR avec suffixe par écran, faisable car la publication est déjà par écran) ou par contenu seulement ; durée de conservation des scans (90 jours comme les diffusions ?) ; pages Résultats détaillés (maquettées dans une première version, retirées) ; serveur joignable depuis Internet pour les téléphones des visiteurs (à vérifier côté réseau) ; vue de résultats dans la page Statistiques.
 
+## 42. Fenêtres d'écran et de contenu : hauteur fixe, colonne de configuration qui défile (12 octobre 2026)
+
+Demande : sur PC, garder l'aperçu visible pendant le réglage. Seule la colonne de droite défile, l'aperçu reste à gauche. Codé dans `wwwroot/app.css` (blocs `min-width` 721 px et 901 px) et `Components/ScreenEditor.razor`. **Non vérifié dans le navigateur** : à valider sur l'écran.
+
+- **Fenêtre de contenu** (`.ci-modal`, `AppInstanceForm`) : hauteur fixe `min(720px, 100vh - 48px)`, largeur `min(1120px, 100vw - 32px)`, aperçu en colonne souple et configuration à 320 px. Seule la colonne de configuration (`.ci-conf`) défile. Mobile (720 px et moins) inchangé.
+- **Fenêtre d'écran** (`.wg-modal`, `ScreenEditor`) : hauteur fixe `min(720px, 100vh - 48px)` au-delà de 900 px. La colonne de réglages (`.wg-side`) défile seule et son contenu remonte en haut. L'aperçu est dans une zone bleu nuit `#0b1f3a` avec un liseré bleu `#378ADD`.
+- **Zoom de l'aperçu** : barre « − 100 % + » en bas de la zone bleu nuit, de 50 % à 150 % par pas de 10 %. Le réglage est une variable CSS `--z` sur la zone, et l'écran se dimensionne sur la hauteur (portrait) ou la largeur (paysage) de cette zone (`container-type: size`). Non mémorisé d'une ouverture à l'autre. Icône `minus` ajoutée à `Ico.razor`.
+- **Non retenu pour l'instant** : quatre propositions de mise en évidence de l'écran (liseré, étiquette, titre, liseré et badge) présentées en maquette ; le choix reste à faire.
+- **À valider** : rendu réel dans le navigateur sur plusieurs tailles d'écran ; défilement quand le contenu dépasse ; écran en paysage et zoom 150 % avec des widgets glissés.
+
 ## Plans et prochaines étapes
 
 - Comptage des scans de QR code : valider la maquette puis coder (§41).
