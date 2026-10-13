@@ -119,6 +119,11 @@ public class User
     public List<AreaRole> AreaRoles { get; set; } = new();
     /// <summary>Dernière aire ouverte, par organisation (l'équipe Linkii et les revendeurs visitent plusieurs organisations).</summary>
     public Dictionary<Guid, Guid> LastAreas { get; set; } = new();
+    /// <summary>Mode d'utilisation : true expert (toutes les fonctions), false simple (vue réduite), null ancien compte = expert.</summary>
+    public bool? ExpertMode { get; set; }
+    /// <summary>Présentation du mode expert déjà fermée (« ne plus afficher »).</summary>
+    public bool ExpertIntroSeen { get; set; }
+    public bool IsExpert() => ExpertMode != false;
     public DateTime? CreatedUtc { get; set; }
 
     /// <summary>Adresse prouvée : lien de confirmation cliqué, connexion Microsoft ou Google, ou première connexion avec le mot de passe provisoire reçu par e-mail.</summary>

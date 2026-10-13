@@ -23,6 +23,7 @@ builder.Services.AddSingleton<CanvaService>();
 builder.Services.AddSingleton<PdfService>();
 builder.Services.AddScoped<TenantContext>();
 builder.Services.AddScoped<TenantStore>();
+builder.Services.AddScoped<ModeService>();
 builder.Services.AddSingleton<Notifier>();
 builder.Services.AddSingleton<PreviewGrants>();   // jetons d'aperçu du simulateur
 builder.Services.AddSingleton<VideoConverter>();

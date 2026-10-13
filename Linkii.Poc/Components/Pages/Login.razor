@@ -70,6 +70,14 @@ else
                         <div><label>Organisation</label><InputText @bind-Value="SsoSignup!.Organisation" placeholder="Ex. : Horizon SA" autofocus /></div>
                         <div><label>Votre nom</label><InputText @bind-Value="SsoSignup.Name" placeholder="Prénom Nom" /></div>
                     </div>
+                    <div class="mode-pick">
+                        <span class="lbl">Mode d'utilisation</span>
+                        <InputRadioGroup @bind-Value="SsoSignup.Mode">
+                            <label><InputRadio Value="@("simple")" /> Simple</label>
+                            <label><InputRadio Value="@("expert")" /> Expert</label>
+                        </InputRadioGroup>
+                        <small>Simple par défaut. Expert ajoute planning, aires, membres, intégrations et widgets ; vous pourrez changer plus tard.</small>
+                    </div>
                     <ConsentSwitches Model="SsoSignup!" Prefix="SsoSignup" />
                     @if (error != null) { <div class="err">@error</div> }
                     <button class="btn" type="submit" data-needs-terms>Créer mon espace</button>
@@ -93,6 +101,14 @@ else
                         <div><label>Mot de passe <small>(8 car. min.)</small></label><InputText @bind-Value="EmailSignup.Password" type="password" autocomplete="new-password" minlength="8" data-pwd /></div>
                         <div><label>Confirmation</label><InputText @bind-Value="EmailSignup.PasswordConfirm" type="password" autocomplete="new-password" data-pwd-confirm aria-describedby="pwd-match" /></div>
                         <small class="pwd-match span-2" id="pwd-match" aria-live="polite"></small>
+                    </div>
+                    <div class="mode-pick">
+                        <span class="lbl">Mode d'utilisation</span>
+                        <InputRadioGroup @bind-Value="EmailSignup.Mode">
+                            <label><InputRadio Value="@("simple")" /> Simple</label>
+                            <label><InputRadio Value="@("expert")" /> Expert</label>
+                        </InputRadioGroup>
+                        <small>Simple par défaut. Expert ajoute planning, aires, membres, intégrations et widgets ; vous pourrez changer plus tard.</small>
                     </div>
                     <ConsentSwitches Model="EmailSignup!" Prefix="EmailSignup" />
                     @if (error != null) { <div class="err">@error</div> }
@@ -145,6 +161,8 @@ else
         public bool Terms { get; set; }
         public bool Marketing { get; set; }
         public bool News { get; set; }
+        /// <summary>« simple » (par défaut) ou « expert ».</summary>
+        public string Mode { get; set; } = "simple";
     }
 
     protected override void OnInitialized()
@@ -198,7 +216,7 @@ else
         if (string.IsNullOrWhiteSpace(m.Organisation) || string.IsNullOrWhiteSpace(m.Email)) { error = "Organisation et e-mail obligatoires."; return; }
         if (m.Password != m.PasswordConfirm) { error = "Les deux mots de passe ne correspondent pas."; m.Password = m.PasswordConfirm = ""; return; }
         var now = DateTime.UtcNow;
-        var (client, admin, token, err) = Store.Write(d => Signup.Create(d, Host!, m.Organisation, m.Name, m.Email, m.Password, null, ConsentsOf(m), now));
+        var (client, admin, token, err) = Store.Write(d => Signup.Create(d, Host!, m.Organisation, m.Name, m.Email, m.Password, null, ConsentsOf(m), now, m.Mode == "expert"));
         if (client == null) { error = err; return; }
         var link = $"{Http!.Request.Scheme}://{Http.Request.Host}/login/verify/confirm?t={Uri.EscapeDataString(token!)}";
         var mailErr = await Mail.SendVerification(Host!, link, admin!.Name, admin.Email, client.Name, Store.Read(d => d.Platform.VerifyLinkHours));
@@ -224,7 +242,7 @@ else
         if (string.IsNullOrWhiteSpace(m.Organisation)) { error = "Le nom de l'organisation est obligatoire."; return; }
         var now = DateTime.UtcNow;
         var id = ticket.Identity;
-        var (client, admin, _, err) = Store.Write(d => Signup.Create(d, Host!, m.Organisation, string.IsNullOrWhiteSpace(m.Name) ? id.Name : m.Name, id.Email, null, id, ConsentsOf(m), now));
+        var (client, admin, _, err) = Store.Write(d => Signup.Create(d, Host!, m.Organisation, string.IsNullOrWhiteSpace(m.Name) ? id.Name : m.Name, id.Email, null, id, ConsentsOf(m), now, m.Mode == "expert"));
         if (client == null) { error = err; return; }
         Sso.Consume(Ext);
         await SendWelcome(client, admin!, pending: false);

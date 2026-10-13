@@ -892,6 +892,37 @@ Demande : simplifier au maximum la gestion des droits. L'administrateur seul cr�
 - Les listes de lecture et la médiathèque restent partagées par aire (avertissement dans l'éditeur de niveau). Les périmètres d'écrans ne filtrent pas encore l'API d'aperçu ni le contrôle du direct hors de la page Écrans (ils passent par `ClientDb.Screens`, donc filtrés, mais sans test dédié).
 - Les maquettes (`droits-pages.html`) numérotent les sections autrement : dans l'appli, Modification est le bloc 3 et Périmètre le bloc 4.
 
+## 47. Mode simple et mode expert (14 octobre 2026) : codé
+
+Demande : simplifier au maximum l'écran pour les personnes qui diffusent seulement. Un interrupteur règle la vue : **simple** (par défaut) ou **expert** (toutes les fonctions). Maquette validée : `maquettes/mode-simple-expert.html`.
+
+### Principe
+- **Affichage seulement** : aucune page ni aucun droit n'est retiré. Les niveaux de droits (§46) restent le contrôle d'accès ; le mode ne fait que masquer. Un membre autorisé au planning le retrouve en passant en expert.
+- Le mode est enregistré **sur le compte** (`User.ExpertMode`), donc il suit la personne sur tous ses appareils.
+
+### Décisions
+1. **Simple** : Écrans (cartes seulement), Listes de lecture, Médiathèque, Réglages réduit à *Utilisation*, *Veille et luminosité*, *Compte et confidentialité*.
+2. **Expert** : Planning, Aires de gestion, Membres, Intégrations, Widgets, et le reste de Réglages. Le lien « Gérer les aires » du sélecteur d'aire suit le mode ; le sélecteur reste visible dès deux aires.
+3. **Inscription** : choix Simple / Expert dans les deux formulaires, Simple présélectionné. Choisir Expert ne déclenche pas la présentation.
+4. **Présentation** au premier passage en expert : fenêtre « Mode expert activé » qui liste les cinq fonctions. Elle s'affiche à **chaque passage en expert**, sauf si « Ne plus afficher ce message » est coché (décoché par défaut). Repasser en simple remet le réglage à zéro.
+5. **Comptes existants** (sans choix enregistré) : expert, pour ne rien retirer à ce qu'ils utilisent.
+6. **Libellé de l'interrupteur** : « Passer en mode expert » ou « Passer en mode simple » selon l'état. Le même libellé est repris partout où l'interrupteur apparaît (barre latérale, Réglages › Compte, bloc « Fonctions avancées », page réservée).
+
+### Réalisation (codé le 14 octobre 2026)
+- **Modèle** (`Models.cs`) : `User.ExpertMode` (`bool?`, `null` = expert pour un ancien compte), `User.ExpertIntroSeen`, méthode `IsExpert()`.
+- **Service** (`ModeService.cs`, enregistré en scoped dans `Program.cs`) : `Expert` relu à chaque demande ; `Switch(bool)` enregistre le mode puis recharge la page (ou ouvre la présentation) ; `DismissIntro(bool)` ferme la présentation. Hors espace client et pendant une consultation par l'équipe Linkii, le mode vaut expert.
+- **Barre latérale** (`MainLayout.razor`) : interrupteur au-dessus du compte. Planning, Aires, Membres, Intégrations et Widgets ne sont rendus qu'en expert.
+- **Page réservée** : en simple, l'adresse directe d'une de ces pages affiche « Disponible en mode expert » avec un bouton (`MainLayout`, liste `ExpertPaths`).
+- **Écrans** (`Screens.razor`) : sélecteur carte/liste masqué en simple, qui reste en cartes.
+- **Réglages** (`Settings.razor`) : onglets filtrés (`SimpleTabs`), une ligne « Mode d'utilisation » dans *Compte et confidentialité*, et un bloc « Fonctions avancées » en bas en simple.
+- **Inscription** (`Login.razor`, `Signup.cs`) : `Signup.Create` reçoit `expert` (défaut `false`) ; les deux chemins (e-mail, fournisseur externe) le transmettent.
+- **Styles** (`app.css`) : pastilles de choix à l'inscription et libellé de l'interrupteur, sans toucher au reste.
+
+### Limites connues
+- **Non testé dans le navigateur** : compilation seulement. Le choix à l'inscription (boutons radio en rendu serveur), la présentation et le rechargement après bascule restent à vérifier sur données d'essai.
+- Changer de mode recharge la page entière. C'est cohérent avec le changement d'aire, mais coûte un instant.
+- Les pages d'intégration accessibles par un lien (par exemple « Comptes connectés » depuis *Utilisation*) passent par la page réservée en simple, sans lien direct vers le mode expert autre que son bouton.
+
 ## Plans et prochaines étapes
 
 - Gestion des droits : essayer avec de vrais membres (niveau en lecture seule page par page, appairage d'un écran par un membre limité à une zone, aperçu et direct) ; voir « Limites connues » du §46.
