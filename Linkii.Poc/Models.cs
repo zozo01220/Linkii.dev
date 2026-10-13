@@ -70,18 +70,9 @@ public static class Roles
     public const string PlatformAdmin = "PlatformAdmin";   // équipe Linkii : console administrateur
     public const string ResellerAdmin = "ResellerAdmin";   // revendeur : clients, marque, équipe
     public const string ClientAdmin = "ClientAdmin";       // administrateur de l'organisation (client du revendeur) : toutes les aires, réglages
-    public const string ClientMember = "ClientMember";     // membre de l'organisation : un rôle par aire (User.AreaRoles)
+    public const string ClientMember = "ClientMember";     // membre de l'organisation : un niveau de droits (User.LevelId)
 
     public static bool IsClient(string role) => role is ClientAdmin or ClientMember;
-}
-
-/// <summary>Rôle d'un membre dans une aire de gestion.</summary>
-public static class AreaRoles
-{
-    public const string Admin = "admin";   // contenus de l'aire, zones et membres de l'aire
-    public const string User = "user";     // contenus de l'aire (écrans, listes de lecture, médias) : modifier et publier
-
-    public static string Label(string? role) => role == Admin ? "Administrateur" : role == User ? "Utilisateur" : "Aucun accès";
 }
 
 /// <summary>Le revendeur : l'entreprise qui revend Linkii sous sa marque. Résolu à partir du nom de domaine de chaque requête.</summary>
@@ -122,7 +113,9 @@ public class User
     /// <summary>Mot de passe provisoire (envoyé par e-mail) : à remplacer à la prochaine connexion.</summary>
     public bool MustChangePassword { get; set; }
 
-    /// <summary>Membre (<see cref="Roles.ClientMember"/>) : son rôle dans chaque aire. Un administrateur de l'organisation a accès à toutes les aires.</summary>
+    /// <summary>Membre (<see cref="Roles.ClientMember"/>) : son niveau de droits (<see cref="AccessLevel"/> de l'organisation). Un administrateur de l'organisation n'en a pas : il a tous les droits.</summary>
+    public Guid? LevelId { get; set; }
+    /// <summary>Ancien format (rôle par aire, avant les niveaux de droits) : lu une fois par <see cref="AccessLevels.Migrate"/>, puis vidé.</summary>
     public List<AreaRole> AreaRoles { get; set; } = new();
     /// <summary>Dernière aire ouverte, par organisation (l'équipe Linkii et les revendeurs visitent plusieurs organisations).</summary>
     public Dictionary<Guid, Guid> LastAreas { get; set; } = new();
@@ -159,14 +152,14 @@ public class User
     /// <summary>Invité qui ne s'est encore jamais connecté.</summary>
     public bool IsInvited => MustChangePassword && LastLoginUtc == null;
     public bool ActiveSince(DateTime utc) => !Disabled && (LastActiveUtc ?? LastLoginUtc) >= utc;
-    public string? RoleIn(Guid areaId) => AreaRoles.FirstOrDefault(r => r.AreaId == areaId)?.Role;
     public string Label => string.IsNullOrWhiteSpace(Name) ? Email : Name;
 }
 
+/// <summary>Ancien rôle d'un membre dans une aire (« admin » ou « user »), gardé pour la migration vers les niveaux de droits.</summary>
 public class AreaRole
 {
     public Guid AreaId { get; set; }
-    public string Role { get; set; } = Linkii.Poc.AreaRoles.User;
+    public string Role { get; set; } = "user";
 }
 
 /// <summary>Aire de gestion d'une organisation : ses écrans, listes de lecture et médias, partagés par ses membres. Les zones classent ses écrans.</summary>
@@ -235,6 +228,8 @@ public class Tenant
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid ResellerId { get; set; }
     public bool Suspended { get; set; }
+    /// <summary>Niveaux de droits créés par les administrateurs de l'organisation (voir <see cref="AccessLevel"/>).</summary>
+    public List<AccessLevel> Levels { get; set; } = new();
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 
     /// <summary>Voir <see cref="SignupSources"/> ; null pour une organisation créée avant le 9 octobre 2026.</summary>
@@ -781,6 +776,41 @@ public static class Helpers
     /// <summary>Durée constatée d'une vidéo YouTube (instance d'app), ou null si elle n'est pas encore connue.</summary>
     public static int? VideoSeconds(MediaItem? m) =>
         m?.Info.TryGetValue("durationSec", out var d) == true && int.TryParse(d, out var n) && n > 0 ? n : null;
+
+    /// <summary>
+    /// Temps total d'un contenu d'app « jusqu'à la fin » : nombre d'images (pages, diapositives, fichiers du dossier) × durée de chaque image,
+    /// plus la durée connue de ses vidéos. Null si elle n'est pas connue (vidéo pas encore lue).
+    /// </summary>
+    public static (int Seconds, int Count)? ContentSeconds(AppManifest? app, MediaItem? m, IReadOnlyCollection<MediaItem> all)
+    {
+        if (app == null || m == null) return null;
+        List<MediaItem> files;
+        if (app.Id == "drive")
+        {
+            var folder = m.Settings.GetValueOrDefault("folder") ?? "";
+            var kinds = m.Settings.GetValueOrDefault("kinds") ?? "all";
+            files = all.Where(x => x.Info.GetValueOrDefault("drive") == folder && x.Status == null && x.FileName != null
+                                   && (kinds == "all" || x.Type == (kinds == "videos" ? "video" : "image"))).ToList();
+        }
+        else if (app.Settings.FirstOrDefault(f => f.IsMedia && AppCatalog.IsVisible(f, m.Settings)) is { } mf)
+        {
+            var byId = all.ToDictionary(x => x.Id);
+            files = AppField.MediaIds(m.Settings.GetValueOrDefault(mf.Key)).Where(byId.ContainsKey).Select(id => byId[id]).ToList();
+        }
+        else return null;
+
+        var intervalField = app.Settings.FirstOrDefault(f => f.Key == "interval");
+        var interval = int.TryParse(m.Settings.GetValueOrDefault("interval") ?? intervalField?.Default, out var iv) && iv > 0 ? iv : 0;
+        var total = 0;
+        foreach (var f in files) total += f.Type == "video" ? VideoLength.Seconds(f) ?? 0 : interval;
+        return total > 0 ? (total, files.Count) : null;
+    }
+
+    /// <summary>Temps alloué à un élément de playlist pleine page : durée fixe, ou, pour un contenu qui décide lui-même, son temps total.</summary>
+    public static int ItemSeconds(PlaylistItem i, MediaItem? m, AppManifest? app, IReadOnlyCollection<MediaItem> all) =>
+        app?.Duration == "content" && i.DurationMode != "fixed"
+            ? ContentSeconds(app, m, all)?.Seconds ?? VideoSeconds(m) ?? i.DurationSec
+            : i.DurationSec;
 
     private static readonly System.Globalization.CultureInfo Fr = new("fr-CH");
 

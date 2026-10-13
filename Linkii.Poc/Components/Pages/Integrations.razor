@@ -1,5 +1,5 @@
 @page "/integrations"
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientAdmin")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:integrations")]
 @inject TenantStore Store
 @inject AppService Svc
 @inject NavigationManager Nav
@@ -15,7 +15,7 @@
         <h1>Intégrations</h1>
         <p class="sub">Les sources de contenus de vos listes de lecture et les comptes qui y donnent accès.</p>
     </div>
-    @if (Addable.Any())
+    @if (admin && Addable.Any())
     {
       <div class="row head-actions">
         <div class="kebab add-menu">
@@ -44,6 +44,8 @@
     }
 </div>
 
+@if (admin)
+{
 <nav class="tabs" role="tablist" aria-label="Intégrations et comptes connectés">
     <button type="button" role="tab" class="@(accountsTab ? "" : "on")" aria-selected="@(accountsTab ? "false" : "true")" @onclick="() => accountsTab = false">Intégrations</button>
     <button type="button" role="tab" class="@(accountsTab ? "on" : "")" aria-selected="@(accountsTab ? "true" : "false")" @onclick="() => accountsTab = true">
@@ -51,6 +53,7 @@
         @if (accounts.Any(a => AccState(a).Css == "hors-ligne")) { <span class="tab-alert" title="Un compte doit être reconnecté"><span class="sr-only">Un compte doit être reconnecté</span></span> }
     </button>
 </nav>
+}
 
 @if (!accountsTab)
 {
@@ -78,7 +81,8 @@
         <CatalogView Groups="Groups" View="@view" Compact="true" Noun="Intégration" UsageLabel="Utilisation">
             <Usage><span>@UsageText(context.Id)</span></Usage>
             <Detail>
-                @if (ConnectedAccounts.For(context.Id) is not { } kind)
+                @if (!admin) { }
+                else if (ConnectedAccounts.For(context.Id) is not { } kind)
                 {
                     <span class="acc-none">Sans compte</span>
                 }
@@ -94,7 +98,8 @@
                 }
             </Detail>
             <Actions>
-                @if (CalSource(context) is { } src)
+                @if (!admin) { }
+                else if (CalSource(context) is { } src)
                 {
                     <button type="button" class="btn ghost sm" @onclick="() => calSource = src">Gérer</button>
                     <button type="button" class="switch @(context.Off ? "" : "on")" role="switch" aria-checked="@(context.Off ? "false" : "true")" aria-label="@context.Name active" @onclick="() => ToggleSource(src)"><span></span></button>
@@ -122,20 +127,37 @@ else
             <p>Connectez un compte Microsoft, Google, Canva, Dropbox ou Facebook, ou un serveur (agendas, Nextcloud, SFTP) : ses agendas, dossiers ou designs seront proposés dans vos listes de lecture.</p>
         </div>
     }
-    <div class="acc-list">
-        @foreach (var acc in accounts)
+    @if (accounts.Count > 0)
+    {
+        <div class="lib-tools">
+            <div class="search-box grow" style="margin:0">
+                <Ico Name="search" Size="16" />
+                <input placeholder="Rechercher un compte" aria-label="Rechercher un compte" @bind="accSearch" @bind:event="oninput" />
+            </div>
+            <select @bind="accFilter" aria-label="Filtrer par fournisseur">
+                <option value="">Tous les fournisseurs</option>
+                @foreach (var k in accounts) { <option value="@k.Id">@k.Kind</option> }
+            </select>
+            <ViewToggle StorageKey="accounts" @bind-Value="accView" />
+        </div>
+    }
+    <div class="acc-list @(accView == "list" ? "list" : "")">
+        @foreach (var acc in ShownAccounts)
         {
             var a = acc;
             var state = AccState(a);
             var oauth = a.Id is ConnectedAccounts.Microsoft or ConnectedAccounts.Google or ConnectedAccounts.Canva or ConnectedAccounts.Dropbox or ConnectedAccounts.Facebook;
-            <article class="acc-card @(flash == a.Id ? "flash" : "")" tabindex="-1" @ref="accRefs[a.Id]" aria-labelledby="acc-@a.Id">
-                <div class="acc-head">
+            <article class="acc-card @(flash == a.Id ? "flash" : "") @(openAcc.Contains(a.Id) ? "open" : "")" tabindex="-1" @ref="accRefs[a.Id]" aria-labelledby="acc-@a.Id">
+                <div class="acc-head" @onclick="() => ToggleAcc(a.Id)">
                     <AccountLogo Kind="@a.Id" Size="28" />
+                    <button type="button" class="acc-chev" aria-expanded="@(openAcc.Contains(a.Id) ? "true" : "false")" aria-label="@(openAcc.Contains(a.Id) ? "Masquer" : "Voir") les intégrations du compte @a.Kind" @onclick="() => ToggleAcc(a.Id)" @onclick:stopPropagation="true"><Ico Name="chevron" Size="14" /></button>
                     <div class="acc-id">
                         <b id="acc-@a.Id">@a.Kind</b>
                         <small class="acc-user"><span class="acc-dot @state.Css" title="@state.Label"></span><span class="sr-only">@state.Label : </span>@a.User</small>
                     </div>
-                    <div class="kebab">
+                    @{ var nInt = ConnectedAccounts.Kind(a.Id).Integrations.Count(); }
+                    <span class="acc-count">@nInt intégration@(nInt > 1 ? "s" : "")</span>
+                    <div class="kebab" @onclick:stopPropagation="true">
                         <button type="button" class="kebab-btn" aria-haspopup="menu" aria-expanded="@(accMenu == a.Id ? "true" : "false")" aria-label="Actions pour le compte @a.Kind" @onclick="() => accMenu = accMenu == a.Id ? null : a.Id"><Ico Name="dots-v" Size="18" /></button>
                         @if (accMenu == a.Id)
                         {
@@ -154,6 +176,7 @@ else
                         }
                     </div>
                 </div>
+                <div class="acc-detail">
                 @if (a.Lost)
                 {
                     <div class="acc-alert">
@@ -194,6 +217,7 @@ else
                         }
                     </span>
                     <small>@SinceLine(a)</small>
+                </div>
                 </div>
             </article>
         }
@@ -325,7 +349,7 @@ else
     private Dictionary<string, int> counts = new();   // contenus créés, par app
     private Tenant tenant = new();
     private List<ConnectedAccount> accounts = new();
-    private bool accountsTab, addMenu, cvOpen, canvaReady;
+    private bool accountsTab, addMenu, cvOpen, canvaReady, admin = true;   // admin : activation, comptes et connexions ; un membre voit seulement les intégrations de son niveau
     private string? calSource;     // source de calendriers dont la fenêtre « Gérer » est ouverte
     private string? driveSource;   // source Drive dont la fenêtre « Gérer » est ouverte
     private string? accMenu;       // compte dont le menu ⋯ est ouvert
@@ -333,6 +357,12 @@ else
     private string? connectKind;   // Microsoft ou Google : choix des accès avant la connexion
     private bool wantCalendars = true, wantFiles = true;
     private string? connectingServer;   // serveur CalDAV ou Exchange ajouté depuis « Connecter un compte » : source activée une fois configurée
+    private string accView = "cards", accSearch = "", accFilter = "";   // vue cartes | liste (mémorisée dans le navigateur)
+    private readonly HashSet<string> openAcc = new();   // comptes dépliés en vue liste
+    private void ToggleAcc(string id) { if (!openAcc.Remove(id)) openAcc.Add(id); }
+    private IEnumerable<ConnectedAccount> ShownAccounts => accounts.Where(a =>
+        (accFilter == "" || a.Id == accFilter) &&
+        (accSearch.Trim().Length == 0 || a.Kind.Contains(accSearch.Trim(), StringComparison.OrdinalIgnoreCase) || a.User.Contains(accSearch.Trim(), StringComparison.OrdinalIgnoreCase)));
     private string? flash;              // compte mis en évidence après « Voir le compte »
     private bool focusPending;
     private readonly Dictionary<string, ElementReference> accRefs = new();
@@ -348,15 +378,15 @@ else
         get
         {
             // les apps « Calendrier partagé » et « Dossier Drive » n'ont pas de carte : elles suivent leurs sources (actives dès qu'une source l'est)
-            var apps = Svc.Catalog.Where(a => !a.ScreenWidget && a.Id is not ("agenda" or "drive"))
+            var apps = Svc.Catalog.Where(a => !a.ScreenWidget && a.Id is not ("agenda" or "drive") && (admin || enabled.Contains(a.Id)))
                 .Where(a => Shown(a.Name + " " + a.Summary + " " + a.Category, enabled.Contains(a.Id)))
                 .OrderBy(a => Array.IndexOf(Order, a.Id) is var i && i >= 0 ? i : int.MaxValue)
                 .ThenBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase)
                 .ToList();
-            var sources = SharedCalendarSources.All
+            var sources = SharedCalendarSources.All.Where(_ => admin)
                 .Where(s => Shown(s.Name + " " + s.Summary + " calendrier partagé", SharedCalendarSources.Enabled(tenant, s.Id)))
                 .Select(SourceEntry);
-            var drives = DriveSources.All
+            var drives = DriveSources.All.Where(_ => admin)
                 .Where(s => Shown(s.Name + " " + s.Summary + " drive dossier", DriveSources.Enabled(tenant, s.Id)))
                 .Select(DriveEntry);
             var known = Sections.Select(s => s.Category).ToHashSet();
@@ -519,6 +549,8 @@ else
         cvOpen = false;
         accountsTab = true;
         flash = kind;
+        accSearch = accFilter = "";
+        openAcc.Add(kind);
         focusPending = true;
     }
 
@@ -564,7 +596,8 @@ else
 
     protected override void OnInitialized()
     {
-        accountsTab = TabParam == ConnectedAccounts.Tab;
+        admin = Store.Read(d => d.Access.IsOrgAdmin);
+        accountsTab = admin && TabParam == ConnectedAccounts.Tab;
         Load();
         CanvaReturn();
         GoogleReturn();

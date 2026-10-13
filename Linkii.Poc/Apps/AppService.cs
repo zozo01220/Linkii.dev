@@ -9,8 +9,12 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
     public IReadOnlyList<AppManifest> Catalog => catalog.All;
     public AppManifest? Find(string? appId) => catalog.Find(appId);
 
-    public List<AppInstall> Installed() { ApplyDefaults(); return store.Read(d => d.AppInstalls.OrderBy(a => a.InstalledUtc).ToList()); }
-    public bool IsInstalled(string appId) { ApplyDefaults(); return store.Read(d => d.AppInstalls.Any(a => a.AppId == appId)); }
+    // Un membre ne voit que les apps de son niveau de droits (intégrations et widgets) ; un administrateur les voit toutes.
+    public List<AppInstall> Installed() { ApplyDefaults(); return store.Read(d => d.AppInstalls.Where(a => d.Access.CanUse(catalog, a.AppId)).OrderBy(a => a.InstalledUtc).ToList()); }
+    public bool IsInstalled(string appId) { ApplyDefaults(); return store.Read(d => d.Access.CanUse(catalog, appId) && d.AppInstalls.Any(a => a.AppId == appId)); }
+
+    /// <summary>Activer, désactiver et retirer une app, ses sources et ses connexions : administrateurs de l'organisation seuls.</summary>
+    private static void RequireAdmin(ClientDb d) { if (!d.Access.IsOrgAdmin) throw new UnauthorizedAccessException("Seul un administrateur de l'organisation gère les intégrations."); }
 
     /// <summary>
     /// Active les apps « par défaut » (Image, Vidéo, Diaporamas, widgets) une seule fois par client, espaces existants compris.
@@ -20,14 +24,18 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
     {
         var ids = catalog.All.Where(a => a.DefaultOn).Select(a => a.Id).ToList();
         if (ids.Count == 0 || store.Read(d => ids.All(d.Tenant.DefaultAppsApplied.Contains))) return;
-        store.Write(d =>
+        try
         {
-            foreach (var id in ids.Where(id => !d.Tenant.DefaultAppsApplied.Contains(id)))
+            store.Write(d =>
             {
-                if (!d.AppInstalls.Any(a => a.AppId == id)) d.AppInstalls.Add(new AppInstall { AppId = id, Version = catalog.Find(id)!.Version });
-                d.Tenant.DefaultAppsApplied.Add(id);
-            }
-        });
+                foreach (var id in ids.Where(id => !d.Tenant.DefaultAppsApplied.Contains(id)))
+                {
+                    if (!d.AppInstalls.Any(a => a.AppId == id)) d.AppInstalls.Add(new AppInstall { AppId = id, Version = catalog.Find(id)!.Version });
+                    d.Tenant.DefaultAppsApplied.Add(id);
+                }
+            });
+        }
+        catch (ReadOnlyLevelException) { }   // un niveau en lecture seule n'active rien : ce sera fait à la prochaine visite d'un administrateur
     }
     public MediaItem? Instance(Guid id) => store.Read(d => d.Media.FirstOrDefault(m => m.Id == id && m.AppId != null));   // même si l'app a été désactivée
     public List<MediaItem> Instances(string appId) => store.Read(d => d.Media.Where(m => m.AppId == appId).OrderBy(m => m.Name).ToList());
@@ -38,6 +46,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         var m = catalog.Find(appId) ?? throw new InvalidOperationException("App inconnue.");
         return store.Write(d =>
         {
+            RequireAdmin(d);
             var existing = d.AppInstalls.FirstOrDefault(a => a.AppId == appId);
             if (existing != null) return existing;
             var a = new AppInstall { AppId = appId, Version = m.Version };
@@ -50,7 +59,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
     public void Enable(string appId) => Install(appId);
 
     /// <summary>Retire l'app des choix proposés. Non destructif : les contenus et widgets déjà en place restent à l'antenne.</summary>
-    public void Disable(string appId) => store.Write(d => { d.AppInstalls.RemoveAll(a => a.AppId == appId); });
+    public void Disable(string appId) => store.Write(d => { RequireAdmin(d); d.AppInstalls.RemoveAll(a => a.AppId == appId); });
 
     /// <summary>
     /// Active ou désactive une source de calendriers partagés (Intégrations). L'app « Calendrier partagé » est proposée
@@ -60,6 +69,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
     {
         var any = store.Write(d =>
         {
+            RequireAdmin(d);
             var a = d.Tenant.CalendarAccounts.FirstOrDefault(x => x.Source == source);
             if (a == null) d.Tenant.CalendarAccounts.Add(a = new CalendarAccount { Source = source });
             a.Enabled = on;
@@ -73,6 +83,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
     {
         var any = store.Write(d =>
         {
+            RequireAdmin(d);
             d.Tenant.DrivesEnabled.Remove(source);
             if (on) d.Tenant.DrivesEnabled.Add(source);
             return d.Tenant.DrivesEnabled.Count > 0;
@@ -86,6 +97,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         var orphans = new List<MediaItem>();
         var count = store.Write(d =>
         {
+            RequireAdmin(d);
             var instances = d.Media.Where(m => m.AppId == appId).ToList();
             var ids = instances.Select(m => m.Id).ToHashSet();
             foreach (var id in ids) RemoveFromDrafts(d, id);
@@ -150,6 +162,27 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         if (m != null) m.Info[key] = value;
     });
 
+    /// <summary>Contenu auquel il manque encore une information obligatoire (média, lien, fichier…) : ajouté à vide, il reste à configurer.</summary>
+    public bool IsIncomplete(MediaItem? m) =>
+        m?.AppId != null && catalog.Find(m.AppId) is { } app && AppCatalog.MissingRequired(app, m.Settings, m.Secrets.Keys.ToHashSet()).Count > 0;
+
+    /// <summary>
+    /// Crée un contenu de l'app « à vide » (réglages par défaut, sans source) pour l'ajouter tout de suite à une playlist ; l'utilisateur le complète ensuite
+    /// (choix du média, du lien…). Il n'est pas publié tant qu'il est incomplet.
+    /// </summary>
+    public MediaItem? CreateEmpty(string appId)
+    {
+        var m = catalog.Find(appId);
+        if (m == null) return null;
+        return store.Write<MediaItem?>(d =>
+        {
+            if (!d.AppInstalls.Any(a => a.AppId == appId) || !d.Access.CanUse(m)) return null;
+            var item = new MediaItem { Type = "app", AppId = appId, Name = m.Name, AppVersion = m.Version, Settings = AppCatalog.WithDefaults(m, null) };
+            d.Media.Add(item);
+            return item;
+        });
+    }
+
     /// <summary>Playlists dont le brouillon contient cette instance.</summary>
     public List<Playlist> PlaylistsUsing(Guid mediaId) => store.Read(d => d.Playlists.Where(p => p.Draft.Any(i => i.MediaId == mediaId)).ToList());
 
@@ -167,6 +200,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         var oldPdfs = new List<string>();
         var result = store.Write<(MediaItem?, List<string>)>(d =>
         {
+            if (!d.Access.CanUse(m)) return (null, new List<string> { "Votre niveau de droits ne permet pas d'utiliser cette intégration." });
             if (instanceId == null && !d.AppInstalls.Any(a => a.AppId == appId)) return (null, new List<string> { "Activez d'abord cette intégration dans la page Intégrations." });   // une app désactivée garde ses contenus modifiables
             var item = instanceId is { } id ? d.Media.FirstOrDefault(x => x.Id == id && x.AppId == appId) : new MediaItem { Type = "app", AppId = appId };
             if (item == null) return (null, new List<string> { "Instance introuvable." });

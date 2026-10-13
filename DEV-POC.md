@@ -377,7 +377,7 @@ Toute nouvelle app suit le **standard de configuration d'un contenu** (§30) : c
 **Retirés** : assistant de démarrage (`/start`, `Onboarding`), éditeur de widgets de données (`DataWidgetEditor`), pack d'exemples (`DemoSlides`), zone de glisser-déposer de la Médiathèque (remplacée par les boutons Images et Vidéos), ancien chemin YouTube (`AppKind = youtube`).
 
 
-## 14. Aires de gestion et membres (8 octobre 2026)
+## 14. Aires de gestion et membres (8 octobre 2026) — rôles remplacés par les niveaux de droits (§46)
 
 Une organisation range ses écrans, listes de lecture et médias dans des **aires de gestion** (un site, un bâtiment, un service). Les membres d'une aire partagent tout son contenu ; les autres aires leur sont invisibles. Les **zones** d'une aire classent ses écrans (filtres de la page Écrans), sans effet sur les droits.
 
@@ -387,7 +387,7 @@ Une organisation range ses écrans, listes de lecture et médias dans des **aire
 | Administrateur d'aire | oui | oui | non |
 | Administrateur de l'organisation (`ClientAdmin`, plusieurs possibles) | oui, toutes les aires | oui | oui |
 
-- **Modèle** : `Area` (`Db.Areas`, `Zones`) ; `Screen`, `Playlist`, `MediaItem` portent `AreaId` (`IAreaOwned`), `Screen.ZoneId` ; `User.AreaRoles` (rôle par aire, membres), `User.LastAreas` (aire ouverte, par organisation), `LastLoginUtc` / `LastActiveUtc` (actifs sur 30 jours).
+- **Modèle** : `Area` (`Db.Areas`, `Zones`) ; `Screen`, `Playlist`, `MediaItem` portent `AreaId` (`IAreaOwned`), `Screen.ZoneId` ; `User.LevelId` (niveau de droits, §46 : le rôle par aire a disparu), `User.LastAreas` (aire ouverte, par organisation), `LastLoginUtc` / `LastActiveUtc` (actifs sur 30 jours).
 - **Isolation** : `TenantStore` ouvre un `ClientDb` limité à l'aire ouverte (`AreaAccess`) : `Screens`, `Media`, `Playlists` ne voient que cette aire, les ajouts y sont rangés. Exception : les fichiers des dossiers Drive (`AreaId` vide) sont communs à toutes les aires, les connexions (calendriers, Drive, Canva) restant celles de l'organisation. Un membre sans aire ne voit rien. Le player et `Notifier` lisent la racine : sans changement.
 - **Migration** : au démarrage, chaque organisation reçoit une aire « Principale » (`Seed.EnsureAreas`) où rejoignent ses données ; un nouveau client la reçoit à sa création.
 - **Pas d'interrupteur** : avec une seule aire et aucun membre, le back-office est celui d'avant. Le sélecteur d'aire (haut du menu) et les pages **Aires de gestion** (`/areas`) et **Membres** (`/members`) apparaissent dès la deuxième aire ou le premier membre ; entrée dans **Réglages › Organisation**.
@@ -777,8 +777,125 @@ Demande : une intégration Facebook gratuite, sur la base des intégrations exis
 - **Dossier `Linkii.Poc/scans/`** ajouté au `.gitignore` : il contient le sel secret du comptage des QR (`salt.bin`) et les journaux de scans (`{client}.jsonl`). Ces données ne doivent jamais être versionnées, comme `keys/` et `data.json`.
 - **Tests** : `dotnet test` donne 357 réussites et 5 échecs. Les 5 échecs (`AppsTests` : `Hidden_fields_are_neither_required_nor_stored`, `Secrets_are_encrypted_kept_when_left_empty_and_never_sent_to_the_player`, `Uninstalling_removes_instances_and_marks_playlists_unpublished`, `Screens_read_the_published_snapshot_of_their_own_playlist_only`, `Apps_belong_to_the_client_who_added_them`) existent déjà sur le dernier commit (`HEAD`), vérifié dans un worktree propre : ils ne viennent pas des changements de cette série. À corriger à part.
 
+## 45. Publicité rémunérée sur les écrans (Growth) : analyse et maquette (12 octobre 2026)
+
+Demande : permettre au propriétaire d'un compte **Growth** d'afficher des spots publicitaires **contre rémunération**, avec une **preuve de diffusion** (nombre de passages et temps d'affichage complet, par jour, par semaine et par mois). Spot pleine page, dans les **deux formats** (portrait et paysage). **Non codé** : analyse puis maquette `maquettes/publicite.html` à valider.
+
+### Décisions (12 octobre 2026)
+1. **Linkii fournit les spots et paie** : Linkii joue le rôle de régie. Le propriétaire n'apporte pas de spot en V1.
+2. **Tarification au passage complet** : la métrique principale est le nombre de passages complets.
+3. **Complet = 100 %** de la durée prévue, sans pause, sans veille, sans coupure.
+4. **Droit de refus du propriétaire : oui, dès la V1** (annonceur, catégorie, spot, avec délai de réponse).
+5. **Format manquant : on approxime** (format le plus proche, fond flouté, jamais de déformation).
+6. **Conservation de la preuve : 13 mois** (journal détaillé et agrégats journaliers).
+7. **Murs et écrans découpés : hors périmètre** de la V1 (un écran découpé en zones ou membre d'un mur ne diffuse pas de pub).
+8. **Console des campagnes : administration Linkii** uniquement (*Admin › Publicité*). Côté client : un réglage et un tableau de revenus.
+
+### Acteurs
+- **Annonceur** : paie Linkii. **Linkii** : crée les campagnes, mesure, facture, reverse une part. **Propriétaire du compte** : autorise la pub sur ses aires/écrans, accepte ou refuse les spots, voit ses revenus.
+
+### Le spot
+- **Campagne** (annonceur, période, tarif par passage complet, part du propriétaire, plafond de passages, plafond par jour, fréquence) contenant un ou plusieurs **spots**. Un spot a un **visuel paysage 16:9 et un visuel portrait 9:16** (image ou vidéo, durée fixe, vidéo sans son par défaut). Un spot sans l'un des deux formats est accepté.
+- **Choix du format** par le serveur à la publication, d'après l'orientation de l'écran (rotation réglée, `DetectedW/H`) ; le player n'a rien à deviner. Format manquant ou écran de ratio inhabituel : visuel le plus proche **centré sur fond flouté**, sans recadrage ni déformation ; le format réellement utilisé est inscrit dans chaque passage.
+- **Pleine page seulement.** L'écran affiche le spot sur toute sa surface. Un écran découpé ou membre d'un mur est exclu (décision 7).
+- **QR code possible sur le spot** : le comptage des scans (§41) s'applique tel quel (pleine page, Growth).
+
+### Quand un spot passe
+- Couche **indépendante du planning** : le spot s'intercale entre deux contenus (jamais au milieu), tous les N contenus ou toutes les N minutes, avec un plafond par heure et par jour et une répartition régulière du quota.
+- Aucun spot, aucun comptage : écran en veille, en pause depuis le back-office (§23), aperçu et simulateur, licence repassée en Base (le serveur retire les spots à la publication, comme le QR), compte suspendu, aire / écran non autorisé, spot refusé.
+- **Hors ligne** : les spots sont préchargés comme les médias (§35) ; les passages sont notés localement et remontés au retour de la connexion.
+
+### Mesure : ce que `PlayLog` ne fait pas
+| Limite de l'historique actuel | Correction pour la pub |
+|---|---|
+| Pas d'identifiant par diffusion : un lot renvoyé après une réponse perdue donne des doublons. | **Identifiant unique par passage**, dédoublonné côté serveur. |
+| Pas de notion de « complet » (durée arrondie, rien sous 1 s). | Durée prévue, durée réellement affichée (horloge monotone), indicateur **complet**, cause d'interruption (pause, veille, coupure, rechargement). |
+| Déclaratif du player, sans recoupement. | Heure recalée par le serveur (décalage d'horloge), recoupement avec la présence de l'écran, plafond de plausibilité, **captures échantillonnées pendant le spot** (fonction capture Growth, §23), lots signés par le jeton de l'écran. |
+| 90 jours, 2 000 diffusions en attente au plus. | **Journal dédié `AdLog`** (JSON Lines par client), file locale compacte, **13 mois**, agrégats journaliers conservés aussi 13 mois. |
+
+- **Définitions** : *passage complet* = affiché sur 100 % de sa durée prévue ; *passage interrompu* = compté à part, non rémunéré ; *temps d'affichage complet* = passages complets × durée du spot ; périodes **jour, semaine (ISO, lundi) et mois** dans le fuseau de l'aire (`Area.SleepTz`, à défaut celui de l'organisation).
+- **Rapport de preuve** : par écran, spot et jour / semaine / mois, export **CSV et PDF** avec numéro de rapport et empreinte, et captures horodatées en annexe.
+
+### Côté propriétaire (compte Growth)
+- **Réglages › Publicité** (facultatif, désactivé par défaut) : interrupteur général, aires et écrans autorisés, catégories exclues, **spots à valider** (accepter / refuser dans le délai), tableau de **revenus** (jour, semaine, mois ; statuts à valider, validé, payé), relevé mensuel. Licence Base : section visible, verrouillée (« Disponible avec la licence Growth »).
+- **Alertes** : écran hors ligne pendant une campagne, spot non préchargé, format absent.
+
+### Pistes de code
+- `Ads.cs` : `Campaign`, `Spot`, affectations (niveau plateforme, pas par client) ; `AdLog` calqué sur `PlayLog` et `ScanLog` (JSON Lines, idempotence, agrégats) ; `Plans` / `Tenant.IsGrowth` pour la licence ; `Notifier.Snapshot` pour publier les spots (`ads` dans `ForPlayer`, comme `schedule` et `qr`) ; `POST /api/player/ad-plays` ; `player.js` (insertion dans `next()`, comptage dédié, préchargement) ; app Android = même player (WebView) ; pages *Admin › Publicité* et *Réglages › Publicité*, résultats dans `Stats.razor`.
+
+### Hors périmètre V1 (à revoir)
+Priorités et pondération entre campagnes, rattrapage de volume, facturation et paiement automatisés (Linkii calcule, le paiement se fait ailleurs), mesure d'audience par caméra (écartée : vie privée), annonceur qui se connecte lui-même, pub sur mur ou écran découpé.
+
+### Reste à décider
+Barème et part du propriétaire (par campagne ou globale) ; délai de validation d'un spot avant diffusion automatique ; fréquence par défaut ; durées de spot autorisées (10, 15, 20, 30 s) ; modèle du relevé mensuel ; mention légale à l'écran ou non.
+
+## 46. Gestion des droits : niveaux de droits (13 octobre 2026) : codé
+
+Demande : simplifier au maximum la gestion des droits. L'administrateur seul crée des **niveaux de droits** ; chaque membre en reçoit un, à l'invitation ou en modifiant le membre. Un niveau règle les pages visibles, les intégrations et widgets utilisables, et un filtre aire › zones › écrans. La page **Membres** sort des Réglages pour le menu latéral. **Codé le 13 octobre 2026** (voir « Réalisation ») ; analyse et maquettes `maquettes/droits-fonctionnement.html` (principe, exemple, règles) et `maquettes/droits-pages.html` (menu, Membres, Niveaux, éditeur de niveau, invitation, vue d'un membre).
+
+### Principe
+- **Un niveau = trois choses** : (1) pages visibles, (2) intégrations et widgets utilisables, (3) périmètre (aires › zones › écrans). **Un membre = un niveau.** Plus de rôle par aire.
+- **Administrateur de l'organisation** : n'est pas un niveau. Il a tout, sans filtre, et seul il crée, modifie et supprime les niveaux, invite, modifie et désactive les membres. Plusieurs administrateurs possibles, un au moins reste actif (règle actuelle).
+- Dans le formulaire d'un membre, **une seule liste** : « Administrateur — tous les droits », puis les niveaux créés. Elle remplace l'interrupteur « Administrateur de l'organisation » et les rôles par aire.
+
+### Menu latéral
+- Membres quitte les Réglages (tuile « Membres » de l'utilisation et ligne « Gérer les membres » de l'organisation supprimées) et se place **au-dessus d'Intégrations**, avec **un trait** entre les deux. Ordre du bas du menu : *Aires de gestion, Membres, ─, Intégrations, Widgets, ─, Réglages*, puis le compte.
+- Aujourd'hui Membres n'apparaît qu'à partir de la 2<sup>e</sup> aire ou du 1<sup>er</sup> invité (§14). Nouveau : **toujours visible pour l'administrateur**, car c'est de là qu'il crée ses niveaux. Un compte seul voit donc Membres (décision 1).
+- La page Membres a deux onglets : **Membres** (colonnes Niveau et Périmètre au lieu d'une colonne par aire) et **Niveaux de droits** (liste, nombre de membres, création).
+
+### Ce que règle un niveau
+1. **Pages** : cases Écrans, Listes de lecture, Planning, Médiathèque. Intégrations et Widgets ne se cochent pas : la page apparaît si au moins une app (ou un widget) est cochée. **Jamais offertes** : Membres, Aires de gestion, Comptes connectés, Réglages.
+2. **Intégrations et widgets** : une case par app du catalogue et par widget, avec « tout cocher ». Cocher = **utiliser** (créer et modifier des contenus avec cette app, la placer dans une liste ou sur un écran). La connexion à un compte (Comptes connectés) reste à l'administrateur. Un contenu existant dont l'app n'est plus autorisée reste visible et diffusé, mais n'est plus modifiable ni créable par ce niveau.
+3. **Périmètre** : arbre aire › zone › écran à cases à trois états. Cocher un parent coche tout ce qu'il contient, **y compris les zones et écrans créés plus tard** ; décocher un enfant rend le parent partiel. Résumé en clair sous l'arbre. Un niveau sans aucun écran coché est refusé à l'enregistrement.
+
+### Effet du périmètre
+| Élément | Règle |
+|---|---|
+| Aires | Seules celles du périmètre figurent dans le sélecteur d'aire (menu) ; l'aire ouverte est toujours l'une d'elles. |
+| Écrans, murs | Filtrés aux écrans cochés ; un mur est visible si au moins un de ses écrans l'est (un mur est toujours entier : décision 3). Contrôle du direct, simulateur, planning, suivi : mêmes écrans. |
+| Listes de lecture, médiathèque | **Par aire** (comme aujourd'hui) : un membre limité à une zone voit les listes et médias de toute l'aire. Avertissement dans l'éditeur de niveau. |
+| Publication | Publier une liste touche tous les écrans qui la jouent, même hors périmètre : **autorisé, avec une mention** « diffusée aussi sur N écrans hors de votre périmètre ». |
+| Planning | Créneaux des zones et écrans du périmètre seulement (page visible si la case est cochée). |
+| Fichiers de dossiers Drive | Sans aire (communs à l'organisation, §14) : visibles si le niveau a accès à l'app de Drive concernée. |
+
+
+### Conséquences à connaître
+- **L'administrateur d'aire disparaît.** Aujourd'hui il gère les membres et les zones de son aire (§14). Désormais ces deux pouvoirs sont à l'administrateur de l'organisation seul. La gestion des **zones** (page Écrans) lui passe donc aussi.
+- **Filtre dans le niveau, pas chez le membre** (demande). Deux sites aux droits identiques demandent deux niveaux (« Éditeur Magasin », « Éditeur Atelier »). Variante écartée : niveau pour les droits et périmètre à part, saisi pour chaque membre (moins de niveaux, un champ de plus par invitation).
+- Modifier un niveau agit aussitôt sur tous ses membres (droits relus à chaque requête). Un niveau utilisé ne se supprime pas ; la fenêtre liste ses membres à réaffecter.
+
+### Décisions (13 octobre 2026)
+1. **Membres toujours visible** pour l'administrateur, même seul : c'est l'entrée pour créer le premier niveau.
+2. **Lecture seule : oui.** Une case par niveau : la personne voit tout ce que le niveau donne, sans rien modifier ni publier.
+3. **Mur : on accepte le mur entier** dès qu'un de ses écrans est dans le périmètre.
+4. **Publication hors périmètre : autorisée, avec une mention** dans l'éditeur de la liste.
+5. **Niveaux à la création d'une organisation** : « Administrateur » (toujours là, non modifiable) et « Utilisateur » (Écrans, Listes de lecture, Médiathèque ; ni Planning ni Réglages ; toutes les apps, tous les widgets, toutes les aires).
+
+### Réalisation (codé le 13 octobre 2026)
+- **Modèle** (`Rights.cs`, `Models.cs`) : `AccessLevel` (pages, `AllIntegrations` / `AllWidgets` + `Apps`, `ReadOnly`, périmètre `AllAreas` + `AreaIds` + `ZoneIds` + `ScreenIds`) stocké dans `Tenant.Levels` ; `User.LevelId` ; l'ancien `User.AreaRoles` n'est plus lu qu'à la migration. Le périmètre est **à plat** (un élément coché donne tout ce qu'il contient, futurs éléments compris), pas imbriqué comme dans les pistes.
+- **Accès** (`Tenancy.cs`) : `AreaAccess.For` calcule le niveau, les aires visibles (`LevelScope`) et un filtre d'écrans ; `ClientDb.Screens` ne rend que les écrans du périmètre. `CanManage` / `ManagesCurrent` = administrateur de l'organisation seul (zones, murs, aires, membres). `CanSee(page)`, `CanUse(app)`, `SeesZone(zone)`, `ReadOnly`.
+- **Pages** : politiques `Page:screens|playlists|planning|media|integrations|widgets` (`PageHandler`, niveau relu à chaque navigation) ; Membres, Aires, Réglages, Comptes connectés restent `ClientAdmin`. Un membre refusé est renvoyé vers la première page de son niveau (`AccessDenied`).
+- **Apps** (`AppService`) : `Installed()` / `IsInstalled()` ne rendent que les apps du niveau ; `SaveInstance` et `CreateEmpty` refusent une app non autorisée ; activer, désactiver, retirer une app et régler une source sont réservés à l'administrateur. Les pages Intégrations et Widgets d'un membre n'affichent que ses apps, sans interrupteur, sans « Gérer », sans comptes connectés.
+- **Lecture seule** : `TenantStore.Write` lève `ReadOnlyLevelException` ; `RightsBoundary` (autour de la page, dans `MainLayout`) affiche « Lecture seule » au lieu de fermer la session ; bandeau en haut et boutons d'en-tête masqués. Le changement d'aire reste permis.
+- **Menu** (`MainLayout.razor`) : entrées filtrées par le niveau ; bas du menu *Aires de gestion (dès la 2<sup>e</sup> aire), Membres, ─, Intégrations, Widgets, ─, Réglages*. Réglages perd la tuile et la ligne Membres.
+- **Page Membres** : onglets *Membres* (niveau, périmètre) et *Niveaux de droits* (liste, dupliquer, supprimer) ; fenêtre d'édition du niveau avec arbre aires › zones › écrans à cases à trois états (un mur n'a qu'une case) et résumé du périmètre ; formulaire membre à liste unique.
+- **Zones filtrées** : les pages Écrans et Planning n'affichent que les zones du périmètre ; `PlanOps` refuse une zone ou un écran hors périmètre.
+- **Mention** (`PlaylistEditor`) : « diffusée aussi sur N écrans hors de votre périmètre ».
+- **Migration** (`AccessLevels.Migrate`, au démarrage) : niveau « Utilisateur » dans chaque organisation sans niveau ; chaque jeu d'aires des anciens membres devient un niveau « Accès … » avec les quatre pages et toutes les apps (les membres gardent ce qu'ils avaient, planning compris) ; les anciens administrateurs d'aire reçoivent le même niveau et **perdent** la gestion des zones et des membres. Un membre sans aire reste sans niveau (« Aucun niveau »).
+- **Suppression** : retirer une aire ou une zone la retire des périmètres (`AccessLevels.Forget`). Console Linkii : la fenêtre des comptes montre le niveau.
+- **Tests** : `AccessLevelTests` (cascade, zones, écrans, mur entier, aire ajoutée plus tard, pages, apps, enregistrement et suppression de niveau, zones réservées à l'administrateur, planning, migration, niveau par défaut) et `ReadOnlyLevelTests` ; `AreasTests` et `ZonesTests` adaptés. 5 tests de `AppsTests` échouaient déjà avant ce travail (apps par défaut), sans lien.
+- **Vérifié dans le navigateur** (données d'essai) : migration, éditeur de niveau, attribution à un membre, menu et pages d'un membre limité à une zone et un écran, pages refusées redirigées.
+
+### Limites connues
+- La lecture seule se joue à l'écriture (`TenantStore.Write`) : un bouton non masqué mène à « Lecture seule » ; seuls les boutons d'en-tête sont cachés. À affiner page par page.
+- Un écran appairé par un membre prend la zone par défaut de l'aire : hors de son périmètre si celui-ci est limité à d'autres zones.
+- Les listes de lecture et la médiathèque restent partagées par aire (avertissement dans l'éditeur de niveau). Les périmètres d'écrans ne filtrent pas encore l'API d'aperçu ni le contrôle du direct hors de la page Écrans (ils passent par `ClientDb.Screens`, donc filtrés, mais sans test dédié).
+- Les maquettes (`droits-pages.html`) numérotent les sections autrement : dans l'appli, Modification est le bloc 3 et Périmètre le bloc 4.
+
 ## Plans et prochaines étapes
 
+- Gestion des droits : essayer avec de vrais membres (niveau en lecture seule page par page, appairage d'un écran par un membre limité à une zone, aperçu et direct) ; voir « Limites connues » du §46.
+- Publicité rémunérée : maquette `maquettes/publicite.html` à valider avant de coder (§45).
 - Comptage des scans de QR code : essai sur un vrai écran et un vrai téléphone, derrière le nom de domaine public ; page de résultats détaillés, comptage par écran (§41).
 - Google Slides, Google Docs et Microsoft PowerPoint : essai avec de vrais comptes, conversion de vrais fichiers, mise à jour automatique (§39, §40).
 

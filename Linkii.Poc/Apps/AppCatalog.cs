@@ -166,6 +166,12 @@ public class AppCatalog
     /// <summary>
     /// Valide les valeurs saisies. <paramref name="storedSecrets"/> : clés des secrets déjà enregistrés (un secret laissé vide est conservé).
     /// </summary>
+    /// <summary>Champs obligatoires encore vides : un contenu ajouté « à vide » à une playlist n'est pas publié tant qu'il n'est pas complété.</summary>
+    public static List<string> MissingRequired(AppManifest m, IReadOnlyDictionary<string, string> values, ISet<string> storedSecrets) =>
+        m.Settings.Where(f => IsVisible(f, values) && f.Required && f.Type != "hidden"
+                              && string.IsNullOrWhiteSpace(values.GetValueOrDefault(f.Key)) && !(f.IsSecret && storedSecrets.Contains(f.Key)))
+                  .Select(f => f.Label).ToList();
+
     public static List<string> Validate(AppManifest m, IReadOnlyDictionary<string, string> values, ISet<string> storedSecrets)
     {
         var errors = new List<string>();

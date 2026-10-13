@@ -1,5 +1,5 @@
 @page "/playlists"
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:playlists")]
 @inject TenantStore Store
 @inject AppService Svc
 @inject NavigationManager Nav
@@ -52,7 +52,7 @@
         var tiles = p.Draft.Where(i => i.Placement == "full").Select(i => media.FirstOrDefault(m => m.Id == i.MediaId)).Where(m => m != null).Take(3).ToList();
         var pl = p;
         var onScreens = screens.Count(s => s.ZonePlaylists().Contains(pl.Id));
-        <div class="pl-card sc-card @(picked.Contains(pl.Id) ? "picked" : "")">
+        <div class="pl-card sc-card pl-lc @(picked.Contains(pl.Id) ? "picked" : "")">
             <input type="checkbox" class="sc-check pl-check" aria-label="Sélectionner @pl.Name" checked="@picked.Contains(pl.Id)" @onchange="() => { if (!picked.Remove(pl.Id)) picked.Add(pl.Id); }" />
             <a class="pl-cover @(tiles.Count <= 1 ? "single" : "")" href="/playlists/@pl.Id" tabindex="-1" aria-hidden="true">
                 @foreach (var m in tiles) { <div class="pl-tile"><MediaThumb Media="m!" All="media" /></div> }
@@ -84,10 +84,12 @@
                         }
                     </div>
                 </div>
+                @{ var mod = Modified(pl); var total = TotalSeconds(pl); }
+                <small class="pl-mod">@mod</small>
                 <div class="pl-meta">
-                    @{ var mod = Modified(pl); var total = TotalSeconds(pl); }
-                    <span>@mod@if (total > 0) { <span class="pl-meta-dur">@(mod != null ? " · " : "")<span class="mono" title="Durée de la boucle">@Helpers.FormatDuration(total)</span></span> }</span>
+                    <span class="pl-modtxt">@mod</span>
                     @if (onScreens > 0) { <span class="badge neutre" title="Écrans qui diffusent cette liste de lecture"><Ico Name="monitor" Size="13" /> @onScreens écran@(onScreens > 1 ? "s" : "")</span> }
+                    @if (total > 0) { <span class="pl-meta-dur mono" title="Durée de la boucle">@Helpers.FormatDuration(total)</span> }
                 </div>
             </div>
         </div>
@@ -299,7 +301,8 @@
     private int TotalSeconds(Playlist p) => p.Draft.Where(i => i.Placement == "full").Sum(i =>
     {
         var m = media.FirstOrDefault(x => x.Id == i.MediaId);
-        return Svc.Find(m?.AppId)?.Duration == "content" && i.DurationMode != "fixed" ? Helpers.VideoSeconds(m) ?? i.DurationSec : i.DurationSec;
+        if (Svc.IsIncomplete(m)) return 0;   // ajouté à vide : pas encore diffusé
+        return Helpers.ItemSeconds(i, m, Svc.Find(m?.AppId), media);
     });
 
     private static string? Modified(Playlist p)

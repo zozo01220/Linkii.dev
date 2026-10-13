@@ -113,6 +113,7 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
 
         var app = catalog.Find(m.AppId);
         if (app == null) return null;   // app retirée du catalogue : l'élément n'est plus publié
+        if (AppCatalog.MissingRequired(app, m.Settings, m.Secrets.Keys.ToHashSet()).Count > 0) return null;   // ajouté à vide, pas encore configuré : jamais publié
         var pi = new PublishedItem
         {
             Id = i.Id, Type = "app", AppId = app.Id, AppVersion = app.Version, MediaId = m.Id,

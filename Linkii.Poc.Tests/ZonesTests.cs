@@ -98,10 +98,12 @@ public class ZonesTests
     }
 
     [Fact]
-    public void Only_area_admins_turn_sync_on()
+    public void Only_org_admins_turn_sync_on()
     {
         var def = AreaOps.EnsureDefaultZone(hall);
-        var member = new User { Email = "sofia@horizon.ch", Role = Roles.ClientMember, ClientId = client.Id, AreaRoles = { new AreaRole { AreaId = hall.Id, Role = AreaRoles.User } } };
+        var level = new AccessLevel { Name = "Hall", Pages = [LevelPages.Screens], AreaIds = { hall.Id } };
+        client.Levels.Add(level);
+        var member = new User { Email = "sofia@horizon.ch", Role = Roles.ClientMember, ClientId = client.Id, LevelId = level.Id };
         db.Users.Add(member);
         Assert.NotNull(AreaOps.SetZoneSync(new ClientDb(db, client.Id, AreaAccess.For(db, client.Id, member.Id)), hall.Id, def.Id, true));
         Assert.False(def.Sync);

@@ -1,5 +1,5 @@
 ﻿@page "/"
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:screens")]
 @implements IDisposable
 @inject TenantStore Store
 @inject Notifier Notifier
@@ -1224,7 +1224,7 @@ else if (wallEdit is { } wid)
     {
         tenant = Store.Read(d => d.Tenant);   // licence : peut changer pendant que la page est ouverte
         (area, manageZones, noArea) = Store.Read(d => (d.Area, d.Access.ManagesCurrent, d.Access.OrgAreaCount > 0 && d.Area == null));
-        zones = area?.Zones.OrderByDescending(z => z.IsDefault).ThenBy(z => z.Name, StringComparer.CurrentCultureIgnoreCase).ToList() ?? new();
+        zones = Store.Read(d => d.Area?.Zones.Where(z => d.Access.SeesZone(z.Id)).OrderByDescending(z => z.IsDefault).ThenBy(z => z.Name, StringComparer.CurrentCultureIgnoreCase).ToList()) ?? new();   // seules les zones du périmètre
         otherAreas = Store.Read(d => d.Access.IsOrgAdmin && d.Area is { } cur ? d.Areas.Where(a => a.Id != cur.Id).OrderBy(a => a.Name).ToList() : new());
         if (zoneFilter != null && !zones.Any(z => z.Id.ToString() == zoneFilter)) zoneFilter = null;
         screens = Store.Read(d => d.Screens.Where(s => s.Token != null).OrderBy(s => s.Name).ToList());

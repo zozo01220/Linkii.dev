@@ -232,13 +232,13 @@
         </div>
         <div class="modal-body">
             <table class="tbl">
-                <thead><tr><th>Nom</th><th>Rôle</th><th>Dernière activité</th><th>État</th></tr></thead>
+                <thead><tr><th>Nom</th><th>Niveau de droits</th><th>Dernière activité</th><th>État</th></tr></thead>
                 <tbody>
                 @foreach (var u in clientUsers)
                 {
                     <tr>
                         <td><b>@u.Label</b><br /><small class="muted">@u.Email</small></td>
-                        <td>@(u.Role == Roles.ClientAdmin ? "Administrateur de l'organisation" : string.Join(", ", u.AreaRoles.Select(r => (clientAreas.FirstOrDefault(a => a.Id == r.AreaId)?.Name ?? "?") + " (" + AreaRoles.Label(r.Role).ToLowerInvariant() + ")")) is { Length: > 0 } t ? t : "Aucune aire")</td>
+                        <td>@(u.Role == Roles.ClientAdmin ? "Administrateur de l'organisation" : clientLevels.FirstOrDefault(l => l.Id == u.LevelId)?.Name ?? "Aucun niveau")</td>
                         <td>@((u.LastActiveUtc ?? u.LastLoginUtc)?.ToLocalTime().ToString("d MMM yyyy HH:mm") ?? "jamais")</td>
                         <td><span class="pill @(u.Disabled ? "" : u.IsInvited ? "warn" : "ok")">@(u.Disabled ? "Désactivé" : u.IsInvited ? "Invité" : "Actif")</span></td>
                     </tr>
@@ -275,7 +275,7 @@
     private Row? _deleteOf;
     private string deleteConfirm = "";
     private List<User> clientUsers = new();
-    private List<Area> clientAreas = new();
+    private List<AccessLevel> clientLevels = new();
 
     // Filtres : état du compte administrateur (À valider / Validé) et de l'essai, type d'inscription, recherche
     private const string FAll = "", FPending = "pending", FVerified = "verified", FTrial = "trial", FEnded = "ended";
@@ -387,7 +387,7 @@
     {
         clientUsers = Root.Read(d => d.Users.Where(u => u.ClientId == r.Client.Id && Roles.IsClient(u.Role))
             .OrderBy(u => u.Role == Roles.ClientAdmin ? 0 : 1).ThenBy(u => u.Name).ToList());
-        clientAreas = Root.Read(d => d.Areas.Where(a => a.ClientId == r.Client.Id).ToList());
+        clientLevels = Root.Read(d => d.Clients.FirstOrDefault(c => c.Id == r.Client.Id)?.Levels.ToList() ?? new());
         usersOf = r;
     }
     private List<Row> clients = new();

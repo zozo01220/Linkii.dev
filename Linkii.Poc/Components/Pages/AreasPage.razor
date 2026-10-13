@@ -29,7 +29,7 @@
                 else
                 {
                     <span class="avatars">
-                        @foreach (var m in row.Members.Take(4)) { <span class="avatar" title="@m.Label (@AreaRoles.Label(m.RoleIn(row.Area.Id)))">@Initials(m)</span> }
+                        @foreach (var m in row.Members.Take(4)) { <span class="avatar" title="@m.Label (@LevelName(m))">@Initials(m)</span> }
                         <small class="muted">@row.Members.Count membre@(row.Members.Count > 1 ? "s" : "")</small>
                     </span>
                 }
@@ -53,7 +53,7 @@
     }
     </tbody>
 </table>
-<p class="hint" style="margin-top:12px">Les administrateurs de l'organisation voient toutes les aires. Pour donner accès à une aire, invitez une personne dans <a href="/members">Membres</a> avec le rôle Utilisateur ou Administrateur de cette aire.</p>
+<p class="hint" style="margin-top:12px">Les administrateurs de l'organisation voient toutes les aires. Pour donner accès à une aire, créez un niveau de droits dans <a href="/members">Membres</a>, puis donnez-le à une personne.</p>
 
 @if (creating)
 {
@@ -67,14 +67,6 @@
             <div class="modal-body">
                 <label class="lbl" for="na-name" style="margin-top:0">Nom</label>
                 <input id="na-name" class="full" maxlength="60" @bind="newName" @bind:event="oninput" placeholder="Ex. : Site de Genève, Bâtiment B" />
-                @if (members.Count > 0)
-                {
-                    <label class="lbl" for="na-adm">Administrateur de l'aire <small>(facultatif)</small></label>
-                    <select id="na-adm" class="full" @bind="newAdmin">
-                        <option value="">— Plus tard —</option>
-                        @foreach (var m in members) { <option value="@m.Id">@m.Label</option> }
-                    </select>
-                }
                 <p class="hint" style="margin:12px 0 0">L'aire démarre vide : connectez-y des écrans, créez-y des listes de lecture et des médias, ou déplacez-en depuis une autre aire.</p>
                 @if (formError != null) { <div class="err">@formError</div> }
             </div>
@@ -134,10 +126,10 @@
 @code {
     private record Row(Area Area, int Screens, int Playlists, int Media, List<User> Members);
     private List<Row> rows = new();
-    private List<User> members = new();
+    private List<AccessLevel> levels = new();
     private Guid? currentId, menuFor;
     private bool creating, sleepOn, dimOn;
-    private string newName = "", newAdmin = "", editName = "";
+    private string newName = "", editName = "";
     private string? formError, deleteError;
     private Row? editing, deleting;
 
@@ -154,34 +146,35 @@
 
     private void Load()
     {
-        (rows, members, currentId) = Store.Read(d =>
+        (rows, levels, currentId) = Store.Read(d =>
         {
             var users = d.Users.ToList();
+            var screens = d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.Token != null).ToList();
             var list = d.Areas.OrderBy(a => a.CreatedUtc).ToList().Select(a =>
             {
                 var (s, p, m) = AreaOps.Contents(d, a.Id);
-                return new Row(a, s, p, m, users.Where(u => u.Role == Roles.ClientMember && u.RoleIn(a.Id) != null).ToList());
+                return new Row(a, s, p, m, users.Where(u => u.Role == Roles.ClientMember && d.Tenant.Levels.FirstOrDefault(l => l.Id == u.LevelId) is { } l && AccessLevels.Reaches(l, a, screens)).ToList());
             }).ToList();
-            return (list, users.Where(u => u.Role == Roles.ClientMember && !u.Disabled).OrderBy(u => u.Label).ToList(), d.Area?.Id);
+            return (list, d.Tenant.Levels.ToList(), d.Area?.Id);
         });
         if (editing != null) editing = rows.FirstOrDefault(r => r.Area.Id == editing.Area.Id);
     }
 
     private static string Initials(User u) => string.Concat(u.Label.Split(' ', '.', '@').Where(w => w.Length > 0).Take(2).Select(w => char.ToUpperInvariant(w[0])));
 
-    private void OpenNew() { formError = null; newName = newAdmin = ""; creating = true; }
+    private string LevelName(User u) => levels.FirstOrDefault(l => l.Id == u.LevelId)?.Name ?? "Aucun niveau";
+
+    private void OpenNew() { formError = null; newName = ""; creating = true; }
 
     private void Create()
     {
-        var name = newName; Guid? adm = Guid.TryParse(newAdmin, out var g) ? g : null;
+        var name = newName;
         Area? created = null;
         formError = Store.Write(d =>
         {
             var (a, err) = AreaOps.Create(d, name);
             if (a == null) return err;
             created = a;
-            if (adm != null && d.Users.FirstOrDefault(u => u.Id == adm && u.Role == Roles.ClientMember) is { } u)
-                u.AreaRoles.Add(new AreaRole { AreaId = a.Id, Role = AreaRoles.Admin });
             return null;
         });
         if (formError != null) return;

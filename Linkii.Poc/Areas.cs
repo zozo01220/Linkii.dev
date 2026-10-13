@@ -59,16 +59,16 @@ public static class AreaOps
         var (s, p, m) = Contents(d, areaId);
         if (s + p + m > 0) return $"Videz d'abord l'aire : {s} écran(s), {p} liste(s) de lecture, {m} média(s). Déplacez-les vers une autre aire ou supprimez-les.";
         d.Root.Media.RemoveAll(x => x.ClientId == d.ClientId && x.AreaId == areaId);   // vidéos en échec de conversion
-        foreach (var u in d.Users) u.AreaRoles.RemoveAll(r => r.AreaId == areaId);
+        AccessLevels.Forget(d, [areaId], d.Areas.Where(a => a.Id == areaId).SelectMany(a => a.Zones).Select(z => z.Id));   // les niveaux de droits perdent cette aire
         d.Areas.RemoveAll(a => a.Id == areaId);
         return null;
     }
 
-    // ---------- Zones (administrateurs de l'aire) ----------
+    // ---------- Zones (administrateurs de l'organisation) ----------
 
     private static (Area? Area, string? Error) Managed(ClientDb d, Guid areaId)
     {
-        if (!d.Access.CanManage(areaId)) return (null, "Seuls les administrateurs de l'aire gèrent ses zones.");
+        if (!d.Access.CanManage(areaId)) return (null, "Seul un administrateur de l'organisation gère les zones et les murs.");
         return d.Areas.FirstOrDefault(a => a.Id == areaId) is { } a ? (a, null) : (null, "Aire introuvable.");
     }
 
@@ -104,6 +104,7 @@ public static class AreaOps
         if (a.Zones.FirstOrDefault(z => z.Id == zoneId) is not { } zone) return "Zone introuvable.";
         if (zone.IsDefault) return "La zone par défaut ne se supprime pas.";
         a.Zones.Remove(zone);
+        AccessLevels.Forget(d, [], [zoneId]);
         var fallback = EnsureDefaultZone(a).Id;
         foreach (var s in d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.ZoneId == zoneId)) { s.ZoneId = fallback; s.WallPos = null; }
         return null;

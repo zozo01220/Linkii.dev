@@ -11,8 +11,14 @@
     <div class="lp-head">
         <span class="sc-dot @(v.Online ? "en-ligne" : "hors-ligne")"><span class="sr-only">@(v.Online ? "En ligne" : "Hors ligne")</span></span>
         <h2 id="lp-title">@v.Name</h2>
-        <span class="badge @(v.Online ? "en-ligne" : "hors-ligne")">@(v.Online ? "En ligne" : "Hors ligne")</span>
+        <span class="badge @(!v.Online ? "hors-ligne" : v.Paused ? "mise-a-jour" : "en-ligne")">@(!v.Online ? "Hors ligne" : v.Paused ? "En pause" : "En ligne")</span>
         <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+
+    <div class="lp-tabs" role="tablist">
+        <button type="button" role="tab" class="@(tab == "direct" ? "on" : "")" aria-selected="@(tab == "direct")" @onclick='() => tab = "direct"'>Direct</button>
+        <button type="button" role="tab" class="@(tab == "app" ? "on" : "")" aria-selected="@(tab == "app")" @onclick='() => tab = "app"'>Appareil</button>
+        <button type="button" role="tab" class="@(tab == "cmd" ? "on" : "")" aria-selected="@(tab == "cmd")" @onclick='() => tab = "cmd"'><span>Commandes</span>@if (FailedCmds > 0) { <span class="lp-n" title="Commandes en échec">@FailedCmds</span> }</button>
     </div>
 
     <div class="lp-body">
@@ -21,8 +27,8 @@
             <div class="lp-offline" role="status">Écran hors ligne@(v.LastSeen is { } ls ? $" depuis {Ago(ls)}" : ""). Les commandes sont indisponibles tant qu'il ne répond pas.</div>
         }
 
-        <section class="lp-sect">
-            <h3>Aperçu du direct</h3>
+        @if (tab == "direct")
+        {
             @* cadre au format configuré de l'écran ; l'image est remise dans ce sens (téléphone tenu à plat pour un écran portrait) et à l'endroit (miroir) *@
             <div class="lp-frame @(v.Portrait ? "portrait" : "") @(Loading ? "loading" : "")">
                 @if (v.CaptureUtc != null)
@@ -33,6 +39,14 @@
                 {
                     <div class="lp-ph"><Ico Name="monitor" Size="30" /><span>Aucune capture pour l'instant.</span></div>
                 }
+                @if (!Loading && ShotFailure is { } sf)
+                {
+                    <div class="lp-fail" role="alert">
+                        <Ico Name="monitor" Size="28" />
+                        <b>Aperçu impossible</b>
+                        <span>@(sf.Detail is { Length: > 0 } fd ? fd : "L'écran n'a pas répondu.")</span>
+                    </div>
+                }
                 @if (Loading)
                 {
                     <div class="lp-wait" role="status" aria-live="polite"><span class="lp-spin" aria-hidden="true"></span><span>Demande envoyée à l'écran…</span></div>
@@ -40,61 +54,42 @@
             </div>
             <div class="lp-bar">
                 <span class="grow">
-                    @if (Loading) { <text>Un instant : la capture peut prendre jusqu'à 10 secondes.</text> }
-                    else if (shotError != null) { <span class="lp-err">@shotError</span> }
+                    @if (Loading) { <text>Capture en cours : jusqu'à 10 secondes.</text> }
                     else if (v.CaptureUtc is { } cu) { <text>Capturé à <b class="mono">@Local(cu, "HH:mm:ss")</b> · @Ago(cu)</text> }
                     else { <text>Voyez ce que l'écran affiche en ce moment.</text> }
+                    <span class="lp-info" title="Un contenu protégé (certaines vidéos) peut apparaître noir sur la capture.">i</span>
                 </span>
-                <button type="button" class="btn sm" disabled="@(!v.Online || Loading || busy)" @onclick="Shoot"><Ico Name="camera" Size="15" /> @(Loading ? "Capture en cours…" : "Aperçu du direct")</button>
+                <button type="button" class="btn sm" disabled="@(!v.Online || Loading || busy)" @onclick="Shoot"><Ico Name="camera" Size="15" /> Actualiser</button>
             </div>
             @if (Loading) { <div class="lp-progress"><i></i></div> }
-            <p class="lp-note">Un contenu protégé (certaines vidéos) peut apparaître noir sur la capture.</p>
-        </section>
 
-        <section class="lp-sect">
-            <h3>Affichage</h3>
-            @if (v.Paused)
-            {
-                <div class="lp-state paused"><Ico Name="pause" Size="16" /><span class="grow">En pause@(v.PausedUntil is { } pu ? Markup(" · reprise automatique à ", Local(pu, "HH:mm")) : new MarkupString(" · reprise manuelle"))</span></div>
-                <div class="row" style="margin-top:12px">
-                    <button type="button" class="btn" disabled="@(!v.Online || busy)" @onclick='() => Run(ScreenCommand.Resume)'><Ico Name="play" Size="15" /> Reprendre maintenant</button>
+            <div class="lp-card">
+                <div class="lp-card-row">
+                    <span class="lp-lbl">Affichage</span>
+                    <span class="grow lp-st"><span class="sc-dot @(v.Paused ? "mise-a-jour" : "en-ligne")"></span> @(v.Paused ? "En pause" : "Lecture en cours")</span>
                 </div>
-            }
-            else
-            {
-                <div class="lp-state"><span class="sc-dot en-ligne"></span><span class="grow">Lecture en cours</span></div>
-                <div class="row" style="margin-top:12px">
-                    <label class="lp-field">Reprise après
-                        <select @bind="pauseMin">
-                            @foreach (var choice in PauseChoices) { <option value="@choice.Min">@choice.Label</option> }
-                        </select>
-                    </label>
-                    <button type="button" class="btn" style="align-self:flex-end" disabled="@(!v.Online || busy)" @onclick='() => Run(ScreenCommand.Pause, pauseMin)'><Ico Name="pause" Size="15" /> Mettre en pause</button>
+                <div class="lp-card-row">
+                    @if (v.Paused)
+                    {
+                        <span class="grow lp-sub">@(v.PausedUntil is { } pu ? Markup("Reprise automatique à ", Local(pu, "HH:mm")) : new MarkupString("Reprise manuelle"))</span>
+                        <button type="button" class="btn" disabled="@(!v.Online || busy)" @onclick="Resume"><Ico Name="play" Size="15" /> Reprendre maintenant</button>
+                    }
+                    else
+                    {
+                        <span class="grow lp-sub">Reprise automatique après
+                            <span class="lp-info" title="Pendant la pause, l'écran affiche le visuel défini dans Réglages › Supervision.">i</span></span>
+                        <span class="lp-seg">
+                            <select aria-label="Reprise après" @bind="pauseMin">
+                                @foreach (var choice in PauseChoices) { <option value="@choice.Min">@choice.Label</option> }
+                            </select>
+                            <button type="button" class="btn" disabled="@(!v.Online || busy)" @onclick="Pause"><Ico Name="pause" Size="15" /> Pause</button>
+                        </span>
+                    }
                 </div>
-            }
-            <p class="lp-note">Pendant la pause, l'écran affiche le visuel défini dans Réglages › Supervision.</p>
-        </section>
-
-        <section class="lp-sect">
-            <h3>Application</h3>
-            <div class="row">
-                <button type="button" class="btn ghost" disabled="@(!v.Online || busy)" @onclick='() => Run(ScreenCommand.Reload)'><Ico Name="refresh" Size="15" /> Recharger les listes</button>
-                <button type="button" class="btn danger" disabled="@(!v.Online || busy)" @onclick="() => confirmRestart = true"><Ico Name="power" Size="15" /> Redémarrer l'application</button>
             </div>
-            @if (confirmRestart)
-            {
-                <div class="lp-confirm" role="alertdialog" aria-label="Confirmer le redémarrage">
-                    Redémarrer l'application sur « @v.Name » ? L'écran sera noir quelques secondes, puis reprendra l'affichage.
-                    <div class="row" style="margin-top:8px">
-                        <button type="button" class="btn danger-solid sm" disabled="@busy" @onclick="Restart">Redémarrer</button>
-                        <button type="button" class="btn ghost sm" @onclick="() => confirmRestart = false">Annuler</button>
-                    </div>
-                </div>
-            }
-        </section>
-
-        <section class="lp-sect">
-            <h3>Appareil</h3>
+        }
+        else if (tab == "app")
+        {
             <dl class="lp-kv">
                 <dt>Système</dt><dd><DeviceLogo Kind="@v.Kind" Size="18" /> @(v.Os ?? "Pas encore remonté")</dd>
                 <dt>Modèle</dt><dd>@(v.Model ?? "—")</dd>
@@ -103,27 +98,45 @@
                 <dt>Allumé depuis</dt><dd>@(v.Boot is { } b ? Uptime(DateTime.UtcNow - b) : "—")</dd>
                 <dt>Dernier contact</dt><dd>@(v.LastSeen is { } l ? Ago(l) : "jamais")</dd>
             </dl>
-        </section>
+        }
+        else if (v.Cmds.Count == 0)
+        {
+            <p class="lp-note" style="margin:0">Aucune commande envoyée à cet écran.</p>
+        }
+        else
+        {
+            <div class="lp-hist">
+                @foreach (var c in v.Cmds.AsEnumerable().Reverse().Take(10))
+                {
+                    <div>
+                        <time>@Local(c.SentUtc, DateTime.UtcNow - c.SentUtc < TimeSpan.FromHours(20) ? "HH:mm" : "dd.MM HH:mm")</time>
+                        <span class="grow">@ScreenCommand.Label(c.Kind)@(c.Detail is { Length: > 0 } d ? $" · {d}" : "")<small>@c.By</small></span>
+                        <span class="badge @StatusClass(c)">@StatusLabel(c)</span>
+                    </div>
+                }
+            </div>
+        }
+    </div>
 
-        <section class="lp-sect">
-            <h3>Dernières commandes</h3>
-            @if (v.Cmds.Count == 0) { <p class="lp-note" style="margin:0">Aucune commande envoyée à cet écran.</p> }
-            else
-            {
-                <div class="lp-hist">
-                    @foreach (var c in v.Cmds.AsEnumerable().Reverse().Take(6))
-                    {
-                        <div>
-                            <time>@Local(c.SentUtc, DateTime.UtcNow - c.SentUtc < TimeSpan.FromHours(20) ? "HH:mm" : "dd.MM HH:mm")</time>
-                            <span class="grow">@ScreenCommand.Label(c.Kind)@(c.Detail is { Length: > 0 } d ? $" · {d}" : "")<small>@c.By</small></span>
-                            <span class="badge @StatusClass(c)">@StatusLabel(c)</span>
-                        </div>
-                    }
-                </div>
-            }
-        </section>
+    <div class="lp-foot">
+        <button type="button" class="btn ghost" disabled="@(!v.Online || busy)" @onclick="Reload"><Ico Name="refresh" Size="15" /> Recharger les listes</button>
+        <span class="grow"></span>
+        <button type="button" class="btn danger" disabled="@(!v.Online || busy)" @onclick="() => confirmRestart = true"><Ico Name="power" Size="15" /> Redémarrer l'application</button>
     </div>
 </aside>
+
+@if (confirmRestart)
+{
+    <div class="modal-backdrop lp-cf-bd" @onclick="() => confirmRestart = false"></div>
+    <div class="modal lp-cf" role="alertdialog" aria-modal="true" aria-labelledby="lp-cf-title">
+        <h3 id="lp-cf-title">Redémarrer l'application ?</h3>
+        <p class="lp-note">L'écran « @v.Name » sera noir quelques secondes, puis reprendra l'affichage.</p>
+        <div class="modal-actions">
+            <button type="button" class="btn ghost" @onclick="() => confirmRestart = false">Annuler</button>
+            <button type="button" class="btn danger-solid" disabled="@busy" @onclick="Restart">Redémarrer</button>
+        </div>
+    </div>
+}
 
 @code {
     [Parameter, EditorRequired] public Guid ScreenId { get; set; }
@@ -137,8 +150,11 @@
     private View v = new("", false, false, null, null, false, false, null, null, null, null, null, null, "", new(), "UTC", 60, false, 0);
     private Timer? timer;
     private Guid? shotId;
-    private string? shotError;
     private bool busy, confirmRestart;
+    private string tab = "direct";
+    /// <summary>Dernière demande d'aperçu, si elle a échoué et qu'aucune capture réussie ne l'a suivie.</summary>
+    private ScreenCommand? ShotFailure => v.Cmds.LastOrDefault(c => c.Kind == ScreenCommand.Capture) is { Status: ScreenCommand.Failed } c && (v.CaptureUtc == null || c.SentUtc > v.CaptureUtc) ? c : null;
+    private int FailedCmds => v.Cmds.AsEnumerable().Reverse().Take(10).Count(c => c.Status == ScreenCommand.Failed);
     private int pauseMin;
 
     private static readonly (int Min, string Label)[] Pauses = { (15, "15 minutes"), (30, "30 minutes"), (60, "1 heure"), (240, "4 heures"), (0, "Reprise manuelle") };
@@ -176,7 +192,8 @@
         if (shotId is { } id && v.Cmds.FirstOrDefault(c => c.Id == id) is { Open: false } c)
         {
             shotId = null;
-            shotError = c.Status == ScreenCommand.Failed ? "Aperçu impossible : " + (c.Detail ?? "l'écran n'a pas répondu") : null;
+            if (c.Status == ScreenCommand.Failed) Toast.Error("Aperçu impossible : " + (c.Detail ?? "l'écran n'a pas répondu"));
+            else Toast.Ok("Aperçu du direct mis à jour.");
         }
     }
 
@@ -195,16 +212,30 @@
 
     private async Task Shoot()
     {
-        shotError = null;
         busy = true;
         try
         {
             var r = await Control.Send(Store.ClientId, ScreenId, ScreenCommand.Capture, Ctx.DisplayName);
-            if (!r.Ok) { shotError = r.Error; return; }
+            if (!r.Ok) { Toast.Error(r.Error ?? "Aperçu impossible."); return; }
             shotId = r.Id;
             Refresh();
         }
         finally { busy = false; }
+    }
+
+    private async Task Pause()
+    {
+        if (await Run(ScreenCommand.Pause, pauseMin)) Toast.Ok(pauseMin == 0 ? "Écran mis en pause." : $"Écran mis en pause : {Pauses.First(p => p.Min == pauseMin).Label.ToLower()}.");
+    }
+
+    private async Task Resume()
+    {
+        if (await Run(ScreenCommand.Resume)) Toast.Ok("Reprise de l'affichage demandée.");
+    }
+
+    private async Task Reload()
+    {
+        if (await Run(ScreenCommand.Reload)) Toast.Ok("Rechargement des listes demandé.");
     }
 
     private async Task Restart()

@@ -8,10 +8,10 @@ namespace Linkii.Poc;
 /// Filtre global d'isolation : cette liste ne voit, n'ajoute et ne supprime que les lignes de son client.
 /// Tout le code du back-office passe par elle (via <see cref="ClientDb"/>), jamais par la liste brute.
 /// </summary>
-public class ScopedList<T>(List<T> root, Guid clientId, Guid? areaId = null) : IEnumerable<T> where T : IClientOwned
+public class ScopedList<T>(List<T> root, Guid clientId, Guid? areaId = null, Func<T, bool>? only = null) : IEnumerable<T> where T : IClientOwned
 {
-    // Avec une aire ouverte, les écrans, listes de lecture et médias des autres aires sont invisibles.
-    private bool In(T x) => x.ClientId == clientId && (areaId == null || x is not IAreaOwned a || a.AreaId == areaId || Shared(x));
+    // Avec une aire ouverte, les écrans, listes de lecture et médias des autres aires sont invisibles ; « only » restreint encore (périmètre d'un niveau de droits).
+    private bool In(T x) => x.ClientId == clientId && (areaId == null || x is not IAreaOwned a || a.AreaId == areaId || Shared(x)) && (only == null || only(x));
 
     /// <summary>Fichiers des dossiers Drive : les connexions sont celles de l'organisation, ils sont communs à toutes les aires.</summary>
     private static bool Shared(T x) => x is MediaItem m && m.AreaId == Guid.Empty && m.Info.ContainsKey("drive");
@@ -32,41 +32,59 @@ public class ScopedList<T>(List<T> root, Guid clientId, Guid? areaId = null) : I
 }
 
 /// <summary>
-/// Aires de gestion de la personne connectée dans une organisation : un administrateur de l'organisation (ou l'équipe Linkii, un revendeur
-/// qui entre dans l'espace) les a toutes ; un membre a celles où il a un rôle. <see cref="Current"/> est l'aire ouverte.
+/// Droits de la personne connectée dans une organisation : un administrateur de l'organisation (ou l'équipe Linkii, un revendeur qui entre
+/// dans l'espace) a tout ; un membre a son <see cref="AccessLevel"/> (pages, apps, périmètre aires › zones › écrans). <see cref="Current"/> est l'aire ouverte.
 /// </summary>
 public class AreaAccess
 {
     public Guid? UserId { get; init; }
     public bool IsOrgAdmin { get; init; } = true;
-    /// <summary>Rôle dans chaque aire accessible (administrateur pour toutes, pour un administrateur de l'organisation).</summary>
-    public Dictionary<Guid, string> Roles { get; init; } = new();
+    /// <summary>Niveau du membre (null : administrateur, ou membre sans niveau, qui ne voit rien).</summary>
+    public AccessLevel? Level { get; init; }
     /// <summary>Aires accessibles, de la plus ancienne à la plus récente.</summary>
     public List<Area> Areas { get; init; } = new();
     public Area? Current { get; init; }
     /// <summary>Nombre d'aires de l'organisation (toutes, accessibles ou non).</summary>
     public int OrgAreaCount { get; init; }
+    /// <summary>Écrans visibles dans le périmètre (null : aucun filtre).</summary>
+    public Func<Screen, bool>? Sees { get; init; }
+    public Func<Guid, bool>? SeesZoneFn { get; init; }
 
     /// <summary>Traitements internes et tests (aucune personne connectée) : aucun filtre d'aire.</summary>
     public static readonly AreaAccess System = new();
 
-    public bool CanManage(Guid areaId) => IsOrgAdmin || Roles.GetValueOrDefault(areaId) == AreaRoles.Admin;
-    /// <summary>Zones et membres de l'aire ouverte.</summary>
-    public bool ManagesCurrent => Current != null && CanManage(Current.Id);
-    public bool ManagesAnyArea => IsOrgAdmin || Roles.ContainsValue(AreaRoles.Admin);
+    public bool ReadOnly => Level?.ReadOnly == true;
+    /// <summary>Aires, zones, membres et niveaux de droits : administrateurs de l'organisation seuls.</summary>
+    public bool CanManage(Guid areaId) => IsOrgAdmin;
+    /// <summary>Zones de l'aire ouverte.</summary>
+    public bool ManagesCurrent => Current != null && IsOrgAdmin;
+    public bool SeesZone(Guid zoneId) => IsOrgAdmin || SeesZoneFn == null || SeesZoneFn(zoneId);
+    public bool HasArea(Guid areaId) => IsOrgAdmin || Areas.Any(a => a.Id == areaId);
+
+    public bool CanUse(AppManifest a) => IsOrgAdmin || Level?.CanUse(a) == true;
+    public bool CanUse(AppCatalog catalog, string appId) => IsOrgAdmin || catalog.Find(appId) is { } m && CanUse(m);
+
+    /// <summary>Les pages Intégrations et Widgets sont visibles dès qu'une app (ou un widget) est autorisée.</summary>
+    public bool CanSee(string page, AppCatalog catalog) => IsOrgAdmin || Level != null && page switch
+    {
+        LevelPages.Integrations => catalog.All.Any(a => !a.ScreenWidget && Level.CanUse(a)),
+        LevelPages.Widgets => catalog.All.Any(a => a.ScreenWidget && Level.CanUse(a)),
+        _ => Level.Pages.Contains(page)
+    };
 
     public static AreaAccess For(Db db, Guid clientId, Guid? userId)
     {
         var areas = db.Areas.Where(a => a.ClientId == clientId).OrderBy(a => a.CreatedUtc).ToList();
         var u = db.Users.FirstOrDefault(x => x.Id == userId);
         var org = u?.Role != Linkii.Poc.Roles.ClientMember;
-        var roles = org ? areas.ToDictionary(a => a.Id, _ => AreaRoles.Admin)
-            : u!.AreaRoles.Where(r => areas.Any(a => a.Id == r.AreaId)).GroupBy(r => r.AreaId).ToDictionary(g => g.Key, g => g.First().Role);
-        var mine = areas.Where(a => roles.ContainsKey(a.Id)).ToList();
-        Guid? last = u != null && u.LastAreas.TryGetValue(clientId, out var l) ? l : null;
+        var level = org ? null : db.Clients.FirstOrDefault(c => c.Id == clientId)?.Levels.FirstOrDefault(l => l.Id == u!.LevelId);
+        var scope = level == null ? null : new LevelScope(level, areas, level.ScreenIds.Count > 0 ? db.Screens.Where(s => s.ClientId == clientId) : []);
+        var mine = org ? areas : scope?.Areas ?? new();
+        Guid? last = u != null && u.LastAreas.TryGetValue(clientId, out var l2) ? l2 : null;
         return new AreaAccess
         {
-            UserId = userId, IsOrgAdmin = org, Roles = roles, Areas = mine, OrgAreaCount = areas.Count,
+            UserId = userId, IsOrgAdmin = org, Level = level, Areas = mine, OrgAreaCount = areas.Count,
+            Sees = scope?.Sees, SeesZoneFn = scope?.SeesZone,
             Current = mine.FirstOrDefault(a => a.Id == last) ?? mine.FirstOrDefault()
         };
     }
@@ -89,7 +107,7 @@ public class ClientDb
         Access = access ?? AreaAccess.System;
         // Sans personne connectée (traitements internes, tests) ou pour une organisation encore sans aire : pas de filtre d'aire.
         Guid? area = Access == AreaAccess.System || Access.OrgAreaCount == 0 ? null : Access.Current?.Id ?? NoArea;
-        Screens = new(root.Screens, clientId, area);
+        Screens = new(root.Screens, clientId, area, Access.Sees);
         Media = new(root.Media, clientId, area);
         Playlists = new(root.Playlists, clientId, area);
         AppInstalls = new(root.AppInstalls, clientId);
@@ -201,12 +219,15 @@ public class TenantStore(JsonStore root, TenantContext ctx)
     private ClientDb Open(Db db, Guid cid) => new(db, cid, AreaAccess.For(db, cid, ctx.UserId));
 
     public T Read<T>(Func<ClientDb, T> f) { var cid = ClientId; return root.Read(db => f(Open(db, cid))); }
-    public T Write<T>(Func<ClientDb, T> f) { var cid = ClientId; return root.Write(db => f(Open(db, cid))); }
-    public void Write(Action<ClientDb> a) { var cid = ClientId; root.Write(db => a(Open(db, cid))); }
+    // Un niveau en lecture seule ne modifie rien : tout enregistrement est refusé (la page l'indique au lieu de planter).
+    public T Write<T>(Func<ClientDb, T> f) { var cid = ClientId; return root.Write(db => f(OpenForWrite(db, cid))); }
+    public void Write(Action<ClientDb> a) { var cid = ClientId; root.Write(db => a(OpenForWrite(db, cid))); }
+    private ClientDb OpenForWrite(Db db, Guid cid) { var d = Open(db, cid); return d.Access.ReadOnly ? throw new ReadOnlyLevelException() : d; }
 
     /// <summary>Ouvre une autre aire (mémorisée pour la personne connectée). Retourne false si elle ne lui est pas accessible.</summary>
-    public bool SwitchArea(Guid areaId) => Write(d =>
+    public bool SwitchArea(Guid areaId) => root.Write(db =>
     {
+        var d = Open(db, ClientId);
         if (!d.Access.Areas.Any(a => a.Id == areaId) || d.Root.Users.FirstOrDefault(u => u.Id == ctx.UserId) is not { } me) return false;
         me.LastAreas[d.ClientId] = areaId;
         return true;
@@ -329,6 +350,7 @@ public static class Tenancy
         var firstArea = new Area { ClientId = client.Id, Name = Seed.DefaultAreaName };   // une aire dès le départ : invisible tant qu'elle est seule
         AreaOps.EnsureDefaultZone(firstArea);
         db.Areas.Add(firstArea);
+        client.Levels.Add(AccessLevels.NewDefault());
         db.Clients.Add(client);
         db.Users.Add(new User { Email = email, Name = adminName.Trim(), PasswordHash = password == null ? "" : Passwords.Hash(password), Role = Roles.ClientAdmin, ResellerId = reseller.Id, ClientId = client.Id, MustChangePassword = mustChangePassword, CreatedUtc = DateTime.UtcNow });
         return (client, null);
@@ -356,6 +378,7 @@ public static class Seed
             PurgeWidgets(db, dataPath, log);
             MigrateGoogleAccount(db);
             EnsureAreas(db);
+            AccessLevels.Migrate(db);
             Signup.MarkVerified(db);
 
             if (!db.Users.Any(u => u.Role == Roles.PlatformAdmin))

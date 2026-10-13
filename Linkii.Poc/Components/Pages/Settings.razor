@@ -6,203 +6,254 @@
 @inject Notifier Notifier
 @inject NavigationManager Nav
 @inject Toaster Toast
+@inject AppService Apps
 
+@* Réglages : navigation latérale groupée, une carte par sujet, un réglage par ligne (libellé à gauche, contrôle à droite).
+   Les modifications de toutes les sections s'enregistrent ensemble : la barre du bas n'apparaît qu'après un changement. « Utilisation » et « Compte » n'en ont pas besoin. *@
 <div class="page-head">
     <div>
         <h1>Réglages</h1>
-        <p class="sub">Paramètres globaux de votre organisation. Ils s'appliquent à tous les écrans.</p>
+        <p class="sub">Paramètres de votre organisation. Ils s'appliquent à tous les écrans.</p>
     </div>
-    @if (Tab is "organisation" or "parametres" || Tab == "supervision" && growth) { <button class="btn" @onclick="Save">Enregistrer</button> }
 </div>
 
-<nav class="tabs" aria-label="Sections des réglages">
-    @foreach (var (id, label) in Tabs)
-    {
-        <a class="@(Tab == id ? "on" : "")" href="/settings?tab=@id" aria-current="@(Tab == id ? "page" : null)">@label</a>
-    }
-</nav>
-
-
-@switch (Tab)
-{
-    case "organisation":
-        <div class="settings-grid">
-            <div class="card">
-                <h3>Organisation</h3>
-                <p class="hint">Nom affiché dans le back-office. La couleur et le logo sont ceux de votre revendeur.</p>
-                <label class="lbl">Nom de l'organisation</label>
-                <input class="full" @bind="name" />
-                <label class="lbl">Fuseau horaire <small>(horloge des écrans)</small></label>
-                <select class="full" @bind="timezone">
-                    @foreach (var tz in Timezones) { <option value="@tz">@tz</option> }
-                </select>
-            </div>
-            <div class="card">
-                <h3>Aires de gestion et membres</h3>
-                <p class="hint">Répartissez vos écrans, listes de lecture et médias en aires (un site, un bâtiment, un service…) et invitez des personnes avec un rôle dans chaque aire. Tant qu'il n'y a qu'une aire et aucun membre, rien ne change.</p>
-                <ul class="opt-list">
-                    <li><Ico Name="map-pin" Size="16" /> <span class="grow">@areaCount aire@(areaCount > 1 ? "s" : "") de gestion</span><a href="/areas">@(areaCount > 1 ? "Gérer les aires et les zones" : "Créer une aire, des zones")</a></li>
-                    <li><Ico Name="users" Size="16" /> <span class="grow">@memberCount membre@(memberCount > 1 ? "s" : "") en plus des administrateurs</span><a href="/members">@(memberCount > 0 ? "Gérer les membres" : "Inviter une personne")</a></li>
-                </ul>
-            </div>
-        </div>
-        break;
-
-    case "parametres":
-        <div class="settings-grid">
-            <div class="card">
-                <h3>Diffusion</h3>
-                <p class="hint">Valeurs par défaut pour les contenus et les players.</p>
-                <label class="lbl">Durée par défaut d'un contenu (secondes)</label>
-                <input class="full" type="number" min="1" max="600" @bind="duration" />
-                <label class="lbl">Redémarrage nocturne des players</label>
-                <select class="full" @bind="reloadHour">
-                    @for (var h = 0; h < 24; h++) { <option value="@h">@($"{h:00}:00")</option> }
-                </select>
-                <small>Évite les fuites de mémoire sur les clés HDMI.</small>
-            </div>
-
-            <div class="card">
-                <h3>Nouveaux écrans</h3>
-                <p class="hint">Préréglage à la création d'un écran (modifiable écran par écran).</p>
-                <ScreenFormat Spec="spec" />
-            </div>
-
-            <div class="card">
-                <h3>Mise en veille</h3>
-                <p class="hint">Éteint les écrans pendant des plages horaires (nuit, week-end). Le réglage se fait par aire, et chaque écran peut le remplacer.</p>
-                <div class="sv-row">
-                    <div class="t"><b>Plages de mise en veille</b><small>Fonction avancée, désactivée par défaut.</small></div>
-                    <div class="ctl"><button type="button" class="switch @(sleepEnabled ? "on" : "")" role="switch" aria-checked="@(sleepEnabled ? "true" : "false")" aria-label="Plages de mise en veille" @onclick="() => sleepEnabled = !sleepEnabled"><span></span></button></div>
-                </div>
-                @if (sleepEnabled)
-                {
-                    @if (areaCount == 1 && soleAreaId != Guid.Empty)
-                    {
-                        <AreaSleep AreaId="soleAreaId" />
-                    }
-                    else
-                    {
-                        <p class="hint" style="margin:12px 0 0">Enregistrez, puis réglez les plages de chaque aire dans <a href="/areas">Aires de gestion</a>.</p>
-                    }
-                }
-            </div>
-
-            <div class="card">
-                <h3>Luminosité et contraste</h3>
-                <p class="hint">Règle la luminosité et le contraste des écrans de l'app Android selon l'heure (jour, soirée, nuit). Le réglage se fait par aire, et chaque écran peut le remplacer ; par défaut, aucun écran n'est réglé.</p>
-                <div class="sv-row">
-                    <div class="t"><b>Luminosité et contraste selon l'heure</b><small>Fonction avancée, désactivée par défaut.</small></div>
-                    <div class="ctl"><button type="button" class="switch @(dimEnabled ? "on" : "")" role="switch" aria-checked="@(dimEnabled ? "true" : "false")" aria-label="Luminosité et contraste selon l'heure" @onclick="() => dimEnabled = !dimEnabled"><span></span></button></div>
-                </div>
-                @if (dimEnabled)
-                {
-                    @if (areaCount == 1 && soleAreaId != Guid.Empty)
-                    {
-                        <AreaDim AreaId="soleAreaId" />
-                    }
-                    else
-                    {
-                        <p class="hint" style="margin:12px 0 0">Enregistrez, puis réglez la luminosité de chaque aire dans <a href="/areas">Aires de gestion</a>.</p>
-                    }
-                }
-            </div>
-        </div>
-        break;
-
-    case "supervision":
-        @* Contrôle du direct et alertes : licence Growth. En licence de base, tout est visible mais verrouillé (bulle au survol). *@
-        @if (!growth)
+<div class="rg-layout">
+    <nav class="rg-nav" aria-label="Sections des réglages">
+        @foreach (var (group, items) in Groups)
         {
-            <div class="sv-upsell"><Ico Name="lock" Size="18" /><span class="grow">La supervision, le contrôle du direct (aperçu, pause, redémarrage) et les murs d'écrans sont inclus dans la licence <b>Growth</b>.</span></div>
+            <h4>@group</h4>
+            @foreach (var t in items)
+            {
+                var id = t.Id;
+                <button type="button" class="@(Tab == id ? "on" : "")" aria-current="@(Tab == id ? "page" : null)" @onclick="() => tab = id">
+                    <Ico Name="@t.Icon" Size="16" /> <span>@t.Label</span>@if (t.Growth) { <em class="rg-badge">GROWTH</em> }
+                </button>
+            }
         }
-        <div class="settings-grid">
-            <div class="card">
-                <h3>Alertes par e-mail</h3>
-                <p class="hint">Soyez prévenu quand un écran ne répond plus, sans ouvrir le back-office.</p>
-                <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
-                    <div class="t"><b>Prévenir par e-mail quand un écran tombe</b><small>Un seul e-mail par panne, puis un second quand l'écran revient en ligne.</small></div>
-                    <div class="ctl"><button type="button" class="switch @(alertOffline ? "on" : "")" role="switch" aria-checked="@(alertOffline ? "true" : "false")" aria-label="Alertes e-mail" disabled="@(!growth)" @onclick="() => alertOffline = !alertOffline"><span></span></button></div>
-                </div>
-                <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
-                    <div class="t"><b>Délai avant l'alerte</b><small>Durée pendant laquelle un écran doit rester hors ligne avant l'envoi de l'e-mail.</small></div>
-                    <div class="ctl">
-                        <select class="full" style="width:160px" @bind="alertMinutes" disabled="@(!growth || !alertOffline)">
-                            @foreach (var (m, l) in AlertDelays) { <option value="@m">@l</option> }
-                        </select>
-                    </div>
-                </div>
-                <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
-                    <div class="t"><b>Destinataires</b><small>Par défaut, tous les administrateurs de l'organisation.</small></div>
-                    <div class="ctl" style="flex-direction:column;align-items:stretch;width:260px">
-                        <select class="full" @bind="alertTarget" disabled="@(!growth || !alertOffline)">
-                            <option value="admins">Tous les administrateurs</option>
-                            <option value="custom">Une adresse dédiée…</option>
-                        </select>
-                        @if (alertTarget == "custom") { <input class="full" type="email" placeholder="alertes@exemple.ch" aria-label="Adresse des alertes" @bind="alertEmail" disabled="@(!growth || !alertOffline)" /> }
-                    </div>
-                </div>
-            </div>
-            <div class="card">
-                <h3>Pause des écrans</h3>
-                <p class="hint">Une pause se lance depuis la carte d'un écran (bouton Pause).</p>
-                <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
-                    <div class="t"><b>Reprise automatique après</b><small>Un écran en pause reprend seul au bout de ce délai : il ne reste jamais figé par oubli. Modifiable à chaque pause.</small></div>
-                    <div class="ctl">
-                        <select class="full" style="width:190px" @bind="pauseMinutes" disabled="@(!growth)">
-                            @foreach (var (m, l) in PauseDelays) { <option value="@m">@l</option> }
-                        </select>
-                    </div>
-                </div>
-                <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
-                    <div class="t"><b>Visuel affiché pendant la pause</b><small>Une image de votre médiathèque, sinon le visuel Linkii par défaut.</small></div>
-                    <div class="ctl" style="flex:1;min-width:0">@if (growth) { <MediaField Field="pauseField" Values="pauseValues" /> } else { <span class="muted">Visuel Linkii par défaut</span> }</div>
-                </div>
-            </div>
-            <div class="card">
-                <h3>Appareil des écrans</h3>
-                <p class="hint">Chaque écran remonte son système (par exemple Android 14), son modèle et la version de l'application. Ces informations s'affichent sur sa carte, dans toutes les licences.</p>
-            </div>
-        </div>
-        break;
+    </nav>
 
-    case "compte":
-        @if (Ctx.IsImpersonating)
+    <div class="rg-main">
+        <div @oninput="Touch" @onchange="Touch">
+        @switch (Tab)
         {
-            <div class="card empty"><div class="big">Compte non modifiable</div><p>Vous consultez cet espace en tant qu'administrateur : le mot de passe reste celui du client.</p></div>
+            case "utilisation":
+                <div class="rg-ph"><h2>Utilisation</h2><p>Ce que contient votre organisation aujourd'hui.</p></div>
+
+                <section class="rg-sec">
+                    <h5>Diffusion</h5>
+                    <div class="rg-tiles four">
+                        <a class="rg-tile" href="/"><span class="top">Écrans</span><span class="n">@screenCount</span><span class="d">@screensOnline en ligne · @(screenCount - screensOnline) hors ligne</span><span class="go">Voir les écrans →</span></a>
+                        <a class="rg-tile" href="/playlists"><span class="top">Playlists</span><span class="n">@playlistCount</span><span class="d">@playlistsUsed en diffusion</span><span class="go">Voir les playlists →</span></a>
+                        <a class="rg-tile" href="/areas"><span class="top">Aires de gestion</span><span class="n">@areaCount</span><span class="d">@areaNames</span><span class="go">Gérer les aires →</span></a>
+                        <a class="rg-tile" href="/areas"><span class="top">Zones</span><span class="n">@zoneCount</span><span class="d">@(wallCount > 0 ? $"dont {wallCount} mur{(wallCount > 1 ? "s" : "")} d'écrans" : "aucun mur d'écrans")</span><span class="go">Gérer les zones →</span></a>
+                    </div>
+                </section>
+
+                <section class="rg-sec">
+                    <h5>Médiathèque</h5>
+                    <div class="rg-media">
+                        <div><div class="lb">Images</div><div class="n">@imageCount</div></div>
+                        <div><div class="lb">Vidéos</div><div class="n">@videoCount</div></div>
+                        <div><div class="lb">Poids total</div><div class="n">@Helpers.FormatSize(imageBytes + videoBytes)</div></div>
+                        <div class="big">
+                            @{ var totalBytes = Math.Max(1, imageBytes + videoBytes); var imgPct = (int)Math.Round(imageBytes * 100.0 / totalBytes); }
+                            <div class="rg-bar" role="img" aria-label="Poids : images @Helpers.FormatSize(imageBytes), vidéos @Helpers.FormatSize(videoBytes)"><i style="width:@(imageBytes + videoBytes == 0 ? 0 : imgPct)%;background:var(--signal)"></i><i style="width:@(imageBytes + videoBytes == 0 ? 0 : 100 - imgPct)%;background:var(--brand)"></i></div>
+                            <div class="rg-legend"><span style="--c:var(--signal)">Images <b>@Helpers.FormatSize(imageBytes)</b></span><span style="--c:var(--brand)">Vidéos <b>@Helpers.FormatSize(videoBytes)</b></span><a href="/media">Ouvrir la médiathèque →</a></div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="rg-sec">
+                    <h5>Connexions</h5>
+                    <div class="rg-tiles three">
+                        <a class="rg-tile" href="/integrations?tab=@ConnectedAccounts.Tab"><span class="top">Comptes connectés</span><span class="n">@accountCount</span><span class="d">@(accountNames.Length > 0 ? accountNames : "aucun compte")</span><span class="go">Voir les comptes →</span></a>
+                        <a class="rg-tile" href="/integrations"><span class="top">Intégrations utilisées</span><span class="n">@integrationCount <small>/ @integrationTotal</small></span><span class="d">@(integrationNames.Length > 0 ? integrationNames : "aucune intégration")</span><span class="go">Voir les intégrations →</span></a>
+                    </div>
+                </section>
+                break;
+
+            case "organisation":
+                <div class="rg-ph"><h2>Identité et équipe</h2><p>Qui vous êtes dans Linkii, et qui y travaille.</p></div>
+                <div class="rg-card">
+                    <header><h3>Organisation</h3><small>La couleur et le logo sont ceux de votre revendeur.</small></header>
+                    <div class="sv-row"><div class="t"><b>Nom</b><small>Affiché dans le back-office.</small></div><div class="ctl"><input class="rg-in" @bind="name" aria-label="Nom de l'organisation" /></div></div>
+                    <div class="sv-row"><div class="t"><b>Fuseau horaire</b><small>Horloge des écrans.</small></div><div class="ctl">
+                        <select class="rg-in" @bind="timezone" aria-label="Fuseau horaire">
+                            @foreach (var tz in Timezones) { <option value="@tz">@tz</option> }
+                        </select>
+                    </div></div>
+                </div>
+                <div class="rg-card">
+                    <header><h3>Aires de gestion</h3><small>Tant qu'il n'y a qu'une aire et aucun membre, rien ne change. Les membres et leurs droits sont dans le menu Membres.</small></header>
+                    <div class="sv-row"><div class="t"><b>@areaCount aire@(areaCount > 1 ? "s" : "") de gestion</b><small>Un site, un bâtiment, un service… avec leurs zones.</small></div><div class="ctl"><a href="/areas">@(areaCount > 1 ? "Gérer les aires et les zones" : "Créer une aire, des zones")</a></div></div>
+                </div>
+                break;
+
+            case "diffusion":
+                <div class="rg-ph"><h2>Contenus et écrans</h2><p>Valeurs par défaut pour les contenus, les players et les nouveaux écrans.</p></div>
+                <div class="rg-card">
+                    <header><h3>Lecture</h3></header>
+                    <div class="sv-row"><div class="t"><b>Durée par défaut d'un contenu</b><small>En secondes.</small></div><div class="ctl"><input class="rg-in short" type="number" min="1" max="600" @bind="duration" aria-label="Durée par défaut en secondes" /></div></div>
+                    <div class="sv-row"><div class="t"><b>Redémarrage nocturne des players</b><small>Évite les fuites de mémoire sur les clés HDMI.</small></div><div class="ctl">
+                        <select class="rg-in short" @bind="reloadHour" aria-label="Heure du redémarrage nocturne">
+                            @for (var h = 0; h < 24; h++) { <option value="@h">@($"{h:00}:00")</option> }
+                        </select>
+                    </div></div>
+                </div>
+                <div class="rg-card">
+                    <header><h3>Nouveaux écrans</h3><small>Préréglage à la création, modifiable écran par écran.</small></header>
+                    <div class="rg-body"><ScreenFormat Spec="spec" /></div>
+                </div>
+                break;
+
+            case "veille":
+                <div class="rg-ph"><h2>Veille et luminosité</h2><p>Fonctions avancées, désactivées par défaut. Réglage par aire ; chaque écran peut le remplacer.</p></div>
+                <div class="rg-card">
+                    <header><h3>Mise en veille</h3><small>Éteint les écrans pendant des plages horaires (nuit, week-end).</small></header>
+                    <div class="sv-row">
+                        <div class="t"><b>Plages de mise en veille</b></div>
+                        <div class="ctl"><button type="button" class="switch @(sleepEnabled ? "on" : "")" role="switch" aria-checked="@(sleepEnabled ? "true" : "false")" aria-label="Plages de mise en veille" @onclick="() => { sleepEnabled = !sleepEnabled; dirty = true; }"><span></span></button></div>
+                    </div>
+                    @if (sleepEnabled)
+                    {
+                        <div class="rg-body">
+                            @if (areaCount == 1 && soleAreaId != Guid.Empty)
+                            {
+                                <AreaSleep AreaId="soleAreaId" />
+                            }
+                            else
+                            {
+                                <p class="hint" style="margin:0">Enregistrez, puis réglez les plages de chaque aire dans <a href="/areas">Aires de gestion</a>.</p>
+                            }
+                        </div>
+                    }
+                </div>
+                <div class="rg-card">
+                    <header><h3>Luminosité et contraste</h3><small>Selon l'heure (jour, soirée, nuit), sur l'app Android uniquement.</small></header>
+                    <div class="sv-row">
+                        <div class="t"><b>Profils jour, soirée, nuit</b><small>Par défaut, aucun écran n'est réglé.</small></div>
+                        <div class="ctl"><button type="button" class="switch @(dimEnabled ? "on" : "")" role="switch" aria-checked="@(dimEnabled ? "true" : "false")" aria-label="Luminosité et contraste selon l'heure" @onclick="() => { dimEnabled = !dimEnabled; dirty = true; }"><span></span></button></div>
+                    </div>
+                    @if (dimEnabled)
+                    {
+                        <div class="rg-body">
+                            @if (areaCount == 1 && soleAreaId != Guid.Empty)
+                            {
+                                <AreaDim AreaId="soleAreaId" />
+                            }
+                            else
+                            {
+                                <p class="hint" style="margin:0">Enregistrez, puis réglez la luminosité de chaque aire dans <a href="/areas">Aires de gestion</a>.</p>
+                            }
+                        </div>
+                    }
+                </div>
+                break;
+
+            case "supervision":
+                @* Contrôle du direct et alertes : licence Growth. En licence de base, tout est visible mais verrouillé (bulle au survol). *@
+                <div class="rg-ph"><h2>Alertes et pause</h2><p>Soyez prévenu d'une panne et gardez la main sur le direct.</p></div>
+                @if (!growth)
+                {
+                    <div class="sv-upsell"><Ico Name="lock" Size="18" /><span class="grow">La supervision, le contrôle du direct (aperçu, pause, redémarrage) et les murs d'écrans sont inclus dans la licence <b>Growth</b>.</span></div>
+                }
+                <div class="rg-card">
+                    <header><h3>Alertes par e-mail</h3></header>
+                    <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
+                        <div class="t"><b>Prévenir quand un écran tombe</b><small>Un seul e-mail par panne, puis un second quand l'écran revient en ligne.</small></div>
+                        <div class="ctl"><button type="button" class="switch @(alertOffline ? "on" : "")" role="switch" aria-checked="@(alertOffline ? "true" : "false")" aria-label="Alertes e-mail" disabled="@(!growth)" @onclick="() => { alertOffline = !alertOffline; dirty = true; }"><span></span></button></div>
+                    </div>
+                    <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
+                        <div class="t"><b>Délai avant l'alerte</b><small>Durée pendant laquelle un écran doit rester hors ligne avant l'envoi de l'e-mail.</small></div>
+                        <div class="ctl">
+                            <select class="rg-in short" @bind="alertMinutes" disabled="@(!growth || !alertOffline)" aria-label="Délai avant l'alerte">
+                                @foreach (var (m, l) in AlertDelays) { <option value="@m">@l</option> }
+                            </select>
+                        </div>
+                    </div>
+                    <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
+                        <div class="t"><b>Destinataires</b><small>Par défaut, tous les administrateurs de l'organisation.</small></div>
+                        <div class="ctl" style="flex-direction:column;align-items:stretch">
+                            <select class="rg-in" @bind="alertTarget" disabled="@(!growth || !alertOffline)" aria-label="Destinataires des alertes">
+                                <option value="admins">Tous les administrateurs</option>
+                                <option value="custom">Une adresse dédiée…</option>
+                            </select>
+                            @if (alertTarget == "custom") { <input class="rg-in" type="email" placeholder="alertes@exemple.ch" aria-label="Adresse des alertes" @bind="alertEmail" disabled="@(!growth || !alertOffline)" /> }
+                        </div>
+                    </div>
+                </div>
+                <div class="rg-card">
+                    <header><h3>Pause des écrans</h3><small>Se lance depuis la carte d'un écran (bouton Pause).</small></header>
+                    <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
+                        <div class="t"><b>Reprise automatique après</b><small>Un écran en pause reprend seul au bout de ce délai : il ne reste jamais figé par oubli. Modifiable à chaque pause.</small></div>
+                        <div class="ctl">
+                            <select class="rg-in short" @bind="pauseMinutes" disabled="@(!growth)" aria-label="Reprise automatique après">
+                                @foreach (var (m, l) in PauseDelays) { <option value="@m">@l</option> }
+                            </select>
+                        </div>
+                    </div>
+                    <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
+                        <div class="t"><b>Visuel affiché pendant la pause</b><small>Une image de votre médiathèque, sinon le visuel Linkii par défaut.</small></div>
+                        <div class="ctl" style="flex:1;min-width:0">@if (growth) { <MediaField Field="pauseField" Values="pauseValues" /> } else { <span class="muted">Visuel Linkii par défaut</span> }</div>
+                    </div>
+                </div>
+                <div class="rg-card">
+                    <header><h3>Appareil des écrans</h3><small>Dans toutes les licences.</small></header>
+                    <div class="rg-body"><p class="hint" style="margin:0">Chaque écran remonte son système (par exemple Android 14), son modèle et la version de l'application. Ces informations s'affichent sur sa carte.</p></div>
+                </div>
+                break;
         }
-        else
+        </div>
+
+        @if (Tab == "compte")
         {
-            <div class="settings-grid">
-                <div class="card">
-                    <h3>Compte administrateur</h3>
-                    <p class="hint">@email</p>
+            <div class="rg-ph"><h2>Compte et confidentialité</h2><p>Votre accès administrateur.</p></div>
+            @if (Ctx.IsImpersonating)
+            {
+                <div class="card empty"><div class="big">Compte non modifiable</div><p>Vous consultez cet espace en tant qu'administrateur : le mot de passe reste celui du client.</p></div>
+            }
+            else
+            {
+                <div class="rg-card">
+                    <header><h3>Connexion</h3><small>@email</small></header>
                     @if (externalProvider != null)
                     {
-                        <p class="sso-note"><ProviderLogo Provider="@externalProvider" Size="16" /> Connexion avec le bouton « Continuer avec @SignupSources.Label(externalProvider) » : pas de mot de passe Linkii.</p>
+                        <div class="rg-body"><p class="sso-note" style="margin:0"><ProviderLogo Provider="@externalProvider" Size="16" /> Connexion avec le bouton « Continuer avec @SignupSources.Label(externalProvider) » : pas de mot de passe Linkii.</p></div>
                     }
                     else
                     {
-                        <label class="lbl">Mot de passe actuel</label>
-                        <input class="full" type="password" @bind="oldPwd" autocomplete="current-password" />
-                        <label class="lbl">Nouveau mot de passe <small>(8 caractères minimum)</small></label>
-                        <input class="full" type="password" @bind="newPwd" autocomplete="new-password" />
-                        <div style="margin-top:12px"><button class="btn ghost" @onclick="ChangePassword">Changer le mot de passe</button></div>
+                        <div class="sv-row"><div class="t"><b>Mot de passe actuel</b></div><div class="ctl"><input class="rg-in" type="password" @bind="oldPwd" autocomplete="current-password" aria-label="Mot de passe actuel" /></div></div>
+                        <div class="sv-row"><div class="t"><b>Nouveau mot de passe</b><small>8 caractères minimum.</small></div><div class="ctl"><input class="rg-in" type="password" @bind="newPwd" autocomplete="new-password" aria-label="Nouveau mot de passe" /></div></div>
+                        <div class="sv-row"><div class="t"></div><div class="ctl"><button class="btn ghost" @onclick="ChangePassword">Changer le mot de passe</button></div></div>
                     }
                 </div>
                 <ConsentPrefs />
+            }
+        }
+
+        @if (dirty && Tab is not ("utilisation" or "compte"))
+        {
+            <div class="rg-savebar" role="region" aria-label="Enregistrement">
+                <span>Modifications non enregistrées</span>
+                <button type="button" class="btn ghost" @onclick="Cancel">Annuler</button>
+                <button type="button" class="btn" @onclick="Save">Enregistrer</button>
             </div>
         }
-        break;
-}
-
+    </div>
+</div>
 
 @code {
     [SupplyParameterFromQuery(Name = "tab")] public string? TabParam { get; set; }
 
-    private static readonly (string Id, string Label)[] Tabs =
+    private record NavItem(string Id, string Label, string Icon, bool Growth = false);
+
+    private static readonly (string Group, NavItem[] Items)[] Groups =
     {
-        ("organisation", "Organisation"), ("parametres", "Paramètres"), ("supervision", "Supervision"), ("compte", "Compte"),
+        ("Vue d'ensemble", new[] { new NavItem("utilisation", "Utilisation", "chart") }),
+        ("Organisation", new[] { new NavItem("organisation", "Identité et équipe", "building") }),
+        ("Diffusion", new[] { new NavItem("diffusion", "Contenus et écrans", "monitor"), new NavItem("veille", "Veille et luminosité", "moon") }),
+        ("Suivi", new[] { new NavItem("supervision", "Alertes et pause", "bell", Growth: true) }),
+        ("Mon compte", new[] { new NavItem("compte", "Compte et confidentialité", "user") }),
     };
 
     private static readonly (int Min, string Label)[] AlertDelays = { (5, "5 minutes"), (10, "10 minutes"), (15, "15 minutes"), (30, "30 minutes"), (60, "1 heure") };
@@ -221,16 +272,25 @@
         "America/Montreal", "America/New_York", "Africa/Casablanca", "UTC"
     };
 
-    private string Tab => Tabs.Any(t => t.Id == TabParam) ? TabParam! : "organisation";
+    private string? tab;
+    private string Tab => tab ?? (TabParam == "parametres" ? "diffusion" : Groups.SelectMany(g => g.Items).Any(t => t.Id == TabParam) ? TabParam! : "utilisation");
+    private bool dirty;
+    private void Touch() => dirty = true;
 
     private string name = "", timezone = "", email = "";
     private int duration, reloadHour;
     private string oldPwd = "", newPwd = "";
     private string? externalProvider;   // compte Microsoft ou Google, sans mot de passe Linkii
     private ScreenSpec spec = new();
-    private int areaCount, memberCount;
+    private int areaCount;
     private bool sleepEnabled, dimEnabled;
     private Guid soleAreaId;   // l'aire, quand il n'y en a qu'une : ses plages se règlent ici
+
+    // Utilisation
+    private int screenCount, screensOnline, playlistCount, playlistsUsed, zoneCount, wallCount;
+    private int imageCount, videoCount, accountCount, integrationCount, integrationTotal;
+    private long imageBytes, videoBytes;
+    private string areaNames = "", accountNames = "", integrationNames = "";
 
     protected override void OnInitialized()
     {
@@ -246,11 +306,42 @@
         email = Ctx.Email;
         var uid = Ctx.UserId;
         externalProvider = Root.Read(d => d.Users.FirstOrDefault(u => u.Id == uid) is { HasPassword: false } u ? u.ExternalProvider : null);
-        (areaCount, memberCount) = Store.Read(d => (d.Areas.Count, d.Users.Count(u => u.Role == Roles.ClientMember)));
+        areaCount = Store.Read(d => d.Areas.Count);
         (sleepEnabled, dimEnabled) = (t.SleepEnabled, t.DimEnabled);
         soleAreaId = areaCount == 1 ? Store.Read(d => d.Areas.First().Id) : Guid.Empty;
         spec = ScreenSpec.From(t);
+        LoadUsage(t);
     }
+
+    // Chiffres de l'onglet « Utilisation » (lus une fois à l'ouverture de la page).
+    private void LoadUsage(Tenant t)
+    {
+        var (screens, playlists, areas, media) = Store.Read(d => (d.Screens.Where(s => s.Token != null).ToList(), d.Playlists.ToList(), d.Areas.ToList(), d.Media.ToList()));
+        screenCount = screens.Count;
+        screensOnline = screens.Count(s => Store.Read(d => d.Status(s)) != "Hors ligne");
+        playlistCount = playlists.Count;
+        var used = screens.SelectMany(s => s.ZonePlaylists()).Concat(areas.SelectMany(a => a.Zones).Select(z => z.PlaylistId)).OfType<Guid>().ToHashSet();
+        playlistsUsed = playlists.Count(p => used.Contains(p.Id));
+        zoneCount = areas.Sum(a => a.Zones.Count);
+        wallCount = areas.Sum(a => a.Zones.Count(z => z.IsWall));
+        var names = areas.Select(a => a.Name).ToList();
+        areaNames = names.Count <= 3 ? string.Join(", ", names) : string.Join(", ", names.Take(3)) + "…";
+
+        var files = media.Where(m => m.Type is "image" or "video" && m.AppId == null && m.Status != "failed").ToList();
+        imageCount = files.Count(m => m.Type == "image"); videoCount = files.Count - imageCount;
+        imageBytes = files.Where(m => m.Type == "image").Sum(m => m.Size ?? 0);
+        videoBytes = files.Where(m => m.Type == "video").Sum(m => m.Size ?? 0);
+
+        var accounts = ConnectedAccounts.Of(t);
+        accountCount = accounts.Count;
+        accountNames = string.Join(", ", accounts.Select(a => a.Kind));
+        var installed = Apps.Installed();
+        integrationCount = installed.Count; integrationTotal = Apps.Catalog.Count;
+        var inst = installed.Select(i => Apps.Find(i.AppId)?.Name ?? i.AppId).ToList();
+        integrationNames = inst.Count <= 3 ? string.Join(", ", inst) : string.Join(", ", inst.Take(3)) + "…";
+    }
+
+    private void Cancel() => Nav.NavigateTo($"/settings?tab={Tab}", forceLoad: true);
 
     private async Task Save()
     {

@@ -1,25 +1,28 @@
 @page "/members"
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientAdmin")]
 @inject TenantStore Store
 @inject TenantContext Ctx
 @inject Mailer Mail
 @inject ResellerResolver Resolver
 @inject NavigationManager Nav
 @inject Toaster Toast
+@inject AppCatalog Catalog
 
 <div class="page-head">
     <div>
         <h1>Membres</h1>
-        <p class="sub">Les personnes qui gèrent les écrans de @orgName. Chacune a un rôle dans chaque aire : Utilisateur (écrans, listes de lecture, médias de l'aire) ou Administrateur (en plus : zones et membres de l'aire).</p>
+        <p class="sub">Les personnes qui gèrent les écrans de @orgName. Chacune a un niveau de droits, défini par un administrateur : pages visibles, intégrations et widgets utilisables, aires, zones et écrans.</p>
     </div>
-    @if (manageable.Count > 0) { <button class="btn" @onclick="OpenInvite"><Ico Name="plus" Size="16" /> Inviter une personne</button> }
+    @if (tab == "levels") { <button class="btn" @onclick="() => OpenLevel(null)"><Ico Name="plus" Size="16" /> Créer un niveau</button> }
+    else { <button class="btn" @onclick="OpenInvite"><Ico Name="plus" Size="16" /> Inviter une personne</button> }
 </div>
 
-@if (manageable.Count == 0)
-{
-    <div class="card empty"><div class="big">Réservé aux administrateurs</div><p>Seuls les administrateurs d'une aire ou de l'organisation gèrent les membres.</p></div>
-}
-else
+<nav class="se-utabs" role="tablist" aria-label="Membres et niveaux de droits">
+    <button type="button" role="tab" class="@(tab == "members" ? "on" : "")" aria-selected="@(tab == "members" ? "true" : "false")" @onclick='() => tab = "members"'>Membres <small>@people.Count</small></button>
+    <button type="button" role="tab" class="@(tab == "levels" ? "on" : "")" aria-selected="@(tab == "levels" ? "true" : "false")" @onclick='() => tab = "levels"'>Niveaux de droits <small>@(levels.Count + 1)</small></button>
+</nav>
+
+@if (tab == "members")
 {
     var since = DateTime.UtcNow.AddDays(-30);
     var invited = people.Count(u => u.IsInvited && !u.Disabled);
@@ -31,61 +34,94 @@ else
     </div>
 
     <table class="tbl">
-        <thead><tr><th style="min-width:220px">Personne</th>@foreach (var a in manageable) { <th>@a.Name</th> }<th>État</th><th></th></tr></thead>
+        <thead><tr><th style="min-width:220px">Personne</th><th>Niveau de droits</th><th>Périmètre</th><th>État</th><th></th></tr></thead>
         <tbody>
         @foreach (var u in people)
         {
             var p = u;
-            <tr class="@(CanEdit(p) ? "clickable" : "") @(p.Disabled ? "dim" : "")" @onclick="() => OpenEdit(p)">
+            var lv = LevelOf(p);
+            <tr class="clickable @(p.Disabled ? "dim" : "")" @onclick="() => OpenEdit(p)">
                 <td>
                     <div class="who-cell">
                         <span class="avatar @(p.Disabled ? "off" : "")">@Initials(p)</span>
                         <div class="who-txt"><b>@p.Label</b><small>@p.Email@(p.Id == Ctx.UserId ? " · vous" : "")</small></div>
                     </div>
                 </td>
-                @foreach (var a in manageable)
-                {
-                    <td>
-                        @if (p.Role == Roles.ClientAdmin) { <span class="pill dark">Organisation</span> }
-                        else if (p.RoleIn(a.Id) is { } r) { <span class="pill @(r == AreaRoles.Admin ? "dark" : "blue")">@AreaRoles.Label(r)</span> }
-                        else { <span class="muted">—</span> }
-                    </td>
-                }
                 <td>
-                    <span class="pill @(p.Disabled ? "" : p.IsInvited ? "warn" : "ok")">@(p.Disabled ? "Désactivé" : p.IsInvited ? "Invité" : "Actif")</span>
-                    @if (p.Role == Roles.ClientMember && p.AreaRoles.Count == 0) { <small class="muted" style="display:block">aucune aire</small> }
+                    @if (p.Role == Roles.ClientAdmin) { <span class="pill dark">Administrateur</span> }
+                    else if (lv != null) { <span class="pill blue">@lv.Name</span>@if (lv.ReadOnly) { <small class="muted"> lecture seule</small> } }
+                    else { <span class="pill warn">Aucun niveau</span> }
                 </td>
+                <td class="muted">@(p.Role == Roles.ClientAdmin ? "Toutes les aires" : lv != null ? AccessLevels.ScopeText(lv, areas, screens) : "—")</td>
+                <td><span class="pill @(p.Disabled ? "" : p.IsInvited ? "warn" : "ok")">@(p.Disabled ? "Désactivé" : p.IsInvited ? "Invité" : "Actif")</span></td>
                 <td @onclick:stopPropagation="true">
-                    @if (CanEdit(p))
-                    {
-                        <div class="kebab">
-                            <button type="button" class="kebab-btn" aria-label="Actions pour @p.Email" aria-haspopup="menu" aria-expanded="@(menuFor == p.Id ? "true" : "false")" @onclick="() => menuFor = menuFor == p.Id ? null : p.Id"><Ico Name="dots-v" Size="18" /></button>
-                            @if (menuFor == p.Id)
-                            {
-                                <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
-                                <div class="kebab-menu" role="menu">
-                                    <button type="button" role="menuitem" @onclick="() => OpenEdit(p)"><Ico Name="edit" Size="16" /> Modifier</button>
-                                    @if (p.IsInvited && !p.Disabled) { <button type="button" role="menuitem" @onclick="() => Resend(p)"><Ico Name="mail" Size="16" /> Renvoyer l'invitation</button> }
-                                    @if (orgAdmin && p.Id != Ctx.UserId)
-                                    {
-                                        <button type="button" role="menuitem" @onclick="() => Ask(p, p.Disabled ? EnableAction : DisableAction)"><Ico Name="@(p.Disabled ? "check" : "lock")" Size="16" /> @(p.Disabled ? "Réactiver" : "Désactiver")</button>
-                                        <button type="button" role="menuitem" class="danger" @onclick="() => Ask(p, DeleteAction)"><Ico Name="trash" Size="16" /> Supprimer</button>
-                                    }
-                                </div>
-                            }
-                        </div>
-                    }
+                    <div class="kebab">
+                        <button type="button" class="kebab-btn" aria-label="Actions pour @p.Email" aria-haspopup="menu" aria-expanded="@(menuFor == p.Id ? "true" : "false")" @onclick="() => menuFor = menuFor == p.Id ? null : p.Id"><Ico Name="dots-v" Size="18" /></button>
+                        @if (menuFor == p.Id)
+                        {
+                            <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                            <div class="kebab-menu" role="menu">
+                                <button type="button" role="menuitem" @onclick="() => OpenEdit(p)"><Ico Name="edit" Size="16" /> Modifier</button>
+                                @if (p.IsInvited && !p.Disabled) { <button type="button" role="menuitem" @onclick="() => Resend(p)"><Ico Name="mail" Size="16" /> Renvoyer l'invitation</button> }
+                                @if (p.Id != Ctx.UserId)
+                                {
+                                    <button type="button" role="menuitem" @onclick="() => Ask(p, p.Disabled ? EnableAction : DisableAction)"><Ico Name="@(p.Disabled ? "check" : "lock")" Size="16" /> @(p.Disabled ? "Réactiver" : "Désactiver")</button>
+                                    <button type="button" role="menuitem" class="danger" @onclick="() => Ask(p, DeleteAction)"><Ico Name="trash" Size="16" /> Supprimer</button>
+                                }
+                            </div>
+                        }
+                    </div>
                 </td>
             </tr>
         }
         </tbody>
     </table>
 }
+else
+{
+    <table class="tbl">
+        <thead><tr><th style="min-width:220px">Niveau</th><th>Intégrations</th><th>Widgets</th><th>Périmètre</th><th class="num">Membres</th><th></th></tr></thead>
+        <tbody>
+            <tr class="dim">
+                <td><b>Administrateur</b><small class="muted" style="display:block">Tous les droits, y compris Membres, Aires de gestion et Réglages. Non modifiable.</small></td>
+                <td>Toutes</td><td>Tous</td><td class="muted">Toutes les aires</td>
+                <td class="num">@people.Count(u => u.Role == Roles.ClientAdmin)</td><td></td>
+            </tr>
+        @foreach (var l in levels)
+        {
+            var lv = l;
+            <tr class="clickable" @onclick="() => OpenLevel(lv)">
+                <td><b>@lv.Name</b>@if (lv.ReadOnly) { <span class="pill" style="margin-left:6px">lecture seule</span> }<small class="muted" style="display:block">@AccessLevels.PagesText(lv, Catalog)</small></td>
+                <td>@AccessLevels.AppsText(lv, Catalog, false)</td>
+                <td>@AccessLevels.AppsText(lv, Catalog, true)</td>
+                <td class="muted">@AccessLevels.ScopeText(lv, areas, screens)</td>
+                <td class="num">@people.Count(u => u.LevelId == lv.Id && u.Role == Roles.ClientMember)</td>
+                <td @onclick:stopPropagation="true">
+                    <div class="kebab">
+                        <button type="button" class="kebab-btn" aria-label="Actions pour le niveau @lv.Name" aria-haspopup="menu" aria-expanded="@(menuFor == lv.Id ? "true" : "false")" @onclick="() => menuFor = menuFor == lv.Id ? null : lv.Id"><Ico Name="dots-v" Size="18" /></button>
+                        @if (menuFor == lv.Id)
+                        {
+                            <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                            <div class="kebab-menu" role="menu">
+                                <button type="button" role="menuitem" @onclick="() => OpenLevel(lv)"><Ico Name="edit" Size="16" /> Modifier</button>
+                                <button type="button" role="menuitem" @onclick="() => Duplicate(lv)"><Ico Name="plus" Size="16" /> Dupliquer</button>
+                                <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; levelDelete = lv; levelError = null; }"><Ico Name="trash" Size="16" /> Supprimer</button>
+                            </div>
+                        }
+                    </div>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+    <p class="hint" style="margin-top:12px">Modifier un niveau change aussitôt les droits de tous ses membres. Un niveau utilisé ne se supprime pas : donnez d'abord un autre niveau à ses membres.</p>
+}
 
 @if (form != null)
 {
     var f = form;
     var isNew = f.Id == null;
+    var chosen = Guid.TryParse(f.Level, out var chosenId) ? levels.FirstOrDefault(l => l.Id == chosenId) : null;
     <div class="modal-backdrop" @onclick="() => form = null"></div>
     <div class="modal app-modal" role="dialog" aria-modal="true" aria-labelledby="m-title">
         <div class="modal-head">
@@ -99,34 +135,21 @@ else
                     <div><label class="lbl" for="m-mail">E-mail</label><input id="m-mail" class="full" type="email" maxlength="120" @bind="f.Email" disabled="@(!isNew)" autocomplete="off" placeholder="prenom.nom@organisation.ch" /></div>
                 </div>
 
-                @if (orgAdmin)
+                <label class="lbl" for="m-level">Niveau de droits</label>
+                <select id="m-level" class="full" value="@f.Level" disabled="@(f.Id == Ctx.UserId)" @onchange="e => { f.Level = e.Value?.ToString() ?? string.Empty; formError = null; }">
+                    <option value="">Choisir un niveau…</option>
+                    <option value="@AdminLevel">Administrateur — tous les droits</option>
+                    @foreach (var l in levels) { <option value="@l.Id">@l.Name</option> }
+                </select>
+                @if (f.Level == AdminLevel)
                 {
-                    <label class="org-admin-check">
-                        <input type="checkbox" class="ios" checked="@f.OrgAdmin" disabled="@(f.Id == Ctx.UserId)" @onchange="e => { f.OrgAdmin = e.Value is true; formError = null; }" />
-                        <span><b>Administrateur de l'organisation</b><small class="muted">Toutes les aires, création des aires, déplacements entre aires, réglages et intégrations.</small></span>
-                    </label>
+                    <div class="lv-sum"><div><b>Pages</b>Toutes, y compris Membres, Aires de gestion et Réglages</div><div><b>Intégrations</b>Toutes</div><div><b>Périmètre</b>Toutes les aires, sans filtre</div></div>
                 }
-
-                @if (!f.OrgAdmin)
+                else if (chosen != null)
                 {
-                    <label class="lbl">Rôle dans chaque aire</label>
-                    <div class="role-rows">
-                        @foreach (var a in manageable)
-                        {
-                            var area = a;
-                            <div class="role-row">
-                                <Ico Name="map-pin" Size="15" />
-                                <span>@area.Name</span>
-                                <select value="@(f.Roles.GetValueOrDefault(area.Id) ?? "")" aria-label="Rôle dans @area.Name" @onchange="e => SetRole(area.Id, e.Value?.ToString())">
-                                    <option value="">Aucun accès</option>
-                                    <option value="@AreaRoles.User">Utilisateur</option>
-                                    <option value="@AreaRoles.Admin">Administrateur</option>
-                                </select>
-                            </div>
-                        }
-                    </div>
-                    @if (!orgAdmin && f.OtherAreas > 0) { <p class="hint" style="margin:8px 0 0">Cette personne a aussi accès à @f.OtherAreas autre(s) aire(s), gérée(s) par d'autres administrateurs.</p> }
+                    <div class="lv-sum"><div><b>Pages</b>@AccessLevels.PagesText(chosen, Catalog)</div><div><b>Intégrations</b>@AccessLevels.AppsText(chosen, Catalog, false) · widgets : @AccessLevels.AppsText(chosen, Catalog, true).ToLowerInvariant()</div><div><b>Périmètre</b>@AccessLevels.ScopeText(chosen, areas, screens)</div>@if (chosen.ReadOnly) { <div><b>Modification</b>Lecture seule</div> }</div>
                 }
+                else if (levels.Count == 0) { <p class="hint" style="margin:8px 0 0">Aucun niveau créé : <a href="" @onclick="CreateFirstLevel" @onclick:preventDefault="true">créez un niveau de droits</a>, ou choisissez Administrateur.</p> }
                 @if (isNew) { <p class="hint" style="margin:12px 0 0">Elle reçoit par e-mail un mot de passe provisoire, à changer à la première connexion.</p> }
                 @if (formError != null) { <div class="err">@formError</div> }
             </div>
@@ -138,12 +161,115 @@ else
     </div>
 }
 
+@if (lf != null)
+{
+    var l = lf;
+    var apps = Catalog.All.Where(a => !a.ScreenWidget).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+    var widgets = Catalog.All.Where(a => a.ScreenWidget).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+    <div class="modal-backdrop" @onclick="() => lf = null"></div>
+    <div class="modal app-modal lv-modal" role="dialog" aria-modal="true" aria-labelledby="lv-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="lv-title">@(l.Id == null ? "Nouveau niveau de droits" : "Niveau « " + l.OldName + " »")</h3></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => lf = null"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            <div style="max-width:380px"><label class="lbl" for="lv-name" style="margin-top:0">Nom du niveau</label><input id="lv-name" class="full" maxlength="60" @bind="l.Name" @bind:event="oninput" placeholder="Ex. : Éditeur Magasin" /></div>
+            <div class="lv-cols">
+                <div>
+                    <section class="lv-sec"><h4><i>1</i>Pages visibles</h4>
+                        <div class="lv-in">
+                            @foreach (var p in LevelPages.Offered)
+                            {
+                                var page = p;
+                                @Check(l.Pages.Contains(page) ? "all" : "none", LevelPages.Label(page), () => { if (!l.Pages.Remove(page)) l.Pages.Add(page); })
+                            }
+                            <p class="lv-note">Intégrations et Widgets apparaissent dès qu'une app est cochée ci-dessous. Membres, Aires de gestion, Comptes connectés et Réglages restent aux administrateurs.</p>
+                        </div>
+                    </section>
+                    <section class="lv-sec"><h4><i>2</i>Intégrations et widgets</h4>
+                        <div class="lv-in">
+                            <div class="lv-sub">Intégrations <button type="button" class="linklike" @onclick="() => AllApps(false)">@(l.AllIntegrations ? "tout décocher" : "tout cocher")</button></div>
+                            @foreach (var a in apps) { var app = a; @Check(AppOn(app) ? "all" : "none", app.Name, () => ToggleApp(app)) }
+                            <div class="lv-sub">Widgets <button type="button" class="linklike" @onclick="() => AllApps(true)">@(l.AllWidgets ? "tout décocher" : "tout cocher")</button></div>
+                            @foreach (var a in widgets) { var app = a; @Check(AppOn(app) ? "all" : "none", app.Name, () => ToggleApp(app)) }
+                            <p class="lv-note">Cocher = utiliser : créer et modifier des contenus avec cette app. Les connexions aux comptes restent à l'administrateur.</p>
+                        </div>
+                    </section>
+                    <section class="lv-sec"><h4><i>3</i>Modification</h4>
+                        <div class="lv-in">
+                            @Check(l.ReadOnly ? "all" : "none", "Lecture seule : voir sans modifier ni publier", () => l.ReadOnly = !l.ReadOnly)
+                        </div>
+                    </section>
+                </div>
+                <div>
+                    <section class="lv-sec"><h4><i>4</i>Périmètre <span>aires › zones › écrans</span></h4>
+                        <div class="lv-in lv-tree">
+                            @Check(l.AllAreas ? "all" : "none", "Toutes les aires, y compris celles créées plus tard", ToggleAllAreas, "lv-root")
+                            @foreach (var a in areas)
+                            {
+                                var area = a;
+                                var sa = AreaState(area);
+                                var oa = open.Contains(area.Id);
+                                <div class="lv-n1">
+                                    @Tree(sa, area.Name, () => ToggleArea(area), oa, () => Open(area.Id), AreaCount(area, sa))
+                                    @if (oa)
+                                    {
+                                        @foreach (var z in area.Zones)
+                                        {
+                                            var zone = z;
+                                            var sz = ZoneState(area, zone);
+                                            var inZone = screens.Where(s => s.AreaId == area.Id && s.ZoneId == zone.Id).ToList();
+                                            var oz = open.Contains(zone.Id);
+                                            <div class="lv-n2">
+                                                @Tree(sz, (zone.IsWall ? "Mur " : "Zone ") + zone.Name, () => ToggleZone(area, zone), oz && !zone.IsWall && inZone.Count > 0, () => Open(zone.Id), zone.IsWall ? "mur entier" : $"{inZone.Count} écran{(inZone.Count > 1 ? "s" : "")}", inZone.Count == 0 || zone.IsWall)
+                                                @if (oz && !zone.IsWall)
+                                                {
+                                                    @foreach (var s in inZone)
+                                                    {
+                                                        var scr = s;
+                                                        <div class="lv-n3">@Check(ScreenOn(scr) ? "all" : "none", scr.Name, () => ToggleScreen(area, zone, scr))</div>
+                                                    }
+                                                }
+                                            </div>
+                                        }
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </section>
+                    <div class="lv-sum"><div><b>Ce niveau voit</b>@AccessLevels.ScopeText(l.ToLevel(), areas, screens)</div></div>
+                    <p class="lv-note">Les listes de lecture et la médiathèque sont partagées par aire : une personne limitée à une zone voit celles de toute l'aire. Un mur d'écrans est toujours donné en entier.</p>
+                </div>
+            </div>
+            @if (levelError != null) { <div class="err">@levelError</div> }
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn ghost" @onclick="() => lf = null">Annuler</button>
+            <button type="button" class="btn" @onclick="SaveLevel">Enregistrer le niveau</button>
+        </div>
+    </div>
+}
+
+@if (levelDelete is { } ld)
+{
+    <div class="modal-backdrop" @onclick="() => levelDelete = null"></div>
+    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="ld-title">
+        <h3 id="ld-title">Supprimer le niveau « @ld.Name » ?</h3>
+        <p class="hint">Un niveau utilisé ne se supprime pas : ses membres doivent d'abord recevoir un autre niveau.</p>
+        @if (levelError != null) { <div class="err">@levelError</div> }
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => levelDelete = null">Annuler</button>
+            <button class="btn danger-solid" @onclick="DeleteLevel">Supprimer</button>
+        </div>
+    </div>
+}
+
 @if (confirm is { } c)
 {
     <div class="modal-backdrop" @onclick="() => confirm = null"></div>
     <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="cf-title">
         <h3 id="cf-title">@(c.Action == DeleteAction ? $"Supprimer le compte de {c.User.Label} ?" : c.Action == DisableAction ? $"Désactiver {c.User.Label} ?" : $"Réactiver {c.User.Label} ?")</h3>
-        <p class="hint">@(c.Action == DeleteAction ? "La personne ne pourra plus se connecter. Les écrans, listes de lecture et médias restent dans leurs aires." : c.Action == DisableAction ? "La personne ne pourra plus se connecter. Ses rôles sont conservés ; vous pourrez la réactiver." : "La personne pourra de nouveau se connecter, avec les mêmes rôles.")</p>
+        <p class="hint">@(c.Action == DeleteAction ? "La personne ne pourra plus se connecter. Les écrans, listes de lecture et médias restent dans leurs aires." : c.Action == DisableAction ? "La personne ne pourra plus se connecter. Son niveau est conservé ; vous pourrez la réactiver." : "La personne pourra de nouveau se connecter, avec le même niveau.")</p>
         @if (confirmError != null) { <div class="err">@confirmError</div> }
         <div class="modal-actions">
             <button class="btn ghost" @onclick="() => confirm = null">Annuler</button>
@@ -153,71 +279,57 @@ else
 }
 
 @code {
-    private const string EnableAction = "enable", DisableAction = "disable", DeleteAction = "delete";
+    private const string EnableAction = "enable", DisableAction = "disable", DeleteAction = "delete", AdminLevel = "admin";
     private List<User> people = new();
-    private List<Area> manageable = new();   // aires dont la personne connectée gère les membres
-    private bool orgAdmin, busy;
-    private string orgName = "";
+    private List<Area> areas = new();
+    private List<Screen> screens = new();
+    private List<AccessLevel> levels = new();
+    private bool busy;
+    private string orgName = "", tab = "members";
     private Guid? menuFor;
     private MemberForm? form;
-    private string? formError, confirmError;
+    private LevelForm? lf;
+    private AccessLevel? levelDelete;
+    private string? formError, confirmError, levelError;
     private (User User, string Action)? confirm;
+    private readonly HashSet<Guid> open = new();
 
     private class MemberForm
     {
         public Guid? Id; public string OldName = "", Name = "", Email = "";
-        public bool OrgAdmin; public int OtherAreas;
-        public Dictionary<Guid, string> Roles = new();
+        /// <summary>« admin », l'identifiant d'un niveau, ou vide.</summary>
+        public string Level = "";
     }
 
     protected override void OnInitialized() => Load();
 
     private void Load()
     {
-        (orgName, orgAdmin, manageable) = Store.Read(d => (d.Tenant.Name, d.Access.IsOrgAdmin, d.Areas.OrderBy(a => a.CreatedUtc).ToList().Where(a => d.Access.CanManage(a.Id)).ToList()));
-        people = Store.Read(d => d.Users.OrderBy(u => u.Role == Roles.ClientAdmin ? 0 : 1).ThenBy(u => u.Label, StringComparer.CurrentCultureIgnoreCase).ToList());
-        if (!orgAdmin)   // un administrateur d'aire voit les membres de ses aires (et les administrateurs de l'organisation)
-        {
-            var mine = manageable.Select(a => a.Id).ToHashSet();
-            people = people.Where(u => u.Role == Roles.ClientAdmin || u.Id == Ctx.UserId || u.AreaRoles.Any(r => mine.Contains(r.AreaId))).ToList();
-        }
+        (orgName, areas, screens, levels, people) = Store.Read(d => (d.Tenant.Name,
+            d.Areas.OrderBy(a => a.CreatedUtc).ToList(),
+            d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.Token != null).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
+            d.Tenant.Levels.OrderBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
+            d.Users.OrderBy(u => u.Role == Roles.ClientAdmin ? 0 : 1).ThenBy(u => u.Label, StringComparer.CurrentCultureIgnoreCase).ToList()));
     }
 
-    private bool CanEdit(User u) => orgAdmin || u.Role == Roles.ClientMember && u.Id != Ctx.UserId;
+    private AccessLevel? LevelOf(User u) => u.Role == Roles.ClientMember ? levels.FirstOrDefault(l => l.Id == u.LevelId) : null;
 
     private static string Initials(User u) => string.Concat(u.Label.Split(' ', '.', '@').Where(w => w.Length > 0).Take(2).Select(w => char.ToUpperInvariant(w[0])));
 
-    private void SetRole(Guid areaId, string? role)
-    {
-        if (form == null) return;
-        formError = null;
-        if (string.IsNullOrEmpty(role)) form.Roles.Remove(areaId); else form.Roles[areaId] = role;
-    }
+    // ---------- Membres ----------
 
-    private void OpenInvite() { formError = null; form = new MemberForm(); }
+    private void OpenInvite() { formError = null; form = new MemberForm { Level = levels.Count == 1 ? levels[0].Id.ToString() : "" }; }
 
     private void OpenEdit(User u)
     {
-        if (!CanEdit(u)) return;
         menuFor = null; formError = null;
-        var mine = manageable.Select(a => a.Id).ToHashSet();
-        form = new MemberForm
-        {
-            Id = u.Id, OldName = u.Label, Name = u.Name, Email = u.Email, OrgAdmin = u.Role == Roles.ClientAdmin,
-            Roles = u.AreaRoles.Where(r => mine.Contains(r.AreaId)).ToDictionary(r => r.AreaId, r => r.Role),
-            OtherAreas = u.AreaRoles.Count(r => !mine.Contains(r.AreaId))
-        };
+        form = new MemberForm { Id = u.Id, OldName = u.Label, Name = u.Name, Email = u.Email, Level = u.Role == Roles.ClientAdmin ? AdminLevel : u.LevelId?.ToString() ?? "" };
     }
+
+    private void CreateFirstLevel() { form = null; tab = "levels"; OpenLevel(null); }
 
     private static string? KeepsAnOrgAdmin(IEnumerable<User> all, Guid changing) =>
         all.Any(u => u.Id != changing && u.Role == Roles.ClientAdmin && !u.Disabled) ? null : "L'organisation doit garder au moins un autre administrateur actif.";
-
-    // Un administrateur d'aire ne touche qu'aux rôles des aires qu'il gère ; les autres rôles de la personne sont conservés.
-    private static void ApplyRoles(User u, Dictionary<Guid, string> roles, HashSet<Guid> managed)
-    {
-        u.AreaRoles.RemoveAll(r => managed.Contains(r.AreaId));
-        u.AreaRoles.AddRange(roles.Where(r => managed.Contains(r.Key)).Select(r => new AreaRole { AreaId = r.Key, Role = r.Value }));
-    }
 
     private async Task Save()
     {
@@ -227,25 +339,26 @@ else
         var email = f.Email.Trim().ToLowerInvariant();
         if (name.Length == 0) { formError = "Saisissez le nom."; return; }
         if (f.Id == null && !System.Text.RegularExpressions.Regex.IsMatch(email, @"^[^@\s]+@[^@\s]+\.[^@\s]+$")) { formError = "Saisissez une adresse e-mail valide."; return; }
-        var makeOrgAdmin = orgAdmin && f.OrgAdmin;
-        if (!makeOrgAdmin && f.Id == null && f.Roles.Count == 0) { formError = "Donnez un rôle dans au moins une aire" + (orgAdmin ? ", ou faites-en un administrateur de l'organisation." : "."); return; }
+        var makeOrgAdmin = f.Level == AdminLevel;
+        Guid? levelId = Guid.TryParse(f.Level, out var lid) ? lid : null;
+        if (!makeOrgAdmin && levelId == null) { formError = "Choisissez un niveau de droits, ou Administrateur."; return; }
 
         if (f.Id is { } id)
         {
             formError = Store.Write(d =>
             {
-                var managed = d.Areas.ToList().Where(a => d.Access.CanManage(a.Id)).Select(a => a.Id).ToHashSet();
+                if (!d.Access.IsOrgAdmin) return "Seul un administrateur de l'organisation modifie ce compte.";
                 var u = d.Users.FirstOrDefault(x => x.Id == id);
                 if (u == null) return "Compte introuvable.";
-                if (!d.Access.IsOrgAdmin && u.Role != Roles.ClientMember) return "Seul un administrateur de l'organisation modifie ce compte.";
-                if (d.Access.IsOrgAdmin && u.Role == Roles.ClientAdmin && !makeOrgAdmin)
+                if (!makeOrgAdmin && d.Tenant.Levels.All(l => l.Id != levelId)) return "Niveau introuvable.";
+                if (u.Role == Roles.ClientAdmin && !makeOrgAdmin)
                 {
                     if (u.Id == Ctx.UserId) return "Vous ne pouvez pas vous retirer ce rôle : demandez-le à un autre administrateur de l'organisation.";
                     if (KeepsAnOrgAdmin(d.Users, u.Id) is { } e) return e;
                 }
                 u.Name = name;
-                if (d.Access.IsOrgAdmin) u.Role = makeOrgAdmin ? Roles.ClientAdmin : Roles.ClientMember;
-                if (u.Role == Roles.ClientMember) ApplyRoles(u, f.Roles, managed);
+                u.Role = makeOrgAdmin ? Roles.ClientAdmin : Roles.ClientMember;
+                u.LevelId = makeOrgAdmin ? null : levelId;
                 return null;
             });
             if (formError != null) return;
@@ -260,11 +373,10 @@ else
         Reseller? reseller = null;
         formError = Store.Write(d =>
         {
-            if (d.EmailTaken(email)) return d.Users.Any(u => u.Email == email) ? "Cette personne fait déjà partie de l'organisation : modifiez ses rôles dans la liste." : "Cette adresse e-mail est déjà utilisée.";
-            var managed = d.Areas.ToList().Where(a => d.Access.CanManage(a.Id)).Select(a => a.Id).ToHashSet();
-            var u = new User { Email = email, Name = name, PasswordHash = Passwords.Hash(pwd), Role = makeOrgAdmin ? Roles.ClientAdmin : Roles.ClientMember, MustChangePassword = true, CreatedUtc = DateTime.UtcNow };
-            if (!makeOrgAdmin) ApplyRoles(u, f.Roles, managed);
-            d.AddUser(u);
+            if (!d.Access.IsOrgAdmin) return "Seul un administrateur de l'organisation invite une personne.";
+            if (d.EmailTaken(email)) return d.Users.Any(u => u.Email == email) ? "Cette personne fait déjà partie de l'organisation : modifiez son niveau dans la liste." : "Cette adresse e-mail est déjà utilisée.";
+            if (!makeOrgAdmin && d.Tenant.Levels.All(l => l.Id != levelId)) return "Niveau introuvable.";
+            d.AddUser(new User { Email = email, Name = name, PasswordHash = Passwords.Hash(pwd), Role = makeOrgAdmin ? Roles.ClientAdmin : Roles.ClientMember, LevelId = makeOrgAdmin ? null : levelId, MustChangePassword = true, CreatedUtc = DateTime.UtcNow });
             reseller = d.Reseller;
             return null;
         });
@@ -318,4 +430,206 @@ else
         confirm = null;
         Load();
     }
+
+    // ---------- Niveaux de droits ----------
+
+    /// <summary>Niveau en cours d'édition. Le périmètre garde la forme du modèle : un élément coché donne tout ce qu'il contient.</summary>
+    private class LevelForm
+    {
+        public Guid? Id; public string OldName = "", Name = "";
+        public HashSet<string> Pages = new();
+        public bool AllIntegrations, AllWidgets, ReadOnly, AllAreas;
+        public HashSet<string> Apps = new();
+        public HashSet<Guid> Areas = new(), Zones = new(), Screens = new();
+
+        public static LevelForm From(AccessLevel l) => new()
+        {
+            Id = l.Id, OldName = l.Name, Name = l.Name, Pages = [.. l.Pages], AllIntegrations = l.AllIntegrations, AllWidgets = l.AllWidgets, Apps = [.. l.Apps],
+            ReadOnly = l.ReadOnly, AllAreas = l.AllAreas, Areas = [.. l.AreaIds], Zones = [.. l.ZoneIds], Screens = [.. l.ScreenIds]
+        };
+
+        public AccessLevel ToLevel() => new()
+        {
+            Id = Id ?? Guid.NewGuid(), Name = Name, Pages = [.. Pages], AllIntegrations = AllIntegrations, AllWidgets = AllWidgets, Apps = [.. Apps], ReadOnly = ReadOnly,
+            AllAreas = AllAreas, AreaIds = [.. Areas], ZoneIds = [.. Zones], ScreenIds = [.. Screens]
+        };
+    }
+
+    private void OpenLevel(AccessLevel? l)
+    {
+        menuFor = null; levelError = null; open.Clear();
+        lf = l == null ? new LevelForm { Pages = [LevelPages.Screens, LevelPages.Playlists, LevelPages.Media], AllIntegrations = true, AllWidgets = true } : LevelForm.From(l);
+        if (areas.Count == 1) open.Add(areas[0].Id);   // une seule aire : ses zones sont déjà dépliées
+    }
+
+    private void Duplicate(AccessLevel l)
+    {
+        OpenLevel(l);
+        lf!.Id = null; lf.OldName = ""; lf.Name = l.Name + " (copie)";
+    }
+
+    private void SaveLevel()
+    {
+        if (lf is not { } f) return;
+        var level = f.ToLevel();
+        levelError = Store.Write(d => AccessLevels.Save(d, level));
+        if (levelError != null) return;
+        Toast.Ok(f.Id == null ? $"Niveau « {level.Name.Trim()} » créé." : $"Niveau « {level.Name.Trim()} » enregistré : ses membres le reçoivent aussitôt.");
+        lf = null;
+        Load();
+    }
+
+    private void DeleteLevel()
+    {
+        if (levelDelete is not { } l) return;
+        levelError = Store.Write(d => AccessLevels.Delete(d, l.Id));
+        if (levelError != null) return;
+        Toast.Ok($"Niveau « {l.Name} » supprimé.");
+        levelDelete = null;
+        Load();
+    }
+
+    // Apps : « tout » mémorisé comme un indicateur (les apps ajoutées plus tard au catalogue sont incluses), sinon liste explicite.
+    private bool AppOn(AppManifest a) => lf != null && ((a.ScreenWidget ? lf.AllWidgets : lf.AllIntegrations) || lf.Apps.Contains(a.Id));
+
+    private void ToggleApp(AppManifest a)
+    {
+        var l = lf!;
+        var all = a.ScreenWidget ? l.AllWidgets : l.AllIntegrations;
+        var group = Catalog.All.Where(x => x.ScreenWidget == a.ScreenWidget).ToList();
+        if (all)
+        {   // décocher une app d'un « tout » : les autres restent cochées une à une
+            if (a.ScreenWidget) l.AllWidgets = false; else l.AllIntegrations = false;
+            foreach (var x in group.Where(x => x.Id != a.Id)) l.Apps.Add(x.Id);
+            l.Apps.Remove(a.Id);
+        }
+        else if (!l.Apps.Remove(a.Id))
+        {
+            l.Apps.Add(a.Id);
+            if (group.All(x => l.Apps.Contains(x.Id))) { if (a.ScreenWidget) l.AllWidgets = true; else l.AllIntegrations = true; foreach (var x in group) l.Apps.Remove(x.Id); }
+        }
+    }
+
+    private void AllApps(bool widgets)
+    {
+        var l = lf!;
+        var on = widgets ? !l.AllWidgets : !l.AllIntegrations;
+        if (widgets) l.AllWidgets = on; else l.AllIntegrations = on;
+        foreach (var x in Catalog.All.Where(x => x.ScreenWidget == widgets)) l.Apps.Remove(x.Id);
+    }
+
+    // ---------- Périmètre : arbre aires › zones › écrans à trois états ----------
+
+    private void Open(Guid id) { if (!open.Remove(id)) open.Add(id); }
+
+    private bool ScreenOn(Screen s) => lf != null && (lf.AllAreas || lf.Areas.Contains(s.AreaId) || s.ZoneId is { } z && lf.Zones.Contains(z) || lf.Screens.Contains(s.Id));
+
+    private string ZoneState(Area a, Zone z)
+    {
+        var l = lf!;
+        if (l.AllAreas || l.Areas.Contains(a.Id) || l.Zones.Contains(z.Id)) return "all";
+        var inZone = screens.Where(s => s.AreaId == a.Id && s.ZoneId == z.Id).ToList();
+        var n = inZone.Count(s => l.Screens.Contains(s.Id));
+        return n == 0 ? "none" : n == inZone.Count ? "all" : "some";
+    }
+
+    private string AreaState(Area a)
+    {
+        var l = lf!;
+        if (l.AllAreas || l.Areas.Contains(a.Id)) return "all";
+        var states = a.Zones.Select(z => ZoneState(a, z)).ToList();
+        return states.Count > 0 && states.All(s => s == "all") ? "all" : states.Any(s => s != "none") ? "some" : "none";
+    }
+
+    private string AreaCount(Area a, string state)
+    {
+        if (state == "all") return "toute l'aire";
+        if (state == "none") return "";
+        var n = a.Zones.Count(z => ZoneState(a, z) != "none");
+        return $"{n} zone{(n > 1 ? "s" : "")} sur {a.Zones.Count}";
+    }
+
+    /// <summary>Quand « toutes les aires » est coché et qu'on retire un détail, chaque aire devient cochée une à une.</summary>
+    private void Expand()
+    {
+        var l = lf!;
+        if (!l.AllAreas) return;
+        l.AllAreas = false;
+        foreach (var a in areas) l.Areas.Add(a.Id);
+    }
+
+    private void ToggleAllAreas()
+    {
+        var l = lf!;
+        var on = !l.AllAreas;
+        l.AllAreas = on; l.Areas.Clear(); l.Zones.Clear(); l.Screens.Clear();
+    }
+
+    private void ClearArea(Area a)
+    {
+        var l = lf!;
+        l.Areas.Remove(a.Id);
+        foreach (var z in a.Zones) l.Zones.Remove(z.Id);
+        l.Screens.RemoveWhere(id => screens.Any(s => s.Id == id && s.AreaId == a.Id));
+    }
+
+    private void ToggleArea(Area a)
+    {
+        var l = lf!;
+        var on = AreaState(a) != "all";
+        Expand();
+        ClearArea(a);
+        if (on) l.Areas.Add(a.Id);
+    }
+
+    /// <summary>Toutes les zones de l'aire cochées : l'aire entière l'est (et suivra ses futures zones).</summary>
+    private void Collapse(Area a)
+    {
+        var l = lf!;
+        if (a.Zones.Count == 0 || !a.Zones.All(z => l.Zones.Contains(z.Id))) return;
+        ClearArea(a);
+        l.Areas.Add(a.Id);
+    }
+
+    private void ToggleZone(Area a, Zone z)
+    {
+        var l = lf!;
+        var on = ZoneState(a, z) != "all";
+        Expand();
+        if (l.Areas.Remove(a.Id)) foreach (var o in a.Zones.Where(o => o.Id != z.Id)) l.Zones.Add(o.Id);   // l'aire était entière : les autres zones restent cochées
+        l.Zones.Remove(z.Id);
+        l.Screens.RemoveWhere(id => screens.Any(s => s.Id == id && s.ZoneId == z.Id));
+        if (on) { l.Zones.Add(z.Id); Collapse(a); }
+    }
+
+    private void ToggleScreen(Area a, Zone z, Screen s)
+    {
+        var l = lf!;
+        var on = !ScreenOn(s);
+        Expand();
+        var siblings = screens.Where(x => x.AreaId == a.Id && x.ZoneId == z.Id).ToList();
+        if (l.Areas.Remove(a.Id)) foreach (var o in a.Zones.Where(o => o.Id != z.Id)) l.Zones.Add(o.Id);
+        if (l.Zones.Remove(z.Id)) foreach (var o in siblings) l.Screens.Add(o.Id);
+        if (on)
+        {
+            l.Screens.Add(s.Id);
+            if (siblings.All(x => l.Screens.Contains(x.Id))) { foreach (var o in siblings) l.Screens.Remove(o.Id); l.Zones.Add(z.Id); Collapse(a); }
+        }
+        else l.Screens.Remove(s.Id);
+    }
+
+    // ---------- Cases ----------
+
+    private RenderFragment Check(string state, string label, Action click, string css = "") => @<div class="lv-row @css">
+        <button type="button" role="checkbox" aria-checked="@(state == "all" ? "true" : state == "some" ? "mixed" : "false")" aria-label="@label" class="lv-box @state" @onclick="click"><Ico Name="@(state == "some" ? "minus" : "check")" Size="12" /></button>
+        <span class="lv-lbl" @onclick="click">@label</span>
+    </div>;
+
+    private RenderFragment Tree(string state, string label, Action click, bool expanded, Action toggle, string count, bool leaf = false) => @<div class="lv-row">
+        @if (leaf) { <span class="lv-tg"></span> }
+        else { <button type="button" class="lv-tg" aria-expanded="@(expanded ? "true" : "false")" aria-label="@(expanded ? "Replier" : "Déplier") @label" @onclick="toggle">@(expanded ? "▾" : "▸")</button> }
+        <button type="button" role="checkbox" aria-checked="@(state == "all" ? "true" : state == "some" ? "mixed" : "false")" aria-label="@label" class="lv-box @state" @onclick="click"><Ico Name="@(state == "some" ? "minus" : "check")" Size="12" /></button>
+        <span class="lv-lbl" @onclick="click">@label</span>
+        <span class="lv-cnt">@count</span>
+    </div>;
 }

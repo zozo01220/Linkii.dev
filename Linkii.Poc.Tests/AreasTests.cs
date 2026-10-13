@@ -18,15 +18,16 @@ public class AreasTests
         lausanne = new Area { ClientId = client.Id, Name = "Lausanne", CreatedUtc = DateTime.UtcNow.AddDays(-2) };
         geneva = new Area { ClientId = client.Id, Name = "Genève", CreatedUtc = DateTime.UtcNow.AddDays(-1) };
         db.Areas.AddRange(new[] { lausanne, geneva });
-        User U(string mail, string role, params (Area, string)[] roles)
+        User U(string mail, string role, params Area[] areas)
         {
-            var u = new User { Email = mail, Role = role, ClientId = client.Id, AreaRoles = roles.Select(r => new AreaRole { AreaId = r.Item1.Id, Role = r.Item2 }).ToList() };
+            var u = new User { Email = mail, Role = role, ClientId = client.Id };
+            if (areas.Length > 0) { var l = new AccessLevel { Name = "Accès " + mail, Pages = [.. LevelPages.Offered], AllIntegrations = true, AllWidgets = true, AreaIds = areas.Select(a => a.Id).ToList() }; client.Levels.Add(l); u.LevelId = l.Id; }
             db.Users.Add(u);
             return u;
         }
         claire = U("claire@horizon.ch", Roles.ClientAdmin);
-        marco = U("marco@horizon.ch", Roles.ClientMember, (lausanne, AreaRoles.Admin));
-        sofia = U("sofia@horizon.ch", Roles.ClientMember, (geneva, AreaRoles.User));
+        marco = U("marco@horizon.ch", Roles.ClientMember, lausanne);
+        sofia = U("sofia@horizon.ch", Roles.ClientMember, geneva);
         Screen S(string name, Area a) { var s = new Screen { ClientId = client.Id, AreaId = a.Id, Name = name, Token = Guid.NewGuid().ToString("N") }; db.Screens.Add(s); return s; }
         S("Accueil Lausanne", lausanne);
         S("Cafétéria", lausanne);
@@ -41,7 +42,7 @@ public class AreasTests
         Assert.Equal(new[] { "Lausanne", "Genève" }, As(claire).Access.Areas.Select(a => a.Name));
         Assert.True(As(claire).Access.CanManage(geneva.Id));
         Assert.Equal(new[] { "Lausanne" }, As(marco).Access.Areas.Select(a => a.Name));
-        Assert.True(As(marco).Access.ManagesCurrent);
+        Assert.False(As(marco).Access.ManagesCurrent);   // les zones et les membres sont réservés aux administrateurs de l'organisation
         Assert.False(As(sofia).Access.ManagesCurrent);   // utilisatrice : contenus, pas les zones ni les membres
         Assert.False(As(marco).Access.CanManage(geneva.Id));
     }
@@ -109,12 +110,12 @@ public class AreasTests
     {
         Assert.NotNull(As(sofia).Access.Current);
         Assert.NotNull(AreaOps.AddZone(As(sofia), geneva.Id, "Hall").Error);   // utilisatrice : refusé
-        var (zone, err) = AreaOps.AddZone(As(marco), lausanne.Id, "Accueil");
+        var (zone, err) = AreaOps.AddZone(As(claire), lausanne.Id, "Accueil");
         Assert.Null(err);
-        Assert.NotNull(AreaOps.AddZone(As(marco), lausanne.Id, "accueil").Error);   // doublon
+        Assert.NotNull(AreaOps.AddZone(As(claire), lausanne.Id, "accueil").Error);   // doublon
         var screen = db.Screens.First(s => s.Name == "Accueil Lausanne");
         screen.ZoneId = zone!.Id;
-        Assert.Null(AreaOps.DeleteZone(As(marco), lausanne.Id, zone.Id));
+        Assert.Null(AreaOps.DeleteZone(As(claire), lausanne.Id, zone.Id));
         Assert.Equal(lausanne.Zones.Single(z => z.IsDefault).Id, screen.ZoneId);   // retour dans la zone par défaut
         Assert.Equal(lausanne.Id, screen.AreaId);
     }
@@ -188,7 +189,7 @@ public class AreasTests
         db.Screens.RemoveAll(s => s.AreaId == geneva.Id);
         Assert.NotNull(AreaOps.Delete(As(marco), geneva.Id));    // membre : refusé
         Assert.Null(AreaOps.Delete(As(claire), geneva.Id));
-        Assert.Empty(sofia.AreaRoles);                           // ses membres perdent cet accès
+        Assert.DoesNotContain(geneva.Id, client.Levels.SelectMany(l => l.AreaIds));   // les niveaux perdent cette aire
         db.Screens.RemoveAll(_ => true);
         Assert.NotNull(AreaOps.Delete(As(claire), lausanne.Id)); // la dernière aire reste
     }

@@ -91,9 +91,12 @@ builder.Services.AddAuthorization(o =>
     o.AddPolicy("ClientSpace", p => p.RequireClaim(Claims.Client));
     // Réglages, intégrations, widgets, aires : administrateurs de l'organisation (et équipe Linkii / revendeur qui entrent dans l'espace), pas les membres
     o.AddPolicy("ClientAdmin", p => p.RequireAssertion(c => c.User.GetGuid(Claims.Client) != null && !c.User.IsInRole(Roles.ClientMember)));
+    // Pages d'un membre : ouvertes par son niveau de droits (relu à chaque navigation) ; les administrateurs y accèdent toujours
+    foreach (var page in LevelPages.All) o.AddPolicy("Page:" + page, p => p.RequireClaim(Claims.Client).AddRequirements(new PageRequirement(page)));
     o.AddPolicy("PlatformAdmin", p => p.RequireAssertion(c => c.User.IsInRole(Roles.PlatformAdmin) && NoClient(c.User)));
     o.AddPolicy("ResellerSpace", p => p.RequireAssertion(c => c.User.IsInRole(Roles.ResellerAdmin) && NoClient(c.User)));
 });
+builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, PageHandler>();
 builder.Services.AddCascadingAuthenticationState();
 
 // Derrière un reverse proxy (NPM) : reprend le schéma https et l'IP réelle du client (X-Forwarded-Proto / -For).

@@ -1,15 +1,26 @@
+@using System.Security.Claims
 @inject NavigationManager Nav
 @inject AuthenticationStateProvider Auth
+@inject JsonStore Store
+@inject AppCatalog Catalog
 
-@* Page réservée à un autre rôle : on renvoie l'utilisateur vers son accueil (ou vers la connexion). *@
-<div style="padding:40px"><h2>Accès refusé</h2><p>Cette page n'est pas disponible pour votre compte.</p></div>
+@* Page non ouverte à ce compte : un membre est renvoyé vers la première page de son niveau de droits, les autres vers leur accueil (ou la connexion). *@
+<div style="padding:40px"><h2>Accès refusé</h2><p>@(noPage ? "Votre niveau de droits ne donne accès à aucune page. Demandez à un administrateur de votre organisation de le compléter." : "Cette page n'est pas disponible pour votre compte.")</p></div>
 
 @code {
+    private bool noPage;
+
     protected override async Task OnInitializedAsync()
     {
         var user = (await Auth.GetAuthenticationStateAsync()).User;
         var path = "/" + Nav.ToBaseRelativePath(Nav.Uri).Split('?')[0].TrimEnd('/');
         var target = user.Identity?.IsAuthenticated == true ? Claims.Home(user) : "/login";
+        if (user.IsInRole(Roles.ClientMember) && user.GetGuid(Claims.Client) is { } cid)
+        {
+            var first = Store.Read(db => LevelPages.All.FirstOrDefault(p => AreaAccess.For(db, cid, user.GetGuid(ClaimTypes.NameIdentifier)).CanSee(p, Catalog)));
+            if (first == null) { noPage = true; return; }
+            target = LevelPages.Path(first);
+        }
         if (target != path && !(target == "/" && path == "/")) Nav.NavigateTo(target, forceLoad: true);
     }
 }

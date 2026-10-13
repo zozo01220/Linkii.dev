@@ -1,0 +1,33 @@
+@inherits ErrorBoundaryBase
+@implements IDisposable
+@inject NavigationManager Nav
+
+@* Entoure la page : une écriture refusée (niveau de droits en lecture seule) ou une erreur inattendue s'affiche ici, sans fermer la session. *@
+@if (CurrentException is null)
+{
+    @ChildContent
+}
+else
+{
+    <div class="card empty">
+        <div class="big">@(CurrentException is ReadOnlyLevelException ? "Lecture seule" : "Une erreur est survenue")</div>
+        <p>@(CurrentException is ReadOnlyLevelException ? CurrentException.Message : "L'action n'a pas abouti. Revenez à la page et réessayez.")</p>
+        <button type="button" class="btn" @onclick="Recover">Revenir à la page</button>
+    </div>
+}
+
+@code {
+    [Inject] private ILogger<RightsBoundary> Log { get; set; } = default!;
+
+    protected override void OnInitialized() => Nav.LocationChanged += OnNavigated;
+
+    protected override Task OnErrorAsync(Exception exception)
+    {
+        if (exception is not ReadOnlyLevelException) Log.LogError(exception, "Erreur dans la page {Page}", Nav.Uri);
+        return Task.CompletedTask;
+    }
+
+    private void OnNavigated(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) => InvokeAsync(Recover);
+
+    public void Dispose() => Nav.LocationChanged -= OnNavigated;
+}

@@ -1,5 +1,5 @@
 @page "/playlists/{Id:guid}"
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:playlists")]
 @inject TenantStore Store
 @inject AppService Svc
 @inject CanvaService Canva
@@ -31,12 +31,46 @@
         @if (Current is { } sp)
         {
             <p class="sub">@sp.Draft.Count contenu@(sp.Draft.Count > 1 ? "s" : "")@(LoopSeconds(sp) is > 0 and var total ? $" · boucle de {Helpers.FormatDuration(total)}" : "")</p>
+            @if (outside > 0) { <p class="sub" role="note"><Ico Name="monitor" Size="14" /> Cette liste est aussi diffusée sur @outside écran@(outside > 1 ? "s" : "") hors de votre périmètre : vos modifications les concerneront à leur prochaine publication.</p> }
         }
     </div>
     @if (Current is { } hp)
     {
-        @if (hp.Draft.Count > 0) { <button type="button" class="btn ghost" title="Jouer la liste dans son état actuel, sur un écran ou un mur simulé" @onclick="() => trying = true"><Ico Name="play" Size="16" /> Essayer sur…</button> }
-        <button type="button" class="btn" @onclick="() => OpenPicker(null)"><Ico Name="plus" Size="16" /> Ajouter un contenu</button>
+        @* Menu des intégrations activées : un clic sur l'une l'ajoute à la liste de lecture, à vide ; le contenu se complète ensuite (média, lien, fichier…). *@
+        <div class="pe-addwrap">
+            <button type="button" class="btn" aria-haspopup="menu" aria-expanded="@(menuOpen ? "true" : "false")" @onclick="ToggleMenu"><Ico Name="plus" Size="16" /> Ajouter un contenu <Ico Name="chevron" Size="14" /></button>
+            @if (menuOpen)
+            {
+                <div class="kebab-backdrop" @onclick="() => menuOpen = false"></div>
+                <div class="pe-addmenu" role="menu" aria-label="Intégrations">
+                    @if (enabledApps.Count == 0)
+                    {
+                        <p class="hint" style="margin:0">Aucune intégration activée. <a href="/integrations">Choisissez-les dans la page Intégrations</a>.</p>
+                    }
+                    else
+                    {
+                        <div class="search-box">
+                            <Ico Name="search" Size="16" />
+                            <input placeholder="Rechercher une intégration" aria-label="Rechercher une intégration" @bind="appSearch" @bind:event="oninput" @ref="pickSearch" />
+                        </div>
+                        <div class="pe-addlist">
+                            @foreach (var g in PickerApps.GroupBy(a => string.IsNullOrEmpty(a.Category) ? "Autres" : a.Category))
+                            {
+                                <h5>@g.Key</h5>
+                                @foreach (var a in g)
+                                {
+                                    var app = a;
+                                    <button type="button" role="menuitem" @onclick="() => AddEmpty(app)" title="@app.Summary">
+                                        <AppIcon Id="@app.Id" Small="true" /> <span>@app.Name</span>
+                                    </button>
+                                }
+                            }
+                            @if (!PickerApps.Any()) { <p class="hint" style="margin:8px">Aucune intégration ne correspond.</p> }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
     }
 </div>
 
@@ -85,7 +119,8 @@
                             var scans = scanCounts.TryGetValue(it.Id, out var sc) ? sc.Scans : 0;
                             <button type="button" class="item-qr" title="Scans du QR code ces 90 derniers jours : ouvrir le réglage" @onclick='() => OpenSettings(pl, it, m, "qr")'><Ico Name="qr" Size="13" /> <b>@scans</b> scan@(scans > 1 ? "s" : "")</button>
                         }
-                        <span class="mono" title="Temps alloué à ce contenu">@Duration(it, m)</span>
+                        @if (Svc.IsIncomplete(m)) { <span class="badge mise-a-jour" title="Ce contenu n'a pas encore de source : il n'est pas publié. Cliquez dessus pour le configurer.">À configurer</span> }
+                        else { <span class="mono" title="Temps alloué à ce contenu">@Duration(it, m)</span> }
                     </div>
                     <div class="kebab">
                         <button type="button" class="kebab-btn" aria-label="Actions pour @(m?.Name ?? "ce contenu")" aria-haspopup="menu" aria-expanded="@(menuFor == it ? "true" : "false")"
@@ -329,7 +364,32 @@
 
     private void OpenPicker(int? at) { insertAt = at; appSearch = ""; appCat = ""; picking = true; focusPicker = true; }
 
-    private void PickApp(AppManifest app)
+    private bool menuOpen;
+
+    private void ToggleMenu() { insertAt = null; appSearch = ""; appCat = ""; menuOpen = !menuOpen; focusPicker = menuOpen; }
+
+    /// <summary>Ajoute à la liste de lecture un contenu de l'app, à vide (à l'endroit choisi, par défaut à la fin) ; l'utilisateur le complète ensuite.</summary>
+    private void AddEmpty(AppManifest app)
+    {
+        menuOpen = false; picking = false;
+        if (Current is not { } pl) return;
+        if (Svc.CreateEmpty(app.Id) is not { } item) { Toast.Error("Activez d'abord cette intégration dans la page Intégrations."); return; }
+        var dur = Store.Read(d => d.Tenant.DefaultDurationSec);
+        var placement = PlacementsFor(item).Select(o => o.Id).DefaultIfEmpty("full").Contains("full") ? "full" : PlacementsFor(item).First().Id;
+        var at = insertAt is { } i && i >= 0 && i < pl.Draft.Count ? i : pl.Draft.Count;
+        Store.Write(d =>
+        {
+            pl.Draft.Insert(at, new PlaylistItem { MediaId = item.Id, DurationSec = dur, Placement = placement });
+            pl.Touch();
+        });
+        insertAt = null;
+        Toast.Ok($"« {app.Name} » ajouté à la liste : cliquez dessus pour choisir son contenu.");
+        Reload();
+    }
+
+    private void PickApp(AppManifest app) => AddEmpty(app);
+
+    private void PickAppWithForm(AppManifest app)
     {
         picking = false; newApp = app; newName = null;
         // réglages du QR code pour le nouveau contenu : mêmes champs que la fenêtre d'un contenu, réinitialisés
@@ -354,7 +414,8 @@
     private int LoopSeconds(Playlist p) => p.Draft.Where(i => i.Placement == "full").Sum(i =>
     {
         var m = media.FirstOrDefault(x => x.Id == i.MediaId);
-        return ContentDuration(m) && i.DurationMode != "fixed" ? Helpers.VideoSeconds(m) ?? i.DurationSec : i.DurationSec;
+        if (Svc.IsIncomplete(m)) return 0;   // ajouté à vide : pas encore diffusé
+        return Helpers.ItemSeconds(i, m, Svc.Find(m?.AppId), media);
     });
 
     private IEnumerable<Option> PlacementsFor(MediaItem? m) =>
@@ -369,12 +430,15 @@
 
     private async Task Refresh() { Reload(); await InvokeAsync(StateHasChanged); }
 
+    private int outside;   // écrans hors du périmètre du membre qui jouent cette liste
+
     private void Reload()
     {
         playlists = Store.Read(d => d.Playlists.ToList());
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());   // hors vidéos en conversion / en échec
         enabledApps = Svc.Installed().Select(i => Svc.Find(i.AppId)).OfType<AppManifest>().Where(a => !a.ScreenWidget).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
         growth = Store.Read(d => d.Tenant.IsGrowth);
+        outside = Store.Read(d => d.Access.Sees is { } sees ? d.Root.Screens.Count(s => s.ClientId == d.ClientId && s.Token != null && !sees(s) && s.ZonePlaylists().Contains(Id)) : 0);
         scanCounts = growth ? Scans.Counts(Store.ClientId, DateTime.UtcNow.AddDays(-ScanLog.RetentionDays)) : new();
     }
 
@@ -559,7 +623,9 @@
     {
         if (m == null) return "";
         if (it.Placement != "full") return "Permanent";
-        if (ContentDuration(m) && it.DurationMode != "fixed") return "Jusqu'à la fin";
+        if (ContentDuration(m) && it.DurationMode != "fixed")
+            return Helpers.ContentSeconds(Svc.Find(m.AppId), m, media) is { } c ? Helpers.FormatDuration(c.Seconds)
+                 : Helpers.VideoSeconds(m) is { } v ? Helpers.FormatDuration(v) : "Jusqu'à la fin";
         return Helpers.FormatDuration(it.DurationSec);
     }
 
@@ -574,7 +640,7 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (focusRename && renaming) { focusRename = false; await renameInput.FocusAsync(); }
-        if (focusPicker && picking && enabledApps.Count > 0) { focusPicker = false; await pickSearch.FocusAsync(); }
+        if (focusPicker && (picking || menuOpen) && enabledApps.Count > 0) { focusPicker = false; await pickSearch.FocusAsync(); }
         // La liste n'existe qu'une fois la liste de lecture chargée ; le script ignore un second appel sur le même élément.
         if (sortList.Context != null && !sortReady)
         {

@@ -277,3 +277,49 @@ public static class Mp4Probe
         return null;
     }
 }
+
+/// <summary>Durée d'un MP4 (boîte « mvhd » de « moov »), lue sans outil externe.</summary>
+public static class Mp4Duration
+{
+    public static int? Seconds(string path)
+    {
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            return Find(fs, 0, fs.Length);
+        }
+        catch { return null; }
+    }
+
+    private static int? Find(FileStream fs, long start, long end)
+    {
+        var pos = start;
+        var h = new byte[16];
+        while (pos + 8 <= end)
+        {
+            fs.Position = pos;
+            var got = fs.Read(h, 0, 16);
+            if (got < 8) return null;
+            long size = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(h);
+            var type = Encoding.Latin1.GetString(h, 4, 4);
+            long hl = 8;
+            if (size == 1 && got >= 16) { size = (long)System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(h.AsSpan(8)); hl = 16; }
+            else if (size == 0) size = end - pos;
+            if (size < hl) return null;
+
+            if (type == "moov") { if (Find(fs, pos + hl, pos + size) is { } r) return r; }
+            else if (type == "mvhd")
+            {
+                var b = new byte[32];
+                fs.Position = pos + hl;
+                fs.Read(b, 0, b.Length);
+                var wide = b[0] == 1;
+                var scale = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(b.AsSpan(wide ? 20 : 12));
+                var dur = wide ? (long)System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(b.AsSpan(24)) : System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(b.AsSpan(16));
+                return scale > 0 && dur > 0 ? (int)Math.Max(1, Math.Round(dur / (double)scale)) : null;
+            }
+            pos += size;
+        }
+        return null;
+    }
+}

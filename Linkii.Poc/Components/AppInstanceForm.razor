@@ -39,7 +39,7 @@ else
             </div>
         }
 
-        @if (sources.Count > 0)
+        @if (sources.Count > 0 && !hasPreview)
         {
             <div class="ci-src">
                 <div class="ci-src-row">
@@ -62,7 +62,36 @@ else
             {
                 <section class="ci-prev" aria-label="Aperçu" hidden="@(OtherTab && OtherPreview != null)">
                     <h4 class="ci-t">Aperçu</h4>
-                    <ContentPreview @ref="previewRef" Manifest="manifest" Values="values" Instance="instance" Qr="PreviewQr" OnNotice="OnPreviewNotice" />
+                    @* La source (lien, fichier, dossier, calendrier…) se choisit dans l'aperçu : « + » tant que rien n'est choisi, puis bouton « Changer » sur l'aperçu. *@
+                    @if (sourceOpen && sources.Count > 0)
+                    {
+                        <div class="ci-empty open">
+                            <div class="ci-srccard">
+                                <div class="ci-src-row">
+                                    <AppForm Manifest="manifest" Values="values" StoredSecrets="storedSecrets" InstanceId="instance?.Id" Zone="source" OnChange="SourceChanged" AutoOpen="autoOpen" />
+                                    @if (NeedsSearch(sources[0]))
+                                    {
+                                        <button type="button" class="btn" @onclick="Search">Rechercher</button>
+                                    }
+                                </div>
+                                <button type="button" class="linklike ci-srcclose" @onclick="CloseSource">@(SourceReady ? "Terminé" : "Annuler")</button>
+                            </div>
+                        </div>
+                    }
+                    else if (!SourceReady && sources.Count > 0)
+                    {
+                        <div class="ci-empty">
+                            <div class="ci-add">
+                                <button type="button" class="ci-plus" aria-label="@AddTitle(sources[0])" @onclick="OpenSourceFromEmpty">+</button>
+                                <b>@AddTitle(sources[0])</b>
+                                <span>@AddHint(sources[0])</span>
+                            </div>
+                        </div>
+                    }
+                    <div class="ci-prevbody" hidden="@(sources.Count > 0 && (sourceOpen || !SourceReady))">
+                        @if (sources.Count > 0 && SourceReady) { <button type="button" class="ci-chg" @onclick="OpenSource"><Ico Name="edit" Size="14" /> @ChangeLabel(sources[0])</button> }
+                        <ContentPreview @ref="previewRef" Manifest="manifest" Values="values" Instance="instance" Qr="PreviewQr" OnNotice="OnPreviewNotice" />
+                    </div>
                 </section>
             }
             <section class="ci-conf" aria-label="Configuration">
@@ -193,9 +222,70 @@ else
         if (previewRef != null && manifest!.Provider != null && manifest.InZone("source").FirstOrDefault()?.Type is "calendar" or "mailbox" or "facebookpage"
             && !string.IsNullOrEmpty(values.GetValueOrDefault(manifest.InZone("source").First().Key)))
             await previewRef.Refresh();
+        // première source choisie dans la carte ouverte par le « + » : l'aperçu prend la place (un lien attend « Rechercher »)
+        if (sourceOpen && openedFromEmpty && manifest!.InZone("source").FirstOrDefault() is { } src && !NeedsSearch(src) && SourceFilled) CloseSource();
     }
 
-    private Task Search() { errors = new(); return previewRef?.Refresh() ?? Task.CompletedTask; }
+    private async Task Search()
+    {
+        errors = new();
+        if (previewRef == null) return;
+        await previewRef.Refresh();
+        if (previewRef.Succeeded) CloseSource();
+    }
+
+    // ---------- La source dans l'aperçu ----------
+    private bool sourceOpen, openedFromEmpty, autoOpen;
+
+    private bool SourceFilled => manifest!.InZone("source").FirstOrDefault() is { } s && !string.IsNullOrEmpty(values.GetValueOrDefault(s.Key));
+
+    /// <summary>Source prête : l'aperçu peut s'afficher. Un lien (YouTube, flux, page web) l'est une fois recherché, ou déjà enregistré.</summary>
+    private bool SourceReady => SourceFilled && (!NeedsSearch(manifest!.InZone("source").First()) || instance != null || previewRef?.Succeeded == true);
+
+    /// <summary>Un lien ou une adresse : il faut cliquer « Rechercher » (les listes de choix et les fichiers mettent l'aperçu à jour d'emblée).</summary>
+    private bool NeedsSearch(AppField src) => manifest!.Provider != null && src.Type is not ("calendar" or "mailbox" or "facebookpage" or "drive" or "media" or "medias" or "gfile" or "pdf" or "canva");
+
+    private void OpenSourceFromEmpty() { openedFromEmpty = true; autoOpen = true; sourceOpen = true; }
+    private void OpenSource() { openedFromEmpty = false; autoOpen = false; sourceOpen = true; }
+    private void CloseSource() { sourceOpen = false; openedFromEmpty = false; autoOpen = false; }
+
+    private static string AddTitle(AppField s) => s.Type switch
+    {
+        "media" => s.Accept == "video" ? "Choisir une vidéo" : "Choisir une image",
+        "medias" => s.Accept == "video" ? "Ajouter des vidéos" : "Ajouter des images",
+        "gfile" => s.Accept switch { "document" => "Choisir un document", "powerpoint" => "Choisir une présentation PowerPoint", _ => "Choisir une présentation" },
+        "pdf" => "Ajouter un fichier PDF",
+        "canva" => "Choisir un design Canva",
+        "drive" => "Choisir un dossier",
+        "calendar" => "Choisir un calendrier",
+        "mailbox" => "Choisir une salle",
+        "facebookpage" => "Choisir une Page Facebook",
+        _ => "Ajouter le lien"
+    };
+
+    private static string AddHint(AppField s) => s.Type switch
+    {
+        "media" or "medias" => "Depuis la médiathèque, ou en important un fichier.",
+        "gfile" => "Depuis votre Drive : le fichier est converti en images.",
+        "pdf" => "Chaque page est convertie en image.",
+        "canva" => "Chaque page du design devient une image.",
+        "drive" => "Les fichiers du dossier sont diffusés.",
+        _ => s.Help ?? s.Label
+    };
+
+    private static string ChangeLabel(AppField s) => s.Type switch
+    {
+        "media" => "Remplacer",
+        "medias" => "Modifier la sélection",
+        "gfile" => "Changer de fichier",
+        "pdf" => "Remplacer le PDF",
+        "canva" => "Changer de design",
+        "drive" => "Changer de dossier",
+        "calendar" => "Changer de calendrier",
+        "mailbox" => "Changer de salle",
+        "facebookpage" => "Changer de Page",
+        _ => "Modifier le lien"
+    };
 
     /// <summary>Réglages de l'appelant, affichés sous la configuration (colonne de droite).</summary>
     [Parameter] public RenderFragment? Extra { get; set; }

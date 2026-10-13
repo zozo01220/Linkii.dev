@@ -113,3 +113,19 @@ public static class MediaProbe
         return null;
     }
 }
+
+/// <summary>Durée des vidéos de la médiathèque (MP4 : toutes y sont converties), lue une fois dans le fichier puis gardée en mémoire.</summary>
+public static class VideoLength
+{
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> Cache = new();
+
+    public static int? Seconds(MediaItem f)
+    {
+        if (Helpers.VideoSeconds(f) is { } known) return known;
+        if (f.Type != "video" || f.FileName is not { } name || !name.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase)) return null;
+        if (Cache.TryGetValue(name, out var s)) return s;
+        if (Mp4Duration.Seconds(Path.Combine(AppPaths.MediaDir, name)) is not { } d) return null;
+        Cache[name] = d;
+        return d;
+    }
+}

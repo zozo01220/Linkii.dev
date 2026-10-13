@@ -196,19 +196,19 @@ public static class PlanOps
 {
     private static string? Allowed(ClientDb d, Guid areaId) =>
         d.Areas.FirstOrDefault(a => a.Id == areaId) == null ? "Aire introuvable."
-        : d.Access.IsOrgAdmin || d.Access.Roles.ContainsKey(areaId) ? null : "Vous n'avez pas accès à cette aire.";
+        : d.Access.HasArea(areaId) ? null : "Vous n'avez pas accès à cette aire.";
 
     private static List<Slot>? ListOf(ClientDb d, Guid areaId, Guid targetId, bool screen, out string? error)
     {
         error = null;
         if (screen)
         {
-            if (d.Root.Screens.FirstOrDefault(s => s.Id == targetId && s.ClientId == d.ClientId && s.AreaId == areaId) is not { } sc) { error = "Écran introuvable."; return null; }
+            if (d.Root.Screens.FirstOrDefault(s => s.Id == targetId && s.ClientId == d.ClientId && s.AreaId == areaId && (d.Access.Sees?.Invoke(s) ?? true)) is not { } sc) { error = "Écran introuvable."; return null; }
             if (!sc.OwnPlanning) { error = "Cet écran suit le planning de sa zone."; return null; }
             return sc.Slots;
         }
         var z = d.Areas.FirstOrDefault(a => a.Id == areaId)?.Zones.FirstOrDefault(x => x.Id == targetId);
-        if (z == null) { error = "Zone introuvable."; return null; }
+        if (z == null || !d.Access.SeesZone(z.Id)) { error = "Zone introuvable."; return null; }
         return z.Slots;
     }
 

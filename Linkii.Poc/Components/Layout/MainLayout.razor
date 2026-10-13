@@ -3,6 +3,7 @@
 @inject TenantContext Ctx
 @inject IServiceProvider Services
 @inject NavigationManager Nav
+@inject AppCatalog Catalog
 
 <HeadContent>
     <style>:root { --brand: @brand; }</style>
@@ -30,7 +31,7 @@
                         {
                             var ar = a;
                             <button type="button" role="menuitem" class="@(ar.Id == currentArea?.Id ? "on" : "")" @onclick="() => SwitchArea(ar.Id)">
-                                <Ico Name="map-pin" Size="15" /><span class="grow">@ar.Name</span><small>@(orgAdmin ? "" : AreaRoles.Label(roles.GetValueOrDefault(ar.Id)))</small>
+                                <Ico Name="map-pin" Size="15" /><span class="grow">@ar.Name</span>
                             </button>
                         }
                         @if (orgAdmin) { <a href="areas" role="menuitem" class="area-manage" @onclick="() => areaMenu = false"><Ico Name="gear" Size="15" /> Gérer les aires</a> }
@@ -40,19 +41,32 @@
         }
         @if (Ctx.ClientId != null)
         {
-            <NavLink class="nav" href="" Match="NavLinkMatch.All">
-                <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></svg> Écrans
-            </NavLink>
-            <NavLink class="nav" href="playlists">
-                <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg> Listes de lecture
-            </NavLink>
-            <NavLink class="nav" href="planning">
-                <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></svg> Planning
-            </NavLink>
-            <div class="nav-sep" role="separator"></div>
-            <NavLink class="nav" href="media">
-                <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg> Médiathèque
-            </NavLink>
+            @* Pages ouvertes par le niveau de droits du membre (un administrateur les a toutes). *@
+            @if (Sees(LevelPages.Screens))
+            {
+                <NavLink class="nav" href="" Match="NavLinkMatch.All">
+                    <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></svg> Écrans
+                </NavLink>
+            }
+            @if (Sees(LevelPages.Playlists))
+            {
+                <NavLink class="nav" href="playlists">
+                    <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg> Listes de lecture
+                </NavLink>
+            }
+            @if (Sees(LevelPages.Planning))
+            {
+                <NavLink class="nav" href="planning">
+                    <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></svg> Planning
+                </NavLink>
+            }
+            @if (Sees(LevelPages.Media))
+            {
+                <div class="nav-sep" role="separator"></div>
+                <NavLink class="nav" href="media">
+                    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg> Médiathèque
+                </NavLink>
+            }
         }
         else if (Ctx.IsPlatformAdmin)
         {
@@ -71,9 +85,10 @@
         }
 
         <div class="spacer"></div>
-        @if (Ctx.ClientId != null && multi && (orgAdmin || managesAny))
+        @if (Ctx.ClientId != null && orgAdmin)
         {
-            @if (orgAdmin)
+            @* Administration : Aires de gestion (dès la 2e aire), Membres et leurs niveaux de droits, puis un trait avant Intégrations. *@
+            @if (multi)
             {
                 <NavLink class="nav" href="areas">
                     <Ico Name="map-pin" Size="18" /> Aires de gestion
@@ -84,23 +99,31 @@
             </NavLink>
             <div class="nav-sep" role="separator"></div>
         }
-        @if (Ctx.ClientId != null && orgAdmin)
+        @if (Ctx.ClientId != null && (Sees(LevelPages.Integrations) || Sees(LevelPages.Widgets)))
         {
-            @* Sources de contenus et éléments d'écran : en bas, juste au-dessus du compte (administrateurs de l'organisation). *@
-            <NavLink class="nav" href="integrations">
-                <svg viewBox="0 0 24 24"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0V8zM12 17v5" /></svg> Intégrations
-            </NavLink>
-            <NavLink class="nav" href="widgets">
-                <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" /></svg> Widgets
-            </NavLink>
+            @* Sources de contenus et éléments d'écran : en bas, juste au-dessus du compte (selon les apps du niveau de droits). *@
+            @if (Sees(LevelPages.Integrations))
+            {
+                <NavLink class="nav" href="integrations">
+                    <svg viewBox="0 0 24 24"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0V8zM12 17v5" /></svg> Intégrations
+                </NavLink>
+            }
+            @if (Sees(LevelPages.Widgets))
+            {
+                <NavLink class="nav" href="widgets">
+                    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" /></svg> Widgets
+                </NavLink>
+            }
         }
         @if (Ctx.ClientId != null)
         {
             @* Statistiques (tous les membres) puis Réglages (administrateurs), sous un trait, juste au-dessus du compte. *@
             <div class="nav-sep" role="separator"></div>
+            @* Page Statistiques masquée (à refaire de zéro) : @page retiré de Stats.razor, entrée de menu désactivée.
             <NavLink class="nav" href="stats">
                 <svg viewBox="0 0 24 24"><path d="M3 3v18h18" /><path d="M7 15l4-4 3 3 6-6" /></svg> Statistiques
             </NavLink>
+            *@
             @if (orgAdmin)
             {
                 <NavLink class="nav" href="settings">
@@ -160,7 +183,10 @@
             <button type="button" class="nav-toggle" aria-label="Menu" aria-expanded="@(navOpen ? "true" : "false")" @onclick="() => { navOpen = !navOpen; open = false; }"><Ico Name="menu" Size="22" /></button>
             <div class="org">@orgName</div>
         </header>
-        <main class="content">@Body</main>
+        @if (readOnly) { <div class="trial-bar"><Ico Name="lock" Size="16" /><span>Votre niveau de droits est en <b>lecture seule</b> : vous consultez, sans rien modifier ni publier.</span></div> }
+        <main class="content @(readOnly ? "ro" : "")">
+            <RightsBoundary @ref="boundary">@Body</RightsBoundary>
+        </main>
         @* Fenêtres empilées au-dessus d'une autre (sélecteur de médias) : rendues ici, hors de la fenêtre parente (son transform décalerait position: fixed). *@
         <SectionOutlet SectionName="overlay" />
         <Toasts />
@@ -168,16 +194,20 @@
 </div>
 
 @code {
-    private bool open, navOpen, areaMenu, multi, orgAdmin = true, managesAny;
+    private bool open, navOpen, areaMenu, multi, orgAdmin = true, readOnly;
     private List<Area> areas = new();
     private Area? currentArea;
-    private Dictionary<Guid, string> roles = new();
+    private HashSet<string> pages = new(LevelPages.All);
+    private RightsBoundary? boundary;
+
+    private bool Sees(string page) => orgAdmin || pages.Contains(page);
 
     // Aires visibles dès qu'il y en a deux, ou dès qu'une personne a été invitée : une organisation seule ne voit rien de nouveau.
     private void LoadAreas()
     {
         var store = Services.GetRequiredService<TenantStore>();
-        (areas, currentArea, roles, orgAdmin, managesAny, multi) = store.Read(d => (d.Access.Areas, d.Access.Current, d.Access.Roles, d.Access.IsOrgAdmin, d.Access.ManagesAnyArea,
+        (areas, currentArea, orgAdmin, readOnly, pages, multi) = store.Read(d => (d.Access.Areas, d.Access.Current, d.Access.IsOrgAdmin, d.Access.ReadOnly,
+            LevelPages.All.Where(p => d.Access.CanSee(p, Catalog)).ToHashSet(),
             d.Access.OrgAreaCount > 1 || d.Users.Any(u => u.Role == Roles.ClientMember)));
     }
 
