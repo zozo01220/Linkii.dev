@@ -54,10 +54,12 @@ public class AreaAccess
     public static readonly AreaAccess System = new();
 
     public bool ReadOnly => Level?.ReadOnly == true;
-    /// <summary>Aires, zones, membres et niveaux de droits : administrateurs de l'organisation seuls.</summary>
-    public bool CanManage(Guid areaId) => IsOrgAdmin;
+    /// <summary>Gérer les zones et les murs : administrateurs de l'organisation, et membres dont le niveau le permet (lecture seule exclue).</summary>
+    public bool CanManageZones => IsOrgAdmin || Level is { ManageZones: true, ReadOnly: false };
+    /// <summary>Zones et murs d'une aire : CanManageZones, dans les aires accessibles. Aires, membres et niveaux restent aux administrateurs.</summary>
+    public bool CanManage(Guid areaId) => CanManageZones && HasArea(areaId);
     /// <summary>Zones de l'aire ouverte.</summary>
-    public bool ManagesCurrent => Current != null && IsOrgAdmin;
+    public bool ManagesCurrent => Current != null && CanManage(Current.Id);
     public bool SeesZone(Guid zoneId) => IsOrgAdmin || SeesZoneFn == null || SeesZoneFn(zoneId);
     public bool HasArea(Guid areaId) => IsOrgAdmin || Areas.Any(a => a.Id == areaId);
 
@@ -69,6 +71,7 @@ public class AreaAccess
     {
         LevelPages.Integrations => catalog.All.Any(a => !a.ScreenWidget && Level.CanUse(a)),
         LevelPages.Widgets => catalog.All.Any(a => a.ScreenWidget && Level.CanUse(a)),
+        LevelPages.Zones => CanManageZones,
         _ => Level.Pages.Contains(page)
     };
 

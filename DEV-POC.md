@@ -923,6 +923,33 @@ Demande : simplifier au maximum l'écran pour les personnes qui diffusent seulem
 - Changer de mode recharge la page entière. C'est cohérent avec le changement d'aire, mais coûte un instant.
 - Les pages d'intégration accessibles par un lien (par exemple « Comptes connectés » depuis *Utilisation*) passent par la page réservée en simple, sans lien direct vers le mode expert autre que son bouton.
 
+## 48. Zones : menu Zones, page Zones et droit « Gérer les zones » (octobre 2026) : codé
+
+Demande : sortir la gestion des zones de la fenêtre du bouton « Ajouter » des Écrans, et la rendre accessible à qui a le droit. Maquettes validées : `maquettes/zones-page-menu-v2.html` (menu, page, fenêtre de création) et `maquettes/ecrans-entete-ajouter.html` (en-tête des Écrans).
+
+### Décisions
+1. **Menu** : entrée **Zones** en mode expert, après « Aires de gestion » et avant « Membres ». Visible à qui a le droit « Gérer les zones » ; « Aires de gestion » et « Membres » restent aux administrateurs.
+2. **Droit** : case « Gérer les zones et les murs (dans son périmètre) » dans le niveau de droits (§46). Il porte sur les aires accessibles du membre. Un niveau en lecture seule ne l'exerce pas.
+3. **Page `/zones`** : tableau de toutes les aires accessibles (zone, aire de gestion, écrans, type, synchronisation, actions), filtre par aire (« Toutes les aires » par défaut). Pas de liste de lecture.
+4. **Fenêtre « Nouvelle zone »** : aire de gestion (préremplie avec le filtre), nom, synchronisation. Pas de choix d'écrans.
+5. **Écrans** : le bouton « Ajouter ▾ » devient un simple **Ajouter** qui ouvre « Connecter un écran ». La fenêtre de zones et son menu disparaissent de la page. « Gérer les zones… » (filtre Zone, actions de zone) mène à la page Zones.
+6. **Mode simple** : l'adresse `zones` affiche « Disponible en mode expert ».
+
+### Réalisation
+- **Droit** (`Rights.cs`) : `AccessLevel.ManageZones` (copié avec le niveau) ; `LevelPages.Zones` (page `zones`, hors cases proposées, donc dans la politique « Page:zones ») ; libellé « Gérer les zones » dans le résumé du niveau.
+- **Accès** (`Tenancy.cs`) : `AreaAccess.CanManageZones` (administrateur, ou niveau avec le droit hors lecture seule) ; `CanManage(aire)` = `CanManageZones` et aire accessible, ce qui couvre toutes les opérations de zone et de mur de `AreaOps` ; `ManagesCurrent` suit la même règle ; `CanSee("zones")` = `CanManageZones`.
+- **Formulaire de niveau** (`Members.razor`) : la case dans « Pages visibles ».
+- **Barre latérale** (`MainLayout.razor`) : bloc d'administration visible si administrateur ou page Zones ouverte ; `zones` ajouté à `ExpertPaths`.
+- **Page** (`Components/Pages/Zones.razor`) : reprend la logique de `AreaZones` (renommer, synchroniser, supprimer, ajouter) ; le nombre d'écrans ne compte que ceux du périmètre du membre.
+- **Écrans** (`Screens.razor`) : bouton unique, liens « Gérer les zones… » vers la page, fenêtre `showZones` retirée.
+- **Tests** (`AccessLevelTests.cs`) : droit accordé dans les aires accessibles seulement ; sans droit ou en lecture seule, rien ; administrateur partout.
+
+### Limites connues
+- **Non testé dans le navigateur** : compilation et tests seulement. Les écrans, la fenêtre de création et la bascule de mode restent à vérifier sur données d'essai.
+- **Murs** : listés sans menu d'actions (on les règle dans Écrans). La maquette v2 montrait un menu ; à trancher.
+- **`AreaZones.razor`** reste utilisé par la page Aires de gestion. La page Écrans ne l'utilise plus.
+- **Tests** : 5 échecs dans `AppsTests.cs` (fichier avec des modifications non commitées, hors de ce chantier). Non vérifiés contre la base de départ.
+
 ## Plans et prochaines étapes
 
 - Gestion des droits : essayer avec de vrais membres (niveau en lecture seule page par page, appairage d'un écran par un membre limité à une zone, aperçu et direct) ; voir « Limites connues » du §46.

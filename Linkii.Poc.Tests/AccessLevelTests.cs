@@ -226,6 +226,46 @@ public class AccessLevelTests
         Assert.True(level.AllAreas && level.AllIntegrations && level.AllWidgets);
         Assert.False(level.ReadOnly);
     }
+
+    [Fact]
+    public void Manage_zones_right_lets_a_member_manage_zones_in_reached_areas_only()
+    {
+        Give(alice, l => { l.AllAreas = false; l.AreaIds.Add(magasin.Id); l.ManageZones = true; });
+        var access = As(alice).Access;
+
+        Assert.True(access.CanManageZones);
+        Assert.True(access.CanSee(LevelPages.Zones, catalog));
+        Assert.True(access.CanManage(magasin.Id));
+        Assert.False(access.CanManage(siege.Id));   // aire non accessible
+
+        var (zone, err) = AreaOps.AddZone(As(alice), magasin.Id, "Réserve");
+        Assert.Null(err);
+        Assert.NotNull(zone);
+        Assert.Equal("Cette zone existe déjà.", AreaOps.AddZone(As(alice), magasin.Id, "réserve").Error);
+        Assert.NotNull(AreaOps.AddZone(As(alice), siege.Id, "Bureau").Error);
+    }
+
+    [Fact]
+    public void Without_the_right_or_read_only_a_member_cannot_manage_zones()
+    {
+        Give(alice, l => { l.AllAreas = true; l.ManageZones = false; });
+        Assert.False(As(alice).Access.CanManageZones);
+        Assert.False(As(alice).Access.CanSee(LevelPages.Zones, catalog));
+        Assert.NotNull(AreaOps.AddZone(As(alice), magasin.Id, "Réserve").Error);
+
+        client.Levels.Clear();
+        Give(alice, l => { l.AllAreas = true; l.ManageZones = true; l.ReadOnly = true; });
+        Assert.False(As(alice).Access.CanManageZones);
+        Assert.NotNull(AreaOps.AddZone(As(alice), magasin.Id, "Réserve").Error);
+    }
+
+    [Fact]
+    public void Administrators_manage_zones_everywhere()
+    {
+        Assert.True(As(admin).Access.CanManageZones);
+        Assert.True(As(admin).Access.CanSee(LevelPages.Zones, catalog));
+        Assert.Null(AreaOps.AddZone(As(admin), siege.Id, "Bureau").Error);
+    }
 }
 
 /// <summary>Le niveau en lecture seule refuse tout enregistrement faisant passer par le magasin du client.</summary>

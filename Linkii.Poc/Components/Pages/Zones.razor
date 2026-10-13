@@ -1,0 +1,248 @@
+@page "/zones"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:zones")]
+@inject TenantStore Store
+@inject Notifier Notifier
+@inject Toaster Toast
+
+@* Zones de toutes les aires accessibles (menu Zones, mode expert). Les zones classent les écrans, sans effet sur les droits.
+   Gérées par les administrateurs de l'organisation et les membres dont le niveau a « Gérer les zones ». Un mur se règle dans Écrans. *@
+
+<div class="page-head">
+    <div>
+        <h1>Zones</h1>
+        <p class="sub">@Subtitle</p>
+    </div>
+    @if (canManage && areas.Count > 0)
+    {
+        <div class="row head-actions"><button class="btn" @onclick="OpenNew"><Ico Name="plus" Size="16" /> Nouvelle zone</button></div>
+    }
+</div>
+
+@if (error != null) { <div class="err">@error</div> }
+
+@if (areas.Count == 0)
+{
+    <div class="card empty"><div class="big">Aucune aire de gestion ne vous est confiée</div><p>Demandez à un administrateur de votre organisation de vous donner un rôle dans une aire.</p></div>
+}
+else
+{
+    <div class="row" style="margin-bottom:14px">
+        <div class="kebab dd">
+            <button type="button" class="dd-btn @(filter != null ? "act" : "")" aria-haspopup="menu" aria-expanded="@(filterOpen ? "true" : "false")" @onclick="() => filterOpen = !filterOpen">
+                <span class="k">Aire</span> <b>@FilterName</b> <Ico Name="chevron" Size="14" />
+            </button>
+            @if (filterOpen)
+            {
+                <div class="kebab-backdrop" @onclick="() => filterOpen = false"></div>
+                <div class="kebab-menu dd-menu" role="menu">
+                    <button type="button" role="menuitemradio" aria-checked="@(filter == null ? "true" : "false")" class="@(filter == null ? "sel" : "")" @onclick="() => Pick(null)">Toutes les aires <small class="n">@rows.Count</small></button>
+                    @foreach (var a in areas)
+                    {
+                        var area = a;
+                        <button type="button" role="menuitemradio" aria-checked="@(filter == area.Id ? "true" : "false")" class="@(filter == area.Id ? "sel" : "")" @onclick="() => Pick(area.Id)">@area.Name <small class="n">@rows.Count(r => r.AreaId == area.Id)</small></button>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    <table class="tbl">
+        <thead>
+            <tr><th>Zone</th><th>Aire de gestion</th><th class="num">Écrans</th><th>Type</th><th>Synchronisation</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var r in Visible)
+            {
+                var row = r;
+                <tr>
+                    <td>
+                        @if (row.IsWall || !canManage)
+                        {
+                            <b>@row.Name</b>
+                        }
+                        else
+                        {
+                            <input class="zname" maxlength="60" value="@row.Name" aria-label="Nom de la zone" @onchange="e => Rename(row, e.Value?.ToString() ?? row.Name)" />
+                        }
+                        @if (row.IsDefault) { <small class="muted"> · par défaut</small> }
+                    </td>
+                    <td class="muted">@row.AreaName</td>
+                    <td class="num">@row.Count</td>
+                    <td>
+                        @if (row.IsWall) { <span class="badge sync">Mur @row.Cols × @row.Rows</span> }
+                        else { <span class="badge neutre">Zone libre</span> }
+                    </td>
+                    <td>
+                        @if (row.IsWall) { <span class="ok-t">Toujours active</span> }
+                        else if (row.Sync) { <span class="ok-t">Synchronisée</span> }
+                        else { <span class="muted">Non synchronisée</span> }
+                    </td>
+                    <td class="num">
+                        @if (!row.IsWall && canManage)
+                        {
+                            <div class="kebab">
+                                <button type="button" class="kebab-btn" aria-label="Actions pour la zone @row.Name" aria-haspopup="menu" aria-expanded="@(menuFor == row.Id ? "true" : "false")" @onclick="() => menuFor = menuFor == row.Id ? null : row.Id"><Ico Name="dots-v" Size="18" /></button>
+                                @if (menuFor == row.Id)
+                                {
+                                    <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                                    <div class="kebab-menu" role="menu">
+                                        <button type="button" role="menuitem" @onclick="() => ToggleSync(row)">@(row.Sync ? "Couper la synchronisation" : "Synchroniser les écrans de cette zone")</button>
+                                        @if (!row.IsDefault)
+                                        {
+                                            <button type="button" role="menuitem" class="danger" @onclick="() => Delete(row)"><Ico Name="trash" Size="16" /> Supprimer la zone</button>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <p class="muted" style="margin-top:12px">Un mur se crée et se règle dans Écrans. Ici, il est seulement listé.</p>
+}
+
+@if (newOpen)
+{
+    <div class="modal-backdrop" @onclick="CloseNew"></div>
+    <div class="modal app-modal sm" role="dialog" aria-modal="true" aria-labelledby="nz-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="nz-title">Nouvelle zone</h3></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseNew"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            <label class="lbl" for="nz-area" style="margin-top:0">Aire de gestion</label>
+            <select id="nz-area" class="full" @onchange="e => newArea = Guid.Parse(e.Value!.ToString()!)">
+                @foreach (var a in areas)
+                {
+                    <option value="@a.Id" selected="@(a.Id == newArea)">@a.Name</option>
+                }
+            </select>
+            <label class="lbl" for="nz-name">Nom de la zone</label>
+            <input id="nz-name" class="full" maxlength="60" placeholder="Ex. : Accueil, Bâtiment B, Vitrine" @bind="newName" @bind:event="oninput" />
+            <label class="check" style="margin-top:14px"><input type="checkbox" @bind="newSync" /> Synchroniser les écrans de cette zone</label>
+            <small class="muted" style="display:block">Les écrans qui jouent la même liste de lecture sont alignés sur la même image.</small>
+            @if (newError != null) { <div class="err">@newError</div> }
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn ghost" @onclick="CloseNew">Annuler</button>
+            <button type="button" class="btn" disabled="@(newName.Trim().Length == 0)" @onclick="Create">Créer la zone</button>
+        </div>
+    </div>
+}
+
+@code {
+    private record ZoneRow(Guid AreaId, string AreaName, Guid Id, string Name, bool IsDefault, bool IsWall, bool Sync, int Cols, int Rows, int Count);
+
+    private List<(Guid Id, string Name)> areas = new();
+    private List<ZoneRow> rows = new();
+    private bool canManage;
+    private Guid? filter;
+    private bool filterOpen;
+    private Guid? menuFor;
+    private string? error;
+    private bool newOpen, newSync;
+    private string newName = "";
+    private Guid newArea;
+    private string? newError;
+
+    protected override void OnInitialized() => Load();
+
+    private void Load()
+    {
+        (areas, rows, canManage) = Store.Read(d =>
+        {
+            var sees = d.Access.Sees;   // membre : seuls ses écrans comptent ; administrateur : aucun filtre
+            var counts = d.Root.Screens
+                .Where(s => s.ClientId == d.ClientId && s.Token != null && s.ZoneId != null && (sees == null || sees(s)))
+                .GroupBy(s => s.ZoneId!.Value).ToDictionary(g => g.Key, g => g.Count());
+            var mine = d.Areas.Where(a => d.Access.HasArea(a.Id)).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+            var list = mine
+                .SelectMany(a => a.Zones.Select(z => new ZoneRow(a.Id, a.Name, z.Id, z.Name, z.IsDefault, z.IsWall, z.Sync, z.WallCols, z.WallRows, counts.GetValueOrDefault(z.Id))))
+                .OrderBy(r => r.AreaName, StringComparer.CurrentCultureIgnoreCase).ThenByDescending(r => r.IsDefault).ThenBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+            return (mine.Select(a => (a.Id, a.Name)).ToList(), list, d.Access.CanManageZones);
+        });
+        if (filter is { } f && areas.All(a => a.Id != f)) filter = null;   // aire retirée entre-temps
+        if (newArea == Guid.Empty || areas.All(a => a.Id != newArea)) newArea = areas.FirstOrDefault().Id;
+    }
+
+    private IEnumerable<ZoneRow> Visible => filter is { } f ? rows.Where(r => r.AreaId == f) : rows;
+    private string FilterName => filter is { } f ? areas.FirstOrDefault(a => a.Id == f).Name ?? "" : "Toutes les aires";
+
+    private string Subtitle
+    {
+        get
+        {
+            var n = Visible.Count();
+            var e = Visible.Sum(r => r.Count);
+            var scope = filter is { } f ? $"Aire « {areas.FirstOrDefault(a => a.Id == f).Name} »" : "Toutes les aires";
+            return $"{scope} · {n} {(n == 1 ? "zone" : "zones")}, {e} {(e == 1 ? "écran" : "écrans")}";
+        }
+    }
+
+    private void Pick(Guid? id) { filter = id; filterOpen = false; menuFor = null; }
+
+    private void OpenNew()
+    {
+        newName = ""; newSync = false; newError = null; newOpen = true;
+        newArea = filter ?? newArea;   // préremplie avec le filtre
+    }
+
+    private void CloseNew() => newOpen = false;
+
+    private void Create()
+    {
+        var aid = newArea;
+        var name = newName;
+        var sync = newSync;
+        var (_, err) = Store.Write(d =>
+        {
+            var (z, e) = AreaOps.AddZone(d, aid, name);
+            if (e == null && sync && z != null) e = AreaOps.SetZoneSync(d, aid, z.Id, true);
+            return (z, e);
+        });
+        if (err != null) { newError = err; return; }
+        newOpen = false;
+        Toast.Ok($"Zone « {name.Trim()} » ajoutée.");
+        Load();
+    }
+
+    private void Rename(ZoneRow r, string name)
+    {
+        if (name.Trim() == r.Name) return;
+        error = Store.Write(d => AreaOps.RenameZone(d, r.AreaId, r.Id, name));
+        if (error == null) Toast.Ok($"Zone renommée en « {name.Trim()} ».");
+        Load();
+    }
+
+    private async Task Delete(ZoneRow r)
+    {
+        menuFor = null;
+        var ids = Store.Read(d => d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.ZoneId == r.Id).Select(s => s.Id).ToList());
+        var err = Store.Write(d => AreaOps.DeleteZone(d, r.AreaId, r.Id));
+        error = err;
+        if (err == null)
+        {
+            await Notifier.PublishPlanning(ids);   // leur zone change : planning et synchro peuvent changer
+            foreach (var id in ids) await Notifier.NotifyScreen(id);
+            Toast.Ok($"Zone « {r.Name} » supprimée.");
+        }
+        Load();
+    }
+
+    private async Task ToggleSync(ZoneRow r)
+    {
+        menuFor = null;
+        var on = !r.Sync;
+        var err = Store.Write(d => AreaOps.SetZoneSync(d, r.AreaId, r.Id, on));
+        error = err;
+        if (err == null)
+        {
+            await Notifier.NotifyZone(r.Id);   // les écrans de la zone rechargent leur configuration
+            Toast.Ok(on ? $"Lecture synchronisée dans la zone « {r.Name} »." : $"Synchronisation coupée dans la zone « {r.Name} ».");
+        }
+        Load();
+    }
+}

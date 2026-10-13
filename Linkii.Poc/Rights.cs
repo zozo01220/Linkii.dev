@@ -7,24 +7,24 @@ namespace Linkii.Poc;
 public static class LevelPages
 {
     public const string Screens = "screens", Playlists = "playlists", Planning = "planning", Media = "media";
-    public const string Integrations = "integrations", Widgets = "widgets";
+    public const string Integrations = "integrations", Widgets = "widgets", Zones = "zones";
 
     /// <summary>Cases du niveau, dans l'ordre du menu.</summary>
     public static readonly string[] Offered = { Screens, Playlists, Planning, Media };
-    /// <summary>Pages d'un membre (celles qui ont une politique d'accès « Page:… »).</summary>
-    public static readonly string[] All = { Screens, Playlists, Planning, Media, Integrations, Widgets };
+    /// <summary>Pages d'un membre (celles qui ont une politique d'accès « Page:… »). Zones n'est pas une case : elle suit « Gérer les zones » du niveau.</summary>
+    public static readonly string[] All = { Screens, Playlists, Planning, Media, Integrations, Widgets, Zones };
 
     public static string Label(string page) => page switch
     {
         Screens => "Écrans", Playlists => "Listes de lecture", Planning => "Planning", Media => "Médiathèque",
-        Integrations => "Intégrations", Widgets => "Widgets", _ => page
+        Integrations => "Intégrations", Widgets => "Widgets", Zones => "Zones", _ => page
     };
 
     /// <summary>Adresse d'une page, pour renvoyer un membre vers la première qui lui est ouverte.</summary>
     public static string Path(string page) => page switch
     {
         Screens => "/", Playlists => "/playlists", Planning => "/planning", Media => "/media",
-        Integrations => "/integrations", Widgets => "/widgets", _ => "/"
+        Integrations => "/integrations", Widgets => "/widgets", Zones => "/zones", _ => "/"
     };
 }
 
@@ -45,6 +45,8 @@ public class AccessLevel
     public List<string> Apps { get; set; } = new();
     /// <summary>Voir sans modifier ni publier.</summary>
     public bool ReadOnly { get; set; }
+    /// <summary>Gérer les zones et les murs (dans les aires du périmètre) : page Zones, menu Zones, créer, renommer, synchroniser, supprimer.</summary>
+    public bool ManageZones { get; set; }
 
     // Périmètre : un élément coché donne tout ce qu'il contient, y compris ce qui y sera ajouté plus tard.
     public bool AllAreas { get; set; }
@@ -57,7 +59,7 @@ public class AccessLevel
 
     public AccessLevel Copy() => new()
     {
-        Id = Id, Name = Name, Pages = [.. Pages], AllIntegrations = AllIntegrations, AllWidgets = AllWidgets, Apps = [.. Apps], ReadOnly = ReadOnly,
+        Id = Id, Name = Name, Pages = [.. Pages], AllIntegrations = AllIntegrations, AllWidgets = AllWidgets, Apps = [.. Apps], ReadOnly = ReadOnly, ManageZones = ManageZones,
         AllAreas = AllAreas, AreaIds = [.. AreaIds], ZoneIds = [.. ZoneIds], ScreenIds = [.. ScreenIds]
     };
 }
@@ -149,6 +151,7 @@ public static class AccessLevels
     public static string PagesText(AccessLevel l, AppCatalog catalog)
     {
         var pages = LevelPages.Offered.Where(l.Pages.Contains).Select(LevelPages.Label).ToList();
+        if (l.ManageZones) pages.Add("Gérer les zones");
         if (l.AllIntegrations || catalog.All.Any(a => !a.ScreenWidget && l.Apps.Contains(a.Id))) pages.Add(LevelPages.Label(LevelPages.Integrations));
         if (l.AllWidgets || catalog.All.Any(a => a.ScreenWidget && l.Apps.Contains(a.Id))) pages.Add(LevelPages.Label(LevelPages.Widgets));
         return pages.Count == 0 ? "Aucune page" : string.Join(", ", pages);
