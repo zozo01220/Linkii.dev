@@ -1,0 +1,59 @@
+@* Ranger des fichiers dans un dossier où l'on écrit, ou à la racine de l'aire. *@
+@inject MediaLibrary Library
+
+<div class="modal-backdrop" @onclick="() => OnClose.InvokeAsync(moved)"></div>
+<div class="modal" role="dialog" aria-modal="true" aria-labelledby="fmv-title">
+    <h3 id="fmv-title">Ranger @(Items.Count > 1 ? $"{Items.Count} fichiers" : $"« {Items.FirstOrDefault().Name} »") dans un dossier</h3>
+    @if (targets.Count == 0)
+    {
+        <p class="hint">Vous n'avez pas de dossier où ranger ces fichiers : demandez à un propriétaire de vous donner un accès en écriture.</p>
+    }
+    else
+    {
+        <select style="width:100%;margin-top:10px" aria-label="Dossier de destination" @bind="choice">
+            @for (var i = 0; i < targets.Count; i++)
+            {
+                var n = i;
+                <option value="@n">@targets[n].Path</option>
+            }
+        </select>
+    }
+    @if (refused.Count > 0)
+    {
+        <div class="err">
+            @moved rangé@(moved > 1 ? "s" : ""), @refused.Count refusé@(refused.Count > 1 ? "s" : "") :
+            <ul style="margin:6px 0 0;padding-left:18px">@foreach (var r in refused) { <li>@r</li> }</ul>
+        </div>
+    }
+    <div class="modal-actions">
+        @if (done) { <button class="btn" @onclick="() => OnClose.InvokeAsync(moved)">Fermer</button> }
+        else
+        {
+            <button class="btn ghost" @onclick="() => OnClose.InvokeAsync(moved)">Annuler</button>
+            <button class="btn" disabled="@(targets.Count == 0)" @onclick="Move">Ranger</button>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public List<(Guid Id, string Name)> Items { get; set; } = new();
+    [Parameter] public EventCallback<int> OnClose { get; set; }
+
+    private List<(Guid? Id, string Path)> targets = new();
+    private int choice;
+    private List<string> refused = new();
+    private int moved;
+    private bool done;
+
+    protected override void OnInitialized() => targets = Library.MoveTargets();
+
+    private void Move()
+    {
+        if (choice < 0 || choice >= targets.Count) return;
+        var (count, failures) = Library.MoveFiles(Items.Select(i => i.Id).ToList(), targets[choice].Id);
+        moved = count;
+        refused = failures;
+        if (refused.Count == 0) { OnClose.InvokeAsync(moved); return; }
+        done = true;
+    }
+}

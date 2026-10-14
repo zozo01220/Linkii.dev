@@ -46,6 +46,8 @@
     [Parameter] public EventCallback<MediaItem> OnImported { get; set; }
     /// <summary>false : pas de liste de progression ici, le parent l’affiche lui-même (Jobs) ; il est prévenu par Changed.</summary>
     [Parameter] public bool ShowJobs { get; set; } = true;
+    /// <summary>Dossier où ranger les fichiers importés (null : racine de l'aire).</summary>
+    [Parameter] public Guid? FolderId { get; set; }
     [Parameter] public EventCallback Changed { get; set; }
 
     /// <summary>Imports en cours ou en échec, du plus récent au plus ancien.</summary>
@@ -101,7 +103,8 @@
         foreach (var (f, job) in queue)   // un fichier à la fois : la progression reste lisible et le serveur n'est pas saturé
         {
             if (!Allowed(f.Name)) { Fail(job, Accept == "video" ? "Ce n'est pas une vidéo." : Accept == "image" ? "Ce n'est pas une image." : "Format non supporté."); await Refresh(); continue; }
-            await Run(job, () => Importer.Import(f, Store.ClientId, new Progress<long>(n => { job.Done = n; _ = InvokeAsync(() => Notify(job)); }), job.Cts.Token, Store.AreaId));
+            if (!CanUpload()) { Fail(job, "Vous ne pouvez pas téléverser dans ce dossier."); await Refresh(); continue; }
+            await Run(job, () => Importer.Import(f, Store.ClientId, new Progress<long>(n => { job.Done = n; _ = InvokeAsync(() => Notify(job)); }), job.Cts.Token, Store.AreaId, FolderId));
         }
     }
 
@@ -112,8 +115,12 @@
         url = "";
         var job = new UploadJob { Name = u, Total = null };
         jobs.Insert(0, job);
-        await Run(job, () => Importer.ImportUrl(u, Store.ClientId, (n, total) => { job.Done = n; job.Total = total; _ = InvokeAsync(() => Notify(job)); }, job.Cts.Token, Store.AreaId), checkType: true);
+        if (!CanUpload()) { Fail(job, "Vous ne pouvez pas téléverser dans ce dossier."); await Refresh(); return; }
+        await Run(job, () => Importer.ImportUrl(u, Store.ClientId, (n, total) => { job.Done = n; job.Total = total; _ = InvokeAsync(() => Notify(job)); }, job.Cts.Token, Store.AreaId, FolderId), checkType: true);
     }
+
+    // Dossier ouvert en écriture, ou racine (comme avant)
+    private bool CanUpload() => Store.Read(d => FolderOps.CanUploadTo(d, FolderId));
 
     private async Task Run(UploadJob job, Func<Task<MediaImporter.Result>> import, bool checkType = false)
     {

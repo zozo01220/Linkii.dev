@@ -281,7 +281,7 @@ public static class AreaOps
         if (blockers.Count > 0) return $"Des contenus de cette liste sont aussi utilisés par {string.Join(", ", blockers)}. Dupliquez la liste et retirez-les, ou déplacez aussi ces éléments.";
 
         pl.AreaId = target;
-        foreach (var m in moving.Where(m => !m.Info.ContainsKey("drive"))) m.AreaId = target;   // les fichiers Drive restent communs
+        foreach (var m in moving.Where(m => !m.Info.ContainsKey("drive"))) { m.AreaId = target; m.FolderId = null; }   // les fichiers Drive restent communs
         foreach (var s in d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.AreaId == source))
         {
             if (s.PlaylistId == pl.Id) s.PlaylistId = null;
@@ -305,6 +305,7 @@ public static class AreaOps
             .Distinct().ToList();
         if (users.Count > 0) return $"Ce fichier est utilisé par {string.Join(", ", users)}. Retirez-le d'abord, ou déplacez la liste de lecture entière.";
         m.AreaId = target;
+        m.FolderId = null;   // le dossier appartient à l'aire d'origine : le fichier arrive à la racine de la nouvelle
         return null;
     }
 

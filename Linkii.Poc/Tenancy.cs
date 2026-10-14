@@ -112,6 +112,7 @@ public class ClientDb
         Guid? area = Access == AreaAccess.System || Access.OrgAreaCount == 0 ? null : Access.Current?.Id ?? NoArea;
         Screens = new(root.Screens, clientId, area, Access.Sees);
         Media = new(root.Media, clientId, area);
+        MediaFolders = new(root.MediaFolders, clientId, area);
         Playlists = new(root.Playlists, clientId, area);
         AppInstalls = new(root.AppInstalls, clientId);
         Areas = new(root.Areas, clientId);
@@ -122,6 +123,8 @@ public class ClientDb
     public Reseller? Reseller => _root.Resellers.FirstOrDefault(r => r.Id == Tenant.ResellerId);
     public ScopedList<Screen> Screens { get; }
     public ScopedList<MediaItem> Media { get; }
+    /// <summary>Dossiers de la médiathèque de l'aire ouverte (voir <see cref="MediaFolder"/>).</summary>
+    public ScopedList<MediaFolder> MediaFolders { get; }
     public ScopedList<Playlist> Playlists { get; }
     public ScopedList<AppInstall> AppInstalls { get; }
     /// <summary>Toutes les aires de l'organisation (pages réservées aux administrateurs).</summary>
@@ -132,7 +135,12 @@ public class ClientDb
     /// <summary>Comptes de l'organisation (administrateurs et membres).</summary>
     public IEnumerable<User> Users => _root.Users.Where(u => u.ClientId == ClientId && Roles.IsClient(u.Role));
     public void AddUser(User u) { u.ClientId = ClientId; u.ResellerId = Tenant.ResellerId; _root.Users.Add(u); }
-    public int RemoveUser(Guid id) => _root.Users.RemoveAll(u => u.Id == id && u.ClientId == ClientId && Roles.IsClient(u.Role));
+    /// <summary>Retire un compte. Ses dossiers de la médiathèque passent à la personne qui agit (administrateur), partages conservés.</summary>
+    public int RemoveUser(Guid id)
+    {
+        foreach (var f in _root.MediaFolders.Where(f => f.ClientId == ClientId && f.OwnerId == id)) f.OwnerId = Access.UserId;
+        return _root.Users.RemoveAll(u => u.Id == id && u.ClientId == ClientId && Roles.IsClient(u.Role));
+    }
     /// <summary>Adresse déjà prise chez ce revendeur (ou par l'équipe Linkii) : un compte se connecte par son e-mail sur le domaine du revendeur.</summary>
     public bool EmailTaken(string email) => _root.Users.Any(u => u.Email == email && (u.ResellerId == Tenant.ResellerId || u.ResellerId == null));
 

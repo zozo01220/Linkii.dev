@@ -12,6 +12,7 @@ public class Db
     public List<AccessLogEntry> AccessLog { get; set; } = new();
     public List<AppInstall> AppInstalls { get; set; } = new();   // apps du catalogue ajoutées par chaque client
     public List<Area> Areas { get; set; } = new();               // aires de gestion des clients
+    public List<MediaFolder> MediaFolders { get; set; } = new();  // dossiers de la médiathèque (voir <see cref="MediaFolder"/>)
     public PlatformSettings Platform { get; set; } = new();      // réglages communs à toutes les organisations (console › Réglages)
 
     /// <summary>Ancien format mono-client (avant le multi-tenant) : lu une fois pour migration, jamais réécrit.</summary>
@@ -235,6 +236,8 @@ public class Tenant
     public bool Suspended { get; set; }
     /// <summary>Niveaux de droits créés par les administrateurs de l'organisation (voir <see cref="AccessLevel"/>).</summary>
     public List<AccessLevel> Levels { get; set; } = new();
+    /// <summary>Option « Dossiers dans la médiathèque » (Réglages › Médiathèque, éteinte par défaut) : dossiers, partages et écran des niveaux.</summary>
+    public bool FoldersOn { get; set; }
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 
     /// <summary>Voir <see cref="SignupSources"/> ; null pour une organisation créée avant le 9 octobre 2026.</summary>
@@ -316,6 +319,9 @@ public class Tenant
     /// <summary>Connexions des Drives qui n'ont pas de compte Google ou Microsoft : Nextcloud, SFTP (identifiants saisis), Dropbox (OAuth).</summary>
     public List<DriveAccount> DriveAccounts { get; set; } = new();
 
+    /// <summary>Compte Home Assistant de l'organisation (un par organisation) : capteurs, interrupteurs et lumières des widgets Home Assistant. Null : pas connecté.</summary>
+    public HomeAssistantAccount? HomeAssistant { get; set; }
+
     // Compte Google connecté par l'organisation (« Se connecter avec Google », lecture seule), partagé par Google Calendar et Google Drive.
     // GoogleScopes : accès accordés (agendas, fichiers Drive). Jeton de renouvellement chiffré (SecretBox).
     public string GoogleRefreshToken { get; set; } = "";
@@ -332,6 +338,39 @@ public class Tenant
     public string? GoogleDriveUser { get; set; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public DateTime? GoogleDriveConnectedUtc { get; set; }
+}
+
+/// <summary>
+/// Compte Home Assistant de l'organisation. Url = adresse HTTPS de l'instance. AuthMode : token (jeton d'accès longue durée) ou password
+/// (User = identifiant Home Assistant). Secret = jeton ou mot de passe, chiffré (SecretBox), jamais réaffiché. Entities = cache des capteurs,
+/// interrupteurs et lumières, pour les sélecteurs des widgets ; rafraîchi à la connexion et à la demande.
+/// </summary>
+public class HomeAssistantAccount
+{
+    public string Url { get; set; } = "";
+    public string AuthMode { get; set; } = "token";
+    public string User { get; set; } = "";
+    public string Secret { get; set; } = "";
+    public DateTime? ConnectedUtc { get; set; }
+    public string LastError { get; set; } = "";
+    public DateTime? EntitiesUtc { get; set; }
+    public List<HomeAssistantEntity> Entities { get; set; } = new();
+
+    /// <summary>Copie pour modification : la donnée lue dans le magasin n'est jamais changée en place.</summary>
+    public HomeAssistantAccount Copy() => new()
+    {
+        Url = Url, AuthMode = AuthMode, User = User, Secret = Secret, ConnectedUtc = ConnectedUtc, LastError = LastError,
+        EntitiesUtc = EntitiesUtc, Entities = Entities.Select(e => new HomeAssistantEntity { Id = e.Id, Name = e.Name, Domain = e.Domain, Unit = e.Unit }).ToList(),
+    };
+}
+
+/// <summary>Une entité du compte Home Assistant (capteur, interrupteur ou lumière).</summary>
+public class HomeAssistantEntity
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Domain { get; set; } = "";
+    public string Unit { get; set; } = "";
 }
 
 /// <summary>
@@ -611,6 +650,37 @@ public class MediaItem : IClientOwned, IAreaOwned
     public int? Width { get; set; }                // pixels (images et vidéos) ; lus dans le fichier pour ceux importés avant
     public int? Height { get; set; }
     public DateTime? AddedUtc { get; set; }
+    /// <summary>Dossier de la médiathèque (null : racine de l'aire). Voir <see cref="MediaFolder"/>.</summary>
+    public Guid? FolderId { get; set; }
+}
+
+/// <summary>
+/// Dossier de la médiathèque (option « Dossiers dans la médiathèque »). Il appartient à son créateur et à une aire, est privé tant qu'il n'est pas partagé.
+/// Le partage (personne ou niveau de droits, en lecture ou en écriture) descend dans les sous-dossiers. Droits : <see cref="FolderAccess"/>.
+/// </summary>
+public class MediaFolder : IClientOwned, IAreaOwned
+{
+    public Guid ClientId { get; set; }
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid AreaId { get; set; }
+    public Guid? ParentId { get; set; }          // null : à la racine de l'aire
+    public string Name { get; set; } = "";
+    public Guid? OwnerId { get; set; }           // créateur (propriétaire) ; null si l'utilisateur a été retiré sans être remplacé
+    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+    public List<FolderShare> Shares { get; set; } = new();
+}
+
+/// <summary>Partage d'un dossier : une personne (Kind = user) ou un niveau de droits (Kind = level), en lecture seule ou en écriture.</summary>
+public class FolderShare
+{
+    public string Kind { get; set; } = FolderShareKind.User;
+    public Guid TargetId { get; set; }
+    public bool Write { get; set; }
+}
+
+public static class FolderShareKind
+{
+    public const string User = "user", Level = "level";
 }
 
 public class Playlist : IClientOwned, IAreaOwned

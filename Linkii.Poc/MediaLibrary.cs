@@ -19,7 +19,12 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     /// <summary>Images et vidéos, les plus récentes d'abord. La taille des fichiers importés avant son enregistrement est lue sur le disque.</summary>
     public List<MediaItem> Files()
     {
-        var list = store.Read(d => d.Media.Where(IsFile).ToList());
+        // un fichier rangé dans un dossier n'est listé que si la personne y a un droit (voir FolderAccess)
+        var list = store.Read(d =>
+        {
+            var rights = FolderAccess.Snapshot(d.Access, FolderOps.All(d));
+            return d.Media.Where(m => IsFile(m) && (m.FolderId is not { } f || rights.GetValueOrDefault(f) != FolderRight.None)).ToList();
+        });
         foreach (var m in list.Where(m => m.Size == null && m.FileName != null))
         {
             try { var fi = new FileInfo(Path.Combine(AppPaths.MediaDir, m.FileName!)); if (fi.Exists) m.Size = fi.Length; } catch { }
@@ -31,7 +36,89 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
         return list.OrderByDescending(m => m.AddedUtc ?? DateTime.MinValue).ThenBy(m => m.Name).ToList();
     }
 
+    // ---------- Dossiers (option « Dossiers dans la médiathèque », §49) ----------
+
+    /// <summary>Dossiers de l'aire que la personne voit, avec son droit sur chacun. Un dossier privé d'un autre n'y figure pas.</summary>
+    public List<FolderRow> Folders() => store.Read(d =>
+    {
+        var all = FolderOps.All(d);
+        var rows = new List<FolderRow>();
+        foreach (var f in d.MediaFolders)
+        {
+            var right = FolderAccess.For(d.Access, f, all);
+            if (right == FolderRight.None) continue;
+            var owner = d.Users.FirstOrDefault(u => u.Id == f.OwnerId)?.Label ?? "—";
+            rows.Add(new FolderRow(f, right, owner, f.Shares.Count > 0));
+        }
+        return rows.OrderBy(r => r.Folder.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+    });
+
+    public (string? Error, MediaFolder? Folder) CreateFolder(string name, Guid? parentId) => store.Write(d => { return FolderOps.Create(d, name, parentId); });
+
+    public string? RenameFolder(Guid id, string name) => store.Write(d => { return FolderOps.Rename(d, id, name); });
+
+    /// <summary>Fichiers qui servent dans une app ou une liste de lecture, parmi ceux d'un dossier (à confirmer avant suppression).</summary>
+    public List<string> UsedInFolder(Guid folderId) => Files().Where(m => m.FolderId == folderId).SelectMany(m => UsedBy(m.Id)).Distinct().ToList();
+
+    /// <summary>Supprime un dossier, ses sous-dossiers et leurs fichiers (même retrait que pour un fichier : apps et listes mises à jour).</summary>
+    public string? DeleteFolder(Guid id)
+    {
+        var plan = store.Write(d => { var err = FolderOps.PlanDelete(d, id, out var folders, out var files); return (err, folders, files); });
+        if (plan.err != null) return plan.err;
+        Delete(plan.files);
+        store.Write(d => { FolderOps.Forget(d, plan.folders); });
+        return null;
+    }
+
+    /// <summary>Partages d'un dossier, et les personnes et niveaux à qui l'on peut en donner (les personnes qui ne le peuvent pas ont une raison).</summary>
+    public FolderShareInfo? ShareInfo(Guid folderId) => store.Read(d =>
+    {
+        if (FolderOps.Find(d, folderId) is not { } f) return null;
+        var area = d.Root.Areas.FirstOrDefault(a => a.Id == f.AreaId)?.Name ?? "";
+        var people = d.Users.Where(u => u.Role == Roles.ClientMember).OrderBy(u => u.Label).Select(u =>
+        {
+            var ua = AreaAccess.For(d.Root, d.ClientId, u.Id);
+            var reason = u.Disabled ? "compte désactivé"
+                : !ua.HasArea(f.AreaId) ? $"ne voit pas l'aire « {area} »"
+                : ua.Level?.Pages.Contains(LevelPages.Media) != true ? "n'a pas la page Médiathèque" : null;
+            return new ShareCandidate(u.Id, u.Label, ua.Level?.Name ?? "Sans niveau", reason);
+        }).ToList();
+        var levels = d.Tenant.Levels.Select(l => new ShareCandidate(l.Id, l.Name,
+            d.Users.Count(u => u.LevelId == l.Id) is var n && n > 0 ? $"{n} membre{(n > 1 ? "s" : "")}" : "aucun membre", null)).ToList();
+        var shares = f.Shares.Select(s =>
+        {
+            var label = s.Kind == FolderShareKind.Level ? levels.FirstOrDefault(l => l.Id == s.TargetId)?.Label : people.FirstOrDefault(p => p.Id == s.TargetId)?.Label;
+            return new ShareRow(s.Kind, s.TargetId, label ?? "Retiré de l'organisation", s.Write);
+        }).ToList();
+        return new FolderShareInfo(f, shares, people, levels, FolderAccess.CanShare(d.Access, f));
+    });
+
+    public string? SetShare(Guid folderId, string kind, Guid target, bool? write) => store.Write(d => { return FolderOps.SetShare(d, folderId, kind, target, write); });
+
+    public string? TransferOwner(Guid folderId, Guid userId) => store.Write(d => { return FolderOps.TransferOwner(d, folderId, userId); });
+
+    /// <summary>Range des fichiers dans un dossier, ou à la racine (null). Rend le nombre rangé et les refus.</summary>
+    public (int Moved, List<string> Refused) MoveFiles(IReadOnlyCollection<Guid> ids, Guid? folderId) => store.Write(d => { return FolderOps.Move(d, ids, folderId); });
+
+    /// <summary>Où ranger : la racine (si la personne peut y ranger) et les dossiers où elle écrit, avec leur chemin.</summary>
+    public List<(Guid? Id, string Path)> MoveTargets() => store.Read(d =>
+    {
+        var all = FolderOps.All(d);
+        var list = new List<(Guid? Id, string Path)>();
+        if (FolderAccess.CanCreateAtRoot(d.Access)) list.Add((null, "Médiathèque de l'aire (racine)"));
+        foreach (var f in d.MediaFolders)
+        {
+            if (FolderAccess.For(d.Access, f, all) < FolderRight.Write) continue;
+            var path = string.Join(" › ", FolderAccess.Chain(f, all).Reverse().Select(x => x.Name));
+            list.Add((f.Id, path));
+        }
+        return list.OrderBy(x => x.Path, StringComparer.CurrentCultureIgnoreCase).ToList();
+    });
+
     /// <summary>Contenus d'apps (et playlists, pour les anciens éléments directs) qui utilisent ce fichier.</summary>
+    /// <summary>Le fichier existe dans l'organisation, même s'il est rangé dans un dossier que la personne ne voit pas.</summary>
+    public bool Exists(Guid id) => store.Read(d => d.Root.Media.Any(m => m.Id == id && m.ClientId == d.ClientId));
+
     public List<string> UsedBy(Guid mediaId) => store.Read(d =>
     {
         var names = d.Media.Where(m => m.AppId != null && MediaFields(m).Any(k => AppField.MediaIds(m.Settings.GetValueOrDefault(k)).Contains(mediaId)))
@@ -44,7 +131,7 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     {
         name = name.Trim();
         if (name.Length == 0) return;
-        store.Write(d => { if (d.Media.FirstOrDefault(m => m.Id == id && IsOwnFile(m)) is { } m) m.Name = name.Length > 120 ? name[..120] : name; });
+        store.Write(d => { if (d.Media.FirstOrDefault(m => m.Id == id && IsOwnFile(m)) is { } m && FolderOps.CanEditFile(d, m)) m.Name = name.Length > 120 ? name[..120] : name; });
     }
 
     /// <summary>
@@ -55,7 +142,7 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     {
         var files = store.Write(d =>
         {
-            var gone = d.Media.Where(m => ids.Contains(m.Id) && IsOwnFile(m)).ToList();   // les fichiers Drive suivent leur dossier
+            var gone = d.Media.Where(m => ids.Contains(m.Id) && IsOwnFile(m) && FolderOps.CanEditFile(d, m)).ToList();   // les fichiers Drive suivent leur dossier ; ceux d'un dossier qu'on ne modifie pas restent
             var set = gone.Select(m => m.Id).ToHashSet();
             if (set.Count == 0) return new List<string>();
             var changedInstances = new HashSet<Guid>();
@@ -124,3 +211,15 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     private IEnumerable<string> MediaFields(MediaItem instance) =>
         catalog.Find(instance.AppId)?.Settings.Where(f => f.IsMedia).Select(f => f.Key) ?? Enumerable.Empty<string>();
 }
+
+/// <summary>Un dossier vu par la personne, avec son droit, le nom de son propriétaire et s'il est partagé.</summary>
+public record FolderRow(MediaFolder Folder, FolderRight Right, string OwnerName, bool Shared);
+
+/// <summary>Une personne ou un niveau à qui partager : <paramref name="Reason"/> dit pourquoi ce n'est pas possible (null : possible).</summary>
+public record ShareCandidate(Guid Id, string Label, string Detail, string? Reason);
+
+/// <summary>Un partage en place sur un dossier.</summary>
+public record ShareRow(string Kind, Guid TargetId, string Label, bool Write);
+
+/// <summary>Partages d'un dossier : ceux en place, les personnes et niveaux possibles, et si la personne peut partager.</summary>
+public record FolderShareInfo(MediaFolder Folder, List<ShareRow> Shares, List<ShareCandidate> People, List<ShareCandidate> Levels, bool CanShare);

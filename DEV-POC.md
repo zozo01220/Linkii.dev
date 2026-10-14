@@ -950,6 +950,96 @@ Demande : sortir la gestion des zones de la fenêtre du bouton « Ajouter » des
 - **`AreaZones.razor`** reste utilisé par la page Aires de gestion. La page Écrans ne l'utilise plus.
 - **Tests** : 5 échecs dans `AppsTests.cs` (fichier avec des modifications non commitées, hors de ce chantier). Non vérifiés contre la base de départ.
 
+## 49. Dossiers dans la médiathèque et droits par dossier : analyse, maquette et réalisation (14 octobre 2026) : codé
+
+Demande : chaque utilisateur crée des dossiers dans la médiathèque et les partage avec d'autres membres, en **écriture** ou en **lecture seule** ; l'administrateur voit tous les dossiers en écriture ; les droits se donnent aussi dans l'onglet **Niveaux de droits**. Maquette : `maquettes/mediatheque-dossiers.html` (principe et règles, médiathèque d'un membre, fenêtre de partage, « Partagés avec moi », vue administrateur, éditeur de niveau, listes de lecture). **Rien n'est codé.**
+
+### Point de départ (code actuel)
+- Un `MediaItem` appartient à une **aire** (`AreaId`) ; il est visible de tout membre dont le périmètre contient l'aire (`AreaAccess.For`, §46). Les fichiers des Drives ont `AreaId` vide et `Info["drive"]` : communs, ni déplaçables ni supprimables.
+- Aucune notion de propriétaire sur un fichier, ni de dossier. Le droit « Médiathèque » est une simple case de page ; « lecture seule » est un drapeau du niveau.
+- Les listes de lecture et les apps référencent les fichiers par `MediaId` ; `AreaOps.MoveMedia` refuse déjà de déplacer un fichier utilisé ailleurs.
+
+### Principe proposé
+1. **Médiathèque de l'aire = racine, inchangée** : fichiers communs de l'aire. Qui ne crée pas de dossier ne voit aucune différence.
+2. **Dossier** : nom, aire, dossier parent (arborescence), **propriétaire** (le créateur), partages. **Privé** par défaut.
+3. **Partage** : une personne **ou un niveau de droits**, mode **Lecture** ou **Écriture**. Il **descend** dans les sous-dossiers ; on peut ajouter un partage sur un sous-dossier, pas en retirer un hérité.
+4. **Droits effectifs** d'un membre sur un dossier : administrateur = écriture + gestion ; propriétaire = écriture + gestion ; sinon le **plus fort** des partages (personne, niveau, dossiers parents). Puis **plafond** : niveau en lecture seule ⇒ lecture au plus.
+5. **Écriture** : téléverser, renommer, déplacer, supprimer des fichiers, créer des sous-dossiers. **Lecture** : voir, télécharger, utiliser dans une liste. **Propriétaire / administrateur** en plus : renommer et supprimer le dossier, gérer le partage, changer de propriétaire (administrateur seul).
+6. **Un dossier à la fois** pour un fichier ; déplacement par glisser-déposer, menu ⋮ et sélection multiple. Un fichier de la racine peut rester à la racine.
+7. **Niveaux de droits** : nouvelle section « Dossiers de la médiathèque » : « Peut créer ses dossiers », « Peut les partager », et l'accès à des dossiers existants (Aucun / choisis en Lecture ou Écriture / Tous en lecture / Tous en écriture). Même donnée que le partage « niveau » d'un dossier, présentée de l'autre côté. « Tous » couvre les futurs dossiers partagés, **jamais** les dossiers privés d'un membre.
+8. **Fonction optionnelle** (mémoire « générique et optionnel ») : réservée au mode expert, interrupteur dans Réglages « Dossiers dans la médiathèque », éteint par défaut.
+
+### Modèle de données (esquisse)
+- `MediaFolder { Id, ClientId, AreaId, ParentId?, Name, OwnerId, CreatedUtc, List<FolderShare> Shares }` ; `FolderShare { Kind: user | level, TargetId, Mode: read | write }`. Stocké dans la base d'organisation, comme `Media`.
+- `MediaItem.FolderId?` (null = racine de l'aire).
+- `AccessLevel` : `CanCreateFolders`, `CanShareFolders`, `AllFolders` (null | read | write). Les accès à des dossiers précis vivent dans les `Shares` du dossier (une seule source de vérité) ; l'éditeur de niveau les lit et les écrit.
+- Calcul centralisé `FolderAccess.For(user, folder)` → `None | Read | Write | Owner`, à côté de `AreaAccess` ; la médiathèque, le sélecteur de média et le téléversement passent tous par lui.
+
+### Écrans (voir la maquette)
+- **Médiathèque** : colonne d'arbre à gauche (Médiathèque de l'aire, Mes dossiers, Partagés avec moi, Sources Drive), fil d'Ariane avec badges (Propriétaire, Partagé avec N), sous-dossiers puis fichiers, bouton « Nouveau dossier », « Partager… ».
+- **Partager** : recherche de personnes et de niveaux (membres sans l'aire ou sans la page Médiathèque grisés avec la raison), liste des accès, sélecteur Lecture / Écriture.
+- **Partagé avec moi** : bandeau « lecture seule », cadenas sur les fichiers, boutons d'écriture grisés.
+- **Administrateur** : « Tous les dossiers » par propriétaire, tableau (propriétaire, aire, partagé avec, fichiers), menu : changer de propriétaire, déplacer vers une autre aire, supprimer.
+- **Niveau de droits** : 4<sup>e</sup> section de l'éditeur.
+- **Listes de lecture** : le sélecteur reprend l'arbre ; un fichier devenu inaccessible reste dans la liste, signalé.
+
+### Cas limites et règles retenues
+- **Fichier utilisé** : reste diffusé même si le dossier n'est plus partagé ; la liste signale « dossier non accessible » (nom et durée visibles, pas d'aperçu). Supprimer un dossier utilisé : message avec le nombre de listes, puis confirmation ou refus (comme `MoveMedia`).
+- **Retirer un partage** : avertissement si l'autre personne utilise des fichiers du dossier.
+- **Membre désactivé** : ses dossiers passent à l'administrateur qui agit ; partages conservés. **Niveau supprimé** : ses partages de dossier tombent (nombre annoncé). **Changement de niveau d'un membre** : ses accès « niveau » suivent le nouveau niveau.
+- **Aire** : un dossier est dans une aire ; on ne le partage qu'avec les membres qui voient l'aire. Déplacer un dossier vers une autre aire = l'administrateur seul (réutilise `AreaMoveDialog`), avec les mêmes refus si des fichiers servent ailleurs.
+- **Drives** : fichiers synchronisés hors dossiers, listés sous « Sources Drive » (pas de dossier virtuel dans cette première version).
+- **Publication** : la règle « publication hors périmètre autorisée avec mention » (§46) s'applique telle quelle ; le droit de lecture sur le dossier suffit pour publier ses fichiers.
+- **Téléverser dans un dossier en écriture seulement** ; les imports en cours gardent leur dossier cible même si l'on navigue ailleurs.
+
+### Décisions à trancher avant de coder
+1. **Profondeur** : arborescence libre (recommandé, affichage plafonné à 4 niveaux) ou un seul niveau de sous-dossiers.
+2. **Partage entre aires** : recommandé = limité aux membres qui voient l'aire du dossier. Alternative : un partage ouvre le dossier même hors périmètre (« Partagés avec moi » toutes aires), mais les listes de lecture étant propres à une aire, cela crée des fichiers de l'aire A dans des listes de l'aire B.
+3. **Écriture et gestion** : recommandé = l'écriture ne permet ni de partager ni de supprimer le dossier. Alternative : un troisième mode « Gestionnaire ».
+4. **Fichiers existants** : restent à la racine (recommandé), ou création automatique d'un dossier « Importés » par aire.
+5. **Racine commune** : garder les fichiers de l'aire visibles de tous (recommandé), ou rendre la racine propre à chacun (rupture avec l'existant).
+6. **Mode simple** : fonction masquée (recommandé) ou « Mes dossiers » seulement, sans partage.
+
+### Réalisation envisagée (par étapes)
+1. Modèle et `FolderAccess` + tests (cascade, plafond lecture seule, niveau supprimé, membre désactivé).
+2. Médiathèque : arbre, création, renommage, déplacement, téléversement dans un dossier.
+3. Partage (fenêtre) et « Partagés avec moi » ; vue administrateur.
+4. Section « Dossiers » du niveau de droits.
+5. Sélecteur de média des listes et signalement des fichiers inaccessibles ; réglage « Dossiers dans la médiathèque ».
+6. Migration : aucune donnée à convertir (`FolderId` nul = racine).
+
+### Limites connues
+- Maquette non validée par l'utilisateur ; les six décisions ci-dessus sont ouvertes.
+- Pas de corbeille : supprimer un dossier supprime ses fichiers après confirmation (comportement actuel des fichiers).
+- Pas de lien de partage externe, pas de notification au destinataire d'un partage (à discuter).
+
+### Réalisation (14 octobre 2026) : codé
+
+Suit les recommandations ci-dessus. Option éteinte par défaut, mode expert seulement.
+
+- **Option** : `Tenant.FoldersOn`, interrupteur dans Réglages › Médiathèque (enregistré aussitôt). **Données** : `Db.MediaFolders` (dossiers, avec leurs `Shares`), `MediaItem.FolderId` (null : racine de l'aire), champs du niveau `CanCreateFolders`, `CanShareFolders`, `AllFolders`.
+- **Droits** (`Folders.cs`, `FolderAccess`) : administrateur = propriétaire partout ; propriétaire de son dossier ; sinon le plus fort des partages qui couvrent le dossier (le dossier ou un de ses parents, à la personne ou à son niveau) et « tous les dossiers partagés » du niveau (jamais un dossier privé d'un autre) ; plafond à la lecture pour un niveau en lecture seule ; profondeur 4.
+- **Opérations** (`FolderOps`) : créer, renommer, supprimer (avec sous-dossiers, refusé si un sous-dossier est à un autre), partager, donner des dossiers à un niveau, changer de propriétaire (logique seulement), ranger des fichiers, éditer un fichier. Un fichier qui quitte l'aire le quitte aussi (`AreaOps.MoveMedia`).
+- **Médiathèque** (`Components/Pages/Media.razor`) : fil d'Ariane, tuiles de dossiers, « Nouveau dossier », « Partager… » (`FolderShareDialog.razor`), « Ranger dans un dossier… » (`FolderMoveDialog.razor`), téléversement dans le dossier ouvert (`MediaUploader`, contrôlé par `FolderOps.CanUploadTo`). Bandeau en lecture seule quand le dossier est partagé en lecture.
+- **Niveaux** (`Components/Pages/Members.razor`) : section « Dossiers de la médiathèque » dans l'éditeur (créer, partager, Aucun / Dossiers choisis / Tous en lecture / Tous en écriture, puis le choix par dossier, grisé hors du périmètre du niveau). Supprimer un niveau retire ses partages de dossiers.
+- **Membre retiré** : ses dossiers passent à la personne qui agit (`ClientDb.RemoveUser`).
+- **Listes de lecture** : `MediaLibrary.Files()` ne donne que les fichiers visibles. `MediaField` garde à l'enregistrement les fichiers rangés dans un dossier que la personne ne voit pas : sans cela, ils disparaîtraient du contenu.
+- **Sélection dans la médiathèque** : sur un fichier qu'on peut modifier, un simple appui sur toute la carte la coche ou la décoche (ClickCard, Media.razor). La case et le menu ⋮ n'y participent pas. Les fichiers Drive et ceux d'un dossier en lecture seule ne se sélectionnent pas.
+- **Tests** : `Linkii.Poc.Tests/FolderAccessTests.cs` (22 tests : droits, partages, niveaux, lecture seule, création, suppression, rangement). Suite complète : 417 réussis, 5 échecs dans `AppsTests`, déjà signalés avant ce chantier.
+
+**Décisions prises sur les six points ouverts** : 1 arborescence libre, quatre niveaux ; 2 partage limité aux membres qui voient l'aire du dossier ; 3 pas de mode « gestionnaire » (l'écriture ne partage ni ne supprime le dossier) ; 4 les fichiers existants restent à la racine ; 5 la racine reste commune ; 6 fonction masquée en mode simple.
+
+**Écarts avec la maquette et limites** :
+- Pas de vue « Tous les dossiers » de l'administrateur, ni de tableau. Il voit les dossiers de l'aire ouverte, comme ses fichiers ; le propriétaire est affiché sur chaque tuile.
+- Pas d'arborescence « Mes dossiers / Partagés avec moi » : une seule liste à la racine, avec les dossiers vus (les miens et ceux partagés avec moi).
+- Pas d'avertissement quand on retire un partage : la diffusion continue, sans message.
+- Le sélecteur de média des listes reste à plat (fichiers accessibles seulement), sans arborescence.
+- Changement de propriétaire : la logique existe (`FolderOps.TransferOwner`), sans interface.
+- Membre seulement désactivé : ses dossiers gardent leur propriétaire (l'administrateur les voit et peut les partager).
+- Option éteinte : la médiathèque revient à plat ; les droits sur les dossiers restent en vigueur.
+- Mode simple : aucun dossier affiché ; les fichiers rangés restent listés à plat selon les droits.
+- **Non testé dans le navigateur** : compilation et tests seulement. L'affichage, les menus et les dialogues restent à vérifier sur des données d'essai.
+
 ## Plans et prochaines étapes
 
 - Gestion des droits : essayer avec de vrais membres (niveau en lecture seule page par page, appairage d'un écran par un membre limité à une zone, aperçu et direct) ; voir « Limites connues » du §46.

@@ -5,18 +5,108 @@
 @inject DriveService Drives
 @inject TenantStore Store
 @inject Toaster Toast
+@inject ModeService Modes
 
 <div class="page-head">
     <div>
         <h1>Médiathèque</h1>
         <p class="sub">Vos images et vidéos, y compris celles de vos dossiers Drive, à utiliser dans vos listes de lecture.</p>
     </div>
-    <button class="btn" @onclick="() => showUpload = !showUpload" aria-expanded="@(showUpload ? "true" : "false")">
-        <Ico Name="upload" Size="16" /> Téléverser des médias
-    </button>
+    <div class="btns">
+        @if (FoldersShown && CanCreateHere) { <button class="btn ghost" @onclick='() => { newFolderName = ""; newFolderError = null; creatingFolder = true; }'><Ico Name="folder" Size="16" /> Nouveau dossier</button> }
+        @if (CanUploadHere)
+        {
+            <button class="btn" @onclick="() => showUpload = !showUpload" aria-expanded="@(showUpload ? "true" : "false")">
+                <Ico Name="upload" Size="16" /> Téléverser des médias
+            </button>
+        }
+    </div>
 </div>
 
 <DriveSyncBar />
+
+@if (FoldersShown)
+{
+    <nav class="lib-crumb" aria-label="Emplacement dans la médiathèque">
+        <button type="button" class="linklike" @onclick="() => OpenFolder(null)"><Ico Name="image" Size="15" /> Médiathèque de l'aire</button>
+        @foreach (var c in crumbs)
+        {
+            var row = c;
+            <span class="sep">›</span>
+            <button type="button" class="linklike" @onclick="() => OpenFolder(row.Folder.Id)">@row.Folder.Name</button>
+        }
+    </nav>
+    @if (currentRow is { } cur)
+    {
+        @if (cur.Right == FolderRight.Read)
+        {
+            <div class="dw-note"><Ico Name="lock" Size="15" /><span class="grow">Dossier partagé en <b>lecture seule</b> : vous pouvez voir, télécharger et utiliser ses fichiers dans vos listes, pas les modifier.</span></div>
+        }
+        <div class="lib-folder-head">
+            <span class="muted">@(cur.Folder.OwnerId == Store.UserId ? "Votre dossier" : $"Dossier de {cur.OwnerName}")@(cur.Shared ? " · partagé" : " · privé")</span>
+            <span class="grow"></span>
+            @if (cur.Right == FolderRight.Owner || cur.Folder.OwnerId == Store.UserId) { <button class="btn ghost sm" @onclick="() => sharingId = cur.Folder.Id"><Ico Name="users" Size="14" /> Partager…</button> }
+        </div>
+    }
+}
+
+@if (creatingFolder)
+{
+    <div class="modal-backdrop" @onclick="() => creatingFolder = false"></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="nf-title">
+        <h3 id="nf-title">Nouveau dossier@(folderId is { } ? $" dans « {currentRow?.Folder.Name} »" : "")</h3>
+        <input style="width:100%;margin-top:10px" placeholder="Nom du dossier" maxlength="60" aria-label="Nom du dossier" @bind="newFolderName" @bind:event="oninput" @onkeydown='e => { if (e.Key == "Enter") CreateFolder(); }' />
+        @if (newFolderError != null) { <div class="err">@newFolderError</div> }
+        <p class="hint">Privé à votre nom : partagez-le ensuite avec d'autres membres, en lecture ou en écriture.</p>
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => creatingFolder = false">Annuler</button>
+            <button class="btn" disabled="@string.IsNullOrWhiteSpace(newFolderName)" @onclick="CreateFolder">Créer</button>
+        </div>
+    </div>
+}
+
+@if (renamingFolder is { } rf)
+{
+    <div class="modal-backdrop" @onclick="() => renamingFolder = null"></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="rnf-title">
+        <h3 id="rnf-title">Renommer le dossier</h3>
+        <input style="width:100%;margin-top:10px" maxlength="60" aria-label="Nom du dossier" @bind="renameFolderValue" @bind:event="oninput" @onkeydown='e => { if (e.Key == "Enter") RenameFolder(rf); }' />
+        @if (newFolderError != null) { <div class="err">@newFolderError</div> }
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => renamingFolder = null">Annuler</button>
+            <button class="btn" disabled="@string.IsNullOrWhiteSpace(renameFolderValue)" @onclick="() => RenameFolder(rf)">Renommer</button>
+        </div>
+    </div>
+}
+
+@if (deletingFolder is { } df)
+{
+    var usedInFolder = Library.UsedInFolder(df.Folder.Id);
+    var inside = files.Count(m => m.FolderId == df.Folder.Id);
+    <div class="modal-backdrop" @onclick="() => deletingFolder = null"></div>
+    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="df-title">
+        <h3 id="df-title">Supprimer le dossier « @df.Folder.Name » ?</h3>
+        <p class="hint">Le dossier, ses sous-dossiers et leurs fichiers@(inside > 0 ? $" ({inside} visible{(inside > 1 ? "s" : "")} ici)" : "") seront supprimés. Cette action est définitive.</p>
+        @if (usedInFolder.Count > 0)
+        {
+            <p class="hint">Ces fichiers sont utilisés et seront retirés de : <b>@string.Join(", ", usedInFolder)</b>. Les écrans concernés auront une mise à jour à publier.</p>
+        }
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => deletingFolder = null">Annuler</button>
+            <button class="btn danger-solid" @onclick="() => DeleteFolder(df)">Supprimer</button>
+        </div>
+    </div>
+}
+
+@if (sharingId is { } shId)
+{
+    <FolderShareDialog FolderId="shId" OnClose="() => { sharingId = null; Reload(); StateHasChanged(); }" />
+}
+
+@if (folderMove is { } fm)
+{
+    <FolderMoveDialog Items="fm" OnClose='n => { folderMove = null; if (n > 0) { picked.Clear(); Toast.Ok(n > 1 ? $"{n} fichiers rangés." : "Fichier rangé."); Reload(); } }' />
+}
 
 @if (unusedCanva.Count > 0)
 {
@@ -27,9 +117,60 @@
 }
 
 @* Toujours présent (masqué quand le panneau est replié) : refermer le panneau n'interrompt pas les imports en cours. *@
-<div class="card lib-upload" style="@(showUpload || (files.Count == 0 && Jobs.Count == 0) ? "" : "display:none")">
-    <MediaUploader OnImported="Imported" ShowJobs="false" Changed="StateHasChanged" @ref="uploader" />
-</div>
+@if (CanUploadHere)
+{
+    <div class="card lib-upload" style="@(showUpload || (files.Count == 0 && Jobs.Count == 0) ? "" : "display:none")">
+        <MediaUploader OnImported="Imported" ShowJobs="false" Changed="StateHasChanged" @ref="uploader" FolderId="folderId" />
+    </div>
+}
+
+@* Dossiers de la position ouverte (option « Dossiers dans la médiathèque », mode expert) : tuiles cliquables, au-dessus des fichiers. *@
+@if (subfolders.Count > 0 && search.Length == 0 && filter == "" && source == "")
+{
+    <div class="lib-grid lib-folders">
+        @foreach (var row in subfolders)
+        {
+            var r = row;
+            var inside = allFiles.Count(m => m.FolderId == r.Folder.Id);
+            var mine = r.Folder.OwnerId == Store.UserId;
+            <div class="lib-card lib-folder" role="button" tabindex="0" aria-label="Ouvrir le dossier @r.Folder.Name" @onclick="() => OpenFolder(r.Folder.Id)">
+                <div class="lib-th lib-th-folder">
+                    <Ico Name="folder" Size="34" />
+                    <span class="lib-count">@inside élément@(inside > 1 ? "s" : "")</span>
+                </div>
+                <div class="lib-body">
+                    <div class="lib-text">
+                        <span class="lib-name" title="@r.Folder.Name">@r.Folder.Name</span>
+                        <div class="lib-sub"><small class="lib-size">@(mine ? "Votre dossier" : $"Dossier de {r.OwnerName}")</small></div>
+                    </div>
+                    @if (mine) { <span class="pill dark">Propriétaire</span> }
+                    else if (r.Right == FolderRight.Write) { <span class="pill ok">Écriture</span> }
+                    else if (r.Right == FolderRight.Read) { <span class="pill blue">Lecture</span> }
+                    else { <span class="pill">Administrateur</span> }
+                    @if (mine || isAdmin)
+                    {
+                        <div class="kebab" @onclick:stopPropagation="true">
+                            <button type="button" class="kebab-btn" aria-label="Actions pour le dossier @r.Folder.Name" aria-haspopup="menu" aria-expanded="@(menuFor == r.Folder.Id ? "true" : "false")"
+                                    @onclick="() => menuFor = menuFor == r.Folder.Id ? null : r.Folder.Id"><Ico Name="dots-v" Size="18" /></button>
+                            @if (menuFor == r.Folder.Id)
+                            {
+                                <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                                <div class="kebab-menu" role="menu">
+                                    <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingId = r.Folder.Id; }"><Ico Name="users" Size="16" /> Partager…</button>
+                                    @if (r.Right == FolderRight.Owner)
+                                    {
+                                        <button type="button" role="menuitem" @onclick="() => { menuFor = null; renamingFolder = r; renameFolderValue = r.Folder.Name; newFolderError = null; }"><Ico Name="edit" Size="16" /> Renommer</button>
+                                        <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deletingFolder = r; }"><Ico Name="trash" Size="16" /> Supprimer</button>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
 
 @if (files.Count > 0 || Jobs.Count > 0)
 {
@@ -40,6 +181,7 @@
         </label>
         @if (picked.Count > 0)
         {
+            @if (FoldersShown && pickedEditable.Count > 0) { <button class="btn ghost sm" @onclick="() => folderMove = pickedEditable"><Ico Name="move" Size="14" /> Ranger dans un dossier…</button> }
             @if (canMove) { <button class="btn ghost sm" @onclick="() => bulkMove = true"><Ico Name="move" Size="14" /> Déplacer vers une autre aire…</button> }
             <button class="btn danger sm" @onclick="() => confirmDelete = picked.ToList()"><Ico Name="trash" Size="14" /> Supprimer</button>
         }
@@ -97,13 +239,13 @@
             var item = m;
             var on = picked.Contains(item.Id);
             var drive = MediaLibrary.IsDrive(item) ? drives.GetValueOrDefault(item.Info["drive"]) : null;   // fichier synchronisé depuis un dossier Drive
-            <div class="lib-card @(on ? "picked" : "") @(item.Status == "failed" ? "failed" : "")">
+            <div class="lib-card @(on ? "picked" : "") @(item.Status == "failed" ? "failed" : "") @(Selectable(item) ? "selectable" : "")" @onclick="() => ClickCard(item)">
                 <div class="lib-th">
                     @if (item.Status == "processing") { <span class="spinner-lg"></span><small class="lib-proc">Conversion en MP4…</small> }
                     else if (item.Status == "failed") { <Ico Name="x" Size="26" /><small class="lib-proc" title="@item.Error">@item.Error</small> }
                     else { <MediaThumb Media="item" /> }
-                    @if (!MediaLibrary.IsDrive(item)) { <input type="checkbox" class="sc-check lib-check" checked="@on" @onchange="() => Toggle(item.Id)" aria-label="Sélectionner @item.Name" /> }
-                    else { <input type="checkbox" class="sc-check lib-check" disabled title="Fichier synchronisé depuis un Drive : commun à toutes les aires, ni déplaçable ni supprimable d'ici" aria-label="@item.Name ne peut pas être sélectionné" /> }
+                    @if (!MediaLibrary.IsDrive(item) && CanEdit(item)) { <input type="checkbox" class="sc-check lib-check" checked="@on" @onclick:stopPropagation="true" @onchange="() => Toggle(item.Id)" aria-label="Sélectionner @item.Name" /> }
+                    else { <input type="checkbox" class="sc-check lib-check" disabled title="@(MediaLibrary.IsDrive(item) ? "Fichier synchronisé depuis un Drive : commun à toutes les aires, ni déplaçable ni supprimable d'ici" : "Dossier en lecture seule : ce fichier ne se modifie pas")" aria-label="@item.Name ne peut pas être sélectionné" /> }
                     <span class="lib-type" title="@(item.Type == "video" ? "Vidéo" : "Image")"><Ico Name="@(item.Type == "video" ? "video" : "image")" Size="15" /></span>
                     @if (MediaLibrary.IsDrive(item))
                     {
@@ -119,7 +261,7 @@
                         </div>
                     </div>
                     <span class="lib-col lib-kind" title="@(item.Type == "video" ? "Vidéo" : "Image")"><Ico Name="@(item.Type == "video" ? "video" : "image")" Size="20" /></span>
-                    <div class="kebab">
+                    <div class="kebab" @onclick:stopPropagation="true">
                         <button type="button" class="kebab-btn" aria-label="Actions pour @item.Name" aria-haspopup="menu" aria-expanded="@(menuFor == item.Id ? "true" : "false")"
                                 @onclick="() => menuFor = menuFor == item.Id ? null : item.Id"><Ico Name="dots-v" Size="18" /></button>
                         @if (menuFor == item.Id)
@@ -130,16 +272,24 @@
                                 {
                                     <span class="kebab-note">@DriveTitle(drive). Renommez ou retirez-le dans le Drive.</span>
                                 }
-                                else
+                                else if (CanEdit(item))
                                 {
                                     <button type="button" role="menuitem" @onclick="() => OpenRename(item)"><Ico Name="edit" Size="16" /> Renommer</button>
+                                }
+                                else
+                                {
+                                    <span class="kebab-note">Dossier en lecture seule : ce fichier ne se modifie pas.</span>
                                 }
                                 @if (item.FileName != null) { <a role="menuitem" href="/media/@item.FileName" download="@item.Name" @onclick="() => menuFor = null"><Ico Name="download" Size="16" /> Télécharger</a> }
                                 @if (!MediaLibrary.IsDrive(item) && canMove)
                                 {
                                     <button type="button" role="menuitem" @onclick="() => { menuFor = null; moving = item; }"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button>
                                 }
-                                @if (!MediaLibrary.IsDrive(item))
+                                @if (FoldersShown && !MediaLibrary.IsDrive(item) && CanEdit(item))
+                                {
+                                    <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (item.Id, item.Name) }; }"><Ico Name="move" Size="16" /> Ranger dans un dossier…</button>
+                                }
+                                @if (!MediaLibrary.IsDrive(item) && CanEdit(item))
                                 {
                                     <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; confirmDelete = new() { item.Id }; }"><Ico Name="trash" Size="16" /> Supprimer</button>
                                 }
@@ -273,13 +423,95 @@
     private bool bulkMove;
     private bool canMove;  // administrateur de l'organisation, avec au moins une autre aire
 
+    // ---------- Dossiers (option « Dossiers dans la médiathèque », mode expert) ----------
+
+    private bool foldersOn, isAdmin, canCreateRoot;
+    private Guid? folderId;                                   // dossier ouvert ; null : racine de l'aire
+    private List<FolderRow> folderRows = new();               // dossiers vus par la personne
+    private Dictionary<Guid, FolderRight> rights = new();
+    private List<FolderRow> subfolders = new();               // dossiers de la position ouverte
+    private List<FolderRow> crumbs = new();                   // chemin jusqu'au dossier ouvert
+    private List<MediaItem> allFiles = new();                 // tous les fichiers visibles de l'aire
+    private bool creatingFolder;
+    private string newFolderName = "", renameFolderValue = "";
+    private string? newFolderError;
+    private FolderRow? renamingFolder, deletingFolder;
+    private Guid? sharingId;
+    private List<(Guid Id, string Name)>? folderMove;
+
+    private bool FoldersShown => foldersOn && Modes.Expert;
+    private FolderRow? currentRow => folderId is { } id ? folderRows.FirstOrDefault(r => r.Folder.Id == id) : null;
+    private bool CanCreateHere => folderId is null ? canCreateRoot : currentRow is { } c && c.Right >= FolderRight.Write;
+    private bool CanUploadHere => folderId is null || currentRow is { } c && c.Right >= FolderRight.Write;
+    // À la racine, tout fichier se modifie comme avant ; dans un dossier, il faut y écrire.
+    private bool CanEdit(MediaItem m) => m.FolderId is not { } f || rights.GetValueOrDefault(f) >= FolderRight.Write;
+    private List<(Guid Id, string Name)> pickedEditable => allFiles.Where(m => picked.Contains(m.Id) && !MediaLibrary.IsDrive(m) && CanEdit(m)).Select(m => (m.Id, m.Name)).ToList();
+
+    private void OpenFolder(Guid? id)
+    {
+        folderId = id;
+        picked.Clear();
+        menuFor = null;
+        Reload();
+    }
+
     private void Reload()
     {
         canMove = Store.Read(d => d.Access.IsOrgAdmin && d.Area != null && d.Access.OrgAreaCount > 1);
-        files = Library.Files();
+        foldersOn = Store.Read(d => d.Tenant.FoldersOn);
+        isAdmin = Store.Read(d => d.Access.IsOrgAdmin);
+        canCreateRoot = Store.Read(d => FolderAccess.CanCreateAtRoot(d.Access));
+        folderRows = Library.Folders();
+        rights = folderRows.ToDictionary(r => r.Folder.Id, r => r.Right);
+        if (!FoldersShown) folderId = null;
+        else if (folderId is { } open && !rights.ContainsKey(open)) folderId = null;   // dossier retiré ou supprimé entre-temps
+        allFiles = Library.Files();
+        files = FoldersShown ? allFiles.Where(m => m.FolderId == folderId).ToList() : allFiles;
+        // À la racine : les dossiers qui n'ont pas de parent visible. Dans un dossier : ses enfants visibles.
+        subfolders = FoldersShown
+            ? folderRows.Where(r => folderId is { } fid ? r.Folder.ParentId == fid : r.Folder.ParentId is not { } p || !rights.ContainsKey(p)).ToList()
+            : new();
+        crumbs = BuildCrumbs();
         drives = Library.DriveFolders();
         unusedCanva = Library.UnusedCanva();
-        picked.IntersectWith(files.Where(f => !MediaLibrary.IsDrive(f)).Select(f => f.Id));
+        picked.IntersectWith(allFiles.Where(f => !MediaLibrary.IsDrive(f)).Select(f => f.Id));
+    }
+
+    private List<FolderRow> BuildCrumbs()
+    {
+        var list = new List<FolderRow>();
+        for (var cur = currentRow; cur != null && list.Count < FolderAccess.MaxDepth; cur = cur.Folder.ParentId is { } p ? folderRows.FirstOrDefault(r => r.Folder.Id == p) : null)
+            list.Insert(0, cur);
+        return list;
+    }
+
+    private void CreateFolder()
+    {
+        var (error, _) = Library.CreateFolder(newFolderName, folderId);
+        if (error != null) { newFolderError = error; return; }
+        creatingFolder = false;
+        Toast.Ok($"Dossier « {newFolderName.Trim()} » créé.");
+        Reload();
+    }
+
+    private void RenameFolder(FolderRow rf)
+    {
+        var error = Library.RenameFolder(rf.Folder.Id, renameFolderValue);
+        if (error != null) { newFolderError = error; return; }
+        renamingFolder = null;
+        Toast.Ok("Dossier renommé.");
+        Reload();
+    }
+
+    private void DeleteFolder(FolderRow df)
+    {
+        var error = Library.DeleteFolder(df.Folder.Id);
+        deletingFolder = null;
+        if (error != null) { Toast.Error(error); return; }
+        if (folderId == df.Folder.Id) folderId = df.Folder.ParentId;
+        picked.Clear();
+        Toast.Ok($"Dossier « {df.Folder.Name} » supprimé.");
+        Reload();
     }
 
     private Dictionary<string, DriveFolder> drives = new();   // dossiers Drive, pour situer les fichiers synchronisés
@@ -292,9 +524,13 @@
 
     private void Toggle(Guid id) { if (!picked.Remove(id)) picked.Add(id); }
 
+    // Un fichier qu'on peut sélectionner : toute la carte, sur simple appui, le coche ou le décoche.
+    private bool Selectable(MediaItem m) => !MediaLibrary.IsDrive(m) && CanEdit(m);
+    private void ClickCard(MediaItem m) { if (Selectable(m)) Toggle(m.Id); }
+
     private void ToggleAll()
     {
-        var vis = Visible.Where(m => !MediaLibrary.IsDrive(m)).Select(m => m.Id).ToList();   // les fichiers Drive ne se suppriment pas d'ici
+        var vis = Visible.Where(m => !MediaLibrary.IsDrive(m) && CanEdit(m)).Select(m => m.Id).ToList();   // les fichiers Drive ne se suppriment pas d'ici, ni ceux d'un dossier en lecture seule
         if (vis.All(picked.Contains)) picked.ExceptWith(vis); else picked.UnionWith(vis);
     }
 

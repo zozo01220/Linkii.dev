@@ -21,15 +21,15 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
     }
 
     /// <summary>Fichier choisi ou déposé dans le navigateur.</summary>
-    public async Task<Result> Import(IBrowserFile f, Guid clientId, IProgress<long>? progress = null, CancellationToken ct = default, Guid? areaId = null)
+    public async Task<Result> Import(IBrowserFile f, Guid clientId, IProgress<long>? progress = null, CancellationToken ct = default, Guid? areaId = null, Guid? folderId = null)
     {
         if (f.Size > MaxBytes) return new(null, $"« {f.Name} » dépasse la taille maximale (2 Go).");
         await using var s = f.OpenReadStream(MaxBytes, ct);
-        return await Import(s, f.Name, clientId, progress, ct, areaId);
+        return await Import(s, f.Name, clientId, progress, ct, areaId, folderId);
     }
 
     /// <summary>Fichier téléchargé par le serveur depuis une adresse publique (jamais le réseau interne : <see cref="SafeHttp"/>).</summary>
-    public async Task<Result> ImportUrl(string url, Guid clientId, Action<long, long?>? progress = null, CancellationToken ct = default, Guid? areaId = null)
+    public async Task<Result> ImportUrl(string url, Guid clientId, Action<long, long?>? progress = null, CancellationToken ct = default, Guid? areaId = null, Guid? folderId = null)
     {
         HttpResponseMessage res;
         try { res = await http.Download(url, ct); }
@@ -43,7 +43,7 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
             var name = FileNameFor(res, url);
             if (!IsSupported(name)) return new(null, "Cette adresse ne mène pas à une image ou une vidéo (formats acceptés : JPG, PNG, GIF, WEBP, SVG, MP4, MOV, AVI, MKV…).");
             await using var s = await res.Content.ReadAsStreamAsync(ct);
-            return await Import(s, name, clientId, progress == null ? null : new Progress<long>(n => progress(n, total)), ct, areaId);
+            return await Import(s, name, clientId, progress == null ? null : new Progress<long>(n => progress(n, total)), ct, areaId, folderId);
         }
     }
 
@@ -74,7 +74,7 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
     };
 
     /// <param name="areaId">Aire de gestion du fichier (celle ouverte par la personne qui importe).</param>
-    private async Task<Result> Import(Stream input, string name, Guid clientId, IProgress<long>? progress, CancellationToken ct, Guid? areaId)
+    private async Task<Result> Import(Stream input, string name, Guid clientId, IProgress<long>? progress, CancellationToken ct, Guid? areaId, Guid? folderId = null)
     {
         var ext = Path.GetExtension(name).ToLowerInvariant();
         var isImage = VideoConverter.ImageExts.Contains(ext);
@@ -123,12 +123,12 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
         if (!needsConversion)
         {
             var px = dim ?? MediaProbe.Size(source);
-            var item = new MediaItem { ClientId = clientId, AreaId = areaId ?? Guid.Empty, Name = title, Type = isVideo ? "video" : "image", FileName = id + ext, Size = written, Width = px?.W, Height = px?.H, AddedUtc = DateTime.UtcNow };
+            var item = new MediaItem { ClientId = clientId, AreaId = areaId ?? Guid.Empty, FolderId = folderId, Name = title, Type = isVideo ? "video" : "image", FileName = id + ext, Size = written, Width = px?.W, Height = px?.H, AddedUtc = DateTime.UtcNow };
             store.Write(d => { d.Media.Add(item); });
             return new(item, null);
         }
 
-        var pending = new MediaItem { ClientId = clientId, AreaId = areaId ?? Guid.Empty, Name = title, Type = "video", FileName = null, Status = "processing", Size = written, AddedUtc = DateTime.UtcNow };
+        var pending = new MediaItem { ClientId = clientId, AreaId = areaId ?? Guid.Empty, FolderId = folderId, Name = title, Type = "video", FileName = null, Status = "processing", Size = written, AddedUtc = DateTime.UtcNow };
         store.Write(d => { d.Media.Add(pending); });
         _ = Task.Run(() => ConvertInBackground(pending, source, id, dim));
         return new(pending, null);

@@ -59,6 +59,7 @@
 
     private List<MediaItem> selected = new();
     private int missing;
+    private List<Guid> hidden = new();   // fichiers du contenu rangés dans un dossier que la personne ne voit pas : gardés tels quels à l'enregistrement
     private bool picking;
     private bool Multiple => Field.Type == "medias";
     /// <summary>Ouvre le sélecteur dès l'affichage si rien n'est encore choisi (clic sur le « + » de l'aperçu).</summary>
@@ -71,10 +72,11 @@
         var all = Library.Files().ToDictionary(m => m.Id);
         var ids = AppField.MediaIds(Values.GetValueOrDefault(Field.Key));
         selected = ids.Where(all.ContainsKey).Select(id => all[id]).ToList();
-        missing = ids.Count - selected.Count;
+        hidden = ids.Where(id => !all.ContainsKey(id) && Library.Exists(id)).ToList();
+        missing = ids.Count(id => !all.ContainsKey(id) && !hidden.Contains(id));
     }
 
-    private void Save() { Values[Field.Key] = string.Join(",", selected.Select(m => m.Id)); missing = 0; _ = OnChange.InvokeAsync(); }
+    private void Save() { Values[Field.Key] = string.Join(",", selected.Select(m => m.Id).Concat(hidden)); missing = 0; _ = OnChange.InvokeAsync(); }
 
     private void Picked(List<MediaItem> items)
     {

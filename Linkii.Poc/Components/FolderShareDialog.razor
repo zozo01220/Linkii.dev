@@ -1,0 +1,115 @@
+@* Partager un dossier de la médiathèque avec des personnes ou des niveaux de droits, en lecture ou en écriture (propriétaire seulement). *@
+@inject MediaLibrary Library
+
+<div class="modal-backdrop" @onclick="Close"></div>
+<div class="modal" role="dialog" aria-modal="true" aria-labelledby="fs-title">
+    @if (info is not { } i)
+    {
+        <h3 id="fs-title">Dossier introuvable</h3>
+        <div class="modal-actions"><button class="btn" @onclick="Close">Fermer</button></div>
+    }
+    else
+    {
+        <h3 id="fs-title">Partager « @i.Folder.Name »</h3>
+        @if (!i.CanShare)
+        {
+            <p class="hint">Seul le propriétaire du dossier le partage, avec un niveau de droits qui le permet. Vous ne pouvez que voir les accès en place.</p>
+        }
+        else
+        {
+            <p class="hint">Lecture : voir et utiliser les fichiers. Écriture : en plus, téléverser, renommer, déplacer et supprimer. Le partage vaut pour les sous-dossiers.</p>
+            <div class="fs-add">
+                <select aria-label="Personne ou niveau" @bind="pick">
+                    <option value="">Ajouter une personne ou un niveau…</option>
+                    @foreach (var p in PeopleToAdd)
+                    {
+                        <option value="user:@p.Id" disabled="@(p.Reason != null)">@p.Label (@p.Detail)@(p.Reason is { } why ? " : " + why : "")</option>
+                    }
+                    @foreach (var l in LevelsToAdd)
+                    {
+                        <option value="level:@l.Id">Niveau « @l.Label » (@l.Detail)</option>
+                    }
+                </select>
+                <select aria-label="Droit" @bind="mode">
+                    <option value="read">Lecture</option>
+                    <option value="write">Écriture</option>
+                </select>
+                <button type="button" class="btn" disabled="@(pick.Length == 0)" @onclick="Add">Partager</button>
+            </div>
+        }
+
+        <div class="fs-sub">Accès actuels</div>
+        @if (i.Shares.Count == 0)
+        {
+            <p class="hint">Aucun partage : le dossier est privé à votre nom.</p>
+        }
+        @foreach (var s in i.Shares)
+        {
+            var row = s;
+            <div class="fs-row">
+                <span class="grow">
+                    <b>@row.Label</b>
+                    <small>@(row.Kind == FolderShareKind.Level ? "Niveau de droits" : "Personne")</small>
+                </span>
+                @if (i.CanShare)
+                {
+                    <select aria-label="Droit de @row.Label" @onchange='e => ChangeMode(row, e.Value?.ToString() == "write")'>
+                        <option value="read" selected="@(!row.Write)">Lecture</option>
+                        <option value="write" selected="@row.Write">Écriture</option>
+                    </select>
+                    <button type="button" class="kebab-btn" aria-label="Retirer le partage de @row.Label" title="Retirer" @onclick="() => Remove(row)"><Ico Name="x" Size="16" /></button>
+                }
+                else
+                {
+                    <span class="pill @(row.Write ? "ok" : "blue")">@(row.Write ? "Écriture" : "Lecture")</span>
+                }
+            </div>
+        }
+        @if (error != null) { <div class="err">@error</div> }
+        <p class="hint">Un membre dont le niveau est en lecture seule garde la lecture, même avec un partage en écriture.</p>
+        <div class="modal-actions">
+            <button class="btn" @onclick="Close">Fermer</button>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public Guid FolderId { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private FolderShareInfo? info;
+    private string pick = "", mode = "read";
+    private string? error;
+
+    private IEnumerable<ShareCandidate> PeopleToAdd => info == null ? Enumerable.Empty<ShareCandidate>()
+        : info.People.Where(p => !info.Shares.Any(s => s.Kind == FolderShareKind.User && s.TargetId == p.Id));
+    private IEnumerable<ShareCandidate> LevelsToAdd => info == null ? Enumerable.Empty<ShareCandidate>()
+        : info.Levels.Where(l => !info.Shares.Any(s => s.Kind == FolderShareKind.Level && s.TargetId == l.Id));
+
+    protected override void OnInitialized() => Reload();
+
+    private void Reload() => info = Library.ShareInfo(FolderId);
+
+    private void Add()
+    {
+        var parts = pick.Split(':', 2);
+        if (parts.Length != 2 || !Guid.TryParse(parts[1], out var target)) return;
+        error = Library.SetShare(FolderId, parts[0], target, mode == "write");
+        pick = "";
+        Reload();
+    }
+
+    private void ChangeMode(ShareRow row, bool write)
+    {
+        error = Library.SetShare(FolderId, row.Kind, row.TargetId, write);
+        Reload();
+    }
+
+    private void Remove(ShareRow row)
+    {
+        error = Library.SetShare(FolderId, row.Kind, row.TargetId, null);
+        Reload();
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+}

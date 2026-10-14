@@ -196,14 +196,46 @@ else
                             <p class="lv-note">Cocher = utiliser : créer et modifier des contenus avec cette app. Les connexions aux comptes restent à l'administrateur.</p>
                         </div>
                     </section>
-                    <section class="lv-sec"><h4><i>3</i>Modification</h4>
+                    @if (foldersOn && folders.Count > 0)
+                    {
+                        <section class="lv-sec"><h4><i>3</i>Dossiers de la médiathèque</h4>
+                            <div class="lv-in">
+                                @Check(lf.CanCreateFolders ? "all" : "none", "Peut créer ses dossiers", () => lf.CanCreateFolders = !lf.CanCreateFolders)
+                                @Check(lf.CanShareFolders ? "all" : "none", "Peut partager les dossiers qu'il a créés", () => lf.CanShareFolders = !lf.CanShareFolders)
+                                <div class="lv-sub">Accès aux dossiers des autres</div>
+                                <div class="seg" role="radiogroup" aria-label="Accès aux dossiers des autres">
+                                    <button type="button" role="radio" aria-checked="@(lf.FolderMode == "none" ? "true" : "false")" class="@(lf.FolderMode == "none" ? "on" : "")" @onclick='() => lf.FolderMode = "none"'>Aucun</button>
+                                    <button type="button" role="radio" aria-checked="@(lf.FolderMode == "chosen" ? "true" : "false")" class="@(lf.FolderMode == "chosen" ? "on" : "")" @onclick='() => lf.FolderMode = "chosen"'>Dossiers choisis</button>
+                                    <button type="button" role="radio" aria-checked="@(lf.FolderMode == "read" ? "true" : "false")" class="@(lf.FolderMode == "read" ? "on" : "")" @onclick='() => lf.FolderMode = "read"'>Tous, en lecture</button>
+                                    <button type="button" role="radio" aria-checked="@(lf.FolderMode == "write" ? "true" : "false")" class="@(lf.FolderMode == "write" ? "on" : "")" @onclick='() => lf.FolderMode = "write"'>Tous, en écriture</button>
+                                </div>
+                                <p class="lv-note">« Tous » couvre les dossiers déjà partagés et ceux qui le seront plus tard, jamais les dossiers privés d'un membre.</p>
+                                @foreach (var fd in folders)
+                                {
+                                    var folder = fd;
+                                    var area = areas.FirstOrDefault(a => a.Id == folder.AreaId);
+                                    var reach = area != null && AccessLevels.Reaches(lf.ToLevel(), area, screens);
+                                    var mode = lf.FolderModes.GetValueOrDefault(folder.Id, "");
+                                    <div class="lv-row @(reach ? "" : "lv-off")">
+                                        <span class="lv-lbl"><b>@folder.Name</b> <small class="muted">@area?.Name@(reach ? "" : " · hors du périmètre du niveau")</small></span>
+                                        <div class="seg">
+                                            <button type="button" class="@(mode == "" ? "on" : "")" disabled="@(!reach)" aria-label="Aucun accès à @folder.Name" @onclick='() => SetFolderMode(folder.Id, "")'>—</button>
+                                            <button type="button" class="@(mode == "read" ? "on" : "")" disabled="@(!reach)" @onclick='() => SetFolderMode(folder.Id, "read")'>Lecture</button>
+                                            <button type="button" class="@(mode == "write" ? "on" : "")" disabled="@(!reach)" @onclick='() => SetFolderMode(folder.Id, "write")'>Écriture</button>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </section>
+                    }
+                    <section class="lv-sec"><h4><i>4</i>Modification</h4>
                         <div class="lv-in">
                             @Check(l.ReadOnly ? "all" : "none", "Lecture seule : voir sans modifier ni publier", () => l.ReadOnly = !l.ReadOnly)
                         </div>
                     </section>
                 </div>
                 <div>
-                    <section class="lv-sec"><h4><i>4</i>Périmètre <span>aires › zones › écrans</span></h4>
+                    <section class="lv-sec"><h4><i>5</i>Périmètre <span>aires › zones › écrans</span></h4>
                         <div class="lv-in lv-tree">
                             @Check(l.AllAreas ? "all" : "none", "Toutes les aires, y compris celles créées plus tard", ToggleAllAreas, "lv-root")
                             @foreach (var a in areas)
@@ -284,6 +316,8 @@ else
     private List<User> people = new();
     private List<Area> areas = new();
     private List<Screen> screens = new();
+    private List<MediaFolder> folders = new();   // dossiers de la médiathèque (tous les niveaux, toutes les aires)
+    private bool foldersOn;                      // option « Dossiers dans la médiathèque » de l'organisation
     private List<AccessLevel> levels = new();
     private bool busy;
     private string orgName = "", tab = "members";
@@ -311,6 +345,8 @@ else
             d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.Token != null).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
             d.Tenant.Levels.OrderBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
             d.Users.OrderBy(u => u.Role == Roles.ClientAdmin ? 0 : 1).ThenBy(u => u.Label, StringComparer.CurrentCultureIgnoreCase).ToList()));
+        folders = Store.Read(d => d.Root.MediaFolders.Where(f => f.ClientId == d.ClientId).OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
+        foldersOn = Store.Read(d => d.Tenant.FoldersOn);
     }
 
     private AccessLevel? LevelOf(User u) => u.Role == Roles.ClientMember ? levels.FirstOrDefault(l => l.Id == u.LevelId) : null;
@@ -442,17 +478,23 @@ else
         public bool AllIntegrations, AllWidgets, ReadOnly, AllAreas, ManageZones;
         public HashSet<string> Apps = new();
         public HashSet<Guid> Areas = new(), Zones = new(), Screens = new();
+        // Dossiers de la médiathèque : « none » | « chosen » | « read » | « write » (tous les dossiers partagés), et le choix par dossier
+        public bool CanCreateFolders, CanShareFolders;
+        public string FolderMode = "none";
+        public Dictionary<Guid, string> FolderModes = new();   // dossier → « read » ou « write » (absent : aucun accès)
 
         public static LevelForm From(AccessLevel l) => new()
         {
             Id = l.Id, OldName = l.Name, Name = l.Name, Pages = [.. l.Pages], AllIntegrations = l.AllIntegrations, AllWidgets = l.AllWidgets, Apps = [.. l.Apps],
-            ReadOnly = l.ReadOnly, ManageZones = l.ManageZones, AllAreas = l.AllAreas, Areas = [.. l.AreaIds], Zones = [.. l.ZoneIds], Screens = [.. l.ScreenIds]
+            ReadOnly = l.ReadOnly, ManageZones = l.ManageZones, AllAreas = l.AllAreas, Areas = [.. l.AreaIds], Zones = [.. l.ZoneIds], Screens = [.. l.ScreenIds],
+            CanCreateFolders = l.CanCreateFolders, CanShareFolders = l.CanShareFolders, FolderMode = l.AllFolders ?? "none"
         };
 
         public AccessLevel ToLevel() => new()
         {
             Id = Id ?? Guid.NewGuid(), Name = Name, Pages = [.. Pages], AllIntegrations = AllIntegrations, AllWidgets = AllWidgets, Apps = [.. Apps], ReadOnly = ReadOnly,
-            ManageZones = ManageZones, AllAreas = AllAreas, AreaIds = [.. Areas], ZoneIds = [.. Zones], ScreenIds = [.. Screens]
+            ManageZones = ManageZones, AllAreas = AllAreas, AreaIds = [.. Areas], ZoneIds = [.. Zones], ScreenIds = [.. Screens],
+            CanCreateFolders = CanCreateFolders, CanShareFolders = CanShareFolders, AllFolders = FolderMode is "read" or "write" ? FolderMode : null
         };
     }
 
@@ -460,6 +502,13 @@ else
     {
         menuFor = null; levelError = null; open.Clear();
         lf = l == null ? new LevelForm { Pages = [LevelPages.Screens, LevelPages.Playlists, LevelPages.Media], AllIntegrations = true, AllWidgets = true } : LevelForm.From(l);
+        if (l != null)
+        {
+            foreach (var f in folders)
+                foreach (var s in f.Shares.Where(s => s.Kind == FolderShareKind.Level && s.TargetId == l.Id))
+                    lf.FolderModes[f.Id] = s.Write ? "write" : "read";
+            if (lf.FolderMode == "none" && lf.FolderModes.Count > 0) lf.FolderMode = "chosen";
+        }
         if (areas.Count == 1) open.Add(areas[0].Id);   // une seule aire : ses zones sont déjà dépliées
     }
 
@@ -473,11 +522,18 @@ else
     {
         if (lf is not { } f) return;
         var level = f.ToLevel();
-        levelError = Store.Write(d => AccessLevels.Save(d, level));
+        // les dossiers ne sont réécrits que si l'option est active : éteinte, les partages existants restent intacts
+        levelError = Store.Write(d => AccessLevels.Save(d, level) ?? (foldersOn ? FolderOps.SetLevelShares(d, level.Id, f.FolderModes) : null));
         if (levelError != null) return;
         Toast.Ok(f.Id == null ? $"Niveau « {level.Name.Trim()} » créé." : $"Niveau « {level.Name.Trim()} » enregistré : ses membres le reçoivent aussitôt.");
         lf = null;
         Load();
+    }
+
+    private void SetFolderMode(Guid folderId, string mode)
+    {
+        if (lf == null) return;
+        if (mode == "") lf.FolderModes.Remove(folderId); else lf.FolderModes[folderId] = mode;
     }
 
     private void DeleteLevel()

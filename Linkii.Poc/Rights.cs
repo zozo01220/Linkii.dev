@@ -47,6 +47,11 @@ public class AccessLevel
     public bool ReadOnly { get; set; }
     /// <summary>Gérer les zones et les murs (dans les aires du périmètre) : page Zones, menu Zones, créer, renommer, synchroniser, supprimer.</summary>
     public bool ManageZones { get; set; }
+    /// <summary>Dossiers de la médiathèque (option de l'organisation) : créer des dossiers à la racine de ses aires ; partager les dossiers dont il est propriétaire.</summary>
+    public bool CanCreateFolders { get; set; }
+    public bool CanShareFolders { get; set; }
+    /// <summary>Accès à tous les dossiers partagés de l'organisation : null, « read » ou « write ». Les dossiers privés d'un autre ne sont jamais donnés.</summary>
+    public string? AllFolders { get; set; }
 
     // Périmètre : un élément coché donne tout ce qu'il contient, y compris ce qui y sera ajouté plus tard.
     public bool AllAreas { get; set; }
@@ -60,6 +65,7 @@ public class AccessLevel
     public AccessLevel Copy() => new()
     {
         Id = Id, Name = Name, Pages = [.. Pages], AllIntegrations = AllIntegrations, AllWidgets = AllWidgets, Apps = [.. Apps], ReadOnly = ReadOnly, ManageZones = ManageZones,
+        CanCreateFolders = CanCreateFolders, CanShareFolders = CanShareFolders, AllFolders = AllFolders,
         AllAreas = AllAreas, AreaIds = [.. AreaIds], ZoneIds = [.. ZoneIds], ScreenIds = [.. ScreenIds]
     };
 }
@@ -117,6 +123,7 @@ public static class AccessLevels
         if (levels.Any(l => l.Id != level.Id && l.Name.Equals(level.Name, StringComparison.CurrentCultureIgnoreCase))) return "Un niveau porte déjà ce nom.";
         if (!level.HasScope) return "Choisissez au moins une aire, une zone ou un écran : sans périmètre, la personne ne verrait rien.";
         level.Pages = level.Pages.Where(LevelPages.Offered.Contains).Distinct().ToList();
+        if (level.AllFolders is not ("read" or "write")) level.AllFolders = null;
         level.Apps = level.Apps.Distinct().ToList();
         var i = levels.FindIndex(l => l.Id == level.Id);
         if (i >= 0) levels[i] = level; else levels.Add(level);
@@ -136,6 +143,7 @@ public static class AccessLevels
         var used = MembersOf(d, levelId);
         if (used.Count > 0) return $"Ce niveau est donné à {string.Join(", ", used.Take(5).Select(u => u.Label))}{(used.Count > 5 ? $" et {used.Count - 5} autre(s)" : "")} : donnez-leur d'abord un autre niveau.";
         d.Tenant.Levels.RemoveAll(l => l.Id == levelId);
+        foreach (var f in d.Root.MediaFolders.Where(f => f.ClientId == d.ClientId)) f.Shares.RemoveAll(s => s.Kind == FolderShareKind.Level && s.TargetId == levelId);   // ses partages de dossiers tombent avec lui
         return null;
     }
 
