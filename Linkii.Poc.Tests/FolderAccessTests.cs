@@ -113,6 +113,17 @@ public class FolderAccessTests
     }
 
     [Fact]
+    public void The_media_audience_counts_the_people_with_the_media_page()
+    {
+        var f = Make(alice, "Affiches");
+        Assert.Null(FolderOps.SetShare(As(alice), f.Id, FolderShareKind.User, marc.Id, false));
+        Assert.Null(FolderOps.SetShare(As(alice), f.Id, FolderShareKind.User, lea.Id, false));
+        Assert.Null(FolderOps.SetShare(As(alice), f.Id, FolderShareKind.Level, caisse.Id, false));   // Sophie : niveau Caisse, sans la page Médiathèque
+        var a = FolderAudiences.Compute(As(admin), FolderOps.All(As(admin)), new[] { f }, LevelPages.Media)[f.Id];
+        Assert.Equal(new[] { "lea@horizon.ch", "marc@horizon.ch" }, a.People.Select(p => p.Label).ToArray());
+    }
+
+    [Fact]
     public void All_folders_gives_the_media_folders_of_an_administrator_even_unshared()
     {
         editeur.AllFolders = "read";

@@ -90,8 +90,14 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
             var label = s.Kind == FolderShareKind.Level ? levels.FirstOrDefault(l => l.Id == s.TargetId)?.Label : people.FirstOrDefault(p => p.Id == s.TargetId)?.Label;
             return new ShareRow(s.Kind, s.TargetId, label ?? "Retiré de l'organisation", s.Write);
         }).ToList();
-        return new FolderShareInfo(f, shares, people, levels, FolderAccess.CanShare(d.Access, f));
+        return new FolderShareInfo(f, shares, people, levels, FolderAccess.CanShare(d.Access, f), Audience(d, f));
     });
+
+    /// <summary>Personnes qui ont accès à chaque dossier vu (nombre de l'icône Partage).</summary>
+    public Dictionary<Guid, FolderAudience> Audiences() => store.Read(d => FolderAudiences.Compute(d, FolderOps.All(d), d.MediaFolders.ToList(), LevelPages.Media));
+
+    private static FolderAudience Audience(ClientDb d, MediaFolder f) =>
+        FolderAudiences.Compute(d, FolderOps.All(d), new[] { f }, LevelPages.Media).GetValueOrDefault(f.Id, FolderAudience.None);
 
     public string? SetShare(Guid folderId, string kind, Guid target, bool? write) => store.Write(d => { return FolderOps.SetShare(d, folderId, kind, target, write); });
 
@@ -249,4 +255,4 @@ public record ShareCandidate(Guid Id, string Label, string Detail, string? Reaso
 public record ShareRow(string Kind, Guid TargetId, string Label, bool Write);
 
 /// <summary>Partages d'un dossier : ceux en place, les personnes et niveaux possibles, et si la personne peut partager.</summary>
-public record FolderShareInfo(MediaFolder Folder, List<ShareRow> Shares, List<ShareCandidate> People, List<ShareCandidate> Levels, bool CanShare);
+public record FolderShareInfo(MediaFolder Folder, List<ShareRow> Shares, List<ShareCandidate> People, List<ShareCandidate> Levels, bool CanShare, FolderAudience Audience);

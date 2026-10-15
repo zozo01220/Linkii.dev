@@ -67,6 +67,76 @@ public static class FolderAccess
     }
 }
 
+/// <summary>Une personne qui a accès à un dossier : choisie une à une (LevelName null) ou par un niveau de droits.</summary>
+public record AudiencePerson(Guid Id, string Label, bool Write, string? LevelName);
+
+/// <summary>Un niveau de droits avec lequel un dossier est partagé, et combien de ses membres ont réellement accès.</summary>
+public record AudienceLevel(string Name, int Members, bool Write);
+
+/// <summary>
+/// Les personnes qui ont accès à un dossier par un partage (l'icône Partage et son nombre, §53) : membres de l'organisation, comptes actifs,
+/// qui voient l'aire du dossier et ont la page concernée. Chaque personne compte une fois (en direct et par son niveau). Le propriétaire et
+/// les administrateurs ne sont pas comptés ; les partages du dossier parent comptent (le sous-dossier est bien vu par ces personnes).
+/// </summary>
+public class FolderAudience
+{
+    public List<AudiencePerson> People { get; init; } = new();
+    public List<AudienceLevel> Levels { get; init; } = new();
+    public int Count => People.Count;
+    /// <summary>Personnes choisies une à une, puis celles qui n'ont accès que par un niveau.</summary>
+    public int Direct => People.Count(p => p.LevelName == null);
+    public int ByLevel => People.Count(p => p.LevelName != null);
+    public static readonly FolderAudience None = new();
+}
+
+public static class FolderAudiences
+{
+    /// <summary>Public de chaque dossier donné ; page : la page que le membre doit avoir (<see cref="LevelPages.Media"/> ou <see cref="LevelPages.Playlists"/>).</summary>
+    public static Dictionary<Guid, FolderAudience> Compute<T>(ClientDb d, IReadOnlyCollection<T> all, IEnumerable<T> folders, string page) where T : class, IFolderNode
+    {
+        var levelNames = d.Tenant.Levels.ToDictionary(l => l.Id, l => l.Name);
+        // les accès des membres sont calculés une fois, pas à chaque dossier
+        var members = new List<(User U, AreaAccess A)>();
+        foreach (var u in d.Users.Where(u => u.Role == Roles.ClientMember && !u.Disabled))
+        {
+            var a = AreaAccess.For(d.Root, d.ClientId, u.Id);
+            if (a.Level?.Pages.Contains(page) == true) members.Add((u, a));
+        }
+
+        var result = new Dictionary<Guid, FolderAudience>();
+        foreach (var f in folders)
+        {
+            var chain = FolderAccess.Chain(f, all).ToList();
+            var people = new List<AudiencePerson>();
+            var perLevel = new Dictionary<Guid, (int Members, bool Write)>();
+            foreach (var (u, a) in members)
+            {
+                if (u.Id == f.OwnerId || !a.HasArea(f.AreaId)) continue;
+                bool direct = false, write = false;
+                Guid? viaLevel = null;
+                foreach (var s in chain.SelectMany(n => n.Shares))
+                {
+                    if (s.Kind == FolderShareKind.User && s.TargetId == u.Id) { direct = true; write |= s.Write; }
+                    else if (s.Kind == FolderShareKind.Level && u.LevelId is { } lid && s.TargetId == lid)
+                    {
+                        viaLevel ??= lid; write |= s.Write;
+                        var cur = perLevel.GetValueOrDefault(lid);
+                        perLevel[lid] = (cur.Members + 1, cur.Write | s.Write);
+                    }
+                }
+                if (!direct && viaLevel == null) continue;
+                people.Add(new AudiencePerson(u.Id, u.Label, write && !a.ReadOnly, direct ? null : levelNames.GetValueOrDefault(viaLevel!.Value, "Niveau")));
+            }
+            result[f.Id] = new FolderAudience
+            {
+                People = people.OrderBy(p => p.Label, StringComparer.CurrentCultureIgnoreCase).ToList(),
+                Levels = perLevel.Select(kv => new AudienceLevel(levelNames.GetValueOrDefault(kv.Key, "Niveau"), kv.Value.Members, kv.Value.Write)).OrderBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase).ToList()
+            };
+        }
+        return result;
+    }
+}
+
 /// <summary>Création, renommage, suppression, partage et rangement des fichiers dans les dossiers. Chaque méthode rend un message d'erreur, ou null si c'est fait.</summary>
 public static class FolderOps
 {

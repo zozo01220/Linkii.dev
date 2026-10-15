@@ -1,0 +1,50 @@
+@* Icône Partage d'un dossier (§53) : picto + nombre de personnes qui y ont accès, et une infobulle (qui, avec quel droit).
+   Gris : partagé avec des personnes ; bleu : partage par niveau ; ambre + cadenas : dossier d'un autre en lecture seule.
+   Cliquable (ouvre le partage) seulement pour le propriétaire et l'administrateur ; sinon, l'infobulle seule. Rien pour un dossier privé. *@
+@if (Audience.Count > 0)
+{
+    var count = Audience.Count;
+    var text = Long ? $"{count} personne{(count > 1 ? "s" : "")}" : count.ToString();
+    var cls = ReadOnly ? "ro" : Audience.Levels.Count > 0 ? "lvl" : "";
+    <span class="share-wrap" @onclick:stopPropagation="true">
+        @if (Clickable)
+        {
+            <button type="button" class="share @cls" aria-label="Partagé avec @count personne@(count > 1 ? "s" : "") : gérer le partage" @onclick="OnClick"><Ico Name="@(ReadOnly ? "lock" : "users")" Size="13" /> @text</button>
+        }
+        else
+        {
+            <span class="share @cls" tabindex="0" role="note" aria-label="Partagé avec @count personne@(count > 1 ? "s" : "")"><Ico Name="@(ReadOnly ? "lock" : "users")" Size="13" /> @text</span>
+        }
+        <span class="share-tip" role="tooltip">
+            <b class="share-h">Partagé avec @count personne@(count > 1 ? "s" : "")</b>
+            @if (!string.IsNullOrEmpty(OwnerName))
+            {
+                <span class="share-r"><span class="grow">@OwnerName <small>propriétaire</small></span></span>
+            }
+            @foreach (var p in Audience.People.Where(p => p.LevelName == null).Take(8))
+            {
+                <span class="share-r"><span class="grow">@p.Label</span><span class="pill @(p.Write ? "ok" : "blue")">@(p.Write ? "Écriture" : "Lecture")</span></span>
+            }
+            @if (Audience.Direct > 8) { <span class="share-r"><small>et @(Audience.Direct - 8) autre@(Audience.Direct - 8 > 1 ? "s" : "")</small></span> }
+            @foreach (var l in Audience.Levels)
+            {
+                <span class="share-r"><span class="grow">Niveau « @l.Name » <small>@l.Members membre@(l.Members > 1 ? "s" : "")</small></span><span class="pill @(l.Write ? "ok" : "blue")">@(l.Write ? "Écriture" : "Lecture")</span></span>
+            }
+            @if (ReadOnly) { <small class="share-n">Dossier en lecture seule : seul le propriétaire gère son partage.</small> }
+            else if (!Clickable) { <small class="share-n">Seul le propriétaire gère le partage.</small> }
+        </span>
+    </span>
+}
+
+@code {
+    [Parameter, EditorRequired] public FolderAudience Audience { get; set; } = FolderAudience.None;
+    /// <summary>Ouvre la fenêtre de partage (propriétaire, administrateur).</summary>
+    [Parameter] public bool Clickable { get; set; }
+    /// <summary>Dossier d'un autre, vu en lecture seule : cadenas ambre.</summary>
+    [Parameter] public bool ReadOnly { get; set; }
+    /// <summary>« 5 personnes » (titre du dossier ouvert) au lieu de « 5 » (puce).</summary>
+    [Parameter] public bool Long { get; set; }
+    /// <summary>Nom du propriétaire, cité dans l'infobulle quand ce n'est pas la personne connectée.</summary>
+    [Parameter] public string? OwnerName { get; set; }
+    [Parameter] public EventCallback OnClick { get; set; }
+}

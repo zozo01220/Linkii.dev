@@ -65,8 +65,14 @@ public class PlaylistLibrary(TenantStore store)
             var label = s.Kind == FolderShareKind.Level ? levels.FirstOrDefault(l => l.Id == s.TargetId)?.Label : people.FirstOrDefault(p => p.Id == s.TargetId)?.Label;
             return new ShareRow(s.Kind, s.TargetId, label ?? "Retiré de l'organisation", s.Write);
         }).ToList();
-        return new PlaylistShareInfo(f, shares, people, levels, FolderAccess.CanShare(d.Access, f));
+        return new PlaylistShareInfo(f, shares, people, levels, FolderAccess.CanShare(d.Access, f), Audience(d, f));
     });
+
+    /// <summary>Personnes qui ont accès à chaque dossier vu (nombre de l'icône Partage).</summary>
+    public Dictionary<Guid, FolderAudience> Audiences() => store.Read(d => FolderAudiences.Compute(d, PlaylistFolderOps.All(d), d.PlaylistFolders.ToList(), LevelPages.Playlists));
+
+    private static FolderAudience Audience(ClientDb d, PlaylistFolder f) =>
+        FolderAudiences.Compute(d, PlaylistFolderOps.All(d), new[] { f }, LevelPages.Playlists).GetValueOrDefault(f.Id, FolderAudience.None);
 
     public string? SetShare(Guid folderId, string kind, Guid target, bool? write) => store.Write(d => PlaylistFolderOps.SetShare(d, folderId, kind, target, write));
 
@@ -151,4 +157,4 @@ public static class PlaylistUses
 public record PlaylistFolderRow(PlaylistFolder Folder, FolderRight Right, string OwnerName, bool Shared);
 
 /// <summary>Partages d'un dossier de listes : ceux en place, les personnes et niveaux possibles, et si la personne peut partager.</summary>
-public record PlaylistShareInfo(PlaylistFolder Folder, List<ShareRow> Shares, List<ShareCandidate> People, List<ShareCandidate> Levels, bool CanShare);
+public record PlaylistShareInfo(PlaylistFolder Folder, List<ShareRow> Shares, List<ShareCandidate> People, List<ShareCandidate> Levels, bool CanShare, FolderAudience Audience);

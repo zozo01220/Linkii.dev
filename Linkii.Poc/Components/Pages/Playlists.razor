@@ -26,7 +26,8 @@
             }
             <span class="lx-sl">/</span>
             <span>@cur.Folder.Name</span>
-            <span class="lx-right @(cur.Right == FolderRight.Read ? "ro" : "")"><Ico Name="@(cur.Right == FolderRight.Read ? "lock" : cur.Shared ? "users" : "folder")" Size="12" /> @RightLabel(cur)</span>
+            <span class="lx-right @(cur.Right == FolderRight.Read ? "ro" : "")"><Ico Name="@(cur.Right == FolderRight.Read ? "lock" : "folder")" Size="12" /> @RightLabel(cur)</span>
+            <SharePill Audience="AudienceOf(cur.Folder.Id)" Long="true" Clickable="cur.Right == FolderRight.Owner || cur.Folder.OwnerId == Store.UserId" ReadOnly="cur.Right == FolderRight.Read" OwnerName="@(cur.Folder.OwnerId == Store.UserId ? null : cur.OwnerName)" OnClick="() => sharingId = cur.Folder.Id" />
         }
         else
         {
@@ -128,8 +129,7 @@ else
                     <Ico Name="folder" Size="17" />
                     <span class="nm">@r.Folder.Name</span>
                     <small>@inside</small>
-                    @if (r.Right == FolderRight.Read) { <span class="ic" title="Lecture seule"><Ico Name="lock" Size="13" /></span> }
-                    else if (r.Shared) { <span class="ic" title="Partagé"><Ico Name="users" Size="13" /></span> }
+                    <SharePill Audience="AudienceOf(r.Folder.Id)" Clickable="mine || isAdmin" ReadOnly="r.Right == FolderRight.Read" OwnerName="@(mine ? null : r.OwnerName)" OnClick="() => sharingId = r.Folder.Id" />
                     @if (mine || isAdmin)
                     {
                         <div class="kebab" @onclick:stopPropagation="true">
@@ -397,6 +397,8 @@ else
     private Guid? folderId;                                   // dossier ouvert ; null : racine de l'aire
     private List<PlaylistFolderRow> folderRows = new();       // dossiers vus par la personne
     private Dictionary<Guid, FolderRight> rights = new();     // droit sur chaque liste vue
+    private Dictionary<Guid, FolderAudience> audiences = new();   // personnes qui ont accès à chaque dossier (icône Partage)
+    private FolderAudience AudienceOf(Guid folder) => audiences.GetValueOrDefault(folder, FolderAudience.None);
     private List<PlaylistFolderRow> subfolders = new();       // dossiers de la position ouverte
     private List<PlaylistFolderRow> crumbs = new();           // chemin jusqu'au dossier ouvert
     private bool creatingFolder;
@@ -432,6 +434,7 @@ else
         canCreateRoot = Store.Read(d => FolderAccess.CanCreateAtRoot(d.Access));
         folderRows = foldersOn ? Library.Folders() : new();
         rights = Library.PlaylistRights();
+        audiences = foldersOn ? Library.Audiences() : new();
         if (!foldersOn) folderId = null;
         else if (folderId is { } open && !folderRows.Any(r => r.Folder.Id == open)) folderId = null;   // dossier retiré entre-temps
         // une liste rangée dans un dossier que la personne ne voit pas n'apparaît pas
@@ -568,7 +571,7 @@ else
     }
 
     private string RightLabel(PlaylistFolderRow r) =>
-        r.Folder.OwnerId == Store.UserId ? $"Votre dossier · {(r.Shared ? "partagé" : "privé")}"
+        r.Folder.OwnerId == Store.UserId ? (r.Shared ? "Votre dossier" : "Votre dossier · privé")
         : r.Right switch
         {
             FolderRight.Read => $"Lecture seule · dossier de {r.OwnerName}",

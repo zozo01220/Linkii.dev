@@ -1208,3 +1208,30 @@ Signalement : la visibilité des dossiers réglée dans un niveau de droits ne m
 
 ### Limite
 - Le serveur ne refuse pas encore qu'un membre choisisse, par une requête forgée, une liste qu'il ne voit pas : seuls les sélecteurs filtrent.
+
+## 53. Icône Partage et nombre de personnes sur les dossiers (15 octobre 2026) : codé
+
+Demande : sur les dossiers de la médiathèque et des listes de lecture, une icône Partage avec le nombre de personnes avec qui le dossier est partagé. Maquette validée : `maquettes/dossiers-icone-partage.html` (puces, infobulle, titre et fenêtre de partage, règles de comptage). Décisions : un niveau compte ses membres ; la pastille d'un dossier d'un autre, en lecture seule, n'est pas cliquable.
+
+### Comportement
+- **Puce de dossier** : après l'effectif, une pastille picto + nombre (`SharePill`). Gris : personnes ; **bleu** : au moins un partage par niveau ; **ambre + cadenas** : dossier d'un autre en lecture seule. Dossier privé (ou partage sans personne concernée) : rien.
+- **Clic** : ouvre la fenêtre de partage, seulement pour le propriétaire et l'administrateur (même règle que le menu ⋮) ; sinon la pastille est un simple repère (focus clavier compris) qui ne fait qu'afficher l'infobulle.
+- **Infobulle** (survol ou focus) : propriétaire (si ce n'est pas soi), personnes choisies avec leur droit (8 au plus, puis « et N autres »), niveaux avec leur nombre de membres, et une note quand on ne gère pas le partage.
+- **Titre d'un dossier ouvert** : « 3 personnes », même pastille, même clic. La pastille « Votre dossier · partagé » devient « Votre dossier » (privé : « Votre dossier · privé »).
+- **Fenêtre de partage** (médiathèque et listes) : ligne de total « 5 personnes y ont accès : 2 choisies une à une, 3 par le niveau « Éditeur » », ou un message si personne n'est concerné.
+
+### Règle de comptage (`FolderAudiences.Compute`, un seul calcul pour tout)
+- Membres de l'organisation, comptes actifs, qui voient l'aire du dossier et ont la page concernée (Médiathèque ou Listes de lecture).
+- Une personne compte **une fois** (partagée en direct et par son niveau : droit le plus fort, comptée « en direct »).
+- Le **propriétaire** et les **administrateurs** ne sont pas comptés.
+- Un **sous-dossier** compte aussi les partages de ses parents.
+- Un niveau en lecture seule ne compte jamais en écriture.
+- Les accès des membres sont calculés une fois par page, pas par dossier.
+
+### Fichiers
+- Nouveaux : `Components/SharePill.razor`. Modifiés : `Folders.cs` (`FolderAudience`, `FolderAudiences`), `MediaLibrary.cs` et `PlaylistLibrary.cs` (`Audiences()`, `Audience` dans `FolderShareInfo` / `PlaylistShareInfo`), `Components/Pages/Media.razor`, `Components/Pages/Playlists.razor`, `Components/FolderShareDialog.razor`, `Components/PlaylistFolderShareDialog.razor`, `wwwroot/app.css` (`.share*`, `.fs-total`).
+- Tests : 6 dans `PlaylistFolderTests`, 1 dans `FolderAccessTests` (un seul compte, propriétaire exclu, niveau et comptes désactivés, page ou aire manquante, héritage, lecture seule, page Médiathèque). Ils passent ; toujours les 5 échecs connus de `AppsTests`.
+- Vérifié dans le navigateur (instance de test) : administrateur (pastille bleue « 3 » sur « Affiches », infobulle, clic → fenêtre avec total, titre « 3 personnes », « Événements » à 2) et membre (pastilles non cliquables, ambre pour la lecture seule, propriétaire cité).
+
+### Remarque d'outillage
+- Quand l'appli de dev tourne, `dotnet test` échoue (exécutable verrouillé) : les tests de cette session ont été lancés sur une copie du dépôt (`robocopy` hors `bin`, `obj`, `.git`, `Unicom-medias`).

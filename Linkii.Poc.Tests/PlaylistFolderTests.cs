@@ -239,6 +239,75 @@ public class PlaylistFolderTests
         Assert.Equal(FolderRight.Read, PlaylistOps.RightOf(As(lea), p));
     }
 
+    // ---------- Icône Partage : nombre de personnes (§53) ----------
+
+    FolderAudience Audience(PlaylistFolder f) =>
+        FolderAudiences.Compute(As(admin), PlaylistFolderOps.All(As(admin)), new[] { f }, LevelPages.Playlists)[f.Id];
+
+    [Fact]
+    public void A_private_folder_has_no_audience()
+    {
+        var f = MakeFolder(alice, "Brouillons");
+        Assert.Equal(0, Audience(f).Count);
+    }
+
+    [Fact]
+    public void A_person_is_counted_once_even_shared_directly_and_by_level_and_the_owner_never()
+    {
+        var f = MakeFolder(alice, "Campagnes");
+        Assert.Null(PlaylistFolderOps.SetShare(As(alice), f.Id, FolderShareKind.User, marc.Id, true));
+        Assert.Null(PlaylistFolderOps.SetShare(As(alice), f.Id, FolderShareKind.Level, editeur.Id, false));   // Alice (propriétaire) et Marc sont éditeurs
+        var a = Audience(f);
+        Assert.Equal(1, a.Count);
+        Assert.Equal("marc@horizon.ch", a.People[0].Label);
+        Assert.True(a.People[0].Write);        // le plus fort des deux partages
+        Assert.Null(a.People[0].LevelName);    // choisi une à une
+        Assert.Equal(1, a.Direct);
+        Assert.Equal(0, a.ByLevel);
+    }
+
+    [Fact]
+    public void A_level_share_counts_its_members_who_can_actually_open_the_folder()
+    {
+        var f = MakeFolder(admin, "Commun");
+        var autre = Member("zoe@horizon.ch", editeur);
+        var desactive = Member("max@horizon.ch", editeur); desactive.Disabled = true;
+        db.Users.AddRange([autre, desactive]);
+        Assert.Null(FolderOps.SetLevelShares(As(admin), editeur.Id, new Dictionary<Guid, string> { [f.Id] = "read" }));
+
+        var a = Audience(f);
+        Assert.Equal(new[] { "alice@horizon.ch", "marc@horizon.ch", "zoe@horizon.ch" }, a.People.Select(p => p.Label).ToArray());   // ni le compte désactivé, ni les autres niveaux
+        Assert.Equal("Éditeur", a.People[0].LevelName);
+        var level = Assert.Single(a.Levels);
+        Assert.Equal(("Éditeur", 3, false), (level.Name, level.Members, level.Write));
+    }
+
+    [Fact]
+    public void A_member_without_the_lists_page_or_outside_the_area_is_not_counted()
+    {
+        var f = MakeFolder(alice, "Équipe");
+        Assert.Null(PlaylistFolderOps.SetShare(As(alice), f.Id, FolderShareKind.Level, sansListes.Id, false));
+        f.Shares.Add(new FolderShare { Kind = FolderShareKind.User, TargetId = sophie.Id });
+        Assert.Equal(0, Audience(f).Count);   // Sophie n'a pas la page Listes de lecture
+    }
+
+    [Fact]
+    public void A_subfolder_counts_the_shares_of_its_parent()
+    {
+        var f = MakeFolder(alice, "Parent");
+        var sub = MakeFolder(alice, "Enfant", f.Id);
+        Assert.Null(PlaylistFolderOps.SetShare(As(alice), f.Id, FolderShareKind.User, marc.Id, false));
+        Assert.Equal(1, Audience(sub).Count);
+    }
+
+    [Fact]
+    public void A_read_only_level_never_counts_as_writing()
+    {
+        var f = MakeFolder(admin, "Vitrines");
+        Assert.Null(PlaylistFolderOps.SetShare(As(admin), f.Id, FolderShareKind.User, lea.Id, true));
+        Assert.False(Audience(f).People.Single().Write);
+    }
+
     [Fact]
     public void The_lists_offered_on_screens_are_the_visible_ones_plus_those_already_in_place()
     {
