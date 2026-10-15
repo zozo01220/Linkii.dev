@@ -1315,3 +1315,27 @@ La racine étant réservée aux administrateurs, les fichiers Drive (tous stock�
 ### Retouches de la médiathèque et des listes (15 octobre 2026)
 - **Vignettes plus grandes** : galerie de la médiathèque en colonnes de 220 px minimum (au lieu de 170) et espacement augmenté (`.lx-mgrid`, `app.css`). Mobile inchangé (2 colonnes).
 - **Dossiers toujours affichés** : une recherche ou un filtre (type, source, non utilisés) ne masque plus les dossiers du dossier courant, dans la médiathèque comme dans les listes de lecture (`Media.razor`, `Playlists.razor`). Avec « Dans : toute l'aire », ce sont toujours les dossiers du dossier courant.
+
+## 57. Barres d'outils épurées : menu Filtres sur six pages (15 octobre 2026) : codé
+
+Maquette validée : mêmes gestes partout, une seule ligne d'outils (recherche, Filtres, tri discret, affichage) et les filtres actifs en puces dessous.
+
+### Composants communs
+- `FilterMenu.razor` : bouton « Filtres » (badge du nombre de filtres actifs) qui ouvre un menu à critères ; chaque critère est une rangée de choix avec effectif. Un critère est actif quand sa valeur n'est pas la valeur vide (« Tous »). Paramètres : `Groups`, `OnPick`, `OnReset`, `Extra` (filtres hors critères), `Footer` (contenu libre).
+- `FilterChips.razor` : filtres actifs en puces retirables d'un clic + « Tout effacer » (rien tant qu'aucun filtre n'est actif).
+- `FilterModels.cs` : `FilterOption`, `FilterGroup`, `FilterExtra`.
+- `app.css` : `.fm`, `.tb-btn`, `.fm-pop`, `.fc`, `.tb-seg` (commutateur à quelques choix), `.tb-sort` (tri sans cadre) ; la recherche prend la place libre.
+
+### Pages
+- **Médiathèque** : Type, Utilisation, Source (seulement s'il y en a plusieurs) ; « Chercher dans : toute l'aire / ce dossier » dans le pied du menu (puce « Dans : ce dossier » quand actif).
+- **Listes de lecture** : Utilisation (Utilisées, À publier si besoin, Non utilisées), même portée de recherche.
+- **Écrans** : Zone et État dans « Filtres » (« Gérer les zones… » dans le pied), bouton Planning à côté quand une zone est choisie ; « Tout sélectionner » n'apparaît plus qu'une fois une sélection commencée.
+- **Intégrations** : catégorie dans « Filtres ». « Connecter un compte » n'est plus en en-tête que sur l'onglet Comptes connectés.
+- **Comptes connectés** : fournisseur dans « Filtres ».
+- **Widgets** : Tous | Actifs | Inactifs en commutateur direct (un seul critère à trois choix).
+
+### Niveau de droits
+- Onglet « Contenus et widgets » : l'icône de chaque app (`AppIcon`) précède son nom dans la liste des interrupteurs (`Check(..., appId)`).
+
+### Limites
+- Non essayé dans le navigateur (l'app tournait et verrouillait l'exe : compilation vérifiée seulement). Le menu reste ouvert après un choix, pour combiner les critères.

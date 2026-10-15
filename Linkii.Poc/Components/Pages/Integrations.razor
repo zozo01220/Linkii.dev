@@ -15,7 +15,7 @@
         <h1>Intégrations</h1>
         <p class="sub">Les sources de contenus de vos listes de lecture et les comptes qui y donnent accès.</p>
     </div>
-    @if (admin && Addable.Any())
+    @if (admin && accountsTab && Addable.Any())
     {
       <div class="row head-actions">
         <div class="kebab add-menu">
@@ -62,15 +62,10 @@
             <Ico Name="search" Size="16" />
             <input placeholder="Rechercher une intégration" aria-label="Rechercher une intégration" @bind="search" @bind:event="oninput" />
         </div>
-        <select @bind="filter" aria-label="Filtrer par catégorie">
-            <option value="">Toutes les catégories</option>
-            @foreach (var s in Sections)
-            {
-                <option value="@s.Category">@s.Title</option>
-            }
-        </select>
+        <FilterMenu Groups="CatGroups" OnPick="p => filter = p.Value" OnReset="() => filter = string.Empty" />
         <ViewToggle StorageKey="integrations" @bind-Value="view" />
     </div>
+    <FilterChips Groups="CatGroups" OnClear="_ => filter = string.Empty" OnResetAll="() => filter = string.Empty" />
 
     @if (Groups.Count == 0)
     {
@@ -138,12 +133,10 @@ else
                 <Ico Name="search" Size="16" />
                 <input placeholder="Rechercher un compte" aria-label="Rechercher un compte" @bind="accSearch" @bind:event="oninput" />
             </div>
-            <select @bind="accFilter" aria-label="Filtrer par fournisseur">
-                <option value="">Tous les fournisseurs</option>
-                @foreach (var k in accounts) { <option value="@k.Id">@k.Kind</option> }
-            </select>
+            <FilterMenu Groups="AccGroups" OnPick="p => accFilter = p.Value" OnReset="() => accFilter = string.Empty" />
             <ViewToggle StorageKey="accounts" @bind-Value="accView" />
         </div>
+        <FilterChips Groups="AccGroups" OnClear="_ => accFilter = string.Empty" OnResetAll="() => accFilter = string.Empty" />
     }
     <div class="acc-list @(accView == "list" ? "list" : "")">
         @foreach (var acc in ShownAccounts)
@@ -365,6 +358,8 @@ else
     private string? connectKind;   // Microsoft ou Google : choix des accès avant la connexion
     private bool wantCalendars = true, wantFiles = true;
     private string? connectingServer;   // serveur CalDAV ou Exchange ajouté depuis « Connecter un compte » : source activée une fois configurée
+    private IReadOnlyList<FilterGroup> CatGroups => new[] { new FilterGroup("cat", "Catégorie", filter, new[] { new FilterOption("", "Toutes") }.Concat(Sections.Select(s => new FilterOption(s.Category, s.Title))).ToList()) };
+    private IReadOnlyList<FilterGroup> AccGroups => new[] { new FilterGroup("prov", "Fournisseur", accFilter, new[] { new FilterOption("", "Tous") }.Concat(accounts.Select(k => new FilterOption(k.Id, k.Kind))).ToList()) };
     private string accView = "cards", accSearch = "", accFilter = "";   // vue cartes | liste (mémorisée dans le navigateur)
     private readonly HashSet<string> openAcc = new();   // comptes dépliés en vue liste
     private void ToggleAcc(string id) { if (!openAcc.Remove(id)) openAcc.Add(id); }

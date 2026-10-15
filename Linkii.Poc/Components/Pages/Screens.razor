@@ -32,10 +32,12 @@
 {
     @* Une seule barre : tout sélectionner, actions de la sélection, zone, état, recherche, tri, affichage *@
     <div class="sc-bar" role="region" aria-label="Filtres et sélection" aria-live="polite">
-        <label class="lib-all" title="Tout sélectionner">
-            <input type="checkbox" class="sc-check" checked="@(Shown.Count > 0 && Shown.All(s => selectedIds.Contains(s.Id)))" @onchange="ToggleAll" aria-label="Tout sélectionner" />
-            @if (selectedIds.Count == 0) { <span>Tout sélectionner</span> }
-        </label>
+        @if (selectedIds.Count > 0)
+        {
+            <label class="lib-all" title="Tout sélectionner">
+                <input type="checkbox" class="sc-check" checked="@(Shown.Count > 0 && Shown.All(s => selectedIds.Contains(s.Id)))" @onchange="ToggleAll" aria-label="Tout sélectionner" />
+            </label>
+            }
         @if (selectedIds.Count > 0)
         {
             <div class="kebab dd">
@@ -58,60 +60,22 @@
                 }
             </div>
         }
-        @if (area != null && ShowZones)
-        {
-            <div class="kebab dd">
-                <button type="button" class="dd-btn @(zoneFilter != null ? "act" : "")" aria-haspopup="menu" aria-expanded="@(openMenu == "zone" ? "true" : "false")" @onclick='() => Toggle("zone")'>
-                    <span class="k">Zone</span>
-                    @if (OpenZone is { } zsel) { <Ico Name="@ZoneIcon(zsel)" Size="14" /> <b>@zsel.Name</b> }
-                    else { <b>Toutes</b> }
-                    <small class="c">@InZone.Count</small> <Ico Name="chevron" Size="14" />
-                </button>
-                @if (openMenu == "zone")
-                {
-                    <div class="kebab-backdrop" @onclick="CloseMenu"></div>
-                    <div class="kebab-menu dd-menu" role="menu">
-                        <button type="button" role="menuitemradio" aria-checked="@(zoneFilter == null ? "true" : "false")" class="@(zoneFilter == null ? "sel" : "")" @onclick="() => PickZone(null)">Toutes les zones <small class="n">@screens.Count</small></button>
-                        <hr />
-                        @foreach (var z in zones)
-                        {
-                            var zone = z;
-                            var on = zoneFilter == zone.Id.ToString();
-                            <button type="button" role="menuitemradio" aria-checked="@(on ? "true" : "false")" class="@(on ? "sel" : "")" @onclick="() => PickZone(zone)"><Ico Name="@ZoneIcon(zone)" Size="16" /> @zone.Name <small class="n">@screens.Count(x => ZoneOf(x)?.Id == zone.Id)</small></button>
-                        }
-                        @if (manageZones)
-                        {
-                            <hr />
-                            <button type="button" role="menuitem" @onclick='() => { CloseMenu(); Nav.NavigateTo("zones"); }'><Ico Name="gear" Size="16" /> Gérer les zones…</button>
-                        }
-                    </div>
-                }
-            </div>
-            @if (OpenZone is { } pz)
-            {
-                <a class="dd-btn" href="planning?zone=@pz.Id" title="Planning de diffusion de @(pz.IsWall ? "ce mur" : "cette zone")"><Ico Name="calendar" Size="14" /> <b>Planning</b> @if (pz.Slots.Count > 0) { <small class="c">@pz.Slots.Count</small> }</a>
-            }
-        }
-        <div class="kebab dd">
-            <button type="button" class="dd-btn @(statusFilter != "" ? "act" : "")" aria-haspopup="menu" aria-expanded="@(openMenu == "state" ? "true" : "false")" @onclick='() => Toggle("state")'>
-                <span class="k">État</span> <b>@StateLabel(statusFilter)</b> <Ico Name="chevron" Size="14" />
-            </button>
-            @if (openMenu == "state")
-            {
-                <div class="kebab-backdrop" @onclick="CloseMenu"></div>
-                <div class="kebab-menu dd-menu" role="menu">
-                    @foreach (var (key, count) in new[] { ("", InZone.Count), ("online", InZone.Count(s => !IsOffline(s))), ("offline", InZone.Count(IsOffline)), ("pending", InZone.Count(s => Helpers.HasPending(s, playlists))) })
-                    {
-                        var k = key;
-                        <button type="button" role="menuitemradio" aria-checked="@(statusFilter == k ? "true" : "false")" class="@(statusFilter == k ? "sel" : "")" @onclick="() => { statusFilter = k; CloseMenu(); }">@StateLabel(k) <small class="n">@count</small></button>
-                    }
-                </div>
-            }
-        </div>
         <div class="search-box grow" style="margin:0">
             <Ico Name="search" Size="16" />
             <input placeholder="Rechercher des écrans" aria-label="Rechercher des écrans" @bind="search" @bind:event="oninput" />
         </div>
+        <FilterMenu Groups="FilterGroups" OnPick="PickFilter" OnReset="ResetFilters">
+            <Footer>
+                @if (area != null && ShowZones && manageZones)
+                {
+                    <div class="fm-note"><span>Zones</span><button type="button" class="linklike" @onclick='() => Nav.NavigateTo("zones")'>Gérer les zones…</button></div>
+                }
+            </Footer>
+        </FilterMenu>
+        @if (area != null && ShowZones && OpenZone is { } pz)
+        {
+            <a class="tb-btn" href="planning?zone=@pz.Id" title="Planning de diffusion de @(pz.IsWall ? "ce mur" : "cette zone")"><Ico Name="calendar" Size="14" /> Planning @if (pz.Slots.Count > 0) { <span class="tb-n">@pz.Slots.Count</span> }</a>
+        }
         <div class="kebab dd">
             <button type="button" class="dd-btn @(sort != "name" ? "act" : "")" aria-haspopup="menu" aria-expanded="@(openMenu == "sort" ? "true" : "false")" @onclick='() => Toggle("sort")'>
                 <span class="k">Tri</span> <b>@SortLabel(sort)</b> <Ico Name="chevron" Size="14" />
@@ -130,6 +94,7 @@
         </div>
         @if (Modes.Expert) { <ViewToggle StorageKey="screens" @bind-Value="view" /> }
     </div>
+    <FilterChips Groups="FilterGroups" OnClear="ClearFilter" OnResetAll="ResetFilters" />
 
     @* Zone libre choisie : une ligne d'information et un menu d'actions (un mur a tout cela dans sa carte) *@
     @if (OpenZone is { IsWall: false } oz)
@@ -1128,6 +1093,26 @@ else if (wallEdit is { } wid)
     private void Toggle(string menu) => openMenu = openMenu == menu ? null : menu;
     private void CloseMenu() => openMenu = null;
 
+    // Menu « Filtres » : zone (si l'aire en a plusieurs) et état
+    private IReadOnlyList<FilterGroup> FilterGroups
+    {
+        get
+        {
+            var list = new List<FilterGroup>();
+            if (area != null && ShowZones)
+                list.Add(new("zone", "Zone", zoneFilter ?? "", new[] { new FilterOption("", "Toutes", screens.Count) }
+                    .Concat(zones.Select(z => new FilterOption(z.Id.ToString(), (z.IsWall ? "Mur " : "") + z.Name, screens.Count(x => ZoneOf(x)?.Id == z.Id)))).ToList()));
+            list.Add(new("state", "État", statusFilter, new[] { "", "online", "offline", "pending" }
+                .Select(k => new FilterOption(k, StateLabel(k), k switch { "online" => InZone.Count(s => !IsOffline(s)), "offline" => InZone.Count(IsOffline), "pending" => InZone.Count(s => Helpers.HasPending(s, playlists)), _ => InZone.Count })).ToList()));
+            return list;
+        }
+    }
+    private void PickFilter((string Key, string Value) p)
+    {
+        if (p.Key == "zone") PickZone(p.Value == "" ? null : zones.FirstOrDefault(z => z.Id.ToString() == p.Value)); else statusFilter = p.Value;
+    }
+    private void ClearFilter(string key) => PickFilter((key, ""));
+    private void ResetFilters() { PickZone(null); statusFilter = ""; }
     private void PickZone(Zone? z) { zoneFilter = z?.Id.ToString(); dissolveFor = null; CloseMenu(); }
 
     private static string ZoneIcon(Zone z) => z.IsWall ? "grid" : z.Sync ? "link" : "box";

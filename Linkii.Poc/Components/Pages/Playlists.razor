@@ -93,28 +93,23 @@ else
             <Ico Name="search" Size="16" />
             <input data-lx-search placeholder="@(foldersOn ? "Rechercher dans toutes les listes" : "Rechercher des listes de lecture")" aria-label="Rechercher des listes de lecture" @bind="search" @bind:event="oninput" />
         </div>
-        <div class="seg-chips" role="group" aria-label="Utilisation des listes de lecture" style="display:contents">
-            <button type="button" class="lx-chip @(filter == "" ? "on" : "")" aria-pressed="@(filter == "" ? "true" : "false")" @onclick='() => SetFilter("")'>Toutes</button>
-            <button type="button" class="lx-chip @(filter == "used" ? "on" : "")" aria-pressed="@(filter == "used" ? "true" : "false")" title="Choisies sur un écran ou programmées dans un planning" @onclick='() => SetFilter("used")'>Utilisées <small>@playlists.Count(p => Use(p).Used)</small></button>
-            @if (PendingCount > 0 || filter == "pending")
-            {
-                <button type="button" class="lx-chip @(filter == "pending" ? "on" : "")" aria-pressed="@(filter == "pending" ? "true" : "false")" title="Modifiées depuis leur publication : les écrans diffusent encore l'ancienne version" @onclick='() => SetFilter("pending")'>À publier <small>@PendingCount</small></button>
-            }
-            <button type="button" class="lx-chip @(filter == "unused" ? "on" : "")" aria-pressed="@(filter == "unused" ? "true" : "false")" @onclick='() => SetFilter("unused")'>Non utilisées <small>@playlists.Count(p => !Use(p).Used)</small></button>
-        </div>
-        @if (foldersOn && folderId != null && Active)
-        {
-            <button type="button" class="lx-chip scope" title="Où chercher" @onclick="() => scopeAll = !scopeAll">Dans : @(scopeAll ? "toute l'aire" : "ce dossier") <Ico Name="refresh" Size="13" /></button>
-        }
-        <span class="grow"></span>
         @if (Active) { <span class="lx-count" aria-live="polite">@Plural(Sorted.Count(), "résultat", "résultats")</span> }
-        <select @bind="sort" aria-label="Trier">
+        <FilterMenu Groups="FilterGroups" Extra="@(foldersOn && folderId != null && !scopeAll ? 1 : 0)" OnPick="PickFilter" OnReset="ResetFilters">
+            <Footer>
+                @if (foldersOn && folderId != null)
+                {
+                    <div class="fm-note"><span>Chercher dans : @(scopeAll ? "toute l'aire" : "ce dossier")</span><button type="button" class="linklike" @onclick="() => scopeAll = !scopeAll">Changer</button></div>
+                }
+            </Footer>
+        </FilterMenu>
+        <select @bind="sort" class="tb-sort" aria-label="Trier">
             <option value="recent">Récentes</option>
             <option value="name">Nom</option>
             <option value="used">Plus utilisées</option>
         </select>
         <ViewToggle StorageKey="playlists" @bind-Value="view" />
     </div>
+    <FilterChips Groups="FilterGroups" Extra="FilterExtras" OnClear="ClearFilter" OnResetAll="ResetFilters" />
 
     @* Dossiers de la position ouverte : puces compactes, cibles du glisser-déposer *@
     @if (subfolders.Count > 0)
@@ -460,6 +455,22 @@ else
     private bool ShowPath => foldersOn && Active && scopeAll;
 
     private void SetFilter(string f) { filter = f; picked.Clear(); }
+
+    // Menu « Filtres » : utilisation (« À publier » seulement s'il y en a)
+    private IReadOnlyList<FilterGroup> FilterGroups
+    {
+        get
+        {
+            var opts = new List<FilterOption> { new("", "Toutes"), new("used", "Utilisées", playlists.Count(p => Use(p).Used), "Choisies sur un écran ou programmées dans un planning") };
+            if (PendingCount > 0 || filter == "pending") opts.Add(new("pending", "À publier", PendingCount, "Modifiées depuis leur publication : les écrans diffusent encore l'ancienne version"));
+            opts.Add(new("unused", "Non utilisées", playlists.Count(p => !Use(p).Used)));
+            return new[] { new FilterGroup("use", "Utilisation", filter, opts) };
+        }
+    }
+    private IReadOnlyList<FilterExtra> FilterExtras => foldersOn && folderId != null && !scopeAll ? new[] { new FilterExtra("Dans : ce dossier", () => scopeAll = true) } : Array.Empty<FilterExtra>();
+    private void PickFilter((string Key, string Value) p) => SetFilter(p.Value);
+    private void ClearFilter(string key) => SetFilter("");
+    private void ResetFilters() { scopeAll = true; SetFilter(""); }
 
     private bool Matches(Playlist p) => filter switch
     {

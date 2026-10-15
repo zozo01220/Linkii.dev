@@ -1,0 +1,51 @@
+@* Bouton « Filtres » des barres d'outils : un menu qui regroupe les critères (une rangée de choix par critère), avec le nombre de filtres actifs.
+   Un critère est « actif » quand sa valeur n'est pas la valeur vide (« Tous »). Les filtres actifs s'affichent en puces sous la barre : voir FilterChips. *@
+<div class="fm">
+    <button type="button" class="tb-btn @(Active > 0 ? "act" : "")" aria-haspopup="dialog" aria-expanded="@(open ? "true" : "false")" @onclick="() => open = !open">
+        <Ico Name="sliders" Size="16" /> Filtres @if (Active > 0) { <span class="tb-n">@Active</span> }
+    </button>
+    @if (open)
+    {
+        <div class="kebab-backdrop" @onclick="() => open = false"></div>
+        <div class="fm-pop" role="dialog" aria-label="Filtres">
+            @foreach (var g in Groups)
+            {
+                var grp = g;
+                <h5>@grp.Title</h5>
+                <div class="fm-row" role="radiogroup" aria-label="@grp.Title">
+                    @foreach (var o in grp.Options)
+                    {
+                        var opt = o;
+                        <button type="button" role="radio" aria-checked="@(grp.Value == opt.Value ? "true" : "false")" class="fm-opt @(grp.Value == opt.Value ? "on" : "")" title="@opt.Hint" @onclick="() => Pick(grp, opt)">@opt.Label@if (opt.Count is { } n) { <small>@n</small> }</button>
+                    }
+                </div>
+            }
+            @Footer
+            @if (Active > 0)
+            {
+                <div class="fm-ft"><button type="button" class="linklike" @onclick="Reset">Réinitialiser</button></div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<FilterGroup> Groups { get; set; } = Array.Empty<FilterGroup>();
+    [Parameter] public EventCallback<(string Key, string Value)> OnPick { get; set; }
+    [Parameter] public EventCallback OnReset { get; set; }
+    /// <summary>Contenu libre sous les critères (ex. : « Dans : ce dossier », lien vers la gestion des zones).</summary>
+    [Parameter] public RenderFragment? Footer { get; set; }
+    /// <summary>Filtres actifs en plus des critères (ex. : la portée « toute l'aire »).</summary>
+    [Parameter] public int Extra { get; set; }
+
+    private bool open;
+    private int Active => Groups.Count(g => g.Value != "") + Extra;
+
+    private async Task Pick(FilterGroup g, FilterOption o) => await OnPick.InvokeAsync((g.Key, o.Value));
+
+    private async Task Reset()
+    {
+        open = false;
+        await OnReset.InvokeAsync();
+    }
+}

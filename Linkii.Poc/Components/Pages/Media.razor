@@ -80,34 +80,23 @@ else
             <Ico Name="search" Size="16" />
             <input data-lx-search placeholder="Rechercher dans la médiathèque" aria-label="Rechercher des médias" @bind="search" @bind:event="oninput" />
         </div>
-        <button type="button" class="lx-chip @(type == "" ? "on" : "")" aria-pressed="@(type == "" ? "true" : "false")" @onclick='() => type = ""'>Tous</button>
-        <button type="button" class="lx-chip @(type == "image" ? "on" : "")" aria-pressed="@(type == "image" ? "true" : "false")" @onclick='() => type = "image"'>Images <small>@BySource.Count(m => m.Type == "image")</small></button>
-        <button type="button" class="lx-chip @(type == "video" ? "on" : "")" aria-pressed="@(type == "video" ? "true" : "false")" @onclick='() => type = "video"'>Vidéos <small>@BySource.Count(m => m.Type == "video")</small></button>
-        <button type="button" class="lx-chip @(filter == "unused" ? "on" : "")" aria-pressed="@(filter == "unused" ? "true" : "false")" title="Dans aucune liste de lecture, aucun contenu et sur aucun écran" @onclick='() => SetFilter(filter == "unused" ? "" : "unused")'>Non utilisés <small>@Pool.Count(m => unused.Contains(m.Id))</small></button>
-        @if (Sources.Count(s => Pool.Any(m => SourceOf(m) == s.Key)) > 1 || source != "")
-        {
-            <select @bind="source" aria-label="Source">
-                <option value="">Toutes les sources</option>
-                @foreach (var (key, label) in Sources)
-                {
-                    var n = ByType.Count(m => SourceOf(m) == key);
-                    @if (n > 0 || source == key) { <option value="@key">@label (@n)</option> }
-                }
-            </select>
-        }
-        @if (FoldersShown && folderId != null && Active)
-        {
-            <button type="button" class="lx-chip scope" title="Où chercher" @onclick="() => scopeAll = !scopeAll">Dans : @(scopeAll ? "toute l'aire" : "ce dossier") <Ico Name="refresh" Size="13" /></button>
-        }
-        <span class="grow"></span>
         @if (Active || type != "" || source != "") { <span class="lx-count" aria-live="polite">@Plural(Visible.Count(), "résultat", "résultats")</span> }
-        <select @bind="sort" aria-label="Trier">
+        <FilterMenu Groups="FilterGroups" Extra="@(FoldersShown && folderId != null && !scopeAll ? 1 : 0)" OnPick="PickFilter" OnReset="ResetFilters">
+            <Footer>
+                @if (FoldersShown && folderId != null)
+                {
+                    <div class="fm-note"><span>Chercher dans : @(scopeAll ? "toute l'aire" : "ce dossier")</span><button type="button" class="linklike" @onclick="() => scopeAll = !scopeAll">Changer</button></div>
+                }
+            </Footer>
+        </FilterMenu>
+        <select @bind="sort" class="tb-sort" aria-label="Trier">
             <option value="date">Récents</option>
             <option value="name">Nom</option>
             <option value="size">Taille</option>
         </select>
         <ViewToggle StorageKey="media" @bind-Value="view" />
     </div>
+    <FilterChips Groups="FilterGroups" Extra="FilterExtras" OnClear="ClearFilter" OnResetAll="ResetFilters" />
 
     @* Dossiers de la position ouverte : puces compactes, cibles du glisser-déposer *@
     @if (subfolders.Count > 0)
@@ -514,6 +503,30 @@ else
     }
 
     private void SetFilter(string f) { filter = f; picked.Clear(); }
+
+    // Menu « Filtres » : type, utilisation, source (la source seulement s'il y en a plusieurs)
+    private IReadOnlyList<FilterGroup> FilterGroups
+    {
+        get
+        {
+            var list = new List<FilterGroup>
+            {
+                new("type", "Type", type, new FilterOption[] { new("", "Tous"), new("image", "Images", BySource.Count(m => m.Type == "image")), new("video", "Vidéos", BySource.Count(m => m.Type == "video")) }),
+                new("use", "Utilisation", filter, new FilterOption[] { new("", "Tous"), new("unused", "Non utilisés", Pool.Count(m => unused.Contains(m.Id)), "Dans aucune liste de lecture, aucun contenu et sur aucun écran") }),
+            };
+            if (Sources.Count(s => Pool.Any(m => SourceOf(m) == s.Key)) > 1 || source != "")
+                list.Add(new("source", "Source", source, new[] { new FilterOption("", "Toutes") }
+                    .Concat(Sources.Select(s => (s.Key, s.Label, N: ByType.Count(m => SourceOf(m) == s.Key))).Where(s => s.N > 0 || source == s.Key).Select(s => new FilterOption(s.Key, s.Label, s.N))).ToList()));
+            return list;
+        }
+    }
+    private IReadOnlyList<FilterExtra> FilterExtras => FoldersShown && folderId != null && !scopeAll ? new[] { new FilterExtra("Dans : ce dossier", () => scopeAll = true) } : Array.Empty<FilterExtra>();
+    private void PickFilter((string Key, string Value) p)
+    {
+        switch (p.Key) { case "type": type = p.Value; break; case "use": SetFilter(p.Value); break; case "source": source = p.Value; break; }
+    }
+    private void ClearFilter(string key) => PickFilter((key, ""));
+    private void ResetFilters() { type = ""; source = ""; scopeAll = true; SetFilter(""); }
 
     private void Reload()
     {
