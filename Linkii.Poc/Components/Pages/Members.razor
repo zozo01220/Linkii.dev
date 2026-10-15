@@ -598,7 +598,7 @@ else
         LevelVisibility.All => lf.Access[domain] == DomainAccess.Write ? "tous les dossiers" : "tous les dossiers, en lecture",
         LevelVisibility.AllRead => "tous les dossiers, en lecture",
         LevelVisibility.Chosen => $"{ChosenCount(domain)} dossier{(ChosenCount(domain) > 1 ? "s" : "")} choisi{(ChosenCount(domain) > 1 ? "s" : "")}",
-        _ => "hors dossier seulement"
+        _ => domain == LevelPages.Media ? "ses dossiers seulement" : "hors dossier seulement"
     };
 
     private int ChosenCount(string domain) => lf!.FolderModes.Keys.Count(id => folders.Any(f => f.Id == id && f.Kind == domain));
@@ -653,7 +653,7 @@ else
     {
         var reach = ReachedAreas();
         var mine = items.Where(i => i.Domain == domain && reach.Contains(i.AreaId)).ToList();
-        var visible = mine.Count(i => i.FolderId is not { } fid || folders.FirstOrDefault(f => f.Id == fid) is { } fd && Effective(fd) != "");
+        var visible = mine.Count(i => i.FolderId is not { } fid ? domain != LevelPages.Media || !foldersOn : folders.FirstOrDefault(f => f.Id == fid) is { } fd && Effective(fd) != "");
         return (visible, mine.Count);
     }
 
@@ -719,7 +719,7 @@ else
         var vis = l.Visibility[domain];
         var (visible, total) = VisibleCount(domain);
         <h4>@LevelPages.Label(domain)</h4>
-        <p class="lvt-lead">@(lists ? "Quelles listes la personne voit, et ce qu'elle peut en faire." : "Quels médias la personne voit (et peut mettre dans ses contenus), et ce qu'elle peut en faire.") Les @(lists ? "listes rangées" : "médias rangés") hors dossier sont toujours visibles dans le périmètre.</p>
+        <p class="lvt-lead">@(lists ? "Quelles listes la personne voit, et ce qu'elle peut en faire." : "Quels médias la personne voit (et peut mettre dans ses contenus), et ce qu'elle peut en faire.") @(lists ? "Les listes rangées hors dossier sont toujours visibles dans le périmètre." : "Les médias à la racine de la médiathèque (dont les fichiers Drive) restent réservés aux administrateurs : les autres ne voient que des dossiers.")</p>
         <section class="lv-sec"><h4>1 · Accès</h4><div class="lv-in">
             @if (lists) { @AccessCards(domain, "Pas de page Listes de lecture.", "Voir, essayer, diffuser sur ses écrans.", "Créer, composer, renommer, supprimer.") }
             else { @AccessCards(domain, "Pas de page Médiathèque (les médias restent utilisables dans les contenus).", "Voir, télécharger, utiliser dans ses contenus.", "Importer, renommer, ranger, supprimer.") }
@@ -732,8 +732,8 @@ else
         <section class="lv-sec"><h4>2 · Visibilité <span>@visible @noun visibles sur @total</span></h4><div class="lv-in">
             <div class="lvt-choices" role="radiogroup" aria-label="Visibilité">
                 @Choice(vis is LevelVisibility.All or LevelVisibility.AllRead, lists ? "Toutes" : "Tous", "Tous les dossiers de l'organisation, y compris les futurs (jamais le dossier privé d'un membre).", () => { if (vis is not (LevelVisibility.All or LevelVisibility.AllRead)) l.Visibility[domain] = LevelVisibility.All; })
-                @Choice(vis == LevelVisibility.Chosen, "Dossiers choisis", $"Les {noun} hors dossier, plus les dossiers cochés.", () => l.Visibility[domain] = LevelVisibility.Chosen)
-                @Choice(vis == LevelVisibility.Own, "Hors dossier seulement", "Plus les siens et ceux qu'on lui partage.", () => l.Visibility[domain] = LevelVisibility.Own)
+                @Choice(vis == LevelVisibility.Chosen, "Dossiers choisis", lists ? "Les listes hors dossier, plus les dossiers cochés." : "Les dossiers cochés ci-dessous.", () => l.Visibility[domain] = LevelVisibility.Chosen)
+                @Choice(vis == LevelVisibility.Own, lists ? "Hors dossier seulement" : "Ses dossiers seulement", lists ? "Plus les siens et ceux qu'on lui partage." : "Les siens et ceux qu'on lui partage.", () => l.Visibility[domain] = LevelVisibility.Own)
             </div>
             @if (vis is LevelVisibility.All or LevelVisibility.AllRead && write)
             {

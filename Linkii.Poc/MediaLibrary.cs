@@ -19,11 +19,13 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     /// <summary>Images et vidéos, les plus récentes d'abord. La taille des fichiers importés avant son enregistrement est lue sur le disque.</summary>
     public List<MediaItem> Files()
     {
-        // un fichier rangé dans un dossier n'est listé que si la personne y a un droit (voir FolderAccess)
+        // un fichier rangé dans un dossier n'est listé que si la personne y a un droit (voir FolderAccess) ;
+        // à la racine (hors dossier, dont les fichiers Drive), avec les dossiers activés, seuls les administrateurs voient
         var list = store.Read(d =>
         {
             var rights = FolderAccess.Snapshot(d.Access, FolderOps.All(d));
-            return d.Media.Where(m => IsFile(m) && (m.FolderId is not { } f || rights.GetValueOrDefault(f) != FolderRight.None)).ToList();
+            var rootVisible = !d.Tenant.FoldersOn || d.Access.IsOrgAdmin;
+            return d.Media.Where(m => IsFile(m) && (m.FolderId is not { } f ? rootVisible : rights.GetValueOrDefault(f) != FolderRight.None)).ToList();
         });
         foreach (var m in list.Where(m => m.Size == null && m.FileName != null))
         {

@@ -1288,3 +1288,19 @@ Demande : remplacer les cases à cocher par des interrupteurs on/off au design L
 
 ### Vérifié
 - Compilation sans erreur ; navigateur (instance de test) : onglets du niveau (Périmètre avec état partiel, Écrans, Listes, Médiathèque, Contenus et widgets, Vue d'ensemble) sans aucune case à cocher restante ; plus aucune case de réglage hors `ios` dans les pages.
+
+## 56. Partage de dossier épuré et racine de la médiathèque réservée aux admins (15 octobre 2026) : codé
+
+### Modales de partage (médiathèque et listes de lecture)
+Maquette validée, même logique que la modale du niveau de droits : en-tête avec croix, corps, pied avec résumé.
+- **Un seul champ d'ajout** (« Ajouter une personne ou un niveau… ») avec recherche : le menu groupe Personnes et Niveaux de droits, un clic ajoute en Lecture (plus de sélecteur de droit ni de bouton « Partager »). Une personne non ajoutable reste grisée avec sa raison.
+- **Lignes d'accès** : pastille (initiales ou bouclier pour un niveau), nom, type, choix segmenté Lecture | Écriture (l'explication de chaque droit est en info-bulle), croix pour retirer. Lecture seule : pastille du droit.
+- **Pied** : « N personnes y ont accès : … » (détail une à une / par niveau) et bouton « Terminé ». Dossier privé : message avec cadenas.
+- Composants `FolderShareDialog` et `PlaylistFolderShareDialog` (même structure) ; styles `sh-*` dans `wwwroot/app.css`. Modale en `app-modal sh-modal` (520 px).
+
+### Racine de la médiathèque
+- Avec l'option « Dossiers dans la médiathèque » activée, **seuls les administrateurs voient les médias hors dossier** (dont tous les fichiers Drive) : `MediaLibrary.Files()` les écarte pour les autres. Sans dossiers activés, rien ne change (médiathèque à plat).
+- Formulaire du niveau (onglet Médiathèque) : « Dossiers choisis » = les dossiers cochés seulement ; « Hors dossier seulement » devient « Ses dossiers seulement » ; le compteur « visibles sur » ne compte plus la racine. Les Listes de lecture gardent leur règle (hors dossier toujours visible).
+
+### Limites
+- Non essayé dans le navigateur ; un membre non admin dont les contenus utilisent un média de la racine ne le voit plus dans le sélecteur.
