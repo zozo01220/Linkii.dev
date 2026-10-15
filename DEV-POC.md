@@ -1273,3 +1273,18 @@ Demande : refaire le formulaire d'un niveau de droits en onglets logiques, et do
 - Le simulateur « Essayer sur… » montre encore les contenus masqués (prévu : écran neutre « Contenu masqué »).
 - La garde par page s'appuie sur l'adresse de la page ouverte : un composant partagé (ex. sélecteur de médias dans l'éditeur de liste) suit la règle de sa page, les opérations de la médiathèque gardant en plus leurs propres contrôles.
 - Les écrans en « Voir » : les boutons restent visibles hors en-tête ; l'écriture est refusée avec un message.
+
+## 55. Interrupteurs on/off à la place des cases à cocher de réglage (15 octobre 2026) : codé
+
+Demande : remplacer les cases à cocher par des interrupteurs on/off au design Linkii. Le design existait déjà (pilule grise, pastille blanche, bleu Linkii une fois activée : `.switch`, `input[type=checkbox].ios`, `.switch-input + .switch-ui`) ; il est maintenant utilisé pour **tous les réglages** on/off.
+
+### Ce qui change
+- Les 4 dernières cases de réglage deviennent des interrupteurs (`class="ios"`) : « Ne plus afficher ce message » (`MainLayout`), « Synchroniser les écrans de cette zone » (`Zones`), « Zone … » et « Aussi la zone … » du planning (`PlanningPage`).
+- **Formulaire du niveau de droits** (`Members.razor`, fragments `Check` et `Tree`) : les cases `.lv-box` (pages, apps, widgets, planning, gérer les zones, tout en lecture seule, ses propres dossiers, toutes les aires) et l'arbre du périmètre passent en `button.switch.sm` (`role="switch"`).
+- Nouveaux styles dans `wwwroot/app.css` : `.switch.sm` (32 × 20, pour les listes denses) et `.switch.some` (« en partie » : pastille au milieu, bleu clair), qui remplace la case à moitié cochée d'une zone ou d'une aire dont seuls certains écrans sont cochés ; son libellé accessible ajoute « (en partie) ». Les anciennes règles `.lv-box` sont supprimées.
+
+### Ce qui reste en cases à cocher (volontairement)
+- Les cases de **sélection** de plusieurs éléments (`sc-check`, `lx-check` : écrans, listes de lecture, médias, « Tout sélectionner ») : elles choisissent des lignes, ce n'est pas un réglage on/off.
+
+### Vérifié
+- Compilation sans erreur ; navigateur (instance de test) : onglets du niveau (Périmètre avec état partiel, Écrans, Listes, Médiathèque, Contenus et widgets, Vue d'ensemble) sans aucune case à cocher restante ; plus aucune case de réglage hors `ios` dans les pages.
