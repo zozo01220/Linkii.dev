@@ -19,10 +19,12 @@ public static class FolderAccess
     {
         if (a.IsOrgAdmin) return FolderRight.Owner;
         if (!a.HasArea(f.AreaId)) return FolderRight.None;
-        if (a.UserId is { } uid && f.OwnerId == uid) return Capped(a, FolderRight.Owner);
+        var domain = DomainOf(f);
+        if (a.UserId is { } uid && f.OwnerId == uid) return Capped(a, domain, FolderRight.Owner);
 
         var best = FolderRight.None;
         var level = a.Level;
+        var vis = level?.VisibilityOf(domain);
         foreach (var n in Chain(f, all))
         {
             foreach (var s in n.Shares)
@@ -33,25 +35,28 @@ public static class FolderAccess
             }
             // « tous les dossiers » : ceux de l'organisation, c'est-à-dire partagés (avec quelqu'un) ou créés par un administrateur (ou dont le
             // propriétaire a été retiré) ; jamais le dossier privé d'un autre membre
-            if (level?.AllFolders is { } mode && n.OwnerId != a.UserId && (n.Shares.Count > 0 || !IsMember(a, n.OwnerId)))
-                best = Max(best, mode == "write" ? FolderRight.Write : FolderRight.Read);
+            if (vis is LevelVisibility.All or LevelVisibility.AllRead && n.OwnerId != a.UserId && (n.Shares.Count > 0 || !IsMember(a, n.OwnerId)))
+                best = Max(best, vis == LevelVisibility.All ? FolderRight.Write : FolderRight.Read);
         }
-        return Capped(a, best);
+        return Capped(a, domain, best);
     }
 
     /// <summary>Droits de la personne sur chaque dossier donné.</summary>
     public static Dictionary<Guid, FolderRight> Snapshot<T>(AreaAccess a, IReadOnlyCollection<T> folders) where T : class, IFolderNode =>
         folders.ToDictionary(f => f.Id, f => For(a, f, folders));
 
-    /// <summary>Créer un dossier à la racine de l'aire : administrateur, ou niveau qui le permet (hors lecture seule).</summary>
-    public static bool CanCreateAtRoot(AreaAccess a) => a.IsOrgAdmin || a.Level is { CanCreateFolders: true, ReadOnly: false };
+    /// <summary>Domaine d'un dossier : Listes de lecture ou Médiathèque.</summary>
+    public static string DomainOf(IFolderNode f) => f is PlaylistFolder ? LevelPages.Playlists : LevelPages.Media;
+
+    /// <summary>Créer un dossier à la racine de l'aire, dans un domaine : administrateur, ou niveau qui le permet (domaine en écriture).</summary>
+    public static bool CanCreateAtRoot(AreaAccess a, string domain) => a.IsOrgAdmin || a.Level is { } l && l.CreatesFolders(domain) && a.CanWrite(domain);
 
     /// <summary>Partager un dossier : son propriétaire, si son niveau le permet (l'administrateur partage tout).</summary>
     public static bool CanShare<T>(AreaAccess a, T f) where T : class, IFolderNode =>
-        a.IsOrgAdmin || (a.UserId is { } u && f.OwnerId == u && a.HasArea(f.AreaId) && a.Level is { CanShareFolders: true, ReadOnly: false });
+        a.IsOrgAdmin || (a.UserId is { } u && f.OwnerId == u && a.HasArea(f.AreaId) && a.Level is { } l && l.SharesFolders(DomainOf(f)) && a.CanWrite(DomainOf(f)));
 
-    /// <summary>Le dossier ajouté à un niveau de droits ne donne rien au-delà de sa lecture seule.</summary>
-    private static FolderRight Capped(AreaAccess a, FolderRight r) => a.ReadOnly && r > FolderRight.Read ? FolderRight.Read : r;
+    /// <summary>Un dossier ne donne rien au-delà de l'accès du niveau à son domaine : « Voir » (ou pas de page) plafonne à la lecture.</summary>
+    private static FolderRight Capped(AreaAccess a, string domain, FolderRight r) => !a.CanWrite(domain) && r > FolderRight.Read ? FolderRight.Read : r;
     private static FolderRight Max(FolderRight x, FolderRight y) => (FolderRight)Math.Max((int)x, (int)y);
     private static bool IsMember(AreaAccess a, Guid? ownerId) => ownerId is { } o && a.MemberIds.Contains(o);
 
@@ -125,7 +130,7 @@ public static class FolderAudiences
                     }
                 }
                 if (!direct && viaLevel == null) continue;
-                people.Add(new AudiencePerson(u.Id, u.Label, write && !a.ReadOnly, direct ? null : levelNames.GetValueOrDefault(viaLevel!.Value, "Niveau")));
+                people.Add(new AudiencePerson(u.Id, u.Label, write && a.CanWrite(page), direct ? null : levelNames.GetValueOrDefault(viaLevel!.Value, "Niveau")));
             }
             result[f.Id] = new FolderAudience
             {
@@ -150,7 +155,7 @@ public static class FolderOps
 
     /// <summary>Téléverser ou ranger un fichier dans ce dossier : écriture dessus (à la racine, tout le monde comme avant).</summary>
     public static bool CanUploadTo(ClientDb d, Guid? folderId) =>
-        folderId is not { } id || Find(d, id) is { } f && RightOf(d, f) >= FolderRight.Write;
+        folderId is not { } id ? d.Access.CanWrite(LevelPages.Media) : Find(d, id) is { } f && RightOf(d, f) >= FolderRight.Write;
 
     public static string? CheckName(string name) =>
         name.Trim().Length == 0 ? "Donnez un nom au dossier." : name.Trim().Length > 60 ? "60 caractères au plus." : null;
@@ -172,7 +177,7 @@ public static class FolderOps
             if (RightOf(d, parent) < FolderRight.Write) return ("Vous ne pouvez pas créer de dossier dans celui-ci.", null);
             depth = FolderAccess.Chain(parent, all).Count() + 1;
         }
-        else if (!FolderAccess.CanCreateAtRoot(d.Access)) return ("Votre niveau de droits ne permet pas de créer des dossiers.", null);
+        else if (!FolderAccess.CanCreateAtRoot(d.Access, LevelPages.Media)) return ("Votre niveau de droits ne permet pas de créer des dossiers.", null);
         if (depth > FolderAccess.MaxDepth) return ($"Les dossiers ne s'imbriquent pas au-delà de {FolderAccess.MaxDepth} niveaux.", null);
 
         var areaId = parent?.AreaId ?? d.Area?.Id ?? Guid.Empty;
@@ -293,7 +298,7 @@ public static class FolderOps
             target = Find(d, tid);
             if (target == null || RightOf(d, target) < FolderRight.Write) return (0, new() { "Vous ne pouvez pas ranger de fichier dans ce dossier." });
         }
-        else if (!FolderAccess.CanCreateAtRoot(d.Access)) return (0, new() { "Votre niveau de droits ne permet pas de ranger des fichiers à la racine." });
+        else if (!FolderAccess.CanCreateAtRoot(d.Access, LevelPages.Media)) return (0, new() { "Votre niveau de droits ne permet pas de ranger des fichiers à la racine." });
 
         foreach (var m in d.Root.Media.Where(x => x.ClientId == d.ClientId && wanted.Contains(x.Id) && MediaLibrary.IsFile(x) && !MediaLibrary.IsDrive(x)).ToList())
         {
@@ -308,5 +313,5 @@ public static class FolderOps
 
     /// <summary>Un fichier qu'on peut retirer ou renommer : à la racine (comme avant), ou dans un dossier où l'on écrit.</summary>
     public static bool CanEditFile(ClientDb d, MediaItem m) =>
-        m.FolderId is not { } fid || Find(d, fid) is { } f && RightOf(d, f) >= FolderRight.Write;
+        m.FolderId is not { } fid ? d.Access.CanWrite(LevelPages.Media) : Find(d, fid) is { } f && RightOf(d, f) >= FolderRight.Write;   // hors dossier : selon l'accès à la médiathèque
 }

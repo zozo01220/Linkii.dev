@@ -84,7 +84,7 @@ public class PlaylistLibrary(TenantStore store)
     {
         var all = PlaylistFolderOps.All(d);
         var list = new List<(Guid? Id, string Path)>();
-        if (FolderAccess.CanCreateAtRoot(d.Access)) list.Add((null, "Listes de lecture de l'aire (racine)"));
+        if (FolderAccess.CanCreateAtRoot(d.Access, LevelPages.Playlists)) list.Add((null, "Listes de lecture de l'aire (racine)"));
         foreach (var f in d.PlaylistFolders)
         {
             if (FolderAccess.For(d.Access, f, all) < FolderRight.Write) continue;

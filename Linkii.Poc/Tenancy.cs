@@ -56,8 +56,11 @@ public class AreaAccess
     public static readonly AreaAccess System = new();
 
     public bool ReadOnly => Level?.ReadOnly == true;
-    /// <summary>Gérer les zones et les murs : administrateurs de l'organisation, et membres dont le niveau le permet (lecture seule exclue).</summary>
-    public bool CanManageZones => IsOrgAdmin || Level is { ManageZones: true, ReadOnly: false };
+    /// <summary>Accès à un domaine (Écrans, Listes de lecture, Médiathèque) : none, read ou write. L'administrateur a tout.</summary>
+    public string AccessTo(string domain) => IsOrgAdmin ? DomainAccess.Write : Level?.AccessTo(domain) ?? DomainAccess.None;
+    public bool CanWrite(string domain) => AccessTo(domain) == DomainAccess.Write;
+    /// <summary>Gérer les zones et les murs : administrateurs de l'organisation, et membres dont le niveau le permet (avec les écrans en écriture).</summary>
+    public bool CanManageZones => IsOrgAdmin || Level is { ManageZones: true } && CanWrite(LevelPages.Screens);
     /// <summary>Zones et murs d'une aire : CanManageZones, dans les aires accessibles. Aires, membres et niveaux restent aux administrateurs.</summary>
     public bool CanManage(Guid areaId) => CanManageZones && HasArea(areaId);
     /// <summary>Zones de l'aire ouverte.</summary>
@@ -225,8 +228,31 @@ public class TenantContext(AuthenticationStateProvider auth, JsonStore store)
 }
 
 /// <summary>Accès aux données du client connecté uniquement (même API que <see cref="JsonStore"/>).</summary>
-public class TenantStore(JsonStore root, TenantContext ctx)
+public class TenantStore(JsonStore root, TenantContext ctx, Microsoft.AspNetCore.Components.NavigationManager? nav = null)
 {
+    /// <summary>
+    /// Domaine de la page ouverte (Écrans, Listes de lecture, Médiathèque), lu dans son adresse : une écriture y est refusée si le niveau ne fait
+    /// que « Voir » ce domaine. Hors d'une page (requête HTTP, traitement interne) : aucun domaine, seule la lecture seule globale s'applique.
+    /// </summary>
+    public string? PageDomain
+    {
+        get
+        {
+            string path;
+            try { path = nav == null ? "" : "/" + nav.ToBaseRelativePath(nav.Uri).Split('?', '#')[0]; }
+            catch (InvalidOperationException) { return null; }   // pas de page (requête HTTP)
+            if (nav == null) return null;
+            var first = path.Trim('/').Split('/')[0];
+            return first switch
+            {
+                "" or "planning" or "zones" => LevelPages.Screens,
+                "playlists" => LevelPages.Playlists,
+                "media" => LevelPages.Media,
+                _ => null
+            };
+        }
+    }
+
     public Guid ClientId => ctx.RequireClientId();
 
     public Guid? UserId => ctx.UserId;
@@ -240,7 +266,13 @@ public class TenantStore(JsonStore root, TenantContext ctx)
     // Un niveau en lecture seule ne modifie rien : tout enregistrement est refusé (la page l'indique au lieu de planter).
     public T Write<T>(Func<ClientDb, T> f) { var cid = ClientId; return root.Write(db => f(OpenForWrite(db, cid))); }
     public void Write(Action<ClientDb> a) { var cid = ClientId; root.Write(db => a(OpenForWrite(db, cid))); }
-    private ClientDb OpenForWrite(Db db, Guid cid) { var d = Open(db, cid); return d.Access.ReadOnly ? throw new ReadOnlyLevelException() : d; }
+    private ClientDb OpenForWrite(Db db, Guid cid)
+    {
+        var d = Open(db, cid);
+        if (d.Access.ReadOnly) throw new ReadOnlyLevelException();
+        if (PageDomain is { } domain && !d.Access.CanWrite(domain)) throw ReadOnlyLevelException.For(domain);   // page d'un domaine en « Voir »
+        return d;
+    }
 
     /// <summary>Ouvre une autre aire (mémorisée pour la personne connectée). Retourne false si elle ne lui est pas accessible.</summary>
     public bool SwitchArea(Guid areaId) => root.Write(db =>

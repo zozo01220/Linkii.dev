@@ -1235,3 +1235,41 @@ Demande : sur les dossiers de la médiathèque et des listes de lecture, une ic�
 
 ### Remarque d'outillage
 - Quand l'appli de dev tourne, `dotnet test` échoue (exécutable verrouillé) : les tests de cette session ont été lancés sur une copie du dépôt (`robocopy` hors `bin`, `obj`, `.git`, `Unicom-medias`).
+
+## 54. Niveau de droits en onglets : accès et visibilité par domaine, contenus masqués (15 octobre 2026) : codé
+
+Demande : refaire le formulaire d'un niveau de droits en onglets logiques, et donner des droits de visibilité **séparés** sur la médiathèque et sur les listes de lecture (au lieu d'un bloc « Dossiers » commun). Maquette validée : `maquettes/niveau-onglets.html`, **option C** (deux réglages indépendants, et un média caché apparaît « masqué » dans une liste visible ; la liste ne disparaît jamais à cause de son contenu).
+
+### Le formulaire (page Membres › Niveaux)
+- Onglets verticaux, chacun avec son état en une ligne : **Vue d'ensemble** · *Où* : **Périmètre** · *Quoi* : **Écrans et planning**, **Listes de lecture**, **Médiathèque**, **Contenus et widgets**. Nom du niveau dans l'en-tête, nombre de membres touchés en pied.
+- Chaque domaine se règle de la même façon : **1 · Accès** (Aucun / Voir / Voir et modifier), puis pour Listes et Médiathèque **2 · Visibilité** (Tous / Dossiers choisis / Hors dossier seulement, avec « dossiers des autres en lecture seulement » quand l'accès est « Voir et modifier ») et **3 · Ses propres dossiers** (créer, partager ; demandent « Voir et modifier »).
+- « Dossiers choisis » : tableau Masqué / Voir / Modifier aligné en colonnes, recherche, « Tout voir » / « Tout retirer », droit hérité d'un parent en pâle, dossier hors périmètre grisé, nombre d'éléments par dossier ; « Modifier » est grisé si l'accès est « Voir ». Compteur « N listes (médias) visibles sur M » dans le périmètre.
+- Écrans : accès, puis Planning et « Gérer les zones » (ce dernier demande « Voir et modifier »).
+- Vue d'ensemble : une carte par domaine avec son accès, et le raccourci « Tout en lecture seule » (chaque domaine passe à « Voir »), qui remplace l'ancienne case « Lecture seule ».
+
+### Modèle (`AccessLevel`, `Rights.cs`)
+- Nouveaux champs : `ScreensAccess`, `PlaylistsAccess`, `MediaAccess` (`DomainAccess` : none / read / write), `PlaylistsVisibility`, `MediaVisibility` (`LevelVisibility` : all / all-read / chosen / own), `PlaylistsCreateFolders`, `PlaylistsShareFolders`, `MediaCreateFolders`, `MediaShareFolders`.
+- `Normalize()` (à chaque enregistrement) en déduit `Pages` (une page par domaine accessible ; Planning reste une case) et `ReadOnly` (= aucun domaine en écriture), retire « Gérer les zones » sans écrans en écriture, et efface les anciens réglages communs (`AllFolders`, `CanCreateFolders`, `CanShareFolders`).
+- **Migration** (`AccessLevels.Migrate`, au démarrage) : un niveau d'avant garde exactement ses droits — lecture seule → « Voir » sur chaque page cochée ; `AllFolders` read/write → visibilité « Tous » en lecture / « Tous » ; sinon « Dossiers choisis » si le niveau a des partages de ce type, « Hors dossier seulement » sinon ; créer/partager copiés sur les deux domaines. Avant migration, `AccessTo` / `VisibilityOf` / `CreatesFolders` lisent les anciens champs.
+
+### Droits
+- `AreaAccess.AccessTo(domain)` / `CanWrite(domain)` (administrateur : tout).
+- Dossiers (`FolderAccess.For`) : la visibilité « Tous » est lue **par domaine** ; tout droit est plafonné par l'accès du domaine (« Voir » ou pas de page → lecture). Sans la page Médiathèque, la visibilité s'applique toujours (médias utilisables dans les contenus).
+- Éléments hors dossier : listes modifiables seulement avec « Voir et modifier » les listes (`PlaylistOps.RightOf`) ; fichiers modifiables et import hors dossier seulement avec « Voir et modifier » la médiathèque (`FolderOps.CanEditFile`, `CanUploadTo`).
+- Créer et partager des dossiers : par domaine (`CanCreateAtRoot(a, domain)`, `CanShare`).
+- **Garde d'écriture par page** (`TenantStore.PageDomain`) : sur `/`, `/planning`, `/zones` (écrans), `/playlists…` et `/media`, une écriture est refusée si le niveau ne fait que « Voir » ce domaine (`ReadOnlyLevelException.For`, message propre au domaine). Le bandeau du haut le dit (« Votre niveau de droits permet de voir la médiathèque, sans la modifier ») et masque les boutons d'en-tête, comme la lecture seule.
+
+### Contenus masqués (option C)
+- `MediaLibrary.HiddenFileIds()` : fichiers de l'aire rangés dans un dossier que la personne ne voit pas ; `MediaLibrary.UsesHidden(m, hidden)` : le fichier lui-même, ou un contenu (app) qui en a choisi un.
+- Éditeur de liste : un tel contenu s'affiche « Contenu masqué » (vignette hachurée + cadenas, durée conservée) ; il se déplace, mais ne s'ouvre, ne se modifie et ne se retire pas (refus aussi côté code).
+- Page Listes : ses médias ne servent jamais de vignette.
+
+### Fichiers
+- `Rights.cs`, `Tenancy.cs`, `Folders.cs`, `PlaylistFolders.cs`, `PlaylistLibrary.cs`, `MediaLibrary.cs`, `Components/Pages/Members.razor` (formulaire réécrit), `Components/Pages/PlaylistEditor.razor`, `Components/Pages/Playlists.razor`, `Components/Pages/Media.razor`, `Components/Layout/MainLayout.razor`, `wwwroot/app.css` (`lvt-*`, `.item-row.masked`).
+- Tests : `LevelDomainTests` (12 : pages et lecture seule déduites, migration, partages de niveau, enregistrement, plafond par domaine, éléments hors dossier, visibilité par domaine, dossiers propres par domaine, sans page Médiathèque, partage compté en écriture, message, contenu masqué). Tous les anciens tests de droits passent sans changement ; toujours les 5 échecs connus de `AppsTests`.
+- Vérifié dans le navigateur (instance de test) : migration du niveau existant, onglets, Médiathèque en « Voir » + « Dossiers choisis » sans dossier, Listes en « Dossiers choisis » ; côté membre, bandeau « voir la médiathèque », pas d'import, dossier « Affiches » invisible, liste « Promo rentrée » avec ses 3 contenus masqués.
+
+### Limites
+- Le simulateur « Essayer sur… » montre encore les contenus masqués (prévu : écran neutre « Contenu masqué »).
+- La garde par page s'appuie sur l'adresse de la page ouverte : un composant partagé (ex. sélecteur de médias dans l'éditeur de liste) suit la règle de sa page, les opérations de la médiathèque gardant en plus leurs propres contrôles.
+- Les écrans en « Voir » : les boutons restent visibles hors en-tête ; l'écriture est refusée avec un message.

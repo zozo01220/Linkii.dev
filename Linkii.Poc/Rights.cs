@@ -53,6 +53,20 @@ public class AccessLevel
     /// <summary>Accès à tous les dossiers partagés de l'organisation : null, « read » ou « write ». Les dossiers privés d'un autre ne sont jamais donnés.</summary>
     public string? AllFolders { get; set; }
 
+    // Accès par domaine (§54) : « none », « read » ou « write » pour Écrans, Listes de lecture et Médiathèque ; null : niveau d'avant
+    // (déduit de Pages et ReadOnly, voir AccessTo). Les pages et la lecture seule globale en sont déduites à l'enregistrement.
+    public string? ScreensAccess { get; set; }
+    public string? PlaylistsAccess { get; set; }
+    public string? MediaAccess { get; set; }
+    // Visibilité des dossiers des autres, par domaine (voir LevelVisibility) ; null : déduite de AllFolders.
+    public string? PlaylistsVisibility { get; set; }
+    public string? MediaVisibility { get; set; }
+    // Ses propres dossiers, par domaine (les anciens CanCreateFolders / CanShareFolders valaient pour les deux).
+    public bool PlaylistsCreateFolders { get; set; }
+    public bool PlaylistsShareFolders { get; set; }
+    public bool MediaCreateFolders { get; set; }
+    public bool MediaShareFolders { get; set; }
+
     // Périmètre : un élément coché donne tout ce qu'il contient, y compris ce qui y sera ajouté plus tard.
     public bool AllAreas { get; set; }
     public List<Guid> AreaIds { get; set; } = new();
@@ -62,12 +76,76 @@ public class AccessLevel
     public bool HasScope => AllAreas || AreaIds.Count + ZoneIds.Count + ScreenIds.Count > 0;
     public bool CanUse(AppManifest a) => (a.ScreenWidget ? AllWidgets : AllIntegrations) || Apps.Contains(a.Id);
 
-    public AccessLevel Copy() => new()
+    /// <summary>Niveau enregistré avant les accès par domaine : ses droits se lisent dans Pages, ReadOnly et AllFolders.</summary>
+    public bool IsLegacy => ScreensAccess == null && PlaylistsAccess == null && MediaAccess == null;
+
+    /// <summary>Accès à un domaine (<see cref="LevelPages.Screens"/>, <see cref="LevelPages.Playlists"/>, <see cref="LevelPages.Media"/>) : none, read ou write.</summary>
+    public string AccessTo(string domain) => (domain switch
     {
-        Id = Id, Name = Name, Pages = [.. Pages], AllIntegrations = AllIntegrations, AllWidgets = AllWidgets, Apps = [.. Apps], ReadOnly = ReadOnly, ManageZones = ManageZones,
-        CanCreateFolders = CanCreateFolders, CanShareFolders = CanShareFolders, AllFolders = AllFolders,
-        AllAreas = AllAreas, AreaIds = [.. AreaIds], ZoneIds = [.. ZoneIds], ScreenIds = [.. ScreenIds]
-    };
+        LevelPages.Screens => ScreensAccess,
+        LevelPages.Playlists => PlaylistsAccess,
+        LevelPages.Media => MediaAccess,
+        _ => null
+    }) ?? (Pages.Contains(domain) ? (ReadOnly ? DomainAccess.Read : DomainAccess.Write) : DomainAccess.None);
+
+    /// <summary>Visibilité des dossiers des autres pour un domaine (<see cref="LevelVisibility"/>).</summary>
+    public string VisibilityOf(string domain) => (domain == LevelPages.Playlists ? PlaylistsVisibility : domain == LevelPages.Media ? MediaVisibility : null)
+        ?? (AllFolders == "write" ? LevelVisibility.All : AllFolders == "read" ? LevelVisibility.AllRead : LevelVisibility.Chosen);
+
+    public bool CreatesFolders(string domain) => IsLegacy ? CanCreateFolders : domain == LevelPages.Playlists ? PlaylistsCreateFolders : MediaCreateFolders;
+    public bool SharesFolders(string domain) => IsLegacy ? CanShareFolders : domain == LevelPages.Playlists ? PlaylistsShareFolders : MediaShareFolders;
+
+    /// <summary>
+    /// Remplit les réglages par domaine d'un niveau d'avant (sans rien changer à ses droits), puis en déduit les pages et la lecture seule globale :
+    /// une page par domaine accessible (le Planning reste une case) ; lecture seule = aucun domaine en écriture.
+    /// </summary>
+    public void Normalize(Func<string, bool>? hasLevelShares = null)
+    {
+        if (IsLegacy)
+        {
+            ScreensAccess = AccessTo(LevelPages.Screens);
+            PlaylistsAccess = AccessTo(LevelPages.Playlists);
+            MediaAccess = AccessTo(LevelPages.Media);
+            // « Dossiers choisis » si le niveau a des partages de ce type, sinon « les siens seulement » ; « Tous » gardé tel quel
+            string Vis(string domain) => AllFolders != null ? VisibilityOf(domain) : hasLevelShares?.Invoke(domain) == true ? LevelVisibility.Chosen : LevelVisibility.Own;
+            PlaylistsVisibility = Vis(LevelPages.Playlists);
+            MediaVisibility = Vis(LevelPages.Media);
+            PlaylistsCreateFolders = MediaCreateFolders = CanCreateFolders;
+            PlaylistsShareFolders = MediaShareFolders = CanShareFolders;
+        }
+        ScreensAccess = DomainAccess.Clean(ScreensAccess);
+        PlaylistsAccess = DomainAccess.Clean(PlaylistsAccess);
+        MediaAccess = DomainAccess.Clean(MediaAccess);
+        PlaylistsVisibility = LevelVisibility.Clean(PlaylistsVisibility);
+        MediaVisibility = LevelVisibility.Clean(MediaVisibility);
+        var planning = Pages.Contains(LevelPages.Planning);
+        Pages = new[] { (LevelPages.Screens, ScreensAccess), (LevelPages.Playlists, PlaylistsAccess), (LevelPages.Media, MediaAccess) }
+            .Where(x => x.Item2 != DomainAccess.None).Select(x => x.Item1).ToList();
+        if (planning && ScreensAccess != DomainAccess.None) Pages.Insert(Pages.IndexOf(LevelPages.Screens) + 1, LevelPages.Planning);
+        ReadOnly = ScreensAccess != DomainAccess.Write && PlaylistsAccess != DomainAccess.Write && MediaAccess != DomainAccess.Write;
+        if (ScreensAccess != DomainAccess.Write) ManageZones = false;   // gérer les zones demande de pouvoir modifier les écrans
+        // anciens réglages communs : remplacés par ceux de chaque domaine
+        AllFolders = null; CanCreateFolders = false; CanShareFolders = false;
+    }
+}
+
+/// <summary>Accès à un domaine d'un niveau de droits.</summary>
+public static class DomainAccess
+{
+    public const string None = "none", Read = "read", Write = "write";
+    public static string Clean(string? v) => v is Read or Write ? v : None;
+    public static string Label(string v) => v == Write ? "Voir et modifier" : v == Read ? "Voir" : "Aucun";
+}
+
+/// <summary>
+/// Visibilité des dossiers des autres, par domaine : All (tous les dossiers de l'organisation, avec le droit du domaine), AllRead (tous, en lecture
+/// seulement), Chosen (les dossiers cochés, par partage de niveau), Own (les siens et ceux partagés avec la personne). Les éléments hors dossier
+/// sont toujours visibles.
+/// </summary>
+public static class LevelVisibility
+{
+    public const string All = "all", AllRead = "all-read", Chosen = "chosen", Own = "own";
+    public static string Clean(string? v) => v is All or AllRead or Chosen ? v : Own;
 }
 
 /// <summary>Ce qu'un périmètre laisse voir, calculé une fois par accès (voir <see cref="AreaAccess.For"/>).</summary>
@@ -97,7 +175,17 @@ public class LevelScope
 }
 
 /// <summary>Refus d'une écriture : le niveau de droits de la personne est en lecture seule.</summary>
-public class ReadOnlyLevelException() : UnauthorizedAccessException("Votre niveau de droits est en lecture seule : vous ne pouvez rien modifier ni publier.");
+public class ReadOnlyLevelException(string? message = null) : UnauthorizedAccessException(message ?? "Votre niveau de droits est en lecture seule : vous ne pouvez rien modifier ni publier.")
+{
+    /// <summary>Refus d'une écriture dans un domaine que le niveau ne fait que voir (Écrans, Listes de lecture, Médiathèque).</summary>
+    public static ReadOnlyLevelException For(string domain) => new("Votre niveau de droits permet de voir " + domain switch
+    {
+        LevelPages.Screens => "les écrans, pas de les modifier ni de les publier.",
+        LevelPages.Playlists => "les listes de lecture, pas de les modifier.",
+        LevelPages.Media => "la médiathèque, pas de la modifier.",
+        _ => "cette page, pas de la modifier."
+    });
+}
 
 /// <summary>Création, enregistrement, suppression et migration des niveaux de droits. Chaque méthode retourne un message d'erreur, ou null si c'est fait.</summary>
 public static class AccessLevels
@@ -105,11 +193,16 @@ public static class AccessLevels
     public const string DefaultName = "Utilisateur";
 
     /// <summary>Niveau proposé à toute organisation : écrans, listes de lecture et médiathèque, toutes les apps, toutes les aires. Ni planning ni réglages.</summary>
-    public static AccessLevel NewDefault() => new()
+    public static AccessLevel NewDefault()
     {
-        Name = DefaultName, Pages = [LevelPages.Screens, LevelPages.Playlists, LevelPages.Media],
-        AllIntegrations = true, AllWidgets = true, AllAreas = true
-    };
+        var l = new AccessLevel
+        {
+            Name = DefaultName, Pages = [LevelPages.Screens, LevelPages.Playlists, LevelPages.Media],
+            AllIntegrations = true, AllWidgets = true, AllAreas = true
+        };
+        l.Normalize();
+        return l;
+    }
 
     public static string? CheckName(string name) => name.Trim().Length == 0 ? "Donnez un nom au niveau." : name.Trim().Length > 60 ? "60 caractères au plus." : null;
 
@@ -124,6 +217,7 @@ public static class AccessLevels
         if (!level.HasScope) return "Choisissez au moins une aire, une zone ou un écran : sans périmètre, la personne ne verrait rien.";
         level.Pages = level.Pages.Where(LevelPages.Offered.Contains).Distinct().ToList();
         if (level.AllFolders is not ("read" or "write")) level.AllFolders = null;
+        level.Normalize(domain => HasLevelShares(d.Root, d.ClientId, level.Id, domain));
         level.Apps = level.Apps.Distinct().ToList();
         var i = levels.FindIndex(l => l.Id == level.Id);
         if (i >= 0) levels[i] = level; else levels.Add(level);
@@ -159,7 +253,9 @@ public static class AccessLevels
 
     public static string PagesText(AccessLevel l, AppCatalog catalog)
     {
-        var pages = LevelPages.Offered.Where(l.Pages.Contains).Select(LevelPages.Label).ToList();
+        // « Écrans, Listes de lecture (voir), Médiathèque » : l'accès « Voir » d'un domaine se lit à côté de sa page (sauf tout en lecture seule)
+        var pages = LevelPages.Offered.Where(l.Pages.Contains)
+            .Select(p => LevelPages.Label(p) + (!l.ReadOnly && p != LevelPages.Planning && l.AccessTo(p) == DomainAccess.Read ? " (voir)" : "")).ToList();
         if (l.ManageZones) pages.Add("Gérer les zones");
         if (l.AllIntegrations || catalog.All.Any(a => !a.ScreenWidget && l.Apps.Contains(a.Id))) pages.Add(LevelPages.Label(LevelPages.Integrations));
         if (l.AllWidgets || catalog.All.Any(a => a.ScreenWidget && l.Apps.Contains(a.Id))) pages.Add(LevelPages.Label(LevelPages.Widgets));
@@ -218,7 +314,18 @@ public static class AccessLevels
                 foreach (var u in group) { u.LevelId = level.Id; u.AreaRoles.Clear(); }
             }
             foreach (var u in db.Users.Where(u => u.ClientId == c.Id && u.AreaRoles.Count > 0)) u.AreaRoles.Clear();
+            // accès par domaine (15 octobre 2026) : un niveau d'avant garde exactement ses droits (lecture seule → « Voir » partout)
+            foreach (var l in c.Levels.Where(l => l.IsLegacy)) l.Normalize(domain => HasLevelShares(db, c.Id, l.Id, domain));
         }
+    }
+
+    /// <summary>Le niveau a des partages de dossiers de ce domaine (« Dossiers choisis »).</summary>
+    public static bool HasLevelShares(Db db, Guid clientId, Guid levelId, string domain)
+    {
+        bool Mine(FolderShare s) => s.Kind == FolderShareKind.Level && s.TargetId == levelId;
+        return domain == LevelPages.Playlists
+            ? db.PlaylistFolders.Any(f => f.ClientId == clientId && f.Shares.Any(Mine))
+            : db.MediaFolders.Any(f => f.ClientId == clientId && f.Shares.Any(Mine));
     }
 }
 

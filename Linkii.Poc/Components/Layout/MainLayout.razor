@@ -205,8 +205,10 @@
             <div class="org">@orgName</div>
             <PulsePill Class="top-pulse" />
         </header>
+        @{ var roDomain = ReadOnlyDomain; }
         @if (readOnly) { <div class="trial-bar"><Ico Name="lock" Size="16" /><span>Votre niveau de droits est en <b>lecture seule</b> : vous consultez, sans rien modifier ni publier.</span></div> }
-        <main class="content @(readOnly ? "ro" : "")">
+        else if (roDomain != null) { <div class="trial-bar"><Ico Name="lock" Size="16" /><span>Votre niveau de droits permet de <b>voir</b> @(roDomain == LevelPages.Media ? "la médiathèque, sans la modifier" : roDomain == LevelPages.Playlists ? "les listes de lecture, sans les modifier" : "les écrans, sans les modifier ni les publier").</span></div> }
+        <main class="content @(readOnly || roDomain != null ? "ro" : "")">
             @if (ExpertOnlyHere)
             {
                 <div class="card empty"><div class="big">Disponible en mode expert</div><p>Cette page fait partie des fonctions avancées (planning, aires de gestion, zones, membres, intégrations, widgets). Elle n'est pas affichée en mode simple.</p><button type="button" class="btn" @onclick="() => Modes.Switch(true)">Passer en mode expert</button></div>
@@ -247,6 +249,9 @@
 
 @code {
     private bool open, navOpen, areaMenu, multi, orgAdmin = true, readOnly;
+    private HashSet<string> writable = new();   // domaines (écrans, listes, médiathèque) que le niveau modifie
+    // Page d'un domaine que le niveau ne fait que voir : bandeau et boutons d'en-tête masqués, comme en lecture seule
+    private string? ReadOnlyDomain => orgAdmin ? null : Services.GetRequiredService<TenantStore>().PageDomain is { } dom && !writable.Contains(dom) ? dom : null;
     private List<Area> areas = new();
     private Area? currentArea;
     private HashSet<string> pages = new(LevelPages.All);
@@ -271,6 +276,7 @@
         (areas, currentArea, orgAdmin, readOnly, pages, multi) = store.Read(d => (d.Access.Areas, d.Access.Current, d.Access.IsOrgAdmin, d.Access.ReadOnly,
             LevelPages.All.Where(p => d.Access.CanSee(p, Catalog)).ToHashSet(),
             d.Access.OrgAreaCount > 1 || d.Users.Any(u => u.Role == Roles.ClientMember)));
+        writable = store.Read(d => new[] { LevelPages.Screens, LevelPages.Playlists, LevelPages.Media }.Where(d.Access.CanWrite).ToHashSet());
     }
 
     private void SwitchArea(Guid id)

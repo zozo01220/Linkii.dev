@@ -7,6 +7,7 @@
 @inject ScanLog Scans
 @inject NavigationManager Nav
 @inject Toaster Toast
+@inject MediaLibrary MediaLib
 @using Microsoft.JSInterop
 @implements IDisposable
 
@@ -95,19 +96,42 @@
                 var idx = i;
                 var it = pl.Draft[idx];
                 var m = media.FirstOrDefault(x => x.Id == it.MediaId);
-                <div class="item-row" data-sort-row @key="it">
+                var masked = MediaLibrary.UsesHidden(m, hidden);   // média que la personne ne voit pas : contenu masqué (§54)
+                <div class="item-row @(masked ? "masked" : "")" data-sort-row @key="it">
                     @if (idx > 0)
                     {
                         @* entre deux lignes : insérer un contenu à cet endroit *@
                         <button type="button" class="item-insert" title="Insérer un contenu ici" aria-label="Insérer un contenu avant « @(m?.Name ?? "ce contenu") »" @onclick="() => OpenPicker(idx)"><span><Ico Name="plus" Size="13" /> Insérer ici</span></button>
                     }
                     <div class="idx"><span class="n">@(idx + 1)</span><span class="grip" title="Glisser pour déplacer"><Ico Name="grip" Size="16" /></span></div>
+                    @if (masked)
+                    {
+                        @* il garde sa place et sa durée ; il ne s'ouvre pas, ne se modifie pas et ne se retire pas (on ne retire pas ce qu'on ne voit pas) *@
+                        <div class="th" aria-hidden="true"><Ico Name="lock" Size="20" /></div>
+                        <div class="item-masked"><b>Contenu masqué</b><small>Il utilise un média que votre niveau de droits ne permet pas de voir. Il est diffusé normalement.</small></div>
+                        <div class="dur-cell"><span class="mono" title="Temps alloué à ce contenu">@Duration(it, m)</span></div>
+                        <div class="kebab">
+                            <button type="button" class="kebab-btn" aria-label="Actions pour ce contenu masqué" aria-haspopup="menu" aria-expanded="@(menuFor == it ? "true" : "false")"
+                                    @onclick="() => menuFor = menuFor == it ? null : it"><Ico Name="dots-v" Size="18" /></button>
+                            @if (menuFor == it)
+                            {
+                                <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                                <div class="kebab-menu" role="menu">
+                                    @if (idx > 0) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; Move(pl, idx, -1); }"><Ico Name="arrow-up" Size="16" /> Monter</button> }
+                                    @if (idx < pl.Draft.Count - 1) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; Move(pl, idx, 1); }"><Ico Name="arrow-down" Size="16" /> Descendre</button> }
+                                    <span class="kebab-note">Contenu masqué : seul quelqu'un qui voit son média peut le modifier ou le retirer.</span>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
                     <div class="th">
                         @if (m != null) { <MediaThumb Media="m" All="media" /> }
                         @if (Helpers.YoutubeBadge(m) is { } badge) { <span class="dur">@badge</span> }
                         <QrBadge Qr="RowQr(it)" Mini="true" />
                     </div>
-                    @{ var kind = m?.AppId != null ? Svc.Find(m.AppId)?.Name ?? "App" : m?.Type == "video" ? "Vidéo" : "Image"; }
+                    var kind = m?.AppId != null ? Svc.Find(m.AppId)?.Name ?? "App" : m?.Type == "video" ? "Vidéo" : "Image";
                     @if (m != null)
                     {
                         @* nom et type : accès direct aux paramètres du contenu *@
@@ -141,6 +165,7 @@
                             </div>
                         }
                     </div>
+                    }
                 </div>
             }
             </div>
@@ -452,12 +477,14 @@
     private async Task Refresh() { Reload(); await InvokeAsync(StateHasChanged); }
 
     private int outside;   // écrans hors du périmètre du membre qui jouent cette liste
+    private HashSet<Guid> hidden = new();
 
     private void Reload()
     {
         playlists = Store.Read(d => d.Playlists.Where(p => PlaylistOps.RightOf(d, p) != FolderRight.None).ToList());   // une liste d'un dossier invisible est « introuvable »
         readOnlyHere = Store.Read(d => d.Playlists.FirstOrDefault(p => p.Id == Id) is { } cur && !PlaylistOps.CanEdit(d, cur));
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());   // hors vidéos en conversion / en échec
+        hidden = MediaLib.HiddenFileIds();   // fichiers des dossiers non accordés : leurs contenus sont masqués
         enabledApps = Svc.Installed().Select(i => Svc.Find(i.AppId)).OfType<AppManifest>().Where(a => !a.ScreenWidget).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
         growth = Store.Read(d => d.Tenant.IsGrowth);
         outside = Store.Read(d => d.Access.Sees is { } sees ? d.Root.Screens.Count(s => s.ClientId == d.ClientId && s.Token != null && !sees(s) && s.ZonePlaylists().Contains(Id)) : 0);
@@ -507,6 +534,7 @@
     // Un contenu d'app n'existe que pour ses listes de lecture : retiré de la dernière, il est supprimé (les fichiers de la médiathèque restent).
     private void RemoveItem(Playlist pl, PlaylistItem it)
     {
+        if (MediaLibrary.UsesHidden(media.FirstOrDefault(x => x.Id == it.MediaId), hidden)) { Toast.Error("Ce contenu utilise un média que vous ne voyez pas : vous ne pouvez pas le retirer."); return; }
         WriteList(d => { pl.Draft.Remove(it); pl.Touch(); });
         var m = media.FirstOrDefault(x => x.Id == it.MediaId);
         if (m?.AppId != null && Svc.PlaylistsUsing(m.Id).Count == 0) Svc.DeleteInstance(m.Id);

@@ -477,7 +477,7 @@ else
 
     // ---------- Dossiers (option « Dossiers dans la médiathèque ») ----------
 
-    private bool foldersOn, isAdmin, canCreateRoot;
+    private bool foldersOn, isAdmin, canCreateRoot, canWrite;   // canWrite : accès « Voir et modifier » à la médiathèque (éléments hors dossier)
     private Guid? folderId;                                   // dossier ouvert ; null : racine de l'aire
     private List<FolderRow> folderRows = new();               // dossiers vus par la personne
     private Dictionary<Guid, FolderRight> rights = new();
@@ -497,9 +497,9 @@ else
     private bool FoldersShown => foldersOn;   // dossiers visibles en mode simple comme en mode expert
     private FolderRow? currentRow => folderId is { } id ? folderRows.FirstOrDefault(r => r.Folder.Id == id) : null;
     private bool CanCreateHere => folderId is null ? canCreateRoot : currentRow is { } c && c.Right >= FolderRight.Write;
-    private bool CanUploadHere => folderId is null || currentRow is { } c && c.Right >= FolderRight.Write;
+    private bool CanUploadHere => folderId is null ? canWrite : currentRow is { } c && c.Right >= FolderRight.Write;
     // À la racine, tout fichier se modifie comme avant ; dans un dossier, il faut y écrire.
-    private bool CanEdit(MediaItem m) => m.FolderId is not { } f || rights.GetValueOrDefault(f) >= FolderRight.Write;
+    private bool CanEdit(MediaItem m) => m.FolderId is not { } f ? canWrite : rights.GetValueOrDefault(f) >= FolderRight.Write;
     private List<(Guid Id, string Name)> pickedEditable => allFiles.Where(m => picked.Contains(m.Id) && Selectable(m)).Select(m => (m.Id, m.Name)).ToList();
     private MediaItem? open => openId is { } id ? allFiles.FirstOrDefault(m => m.Id == id) : null;
     private List<MediaItem> OpenList => Visible.ToList();
@@ -520,7 +520,8 @@ else
         canMove = Store.Read(d => d.Access.IsOrgAdmin && d.Area != null && d.Access.OrgAreaCount > 1);
         foldersOn = Store.Read(d => d.Tenant.FoldersOn);
         isAdmin = Store.Read(d => d.Access.IsOrgAdmin);
-        canCreateRoot = Store.Read(d => FolderAccess.CanCreateAtRoot(d.Access));
+        canCreateRoot = Store.Read(d => FolderAccess.CanCreateAtRoot(d.Access, LevelPages.Media));
+        canWrite = Store.Read(d => d.Access.CanWrite(LevelPages.Media));
         folderRows = Library.Folders();
         rights = folderRows.ToDictionary(r => r.Folder.Id, r => r.Right);
         audiences = foldersOn ? Library.Audiences() : new();

@@ -9,7 +9,7 @@ public static class PlaylistOps
     /// </summary>
     public static FolderRight RightOf(ClientDb d, Playlist p)
     {
-        if (p.FolderId is not { } fid || PlaylistFolderOps.Find(d, fid) is not { } f) return d.Access.ReadOnly ? FolderRight.Read : FolderRight.Write;
+        if (p.FolderId is not { } fid || PlaylistFolderOps.Find(d, fid) is not { } f) return d.Access.CanWrite(LevelPages.Playlists) ? FolderRight.Write : FolderRight.Read;
         return PlaylistFolderOps.RightOf(d, f);
     }
 
@@ -103,7 +103,7 @@ public static class PlaylistFolderOps
             if (RightOf(d, parent) < FolderRight.Write) return ("Vous ne pouvez pas créer de dossier dans celui-ci.", null);
             depth = FolderAccess.Chain(parent, all).Count() + 1;
         }
-        else if (!FolderAccess.CanCreateAtRoot(d.Access)) return ("Votre niveau de droits ne permet pas de créer des dossiers.", null);
+        else if (!FolderAccess.CanCreateAtRoot(d.Access, LevelPages.Playlists)) return ("Votre niveau de droits ne permet pas de créer des dossiers.", null);
         if (depth > FolderAccess.MaxDepth) return ($"Les dossiers ne s'imbriquent pas au-delà de {FolderAccess.MaxDepth} niveaux.", null);
 
         var areaId = parent?.AreaId ?? d.Area?.Id ?? Guid.Empty;
@@ -196,7 +196,7 @@ public static class PlaylistFolderOps
             target = Find(d, tid);
             if (target == null || RightOf(d, target) < FolderRight.Write) return (0, new() { "Vous ne pouvez pas ranger de liste dans ce dossier." });
         }
-        else if (!FolderAccess.CanCreateAtRoot(d.Access)) return (0, new() { "Votre niveau de droits ne permet pas de ranger des listes à la racine." });
+        else if (!FolderAccess.CanCreateAtRoot(d.Access, LevelPages.Playlists)) return (0, new() { "Votre niveau de droits ne permet pas de ranger des listes à la racine." });
 
         foreach (var p in d.Playlists.Where(x => wanted.Contains(x.Id)).ToList())
         {

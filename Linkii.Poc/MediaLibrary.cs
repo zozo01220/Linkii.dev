@@ -111,7 +111,7 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     {
         var all = FolderOps.All(d);
         var list = new List<(Guid? Id, string Path)>();
-        if (FolderAccess.CanCreateAtRoot(d.Access)) list.Add((null, "Médiathèque de l'aire (racine)"));
+        if (FolderAccess.CanCreateAtRoot(d.Access, LevelPages.Media)) list.Add((null, "Médiathèque de l'aire (racine)"));
         foreach (var f in d.MediaFolders)
         {
             if (FolderAccess.For(d.Access, f, all) < FolderRight.Write) continue;
@@ -185,6 +185,17 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     /// </summary>
     public static List<MediaItem> UnusedCanva(IEnumerable<MediaItem> media, IEnumerable<Playlist> playlists, IEnumerable<Screen> screens) =>
         UnusedExports(media, playlists, screens, "canva");
+
+    /// <summary>Fichiers de l'aire que la personne ne voit pas (rangés dans un dossier qui ne lui est pas accordé) : masqués dans les listes (§54).</summary>
+    public HashSet<Guid> HiddenFileIds()
+    {
+        var visible = Files().Select(m => m.Id).ToHashSet();
+        return store.Read(d => d.Media.Where(m => IsFile(m) && !visible.Contains(m.Id)).Select(m => m.Id).ToHashSet());
+    }
+
+    /// <summary>Le contenu montre un fichier masqué : le fichier lui-même, ou un contenu (app) qui en a choisi un dans ses réglages.</summary>
+    public static bool UsesHidden(MediaItem? m, IReadOnlySet<Guid> hidden) =>
+        m != null && hidden.Count > 0 && (IsFile(m) ? hidden.Contains(m.Id) : m.Settings.Values.SelectMany(AppField.MediaIds).Any(hidden.Contains));
 
     /// <summary>Tous les fichiers sans emploi (même règle que les exports Canva) : filtre « Non utilisés » et mention sur la vignette.</summary>
     public HashSet<Guid> UnusedIds() => store.Read(d => UnusedExports(d.Media, d.Playlists, d.Screens, null).Select(m => m.Id).ToHashSet());

@@ -5,6 +5,7 @@
 @inject TenantStore Store
 @inject AppService Svc
 @inject PlaylistLibrary Library
+@inject MediaLibrary MediaLib
 @inject NavigationManager Nav
 @inject Toaster Toast
 @inject IJSRuntime JS
@@ -393,7 +394,7 @@ else
     private List<Playlist>? deleting;   // listes en attente de confirmation de suppression
 
     // Dossiers des listes de lecture (option « Dossiers », comme la médiathèque)
-    private bool foldersOn, canCreateRoot, isAdmin;
+    private bool foldersOn, canCreateRoot, isAdmin, canWrite;
     private Guid? folderId;                                   // dossier ouvert ; null : racine de l'aire
     private List<PlaylistFolderRow> folderRows = new();       // dossiers vus par la personne
     private Dictionary<Guid, FolderRight> rights = new();     // droit sur chaque liste vue
@@ -418,7 +419,7 @@ else
 
     private PlaylistFolderRow? currentRow => folderId is { } id ? folderRows.FirstOrDefault(r => r.Folder.Id == id) : null;
     // Une liste se crée à la racine comme avant (tout membre de la page) ; dans un dossier, il faut y écrire. Un dossier se crée à la racine selon le niveau.
-    private bool CanCreateListHere => folderId is null || currentRow is { } c && c.Right >= FolderRight.Write;
+    private bool CanCreateListHere => folderId is null ? canWrite : currentRow is { } c && c.Right >= FolderRight.Write;   // hors dossier : selon l'accès aux listes
     private bool CanCreateFolderHere => folderId is null ? canCreateRoot : currentRow is { } c && c.Right >= FolderRight.Write;
     private FolderRight RightOfList(Playlist p) => rights.GetValueOrDefault(p.Id, FolderRight.None);
     private bool CanEdit(Playlist p) => RightOfList(p) >= FolderRight.Write;
@@ -431,7 +432,8 @@ else
         canMove = Store.Read(d => d.Access.IsOrgAdmin && d.Area != null && d.Access.OrgAreaCount > 1);
         isAdmin = Store.Read(d => d.Access.IsOrgAdmin);
         foldersOn = Store.Read(d => d.Tenant.FoldersOn);
-        canCreateRoot = Store.Read(d => FolderAccess.CanCreateAtRoot(d.Access));
+        canCreateRoot = Store.Read(d => FolderAccess.CanCreateAtRoot(d.Access, LevelPages.Playlists));
+        canWrite = Store.Read(d => d.Access.CanWrite(LevelPages.Playlists));
         folderRows = foldersOn ? Library.Folders() : new();
         rights = Library.PlaylistRights();
         audiences = foldersOn ? Library.Audiences() : new();
@@ -440,6 +442,7 @@ else
         // une liste rangée dans un dossier que la personne ne voit pas n'apparaît pas
         playlists = Store.Read(d => d.Playlists.Where(p => PlaylistOps.RightOf(d, p) != FolderRight.None).ToList());
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
+        hidden = MediaLib.HiddenFileIds();   // fichiers des dossiers non accordés : jamais en vignette
         allScreens = Store.Read(d => d.Screens.ToList());
         screens = allScreens.Where(s => s.Token != null).ToList();
         areas = Store.Read(d => d.Areas.ToList());
@@ -494,8 +497,9 @@ else
 
     // ---------- Affichage d'une liste ----------
 
+    private HashSet<Guid> hidden = new();
     private IEnumerable<MediaItem> Tiles(Playlist p) =>
-        p.Draft.Where(i => i.Placement == "full").Select(i => media.FirstOrDefault(m => m.Id == i.MediaId)).Where(m => m != null)!;
+        p.Draft.Where(i => i.Placement == "full").Select(i => media.FirstOrDefault(m => m.Id == i.MediaId)).Where(m => m != null && !MediaLibrary.UsesHidden(m, hidden))!;
 
     private string Meta(Playlist p, int total)
     {
