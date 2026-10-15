@@ -51,6 +51,8 @@ builder.Services.AddSingleton<IAppProvider, RssProvider>();
 builder.Services.AddSingleton<IAppProvider, FacebookProvider>();
 builder.Services.AddSingleton<IAppProvider, WebPageProvider>();
 builder.Services.AddSingleton<IAppProvider, YouTubeProvider>();
+builder.Services.AddSingleton<HomeAssistantClient>();   // Home Assistant : compte de l'organisation, états, commandes (voir Apps/HomeAssistant.cs)
+builder.Services.AddSingleton<IAppProvider, HomeAssistantProvider>();
 builder.Services.AddSingleton<AppProviders>();
 builder.Services.AddSingleton<GoogleAuth>();   // « Se connecter avec Google » (Calendar et Drive, lecture seule)
 builder.Services.AddSingleton<MicrosoftAuth>();   // « Se connecter avec Microsoft » (agendas Microsoft 365 et OneDrive / SharePoint, lecture seule)
@@ -68,6 +70,7 @@ builder.Services.AddHostedService<DriveSyncWorker>();   // dossiers des Drives :
 builder.Services.AddSingleton<ScanLog>();   // scans des QR codes de comptage (Growth) : journal par client, 90 jours
 builder.Services.AddScoped<AppService>();
 builder.Services.AddScoped<MediaLibrary>();
+builder.Services.AddScoped<PlaylistLibrary>();
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(o =>
@@ -708,6 +711,32 @@ static async Task<IResult> AppData(PublishedItem published, Tenant tenant, AppCa
     }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 }
+
+// Interrupteur ou lumière d'un widget Home Assistant, actionné depuis l'écran tactile. Seule une entité choisie dans ce widget peut être commandée,
+// et seulement dans son domaine (interrupteurs pour « ha-switches », lumières pour « ha-lights »).
+api.MapPost("/player/app/{id:guid}/switch", async (HttpRequest req, Guid id, HaSwitchDto body, JsonStore store, HomeAssistantClient ha) =>
+{
+    var (denied, account, published) = store.Read<(IResult?, HomeAssistantAccount?, PublishedItem?)>(db =>
+    {
+        var s = Auth(req, db);
+        var gate = Gate(s, db);
+        if (gate != null) return (gate, null, null);
+        var pub = PlayerFeed.AllItems(db, s!).FirstOrDefault(x => x.Id == id && HomeAssistantRules.IsHaApp(x.AppId));
+        return ((IResult?)null, db.Clients.First(c => c.Id == s!.ClientId).HomeAssistant, pub);
+    });
+    if (denied != null) return denied;
+    if (published == null) return Results.NotFound();
+    var entityId = body.EntityId ?? "";
+    if (!HomeAssistantRules.ParseEntities(published.Settings.GetValueOrDefault("entities")).Contains(entityId) || !HomeAssistantRules.Commandable(published.AppId!, entityId))
+        return Results.BadRequest(new { error = "Entité non configurée ou non actionnable." });
+    if (account == null) return Results.Json(new { error = "Compte Home Assistant non connecté." }, statusCode: 409);
+    try
+    {
+        await ha.SetState(ha.Conn(account), entityId, body.On);
+        return Results.Ok();
+    }
+    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
 
 // ---------- Simulateur du back-office : le player en mode aperçu ----------
 // Jeton d'aperçu (en-tête X-Preview) créé par le back-office pour un écran, un mur ou une liste de lecture auxquels la personne a accès.

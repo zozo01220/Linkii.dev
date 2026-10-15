@@ -13,6 +13,7 @@ public class Db
     public List<AppInstall> AppInstalls { get; set; } = new();   // apps du catalogue ajoutées par chaque client
     public List<Area> Areas { get; set; } = new();               // aires de gestion des clients
     public List<MediaFolder> MediaFolders { get; set; } = new();  // dossiers de la médiathèque (voir <see cref="MediaFolder"/>)
+    public List<PlaylistFolder> PlaylistFolders { get; set; } = new();  // dossiers des listes de lecture (voir <see cref="PlaylistFolder"/>)
     public PlatformSettings Platform { get; set; } = new();      // réglages communs à toutes les organisations (console › Réglages)
 
     /// <summary>Ancien format mono-client (avant le multi-tenant) : lu une fois pour migration, jamais réécrit.</summary>
@@ -658,7 +659,17 @@ public class MediaItem : IClientOwned, IAreaOwned
 /// Dossier de la médiathèque (option « Dossiers dans la médiathèque »). Il appartient à son créateur et à une aire, est privé tant qu'il n'est pas partagé.
 /// Le partage (personne ou niveau de droits, en lecture ou en écriture) descend dans les sous-dossiers. Droits : <see cref="FolderAccess"/>.
 /// </summary>
-public class MediaFolder : IClientOwned, IAreaOwned
+/// <summary>Un dossier de la médiathèque ou des listes de lecture : mêmes droits (<see cref="FolderAccess"/>), même arborescence et même partage.</summary>
+public interface IFolderNode : IAreaOwned
+{
+    Guid Id { get; }
+    Guid? ParentId { get; }
+    Guid? OwnerId { get; }
+    string Name { get; }
+    List<FolderShare> Shares { get; }
+}
+
+public class MediaFolder : IClientOwned, IFolderNode
 {
     public Guid ClientId { get; set; }
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -695,9 +706,26 @@ public class Playlist : IClientOwned, IAreaOwned
     public DateTime? UpdatedAt { get; set; }                       // dernière modification (UTC), affichée sur la carte de la playlist
     public List<PlaylistItem> Draft { get; set; } = new();       // l'ordre de la liste = l'ordre de diffusion
     public List<PublishedItem> Published { get; set; } = new();  // ancien instantané : lu seulement par les écrans jamais publiés depuis
+    public Guid? FolderId { get; set; }                            // dossier des listes de lecture (null : racine de l'aire). Voir <see cref="PlaylistFolder"/>
 
     /// <summary>À appeler dans un Store.Write après toute modification du contenu de la playlist.</summary>
     public void Touch() { DraftChanged = true; Revision++; UpdatedAt = DateTime.UtcNow; }
+}
+
+/// <summary>
+/// Dossier des listes de lecture (option « Dossiers », comme la médiathèque). Il appartient à son créateur et à une aire, est privé tant qu'il n'est pas partagé.
+/// Les listes rangées dedans ne sont visibles que si la personne y a un droit ; à la racine, elles restent visibles de tous, comme avant.
+/// </summary>
+public class PlaylistFolder : IClientOwned, IFolderNode
+{
+    public Guid ClientId { get; set; }
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid AreaId { get; set; }
+    public Guid? ParentId { get; set; }
+    public string Name { get; set; } = "";
+    public Guid? OwnerId { get; set; }
+    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+    public List<FolderShare> Shares { get; set; } = new();
 }
 
 public class PlaylistItem

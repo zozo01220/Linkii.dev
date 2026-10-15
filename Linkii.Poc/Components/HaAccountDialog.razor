@@ -1,0 +1,245 @@
+@inject TenantStore Store
+@inject HomeAssistantClient Ha
+@inject Toaster Toast
+
+@* Intégrations › Maison connectée › Home Assistant : un compte pour toute l'organisation. Adresse, jeton ou identifiant saisis une fois ;
+   « Enregistrer et tester » vérifie la connexion avant d'enregistrer et charge la liste des capteurs, interrupteurs et lumières. *@
+@if (Open)
+{
+    <div class="modal-backdrop" @onclick="CloseDialog"></div>
+    <div class="modal app-modal" role="dialog" aria-modal="true" aria-labelledby="ha-title">
+        <div class="modal-head">
+            <AppIcon Id="homeassistant" />
+            <div class="grow">
+                <h3 id="ha-title">Home Assistant</h3>
+                <small>Un compte pour toute l'organisation. Ses capteurs, interrupteurs et lumières alimentent les widgets Home Assistant.</small>
+            </div>
+        </div>
+        <div class="modal-body">
+            @if (account != null && !editing)
+            {
+                <div class="hac-acct">
+                    <div class="hac-who">
+                        <b>@(account.AuthMode == "password" ? account.User : "Jeton d'accès")</b>
+                        <small>@account.Url</small>
+                    </div>
+                    @if (account.LastError.Length > 0)
+                    {
+                        <span class="hac-pill hac-pill-err">Erreur</span>
+                    }
+                    else
+                    {
+                        <span class="hac-pill">Connecté</span>
+                    }
+                    <button type="button" class="btn ghost sm" disabled="@busy" @onclick="() => editing = true">Modifier</button>
+                </div>
+                @if (account.LastError.Length > 0)
+                {
+                    <div class="err">Dernier test en échec : @account.LastError</div>
+                }
+                <p class="hac-note">Liste mise à jour @(account.EntitiesUtc is { } u ? $"le {u.ToLocalTime():dd.MM.yyyy à HH:mm}" : "jamais") · @account.Entities.Count entité(s)</p>
+
+                <div class="hac-tabs" role="tablist">
+                    @foreach (var t in Tabs)
+                    {
+                        var domain = t.Domain;
+                        <button type="button" role="tab" class="@(tab == domain ? "on" : "")" aria-selected="@(tab == domain ? "true" : "false")" @onclick="() => tab = domain">
+                            @t.Label <small>@CountOf(domain)</small>
+                        </button>
+                    }
+                </div>
+                <div class="hac-bar">
+                    <input type="search" placeholder="Rechercher une entité" aria-label="Rechercher une entité" @bind="search" @bind:event="oninput" />
+                    <span class="hac-count">@Shown().Count sur @CountOf(tab)</span>
+                </div>
+                @if (CountOf(tab) == 0)
+                {
+                    <p class="hac-empty">Aucune entité de ce type dans cette instance. Ajoutez-en dans Home Assistant, puis actualisez la liste.</p>
+                }
+                else if (Shown().Count == 0)
+                {
+                    <p class="hac-empty">Aucune entité ne correspond à la recherche.</p>
+                }
+                else
+                {
+                    <div class="hac-list">
+                        @foreach (var e in Shown())
+                        {
+                            <div class="hac-row">
+                                <span class="hac-txt">
+                                    <span class="hac-name">@e.Name</span>
+                                    <span class="hac-id">@e.Id</span>
+                                </span>
+                                @if (e.Unit.Length > 0)
+                                {
+                                    <span class="hac-unit">@e.Unit</span>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            }
+            else
+            {
+                <div class="dw">
+                    <div class="dw-field"><label for="ha-url">Adresse de Home Assistant</label><input id="ha-url" class="mono" @bind="url" spellcheck="false" autocomplete="off" placeholder="https://maison.exemple.ch" /><small>Adresse HTTPS joignable depuis internet, sans / final.</small></div>
+                    <div class="dw-field"><label for="ha-auth">Connexion</label>
+                        <select id="ha-auth" @bind="auth">
+                            <option value="token">Jeton d'accès longue durée</option>
+                            <option value="password">Identifiant et mot de passe</option>
+                        </select>
+                    </div>
+                    @if (auth == "password")
+                    {
+                        <div class="dw-field"><label for="ha-user">Identifiant Home Assistant</label><input id="ha-user" @bind="user" autocomplete="off" /></div>
+                        <div class="dw-field"><label for="ha-pwd">Mot de passe</label><input id="ha-pwd" type="password" @bind="secret" autocomplete="new-password" placeholder="@SecretPlaceholder" /></div>
+                    }
+                    else
+                    {
+                        <div class="dw-field"><label for="ha-token">Jeton d'accès</label><input id="ha-token" type="password" @bind="secret" autocomplete="new-password" placeholder="@SecretPlaceholder" /><small>Profil Home Assistant › Sécurité › Jetons d'accès longue durée.</small></div>
+                    }
+                    <div class="dw-actions">
+                        @if (account != null) { <button type="button" class="btn ghost sm" disabled="@busy" @onclick="() => editing = false">Annuler</button> }
+                        <button type="button" class="btn sm" disabled="@busy" @onclick="Save">@(busy ? "Test en cours…" : "Enregistrer et tester")</button>
+                    </div>
+                </div>
+                <p class="csd-shared"><Ico Name="lock" Size="14" /> Identifiants chiffrés sur le serveur Linkii. Home Assistant doit être joignable depuis internet.</p>
+            }
+        </div>
+        <div class="modal-foot hac-foot">
+            @if (account != null && !editing)
+            {
+                @if (!confirmOff)
+                {
+                    <button type="button" class="btn danger sm" disabled="@busy" @onclick="() => confirmOff = true">Déconnecter</button>
+                }
+                else
+                {
+                    <span class="hac-warn">Les widgets Home Assistant ne fonctionneront plus.</span>
+                    <button type="button" class="btn danger sm" disabled="@busy" @onclick="Disconnect">Confirmer</button>
+                    <button type="button" class="btn ghost sm" disabled="@busy" @onclick="() => confirmOff = false">Annuler</button>
+                }
+                <span class="hac-spacer"></span>
+                <button type="button" class="btn ghost sm" disabled="@busy" @onclick="RefreshList">@(busy ? "Actualisation…" : "Actualiser la liste")</button>
+            }
+            else
+            {
+                <span class="hac-spacer"></span>
+            }
+            <button type="button" class="btn ghost" @onclick="CloseDialog">Fermer</button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>Compte enregistré, modifié, actualisé ou supprimé : la page Intégrations se met à jour.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private HomeAssistantAccount? account;
+    private bool editing, busy, confirmOff, wasOpen;
+    private string url = "", auth = "token", user = "", secret = "";
+    private string tab = HomeAssistantRules.Sensor;
+    private string search = "";
+
+    private static readonly (string Domain, string Label)[] Tabs =
+    {
+        (HomeAssistantRules.Sensor, "Capteurs"), (HomeAssistantRules.Switch, "Interrupteurs"), (HomeAssistantRules.Light, "Lumières"),
+    };
+
+    private int CountOf(string domain) => account?.Entities.Count(e => e.Domain == domain) ?? 0;
+
+    /// <summary>Entités de l'onglet choisi, filtrées par la recherche.</summary>
+    private List<HomeAssistantEntity> Shown()
+    {
+        var q = search.Trim();
+        return (account?.Entities ?? new()).Where(e => e.Domain == tab
+            && (q.Length == 0 || e.Name.Contains(q, StringComparison.OrdinalIgnoreCase) || e.Id.Contains(q, StringComparison.OrdinalIgnoreCase))).ToList();
+    }
+
+    private string SecretPlaceholder => account is { Secret.Length: > 0 } ? "Laissez vide pour garder le secret enregistré" : "";
+
+    protected override void OnParametersSet()
+    {
+        if (Open && !wasOpen) Load();   // chaque ouverture repart de la connexion enregistrée
+        wasOpen = Open;
+    }
+
+    private void Load()
+    {
+        account = Store.Read(d => d.Tenant.HomeAssistant);
+        editing = account == null;
+        confirmOff = false;
+        tab = HomeAssistantRules.Sensor;
+        search = "";
+        url = account?.Url ?? "";
+        auth = account?.AuthMode ?? "token";
+        user = account?.User ?? "";
+        secret = "";
+    }
+
+    private async Task CloseDialog() => await OnClose.InvokeAsync();
+
+    private async Task Save()
+    {
+        var server = url.Trim().TrimEnd('/');
+        if (!server.StartsWith("https://", StringComparison.OrdinalIgnoreCase) || !AppCatalog.IsHttpUrl(server))
+        {
+            Toast.Error("Saisissez l'adresse en https:// (https://maison.exemple.ch).");
+            return;
+        }
+        if (auth == "password" && user.Trim().Length == 0) { Toast.Error("Saisissez l'identifiant Home Assistant."); return; }
+
+        // Secret laissé vide : on garde celui d'avant, seulement si l'instance et l'identifiant ne changent pas.
+        var same = account != null && account.Url == server && account.AuthMode == auth && account.User == (auth == "password" ? user.Trim() : "");
+        var plain = secret.Length > 0 ? secret : same ? Ha.Conn(account!).Secret : "";
+        if (plain.Length == 0) { Toast.Error(auth == "password" ? "Saisissez le mot de passe." : "Saisissez le jeton d'accès."); return; }
+
+        busy = true;
+        try
+        {
+            var fresh = await Ha.Connect(server, auth, user, plain, same ? account : null);
+            Store.Write(d => { d.Tenant.HomeAssistant = fresh; });
+            account = fresh;
+            editing = false;
+            secret = "";
+            Toast.Ok($"Home Assistant connecté : {fresh.Entities.Count} entité(s) trouvée(s).");
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+        finally { busy = false; }
+    }
+
+    private async Task RefreshList()
+    {
+        if (account == null) return;
+        busy = true;
+        try
+        {
+            var fresh = await Ha.Refresh(account);
+            Store.Write(d => { d.Tenant.HomeAssistant = fresh; });
+            account = fresh;
+            Toast.Ok($"Liste actualisée : {fresh.Entities.Count} entité(s).");
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Store.Write(d => { if (d.Tenant.HomeAssistant is { } a) a.LastError = ex.Message; });
+            account = Store.Read(d => d.Tenant.HomeAssistant);
+            Toast.Error("Liste non actualisée : " + ex.Message);
+            await OnChanged.InvokeAsync();
+        }
+        finally { busy = false; }
+    }
+
+    private async Task Disconnect()
+    {
+        Store.Write(d => { d.Tenant.HomeAssistant = null; });
+        account = null;
+        editing = true;
+        confirmOff = false;
+        Toast.Ok("Home Assistant déconnecté.");
+        await OnChanged.InvokeAsync();
+    }
+}

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Source dans l'aperçu</title>
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--row:#EDF1F5;--brand:#0B1F3A;--brand-tint:#EBEDF0;--signal:#3B82C4;--ok:#1E8E5A;--radius:4px;--mono:"JetBrains Mono",ui-monospace,Consolas,monospace}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:#8c96a4;color:var(--ink);font-size:15px;line-height:1.5}
+h1,h3,h4,p{margin:0;font-weight:500}p{font-weight:400}b{font-weight:500}button,select,input{font:inherit;color:inherit}
+.mock{position:fixed;top:0;left:0;right:0;z-index:100;background:#FFF8E1;border-bottom:1px dashed #E0B84A;padding:8px 20px;font-size:13px;color:#6B5200;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.mock .seg{display:flex;gap:0;border:1px solid #E0B84A;border-radius:4px;overflow:hidden}.mock .seg button{border:0;background:#fff;padding:3px 12px;cursor:pointer;border-right:1px solid #E0B84A}.mock .seg button:last-child{border:0}.mock .seg .on{background:#E0B84A;color:#fff}
+.stagebg{min-height:100%;padding:70px 24px 24px;display:flex;justify-content:center;align-items:flex-start}
+.modal{background:#fff;border-radius:10px;width:min(1150px,100%);display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(11,31,58,.35);overflow:hidden}
+.mh{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line)}
+.mh .ic{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:18px;flex:none}
+.mh h3{font-size:18px;display:inline}.mh small{color:var(--muted);font-size:13px;display:block}
+.btn{font-weight:500;cursor:pointer;border:1px solid var(--brand);border-radius:var(--radius);padding:9px 16px;background:var(--brand);color:#fff;display:inline-flex;gap:8px;align-items:center;white-space:nowrap}
+.btn.ghost{background:#fff;color:var(--ink);border-color:var(--line-2)}.btn.sm{padding:5px 11px;font-size:13px}
+.xb{width:36px;height:36px;border:0;border-radius:4px;background:var(--bg);cursor:pointer;font-size:18px}
+.mb{display:grid;grid-template-columns:1.15fr 1fr;gap:28px;padding:22px 24px;min-height:440px}
+.ci-t{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;display:block}
+/* aperçu */
+.pv{position:relative;aspect-ratio:16/9;border-radius:8px;overflow:hidden}
+.pv.empty{border:2px dashed var(--line-2);background:var(--bg);display:grid;place-items:center;text-align:center}
+.pv.filled{background:#0b1f3a}
+.add{display:flex;flex-direction:column;align-items:center;gap:12px}
+.add .plus{width:68px;height:68px;border-radius:50%;background:var(--brand);color:#fff;display:grid;place-items:center;font-size:34px;line-height:1;border:0;cursor:pointer;box-shadow:0 6px 16px rgba(11,31,58,.25);transition:transform .12s}
+.add .plus:hover{transform:scale(1.06)}
+.add b{font-size:17px}.add span{color:var(--muted);font-size:13.5px;max-width:340px}
+.add .alt{margin-top:2px;font-size:13px;color:var(--signal);cursor:pointer;background:none;border:0}
+/* source en ligne (YouTube) */
+.inline{width:min(480px,86%);background:#fff;border-radius:10px;padding:16px;box-shadow:0 8px 24px rgba(11,31,58,.18);text-align:left}
+.inline label{font-size:13px;font-weight:500;color:var(--muted);display:block;margin-bottom:6px}
+.inline .r{display:flex;gap:8px}.inline input{flex:1;min-width:0;border:1px solid var(--line-2);border-radius:var(--radius);padding:9px 10px}
+.inline small{display:block;color:var(--muted);font-size:12.5px;margin-top:8px}
+.inline .back{background:none;border:0;color:var(--muted);cursor:pointer;margin-top:8px;padding:0;font-size:13px}
+/* aperçu rempli */
+.pv .play{position:absolute;inset:0;margin:auto;width:60px;height:60px;border-radius:50%;background:rgba(255,255,255,.92)}
+.pv .play::after{content:"";position:absolute;left:24px;top:18px;border-left:18px solid var(--ink);border-top:12px solid transparent;border-bottom:12px solid transparent}
+.pv .chg{position:absolute;top:10px;right:10px;z-index:3;display:flex;gap:6px}
+.pv .chg button{border:0;background:rgba(255,255,255,.95);border-radius:4px;padding:5px 11px;font-size:13px;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.25)}
+.pv .meta{position:absolute;left:0;right:0;bottom:0;padding:22px 14px 10px;background:linear-gradient(transparent,rgba(0,0,0,.7));color:#fff;font-size:14px;display:flex;justify-content:space-between}
+.pv .f{position:absolute;width:46%;aspect-ratio:16/9;top:50%;left:27%;margin-top:-13%;border-radius:4px;border:2px solid rgba(255,255,255,.2);box-shadow:0 8px 20px rgba(0,0,0,.4)}
+.pv.car{background:radial-gradient(ellipse at center,#1a3355,#0b1f3a 75%)}
+.pv .f.a{transform:translateX(-52%) scale(.85);background:linear-gradient(135deg,#2c7a4b,#9bd27a);opacity:.7}.pv .f.b{background:linear-gradient(135deg,#c28a2b,#f2d27a);border-color:#fff;z-index:2}.pv .f.c{transform:translateX(52%) scale(.85);background:linear-gradient(135deg,#1d3a63,var(--signal));opacity:.7}
+.foot{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:13px;color:var(--muted)}.foot .view{margin-left:auto;border:1px solid var(--line-2);border-radius:var(--radius);padding:2px 10px;background:#fff;cursor:pointer}
+/* colonne config */
+.tabs{display:flex;gap:22px;border-bottom:1px solid var(--line);margin-bottom:16px}.tabs span{padding:8px 0;color:var(--muted)}.tabs .on{color:var(--ink);font-weight:500;border-bottom:2px solid var(--signal);margin-bottom:-1px}
+.sw{display:flex;gap:10px;align-items:center}.sw i{width:40px;height:24px;border-radius:12px;background:#D1D5DB;position:relative;flex:none}.sw i::after{content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.2)}
+.help{color:var(--muted);font-size:13px;margin-top:6px}
+.field{display:grid;gap:6px;margin-bottom:14px}.field label{font-size:13px;font-weight:500;color:var(--muted)}.field input,.field select{border:1px solid var(--line-2);border-radius:var(--radius);padding:8px 10px;width:100%;background:#fff}
+.seg2{display:flex;border:1px solid var(--line-2);border-radius:var(--radius);overflow:hidden}.seg2 button{flex:1;border:0;background:#fff;padding:7px;cursor:pointer;border-right:1px solid var(--line-2)}.seg2 button:last-child{border:0}.seg2 .on{background:var(--brand-tint);font-weight:500}
+.mf{display:flex;justify-content:flex-end;gap:10px;padding:14px 24px;border-top:1px solid var(--line);background:#FAFBFC}
+/* sélecteur de fichiers (volet recouvrant l'aperçu) */
+.picker{position:absolute;inset:0;background:#fff;z-index:5;display:flex;flex-direction:column;border-radius:8px}
+.pk-h{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line)}
+.pk-h .s{flex:1;border:1px solid var(--line-2);border-radius:var(--radius);padding:5px 10px;color:var(--muted)}
+.pk-g{flex:1;overflow:auto;display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding:12px;align-content:start}
+.pk-g i{aspect-ratio:16/9;border-radius:4px;background:linear-gradient(135deg,#1d3a63,var(--signal));position:relative;cursor:pointer;border:2px solid transparent}
+.pk-g i:nth-child(3n){background:linear-gradient(135deg,#2c7a4b,#9bd27a)}.pk-g i:nth-child(4n){background:linear-gradient(135deg,#c28a2b,#f2d27a)}
+.pk-g i.sel{border-color:var(--signal)}.pk-g i.sel::after{content:"✓";position:absolute;right:4px;top:4px;width:18px;height:18px;border-radius:50%;background:var(--signal);color:#fff;font-size:12px;display:grid;place-items:center;font-style:normal}
+.pk-f{display:flex;align-items:center;gap:10px;padding:10px 12px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}
+.files{flex:1;overflow:auto;padding:6px 12px}.files div{display:flex;gap:10px;align-items:center;padding:9px 6px;border-bottom:1px solid var(--row);cursor:pointer}.files div:hover{background:var(--bg)}
+.hide{display:none!important}
+</style>
+</head>
+<body>
+<div class="mock"><b>Proposition :</b> la source (lien, fichier, dossier…) se choisit directement dans l'aperçu, avec un grand « + ». Le bandeau du haut disparaît.
+ <span>App :</span><div class="seg" id="appseg"><button data-a="yt" class="on">YouTube</button><button data-a="slides">Diaporama d'images</button><button data-a="gs">Google Slides</button></div>
+ <span>État :</span><div class="seg" id="stseg"><button data-s="empty" class="on">Vide</button><button data-s="filled">Rempli</button></div></div>
+
+<div class="stagebg"><div class="modal">
+  <div class="mh"><div class="ic" id="mic" style="background:#d62d2d">▶</div>
+    <div style="flex:1"><h3 id="mname">YouTube</h3> <button class="btn ghost sm" style="margin-left:6px">✎ Renommer</button><small>Ajout à « Facebook »</small></div>
+    <button class="xb" title="Options avancées">⚙</button><button class="xb">×</button></div>
+  <div class="mb">
+    <section>
+      <span class="ci-t">Aperçu</span>
+      <div id="pvwrap"></div>
+      <div id="pvfoot"></div>
+    </section>
+    <section>
+      <div class="tabs"><span class="on">🖥 Contenu</span><span>▦ QR code</span></div>
+      <div id="conf"></div>
+    </section>
+  </div>
+  <div class="mf"><button class="btn ghost">Annuler</button><button class="btn" id="add">Ajouter à la liste de lecture</button></div>
+</div></div>
+
+<script>
+let app='yt',st='empty',sub='';   // sub: '' | 'input' | 'picker'
+const $=s=>document.querySelector(s);
+const APPS={
+ yt:{name:'YouTube',ic:'▶',col:'#d62d2d',label:'Ajouter une vidéo YouTube',hint:'Collez le lien d\'une vidéo ou d\'une playlist.',
+  conf:`<div class="sw"><i></i><b>Activer le son</b></div><p class="help">Les navigateurs bloquent souvent la lecture automatique avec le son : dans ce cas la vidéo démarre sans son.</p>`},
+ slides:{name:'Diaporama d\'images',ic:'▤',col:'#2c7a4b',label:'Ajouter des images',hint:'Depuis la médiathèque ou depuis votre ordinateur.',
+  conf:`<div class="field"><label>Durée de chaque image</label><input type="number" value="8"></div><div class="field"><label>Cadrage</label><div class="seg2"><button class="on">Entier</button><button>Remplir</button></div></div><div class="field"><label>Transition</label><select><option>Fondu enchaîné</option></select></div>`},
+ gs:{name:'Google Slides',ic:'S',col:'#c28a2b',label:'Choisir une présentation',hint:'Depuis votre Google Drive. Chaque diapositive est convertie en image.',
+  conf:`<div class="field"><label>Durée de chaque diapositive</label><input type="number" value="10"></div><div class="field"><label>Cadrage</label><div class="seg2"><button class="on">Entier</button><button>Remplir</button></div></div><div class="field"><label>Mettre à jour si le fichier change</label><select><option>Toutes les heures</option></select></div>`}
+};
+function render(){
+  const A=APPS[app];
+  $('#mname').textContent=A.name;$('#mic').textContent=A.ic;$('#mic').style.background=A.col;$('#conf').innerHTML=A.conf;
+  let pv='',foot='';
+  if(st==='empty'){
+    if(sub==='input'&&app==='yt') pv=`<div class="pv empty"><div class="inline"><label>Lien de la vidéo ou de la playlist</label><div class="r"><input placeholder="https://www.youtube.com/watch?v=…" autofocus><button class="btn" onclick="found()">Rechercher</button></div><small>watch?v=, youtu.be/, shorts/, embed/ ou playlist?list=…</small><button class="back" onclick="sub='';render()">← Annuler</button></div></div>`;
+    else if(sub==='picker'&&app==='slides') pv=`<div class="pv empty" style="border:0"><div class="picker"><div class="pk-h"><b>Médiathèque</b><span class="s">⌕ Rechercher</span><button class="btn ghost sm">⇪ Importer</button></div><div class="pk-g">${'<i onclick="this.classList.toggle(\'sel\')"></i>'.repeat(15)}</div><div class="pk-f"><span>0 sélectionnée</span><span style="flex:1"></span><button class="btn ghost sm" onclick="sub=\'\';render()">Annuler</button><button class="btn sm" onclick="found()">Valider</button></div></div></div>`;
+    else if(sub==='picker'&&app==='gs') pv=`<div class="pv empty" style="border:0"><div class="picker"><div class="pk-h"><b>Google Drive</b><span class="s">⌕ Rechercher une présentation</span></div><div class="files"><div onclick="found()">📊 Road trip côte ouest <span style="margin-left:auto;color:var(--muted);font-size:13px">modifié hier</span></div><div onclick="found()">📊 Pitch deck STEM <span style="margin-left:auto;color:var(--muted);font-size:13px">il y a 3 j</span></div><div onclick="found()">📊 Accueil nouveaux collaborateurs <span style="margin-left:auto;color:var(--muted);font-size:13px">il y a 2 sem.</span></div></div><div class="pk-f"><span style="flex:1"></span><button class="btn ghost sm" onclick="sub=\'\';render()">Annuler</button></div></div></div>`;
+    else pv=`<div class="pv empty"><div class="add"><button class="plus" aria-label="${A.label}" onclick="sub=app==='yt'?'input':'picker';render()">+</button><b>${A.label}</b><span>${A.hint}</span>${app==='slides'?'<button class="alt">ou glisser des fichiers ici</button>':''}</div></div>`;
+  } else {
+    if(app==='yt') pv=`<div class="pv filled" style="background:linear-gradient(135deg,#1d3a63,#3B82C4)"><div class="chg"><button onclick="st='empty';sub='input';render()">✎ Changer de vidéo</button></div><span class="play"></span><div class="meta"><span>Présentation du projet</span><span>3:32</span></div></div>`;
+    else pv=`<div class="pv car"><div class="chg"><button onclick="st='empty';sub='picker';render()">✎ ${app==='gs'?'Changer de fichier':'Modifier la sélection'}</button></div><div class="f a"></div><div class="f c"></div><div class="f b"></div></div>`;
+    foot=app==='yt'?'':`<div class="foot"><span>3 / 32</span><span>● ● ● ● ●</span><span>32 ${app==='gs'?'diapositives':'images'} · 2:08</span><button class="view">Grille</button></div>`;
+  }
+  $('#pvwrap').innerHTML=pv;$('#pvfoot').innerHTML=foot;
+  $('#add').disabled=st==='empty';$('#add').style.opacity=st==='empty'?.45:1;
+}
+function found(){st='filled';sub='';render();syncSeg()}
+function syncSeg(){document.querySelectorAll('#stseg button').forEach(b=>b.classList.toggle('on',b.dataset.s===st))}
+document.querySelectorAll('#appseg button').forEach(b=>b.onclick=()=>{app=b.dataset.a;sub='';document.querySelectorAll('#appseg button').forEach(x=>x.classList.toggle('on',x===b));render()});
+document.querySelectorAll('#stseg button').forEach(b=>b.onclick=()=>{st=b.dataset.s;sub='';syncSeg();render()});
+render();
+</script>
+</body>
+</html>

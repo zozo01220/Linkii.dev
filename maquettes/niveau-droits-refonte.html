@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Niveau de droits : proposition de refonte</title>
+<style>
+  :root {
+    --ink: #0f1d33;
+    --ink-2: #4a5568;
+    --muted: #7a8699;
+    --line: #e2e6ee;
+    --soft: #f5f7fa;
+    --accent: #2563eb;
+    --accent-soft: #e8efff;
+    --ok: #15803d;
+    --warn: #b45309;
+    --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #e8edf5; --ink-2: #aeb8c8; --muted: #7d8a9f;
+      --line: #2a3446; --soft: #18202e; --accent: #6b9bff; --accent-soft: #1d2b47;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #e8edf5; --ink-2: #aeb8c8; --muted: #7d8a9f;
+    --line: #2a3446; --soft: #18202e; --accent: #6b9bff; --accent-soft: #1d2b47;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 16px; min-height: 100vh;
+    background: #d9dee7; color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: grid; place-items: center;
+  }
+  .modal {
+    width: min(980px, 100%); background: #fff; color: var(--ink);
+    border-radius: 16px; box-shadow: 0 24px 60px rgba(15,29,51,.25);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) body, :root:not([data-theme="light"]) .modal { background: #111826; } }
+
+  header {
+    display: flex; align-items: flex-start; gap: 16px; padding: 22px 28px 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  header .title { flex: 1; }
+  header h1 { font-size: 20px; margin: 0; }
+  header .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .name {
+    margin-top: 14px; display: flex; align-items: center; gap: 10px;
+  }
+  .name label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .name input {
+    flex: 1; max-width: 320px; font: inherit; color: var(--ink);
+    padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: transparent;
+  }
+  .close { border: 0; background: none; color: var(--muted); font-size: 22px; cursor: pointer; padding: 0 4px; }
+
+  /* Résumé vivant */
+  .summary {
+    margin: 18px 28px 0; padding: 14px 16px; border-radius: var(--radius);
+    background: var(--accent-soft); display: grid; gap: 10px;
+  }
+  .summary .lead { font-size: 14px; }
+  .summary .lead strong { color: var(--accent); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    font-size: 12px; padding: 3px 10px; border-radius: 999px;
+    background: #fff; border: 1px solid var(--line); color: var(--ink-2);
+  }
+  .chip.off { opacity: .6; text-decoration: line-through; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chip { background: var(--soft); } }
+
+  /* Trois blocs en colonnes */
+  .grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+    padding: 18px 28px 22px;
+  }
+  .card {
+    border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px;
+    min-width: 0;
+  }
+  .card.wide { grid-column: 1 / -1; }
+  .card h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--ink-2); margin: 0 0 4px; display: flex; align-items: center; gap: 8px;
+  }
+  .card h2 .n {
+    width: 20px; height: 20px; border-radius: 50%; background: var(--ink); color: var(--soft);
+    display: inline-grid; place-items: center; font-size: 11px;
+  }
+  .card .hint { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
+
+  /* Interrupteurs de pages */
+  .toggle {
+    display: flex; align-items: center; gap: 12px; padding: 9px 0;
+    border-top: 1px solid var(--line); cursor: pointer;
+  }
+  .toggle:first-of-type { border-top: 0; }
+  .toggle .ic {
+    width: 30px; height: 30px; border-radius: 8px; background: var(--soft);
+    display: grid; place-items: center; font-size: 15px; flex: none;
+  }
+  .toggle .t { flex: 1; }
+  .toggle .t small { display: block; color: var(--muted); font-size: 12px; }
+  .switch {
+    width: 36px; height: 20px; border-radius: 999px; background: #c9d0dc; position: relative; flex: none;
+  }
+  .switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+    border-radius: 50%; background: #fff; transition: left .15s;
+  }
+  .switch.on { background: var(--accent); }
+  .switch.on::after { left: 18px; }
+  .note {
+    margin-top: 10px; font-size: 12px; color: var(--muted);
+    border-left: 2px solid var(--line); padding-left: 10px;
+  }
+
+  /* Intégrations : filtres + grille */
+  .tools { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  .tab {
+    font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line);
+    background: transparent; color: var(--ink-2); cursor: pointer;
+  }
+  .tab.on { background: var(--ink); color: var(--soft); border-color: var(--ink); }
+  .apps { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .app {
+    display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 8px;
+    border: 1px solid var(--line); font-size: 13px; cursor: pointer;
+  }
+  .app.on { border-color: var(--accent); background: var(--accent-soft); }
+  .app .box {
+    width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid #aab3c2; flex: none;
+    display: grid; place-items: center; color: #fff; font-size: 11px;
+  }
+  .app.on .box { background: var(--accent); border-color: var(--accent); }
+  .app .cat { margin-left: auto; font-size: 11px; color: var(--muted); }
+
+  /* Périmètre */
+  .scope-mode {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 12px;
+  }
+  .mode {
+    padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer;
+  }
+  .mode.on { border: 2px solid var(--accent); padding: 9px 11px; }
+  .mode b { display: block; font-size: 13px; }
+  .mode span { color: var(--muted); font-size: 12px; }
+  .tree { font-size: 13px; }
+  .tree details { margin: 2px 0; }
+  .tree summary {
+    list-style: none; display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    border-radius: 8px; cursor: pointer;
+  }
+  .tree summary::-webkit-details-marker { display: none; }
+  .tree summary:hover { background: var(--soft); }
+  .tree summary::before { content: "▸"; color: var(--muted); width: 10px; transition: transform .15s; }
+  .tree details[open] > summary::before { transform: rotate(90deg); }
+  .tree .count { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .tree .leaf { padding-left: 34px; display: flex; align-items: center; gap: 8px; padding-top: 5px; padding-bottom: 5px; }
+  .tree .kids { padding-left: 18px; border-left: 1px solid var(--line); margin-left: 12px; }
+  .badge {
+    font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--soft); color: var(--ink-2);
+  }
+  .badge.full { background: #dcf5e4; color: var(--ok); }
+  .badge.part { background: #fdf0dc; color: var(--warn); }
+
+  /* Pied */
+  footer {
+    display: flex; align-items: center; gap: 12px; padding: 14px 28px;
+    border-top: 1px solid var(--line); background: var(--soft);
+  }
+  footer .info { flex: 1; color: var(--ink-2); font-size: 12px; }
+  .btn {
+    font: inherit; padding: 9px 18px; border-radius: 8px; border: 1px solid var(--line);
+    background: #fff; color: var(--ink); cursor: pointer;
+  }
+  .btn.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .btn { background: var(--soft); } }
+
+  @media (max-width: 720px) {
+    .grid { grid-template-columns: 1fr; padding: 16px; }
+    header, .summary, footer { padding-left: 16px; padding-right: 16px; }
+    .summary { margin-left: 16px; margin-right: 16px; }
+    .apps { grid-template-columns: 1fr; }
+    footer { flex-wrap: wrap; }
+  }
+</style>
+</head>
+<body>
+<div class="modal" role="dialog" aria-label="Niveau Utilisateur">
+
+  <header>
+    <div class="title">
+      <h1>Niveau « Utilisateur »</h1>
+      <div class="sub">Ce qu'une personne de ce niveau peut voir et faire</div>
+      <div class="name">
+        <label for="nom">Nom du niveau</label>
+        <input id="nom" value="Utilisateur">
+      </div>
+    </div>
+    <button class="close" aria-label="Fermer">×</button>
+  </header>
+
+  <!-- Résumé vivant : ce que le niveau voit, en une phrase, mis à jour à chaque case -->
+  <section class="summary" aria-live="polite">
+    <div class="lead">
+      Un <strong>Utilisateur</strong> voit <strong>Écrans, Listes de lecture, Médiathèque</strong>
+      et <strong>7 intégrations</strong> sur <strong>toutes les aires</strong>.
+    </div>
+    <div class="chips">
+      <span class="chip">Lecture seule</span>
+      <span class="chip off">Planning</span>
+      <span class="chip off">Gérer les zones</span>
+      <span class="chip">Aires : toutes</span>
+    </div>
+  </section>
+
+  <div class="grid">
+
+    <!-- 1. Pages -->
+    <section class="card">
+      <h2><span class="n">1</span> Pages visibles</h2>
+      <p class="hint">Ce que le menu affiche à ce niveau.</p>
+
+      <label class="toggle">
+        <span class="ic">▣</span>
+        <span class="t">Écrans<small>Voir et piloter les écrans</small></span>
+        <span class="switch on"></span>
+      </label>
+      <label class="toggle">
+        <span class="ic">☰</span>
+        <span class="t">Listes de lecture<small>Composer les diffusions</small></span>
+        <span class="switch on"></span>
+      </label>
+      <label class="toggle">
+        <span class="ic">▤</span>
+        <span class="t">Médiathèque<small>Fichiers et dossiers partagés</small></span>
+        <span class="switch on"></span>
+      </label>
+      <label class="toggle">
+        <span class="ic">◷</span>
+        <span class="t">Planning<small>Créneaux de diffusion</small></span>
+        <span class="switch"></span>
+      </label>
+      <label class="toggle">
+        <span class="ic">⬚</span>
+        <span class="t">Gérer les zones et les murs<small>Dans son périmètre seulement</small></span>
+        <span class="switch"></span>
+      </label>
+
+      <p class="note">Intégrations, Membres, Aires de gestion, Comptes connectés et Réglages restent réservés aux administrateurs.</p>
+    </section>
+
+    <!-- 5. Périmètre (déplacé en haut à droite : c'est souvent la première question) -->
+    <section class="card">
+      <h2><span class="n">2</span> Périmètre</h2>
+      <p class="hint">Où ce niveau peut agir.</p>
+
+      <div class="scope-mode">
+        <div class="mode on"><b>Toutes les aires</b><span>Y compris celles créées plus tard</span></div>
+        <div class="mode"><b>Certaines aires</b><span>Choisir aire, zones et écrans</span></div>
+      </div>
+
+      <div class="tree">
+        <details open>
+          <summary>Principale <span class="badge full">Toute l'aire</span> <span class="count">4 écrans</span></summary>
+          <div class="kids">
+            <details open>
+              <summary>Zone Défaut <span class="count">2 écrans</span></summary>
+              <div class="kids">
+                <div class="leaf">Écran accueil <span class="count">▣</span></div>
+                <div class="leaf">Écran hall <span class="count">▣</span></div>
+              </div>
+            </details>
+            <details>
+              <summary>Zone Geopolis <span class="count">1 écran</span></summary>
+              <div class="kids"><div class="leaf">Écran entrée</div></div>
+            </details>
+            <details>
+              <summary>Zone Amphimax <span class="count">1 écran</span></summary>
+              <div class="kids"><div class="leaf">Écran salle A</div></div>
+            </details>
+            <div class="leaf" style="padding-left:24px">Zone Amphipol <span class="count">0 écran</span></div>
+          </div>
+        </details>
+      </div>
+
+      <p class="note">Les listes et la médiathèque sont partagées par aire : limité à une zone, la personne voit tout de l'aire. Un mur d'écrans est toujours donné en entier.</p>
+    </section>
+
+    <!-- 2. Intégrations -->
+    <section class="card wide">
+      <h2><span class="n">3</span> Intégrations et widgets</h2>
+      <p class="hint">Cochez les sources que ce niveau peut utiliser. Une intégration cochée apparaît dans son menu.</p>
+
+      <div class="tools">
+        <button class="tab on">Toutes · 7</button>
+        <button class="tab">Calendrier</button>
+        <button class="tab">Diaporamas</button>
+        <button class="tab">Documents</button>
+        <button class="tab">Réseaux et flux</button>
+        <span style="flex:1"></span>
+        <button class="tab">Tout cocher</button>
+        <button class="tab">Tout décocher</button>
+      </div>
+
+      <div class="apps">
+        <div class="app on"><span class="box">✓</span>Calendrier partagé<span class="cat">Calendrier</span></div>
+        <div class="app on"><span class="box">✓</span>Canva<span class="cat">Documents</span></div>
+        <div class="app on"><span class="box">✓</span>Diaporama images<span class="cat">Diaporamas</span></div>
+        <div class="app on"><span class="box">✓</span>Diaporama vidéos<span class="cat">Diaporamas</span></div>
+        <div class="app on"><span class="box">✓</span>Document PDF<span class="cat">Documents</span></div>
+        <div class="app on"><span class="box">✓</span>Dossier Drive<span class="cat">Documents</span></div>
+        <div class="app on"><span class="box">✓</span>Facebook (publications)<span class="cat">Réseaux</span></div>
+        <div class="app on"><span class="box">✓</span>Flux RSS / actualités<span class="cat">Réseaux</span></div>
+        <div class="app on"><span class="box">✓</span>Google Docs<span class="cat">Documents</span></div>
+        <div class="app on"><span class="box">✓</span>Google Slides<span class="cat">Documents</span></div>
+      </div>
+      <p class="note">Et 4 de plus, non visibles : faites défiler ou affinez par catégorie.</p>
+    </section>
+
+    <!-- 4. Droits d'action (à ajouter si pertinent) -->
+    <section class="card">
+      <h2><span class="n">4</span> Droits sur le contenu</h2>
+      <p class="hint">Ce que la personne peut modifier dans son périmètre.</p>
+      <label class="toggle">
+        <span class="ic">✎</span>
+        <span class="t">Modifier la médiathèque<small>Ajouter, renommer, supprimer</small></span>
+        <span class="switch"></span>
+      </label>
+      <label class="toggle">
+        <span class="ic">▶</span>
+        <span class="t">Lancer une diffusion<small>Envoyer une liste sur un écran</small></span>
+        <span class="switch on"></span>
+      </label>
+    </section>
+
+    <!-- Aperçu -->
+    <section class="card">
+      <h2>Vue de la personne</h2>
+      <p class="hint">Le menu tel qu'il s'affichera pour ce niveau.</p>
+      <div style="border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--soft);font-size:13px;">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+          <span class="badge full">Écrans</span><span class="badge full">Listes</span><span class="badge full">Médiathèque</span>
+        </div>
+        <div style="color:var(--muted);font-size:12px">Intégrations : Calendrier, Diaporamas, Documents, Réseaux</div>
+      </div>
+    </section>
+
+  </div>
+
+  <footer>
+    <div class="info">Modifications non enregistrées</div>
+    <button class="btn">Annuler</button>
+    <button class="btn primary">Enregistrer le niveau</button>
+  </footer>
+
+</div>
+</body>
+</html>

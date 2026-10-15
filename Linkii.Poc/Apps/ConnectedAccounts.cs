@@ -29,7 +29,7 @@ public record ConnectedAccount(string Id, string Kind, string User, string Detai
 public static class ConnectedAccounts
 {
     public const string Microsoft = "microsoft", Google = "google", Canva = "canva", CalDav = "caldav", Exchange = "ews",
-                        Nextcloud = "nextcloud", Sftp = "sftp", Dropbox = "dropbox", Facebook = "facebook";
+                        Nextcloud = "nextcloud", Sftp = "sftp", Dropbox = "dropbox", Facebook = "facebook", HomeAssistant = "homeassistant";
 
     /// <summary>Onglet de la page Intégrations (?tab=comptes).</summary>
     public const string Tab = "comptes";
@@ -49,6 +49,7 @@ public static class ConnectedAccounts
         new(Nextcloud, "Nextcloud", "Dossiers d'un serveur Nextcloud ou ownCloud", ["drv-nextcloud"]),
         new(Sftp, "Serveur SFTP", "Dossiers d'un serveur SFTP", ["drv-sftp"]),
         new(Dropbox, "Dropbox", "Dossiers de votre compte Dropbox", ["drv-dropbox"]),
+        new(HomeAssistant, "Home Assistant", "Capteurs, interrupteurs et lumières de votre maison", ["ha-home"]),
     };
 
     public static KindDef Kind(string id) => Kinds.First(k => k.Id == id);
@@ -101,6 +102,9 @@ public static class ConnectedAccounts
         if (DriveSources.Account(t, Sftp) is { Url.Length: > 0 } sftp)
             list.Add(new(Sftp, "Serveur SFTP", sftp.User.Length > 0 ? sftp.User : "Sans identifiant", sftp.Url + (sftp.Port is > 0 and not 22 ? ":" + sftp.Port : ""), null, false, sftp.LastError,
                 [new("Fichiers (lecture)", true, null)]));
+        if (t.HomeAssistant is { Url.Length: > 0 } ha)
+            list.Add(new(HomeAssistant, "Home Assistant", ha.AuthMode == "password" && ha.User.Length > 0 ? ha.User : "Jeton d'accès", ha.Url, ha.ConnectedUtc, false, ha.LastError,
+                [new("Capteurs, interrupteurs et lumières (lecture et commande)", true, null)]));
         if (DriveSources.Account(t, Dropbox) is { } dbx && (dbx.Secret.Length > 0 || dbx.LostUtc != null))
             list.Add(new(Dropbox, "Dropbox", dbx.User.Length > 0 ? dbx.User : "Compte Dropbox", "", dbx.ConnectedUtc, dbx.Secret.Length == 0, "",
                 [new("Fichiers (lecture)", true, null)]));

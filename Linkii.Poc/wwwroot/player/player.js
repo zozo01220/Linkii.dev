@@ -235,8 +235,7 @@
       phone = true;
     } else { W = availW; H = availH; }
     stage.classList.toggle('phone', phone);   // images et vidéos remplissent l'écran du téléphone (recadrées) au lieu de laisser des bandes
-    var s = Math.min(availW / W, availH / H);
-    // Mur d'écrans : la scène est l'image de tout le mur (colonnes × lignes écrans) ; elle est décalée pour que seule
+    var s = Math.min(availW / W, availH / H);    // Mur d'écrans : la scène est l'image de tout le mur (colonnes × lignes écrans) ; elle est décalée pour que seule
     // la portion de cet écran (sa colonne, sa ligne) soit au centre de l'écran. Le reste déborde, hors de la vue.
     var wall = cfg.wall, SW = W, SH = H, dx = 0, dy = 0;
     if (wall && wall.cols > 0 && wall.rows > 0) {
@@ -716,6 +715,11 @@
         }, 50);
       },
       note: function (text) { var n = document.createElement('div'); n.className = 'yt-note'; n.textContent = text; el.appendChild(n); },
+      // Ordre envoyé par l'app au serveur (interrupteur Home Assistant). En aperçu du back-office, aucun ordre n'est envoyé.
+      command: function (action, body) {
+        if (PREVIEW) return Promise.reject(new Error('preview'));
+        return api('/api/player/app/' + item.id + '/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      },
       youtube: function (o) { ivs.push(makeYoutube(el, o, ivs, opts)); },
       onStop: function (fn) { ivs.push(fn); },   // nettoyage quand l'app disparaît (lecteurs vidéo, adresses blob)
       media: mediaSrc,   // fichier de la médiathèque : copie locale (hors ligne) si elle existe, sinon en ligne -> { src, revoke }

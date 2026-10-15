@@ -143,6 +143,34 @@
                             <div class="wg-q-t">“@q.Item1”</div>
                             @if (q.Item2 is { Length: > 0 }) { <div class="wg-q-a">— @q.Item2</div> }
                         }
+                        else if (HomeAssistantRules.IsHaApp(wid.AppId))
+                        {
+                            @* widgets Home Assistant : même structure et mêmes dimensions que le widget du player (apps.js « haApp »), toutes les entités choisies ;
+                               valeurs en direct sur l'écran seulement. La taille doit rester celle du vrai widget : c'est elle qui borne la position au glisser-déposer. *@
+                            var haIds = HomeAssistantRules.ParseEntities(wid.Settings.GetValueOrDefault("entities"));
+                            var haTitle = wid.Settings.GetValueOrDefault("title") ?? "";
+                            var haSwitch = wid.AppId != "ha-sensors";
+                            <div class="wg-ha">
+                                @if (haTitle.Length > 0) { <div class="wg-ha-t">@haTitle</div> }
+                                @if (haIds.Count == 0)
+                                {
+                                    <div class="wg-ha-none">Aucune entité choisie</div>
+                                }
+                                else
+                                {
+                                    <div class="wg-ha-list">
+                                        @foreach (var id in haIds)
+                                        {
+                                            <div class="wg-ha-row">
+                                                <span class="wg-ha-n">@HaName(id)</span>
+                                                <span class="wg-ha-v">@HaValue(wid.AppId, id)</span>
+                                                @if (haSwitch) { <span class="wg-ha-sw"></span> }
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
                         else
                         {
                             @* même mise en page que le widget de l'écran (apps.js « weather ») ; valeurs d'exemple *@
@@ -196,7 +224,8 @@
             {
                 @* widgets : posés sur l'aperçu par glisser-déposer (ou un clic) ; la liste du dessus permet de les régler ou de les retirer *@
                 @* une seule liste : d'abord les widgets déjà sur l'écran (régler, retirer), puis ceux qu'on peut ajouter (+) *@
-                var free = available.Where(x => widgets.All(w => w.AppId != x.Id)).ToList();
+                @* un même widget peut être posé plusieurs fois (chaque pose a ses propres réglages) : tous les widgets actifs restent proposés *@
+                var free = available.ToList();
                 @if (free.Count > 6) { <input id="wg-search" type="text" placeholder="Rechercher" aria-label="Rechercher un widget" @bind="search" @bind:event="oninput" style="margin-bottom:8px" /> }
                 @if (widgets.Count + free.Count > 0)
                 {
@@ -314,7 +343,7 @@
 {
     @* réglages du widget : fenêtre au-dessus de l'éditeur ; les valeurs s'écrivent dans la copie de travail, rien n'est enregistré avant « Enregistrer » *@
     <div class="modal-backdrop picker-backdrop" @onclick="CloseSettings"></div>
-    <div class="modal app-modal sm wg-settings" role="dialog" aria-modal="true" aria-label="Réglages : @m.Name">
+    <div class="modal app-modal sm wg-settings @(HomeAssistantRules.IsHaApp(m.Id) ? "wg-settings-ha" : "")" role="dialog" aria-modal="true" aria-label="Réglages : @m.Name">
         <div class="modal-head">
             <AppIcon Id="@m.Id" Small="true" Size="18" />
             <div class="grow" style="min-width:0"><h3>@m.Name</h3><small>Réglages du widget</small></div>
@@ -457,7 +486,19 @@
     /// <summary>Veille qui s'applique à l'écran (pour hachurer ces heures dans l'éditeur de luminosité).</summary>
     private string? DimAsleep => !sleepOn ? null : sleepMode switch { Sleep.Never => null, Sleep.Own => Sleep.Any(sleepGrid) ? sleepGrid : null, _ => Sleep.Any(areaSleepGrid) ? areaSleepGrid : null };
 
-    private ScreenWidget? Sel => widgets.FirstOrDefault(w => w.Id == selected);
+    /// <summary>Nom d'une entité Home Assistant, d'après le cache du compte de l'organisation (l'identifiant sinon).</summary>
+    private string HaName(string entityId) =>
+        Store.Read(d => d.Tenant.HomeAssistant)?.Entities.FirstOrDefault(e => e.Id == entityId)?.Name ?? entityId;
+
+    /// <summary>Valeur d'exemple d'une entité dans l'aperçu : même encombrement que sur l'écran (« Éteint » pour une commande, « — » et l'unité pour un capteur).</summary>
+    private string HaValue(string appId, string entityId)
+    {
+        if (appId != "ha-sensors") return "Éteint";
+        var unit = Store.Read(d => d.Tenant.HomeAssistant)?.Entities.FirstOrDefault(e => e.Id == entityId)?.Unit ?? "";
+        return unit.Length > 0 ? "— " + unit : "—";
+    }
+
+    private ScreenWidget? Sel =>widgets.FirstOrDefault(w => w.Id == selected);
 
     protected override void OnInitialized()
     {
@@ -604,7 +645,7 @@
         return InvokeAsync(StateHasChanged);
     }
 
-    private bool advanced, addOpen;
+    private bool advanced;
     private (string Type, string Orientation, string Resolution, string Layout, bool H, bool V)? advSnap;
 
     private void OpenAdvanced()

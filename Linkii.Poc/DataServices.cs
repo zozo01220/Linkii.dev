@@ -50,7 +50,7 @@ public class CalendarService(IEnumerable<ICalendarConnector> connectors, Provide
         {
             if (occ.Source is not CalendarEvent ev) continue;
             var start = occ.Period.StartTime.AsUtc;
-            var end = occ.Period.EndTime != null && occ.Period.EndTime.AsUtc > start ? occ.Period.EndTime.AsUtc : start + (ev.End != null && ev.End.AsUtc > ev.Start.AsUtc ? ev.End.AsUtc - ev.Start.AsUtc : TimeSpan.FromHours(1));
+            var end = occ.Period.EndTime != null && occ.Period.EndTime.AsUtc > start ? occ.Period.EndTime.AsUtc : start + (ev.End != null && ev.End.AsUtc > ev.Start!.AsUtc ? ev.End.AsUtc - ev.Start!.AsUtc : TimeSpan.FromHours(1));
             if (end <= fromUtc) continue;
             if (string.Equals(ev.Status, "CANCELLED", StringComparison.OrdinalIgnoreCase)) continue;
             if (string.Equals(ev.Transparency, "TRANSPARENT", StringComparison.OrdinalIgnoreCase)) continue;   // « libre » : ne bloque pas la salle

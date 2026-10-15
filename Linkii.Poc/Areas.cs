@@ -281,6 +281,7 @@ public static class AreaOps
         if (blockers.Count > 0) return $"Des contenus de cette liste sont aussi utilisés par {string.Join(", ", blockers)}. Dupliquez la liste et retirez-les, ou déplacez aussi ces éléments.";
 
         pl.AreaId = target;
+        pl.FolderId = null;   // le dossier appartient à l'aire d'origine : la liste arrive à la racine de la nouvelle
         foreach (var m in moving.Where(m => !m.Info.ContainsKey("drive"))) { m.AreaId = target; m.FolderId = null; }   // les fichiers Drive restent communs
         foreach (var s in d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.AreaId == source))
         {

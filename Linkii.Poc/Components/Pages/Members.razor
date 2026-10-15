@@ -174,6 +174,7 @@ else
         </div>
         <div class="modal-body">
             <div style="max-width:380px"><label class="lbl" for="lv-name" style="margin-top:0">Nom du niveau</label><input id="lv-name" class="full" maxlength="60" @bind="l.Name" @bind:event="oninput" placeholder="Ex. : Éditeur Magasin" /></div>
+            <div class="lv-sum"><div><b>Ce niveau voit</b>@AccessLevels.ScopeText(l.ToLevel(), areas, screens)</div></div>
             <div class="lv-cols">
                 <div>
                     <section class="lv-sec"><h4><i>1</i>Pages visibles</h4>
@@ -187,55 +188,14 @@ else
                             <p class="lv-note">Intégrations et Widgets apparaissent dès qu'une app est cochée ci-dessous. Membres, Aires de gestion, Comptes connectés et Réglages restent aux administrateurs.</p>
                         </div>
                     </section>
-                    <section class="lv-sec"><h4><i>2</i>Intégrations et widgets</h4>
-                        <div class="lv-in">
-                            <div class="lv-sub">Intégrations <button type="button" class="linklike" @onclick="() => AllApps(false)">@(l.AllIntegrations ? "tout décocher" : "tout cocher")</button></div>
-                            @foreach (var a in apps) { var app = a; @Check(AppOn(app) ? "all" : "none", app.Name, () => ToggleApp(app)) }
-                            <div class="lv-sub">Widgets <button type="button" class="linklike" @onclick="() => AllApps(true)">@(l.AllWidgets ? "tout décocher" : "tout cocher")</button></div>
-                            @foreach (var a in widgets) { var app = a; @Check(AppOn(app) ? "all" : "none", app.Name, () => ToggleApp(app)) }
-                            <p class="lv-note">Cocher = utiliser : créer et modifier des contenus avec cette app. Les connexions aux comptes restent à l'administrateur.</p>
-                        </div>
-                    </section>
-                    @if (foldersOn && folders.Count > 0)
-                    {
-                        <section class="lv-sec"><h4><i>3</i>Dossiers de la médiathèque</h4>
-                            <div class="lv-in">
-                                @Check(lf.CanCreateFolders ? "all" : "none", "Peut créer ses dossiers", () => lf.CanCreateFolders = !lf.CanCreateFolders)
-                                @Check(lf.CanShareFolders ? "all" : "none", "Peut partager les dossiers qu'il a créés", () => lf.CanShareFolders = !lf.CanShareFolders)
-                                <div class="lv-sub">Accès aux dossiers des autres</div>
-                                <div class="seg" role="radiogroup" aria-label="Accès aux dossiers des autres">
-                                    <button type="button" role="radio" aria-checked="@(lf.FolderMode == "none" ? "true" : "false")" class="@(lf.FolderMode == "none" ? "on" : "")" @onclick='() => lf.FolderMode = "none"'>Aucun</button>
-                                    <button type="button" role="radio" aria-checked="@(lf.FolderMode == "chosen" ? "true" : "false")" class="@(lf.FolderMode == "chosen" ? "on" : "")" @onclick='() => lf.FolderMode = "chosen"'>Dossiers choisis</button>
-                                    <button type="button" role="radio" aria-checked="@(lf.FolderMode == "read" ? "true" : "false")" class="@(lf.FolderMode == "read" ? "on" : "")" @onclick='() => lf.FolderMode = "read"'>Tous, en lecture</button>
-                                    <button type="button" role="radio" aria-checked="@(lf.FolderMode == "write" ? "true" : "false")" class="@(lf.FolderMode == "write" ? "on" : "")" @onclick='() => lf.FolderMode = "write"'>Tous, en écriture</button>
-                                </div>
-                                <p class="lv-note">« Tous » couvre les dossiers déjà partagés et ceux qui le seront plus tard, jamais les dossiers privés d'un membre.</p>
-                                @foreach (var fd in folders)
-                                {
-                                    var folder = fd;
-                                    var area = areas.FirstOrDefault(a => a.Id == folder.AreaId);
-                                    var reach = area != null && AccessLevels.Reaches(lf.ToLevel(), area, screens);
-                                    var mode = lf.FolderModes.GetValueOrDefault(folder.Id, "");
-                                    <div class="lv-row @(reach ? "" : "lv-off")">
-                                        <span class="lv-lbl"><b>@folder.Name</b> <small class="muted">@area?.Name@(reach ? "" : " · hors du périmètre du niveau")</small></span>
-                                        <div class="seg">
-                                            <button type="button" class="@(mode == "" ? "on" : "")" disabled="@(!reach)" aria-label="Aucun accès à @folder.Name" @onclick='() => SetFolderMode(folder.Id, "")'>—</button>
-                                            <button type="button" class="@(mode == "read" ? "on" : "")" disabled="@(!reach)" @onclick='() => SetFolderMode(folder.Id, "read")'>Lecture</button>
-                                            <button type="button" class="@(mode == "write" ? "on" : "")" disabled="@(!reach)" @onclick='() => SetFolderMode(folder.Id, "write")'>Écriture</button>
-                                        </div>
-                                    </div>
-                                }
-                            </div>
-                        </section>
-                    }
-                    <section class="lv-sec"><h4><i>4</i>Modification</h4>
+                    <section class="lv-sec"><h4><i>3</i>Modification</h4>
                         <div class="lv-in">
                             @Check(l.ReadOnly ? "all" : "none", "Lecture seule : voir sans modifier ni publier", () => l.ReadOnly = !l.ReadOnly)
                         </div>
                     </section>
                 </div>
                 <div>
-                    <section class="lv-sec"><h4><i>5</i>Périmètre <span>aires › zones › écrans</span></h4>
+                    <section class="lv-sec"><h4><i>2</i>Périmètre <span>aires › zones › écrans</span></h4>
                         <div class="lv-in lv-tree">
                             @Check(l.AllAreas ? "all" : "none", "Toutes les aires, y compris celles créées plus tard", ToggleAllAreas, "lv-root")
                             @foreach (var a in areas)
@@ -270,9 +230,51 @@ else
                             }
                         </div>
                     </section>
-                    <div class="lv-sum"><div><b>Ce niveau voit</b>@AccessLevels.ScopeText(l.ToLevel(), areas, screens)</div></div>
                     <p class="lv-note">Les listes de lecture et la médiathèque sont partagées par aire : une personne limitée à une zone voit celles de toute l'aire. Un mur d'écrans est toujours donné en entier.</p>
                 </div>
+            </div>
+            <div class="lv-wide">
+                    <section class="lv-sec"><h4><i>4</i>Intégrations et widgets</h4>
+                        <div class="lv-in lv-apps">
+                            <div class="lv-sub">Intégrations <button type="button" class="linklike" @onclick="() => AllApps(false)">@(l.AllIntegrations ? "tout décocher" : "tout cocher")</button></div>
+                            @foreach (var a in apps) { var app = a; @Check(AppOn(app) ? "all" : "none", app.Name, () => ToggleApp(app)) }
+                            <div class="lv-sub">Widgets <button type="button" class="linklike" @onclick="() => AllApps(true)">@(l.AllWidgets ? "tout décocher" : "tout cocher")</button></div>
+                            @foreach (var a in widgets) { var app = a; @Check(AppOn(app) ? "all" : "none", app.Name, () => ToggleApp(app)) }
+                            <p class="lv-note">Cocher = utiliser : créer et modifier des contenus avec cette app. Les connexions aux comptes restent à l'administrateur.</p>
+                        </div>
+                    </section>
+                    @if (foldersOn && folders.Count > 0)
+                    {
+                        <section class="lv-sec"><h4><i>5</i>Dossiers</h4>
+                            <div class="lv-in">
+                                @Check(lf.CanCreateFolders ? "all" : "none", "Peut créer ses dossiers", () => lf.CanCreateFolders = !lf.CanCreateFolders)
+                                @Check(lf.CanShareFolders ? "all" : "none", "Peut partager les dossiers qu'il a créés", () => lf.CanShareFolders = !lf.CanShareFolders)
+                                <div class="lv-sub">Accès aux dossiers des autres</div>
+                                <div class="seg" role="radiogroup" aria-label="Accès aux dossiers des autres">
+                                    <button type="button" role="radio" aria-checked="@(lf.FolderMode == "none" ? "true" : "false")" class="@(lf.FolderMode == "none" ? "on" : "")" @onclick='() => lf.FolderMode = "none"'>Aucun</button>
+                                    <button type="button" role="radio" aria-checked="@(lf.FolderMode == "chosen" ? "true" : "false")" class="@(lf.FolderMode == "chosen" ? "on" : "")" @onclick='() => lf.FolderMode = "chosen"'>Dossiers choisis</button>
+                                    <button type="button" role="radio" aria-checked="@(lf.FolderMode == "read" ? "true" : "false")" class="@(lf.FolderMode == "read" ? "on" : "")" @onclick='() => lf.FolderMode = "read"'>Tous, en lecture</button>
+                                    <button type="button" role="radio" aria-checked="@(lf.FolderMode == "write" ? "true" : "false")" class="@(lf.FolderMode == "write" ? "on" : "")" @onclick='() => lf.FolderMode = "write"'>Tous, en écriture</button>
+                                </div>
+                                <p class="lv-note">« Tous » couvre les dossiers déjà partagés (médiathèque et listes de lecture) et ceux qui le seront plus tard, jamais les dossiers privés d'un membre.</p>
+                                @foreach (var fd in folders)
+                                {
+                                    var folder = fd;
+                                    var area = areas.FirstOrDefault(a => a.Id == folder.AreaId);
+                                    var reach = area != null && AccessLevels.Reaches(lf.ToLevel(), area, screens);
+                                    var mode = lf.FolderModes.GetValueOrDefault(folder.Id, "");
+                                    <div class="lv-row @(reach ? "" : "lv-off")">
+                                        <span class="lv-lbl"><b>@folder.Name</b> <small class="muted">@folder.Kind · @area?.Name@(reach ? "" : " · hors du périmètre du niveau")</small></span>
+                                        <div class="seg">
+                                            <button type="button" class="@(mode == "" ? "on" : "")" disabled="@(!reach)" aria-label="Aucun accès à @folder.Name" @onclick='() => SetFolderMode(folder.Id, "")'>—</button>
+                                            <button type="button" class="@(mode == "read" ? "on" : "")" disabled="@(!reach)" @onclick='() => SetFolderMode(folder.Id, "read")'>Lecture</button>
+                                            <button type="button" class="@(mode == "write" ? "on" : "")" disabled="@(!reach)" @onclick='() => SetFolderMode(folder.Id, "write")'>Écriture</button>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </section>
+                    }
             </div>
             @if (levelError != null) { <div class="err">@levelError</div> }
         </div>
@@ -316,7 +318,8 @@ else
     private List<User> people = new();
     private List<Area> areas = new();
     private List<Screen> screens = new();
-    private List<MediaFolder> folders = new();   // dossiers de la médiathèque (tous les niveaux, toutes les aires)
+    private List<LevelFolder> folders = new();   // dossiers de la médiathèque et des listes de lecture (tous les niveaux, toutes les aires)
+    private record LevelFolder(Guid Id, Guid AreaId, string Name, string Kind, List<FolderShare> Shares);
     private bool foldersOn;                      // option « Dossiers dans la médiathèque » de l'organisation
     private List<AccessLevel> levels = new();
     private bool busy;
@@ -345,7 +348,9 @@ else
             d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.Token != null).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
             d.Tenant.Levels.OrderBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
             d.Users.OrderBy(u => u.Role == Roles.ClientAdmin ? 0 : 1).ThenBy(u => u.Label, StringComparer.CurrentCultureIgnoreCase).ToList()));
-        folders = Store.Read(d => d.Root.MediaFolders.Where(f => f.ClientId == d.ClientId).OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
+        folders = Store.Read(d => d.Root.MediaFolders.Where(f => f.ClientId == d.ClientId).Select(f => new LevelFolder(f.Id, f.AreaId, f.Name, "Médiathèque", f.Shares))
+            .Concat(d.Root.PlaylistFolders.Where(f => f.ClientId == d.ClientId).Select(f => new LevelFolder(f.Id, f.AreaId, f.Name, "Listes", f.Shares)))
+            .OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
         foldersOn = Store.Read(d => d.Tenant.FoldersOn);
     }
 

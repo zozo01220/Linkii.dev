@@ -19,6 +19,8 @@ public class AppField
     public string? ShowIf { get; set; }
     public int? Min { get; set; }
     public int? Max { get; set; }
+    /// <summary>haentity : domaines Home Assistant proposés (sensor, switch, light), pris dans le compte connecté de l'organisation.</summary>
+    public List<string> Domains { get; set; } = new();
     public int MaxLength { get; set; } = 2000;
     /// <summary>textfile : adresse (du site) d'un fichier modèle à télécharger.</summary>
     public string? Template { get; set; }
@@ -90,7 +92,7 @@ public class AppCatalog
 {
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
     private static readonly string[] AllPlacements = { "full", "top-left", "top-right", "bottom-left", "bottom-right", "top", "bottom" };
-    private static readonly string[] FieldTypes = { "text", "textarea", "number", "select", "bool", "color", "url", "secret", "date", "mailbox", "youtube", "textfile", "hidden", "media", "medias", "canva", "pdf", "gfile", "calendar", "drive", "facebookpage" };
+    private static readonly string[] FieldTypes = { "text", "textarea", "number", "select", "bool", "color", "url", "secret", "date", "mailbox", "youtube", "textfile", "hidden", "media", "medias", "canva", "pdf", "gfile", "calendar", "drive", "facebookpage", "haentity" };
     private readonly List<AppManifest> _apps = new();
 
     public IReadOnlyList<AppManifest> All => _apps;
@@ -135,6 +137,7 @@ public class AppCatalog
             if (f.Type == "gfile" && f.Accept is not ("presentation" or "document" or "powerpoint")) p.Add($"fichier sans type accepté (presentation, document ou powerpoint) : {f.Key}");
             if (f.Zone is not ("source" or "main" or "advanced")) p.Add($"zone inconnue (source, main ou advanced) : {f.Key}");
             if (f.Ui != null && !(f.Ui == "segmented" && f.Type == "select")) p.Add($"« ui » n'existe que pour un select segmented : {f.Key}");
+            if (f.Type == "haentity" && (f.Domains.Count == 0 || f.Domains.Any(d => !HomeAssistantRules.Domains.Contains(d)))) p.Add($"entités Home Assistant sans domaine valide (sensor, switch, light) : {f.Key}");
         }
         return p;
     }

@@ -99,6 +99,10 @@
             </Detail>
             <Actions>
                 @if (!admin) { }
+                else if (context.Id == "ha-home")
+                {
+                    <button type="button" class="btn ghost sm" @onclick="() => haOpen = true">Gérer</button>
+                }
                 else if (CalSource(context) is { } src)
                 {
                     <button type="button" class="btn ghost sm" @onclick="() => calSource = src">Gérer</button>
@@ -195,7 +199,7 @@ else
                 {
                     <div class="acc-alert">
                         <span class="grow">@PermName(p) : accès non autorisé</span>
-                        <a class="btn danger sm" href="@ConnectedAccounts.ConnectUrl(a.Id, p.Purpose)" target="_top">Autoriser</a>
+                        <a class="btn danger sm" href="@ConnectedAccounts.ConnectUrl(a.Id, p.Purpose ?? AccountPurposes.All)" target="_top">Autoriser</a>
                     </div>
                 }
                 <div class="acc-uses">
@@ -234,6 +238,9 @@ else
 {
     <DriveSourceDialog Source="@driveSource" OnClose="() => driveSource = null" OnChanged="Load" OnShowAccount="ShowAccount" />
 }
+
+@* Hors de tout bloc conditionnel : « Connecter un compte › Home Assistant » ouvre cette fenêtre sans autre source choisie. *@
+<HaAccountDialog Open="haOpen" OnClose="() => haOpen = false" OnChanged="Load" />
 
 @if (cvOpen)
 {
@@ -332,11 +339,11 @@ else
 
 @code {
     // Groupes affichés, dans l'ordre : catégorie du manifeste → titre du groupe. Calendriers partagés et Drives sont des familles de sources, pas des apps.
-    private const string CalendarsGroup = "@calendriers", DrivesGroup = "@drives";
+    private const string CalendarsGroup = "@calendriers", DrivesGroup = "@drives", HomeGroup = "Maison connectée";
     private static readonly (string Category, string Title)[] Sections =
     {
         ("Médiathèque", "Médias de la médiathèque"), (CalendarsGroup, "Calendriers partagés"), (DrivesGroup, "Drives"),
-        ("Service en ligne", "Services en ligne"), ("Web", "Contenus web"),
+        ("Service en ligne", "Services en ligne"), ("Web", "Contenus web"), (HomeGroup, "Maison connectée"),
     };
 
     // Ordre des cartes dans leur groupe (les apps absentes de la liste suivent, par nom).
@@ -352,6 +359,7 @@ else
     private bool accountsTab, addMenu, cvOpen, canvaReady, admin = true;   // admin : activation, comptes et connexions ; un membre voit seulement les intégrations de son niveau
     private string? calSource;     // source de calendriers dont la fenêtre « Gérer » est ouverte
     private string? driveSource;   // source Drive dont la fenêtre « Gérer » est ouverte
+    private bool haOpen;           // compte Home Assistant : fenêtre de connexion ouverte
     private string? accMenu;       // compte dont le menu ⋯ est ouvert
     private string? disconnectId;  // compte dont la déconnexion est à confirmer
     private string? connectKind;   // Microsoft ou Google : choix des accès avant la connexion
@@ -389,11 +397,13 @@ else
             var drives = DriveSources.All.Where(_ => admin)
                 .Where(s => Shown(s.Name + " " + s.Summary + " drive dossier", DriveSources.Enabled(tenant, s.Id)))
                 .Select(DriveEntry);
+            var home = admin ? new[] { HomeEntry() }.Where(e => Shown(e.Name + " " + e.Summary + " maison connectée", e.Off == false)) : Enumerable.Empty<CatalogView.Entry>();
             var known = Sections.Select(s => s.Category).ToHashSet();
             return Sections.Where(s => filter == "" || filter == s.Category).Select(s => (s.Title, Items: s.Category switch
                 {
                     CalendarsGroup => sources,
                     DrivesGroup => drives,
+                    HomeGroup => home,
                     _ => apps.Where(a => a.Category == s.Category).Select(Entry)
                 }))
                 .Concat(filter == "" ? new[] { ("Autres", apps.Where(a => !known.Contains(a.Category)).Select(Entry)) } : [])
@@ -459,6 +469,16 @@ else
         return new("drv-" + s.Id, s.Name, "Drive", s.Summary, "drv-" + s.Id, null, status, css, !on, why);
     }
 
+    /// <summary>Carte Home Assistant de la catégorie « Maison connectée » : son compte de l'organisation, ouvert par « Gérer ».</summary>
+    private CatalogView.Entry HomeEntry()
+    {
+        var ha = tenant.HomeAssistant;
+        (string status, string css, string? why) = ha == null ? ("À connecter", "mise-a-jour", (string?)null)
+            : ha.LastError.Length > 0 ? ("Erreur de connexion", "hors-ligne", ha.LastError)
+            : ("Connecté", "en-ligne", (string?)null);
+        return new("ha-home", "Home Assistant", "Maison connectée", "Capteurs, interrupteurs et lumières de votre Home Assistant.", "homeassistant", null, status, css, ha == null, why);
+    }
+
     // ---------- Intégrations utilisées par les comptes ----------
 
     private bool Enabled(string integrationId) =>
@@ -467,7 +487,8 @@ else
         : enabled.Contains(integrationId);
 
     private string IntegrationName(string integrationId) =>
-        integrationId.StartsWith("cal-") ? SharedCalendarSources.Find(integrationId[4..])?.Name ?? integrationId
+        integrationId == "ha-home" ? "Home Assistant"
+        : integrationId.StartsWith("cal-") ? SharedCalendarSources.Find(integrationId[4..])?.Name ?? integrationId
         : integrationId.StartsWith("drv-") ? DriveSources.Find(integrationId[4..])?.Name ?? integrationId
         : Svc.Catalog.FirstOrDefault(a => a.Id == integrationId)?.Name ?? integrationId;
 
@@ -531,6 +552,7 @@ else
     {
         addMenu = false;
         if (kind is ConnectedAccounts.Microsoft or ConnectedAccounts.Google) { wantCalendars = wantFiles = true; connectKind = kind; return; }
+        if (kind == ConnectedAccounts.HomeAssistant) { haOpen = true; return; }   // connexion saisie dans sa fenêtre
         if (ConnectedAccounts.IsDriveForm(kind)) { driveSource = kind; return; }   // Nextcloud, SFTP : la connexion se saisit dans la fenêtre du Drive (activé une fois testée)
         connectingServer = kind;   // CalDAV ou Exchange : la connexion se saisit dans la fenêtre de la source
         calSource = kind;
@@ -540,6 +562,7 @@ else
     private void EditConnection(string kind)
     {
         if (ConnectedAccounts.IsDriveForm(kind)) driveSource = kind;
+        else if (kind == ConnectedAccounts.HomeAssistant) haOpen = true;
         else calSource = kind;
     }
 
@@ -578,6 +601,7 @@ else
             case ConnectedAccounts.Dropbox: await DropboxAuth.Disconnect(Store.ClientId); break;
             case ConnectedAccounts.Facebook: FacebookAuth.Disconnect(Store.ClientId); break;
             case ConnectedAccounts.Nextcloud or ConnectedAccounts.Sftp: Store.Write(d => d.Tenant.DriveAccounts.RemoveAll(x => x.Source == id)); break;
+            case ConnectedAccounts.HomeAssistant: Store.Write(d => { d.Tenant.HomeAssistant = null; }); break;
             default:
                 Store.Write(d =>
                 {

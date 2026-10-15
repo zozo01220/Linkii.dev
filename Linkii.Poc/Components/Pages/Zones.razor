@@ -48,7 +48,7 @@ else
 
     <table class="tbl">
         <thead>
-            <tr><th>Zone</th><th>Aire de gestion</th><th class="num">Écrans</th><th>Type</th><th>Synchronisation</th><th></th></tr>
+            <tr><th>Zone</th><th>Aire de gestion</th><th class="num ctr">Écrans</th><th>Type</th><th>Synchronisation</th><th></th></tr>
         </thead>
         <tbody>
             @foreach (var r in Visible)
@@ -56,18 +56,12 @@ else
                 var row = r;
                 <tr>
                     <td>
-                        @if (row.IsWall || !canManage)
-                        {
-                            <b>@row.Name</b>
-                        }
-                        else
-                        {
-                            <input class="zname" maxlength="60" value="@row.Name" aria-label="Nom de la zone" @onchange="e => Rename(row, e.Value?.ToString() ?? row.Name)" />
-                        }
+                        @if (row.IsWall) { <b>@row.Name</b> }
+                        else { <span class="zn">@row.Name</span> }
                         @if (row.IsDefault) { <small class="muted"> · par défaut</small> }
                     </td>
                     <td class="muted">@row.AreaName</td>
-                    <td class="num">@row.Count</td>
+                    <td class="num ctr">@row.Count</td>
                     <td>
                         @if (row.IsWall) { <span class="badge sync">Mur @row.Cols × @row.Rows</span> }
                         else { <span class="badge neutre">Zone libre</span> }
@@ -77,7 +71,7 @@ else
                         else if (row.Sync) { <span class="ok-t">Synchronisée</span> }
                         else { <span class="muted">Non synchronisée</span> }
                     </td>
-                    <td class="num">
+                    <td class="kebab-cell">
                         @if (!row.IsWall && canManage)
                         {
                             <div class="kebab">
@@ -86,6 +80,7 @@ else
                                 {
                                     <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
                                     <div class="kebab-menu" role="menu">
+                                        <button type="button" role="menuitem" @onclick="() => OpenEdit(row)"><Ico Name="edit" Size="16" /> Éditer</button>
                                         <button type="button" role="menuitem" @onclick="() => ToggleSync(row)">@(row.Sync ? "Couper la synchronisation" : "Synchroniser les écrans de cette zone")</button>
                                         @if (!row.IsDefault)
                                         {
@@ -101,6 +96,27 @@ else
         </tbody>
     </table>
     <p class="muted" style="margin-top:12px">Un mur se crée et se règle dans Écrans. Ici, il est seulement listé.</p>
+}
+
+@if (editRow is { } er)
+{
+    <div class="modal-backdrop" @onclick="CloseEdit"></div>
+    <div class="modal app-modal sm" role="dialog" aria-modal="true" aria-labelledby="ez-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="ez-title">Modifier la zone</h3></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseEdit"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            <label class="lbl" for="ez-name" style="margin-top:0">Nom de la zone</label>
+            <input id="ez-name" class="full" maxlength="60" @bind="editName" @bind:event="oninput" />
+            <small class="muted" style="display:block">Aire de gestion : @er.AreaName</small>
+            @if (editError != null) { <div class="err">@editError</div> }
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn ghost" @onclick="CloseEdit">Annuler</button>
+            <button type="button" class="btn" disabled="@(editName.Trim().Length == 0)" @onclick="SaveEdit">Enregistrer</button>
+        </div>
+    </div>
 }
 
 @if (newOpen)
@@ -146,6 +162,8 @@ else
     private string newName = "";
     private Guid newArea;
     private string? newError;
+    private ZoneRow? editRow;
+    private string editName = "", editError = "";
 
     protected override void OnInitialized() => Load();
 
@@ -209,11 +227,24 @@ else
         Load();
     }
 
-    private void Rename(ZoneRow r, string name)
+    private void OpenEdit(ZoneRow r)
     {
-        if (name.Trim() == r.Name) return;
-        error = Store.Write(d => AreaOps.RenameZone(d, r.AreaId, r.Id, name));
-        if (error == null) Toast.Ok($"Zone renommée en « {name.Trim()} ».");
+        menuFor = null;
+        editRow = r; editName = r.Name; editError = null;
+    }
+
+    private void CloseEdit() => editRow = null;
+
+    private void SaveEdit()
+    {
+        if (editRow is not { } r) return;
+        var name = editName.Trim();
+        if (name.Length == 0) return;
+        if (name == r.Name) { CloseEdit(); return; }
+        var err = Store.Write(d => AreaOps.RenameZone(d, r.AreaId, r.Id, name));
+        if (err != null) { editError = err; return; }
+        editRow = null;
+        Toast.Ok($"Zone renommée en « {name} ».");
         Load();
     }
 

@@ -60,6 +60,78 @@
     }, 10 * 60 * 1000);
   });
 
+  /* ---------- Home Assistant : capteurs (lecture) et interrupteurs (touchés à l'écran) ---------- */
+  var HA_BINARY = { door: ['Ouverte', 'Fermée'], window: ['Ouverte', 'Fermée'], motion: ['Mouvement', 'Calme'],
+    occupancy: ['Présence', 'Absence'], presence: ['Présent', 'Absent'], opening: ['Ouvert', 'Fermé'] };
+  function haValue(e) {
+    if (e.state === 'absent') return '?';
+    if (e.state === 'unavailable' || e.state === 'unknown') return '—';
+    if (e.domain === 'binary_sensor') { var l = HA_BINARY[e.deviceClass] || ['Actif', 'Inactif']; return e.on ? l[0] : l[1]; }
+    if (e.domain === 'switch' || e.domain === 'light' || e.domain === 'input_boolean') return e.on ? 'Allumé' : 'Éteint';
+    return e.state + (e.unit ? ' ' + e.unit : '');
+  }
+  /* Un seul rendu pour les trois widgets : le serveur dit pour chaque entité si elle s'actionne (interrupteur ou lumière) ou se lit (capteur). */
+  function haApp(h) {
+    var s = h.settings, el = h.el;
+    el.className += ' ha';
+    el.innerHTML = (s.title ? '<div class="ha-t"></div>' : '') + '<div class="ha-list"></div><div class="ha-err"></div>';
+    var titleEl = el.querySelector('.ha-t'), list = el.querySelector('.ha-list'), err = el.querySelector('.ha-err');
+    if (titleEl) titleEl.textContent = s.title;
+    var pending = {};   // interrupteur touché : état voulu, affiché le temps que Home Assistant l'applique
+    function paint(row, e, on) {
+      var sw = row.querySelector('.ha-sw');
+      sw.className = 'ha-sw' + (on ? ' on' : '');
+      sw.setAttribute('aria-pressed', on ? 'true' : 'false');
+      row.querySelector('.ha-v').textContent = on ? 'Allumé' : 'Éteint';
+    }
+    /* La liste est redessinée à chaque lecture des données : on retrouve la ligne au moment du clic, pas celle de la liste d'origine. */
+    function rowOf(id) { return list.querySelector('.ha-row[data-id="' + id + '"]'); }
+    function toggle(e) {
+      return function () {
+        var row = rowOf(e.id), sw = row && row.querySelector('.ha-sw');
+        if (!sw || sw.disabled) return;
+        var current = pending.hasOwnProperty(e.id) ? pending[e.id] : e.on;
+        var want = !current;
+        pending[e.id] = want; paint(row, e, want); sw.disabled = true; err.textContent = '';
+        h.command('switch', { entityId: e.id, on: want }).catch(function () {
+          delete pending[e.id];
+          var r = rowOf(e.id);
+          if (r) paint(r, e, current);
+          err.textContent = 'Commande non envoyée. Réessayez.';
+        }).then(function () {
+          var r = rowOf(e.id);
+          if (r) r.querySelector('.ha-sw').disabled = false;
+          delete pending[e.id];
+        });
+      };
+    }
+    h.data(function (d) {
+      if (!d) return;
+      list.innerHTML = '';
+      (d.entities || []).forEach(function (e) {
+        var row = document.createElement('div');
+        row.className = 'ha-row';
+        row.setAttribute('data-id', e.id);
+        row.innerHTML = '<span class="ha-n"></span>';
+        row.firstChild.textContent = e.name;
+        if (e.switchable) {
+          var on = pending.hasOwnProperty(e.id) ? pending[e.id] : e.on;
+          row.innerHTML += '<span class="ha-v"></span><button class="ha-sw" type="button" role="switch"><i></i></button>';
+          row.querySelector('.ha-sw').setAttribute('aria-label', e.name);
+          row.querySelector('.ha-sw').onclick = toggle(e);
+          paint(row, e, on);
+        } else {
+          row.innerHTML += '<span class="ha-v"></span>';
+          row.querySelector('.ha-v').textContent = haValue(e);
+        }
+        list.appendChild(row);
+      });
+    }, 10 * 1000);
+  }
+  A.register('ha-sensors', haApp);
+  A.register('ha-switches', haApp);
+  A.register('ha-lights', haApp);
+
   /* ---------- Agenda en bandeau (pleine page et angles : liste, voir player.js) ---------- */
   A.register('agenda', function (h) {
     var title = h.settings.title || 'Agenda';

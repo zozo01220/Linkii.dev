@@ -14,7 +14,7 @@ public static class FolderAccess
     /// <summary>Profondeur maximale : l'arborescence est affichée sur quatre niveaux.</summary>
     public const int MaxDepth = 4;
 
-    public static FolderRight For(AreaAccess a, MediaFolder f, IReadOnlyCollection<MediaFolder> all)
+    public static FolderRight For<T>(AreaAccess a, T f, IReadOnlyCollection<T> all) where T : class, IFolderNode
     {
         if (a.IsOrgAdmin) return FolderRight.Owner;
         if (!a.HasArea(f.AreaId)) return FolderRight.None;
@@ -38,14 +38,14 @@ public static class FolderAccess
     }
 
     /// <summary>Droits de la personne sur chaque dossier donné.</summary>
-    public static Dictionary<Guid, FolderRight> Snapshot(AreaAccess a, IReadOnlyCollection<MediaFolder> folders) =>
+    public static Dictionary<Guid, FolderRight> Snapshot<T>(AreaAccess a, IReadOnlyCollection<T> folders) where T : class, IFolderNode =>
         folders.ToDictionary(f => f.Id, f => For(a, f, folders));
 
     /// <summary>Créer un dossier à la racine de l'aire : administrateur, ou niveau qui le permet (hors lecture seule).</summary>
     public static bool CanCreateAtRoot(AreaAccess a) => a.IsOrgAdmin || a.Level is { CanCreateFolders: true, ReadOnly: false };
 
     /// <summary>Partager un dossier : son propriétaire, si son niveau le permet (l'administrateur partage tout).</summary>
-    public static bool CanShare(AreaAccess a, MediaFolder f) =>
+    public static bool CanShare<T>(AreaAccess a, T f) where T : class, IFolderNode =>
         a.IsOrgAdmin || (a.UserId is { } u && f.OwnerId == u && a.HasArea(f.AreaId) && a.Level is { CanShareFolders: true, ReadOnly: false });
 
     /// <summary>Le dossier ajouté à un niveau de droits ne donne rien au-delà de sa lecture seule.</summary>
@@ -53,9 +53,9 @@ public static class FolderAccess
     private static FolderRight Max(FolderRight x, FolderRight y) => (FolderRight)Math.Max((int)x, (int)y);
 
     /// <summary>Le dossier, puis ses parents jusqu'à la racine de l'aire (sans boucle).</summary>
-    public static IEnumerable<MediaFolder> Chain(MediaFolder f, IReadOnlyCollection<MediaFolder> all)
+    public static IEnumerable<T> Chain<T>(T f, IReadOnlyCollection<T> all) where T : class, IFolderNode
     {
-        var cur = f;
+        T? cur = f;
         for (var n = 0; cur != null && n < 50; n++)
         {
             yield return cur;
@@ -185,7 +185,9 @@ public static class FolderOps
     public static string? SetLevelShares(ClientDb d, Guid levelId, IReadOnlyDictionary<Guid, string> modes)
     {
         if (!d.Access.IsOrgAdmin) return "Seul un administrateur de l'organisation gère les niveaux de droits.";
-        foreach (var f in All(d))
+        // dossiers de la médiathèque et des listes de lecture : un même choix par niveau
+        var nodes = All(d).Cast<IFolderNode>().Concat(PlaylistFolderOps.All(d));
+        foreach (var f in nodes)
         {
             var mode = modes.GetValueOrDefault(f.Id);
             f.Shares.RemoveAll(s => s.Kind == FolderShareKind.Level && s.TargetId == levelId);

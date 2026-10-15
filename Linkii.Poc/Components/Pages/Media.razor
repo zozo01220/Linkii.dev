@@ -28,12 +28,12 @@
 @if (FoldersShown)
 {
     <nav class="lib-crumb" aria-label="Emplacement dans la médiathèque">
-        <button type="button" class="linklike" @onclick="() => OpenFolder(null)"><Ico Name="image" Size="15" /> Médiathèque de l'aire</button>
+        <button type="button" class="linklike" @onclick="() => OpenFolder(null)" @ondragover="() => { }" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="() => DropOn(null)"><Ico Name="image" Size="15" /> Médiathèque de l'aire</button>
         @foreach (var c in crumbs)
         {
             var row = c;
             <span class="sep">›</span>
-            <button type="button" class="linklike" @onclick="() => OpenFolder(row.Folder.Id)">@row.Folder.Name</button>
+            <button type="button" class="linklike" @onclick="() => OpenFolder(row.Folder.Id)" @ondragover="() => { }" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="() => DropOn(row.Folder.Id)">@row.Folder.Name</button>
         }
     </nav>
     @if (currentRow is { } cur)
@@ -131,9 +131,10 @@
         @foreach (var row in subfolders)
         {
             var r = row;
-            var inside = allFiles.Count(m => m.FolderId == r.Folder.Id);
+            var inside = ChildCount(r.Folder.Id);
             var mine = r.Folder.OwnerId == Store.UserId;
-            <div class="lib-card lib-folder" role="button" tabindex="0" aria-label="Ouvrir le dossier @r.Folder.Name" @onclick="() => OpenFolder(r.Folder.Id)">
+            <div class="lib-card lib-folder @(dropOver == r.Folder.Id ? "drop-target" : "")" role="button" tabindex="0" aria-label="Ouvrir le dossier @r.Folder.Name" @onclick="() => OpenFolder(r.Folder.Id)"
+                 @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = r.Folder.Id; }" @ondragleave="() => { if (dropOver == r.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(r.Folder.Id)">
                 <div class="lib-th lib-th-folder">
                     <Ico Name="folder" Size="34" />
                     <span class="lib-count">@inside élément@(inside > 1 ? "s" : "")</span>
@@ -239,7 +240,8 @@
             var item = m;
             var on = picked.Contains(item.Id);
             var drive = MediaLibrary.IsDrive(item) ? drives.GetValueOrDefault(item.Info["drive"]) : null;   // fichier synchronisé depuis un dossier Drive
-            <div class="lib-card @(on ? "picked" : "") @(item.Status == "failed" ? "failed" : "") @(Selectable(item) ? "selectable" : "")" @onclick="() => ClickCard(item)">
+            <div class="lib-card @(on ? "picked" : "") @(item.Status == "failed" ? "failed" : "") @(Selectable(item) ? "selectable" : "") @(dragIds.Contains(item.Id) ? "dragging" : "")" @onclick="() => ClickCard(item)"
+                 draggable="@(CanDrag(item) ? "true" : "false")" @ondragstart="() => StartDrag(item)" @ondragend="EndDrag">
                 <div class="lib-th">
                     @if (item.Status == "processing") { <span class="spinner-lg"></span><small class="lib-proc">Conversion en MP4…</small> }
                     else if (item.Status == "failed") { <Ico Name="x" Size="26" /><small class="lib-proc" title="@item.Error">@item.Error</small> }
@@ -439,7 +441,7 @@
     private Guid? sharingId;
     private List<(Guid Id, string Name)>? folderMove;
 
-    private bool FoldersShown => foldersOn && Modes.Expert;
+    private bool FoldersShown => foldersOn;   // dossiers visibles en mode simple comme en mode expert
     private FolderRow? currentRow => folderId is { } id ? folderRows.FirstOrDefault(r => r.Folder.Id == id) : null;
     private bool CanCreateHere => folderId is null ? canCreateRoot : currentRow is { } c && c.Right >= FolderRight.Write;
     private bool CanUploadHere => folderId is null || currentRow is { } c && c.Right >= FolderRight.Write;
@@ -476,6 +478,9 @@
         unusedCanva = Library.UnusedCanva();
         picked.IntersectWith(allFiles.Where(f => !MediaLibrary.IsDrive(f)).Select(f => f.Id));
     }
+
+    // Éléments directs d'un dossier : ses fichiers et ses sous-dossiers visibles
+    private int ChildCount(Guid id) => allFiles.Count(m => m.FolderId == id) + folderRows.Count(r => r.Folder.ParentId == id);
 
     private List<FolderRow> BuildCrumbs()
     {
@@ -527,6 +532,26 @@
     // Un fichier qu'on peut sélectionner : toute la carte, sur simple appui, le coche ou le décoche.
     private bool Selectable(MediaItem m) => !MediaLibrary.IsDrive(m) && CanEdit(m);
     private void ClickCard(MediaItem m) { if (Selectable(m)) Toggle(m.Id); }
+
+    // Glisser-déposer : un fichier, ou tous les fichiers sélectionnés, vers un dossier (ou la racine de l'aire, null)
+    private List<Guid> dragIds = new();
+    private Guid? dropOver;
+    private bool CanDrag(MediaItem m) => FoldersShown && Selectable(m);
+    private void StartDrag(MediaItem m)
+    {
+        dragIds = picked.Contains(m.Id) ? pickedEditable.Select(x => x.Id).ToList() : new List<Guid> { m.Id };
+    }
+    private void EndDrag() { dragIds = new(); dropOver = null; }
+    private void DropOn(Guid? target)
+    {
+        var ids = dragIds.ToList();
+        EndDrag();
+        if (ids.Count == 0) return;
+        var (moved, refused) = Library.MoveFiles(ids, target);
+        if (refused.Count > 0) Toast.Error(refused[0] + (refused.Count > 1 ? $" (et {refused.Count - 1} autre{(refused.Count > 2 ? "s" : "")})" : ""));
+        if (moved > 0) { picked.Clear(); Toast.Ok(moved > 1 ? $"{moved} fichiers rangés." : "Fichier rangé."); }
+        Reload();
+    }
 
     private void ToggleAll()
     {

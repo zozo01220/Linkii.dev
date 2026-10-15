@@ -10,6 +10,11 @@
 @using Microsoft.JSInterop
 @implements IDisposable
 
+@if (readOnlyHere)
+{
+    <div class="dw-note"><Ico Name="lock" Size="15" /><span class="grow">Cette liste est dans un dossier partagé en <b>lecture seule</b> : vous pouvez la voir et la diffuser, pas la modifier.</span></div>
+}
+
 <div class="page-head">
     <div class="grow" style="min-width:0">
         <a class="back" href="/playlists">← Listes de lecture</a>
@@ -377,7 +382,7 @@
         var dur = Store.Read(d => d.Tenant.DefaultDurationSec);
         var placement = PlacementsFor(item).Select(o => o.Id).DefaultIfEmpty("full").Contains("full") ? "full" : PlacementsFor(item).First().Id;
         var at = insertAt is { } i && i >= 0 && i < pl.Draft.Count ? i : pl.Draft.Count;
-        Store.Write(d =>
+        WriteList(d =>
         {
             pl.Draft.Insert(at, new PlaylistItem { MediaId = item.Id, DurationSec = dur, Placement = placement });
             pl.Touch();
@@ -426,6 +431,22 @@
 
     private Playlist? Current => playlists.FirstOrDefault(p => p.Id == Id);
 
+    // Une liste rangée dans un dossier partagé en lecture seule ne s'enregistre pas, même si la page est ouverte (contrôle côté serveur)
+    private bool readOnlyHere;
+    private void WriteList(Action<ClientDb> act)
+    {
+        try
+        {
+            Store.Write(d =>
+            {
+                if (d.Playlists.FirstOrDefault(p => p.Id == Id) is { } p && !PlaylistOps.CanEdit(d, p))
+                    throw new UnauthorizedAccessException("Cette liste est dans un dossier partagé en lecture seule : vous ne pouvez pas la modifier.");
+                act(d);
+            });
+        }
+        catch (UnauthorizedAccessException e) { Toast.Error(e.Message); }
+    }
+
     protected override void OnParametersSet() { Reload(); renaming = false; }
 
     private async Task Refresh() { Reload(); await InvokeAsync(StateHasChanged); }
@@ -435,6 +456,7 @@
     private void Reload()
     {
         playlists = Store.Read(d => d.Playlists.ToList());
+        readOnlyHere = Store.Read(d => d.Playlists.FirstOrDefault(p => p.Id == Id) is { } cur && !PlaylistOps.CanEdit(d, cur));
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());   // hors vidéos en conversion / en échec
         enabledApps = Svc.Installed().Select(i => Svc.Find(i.AppId)).OfType<AppManifest>().Where(a => !a.ScreenWidget).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
         growth = Store.Read(d => d.Tenant.IsGrowth);
@@ -453,7 +475,7 @@
         var qrCode = qr ? mQrCode ?? QrTracking.NewCode() : null; var qrUrl = QrTracking.Destination(mQrUrl) ?? mQrUrl.Trim();
         var qrLabel = QrTracking.CleanLabel(mQrLabel); var qrBase = QrTracking.Origin(Nav.BaseUri);
         var (qx, qy, qs) = (mQrX, mQrY, mQrSize);
-        Store.Write(d =>
+        WriteList(d =>
         {
             pl.Draft.Insert(at, new PlaylistItem
             {
@@ -485,7 +507,7 @@
     // Un contenu d'app n'existe que pour ses listes de lecture : retiré de la dernière, il est supprimé (les fichiers de la médiathèque restent).
     private void RemoveItem(Playlist pl, PlaylistItem it)
     {
-        Store.Write(d => { pl.Draft.Remove(it); pl.Touch(); });
+        WriteList(d => { pl.Draft.Remove(it); pl.Touch(); });
         var m = media.FirstOrDefault(x => x.Id == it.MediaId);
         if (m?.AppId != null && Svc.PlaylistsUsing(m.Id).Count == 0) Svc.DeleteInstance(m.Id);
         Toast.Ok($"« {m?.Name ?? "Contenu"} » retiré de la liste de lecture.");
@@ -494,7 +516,7 @@
 
     private void Move(Playlist pl, int idx, int delta)
     {
-        Store.Write(d =>
+        WriteList(d =>
         {
             (pl.Draft[idx], pl.Draft[idx + delta]) = (pl.Draft[idx + delta], pl.Draft[idx]);
             pl.Touch();
@@ -573,7 +595,7 @@
         var qrOn = mQrOn; var qrUrl = QrTracking.Destination(mQrUrl) ?? mQrUrl.Trim(); var qrLabel = QrTracking.CleanLabel(mQrLabel);
         var qrCode = qrOn ? mQrCode ?? QrTracking.NewCode() : mQrCode ?? item.QrCode; var qrBase = QrTracking.Origin(Nav.BaseUri);
         double qx = mQrX, qy = mQrY, qs = mQrSize;
-        Store.Write(d =>
+        WriteList(d =>
         {
             item.Placement = placement;
             if (content) item.DurationMode = mode;
@@ -604,7 +626,7 @@
     {
         if (Current is { } pl && from != to && from >= 0 && from < pl.Draft.Count && to >= 0 && to < pl.Draft.Count)
         {
-            Store.Write(d =>
+            WriteList(d =>
             {
                 var it = pl.Draft[from];
                 pl.Draft.RemoveAt(from);
@@ -660,7 +682,7 @@
     {
         var name = renameValue.Trim();
         if (name.Length == 0) return;
-        Store.Write(d => { pl.Name = name; pl.UpdatedAt = DateTime.UtcNow; });   // le nom n'est pas publié : aucun écran à notifier
+        WriteList(d => { pl.Name = name; pl.UpdatedAt = DateTime.UtcNow; });   // le nom n'est pas publié : aucun écran à notifier
         Toast.Ok($"Liste de lecture renommée en « {name} ».");
         renaming = false;
         Reload();

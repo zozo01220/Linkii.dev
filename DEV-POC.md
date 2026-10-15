@@ -1085,3 +1085,42 @@ Horloge et Météo ne sont plus des apps de playlist (`"screenWidget": true` dan
 La médiathèque ne contient plus que des **images et des vidéos** (`MediaLibrary`). Téléversement depuis l'ordinateur (bouton ou glisser-déposer) ou **par URL** (`MediaImporter.ImportUrl`, téléchargement côté serveur via `SafeHttp.Download` : jamais le réseau interne, 2 Go max), avec une **barre de progression par fichier** (`MediaUploader`, réutilisé dans le sélecteur des apps). Taille et date d'ajout enregistrées (`MediaItem.Size`, `AddedUtc`). Menu ⋮ : Renommer, Télécharger, Supprimer ; sélection multiple pour supprimer. Supprimer un fichier le retire des apps qui l'utilisaient (playlists touchées → « À publier »).
 
 Quatre apps prennent leurs fichiers dans la médiathèque : **Image**, **Vidéo**, **Diaporama images**, **Diaporama vidéos** (`Apps/image.json`, `video.json`, `slideshow-images.json`, `slideshow-videos.json`). Nouveaux types de champ `media` / `medias` (attribut `accept` : image | video ; valeur = identifiants séparés par des virgules) rendus par `MediaField` + `MediaPicker` (on peut téléverser depuis le sélecteur). À la publication, `Notifier` résout les fichiers en adresses `/media/…` (`PublishedItem.Urls`) ; le player les précharge pour la lecture hors ligne et les lit via `host.media(url)` (`apps.js`). Vidéo et diaporamas sont en durée « content » : contenu suivant à la fin. Les playlists n'ajoutent plus de fichier directement (les anciens éléments restent diffusés) ; un contenu d'app retiré de sa dernière playlist est supprimé.
+
+## 50. Dossiers des listes de lecture, glisser-déposer et « Ajouter un dossier » (14 octobre 2026) : codé
+
+Demande : les listes de lecture se rangent dans des dossiers comme les fichiers de la médiathèque (§49), avec les mêmes droits ; un ou plusieurs éléments se déplacent par glisser-déposer ; la fenêtre « Ranger dans un dossier » permet de créer le dossier de destination. **Non testé dans le navigateur à la date de rédaction** (l'appli tournait sur une version antérieure).
+
+### Modèle
+- `PlaylistFolder { Id, ClientId, AreaId, ParentId?, Name, OwnerId, CreatedUtc, Shares }`, stocké dans `Db.PlaylistFolders` ; accès aire par `ClientDb.PlaylistFolders`.
+- `Playlist.FolderId?` (null = racine de l'aire, comme avant).
+- `IFolderNode` : interface commune aux dossiers de la médiathèque et des listes. `FolderAccess` est générique (`For<T>`, `Chain<T>`, `Snapshot<T>`, `CanShare<T>`) : une seule logique de droits.
+- Les partages de niveau sont une seule donnée pour les deux types (`FolderOps.SetLevelShares` écrit les deux). Le niveau supprimé retire ses partages des deux types.
+
+### Règles
+- **Droit sur une liste** (`PlaylistOps.RightOf`) : celui de son dossier ; à la racine, comme avant : visible de tous, modifiable, sauf niveau en lecture seule (plafond Read).
+- **Visibilité** : une liste rangée dans un dossier qu'on ne voit pas n'apparaît pas sur la page Listes.
+- **Partage personne** : la personne doit avoir la page « Listes de lecture ». Partage niveau : aucune condition supplémentaire.
+- **Rangement** (`PlaylistFolderOps.Move`) : écriture sur le dossier d'arrivée, et sur le dossier d'origine si la liste vient d'un dossier ; vers la racine, il faut pouvoir créer à la racine. Ranger ne touche pas au contenu (pas de mise à jour à publier).
+- **Suppression d'un dossier** : propriétaire seul, refusé si un sous-dossier appartient à quelqu'un d'autre ; les listes du dossier sont retirées par `PlaylistOps.Remove` (même logique que la suppression d'une liste : écrans gardant leur instantané).
+- **Éditeur de liste** (`PlaylistEditor`) : les écritures passent par `WriteList`, qui refuse côté serveur une liste dans un dossier non modifiable ; bandeau « lecture seule » à l'écran.
+- **Changement d'aire** : la liste arrive à la racine de la nouvelle aire (`AreaOps.MovePlaylist`).
+- **Propriétaire retiré** : ses dossiers de listes passent à la personne qui agit (`ClientDb.RemoveUser`).
+
+### Écrans
+- **Page Listes** (`Playlists.razor`) : fil d'Ariane, dossiers de la position ouverte, puis la barre de filtres (même disposition que la Médiathèque). Recherche ou filtre : toutes les listes vues, à plat.
+- **Glisser-déposer** : une carte (ou toute la sélection si la carte en fait partie) vers une tuile de dossier, ou vers un élément du fil d'Ariane (racine comprise). La cible s'éclaire (`.drop-target`). Côté Blazor, le dépôt exige un gestionnaire explicite sur `dragover` (`@ondragover` avec `preventDefault`), sinon le navigateur refuse le dépôt.
+- **Ranger dans un dossier** (`PlaylistMoveDialog`, `FolderMoveDialog`) : lien « Ajouter un dossier » : le nouveau dossier se crée dans l'emplacement choisi (ou à la racine) et est sélectionné.
+- **Partage** : `PlaylistFolderShareDialog` (copie de `FolderShareDialog`, appliquée aux listes).
+
+### Fichiers
+- Nouveaux : `PlaylistFolders.cs` (`PlaylistOps`, `PlaylistFolderOps`), `PlaylistLibrary.cs` (service et enregistrements), `Components/PlaylistFolderShareDialog.razor`, `Components/PlaylistMoveDialog.razor`, `Linkii.Poc.Tests/PlaylistFolderTests.cs`.
+- Modifiés : `Models.cs`, `Folders.cs`, `Tenancy.cs`, `Rights.cs`, `Areas.cs`, `Program.cs`, `Components/Pages/Playlists.razor`, `Components/Pages/PlaylistEditor.razor`, `Components/Pages/Members.razor`, `Components/Pages/Media.razor`, `Components/FolderMoveDialog.razor`, `wwwroot/app.css`.
+
+### Tests
+- `PlaylistFolderTests` : 11 tests (droits, partage, lecture seule, niveau, rangement, suppression). Ils passent.
+- Suite complète : 5 échecs sur `AppsTests`, présents aussi sur le commit HEAD (fa32ec7) ; cause non identifiée (attentes des tests contre le catalogue).
+
+### Limites connues
+- Les sélecteurs de listes (planning, écrans) ne filtrent pas encore par droits, comme pour la médiathèque.
+- La fenêtre de partage des listes n'est pas testée dans le navigateur.
+- Le glisser-déposer et la barre de filtres sont à valider à l'écran.

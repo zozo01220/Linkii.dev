@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Listes de lecture : proposition explorateur</title>
+<style>
+  :root { --ink:#0f1d33; --ink2:#4a5568; --muted:#7a8699; --line:#e2e6ee; --soft:#f5f7fa; --hover:#eef3fb; --sel:#dbe8ff; --accent:#2563eb; --ok:#15803d; --warn:#b45309; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ink:#e8edf5; --ink2:#aeb8c8; --muted:#7d8a9f; --line:#2a3446; --soft:#18202e; --hover:#1d2736; --sel:#1d2b47; --accent:#6b9bff; } }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px 14px; background:#d9dee7; font:13px/1.4 system-ui,"Segoe UI",Roboto,sans-serif; color:var(--ink); }
+  .win { max-width:1180px; margin:0 auto; background:#fff; border-radius:10px; box-shadow:0 18px 50px rgba(15,29,51,.25); overflow:hidden; display:flex; flex-direction:column; min-height:720px; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .win { background:#111826; } }
+  /* barre de titre et ruban */
+  .titlebar { display:flex; align-items:center; gap:10px; padding:8px 12px; border-bottom:1px solid var(--line); }
+  .titlebar h1 { font-size:15px; margin:0; font-weight:600; }
+  .titlebar .sub { color:var(--muted); font-size:12px; }
+  .ribbon { display:flex; gap:4px; padding:6px 10px; border-bottom:1px solid var(--line); flex-wrap:wrap; background:var(--soft); }
+  .rb { border:1px solid transparent; background:none; padding:5px 9px; border-radius:6px; cursor:pointer; color:var(--ink); font:inherit; display:inline-flex; align-items:center; gap:6px; }
+  .rb:hover { background:var(--hover); border-color:var(--line); }
+  .rb.primary { background:var(--ink); color:#fff; }
+  .rb:disabled, .rb.off { color:var(--muted); cursor:default; }
+  .sep { width:1px; background:var(--line); margin:2px 4px; }
+  /* navigation : précédent, suivant, remonter, barre d'adresse, recherche */
+  .navbar { display:flex; align-items:center; gap:6px; padding:8px 10px; border-bottom:1px solid var(--line); }
+  .nav-btn { width:28px; height:28px; border:1px solid var(--line); border-radius:6px; background:#fff; display:grid; place-items:center; cursor:pointer; color:var(--ink2); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .nav-btn { background:var(--soft); } }
+  .address { flex:1; display:flex; align-items:center; gap:4px; border:1px solid var(--line); border-radius:6px; padding:4px 8px; min-width:0; overflow:hidden; white-space:nowrap; }
+  .address .crumb { padding:2px 6px; border-radius:4px; cursor:pointer; }
+  .address .crumb:hover, .address .crumb.drop { background:var(--hover); }
+  .address .crumb.drop { outline:2px dashed var(--accent); }
+  .address .chev { color:var(--muted); }
+  .search { width:240px; border:1px solid var(--line); border-radius:6px; padding:5px 9px; color:var(--muted); }
+  /* corps : arbre à gauche, contenu au centre, volet d'aperçu à droite */
+  .body { display:grid; grid-template-columns: 230px 1fr 260px; flex:1; min-height:0; }
+  .tree { border-right:1px solid var(--line); padding:8px 6px; overflow:auto; }
+  .tree .sect { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:10px 6px 4px; }
+  .tree .node { padding:4px 6px; border-radius:5px; display:flex; align-items:center; gap:6px; cursor:pointer; white-space:nowrap; }
+  .tree .node:hover { background:var(--hover); }
+  .tree .node.on { background:var(--sel); }
+  .tree .node .n { margin-left:auto; color:var(--muted); font-size:11px; }
+  .tree .indent1 { padding-left:22px; } .tree .indent2 { padding-left:38px; }
+  .tree .node.drop { outline:2px dashed var(--accent); }
+  .main { display:flex; flex-direction:column; min-width:0; }
+  .content-head { display:flex; align-items:center; gap:8px; padding:8px 12px; border-bottom:1px solid var(--line); }
+  .views { display:flex; gap:2px; margin-left:auto; }
+  .views button { border:1px solid var(--line); background:#fff; padding:4px 8px; border-radius:5px; cursor:pointer; font:inherit; color:var(--ink2); }
+  .views button.on { background:var(--ink); color:#fff; border-color:var(--ink); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .views button { background:var(--soft); } }
+  /* vue Détails : colonnes triables, redimensionnables */
+  .details { width:100%; border-collapse:collapse; }
+  .details th { text-align:left; font-weight:600; color:var(--ink2); font-size:12px; padding:6px 10px; border-bottom:1px solid var(--line); position:sticky; top:0; background:inherit; cursor:pointer; user-select:none; }
+  .details th .arrow { color:var(--accent); margin-left:4px; }
+  .details td { padding:6px 10px; border-bottom:1px solid var(--line); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:0; }
+  .details tr:hover td { background:var(--hover); }
+  .details tr.sel td { background:var(--sel); }
+  .details tr.drop td { outline:2px dashed var(--accent); outline-offset:-2px; }
+  .details tr.cut td { opacity:.5; }
+  .ico { display:inline-block; width:16px; height:16px; vertical-align:-3px; margin-right:6px; }
+  .f-folder { color:#d9a441; } .f-list { color:#2563eb; } .f-media { color:#7c3aed; }
+  .pill { font-size:11px; padding:1px 7px; border-radius:999px; background:var(--soft); color:var(--ink2); border:1px solid var(--line); }
+  .pill.ok { color:var(--ok); } .pill.warn { color:var(--warn); }
+  /* vue Icônes : grille de tuiles, zone de rectangle de sélection */
+  .icons { display:grid; grid-template-columns: repeat(auto-fill, minmax(150px,1fr)); gap:10px; padding:12px; align-content:start; }
+  .tile { border:1px solid transparent; border-radius:8px; padding:8px; text-align:center; cursor:pointer; }
+  .tile:hover { background:var(--hover); }
+  .tile.sel { background:var(--sel); border-color:var(--accent); }
+  .tile.drop { outline:2px dashed var(--accent); }
+  .tile .thumb { height:84px; border-radius:6px; background:var(--soft); display:grid; place-items:center; font-size:30px; margin-bottom:6px; }
+  .tile .nm { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tile .meta { color:var(--muted); font-size:11px; }
+  /* menu contextuel (exemple) */
+  .ctx { position:absolute; left:340px; top:330px; width:230px; background:#fff; border:1px solid var(--line); border-radius:8px; box-shadow:0 10px 30px rgba(15,29,51,.2); padding:5px; font-size:13px; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .ctx { background:#18202e; } }
+  .ctx div { padding:6px 10px; border-radius:5px; display:flex; justify-content:space-between; gap:8px; }
+  .ctx div:hover { background:var(--hover); }
+  .ctx hr { border:0; border-top:1px solid var(--line); margin:4px 2px; }
+  .ctx kbd { color:var(--muted); font:inherit; font-size:11px; }
+  .ctx .danger { color:#b91c1c; }
+  .ghost-drag { position:absolute; left:610px; top:470px; background:#fff; border:1px solid var(--accent); border-radius:6px; padding:4px 10px; box-shadow:0 6px 18px rgba(0,0,0,.2); font-size:12px; }
+  .ghost-drag b { color:var(--accent); }
+  /* volet d'aperçu */
+  .preview { border-left:1px solid var(--line); padding:14px; overflow:auto; }
+  .preview .big { height:120px; border-radius:8px; background:var(--soft); display:grid; place-items:center; font-size:40px; margin-bottom:10px; }
+  .preview h2 { font-size:14px; margin:0 0 6px; }
+  .preview dl { display:grid; grid-template-columns:auto 1fr; gap:4px 10px; margin:10px 0; font-size:12px; }
+  .preview dt { color:var(--muted); }
+  .preview .items { border-top:1px solid var(--line); margin-top:10px; padding-top:8px; }
+  .preview .items div { padding:3px 0; font-size:12px; color:var(--ink2); }
+  /* barre d'état */
+  .status { display:flex; gap:14px; padding:6px 12px; border-top:1px solid var(--line); color:var(--ink2); font-size:12px; background:var(--soft); }
+  .status .grow { flex:1; }
+  .legend { margin:14px auto 0; max-width:1180px; color:#334155; font-size:12px; background:#fff; border-radius:8px; padding:12px 16px; }
+  .legend b { color:#0f1d33; }
+  .legend ul { margin:6px 0 0; padding-left:18px; columns:2; }
+  @media (max-width: 900px) { .body { grid-template-columns: 1fr; } .tree, .preview { display:none; } .search { display:none; } }
+</style>
+</head>
+<body>
+<div class="win" role="application" aria-label="Listes de lecture">
+
+  <div class="titlebar">
+    <h1>Listes de lecture</h1><span class="sub">Médiathèque de l'aire Siège</span>
+  </div>
+
+  <!-- Ruban : actions regroupées comme dans un explorateur -->
+  <div class="ribbon">
+    <button class="rb primary">+ Nouvelle liste</button>
+    <button class="rb">Nouveau dossier</button>
+    <span class="sep"></span>
+    <button class="rb">Couper</button>
+    <button class="rb">Copier</button>
+    <button class="rb">Coller</button>
+    <button class="rb">Renommer <small>F2</small></button>
+    <button class="rb">Ranger dans… </button>
+    <button class="rb">Partager…</button>
+    <button class="rb">Dupliquer</button>
+    <button class="rb" style="color:#b91c1c">Supprimer <small>Suppr</small></button>
+    <span class="sep"></span>
+    <button class="rb">Trier ▾</button>
+    <button class="rb">Affichage ▾</button>
+    <button class="rb">Propriétés</button>
+  </div>
+
+  <!-- Navigation : précédent, suivant, remonter, adresse, recherche -->
+  <div class="navbar">
+    <button class="nav-btn" title="Précédent (Alt+←)">←</button>
+    <button class="nav-btn" title="Suivant (Alt+→)">→</button>
+    <button class="nav-btn" title="Dossier parent (Alt+↑)">↑</button>
+    <div class="address" title="Adresse (Ctrl+L)">
+      <span class="crumb">▷ Listes de l'aire</span><span class="chev">›</span>
+      <span class="crumb">Diaporamas</span><span class="chev">›</span>
+      <span class="crumb drop">Été 2026</span>
+    </div>
+    <div class="search">Rechercher dans Listes de lecture</div>
+  </div>
+
+  <div class="body">
+
+    <!-- Arbre des dossiers -->
+    <aside class="tree" aria-label="Dossiers">
+      <div class="sect">Accès rapide</div>
+      <div class="node">▷ Listes de l'aire <span class="n">5</span></div>
+      <div class="node">★ Utilisées <span class="n">2</span></div>
+      <div class="node">⚠ Non utilisées <span class="n">3</span></div>
+      <div class="sect">Dossiers</div>
+      <div class="node">▾ 📁 Autres <span class="n">2</span></div>
+      <div class="node indent1">▸ 📁 Saison</div>
+      <div class="node">▾ 📁 Diaporamas <span class="n">1</span></div>
+      <div class="node indent1 on">▾ 📁 Été 2026 <span class="n">1</span></div>
+      <div class="node indent2">📋 Vitrine été</div>
+      <div class="node indent1">📁 Hiver</div>
+      <div class="node">📁 Images <span class="n">1</span></div>
+      <div class="node">📁 Réseaux sociaux <span class="n">1</span></div>
+      <div class="sect">Partagés avec moi</div>
+      <div class="node">📁 Promotions <span class="n">Lecture</span></div>
+      <div class="node">📁 Équipe caisse <span class="n">Écriture</span></div>
+    </aside>
+
+    <!-- Contenu : vue Détails, avec icônes et tuiles en alternative -->
+    <section class="main">
+      <div class="content-head">
+        <span class="muted" style="color:var(--muted)">3 éléments · 1 sélectionné</span>
+        <div class="views">
+          <button>Très grandes</button><button>Grandes</button><button>Moyennes</button>
+          <button class="on">Détails</button><button>Liste</button><button>Mosaïque</button>
+        </div>
+      </div>
+
+      <table class="details">
+        <thead>
+          <tr>
+            <th style="width:44%">Nom <span class="arrow">▲</span></th>
+            <th>Contenus</th>
+            <th>Durée</th>
+            <th>Écrans</th>
+            <th>Modifiée</th>
+            <th>Propriétaire</th>
+            <th>Droit</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="drop"><td><span class="ico f-folder">📁</span>Vitrine été <span class="pill">dossier</span></td><td>—</td><td>—</td><td>—</td><td>—</td><td>Camille</td><td><span class="pill ok">Écriture</span></td></tr>
+          <tr class="sel"><td><span class="ico f-list">▶</span>Vitrine été accueil</td><td>5 contenus</td><td>02:40</td><td>2</td><td>il y a 1 h</td><td>Alice</td><td><span class="pill ok">Modifiable</span></td></tr>
+          <tr><td><span class="ico f-list">▶</span>Promo rentrée <span class="pill warn">lecture seule</span></td><td>3 contenus</td><td>01:12</td><td>0</td><td>hier</td><td>Marc</td><td><span class="pill">Lecture</span></td></tr>
+          <tr class="cut"><td><span class="ico f-list">▶</span>Ancienne boucle (coupée)</td><td>2 contenus</td><td>00:48</td><td>0</td><td>12 oct.</td><td>Alice</td><td><span class="pill ok">Modifiable</span></td></tr>
+        </tbody>
+      </table>
+
+      <!-- Exemple de la vue Icônes, en miniature -->
+      <div class="icons" style="display:none">
+        <div class="tile"><div class="thumb">📁</div><div class="nm">Vitrine</div><div class="meta">2 éléments</div></div>
+        <div class="tile sel"><div class="thumb">▶</div><div class="nm">Vitrine été</div><div class="meta">5 contenus · 02:40</div></div>
+      </div>
+
+      <!-- Menu contextuel, ouvert sur une liste -->
+      <div class="ctx" role="menu">
+        <div>Ouvrir <kbd>Entrée</kbd></div>
+        <div>Éditer</div>
+        <div>Essayer sur…</div>
+        <hr>
+        <div>Couper <kbd>Ctrl+X</kbd></div>
+        <div>Copier <kbd>Ctrl+C</kbd></div>
+        <div>Coller <kbd>Ctrl+V</kbd></div>
+        <div>Dupliquer</div>
+        <hr>
+        <div>Renommer <kbd>F2</kbd></div>
+        <div>Ranger dans un dossier…</div>
+        <div>Partager…</div>
+        <div>Nouveau dossier <kbd>Ctrl+Maj+N</kbd></div>
+        <hr>
+        <div class="danger">Supprimer <kbd>Suppr</kbd></div>
+        <div>Propriétés <kbd>Alt+Entrée</kbd></div>
+      </div>
+
+      <!-- Glisser-déposer en cours : fantôme et cible -->
+      <div class="ghost-drag"><b>2 listes</b> → Vitrine été</div>
+    </section>
+
+    <!-- Volet d'aperçu : détails de la sélection -->
+    <aside class="preview" aria-label="Aperçu">
+      <div class="big">▶</div>
+      <h2>Vitrine été accueil</h2>
+      <div class="muted" style="color:var(--muted);font-size:12px">Liste de lecture · Dossier Diaporamas › Été 2026</div>
+      <dl>
+        <dt>Contenus</dt><dd>5</dd>
+        <dt>Durée</dt><dd>02:40</dd>
+        <dt>Écrans</dt><dd>2 écrans diffusent</dd>
+        <dt>Modifiée</dt><dd>il y a 1 h</dd>
+        <dt>Propriétaire</dt><dd>Alice</dd>
+        <dt>Partagée</dt><dd>Équipe caisse (écriture)</dd>
+      </dl>
+      <div class="items">
+        <div>1. Accueil (image, 8 s)</div>
+        <div>2. Promo été (vidéo, 15 s)</div>
+        <div>3. Horaires (PDF, 10 s)</div>
+        <div>4. …</div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="status">
+    <span>3 éléments</span><span>1 sélectionné</span><span class="grow"></span><span>Presse-papiers : 0</span><span>Tri : Nom ▲</span>
+  </div>
+</div>
+
+<div class="legend">
+  <b>Ce que la proposition reprend d'un explorateur de fichiers</b>
+  <ul>
+    <li>Arbre des dossiers à gauche, accès rapides (utilisées, non utilisées), section « Partagés avec moi ».</li>
+    <li>Barre d'adresse cliquable (chaque segment est une cible de dépôt), précédent, suivant, dossier parent, recherche.</li>
+    <li>Vues Très grandes, Grandes, Moyennes, Détails, Liste, Mosaïque ; colonnes triables (nom, contenus, durée, écrans, modifiée, propriétaire, droit).</li>
+    <li>Sélection : case, Ctrl et Maj, Ctrl+A, rectangle de sélection à la souris.</li>
+    <li>Glisser-déposer d'une ou plusieurs listes sur un dossier, un segment d'adresse ou l'arbre ; cible surlignée, fantôme avec le nombre d'éléments.</li>
+    <li>Couper, copier, coller (un élément rangé ailleurs, une copie sans écran), dupliquer, renommer (F2), supprimer (Suppr).</li>
+    <li>Nouveau dossier, ranger dans un dossier, partager, propriétés (volet d'aperçu, Alt+Entrée).</li>
+    <li>Menu contextuel au clic droit, barre d'état (nombre, sélection, presse-papiers, tri).</li>
+    <li>Droits visibles partout : pastille Écriture, Lecture, Modifiable ; une liste en lecture seule ne s'édite pas ni ne se supprime.</li>
+  </ul>
+</div>
+</body>
+</html>

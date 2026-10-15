@@ -1,5 +1,7 @@
 @inject TenantStore Store
 @inject GraphService Graph
+@inject HomeAssistantClient Ha
+@inject Toaster Toast
 
 @* Formulaire de paramétrage généré à partir du manifeste de l'app. Values : une entrée par champ. *@
 <div class="dw">
@@ -133,7 +135,60 @@
                             <small>@(fbLost ? "Le compte Facebook est à reconnecter" : "Aucun compte Facebook connecté") : <a href="/integrations?tab=comptes">connectez-le dans Intégrations › Comptes connectés</a>, ou saisissez la Page ici et collez son jeton dans les options avancées.</small>
                         }
                         break;
-                    case "mailbox":
+                    case "haentity":
+                        @if (HaAccount() is not { } acc)
+                        {
+                            <div class="dw-note">Aucun compte Home Assistant. <a href="/integrations">Connectez-le dans Intégrations › Maison connectée</a>.</div>
+                        }
+                        else
+                        {
+                            var choices = HaChoices(f);
+                            var chosen = HaSelection(k);
+                            <div class="hp">
+                                @if (chosen.Count > 0)
+                                {
+                                    <div class="hp-chips">
+                                        @foreach (var id in chosen)
+                                        {
+                                            <span class="hp-chip">@HaLabel(choices, id)<button type="button" aria-label="Retirer @HaLabel(choices, id)" @onclick="() => HaToggle(k, id, false)">×</button></span>
+                                        }
+                                    </div>
+                                }
+                                <div class="hp-bar">
+                                    <input type="search" class="hp-search" placeholder="Rechercher une entité" aria-label="Rechercher une entité" @bind="haSearch" @bind:event="oninput" />
+                                    <span class="hp-count">@chosen.Count sur @choices.Count</span>
+                                    <button type="button" class="hp-refresh" disabled="@haBusy" title="Actualiser depuis Home Assistant" @onclick="HaRefresh">
+                                        <Ico Name="refresh" Size="14" /> @(haBusy ? "Actualisation…" : "Actualiser")
+                                    </button>
+                                </div>
+                                @if (choices.Count == 0)
+                                {
+                                    <div class="hp-empty">Aucune entité de ce type. Ajoutez-en dans Home Assistant, puis actualisez.</div>
+                                }
+                                else
+                                {
+                                    var shown = choices.Where(x => HaMatch(x)).ToList();
+                                    <div class="hp-list">
+                                        @foreach (var e in shown)
+                                        {
+                                            var on = HaSelected(k, e.Id);
+                                            <div class="hp-row">
+                                                <span class="hp-txt"><span class="hp-name">@e.Name</span><span class="hp-id">@e.Id</span></span>
+                                                <button type="button" class="switch @(on ? "on" : "")" role="switch" aria-checked="@(on ? "true" : "false")" aria-label="@e.Name" @onclick="() => HaToggle(k, e.Id, !on)"><span></span></button>
+                                            </div>
+                                        }
+                                        @if (shown.Count == 0)
+                                        {
+                                            <div class="hp-empty">Aucune entité ne correspond à la recherche.</div>
+                                        }
+                                    </div>
+                                    <p class="hp-note">Liste du @(acc.EntitiesUtc is { } u ? u.ToLocalTime().ToString("dd.MM.yyyy HH:mm") : "—"). Les entités choisies s'affichent sur l'écran.</p>
+                                }
+                            </div>
+                        }
+                        break;
+
+case "mailbox":
                         @if (rooms.Count > 0)
                         {
                             <select value="@Values[k]" @onchange="e => Values[k] = e.Value?.ToString() ?? string.Empty">
@@ -174,6 +229,47 @@
     [Parameter] public bool AutoOpen { get; set; }
 
     private Task Changed() => OnChange.InvokeAsync();
+
+    // Champ « entités Home Assistant » : les entités du compte de l'organisation, filtrées par domaine. Valeur : identifiants séparés par des virgules.
+    private bool haBusy;
+    private string haSearch = "";
+
+    private HomeAssistantAccount? HaAccount() => Store.Read(d => d.Tenant.HomeAssistant);
+
+    private List<HomeAssistantEntity> HaChoices(AppField f) =>
+        HaAccount() is { } a ? a.Entities.Where(e => f.Domains.Contains(e.Domain)).ToList() : new();
+
+    private bool HaMatch(HomeAssistantEntity e) =>
+        haSearch.Trim().Length == 0 || e.Name.Contains(haSearch.Trim(), StringComparison.OrdinalIgnoreCase) || e.Id.Contains(haSearch.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private List<string> HaSelection(string key) => Values[key].Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
+    private bool HaSelected(string key, string id) => HaSelection(key).Contains(id);
+    private static string HaLabel(List<HomeAssistantEntity> choices, string id) => choices.FirstOrDefault(c => c.Id == id)?.Name ?? id;
+
+    private Task HaToggle(string key, string id, bool on)
+    {
+        var list = HaSelection(key);
+        list.Remove(id);
+        if (on) list.Add(id);
+        Values[key] = string.Join(',', list);
+        return Changed();
+    }
+
+    /// <summary>Recharge la liste des entités depuis Home Assistant (après un ajout dans l'instance).</summary>
+    private async Task HaRefresh()
+    {
+        var acc = HaAccount();
+        if (acc == null) return;
+        haBusy = true;
+        try
+        {
+            var fresh = await Ha.Refresh(acc);
+            Store.Write(d => { d.Tenant.HomeAssistant = fresh; });
+            await Changed();
+        }
+        catch (Exception ex) { Toast.Error("Liste non actualisée : " + ex.Message); }
+        finally { haBusy = false; }
+    }
     private Task Pick(string key, string value) { Values[key] = value; return Changed(); }
     private Task CanvaChanged() { StateHasChanged(); return Changed(); }
 

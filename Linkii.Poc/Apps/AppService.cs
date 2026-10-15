@@ -4,7 +4,7 @@ namespace Linkii.Poc;
 /// Les apps du client connecté : installation depuis le catalogue, instances (paramétrées, dans la médiathèque), désinstallation.
 /// Les paramètres d'une instance sont un brouillon : ils ne partent sur les écrans qu'à la publication d'une playlist.
 /// </summary>
-public class AppService(TenantStore store, AppCatalog catalog, AppProviders providers, SecretBox box, SafeHttp? http = null)
+public class AppService(TenantStore store, AppCatalog catalog, AppProviders providers, SecretBox box)
 {
     public IReadOnlyList<AppManifest> Catalog => catalog.All;
     public AppManifest? Find(string? appId) => catalog.Find(appId);

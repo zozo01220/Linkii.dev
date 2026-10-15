@@ -113,6 +113,7 @@ public class ClientDb
         Screens = new(root.Screens, clientId, area, Access.Sees);
         Media = new(root.Media, clientId, area);
         MediaFolders = new(root.MediaFolders, clientId, area);
+        PlaylistFolders = new(root.PlaylistFolders, clientId, area);
         Playlists = new(root.Playlists, clientId, area);
         AppInstalls = new(root.AppInstalls, clientId);
         Areas = new(root.Areas, clientId);
@@ -125,6 +126,8 @@ public class ClientDb
     public ScopedList<MediaItem> Media { get; }
     /// <summary>Dossiers de la médiathèque de l'aire ouverte (voir <see cref="MediaFolder"/>).</summary>
     public ScopedList<MediaFolder> MediaFolders { get; }
+    /// <summary>Dossiers des listes de lecture de l'aire ouverte (voir <see cref="PlaylistFolder"/>).</summary>
+    public ScopedList<PlaylistFolder> PlaylistFolders { get; }
     public ScopedList<Playlist> Playlists { get; }
     public ScopedList<AppInstall> AppInstalls { get; }
     /// <summary>Toutes les aires de l'organisation (pages réservées aux administrateurs).</summary>
@@ -139,6 +142,7 @@ public class ClientDb
     public int RemoveUser(Guid id)
     {
         foreach (var f in _root.MediaFolders.Where(f => f.ClientId == ClientId && f.OwnerId == id)) f.OwnerId = Access.UserId;
+        foreach (var f in _root.PlaylistFolders.Where(f => f.ClientId == ClientId && f.OwnerId == id)) f.OwnerId = Access.UserId;
         return _root.Users.RemoveAll(u => u.Id == id && u.ClientId == ClientId && Roles.IsClient(u.Role));
     }
     /// <summary>Adresse déjà prise chez ce revendeur (ou par l'équipe Linkii) : un compte se connecte par son e-mail sur le domaine du revendeur.</summary>

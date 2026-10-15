@@ -1,0 +1,51 @@
+@implements IDisposable
+@inject TenantStore Store
+@inject ModeService Modes
+@inject TenantContext Ctx
+@inject NavigationManager Nav
+
+@* Pastille « pouls » : écrans en ligne, cliquable vers Statistiques. Visible en mode expert, licence Base seulement (en Growth, la page est dans le menu). *@
+@if (shown)
+{
+    <button type="button" class="pulse @Class" title="Ouvrir les statistiques" aria-label="Statistiques : @online écrans sur @total en ligne" @onclick='() => Nav.NavigateTo("stats")'>
+        <span class="pulse-dot" aria-hidden="true"></span>
+        <span class="pulse-count"><b>@online</b> / @total en ligne</span>
+        <span class="pulse-tag"><Ico Name="lock" Size="12" /> Growth</span>
+        <span class="pulse-go">Statistiques →</span>
+    </button>
+}
+
+@code {
+    [Parameter] public string Class { get; set; } = "";
+
+    private bool shown;
+    private int online, total;
+    private System.Threading.Timer? timer;
+
+    protected override void OnInitialized()
+    {
+        Modes.Changed += OnChanged;
+        Load();
+        timer = new System.Threading.Timer(_ => InvokeAsync(() => { Load(); StateHasChanged(); }), null, 30000, 30000);
+    }
+
+    private void OnChanged() => InvokeAsync(() => { Load(); StateHasChanged(); });
+
+    private void Load()
+    {
+        shown = false;
+        if (Ctx.ClientId == null || !Modes.Expert) return;
+        (shown, online, total) = Store.Read(d =>
+        {
+            if (d.Tenant.IsGrowth) return (false, 0, 0);
+            var sc = d.Screens.Where(s => s.Token != null).ToList();
+            return (sc.Count > 0, sc.Count(s => d.Status(s) != "Hors ligne"), sc.Count);
+        });
+    }
+
+    public void Dispose()
+    {
+        Modes.Changed -= OnChanged;
+        timer?.Dispose();
+    }
+}

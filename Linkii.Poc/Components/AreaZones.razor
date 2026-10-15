@@ -4,45 +4,56 @@
 @inject Notifier Notifier
 @inject Toaster Toast
 
-<div class="zone-rows">
+<div class="zlist">
+    <div class="zhead">
+        <span></span><span>Zone</span><span>Écrans</span><span>Synchronisation</span><span></span>
+    </div>
     @foreach (var z in zones)
     {
         var zone = z;
-        <div class="zone-row">
+        var n = counts.GetValueOrDefault(zone.Id);
+        <div class="zrow @(zone.IsWall ? "wall" : "")">
             <Ico Name="box" Size="16" />
-            <input maxlength="60" value="@zone.Name" aria-label="Nom de la zone" @onchange="e => Rename(zone, e.Value?.ToString() ?? zone.Name)" />
-            <span class="n">@counts.GetValueOrDefault(zone.Id) écran@(counts.GetValueOrDefault(zone.Id) > 1 ? "s" : "")</span>
-            @if (zone.IsWall)
-            {
-                <span class="badge sync zone-kind" title="Une seule image répartie sur @(zone.WallCols * zone.WallRows) écrans">Mur @zone.WallCols × @zone.WallRows</span>
-                <span class="zone-sync"><small>Synchro toujours active</small></span>
-            }
-            else
-            {
-                <span class="badge neutre zone-kind" title="Écrans de tout type, chacun avec sa liste de lecture">Zone libre</span>
-                <span class="zone-sync" title="Les écrans de la zone qui jouent la même liste affichent le même contenu au même moment">
-                    <small>Synchro</small>
-                    <button type="button" class="switch @(zone.Sync ? "on" : "")" role="switch" aria-checked="@(zone.Sync ? "true" : "false")" aria-label="Lecture synchronisée de la zone @zone.Name" @onclick="() => ToggleSync(zone)"><span></span></button>
-                </span>
-            }
-            @if (zone.IsDefault)
-            {
-                <span class="zone-del" title="La zone par défaut ne se supprime pas"></span>
-            }
-            else
-            {
-                <button type="button" class="btn ghost icon" title="@(zone.IsWall ? "Dissoudre le mur" : "Supprimer la zone") (ses écrans passent dans « @DefaultName »)" aria-label="@(zone.IsWall ? "Dissoudre le mur" : "Supprimer la zone") @zone.Name" @onclick="() => Delete(zone)"><Ico Name="trash" Size="15" /></button>
-            }
+            <input class="zname" maxlength="60" value="@zone.Name" aria-label="Nom de la zone" @onchange="e => Rename(zone, e.Value?.ToString() ?? zone.Name)" />
+            <span class="cnt">@n<small>écran@(n > 1 ? "s" : "")</small></span>
+            <span class="syn">
+                @if (zone.IsWall)
+                {
+                    <span class="badge sync" title="Une seule image répartie sur @(zone.WallCols * zone.WallRows) écrans">Mur @zone.WallCols × @zone.WallRows</span>
+                    <span class="sm">Synchro toujours active</span>
+                }
+                else
+                {
+                    <span class="badge neutre" title="Écrans de tout type, chacun avec sa liste de lecture">Zone libre</span>
+                    @if (zone.Sync) { <span class="sm on">Synchronisée</span> }
+                }
+            </span>
+            <div class="kebab">
+                <button type="button" class="kebab-btn" aria-label="Actions pour la zone @zone.Name" aria-haspopup="menu" aria-expanded="@(menuFor == zone.Id ? "true" : "false")" @onclick="() => menuFor = menuFor == zone.Id ? null : zone.Id"><Ico Name="dots-v" Size="18" /></button>
+                @if (menuFor == zone.Id)
+                {
+                    <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                    <div class="kebab-menu" role="menu">
+                        @if (!zone.IsWall)
+                        {
+                            <button type="button" role="menuitem" @onclick="() => ToggleSync(zone)">@(zone.Sync ? "Couper la synchronisation" : "Synchroniser les écrans de cette zone")</button>
+                        }
+                        @if (!zone.IsDefault)
+                        {
+                            <button type="button" role="menuitem" class="danger" @onclick="() => Delete(zone)"><Ico Name="trash" Size="16" /> @(zone.IsWall ? "Dissoudre le mur" : "Supprimer la zone")</button>
+                        }
+                    </div>
+                }
+            </div>
         </div>
     }
-    <div class="zone-row">
+    <div class="zadd">
         <Ico Name="plus" Size="16" />
         <input maxlength="60" placeholder="Nouvelle zone (ex. : Accueil, Bâtiment B)" @bind="newName" @bind:event="oninput" @onkeydown="OnKey" aria-label="Nouvelle zone" />
         <button type="button" class="btn ghost sm" @onclick="Add">Ajouter</button>
     </div>
-    <p class="hint zone-note">La synchronisation ne change aucune liste de lecture : elle aligne seulement les écrans de la zone qui jouent déjà la même liste. Supprimer une zone renvoie ses écrans dans « @DefaultName ».</p>
-    @if (error != null) { <div class="err">@error</div> }
 </div>
+@if (error != null) { <div class="err">@error</div> }
 
 @code {
     [Parameter] public Guid AreaId { get; set; }
@@ -52,8 +63,7 @@
     private Dictionary<Guid, int> counts = new();
     private string newName = "";
     private string? error;
-
-    private string DefaultName => zones.FirstOrDefault(z => z.IsDefault)?.Name ?? Zone.DefaultName;
+    private Guid? menuFor;
 
     protected override void OnParametersSet() => Load();
 
@@ -93,6 +103,7 @@
 
     private async Task Delete(Zone z)
     {
+        menuFor = null;
         var ids = Store.Read(d => d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.ZoneId == z.Id).Select(s => s.Id).ToList());
         var err = Store.Write(d => AreaOps.DeleteZone(d, AreaId, z.Id));
         if (err == null) { await Notifier.PublishPlanning(ids); foreach (var id in ids) await Notifier.NotifyScreen(id); }   // leur zone change : planning et synchro peuvent changer
@@ -101,6 +112,7 @@
 
     private async Task ToggleSync(Zone z)
     {
+        menuFor = null;
         var on = !z.Sync;
         var err = Store.Write(d => AreaOps.SetZoneSync(d, AreaId, z.Id, on));
         if (err == null) await Notifier.NotifyZone(z.Id);   // les écrans de la zone rechargent leur configuration

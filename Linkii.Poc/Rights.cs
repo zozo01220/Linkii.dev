@@ -144,6 +144,7 @@ public static class AccessLevels
         if (used.Count > 0) return $"Ce niveau est donné à {string.Join(", ", used.Take(5).Select(u => u.Label))}{(used.Count > 5 ? $" et {used.Count - 5} autre(s)" : "")} : donnez-leur d'abord un autre niveau.";
         d.Tenant.Levels.RemoveAll(l => l.Id == levelId);
         foreach (var f in d.Root.MediaFolders.Where(f => f.ClientId == d.ClientId)) f.Shares.RemoveAll(s => s.Kind == FolderShareKind.Level && s.TargetId == levelId);   // ses partages de dossiers tombent avec lui
+        foreach (var f in d.Root.PlaylistFolders.Where(f => f.ClientId == d.ClientId)) f.Shares.RemoveAll(s => s.Kind == FolderShareKind.Level && s.TargetId == levelId);
         return null;
     }
 
