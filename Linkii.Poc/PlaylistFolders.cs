@@ -37,6 +37,27 @@ public static class PlaylistOps
         foreach (var s in d.Screens) s.Slots.RemoveAll(x => ids.Contains(x.PlaylistId));
         d.Playlists.RemoveAll(x => ids.Contains(x.Id));
     }
+
+    /// <summary>
+    /// Copie d'une liste (nouveaux identifiants d'éléments), nommée « (copie) », « (copie 2) »… ; choisie sur aucun écran.
+    /// Elle reste dans le dossier de l'original si la personne peut y écrire, sinon elle part à la racine de l'aire.
+    /// </summary>
+    public static Playlist Copy(ClientDb d, Playlist p)
+    {
+        var names = d.Playlists.Select(x => x.Name).ToHashSet(StringComparer.CurrentCultureIgnoreCase);
+        var name = p.Name + " (copie)";
+        for (var n = 2; names.Contains(name); n++) name = $"{p.Name} (copie {n})";
+        var copy = new Playlist
+        {
+            Name = name, UpdatedAt = DateTime.UtcNow,
+            FolderId = p.FolderId is { } f && CanEdit(d, p) ? f : null,
+            Draft = p.Draft.Select(i => new PlaylistItem { MediaId = i.MediaId, DurationSec = i.DurationSec, DurationMode = i.DurationMode, Placement = i.Placement,
+                // QR de comptage : mêmes réglages, mais une adresse courte à elle (les scans de la copie ne se mélangent pas à ceux de l'original)
+                QrOn = i.QrOn, QrCode = i.QrOn ? QrTracking.NewCode() : null, QrUrl = i.QrUrl, QrLabel = i.QrLabel, QrBase = i.QrBase, QrX = i.QrX, QrY = i.QrY, QrSize = i.QrSize }).ToList()
+        };
+        d.Playlists.Add(copy);
+        return copy;
+    }
 }
 
 /// <summary>Création, renommage, suppression, partage et rangement des listes de lecture dans les dossiers. Chaque méthode rend un message d'erreur, ou null si c'est fait.</summary>

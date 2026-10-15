@@ -180,11 +180,28 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     public static List<MediaItem> UnusedCanva(IEnumerable<MediaItem> media, IEnumerable<Playlist> playlists, IEnumerable<Screen> screens) =>
         UnusedExports(media, playlists, screens, "canva");
 
-    /// <summary>Même recherche pour les fichiers produits par une app (Info[key] : « canva », « pdf »).</summary>
-    public static List<MediaItem> UnusedExports(IEnumerable<MediaItem> media, IEnumerable<Playlist> playlists, IEnumerable<Screen> screens, string key)
+    /// <summary>Tous les fichiers sans emploi (même règle que les exports Canva) : filtre « Non utilisés » et mention sur la vignette.</summary>
+    public HashSet<Guid> UnusedIds() => store.Read(d => UnusedExports(d.Media, d.Playlists, d.Screens, null).Select(m => m.Id).ToHashSet());
+
+    /// <summary>Où sert un fichier : contenus (apps) qui l'ont choisi, listes de lecture qui le diffusent (directement ou par un contenu) et leurs écrans.</summary>
+    public MediaUses Uses(Guid mediaId) => store.Read(d =>
+    {
+        var contents = d.Media.Where(m => m.AppId != null && MediaFields(m).Any(k => AppField.MediaIds(m.Settings.GetValueOrDefault(k)).Contains(mediaId))).ToList();
+        var ids = contents.Select(c => c.Id).Append(mediaId).ToHashSet();
+        var screens = d.Screens.Where(s => s.Token != null).ToList();
+        var lists = d.Playlists.Where(p => p.Draft.Any(i => ids.Contains(i.MediaId)))
+            .Select(p => new MediaUse(p.Id, p.Name, screens.Count(s => s.ZonePlaylists().Contains(p.Id))))
+            .OrderBy(u => u.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        var used = contents.Select(c => new MediaUse(c.Id, c.Name, d.Playlists.Count(p => p.Draft.Any(i => i.MediaId == c.Id))))
+            .OrderBy(u => u.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        return new MediaUses(used, lists);
+    });
+
+    /// <summary>Même recherche pour les fichiers produits par une app (Info[key] : « canva », « pdf ») ; key null : tous les fichiers.</summary>
+    public static List<MediaItem> UnusedExports(IEnumerable<MediaItem> media, IEnumerable<Playlist> playlists, IEnumerable<Screen> screens, string? key)
     {
         var mediaList = media.ToList();
-        var candidates = mediaList.Where(m => IsFile(m) && m.Info.ContainsKey(key) && m.Status != "processing").ToList();
+        var candidates = mediaList.Where(m => IsFile(m) && (key == null || m.Info.ContainsKey(key)) && m.Status != "processing").ToList();
         if (candidates.Count == 0) return candidates;
 
         var used = new HashSet<Guid>();
@@ -210,6 +227,16 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
 
     private IEnumerable<string> MediaFields(MediaItem instance) =>
         catalog.Find(instance.AppId)?.Settings.Where(f => f.IsMedia).Select(f => f.Key) ?? Enumerable.Empty<string>();
+}
+
+/// <summary>Un contenu ou une liste qui utilise un fichier ; Count : nombre de listes (contenu) ou d'écrans (liste).</summary>
+public record MediaUse(Guid Id, string Name, int Count);
+
+/// <summary>Utilisations d'un fichier (panneau d'aperçu de la médiathèque).</summary>
+public record MediaUses(List<MediaUse> Contents, List<MediaUse> Lists)
+{
+    public bool Any => Contents.Count > 0 || Lists.Count > 0;
+    public int Screens => Lists.Sum(l => l.Count);
 }
 
 /// <summary>Un dossier vu par la personne, avec son droit, le nom de son propriétaire et s'il est partagé.</summary>

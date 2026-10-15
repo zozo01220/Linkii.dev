@@ -1,53 +1,302 @@
 @page "/media"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:media")]
-@implements IDisposable
+@implements IAsyncDisposable
+@using Microsoft.JSInterop
 @inject MediaLibrary Library
 @inject DriveService Drives
 @inject TenantStore Store
 @inject Toaster Toast
-@inject ModeService Modes
+@inject IJSRuntime JS
 
-<div class="page-head">
-    <div>
-        <h1>Médiathèque</h1>
-        <p class="sub">Vos images et vidéos, y compris celles de vos dossiers Drive, à utiliser dans vos listes de lecture.</p>
-    </div>
-    <div class="btns">
-        @if (FoldersShown && CanCreateHere) { <button class="btn ghost" @onclick='() => { newFolderName = ""; newFolderError = null; creatingFolder = true; }'><Ico Name="folder" Size="16" /> Nouveau dossier</button> }
-        @if (CanUploadHere)
+@* Médiathèque épurée (§51) : même squelette que les listes de lecture. Vignettes « galerie » (l'image d'abord), un clic ouvre l'aperçu
+   (infos, où le média sert, actions), la case au survol sélectionne. On importe en déposant des fichiers n'importe où sur la page. *@
+<div class="lx-top">
+    <h1>
+        @if (FoldersShown && currentRow is { } cur)
         {
-            <button class="btn" @onclick="() => showUpload = !showUpload" aria-expanded="@(showUpload ? "true" : "false")">
-                <Ico Name="upload" Size="16" /> Téléverser des médias
-            </button>
+            <button type="button" class="lx-crumb @(dropOver == RootDrop ? "drop-target" : "")" @onclick="() => OpenFolder(null)"
+                    @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = RootDrop; }" @ondragleave="() => { if (dropOver == RootDrop) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(null)">Médiathèque</button>
+            @foreach (var c in crumbs.Take(crumbs.Count - 1))
+            {
+                var row = c;
+                <span class="lx-sl">/</span>
+                <button type="button" class="lx-crumb @(dropOver == row.Folder.Id ? "drop-target" : "")" @onclick="() => OpenFolder(row.Folder.Id)"
+                        @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = row.Folder.Id; }" @ondragleave="() => { if (dropOver == row.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(row.Folder.Id)">@row.Folder.Name</button>
+            }
+            <span class="lx-sl">/</span>
+            <span>@cur.Folder.Name</span>
+            <span class="lx-right @(cur.Right == FolderRight.Read ? "ro" : "")"><Ico Name="@(cur.Right == FolderRight.Read ? "lock" : cur.Shared ? "users" : "folder")" Size="12" /> @RightLabel(cur)</span>
         }
+        else
+        {
+            <span>Médiathèque</span>
+        }
+    </h1>
+    <span class="grow"></span>
+    <div class="btns">
+        @if (currentRow is { } here && (here.Right == FolderRight.Owner || here.Folder.OwnerId == Store.UserId))
+        {
+            <button class="btn ghost sm" @onclick="() => sharingId = here.Folder.Id"><Ico Name="users" Size="14" /> Partager…</button>
+        }
+        @if (FoldersShown && CanCreateHere) { <button class="btn ghost" @onclick='() => { newFolderName = ""; newFolderError = null; creatingFolder = true; }'><Ico Name="folder" Size="16" /> Nouveau dossier</button> }
+        @if (CanUploadHere) { <button class="btn" @onclick="OpenImport"><Ico Name="upload" Size="16" /> Importer</button> }
     </div>
+</div>
+
+<div class="lx-status">
+    <span>@Plural(files.Count, "média", "médias")@(TotalSize > 0 ? $" · {Helpers.FormatSize(TotalSize)}" : "")@(FoldersShown && folderId == null && folderRows.Count > 0 ? $" · {Plural(folderRows.Count, "dossier", "dossiers")}" : "")</span>
+    @if (UnusedHere > 0 && filter != "unused")
+    {
+        <span><i class="lx-dot off"></i>@Plural(UnusedHere, "média non utilisé", "médias non utilisés") <button type="button" class="linklike" @onclick='() => SetFilter("unused")'>Voir</button></span>
+    }
+    @if (currentRow is { Right: FolderRight.Read })
+    {
+        <span>Vous pouvez voir, télécharger et utiliser ces fichiers dans vos listes, pas les modifier.</span>
+    }
+    else if (CanUploadHere && (files.Count > 0 || Jobs.Count > 0))
+    {
+        <span class="lx-desk">Glissez des fichiers n'importe où sur la page pour les importer.</span>
+    }
 </div>
 
 <DriveSyncBar />
 
-@if (FoldersShown)
+@if (files.Count == 0 && Jobs.Count == 0 && subfolders.Count == 0 && !Active)
 {
-    <nav class="lib-crumb" aria-label="Emplacement dans la médiathèque">
-        <button type="button" class="linklike" @onclick="() => OpenFolder(null)" @ondragover="() => { }" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="() => DropOn(null)"><Ico Name="image" Size="15" /> Médiathèque de l'aire</button>
-        @foreach (var c in crumbs)
+    <div class="empty">
+        <div class="big">@(folderId == null ? "Votre médiathèque est vide" : "Ce dossier est vide")</div>
+        @if (CanUploadHere)
         {
-            var row = c;
-            <span class="sep">›</span>
-            <button type="button" class="linklike" @onclick="() => OpenFolder(row.Folder.Id)" @ondragover="() => { }" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="() => DropOn(row.Folder.Id)">@row.Folder.Name</button>
+            <p>Glissez ici vos images et vos vidéos depuis l'ordinateur, ou importez-les. Elles serviront dans vos listes de lecture.</p>
+            <button class="btn" @onclick="OpenImport"><Ico Name="upload" Size="16" /> Importer des médias</button>
         }
-    </nav>
-    @if (currentRow is { } cur)
+    </div>
+}
+else
+{
+    <div class="lx-tools" role="region" aria-label="Recherche et filtres">
+        <div class="search-box">
+            <Ico Name="search" Size="16" />
+            <input data-lx-search placeholder="Rechercher dans la médiathèque" aria-label="Rechercher des médias" @bind="search" @bind:event="oninput" />
+        </div>
+        <button type="button" class="lx-chip @(type == "" ? "on" : "")" aria-pressed="@(type == "" ? "true" : "false")" @onclick='() => type = ""'>Tous</button>
+        <button type="button" class="lx-chip @(type == "image" ? "on" : "")" aria-pressed="@(type == "image" ? "true" : "false")" @onclick='() => type = "image"'>Images <small>@BySource.Count(m => m.Type == "image")</small></button>
+        <button type="button" class="lx-chip @(type == "video" ? "on" : "")" aria-pressed="@(type == "video" ? "true" : "false")" @onclick='() => type = "video"'>Vidéos <small>@BySource.Count(m => m.Type == "video")</small></button>
+        <button type="button" class="lx-chip @(filter == "unused" ? "on" : "")" aria-pressed="@(filter == "unused" ? "true" : "false")" title="Dans aucune liste de lecture, aucun contenu et sur aucun écran" @onclick='() => SetFilter(filter == "unused" ? "" : "unused")'>Non utilisés <small>@Pool.Count(m => unused.Contains(m.Id))</small></button>
+        @if (Sources.Count(s => Pool.Any(m => SourceOf(m) == s.Key)) > 1 || source != "")
+        {
+            <select @bind="source" aria-label="Source">
+                <option value="">Toutes les sources</option>
+                @foreach (var (key, label) in Sources)
+                {
+                    var n = ByType.Count(m => SourceOf(m) == key);
+                    @if (n > 0 || source == key) { <option value="@key">@label (@n)</option> }
+                }
+            </select>
+        }
+        @if (FoldersShown && folderId != null && Active)
+        {
+            <button type="button" class="lx-chip scope" title="Où chercher" @onclick="() => scopeAll = !scopeAll">Dans : @(scopeAll ? "toute l'aire" : "ce dossier") <Ico Name="refresh" Size="13" /></button>
+        }
+        <span class="grow"></span>
+        @if (Active || type != "" || source != "") { <span class="lx-count" aria-live="polite">@Plural(Visible.Count(), "résultat", "résultats")</span> }
+        <select @bind="sort" aria-label="Trier">
+            <option value="date">Récents</option>
+            <option value="name">Nom</option>
+            <option value="size">Taille</option>
+        </select>
+        <ViewToggle StorageKey="media" @bind-Value="view" />
+    </div>
+
+    @* Dossiers de la position ouverte : puces compactes, cibles du glisser-déposer *@
+    @if (subfolders.Count > 0 && !Active && type == "" && source == "")
     {
-        @if (cur.Right == FolderRight.Read)
-        {
-            <div class="dw-note"><Ico Name="lock" Size="15" /><span class="grow">Dossier partagé en <b>lecture seule</b> : vous pouvez voir, télécharger et utiliser ses fichiers dans vos listes, pas les modifier.</span></div>
-        }
-        <div class="lib-folder-head">
-            <span class="muted">@(cur.Folder.OwnerId == Store.UserId ? "Votre dossier" : $"Dossier de {cur.OwnerName}")@(cur.Shared ? " · partagé" : " · privé")</span>
-            <span class="grow"></span>
-            @if (cur.Right == FolderRight.Owner || cur.Folder.OwnerId == Store.UserId) { <button class="btn ghost sm" @onclick="() => sharingId = cur.Folder.Id"><Ico Name="users" Size="14" /> Partager…</button> }
+        <div class="lx-folders">
+            @foreach (var row in subfolders)
+            {
+                var r = row;
+                var inside = ChildCount(r.Folder.Id);
+                var mine = r.Folder.OwnerId == Store.UserId;
+                <div class="lx-fchip @(r.Shared ? "" : "priv") @(dropOver == r.Folder.Id ? "drop-target" : "")" role="button" tabindex="0" title="@FolderTitle(r)" aria-label="Ouvrir le dossier @r.Folder.Name" @onclick="() => OpenFolder(r.Folder.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenFolder(r.Folder.Id); }'
+                     @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = r.Folder.Id; }" @ondragleave="() => { if (dropOver == r.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(r.Folder.Id)">
+                    <Ico Name="folder" Size="17" />
+                    <span class="nm">@r.Folder.Name</span>
+                    <small>@inside</small>
+                    @if (r.Right == FolderRight.Read) { <span class="ic" title="Lecture seule"><Ico Name="lock" Size="13" /></span> }
+                    else if (r.Shared) { <span class="ic" title="Partagé"><Ico Name="users" Size="13" /></span> }
+                    @if (mine || isAdmin)
+                    {
+                        <div class="kebab" @onclick:stopPropagation="true">
+                            <button type="button" class="kebab-btn" aria-label="Actions pour le dossier @r.Folder.Name" aria-haspopup="menu" aria-expanded="@(menuFor == r.Folder.Id ? "true" : "false")"
+                                    @onclick="() => menuFor = menuFor == r.Folder.Id ? null : r.Folder.Id"><Ico Name="dots-v" Size="16" /></button>
+                            @if (menuFor == r.Folder.Id)
+                            {
+                                <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                                <div class="kebab-menu" role="menu">
+                                    <span class="kebab-note">@(mine ? "Votre dossier" : $"Dossier de {r.OwnerName}") · @(r.Shared ? "partagé" : "privé")</span>
+                                    <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingId = r.Folder.Id; }"><Ico Name="users" Size="16" /> Partager…</button>
+                                    @if (r.Right == FolderRight.Owner)
+                                    {
+                                        <button type="button" role="menuitem" @onclick="() => { menuFor = null; renamingFolder = r; renameFolderValue = r.Folder.Name; newFolderError = null; }"><Ico Name="edit" Size="16" /> Renommer</button>
+                                        <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deletingFolder = r; }"><Ico Name="trash" Size="16" /> Supprimer</button>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
         </div>
     }
+
+    @if (!Visible.Any() && Jobs.Count == 0)
+    {
+        @if (Active || type != "" || source != "") { <div class="empty"><div class="big">Aucun média ne correspond</div><button class="btn ghost sm" @onclick='() => { search = ""; filter = ""; type = ""; source = ""; }'>Effacer la recherche et les filtres</button></div> }
+    }
+    else
+    {
+        @if (view == "list")
+        {
+        <div class="lx-tbl-wrap">
+            <table class="lx-tbl">
+                <thead>
+                    <tr>
+                        <th style="width:34px"><input type="checkbox" class="sc-check lx-check" checked="@AllPicked" @onchange="ToggleAll" aria-label="Tout sélectionner" /></th>
+                        <th><button type="button" class="@(sort == "name" ? "on" : "")" @onclick='() => sort = "name"'>Nom</button></th>
+                        @if (FoldersShown) { <th>Emplacement</th> }
+                        <th>Format</th>
+                        <th class="num"><button type="button" class="@(sort == "size" ? "on" : "")" @onclick='() => sort = "size"'>Taille</button></th>
+                        <th>Utilisation</th>
+                        <th><button type="button" class="@(sort == "date" ? "on" : "")" @onclick='() => sort = "date"'>Importé</button></th>
+                        <th style="width:44px"><span class="sr-only">Actions</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var j in Jobs)
+                    {
+                        var job = j;
+                        <tr>
+                            <td></td>
+                            <td><div class="nm"><span class="mini"><Ico Name="upload" Size="16" /></span><span>@job.Name</span></div></td>
+                            @if (FoldersShown) { <td></td> }
+                            <td colspan="4"><small>@(job.State == "error" ? job.Error ?? "Échec de l'import" : job.Total is > 0 ? $"Envoi · {MediaUploader.Pct(job)} %" : "Envoi…")</small></td>
+                            <td><button type="button" class="kebab-btn" aria-label="@(job.State == "error" ? "Retirer" : "Annuler l'import de") @job.Name" @onclick="() => DismissJob(job)"><Ico Name="x" Size="16" /></button></td>
+                        </tr>
+                    }
+                    @foreach (var m in Visible)
+                    {
+                        var item = m;
+                        <tr class="@(picked.Contains(item.Id) ? "picked" : "") @(dragIds.Contains(item.Id) ? "dragging" : "")" draggable="@(CanDrag(item) ? "true" : "false")" @ondragstart="() => StartDrag(item)" @ondragend="EndDrag">
+                            <td>@if (Selectable(item)) { <input type="checkbox" class="sc-check lx-check" checked="@picked.Contains(item.Id)" @onchange="() => Toggle(item.Id)" aria-label="Sélectionner @item.Name" /> }</td>
+                            <td><div class="nm"><span class="mini">@if (item.Status == null) { <MediaThumb Media="item" /> } else { <Ico Name="@(item.Status == "failed" ? "x" : "hourglass")" Size="16" /> }</span><button type="button" title="@item.Name" @onclick="() => Open(item)">@item.Name</button></div></td>
+                            @if (FoldersShown) { <td><small>@PathOf(item)</small></td> }
+                            <td><small>@(item.Type == "video" ? "Vidéo" : "Image")@(MediaProbe.Label(item) is { } fmt ? " · " + fmt : "")@(SourceLabel(item) is { } src ? " · " + src : "")</small></td>
+                            <td class="num">@(item.Size is { } s ? Helpers.FormatSize(s) : "—")</td>
+                            <td>@if (item.Status == "failed") { <span class="lx-state bad"><i class="lx-dot bad"></i><span>Échec</span></span> } else if (unused.Contains(item.Id)) { <span class="lx-state"><i class="lx-dot off"></i><span>Non utilisé</span></span> } else { <span class="lx-state ok"><i class="lx-dot"></i><span>Utilisé</span></span> }</td>
+                            <td><small>@(item.AddedUtc is { } a ? a.ToLocalTime().ToString("dd.MM.yyyy") : "—")</small></td>
+                            <td>@Menu(item)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        }
+        @* sur mobile, toujours en cartes (pas de bascule) *@
+        <div class="lx-mgrid @(picked.Count > 0 ? "lx-selecting" : "") @(view == "list" ? "lx-mobile-only" : "")">
+            @foreach (var j in Jobs)
+            {
+                var job = j;
+                var failed = job.State == "error";
+                <div class="lx-mc @(failed ? "fail" : "up")">
+                    <div class="th">
+                        @if (failed) { <Ico Name="x" Size="22" /><span>@(job.Error ?? "Échec de l'import")</span><div class="acts"><button type="button" @onclick="() => DismissJob(job)">Retirer</button></div> }
+                        else
+                        {
+                            <span class="pct">@(job.Total is > 0 ? $"{MediaUploader.Pct(job)} %" : Helpers.FormatSize(job.Done))</span>
+                            <span class="bar" style="width:@(MediaUploader.Pct(job))%"></span>
+                            <button type="button" class="kebab-btn x" aria-label="Annuler l'import de @job.Name" title="Annuler" @onclick="() => DismissJob(job)"><Ico Name="x" Size="15" /></button>
+                        }
+                    </div>
+                    <div class="nm" title="@job.Name">@job.Name</div>
+                    <div class="mt">@(failed ? "Échec de l'import" : job.Total is > 0 ? $"Envoi · {Helpers.FormatSize(job.Done)} / {Helpers.FormatSize(job.Total.Value)}" : "Envoi…")</div>
+                </div>
+            }
+            @foreach (var m in Visible)
+            {
+                var item = m;
+                var failed = item.Status == "failed";
+                <div class="lx-mc @(picked.Contains(item.Id) ? "picked" : "") @(failed ? "fail" : "") @(openId == item.Id ? "open" : "") @(dragIds.Contains(item.Id) ? "dragging" : "")"
+                     role="button" tabindex="0" aria-label="Aperçu de @item.Name" @onclick="e => ClickCard(item, e)" @onkeydown='e => { if (e.Key == "Enter") Open(item); }'
+                     draggable="@(CanDrag(item) ? "true" : "false")" @ondragstart="() => StartDrag(item)" @ondragend="EndDrag">
+                    <div class="th">
+                        @if (item.Status == "processing") { <span class="spinner-lg"></span><small>Conversion en MP4…</small> }
+                        else if (failed)
+                        {
+                            <Ico Name="x" Size="22" /><span title="@item.Error">@(item.Error ?? "Import en échec")</span>
+                            @if (Selectable(item)) { <div class="acts" @onclick:stopPropagation="true"><button type="button" @onclick="() => confirmDelete = new() { item.Id }">Retirer</button></div> }
+                        }
+                        else { <MediaThumb Media="item" /> }
+                        @if (Selectable(item)) { <input type="checkbox" class="sc-check lx-check" checked="@picked.Contains(item.Id)" @onclick:stopPropagation="true" @onchange="() => Toggle(item.Id)" aria-label="Sélectionner @item.Name" /> }
+                        @if (!failed && item.Status == null)
+                        {
+                            @if (SourceLabel(item) is { } src) { <span class="lx-src" title="@(MediaLibrary.IsDrive(item) ? DriveTitle(DriveOf(item)) : null)">@if (MediaLibrary.IsDrive(item)) { <Ico Name="folder" Size="11" /> }@src</span> }
+                            @if (item.Type == "video") { <span class="lx-badge"><Ico Name="play" Size="11" />@(Seconds(item) is { } s ? Helpers.FormatDuration(s) : "")</span> }
+                            @if (unused.Contains(item.Id)) { <span class="lx-unused">Non utilisé</span> }
+                        }
+                    </div>
+                    <div class="nm" title="@item.Name">@if (FoldersShown && item.FolderId is { } fid && rights.GetValueOrDefault(fid) == FolderRight.Read) { <Ico Name="lock" Size="12" /> }@item.Name</div>
+                    <div class="mt">@(ShowPath ? PathOf(item) : Details(item))</div>
+                </div>
+            }
+        </div>
+    }
+
+    @if (picked.Count > 0)
+    {
+        <div class="lx-selbar" role="region" aria-label="Sélection">
+            <b>@picked.Count sélectionné@(picked.Count > 1 ? "s" : "")</b>
+            <button type="button" @onclick="ToggleAll">@(AllPicked ? "Tout désélectionner" : $"Tout sélectionner ({Visible.Count(Selectable)})")</button>
+            <span class="vr"></span>
+            @if (FoldersShown) { <button type="button" disabled="@(pickedEditable.Count == 0)" @onclick="() => folderMove = pickedEditable"><Ico Name="folder" Size="15" /><span class="lx-lbl">Ranger…</span></button> }
+            @if (canMove) { <button type="button" @onclick="() => bulkMove = true"><Ico Name="move" Size="15" /><span class="lx-lbl">Autre aire…</span></button> }
+            <span class="vr"></span>
+            <button type="button" class="del" @onclick="() => confirmDelete = picked.ToList()"><Ico Name="trash" Size="15" /> Supprimer</button>
+            <span class="vr"></span>
+            <button type="button" title="Tout désélectionner (Échap)" aria-label="Tout désélectionner" @onclick="() => picked.Clear()"><Ico Name="x" Size="15" /></button>
+        </div>
+    }
+}
+
+@* Import : la fenêtre (choisir des fichiers ou coller une adresse) et le voile de dépôt restent dans la page, fermés,
+   pour que les imports continuent et que les fichiers déposés se lisent depuis leur champ. *@
+@if (CanUploadHere)
+{
+    <div style="@(showUpload ? "" : "display:none")">
+        <div class="modal-backdrop" @onclick="() => showUpload = false"></div>
+        <div class="modal lx-import" role="dialog" aria-modal="true" aria-labelledby="imp-title">
+            <h3 id="imp-title">Importer@(currentRow is { } f ? $" dans « {f.Folder.Name} »" : "")</h3>
+            <MediaUploader OnImported="Imported" ShowJobs="false" Changed="UploadChanged" @ref="uploader" FolderId="folderId" />
+            <div class="modal-actions"><button class="btn ghost" @onclick="() => showUpload = false">Fermer</button></div>
+        </div>
+    </div>
+    <div class="lx-dropzone @(dragging ? "on" : "")" aria-hidden="@(dragging ? "false" : "true")">
+        <Ico Name="upload" Size="40" />
+        <span>Déposez pour importer@(currentRow is { } f2 ? $" dans « {f2.Folder.Name} »" : " dans la médiathèque")</span>
+        <small>Images (JPG, PNG, GIF, WEBP, SVG) et vidéos (MP4, MOV, AVI, MKV…) · 2 Go maximum par fichier</small>
+        <InputFile OnChange="OnDropped" multiple aria-label="Fichiers à importer" />
+    </div>
+}
+
+@if (open is { } om)
+{
+    var idx = OpenList.FindIndex(x => x.Id == om.Id);
+    <MediaPreviewPanel Item="om" Path="@PathOf(om)" CanEdit="Selectable(om)" Drive="@(MediaLibrary.IsDrive(om) ? DriveTitle(DriveOf(om)) : null)"
+                       HasPrev="idx > 0" HasNext="idx >= 0 && idx < OpenList.Count - 1"
+                       OnClose="() => openId = null" OnPrev="() => Step(-1)" OnNext="() => Step(1)"
+                       OnRename="() => OpenRename(om)"
+                       OnFolder="@(FoldersShown ? EventCallback.Factory.Create(this, () => folderMove = new() { (om.Id, om.Name) }) : default)"
+                       OnArea="@(canMove ? EventCallback.Factory.Create(this, () => moving = om) : default)"
+                       OnDelete="() => confirmDelete = new() { om.Id }" />
 }
 
 @if (creatingFolder)
@@ -82,7 +331,7 @@
 @if (deletingFolder is { } df)
 {
     var usedInFolder = Library.UsedInFolder(df.Folder.Id);
-    var inside = files.Count(m => m.FolderId == df.Folder.Id);
+    var inside = allFiles.Count(m => m.FolderId == df.Folder.Id);
     <div class="modal-backdrop" @onclick="() => deletingFolder = null"></div>
     <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="df-title">
         <h3 id="df-title">Supprimer le dossier « @df.Folder.Name » ?</h3>
@@ -108,209 +357,13 @@
     <FolderMoveDialog Items="fm" OnClose='n => { folderMove = null; if (n > 0) { picked.Clear(); Toast.Ok(n > 1 ? $"{n} fichiers rangés." : "Fichier rangé."); Reload(); } }' />
 }
 
-@if (unusedCanva.Count > 0)
-{
-    <div class="dw-note lib-clean">
-        <span class="grow">@unusedCanva.Count export@(unusedCanva.Count > 1 ? "s" : "") Canva @(unusedCanva.Count > 1 ? "ne servent" : "ne sert") plus : @(unusedCanva.Count > 1 ? "ils ne sont" : "il n'est") dans aucun contenu ni sur aucun écran.</span>
-        <button type="button" class="btn ghost sm" @onclick="() => cleaning = true"><Ico Name="trash" Size="14" /> Nettoyer…</button>
-    </div>
-}
-
-@* Toujours présent (masqué quand le panneau est replié) : refermer le panneau n'interrompt pas les imports en cours. *@
-@if (CanUploadHere)
-{
-    <div class="card lib-upload" style="@(showUpload || (files.Count == 0 && Jobs.Count == 0) ? "" : "display:none")">
-        <MediaUploader OnImported="Imported" ShowJobs="false" Changed="StateHasChanged" @ref="uploader" FolderId="folderId" />
-    </div>
-}
-
-@* Dossiers de la position ouverte (option « Dossiers dans la médiathèque », mode expert) : tuiles cliquables, au-dessus des fichiers. *@
-@if (subfolders.Count > 0 && search.Length == 0 && filter == "" && source == "")
-{
-    <div class="lib-grid lib-folders">
-        @foreach (var row in subfolders)
-        {
-            var r = row;
-            var inside = ChildCount(r.Folder.Id);
-            var mine = r.Folder.OwnerId == Store.UserId;
-            <div class="lib-card lib-folder @(dropOver == r.Folder.Id ? "drop-target" : "")" role="button" tabindex="0" aria-label="Ouvrir le dossier @r.Folder.Name" @onclick="() => OpenFolder(r.Folder.Id)"
-                 @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = r.Folder.Id; }" @ondragleave="() => { if (dropOver == r.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(r.Folder.Id)">
-                <div class="lib-th lib-th-folder">
-                    <Ico Name="folder" Size="34" />
-                    <span class="lib-count">@inside élément@(inside > 1 ? "s" : "")</span>
-                </div>
-                <div class="lib-body">
-                    <div class="lib-text">
-                        <span class="lib-name" title="@r.Folder.Name">@r.Folder.Name</span>
-                        <div class="lib-sub"><small class="lib-size">@(mine ? "Votre dossier" : $"Dossier de {r.OwnerName}")</small></div>
-                    </div>
-                    @if (mine) { <span class="pill dark">Propriétaire</span> }
-                    else if (r.Right == FolderRight.Write) { <span class="pill ok">Écriture</span> }
-                    else if (r.Right == FolderRight.Read) { <span class="pill blue">Lecture</span> }
-                    else { <span class="pill">Administrateur</span> }
-                    @if (mine || isAdmin)
-                    {
-                        <div class="kebab" @onclick:stopPropagation="true">
-                            <button type="button" class="kebab-btn" aria-label="Actions pour le dossier @r.Folder.Name" aria-haspopup="menu" aria-expanded="@(menuFor == r.Folder.Id ? "true" : "false")"
-                                    @onclick="() => menuFor = menuFor == r.Folder.Id ? null : r.Folder.Id"><Ico Name="dots-v" Size="18" /></button>
-                            @if (menuFor == r.Folder.Id)
-                            {
-                                <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
-                                <div class="kebab-menu" role="menu">
-                                    <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingId = r.Folder.Id; }"><Ico Name="users" Size="16" /> Partager…</button>
-                                    @if (r.Right == FolderRight.Owner)
-                                    {
-                                        <button type="button" role="menuitem" @onclick="() => { menuFor = null; renamingFolder = r; renameFolderValue = r.Folder.Name; newFolderError = null; }"><Ico Name="edit" Size="16" /> Renommer</button>
-                                        <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deletingFolder = r; }"><Ico Name="trash" Size="16" /> Supprimer</button>
-                                    }
-                                </div>
-                            }
-                        </div>
-                    }
-                </div>
-            </div>
-        }
-    </div>
-}
-
-@if (files.Count > 0 || Jobs.Count > 0)
-{
-    <div class="lib-tools">
-        <label class="lib-all">
-            <input type="checkbox" class="sc-check" checked="@(Visible.Any(m => !MediaLibrary.IsDrive(m)) && Visible.Where(m => !MediaLibrary.IsDrive(m)).All(m => picked.Contains(m.Id)))" @onchange="ToggleAll" aria-label="Tout sélectionner" />
-            @if (picked.Count > 0) { <span>@picked.Count sélectionné@(picked.Count > 1 ? "s" : "")</span> }
-        </label>
-        @if (picked.Count > 0)
-        {
-            @if (FoldersShown && pickedEditable.Count > 0) { <button class="btn ghost sm" @onclick="() => folderMove = pickedEditable"><Ico Name="move" Size="14" /> Ranger dans un dossier…</button> }
-            @if (canMove) { <button class="btn ghost sm" @onclick="() => bulkMove = true"><Ico Name="move" Size="14" /> Déplacer vers une autre aire…</button> }
-            <button class="btn danger sm" @onclick="() => confirmDelete = picked.ToList()"><Ico Name="trash" Size="14" /> Supprimer</button>
-        }
-        <div class="seg" role="tablist" aria-label="Type de fichier">
-            <button type="button" class="@(filter == "" ? "on" : "")" @onclick='() => filter = ""'>Tous <small>@BySource.Count()</small></button>
-            <button type="button" class="@(filter == "image" ? "on" : "")" @onclick='() => filter = "image"'>Images <small>@BySource.Count(m => m.Type == "image")</small></button>
-            <button type="button" class="@(filter == "video" ? "on" : "")" @onclick='() => filter = "video"'>Vidéos <small>@BySource.Count(m => m.Type == "video")</small></button>
-        </div>
-        <select @bind="source" aria-label="Source">
-            <option value="">Toutes les sources</option>
-            @foreach (var (key, label) in Sources)
-            {
-                var n = ByType.Count(m => SourceOf(m) == key);
-                @if (n > 0 || source == key) { <option value="@key">@label (@n)</option> }
-            }
-        </select>
-        <div class="search-box grow" style="margin:0">
-            <Ico Name="search" Size="16" />
-            <input placeholder="Rechercher des médias" aria-label="Rechercher des médias" @bind="search" @bind:event="oninput" />
-        </div>
-        <select @bind="sort" aria-label="Trier">
-            <option value="date">Plus récents</option>
-            <option value="name">Nom</option>
-            <option value="size">Taille</option>
-        </select>
-        <ViewToggle StorageKey="media" @bind-Value="view" />
-    </div>
-
-    @if (!Visible.Any() && Jobs.Count == 0) { <div class="empty"><div class="big">Aucun média trouvé</div></div> }
-
-    <div class="lib-grid @(view == "list" ? "list" : "")">
-        @foreach (var j in Jobs)
-        {
-            var job = j;
-            var failed = job.State == "error";
-            <div class="lib-card uploading @(failed ? "failed" : "")">
-                <div class="lib-th">
-                    @if (failed) { <Ico Name="x" Size="26" /><small class="lib-proc" title="@job.Error">@job.Error</small> }
-                    else { <span class="upl-pct">@(job.Total is > 0 ? $"{MediaUploader.Pct(job)} %" : Helpers.FormatSize(job.Done))</span> }
-                </div>
-                <div class="lib-body">
-                    <div class="lib-text">
-                        <span class="lib-name" title="@job.Name">@job.Name</span>
-                        <small class="lib-size">@(failed ? "Échec de l'import" : job.Total is > 0 ? $"{Helpers.FormatSize(job.Done)} / {Helpers.FormatSize(job.Total.Value)}" : "Téléversement…")</small>
-                    </div>
-                    <span class="lib-col">@(failed ? "Échec" : "Envoi…")</span>
-                    <span class="lib-col"></span>
-                    @if (failed) { <button type="button" class="kebab-btn" aria-label="Retirer @job.Name" title="Retirer" @onclick="() => uploader!.Dismiss(job)"><Ico Name="x" Size="16" /></button> }
-                    else { <button type="button" class="kebab-btn" aria-label="Annuler l'import de @job.Name" title="Annuler" @onclick="() => uploader!.Cancel(job)"><Ico Name="x" Size="16" /></button> }
-                </div>
-            </div>
-        }
-        @foreach (var m in Visible)
-        {
-            var item = m;
-            var on = picked.Contains(item.Id);
-            var drive = MediaLibrary.IsDrive(item) ? drives.GetValueOrDefault(item.Info["drive"]) : null;   // fichier synchronisé depuis un dossier Drive
-            <div class="lib-card @(on ? "picked" : "") @(item.Status == "failed" ? "failed" : "") @(Selectable(item) ? "selectable" : "") @(dragIds.Contains(item.Id) ? "dragging" : "")" @onclick="() => ClickCard(item)"
-                 draggable="@(CanDrag(item) ? "true" : "false")" @ondragstart="() => StartDrag(item)" @ondragend="EndDrag">
-                <div class="lib-th">
-                    @if (item.Status == "processing") { <span class="spinner-lg"></span><small class="lib-proc">Conversion en MP4…</small> }
-                    else if (item.Status == "failed") { <Ico Name="x" Size="26" /><small class="lib-proc" title="@item.Error">@item.Error</small> }
-                    else { <MediaThumb Media="item" /> }
-                    @if (!MediaLibrary.IsDrive(item) && CanEdit(item)) { <input type="checkbox" class="sc-check lib-check" checked="@on" @onclick:stopPropagation="true" @onchange="() => Toggle(item.Id)" aria-label="Sélectionner @item.Name" /> }
-                    else { <input type="checkbox" class="sc-check lib-check" disabled title="@(MediaLibrary.IsDrive(item) ? "Fichier synchronisé depuis un Drive : commun à toutes les aires, ni déplaçable ni supprimable d'ici" : "Dossier en lecture seule : ce fichier ne se modifie pas")" aria-label="@item.Name ne peut pas être sélectionné" /> }
-                    <span class="lib-type" title="@(item.Type == "video" ? "Vidéo" : "Image")"><Ico Name="@(item.Type == "video" ? "video" : "image")" Size="15" /></span>
-                    @if (MediaLibrary.IsDrive(item))
-                    {
-                        <span class="lib-drive" title="@DriveTitle(drive)"><Ico Name="folder" Size="13" /> @(drive?.Source == "onedrive" ? "OneDrive" : "Drive")</span>
-                    }
-                </div>
-                <div class="lib-body">
-                    <div class="lib-text">
-                        <span class="lib-name" title="@item.Name">@item.Name</span>
-                        <div class="lib-sub">
-                        <small class="lib-size" title="@(item.Width is > 0 ? $"{item.Width}×{item.Height} px" : null)">@(item.Size is { } s ? Helpers.FormatSize(s) : "—")@(MediaProbe.Label(item) is { } fmt ? " · " + fmt : "")</small>
-                        @if (item.AddedUtc is { } added) { <small class="lib-added">Importé le @added.ToLocalTime().ToString("dd.MM.yyyy")</small> }
-                        </div>
-                    </div>
-                    <span class="lib-col lib-kind" title="@(item.Type == "video" ? "Vidéo" : "Image")"><Ico Name="@(item.Type == "video" ? "video" : "image")" Size="20" /></span>
-                    <div class="kebab" @onclick:stopPropagation="true">
-                        <button type="button" class="kebab-btn" aria-label="Actions pour @item.Name" aria-haspopup="menu" aria-expanded="@(menuFor == item.Id ? "true" : "false")"
-                                @onclick="() => menuFor = menuFor == item.Id ? null : item.Id"><Ico Name="dots-v" Size="18" /></button>
-                        @if (menuFor == item.Id)
-                        {
-                            <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
-                            <div class="kebab-menu" role="menu">
-                                @if (MediaLibrary.IsDrive(item))
-                                {
-                                    <span class="kebab-note">@DriveTitle(drive). Renommez ou retirez-le dans le Drive.</span>
-                                }
-                                else if (CanEdit(item))
-                                {
-                                    <button type="button" role="menuitem" @onclick="() => OpenRename(item)"><Ico Name="edit" Size="16" /> Renommer</button>
-                                }
-                                else
-                                {
-                                    <span class="kebab-note">Dossier en lecture seule : ce fichier ne se modifie pas.</span>
-                                }
-                                @if (item.FileName != null) { <a role="menuitem" href="/media/@item.FileName" download="@item.Name" @onclick="() => menuFor = null"><Ico Name="download" Size="16" /> Télécharger</a> }
-                                @if (!MediaLibrary.IsDrive(item) && canMove)
-                                {
-                                    <button type="button" role="menuitem" @onclick="() => { menuFor = null; moving = item; }"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button>
-                                }
-                                @if (FoldersShown && !MediaLibrary.IsDrive(item) && CanEdit(item))
-                                {
-                                    <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (item.Id, item.Name) }; }"><Ico Name="move" Size="16" /> Ranger dans un dossier…</button>
-                                }
-                                @if (!MediaLibrary.IsDrive(item) && CanEdit(item))
-                                {
-                                    <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; confirmDelete = new() { item.Id }; }"><Ico Name="trash" Size="16" /> Supprimer</button>
-                                }
-                            </div>
-                        }
-                    </div>
-                </div>
-            </div>
-        }
-    </div>
-}
-
 @if (moving is { } mv)
 {
-    <AreaMoveDialog Kind="media" Items="new() { (mv.Id, mv.Name) }" OnClose="moved => { moving = null; if (moved) Reload(); }" />
+    <AreaMoveDialog Kind="media" Items="new() { (mv.Id, mv.Name) }" OnClose="moved => { moving = null; if (moved) { openId = null; Reload(); } }" />
 }
 @if (bulkMove)
 {
-    <AreaMoveDialog Kind="media" Items="files.Where(f => picked.Contains(f.Id)).Select(f => (f.Id, f.Name)).ToList()" OnClose="moved => { bulkMove = false; if (moved) Reload(); }" />
+    <AreaMoveDialog Kind="media" Items="allFiles.Where(f => picked.Contains(f.Id)).Select(f => (f.Id, f.Name)).ToList()" OnClose="moved => { bulkMove = false; if (moved) Reload(); }" />
 }
 
 @if (renaming != null)
@@ -329,16 +382,17 @@
 @if (confirmDelete is { Count: > 0 } del)
 {
     var used = del.SelectMany(Library.UsedBy).Distinct().ToList();
+    var many = del.Count > 1;
     <div class="modal-backdrop" @onclick="() => confirmDelete = null"></div>
     <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="mdel-title">
-        <h3 id="mdel-title">Supprimer @(del.Count > 1 ? $"{del.Count} médias" : $"« {files.FirstOrDefault(f => f.Id == del[0])?.Name} »") ?</h3>
+        <h3 id="mdel-title">Supprimer @(many ? $"{del.Count} médias" : $"« {allFiles.FirstOrDefault(f => f.Id == del[0])?.Name} »") ?</h3>
         @if (used.Count == 0)
         {
-            <p class="hint">@(del.Count > 1 ? "Ils ne sont utilisés" : "Il n'est utilisé") par aucune app. Cette action est définitive.</p>
+            <p class="hint">@(many ? "Ils ne sont" : "Il n'est") dans aucune liste de lecture ni aucun contenu. Cette action est définitive.</p>
         }
         else
         {
-            <p class="hint">@(del.Count > 1 ? "Ils seront retirés" : "Il sera retiré") de : <b>@string.Join(", ", used)</b>. Les écrans concernés auront une mise à jour à publier. Cette action est définitive.</p>
+            <p class="hint">@(many ? "Ils seront retirés" : "Il sera retiré") de : <b>@string.Join(", ", used.Take(6))@(used.Count > 6 ? $" et {used.Count - 6} autre{(used.Count > 7 ? "s" : "")}" : "")</b>. Les écrans concernés auront une mise à jour à publier ; d'ici là, ils gardent ce qu'ils diffusent. Cette action est définitive.</p>
         }
         <div class="modal-actions">
             <button class="btn ghost" @onclick="() => confirmDelete = null">Annuler</button>
@@ -347,40 +401,23 @@
     </div>
 }
 
-@if (cleaning && unusedCanva.Count > 0)
-{
-    <div class="modal-backdrop" @onclick="() => cleaning = false"></div>
-    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="mcl-title">
-        <h3 id="mcl-title">Supprimer @unusedCanva.Count export@(unusedCanva.Count > 1 ? "s" : "") Canva ?</h3>
-        <p class="hint">Ces fichiers viennent d'exports de designs devenus inutiles (export abandonné, contenu supprimé, remplacé par un autre export) :</p>
-        <ul class="hint" style="max-height:180px;overflow:auto;margin:6px 0 0;padding-left:18px">
-            @foreach (var m in unusedCanva.Take(30)) { <li>@m.Name</li> }
-            @if (unusedCanva.Count > 30) { <li>… et @(unusedCanva.Count - 30) autre@(unusedCanva.Count - 30 > 1 ? "s" : "")</li> }
-        </ul>
-        <p class="hint">Cette action est définitive. Vous pourrez toujours exporter le design à nouveau depuis Canva.</p>
-        <div class="modal-actions">
-            <button class="btn ghost" @onclick="() => cleaning = false">Annuler</button>
-            <button class="btn danger-solid" @onclick="CleanCanva">Supprimer</button>
-        </div>
-    </div>
-}
-
 @code {
-    private List<MediaItem> files = new();
-    private List<MediaItem> unusedCanva = new();
-    private bool cleaning;
+    private List<MediaItem> files = new();     // fichiers de la position ouverte
+    private HashSet<Guid> unused = new();      // fichiers sans emploi (filtre « Non utilisés », mention sur la vignette)
     private readonly HashSet<Guid> picked = new();
-    private string filter = "", source = "", search = "", sort = "date";
-    private bool showUpload;
+    private string type = "", filter = "", source = "", search = "", sort = "date";   // filter : "" | unused
+    private bool scopeAll = true;              // recherche et « Non utilisés » : toute l'aire (défaut) ou le dossier ouvert
+    private bool showUpload, dragging;
     private string view = "cards";   // cards | list (liste : PC seulement ; sur mobile, toujours en cartes)
-    private Guid? menuFor;
+    private Guid? menuFor, openId;
     private MediaItem? renaming;
     private string renameValue = "";
     private List<Guid>? confirmDelete;
     private System.Threading.Timer? refreshTimer;
     private MediaUploader? uploader;
+    private int jobsAtOpen;
 
-    // Imports en cours ou en échec : affichés comme des cartes en tête de la grille, avec leur pourcentage.
+    // Imports en cours ou en échec : affichés comme des vignettes en tête de la grille, avec leur pourcentage.
     private IReadOnlyList<MediaUploader.UploadJob> Jobs => uploader?.Jobs ?? Array.Empty<MediaUploader.UploadJob>();
 
     // Provenance d'un fichier : téléversé ici, exporté depuis Canva, ou synchronisé depuis un dossier Drive.
@@ -388,18 +425,28 @@
         { ("upload", "Téléversés"), ("canva", "Canva"), ("pdf", "PDF"), ("gdrive", "Google Drive"), ("onedrive", "OneDrive") };
 
     private string SourceOf(MediaItem m) =>
-        MediaLibrary.IsDrive(m) ? (drives.GetValueOrDefault(m.Info["drive"])?.Source == "onedrive" ? "onedrive" : "gdrive")
+        MediaLibrary.IsDrive(m) ? (DriveOf(m)?.Source == "onedrive" ? "onedrive" : "gdrive")
         : m.Info.ContainsKey("canva") ? "canva" : m.Info.ContainsKey("pdf") ? "pdf" : "upload";
 
+    private string? SourceLabel(MediaItem m) => SourceOf(m) switch { "onedrive" => "OneDrive", "gdrive" => "Drive", "canva" => "Canva", "pdf" => "PDF", _ => null };
+
+    private DriveFolder? DriveOf(MediaItem m) => MediaLibrary.IsDrive(m) ? drives.GetValueOrDefault(m.Info["drive"]) : null;
+
+    // Recherche et « Non utilisés » regardent toute l'aire (chemin affiché sous chaque résultat), comme les listes de lecture ; les types et sources filtrent ce qu'on voit.
+    private bool Active => search.Length > 0 || filter != "";
+    private bool ShowPath => FoldersShown && Active && scopeAll;
+    private IEnumerable<MediaItem> Pool => ShowPath ? allFiles : files;
+
     // Les compteurs de chaque filtre tiennent compte de l'autre (type × source).
-    private IEnumerable<MediaItem> ByType => files.Where(m => filter == "" || m.Type == filter);
-    private IEnumerable<MediaItem> BySource => files.Where(m => source == "" || SourceOf(m) == source);
+    private IEnumerable<MediaItem> ByType => Pool.Where(m => type == "" || m.Type == type);
+    private IEnumerable<MediaItem> BySource => Pool.Where(m => source == "" || SourceOf(m) == source);
 
     private IEnumerable<MediaItem> Visible
     {
         get
         {
             var q = ByType.Where(m => source == "" || SourceOf(m) == source)
+                          .Where(m => filter != "unused" || unused.Contains(m.Id))
                           .Where(m => search.Length == 0 || m.Name.Contains(search, StringComparison.OrdinalIgnoreCase));
             return sort switch
             {
@@ -410,13 +457,16 @@
         }
     }
 
+    private long TotalSize => files.Sum(m => m.Size ?? 0);
+    private int UnusedHere => Pool.Count(m => unused.Contains(m.Id));
+
     protected override void OnInitialized()
     {
         Reload();
         // pendant une conversion vidéo, la liste se rafraîchit seule
         refreshTimer = new System.Threading.Timer(_ => InvokeAsync(() =>
         {
-            if (files.Any(m => m.Status == "processing") || Drives.Running(Store.ClientId).Count > 0) { Reload(); StateHasChanged(); }   // import de dossier Drive : les fichiers arrivent au fil de l'eau
+            if (allFiles.Any(m => m.Status == "processing") || Drives.Running(Store.ClientId).Count > 0) { Reload(); StateHasChanged(); }   // import de dossier Drive : les fichiers arrivent au fil de l'eau
         }), null, 2000, 2000);
         Drives.ProgressChanged += OnDriveProgress;
     }
@@ -425,7 +475,7 @@
     private bool bulkMove;
     private bool canMove;  // administrateur de l'organisation, avec au moins une autre aire
 
-    // ---------- Dossiers (option « Dossiers dans la médiathèque », mode expert) ----------
+    // ---------- Dossiers (option « Dossiers dans la médiathèque ») ----------
 
     private bool foldersOn, isAdmin, canCreateRoot;
     private Guid? folderId;                                   // dossier ouvert ; null : racine de l'aire
@@ -440,6 +490,7 @@
     private FolderRow? renamingFolder, deletingFolder;
     private Guid? sharingId;
     private List<(Guid Id, string Name)>? folderMove;
+    private static readonly Guid RootDrop = Guid.Empty;       // cible « racine » du glisser-déposer (fil d'Ariane)
 
     private bool FoldersShown => foldersOn;   // dossiers visibles en mode simple comme en mode expert
     private FolderRow? currentRow => folderId is { } id ? folderRows.FirstOrDefault(r => r.Folder.Id == id) : null;
@@ -447,15 +498,20 @@
     private bool CanUploadHere => folderId is null || currentRow is { } c && c.Right >= FolderRight.Write;
     // À la racine, tout fichier se modifie comme avant ; dans un dossier, il faut y écrire.
     private bool CanEdit(MediaItem m) => m.FolderId is not { } f || rights.GetValueOrDefault(f) >= FolderRight.Write;
-    private List<(Guid Id, string Name)> pickedEditable => allFiles.Where(m => picked.Contains(m.Id) && !MediaLibrary.IsDrive(m) && CanEdit(m)).Select(m => (m.Id, m.Name)).ToList();
+    private List<(Guid Id, string Name)> pickedEditable => allFiles.Where(m => picked.Contains(m.Id) && Selectable(m)).Select(m => (m.Id, m.Name)).ToList();
+    private MediaItem? open => openId is { } id ? allFiles.FirstOrDefault(m => m.Id == id) : null;
+    private List<MediaItem> OpenList => Visible.ToList();
 
     private void OpenFolder(Guid? id)
     {
         folderId = id;
         picked.Clear();
-        menuFor = null;
+        menuFor = null; openId = null; scopeAll = true;
         Reload();
+        _ = SetDrop();
     }
+
+    private void SetFilter(string f) { filter = f; picked.Clear(); }
 
     private void Reload()
     {
@@ -475,8 +531,10 @@
             : new();
         crumbs = BuildCrumbs();
         drives = Library.DriveFolders();
-        unusedCanva = Library.UnusedCanva();
-        picked.IntersectWith(allFiles.Where(f => !MediaLibrary.IsDrive(f)).Select(f => f.Id));
+        unused = Library.UnusedIds();
+        unused.ExceptWith(allFiles.Where(m => m.Status == "failed").Select(m => m.Id));   // un import en échec est signalé comme tel, pas comme « non utilisé »
+        picked.IntersectWith(allFiles.Where(Selectable).Select(f => f.Id));
+        if (openId is { } oid && allFiles.All(m => m.Id != oid)) openId = null;
     }
 
     // Éléments directs d'un dossier : ses fichiers et ses sous-dossiers visibles
@@ -489,6 +547,62 @@
             list.Insert(0, cur);
         return list;
     }
+
+    // Emplacement d'un fichier : chemin de son dossier, ou la racine de l'aire (fichier Drive : son dossier Drive)
+    private string PathOf(MediaItem m)
+    {
+        if (MediaLibrary.IsDrive(m)) return DriveOf(m) is { } f ? $"Drive « {f.Name} »" : "Drive";
+        if (m.FolderId is not { } fid || folderRows.FirstOrDefault(r => r.Folder.Id == fid) is not { } row) return "Médiathèque de l'aire";
+        var names = new List<string>();
+        for (var cur = row; cur != null && names.Count < FolderAccess.MaxDepth; cur = cur.Folder.ParentId is { } pid ? folderRows.FirstOrDefault(r => r.Folder.Id == pid) : null)
+            names.Insert(0, cur.Folder.Name);
+        return string.Join(" › ", names);
+    }
+
+    private static string Details(MediaItem m)
+    {
+        if (m.Status == "processing") return "Conversion en cours";
+        if (m.Status == "failed") return "Échec de l'import";
+        var parts = new List<string>();
+        if (m.Width is > 0) parts.Add(m.Type == "video" ? MediaProbe.Label(m)! : $"{m.Width}×{m.Height}");
+        if (m.Size is { } s) parts.Add(Helpers.FormatSize(s));
+        return parts.Count > 0 ? string.Join(" · ", parts) : (m.Type == "video" ? "Vidéo" : "Image");
+    }
+
+    private static int? Seconds(MediaItem m) => int.TryParse(m.Info.GetValueOrDefault("durationSec"), out var s) && s > 0 ? s : null;
+
+    private string RightLabel(FolderRow r) =>
+        r.Folder.OwnerId == Store.UserId ? $"Votre dossier · {(r.Shared ? "partagé" : "privé")}"
+        : r.Right switch
+        {
+            FolderRight.Read => $"Lecture seule · dossier de {r.OwnerName}",
+            FolderRight.Write => $"Écriture · dossier de {r.OwnerName}",
+            _ => $"Administrateur · dossier de {r.OwnerName}"
+        };
+
+    private string FolderTitle(FolderRow r) => (r.Folder.OwnerId == Store.UserId ? "Votre dossier" : $"Dossier de {r.OwnerName}") + (r.Right == FolderRight.Read ? " · lecture seule" : r.Shared ? " · partagé" : " · privé");
+
+    private static string Plural(int n, string one, string many) => $"{n} {(n > 1 ? many : one)}";
+
+    private RenderFragment Menu(MediaItem item) => __builder =>
+    {
+        <div class="kebab">
+            <button type="button" class="kebab-btn" aria-label="Actions pour @item.Name" aria-haspopup="menu" aria-expanded="@(menuFor == item.Id ? "true" : "false")"
+                    @onclick="() => menuFor = menuFor == item.Id ? null : item.Id"><Ico Name="dots-v" Size="18" /></button>
+            @if (menuFor == item.Id)
+            {
+                <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                <div class="kebab-menu" role="menu">
+                    <button type="button" role="menuitem" @onclick="() => { menuFor = null; Open(item); }"><Ico Name="eye" Size="16" /> Aperçu et utilisations</button>
+                    @if (Selectable(item)) { <button type="button" role="menuitem" @onclick="() => OpenRename(item)"><Ico Name="edit" Size="16" /> Renommer</button> }
+                    @if (item.FileName != null) { <a role="menuitem" href="/media/@item.FileName" download="@item.Name" @onclick="() => menuFor = null"><Ico Name="download" Size="16" /> Télécharger</a> }
+                    @if (FoldersShown && Selectable(item)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (item.Id, item.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
+                    @if (canMove && Selectable(item)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; moving = item; }"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
+                    @if (Selectable(item)) { <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; confirmDelete = new() { item.Id }; }"><Ico Name="trash" Size="16" /> Supprimer</button> }
+                </div>
+            }
+        </div>
+    };
 
     private void CreateFolder()
     {
@@ -524,14 +638,56 @@
     private static string DriveTitle(DriveFolder? f) => f == null ? "Synchronisé depuis un Drive"
         : $"Synchronisé depuis le dossier « {f.Name} » ({(f.Source == "onedrive" ? "OneDrive" : "Google Drive")})";
 
+    // ---------- Import ----------
+
+    private void OpenImport() { jobsAtOpen = Jobs.Count; showUpload = true; }
+
     private void Imported(MediaItem m) { Reload(); Toast.Ok(m.Status == "processing" ? $"« {m.Name} » importé, conversion en MP4 en cours." : $"« {m.Name} » importé."); }
 
+    // Dès qu'un import démarre, la fenêtre se ferme : la progression s'affiche dans la grille.
+    private void UploadChanged()
+    {
+        if (showUpload && Jobs.Count > jobsAtOpen) showUpload = false;
+        StateHasChanged();
+    }
+
+    private async Task OnDropped(InputFileChangeEventArgs e)
+    {
+        dragging = false;
+        jobsAtOpen = Jobs.Count;
+        if (uploader != null) await uploader.AddFiles(e);
+    }
+
+    private void DismissJob(MediaUploader.UploadJob job)
+    {
+        if (job.State == "running") uploader?.Cancel(job); else uploader?.Dismiss(job);
+    }
+
+    // ---------- Sélection et aperçu ----------
 
     private void Toggle(Guid id) { if (!picked.Remove(id)) picked.Add(id); }
 
-    // Un fichier qu'on peut sélectionner : toute la carte, sur simple appui, le coche ou le décoche.
+    // Un fichier qu'on peut sélectionner : ni synchronisé depuis un Drive, ni dans un dossier en lecture seule.
     private bool Selectable(MediaItem m) => !MediaLibrary.IsDrive(m) && CanEdit(m);
-    private void ClickCard(MediaItem m) { if (Selectable(m)) Toggle(m.Id); }
+
+    // Clic : aperçu ; en cours de sélection (ou Ctrl/Maj + clic) : coche ou décoche.
+    private void ClickCard(MediaItem m, MouseEventArgs e)
+    {
+        if ((picked.Count > 0 || e.CtrlKey || e.MetaKey || e.ShiftKey) && Selectable(m)) Toggle(m.Id);
+        else Open(m);
+    }
+
+    private void Open(MediaItem m) { menuFor = null; openId = m.Id; }
+
+    [JSInvokable]
+    public Task StepFromKey(int delta) => InvokeAsync(() => { Step(delta); StateHasChanged(); });
+
+    private void Step(int delta)
+    {
+        var list = OpenList;
+        var i = list.FindIndex(x => x.Id == openId);
+        if (i >= 0 && i + delta >= 0 && i + delta < list.Count) openId = list[i + delta].Id;
+    }
 
     // Glisser-déposer : un fichier, ou tous les fichiers sélectionnés, vers un dossier (ou la racine de l'aire, null)
     private List<Guid> dragIds = new();
@@ -553,9 +709,11 @@
         Reload();
     }
 
+    private bool AllPicked => Visible.Any(Selectable) && Visible.Where(Selectable).All(m => picked.Contains(m.Id));
+
     private void ToggleAll()
     {
-        var vis = Visible.Where(m => !MediaLibrary.IsDrive(m) && CanEdit(m)).Select(m => m.Id).ToList();   // les fichiers Drive ne se suppriment pas d'ici, ni ceux d'un dossier en lecture seule
+        var vis = Visible.Where(Selectable).Select(m => m.Id).ToList();   // les fichiers Drive ne se suppriment pas d'ici, ni ceux d'un dossier en lecture seule
         if (vis.All(picked.Contains)) picked.ExceptWith(vis); else picked.UnionWith(vis);
     }
 
@@ -580,17 +738,11 @@
     {
         if (confirmDelete == null) return;
         Library.Delete(confirmDelete);
-        Toast.Ok(confirmDelete.Count > 1 ? $"{confirmDelete.Count} médias supprimés." : "Média supprimé.");
+        var asked = confirmDelete.Count;
+        Toast.Ok(asked > 1 ? $"{asked} médias supprimés." : "Média supprimé.");
         picked.ExceptWith(confirmDelete);
+        if (openId is { } oid && confirmDelete.Contains(oid)) openId = null;
         confirmDelete = null;
-        Reload();
-    }
-
-    private void CleanCanva()
-    {
-        cleaning = false;
-        var n = Library.DeleteUnusedCanva();
-        Toast.Ok(n > 1 ? $"{n} exports Canva supprimés." : n == 1 ? "1 export Canva supprimé." : "Rien à supprimer.");
         Reload();
     }
 
@@ -601,9 +753,46 @@
         _ = InvokeAsync(() => { Reload(); StateHasChanged(); });
     }
 
-    public void Dispose()
+    // ---------- Clavier et dépôt de fichiers (library.js) ----------
+    private DotNetObjectReference<Media>? selfRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        selfRef = DotNetObjectReference.Create(this);
+        try { await JS.InvokeVoidAsync("linkiiLibrary.attach", selfRef, CanUploadHere); } catch (JSException) { } catch (InvalidOperationException) { }
+    }
+
+    private async Task SetDrop()
+    {
+        try { await JS.InvokeVoidAsync("linkiiLibrary.setDrop", CanUploadHere); } catch (JSException) { } catch (InvalidOperationException) { }
+    }
+
+    [JSInvokable]
+    public Task Escape() => InvokeAsync(() =>
+    {
+        if (menuFor != null) menuFor = null;
+        else if (showUpload) showUpload = false;
+        else if (openId != null) openId = null;
+        else if (picked.Count > 0) picked.Clear();
+        else return;
+        StateHasChanged();
+    });
+
+    [JSInvokable]
+    public Task Drag(bool on) => InvokeAsync(() =>
+    {
+        if (dragIds.Count > 0 || dragging == on) return;   // glisser interne (vers un dossier) : pas de voile
+        dragging = on && CanUploadHere;
+        StateHasChanged();
+    });
+
+    public async ValueTask DisposeAsync()
     {
         Drives.ProgressChanged -= OnDriveProgress;
         refreshTimer?.Dispose();
+        if (selfRef == null) return;
+        try { await JS.InvokeVoidAsync("linkiiLibrary.detach", selfRef); } catch (JSException) { } catch (JSDisconnectedException) { } catch (InvalidOperationException) { }
+        selfRef.Dispose();
     }
 }

@@ -1,0 +1,94 @@
+@inject MediaLibrary Library
+
+@* Aperçu d'un média de la médiathèque (§51) : grand aperçu, informations, où il est utilisé et actions.
+   Ouvert par un clic sur la vignette ; ← → passent au média voisin, Échap ferme (géré par la page). *@
+<div class="lx-drawer-veil" @onclick="OnClose"></div>
+<aside class="lx-drawer" role="dialog" aria-modal="false" aria-labelledby="mpp-title">
+    <div class="dh">
+        <b id="mpp-title" title="@Item.Name">@Item.Name</b>
+        <button type="button" class="kebab-btn" title="Média précédent" aria-label="Média précédent" disabled="@(!HasPrev)" @onclick="OnPrev"><span style="display:grid;transform:scaleX(-1)"><Ico Name="chevron-right" Size="16" /></span></button>
+        <button type="button" class="kebab-btn" title="Média suivant" aria-label="Média suivant" disabled="@(!HasNext)" @onclick="OnNext"><Ico Name="chevron-right" Size="16" /></button>
+        <button type="button" class="kebab-btn" title="Fermer (Échap)" aria-label="Fermer" @onclick="OnClose"><Ico Name="x" Size="16" /></button>
+    </div>
+    <div class="db">
+        <div class="big">
+            @if (Item.Status == "processing") { <span>Conversion en MP4…</span> }
+            else if (Item.Status == "failed") { <span>@(Item.Error ?? "Import en échec")</span> }
+            else if (Item.FileName == null) { <Ico Name="image" Size="32" /> }
+            else if (Item.Type == "video") { <video src="/media/@Item.FileName" controls preload="metadata" @key="Item.Id"></video> }
+            else { <img src="/media/@Item.FileName?w=1280" alt="" @key="Item.Id" /> }
+        </div>
+        <dl>
+            <dt>Type</dt><dd>@(Item.Type == "video" ? "Vidéo" : "Image")@(Ext is { } e ? $" {e}" : "")</dd>
+            @if (Item.Width is > 0) { <dt>Définition</dt><dd>@Item.Width × @Item.Height px@(MediaProbe.Label(Item) is { } l && Item.Type == "video" ? $" ({l})" : "")</dd> }
+            @if (Seconds is { } s) { <dt>Durée</dt><dd>@Helpers.FormatDuration(s)</dd> }
+            @if (Item.Size is { } size) { <dt>Poids</dt><dd>@Helpers.FormatSize(size)</dd> }
+            <dt>Emplacement</dt><dd>@Path</dd>
+            @if (Item.AddedUtc is { } added) { <dt>Importé</dt><dd>le @added.ToLocalTime().ToString("dd.MM.yyyy à HH:mm")</dd> }
+            @if (Source != null) { <dt>Source</dt><dd>@Source</dd> }
+        </dl>
+
+        <h4>Utilisé dans</h4>
+        @if (uses == null || !uses.Any)
+        {
+            <p class="note">Aucune liste de lecture ni aucun contenu ne l'utilise.</p>
+        }
+        else
+        {
+            @foreach (var l in uses.Lists)
+            {
+                <div class="lx-use"><Ico Name="play" Size="16" /><span class="grow"><span>@l.Name</span><small>liste de lecture · @(l.Count == 0 ? "sur aucun écran" : l.Count > 1 ? $"{l.Count} écrans" : "1 écran")</small></span><a href="/playlists/@l.Id">Ouvrir</a></div>
+            }
+            @foreach (var c in uses.Contents)
+            {
+                <div class="lx-use"><Ico Name="grid" Size="16" /><span class="grow"><span>@c.Name</span><small>contenu · @(c.Count == 0 ? "dans aucune liste" : c.Count > 1 ? $"dans {c.Count} listes" : "dans 1 liste")</small></span><a href="/apps/instance/@c.Id">Ouvrir</a></div>
+            }
+        }
+        @if (Drive != null) { <p class="note"><Ico Name="folder" Size="13" /> @Drive. Renommez-le, déplacez-le ou retirez-le dans le Drive.</p> }
+        else if (!CanEdit) { <p class="note"><Ico Name="lock" Size="13" /> Dossier en lecture seule : vous pouvez l'utiliser et le télécharger, pas le modifier.</p> }
+    </div>
+    <div class="df">
+        @if (Item.FileName != null) { <a class="btn ghost sm" href="/media/@Item.FileName" download="@Item.Name"><Ico Name="download" Size="14" /> Télécharger</a> }
+        @if (CanEdit && Drive == null)
+        {
+            <button class="btn ghost sm" @onclick="OnRename"><Ico Name="edit" Size="14" /> Renommer</button>
+            @if (OnFolder.HasDelegate) { <button class="btn ghost sm" @onclick="OnFolder"><Ico Name="folder" Size="14" /> Ranger…</button> }
+            @if (OnArea.HasDelegate) { <button class="btn ghost sm" @onclick="OnArea"><Ico Name="move" Size="14" /> Autre aire…</button> }
+            <span class="grow"></span>
+            <button class="btn danger sm" @onclick="OnDelete"><Ico Name="trash" Size="14" /> Supprimer</button>
+        }
+    </div>
+</aside>
+
+@code {
+    [Parameter, EditorRequired] public MediaItem Item { get; set; } = default!;
+    [Parameter] public string Path { get; set; } = "Médiathèque de l'aire";
+    [Parameter] public bool CanEdit { get; set; }
+    /// <summary>Fichier synchronisé depuis un Drive : d'où il vient (null : fichier de la médiathèque).</summary>
+    [Parameter] public string? Drive { get; set; }
+    [Parameter] public bool HasPrev { get; set; }
+    [Parameter] public bool HasNext { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnPrev { get; set; }
+    [Parameter] public EventCallback OnNext { get; set; }
+    [Parameter] public EventCallback OnRename { get; set; }
+    [Parameter] public EventCallback OnFolder { get; set; }
+    [Parameter] public EventCallback OnArea { get; set; }
+    [Parameter] public EventCallback OnDelete { get; set; }
+
+    private MediaUses? uses;
+    private Guid loadedFor;
+
+    protected override void OnParametersSet()
+    {
+        if (loadedFor == Item.Id && uses != null) return;
+        loadedFor = Item.Id;
+        uses = Library.Uses(Item.Id);
+    }
+
+    private string? Ext => System.IO.Path.GetExtension(Item.FileName ?? Item.Name) is { Length: > 1 } e ? e[1..].ToUpperInvariant() : null;
+
+    private int? Seconds => int.TryParse(Item.Info.GetValueOrDefault("durationSec"), out var s) && s > 0 ? s : null;
+
+    private string? Source => Drive != null ? null : Item.Info.ContainsKey("canva") ? "Export Canva" : Item.Info.ContainsKey("pdf") ? "Page de PDF" : null;
+}

@@ -1,85 +1,145 @@
 @page "/playlists"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:playlists")]
+@implements IAsyncDisposable
+@using Microsoft.JSInterop
 @inject TenantStore Store
 @inject AppService Svc
 @inject PlaylistLibrary Library
 @inject NavigationManager Nav
 @inject Toaster Toast
+@inject IJSRuntime JS
 
-<div class="page-head">
-    <div>
-        <h1>Vos listes de lecture</h1>
-        <p class="sub">Composez vos boucles de contenus, puis choisissez-les et publiez-les écran par écran.</p>
-    </div>
+@* Listes de lecture épurées (§51) : le fil d'Ariane est le titre, une ligne d'état, une ligne d'outils, les dossiers en puces,
+   des cartes qui disent l'essentiel (une ligne de méta, un état de diffusion) et une barre de sélection flottante. *@
+<div class="lx-top">
+    <h1>
+        @if (foldersOn && currentRow is { } cur)
+        {
+            <button type="button" class="lx-crumb @(dropOver == RootDrop ? "drop-target" : "")" @onclick="() => OpenFolder(null)"
+                    @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = RootDrop; }" @ondragleave="() => { if (dropOver == RootDrop) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(null)">Listes de lecture</button>
+            @foreach (var c in crumbs.Take(crumbs.Count - 1))
+            {
+                var row = c;
+                <span class="lx-sl">/</span>
+                <button type="button" class="lx-crumb @(dropOver == row.Folder.Id ? "drop-target" : "")" @onclick="() => OpenFolder(row.Folder.Id)"
+                        @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = row.Folder.Id; }" @ondragleave="() => { if (dropOver == row.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(row.Folder.Id)">@row.Folder.Name</button>
+            }
+            <span class="lx-sl">/</span>
+            <span>@cur.Folder.Name</span>
+            <span class="lx-right @(cur.Right == FolderRight.Read ? "ro" : "")"><Ico Name="@(cur.Right == FolderRight.Read ? "lock" : cur.Shared ? "users" : "folder")" Size="12" /> @RightLabel(cur)</span>
+        }
+        else
+        {
+            <span>Listes de lecture</span>
+        }
+    </h1>
+    <span class="grow"></span>
     <div class="btns">
-        @if (foldersOn && CanCreateFolderHere) { <button class="btn ghost" @onclick='() => { newFolderName = ""; folderError = null; creatingFolder = true; }'><Ico Name="folder" Size="16" /> Nouveau dossier</button> }
+        @if (currentRow is { } here && (here.Right == FolderRight.Owner || here.Folder.OwnerId == Store.UserId))
+        {
+            <button class="btn ghost sm" @onclick="() => sharingId = here.Folder.Id"><Ico Name="users" Size="14" /> Partager…</button>
+        }
         @if (CanCreateListHere)
         {
-            <button class="btn" @onclick="OpenCreate">
-                <svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg> Nouvelle liste de lecture
-            </button>
+            <div class="lx-split">
+                <button class="btn" @onclick="OpenCreate"><Ico Name="plus" Size="16" /> Nouvelle liste</button>
+                @if (foldersOn && CanCreateFolderHere)
+                {
+                    <button class="btn lx-car" aria-label="Autres créations" aria-haspopup="menu" aria-expanded="@(newMenu ? "true" : "false")" @onclick="() => newMenu = !newMenu"><Ico Name="chevron" Size="14" /></button>
+                    @if (newMenu)
+                    {
+                        <div class="kebab-backdrop" @onclick="() => newMenu = false"></div>
+                        <div class="kebab-menu" role="menu">
+                            <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenCreate(); }"><Ico Name="play" Size="16" /> Nouvelle liste de lecture</button>
+                            <button type="button" role="menuitem" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /> Nouveau dossier@(currentRow is { } cf ? $" dans « {cf.Folder.Name} »" : "")</button>
+                        </div>
+                    }
+                }
+            </div>
+        }
+        else if (foldersOn && CanCreateFolderHere)
+        {
+            <button class="btn ghost" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /> Nouveau dossier</button>
         }
     </div>
 </div>
 
-@if (foldersOn)
-{
-    <nav class="lib-crumb" aria-label="Emplacement dans les listes de lecture">
-        <button type="button" class="linklike" @onclick="() => OpenFolder(null)" @ondragover="() => { }" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="() => DropOn(null)"><Ico Name="play" Size="15" /> Listes de lecture de l'aire</button>
-        @foreach (var c in crumbs)
-        {
-            var row = c;
-            <span class="sep">›</span>
-            <button type="button" class="linklike" @onclick="() => OpenFolder(row.Folder.Id)" @ondragover="() => { }" @ondragover:preventDefault="true" @ondrop:preventDefault="true" @ondrop="() => DropOn(row.Folder.Id)">@row.Folder.Name</button>
-        }
-    </nav>
-    @if (currentRow is { } cur)
+<div class="lx-status">
+    <span>@Plural(playlists.Count, "liste", "listes")@(foldersOn && folderRows.Count > 0 ? $" · {Plural(folderRows.Count, "dossier", "dossiers")}" : "")</span>
+    @if (PendingCount > 0)
     {
-        @if (cur.Right == FolderRight.Read)
-        {
-            <div class="dw-note"><Ico Name="lock" Size="15" /><span class="grow">Dossier partagé en <b>lecture seule</b> : vous pouvez voir et diffuser ses listes, pas les modifier.</span></div>
-        }
-        <div class="lib-folder-head">
-            <span class="muted">@(cur.Folder.OwnerId == Store.UserId ? "Votre dossier" : $"Dossier de {cur.OwnerName}")@(cur.Shared ? " · partagé" : " · privé")</span>
-            <span class="grow"></span>
-            @if (cur.Right == FolderRight.Owner || cur.Folder.OwnerId == Store.UserId) { <button class="btn ghost sm" @onclick="() => sharingId = cur.Folder.Id"><Ico Name="users" Size="14" /> Partager…</button> }
-        </div>
+        <span><i class="lx-dot warn"></i>@(PendingCount > 1 ? $"{PendingCount} listes ont des modifications non publiées" : "1 liste a des modifications non publiées") <button type="button" class="linklike" @onclick='() => SetFilter("pending")'>Voir</button></span>
     }
-}
+    @if (currentRow is { Right: FolderRight.Read })
+    {
+        <span>Vous pouvez voir, essayer et diffuser ces listes, pas les modifier. Dupliquez-en une pour l'adapter.</span>
+    }
+</div>
 
-@* Dossiers de la position ouverte (option « Dossiers ») : tuiles cliquables, au-dessus des listes. *@
-@if (subfolders.Count > 0 && search.Length == 0 && filter == "")
+@if (playlists.Count == 0 && subfolders.Count == 0)
 {
-    <div class="lib-grid lib-folders">
-        @foreach (var row in subfolders)
+    <div class="empty">
+        <div class="big">Aucune liste de lecture</div>
+        <p>Une liste de lecture est une boucle de contenus (images, vidéos, apps). Composez-la, puis choisissez-la sur vos écrans et publiez.</p>
+        @if (CanCreateListHere) { <button class="btn" @onclick="OpenCreate"><Ico Name="plus" Size="16" /> Créer une liste de lecture</button> }
+    </div>
+}
+else
+{
+    <div class="lx-tools" role="region" aria-label="Recherche et filtres">
+        <div class="search-box">
+            <Ico Name="search" Size="16" />
+            <input data-lx-search placeholder="@(foldersOn ? "Rechercher dans toutes les listes" : "Rechercher des listes de lecture")" aria-label="Rechercher des listes de lecture" @bind="search" @bind:event="oninput" />
+        </div>
+        <div class="seg-chips" role="group" aria-label="Utilisation des listes de lecture" style="display:contents">
+            <button type="button" class="lx-chip @(filter == "" ? "on" : "")" aria-pressed="@(filter == "" ? "true" : "false")" @onclick='() => SetFilter("")'>Toutes</button>
+            <button type="button" class="lx-chip @(filter == "used" ? "on" : "")" aria-pressed="@(filter == "used" ? "true" : "false")" title="Choisies sur un écran ou programmées dans un planning" @onclick='() => SetFilter("used")'>Utilisées <small>@playlists.Count(p => Use(p).Used)</small></button>
+            @if (PendingCount > 0 || filter == "pending")
+            {
+                <button type="button" class="lx-chip @(filter == "pending" ? "on" : "")" aria-pressed="@(filter == "pending" ? "true" : "false")" title="Modifiées depuis leur publication : les écrans diffusent encore l'ancienne version" @onclick='() => SetFilter("pending")'>À publier <small>@PendingCount</small></button>
+            }
+            <button type="button" class="lx-chip @(filter == "unused" ? "on" : "")" aria-pressed="@(filter == "unused" ? "true" : "false")" @onclick='() => SetFilter("unused")'>Non utilisées <small>@playlists.Count(p => !Use(p).Used)</small></button>
+        </div>
+        @if (foldersOn && folderId != null && Active)
         {
-            var r = row;
-            var inside = ChildCount(r.Folder.Id);
-            var mine = r.Folder.OwnerId == Store.UserId;
-            <div class="lib-card lib-folder @(dropOver == r.Folder.Id ? "drop-target" : "")" role="button" tabindex="0" aria-label="Ouvrir le dossier @r.Folder.Name" @onclick="() => OpenFolder(r.Folder.Id)"
-                 @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = r.Folder.Id; }" @ondragleave="() => { if (dropOver == r.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(r.Folder.Id)">
-                <div class="lib-th lib-th-folder">
-                    <Ico Name="folder" Size="34" />
-                    <span class="lib-count">@inside élément@(inside > 1 ? "s" : "")</span>
-                </div>
-                <div class="lib-body">
-                    <div class="lib-text">
-                        <span class="lib-name" title="@r.Folder.Name">@r.Folder.Name</span>
-                        <div class="lib-sub"><small class="lib-size">@(mine ? "Votre dossier" : $"Dossier de {r.OwnerName}")</small></div>
-                    </div>
-                    @if (mine) { <span class="pill dark">Propriétaire</span> }
-                    else if (r.Right == FolderRight.Write) { <span class="pill ok">Écriture</span> }
-                    else if (r.Right == FolderRight.Read) { <span class="pill blue">Lecture</span> }
-                    else { <span class="pill">Administrateur</span> }
+            <button type="button" class="lx-chip scope" title="Où chercher" @onclick="() => scopeAll = !scopeAll">Dans : @(scopeAll ? "toute l'aire" : "ce dossier") <Ico Name="refresh" Size="13" /></button>
+        }
+        <span class="grow"></span>
+        @if (Active) { <span class="lx-count" aria-live="polite">@Plural(Sorted.Count(), "résultat", "résultats")</span> }
+        <select @bind="sort" aria-label="Trier">
+            <option value="recent">Récentes</option>
+            <option value="name">Nom</option>
+            <option value="used">Plus utilisées</option>
+        </select>
+        <ViewToggle StorageKey="playlists" @bind-Value="view" />
+    </div>
+
+    @* Dossiers de la position ouverte : puces compactes, cibles du glisser-déposer *@
+    @if (subfolders.Count > 0 && !Active)
+    {
+        <div class="lx-folders">
+            @foreach (var row in subfolders)
+            {
+                var r = row;
+                var inside = ChildCount(r.Folder.Id);
+                var mine = r.Folder.OwnerId == Store.UserId;
+                <div class="lx-fchip @(r.Shared ? "" : "priv") @(dropOver == r.Folder.Id ? "drop-target" : "")" role="button" tabindex="0" title="@FolderTitle(r)" aria-label="Ouvrir le dossier @r.Folder.Name" @onclick="() => OpenFolder(r.Folder.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenFolder(r.Folder.Id); }'
+                     @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = r.Folder.Id; }" @ondragleave="() => { if (dropOver == r.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(r.Folder.Id)">
+                    <Ico Name="folder" Size="17" />
+                    <span class="nm">@r.Folder.Name</span>
+                    <small>@inside</small>
+                    @if (r.Right == FolderRight.Read) { <span class="ic" title="Lecture seule"><Ico Name="lock" Size="13" /></span> }
+                    else if (r.Shared) { <span class="ic" title="Partagé"><Ico Name="users" Size="13" /></span> }
                     @if (mine || isAdmin)
                     {
                         <div class="kebab" @onclick:stopPropagation="true">
                             <button type="button" class="kebab-btn" aria-label="Actions pour le dossier @r.Folder.Name" aria-haspopup="menu" aria-expanded="@(menuFor == r.Folder.Id ? "true" : "false")"
-                                    @onclick="() => menuFor = menuFor == r.Folder.Id ? null : r.Folder.Id"><Ico Name="dots-v" Size="18" /></button>
+                                    @onclick="() => menuFor = menuFor == r.Folder.Id ? null : r.Folder.Id"><Ico Name="dots-v" Size="16" /></button>
                             @if (menuFor == r.Folder.Id)
                             {
                                 <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
                                 <div class="kebab-menu" role="menu">
+                                    <span class="kebab-note">@(mine ? "Votre dossier" : $"Dossier de {r.OwnerName}") · @(r.Shared ? "partagé" : "privé")</span>
                                     <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingId = r.Folder.Id; }"><Ico Name="users" Size="16" /> Partager…</button>
                                     @if (r.Right == FolderRight.Owner)
                                     {
@@ -91,112 +151,121 @@
                         </div>
                     }
                 </div>
-            </div>
-        }
-    </div>
-}
-
-@if (playlists.Count > 0)
-{
-    <div class="lib-tools" role="region" aria-label="Filtres et sélection" aria-live="polite">
-        <label class="lib-all">
-            <input type="checkbox" class="sc-check" checked="@(Sorted.Any() && Sorted.All(p => picked.Contains(p.Id)))" @onchange="ToggleAll" aria-label="Tout sélectionner" />
-            @if (picked.Count > 0) { <span>@picked.Count sélectionnée@(picked.Count > 1 ? "s" : "")</span> }
-        </label>
-        @if (picked.Count > 0)
-        {
-            @if (canMove) { <button class="btn ghost sm" @onclick="() => bulkMove = true"><Ico Name="move" Size="14" /> Déplacer vers une autre aire…</button> }
-            @if (foldersOn && picked.Any(id => playlists.Any(p => p.Id == id && CanEdit(p)))) { <button class="btn ghost sm" @onclick="() => listMove = PickedEditable()"><Ico Name="move" Size="14" /> Ranger dans un dossier…</button> }
-            <button class="btn danger sm" @onclick="() => deleting = playlists.Where(x => picked.Contains(x.Id) && CanEdit(x)).ToList()"><Ico Name="trash" Size="14" /> Supprimer</button>
-        }
-        <div class="seg" role="tablist" aria-label="Utilisation des listes de lecture">
-            <button type="button" class="@(filter == "" ? "on" : "")" @onclick='() => filter = ""'>Toutes <small>@playlists.Count</small></button>
-            <button type="button" class="@(filter == "used" ? "on" : "")" @onclick='() => filter = "used"'>Utilisées <small>@playlists.Count(IsUsed)</small></button>
-            <button type="button" class="@(filter == "unused" ? "on" : "")" @onclick='() => filter = "unused"'>Non utilisées <small>@playlists.Count(p => !IsUsed(p))</small></button>
+            }
         </div>
-        <div class="search-box grow" style="margin:0">
-            <Ico Name="search" Size="16" />
-            <input placeholder="Rechercher des listes de lecture" aria-label="Rechercher des listes de lecture" @bind="search" @bind:event="oninput" />
-        </div>
-        <select @bind="sort" aria-label="Trier">
-            <option value="recent">Plus récentes</option>
-            <option value="name">Nom</option>
-            <option value="used">Plus utilisées</option>
-        </select>
-        <ViewToggle StorageKey="playlists" @bind-Value="view" />
-    </div>
-    @if (!Sorted.Any() && subfolders.Count == 0) { <div class="empty"><div class="big">Aucune liste de lecture trouvée</div></div> }
-}
+    }
 
-<div class="pl-grid @(view == "list" ? "list" : "")">
-    @foreach (var p in Sorted)
+    @if (!Sorted.Any())
     {
-        var tiles = p.Draft.Where(i => i.Placement == "full").Select(i => media.FirstOrDefault(m => m.Id == i.MediaId)).Where(m => m != null).Take(3).ToList();
-        var pl = p;
-        var canEdit = CanEdit(pl);
-        var readOnlyHere = RightOfList(pl) == FolderRight.Read;
-        var onScreens = screens.Count(s => s.ZonePlaylists().Contains(pl.Id));
-        <div class="pl-card sc-card pl-lc @(picked.Contains(pl.Id) ? "picked" : "") @(dragIds.Contains(pl.Id) ? "dragging" : "")"
-             draggable="@(CanDrag(pl) ? "true" : "false")" @ondragstart="() => StartDrag(pl)" @ondragend="EndDrag">
-            <input type="checkbox" class="sc-check pl-check" aria-label="Sélectionner @pl.Name" checked="@picked.Contains(pl.Id)" @onchange="() => { if (!picked.Remove(pl.Id)) picked.Add(pl.Id); }" />
-            <a class="pl-cover @(tiles.Count <= 1 ? "single" : "")" href="/playlists/@pl.Id" tabindex="-1" aria-hidden="true">
-                @foreach (var m in tiles) { <div class="pl-tile"><MediaThumb Media="m!" All="media" /></div> }
-                @if (tiles.Count == 0)
-                {
-                    <div class="pl-tile pl-void"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg></div>
-                }
-                <span class="pl-count">@pl.Draft.Count contenu@(pl.Draft.Count > 1 ? "s" : "")</span>
-                @{ var dur = TotalSeconds(pl); }
-                @if (dur > 0) { <span class="pl-dur mono" title="Durée de la boucle">@Helpers.FormatDuration(dur)</span> }
-            </a>
-            <div class="pl-body">
-                <div class="pl-title">
-                    <a class="pl-name" href="/playlists/@pl.Id">@pl.Name</a>
-                    <div class="kebab">
-                        <button type="button" class="kebab-btn" aria-label="Actions pour @pl.Name" aria-haspopup="menu" aria-expanded="@(menuFor == pl.Id ? "true" : "false")"
-                                @onclick="() => menuFor = menuFor == pl.Id ? null : pl.Id"><Ico Name="dots-v" Size="18" /></button>
-                        @if (menuFor == pl.Id)
-                        {
-                            <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
-                            <div class="kebab-menu" role="menu">
-                                <a role="menuitem" href="/playlists/@pl.Id"><Ico Name="pencil-square" Size="16" /> @(canEdit ? "Éditer" : "Voir")</a>
-                                <button type="button" role="menuitem" @onclick="() => { menuFor = null; trying = pl.Id; }"><Ico Name="play" Size="16" /> Essayer sur…</button>
-                                @if (canEdit) { <button type="button" role="menuitem" @onclick="() => OpenRename(pl)"><Ico Name="edit" Size="16" /> Renommer</button> }
-                                <button type="button" role="menuitem" @onclick="() => Duplicate(pl)"><Ico Name="copy" Size="16" /> Dupliquer</button>
-                                @if (foldersOn && canEdit) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; listMove = new() { (pl.Id, pl.Name) }; }"><Ico Name="move" Size="16" /> Ranger dans un dossier…</button> }
-                                @if (canMove) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; moving = pl; }"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
-                                @if (canEdit) { <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = new() { pl }; }"><Ico Name="trash" Size="16" /> Supprimer</button> }
-                            </div>
-                        }
+        @if (Active) { <div class="empty"><div class="big">Aucune liste ne correspond</div><button class="btn ghost sm" @onclick='() => { search = ""; filter = ""; }'>Effacer la recherche et les filtres</button></div> }
+        else if (subfolders.Count == 0 && folderId != null) { <div class="empty"><div class="big">Ce dossier est vide</div>@if (CanCreateListHere) { <p>Créez-y une liste, ou glissez-y des listes depuis « Listes de lecture ».</p> }</div> }
+    }
+    else
+    {
+        @if (view == "list")
+        {
+        <div class="lx-tbl-wrap">
+            <table class="lx-tbl @(picked.Count > 0 ? "lx-selecting" : "")">
+                <thead>
+                    <tr>
+                        <th style="width:34px"><input type="checkbox" class="sc-check lx-check" checked="@AllPicked" @onchange="ToggleAll" aria-label="Tout sélectionner" /></th>
+                        <th><button type="button" class="@(sort == "name" ? "on" : "")" @onclick='() => sort = "name"'>Nom</button></th>
+                        @if (foldersOn) { <th>Emplacement</th> }
+                        <th class="num">Contenus</th>
+                        <th class="num">Durée</th>
+                        <th><button type="button" class="@(sort == "used" ? "on" : "")" @onclick='() => sort = "used"'>Diffusion</button></th>
+                        <th><button type="button" class="@(sort == "recent" ? "on" : "")" @onclick='() => sort = "recent"'>Modifiée</button></th>
+                        <th style="width:44px"><span class="sr-only">Actions</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var p in Sorted)
+                    {
+                        var pl = p;
+                        var tile = Tiles(pl).FirstOrDefault();
+                        var total = TotalSeconds(pl);
+                        <tr class="@(picked.Contains(pl.Id) ? "picked" : "") @(dragIds.Contains(pl.Id) ? "dragging" : "")" draggable="@(CanDrag(pl) ? "true" : "false")" @ondragstart="() => StartDrag(pl)" @ondragend="EndDrag">
+                            <td><input type="checkbox" class="sc-check lx-check" aria-label="Sélectionner @pl.Name" checked="@picked.Contains(pl.Id)" @onchange="() => Toggle(pl.Id)" /></td>
+                            <td><div class="nm"><span class="mini">@if (tile != null) { <MediaThumb Media="tile" All="media" /> } else { <Ico Name="image" Size="16" /> }</span><a href="/playlists/@pl.Id">@pl.Name</a>@if (RightOfList(pl) == FolderRight.Read) { <span title="Lecture seule"><Ico Name="lock" Size="13" /></span> }</div></td>
+                            @if (foldersOn) { <td><small>@PathOf(pl)</small></td> }
+                            <td class="num">@pl.Draft.Count</td>
+                            <td class="num">@(total > 0 ? Helpers.FormatDuration(total) : "—")</td>
+                            <td>@State(pl)</td>
+                            <td><small>@(Ago(pl) ?? "—")</small></td>
+                            <td>@Menu(pl)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        }
+        @* sur mobile, toujours en cartes (pas de bascule) *@
+        <div class="lx-pgrid @(picked.Count > 0 ? "lx-selecting" : "") @(view == "list" ? "lx-mobile-only" : "")">
+            @foreach (var p in Sorted)
+            {
+                var pl = p;
+                var tiles = Tiles(pl).Take(3).ToList();
+                var total = TotalSeconds(pl);
+                <div class="lx-pc @(picked.Contains(pl.Id) ? "picked" : "") @(dragIds.Contains(pl.Id) ? "dragging" : "")"
+                     draggable="@(CanDrag(pl) ? "true" : "false")" @ondragstart="() => StartDrag(pl)" @ondragend="EndDrag">
+                    <input type="checkbox" class="sc-check lx-check" aria-label="Sélectionner @pl.Name" checked="@picked.Contains(pl.Id)" @onchange="() => Toggle(pl.Id)" />
+                    @if (tiles.Count == 0)
+                    {
+                        <a class="pl-cover lx-empty" href="/playlists/@pl.Id" tabindex="-1" aria-hidden="true"><Ico Name="plus" Size="15" /> @(pl.Draft.Count == 0 ? "Ajouter des contenus" : "Aperçu indisponible")</a>
+                    }
+                    else
+                    {
+                        <a class="pl-cover @(tiles.Count <= 1 ? "single" : "")" href="/playlists/@pl.Id" tabindex="-1" aria-hidden="true">
+                            @foreach (var m in tiles) { <div class="pl-tile"><MediaThumb Media="m" All="media" /></div> }
+                        </a>
+                    }
+                    @if (RightOfList(pl) == FolderRight.Read) { <span class="lx-lock" title="Dans un dossier partagé en lecture seule"><Ico Name="lock" Size="13" /></span> }
+                    @if (pl.Draft.Count > 0) { <button type="button" class="lx-try" @onclick="() => trying = pl.Id"><Ico Name="play" Size="13" /> Essayer</button> }
+                    <div class="lx-pbody">
+                        <div class="grow">
+                            <a class="pl-name" href="/playlists/@pl.Id" title="@pl.Name">@pl.Name</a>
+                            <div class="lx-meta">@Meta(pl, total)</div>
+                            @if (ShowPath) { <div class="lx-path"><Ico Name="folder" Size="12" /><span>@PathOf(pl)</span></div> }
+                            @State(pl)
+                        </div>
+                        @Menu(pl)
                     </div>
                 </div>
-                @{ var mod = Modified(pl); var total = TotalSeconds(pl); }
-                <small class="pl-mod">@mod</small>
-                <div class="pl-meta">
-                    <span class="pl-modtxt">@mod</span>
-                    @if (readOnlyHere) { <span class="pill blue" title="Dans un dossier partagé en lecture seule">Lecture seule</span> }
-                    @if (onScreens > 0) { <span class="badge neutre" title="Écrans qui diffusent cette liste de lecture"><Ico Name="monitor" Size="13" /> @onScreens écran@(onScreens > 1 ? "s" : "")</span> }
-                    @if (total > 0) { <span class="pl-meta-dur mono" title="Durée de la boucle">@Helpers.FormatDuration(total)</span> }
-                </div>
-            </div>
+            }
         </div>
     }
-    @if (CanCreateListHere)
+
+    @if (picked.Count > 0)
     {
-        <button class="pl-card pl-add" @onclick="OpenCreate">
-            <span class="pl-plus"><svg viewBox="0 0 24 24"><path d="M12 4v16M4 12h16" /></svg></span>
-            <span>Créer une liste de lecture</span>
-        </button>
+        var editable = PickedEditable();
+        var locked = picked.Count - editable.Count;
+        <div class="lx-selbar" role="region" aria-label="Sélection">
+            <b>@picked.Count sélectionnée@(picked.Count > 1 ? "s" : "")</b>
+            <button type="button" @onclick="ToggleAll">@(AllPicked ? "Tout désélectionner" : $"Tout sélectionner ({Sorted.Count()})")</button>
+            <span class="vr"></span>
+            @if (foldersOn) { <button type="button" disabled="@(editable.Count == 0)" title="@(editable.Count == 0 ? "Aucune liste modifiable dans la sélection" : null)" @onclick="() => listMove = editable"><Ico Name="folder" Size="15" /><span class="lx-lbl">Ranger…</span></button> }
+            @if (canMove) { <button type="button" @onclick="() => bulkMove = true"><Ico Name="move" Size="15" /><span class="lx-lbl">Autre aire…</span></button> }
+            <button type="button" @onclick="DuplicatePicked"><Ico Name="copy" Size="15" /><span class="lx-lbl">Dupliquer</span></button>
+            <span class="vr"></span>
+            <button type="button" class="del" disabled="@(editable.Count == 0)" title="@(editable.Count == 0 ? "Ces listes sont dans un dossier en lecture seule" : null)"
+                    @onclick="() => deleting = playlists.Where(x => picked.Contains(x.Id)).ToList()">
+                <Ico Name="trash" Size="15" /> Supprimer@(locked > 0 && editable.Count > 0 ? $" {editable.Count}" : "")@if (locked > 0) { <small>(@locked en lecture seule)</small> }
+            </button>
+            <span class="vr"></span>
+            <button type="button" title="Tout désélectionner (Échap)" aria-label="Tout désélectionner" @onclick="() => picked.Clear()"><Ico Name="x" Size="15" /></button>
+        </div>
     }
-</div>
+}
 
 @if (creating)
 {
+    var dup = DuplicateName(newName);
     <div class="modal-backdrop" @onclick="CloseName"></div>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="create-title">
         <h3 id="create-title">@(renamingPl == null ? "Nouvelle liste de lecture" : "Renommer la liste de lecture")</h3>
         <p class="hint">@(renamingPl == null ? "Donnez-lui un nom, vous ajouterez les contenus ensuite." : "Le nouveau nom s'affiche dans le back-office uniquement.")</p>
         <input style="width:100%" @ref="nameInput" @bind="newName" @bind:event="oninput" @onkeydown="OnCreateKey" placeholder="Ex. Accueil, vitrine, salle d'attente" />
+        @if (dup) { <p class="hint" style="color:var(--warn-ink)">Une autre liste de l'aire porte déjà ce nom : sur les écrans, on ne saura pas laquelle choisir.</p> }
         <div class="modal-actions">
             <button class="btn ghost" @onclick="CloseName">Annuler</button>
             <button class="btn" disabled="@string.IsNullOrWhiteSpace(newName)" @onclick="SubmitName">@(renamingPl == null ? "Créer" : "Renommer")</button>
@@ -235,11 +304,13 @@
 
 @if (deletingFolder is { } df)
 {
-    var inside = playlists.Count(p => p.FolderId == df.Folder.Id);
+    var inside = playlists.Where(p => p.FolderId == df.Folder.Id).ToList();
+    var impact = PlaylistUses.Impact(inside.Select(p => p.Id).ToList(), allScreens, areas);
     <div class="modal-backdrop" @onclick="() => deletingFolder = null"></div>
     <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="dfp-title">
         <h3 id="dfp-title">Supprimer le dossier « @df.Folder.Name » ?</h3>
-        <p class="hint">Le dossier, ses sous-dossiers et leurs listes@(inside > 0 ? $" ({inside} visible{(inside > 1 ? "s" : "")} ici)" : "") seront supprimés. Les contenus restent dans la médiathèque. Cette action est définitive.</p>
+        <p class="hint">Le dossier, ses sous-dossiers et leurs listes@(inside.Count > 0 ? $" ({inside.Count} visible{(inside.Count > 1 ? "s" : "")} ici)" : "") seront supprimés. Les contenus restent dans la médiathèque. Cette action est définitive.</p>
+        <DeleteImpactBox Impact="impact" />
         <div class="modal-actions">
             <button class="btn ghost" @onclick="() => deletingFolder = null">Annuler</button>
             <button class="btn danger-solid" @onclick="() => DeleteFolder(df)">Supprimer</button>
@@ -273,24 +344,32 @@
 
 @if (deleting is { Count: > 0 } del)
 {
-    var ids = del.Select(x => x.Id).ToHashSet();
-    var used = screens.Where(s => s.ZonePlaylists().Any(z => z is { } zid && ids.Contains(zid))).ToList();
-    var many = del.Count > 1;
+    // Seules les listes modifiables partent ; les autres sont nommées, pour qu'on ne croie pas les avoir supprimées.
+    var gone = del.Where(CanEdit).ToList();
+    var kept = del.Where(x => !CanEdit(x)).ToList();
+    var impact = PlaylistUses.Impact(gone.Select(x => x.Id).ToList(), allScreens, areas);
     <div class="modal-backdrop" @onclick="() => deleting = null"></div>
     <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="del-title">
-        <h3 id="del-title">Supprimer @(many ? $"{del.Count} listes de lecture" : $"« {del[0].Name} »") ?</h3>
-        @if (used.Count == 0)
+        @if (gone.Count == 0)
         {
-            <p class="hint">Aucun écran @(many ? "ne les utilise" : "ne l'utilise"). Les contenus restent dans la médiathèque.</p>
+            <h3 id="del-title">Rien à supprimer</h3>
+            <p class="hint">@(kept.Count > 1 ? "Ces listes sont" : "Cette liste est") dans un dossier partagé en lecture seule.</p>
+            <div class="modal-actions"><button class="btn" @onclick="() => deleting = null">Fermer</button></div>
         }
         else
         {
-            <p class="hint">@(many ? "Elles sont choisies" : "Elle est choisie") sur : <b>@string.Join(", ", used.Select(s => s.Name))</b>. Ces écrans gardent ce qu'ils diffusent jusqu'à leur prochaine publication, puis n'auront plus de liste de lecture.</p>
+            <h3 id="del-title">Supprimer @(gone.Count > 1 ? $"{gone.Count} listes de lecture" : $"« {gone[0].Name} »") ?</h3>
+            <p class="hint">@(gone.Count > 1 && gone.Count <= 4 ? string.Join(", ", gone.Select(x => $"« {x.Name} »")) + ". " : "")Les contenus restent dans la médiathèque.</p>
+            <DeleteImpactBox Impact="impact" />
+            @if (kept.Count > 0)
+            {
+                <p class="hint"><Ico Name="lock" Size="13" /> Non supprimée@(kept.Count > 1 ? "s" : "") (lecture seule) : @string.Join(", ", kept.Select(x => $"« {x.Name} »")).</p>
+            }
+            <div class="modal-actions">
+                <button class="btn ghost" @onclick="() => deleting = null">Annuler</button>
+                <button class="btn danger-solid" @onclick="() => Delete(gone)">Supprimer@(gone.Count > 1 ? $" {gone.Count} listes" : "")</button>
+            </div>
         }
-        <div class="modal-actions">
-            <button class="btn ghost" @onclick="() => deleting = null">Annuler</button>
-            <button class="btn danger-solid" @onclick="() => Delete(del)">Supprimer</button>
-        </div>
     </div>
 }
 
@@ -299,12 +378,15 @@
     private List<MediaItem> media = new();
     private string sort = "recent";
     private string view = "cards";   // cards | list (mémorisé dans le navigateur)
-    private bool creating;
+    private bool creating, newMenu;
     private string newName = "";
     private ElementReference nameInput;
     private bool focusName;
 
-    private List<Screen> screens = new();
+    private List<Screen> screens = new();      // écrans appairés : diffusion des listes
+    private List<Screen> allScreens = new();   // tous les écrans : ce qu'une suppression touche
+    private List<Area> areas = new();
+    private Dictionary<Guid, PlaylistUse> uses = new();
     private Guid? menuFor;
     private Guid? trying;   // « Essayer sur… » : simulateur de la liste
     private Playlist? renamingPl;
@@ -323,6 +405,7 @@
     private PlaylistFolderRow? renamingFolder, deletingFolder;
     private Guid? sharingId;
     private List<(Guid Id, string Name)>? listMove;
+    private static readonly Guid RootDrop = Guid.Empty;       // cible « racine » du glisser-déposer (fil d'Ariane)
 
     protected override void OnInitialized() => Load();
 
@@ -338,6 +421,8 @@
     private FolderRight RightOfList(Playlist p) => rights.GetValueOrDefault(p.Id, FolderRight.None);
     private bool CanEdit(Playlist p) => RightOfList(p) >= FolderRight.Write;
     private List<(Guid Id, string Name)> PickedEditable() => playlists.Where(p => picked.Contains(p.Id) && CanEdit(p)).Select(p => (p.Id, p.Name)).ToList();
+    private PlaylistUse Use(Playlist p) => uses.GetValueOrDefault(p.Id, PlaylistUse.None);
+    private int PendingCount => playlists.Count(p => Use(p).Pending > 0);
 
     private void Load()
     {
@@ -352,8 +437,10 @@
         // une liste rangée dans un dossier que la personne ne voit pas n'apparaît pas
         playlists = Store.Read(d => d.Playlists.Where(p => PlaylistOps.RightOf(d, p) != FolderRight.None).ToList());
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
-        screens = Store.Read(d => d.Screens.Where(s => s.Token != null).ToList());
-        scheduled = Store.Read(d => (d.Area?.Zones.SelectMany(z => z.Slots) ?? Enumerable.Empty<Slot>()).Concat(d.Screens.SelectMany(s => s.Slots)).Select(x => x.PlaylistId).ToHashSet());
+        allScreens = Store.Read(d => d.Screens.ToList());
+        screens = allScreens.Where(s => s.Token != null).ToList();
+        areas = Store.Read(d => d.Areas.ToList());
+        uses = PlaylistUses.Of(playlists, screens, areas);
         subfolders = foldersOn
             ? folderRows.Where(r => folderId is { } fid ? r.Folder.ParentId == fid : r.Folder.ParentId is not { } p || folderRows.All(x => x.Folder.Id != p)).ToList()
             : new();
@@ -361,27 +448,38 @@
         picked.IntersectWith(playlists.Select(x => x.Id));
     }
 
-    private string filter = "", search = "";   // filter : "" | used | unused
+    private string filter = "", search = "";   // filter : "" | used | pending | unused
+    private bool scopeAll = true;              // recherche et filtres : toute l'aire (défaut) ou le dossier ouvert
+    private bool Active => search.Length > 0 || filter != "";
+    private bool ShowPath => foldersOn && Active && scopeAll;
 
-    private bool IsUsed(Playlist p) => screens.Any(s => s.ZonePlaylists().Contains(p.Id)) || scheduled.Contains(p.Id);
-    private HashSet<Guid> scheduled = new();   // listes programmées dans un planning (zone ou écran)
+    private void SetFilter(string f) { filter = f; picked.Clear(); }
 
-    // Position ouverte (sauf recherche ou filtre : toutes les listes vues), puis filtrées et triées ; les listes sélectionnées mais masquées restent sélectionnées.
+    private bool Matches(Playlist p) => filter switch
+    {
+        "used" => Use(p).Used,
+        "pending" => Use(p).Pending > 0,
+        "unused" => !Use(p).Used,
+        _ => true
+    };
+
+    // Position ouverte (sauf recherche ou filtre dans toute l'aire), puis filtrées et triées ; les listes sélectionnées mais masquées restent sélectionnées.
     private IEnumerable<Playlist> Sorted
     {
         get
         {
-            var pool = !foldersOn || search.Length > 0 || filter != "" ? playlists : playlists.Where(p => p.FolderId == folderId);
-            var q = pool.Where(p => filter == "" || IsUsed(p) == (filter == "used"))
-                        .Where(p => search.Length == 0 || p.Name.Contains(search, StringComparison.OrdinalIgnoreCase));
+            var pool = !foldersOn || ShowPath ? playlists : playlists.Where(p => p.FolderId == folderId);
+            var q = pool.Where(Matches).Where(p => search.Length == 0 || p.Name.Contains(search, StringComparison.OrdinalIgnoreCase));
             return sort switch
             {
                 "name" => q.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase),
-                "used" => q.OrderByDescending(p => screens.Count(s => s.ZonePlaylists().Contains(p.Id))).ThenBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase),
+                "used" => q.OrderByDescending(p => Use(p).Screens + Use(p).Slots).ThenBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase),
                 _ => q.OrderByDescending(p => p.UpdatedAt ?? DateTime.MinValue).ThenBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)
             };
         }
     }
+
+    private bool AllPicked => Sorted.Any() && Sorted.All(p => picked.Contains(p.Id));
 
     private void ToggleAll()
     {
@@ -389,7 +487,109 @@
         if (vis.All(picked.Contains)) picked.ExceptWith(vis); else picked.UnionWith(vis);
     }
 
-    private void OpenCreate() { renamingPl = null; newName = ""; creating = true; focusName = true; }
+    private void Toggle(Guid id) { if (!picked.Remove(id)) picked.Add(id); }
+
+    // ---------- Affichage d'une liste ----------
+
+    private IEnumerable<MediaItem> Tiles(Playlist p) =>
+        p.Draft.Where(i => i.Placement == "full").Select(i => media.FirstOrDefault(m => m.Id == i.MediaId)).Where(m => m != null)!;
+
+    private string Meta(Playlist p, int total)
+    {
+        var parts = new List<string> { p.Draft.Count == 0 ? "Vide" : Plural(p.Draft.Count, "contenu", "contenus") };
+        if (total > 0) parts.Add(Helpers.FormatDuration(total));
+        if (Ago(p) is { } a) parts.Add("modifiée " + a);
+        return string.Join(" · ", parts);
+    }
+
+    private int Incomplete(Playlist p) => p.Draft.Count(i => Svc.IsIncomplete(media.FirstOrDefault(m => m.Id == i.MediaId)));
+
+    // Un seul état, le plus utile d'abord : à publier, à compléter, diffusée, programmée, vide, non utilisée.
+    private RenderFragment State(Playlist p) => __builder =>
+    {
+        var u = Use(p);
+        var todo = Incomplete(p);
+        if (u.Pending > 0)
+        {
+            <div class="lx-state warn" title="Modifiée depuis la dernière publication : ces écrans diffusent encore l'ancienne version"><i class="lx-dot warn"></i><span>À publier sur @Plural(u.Pending, "écran", "écrans")</span><a class="linklike" href="/">Publier…</a></div>
+        }
+        else if (todo > 0)
+        {
+            <div class="lx-state warn" title="Contenus ajoutés sans réglage : ils ne sont pas diffusés"><i class="lx-dot warn"></i><span>@Plural(todo, "contenu", "contenus") à compléter</span></div>
+        }
+        else if (u.Screens > 0)
+        {
+            <div class="lx-state ok"><i class="lx-dot"></i><span>Diffusée sur @Plural(u.Screens, "écran", "écrans")@(u.Slots > 0 ? " · programmée" : "")</span></div>
+        }
+        else if (u.Slots > 0)
+        {
+            <div class="lx-state ok" title="Programmée dans le planning"><i class="lx-dot"></i><span>Programmée · @u.FirstSlot@(u.Slots > 1 ? $" (+{u.Slots - 1})" : "")</span></div>
+        }
+        else if (p.Draft.Count == 0)
+        {
+            <div class="lx-state"><i class="lx-dot off"></i><span>Vide</span></div>
+        }
+        else
+        {
+            <div class="lx-state"><i class="lx-dot off"></i><span>Non utilisée</span></div>
+        }
+    };
+
+    private RenderFragment Menu(Playlist pl) => __builder =>
+    {
+        var canEdit = CanEdit(pl);
+        <div class="kebab">
+            <button type="button" class="kebab-btn" aria-label="Actions pour @pl.Name" aria-haspopup="menu" aria-expanded="@(menuFor == pl.Id ? "true" : "false")"
+                    @onclick="() => menuFor = menuFor == pl.Id ? null : pl.Id"><Ico Name="dots-v" Size="18" /></button>
+            @if (menuFor == pl.Id)
+            {
+                <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                <div class="kebab-menu" role="menu">
+                    <a role="menuitem" href="/playlists/@pl.Id"><Ico Name="pencil-square" Size="16" /> @(canEdit ? "Éditer" : "Voir")</a>
+                    <button type="button" role="menuitem" @onclick="() => { menuFor = null; trying = pl.Id; }"><Ico Name="play" Size="16" /> Essayer sur…</button>
+                    @if (canEdit) { <button type="button" role="menuitem" @onclick="() => OpenRename(pl)"><Ico Name="edit" Size="16" /> Renommer</button> }
+                    <button type="button" role="menuitem" @onclick="() => Duplicate(pl)"><Ico Name="copy" Size="16" /> Dupliquer</button>
+                    @if (foldersOn && canEdit) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; listMove = new() { (pl.Id, pl.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
+                    @if (canMove) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; moving = pl; }"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
+                    @if (canEdit) { <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = new() { pl }; }"><Ico Name="trash" Size="16" /> Supprimer</button> }
+                </div>
+            }
+        </div>
+    };
+
+    // Emplacement d'une liste : chemin de son dossier, ou la racine de l'aire
+    private string PathOf(Playlist p)
+    {
+        if (p.FolderId is not { } fid || folderRows.FirstOrDefault(r => r.Folder.Id == fid) is not { } row) return "Listes de l'aire";
+        var names = new List<string>();
+        for (var cur = row; cur != null && names.Count < FolderAccess.MaxDepth; cur = cur.Folder.ParentId is { } pid ? folderRows.FirstOrDefault(r => r.Folder.Id == pid) : null)
+            names.Insert(0, cur.Folder.Name);
+        return string.Join(" › ", names);
+    }
+
+    private string RightLabel(PlaylistFolderRow r) =>
+        r.Folder.OwnerId == Store.UserId ? $"Votre dossier · {(r.Shared ? "partagé" : "privé")}"
+        : r.Right switch
+        {
+            FolderRight.Read => $"Lecture seule · dossier de {r.OwnerName}",
+            FolderRight.Write => $"Écriture · dossier de {r.OwnerName}",
+            _ => $"Administrateur · dossier de {r.OwnerName}"
+        };
+
+    private string FolderTitle(PlaylistFolderRow r) => (r.Folder.OwnerId == Store.UserId ? "Votre dossier" : $"Dossier de {r.OwnerName}") + (r.Right == FolderRight.Read ? " · lecture seule" : r.Shared ? " · partagé" : " · privé");
+
+    private static string Plural(int n, string one, string many) => $"{n} {(n > 1 ? many : one)}";
+
+    // Même nom qu'une autre liste de l'aire : les écrans proposent les listes par leur nom
+    private bool DuplicateName(string name)
+    {
+        var n = name.Trim();
+        return n.Length > 0 && playlists.Any(p => p.Id != renamingPl?.Id && string.Equals(p.Name.Trim(), n, StringComparison.CurrentCultureIgnoreCase));
+    }
+
+    private void OpenCreate() { newMenu = false; renamingPl = null; newName = ""; creating = true; focusName = true; }
+
+    private void OpenNewFolder() { newMenu = false; newFolderName = ""; folderError = null; creatingFolder = true; }
 
     private void OpenRename(Playlist p) { menuFor = null; renamingPl = p; newName = p.Name; creating = true; focusName = true; }
 
@@ -417,7 +617,7 @@
 
     private void OpenFolder(Guid? id)
     {
-        folderId = id; menuFor = null; picked.Clear();
+        folderId = id; menuFor = null; picked.Clear(); scopeAll = true;
         Load();
     }
 
@@ -460,9 +660,36 @@
         Load();
     }
 
+    // ---------- Clavier : « / » recherche, Échap ferme le menu ou désélectionne ----------
+    private DotNetObjectReference<Playlists>? selfRef;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            selfRef = DotNetObjectReference.Create(this);
+            try { await JS.InvokeVoidAsync("linkiiLibrary.attach", selfRef, false); } catch (JSException) { } catch (InvalidOperationException) { }
+        }
         if (focusName && creating) { focusName = false; await nameInput.FocusAsync(); }
+    }
+
+    [JSInvokable]
+    public Task Escape() => InvokeAsync(() =>
+    {
+        if (menuFor != null || newMenu) { menuFor = null; newMenu = false; }
+        else if (picked.Count > 0) picked.Clear();
+        else return;
+        StateHasChanged();
+    });
+
+    [JSInvokable]
+    public Task Drag(bool on) => Task.CompletedTask;   // pas de dépôt de fichiers sur cette page
+
+    public async ValueTask DisposeAsync()
+    {
+        if (selfRef == null) return;
+        try { await JS.InvokeVoidAsync("linkiiLibrary.detach", selfRef); } catch (JSException) { } catch (JSDisconnectedException) { } catch (InvalidOperationException) { }
+        selfRef.Dispose();
     }
 
     private void OnCreateKey(KeyboardEventArgs e)
@@ -510,23 +737,18 @@
     private void Duplicate(Playlist src)
     {
         menuFor = null;
-        Store.Write(d =>
-        {
-            var p = d.Playlists.FirstOrDefault(x => x.Id == src.Id);
-            if (p == null) return;
-            var names = d.Playlists.Select(x => x.Name).ToHashSet(StringComparer.CurrentCultureIgnoreCase);
-            var name = p.Name + " (copie)";
-            for (var n = 2; names.Contains(name); n++) name = $"{p.Name} (copie {n})";
-            d.Playlists.Add(new Playlist
-            {
-                Name = name, UpdatedAt = DateTime.UtcNow,
-                FolderId = p.FolderId is { } f && PlaylistOps.CanEdit(d, p) ? f : null,
-                Draft = p.Draft.Select(i => new PlaylistItem { MediaId = i.MediaId, DurationSec = i.DurationSec, DurationMode = i.DurationMode, Placement = i.Placement,
-                    // QR de comptage : mêmes réglages, mais une adresse courte à elle (les scans de la copie ne se mélangent pas à ceux de l'original)
-                    QrOn = i.QrOn, QrCode = i.QrOn ? QrTracking.NewCode() : null, QrUrl = i.QrUrl, QrLabel = i.QrLabel, QrBase = i.QrBase, QrX = i.QrX, QrY = i.QrY, QrSize = i.QrSize }).ToList()
-            });
-        });
-        Toast.Ok($"Liste de lecture « {src.Name} » dupliquée.");
+        var where = Store.Write(d => d.Playlists.FirstOrDefault(x => x.Id == src.Id) is { } p ? PlaylistOps.Copy(d, p) : null);
+        if (where == null) return;
+        Toast.Ok(where.FolderId == src.FolderId ? $"Liste de lecture « {src.Name} » dupliquée." : $"Liste de lecture « {src.Name} » dupliquée dans Listes de l'aire (dossier en lecture seule).");
+        Load();
+    }
+
+    private void DuplicatePicked()
+    {
+        var ids = picked.ToList();
+        var n = Store.Write(d => ids.Select(id => d.Playlists.FirstOrDefault(x => x.Id == id)).Where(p => p != null).Select(p => PlaylistOps.Copy(d, p!)).Count());
+        picked.Clear();
+        Toast.Ok(n > 1 ? $"{n} listes de lecture dupliquées." : "Liste de lecture dupliquée.");
         Load();
     }
 
@@ -546,7 +768,7 @@
         else if (names.Count == 1) Toast.Ok($"Liste de lecture « {names[0].Name} » supprimée.");
         else Toast.Error("Vous ne pouvez pas supprimer ces listes de lecture.");
         deleting = null;
-        picked.ExceptWith(requested);
+        picked.ExceptWith(removed);
         Load();
     }
 
@@ -559,15 +781,15 @@
         return Helpers.ItemSeconds(i, m, Svc.Find(m?.AppId), media);
     });
 
-    private static string? Modified(Playlist p)
+    private static string? Ago(Playlist p)
     {
         if (p.UpdatedAt is not { } at) return null;   // playlists créées avant le suivi des modifications
         var ago = DateTime.UtcNow - at;
-        return ago.TotalMinutes < 1 ? "Modifiée à l'instant"
-            : ago.TotalHours < 1 ? $"Modifiée il y a {(int)ago.TotalMinutes} min"
-            : ago.TotalDays < 1 ? $"Modifiée il y a {(int)ago.TotalHours} h"
-            : ago.TotalDays < 2 ? "Modifiée hier"
-            : ago.TotalDays < 30 ? $"Modifiée il y a {(int)ago.TotalDays} j"
-            : $"Modifiée le {at.ToLocalTime():d MMM yyyy}";
+        return ago.TotalMinutes < 1 ? "à l'instant"
+            : ago.TotalHours < 1 ? $"il y a {(int)ago.TotalMinutes} min"
+            : ago.TotalDays < 1 ? $"il y a {(int)ago.TotalHours} h"
+            : ago.TotalDays < 2 ? "hier"
+            : ago.TotalDays < 30 ? $"il y a {(int)ago.TotalDays} j"
+            : $"le {at.ToLocalTime():d MMM yyyy}";
     }
 }

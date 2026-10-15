@@ -1124,3 +1124,59 @@ Demande : les listes de lecture se rangent dans des dossiers comme les fichiers 
 - Les sélecteurs de listes (planning, écrans) ne filtrent pas encore par droits, comme pour la médiathèque.
 - La fenêtre de partage des listes n'est pas testée dans le navigateur.
 - Le glisser-déposer et la barre de filtres sont à valider à l'écran.
+
+## 51. Listes de lecture et médiathèque épurées (15 octobre 2026) : codé
+
+Demande : alléger les pages `/playlists` et `/media`, et corriger au passage les dysfonctionnements et règles métier manquantes. Maquette validée : `maquettes/listes-mediatheque-epurees.html` (7 onglets, dont « Corrections et règles »). Vérifié dans le navigateur sur une instance de test isolée (cartes, liste, dossier, recherche, sélection, suppression, aperçu, dépôt de fichier, mobile).
+
+### Même squelette sur les deux pages
+- **Titre = fil d'Ariane** (`.lx-top`) : « Listes de lecture / Événements », chaque niveau reste une cible de glisser-déposer. Une **pastille de droits** remplace le bandeau « lecture seule » et la ligne « Votre dossier · partagé » (« Lecture seule · dossier de Marie », « Votre dossier · privé »…).
+- **Ligne d'état** (`.lx-status`) : comptes, choses à faire (« 1 liste a des modifications non publiées · Voir », « 2 médias non utilisés · Voir »), conseil. Plus de phrase d'explication sous le titre : elle passe dans l'état vide.
+- **Une ligne d'outils** (`.lx-tools`) : recherche (touche `/`), filtres en puces, puce de portée « Dans : toute l'aire / ce dossier » (dossier ouvert + recherche ou filtre), tri, bascule cartes / liste.
+- **Dossiers en puces** (`.lx-fchip`) au lieu de tuiles hautes ; menu ⋮ (partager, renommer, supprimer) ; icône partagé / lecture seule.
+- **Barre de sélection flottante** (`.lx-selbar`) en bas, au lieu de boutons qui s'ajoutent à la barre d'outils. `Échap` désélectionne.
+- **Vue liste = vrai tableau** (`.lx-tbl`), colonnes triables (nom, diffusion / taille, date). Sur mobile, toujours en cartes (la bascule y est masquée) : le tableau est caché et les cartes affichées (`.lx-mobile-only`).
+- Clavier et dépôt de fichiers : `wwwroot/library.js` (`linkiiLibrary.attach/setDrop/detach`), appelé par les deux pages.
+
+### Listes de lecture
+- Un seul bouton **« Nouvelle liste ▾ »** (le menu propose « Nouveau dossier ») ; la carte « Créer une liste » en fin de grille disparaît.
+- **Carte** : nom, une ligne de méta (« 4 contenus · 0:32 · modifiée il y a 2 h »), **un seul état** (le plus utile d'abord) : *À publier sur N écrans · Publier…* → *N contenus à compléter* → *Diffusée sur N écrans* → *Programmée · Lun – Ven · 08:00 – 12:00* → *Vide* → *Non utilisée*. Case de sélection et bouton « Essayer » au survol ; cadenas sur une liste en lecture seule. Durée et « Modifiée » ne sont plus affichées deux fois.
+- **Filtres** : Toutes · Utilisées · À publier (s'il y en a) · Non utilisées. En recherche ou filtre dans toute l'aire, l'emplacement s'affiche sous chaque carte (colonne « Emplacement » en liste).
+- **Sélection** : Ranger…, Autre aire…, **Dupliquer** (nouveau, en masse), Supprimer.
+
+### Médiathèque
+- **Vignettes « galerie »** (`.lx-mc`) : image d'abord, nom et une ligne dessous (« 1920×1080 · 2,4 Mo »). Étiquettes discrètes : source (Drive, OneDrive, Canva, PDF), durée d'une vidéo, « Non utilisé ».
+- **Clic = aperçu** (`MediaPreviewPanel`, panneau latéral) : grand aperçu (lecteur pour une vidéo), type, définition, durée, poids, emplacement, date, **où il est utilisé** (listes avec nombre d'écrans, contenus avec nombre de listes, liens « Ouvrir »), actions (télécharger, renommer, ranger, autre aire, supprimer). `←` `→` passent au média voisin, `Échap` ferme. Pendant une sélection, ou avec Ctrl/Maj, le clic coche.
+- **Import** : bouton « Importer » (fenêtre fichiers ou adresse web, qui se ferme dès qu'un import démarre) et **dépôt n'importe où sur la page** : un voile apparaît pendant le glisser de fichiers et nomme le dossier de destination. Le champ du voile reste dans la page (caché) : le fichier déposé se lit depuis ce champ (`MediaUploader.AddFiles`). Un glisser interne (vers un dossier) n'affiche pas le voile.
+- Le bandeau « exports Canva inutiles · Nettoyer » disparaît : c'est un cas du filtre **Non utilisés**, qui vaut pour tous les fichiers.
+- Fichiers Drive : plus de case à cocher grisée ; l'explication est dans l'aperçu.
+- Import en échec : « Retirer » directement sur la vignette.
+
+### Corrections et règles
+- **Bug** : supprimer une liste retirait ses **créneaux de planning** sans prévenir. La confirmation (`DeleteImpactBox`) liste les écrans qui la diffusent et chaque créneau retiré (« zone « Rez » · Lun – Ven · 08:00 – 12:00 ») ; idem pour la suppression d'un dossier de listes.
+- **Bug** : « Supprimer » en sélection ne faisait rien si les listes étaient en lecture seule. Le bouton dit « Supprimer 2 (1 en lecture seule) », se grise s'il n'y a rien à supprimer, et la confirmation nomme les listes ignorées.
+- **Incohérence** : « utilisée » ne voulait pas dire la même chose partout (le filtre comptait les plannings, la pastille et le tri non). Une seule règle (`PlaylistUse.Used`) : choisie sur un écran **ou** programmée.
+- **Règle** : état **« À publier »** d'une liste modifiée depuis sa publication (ou choisie mais jamais publiée) : lu dans l'empreinte de publication de chaque écran (`PlaylistUses.PublishedWith`, numéros de révision comparés en entier) et dans les révisions du planning (`PublishedListRevs`).
+- **Règle** : avertissement (non bloquant) quand on crée ou renomme une liste avec le nom d'une autre liste de l'aire.
+- **Incohérence** : la recherche de la médiathèque ne regardait que le dossier ouvert ; elle regarde toute l'aire, comme celle des listes, avec le chemin sous chaque résultat. Les types et sources filtrent ce qu'on voit.
+- **Libellé** : la confirmation de suppression d'un média ne parle plus d'« app » (« dans aucune liste de lecture ni aucun contenu »).
+- La copie d'une liste en lecture seule part à la racine : le message le dit.
+
+### Code
+- `PlaylistLibrary.cs` : `PlaylistUse`, `PlaylistDeleteImpact`, `PlaylistUses.Of / PublishedWith / Impact`.
+- `PlaylistFolders.cs` : `PlaylistOps.Copy` (duplication, sortie de la page).
+- `MediaLibrary.cs` : `UnusedIds()`, `Uses(id)` → `MediaUses` / `MediaUse` ; `UnusedExports(..., key: null)` = tous les fichiers.
+- Nouveaux : `Components/MediaPreviewPanel.razor`, `Components/DeleteImpactBox.razor`, `wwwroot/library.js`, `Linkii.Poc.Tests/LibraryPagesTests.cs`.
+- Réécrits : `Components/Pages/Playlists.razor`, `Components/Pages/Media.razor`. Modifiés : `MediaUploader.razor` (`AddFiles`), `App.razor` (script), `app.css` (bloc `lx-*` en fin de fichier).
+
+### Tests
+- `LibraryPagesTests` : 11 tests (diffusion, à publier, découpage en zones, planning, impact d'une suppression, duplication, médias sans emploi). Ils passent.
+- Suite complète : toujours les 5 échecs connus de `AppsTests` (§50), sans lien.
+
+### Reste à faire (priorité 2, maquette onglet 7)
+- **Remplacer le fichier** d'un média en gardant ses utilisations (écrans « à publier »).
+- **Doublons à l'import** (même contenu) : utiliser l'existant / remplacer / garder les deux.
+- **Réessayer** un import en échec (aujourd'hui : « Retirer » seulement).
+- **Ajouter à une liste…** depuis l'aperçu d'un média.
+- Ne pas proposer une liste vide dans le choix d'un écran.
+- Sélection en plage (Maj + clic) et `Suppr` pour supprimer la sélection.

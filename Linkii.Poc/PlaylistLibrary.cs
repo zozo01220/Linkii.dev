@@ -89,6 +89,64 @@ public class PlaylistLibrary(TenantStore store)
     });
 }
 
+/// <summary>
+/// Diffusion d'une liste de lecture : écrans qui l'ont choisie (une de leurs zones), écrans qui diffusent une version antérieure
+/// (modifiée depuis la publication, ou jamais publiée), créneaux de planning qui la programment. « Utilisée » = choisie ou programmée,
+/// partout pareil (filtre, tri, carte).
+/// </summary>
+public record PlaylistUse(int Screens, int Pending, int Slots, string? FirstSlot)
+{
+    public bool Used => Screens > 0 || Slots > 0;
+    public static readonly PlaylistUse None = new(0, 0, 0, null);
+}
+
+/// <summary>Où une suppression de listes se fait sentir : écrans qui les ont choisies et créneaux de planning retirés (« zone « Rez » · Lun – Ven · 08:00 – 12:00 »).</summary>
+public record PlaylistDeleteImpact(List<string> Screens, List<string> Slots);
+
+public static class PlaylistUses
+{
+    public static Dictionary<Guid, PlaylistUse> Of(IEnumerable<Playlist> lists, IReadOnlyCollection<Screen> screens, IEnumerable<Area> areas)
+    {
+        var zones = areas.SelectMany(a => a.Zones).ToList();
+        var result = new Dictionary<Guid, PlaylistUse>();
+        foreach (var p in lists)
+        {
+            var chosen = screens.Where(s => s.ZonePlaylists().Contains(p.Id)).ToList();
+            var pending = chosen.Count(s => !PublishedWith(s, p))
+                + screens.Count(s => !chosen.Contains(s) && s.PublishedListRevs.TryGetValue(p.Id, out var rev) && rev != p.Revision);   // liste du planning modifiée depuis son instantané
+            var slots = zones.SelectMany(z => z.Slots).Concat(screens.SelectMany(s => s.Slots)).Where(x => x.PlaylistId == p.Id).ToList();
+            result[p.Id] = new PlaylistUse(chosen.Count, pending, slots.Count, slots.Count > 0 ? Planning.Describe(slots[0]) : null);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// L'écran a publié cette liste dans sa révision actuelle. Lu dans l'empreinte de publication (<see cref="Helpers.PublishStamp"/>) :
+    /// « liste:révision:widgets » puis, découpé, « |découpage|liste:révision » par zone.
+    /// </summary>
+    public static bool PublishedWith(Screen s, Playlist p)
+    {
+        if (string.IsNullOrEmpty(s.PublishedStamp)) return false;
+        var id = p.Id.ToString();
+        var rev = p.Revision.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return s.PublishedStamp.Split('|').Select(part => part.Split(':')).Any(x => x.Length >= 2 && x[0] == id && x[1] == rev);
+    }
+
+    /// <summary>Ce que retirerait <see cref="PlaylistOps.Remove"/> : les écrans qui les ont choisies (ils gardent leur instantané) et les créneaux de planning.</summary>
+    public static PlaylistDeleteImpact Impact(IReadOnlyCollection<Guid> ids, IEnumerable<Screen> screens, IEnumerable<Area> areas)
+    {
+        var set = ids.ToHashSet();
+        var list = screens.ToList();
+        var chosen = list.Where(s => s.ZonePlaylists().Any(z => z is { } zid && set.Contains(zid))).Select(s => s.Name).ToList();
+        var slots = new List<string>();
+        foreach (var z in areas.SelectMany(a => a.Zones))
+            slots.AddRange(z.Slots.Where(x => set.Contains(x.PlaylistId)).Select(x => $"zone « {z.Name} » · {Planning.Describe(x)}"));
+        foreach (var s in list)
+            slots.AddRange(s.Slots.Where(x => set.Contains(x.PlaylistId)).Select(x => $"écran « {s.Name} » · {Planning.Describe(x)}"));
+        return new PlaylistDeleteImpact(chosen, slots);
+    }
+}
+
 /// <summary>Un dossier de listes vu par la personne, avec son droit, le nom de son propriétaire et s'il est partagé.</summary>
 public record PlaylistFolderRow(PlaylistFolder Folder, FolderRight Right, string OwnerName, bool Shared);
 
