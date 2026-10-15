@@ -1311,3 +1311,7 @@ La racine étant réservée aux administrateurs, les fichiers Drive (tous stock�
 - Page Médiathèque : un fichier Drive se sélectionne, se glisse sur un dossier et a « Ranger dans un dossier… » (si les dossiers sont activés). Renommer, supprimer et « Autre aire… » restent réservés aux fichiers propres (`Own`) ; la sélection groupée les ignore pour les fichiers Drive (`pickedOwn`).
 - Synchro Drive : un fichier modifié à la source est réimporté en gardant son dossier de rangement (`shelved`). Un fichier retiré à la source disparaît de la médiathèque, comme avant.
 - Limite : supprimer un dossier de la médiathèque supprime aussi les fichiers Drive rangés dedans ; la synchro suivante les réimporte à la racine.
+
+### Retouches de la médiathèque et des listes (15 octobre 2026)
+- **Vignettes plus grandes** : galerie de la médiathèque en colonnes de 220 px minimum (au lieu de 170) et espacement augmenté (`.lx-mgrid`, `app.css`). Mobile inchangé (2 colonnes).
+- **Dossiers toujours affichés** : une recherche ou un filtre (type, source, non utilisés) ne masque plus les dossiers du dossier courant, dans la médiathèque comme dans les listes de lecture (`Media.razor`, `Playlists.razor`). Avec « Dans : toute l'aire », ce sont toujours les dossiers du dossier courant.
