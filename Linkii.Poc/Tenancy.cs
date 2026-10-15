@@ -49,6 +49,8 @@ public class AreaAccess
     /// <summary>Écrans visibles dans le périmètre (null : aucun filtre).</summary>
     public Func<Screen, bool>? Sees { get; init; }
     public Func<Guid, bool>? SeesZoneFn { get; init; }
+    /// <summary>Membres de l'organisation (ni administrateurs ni équipe Linkii) : un dossier privé est celui d'un membre, sans partage (voir <see cref="FolderAccess"/>).</summary>
+    public IReadOnlySet<Guid> MemberIds { get; init; } = new HashSet<Guid>();
 
     /// <summary>Traitements internes et tests (aucune personne connectée) : aucun filtre d'aire.</summary>
     public static readonly AreaAccess System = new();
@@ -88,6 +90,7 @@ public class AreaAccess
         {
             UserId = userId, IsOrgAdmin = org, Level = level, Areas = mine, OrgAreaCount = areas.Count,
             Sees = scope?.Sees, SeesZoneFn = scope?.SeesZone,
+            MemberIds = org ? new HashSet<Guid>() : db.Users.Where(x => x.ClientId == clientId && x.Role == Linkii.Poc.Roles.ClientMember).Select(x => x.Id).ToHashSet(),
             Current = mine.FirstOrDefault(a => a.Id == last) ?? mine.FirstOrDefault()
         };
     }

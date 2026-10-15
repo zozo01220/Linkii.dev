@@ -6,8 +6,9 @@ public enum FolderRight { None, Read, Write, Owner }
 /// <summary>
 /// Droits sur les dossiers de la médiathèque (option « Dossiers dans la médiathèque », §49). L'administrateur de l'organisation a tout ; le
 /// propriétaire d'un dossier a tout dessus ; les autres ont le plus fort des partages qui le couvrent (le dossier ou un de ses parents, donné à
-/// la personne ou à son niveau), plus « tous les dossiers partagés » du niveau. Un niveau en lecture seule plafonne à la lecture.
-/// Un dossier privé (sans partage, créé par un autre) n'est jamais donné par « tous les dossiers ».
+/// la personne ou à son niveau), plus « tous les dossiers » du niveau. Un niveau en lecture seule plafonne à la lecture.
+/// Un dossier privé (sans partage, créé par un autre membre) n'est jamais donné par « tous les dossiers » ; ceux d'un administrateur le sont.
+/// Mêmes règles pour les dossiers des listes de lecture.
 /// </summary>
 public static class FolderAccess
 {
@@ -30,8 +31,9 @@ public static class FolderAccess
                     : level != null && s.Kind == FolderShareKind.Level && s.TargetId == level.Id;
                 if (mine) best = Max(best, s.Write ? FolderRight.Write : FolderRight.Read);
             }
-            // « tous les dossiers partagés » : seulement ceux qui sont partagés (avec quelqu'un) et qui ne sont pas à la personne
-            if (level?.AllFolders is { } mode && n.Shares.Count > 0 && n.OwnerId != a.UserId)
+            // « tous les dossiers » : ceux de l'organisation, c'est-à-dire partagés (avec quelqu'un) ou créés par un administrateur (ou dont le
+            // propriétaire a été retiré) ; jamais le dossier privé d'un autre membre
+            if (level?.AllFolders is { } mode && n.OwnerId != a.UserId && (n.Shares.Count > 0 || !IsMember(a, n.OwnerId)))
                 best = Max(best, mode == "write" ? FolderRight.Write : FolderRight.Read);
         }
         return Capped(a, best);
@@ -51,6 +53,7 @@ public static class FolderAccess
     /// <summary>Le dossier ajouté à un niveau de droits ne donne rien au-delà de sa lecture seule.</summary>
     private static FolderRight Capped(AreaAccess a, FolderRight r) => a.ReadOnly && r > FolderRight.Read ? FolderRight.Read : r;
     private static FolderRight Max(FolderRight x, FolderRight y) => (FolderRight)Math.Max((int)x, (int)y);
+    private static bool IsMember(AreaAccess a, Guid? ownerId) => ownerId is { } o && a.MemberIds.Contains(o);
 
     /// <summary>Le dossier, puis ses parents jusqu'à la racine de l'aire (sans boucle).</summary>
     public static IEnumerable<T> Chain<T>(T f, IReadOnlyCollection<T> all) where T : class, IFolderNode

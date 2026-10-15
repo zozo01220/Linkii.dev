@@ -1180,3 +1180,31 @@ Demande : alléger les pages `/playlists` et `/media`, et corriger au passage le
 - **Ajouter à une liste…** depuis l'aperçu d'un média.
 - Ne pas proposer une liste vide dans le choix d'un écran.
 - Sélection en plage (Maj + clic) et `Suppr` pour supprimer la sélection.
+
+## 52. Visibilité des dossiers par les niveaux de droits : médiathèque et listes de lecture (15 octobre 2026) : corrigé
+
+Signalement : la visibilité des dossiers réglée dans un niveau de droits ne marchait pas pour la médiathèque, et n'existait pas pour les listes de lecture. Reproduit sur une instance de test (un administrateur crée « Affiches » et « Événements », règle le niveau sur « Tous, en lecture », un membre se connecte) : le membre ne voyait aucun des deux dossiers.
+
+### Causes
+- **« Tous » ne donnait que les dossiers déjà partagés avec quelqu'un.** Un dossier créé par un administrateur, jamais partagé, passait pour « privé » et n'était donné à personne : le cas le plus courant.
+- La section « Dossiers » de l'éditeur de niveau n'apparaissait que s'il existait déjà un dossier : impossible de cocher « Peut créer ses dossiers » ou « Tous » dans une organisation qui n'en a pas encore.
+- Les choix dossier par dossier restaient enregistrés en « Aucun » ou « Tous » : « Aucun » laissait donc l'accès.
+- Listes de lecture : les sélecteurs des écrans, de l'éditeur d'écran, des murs et du planning proposaient **toutes** les listes, y compris celles rangées dans un dossier invisible ; l'éditeur de liste s'ouvrait par son adresse.
+
+### Règles
+- **« Tous, en lecture / en écriture »** donne les dossiers *de l'organisation* : ceux créés par un administrateur (ou dont le propriétaire a été retiré) et ceux qu'un membre a partagés, y compris ceux créés plus tard. Jamais le dossier privé d'un autre membre. Un sous-dossier suit son dossier ; un niveau en lecture seule plafonne à la lecture ; le périmètre (aires) s'applique toujours. Mêmes règles pour les deux sortes de dossiers (`FolderAccess.For`, qui reçoit les membres de l'organisation par `AreaAccess.MemberIds`).
+- **« Dossiers choisis »** : accès dossier par dossier (partage de niveau). **« Aucun »** et **« Tous »** retirent les choix dossier par dossier à l'enregistrement.
+- **Listes proposées** (`PlaylistOps.Choosable`) : celles que la personne voit, plus celles déjà en place sur un écran, une zone, un mur ou un créneau qu'elle voit (le choix actuel reste affiché). Appliqué à la page Écrans, à l'éditeur d'écran, aux murs et au planning. Une liste d'un dossier invisible ouverte par son adresse est « introuvable ».
+
+### Écran (Membres › niveau › Dossiers)
+- Section toujours présente quand l'option Dossiers est active.
+- Une phrase explique le mode choisi.
+- En « Dossiers choisis » seulement : la liste des dossiers, séparée en **Médiathèque** et **Listes de lecture**, avec le chemin (« Affiches › Été ») et l'accès hérité d'un dossier parent.
+
+### Fichiers
+- `Folders.cs`, `Tenancy.cs` (`AreaAccess.MemberIds`), `PlaylistFolders.cs` (`Choosable`), `Components/Pages/Members.razor`, `Components/Pages/Screens.razor`, `Components/ScreenEditor.razor`, `Components/WallDialog.razor`, `Components/Pages/PlanningPage.razor`, `Components/Pages/PlaylistEditor.razor`.
+- Tests : 1 dans `FolderAccessTests`, 6 dans `PlaylistFolderTests`. Ils passent ; toujours les 5 échecs connus de `AppsTests`.
+- Vérifié dans le navigateur (instance de test) : « Tous, en lecture » fait apparaître les deux dossiers au membre, en lecture seule ; « Dossiers choisis » enregistre un seul dossier ; « Aucun » retire l'accès.
+
+### Limite
+- Le serveur ne refuse pas encore qu'un membre choisisse, par une requête forgée, une liste qu'il ne voit pas : seuls les sélecteurs filtrent.

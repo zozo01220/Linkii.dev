@@ -16,6 +16,21 @@ public static class PlaylistOps
     public static bool CanEdit(ClientDb d, Playlist p) => RightOf(d, p) >= FolderRight.Write;
 
     /// <summary>
+    /// Listes proposées dans les choix (écrans, zones, murs, planning) : celles que la personne voit, plus celles déjà en place
+    /// sur un écran, une zone ou un créneau qu'elle voit (pour ne pas perdre ni masquer le choix actuel). Triées par nom.
+    /// </summary>
+    public static List<Playlist> Choosable(ClientDb d)
+    {
+        // (les listes de l'instantané du planning comptent aussi : le calcul « à publier » d'un écran les relit)
+        var inUse = d.Screens.SelectMany(s => s.ZonePlaylists().OfType<Guid>().Concat(s.Slots.Select(x => x.PlaylistId)).Concat(s.PublishedListRevs.Keys))
+            .Concat(d.Areas.Where(a => d.Access.HasArea(a.Id)).SelectMany(a => a.Zones).Where(z => d.Access.SeesZone(z.Id))
+                .SelectMany(z => z.Slots.Select(x => x.PlaylistId).Concat(z.PlaylistId is { } w ? [w] : Array.Empty<Guid>())))
+            .ToHashSet();
+        return d.Playlists.Where(p => RightOf(d, p) != FolderRight.None || inUse.Contains(p.Id))
+            .OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+    }
+
+    /// <summary>
     /// Supprime des listes de lecture : les écrans qui les diffusaient gardent leur instantané publié ; elles ne sont plus choisies (modification en attente sur ces écrans).
     /// Ni les contenus ni la médiathèque ne bougent.
     /// </summary>

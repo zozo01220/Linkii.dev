@@ -174,4 +174,85 @@ public class PlaylistFolderTests
         Assert.Equal(FolderRight.Read, FolderRightOf(marc, f));
         Assert.Equal(FolderRight.None, FolderRightOf(sophie, f));
     }
+
+    // ---------- Visibilité par le niveau (§52) ----------
+
+    [Fact]
+    public void All_folders_gives_the_folders_an_administrator_created_without_sharing_them()
+    {
+        editeur.AllFolders = "read";
+        var f = MakeFolder(admin, "Campagnes");
+        var sub = MakeFolder(admin, "Été", f.Id);
+        var p = MakeList("Promo", sub.Id);
+        Assert.Equal(FolderRight.Read, FolderRightOf(marc, f));
+        Assert.Equal(FolderRight.Read, PlaylistOps.RightOf(As(marc), p));
+
+        editeur.AllFolders = "write";
+        Assert.Equal(FolderRight.Write, PlaylistOps.RightOf(As(marc), p));
+
+        editeur.AllFolders = null;
+        Assert.Equal(FolderRight.None, PlaylistOps.RightOf(As(marc), p));
+    }
+
+    [Fact]
+    public void All_folders_never_gives_the_private_folder_of_another_member()
+    {
+        editeur.AllFolders = "write";
+        var f = MakeFolder(alice, "Brouillons d'Alice");
+        var p = MakeList("Essai", f.Id);
+        Assert.Equal(FolderRight.None, PlaylistOps.RightOf(As(marc), p));
+        // dès qu'Alice le partage (avec n'importe qui), il fait partie des dossiers de l'organisation
+        Assert.Null(PlaylistFolderOps.SetShare(As(alice), f.Id, FolderShareKind.User, lea.Id, false));
+        Assert.Equal(FolderRight.Write, PlaylistOps.RightOf(As(marc), p));
+    }
+
+    [Fact]
+    public void A_folder_whose_owner_was_removed_is_given_by_all_folders()
+    {
+        editeur.AllFolders = "read";
+        var f = MakeFolder(alice, "Repris");
+        f.OwnerId = null;
+        Assert.Equal(FolderRight.Read, FolderRightOf(marc, f));
+    }
+
+    [Fact]
+    public void A_chosen_folder_shows_its_lists_and_subfolders_and_an_empty_choice_removes_it()
+    {
+        var f = MakeFolder(admin, "Accueil");
+        var sub = MakeFolder(admin, "Matin", f.Id);
+        var p = MakeList("Ouverture", sub.Id);
+        Assert.Equal(FolderRight.None, PlaylistOps.RightOf(As(marc), p));
+
+        Assert.Null(FolderOps.SetLevelShares(As(admin), editeur.Id, new Dictionary<Guid, string> { [f.Id] = "write" }));
+        Assert.Equal(FolderRight.Write, PlaylistOps.RightOf(As(marc), p));
+
+        // « Aucun » (ou « Tous ») : la page Membres envoie un choix vide, qui retire le partage du niveau
+        Assert.Null(FolderOps.SetLevelShares(As(admin), editeur.Id, new Dictionary<Guid, string>()));
+        Assert.Equal(FolderRight.None, PlaylistOps.RightOf(As(marc), p));
+    }
+
+    [Fact]
+    public void A_read_only_level_with_all_folders_in_writing_still_only_reads()
+    {
+        lecture.AllFolders = "write";
+        var p = MakeList("Vitrine", MakeFolder(admin, "Vitrines").Id);
+        Assert.Equal(FolderRight.Read, PlaylistOps.RightOf(As(lea), p));
+    }
+
+    [Fact]
+    public void The_lists_offered_on_screens_are_the_visible_ones_plus_those_already_in_place()
+    {
+        var hidden = MakeFolder(admin, "Direction");
+        var secret = MakeList("Résultats", hidden.Id);
+        var used = MakeList("Annonce", hidden.Id);
+        var open = MakeList("Accueil");
+        db.Screens.Add(new Screen { ClientId = client.Id, AreaId = siege.Id, ZoneId = siege.Zones[0].Id, Name = "Hall", Token = "t", PlaylistId = used.Id });
+
+        var offered = PlaylistOps.Choosable(As(marc)).Select(p => p.Id).ToList();
+        Assert.Contains(open.Id, offered);
+        Assert.Contains(used.Id, offered);      // déjà sur un écran qu'il voit : le choix actuel reste affiché
+        Assert.DoesNotContain(secret.Id, offered);
+
+        Assert.Contains(secret.Id, PlaylistOps.Choosable(As(admin)).Select(p => p.Id));
+    }
 }

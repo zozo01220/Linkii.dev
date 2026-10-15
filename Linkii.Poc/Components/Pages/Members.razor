@@ -243,7 +243,7 @@ else
                             <p class="lv-note">Cocher = utiliser : créer et modifier des contenus avec cette app. Les connexions aux comptes restent à l'administrateur.</p>
                         </div>
                     </section>
-                    @if (foldersOn && folders.Count > 0)
+                    @if (foldersOn)
                     {
                         <section class="lv-sec"><h4><i>5</i>Dossiers</h4>
                             <div class="lv-in">
@@ -256,21 +256,30 @@ else
                                     <button type="button" role="radio" aria-checked="@(lf.FolderMode == "read" ? "true" : "false")" class="@(lf.FolderMode == "read" ? "on" : "")" @onclick='() => lf.FolderMode = "read"'>Tous, en lecture</button>
                                     <button type="button" role="radio" aria-checked="@(lf.FolderMode == "write" ? "true" : "false")" class="@(lf.FolderMode == "write" ? "on" : "")" @onclick='() => lf.FolderMode = "write"'>Tous, en écriture</button>
                                 </div>
-                                <p class="lv-note">« Tous » couvre les dossiers déjà partagés (médiathèque et listes de lecture) et ceux qui le seront plus tard, jamais les dossiers privés d'un membre.</p>
-                                @foreach (var fd in folders)
+                                <p class="lv-note">@FolderModeNote(lf.FolderMode) Médiathèque et listes de lecture, dans le périmètre du niveau. Un sous-dossier suit son dossier. Les fichiers et les listes rangés hors dossier restent visibles de tous.</p>
+                                @if (lf.FolderMode == "chosen")
                                 {
-                                    var folder = fd;
-                                    var area = areas.FirstOrDefault(a => a.Id == folder.AreaId);
-                                    var reach = area != null && AccessLevels.Reaches(lf.ToLevel(), area, screens);
-                                    var mode = lf.FolderModes.GetValueOrDefault(folder.Id, "");
-                                    <div class="lv-row @(reach ? "" : "lv-off")">
-                                        <span class="lv-lbl"><b>@folder.Name</b> <small class="muted">@folder.Kind · @area?.Name@(reach ? "" : " · hors du périmètre du niveau")</small></span>
-                                        <div class="seg">
-                                            <button type="button" class="@(mode == "" ? "on" : "")" disabled="@(!reach)" aria-label="Aucun accès à @folder.Name" @onclick='() => SetFolderMode(folder.Id, "")'>—</button>
-                                            <button type="button" class="@(mode == "read" ? "on" : "")" disabled="@(!reach)" @onclick='() => SetFolderMode(folder.Id, "read")'>Lecture</button>
-                                            <button type="button" class="@(mode == "write" ? "on" : "")" disabled="@(!reach)" @onclick='() => SetFolderMode(folder.Id, "write")'>Écriture</button>
-                                        </div>
-                                    </div>
+                                    @if (folders.Count == 0) { <p class="lv-note">Aucun dossier pour l'instant : créez-en dans la médiathèque ou dans les listes de lecture.</p> }
+                                    @foreach (var kind in folders.GroupBy(f => f.Kind))
+                                    {
+                                        <div class="lv-sub">@kind.Key</div>
+                                        @foreach (var fd in kind)
+                                        {
+                                            var folder = fd;
+                                            var area = areas.FirstOrDefault(a => a.Id == folder.AreaId);
+                                            var reach = area != null && AccessLevels.Reaches(lf.ToLevel(), area, screens);
+                                            var mode = lf.FolderModes.GetValueOrDefault(folder.Id, "");
+                                            var inherited = InheritedMode(folder);
+                                            <div class="lv-row @(reach ? "" : "lv-off")">
+                                                <span class="lv-lbl"><b>@folder.Path</b> <small class="muted">@area?.Name@(reach ? "" : " · hors du périmètre du niveau")@(inherited != null && mode == "" ? $" · {(inherited == "write" ? "écriture" : "lecture")} par le dossier parent" : "")</small></span>
+                                                <div class="seg">
+                                                    <button type="button" class="@(mode == "" ? "on" : "")" disabled="@(!reach)" aria-label="Aucun accès propre à @folder.Name" @onclick='() => SetFolderMode(folder.Id, "")'>—</button>
+                                                    <button type="button" class="@(mode == "read" ? "on" : "")" disabled="@(!reach)" @onclick='() => SetFolderMode(folder.Id, "read")'>Lecture</button>
+                                                    <button type="button" class="@(mode == "write" ? "on" : "")" disabled="@(!reach)" @onclick='() => SetFolderMode(folder.Id, "write")'>Écriture</button>
+                                                </div>
+                                            </div>
+                                        }
+                                    }
                                 }
                             </div>
                         </section>
@@ -319,7 +328,7 @@ else
     private List<Area> areas = new();
     private List<Screen> screens = new();
     private List<LevelFolder> folders = new();   // dossiers de la médiathèque et des listes de lecture (tous les niveaux, toutes les aires)
-    private record LevelFolder(Guid Id, Guid AreaId, string Name, string Kind, List<FolderShare> Shares);
+    private record LevelFolder(Guid Id, Guid? ParentId, Guid AreaId, string Name, string Path, string Kind, List<FolderShare> Shares);
     private bool foldersOn;                      // option « Dossiers dans la médiathèque » de l'organisation
     private List<AccessLevel> levels = new();
     private bool busy;
@@ -348,9 +357,16 @@ else
             d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.Token != null).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
             d.Tenant.Levels.OrderBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
             d.Users.OrderBy(u => u.Role == Roles.ClientAdmin ? 0 : 1).ThenBy(u => u.Label, StringComparer.CurrentCultureIgnoreCase).ToList()));
-        folders = Store.Read(d => d.Root.MediaFolders.Where(f => f.ClientId == d.ClientId).Select(f => new LevelFolder(f.Id, f.AreaId, f.Name, "Médiathèque", f.Shares))
-            .Concat(d.Root.PlaylistFolders.Where(f => f.ClientId == d.ClientId).Select(f => new LevelFolder(f.Id, f.AreaId, f.Name, "Listes", f.Shares)))
-            .OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
+        // dossiers des deux sortes, rangés par chemin (« Affiches › Été ») pour que les sous-dossiers suivent leur parent
+        folders = Store.Read(d =>
+        {
+            var media = FolderOps.All(d);
+            var lists = PlaylistFolderOps.All(d);
+            static string PathOf<T>(T f, IReadOnlyCollection<T> all) where T : class, IFolderNode => string.Join(" › ", FolderAccess.Chain(f, all).Reverse().Select(x => x.Name));
+            return media.Select(f => new LevelFolder(f.Id, f.ParentId, f.AreaId, f.Name, PathOf(f, media), "Médiathèque", f.Shares)).OrderBy(f => f.Path, StringComparer.CurrentCultureIgnoreCase)
+                .Concat(lists.Select(f => new LevelFolder(f.Id, f.ParentId, f.AreaId, f.Name, PathOf(f, lists), "Listes de lecture", f.Shares)).OrderBy(f => f.Path, StringComparer.CurrentCultureIgnoreCase))
+                .ToList();
+        });
         foldersOn = Store.Read(d => d.Tenant.FoldersOn);
     }
 
@@ -527,12 +543,35 @@ else
     {
         if (lf is not { } f) return;
         var level = f.ToLevel();
-        // les dossiers ne sont réécrits que si l'option est active : éteinte, les partages existants restent intacts
-        levelError = Store.Write(d => AccessLevels.Save(d, level) ?? (foldersOn ? FolderOps.SetLevelShares(d, level.Id, f.FolderModes) : null));
+        // les dossiers ne sont réécrits que si l'option est active : éteinte, les partages existants restent intacts.
+        // Hors « Dossiers choisis », les choix dossier par dossier sont retirés : « Aucun » ne laisse aucun accès, « Tous » couvre tout.
+        var chosen = f.FolderMode == "chosen" ? f.FolderModes : new Dictionary<Guid, string>();
+        levelError = Store.Write(d => AccessLevels.Save(d, level) ?? (foldersOn ? FolderOps.SetLevelShares(d, level.Id, chosen) : null));
         if (levelError != null) return;
         Toast.Ok(f.Id == null ? $"Niveau « {level.Name.Trim()} » créé." : $"Niveau « {level.Name.Trim()} » enregistré : ses membres le reçoivent aussitôt.");
         lf = null;
         Load();
+    }
+
+    private static string FolderModeNote(string mode) => mode switch
+    {
+        "chosen" => "Accès aux seuls dossiers choisis ci-dessous.",
+        "read" => "Tous les dossiers de l'organisation, en lecture : ceux d'un administrateur et ceux qu'un membre a partagés, y compris ceux créés plus tard. Jamais le dossier privé d'un membre.",
+        "write" => "Tous les dossiers de l'organisation, en écriture : ceux d'un administrateur et ceux qu'un membre a partagés, y compris ceux créés plus tard. Jamais le dossier privé d'un membre.",
+        _ => "Aucun dossier des autres : seulement les siens, et ceux partagés avec la personne elle-même."
+    };
+
+    // Droit donné par un dossier parent choisi (le sous-dossier en hérite)
+    private string? InheritedMode(LevelFolder f)
+    {
+        if (lf == null) return null;
+        var p = f.ParentId;
+        for (var n = 0; p is { } pid && n < FolderAccess.MaxDepth; n++)
+        {
+            if (lf.FolderModes.TryGetValue(pid, out var m)) return m;
+            p = folders.FirstOrDefault(x => x.Id == pid && x.Kind == f.Kind)?.ParentId;
+        }
+        return null;
     }
 
     private void SetFolderMode(Guid folderId, string mode)

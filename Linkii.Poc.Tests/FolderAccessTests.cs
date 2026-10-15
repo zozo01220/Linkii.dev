@@ -113,6 +113,17 @@ public class FolderAccessTests
     }
 
     [Fact]
+    public void All_folders_gives_the_media_folders_of_an_administrator_even_unshared()
+    {
+        editeur.AllFolders = "read";
+        var f = Make(admin, "Affiches");
+        var sub = Make(admin, "Été", f.Id);
+        Assert.Equal(FolderRight.Read, Right(marc, f));
+        Assert.Equal(FolderRight.Read, Right(marc, sub));
+        Assert.Equal(FolderRight.None, Right(sophie, f));   // hors de son périmètre
+    }
+
+    [Fact]
     public void A_member_outside_the_area_of_a_folder_sees_nothing_of_it()
     {
         var f = Make(alice, "Siège seulement");
