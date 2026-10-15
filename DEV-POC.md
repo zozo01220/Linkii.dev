@@ -1304,3 +1304,10 @@ Maquette validée, même logique que la modale du niveau de droits : en-tête av
 
 ### Limites
 - Non essayé dans le navigateur ; un membre non admin dont les contenus utilisent un média de la racine ne le voit plus dans le sélecteur.
+
+### Fichiers Drive rangeables dans un dossier (complément du §56, 15 octobre 2026)
+La racine étant réservée aux administrateurs, les fichiers Drive (tous stockés à la racine) doivent pouvoir être rangés :
+- `FolderOps.Move` accepte les fichiers Drive (plus d'exclusion) et ne refuse plus l'« autre aire » pour eux (ils sont communs à toutes les aires).
+- Page Médiathèque : un fichier Drive se sélectionne, se glisse sur un dossier et a « Ranger dans un dossier… » (si les dossiers sont activés). Renommer, supprimer et « Autre aire… » restent réservés aux fichiers propres (`Own`) ; la sélection groupée les ignore pour les fichiers Drive (`pickedOwn`).
+- Synchro Drive : un fichier modifié à la source est réimporté en gardant son dossier de rangement (`shelved`). Un fichier retiré à la source disparaît de la médiathèque, comme avant.
+- Limite : supprimer un dossier de la médiathèque supprime aussi les fichiers Drive rangés dedans ; la synchro suivante les réimporte à la racine.

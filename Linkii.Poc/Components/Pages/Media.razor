@@ -233,7 +233,7 @@ else
                         else if (failed)
                         {
                             <Ico Name="x" Size="22" /><span title="@item.Error">@(item.Error ?? "Import en échec")</span>
-                            @if (Selectable(item)) { <div class="acts" @onclick:stopPropagation="true"><button type="button" @onclick="() => confirmDelete = new() { item.Id }">Retirer</button></div> }
+                            @if (Own(item)) { <div class="acts" @onclick:stopPropagation="true"><button type="button" @onclick="() => confirmDelete = new() { item.Id }">Retirer</button></div> }
                         }
                         else { <MediaThumb Media="item" /> }
                         @if (Selectable(item)) { <input type="checkbox" class="sc-check lx-check" checked="@picked.Contains(item.Id)" @onclick:stopPropagation="true" @onchange="() => Toggle(item.Id)" aria-label="Sélectionner @item.Name" /> }
@@ -258,9 +258,9 @@ else
             <button type="button" @onclick="ToggleAll">@(AllPicked ? "Tout désélectionner" : $"Tout sélectionner ({Visible.Count(Selectable)})")</button>
             <span class="vr"></span>
             @if (FoldersShown) { <button type="button" disabled="@(pickedEditable.Count == 0)" @onclick="() => folderMove = pickedEditable"><Ico Name="folder" Size="15" /><span class="lx-lbl">Ranger…</span></button> }
-            @if (canMove) { <button type="button" @onclick="() => bulkMove = true"><Ico Name="move" Size="15" /><span class="lx-lbl">Autre aire…</span></button> }
+            @if (canMove && pickedOwn.Count > 0) { <button type="button" @onclick="() => bulkMove = true"><Ico Name="move" Size="15" /><span class="lx-lbl">Autre aire…</span></button> }
             <span class="vr"></span>
-            <button type="button" class="del" @onclick="() => confirmDelete = picked.ToList()"><Ico Name="trash" Size="15" /> Supprimer</button>
+            <button type="button" class="del" @onclick="() => confirmDelete = pickedOwn.Select(x => x.Id).ToList()"><Ico Name="trash" Size="15" /> Supprimer</button>
             <span class="vr"></span>
             <button type="button" title="Tout désélectionner (Échap)" aria-label="Tout désélectionner" @onclick="() => picked.Clear()"><Ico Name="x" Size="15" /></button>
         </div>
@@ -290,7 +290,7 @@ else
 @if (open is { } om)
 {
     var idx = OpenList.FindIndex(x => x.Id == om.Id);
-    <MediaPreviewPanel Item="om" Path="@PathOf(om)" CanEdit="Selectable(om)" Drive="@(MediaLibrary.IsDrive(om) ? DriveTitle(DriveOf(om)) : null)"
+    <MediaPreviewPanel Item="om" Path="@PathOf(om)" CanEdit="Own(om)" Drive="@(MediaLibrary.IsDrive(om) ? DriveTitle(DriveOf(om)) : null)"
                        HasPrev="idx > 0" HasNext="idx >= 0 && idx < OpenList.Count - 1"
                        OnClose="() => openId = null" OnPrev="() => Step(-1)" OnNext="() => Step(1)"
                        OnRename="() => OpenRename(om)"
@@ -363,7 +363,7 @@ else
 }
 @if (bulkMove)
 {
-    <AreaMoveDialog Kind="media" Items="allFiles.Where(f => picked.Contains(f.Id)).Select(f => (f.Id, f.Name)).ToList()" OnClose="moved => { bulkMove = false; if (moved) Reload(); }" />
+    <AreaMoveDialog Kind="media" Items="pickedOwn.Select(f => (f.Id, f.Name)).ToList()" OnClose="moved => { bulkMove = false; if (moved) Reload(); }" />
 }
 
 @if (renaming != null)
@@ -598,11 +598,11 @@ else
                 <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
                 <div class="kebab-menu" role="menu">
                     <button type="button" role="menuitem" @onclick="() => { menuFor = null; Open(item); }"><Ico Name="eye" Size="16" /> Aperçu et utilisations</button>
-                    @if (Selectable(item)) { <button type="button" role="menuitem" @onclick="() => OpenRename(item)"><Ico Name="edit" Size="16" /> Renommer</button> }
+                    @if (Own(item)) { <button type="button" role="menuitem" @onclick="() => OpenRename(item)"><Ico Name="edit" Size="16" /> Renommer</button> }
                     @if (item.FileName != null) { <a role="menuitem" href="/media/@item.FileName" download="@item.Name" @onclick="() => menuFor = null"><Ico Name="download" Size="16" /> Télécharger</a> }
                     @if (FoldersShown && Selectable(item)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (item.Id, item.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
-                    @if (canMove && Selectable(item)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; moving = item; }"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
-                    @if (Selectable(item)) { <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; confirmDelete = new() { item.Id }; }"><Ico Name="trash" Size="16" /> Supprimer</button> }
+                    @if (canMove && Own(item)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; moving = item; }"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
+                    @if (Own(item)) { <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; confirmDelete = new() { item.Id }; }"><Ico Name="trash" Size="16" /> Supprimer</button> }
                 </div>
             }
         </div>
@@ -672,7 +672,10 @@ else
     private void Toggle(Guid id) { if (!picked.Remove(id)) picked.Add(id); }
 
     // Un fichier qu'on peut sélectionner : ni synchronisé depuis un Drive, ni dans un dossier en lecture seule.
-    private bool Selectable(MediaItem m) => !MediaLibrary.IsDrive(m) && CanEdit(m);
+    // sélectionnable / rangeable : ses fichiers, et les fichiers Drive (qu on peut ranger dans un dossier mais ni renommer ni supprimer ici)
+    private bool Selectable(MediaItem m) => CanEdit(m) && (FoldersShown || !MediaLibrary.IsDrive(m));
+    private bool Own(MediaItem m) => !MediaLibrary.IsDrive(m) && CanEdit(m);
+    private List<(Guid Id, string Name)> pickedOwn => allFiles.Where(m => picked.Contains(m.Id) && Own(m)).Select(m => (m.Id, m.Name)).ToList();
 
     // Clic : aperçu ; en cours de sélection (ou Ctrl/Maj + clic) : coche ou décoche.
     private void ClickCard(MediaItem m, MouseEventArgs e)

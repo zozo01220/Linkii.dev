@@ -501,6 +501,9 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
                 // retirés du dossier, ou modifiés (remplacés ci-dessous)
                 var keep = remote.ToDictionary(f => f.Id, f => f.Version);
                 var stale = local.Where(m => !keep.TryGetValue(m.Info.GetValueOrDefault("driveFile") ?? "", out var v) || v != m.Info.GetValueOrDefault("driveVer")).ToList();
+                // un fichier modifié est réimporté : il garde le dossier de la médiathèque où on l'avait rangé
+                var shelved = stale.Where(m => m.FolderId != null && keep.ContainsKey(m.Info.GetValueOrDefault("driveFile") ?? ""))
+                    .ToDictionary(m => m.Info["driveFile"], m => m.FolderId, StringComparer.Ordinal);
                 if (stale.Count > 0) { Delete(stale); changed = true; }
 
                 // déplacés d'un sous-dossier à l'autre : même fichier, autre chemin (l'ordre « par nom » en dépend)
@@ -535,6 +538,7 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
                         {
                             item.Info["drive"] = key; item.Info["driveFile"] = f.Id; item.Info["driveVer"] = f.Version;
                             item.Info["driveName"] = f.Name; item.Info["drivePath"] = f.Path; item.Info["driveTime"] = f.Time;
+                            if (shelved.TryGetValue(f.Id, out var shelf)) item.FolderId = shelf;
                         });
                         changed = true;
                     }

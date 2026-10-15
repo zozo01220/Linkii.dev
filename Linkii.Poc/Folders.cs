@@ -300,10 +300,11 @@ public static class FolderOps
         }
         else if (!FolderAccess.CanCreateAtRoot(d.Access, LevelPages.Media)) return (0, new() { "Votre niveau de droits ne permet pas de ranger des fichiers à la racine." });
 
-        foreach (var m in d.Root.Media.Where(x => x.ClientId == d.ClientId && wanted.Contains(x.Id) && MediaLibrary.IsFile(x) && !MediaLibrary.IsDrive(x)).ToList())
+        foreach (var m in d.Root.Media.Where(x => x.ClientId == d.ClientId && wanted.Contains(x.Id) && MediaLibrary.IsFile(x)).ToList())
         {
             if (m.FolderId == folderId) continue;
-            if (target != null && target.AreaId != m.AreaId) { refused.Add($"« {m.Name} » est dans une autre aire."); continue; }
+            // les fichiers Drive sont communs à toutes les aires : on peut les ranger dans le dossier de n'importe laquelle
+            if (target != null && target.AreaId != m.AreaId && !MediaLibrary.IsDrive(m)) { refused.Add($"« {m.Name} » est dans une autre aire."); continue; }
             if (m.FolderId is { } from && Find(d, from) is { } src && RightOf(d, src) < FolderRight.Write) { refused.Add($"« {m.Name} » : pas d'écriture dans son dossier."); continue; }
             m.FolderId = folderId;
             moved++;
