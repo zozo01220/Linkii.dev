@@ -1339,3 +1339,34 @@ Maquette validée : mêmes gestes partout, une seule ligne d'outils (recherche, 
 
 ### Limites
 - Non essayé dans le navigateur (l'app tournait et verrouillait l'exe : compilation vérifiée seulement). Le menu reste ouvert après un choix, pour combiner les critères.
+
+## 58. Console Linkii : tableau de bord, clients, réglages (16 octobre 2026) : codé
+
+Refonte de la console administrateur en briques ; première brique : Clients. Revendeurs et Facturation viennent ensuite (leurs pages actuelles restent telles quelles). Maquette validée avant le code.
+
+### Navigation et pages
+- Menu : Tableau de bord (`/admin`), Clients, Revendeurs (`/admin/resellers`, avant `/admin`), Facturation, Réglages. La page Supervision (`/admin/screens`) est supprimée : les écrans se voient dans la fiche du client.
+- **Tableau de bord** (`Admin/Dashboard.razor`) : clients (nouveaux du mois), écrans (en ligne), utilisateurs (actifs sur 30 j), essais en cours ; nouveaux clients sur 6 mois ; répartition par état et par licence ; « À traiter » (comptes à valider, essais finissant sous 3 jours, essais terminés, suspendus, bloqués) avec lien vers Clients filtré (`?etat=`).
+- **Clients** (`Admin/Clients.razor`) : onglets par état avec effectifs, recherche, filtres licence et origine ; tableau (licence, écrans en ligne sur total, utilisateurs, état). Un clic ouvre une **fiche latérale** (Aperçu, Écrans, Utilisateurs, Activité) : licence Base/Growth immédiate, essai (+7/+14/+30 j, passer en abonné), valider le compte / renvoyer le lien, suspendre / bloquer / réactiver, suppression (nom à saisir), « Entrer dans l'espace » (journalisé). `?nouveau=1` ouvre la création.
+- **Réglages** (`PlatformSettingsPage.razor`) : sections Inscription et essai, Suspension et blocage (information), E-mails (SMTP), Conditions. Pas de limite d'écrans par plan : les clients paient au nombre d'écrans.
+
+### Suspendu et bloqué
+- `Tenant.Suspended` : écrans coupés, back-office accessible (bandeau rouge « Votre espace est suspendu » dans le back-office du client).
+- `Tenant.Blocked` (nouveau) : écrans coupés et connexion refusée aux membres. `Tenant.IsCut` = l'un ou l'autre ; utilisé par les écrans, les synchronisations Drive, les alertes et les QR.
+- Avant, « Suspendu » fermait aussi le back-office : la connexion ne teste plus que `Blocked`.
+- `ClientStates.cs` : un seul état affiché par client (Bloqué > Suspendu > À valider > Essai terminé > Essai > Actif).
+
+### Création d'un client (`Tenancy.CreateClient`)
+- Licence Growth, mode simple (`ExpertMode = false`).
+- Créé par la console ou un revendeur : essai gratuit aussitôt (durée = réglage de la plateforme). En libre-service : l'essai démarre toujours à la validation de l'e-mail.
+
+### Côté client
+- Bandeau orange en haut : « N jours restants dans votre période d'essai (jusqu'au …) » ; rouge une fois l'essai terminé.
+- Intégrations et Widgets sont visibles en mode simple, **en lecture seule** : bandeau « Lecture seule en mode simple » avec bouton « Passer en mode expert », actions grisées, et toute écriture refusée côté serveur (`TenantStore.SimpleModeLocked`, hors consultation par l'équipe Linkii).
+
+### Adresses des revendeurs
+- `ResellerResolver.HostFor` : séparateur configurable `Linkii:SubdomainSeparator` (« - » par défaut sur `*.duckdns.org`). Suppression d'un revendeur sans client dans Revendeurs.
+
+### Limites
+- Vérifié dans le navigateur sur une instance de test : création, validation, blocage, tableau de bord, réglages, connexion d'un client, bandeau d'essai, Intégrations en lecture seule. Non essayés : suppression, suspension côté client (bandeau), prolongation d'essai, changement de licence, page Widgets.
+- Automatisation de l'hôte proxy et du certificat (API Nginx Proxy Manager, ou certificat générique DuckDNS) : proposée, non codée.
