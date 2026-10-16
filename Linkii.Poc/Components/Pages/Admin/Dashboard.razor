@@ -1,0 +1,124 @@
+@page "/admin"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "PlatformAdmin")]
+@inject JsonStore Root
+
+<div class="page-head">
+    <div>
+        <h1>Tableau de bord</h1>
+        <p class="sub">Vue d'ensemble de la plateforme · @now.ToLocalTime().ToString("d MMMM yyyy", Fr)</p>
+    </div>
+    <a class="btn" href="admin/clients?nouveau=1"><Ico Name="plus" Size="16" /> Nouveau client</a>
+</div>
+
+<div class="adm-k4">
+    <div class="adm-card"><div class="kl">Clients</div><div class="kn">@rows.Count</div><div class="ks @(newThisMonth > 0 ? "up" : "")">@(newThisMonth > 0 ? $"+{newThisMonth} ce mois" : "aucun nouveau ce mois") · @resellers revendeur@(resellers > 1 ? "s" : "")</div></div>
+    <div class="adm-card"><div class="kl">Écrans</div><div class="kn">@screens</div><div class="ks">@online en ligne@(screens > 0 ? $" · {(int)Math.Round(online * 100.0 / screens)} %" : "")</div></div>
+    <div class="adm-card"><div class="kl">Utilisateurs</div><div class="kn">@users</div><div class="ks">@(users == 0 ? "—" : $"{(int)Math.Round(active30 * 100.0 / users)} % actifs sur 30 jours")</div></div>
+    <div class="adm-card"><div class="kl">Essais en cours</div><div class="kn">@Count(ClientStates.Trial)</div><div class="ks">@(endingSoon > 0 ? $"{endingSoon} se termine{(endingSoon > 1 ? "nt" : "")} sous 7 jours" : "aucun ne se termine bientôt")</div></div>
+</div>
+
+<div class="adm-g2">
+    <div class="adm-card">
+        <div class="adm-ct">Nouveaux clients <span>6 derniers mois</span></div>
+        <div class="adm-chart" role="img" aria-label="Nouveaux clients par mois">
+            @for (var i = 0; i < months.Count; i++)
+            {
+                var (label, n) = months[i];
+                <div class="col"><span class="v">@n</span><i class="@(i == months.Count - 1 ? "now" : "")" style="height:@(maxMonth == 0 ? 0 : (int)Math.Round(n * 90.0 / maxMonth))px"></i><span class="l">@label</span></div>
+            }
+        </div>
+    </div>
+    <div class="adm-card">
+        <div class="adm-ct">Répartition <span>par état</span></div>
+        <div class="adm-stk">
+            @foreach (var s in ClientStates.All.Where(s => Count(s) > 0)) { <i style="flex:@Count(s);background:@ClientStates.Color(s)" title="@s : @Count(s)"></i> }
+        </div>
+        <div class="adm-lg">
+            @foreach (var s in ClientStates.All) { <div><span class="adm-dot" style="background:@ClientStates.Color(s)"></span>@s<b>@Count(s)</b></div> }
+        </div>
+        <div class="adm-ct" style="margin-top:20px">Licences <span>Base · Growth</span></div>
+        <div class="adm-stk">
+            @if (rows.Count > 0)
+            {
+                <i style="flex:@Math.Max(basePlan, 0);background:#C9D3E0"></i>
+                <i style="flex:@Math.Max(growth, 0);background:#3B82C4"></i>
+            }
+        </div>
+        <div class="adm-lg">
+            <div><span class="adm-dot" style="background:#C9D3E0"></span>Base<b>@basePlan</b></div>
+            <div><span class="adm-dot" style="background:#3B82C4"></span>Growth<b>@growth</b></div>
+        </div>
+    </div>
+</div>
+
+<div class="adm-card">
+    <div class="adm-ct">À traiter <span>@todo.Count</span></div>
+    @foreach (var t in todo)
+    {
+        <div class="adm-todo">
+            <div class="ic @t.Tone"><Ico Name="@t.Icon" Size="18" /></div>
+            <div class="grow">@t.Title<small>@t.Detail</small></div>
+            <a class="btn ghost sm" href="admin/clients?etat=@Uri.EscapeDataString(t.State)">Ouvrir</a>
+        </div>
+    }
+    @if (todo.Count == 0) { <div class="adm-empty">Rien à traiter pour le moment.</div> }
+</div>
+
+@code {
+    private record Todo(string Icon, string Tone, string Title, string Detail, string State);
+    private static readonly System.Globalization.CultureInfo Fr = new("fr-CH");
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+    private record Row(Tenant Client, string State, User? Owner);
+    private List<Row> rows = new();
+    private List<(string Label, int N)> months = new();
+    private List<Todo> todo = new();
+    private DateTime now = DateTime.UtcNow;
+    private int screens, online, users, active30, resellers, newThisMonth, endingSoon, basePlan, growth, maxMonth;
+
+    private int Count(string state) => rows.Count(r => r.State == state);
+
+    protected override void OnInitialized()
+    {
+        now = DateTime.UtcNow;
+        var since = now.AddDays(-30);
+        var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        Root.Read(d =>
+        {
+            rows = d.Clients.Select(c => { var o = Signup.OwnerOf(d, c); return new Row(c, ClientStates.Of(c, o, now), o); }).ToList();
+            var live = d.Screens.Where(s => s.Token != null).ToList();
+            screens = live.Count;
+            online = live.Count(s => s.LastSeenUtc is { } ls && now - ls <= TimeSpan.FromSeconds(90));
+            var us = d.Users.Where(u => u.ClientId != null && Roles.IsClient(u.Role)).ToList();
+            users = us.Count;
+            active30 = us.Count(u => u.ActiveSince(since));
+            resellers = d.Resellers.Count(r => !r.IsDefault);
+            return 0;
+        });
+        newThisMonth = rows.Count(r => r.Client.CreatedUtc >= monthStart);
+        endingSoon = rows.Count(r => r.State == ClientStates.Trial && r.Client.TrialEndsUtc is { } e && e - now <= TimeSpan.FromDays(7));
+        basePlan = rows.Count(r => !r.Client.IsGrowth);
+        growth = rows.Count - basePlan;
+        months = Enumerable.Range(0, 6).Select(i =>
+        {
+            var m = monthStart.AddMonths(i - 5);
+            return (Fr.DateTimeFormat.GetAbbreviatedMonthName(m.Month).TrimEnd('.'), rows.Count(r => r.Client.CreatedUtc >= m && r.Client.CreatedUtc < m.AddMonths(1)));
+        }).ToList();
+        maxMonth = months.Max(m => m.N);
+
+        var pending = rows.Where(r => r.State == ClientStates.Pending).ToList();
+        if (pending.Count > 0)
+            todo.Add(new("mail", "", $"{pending.Count} compte{(pending.Count > 1 ? "s" : "")} à valider", string.Join(", ", pending.Take(3).Select(r => r.Client.Name)) + (pending.Count > 3 ? "…" : ""), ClientStates.Pending));
+        var soon = rows.Where(r => r.State == ClientStates.Trial && r.Client.TrialEndsUtc is { } e && e - now <= TimeSpan.FromDays(3)).OrderBy(r => r.Client.TrialEndsUtc).ToList();
+        if (soon.Count > 0)
+            todo.Add(new("hourglass", "ac", $"{soon.Count} essai{(soon.Count > 1 ? "s" : "")} se termine{(soon.Count > 1 ? "nt" : "")} sous 3 jours", string.Join(", ", soon.Take(3).Select(r => $"{r.Client.Name} ({r.Client.TrialDaysLeft(now)} j)")), ClientStates.Trial));
+        var ended = rows.Where(r => r.State == ClientStates.Ended).ToList();
+        if (ended.Count > 0)
+            todo.Add(new("clock", "warn", $"{ended.Count} essai{(ended.Count > 1 ? "s" : "")} terminé{(ended.Count > 1 ? "s" : "")}", "Écrans sur « Essai terminé » : prolongez l'essai ou passez le client en abonné.", ClientStates.Ended));
+        var susp = rows.Where(r => r.State == ClientStates.Suspended).ToList();
+        if (susp.Count > 0)
+            todo.Add(new("pause", "warn", $"{susp.Count} client{(susp.Count > 1 ? "s" : "")} suspendu{(susp.Count > 1 ? "s" : "")}", "Leurs écrans ne diffusent plus.", ClientStates.Suspended));
+        var blocked = rows.Where(r => r.State == ClientStates.Blocked).ToList();
+        if (blocked.Count > 0)
+            todo.Add(new("lock", "bad", $"{blocked.Count} client{(blocked.Count > 1 ? "s" : "")} bloqué{(blocked.Count > 1 ? "s" : "")}", "Écrans coupés et back-office fermé.", ClientStates.Blocked));
+    }
+}

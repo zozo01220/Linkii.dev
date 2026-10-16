@@ -208,7 +208,7 @@ app.Use(async (ctx, next) =>
             var c = db.Clients.FirstOrDefault(x => x.Id == cid);
             if (c == null) return false;
             return u.Role == Roles.PlatformAdmin || u.Role == Roles.ResellerAdmin && c.ResellerId == u.ResellerId
-                   || Roles.IsClient(u.Role) && u.ClientId == c.Id && !c.Suspended;
+                   || Roles.IsClient(u.Role) && u.ClientId == c.Id && !c.Blocked;
         });
         if (!ok)
         {
@@ -390,7 +390,7 @@ app.MapGet("/login/sso/finish", async (HttpContext ctx, string? t, ExternalLogin
             }
         }
         if (u == null) return ((Guid?)null, (string?)(db.Users.Any(x => x.Email == id.Email && Tenancy.HostAllows(x, host)) ? "taken" : "nolink"));
-        if (u.Disabled || u.ClientId != null && db.Clients.FirstOrDefault(c => c.Id == u.ClientId)?.Suspended != false) return (null, "suspended");
+        if (u.Disabled || u.ClientId != null && db.Clients.FirstOrDefault(c => c.Id == u.ClientId) is not { Blocked: false }) return (null, "suspended");
         return (u.Id, null);
     });
     if (userId is { } uid)
@@ -483,7 +483,7 @@ app.MapGet("/q/{code}", (string code, HttpContext ctx, JsonStore store, ScanLog 
             if (p.Draft.FirstOrDefault(x => x.QrCode == code) is { } it)
             {
                 var client = db.Clients.FirstOrDefault(c => c.Id == p.ClientId);
-                return new QrHit(p.ClientId, it.Id, QrTracking.Destination(it.QrUrl), it.QrOn && client is { IsGrowth: true, Suspended: false });
+                return new QrHit(p.ClientId, it.Id, QrTracking.Destination(it.QrUrl), it.QrOn && client is { IsGrowth: true, IsCut: false });
             }
         return null;
     });

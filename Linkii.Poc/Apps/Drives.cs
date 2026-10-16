@@ -453,7 +453,7 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
     /// <summary>Synchronise tous les dossiers des sources actives (tâche de fond, toutes les 15 minutes).</summary>
     public async Task SyncAll(CancellationToken ct)
     {
-        var work = store.Read(db => db.Clients.Where(c => !c.Suspended)
+        var work = store.Read(db => db.Clients.Where(c => !c.IsCut)
             .SelectMany(c => c.DriveFolders.Where(f => DriveSources.Enabled(c, f.Source) && DriveSources.Configured(c, f.Source)).Select(f => (c.Id, f.Id)))
             .ToList());
         foreach (var (clientId, folderId) in work)

@@ -234,7 +234,11 @@ public class Tenant
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid ResellerId { get; set; }
+    /// <summary>Suspendu : les écrans cessent de diffuser, le back-office reste accessible.</summary>
     public bool Suspended { get; set; }
+    /// <summary>Bloqué : écrans coupés et back-office fermé aux membres de l'organisation.</summary>
+    public bool Blocked { get; set; }
+    public bool IsCut => Suspended || Blocked;
     /// <summary>Niveaux de droits créés par les administrateurs de l'organisation (voir <see cref="AccessLevel"/>).</summary>
     public List<AccessLevel> Levels { get; set; } = new();
     /// <summary>Option « Dossiers dans la médiathèque » (Réglages › Médiathèque, éteinte par défaut) : dossiers, partages et écran des niveaux.</summary>

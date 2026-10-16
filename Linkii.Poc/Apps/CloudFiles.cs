@@ -103,7 +103,7 @@ public class CloudFileService(DriveService drive, PdfService pdf, JsonStore stor
     /// </summary>
     public async Task CheckAll(CancellationToken ct)
     {
-        var due = store.Read(db => db.Clients.Where(c => !c.Suspended)
+        var due = store.Read(db => db.Clients.Where(c => !c.IsCut)
             .SelectMany(c => db.Media.Where(m => m.ClientId == c.Id && CloudFileKind.Of(m.AppId)?.Connected(c) == true
                     && m.Settings.GetValueOrDefault("gfile") is { Length: > 0 } && m.Settings.GetValueOrDefault("auto") != "false" && IsDue(m))
                 .Select(m => (c.Id, m.Id)))

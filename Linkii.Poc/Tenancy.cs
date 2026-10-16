@@ -373,7 +373,7 @@ public static class Tenancy
     public static string? Blocked(Db db, Screen s)
     {
         var c = db.Clients.FirstOrDefault(x => x.Id == s.ClientId);
-        if (c == null || c.Suspended || db.Resellers.FirstOrDefault(r => r.Id == c.ResellerId)?.Active != true) return "suspended";
+        if (c == null || c.Suspended || c.Blocked || db.Resellers.FirstOrDefault(r => r.Id == c.ResellerId)?.Active != true) return "suspended";
         return c.TrialEnded(DateTime.UtcNow) ? "trial" : null;
     }
 

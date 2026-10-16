@@ -171,7 +171,7 @@ public static class ScreenAlerts
     public static List<AlertBatch> Plan(Db db, DateTime now, DateTime startedUtc)
     {
         var batches = new List<AlertBatch>();
-        foreach (var c in db.Clients.Where(c => c.IsGrowth && c.AlertOffline && !c.Suspended))
+        foreach (var c in db.Clients.Where(c => c.IsGrowth && c.AlertOffline && !c.IsCut))
         {
             var delay = TimeSpan.FromMinutes(Math.Clamp(c.AlertOfflineMinutes, 1, 1440));
             if (now - startedUtc < delay) continue;
