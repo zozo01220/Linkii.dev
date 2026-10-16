@@ -28,7 +28,7 @@
             <div class="modal-body">
                 <div class="form-grid">
                     <div><label class="lbl">Nom</label><input class="full" @bind="name" placeholder="Ex. : Acme Affichage" /></div>
-                    <div><label class="lbl">Sous-domaine <small>(.@(BaseDomain))</small></label><input class="full" @bind="slug" placeholder="acme" /></div>
+                    <div><label class="lbl">Sous-domaine <small>(@Resolver.HostFor("…"))</small></label><input class="full" @bind="slug" placeholder="acme" /></div>
                     <div><label class="lbl">Domaine propre <small>(facultatif)</small></label><input class="full" @bind="domain" placeholder="affichage.acme.ch" /></div>
                     <div><label class="lbl">Administrateur : nom</label><input class="full" @bind="adminName" /></div>
                     <div><label class="lbl">Administrateur : e-mail</label><input class="full" type="email" @bind="adminEmail" autocomplete="off" /></div>
@@ -47,6 +47,21 @@
     </div>
 }
 
+@if (toDelete != null)
+{
+    <div class="modal-backdrop" @onclick="() => toDelete = null"></div>
+    <div class="modal app-modal" role="dialog" aria-modal="true">
+        <div class="modal-head"><div class="grow"><h3>Supprimer le revendeur</h3></div></div>
+        <div class="modal-body">
+            <p>Supprimer définitivement « <b>@toDelete.Name</b> » (@Resolver.HostFor(toDelete.Slug)) et les comptes de son équipe ? Cette action est irréversible.</p>
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn ghost" @onclick="() => toDelete = null">Annuler</button>
+            <button type="button" class="btn" @onclick="Delete">Supprimer</button>
+        </div>
+    </div>
+}
+
 <table class="tbl">
     <thead><tr><th>Revendeur</th><th>Adresse</th><th class="num">Clients</th><th class="num">Écrans</th><th>État</th><th></th></tr></thead>
     <tbody>
@@ -62,7 +77,7 @@
                 }
                 else
                 {
-                    <div>@(r.R.Slug + "." + BaseDomain)</div>
+                    <div>@Resolver.HostFor(r.R.Slug)</div>
                     @if (!string.IsNullOrEmpty(r.R.CustomDomain)) { <small>@r.R.CustomDomain</small> }
                     <a href="#" @onclick="() => Edit(r.R)" @onclick:preventDefault>domaine propre…</a>
                 }
@@ -74,6 +89,10 @@
                 @if (!r.R.IsDefault)
                 {
                     <button class="btn ghost" @onclick="() => Toggle(r.R)">@(r.R.Active ? "Suspendre" : "Activer")</button>
+                    @if (r.Clients == 0)
+                    {
+                        <button class="btn ghost" @onclick="() => toDelete = r.R">Supprimer</button>
+                    }
                 }
             </td>
         </tr>
@@ -88,7 +107,7 @@
     private string name = "", slug = "", domain = "", adminName = "", adminEmail = "", adminPwd = "";
     private string? formError, editDomain;
     private Guid? editId;
-    private string BaseDomain => Config["Linkii:BaseDomain"] ?? "linkii.com";
+    private Reseller? toDelete;
 
     protected override void OnInitialized() => Load();
 
@@ -128,8 +147,8 @@
         name = slug = domain = adminName = adminEmail = adminPwd = ""; showAdd = false;
         Load();
         var mailErr = await Mail.SendWelcome(created!, Resolver.LoginUrl(created!, Nav.BaseUri), $"Votre espace revendeur « {rName} » est prêt.", person, email, pwd);
-        if (mailErr == null) Toast.Ok($"Revendeur « {rName} » créé : {s}.{BaseDomain}. Les identifiants de l'administrateur ont été envoyés à {email}.");
-        else Toast.Error($"Revendeur « {rName} » créé : {s}.{BaseDomain}, mais l'e-mail n'a pas pu être envoyé : {mailErr}. Communiquez vous-même le mot de passe provisoire à {email} : {pwd}");
+        if (mailErr == null) Toast.Ok($"Revendeur « {rName} » créé : {Resolver.HostFor(s)}. Les identifiants de l'administrateur ont été envoyés à {email}.");
+        else Toast.Error($"Revendeur « {rName} » créé : {Resolver.HostFor(s)}, mais l'e-mail n'a pas pu être envoyé : {mailErr}. Communiquez vous-même le mot de passe provisoire à {email} : {pwd}");
     }
 
     private void SaveDomain(Reseller r)
@@ -146,6 +165,24 @@
     }
 
     private void Edit(Reseller r) { editId = r.Id; editDomain = r.CustomDomain ?? ""; }
+
+    // Refusé tant que le revendeur a des clients : on les supprime ou on les déplace d'abord.
+    private void Delete()
+    {
+        var r = toDelete!; toDelete = null;
+        var err = Root.Write(d =>
+        {
+            var x = d.Resellers.FirstOrDefault(y => y.Id == r.Id);
+            if (x == null) return null;
+            if (x.IsDefault) return "Le revendeur Linkii ne peut pas être supprimé.";
+            if (d.Clients.Any(c => c.ResellerId == x.Id)) return "Ce revendeur a encore des clients.";
+            d.Users.RemoveAll(u => u.ResellerId == x.Id);
+            d.Resellers.Remove(x);
+            return null;
+        });
+        if (err != null) Toast.Error(err); else Toast.Ok($"Revendeur « {r.Name} » supprimé.");
+        Load();
+    }
 
     private void Toggle(Reseller r)
     {

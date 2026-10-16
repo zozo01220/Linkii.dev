@@ -288,6 +288,11 @@ public class TenantStore(JsonStore root, TenantContext ctx, Microsoft.AspNetCore
 public class ResellerResolver(JsonStore store, IConfiguration config)
 {
     private string BaseDomain => (config["Linkii:BaseDomain"] ?? "linkii.com").ToLowerInvariant();
+    /// <summary>Séparateur entre le sous-domaine et le domaine de base : "." (défaut) ou "-" (ex. DuckDNS : acme-linkii.duckdns.org). DuckDNS n'accepte pas les sous-domaines : "-" par défaut sur *.duckdns.org.</summary>
+    private string Sep => config["Linkii:SubdomainSeparator"] is { Length: > 0 } x ? x : BaseDomain.EndsWith(".duckdns.org") ? "-" : ".";
+
+    /// <summary>Adresse (sans schéma) d'un revendeur sur le domaine de la plateforme.</summary>
+    public string HostFor(string slug) => slug + Sep + BaseDomain;
 
     /// <summary>Retourne le revendeur de ce domaine, le revendeur par défaut pour un domaine neutre (localhost, IP…), ou null si le sous-domaine est inconnu.</summary>
     public Reseller? Resolve(string? host) => store.Read(db => ResolveIn(db, host));
@@ -301,12 +306,12 @@ public class ResellerResolver(JsonStore store, IConfiguration config)
         var byDomain = db.Resellers.FirstOrDefault(r => !string.IsNullOrEmpty(r.CustomDomain) && r.CustomDomain.Equals(h, StringComparison.OrdinalIgnoreCase));
         if (byDomain != null) return byDomain;
 
-        foreach (var baseDomain in new[] { BaseDomain, "localhost" })
+        foreach (var (baseDomain, sep) in new[] { (BaseDomain, Sep), ("localhost", ".") })
         {
             if (h == baseDomain) return Default(db);
-            if (h.EndsWith("." + baseDomain))
+            if (h.EndsWith(sep + baseDomain))
             {
-                var slug = h[..^(baseDomain.Length + 1)];
+                var slug = h[..^(baseDomain.Length + sep.Length)];
                 return db.Resellers.FirstOrDefault(r => r.Slug == slug);   // sous-domaine inconnu => null
             }
         }
@@ -322,7 +327,7 @@ public class ResellerResolver(JsonStore store, IConfiguration config)
         if (Uri.TryCreate(currentBase, UriKind.Absolute, out var cur) && Resolve(cur.Host)?.Id == r.Id)
             return cur.GetLeftPart(UriPartial.Authority) + "/login";
         var host = !string.IsNullOrWhiteSpace(r.CustomDomain) ? r.CustomDomain.Trim().ToLowerInvariant()
-                 : r.IsDefault ? BaseDomain : r.Slug + "." + BaseDomain;
+                 : r.IsDefault ? BaseDomain : HostFor(r.Slug);
         return "https://" + host + "/login";
     }
 
@@ -332,7 +337,7 @@ public class ResellerResolver(JsonStore store, IConfiguration config)
         var d = (domain ?? "").Trim().ToLowerInvariant();
         if (d.Length == 0) return false;
         return store.Read(db => db.Resellers.Any(r => r.Active &&
-            (!string.IsNullOrEmpty(r.CustomDomain) && r.CustomDomain.Equals(d, StringComparison.OrdinalIgnoreCase) || d == r.Slug + "." + BaseDomain)));
+            (!string.IsNullOrEmpty(r.CustomDomain) && r.CustomDomain.Equals(d, StringComparison.OrdinalIgnoreCase) || d == HostFor(r.Slug))));
     }
 }
 
