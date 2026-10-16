@@ -2,11 +2,11 @@ using System.Globalization;
 
 namespace Linkii.Poc;
 
-/// <summary>Un renouvellement payé (mensuel ou annuel) d'un client direct ou d'un revendeur : journal des paiements.</summary>
+/// <summary>Un paiement de renouvellement (mensuel ou annuel) d'un client : journal des paiements encaissés par Linkii.</summary>
 public class Payment
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    /// <summary>reseller | client</summary>
+    /// <summary>Toujours « client » : les revendeurs ne paient pas Linkii, ils en reçoivent une commission.</summary>
     public string Kind { get; set; } = "client";
     public Guid? ResellerId { get; set; }
     public Guid? ClientId { get; set; }
@@ -19,14 +19,33 @@ public class Payment
     public string Period { get; set; } = "monthly";
     public int Screens { get; set; }
     public decimal Amount { get; set; }
+    /// <summary>Frais de paiement (estimés tant que Stripe n'envoie pas le montant réel).</summary>
+    public decimal Fee { get; set; }
+    /// <summary>Commission du revendeur au moment du paiement : taux figé, montant calculé sur le net (montant moins frais). 0 pour un client direct.</summary>
+    public int CommissionPct { get; set; }
+    public decimal Commission { get; set; }
     /// <summary>Premier paiement : fixe la date anniversaire et met fin à l'essai.</summary>
     public bool First { get; set; }
 }
 
+/// <summary>Versement d'un mois à un revendeur (dernier jour du mois) : enregistré à la main une fois le virement fait.</summary>
+public class Payout
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ResellerId { get; set; }
+    public int Year { get; set; }
+    public int Month { get; set; }
+    public DateTime PaidUtc { get; set; }
+    public string Reference { get; set; } = "";
+    /// <summary>Montant versé, figé au moment du versement.</summary>
+    public decimal Amount { get; set; }
+}
+
 /// <summary>
-/// Abonnements : un client direct paie au mois ou à l'année, un revendeur au mois. La date anniversaire est celle du premier paiement et ne bouge plus.
-/// Sans paiement à la date anniversaire, le compte est bloqué automatiquement : pas de relance ni de suivi. Le paiement suivant le débloque.
-/// Prix par écran et par mois selon la licence (Réglages › Facturation). En attendant Stripe, un bouton enregistre à la main le paiement du renouvellement.
+/// Abonnements : tous les clients (directs ou rattachés à un revendeur) paient Linkii au tarif unique, au mois ou à l'année. La date anniversaire est celle du premier
+/// paiement et ne bouge plus ; sans paiement à cette date, le client est bloqué automatiquement (pas de relance). Un revendeur reçoit de Linkii, le dernier jour du mois,
+/// une commission sur le net (montant payé moins frais) des paiements reçus dans le mois ; un paiement annuel est commissionné d'un coup.
+/// En attendant Stripe, un bouton enregistre à la main le paiement du renouvellement.
 /// </summary>
 public static class Subscriptions
 {
@@ -42,37 +61,96 @@ public static class Subscriptions
     public static int ScreensOf(Db db, Tenant c) => db.Screens.Count(s => s.ClientId == c.Id && s.Token != null);
     public static int UsersOf(Db db, Tenant c) => db.Users.Count(u => u.ClientId == c.Id && Roles.IsClient(u.Role) && !u.Disabled);
 
-    /// <summary>Un client compte dans la facture quand il est actif : ni en essai, ni à valider, ni suspendu, ni bloqué.</summary>
+    /// <summary>Un client compte dans le chiffre d'affaires quand il est actif : ni en essai, ni à valider, ni suspendu, ni bloqué.</summary>
     public static bool Billable(Db db, Tenant c, DateTime now) => ClientStates.Of(c, Signup.OwnerOf(db, c), now) == ClientStates.Active;
 
     /// <summary>Montant mensuel d'un client : écrans × prix de sa licence.</summary>
     public static decimal MonthlyOf(Db db, Tenant c) => ScreensOf(db, c) * Unit(PricesOf(db), c.Plan);
 
-    /// <summary>Montant d'un renouvellement d'un client direct : au mois, ou 12 mois remisés pour un paiement annuel.</summary>
+    /// <summary>Montant d'un renouvellement : au mois, ou 12 mois remisés pour un paiement annuel.</summary>
     public static decimal ClientAmount(Db db, Tenant c) =>
         Math.Round(c.BillingPeriod == "annual" ? MonthlyOf(db, c) * 12 * (1 - PricesOf(db).AnnualPct / 100m) : MonthlyOf(db, c), 2);
 
-    /// <summary>Équivalent mensuel d'un client direct (un paiement annuel est remisé).</summary>
+    /// <summary>Équivalent mensuel d'un client (un paiement annuel est remisé).</summary>
     public static decimal ClientMonthlyEquivalent(Db db, Tenant c) =>
         Math.Round(c.BillingPeriod == "annual" ? MonthlyOf(db, c) * (1 - PricesOf(db).AnnualPct / 100m) : MonthlyOf(db, c), 2);
 
-    public record Line(Tenant Client, string Plan, int Screens, int Users, decimal Unit, decimal Amount);
+    // ---------- Commission des revendeurs ----------
 
-    public record ResellerBill(Reseller R, List<Line> Lines, decimal Gross, decimal Discount, decimal Net)
+    public static bool IsReseller(Db db, Tenant c) => db.Resellers.FirstOrDefault(r => r.Id == c.ResellerId) is { IsDefault: false };
+
+    public static int CommissionPct(Db db, Reseller r) => r.IsDefault ? 0 : Math.Clamp(r.CommissionPct ?? db.Platform.DefaultCommissionPct, 0, 100);
+
+    /// <summary>Frais de paiement estimés : pourcentage + montant fixe (Réglages › Facturation).</summary>
+    public static decimal FeeOf(Db db, decimal amount) =>
+        amount <= 0 ? 0 : Math.Round(amount * db.Platform.StripeFeePct / 100m + db.Platform.StripeFeeFixed, 2);
+
+    /// <summary>Commission sur le net : (montant − frais) × taux, arrondie au centime.</summary>
+    public static decimal CommissionOf(decimal amount, decimal fee, int pct) => Math.Round(Math.Max(0, amount - fee) * pct / 100m, 2);
+
+    // ---------- Mois (fuseau de Zurich) ----------
+
+    private static readonly TimeZoneInfo Zurich = FindZone();
+    private static TimeZoneInfo FindZone() { try { return TimeZoneInfo.FindSystemTimeZoneById("Europe/Zurich"); } catch (Exception) { return TimeZoneInfo.Local; } }
+    public static DateTime ToLocal(DateTime utc) => TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), Zurich);
+    public static bool InMonth(DateTime utc, int year, int month) { var l = ToLocal(utc); return l.Year == year && l.Month == month; }
+    /// <summary>Jour du versement : le dernier jour du mois.</summary>
+    public static DateTime PayoutDate(int year, int month) => new(year, month, DateTime.DaysInMonth(year, month));
+
+    public record Share(int Payments, decimal Gross, decimal Fees, decimal Net, decimal Commission)
     {
-        public int Screens => Lines.Sum(l => l.Screens);
+        public static readonly Share None = new(0, 0, 0, 0, 0);
     }
 
-    /// <summary>Renouvellement mensuel d'un revendeur : écrans de ses clients actifs au tarif de leur licence, moins son rabais.</summary>
-    public static ResellerBill ResellerBillOf(Db db, Reseller r, DateTime now)
+    /// <summary>Part d'un revendeur pour un mois : paiements de ses clients reçus ce mois-là, frais, net et commission figée sur chaque paiement.</summary>
+    public static Share ShareOf(Db db, Reseller r, int year, int month)
     {
-        var p = PricesOf(db);
-        var lines = db.Clients.Where(c => c.ResellerId == r.Id && Billable(db, c, now)).OrderBy(c => c.Name)
-            .Select(c => new Line(c, c.Plan, ScreensOf(db, c), UsersOf(db, c), Unit(p, c.Plan), Math.Round(ScreensOf(db, c) * Unit(p, c.Plan), 2))).ToList();
-        var gross = lines.Sum(l => l.Amount);
-        var disc = Math.Round(gross * r.DiscountPct / 100m, 2);
-        return new(r, lines, gross, disc, gross - disc);
+        var pays = db.Payments.Where(p => p.ResellerId == r.Id && InMonth(p.PaidUtc, year, month)).ToList();
+        if (pays.Count == 0) return Share.None;
+        return new(pays.Count, pays.Sum(p => p.Amount), pays.Sum(p => p.Fee), pays.Sum(p => p.Amount - p.Fee), pays.Sum(p => p.Commission));
     }
+
+    public record Expected(Tenant Client, DateTime Due, decimal Amount, decimal Fee, decimal Commission);
+
+    /// <summary>Renouvellements encore attendus d'ici la fin du mois en cours (clients actifs du revendeur) et la commission qu'ils rapporteraient : une prévision, pas un acquis.</summary>
+    public static List<Expected> ExpectedOf(Db db, Reseller r, DateTime now)
+    {
+        var local = ToLocal(now);
+        var end = new DateTime(local.Year, local.Month, DateTime.DaysInMonth(local.Year, local.Month));
+        var pct = CommissionPct(db, r);
+        return db.Clients.Where(c => c.ResellerId == r.Id && !c.Blocked && c.NextRenewalUtc is { } n && n.Date >= local.Date && n.Date <= end && Billable(db, c, now))
+            .OrderBy(c => c.NextRenewalUtc).Select(c =>
+            {
+                var amount = ClientAmount(db, c);
+                var fee = FeeOf(db, amount);
+                return new Expected(c, c.NextRenewalUtc!.Value, amount, fee, CommissionOf(amount, fee, pct));
+            }).ToList();
+    }
+
+    public static Payout? PayoutOf(Db db, Guid resellerId, int year, int month) => db.Payouts.FirstOrDefault(p => p.ResellerId == resellerId && p.Year == year && p.Month == month);
+
+    public const string PayoutOpen = "En cours", PayoutDue = "À verser", PayoutDone = "Versé", PayoutEmpty = "Rien à verser";
+
+    /// <summary>« En cours » jusqu'au dernier jour du mois, « À verser » le jour même et après, « Versé » une fois le virement saisi.</summary>
+    public static string PayoutState(Db db, Reseller r, int year, int month, DateTime now)
+    {
+        if (PayoutOf(db, r.Id, year, month) != null) return PayoutDone;
+        var share = ShareOf(db, r, year, month);
+        if (share.Commission <= 0) return PayoutEmpty;
+        return ToLocal(now).Date >= PayoutDate(year, month) ? PayoutDue : PayoutOpen;
+    }
+
+    public static Payout? MarkPaid(Db db, Reseller r, int year, int month, string reference, DateTime now)
+    {
+        if (PayoutOf(db, r.Id, year, month) != null) return null;
+        var share = ShareOf(db, r, year, month);
+        if (share.Commission <= 0) return null;
+        var p = new Payout { ResellerId = r.Id, Year = year, Month = month, PaidUtc = now, Reference = (reference ?? "").Trim(), Amount = share.Commission };
+        db.Payouts.Add(p);
+        return p;
+    }
+
+    public static bool Unpay(Db db, Guid payoutId) => db.Payouts.RemoveAll(p => p.Id == payoutId) > 0;
 
     // ---------- Renouvellement ----------
 
@@ -99,7 +177,7 @@ public static class Subscriptions
     /// <summary>Le bouton « Paiement reçu » : premier paiement, ou renouvellement dû dans les 7 jours (ou déjà dépassé). Pas plus tôt : évite d'avancer la date par erreur.</summary>
     public static bool CanRecord(DateTime? next, DateTime now) => next == null || next.Value.Date <= now.Date.AddDays(7);
 
-    /// <summary>Enregistre le paiement d'un renouvellement d'un client direct. null : rien à enregistrer (renouvellement pas encore proche).</summary>
+    /// <summary>Enregistre le paiement d'un renouvellement d'un client (direct ou d'un revendeur). null : rien à enregistrer (renouvellement pas encore proche).</summary>
     public static Payment? RecordClient(Db db, Tenant c, DateTime now)
     {
         if (!CanRecord(c.NextRenewalUtc, now)) return null;
@@ -107,59 +185,42 @@ public static class Subscriptions
         var from = first ? now : c.NextRenewalUtc!.Value;
         if (first) { c.AnchorDay = now.Day; c.TrialEndsUtc = null; c.TrialReminderSentUtc = null; c.TrialEndedNotifiedUtc = null; }
         var amount = ClientAmount(db, c);
+        var fee = FeeOf(db, amount);
+        var reseller = db.Resellers.FirstOrDefault(r => r.Id == c.ResellerId);
+        var pct = reseller == null ? 0 : CommissionPct(db, reseller);
         var next = NextAfter(from, c.AnchorDay, StepMonths(c));
         c.NextRenewalUtc = next;
         if (c.Blocked && c.BlockedReason == PaymentReason && next.Date >= now.Date) { c.Blocked = false; c.BlockedReason = ""; }
-        var pay = new Payment { Kind = "client", ClientId = c.Id, ResellerId = c.ResellerId, Name = c.Name, PaidUtc = now, FromUtc = from, ToUtc = next, Period = c.BillingPeriod, Screens = ScreensOf(db, c), Amount = amount, First = first };
+        var pay = new Payment { ClientId = c.Id, ResellerId = c.ResellerId, Name = c.Name, PaidUtc = now, FromUtc = from, ToUtc = next, Period = c.BillingPeriod, Screens = ScreensOf(db, c),
+            Amount = amount, Fee = fee, CommissionPct = pct, Commission = CommissionOf(amount, fee, pct), First = first };
         db.Payments.Add(pay);
         return pay;
     }
 
-    /// <summary>Enregistre le paiement du renouvellement mensuel d'un revendeur.</summary>
-    public static Payment? RecordReseller(Db db, Reseller r, DateTime now)
-    {
-        if (r.IsDefault || !CanRecord(r.NextRenewalUtc, now)) return null;
-        var first = r.NextRenewalUtc == null;
-        var from = first ? now : r.NextRenewalUtc!.Value;
-        if (first) r.AnchorDay = now.Day;
-        var bill = ResellerBillOf(db, r, now);
-        var next = NextAfter(from, r.AnchorDay, 1);
-        r.NextRenewalUtc = next;
-        if (!r.Active && r.BlockedReason == PaymentReason && next.Date >= now.Date) { r.Active = true; r.BlockedReason = ""; }
-        var pay = new Payment { Kind = "reseller", ResellerId = r.Id, Name = r.Name, PaidUtc = now, FromUtc = from, ToUtc = next, Period = "monthly", Screens = bill.Screens, Amount = bill.Net, First = first };
-        db.Payments.Add(pay);
-        return pay;
-    }
-
-    /// <summary>Annule le dernier paiement d'un client ou d'un revendeur (erreur de saisie) : la date de renouvellement revient en arrière.</summary>
+    /// <summary>Annule le dernier paiement d'un client (erreur de saisie) : la date de renouvellement revient en arrière. Refusé si le versement du mois est déjà fait.</summary>
     public static bool UndoLast(Db db, Guid paymentId)
     {
         var pay = db.Payments.FirstOrDefault(p => p.Id == paymentId);
         if (pay == null) return false;
-        var latest = db.Payments.Where(p => p.Kind == pay.Kind && p.ClientId == pay.ClientId && p.ResellerId == pay.ResellerId).OrderByDescending(p => p.PaidUtc).First();
+        var latest = db.Payments.Where(p => p.ClientId == pay.ClientId).OrderByDescending(p => p.PaidUtc).First();
         if (latest.Id != pay.Id) return false;
-        if (pay.Kind == "reseller" && db.Resellers.FirstOrDefault(r => r.Id == pay.ResellerId) is { } r) r.NextRenewalUtc = pay.First ? null : pay.FromUtc;
-        else if (pay.Kind == "client" && db.Clients.FirstOrDefault(c => c.Id == pay.ClientId) is { } c) c.NextRenewalUtc = pay.First ? null : pay.FromUtc;
+        var local = ToLocal(pay.PaidUtc);
+        if (pay.ResellerId is { } rid && PayoutOf(db, rid, local.Year, local.Month) != null) return false;
+        if (db.Clients.FirstOrDefault(c => c.Id == pay.ClientId) is { } c) c.NextRenewalUtc = pay.First ? null : pay.FromUtc;
         db.Payments.Remove(pay);
         return true;
     }
 
     // ---------- Blocage automatique ----------
 
-    /// <summary>Bloque, à la date anniversaire dépassée, tout client direct ou revendeur dont le renouvellement n'a pas été payé. Retourne les clients à prévenir (écrans).</summary>
+    /// <summary>Bloque, à la date anniversaire dépassée, tout client dont le renouvellement n'a pas été payé. Retourne les clients à prévenir (écrans).</summary>
     public static List<Guid> Enforce(Db db, DateTime now)
     {
         var affected = new List<Guid>();
         foreach (var c in db.Clients.Where(c => c.NextRenewalUtc != null && now.Date > c.NextRenewalUtc.Value.Date && !c.Blocked))
         {
-            if (db.Resellers.FirstOrDefault(r => r.Id == c.ResellerId) is not { IsDefault: true }) continue;   // un client de revendeur est facturé avec le revendeur
             c.Blocked = true; c.Suspended = false; c.BlockedReason = PaymentReason;
             affected.Add(c.Id);
-        }
-        foreach (var r in db.Resellers.Where(r => !r.IsDefault && r.NextRenewalUtc != null && now.Date > r.NextRenewalUtc.Value.Date && r.Active))
-        {
-            r.Active = false; r.Suspended = false; r.BlockedReason = PaymentReason;
-            affected.AddRange(db.Clients.Where(c => c.ResellerId == r.Id).Select(c => c.Id));
         }
         return affected;
     }

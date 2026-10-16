@@ -15,6 +15,7 @@ public class Db
     public List<MediaFolder> MediaFolders { get; set; } = new();  // dossiers de la médiathèque (voir <see cref="MediaFolder"/>)
     public List<PlaylistFolder> PlaylistFolders { get; set; } = new();  // dossiers des listes de lecture (voir <see cref="PlaylistFolder"/>)
     public List<Payment> Payments { get; set; } = new();          // paiements de renouvellement enregistrés (voir <see cref="Subscriptions"/>)
+    public List<Payout> Payouts { get; set; } = new();            // versements de fin de mois aux revendeurs
     public PlatformSettings Platform { get; set; } = new();      // réglages communs à toutes les organisations (console › Réglages)
 
     /// <summary>Ancien format mono-client (avant le multi-tenant) : lu une fois pour migration, jamais réécrit.</summary>
@@ -43,6 +44,11 @@ public class PlatformSettings
     public decimal PriceGrowth { get; set; } = 29m;
     /// <summary>Remise (en %) d'un client direct qui paie à l'année.</summary>
     public int AnnualDiscountPct { get; set; } = 15;
+    /// <summary>Commission (en %) d'un revendeur sur le net payé par ses clients, tant qu'aucun taux particulier ne lui est donné.</summary>
+    public int DefaultCommissionPct { get; set; } = 20;
+    /// <summary>Frais de paiement estimés (Stripe) : pourcentage + montant fixe par paiement. La commission se calcule sur le net, après frais.</summary>
+    public decimal StripeFeePct { get; set; } = 2.9m;
+    public decimal StripeFeeFixed { get; set; } = 0.30m;
 
     // Adresses des revendeurs. Vide : repli sur la configuration du serveur (Linkii:BaseDomain, Linkii:SubdomainSeparator).
     public string BaseDomain { get; set; } = "";
@@ -108,14 +114,11 @@ public class Reseller
     public bool Active { get; set; } = true;
     /// <summary>Suspendu : les écrans de tous ses clients sont coupés ; son back-office et celui de ses clients restent ouverts.</summary>
     public bool Suspended { get; set; }
-    /// <summary>Rabais (en %) sur la facture mensuelle du revendeur.</summary>
-    public int DiscountPct { get; set; }
-    /// <summary>Prochain renouvellement mensuel (date anniversaire du premier paiement). null : aucun paiement enregistré. Sans paiement à cette date, le revendeur est bloqué.</summary>
-    public DateTime? NextRenewalUtc { get; set; }
-    /// <summary>Jour du mois du premier paiement : la date anniversaire ne dérive pas (31 janvier, 28 février, 31 mars).</summary>
-    public int AnchorDay { get; set; }
-    /// <summary>« payment » : bloqué automatiquement faute de paiement (levé par le paiement suivant).</summary>
-    public string BlockedReason { get; set; } = "";
+    /// <summary>Commission (en %) du revendeur sur le net payé par ses clients. null : taux par défaut de la plateforme.</summary>
+    public int? CommissionPct { get; set; }
+    /// <summary>Coordonnées de versement de la commission (saisies par le revendeur).</summary>
+    public string Iban { get; set; } = "";
+    public string VatNumber { get; set; } = "";
     // Mise en ligne de l'adresse (hôte proxy dans Nginx Proxy Manager) : "" non géré | online | error
     public string AddressState { get; set; } = "";
     public int? NpmHostId { get; set; }

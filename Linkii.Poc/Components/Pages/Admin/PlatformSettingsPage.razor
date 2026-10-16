@@ -70,11 +70,19 @@
             <div class="val"><input type="number" min="0" step="0.5" class="mono" style="width:100px" aria-label="Prix Growth" @bind="priceGrowth" /><span class="muted">CHF</span></div>
         </div>
         <div class="adm-row">
-            <div>Remise annuelle<small>Pour un client direct qui paie à l'année (12 mois en une facture). Les revendeurs sont toujours facturés au mois.</small></div>
+            <div>Remise annuelle<small>Pour un client qui paie à l'année (12 mois en un paiement).</small></div>
             <div class="val"><input type="number" min="0" max="90" class="mono" style="width:90px" aria-label="Remise annuelle en pourcentage" @bind="annualPct" /><span class="muted">%</span></div>
         </div>
         <div class="adm-row">
-            <div>Date anniversaire<small>Un client paie au mois ou à l'année, un revendeur au mois. La date anniversaire est celle du premier paiement et ne change plus. Sans paiement à cette date, le compte est bloqué automatiquement : pas de relance. Le paiement suivant le débloque.</small></div>
+            <div>Commission des revendeurs<small>Part du net payé par les clients d'un revendeur (montant moins frais de paiement), versée au revendeur le dernier jour du mois. Chaque revendeur peut recevoir un taux particulier dans sa fiche ; un paiement annuel est commissionné d'un coup. Prix unique : tous les clients paient le tarif Linkii.</small></div>
+            <div class="val"><input type="number" min="0" max="100" class="mono" style="width:90px" aria-label="Commission par défaut en pourcentage" @bind="commissionPct" /><span class="muted">%</span></div>
+        </div>
+        <div class="adm-row">
+            <div>Frais de paiement estimés<small>Pourcentage et montant fixe retenus sur chaque paiement avant de calculer la commission (Stripe : 2,9 % + 0,30 CHF par carte). Estimation tant que Stripe n'envoie pas les frais réels.</small></div>
+            <div class="val"><input type="number" min="0" max="20" step="0.1" class="mono" style="width:80px" aria-label="Frais en pourcentage" @bind="feePct" /><span class="muted">% +</span><input type="number" min="0" max="10" step="0.05" class="mono" style="width:80px" aria-label="Frais fixes" @bind="feeFixed" /><span class="muted">CHF</span></div>
+        </div>
+        <div class="adm-row">
+            <div>Date anniversaire<small>Un client paie au mois ou à l'année. La date anniversaire est celle de son premier paiement et ne change plus. Sans paiement à cette date, le compte est bloqué automatiquement : pas de relance. Le paiement suivant le débloque.</small></div>
             <div class="val"><span class="adm-st ok">Automatique</span></div>
         </div>
         <div class="adm-row">
@@ -139,8 +147,8 @@
     private string testTo = "";
     private string section = "signup";
     private string baseDomain = "", sepChoice = "", npmUrl = "", npmUser = "", npmPassword = "", npmScheme = "http", npmForwardHost = "", npmTest = "";
-    private int npmPort = 5001, annualPct = 15;
-    private decimal priceBase = 15, priceGrowth = 29;
+    private int npmPort = 5001, annualPct = 15, commissionPct = 20;
+    private decimal priceBase = 15, priceGrowth = 29, feePct = 2.9m, feeFixed = 0.30m;
     private bool npmReadable = true;
     private bool hasNpmPassword, npmReady, testing, npmTestOk;
     private string EffectiveBase => Root.Read(d => Resolver.BaseDomainOf(d));
@@ -156,7 +164,7 @@
             d.Users.Count(u => u.TermsVersion == Terms.Version)));
         var p = Root.Read(d => d.Platform);
         (baseDomain, sepChoice, npmUrl, npmUser, npmScheme, npmForwardHost, npmPort, hasNpmPassword) = (p.BaseDomain, p.SubdomainSeparator, p.NpmUrl, p.NpmUser, p.NpmForwardScheme, p.NpmForwardHost, p.NpmForwardPort, p.NpmPassword != "");
-        (priceBase, priceGrowth, annualPct) = (p.PriceBase, p.PriceGrowth, p.AnnualDiscountPct);
+        (priceBase, priceGrowth, annualPct, commissionPct, feePct, feeFixed) = (p.PriceBase, p.PriceGrowth, p.AnnualDiscountPct, p.DefaultCommissionPct, p.StripeFeePct, p.StripeFeeFixed);
         npmReady = Npm.Configured;
         npmReadable = !hasNpmPassword || npmReady || Npm.Problem() is not { } pb || !pb.Contains("illisible");
         (smtpHost, smtpPort, smtpSsl, smtpUser, smtpFrom, hasPassword) = (p.SmtpHost, p.SmtpPort > 0 ? p.SmtpPort : 587, p.SmtpSsl, p.SmtpUser, p.SmtpFrom, p.SmtpPassword != "");
@@ -172,6 +180,8 @@
         if (smtpPort is < 1 or > 65535) { Toast.Error("Le port du serveur d'e-mails doit être compris entre 1 et 65535."); return false; }
         if (smtpHost.Trim() != "" && !smtpFrom.Contains('@') && !smtpUser.Contains('@')) { Toast.Error("Indiquez l'adresse d'expédition des e-mails."); return false; }
         if (priceBase < 0 || priceGrowth < 0 || priceBase > 10000 || priceGrowth > 10000) { Toast.Error("Les prix doivent être compris entre 0 et 10 000 CHF."); return false; }
+        if (commissionPct is < 0 or > 100) { Toast.Error("La commission doit être comprise entre 0 et 100 %."); return false; }
+        if (feePct is < 0 or > 20 || feeFixed is < 0 or > 10) { Toast.Error("Les frais de paiement ne sont pas valides."); return false; }
         if (annualPct is < 0 or > 90) { Toast.Error("La remise annuelle doit être comprise entre 0 et 90 %."); return false; }
         baseDomain = baseDomain.Trim().ToLowerInvariant();
         if (baseDomain != "" && !System.Text.RegularExpressions.Regex.IsMatch(baseDomain, @"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")) { Toast.Error("Le domaine de base n'est pas valide (ex. : linkii.duckdns.org)."); return false; }
@@ -182,7 +192,7 @@
         {
             var p = d.Platform;
             p.TrialDays = trialDays; p.VerifyLinkHours = linkHours; p.PurgeUnverifiedDays = purgeDays;
-            p.PriceBase = Math.Round(priceBase, 2); p.PriceGrowth = Math.Round(priceGrowth, 2); p.AnnualDiscountPct = annualPct;
+            p.PriceBase = Math.Round(priceBase, 2); p.PriceGrowth = Math.Round(priceGrowth, 2); p.AnnualDiscountPct = annualPct; p.DefaultCommissionPct = commissionPct; p.StripeFeePct = Math.Round(feePct, 2); p.StripeFeeFixed = Math.Round(feeFixed, 2);
             p.BaseDomain = baseDomain; p.SubdomainSeparator = sepChoice; p.NpmUrl = npmUrl.Trim(); p.NpmUser = npmUser.Trim(); p.NpmForwardScheme = npmScheme; p.NpmForwardHost = npmForwardHost.Trim(); p.NpmForwardPort = npmPort;
             if (p.NpmUrl == "") p.NpmPassword = ""; else if (npmEncrypted != null) p.NpmPassword = npmEncrypted;
             hasNpmPassword = p.NpmPassword != "";

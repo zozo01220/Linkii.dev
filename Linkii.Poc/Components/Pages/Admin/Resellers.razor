@@ -11,7 +11,7 @@
 <div class="page-head">
     <div>
         <h1>Revendeurs</h1>
-        <p class="sub">Gérez les revendeurs, leur adresse, leur rabais et leur accès. Cliquez sur un revendeur pour ouvrir sa fiche.</p>
+        <p class="sub">Gérez les revendeurs, leur adresse, leur commission et leur accès. Cliquez sur un revendeur pour ouvrir sa fiche.</p>
     </div>
     <button class="btn" @onclick="Open"><Ico Name="plus" Size="16" /> Nouveau revendeur</button>
 </div>
@@ -171,9 +171,10 @@
             @if (!r0.R.IsDefault)
             {
                 <div class="adm-sec">
-                    <span class="lb">Rabais mensuel · @r0.R.DiscountPct %</span>
-                    <input type="range" min="0" max="50" step="1" value="@r0.R.DiscountPct" aria-label="Rabais mensuel en pourcentage" @onchange="e => SetDiscount(r0, e.Value?.ToString())" />
-                    <div class="adm-note">Appliqué sur sa facture mensuelle (brique Facturation).</div>
+                    <span class="lb">Commission · @(r0.R.CommissionPct ?? defaultPct) %@(r0.R.CommissionPct == null ? " (taux par défaut)" : "")</span>
+                    <div class="row" style="gap:8px"><input type="number" min="0" max="100" class="mono" style="width:90px" value="@(r0.R.CommissionPct ?? defaultPct)" aria-label="Commission en pourcentage" @onchange="e => SetCommission(r0, e.Value?.ToString())" /><span class="muted">% du net payé par ses clients</span>
+                        @if (r0.R.CommissionPct != null) { <button type="button" class="btn ghost sm" @onclick="() => SetCommission(r0, null)">Taux par défaut (@defaultPct %)</button> }</div>
+                    <div class="adm-note">Linkii encaisse ses clients et lui verse sa part le dernier jour du mois. Le taux s'applique aux paiements reçus après le changement.</div>
                 </div>
 
                 <div class="adm-sec">
@@ -358,6 +359,7 @@
     private void Load()
     {
         now = DateTime.UtcNow;
+        defaultPct = Root.Read(d => d.Platform.DefaultCommissionPct);
         rows = Root.Read(d => d.Resellers.Select(r =>
         {
             var cl = d.Clients.Where(c => c.ResellerId == r.Id).Select(c => c.Id).ToHashSet();
@@ -517,14 +519,17 @@
         if (ok) Toast.Ok(msg); else Toast.Error(msg);
     }
 
-    // ---------- Rabais, accès ----------
+    // ---------- Commission, accès ----------
 
-    private void SetDiscount(Row r, string? value)
+    private int defaultPct = 20;
+
+    // value null ou vide : retour au taux par défaut de la plateforme.
+    private void SetCommission(Row r, string? value)
     {
-        var pct = int.TryParse(value, out var v) ? Math.Clamp(v, 0, 50) : 0;
-        Root.Write(d => { if (d.Resellers.FirstOrDefault(x => x.Id == r.R.Id) is { } x) x.DiscountPct = pct; });
+        int? pct = int.TryParse(value, out var v) ? Math.Clamp(v, 0, 100) : null;
+        Root.Write(d => { if (d.Resellers.FirstOrDefault(x => x.Id == r.R.Id) is { } x) x.CommissionPct = pct; });
         Load();
-        Toast.Ok($"Rabais de « {r.R.Name} » : {pct} %.");
+        Toast.Ok(pct == null ? $"Commission de « {r.R.Name} » : taux par défaut ({defaultPct} %)." : $"Commission de « {r.R.Name} » : {pct} %.");
     }
 
     // Suspendu : écrans de tous ses clients coupés. Bloqué (Active = false) : son back-office et celui de ses clients fermés. Les deux s'excluent.
@@ -534,7 +539,7 @@
         var clientIds = Root.Write(d =>
         {
             var x = d.Resellers.First(y => y.Id == r.R.Id);
-            x.Suspended = suspended; x.Active = !blocked; x.BlockedReason = "";
+            x.Suspended = suspended; x.Active = !blocked;
             return d.Clients.Where(c => c.ResellerId == x.Id).Select(c => c.Id).ToList();
         });
         Load();

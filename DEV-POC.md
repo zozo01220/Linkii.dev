@@ -1420,6 +1420,8 @@ Page Revendeurs refaite sur le modèle de la page Clients (§58) : mêmes onglet
 
 ## 61. Facturation : abonnements à date anniversaire (16 octobre 2026) : codé
 
+> **Mis à jour par le §62** : les revendeurs ne paient plus Linkii, ils en reçoivent une commission ; tous les clients paient Linkii. Ce qui concerne le « paiement d'un revendeur », son rabais et son blocage ci-dessous n'est plus d'actualité.
+
 Page `/admin/billing` refaite sur le modèle de Clients et Revendeurs ; logique dans `Subscriptions.cs`, page dans `Admin/Billing.razor`. Prévue pour Stripe ; en attendant, le paiement d'un renouvellement s'enregistre à la main.
 
 ### Principe
@@ -1440,3 +1442,27 @@ Page `/admin/billing` refaite sur le modèle de Clients et Revendeurs ; logique 
 - Vérifié sur des données de test : blocage automatique d'un client dont l'échéance est dépassée, paiement qui le débloque et avance la date au 10 du mois suivant, montants (Growth 17 écrans = 493.00), compteurs. Non vérifiés : premier paiement (annuel), annulation d'un paiement, changement de périodicité, revendeur non payé, changement de mois.
 - Le nombre d'écrans et la licence sont ceux du moment du calcul. Un client à l'année qui ajoute des écrans en cours d'année n'est pas refacturé avant le renouvellement.
 - Pas d'export, de facture PDF, d'e-mail ni de relance. Stripe (abonnements, webhook de paiement, jour anniversaire) reste à brancher : `Subscriptions.RecordClient` et `RecordReseller` sont les points d'entrée à appeler depuis le webhook.
+
+## 62. Facturation : commission et versement des revendeurs (16 octobre 2026) : codé
+
+Les revendeurs **reçoivent** de l'argent de Linkii. Décisions : prix unique (tarif Linkii), taux de commission par défaut modifiable par revendeur, commission **sur le net** (montant payé moins frais de paiement), paiement annuel commissionné **d'un coup**, versement **le dernier jour du mois**.
+
+### Circuit
+- **Tous les clients paient Linkii** (directs ou d'un revendeur), au tarif unique, au mois ou à l'année, avec la date anniversaire et le **blocage automatique sans paiement** du §61. Le revendeur n'a plus d'abonnement, de date anniversaire ni de blocage de paiement (champs `NextRenewalUtc`, `AnchorDay`, `BlockedReason` retirés de `Reseller`, `DiscountPct` remplacé par `CommissionPct`).
+- À chaque paiement (`Subscriptions.RecordClient`, bouton « Paiement reçu » puis Stripe) : frais estimés (`Réglages › Facturation` : 2,9 % + 0,30 CHF par défaut), taux de commission **figé sur le paiement** (`Payment.CommissionPct`), `Payment.Commission = (montant − frais) × taux`. Un client direct n'a pas de commission.
+- **Taux** : `PlatformSettings.DefaultCommissionPct` (20 % par défaut) ; `Reseller.CommissionPct` (null = taux par défaut), réglé dans Revendeurs › fiche. Un changement ne touche que les paiements suivants.
+- **Versement du mois** : somme des commissions des paiements reçus dans le mois (fuseau de Zurich). États : En cours jusqu'au dernier jour, À verser à partir de ce jour, Versé, Rien à verser. « Marquer versé » (`Payout`, montant figé + référence) après le virement ; « Annuler » le défait. Un paiement ne peut plus être annulé une fois le versement du mois enregistré.
+- **Prévision** (`Subscriptions.ExpectedOf`) : renouvellements encore attendus d'ici fin de mois chez les clients actifs du revendeur, avec la commission qu'ils rapporteraient ; affichée à part de l'acquis.
+
+### Espace revendeur : Facturation (`/reseller/billing`, remplace « Abonnement »)
+- **En direct** (actualisé toutes les 30 secondes) : À toucher fin du mois (acquis), Encore attendu, Prévision fin de mois, Encaissé par Linkii (frais, net).
+- Clients (licence, écrans, périodicité, montant, renouvellement, ma part ; un client bloqué faute de paiement est signalé), paiements du mois (payé, frais, net, ma part), versements des 6 derniers mois (statut, date, référence), **IBAN** (contrôlé, clé modulo 97) et n° de TVA.
+
+### Console : Facturation (`/admin/billing`)
+- Chiffre d'affaires mensuel (tarif Linkii, comptes actifs), Encaissé du mois (frais, net), **Part des revendeurs** et **net Linkii**, Bloqués faute de paiement.
+- Onglets **Clients** (tous : paiement, renouvellement, « Paiement reçu »), **Revendeurs** (CA, taux, part acquise, IBAN ; fiche : détail du mois, versement, coordonnées), **Paiements** (à encaisser, journal avec commission), **Versements** (par revendeur : paiements, payé, frais, net, taux, à verser, IBAN, statut, « Marquer versé »).
+
+### Limites
+- Vérifié sur des données de test : premier paiement d'un client de revendeur (406.00 CHF, frais 12.07, net 393.93, commission 20 % = 78.79), net Linkii (808.14 pour 899.00 encaissés), page revendeur en direct, enregistrement d'un IBAN valide. Non vérifiés : « Marquer versé » et son annulation, taux particulier, paiement annuel d'un client de revendeur, revendeur bloqué.
+- Frais estimés tant que Stripe ne donne pas les frais réels. Pas de remboursement ni de litige (un paiement annulé retire sa commission), pas de montant minimum de versement ni de report, pas de PDF ni d'e-mail (relevé, TVA : à définir avec la comptabilité). Pas de virement automatique (Stripe Connect).
+- Les anciens revendeurs gardent leur date et leur blocage de paiement dans `data.json` (champs ignorés) ; un revendeur bloqué pour paiement avant ce changement reste bloqué jusqu'à action manuelle dans Revendeurs.
