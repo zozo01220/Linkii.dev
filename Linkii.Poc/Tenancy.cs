@@ -401,13 +401,16 @@ public static class Tenancy
         if (password != null && password.Length < 8) return (null, "Mot de passe trop court (8 caractères minimum).");
         if (db.Users.Any(u => u.Email == email && (u.ResellerId == reseller.Id || u.ResellerId == null)))
             return (null, "Cette adresse e-mail est déjà utilisée.");
-        var client = new Tenant { ResellerId = reseller.Id, Name = clientName.Trim(), SignupSource = source };
+        // Tout nouveau client démarre en licence Growth. Créé par la console ou un revendeur, il est aussitôt en essai gratuit (durée réglée dans la console) ;
+        // en libre-service, l'essai ne démarre qu'à la validation de l'adresse e-mail (voir Signup.Verify).
+        var client = new Tenant { ResellerId = reseller.Id, Name = clientName.Trim(), SignupSource = source, Plan = Plans.Growth };
+        if (!SignupSources.IsSelfService(source)) client.TrialEndsUtc = DateTime.UtcNow.AddDays(Math.Max(1, db.Platform.TrialDays));
         var firstArea = new Area { ClientId = client.Id, Name = Seed.DefaultAreaName };   // une aire dès le départ : invisible tant qu'elle est seule
         AreaOps.EnsureDefaultZone(firstArea);
         db.Areas.Add(firstArea);
         client.Levels.Add(AccessLevels.NewDefault());
         db.Clients.Add(client);
-        db.Users.Add(new User { Email = email, Name = adminName.Trim(), PasswordHash = password == null ? "" : Passwords.Hash(password), Role = Roles.ClientAdmin, ResellerId = reseller.Id, ClientId = client.Id, MustChangePassword = mustChangePassword, CreatedUtc = DateTime.UtcNow });
+        db.Users.Add(new User { Email = email, Name = adminName.Trim(), PasswordHash = password == null ? "" : Passwords.Hash(password), Role = Roles.ClientAdmin, ResellerId = reseller.Id, ClientId = client.Id, MustChangePassword = mustChangePassword, CreatedUtc = DateTime.UtcNow, ExpertMode = false });
         return (client, null);
     }
 }

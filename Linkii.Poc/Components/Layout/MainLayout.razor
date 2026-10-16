@@ -113,8 +113,9 @@
             }
             <div class="nav-sep" role="separator"></div>
         }
-        @if (Ctx.ClientId != null && Modes.Expert && (Sees(LevelPages.Integrations) || Sees(LevelPages.Widgets)))
+        @if (Ctx.ClientId != null && (Sees(LevelPages.Integrations) || Sees(LevelPages.Widgets)))
         {
+            @if (!Modes.Expert) { <div class="nav-sep" role="separator"></div> }
             @* Sources de contenus et éléments d'écran : en bas, juste au-dessus du compte (selon les apps du niveau de droits). *@
             @if (Sees(LevelPages.Integrations))
             {
@@ -199,7 +200,7 @@
             }
             else
             {
-                <div class="trial-bar @(left <= 2 ? "soon" : "")"><Ico Name="hourglass" Size="16" /><span>Essai gratuit : <b>@left jour@(left > 1 ? "s" : "") restant@(left > 1 ? "s" : "")</b>, jusqu'au @trialEndLabel.</span></div>
+                <div class="trial-bar soon"><Ico Name="hourglass" Size="16" /><span><b>@left jour@(left > 1 ? "s" : "") restant@(left > 1 ? "s" : "")</b> dans votre période d'essai (jusqu'au @trialEndLabel).</span></div>
             }
         }
         <header class="topbar">
@@ -210,7 +211,8 @@
         @{ var roDomain = ReadOnlyDomain; }
         @if (readOnly) { <div class="trial-bar"><Ico Name="lock" Size="16" /><span>Votre niveau de droits est en <b>lecture seule</b> : vous consultez, sans rien modifier ni publier.</span></div> }
         else if (roDomain != null) { <div class="trial-bar"><Ico Name="lock" Size="16" /><span>Votre niveau de droits permet de <b>voir</b> @(roDomain == LevelPages.Media ? "la médiathèque, sans la modifier" : roDomain == LevelPages.Playlists ? "les listes de lecture, sans les modifier" : "les écrans, sans les modifier ni les publier").</span></div> }
-        <main class="content @(readOnly || roDomain != null ? "ro" : "")">
+        @if (SimpleLocked) { <div class="trial-bar"><Ico Name="lock" Size="16" /><span><b>Lecture seule en mode simple.</b> Passez en mode expert pour modifier cette page.</span><button type="button" class="btn sm" @onclick="() => Modes.Switch(true)">Passer en mode expert</button></div> }
+        <main class="content @(readOnly || roDomain != null || SimpleLocked ? "ro" : "") @(SimpleLocked ? "ro-simple" : "")">
             @if (ExpertOnlyHere)
             {
                 <div class="card empty"><div class="big">Disponible en mode expert</div><p>Cette page fait partie des fonctions avancées (planning, aires de gestion, zones, membres, intégrations, widgets). Elle n'est pas affichée en mode simple.</p><button type="button" class="btn" @onclick="() => Modes.Switch(true)">Passer en mode expert</button></div>
@@ -262,9 +264,11 @@
     private bool Sees(string page) => orgAdmin || pages.Contains(page);
 
     // Pages du mode expert : en mode simple, leur adresse directe affiche « Disponible en mode expert ».
-    private static readonly string[] ExpertPaths = { "planning", "areas", "zones", "members", "integrations", "widgets", "stats" };
+    private static readonly string[] ExpertPaths = { "planning", "areas", "zones", "members", "stats" };
     private string CurrentPath => Nav.ToBaseRelativePath(Nav.Uri).Split('?')[0].Trim('/');
     private bool ExpertOnlyHere => !Modes.Expert && Ctx.ClientId != null && ExpertPaths.Any(p => CurrentPath == p || CurrentPath.StartsWith(p + "/"));
+    private static readonly string[] SimpleReadOnlyPaths = { "integrations", "widgets" };
+    private bool SimpleLocked => !Modes.Expert && Ctx.ClientId != null && SimpleReadOnlyPaths.Any(p => CurrentPath == p || CurrentPath.StartsWith(p + "/"));
     private bool dontShowAgain;
 
     private void ToggleMode() => Modes.Switch(!Modes.Expert);
