@@ -60,6 +60,7 @@ builder.Services.AddSingleton<MicrosoftAuth>();   // « Se connecter avec Micros
 builder.Services.AddSingleton<ExternalLogin>();   // « Continuer avec Microsoft / Google » sur la page de connexion (identité seulement)
 builder.Services.AddSingleton<ScreenControl>();   // contrôle du direct (Growth) : pause, redémarrage, aperçu
 builder.Services.AddHostedService<ScreenWatchWorker>();   // commandes sans réponse, pauses terminées, alertes « écran hors ligne »
+builder.Services.AddHostedService<SubscriptionWorker>();   // comptes bloqués faute de paiement à la date anniversaire
 builder.Services.AddHostedService<SignupWorker>();   // inscriptions non validées supprimées, rappel et fin des essais gratuits
 builder.Services.AddSingleton<DropboxAuth>();   // « Se connecter avec Dropbox » (lecture seule)
 builder.Services.AddSingleton<FacebookAuth>();   // « Se connecter avec Facebook » (Pages administrées, lecture seule)

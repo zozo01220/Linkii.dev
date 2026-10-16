@@ -59,6 +59,29 @@
             <div class="val"><span class="adm-st ok">Toujours actif</span></div>
         </div>
     }
+    else if (section == "billing")
+    {
+        <div class="adm-row">
+            <div>Licence Base<small>Prix par écran et par mois. Les clients paient au nombre d'écrans, sans limite.</small></div>
+            <div class="val"><input type="number" min="0" step="0.5" class="mono" style="width:100px" aria-label="Prix Base" @bind="priceBase" /><span class="muted">CHF</span></div>
+        </div>
+        <div class="adm-row">
+            <div>Licence Growth<small>Prix par écran et par mois : contrôle du direct, supervision, murs d'écrans et statistiques en plus.</small></div>
+            <div class="val"><input type="number" min="0" step="0.5" class="mono" style="width:100px" aria-label="Prix Growth" @bind="priceGrowth" /><span class="muted">CHF</span></div>
+        </div>
+        <div class="adm-row">
+            <div>Remise annuelle<small>Pour un client direct qui paie à l'année (12 mois en une facture). Les revendeurs sont toujours facturés au mois.</small></div>
+            <div class="val"><input type="number" min="0" max="90" class="mono" style="width:90px" aria-label="Remise annuelle en pourcentage" @bind="annualPct" /><span class="muted">%</span></div>
+        </div>
+        <div class="adm-row">
+            <div>Date anniversaire<small>Un client paie au mois ou à l'année, un revendeur au mois. La date anniversaire est celle du premier paiement et ne change plus. Sans paiement à cette date, le compte est bloqué automatiquement : pas de relance. Le paiement suivant le débloque.</small></div>
+            <div class="val"><span class="adm-st ok">Automatique</span></div>
+        </div>
+        <div class="adm-row">
+            <div>Paiement en ligne<small>Stripe n'est pas encore branché : en attendant, le bouton « Paiement reçu » de la page Facturation enregistre le renouvellement à la main.</small></div>
+            <div class="val"><span class="adm-st mute">À venir</span></div>
+        </div>
+    }
     else if (section == "addr")
     {
         <div style="padding:16px 0 4px" class="muted">Chaque revendeur reçoit une adresse « revendeur + séparateur + domaine ». Avec un certificat générique dans NPM, elle fonctionne dès la création.</div>
@@ -116,14 +139,15 @@
     private string testTo = "";
     private string section = "signup";
     private string baseDomain = "", sepChoice = "", npmUrl = "", npmUser = "", npmPassword = "", npmScheme = "http", npmForwardHost = "", npmTest = "";
-    private int npmPort = 5001;
+    private int npmPort = 5001, annualPct = 15;
+    private decimal priceBase = 15, priceGrowth = 29;
     private bool npmReadable = true;
     private bool hasNpmPassword, npmReady, testing, npmTestOk;
     private string EffectiveBase => Root.Read(d => Resolver.BaseDomainOf(d));
     private string Example => Root.Read(d => Resolver.HostFor(d, "acme"));
     private static readonly (string Id, string Label, string Icon)[] Sections =
     {
-        ("signup", "Inscription et essai", "user"), ("access", "Suspension et blocage", "lock"), ("addr", "Adresses", "globe"), ("mail", "E-mails", "mail"), ("terms", "Conditions", "file")
+        ("signup", "Inscription et essai", "user"), ("access", "Suspension et blocage", "lock"), ("billing", "Facturation", "chart"), ("addr", "Adresses", "globe"), ("mail", "E-mails", "mail"), ("terms", "Conditions", "file")
     };
 
     protected override void OnInitialized()
@@ -132,6 +156,7 @@
             d.Users.Count(u => u.TermsVersion == Terms.Version)));
         var p = Root.Read(d => d.Platform);
         (baseDomain, sepChoice, npmUrl, npmUser, npmScheme, npmForwardHost, npmPort, hasNpmPassword) = (p.BaseDomain, p.SubdomainSeparator, p.NpmUrl, p.NpmUser, p.NpmForwardScheme, p.NpmForwardHost, p.NpmForwardPort, p.NpmPassword != "");
+        (priceBase, priceGrowth, annualPct) = (p.PriceBase, p.PriceGrowth, p.AnnualDiscountPct);
         npmReady = Npm.Configured;
         npmReadable = !hasNpmPassword || npmReady || Npm.Problem() is not { } pb || !pb.Contains("illisible");
         (smtpHost, smtpPort, smtpSsl, smtpUser, smtpFrom, hasPassword) = (p.SmtpHost, p.SmtpPort > 0 ? p.SmtpPort : 587, p.SmtpSsl, p.SmtpUser, p.SmtpFrom, p.SmtpPassword != "");
@@ -146,6 +171,8 @@
         if (purgeDays is < 1 or > 365) { Toast.Error("Le délai de suppression doit être compris entre 1 et 365 jours."); return false; }
         if (smtpPort is < 1 or > 65535) { Toast.Error("Le port du serveur d'e-mails doit être compris entre 1 et 65535."); return false; }
         if (smtpHost.Trim() != "" && !smtpFrom.Contains('@') && !smtpUser.Contains('@')) { Toast.Error("Indiquez l'adresse d'expédition des e-mails."); return false; }
+        if (priceBase < 0 || priceGrowth < 0 || priceBase > 10000 || priceGrowth > 10000) { Toast.Error("Les prix doivent être compris entre 0 et 10 000 CHF."); return false; }
+        if (annualPct is < 0 or > 90) { Toast.Error("La remise annuelle doit être comprise entre 0 et 90 %."); return false; }
         baseDomain = baseDomain.Trim().ToLowerInvariant();
         if (baseDomain != "" && !System.Text.RegularExpressions.Regex.IsMatch(baseDomain, @"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")) { Toast.Error("Le domaine de base n'est pas valide (ex. : linkii.duckdns.org)."); return false; }
         if (npmUrl.Trim() != "" && !Uri.TryCreate(npmUrl.Trim(), UriKind.Absolute, out _) || npmPort is < 1 or > 65535) { Toast.Error("L'adresse de NPM ou le port de destination n'est pas valide."); return false; }
@@ -155,6 +182,7 @@
         {
             var p = d.Platform;
             p.TrialDays = trialDays; p.VerifyLinkHours = linkHours; p.PurgeUnverifiedDays = purgeDays;
+            p.PriceBase = Math.Round(priceBase, 2); p.PriceGrowth = Math.Round(priceGrowth, 2); p.AnnualDiscountPct = annualPct;
             p.BaseDomain = baseDomain; p.SubdomainSeparator = sepChoice; p.NpmUrl = npmUrl.Trim(); p.NpmUser = npmUser.Trim(); p.NpmForwardScheme = npmScheme; p.NpmForwardHost = npmForwardHost.Trim(); p.NpmForwardPort = npmPort;
             if (p.NpmUrl == "") p.NpmPassword = ""; else if (npmEncrypted != null) p.NpmPassword = npmEncrypted;
             hasNpmPassword = p.NpmPassword != "";

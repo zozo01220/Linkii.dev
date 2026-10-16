@@ -1,36 +1,439 @@
 @page "/admin/billing"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "PlatformAdmin")]
 @inject JsonStore Root
+@inject Toaster Toast
+@inject Notifier Screens
 
 <div class="page-head">
     <div>
         <h1>Facturation</h1>
-        <p class="sub">Comptage des écrans appairés et des utilisateurs (comptes non désactivés) par revendeur et par client. Les montants seront traités plus tard.</p>
+        <p class="sub">Abonnements au nombre d'écrans. Chaque compte renouvelle à sa date anniversaire ; sans paiement ce jour-là, il est bloqué.</p>
+    </div>
+    <div class="row" style="gap:8px">
+        <button type="button" class="btn ghost icon" aria-label="Mois précédent" @onclick="() => Shift(-1)"><Ico Name="chevron" Size="16" /></button>
+        <b style="min-width:120px;text-align:center">@MonthLabel</b>
+        <button type="button" class="btn ghost icon" aria-label="Mois suivant" @onclick="() => Shift(1)"><Ico Name="chevron-right" Size="16" /></button>
     </div>
 </div>
 
-<table class="tbl">
-    <thead><tr><th>Revendeur</th><th>Client</th><th class="num">Utilisateurs</th><th class="num">Écrans appairés</th></tr></thead>
-    <tbody>
-    @foreach (var g in groups)
+<div class="adm-k4">
+    <div class="adm-card"><div class="kl">Chiffre d'affaires mensuel</div><div class="kn">@Subscriptions.Fmt(mrr) <small class="muted" style="font-size:12px">CHF</small></div>
+        <div class="adm-stk"><i style="flex:@Math.Max(1, (double)grossBase);background:#9DB6D3"></i><i style="flex:@Math.Max(1, (double)grossGrowth);background:#2F6FB5"></i></div>
+        <div class="ks"><span class="adm-dot" style="background:#9DB6D3"></span>Base @Subscriptions.Fmt(grossBase) · <span class="adm-dot" style="background:#2F6FB5"></span>Growth @Subscriptions.Fmt(grossGrowth)<br />Rabais et remises : −@Subscriptions.Fmt(Math.Max(0, grossBase + grossGrowth - mrr))</div></div>
+    <div class="adm-card"><div class="kl">Encaissé en @MonthLabel.ToLowerInvariant()</div><div class="kn" style="color:var(--ok)">@Subscriptions.Fmt(paidSum) <small class="muted" style="font-size:12px">CHF</small></div><div class="ks">@monthPayments.Count paiement@(monthPayments.Count > 1 ? "s" : "") enregistré@(monthPayments.Count > 1 ? "s" : "")</div></div>
+    <div class="adm-card"><div class="kl">À renouveler sous 30 jours</div><div class="kn">@Subscriptions.Fmt(dueSum) <small class="muted" style="font-size:12px">CHF</small></div><div class="ks">@dueCount renouvellement@(dueCount > 1 ? "s" : "")</div></div>
+    <div class="adm-card"><div class="kl">Bloqués faute de paiement</div><div class="kn" style="color:@(blockedCount > 0 ? "var(--danger)" : "inherit")">@blockedCount</div><div class="ks">@(blockedCount > 0 ? Subscriptions.Fmt(blockedSum) + " CHF dus" : "aucun")</div></div>
+</div>
+
+<div class="adm-card adm-cnt">
+    <span><b>@resellerCount</b>revendeurs</span>
+    <span><b>@clientCount</b>clients <small>(@billedClients actifs)</small></span>
+    <span><b>@billedScreens</b>écrans facturés</span>
+    <span><b>@userCount</b>utilisateurs</span>
+    <span class="grow"></span>
+    <span class="muted">Base @Subscriptions.Fmt(prices.Base) · Growth @Subscriptions.Fmt(prices.Growth) CHF / écran / mois · annuel −@prices.AnnualPct %</span>
+</div>
+
+<div class="adm-tabs" role="tablist" aria-label="Vue">
+    @foreach (var (id, n) in new[] { ("Revendeurs", rrows.Count), ("Clients", crows.Count), ("Paiements", renewals.Count + monthPayments.Count) })
     {
-        <tr style="background:#F5F7FA"><td><b>@g.Reseller</b></td><td></td><td class="num"><b>@g.Clients.Sum(c => c.Users)</b></td><td class="num"><b>@g.Clients.Sum(c => c.Screens)</b></td></tr>
-        @foreach (var c in g.Clients)
-        {
-            <tr><td></td><td>@c.Name @if (c.Suspended) { <span class="pill bad">Suspendu</span> }</td><td class="num">@c.Users</td><td class="num">@c.Screens</td></tr>
-        }
+        var t = id;
+        <button type="button" class="@(tab == t ? "on" : "")" @onclick="() => SetTab(t)">@t <b>@n</b></button>
     }
-    <tr><td><b>Total plateforme</b></td><td></td><td class="num"><b>@groups.Sum(g => g.Clients.Sum(c => c.Users))</b></td><td class="num"><b>@groups.Sum(g => g.Clients.Sum(c => c.Screens))</b></td></tr>
-    </tbody>
-</table>
+</div>
+
+@if (tab == "Revendeurs")
+{
+    <div class="adm-card" style="padding:0;overflow:hidden"><div class="tbl-scroll">
+    <table class="adm-tbl">
+        <thead><tr><th>Revendeur</th><th class="r">Clients</th><th class="r">Écrans</th><th class="r">Util.</th><th class="r">Base</th><th class="r">Growth</th><th class="r">Brut</th><th class="r">Rabais</th><th class="r">Net CHF / mois</th><th>Renouvellement</th></tr></thead>
+        <tbody>
+        @foreach (var r in rrows)
+        {
+            var row = r;
+            <tr class="@(selR == r.R.Id ? "sel" : "")" @onclick="() => OpenR(row)">
+                <td><div class="adm-who"><div class="adm-av" style="background:@AvatarColor(r.R.Name)">@Initials(r.R.Name)</div><div><b>@r.R.Name</b><small>Paiement mensuel</small></div></div></td>
+                <td class="r m">@r.Clients</td>
+                <td class="r m">@r.Bill.Screens</td>
+                <td class="r m">@r.Users</td>
+                <td class="r m">@ScreensOfPlan(r.Bill.Lines, Plans.Base)×@Subscriptions.Fmt(prices.Base)</td>
+                <td class="r m">@ScreensOfPlan(r.Bill.Lines, Plans.Growth)×@Subscriptions.Fmt(prices.Growth)</td>
+                <td class="r m">@Subscriptions.Fmt(r.Bill.Gross)</td>
+                <td class="r m">@r.R.DiscountPct %</td>
+                <td class="r m"><b>@Subscriptions.Fmt(r.Bill.Net)</b></td>
+                <td>@Renewal(r.State, r.R.NextRenewalUtc, !r.R.Active && r.R.BlockedReason == Subscriptions.PaymentReason)
+                    @if (Subscriptions.CanRecord(r.R.NextRenewalUtc, now)) { <button type="button" class="btn ok-o sm" style="margin-left:6px" @onclick:stopPropagation="true" @onclick="() => PayReseller(row)">@(r.R.NextRenewalUtc == null ? "Premier paiement" : "Paiement reçu")</button> }</td>
+            </tr>
+        }
+        @if (rrows.Count == 0) { <tr><td colspan="10" style="text-align:center;color:var(--muted);padding:28px">Aucun revendeur.</td></tr> }
+        </tbody>
+    </table></div></div>
+    <div class="adm-note">Un revendeur paie chaque mois les écrans de ses clients actifs, au tarif de leur licence, moins son rabais. S'il ne paie pas à sa date anniversaire, son compte et ceux de ses clients sont bloqués.</div>
+}
+else if (tab == "Clients")
+{
+    <div class="adm-chips">
+        @foreach (var f in new[] { "Tous", "Directs", "Via un revendeur", "À renouveler" })
+        {
+            var ff = f;
+            <button type="button" class="@(filter == ff ? "on" : "")" @onclick="() => filter = ff">@ff</button>
+        }
+    </div>
+    <div class="adm-card" style="padding:0;overflow:hidden"><div class="tbl-scroll">
+    <table class="adm-tbl">
+        <thead><tr><th>Client</th><th>Facturé à</th><th>Licence</th><th class="r">Écrans</th><th class="r">Util.</th><th>Paiement</th><th class="r">CHF / mois</th><th>Renouvellement</th></tr></thead>
+        <tbody>
+        @foreach (var c in FilteredClients)
+        {
+            var row = c;
+            <tr class="@(selC == c.C.Id ? "sel" : "")" @onclick="() => OpenC(row)">
+                <td><div class="adm-who"><div class="adm-av" style="background:@AvatarColor(c.R.Name)">@Initials(c.C.Name)</div><div><b>@c.C.Name</b><small><span class="adm-st @ClientStates.Css(c.State)">@c.State</span></small></div></div></td>
+                <td>@(c.Direct ? "Linkii (direct)" : c.R.Name)</td>
+                <td><span class="adm-plan @(c.C.IsGrowth ? "g" : "")">@Plans.Label(c.C.Plan)</span></td>
+                <td class="r m">@c.Screens</td>
+                <td class="r m">@c.Users</td>
+                <td>@(c.Direct ? (c.C.BillingPeriod == "annual" ? "Annuel" : "Mensuel") : "via revendeur")</td>
+                <td class="r m">@(c.Billable ? Subscriptions.Fmt(c.Monthly) : "—")</td>
+                <td>@if (c.Direct)
+                    {
+                        @Renewal(c.Sub, c.C.NextRenewalUtc, c.C.Blocked && c.C.BlockedReason == Subscriptions.PaymentReason)
+                        @if (Subscriptions.CanRecord(c.C.NextRenewalUtc, now)) { <button type="button" class="btn ok-o sm" style="margin-left:6px" @onclick:stopPropagation="true" @onclick="() => PayClient(row)">@(c.C.NextRenewalUtc == null ? "Premier paiement" : "Paiement reçu")</button> }
+                    }
+                    else { <span class="adm-sub" style="display:inline">@(c.Billable ? "inclus dans le revendeur" : "non facturé")</span> }</td>
+            </tr>
+        }
+        </tbody>
+    </table></div></div>
+    <div class="adm-note">Un client direct paie au mois ou à l'année ; sa date anniversaire est celle de son premier paiement. Un client en essai n'est pas facturé : son premier paiement met fin à l'essai. Un client d'un revendeur est facturé avec le revendeur.</div>
+}
+else
+{
+    <div class="adm-sec" style="margin-top:0"><span class="lb">À encaisser</span></div>
+    <div class="adm-card" style="padding:0;overflow:hidden"><div class="tbl-scroll">
+    <table class="adm-tbl">
+        <thead><tr><th>Client / revendeur</th><th>Type</th><th>Renouvellement</th><th class="r">Montant CHF</th><th></th></tr></thead>
+        <tbody>
+        @foreach (var x in renewals)
+        {
+            var rn = x;
+            <tr style="cursor:default">
+                <td><b>@rn.Name</b><small class="adm-sub">@rn.Detail</small></td>
+                <td>@rn.Kind · @rn.Period</td>
+                <td>@Renewal(rn.State, rn.Next, rn.Blocked)</td>
+                <td class="r m">@Subscriptions.Fmt(rn.Amount)</td>
+                <td class="r"><button type="button" class="btn ok-o sm" @onclick="() => PayRenewal(rn)">@(rn.Next == null ? "Premier paiement" : "Paiement reçu")</button></td>
+            </tr>
+        }
+        @if (renewals.Count == 0) { <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">Rien à renouveler pour le moment.</td></tr> }
+        </tbody>
+    </table></div></div>
+
+    <div class="adm-sec"><span class="lb">Paiements enregistrés en @MonthLabel.ToLowerInvariant()</span></div>
+    <div class="adm-card" style="padding:0;overflow:hidden"><div class="tbl-scroll">
+    <table class="adm-tbl">
+        <thead><tr><th>Date</th><th>Client / revendeur</th><th>Période couverte</th><th class="r">Montant CHF</th><th></th></tr></thead>
+        <tbody>
+        @foreach (var p in monthPayments)
+        {
+            var pay = p;
+            <tr style="cursor:default">
+                <td>@Day(pay.PaidUtc)</td>
+                <td><b>@pay.Name</b><small class="adm-sub">@(pay.Kind == "reseller" ? "Revendeur" : "Client") · @(pay.First ? "premier paiement" : pay.Period == "annual" ? "renouvellement annuel" : "renouvellement mensuel") · @pay.Screens écran@(pay.Screens > 1 ? "s" : "")</small></td>
+                <td>@Day(pay.FromUtc) → @Day(pay.ToUtc)</td>
+                <td class="r m">@Subscriptions.Fmt(pay.Amount)</td>
+                <td class="r">@if (IsLatest(pay)) { <button type="button" class="btn ghost sm" @onclick="() => Undo(pay)">Annuler</button> }</td>
+            </tr>
+        }
+        @if (monthPayments.Count == 0) { <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">Aucun paiement enregistré ce mois-ci.</td></tr> }
+        </tbody>
+    </table></div></div>
+    <div class="adm-note">« Paiement reçu » enregistre à la main le renouvellement (en attendant Stripe) : la prochaine date anniversaire avance d'un mois ou d'un an, et un compte bloqué faute de paiement est débloqué.</div>
+}
+
+@if (SelRow is { } sr)
+{
+    <div class="adm-veil" @onclick="Close"></div>
+    <aside class="adm-drawer" role="dialog" aria-label="Abonnement de @sr.R.Name">
+        <div class="dh"><div class="top">
+            <div class="adm-av lg" style="background:@AvatarColor(sr.R.Name)">@Initials(sr.R.Name)</div>
+            <div class="grow"><h2>@sr.R.Name</h2>@Renewal(sr.State, sr.R.NextRenewalUtc, !sr.R.Active && sr.R.BlockedReason == Subscriptions.PaymentReason)</div>
+            <button type="button" class="btn ghost icon" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="18" /></button>
+        </div></div>
+        <div class="db">
+            <div class="adm-sec"><span class="lb">Renouvellement mensuel</span>
+                @foreach (var l in sr.Bill.Lines)
+                {
+                    <div class="adm-ln"><span style="color:var(--ink)">@l.Client.Name<span class="adm-sub">@l.Screens écran@(l.Screens > 1 ? "s" : "") · @Plans.Label(l.Plan) × @Subscriptions.Fmt(l.Unit) · @l.Users util.</span></span><span class="m">@Subscriptions.Fmt(l.Amount)</span></div>
+                }
+                @if (!sr.Bill.Lines.Any()) { <div class="adm-note">Aucun client actif : rien à facturer.</div> }
+                <div class="adm-tot"><span class="muted">Sous-total (@sr.Bill.Screens écrans)</span><span class="m">@Subscriptions.Fmt(sr.Bill.Gross)</span></div>
+                <div class="adm-tot"><span class="muted">Rabais @sr.R.DiscountPct %</span><span class="m">−@Subscriptions.Fmt(sr.Bill.Discount)</span></div>
+                <div class="adm-tot g"><span>Total CHF / mois</span><span class="m">@Subscriptions.Fmt(sr.Bill.Net)</span></div>
+            </div>
+            <div class="adm-sec"><span class="lb">Rabais · @sr.R.DiscountPct %</span>
+                <input type="range" min="0" max="50" step="1" value="@sr.R.DiscountPct" aria-label="Rabais en pourcentage" @onchange="e => SetDiscount(sr, e.Value?.ToString())" />
+                <div class="adm-note">Appliqué à son prochain renouvellement.</div></div>
+            <div class="adm-sec"><span class="lb">Paiement</span>
+                <div class="adm-note">@RenewalNote(sr.State, sr.R.NextRenewalUtc, sr.Bill.Net, "mois")</div>
+                <div class="adm-acts">
+                    @if (Subscriptions.CanRecord(sr.R.NextRenewalUtc, now)) { <button type="button" class="btn ok-o sm" @onclick="() => PayReseller(sr)">@(sr.R.NextRenewalUtc == null ? "Premier paiement reçu" : "Paiement reçu")</button> }
+                    @if (history.FirstOrDefault() is { } last) { <button type="button" class="btn ghost sm" @onclick="() => Undo(last)">Annuler le dernier paiement</button> }
+                </div></div>
+            <div class="adm-sec"><span class="lb">Historique des paiements</span>
+                @foreach (var h in history)
+                {
+                    <div class="adm-ln"><span style="color:var(--ink)">@Day(h.PaidUtc)<span class="adm-sub">@(h.First ? "premier paiement" : "renouvellement") · jusqu'au @Day(h.ToUtc)</span></span><span class="m">@Subscriptions.Fmt(h.Amount)</span></div>
+                }
+                @if (history.Count == 0) { <div class="adm-note">Aucun paiement enregistré.</div> }
+            </div>
+        </div>
+    </aside>
+}
+else if (SelClient is { } sc)
+{
+    <div class="adm-veil" @onclick="Close"></div>
+    <aside class="adm-drawer" role="dialog" aria-label="Abonnement de @sc.C.Name">
+        <div class="dh"><div class="top">
+            <div class="adm-av lg" style="background:@AvatarColor(sc.R.Name)">@Initials(sc.C.Name)</div>
+            <div class="grow"><h2>@sc.C.Name</h2><span class="adm-st @ClientStates.Css(sc.State)">@sc.State</span> <span class="adm-sub" style="display:inline">@(sc.Direct ? "client direct" : "via " + sc.R.Name)</span></div>
+            <button type="button" class="btn ghost icon" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="18" /></button>
+        </div></div>
+        <div class="db">
+            <div class="adm-sec"><span class="lb">Calcul</span>
+                <div class="adm-ln"><span>Écrans</span><span class="m">@sc.Screens</span></div>
+                <div class="adm-ln"><span>Licence</span><span><span class="adm-plan @(sc.C.IsGrowth ? "g" : "")">@Plans.Label(sc.C.Plan)</span> <span class="m">@Subscriptions.Fmt(sc.Unit) CHF</span></span></div>
+                <div class="adm-ln"><span>Utilisateurs</span><span class="m">@sc.Users</span></div>
+                <div class="adm-tot"><span class="muted">@sc.Screens × @Subscriptions.Fmt(sc.Unit) CHF / mois</span><span class="m">@Subscriptions.Fmt(sc.Gross)</span></div>
+                @if (sc.Direct && sc.C.BillingPeriod == "annual")
+                {
+                    <div class="adm-tot"><span class="muted">12 mois, remise annuelle −@prices.AnnualPct %</span><span class="m">@Subscriptions.Fmt(sc.PeriodAmount)</span></div>
+                }
+                @if (!sc.Direct && sc.R.DiscountPct > 0) { <div class="adm-tot"><span class="muted">Rabais du revendeur @sc.R.DiscountPct %</span><span class="m">−@Subscriptions.Fmt(sc.Gross - sc.Monthly)</span></div> }
+                <div class="adm-tot g"><span>@(sc.Direct && sc.C.BillingPeriod == "annual" ? "CHF / an" : "CHF / mois")</span><span class="m">@Subscriptions.Fmt(sc.Direct ? sc.PeriodAmount : sc.Monthly)</span></div>
+                @if (!sc.Billable) { <div class="adm-note">@NotBilledReason(sc)</div> }
+            </div>
+            @if (sc.Direct)
+            {
+                <div class="adm-sec"><span class="lb">Périodicité de paiement</span>
+                    <div class="adm-seg">
+                        <button type="button" class="@(sc.C.BillingPeriod != "annual" ? "on" : "")" @onclick='() => SetPeriod(sc, "monthly")'>Mensuel</button>
+                        <button type="button" class="@(sc.C.BillingPeriod == "annual" ? "on" : "")" @onclick='() => SetPeriod(sc, "annual")'>Annuel · −@prices.AnnualPct %</button>
+                    </div>
+                    <div class="adm-note" style="margin-top:6px">Le changement s'applique au prochain renouvellement, à la même date anniversaire.</div></div>
+                <div class="adm-sec"><span class="lb">Paiement</span>
+                    <div class="adm-note">@RenewalNote(sc.Sub, sc.C.NextRenewalUtc, sc.PeriodAmount, sc.C.BillingPeriod == "annual" ? "an" : "mois")</div>
+                    <div class="adm-acts">
+                        @if (Subscriptions.CanRecord(sc.C.NextRenewalUtc, now)) { <button type="button" class="btn ok-o sm" @onclick="() => PayClient(sc)">@(sc.C.NextRenewalUtc == null ? "Premier paiement reçu" : "Paiement reçu")</button> }
+                        @if (history.FirstOrDefault() is { } last) { <button type="button" class="btn ghost sm" @onclick="() => Undo(last)">Annuler le dernier paiement</button> }
+                    </div></div>
+                <div class="adm-sec"><span class="lb">Historique des paiements</span>
+                    @foreach (var h in history)
+                    {
+                        <div class="adm-ln"><span style="color:var(--ink)">@Day(h.PaidUtc)<span class="adm-sub">@(h.First ? "premier paiement" : h.Period == "annual" ? "renouvellement annuel" : "renouvellement mensuel") · jusqu'au @Day(h.ToUtc)</span></span><span class="m">@Subscriptions.Fmt(h.Amount)</span></div>
+                    }
+                    @if (history.Count == 0) { <div class="adm-note">Aucun paiement enregistré.</div> }
+                </div>
+            }
+            else { <div class="adm-sec"><span class="lb">Paiement</span><div class="adm-note">Facturé à <b>@sc.R.Name</b> avec tous ses clients : voir l'onglet Revendeurs.</div></div> }
+        </div>
+    </aside>
+}
 
 @code {
-    private record ClientRow(string Name, bool Suspended, int Screens, int Users);
-    private record Group(string Reseller, List<ClientRow> Clients);
-    private List<Group> groups = new();
+    private record RRow(Reseller R, Subscriptions.ResellerBill Bill, int Clients, int Users, string State);
+    private record CRow(Tenant C, Reseller R, bool Direct, string State, bool Billable, string Sub, int Screens, int Users, decimal Unit, decimal Gross, decimal Monthly, decimal PeriodAmount);
+    private record Renew(string Name, string Kind, string Period, string Detail, string State, DateTime? Next, decimal Amount, bool Blocked, Guid? ClientId, Guid? ResellerId);
 
-    protected override void OnInitialized() => groups = Root.Read(d => d.Resellers.OrderBy(r => r.Name)
-        .Select(r => new Group(r.Name, d.Clients.Where(c => c.ResellerId == r.Id).OrderBy(c => c.Name)
-            .Select(c => new ClientRow(c.Name, c.Suspended, d.Screens.Count(s => s.ClientId == c.Id && s.Token != null), d.Users.Count(u => u.ClientId == c.Id && Roles.IsClient(u.Role) && !u.Disabled))).ToList()))
-        .ToList());
+    private static readonly System.Globalization.CultureInfo Fr = new("fr-CH");
+    private static readonly string[] Palette = { "#0B1F3A", "#2A7F62", "#B9792B", "#7A5CC0", "#C0392B", "#2A8A99", "#5A6B80" };
+
+    private DateTime now = DateTime.UtcNow;
+    private int year, month;
+    private string tab = "Revendeurs", filter = "Tous";
+    private Guid? selR, selC;
+    private Subscriptions.Prices prices = new(15, 29, 15);
+    private List<RRow> rrows = new();
+    private List<CRow> crows = new();
+    private List<Renew> renewals = new();        // à encaisser : premiers paiements, renouvellements proches ou en retard
+    private List<Payment> monthPayments = new();
+    private List<Payment> history = new();
+    private decimal mrr, grossBase, grossGrowth, paidSum, dueSum, blockedSum;
+    private int dueCount, blockedCount, resellerCount, clientCount, billedClients, billedScreens, userCount;
+
+    private string MonthLabel => char.ToUpper(Fr.DateTimeFormat.GetMonthName(month)[0]) + Fr.DateTimeFormat.GetMonthName(month)[1..] + " " + year;
+    private static string Day(DateTime utc) => utc.ToLocalTime().ToString("d MMM yyyy", Fr);
+    private static string Initials(string n) => string.Concat(n.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => char.ToUpperInvariant(w[0])));
+    private static string AvatarColor(string n) => Palette[Math.Abs(n.Aggregate(0, (h, ch) => h * 31 + ch)) % Palette.Length];
+    private static int ScreensOfPlan(List<Subscriptions.Line> lines, string plan) => lines.Where(l => l.Plan == plan).Sum(l => l.Screens);
+
+    private RRow? SelRow => selR is { } id ? rrows.FirstOrDefault(r => r.R.Id == id) : null;
+    private CRow? SelClient => selC is { } id ? crows.FirstOrDefault(c => c.C.Id == id) : null;
+    private IEnumerable<CRow> FilteredClients => crows.Where(c => filter switch { "Directs" => c.Direct, "Via un revendeur" => !c.Direct, "À renouveler" => c.Direct && (c.Sub == Subscriptions.Soon || c.Sub == Subscriptions.Unpaid || c.Sub == Subscriptions.FirstDue), _ => true });
+
+    private bool IsLatest(Payment p) => Root.Read(db => db.Payments.Where(x => x.Kind == p.Kind && x.ClientId == p.ClientId && x.ResellerId == p.ResellerId).OrderByDescending(x => x.PaidUtc).FirstOrDefault()?.Id == p.Id);
+
+    private RenderFragment Renewal(string state, DateTime? next, bool blockedForPayment) => builder =>
+    {
+        var css = blockedForPayment || state == Subscriptions.Unpaid ? "bad" : state == Subscriptions.Soon || state == Subscriptions.FirstDue ? "warn" : state == Subscriptions.Current ? "ok" : "mute";
+        var label = blockedForPayment ? "Bloqué : non payé" : state;
+        builder.OpenElement(0, "span"); builder.AddAttribute(1, "class", "adm-st " + css); builder.AddContent(2, label); builder.CloseElement();
+        if (next is { } n)
+        {
+            builder.OpenElement(3, "small"); builder.AddAttribute(4, "class", "adm-sub");
+            builder.AddContent(5, state == Subscriptions.Current ? "jusqu'au " + Day(n) : "échéance le " + Day(n));
+            builder.CloseElement();
+        }
+    };
+
+    private string RenewalNote(string state, DateTime? next, decimal amount, string per) => state switch
+    {
+        Subscriptions.FirstDue => "Aucun paiement enregistré. Le premier paiement fixe la date anniversaire et met fin à l'essai.",
+        Subscriptions.NotBilled => "Pas de paiement à enregistrer pour le moment. Le premier paiement fixe la date anniversaire.",
+        Subscriptions.Current => $"À jour jusqu'au {Day(next!.Value)}. Prochain renouvellement : {Subscriptions.Fmt(amount)} CHF par {per}.",
+        Subscriptions.Soon => $"Renouvellement le {Day(next!.Value)} : {Subscriptions.Fmt(amount)} CHF. Sans paiement ce jour-là, le compte est bloqué.",
+        _ => $"Non payé depuis le {Day(next!.Value)} : le compte est bloqué. Enregistrez le paiement pour le débloquer."
+    };
+
+    private string NotBilledReason(CRow c) => c.State switch
+    {
+        ClientStates.Trial => "En essai : pas facturé. Son premier paiement met fin à l'essai.",
+        ClientStates.Ended => "Essai terminé : pas facturé tant qu'il n'a pas payé.",
+        ClientStates.Pending => "Compte à valider : pas facturé.",
+        ClientStates.Suspended => "Suspendu : pas facturé.",
+        _ => "Bloqué : pas facturé."
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        now = DateTime.UtcNow;
+        (year, month) = (now.Year, now.Month);
+        // Les comptes dont la date anniversaire est passée sans paiement sont bloqués (le service d'arrière-plan le fait aussi, toutes les heures).
+        var ids = Root.Write(db => Subscriptions.Enforce(db, DateTime.UtcNow));
+        Load();
+        foreach (var id in ids.Distinct()) await Screens.NotifyClient(id);
+    }
+
+    private void Shift(int delta)
+    {
+        var d = new DateTime(year, month, 1).AddMonths(delta);
+        (year, month) = (d.Year, d.Month);
+        Load();
+    }
+
+    private void SetTab(string t) { tab = t; filter = "Tous"; selR = selC = null; }
+
+    private void Load()
+    {
+        now = DateTime.UtcNow;
+        Root.Read(db =>
+        {
+            prices = Subscriptions.PricesOf(db);
+            var direct = db.Resellers.FirstOrDefault(r => r.IsDefault);
+            rrows = db.Resellers.Where(r => !r.IsDefault).OrderBy(r => r.Name).Select(r =>
+            {
+                var bill = Subscriptions.ResellerBillOf(db, r, now);
+                var cs = db.Clients.Where(c => c.ResellerId == r.Id).ToList();
+                return new RRow(r, bill, cs.Count, cs.Sum(c => Subscriptions.UsersOf(db, c)), Subscriptions.StateOf(r.NextRenewalUtc, bill.Net > 0, now));
+            }).ToList();
+            crows = db.Clients.OrderBy(c => c.Name).Select(c =>
+            {
+                var r = db.Resellers.FirstOrDefault(x => x.Id == c.ResellerId) ?? direct!;
+                var isDirect = r.IsDefault;
+                var billable = Subscriptions.Billable(db, c, now);
+                var gross = Subscriptions.MonthlyOf(db, c);
+                var monthly = !billable ? 0 : isDirect ? Subscriptions.ClientMonthlyEquivalent(db, c) : Math.Round(gross * (1 - r.DiscountPct / 100m), 2);
+                // un client en essai peut effectuer son premier paiement ; seul un client actif a un renouvellement à suivre
+                var sub = Subscriptions.StateOf(c.NextRenewalUtc, billable || c.TrialEndsUtc != null, now);
+                return new CRow(c, r, isDirect, ClientStates.Of(c, Signup.OwnerOf(db, c), now), billable, sub, Subscriptions.ScreensOf(db, c), Subscriptions.UsersOf(db, c),
+                    Subscriptions.Unit(prices, c.Plan), gross, monthly, Subscriptions.ClientAmount(db, c));
+            }).ToList();
+
+            // CA mensuel : ce que rapportent aujourd'hui les comptes actifs (un client à l'année compte pour son équivalent mensuel remisé).
+            mrr = rrows.Sum(r => r.Bill.Net) + crows.Where(c => c.Direct && c.Billable).Sum(c => c.Monthly);
+            var lines = rrows.SelectMany(r => r.Bill.Lines).Select(l => (Plan: l.Plan, Amount: l.Amount)).Concat(crows.Where(c => c.Direct && c.Billable).Select(c => (Plan: c.C.Plan, Amount: c.Gross))).ToList();
+            grossBase = lines.Where(l => l.Plan != Plans.Growth).Sum(l => l.Amount);
+            grossGrowth = lines.Where(l => l.Plan == Plans.Growth).Sum(l => l.Amount);
+            monthPayments = db.Payments.Where(p => p.PaidUtc.ToLocalTime().Year == year && p.PaidUtc.ToLocalTime().Month == month).OrderByDescending(p => p.PaidUtc).ToList();
+            paidSum = monthPayments.Sum(p => p.Amount);
+
+            renewals = rrows.Where(r => Subscriptions.CanRecord(r.R.NextRenewalUtc, now) && (r.R.NextRenewalUtc != null || r.Bill.Net > 0))
+                    .Select(r => new Renew(r.R.Name, "Revendeur", "mensuel", r.Bill.Screens + " écrans", r.State, r.R.NextRenewalUtc, r.Bill.Net, !r.R.Active && r.R.BlockedReason == Subscriptions.PaymentReason, null, r.R.Id))
+                .Concat(crows.Where(c => c.Direct && Subscriptions.CanRecord(c.C.NextRenewalUtc, now) && (c.C.NextRenewalUtc != null || c.Billable))
+                    .Select(c => new Renew(c.C.Name, "Client", c.C.BillingPeriod == "annual" ? "annuel" : "mensuel", c.Screens + " écrans · " + Plans.Label(c.C.Plan), c.Sub, c.C.NextRenewalUtc, c.PeriodAmount, c.C.Blocked && c.C.BlockedReason == Subscriptions.PaymentReason, c.C.Id, null)))
+                .OrderBy(x => x.Next ?? DateTime.MaxValue).ToList();
+            // à renouveler sous 30 jours : comptes actifs dont la date anniversaire tombe dans le mois à venir
+            var soon = rrows.Where(r => r.R.Active && r.R.NextRenewalUtc is { } n && n.Date >= now.Date && n.Date <= now.Date.AddDays(30)).Select(r => r.Bill.Net)
+                .Concat(crows.Where(c => c.Direct && !c.C.Blocked && c.C.NextRenewalUtc is { } n && n.Date >= now.Date && n.Date <= now.Date.AddDays(30)).Select(c => c.PeriodAmount)).ToList();
+            dueCount = soon.Count; dueSum = soon.Sum();
+            var blocked = renewals.Where(x => x.Blocked).ToList();
+            blockedCount = blocked.Count; blockedSum = blocked.Sum(x => x.Amount);
+
+            resellerCount = rrows.Count; clientCount = crows.Count;
+            billedClients = crows.Count(c => c.Billable);
+            billedScreens = crows.Where(c => c.Billable).Sum(c => c.Screens);
+            userCount = crows.Sum(c => c.Users);
+            history = selR is { } rid ? db.Payments.Where(p => p.Kind == "reseller" && p.ResellerId == rid).OrderByDescending(p => p.PaidUtc).Take(8).ToList()
+                : selC is { } cid ? db.Payments.Where(p => p.Kind == "client" && p.ClientId == cid).OrderByDescending(p => p.PaidUtc).Take(8).ToList() : new();
+            return 0;
+        });
+    }
+
+    private void OpenR(RRow r) { selR = r.R.Id; selC = null; Load(); }
+    private void OpenC(CRow c) { selC = c.C.Id; selR = null; Load(); }
+    private void Close() { selR = selC = null; }
+
+    private async Task PayClient(CRow c)
+    {
+        var pay = Root.Write(db => db.Clients.FirstOrDefault(x => x.Id == c.C.Id) is { } x ? Subscriptions.RecordClient(db, x, DateTime.UtcNow) : null);
+        Load();
+        await Screens.NotifyClient(c.C.Id);
+        Done(pay, c.C.Name);
+    }
+
+    private async Task PayReseller(RRow r)
+    {
+        var pay = Root.Write(db => db.Resellers.FirstOrDefault(x => x.Id == r.R.Id) is { } x ? Subscriptions.RecordReseller(db, x, DateTime.UtcNow) : null);
+        var clients = Root.Read(db => db.Clients.Where(c => c.ResellerId == r.R.Id).Select(c => c.Id).ToList());
+        Load();
+        foreach (var id in clients) await Screens.NotifyClient(id);
+        Done(pay, r.R.Name);
+    }
+
+    private async Task PayRenewal(Renew x)
+    {
+        if (x.ClientId is { } cid && crows.FirstOrDefault(c => c.C.Id == cid) is { } c) await PayClient(c);
+        else if (x.ResellerId is { } rid && rrows.FirstOrDefault(r => r.R.Id == rid) is { } r) await PayReseller(r);
+    }
+
+    private void Done(Payment? pay, string name)
+    {
+        if (pay == null) { Toast.Error("Rien à enregistrer : le prochain renouvellement n'est pas encore proche."); return; }
+        Toast.Ok($"Paiement de « {name} » enregistré : {Subscriptions.Fmt(pay.Amount)} CHF. Prochain renouvellement le {Day(pay.ToUtc)}.");
+    }
+
+    private async Task Undo(Payment p)
+    {
+        var ok = Root.Write(db => Subscriptions.UndoLast(db, p.Id));
+        var clients = Root.Read(db => p.ClientId is { } c ? new List<Guid> { c } : db.Clients.Where(x => x.ResellerId == p.ResellerId).Select(x => x.Id).ToList());
+        Load();
+        foreach (var id in clients) await Screens.NotifyClient(id);
+        if (ok) Toast.Ok($"Paiement de « {p.Name} » annulé."); else Toast.Error("Seul le dernier paiement peut être annulé.");
+    }
+
+    private void SetDiscount(RRow r, string? value)
+    {
+        var pct = int.TryParse(value, out var v) ? Math.Clamp(v, 0, 50) : 0;
+        Root.Write(db => { if (db.Resellers.FirstOrDefault(x => x.Id == r.R.Id) is { } x) x.DiscountPct = pct; });
+        Load();
+        Toast.Ok($"Rabais de « {r.R.Name} » : {pct} %.");
+    }
+
+    private void SetPeriod(CRow c, string period)
+    {
+        if (c.C.BillingPeriod == period) return;
+        Root.Write(db => { if (db.Clients.FirstOrDefault(x => x.Id == c.C.Id) is { } x) x.BillingPeriod = period; });
+        Load();
+        var when = period == "annual" ? "à l’année" : "au mois";
+        Toast.Ok($"« {c.C.Name} » paiera désormais {when} dès son prochain renouvellement.");
+    }
 }

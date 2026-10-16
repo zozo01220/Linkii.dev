@@ -1409,3 +1409,34 @@ Page Revendeurs refaite sur le modèle de la page Clients (§58) : mêmes onglet
 - **Option A** : désactiver un fournisseur ne le retire que de l'inscription. Sur la page de connexion, son bouton reste affiché tant qu'au moins un compte de ce revendeur l'utilise ; les personnes déjà inscrites ne sont jamais enfermées dehors.
 - Page de connexion : « Créer un espace » seulement si l'e-mail est proposé ; la création par un fournisseur (dernière étape) exige que ce fournisseur soit proposé ; refus aussi côté serveur (`DoSignup`, `DoSsoSignup`, `/login/sso/finish`).
 - Vérifié : après avoir activé e-mail et Google chez le revendeur de test, sa page de connexion n'affiche que « Continuer avec Google » et « Créer un espace ». Non vérifié : le cas d'un fournisseur désactivé mais encore utilisé, et le parcours complet d'inscription par fournisseur (clés OAuth absentes en test).
+
+### Compléments §59 : exploitation, diagnostics et déploiement (16 octobre 2026)
+- **Diagnostic NPM** (`NpmProxy.Problem()`) : le test de connexion et la création disent précisément ce qui manque (adresse, identifiant, mot de passe, destination des hôtes) ou que le **mot de passe enregistré est illisible sur ce serveur** (réglages copiés d'une autre machine : le chiffrement SecretBox dépend des clés de protection de données du serveur, à ressaisir). Si le certificat générique manque, le message donne le domaine cherché et les certificats `*.…` trouvés dans NPM (cause typique : « Domaine de base » vide, donc `linkii.com` par défaut).
+- **Identifiant NPM** : texte libre envoyé tel quel au champ `identity` de l'API ; adresse de l'API en `http://hôte:81` (le port 81 de NPM n'est en général pas en HTTPS). Éviter le remplissage automatique du navigateur sur ce champ.
+- **Une instance = une base** : chaque serveur Linkii a son `data.json`. L'hôte NPM envoie vers une instance précise (destination des hôtes) ; si elle ne connaît pas le revendeur (autre base), elle sert la marque Linkii par défaut et la connexion du revendeur échoue (« E-mail ou mot de passe incorrect »). Créer les revendeurs sur l'instance vers laquelle NPM pointe.
+- **Connexion** : le mot de passe est aussi essayé sans espaces de début ou de fin (copié depuis un e-mail). Un administrateur de revendeur ne se connecte que sur l'adresse de son revendeur.
+- **Mise en production** : redémarrer le service après déploiement ; prérequis NPM : certificat `*.domaine` (Let's Encrypt par DNS, plugin DuckDNS), compte NPM dédié. Les anciens hôtes `digisignit-linkii…` créés à la main ne sont pas migrés.
+- **Courrier indésirable** : relève de l'authentification de l'expéditeur (SPF, DKIM, DMARC du domaine de l'adresse d'expédition, réglée dans Réglages › E-mails) ; l'application ajoute seulement un `Message-ID` au domaine de l'expéditeur.
+
+## 61. Facturation : abonnements à date anniversaire (16 octobre 2026) : codé
+
+Page `/admin/billing` refaite sur le modèle de Clients et Revendeurs ; logique dans `Subscriptions.cs`, page dans `Admin/Billing.razor`. Prévue pour Stripe ; en attendant, le paiement d'un renouvellement s'enregistre à la main.
+
+### Principe
+- Prix **par écran et par mois** selon la licence (Réglages › Facturation : Base 15, Growth 29 CHF par défaut, remise annuelle 15 %). Pas de limite d'écrans.
+- Un **client direct** (revendeur Linkii) paie **au mois ou à l'année** (`Tenant.BillingPeriod`) ; un **revendeur** paie **au mois** (écrans de ses clients actifs au tarif de leur licence, moins son rabais `Reseller.DiscountPct`) ; un client d'un revendeur est facturé avec le revendeur.
+- **Date anniversaire** = date du premier paiement, qui ne bouge plus (`NextRenewalUtc` + `AnchorDay` : un 31 janvier devient 28 février puis revient au 31 mars). Chaque paiement avance la date d'un mois ou d'un an.
+- **Sans paiement à la date anniversaire, le compte est bloqué automatiquement** (`Subscriptions.Enforce`, `BlockedReason = "payment"`) : pas de facture, de relance ni de suivi. Le blocage tombe le lendemain de la date anniversaire (la journée sert à payer). Un revendeur non payé est bloqué avec tous ses clients. Le paiement suivant débloque (si la nouvelle échéance n'est pas déjà dépassée) ; un blocage manuel n'a pas de motif et reste manuel.
+- `SubscriptionWorker` applique le blocage au démarrage puis toutes les heures et prévient les écrans ; la page Facturation l'applique aussi à son ouverture.
+- **Premier paiement** : il fixe la date anniversaire et met fin à l'essai (un client en essai n'est pas facturé). Sans paiement enregistré, un compte actif reste « Premier paiement » et n'est jamais bloqué (comptes existants).
+- **Bouton « Paiement reçu »** (à la place de Stripe) : sur chaque ligne de Revendeurs et Clients, dans les fiches, et dans l'onglet Paiements. Disponible pour un premier paiement ou dans les 7 jours avant l'échéance (ou après) ; « Annuler » défait le dernier paiement d'un compte (la fin d'essai n'est pas rétablie). Chaque paiement est gardé dans `Db.Payments` (date, période couverte, écrans, montant au moment du paiement).
+
+### Page
+- Chiffre d'affaires mensuel (comptes actifs, réparti Base et Growth, rabais déduits ; un client à l'année compte pour son équivalent mensuel remisé), Encaissé du mois sélectionné, À renouveler sous 30 jours, Bloqués faute de paiement (avec le montant dû).
+- Compteurs : revendeurs, clients (dont actifs), écrans facturés, utilisateurs ; rappel des tarifs.
+- Onglets **Revendeurs** (écrans Base × prix, Growth × prix, brut, rabais, net, renouvellement ; fiche : détail par client, rabais, paiement, historique), **Clients** (facturé à, licence, périodicité, CHF par mois, renouvellement ; fiche : calcul, périodicité mensuelle ou annuelle appliquée au prochain renouvellement, paiement), **Paiements** (à encaisser, puis journal du mois).
+
+### Limites
+- Vérifié sur des données de test : blocage automatique d'un client dont l'échéance est dépassée, paiement qui le débloque et avance la date au 10 du mois suivant, montants (Growth 17 écrans = 493.00), compteurs. Non vérifiés : premier paiement (annuel), annulation d'un paiement, changement de périodicité, revendeur non payé, changement de mois.
+- Le nombre d'écrans et la licence sont ceux du moment du calcul. Un client à l'année qui ajoute des écrans en cours d'année n'est pas refacturé avant le renouvellement.
+- Pas d'export, de facture PDF, d'e-mail ni de relance. Stripe (abonnements, webhook de paiement, jour anniversaire) reste à brancher : `Subscriptions.RecordClient` et `RecordReseller` sont les points d'entrée à appeler depuis le webhook.

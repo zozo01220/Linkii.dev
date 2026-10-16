@@ -14,6 +14,7 @@ public class Db
     public List<Area> Areas { get; set; } = new();               // aires de gestion des clients
     public List<MediaFolder> MediaFolders { get; set; } = new();  // dossiers de la médiathèque (voir <see cref="MediaFolder"/>)
     public List<PlaylistFolder> PlaylistFolders { get; set; } = new();  // dossiers des listes de lecture (voir <see cref="PlaylistFolder"/>)
+    public List<Payment> Payments { get; set; } = new();          // paiements de renouvellement enregistrés (voir <see cref="Subscriptions"/>)
     public PlatformSettings Platform { get; set; } = new();      // réglages communs à toutes les organisations (console › Réglages)
 
     /// <summary>Ancien format mono-client (avant le multi-tenant) : lu une fois pour migration, jamais réécrit.</summary>
@@ -36,6 +37,12 @@ public class PlatformSettings
     public int VerifyLinkHours { get; set; } = 48;
     /// <summary>Un compte jamais validé est supprimé après ce délai (libère une adresse mal saisie ou fausse).</summary>
     public int PurgeUnverifiedDays { get; set; } = 7;
+
+    // Facturation (console › Réglages › Facturation) : prix par écran et par mois selon la licence
+    public decimal PriceBase { get; set; } = 15m;
+    public decimal PriceGrowth { get; set; } = 29m;
+    /// <summary>Remise (en %) d'un client direct qui paie à l'année.</summary>
+    public int AnnualDiscountPct { get; set; } = 15;
 
     // Adresses des revendeurs. Vide : repli sur la configuration du serveur (Linkii:BaseDomain, Linkii:SubdomainSeparator).
     public string BaseDomain { get; set; } = "";
@@ -103,6 +110,12 @@ public class Reseller
     public bool Suspended { get; set; }
     /// <summary>Rabais (en %) sur la facture mensuelle du revendeur.</summary>
     public int DiscountPct { get; set; }
+    /// <summary>Prochain renouvellement mensuel (date anniversaire du premier paiement). null : aucun paiement enregistré. Sans paiement à cette date, le revendeur est bloqué.</summary>
+    public DateTime? NextRenewalUtc { get; set; }
+    /// <summary>Jour du mois du premier paiement : la date anniversaire ne dérive pas (31 janvier, 28 février, 31 mars).</summary>
+    public int AnchorDay { get; set; }
+    /// <summary>« payment » : bloqué automatiquement faute de paiement (levé par le paiement suivant).</summary>
+    public string BlockedReason { get; set; } = "";
     // Mise en ligne de l'adresse (hôte proxy dans Nginx Proxy Manager) : "" non géré | online | error
     public string AddressState { get; set; } = "";
     public int? NpmHostId { get; set; }
@@ -267,6 +280,14 @@ public class Tenant
     /// <summary>Bloqué : écrans coupés et back-office fermé aux membres de l'organisation.</summary>
     public bool Blocked { get; set; }
     public bool IsCut => Suspended || Blocked;
+    /// <summary>monthly (par défaut) ou annual : paiement d'un client direct (un client d'un revendeur est facturé avec le revendeur).</summary>
+    public string BillingPeriod { get; set; } = "monthly";
+    /// <summary>Prochain renouvellement (date anniversaire du premier paiement, chaque mois ou chaque année). null : aucun paiement enregistré. Sans paiement à cette date, le client est bloqué.</summary>
+    public DateTime? NextRenewalUtc { get; set; }
+    /// <summary>Jour du mois du premier paiement : la date anniversaire ne dérive pas.</summary>
+    public int AnchorDay { get; set; }
+    /// <summary>« payment » : bloqué automatiquement faute de paiement (levé par le paiement suivant).</summary>
+    public string BlockedReason { get; set; } = "";
     /// <summary>Niveaux de droits créés par les administrateurs de l'organisation (voir <see cref="AccessLevel"/>).</summary>
     public List<AccessLevel> Levels { get; set; } = new();
     /// <summary>Option « Dossiers dans la médiathèque » (Réglages › Médiathèque, éteinte par défaut) : dossiers, partages et écran des niveaux.</summary>
