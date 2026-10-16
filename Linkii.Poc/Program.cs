@@ -16,6 +16,7 @@ builder.Services.AddSignalR();
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<JsonStore>();
 builder.Services.AddSingleton<ResellerResolver>();
+builder.Services.AddSingleton<NpmProxy>();
 builder.Services.AddSingleton<Mailer>();
 builder.Services.AddScoped<Toaster>();
 builder.Services.AddSingleton<PlayLog>();
@@ -400,7 +401,7 @@ app.MapGet("/login/sso/finish", async (HttpContext ctx, string? t, ExternalLogin
     }
     // Aucun compte pour cette identité : les mêmes boutons servent à se connecter et à s'inscrire. Si l'inscription libre est ouverte,
     // on passe à la dernière étape de la création d'un espace (le ticket reste valable) ; sinon, message « aucun espace ».
-    if (problem == "nolink" && host is { Active: true, AllowSelfSignup: true })
+    if (problem == "nolink" && host.Active && host.AllowsSignupWith(id.Provider))
         return Results.Redirect("/login?signup=1&ext=" + Uri.EscapeDataString(t!));
     sso.Consume(t);
     return Results.Redirect($"/login?sso={problem}&p={id.Provider}");

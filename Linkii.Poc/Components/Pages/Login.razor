@@ -33,7 +33,7 @@ else
                 @if (error != null && !signup) { <div class="err">@error</div> }
                 <button class="btn" type="submit">Se connecter</button>
             </EditForm>
-            @if (Host.AllowSelfSignup)
+            @if (Host.AllowsSignupWith(SignupSources.Email))
             {
                 <p class="auth-alt left">Pas encore d'espace ? <a href="/login?signup=1">Créer un espace</a></p>
             }
@@ -42,7 +42,7 @@ else
         {
             <aside class="split-side" aria-label="Connexion rapide">
                 <h2>Connexion rapide</h2>
-                <p>@(Host.AllowSelfSignup ? "Connectez-vous avec un compte que vous avez déjà. Pas encore d'espace ? Il est créé en une étape." : "Connectez-vous avec un compte que vous avez déjà.")</p>
+                <p>@(Host.AllowsSignup ? "Connectez-vous avec un compte que vous avez déjà. Pas encore d'espace ? Il est créé en une étape." : "Connectez-vous avec un compte que vous avez déjà.")</p>
                 <SsoButtons Mode="login" WithGoogle="@ShowGoogle" WithMicrosoft="@ShowMicrosoft" WithLinkedIn="@ShowLinkedIn" WithGitHub="@ShowGitHub" />
             </aside>
         }
@@ -134,16 +134,21 @@ else
     [SupplyParameterFromQuery(Name = "why")] private string? WhyQuery { get; set; }
 
     private Reseller? Host => Http?.Items["reseller"] as Reseller;
-    private bool signup => SignupQuery != null && Host is { Active: true, AllowSelfSignup: true };
+    // La fenêtre de création s'ouvre si le revendeur propose l'inscription par e-mail, ou pour la dernière étape d'une inscription par un fournisseur qu'il propose.
+    private bool signup => SignupQuery != null && Host is { Active: true } h && (h.AllowsSignupWith(SignupSources.Email) || Ext != null && h.AllowsSignup);
     private ExternalLogin.Ticket? ticket;
     private string? error, ssoError;
     private int trialDays;
 
     // Boutons Microsoft / Google : proposés quand l'application OAuth de la plateforme est configurée (toujours en développement, pour essayer l'écran).
-    private bool ShowGoogle => Sso.IsConfigured(SignupSources.Google) || Env.IsDevelopment();
-    private bool ShowMicrosoft => Sso.IsConfigured(SignupSources.Microsoft) || Env.IsDevelopment();
-    private bool ShowLinkedIn => Sso.IsConfigured(SignupSources.LinkedIn) || Env.IsDevelopment();
-    private bool ShowGitHub => Sso.IsConfigured(SignupSources.GitHub) || Env.IsDevelopment();
+    // Un fournisseur est proposé s'il est configuré sur la plateforme ET que le revendeur l'offre à l'inscription, ou que des personnes de ce revendeur
+    // se connectent déjà avec lui : le désactiver ne ferme l'inscription qu'aux nouveaux, personne n'est enfermé dehors.
+    private HashSet<string> usedProviders = new();
+    private bool Offered(string p) => (Sso.IsConfigured(p) || Env.IsDevelopment()) && Host is { } h && (h.AllowsSignupWith(p) || usedProviders.Contains(p));
+    private bool ShowGoogle => Offered(SignupSources.Google);
+    private bool ShowMicrosoft => Offered(SignupSources.Microsoft);
+    private bool ShowLinkedIn => Offered(SignupSources.LinkedIn);
+    private bool ShowGitHub => Offered(SignupSources.GitHub);
 
     public class LoginModel
     {
@@ -171,6 +176,7 @@ else
         EmailSignup ??= new();
         if (Http?.User.Identity?.IsAuthenticated == true) { Nav.NavigateTo(Claims.Home(Http.User), forceLoad: true); return; }
         trialDays = Store.Read(d => d.Platform.TrialDays);
+        if (Host is { } hh) usedProviders = Store.Read(d => d.Users.Where(u => u.ResellerId == hh.Id && u.ExternalProvider != null).Select(u => u.ExternalProvider!).ToHashSet());
         if (signup && Ext != null)
         {
             ticket = Sso.Peek(Ext);   // connexion ou inscription : les mêmes boutons servent aux deux
@@ -213,6 +219,7 @@ else
     {
         error = null;
         var m = EmailSignup!;
+        if (Host?.AllowsSignupWith(SignupSources.Email) != true) { error = "La création d'un espace par e-mail n'est pas proposée ici."; return; }
         if (string.IsNullOrWhiteSpace(m.Organisation) || string.IsNullOrWhiteSpace(m.Email)) { error = "Organisation et e-mail obligatoires."; return; }
         if (m.Password != m.PasswordConfirm) { error = "Les deux mots de passe ne correspondent pas."; m.Password = m.PasswordConfirm = ""; return; }
         var now = DateTime.UtcNow;
@@ -239,6 +246,7 @@ else
         error = null;
         var m = SsoSignup!;
         if (ticket == null) { error = "La connexion a expiré. Recommencez."; return; }
+        if (Host?.AllowsSignupWith(ticket.Identity.Provider) != true) { error = "La création d'un espace avec ce compte n'est pas proposée ici."; return; }
         if (string.IsNullOrWhiteSpace(m.Organisation)) { error = "Le nom de l'organisation est obligatoire."; return; }
         var now = DateTime.UtcNow;
         var id = ticket.Identity;
@@ -262,7 +270,8 @@ else
             var u = d.Users.FirstOrDefault(x => x.Email == email && Tenancy.HostAllows(x, host));
             if (u is { Disabled: false, HasPassword: false, ExternalProvider: { } p })
                 return ((Guid?)null, (string?)$"Ce compte se connecte avec le bouton « Continuer avec {SignupSources.Label(p)} ».");
-            if (u == null || u.Disabled || !Passwords.Verify(u.PasswordHash, pwd)) return (null, "E-mail ou mot de passe incorrect.");
+            // Un mot de passe copié depuis un e-mail traîne souvent un espace ou un retour à la ligne : on accepte aussi la version nettoyée.
+            if (u == null || u.Disabled || !(Passwords.Verify(u.PasswordHash, pwd) || pwd.Trim() != pwd && Passwords.Verify(u.PasswordHash, pwd.Trim()))) return (null, "E-mail ou mot de passe incorrect.");
             if (u.ClientId != null && d.Clients.FirstOrDefault(c => c.Id == u.ClientId) is not { Blocked: false }) return (null, "Cet espace est bloqué. Contactez votre revendeur.");
             return (u.Id, (string?)null);
         });

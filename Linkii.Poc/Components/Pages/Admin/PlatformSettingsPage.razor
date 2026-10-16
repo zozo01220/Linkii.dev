@@ -4,6 +4,8 @@
 @inject Toaster Toast
 @inject SecretBox Box
 @inject Mailer Mail
+@inject NpmProxy Npm
+@inject ResellerResolver Resolver
 
 <div class="page-head">
     <div>
@@ -57,6 +59,28 @@
             <div class="val"><span class="adm-st ok">Toujours actif</span></div>
         </div>
     }
+    else if (section == "addr")
+    {
+        <div style="padding:16px 0 4px" class="muted">Chaque revendeur reçoit une adresse « revendeur + séparateur + domaine ». Avec un certificat générique dans NPM, elle fonctionne dès la création.</div>
+        <div class="form-grid" style="padding:8px 0 6px">
+            <div><label class="lbl">Domaine de base</label><input class="full mono" @bind="baseDomain" placeholder="@EffectiveBase" autocomplete="off" spellcheck="false" /><small class="muted">À renseigner : c'est le domaine du certificat générique de NPM (*.domaine). Vide, le serveur utilise « @EffectiveBase ».</small></div>
+            <div><label class="lbl">Séparateur</label>
+                <select class="full" @bind="sepChoice"><option value="">Automatique</option><option value=".">. (point) : acme.domaine</option><option value="-">- (tiret) : acme-domaine</option></select></div>
+            <div><label class="lbl">Exemple</label><div class="mono" style="padding:8px 0">@Example</div></div>
+        </div>
+        <div class="adm-row" style="border-top:1px solid var(--row);margin-top:10px">
+            <div>Nginx Proxy Manager<small>Linkii y crée un hôte proxy pour chaque nouveau revendeur, avec le certificat générique du domaine. Laissez l'adresse vide pour ne rien automatiser.</small></div>
+            <div class="val"><span class="adm-st @(npmReady ? "ok" : "mute")">@(npmReady ? "Configuré" : "Non configuré")</span></div>
+        </div>
+        <div class="form-grid" style="padding:4px 0 8px">
+            <div style="grid-column:1/-1"><label class="lbl">Adresse de l'API</label><input class="full mono" @bind="npmUrl" placeholder="http://192.168.1.120:81" autocomplete="off" spellcheck="false" /></div>
+            <div><label class="lbl">Identifiant (compte dédié)</label><input class="full" @bind="npmUser" autocomplete="off" /></div>
+            <div><label class="lbl">Mot de passe</label><input class="full" type="password" @bind="npmPassword" autocomplete="new-password" name="npm-secret" placeholder="@(hasNpmPassword && npmReadable ? "Enregistré : laisser vide pour le conserver" : hasNpmPassword ? "Illisible sur ce serveur : saisissez-le à nouveau" : "")" /></div>
+            <div><label class="lbl">Destination des hôtes</label>
+                <div class="row" style="gap:6px"><select @bind="npmScheme"><option value="http">http</option><option value="https">https</option></select><input class="full mono" @bind="npmForwardHost" placeholder="192.168.1.249" autocomplete="off" /><input type="number" min="1" max="65535" class="mono" style="width:90px" @bind="npmPort" aria-label="Port" /></div></div>
+        </div>
+        <div class="row" style="gap:10px;padding-bottom:16px"><button type="button" class="btn ghost" @onclick="TestNpm" disabled="@testing">Enregistrer et tester la connexion</button><span class="@(npmTestOk ? "muted" : "err")" style="margin:0">@npmTest</span></div>
+    }
     else if (section == "mail")
     {
         <div style="padding:16px 0 4px" class="muted">Un seul serveur d'envoi pour toute la plateforme : confirmations d'adresse, mots de passe provisoires, invitations et rappels. @(Mail.Configured ? "" : "Aucun e-mail ne part tant que ce n'est pas renseigné.")</div>
@@ -91,9 +115,15 @@
     private bool smtpSsl = true, hasPassword, sending;
     private string testTo = "";
     private string section = "signup";
+    private string baseDomain = "", sepChoice = "", npmUrl = "", npmUser = "", npmPassword = "", npmScheme = "http", npmForwardHost = "", npmTest = "";
+    private int npmPort = 5001;
+    private bool npmReadable = true;
+    private bool hasNpmPassword, npmReady, testing, npmTestOk;
+    private string EffectiveBase => Root.Read(d => Resolver.BaseDomainOf(d));
+    private string Example => Root.Read(d => Resolver.HostFor(d, "acme"));
     private static readonly (string Id, string Label, string Icon)[] Sections =
     {
-        ("signup", "Inscription et essai", "user"), ("access", "Suspension et blocage", "lock"), ("mail", "E-mails", "mail"), ("terms", "Conditions", "file")
+        ("signup", "Inscription et essai", "user"), ("access", "Suspension et blocage", "lock"), ("addr", "Adresses", "globe"), ("mail", "E-mails", "mail"), ("terms", "Conditions", "file")
     };
 
     protected override void OnInitialized()
@@ -101,6 +131,9 @@
         (trialDays, linkHours, purgeDays, accepted) = Root.Read(d => (d.Platform.TrialDays, d.Platform.VerifyLinkHours, d.Platform.PurgeUnverifiedDays,
             d.Users.Count(u => u.TermsVersion == Terms.Version)));
         var p = Root.Read(d => d.Platform);
+        (baseDomain, sepChoice, npmUrl, npmUser, npmScheme, npmForwardHost, npmPort, hasNpmPassword) = (p.BaseDomain, p.SubdomainSeparator, p.NpmUrl, p.NpmUser, p.NpmForwardScheme, p.NpmForwardHost, p.NpmForwardPort, p.NpmPassword != "");
+        npmReady = Npm.Configured;
+        npmReadable = !hasNpmPassword || npmReady || Npm.Problem() is not { } pb || !pb.Contains("illisible");
         (smtpHost, smtpPort, smtpSsl, smtpUser, smtpFrom, hasPassword) = (p.SmtpHost, p.SmtpPort > 0 ? p.SmtpPort : 587, p.SmtpSsl, p.SmtpUser, p.SmtpFrom, p.SmtpPassword != "");
     }
 
@@ -113,18 +146,33 @@
         if (purgeDays is < 1 or > 365) { Toast.Error("Le délai de suppression doit être compris entre 1 et 365 jours."); return false; }
         if (smtpPort is < 1 or > 65535) { Toast.Error("Le port du serveur d'e-mails doit être compris entre 1 et 65535."); return false; }
         if (smtpHost.Trim() != "" && !smtpFrom.Contains('@') && !smtpUser.Contains('@')) { Toast.Error("Indiquez l'adresse d'expédition des e-mails."); return false; }
+        baseDomain = baseDomain.Trim().ToLowerInvariant();
+        if (baseDomain != "" && !System.Text.RegularExpressions.Regex.IsMatch(baseDomain, @"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")) { Toast.Error("Le domaine de base n'est pas valide (ex. : linkii.duckdns.org)."); return false; }
+        if (npmUrl.Trim() != "" && !Uri.TryCreate(npmUrl.Trim(), UriKind.Absolute, out _) || npmPort is < 1 or > 65535) { Toast.Error("L'adresse de NPM ou le port de destination n'est pas valide."); return false; }
         var encrypted = smtpPassword == "" ? null : Box.Protect(smtpPassword);
+        var npmEncrypted = npmPassword == "" ? null : Box.Protect(npmPassword);
         Root.Write(d =>
         {
             var p = d.Platform;
             p.TrialDays = trialDays; p.VerifyLinkHours = linkHours; p.PurgeUnverifiedDays = purgeDays;
+            p.BaseDomain = baseDomain; p.SubdomainSeparator = sepChoice; p.NpmUrl = npmUrl.Trim(); p.NpmUser = npmUser.Trim(); p.NpmForwardScheme = npmScheme; p.NpmForwardHost = npmForwardHost.Trim(); p.NpmForwardPort = npmPort;
+            if (p.NpmUrl == "") p.NpmPassword = ""; else if (npmEncrypted != null) p.NpmPassword = npmEncrypted;
+            hasNpmPassword = p.NpmPassword != "";
             p.SmtpHost = smtpHost.Trim(); p.SmtpPort = smtpPort; p.SmtpSsl = smtpSsl; p.SmtpUser = smtpUser.Trim(); p.SmtpFrom = smtpFrom.Trim();
             if (p.SmtpHost == "") p.SmtpPassword = ""; else if (encrypted != null) p.SmtpPassword = encrypted;
             hasPassword = p.SmtpPassword != "";
         });
-        smtpPassword = "";
+        smtpPassword = ""; npmPassword = ""; npmReady = Npm.Configured;
         if (toast) Toast.Ok("Réglages de la plateforme enregistrés.");
         return true;
+    }
+
+    private async Task TestNpm()
+    {
+        if (!SaveCore(false)) return;
+        testing = true; npmTest = "Connexion en cours…"; npmTestOk = true; StateHasChanged();
+        (npmTestOk, npmTest) = await Npm.Test();
+        testing = false;
     }
 
     private async Task SendTest()

@@ -312,13 +312,14 @@
         var cid = Ctx.ClientId;
         orgName = cid != null ? Root.Read(d => d.Clients.FirstOrDefault(c => c.Id == cid)?.Name ?? "")
                 : Ctx.IsPlatformAdmin ? "Console administrateur Linkii" : reseller?.Name ?? "";
-        if (cid != null) { suspended = Root.Read(d => d.Clients.FirstOrDefault(c => c.Id == cid)?.Suspended == true); siteUrl = Services.GetRequiredService<Mailer>().SiteUrl; }
+        if (cid != null) { suspended = Root.Read(d => d.Clients.FirstOrDefault(c => c.Id == cid) is { } cl && (cl.Suspended || d.Resellers.FirstOrDefault(r => r.Id == cl.ResellerId)?.Suspended == true)); siteUrl = Services.GetRequiredService<Mailer>().SiteUrl; }
         if (cid != null && Root.Read(d => d.Clients.FirstOrDefault(c => c.Id == cid)) is { TrialEndsUtc: { } end } client)
         {
             trialEnd = end;
             trialEndLabel = Signup.Day(client, end);
             siteUrl = Services.GetRequiredService<Mailer>().SiteUrl;
         }
+        if (cid == null && Ctx.IsResellerAdmin && reseller?.Suspended == true) suspended = true;   // revendeur suspendu : les écrans de ses clients sont coupés
         if (cid != null) LoadAreas();
         userEmail = Ctx.Email;
         userName = string.IsNullOrWhiteSpace(Ctx.DisplayName) ? userEmail : Ctx.DisplayName;

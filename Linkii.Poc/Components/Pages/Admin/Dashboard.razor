@@ -58,14 +58,14 @@
         <div class="adm-todo">
             <div class="ic @t.Tone"><Ico Name="@t.Icon" Size="18" /></div>
             <div class="grow">@t.Title<small>@t.Detail</small></div>
-            <a class="btn ghost sm" href="admin/clients?etat=@Uri.EscapeDataString(t.State)">Ouvrir</a>
+            <a class="btn ghost sm" href="@(t.Href ?? "admin/clients?etat=" + Uri.EscapeDataString(t.State))">Ouvrir</a>
         </div>
     }
     @if (todo.Count == 0) { <div class="adm-empty">Rien à traiter pour le moment.</div> }
 </div>
 
 @code {
-    private record Todo(string Icon, string Tone, string Title, string Detail, string State);
+    private record Todo(string Icon, string Tone, string Title, string Detail, string State, string? Href = null);
     private static readonly System.Globalization.CultureInfo Fr = new("fr-CH");
     private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
     private record Row(Tenant Client, string State, User? Owner);
@@ -73,6 +73,7 @@
     private List<(string Label, int N)> months = new();
     private List<Todo> todo = new();
     private DateTime now = DateTime.UtcNow;
+    private int pendingAddresses;
     private int screens, online, users, active30, resellers, newThisMonth, endingSoon, basePlan, growth, maxMonth;
 
     private int Count(string state) => rows.Count(r => r.State == state);
@@ -92,6 +93,7 @@
             users = us.Count;
             active30 = us.Count(u => u.ActiveSince(since));
             resellers = d.Resellers.Count(r => !r.IsDefault);
+            pendingAddresses = d.Resellers.Count(r => r.AddressState == NpmProxy.Error);
             return 0;
         });
         newThisMonth = rows.Count(r => r.Client.CreatedUtc >= monthStart);
@@ -105,6 +107,8 @@
         }).ToList();
         maxMonth = months.Max(m => m.N);
 
+        if (pendingAddresses > 0)
+            todo.Add(new("globe", "warn", $"{pendingAddresses} adresse{(pendingAddresses > 1 ? "s" : "")} de revendeur en attente", "La mise en ligne dans NPM a échoué : à relancer depuis la fiche du revendeur.", "", "admin/resellers?etat=" + Uri.EscapeDataString("Adresse en attente")));
         var pending = rows.Where(r => r.State == ClientStates.Pending).ToList();
         if (pending.Count > 0)
             todo.Add(new("mail", "", $"{pending.Count} compte{(pending.Count > 1 ? "s" : "")} à valider", string.Join(", ", pending.Take(3).Select(r => r.Client.Name)) + (pending.Count > 3 ? "…" : ""), ClientStates.Pending));

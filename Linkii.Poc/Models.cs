@@ -37,6 +37,17 @@ public class PlatformSettings
     /// <summary>Un compte jamais validé est supprimé après ce délai (libère une adresse mal saisie ou fausse).</summary>
     public int PurgeUnverifiedDays { get; set; } = 7;
 
+    // Adresses des revendeurs. Vide : repli sur la configuration du serveur (Linkii:BaseDomain, Linkii:SubdomainSeparator).
+    public string BaseDomain { get; set; } = "";
+    public string SubdomainSeparator { get; set; } = "";
+    // Nginx Proxy Manager : un hôte proxy est créé pour chaque nouveau revendeur (adresse vide : pas d'automatisation).
+    public string NpmUrl { get; set; } = "";
+    public string NpmUser { get; set; } = "";
+    public string NpmPassword { get; set; } = "";    // chiffré (SecretBox), jamais réaffiché
+    public string NpmForwardScheme { get; set; } = "http";
+    public string NpmForwardHost { get; set; } = "";
+    public int NpmForwardPort { get; set; } = 5001;
+
     // Envoi d'e-mails (SMTP), commun à toutes les organisations. Vide : repli sur la configuration du serveur (Linkii:Smtp:*).
     public string SmtpHost { get; set; } = "";
     public int SmtpPort { get; set; } = 587;
@@ -58,6 +69,8 @@ public static class SignupSources
     public const string Console = "console";
 
     public static readonly string[] All = { Email, Google, Microsoft, LinkedIn, GitHub, Reseller, Console };
+    /// <summary>Les méthodes qu'un revendeur peut activer pour l'inscription en libre-service.</summary>
+    public static readonly string[] SignupMethodIds = { Email, Google, Microsoft, LinkedIn, GitHub };
     public static bool IsSelfService(string? s) => s is Email or Google or Microsoft or LinkedIn or GitHub;
 
     public static string Label(string? s) => s switch
@@ -84,9 +97,24 @@ public class Reseller
     public string Name { get; set; } = "";
     public string Slug { get; set; } = "";             // revendeur.linkii.com
     public string? CustomDomain { get; set; }          // affichage.revendeur.ch (CNAME vers Linkii)
+    /// <summary>false : revendeur bloqué (son back-office et celui de ses clients sont fermés, leurs écrans coupés).</summary>
     public bool Active { get; set; } = true;
+    /// <summary>Suspendu : les écrans de tous ses clients sont coupés ; son back-office et celui de ses clients restent ouverts.</summary>
+    public bool Suspended { get; set; }
+    /// <summary>Rabais (en %) sur la facture mensuelle du revendeur.</summary>
+    public int DiscountPct { get; set; }
+    // Mise en ligne de l'adresse (hôte proxy dans Nginx Proxy Manager) : "" non géré | online | error
+    public string AddressState { get; set; } = "";
+    public int? NpmHostId { get; set; }
+    public string AddressNote { get; set; } = "";
+    public DateTime? AddressCheckedUtc { get; set; }
     public bool IsDefault { get; set; }                // le « revendeur » Linkii lui-même (domaine principal, console administrateur)
-    public bool AllowSelfSignup { get; set; }          // création de compte en libre-service (offre directe Linkii)
+    public bool AllowSelfSignup { get; set; }          // ancien réglage : création de compte en libre-service (offre directe Linkii) ; voir SignupMethods
+    /// <summary>Méthodes d'inscription en libre-service que le revendeur propose (e-mail, google, microsoft, linkedin, github). null : réglage d'origine (AllowSelfSignup : toutes, sinon aucune).</summary>
+    public List<string>? SignupMethods { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public IReadOnlyCollection<string> SignupOn => (IReadOnlyCollection<string>?)SignupMethods ?? (AllowSelfSignup ? SignupSources.SignupMethodIds : Array.Empty<string>());
+    public bool AllowsSignupWith(string method) => SignupOn.Contains(method);
+    [System.Text.Json.Serialization.JsonIgnore] public bool AllowsSignup => SignupOn.Count > 0;
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 
     // Marque

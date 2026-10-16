@@ -4,6 +4,8 @@
 @inject TenantContext Ctx
 @inject Notifier Notifier
 @inject IConfiguration Config
+@inject ExternalLogin Sso
+@inject IWebHostEnvironment Env
 @inject ResellerResolver Resolver
 @inject NavigationManager Nav
 @inject Toaster Toast
@@ -30,6 +32,26 @@
     </div>
 
     <div class="card">
+        <h3>Connexion et inscription</h3>
+        <p class="hint">Choisissez comment vos clients peuvent créer leur espace. Désactiver une méthode la retire de l'inscription : les personnes déjà inscrites avec elle peuvent continuer à l'utiliser pour se connecter.</p>
+        <ul class="opt-list">
+            @foreach (var m in SignupSources.SignupMethodIds)
+            {
+                var id = m;
+                var available = id == SignupSources.Email || Sso.IsConfigured(id) || Env.IsDevelopment();
+                <li>
+                    @if (id == SignupSources.Email) { <Ico Name="mail" Size="18" /> } else { <ProviderLogo Provider="@id" Size="18" /> }
+                    <span class="grow"><b>@(id == SignupSources.Email ? "Créer un espace avec e-mail et mot de passe" : "Continuer avec " + SignupSources.Label(id))</b>
+                        @if (!available) { <small class="muted" style="display:block">Non disponible : à activer par Linkii.</small> }</span>
+                    <button type="button" class="switch @(methods.Contains(id) ? "on" : "")" role="switch" aria-checked="@(methods.Contains(id) ? "true" : "false")" aria-label="@id" disabled="@(!available)"
+                            @onclick="() => ToggleMethod(id)"><span></span></button>
+                </li>
+            }
+        </ul>
+        <small class="muted">@(methods.Count == 0 ? "Aucune méthode : seuls vos clients déjà créés se connectent, vous les ajoutez vous-même." : "Les changements s'appliquent après « Enregistrer ».")</small>
+    </div>
+
+    <div class="card">
         <h3>Adresse et e-mails</h3>
         <label class="lbl">Adresse du back-office</label>
         <input class="full" value="@Resolver.HostFor(slug)" disabled />
@@ -53,6 +75,8 @@
     private string brandName = "", color = "#0B1F3A", sender = "", slug = "", domain = "";
     private string? logoUrl;
     private bool powered = true;
+    private HashSet<string> methods = new();
+    private void ToggleMethod(string id) { if (!methods.Remove(id)) methods.Add(id); }
     private string BaseDomain => Config["Linkii:BaseDomain"] ?? "linkii.com";
     private string CnameTarget => Config["Linkii:CnameTarget"] ?? "app." + BaseDomain;
     private static readonly string[] Allowed = { "image/png", "image/jpeg", "image/webp" };
@@ -62,6 +86,7 @@
         var r = Ctx.Reseller!;
         brandName = r.DisplayName; color = r.BrandColor; sender = r.SenderEmail; powered = r.ShowPoweredBy;
         slug = r.Slug; domain = r.CustomDomain ?? ""; logoUrl = r.LogoUrl;
+        methods = r.SignupOn.ToHashSet();
         if (Nav.Uri.Contains("saved=1")) Toast.Ok("Marque enregistrée.");
     }
 
@@ -104,6 +129,7 @@
         {
             var r = d.Resellers.First(x => x.Id == rid);
             r.BrandName = brandName.Trim(); r.BrandColor = color; r.SenderEmail = sender.Trim(); r.ShowPoweredBy = powered;
+            r.SignupMethods = SignupSources.SignupMethodIds.Where(methods.Contains).ToList();
         });
         await Notifier.NotifyReseller(rid);   // les écrans de tous les clients reprennent la nouvelle marque
         Nav.NavigateTo("/reseller/brand?saved=1", forceLoad: true);

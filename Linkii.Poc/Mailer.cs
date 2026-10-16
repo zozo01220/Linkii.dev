@@ -54,6 +54,8 @@ public class Mailer(IConfiguration config, JsonStore store, SecretBox box, ILogg
         {
             using var msg = new MailMessage { From = new MailAddress(smtpCfg.From, fromName ?? "Linkii"), Subject = subject, Body = text, IsBodyHtml = false };
             msg.To.Add(to);
+            // Identifiant de message au domaine de l'expéditeur : un message sans identifiant propre est plus souvent classé en courrier indésirable.
+            msg.Headers.Add("Message-ID", $"<{Guid.NewGuid():N}@{new MailAddress(smtpCfg.From).Host}>");
             if (!string.IsNullOrWhiteSpace(replyTo) && MailAddress.TryCreate(replyTo, out var rt)) msg.ReplyToList.Add(rt);
             msg.AlternateViews.Add(AlternateView.CreateAlternateViewFromString(html, System.Text.Encoding.UTF8, "text/html"));
             msg.BodyEncoding = msg.SubjectEncoding = System.Text.Encoding.UTF8;

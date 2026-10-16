@@ -1370,3 +1370,42 @@ Refonte de la console administrateur en briques ; première brique : Clients. Re
 ### Limites
 - Vérifié dans le navigateur sur une instance de test : création, validation, blocage, tableau de bord, réglages, connexion d'un client, bandeau d'essai, Intégrations en lecture seule. Non essayés : suppression, suspension côté client (bandeau), prolongation d'essai, changement de licence, page Widgets.
 - Automatisation de l'hôte proxy et du certificat (API Nginx Proxy Manager, ou certificat générique DuckDNS) : proposée, non codée.
+
+## 59. Revendeurs : fiche de gestion et mise en ligne automatique dans NPM (16 octobre 2026) : codé
+
+Page Revendeurs refaite sur le modèle de la page Clients (§58) : mêmes onglets, tableau et fiche latérale.
+
+### Page Revendeurs (`Admin/Resellers.razor`, `/admin/resellers`)
+- Onglets : Tous, Actif, Suspendu, Bloqué, Adresse en attente (avec effectifs) ; recherche. Tableau : clients, écrans, utilisateurs, adresse, état.
+- Fiche (Aperçu, Clients, Équipe, Activité) : adresse et son état (Vérifier, Relancer la mise en ligne), **rabais mensuel** 0 à 50 % (`Reseller.DiscountPct`, utilisé par la future Facturation), accès, informations, suppression (refusée tant qu'il reste des clients ; retire aussi l'hôte NPM). « Ouvrir son adresse » en pied.
+- Le revendeur Linkii (par défaut) ne se suspend, ne se bloque ni ne se supprime.
+- Le champ « domaine propre » n'est plus proposé (CNAME mis de côté) ; les domaines déjà saisis continuent de fonctionner.
+
+### Suspendu et bloqué (revendeur)
+- `Reseller.Suspended` (nouveau) : les écrans de tous ses clients sont coupés (`Tenancy.Blocked`), tous les back-offices restent ouverts ; bandeau « Votre espace est suspendu » chez le revendeur et ses clients.
+- Bloqué = `Reseller.Active = false` (comportement existant) : la page de connexion de son adresse affiche « Service suspendu », les sessions de son équipe et de **tous ses clients** sont refusées, leurs écrans coupés.
+
+### Adresses et NPM
+- Réglages › **Adresses** : domaine de base, séparateur (point, tiret ou automatique) avec exemple, puis connexion à Nginx Proxy Manager : adresse de l'API, compte dédié (mot de passe chiffré SecretBox), destination des hôtes (schéma, adresse, port), « Enregistrer et tester la connexion ». Ces réglages (`PlatformSettings.BaseDomain`, `SubdomainSeparator`, `Npm*`) remplacent `Linkii:BaseDomain` et `Linkii:SubdomainSeparator` quand ils sont renseignés.
+- `NpmProxy.cs` : API REST de NPM. `Provision` obtient un jeton, trouve le certificat générique `*.domaine`, retrouve ou crée l'hôte proxy du revendeur (forcer SSL, HTTP/2, Websockets, bloquer les exploits) et enregistre le n° d'hôte et l'état (`AddressState` : online, error ou vide) ; `Remove` retire l'hôte ; `Check` contrôle l'HTTPS ; `Test` valide la connexion.
+- À la création, l'**hôte NPM est créé en premier** : NPM non configuré ou en panne, aucun revendeur n'est créé (message clair, formulaire conservé, « Retour au formulaire »). Puis revendeur et administrateur (hôte retiré de NPM si cette étape échoue), puis e-mail de bienvenue ; la progression est affichée. « Relancer la mise en ligne » ne sert plus que pour un revendeur dont l'hôte a disparu ou n'a jamais été créé (état « En attente »).
+- Adresse proposée d'après le nom, contrôlée à chaque frappe (disponible, déjà prise, invalide) avec une alternative (`acme-2`).
+- L'e-mail d'identifiants de l'administrateur du revendeur est envoyé au nom de « Linkii Revendeur » (marque Linkii), pas de celui du revendeur.
+
+### Limites
+- Vérifié contre un **faux NPM** (script local) : test de connexion, création de l'hôte avec le certificat générique, panne puis état « En attente », blocage et déblocage. Jamais essayé sur le vrai NPM (192.168.1.120:81) : à tester avec un compte NPM dédié.
+- Non essayés : suspension (bandeau chez le revendeur et ses clients), suppression avec retrait de l'hôte, « Relancer », « Vérifier » (le contrôle HTTPS part du serveur : il peut échouer à cause du routage interne).
+- Prérequis réseau : certificat `*.linkii.duckdns.org` dans NPM et séparateur « . » (un hôte `digisignit-linkii…` existant n'est pas migré).
+
+### Mot de passe de l'administrateur d'un revendeur (16 octobre 2026)
+- Fiche revendeur › Informations › « Définir un mot de passe » : mot de passe provisoire (généré ou saisi, 8 caractères minimum), à changer à la prochaine connexion, avec envoi facultatif par e-mail (au nom de « Linkii Revendeur »). Vérifié : connexion sur `acme-affichage.localhost` avec le mot de passe défini, puis demande de nouveau mot de passe.
+- Un administrateur de revendeur ne se connecte que sur **l'adresse de son revendeur** (`Tenancy.HostAllows`) ; sur l'adresse principale, le message est « E-mail ou mot de passe incorrect ».
+- `Mailer` : identifiant de message au domaine de l'expéditeur. Les e-mails classés en indésirables relèvent surtout de l'expéditeur (SPF, DKIM, DMARC du domaine du « From »), à régler chez le fournisseur d'envoi.
+
+## 60. Revendeur : méthodes de connexion et d'inscription (16 octobre 2026) : codé
+
+- Page **Marque** de l'espace revendeur : carte « Connexion et inscription » avec un interrupteur par méthode : créer un espace avec e-mail et mot de passe, Google, Microsoft, LinkedIn, GitHub (enregistré avec « Enregistrer »). Un fournisseur dont l'application OAuth n'est pas configurée sur la plateforme est grisé (« Non disponible : à activer par Linkii »).
+- `Reseller.SignupMethods` (liste) ; `null` = ancien réglage `AllowSelfSignup` (Linkii : toutes les méthodes, autres revendeurs : aucune). Par défaut un revendeur n'en propose donc aucune.
+- **Option A** : désactiver un fournisseur ne le retire que de l'inscription. Sur la page de connexion, son bouton reste affiché tant qu'au moins un compte de ce revendeur l'utilise ; les personnes déjà inscrites ne sont jamais enfermées dehors.
+- Page de connexion : « Créer un espace » seulement si l'e-mail est proposé ; la création par un fournisseur (dernière étape) exige que ce fournisseur soit proposé ; refus aussi côté serveur (`DoSignup`, `DoSsoSignup`, `/login/sso/finish`).
+- Vérifié : après avoir activé e-mail et Google chez le revendeur de test, sa page de connexion n'affiche que « Continuer avec Google » et « Créer un espace ». Non vérifié : le cas d'un fournisseur désactivé mais encore utilisé, et le parcours complet d'inscription par fournisseur (clés OAuth absentes en test).

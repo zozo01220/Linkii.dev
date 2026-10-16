@@ -4,16 +4,16 @@
 @inject Mailer Mail
 @inject ResellerResolver Resolver
 @inject NavigationManager Nav
-@inject Notifier Notifier
-@inject IConfiguration Config
+@inject Notifier Screens
 @inject Toaster Toast
+@inject NpmProxy Npm
 
 <div class="page-head">
     <div>
         <h1>Revendeurs</h1>
-        <p class="sub">Une seule instance sert tous les revendeurs : l'adresse de chaque requête détermine la marque et les clients.</p>
+        <p class="sub">Gérez les revendeurs, leur adresse, leur rabais et leur accès. Cliquez sur un revendeur pour ouvrir sa fiche.</p>
     </div>
-    <button class="btn" @onclick="Open">+ Ajouter un revendeur</button>
+    <button class="btn" @onclick="Open"><Ico Name="plus" Size="16" /> Nouveau revendeur</button>
 </div>
 
 @if (showAdd)
@@ -21,158 +21,538 @@
     <div class="modal-backdrop" @onclick="Close"></div>
     <div class="modal app-modal" role="dialog" aria-modal="true" aria-labelledby="add-title">
         <div class="modal-head">
-            <div class="grow"><h3 id="add-title">Nouveau revendeur</h3></div>
+            <div class="grow"><h3 id="add-title">Nouveau revendeur</h3><small class="muted">Son adresse est mise en ligne automatiquement@(Npm.Configured ? " dans Nginx Proxy Manager" : "").</small></div>
             <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
         </div>
         <EditForm Model="this" OnSubmit="Add" class="modal-form">
             <div class="modal-body">
-                <div class="form-grid">
-                    <div><label class="lbl">Nom</label><input class="full" @bind="name" placeholder="Ex. : Acme Affichage" /></div>
-                    <div><label class="lbl">Sous-domaine <small>(@Resolver.HostFor("…"))</small></label><input class="full" @bind="slug" placeholder="acme" /></div>
-                    <div><label class="lbl">Domaine propre <small>(facultatif)</small></label><input class="full" @bind="domain" placeholder="affichage.acme.ch" /></div>
-                    <div><label class="lbl">Administrateur : nom</label><input class="full" @bind="adminName" /></div>
-                    <div><label class="lbl">Administrateur : e-mail</label><input class="full" type="email" @bind="adminEmail" autocomplete="off" /></div>
-                    <div>
-                        <label class="lbl">Mot de passe provisoire <small>(envoyé par e-mail, à changer à la 1re connexion)</small></label>
-                        <div class="row" style="gap:6px"><input class="full mono" @bind="adminPwd" autocomplete="off" spellcheck="false" /><button type="button" class="btn ghost" title="Générer un autre mot de passe" @onclick="() => adminPwd = Passwords.Generate()">Générer</button></div>
+                @if (steps.Count == 0)
+                {
+                    <div class="form-grid">
+                        <div><label class="lbl">Nom</label><input class="full" value="@name" @oninput="OnName" placeholder="Ex. : Acme Affichage" /></div>
+                        <div>
+                            <label class="lbl">Adresse <small>(@Resolver.HostFor(Slug.Length > 0 ? Slug : "…"))</small></label>
+                            <input class="full mono" value="@slug" @oninput="OnSlug" placeholder="acme" autocomplete="off" spellcheck="false" />
+                            @if (Slug.Length > 0)
+                            {
+                                var (avail, why) = Availability(Slug);
+                                <div class="adm-note" style="margin:6px 0 0"><span class="adm-st @(avail ? "ok" : "bad")">@(avail ? "Disponible" : why)</span>
+                                    @if (!avail && Suggestion() is { } alt) { <button type="button" class="linkish" style="margin-left:8px" @onclick="() => UseSlug(alt)">Utiliser « @alt »</button> }</div>
+                            }
+                        </div>
+                        <div><label class="lbl">Administrateur : nom</label><input class="full" @bind="adminName" /></div>
+                        <div><label class="lbl">Administrateur : e-mail</label><input class="full" type="email" @bind="adminEmail" autocomplete="off" /></div>
+                        <div>
+                            <label class="lbl">Mot de passe provisoire <small>(envoyé par e-mail, à changer à la 1re connexion)</small></label>
+                            <div class="row" style="gap:6px"><input class="full mono" @bind="adminPwd" autocomplete="off" spellcheck="false" /><button type="button" class="btn ghost" title="Générer un autre mot de passe" @onclick="() => adminPwd = Passwords.Generate()">Générer</button></div>
+                        </div>
                     </div>
-                </div>
-                @if (formError != null) { <div class="err">@formError</div> }
+                    @if (formError != null) { <div class="err">@formError</div> }
+                }
+                else
+                {
+                    <div class="adm-sec" style="margin-top:0"><span class="lb">Mise en ligne</span>
+                    @foreach (var s in steps)
+                    {
+                        <div class="adm-todo" style="padding:8px 0">
+                            <div class="ic @(s.State == "done" ? "ok" : s.State == "run" ? "warn" : s.State == "fail" ? "bad" : "")" style="width:26px;height:26px;border-radius:50%"><Ico Name="@(s.State == "done" ? "check" : s.State == "fail" ? "x" : s.State == "run" ? "refresh" : "clock")" Size="14" /></div>
+                            <div class="grow">@s.Label<small>@s.Detail</small></div>
+                        </div>
+                    }
+                    </div>
+                    @if (outcome != null) { <div class="@(outcomeOk ? "adm-note" : "err")" style="margin-top:12px">@outcome</div> }
+                }
             </div>
             <div class="modal-foot">
-                <button type="button" class="btn ghost" @onclick="Close">Annuler</button>
-                <button type="submit" class="btn">Créer le revendeur</button>
+                @if (steps.Count == 0)
+                {
+                    <button type="button" class="btn ghost" @onclick="Close">Annuler</button>
+                    <button type="submit" class="btn">Créer le revendeur</button>
+                }
+                else
+                {
+                    @if (!outcomeOk && outcome?.StartsWith("Le revendeur n'a pas été créé") == true) { <button type="button" class="btn ghost" disabled="@working" @onclick="BackToForm">Retour au formulaire</button> }
+                    <button type="button" class="btn" disabled="@working" @onclick="Close">@(outcomeOk ? "Terminer" : "Fermer")</button>
+                }
             </div>
         </EditForm>
     </div>
 }
 
-@if (toDelete != null)
+<div class="adm-tabs" role="tablist" aria-label="État du revendeur">
+    <button type="button" class="@(state == "" ? "on" : "")" @onclick='() => state = ""'>Tous <b>@rows.Count</b></button>
+    @foreach (var s in StateTabs)
+    {
+        var st = s;
+        <button type="button" class="@(state == st ? "on" : "")" @onclick="() => state = st">@st <b>@rows.Count(r => Match(r, st))</b></button>
+    }
+</div>
+
+<div class="adm-tools">
+    <div class="search-box">
+        <Ico Name="search" Size="16" />
+        <input placeholder="Rechercher un revendeur, une adresse, un e-mail…" aria-label="Rechercher" @bind="search" @bind:event="oninput" />
+    </div>
+</div>
+
+<div class="adm-card" style="padding:0;overflow:hidden">
+<div class="tbl-scroll">
+<table class="adm-tbl">
+    <thead><tr><th>Revendeur</th><th class="r">Clients</th><th class="r">Écrans</th><th class="r">Utilisateurs</th><th>Adresse</th><th>État</th><th></th></tr></thead>
+    <tbody>
+    @foreach (var r in Filtered)
+    {
+        var row = r;
+        <tr class="@(selId == r.R.Id ? "sel" : "")" @onclick="() => OpenRow(row)">
+            <td>
+                <div class="adm-who">
+                    <div class="adm-av" style="background:@AvatarColor(r.R.Name)">@Initials(r.R.Name)</div>
+                    <div><b>@r.R.Name</b>@if (r.R.IsDefault) { <span class="adm-plan" style="margin-left:6px">par défaut</span> }<small class="m">@HostOf(r.R)</small></div>
+                </div>
+            </td>
+            <td class="r m">@r.Clients</td>
+            <td class="r m">@r.Screens</td>
+            <td class="r m">@r.Users</td>
+            <td><span class="adm-st @AddrCss(r.R)">@AddrLabel(r.R)</span></td>
+            <td><span class="adm-st @StateCss(r.State)">@r.State</span></td>
+            <td class="r"><Ico Name="chevron-right" Size="16" /></td>
+        </tr>
+    }
+    @if (!Filtered.Any()) { <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:32px">Aucun revendeur ne correspond à ces critères.</td></tr> }
+    </tbody>
+</table>
+</div>
+</div>
+<div class="adm-foot"><span>@Filtered.Count() revendeur@(Filtered.Count() > 1 ? "s" : "") affiché@(Filtered.Count() > 1 ? "s" : "")</span><span>Bloquer un revendeur ferme aussi l'accès de tous ses clients.</span></div>
+
+@if (Sel is { } r0)
 {
-    <div class="modal-backdrop" @onclick="() => toDelete = null"></div>
-    <div class="modal app-modal" role="dialog" aria-modal="true">
-        <div class="modal-head"><div class="grow"><h3>Supprimer le revendeur</h3></div></div>
+    <div class="adm-veil" @onclick="CloseDrawer"></div>
+    <aside class="adm-drawer" role="dialog" aria-label="Fiche de @r0.R.Name">
+        <div class="dh">
+            <div class="top">
+                <div class="adm-av lg" style="background:@AvatarColor(r0.R.Name)">@Initials(r0.R.Name)</div>
+                <div class="grow"><h2>@r0.R.Name</h2><span class="adm-st @StateCss(r0.State)">@r0.State</span></div>
+                <button type="button" class="btn ghost icon" aria-label="Fermer" @onclick="CloseDrawer"><Ico Name="x" Size="18" /></button>
+            </div>
+            <div class="adm-tabs in" style="margin:16px 0 0">
+                @foreach (var t in DrawerTabs)
+                {
+                    var tt = t;
+                    <button type="button" class="@(tab == tt ? "on" : "")" @onclick="() => tab = tt">@tt</button>
+                }
+            </div>
+        </div>
+        <div class="db">
+        @if (tab == "Aperçu")
+        {
+            <div class="adm-kv">
+                <div><span>Clients</span><b>@r0.Clients</b></div>
+                <div><span>Écrans</span><b>@r0.Screens</b></div>
+                <div><span>Utilisateurs</span><b>@r0.Users</b></div>
+            </div>
+
+            <div class="adm-sec">
+                <span class="lb">Adresse</span>
+                <div class="adm-ln"><span class="m" style="color:var(--ink)">@HostOf(r0.R)</span><span><span class="adm-st @AddrCss(r0.R)">@AddrLabel(r0.R)</span></span></div>
+                @if (r0.R.AddressNote != "" || r0.R.AddressCheckedUtc != null)
+                {
+                    <div class="adm-note" style="margin-top:6px">@r0.R.AddressNote@(r0.R.AddressCheckedUtc is { } chk ? $" Dernier contrôle : {chk.ToLocalTime().ToString("d MMM HH:mm", Fr)}." : "")@(checkNote != null ? " " + checkNote : "")</div>
+                }
+                @if (!r0.R.IsDefault)
+                {
+                    <div class="adm-acts">
+                        <button type="button" class="btn ghost sm" disabled="@working" @onclick="() => Verify(r0)"><Ico Name="refresh" Size="15" /> Vérifier</button>
+                        @if (r0.R.AddressState != NpmProxy.Online && Npm.Configured) { <button type="button" class="btn sm" disabled="@working" @onclick="() => Relaunch(r0)">Relancer la mise en ligne</button> }
+                    </div>
+                }
+            </div>
+
+            @if (!r0.R.IsDefault)
+            {
+                <div class="adm-sec">
+                    <span class="lb">Rabais mensuel · @r0.R.DiscountPct %</span>
+                    <input type="range" min="0" max="50" step="1" value="@r0.R.DiscountPct" aria-label="Rabais mensuel en pourcentage" @onchange="e => SetDiscount(r0, e.Value?.ToString())" />
+                    <div class="adm-note">Appliqué sur sa facture mensuelle (brique Facturation).</div>
+                </div>
+
+                <div class="adm-sec">
+                    <span class="lb">Accès</span>
+                    <div class="adm-note">@(r0.State == "Bloqué" ? "Son back-office et celui de ses clients sont fermés, leurs écrans coupés." : r0.State == "Suspendu" ? "Les écrans de tous ses clients sont coupés. Les back-offices restent accessibles." : "Accès complet.")</div>
+                    <div class="adm-acts">
+                        @if (r0.State == "Actif")
+                        {
+                            <button type="button" class="btn warn-o sm" @onclick="() => SetAccess(r0, true, false)"><Ico Name="pause" Size="15" /> Suspendre</button>
+                            <button type="button" class="btn danger sm" @onclick="() => SetAccess(r0, false, true)"><Ico Name="lock" Size="15" /> Bloquer</button>
+                        }
+                        else if (r0.State == "Suspendu")
+                        {
+                            <button type="button" class="btn ok-o sm" @onclick="() => SetAccess(r0, false, false)"><Ico Name="play" Size="15" /> Réactiver</button>
+                            <button type="button" class="btn danger sm" @onclick="() => SetAccess(r0, false, true)"><Ico Name="lock" Size="15" /> Bloquer</button>
+                        }
+                        else { <button type="button" class="btn ok-o sm" @onclick="() => SetAccess(r0, false, false)"><Ico Name="play" Size="15" /> Débloquer</button> }
+                    </div>
+                    <div class="adm-note" style="margin-top:8px">Suspendre coupe les écrans de ses clients, tous les back-offices restent accessibles. Bloquer ferme aussi son back-office et celui de ses clients.</div>
+                </div>
+            }
+
+            <div class="adm-sec">
+                <span class="lb">Informations</span>
+                <div class="adm-ln"><span>Administrateur</span><span>@r0.Admin?.Name<span class="adm-sub">@r0.Admin?.Email</span></span></div>
+                @if (r0.Admin != null)
+                {
+                    <div class="adm-acts" style="margin-top:8px"><button type="button" class="btn ghost sm" @onclick="() => OpenPassword(r0)"><Ico Name="lock" Size="15" /> Définir un mot de passe</button></div>
+                    <div class="adm-note" style="margin-top:6px">Il se connecte sur @HostOf(r0.R), pas sur l'adresse principale.</div>
+                }
+                <div class="adm-ln"><span>Créé le</span><span>@Day(r0.R.CreatedUtc)</span></div>
+                @if (!string.IsNullOrEmpty(r0.R.CustomDomain)) { <div class="adm-ln"><span>Domaine propre</span><span class="m">@r0.R.CustomDomain</span></div> }
+            </div>
+
+            @if (!r0.R.IsDefault)
+            {
+                <div class="adm-danger">
+                    <div><b>Supprimer le revendeur</b><small>@(r0.Clients > 0 ? $"Impossible : {r0.Clients} client{(r0.Clients > 1 ? "s" : "")} à supprimer ou déplacer d'abord." : "Son équipe et son hôte NPM sont aussi supprimés.")</small></div>
+                    <button type="button" class="btn danger sm" disabled="@(r0.Clients > 0)" @onclick="() => deleteOf = r0"><Ico Name="trash" Size="15" /> Supprimer</button>
+                </div>
+            }
+        }
+        else if (tab == "Clients")
+        {
+            <div style="margin-top:14px">
+            @foreach (var c in drawerClients)
+            {
+                <div class="adm-ln"><span style="color:var(--ink)">@c.Name<span class="adm-sub">@c.Screens écran@(c.Screens > 1 ? "s" : "") · @c.Users utilisateur@(c.Users > 1 ? "s" : "")</span></span><span><span class="adm-st @ClientStates.Css(c.State)">@c.State</span></span></div>
+            }
+            @if (drawerClients.Count == 0) { <div class="adm-empty">Aucun client pour l'instant.</div> }
+            </div>
+        }
+        else if (tab == "Équipe")
+        {
+            <div style="margin-top:14px">
+            @foreach (var u in drawerTeam)
+            {
+                <div class="adm-ln"><span style="color:var(--ink)">@u.Label<span class="adm-sub">@u.Email</span></span><span>@(u.Disabled ? "désactivé" : (u.LastActiveUtc ?? u.LastLoginUtc)?.ToLocalTime().ToString("d MMM yyyy", Fr) ?? "jamais connecté")</span></div>
+            }
+            </div>
+        }
+        else
+        {
+            <div style="margin-top:14px">
+            @foreach (var l in drawerLog)
+            {
+                <div class="adm-ln"><span style="color:var(--ink)">@(l.Action == "enter" ? "Entrée" : "Sortie") dans « @l.ClientName »<span class="adm-sub">@l.UserEmail (@l.Role)</span></span><span>@l.AtUtc.ToLocalTime().ToString("d MMM yyyy HH:mm")</span></div>
+            }
+            @if (drawerLog.Count == 0) { <div class="adm-empty">Aucun accès enregistré chez ses clients.</div> }
+            </div>
+        }
+        </div>
+        <div class="df">
+            <a class="btn" href="@Resolver.LoginUrl(r0.R)" target="_blank" rel="noopener"><Ico Name="external" Size="16" /> Ouvrir son adresse</a>
+        </div>
+    </aside>
+}
+
+@if (deleteOf is { } del)
+{
+    <div class="modal-backdrop" style="z-index:110" @onclick="() => deleteOf = null"></div>
+    <div class="modal app-modal sm" style="z-index:111" role="dialog" aria-modal="true" aria-labelledby="del-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="del-title">Supprimer « @del.R.Name » ?</h3></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => deleteOf = null"><Ico Name="x" Size="20" /></button>
+        </div>
         <div class="modal-body">
-            <p>Supprimer définitivement « <b>@toDelete.Name</b> » (@Resolver.HostFor(toDelete.Slug)) et les comptes de son équipe ? Cette action est irréversible.</p>
+            <p>Le revendeur (@HostOf(del.R)), les comptes de son équipe@(del.R.NpmHostId != null ? " et son hôte dans NPM" : "") sont supprimés définitivement.</p>
+            <label class="lbl">Tapez le nom du revendeur pour confirmer</label>
+            <input class="full" @bind="deleteConfirm" @bind:event="oninput" placeholder="@del.R.Name" autocomplete="off" />
         </div>
         <div class="modal-foot">
-            <button type="button" class="btn ghost" @onclick="() => toDelete = null">Annuler</button>
-            <button type="button" class="btn" @onclick="Delete">Supprimer</button>
+            <button type="button" class="btn ghost" @onclick="() => deleteOf = null">Annuler</button>
+            <button type="button" class="btn danger-solid" disabled="@(!string.Equals(deleteConfirm.Trim(), del.R.Name, StringComparison.OrdinalIgnoreCase))" @onclick="() => Delete(del)">Supprimer définitivement</button>
         </div>
     </div>
 }
 
-<table class="tbl">
-    <thead><tr><th>Revendeur</th><th>Adresse</th><th class="num">Clients</th><th class="num">Écrans</th><th>État</th><th></th></tr></thead>
-    <tbody>
-    @foreach (var r in rows)
-    {
-        <tr>
-            <td><b>@r.R.Name</b>@if (r.R.IsDefault) { <span class="pill" style="margin-left:6px">Linkii</span> }</td>
-            <td>
-                @if (editId == r.R.Id)
-                {
-                    <input @bind="editDomain" placeholder="affichage.acme.ch" style="width:200px;max-width:100%" />
-                    <button class="btn ghost" @onclick="() => SaveDomain(r.R)">OK</button>
-                }
-                else
-                {
-                    <div>@Resolver.HostFor(r.R.Slug)</div>
-                    @if (!string.IsNullOrEmpty(r.R.CustomDomain)) { <small>@r.R.CustomDomain</small> }
-                    <a href="#" @onclick="() => Edit(r.R)" @onclick:preventDefault>domaine propre…</a>
-                }
-            </td>
-            <td class="num">@r.Clients</td>
-            <td class="num">@r.Screens</td>
-            <td><span class="pill @(r.R.Active ? "ok" : "bad")">@(r.R.Active ? "Actif" : "Suspendu")</span></td>
-            <td>
-                @if (!r.R.IsDefault)
-                {
-                    <button class="btn ghost" @onclick="() => Toggle(r.R)">@(r.R.Active ? "Suspendre" : "Activer")</button>
-                    @if (r.Clients == 0)
-                    {
-                        <button class="btn ghost" @onclick="() => toDelete = r.R">Supprimer</button>
-                    }
-                }
-            </td>
-        </tr>
-    }
-    </tbody>
-</table>
+@if (pwdOf is { } pw)
+{
+    <div class="modal-backdrop" style="z-index:110" @onclick="() => pwdOf = null"></div>
+    <div class="modal app-modal sm" style="z-index:111" role="dialog" aria-modal="true" aria-labelledby="pwd-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="pwd-title">Mot de passe de @pw.Admin?.Name</h3><small class="muted">@pw.Admin?.Email · @pw.R.Name</small></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => pwdOf = null"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            <label class="lbl">Mot de passe provisoire <small>(à changer à la prochaine connexion)</small></label>
+            <div class="row" style="gap:6px"><input class="full mono" @bind="newPwd" @bind:event="oninput" autocomplete="off" spellcheck="false" /><button type="button" class="btn ghost" @onclick="() => newPwd = Passwords.Generate()">Générer</button></div>
+            <label class="lbl" style="display:flex;align-items:center;gap:8px;margin-top:14px"><input type="checkbox" class="ios" @bind="pwdMail" /> Envoyer le mot de passe par e-mail</label>
+            @if (pwdError != null) { <div class="err">@pwdError</div> }
+            <p class="hint" style="margin-top:12px">Il se connecte sur <b>@HostOf(pw.R)</b>. Les sessions déjà ouvertes de ce compte restent valables.</p>
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn ghost" @onclick="() => pwdOf = null">Annuler</button>
+            <button type="button" class="btn" disabled="@working" @onclick="() => SavePassword(pw)">Enregistrer</button>
+        </div>
+    </div>
+}
 
 @code {
-    private record Row(Reseller R, int Clients, int Screens);
+    private record Row(Reseller R, int Clients, int Screens, int Users, string State, User? Admin);
+    private record ClientLine(string Name, string State, int Screens, int Users);
+    private record Step(string Label, string State, string Detail);
+
+    [SupplyParameterFromQuery(Name = "etat")] public string? EtatParam { get; set; }
+
+    private static readonly System.Globalization.CultureInfo Fr = new("fr-CH");
+    private static readonly string[] StateTabs = { "Actif", "Suspendu", "Bloqué", "Adresse en attente" };
+    private static readonly string[] DrawerTabs = { "Aperçu", "Clients", "Équipe", "Activité" };
+    private static readonly string[] Palette = { "#0B1F3A", "#2A7F62", "#B9792B", "#7A5CC0", "#C0392B", "#2A8A99", "#5A6B80" };
+
     private List<Row> rows = new();
-    private bool showAdd;
-    private string name = "", slug = "", domain = "", adminName = "", adminEmail = "", adminPwd = "";
-    private string? formError, editDomain;
-    private Guid? editId;
-    private Reseller? toDelete;
+    private string state = "", search = "";
+    private DateTime now = DateTime.UtcNow;
+
+    private Guid? selId;
+    private string tab = "Aperçu";
+    private List<ClientLine> drawerClients = new();
+    private List<User> drawerTeam = new();
+    private List<AccessLogEntry> drawerLog = new();
+    private string? checkNote;
+    private bool working;
+    private Row? Sel => selId is { } id ? rows.FirstOrDefault(r => r.R.Id == id) : null;
+
+    private Row? deleteOf { get => _deleteOf; set { _deleteOf = value; deleteConfirm = ""; } }
+    private Row? _deleteOf;
+    private string deleteConfirm = "";
+
+    // Création
+    private bool showAdd, slugTouched;
+    private string name = "", slug = "", adminName = "", adminEmail = "", adminPwd = "";
+    private string? formError, outcome;
+    private bool outcomeOk;
+    private List<Step> steps = new();
+
+    // Les identifiants arrivent au nom de Linkii, pas du revendeur : sa propre marque ne sert qu'à ses clients.
+    private static readonly Reseller LinkiiBrand = new() { Name = "Linkii Revendeur", BrandName = "Linkii Revendeur", BrandColor = "#0B1F3A", SenderEmail = "" };
+
+    private static string StateOf(Reseller r) => !r.Active ? "Bloqué" : r.Suspended ? "Suspendu" : "Actif";
+    private static bool Match(Row r, string tab) => tab == "Adresse en attente" ? r.R.AddressState == NpmProxy.Error : r.State == tab;
+    private static string StateCss(string s) => s switch { "Actif" => "ok", "Suspendu" => "warn", _ => "bad" };
+    private string HostOf(Reseller r) => r.IsDefault ? Root.Read(Resolver.BaseDomainOf) : Resolver.HostFor(r.Slug);
+    private static string AddrLabel(Reseller r) => r.IsDefault ? "Domaine principal" : r.AddressState switch { NpmProxy.Online => "En ligne", NpmProxy.Error => "En attente", _ => "Hôte générique" };
+    private static string AddrCss(Reseller r) => r.IsDefault ? "mute" : r.AddressState switch { NpmProxy.Online => "ok", NpmProxy.Error => "warn", _ => "mute" };
+    private static string Initials(string n) => string.Concat(n.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => char.ToUpperInvariant(w[0])));
+    private static string AvatarColor(string n) => Palette[Math.Abs(n.Aggregate(0, (h, ch) => h * 31 + ch)) % Palette.Length];
+    private static string Day(DateTime utc) => utc.ToLocalTime().ToString("d MMM yyyy", Fr);
+
+    private IEnumerable<Row> Filtered => rows.Where(r => (state == "" || Match(r, state))
+        && (search.Trim() is not { Length: > 0 } q || r.R.Name.Contains(q, StringComparison.OrdinalIgnoreCase) || r.R.Slug.Contains(q, StringComparison.OrdinalIgnoreCase)
+            || r.Admin?.Email.Contains(q, StringComparison.OrdinalIgnoreCase) == true))
+        .OrderByDescending(r => r.R.IsDefault).ThenBy(r => r.R.Name);
 
     protected override void OnInitialized() => Load();
 
-    private void Load() => rows = Root.Read(d => d.Resellers.OrderBy(r => r.Name).Select(r =>
+    protected override void OnParametersSet()
     {
-        var ids = d.Clients.Where(c => c.ResellerId == r.Id).Select(c => c.Id).ToHashSet();
-        return new Row(r, ids.Count, d.Screens.Count(s => s.Token != null && ids.Contains(s.ClientId)));
-    }).ToList());
+        if (EtatParam != null && (StateTabs.Contains(EtatParam))) state = EtatParam;
+    }
 
-    private void Open() { formError = null; adminPwd = Passwords.Generate(); showAdd = true; }
-    private void Close() => showAdd = false;
+    private void Load()
+    {
+        now = DateTime.UtcNow;
+        rows = Root.Read(d => d.Resellers.Select(r =>
+        {
+            var cl = d.Clients.Where(c => c.ResellerId == r.Id).Select(c => c.Id).ToHashSet();
+            return new Row(r, cl.Count, d.Screens.Count(s => cl.Contains(s.ClientId) && s.Token != null),
+                d.Users.Count(u => u.ResellerId == r.Id && u.ClientId != null && Roles.IsClient(u.Role)), StateOf(r),
+                d.Users.Where(u => u.ResellerId == r.Id && u.ClientId == null).OrderBy(u => u.CreatedUtc).FirstOrDefault());
+        }).ToList());
+        if (selId != null) LoadDrawer();
+    }
+
+    private void LoadDrawer()
+    {
+        var id = selId!.Value;
+        (drawerClients, drawerTeam, drawerLog) = Root.Read(d =>
+        {
+            var cs = d.Clients.Where(c => c.ResellerId == id).OrderBy(c => c.Name).ToList();
+            var ids = cs.Select(c => c.Id).ToHashSet();
+            return (cs.Select(c => new ClientLine(c.Name, ClientStates.Of(c, Signup.OwnerOf(d, c), now), d.Screens.Count(s => s.ClientId == c.Id && s.Token != null),
+                        d.Users.Count(u => u.ClientId == c.Id && Roles.IsClient(u.Role)))).ToList(),
+                d.Users.Where(u => u.ResellerId == id && u.ClientId == null).OrderBy(u => u.Name).ToList(),
+                d.AccessLog.Where(l => ids.Contains(l.ClientId)).OrderByDescending(l => l.AtUtc).Take(30).ToList());
+        });
+    }
+
+    private void OpenRow(Row r) { selId = r.R.Id; tab = "Aperçu"; checkNote = null; LoadDrawer(); }
+    private void CloseDrawer() => selId = null;
+
+    // ---------- Création ----------
+
+    // L'adresse se propose d'après le nom tant qu'elle n'est pas modifiée à la main ; sa disponibilité est contrôlée à chaque frappe.
+    private string Slug => Tenancy.Slugify(slug.Length > 0 ? slug : name);
+    private void OnName(ChangeEventArgs e) { name = e.Value?.ToString() ?? ""; if (!slugTouched) slug = Tenancy.Slugify(name); }
+    private void OnSlug(ChangeEventArgs e) { slug = e.Value?.ToString() ?? ""; slugTouched = slug.Length > 0; if (!slugTouched) slug = Tenancy.Slugify(name); }
+    private void UseSlug(string s) { slug = s; slugTouched = true; }
+    private (bool Ok, string Why) Availability(string s) =>
+        !Tenancy.IsValidSlug(s) ? (false, "Invalide ou réservée (2 à 40 caractères : lettres, chiffres, tirets)")
+        : rows.Any(r => r.R.Slug == s) ? (false, "Déjà prise") : (true, "");
+    private string? Suggestion()
+    {
+        var b = Slug.Length >= 2 ? Slug : "revendeur";
+        for (var i = 2; i < 100; i++) { var c = b + "-" + i; if (Availability(c).Ok) return c; }
+        return null;
+    }
+
+    private void Open() { slugTouched = false; formError = null; outcome = null; steps = new(); adminPwd = Passwords.Generate(); showAdd = true; }
+    private void BackToForm() { steps = new(); outcome = null; }
+    private void Close() { if (working) return; showAdd = false; steps = new(); outcome = null; }
+
+    private void SetStep(int i, string state, string detail = "") { steps[i] = steps[i] with { State = state, Detail = detail }; StateHasChanged(); }
 
     // L'administrateur du revendeur reçoit un mot de passe provisoire par e-mail ; il devra le changer à la première connexion.
     private async Task Add()
     {
         formError = null;
         var s = Tenancy.Slugify(slug.Length > 0 ? slug : name);
-        var dom = domain.Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(name)) { formError = "Le nom est obligatoire."; return; }
-        if (!Tenancy.IsValidSlug(s)) { formError = "Sous-domaine invalide ou réservé (lettres, chiffres et tirets, 2 à 40 caractères)."; return; }
+        if (!Tenancy.IsValidSlug(s)) { formError = "Adresse invalide ou réservée (lettres, chiffres et tirets, 2 à 40 caractères)."; return; }
         var email = adminEmail.Trim().ToLowerInvariant();
         if (email.Length == 0 || adminPwd.Length < 8) { formError = "E-mail et mot de passe (8 caractères minimum) de l'administrateur obligatoires."; return; }
+        if (rows.Any(r => r.R.Slug == s)) { formError = "Cette adresse est déjà prise."; return; }
+        if (Root.Read(d => d.Users.Any(u => u.Email == email && u.ResellerId == null))) { formError = "Cet e-mail est déjà utilisé."; return; }
+        if (!Npm.Configured) { formError = "Nginx Proxy Manager n'est pas configuré : l'adresse du revendeur ne peut pas être mise en ligne. Renseignez-le dans Réglages › Adresses."; return; }
+
+        // L'hôte proxy est créé d'abord : si NPM échoue, aucun revendeur n'est créé et le formulaire reste tel quel.
+        var host = Resolver.HostFor(s);
+        working = true;
+        steps = new() { new("Hôte proxy " + host, "run", "Connexion à Nginx Proxy Manager…"), new("Revendeur et administrateur", "wait", ""), new("E-mail de bienvenue", "wait", email) };
+        outcome = null; StateHasChanged();
+        var (npmOk, hostId, npmMsg) = await Npm.CreateHost(host);
+        if (!npmOk)
+        {
+            SetStep(0, "fail", npmMsg);
+            outcomeOk = false;
+            outcome = "Le revendeur n'a pas été créé : son adresse n'a pas pu être mise en ligne. Corrigez NPM (Réglages › Adresses), puis réessayez : rien n'est perdu.";
+            working = false;
+            return;
+        }
+        SetStep(0, "done", npmMsg);
+
+        SetStep(1, "run", "");
         Reseller? created = null;
         var err = Root.Write(d =>
         {
-            if (d.Resellers.Any(r => r.Slug == s)) return "Ce sous-domaine est déjà pris.";
-            if (dom.Length > 0 && d.Resellers.Any(r => string.Equals(r.CustomDomain, dom, StringComparison.OrdinalIgnoreCase))) return "Ce domaine est déjà attribué.";
+            if (d.Resellers.Any(r => r.Slug == s)) return "Cette adresse est déjà prise.";
             if (d.Users.Any(u => u.Email == email && (u.ResellerId == null || u.ResellerId == d.Resellers.FirstOrDefault(r => r.Slug == s)?.Id))) return "Cet e-mail est déjà utilisé.";
-            var r = new Reseller { Name = name.Trim(), Slug = s, BrandName = name.Trim(), CustomDomain = dom.Length > 0 ? dom : null };
+            var r = new Reseller { Name = name.Trim(), Slug = s, BrandName = name.Trim(), AddressState = NpmProxy.Online, NpmHostId = hostId, AddressNote = npmMsg, AddressCheckedUtc = DateTime.UtcNow };
             d.Resellers.Add(r);
             d.Users.Add(new User { Email = email, Name = adminName.Trim(), PasswordHash = Passwords.Hash(adminPwd), Role = Roles.ResellerAdmin, ResellerId = r.Id, MustChangePassword = true });
             created = r;
             return null;
         });
-        if (err != null) { formError = err; return; }
+        if (err != null)
+        {
+            if (hostId is { } h) await Npm.Remove(h);   // annule l'hôte créé pour rien
+            SetStep(1, "fail", err);
+            outcomeOk = false; outcome = "Le revendeur n'a pas été créé. " + err; working = false;
+            return;
+        }
         var (rName, person, pwd) = (name.Trim(), adminName, adminPwd);
-        name = slug = domain = adminName = adminEmail = adminPwd = ""; showAdd = false;
+        name = slug = adminName = adminEmail = adminPwd = ""; slugTouched = false;
+        SetStep(1, "done", "Compte prêt");
         Load();
-        var mailErr = await Mail.SendWelcome(created!, Resolver.LoginUrl(created!, Nav.BaseUri), $"Votre espace revendeur « {rName} » est prêt.", person, email, pwd);
-        if (mailErr == null) Toast.Ok($"Revendeur « {rName} » créé : {Resolver.HostFor(s)}. Les identifiants de l'administrateur ont été envoyés à {email}.");
-        else Toast.Error($"Revendeur « {rName} » créé : {Resolver.HostFor(s)}, mais l'e-mail n'a pas pu être envoyé : {mailErr}. Communiquez vous-même le mot de passe provisoire à {email} : {pwd}");
+
+        SetStep(2, "run", email);
+        var mailErr = await Mail.SendWelcome(LinkiiBrand, Resolver.LoginUrl(created!, Nav.BaseUri), $"Votre espace revendeur « {rName} » est prêt.", person, email, pwd);
+        SetStep(2, mailErr == null ? "done" : "fail", mailErr == null ? "Envoyé à " + email : "Non envoyé : " + mailErr + ". Mot de passe provisoire : " + pwd);
+        outcomeOk = mailErr == null;
+        outcome = outcomeOk ? $"Revendeur prêt : https://{host}. Les identifiants ont été envoyés à {email}."
+            : "Le revendeur est créé, mais l'e-mail n'a pas pu être envoyé. Communiquez-lui son mot de passe provisoire.";
+        working = false;
     }
 
-    private void SaveDomain(Reseller r)
+    // ---------- Mot de passe de l'administrateur ----------
+
+    private Row? pwdOf;
+    private string newPwd = "";
+    private string? pwdError;
+    private bool pwdMail = true;
+
+    private void OpenPassword(Row r) { newPwd = Passwords.Generate(); pwdError = null; pwdMail = true; pwdOf = r; }
+
+    // Mot de passe provisoire : l'administrateur du revendeur devra le changer à sa prochaine connexion.
+    private async Task SavePassword(Row r)
     {
-        var dom = (editDomain ?? "").Trim().ToLowerInvariant();
-        var err = Root.Write(d =>
+        if (r.Admin is not { } admin) return;
+        var pwd = newPwd.Trim();
+        if (pwd.Length < 8) { pwdError = "8 caractères minimum."; return; }
+        working = true;
+        Root.Write(d => { if (d.Users.FirstOrDefault(u => u.Id == admin.Id) is { } u) { u.PasswordHash = Passwords.Hash(pwd); u.MustChangePassword = true; } });
+        string? mailErr = null;
+        if (pwdMail) mailErr = await Mail.SendWelcome(LinkiiBrand, Resolver.LoginUrl(r.R, Nav.BaseUri), $"Votre mot de passe pour l'espace revendeur « {r.R.Name} » a été défini.", admin.Name, admin.Email, pwd);
+        working = false;
+        pwdOf = null;
+        Load();
+        if (!pwdMail) Toast.Ok($"Mot de passe de {admin.Email} enregistré : {pwd}");
+        else if (mailErr == null) Toast.Ok($"Mot de passe enregistré et envoyé à {admin.Email}. Pensez à vérifier ses courriers indésirables.");
+        else Toast.Error($"Mot de passe enregistré, mais l'e-mail n'est pas parti ({mailErr}). Communiquez-le : {pwd}");
+    }
+
+    // ---------- Adresse ----------
+
+    private async Task Verify(Row r)
+    {
+        working = true; checkNote = null; StateHasChanged();
+        var (_, msg) = await Npm.Check(r.R.Id);
+        checkNote = msg;
+        working = false;
+        Load();
+    }
+
+    private async Task Relaunch(Row r)
+    {
+        working = true; StateHasChanged();
+        var (ok, msg) = await Npm.Provision(r.R.Id);
+        working = false;
+        Load();
+        if (ok) Toast.Ok(msg); else Toast.Error(msg);
+    }
+
+    // ---------- Rabais, accès ----------
+
+    private void SetDiscount(Row r, string? value)
+    {
+        var pct = int.TryParse(value, out var v) ? Math.Clamp(v, 0, 50) : 0;
+        Root.Write(d => { if (d.Resellers.FirstOrDefault(x => x.Id == r.R.Id) is { } x) x.DiscountPct = pct; });
+        Load();
+        Toast.Ok($"Rabais de « {r.R.Name} » : {pct} %.");
+    }
+
+    // Suspendu : écrans de tous ses clients coupés. Bloqué (Active = false) : son back-office et celui de ses clients fermés. Les deux s'excluent.
+    private async Task SetAccess(Row r, bool suspended, bool blocked)
+    {
+        if (r.R.IsDefault) return;
+        var clientIds = Root.Write(d =>
         {
-            if (dom.Length > 0 && d.Resellers.Any(x => x.Id != r.Id && string.Equals(x.CustomDomain, dom, StringComparison.OrdinalIgnoreCase))) return "Ce domaine est déjà attribué.";
-            d.Resellers.First(x => x.Id == r.Id).CustomDomain = dom.Length > 0 ? dom : null;
-            return null;
+            var x = d.Resellers.First(y => y.Id == r.R.Id);
+            x.Suspended = suspended; x.Active = !blocked;
+            return d.Clients.Where(c => c.ResellerId == x.Id).Select(c => c.Id).ToList();
         });
-        if (err != null) Toast.Error(err); else Toast.Ok("Domaine enregistré. Le revendeur doit créer un enregistrement DNS (CNAME) vers Linkii.");
-        editId = null; Load();
+        Load();
+        foreach (var id in clientIds) await Screens.NotifyClient(id);
+        Toast.Ok(blocked ? $"« {r.R.Name} » est bloqué : écrans coupés, son back-office et celui de ses clients fermés."
+            : suspended ? $"« {r.R.Name} » est suspendu : les écrans de ses clients sont coupés."
+            : $"« {r.R.Name} » est de nouveau actif.");
     }
 
-    private void Edit(Reseller r) { editId = r.Id; editDomain = r.CustomDomain ?? ""; }
+    // ---------- Suppression ----------
 
-    // Refusé tant que le revendeur a des clients : on les supprime ou on les déplace d'abord.
-    private void Delete()
+    private async Task Delete(Row r)
     {
-        var r = toDelete!; toDelete = null;
+        if (!string.Equals(deleteConfirm.Trim(), r.R.Name, StringComparison.OrdinalIgnoreCase)) return;
+        var hostId = r.R.NpmHostId;
         var err = Root.Write(d =>
         {
-            var x = d.Resellers.FirstOrDefault(y => y.Id == r.Id);
+            var x = d.Resellers.FirstOrDefault(y => y.Id == r.R.Id);
             if (x == null) return null;
             if (x.IsDefault) return "Le revendeur Linkii ne peut pas être supprimé.";
             if (d.Clients.Any(c => c.ResellerId == x.Id)) return "Ce revendeur a encore des clients.";
@@ -180,13 +560,11 @@
             d.Resellers.Remove(x);
             return null;
         });
-        if (err != null) Toast.Error(err); else Toast.Ok($"Revendeur « {r.Name} » supprimé.");
+        deleteOf = null;
+        if (err != null) { Toast.Error(err); return; }
+        selId = null;
+        string? npmErr = hostId is { } h ? await Npm.Remove(h) : null;
         Load();
-    }
-
-    private void Toggle(Reseller r)
-    {
-        Root.Write(d => { var x = d.Resellers.First(y => y.Id == r.Id); x.Active = !x.Active; });
-        Load();
+        if (npmErr == null) Toast.Ok($"Revendeur « {r.R.Name} » supprimé."); else Toast.Error($"Revendeur « {r.R.Name} » supprimé, mais son hôte NPM n'a pas pu être retiré ({npmErr}). Supprimez-le dans NPM.");
     }
 }
