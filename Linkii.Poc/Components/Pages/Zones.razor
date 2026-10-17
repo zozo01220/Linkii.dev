@@ -3,14 +3,16 @@
 @inject TenantStore Store
 @inject Notifier Notifier
 @inject Toaster Toast
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
 
 @* Zones de toutes les aires accessibles (menu Zones, mode expert). Les zones classent les écrans, sans effet sur les droits.
    Gérées par les administrateurs de l'organisation et les membres dont le niveau a « Gérer les zones ». Un mur se règle dans Écrans. *@
 
 <div class="page-head">
     <div>
-        <h1>Zones</h1>
-        <p class="sub">@Subtitle</p>
+        <h1>Zones<span class="lx-cntpill" aria-label="@Visible.Count() zone@(Visible.Count() > 1 ? "s" : "")">@Visible.Count()</span></h1>
+        <p class="sub sc-intro">@Subtitle</p>
     </div>
     @if (canManage && areas.Count > 0)
     {
@@ -26,7 +28,7 @@
 }
 else
 {
-    <div class="row" style="margin-bottom:14px">
+    <div class="row zn-filter" style="margin-bottom:14px">
         <div class="kebab dd">
             <button type="button" class="dd-btn @(filter != null ? "act" : "")" aria-haspopup="menu" aria-expanded="@(filterOpen ? "true" : "false")" @onclick="() => filterOpen = !filterOpen">
                 <span class="k">Aire</span> <b>@FilterName</b> <Ico Name="chevron" Size="14" />
@@ -46,7 +48,7 @@ else
         </div>
     </div>
 
-    <table class="tbl">
+    <table class="tbl zn-tbl">
         <thead>
             <tr><th>Zone</th><th>Aire de gestion</th><th class="num ctr">Écrans</th><th>Type</th><th>Synchronisation</th><th></th></tr>
         </thead>
@@ -54,11 +56,12 @@ else
             @foreach (var r in Visible)
             {
                 var row = r;
-                <tr>
+                <tr @oncontextmenu="() => { if (inApp && !row.IsWall && canManage) menuFor = row.Id; }" @oncontextmenu:preventDefault="inApp && !row.IsWall && canManage">
                     <td>
                         @if (row.IsWall) { <b>@row.Name</b> }
                         else { <span class="zn">@row.Name</span> }
                         @if (row.IsDefault) { <small class="muted"> · par défaut</small> }
+                        <small class="zn-sub">@row.AreaName · @row.Count écran@(row.Count > 1 ? "s" : "")</small>
                     </td>
                     <td class="muted">@row.AreaName</td>
                     <td class="num ctr">@row.Count</td>
@@ -166,6 +169,13 @@ else
     private string editName = "", editError = "";
 
     protected override void OnInitialized() => Load();
+
+    private bool inApp;   // look « app » : appui long = menu de la carte
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try { inApp = await JS.InvokeAsync<bool>("linkiiPrefs.isApp"); if (inApp) StateHasChanged(); } catch (JSException) { } catch (InvalidOperationException) { }
+    }
 
     private void Load()
     {

@@ -9,11 +9,13 @@
 @inject MicrosoftAuth MsAuth
 @inject DropboxAuth DropboxAuth
 @inject FacebookAuth FacebookAuth
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
 
 <div class="page-head">
     <div>
         <h1>Intégrations</h1>
-        <p class="sub">Les sources de contenus de vos listes de lecture et les comptes qui y donnent accès.</p>
+        <p class="sub sc-intro">Les sources de contenus de vos listes de lecture et les comptes qui y donnent accès.</p>
     </div>
     @if (admin && accountsTab && Addable.Any())
     {
@@ -46,7 +48,7 @@
 
 @if (admin)
 {
-<nav class="tabs" role="tablist" aria-label="Intégrations et comptes connectés">
+<nav class="tabs int-tabs" role="tablist" aria-label="Intégrations et comptes connectés">
     <button type="button" role="tab" class="@(accountsTab ? "" : "on")" aria-selected="@(accountsTab ? "false" : "true")" @onclick="() => accountsTab = false">Intégrations</button>
     <button type="button" role="tab" class="@(accountsTab ? "on" : "")" aria-selected="@(accountsTab ? "true" : "false")" @onclick="() => accountsTab = true">
         Comptes connectés <span class="cat-count">@accounts.Count</span>
@@ -144,7 +146,8 @@ else
             var a = acc;
             var state = AccState(a);
             var oauth = a.Id is ConnectedAccounts.Microsoft or ConnectedAccounts.Google or ConnectedAccounts.Canva or ConnectedAccounts.Dropbox or ConnectedAccounts.Facebook;
-            <article class="acc-card @(flash == a.Id ? "flash" : "") @(openAcc.Contains(a.Id) ? "open" : "")" tabindex="-1" @ref="accRefs[a.Id]" aria-labelledby="acc-@a.Id">
+            <article class="acc-card @(flash == a.Id ? "flash" : "") @(openAcc.Contains(a.Id) ? "open" : "")" tabindex="-1" @ref="accRefs[a.Id]" aria-labelledby="acc-@a.Id"
+                     @oncontextmenu="() => { if (inApp) accMenu = a.Id; }" @oncontextmenu:preventDefault="inApp">
                 <div class="acc-head" @onclick="() => ToggleAcc(a.Id)">
                     <AccountLogo Kind="@a.Id" Size="28" />
                     <button type="button" class="acc-chev" aria-expanded="@(openAcc.Contains(a.Id) ? "true" : "false")" aria-label="@(openAcc.Contains(a.Id) ? "Masquer" : "Voir") les intégrations du compte @a.Kind" @onclick="() => ToggleAcc(a.Id)" @onclick:stopPropagation="true"><Ico Name="chevron" Size="14" /></button>
@@ -154,6 +157,9 @@ else
                     </div>
                     @{ var nInt = ConnectedAccounts.Kind(a.Id).Integrations.Count(); }
                     <span class="acc-count">@nInt intégration@(nInt > 1 ? "s" : "")</span>
+                    @* Look app : le bouton Reconnecter se voit sans ouvrir la carte quand le compte demande de l'attention *@
+                    @if (a.Lost && oauth) { <a class="acc-reco" href="@ReconnectUrl(a)" target="_top" @onclick="() => { }" @onclick:stopPropagation="true">Reconnecter</a> }
+                    else if (a.Lost || a.Error.Length > 0) { <button type="button" class="acc-reco" @onclick="() => EditConnection(a.Id)" @onclick:stopPropagation="true">Vérifier</button> }
                     <div class="kebab" @onclick:stopPropagation="true">
                         <button type="button" class="kebab-btn" aria-haspopup="menu" aria-expanded="@(accMenu == a.Id ? "true" : "false")" aria-label="Actions pour le compte @a.Kind" @onclick="() => accMenu = accMenu == a.Id ? null : a.Id"><Ico Name="dots-v" Size="18" /></button>
                         @if (accMenu == a.Id)
@@ -572,8 +578,14 @@ else
         focusPending = true;
     }
 
+    private bool inApp;   // look « app » : appui long = menu du compte
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            try { inApp = await JS.InvokeAsync<bool>("linkiiPrefs.isApp"); if (inApp) StateHasChanged(); } catch (JSException) { } catch (InvalidOperationException) { }
+        }
         if (!focusPending || flash == null || !accRefs.TryGetValue(flash, out var el)) return;
         focusPending = false;
         try { await el.FocusAsync(); } catch (InvalidOperationException) { return; /* carte pas encore affichée */ }

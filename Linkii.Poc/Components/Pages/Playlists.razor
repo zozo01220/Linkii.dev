@@ -34,6 +34,7 @@
         {
             <span>Listes de lecture</span>
         }
+        <span class="lx-cntpill" aria-label="@Plural(playlists.Count, "liste", "listes")">@playlists.Count</span>
     </h1>
     <span class="grow"></span>
     <div class="btns">
@@ -68,10 +69,10 @@
 </div>
 
 <div class="lx-status">
-    <span>@Plural(playlists.Count, "liste", "listes")@(foldersOn && folderRows.Count > 0 ? $" · {Plural(folderRows.Count, "dossier", "dossiers")}" : "")</span>
+    <span class="lx-appoff">@Plural(playlists.Count, "liste", "listes")@(foldersOn && folderRows.Count > 0 ? $" · {Plural(folderRows.Count, "dossier", "dossiers")}" : "")</span>
     @if (PendingCount > 0)
     {
-        <span><i class="lx-dot warn"></i>@(PendingCount > 1 ? $"{PendingCount} listes ont des modifications non publiées" : "1 liste a des modifications non publiées") <button type="button" class="linklike" @onclick='() => SetFilter("pending")'>Voir</button></span>
+        <span class="lx-appoff"><i class="lx-dot warn"></i>@(PendingCount > 1 ? $"{PendingCount} listes ont des modifications non publiées" : "1 liste a des modifications non publiées") <button type="button" class="linklike" @onclick='() => SetFilter("pending")'>Voir</button></span>
     }
     @if (currentRow is { Right: FolderRight.Read })
     {
@@ -113,9 +114,56 @@ else
     <FilterChips Groups="FilterGroups" Extra="FilterExtras" OnClear="ClearFilter" OnResetAll="ResetFilters" />
 
     @* Dossiers de la position ouverte : puces compactes, cibles du glisser-déposer *@
+    @* Look « app » : bande de cartes de dossiers qui défile (aperçu, badge de partage) ; appui long = menu. Masquée ailleurs par le CSS. *@
+    @if (subfolders.Count > 0 || (foldersOn && CanCreateFolderHere))
+    {
+        <div class="lx-fstrip" role="list" aria-label="Dossiers">
+            @foreach (var row in subfolders)
+            {
+                var r = row;
+                var mine = r.Folder.OwnerId == Store.UserId;
+                var aud = AudienceOf(r.Folder.Id);
+                var preview = FolderPreview(r.Folder.Id);
+                var canMenu = mine || isAdmin;
+                <div class="lx-fcard" role="listitem" tabindex="0" title="@FolderTitle(r)" aria-label="Ouvrir le dossier @r.Folder.Name"
+                     @onclick="() => OpenFolder(r.Folder.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenFolder(r.Folder.Id); }'
+                     @oncontextmenu="() => { if (canMenu) menuFor = r.Folder.Id; }" @oncontextmenu:preventDefault="inApp && canMenu">
+                    <div class="fp @(preview.Count == 0 ? "none" : "")">
+                        @foreach (var pm in preview) { <span class="fpi"><MediaThumb Media="pm" All="media" /></span> }
+                        @if (preview.Count == 0) { <span class="fpi fe"><Ico Name="folder" Size="26" /></span> }
+                        @if (r.Right == FolderRight.Read) { <span class="fbadge ro"><Ico Name="lock" Size="11" /> Lecture seule</span> }
+                        else if (!mine) { <span class="fbadge lvl"><Ico Name="users" Size="11" /> Écriture</span> }
+                        else if (aud.Count > 0) { <span class="fbadge @(aud.Levels.Count > 0 ? "lvl" : "sh")"><Ico Name="users" Size="11" /> Partagé · @aud.Count</span> }
+                        else { <span class="fbadge pv"><Ico Name="lock" Size="11" /> Privé</span> }
+                    </div>
+                    <div class="fn"><span>@r.Folder.Name</span><small>@ChildCount(r.Folder.Id)</small></div>
+                    @if (menuFor == r.Folder.Id)
+                    {
+                        <div class="kebab-backdrop" @onclick:stopPropagation="true" @onclick="() => menuFor = null"></div>
+                        <div class="kebab-menu" role="menu" @onclick:stopPropagation="true">
+                            <span class="kebab-note">@r.Folder.Name · @(mine ? "votre dossier" : $"dossier de {r.OwnerName}") · @(r.Right == FolderRight.Read ? "lecture seule" : aud.Count > 0 ? "partagé" : "privé")</span>
+                            <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingId = r.Folder.Id; }"><Ico Name="users" Size="16" /> Partager…</button>
+                            @if (r.Right == FolderRight.Owner)
+                            {
+                                <button type="button" role="menuitem" @onclick="() => { menuFor = null; renamingFolder = r; renameFolderValue = r.Folder.Name; folderError = null; }"><Ico Name="edit" Size="16" /> Renommer</button>
+                                <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deletingFolder = r; }"><Ico Name="trash" Size="16" /> Supprimer</button>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+            @if (foldersOn && CanCreateFolderHere)
+            {
+                <button type="button" class="lx-fcard add" @onclick="OpenNewFolder">
+                    <div class="fp none"><span class="fpi fe"><Ico Name="plus" Size="26" /></span></div>
+                    <div class="fn"><span>Nouveau dossier</span></div>
+                </button>
+            }
+        </div>
+    }
     @if (subfolders.Count > 0)
     {
-        @* Look « app » : les dossiers se replient derrière un bouton (masqué ailleurs par le CSS). *@
+        @* Liste classique des dossiers (PC) ; le bouton de repli est masqué partout. *@
         <button type="button" class="lx-fold-toggle @(foldersOpen ? "open" : "")" aria-expanded="@(foldersOpen ? "true" : "false")" @onclick="() => foldersOpen = !foldersOpen"><Ico Name="folder" Size="16" /> <span>Dossiers</span> <small>@subfolders.Count</small><Ico Name="chevron" Size="16" /></button>
         <div class="lx-folders @(foldersOpen ? "open" : "")">
             @foreach (var row in subfolders)
@@ -206,6 +254,7 @@ else
                 var tiles = Tiles(pl).Take(3).ToList();
                 var total = TotalSeconds(pl);
                 <div class="lx-pc @(picked.Contains(pl.Id) ? "picked" : "") @(dragIds.Contains(pl.Id) ? "dragging" : "")"
+                     @oncontextmenu="() => { if (inApp) menuFor = pl.Id; }" @oncontextmenu:preventDefault="inApp"
                      draggable="@(CanDrag(pl) ? "true" : "false")" @ondragstart="() => StartDrag(pl)" @ondragend="EndDrag">
                     <input type="checkbox" class="sc-check lx-check" aria-label="Sélectionner @pl.Name" checked="@picked.Contains(pl.Id)" @onchange="() => Toggle(pl.Id)" />
                     @if (tiles.Count == 0)
@@ -684,12 +733,18 @@ else
 
     // ---------- Clavier : « / » recherche, Échap ferme le menu ou désélectionne ----------
     private DotNetObjectReference<Playlists>? selfRef;
+    private bool inApp;   // look « app » : appui long = menu de la carte
+
+    // les trois dernières listes d'un dossier, avec un aperçu : vignettes de sa carte (look app)
+    private List<MediaItem> FolderPreview(Guid folder) => playlists.Where(p => p.FolderId == folder).OrderByDescending(p => p.UpdatedAt ?? DateTime.MinValue)
+        .Select(p => Tiles(p).FirstOrDefault()).Where(m => m != null).Take(3).ToList()!;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
             selfRef = DotNetObjectReference.Create(this);
+            try { inApp = await JS.InvokeAsync<bool>("linkiiPrefs.isApp"); if (inApp) StateHasChanged(); } catch (JSException) { } catch (InvalidOperationException) { }
             try { await JS.InvokeVoidAsync("linkiiLibrary.attach", selfRef, false); } catch (JSException) { } catch (InvalidOperationException) { }
         }
         if (focusName && creating) { focusName = false; await nameInput.FocusAsync(); }
