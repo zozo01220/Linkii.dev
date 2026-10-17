@@ -32,6 +32,7 @@
         {
             <span>Médiathèque</span>
         }
+        <span class="lx-cntpill" aria-label="@Plural(files.Count, "média", "médias")">@files.Count</span>
     </h1>
     <span class="grow"></span>
     <div class="btns">
@@ -45,10 +46,10 @@
 </div>
 
 <div class="lx-status">
-    <span>@Plural(files.Count, "média", "médias")@(TotalSize > 0 ? $" · {Helpers.FormatSize(TotalSize)}" : "")@(FoldersShown && folderId == null && folderRows.Count > 0 ? $" · {Plural(folderRows.Count, "dossier", "dossiers")}" : "")</span>
+    <span class="lx-appoff">@Plural(files.Count, "média", "médias")@(TotalSize > 0 ? $" · {Helpers.FormatSize(TotalSize)}" : "")@(FoldersShown && folderId == null && folderRows.Count > 0 ? $" · {Plural(folderRows.Count, "dossier", "dossiers")}" : "")</span>
     @if (UnusedHere > 0 && filter != "unused")
     {
-        <span><i class="lx-dot off"></i>@Plural(UnusedHere, "média non utilisé", "médias non utilisés") <button type="button" class="linklike" @onclick='() => SetFilter("unused")'>Voir</button></span>
+        <span class="lx-appoff"><i class="lx-dot off"></i>@Plural(UnusedHere, "média non utilisé", "médias non utilisés") <button type="button" class="linklike" @onclick='() => SetFilter("unused")'>Voir</button></span>
     }
     @if (currentRow is { Right: FolderRight.Read })
     {
@@ -99,9 +100,56 @@ else
     <FilterChips Groups="FilterGroups" Extra="FilterExtras" OnClear="ClearFilter" OnResetAll="ResetFilters" />
 
     @* Dossiers de la position ouverte : puces compactes, cibles du glisser-déposer *@
+    @* Look « app » : les dossiers sont une bande de cartes qui défile (aperçu des derniers médias, badge de partage) ;
+       appui long = menu (partager, renommer, supprimer). Masquée ailleurs par le CSS. *@
+    @if (subfolders.Count > 0 || (FoldersShown && CanCreateHere))
+    {
+        <div class="lx-fstrip" role="list" aria-label="Dossiers">
+            @foreach (var row in subfolders)
+            {
+                var r = row;
+                var mine = r.Folder.OwnerId == Store.UserId;
+                var aud = AudienceOf(r.Folder.Id);
+                var recent = RecentMedia(r.Folder.Id);
+                var canMenu = mine || isAdmin;
+                <div class="lx-fcard" role="listitem" tabindex="0" title="@FolderTitle(r)" aria-label="Ouvrir le dossier @r.Folder.Name"
+                     @onclick="() => OpenFolder(r.Folder.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenFolder(r.Folder.Id); }'
+                     @oncontextmenu="() => { if (canMenu) menuFor = r.Folder.Id; }" @oncontextmenu:preventDefault="inApp && canMenu">
+                    <div class="fp @(recent.Count == 0 ? "none" : "")">
+                        @foreach (var rm in recent) { <span class="fpi"><MediaThumb Media="rm" /></span> }
+                        @if (recent.Count == 0) { <span class="fpi fe"><Ico Name="folder" Size="26" /></span> }
+                        @if (r.Right == FolderRight.Read) { <span class="fbadge ro"><Ico Name="lock" Size="11" /> Lecture seule</span> }
+                        else if (!mine) { <span class="fbadge lvl"><Ico Name="users" Size="11" /> Écriture</span> }
+                        else if (aud.Count > 0) { <span class="fbadge @(aud.Levels.Count > 0 ? "lvl" : "sh")"><Ico Name="users" Size="11" /> Partagé · @aud.Count</span> }
+                        else { <span class="fbadge pv"><Ico Name="lock" Size="11" /> Privé</span> }
+                    </div>
+                    <div class="fn"><span>@r.Folder.Name</span><small>@ChildCount(r.Folder.Id)</small></div>
+                    @if (menuFor == r.Folder.Id)
+                    {
+                        <div class="kebab-backdrop" @onclick:stopPropagation="true" @onclick="() => menuFor = null"></div>
+                        <div class="kebab-menu" role="menu" @onclick:stopPropagation="true">
+                            <span class="kebab-note">@r.Folder.Name · @(mine ? "votre dossier" : $"dossier de {r.OwnerName}") · @(r.Right == FolderRight.Read ? "lecture seule" : aud.Count > 0 ? "partagé" : "privé")</span>
+                            <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingId = r.Folder.Id; }"><Ico Name="users" Size="16" /> Partager…</button>
+                            @if (r.Right == FolderRight.Owner)
+                            {
+                                <button type="button" role="menuitem" @onclick="() => { menuFor = null; renamingFolder = r; renameFolderValue = r.Folder.Name; newFolderError = null; }"><Ico Name="edit" Size="16" /> Renommer</button>
+                                <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deletingFolder = r; }"><Ico Name="trash" Size="16" /> Supprimer</button>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+            @if (FoldersShown && CanCreateHere)
+            {
+                <button type="button" class="lx-fcard add" @onclick='() => { newFolderName = ""; newFolderError = null; creatingFolder = true; }'>
+                    <div class="fp none"><span class="fpi fe"><Ico Name="plus" Size="26" /></span></div>
+                    <div class="fn"><span>Nouveau dossier</span></div>
+                </button>
+            }
+        </div>
+    }
     @if (subfolders.Count > 0)
     {
-        @* Look « app » : les dossiers se replient derrière un bouton (masqué ailleurs par le CSS). *@
         <button type="button" class="lx-fold-toggle @(foldersOpen ? "open" : "")" aria-expanded="@(foldersOpen ? "true" : "false")" @onclick="() => foldersOpen = !foldersOpen"><Ico Name="folder" Size="16" /> <span>Dossiers</span> <small>@subfolders.Count</small><Ico Name="chevron" Size="16" /></button>
         <div class="lx-folders @(foldersOpen ? "open" : "")">
             @foreach (var row in subfolders)
@@ -777,11 +825,14 @@ else
             var today = DateTime.Now.Date;
             foreach (var g in Visible.GroupBy(m => m.AddedUtc is { } a ? a.ToLocalTime().Date : (DateTime?)null))
             {
-                var label = g.Key is not { } d ? "Plus ancien" : d == today ? "Aujourd'hui" : d == today.AddDays(-1) ? "Hier" : Fr.TextInfo.ToTitleCase(d.ToString(d.Year == today.Year ? "dddd d MMMM" : "d MMMM yyyy", Fr));
+                var label = g.Key is not { } d ? "Plus ancien" : d == today ? "Aujourd'hui" : d == today.AddDays(-1) ? "Hier" : Cap(d.ToString(d.Year == today.Year ? "dddd d MMMM" : "d MMMM yyyy", Fr));
                 yield return (label, g.ToList());
             }
         }
     }
+    // les trois derniers médias prêts d'un dossier : aperçu de sa carte (look app)
+    private List<MediaItem> RecentMedia(Guid folder) => allFiles.Where(m => m.FolderId == folder && m.Status == null).OrderByDescending(m => m.AddedUtc).Take(3).ToList();
+    private static string Cap(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];   // « Dimanche 11 octobre »
     private static string PhotoRatio(MediaItem m) =>
         (m.Width is > 0 && m.Height is > 0 ? Math.Clamp(m.Width.Value / (double)m.Height.Value, 0.55, 2.2) : 1.5).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
 

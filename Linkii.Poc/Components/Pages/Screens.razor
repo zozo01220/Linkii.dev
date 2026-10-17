@@ -9,8 +9,8 @@
 
 <div class="page-head">
     <div>
-        <h1>Vos écrans</h1>
-        <p class="sub">Choisissez la liste de lecture et les widgets de chaque écran, puis publiez : chaque écran se met à jour indépendamment.</p>
+        <h1>Vos écrans<span class="scr-count" aria-label="@Shown.Count écran@(Shown.Count > 1 ? "s" : "")">@Shown.Count</span></h1>
+        <p class="sub sc-intro">Choisissez la liste de lecture et les widgets de chaque écran, puis publiez : chaque écran se met à jour indépendamment.</p>
     </div>
     <div class="row head-actions">
         @* Publier : seulement s'il y a des modifications à publier (écrans affichés), en couleur avec leur nombre *@
@@ -302,6 +302,8 @@
                             <div class="kebab-menu" role="menu">
                                 @if (gsl.Asleep) { <button type="button" role="menuitem" @onclick="async () => { menuFor = null; await Wake(new[] { gs }); }"><Ico Name="sun" Size="16" /> Réveiller</button> }
                                 else if (tenant.SleepEnabled) { <button type="button" role="menuitem" @onclick="async () => { menuFor = null; await SleepNow(new[] { gs }); }"><Ico Name="moon" Size="16" /> Mettre en veille</button> }
+                                <button type="button" role="menuitem" class="app-only" disabled="@(!Growth || !gonline)" title="@(!Growth ? Plans.LockedHint : !gonline ? "L'écran est hors ligne" : null)" @onclick='() => { menuFor = null; OpenLive(gs, "preview"); }'><Ico Name="eye" Size="16" /> Aperçu en direct</button>
+                                <button type="button" role="menuitem" class="app-only" disabled="@(!Growth || !gonline)" title="@(!Growth ? Plans.LockedHint : !gonline ? "L'écran est hors ligne" : null)" @onclick='() => { menuFor = null; OpenLive(gs, null); }'><Ico Name="@(gpaused ? "play" : "pause")" Size="16" /> @(gpaused ? "Reprendre" : "Mettre en pause")</button>
                                 <button type="button" role="menuitem" @onclick="() => Edit(gs)"><Ico Name="pencil-square" Size="16" /> Éditer</button>
                                 <button type="button" role="menuitem" @onclick="() => { menuFor = null; simScreen = gs.Id; }"><Ico Name="play" Size="16" /> Simuler</button>
                                 <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"planning?screen={gs.Id}")'><Ico Name="calendar" Size="16" /> Planning de cet écran…</button>
@@ -318,6 +320,14 @@
                     <div class="gc-name">
                         <button type="button" class="gc-nm linklike-name" title="Paramètres de l'écran « @gs.Name »" @onclick="() => Edit(gs)">@gs.Name</button>
                         @if (gs.DeviceKind != null) { <DeviceLogo Kind="@gs.DeviceKind" Size="20" /> }
+                        @* état de publication (look app : à droite du nom ; masqué sur PC où les pastilles sont sur l'aperçu) *@
+                        @if (gpending || gdl != null)
+                        {
+                            <span class="gc-dlv">
+                                @if (gdl is { } gd2) { <span class="gc-dpill @gd2.State" title="@gd2.Detail">@gd2.Label</span> }
+                                @if (gpending) { <span class="gc-dpill late" title="Liste de lecture, widgets ou choix de liste de lecture modifiés depuis la dernière publication">À publier</span> }
+                            </span>
+                        }
                     </div>
                     <div class="gc-sub">
                         @if (gs.DeviceKind != null)
@@ -367,6 +377,7 @@
                                 }
                             }
                         </div>
+                        @if (ShowZones && zoneFilter == null) { <span class="gc-zapp">@(gzone?.Name ?? Zone.DefaultName)</span> }
                         <div class="sc-live gc-live" role="group" aria-label="Contrôle du direct de @gs.Name">
                             <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth ? (gonline ? "Aperçu" : "L'écran est hors ligne") : null)" aria-label="Aperçu" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !gonline)" @onclick='() => OpenLive(gs, "preview")'><Ico Name="eye" Size="16" />@if (!Growth) { @LockIcon }</button>
                             <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth ? (gonline ? (gpaused ? "Reprendre" : "Pause") : "L'écran est hors ligne") : null)" aria-label="@(gpaused ? "Reprendre" : "Pause")" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !gonline)" @onclick='() => OpenLive(gs, null)'><Ico Name="@(gpaused ? "play" : "pause")" Size="16" />@if (!Growth) { @LockIcon }</button>
@@ -640,7 +651,7 @@
             </div>
         </div>
     }
-    <button class="pl-card pl-add" @onclick="OpenPair">
+    <button class="pl-card pl-add scr-add" @onclick="OpenPair">
         <span class="pl-plus"><Ico Name="plus" Size="28" /></span>
         <span>Connecter un écran</span>
     </button>
