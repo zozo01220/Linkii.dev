@@ -5,21 +5,25 @@
 @* Mise en veille d'une aire : son fuseau horaire et ses plages, par défaut de tous ses écrans (chacun peut les remplacer). Voir Sleep. *@
 @if (loaded)
 {
-    <label class="lbl" for="sl-tz" style="margin-top:0">Fuseau horaire des plages</label>
+    <div class="sl-tzrow"><label class="lbl" for="sl-tz" style="margin:0">Fuseau des plages</label>
     <select id="sl-tz" class="full" @bind="tz">
         <option value="">Celui de l'organisation (@orgTz)</option>
         @foreach (var z in Zones) { <option value="@z">@z</option> }
-    </select>
+    </select></div>
     <label class="lbl">Plages de veille <small>(cliquez ou glissez pour peindre)</small></label>
-    <SleepGrid @bind-Grid="grid" />
-    <div style="margin-top:14px"><button type="button" class="btn" @onclick="Save">Enregistrer la mise en veille</button></div>
-    <p class="hint" style="margin:10px 0 0">Les écrans de l'aire s'éteignent pendant ces plages. Un écran peut suivre l'aire, ne jamais s'éteindre ou avoir ses propres plages (fenêtre de l'écran).</p>
+    <SleepGrid @bind-Grid="grid" @bind-Grid:after="Edited" />
+    @if (!Embedded) { <div class="rg-stick" style="margin-top:14px"><button type="button" class="btn" @onclick="Save">Enregistrer la mise en veille</button></div> }
+    <p class="hint sl-hint" style="margin:10px 0 0">Les écrans de l'aire s'éteignent pendant ces plages. Un écran peut suivre l'aire, ne jamais s'éteindre ou avoir ses propres plages (fenêtre de l'écran).</p>
 }
 
 @code {
     [Parameter, EditorRequired] public Guid AreaId { get; set; }
     /// <summary>Appelé après l'enregistrement (la page appelante se met à jour).</summary>
     [Parameter] public EventCallback OnSaved { get; set; }
+    /// <summary>Dans les Réglages : le bouton « Enregistrer » de la page enregistre aussi les plages (pas de bouton ici).</summary>
+    [Parameter] public bool Embedded { get; set; }
+    [Parameter] public EventCallback OnEdited { get; set; }
+    private Task Edited() => OnEdited.InvokeAsync();
 
     internal static readonly string[] Zones =
     {
@@ -38,7 +42,10 @@
         loaded = true;
     }
 
-    private async Task Save()
+    private Task Save() => Persist();
+
+    /// <summary>Enregistre le fuseau et les plages (appelé par le bouton de la fenêtre, ou par « Enregistrer » des Réglages).</summary>
+    public async Task<bool> Persist()
     {
         var g = Sleep.Valid(grid) ? grid! : new string('0', Sleep.Cells);
         var z = tz;
@@ -51,5 +58,6 @@
         await Notifier.NotifyArea(AreaId);   // les écrans de l'aire rechargent leur configuration
         Toast.Ok("Mise en veille enregistrée.");
         await OnSaved.InvokeAsync();
+        return true;
     }
 }

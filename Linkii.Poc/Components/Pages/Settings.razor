@@ -14,7 +14,7 @@
 <div class="page-head">
     <div>
         <h1>Réglages</h1>
-        <p class="sub">Paramètres de votre organisation. Ils s'appliquent à tous les écrans.</p>
+        <p class="sub sc-intro">Paramètres de votre organisation. Ils s'appliquent à tous les écrans.</p>
     </div>
 </div>
 
@@ -53,6 +53,11 @@
 
                 <section class="rg-sec">
                     <h5>Médiathèque</h5>
+                    @* Look app : deux tuiles (images, vidéos) à la place du bloc détaillé *@
+                    <div class="rg-tiles rg-apptiles">
+                        <a class="rg-tile" href="/media"><span class="top">Images</span><span class="n">@imageCount</span><span class="d">@Helpers.FormatSize(imageBytes)</span></a>
+                        <a class="rg-tile" href="/media"><span class="top">Vidéos</span><span class="n">@videoCount</span><span class="d">@Helpers.FormatSize(videoBytes)</span></a>
+                    </div>
                     <div class="rg-media">
                         <div><div class="lb">Images</div><div class="n">@imageCount</div></div>
                         <div><div class="lb">Vidéos</div><div class="n">@videoCount</div></div>
@@ -151,7 +156,7 @@
                         <div class="rg-body">
                             @if (areaCount == 1 && soleAreaId != Guid.Empty)
                             {
-                                <AreaSleep AreaId="soleAreaId" />
+                                <AreaSleep @ref="sleepRef" AreaId="soleAreaId" Embedded="true" OnEdited="Touch" />
                             }
                             else
                             {
@@ -171,7 +176,7 @@
                         <div class="rg-body">
                             @if (areaCount == 1 && soleAreaId != Guid.Empty)
                             {
-                                <AreaDim AreaId="soleAreaId" />
+                                <AreaDim @ref="dimRef" AreaId="soleAreaId" Embedded="true" OnEdited="Touch" />
                             }
                             else
                             {
@@ -229,10 +234,6 @@
                         <div class="ctl" style="flex:1;min-width:0">@if (growth) { <MediaField Field="pauseField" Values="pauseValues" /> } else { <span class="muted">Visuel Linkii par défaut</span> }</div>
                     </div>
                 </div>
-                <div class="rg-card">
-                    <header><h3>Appareil des écrans</h3><small>Dans toutes les licences.</small></header>
-                    <div class="rg-body"><p class="hint" style="margin:0">Chaque écran remonte son système (par exemple Android 14), son modèle et la version de l'application. Ces informations s'affichent sur sa carte.</p></div>
-                </div>
                 break;
         }
         </div>
@@ -259,7 +260,7 @@
                         <div class="sv-row"><div class="t"></div><div class="ctl"><button class="btn ghost" @onclick="ChangePassword">Changer le mot de passe</button></div></div>
                     }
                 </div>
-                <div class="rg-card">
+                <div class="rg-card rg-mode">
                     <header><h3>Mode d'utilisation</h3><small>@(Modes.Expert ? "Expert : toutes les fonctions." : "Simple : vue réduite.")</small></header>
                     <div class="sv-row"><div class="t"><b>@(Modes.Expert ? "Passer en mode simple" : "Passer en mode expert")</b><small>Planning, aires de gestion, membres, intégrations et widgets.</small></div>
                         <div class="ctl"><button type="button" class="switch @(Modes.Expert ? "on" : "")" role="switch" aria-checked="@(Modes.Expert ? "true" : "false")" aria-label="Passer en mode expert" @onclick="() => Modes.Switch(!Modes.Expert)"><span></span></button></div></div>
@@ -330,6 +331,8 @@
     private string Tab => Shown(tab ?? (TabParam == "parametres" ? "diffusion" : Groups.SelectMany(g => g.Items).Any(t => t.Id == TabParam) ? TabParam! : "utilisation"));
     private bool dirty, sub;   // sub : look « app », une rubrique ouverte (liste des rubriques masquée)
     private void Touch() => dirty = true;
+    private AreaSleep? sleepRef;
+    private AreaDim? dimRef;
 
     private string name = "", timezone = "", email = "";
     private int duration, reloadHour;
@@ -425,6 +428,9 @@
         if (techPinOn && techPin.Length > 0 && !TechPin.Valid(techPin)) { Toast.Error("Le code du menu technicien doit comporter 4 à 8 chiffres."); return; }
         var target = alertTarget == "custom" ? alertEmail.Trim() : "";
         if (growth && alertOffline && alertTarget == "custom" && !System.Net.Mail.MailAddress.TryCreate(target, out _)) { Toast.Error("L'adresse des alertes n'est pas valide."); return; }
+        // plages de veille et profils de luminosité (composants de l'aire) : enregistrés avec le reste, sans second bouton
+        if (sleepEnabled && sleepRef != null) await sleepRef.Persist();
+        if (dimEnabled && dimRef != null && !await dimRef.Persist()) return;
         var pauseImage = AppField.MediaIds(pauseValues.GetValueOrDefault("pause")) is { Count: > 0 } ids ? ids[0] : (Guid?)null;
 
         Store.Write(d =>

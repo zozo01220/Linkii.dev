@@ -11,16 +11,19 @@
     </div>
     @if (on)
     {
-        <DimEditor @bind-Plan="plan" Asleep="@asleep" />
-        <p class="hint" style="margin:10px 0 0">Les heures sont celles du fuseau de l'aire (voir Mise en veille, à défaut celui de l'organisation). Seuls les écrans de l'app Android sont concernés.</p>
+        <DimEditor @bind-Plan="plan" @bind-Plan:after="Edited" Asleep="@asleep" />
+        <p class="hint sl-hint" style="margin:10px 0 0">Les heures sont celles du fuseau de l'aire (voir Mise en veille, à défaut celui de l'organisation). Seuls les écrans de l'app Android sont concernés.</p>
     }
-    <div style="margin-top:14px"><button type="button" class="btn" @onclick="Save">Enregistrer la luminosité</button></div>
+    @if (!Embedded) { <div class="rg-stick" style="margin-top:14px"><button type="button" class="btn" @onclick="Save">Enregistrer la luminosité</button></div> }
 }
 
 @code {
     [Parameter, EditorRequired] public Guid AreaId { get; set; }
     /// <summary>Appelé après l'enregistrement (la page appelante se met à jour).</summary>
     [Parameter] public EventCallback OnSaved { get; set; }
+    [Parameter] public bool Embedded { get; set; }
+    [Parameter] public EventCallback OnEdited { get; set; }
+    private Task Edited() => OnEdited.InvokeAsync();
 
     private bool loaded, on;
     private DimPlan? plan;
@@ -39,12 +42,14 @@
         loaded = true;
     }
 
-    private void Toggle() => on = !on;
+    private void Toggle() { on = !on; _ = OnEdited.InvokeAsync(); }
 
-    private async Task Save()
+    private Task Save() => Persist();
+
+    public async Task<bool> Persist()
     {
         var p = on && Dim.Valid(plan) ? plan!.Clone() : null;
-        if (on && p == null) { Toast.Error("Réglage invalide : vérifiez les profils."); return; }
+        if (on && p == null) { Toast.Error("Réglage invalide : vérifiez les profils."); return false; }
         Store.Write(d =>
         {
             if (d.Areas.FirstOrDefault(a => a.Id == AreaId) is { } a) a.Dimming = p;
@@ -52,5 +57,6 @@
         await Notifier.NotifyArea(AreaId);   // les écrans de l'aire rechargent leur configuration
         Toast.Ok("Luminosité et contraste enregistrés.");
         await OnSaved.InvokeAsync();
+        return true;
     }
 }
