@@ -25,7 +25,7 @@ public class DimPlan
 }
 
 /// <summary>
-/// Luminosité et contraste selon l'heure, pour les écrans de l'app Android (voir Linkii.Android).
+/// Luminosité et contraste selon l'heure, pour les écrans de l'app Android (voir Linkii.AndroidPlayer).
 /// Réglé sur l'aire (par défaut de ses écrans) et surchargé écran par écran, comme la mise en veille ; les heures sont celles du fuseau de l'aire.
 /// La luminosité est réelle sur smartphone et tablette (fenêtre de l'app), simulée par filtre sur Android TV ; le contraste est toujours simulé.
 /// </summary>

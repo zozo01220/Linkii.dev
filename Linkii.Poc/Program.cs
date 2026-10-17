@@ -26,6 +26,7 @@ builder.Services.AddScoped<TenantContext>();
 builder.Services.AddScoped<TenantStore>();
 builder.Services.AddScoped<ModeService>();
 builder.Services.AddSingleton<Notifier>();
+builder.Services.AddSingleton<PushService>();   // notifications push (Firebase) vers l'app Android du back-office
 builder.Services.AddSingleton<PreviewGrants>();   // jetons d'aperçu du simulateur
 builder.Services.AddSingleton<VideoConverter>();
 builder.Services.AddSingleton<MediaImporter>();
@@ -260,9 +261,15 @@ app.Use(async (ctx, next) =>
 });
 app.UseAntiforgery();
 
-// Manifeste de l'application installable (écran d'accueil Android / iPhone) : nom et couleur du revendeur du domaine.
+// Manifeste de l'application installable (écran d'accueil iPhone / iPad) : nom et couleur du revendeur du domaine.
 app.MapGet("/manifest.webmanifest", (HttpContext ctx) =>
 {
+    // Installation sur l'écran d'accueil : réservée à Apple (pas d'application iPhone / iPad). Android et Windows ont l'application Linkii :
+    // sans manifeste, Chrome et Edge ne proposent plus d'installer le site. Safari (iPadOS en mode « site de bureau » compris) le reçoit.
+    var ua = ctx.Request.Headers.UserAgent.ToString();
+    var apple = ua.Contains("iPhone") || ua.Contains("iPad") || ua.Contains("iPod")
+        || ua.Contains("Macintosh") && !ua.Contains("Chrome") && !ua.Contains("Edg/") && !ua.Contains("Firefox");
+    if (!apple) return Results.NotFound();
     var r = ctx.Items["reseller"] as Reseller;
     var name = r?.DisplayName is { Length: > 0 } n ? n : "Linkii";
     var color = r?.BrandColor is { Length: > 0 } c ? c : "#0B1F3A";
@@ -601,6 +608,7 @@ api.MapPost("/player/device", (HttpRequest req, DeviceDto body, JsonStore store)
     static string? Clean(string? v, int max) => string.IsNullOrWhiteSpace(v) ? null : (v.Trim().Length > max ? v.Trim()[..max] : v.Trim());
     s!.DeviceKind = body.Kind is "androidtv" or "android" ? body.Kind : "web";
     s.DeviceOs = Clean(body.Os, 40); s.DeviceModel = Clean(body.Model, 60); s.DeviceApp = Clean(body.App, 20);
+    s.DevicePinSig = Clean(body.PinSig, 16);
     if (body.BootMs is > 0) s.DeviceBootUtc = DateTimeOffset.FromUnixTimeMilliseconds(body.BootMs.Value).UtcDateTime;
     return Results.Ok();
 }));
@@ -796,6 +804,27 @@ app.MapGet("/screens/{id:guid}/capture.jpg", (HttpContext ctx, Guid id, JsonStor
     return Results.File(path, "image/jpeg");
 }).RequireAuthorization("ClientSpace");
 
+// Notifications push : l'app Android du back-office confie son jeton Firebase à la page (pont LinkiiAdmin), qui l'enregistre avec la session de la personne.
+app.MapPost("/api/push/register", (HttpContext ctx, PushRegisterDto body, JsonStore store) =>
+{
+    var uid = ctx.User.GetGuid(ClaimTypes.NameIdentifier);
+    var token = body.Token?.Trim() ?? "";
+    if (uid == null || token.Length < 20 || token.Length > 4096) return Results.BadRequest();
+    store.Write(db =>
+    {
+        db.PushDevices.RemoveAll(d => d.Token == token);   // le même appareil change de compte : le jeton suit la dernière personne connectée
+        db.PushDevices.Add(new PushDevice { UserId = uid.Value, Token = token, Name = (body.Name ?? "").Trim() is { Length: > 0 } n ? n[..Math.Min(n.Length, 80)] : "Appareil Android" });
+    });
+    return Results.NoContent();
+}).RequireAuthorization().DisableAntiforgery();
+
+app.MapPost("/api/push/unregister", (HttpContext ctx, PushRegisterDto body, JsonStore store) =>
+{
+    var uid = ctx.User.GetGuid(ClaimTypes.NameIdentifier);
+    store.Write(db => db.PushDevices.RemoveAll(d => d.UserId == uid && d.Token == body.Token));
+    return Results.NoContent();
+}).RequireAuthorization().DisableAntiforgery();
+
 app.MapHub<ScreenHub>("/hubs/screen");
 
 // ---------- Back-office Blazor ----------
@@ -807,7 +836,8 @@ record AckDto(string Version, int? W, int? H, string? Stage = null);
 record QrHit(Guid ClientId, Guid ItemId, string? Destination, bool Counts);
 record PlayDto(Guid? MediaId, string? AppId, long Start, int Sec);
 record StartDto(int? W, int? H);
-record DeviceDto(string? Kind, string? Os, string? Model, string? App, long? BootMs);
+record DeviceDto(string? Kind, string? Os, string? Model, string? App, long? BootMs, string? PinSig = null);
 record CommandAckDto(Guid Id, string? Status, string? Detail);
 
 public partial class Program;
+record PushRegisterDto(string? Token, string? Name);

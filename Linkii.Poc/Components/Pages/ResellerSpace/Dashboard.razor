@@ -1,0 +1,165 @@
+@page "/reseller"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ResellerSpace")]
+@inject JsonStore Root
+@inject TenantContext Ctx
+
+<div class="page-head">
+    <div>
+        <h1>Tableau de bord</h1>
+        <p class="sub">Votre activité de revendeur · @now.ToLocalTime().ToString("d MMMM yyyy", Fr)</p>
+    </div>
+    <a class="btn" href="reseller/clients?nouveau=1"><Ico Name="plus" Size="16" /> Nouveau client</a>
+</div>
+
+<div class="adm-k4">
+    <div class="adm-card"><div class="kl">À toucher fin @MonthName</div><div class="kn" style="color:var(--ok)">@Subscriptions.Fmt(share.Commission) <small class="muted" style="font-size:12px">CHF</small></div><div class="ks">versement le @Subscriptions.PayoutDate(year, month).ToString("d MMM", Fr) · prévision @Subscriptions.Fmt(share.Commission + expectedSum)</div></div>
+    <div class="adm-card"><div class="kl">Clients</div><div class="kn">@rows.Count</div><div class="ks @(newThisMonth > 0 ? "up" : "")">@(newThisMonth > 0 ? $"+{newThisMonth} ce mois" : "aucun nouveau ce mois") · @Count(ClientStates.Trial) en essai</div></div>
+    <div class="adm-card"><div class="kl">Écrans</div><div class="kn">@screens</div><div class="ks">@online en ligne@(screens > 0 ? $" · {(int)Math.Round(online * 100.0 / screens)} %" : "")</div></div>
+    <div class="adm-card"><div class="kl">Utilisateurs</div><div class="kn">@users</div><div class="ks">@(users == 0 ? "—" : $"{(int)Math.Round(active30 * 100.0 / users)} % actifs sur 30 jours")</div></div>
+</div>
+
+<div class="adm-g2">
+    <div class="adm-card">
+        <div class="adm-ct">Ma part par mois <span>6 derniers mois, CHF</span></div>
+        <div class="adm-chart" role="img" aria-label="Ma part par mois">
+            @for (var i = 0; i < months.Count; i++)
+            {
+                var (label, n) = months[i];
+                <div class="col"><span class="v">@Subscriptions.Fmt(n)</span><i class="@(i == months.Count - 1 ? "now" : "")" style="height:@(maxMonth <= 0 ? 0 : (int)Math.Round(n * 90m / maxMonth))px"></i><span class="l">@label</span></div>
+            }
+        </div>
+    </div>
+    <div class="adm-card">
+        <div class="adm-ct">Répartition <span>par état</span></div>
+        <div class="adm-stk">
+            @foreach (var s in ClientStates.All.Where(s => Count(s) > 0)) { <i style="flex:@Count(s);background:@ClientStates.Color(s)" title="@s : @Count(s)"></i> }
+        </div>
+        <div class="adm-lg">
+            @foreach (var s in ClientStates.All) { <div><span class="adm-dot" style="background:@ClientStates.Color(s)"></span>@s<b>@Count(s)</b></div> }
+        </div>
+        <div class="adm-ct" style="margin-top:20px">Licences <span>Base · Growth</span></div>
+        <div class="adm-stk">
+            @if (rows.Count > 0)
+            {
+                <i style="flex:@Math.Max(basePlan, 0);background:#C9D3E0"></i>
+                <i style="flex:@Math.Max(growth, 0);background:#3B82C4"></i>
+            }
+        </div>
+        <div class="adm-lg">
+            <div><span class="adm-dot" style="background:#C9D3E0"></span>Base<b>@basePlan</b></div>
+            <div><span class="adm-dot" style="background:#3B82C4"></span>Growth<b>@growth</b></div>
+        </div>
+    </div>
+</div>
+
+<div class="adm-card">
+    <div class="adm-ct">À traiter <span>@todo.Count</span></div>
+    @foreach (var t in todo)
+    {
+        <div class="adm-todo">
+            <div class="ic @t.Tone"><Ico Name="@t.Icon" Size="18" /></div>
+            <div class="grow">@t.Title<small>@t.Detail</small></div>
+            <a class="btn ghost sm" href="@(t.State == "" ? "reseller/clients" : "reseller/clients?etat=" + Uri.EscapeDataString(t.State))">Ouvrir</a>
+        </div>
+    }
+    @if (todo.Count == 0) { <div class="adm-empty">Rien à traiter pour le moment.</div> }
+</div>
+
+<div class="adm-g2" style="margin-top:14px">
+    <div class="adm-card">
+        <div class="adm-ct">Derniers paiements <span><a href="reseller/billing">voir la facturation</a></span></div>
+        @foreach (var p in payments)
+        {
+            <div class="adm-ln"><span style="color:var(--ink)">@p.Name<span class="adm-sub">@Subscriptions.ToLocal(p.PaidUtc).ToString("d MMM", Fr) · @(p.Period == "annual" ? "annuel" : "mensuel")</span></span><span class="m">+@Subscriptions.Fmt(p.Commission)</span></div>
+        }
+        @if (payments.Count == 0) { <div class="adm-empty">Aucun paiement reçu pour l'instant.</div> }
+    </div>
+    <div class="adm-card">
+        <div class="adm-ct">Écrans hors ligne <span>@offline.Count</span></div>
+        @foreach (var s in offline)
+        {
+            <div class="adm-ln"><span style="color:var(--ink)"><span class="adm-dot" style="background:#C8372D;margin-right:8px"></span>@s.Name<span class="adm-sub">@s.Client · @s.Seen</span></span><span>Hors ligne</span></div>
+        }
+        @if (offline.Count == 0) { <div class="adm-note" style="margin:10px 0 0">@(screens == 0 ? "Aucun écran appairé chez vos clients." : "Tous les écrans de vos clients sont en ligne.")</div> }
+    </div>
+</div>
+
+@code {
+    private record Row(Tenant Client, string State, User? Owner);
+    private record Todo(string Icon, string Tone, string Title, string Detail, string State);
+    private record Off(string Name, string Client, string Seen);
+
+    private static readonly System.Globalization.CultureInfo Fr = new("fr-CH");
+    private DateTime now = DateTime.UtcNow;
+    private int year, month, screens, online, users, active30, newThisMonth, basePlan, growth;
+    private decimal expectedSum, maxMonth;
+    private Subscriptions.Share share = Subscriptions.Share.None;
+    private List<Row> rows = new();
+    private List<(string Label, decimal N)> months = new();
+    private List<Todo> todo = new();
+    private List<Payment> payments = new();
+    private List<Off> offline = new();
+
+    private string MonthName => Fr.DateTimeFormat.GetMonthName(month);
+    private int Count(string state) => rows.Count(r => r.State == state);
+
+    protected override void OnInitialized()
+    {
+        var rid = Ctx.RequireResellerId();
+        now = DateTime.UtcNow;
+        var local = Subscriptions.ToLocal(now);
+        (year, month) = (local.Year, local.Month);
+        var since = now.AddDays(-30);
+        var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        Root.Read(d =>
+        {
+            var r = d.Resellers.First(x => x.Id == rid);
+            rows = d.Clients.Where(c => c.ResellerId == rid).OrderBy(c => c.Name).Select(c => { var o = Signup.OwnerOf(d, c); return new Row(c, ClientStates.Of(c, o, now), o); }).ToList();
+            var ids = rows.Select(x => x.Client.Id).ToHashSet();
+            var live = d.Screens.Where(s => ids.Contains(s.ClientId) && s.Token != null).ToList();
+            screens = live.Count;
+            bool IsOn(Screen s) => s.LastSeenUtc is { } ls && now - ls <= TimeSpan.FromSeconds(90);
+            online = live.Count(IsOn);
+            offline = live.Where(s => !IsOn(s)).OrderBy(s => s.Name).Take(5).Select(s => new Off(s.Name, rows.First(x => x.Client.Id == s.ClientId).Client.Name,
+                s.LastSeenUtc is { } ls ? "vu " + Ago(ls) : "jamais vu")).ToList();
+            var us = d.Users.Where(u => u.ClientId != null && ids.Contains(u.ClientId.Value) && Roles.IsClient(u.Role)).ToList();
+            users = us.Count;
+            active30 = us.Count(u => u.ActiveSince(since));
+            share = Subscriptions.ShareOf(d, r, year, month);
+            expectedSum = Subscriptions.ExpectedOf(d, r, now).Sum(e => e.Commission);
+            months = Enumerable.Range(0, 6).Select(i =>
+            {
+                var m = new DateTime(year, month, 1).AddMonths(i - 5);
+                return (Fr.DateTimeFormat.GetAbbreviatedMonthName(m.Month).TrimEnd('.'), Subscriptions.ShareOf(d, r, m.Year, m.Month).Commission);
+            }).ToList();
+            payments = d.Payments.Where(p => p.ResellerId == rid).OrderByDescending(p => p.PaidUtc).Take(4).ToList();
+            return 0;
+        });
+        maxMonth = months.Max(m => m.N);
+        newThisMonth = rows.Count(r => r.Client.CreatedUtc >= monthStart);
+        basePlan = rows.Count(r => !r.Client.IsGrowth);
+        growth = rows.Count - basePlan;
+
+        var pending = rows.Where(r => r.State == ClientStates.Pending).ToList();
+        if (pending.Count > 0)
+            todo.Add(new("mail", "", $"{pending.Count} compte{(pending.Count > 1 ? "s" : "")} à valider", string.Join(", ", pending.Take(3).Select(r => r.Client.Name)) + (pending.Count > 3 ? "…" : ""), ClientStates.Pending));
+        var soon = rows.Where(r => r.State == ClientStates.Trial && r.Client.TrialEndsUtc is { } e && e - now <= TimeSpan.FromDays(3)).OrderBy(r => r.Client.TrialEndsUtc).ToList();
+        if (soon.Count > 0)
+            todo.Add(new("hourglass", "ac", $"{soon.Count} essai{(soon.Count > 1 ? "s" : "")} se termine{(soon.Count > 1 ? "nt" : "")} sous 3 jours", string.Join(", ", soon.Take(3).Select(r => $"{r.Client.Name} ({r.Client.TrialDaysLeft(now)} j)")), ClientStates.Trial));
+        var ended = rows.Where(r => r.State == ClientStates.Ended).ToList();
+        if (ended.Count > 0)
+            todo.Add(new("clock", "warn", $"{ended.Count} essai{(ended.Count > 1 ? "s" : "")} terminé{(ended.Count > 1 ? "s" : "")}", "Écrans sur « Essai terminé » : le client doit passer en abonné.", ClientStates.Ended));
+        var susp = rows.Where(r => r.State == ClientStates.Suspended).ToList();
+        if (susp.Count > 0)
+            todo.Add(new("pause", "warn", $"{susp.Count} client{(susp.Count > 1 ? "s" : "")} suspendu{(susp.Count > 1 ? "s" : "")}", "Leurs écrans ne diffusent plus.", ClientStates.Suspended));
+        var blocked = rows.Where(r => r.State == ClientStates.Blocked).ToList();
+        if (blocked.Count > 0)
+            todo.Add(new("lock", "bad", $"{blocked.Count} client{(blocked.Count > 1 ? "s" : "")} bloqué{(blocked.Count > 1 ? "s" : "")}", "Écrans coupés et back-office fermé (paiement manquant ou décision de Linkii).", ClientStates.Blocked));
+    }
+
+    private string Ago(DateTime utc)
+    {
+        var d = now - utc;
+        return d.TotalHours < 1 ? "il y a < 1 h" : d.TotalDays < 1 ? $"il y a {(int)d.TotalHours} h" : $"il y a {(int)d.TotalDays} j";
+    }
+}

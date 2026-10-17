@@ -404,7 +404,7 @@ public static class Tenancy
             return (null, "Cette adresse e-mail est déjà utilisée.");
         // Tout nouveau client démarre en licence Growth. Créé par la console ou un revendeur, il est aussitôt en essai gratuit (durée réglée dans la console) ;
         // en libre-service, l'essai ne démarre qu'à la validation de l'adresse e-mail (voir Signup.Verify).
-        var client = new Tenant { ResellerId = reseller.Id, Name = clientName.Trim(), SignupSource = source, Plan = Plans.Growth };
+        var client = new Tenant { ResellerId = reseller.Id, Name = clientName.Trim(), SignupSource = source, Plan = Plans.Growth, TechPin = TechPin.Generate(), TechPinUtc = DateTime.UtcNow, TechPinBy = "Création" };
         if (!SignupSources.IsSelfService(source)) client.TrialEndsUtc = DateTime.UtcNow.AddDays(Math.Max(1, db.Platform.TrialDays));
         var firstArea = new Area { ClientId = client.Id, Name = Seed.DefaultAreaName };   // une aire dès le départ : invisible tant qu'elle est seule
         AreaOps.EnsureDefaultZone(firstArea);
@@ -439,6 +439,7 @@ public static class Seed
             EnsureAreas(db);
             AccessLevels.Migrate(db);
             Signup.MarkVerified(db);
+            Subscriptions.MigrateResellerShare(db);
 
             if (!db.Users.Any(u => u.Role == Roles.PlatformAdmin))
             {

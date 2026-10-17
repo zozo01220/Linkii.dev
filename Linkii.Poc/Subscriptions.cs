@@ -21,7 +21,7 @@ public class Payment
     public decimal Amount { get; set; }
     /// <summary>Frais de paiement (estimés tant que Stripe n'envoie pas le montant réel).</summary>
     public decimal Fee { get; set; }
-    /// <summary>Commission du revendeur au moment du paiement : taux figé, montant calculé sur le net (montant moins frais). 0 pour un client direct.</summary>
+    /// <summary>Part du revendeur au moment du paiement : taux (commission de Linkii) figé, montant = net (montant moins frais) moins cette commission. 0 pour un client direct.</summary>
     public int CommissionPct { get; set; }
     public decimal Commission { get; set; }
     /// <summary>Premier paiement : fixe la date anniversaire et met fin à l'essai.</summary>
@@ -85,8 +85,24 @@ public static class Subscriptions
     public static decimal FeeOf(Db db, decimal amount) =>
         amount <= 0 ? 0 : Math.Round(amount * db.Platform.StripeFeePct / 100m + db.Platform.StripeFeeFixed, 2);
 
-    /// <summary>Commission sur le net : (montant − frais) × taux, arrondie au centime.</summary>
-    public static decimal CommissionOf(decimal amount, decimal fee, int pct) => Math.Round(Math.Max(0, amount - fee) * pct / 100m, 2);
+    /// <summary>Part du revendeur sur le net : le taux est la commission de Linkii ; le revendeur reçoit (montant − frais) moins cette commission, arrondie au centime.</summary>
+    public static decimal CommissionOf(decimal amount, decimal fee, int pct, bool direct = false)
+    {
+        if (direct) return 0;
+        var net = Math.Max(0, amount - fee);
+        return net - Math.Round(net * pct / 100m, 2);
+    }
+
+    /// <summary>Une fois (16 octobre 2026) : le taux était la part du revendeur, il est désormais la commission de Linkii. Recalcule les paiements existants et les versements déjà saisis.</summary>
+    public static void MigrateResellerShare(Db db)
+    {
+        if (db.Platform.ResellerShareVersion >= 2) return;
+        db.Platform.ResellerShareVersion = 2;
+        foreach (var p in db.Payments)
+            p.Commission = CommissionOf(p.Amount, p.Fee, p.CommissionPct, db.Resellers.FirstOrDefault(r => r.Id == p.ResellerId) is not { IsDefault: false });
+        foreach (var po in db.Payouts)
+            if (db.Resellers.FirstOrDefault(r => r.Id == po.ResellerId) is { } r) po.Amount = ShareOf(db, r, po.Year, po.Month).Commission;
+    }
 
     // ---------- Mois (fuseau de Zurich) ----------
 
@@ -192,7 +208,7 @@ public static class Subscriptions
         c.NextRenewalUtc = next;
         if (c.Blocked && c.BlockedReason == PaymentReason && next.Date >= now.Date) { c.Blocked = false; c.BlockedReason = ""; }
         var pay = new Payment { ClientId = c.Id, ResellerId = c.ResellerId, Name = c.Name, PaidUtc = now, FromUtc = from, ToUtc = next, Period = c.BillingPeriod, Screens = ScreensOf(db, c),
-            Amount = amount, Fee = fee, CommissionPct = pct, Commission = CommissionOf(amount, fee, pct), First = first };
+            Amount = amount, Fee = fee, CommissionPct = pct, Commission = CommissionOf(amount, fee, pct, reseller is not { IsDefault: false }), First = first };
         db.Payments.Add(pay);
         return pay;
     }
@@ -227,7 +243,7 @@ public static class Subscriptions
 }
 
 /// <summary>Applique le blocage faute de paiement : au démarrage puis toutes les heures, et prévient les écrans concernés.</summary>
-public class SubscriptionWorker(JsonStore store, Notifier notifier, ILogger<SubscriptionWorker> log) : BackgroundService
+public class SubscriptionWorker(JsonStore store, Notifier notifier, PushService push, ILogger<SubscriptionWorker> log) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -238,7 +254,11 @@ public class SubscriptionWorker(JsonStore store, Notifier notifier, ILogger<Subs
             {
                 var ids = store.Write(db => Subscriptions.Enforce(db, DateTime.UtcNow));
                 if (ids.Count > 0) log.LogInformation("{N} client(s) bloqué(s) faute de paiement à la date anniversaire", ids.Distinct().Count());
-                foreach (var id in ids.Distinct()) await notifier.NotifyClient(id);
+                foreach (var id in ids.Distinct())
+                {
+                    await notifier.NotifyClient(id);
+                    await push.ToClientAdmins(id, PushCategories.Billing, "Espace suspendu", "Le paiement de l'abonnement n'a pas été reçu à la date prévue : l'espace est suspendu.", "/");
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning(ex, "Blocage faute de paiement"); }
             await Task.Delay(TimeSpan.FromHours(1), ct);

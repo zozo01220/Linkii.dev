@@ -79,7 +79,7 @@ else if (tab == "Revendeurs")
 {
     <div class="adm-card" style="padding:0;overflow:hidden"><div class="tbl-scroll">
     <table class="adm-tbl">
-        <thead><tr><th>Revendeur</th><th class="r">Clients</th><th class="r">Écrans</th><th class="r">Util.</th><th class="r">CA mensuel</th><th class="r">Commission</th><th class="r">Part acquise (@MonthLabel.Split(' ')[0].ToLowerInvariant())</th><th>IBAN</th></tr></thead>
+        <thead><tr><th>Revendeur</th><th class="r">Clients</th><th class="r">Écrans</th><th class="r">Util.</th><th class="r">CA mensuel</th><th class="r">Commission Linkii</th><th class="r">Part acquise (@MonthLabel.Split(' ')[0].ToLowerInvariant())</th><th>IBAN</th></tr></thead>
         <tbody>
         @foreach (var r in rrows)
         {
@@ -98,7 +98,7 @@ else if (tab == "Revendeurs")
         @if (rrows.Count == 0) { <tr><td colspan="8" style="text-align:center;color:var(--muted);padding:28px">Aucun revendeur.</td></tr> }
         </tbody>
     </table></div></div>
-    <div class="adm-note">Commission = (montant payé − frais) × taux, sur les paiements reçus dans le mois. * : taux particulier (taux par défaut : @prices.DefaultPct %). Le taux se règle dans la fiche du revendeur.</div>
+    <div class="adm-note">Part du revendeur = (montant payé − frais) − commission de Linkii (taux), sur les paiements reçus dans le mois. * : taux particulier (taux par défaut : @prices.DefaultPct %). Le taux se règle dans la fiche du revendeur.</div>
 }
 else if (tab == "Paiements")
 {
@@ -201,7 +201,7 @@ else
     <aside class="adm-drawer" role="dialog" aria-label="Commission de @sr.R.Name">
         <div class="dh"><div class="top">
             <div class="adm-av lg" style="background:@AvatarColor(sr.R.Name)">@Initials(sr.R.Name)</div>
-            <div class="grow"><h2>@sr.R.Name</h2><span class="adm-st @(sr.PayState == Subscriptions.PayoutDone ? "ok" : sr.PayState == Subscriptions.PayoutDue ? "warn" : "mute")">@sr.PayState</span> <span class="adm-sub" style="display:inline">commission @sr.Pct %@(sr.R.CommissionPct == null ? " (par défaut)" : "")</span></div>
+            <div class="grow"><h2>@sr.R.Name</h2><span class="adm-st @(sr.PayState == Subscriptions.PayoutDone ? "ok" : sr.PayState == Subscriptions.PayoutDue ? "warn" : "mute")">@sr.PayState</span> <span class="adm-sub" style="display:inline">commission de Linkii @sr.Pct %@(sr.R.CommissionPct == null ? " (par défaut)" : "")</span></div>
             <button type="button" class="btn ghost icon" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="18" /></button>
         </div></div>
         <div class="db">
@@ -210,7 +210,7 @@ else
                 <div class="adm-ln"><span>Payé par les clients</span><span class="m">@Subscriptions.Fmt(sr.Share.Gross)</span></div>
                 <div class="adm-ln"><span>Frais de paiement</span><span class="m">−@Subscriptions.Fmt(sr.Share.Fees)</span></div>
                 <div class="adm-ln"><span>Net</span><span class="m">@Subscriptions.Fmt(sr.Share.Net)</span></div>
-                <div class="adm-tot g"><span>À verser (@sr.Pct %)</span><span class="m">@Subscriptions.Fmt(sr.Payout?.Amount ?? sr.Share.Commission)</span></div>
+                <div class="adm-tot g"><span>À verser (100 − @sr.Pct %)</span><span class="m">@Subscriptions.Fmt(sr.Payout?.Amount ?? sr.Share.Commission)</span></div>
                 @if (sr.ExpectedSum > 0) { <div class="adm-note">Encore attendu d'ici fin de mois : @Subscriptions.Fmt(sr.ExpectedSum) CHF (prévision).</div> }
             </div>
             <div class="adm-sec"><span class="lb">Versement</span>
@@ -257,7 +257,7 @@ else if (SelClient is { } sc)
                 <div class="adm-tot"><span class="muted">@sc.Screens × @Subscriptions.Fmt(sc.Unit) CHF / mois</span><span class="m">@Subscriptions.Fmt(sc.Gross)</span></div>
                 @if (sc.C.BillingPeriod == "annual") { <div class="adm-tot"><span class="muted">12 mois, remise annuelle −@prices.AnnualPct %</span><span class="m">@Subscriptions.Fmt(sc.PeriodAmount)</span></div> }
                 <div class="adm-tot g"><span>@(sc.C.BillingPeriod == "annual" ? "CHF / an" : "CHF / mois")</span><span class="m">@Subscriptions.Fmt(sc.PeriodAmount)</span></div>
-                @if (!sc.Direct) { <div class="adm-note">Commission de @sc.R.Name : @sc.ResellerPct % du net, soit environ @Subscriptions.Fmt(sc.ResellerShare) CHF sur ce paiement.</div> }
+                @if (!sc.Direct) { <div class="adm-note">Commission de Linkii : @sc.ResellerPct % du net ; @sc.R.Name reçoit environ @Subscriptions.Fmt(sc.ResellerShare) CHF sur ce paiement.</div> }
                 @if (!sc.Billable) { <div class="adm-note">@NotBilledReason(sc)</div> }
             </div>
             <div class="adm-sec"><span class="lb">Périodicité de paiement</span>
@@ -391,7 +391,7 @@ else if (SelClient is { } sc)
                 var pct = Subscriptions.CommissionPct(db, r);
                 var sub = Subscriptions.StateOf(c.NextRenewalUtc, billable || c.TrialEndsUtc != null, now);
                 return new CRow(c, r, r.IsDefault, ClientStates.Of(c, Signup.OwnerOf(db, c), now), billable, sub, Subscriptions.ScreensOf(db, c), Subscriptions.UsersOf(db, c),
-                    Subscriptions.Unit(p, c.Plan), gross, billable ? Subscriptions.ClientMonthlyEquivalent(db, c) : 0, period, pct, Subscriptions.CommissionOf(period, Subscriptions.FeeOf(db, period), pct));
+                    Subscriptions.Unit(p, c.Plan), gross, billable ? Subscriptions.ClientMonthlyEquivalent(db, c) : 0, period, pct, Subscriptions.CommissionOf(period, Subscriptions.FeeOf(db, period), pct, r.IsDefault));
             }).ToList();
             monthPayments = db.Payments.Where(x => Subscriptions.InMonth(x.PaidUtc, year, month)).OrderByDescending(x => x.PaidUtc).ToList();
             rrows = db.Resellers.Where(r => !r.IsDefault).OrderBy(r => r.Name).Select(r =>

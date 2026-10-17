@@ -10,6 +10,7 @@
 @inject NavigationManager Nav
 @inject Toaster Toast
 
+
 <div class="page-head">
     <div>
         <h1>Marque</h1>
@@ -18,60 +19,83 @@
     <button class="btn" @onclick="Save">Enregistrer</button>
 </div>
 
-<div class="settings-grid">
-    <div class="card">
-        <h3>Identité</h3>
-        <label class="lbl">Nom affiché</label>
-        <input class="full" @bind="brandName" />
-        <label class="lbl">Couleur principale</label>
-        <div class="row"><input type="color" @bind="color" style="padding:2px;width:52px;height:38px" /><small>@color</small></div>
-        <label class="lbl">Logo <small>(PNG, JPEG ou WebP, 1 Mo maximum)</small></label>
-        @if (logoUrl != null) { <img class="logo-prev" src="@logoUrl" alt="Logo" /> }
-        <InputFile OnChange="OnLogo" accept="image/png,image/jpeg,image/webp" />
-        @if (logoUrl != null) { <div><button class="btn ghost" style="margin-top:8px" @onclick="RemoveLogo">Retirer le logo</button></div> }
-    </div>
-
-    <div class="card">
-        <h3>Connexion et inscription</h3>
-        <p class="hint">Choisissez comment vos clients peuvent créer leur espace. Désactiver une méthode la retire de l'inscription : les personnes déjà inscrites avec elle peuvent continuer à l'utiliser pour se connecter.</p>
-        <ul class="opt-list">
-            @foreach (var m in SignupSources.SignupMethodIds)
-            {
-                var id = m;
-                var available = id == SignupSources.Email || Sso.IsConfigured(id) || Env.IsDevelopment();
-                <li>
-                    @if (id == SignupSources.Email) { <Ico Name="mail" Size="18" /> } else { <ProviderLogo Provider="@id" Size="18" /> }
-                    <span class="grow"><b>@(id == SignupSources.Email ? "Créer un espace avec e-mail et mot de passe" : "Continuer avec " + SignupSources.Label(id))</b>
-                        @if (!available) { <small class="muted" style="display:block">Non disponible : à activer par Linkii.</small> }</span>
-                    <button type="button" class="switch @(methods.Contains(id) ? "on" : "")" role="switch" aria-checked="@(methods.Contains(id) ? "true" : "false")" aria-label="@id" disabled="@(!available)"
-                            @onclick="() => ToggleMethod(id)"><span></span></button>
-                </li>
-            }
-        </ul>
-        <small class="muted">@(methods.Count == 0 ? "Aucune méthode : seuls vos clients déjà créés se connectent, vous les ajoutez vous-même." : "Les changements s'appliquent après « Enregistrer ».")</small>
-    </div>
-
-    <div class="card">
-        <h3>Adresse et e-mails</h3>
-        <label class="lbl">Adresse du back-office</label>
-        <input class="full" value="@Resolver.HostFor(slug)" disabled />
-        @if (!string.IsNullOrEmpty(domain))
+<div class="adm-set">
+    <nav aria-label="Sections">
+        @foreach (var (id, label, icon) in Sections)
         {
-            <label class="lbl">Domaine propre</label>
-            <input class="full" value="@domain" disabled />
-            <small>Créez chez votre hébergeur DNS un enregistrement <b>CNAME</b> : <code>@domain</code> → <code>@CnameTarget</code>. Le certificat HTTPS est généré automatiquement.</small>
+            var sid = id;
+            <button type="button" class="@(section == sid ? "on" : "")" @onclick="() => section = sid"><Ico Name="@icon" Size="18" /> @label</button>
         }
-        else
+    </nav>
+
+    <div class="adm-card" style="padding:4px 22px">
+    @if (section == "identity")
+    {
+        <div class="adm-row">
+            <div>Nom affiché<small>Le nom de votre marque, visible par vos clients dans le back-office, les e-mails et sur les écrans.</small></div>
+            <div class="val"><input style="width:240px" aria-label="Nom affiché" @bind="brandName" /></div>
+        </div>
+        <div class="adm-row">
+            <div>Couleur principale<small>Boutons, liens et accents du back-office de vos clients.</small></div>
+            <div class="val"><input type="color" aria-label="Couleur principale" @bind="color" style="padding:2px;width:52px;height:38px" /><span class="m muted">@color</span></div>
+        </div>
+        <div class="adm-row">
+            <div>Logo<small>PNG, JPEG ou WebP, 1 Mo maximum.</small></div>
+            <div class="val" style="flex-direction:column;align-items:flex-end">
+                @if (logoUrl != null) { <img class="logo-prev" src="@logoUrl" alt="Logo" /> }
+                <InputFile OnChange="OnLogo" accept="image/png,image/jpeg,image/webp" />
+                @if (logoUrl != null) { <button type="button" class="btn ghost sm" @onclick="RemoveLogo">Retirer le logo</button> }
+            </div>
+        </div>
+        <div class="adm-row">
+            <div>Mention « Propulsé par Linkii »<small>Affichée en bas du menu de vos clients.</small></div>
+            <div class="val"><button type="button" class="switch @(powered ? "on" : "")" role="switch" aria-checked="@(powered ? "true" : "false")" aria-label="Mention Propulsé par Linkii" @onclick="() => powered = !powered"><span></span></button></div>
+        </div>
+    }
+    else if (section == "signup")
+    {
+        <div style="padding:16px 0 4px" class="muted">Choisissez comment vos clients peuvent créer leur espace. Désactiver une méthode la retire de l'inscription : les personnes déjà inscrites avec elle peuvent continuer à l'utiliser pour se connecter.</div>
+        @foreach (var m in SignupSources.SignupMethodIds)
         {
-            <small>Pour utiliser votre propre domaine (ex. affichage.votre-entreprise.ch), demandez à Linkii de l'activer.</small>
+            var id = m;
+            var available = id == SignupSources.Email || Sso.IsConfigured(id) || Env.IsDevelopment();
+            <div class="adm-row">
+                <div style="display:flex;gap:12px;align-items:center">
+                    @if (id == SignupSources.Email) { <Ico Name="mail" Size="20" /> } else { <ProviderLogo Provider="@id" Size="20" /> }
+                    <div>@(id == SignupSources.Email ? "E-mail et mot de passe" : SignupSources.Label(id))
+                        <small>@(id == SignupSources.Email ? "Créer un espace avec une adresse e-mail et un mot de passe." : "Continuer avec " + SignupSources.Label(id) + ".")@(available ? "" : " Non disponible : à activer par Linkii.")</small></div>
+                </div>
+                <div class="val"><button type="button" class="switch @(methods.Contains(id) ? "on" : "")" role="switch" aria-checked="@(methods.Contains(id) ? "true" : "false")" aria-label="@id" disabled="@(!available)" @onclick="() => ToggleMethod(id)"><span></span></button></div>
+            </div>
         }
-        <label class="lbl">Adresse e-mail d'envoi</label>
-        <input class="full" type="email" @bind="sender" placeholder="no-reply@votre-entreprise.ch" />
-        <label class="lbl"><input type="checkbox" class="ios" @bind="powered" /> Afficher la mention « Propulsé par Linkii »</label>
+        <div class="adm-note" style="margin:4px 0 14px">@(methods.Count == 0 ? "Aucune méthode : seuls vos clients déjà créés se connectent, vous les ajoutez vous-même." : "Les changements s'appliquent après « Enregistrer ».")</div>
+    }
+    else
+    {
+        <div class="adm-row">
+            <div>Adresse du back-office<small>L'adresse à laquelle vos clients et votre équipe se connectent.</small></div>
+            <div class="val"><span class="m">@Resolver.HostFor(slug)</span></div>
+        </div>
+        <div class="adm-row">
+            <div>Domaine propre
+                @if (!string.IsNullOrEmpty(domain)) { <small>Créez chez votre hébergeur DNS un enregistrement <b>CNAME</b> : <code>@domain</code> → <code>@CnameTarget</code>. Le certificat HTTPS est généré automatiquement.</small> }
+                else { <small>Pour utiliser votre propre domaine (ex. affichage.votre-entreprise.ch), demandez à Linkii de l'activer.</small> }</div>
+            <div class="val">@if (!string.IsNullOrEmpty(domain)) { <span class="m">@domain</span> } else { <span class="adm-st mute">Non activé</span> }</div>
+        </div>
+        <div class="adm-row">
+            <div>Adresse e-mail d'envoi<small>Expéditeur des e-mails envoyés à vos clients (invitations, mots de passe provisoires).</small></div>
+            <div class="val"><input type="email" style="width:260px" aria-label="Adresse e-mail d'envoi" @bind="sender" placeholder="no-reply@votre-entreprise.ch" /></div>
+        </div>
+    }
     </div>
 </div>
 
 @code {
+    private string section = "identity";
+    private static readonly (string Id, string Label, string Icon)[] Sections =
+    {
+        ("identity", "Identité", "palette"), ("signup", "Connexion et inscription", "users"), ("addr", "Adresse et e-mails", "mail"),
+    };
     private string brandName = "", color = "#0B1F3A", sender = "", slug = "", domain = "";
     private string? logoUrl;
     private bool powered = true;

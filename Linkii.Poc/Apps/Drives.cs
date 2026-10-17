@@ -130,7 +130,7 @@ public static class DriveSources
 
 /// <summary>Lecture des Drives (Google Drive API v3, Microsoft Graph) et synchronisation des dossiers dans la médiathèque.</summary>
 public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService graph, SafeHttp http,
-                          MediaImporter importer, Notifier notifier, RemoteDrives remotes, ILogger<DriveService> log)
+                          MediaImporter importer, Notifier notifier, PushService push, RemoteDrives remotes, ILogger<DriveService> log)
 {
     public const int MaxFiles = 300;              // par dossier, sous-dossiers compris
     public const long MaxFileBytes = 1_000_000_000;
@@ -581,17 +581,27 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
             try { File.Delete(Path.Combine(AppPaths.MediaDir, m.FileName!)); } catch (IOException) { }
     }
 
-    private void Record(Guid clientId, Guid folderId, string error, Listed? listed) => store.Write(db =>
+    private void Record(Guid clientId, Guid folderId, string error, Listed? listed)
     {
-        var f = db.Clients.FirstOrDefault(c => c.Id == clientId)?.DriveFolders.FirstOrDefault(x => x.Id == folderId);
-        if (f == null) return;
-        f.LastError = error;
-        f.SyncedUtc = DateTime.UtcNow;
-        if (listed == null) return;
-        f.FileCount = listed.Files.Count;
-        f.Skipped = listed.Skipped;
-        f.SubfolderCount = listed.Subfolders;
-    });
+        // Notification seulement à la première erreur d'une série : un dossier en échec ne prévient pas toutes les 15 minutes.
+        var alert = store.Write(db =>
+        {
+            var f = db.Clients.FirstOrDefault(c => c.Id == clientId)?.DriveFolders.FirstOrDefault(x => x.Id == folderId);
+            if (f == null) return null;
+            var first = error.Length > 0 && f.LastError.Length == 0;
+            f.LastError = error;
+            f.SyncedUtc = DateTime.UtcNow;
+            if (listed != null)
+            {
+                f.FileCount = listed.Files.Count;
+                f.Skipped = listed.Skipped;
+                f.SubfolderCount = listed.Subfolders;
+            }
+            return first ? f.Name : null;
+        });
+        if (alert != null)
+            _ = push.ToClientAdmins(clientId, PushCategories.Sync, "Synchronisation en échec", $"Le dossier « {alert} » n'a pas pu être synchronisé : {error}", "/media");
+    }
 
     // ---------- Contenu d'un dossier ----------
 

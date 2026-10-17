@@ -265,7 +265,8 @@ class MainActivity : Activity() {
             return org.json.JSONObject()
                 .put("kind", if (tv) "androidtv" else "android").put("os", "Android ${Build.VERSION.RELEASE}")
                 .put("model", model.replaceFirstChar { it.uppercase() }).put("app", BuildConfig.VERSION_NAME)
-                .put("bootMs", System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime()).toString()
+                .put("bootMs", System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime())
+                .put("pinSig", prefs.orgPinSig() ?: "").toString()
         }
 
         /** Plages de mise en veille du serveur : { tz, ranges } ou chaîne vide (aucune). L'appareil les garde et les applique seul. */
@@ -281,6 +282,17 @@ class MainActivity : Activity() {
             if (isTv()) return false
             runOnUiThread { dimPercent = percent.coerceIn(10, 100); if (blackout == null) applyDim() }
             return true
+        }
+
+        /** Code du menu technicien de l'organisation : { pin, local } ou chaîne vide (rien d'imposé, l'appareil garde son code). */
+        @JavascriptInterface
+        fun techPin(json: String) {
+            if (json.isEmpty()) { prefs.orgPin = null; prefs.orgPinLocal = false; return }
+            try {
+                val o = org.json.JSONObject(json)
+                prefs.orgPin = o.optString("pin", "")
+                prefs.orgPinLocal = o.optBoolean("local", false)
+            } catch (e: org.json.JSONException) { /* reçu de travers : on garde l'état actuel */ }
         }
 
         /** Redémarrage de l'application demandé depuis le back-office. */
@@ -356,13 +368,13 @@ class MainActivity : Activity() {
     }
 
     private fun showMenu() {
-        val actions = listOf(
+        val actions = listOf<Pair<String, () -> Unit>>(
             "Reprendre la diffusion" to { },
             "Recharger le player" to { web?.loadUrl(prefs.playerUrl()) },
             "Redémarrer l'application" to { restartApp() },
             "Test de capture d'écran" to { CaptureTest.run(this, root) },
             "Changer de serveur" to { askServer() },
-            "Définir le code PIN" to { askNewPin() },
+            *(if (prefs.pinManaged) emptyArray() else arrayOf<Pair<String, () -> Unit>>("Définir le code PIN" to { askNewPin() })),
             "Autoriser le démarrage automatique" to { requestOverlayPermission() },
             "Activer la mise en veille de l'écran" to { requestSleepAdmin() },
             "Désappairer cet écran" to { confirmUnpair() },
@@ -403,7 +415,8 @@ class MainActivity : Activity() {
             "Réseau : ${if (online) "connecté" else "hors ligne"}\n" +
             "Mise en veille : ${if (prefs.sleepJson.isEmpty()) "aucune plage" else "plages reçues"}, écran ${if (SleepController.isAdmin(this)) "éteint pour de bon" else "noir seulement (droit non activé)"}, alarmes ${if (sleeper.exactAlarms()) "exactes" else "approximatives"}\n" +
             "Stockage libre : ${"%.1f".format(freeGb)} Go\n" +
-            "PIN : ${if (prefs.pin.isEmpty()) "non défini" else "défini"}"
+            "PIN : ${if (prefs.pin.isEmpty()) "non défini" else "défini"}" +
+            (if (prefs.orgPin == null) "" else if (prefs.pinManaged || !prefs.hasDevicePin) " (géré par l'organisation)" else " (propre à l'appareil)")
     }
 
     private fun askServer() {

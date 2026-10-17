@@ -1,4 +1,4 @@
-@page "/reseller"
+@page "/reseller/clients"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ResellerSpace")]
 @inject JsonStore Root
 @inject Mailer Mail
@@ -6,71 +6,300 @@
 @inject NavigationManager Nav
 @inject TenantContext Ctx
 @inject Toaster Toast
+@inject Notifier Screens
 
 <div class="page-head">
     <div>
         <h1>Clients</h1>
-        <p class="sub">Vos clients (écoles, commerces, associations). Chacun a son propre espace, isolé des autres.</p>
+        <p class="sub">Vos clients (écoles, commerces, associations). Chacun a son propre espace, isolé des autres. Cliquez sur un client pour ouvrir sa fiche.</p>
     </div>
-    <button class="btn" @onclick="() => showAdd = !showAdd">+ Ajouter un client</button>
+    <button class="btn" @onclick="Open"><Ico Name="plus" Size="16" /> Nouveau client</button>
 </div>
 
 @if (showAdd)
 {
-    <div class="card" style="margin-bottom:18px">
-        <h3>Nouveau client</h3>
-        <div class="form-grid">
-            <div><label class="lbl">Nom du client</label><input class="full" @bind="clientName" placeholder="Ex. : École du Midi" /></div>
-            <div><label class="lbl">Administrateur : nom</label><input class="full" @bind="adminName" /></div>
-            <div><label class="lbl">Administrateur : e-mail</label><input class="full" type="email" @bind="adminEmail" autocomplete="off" /></div>
-            <div>
+    <div class="modal-backdrop" @onclick="Close"></div>
+    <div class="modal app-modal" role="dialog" aria-modal="true" aria-labelledby="add-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="add-title">Nouveau client</h3></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+        </div>
+        <EditForm Model="this" OnSubmit="Add" class="modal-form">
+            <div class="modal-body">
+                <div class="form-grid">
+                    <div><label class="lbl">Nom du client</label><input class="full" @bind="clientName" placeholder="Ex. : École du Midi" /></div>
+                    <div><label class="lbl">Administrateur : nom</label><input class="full" @bind="adminName" /></div>
+                    <div><label class="lbl">Administrateur : e-mail</label><input class="full" type="email" @bind="adminEmail" autocomplete="off" /></div>
+                    <div>
                         <label class="lbl">Mot de passe provisoire <small>(envoyé par e-mail, à changer à la 1re connexion)</small></label>
                         <div class="row" style="gap:6px"><input class="full mono" @bind="adminPwd" autocomplete="off" spellcheck="false" /><button type="button" class="btn ghost" title="Générer un autre mot de passe" @onclick="() => adminPwd = Passwords.Generate()">Générer</button></div>
                     </div>
-        </div>
-        <div style="margin-top:12px"><button class="btn" @onclick="Add">Créer le client</button></div>
+                </div>
+                @if (formError != null) { <div class="err">@formError</div> }
+            </div>
+            <div class="modal-foot">
+                <button type="button" class="btn ghost" @onclick="Close">Annuler</button>
+                <button type="submit" class="btn">Créer le client</button>
+            </div>
+        </EditForm>
     </div>
 }
 
-<table class="tbl">
-    <thead><tr><th>Client</th><th>Utilisateurs</th><th class="num">Aires</th><th class="num">Écrans</th><th>État</th><th></th></tr></thead>
-    <tbody>
-    @foreach (var c in clients)
+<div class="adm-tabs" role="tablist" aria-label="État du client">
+    <button type="button" class="@(state == "" ? "on" : "")" @onclick='() => state = ""'>Tous <b>@clients.Count</b></button>
+    @foreach (var s in ClientStates.All.Where(s => clients.Any(c => c.State == s) || state == s))
     {
-        <tr>
-            <td><b>@c.Client.Name</b></td>
-            <td><span class="mono">@c.Users.Total</span> <small class="muted">@c.Users.Breakdown · @c.Users.Active30 actif@(c.Users.Active30 > 1 ? "s" : "") sur 30 j</small></td>
-            <td class="num">@c.Users.Areas</td>
-            <td class="num">@c.Screens</td>
-            <td><span class="pill @(c.Client.Suspended ? "bad" : "ok")">@(c.Client.Suspended ? "Suspendu" : "Actif")</span></td>
+        var st = s;
+        <button type="button" class="@(state == st ? "on" : "")" @onclick="() => state = st">@st <b>@clients.Count(c => c.State == st)</b></button>
+    }
+</div>
+
+<div class="adm-tools">
+    <div class="search-box">
+        <Ico Name="search" Size="16" />
+        <input placeholder="Rechercher un client, un e-mail…" aria-label="Rechercher" @bind="search" @bind:event="oninput" />
+    </div>
+    <select @bind="plan" aria-label="Licence">
+        <option value="">Toutes les licences</option>
+        @foreach (var p in Plans.All) { <option value="@p">@Plans.Label(p)</option> }
+    </select>
+</div>
+
+<div class="adm-card" style="padding:0;overflow:hidden">
+<div class="tbl-scroll">
+<table class="adm-tbl">
+    <thead><tr><th>Client</th><th>Licence</th><th>Écrans</th><th class="r">Utilisateurs</th><th>État</th><th></th></tr></thead>
+    <tbody>
+    @foreach (var c in Filtered)
+    {
+        var row = c;
+        <tr class="@(selId == c.Client.Id ? "sel" : "")" @onclick="() => OpenRow(row)">
             <td>
-                <form method="post" action="/space/enter"><input type="hidden" name="clientId" value="@c.Client.Id" /><button class="btn ghost" type="submit">Entrer</button></form>
-                <button class="btn ghost" @onclick="() => Toggle(c.Client)">@(c.Client.Suspended ? "Activer" : "Suspendre")</button>
+                <div class="adm-who">
+                    <div class="adm-av" style="background:@AvatarColor(c.Client.Name)">@Initials(c.Client.Name)</div>
+                    <div><b>@c.Client.Name</b><small>@c.Owner?.Email</small></div>
+                </div>
             </td>
+            <td><span class="adm-plan @(c.Client.IsGrowth ? "g" : "")">@Plans.Label(c.Client.Plan)</span></td>
+            <td>
+                <span class="m">@c.Online</span><span class="adm-sub" style="display:inline"> / @c.Screens</span>
+                <div class="adm-bar"><i style="width:@(c.Screens == 0 ? 0 : c.Online * 100 / c.Screens)%;background:@(c.Screens == 0 ? "#C5CED9" : c.Online == c.Screens ? "#1E8E5A" : c.Online > 0 ? "#D79A2B" : "#C8372D")"></i></div>
+            </td>
+            <td class="r m">@c.Users.Total</td>
+            <td><span class="adm-st @ClientStates.Css(c.State)">@c.State@(c.State == ClientStates.Trial ? $" · {c.Client.TrialDaysLeft(now)} j" : "")</span></td>
+            <td class="r"><Ico Name="chevron-right" Size="16" /></td>
         </tr>
     }
-    @if (clients.Count == 0) { <tr><td colspan="6">Aucun client pour l'instant.</td></tr> }
+    @if (!Filtered.Any()) { <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:32px">@(clients.Count == 0 ? "Aucun client pour l'instant." : "Aucun client ne correspond à ces critères.")</td></tr> }
     </tbody>
 </table>
+</div>
+</div>
+<div class="adm-foot"><span>@Filtered.Count() client@(Filtered.Count() > 1 ? "s" : "") affiché@(Filtered.Count() > 1 ? "s" : "")</span><span>Entrer dans un espace est journalisé.</span></div>
+
+@if (Sel is { } c0)
+{
+    var o = c0.Owner;
+    <div class="adm-veil" @onclick="CloseDrawer"></div>
+    <aside class="adm-drawer" role="dialog" aria-label="Fiche de @c0.Client.Name">
+        <div class="dh">
+            <div class="top">
+                <div class="adm-av lg" style="background:@AvatarColor(c0.Client.Name)">@Initials(c0.Client.Name)</div>
+                <div class="grow"><h2>@c0.Client.Name</h2><span class="adm-st @ClientStates.Css(c0.State)">@c0.State</span></div>
+                <button type="button" class="btn ghost icon" aria-label="Fermer" @onclick="CloseDrawer"><Ico Name="x" Size="18" /></button>
+            </div>
+            <div class="adm-tabs in" style="margin:16px 0 0">
+                @foreach (var t in DrawerTabs)
+                {
+                    var tt = t;
+                    <button type="button" class="@(tab == tt ? "on" : "")" @onclick="() => tab = tt">@tt</button>
+                }
+            </div>
+        </div>
+        <div class="db">
+        @if (tab == "Aperçu")
+        {
+            <div class="adm-kv">
+                <div><span>Écrans</span><b>@c0.Online<small>/@c0.Screens</small></b></div>
+                <div><span>Utilisateurs</span><b>@c0.Users.Total</b></div>
+                <div><span>Licence</span><b style="font-size:16px;padding-top:3px">@Plans.Label(c0.Client.Plan)</b></div>
+            </div>
+
+            @if (c0.Client.TrialEndsUtc is { } end)
+            {
+                <div class="adm-sec">
+                    <span class="lb">Essai gratuit</span>
+                    <div class="adm-note">@(c0.Client.TrialEnded(now) ? $"Terminé le {Day(end)} : les écrans affichent « Essai terminé »." : $"{c0.Client.TrialDaysLeft(now)} j restants, jusqu'au {Day(end)}.")</div>
+                </div>
+            }
+
+            <div class="adm-sec">
+                <span class="lb">Accès</span>
+                <div class="adm-note">@StateNote(c0)</div>
+                @if (!c0.Client.Blocked)
+                {
+                    <div class="adm-acts">
+                        @if (c0.Client.Suspended) { <button type="button" class="btn ok-o sm" @onclick="() => SetSuspended(c0, false)"><Ico Name="play" Size="15" /> Réactiver</button> }
+                        else { <button type="button" class="btn warn-o sm" @onclick="() => SetSuspended(c0, true)"><Ico Name="pause" Size="15" /> Suspendre</button> }
+                    </div>
+                    <div class="adm-note" style="margin-top:8px">Suspendre coupe les écrans du client ; son back-office reste accessible.</div>
+                }
+                else { <div class="adm-note" style="margin-top:8px">Ce compte est bloqué par Linkii (@(c0.Client.BlockedReason == "" ? "décision de Linkii" : "paiement manquant")). Contactez Linkii pour le débloquer.</div> }
+            </div>
+
+            <div class="adm-sec">
+                <span class="lb">Informations</span>
+                <div class="adm-ln"><span>Administrateur</span><span>@(o?.Name) <span class="adm-sub">@o?.Email</span></span></div>
+                <div class="adm-ln"><span>Créé le</span><span>@Day(c0.Client.CreatedUtc) <span class="adm-sub">@Ago(c0.Client.CreatedUtc)</span></span></div>
+                <div class="adm-ln"><span>Facturation</span><span>@(c0.Client.BillingPeriod == "annual" ? "Annuelle" : "Mensuelle")</span></div>
+            </div>
+        }
+        else if (tab == "Écrans")
+        {
+            <div style="margin-top:14px">
+            @foreach (var s in drawerScreens)
+            {
+                <div class="adm-ln">
+                    <span style="color:var(--ink)"><span class="adm-dot" style="background:@(s.Status == "Hors ligne" ? "#C8372D" : s.Status == "En ligne" ? "#1E8E5A" : "#D79A2B");margin-right:8px"></span>@s.Name<span class="adm-sub">@s.Detail</span></span>
+                    <span>@s.Status</span>
+                </div>
+            }
+            @if (drawerScreens.Count == 0) { <div class="adm-empty">Aucun écran appairé.</div> }
+            </div>
+        }
+        else if (tab == "Utilisateurs")
+        {
+            <div class="adm-note" style="margin-top:14px">@c0.Users.Breakdown · @c0.Users.Active30 actif@(c0.Users.Active30 > 1 ? "s" : "") sur 30 jours</div>
+            @foreach (var u in clientUsers)
+            {
+                <div class="adm-ln">
+                    <span style="color:var(--ink)">@u.Label<span class="adm-sub">@u.Email</span></span>
+                    <span>@(u.Role == Roles.ClientAdmin ? "Administrateur" : clientLevels.FirstOrDefault(l => l.Id == u.LevelId)?.Name ?? "Aucun niveau")
+                        <span class="adm-sub">@(u.Disabled ? "désactivé" : u.IsInvited ? "invité" : (u.LastActiveUtc ?? u.LastLoginUtc)?.ToLocalTime().ToString("d MMM yyyy HH:mm") ?? "jamais connecté")</span></span>
+                </div>
+            }
+        }
+        else
+        {
+            <div style="margin-top:14px">
+            @foreach (var l in drawerLog)
+            {
+                <div class="adm-ln"><span style="color:var(--ink)">@(l.Action == "enter" ? "Entrée dans l'espace" : "Sortie de l'espace")<span class="adm-sub">@l.UserEmail (@l.Role)</span></span><span>@l.AtUtc.ToLocalTime().ToString("d MMM yyyy HH:mm")</span></div>
+            }
+            @if (drawerLog.Count == 0) { <div class="adm-empty">Aucun accès enregistré par votre équipe.</div> }
+            </div>
+        }
+        </div>
+        <div class="df">
+            <form method="post" action="/space/enter"><input type="hidden" name="clientId" value="@c0.Client.Id" /><button class="btn" type="submit"><Ico Name="logout" Size="16" /> Entrer dans l'espace</button></form>
+        </div>
+    </aside>
+}
 
 @code {
-    private record Row(Tenant Client, int Screens, UserStats Users);
+    private record Row(Tenant Client, int Screens, int Online, UserStats Users, User? Owner, string State);
+    private record ScreenLine(string Name, string Status, string Detail);
+
+    private static readonly System.Globalization.CultureInfo Fr = new("fr-CH");
+    [SupplyParameterFromQuery(Name = "etat")] public string? EtatParam { get; set; }
+    [SupplyParameterFromQuery(Name = "nouveau")] public string? NouveauParam { get; set; }
+
+    private static readonly string[] DrawerTabs = { "Aperçu", "Écrans", "Utilisateurs", "Activité" };
+    private static readonly string[] Palette = { "#2F6FB5", "#1E8E5A", "#B7791F", "#7A5CC0", "#C0392B", "#2A8A99", "#5A6B80" };
+
     private List<Row> clients = new();
+    private string state = "", plan = "", search = "";
+    private DateTime now = DateTime.UtcNow;
+
+    private Guid? selId;
+    private string tab = "Aperçu";
+    private List<ScreenLine> drawerScreens = new();
+    private List<User> clientUsers = new();
+    private List<AccessLevel> clientLevels = new();
+    private List<AccessLogEntry> drawerLog = new();
+    private Row? Sel => selId is { } id ? clients.FirstOrDefault(c => c.Client.Id == id) : null;
+
     private bool showAdd;
     private string clientName = "", adminName = "", adminEmail = "", adminPwd = "";
+    private string? formError;
+
+    private IEnumerable<Row> Filtered => clients.Where(c => (state == "" || c.State == state)
+        && (plan == "" || c.Client.Plan == plan)
+        && (search.Trim() is not { Length: > 0 } q || c.Client.Name.Contains(q, StringComparison.OrdinalIgnoreCase) || c.Owner?.Email.Contains(q, StringComparison.OrdinalIgnoreCase) == true))
+        .OrderByDescending(c => c.Client.CreatedUtc);
+
+    private static string Initials(string n) => string.Concat(n.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => char.ToUpperInvariant(w[0])));
+    private static string AvatarColor(string n) => Palette[Math.Abs(n.Aggregate(0, (h, ch) => h * 31 + ch)) % Palette.Length];
+    private static string Day(DateTime utc) => utc.ToLocalTime().ToString("d MMM yyyy", Fr);
+    private string Ago(DateTime utc)
+    {
+        var d = now - utc;
+        return d.TotalHours < 1 ? "il y a < 1 h" : d.TotalDays < 1 ? $"il y a {(int)d.TotalHours} h" : $"il y a {(int)d.TotalDays} j";
+    }
+
+    private static string StateNote(Row r) => r.State switch
+    {
+        ClientStates.Blocked => "Écrans coupés et back-office fermé aux membres.",
+        ClientStates.Suspended => "Écrans coupés. Le back-office reste accessible.",
+        ClientStates.Pending => "Première connexion ou confirmation de l'adresse attendue.",
+        ClientStates.Ended => "Essai terminé : les écrans affichent « Essai terminé ».",
+        _ => "Accès complet."
+    };
 
     protected override void OnInitialized() { Load(); adminPwd = Passwords.Generate(); }
+
+    protected override void OnParametersSet()
+    {
+        if (EtatParam != null && ClientStates.All.Contains(EtatParam)) state = EtatParam;
+        if (NouveauParam == "1" && !showAdd) Open();
+    }
 
     private void Load()
     {
         var rid = Ctx.RequireResellerId();
-        clients = Root.Read(d => d.Clients.Where(c => c.ResellerId == rid).OrderBy(c => c.Name)
-            .Select(c => new Row(c, d.Screens.Count(s => s.ClientId == c.Id && s.Token != null), UserStats.Of(d, c))).ToList());
+        now = DateTime.UtcNow;
+        clients = Root.Read(d => d.Clients.Where(c => c.ResellerId == rid).OrderBy(c => c.Name).Select(c =>
+        {
+            var owner = Signup.OwnerOf(d, c);
+            var scr = d.Screens.Where(s => s.ClientId == c.Id && s.Token != null).ToList();
+            return new Row(c, scr.Count, scr.Count(s => s.LastSeenUtc is { } ls && now - ls <= TimeSpan.FromSeconds(90)), UserStats.Of(d, c), owner, ClientStates.Of(c, owner, now));
+        }).ToList());
+        if (selId != null) LoadDrawer();
     }
+
+    // Écrans, utilisateurs et accès de la fiche ouverte (lecture seule) ; seuls les clients de ce revendeur sont lus.
+    private void LoadDrawer()
+    {
+        var id = selId!.Value;
+        var rid = Ctx.RequireResellerId();
+        (drawerScreens, clientUsers, clientLevels, drawerLog) = Root.Read(d =>
+        {
+            var c = d.Clients.FirstOrDefault(x => x.Id == id && x.ResellerId == rid);
+            if (c == null) return (new List<ScreenLine>(), new List<User>(), new List<AccessLevel>(), new List<AccessLogEntry>());
+            var r = d.Resellers.FirstOrDefault(x => x.Id == c.ResellerId);
+            var screens = d.Screens.Where(s => s.ClientId == id && s.Token != null).OrderBy(s => s.Name).Select(s =>
+            {
+                var status = Helpers.Status(s, d.Playlists.FirstOrDefault(p => p.Id == s.PlaylistId && p.ClientId == id), c, r, Helpers.SyncStamp(d.Areas, s));
+                var seen = s.LastSeenUtc is { } ls ? "vu " + Ago(ls) : "jamais vu";
+                return new ScreenLine(s.Name, status, (s.DetectedW is { } w ? $"{w}×{s.DetectedH} · " : "") + seen);
+            }).ToList();
+            var users = d.Users.Where(u => u.ClientId == id && Roles.IsClient(u.Role)).OrderBy(u => u.Role == Roles.ClientAdmin ? 0 : 1).ThenBy(u => u.Name).ToList();
+            return (screens, users, c.Levels.ToList(), d.AccessLog.Where(l => l.ClientId == id).OrderByDescending(l => l.AtUtc).Take(30).ToList());
+        });
+    }
+
+    private void OpenRow(Row r) { selId = r.Client.Id; tab = "Aperçu"; LoadDrawer(); }
+    private void CloseDrawer() => selId = null;
+
+    // ---------- Création ----------
+
+    private void Open() { formError = null; adminPwd = Passwords.Generate(); showAdd = true; }
+    private void Close() { showAdd = false; if (NouveauParam != null) Nav.NavigateTo("reseller/clients", replace: true); }
 
     // Le compte est créé avec un mot de passe provisoire, envoyé par e-mail ; il devra être changé à la première connexion.
     private async Task Add()
     {
+        formError = null;
         var rid = Ctx.RequireResellerId();
         Reseller? reseller = null;
         var err = Root.Write(d =>
@@ -78,7 +307,7 @@
             reseller = d.Resellers.First(x => x.Id == rid);
             return Tenancy.CreateClient(d, reseller, clientName, adminName, adminEmail, adminPwd, mustChangePassword: true, source: SignupSources.Reseller).Error;
         });
-        if (err != null) { Toast.Error(err); return; }
+        if (err != null) { formError = err; return; }
         var (name, person, email, pwd) = (clientName.Trim(), adminName, adminEmail.Trim().ToLowerInvariant(), adminPwd);
         clientName = adminName = adminEmail = ""; adminPwd = Passwords.Generate(); showAdd = false;
         Load();
@@ -87,10 +316,14 @@
         else Toast.Error($"Client « {name} » créé, mais l'e-mail n'a pas pu être envoyé : {mailErr}. Communiquez vous-même le mot de passe provisoire à {email} : {pwd}");
     }
 
-    private void Toggle(Tenant c)
+    // ---------- Accès ----------
+
+    private async Task SetSuspended(Row r, bool suspended)
     {
         var rid = Ctx.RequireResellerId();
-        Root.Write(d => { var x = d.Clients.First(y => y.Id == c.Id && y.ResellerId == rid); x.Suspended = !x.Suspended; });
+        Root.Write(d => { var x = d.Clients.First(y => y.Id == r.Client.Id && y.ResellerId == rid); x.Suspended = suspended; });
         Load();
+        await Screens.NotifyClient(r.Client.Id);
+        Toast.Ok(suspended ? $"« {r.Client.Name} » est suspendu : écrans coupés." : $"« {r.Client.Name} » est de nouveau actif.");
     }
 }

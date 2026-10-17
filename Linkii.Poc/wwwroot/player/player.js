@@ -277,6 +277,10 @@
       cfg.mirrorH = !!pl.screen.mirrorH; cfg.mirrorV = !!pl.screen.mirrorV;
     }
     if (pl.settings) { cfg.timezone = pl.settings.timezone || null; if (pl.settings.reloadHour != null) cfg.reloadHour = pl.settings.reloadHour; }
+    // code du menu technicien de l'organisation : confié à l'application Android (chaîne vide : rien d'imposé, l'appareil garde son code)
+    if (!PREVIEW && pl.settings && window.LinkiiNative && typeof window.LinkiiNative.techPin === 'function') {
+      try { window.LinkiiNative.techPin(pl.settings.techPin ? JSON.stringify(pl.settings.techPin) : ''); } catch (e) {}
+    }
     cfg.wall = pl.wall || null;
     if (pl.dim !== undefined) cfg.dim = pl.dim || null;
     layout();

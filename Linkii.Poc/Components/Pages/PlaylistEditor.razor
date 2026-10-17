@@ -270,7 +270,7 @@
         <div class="modal-head">
             <AppIcon Id="@a.Id" />
             <div class="grow">
-                <div class="ci-title"><h3 id="new-app-title">@(newName ?? a.Name)</h3> <button type="button" class="btn ghost sm" @onclick="() => newForm?.OpenRename()"><Ico Name="edit" Size="15" /> Renommer</button></div>
+                <div class="ci-title"><h3 id="new-app-title">@(newName ?? a.Name)</h3> <button type="button" class="btn ghost sm icon" title="Renommer" aria-label="Renommer" @onclick="() => newForm?.OpenRename()"><Ico Name="edit" Size="15" /></button></div>
                 <small>Ajout à « @target.Name »</small>
             </div>
             @if (a.HasAdvanced) { <button type="button" class="modal-x" aria-label="Options avancées" title="Options avancées" @onclick="() => newForm?.OpenAdvanced()"><Ico Name="sliders" Size="20" /></button> }
@@ -278,8 +278,8 @@
         </div>
         <div class="modal-body">
             <AppInstanceForm @key="a.Id" AppId="@a.Id" ShowActions="false" OnSaved="item => AddApp(target, item)" OnRenamed="n => newName = n" @ref="newForm"
-                             ConfTabs="qrTabs" OtherTab="@(mTab == "qr" && !qrAngle)" OtherPane="qrPane" OtherPreview="qrPreview" PreviewQr="PreviewQr" />
-        </div>
+                             ConfTabs="qrTabs" OtherTab="@(mTab == "qr" && !qrAngle)" OtherPane="qrPane" OtherPreview="qrPreview" PreviewQr="PreviewQr" PreviewPortrait="portraitScreens" />
+</div>
         <div class="modal-foot">
             <button class="btn ghost" @onclick="() => newApp = null">Annuler</button>
             @if (AppInstanceForm.NeedsTest(a)) { <button class="btn ghost" @onclick="() => newForm!.Test()">Tester</button> }
@@ -298,7 +298,7 @@
             <div class="modal-head">
                 <AppIcon Id="@mMedia!.AppId" />
                 <div class="grow">
-                    <div class="ci-title"><h3 id="modal-title">@(itemName ?? mMedia.Name)</h3> <button type="button" class="btn ghost sm" @onclick="() => itemForm?.OpenRename()"><Ico Name="edit" Size="15" /> Renommer</button></div>
+                    <div class="ci-title"><h3 id="modal-title">@(itemName ?? mMedia.Name)</h3> <button type="button" class="btn ghost sm icon" title="Renommer" aria-label="Renommer" @onclick="() => itemForm?.OpenRename()"><Ico Name="edit" Size="15" /></button></div>
                     <small>@Svc.Find(mMedia.AppId)?.Name</small>
                 </div>
                 @if (Svc.Find(mMedia.AppId) is { HasAdvanced: true }) { <button type="button" class="modal-x" aria-label="Options avancées" title="Options avancées" @onclick="() => itemForm?.OpenAdvanced()"><Ico Name="sliders" Size="20" /></button> }
@@ -353,7 +353,7 @@
         @if (isApp)
         {
             <div class="modal-body">
-                <AppInstanceForm @key="mMedia!.Id" AppId="@(mMedia!.AppId!)" InstanceId="mMedia!.Id" ShowActions="false" OnSaved="_ => SaveSettings()" OnRenamed="n => itemName = n" Extra="appExtra" ConfTabs="qrTabs" OtherTab="@(mTab == "qr" && !qrAngle)" OtherPane="qrPane" OtherPreview="qrPreview" PreviewQr="PreviewQr" @ref="itemForm" />
+                <AppInstanceForm @key="mMedia!.Id" AppId="@(mMedia!.AppId!)" InstanceId="mMedia!.Id" ShowActions="false" OnSaved="_ => SaveSettings()" OnRenamed="n => itemName = n" Extra="appExtra" ConfTabs="qrTabs" OtherTab="@(mTab == "qr" && !qrAngle)" OtherPane="qrPane" OtherPreview="qrPreview" PreviewQr="PreviewQr" PreviewPortrait="portraitScreens" @ref="itemForm" />
             </div>
         }
         else { @listSettings }
@@ -476,6 +476,7 @@
 
     private async Task Refresh() { Reload(); await InvokeAsync(StateHasChanged); }
 
+    private bool portraitScreens;   // tous les écrans qui jouent cette liste sont en portrait : les aperçus des contenus le sont aussi
     private int outside;   // écrans hors du périmètre du membre qui jouent cette liste
     private HashSet<Guid> hidden = new();
 
@@ -488,6 +489,7 @@
         enabledApps = Svc.Installed().Select(i => Svc.Find(i.AppId)).OfType<AppManifest>().Where(a => !a.ScreenWidget).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
         growth = Store.Read(d => d.Tenant.IsGrowth);
         outside = Store.Read(d => d.Access.Sees is { } sees ? d.Root.Screens.Count(s => s.ClientId == d.ClientId && s.Token != null && !sees(s) && s.ZonePlaylists().Contains(Id)) : 0);
+        portraitScreens = Store.Read(d => d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.Token != null && s.ZonePlaylists().Contains(Id)).ToList() is { Count: > 0 } ps && ps.All(s => s.Orientation == "portrait"));
         scanCounts = growth ? Scans.Counts(Store.ClientId, DateTime.UtcNow.AddDays(-ScanLog.RetentionDays)) : new();
     }
 

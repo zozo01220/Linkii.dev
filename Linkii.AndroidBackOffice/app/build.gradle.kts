@@ -2,21 +2,32 @@ plugins {
     id("com.android.application")
 }
 
+// Fichiers de sortie : linkii-backoffice-debug.apk, linkii-backoffice-release.aab
+base { archivesName.set("linkii-backoffice") }
+
 android {
-    namespace = "ch.linkii.player"
+    namespace = "ch.linkii.backoffice"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "ch.linkii.player"
+        applicationId = "ch.linkii.backoffice"
         minSdk = 24
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 1
+        versionName = "1.0.0"
 
-        // Adresse neutre du serveur Linkii (modifiable sur l'appareil dans le menu technicien).
+        // Adresse du back-office (modifiable sur l'appareil : écran « serveur injoignable »).
         // Surcharge possible : gradlew bundleRelease -PserverUrl=https://app.exemple.ch
         val serverUrl = (project.findProperty("serverUrl") as String?) ?: "https://linkii.duckdns.org"
         buildConfigField("String", "DEFAULT_SERVER_URL", "\"$serverUrl\"")
+
+        // Notifications (Firebase Cloud Messaging) : valeurs du projet Firebase, à passer en -P ou dans ~/.gradle/gradle.properties.
+        // Sans elles l'app se compile et fonctionne, sans notifications.
+        fun fcm(name: String) = (project.findProperty(name) as String?) ?: ""
+        buildConfigField("String", "FCM_PROJECT_ID", "\"${fcm("fcmProjectId")}\"")
+        buildConfigField("String", "FCM_APP_ID", "\"${fcm("fcmAppId")}\"")
+        buildConfigField("String", "FCM_API_KEY", "\"${fcm("fcmApiKey")}\"")
+        buildConfigField("String", "FCM_SENDER_ID", "\"${fcm("fcmSenderId")}\"")
     }
 
     buildFeatures { buildConfig = true }
@@ -47,4 +58,9 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+}
+
+dependencies {
+    // Seule dépendance : réception des notifications push (FCM).
+    implementation("com.google.firebase:firebase-messaging:24.1.0")
 }

@@ -1,5 +1,4 @@
-/* Installation de Linkii sur l'écran d'accueil (Android, iPhone, iPad).
-   - Android / Chrome / Edge : l'événement beforeinstallprompt ouvre la boîte d'installation du système.
+/* Installation de Linkii sur l'écran d'accueil : iPhone et iPad seulement (Android et Windows ont l'application Linkii).
    - iPhone / iPad : Safari n'a pas d'API d'installation ; on montre le geste (Partager › Sur l'écran d'accueil).
    Un bandeau propose l'installation (masquable 14 jours). Tout élément portant data-install la déclenche aussi
    et n'est visible que si l'installation est possible (classe can-install sur <html>). JS volontairement simple (ES5). */
@@ -23,7 +22,7 @@
     try { return Date.now() - (parseInt(localStorage.getItem(KEY), 10) || 0) < DAYS * 86400000; } catch (e) { return false; }
   }
   function remember() { try { localStorage.setItem(KEY, String(Date.now())); } catch (e) {} }
-  function canInstall() { return !installed() && (!!deferred || isIos()); }
+  function canInstall() { return !installed() && isIos(); }
 
   function appName() {
     var m = document.querySelector('meta[name="apple-mobile-web-app-title"]');
@@ -62,7 +61,7 @@
     }
   }
 
-  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferred = e; refresh(); show(false); });
+  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); });   // pas d'invite d'installation hors Apple
   window.addEventListener('appinstalled', function () { deferred = null; hide(); refresh(); });
 
   document.addEventListener('click', function (e) {

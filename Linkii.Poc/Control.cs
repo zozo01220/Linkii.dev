@@ -198,7 +198,7 @@ public static class ScreenAlerts
 }
 
 /// <summary>Toutes les minutes : commandes sans réponse, pauses terminées, et e-mail quand un écran tombe (ou revient) si l'organisation l'a activé.</summary>
-public class ScreenWatchWorker(JsonStore store, Mailer mail, ResellerResolver resolver, ILogger<ScreenWatchWorker> log) : BackgroundService
+public class ScreenWatchWorker(JsonStore store, Mailer mail, PushService push, ResellerResolver resolver, ILogger<ScreenWatchWorker> log) : BackgroundService
 {
     private readonly DateTime started = DateTime.UtcNow;
 
@@ -226,6 +226,12 @@ public class ScreenWatchWorker(JsonStore store, Mailer mail, ResellerResolver re
             var app = resolver.LoginUrl(reseller)[..^"login".Length];
             var down = b.Down.Select(s => (s.Name, Since: Local(b.Client, s.LastSeenUtc ?? now))).ToList();
             var back = b.Back.Select(s => s.Name).ToList();
+            if (b.Down.Count > 0)
+                await push.ToClientAdmins(b.Client.Id, PushCategories.Screens, b.Down.Count == 1 ? $"Écran hors ligne : {b.Down[0].Name}" : $"{b.Down.Count} écrans hors ligne",
+                    string.Join(", ", down.Take(3).Select(d => $"{d.Name} (depuis {d.Since})")) + (down.Count > 3 ? "…" : ""), "/");
+            if (b.Back.Count > 0)
+                await push.ToClientAdmins(b.Client.Id, PushCategories.Screens, b.Back.Count == 1 ? $"Écran de retour : {back[0]}" : $"{b.Back.Count} écrans de retour",
+                    string.Join(", ", back.Take(3)) + (back.Count > 3 ? "…" : ""), "/");
             foreach (var (email, name) in rcpt)
             {
                 var err = await mail.SendScreenAlert(reseller, app, b.Client.Name, name, email, down, back, b.Client.AlertOfflineMinutes);

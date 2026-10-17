@@ -18,7 +18,7 @@
     </div>
 </div>
 
-<div class="rg-layout">
+<div class="rg-layout @(sub ? "sub" : "hub")">
     <nav class="rg-nav" aria-label="Sections des réglages">
         @foreach (var (group, items) in VisibleGroups)
         {
@@ -26,7 +26,7 @@
             @foreach (var t in items)
             {
                 var id = t.Id;
-                <button type="button" class="@(Tab == id ? "on" : "")" aria-current="@(Tab == id ? "page" : null)" @onclick="() => tab = id">
+                <button type="button" class="@(Tab == id ? "on" : "")" aria-current="@(Tab == id ? "page" : null)" @onclick="() => { tab = id; sub = true; }">
                     <Ico Name="@t.Icon" Size="16" /> <span>@t.Label</span>@if (t.Growth) { <em class="rg-badge">GROWTH</em> }
                 </button>
             }
@@ -34,6 +34,7 @@
     </nav>
 
     <div class="rg-main">
+        <button type="button" class="rg-back" @onclick="() => sub = false"><Ico Name="chevron-right" Size="16" /> Réglages</button>
         <div @oninput="Touch" @onchange="Touch">
         @switch (Tab)
         {
@@ -100,6 +101,36 @@
                             @for (var h = 0; h < 24; h++) { <option value="@h">@($"{h:00}:00")</option> }
                         </select>
                     </div></div>
+                </div>
+                <div class="rg-card">
+                    <header><h3>Menu technicien des écrans</h3><small>Code demandé sur les boîtiers Android après 5 appuis sur OK (ou 5 touchers en haut à droite). Il s'applique à tous les écrans de l'organisation.</small></header>
+                    @if (techPinOn && techPin.Length == 0)
+                    {
+                        <div class="rg-body"><p class="hint" style="margin:0;color:var(--warn-ink)">Aucun code défini : vos écrans gardent leur code par défaut (9999). Définissez un code ci-dessous.</p></div>
+                    }
+                    <div class="sv-row">
+                        <div class="t"><b>Protéger le menu par un code</b><small>Sans code, toute personne devant l'écran peut changer de serveur ou désappairer.</small></div>
+                        <div class="ctl"><button type="button" class="switch @(techPinOn ? "on" : "")" role="switch" aria-checked="@(techPinOn ? "true" : "false")" aria-label="Protéger le menu technicien par un code" @onclick="() => { techPinOn = !techPinOn; dirty = true; }"><span></span></button></div>
+                    </div>
+                    @if (techPinOn)
+                    {
+                        <div class="sv-row">
+                            <div class="t"><b>Code</b><small>4 à 8 chiffres.@if (techPinUtc != null) { <text> Modifié le @techPinUtc.Value.ToLocalTime().ToString("d MMM yyyy") @(techPinBy.Length > 0 ? "par " + techPinBy : "").</text> }</small></div>
+                            <div class="ctl" style="display:flex;gap:8px">
+                                <input class="rg-in short" type="@(techShow ? "text" : "password")" inputmode="numeric" maxlength="8" autocomplete="off" @bind="techPin" @bind:event="oninput" aria-label="Code du menu technicien" style="font-family:var(--mono);letter-spacing:.2em" />
+                                <button type="button" class="btn" @onclick="() => techShow = !techShow">@(techShow ? "Masquer" : "Afficher")</button>
+                                <button type="button" class="btn" @onclick="() => { techPin = TechPin.Generate(); techShow = true; dirty = true; }">Générer</button>
+                            </div>
+                        </div>
+                        <div class="sv-row">
+                            <div class="t"><b>Autoriser un code propre à un appareil</b><small>Le technicien peut définir un autre code depuis le menu ; il remplace celui-ci sur cet appareil.</small></div>
+                            <div class="ctl"><button type="button" class="switch @(techPinLocal ? "on" : "")" role="switch" aria-checked="@(techPinLocal ? "true" : "false")" aria-label="Autoriser un code propre à un appareil" @onclick="() => { techPinLocal = !techPinLocal; dirty = true; }"><span></span></button></div>
+                        </div>
+                    }
+                    @if (pinTotal > 0)
+                    {
+                        <div class="rg-body"><p class="hint" style="margin:0">@pinApplied écran@(pinApplied > 1 ? "s" : "") Android sur @pinTotal @(pinApplied > 1 ? "ont" : "a") reçu ce code@(pinWaiting.Length > 0 ? ". En attente : " + pinWaiting : "").@if (pinWaiting.Length > 0) { <text> Ils le recevront à leur prochaine synchronisation ; une ancienne version de l'app doit d'abord être mise à jour.</text> }</p></div>
+                    }
                 </div>
                 <div class="rg-card">
                     <header><h3>Nouveaux écrans</h3><small>Préréglage à la création, modifiable écran par écran.</small></header>
@@ -234,6 +265,7 @@
                         <div class="ctl"><button type="button" class="switch @(Modes.Expert ? "on" : "")" role="switch" aria-checked="@(Modes.Expert ? "true" : "false")" aria-label="Passer en mode expert" @onclick="() => Modes.Switch(!Modes.Expert)"><span></span></button></div></div>
                 </div>
                 <ConsentPrefs />
+                <AppDevicePrefs />
             }
         }
 
@@ -304,7 +336,7 @@
 
     private string? tab;
     private string Tab => Shown(tab ?? (TabParam == "parametres" ? "diffusion" : Groups.SelectMany(g => g.Items).Any(t => t.Id == TabParam) ? TabParam! : "utilisation"));
-    private bool dirty;
+    private bool dirty, sub;   // sub : look « app », une rubrique ouverte (liste des rubriques masquée)
     private void Touch() => dirty = true;
 
     private string name = "", timezone = "", email = "";
@@ -338,6 +370,8 @@
         externalProvider = Root.Read(d => d.Users.FirstOrDefault(u => u.Id == uid) is { HasPassword: false } u ? u.ExternalProvider : null);
         areaCount = Store.Read(d => d.Areas.Count);
         (sleepEnabled, dimEnabled) = (t.SleepEnabled, t.DimEnabled);
+        (techPinOn, techPin, techPinLocal, techPinUtc, techPinBy) = (t.TechPinOn, t.TechPin, t.TechPinLocal, t.TechPinUtc, t.TechPinBy);
+        LoadPinState(t);
         soleAreaId = areaCount == 1 ? Store.Read(d => d.Areas.First().Id) : Guid.Empty;
         spec = ScreenSpec.From(t);
         LoadUsage(t);
@@ -371,12 +405,32 @@
         integrationNames = inst.Count <= 3 ? string.Join(", ", inst) : string.Join(", ", inst.Take(3)) + "…";
     }
 
+    // Menu technicien : état du code
+    private bool techPinOn, techPinLocal, techShow;
+    private string techPin = "", techPinBy = "";
+    private DateTime? techPinUtc;
+    private int pinApplied, pinTotal;
+    private string pinWaiting = "";
+
+    // Écrans Android appairés : ont-ils renvoyé l'empreinte du code actuel ?
+    private void LoadPinState(Tenant t)
+    {
+        var expected = TechPin.Expected(t);
+        var android = Store.Read(d => d.Screens.Where(s => s.Token != null && s.DeviceKind is "android" or "androidtv").ToList());
+        pinTotal = expected == null ? 0 : android.Count;
+        pinApplied = android.Count(s => s.DevicePinSig == expected);
+        var waiting = android.Where(s => s.DevicePinSig != expected).Select(s => s.Name).ToList();
+        pinWaiting = waiting.Count <= 3 ? string.Join(", ", waiting) : string.Join(", ", waiting.Take(3)) + "…";
+    }
+
     private void Cancel() => Nav.NavigateTo($"/settings?tab={Tab}", forceLoad: true);
 
     private async Task Save()
     {
         if (string.IsNullOrWhiteSpace(name)) { Toast.Error("Le nom de l'organisation est obligatoire."); return; }
         if (duration < 1) { Toast.Error("La durée par défaut doit être d'au moins 1 seconde."); return; }
+        techPin = techPin.Trim();
+        if (techPinOn && techPin.Length > 0 && !TechPin.Valid(techPin)) { Toast.Error("Le code du menu technicien doit comporter 4 à 8 chiffres."); return; }
         var target = alertTarget == "custom" ? alertEmail.Trim() : "";
         if (growth && alertOffline && alertTarget == "custom" && !System.Net.Mail.MailAddress.TryCreate(target, out _)) { Toast.Error("L'adresse des alertes n'est pas valide."); return; }
         var pauseImage = AppField.MediaIds(pauseValues.GetValueOrDefault("pause")) is { Count: > 0 } ids ? ids[0] : (Guid?)null;
@@ -387,6 +441,11 @@
             t.Name = name.Trim(); t.Timezone = timezone;
             t.DefaultDurationSec = duration; t.ReloadHour = reloadHour;
             t.SleepEnabled = sleepEnabled; t.DimEnabled = dimEnabled;
+            if (t.TechPinOn != techPinOn || t.TechPin != techPin || t.TechPinLocal != techPinLocal)
+            {
+                t.TechPinOn = techPinOn; t.TechPin = techPin; t.TechPinLocal = techPinLocal;
+                t.TechPinUtc = DateTime.UtcNow; t.TechPinBy = Ctx.Email ?? "";
+            }
             t.DefaultScreenType = spec.Type; t.DefaultOrientation = spec.Orientation; t.DefaultResolution = spec.Resolution;
             if (t.IsGrowth)   // supervision : licence Growth (contrôlée ici aussi, pas seulement dans l'interface)
             {

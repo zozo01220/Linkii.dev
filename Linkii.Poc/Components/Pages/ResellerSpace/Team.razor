@@ -10,60 +10,165 @@
 <div class="page-head">
     <div>
         <h1>Équipe</h1>
-        <p class="sub">Les administrateurs de votre espace revendeur.</p>
+        <p class="sub">Les administrateurs de votre espace revendeur. Cliquez sur un membre pour ouvrir sa fiche.</p>
     </div>
-    <button class="btn" @onclick="() => showAdd = !showAdd">+ Ajouter un membre</button>
+    <button class="btn" @onclick="Open"><Ico Name="plus" Size="16" /> Nouveau membre</button>
 </div>
 
 @if (showAdd)
 {
-    <div class="card" style="margin-bottom:18px">
-        <h3>Nouveau membre</h3>
-        <div class="form-grid">
-            <div><label class="lbl">Nom</label><input class="full" @bind="name" /></div>
-            <div><label class="lbl">E-mail</label><input class="full" type="email" @bind="email" autocomplete="off" /></div>
-            <div>
-                <label class="lbl">Mot de passe provisoire <small>(envoyé par e-mail, à changer à la 1re connexion)</small></label>
-                <div class="row" style="gap:6px"><input class="full mono" @bind="pwd" autocomplete="off" spellcheck="false" /><button type="button" class="btn ghost" title="Générer un autre mot de passe" @onclick="() => pwd = Passwords.Generate()">Générer</button></div>
-            </div>
+    <div class="modal-backdrop" @onclick="Close"></div>
+    <div class="modal app-modal" role="dialog" aria-modal="true" aria-labelledby="add-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="add-title">Nouveau membre</h3><small class="muted">Il reçoit ses identifiants par e-mail.</small></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
         </div>
-        <div style="margin-top:12px"><button class="btn" @onclick="Add">Ajouter</button></div>
+        <EditForm Model="this" OnSubmit="Add" class="modal-form">
+            <div class="modal-body">
+                <div class="form-grid">
+                    <div><label class="lbl">Nom</label><input class="full" @bind="name" /></div>
+                    <div><label class="lbl">E-mail</label><input class="full" type="email" @bind="email" autocomplete="off" /></div>
+                    <div>
+                        <label class="lbl">Mot de passe provisoire <small>(envoyé par e-mail, à changer à la 1re connexion)</small></label>
+                        <div class="row" style="gap:6px"><input class="full mono" @bind="pwd" autocomplete="off" spellcheck="false" /><button type="button" class="btn ghost" title="Générer un autre mot de passe" @onclick="() => pwd = Passwords.Generate()">Générer</button></div>
+                    </div>
+                </div>
+                @if (formError != null) { <div class="err">@formError</div> }
+            </div>
+            <div class="modal-foot">
+                <button type="button" class="btn ghost" @onclick="Close">Annuler</button>
+                <button type="submit" class="btn">Ajouter le membre</button>
+            </div>
+        </EditForm>
     </div>
 }
 
-<table class="tbl">
-    <thead><tr><th>Nom</th><th>E-mail</th><th>État</th><th></th></tr></thead>
-    <tbody>
-    @foreach (var u in users)
+<div class="adm-tabs" role="tablist" aria-label="État du membre">
+    <button type="button" class="@(state == "" ? "on" : "")" @onclick='() => state = ""'>Tous <b>@users.Count</b></button>
+    @foreach (var s in StateTabs)
     {
-        <tr>
-            <td><b>@u.Name</b></td><td>@u.Email</td>
-            <td><span class="pill @(u.Disabled ? "bad" : "ok")">@(u.Disabled ? "Désactivé" : "Actif")</span></td>
-            <td>@if (u.Id != Ctx.UserId) { <button class="btn ghost" @onclick="() => Toggle(u)">@(u.Disabled ? "Réactiver" : "Désactiver")</button> }</td>
+        var st = s;
+        <button type="button" class="@(state == st ? "on" : "")" @onclick="() => state = st">@st <b>@users.Count(u => StateOf(u) == st)</b></button>
+    }
+</div>
+
+<div class="adm-tools">
+    <div class="search-box">
+        <Ico Name="search" Size="16" />
+        <input placeholder="Rechercher un nom, une adresse e-mail…" aria-label="Rechercher" @bind="search" @bind:event="oninput" />
+    </div>
+</div>
+
+<div class="adm-card" style="padding:0;overflow:hidden">
+<div class="tbl-scroll">
+<table class="adm-tbl">
+    <thead><tr><th>Membre</th><th>Dernière activité</th><th>État</th><th></th></tr></thead>
+    <tbody>
+    @foreach (var u in Filtered)
+    {
+        var row = u;
+        <tr class="@(selId == u.Id ? "sel" : "")" @onclick="() => OpenRow(row)">
+            <td>
+                <div class="adm-who">
+                    <div class="adm-av" style="background:@AvatarColor(u.Label)">@Initials(u.Label)</div>
+                    <div><b>@u.Label</b>@if (u.Id == Ctx.UserId) { <span class="adm-plan" style="margin-left:6px">vous</span> }<small>@u.Email</small></div>
+                </div>
+            </td>
+            <td>@LastSeen(u)</td>
+            <td><span class="adm-st @StateCss(StateOf(u))">@StateOf(u)</span></td>
+            <td class="r"><Ico Name="chevron-right" Size="16" /></td>
         </tr>
     }
+    @if (!Filtered.Any()) { <tr><td colspan="4" style="text-align:center;color:var(--muted);padding:32px">Aucun membre ne correspond à ces critères.</td></tr> }
     </tbody>
 </table>
+</div>
+</div>
+<div class="adm-foot"><span>@Filtered.Count() membre@(Filtered.Count() > 1 ? "s" : "") affiché@(Filtered.Count() > 1 ? "s" : "")</span><span>Tous les membres ont les mêmes droits sur l'espace revendeur.</span></div>
+
+@if (Sel is { } u0)
+{
+    <div class="adm-veil" @onclick="CloseDrawer"></div>
+    <aside class="adm-drawer" role="dialog" aria-label="Fiche de @u0.Label">
+        <div class="dh">
+            <div class="top">
+                <div class="adm-av lg" style="background:@AvatarColor(u0.Label)">@Initials(u0.Label)</div>
+                <div class="grow"><h2>@u0.Label</h2><span class="adm-st @StateCss(StateOf(u0))">@StateOf(u0)</span></div>
+                <button type="button" class="btn ghost icon" aria-label="Fermer" @onclick="CloseDrawer"><Ico Name="x" Size="18" /></button>
+            </div>
+        </div>
+        <div class="db">
+            <div class="adm-sec">
+                <span class="lb">Informations</span>
+                <div class="adm-ln"><span>E-mail</span><span>@u0.Email</span></div>
+                <div class="adm-ln"><span>Rôle</span><span>Administrateur revendeur</span></div>
+                <div class="adm-ln"><span>Dernière activité</span><span>@LastSeen(u0)</span></div>
+                @if (u0.CreatedUtc is { } created) { <div class="adm-ln"><span>Ajouté le</span><span>@created.ToLocalTime().ToString("d MMM yyyy", Fr)</span></div> }
+            </div>
+
+            <div class="adm-sec">
+                <span class="lb">Accès</span>
+                @if (u0.Id == Ctx.UserId)
+                {
+                    <div class="adm-note">C'est votre compte : vous ne pouvez pas le désactiver vous-même.</div>
+                }
+                else
+                {
+                    <div class="adm-note">@(u0.Disabled ? "Ce compte ne peut plus se connecter à l'espace revendeur." : "Accès complet à l'espace revendeur.")</div>
+                    <div class="adm-acts">
+                        @if (u0.Disabled) { <button type="button" class="btn ok-o sm" @onclick="() => Toggle(u0)"><Ico Name="play" Size="15" /> Réactiver</button> }
+                        else { <button type="button" class="btn warn-o sm" @onclick="() => Toggle(u0)"><Ico Name="pause" Size="15" /> Désactiver</button> }
+                    </div>
+                }
+            </div>
+        </div>
+    </aside>
+}
 
 @code {
+    private static readonly System.Globalization.CultureInfo Fr = new("fr-CH");
+    private static readonly string[] StateTabs = { "Actif", "Invité", "Désactivé" };
+    private static readonly string[] Palette = { "#2F6FB5", "#1E8E5A", "#B7791F", "#7A5CC0", "#C0392B", "#2A8A99", "#5A6B80" };
+
     private List<User> users = new();
+    private string state = "", search = "";
+    private Guid? selId;
+    private User? Sel => selId is { } id ? users.FirstOrDefault(u => u.Id == id) : null;
+
     private bool showAdd;
     private string name = "", email = "", pwd = "";
+    private string? formError;
+
+    private static string StateOf(User u) => u.Disabled ? "Désactivé" : u.MustChangePassword && u.LastLoginUtc == null ? "Invité" : "Actif";
+    private static string StateCss(string s) => s switch { "Actif" => "ok", "Invité" => "warn", _ => "bad" };
+    private static string Initials(string n) => string.Concat(n.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => char.ToUpperInvariant(w[0])));
+    private static string AvatarColor(string n) => Palette[Math.Abs(n.Aggregate(0, (h, ch) => h * 31 + ch)) % Palette.Length];
+    private static string LastSeen(User u) => (u.LastActiveUtc ?? u.LastLoginUtc)?.ToLocalTime().ToString("d MMM yyyy HH:mm", Fr) ?? "jamais connecté";
+
+    private IEnumerable<User> Filtered => users.Where(u => (state == "" || StateOf(u) == state)
+        && (search.Trim() is not { Length: > 0 } q || u.Label.Contains(q, StringComparison.OrdinalIgnoreCase) || u.Email.Contains(q, StringComparison.OrdinalIgnoreCase)));
 
     protected override void OnInitialized() { Load(); pwd = Passwords.Generate(); }
 
     private void Load()
     {
         var rid = Ctx.RequireResellerId();
-        users = Root.Read(d => d.Users.Where(u => u.ResellerId == rid && u.Role == Roles.ResellerAdmin).OrderBy(u => u.Name).ToList());
+        users = Root.Read(d => d.Users.Where(u => u.ResellerId == rid && u.ClientId == null && u.Role == Roles.ResellerAdmin).OrderBy(u => u.Name).ToList());
     }
+
+    private void OpenRow(User u) => selId = u.Id;
+    private void CloseDrawer() => selId = null;
+
+    private void Open() { formError = null; pwd = Passwords.Generate(); showAdd = true; }
+    private void Close() => showAdd = false;
 
     // Le membre reçoit un mot de passe provisoire par e-mail ; il devra le changer à la première connexion.
     private async Task Add()
     {
+        formError = null;
         var rid = Ctx.RequireResellerId();
         var mail = email.Trim().ToLowerInvariant();
-        if (mail.Length == 0 || pwd.Length < 8) { Toast.Error("E-mail et mot de passe (8 caractères minimum) obligatoires."); return; }
+        if (mail.Length == 0 || pwd.Length < 8) { formError = "E-mail et mot de passe (8 caractères minimum) obligatoires."; return; }
         Reseller? reseller = null;
         var err = Root.Write(d =>
         {
@@ -72,7 +177,7 @@
             reseller = d.Resellers.First(r => r.Id == rid);
             return null;
         });
-        if (err != null) { Toast.Error(err); return; }
+        if (err != null) { formError = err; return; }
         var (person, temp) = (name, pwd);
         name = email = ""; pwd = Passwords.Generate(); showAdd = false; Load();
         var mailErr = await Mail.SendWelcome(reseller!, Resolver.LoginUrl(reseller!, Nav.BaseUri), $"Vous avez été ajouté à l'équipe de l'espace revendeur « {reseller!.DisplayName} ».", person, mail, temp);
@@ -83,7 +188,8 @@
     private void Toggle(User u)
     {
         var rid = Ctx.RequireResellerId();
-        Root.Write(d => { var x = d.Users.First(y => y.Id == u.Id && y.ResellerId == rid && y.Id != Ctx.UserId); x.Disabled = !x.Disabled; });
+        var disabled = Root.Write(d => { var x = d.Users.First(y => y.Id == u.Id && y.ResellerId == rid && y.Id != Ctx.UserId); x.Disabled = !x.Disabled; return x.Disabled; });
         Load();
+        Toast.Ok(disabled ? $"« {u.Label} » est désactivé." : $"« {u.Label} » est de nouveau actif.");
     }
 }

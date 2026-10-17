@@ -76,7 +76,7 @@ public static class PlayerFeed
             ["layout"] = new { id = lay.Id, dir = s.Orientation == "portrait" ? "col" : "row", sizes = lay.Sizes },
             ["zones"] = (s.PublishedVersion > 0 ? s.PublishedZones : new List<List<PublishedItem>>()).Select(z => Sync(z).Select(i => i.ForPlayer())),
             ["screen"] = new { orientation = s.Orientation, resolution = s.Resolution, mirrorH = mirror.H, mirrorV = mirror.V },
-            ["settings"] = new { timezone = t.Timezone, reloadHour = t.ReloadHour },
+            ["settings"] = new { timezone = t.Timezone, reloadHour = t.ReloadHour, techPin = TechPin.ForPlayer(t) },
             ["schedule"] = Planning.ForPlayer(t, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, Sync),   // créneaux du planning de diffusion (null : aucun)
             ["sleep"] = Sleep.ForPlayer(t, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, wall != null),   // plages de mise en veille (null : aucune)
             ["dim"] = Dim.ForPlayer(t, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, wall != null),   // luminosité et contraste selon l'heure (null : aucun réglage)

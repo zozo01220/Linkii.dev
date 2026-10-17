@@ -11,9 +11,9 @@ Visuel validé : `maquettes/player-android.html`.
 JDK 17 ou plus (celui d'Android Studio convient), SDK Android 35.
 
 ```bash
-cd Linkii.Android
-./gradlew :app:assembleDebug          # app/build/outputs/apk/debug/app-debug.apk
-./gradlew :app:bundleRelease          # app/build/outputs/bundle/release/app-release.aab (Google Play)
+cd Linkii.AndroidPlayer
+./gradlew :app:assembleDebug          # app/build/outputs/apk/debug/linkii-player-debug.apk
+./gradlew :app:bundleRelease          # app/build/outputs/bundle/release/linkii-player-release.aab (Google Play)
 ```
 
 Adresse du serveur par défaut : `-PserverUrl=https://app.exemple.ch` (modifiable ensuite sur l'appareil).
@@ -27,7 +27,7 @@ Le player (`wwwroot/player`) est servi par le serveur : un changement de `player
 
 1. Compiler avec un JDK 17 ou plus (le JDK par défaut de la machine de développement est le 11) :
    ```bash
-   cd Linkii.Android
+   cd Linkii.AndroidPlayer
    JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" ./gradlew :app:assembleDebug
    ```
 2. Sur l'appareil : Paramètres › Système › À propos, 7 appuis sur « Version » ; puis Options pour les développeurs › débogage ADB / réseau (redémarrer l'appareil si besoin).
@@ -36,7 +36,7 @@ Le player (`wwwroot/player`) est servi par le serveur : un changement de `player
    $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
    & $adb connect 192.168.x.x:5555        # accepter « Autoriser le débogage ? » sur l'appareil
    & $adb devices                         # doit afficher « device » (pas « unauthorized »)
-   & $adb install -r app\build\outputs\apk\debug\app-debug.apk
+   & $adb install -r app\build\outputs\apk\debug\linkii-player-debug.apk
    ```
    `-r` garde l'appairage, les réglages et les médias déjà téléchargés. Erreurs : `INSTALL_FAILED_UPDATE_INCOMPATIBLE` (autre signature : désinstaller d'abord, l'appairage est perdu), `INSTALL_FAILED_VERSION_DOWNGRADE` (ajouter `-d`), `no devices/emulators found` (`connect` pas fait ou ADB réseau inactif).
 4. Contrôler : republier l'écran, puis menu technicien (« dont images… vidéos… »), puis couper le réseau.
@@ -53,6 +53,10 @@ Le player (`wwwroot/player`) est servi par le serveur : un changement de `player
 
 Cinq appuis sur OK (télécommande) ou cinq touchers dans le coin supérieur droit, en moins de 3 secondes.
 Code PIN par défaut : 9999 (modifiable depuis le menu ; vide = menu sans code).
+
+Depuis la version 1.3.0, l'organisation peut imposer son code à tous ses écrans (Réglages › Contenus et écrans › Menu technicien). Le player le confie à l'app
+(`LinkiiNative.techPin`), qui le garde pour fonctionner hors ligne. Ordre : code propre à l'appareil si l'organisation l'autorise et qu'il en a défini un, sinon code de
+l'organisation, sinon code de l'appareil (9999). L'app renvoie une empreinte du code reçu (`pinSig`) : Réglages indique combien d'écrans l'ont appliqué.
 
 ## Médias hors ligne
 

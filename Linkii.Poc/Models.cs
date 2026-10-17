@@ -11,6 +11,7 @@ public class Db
     public List<Playlist> Playlists { get; set; } = new();
     public List<AccessLogEntry> AccessLog { get; set; } = new();
     public List<AppInstall> AppInstalls { get; set; } = new();   // apps du catalogue ajoutées par chaque client
+    public List<PushDevice> PushDevices { get; set; } = new();   // appareils qui reçoivent les notifications (voir <see cref="PushService"/>)
     public List<Area> Areas { get; set; } = new();               // aires de gestion des clients
     public List<MediaFolder> MediaFolders { get; set; } = new();  // dossiers de la médiathèque (voir <see cref="MediaFolder"/>)
     public List<PlaylistFolder> PlaylistFolders { get; set; } = new();  // dossiers des listes de lecture (voir <see cref="PlaylistFolder"/>)
@@ -46,6 +47,8 @@ public class PlatformSettings
     public int AnnualDiscountPct { get; set; } = 15;
     /// <summary>Commission (en %) d'un revendeur sur le net payé par ses clients, tant qu'aucun taux particulier ne lui est donné.</summary>
     public int DefaultCommissionPct { get; set; } = 20;
+    /// <summary>Migration faite : le taux est la commission de Linkii, le revendeur touche le reste.</summary>
+    public int ResellerShareVersion { get; set; }
     /// <summary>Frais de paiement estimés (Stripe) : pourcentage + montant fixe par paiement. La commission se calcule sur le net, après frais.</summary>
     public decimal StripeFeePct { get; set; } = 2.9m;
     public decimal StripeFeeFixed { get; set; } = 0.30m;
@@ -156,6 +159,8 @@ public class User
     public Guid? ResellerId { get; set; }   // null pour l'équipe Linkii
     public Guid? ClientId { get; set; }     // seulement pour un compte d'organisation (administrateur ou membre)
     public bool Disabled { get; set; }
+    /// <summary>Catégories de notification coupées par cette personne (voir <see cref="PushCategories"/>).</summary>
+    public List<string> PushMuted { get; set; } = new();
     /// <summary>Mot de passe provisoire (envoyé par e-mail) : à remplacer à la prochaine connexion.</summary>
     public bool MustChangePassword { get; set; }
 
@@ -322,6 +327,13 @@ public class Tenant
     public bool SleepEnabled { get; set; }
     /// <summary>Fonction avancée « Luminosité et contraste » activée dans Réglages (voir <see cref="Dim"/>).</summary>
     public bool DimEnabled { get; set; }
+
+    // Menu technicien de l'app Android (voir TechPin)
+    public bool TechPinOn { get; set; } = true;       // false : menu sans code
+    public string TechPin { get; set; } = "";         // vide : non défini, les appareils gardent leur code
+    public bool TechPinLocal { get; set; }            // un appareil peut définir son propre code, qui remplace celui-ci
+    public DateTime? TechPinUtc { get; set; }
+    public string TechPinBy { get; set; } = "";
 
     /// <summary>Licence de l'organisation (voir <see cref="Plans"/>) : Growth ajoute le contrôle du direct, la supervision et les murs d'écrans.</summary>
     public string Plan { get; set; } = Plans.Base;
@@ -546,6 +558,7 @@ public class Screen : IClientOwned, IAreaOwned
     public string? DeviceModel { get; set; }
     public string? DeviceApp { get; set; }         // version de l'application Linkii Player
     public DateTime? DeviceBootUtc { get; set; }   // dernier démarrage de l'appareil
+    public string? DevicePinSig { get; set; }      // empreinte du code technicien reçu de l'organisation (voir TechPin.Sig)
 
     // Contrôle du direct (licence Growth)
     public DateTime? PausedUtc { get; set; }       // pause en cours depuis…
@@ -998,7 +1011,7 @@ public static class Helpers
 
     /// <summary>Identifie ce que l'écran doit afficher : playlist publiée + configuration (format, fuseau, redémarrage).</summary>
     public static string Revision(Playlist? p, Screen s, Tenant t, Reseller? r, string sync = "") =>
-        $"{(s.PublishedVersion > 0 ? "s" + s.PublishedVersion : p == null ? "none" : p.Id.ToString("N") + ":" + p.PublishedVersion)}|{s.Orientation}|{s.Resolution}|{t.Timezone}|{t.ReloadHour}|{r?.BrandStamp}{(t.SleepEnabled ? "|sl" : "")}{(t.DimEnabled ? "|dm" : "")}{sync}";
+        $"{(s.PublishedVersion > 0 ? "s" + s.PublishedVersion : p == null ? "none" : p.Id.ToString("N") + ":" + p.PublishedVersion)}|{s.Orientation}|{s.Resolution}|{t.Timezone}|{t.ReloadHour}|{r?.BrandStamp}{(t.SleepEnabled ? "|sl" : "")}{(t.DimEnabled ? "|dm" : "")}|tp{TechPin.Stamp(t)}{sync}";
 
     public static string Status(Screen s, Playlist? p, Tenant t, Reseller? r, string sync = "")
     {
