@@ -40,7 +40,7 @@
             <button class="btn ghost sm" @onclick="() => sharingId = here.Folder.Id"><Ico Name="users" Size="14" /> Partager…</button>
         }
         @if (FoldersShown && CanCreateHere) { <button class="btn ghost" @onclick='() => { newFolderName = ""; newFolderError = null; creatingFolder = true; }'><Ico Name="folder" Size="16" /> Nouveau dossier</button> }
-        @if (CanUploadHere) { <button class="btn" @onclick="OpenImport"><Ico Name="upload" Size="16" /> Importer</button> }
+        @if (CanUploadHere) { <button class="btn lx-imp" @onclick="OpenImport"><Ico Name="upload" Size="16" /> Importer</button> }
     </div>
 </div>
 
@@ -94,7 +94,7 @@ else
             <option value="name">Nom</option>
             <option value="size">Taille</option>
         </select>
-        <ViewToggle StorageKey="media" @bind-Value="view" />
+        <ViewToggle StorageKey="media" Photos="true" @bind-Value="view" />
     </div>
     <FilterChips Groups="FilterGroups" Extra="FilterExtras" OnClear="ClearFilter" OnResetAll="ResetFilters" />
 
@@ -192,6 +192,64 @@ else
             </table>
         </div>
         }
+        @if (view == "photos")
+        {
+            @* Vue « photos » : mosaïque serrée groupée par jour d'import ; pastille ronde pour sélectionner (appui long dans l'app) ; état d'usage en simple point. *@
+            <div class="ph @(picked.Count > 0 ? "ph-selecting" : "")">
+                @if (Jobs.Count > 0)
+                {
+                    <div class="ph-day"><span>Envoi en cours <small>@Jobs.Count</small></span></div>
+                    <div class="ph-grid">
+                        @foreach (var j in Jobs)
+                        {
+                            var job = j;
+                            var failed = job.State == "error";
+                            <div class="ph-t up @(failed ? "fail" : "")" title="@job.Name">
+                                @if (failed) { <span class="ph-msg"><Ico Name="x" Size="18" />@(job.Error ?? "Échec")</span> }
+                                else { <span class="ph-msg">@(job.Total is > 0 ? $"{MediaUploader.Pct(job)} %" : "Envoi…")</span><span class="ph-bar" style="width:@(MediaUploader.Pct(job))%"></span> }
+                                <button type="button" class="ph-x" aria-label="@(failed ? "Retirer" : "Annuler l'import de") @job.Name" @onclick="() => DismissJob(job)"><Ico Name="x" Size="14" /></button>
+                            </div>
+                        }
+                    </div>
+                }
+                @foreach (var g in PhotoGroups)
+                {
+                    var grp = g;
+                    var selectable = grp.Items.Where(Selectable).ToList();
+                    var allIn = selectable.Count > 0 && selectable.All(x => picked.Contains(x.Id));
+                    @if (grp.Label != null)
+                    {
+                        <div class="ph-day">
+                            @if (selectable.Count > 0) { <button type="button" class="ph-dayck @(allIn ? "on" : "")" aria-label="Sélectionner tout « @grp.Label »" aria-pressed="@(allIn ? "true" : "false")" @onclick="() => ToggleGroup(selectable)"><Ico Name="check" Size="13" /></button> }
+                            <span>@grp.Label <small>@grp.Items.Count</small></span>
+                        </div>
+                    }
+                    <div class="ph-grid">
+                        @foreach (var m in grp.Items)
+                        {
+                            var item = m;
+                            var failed = item.Status == "failed";
+                            <div class="ph-t @(picked.Contains(item.Id) ? "picked" : "") @(failed ? "fail" : "") @(dragIds.Contains(item.Id) ? "dragging" : "")" style="--r:@PhotoRatio(item)"
+                                 role="button" tabindex="0" title="@item.Name" aria-label="Aperçu de @item.Name" @onclick="e => ClickCard(item, e)" @onkeydown='e => { if (e.Key == "Enter") Open(item); }'
+                                 @oncontextmenu="() => LongPress(item)" @oncontextmenu:preventDefault="inApp"
+                                 draggable="@(CanDrag(item) ? "true" : "false")" @ondragstart="() => StartDrag(item)" @ondragend="EndDrag">
+                                @if (item.Status == "processing") { <span class="ph-msg"><span class="spinner-lg"></span>Conversion…</span> }
+                                else if (failed) { <span class="ph-msg"><Ico Name="x" Size="18" />@(item.Error ?? "Import en échec")</span> }
+                                else { <MediaThumb Media="item" /> }
+                                @if (Selectable(item)) { <input type="checkbox" class="sc-check lx-check" checked="@picked.Contains(item.Id)" @onclick:stopPropagation="true" @onchange="() => Toggle(item.Id)" aria-label="Sélectionner @item.Name" /> }
+                                @if (!failed && item.Status == null)
+                                {
+                                    @if (item.Type == "video") { <span class="ph-dur"><Ico Name="play" Size="10" />@(Seconds(item) is { } sec ? Helpers.FormatDuration(sec) : "")</span> }
+                                    <span class="ph-use @(unused.Contains(item.Id) ? "no" : "")" title="@(unused.Contains(item.Id) ? "Non utilisé" : "Utilisé dans une liste")"></span>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
         @* sur mobile, toujours en cartes (pas de bascule) *@
         <div class="lx-mgrid @(picked.Count > 0 ? "lx-selecting" : "") @(view == "list" ? "lx-mobile-only" : "")">
             @foreach (var j in Jobs)
@@ -240,6 +298,12 @@ else
                 </div>
             }
         </div>
+        }
+    }
+
+    @if (CanUploadHere && picked.Count == 0)
+    {
+        <button type="button" class="ph-fab" aria-label="Importer des médias" @onclick="OpenImport"><Ico Name="upload" Size="24" /></button>
     }
 
     @if (picked.Count > 0)
@@ -400,6 +464,7 @@ else
     private string type = "", filter = "", source = "", search = "", sort = "date";   // filter : "" | unused
     private bool scopeAll = true;              // recherche et « Non utilisés » : toute l'aire (défaut) ou le dossier ouvert
     private bool showUpload, dragging;
+    private bool inApp;   // look « app » : appui long = sélection
     private string view = "cards";   // cards | list (liste : PC seulement ; sur mobile, toujours en cartes)
     private Guid? menuFor, openId;
     private MediaItem? renaming;
@@ -700,6 +765,31 @@ else
         else Open(m);
     }
 
+    private void LongPress(MediaItem m) { if (inApp && Selectable(m)) Toggle(m.Id); }
+    private void ToggleGroup(List<MediaItem> items)
+    {
+        if (items.All(x => picked.Contains(x.Id))) foreach (var x in items) picked.Remove(x.Id);
+        else foreach (var x in items) picked.Add(x.Id);
+    }
+
+    // Vue photos : groupes par jour d'import (tri « récents »), sinon une seule suite sans en-tête
+    private static readonly System.Globalization.CultureInfo Fr = new("fr-FR");
+    private IEnumerable<(string? Label, List<MediaItem> Items)> PhotoGroups
+    {
+        get
+        {
+            if (sort != "date") { yield return (null, Visible.ToList()); yield break; }
+            var today = DateTime.Now.Date;
+            foreach (var g in Visible.GroupBy(m => m.AddedUtc is { } a ? a.ToLocalTime().Date : (DateTime?)null))
+            {
+                var label = g.Key is not { } d ? "Plus ancien" : d == today ? "Aujourd'hui" : d == today.AddDays(-1) ? "Hier" : Fr.TextInfo.ToTitleCase(d.ToString(d.Year == today.Year ? "dddd d MMMM" : "d MMMM yyyy", Fr));
+                yield return (label, g.ToList());
+            }
+        }
+    }
+    private static string PhotoRatio(MediaItem m) =>
+        (m.Width is > 0 && m.Height is > 0 ? Math.Clamp(m.Width.Value / (double)m.Height.Value, 0.55, 2.2) : 1.5).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
     private void Open(MediaItem m) { menuFor = null; openId = m.Id; }
 
     [JSInvokable]
@@ -783,6 +873,7 @@ else
     {
         if (!firstRender) return;
         selfRef = DotNetObjectReference.Create(this);
+        try { inApp = await JS.InvokeAsync<bool>("linkiiPrefs.isApp"); } catch (JSException) { } catch (InvalidOperationException) { }
         try { await JS.InvokeVoidAsync("linkiiLibrary.attach", selfRef, CanUploadHere); } catch (JSException) { } catch (InvalidOperationException) { }
     }
 

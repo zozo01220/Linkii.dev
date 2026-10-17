@@ -4,6 +4,7 @@
   'use strict';
   w.linkiiPrefs = {
     get: function (k) { try { return w.localStorage.getItem('lk_pref_' + k); } catch (e) { return null; } },
+    isApp: function () { return !!(w.document.body && w.document.body.classList.contains('is-app')); },
     set: function (k, v) { try { w.localStorage.setItem('lk_pref_' + k, v); } catch (e) {} }
   };
 })(window);
