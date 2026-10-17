@@ -298,8 +298,8 @@ public class Tenant
     public string BlockedReason { get; set; } = "";
     /// <summary>Niveaux de droits créés par les administrateurs de l'organisation (voir <see cref="AccessLevel"/>).</summary>
     public List<AccessLevel> Levels { get; set; } = new();
-    /// <summary>Option « Dossiers dans la médiathèque » (Réglages › Médiathèque, éteinte par défaut) : dossiers, partages et écran des niveaux.</summary>
-    public bool FoldersOn { get; set; }
+    /// <summary>Dossiers de la médiathèque et des listes : toujours actifs (l'option des Réglages a été retirée le 17 octobre 2026). Les anciennes valeurs enregistrées sont ignorées.</summary>
+    public bool FoldersOn { get => true; set { } }
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 
     /// <summary>Voir <see cref="SignupSources"/> ; null pour une organisation créée avant le 9 octobre 2026.</summary>

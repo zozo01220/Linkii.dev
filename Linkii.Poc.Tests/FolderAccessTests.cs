@@ -176,13 +176,6 @@ public class FolderAccessTests
         Assert.NotNull(FolderOps.Create(As(alice), "soldes", null).Error);
     }
 
-    [Fact]
-    public void Nothing_can_be_created_while_the_option_is_off()
-    {
-        client.FoldersOn = false;
-        Assert.NotNull(FolderOps.Create(As(alice), "Refusé", null).Error);
-    }
-
     // ---------- Partage ----------
 
     [Fact]
