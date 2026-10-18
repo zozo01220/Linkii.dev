@@ -256,7 +256,7 @@
             var gdl = Store.Read(d => d.Delivery(gs));
             var gsl = Sleep.State(tenant, area, gs, false, gnow);   // en veille : écran éteint, il ne dialogue plus
             var gcls = gsl.Asleep ? "sleep" : gpaused ? "warn" : gst == "En ligne" ? "ok" : gst == "Mise à jour" ? "warn" : "bad";
-            <div class="pl-card gc @(selectedIds.Contains(gs.Id) ? "picked" : "") @(gonline || gsl.Asleep ? "" : "is-off") @(gpaused ? "is-paused" : "")">
+            <div class="pl-card gc @(selectedIds.Contains(gs.Id) ? "picked" : "") @(gonline || gsl.Asleep ? "" : "is-off") @(gonline && !gpaused && !gsl.Asleep ? "is-on" : "") @(gpaused ? "is-paused" : "")">
                 <div class="gc-top">
                     <div class="gc-stage">
                         <div class="gc-mon @(gs.Orientation == "portrait" ? "portrait" : "")">
@@ -284,7 +284,7 @@
                             }
                         </div>
                         <button type="button" class="gc-hit" tabindex="-1" aria-hidden="true" @onclick="() => Edit(gs)"></button>
-                        <span class="gc-pill" title="@(gsl.Asleep ? "Mise en veille : l'écran est éteint" : gst)"><span class="gc-d @gcls"></span>@(gsl.Asleep ? "En veille" + (gsl.Wake is { } wake ? " · réveil " + wake : "") : gpaused ? "En pause" + (gs.PausedUntilUtc is { } pu ? " · reprise " + LocalTime(pu) : "") : gst)</span>
+                        <span class="gc-pill @(!gonline && !gsl.Asleep && !gpaused ? "off" : "")" title="@(gsl.Asleep ? "Mise en veille : l'écran est éteint" : gst)"><span class="gc-d @gcls"></span>@(gsl.Asleep ? "En veille" + (gsl.Wake is { } wake ? " · réveil " + wake : "") : gpaused ? "En pause" + (gs.PausedUntilUtc is { } pu ? " · reprise " + LocalTime(pu) : "") : !gonline ? OfflineSince(gs, gnow) : gst)</span>
                         @if (gpending || gdl != null)
                         {
                             <span class="gc-pills-r">
@@ -885,6 +885,14 @@ else if (wallEdit is { } wid)
         try { utc = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), TimeZoneInfo.FindSystemTimeZoneById(tenant.Timezone)); }
         catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException) { }
         return utc.ToString("HH:mm");
+    }
+
+    // Libellé du bandeau d'un écran hors ligne : « Hors ligne depuis 3 h » (ou « Jamais connecté »)
+    private static string OfflineSince(Screen s, DateTime now)
+    {
+        if (s.LastSeenUtc is not { } seen) return "Jamais connecté";
+        var d = now - seen;
+        return "Hors ligne depuis " + (d.TotalMinutes < 60 ? $"{Math.Max(1, (int)d.TotalMinutes)} min" : d.TotalHours < 24 ? $"{(int)d.TotalHours} h" : $"{(int)d.TotalDays} j");
     }
 
     // Premier contenu plein écran d'une liste de lecture : vignette de sa zone sur la carte.

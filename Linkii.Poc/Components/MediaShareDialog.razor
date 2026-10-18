@@ -1,0 +1,70 @@
+@* Partager un ou plusieurs médias avec des membres : lecture seule, à la racine de leur médiathèque. Pas de droit à choisir, seulement les personnes. *@
+@inject MediaLibrary Library
+@inject Toaster Toast
+
+<div class="modal-backdrop" @onclick="Close"></div>
+<div class="modal app-modal sh-modal" role="dialog" aria-modal="true" aria-labelledby="ms-title">
+    <div class="modal-head">
+        <h3 id="ms-title">Partager @(Names.Count == 1 ? $"« {Names[0]} »" : $"{Names.Count} médias")</h3>
+        <span class="grow"></span>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="modal-body sh-body">
+        <div class="sh-add">
+            <Ico Name="search" Size="16" />
+            <input type="text" autocomplete="off" placeholder="Nom d'un membre" aria-label="Chercher un membre" @bind="query" @bind:event="oninput" />
+        </div>
+        <div class="sh-list lx-msl">
+            @foreach (var c in Candidates.Where(Match))
+            {
+                var cand = c;
+                var on = chosen.Contains(cand.Id);
+                <button type="button" class="sh-row lx-msr @(on ? "on" : "")" disabled="@(cand.Reason != null)" aria-pressed="@(on ? "true" : "false")" @onclick="() => Toggle(cand.Id)">
+                    <span class="sh-av">@Initials(cand.Label)</span>
+                    <span class="grow"><b>@cand.Label</b><small>@(cand.Reason ?? cand.Detail)</small></span>
+                    @if (on) { <span class="lx-chip"><Ico Name="check" Size="12" /> Choisi</span> }
+                </button>
+            }
+            @if (!Candidates.Any(Match)) { <p class="sh-empty">Aucun membre à qui partager.</p> }
+        </div>
+        <p class="lx-msnote"><Ico Name="eye" Size="14" /> La personne verra ce média en lecture seule, à la racine de sa médiathèque. Elle pourra l'utiliser dans ses listes, mais ni le modifier ni le supprimer, et peut ne plus le voir quand elle veut.</p>
+        @if (error != null) { <div class="err">@error</div> }
+    </div>
+    <div class="modal-actions">
+        <button class="btn ghost" @onclick="Close">Annuler</button>
+        <button class="btn" disabled="@(chosen.Count == 0)" @onclick="Send"><Ico Name="share" Size="15" /> Partager@(chosen.Count > 0 ? $" avec {chosen.Count} personne{(chosen.Count > 1 ? "s" : "")}" : "")</button>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public List<(Guid Id, string Name)> Media { get; set; } = new();
+    [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>Appelé après un partage réussi (la page recharge ses listes).</summary>
+    [Parameter] public EventCallback OnShared { get; set; }
+
+    private List<ShareCandidate> Candidates = new();
+    private readonly HashSet<Guid> chosen = new();
+    private string query = "";
+    private string? error;
+    private List<string> Names => Media.Select(m => m.Name).ToList();
+
+    protected override void OnInitialized() => Candidates = Library.ShareCandidates(Media.Select(m => m.Id).ToList());
+
+    private bool Match(ShareCandidate c) => query.Length == 0 || c.Label.Contains(query, StringComparison.CurrentCultureIgnoreCase);
+    private void Toggle(Guid id) { if (!chosen.Remove(id)) chosen.Add(id); }
+    private static string Initials(string label) => string.Concat(label.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpperInvariant(p[0])));
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task Send()
+    {
+        var ids = Media.Select(m => m.Id).ToList();
+        foreach (var to in chosen)
+        {
+            var (_, err) = Library.Share(ids, to);
+            if (err != null) { error = err; return; }
+        }
+        Toast.Ok(chosen.Count == 1 ? "Média partagé en lecture seule." : $"Partagé avec {chosen.Count} personnes, en lecture seule.");
+        await OnShared.InvokeAsync();
+        await OnClose.InvokeAsync();
+    }
+}

@@ -312,7 +312,12 @@ public static class FolderOps
         return (moved, refused);
     }
 
-    /// <summary>Un fichier qu'on peut retirer ou renommer : à la racine (comme avant), ou dans un dossier où l'on écrit.</summary>
+    /// <summary>
+    /// Un fichier qu'on peut retirer ou renommer : à la racine (comme avant), ou dans un dossier où l'on écrit.
+    /// Avec les dossiers activés, la racine d'un membre n'est que ses propres fichiers et ceux qu'on lui a partagés (lecture seule) : il ne modifie pas ces derniers.
+    /// </summary>
     public static bool CanEditFile(ClientDb d, MediaItem m) =>
-        m.FolderId is not { } fid ? d.Access.CanWrite(LevelPages.Media) : Find(d, fid) is { } f && RightOf(d, f) >= FolderRight.Write;   // hors dossier : selon l'accès à la médiathèque
+        m.FolderId is not { } fid
+            ? d.Access.CanWrite(LevelPages.Media) && (!d.Tenant.FoldersOn || d.Access.IsOrgAdmin || m.OwnerId == null || m.OwnerId == d.Access.UserId)
+            : Find(d, fid) is { } f && RightOf(d, f) >= FolderRight.Write;   // hors dossier : selon l'accès à la médiathèque
 }

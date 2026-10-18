@@ -90,34 +90,13 @@
 }
 else
 {
-    <div class="lx-tools" role="region" aria-label="Recherche et filtres">
-        <div class="search-box">
-            <Ico Name="search" Size="16" />
-            <input data-lx-search placeholder="@(foldersOn ? "Rechercher dans toutes les listes" : "Rechercher des listes de lecture")" aria-label="Rechercher des listes de lecture" @bind="search" @bind:event="oninput" />
-        </div>
-        @if (Active) { <span class="lx-count" aria-live="polite">@Plural(Sorted.Count(), "résultat", "résultats")</span> }
-        <FilterMenu Groups="FilterGroups" Extra="@(foldersOn && folderId != null && !scopeAll ? 1 : 0)" OnPick="PickFilter" OnReset="ResetFilters">
-            <Footer>
-                @if (foldersOn && folderId != null)
-                {
-                    <div class="fm-note"><span>Chercher dans : @(scopeAll ? "toute l'aire" : "ce dossier")</span><button type="button" class="linklike" @onclick="() => scopeAll = !scopeAll">Changer</button></div>
-                }
-            </Footer>
-        </FilterMenu>
-        <select @bind="sort" class="tb-sort" aria-label="Trier">
-            <option value="recent">Récentes</option>
-            <option value="name">Nom</option>
-            <option value="used">Plus utilisées</option>
-        </select>
-        <ViewToggle StorageKey="playlists" @bind-Value="view" />
-    </div>
-    <FilterChips Groups="FilterGroups" Extra="FilterExtras" OnClear="ClearFilter" OnResetAll="ResetFilters" />
-
+    <section class="lx-blk lx-blk-folders" aria-label="Dossiers">
+        <div class="lx-bh"><Ico Name="folder" Size="16" /> <span>Dossiers</span> <small>@subfolders.Count</small></div>
     @* Dossiers de la position ouverte : puces compactes, cibles du glisser-déposer *@
     @* Look « app » : bande de cartes de dossiers qui défile (aperçu, badge de partage) ; appui long = menu. Masquée ailleurs par le CSS. *@
     @if (subfolders.Count > 0 || (foldersOn && CanCreateFolderHere))
     {
-        <div class="lx-fstrip" role="list" aria-label="Dossiers">
+        <div class="lx-fstrip lx-fgrid" role="list" aria-label="Dossiers">
             @foreach (var row in subfolders)
             {
                 var r = row;
@@ -125,8 +104,9 @@ else
                 var aud = AudienceOf(r.Folder.Id);
                 var preview = FolderPreview(r.Folder.Id);
                 var canMenu = mine || isAdmin;
-                <div class="lx-fcard" role="listitem" tabindex="0" title="@FolderTitle(r)" aria-label="Ouvrir le dossier @r.Folder.Name"
+                <div class="lx-fcard @(dropOver == r.Folder.Id ? "drop-target" : "")" role="listitem" tabindex="0" title="@FolderTitle(r)" aria-label="Ouvrir le dossier @r.Folder.Name"
                      @onclick="() => OpenFolder(r.Folder.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenFolder(r.Folder.Id); }'
+                     @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = r.Folder.Id; }" @ondragleave="() => { if (dropOver == r.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(r.Folder.Id)"
                      @oncontextmenu="() => { if (canMenu) menuFor = r.Folder.Id; }" @oncontextmenu:preventDefault="inApp && canMenu">
                     <div class="fp @(preview.Count == 0 ? "none" : "")">
                         @foreach (var pm in preview) { <span class="fpi"><MediaThumb Media="pm" All="media" /></span> }
@@ -137,6 +117,11 @@ else
                         else { <span class="fbadge pv"><Ico Name="lock" Size="11" /> Privé</span> }
                     </div>
                     <div class="fn"><span>@r.Folder.Name</span><small>@ChildCount(r.Folder.Id)</small></div>
+                    @if (canMenu)
+                    {
+                        <button type="button" class="fk" aria-label="Actions pour le dossier @r.Folder.Name" aria-haspopup="menu" aria-expanded="@(menuFor == r.Folder.Id ? "true" : "false")"
+                                @onclick:stopPropagation="true" @onclick="() => menuFor = menuFor == r.Folder.Id ? null : r.Folder.Id"><Ico Name="dots-v" Size="16" /></button>
+                    }
                     @if (menuFor == r.Folder.Id)
                     {
                         <div class="kebab-backdrop" @onclick:stopPropagation="true" @onclick="() => menuFor = null"></div>
@@ -161,46 +146,31 @@ else
             }
         </div>
     }
-    @if (subfolders.Count > 0)
-    {
-        @* Liste classique des dossiers (PC) ; le bouton de repli est masqué partout. *@
-        <button type="button" class="lx-fold-toggle @(foldersOpen ? "open" : "")" aria-expanded="@(foldersOpen ? "true" : "false")" @onclick="() => foldersOpen = !foldersOpen"><Ico Name="folder" Size="16" /> <span>Dossiers</span> <small>@subfolders.Count</small><Ico Name="chevron" Size="16" /></button>
-        <div class="lx-folders @(foldersOpen ? "open" : "")">
-            @foreach (var row in subfolders)
-            {
-                var r = row;
-                var inside = ChildCount(r.Folder.Id);
-                var mine = r.Folder.OwnerId == Store.UserId;
-                <div class="lx-fchip @(r.Shared ? "" : "priv") @(dropOver == r.Folder.Id ? "drop-target" : "")" role="button" tabindex="0" title="@FolderTitle(r)" aria-label="Ouvrir le dossier @r.Folder.Name" @onclick="() => OpenFolder(r.Folder.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenFolder(r.Folder.Id); }'
-                     @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = r.Folder.Id; }" @ondragleave="() => { if (dropOver == r.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(r.Folder.Id)">
-                    <Ico Name="folder" Size="17" />
-                    <span class="nm">@r.Folder.Name</span>
-                    <small>@inside</small>
-                    <SharePill Audience="AudienceOf(r.Folder.Id)" Clickable="mine || isAdmin" ReadOnly="r.Right == FolderRight.Read" OwnerName="@(mine ? null : r.OwnerName)" OnClick="() => sharingId = r.Folder.Id" />
-                    @if (mine || isAdmin)
-                    {
-                        <div class="kebab" @onclick:stopPropagation="true">
-                            <button type="button" class="kebab-btn" aria-label="Actions pour le dossier @r.Folder.Name" aria-haspopup="menu" aria-expanded="@(menuFor == r.Folder.Id ? "true" : "false")"
-                                    @onclick="() => menuFor = menuFor == r.Folder.Id ? null : r.Folder.Id"><Ico Name="dots-v" Size="16" /></button>
-                            @if (menuFor == r.Folder.Id)
-                            {
-                                <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
-                                <div class="kebab-menu" role="menu">
-                                    <span class="kebab-note">@(mine ? "Votre dossier" : $"Dossier de {r.OwnerName}") · @(r.Shared ? "partagé" : "privé")</span>
-                                    <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingId = r.Folder.Id; }"><Ico Name="users" Size="16" /> Partager…</button>
-                                    @if (r.Right == FolderRight.Owner)
-                                    {
-                                        <button type="button" role="menuitem" @onclick="() => { menuFor = null; renamingFolder = r; renameFolderValue = r.Folder.Name; folderError = null; }"><Ico Name="edit" Size="16" /> Renommer</button>
-                                        <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deletingFolder = r; }"><Ico Name="trash" Size="16" /> Supprimer</button>
-                                    }
-                                </div>
-                            }
-                        </div>
-                    }
-                </div>
-            }
+    </section>
+    <section class="lx-blk lx-blk-main" aria-label="Listes">
+        <div class="lx-bh"><Ico Name="play" Size="16" /> <span>Listes</span> <small>@Sorted.Count()</small></div>
+    <div class="lx-tools" role="region" aria-label="Recherche et filtres">
+        <div class="search-box">
+            <Ico Name="search" Size="16" />
+            <input data-lx-search placeholder="@(foldersOn ? "Rechercher dans toutes les listes" : "Rechercher des listes de lecture")" aria-label="Rechercher des listes de lecture" @bind="search" @bind:event="oninput" />
         </div>
-    }
+        @if (Active) { <span class="lx-count" aria-live="polite">@Plural(Sorted.Count(), "résultat", "résultats")</span> }
+        <FilterMenu Groups="FilterGroups" Extra="@(foldersOn && folderId != null && !scopeAll ? 1 : 0)" OnPick="PickFilter" OnReset="ResetFilters">
+            <Footer>
+                @if (foldersOn && folderId != null)
+                {
+                    <div class="fm-note"><span>Chercher dans : @(scopeAll ? "toute l'aire" : "ce dossier")</span><button type="button" class="linklike" @onclick="() => scopeAll = !scopeAll">Changer</button></div>
+                }
+            </Footer>
+        </FilterMenu>
+        <select @bind="sort" class="tb-sort" aria-label="Trier">
+            <option value="recent">Récentes</option>
+            <option value="name">Nom</option>
+            <option value="used">Plus utilisées</option>
+        </select>
+        <ViewToggle StorageKey="playlists" @bind-Value="view" />
+    </div>
+    <FilterChips Groups="FilterGroups" Extra="FilterExtras" OnClear="ClearFilter" OnResetAll="ResetFilters" />
 
     @if (!Sorted.Any())
     {
@@ -282,6 +252,7 @@ else
             }
         </div>
     }
+    </section>
 
     @if (picked.Count > 0)
     {

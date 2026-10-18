@@ -154,8 +154,6 @@ public class LevelDomainTests
         Assert.True(FolderAccess.CanCreateAtRoot(a, LevelPages.Playlists));
         Assert.False(FolderAccess.CanCreateAtRoot(a, LevelPages.Media));   // médiathèque en « Voir »
 
-        niveau.PlaylistsCreateFolders = false;
-        Assert.False(FolderAccess.CanCreateAtRoot(As(marc).Access, LevelPages.Playlists));
         Assert.True(FolderAccess.CanCreateAtRoot(As(admin).Access, LevelPages.Media));
     }
 

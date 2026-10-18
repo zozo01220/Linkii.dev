@@ -40,8 +40,29 @@
         {
             <button class="btn ghost sm" @onclick="() => sharingId = here.Folder.Id"><Ico Name="users" Size="14" /> Partager…</button>
         }
-        @if (FoldersShown && CanCreateHere) { <button class="btn ghost" data-fab="Nouveau dossier" @onclick='() => { newFolderName = ""; newFolderError = null; creatingFolder = true; }'><Ico Name="folder" Size="16" /> Nouveau dossier</button> }
-        @if (CanUploadHere) { <button class="btn lx-imp" data-fab="Importer des médias" @onclick="OpenImport"><Ico Name="upload" Size="16" /> Importer</button> }
+        @if (CanUploadHere)
+        {
+            <div class="lx-split">
+                <button class="btn lx-imp" data-fab="Importer des médias" @onclick="OpenImport"><Ico Name="upload" Size="16" /> Importer</button>
+                @if (FoldersShown && CanCreateHere) { <button class="btn ghost lx-appfolder" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /> Nouveau dossier</button> }
+                @if (FoldersShown && CanCreateHere)
+                {
+                    <button class="btn lx-car" aria-label="Autres créations" aria-haspopup="menu" aria-expanded="@(newMenu ? "true" : "false")" @onclick="() => newMenu = !newMenu"><Ico Name="chevron" Size="14" /></button>
+                    @if (newMenu)
+                    {
+                        <div class="kebab-backdrop" @onclick="() => newMenu = false"></div>
+                        <div class="kebab-menu" role="menu">
+                            <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenImport(); }"><Ico Name="upload" Size="16" /> Importer des médias</button>
+                            <button type="button" role="menuitem" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /> Nouveau dossier@(currentRow is { } cf ? $" dans « {cf.Folder.Name} »" : "")</button>
+                        </div>
+                    }
+                }
+            </div>
+        }
+        else if (FoldersShown && CanCreateHere)
+        {
+            <button class="btn ghost" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /> Nouveau dossier</button>
+        }
     </div>
 </div>
 
@@ -76,35 +97,14 @@
 }
 else
 {
-    <div class="lx-tools" role="region" aria-label="Recherche et filtres">
-        <div class="search-box">
-            <Ico Name="search" Size="16" />
-            <input data-lx-search placeholder="Rechercher dans la médiathèque" aria-label="Rechercher des médias" @bind="search" @bind:event="oninput" />
-        </div>
-        @if (Active || type != "" || source != "") { <span class="lx-count" aria-live="polite">@Plural(Visible.Count(), "résultat", "résultats")</span> }
-        <FilterMenu Groups="FilterGroups" Extra="@(FoldersShown && folderId != null && !scopeAll ? 1 : 0)" OnPick="PickFilter" OnReset="ResetFilters">
-            <Footer>
-                @if (FoldersShown && folderId != null)
-                {
-                    <div class="fm-note"><span>Chercher dans : @(scopeAll ? "toute l'aire" : "ce dossier")</span><button type="button" class="linklike" @onclick="() => scopeAll = !scopeAll">Changer</button></div>
-                }
-            </Footer>
-        </FilterMenu>
-        <select @bind="sort" class="tb-sort" aria-label="Trier">
-            <option value="date">Récents</option>
-            <option value="name">Nom</option>
-            <option value="size">Taille</option>
-        </select>
-        <ViewToggle StorageKey="media" Photos="true" @bind-Value="view" />
-    </div>
-    <FilterChips Groups="FilterGroups" Extra="FilterExtras" OnClear="ClearFilter" OnResetAll="ResetFilters" />
-
+    <section class="lx-blk lx-blk-folders" aria-label="Dossiers">
+        <div class="lx-bh"><Ico Name="folder" Size="16" /> <span>Dossiers</span> <small>@subfolders.Count</small></div>
     @* Dossiers de la position ouverte : puces compactes, cibles du glisser-déposer *@
     @* Look « app » : les dossiers sont une bande de cartes qui défile (aperçu des derniers médias, badge de partage) ;
        appui long = menu (partager, renommer, supprimer). Masquée ailleurs par le CSS. *@
     @if (subfolders.Count > 0 || (FoldersShown && CanCreateHere))
     {
-        <div class="lx-fstrip" role="list" aria-label="Dossiers">
+        <div class="lx-fstrip lx-fgrid" role="list" aria-label="Dossiers">
             @foreach (var row in subfolders)
             {
                 var r = row;
@@ -112,8 +112,9 @@ else
                 var aud = AudienceOf(r.Folder.Id);
                 var recent = RecentMedia(r.Folder.Id);
                 var canMenu = mine || isAdmin;
-                <div class="lx-fcard" role="listitem" tabindex="0" title="@FolderTitle(r)" aria-label="Ouvrir le dossier @r.Folder.Name"
+                <div class="lx-fcard @(dropOver == r.Folder.Id ? "drop-target" : "")" role="listitem" tabindex="0" title="@FolderTitle(r)" aria-label="Ouvrir le dossier @r.Folder.Name"
                      @onclick="() => OpenFolder(r.Folder.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenFolder(r.Folder.Id); }'
+                     @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = r.Folder.Id; }" @ondragleave="() => { if (dropOver == r.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(r.Folder.Id)"
                      @oncontextmenu="() => { if (canMenu) menuFor = r.Folder.Id; }" @oncontextmenu:preventDefault="inApp && canMenu">
                     <div class="fp @(recent.Count == 0 ? "none" : "")">
                         @foreach (var rm in recent) { <span class="fpi"><MediaThumb Media="rm" /></span> }
@@ -124,6 +125,11 @@ else
                         else { <span class="fbadge pv"><Ico Name="lock" Size="11" /> Privé</span> }
                     </div>
                     <div class="fn"><span>@r.Folder.Name</span><small>@ChildCount(r.Folder.Id)</small></div>
+                    @if (canMenu)
+                    {
+                        <button type="button" class="fk" aria-label="Actions pour le dossier @r.Folder.Name" aria-haspopup="menu" aria-expanded="@(menuFor == r.Folder.Id ? "true" : "false")"
+                                @onclick:stopPropagation="true" @onclick="() => menuFor = menuFor == r.Folder.Id ? null : r.Folder.Id"><Ico Name="dots-v" Size="16" /></button>
+                    }
                     @if (menuFor == r.Folder.Id)
                     {
                         <div class="kebab-backdrop" @onclick:stopPropagation="true" @onclick="() => menuFor = null"></div>
@@ -148,45 +154,31 @@ else
             }
         </div>
     }
-    @if (subfolders.Count > 0)
-    {
-        <button type="button" class="lx-fold-toggle @(foldersOpen ? "open" : "")" aria-expanded="@(foldersOpen ? "true" : "false")" @onclick="() => foldersOpen = !foldersOpen"><Ico Name="folder" Size="16" /> <span>Dossiers</span> <small>@subfolders.Count</small><Ico Name="chevron" Size="16" /></button>
-        <div class="lx-folders @(foldersOpen ? "open" : "")">
-            @foreach (var row in subfolders)
-            {
-                var r = row;
-                var inside = ChildCount(r.Folder.Id);
-                var mine = r.Folder.OwnerId == Store.UserId;
-                <div class="lx-fchip @(r.Shared ? "" : "priv") @(dropOver == r.Folder.Id ? "drop-target" : "")" role="button" tabindex="0" title="@FolderTitle(r)" aria-label="Ouvrir le dossier @r.Folder.Name" @onclick="() => OpenFolder(r.Folder.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenFolder(r.Folder.Id); }'
-                     @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = r.Folder.Id; }" @ondragleave="() => { if (dropOver == r.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(r.Folder.Id)">
-                    <Ico Name="folder" Size="17" />
-                    <span class="nm">@r.Folder.Name</span>
-                    <small>@inside</small>
-                    <SharePill Audience="AudienceOf(r.Folder.Id)" Clickable="mine || isAdmin" ReadOnly="r.Right == FolderRight.Read" OwnerName="@(mine ? null : r.OwnerName)" OnClick="() => sharingId = r.Folder.Id" />
-                    @if (mine || isAdmin)
-                    {
-                        <div class="kebab" @onclick:stopPropagation="true">
-                            <button type="button" class="kebab-btn" aria-label="Actions pour le dossier @r.Folder.Name" aria-haspopup="menu" aria-expanded="@(menuFor == r.Folder.Id ? "true" : "false")"
-                                    @onclick="() => menuFor = menuFor == r.Folder.Id ? null : r.Folder.Id"><Ico Name="dots-v" Size="16" /></button>
-                            @if (menuFor == r.Folder.Id)
-                            {
-                                <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
-                                <div class="kebab-menu" role="menu">
-                                    <span class="kebab-note">@(mine ? "Votre dossier" : $"Dossier de {r.OwnerName}") · @(r.Shared ? "partagé" : "privé")</span>
-                                    <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingId = r.Folder.Id; }"><Ico Name="users" Size="16" /> Partager…</button>
-                                    @if (r.Right == FolderRight.Owner)
-                                    {
-                                        <button type="button" role="menuitem" @onclick="() => { menuFor = null; renamingFolder = r; renameFolderValue = r.Folder.Name; newFolderError = null; }"><Ico Name="edit" Size="16" /> Renommer</button>
-                                        <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deletingFolder = r; }"><Ico Name="trash" Size="16" /> Supprimer</button>
-                                    }
-                                </div>
-                            }
-                        </div>
-                    }
-                </div>
-            }
+    </section>
+    <section class="lx-blk lx-blk-main" aria-label="Médias">
+        <div class="lx-bh"><Ico Name="image" Size="16" /> <span>Médias</span> <small>@Visible.Count()</small></div>
+    <div class="lx-tools" role="region" aria-label="Recherche et filtres">
+        <div class="search-box">
+            <Ico Name="search" Size="16" />
+            <input data-lx-search placeholder="Rechercher dans la médiathèque" aria-label="Rechercher des médias" @bind="search" @bind:event="oninput" />
         </div>
-    }
+        @if (Active || type != "" || source != "") { <span class="lx-count" aria-live="polite">@Plural(Visible.Count(), "résultat", "résultats")</span> }
+        <FilterMenu Groups="FilterGroups" Extra="@(FoldersShown && folderId != null && !scopeAll ? 1 : 0)" OnPick="PickFilter" OnReset="ResetFilters">
+            <Footer>
+                @if (FoldersShown && folderId != null)
+                {
+                    <div class="fm-note"><span>Chercher dans : @(scopeAll ? "toute l'aire" : "ce dossier")</span><button type="button" class="linklike" @onclick="() => scopeAll = !scopeAll">Changer</button></div>
+                }
+            </Footer>
+        </FilterMenu>
+        <select @bind="sort" class="tb-sort" aria-label="Trier">
+            <option value="date">Récents</option>
+            <option value="name">Nom</option>
+            <option value="size">Taille</option>
+        </select>
+        <ViewToggle StorageKey="media" Photos="true" @bind-Value="view" />
+    </div>
+    <FilterChips Groups="FilterGroups" Extra="FilterExtras" OnClear="ClearFilter" OnResetAll="ResetFilters" />
 
     @if (!Visible.Any() && Jobs.Count == 0)
     {
@@ -227,7 +219,7 @@ else
                         var item = m;
                         <tr class="@(picked.Contains(item.Id) ? "picked" : "") @(dragIds.Contains(item.Id) ? "dragging" : "")" draggable="@(CanDrag(item) ? "true" : "false")" @ondragstart="() => StartDrag(item)" @ondragend="EndDrag">
                             <td>@if (Selectable(item)) { <input type="checkbox" class="sc-check lx-check" checked="@picked.Contains(item.Id)" @onchange="() => Toggle(item.Id)" aria-label="Sélectionner @item.Name" /> }</td>
-                            <td><div class="nm"><span class="mini">@if (item.Status == null) { <MediaThumb Media="item" /> } else { <Ico Name="@(item.Status == "failed" ? "x" : "hourglass")" Size="16" /> }</span><button type="button" title="@item.Name" @onclick="() => Open(item)">@item.Name</button></div></td>
+                            <td><div class="nm"><span class="mini">@if (item.Status == null) { <MediaThumb Media="item" /> } else { <Ico Name="@(item.Status == "failed" ? "x" : "hourglass")" Size="16" /> }</span><button type="button" title="@item.Name" @onclick="() => Open(item)">@item.Name</button>@ShareBadge(item, "ph-sharei")</div></td>
                             @if (FoldersShown) { <td><small>@PathOf(item)</small></td> }
                             <td><small>@(item.Type == "video" ? "Vidéo" : "Image")@(MediaProbe.Label(item) is { } fmt ? " · " + fmt : "")@(SourceLabel(item) is { } src ? " · " + src : "")</small></td>
                             <td class="num">@(item.Size is { } s ? Helpers.FormatSize(s) : "—")</td>
@@ -289,6 +281,7 @@ else
                                 {
                                     @if (item.Type == "video") { <span class="ph-dur"><Ico Name="play" Size="10" />@(Seconds(item) is { } sec ? Helpers.FormatDuration(sec) : "")</span> }
                                     <span class="ph-use @(unused.Contains(item.Id) ? "no" : "")" title="@(unused.Contains(item.Id) ? "Non utilisé" : "Utilisé dans une liste")"></span>
+                                    @ShareBadge(item, "ph-share")
                                 }
                             </div>
                         }
@@ -339,6 +332,7 @@ else
                             @if (SourceLabel(item) is { } src) { <span class="lx-src" title="@(MediaLibrary.IsDrive(item) ? DriveTitle(DriveOf(item)) : null)">@if (MediaLibrary.IsDrive(item)) { <Ico Name="folder" Size="11" /> }@src</span> }
                             @if (item.Type == "video") { <span class="lx-badge"><Ico Name="play" Size="11" />@(Seconds(item) is { } s ? Helpers.FormatDuration(s) : "")</span> }
                             @if (unused.Contains(item.Id)) { <span class="lx-unused">Non utilisé</span> }
+                            @ShareBadge(item, "ph-share")
                         }
                     </div>
                     <div class="nm" title="@item.Name">@if (FoldersShown && item.FolderId is { } fid && rights.GetValueOrDefault(fid) == FolderRight.Read) { <Ico Name="lock" Size="12" /> }@item.Name</div>
@@ -348,6 +342,7 @@ else
         </div>
         }
     }
+    </section>
 
     @if (picked.Count > 0)
     {
@@ -355,6 +350,7 @@ else
             <b>@picked.Count sélectionné@(picked.Count > 1 ? "s" : "")</b>
             <button type="button" @onclick="ToggleAll">@(AllPicked ? "Tout désélectionner" : $"Tout sélectionner ({Visible.Count(Selectable)})")</button>
             <span class="vr"></span>
+            @if (pickedShareable.Count > 0) { <button type="button" @onclick="() => sharingMedia = pickedShareable"><Ico Name="share" Size="15" /><span class="lx-lbl">Partager…</span></button> }
             @if (FoldersShown) { <button type="button" disabled="@(pickedEditable.Count == 0)" @onclick="() => folderMove = pickedEditable"><Ico Name="folder" Size="15" /><span class="lx-lbl">Ranger…</span></button> }
             @if (canMove && pickedOwn.Count > 0) { <button type="button" @onclick="() => bulkMove = true"><Ico Name="move" Size="15" /><span class="lx-lbl">Autre aire…</span></button> }
             <span class="vr"></span>
@@ -389,12 +385,34 @@ else
 {
     var idx = OpenList.FindIndex(x => x.Id == om.Id);
     <MediaPreviewPanel Item="om" Path="@PathOf(om)" CanEdit="Own(om)" Drive="@(MediaLibrary.IsDrive(om) ? DriveTitle(DriveOf(om)) : null)"
+                       CanShare="@(Own(om) && om.Status == null)" Shares="@Library.SharesOf(om.Id)" SharedBy="@(sharedIn.GetValueOrDefault(om.Id))"
+                       OnShare="() => sharingMedia = new() { (om.Id, om.Name) }" OnUnshare="id => Unshare(om, id)" OnLeave="() => leaving = om"
                        HasPrev="idx > 0" HasNext="idx >= 0 && idx < OpenList.Count - 1"
                        OnClose="() => openId = null" OnPrev="() => Step(-1)" OnNext="() => Step(1)"
                        OnRename="() => OpenRename(om)"
                        OnFolder="@(FoldersShown ? EventCallback.Factory.Create(this, () => folderMove = new() { (om.Id, om.Name) }) : default)"
                        OnArea="@(canMove ? EventCallback.Factory.Create(this, () => moving = om) : default)"
                        OnDelete="() => confirmDelete = new() { om.Id }" />
+}
+
+@if (sharingMedia is { } shm)
+{
+    <MediaShareDialog Media="shm" OnClose="() => sharingMedia = null" OnShared="Reload" />
+}
+
+@if (leaving is { } lv)
+{
+    var by = sharedIn.GetValueOrDefault(lv.Id)?.By ?? "son propriétaire";
+    var inLists = Library.Uses(lv.Id).Lists.Count;
+    <div class="modal-backdrop" @onclick="() => leaving = null"></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="lv-title">
+        <h3 id="lv-title">Ne plus voir « @lv.Name » ?</h3>
+        <p class="hint">Ce média disparaît de votre médiathèque. Il reste chez @by, qui peut vous le partager de nouveau.@(inLists > 0 ? $" Il est utilisé dans {(inLists > 1 ? $"{inLists} de vos listes de lecture" : "une de vos listes de lecture")} : il en sera retiré." : "")</p>
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => leaving = null">Annuler</button>
+            <button class="btn danger" @onclick="LeaveShared"><Ico Name="eye-off" Size="15" /> Ne plus voir</button>
+        </div>
+    </div>
 }
 
 @if (creatingFolder)
@@ -586,7 +604,12 @@ else
     private List<FolderRow> subfolders = new();               // dossiers de la position ouverte
     private List<FolderRow> crumbs = new();                   // chemin jusqu'au dossier ouvert
     private List<MediaItem> allFiles = new();                 // tous les fichiers visibles de l'aire
-    private bool creatingFolder;
+    private bool creatingFolder, newMenu;
+    private Dictionary<Guid, MediaSharedWithMe> sharedIn = new();   // médias reçus en partage (lecture seule)
+    private HashSet<Guid> sharedOut = new();                         // médias que la personne a partagés
+    private List<(Guid Id, string Name)>? sharingMedia;              // fenêtre « Partager »
+    private MediaItem? leaving;                                      // confirmation « Ne plus voir »
+    private void OpenNewFolder() { newMenu = false; newFolderName = ""; newFolderError = null; creatingFolder = true; }
     private string newFolderName = "", renameFolderValue = "";
     private string? newFolderError;
     private FolderRow? renamingFolder, deletingFolder;
@@ -599,7 +622,7 @@ else
     private bool CanCreateHere => folderId is null ? canCreateRoot : currentRow is { } c && c.Right >= FolderRight.Write;
     private bool CanUploadHere => folderId is null ? canWrite : currentRow is { } c && c.Right >= FolderRight.Write;
     // À la racine, tout fichier se modifie comme avant ; dans un dossier, il faut y écrire.
-    private bool CanEdit(MediaItem m) => m.FolderId is not { } f ? canWrite : rights.GetValueOrDefault(f) >= FolderRight.Write;
+    private bool CanEdit(MediaItem m) => !sharedIn.ContainsKey(m.Id) && (m.FolderId is not { } f ? canWrite : rights.GetValueOrDefault(f) >= FolderRight.Write);   // un média reçu en partage est en lecture seule
     private List<(Guid Id, string Name)> pickedEditable => allFiles.Where(m => picked.Contains(m.Id) && Selectable(m)).Select(m => (m.Id, m.Name)).ToList();
     private MediaItem? open => openId is { } id ? allFiles.FirstOrDefault(m => m.Id == id) : null;
     private List<MediaItem> OpenList => Visible.ToList();
@@ -611,6 +634,28 @@ else
         menuFor = null; openId = null; scopeAll = true;
         Reload();
         _ = SetDrop();
+    }
+
+    private RenderFragment ShareBadge(MediaItem m, string css) => sharedIn.TryGetValue(m.Id, out var by)
+        ? @<span class="@css in" title="@($"Partagé par {by.By} · lecture seule")"><Ico Name="share" Size="12" /></span>
+        : sharedOut.Contains(m.Id) ? @<span class="@css" title="Partagé avec d'autres membres"><Ico Name="share" Size="12" /></span> : (b => { });
+
+    private void Unshare(MediaItem m, Guid userId)
+    {
+        var err = Library.Unshare(m.Id, userId);
+        if (err != null) { Toast.Error(err); return; }
+        Reload();
+    }
+
+    private void LeaveShared()
+    {
+        if (leaving is not { } m) return;
+        var err = Library.Leave(m.Id);
+        leaving = null;
+        if (err != null) { Toast.Error(err); return; }
+        if (openId == m.Id) openId = null;
+        Toast.Ok($"« {m.Name} » n'apparaît plus dans votre médiathèque.");
+        Reload();
     }
 
     private void SetFilter(string f) { filter = f; picked.Clear(); }
@@ -652,7 +697,9 @@ else
         if (!FoldersShown) folderId = null;
         else if (folderId is { } open && !rights.ContainsKey(open)) folderId = null;   // dossier retiré ou supprimé entre-temps
         allFiles = Library.Files();
-        files = FoldersShown ? allFiles.Where(m => m.FolderId == folderId).ToList() : allFiles;
+        sharedIn = Library.SharedWithMe();
+        sharedOut = Library.SharedOut();
+        files = FoldersShown ? allFiles.Where(m => sharedIn.ContainsKey(m.Id) ? folderId == null : m.FolderId == folderId).ToList() : allFiles;   // un média partagé avec la personne est à la racine
         // À la racine : les dossiers qui n'ont pas de parent visible. Dans un dossier : ses enfants visibles.
         subfolders = FoldersShown
             ? folderRows.Where(r => folderId is { } fid ? r.Folder.ParentId == fid : r.Folder.ParentId is not { } p || !rights.ContainsKey(p)).ToList()
@@ -666,7 +713,7 @@ else
     }
 
     // Éléments directs d'un dossier : ses fichiers et ses sous-dossiers visibles
-    private int ChildCount(Guid id) => allFiles.Count(m => m.FolderId == id) + folderRows.Count(r => r.Folder.ParentId == id);
+    private int ChildCount(Guid id) => allFiles.Count(m => m.FolderId == id && !sharedIn.ContainsKey(m.Id)) + folderRows.Count(r => r.Folder.ParentId == id);
 
     private List<FolderRow> BuildCrumbs()
     {
@@ -679,6 +726,7 @@ else
     // Emplacement d'un fichier : chemin de son dossier, ou la racine de l'aire (fichier Drive : son dossier Drive)
     private string PathOf(MediaItem m)
     {
+        if (sharedIn.TryGetValue(m.Id, out var by)) return $"Partagé par {by.By}";
         if (MediaLibrary.IsDrive(m)) return DriveOf(m) is { } f ? $"Drive « {f.Name} »" : "Drive";
         if (m.FolderId is not { } fid || folderRows.FirstOrDefault(r => r.Folder.Id == fid) is not { } row) return "Médiathèque de l'aire";
         var names = new List<string>();
@@ -722,6 +770,7 @@ else
                 <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
                 <div class="kebab-menu" role="menu">
                     <button type="button" role="menuitem" @onclick="() => { menuFor = null; Open(item); }"><Ico Name="eye" Size="16" /> Aperçu et utilisations</button>
+                    @if (Own(item) && item.Status == null) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingMedia = new() { (item.Id, item.Name) }; }"><Ico Name="share" Size="16" /> Partager…</button> }
                     @if (Own(item)) { <button type="button" role="menuitem" @onclick="() => OpenRename(item)"><Ico Name="edit" Size="16" /> Renommer</button> }
                     @if (item.FileName != null) { <a role="menuitem" href="/media/@item.FileName" download="@item.Name" @onclick="() => menuFor = null"><Ico Name="download" Size="16" /> Télécharger</a> }
                     @if (FoldersShown && Selectable(item)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (item.Id, item.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
@@ -799,6 +848,7 @@ else
     // sélectionnable / rangeable : ses fichiers, et les fichiers Drive (qu on peut ranger dans un dossier mais ni renommer ni supprimer ici)
     private bool Selectable(MediaItem m) => CanEdit(m) && (FoldersShown || !MediaLibrary.IsDrive(m));
     private bool Own(MediaItem m) => !MediaLibrary.IsDrive(m) && CanEdit(m);
+    private List<(Guid Id, string Name)> pickedShareable => allFiles.Where(m => picked.Contains(m.Id) && Own(m) && m.Status == null).Select(m => (m.Id, m.Name)).ToList();
     private List<(Guid Id, string Name)> pickedOwn => allFiles.Where(m => picked.Contains(m.Id) && Own(m)).Select(m => (m.Id, m.Name)).ToList();
 
     // Clic : aperçu ; en cours de sélection (ou Ctrl/Maj + clic) : coche ou décoche.
@@ -931,7 +981,7 @@ else
     [JSInvokable]
     public Task Escape() => InvokeAsync(() =>
     {
-        if (menuFor != null) menuFor = null;
+        if (menuFor != null || newMenu) { menuFor = null; newMenu = false; }
         else if (showUpload) showUpload = false;
         else if (openId != null) openId = null;
         else if (picked.Count > 0) picked.Clear();

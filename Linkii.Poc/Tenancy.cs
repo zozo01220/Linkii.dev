@@ -130,6 +130,8 @@ public class ClientDb
     public Reseller? Reseller => _root.Resellers.FirstOrDefault(r => r.Id == Tenant.ResellerId);
     public ScopedList<Screen> Screens { get; }
     public ScopedList<MediaItem> Media { get; }
+    /// <summary>Partages de médias de l'organisation (voir <see cref="MediaShare"/>).</summary>
+    public List<MediaShare> MediaShares => _root.MediaShares;
     /// <summary>Dossiers de la médiathèque de l'aire ouverte (voir <see cref="MediaFolder"/>).</summary>
     public ScopedList<MediaFolder> MediaFolders { get; }
     /// <summary>Dossiers des listes de lecture de l'aire ouverte (voir <see cref="PlaylistFolder"/>).</summary>
@@ -149,6 +151,7 @@ public class ClientDb
     {
         foreach (var f in _root.MediaFolders.Where(f => f.ClientId == ClientId && f.OwnerId == id)) f.OwnerId = Access.UserId;
         foreach (var f in _root.PlaylistFolders.Where(f => f.ClientId == ClientId && f.OwnerId == id)) f.OwnerId = Access.UserId;
+        _root.MediaShares.RemoveAll(s => s.ClientId == ClientId && (s.ToUserId == id || s.FromUserId == id));
         return _root.Users.RemoveAll(u => u.Id == id && u.ClientId == ClientId && Roles.IsClient(u.Role));
     }
     /// <summary>Adresse déjà prise chez ce revendeur (ou par l'équipe Linkii) : un compte se connecte par son e-mail sur le domaine du revendeur.</summary>

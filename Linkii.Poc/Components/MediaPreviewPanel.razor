@@ -1,61 +1,92 @@
 @inject MediaLibrary Library
 
-@* Aperçu d'un média de la médiathèque (§51) : grand aperçu, informations, où il est utilisé et actions.
-   Ouvert par un clic sur la vignette ; ← → passent au média voisin, Échap ferme (géré par la page). *@
+@* Aperçu d'un média de la médiathèque : tiroir « immersif » (§51) — le média en grand avec ses flèches et sa croix posées dessus, son nom et ses
+   infos juste dessous, puis le partage (avec qui, en lecture seule) et où il sert, enfin les actions. Ouvert par un clic sur la vignette ;
+   ← → passent au média voisin, Échap ferme (géré par la page). Un média partagé avec la personne n'offre que Télécharger et « Ne plus voir ». *@
 <div class="lx-drawer-veil" @onclick="OnClose"></div>
-<aside class="lx-drawer" role="dialog" aria-modal="false" aria-labelledby="mpp-title">
-    <div class="dh">
+<aside class="lx-drawer lx-im" role="dialog" aria-modal="false" aria-labelledby="mpp-title">
+    <div class="big">
+        @if (Item.Status == "processing") { <span>Conversion en MP4…</span> }
+        else if (Item.Status == "failed") { <span>@(Item.Error ?? "Import en échec")</span> }
+        else if (Item.FileName == null) { <Ico Name="image" Size="32" /> }
+        else if (Item.Type == "video") { <video src="/media/@Item.FileName" controls preload="metadata" @key="Item.Id"></video> }
+        else { <img src="/media/@Item.FileName?w=1280" alt="" @key="Item.Id" /> }
+        <span class="im-nav">
+            <button type="button" class="im-btn" title="Média précédent" aria-label="Média précédent" disabled="@(!HasPrev)" @onclick="OnPrev"><span style="display:grid;transform:scaleX(-1)"><Ico Name="chevron-right" Size="16" /></span></button>
+            <button type="button" class="im-btn" title="Média suivant" aria-label="Média suivant" disabled="@(!HasNext)" @onclick="OnNext"><Ico Name="chevron-right" Size="16" /></button>
+        </span>
+        <button type="button" class="im-btn im-x" title="Fermer (Échap)" aria-label="Fermer" @onclick="OnClose"><Ico Name="x" Size="16" /></button>
+    </div>
+    <div class="im-cap">
         <b id="mpp-title" title="@Item.Name">@Item.Name</b>
-        <button type="button" class="kebab-btn" title="Média précédent" aria-label="Média précédent" disabled="@(!HasPrev)" @onclick="OnPrev"><span style="display:grid;transform:scaleX(-1)"><Ico Name="chevron-right" Size="16" /></span></button>
-        <button type="button" class="kebab-btn" title="Média suivant" aria-label="Média suivant" disabled="@(!HasNext)" @onclick="OnNext"><Ico Name="chevron-right" Size="16" /></button>
-        <button type="button" class="kebab-btn" title="Fermer (Échap)" aria-label="Fermer" @onclick="OnClose"><Ico Name="x" Size="16" /></button>
+        <span>@(Item.Type == "video" ? "Vidéo" : "Image")@(Ext is { } e ? $" {e}" : "")@(Item.Width is > 0 ? $" · {Item.Width} × {Item.Height}" : "")@(Seconds is { } s ? $" · {Helpers.FormatDuration(s)}" : "")@(Item.Size is { } size ? $" · {Helpers.FormatSize(size)}" : "")</span>
+        <span>@Path@(Item.AddedUtc is { } added ? $" · importé le {added.ToLocalTime():dd.MM.yyyy à HH:mm}" : "")@(Source != null ? $" · {Source}" : "")</span>
     </div>
     <div class="db">
-        <div class="big">
-            @if (Item.Status == "processing") { <span>Conversion en MP4…</span> }
-            else if (Item.Status == "failed") { <span>@(Item.Error ?? "Import en échec")</span> }
-            else if (Item.FileName == null) { <Ico Name="image" Size="32" /> }
-            else if (Item.Type == "video") { <video src="/media/@Item.FileName" controls preload="metadata" @key="Item.Id"></video> }
-            else { <img src="/media/@Item.FileName?w=1280" alt="" @key="Item.Id" /> }
-        </div>
-        <dl>
-            <dt>Type</dt><dd>@(Item.Type == "video" ? "Vidéo" : "Image")@(Ext is { } e ? $" {e}" : "")</dd>
-            @if (Item.Width is > 0) { <dt>Définition</dt><dd>@Item.Width × @Item.Height px@(MediaProbe.Label(Item) is { } l && Item.Type == "video" ? $" ({l})" : "")</dd> }
-            @if (Seconds is { } s) { <dt>Durée</dt><dd>@Helpers.FormatDuration(s)</dd> }
-            @if (Item.Size is { } size) { <dt>Poids</dt><dd>@Helpers.FormatSize(size)</dd> }
-            <dt>Emplacement</dt><dd>@Path</dd>
-            @if (Item.AddedUtc is { } added) { <dt>Importé</dt><dd>le @added.ToLocalTime().ToString("dd.MM.yyyy à HH:mm")</dd> }
-            @if (Source != null) { <dt>Source</dt><dd>@Source</dd> }
-        </dl>
+        @if (SharedBy is { } by)
+        {
+            <section class="im-sec">
+                <h4><Ico Name="share" Size="14" /> Partagé par</h4>
+                <div class="im-per"><span class="im-av">@Initials(by.By)</span><span class="grow"><b>@by.By</b><small>vous l'a partagé le @by.Utc.ToLocalTime().ToString("dd.MM.yyyy")</small></span></div>
+                <p class="note"><Ico Name="lock" Size="13" /> Lecture seule : vous pouvez l'utiliser dans vos listes et le télécharger, pas le modifier ni le supprimer.</p>
+            </section>
+        }
+        else if (CanShare)
+        {
+            <section class="im-sec">
+                <h4><Ico Name="share" Size="14" /> Partagé avec <small>lecture seule</small></h4>
+                @if (Shares.Count == 0) { <p class="im-none">Pas partagé : vous seul le voyez.</p> }
+                @foreach (var sh in Shares)
+                {
+                    var row = sh;
+                    <div class="im-per">
+                        <span class="im-av">@Initials(row.Label)</span>
+                        <span class="grow"><b>@row.Label</b><small>depuis le @row.Utc.ToLocalTime().ToString("dd.MM.yyyy")</small></span>
+                        <button type="button" class="kebab-btn" title="Ne plus partager avec @row.Label" aria-label="Ne plus partager avec @row.Label" @onclick="() => OnUnshare.InvokeAsync(row.UserId)"><Ico Name="x" Size="15" /></button>
+                    </div>
+                }
+                <button type="button" class="im-add" @onclick="OnShare"><span class="im-av add"><Ico Name="plus" Size="13" /></span> Ajouter une personne</button>
+            </section>
+        }
 
-        <h4>Utilisé dans</h4>
-        @if (uses == null || !uses.Any)
-        {
-            <p class="note">Aucune liste de lecture ni aucun contenu ne l'utilise.</p>
-        }
-        else
-        {
-            @foreach (var l in uses.Lists)
+        <section class="im-sec">
+            <h4><Ico Name="play" Size="14" /> Utilisé dans @if (uses != null && uses.Any) { <small>@(uses.Lists.Count + uses.Contents.Count)</small> }</h4>
+            @if (uses == null || !uses.Any)
             {
-                <div class="lx-use"><Ico Name="play" Size="16" /><span class="grow"><span>@l.Name</span><small>liste de lecture · @(l.Count == 0 ? "sur aucun écran" : l.Count > 1 ? $"{l.Count} écrans" : "1 écran")</small></span><a href="/playlists/@l.Id">Ouvrir</a></div>
+                <p class="im-none">Aucune liste de lecture ni aucun contenu ne l'utilise.</p>
             }
-            @foreach (var c in uses.Contents)
+            else
             {
-                <div class="lx-use"><Ico Name="grid" Size="16" /><span class="grow"><span>@c.Name</span><small>contenu · @(c.Count == 0 ? "dans aucune liste" : c.Count > 1 ? $"dans {c.Count} listes" : "dans 1 liste")</small></span><a href="/apps/instance/@c.Id">Ouvrir</a></div>
+                <div class="im-chips">
+                    @foreach (var l in uses.Lists)
+                    {
+                        <a class="im-chip" href="/playlists/@l.Id" title="Liste de lecture · @(l.Count == 0 ? "sur aucun écran" : l.Count > 1 ? $"{l.Count} écrans" : "1 écran")"><Ico Name="play" Size="13" />@l.Name<small>@(l.Count == 0 ? "" : l.Count > 1 ? $"{l.Count} écrans" : "1 écran")</small></a>
+                    }
+                    @foreach (var c in uses.Contents)
+                    {
+                        <a class="im-chip" href="/apps/instance/@c.Id" title="Contenu · @(c.Count == 0 ? "dans aucune liste" : c.Count > 1 ? $"dans {c.Count} listes" : "dans 1 liste")"><Ico Name="grid" Size="13" />@c.Name<small>@(c.Count == 0 ? "" : c.Count > 1 ? $"{c.Count} listes" : "1 liste")</small></a>
+                    }
+                </div>
             }
-        }
+        </section>
         @if (Drive != null) { <p class="note"><Ico Name="folder" Size="13" /> @Drive. Renommez-le, déplacez-le ou retirez-le dans le Drive.</p> }
-        else if (!CanEdit) { <p class="note"><Ico Name="lock" Size="13" /> Dossier en lecture seule : vous pouvez l'utiliser et le télécharger, pas le modifier.</p> }
+        else if (!CanEdit && SharedBy == null) { <p class="note"><Ico Name="lock" Size="13" /> Dossier en lecture seule : vous pouvez l'utiliser et le télécharger, pas le modifier.</p> }
     </div>
-    <div class="df">
-        @if (Item.FileName != null) { <a class="btn ghost sm" href="/media/@Item.FileName" download="@Item.Name"><Ico Name="download" Size="14" /> Télécharger</a> }
+    <div class="df im-df">
+        @if (CanShare) { <button class="btn sm" @onclick="OnShare"><Ico Name="share" Size="14" /> Partager</button> }
+        @if (Item.FileName != null) { <a class="btn ghost sm" href="/media/@Item.FileName" download="@Item.Name" title="Télécharger"><Ico Name="download" Size="14" /> <span class="im-lbl">Télécharger</span></a> }
         @if (CanEdit && Drive == null)
         {
             <button class="btn ghost sm icon" title="Renommer" aria-label="Renommer" @onclick="OnRename"><Ico Name="edit" Size="14" /></button>
             @if (OnFolder.HasDelegate) { <button class="btn ghost sm" @onclick="OnFolder"><Ico Name="folder" Size="14" /> Ranger…</button> }
             @if (OnArea.HasDelegate) { <button class="btn ghost sm" @onclick="OnArea"><Ico Name="move" Size="14" /> Autre aire…</button> }
             <span class="grow"></span>
-            <button class="btn danger sm" @onclick="OnDelete"><Ico Name="trash" Size="14" /> Supprimer</button>
+            <button class="btn danger sm icon" title="Supprimer" aria-label="Supprimer" @onclick="OnDelete"><Ico Name="trash" Size="14" /></button>
+        }
+        @if (SharedBy != null)
+        {
+            <span class="grow"></span>
+            <button class="btn danger sm" title="Ce média disparaît de votre médiathèque" @onclick="OnLeave"><Ico Name="eye-off" Size="14" /> Ne plus voir</button>
         }
     </div>
 </aside>
@@ -64,6 +95,15 @@
     [Parameter, EditorRequired] public MediaItem Item { get; set; } = default!;
     [Parameter] public string Path { get; set; } = "Médiathèque de l'aire";
     [Parameter] public bool CanEdit { get; set; }
+    /// <summary>Peut partager ce média (celui qui le modifie, hors fichier Drive et média reçu).</summary>
+    [Parameter] public bool CanShare { get; set; }
+    /// <summary>Personnes avec qui ce média est partagé (vu par son propriétaire).</summary>
+    [Parameter] public List<MediaShareRow> Shares { get; set; } = new();
+    /// <summary>Média partagé avec la personne : par qui (lecture seule).</summary>
+    [Parameter] public MediaSharedWithMe? SharedBy { get; set; }
+    [Parameter] public EventCallback OnShare { get; set; }
+    [Parameter] public EventCallback<Guid> OnUnshare { get; set; }
+    [Parameter] public EventCallback OnLeave { get; set; }
     /// <summary>Fichier synchronisé depuis un Drive : d'où il vient (null : fichier de la médiathèque).</summary>
     [Parameter] public string? Drive { get; set; }
     [Parameter] public bool HasPrev { get; set; }
@@ -89,6 +129,8 @@
     private string? Ext => System.IO.Path.GetExtension(Item.FileName ?? Item.Name) is { Length: > 1 } e ? e[1..].ToUpperInvariant() : null;
 
     private int? Seconds => int.TryParse(Item.Info.GetValueOrDefault("durationSec"), out var s) && s > 0 ? s : null;
+
+    private static string Initials(string label) => string.Concat(label.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpperInvariant(p[0])));
 
     private string? Source => Drive != null ? null : Item.Info.ContainsKey("canva") ? "Export Canva" : Item.Info.ContainsKey("pdf") ? "Page de PDF" : null;
 }

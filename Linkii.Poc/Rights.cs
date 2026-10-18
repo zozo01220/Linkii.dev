@@ -92,7 +92,8 @@ public class AccessLevel
     public string VisibilityOf(string domain) => (domain == LevelPages.Playlists ? PlaylistsVisibility : domain == LevelPages.Media ? MediaVisibility : null)
         ?? (AllFolders == "write" ? LevelVisibility.All : AllFolders == "read" ? LevelVisibility.AllRead : LevelVisibility.Chosen);
 
-    public bool CreatesFolders(string domain) => IsLegacy ? CanCreateFolders : domain == LevelPages.Playlists ? PlaylistsCreateFolders : MediaCreateFolders;
+    // Plus d'interrupteur : créer ses dossiers est toujours permis (le droit d'écriture sur le domaine reste requis, voir FolderAccess)
+    public bool CreatesFolders(string domain) => true;
     public bool SharesFolders(string domain) => IsLegacy ? CanShareFolders : domain == LevelPages.Playlists ? PlaylistsShareFolders : MediaShareFolders;
 
     /// <summary>
@@ -113,6 +114,7 @@ public class AccessLevel
             PlaylistsCreateFolders = MediaCreateFolders = CanCreateFolders;
             PlaylistsShareFolders = MediaShareFolders = CanShareFolders;
         }
+        PlaylistsCreateFolders = MediaCreateFolders = true;   // plus d'interrupteur : créer ses dossiers est toujours permis (le droit d'écriture reste requis)
         ScreensAccess = DomainAccess.Clean(ScreensAccess);
         PlaylistsAccess = DomainAccess.Clean(PlaylistsAccess);
         MediaAccess = DomainAccess.Clean(MediaAccess);
