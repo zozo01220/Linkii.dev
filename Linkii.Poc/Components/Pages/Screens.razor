@@ -564,7 +564,7 @@ else if (wallEdit is { } wid)
     }
 
     // ---------- Écrans par blocs (aire › zone) et glisser-déposer ----------
-    private record GroupArea(Area Area, List<Zone> Zones, List<Screen> Screens, Dictionary<Guid, string> Lists);
+    private record GroupArea(Area Area, List<Zone> Zones, List<Screen> Screens, Dictionary<Guid, Playlist> Lists, List<MediaItem> MediaAll);
     private List<GroupArea> groupAreas = new();
     private bool canMoveScreens;   // droit de déplacer les écrans entre zones et entre aires
     private List<Guid> dragIds = new();
@@ -586,10 +586,11 @@ else if (wallEdit is { } wid)
         // un administrateur : toutes les aires et toutes les zones de l'organisation, même vides (pour y placer un écran) ; un membre : celles de son périmètre
         groupAreas = Store.Read(d =>
         {
-            var lists = d.Root.Playlists.Where(p => p.ClientId == d.ClientId).ToDictionary(p => p.Id, p => p.Name);
+            var lists = d.Root.Playlists.Where(p => p.ClientId == d.ClientId).ToDictionary(p => p.Id);
+            var allMedia = d.Root.Media.Where(m => m.ClientId == d.ClientId && m.Status == null).ToList();   // pour l'aperçu des listes des autres aires
             return d.Access.Areas.OrderBy(a => a.CreatedUtc).Select(a => new GroupArea(a,
                 a.Zones.Where(z => d.Access.SeesZone(z.Id)).OrderByDescending(z => z.IsDefault).ThenBy(z => z.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
-                d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.AreaId == a.Id && (d.Access.Sees == null || d.Access.Sees(s))).ToList(), lists)).ToList();
+                d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.AreaId == a.Id && (d.Access.Sees == null || d.Access.Sees(s))).ToList(), lists, allMedia)).ToList();
         });
         canMoveScreens = Store.Read(d => d.Access.CanMoveScreens);
     }
@@ -602,17 +603,33 @@ else if (wallEdit is { } wid)
     private void StartDragScreen(Screen s) { dragIds = selectedIds.Contains(s.Id) ? selectedIds.ToList() : new List<Guid> { s.Id }; groupNotice = groupWarn = null; }
     private void EndDragScreen() { dragIds = new(); dropArea = dropZone = null; }
 
+    // Aperçu d'un écran d'une autre aire : une vignette par zone de découpage, comme sur les cartes de l'aire ouverte (listes et médias lus dans toute l'organisation).
+    private RenderFragment LightPreview(Screen s, GroupArea ga) => __builder =>
+    {
+        <span class="sc-zones @(s.Orientation == "portrait" ? "dir-col" : "dir-row")">
+            @for (var z = 0; z < s.ZoneCount; z++)
+            {
+                var zp = s.ZonePlaylist(z) is { } zid && ga.Lists.TryGetValue(zid, out var pl) ? pl : null;
+                var zt = zp?.Draft.Where(i => i.Placement == "full").Select(i => ga.MediaAll.FirstOrDefault(m => m.Id == i.MediaId)).FirstOrDefault(m => m != null);
+                <span class="sc-zone" style="flex:@(ScreenLayouts.Find(s.Layout).Sizes[z].ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)) 1 0">
+                    @if (zt != null) { <MediaThumb Media="zt" All="ga.MediaAll" /> }
+                    else { <span class="sc-empty">@(zp == null ? (s.ZoneCount > 1 ? "+" : "Aucune liste de lecture") : zp.Name)</span> }
+                </span>
+            }
+        </span>
+    };
+
     // Carte de consultation d'un écran d'une autre aire : mêmes formes que les cartes habituelles, sans réglages (on les modifie en ouvrant son aire).
     private RenderFragment LightCard(Screen s, GroupArea ga) => __builder =>
     {
         var off = IsOffline(s);
-        var listName = s.PlaylistId is { } pid && ga.Lists.TryGetValue(pid, out var ln) ? ln : "Aucune liste de lecture";
+        var listName = s.PlaylistId is { } pid && ga.Lists.TryGetValue(pid, out var lp) ? lp.Name : "Aucune liste de lecture";
         <div class="pl-card gc gc-light @(off ? "is-off" : "is-on")" role="button" tabindex="0" title="Modifier cet écran (aire « @ga.Area.Name »)"
              draggable="@(canMoveScreens ? "true" : null)" @ondragstart="() => StartDragScreen(s)" @ondragend="EndDragScreen"
              @onclick="() => OpenAreaPage(ga.Area.Id, s.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenAreaPage(ga.Area.Id, s.Id); }'>
             <div class="gc-top">
                 <div class="gc-stage">
-                    <div class="gc-mon @(s.Orientation == "portrait" ? "portrait" : "")"></div>
+                    <div class="gc-mon @(s.Orientation == "portrait" ? "portrait" : "")">@LightPreview(s, ga)</div>
                     <span class="gc-pill @(off ? "off" : "")"><span class="gc-d @(off ? "bad" : "ok")"></span>@(off ? OfflineSince(s, DateTime.UtcNow) : "En ligne")</span>
                 </div>
             </div>
@@ -629,7 +646,7 @@ else if (wallEdit is { } wid)
     {
         var off = IsOffline(s);
         var st = off ? "Hors ligne" : "En ligne";
-        var listName = s.PlaylistId is { } pid && ga.Lists.TryGetValue(pid, out var ln) ? ln : "— Aucune liste de lecture —";
+        var listName = s.PlaylistId is { } pid && ga.Lists.TryGetValue(pid, out var lp) ? lp.Name : "— Aucune liste de lecture —";
         <div class="pl-card sc-card scr-card @(off ? "is-off" : "")" role="button" tabindex="0" title="Modifier cet écran (aire « @ga.Area.Name »)"
              draggable="@(canMoveScreens ? "true" : null)" @ondragstart="() => StartDragScreen(s)" @ondragend="EndDragScreen"
              @onclick="() => OpenAreaPage(ga.Area.Id, s.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenAreaPage(ga.Area.Id, s.Id); }'>
@@ -650,7 +667,7 @@ else if (wallEdit is { } wid)
                 </div>
             </div>
             <div class="sc-vwrap">
-                <span class="sc-visual"><span class="sc-monitor @(s.Orientation == "portrait" ? "portrait" : "")"><span class="sc-zones dir-row"><span class="sc-zone"><span class="sc-empty"></span></span></span></span><span class="sc-stand"></span></span>
+                <span class="sc-visual"><span class="sc-monitor @(s.Orientation == "portrait" ? "portrait" : "")">@LightPreview(s, ga)</span><span class="sc-stand"></span></span>
             </div>
             <div class="sc-foot"><span class="sc-select">@listName</span></div>
         </div>

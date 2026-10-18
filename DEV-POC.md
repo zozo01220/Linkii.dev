@@ -1574,4 +1574,5 @@ Maquettes montrées dans la conversation. Première version (bouton « Par aire 
 - **Connecter un écran** : un **tiroir** à droite (`.lx-drawer`, comme l'aperçu d'un média) remplace la fenêtre modale ; un champ par ligne, boutons Annuler / Connecter en bas.
 - **Édition d'un écran d'une autre aire** : un clic sur sa carte change d'aire puis **ouvre directement son édition** (paramètre `?edit=<id>` lu à l'ouverture de la page puis retiré de l'adresse) ; avant, il fallait cliquer une seconde fois après le rechargement.
 - **Curseur** : la règle globale `.pl-card[draggable]` donnait une main « déplacer » à toutes les cartes d'écran ; elles gardent un curseur normal (cliquer = éditer), le glisser-déposer fonctionne toujours.
+- **Aperçu des autres aires** : leurs cartes et rangées montrent l'aperçu de la liste de l'écran (une vignette par zone de découpage, `LightPreview`), lu dans les listes et médias de toute l'organisation, comme l'aire ouverte.
 - **Pas vu** : ces écrans dans le navigateur.
