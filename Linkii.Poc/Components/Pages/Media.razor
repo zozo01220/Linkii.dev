@@ -113,9 +113,9 @@ else
                 var aud = AudienceOf(r.Folder.Id);
                 var recent = RecentMedia(r.Folder.Id);
                 var canMenu = mine || isAdmin;
-                <div class="lx-fcard @(dropOver == r.Folder.Id ? "drop-target" : "")" role="listitem" tabindex="0" title="@FolderTitle(r)" aria-label="Ouvrir le dossier @r.Folder.Name"
+                <div class="lx-fcard @(dropOver == r.Folder.Id ? "drop-target" : "")" role="listitem" tabindex="0" draggable="@(r.Right == FolderRight.Owner && !inApp ? "true" : null)" @ondragstart="() => { dragFolder = r.Folder.Id; }" @ondragend="EndDrag" title="@FolderTitle(r)" aria-label="Ouvrir le dossier @r.Folder.Name"
                      @onclick="() => OpenFolder(r.Folder.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenFolder(r.Folder.Id); }'
-                     @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = r.Folder.Id; }" @ondragleave="() => { if (dropOver == r.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(r.Folder.Id)"
+                     @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0 || (dragFolder != null && dragFolder != r.Folder.Id)) dropOver = r.Folder.Id; }" @ondragleave="() => { if (dropOver == r.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(r.Folder.Id)"
                      @oncontextmenu="() => { if (canMenu) menuFor = r.Folder.Id; }" @oncontextmenu:preventDefault="inApp && canMenu">
                     <div class="fp @(recent.Count == 0 ? "none" : "")">
                         @foreach (var rm in recent) { <span class="fpi"><MediaThumb Media="rm" /></span> }
@@ -142,6 +142,7 @@ else
                             @if (r.Right == FolderRight.Owner)
                             {
                                 <button type="button" role="menuitem" @onclick="() => { menuFor = null; renamingFolder = r; renameFolderValue = r.Folder.Name; newFolderError = null; }"><Ico Name="edit" Size="16" /> Renommer</button>
+                                @if (FoldersShown) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; reparenting = (r.Folder.Id, r.Folder.Name); }"><Ico Name="move" Size="16" /> Déplacer…</button> }
                                 <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deletingFolder = r; }"><Ico Name="trash" Size="16" /> Supprimer</button>
                             }
                         </div>
@@ -396,6 +397,11 @@ else
                        OnFolder="@(FoldersShown ? EventCallback.Factory.Create(this, () => folderMove = new() { (om.Id, om.Name) }) : default)"
                        OnArea="@(canMove ? EventCallback.Factory.Create(this, () => moving = om) : default)"
                        OnDelete="() => confirmDelete = new() { om.Id }" />
+}
+
+@if (reparenting is { } rp)
+{
+    <FolderReparentDialog Kind="@ShareKind.MediaFolder" FolderId="rp.Id" FolderName="@rp.Name" OnClose="MovedFolder" />
 }
 
 @if (sharingMedia is { } shm)
@@ -917,8 +923,22 @@ else
     {
         dragIds = picked.Contains(m.Id) ? pickedEditable.Select(x => x.Id).ToList() : new List<Guid> { m.Id };
     }
-    private void EndDrag() { dragIds = new(); dropOver = null; }
+    private Guid? dragFolder;                                    // dossier qu'on glisse sur un autre (PC)
+    private (Guid Id, string Name)? reparenting;                 // fenêtre « Déplacer le dossier »
+    private void EndDrag() { dragIds = new(); dragFolder = null; dropOver = null; }
+    private void MovedFolder(bool moved) { reparenting = null; if (moved) Reload(); }
     private void DropOn(Guid? target)
+    {
+        if (dragFolder is { } df)   // un dossier glissé sur un autre : il y entre (sur lui-même ou son parent : rien)
+        {
+            EndDrag();
+            if (target is { } t && t != df) { var err = Library.MoveFolder(df, t); if (err != null) Toast.Error(err); else Toast.Ok("Dossier déplacé."); Reload(); }
+            return;
+        }
+        DropFiles(target);
+    }
+
+    private void DropFiles(Guid? target)
     {
         var ids = dragIds.ToList();
         EndDrag();

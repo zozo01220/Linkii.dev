@@ -28,6 +28,10 @@ public class PlaylistLibrary(TenantStore store)
 
     public string? RenameFolder(Guid id, string name) => store.Write(d => PlaylistFolderOps.Rename(d, id, name));
 
+    public string? MoveFolder(Guid id, Guid? newParent) => store.Write(d => PlaylistFolderOps.MoveFolder(d, id, newParent));
+    public List<FolderTarget> MoveFolderTargets(Guid id) => store.Read(d => PlaylistFolderOps.MoveTargets(d, id));
+    public FolderContents ContentsOfFolder(Guid id) => store.Read(d => PlaylistFolderOps.ContentsOf(d, id));
+
     /// <summary>Supprime un dossier, ses sous-dossiers et les listes qu'ils contiennent.</summary>
     public string? DeleteFolder(Guid id)
     {

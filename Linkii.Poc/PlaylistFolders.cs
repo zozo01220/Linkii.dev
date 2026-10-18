@@ -162,6 +162,48 @@ public static class PlaylistFolderOps
         AreaShareOps.Forget(d, ShareKind.PlaylistFolder, set);
     }
 
+    // ---------- Déplacer un dossier dans un autre (voir FolderMove) ----------
+
+    public static FolderContents ContentsOf(ClientDb d, Guid id) =>
+        new(d.Root.Playlists.Count(p => p.ClientId == d.ClientId && p.FolderId == id), All(d).Count(f => f.ParentId == id));
+
+    public static List<FolderTarget> MoveTargets(ClientDb d, Guid id)
+    {
+        var all = All(d);
+        if (Find(d, id) is not { } f) return new();
+        var list = new List<FolderTarget> { new(null, "Racine des listes de lecture", 0, f.ParentId == null ? "déjà à la racine" : null) };
+        foreach (var g in d.PlaylistFolders.Where(x => x.AreaId == f.AreaId).Select(x => (Folder: x, Path: string.Join(" › ", FolderAccess.Chain(x, all).Reverse().Select(c => c.Name)))).OrderBy(x => x.Path, StringComparer.CurrentCultureIgnoreCase))
+        {
+            if (RightOf(d, g.Folder) == FolderRight.None) continue;
+            var reason = g.Folder.Id == f.ParentId ? "déjà ici" : FolderMove.CheckTarget(all, f, g.Folder, RightOf(d, g.Folder)) is { } r ? FolderMove.Explain(r) : null;
+            list.Add(new(g.Folder.Id, g.Path, g.Path.Count(c => c == '›'), reason));
+        }
+        return list;
+    }
+
+    /// <summary>Range un dossier de listes dans un autre, ou le dissout (destination : la racine) : ses listes et ses sous-dossiers vont à la racine de l'aire.</summary>
+    public static string? MoveFolder(ClientDb d, Guid id, Guid? newParent)
+    {
+        if (Option(d) is { } off) return off;
+        if (Find(d, id) is not { } f) return "Dossier introuvable.";
+        if (RightOf(d, f) != FolderRight.Owner) return "Seul le propriétaire du dossier peut le déplacer.";
+        var all = All(d);
+        if (newParent == null)
+        {
+            if (f.ParentId == null) return null;
+            if (FolderMove.RootNameClash(all, f) is { } clash) return $"Un dossier « {clash} » existe déjà à la racine : renommez-le d'abord.";
+            foreach (var p in d.Root.Playlists.Where(p => p.ClientId == d.ClientId && p.FolderId == id)) p.FolderId = null;
+            foreach (var c in all.Where(x => x.ParentId == id)) c.ParentId = null;
+            Forget(d, new[] { id });
+            return null;
+        }
+        if (Find(d, newParent.Value) is not { } target) return "Dossier introuvable.";
+        if (f.ParentId == target.Id) return null;
+        if (FolderMove.CheckTarget(all, f, target, RightOf(d, target)) is { } reason) return FolderMove.Explain(reason);
+        f.ParentId = target.Id;
+        return null;
+    }
+
     /// <summary>Ajoute, change (write) ou retire (null) le partage d'un dossier de listes, pour une personne ou un niveau.</summary>
     public static string? SetShare(ClientDb d, Guid folderId, string kind, Guid target, bool? write)
     {

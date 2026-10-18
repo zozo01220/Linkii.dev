@@ -105,9 +105,9 @@ else
                 var aud = AudienceOf(r.Folder.Id);
                 var preview = FolderPreview(r.Folder.Id);
                 var canMenu = mine || isAdmin;
-                <div class="lx-fcard @(dropOver == r.Folder.Id ? "drop-target" : "")" role="listitem" tabindex="0" title="@FolderTitle(r)" aria-label="Ouvrir le dossier @r.Folder.Name"
+                <div class="lx-fcard @(dropOver == r.Folder.Id ? "drop-target" : "")" role="listitem" tabindex="0" draggable="@(r.Right == FolderRight.Owner && !inApp ? "true" : null)" @ondragstart="() => { dragFolder = r.Folder.Id; }" @ondragend="EndDrag" title="@FolderTitle(r)" aria-label="Ouvrir le dossier @r.Folder.Name"
                      @onclick="() => OpenFolder(r.Folder.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenFolder(r.Folder.Id); }'
-                     @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = r.Folder.Id; }" @ondragleave="() => { if (dropOver == r.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(r.Folder.Id)"
+                     @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0 || (dragFolder != null && dragFolder != r.Folder.Id)) dropOver = r.Folder.Id; }" @ondragleave="() => { if (dropOver == r.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(r.Folder.Id)"
                      @oncontextmenu="() => { if (canMenu) menuFor = r.Folder.Id; }" @oncontextmenu:preventDefault="inApp && canMenu">
                     <div class="fp @(preview.Count == 0 ? "none" : "")">
                         @foreach (var pm in preview) { <span class="fpi"><MediaThumb Media="pm" All="media" /></span> }
@@ -134,6 +134,7 @@ else
                             @if (r.Right == FolderRight.Owner)
                             {
                                 <button type="button" role="menuitem" @onclick="() => { menuFor = null; renamingFolder = r; renameFolderValue = r.Folder.Name; folderError = null; }"><Ico Name="edit" Size="16" /> Renommer</button>
+                                <button type="button" role="menuitem" @onclick="() => { menuFor = null; reparenting = (r.Folder.Id, r.Folder.Name); }"><Ico Name="move" Size="16" /> Déplacer…</button>
                                 <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deletingFolder = r; }"><Ico Name="trash" Size="16" /> Supprimer</button>
                             }
                         </div>
@@ -339,6 +340,11 @@ else
             <button class="btn danger-solid" @onclick="() => DeleteFolder(df)">Supprimer</button>
         </div>
     </div>
+}
+
+@if (reparenting is { } rp)
+{
+    <FolderReparentDialog Kind="@ShareKind.PlaylistFolder" FolderId="rp.Id" FolderName="@rp.Name" OnClose="MovedFolder" />
 }
 
 @if (sharingItems is { } shi)
@@ -687,8 +693,22 @@ else
     {
         dragIds = picked.Contains(p.Id) ? PickedEditable().Select(x => x.Id).ToList() : new List<Guid> { p.Id };
     }
-    private void EndDrag() { dragIds = new(); dropOver = null; }
+    private Guid? dragFolder;                                    // dossier qu'on glisse sur un autre (PC)
+    private (Guid Id, string Name)? reparenting;                 // fenêtre « Déplacer le dossier »
+    private void EndDrag() { dragIds = new(); dragFolder = null; dropOver = null; }
+    private void MovedFolder(bool moved) { reparenting = null; if (moved) Load(); }
     private void DropOn(Guid? target)
+    {
+        if (dragFolder is { } df)   // un dossier glissé sur un autre : il y entre
+        {
+            EndDrag();
+            if (target is { } t && t != df) { var err = Library.MoveFolder(df, t); if (err != null) Toast.Error(err); else Toast.Ok("Dossier déplacé."); Load(); }
+            return;
+        }
+        DropLists(target);
+    }
+
+    private void DropLists(Guid? target)
     {
         var ids = dragIds.ToList();
         EndDrag();

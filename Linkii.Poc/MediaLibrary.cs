@@ -89,6 +89,11 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
 
     public string? RenameFolder(Guid id, string name) => store.Write(d => { return FolderOps.Rename(d, id, name); });
 
+    /// <summary>Déplacement d'un dossier dans un autre, ou à la racine (le dossier est alors dissous : ses fichiers et sous-dossiers vont à la racine).</summary>
+    public string? MoveFolder(Guid id, Guid? newParent) => store.Write(d => FolderOps.MoveFolder(d, id, newParent));
+    public List<FolderTarget> MoveFolderTargets(Guid id) => store.Read(d => FolderOps.MoveTargets(d, id));
+    public FolderContents ContentsOfFolder(Guid id) => store.Read(d => FolderOps.ContentsOf(d, id));
+
     /// <summary>Fichiers qui servent dans une app ou une liste de lecture, parmi ceux d'un dossier (à confirmer avant suppression).</summary>
     public List<string> UsedInFolder(Guid folderId) => Files().Where(m => m.FolderId == folderId).SelectMany(m => UsedBy(m.Id)).Distinct().ToList();
 

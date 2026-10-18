@@ -1,0 +1,79 @@
+@* Déplacer un dossier dans un autre dossier (médiathèque ou listes de lecture), ou à la racine : un dossier déplacé à la racine est dissous après confirmation,
+   ses fichiers (ou listes) et ses sous-dossiers vont à la racine. Fonctionne au doigt comme à la souris (liste de destinations, pas de glisser obligatoire). *@
+@inject MediaLibrary Media
+@inject PlaylistLibrary Lists
+@inject Toaster Toast
+
+<div class="modal-backdrop" @onclick="Close"></div>
+<div class="modal app-modal lx-reparent" role="dialog" aria-modal="true" aria-labelledby="rp-title">
+    <div class="modal-head">
+        <h3 id="rp-title">Déplacer « @FolderName »</h3>
+        <span class="grow"></span>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="modal-body">
+        <p class="hint" style="margin-top:0">Choisissez où ranger ce dossier (avec tout ce qu'il contient).</p>
+        <div class="lx-rpl" role="radiogroup" aria-label="Destination">
+            @foreach (var t in targets)
+            {
+                var target = t;
+                var on = chosen == target.Id && picked;
+                <button type="button" role="radio" aria-checked="@(on ? "true" : "false")" class="lx-rpr @(on ? "on" : "")" disabled="@(target.Reason != null)" @onclick="() => { chosen = target.Id; picked = true; error = null; }">
+                    <span class="lx-rpd" style="padding-left:@(target.Depth * 18)px"><Ico Name="@(target.Id == null ? "home" : "folder")" Size="16" /> <span>@(target.Id == null ? target.Path : target.Path.Split(" › ").Last())</span></span>
+                    @if (target.Reason != null) { <small>@target.Reason</small> }
+                    @if (on) { <Ico Name="check" Size="16" /> }
+                </button>
+            }
+        </div>
+        @if (picked && chosen == null)
+        {
+            <div class="lx-rpwarn" role="alert">
+                <Ico Name="alert" Size="16" />
+                <span><b>Ce dossier sera dissous.</b> Il disparaît, et ses @Plural(contents.Items, ItemWord, ItemWords) @(contents.Subfolders > 0 ? $"et {Plural(contents.Subfolders, "sous-dossier", "sous-dossiers")} " : "")vont à la racine. Rien n'est supprimé.</span>
+            </div>
+        }
+        @if (error != null) { <div class="err">@error</div> }
+    </div>
+    <div class="modal-actions">
+        <button class="btn ghost" @onclick="Close">Annuler</button>
+        <button class="btn @(picked && chosen == null ? "danger" : "")" disabled="@(!picked)" @onclick="Move">
+            @(picked && chosen == null ? "Dissoudre et envoyer à la racine" : "Déplacer ici")
+        </button>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Kind { get; set; } = ShareKind.MediaFolder;   // ShareKind.MediaFolder ou ShareKind.PlaylistFolder
+    [Parameter, EditorRequired] public Guid FolderId { get; set; }
+    [Parameter, EditorRequired] public string FolderName { get; set; } = "";
+    /// <summary>Appelé à la fermeture ; true si le dossier a bougé (la page recharge).</summary>
+    [Parameter] public EventCallback<bool> OnClose { get; set; }
+
+    private List<FolderTarget> targets = new();
+    private FolderContents contents = new(0, 0);
+    private Guid? chosen;
+    private bool picked;
+    private string? error;
+
+    private bool IsLists => Kind == ShareKind.PlaylistFolder;
+    private string ItemWord => IsLists ? "liste de lecture" : "fichier";
+    private string ItemWords => IsLists ? "listes de lecture" : "fichiers";
+
+    protected override void OnInitialized()
+    {
+        targets = IsLists ? Lists.MoveFolderTargets(FolderId) : Media.MoveFolderTargets(FolderId);
+        contents = IsLists ? Lists.ContentsOfFolder(FolderId) : Media.ContentsOfFolder(FolderId);
+    }
+
+    private static string Plural(int n, string one, string many) => $"{n} {(n > 1 ? many : one)}";
+    private Task Close() => OnClose.InvokeAsync(false);
+
+    private async Task Move()
+    {
+        if (!picked) return;
+        var err = IsLists ? Lists.MoveFolder(FolderId, chosen) : Media.MoveFolder(FolderId, chosen);
+        if (err != null) { error = err; return; }
+        Toast.Ok(chosen == null ? $"« {FolderName} » dissous : son contenu est à la racine." : $"« {FolderName} » déplacé.");
+        await OnClose.InvokeAsync(true);
+    }
+}
