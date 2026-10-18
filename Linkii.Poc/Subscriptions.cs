@@ -243,7 +243,7 @@ public static class Subscriptions
 }
 
 /// <summary>Applique le blocage faute de paiement : au démarrage puis toutes les heures, et prévient les écrans concernés.</summary>
-public class SubscriptionWorker(JsonStore store, Notifier notifier, PushService push, ILogger<SubscriptionWorker> log) : BackgroundService
+public class SubscriptionWorker(JsonStore store, Notifier notifier, AlertService alerts, ILogger<SubscriptionWorker> log) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -257,7 +257,7 @@ public class SubscriptionWorker(JsonStore store, Notifier notifier, PushService 
                 foreach (var id in ids.Distinct())
                 {
                     await notifier.NotifyClient(id);
-                    await push.ToClientAdmins(id, PushCategories.Billing, "Espace suspendu", "Le paiement de l'abonnement n'a pas été reçu à la date prévue : l'espace est suspendu.", "/");
+                    await alerts.Raise(id, Alerts.Billing, "Espace suspendu", "Le paiement de l'abonnement n'a pas été reçu à la date prévue : l'espace est suspendu.", "/");
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning(ex, "Blocage faute de paiement"); }

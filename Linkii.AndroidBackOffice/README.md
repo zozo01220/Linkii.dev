@@ -32,8 +32,9 @@ Le back-office peut tester sa présence pour savoir qu'il tourne dans l'app.
 
 ## Notifications (Firebase Cloud Messaging)
 
-Quatre catégories, que chaque administrateur coupe ou garde dans **Réglages › Compte et confidentialité › Notifications** : écrans hors ligne ou de retour (suit l'alerte réglée dans Réglages),
-synchronisation de dossier en échec (première erreur d'une série seulement), abonnement et essai (rappel, fin d'essai, espace suspendu), nouvelle personne dans l'organisation.
+Les notifications sont un canal des alertes de l'organisation (licence Growth), réglées dans **Réglages › Alertes et pause** : interrupteur général, « Par notification »
+(et/ou « Par e-mail »), puis les types suivis : écrans hors ligne ou de retour (après le délai réglé), synchronisation de dossier en échec (première erreur d'une série seulement),
+équipe (nouvelle personne), abonnement (rappel, fin d'essai, espace suspendu). Elles vont aux téléphones des administrateurs ; il n'y a plus de choix par personne.
 
 **Mise en place (une fois)**
 1. Créer un projet sur console.firebase.google.com, y ajouter une app Android `ch.linkii.backoffice`.
@@ -54,7 +55,7 @@ L'interrupteur est dans **Réglages › Compte et confidentialité › Verrouill
 
 ## Limites connues
 
-- Notifications jamais essayées avec un vrai projet Firebase ; pas de caméra (import depuis les fichiers de l'appareil seulement).
+- Notifications essayées le 18 octobre 2026 avec le projet Firebase `linkii-c213d` (écran hors ligne reçu sur un Samsung) ; la clé du compte de service doit être lisible par l'utilisateur du service (`linkii`) ; pas de caméra (import depuis les fichiers de l'appareil seulement).
 - Icône provisoire (vectorielle, identique au player).
 - Jamais essayée sur un appareil réel.
 

@@ -159,7 +159,7 @@ public class User
     public Guid? ResellerId { get; set; }   // null pour l'équipe Linkii
     public Guid? ClientId { get; set; }     // seulement pour un compte d'organisation (administrateur ou membre)
     public bool Disabled { get; set; }
-    /// <summary>Catégories de notification coupées par cette personne (voir <see cref="PushCategories"/>).</summary>
+    /// <summary>Ancien choix personnel des notifications (avant le 18 octobre 2026) : ignoré, les alertes se règlent pour l'organisation (voir <see cref="Alerts"/>).</summary>
     public List<string> PushMuted { get; set; } = new();
     /// <summary>Mot de passe provisoire (envoyé par e-mail) : à remplacer à la prochaine connexion.</summary>
     public bool MustChangePassword { get; set; }
@@ -339,10 +339,17 @@ public class Tenant
     public string Plan { get; set; } = Plans.Base;
     public bool IsGrowth => Plan == Plans.Growth;
 
-    // Supervision (Growth) : e-mail quand un écran tombe, pause des écrans
+    // Alertes (Growth, voir Alerts) : interrupteur général, canaux, types suivis ; pause des écrans
+    public bool AlertsOn { get; set; }
+    public bool AlertMail { get; set; }
+    public bool AlertPush { get; set; }
+    public List<string> AlertTypes { get; set; } = new();
+    public int AlertsVersion { get; set; }   // 1 : réglages d'alertes migrés (voir Alerts.Migrate)
+    /// <summary>Ancien interrupteur « Prévenir quand un écran tombe » (avant le 18 octobre 2026) : lu une fois par <see cref="Alerts.Migrate"/>.</summary>
     public bool AlertOffline { get; set; }
+    /// <summary>Délai avant l'alerte « écran hors ligne ».</summary>
     public int AlertOfflineMinutes { get; set; } = 10;
-    /// <summary>Destinataire des alertes ; vide : tous les administrateurs de l'organisation.</summary>
+    /// <summary>Destinataire des e-mails d'alerte ; vide : tous les administrateurs de l'organisation.</summary>
     public string AlertEmail { get; set; } = "";
     /// <summary>Une pause se termine seule après ce délai (0 : reprise manuelle seulement).</summary>
     public int PauseResumeMinutes { get; set; } = 60;

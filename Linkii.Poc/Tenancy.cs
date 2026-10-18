@@ -440,6 +440,7 @@ public static class Seed
             AccessLevels.Migrate(db);
             Signup.MarkVerified(db);
             Subscriptions.MigrateResellerShare(db);
+            Alerts.Migrate(db);
 
             if (!db.Users.Any(u => u.Role == Roles.PlatformAdmin))
             {

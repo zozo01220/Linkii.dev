@@ -1,10 +1,8 @@
 @using Microsoft.JSInterop
-@inject JsonStore Root
-@inject TenantContext Ctx
 @inject Toaster Toast
 @inject IJSRuntime JS
 
-@* Réglages de l'application Android : notifications (par personne) et verrouillage biométrique (par appareil). *@
+@* Réglages de l'application Android : verrouillage biométrique (par appareil). Les notifications se règlent pour l'organisation, dans Alertes et pause. *@
 
 @if (inApp)
 {
@@ -17,31 +15,8 @@
     </div>
 }
 
-@if (Ctx.User.IsInRole(Roles.ClientAdmin))
-{
-    <div class="rg-card">
-        <header><h3>Notifications</h3><small>@devices appareil(s) enregistré(s)</small></header>
-        @foreach (var c in PushCategories.All)
-        {
-            var id = c.Id;
-            var on = !muted.Contains(id);
-            <div class="sv-row"><div class="t"><b>@c.Label</b><small>@c.Hint</small></div>
-                <div class="ctl"><button type="button" class="switch @(on ? "on" : "")" role="switch" aria-checked="@(on ? "true" : "false")" aria-label="@c.Label" @onclick="() => Toggle(id)"><span></span></button></div></div>
-        }
-        <div class="sv-row"><div class="t"><small>Reçues sur le téléphone ou la tablette où l'application Linkii est installée.</small></div></div>
-    </div>
-}
-
 @code {
-    private HashSet<string> muted = new();
-    private int devices;
     private bool inApp, bioAvailable, bioOn;
-
-    protected override void OnInitialized()
-    {
-        var uid = Ctx.UserId;
-        (muted, devices) = Root.Read(d => (d.Users.FirstOrDefault(u => u.Id == uid)?.PushMuted.ToHashSet() ?? new(), d.PushDevices.Count(p => p.UserId == uid)));
-    }
 
     // Verrouillage biométrique : proposé seulement dans l'application Android.
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -63,12 +38,5 @@
         try { await JS.InvokeVoidAsync("linkiiBio.set", !bioOn); bioOn = await JS.InvokeAsync<bool>("linkiiBio.enabled"); }
         catch (JSException) { return; }
         Toast.Ok(bioOn ? "Verrouillage activé sur cet appareil." : "Verrouillage désactivé.");
-    }
-
-    private void Toggle(string category)
-    {
-        var uid = Ctx.UserId;
-        if (!muted.Remove(category)) muted.Add(category);
-        Root.Write(d => { if (d.Users.FirstOrDefault(u => u.Id == uid) is { } u) u.PushMuted = muted.ToList(); });
     }
 }

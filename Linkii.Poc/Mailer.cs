@@ -218,10 +218,29 @@ public class Mailer(IConfiguration config, JsonStore store, SecretBox box, ILogg
             text += (back.Count == 1 ? "De nouveau en ligne : " : "De nouveau en ligne : ") + string.Join(", ", back) + "\n\n";
             html += $"""<p style="margin:0 0 16px">De nouveau en ligne : <b>{E(string.Join(", ", back))}</b></p>""";
         }
-        text += $"Vérifiez l'alimentation et le réseau de l'écran. Votre espace : {appUrl}\n\n— L'équipe {brand}\n(Alertes réglables dans Réglages › Supervision.)";
-        html += $"""<p style="margin:0 0 6px;color:#5A6B80;font-size:13px">Vérifiez l'alimentation et le réseau de l'écran.</p>{Button(r, appUrl, "Ouvrir mes écrans")}<p style="margin:0;color:#5A6B80;font-size:12px">Alertes réglables dans Réglages › Supervision.</p>""";
+        text += $"Vérifiez l'alimentation et le réseau de l'écran. Votre espace : {appUrl}\n\n— L'équipe {brand}\n({SettingsHint})";
+        html += $"""<p style="margin:0 0 6px;color:#5A6B80;font-size:13px">Vérifiez l'alimentation et le réseau de l'écran.</p>{Button(r, appUrl, "Ouvrir mes écrans")}<p style="margin:0;color:#5A6B80;font-size:12px">{SettingsHint}</p>""";
         return Send(email, $"{brand} · {title}", Frame(r, html), text, brand, r.SenderEmail);
     }
+
+    /// <summary>Alerte simple (synchronisation, équipe, abonnement) : titre, texte et un bouton vers la page concernée.</summary>
+    public Task<string?> SendAlert(Reseller r, string appUrl, string org, string name, string email, string title, string body, string link)
+    {
+        var brand = BrandOf(r);
+        var hello = Hello(name);
+        var text = $"{hello}\n\n{title}\n{body}\n\nEspace : {org}\n{link}\n\n— L'équipe {brand}\n({SettingsHint})";
+        var html = $"""
+            <p style="margin:0 0 14px">{E(hello)}</p>
+            <p style="margin:0 0 6px;font-weight:600">{E(title)}</p>
+            <p style="margin:0 0 6px">{E(body)}</p>
+            <p style="margin:0 0 18px;color:#5A6B80;font-size:13px">Espace : {E(org)}</p>
+            {Button(r, link, "Ouvrir mon espace")}
+            <p style="margin:0;color:#5A6B80;font-size:12px">{SettingsHint}</p>
+            """;
+        return Send(email, $"{brand} · {title}", Frame(r, html), text, brand, r.SenderEmail);
+    }
+
+    private const string SettingsHint = "Alertes réglables dans Réglages › Alertes et pause.";
 
     private static string E(string s) => WebUtility.HtmlEncode(s);
     private static string BrandOf(Reseller r) => r.DisplayName is { Length: > 0 } b ? b : "Linkii";

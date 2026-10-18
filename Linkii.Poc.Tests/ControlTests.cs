@@ -212,7 +212,7 @@ public class ControlTests
     public void An_offline_screen_is_reported_once_after_the_chosen_delay()
     {
         var (db, c, a) = World();
-        c.AlertOffline = true; c.AlertOfflineMinutes = 10;
+        On(c); c.AlertOfflineMinutes = 10;
         var started = Now.AddHours(-1);
         var down = Seen(db, c, a, "Cafétéria", Now.AddMinutes(-12));
         Seen(db, c, a, "Hall", Now.AddSeconds(-20));
@@ -229,7 +229,7 @@ public class ControlTests
     public void A_screen_that_comes_back_is_reported_once_and_can_fall_again()
     {
         var (db, c, a) = World();
-        c.AlertOffline = true; c.AlertOfflineMinutes = 5;
+        On(c); c.AlertOfflineMinutes = 5;
         var started = Now.AddHours(-1);
         var s = Seen(db, c, a, "Cafétéria", Now.AddMinutes(-8));
         ScreenAlerts.Plan(db, Now, started);
@@ -244,22 +244,54 @@ public class ControlTests
     public void Nothing_is_reported_right_after_the_server_starts_nor_without_growth_nor_when_disabled()
     {
         var (db, c, a) = World();
-        c.AlertOffline = true; c.AlertOfflineMinutes = 10;
+        On(c); c.AlertOfflineMinutes = 10;
         Seen(db, c, a, "Cafétéria", Now.AddMinutes(-30));
         Assert.Empty(ScreenAlerts.Plan(db, Now, Now.AddMinutes(-3)));   // les écrans n'ont pas eu le temps de se reconnecter
 
-        c.AlertOffline = false;
+        c.AlertsOn = false;   // interrupteur général coupé
         Assert.Empty(ScreenAlerts.Plan(db, Now, Now.AddHours(-1)));
 
-        c.AlertOffline = true; c.Plan = Plans.Base;
+        On(c); c.AlertTypes.Remove(Alerts.Screens);   // type non suivi
         Assert.Empty(ScreenAlerts.Plan(db, Now, Now.AddHours(-1)));
+
+        On(c); c.AlertMail = c.AlertPush = false;   // aucun canal
+        Assert.Empty(ScreenAlerts.Plan(db, Now, Now.AddHours(-1)));
+
+        On(c); c.Plan = Plans.Base;
+        Assert.Empty(ScreenAlerts.Plan(db, Now, Now.AddHours(-1)));
+    }
+
+    private static void On(Tenant c)
+    {
+        c.AlertsOn = c.AlertMail = true;
+        c.AlertPush = false;
+        c.AlertTypes = new() { Alerts.Screens };
+    }
+
+    [Fact]
+    public void Old_offline_switch_keeps_mail_and_adds_notifications_for_every_type()
+    {
+        var db = new Db();
+        var before = new Tenant { Plan = Plans.Growth, AlertOffline = true };
+        var off = new Tenant { Plan = Plans.Growth };
+        db.Clients.AddRange(new[] { before, off });
+        Alerts.Migrate(db);
+
+        Assert.True(before.AlertsOn && before.AlertMail && before.AlertPush);
+        Assert.Equal(Alerts.All.Select(a => a.Id), before.AlertTypes);
+        Assert.False(off.AlertsOn || off.AlertMail || off.AlertPush);   // tout coupé, comme une nouvelle organisation
+        Assert.Empty(off.AlertTypes);
+
+        before.AlertsOn = false;
+        Alerts.Migrate(db);   // une seule fois
+        Assert.False(before.AlertsOn);
     }
 
     [Fact]
     public void A_screen_never_seen_is_not_reported()
     {
         var (db, c, a) = World();
-        c.AlertOffline = true;
+        On(c);
         Scr(db, c, a, "Neuf");
         Assert.Empty(ScreenAlerts.Plan(db, Now, Now.AddHours(-1)));
     }
@@ -271,11 +303,11 @@ public class ControlTests
         db.Users.Add(new User { Email = "claire@horizon.ch", Name = "Claire", Role = Roles.ClientAdmin, ClientId = c.Id, EmailVerifiedUtc = Now });
         db.Users.Add(new User { Email = "off@horizon.ch", Role = Roles.ClientAdmin, ClientId = c.Id, Disabled = true });
         db.Users.Add(new User { Email = "membre@horizon.ch", Role = Roles.ClientMember, ClientId = c.Id });
-        Assert.Equal(new[] { "claire@horizon.ch" }, ScreenAlerts.Recipients(db, c).Select(r => r.Email));
+        Assert.Equal(new[] { "claire@horizon.ch" }, Alerts.Recipients(db, c).Select(r => r.Email));
         c.AlertEmail = "alertes@horizon.ch";
-        Assert.Equal(new[] { "alertes@horizon.ch" }, ScreenAlerts.Recipients(db, c).Select(r => r.Email));
+        Assert.Equal(new[] { "alertes@horizon.ch" }, Alerts.Recipients(db, c).Select(r => r.Email));
         c.AlertEmail = "pas une adresse";
-        Assert.Equal(new[] { "claire@horizon.ch" }, ScreenAlerts.Recipients(db, c).Select(r => r.Email));
+        Assert.Equal(new[] { "claire@horizon.ch" }, Alerts.Recipients(db, c).Select(r => r.Email));
     }
 }
 

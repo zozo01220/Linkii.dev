@@ -192,32 +192,61 @@
                 <div class="rg-ph"><h2>Alertes et pause</h2><p>Soyez prévenu d'une panne et gardez la main sur le direct.</p></div>
                 @if (!growth)
                 {
-                    <div class="sv-upsell"><Ico Name="lock" Size="18" /><span class="grow">La supervision, le contrôle du direct (aperçu, pause, redémarrage) et les murs d'écrans sont inclus dans la licence <b>Growth</b>.</span></div>
+                    <div class="sv-upsell"><Ico Name="lock" Size="18" /><span class="grow">Les alertes, le contrôle du direct (aperçu, pause, redémarrage) et les murs d'écrans sont inclus dans la licence <b>Growth</b>.</span></div>
                 }
-                <div class="rg-card">
-                    <header><h3>Alertes par e-mail</h3></header>
-                    <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
-                        <div class="t"><b>Prévenir quand un écran tombe</b><small>Un seul e-mail par panne, puis un second quand l'écran revient en ligne.</small></div>
-                        <div class="ctl"><button type="button" class="switch @(alertOffline ? "on" : "")" role="switch" aria-checked="@(alertOffline ? "true" : "false")" aria-label="Alertes e-mail" disabled="@(!growth)" @onclick="() => { alertOffline = !alertOffline; dirty = true; }"><span></span></button></div>
+                @* Alertes en 3 étapes : ① interrupteur général ② canaux (e-mail, notification) ③ types suivis. Couper ① garde les choix de ② et ③. *@
+                var alertsLive = growth && alertsOn;
+                <div class="rg-card al-master @(growth ? "" : "al-off")" data-tip="@(growth ? null : Plans.LockedHint)">
+                    <div class="sv-row"><span class="al-num">1</span>
+                        <div class="t"><b>Activer les alertes</b><small>Un seul interrupteur pour tout couper ou tout rallumer, sans perdre vos choix.</small></div>
+                        <div class="ctl"><button type="button" class="switch @(alertsOn ? "on" : "")" role="switch" aria-checked="@(alertsOn ? "true" : "false")" aria-label="Activer les alertes" disabled="@(!growth)" @onclick="() => { alertsOn = !alertsOn; dirty = true; }"><span></span></button></div>
                     </div>
-                    <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
-                        <div class="t"><b>Délai avant l'alerte</b><small>Durée pendant laquelle un écran doit rester hors ligne avant l'envoi de l'e-mail.</small></div>
-                        <div class="ctl">
-                            <select class="rg-in short" @bind="alertMinutes" disabled="@(!growth || !alertOffline)" aria-label="Délai avant l'alerte">
-                                @foreach (var (m, l) in AlertDelays) { <option value="@m">@l</option> }
-                            </select>
-                        </div>
+                </div>
+                <div class="rg-card @(alertsLive ? "" : "al-off")">
+                    <header><span class="al-num">2</span><h3>Comment être prévenu</h3></header>
+                    <div class="sv-row">
+                        <div class="t"><b>Par e-mail</b><small>Un message dans la boîte e-mail.</small></div>
+                        <div class="ctl"><button type="button" class="switch @(alertMail ? "on" : "")" role="switch" aria-checked="@(alertMail ? "true" : "false")" aria-label="Par e-mail" disabled="@(!alertsLive)" @onclick="() => { alertMail = !alertMail; dirty = true; }"><span></span></button></div>
                     </div>
-                    <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
-                        <div class="t"><b>Destinataires</b><small>Par défaut, tous les administrateurs de l'organisation.</small></div>
-                        <div class="ctl" style="flex-direction:column;align-items:stretch">
-                            <select class="rg-in" @bind="alertTarget" disabled="@(!growth || !alertOffline)" aria-label="Destinataires des alertes">
+                    @if (alertMail)
+                    {
+                        <div class="al-sub">
+                            <select class="rg-in" @bind="alertTarget" disabled="@(!alertsLive)" aria-label="Destinataires des e-mails">
                                 <option value="admins">Tous les administrateurs</option>
                                 <option value="custom">Une adresse dédiée…</option>
                             </select>
-                            @if (alertTarget == "custom") { <input class="rg-in" type="email" placeholder="alertes@exemple.ch" aria-label="Adresse des alertes" @bind="alertEmail" disabled="@(!growth || !alertOffline)" /> }
+                            @if (alertTarget == "custom") { <input class="rg-in" type="email" placeholder="alertes@exemple.ch" aria-label="Adresse des alertes" @bind="alertEmail" disabled="@(!alertsLive)" /> }
                         </div>
+                    }
+                    <div class="sv-row">
+                        <div class="t"><b>Par notification</b><small>Sur les téléphones où l'app Linkii est installée et connectée avec un compte administrateur@(pushDevices > 0 ? $" ({pushDevices} enregistré{(pushDevices > 1 ? "s" : "")})" : " (aucun enregistré pour l'instant)").</small></div>
+                        <div class="ctl"><button type="button" class="switch @(alertPush ? "on" : "")" role="switch" aria-checked="@(alertPush ? "true" : "false")" aria-label="Par notification" disabled="@(!alertsLive)" @onclick="() => { alertPush = !alertPush; dirty = true; }"><span></span></button></div>
                     </div>
+                    @if (alertsLive && !alertMail && !alertPush)
+                    {
+                        <div class="sv-row"><div class="t"><small class="al-warn">Aucun canal choisi : aucune alerte ne sera envoyée.</small></div></div>
+                    }
+                </div>
+                <div class="rg-card @(alertsLive ? "" : "al-off")">
+                    <header><span class="al-num">3</span><h3>De quoi être prévenu</h3></header>
+                    @foreach (var (id, label, hint) in Alerts.All)
+                    {
+                        var kind = id;
+                        var on = alertTypes.Contains(kind);
+                        <div class="sv-row">
+                            <div class="t"><b>@label</b><small>@hint</small></div>
+                            <div class="ctl"><button type="button" class="switch @(on ? "on" : "")" role="switch" aria-checked="@(on ? "true" : "false")" aria-label="@label" disabled="@(!alertsLive)" @onclick="() => { if (!alertTypes.Remove(kind)) alertTypes.Add(kind); dirty = true; }"><span></span></button></div>
+                        </div>
+                        @if (kind == Alerts.Screens && on)
+                        {
+                            <div class="al-sub al-inline">
+                                <span>Alerter après</span>
+                                <select class="rg-in short" @bind="alertMinutes" disabled="@(!alertsLive)" aria-label="Délai avant l'alerte">
+                                    @foreach (var (m, l) in AlertDelays) { <option value="@m">@l</option> }
+                                </select>
+                            </div>
+                        }
+                    }
                 </div>
                 <div class="rg-card">
                     <header><h3>Pause des écrans</h3><small>Se lance depuis la carte d'un écran (bouton Pause).</small></header>
@@ -305,11 +334,13 @@
         ("Mon compte", new[] { new NavItem("compte", "Compte et confidentialité", "user") }),
     };
 
-    private static readonly (int Min, string Label)[] AlertDelays = { (5, "5 minutes"), (10, "10 minutes"), (15, "15 minutes"), (30, "30 minutes"), (60, "1 heure") };
+    private static readonly (int Min, string Label)[] AlertDelays = { (1, "1 minute"), (5, "5 minutes"), (10, "10 minutes"), (15, "15 minutes"), (30, "30 minutes"), (60, "1 heure") };
     private static readonly (int Min, string Label)[] PauseDelays = { (15, "15 minutes"), (30, "30 minutes"), (60, "1 heure"), (240, "4 heures"), (0, "Jamais (reprise manuelle)") };
 
-    // Supervision (Growth)
-    private bool growth, alertOffline;
+    // Alertes et pause (Growth)
+    private bool growth, alertsOn, alertMail, alertPush;
+    private HashSet<string> alertTypes = new();
+    private int pushDevices;   // téléphones des administrateurs qui reçoivent les notifications
     private int alertMinutes = 10, pauseMinutes = 60;
     private string alertTarget = "admins", alertEmail = "";
     private readonly AppField pauseField = new() { Key = "pause", Type = "media", Accept = "image", Label = "Visuel de pause" };
@@ -355,7 +386,10 @@
         if (TabParam == "applications") { Nav.NavigateTo("/integrations" + new Uri(Nav.Uri).Query.Replace("tab=applications&", "").Replace("?tab=applications", ""), replace: true); return; }
         var t = Store.Read(d => d.Tenant);
         name = t.Name; timezone = t.Timezone; duration = t.DefaultDurationSec; reloadHour = t.ReloadHour;
-        growth = t.IsGrowth; alertOffline = t.AlertOffline; alertMinutes = AlertDelays.Any(a => a.Min == t.AlertOfflineMinutes) ? t.AlertOfflineMinutes : 10;
+        growth = t.IsGrowth; (alertsOn, alertMail, alertPush, alertTypes) = (t.AlertsOn, t.AlertMail, t.AlertPush, t.AlertTypes.ToHashSet());
+        var cid = t.Id;
+        pushDevices = Root.Read(d => { var admins = d.Users.Where(u => u.ClientId == cid && u.Role == Roles.ClientAdmin && !u.Disabled).Select(u => u.Id).ToHashSet(); return d.PushDevices.Count(p => admins.Contains(p.UserId)); });
+        alertMinutes = AlertDelays.Any(a => a.Min == t.AlertOfflineMinutes) ? t.AlertOfflineMinutes : 10;
         alertTarget = t.AlertEmail.Length > 0 ? "custom" : "admins"; alertEmail = t.AlertEmail;
         pauseMinutes = PauseDelays.Any(p => p.Min == t.PauseResumeMinutes) ? t.PauseResumeMinutes : 60;
         pauseValues["pause"] = t.PauseMediaId?.ToString() ?? "";
@@ -427,7 +461,7 @@
         techPin = techPin.Trim();
         if (techPinOn && techPin.Length > 0 && !TechPin.Valid(techPin)) { Toast.Error("Le code du menu technicien doit comporter 4 à 8 chiffres."); return; }
         var target = alertTarget == "custom" ? alertEmail.Trim() : "";
-        if (growth && alertOffline && alertTarget == "custom" && !System.Net.Mail.MailAddress.TryCreate(target, out _)) { Toast.Error("L'adresse des alertes n'est pas valide."); return; }
+        if (growth && alertsOn && alertMail && alertTarget == "custom" && !System.Net.Mail.MailAddress.TryCreate(target, out _)) { Toast.Error("L'adresse des alertes n'est pas valide."); return; }
         // plages de veille et profils de luminosité (composants de l'aire) : enregistrés avec le reste, sans second bouton
         if (sleepEnabled && sleepRef != null) await sleepRef.Persist();
         if (dimEnabled && dimRef != null && !await dimRef.Persist()) return;
@@ -445,9 +479,12 @@
                 t.TechPinUtc = DateTime.UtcNow; t.TechPinBy = Ctx.Email ?? "";
             }
             t.DefaultScreenType = spec.Type; t.DefaultOrientation = spec.Orientation; t.DefaultResolution = spec.Resolution;
-            if (t.IsGrowth)   // supervision : licence Growth (contrôlée ici aussi, pas seulement dans l'interface)
+            if (t.IsGrowth)   // alertes et pause : licence Growth (contrôlée ici aussi, pas seulement dans l'interface)
             {
-                t.AlertOffline = alertOffline; t.AlertOfflineMinutes = alertMinutes; t.AlertEmail = target;
+                t.AlertsOn = alertsOn; t.AlertMail = alertMail; t.AlertPush = alertPush;
+                t.AlertTypes = Alerts.All.Select(a => a.Id).Where(alertTypes.Contains).ToList();
+                t.AlertOfflineMinutes = alertMinutes;
+                t.AlertEmail = target;   // e-mail coupé : le choix reste (masqué) pour plus tard
                 t.PauseResumeMinutes = pauseMinutes;
                 t.PauseMediaId = pauseImage is { } pm && d.Media.Any(m => m.Id == pm && m.Type == "image") ? pauseImage : null;
             }

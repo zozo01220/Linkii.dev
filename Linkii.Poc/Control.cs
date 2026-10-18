@@ -171,7 +171,7 @@ public static class ScreenAlerts
     public static List<AlertBatch> Plan(Db db, DateTime now, DateTime startedUtc)
     {
         var batches = new List<AlertBatch>();
-        foreach (var c in db.Clients.Where(c => c.IsGrowth && c.AlertOffline && !c.IsCut))
+        foreach (var c in db.Clients.Where(c => Alerts.Wants(c, Alerts.Screens) && !c.IsCut))
         {
             var delay = TimeSpan.FromMinutes(Math.Clamp(c.AlertOfflineMinutes, 1, 1440));
             if (now - startedUtc < delay) continue;
@@ -188,17 +188,10 @@ public static class ScreenAlerts
         }
         return batches;
     }
-
-    /// <summary>Destinataires : l'adresse choisie, sinon les administrateurs de l'organisation.</summary>
-    public static List<(string Email, string Name)> Recipients(Db db, Tenant c) =>
-        System.Net.Mail.MailAddress.TryCreate(c.AlertEmail?.Trim(), out var one)
-            ? new() { (one.Address, "") }
-            : db.Users.Where(u => u.ClientId == c.Id && u.Role == Roles.ClientAdmin && !u.Disabled && !u.AwaitsVerification && u.Email.Contains('@'))
-                .Select(u => (u.Email, u.Name)).ToList();
 }
 
-/// <summary>Toutes les minutes : commandes sans réponse, pauses terminées, et e-mail quand un écran tombe (ou revient) si l'organisation l'a activé.</summary>
-public class ScreenWatchWorker(JsonStore store, Mailer mail, PushService push, ResellerResolver resolver, ILogger<ScreenWatchWorker> log) : BackgroundService
+/// <summary>Toutes les minutes : commandes sans réponse, pauses terminées, et alerte quand un écran tombe (ou revient) si l'organisation l'a activée.</summary>
+public class ScreenWatchWorker(JsonStore store, Mailer mail, AlertService alerts, ILogger<ScreenWatchWorker> log) : BackgroundService
 {
     private readonly DateTime started = DateTime.UtcNow;
 
@@ -217,26 +210,25 @@ public class ScreenWatchWorker(JsonStore store, Mailer mail, PushService push, R
         var work = store.Write(db =>
         {
             foreach (var s in db.Screens.Where(s => s.Commands.Count > 0 || s.PausedUtc != null)) ScreenControl.Expire(s, now);
-            return ScreenAlerts.Plan(db, now, started).Select(b => (b, Rcpt: ScreenAlerts.Recipients(db, b.Client),
-                Reseller: db.Resellers.FirstOrDefault(r => r.Id == b.Client.ResellerId))).ToList();
+            return ScreenAlerts.Plan(db, now, started);
         });
-        foreach (var (b, rcpt, reseller) in work)
+        foreach (var b in work)
         {
-            if (reseller == null) continue;
-            var app = resolver.LoginUrl(reseller)[..^"login".Length];
-            var down = b.Down.Select(s => (s.Name, Since: Local(b.Client, s.LastSeenUtc ?? now))).ToList();
+            var c = b.Client;
+            var down = b.Down.Select(s => (s.Name, Since: Local(c, s.LastSeenUtc ?? now))).ToList();
             var back = b.Back.Select(s => s.Name).ToList();
-            if (b.Down.Count > 0)
-                await push.ToClientAdmins(b.Client.Id, PushCategories.Screens, b.Down.Count == 1 ? $"Écran hors ligne : {b.Down[0].Name}" : $"{b.Down.Count} écrans hors ligne",
-                    string.Join(", ", down.Take(3).Select(d => $"{d.Name} (depuis {d.Since})")) + (down.Count > 3 ? "…" : ""), "/");
-            if (b.Back.Count > 0)
-                await push.ToClientAdmins(b.Client.Id, PushCategories.Screens, b.Back.Count == 1 ? $"Écran de retour : {back[0]}" : $"{b.Back.Count} écrans de retour",
+            // notification : une par sens ; e-mail : un seul, qui regroupe pannes et retours
+            var title = b.Down.Count > 0
+                ? (b.Down.Count == 1 ? $"Écran hors ligne : {b.Down[0].Name}" : $"{b.Down.Count} écrans hors ligne")
+                : (b.Back.Count == 1 ? $"Écran de retour : {back[0]}" : $"{b.Back.Count} écrans de retour");
+            var body = b.Down.Count > 0
+                ? string.Join(", ", down.Take(3).Select(d => $"{d.Name} (depuis {d.Since})")) + (down.Count > 3 ? "…" : "")
+                : string.Join(", ", back.Take(3)) + (back.Count > 3 ? "…" : "");
+            await alerts.Raise(c.Id, Alerts.Screens, title, body, "/",
+                buildMail: (r, app, name, email) => mail.SendScreenAlert(r, app, c.Name, name, email, down, back, c.AlertOfflineMinutes));
+            if (b.Down.Count > 0 && b.Back.Count > 0)   // les retours du même passage : notification seule (déjà dans l'e-mail)
+                await alerts.RaisePush(c.Id, Alerts.Screens, b.Back.Count == 1 ? $"Écran de retour : {back[0]}" : $"{b.Back.Count} écrans de retour",
                     string.Join(", ", back.Take(3)) + (back.Count > 3 ? "…" : ""), "/");
-            foreach (var (email, name) in rcpt)
-            {
-                var err = await mail.SendScreenAlert(reseller, app, b.Client.Name, name, email, down, back, b.Client.AlertOfflineMinutes);
-                if (err != null) log.LogWarning("Alerte d'écran non envoyée à {Email} : {Error}", email, err);
-            }
         }
     }
 

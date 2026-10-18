@@ -14,24 +14,11 @@ public class PushDevice
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 }
 
-/// <summary>Catégories de notification : chaque personne choisit celles qu'elle reçoit (<see cref="User.PushMuted"/>).</summary>
-public static class PushCategories
-{
-    public const string Screens = "screens", Sync = "sync", Billing = "billing", Members = "members";
-
-    public static readonly (string Id, string Label, string Hint)[] All =
-    {
-        (Screens, "Écrans hors ligne", "Un écran cesse d'émettre, ou revient (selon l'alerte réglée dans Réglages)."),
-        (Sync, "Synchronisations", "Une synchronisation de dossier échoue."),
-        (Billing, "Abonnement et essai", "Fin d'essai proche ou terminée, espace suspendu faute de paiement."),
-        (Members, "Équipe", "Une personne est ajoutée à l'organisation."),
-    };
-}
-
 /// <summary>
 /// Envoi de notifications push par Firebase Cloud Messaging (API HTTP v1, sans bibliothèque). Actif seulement si
 /// <c>Linkii:Fcm:ServiceAccountFile</c> désigne le fichier JSON d'un compte de service Firebase ; sinon chaque envoi est ignoré.
 /// Les messages ne portent que des données (titre, texte, page à ouvrir) : l'app construit la notification.
+/// Appelé par <see cref="AlertService"/>, qui vérifie les réglages d'alertes de l'organisation.
 /// </summary>
 public class PushService(JsonStore store, IConfiguration config, ILogger<PushService> log)
 {
@@ -43,7 +30,7 @@ public class PushService(JsonStore store, IConfiguration config, ILogger<PushSer
     private string? KeyFile => config["Linkii:Fcm:ServiceAccountFile"];
     public bool Enabled => !string.IsNullOrWhiteSpace(KeyFile) && File.Exists(KeyFile);
 
-    /// <summary>Prévient les administrateurs d'une organisation qui n'ont pas coupé cette catégorie. Ne lève jamais d'exception.</summary>
+    /// <summary>Prévient les administrateurs d'une organisation sur leurs téléphones. Ne lève jamais d'exception.</summary>
     public async Task ToClientAdmins(Guid clientId, string category, string title, string body, string? path = null, Guid? except = null)
     {
         try
@@ -51,8 +38,8 @@ public class PushService(JsonStore store, IConfiguration config, ILogger<PushSer
             if (!Enabled) return;
             var targets = store.Read(db =>
             {
-                var users = db.Users.Where(u => u.ClientId == clientId && u.Role == Roles.ClientAdmin && !u.Disabled && u.Id != except
-                    && !u.PushMuted.Contains(category)).Select(u => u.Id).ToHashSet();
+                var users = db.Users.Where(u => u.ClientId == clientId && u.Role == Roles.ClientAdmin && !u.Disabled && u.Id != except)
+                    .Select(u => u.Id).ToHashSet();
                 return db.PushDevices.Where(d => users.Contains(d.UserId)).Select(d => (d.Id, d.Token)).ToList();
             });
             foreach (var (id, token) in targets)

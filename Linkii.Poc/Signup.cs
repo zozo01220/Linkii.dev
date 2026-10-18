@@ -205,7 +205,7 @@ public static class Signup
 /// Toutes les 30 minutes : supprime les inscriptions jamais validées, envoie le rappel 2 jours avant la fin de l'essai,
 /// et prévient les écrans d'une organisation dont l'essai vient de se terminer (ils affichent « Essai terminé »).
 /// </summary>
-public class SignupWorker(JsonStore store, Mailer mail, Notifier notifier, PushService push, ResellerResolver resolver, ILogger<SignupWorker> log) : BackgroundService
+public class SignupWorker(JsonStore store, Mailer mail, Notifier notifier, AlertService alerts, ResellerResolver resolver, ILogger<SignupWorker> log) : BackgroundService
 {
     public static readonly TimeSpan Every = TimeSpan.FromMinutes(30);
     public static readonly TimeSpan ReminderBefore = TimeSpan.FromDays(2);
@@ -240,7 +240,8 @@ public class SignupWorker(JsonStore store, Mailer mail, Notifier notifier, PushS
             var app = resolver.LoginUrl(r!)[..^"login".Length];
             var err = await mail.SendTrialReminder(r!, app, owner!.Name, owner.Email, c.Name, Signup.Day(c, c.TrialEndsUtc!.Value), c.TrialDaysLeft(now));
             if (err != null) log.LogWarning("Rappel de fin d'essai non envoyé à {Email} : {Error}", owner.Email, err);
-            await push.ToClientAdmins(c.Id, PushCategories.Billing, "Votre essai se termine bientôt", $"Il reste {c.TrialDaysLeft(now)} jour(s) d'essai gratuit.", "/");
+            // rappel ci-dessus : envoyé au créateur de l'espace quels que soient les réglages ; l'alerte prévient les autres destinataires choisis
+            await alerts.Raise(c.Id, Alerts.Billing, "Votre essai se termine bientôt", $"Il reste {c.TrialDaysLeft(now)} jour(s) d'essai gratuit.", "/", skipEmail: owner.Email);
             store.Write(db => { if (db.Clients.FirstOrDefault(x => x.Id == c.Id) is { } x) x.TrialReminderSentUtc = now; });   // une seule tentative
         }
 
@@ -253,7 +254,7 @@ public class SignupWorker(JsonStore store, Mailer mail, Notifier notifier, PushS
         foreach (var id in ended)
         {
             await notifier.NotifyClient(id);
-            await push.ToClientAdmins(id, PushCategories.Billing, "Essai gratuit terminé", "L'espace est suspendu : choisissez un abonnement pour le réactiver.", "/");
+            await alerts.Raise(id, Alerts.Billing, "Essai gratuit terminé", "L'espace est suspendu : choisissez un abonnement pour le réactiver.", "/");
         }
     }
 }

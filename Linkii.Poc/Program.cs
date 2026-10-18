@@ -27,6 +27,7 @@ builder.Services.AddScoped<TenantStore>();
 builder.Services.AddScoped<ModeService>();
 builder.Services.AddSingleton<Notifier>();
 builder.Services.AddSingleton<PushService>();   // notifications push (Firebase) vers l'app Android du back-office
+builder.Services.AddSingleton<AlertService>();  // alertes de l'organisation : e-mail et/ou notification selon les Réglages
 builder.Services.AddSingleton<PreviewGrants>();   // jetons d'aperçu du simulateur
 builder.Services.AddSingleton<VideoConverter>();
 builder.Services.AddSingleton<MediaImporter>();

@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Alertes et notifications par cas</title>
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--row:#EDF1F5;--brand:#0B1F3A;--brand-tint:#EBEDF0;--signal:#3B82C4;--ok:#1E8E5A;--warn-bg:#FBF0DC;--warn-ink:#7A4F12;--radius:4px}
+*{box-sizing:border-box}html,body{margin:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
+h1,h2,h3,p{margin:0;font-weight:500}p{font-weight:400}b{font-weight:500}button,select,input{font:inherit;color:inherit}
+.note{background:#FFF8E1;border-bottom:1px dashed #E0B84A;padding:10px 24px;font-size:13px;color:#6B5200}
+.wrap{max-width:1100px;margin:0 auto;padding:28px 24px 90px}
+h1{font-size:26px}.lead{color:var(--muted);margin:4px 0 22px;max-width:800px}
+.tabs{display:flex;gap:6px;margin-bottom:22px;flex-wrap:wrap}
+.tabs button{border:1px solid var(--line-2);background:#fff;border-radius:var(--radius);padding:7px 14px;cursor:pointer}
+.tabs button.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+.view{display:none}.view.on{display:block}
+.crumb{margin:0 0 10px;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.ph{margin-bottom:14px}.ph h2{font-size:20px}.ph p{color:var(--muted);font-size:14px}
+.card{background:#fff;border:1px solid var(--line);border-radius:8px;margin-bottom:16px}
+.card>header{padding:14px 18px;border-bottom:1px solid var(--row);display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.card>header h3{font-size:16px}.card>header small{color:var(--muted);font-size:13px}
+.row{display:flex;gap:16px;align-items:center;padding:13px 18px;border-top:1px solid var(--row)}
+.card>header+.row{border-top:0}
+.row .t{flex:1;min-width:0}.row .t b{display:block}.row .t small{display:block;color:var(--muted);font-size:13px;line-height:1.4}
+.row .ctl{flex:none;display:flex;gap:8px;align-items:center}
+.row.off .t,.row.off .ctl{opacity:.45}.row.off .ctl select,.row.off .ctl input{pointer-events:none}
+select,input[type=email]{border:1px solid var(--line-2);border-radius:var(--radius);padding:7px 10px;background:#fff}
+/* grille cas x canaux */
+.g .gh,.g .row.c,.g .tp{display:grid;grid-template-columns:1fr 84px 84px;gap:10px;align-items:center}
+.gh{padding:9px 18px;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--row);background:#FAFBFC;border-radius:8px 8px 0 0}
+.gh span{text-align:center}.gh span:first-child{text-align:left}
+.gh .ic{display:flex;gap:5px;align-items:center;justify-content:center}.gh svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.tp{padding:11px 18px;background:#FAFBFC;border-top:1px solid var(--row)}
+.tp .n{font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.tp .n small{text-transform:none;letter-spacing:0;font-weight:400;color:var(--muted);font-size:13px;margin-left:8px}
+.cell{display:flex;justify-content:center}
+.row.c{padding:11px 18px 11px 34px}
+.row.c .t b{font-weight:400}
+.sw{width:38px;height:22px;border-radius:11px;background:var(--line-2);border:0;position:relative;cursor:pointer;flex:none}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}
+.sw.on{background:var(--ok)}.sw.on::after{left:19px}
+.sw.mid{background:var(--signal)}.sw.mid::after{left:11px}
+.sw:disabled{opacity:.35;cursor:not-allowed}
+.sw.sm{width:34px;height:20px}.sw.sm::after{width:14px;height:14px}.sw.sm.on::after{left:17px}.sw.sm.mid::after{left:10px}
+.pill{font-size:11px;font-weight:600;letter-spacing:.04em;border-radius:var(--radius);padding:1px 7px;margin-left:6px;vertical-align:1px;text-transform:none}
+.pill.g{background:var(--warn-bg);color:var(--warn-ink)}.pill.d{background:var(--brand-tint);color:var(--muted)}
+.info{display:flex;gap:10px;align-items:flex-start;background:var(--brand-tint);border-radius:var(--radius);padding:10px 14px;font-size:13.5px;margin-bottom:16px}
+.info svg{width:16px;height:16px;flex:none;margin-top:3px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.hint{color:var(--muted);font-size:13px}
+.savebar{position:sticky;bottom:0;background:#fff;border-top:1px solid var(--line);padding:12px 18px;display:flex;gap:12px;align-items:center;justify-content:flex-end;margin:0 -1px}
+.savebar span{margin-right:auto;color:var(--muted);font-size:14px}
+.btn{font-weight:500;cursor:pointer;border:1px solid var(--brand);border-radius:var(--radius);padding:8px 16px;background:var(--brand);color:#fff}
+table.m{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden;font-size:14px;margin-bottom:12px}
+table.m th,table.m td{padding:10px 14px;border-bottom:1px solid var(--row);text-align:left;vertical-align:top}
+table.m th{background:var(--brand-tint);font-weight:500}
+.ok{color:var(--ok);font-weight:500}.no{color:var(--muted)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:start}
+.phone{width:360px;margin:0 auto;border:10px solid #111827;border-radius:34px;background:var(--bg);overflow:hidden;box-shadow:0 10px 30px rgba(11,31,58,.18)}
+.phone .bar{background:#fff;border-bottom:1px solid var(--line);padding:14px 16px;font-weight:500;font-size:17px}
+.phone .body{padding:14px;min-height:620px}
+.phone .card{margin-bottom:12px}
+.phone .g .gh,.phone .g .row.c,.phone .g .tp{grid-template-columns:1fr 54px 54px;gap:6px}
+.phone .row{padding:11px 12px}.phone .row.c{padding:10px 12px 10px 20px}.phone .gh,.phone .tp{padding:9px 12px}
+.phone .t small{font-size:12px}.phone .gh span{font-size:9.500px}
+.phone .tabbar{display:flex;justify-content:space-around;background:#fff;border-top:1px solid var(--line);padding:10px 0;font-size:11px;color:var(--muted)}
+.phone .tabbar .on{color:var(--ink);font-weight:500}
+.cap{text-align:center;color:var(--muted);font-size:13px;margin-top:12px}.cap.l{text-align:left}
+@media(max-width:900px){.cols{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="note">Proposition : une seule grille « <b>cas × canal</b> ». Pour chaque type d'alerte, on active cas par cas l'<b>e-mail</b> et/ou la <b>notification</b>. Le <b>délai</b> est commun, les <b>destinataires</b> ne concernent que l'e-mail. Cliquez sur les interrupteurs (celui du titre d'un type active ou coupe tous ses cas).</div>
+<div class="wrap">
+<h1>Alertes et notifications</h1>
+<p class="lead">Chaque cas (écran hors ligne, synchro en échec, fin d'essai…) se règle séparément, par canal. Rien n'est lié à autre chose : on peut recevoir l'écran hors ligne par notification seulement, la fin d'essai par e-mail seulement, ou les deux.</p>
+
+<div class="tabs" id="tabs">
+  <button data-v="pc" class="on">Réglages (PC)</button>
+  <button data-v="app">Réglages (app Android)</button>
+  <button data-v="mig">Migration et défauts</button>
+</div>
+
+<section class="view on" id="v-pc">
+  <div class="crumb">Réglages › Alertes et notifications</div>
+  <div class="ph"><h2>Alertes et notifications</h2><p>Choisissez ce qui vous prévient, et comment.</p></div>
+  <div class="card" id="common-pc"></div>
+  <div class="card g" id="grid-pc"></div>
+  <div class="savebar"><span>Modifications non enregistrées</span><button class="btn">Enregistrer</button></div>
+</section>
+
+<section class="view" id="v-app">
+  <div class="cols">
+    <div>
+      <div class="phone"><div class="bar">Alertes et notifications</div><div class="body">
+        <div class="card" id="common-app"></div>
+        <div class="card g" id="grid-app"></div>
+      </div><div class="tabbar"><span>Écrans</span><span>Playlists</span><span>Médias</span><span class="on">Réglages</span><span>Plus</span></div></div>
+      <p class="cap">Même page dans l'app : mêmes lignes, interrupteurs plus compacts</p>
+    </div>
+    <div>
+      <div class="info"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg><span>Les <b>notifications</b> arrivent sur les téléphones où l'app Linkii est installée et connectée avec un compte administrateur. Si aucun téléphone n'est enregistré, la colonne « Notification » reste activable mais on l'indique : <i>« Aucun appareil enregistré »</i>.</span></div>
+      <div class="card"><header><h3>Cet appareil</h3><small>Visible seulement dans l'app</small></header>
+        <div class="row"><div class="t"><b>Recevoir les notifications ici</b><small>Coupe les notifications sur ce téléphone sans changer les réglages de l'organisation.</small></div><div class="ctl"><button class="sw on" data-free></button></div></div>
+        <div class="row"><div class="t"><b>Verrouillage de l'application</b><small>Empreinte, visage ou code de l'appareil.</small></div><div class="ctl"><button class="sw" data-free></button></div></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="view" id="v-mig">
+  <div class="cols">
+    <div><h3 style="margin-bottom:10px">Organisations existantes</h3>
+      <table class="m"><tr><th>Cas</th><th>E-mail</th><th>Notification</th></tr>
+      <tr><td>Écran hors ligne / de retour</td><td>Selon l'ancien interrupteur</td><td class="ok">Activée (comme avant)</td></tr>
+      <tr><td>Synchronisation en échec</td><td>Comme aujourd'hui</td><td class="ok">Activée</td></tr>
+      <tr><td>Abonnement et essai (3 cas)</td><td>Comme aujourd'hui</td><td class="ok">Activée</td></tr>
+      <tr><td>Nouvelle personne</td><td>Comme aujourd'hui</td><td class="ok">Activée</td></tr></table>
+      <p class="cap l">Aucun changement de comportement. La différence : on peut maintenant couper la notification des écrans sans toucher à l'e-mail, et inversement.</p></div>
+    <div><h3 style="margin-bottom:10px">Nouvelles organisations</h3>
+      <table class="m"><tr><th>Réglage</th><th>Par défaut</th></tr>
+      <tr><td>Tous les cas, e-mail</td><td class="no">Coupé</td></tr>
+      <tr><td>Tous les cas, notification</td><td class="no">Coupée</td></tr>
+      <tr><td>Délai commun</td><td>10 minutes</td></tr>
+      <tr><td>Destinataires e-mail</td><td>Tous les administrateurs</td></tr></table>
+      <p class="cap l">Comme demandé : tout est coupé à la création, l'administrateur active cas par cas.</p></div>
+  </div>
+  <div class="info" style="margin-top:22px"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg><span><b>Licence de base :</b> comme aujourd'hui, les cas « écrans » restent visibles mais verrouillés (Growth). Les autres types ne dépendent pas de la licence. La liste des cas est extensible : un nouveau cas = une nouvelle ligne dans la même grille.</span></div>
+</section>
+</div>
+
+<script>
+var TYPES=[
+ {id:'screens',t:'Écrans',h:'Supervision du direct',growth:true,cases:[
+   {id:'down',t:'Un écran passe hors ligne',h:'Après le délai commun, une seule alerte par panne.',delay:true},
+   {id:'back',t:'Un écran revient en ligne',h:'Après une alerte de panne.'}]},
+ {id:'sync',t:'Synchronisation',h:'Dossiers connectés',cases:[
+   {id:'fail',t:'Une synchronisation échoue',h:'Première erreur d’une série seulement.'}]},
+ {id:'billing',t:'Abonnement et essai',h:'Compte',cases:[
+   {id:'soon',t:'Fin d’essai proche',h:'Rappel avant la fin de l’essai gratuit.'},
+   {id:'end',t:'Essai terminé',h:'L’espace est suspendu.'},
+   {id:'susp',t:'Espace suspendu faute de paiement',h:'Le paiement n’a pas été reçu à la date prévue.'}]},
+ {id:'members',t:'Équipe',h:'Organisation',cases:[
+   {id:'add',t:'Une personne est ajoutée',h:'Les autres administrateurs sont prévenus.'}]}
+];
+var S={};TYPES.forEach(function(t){t.cases.forEach(function(c){S[t.id+'.'+c.id]={mail:false,push:false}})});
+var common={delay:'10',to:'admins'};
+var ICM='<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM4 6l8 7 8-7"/></svg>',ICP='<svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>';
+function st(keys,ch){var n=keys.filter(function(k){return S[k][ch]}).length;return n===0?'':n===keys.length?'on':'mid'}
+function sw(cls,attr,sm,dis){return '<button class="sw '+cls+(sm?' sm':'')+'" '+attr+(dis?' disabled':'')+'></button>'}
+function anyMail(){return Object.keys(S).some(function(k){return S[k].mail})}
+function commonHtml(){
+  var mail=anyMail();
+  return '<header><h3>Délai et destinataires</h3><small>Communs à toutes les alertes</small></header>'
+   +'<div class="row"><div class="t"><b>Délai avant l’alerte</b><small>Durée pendant laquelle une situation doit durer avant d’être signalée (cas marqués ⏱).</small></div><div class="ctl"><select data-c="delay"><option value="1">1 minute</option><option value="5">5 minutes</option><option value="10" selected>10 minutes</option><option value="30">30 minutes</option><option value="60">1 heure</option></select></div></div>'
+   +'<div class="row'+(mail?'':' off')+'"><div class="t"><b>Destinataires des e-mails</b><small>'+(mail?'Les notifications vont aux téléphones des administrateurs.':'Active au moins un cas par e-mail pour choisir les destinataires.')+'</small></div><div class="ctl"><select data-c="to"><option>Tous les administrateurs</option><option>Une adresse dédiée…</option></select></div></div>';
+}
+function gridHtml(app){
+  var h='<div class="gh"><span>Alerte</span><span class="ic">'+ICM+'E-mail</span><span class="ic">'+ICP+(app?'Notif.':'Notification')+'</span></div>';
+  TYPES.forEach(function(t){
+    var keys=t.cases.map(function(c){return t.id+'.'+c.id});
+    var dis=!!t.growth&&false;
+    h+='<div class="tp"><div class="n">'+t.t+(t.growth?'<span class="pill g">GROWTH</span>':'')+'<small>'+t.h+'</small></div>'
+      +'<div class="cell">'+sw(st(keys,'mail'),'data-t="'+t.id+'" data-ch="mail"',app)+'</div><div class="cell">'+sw(st(keys,'push'),'data-t="'+t.id+'" data-ch="push"',app)+'</div></div>';
+    t.cases.forEach(function(c){
+      var k=t.id+'.'+c.id;
+      h+='<div class="row c"><div class="t"><b>'+c.t+(c.delay?' <span class="pill d">⏱ délai</span>':'')+'</b><small>'+c.h+'</small></div>'
+        +'<div class="cell">'+sw(S[k].mail?'on':'','data-k="'+k+'" data-ch="mail"',app)+'</div><div class="cell">'+sw(S[k].push?'on':'','data-k="'+k+'" data-ch="push"',app)+'</div></div>';
+    });
+  });
+  return h;
+}
+function render(){
+  ['pc','app'].forEach(function(s){
+    document.getElementById('common-'+s).innerHTML=commonHtml();
+    document.getElementById('grid-'+s).innerHTML=gridHtml(s==='app');
+  });
+  document.querySelectorAll('select[data-c=delay]').forEach(function(e){e.value=common.delay});
+}
+document.addEventListener('change',function(e){var c=e.target.dataset&&e.target.dataset.c;if(c==='delay'){common.delay=e.target.value;render()}});
+document.addEventListener('click',function(e){
+  var b=e.target.closest('.sw');
+  if(b&&!b.disabled){
+    if(b.dataset.free!==undefined){b.classList.toggle('on');return}
+    var ch=b.dataset.ch;
+    if(b.dataset.k){S[b.dataset.k][ch]=!S[b.dataset.k][ch]}
+    else if(b.dataset.t){var t=TYPES.filter(function(x){return x.id===b.dataset.t})[0];
+      var keys=t.cases.map(function(c){return t.id+'.'+c.id});var all=keys.every(function(k){return S[k][ch]});
+      keys.forEach(function(k){S[k][ch]=!all})}
+    render();return}
+  var t=e.target.closest('#tabs button');
+  if(t){document.querySelectorAll('#tabs button').forEach(function(x){x.classList.toggle('on',x===t)});
+    document.querySelectorAll('.view').forEach(function(v){v.classList.toggle('on',v.id==='v-'+t.dataset.v)})}
+});
+S['screens.down'].mail=true;S['screens.down'].push=true;S['screens.back'].push=true;S['billing.end'].mail=true;S['billing.end'].push=true;S['sync.fail'].push=true;
+render();
+</script>
+</body>
+</html>
