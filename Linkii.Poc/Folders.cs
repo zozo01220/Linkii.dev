@@ -26,7 +26,7 @@ public static class FolderAccess
 
         var best = FolderRight.None;
         var level = a.Level;
-        var vis = level?.VisibilityOf(domain);
+        var vis = a.VisibilityOf(domain);
         foreach (var n in Chain(f, all))
         {
             foreach (var s in n.Shares)

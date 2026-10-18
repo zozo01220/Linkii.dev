@@ -14,7 +14,7 @@
 <div class="page-head">
     <div>
         <h1>Membres<span class="lx-cntpill">@people.Count</span></h1>
-        <p class="sub sc-intro">Les personnes qui gèrent les écrans de @orgName. Chacune a un niveau de droits, défini par un administrateur : pages visibles, intégrations et widgets utilisables, aires, zones et écrans.</p>
+        <p class="sub sc-intro">Les personnes qui gèrent les écrans de @orgName. Chacune a un niveau de droits (ce qu'elle peut faire : pages, intégrations et widgets) et un périmètre (ce qu'elle voit : aires, zones, écrans et dossiers).</p>
     </div>
     @if (tab == "levels") { <button class="btn" data-fab="Créer un niveau" @onclick="() => OpenLevel(null)"><Ico Name="plus" Size="16" /> Créer un niveau</button> }
     else { <button class="btn" data-fab="Inviter une personne" @onclick="OpenInvite"><Ico Name="plus" Size="16" /> Inviter une personne</button> }
@@ -55,7 +55,7 @@
                     else if (lv != null) { <span class="pill blue">@lv.Name</span>@if (lv.ReadOnly) { <small class="muted"> lecture seule</small> } }
                     else { <span class="pill warn">Aucun niveau</span> }
                 </td>
-                <td class="muted">@(p.Role == Roles.ClientAdmin ? "Toutes les aires" : lv != null ? AccessLevels.ScopeText(lv, areas, screens) : "—")</td>
+                <td class="muted">@(p.Role == Roles.ClientAdmin ? "Toutes les aires" : lv != null ? AccessLevels.ScopeText(PerimeterOf(p), areas, screens) : "—")</td>
                 <td><span class="pill @(p.Disabled ? "" : p.IsInvited ? "warn" : "ok")">@(p.Disabled ? "Désactivé" : p.IsInvited ? "Invité" : "Actif")</span></td>
                 <td @onclick:stopPropagation="true">
                     <div class="kebab">
@@ -83,11 +83,11 @@
 else
 {
     <table class="tbl lv-tbl2">
-        <thead><tr><th style="min-width:220px">Niveau</th><th>Intégrations</th><th>Widgets</th><th>Périmètre</th><th class="num">Membres</th><th></th></tr></thead>
+        <thead><tr><th style="min-width:220px">Niveau</th><th>Intégrations</th><th>Widgets</th><th class="num">Membres</th><th></th></tr></thead>
         <tbody>
             <tr class="dim">
                 <td><span class="lv-ico dark"><Ico Name="lock" Size="18" /></span><b>Administrateur</b><small class="muted" style="display:block">Tous les droits, y compris Membres, Aires de gestion et Réglages. Non modifiable.</small></td>
-                <td>Toutes</td><td>Tous</td><td class="muted">Toutes les aires</td>
+                <td>Toutes</td><td>Tous</td>
                 <td class="num">@people.Count(u => u.Role == Roles.ClientAdmin)<span class="mb-unit"> membre</span></td><td></td>
             </tr>
         @foreach (var l in levels)
@@ -97,7 +97,6 @@ else
                 <td><span class="lv-ico"><Ico Name="users" Size="18" /></span><b>@lv.Name</b>@if (lv.ReadOnly) { <span class="pill" style="margin-left:6px">lecture seule</span> }<small class="muted" style="display:block">@AccessLevels.PagesText(lv, Catalog)</small></td>
                 <td>@AccessLevels.AppsText(lv, Catalog, false)</td>
                 <td>@AccessLevels.AppsText(lv, Catalog, true)</td>
-                <td class="muted">@AccessLevels.ScopeText(lv, areas, screens)</td>
                 @{ var nm = people.Count(u => u.LevelId == lv.Id && u.Role == Roles.ClientMember); }
                 <td class="num">@nm<span class="mb-unit"> membre@(nm > 1 ? "s" : "")</span></td>
                 <td @onclick:stopPropagation="true">
@@ -118,7 +117,7 @@ else
         }
         </tbody>
     </table>
-    <p class="hint" style="margin-top:12px">Modifier un niveau change aussitôt les droits de tous ses membres. Un niveau utilisé ne se supprime pas : donnez d'abord un autre niveau à ses membres.</p>
+    <p class="hint" style="margin-top:12px">Modifier un niveau change aussitôt ce que peuvent faire tous ses membres ; ce qu'ils voient (leur périmètre) se règle sur chaque membre. Un niveau utilisé ne se supprime pas : donnez d'abord un autre niveau à ses membres.</p>
 }
 
 @if (form != null)
@@ -154,6 +153,14 @@ else
                     <div class="lv-sum"><div><b>Pages</b>@AccessLevels.PagesText(chosen, Catalog)</div><div><b>Intégrations</b>@AccessLevels.AppsText(chosen, Catalog, false) · widgets : @AccessLevels.AppsText(chosen, Catalog, true).ToLowerInvariant()</div><div><b>Périmètre</b>@AccessLevels.ScopeText(chosen, areas, screens)</div>@if (chosen.ReadOnly) { <div><b>Modification</b>Lecture seule</div> }</div>
                 }
                 else if (levels.Count == 0) { <p class="hint" style="margin:8px 0 0">Aucun niveau créé : <a href="" @onclick="CreateFirstLevel" @onclick:preventDefault="true">créez un niveau de droits</a>, ou choisissez Administrateur.</p> }
+                @if (f.Level != AdminLevel && f.Level != "")
+                {
+                    <label class="lbl" style="margin-top:16px">Périmètre : ce que la personne voit</label>
+                    <p class="hint" style="margin:0 0 8px">Aires, zones et écrans. Son niveau ne dit que ce qu'elle peut y faire : changer de niveau ne change pas son périmètre.</p>
+                    <div class="mb-perim">@PerimeterPicker()</div>
+                    @FolderVisibility(f, chosen)
+                    @PerimeterSummary(f, chosen)
+                }
                 @if (isNew) { <p class="hint" style="margin:12px 0 0">Elle reçoit par e-mail un mot de passe provisoire, à changer à la première connexion.</p> }
                 @if (formError != null) { <div class="err">@formError</div> }
             </div>
@@ -183,10 +190,7 @@ else
         </div>
         <div class="lvt-body">
             <nav class="lvt-tabs" role="tablist" aria-label="Réglages du niveau" aria-orientation="vertical">
-                @TabButton("overview", "info", "Vue d'ensemble", "Ce que voit ce niveau", "")
-                <h5>Où</h5>
-                @TabButton("scope", "map-pin", "Périmètre", AccessLevels.ScopeText(l.ToLevel(), areas, screens), l.ToLevel().HasScope ? "" : "warn")
-                <h5>Quoi</h5>
+                @TabButton("overview", "info", "Vue d'ensemble", "Ce que peut faire ce niveau", "")
                 @TabButton("screens", "monitor", "Écrans et planning", ScreensStatus(), l.Access[LevelPages.Screens] == DomainAccess.None ? "off" : "")
                 @TabButton("playlists", "play", "Listes de lecture", DomainStatus(LevelPages.Playlists), l.Access[LevelPages.Playlists] == DomainAccess.None ? "off" : "")
                 @TabButton("media", "image", "Médiathèque", DomainStatus(LevelPages.Media), l.Access[LevelPages.Media] == DomainAccess.None ? "off" : "")
@@ -195,44 +199,6 @@ else
             <div class="lvt-pane" role="tabpanel">
                 @switch (lvTab)
                 {
-                    case "scope":
-                        <h4>Périmètre</h4>
-                        <p class="lvt-lead">Où la personne travaille. Écrans, listes et médias sont limités à ce périmètre.</p>
-                        <section class="lv-sec"><div class="lv-in lv-tree">
-                            @Check(l.AllAreas ? "all" : "none", "Toutes les aires, y compris celles créées plus tard", ToggleAllAreas, "lv-root")
-                            @foreach (var a in areas)
-                            {
-                                var area = a;
-                                var sa = AreaState(area);
-                                var oa = open.Contains(area.Id);
-                                <div class="lv-n1">
-                                    @Tree(sa, area.Name, () => ToggleArea(area), oa, () => Open(area.Id), AreaCount(area, sa))
-                                    @if (oa)
-                                    {
-                                        @foreach (var z in area.Zones)
-                                        {
-                                            var zone = z;
-                                            var sz = ZoneState(area, zone);
-                                            var inZone = screens.Where(s => s.AreaId == area.Id && s.ZoneId == zone.Id).ToList();
-                                            var oz = open.Contains(zone.Id);
-                                            <div class="lv-n2">
-                                                @Tree(sz, (zone.IsWall ? "Mur " : "Zone ") + zone.Name, () => ToggleZone(area, zone), oz && !zone.IsWall && inZone.Count > 0, () => Open(zone.Id), zone.IsWall ? "mur entier" : $"{inZone.Count} écran{(inZone.Count > 1 ? "s" : "")}", inZone.Count == 0 || zone.IsWall)
-                                                @if (oz && !zone.IsWall)
-                                                {
-                                                    @foreach (var s in inZone)
-                                                    {
-                                                        var scr = s;
-                                                        <div class="lv-n3">@Check(ScreenOn(scr) ? "all" : "none", scr.Name, () => ToggleScreen(area, zone, scr))</div>
-                                                    }
-                                                }
-                                            </div>
-                                        }
-                                    }
-                                </div>
-                            }
-                        </div></section>
-                        <p class="lv-note">Les listes et les médias appartiennent à une aire : limité à une zone, on voit ceux de toute l'aire (sous réserve des onglets Listes de lecture et Médiathèque). Un mur d'écrans est toujours donné en entier.</p>
-                        break;
 
                     case "screens":
                         <h4>Écrans et planning</h4>
@@ -280,7 +246,6 @@ else
                         <h4>Vue d'ensemble</h4>
                         <p class="lvt-lead">Ce que les membres de ce niveau peuvent faire, domaine par domaine. Un clic ouvre l'onglet.</p>
                         <div class="lvt-sum">
-                            @SumCard("scope", "map-pin", "Périmètre", AccessLevels.ScopeText(l.ToLevel(), areas, screens), "", "")
                             @SumCard("screens", "monitor", "Écrans", ScreensStatus(), DomainAccess.Label(l.Access[LevelPages.Screens]), l.Access[LevelPages.Screens])
                             @SumCard("playlists", "play", "Listes de lecture", VisibilityStatus(LevelPages.Playlists), DomainAccess.Label(l.Access[LevelPages.Playlists]), l.Access[LevelPages.Playlists])
                             @SumCard("media", "image", "Médiathèque", VisibilityStatus(LevelPages.Media), DomainAccess.Label(l.Access[LevelPages.Media]), l.Access[LevelPages.Media])
@@ -358,6 +323,8 @@ else
         public Guid? Id; public string OldName = "", Name = "", Email = "";
         /// <summary>« admin », l'identifiant d'un niveau, ou vide.</summary>
         public string Level = "";
+        /// <summary>Ce que la personne voit (aires, zones, écrans, dossiers) : séparé de son niveau de droits.</summary>
+        public PerimForm Perim = new() { AllAreas = true };
     }
 
     protected override void OnInitialized() => Load();
@@ -403,7 +370,7 @@ else
     private void OpenEdit(User u)
     {
         menuFor = null; formError = null;
-        form = new MemberForm { Id = u.Id, OldName = u.Label, Name = u.Name, Email = u.Email, Level = u.Role == Roles.ClientAdmin ? AdminLevel : u.LevelId?.ToString() ?? "" };
+        form = new MemberForm { Id = u.Id, OldName = u.Label, Name = u.Name, Email = u.Email, Level = u.Role == Roles.ClientAdmin ? AdminLevel : u.LevelId?.ToString() ?? "", Perim = u.Role == Roles.ClientAdmin ? new PerimForm { AllAreas = true } : PerimForm.From(PerimeterOf(u)) };
     }
 
     private void CreateFirstLevel() { form = null; tab = "levels"; OpenLevel(null); }
@@ -422,6 +389,8 @@ else
         var makeOrgAdmin = f.Level == AdminLevel;
         Guid? levelId = Guid.TryParse(f.Level, out var lid) ? lid : null;
         if (!makeOrgAdmin && levelId == null) { formError = "Choisissez un niveau de droits, ou Administrateur."; return; }
+        if (!makeOrgAdmin && !f.Perim.HasScope) { formError = "Choisissez au moins une aire, une zone ou un écran : sans périmètre, la personne ne verrait rien."; return; }
+        var perimeter = makeOrgAdmin ? null : f.Perim.ToPerimeter();
 
         if (f.Id is { } id)
         {
@@ -439,6 +408,7 @@ else
                 u.Name = name;
                 u.Role = makeOrgAdmin ? Roles.ClientAdmin : Roles.ClientMember;
                 u.LevelId = makeOrgAdmin ? null : levelId;
+                u.Perimeter = perimeter;   // ce que la personne voit : change de niveau sans changer de périmètre
                 return null;
             });
             if (formError != null) return;
@@ -456,7 +426,7 @@ else
             if (!d.Access.IsOrgAdmin) return "Seul un administrateur de l'organisation invite une personne.";
             if (d.EmailTaken(email)) return d.Users.Any(u => u.Email == email) ? "Cette personne fait déjà partie de l'organisation : modifiez son niveau dans la liste." : "Cette adresse e-mail est déjà utilisée.";
             if (!makeOrgAdmin && d.Tenant.Levels.All(l => l.Id != levelId)) return "Niveau introuvable.";
-            d.AddUser(new User { Email = email, Name = name, PasswordHash = Passwords.Hash(pwd), Role = makeOrgAdmin ? Roles.ClientAdmin : Roles.ClientMember, LevelId = makeOrgAdmin ? null : levelId, MustChangePassword = true, CreatedUtc = DateTime.UtcNow });
+            d.AddUser(new User { Email = email, Name = name, PasswordHash = Passwords.Hash(pwd), Role = makeOrgAdmin ? Roles.ClientAdmin : Roles.ClientMember, LevelId = makeOrgAdmin ? null : levelId, Perimeter = perimeter, MustChangePassword = true, CreatedUtc = DateTime.UtcNow });
             reseller = d.Reseller;
             return null;
         });
@@ -580,7 +550,7 @@ else
         var level = f.ToLevel();
         // les dossiers ne sont réécrits que si l'option est active : éteinte, les partages existants restent intacts. Seuls les domaines en
         // « Dossiers choisis » gardent leurs choix dossier par dossier ; les autres n'ont plus de partage de niveau.
-        var chosen = f.FolderModes.Where(kv => folders.FirstOrDefault(x => x.Id == kv.Key) is { } fd && f.Visibility[fd.Kind] == LevelVisibility.Chosen)
+        var chosen = f.FolderModes.Where(kv => folders.Any(x => x.Id == kv.Key))
             .ToDictionary(kv => kv.Key, kv => kv.Value);
         levelError = Store.Write(d => AccessLevels.Save(d, level) ?? (foldersOn ? FolderOps.SetLevelShares(d, level.Id, chosen) : null));
         if (levelError != null) return;
@@ -632,7 +602,7 @@ else
 
     // ---------- Visibilité calculée sur le formulaire (avant enregistrement) ----------
 
-    private HashSet<Guid> ReachedAreas() { var lv = lf!.ToLevel(); return areas.Where(a => AccessLevels.Reaches(lv, a, screens)).Select(a => a.Id).ToHashSet(); }
+    private HashSet<Guid> ReachedAreas() => areas.Select(a => a.Id).ToHashSet();   // un niveau n'a plus de périmètre : tous les dossiers sont à sa portée
 
     // Dossier « de l'organisation » : lui ou un parent est partagé, ou créé par un administrateur ; le dossier privé d'un membre n'en est pas
     private bool OrgFolder(LevelFolder f)
@@ -742,17 +712,9 @@ else
             <p class="lv-note">Les dossiers ne sont pas activés pour l'organisation (Réglages) : tout le contenu du périmètre est visible.</p>
             return;
         }
-        <section class="lv-sec"><h4>2 · Visibilité <span>@visible @noun visibles sur @total</span></h4><div class="lv-in">
-            <div class="lvt-choices" role="radiogroup" aria-label="Visibilité">
-                @Choice(vis is LevelVisibility.All or LevelVisibility.AllRead, lists ? "Toutes" : "Tous", "Tous les dossiers de l'organisation, y compris les futurs (jamais le dossier privé d'un membre).", () => { if (vis is not (LevelVisibility.All or LevelVisibility.AllRead)) l.Visibility[domain] = LevelVisibility.All; })
-                @Choice(vis == LevelVisibility.Chosen, "Dossiers choisis", lists ? "Les listes hors dossier, plus les dossiers cochés." : "Les dossiers cochés ci-dessous.", () => l.Visibility[domain] = LevelVisibility.Chosen)
-                @Choice(vis == LevelVisibility.Own, lists ? "Hors dossier seulement" : "Ses dossiers seulement", lists ? "Plus les siens et ceux qu'on lui partage." : "Les siens et ceux qu'on lui partage.", () => l.Visibility[domain] = LevelVisibility.Own)
-            </div>
-            @if (vis is LevelVisibility.All or LevelVisibility.AllRead && write)
-            {
-                @Check(vis == LevelVisibility.AllRead ? "all" : "none", "Les dossiers des autres en lecture seulement (ses propres dossiers restent modifiables)", () => l.Visibility[domain] = vis == LevelVisibility.AllRead ? LevelVisibility.All : LevelVisibility.AllRead)
-            }
-            @if (vis == LevelVisibility.Chosen)
+        <section class="lv-sec"><h4>2 · Dossiers partagés avec ce niveau <span>@ChosenCount(domain) choisi@(ChosenCount(domain) > 1 ? "s" : "")</span></h4><div class="lv-in">
+            <p class="lv-note" style="margin-top:0">Ce que le niveau reçoit en plus, dossier par dossier. Ce que chaque personne voit des autres dossiers (tous, ou seulement ceux qu'on lui partage) se règle sur le membre.</p>
+            @if (true)
             {
                 var reach = ReachedAreas();
                 var rows = folders.Where(f => f.Kind == domain && (folderQuery.Length == 0 || f.Path.Contains(folderQuery, StringComparison.CurrentCultureIgnoreCase))).ToList();
@@ -793,7 +755,7 @@ else
                                 }
                             </tbody>
                         </table>
-                        <div class="lvt-pfoot"><b>@visible @noun visibles sur @total</b> dans le périmètre@(ChosenCount(domain) > 0 ? $" · {ChosenCount(domain)} dossier{(ChosenCount(domain) > 1 ? "s" : "")} choisi{(ChosenCount(domain) > 1 ? "s" : "")}" : "").</div>
+                        <div class="lvt-pfoot"><b>@ChosenCount(domain) dossier@(ChosenCount(domain) > 1 ? "s" : "") choisi@(ChosenCount(domain) > 1 ? "s" : "")</b>@(false ? $" · {ChosenCount(domain)} dossier{(ChosenCount(domain) > 1 ? "s" : "")} choisi{(ChosenCount(domain) > 1 ? "s" : "")}" : "").</div>
                     }
                 </div>
             }
@@ -843,15 +805,125 @@ else
         foreach (var x in Catalog.All.Where(x => x.ScreenWidget == widgets)) l.Apps.Remove(x.Id);
     }
 
+    /// <summary>Périmètre d'un membre en cours d'édition : aires, zones, écrans (un élément coché donne tout ce qu'il contient) et visibilité des dossiers.</summary>
+    private class PerimForm
+    {
+        public bool AllAreas;
+        public HashSet<Guid> Areas = new(), Zones = new(), Screens = new();
+        public Dictionary<string, string> Visibility = new() { [LevelPages.Playlists] = LevelVisibility.Chosen, [LevelPages.Media] = LevelVisibility.Chosen };
+
+        public bool HasScope => AllAreas || Areas.Count + Zones.Count + Screens.Count > 0;
+
+        public static PerimForm From(Perimeter p) => new()
+        {
+            AllAreas = p.AllAreas, Areas = [.. p.AreaIds], Zones = [.. p.ZoneIds], Screens = [.. p.ScreenIds],
+            Visibility = new()
+            {
+                [LevelPages.Playlists] = p.VisibilityOf(LevelPages.Playlists) is LevelVisibility.All or LevelVisibility.AllRead ? p.VisibilityOf(LevelPages.Playlists)! : LevelVisibility.Chosen,
+                [LevelPages.Media] = p.VisibilityOf(LevelPages.Media) is LevelVisibility.All or LevelVisibility.AllRead ? p.VisibilityOf(LevelPages.Media)! : LevelVisibility.Chosen
+            }
+        };
+
+        public Perimeter ToPerimeter() => new()
+        {
+            AllAreas = AllAreas, AreaIds = [.. Areas], ZoneIds = [.. Zones], ScreenIds = [.. Screens],
+            PlaylistsVisibility = Visibility[LevelPages.Playlists], MediaVisibility = Visibility[LevelPages.Media]
+        };
+    }
+
+    /// <summary>Périmètre effectif d'un membre : le sien, ou celui de son niveau tant qu'il n'en a pas (avant la séparation).</summary>
+    private Perimeter PerimeterOf(User u) => u.Perimeter ?? (LevelOf(u) is { } lv ? Perimeter.From(lv) : new Perimeter());
+
+    // Ce que la personne pourra faire, et où : le résumé sous le périmètre.
+    private RenderFragment PerimeterSummary(MemberForm f, AccessLevel? level) => __builder =>
+    {
+        var p = f.Perim;
+        var (nAreas, nZones, nScreens) = PerimeterCounts(p);
+        <div class="lv-sum">
+            <div><b>Pourra</b>@(level == null ? "—" : AccessLevels.PagesText(level, Catalog))</div>
+            <div><b>Dans seulement</b>@AccessLevels.ScopeText(p.ToPerimeter(), areas, screens)</div>
+            <div><b>Soit</b>@(p.AllAreas ? "toute l'organisation" : $"{nAreas} aire{(nAreas > 1 ? "s" : "")} · {nZones} zone{(nZones > 1 ? "s" : "")} · {nScreens} écran{(nScreens > 1 ? "s" : "")}")</div>
+        </div>
+    };
+
+    private (int Areas, int Zones, int Screens) PerimeterCounts(PerimForm p)
+    {
+        var per = p.ToPerimeter();
+        var reached = areas.Where(a => AccessLevels.Reaches(per, a, screens)).ToList();
+        var sees = new LevelScope(per, areas, per.ScreenIds.Count > 0 ? screens : []);
+        var zoneCount = reached.SelectMany(a => a.Zones).Count(z => sees.SeesZone(z.Id));
+        return (reached.Count, zoneCount, screens.Count(s => sees.Sees(s)));
+    }
+
+    // Visibilité des dossiers des autres, par domaine (organisation qui a activé les dossiers) : tous, tous en lecture, ou ceux qu'on lui partage.
+    private RenderFragment FolderVisibility(MemberForm f, AccessLevel? level) => __builder =>
+    {
+        if (foldersOn && level != null)
+        {
+            foreach (var domain in new[] { LevelPages.Playlists, LevelPages.Media })
+            {
+                var dom = domain;
+                if (level.AccessTo(dom) == DomainAccess.None) continue;
+                <div class="mb-vis">
+                    <label class="lbl" for="vis-@dom">@(dom == LevelPages.Playlists ? "Dossiers de listes de lecture" : "Dossiers de la médiathèque")</label>
+                    <select id="vis-@dom" class="full" value="@f.Perim.Visibility[dom]" @onchange="e => f.Perim.Visibility[dom] = e.Value?.ToString() ?? LevelVisibility.Chosen">
+                        <option value="@LevelVisibility.Chosen">Les siens et ceux qu'on lui partage</option>
+                        <option value="@LevelVisibility.AllRead">Tous ceux de l'organisation, en lecture seule</option>
+                        <option value="@LevelVisibility.All">Tous ceux de l'organisation</option>
+                    </select>
+                </div>
+            }
+        }
+    };
+
+    // Périmètre d'un membre : arbre aires › zones › écrans à trois états (un élément coché donne tout ce qu'il contient, ajouts futurs compris).
+    private RenderFragment PerimeterPicker() => __builder =>
+    {
+        var l = form!.Perim;
+                        <section class="lv-sec"><div class="lv-in lv-tree">
+                            @Check(l.AllAreas ? "all" : "none", "Toutes les aires, y compris celles créées plus tard", ToggleAllAreas, "lv-root")
+                            @foreach (var a in areas)
+                            {
+                                var area = a;
+                                var sa = AreaState(area);
+                                var oa = open.Contains(area.Id);
+                                <div class="lv-n1">
+                                    @Tree(sa, area.Name, () => ToggleArea(area), oa, () => Open(area.Id), AreaCount(area, sa))
+                                    @if (oa)
+                                    {
+                                        @foreach (var z in area.Zones)
+                                        {
+                                            var zone = z;
+                                            var sz = ZoneState(area, zone);
+                                            var inZone = screens.Where(s => s.AreaId == area.Id && s.ZoneId == zone.Id).ToList();
+                                            var oz = open.Contains(zone.Id);
+                                            <div class="lv-n2">
+                                                @Tree(sz, (zone.IsWall ? "Mur " : "Zone ") + zone.Name, () => ToggleZone(area, zone), oz && !zone.IsWall && inZone.Count > 0, () => Open(zone.Id), zone.IsWall ? "mur entier" : $"{inZone.Count} écran{(inZone.Count > 1 ? "s" : "")}", inZone.Count == 0 || zone.IsWall)
+                                                @if (oz && !zone.IsWall)
+                                                {
+                                                    @foreach (var s in inZone)
+                                                    {
+                                                        var scr = s;
+                                                        <div class="lv-n3">@Check(ScreenOn(scr) ? "all" : "none", scr.Name, () => ToggleScreen(area, zone, scr))</div>
+                                                    }
+                                                }
+                                            </div>
+                                        }
+                                    }
+                                </div>
+                            }
+                        </div></section>
+    };
+
     // ---------- Périmètre : arbre aires › zones › écrans à trois états ----------
 
     private void Open(Guid id) { if (!open.Remove(id)) open.Add(id); }
 
-    private bool ScreenOn(Screen s) => lf != null && (lf.AllAreas || lf.Areas.Contains(s.AreaId) || s.ZoneId is { } z && lf.Zones.Contains(z) || lf.Screens.Contains(s.Id));
+    private bool ScreenOn(Screen s) => form != null && (form.Perim.AllAreas || form.Perim.Areas.Contains(s.AreaId) || s.ZoneId is { } z && form.Perim.Zones.Contains(z) || form.Perim.Screens.Contains(s.Id));
 
     private string ZoneState(Area a, Zone z)
     {
-        var l = lf!;
+        var l = form!.Perim;
         if (l.AllAreas || l.Areas.Contains(a.Id) || l.Zones.Contains(z.Id)) return "all";
         var inZone = screens.Where(s => s.AreaId == a.Id && s.ZoneId == z.Id).ToList();
         var n = inZone.Count(s => l.Screens.Contains(s.Id));
@@ -860,7 +932,7 @@ else
 
     private string AreaState(Area a)
     {
-        var l = lf!;
+        var l = form!.Perim;
         if (l.AllAreas || l.Areas.Contains(a.Id)) return "all";
         var states = a.Zones.Select(z => ZoneState(a, z)).ToList();
         return states.Count > 0 && states.All(s => s == "all") ? "all" : states.Any(s => s != "none") ? "some" : "none";
@@ -877,7 +949,7 @@ else
     /// <summary>Quand « toutes les aires » est coché et qu'on retire un détail, chaque aire devient cochée une à une.</summary>
     private void Expand()
     {
-        var l = lf!;
+        var l = form!.Perim;
         if (!l.AllAreas) return;
         l.AllAreas = false;
         foreach (var a in areas) l.Areas.Add(a.Id);
@@ -885,14 +957,14 @@ else
 
     private void ToggleAllAreas()
     {
-        var l = lf!;
+        var l = form!.Perim;
         var on = !l.AllAreas;
         l.AllAreas = on; l.Areas.Clear(); l.Zones.Clear(); l.Screens.Clear();
     }
 
     private void ClearArea(Area a)
     {
-        var l = lf!;
+        var l = form!.Perim;
         l.Areas.Remove(a.Id);
         foreach (var z in a.Zones) l.Zones.Remove(z.Id);
         l.Screens.RemoveWhere(id => screens.Any(s => s.Id == id && s.AreaId == a.Id));
@@ -900,7 +972,7 @@ else
 
     private void ToggleArea(Area a)
     {
-        var l = lf!;
+        var l = form!.Perim;
         var on = AreaState(a) != "all";
         Expand();
         ClearArea(a);
@@ -910,7 +982,7 @@ else
     /// <summary>Toutes les zones de l'aire cochées : l'aire entière l'est (et suivra ses futures zones).</summary>
     private void Collapse(Area a)
     {
-        var l = lf!;
+        var l = form!.Perim;
         if (a.Zones.Count == 0 || !a.Zones.All(z => l.Zones.Contains(z.Id))) return;
         ClearArea(a);
         l.Areas.Add(a.Id);
@@ -918,7 +990,7 @@ else
 
     private void ToggleZone(Area a, Zone z)
     {
-        var l = lf!;
+        var l = form!.Perim;
         var on = ZoneState(a, z) != "all";
         Expand();
         if (l.Areas.Remove(a.Id)) foreach (var o in a.Zones.Where(o => o.Id != z.Id)) l.Zones.Add(o.Id);   // l'aire était entière : les autres zones restent cochées
@@ -929,7 +1001,7 @@ else
 
     private void ToggleScreen(Area a, Zone z, Screen s)
     {
-        var l = lf!;
+        var l = form!.Perim;
         var on = !ScreenOn(s);
         Expand();
         var siblings = screens.Where(x => x.AreaId == a.Id && x.ZoneId == z.Id).ToList();

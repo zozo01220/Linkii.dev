@@ -169,6 +169,8 @@ public class User
     public Guid? LevelId { get; set; }
     /// <summary>Ancien format (rôle par aire, avant les niveaux de droits) : lu une fois par <see cref="AccessLevels.Migrate"/>, puis vidé.</summary>
     public List<AreaRole> AreaRoles { get; set; } = new();
+    /// <summary>Périmètre du membre : ce qu'il voit (aires, zones, écrans, dossiers), séparé de son niveau de droits (voir <see cref="Perimeter"/>). Null : celui de son niveau.</summary>
+    public Perimeter? Perimeter { get; set; }
     /// <summary>Dernière aire ouverte, par organisation (l'équipe Linkii et les revendeurs visitent plusieurs organisations).</summary>
     public Dictionary<Guid, Guid> LastAreas { get; set; } = new();
     /// <summary>Mode d'utilisation : true expert (toutes les fonctions), false simple (vue réduite), null ancien compte = expert.</summary>

@@ -44,6 +44,10 @@ public class AreaAccess
     public bool IsOrgAdmin { get; init; } = true;
     /// <summary>Niveau du membre (null : administrateur, ou membre sans niveau, qui ne voit rien).</summary>
     public AccessLevel? Level { get; init; }
+    /// <summary>Périmètre du membre (ce qu'il voit) ; null pour un administrateur.</summary>
+    public Perimeter? Perimeter { get; init; }
+    /// <summary>Visibilité des dossiers des autres pour un domaine : celle du périmètre du membre, à défaut celle de son niveau.</summary>
+    public string? VisibilityOf(string domain) => Perimeter?.VisibilityOf(domain) ?? Level?.VisibilityOf(domain);
     /// <summary>Aires accessibles, de la plus ancienne à la plus récente.</summary>
     public List<Area> Areas { get; init; } = new();
     public Area? Current { get; init; }
@@ -93,14 +97,16 @@ public class AreaAccess
         var u = db.Users.FirstOrDefault(x => x.Id == userId);
         var org = u?.Role != Linkii.Poc.Roles.ClientMember;
         var level = org ? null : db.Clients.FirstOrDefault(c => c.Id == clientId)?.Levels.FirstOrDefault(l => l.Id == u!.LevelId);
-        var scope = level == null ? null : new LevelScope(level, areas, level.ScreenIds.Count > 0 ? db.Screens.Where(s => s.ClientId == clientId) : []);
+        // le périmètre est celui du membre (ce qu'il voit), pas celui de son niveau ; un membre d'avant la séparation reprend celui de son niveau
+        var perimeter = org || level == null ? null : u!.Perimeter ?? Perimeter.From(level);
+        var scope = perimeter == null ? null : new LevelScope(perimeter, areas, perimeter.ScreenIds.Count > 0 ? db.Screens.Where(s => s.ClientId == clientId) : []);
         var mine = org ? areas : scope?.Areas ?? new();
         Guid? last = u != null && u.LastAreas.TryGetValue(clientId, out var l2) ? l2 : null;
         var current = mine.FirstOrDefault(a => a.Id == last) ?? mine.FirstOrDefault();
         return new AreaAccess
         {
             Shared = SharedView.Build(db, clientId, current?.Id),
-            UserId = userId, IsOrgAdmin = org, Level = level, Areas = mine, OrgAreaCount = areas.Count,
+            UserId = userId, IsOrgAdmin = org, Level = level, Perimeter = perimeter, Areas = mine, OrgAreaCount = areas.Count,
             Sees = scope?.Sees, SeesZoneFn = scope?.SeesZone,
             MemberIds = org ? new HashSet<Guid>() : db.Users.Where(x => x.ClientId == clientId && x.Role == Linkii.Poc.Roles.ClientMember).Select(x => x.Id).ToHashSet(),
             Current = current

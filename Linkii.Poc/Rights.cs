@@ -28,11 +28,55 @@ public static class LevelPages
     };
 }
 
+/// <summary>Ce qui borne la vue d'une personne : aires, zones, écrans (un élément coché donne tout ce qu'il contient, ajouts futurs compris).</summary>
+public interface IPerimeter
+{
+    bool AllAreas { get; }
+    List<Guid> AreaIds { get; }
+    List<Guid> ZoneIds { get; }
+    List<Guid> ScreenIds { get; }
+}
+
 /// <summary>
-/// Niveau de droits (créé par un administrateur de l'organisation, donné à des membres) : pages visibles, apps utilisables et périmètre
-/// (aires, zones, écrans). Un membre a un seul niveau ; un administrateur de l'organisation n'en a pas, il a tous les droits.
+/// Périmètre d'un membre (« ce qu'il voit ») : aires, zones, écrans, et visibilité des dossiers des autres par domaine. Il est séparé du niveau de droits
+/// (« ce qu'il peut faire ») : un même niveau sert à plusieurs équipes, chacune avec son périmètre, et changer de niveau ne change pas ce qu'on voit.
+/// Un membre qui n'en a pas encore (enregistré avant le 18 octobre 2026) reprend celui de son niveau, voir <see cref="AccessLevels.Migrate"/>.
 /// </summary>
-public class AccessLevel
+public class Perimeter : IPerimeter
+{
+    public bool AllAreas { get; set; }
+    public List<Guid> AreaIds { get; set; } = new();
+    public List<Guid> ZoneIds { get; set; } = new();
+    public List<Guid> ScreenIds { get; set; } = new();
+    /// <summary>Visibilité des dossiers des autres (voir <see cref="LevelVisibility"/>) ; null : celle du niveau.</summary>
+    public string? PlaylistsVisibility { get; set; }
+    public string? MediaVisibility { get; set; }
+
+    public bool HasScope => AllAreas || AreaIds.Count + ZoneIds.Count + ScreenIds.Count > 0;
+
+    public string? VisibilityOf(string domain) => domain == LevelPages.Playlists ? PlaylistsVisibility : domain == LevelPages.Media ? MediaVisibility : null;
+
+    /// <summary>Périmètre d'un niveau d'avant la séparation : copié sur chacun de ses membres.</summary>
+    public static Perimeter From(AccessLevel l) => new()
+    {
+        AllAreas = l.AllAreas, AreaIds = [.. l.AreaIds], ZoneIds = [.. l.ZoneIds], ScreenIds = [.. l.ScreenIds],
+        PlaylistsVisibility = l.VisibilityOf(LevelPages.Playlists), MediaVisibility = l.VisibilityOf(LevelPages.Media)
+    };
+
+    public Perimeter Copy() => new()
+    {
+        AllAreas = AllAreas, AreaIds = [.. AreaIds], ZoneIds = [.. ZoneIds], ScreenIds = [.. ScreenIds],
+        PlaylistsVisibility = PlaylistsVisibility, MediaVisibility = MediaVisibility
+    };
+
+    public static Perimeter Everything() => new() { AllAreas = true };
+}
+
+/// <summary>
+/// Niveau de droits (créé par un administrateur de l'organisation, donné à des membres) : ce qu'on peut faire (pages, accès par domaine, apps utilisables ;
+/// le périmètre est celui du membre, voir <see cref="Perimeter"/> : les champs aires / zones / écrans d'ici ne servent plus qu'à la migration). Un membre a un seul niveau ; un administrateur de l'organisation n'en a pas, il a tous les droits.
+/// </summary>
+public class AccessLevel : IPerimeter
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "";
@@ -160,7 +204,7 @@ public class LevelScope
     public Func<Screen, bool> Sees { get; }
     public Func<Guid, bool> SeesZone { get; }
 
-    public LevelScope(AccessLevel l, List<Area> areas, IEnumerable<Screen> clientScreens)
+    public LevelScope(IPerimeter l, List<Area> areas, IEnumerable<Screen> clientScreens)
     {
         var chosen = l.ScreenIds.Count > 0 ? clientScreens.Where(s => s.Token != null && l.ScreenIds.Contains(s.Id)).ToList() : new List<Screen>();
         var wholeZones = l.ZoneIds.ToHashSet();
@@ -219,7 +263,6 @@ public static class AccessLevels
         if (CheckName(level.Name) is { } e) return e;
         var levels = d.Tenant.Levels;
         if (levels.Any(l => l.Id != level.Id && l.Name.Equals(level.Name, StringComparison.CurrentCultureIgnoreCase))) return "Un niveau porte déjà ce nom.";
-        if (!level.HasScope) return "Choisissez au moins une aire, une zone ou un écran : sans périmètre, la personne ne verrait rien.";
         level.Pages = level.Pages.Where(LevelPages.Offered.Contains).Distinct().ToList();
         if (level.AllFolders is not ("read" or "write")) level.AllFolders = null;
         level.Normalize(domain => HasLevelShares(d.Root, d.ClientId, level.Id, domain));
@@ -230,7 +273,7 @@ public static class AccessLevels
     }
 
     /// <summary>Le niveau donne-t-il accès à quelque chose dans cette aire (l'aire entière, une de ses zones ou un de ses écrans) ?</summary>
-    public static bool Reaches(AccessLevel l, Area a, IEnumerable<Screen> screens) =>
+    public static bool Reaches(IPerimeter l, Area a, IEnumerable<Screen> screens) =>
         l.AllAreas || l.AreaIds.Contains(a.Id) || a.Zones.Any(z => l.ZoneIds.Contains(z.Id)) || screens.Any(s => s.AreaId == a.Id && l.ScreenIds.Contains(s.Id));
 
     public static List<User> MembersOf(ClientDb d, Guid levelId) => d.Users.Where(u => u.Role == Roles.ClientMember && u.LevelId == levelId).ToList();
@@ -252,6 +295,7 @@ public static class AccessLevels
     {
         var a = areas.ToHashSet(); var z = zones.ToHashSet();
         foreach (var l in d.Tenant.Levels) { l.AreaIds.RemoveAll(a.Contains); l.ZoneIds.RemoveAll(z.Contains); }
+        foreach (var u in d.Root.Users.Where(u => u.ClientId == d.ClientId && u.Perimeter != null)) { u.Perimeter!.AreaIds.RemoveAll(a.Contains); u.Perimeter.ZoneIds.RemoveAll(z.Contains); }
     }
 
     // ---------- Textes d'affichage ----------
@@ -277,7 +321,7 @@ public static class AccessLevels
     }
 
     /// <summary>« Magasin › Vitrines, Caisses · Atelier » : le périmètre en clair.</summary>
-    public static string ScopeText(AccessLevel l, IReadOnlyCollection<Area> areas, IReadOnlyCollection<Screen> screens)
+    public static string ScopeText(IPerimeter l, IReadOnlyCollection<Area> areas, IReadOnlyCollection<Screen> screens)
     {
         if (l.AllAreas) return "Toutes les aires";
         var parts = new List<string>();
@@ -322,6 +366,9 @@ public static class AccessLevels
             foreach (var u in db.Users.Where(u => u.ClientId == c.Id && u.AreaRoles.Count > 0)) u.AreaRoles.Clear();
             // accès par domaine (15 octobre 2026) : un niveau d'avant garde exactement ses droits (lecture seule → « Voir » partout)
             foreach (var l in c.Levels.Where(l => l.IsLegacy)) l.Normalize(domain => HasLevelShares(db, c.Id, l.Id, domain));
+            // périmètre séparé du niveau (18 octobre 2026) : chaque membre reprend celui de son niveau, rien ne change pour personne
+            foreach (var u in db.Users.Where(u => u.ClientId == c.Id && u.Role == Roles.ClientMember && u.Perimeter == null && u.LevelId != null))
+                if (c.Levels.FirstOrDefault(l => l.Id == u.LevelId) is { } lv) u.Perimeter = Perimeter.From(lv);
         }
     }
 

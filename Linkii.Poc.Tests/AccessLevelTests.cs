@@ -137,7 +137,7 @@ public class AccessLevelTests
     }
 
     [Fact]
-    public void Only_an_org_admin_saves_a_level_and_it_needs_a_name_and_a_scope()
+    public void Only_an_org_admin_saves_a_level_and_it_needs_a_name()
     {
         var l = new AccessLevel { Name = "Éditeur", Pages = [LevelPages.Screens, "admin"], AreaIds = { magasin.Id } };
         Assert.NotNull(AccessLevels.Save(As(alice), l));   // un membre ne gère pas les niveaux
@@ -146,11 +146,13 @@ public class AccessLevelTests
 
         Assert.NotNull(AccessLevels.Save(As(admin), new AccessLevel { Name = "  ", AllAreas = true }));
         Assert.NotNull(AccessLevels.Save(As(admin), new AccessLevel { Name = "éditeur", AllAreas = true }));   // nom déjà pris
-        Assert.NotNull(AccessLevels.Save(As(admin), new AccessLevel { Name = "Sans rien" }));                  // aucun périmètre
+        Assert.Null(AccessLevels.Save(As(admin), new AccessLevel { Name = "Sans rien" }));                     // un niveau n'a plus de périmètre : il ne dit que ce qu'on peut faire
 
         l.Name = "Éditeur Magasin";
         Assert.Null(AccessLevels.Save(As(admin), l));   // même Id : remplacé, pas dupliqué
-        Assert.Single(client.Levels);
+        Assert.Equal(2, client.Levels.Count);           // « Éditeur Magasin » et « Sans rien »
+
+
     }
 
     [Fact]
