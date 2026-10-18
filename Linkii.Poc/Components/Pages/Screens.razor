@@ -70,6 +70,7 @@
                 </div>
             }
         </div>
+        @if (Modes.Expert && (otherAreas.Count > 0 || zones.Count > 1)) { <button type="button" class="tb-btn scr-gtoggle @(groupMode ? "on" : "")" aria-pressed="@(groupMode ? "true" : "false")" title="Voir les écrans par aire et par zone, et les déplacer en les glissant" @onclick="ToggleGroup"><Ico Name="map-pin" Size="14" /> Par aire</button> }
         @if (Modes.Expert) { <ViewToggle StorageKey="screens" @bind-Value="view" /> }
     </div>
     <FilterChips Groups="FilterGroups" OnClear="ClearFilter" OnResetAll="ResetFilters" />
@@ -104,7 +105,63 @@
     @if (Shown.Count == 0) { <div class="empty"><div class="big">Aucun écran trouvé</div></div> }
 }
 
-<div class="pl-grid @(ListView ? "list" : "")">
+@* Vue « Par aire » (PC, mode expert) : les écrans de toutes les aires accessibles, regroupés par aire puis par zone. On glisse un écran sur une zone, ou sur
+   l'en-tête d'une aire (zone par défaut) : changement de zone dans la même aire (planning conservé), changement d'aire pour les administrateurs
+   (planning propre retiré, listes de l'ancienne aire plus choisies). « Annuler » remet l'écran où il était. *@
+@if (groupMode)
+{
+    <div class="scr-groups" role="region" aria-label="Écrans par aire et par zone">
+        @foreach (var ga in groupAreas)
+        {
+            var ar = ga;
+            var inArea = ar.Screens.Where(GroupMatch).ToList();
+            var current = ar.Area.Id == area?.Id;
+            <section class="scr-ga @(dropArea == ar.Area.Id && dropZone == null ? "over" : "")">
+                <header class="scr-gah" @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { dropArea = ar.Area.Id; dropZone = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOnZone(ar.Area.Id, null)">
+                    <Ico Name="map-pin" Size="16" /><b>@ar.Area.Name</b>
+                    <small>@Plural(inArea.Count, "écran", "écrans") · @inArea.Count(x => !IsOffline(x)) en ligne</small>
+                    <span class="grow"></span>
+                    @if (current) { <span class="lx-chip">aire ouverte</span> }
+                    else { <button type="button" class="linklike" @onclick="() => OpenAreaPage(ar.Area.Id)">Ouvrir cette aire</button> }
+                </header>
+                @foreach (var gz in ar.Zones)
+                {
+                    var zn = gz;
+                    var inZone = inArea.Where(x => x.ZoneId == zn.Id || (x.ZoneId == null && zn.IsDefault)).ToList();
+                    <div class="scr-gz @(zn.IsWall ? "wall" : "") @(dropZone == zn.Id ? "over" : "")"
+                         @ondragover="() => { }" @ondragover:preventDefault="@(!zn.IsWall)" @ondragenter="() => { if (!zn.IsWall) { dropArea = ar.Area.Id; dropZone = zn.Id; } }" @ondrop:preventDefault="true" @ondrop="() => DropOnZone(ar.Area.Id, zn.Id)">
+                        <div class="scr-gzh"><Ico Name="@(zn.IsWall ? "grid" : "box")" Size="14" /><b>@zn.Name</b><span>@Plural(inZone.Count, "écran", "écrans")</span>@if (zn.IsWall) { <span class="lx-chip" title="Les écrans d'un mur se déplacent en dissolvant le mur">Mur</span> }</div>
+                        <div class="scr-gt">
+                            @foreach (var sc in inZone)
+                            {
+                                var s = sc;
+                                var off = IsOffline(s);
+                                var movable = !zn.IsWall;
+                                <div class="scr-tile @(off ? "off" : "on") @(selectedIds.Contains(s.Id) ? "picked" : "") @(dragIds.Contains(s.Id) ? "dragging" : "")" role="button" tabindex="0"
+                                     title="@(movable ? "Glissez pour déplacer · Ctrl + clic pour sélectionner" : "Écran d'un mur : dissolvez le mur pour le déplacer")"
+                                     draggable="@(movable ? "true" : "false")" @ondragstart="() => StartDragScreen(s)" @ondragend="EndDragScreen"
+                                     @onclick="e => TileClick(s, current, e)" @onkeydown='e => { if (e.Key == "Enter" && current) Edit(s); }'>
+                                    <div class="pv"><Ico Name="monitor" Size="24" /></div>
+                                    <div class="st">@(off ? OfflineSince(s, DateTime.UtcNow) : "En ligne")</div>
+                                    <div class="n"><b>@s.Name</b><small>@(s.DeviceOs ?? "Appareil")</small></div>
+                                </div>
+                            }
+                            @if (inZone.Count == 0) { <div class="scr-gempty">@(zn.IsWall ? "Mur sans écran" : "Glissez un écran ici")</div> }
+                        </div>
+                    </div>
+                }
+            </section>
+        }
+        @if (groupNotice != null)
+        {
+            <div class="scr-gnotice" role="status"><Ico Name="info" Size="16" /><span>@groupNotice</span>@if (lastUndo.Count > 0) { <button type="button" class="linklike" @onclick="UndoMove">Annuler</button> }</div>
+        }
+        @if (groupWarn != null) { <div class="scr-gwarn" role="status"><Ico Name="alert" Size="16" /><span>@groupWarn</span></div> }
+        <p class="scr-ghint"><Ico Name="move" Size="14" /> Glissez un écran sur une zone ou une aire. Plusieurs écrans : Ctrl + clic pour les sélectionner, puis glissez-les ensemble.@(otherAreasForMove ? "" : " Le déplacement entre aires est réservé aux administrateurs.")</p>
+    </div>
+}
+
+<div class="pl-grid @(ListView ? "list" : "")" style="@(groupMode ? "display:none" : null)">
     @if (ListView)
     {
         @* en-têtes des colonnes (PC) ; masqués au téléphone *@
@@ -1035,6 +1092,106 @@ else if (wallEdit is { } wid)
         foreach (var id in ids) await Notifier.NotifyScreen(id);
         selectedIds.Clear();
         Reload();
+    }
+
+    // ---------- Vue « Par aire » : glisser-déposer entre zones et aires (PC) ----------
+    private record GroupArea(Area Area, List<Zone> Zones, List<Screen> Screens);
+    private bool groupMode;
+    private List<GroupArea> groupAreas = new();
+    private bool otherAreasForMove;
+    private List<Guid> dragIds = new();
+    private Guid? dropArea, dropZone;
+    private string? groupNotice, groupWarn;
+    private List<AreaOps.ScreenPlace> lastUndo = new();
+
+    private static string Plural(int n, string one, string many) => $"{n} {(n > 1 ? many : one)}";
+
+    private void ToggleGroup()
+    {
+        groupMode = !groupMode;
+        selectedIds.Clear(); dragIds = new(); dropArea = dropZone = null; groupNotice = groupWarn = null; lastUndo = new();
+        if (groupMode) LoadGroups();
+    }
+
+    private bool GroupMatch(Screen s) =>
+        (search.Length == 0 || s.Name.Contains(search, StringComparison.OrdinalIgnoreCase))
+        && statusFilter switch { "online" => !IsOffline(s), "offline" => IsOffline(s), _ => true };
+
+    private void LoadGroups()
+    {
+        groupAreas = Store.Read(d => d.Access.Areas.OrderBy(a => a.CreatedUtc).Select(a => new GroupArea(a,
+            a.Zones.Where(z => d.Access.SeesZone(z.Id)).OrderByDescending(z => z.IsDefault).ThenBy(z => z.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
+            d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.AreaId == a.Id && (d.Access.Sees == null || d.Access.Sees(s))).ToList())).ToList());
+        otherAreasForMove = Store.Read(d => d.Access.IsOrgAdmin);
+    }
+
+    private void OpenAreaPage(Guid areaId)
+    {
+        if (Store.SwitchArea(areaId)) Nav.NavigateTo(Nav.Uri, forceLoad: true);
+    }
+
+    private void StartDragScreen(Screen s) { dragIds = selectedIds.Contains(s.Id) ? selectedIds.ToList() : new List<Guid> { s.Id }; groupNotice = groupWarn = null; }
+    private void EndDragScreen() { dragIds = new(); dropArea = dropZone = null; }
+
+    private void TileClick(Screen s, bool current, MouseEventArgs e)
+    {
+        if (e.CtrlKey || e.MetaKey || selectedIds.Count > 0) { ToggleSelect(s.Id); return; }
+        if (current) Edit(s);
+    }
+
+    private async Task DropOnZone(Guid areaId, Guid? zoneId)
+    {
+        var ids = dragIds.ToList();
+        dragIds = new(); dropArea = dropZone = null;
+        if (ids.Count == 0) return;
+        var zone = zoneId ?? groupAreas.First(g => g.Area.Id == areaId).Zones.First(z => z.IsDefault).Id;
+        var undo = new List<AreaOps.ScreenPlace>();
+        string? error = null;
+        var changedArea = 0; var lostList = 0; string? lastName = null;
+        Store.Write(d =>
+        {
+            foreach (var id in ids)
+            {
+                if (d.Root.Screens.FirstOrDefault(x => x.Id == id && x.ClientId == d.ClientId) is not { } sc) continue;
+                if (sc.AreaId == areaId && sc.ZoneId == zone) continue;
+                var before = AreaOps.PlaceOf(sc);
+                if (AreaOps.PlaceScreen(d, id, areaId, zone) is { } err) { error = err; break; }
+                undo.Add(before);
+                lastName = sc.Name;
+                if (before.AreaId != areaId) { changedArea++; if (before.PlaylistId != null && sc.PlaylistId == null) lostList++; }
+            }
+        });
+        if (error != null) Toast.Error(error);
+        if (undo.Count > 0)
+        {
+            var target = groupAreas.First(g => g.Area.Id == areaId);
+            var where = $"{target.Area.Name} › {target.Zones.First(z => z.Id == zone).Name}";
+            groupNotice = undo.Count == 1 ? $"« {lastName} » déplacé vers {where}." : $"{undo.Count} écrans déplacés vers {where}.";
+            groupWarn = changedArea == 0 ? null
+                : lostList > 0 ? $"Changement d'aire : leur liste de lecture n'est pas disponible dans « {target.Area.Name} ». Ils gardent leur contenu publié, sans liste choisie ; leur planning propre est retiré. Choisissez-leur une liste de cette aire."
+                : "Changement d'aire : leur planning propre est retiré.";
+            lastUndo = undo;
+            var moved = undo.Select(u => u.ScreenId).ToList();
+            await Notifier.PublishPlanning(moved);
+            foreach (var id in moved) await Notifier.NotifyScreen(id);
+        }
+        selectedIds.Clear();
+        Reload();
+        LoadGroups();
+    }
+
+    private async Task UndoMove()
+    {
+        if (lastUndo.Count == 0) return;
+        var undo = lastUndo.ToList();
+        lastUndo = new();
+        Store.Write(d => { foreach (var p in undo) AreaOps.Restore(d, p); });
+        groupNotice = "Déplacement annulé."; groupWarn = null;
+        var ids = undo.Select(u => u.ScreenId).ToList();
+        await Notifier.PublishPlanning(ids);
+        foreach (var id in ids) await Notifier.NotifyScreen(id);
+        Reload();
+        LoadGroups();
     }
 
     // ---------- Mur d'écrans ----------

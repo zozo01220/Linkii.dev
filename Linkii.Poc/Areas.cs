@@ -257,6 +257,46 @@ public static class AreaOps
         return null;
     }
 
+    /// <summary>L'emplacement et le réglage d'un écran avant un déplacement : de quoi l'y remettre (« Annuler »).</summary>
+    public record ScreenPlace(Guid ScreenId, Guid AreaId, Guid? ZoneId, int? WallPos, bool OwnPlanning, List<Slot> Slots, Guid? PlaylistId, List<Guid?> ZonePlaylistIds);
+
+    public static ScreenPlace PlaceOf(Screen s) => new(s.Id, s.AreaId, s.ZoneId, s.WallPos, s.OwnPlanning, s.Slots.ToList(), s.PlaylistId, s.ZonePlaylistIds.ToList());
+
+    /// <summary>Remet un écran où il était (zone, aire, planning propre, listes choisies).</summary>
+    public static void Restore(ClientDb d, ScreenPlace p)
+    {
+        if (d.Root.Screens.FirstOrDefault(x => x.Id == p.ScreenId && x.ClientId == d.ClientId) is not { } s) return;
+        s.AreaId = p.AreaId; s.ZoneId = p.ZoneId; s.WallPos = p.WallPos; s.OwnPlanning = p.OwnPlanning;
+        s.Slots = p.Slots.ToList(); s.PlaylistId = p.PlaylistId; s.ZonePlaylistIds = p.ZonePlaylistIds.ToList();
+    }
+
+    /// <summary>
+    /// Place un écran dans une zone d'une aire (glisser-déposer de la page Écrans). Dans la même aire : un changement de zone, planning conservé
+    /// (qui gère les zones). Vers une autre aire : administrateur de l'organisation seulement, planning propre retiré et listes de l'ancienne aire
+    /// plus choisies (voir <see cref="MoveScreen"/>). Un écran de mur, ou une zone de mur, ne se déplace pas ainsi.
+    /// </summary>
+    public static string? PlaceScreen(ClientDb d, Guid screenId, Guid targetArea, Guid targetZone)
+    {
+        var s = d.Root.Screens.FirstOrDefault(x => x.Id == screenId && x.ClientId == d.ClientId);
+        if (s == null) return "Écran introuvable.";
+        var target = d.Root.Areas.FirstOrDefault(a => a.Id == targetArea && a.ClientId == d.ClientId);
+        if (target == null || !d.Access.HasArea(targetArea)) return "Aire introuvable.";
+        var zone = target.Zones.FirstOrDefault(z => z.Id == targetZone);
+        if (zone == null) return "Zone introuvable.";
+        if (zone.IsWall) return $"« {zone.Name} » est un mur d'écrans : on y place des écrans en le modifiant.";
+        if (d.Access.Sees is { } sees && !sees(s) || !d.Access.HasArea(s.AreaId)) return "Cet écran n'est pas dans votre périmètre.";
+        if (WallOf(d, s) is { } wall) return $"« {s.Name} » fait partie du mur « {wall.Name} » : dissolvez d'abord le mur.";
+        if (s.AreaId == targetArea)
+        {
+            if (!d.Access.CanManage(targetArea)) return "Votre niveau de droits ne permet pas de changer un écran de zone.";
+            s.ZoneId = zone.Id;
+            return null;
+        }
+        if (MoveScreen(d, screenId, targetArea) is { } err) return err;
+        s.ZoneId = zone.Id;
+        return null;
+    }
+
     /// <summary>
     /// Une liste de lecture part avec les contenus qu'elle utilise (contenus d'apps et fichiers qu'ils affichent), à condition qu'aucune autre
     /// liste de son aire ne les utilise. Les écrans de l'ancienne aire qui la diffusaient gardent leur publication, sans liste choisie.
