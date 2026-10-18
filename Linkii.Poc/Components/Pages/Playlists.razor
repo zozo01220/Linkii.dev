@@ -5,6 +5,7 @@
 @inject TenantStore Store
 @inject AppService Svc
 @inject PlaylistLibrary Library
+@inject AreaSharing Sharing
 @inject MediaLibrary MediaLib
 @inject NavigationManager Nav
 @inject Toaster Toast
@@ -111,7 +112,8 @@ else
                     <div class="fp @(preview.Count == 0 ? "none" : "")">
                         @foreach (var pm in preview) { <span class="fpi"><MediaThumb Media="pm" All="media" /></span> }
                         @if (preview.Count == 0) { <span class="fpi fe"><Ico Name="folder" Size="26" /></span> }
-                        @if (r.Right == FolderRight.Read) { <span class="fbadge ro"><Ico Name="lock" Size="11" /> Lecture seule</span> }
+                        @if (foreignNames.TryGetValue(r.Folder.Id, out var fromArea)) { <span class="fbadge lvl" title="Dossier de l'aire @fromArea, partagé en lien vivant"><Ico Name="link" Size="11" /> @fromArea</span> }
+                        else if (r.Right == FolderRight.Read) { <span class="fbadge ro"><Ico Name="lock" Size="11" /> Lecture seule</span> }
                         else if (!mine) { <span class="fbadge lvl"><Ico Name="users" Size="11" /> Écriture</span> }
                         else if (aud.Count > 0) { <span class="fbadge @(aud.Levels.Count > 0 ? "lvl" : "sh")"><Ico Name="users" Size="11" /> Partagé · @aud.Count</span> }
                         else { <span class="fbadge pv"><Ico Name="lock" Size="11" /> Privé</span> }
@@ -128,6 +130,7 @@ else
                         <div class="kebab-menu" role="menu" @onclick:stopPropagation="true">
                             <span class="kebab-note">@r.Folder.Name · @(mine ? "votre dossier" : $"dossier de {r.OwnerName}") · @(r.Right == FolderRight.Read ? "lecture seule" : aud.Count > 0 ? "partagé" : "privé")</span>
                             <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingId = r.Folder.Id; }"><Ico Name="users" Size="16" /> Partager…</button>
+                            @if (hasOtherAreas && !foreignNames.ContainsKey(r.Folder.Id) && (mine || isAdmin)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingKind = ShareKind.PlaylistFolder; sharingItems = new() { (r.Folder.Id, r.Folder.Name) }; }"><Ico Name="map-pin" Size="16" /> Partager avec d'autres aires…</button> }
                             @if (r.Right == FolderRight.Owner)
                             {
                                 <button type="button" role="menuitem" @onclick="() => { menuFor = null; renamingFolder = r; renameFolderValue = r.Folder.Name; folderError = null; }"><Ico Name="edit" Size="16" /> Renommer</button>
@@ -242,6 +245,7 @@ else
                     <div class="lx-pbody">
                         <div class="grow">
                             <a class="pl-name" href="/playlists/@pl.Id" title="@pl.Name">@pl.Name</a>
+                            @if (foreignNames.TryGetValue(pl.Id, out var fromPl)) { <span class="lx-chip" title="Liste de l'aire @fromPl, partagée en lien vivant"><Ico Name="link" Size="12" /> @fromPl</span> }
                             <div class="lx-meta">@Meta(pl, total)</div>
                             @if (ShowPath) { <div class="lx-path"><Ico Name="folder" Size="12" /><span>@PathOf(pl)</span></div> }
                             @State(pl)
@@ -337,6 +341,25 @@ else
     </div>
 }
 
+@if (sharingItems is { } shi)
+{
+    <AreaShareDialog Kind="@sharingKind" Items="shi" OnClose="() => sharingItems = null" OnShared="Load" />
+}
+
+@if (leaving is { } lvp)
+{
+    var from = foreignNames.GetValueOrDefault(lvp.Id, "son aire");
+    <div class="modal-backdrop" @onclick="() => leaving = null"></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="lvp-title">
+        <h3 id="lvp-title">Ne plus voir « @lvp.Name » ?</h3>
+        <p class="hint">Cette liste disparaît de vos listes de lecture. Elle reste dans l'aire @from, qui peut vous la partager de nouveau. Les écrans qui la diffusent gardent leur contenu publié jusqu'à leur prochaine publication.</p>
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => leaving = null">Annuler</button>
+            <button class="btn danger" @onclick="LeaveShared"><Ico Name="eye-off" Size="15" /> Ne plus voir</button>
+        </div>
+    </div>
+}
+
 @if (sharingId is { } shId)
 {
     <PlaylistFolderShareDialog FolderId="shId" OnClose="() => { sharingId = null; Load(); StateHasChanged(); }" />
@@ -426,6 +449,11 @@ else
     private string? folderError;
     private PlaylistFolderRow? renamingFolder, deletingFolder;
     private Guid? sharingId;
+    private bool hasOtherAreas;                                    // d'autres aires accessibles : le partage a un sens
+    private Dictionary<Guid, string> foreignNames = new();         // dossiers et listes reçus d'une autre aire → son nom
+    private List<(Guid Id, string Name)>? sharingItems;            // fenêtre « Partager avec d'autres aires »
+    private string sharingKind = ShareKind.Playlist;
+    private Playlist? leaving;                                     // confirmation « Ne plus voir »
     private List<(Guid Id, string Name)>? listMove;
     private static readonly Guid RootDrop = Guid.Empty;       // cible « racine » du glisser-déposer (fil d'Ariane)
 
@@ -452,6 +480,8 @@ else
         isAdmin = Store.Read(d => d.Access.IsOrgAdmin);
         foldersOn = Store.Read(d => d.Tenant.FoldersOn);
         canCreateRoot = Store.Read(d => FolderAccess.CanCreateAtRoot(d.Access, LevelPages.Playlists));
+        hasOtherAreas = Sharing.HasOtherAreas();
+        foreignNames = Sharing.ForeignNames();
         canWrite = Store.Read(d => d.Access.CanWrite(LevelPages.Playlists));
         folderRows = foldersOn ? Library.Folders() : new();
         rights = Library.PlaylistRights();
@@ -591,6 +621,8 @@ else
                     <button type="button" role="menuitem" @onclick="() => { menuFor = null; trying = pl.Id; }"><Ico Name="play" Size="16" /> Essayer sur…</button>
                     @if (canEdit) { <button type="button" role="menuitem" @onclick="() => OpenRename(pl)"><Ico Name="edit" Size="16" /> Renommer</button> }
                     <button type="button" role="menuitem" @onclick="() => Duplicate(pl)"><Ico Name="copy" Size="16" /> Dupliquer</button>
+                    @if (hasOtherAreas && canEdit && !foreignNames.ContainsKey(pl.Id)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingKind = ShareKind.Playlist; sharingItems = new() { (pl.Id, pl.Name) }; }"><Ico Name="map-pin" Size="16" /> Partager avec d'autres aires…</button> }
+                    @if (foreignNames.ContainsKey(pl.Id)) { <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; leaving = pl; }"><Ico Name="eye-off" Size="16" /> Ne plus voir</button> }
                     @if (foldersOn && canEdit) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; listMove = new() { (pl.Id, pl.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
                     @if (canMove) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; moving = pl; }"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
                     @if (canEdit) { <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = new() { pl }; }"><Ico Name="trash" Size="16" /> Supprimer</button> }
@@ -598,6 +630,16 @@ else
             }
         </div>
     };
+
+    private void LeaveShared()
+    {
+        if (leaving is not { } p) return;
+        var err = Sharing.Leave(ShareKind.Playlist, p.Id);
+        leaving = null;
+        if (err != null) { Toast.Error(err); return; }
+        Toast.Ok($"« {p.Name} » n'apparaît plus dans vos listes.");
+        Load();
+    }
 
     // Emplacement d'une liste : chemin de son dossier, ou la racine de l'aire
     private string PathOf(Playlist p)

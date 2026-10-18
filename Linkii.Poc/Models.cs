@@ -14,7 +14,7 @@ public class Db
     public List<PushDevice> PushDevices { get; set; } = new();   // appareils qui reçoivent les notifications (voir <see cref="PushService"/>)
     public List<Area> Areas { get; set; } = new();               // aires de gestion des clients
     public List<MediaFolder> MediaFolders { get; set; } = new();  // dossiers de la médiathèque (voir <see cref="MediaFolder"/>)
-    public List<MediaShare> MediaShares { get; set; } = new();    // médias partagés en lecture avec un membre (voir <see cref="MediaShare"/>)
+    public List<AreaShare> AreaShares { get; set; } = new();       // partages entre aires de gestion : médias, dossiers, listes de lecture (voir <see cref="AreaShare"/>)
     public List<PlaylistFolder> PlaylistFolders { get; set; } = new();  // dossiers des listes de lecture (voir <see cref="PlaylistFolder"/>)
     public List<Payment> Payments { get; set; } = new();          // paiements de renouvellement enregistrés (voir <see cref="Subscriptions"/>)
     public List<Payout> Payouts { get; set; } = new();            // versements de fin de mois aux revendeurs
@@ -1202,18 +1202,4 @@ public static class AppPaths
     public static string ThumbDir = "thumbs";
     public static string PdfDir = "pdf";   // PDF d'origine de l'app Document PDF (jamais servis)
     public static string CaptureDir = "captures";   // dernier aperçu du direct de chaque écran
-}
-
-/// <summary>
-/// Partage d'un média avec un membre, en lecture seule : le média apparaît à la racine de sa médiathèque (avec l'icône de partage),
-/// il peut l'utiliser dans ses listes et le télécharger, pas le renommer, le ranger ni le supprimer. Lui comme l'émetteur peuvent retirer le partage.
-/// </summary>
-public class MediaShare : IClientOwned
-{
-    public Guid ClientId { get; set; }
-    public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid MediaId { get; set; }
-    public Guid FromUserId { get; set; }
-    public Guid ToUserId { get; set; }
-    public DateTime SharedUtc { get; set; } = DateTime.UtcNow;
 }

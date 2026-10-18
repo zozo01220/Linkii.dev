@@ -9,6 +9,7 @@ public static class PlaylistOps
     /// </summary>
     public static FolderRight RightOf(ClientDb d, Playlist p)
     {
+        if (d.Access.Shared.Playlists.Contains(p.Id)) return d.Access.CanWrite(LevelPages.Playlists) ? FolderRight.Write : d.Access.AccessTo(LevelPages.Playlists) == DomainAccess.None ? FolderRight.None : FolderRight.Read;   // liste d'une autre aire, partagée : modifiable comme les listes de l'aire
         if (p.FolderId is not { } fid || PlaylistFolderOps.Find(d, fid) is not { } f) return d.Access.CanWrite(LevelPages.Playlists) ? FolderRight.Write : FolderRight.Read;
         return PlaylistFolderOps.RightOf(d, f);
     }
@@ -34,9 +35,10 @@ public static class PlaylistOps
     /// Supprime des listes de lecture : les écrans qui les diffusaient gardent leur instantané publié ; elles ne sont plus choisies (modification en attente sur ces écrans).
     /// Ni les contenus ni la médiathèque ne bougent.
     /// </summary>
-    public static void Remove(ClientDb d, IReadOnlyCollection<Guid> listIds)
+    public static void Remove(ClientDb d, IReadOnlyCollection<Guid> listIds, bool detachOnly = false)
     {
         var ids = listIds.ToHashSet();
+        if (!detachOnly) ids.ExceptWith(d.Access.Shared.Playlists);   // une liste partagée par une autre aire ne se supprime que dans son aire (detachOnly : on retire seulement le partage)
         foreach (var s in d.Screens.Where(s => s.PlaylistId is { } pid && ids.Contains(pid)))
         {
             if (s.PublishedVersion == 0 && d.Playlists.FirstOrDefault(x => x.Id == s.PlaylistId) is { } old)   // écran jamais publié depuis : il garde l'ancien instantané
@@ -51,6 +53,7 @@ public static class PlaylistOps
         foreach (var z in d.Areas.SelectMany(a => a.Zones)) z.Slots.RemoveAll(x => ids.Contains(x.PlaylistId));   // plus programmées dans un planning
         foreach (var s in d.Screens) s.Slots.RemoveAll(x => ids.Contains(x.PlaylistId));
         d.Playlists.RemoveAll(x => ids.Contains(x.Id));
+        if (!detachOnly) AreaShareOps.Forget(d, ShareKind.Playlist, ids);
     }
 
     /// <summary>
@@ -156,6 +159,7 @@ public static class PlaylistFolderOps
     {
         var set = folderIds.ToHashSet();
         d.Root.PlaylistFolders.RemoveAll(f => f.ClientId == d.ClientId && set.Contains(f.Id));
+        AreaShareOps.Forget(d, ShareKind.PlaylistFolder, set);
     }
 
     /// <summary>Ajoute, change (write) ou retire (null) le partage d'un dossier de listes, pour une personne ou un niveau.</summary>

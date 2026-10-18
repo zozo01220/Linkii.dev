@@ -3,6 +3,7 @@
 @implements IAsyncDisposable
 @using Microsoft.JSInterop
 @inject MediaLibrary Library
+@inject AreaSharing Sharing
 @inject DriveService Drives
 @inject TenantStore Store
 @inject Toaster Toast
@@ -119,7 +120,8 @@ else
                     <div class="fp @(recent.Count == 0 ? "none" : "")">
                         @foreach (var rm in recent) { <span class="fpi"><MediaThumb Media="rm" /></span> }
                         @if (recent.Count == 0) { <span class="fpi fe"><Ico Name="folder" Size="26" /></span> }
-                        @if (r.Right == FolderRight.Read) { <span class="fbadge ro"><Ico Name="lock" Size="11" /> Lecture seule</span> }
+                        @if (foreignNames.TryGetValue(r.Folder.Id, out var fromArea)) { <span class="fbadge lvl" title="Dossier de l'aire @fromArea, partagé en lien vivant"><Ico Name="link" Size="11" /> @fromArea</span> }
+                        else if (r.Right == FolderRight.Read) { <span class="fbadge ro"><Ico Name="lock" Size="11" /> Lecture seule</span> }
                         else if (!mine) { <span class="fbadge lvl"><Ico Name="users" Size="11" /> Écriture</span> }
                         else if (aud.Count > 0) { <span class="fbadge @(aud.Levels.Count > 0 ? "lvl" : "sh")"><Ico Name="users" Size="11" /> Partagé · @aud.Count</span> }
                         else { <span class="fbadge pv"><Ico Name="lock" Size="11" /> Privé</span> }
@@ -136,6 +138,7 @@ else
                         <div class="kebab-menu" role="menu" @onclick:stopPropagation="true">
                             <span class="kebab-note">@r.Folder.Name · @(mine ? "votre dossier" : $"dossier de {r.OwnerName}") · @(r.Right == FolderRight.Read ? "lecture seule" : aud.Count > 0 ? "partagé" : "privé")</span>
                             <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingId = r.Folder.Id; }"><Ico Name="users" Size="16" /> Partager…</button>
+                            @if (hasOtherAreas && !foreignNames.ContainsKey(r.Folder.Id) && (mine || isAdmin)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingKind = ShareKind.MediaFolder; sharingMedia = new() { (r.Folder.Id, r.Folder.Name) }; }"><Ico Name="map-pin" Size="16" /> Partager avec d'autres aires…</button> }
                             @if (r.Right == FolderRight.Owner)
                             {
                                 <button type="button" role="menuitem" @onclick="() => { menuFor = null; renamingFolder = r; renameFolderValue = r.Folder.Name; newFolderError = null; }"><Ico Name="edit" Size="16" /> Renommer</button>
@@ -350,7 +353,7 @@ else
             <b>@picked.Count sélectionné@(picked.Count > 1 ? "s" : "")</b>
             <button type="button" @onclick="ToggleAll">@(AllPicked ? "Tout désélectionner" : $"Tout sélectionner ({Visible.Count(Selectable)})")</button>
             <span class="vr"></span>
-            @if (pickedShareable.Count > 0) { <button type="button" @onclick="() => sharingMedia = pickedShareable"><Ico Name="share" Size="15" /><span class="lx-lbl">Partager…</span></button> }
+            @if (pickedShareable.Count > 0) { <button type="button" @onclick="() => { sharingKind = ShareKind.Media; sharingMedia = pickedShareable; }"><Ico Name="share" Size="15" /><span class="lx-lbl">Partager…</span></button> }
             @if (FoldersShown) { <button type="button" disabled="@(pickedEditable.Count == 0)" @onclick="() => folderMove = pickedEditable"><Ico Name="folder" Size="15" /><span class="lx-lbl">Ranger…</span></button> }
             @if (canMove && pickedOwn.Count > 0) { <button type="button" @onclick="() => bulkMove = true"><Ico Name="move" Size="15" /><span class="lx-lbl">Autre aire…</span></button> }
             <span class="vr"></span>
@@ -385,8 +388,8 @@ else
 {
     var idx = OpenList.FindIndex(x => x.Id == om.Id);
     <MediaPreviewPanel Item="om" Path="@PathOf(om)" CanEdit="Own(om)" Drive="@(MediaLibrary.IsDrive(om) ? DriveTitle(DriveOf(om)) : null)"
-                       CanShare="@(Own(om) && om.Status == null)" Shares="@Library.SharesOf(om.Id)" SharedBy="@(sharedIn.GetValueOrDefault(om.Id))"
-                       OnShare="() => sharingMedia = new() { (om.Id, om.Name) }" OnUnshare="id => Unshare(om, id)" OnLeave="() => leaving = om"
+                       CanShare="@Shareable(om)" Shares="@Sharing.RowsOf(ShareKind.Media, om.Id)" SharedBy="@(sharedIn.GetValueOrDefault(om.Id))" CanDelete="@(!foreignMedia.Contains(om.Id))"
+                       OnShare="() => { sharingKind = ShareKind.Media; sharingMedia = new() { (om.Id, om.Name) }; }" OnUnshare="id => Unshare(om, id)" OnLeave="() => leaving = om"
                        HasPrev="idx > 0" HasNext="idx >= 0 && idx < OpenList.Count - 1"
                        OnClose="() => openId = null" OnPrev="() => Step(-1)" OnNext="() => Step(1)"
                        OnRename="() => OpenRename(om)"
@@ -397,7 +400,7 @@ else
 
 @if (sharingMedia is { } shm)
 {
-    <MediaShareDialog Media="shm" OnClose="() => sharingMedia = null" OnShared="Reload" />
+    <AreaShareDialog Kind="@(sharingKind)" Items="shm" OnClose="() => sharingMedia = null" OnShared="Reload" />
 }
 
 @if (leaving is { } lv)
@@ -407,7 +410,7 @@ else
     <div class="modal-backdrop" @onclick="() => leaving = null"></div>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="lv-title">
         <h3 id="lv-title">Ne plus voir « @lv.Name » ?</h3>
-        <p class="hint">Ce média disparaît de votre médiathèque. Il reste chez @by, qui peut vous le partager de nouveau.@(inLists > 0 ? $" Il est utilisé dans {(inLists > 1 ? $"{inLists} de vos listes de lecture" : "une de vos listes de lecture")} : il en sera retiré." : "")</p>
+        <p class="hint">Ce média disparaît de votre médiathèque. Il reste dans l'aire @by, qui peut vous le partager de nouveau.@(inLists > 0 ? $" Il est utilisé dans {(inLists > 1 ? $"{inLists} de vos listes de lecture" : "une de vos listes de lecture")} : il en sera retiré." : "")</p>
         <div class="modal-actions">
             <button class="btn ghost" @onclick="() => leaving = null">Annuler</button>
             <button class="btn danger" @onclick="LeaveShared"><Ico Name="eye-off" Size="15" /> Ne plus voir</button>
@@ -607,8 +610,12 @@ else
     private bool creatingFolder, newMenu;
     private Dictionary<Guid, MediaSharedWithMe> sharedIn = new();   // médias reçus en partage (lecture seule)
     private HashSet<Guid> sharedOut = new();                         // médias que la personne a partagés
+    private bool hasOtherAreas;                                      // d'autres aires accessibles : le partage a un sens
+    private Dictionary<Guid, string> foreignNames = new();           // dossiers reçus d'une autre aire → son nom
+    private HashSet<Guid> foreignMedia = new();                      // médias d'une autre aire (partagés)
     private List<(Guid Id, string Name)>? sharingMedia;              // fenêtre « Partager »
     private MediaItem? leaving;                                      // confirmation « Ne plus voir »
+    private string sharingKind = ShareKind.Media;                  // type d'élément de la fenêtre « Partager »
     private void OpenNewFolder() { newMenu = false; newFolderName = ""; newFolderError = null; creatingFolder = true; }
     private string newFolderName = "", renameFolderValue = "";
     private string? newFolderError;
@@ -622,7 +629,7 @@ else
     private bool CanCreateHere => folderId is null ? canCreateRoot : currentRow is { } c && c.Right >= FolderRight.Write;
     private bool CanUploadHere => folderId is null ? canWrite : currentRow is { } c && c.Right >= FolderRight.Write;
     // À la racine, tout fichier se modifie comme avant ; dans un dossier, il faut y écrire.
-    private bool CanEdit(MediaItem m) => !sharedIn.ContainsKey(m.Id) && (m.FolderId is not { } f ? canWrite : rights.GetValueOrDefault(f) >= FolderRight.Write);   // un média reçu en partage est en lecture seule
+    private bool CanEdit(MediaItem m) => m.FolderId is { } f && rights.ContainsKey(f) ? rights[f] >= FolderRight.Write : canWrite;   // un média partagé par une autre aire se modifie comme les autres
     private List<(Guid Id, string Name)> pickedEditable => allFiles.Where(m => picked.Contains(m.Id) && Selectable(m)).Select(m => (m.Id, m.Name)).ToList();
     private MediaItem? open => openId is { } id ? allFiles.FirstOrDefault(m => m.Id == id) : null;
     private List<MediaItem> OpenList => Visible.ToList();
@@ -637,12 +644,12 @@ else
     }
 
     private RenderFragment ShareBadge(MediaItem m, string css) => sharedIn.TryGetValue(m.Id, out var by)
-        ? @<span class="@css in" title="@($"Partagé par {by.By} · lecture seule")"><Ico Name="share" Size="12" /></span>
-        : sharedOut.Contains(m.Id) ? @<span class="@css" title="Partagé avec d'autres membres"><Ico Name="share" Size="12" /></span> : (b => { });
+        ? @<span class="@css in" title="@($"Partagé par l'aire {by.By} (lien vivant)")"><Ico Name="share" Size="12" /></span>
+        : sharedOut.Contains(m.Id) ? @<span class="@css" title="Partagé avec d'autres aires"><Ico Name="share" Size="12" /></span> : (b => { });
 
-    private void Unshare(MediaItem m, Guid userId)
+    private void Unshare(MediaItem m, Guid toArea)
     {
-        var err = Library.Unshare(m.Id, userId);
+        var err = Sharing.Unshare(ShareKind.Media, m.Id, toArea);
         if (err != null) { Toast.Error(err); return; }
         Reload();
     }
@@ -650,7 +657,7 @@ else
     private void LeaveShared()
     {
         if (leaving is not { } m) return;
-        var err = Library.Leave(m.Id);
+        var err = Sharing.Leave(ShareKind.Media, m.Id);
         leaving = null;
         if (err != null) { Toast.Error(err); return; }
         if (openId == m.Id) openId = null;
@@ -699,6 +706,9 @@ else
         allFiles = Library.Files();
         sharedIn = Library.SharedWithMe();
         sharedOut = Library.SharedOut();
+        hasOtherAreas = Sharing.HasOtherAreas();
+        foreignNames = Sharing.ForeignNames();
+        foreignMedia = Store.Read(d => d.Access.Shared.MediaAll.ToHashSet());
         files = FoldersShown ? allFiles.Where(m => sharedIn.ContainsKey(m.Id) ? folderId == null : m.FolderId == folderId).ToList() : allFiles;   // un média partagé avec la personne est à la racine
         // À la racine : les dossiers qui n'ont pas de parent visible. Dans un dossier : ses enfants visibles.
         subfolders = FoldersShown
@@ -770,7 +780,7 @@ else
                 <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
                 <div class="kebab-menu" role="menu">
                     <button type="button" role="menuitem" @onclick="() => { menuFor = null; Open(item); }"><Ico Name="eye" Size="16" /> Aperçu et utilisations</button>
-                    @if (Own(item) && item.Status == null) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingMedia = new() { (item.Id, item.Name) }; }"><Ico Name="share" Size="16" /> Partager…</button> }
+                    @if (Shareable(item)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingKind = ShareKind.Media; sharingMedia = new() { (item.Id, item.Name) }; }"><Ico Name="share" Size="16" /> Partager avec d'autres aires…</button> }
                     @if (Own(item)) { <button type="button" role="menuitem" @onclick="() => OpenRename(item)"><Ico Name="edit" Size="16" /> Renommer</button> }
                     @if (item.FileName != null) { <a role="menuitem" href="/media/@item.FileName" download="@item.Name" @onclick="() => menuFor = null"><Ico Name="download" Size="16" /> Télécharger</a> }
                     @if (FoldersShown && Selectable(item)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (item.Id, item.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
@@ -848,7 +858,8 @@ else
     // sélectionnable / rangeable : ses fichiers, et les fichiers Drive (qu on peut ranger dans un dossier mais ni renommer ni supprimer ici)
     private bool Selectable(MediaItem m) => CanEdit(m) && (FoldersShown || !MediaLibrary.IsDrive(m));
     private bool Own(MediaItem m) => !MediaLibrary.IsDrive(m) && CanEdit(m);
-    private List<(Guid Id, string Name)> pickedShareable => allFiles.Where(m => picked.Contains(m.Id) && Own(m) && m.Status == null).Select(m => (m.Id, m.Name)).ToList();
+    private bool Shareable(MediaItem m) => hasOtherAreas && Own(m) && m.Status == null && !foreignMedia.Contains(m.Id);
+    private List<(Guid Id, string Name)> pickedShareable => allFiles.Where(m => picked.Contains(m.Id) && Shareable(m)).Select(m => (m.Id, m.Name)).ToList();
     private List<(Guid Id, string Name)> pickedOwn => allFiles.Where(m => picked.Contains(m.Id) && Own(m)).Select(m => (m.Id, m.Name)).ToList();
 
     // Clic : aperçu ; en cours de sélection (ou Ctrl/Maj + clic) : coche ou décoche.

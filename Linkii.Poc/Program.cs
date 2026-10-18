@@ -75,6 +75,7 @@ builder.Services.AddSingleton<ScanLog>();   // scans des QR codes de comptage (G
 builder.Services.AddScoped<AppService>();
 builder.Services.AddScoped<MediaLibrary>();
 builder.Services.AddScoped<PlaylistLibrary>();
+builder.Services.AddScoped<AreaSharing>();
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(o =>

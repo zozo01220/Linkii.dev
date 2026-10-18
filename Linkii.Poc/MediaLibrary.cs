@@ -23,9 +23,7 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
         // à la racine (hors dossier, dont les fichiers Drive), avec les dossiers activés, seuls les administrateurs voient
         var list = store.Read(d =>
         {
-            var normal = Normal(d);
-            normal.AddRange(SharedExtra(d, normal));   // médias partagés avec la personne : à la racine de sa médiathèque
-            return normal;
+            return Normal(d);
         });
         foreach (var m in list.Where(m => m.Size == null && m.FileName != null))
         {
@@ -42,90 +40,32 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     {
         var rights = FolderAccess.Snapshot(d.Access, FolderOps.All(d));
         var rootVisible = !d.Tenant.FoldersOn || d.Access.IsOrgAdmin;
-        return d.Media.Where(m => IsFile(m) && (m.FolderId is not { } f ? rootVisible || (m.OwnerId != null && m.OwnerId == d.Access.UserId) : rights.GetValueOrDefault(f) != FolderRight.None)).ToList();
+        var shared = d.Access.Shared;
+        return d.Media.Where(m => IsFile(m) && (shared.MediaAll.Contains(m.Id)
+            // média d'une autre aire : partagé directement (à la racine), ou dans un dossier partagé ; ceux que seule une liste partagée utilise ne sont pas listés
+            ? shared.Media.Contains(m.Id) || m.FolderId is { } sf && rights.GetValueOrDefault(sf) != FolderRight.None
+            : m.FolderId is not { } f ? rootVisible || (m.OwnerId != null && m.OwnerId == d.Access.UserId) : rights.GetValueOrDefault(f) != FolderRight.None)).ToList();
     }
 
-    /// <summary>Médias partagés avec la personne et qu'elle ne voit pas déjà par ailleurs (de n'importe quelle aire).</summary>
-    private static List<MediaItem> SharedExtra(ClientDb d, IReadOnlyCollection<MediaItem> normal)
-    {
-        if (d.Access.UserId is not { } me) return new();
-        var have = normal.Select(m => m.Id).ToHashSet();
-        var ids = d.MediaShares.Where(s => s.ClientId == d.ClientId && s.ToUserId == me).Select(s => s.MediaId).ToHashSet();
-        return d.Root.Media.Where(m => m.ClientId == d.ClientId && ids.Contains(m.Id) && IsFile(m) && !have.Contains(m.Id)).ToList();
-    }
+    // ---------- Partage entre aires (lien vivant, lecture seule) ----------
 
-    // ---------- Partage de médias (lecture seule, à la racine du destinataire) ----------
-
-    /// <summary>Médias partagés avec la personne (absents de sa vue normale) : identifiant du média → qui le lui a partagé, et quand.</summary>
+    /// <summary>Médias d'une autre aire partagés directement avec l'aire ouverte (à sa racine) : identifiant → aire d'origine et date.</summary>
     public Dictionary<Guid, MediaSharedWithMe> SharedWithMe() => store.Read(d =>
     {
-        var extra = SharedExtra(d, Normal(d)).Select(m => m.Id).ToHashSet();
-        var me = d.Access.UserId;
-        return d.MediaShares.Where(s => s.ClientId == d.ClientId && s.ToUserId == me && extra.Contains(s.MediaId))
-            .GroupBy(s => s.MediaId).ToDictionary(g => g.Key, g =>
+        var cur = d.Area?.Id;
+        return d.AreaShares.Where(s => s.ClientId == d.ClientId && s.Kind == ShareKind.Media && s.ToAreaId == cur && d.Access.Shared.Media.Contains(s.ItemId))
+            .GroupBy(s => s.ItemId).ToDictionary(g => g.Key, g =>
             {
                 var s = g.OrderBy(x => x.SharedUtc).First();
-                return new MediaSharedWithMe(d.Users.FirstOrDefault(u => u.Id == s.FromUserId)?.Label ?? "Un membre", s.SharedUtc);
+                return new MediaSharedWithMe(d.Root.Areas.FirstOrDefault(a => a.Id == s.FromAreaId)?.Name ?? "Une autre aire", s.SharedUtc);
             });
     });
 
-    /// <summary>Médias que la personne voit et qui sont partagés avec quelqu'un (pastille de partage sur la vignette).</summary>
+    /// <summary>Médias de l'aire ouverte partagés avec d'autres aires (pastille de partage sur la vignette).</summary>
     public HashSet<Guid> SharedOut() => store.Read(d =>
     {
-        var mine = d.Media.Select(m => m.Id).ToHashSet();
-        return d.MediaShares.Where(s => s.ClientId == d.ClientId && mine.Contains(s.MediaId)).Select(s => s.MediaId).ToHashSet();
-    });
-
-    /// <summary>Personnes avec qui un média est partagé.</summary>
-    public List<MediaShareRow> SharesOf(Guid mediaId) => store.Read(d =>
-        d.MediaShares.Where(s => s.ClientId == d.ClientId && s.MediaId == mediaId).OrderBy(s => s.SharedUtc)
-            .Select(s => new MediaShareRow(s.ToUserId, d.Users.FirstOrDefault(u => u.Id == s.ToUserId)?.Label ?? "Retiré de l'organisation", s.SharedUtc)).ToList());
-
-    /// <summary>Membres à qui l'on peut partager (pas soi-même) ; la raison dit pourquoi ce n'est pas possible.</summary>
-    public List<ShareCandidate> ShareCandidates(IReadOnlyCollection<Guid> mediaIds) => store.Read(d =>
-        d.Users.Where(u => u.Role == Roles.ClientMember && u.Id != d.Access.UserId).OrderBy(u => u.Label).Select(u =>
-        {
-            var ua = AreaAccess.For(d.Root, d.ClientId, u.Id);
-            var already = mediaIds.Count > 0 && mediaIds.All(id => d.MediaShares.Any(s => s.ClientId == d.ClientId && s.MediaId == id && s.ToUserId == u.Id));
-            var reason = u.Disabled ? "compte désactivé"
-                : ua.Level?.Pages.Contains(LevelPages.Media) != true ? "n'a pas la page Médiathèque"
-                : already ? "déjà partagé" : null;
-            return new ShareCandidate(u.Id, u.Label, ua.Level?.Name ?? "Sans niveau", reason);
-        }).ToList());
-
-    /// <summary>Partage des médias avec un membre, en lecture seule. Seuls les médias que la personne peut modifier se partagent.</summary>
-    public (int Shared, string? Error) Share(IReadOnlyCollection<Guid> mediaIds, Guid toUserId) => store.Write(d =>
-    {
-        if (d.Access.UserId is not { } me) return (0, "Aucune personne connectée.");
-        if (toUserId == me) return (0, "Vous avez déjà accès à ces médias.");
-        var to = d.Users.FirstOrDefault(u => u.Id == toUserId && u.Role == Roles.ClientMember && !u.Disabled);
-        if (to == null) return (0, "Cette personne n'existe pas ou son compte est désactivé.");
-        if (AreaAccess.For(d.Root, d.ClientId, toUserId).Level?.Pages.Contains(LevelPages.Media) != true) return (0, $"{to.Label} n'a pas la page Médiathèque.");
-        var n = 0;
-        foreach (var m in d.Media.Where(m => mediaIds.Contains(m.Id) && IsOwnFile(m) && FolderOps.CanEditFile(d, m)))
-        {
-            if (d.MediaShares.Any(s => s.ClientId == d.ClientId && s.MediaId == m.Id && s.ToUserId == toUserId)) continue;
-            d.MediaShares.Add(new MediaShare { ClientId = d.ClientId, MediaId = m.Id, FromUserId = me, ToUserId = toUserId });
-            n++;
-        }
-        return (n, null);
-    });
-
-    /// <summary>Retire le partage d'un média avec une personne (par celui qui peut modifier le média).</summary>
-    public string? Unshare(Guid mediaId, Guid toUserId) => store.Write(d =>
-    {
-        if (d.Media.FirstOrDefault(m => m.Id == mediaId) is not { } m || !FolderOps.CanEditFile(d, m)) return "Vous ne pouvez pas modifier le partage de ce média.";
-        d.MediaShares.RemoveAll(s => s.ClientId == d.ClientId && s.MediaId == mediaId && s.ToUserId == toUserId);
-        return null;
-    });
-
-    /// <summary>La personne ne veut plus voir un média qu'on lui a partagé : le partage est retiré et le média sort de ses listes de lecture et contenus.</summary>
-    public string? Leave(Guid mediaId) => store.Write(d =>
-    {
-        if (d.Access.UserId is not { } me) return "Aucune personne connectée.";
-        if (d.MediaShares.RemoveAll(s => s.ClientId == d.ClientId && s.MediaId == mediaId && s.ToUserId == me) == 0) return "Ce média ne vous est pas partagé.";
-        DetachFromContent(d, new HashSet<Guid> { mediaId });
-        return null;
+        var mine = d.Media.Where(m => m.AreaId == d.Area?.Id).Select(m => m.Id).ToHashSet();
+        return d.AreaShares.Where(s => s.ClientId == d.ClientId && s.Kind == ShareKind.Media && mine.Contains(s.ItemId)).Select(s => s.ItemId).ToHashSet();
     });
 
     // ---------- Dossiers (option « Dossiers dans la médiathèque », §49) ----------
@@ -240,11 +180,11 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     {
         var files = store.Write(d =>
         {
-            var gone = d.Media.Where(m => ids.Contains(m.Id) && IsOwnFile(m) && FolderOps.CanEditFile(d, m)).ToList();   // les fichiers Drive suivent leur dossier ; ceux d'un dossier qu'on ne modifie pas restent
+            var gone = d.Media.Where(m => ids.Contains(m.Id) && IsOwnFile(m) && !d.Access.Shared.MediaAll.Contains(m.Id) && FolderOps.CanEditFile(d, m)).ToList();   // un média partagé par une autre aire ne se supprime que dans son aire   // les fichiers Drive suivent leur dossier ; ceux d'un dossier qu'on ne modifie pas restent
             var set = gone.Select(m => m.Id).ToHashSet();
             if (set.Count == 0) return new List<string>();
             DetachFromContent(d, set);
-            d.MediaShares.RemoveAll(s => set.Contains(s.MediaId));
+            AreaShareOps.Forget(d, ShareKind.Media, set);
             d.Media.RemoveAll(m => set.Contains(m.Id));
             return gone.Where(m => m.FileName != null).Select(m => m.FileName!).ToList();
         });
@@ -367,8 +307,6 @@ public record ShareRow(string Kind, Guid TargetId, string Label, bool Write);
 /// <summary>Partages d'un dossier : ceux en place, les personnes et niveaux possibles, et si la personne peut partager.</summary>
 public record FolderShareInfo(MediaFolder Folder, List<ShareRow> Shares, List<ShareCandidate> People, List<ShareCandidate> Levels, bool CanShare, FolderAudience Audience);
 
-/// <summary>Un média partagé avec la personne : qui le lui a partagé, et quand.</summary>
+/// <summary>Un média partagé avec l'aire ouverte : de quelle aire, et quand.</summary>
 public record MediaSharedWithMe(string By, DateTime Utc);
 
-/// <summary>Une personne avec qui un média est partagé.</summary>
-public record MediaShareRow(Guid UserId, string Label, DateTime Utc);

@@ -1,7 +1,7 @@
 @inject MediaLibrary Library
 
 @* Aperçu d'un média de la médiathèque : tiroir « immersif » (§51) — le média en grand avec ses flèches et sa croix posées dessus, son nom et ses
-   infos juste dessous, puis le partage (avec qui, en lecture seule) et où il sert, enfin les actions. Ouvert par un clic sur la vignette ;
+   infos juste dessous, puis le partage (avec quelles aires, en lien vivant) et où il sert, enfin les actions. Ouvert par un clic sur la vignette ;
    ← → passent au média voisin, Échap ferme (géré par la page). Un média partagé avec la personne n'offre que Télécharger et « Ne plus voir ». *@
 <div class="lx-drawer-veil" @onclick="OnClose"></div>
 <aside class="lx-drawer lx-im" role="dialog" aria-modal="false" aria-labelledby="mpp-title">
@@ -26,26 +26,26 @@
         @if (SharedBy is { } by)
         {
             <section class="im-sec">
-                <h4><Ico Name="share" Size="14" /> Partagé par</h4>
-                <div class="im-per"><span class="im-av">@Initials(by.By)</span><span class="grow"><b>@by.By</b><small>vous l'a partagé le @by.Utc.ToLocalTime().ToString("dd.MM.yyyy")</small></span></div>
-                <p class="note"><Ico Name="lock" Size="13" /> Lecture seule : vous pouvez l'utiliser dans vos listes et le télécharger, pas le modifier ni le supprimer.</p>
+                <h4><Ico Name="share" Size="14" /> Partagé par l'aire <small>lien vivant</small></h4>
+                <div class="im-per"><span class="im-av"><Ico Name="map-pin" Size="14" /></span><span class="grow"><b>@by.By</b><small>partagé le @by.Utc.ToLocalTime().ToString("dd.MM.yyyy")</small></span></div>
+                <p class="note"><Ico Name="link" Size="13" /> Ce n'est pas une copie : c'est le média de l'aire @by.By. Vous pouvez le modifier et l'utiliser dans vos listes ; il ne se supprime que dans son aire.</p>
             </section>
         }
         else if (CanShare)
         {
             <section class="im-sec">
-                <h4><Ico Name="share" Size="14" /> Partagé avec <small>lecture seule</small></h4>
-                @if (Shares.Count == 0) { <p class="im-none">Pas partagé : vous seul le voyez.</p> }
+                <h4><Ico Name="share" Size="14" /> Partagé avec <small>lien vivant</small></h4>
+                @if (Shares.Count == 0) { <p class="im-none">Pas partagé : seule votre aire le voit.</p> }
                 @foreach (var sh in Shares)
                 {
                     var row = sh;
                     <div class="im-per">
-                        <span class="im-av">@Initials(row.Label)</span>
-                        <span class="grow"><b>@row.Label</b><small>depuis le @row.Utc.ToLocalTime().ToString("dd.MM.yyyy")</small></span>
-                        <button type="button" class="kebab-btn" title="Ne plus partager avec @row.Label" aria-label="Ne plus partager avec @row.Label" @onclick="() => OnUnshare.InvokeAsync(row.UserId)"><Ico Name="x" Size="15" /></button>
+                        <span class="im-av"><Ico Name="map-pin" Size="14" /></span>
+                        <span class="grow"><b>@row.Name</b><small>depuis le @row.Utc.ToLocalTime().ToString("dd.MM.yyyy")</small></span>
+                        <button type="button" class="kebab-btn" title="Ne plus partager avec l'aire @row.Name" aria-label="Ne plus partager avec l'aire @row.Name" @onclick="() => OnUnshare.InvokeAsync(row.AreaId)"><Ico Name="x" Size="15" /></button>
                     </div>
                 }
-                <button type="button" class="im-add" @onclick="OnShare"><span class="im-av add"><Ico Name="plus" Size="13" /></span> Ajouter une personne</button>
+                <button type="button" class="im-add" @onclick="OnShare"><span class="im-av add"><Ico Name="plus" Size="13" /></span> Ajouter une aire</button>
             </section>
         }
 
@@ -81,7 +81,7 @@
             @if (OnFolder.HasDelegate) { <button class="btn ghost sm" @onclick="OnFolder"><Ico Name="folder" Size="14" /> Ranger…</button> }
             @if (OnArea.HasDelegate) { <button class="btn ghost sm" @onclick="OnArea"><Ico Name="move" Size="14" /> Autre aire…</button> }
             <span class="grow"></span>
-            <button class="btn danger sm icon" title="Supprimer" aria-label="Supprimer" @onclick="OnDelete"><Ico Name="trash" Size="14" /></button>
+            @if (CanDelete) { <button class="btn danger sm icon" title="Supprimer" aria-label="Supprimer" @onclick="OnDelete"><Ico Name="trash" Size="14" /></button> }
         }
         @if (SharedBy != null)
         {
@@ -97,12 +97,14 @@
     [Parameter] public bool CanEdit { get; set; }
     /// <summary>Peut partager ce média (celui qui le modifie, hors fichier Drive et média reçu).</summary>
     [Parameter] public bool CanShare { get; set; }
-    /// <summary>Personnes avec qui ce média est partagé (vu par son propriétaire).</summary>
-    [Parameter] public List<MediaShareRow> Shares { get; set; } = new();
-    /// <summary>Média partagé avec la personne : par qui (lecture seule).</summary>
+    /// <summary>Aires avec lesquelles ce média est partagé (vu par l'aire propriétaire).</summary>
+    [Parameter] public List<AreaShareRow> Shares { get; set; } = new();
+    /// <summary>Média partagé avec l'aire ouverte : par quelle aire.</summary>
     [Parameter] public MediaSharedWithMe? SharedBy { get; set; }
     [Parameter] public EventCallback OnShare { get; set; }
     [Parameter] public EventCallback<Guid> OnUnshare { get; set; }
+    /// <summary>Peut-on supprimer ce média ici ? (un média partagé par une autre aire ne se supprime que dans son aire)</summary>
+    [Parameter] public bool CanDelete { get; set; } = true;
     [Parameter] public EventCallback OnLeave { get; set; }
     /// <summary>Fichier synchronisé depuis un Drive : d'où il vient (null : fichier de la médiathèque).</summary>
     [Parameter] public string? Drive { get; set; }

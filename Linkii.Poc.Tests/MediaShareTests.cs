@@ -1,107 +1,148 @@
-using System.Security.Claims;
 using Linkii.Poc;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Linkii.Poc.Tests;
 
-/// <summary>Partage de médias en lecture seule : visible à la racine du destinataire, ni modifiable ni supprimable par lui, retirable par les deux.</summary>
+/// <summary>Partage entre aires (lien vivant, sans copie) : médias, dossiers de médias, listes de lecture et dossiers de listes ; modifiables par l'aire qui reçoit, retirables.</summary>
 [Collection("platform")]
-public class MediaShareTests
+public class AreaShareTests
 {
-    readonly Platform p;
+    readonly JsonStore store;
     readonly Tenant client;
-    readonly User alice, marc, sophie;
-    readonly MediaItem photo;
+    readonly Area siege, magasin;
+    readonly User camille;   // administratrice : ouvre l'aire qu'on veut
+    readonly MediaItem photo, usedByList;
+    readonly Playlist hall;
+    readonly Screen borne;
 
-    public MediaShareTests(Platform p)
+    public AreaShareTests(Platform p)
     {
-        this.p = p;
-        var store = p.Services.GetRequiredService<JsonStore>();
-        (client, alice, marc, sophie, photo) = store.Write(db =>
+        store = p.Services.GetRequiredService<JsonStore>();
+        (client, siege, magasin, camille, photo, usedByList, hall, borne) = store.Write(db =>
         {
-            var c = new Tenant { ResellerId = p.R1.Id, Name = "Partage SA", FoldersOn = true };
-            var area = new Area { ClientId = c.Id, Name = "Siège" };
-            AreaOps.EnsureDefaultZone(area);
-            db.Clients.Add(c); db.Areas.Add(area);
-            var editeur = new AccessLevel { Name = "Éditeur", Pages = [LevelPages.Screens, LevelPages.Playlists, LevelPages.Media], AllAreas = true };
-            var caisse = new AccessLevel { Name = "Caisse", Pages = [LevelPages.Screens], AllAreas = true };
-            c.Levels.AddRange([editeur, caisse]);
-            User Member(string name, AccessLevel l) { var u = new User { Email = name + "@partage.ch", Name = name, Role = Roles.ClientMember, ClientId = c.Id, LevelId = l.Id }; db.Users.Add(u); return u; }
-            var a = Member("alice", editeur); var m = Member("marc", editeur); var s = Member("sophie", caisse);
-            var item = new MediaItem { ClientId = c.Id, AreaId = area.Id, Name = "Sortie", Type = "image", FileName = "sortie.png", OwnerId = a.Id, AddedUtc = DateTime.UtcNow };
-            db.Media.Add(item);
-            return (c, a, m, s, item);
+            var c = new Tenant { ResellerId = p.R1.Id, Name = "Aires SA", FoldersOn = true };
+            var a1 = new Area { ClientId = c.Id, Name = "Siège", CreatedUtc = DateTime.UtcNow.AddDays(-2) };
+            var a2 = new Area { ClientId = c.Id, Name = "Magasin", CreatedUtc = DateTime.UtcNow.AddDays(-1) };
+            AreaOps.EnsureDefaultZone(a1); AreaOps.EnsureDefaultZone(a2);
+            db.Clients.Add(c); db.Areas.AddRange([a1, a2]);
+            var admin = new User { Email = "camille@aires.ch", Name = "Camille", Role = Roles.ClientAdmin, ClientId = c.Id };
+            db.Users.Add(admin);
+            var ph = new MediaItem { ClientId = c.Id, AreaId = a1.Id, Name = "Sortie", Type = "image", FileName = "sortie.png", AddedUtc = DateTime.UtcNow };
+            var used = new MediaItem { ClientId = c.Id, AreaId = a1.Id, Name = "Affiche", Type = "image", FileName = "affiche.png", AddedUtc = DateTime.UtcNow };
+            db.Media.AddRange([ph, used]);
+            var pl = new Playlist { ClientId = c.Id, AreaId = a1.Id, Name = "Hall d'entrée" };
+            pl.Draft.Add(new PlaylistItem { MediaId = used.Id });
+            db.Playlists.Add(pl);
+            var sc = new Screen { ClientId = c.Id, AreaId = a2.Id, Name = "Borne", Token = "tok-" + Guid.NewGuid().ToString("N")[..6] };
+            db.Screens.Add(sc);
+            return (c, a1, a2, admin, ph, used, pl, sc);
         });
     }
 
-    MediaLibrary As(User u)
+    // Une session ouverte sur une aire donnée.
+    ClientDb Open(Db db, Area area)
     {
-        var store = p.Services.GetRequiredService<JsonStore>();
-        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        var u = db.Users.First(x => x.Id == camille.Id);
+        u.LastAreas[client.Id] = area.Id;
+        return new ClientDb(db, client.Id, AreaAccess.For(db, client.Id, camille.Id));
+    }
+
+    [Fact]
+    public void A_media_shared_with_another_area_is_visible_there_and_editable_but_not_deletable()
+    {
+        store.Write(db => AreaShareOps.SetTargets(Open(db, siege), ShareKind.Media, [photo.Id], [magasin.Id], false));
+
+        Assert.True(store.Read(db =>
         {
-            new Claim(Claims.Client, client.Id.ToString()), new Claim(ClaimTypes.NameIdentifier, u.Id.ToString()), new Claim(ClaimTypes.Role, Roles.ClientMember)
-        }, "test"));
-        return new MediaLibrary(new TenantStore(store, new TenantContext(new FixedAuth(principal), store)), p.Services.GetRequiredService<AppCatalog>());
+            var d = Open(db, magasin);
+            Assert.Contains(d.Media, m => m.Id == photo.Id);                 // visible dans l'aire qui reçoit
+            Assert.True(FolderOps.CanEditFile(d, photo));                    // et modifiable
+            Assert.Equal(1, db.Media.Count(m => m.ClientId == client.Id && m.Name == "Sortie"));        // aucune copie
+            return true;
+        }));
+        // l'autre aire ne le supprime pas
+        store.Write(db => { var d = Open(db, magasin); d.Media.RemoveAll(m => m.Id == photo.Id); });
+        Assert.Contains(store.Read(db => db.Media.ToList()), m => m.Id == photo.Id);
     }
 
     [Fact]
-    public void A_member_does_not_see_the_root_media_of_another_member_until_it_is_shared()
+    public void Sharing_a_list_makes_its_media_readable_without_putting_them_at_the_root_and_the_list_can_be_edited()
     {
-        Assert.Contains(photo.Id, As(alice).Files().Select(m => m.Id));
-        Assert.DoesNotContain(photo.Id, As(marc).Files().Select(m => m.Id));
+        store.Write(db => AreaShareOps.SetTargets(Open(db, siege), ShareKind.Playlist, [hall.Id], [magasin.Id], false));
 
-        var (n, err) = As(alice).Share([photo.Id], marc.Id);
-        Assert.Null(err); Assert.Equal(1, n);
-
-        var marcLib = As(marc);
-        Assert.Contains(photo.Id, marcLib.Files().Select(m => m.Id));
-        Assert.Equal("alice", marcLib.SharedWithMe()[photo.Id].By);
-        Assert.Contains(photo.Id, As(alice).SharedOut());
-        Assert.Single(As(alice).SharesOf(photo.Id));
+        Assert.True(store.Read(db =>
+        {
+            var d = Open(db, magasin);
+            Assert.Contains(d.Playlists, x => x.Id == hall.Id);
+            Assert.Contains(d.Media, m => m.Id == usedByList.Id);            // lisible pour être diffusé
+            Assert.Equal(FolderRight.Write, PlaylistOps.RightOf(d, hall));   // modifiable
+            Assert.DoesNotContain(usedByList.Id, d.Access.Shared.Media);     // pas à la racine de la médiathèque
+            return true;
+        }));
     }
 
     [Fact]
-    public void The_recipient_cannot_rename_or_delete_a_shared_media_but_can_stop_seeing_it()
+    public void Removing_a_share_detaches_the_list_from_the_screens_of_the_other_area_which_keep_their_published_content()
     {
-        As(alice).Share([photo.Id], marc.Id);
-        var marcLib = As(marc);
-        marcLib.Rename(photo.Id, "Piraté");
-        Assert.Equal(0, marcLib.Delete([photo.Id]));
-        Assert.Equal("Sortie", As(alice).Files().First(m => m.Id == photo.Id).Name);
+        store.Write(db => AreaShareOps.SetTargets(Open(db, siege), ShareKind.Playlist, [hall.Id], [magasin.Id], false));
+        store.Write(db => { var s = db.Screens.First(x => x.Id == borne.Id); s.PlaylistId = hall.Id; s.Published = [new PublishedItem { Id = Guid.NewGuid(), Type = "image", MediaId = usedByList.Id }]; s.PublishedVersion = 1; });
 
-        Assert.Null(marcLib.Leave(photo.Id));
-        Assert.DoesNotContain(photo.Id, marcLib.Files().Select(m => m.Id));
-        Assert.Contains(photo.Id, As(alice).Files().Select(m => m.Id));   // reste chez l'émetteur
-        Assert.NotNull(marcLib.Leave(photo.Id));                           // plus rien à quitter
+        Assert.Null(store.Write(db => AreaShareOps.Unshare(Open(db, siege), ShareKind.Playlist, hall.Id, magasin.Id)));
+
+        Assert.True(store.Read(db =>
+        {
+            var s = db.Screens.First(x => x.Id == borne.Id);
+            Assert.Null(s.PlaylistId);                                       // plus choisie
+            Assert.Single(s.Published);                                      // le contenu publié reste
+            Assert.DoesNotContain(Open(db, magasin).Playlists, x => x.Id == hall.Id);
+            return true;
+        }));
     }
 
     [Fact]
-    public void The_sender_can_revoke_and_nobody_else_can_share_it()
+    public void A_shared_folder_gives_its_content_and_subfolders_and_is_not_renamed_by_the_other_area()
     {
-        As(alice).Share([photo.Id], marc.Id);
-        Assert.NotNull(As(marc).Unshare(photo.Id, marc.Id));              // le destinataire passe par « Ne plus voir », pas par la gestion du partage
-        var (n, err) = As(marc).Share([photo.Id], alice.Id);              // et ne repartage pas un média reçu
-        Assert.Equal(0, n);
+        var (folder, sub, inside) = store.Write(db =>
+        {
+            var f = new MediaFolder { ClientId = client.Id, AreaId = siege.Id, Name = "Campagnes" };
+            var s = new MediaFolder { ClientId = client.Id, AreaId = siege.Id, Name = "2026", ParentId = f.Id };
+            db.MediaFolders.AddRange([f, s]);
+            var m = new MediaItem { ClientId = client.Id, AreaId = siege.Id, Name = "Dans le dossier", Type = "image", FileName = "d.png", FolderId = s.Id };
+            db.Media.Add(m);
+            return (f, s, m);
+        });
+        store.Write(db => AreaShareOps.SetTargets(Open(db, siege), ShareKind.MediaFolder, [folder.Id], [magasin.Id], false));
 
-        Assert.Null(As(alice).Unshare(photo.Id, marc.Id));
-        Assert.DoesNotContain(photo.Id, As(marc).Files().Select(m => m.Id));
+        store.Write(db =>
+        {
+            var d = Open(db, magasin);
+            Assert.Contains(d.MediaFolders, f => f.Id == sub.Id);            // sous-dossier compris
+            Assert.Contains(d.Media, m => m.Id == inside.Id);
+            Assert.Equal(FolderRight.Write, FolderOps.RightOf(d, folder));
+            Assert.NotNull(FolderOps.Rename(d, folder.Id, "Autre nom"));     // renommer reste à l'aire d'origine
+        });
     }
 
     [Fact]
-    public void A_member_without_the_media_page_cannot_receive_a_share()
+    public void Only_the_owning_area_shares_and_only_with_other_areas()
     {
-        var (n, err) = As(alice).Share([photo.Id], sophie.Id);
-        Assert.Equal(0, n); Assert.NotNull(err);
-        Assert.Contains(As(alice).ShareCandidates([photo.Id]), c => c.Id == sophie.Id && c.Reason != null);
+        store.Write(db => AreaShareOps.SetTargets(Open(db, siege), ShareKind.Media, [photo.Id], [magasin.Id], false));
+        Assert.False(store.Read(db => AreaShareOps.CanShare(Open(db, magasin), ShareKind.Media, photo.Id)));   // un média reçu ne se repartage pas
+        var err = store.Write(db => AreaShareOps.SetTargets(Open(db, siege), ShareKind.Media, [photo.Id], [siege.Id], false));
+        Assert.NotNull(err);                                                                                    // pas vers sa propre aire
     }
 
     [Fact]
-    public void Deleting_the_media_removes_its_shares()
+    public void The_receiving_area_can_stop_seeing_a_shared_item_and_deleting_the_item_removes_its_shares()
     {
-        As(alice).Share([photo.Id], marc.Id);
-        Assert.Equal(1, As(alice).Delete([photo.Id]));
-        var store = p.Services.GetRequiredService<JsonStore>();
-        Assert.False(store.Read(db => db.MediaShares.Any(s => s.MediaId == photo.Id)));
+        store.Write(db => AreaShareOps.SetTargets(Open(db, siege), ShareKind.Media, [photo.Id], [magasin.Id], false));
+        Assert.Null(store.Write(db => AreaShareOps.Leave(Open(db, magasin), ShareKind.Media, photo.Id)));
+        Assert.DoesNotContain(store.Read(db => Open(db, magasin).Media.ToList()), m => m.Id == photo.Id);
+        Assert.NotNull(store.Write(db => AreaShareOps.Leave(Open(db, magasin), ShareKind.Media, photo.Id)));   // plus rien à quitter
+
+        store.Write(db => AreaShareOps.SetTargets(Open(db, siege), ShareKind.Media, [photo.Id], [magasin.Id], false));
+        store.Write(db => AreaShareOps.Forget(Open(db, siege), ShareKind.Media, [photo.Id]));
+        Assert.False(store.Read(db => db.AreaShares.Any(s => s.ItemId == photo.Id)));
     }
 }

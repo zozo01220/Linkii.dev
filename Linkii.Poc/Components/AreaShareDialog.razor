@@ -1,0 +1,69 @@
+@* Partager avec d'autres aires de gestion : médias, dossiers de médias, listes de lecture, dossiers de listes. Lien vivant (rien n'est copié) :
+   l'aire qui reçoit voit l'élément d'origine, toujours à jour, et le modifie comme ceux de son aire. Un seul élément : on coche ou décoche les aires ;
+   plusieurs : on ajoute seulement. *@
+@inject AreaSharing Sharing
+@inject Toaster Toast
+
+<div class="modal-backdrop" @onclick="Close"></div>
+<div class="modal app-modal sh-modal" role="dialog" aria-modal="true" aria-labelledby="as-title">
+    <div class="modal-head">
+        <h3 id="as-title">Partager @(Items.Count == 1 ? $"« {Items[0].Name} »" : $"{Items.Count} {ShareKind.Label(Kind)}s")</h3>
+        <span class="grow"></span>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="modal-body sh-body">
+        <p class="sh-lead">Choisissez les aires qui verront @(Items.Count == 1 ? "cet élément" : "ces éléments").</p>
+        <div class="sh-list lx-msl">
+            @foreach (var t in targets)
+            {
+                var area = t;
+                var on = chosen.Contains(area.Id);
+                <button type="button" class="sh-row lx-msr @(on ? "on" : "")" aria-pressed="@(on ? "true" : "false")" @onclick="() => Toggle(area.Id)">
+                    <span class="sh-av"><Ico Name="map-pin" Size="14" /></span>
+                    <span class="grow"><b>@area.Name</b><small>@(area.Screens == 0 ? "aucun écran" : area.Screens == 1 ? "1 écran" : $"{area.Screens} écrans")@(area.Shared && Items.Count == 1 ? " · déjà partagé" : "")</small></span>
+                    @if (on) { <span class="lx-chip"><Ico Name="check" Size="12" /> Choisie</span> }
+                </button>
+            }
+            @if (targets.Count == 0) { <p class="sh-empty">Vous n'avez accès à aucune autre aire.</p> }
+        </div>
+        <p class="lx-msnote"><Ico Name="link" Size="14" /> Lien vivant, pas une copie : l'aire voit l'original et les modifications arrivent d'elles-mêmes. Elle peut le modifier et l'utiliser, mais le supprimer ou le déplacer hors de son aire d'origine reste à votre aire.@(Kind is ShareKind.Playlist or ShareKind.PlaylistFolder ? " Les médias des listes partagées deviennent lisibles dans l'autre aire." : "")</p>
+        @if (error != null) { <div class="err">@error</div> }
+    </div>
+    <div class="modal-actions">
+        <button class="btn ghost" @onclick="Close">Annuler</button>
+        <button class="btn" disabled="@(!Changed)" @onclick="Save"><Ico Name="share" Size="15" /> @(Items.Count == 1 ? "Enregistrer" : $"Partager avec {chosen.Count} aire{(chosen.Count > 1 ? "s" : "")}")</button>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Kind { get; set; } = ShareKind.Media;
+    [Parameter, EditorRequired] public List<(Guid Id, string Name)> Items { get; set; } = new();
+    [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>Appelé après un partage enregistré (la page recharge ses listes).</summary>
+    [Parameter] public EventCallback OnShared { get; set; }
+
+    private List<AreaTarget> targets = new();
+    private readonly HashSet<Guid> chosen = new();
+    private HashSet<Guid> initial = new();
+    private string? error;
+
+    protected override void OnInitialized()
+    {
+        targets = Items.Count == 1 ? Sharing.Targets(Kind, Items[0].Id) : Sharing.Targets(Kind, Guid.Empty);
+        initial = Items.Count == 1 ? targets.Where(t => t.Shared).Select(t => t.Id).ToHashSet() : new();
+        chosen.UnionWith(initial);
+    }
+
+    private bool Changed => Items.Count == 1 ? !chosen.SetEquals(initial) : chosen.Count > 0;
+    private void Toggle(Guid id) { if (!chosen.Remove(id)) chosen.Add(id); error = null; }
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task Save()
+    {
+        var err = Sharing.Set(Kind, Items.Select(i => i.Id).ToList(), chosen.ToList(), onlyAdd: Items.Count > 1);
+        if (err != null) { error = err; return; }
+        Toast.Ok(chosen.Count == 0 ? "Partage retiré." : $"Partagé avec {chosen.Count} aire{(chosen.Count > 1 ? "s" : "")}.");
+        await OnShared.InvokeAsync();
+        await OnClose.InvokeAsync();
+    }
+}

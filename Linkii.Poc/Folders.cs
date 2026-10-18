@@ -17,6 +17,8 @@ public static class FolderAccess
 
     public static FolderRight For<T>(AreaAccess a, T f, IReadOnlyCollection<T> all) where T : class, IFolderNode
     {
+        // dossier d'une autre aire, partagé avec l'aire ouverte : on y écrit comme dans un dossier de l'aire (le renommer ou le supprimer reste à son aire d'origine)
+        if (a.Shared.Has(f)) return a.AccessTo(DomainOf(f)) == DomainAccess.None ? FolderRight.None : a.CanWrite(DomainOf(f)) ? FolderRight.Write : FolderRight.Read;
         if (a.IsOrgAdmin) return FolderRight.Owner;
         if (!a.HasArea(f.AreaId)) return FolderRight.None;
         var domain = DomainOf(f);
@@ -230,6 +232,7 @@ public static class FolderOps
     {
         var set = folderIds.ToHashSet();
         d.Root.MediaFolders.RemoveAll(f => f.ClientId == d.ClientId && set.Contains(f.Id));
+        AreaShareOps.Forget(d, ShareKind.MediaFolder, set);
     }
 
     /// <summary>Ajoute, change (write) ou retire (null) le partage d'un dossier pour une personne ou un niveau.</summary>
@@ -313,11 +316,13 @@ public static class FolderOps
     }
 
     /// <summary>
-    /// Un fichier qu'on peut retirer ou renommer : à la racine (comme avant), ou dans un dossier où l'on écrit.
-    /// Avec les dossiers activés, la racine d'un membre n'est que ses propres fichiers et ceux qu'on lui a partagés (lecture seule) : il ne modifie pas ces derniers.
+    /// Un fichier qu'on peut renommer ou ranger : à la racine (comme avant), ou dans un dossier où l'on écrit ; un média partagé par une autre aire se modifie comme ceux de l'aire.
+    /// Avec les dossiers activés, la racine d'un membre n'est que ses propres fichiers.
     /// </summary>
-    public static bool CanEditFile(ClientDb d, MediaItem m) =>
-        m.FolderId is not { } fid
-            ? d.Access.CanWrite(LevelPages.Media) && (!d.Tenant.FoldersOn || d.Access.IsOrgAdmin || m.OwnerId == null || m.OwnerId == d.Access.UserId)
-            : Find(d, fid) is { } f && RightOf(d, f) >= FolderRight.Write;   // hors dossier : selon l'accès à la médiathèque
+    public static bool CanEditFile(ClientDb d, MediaItem m)
+    {
+        if (m.FolderId is { } fid && Find(d, fid) is { } f) return RightOf(d, f) >= FolderRight.Write;
+        if (d.Access.Shared.MediaAll.Contains(m.Id)) return d.Access.CanWrite(LevelPages.Media);   // média d'une autre aire, partagé : modifiable par l'aire qui le reçoit
+        return m.FolderId is null && d.Access.CanWrite(LevelPages.Media) && (!d.Tenant.FoldersOn || d.Access.IsOrgAdmin || m.OwnerId == null || m.OwnerId == d.Access.UserId);   // hors dossier : selon l'accès à la médiathèque
+    }
 }

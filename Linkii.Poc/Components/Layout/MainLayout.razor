@@ -212,7 +212,29 @@
         }
         <header class="topbar">
             <button type="button" class="nav-toggle" aria-label="Menu" aria-expanded="@(navOpen ? "true" : "false")" @onclick="() => { navOpen = !navOpen; open = false; }"><Ico Name="menu" Size="22" /></button>
-            <div class="org">@orgName</div>
+            <div class="org @(Ctx.ClientId != null && multi && areas.Count > 0 ? "has-area" : "")">@orgName</div>
+            @if (Ctx.ClientId != null && multi && areas.Count > 0)
+            {
+                @* Look « app » : liste déroulante des aires de gestion à la place du nom de l'organisation (masquée sur PC, où le sélecteur est dans le menu latéral). *@
+                <div class="app-area" @onclick:stopPropagation="true">
+                    <button type="button" class="app-area-btn" aria-haspopup="menu" aria-expanded="@(topAreaMenu ? "true" : "false")" disabled="@(areas.Count < 2)" title="@(areas.Count < 2 ? "Votre aire de gestion" : "Changer d'aire de gestion")" @onclick="() => topAreaMenu = !topAreaMenu">
+                        <Ico Name="map-pin" Size="16" /><span>@(currentArea?.Name ?? "Aucune aire")</span>@if (areas.Count > 1) { <Ico Name="chevron" Size="16" /> }
+                    </button>
+                    @if (topAreaMenu)
+                    {
+                        <div class="menu-backdrop" @onclick="() => topAreaMenu = false"></div>
+                        <div class="area-menu" role="menu">
+                            @foreach (var a in areas)
+                            {
+                                var ar = a;
+                                <button type="button" role="menuitem" class="@(ar.Id == currentArea?.Id ? "on" : "")" @onclick="() => { topAreaMenu = false; SwitchArea(ar.Id); }">
+                                    <Ico Name="map-pin" Size="15" /><span class="grow">@ar.Name</span>@if (ar.Id == currentArea?.Id) { <Ico Name="check" Size="15" /> }
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+            }
             @if (Ctx.ClientId != null && !Ctx.IsImpersonating)
             {
                 @* Look « app » : mode simple / expert toujours visible dans la barre du haut (masqué ailleurs par le CSS). *@
@@ -333,7 +355,7 @@
 @code {
     private bool more;
     private void CloseMore() => more = false;
-    private bool open, navOpen, areaMenu, multi, orgAdmin = true, readOnly;
+    private bool open, navOpen, areaMenu, topAreaMenu, multi, orgAdmin = true, readOnly;
     private HashSet<string> writable = new();   // domaines (écrans, listes, médiathèque) que le niveau modifie
     // Page d'un domaine que le niveau ne fait que voir : bandeau et boutons d'en-tête masqués, comme en lecture seule
     private string? ReadOnlyDomain => orgAdmin ? null : Services.GetRequiredService<TenantStore>().PageDomain is { } dom && !writable.Contains(dom) ? dom : null;
