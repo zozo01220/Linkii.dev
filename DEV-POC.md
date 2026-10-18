@@ -1567,3 +1567,11 @@ Maquettes montrées dans la conversation. Première version (bouton « Par aire 
 - **Serveur** (`AreaOps`) : `PlaceScreen` (zone ou aire cible, droits, murs), `MoveScreen(…, adminOnly: false)` pour les membres qui ont le droit (la boîte « Autre aire… » reste réservée aux administrateurs), `PlaceOf` / `Restore` (annulation).
 - **Tests** : `ScreenPlaceTests` (déplacement complet et annulation, droit de déplacement, gestion des zones seule, planning conservé, zone de mur refusée). 9 tests déjà en échec avant ces travaux.
 - **Pas vu** : la page dans le navigateur (le glisser-déposer Blazor et la mise en page des blocs n'ont pas été essayés en vrai). Limites : les cartes des autres aires n'ont ni réglages ni aperçu (on les modifie en ouvrant leur aire) ; le filtre « À publier » ne s'applique qu'à l'aire ouverte.
+
+## 68. Écrans : retouches des blocs aire › zone (18 octobre 2026) : codé
+
+- **Vue liste** : les écrans des autres aires reprennent la rangée habituelle (`LightRow`, même balisage que les rangées de l'aire ouverte) au lieu d'une carte ; toutes les aires et zones ont le même aspect en liste.
+- **Connecter un écran** : un **tiroir** à droite (`.lx-drawer`, comme l'aperçu d'un média) remplace la fenêtre modale ; un champ par ligne, boutons Annuler / Connecter en bas.
+- **Édition d'un écran d'une autre aire** : un clic sur sa carte change d'aire puis **ouvre directement son édition** (paramètre `?edit=<id>` lu à l'ouverture de la page puis retiré de l'adresse) ; avant, il fallait cliquer une seconde fois après le rechargement.
+- **Curseur** : la règle globale `.pl-card[draggable]` donnait une main « déplacer » à toutes les cartes d'écran ; elles gardent un curseur normal (cliquer = éditer), le glisser-déposer fonctionne toujours.
+- **Pas vu** : ces écrans dans le navigateur.

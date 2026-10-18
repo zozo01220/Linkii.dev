@@ -373,6 +373,7 @@ else if (wallEdit is { } wid)
     private bool showPair;
     private Timer? timer;
     private Guid? menuFor, editing;
+    private bool cleanQuery;   // paramètre « edit » à retirer de l'adresse
     private Guid? simScreen, simWall;   // simulateur ouvert : un écran, ou un mur entier
     private List<Screen>? deleting;   // écrans en attente de confirmation de suppression
     private string view = "cards";   // cards | list (mémorisé dans le navigateur)
@@ -384,6 +385,8 @@ else if (wallEdit is { } wid)
     {
         tenant = Store.Read(d => d.Tenant);
         Reload();
+        // « Ouvrir cette aire » depuis un écran d'une autre aire : après le changement d'aire, l'écran choisi s'ouvre directement en édition
+        if (Guid.TryParse(System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query)["edit"], out var wanted)) { cleanQuery = true; if (screens.Any(s => s.Id == wanted)) editing = wanted; }
         timer = new Timer(_ => InvokeAsync(() => { Reload(); StateHasChanged(); }), null, 3000, 3000);   // état en ligne / hors ligne
     }
 
@@ -591,9 +594,9 @@ else if (wallEdit is { } wid)
         canMoveScreens = Store.Read(d => d.Access.CanMoveScreens);
     }
 
-    private void OpenAreaPage(Guid areaId)
+    private void OpenAreaPage(Guid areaId, Guid? editScreen = null)
     {
-        if (Store.SwitchArea(areaId)) Nav.NavigateTo(Nav.Uri, forceLoad: true);
+        if (Store.SwitchArea(areaId)) Nav.NavigateTo(editScreen is { } id ? Nav.GetUriWithQueryParameter("edit", id.ToString()) : Nav.Uri, forceLoad: true);
     }
 
     private void StartDragScreen(Screen s) { dragIds = selectedIds.Contains(s.Id) ? selectedIds.ToList() : new List<Guid> { s.Id }; groupNotice = groupWarn = null; }
@@ -604,9 +607,9 @@ else if (wallEdit is { } wid)
     {
         var off = IsOffline(s);
         var listName = s.PlaylistId is { } pid && ga.Lists.TryGetValue(pid, out var ln) ? ln : "Aucune liste de lecture";
-        <div class="pl-card gc gc-light @(off ? "is-off" : "is-on")" role="button" tabindex="0" title="Aire « @ga.Area.Name » : ouvrez-la pour modifier cet écran"
+        <div class="pl-card gc gc-light @(off ? "is-off" : "is-on")" role="button" tabindex="0" title="Modifier cet écran (aire « @ga.Area.Name »)"
              draggable="@(canMoveScreens ? "true" : null)" @ondragstart="() => StartDragScreen(s)" @ondragend="EndDragScreen"
-             @onclick="() => OpenAreaPage(ga.Area.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenAreaPage(ga.Area.Id); }'>
+             @onclick="() => OpenAreaPage(ga.Area.Id, s.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenAreaPage(ga.Area.Id, s.Id); }'>
             <div class="gc-top">
                 <div class="gc-stage">
                     <div class="gc-mon @(s.Orientation == "portrait" ? "portrait" : "")"></div>
@@ -627,9 +630,9 @@ else if (wallEdit is { } wid)
         var off = IsOffline(s);
         var st = off ? "Hors ligne" : "En ligne";
         var listName = s.PlaylistId is { } pid && ga.Lists.TryGetValue(pid, out var ln) ? ln : "— Aucune liste de lecture —";
-        <div class="pl-card sc-card scr-card @(off ? "is-off" : "")" role="button" tabindex="0" title="Aire « @ga.Area.Name » : ouvrez-la pour modifier cet écran"
+        <div class="pl-card sc-card scr-card @(off ? "is-off" : "")" role="button" tabindex="0" title="Modifier cet écran (aire « @ga.Area.Name »)"
              draggable="@(canMoveScreens ? "true" : null)" @ondragstart="() => StartDragScreen(s)" @ondragend="EndDragScreen"
-             @onclick="() => OpenAreaPage(ga.Area.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenAreaPage(ga.Area.Id); }'>
+             @onclick="() => OpenAreaPage(ga.Area.Id, s.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenAreaPage(ga.Area.Id, s.Id); }'>
             <div class="sc-head">
                 <div class="pl-title">
                     <span class="sc-dot @(off ? "hors-ligne" : "en-ligne")" title="@st"><span class="sr-only sc-st">@st</span></span>
@@ -1527,6 +1530,7 @@ else if (wallEdit is { } wid)
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (cleanQuery && !firstRender) { cleanQuery = false; Nav.NavigateTo(Nav.GetUriWithQueryParameter("edit", (string?)null), replace: true); }
         if (focusRename && renamingScreen != null) { focusRename = false; await renameInput.FocusAsync(); }
     }
 
