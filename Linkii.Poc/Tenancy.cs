@@ -66,6 +66,8 @@ public class AreaAccess
     public bool CanWrite(string domain) => AccessTo(domain) == DomainAccess.Write;
     /// <summary>Gérer les zones et les murs : administrateurs de l'organisation, et membres dont le niveau le permet (avec les écrans en écriture).</summary>
     public bool CanManageZones => IsOrgAdmin || Level is { ManageZones: true } && CanWrite(LevelPages.Screens);
+    /// <summary>Déplacer les écrans entre zones et entre aires (dans le périmètre) : administrateurs, et membres dont le niveau le permet (avec les écrans en écriture).</summary>
+    public bool CanMoveScreens => IsOrgAdmin || Level is { MoveScreens: true } && CanWrite(LevelPages.Screens);
     /// <summary>Zones et murs d'une aire : CanManageZones, dans les aires accessibles. Aires, membres et niveaux restent aux administrateurs.</summary>
     public bool CanManage(Guid areaId) => CanManageZones && HasArea(areaId);
     /// <summary>Zones de l'aire ouverte.</summary>

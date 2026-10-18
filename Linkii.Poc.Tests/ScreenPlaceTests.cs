@@ -13,14 +13,14 @@ public class ScreenPlaceTests
     readonly Tenant client;
     readonly Area siege, magasin;
     readonly Zone vitrine, mur;
-    readonly User camille, marc;   // administratrice ; membre qui gère les zones
+    readonly User camille, marc, lea;   // administratrice ; membre qui gère les zones ; membre qui peut déplacer les écrans
     readonly Screen borne;
     readonly Playlist hall;
 
     public ScreenPlaceTests(Platform p)
     {
         store = p.Services.GetRequiredService<JsonStore>();
-        (client, siege, magasin, vitrine, mur, camille, marc, borne, hall) = store.Write(db =>
+        (client, siege, magasin, vitrine, mur, camille, marc, lea, borne, hall) = store.Write(db =>
         {
             var c = new Tenant { ResellerId = p.R1.Id, Name = "Déplacement SA" };
             var a1 = new Area { ClientId = c.Id, Name = "Siège", CreatedUtc = DateTime.UtcNow.AddDays(-2) };
@@ -30,16 +30,18 @@ public class ScreenPlaceTests
             var w = new Zone { Name = "Mur du hall", Kind = Zone.Wall }; a2.Zones.Add(w);
             db.Clients.Add(c); db.Areas.AddRange([a1, a2]);
             var level = new AccessLevel { Name = "Gestion", Pages = [LevelPages.Screens], AllAreas = true, ManageZones = true };
-            c.Levels.Add(level);
+            var mover = new AccessLevel { Name = "Déplacement", Pages = [LevelPages.Screens], AllAreas = true, MoveScreens = true };
+            c.Levels.AddRange([level, mover]);
             var admin = new User { Email = "camille@deplace.ch", Role = Roles.ClientAdmin, ClientId = c.Id };
             var member = new User { Email = "marc@deplace.ch", Role = Roles.ClientMember, ClientId = c.Id, LevelId = level.Id };
-            db.Users.AddRange([admin, member]);
+            var mover1 = new User { Email = "lea@deplace.ch", Role = Roles.ClientMember, ClientId = c.Id, LevelId = mover.Id };
+            db.Users.AddRange([admin, member, mover1]);
             var pl = new Playlist { ClientId = c.Id, AreaId = a1.Id, Name = "Hall" };
             db.Playlists.Add(pl);
             var sc = new Screen { ClientId = c.Id, AreaId = a1.Id, ZoneId = a1.Zones[0].Id, Name = "Borne", Token = "tk-" + Guid.NewGuid().ToString("N")[..6], PlaylistId = pl.Id, OwnPlanning = true };
             sc.Slots.Add(new Slot { PlaylistId = pl.Id });
             db.Screens.Add(sc);
-            return (c, a1, a2, v, w, admin, member, sc, pl);
+            return (c, a1, a2, v, w, admin, member, mover1, sc, pl);
         });
     }
 
@@ -89,6 +91,15 @@ public class ScreenPlaceTests
         var zone = store.Write(db => AreaOps.AddZone(As(db, camille, siege), siege.Id, "Accueil").Zone!.Id);
         Assert.Null(store.Write(db => AreaOps.PlaceScreen(As(db, marc, siege), borne.Id, siege.Id, zone)));   // changement de zone : permis
         Assert.Single(store.Read(db => db.Screens.First(s => s.Id == borne.Id).Slots));                       // planning conservé
+    }
+
+    [Fact]
+    public void The_move_right_lets_a_member_move_screens_between_zones_and_areas_without_being_an_administrator()
+    {
+        Assert.Null(store.Write(db => AreaOps.PlaceScreen(As(db, lea, siege), borne.Id, magasin.Id, vitrine.Id)));
+        Assert.Equal(magasin.Id, store.Read(db => db.Screens.First(s => s.Id == borne.Id).AreaId));
+        Assert.True(store.Read(db => As(db, lea, siege).Access.CanMoveScreens));
+        Assert.False(store.Read(db => As(db, marc, siege).Access.CanMoveScreens));   // la gestion des zones seule ne le donne pas
     }
 
     [Fact]

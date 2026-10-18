@@ -240,9 +240,10 @@ public static class AreaOps
     /// L'écran continue d'afficher ce qui y est publié. Ses listes de lecture restent dans l'ancienne aire : il n'en a plus
     /// (modification à publier) jusqu'à ce qu'on lui en choisisse une de sa nouvelle aire.
     /// </summary>
-    public static string? MoveScreen(ClientDb d, Guid screenId, Guid target)
+    public static string? MoveScreen(ClientDb d, Guid screenId, Guid target, bool adminOnly = true)
     {
-        if (CheckTarget(d, target) is { } e) return e;
+        var targetError = adminOnly ? CheckTarget(d, target) : d.Areas.Any(a => a.Id == target) ? null : "Aire introuvable.";
+        if (targetError != null) return targetError;
         var s = d.Root.Screens.FirstOrDefault(x => x.Id == screenId && x.ClientId == d.ClientId);
         if (s == null) return "Écran introuvable.";
         if (s.AreaId == target) return null;
@@ -272,7 +273,7 @@ public static class AreaOps
 
     /// <summary>
     /// Place un écran dans une zone d'une aire (glisser-déposer de la page Écrans). Dans la même aire : un changement de zone, planning conservé
-    /// (qui gère les zones). Vers une autre aire : administrateur de l'organisation seulement, planning propre retiré et listes de l'ancienne aire
+    /// (administrateur, droit « déplacer les écrans » ou gestion des zones). Vers une autre aire : administrateur ou droit « déplacer les écrans » (aires du périmètre), planning propre retiré et listes de l'ancienne aire
     /// plus choisies (voir <see cref="MoveScreen"/>). Un écran de mur, ou une zone de mur, ne se déplace pas ainsi.
     /// </summary>
     public static string? PlaceScreen(ClientDb d, Guid screenId, Guid targetArea, Guid targetZone)
@@ -288,11 +289,12 @@ public static class AreaOps
         if (WallOf(d, s) is { } wall) return $"« {s.Name} » fait partie du mur « {wall.Name} » : dissolvez d'abord le mur.";
         if (s.AreaId == targetArea)
         {
-            if (!d.Access.CanManage(targetArea)) return "Votre niveau de droits ne permet pas de changer un écran de zone.";
+            if (!d.Access.CanMoveScreens && !d.Access.CanManage(targetArea)) return "Votre niveau de droits ne permet pas de déplacer les écrans.";
             s.ZoneId = zone.Id;
             return null;
         }
-        if (MoveScreen(d, screenId, targetArea) is { } err) return err;
+        if (!d.Access.CanMoveScreens) return "Votre niveau de droits ne permet pas de déplacer un écran vers une autre aire de gestion.";
+        if (MoveScreen(d, screenId, targetArea, adminOnly: false) is { } err) return err;
         s.ZoneId = zone.Id;
         return null;
     }
