@@ -134,7 +134,7 @@
                             }
                             else
                             {
-                                @foreach (var sc in inZone) { @LightCard(sc, ar) }
+                                @foreach (var sc in inZone) { if (ListView) { @LightRow(sc, ar) } else { @LightCard(sc, ar) } }
                             }
                             @if (count == 0) { <div class="scr-gempty">@(zn.IsWall ? "Mur sans écran" : canMoveScreens ? "Glissez un écran ici" : "Aucun écran")</div> }
                             @if (current && zn.IsDefault && !zn.IsWall)
@@ -192,40 +192,47 @@ else
     </div>
 }
 
+@* Connecter un écran : un tiroir à droite (comme l'aperçu d'un média) plutôt qu'une fenêtre ; la page reste visible derrière. *@
 @if (showPair)
 {
-    <div class="modal-backdrop" @onclick="() => showPair = false"></div>
-    <div class="modal pair-modal" role="dialog" aria-modal="true" aria-labelledby="pair-title">
-        <h3 id="pair-title">Connecter un écran</h3>
-        <p class="hint">Allumez l'écran, puis saisissez le code à 6 chiffres affiché. <a href="/player/" target="_blank">Ouvrir un écran de test</a></p>
-        <div class="dw pair-grid">
-            <div class="dw-field"><label for="pair-code">Code</label><input id="pair-code" class="pair-code" @bind="code" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="off" /></div>
-            <div class="dw-field"><label for="pair-name">Nom de l'écran</label><input id="pair-name" @bind="name" placeholder="Ex. Accueil, salle de pause" /></div>
-            <div class="dw-field @(FreeZones.Count > 1 ? "" : "wide")">
-                <label for="pair-pl">Liste de lecture</label>
-                <select id="pair-pl" @bind="playlistId">
-                    <option value="">— Aucune liste de lecture —</option>
-                    @foreach (var p in playlists) { <option value="@p.Id">@p.Name</option> }
-                </select>
-            </div>
-            <div class="dw-field wide"><ScreenFormat Spec="pairSpec" /></div>
-            @if (FreeZones.Count > 1)
-            {
-                <div class="dw-field">
-                    <label for="pair-zone">Zone</label>
-                    <select id="pair-zone" @bind="pairZone">
-                        @foreach (var z in FreeZones) { <option value="@z.Id">@z.Name</option> }
+    <div class="lx-drawer-veil" @onclick="() => showPair = false"></div>
+    <aside class="lx-drawer lx-pair" role="dialog" aria-modal="false" aria-labelledby="pair-title">
+        <div class="dh">
+            <b id="pair-title">Connecter un écran</b>
+            <button type="button" class="kebab-btn" title="Fermer" aria-label="Fermer" @onclick="() => showPair = false"><Ico Name="x" Size="16" /></button>
+        </div>
+        <div class="db">
+            <p class="hint" style="margin-top:0">Allumez l'écran, puis saisissez le code à 6 chiffres affiché. <a href="/player/" target="_blank">Ouvrir un écran de test</a></p>
+            <div class="dw pair-grid">
+                <div class="dw-field wide"><label for="pair-code">Code</label><input id="pair-code" class="pair-code" @bind="code" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="off" /></div>
+                <div class="dw-field wide"><label for="pair-name">Nom de l'écran</label><input id="pair-name" @bind="name" placeholder="Ex. Accueil, salle de pause" /></div>
+                <div class="dw-field wide">
+                    <label for="pair-pl">Liste de lecture</label>
+                    <select id="pair-pl" @bind="playlistId">
+                        <option value="">— Aucune liste de lecture —</option>
+                        @foreach (var p in playlists) { <option value="@p.Id">@p.Name</option> }
                     </select>
                 </div>
-            }
+                @if (FreeZones.Count > 1)
+                {
+                    <div class="dw-field wide">
+                        <label for="pair-zone">Zone</label>
+                        <select id="pair-zone" @bind="pairZone">
+                            @foreach (var z in FreeZones) { <option value="@z.Id">@z.Name</option> }
+                        </select>
+                    </div>
+                }
+                <div class="dw-field wide"><ScreenFormat Spec="pairSpec" /></div>
+            </div>
+            <p class="hint" style="margin:12px 0 0">Matériel et format viennent des Réglages ; la résolution est celle de l'appareil par défaut. Tout reste modifiable ensuite dans l'édition de l'écran.</p>
+            @if (error != null) { <div class="err">@error</div> }
         </div>
-        <p class="hint" style="margin:12px 0 0">Matériel et format viennent des Réglages ; la résolution est celle de l'appareil par défaut. Tout reste modifiable ensuite dans l'édition de l'écran.</p>
-        @if (error != null) { <div class="err">@error</div> }
-        <div class="modal-actions">
+        <div class="df">
             <button class="btn ghost" @onclick="() => showPair = false">Annuler</button>
-            <button class="btn" @onclick="Pair">Connecter</button>
+            <span class="grow"></span>
+            <button class="btn" @onclick="Pair"><Ico Name="plus" Size="15" /> Connecter</button>
         </div>
-    </div>
+    </aside>
 }
 
 @if (renamingScreen != null)
@@ -611,6 +618,38 @@ else if (wallEdit is { } wid)
                 <div class="gc-sub">@if (s.DeviceKind != null) { <b>@(s.DeviceOs ?? "Appareil")</b> } else { <span>En attente des informations de l'écran</span> }</div>
                 <div class="gc-plrow"><div class="gc-sel"><Ico Name="play-box" Size="16" /><span class="gc-selro">@listName</span></div></div>
             </div>
+        </div>
+    };
+
+    // Même chose en vue liste : la rangée de consultation reprend le balisage des rangées habituelles (voir Card), pour que toutes les aires aient le même aspect.
+    private RenderFragment LightRow(Screen s, GroupArea ga) => __builder =>
+    {
+        var off = IsOffline(s);
+        var st = off ? "Hors ligne" : "En ligne";
+        var listName = s.PlaylistId is { } pid && ga.Lists.TryGetValue(pid, out var ln) ? ln : "— Aucune liste de lecture —";
+        <div class="pl-card sc-card scr-card @(off ? "is-off" : "")" role="button" tabindex="0" title="Aire « @ga.Area.Name » : ouvrez-la pour modifier cet écran"
+             draggable="@(canMoveScreens ? "true" : null)" @ondragstart="() => StartDragScreen(s)" @ondragend="EndDragScreen"
+             @onclick="() => OpenAreaPage(ga.Area.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenAreaPage(ga.Area.Id); }'>
+            <div class="sc-head">
+                <div class="pl-title">
+                    <span class="sc-dot @(off ? "hors-ligne" : "en-ligne")" title="@st"><span class="sr-only sc-st">@st</span></span>
+                    <span class="pl-name">@s.Name</span>
+                </div>
+                <div class="sc-meta">
+                    <div class="sc-device @(off ? "off" : "")">
+                        @if (s.DeviceKind != null)
+                        {
+                            <DeviceLogo Kind="@s.DeviceKind" Size="22" />
+                            <span><b>@(s.DeviceOs ?? "Appareil")</b>@if (s.DeviceApp is { Length: > 0 } da && s.DeviceApp != "web") { <text> <span class="sep">·</span> App <span class="mono">@da</span></text> }</span>
+                        }
+                        else { <span class="muted">Appareil : en attente des informations de l'écran</span> }
+                    </div>
+                </div>
+            </div>
+            <div class="sc-vwrap">
+                <span class="sc-visual"><span class="sc-monitor @(s.Orientation == "portrait" ? "portrait" : "")"><span class="sc-zones dir-row"><span class="sc-zone"><span class="sc-empty"></span></span></span></span><span class="sc-stand"></span></span>
+            </div>
+            <div class="sc-foot"><span class="sc-select">@listName</span></div>
         </div>
     };
 
