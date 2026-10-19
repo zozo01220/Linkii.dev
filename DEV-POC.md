@@ -1614,3 +1614,9 @@ Maquette validée : `maquettes/listes-dossiers-apercu.html` (couleur Nuit retenu
 - **Glisser-déposer** : un dossier cible prend le dos Signal et ses vignettes se soulèvent. ⋮ au survol sur l'onglet (PC), toujours visible au téléphone.
 - **Téléphone (navigateur)** : deux colonnes. **App Android** : bande qui défile (dossiers de 140 px), « Nouveau dossier » en pointillés au bout ; la bande garde sa marge à gauche (`scroll-padding`).
 - **Vu** : PC, navigateur mobile et look app, médiathèque et listes (instance de test, 3 dossiers de médias, 3 dossiers de listes).
+
+## 72. Boutons « Partager » en bleu vif (19 octobre 2026) : codé
+
+- Classe `.btn-share` (`#1F6FD1`, texte blanc, survol `#1A62BB`) sur les boutons Partager : en-tête d'un dossier (Médiathèque, Listes de lecture), aperçu d'un média, « Partager avec N aires ». Même taille que les autres boutons (`.btn`), sauf dans l'aperçu d'un média où tous les boutons du pied sont petits.
+- Pourquoi : à côté d'un bouton Nuit (« Nouvelle liste », « Importer »), un second bouton Nuit se confondait ; le bleu vif les distingue. Hors charte (le Signal `#3B82C4` reste l'accent du logo).
+- Dans l'app Android, le bouton garde son rang (après le bouton principal).
