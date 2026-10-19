@@ -1643,3 +1643,16 @@ Maquette validée : `maquettes/etats-vides.html` (style de l'état vide existant
 - **Listes de lecture** : vide → « Nouvelle liste » ; rien à la racine → « Aucune liste à la racine » ; dossier vide → texte et bouton « Nouvelle liste ».
 - Styles : `.empty p` (largeur et marge sous le texte), `.empty.compact` (dans un bloc).
 - **Vu** (instance de test) : médiathèque vide / racine vide / dossier vide, listes racine vide / dossier vide, écrans sans écran. **Pas vu** : aire sans écran avec d'autres aires, droits en lecture seule (le bouton disparaît, le texte reste).
+
+## 75. Carte écran allégée (19 octobre 2026) : codé
+
+Maquette validée : `maquettes/carte-ecran-legere.html`. But : une carte plus basse, avec seulement l'information utile.
+
+- **Vue cartes, PC** : la liste de lecture déroulante, Aperçu et Pause passent **dans l'aperçu (rectangle noir), au survol** ou au clavier (`.gc-ctl`, bande dégradée en bas de l'aperçu). Elle reste affichée tant qu'un menu qu'elle a ouvert l'est (choix par zone d'un écran découpé).
+- **Mur** : « 2 sur 2 en ligne » est remplacé dans l'aperçu par la pastille dépliable (points d'état + « 2 écrans », liste des écrans au clic) ; elle ne figure plus sous le nom. L'état complet reste dans l'info-bulle.
+- **Sous le nom** : une ligne « ▷ liste de lecture » rappelle ce qui passe (pour un écran découpé : le résumé des zones).
+- **Au survol** : la pastille d'état (ou celle du mur) remonte au-dessus des commandes ; les pastilles de publication (« Affichée à… », « À publier ») s'effacent le temps du survol ; le bandeau rouge « Hors ligne depuis… » s'efface et Aperçu / Pause apparaissent grisés.
+- **Au doigt (navigateur du téléphone)** : pas de survol, les commandes restent visibles et les pastilles au-dessus.
+- **App Android** : inchangée (rangée sous le nom et état du mur en texte, classes `.gc-apponly`). **Vue liste** : inchangée.
+- Code : fragments `WallPlRow` / `ScreenPlRow` (une seule rangée, rendue dans l'aperçu et, pour l'app, sous le nom).
+- **Vu** (instance de test, 2 lecteurs web, mur 2 × 1) : carte au repos, survol, choix de la liste depuis la bande, liste des écrans du mur au-dessus des commandes, écran hors ligne. **Pas vu** : app Android, écran découpé en zones, licence de base (boutons verrouillés).

@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Carte écran allégée</title>
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--signal:#3B82C4;--ok:#1E8E5A;--danger:#C8372D;--radius:4px;--mono:"JetBrains Mono",ui-monospace,Consolas,monospace}
+*{box-sizing:border-box}html,body{margin:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
+b{font-weight:500}button,select{font:inherit;color:inherit}
+svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.note{background:#FFF8E1;border-bottom:1px dashed #E0B84A;padding:10px 24px;font-size:13px;color:#6B5200}
+.bar{display:flex;gap:16px;align-items:center;flex-wrap:wrap;padding:12px 32px;font-size:13px;color:var(--muted)}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:var(--radius);overflow:hidden}
+.seg button{border:0;background:#fff;padding:5px 12px;font-size:13px;cursor:pointer;color:var(--muted)}
+.seg button.on{background:var(--ink);color:#fff}
+.wrap{padding:8px 32px 48px}
+h2{font-size:13px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:500;margin:14px 0 12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:20px;align-items:start;max-width:1260px}
+
+/* carte */
+.card{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:visible;position:relative}
+.scene{position:relative;height:214px;background:#0F1A2B;border-radius:9px 9px 0 0;display:grid;place-items:center;overflow:hidden}
+.scene .chk{position:absolute;left:10px;top:10px;width:18px;height:18px;border-radius:3px;background:#fff;border:1px solid var(--line-2)}
+.scene .kb{position:absolute;right:8px;top:8px;width:28px;height:28px;border-radius:var(--radius);background:#fff;display:grid;place-items:center;font-size:16px;line-height:1;z-index:3}
+.tv{width:290px;height:150px;background:#151515;border:3px solid #2A2F36;border-radius:3px}
+.tv.on{background:linear-gradient(135deg,#2a5a7a,#7fb2c9 60%,#e8d6a8)}
+.wall{display:grid;grid-template-columns:1fr 1fr;gap:2px;width:345px;height:96px}
+.wall i{background:#24456E;position:relative;display:block}
+.wall i::before{content:attr(data-n);position:absolute;left:6px;top:3px;color:#fff;font-size:11px;font-style:normal}
+.wall.on i{background:linear-gradient(135deg,#2a5a7a,#7fb2c9 60%,#e8d6a8)}
+.wall .cal{position:absolute;inset:0;display:grid;place-items:center;color:#fff}
+.offl{position:absolute;left:0;right:0;bottom:0;background:var(--danger);color:#fff;text-align:center;font-size:13px;font-weight:500;padding:5px}
+.state{position:absolute;left:10px;bottom:10px;color:#fff;font-size:13px;display:flex;gap:6px;align-items:center}
+.dot{width:8px;height:8px;border-radius:50%;background:#3FBF7F;display:inline-block}
+.dot.off{background:#E06B62}
+
+/* pastille déroulante dans la scène (proposition) */
+.pill{position:absolute;left:10px;bottom:10px;display:inline-flex;gap:6px;align-items:center;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);color:#fff;border-radius:99px;padding:3px 10px 3px 9px;font-size:13px;cursor:pointer;z-index:2}
+.pill:hover{background:rgba(255,255,255,.22)}
+.pill .dots{display:inline-flex;gap:3px}
+.pill svg{width:13px;height:13px}
+.pop{position:absolute;left:10px;bottom:44px;background:#fff;color:var(--ink);border:1px solid var(--line-2);border-radius:6px;box-shadow:0 10px 26px rgba(11,31,58,.28);padding:6px;min-width:230px;z-index:6;display:none;font-size:14px}
+.pop.on{display:block}
+.pop div{display:flex;gap:10px;align-items:center;padding:6px 8px;border-radius:3px}
+.pop div:hover{background:var(--bg)}
+.pop small{margin-left:auto;color:var(--muted);font-size:12px}
+
+/* commandes au survol de la scène (proposition) */
+.ctl{position:absolute;left:0;right:0;bottom:0;padding:28px 10px 10px;background:linear-gradient(to top,rgba(11,31,58,.92),rgba(11,31,58,.7) 60%,transparent);display:flex;gap:8px;align-items:center;opacity:0;transform:translateY(6px);transition:opacity .15s,transform .15s;z-index:4;pointer-events:none}
+.scene:hover .ctl,.scene:focus-within .ctl,.card.force .ctl{opacity:1;transform:none;pointer-events:auto}
+.scene:hover .pill,.scene:focus-within .pill,.card.force .pill{opacity:0;pointer-events:none}
+.scene:hover .offl,.card.force .offl{opacity:0}
+.sel{flex:1;min-width:0;display:flex;gap:8px;align-items:center;background:#fff;border:1px solid var(--line-2);border-radius:var(--radius);padding:6px 10px;font-size:14px;color:var(--ink);cursor:pointer}
+.sel span{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ib{width:34px;height:34px;flex:none;border:1px solid var(--line-2);background:#fff;border-radius:var(--radius);display:grid;place-items:center;color:var(--ink);cursor:pointer}
+.ib:disabled{opacity:.45;cursor:not-allowed}
+
+/* bas de carte */
+.body{padding:12px 14px 14px}
+.nm{display:flex;align-items:center;gap:8px}
+.nm b{font-size:17px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nm svg{color:var(--muted)}
+.sub{color:var(--muted);font-size:13px;margin-top:2px;display:flex;gap:6px;align-items:center}
+.sub .pl{display:inline-flex;gap:5px;align-items:center;color:var(--ink)}
+.card.offline .nm b{color:var(--muted)}
+/* « avant » */
+.oldpill{display:inline-flex;gap:6px;align-items:center;border-radius:99px;background:#EDF1F5;padding:2px 10px;font-size:13px;margin-top:8px}
+.oldctl{display:flex;gap:8px;margin-top:12px}
+.oldctl .sel{border-color:var(--line-2)}
+.add{border:2px dashed var(--line-2);border-radius:10px;align-self:stretch;min-height:220px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:var(--muted)}
+.add span{width:64px;height:64px;background:#fff;border:1px solid var(--line);border-radius:6px;display:grid;place-items:center;font-size:28px;color:var(--ink)}
+.gain{font-family:var(--mono);font-size:12px;color:var(--ok);margin-top:6px}
+</style>
+</head>
+<body>
+<div class="note"><b>Proposition :</b> la carte ne garde que l'essentiel (aperçu, nom, ce qui passe). La pastille des écrans du mur remplace « 2 sur 2 en ligne » dans l'aperçu. La liste de lecture, l'aperçu et la pause apparaissent <b>dans le rectangle noir, au survol</b> (ou au clavier). Survolez les cartes du bas, ou cochez « Forcer le survol ».</div>
+<div class="bar">
+  Affichage <span class="seg" id="v"><button data-v="both" class="on">Avant / après</button><button data-v="after">Après seulement</button></span>
+  <label><input type="checkbox" id="force"> Forcer le survol (capture)</label>
+</div>
+<div class="wrap">
+
+<section id="before">
+  <h2>Avant (aujourd'hui)</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="scene"><span class="chk"></span><span class="kb">⋮</span>
+        <div style="position:relative"><div class="wall"><i data-n="1"></i><i data-n="2"></i></div><span class="cal"><svg class="i" style="width:28px;height:28px" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="15" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></span></div>
+        <span class="state"><span class="dot"></span>2 sur 2 en ligne</span>
+      </div>
+      <div class="body">
+        <div class="nm"><b>Mur 2 × 1</b><svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></div>
+        <div class="sub">Mur d'écrans 2 × 1</div>
+        <span class="oldpill"><span class="dot"></span><span class="dot"></span> 2 écrans ▾</span>
+        <div class="oldctl"><span class="sel">▷ <span>Diaporama paysages</span>▾</span><span class="ib">👁</span><span class="ib">❚❚</span></div>
+      </div>
+    </div>
+    <div class="card offline">
+      <div class="scene"><span class="chk"></span><span class="kb">⋮</span><div class="tv"></div><div class="offl">Hors ligne depuis 4 j</div></div>
+      <div class="body">
+        <div class="nm"><b>Borne test dev</b><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></div>
+        <div class="sub"><b style="color:var(--muted)">Windows</b>· Chrome 155</div>
+        <div class="oldctl" style="margin-top:34px"><span class="sel" style="color:var(--muted)">▷ <span>Diaporama paysages</span>▾</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Après (proposition)</h2>
+  <div class="grid" id="after">
+    <!-- mur -->
+    <div class="card">
+      <div class="scene" tabindex="0"><span class="chk"></span><span class="kb">⋮</span>
+        <div style="position:relative"><div class="wall on"><i data-n="1"></i><i data-n="2"></i></div></div>
+        <button class="pill" onclick="event.stopPropagation();this.nextElementSibling.classList.toggle('on')"><span class="dots"><span class="dot"></span><span class="dot"></span></span>2 écrans<svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+        <div class="pop"><div><span class="dot"></span>Écran 1 · gauche<small>en ligne</small></div><div><span class="dot"></span>Écran 2 · droite<small>en ligne</small></div></div>
+        <div class="ctl">
+          <span class="sel"><svg class="i" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg><span>Diaporama paysages</span><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>
+          <button class="ib" title="Aperçu"><svg class="i" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          <button class="ib" title="Pause"><svg class="i" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg></button>
+        </div>
+      </div>
+      <div class="body">
+        <div class="nm"><b>Mur 2 × 1</b><svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></div>
+        <div class="sub">Mur d'écrans 2 × 1 · <span class="pl"><svg class="i" style="width:13px;height:13px" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg>Diaporama paysages</span></div>
+      </div>
+    </div>
+    <!-- écran hors ligne -->
+    <div class="card offline">
+      <div class="scene" tabindex="0"><span class="chk"></span><span class="kb">⋮</span><div class="tv"></div><div class="offl">Hors ligne depuis 4 j</div>
+        <div class="ctl">
+          <span class="sel"><svg class="i" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg><span>Diaporama paysages</span><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>
+          <button class="ib" disabled title="Écran hors ligne"><svg class="i" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          <button class="ib" disabled title="Écran hors ligne"><svg class="i" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg></button>
+        </div>
+      </div>
+      <div class="body">
+        <div class="nm"><b>Borne test dev</b><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></div>
+        <div class="sub">Windows · Chrome 155 · <span class="pl" style="color:var(--muted)"><svg class="i" style="width:13px;height:13px" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg>Diaporama paysages</span></div>
+      </div>
+    </div>
+    <!-- écran en ligne -->
+    <div class="card">
+      <div class="scene" tabindex="0"><span class="chk"></span><span class="kb">⋮</span><div class="tv on"></div>
+        <span class="pill" style="cursor:default"><span class="dot"></span>En ligne</span>
+        <div class="ctl">
+          <span class="sel"><svg class="i" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg><span>Accueil campus</span><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>
+          <button class="ib" title="Aperçu"><svg class="i" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          <button class="ib" title="Pause"><svg class="i" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg></button>
+        </div>
+      </div>
+      <div class="body">
+        <div class="nm"><b>Hall d'entrée</b></div>
+        <div class="sub">Android · <span class="pl"><svg class="i" style="width:13px;height:13px" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg>Accueil campus</span></div>
+      </div>
+    </div>
+    <div class="add"><span>+</span>Connecter un écran</div>
+  </div>
+  <p class="gain">Hauteur de la carte : ≈ 388 px → ≈ 290 px (−25 %)</p>
+</section>
+</div>
+<script>
+document.getElementById('v').onclick=e=>{const v=e.target.dataset.v;if(!v)return;document.querySelectorAll('#v button').forEach(b=>b.classList.toggle('on',b===e.target));document.getElementById('before').style.display=v==='after'?'none':''};
+document.getElementById('force').onchange=e=>document.querySelectorAll('#after .card').forEach(c=>c.classList.toggle('force',e.target.checked));
+document.addEventListener('click',()=>document.querySelectorAll('.pop.on').forEach(p=>p.classList.remove('on')));
+const ab=document.querySelector('#after .card');const h=ab.getBoundingClientRect().height;document.querySelector('.gain').textContent=`Hauteur de la carte du mur : ${Math.round(document.querySelector('#before .card').getBoundingClientRect().height)} px → ${Math.round(h)} px`;
+</script>
+</body>
+</html>
