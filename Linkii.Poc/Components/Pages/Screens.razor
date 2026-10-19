@@ -20,7 +20,7 @@
                 <Ico Name="upload" Size="16" /> @(bulkPublishing ? "Publication…" : "Publier") <span class="cnt">@PendingShown.Count</span>
             </button>
         }
-        <button class="btn" data-fab="Ajouter un écran" @onclick="OpenPair"><Ico Name="plus" Size="16" /> Ajouter</button>
+        <button class="btn" data-fab="Connecter un écran" @onclick="OpenPair"><Ico Name="plus" Size="16" /> Connecter un écran</button>
     </div>
 </div>
 
@@ -85,7 +85,25 @@
             }
         </div>
     }
-    @if (Shown.Count + OtherShown.Count == 0) { <div class="empty"><div class="big">Aucun écran trouvé</div></div> }
+    @if (Shown.Count + OtherShown.Count == 0 && !NoScreenHere) { <div class="empty"><div class="big">Aucun écran trouvé</div></div> }
+}
+
+@if (!noArea && NoScreenHere)
+{
+    @* Aucun écran dans l'aire ouverte : on explique comment en connecter un (les écrans des autres aires restent affichés en dessous) *@
+    <div class="empty @(OtherAll.Count > 0 ? "compact" : "")">
+        @if (OtherAll.Count == 0)
+        {
+            <div class="big">Aucun écran connecté</div>
+            <p>Installez l'app Linkii sur l'écran (TV, boîtier, PC) : il affiche un code. Saisissez ce code ici pour relier l'écran à votre organisation.</p>
+        }
+        else
+        {
+            <div class="big">Aucun écran dans « @area?.Name »</div>
+            <p>Les écrans de vos autres aires restent dans leur aire. Connectez ici un écran qui appartiendra à « @area?.Name ».</p>
+        }
+        <button class="btn" @onclick="OpenPair"><Ico Name="plus" Size="16" /> Connecter un écran</button>
+    </div>
 }
 
 @* Grille à plat des écrans de l'aire ouverte (cartes habituelles), puis ceux des autres aires que le filtre « Aire de gestion » laisse voir (« Tous » par défaut) :
@@ -98,7 +116,7 @@
     }
     @foreach (var entry in Entries) { @Card(entry) }
     @foreach (var os in OtherShown) { if (ListView) { @LightRow(os.Screen, os.Area) } else { @LightCard(os.Screen, os.Area) } }
-    @if (OwnAreaVisible)
+    @if (OwnAreaVisible && !NoScreenHere)
     {
         <button class="pl-card pl-add scr-add" @onclick="OpenPair">
             <span class="pl-plus"><Ico Name="plus" Size="28" /></span>
@@ -505,6 +523,9 @@ else if (wallEdit is { } wid)
 
     // L'aire ouverte entre dans le filtre « Aire de gestion » (Tous, ou elle-même)
     private bool OwnAreaVisible => areaFilter == "" || areaFilter == area?.Id.ToString();
+
+    // L'aire ouverte n'a aucun écran (hors recherche et filtres de zone ou d'état) : texte d'accueil et bouton « Connecter un écran »
+    private bool NoScreenHere => screens.Count == 0 && OwnAreaVisible && zoneFilter == null && statusFilter == "" && search.Length == 0;
 
     // Écrans des autres aires du périmètre (consultation : on ouvre leur aire pour les modifier)
     private List<OtherScreen> OtherAll => groupAreas.Where(g => g.Area.Id != area?.Id)

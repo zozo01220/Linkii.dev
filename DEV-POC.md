@@ -1633,3 +1633,13 @@ Maquette validée : `maquettes/playlist-fil-glisser-deposer.html` (PC seulement 
 - **Désactivé** : nouveau champ `PlaylistItem.Off` ; le contenu garde sa place mais n'est pas publié (`Notifier.Items`), ni compté dans la boucle ; numéro « – » et « ignoré ». Copié avec la liste (`PlaylistFolders`).
 - **Pas fait** : déposer des fichiers de l'ordinateur directement dans le fil (la phrase de la maquette n'a pas été reprise).
 - **Vu** : PC dans le navigateur (instance de test) : ajout par clic et par glisser, déplacement en Lignes et en Cartes, durée, renommer, dupliquer, désactiver. Glisser simulé par script, pas à la souris. **Pas vu** : licence Growth avec scans réels, lecture seule, écran étroit.
+
+## 74. États vides : texte et bouton d'action (19 octobre 2026) : codé
+
+Maquette validée : `maquettes/etats-vides.html` (style de l'état vide existant : titre, une phrase, bouton, sans cadre ni icône).
+
+- **Écrans** : le bouton d'en-tête « Ajouter » devient « Connecter un écran ». Aucun écran : « Aucun écran connecté », comment relier un écran par son code, bouton « Connecter un écran ». Aire sans écran alors que d'autres aires en ont : « Aucun écran dans « aire » ». Dans ces deux cas, la carte « Connecter un écran » de la grille n'est plus affichée (doublon). « Aucun écran trouvé » reste pour une recherche ou un filtre sans résultat.
+- **Médiathèque** : vide → bouton « Importer » ; rien à la racine (tout est dans des dossiers) → « Aucun média à la racine » dans le bloc Médias, avec « Importer » ; dossier vide → « Importer dans « dossier » ».
+- **Listes de lecture** : vide → « Nouvelle liste » ; rien à la racine → « Aucune liste à la racine » ; dossier vide → texte et bouton « Nouvelle liste ».
+- Styles : `.empty p` (largeur et marge sous le texte), `.empty.compact` (dans un bloc).
+- **Vu** (instance de test) : médiathèque vide / racine vide / dossier vide, listes racine vide / dossier vide, écrans sans écran. **Pas vu** : aire sans écran avec d'autres aires, droits en lecture seule (le bouton disparaît, le texte reste).
