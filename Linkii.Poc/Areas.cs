@@ -240,10 +240,9 @@ public static class AreaOps
     /// L'écran continue d'afficher ce qui y est publié. Ses listes de lecture restent dans l'ancienne aire : il n'en a plus
     /// (modification à publier) jusqu'à ce qu'on lui en choisisse une de sa nouvelle aire.
     /// </summary>
-    public static string? MoveScreen(ClientDb d, Guid screenId, Guid target, bool adminOnly = true)
+    public static string? MoveScreen(ClientDb d, Guid screenId, Guid target)
     {
-        var targetError = adminOnly ? CheckTarget(d, target) : d.Areas.Any(a => a.Id == target) ? null : "Aire introuvable.";
-        if (targetError != null) return targetError;
+        if (CheckTarget(d, target) is { } e) return e;
         var s = d.Root.Screens.FirstOrDefault(x => x.Id == screenId && x.ClientId == d.ClientId);
         if (s == null) return "Écran introuvable.";
         if (s.AreaId == target) return null;
@@ -255,47 +254,6 @@ public static class AreaOps
         bool Elsewhere(Guid? id) => id is { } pid && d.Root.Playlists.FirstOrDefault(p => p.Id == pid)?.AreaId != target;
         if (Elsewhere(s.PlaylistId)) s.PlaylistId = null;
         for (var z = 0; z < s.ZonePlaylistIds.Count; z++) if (Elsewhere(s.ZonePlaylistIds[z])) s.ZonePlaylistIds[z] = null;
-        return null;
-    }
-
-    /// <summary>L'emplacement et le réglage d'un écran avant un déplacement : de quoi l'y remettre (« Annuler »).</summary>
-    public record ScreenPlace(Guid ScreenId, Guid AreaId, Guid? ZoneId, int? WallPos, bool OwnPlanning, List<Slot> Slots, Guid? PlaylistId, List<Guid?> ZonePlaylistIds);
-
-    public static ScreenPlace PlaceOf(Screen s) => new(s.Id, s.AreaId, s.ZoneId, s.WallPos, s.OwnPlanning, s.Slots.ToList(), s.PlaylistId, s.ZonePlaylistIds.ToList());
-
-    /// <summary>Remet un écran où il était (zone, aire, planning propre, listes choisies).</summary>
-    public static void Restore(ClientDb d, ScreenPlace p)
-    {
-        if (d.Root.Screens.FirstOrDefault(x => x.Id == p.ScreenId && x.ClientId == d.ClientId) is not { } s) return;
-        s.AreaId = p.AreaId; s.ZoneId = p.ZoneId; s.WallPos = p.WallPos; s.OwnPlanning = p.OwnPlanning;
-        s.Slots = p.Slots.ToList(); s.PlaylistId = p.PlaylistId; s.ZonePlaylistIds = p.ZonePlaylistIds.ToList();
-    }
-
-    /// <summary>
-    /// Place un écran dans une zone d'une aire (glisser-déposer de la page Écrans). Dans la même aire : un changement de zone, planning conservé
-    /// (administrateur, droit « déplacer les écrans » ou gestion des zones). Vers une autre aire : administrateur ou droit « déplacer les écrans » (aires du périmètre), planning propre retiré et listes de l'ancienne aire
-    /// plus choisies (voir <see cref="MoveScreen"/>). Un écran de mur, ou une zone de mur, ne se déplace pas ainsi.
-    /// </summary>
-    public static string? PlaceScreen(ClientDb d, Guid screenId, Guid targetArea, Guid targetZone)
-    {
-        var s = d.Root.Screens.FirstOrDefault(x => x.Id == screenId && x.ClientId == d.ClientId);
-        if (s == null) return "Écran introuvable.";
-        var target = d.Root.Areas.FirstOrDefault(a => a.Id == targetArea && a.ClientId == d.ClientId);
-        if (target == null || !d.Access.HasArea(targetArea)) return "Aire introuvable.";
-        var zone = target.Zones.FirstOrDefault(z => z.Id == targetZone);
-        if (zone == null) return "Zone introuvable.";
-        if (zone.IsWall) return $"« {zone.Name} » est un mur d'écrans : on y place des écrans en le modifiant.";
-        if (d.Access.Sees is { } sees && !sees(s) || !d.Access.HasArea(s.AreaId)) return "Cet écran n'est pas dans votre périmètre.";
-        if (WallOf(d, s) is { } wall) return $"« {s.Name} » fait partie du mur « {wall.Name} » : dissolvez d'abord le mur.";
-        if (s.AreaId == targetArea)
-        {
-            if (!d.Access.CanMoveScreens && !d.Access.CanManage(targetArea)) return "Votre niveau de droits ne permet pas de déplacer les écrans.";
-            s.ZoneId = zone.Id;
-            return null;
-        }
-        if (!d.Access.CanMoveScreens) return "Votre niveau de droits ne permet pas de déplacer un écran vers une autre aire de gestion.";
-        if (MoveScreen(d, screenId, targetArea, adminOnly: false) is { } err) return err;
-        s.ZoneId = zone.Id;
         return null;
     }
 

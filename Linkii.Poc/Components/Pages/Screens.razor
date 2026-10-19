@@ -9,7 +9,7 @@
 
 <div class="page-head">
     <div>
-        <h1>Vos écrans<span class="scr-count" aria-label="@Shown.Count écran@(Shown.Count > 1 ? "s" : "")">@Shown.Count</span></h1>
+        <h1>Vos écrans<span class="scr-count" aria-label="@(Shown.Count + OtherShown.Count) écran@(Shown.Count + OtherShown.Count > 1 ? "s" : "")">@(Shown.Count + OtherShown.Count)</span></h1>
         <p class="sub sc-intro">Choisissez la liste de lecture et les widgets de chaque écran, puis publiez : chaque écran se met à jour indépendamment.</p>
     </div>
     <div class="row head-actions">
@@ -28,7 +28,7 @@
 {
     <div class="card empty"><div class="big">Aucune aire de gestion ne vous est confiée</div><p>Demandez à un administrateur de votre organisation de vous donner un rôle dans une aire.</p></div>
 }
-@if (screens.Count > 0)
+@if (screens.Count > 0 || OtherAll.Count > 0)
 {
     @* Une seule barre : tout sélectionner, actions de la sélection, zone, état, recherche, tri, affichage *@
     <div class="sc-bar" role="region" aria-label="Filtres et sélection" aria-live="polite">
@@ -85,80 +85,11 @@
             }
         </div>
     }
-    @if (Shown.Count == 0) { <div class="empty"><div class="big">Aucun écran trouvé</div></div> }
+    @if (Shown.Count + OtherShown.Count == 0) { <div class="empty"><div class="big">Aucun écran trouvé</div></div> }
 }
 
-@* Écrans par blocs : dès qu'on voit plusieurs aires ou plusieurs zones, les écrans sont rangés par aire puis par zone (un administrateur voit toutes les aires et
-   toutes les zones de l'organisation, même vides, pour y placer un écran). Les écrans de l'aire ouverte ont leurs cartes habituelles ; ceux des autres aires
-   une carte de consultation (« Ouvrir cette aire » pour les modifier). Avec le droit de déplacer les écrans, on glisse une carte sur une zone ou sur l'en-tête
-   d'une aire (zone par défaut) : changement de zone dans la même aire (planning conservé), d'aire (planning propre retiré, listes de l'ancienne aire plus
-   choisies). « Annuler » remet l'écran où il était. *@
-@if (Grouped)
-{
-    <div class="scr-groups" role="region" aria-label="Écrans par aire et par zone">
-        @foreach (var ga in groupAreas)
-        {
-            var ar = ga;
-            var multiArea = groupAreas.Count > 1;
-            var current = ar.Area.Id == area?.Id;
-            var inArea = ar.Screens.Where(GroupMatch).ToList();
-            <section class="scr-ga @(multiArea ? "" : "single") @(dropArea == ar.Area.Id && dropZone == null ? "over" : "")">
-                @if (multiArea)
-                {
-                    <header class="scr-gah" @ondragover="() => { }" @ondragover:preventDefault="canMoveScreens" @ondragenter="() => { if (canMoveScreens) { dropArea = ar.Area.Id; dropZone = null; } }" @ondrop:preventDefault="true" @ondrop="() => DropOnZone(ar.Area.Id, null)">
-                        <Ico Name="map-pin" Size="16" /><b>@ar.Area.Name</b>
-                        <small>@Plural(inArea.Count, "écran", "écrans")</small>
-                        @if (inArea.Count(x => !IsOffline(x)) is var onl && inArea.Count > 0) { <span class="scr-gon @(onl == 0 ? "none" : "")">@onl en ligne</span> }
-                        <span class="grow"></span>
-                        @if (current) { <span class="lx-chip">aire ouverte</span> }
-                        else { <button type="button" class="linklike" @onclick="() => OpenAreaPage(ar.Area.Id)">Ouvrir cette aire</button> }
-                    </header>
-                }
-                @foreach (var gz in ar.Zones)
-                {
-                    var zn = gz;
-                    var manyZones = ar.Zones.Count > 1;
-                    var inZone = inArea.Where(x => x.ZoneId == zn.Id || (x.ZoneId == null && zn.IsDefault)).ToList();
-                    var cards = current ? Entries.Where(e => e.Wall?.Id == zn.Id || (e.Screen != null && ZoneOf(e.Screen)?.Id == zn.Id)).ToList() : new List<Entry>();
-                    var count = current ? cards.Sum(e => e.Wall != null ? WallMembers(e.Wall).Count : 1) : inZone.Count;
-                    <div class="scr-gz @(zn.IsWall ? "wall" : "") @(dropZone == zn.Id ? "over" : "")"
-                         @ondragover="() => { }" @ondragover:preventDefault="@(canMoveScreens && !zn.IsWall)" @ondragenter="() => { if (canMoveScreens && !zn.IsWall) { dropArea = ar.Area.Id; dropZone = zn.Id; } }" @ondrop:preventDefault="true" @ondrop="() => DropOnZone(ar.Area.Id, zn.Id)">
-                        @if (manyZones || multiArea)
-                        {
-                            <div class="scr-gzh"><Ico Name="@(zn.IsWall ? "grid" : "box")" Size="14" /><b>@zn.Name</b><span>@Plural(count, "écran", "écrans")</span>@if (zn.IsWall) { <span class="lx-chip" title="Les écrans d'un mur se déplacent en dissolvant le mur">Mur</span> }</div>
-                        }
-                        <div class="pl-grid @(ListView ? "list" : "")">
-                            @if (current)
-                            {
-                                @foreach (var entry in cards) { @Card(entry) }
-                            }
-                            else
-                            {
-                                @foreach (var sc in inZone) { if (ListView) { @LightRow(sc, ar) } else { @LightCard(sc, ar) } }
-                            }
-                            @if (count == 0) { <div class="scr-gempty">@(zn.IsWall ? "Mur sans écran" : canMoveScreens ? "Glissez un écran ici" : "Aucun écran")</div> }
-                            @if (current && zn.IsDefault && !zn.IsWall)
-                            {
-                                <button class="pl-card pl-add scr-add" @onclick="OpenPair">
-                                    <span class="pl-plus"><Ico Name="plus" Size="28" /></span>
-                                    <span>Connecter un écran</span>
-                                </button>
-                            }
-                        </div>
-                    </div>
-                }
-            </section>
-        }
-        @if (groupNotice != null)
-        {
-            <div class="scr-gnotice" role="status"><Ico Name="info" Size="16" /><span>@groupNotice</span>@if (lastUndo.Count > 0) { <button type="button" class="linklike" @onclick="UndoMove">Annuler</button> }</div>
-        }
-        @if (groupWarn != null) { <div class="scr-gwarn" role="status"><Ico Name="alert" Size="16" /><span>@groupWarn</span></div> }
-        @if (canMoveScreens) { <p class="scr-ghint"><Ico Name="move" Size="14" /> Glissez un écran sur une zone ou sur une aire pour le déplacer.</p> }
-    </div>
-}
-else
-{
+@* Grille à plat des écrans de l'aire ouverte (cartes habituelles), puis ceux des autres aires que le filtre « Aire de gestion » laisse voir (« Tous » par défaut) :
+   cartes de consultation, un clic ouvre l'aire de l'écran pour le modifier. *@
 <div class="pl-grid @(ListView ? "list" : "")">
     @if (ListView)
     {
@@ -166,12 +97,15 @@ else
         <div class="sc-listhead" aria-hidden="true"><span></span><span>Aperçu</span><span></span><span>Écran</span><span>État</span><span></span><span>En diffusion</span><span></span><span></span></div>
     }
     @foreach (var entry in Entries) { @Card(entry) }
-    <button class="pl-card pl-add scr-add" @onclick="OpenPair">
-        <span class="pl-plus"><Ico Name="plus" Size="28" /></span>
-        <span>Connecter un écran</span>
-    </button>
+    @foreach (var os in OtherShown) { if (ListView) { @LightRow(os.Screen, os.Area) } else { @LightCard(os.Screen, os.Area) } }
+    @if (OwnAreaVisible)
+    {
+        <button class="pl-card pl-add scr-add" @onclick="OpenPair">
+            <span class="pl-plus"><Ico Name="plus" Size="28" /></span>
+            <span>Connecter un écran</span>
+        </button>
+    }
 </div>
-}
 
 @if (selectedIds.Count > 0)
 {
@@ -453,7 +387,7 @@ else if (wallEdit is { } wid)
     private bool IsOffline(Screen s) => Status(s) is not ("En ligne" or "Mise à jour");
 
     // Écrans de la zone ouverte : base des compteurs du filtre d'état.
-    private List<Screen> InZone => zoneFilter == null ? screens : screens.Where(x => ZoneOf(x)?.Id.ToString() == zoneFilter).ToList();
+    private List<Screen> InZone => !OwnAreaVisible ? new() : zoneFilter == null ? screens : screens.Where(x => ZoneOf(x)?.Id.ToString() == zoneFilter).ToList();
 
     private List<Screen> Shown
     {
@@ -563,45 +497,45 @@ else if (wallEdit is { } wid)
         Reload();
     }
 
-    // ---------- Écrans par blocs (aire › zone) et glisser-déposer ----------
-    private record GroupArea(Area Area, List<Zone> Zones, List<Screen> Screens, Dictionary<Guid, Playlist> Lists, List<MediaItem> MediaAll);
+    // ---------- Aires de gestion : filtre et écrans des autres aires ----------
+    private record GroupArea(Area Area, List<Screen> Screens, Dictionary<Guid, Playlist> Lists, List<MediaItem> MediaAll);
+    private record OtherScreen(Screen Screen, GroupArea Area);
     private List<GroupArea> groupAreas = new();
-    private bool canMoveScreens;   // droit de déplacer les écrans entre zones et entre aires
-    private List<Guid> dragIds = new();
-    private Guid? dropArea, dropZone;
-    private string? groupNotice, groupWarn;
-    private List<AreaOps.ScreenPlace> lastUndo = new();
+    private string areaFilter = "";   // "" : Tous ; sinon l'Id de l'aire
 
-    /// <summary>Plusieurs aires ou plusieurs zones visibles : les écrans sont rangés en blocs (une seule aire et une seule zone : la grille d'avant).</summary>
-    private bool Grouped => groupAreas.Count > 1 || groupAreas.Sum(g => g.Zones.Count) > 1;
+    // L'aire ouverte entre dans le filtre « Aire de gestion » (Tous, ou elle-même)
+    private bool OwnAreaVisible => areaFilter == "" || areaFilter == area?.Id.ToString();
+
+    // Écrans des autres aires du périmètre (consultation : on ouvre leur aire pour les modifier)
+    private List<OtherScreen> OtherAll => groupAreas.Where(g => g.Area.Id != area?.Id)
+        .SelectMany(g => g.Screens.Select(s => new OtherScreen(s, g))).OrderBy(o => o.Screen.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+
+    // Ceux que le filtre « Aire de gestion » retient ; les zones et les modifications à publier sont propres à l'aire ouverte.
+    private List<OtherScreen> OtherScope => zoneFilter != null ? new() : OtherAll.Where(o => areaFilter == "" || areaFilter == o.Area.Area.Id.ToString()).ToList();
+
+    private List<OtherScreen> OtherShown => statusFilter == "pending" ? new() : OtherScope.Where(o =>
+        (search.Length == 0 || o.Screen.Name.Contains(search, StringComparison.OrdinalIgnoreCase))
+        && statusFilter switch { "online" => !IsOffline(o.Screen), "offline" => IsOffline(o.Screen), _ => true }).ToList();
 
     private static string Plural(int n, string one, string many) => $"{n} {(n > 1 ? many : one)}";
 
-    private bool GroupMatch(Screen s) =>
-        (search.Length == 0 || s.Name.Contains(search, StringComparison.OrdinalIgnoreCase))
-        && statusFilter switch { "online" => !IsOffline(s), "offline" => IsOffline(s), _ => true };
-
     private void LoadGroups()
     {
-        // un administrateur : toutes les aires et toutes les zones de l'organisation, même vides (pour y placer un écran) ; un membre : celles de son périmètre
+        // les aires du périmètre de la personne et leurs écrans (listes et médias lus dans toute l'organisation, pour l'aperçu)
         groupAreas = Store.Read(d =>
         {
             var lists = d.Root.Playlists.Where(p => p.ClientId == d.ClientId).ToDictionary(p => p.Id);
-            var allMedia = d.Root.Media.Where(m => m.ClientId == d.ClientId && m.Status == null).ToList();   // pour l'aperçu des listes des autres aires
-            return d.Access.Areas.OrderBy(a => a.CreatedUtc).Select(a => new GroupArea(a,
-                a.Zones.Where(z => d.Access.SeesZone(z.Id)).OrderByDescending(z => z.IsDefault).ThenBy(z => z.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
-                d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.AreaId == a.Id && (d.Access.Sees == null || d.Access.Sees(s))).ToList(), lists, allMedia)).ToList();
+            var allMedia = d.Root.Media.Where(m => m.ClientId == d.ClientId && m.Status == null).ToList();
+            return d.Access.Areas.OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).Select(a => new GroupArea(a,
+                d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.AreaId == a.Id && s.Token != null && (d.Access.Sees == null || d.Access.Sees(s))).ToList(), lists, allMedia)).ToList();
         });
-        canMoveScreens = Store.Read(d => d.Access.CanMoveScreens);
+        if (areaFilter != "" && !groupAreas.Any(g => g.Area.Id.ToString() == areaFilter)) areaFilter = "";
     }
 
     private void OpenAreaPage(Guid areaId, Guid? editScreen = null)
     {
         if (Store.SwitchArea(areaId)) Nav.NavigateTo(editScreen is { } id ? Nav.GetUriWithQueryParameter("edit", id.ToString()) : Nav.Uri, forceLoad: true);
     }
-
-    private void StartDragScreen(Screen s) { dragIds = selectedIds.Contains(s.Id) ? selectedIds.ToList() : new List<Guid> { s.Id }; groupNotice = groupWarn = null; }
-    private void EndDragScreen() { dragIds = new(); dropArea = dropZone = null; }
 
     // Aperçu d'un écran d'une autre aire : une vignette par zone de découpage, comme sur les cartes de l'aire ouverte (listes et médias lus dans toute l'organisation).
     private RenderFragment LightPreview(Screen s, GroupArea ga) => __builder =>
@@ -625,7 +559,6 @@ else if (wallEdit is { } wid)
         var off = IsOffline(s);
         var listName = s.PlaylistId is { } pid && ga.Lists.TryGetValue(pid, out var lp) ? lp.Name : "Aucune liste de lecture";
         <div class="pl-card gc gc-light @(off ? "is-off" : "is-on")" role="button" tabindex="0" title="Modifier cet écran (aire « @ga.Area.Name »)"
-             draggable="@(canMoveScreens ? "true" : null)" @ondragstart="() => StartDragScreen(s)" @ondragend="EndDragScreen"
              @onclick="() => OpenAreaPage(ga.Area.Id, s.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenAreaPage(ga.Area.Id, s.Id); }'>
             <div class="gc-top">
                 <div class="gc-stage">
@@ -635,6 +568,7 @@ else if (wallEdit is { } wid)
             </div>
             <div class="gc-body">
                 <div class="gc-name"><span class="gc-nm">@s.Name</span>@if (s.DeviceKind != null) { <DeviceLogo Kind="@s.DeviceKind" Size="20" /> }</div>
+                <div class="gc-area"><Ico Name="map-pin" Size="13" /> @ga.Area.Name</div>
                 <div class="gc-sub">@if (s.DeviceKind != null) { <b>@(s.DeviceOs ?? "Appareil")</b> } else { <span>En attente des informations de l'écran</span> }</div>
                 <div class="gc-plrow"><div class="gc-sel"><Ico Name="play-box" Size="16" /><span class="gc-selro">@listName</span></div></div>
             </div>
@@ -648,12 +582,11 @@ else if (wallEdit is { } wid)
         var st = off ? "Hors ligne" : "En ligne";
         var listName = s.PlaylistId is { } pid && ga.Lists.TryGetValue(pid, out var lp) ? lp.Name : "— Aucune liste de lecture —";
         <div class="pl-card sc-card scr-card @(off ? "is-off" : "")" role="button" tabindex="0" title="Modifier cet écran (aire « @ga.Area.Name »)"
-             draggable="@(canMoveScreens ? "true" : null)" @ondragstart="() => StartDragScreen(s)" @ondragend="EndDragScreen"
              @onclick="() => OpenAreaPage(ga.Area.Id, s.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenAreaPage(ga.Area.Id, s.Id); }'>
             <div class="sc-head">
                 <div class="pl-title">
                     <span class="sc-dot @(off ? "hors-ligne" : "en-ligne")" title="@st"><span class="sr-only sc-st">@st</span></span>
-                    <span class="pl-name">@s.Name</span>
+                    <span class="pl-name">@s.Name</span><span class="lx-chip" title="Aire de gestion">@ga.Area.Name</span>
                 </div>
                 <div class="sc-meta">
                     <div class="sc-device @(off ? "off" : "")">
@@ -672,59 +605,6 @@ else if (wallEdit is { } wid)
             <div class="sc-foot"><span class="sc-select">@listName</span></div>
         </div>
     };
-
-    private async Task DropOnZone(Guid areaId, Guid? zoneId)
-    {
-        var ids = dragIds.ToList();
-        dragIds = new(); dropArea = dropZone = null;
-        if (ids.Count == 0 || !canMoveScreens) return;
-        var zone = zoneId ?? groupAreas.First(g => g.Area.Id == areaId).Zones.First(z => z.IsDefault).Id;
-        var undo = new List<AreaOps.ScreenPlace>();
-        string? error = null;
-        var changedArea = 0; var lostList = 0; string? lastName = null;
-        Store.Write(d =>
-        {
-            foreach (var id in ids)
-            {
-                if (d.Root.Screens.FirstOrDefault(x => x.Id == id && x.ClientId == d.ClientId) is not { } sc) continue;
-                if (sc.AreaId == areaId && sc.ZoneId == zone) continue;
-                var before = AreaOps.PlaceOf(sc);
-                if (AreaOps.PlaceScreen(d, id, areaId, zone) is { } err) { error = err; break; }
-                undo.Add(before);
-                lastName = sc.Name;
-                if (before.AreaId != areaId) { changedArea++; if (before.PlaylistId != null && sc.PlaylistId == null) lostList++; }
-            }
-        });
-        if (error != null) Toast.Error(error);
-        if (undo.Count > 0)
-        {
-            var target = groupAreas.First(g => g.Area.Id == areaId);
-            var where = groupAreas.Count > 1 ? $"{target.Area.Name} › {target.Zones.First(z => z.Id == zone).Name}" : target.Zones.First(z => z.Id == zone).Name;
-            groupNotice = undo.Count == 1 ? $"« {lastName} » déplacé vers {where}." : $"{undo.Count} écrans déplacés vers {where}.";
-            groupWarn = changedArea == 0 ? null
-                : lostList > 0 ? $"Changement d'aire : leur liste de lecture n'est pas disponible dans « {target.Area.Name} ». Ils gardent leur contenu publié, sans liste choisie ; leur planning propre est retiré. Choisissez-leur une liste de cette aire."
-                : "Changement d'aire : leur planning propre est retiré.";
-            lastUndo = undo;
-            var moved = undo.Select(u => u.ScreenId).ToList();
-            await Notifier.PublishPlanning(moved);
-            foreach (var id in moved) await Notifier.NotifyScreen(id);
-        }
-        selectedIds.Clear();
-        Reload();
-    }
-
-    private async Task UndoMove()
-    {
-        if (lastUndo.Count == 0) return;
-        var undo = lastUndo.ToList();
-        lastUndo = new();
-        Store.Write(d => { foreach (var p in undo) AreaOps.Restore(d, p); });
-        groupNotice = "Déplacement annulé."; groupWarn = null;
-        var ids = undo.Select(u => u.ScreenId).ToList();
-        await Notifier.PublishPlanning(ids);
-        foreach (var id in ids) await Notifier.NotifyScreen(id);
-        Reload();
-    }
 
     // Carte d'un écran (ou d'un mur) de l'aire ouverte : le balisage d'origine de la grille, partagé par la grille à plat et les blocs par aire et zone.
     private RenderFragment Card(Entry entry) => __builder =>
@@ -873,7 +753,7 @@ else if (wallEdit is { } wid)
             var gdl = Store.Read(d => d.Delivery(gs));
             var gsl = Sleep.State(tenant, area, gs, false, gnow);   // en veille : écran éteint, il ne dialogue plus
             var gcls = gsl.Asleep ? "sleep" : gpaused ? "warn" : gst == "En ligne" ? "ok" : gst == "Mise à jour" ? "warn" : "bad";
-            <div class="pl-card gc @(selectedIds.Contains(gs.Id) ? "picked" : "") @(gonline || gsl.Asleep ? "" : "is-off") @(gonline && !gpaused && !gsl.Asleep ? "is-on" : "") @(gpaused ? "is-paused" : "")" draggable="@(Grouped && canMoveScreens ? "true" : null)" @ondragstart="() => StartDragScreen(gs)" @ondragend="EndDragScreen">
+            <div class="pl-card gc @(selectedIds.Contains(gs.Id) ? "picked" : "") @(gonline || gsl.Asleep ? "" : "is-off") @(gonline && !gpaused && !gsl.Asleep ? "is-on" : "") @(gpaused ? "is-paused" : "")">
                 <div class="gc-top">
                     <div class="gc-stage">
                         <div class="gc-mon @(gs.Orientation == "portrait" ? "portrait" : "")">
@@ -1341,26 +1221,32 @@ else if (wallEdit is { } wid)
     private void Toggle(string menu) => openMenu = openMenu == menu ? null : menu;
     private void CloseMenu() => openMenu = null;
 
-    // Menu « Filtres » : zone (si l'aire en a plusieurs) et état
+    // Menu « Filtres » : aire de gestion (si la personne en voit plusieurs), zone (si l'aire en a plusieurs) et état
     private IReadOnlyList<FilterGroup> FilterGroups
     {
         get
         {
             var list = new List<FilterGroup>();
-            if (area != null && ShowZones)
-                if (!Grouped) list.Add(new("zone", "Zone", zoneFilter ?? "", new[] { new FilterOption("", "Toutes", screens.Count) }
+            if (groupAreas.Count > 1)
+                list.Add(new("area", "Aire de gestion", areaFilter, new[] { new FilterOption("", "Tous", screens.Count + OtherAll.Count) }
+                    .Concat(groupAreas.Select(g => new FilterOption(g.Area.Id.ToString(), g.Area.Name, g.Area.Id == area?.Id ? screens.Count : g.Screens.Count))).ToList()));
+            if (area != null && ShowZones && OwnAreaVisible)
+                list.Add(new("zone", "Zone", zoneFilter ?? "", new[] { new FilterOption("", "Toutes", screens.Count) }
                     .Concat(zones.Select(z => new FilterOption(z.Id.ToString(), (z.IsWall ? "Mur " : "") + z.Name, screens.Count(x => ZoneOf(x)?.Id == z.Id)))).ToList()));
+            var others = OtherScope;
             list.Add(new("state", "État", statusFilter, new[] { "", "online", "offline", "pending" }
-                .Select(k => new FilterOption(k, StateLabel(k), k switch { "online" => InZone.Count(s => !IsOffline(s)), "offline" => InZone.Count(IsOffline), "pending" => InZone.Count(s => Helpers.HasPending(s, playlists)), _ => InZone.Count })).ToList()));
+                .Select(k => new FilterOption(k, StateLabel(k), k switch { "online" => InZone.Count(s => !IsOffline(s)) + others.Count(o => !IsOffline(o.Screen)), "offline" => InZone.Count(IsOffline) + others.Count(o => IsOffline(o.Screen)), "pending" => InZone.Count(s => Helpers.HasPending(s, playlists)), _ => InZone.Count + others.Count })).ToList()));
             return list;
         }
     }
     private void PickFilter((string Key, string Value) p)
     {
-        if (p.Key == "zone") PickZone(p.Value == "" ? null : zones.FirstOrDefault(z => z.Id.ToString() == p.Value)); else statusFilter = p.Value;
+        if (p.Key == "area") PickArea(p.Value);
+        else if (p.Key == "zone") PickZone(p.Value == "" ? null : zones.FirstOrDefault(z => z.Id.ToString() == p.Value)); else statusFilter = p.Value;
     }
     private void ClearFilter(string key) => PickFilter((key, ""));
-    private void ResetFilters() { PickZone(null); statusFilter = ""; }
+    private void ResetFilters() { areaFilter = ""; PickZone(null); statusFilter = ""; }
+    private void PickArea(string id) { areaFilter = id; if (!OwnAreaVisible) zoneFilter = null; dissolveFor = null; CloseMenu(); }   // les zones sont celles de l'aire ouverte
     private void PickZone(Zone? z) { zoneFilter = z?.Id.ToString(); dissolveFor = null; CloseMenu(); }
 
     private static string ZoneIcon(Zone z) => z.IsWall ? "grid" : z.Sync ? "link" : "box";

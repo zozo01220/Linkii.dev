@@ -91,8 +91,6 @@ public class AccessLevel : IPerimeter
     public bool ReadOnly { get; set; }
     /// <summary>Gérer les zones et les murs (dans les aires du périmètre) : page Zones, menu Zones, créer, renommer, synchroniser, supprimer.</summary>
     public bool ManageZones { get; set; }
-    /// <summary>Déplacer les écrans d'une zone à l'autre et d'une aire de gestion à l'autre (dans les aires du périmètre), par glisser-déposer sur la page Écrans.</summary>
-    public bool MoveScreens { get; set; }
     /// <summary>Dossiers de la médiathèque (option de l'organisation) : créer des dossiers à la racine de ses aires ; partager les dossiers dont il est propriétaire.</summary>
     public bool CanCreateFolders { get; set; }
     public bool CanShareFolders { get; set; }
@@ -172,7 +170,6 @@ public class AccessLevel : IPerimeter
         if (planning && ScreensAccess != DomainAccess.None) Pages.Insert(Pages.IndexOf(LevelPages.Screens) + 1, LevelPages.Planning);
         ReadOnly = ScreensAccess != DomainAccess.Write && PlaylistsAccess != DomainAccess.Write && MediaAccess != DomainAccess.Write;
         if (ScreensAccess != DomainAccess.Write) ManageZones = false;   // gérer les zones demande de pouvoir modifier les écrans
-        if (ScreensAccess != DomainAccess.Write) MoveScreens = false;   // déplacer les écrans demande aussi de pouvoir les modifier
         // anciens réglages communs : remplacés par ceux de chaque domaine
         AllFolders = null; CanCreateFolders = false; CanShareFolders = false;
     }
@@ -306,7 +303,6 @@ public static class AccessLevels
         var pages = LevelPages.Offered.Where(l.Pages.Contains)
             .Select(p => LevelPages.Label(p) + (!l.ReadOnly && p != LevelPages.Planning && l.AccessTo(p) == DomainAccess.Read ? " (voir)" : "")).ToList();
         if (l.ManageZones) pages.Add("Gérer les zones");
-        if (l.MoveScreens) pages.Add("Déplacer les écrans");
         if (l.AllIntegrations || catalog.All.Any(a => !a.ScreenWidget && l.Apps.Contains(a.Id))) pages.Add(LevelPages.Label(LevelPages.Integrations));
         if (l.AllWidgets || catalog.All.Any(a => a.ScreenWidget && l.Apps.Contains(a.Id))) pages.Add(LevelPages.Label(LevelPages.Widgets));
         return pages.Count == 0 ? "Aucune page" : string.Join(", ", pages);

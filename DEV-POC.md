@@ -1557,7 +1557,7 @@ Maquette montrée dans la conversation (fenêtre unique « Partager », élémen
 - **Tests** : `AreaShareTests` (visibilité et modification, suppression refusée, liste partagée et médias lisibles, retrait côté écrans, dossier et sous-dossiers, partage seulement depuis l'aire d'origine, « Ne plus voir »). 9 tests déjà en échec avant ces travaux.
 - **Pas fait / limites** : les contenus (apps) qu'une liste partagée utilise ne sont pas détachés des autres aires au retrait du partage (seuls les médias de leurs listes le sont) ; supprimer un élément partagé ne prévient pas l'aire qui le reçoit ; filtres « Partagés » / « Reçus » non codés. **Pas vu** : aucun écran dans le navigateur, ni l'app Android réelle ; diffusion d'une liste partagée sur un écran réel à vérifier.
 
-## 67. Écrans par blocs aire › zone et glisser-déposer (18 octobre 2026) : codé
+## 67. Écrans par blocs aire › zone et glisser-déposer (18 octobre 2026) : retiré (voir §70)
 
 Maquettes montrées dans la conversation. Première version (bouton « Par aire » et tuiles simplifiées) **remplacée** : l'affichage est automatique, avec les cartes habituelles. Décisions : plus de bouton ni de tri (les écrans sont classés par nom) ; le planning est conservé quand l'écran change de zone dans la même aire, retiré quand il change d'aire.
 
@@ -1568,7 +1568,7 @@ Maquettes montrées dans la conversation. Première version (bouton « Par aire 
 - **Tests** : `ScreenPlaceTests` (déplacement complet et annulation, droit de déplacement, gestion des zones seule, planning conservé, zone de mur refusée). 9 tests déjà en échec avant ces travaux.
 - **Pas vu** : la page dans le navigateur (le glisser-déposer Blazor et la mise en page des blocs n'ont pas été essayés en vrai). Limites : les cartes des autres aires n'ont ni réglages ni aperçu (on les modifie en ouvrant leur aire) ; le filtre « À publier » ne s'applique qu'à l'aire ouverte.
 
-## 68. Écrans : retouches des blocs aire › zone (18 octobre 2026) : codé
+## 68. Écrans : retouches des blocs aire › zone (18 octobre 2026) : retiré (voir §70)
 
 - **Vue liste** : les écrans des autres aires reprennent la rangée habituelle (`LightRow`, même balisage que les rangées de l'aire ouverte) au lieu d'une carte ; toutes les aires et zones ont le même aspect en liste.
 - **Connecter un écran** : un **tiroir** à droite (`.lx-drawer`, comme l'aperçu d'un média) remplace la fenêtre modale ; un champ par ligne, boutons Annuler / Connecter en bas.
@@ -1597,3 +1597,10 @@ Médiathèque et listes de lecture, **PC, mobile et app Android**. Décision : u
 - **Serveur** : `FolderMove` (descendants, hauteur, règles de destination), `FolderOps.MoveFolder` / `MoveTargets` / `ContentsOf` et leurs équivalents `PlaylistFolderOps`, `MediaLibrary` et `PlaylistLibrary`. Règles : propriétaire seulement ; écriture sur le dossier d'arrivée ; même aire ; pas dans lui-même ni un descendant ; pas deux dossiers du même nom au même endroit ; `FolderAccess.MaxDepth` niveaux. Dissolution : un sous-dossier dont le nom existe déjà à la racine bloque (message). Les fichiers dissous gardent un propriétaire (celui du dossier à défaut) pour rester visibles de lui à la racine.
 - **Tests** : `FolderMoveTests` (déplacement, refus, profondeur, dissolution médias et listes, destinations).
 - **Pas vu** : la fenêtre et le glisser dans le navigateur et sur Android.
+
+## 70. Écrans : retour à la grille de base, filtre « Aire de gestion » (19 octobre 2026) : codé
+
+- **Retiré** : l'affichage par blocs aire › zone (§67-68), le glisser-déposer des cartes et son bandeau « Annuler », le droit de niveau « déplacer les écrans » (`MoveScreens`, `CanMoveScreens`), `AreaOps.PlaceScreen` / `PlaceOf` / `Restore`, le paramètre `adminOnly` de `MoveScreen` et les tests `ScreenPlaceTests`. La boîte « Autre aire… » (administrateurs) reste.
+- **Affichage de base** : une seule grille à plat (cartes ou liste), puis « Connecter un écran ».
+- **Filtre « Aire de gestion »** (menu Filtres, seulement si la personne voit plusieurs aires) : **Tous** par défaut (écrans de l'aire ouverte avec leurs cartes habituelles, puis ceux des autres aires en cartes de consultation avec le nom de leur aire ; un clic ouvre leur édition) ; choisir une aire ne garde que ses écrans. Les filtres Zone et « À publier » sont propres à l'aire ouverte : ils masquent les autres aires. Le filtre est mémorisé le temps de la page.
+- **Vu** : filtre Tous / une aire dans le navigateur (3 aires, 4 écrans, compte neuf). **Pas vu** : vue liste et mode simple.
