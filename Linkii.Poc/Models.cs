@@ -817,6 +817,8 @@ public class PlaylistItem
     /// <summary>Apps dont la durée dépend du contenu (YouTube) : « content » = jusqu'à la fin (défaut), « fixed » = DurationSec.</summary>
     public string DurationMode { get; set; } = "content";
     public string Placement { get; set; } = "full";   // full = diapo ; sinon app en surimpression permanente
+    /// <summary>Désactivé : le contenu garde sa place dans la liste mais n'est pas publié ; la boucle le saute.</summary>
+    public bool Off { get; set; }
 
     // Comptage des scans (licence Growth, contenus pleine page) : un QR code au premier plan, dont l'adresse courte /q/{code} compte puis redirige (voir QrTracking)
     public bool QrOn { get; set; }

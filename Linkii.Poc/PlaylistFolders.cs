@@ -69,7 +69,7 @@ public static class PlaylistOps
         {
             Name = name, UpdatedAt = DateTime.UtcNow,
             FolderId = p.FolderId is { } f && CanEdit(d, p) ? f : null,
-            Draft = p.Draft.Select(i => new PlaylistItem { MediaId = i.MediaId, DurationSec = i.DurationSec, DurationMode = i.DurationMode, Placement = i.Placement,
+            Draft = p.Draft.Select(i => new PlaylistItem { MediaId = i.MediaId, DurationSec = i.DurationSec, DurationMode = i.DurationMode, Placement = i.Placement, Off = i.Off,
                 // QR de comptage : mêmes réglages, mais une adresse courte à elle (les scans de la copie ne se mélangent pas à ceux de l'original)
                 QrOn = i.QrOn, QrCode = i.QrOn ? QrTracking.NewCode() : null, QrUrl = i.QrUrl, QrLabel = i.QrLabel, QrBase = i.QrBase, QrX = i.QrX, QrY = i.QrY, QrSize = i.QrSize }).ToList()
         };

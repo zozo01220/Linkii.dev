@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Fil de la liste de lecture</title>
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--brand:#0B1F3A;--brand-tint:#EBEDF0;--signal:#3B82C4;--signal-bg:#EAF3FB;--ok:#1E8E5A;--ok-bg:#E1F0E8;--ok-ink:#155A38;--radius:4px;--mono:"JetBrains Mono",ui-monospace,Consolas,monospace}
+*{box-sizing:border-box}html,body{margin:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
+h1,h3,h4,h5,p{margin:0;font-weight:500}p{font-weight:400}b{font-weight:500}button,input{font:inherit;color:inherit}
+.note{background:#FFF8E1;border-bottom:1px dashed #E0B84A;padding:10px 24px;font-size:13px;color:#6B5200}
+.shell{display:flex;min-height:calc(100vh - 42px)}
+
+/* menu latéral (inchangé) */
+.sidebar{width:230px;background:#fff;border-right:1px solid var(--line);padding:22px 14px;flex:none}
+.sidebar .wm{font-size:28px;font-weight:500;letter-spacing:-.03em;padding:0 10px 22px}
+.sidebar .aire{border:1px solid var(--line);border-radius:var(--radius);padding:8px 12px;margin-bottom:16px;font-size:14px}.sidebar .aire small{display:block;color:var(--muted);font-size:12px}
+.nav{display:block;padding:9px 12px;color:var(--muted);font-size:16px}
+.nav.active{background:var(--brand-tint);color:var(--ink);font-weight:500;box-shadow:inset 2px 0 0 var(--brand);border-radius:0 4px 4px 0}
+.sep{border-top:1px solid var(--line);margin:10px 12px}
+
+/* colonne des apps */
+.apps{width:248px;flex:none;background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+.apps .ah{padding:20px 16px 10px}
+.apps .ah h3{font-size:16px}
+.apps .ah p{color:var(--muted);font-size:12px;margin-top:2px}
+.search{display:flex;gap:8px;align-items:center;border:1px solid var(--line-2);border-radius:var(--radius);padding:6px 10px;color:var(--muted);margin-top:10px}
+.search input{border:0;outline:0;flex:1;min-width:0;background:none;font-size:14px}
+.apps .al{flex:1;overflow:auto;padding:4px 8px 16px}
+.apps h5{margin:12px 8px 4px;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:500}
+.ap{display:flex;gap:10px;align-items:center;padding:6px 8px;border-radius:var(--radius);cursor:grab;font-size:14px;border:1px solid transparent;user-select:none}
+.ap:hover{background:var(--bg);border-color:var(--line)}
+.ap:hover .grip{opacity:1}
+.ap .grip{margin-left:auto;color:var(--line-2);opacity:0;font-size:14px}
+.ap.dragging{opacity:.4}
+.dot{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:12px;flex:none;font-weight:500}
+.apps .af{border-top:1px solid var(--line);padding:12px 16px;font-size:12px;color:var(--muted)}
+.apps .af a{color:var(--signal);cursor:pointer}
+
+/* zone principale */
+main{flex:1;padding:28px 36px 80px;min-width:0}
+.back{color:var(--muted);font-size:14px}
+.head{display:flex;gap:12px;align-items:flex-end;margin:6px 0 18px}.head h1{font-size:28px;line-height:1.2}.head .sub{color:var(--muted)}.grow{flex:1}
+.btn{font-weight:500;cursor:pointer;border:1px solid var(--brand);border-radius:var(--radius);padding:9px 16px;background:var(--brand);color:#fff;display:inline-flex;gap:8px;align-items:center;white-space:nowrap}
+.btn.ghost{background:#fff;color:var(--ink);border-color:var(--line-2)}.btn.sm{padding:5px 12px;font-size:14px}
+
+/* frise de la boucle */
+.strip-wrap{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:16px}
+.strip-top{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.strip-top .lbl{font-size:13px;color:var(--muted)}.strip-top .lbl b{color:var(--ink);font-family:var(--mono)}
+.seg-ctl{margin-left:auto;display:inline-flex;border:1px solid var(--line-2);border-radius:var(--radius);overflow:hidden}
+.seg-ctl button{border:0;background:#fff;padding:4px 12px;font-size:13px;cursor:pointer;color:var(--muted)}
+.seg-ctl button.on{background:var(--brand);color:#fff}
+.strip{display:flex;height:30px;gap:2px;border-radius:var(--radius);overflow:hidden}
+.strip i{display:flex;align-items:center;gap:6px;padding:0 8px;color:#fff;font-style:normal;font-size:12px;font-weight:500;min-width:26px;overflow:hidden;white-space:nowrap;cursor:pointer;opacity:.92}
+.strip i:hover{opacity:1}
+.strip i.new{outline:2px solid var(--signal);outline-offset:-2px}
+.ticks{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:4px}
+
+/* fil : vue lignes */
+.flow{position:relative}
+.flow.lines{display:grid;gap:12px}
+.flow.lines::before{content:"";position:absolute;left:23px;top:30px;bottom:34px;width:2px;background:var(--line-2)}
+.u{position:relative}
+.lines .u{display:grid;grid-template-columns:48px 1fr;gap:14px;align-items:center}
+.rail{display:flex;flex-direction:column;align-items:center;position:relative;z-index:1}
+.num{width:34px;height:34px;border-radius:50%;background:var(--brand);color:#fff;font-weight:500;display:grid;place-items:center;font-size:15px;box-shadow:0 0 0 4px var(--bg)}
+.rail .t{font-family:var(--mono);font-size:11px;color:var(--muted);background:var(--bg);padding:2px 0;margin-top:4px}
+.it{display:grid;grid-template-columns:14px 208px 1fr auto auto 34px;gap:18px;align-items:center;padding:10px 12px 10px 10px;background:#fff;border:1px solid var(--line);border-radius:8px;cursor:grab}
+.it:hover{border-color:var(--line-2)}
+.it .h{color:var(--line-2);font-size:16px;text-align:center}
+.th{aspect-ratio:16/9;border-radius:6px;position:relative;overflow:hidden;display:grid;place-items:center;color:#fff;font-weight:500;letter-spacing:-.01em}
+.lines .th{width:208px;font-size:26px}
+.th .badge{position:absolute;left:6px;bottom:6px;width:22px;height:22px;font-size:10px;box-shadow:0 0 0 2px rgba(255,255,255,.85)}
+.info{min-width:0}
+.info .nm{font-size:17px;font-weight:500;line-height:1.3;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.info .meta{color:var(--muted);font-size:13px;display:flex;gap:8px;align-items:center;margin-top:3px;flex-wrap:wrap}
+.info .meta a{color:var(--signal);cursor:pointer}
+.scan{display:inline-flex;gap:6px;align-items:center;background:var(--ok-bg);color:var(--ok-ink);font-size:13px;border-radius:99px;padding:2px 10px;font-weight:500;white-space:nowrap}
+.scan.none{background:none;color:var(--line-2);font-weight:400;padding:0}
+.dur{text-align:right;line-height:1.1}
+.dur b{font-family:var(--mono);font-size:22px;font-weight:500;display:block;cursor:text;border-bottom:1px dashed transparent}
+.dur b:hover{border-bottom-color:var(--line-2)}
+.dur small{font-size:11px;color:var(--muted)}
+.kb{width:34px;height:34px;border:1px solid transparent;border-radius:var(--radius);background:none;cursor:pointer;font-size:18px;color:var(--muted)}
+.kb:hover{background:var(--bg);border-color:var(--line)}
+.new-tag{display:inline-block;font-size:12px;background:var(--signal-bg);color:#1f5f99;border-radius:99px;padding:0 9px;font-weight:500}
+
+/* états */
+.u.dragging{opacity:.35}
+.u.fresh .it,.u.fresh .c{border-color:var(--signal);box-shadow:0 0 0 3px var(--signal-bg)}
+.u.off .th,.u.off .info,.u.off .dur,.u.off .scan{opacity:.45}
+.u.off .num{background:#fff;color:var(--muted);border:1px dashed var(--line-2)}
+
+/* repère d'insertion */
+.lines .u.ins-before::after,.lines .u.ins-after::after{content:"";position:absolute;left:56px;right:0;height:4px;background:var(--signal);border-radius:2px;z-index:3}
+.lines .u.ins-before::after{top:-8px}.lines .u.ins-after::after{bottom:-8px}
+.cards .u.ins-before::after,.cards .u.ins-after::after{content:"";position:absolute;top:0;bottom:0;width:4px;background:var(--signal);border-radius:2px;z-index:3}
+.cards .u.ins-before::after{left:-13px}.cards .u.ins-after::after{right:-13px}
+
+/* fin de boucle / dépôt à la fin */
+.end-zone{border:2px dashed var(--line-2);border-radius:8px;padding:16px;display:flex;gap:12px;align-items:center;justify-content:center;color:var(--muted);font-size:14px;background:transparent;transition:.12s}
+.end-zone.over{border-color:var(--signal);background:var(--signal-bg);color:#1f5f99}
+.flow.drag-app .end-zone{border-color:var(--signal);color:#1f5f99}
+.loop{width:34px;height:34px;border-radius:50%;border:2px solid var(--line-2);background:var(--bg);display:grid;place-items:center;color:var(--muted);font-size:16px;box-shadow:0 0 0 4px var(--bg)}
+
+/* fil : vue cartes */
+.flow.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:24px}
+.c{background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden;cursor:grab;height:100%;display:flex;flex-direction:column}
+.c .th{border-radius:0;font-size:34px}
+.c .th .badge{display:none}
+.c .num{position:absolute;left:10px;top:10px;width:30px;height:30px;font-size:14px;box-shadow:0 0 0 2px #fff}
+.c .tdur{position:absolute;right:8px;bottom:8px;background:rgba(11,31,58,.82);color:#fff;font-family:var(--mono);font-size:14px;border-radius:var(--radius);padding:1px 8px}
+.c .tscan{position:absolute;right:8px;top:8px}
+.c .cb{display:grid;grid-template-columns:1fr 34px;gap:4px;padding:10px 6px 12px 12px;align-items:start}
+.c .cb .nm{font-size:16px}
+.c .start{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.cards .end-zone{flex-direction:column;min-height:180px;text-align:center}
+
+/* menu ⋮ */
+.menu{position:fixed;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 30px rgba(11,31,58,.18);padding:6px;min-width:200px;z-index:40;display:none}
+.menu.on{display:block}
+.menu button{display:flex;width:100%;gap:10px;border:0;background:none;padding:7px 10px;border-radius:var(--radius);cursor:pointer;font-size:14px;text-align:left}
+.menu button:hover{background:var(--bg)}
+.menu button.danger{color:#8A231C}
+.menu hr{border:0;border-top:1px solid var(--line);margin:4px 0}
+
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;border-radius:8px;padding:10px 18px;font-size:14px;display:none;z-index:70}
+.toast.on{display:block}
+.toast a{color:#9fc8ef;margin-left:10px;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="note"><b>Maquette PC :</b> les apps sont en liste à gauche du fil. <b>Glissez une app</b> entre deux contenus (un trait bleu montre l'endroit), ou <b>cliquez</b> dessus pour l'ajouter à la fin. Les contenus du fil se réordonnent aussi par glisser-déposer. Essayez la vue <b>Lignes</b> et la vue <b>Cartes</b>.</div>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="wm">linkii</div>
+    <div class="aire"><b>Principale</b><small>Aire de gestion</small></div>
+    <a class="nav">Écrans</a><a class="nav active">Listes de lecture</a><a class="nav">Planning</a>
+    <div class="sep"></div><a class="nav">Médiathèque</a>
+    <div class="sep"></div><a class="nav">Aires de gestion</a><a class="nav">Zones</a><a class="nav">Membres</a>
+    <div class="sep"></div><a class="nav">Intégrations</a><a class="nav">Widgets</a>
+  </aside>
+
+  <aside class="apps">
+    <div class="ah">
+      <h3>Ajouter au fil</h3>
+      <p>Glissez une app dans le fil, ou cliquez pour l'ajouter à la fin.</p>
+      <label class="search">⌕ <input id="q" placeholder="Rechercher une app" oninput="renderApps()"></label>
+    </div>
+    <div class="al" id="appList"></div>
+    <div class="af">Vous pouvez aussi déposer des fichiers de votre ordinateur directement dans le fil.<br><a>Toutes les intégrations…</a></div>
+  </aside>
+
+  <main>
+    <a class="back">← Listes de lecture</a>
+    <div class="head">
+      <div class="grow"><h1>Vidéos Paysages <span style="font-size:16px;color:var(--muted);cursor:pointer">✎</span></h1><p class="sub" id="sub"></p></div>
+      <button class="btn ghost">▷ Essayer sur…</button>
+    </div>
+
+    <div class="strip-wrap">
+      <div class="strip-top">
+        <span class="lbl">Une boucle dure <b id="total"></b> puis recommence au contenu 1</span>
+        <div class="seg-ctl"><button id="vL" class="on" onclick="setView('lines')">☰ Lignes</button><button id="vC" onclick="setView('cards')">▦ Cartes</button></div>
+      </div>
+      <div class="strip" id="strip"></div>
+      <div class="ticks" id="ticks"></div>
+    </div>
+
+    <div class="flow lines" id="flow"></div>
+  </main>
+</div>
+
+<div class="menu" id="menu"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const APPS={
+  image:{n:'Image',c:'#F0A92E',i:'▣',d:8,cat:'Médias'},
+  slideshow:{n:'Diaporama d\'images',c:'#F0A92E',i:'▤',d:40,cat:'Médias'},
+  video:{n:'Vidéo',c:'#7B5CC4',i:'▶',d:30,cat:'Médias'},
+  pdf:{n:'PDF',c:'#C8372D',i:'P',d:30,cat:'Médias'},
+  drive:{n:'Dossier Drive',c:'#0F6CBD',i:'◫',d:60,cat:'Médias'},
+  ppt:{n:'Microsoft PowerPoint',c:'#C43E1C',i:'P',d:60,cat:'Présentations'},
+  gslides:{n:'Google Slides',c:'#E8A317',i:'S',d:60,cat:'Présentations'},
+  canva:{n:'Canva',c:'#00A3B4',i:'C',d:20,cat:'Présentations'},
+  web:{n:'Page web',c:'#3A9399',i:'◎',d:20,cat:'Web et réseaux'},
+  youtube:{n:'YouTube',c:'#E3261D',i:'▶',d:45,cat:'Web et réseaux'},
+  facebook:{n:'Facebook',c:'#1877F2',i:'f',d:15,cat:'Web et réseaux'},
+  rss:{n:'Flux RSS',c:'#F2541B',i:'≋',d:20,cat:'Web et réseaux'},
+  text:{n:'Texte / annonce',c:'#4F6BED',i:'Aa',d:10,cat:'Widgets'},
+  clock:{n:'Horloge',c:'#0B1F3A',i:'◷',d:10,cat:'Widgets'},
+  meteo:{n:'Météo',c:'#3D63F2',i:'☀',d:10,cat:'Widgets'},
+  cal:{n:'Calendrier partagé',c:'#2FA66A',i:'▦',d:15,cat:'Widgets'},
+};
+let uid=10;
+let items=[
+  {id:1,app:'image',name:'Tigre du Bengale',meta:'1920 × 1080',dur:8,scans:null,th:'linear-gradient(135deg,#2a1a08,#b8611c 55%,#f2b35e)',lbl:''},
+  {id:2,app:'ppt',name:'Pitch deck STEM',meta:'12 diapositives',dur:76,scans:14,th:'linear-gradient(135deg,#1f5e3b,#4caf6e)',lbl:'STEM'},
+  {id:3,app:'youtube',name:'Lac Léman au lever du jour',meta:'Sans le son',dur:45,scans:null,th:'linear-gradient(180deg,#f3a37a,#c0718f 45%,#3c5c9a)',lbl:'▶'},
+  {id:4,app:'meteo',name:'Météo Lausanne',meta:'3 jours',dur:10,scans:null,th:'linear-gradient(135deg,#2b4fd6,#6d8cf7)',lbl:'18°'},
+  {id:5,app:'web',name:'Actualités du campus',meta:'unil.ch/actu',dur:20,scans:3,th:'linear-gradient(180deg,#ffffff 0 22%,#e4e9ef 22% 24%,#f5f7fa 24%)',lbl:'<span style="color:#3A9399;font-size:15px">Actualités</span>'},
+];
+let view='lines', drag=null, target=null, freshId=null;
+const fmt=s=>Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+
+function renderApps(){
+  const q=$('#q').value.trim().toLowerCase(); let h='', cat='';
+  for(const [k,a] of Object.entries(APPS)){
+    if(q && !a.n.toLowerCase().includes(q)) continue;
+    if(a.cat!==cat){cat=a.cat;h+=`<h5>${cat}</h5>`}
+    h+=`<div class="ap" draggable="true" data-app="${k}"><span class="dot" style="background:${a.c}">${a.i}</span>${a.n}<span class="grip">⠿</span></div>`;
+  }
+  $('#appList').innerHTML=h||'<p style="color:var(--muted);font-size:13px;padding:8px">Aucune app trouvée.</p>';
+}
+
+function starts(){let t=0;return items.map(it=>{const s=t;if(!it.off)t+=it.dur;return s})}
+function render(){
+  const st=starts(), act=items.filter(i=>!i.off), total=act.reduce((a,b)=>a+b.dur,0);
+  let n=0; const nums=items.map(i=>i.off?'–':++n);
+  $('#sub').textContent=`${act.length} contenu${act.length>1?'s':''} · boucle de ${fmt(total)}`;
+  $('#total').textContent=fmt(total);
+  $('#strip').innerHTML=items.map((it,i)=>it.off?'':`<i class="${it.id===freshId?'new':''}" style="flex:${it.dur};background:${APPS[it.app].c}" title="${nums[i]}. ${it.name} · ${fmt(it.dur)}" onclick="focusItem(${it.id})">${nums[i]}&nbsp;${it.dur>=20?it.name:''}</i>`).join('');
+  const q=[0,.25,.5,.75,1].map(f=>fmt(Math.round(total*f)));
+  $('#ticks').innerHTML=q.map(x=>`<span>${x}</span>`).join('');
+
+  const f=$('#flow'); f.className='flow '+view;
+  f.innerHTML=items.map((it,i)=>view==='lines'?lineHtml(it,i,nums[i],st[i]):cardHtml(it,i,nums[i],st[i])).join('')+endHtml(total);
+}
+function scanHtml(it,cls=''){return it.scans==null?(view==='lines'?'<span class="scan none">—</span>':''):`<span class="scan ${cls}" title="Scans du QR code">⌗ ${it.scans} scan${it.scans>1?'s':''}</span>`}
+function thumb(it){const a=APPS[it.app];return `<div class="th" style="background:${it.th}">${it.lbl}<span class="dot badge" style="background:${a.c}">${a.i}</span>`}
+function metaHtml(it){const a=APPS[it.app];return `<span class="meta">${it.fresh?'<span class="new-tag">Nouveau</span>':''}${a.n}${it.meta?' · '+it.meta:''} · <a onclick="cfg(${it.id})">⚙ ${it.fresh?'Configurer':'Régler'}</a>${it.off?' · <b>Désactivé</b>':''}</span>`}
+function cls(it){return 'u'+(it.id===freshId?' fresh':'')+(it.off?' off':'')}
+function lineHtml(it,i,num,s){
+  return `<div class="${cls(it)}" draggable="true" data-i="${i}" data-id="${it.id}">
+    <div class="rail"><span class="num">${num}</span><span class="t">${it.off?'ignoré':fmt(s)}</span></div>
+    <div class="it"><span class="h">⠿</span>${thumb(it)}</div>
+      <div class="info"><b class="nm">${it.name}</b>${metaHtml(it)}</div>
+      ${scanHtml(it)}
+      <div class="dur"><b title="Cliquer pour modifier">${fmt(it.dur)}</b><small>durée</small></div>
+      <button class="kb" onclick="openMenu(event,${it.id})">⋮</button>
+    </div></div>`;
+}
+function cardHtml(it,i,num,s){
+  return `<div class="${cls(it)}" draggable="true" data-i="${i}" data-id="${it.id}"><div class="c">
+    ${thumb(it)}<span class="num">${num}</span><span class="tdur">${fmt(it.dur)}</span>${it.scans!=null?`<span class="tscan">${scanHtml(it)}</span>`:''}</div>
+    <div class="cb"><div class="info"><b class="nm">${it.name}</b>${metaHtml(it)}<span class="start">${it.off?'ignoré dans la boucle':'démarre à '+fmt(s)}</span></div>
+    <button class="kb" onclick="openMenu(event,${it.id})">⋮</button></div></div></div>`;
+}
+function endHtml(total){
+  return view==='lines'
+    ? `<div class="u end" data-end="1" style="display:grid;grid-template-columns:48px 1fr;gap:14px;align-items:center"><div class="rail"><span class="loop">↺</span><span class="t">${fmt(total)}</span></div><div class="end-zone">＋ Glissez une app ici pour l'ajouter à la fin · ensuite la boucle recommence au contenu 1</div></div>`
+    : `<div class="u end" data-end="1"><div class="end-zone"><span class="loop">↺</span>Glissez une app ici<br><small>ajout à la fin · la boucle recommence ensuite</small></div></div>`;
+}
+
+/* ---------- glisser-déposer ---------- */
+document.addEventListener('dragstart',e=>{
+  const ap=e.target.closest?.('.ap'), u=e.target.closest?.('.u[data-i]');
+  if(ap){drag={kind:'app',app:ap.dataset.app};ap.classList.add('dragging');$('#flow').classList.add('drag-app')}
+  else if(u){drag={kind:'item',i:+u.dataset.i};u.classList.add('dragging')}
+  else return;
+  e.dataTransfer.setData('text/plain','linkii');e.dataTransfer.effectAllowed=drag.kind==='app'?'copy':'move';
+});
+document.addEventListener('dragend',clearDrag);
+function clearMarks(){document.querySelectorAll('.ins-before,.ins-after').forEach(x=>x.classList.remove('ins-before','ins-after'));document.querySelectorAll('.end-zone.over').forEach(x=>x.classList.remove('over'))}
+function clearDrag(){clearMarks();document.querySelectorAll('.dragging').forEach(x=>x.classList.remove('dragging'));$('#flow').classList.remove('drag-app');drag=null;target=null}
+$('#flow').addEventListener('dragover',e=>{
+  if(!drag)return; e.preventDefault(); clearMarks();
+  const u=e.target.closest('.u');
+  if(!u||u.dataset.end){target=items.length;$('#flow .end-zone').classList.add('over');return}
+  const r=u.getBoundingClientRect(), i=+u.dataset.i;
+  const before=view==='lines'?e.clientY<r.top+r.height/2:e.clientX<r.left+r.width/2;
+  u.classList.add(before?'ins-before':'ins-after'); target=before?i:i+1;
+});
+$('#flow').addEventListener('drop',e=>{
+  e.preventDefault(); if(!drag||target==null)return clearDrag();
+  let at=target;
+  if(drag.kind==='item'){
+    const from=drag.i; if(at===from||at===from+1)return clearDrag();
+    const [m]=items.splice(from,1); if(from<at)at--; items.splice(at,0,m); freshId=m.id;
+    toast(`« ${m.name} » déplacé en position ${at+1}`);
+  } else insertApp(drag.app,at);
+  clearDrag(); render(); flashOff();
+});
+function insertApp(k,at){
+  const a=APPS[k], it={id:++uid,app:k,name:'Nouveau contenu '+a.n,meta:'',dur:a.d,scans:null,th:`linear-gradient(135deg,${a.c},${a.c}99)`,lbl:a.i,fresh:true};
+  items.splice(at,0,it); freshId=it.id;
+  toast(`${a.n} ajouté en position ${at+1}<a onclick="cfg(${it.id})">Configurer</a>`);
+}
+$('#appList').addEventListener('click',e=>{const ap=e.target.closest('.ap');if(!ap)return;insertApp(ap.dataset.app,items.length);render();flashOff();setTimeout(()=>focusItem(freshId),30)});
+
+/* ---------- divers ---------- */
+let ft;function flashOff(){clearTimeout(ft);ft=setTimeout(()=>{freshId=null;render()},2600)}
+function focusItem(id){const el=document.querySelector(`.u[data-id="${id}"]`);if(el){el.scrollIntoView({behavior:'smooth',block:'center'});freshId=id;render();flashOff()}}
+function cfg(id){const it=items.find(x=>x.id===id);toast(`Ouvre la fenêtre de configuration standard de « ${it.name} » (source · aperçu · réglages)`)}
+function setView(v){view=v;$('#vL').classList.toggle('on',v==='lines');$('#vC').classList.toggle('on',v==='cards');render()}
+let tt;function toast(h){const t=$('#toast');t.innerHTML=h;t.classList.add('on');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('on'),3200)}
+
+function openMenu(e,id){
+  e.stopPropagation(); const it=items.find(x=>x.id===id), m=$('#menu');
+  m.innerHTML=`<button onclick="cfg(${id})">⚙ Configurer…</button><button onclick="toast('Renommer en place')">✎ Renommer</button><button onclick="toast('Changer la durée')">◷ Changer la durée</button><button onclick="dup(${id})">⧉ Dupliquer</button><button onclick="toggleOff(${id})">${it.off?'◉ Réactiver':'◌ Désactiver (sans retirer)'}</button><button onclick="toast('Ouvre l\\'onglet QR code et le comptage des scans')">⌗ QR code et scans</button><hr><button class="danger" onclick="rm(${id})">✕ Retirer de la liste</button>`;
+  const r=e.currentTarget.getBoundingClientRect();
+  m.style.top=Math.min(r.bottom+4,innerHeight-300)+'px'; m.style.left=(r.right-210)+'px'; m.classList.add('on');
+}
+document.addEventListener('click',e=>{if(!e.target.closest('.kb'))$('#menu').classList.remove('on')});
+function dup(id){const i=items.findIndex(x=>x.id===id),c={...items[i],id:++uid,name:items[i].name+' (copie)',fresh:false};items.splice(i+1,0,c);freshId=c.id;render();flashOff()}
+function toggleOff(id){const it=items.find(x=>x.id===id);it.off=!it.off;render()}
+function rm(id){const it=items.find(x=>x.id===id);items=items.filter(x=>x.id!==id);render();toast(`« ${it.name} » retiré<a onclick="toast('Annulé')">Annuler</a>`)}
+
+renderApps(); render();
+</script>
+</body>
+</html>

@@ -72,6 +72,7 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
     {
         var growth = db.Clients.FirstOrDefault(c => c.Id == p.ClientId)?.IsGrowth == true;   // QR code de comptage des scans : licence Growth
         return p.Draft
+            .Where(i => !i.Off)   // désactivé dans la liste : gardé dans le brouillon, jamais publié
             .Select(i => (i, m: db.Media.FirstOrDefault(x => x.Id == i.MediaId && x.ClientId == p.ClientId)))   // jamais un média d'un autre client
             .Where(t => t.m != null && t.m.Status == null)   // une vidéo en cours de conversion n'est pas publiée
             .Select(t => Snapshot(db, t.i, t.m!, growth))

@@ -1620,3 +1620,16 @@ Maquette validée : `maquettes/listes-dossiers-apercu.html` (couleur Nuit retenu
 - Classe `.btn-share` (`#1F6FD1`, texte blanc, survol `#1A62BB`) sur les boutons Partager : en-tête d'un dossier (Médiathèque, Listes de lecture), aperçu d'un média, « Partager avec N aires ». Même taille que les autres boutons (`.btn`), sauf dans l'aperçu d'un média où tous les boutons du pied sont petits.
 - Pourquoi : à côté d'un bouton Nuit (« Nouvelle liste », « Importer »), un second bouton Nuit se confondait ; le bleu vif les distingue. Hors charte (le Signal `#3B82C4` reste l'accent du logo).
 - Dans l'app Android, le bouton garde son rang (après le bouton principal).
+
+## 73. Fil de la liste de lecture : colonne des apps et glisser-déposer (19 octobre 2026) : codé
+
+Maquette validée : `maquettes/playlist-fil-glisser-deposer.html` (PC seulement ; l'app Android viendra plus tard).
+
+- **Colonne « Ajouter au fil »** entre le menu et le fil : apps activées en liste, par catégorie (Médiathèque, Drive, Web, puis les autres), recherche. Les widgets d'écran n'y sont pas (ce ne sont pas des apps). On glisse une app dans le fil, ou un clic l'ajoute à la fin, à vide (« À configurer »). Remplace le menu « Ajouter un contenu », la galerie des apps et les boutons « Insérer ici ».
+- **Frise de la boucle** : chaque contenu diffusé y prend une place proportionnelle à sa durée, à la couleur de son app ; un clic amène le contenu à l'écran. Graduations 0 / ¼ / ½ / ¾ / fin.
+- **Vues Lignes et Cartes** (mémorisées dans le navigateur, `pl-flow`). Lignes : fil vertical numéroté, heure de départ sous le numéro, aperçu de 208 px (160 px sous 1 440 px de large), nom en évidence, app et « Régler » / « Configurer », scans du QR code, durée en grand, menu ⋮. Cartes : grille, numéro, durée et scans sur l'aperçu, « démarre à … ». Fin du fil : zone de dépôt « ↺ » (la boucle recommence au contenu 1).
+- **Glisser-déposer** (`playlist-flow.js`, glisser natif) : un trait bleu montre l'endroit (au-dessus / au-dessous en Lignes, à gauche / à droite en Cartes) ; réordonner les contenus de la même façon. `sort-list.js` n'est plus utilisé sur cette page.
+- **Menu ⋮** : Configurer…, Renommer (sur place, contenus d'app), Changer la durée (sur place : `m:ss` ou secondes ; un clic sur la durée fait de même ; une app « jusqu'à la fin » passe en durée fixe), Dupliquer (le même contenu repasse juste après ; nouvelle adresse courte pour le QR), Désactiver (sans retirer) / Réactiver, QR code et scans (Growth), Retirer de la liste.
+- **Désactivé** : nouveau champ `PlaylistItem.Off` ; le contenu garde sa place mais n'est pas publié (`Notifier.Items`), ni compté dans la boucle ; numéro « – » et « ignoré ». Copié avec la liste (`PlaylistFolders`).
+- **Pas fait** : déposer des fichiers de l'ordinateur directement dans le fil (la phrase de la maquette n'a pas été reprise).
+- **Vu** : PC dans le navigateur (instance de test) : ajout par clic et par glisser, déplacement en Lignes et en Cartes, durée, renommer, dupliquer, désactiver. Glisser simulé par script, pas à la souris. **Pas vu** : licence Growth avec scans réels, lecture seule, écran étroit.
