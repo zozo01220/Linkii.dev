@@ -1604,3 +1604,13 @@ Médiathèque et listes de lecture, **PC, mobile et app Android**. Décision : u
 - **Affichage de base** : une seule grille à plat (cartes ou liste), puis « Connecter un écran ».
 - **Filtre « Aire de gestion »** (menu Filtres, seulement si la personne voit plusieurs aires) : **Tous** par défaut (écrans de l'aire ouverte avec leurs cartes habituelles, puis ceux des autres aires en cartes de consultation avec le nom de leur aire ; un clic ouvre leur édition) ; choisir une aire ne garde que ses écrans. Les filtres Zone et « À publier » sont propres à l'aire ouverte : ils masquent les autres aires. Le filtre est mémorisé le temps de la page.
 - **Vu** : filtre Tous / une aire dans le navigateur (3 aires, 4 écrans, compte neuf). **Pas vu** : vue liste et mode simple.
+
+## 71. Dossiers en forme de dossier, hors du bloc (19 octobre 2026) : codé
+
+Maquette validée : `maquettes/listes-dossiers-apercu.html` (couleur Nuit retenue ; variantes Signal et Clair écartées). Trois propositions de navigation précédentes (arbre, colonnes, tout à plat) refusées : trop chargées.
+
+- **Médiathèque et Listes de lecture** : les dossiers sortent du bloc « Dossiers » (plus de cadre ni de titre) et s'affichent sous l'en-tête, avant le bloc Médias / Listes ; rien n'apparaît s'il n'y a pas de dossier (PC).
+- **Forme** (`FolderShape.razor`, styles `.lx-fcard` / `.lx-fzone`) : dos et onglet Nuit `#0B1F3A`, rabat `#1D3B63` avec le carré Signal du logo ; jusqu'à trois vignettes du contenu (derniers médias, ou première vignette des dernières listes) qui dépassent, inclinées, et se soulèvent au survol ; sur le rabat le nombre d'éléments (« 3 listes », « 2 médias », « Vide », « éléments » si dossiers et contenus sont mélangés) et la pastille d'accès (partagé, écriture, lecture seule, aire d'origine ; plus de pastille « Privé »). Sous le dossier : son nom et « modifié le … » (dernier média ajouté, dernière liste modifiée) ou « créé le … ».
+- **Glisser-déposer** : un dossier cible prend le dos Signal et ses vignettes se soulèvent. ⋮ au survol sur l'onglet (PC), toujours visible au téléphone.
+- **Téléphone (navigateur)** : deux colonnes. **App Android** : bande qui défile (dossiers de 140 px), « Nouveau dossier » en pointillés au bout ; la bande garde sa marge à gauche (`scroll-padding`).
+- **Vu** : PC, navigateur mobile et look app, médiathèque et listes (instance de test, 3 dossiers de médias, 3 dossiers de listes).

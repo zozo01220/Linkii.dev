@@ -98,11 +98,9 @@
 }
 else
 {
-    <section class="lx-blk lx-blk-folders" aria-label="Dossiers">
-        <div class="lx-bh"><Ico Name="folder" Size="16" /> <span>Dossiers</span> <small>@subfolders.Count</small></div>
-    @* Dossiers de la position ouverte : puces compactes, cibles du glisser-déposer *@
-    @* Look « app » : les dossiers sont une bande de cartes qui défile (aperçu des derniers médias, badge de partage) ;
-       appui long = menu (partager, renommer, supprimer). Masquée ailleurs par le CSS. *@
+    <section class="lx-fzone" aria-label="Dossiers">
+    @* Dossiers de la position ouverte, hors du bloc des médias : forme de dossier (FolderShape) avec l'aperçu des derniers médias, cibles du glisser-déposer.
+       PC : grille ; app : bande qui défile, appui long = menu (partager, renommer, supprimer). *@
     @if (subfolders.Count > 0 || (FoldersShown && CanCreateHere))
     {
         <div class="lx-fstrip lx-fgrid" role="list" aria-label="Dossiers">
@@ -117,16 +115,15 @@ else
                      @onclick="() => OpenFolder(r.Folder.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenFolder(r.Folder.Id); }'
                      @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0 || (dragFolder != null && dragFolder != r.Folder.Id)) dropOver = r.Folder.Id; }" @ondragleave="() => { if (dropOver == r.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(r.Folder.Id)"
                      @oncontextmenu="() => { if (canMenu) menuFor = r.Folder.Id; }" @oncontextmenu:preventDefault="inApp && canMenu">
-                    <div class="fp @(recent.Count == 0 ? "none" : "")">
-                        @foreach (var rm in recent) { <span class="fpi"><MediaThumb Media="rm" /></span> }
-                        @if (recent.Count == 0) { <span class="fpi fe"><Ico Name="folder" Size="26" /></span> }
-                        @if (foreignNames.TryGetValue(r.Folder.Id, out var fromArea)) { <span class="fbadge lvl" title="Dossier de l'aire @fromArea, partagé en lien vivant"><Ico Name="link" Size="11" /> @fromArea</span> }
-                        else if (r.Right == FolderRight.Read) { <span class="fbadge ro"><Ico Name="lock" Size="11" /> Lecture seule</span> }
-                        else if (!mine) { <span class="fbadge lvl"><Ico Name="users" Size="11" /> Écriture</span> }
-                        else if (aud.Count > 0) { <span class="fbadge @(aud.Levels.Count > 0 ? "lvl" : "sh")"><Ico Name="users" Size="11" /> Partagé · @aud.Count</span> }
-                        else { <span class="fbadge pv"><Ico Name="lock" Size="11" /> Privé</span> }
-                    </div>
-                    <div class="fn"><span>@r.Folder.Name</span><small>@ChildCount(r.Folder.Id)</small></div>
+                    <FolderShape Preview="recent" Count="ChildCount(r.Folder.Id)" Unit="@FolderUnit(r.Folder.Id)">
+                        <Badge>
+                            @if (foreignNames.TryGetValue(r.Folder.Id, out var fromArea)) { <span class="fbadge lvl" title="Dossier de l'aire @fromArea, partagé en lien vivant"><Ico Name="link" Size="11" /> @fromArea</span> }
+                            else if (r.Right == FolderRight.Read) { <span class="fbadge ro"><Ico Name="lock" Size="11" /> Lecture seule</span> }
+                            else if (!mine) { <span class="fbadge lvl"><Ico Name="users" Size="11" /> Écriture</span> }
+                            else if (aud.Count > 0) { <span class="fbadge @(aud.Levels.Count > 0 ? "lvl" : "sh")"><Ico Name="users" Size="11" /> Partagé · @aud.Count</span> }
+                        </Badge>
+                    </FolderShape>
+                    <div class="fn"><span>@r.Folder.Name</span><small>@FolderDate(r)</small></div>
                     @if (canMenu)
                     {
                         <button type="button" class="fk" aria-label="Actions pour le dossier @r.Folder.Name" aria-haspopup="menu" aria-expanded="@(menuFor == r.Folder.Id ? "true" : "false")"
@@ -152,7 +149,7 @@ else
             @if (FoldersShown && CanCreateHere)
             {
                 <button type="button" class="lx-fcard add" @onclick='() => { newFolderName = ""; newFolderError = null; creatingFolder = true; }'>
-                    <div class="fp none"><span class="fpi fe"><Ico Name="plus" Size="26" /></span></div>
+                    <div class="fv"><span class="fbk"></span><span class="ffr"><Ico Name="plus" Size="22" /></span></div>
                     <div class="fn"><span>Nouveau dossier</span></div>
                 </button>
             }
@@ -730,6 +727,16 @@ else
 
     // Éléments directs d'un dossier : ses fichiers et ses sous-dossiers visibles
     private int ChildCount(Guid id) => allFiles.Count(m => m.FolderId == id && !sharedIn.ContainsKey(m.Id)) + folderRows.Count(r => r.Folder.ParentId == id);
+
+    private string FolderUnit(Guid id) => FolderShape.UnitFor(allFiles.Count(m => m.FolderId == id && !sharedIn.ContainsKey(m.Id)), folderRows.Count(r => r.Folder.ParentId == id), "média", "médias");
+
+    // Sous le nom du dossier : le dernier média ajouté, sinon sa création
+    private string FolderDate(FolderRow r)
+    {
+        var last = allFiles.Where(m => m.FolderId == r.Folder.Id && m.AddedUtc != null).Max(m => m.AddedUtc);
+        var d = (last ?? r.Folder.CreatedUtc).ToLocalTime();
+        return (last != null ? "modifié le " : "créé le ") + d.ToString(d.Year == DateTime.Now.Year ? "d MMM" : "d MMM yyyy", Fr);
+    }
 
     private List<FolderRow> BuildCrumbs()
     {

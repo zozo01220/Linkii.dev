@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Listes de lecture, dossiers avec aperçu</title>
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--row:#EDF1F5;--signal:#3B82C4;--radius:6px;
+  --fb:#0B1F3A;--ff:#1D3B63;--ft:#fff;--fm:rgba(255,255,255,.72)}
+body.v-signal{--fb:#2A6AA6;--ff:#3B82C4;--ft:#fff;--fm:rgba(255,255,255,.8)}
+body.v-clair{--fb:#BFCDDF;--ff:#DCE5F0;--ft:#0B1F3A;--fm:#5A6B80}
+*{box-sizing:border-box}html,body{margin:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
+h1,b{font-weight:500}h1{margin:0;font-size:26px}
+button{font:inherit;color:inherit;cursor:pointer}
+.note{background:#fff;border-bottom:1px dashed var(--line-2);padding:8px 24px;font-size:13px;color:var(--muted);display:flex;gap:14px;align-items:center;justify-content:center;flex-wrap:wrap}
+.note b{color:var(--ink)}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:6px;overflow:hidden}
+.seg button{border:0;background:#fff;padding:4px 12px;font-size:13px}
+.seg button.on{background:var(--ink);color:#fff}
+.shell{display:grid;grid-template-columns:240px minmax(0,1fr);min-height:calc(100vh - 38px)}
+.side{background:#fff;border-right:1px solid var(--line);padding:22px 14px}
+.wm{font-size:24px;font-weight:500;letter-spacing:-.03em;padding:0 10px 18px;display:block}
+.wm small{font-size:11px;color:var(--muted);letter-spacing:0;font-weight:400;margin-left:6px}
+.area{border:1px solid var(--line);border-radius:6px;padding:8px 12px;margin-bottom:18px;font-size:14px}
+.area small{display:block;font-size:11px;color:var(--muted)}
+.nav{display:flex;align-items:center;gap:12px;padding:9px 12px;border-radius:6px;color:var(--muted);font-size:15px}
+.nav.on{background:var(--row);color:var(--ink);font-weight:500;box-shadow:inset 3px 0 0 var(--ink)}
+.nav svg{width:18px;height:18px}
+.main{padding:28px 18px 40px;max-width:1640px}
+.head{display:flex;align-items:flex-start;gap:16px;margin-bottom:22px}
+.head .sub{font-size:13px;color:var(--muted);margin-top:6px}
+.grow{flex:1}
+.split{display:inline-flex;border-radius:6px;overflow:hidden}
+.split button{border:0;background:var(--ink);color:#fff;padding:10px 18px;font-weight:500;display:inline-flex;align-items:center;gap:8px}
+.split button+button{border-left:1px solid #2A4366;padding:10px 12px}
+/* ---- dossiers ---- */
+.folders{display:grid;grid-template-columns:repeat(auto-fill,188px);gap:26px 22px;margin:4px 4px 34px}
+.fold{width:188px;cursor:pointer;background:none;border:0;padding:0;text-align:left}
+.fv{position:relative;height:150px;margin-bottom:10px}
+.bk{position:absolute;left:0;right:0;top:12px;bottom:0;background:var(--fb);border-radius:4px 12px 12px 12px}
+.bk::before{content:"";position:absolute;left:0;top:-12px;width:44%;height:18px;background:var(--fb);border-radius:9px 10px 0 0}
+.pp{position:absolute;top:16px;width:56%;height:104px;border-radius:5px;background:#fff center/cover no-repeat;border:3px solid #fff;box-shadow:0 1px 4px rgba(11,31,58,.28);transition:transform .22s ease;transform:rotate(var(--r))}
+.pp.p1{left:9%;--r:-7deg}.pp.p2{left:23%;--r:1deg;top:12px}.pp.p3{left:37%;--r:8deg}
+.pp.tile{display:grid;place-items:center;background:#fff}
+.pp.tile svg{width:34px;height:34px;color:var(--ink)}
+.fr{position:absolute;left:0;right:0;bottom:0;height:46%;background:var(--ff);border-radius:9px 9px 12px 12px;display:flex;align-items:flex-end;justify-content:space-between;gap:8px;padding:10px 12px;color:var(--ft);transition:transform .22s ease;transform-origin:bottom center}
+.fr::after{content:"";position:absolute;top:11px;right:12px;width:7px;height:7px;background:var(--signal)}
+body.v-signal .fr::after{background:#fff}
+.fr .n{font-size:22px;font-weight:500;line-height:1}
+.fr .n small{font-size:12px;font-weight:400;color:var(--fm);margin-left:4px}
+.fr .sh{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--fm)}
+.fr .sh svg{width:13px;height:13px}
+.fold:hover .pp{transform:translateY(-12px) rotate(var(--r))}
+.fold:hover .fr{transform:perspective(500px) rotateX(-14deg)}
+.fold:focus-visible{outline:2px solid var(--signal);outline-offset:6px;border-radius:8px}
+.fold .nm{display:block;font-weight:500;font-size:15px;padding:0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fold .mt{display:block;font-size:12.5px;color:var(--muted);padding:0 2px}
+.fold.empty .fr{height:62%}
+.fold.drop .bk,.fold.drop .bk::before{background:var(--signal)}
+.fold.drop .pp{transform:translateY(-16px) rotate(var(--r))}
+.fold.new .bk,.fold.new .bk::before{background:none;border:1.5px dashed var(--line-2)}
+.fold.new .bk::before{border-bottom:0;top:-13px;left:-1.5px}
+.fold.new .fr{background:none;border:1.5px dashed var(--line-2);color:var(--muted);justify-content:center;align-items:center;font-size:14px}
+.fold.new .fr::after{display:none}
+/* ---- bloc listes (inchangé) ---- */
+.blk{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 14px 18px}
+.bh{display:flex;align-items:center;gap:8px;font-weight:500;margin:0 2px 12px}
+.bh small{color:var(--muted);font-weight:400}
+.bar{display:flex;gap:8px;margin-bottom:16px}
+.srch{flex:1;border:1px solid var(--line-2);border-radius:6px;padding:8px 12px;color:var(--muted);display:flex;gap:8px;align-items:center}
+.tb{border:1px solid var(--line-2);border-radius:6px;padding:8px 12px;background:#fff;display:flex;gap:6px;align-items:center}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,248px);gap:16px}
+.card{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
+.card .tv{display:flex;height:138px;background:var(--ink)}
+.card .tv span{flex:1 1 0;background:center/cover no-repeat}
+.card .bd{padding:10px 12px 12px}
+.card .bd b{display:block}
+.card .bd small{display:block;font-size:12.5px;color:var(--muted)}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--line-2);margin-right:6px}
+.hint{font-size:12.5px;color:var(--muted);margin:-22px 4px 26px}
+@media (max-width:760px){.shell{grid-template-columns:1fr}.side{display:none}.folders{grid-template-columns:repeat(2,minmax(0,1fr));gap:22px 14px}.fold{width:100%}.cards{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="note"><span><b>Maquette</b> · dossiers sortis du bloc, en forme de dossier Linkii avec l'aperçu de leurs listes. Survolez un dossier.</span>
+  <span>Couleur <span class="seg" id="v"><button class="on" data-v="">Nuit</button><button data-v="v-signal">Signal</button><button data-v="v-clair">Clair</button></span></span>
+  <span>Glisser une liste <span class="seg" id="d"><button class="on" data-d="0">Non</button><button data-d="1">Survol de « Images »</button></span></span>
+</div>
+<div class="shell">
+  <aside class="side">
+    <span class="wm">linkii<small>v1.97.0</small></span>
+    <div class="area"><b>Principale</b><small>Aire de gestion</small></div>
+    <div class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>Écrans</div>
+    <div class="nav on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>Listes de lecture</div>
+    <div class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Planning</div>
+    <div class="nav"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/></svg>Médiathèque</div>
+  </aside>
+  <main class="main">
+    <div class="head">
+      <div><h1>Listes de lecture</h1><div class="sub">5 listes · 4 dossiers</div></div>
+      <span class="grow"></span>
+      <span class="split"><button><span style="font-size:18px;line-height:1">+</span> Nouvelle liste</button><button aria-label="Autres créations">⌄</button></span>
+    </div>
+
+    <div class="folders" id="folders"></div>
+
+    <section class="blk">
+      <div class="bh">▹ Listes <small>2</small></div>
+      <div class="bar">
+        <div class="srch">⌕ Rechercher dans toutes les listes</div>
+        <div class="tb">⚙ Filtres</div><div class="tb">Récentes ⌄</div>
+      </div>
+      <div class="cards">
+        <div class="card"><div class="tv"><span id="t1"></span><span id="t2" style="flex:.5"></span></div><div class="bd"><b>Vidéos Paysages</b><small>2 contenus · 1:24 · modifiée il y a 2 j</small><small><span class="dot"></span>Non utilisée</small></div></div>
+        <div class="card"><div class="tv"><span id="t3"></span><span id="t4" style="flex:.5"></span></div><div class="bd"><b>Accueil</b><small>2 contenus · 0:16 · modifiée hier</small><small><span class="dot"></span>Non utilisée</small></div></div>
+      </div>
+    </section>
+  </main>
+</div>
+<script>
+var M='../Unicom-medias/';
+var IMG={ete1:'0050_26_01_Campagne_été_1080x1920_Bornes 1.jpg',ete2:'0050_26_01_Campagne_été_1080x1920_Bornes2 1.jpg',ete3:'0050_26_01_Campagne_été_1080x1920_Bornes3 1.jpg',
+ fac:'FacLettres.jpg',j1:'1.jpg',j2:'2.jpg',j3:'3.jpg',cent:"Centenaire d&#039;Études de Lettres.png",sortie:'Sortie allez savoir.png',bornes:'Bornes.png',merc:'Mercredi, 1609.png'};
+function url(k){return "url('"+encodeURI(M+IMG[k]).replace(/'/g,"%27")+"')"}
+var FB='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/></svg>';
+var SH='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4-6"/></svg>';
+var F=[
+ {n:'Diaporamas',c:3,u:'listes',sh:'Partagé · 1',d:'modifié le 12 oct.',p:['ete1','ete2','ete3']},
+ {n:'Images',c:2,u:'listes',sh:'Partagé · 1',d:'modifié le 9 oct.',p:['j1','fac']},
+ {n:'Réseaux sociaux',c:1,u:'liste',sh:'Partagé · 1',d:'modifié le 11 oct.',p:['app']},
+ {n:'Archives',c:0,u:'',d:'créé le 2 oct.',p:[]},
+ {nw:1}];
+function draw(drop){var h='';F.forEach(function(f){
+ if(f.nw){h+='<button class="fold new"><div class="fv"><div class="bk"></div><div class="fr">+ Nouveau dossier</div></div></button>';return}
+ var pp='',k=f.p.length>2?['p1','p2','p3']:f.p.length==2?['p1','p3']:['p2'];
+ f.p.forEach(function(x,i){pp+=x==='app'?'<span class="pp tile '+k[i]+'">'+FB+'</span>':'<span class="pp '+k[i]+'" style="background-image:'+url(x)+'"></span>'});
+ h+='<button class="fold'+(f.c?'':' empty')+(drop&&f.n==='Images'?' drop':'')+'" aria-label="Ouvrir le dossier '+f.n+'"><div class="fv"><div class="bk"></div>'+pp+
+ '<div class="fr"><span class="n">'+(f.c||'Vide')+(f.c?'<small>'+f.u+'</small>':'')+'</span>'+(f.sh?'<span class="sh">'+SH+f.sh+'</span>':'')+'</div></div>'+
+ '<span class="nm">'+f.n+'</span><span class="mt">'+f.d+'</span></button>'});
+ document.getElementById('folders').innerHTML=h}
+draw(false);
+document.getElementById('t1').style.backgroundImage=url('j3');document.getElementById('t2').style.backgroundImage=url('bornes');
+document.getElementById('t3').style.backgroundImage=url('sortie');document.getElementById('t4').style.backgroundImage=url('merc');
+document.getElementById('v').onclick=function(e){var b=e.target.closest('button');if(!b)return;document.body.className=b.dataset.v;[].forEach.call(this.children,function(x){x.classList.toggle('on',x===b)})};
+document.getElementById('d').onclick=function(e){var b=e.target.closest('button');if(!b)return;draw(b.dataset.d==='1');[].forEach.call(this.children,function(x){x.classList.toggle('on',x===b)})};
+</script>
+</body>
+</html>
