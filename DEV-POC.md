@@ -904,7 +904,7 @@ Demande : simplifier au maximum l'écran pour les personnes qui diffusent seulem
 1. **Simple** : Écrans (cartes seulement), Listes de lecture, Médiathèque, Réglages réduit à *Utilisation*, *Veille et luminosité*, *Compte et confidentialité*.
 2. **Expert** : Planning, Aires de gestion, Membres, Intégrations, Widgets, et le reste de Réglages. Le lien « Gérer les aires » du sélecteur d'aire suit le mode ; le sélecteur reste visible dès deux aires.
 3. **Inscription** : choix Simple / Expert dans les deux formulaires, Simple présélectionné. Choisir Expert ne déclenche pas la présentation.
-4. **Présentation** au premier passage en expert : fenêtre « Mode expert activé » qui liste les cinq fonctions. Elle s'affiche à **chaque passage en expert**, sauf si « Ne plus afficher ce message » est coché (décoché par défaut). Repasser en simple remet le réglage à zéro.
+4. **Présentation** au premier passage en expert : fenêtre « Mode expert activé » qui liste les cinq fonctions. Elle s'affiche à **chaque passage en expert**, sauf si « Ne plus afficher ce message » est coché (décoché par défaut). Le choix est mémorisé sur le compte : repasser en simple ne le remet pas à zéro.
 5. **Comptes existants** (sans choix enregistré) : expert, pour ne rien retirer à ce qu'ils utilisent.
 6. **Libellé de l'interrupteur** : « Passer en mode expert » ou « Passer en mode simple » selon l'état. Le même libellé est repris partout où l'interrupteur apparaît (barre latérale, Réglages › Compte, bloc « Fonctions avancées », page réservée).
 

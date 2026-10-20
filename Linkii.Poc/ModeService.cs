@@ -34,7 +34,6 @@ public class ModeService(JsonStore root, TenantContext ctx, NavigationManager na
             if (d.Users.FirstOrDefault(u => u.Id == uid) is not { } u) return;
             u.ExpertMode = expert;
             seen = u.ExpertIntroSeen;
-            if (!expert) u.ExpertIntroSeen = false;   // repasser en simple réactive la présentation pour le prochain passage en expert
         });
         IntroDue = expert && !seen;
         if (IntroDue) Changed?.Invoke();
