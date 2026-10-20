@@ -49,6 +49,7 @@ builder.Services.AddSingleton<AppCatalog>();
 builder.Services.AddSingleton<SecretBox>();
 builder.Services.AddSingleton<SafeHttp>();
 builder.Services.AddSingleton<IAppProvider, WeatherProvider>();
+builder.Services.AddSingleton<IAppProvider, WeatherSlideProvider>();
 builder.Services.AddSingleton<IAppProvider, CalendarProvider>();
 builder.Services.AddSingleton<IAppProvider, RssProvider>();
 builder.Services.AddSingleton<IAppProvider, FacebookProvider>();

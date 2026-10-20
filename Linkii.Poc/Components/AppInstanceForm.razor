@@ -20,6 +20,7 @@ else
 {
     var sources = manifest.InZone("source").ToList();
     var hasPreview = ContentPreview.Has(manifest);
+    var tabsUnder = ConfTabs != null && hasPreview;   // onglets sous l'aperçu ; sans aperçu, en tête de la colonne de droite
     <div class="ci">
         @* résultats de recherche, d'import, de test, erreurs : un bandeau collé en haut de la fenêtre, visible sans défilement *@
         @if (Banner() is { } bn)
@@ -53,6 +54,8 @@ else
         }
 
         <div class="ci-cols @(hasPreview || OtherTab ? "" : "one")">
+            @* colonne de gauche : aperçu, puis les onglets de l'appelant (« Contenu / QR code ») sous l'aperçu *@
+            <div class="ci-left" hidden="@(!(hasPreview || OtherTab))">
             @* autre onglet de l'appelant (ex. « QR code ») : sa propre colonne d'aperçu ; l'aperçu du contenu est seulement masqué, il garde son état *@
             @if (OtherTab && OtherPreview != null)
             {
@@ -90,16 +93,19 @@ else
                     }
                     <div class="ci-prevbody" hidden="@(sources.Count > 0 && (sourceOpen || !SourceReady))">
                         @if (sources.Count > 0 && SourceReady) { <button type="button" class="ci-chg" @onclick="OpenSource"><Ico Name="edit" Size="14" /> @ChangeLabel(sources[0])</button> }
-                        <ContentPreview @ref="previewRef" Manifest="manifest" Values="values" Instance="instance" Qr="PreviewQr" Portrait="PreviewPortrait" OnNotice="OnPreviewNotice" />
+                        <ContentPreview @ref="previewRef" Manifest="manifest" Values="values" Instance="instance" Qr="PreviewQr" Portrait="PreviewPortrait" Place="PreviewPlace" OnNotice="OnPreviewNotice" />
                     </div>
                 </section>
             }
+            @* onglets de l'appelant sous l'aperçu (ils restent à la même place quel que soit l'onglet) *@
+            @if (tabsUnder) { @ConfTabs }
+            </div>
             <section class="ci-conf" aria-label="Configuration">
-                @* onglets de l'appelant, en tête de la colonne de droite (même emplacement que « Écran / Widgets » de l'éditeur d'écran) *@
-                @ConfTabs
+                @* sans aperçu, les onglets restent en tête de la colonne de droite (même emplacement que « Écran / Widgets » de l'éditeur d'écran) *@
+                @if (!tabsUnder) { @ConfTabs }
                 @if (OtherTab) { @OtherPane }
                 <div class="ci-conf-main" hidden="@OtherTab">
-                    @if (ConfTabs == null) { <h4 class="ci-t">Configuration</h4> }
+                    @if (ConfTabs == null || tabsUnder) { <h4 class="ci-t">Configuration</h4> }
                     <AppForm Manifest="manifest" Values="values" StoredSecrets="storedSecrets" InstanceId="instance?.Id" Zone="main" OnChange="Touch" />
                     @* réglages propres à l'appelant (ex. « Dans cette liste de lecture »), à droite de l'aperçu *@
                     @Extra
@@ -260,6 +266,7 @@ else
         "calendar" => "Choisir un calendrier",
         "mailbox" => "Choisir une salle",
         "facebookpage" => "Choisir une Page Facebook",
+        "city" => "Choisir une ville",
         _ => "Ajouter le lien"
     };
 
@@ -270,6 +277,7 @@ else
         "pdf" => "Chaque page est convertie en image.",
         "canva" => "Chaque page du design devient une image.",
         "drive" => "Les fichiers du dossier sont diffusés.",
+        "city" => "Saisissez le nom d'une ville : sa météo s'affiche aussitôt.",
         _ => s.Help ?? s.Label
     };
 
@@ -284,6 +292,7 @@ else
         "calendar" => "Changer de calendrier",
         "mailbox" => "Changer de salle",
         "facebookpage" => "Changer de Page",
+        "city" => "Changer de ville",
         _ => "Modifier le lien"
     };
 
@@ -301,6 +310,8 @@ else
     [Parameter] public PublishedQr? PreviewQr { get; set; }
     /// <summary>L'aperçu reproduit un écran portrait (carrousel et image debout).</summary>
     [Parameter] public bool PreviewPortrait { get; set; }
+    /// <summary>Position choisie dans la liste de lecture (full, top-left…) : l'aperçu de la Météo la reproduit.</summary>
+    [Parameter] public string PreviewPlace { get; set; } = "full";
 
     // Résultat de la recherche, du test ou du dossier : une notification (toast) comme partout dans l'app, qui disparaît seule.
     private Task OnPreviewNotice((string Kind, string Text) n) { Notify(n.Kind != "bad", n.Text); return Task.CompletedTask; }

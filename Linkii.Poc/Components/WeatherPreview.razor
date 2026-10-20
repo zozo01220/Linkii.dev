@@ -1,0 +1,113 @@
+@using System.Globalization
+@using System.Text.Json
+
+@* Aperçu du contenu « Météo » : la scène de l'écran à l'échelle (1em = 1 % de la largeur, comme sur l'écran), avec la carte à la position choisie.
+   Même structure et mêmes classes que le rendu du player (apps.js « weather-slide »). Les interrupteurs (options avancées) sont lus dans les réglages en cours. *@
+<div class="wp-scene @(Portrait ? "portrait" : "")">
+    @if (!Full)
+    {
+        <div class="wp-bg"><b>Contenu précédent</b><small>La météo reste dans l'angle pendant toute la boucle.</small></div>
+    }
+    <div class="wp-inner">
+        @if (Full)
+        {
+            <div class="widget p-full k-weather-slide wx @Light @(Portrait ? "wx-tall" : "")">
+                <div class="wx-top">
+                    <div class="wx-city">@Str("city")<small>@Where</small></div>
+                    @AlertBar
+                </div>
+                <div class="wx-mid">
+                    <div class="wx-now">
+                        @Now
+                        <div class="wx-txt">@Str("text")</div>
+                        @Details
+                    </div>
+                    @DaysBar
+                </div>
+                @Bottom
+            </div>
+        }
+        else
+        {
+            <div class="zone z-@Place">
+                <div class="widget p-@Place k-weather-slide wx @Light">
+                    <div class="wx-city">@Str("city")<small> · @Str("text")</small></div>
+                    @Now
+                    @Details
+                    @DaysBar
+                    @AlertBar
+                    @Bottom
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public JsonElement Data { get; set; }
+    [Parameter, EditorRequired] public Dictionary<string, string> Values { get; set; } = default!;
+    /// <summary>Position choisie dans la liste de lecture : full, top-left, top-right, bottom-left, bottom-right.</summary>
+    [Parameter] public string Place { get; set; } = "full";
+    /// <summary>L'écran qui jouera le contenu est en portrait.</summary>
+    [Parameter] public bool Portrait { get; set; }
+
+    private bool Full => Place is not ("top-left" or "top-right" or "bottom-left" or "bottom-right");
+    private string Light => Values.GetValueOrDefault("theme") == "light" ? "wx-light" : "";
+    private bool On(string key, bool fallback) => Values.TryGetValue(key, out var v) && v.Length > 0 ? v == "true" : fallback;
+    private string Str(string name) => Data.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+    private double Num(string name) => Data.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? Math.Round(v.GetDouble()) : 0;
+    private int Code => Data.TryGetProperty("code", out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : -1;
+    private string Where => Str("region").Length > 0 ? Str("region") : Str("country");
+
+    private RenderFragment Now => @<div class="wx-big"><span>@WeatherService.Icon(Code)</span><b>@Num("temp")°</b></div>;
+
+    private RenderFragment Details => @<text>@if (Detail().Count > 0) { <div class="wx-det">@foreach (var d in Detail()) { <span>@d</span> }</div> }</text>;
+    private List<string> Detail()
+    {
+        var l = new List<string>();
+        if (On("feel", true)) l.Add($"Ressenti {Num("feel")}°");
+        if (On("wind", true)) l.Add($"Vent {Num("wind")} km/h");
+        if (On("humidity", false)) l.Add($"Humidité {Num("humidity")} %");
+        if (On("uv", false)) l.Add($"UV {Num("uv")}");
+        if (On("sun", false) && Str("sunrise").Length > 0) l.Add($"☀ {Str("sunrise")} · {Str("sunset")}");
+        return l;
+    }
+
+    private RenderFragment DaysBar => @<text>@if (On("forecast", true) && Days.Count > 0)
+    {
+        <div class="wx-days">
+            @foreach (var d in Days)
+            {
+                <div class="wx-day"><span>@DayName(d)</span><i>@WeatherService.Icon(d.GetProperty("code").GetInt32())</i><b>@Math.Round(d.GetProperty("max").GetDouble())°</b> <em>@Math.Round(d.GetProperty("min").GetDouble())°</em></div>
+            }
+        </div>
+    }</text>;
+    private List<JsonElement> Days => Data.TryGetProperty("days", out var d) && d.ValueKind == JsonValueKind.Array ? d.EnumerateArray().ToList() : new();
+    private static string DayName(JsonElement d)
+    {
+        if (!DateTime.TryParse(d.GetProperty("date").GetString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt)) return "";
+        var n = dt.ToString("ddd", CultureInfo.GetCultureInfo("fr-CH")).TrimEnd('.');
+        return n.Length == 0 ? "" : char.ToUpper(n[0]) + n[1..];
+    }
+
+    private RenderFragment AlertBar => @<text>@if (On("alerts", true) && Data.TryGetProperty("alert", out var al) && al.ValueKind == JsonValueKind.Object)
+    {
+        <div class="wx-al wx-sev-@((al.TryGetProperty("severity", out var sv) ? sv.GetString() : "")?.ToLowerInvariant())">⚠ @AlertText(al)</div>
+    }</text>;
+    private static string AlertText(JsonElement a)
+    {
+        var s = a.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "";
+        if (a.TryGetProperty("until", out var u) && u.ValueKind == JsonValueKind.String && DateTime.TryParse(u.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var until))
+            s += " · jusqu'à " + until.ToLocalTime().ToString("HH:mm");
+        return s;
+    }
+
+    private RenderFragment Bottom => @<div class="wx-bot">
+        @if (On("airQuality", true) && Data.TryGetProperty("air", out var air) && air.ValueKind == JsonValueKind.Object)
+        {
+            <span class="wx-aqi"><i class="a@(air.GetProperty("index").GetInt32())"></i>Air · @air.GetProperty("label").GetString()</span>
+        }
+        else { <span></span> }
+        <span class="wx-att">WeatherAPI.com</span>
+    </div>;
+}

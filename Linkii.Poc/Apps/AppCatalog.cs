@@ -8,7 +8,7 @@ public class AppField
 {
     public string Key { get; set; } = "";
     public string Label { get; set; } = "";
-    /// <summary>gfile (un fichier Google Slides, Google Docs ou PowerPoint : Accept = presentation | document | powerpoint) | text | textarea | number | select | bool | color | url | secret | date | mailbox | calendar (un calendrier partagé, voir Intégrations) | drive (un dossier synchronisé d'un Drive) | facebookpage (une Page Facebook du compte connecté, ou son adresse saisie) | youtube | textfile (fichier texte importé) | hidden (valeur gérée par un composant, jamais affichée) | media (un fichier de la médiathèque) | medias (plusieurs, dans l'ordre)</summary>
+    /// <summary>city (une ville, saisie libre ; l'aperçu la recherche) | gfile (un fichier Google Slides, Google Docs ou PowerPoint : Accept = presentation | document | powerpoint) | text | textarea | number | select | bool | color | url | secret | date | mailbox | calendar (un calendrier partagé, voir Intégrations) | drive (un dossier synchronisé d'un Drive) | facebookpage (une Page Facebook du compte connecté, ou son adresse saisie) | youtube | textfile (fichier texte importé) | hidden (valeur gérée par un composant, jamais affichée) | media (un fichier de la médiathèque) | medias (plusieurs, dans l'ordre)</summary>
     public string Type { get; set; } = "text";
     public string? Help { get; set; }
     public string? Placeholder { get; set; }
@@ -92,7 +92,7 @@ public class AppCatalog
 {
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
     private static readonly string[] AllPlacements = { "full", "top-left", "top-right", "bottom-left", "bottom-right", "top", "bottom" };
-    private static readonly string[] FieldTypes = { "text", "textarea", "number", "select", "bool", "color", "url", "secret", "date", "mailbox", "youtube", "textfile", "hidden", "media", "medias", "canva", "pdf", "gfile", "calendar", "drive", "facebookpage", "haentity" };
+    private static readonly string[] FieldTypes = { "text", "textarea", "number", "select", "bool", "color", "url", "secret", "date", "mailbox", "youtube", "city", "textfile", "hidden", "media", "medias", "canva", "pdf", "gfile", "calendar", "drive", "facebookpage", "haentity" };
     private readonly List<AppManifest> _apps = new();
 
     public IReadOnlyList<AppManifest> All => _apps;

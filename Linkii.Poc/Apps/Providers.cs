@@ -52,6 +52,51 @@ public class WeatherProvider(WeatherService weather) : IAppProvider
 }
 
 // ---------------------------------------------------------------------------------------------
+/// <summary>Contenu « Météo » d'une liste de lecture : une ville, prévisions 3 jours, qualité de l'air, alertes (Europe). Interrupteurs : champs « advanced ».</summary>
+public class WeatherSlideProvider(WeatherService weather) : IAppProvider
+{
+    public string Id => "weather-slide";
+
+    private static bool On(AppRuntime rt, string key, bool fallback) => rt.Get(key, fallback ? "true" : "false") == "true";
+    private static TimeSpan MaxAge(AppRuntime rt) => TimeSpan.FromMinutes(rt.Get("refresh") == "60" ? 60 : 30);
+
+    private async Task<WeatherForecast> Load(AppRuntime rt) =>
+        await weather.Forecast(rt.Get("city"), MaxAge(rt)) ?? throw new InvalidOperationException("Ville introuvable. Essayez avec le nom seul (ex. : Lausanne) ou « ville, pays ».");
+
+    public async Task<object?> Fetch(AppRuntime rt)
+    {
+        var f = await Load(rt);
+        var unit = rt.Get("unit", "C") == "F" ? "F" : "C";
+        double T(double c) => Math.Round(WeatherService.Convert(c, unit));
+        var today = f.Days.FirstOrDefault();
+        var alert = f.Europe ? f.Alerts.FirstOrDefault(a => a.Expires == null || a.Expires > DateTime.UtcNow) : null;
+        return new
+        {
+            kind = "weather", fetchedAt = DateTime.UtcNow,
+            city = f.City, region = f.Region, country = f.Country, unit,
+            code = f.Code, text = f.Text, temp = T(f.TempC), feel = T(f.FeelC),
+            min = today == null ? (double?)null : T(today.MinC), max = today == null ? (double?)null : T(today.MaxC),
+            wind = Math.Round(f.WindKph), humidity = f.Humidity, uv = Math.Round(f.Uv),
+            sunrise = today?.Sunrise ?? "", sunset = today?.Sunset ?? "",
+            days = f.Days.Select(d => new { date = d.Date, code = d.Code, min = T(d.MinC), max = T(d.MaxC), rain = d.RainChance }),
+            air = f.Aqi > 0 ? new { index = f.Aqi, label = WeatherService.AqiLabel(f.Aqi) } : null,
+            alertsAvailable = f.Europe,
+            alert = alert == null ? null : new { title = alert.Event.Length > 0 ? alert.Event : alert.Headline, headline = alert.Headline, severity = alert.Severity, until = alert.Expires }
+        };
+    }
+
+    public async Task<string> Test(AppRuntime rt)
+    {
+        var f = await Load(rt);
+        var unit = rt.Get("unit", "C") == "F" ? "F" : "C";
+        var place = string.Join(", ", new[] { f.City, f.Region, f.Country }.Where(x => x.Length > 0).Distinct());
+        var msg = $"Ville trouvée : {place} · {Math.Round(WeatherService.Convert(f.TempC, unit))}°{unit}, {f.Text.ToLowerInvariant()}.";
+        if (On(rt, "alerts", true) && !f.Europe) msg = "⚠ " + msg + " Les alertes météo ne sont disponibles qu'en Europe.";
+        return msg;
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 public class CalendarProvider(CalendarService calendars, SecretBox box) : IAppProvider
 {
     public string Id => "calendar";

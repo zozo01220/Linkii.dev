@@ -60,6 +60,49 @@
     }, 10 * 60 * 1000);
   });
 
+  /* ---------- Météo d'une ville : contenu de liste de lecture (pleine page ou angle) ----------
+     Le serveur envoie tout (aujourd'hui, 3 jours, air, alerte) ; les interrupteurs des options avancées sont appliqués ici, dans host.settings. */
+  A.register('weather-slide', function (h) {
+    var s = h.settings, el = h.el;
+    el.className += ' wx' + (s.theme === 'light' ? ' wx-light' : '') + (h.cfg && h.cfg.orientation === 'portrait' ? ' wx-tall' : '');
+    function on(k, dflt) { return s[k] === undefined || s[k] === '' ? dflt : s[k] === 'true'; }
+    var DAYS = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
+    h.data(function (d) {
+      if (!d || d.error) { if (!el.firstChild) el.textContent = ''; return; }
+      var det = [];
+      if (on('feel', true)) det.push('Ressenti ' + Math.round(d.feel) + '°');
+      if (on('wind', true)) det.push('Vent ' + Math.round(d.wind) + ' km/h');
+      if (on('humidity', false)) det.push('Humidité ' + Math.round(d.humidity) + ' %');
+      if (on('uv', false)) det.push('UV ' + Math.round(d.uv));
+      if (on('sun', false) && d.sunrise) det.push('☀ ' + d.sunrise + ' · ' + d.sunset);
+      var detH = det.length ? '<div class="wx-det">' + det.map(function (x) { return '<span>' + h.esc(x) + '</span>'; }).join('') + '</div>' : '';
+      var daysH = '';
+      if (on('forecast', true) && d.days && d.days.length) {
+        daysH = '<div class="wx-days">' + d.days.map(function (x) {
+          var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(x.date || ''), n = m ? DAYS[new Date(+m[1], +m[2] - 1, +m[3]).getDay()] : '';
+          return '<div class="wx-day"><span>' + n + '</span><i>' + wmoIcon(x.code) + '</i><b>' + Math.round(x.max) + '°</b> <em>' + Math.round(x.min) + '°</em></div>';
+        }).join('') + '</div>';
+      }
+      var alH = '';
+      if (on('alerts', true) && d.alert) {
+        var until = d.alert.until ? Date.parse(d.alert.until) : 0;
+        if (!until || until > Date.now())
+          alH = '<div class="wx-al wx-sev-' + h.esc(String(d.alert.severity || '').toLowerCase()) + '">⚠ ' + h.esc(d.alert.title || d.alert.headline || 'Alerte météo') +
+            (until ? ' · jusqu\'à ' + h.fmtT(until) : '') + '</div>';
+      }
+      var aqH = on('airQuality', true) && d.air ? '<span class="wx-aqi"><i class="a' + d.air.index + '"></i>Air · ' + h.esc(d.air.label) + '</span>' : '<span></span>';
+      var stale = d.fetchedAt && Date.now() - Date.parse(d.fetchedAt) > 3 * 3600 * 1000 ? ' · ⚠ données de ' + h.fmtT(Date.parse(d.fetchedAt)) : '';
+      var bot = '<div class="wx-bot">' + aqH + '<span class="wx-att">WeatherAPI.com' + stale + '</span></div>';
+      var now = '<div class="wx-big"><span>' + wmoIcon(d.code) + '</span><b>' + Math.round(d.temp) + '°</b></div>';
+      if (h.compact) {
+        el.innerHTML = '<div class="wx-city">' + h.esc(d.city) + '<small> · ' + h.esc(d.text) + '</small></div>' + now + detH + daysH + alH + bot;
+      } else {
+        el.innerHTML = '<div class="wx-top"><div class="wx-city">' + h.esc(d.city) + '<small>' + h.esc(d.region || d.country) + '</small></div>' + alH + '</div>' +
+          '<div class="wx-mid"><div class="wx-now">' + now + '<div class="wx-txt">' + h.esc(d.text) + '</div>' + detH + '</div>' + daysH + '</div>' + bot;
+      }
+    }, 10 * 60 * 1000);
+  });
+
   /* ---------- Home Assistant : capteurs (lecture) et interrupteurs (touchés à l'écran) ---------- */
   var HA_BINARY = { door: ['Ouverte', 'Fermée'], window: ['Ouverte', 'Fermée'], motion: ['Mouvement', 'Calme'],
     occupancy: ['Présence', 'Absence'], presence: ['Présent', 'Absent'], opening: ['Ouvert', 'Fermé'] };

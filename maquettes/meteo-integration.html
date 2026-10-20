@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Intégration Météo</title>
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--row:#EDF1F5;--brand:#0B1F3A;--brand-tint:#EBEDF0;--signal:#3B82C4;--ok:#1E8E5A;--radius:4px}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:#8c96a4;color:var(--ink);font-size:15px;line-height:1.5}
+h1,h3,h4,p{margin:0;font-weight:500}p{font-weight:400}b{font-weight:500}button,select,input{font:inherit;color:inherit}
+.mock{position:fixed;top:0;left:0;right:0;z-index:100;background:#FFF8E1;border-bottom:1px dashed #E0B84A;padding:8px 20px;font-size:13px;color:#6B5200;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.mock .seg{display:flex;border:1px solid #E0B84A;border-radius:4px;overflow:hidden}.mock .seg button{border:0;background:#fff;padding:3px 12px;cursor:pointer;border-right:1px solid #E0B84A}.mock .seg button:last-child{border:0}.mock .seg .on{background:#E0B84A;color:#fff}
+.stagebg{min-height:100%;padding:90px 24px 24px;display:flex;justify-content:center;align-items:flex-start}
+.modal{background:#fff;border-radius:10px;width:min(1150px,100%);display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(11,31,58,.35);overflow:hidden;position:relative}
+.mh{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line)}
+.mh .ic{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:20px;flex:none;background:#3B82C4}
+.mh h3{font-size:18px;display:inline}.mh small{color:var(--muted);font-size:13px;display:block}
+.btn{font-weight:500;cursor:pointer;border:1px solid var(--brand);border-radius:var(--radius);padding:9px 16px;background:var(--brand);color:#fff;display:inline-flex;gap:8px;align-items:center;white-space:nowrap}
+.btn.ghost{background:#fff;color:var(--ink);border-color:var(--line-2)}.btn.sm{padding:5px 11px;font-size:13px}
+.xb{width:36px;height:36px;border:0;border-radius:4px;background:var(--bg);cursor:pointer;font-size:18px}
+.mb{display:grid;grid-template-columns:1.15fr 1fr;gap:28px;padding:22px 24px;min-height:440px}
+.ci-t{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;display:block}
+.mf{display:flex;justify-content:flex-end;gap:10px;padding:14px 24px;border-top:1px solid var(--line);background:#FAFBFC}
+/* aperçu : tout est en cqw pour suivre la taille de l'écran */
+.pv{position:relative;aspect-ratio:16/9;border-radius:8px;overflow:hidden;container-type:inline-size;background:linear-gradient(180deg,#7fb0dc 0%,#bcd8ee 46%,#5d8a63 47%,#3d6a48 100%)}
+.pv .bgtxt{position:absolute;left:0;right:0;top:36%;text-align:center;color:rgba(255,255,255,.9);font-size:3.4cqw;font-weight:500;text-shadow:0 1px 6px rgba(0,0,0,.25)}
+.pv .bgtxt small{display:block;font-size:1.6cqw;font-weight:400;opacity:.85}
+.pv .tag{position:absolute;left:1.4cqw;bottom:1.2cqw;background:rgba(0,0,0,.45);color:#fff;font-size:1.3cqw;padding:.2cqw 1cqw;border-radius:.6cqw}
+.wc{position:absolute;color:#fff;background:rgba(11,31,58,.86);backdrop-filter:blur(4px)}
+.wc.light{background:rgba(255,255,255,.93);color:var(--ink)}
+.wc .city{font-weight:500}
+.wc .sub{opacity:.75}
+.wc .al{display:flex;align-items:center;gap:.8em;border-radius:.6em;padding:.5em .9em;background:#E07B1A;color:#fff;font-weight:500}
+.wc .aqi{display:inline-flex;align-items:center;gap:.6em;border-radius:2em;padding:.25em .9em;background:rgba(255,255,255,.14)}
+.wc.light .aqi{background:var(--bg)}
+.wc .aqi i{width:.8em;height:.8em;border-radius:50%;background:#2fb26b;display:inline-block}
+.wc .det{display:flex;flex-wrap:wrap;gap:.3em 1.2em;opacity:.9}
+.wc .days{display:flex;gap:.8em}.wc .d{flex:1;text-align:center;border-radius:.6em;padding:.5em .3em;background:rgba(255,255,255,.1)}
+.wc.light .d{background:var(--bg)}
+.wc .att{opacity:.55;font-size:.75em}
+/* coin */
+.wc.corner{width:34cqw;margin:2.2cqw;padding:1.6cqw;border-radius:1.2cqw;font-size:1.5cqw;display:grid;gap:.9cqw}
+.wc.corner .now{display:flex;align-items:center;gap:1.2cqw}.wc.corner .ico{font-size:4.4cqw;line-height:1}.wc.corner .t{font-size:4.4cqw;font-weight:500;line-height:1}
+.wc.corner .al{font-size:1.35cqw}
+.pos-tl{top:0;left:0}.pos-tr{top:0;right:0}.pos-bl{bottom:0;left:0}.pos-br{bottom:0;right:0}
+/* plein écran */
+.wc.full{inset:0;padding:3.2cqw 4cqw;font-size:2cqw;display:grid;grid-template-rows:auto 1fr auto;gap:1.6cqw;background:linear-gradient(135deg,#0b1f3a,#1d3a63 60%,#2b5f93);backdrop-filter:none}
+.wc.full.light{background:linear-gradient(135deg,#e8f1fa,#cfe2f3);color:var(--ink)}
+.wc.full .top{display:flex;justify-content:space-between;align-items:center}
+.wc.full .city{font-size:3cqw}
+.wc.full .mid{display:grid;grid-template-columns:1fr 1fr;gap:3cqw;align-items:center}
+.wc.full .now{display:flex;align-items:center;gap:2cqw}.wc.full .ico{font-size:9cqw;line-height:1}.wc.full .t{font-size:9cqw;font-weight:500;line-height:1}
+.wc.full .col{display:grid;gap:1.4cqw}
+.wc.full .d{padding:1cqw .4cqw}.wc.full .d .ic2{font-size:3.6cqw;line-height:1.2}
+.wc.full .bot{display:flex;justify-content:space-between;align-items:center}
+.wc.full .al{font-size:1.9cqw}
+/* colonne config */
+.tabs{display:flex;gap:22px;border-bottom:1px solid var(--line);margin-bottom:16px}.tabs span{padding:8px 0;color:var(--muted)}.tabs .on{color:var(--ink);font-weight:500;border-bottom:2px solid var(--signal);margin-bottom:-1px}
+.field{display:grid;gap:6px;margin-bottom:16px}.field label{font-size:13px;font-weight:500;color:var(--muted)}.field input,.field select{border:1px solid var(--line-2);border-radius:var(--radius);padding:8px 10px;width:100%;background:#fff}
+.seg2{display:flex;border:1px solid var(--line-2);border-radius:var(--radius);overflow:hidden}.seg2 button{flex:1;border:0;background:#fff;padding:7px;cursor:pointer;border-right:1px solid var(--line-2)}.seg2 button:last-child{border:0}.seg2 .on{background:var(--brand-tint);font-weight:500}
+.city-box{position:relative}
+.city-box .ok{display:flex;gap:8px;align-items:center;border:1px solid var(--line-2);border-radius:var(--radius);padding:8px 10px}
+.city-box .ok span{flex:1}.city-box .ok small{color:var(--muted)}
+.city-box button.x{border:0;background:none;cursor:pointer;color:var(--muted);font-size:16px}
+.help{color:var(--muted);font-size:13px;margin-top:2px}
+/* sélecteur de position */
+.posgrid{position:relative;aspect-ratio:16/9;width:210px;flex:none;border:1px solid var(--line-2);border-radius:6px;background:var(--bg);display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:6px;padding:6px}
+.posgrid button{border:1px dashed var(--line-2);border-radius:4px;background:#fff;cursor:pointer;position:relative}
+.posgrid button:hover{border-color:var(--signal)}
+.posgrid button.on{border:2px solid var(--signal);background:var(--brand-tint)}
+.posgrid button.on::after{content:"";position:absolute;width:44%;height:50%;border-radius:3px;background:var(--signal)}
+.posgrid .tl.on::after{top:8%;left:8%}.posgrid .tr.on::after{top:8%;right:8%}.posgrid .bl.on::after{bottom:8%;left:8%}.posgrid .br.on::after{bottom:8%;right:8%}
+.poswrap{display:flex;gap:14px;align-items:stretch}
+.posfull{border:1px solid var(--line-2);border-radius:6px;background:#fff;cursor:pointer;padding:0 14px;font-size:13px;display:grid;place-items:center;text-align:center;width:104px}
+.posfull.on{border:2px solid var(--signal);background:var(--brand-tint);font-weight:500}
+/* options avancées */
+.scrim{position:absolute;inset:0;background:rgba(11,31,58,.38);display:grid;place-items:start center;padding-top:60px;z-index:10}
+.adv{background:#fff;border-radius:10px;width:min(480px,92%);box-shadow:0 14px 40px rgba(11,31,58,.35);overflow:hidden}
+.adv .ah{display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line)}.adv .ah h4{flex:1;font-size:16px}
+.adv .ab{padding:6px 18px 10px}
+.adv .grp{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:14px 0 4px}
+.sr{display:flex;gap:12px;align-items:center;padding:9px 0;border-bottom:1px solid var(--row)}
+.sr:last-child{border:0}.sr .tx{flex:1}.sr small{display:block;color:var(--muted);font-size:12.5px;line-height:1.35}
+.sw{width:40px;height:24px;border-radius:12px;background:#D1D5DB;position:relative;flex:none;cursor:pointer;border:0;padding:0}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.2);transition:left .12s}
+.sw.on{background:var(--signal)}.sw.on::after{left:18px}.sw:disabled{opacity:.4;cursor:not-allowed}
+.adv .af{display:flex;justify-content:flex-end;padding:12px 18px;border-top:1px solid var(--line);background:#FAFBFC}
+.note{display:flex;gap:8px;background:var(--bg);border-radius:var(--radius);padding:8px 10px;font-size:13px;color:var(--muted);margin-top:4px}
+.hide{display:none!important}
+</style>
+</head>
+<body>
+<div class="mock"><b>Proposition :</b> la météo se configure comme les autres contenus : ville choisie ici (pas à l'installation), position plein écran ou coin, options dans ⚙.
+ <span>Ville :</span><div class="seg" id="scseg"><button data-c="alert" class="on">Lausanne · alerte en cours</button><button data-c="none">Lausanne · aucune alerte</button><button data-c="out">New York · hors Europe</button></div>
+ <span>⚙ :</span><div class="seg" id="advseg"><button data-v="0" class="on">Fermées</button><button data-v="1">Ouvertes</button></div></div>
+
+<div class="stagebg"><div class="modal">
+  <div class="mh"><div class="ic">⛅</div>
+    <div style="flex:1"><h3>Météo</h3> <button class="btn ghost sm" style="margin-left:6px">✎ Renommer</button><small>Ajout à « Accueil »</small></div>
+    <button class="xb" title="Options avancées" onclick="advOpen(true)">⚙</button><button class="xb">×</button></div>
+  <div class="mb">
+    <section>
+      <span class="ci-t">Aperçu</span>
+      <div class="pv" id="pv"></div>
+      <p class="help" style="margin-top:10px" id="pvhelp"></p>
+    </section>
+    <section>
+      <div class="tabs"><span class="on">🖥 Contenu</span><span>▦ QR code</span></div>
+      <div class="field"><label>Ville</label>
+        <div class="city-box"><div class="ok"><span id="cityname"></span><small id="citysub"></small><button class="x" title="Changer de ville">✎</button></div></div>
+        <p class="help">Une ville par contenu. Pour afficher deux villes, ajoutez deux fois la Météo à la liste de lecture.</p></div>
+      <div class="field"><label>Position à l'écran</label>
+        <div class="poswrap">
+          <div class="posgrid" id="posgrid"><button class="tl" data-p="tl" title="Haut gauche"></button><button class="tr" data-p="tr" title="Haut droite"></button><button class="bl" data-p="bl" title="Bas gauche"></button><button class="br" data-p="br" title="Bas droite"></button></div>
+          <button class="posfull on" id="posfull" data-p="full">Plein<br>écran</button>
+        </div>
+        <p class="help" id="poshelp">En coin, la météo se superpose au contenu précédent de la liste.</p></div>
+      <div class="field"><label>Unité</label><div class="seg2" id="unit"><button class="on" data-u="C">°C</button><button data-u="F">°F</button></div></div>
+      <div class="field"><label>Fond</label><div class="seg2" id="theme"><button class="on" data-t="dark">Sombre</button><button data-t="light">Clair</button></div></div>
+      <div class="field"><label>Durée d'affichage</label><input type="number" value="12" style="max-width:120px"><p class="help">Secondes, avant de passer au contenu suivant.</p></div>
+    </section>
+  </div>
+  <div class="mf"><button class="btn ghost">Annuler</button><button class="btn">Ajouter à la liste de lecture</button></div>
+
+  <div class="scrim hide" id="scrim" onclick="if(event.target===this)advOpen(false)"><div class="adv">
+    <div class="ah"><h4>Options avancées · Météo</h4><button class="xb" onclick="advOpen(false)">×</button></div>
+    <div class="ab">
+      <div class="grp">Afficher</div>
+      <div class="sr"><div class="tx"><b>Prévisions sur 3 jours</b></div><button class="sw on" data-k="fc"></button></div>
+      <div class="sr"><div class="tx"><b>Qualité de l'air</b><small>Indice de qualité de l'air de la ville.</small></div><button class="sw on" data-k="aq"></button></div>
+      <div class="sr"><div class="tx"><b>Alertes météo</b><small id="alsub">Affichées seulement lorsqu'une alerte est en cours.</small></div><button class="sw on" data-k="al" id="alsw"></button></div>
+      <div class="grp">Détails du jour</div>
+      <div class="sr"><div class="tx"><b>Température ressentie</b></div><button class="sw on" data-k="feel"></button></div>
+      <div class="sr"><div class="tx"><b>Vent</b></div><button class="sw on" data-k="wind"></button></div>
+      <div class="sr"><div class="tx"><b>Humidité</b></div><button class="sw" data-k="hum"></button></div>
+      <div class="sr"><div class="tx"><b>Indice UV</b></div><button class="sw" data-k="uv"></button></div>
+      <div class="sr"><div class="tx"><b>Lever et coucher du soleil</b></div><button class="sw" data-k="sun"></button></div>
+      <div class="grp">Mise à jour</div>
+      <div class="sr"><div class="tx"><b>Actualiser les données</b><small>Les écrans lisent le cache du serveur, jamais le service météo.</small></div><select><option>Toutes les 30 min</option><option>Toutes les heures</option></select></div>
+      <div class="note" id="outnote">ⓘ Les alertes sont disponibles en Europe. Pour une ville hors Europe, l'option est désactivée.</div>
+    </div>
+    <div class="af"><button class="btn" onclick="advOpen(false)">Terminé</button></div>
+  </div></div>
+</div></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const S={sc:'alert',pos:'full',unit:'C',theme:'dark',fc:1,aq:1,al:1,feel:1,wind:1,hum:0,uv:0,sun:0};
+const CITY={alert:['Lausanne','Vaud, Suisse'],none:['Lausanne','Vaud, Suisse'],out:['New York','New York, États-Unis']};
+const t=c=>S.unit==='C'?c+'°':Math.round(c*9/5+32)+'°';
+const DAYS=[['Mer','⛅',9,17],['Jeu','🌧️',8,13],['Ven','☀️',6,15]];
+function card(){
+  const out=S.sc==='out',hasAl=S.sc==='alert'&&S.al;
+  const full=S.pos==='full',cls='wc '+(full?'full':'corner pos-'+S.pos)+(S.theme==='light'?' light':'');
+  const now=out?[21,'☀️','Ensoleillé',24]:[14,'⛅','Partiellement nuageux',12];
+  const det=[S.feel?'Ressenti '+t(now[3]):'',S.wind?'Vent 14 km/h':'',S.hum?'Humidité 68 %':'',S.uv?'UV 3':'',S.sun?'☀ 07:42 · 18:21':''].filter(Boolean);
+  const detH=det.length?`<div class="det">${det.map(x=>`<span>${x}</span>`).join('')}</div>`:'';
+  const aq=S.aq?`<span class="aqi"><i></i>Air · Bonne (42)</span>`:'';
+  const al=hasAl?`<div class="al">⚠ Vigilance orange · Orages · jusqu'à 22 h</div>`:'';
+  const days=S.fc?`<div class="days">${DAYS.map(d=>`<div class="d"><div>${d[0]}</div><div class="ic2">${d[1]}</div><div>${t(d[3])} <span class="sub">${t(d[2])}</span></div></div>`).join('')}</div>`:'';
+  const att=`<span class="att">WeatherAPI.com</span>`;
+  const c=CITY[S.sc];
+  if(full) return `<div class="${cls}">
+    <div class="top"><div class="city">${c[0]} <span class="sub" style="font-size:.6em">${c[1].split(',').pop().trim()}</span></div>${al}</div>
+    <div class="mid"><div class="col"><div class="now"><span class="ico">${now[1]}</span><span class="t">${t(now[0])}</span></div><div>${now[2]}</div>${detH}</div><div class="col">${days}</div></div>
+    <div class="bot">${aq||'<span></span>'}${att}</div></div>`;
+  return `<div class="${cls}"><div class="city">${c[0]} <span class="sub">· ${now[2]}</span></div>
+    <div class="now"><span class="ico">${now[1]}</span><span class="t">${t(now[0])}</span></div>${detH}${days}${al}<div style="display:flex;justify-content:space-between;align-items:center">${aq||'<span></span>'}${att}</div></div>`;
+}
+function render(){
+  const full=S.pos==='full';
+  $('#pv').innerHTML=(full?'':`<div class="bgtxt">Contenu précédent<small>image, vidéo ou diaporama de la liste</small></div>`)+card()+`<span class="tag">Aperçu · ${full?'plein écran':'en coin'}</span>`;
+  $('#pvhelp').textContent=full?'La météo occupe tout l\'écran pendant la durée choisie.':'La météo reste en coin par-dessus le contenu précédent de la liste, sans l\'interrompre.';
+  $('#cityname').textContent=CITY[S.sc][0];$('#citysub').textContent=CITY[S.sc][1];
+  document.querySelectorAll('#posgrid button').forEach(b=>b.classList.toggle('on',b.dataset.p===S.pos));
+  $('#posfull').classList.toggle('on',full);
+  $('#poshelp').textContent=full?'Plein écran : un slide à part entière dans la liste.':'En coin, la météo se superpose au contenu précédent de la liste.';
+  document.querySelectorAll('.sw').forEach(b=>b.classList.toggle('on',!!S[b.dataset.k]));
+  const out=S.sc==='out';$('#alsw').disabled=out;$('#outnote').classList.toggle('hide',!out);
+  $('#alsub').textContent=out?'Indisponibles hors Europe.':'Affichées seulement lorsqu\'une alerte est en cours.';
+}
+function advOpen(v){$('#scrim').classList.toggle('hide',!v);document.querySelectorAll('#advseg button').forEach(b=>b.classList.toggle('on',(b.dataset.v==='1')===v))}
+document.querySelectorAll('#posgrid button,#posfull').forEach(b=>b.onclick=()=>{S.pos=b.dataset.p;render()});
+document.querySelectorAll('#unit button').forEach(b=>b.onclick=()=>{S.unit=b.dataset.u;document.querySelectorAll('#unit button').forEach(x=>x.classList.toggle('on',x===b));render()});
+document.querySelectorAll('#theme button').forEach(b=>b.onclick=()=>{S.theme=b.dataset.t;document.querySelectorAll('#theme button').forEach(x=>x.classList.toggle('on',x===b));render()});
+document.querySelectorAll('.sw').forEach(b=>b.onclick=()=>{if(b.disabled)return;S[b.dataset.k]=S[b.dataset.k]?0:1;render()});
+document.querySelectorAll('#scseg button').forEach(b=>b.onclick=()=>{S.sc=b.dataset.c;document.querySelectorAll('#scseg button').forEach(x=>x.classList.toggle('on',x===b));render()});
+document.querySelectorAll('#advseg button').forEach(b=>b.onclick=()=>advOpen(b.dataset.v==='1'));
+render();
+</script>
+</body>
+</html>
