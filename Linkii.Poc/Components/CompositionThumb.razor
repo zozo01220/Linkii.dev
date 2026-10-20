@@ -1,0 +1,30 @@
+@inject IJSRuntime JS
+@using Microsoft.JSInterop
+
+@* Vignette d'une composition : le même rendu que sur l'écran (player/composition.js), à l'échelle de la largeur disponible. *@
+<div class="cmp-th" style="background:@Back" data-doc="@doc" data-contain="@(Contain ? "1" : null)" role="img" aria-label="@Label"></div>
+
+@code {
+    [Parameter, EditorRequired] public MediaItem Item { get; set; } = default!;
+    /// <summary>Images de la médiathèque (pour résoudre celles de la composition).</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<MediaItem> Files { get; set; } = default!;
+    /// <summary>La page entière dans une case de taille fixe (vignette d'une ligne de liste), au lieu d'adapter la hauteur à la largeur.</summary>
+    [Parameter] public bool Contain { get; set; }
+    [Parameter] public string Label { get; set; } = "Aperçu de la composition";
+
+    private string doc = "";
+    private string Back => "#eef1f5";
+
+    protected override void OnParametersSet()
+    {
+        var byId = Files.ToDictionary(f => f.Id);
+        doc = Compositions.Publish(Item.Settings, id => byId.GetValueOrDefault(id)) is { } p ? p.Settings["doc"] : "";
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try { await JS.InvokeVoidAsync("LinkiiCompo.thumbs"); }
+        catch (JSDisconnectedException) { }
+        catch (InvalidOperationException) { }   // rendu statique : pas de JS
+    }
+}

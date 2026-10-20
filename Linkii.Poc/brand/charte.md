@@ -58,6 +58,7 @@ Ajouté le 7 octobre 2026, à la demande : chaque app a une **pastille ronde de 
 | Météo | `#3D63F2` | soleil |
 | Page web | `#3A9399` | globe |
 | Image · Diaporama images | `#F0A92E` | image · pile d'images |
+| Composition | `#4F6BED` | grille |
 | Vidéo · Diaporama vidéos | `#7B5CC4` | lecture · lecture encadrée |
 | YouTube | `#E3261D` | lecture |
 | Canva | `#00A3B4` | palette |

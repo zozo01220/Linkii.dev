@@ -223,6 +223,43 @@ else
     </div>
 }
 
+@if (pickCompo && Current is { } cpl)
+{
+    @* Compositions (§80) : celles de « Mes compositions » se choisissent ici ; une nouvelle s'ajoute dès son premier enregistrement. *@
+    <div class="modal-backdrop" @onclick="() => pickCompo = false"></div>
+    <div class="modal app-modal" role="dialog" aria-modal="true" aria-labelledby="cmp-pick-title" style="max-width:760px">
+        <div class="modal-head">
+            <AppIcon Id="@Compositions.AppId" />
+            <div class="grow"><h3 id="cmp-pick-title">Ajouter une composition</h3><small>À « @cpl.Name »</small></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => pickCompo = false"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            @if (compoItems.Count == 0)
+            {
+                <div class="empty compact"><div class="big">Aucune composition</div><p>Créez-en une : elle sera enregistrée dans « Mes compositions » et ajoutée à cette liste.</p></div>
+            }
+            else
+            {
+                <p class="hint">Choisissez une composition de « Mes compositions ». Elle peut aussi servir dans d'autres listes.</p>
+                <div class="cmp-pick">
+                    @foreach (var c in compoItems)
+                    {
+                        var ci = c;
+                        <button type="button" class="cmp-choice" @onclick="() => AddComposition(ci)">
+                            <CompositionThumb Item="ci" Files="compoFiles" Label="@("Aperçu de " + ci.Name)" />
+                            <span><b>@ci.Name</b>@if (Compositions.Size(ci.Settings) is { } sz) { <small>@sz.W × @sz.H</small> }</span>
+                        </button>
+                    }
+                </div>
+            }
+        </div>
+        <div class="modal-foot">
+            <button class="btn ghost" @onclick="() => pickCompo = false">Annuler</button>
+            <a class="btn" href="@NewCompositionUrl"><Ico Name="plus" Size="16" /> Créer une composition</a>
+        </div>
+    </div>
+}
+
 @if (mItem != null && mPlaylist != null)
 {
     var isApp = mMedia?.AppId != null;
@@ -335,6 +372,7 @@ else
     private void AddEmpty(AppManifest app, int? position)
     {
         if (Current is not { } pl) return;
+        if (app.Id == Compositions.AppId) { OpenCompositionPicker(position); return; }   // on choisit une composition existante, ou on en crée une
         if (Svc.CreateEmpty(app.Id) is not { } item) { Toast.Error("Activez d'abord cette intégration dans la page Intégrations."); return; }
         var dur = Store.Read(d => d.Tenant.DefaultDurationSec);
         var placement = PlacementsFor(item).Select(o => o.Id).DefaultIfEmpty("full").Contains("full") ? "full" : PlacementsFor(item).First().Id;
@@ -441,6 +479,7 @@ else
     private RenderFragment Thumb(FlowRow r) =>
         @<div class="pf-th" style="@(r.Masked ? null : $"background:{r.Color}")">
             @if (r.Masked) { <Ico Name="lock" Size="20" /> }
+            else if (r.M?.AppId == Compositions.AppId) { <CompositionThumb Item="r.M" Files="media" Contain="true" /> }
             else if (r.M != null) { <MediaThumb Media="r.M" All="media" /> }
             @if (r.AppId != null && !r.Masked) { <span class="pf-badge"><AppIcon Id="@r.AppId" Small="true" /></span> }
         </div>;
@@ -470,7 +509,7 @@ else
                     @if (r.Incomplete) { <span class="pf-new">@(r.It.Id == freshId ? "Nouveau" : "À configurer")</span> }
                     <span>@Kind(r.M)@(r.M.AppId == null && r.M.Width is { } w && r.M.Height is { } h ? $" · {w} × {h}" : "")@(r.It.Placement != "full" ? " · incrusté en permanence" : "")</span>
                     <span aria-hidden="true">·</span>
-                    <button type="button" class="pf-link" @onclick="() => OpenSettings(pl, r.It, r.M)"><Ico Name="sliders" Size="13" /> @(r.Incomplete ? "Configurer" : "Régler")</button>
+                    <button type="button" class="pf-link" @onclick="() => OpenSettings(pl, r.It, r.M)"><Ico Name="sliders" Size="13" /> @(r.AppId == Compositions.AppId ? "Modifier" : r.Incomplete ? "Configurer" : "Régler")</button>
                     @if (r.It.Off) { <span aria-hidden="true">·</span><b>Désactivé</b> }
                 </span>
             }
@@ -735,7 +774,7 @@ else
         if (MediaLibrary.UsesHidden(media.FirstOrDefault(x => x.Id == it.MediaId), hidden)) { Toast.Error("Ce contenu utilise un média que vous ne voyez pas : vous ne pouvez pas le retirer."); return; }
         WriteList(d => { pl.Draft.Remove(it); pl.Touch(); });
         var m = media.FirstOrDefault(x => x.Id == it.MediaId);
-        if (m?.AppId != null && Svc.PlaylistsUsing(m.Id).Count == 0) Svc.DeleteInstance(m.Id);
+        if (m?.AppId != null && m.AppId != Compositions.AppId && Svc.PlaylistsUsing(m.Id).Count == 0) Svc.DeleteInstance(m.Id);   // une composition reste dans « Mes compositions »
         Toast.Ok($"« {m?.Name ?? "Contenu"} » retiré de la liste de lecture.");
         Reload();
     }
@@ -756,8 +795,37 @@ else
     private bool growth;
     private Dictionary<Guid, (int Scans, int Visitors)> scanCounts = new();
 
+    // ---------- Compositions : choix dans « Mes compositions » ----------
+    private bool pickCompo;
+    private List<MediaItem> compoItems = new(), compoFiles = new();
+    private string NewCompositionUrl => $"/compositions/new?back={Uri.EscapeDataString($"/playlists/{Id}")}&addTo={Id}&at={insertAt?.ToString() ?? ""}";
+
+    private void OpenCompositionPicker(int? position)
+    {
+        insertAt = position;
+        compoItems = Svc.Instances(Compositions.AppId);
+        compoFiles = MediaLib.Files().Where(m => m.Type == "image" && m.Status == null && m.FileName != null).ToList();
+        pickCompo = true;
+    }
+
+    private void AddComposition(MediaItem c)
+    {
+        if (Current is not { } pl) return;
+        var dur = Store.Read(d => d.Tenant.DefaultDurationSec);
+        var at = insertAt is { } i && i >= 0 && i < pl.Draft.Count ? i : pl.Draft.Count;
+        var row = new PlaylistItem { MediaId = c.Id, DurationSec = dur, Placement = "full" };
+        WriteList(d => { pl.Draft.Insert(at, row); pl.Touch(); });
+        insertAt = null; pickCompo = false;
+        Toast.Ok($"« {c.Name} » ajoutée en position {at + 1}.");
+        Reload();
+        Flash(row.Id);
+    }
+
+    private string EditorUrl(Guid compositionId) => $"/compositions/{compositionId}?back={Uri.EscapeDataString($"/playlists/{Id}")}";
+
     private void OpenSettings(Playlist pl, PlaylistItem it, MediaItem? m, string tab = "content")
     {
+        if (m?.AppId == Compositions.AppId && tab == "content") { Nav.NavigateTo(EditorUrl(m.Id)); return; }   // contenu : l'éditeur ; durée et QR code : la fenêtre
         mPlaylist = pl; mItem = it; mMedia = m; itemName = null;
         mPlacement = it.Placement;
         mMode = it.DurationMode == "fixed" ? "fixed" : "content";

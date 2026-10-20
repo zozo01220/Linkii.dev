@@ -8,23 +8,25 @@ public static class LevelPages
 {
     public const string Screens = "screens", Playlists = "playlists", Planning = "planning", Media = "media";
     public const string Integrations = "integrations", Widgets = "widgets", Zones = "zones";
+    /// <summary>Page du menu qui n'apparaît que si l'intégration « Compositions » est dans Mes intégrations et que le niveau peut l'utiliser.</summary>
+    public const string Compositions = "compositions";
 
     /// <summary>Cases du niveau, dans l'ordre du menu.</summary>
     public static readonly string[] Offered = { Screens, Playlists, Planning, Media };
     /// <summary>Pages d'un membre (celles qui ont une politique d'accès « Page:… »). Zones n'est pas une case : elle suit « Gérer les zones » du niveau.</summary>
-    public static readonly string[] All = { Screens, Playlists, Planning, Media, Integrations, Widgets, Zones };
+    public static readonly string[] All = { Screens, Playlists, Planning, Media, Integrations, Widgets, Zones, Compositions };
 
     public static string Label(string page) => page switch
     {
         Screens => "Écrans", Playlists => "Listes de lecture", Planning => "Planning", Media => "Médiathèque",
-        Integrations => "Intégrations", Widgets => "Widgets", Zones => "Zones", _ => page
+        Integrations => "Intégrations", Widgets => "Widgets", Zones => "Zones", Compositions => "Compositions", _ => page
     };
 
     /// <summary>Adresse d'une page, pour renvoyer un membre vers la première qui lui est ouverte.</summary>
     public static string Path(string page) => page switch
     {
         Screens => "/", Playlists => "/playlists", Planning => "/planning", Media => "/media",
-        Integrations => "/integrations", Widgets => "/widgets", Zones => "/zones", _ => "/"
+        Integrations => "/integrations", Widgets => "/widgets", Zones => "/zones", Compositions => "/compositions", _ => "/"
     };
 }
 

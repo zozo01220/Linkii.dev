@@ -40,19 +40,26 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
     public MediaItem? Instance(Guid id) => store.Read(d => d.Media.FirstOrDefault(m => m.Id == id && m.AppId != null));   // même si l'app a été désactivée
     public List<MediaItem> Instances(string appId) => store.Read(d => d.Media.Where(m => m.AppId == appId).OrderBy(m => m.Name).ToList());
 
+    /// <summary>Les apps du client ont changé (ajout, retrait) : le menu latéral (ex. Compositions) se met à jour sans recharger la page. Même session seulement.</summary>
+    public event Action? InstallsChanged;
+
     /// <summary>Ajoute l'app au client (sans effet si elle l'est déjà).</summary>
     public AppInstall Install(string appId)
     {
         var m = catalog.Find(appId) ?? throw new InvalidOperationException("App inconnue.");
-        return store.Write(d =>
+        var added = false;
+        var install = store.Write(d =>
         {
             RequireAdmin(d);
             var existing = d.AppInstalls.FirstOrDefault(a => a.AppId == appId);
             if (existing != null) return existing;
             var a = new AppInstall { AppId = appId, Version = m.Version };
             d.AppInstalls.Add(a);
+            added = true;
             return a;
         });
+        if (added) InstallsChanged?.Invoke();
+        return install;
     }
 
     /// <summary>Rend l'app disponible dans les listes de lecture (page Intégrations), ou le widget dans l'édition des écrans (page Widgets).</summary>
@@ -65,7 +72,11 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
     public void Unmark(string integrationId) => store.Write(d => { RequireAdmin(d); d.Tenant.IntegrationsAdded.Remove(integrationId); });
 
     /// <summary>Retire l'app des choix proposés. Non destructif : les contenus et widgets déjà en place restent à l'antenne.</summary>
-    public void Disable(string appId) => store.Write(d => { RequireAdmin(d); d.AppInstalls.RemoveAll(a => a.AppId == appId); });
+    public void Disable(string appId)
+    {
+        store.Write(d => { RequireAdmin(d); d.AppInstalls.RemoveAll(a => a.AppId == appId); });
+        InstallsChanged?.Invoke();
+    }
 
     /// <summary>
     /// Active ou désactive une source de calendriers partagés (Intégrations). L'app « Calendrier partagé » est proposée
@@ -113,6 +124,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
             return ids.Count;
         });
         DeleteFiles(orphans);
+        InstallsChanged?.Invoke();
         return count;
     }
 

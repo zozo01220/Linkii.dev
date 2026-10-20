@@ -1,0 +1,177 @@
+@page "/compositions"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:compositions")]
+@implements IDisposable
+@using Microsoft.JSInterop
+@inject AppService Svc
+@inject MediaLibrary Library
+@inject TenantStore Store
+@inject Toaster Toast
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+@* Compositions (§80) : Mes compositions et la galerie de modèles. La page n'existe que si l'intégration « Compositions » est dans Mes intégrations.
+   Les compositions de « Mes compositions » se placent ensuite dans les listes de lecture, comme n'importe quel contenu. *@
+<HeadContent><link rel="stylesheet" href="compo-editor.css?v=2" /></HeadContent>
+
+<div class="page-head">
+    <div>
+        <h1>Compositions</h1>
+        <p class="sub">Vos propres pages d'affichage : textes, formes, images, QR codes et horloge, à placer dans vos listes de lecture.</p>
+    </div>
+    @if (installed)
+    {
+        <div class="row head-actions">
+            <button type="button" class="btn" data-fab="Créer une composition" @onclick="Create"><Ico Name="plus" Size="16" /> Créer une composition</button>
+        </div>
+    }
+</div>
+
+@if (!installed)
+{
+    <div class="empty">
+        <div class="big">L'intégration « Compositions » n'est pas dans Mes intégrations</div>
+        <p>Ajoutez-la depuis le Store des intégrations (bouton « Utiliser ») pour créer vos compositions et les placer dans vos listes de lecture.@(items.Count > 0 ? $" Vos {items.Count} composition{(items.Count > 1 ? "s" : "")} existante{(items.Count > 1 ? "s" : "")} sont conservées." : "")</p>
+        <a class="btn" href="/integrations">Ouvrir les intégrations</a>
+    </div>
+}
+else
+{
+    <nav class="tabs" role="tablist" aria-label="Mes compositions et modèles">
+        <button type="button" role="tab" class="@(tab == "mine" ? "on" : "")" aria-selected="@(tab == "mine" ? "true" : "false")" @onclick='() => SetTab("mine")'>Mes compositions <span class="cat-count">@items.Count</span></button>
+        <button type="button" role="tab" class="@(tab == "models" ? "on" : "")" aria-selected="@(tab == "models" ? "true" : "false")" @onclick='() => SetTab("models")'>Modèles</button>
+    </nav>
+
+    @if (tab == "models")
+    {
+        <p class="hint cmp-hint">Choisissez un modèle pour démarrer : tout reste modifiable, et rien n'est enregistré tant que vous ne l'avez pas fait.</p>
+        <div @key="galKey" @ref="gal"></div>
+    }
+    else if (items.Count == 0)
+    {
+        <div class="empty">
+            <div class="big">Aucune composition</div>
+            <p>Créez une page vide ou partez d'un modèle (horaires d'ouverture, accueil, orientation, annonce…). Vos compositions apparaîtront ici et pourront être ajoutées à vos listes de lecture.</p>
+            <div class="row" style="justify-content:center;gap:10px">
+                <button type="button" class="btn" @onclick="Create"><Ico Name="plus" Size="16" /> Créer une composition</button>
+                <button type="button" class="btn ghost" @onclick='() => SetTab("models")'>Voir les modèles</button>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="cmp-grid">
+            @foreach (var c in items)
+            {
+                var it = c;
+                var lists = usage.GetValueOrDefault(it.Id) ?? new();
+                var size = Compositions.Size(it.Settings);
+                <article class="cmp-card">
+                    <a class="cmp-open" href="/compositions/@it.Id" aria-label="Modifier « @it.Name »"><CompositionThumb Item="it" Files="files" Label="@("Aperçu de " + it.Name)" /></a>
+                    <div class="cmp-info">
+                        <div class="cmp-t">
+                            <b title="@it.Name">@it.Name</b>
+                            <div class="kebab">
+                                <button type="button" class="kebab-btn" aria-label="Actions pour @it.Name" aria-haspopup="menu" aria-expanded="@(menuFor == it.Id ? "true" : "false")" @onclick="() => menuFor = menuFor == it.Id ? null : it.Id"><Ico Name="dots-v" Size="18" /></button>
+                                @if (menuFor == it.Id)
+                                {
+                                    <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                                    <div class="kebab-menu" role="menu">
+                                        <a role="menuitem" href="/compositions/@it.Id"><Ico Name="edit" Size="16" /> Modifier</a>
+                                        <button type="button" role="menuitem" @onclick="() => Duplicate(it)"><Ico Name="copy" Size="16" /> Dupliquer</button>
+                                        <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = it; }"><Ico Name="trash" Size="16" /> Supprimer…</button>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                        <span class="cmp-m">@(size is { } s ? $"{s.W} × {s.H}" : "Format inconnu") · @(lists.Count == 0 ? "dans aucune liste" : lists.Count == 1 ? "dans « " + lists[0] + " »" : $"dans {lists.Count} listes")</span>
+                    </div>
+                </article>
+            }
+        </div>
+    }
+}
+
+@if (deleting is { } del)
+{
+    var lists = usage.GetValueOrDefault(del.Id) ?? new();
+    <div class="modal-backdrop" @onclick="() => deleting = null"></div>
+    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="cmp-del-title">
+        <h3 id="cmp-del-title">Supprimer « @del.Name » ?</h3>
+        @if (lists.Count > 0)
+        {
+            <p class="hint">Elle est utilisée par @(lists.Count == 1 ? "la liste" : $"{lists.Count} listes") : <b>@string.Join(", ", lists.Take(5))@(lists.Count > 5 ? $" et {lists.Count - 5} autre(s)" : "")</b>. Elle en sera retirée ; les écrans gardent leur version actuelle jusqu'à leur prochaine publication.</p>
+        }
+        else { <p class="hint">Aucune liste de lecture ne l'utilise.</p> }
+        <p class="hint">Les images de la médiathèque ne sont pas supprimées. Cette action est définitive.</p>
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => deleting = null">Annuler</button>
+            <button class="btn danger-solid" @onclick="() => Delete(del)">Supprimer</button>
+        </div>
+    </div>
+}
+
+@code {
+    private bool installed;
+    private string tab = "mine";
+    private List<MediaItem> items = new(), files = new();
+    private Dictionary<Guid, List<string>> usage = new();
+    private Guid? menuFor;
+    private MediaItem? deleting;
+    private ElementReference gal;
+    private int galKey;
+    private bool galDrawn;
+    private DotNetObjectReference<CompositionsPage>? self;
+
+    protected override void OnInitialized()
+    {
+        Svc.InstallsChanged += OnInstalls;
+        Load();
+    }
+
+    private void OnInstalls() => InvokeAsync(() => { Load(); StateHasChanged(); });
+    public void Dispose() { Svc.InstallsChanged -= OnInstalls; self?.Dispose(); }
+
+    private void Load()
+    {
+        installed = Svc.IsInstalled(Compositions.AppId);
+        items = Svc.Instances(Compositions.AppId);
+        files = Library.Files().Where(m => m.Type == "image" && m.Status == null && m.FileName != null).ToList();
+        usage = Store.Read(d => d.Playlists.SelectMany(p => p.Draft.Select(i => (i.MediaId, p.Name)))
+            .Where(x => items.Any(c => c.Id == x.MediaId)).GroupBy(x => x.MediaId).ToDictionary(g => g.Key, g => g.Select(x => x.Name).Distinct().ToList()));
+    }
+
+    private void SetTab(string t) { tab = t; menuFor = null; galDrawn = false; galKey++; }
+
+    private void Create() => Nav.NavigateTo("/compositions/new?back=%2Fcompositions");
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (tab != "models" || galDrawn || !installed) return;
+        galDrawn = true;
+        self ??= DotNetObjectReference.Create(this);
+        try { await JS.InvokeVoidAsync("LinkiiCompoEditor.gallery", gal, self); }
+        catch (JSDisconnectedException) { }
+    }
+
+    /// <summary>Un modèle de la galerie : l'éditeur s'ouvre dessus (rien n'est enregistré avant « Enregistrer »).</summary>
+    [JSInvokable]
+    public void Template(int index) => Nav.NavigateTo($"/compositions/new?tpl={index}&back=%2Fcompositions");
+
+    private void Duplicate(MediaItem it)
+    {
+        menuFor = null;
+        var name = it.Name.Length > 70 ? it.Name[..70] : it.Name;
+        var (copy, errors) = Svc.SaveInstance(Compositions.AppId, null, name + " (copie)", new Dictionary<string, string>(it.Settings));
+        if (errors.Count > 0 || copy == null) { Toast.Error(errors.FirstOrDefault() ?? "Duplication impossible."); return; }
+        Toast.Ok($"« {copy.Name} » créée.");
+        Load();
+    }
+
+    private void Delete(MediaItem it)
+    {
+        deleting = null;
+        Svc.DeleteInstance(it.Id);   // retirée aussi des listes de lecture qui l'utilisent
+        Toast.Ok($"« {it.Name} » supprimée.");
+        Load();
+    }
+}

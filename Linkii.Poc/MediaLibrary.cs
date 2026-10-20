@@ -287,7 +287,7 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     }
 
     private IEnumerable<string> MediaFields(MediaItem instance) =>
-        catalog.Find(instance.AppId)?.Settings.Where(f => f.IsMedia).Select(f => f.Key) ?? Enumerable.Empty<string>();
+        catalog.Find(instance.AppId)?.Settings.Where(f => f.IsMedia || f.Type == "hidden" && f.Accept == "image").Select(f => f.Key) ?? Enumerable.Empty<string>();   // hidden + accept : images d'une composition
 }
 
 /// <summary>Un contenu ou une liste qui utilise un fichier ; Count : nombre de listes (contenu) ou d'écrans (liste).</summary>

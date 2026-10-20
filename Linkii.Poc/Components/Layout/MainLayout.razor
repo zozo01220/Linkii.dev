@@ -70,6 +70,13 @@
                     <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg> Médiathèque
                 </NavLink>
             }
+            @if (CompositionsMenu)
+            {
+                @* Apparaît dès que l'intégration « Compositions » est dans Mes intégrations (et que le niveau de droits peut l'utiliser). *@
+                <NavLink class="nav" href="compositions">
+                    <Ico Name="grid" Size="18" /> Compositions
+                </NavLink>
+            }
         }
         else if (Ctx.IsPlatformAdmin)
         {
@@ -272,6 +279,7 @@
                     <div class="mg">
                         @if (orgAdmin && multi && Modes.Expert) { <NavLink href="areas" @onclick="CloseMore"><span class="ic"><Ico Name="map-pin" Size="22" /></span>Aires de gestion</NavLink> }
                         @if (Modes.Expert && Sees(LevelPages.Zones)) { <NavLink href="zones" @onclick="CloseMore"><span class="ic"><Ico Name="box" Size="22" /></span>Zones</NavLink> }
+                        @if (CompositionsMenu) { <NavLink href="compositions" @onclick="CloseMore"><span class="ic"><Ico Name="images" Size="22" /></span>Compositions</NavLink> }
                         @if (Sees(LevelPages.Widgets)) { <NavLink href="widgets" @onclick="CloseMore"><span class="ic"><Ico Name="grid" Size="22" /></span>Widgets</NavLink> }
                         @if (Modes.Expert && Sees(LevelPages.Integrations)) { <NavLink href="integrations" @onclick="CloseMore"><span class="ic"><Ico Name="link" Size="22" /></span>Intégrations</NavLink> }
                         @if (Modes.Expert) { <NavLink href="stats" @onclick="CloseMore"><span class="ic n"><Ico Name="chart" Size="22" /></span>Statistiques</NavLink> }
@@ -365,6 +373,8 @@
     private RightsBoundary? boundary;
 
     private bool Sees(string page) => orgAdmin || pages.Contains(page);
+    private bool compositionsOn;   // l'intégration « Compositions » est dans Mes intégrations
+    private bool CompositionsMenu => Ctx.ClientId != null && compositionsOn && Sees(LevelPages.Compositions);
     // Console Linkii ou espace revendeur (hors espace client) : barre du bas et feuille « Plus » dans l'app
     private bool AdminSpace => Ctx.ClientId == null && (Ctx.IsPlatformAdmin || Ctx.IsResellerAdmin);
 
@@ -378,7 +388,10 @@
 
     private void ToggleMode() => Modes.Switch(!Modes.Expert);
     private void OnModeChanged() => InvokeAsync(StateHasChanged);
-    public void Dispose() => Modes.Changed -= OnModeChanged;
+    // Ajout ou retrait d'une intégration (page Intégrations) : le menu se met à jour sans recharger.
+    private void OnInstallsChanged() => InvokeAsync(() => { if (Ctx.ClientId != null) LoadAreas(); StateHasChanged(); });
+    public void Dispose() { Modes.Changed -= OnModeChanged; if (apps != null) apps.InstallsChanged -= OnInstallsChanged; }
+    private AppService? apps;
 
     // Aires visibles dès qu'il y en a deux, ou dès qu'une personne a été invitée : une organisation seule ne voit rien de nouveau.
     private void LoadAreas()
@@ -387,6 +400,7 @@
         (areas, currentArea, orgAdmin, readOnly, pages, multi) = store.Read(d => (d.Access.Areas, d.Access.Current, d.Access.IsOrgAdmin, d.Access.ReadOnly,
             LevelPages.All.Where(p => d.Access.CanSee(p, Catalog)).ToHashSet(),
             d.Access.OrgAreaCount > 1 || d.Users.Any(u => u.Role == Roles.ClientMember)));
+        compositionsOn = store.Read(d => d.AppInstalls.Any(a => a.AppId == Compositions.AppId));
         writable = store.Read(d => new[] { LevelPages.Screens, LevelPages.Playlists, LevelPages.Media }.Where(d.Access.CanWrite).ToHashSet());
     }
 
@@ -421,7 +435,7 @@
             siteUrl = Services.GetRequiredService<Mailer>().SiteUrl;
         }
         if (cid == null && Ctx.IsResellerAdmin && reseller?.Suspended == true) suspended = true;   // revendeur suspendu : les écrans de ses clients sont coupés
-        if (cid != null) LoadAreas();
+        if (cid != null) { LoadAreas(); apps = Services.GetRequiredService<AppService>(); apps.InstallsChanged += OnInstallsChanged; }
         userEmail = Ctx.Email;
         userName = string.IsNullOrWhiteSpace(Ctx.DisplayName) ? userEmail : Ctx.DisplayName;
     }

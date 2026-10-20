@@ -129,6 +129,12 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
             pi.DurationMode = "fixed";
         else if (app.Duration == "content")   // l'app décide de la durée (fin de la vidéo) ; la durée maximale limite la boucle
             pi.DurationSec = (int.TryParse(m.Settings.GetValueOrDefault("maxMinutes"), out var mm) ? Math.Clamp(mm, 1, 240) : 30) * 60;
+        if (app.Id == Compositions.AppId)   // composition : images (fichiers prêts du même client) et QR codes résolus maintenant
+        {
+            if (Compositions.Publish(m.Settings, id => db.Media.FirstOrDefault(x => x.Id == id && x.ClientId == m.ClientId && x.Status == null && x.Type == "image" && x.FileName != null)) is not { } c) return null;
+            (pi.Settings, pi.Urls) = c;
+            return pi;
+        }
         // Apps de la médiathèque : les fichiers choisis deviennent des adresses /media/… (fichiers prêts, du même client, dans l'ordre choisi).
         if (app.Settings.FirstOrDefault(f => f.IsMedia && AppCatalog.IsVisible(f, m.Settings)) is { } mf)   // Canva : pages ou vidéo selon l'export
         {

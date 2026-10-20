@@ -86,6 +86,7 @@ public class AreaAccess
         LevelPages.Integrations => catalog.All.Any(a => !a.ScreenWidget && Level.CanUse(a)),
         LevelPages.Widgets => catalog.All.Any(a => a.ScreenWidget && Level.CanUse(a)),
         LevelPages.Zones => CanManageZones,
+        LevelPages.Compositions => catalog.Find(Linkii.Poc.Compositions.AppId) is { } c && Level.CanUse(c),
         _ => Level.Pages.Contains(page)
     };
 

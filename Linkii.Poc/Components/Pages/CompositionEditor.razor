@@ -1,0 +1,123 @@
+@page "/compositions/new"
+@page "/compositions/{Id:guid}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:compositions")]
+@implements IAsyncDisposable
+@using Microsoft.JSInterop
+@inject AppService Svc
+@inject MediaLibrary Library
+@inject TenantStore Store
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+@* Éditeur de compositions (DEV-POC.md §80) : l'interface est en JS (wwwroot/compo-editor.js, plein écran), le serveur garde le document,
+   calcule les QR codes et liste les images de la médiathèque. Le rendu des calques est celui du player (player/composition.js).
+   « /compositions/new » : rien n'est créé tant qu'on n'a pas enregistré (pas de composition vide laissée derrière soi). *@
+<HeadContent><link rel="stylesheet" href="compo-editor.css?v=2" /></HeadContent>
+
+@if (!ready)
+{
+    <div class="page-head"><div><h1>Composition introuvable</h1><p class="sub">Elle a peut-être été supprimée, ou elle appartient à une autre aire de gestion.</p></div></div>
+    <a class="btn ghost" href="@Back">← Retour</a>
+}
+else if (!Svc.IsInstalled(Compositions.AppId))
+{
+    <div class="page-head"><div><h1>Compositions</h1><p class="sub">L'intégration « Compositions » n'est pas dans Mes intégrations.</p></div></div>
+    <a class="btn" href="/integrations">Ouvrir les intégrations</a>
+}
+else
+{
+    <div class="ce" @ref="root"></div>
+}
+
+@code {
+    [Parameter] public Guid? Id { get; set; }
+    /// <summary>Page d'origine (Compositions, liste de lecture…), où « Retour » et l'enregistrement avec retour ramènent.</summary>
+    [SupplyParameterFromQuery(Name = "back")] public string? BackParam { get; set; }
+    /// <summary>Modèle de la galerie (numéro) pour démarrer une nouvelle composition.</summary>
+    [SupplyParameterFromQuery(Name = "tpl")] public int? Tpl { get; set; }
+    /// <summary>Liste de lecture où ajouter la composition dès son premier enregistrement (création depuis la liste), et la position visée.</summary>
+    [SupplyParameterFromQuery(Name = "addTo")] public Guid? AddTo { get; set; }
+    [SupplyParameterFromQuery(Name = "at")] public int? At { get; set; }
+
+    private MediaItem? item;
+    private bool ready;
+    private Guid? createdId;   // composition créée par le premier enregistrement
+    private ElementReference root;
+    private DotNetObjectReference<CompositionEditor>? self;
+
+    private string Back => BackParam is { Length: > 1 } b && b.StartsWith('/') && !b.StartsWith("//") && !b.Contains('\\') ? b : "/compositions";
+
+    protected override void OnParametersSet()
+    {
+        if (Id is { } id)
+        {
+            var m = Svc.Instance(id);
+            item = m?.AppId == Compositions.AppId ? m : null;
+            ready = item != null;
+        }
+        else ready = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !ready || !Svc.IsInstalled(Compositions.AppId)) return;
+        self = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("LinkiiCompoEditor.mount", root,
+            new { name = item?.Name ?? "", doc = item?.Settings.GetValueOrDefault("doc") ?? "", images = Images(), tpl = Tpl }, self);
+    }
+
+    /// <summary>Enregistre le nom et le document (crée la composition au premier enregistrement) ; rend le message d'erreur, ou null.</summary>
+    [JSInvokable]
+    public string? Save(string name, string doc)
+    {
+        if (Compositions.Clean(doc) is not { } c) return "La composition est trop grande ou illisible : elle n'a pas été enregistrée.";
+        var target = Id ?? createdId;
+        var (saved, errors) = Svc.SaveInstance(Compositions.AppId, target, name, new Dictionary<string, string> { ["doc"] = c.Doc, ["images"] = string.Join(",", c.Images) });
+        if (errors.Count > 0) return string.Join(" ", errors);
+        if (target == null && saved != null)
+        {
+            createdId = saved.Id;
+            if (AddTo is { } listId) AddToList(listId, saved.Id);
+        }
+        return null;
+    }
+
+    // Création depuis une liste de lecture : la composition y entre à la position choisie, pleine page, avec la durée par défaut.
+    private void AddToList(Guid listId, Guid compositionId)
+    {
+        try
+        {
+            Store.Write(d =>
+            {
+                if (d.Playlists.FirstOrDefault(p => p.Id == listId) is not { } pl || !PlaylistOps.CanEdit(d, pl)) return;
+                var at = At is { } i && i >= 0 && i < pl.Draft.Count ? i : pl.Draft.Count;
+                pl.Draft.Insert(at, new PlaylistItem { MediaId = compositionId, DurationSec = d.Tenant.DefaultDurationSec, Placement = "full" });
+                pl.Touch();
+            });
+        }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    /// <summary>Tracé du QR code (le même que celui publié sur l'écran).</summary>
+    [JSInvokable]
+    public string? Qr(string text) => QrCodes.Encode(text);
+
+    /// <summary>Images prêtes de la médiathèque visibles par la personne, les plus récentes d'abord.</summary>
+    [JSInvokable]
+    public List<object> Images() => Library.Files()
+        .Where(m => m.Type == "image" && m.Status == null && m.FileName != null)
+        .OrderByDescending(m => m.AddedUtc)
+        .Select(m => (object)new { id = m.Id.ToString(), name = m.Name, url = "/media/" + m.FileName, w = m.Width, h = m.Height })
+        .ToList();
+
+    [JSInvokable]
+    public void Leave() => Nav.NavigateTo(Back);
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await JS.InvokeVoidAsync("LinkiiCompoEditor.unmount"); }
+        catch (JSDisconnectedException) { }
+        catch (InvalidOperationException) { }   // rendu statique : pas de JS
+        self?.Dispose();
+    }
+}
