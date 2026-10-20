@@ -109,6 +109,30 @@ public class CompositionsTests(Platform p)
     }
 
     [Fact]
+    public async Task Une_composition_accepte_les_memes_positions_que_les_autres_medias()
+    {
+        var catalog = p.Services.GetRequiredService<AppCatalog>();
+        Assert.Equal(catalog.Find("image")!.Placements, catalog.Find(Compositions.AppId)!.Placements);
+
+        var store = p.Services.GetRequiredService<JsonStore>();
+        var user = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(Claims.Client, p.A.Id.ToString()), new Claim(ClaimTypes.Role, Roles.ClientAdmin) }, "test"));
+        var s = new AppService(new TenantStore(store, new TenantContext(new FixedAuth(user), store)), catalog, p.Services.GetRequiredService<AppProviders>(), p.Services.GetRequiredService<SecretBox>());
+        s.Install(Compositions.AppId);
+        var c = Compositions.Clean(Doc(new { id = "e1", type = "text", text = "Coin" }))!.Value;
+        var (item, errors) = s.SaveInstance(Compositions.AppId, null, "En angle", new Dictionary<string, string> { ["doc"] = c.Doc, ["images"] = "" });
+        Assert.Empty(errors);
+        var pl = store.Write(db =>
+        {
+            var list = new Playlist { ClientId = p.A.Id, Name = "Angle " + Guid.NewGuid().ToString("N")[..6] };
+            list.Draft.Add(new PlaylistItem { MediaId = item!.Id, DurationSec = 5, Placement = "top-left" });
+            db.Playlists.Add(list);
+            return list.Id;
+        });
+        await p.Services.GetRequiredService<Notifier>().Publish(pl);
+        Assert.Equal("top-left", store.Read(db => db.Playlists.First(x => x.Id == pl).Published[0].Placement));
+    }
+
+    [Fact]
     public async Task Une_composition_enregistree_puis_publiee_arrive_sur_l_ecran_avec_ses_images()
     {
         var store = p.Services.GetRequiredService<JsonStore>();

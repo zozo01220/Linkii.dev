@@ -3,6 +3,7 @@
 @inject AppService Apps
 @inject MediaLibrary Library
 @inject TenantStore Store
+@inject NavigationManager Nav
 
 @* Zone « Aperçu » de la fenêtre de configuration d'un contenu (standard Linkii, voir DEV-POC.md) : montre ce que le contenu affichera.
    - fichiers (Image, Vidéo, diaporamas, Canva) et dossier Drive : une image fixe pour un seul élément, carrousel 3D dès qu'il y en a plusieurs ;
@@ -10,6 +11,15 @@
 <div class="cp">
     @switch (kind)
     {
+        case "composition":
+            @* Compositions : la page telle qu'elle sera diffusée ; un clic ouvre l'éditeur de compositions. *@
+            <div class="cp-stage cmp-stage @(Portrait ? "portrait" : "")">
+                <CompositionThumb Item="new MediaItem { Settings = Values }" Files="allFiles" Contain="true" />
+                @if (Instance != null) { <a class="cmp-pvlink" href="@EditorHref" aria-label="Modifier dans l'éditeur de compositions"><span><Ico Name="edit" Size="15" /> Modifier dans l'éditeur</span></a> }
+                <QrBadge Qr="Qr" />
+            </div>
+            break;
+
         case "media" or "drive":
             @if (files.Count == 0)
             {
@@ -132,7 +142,8 @@
     private string Fit => Values.GetValueOrDefault("fit") == "cover" ? "cover" : "contain";
 
     private string kind = "none";
-    private List<MediaItem> files = new();
+    private List<MediaItem> files = new(), allFiles = new();
+    private string EditorHref => Instance == null ? "#" : $"/compositions/{Instance.Id}?back={Uri.EscapeDataString(new Uri(Nav.Uri).PathAndQuery)}";
     private string? driveInfo;
     private bool loading, loaded;
     private (bool Ok, string Message, JsonElement? Data) result;
@@ -149,11 +160,12 @@
     };
 
     /// <summary>Un aperçu existe pour cette app (sinon la fenêtre n'affiche que la configuration, sur toute la largeur).</summary>
-    public static bool Has(AppManifest m) => m.Settings.Any(f => f.IsMedia || f.Type == "drive") || m.Provider != null && m.Settings.Any(f => f.Zone == "source");
+    public static bool Has(AppManifest m) => m.Id == Compositions.AppId || m.Settings.Any(f => f.IsMedia || f.Type == "drive") || m.Provider != null && m.Settings.Any(f => f.Zone == "source");
 
     protected override async Task OnInitializedAsync()
     {
-        kind = Manifest.Settings.Any(f => f.Type == "drive") ? "drive"
+        kind = Manifest.Id == Compositions.AppId ? "composition"
+             : Manifest.Settings.Any(f => f.Type == "drive") ? "drive"
              : Manifest.Settings.Any(f => f.IsMedia) ? "media"
              : Manifest.Provider != null ? "provider" : "none";
         if (kind == "provider" && Instance != null) await Refresh();   // contenu existant : aperçu d'emblée
@@ -174,7 +186,8 @@
     // Fichiers à montrer : champs « média » visibles (Canva : pages ou vidéo selon l'export) ou fichiers du dossier Drive choisi.
     private void Collect()
     {
-        if (kind == "media")
+        if (kind == "composition") allFiles = Library.Files().Where(m => m.Type == "image" && m.Status == null && m.FileName != null).ToList();
+        else if (kind == "media")
         {
             var all = Library.Files().ToDictionary(m => m.Id);
             files = Manifest.Settings.Where(f => f.IsMedia && AppCatalog.IsVisible(f, Values))

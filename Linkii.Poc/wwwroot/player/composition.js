@@ -167,6 +167,11 @@
     C.ensure();
     var el = h.el, tz = h.settings.timezone || (h.cfg && h.cfg.timezone) || undefined;
     el.style.overflow = 'hidden'; el.style.background = C.bg(doc);   // pleine page (.p-full) : la zone entière ; bandes de la couleur du fond si le format diffère
+    if (h.place && h.place !== 'full') {   // angle : une fenêtre de 32 % de la largeur de la scène (18 % de haut au plus), au format de la composition
+      var wEm = 32, hEm = wEm * doc.h / doc.w;
+      if (hEm > 18) { wEm = wEm * 18 / hEm; hEm = 18; }
+      el.style.width = wEm + 'em'; el.style.height = hEm + 'em'; el.style.borderRadius = '.4em';
+    }
     var st = document.createElement('div');
     st.className = 'lc-stage';
     st.style.width = doc.w + 'px'; st.style.height = doc.h + 'px'; st.style.background = C.bg(doc);
