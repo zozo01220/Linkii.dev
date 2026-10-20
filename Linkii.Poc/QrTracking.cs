@@ -13,7 +13,7 @@ namespace Linkii.Poc;
 /// </summary>
 public static class QrTracking
 {
-    public const double DefaultX = 78, DefaultY = 70, DefaultSize = 19, MinSize = 8, MaxSize = 45;
+    public const double DefaultX = 78, DefaultY = 70, DefaultSize = 19, MinSize = 3, MaxSize = 45;
     public const int LabelMax = 60, UrlMax = 2000;
 
     private const string Alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";   // sans les caractères qui se ressemblent (0/O, 1/l/I)

@@ -133,6 +133,16 @@ public class CompositionsTests(Platform p)
     }
 
     [Fact]
+    public void Le_cadre_d_apercu_suit_la_page_de_la_composition()
+    {
+        Assert.Equal("aspect-ratio:1920 / 1080", Compositions.StageStyle(new Dictionary<string, string> { ["doc"] = Doc() }));
+        var portrait = JsonSerializer.Serialize(new { v = 1, w = 1080, h = 1920, els = Array.Empty<object>() });
+        Assert.Contains("height:360px", Compositions.StageStyle(new Dictionary<string, string> { ["doc"] = portrait }));
+        Assert.Equal("aspect-ratio:1920 / 1080", Compositions.StageStyle(new Dictionary<string, string>()));   // document illisible : cadre 16:9
+        Assert.Equal(3, QrTracking.MinSize);
+    }
+
+    [Fact]
     public async Task Une_composition_enregistree_puis_publiee_arrive_sur_l_ecran_avec_ses_images()
     {
         var store = p.Services.GetRequiredService<JsonStore>();

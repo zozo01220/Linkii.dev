@@ -159,6 +159,24 @@
     }
   };
 
+  // QR de comptage des scans : en % de la page (pas de l'écran), dessiné dans la scène mise à l'échelle ; tracé calculé par le serveur
+  function addQr(st, q, doc) {
+    if (!q || !q.d) return;
+    var parts = String(q.d).split('|'), n = parseInt(parts[0], 10), path = parts[1] || '';
+    if (!(n > 0) || !/^[0-9MhvzH\- ]+$/.test(path)) return;
+    var size = Math.max(2, Math.min(60, Number(q.size) || 19)), x = Number(q.x), y = Number(q.y);
+    var e = document.createElement('div');
+    e.className = 'qr-ov';
+    e.style.cssText = 'left:' + (isFinite(x) ? x : 78) + '%;top:' + (isFinite(y) ? y : 70) + '%;width:' + size + '%;font-size:' + (doc.w / 100) + 'px';   // 1em = 1 % de la largeur de la page
+    e.innerHTML = '<svg viewBox="0 0 ' + n + ' ' + n + '" shape-rendering="crispEdges" aria-hidden="true"><path d="' + path + '" fill="#0B1F3A"/></svg>';
+    if (q.label) {
+      var t = document.createElement('div');
+      t.className = 'q-t'; t.textContent = q.label; t.style.fontSize = (size * 0.11) + 'em';
+      e.appendChild(t);
+    }
+    st.appendChild(e);
+  }
+
   /* ---------- Player : app « composition » (pleine page, mise à l'échelle sans déformation) ---------- */
   if (w.LinkiiApps) w.LinkiiApps.register('composition', function (h) {
     var doc = null;
@@ -177,6 +195,7 @@
     st.style.width = doc.w + 'px'; st.style.height = doc.h + 'px'; st.style.background = C.bg(doc);
     st.innerHTML = C.html(doc, { player: true, tz: tz });
     el.appendChild(st);
+    addQr(st, h.item.qr, doc);
     var srcs = [];
     h.onStop(function () { for (var i = 0; i < srcs.length; i++) srcs[i].revoke(); });
     C.images(st, function (url, cb) { h.media(url).then(function (m) { srcs.push(m); cb(m.src); }); });

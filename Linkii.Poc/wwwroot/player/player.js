@@ -993,7 +993,7 @@
       onSkip();
       return;
     }
-    addQr(layer, item);
+    if (!(item.type === 'app' && item.appId === 'composition')) addQr(layer, item);   // une composition dessine le QR dans sa page (composition.js) : même position sur tous les formats d'écran
   }
 
   /* QR code de comptage des scans : posé en dernier dans le calque (donc au premier plan, il apparaît et disparaît avec le contenu).

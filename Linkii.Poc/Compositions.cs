@@ -79,6 +79,18 @@ public static class Compositions
         catch (JsonException) { return null; }
     }
 
+    /// <summary>
+    /// Cadre d'aperçu d'une composition (CSS en ligne) : celui de sa page, pas celui de l'écran. Le QR de comptage se place et se mesure en % de cette page
+    /// (comme le player, qui le dessine dans la page mise à l'échelle) : la même position à l'aperçu et sur tous les écrans, quel que soit leur format.
+    /// </summary>
+    public static string StageStyle(IReadOnlyDictionary<string, string> settings)
+    {
+        var s = Size(settings) ?? (1920, 1080);
+        return s.Item2 > s.Item1
+            ? $"aspect-ratio:auto;width:calc(360px * {s.Item1} / {s.Item2});height:360px;max-height:none;margin:0 auto"
+            : $"aspect-ratio:{s.Item1} / {s.Item2}";
+    }
+
     private static string? Str(JsonObject o, string key) => o[key] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
 
     private static int? Side(JsonNode? n) =>
