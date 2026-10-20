@@ -199,6 +199,9 @@
     var srcs = [];
     h.onStop(function () { for (var i = 0; i < srcs.length; i++) srcs[i].revoke(); });
     C.images(st, function (url, cb) { h.media(url).then(function (m) { srcs.push(m); cb(m.src); }); });
+    // La scène fait la taille de la page (ex. 2160 × 3840) : tant qu'elle n'est pas mise à l'échelle elle déborde de l'écran. Elle reste donc
+    // cachée jusqu'au premier calcul réussi, et l'échelle suit la taille de la zone (ResizeObserver) : l'élément n'a pas encore de taille à l'insertion.
+    st.style.visibility = 'hidden';
     var last = '';
     function fit() {
       var W = el.clientWidth, H = el.clientHeight;
@@ -207,8 +210,15 @@
       if (key === last) return;
       last = key;
       st.style.transform = 'translate(' + (W - doc.w * s) / 2 + 'px,' + (H - doc.h * s) / 2 + 'px) scale(' + s + ')';
+      st.style.visibility = '';
     }
     fit();
+    if (w.requestAnimationFrame) w.requestAnimationFrame(fit);
+    if (w.ResizeObserver) {
+      var ro = new w.ResizeObserver(fit);
+      ro.observe(el);
+      h.onStop(function () { ro.disconnect(); });
+    }
     h.every(function () { fit(); C.tick(st, tz); }, 1000);
   });
 })(window);
