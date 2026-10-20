@@ -134,6 +134,7 @@ public class ClientDb
         Media = new(root.Media, clientId, area, null, area == null ? null : Access.Shared);
         MediaFolders = new(root.MediaFolders, clientId, area, null, area == null ? null : Access.Shared);
         PlaylistFolders = new(root.PlaylistFolders, clientId, area, null, area == null ? null : Access.Shared);
+        CompositionTemplates = new(root.CompositionTemplates, clientId, area);
         Playlists = new(root.Playlists, clientId, area, null, area == null ? null : Access.Shared);
         AppInstalls = new(root.AppInstalls, clientId);
         Areas = new(root.Areas, clientId);
@@ -150,6 +151,8 @@ public class ClientDb
     public ScopedList<MediaFolder> MediaFolders { get; }
     /// <summary>Dossiers des listes de lecture de l'aire ouverte (voir <see cref="PlaylistFolder"/>).</summary>
     public ScopedList<PlaylistFolder> PlaylistFolders { get; }
+    /// <summary>« Mes modèles » de compositions de l'aire ouverte (voir <see cref="CompositionTemplate"/>).</summary>
+    public ScopedList<CompositionTemplate> CompositionTemplates { get; }
     public ScopedList<Playlist> Playlists { get; }
     public ScopedList<AppInstall> AppInstalls { get; }
     /// <summary>Toutes les aires de l'organisation (pages réservées aux administrateurs).</summary>

@@ -94,7 +94,7 @@ else
                     }
                     <div class="ci-prevbody" hidden="@(sources.Count > 0 && (sourceOpen || !SourceReady))">
                         @if (sources.Count > 0 && SourceReady) { <button type="button" class="ci-chg" @onclick="OpenSource"><Ico Name="edit" Size="14" /> @ChangeLabel(sources[0])</button> }
-                        <ContentPreview @ref="previewRef" Manifest="manifest" Values="values" Instance="instance" Qr="PreviewQr" Portrait="PreviewPortrait" Place="PreviewPlace" OnNotice="OnPreviewNotice" />
+                        <ContentPreview @ref="previewRef" Manifest="manifest" Values="values" Instance="instance" Qr="PreviewQr" Portrait="PreviewPortrait" Place="PreviewPlace" OnNotice="OnPreviewNotice" OnEdit="OpenEditor" />
                     </div>
                 </section>
             }
@@ -108,7 +108,7 @@ else
                     <AppForm Manifest="manifest" Values="values" StoredSecrets="storedSecrets" InstanceId="instance?.Id" Zone="main" OnChange="Touch" />
                     @if (manifest.Id == Compositions.AppId && instance != null)
                     {
-                        <div class="dw-note cmp-note"><span class="grow">Le contenu de cette page se modifie dans l'éditeur de compositions.</span> <a class="btn sm" href="/compositions/@instance.Id?back=@Uri.EscapeDataString(new Uri(Nav.Uri).PathAndQuery)">Ouvrir l'éditeur</a></div>
+                        <div class="dw-note cmp-note"><span class="grow">Le contenu de cette page se modifie dans l'éditeur de compositions.</span> <button type="button" class="btn sm" @onclick="OpenEditor">Ouvrir l'éditeur</button></div>
                     }
                     @* réglages propres à l'appelant (ex. « Dans cette liste de lecture »), à droite de l'aperçu *@
                     @Extra
@@ -301,6 +301,15 @@ else
 
     /// <summary>Réglages de l'appelant, affichés sous la configuration (colonne de droite).</summary>
     [Parameter] public RenderFragment? Extra { get; set; }
+    /// <summary>Composition : l'appelant enregistre ses propres réglages (position, durée, QR code) avant d'ouvrir l'éditeur. Sans lui : ouverture directe.</summary>
+    [Parameter] public EventCallback<Guid> OnOpenEditor { get; set; }
+
+    private async Task OpenEditor()
+    {
+        if (instance == null) return;
+        if (OnOpenEditor.HasDelegate) await OnOpenEditor.InvokeAsync(instance.Id);
+        else Nav.NavigateTo($"/compositions/{instance.Id}?back={Uri.EscapeDataString(new Uri(Nav.Uri).PathAndQuery)}");
+    }
 
     /// <summary>Onglets de l'appelant, en tête de la colonne de droite. Le premier onglet est la configuration de l'app.</summary>
     [Parameter] public RenderFragment? ConfTabs { get; set; }

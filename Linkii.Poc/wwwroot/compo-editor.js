@@ -17,6 +17,7 @@
   let root = null, net = null, ac = null, timer = null;
   let D, name = '', savedDoc = '', savedName = '', H = [], hi = -1, uid = 1;
   let selId = null, zoom = 1, z = 1, panelName = 'modeles', panelOpen = true, layersOpen = false, mediaMode = 'add', editing = false;
+  let myTpl = [], tplTab = 'galerie', canImport = false;   // « Mes modèles » (§84), import d'images permis par le niveau de droits
   let drag = null, guides = null, images = [], tplCat = 'Tous', mediaSearch = '', popCb = null, nudge = null, qrWait = {}, fmtNew = false, fmtO = 'land';
   const q = s => root.querySelector(s);
   const cur = () => D.els.find(e => e.id === selId) || null;
@@ -129,6 +130,7 @@
     root = el; net = dotnet; ac = new AbortController();
     LC().ensure();
     images = o.images || [];
+    myTpl = o.myTemplates || []; canImport = !!o.canImport; tplTab = 'galerie';
     name = savedName = o.name || 'Composition';
     let doc = null;
     try { doc = o.doc ? JSON.parse(o.doc) : null; } catch (x) { doc = null; }
@@ -146,7 +148,7 @@
     q('#ce-name').value = name;
     bind();
     push();
-    savedDoc = tpl ? '' : H[0];   // un modèle choisi n'est pas encore enregistré
+    savedDoc = tpl || o.fromTemplate ? '' : H[0];   // un modèle choisi (galerie ou Mes modèles) n'est pas encore enregistré
     renderPanel(); render(); renderCtx(); setDirty();
     D.els.filter(e => e.type === 'qr').forEach(fetchQr);
     timer = setInterval(() => { const st = q('#ce-stage'); if (st) LC().tick(st); }, 1000);
@@ -226,6 +228,14 @@
   </div>
   <div class="ce-mf"><button class="ce-btn ghost" data-fmt="close">Annuler</button><button class="ce-btn" data-fmt="ok" id="ce-fmtok">Créer</button></div>
 </div></div>
+<div class="ce-scrim" id="ce-tplscrim" hidden><div class="ce-modal" role="dialog" aria-modal="true" aria-labelledby="ce-tpltitle">
+  <div class="ce-mh"><h4 id="ce-tpltitle">Enregistrer comme modèle</h4><button class="ce-xb" data-tplm="close" aria-label="Fermer">×</button></div>
+  <div class="ce-mb">
+    <div class="ce-field"><label for="ce-tplname">Nom du modèle</label><input type="text" id="ce-tplname" maxlength="80"></div>
+    <p class="ce-help" style="margin:0">Le modèle rejoint « Mes modèles » : il servira de point de départ aux nouvelles compositions de cette aire. Cette composition ne change pas.</p>
+  </div>
+  <div class="ce-mf"><button class="ce-btn ghost" data-tplm="close">Annuler</button><button class="ce-btn" data-tplm="ok">Enregistrer le modèle</button></div>
+</div></div>
 <div class="ce-pvw" id="ce-pvw" hidden><button class="close" data-top="closepv">× Fermer l'aperçu (Échap)</button><div class="pf" id="ce-pf"></div></div>
 <div class="ce-toast" id="ce-toast" role="status" aria-live="polite"></div>`;
 
@@ -261,18 +271,20 @@
     const e = cur(), ov = q('#ce-ov');
     let h = '';
     if (e && !e.hidden) {
-      const L = e.x * z, Tp = e.y * z, Wd = e.w * z, Ht = e.h * z;
-      h += `<div class="ce-selbox${e.locked ? ' locked' : ''}" style="left:${L}px;top:${Tp}px;width:${Wd}px;height:${Ht}px"></div>`;
+      const L = e.x * z, Tp = e.y * z, Wd = e.w * z, Ht = e.h * z, r = +e.rot || 0;
+      // cadre, poignées et poignée de rotation tournent avec l'élément (même centre que le rendu)
+      h += `<div class="ce-selwrap" style="left:${L}px;top:${Tp}px;width:${Wd}px;height:${Ht}px;transform:rotate(${r}deg)"><div class="ce-selbox${e.locked ? ' locked' : ''}"></div>`;
       if (!e.locked && !editing) {
         const P = { nw: [0, 0], n: [.5, 0], ne: [1, 0], e: [1, .5], se: [1, 1], s: [.5, 1], sw: [0, 1], w: [0, .5] };
-        (textual(e) ? ['w', 'e'] : Object.keys(P)).forEach(d => h += `<div class="ce-hd" data-d="${d}" style="left:${L + Wd * P[d][0]}px;top:${Tp + Ht * P[d][1]}px"></div>`);
+        (textual(e) ? ['w', 'e'] : Object.keys(P)).forEach(d => h += `<div class="ce-hd" data-d="${d}" style="left:${P[d][0] * 100}%;top:${P[d][1] * 100}%"></div>`);
+        h += '<div class="ce-hd ce-rot" data-d="rot" title="Faire pivoter (Maj : par pas de 15°)"></div>';
       }
-      if (drag && drag.moved) h += `<div class="ce-tag" style="left:${L + Wd / 2}px;top:${Tp + Ht}px">${drag.mode === 'r' ? `${Math.round(e.w)} × ${Math.round(e.h)}` : `x ${Math.round(e.x)} · y ${Math.round(e.y)}`}</div>`;
+      h += '</div>';
+      if (drag && drag.moved) h += `<div class="ce-tag" style="left:${L + Wd / 2}px;top:${Tp + Ht}px">${drag.mode === 'rot' ? `${Math.round(r)}°` : drag.mode === 'r' ? `${Math.round(e.w)} × ${Math.round(e.h)}` : `x ${Math.round(e.x)} · y ${Math.round(e.y)}`}</div>`;
     }
-    if (guides) {
-      if (guides.v) h += `<div class="ce-guide" style="left:${D.w / 2 * z}px;top:0;width:1px;height:100%"></div>`;
-      if (guides.h) h += `<div class="ce-guide" style="top:${D.h / 2 * z}px;left:0;height:1px;width:100%"></div>`;
-    }
+    (guides || []).forEach(g => h += g.v != null
+      ? `<div class="ce-guide" style="left:${g.v * z}px;top:0;width:1px;height:100%"></div>`
+      : `<div class="ce-guide" style="top:${g.h * z}px;left:0;height:1px;width:100%"></div>`);
     ov.innerHTML = h;
   }
 
@@ -326,6 +338,8 @@
     on(root, 'click', ev => {
       const t = ev.target.closest('[data-top]');
       if (t) top(t.dataset.top, t);
+      const tm = ev.target.closest('[data-tplm]');
+      if (tm) { if (tm.dataset.tplm === 'ok') saveTemplate(); else q('#ce-tplscrim').hidden = true; }
       const f = ev.target.closest('[data-fmt]');
       if (f) { if (f.dataset.fmt === 'ok') applyFormat(); else closeFormat(); }
       const o = ev.target.closest('.ce-ori');
@@ -339,6 +353,11 @@
       if (ev.target.closest('[contenteditable=true]')) return;
       closePop();
       const hd = ev.target.closest('.ce-hd'), e0 = cur();
+      if (hd && e0 && hd.dataset.d === 'rot') {   // rotation autour du centre de l'élément
+        const fr = frame.getBoundingClientRect();
+        drag = { mode: 'rot', sx: ev.clientX, sy: ev.clientY, cx: fr.left + (e0.x + e0.w / 2) * z, cy: fr.top + (e0.y + e0.h / 2) * z, o: Object.assign({}, e0) };
+        ev.preventDefault(); return;
+      }
       if (hd && e0) { drag = { mode: 'r', dir: hd.dataset.d, sx: ev.clientX, sy: ev.clientY, o: Object.assign({}, e0) }; ev.preventDefault(); return; }
       const n = ev.target.closest('.lc-el');
       if (n) {
@@ -350,7 +369,7 @@
     });
     on(area, 'pointerdown', ev => { if (ev.target === area) { closePop(); if (editing) document.activeElement.blur(); select(null); } });
     on(w, 'pointermove', move);
-    on(w, 'pointerup', () => { if (!drag) return; const m = drag.moved; drag = null; guides = null; if (m) commit(); else drawOverlay(); });
+    on(w, 'pointerup', () => { if (!drag) return; const m = drag.moved; drag = null; guides = null; if (m) { commit(); renderCtx(); } else drawOverlay(); });   // renderCtx : la rotation et la taille affichées suivent
     on(frame, 'dblclick', ev => {
       const n = ev.target.closest('.lc-el'); if (!n) return;
       const e = byId(n.dataset.id); if (!e || e.type !== 'text' || e.locked) return;
@@ -430,7 +449,8 @@
     else if (a === 'closepv') closePreview();
     else if (a === 'revert') revert();
     else if (a === 'save') save(false);
-    else if (a === 'savemenu') openPop(b, '<button class="ce-mi" data-o="s">Enregistrer</button><button class="ce-mi" data-o="l">Enregistrer et revenir</button>', o => save(o === 'l'));
+    else if (a === 'savemenu') openPop(b, '<button class="ce-mi" data-o="s">Enregistrer</button><button class="ce-mi" data-o="l">Enregistrer et revenir</button><hr><button class="ce-mi" data-o="t">Enregistrer comme modèle…</button>',
+      o => { if (o === 't') openTemplateDialog(); else save(o === 'l'); });
   }
 
   function move(ev) {
@@ -438,19 +458,38 @@
     const e = cur(); if (!e) return;
     const dx = (ev.clientX - drag.sx) / z, dy = (ev.clientY - drag.sy) / z, o = drag.o;
     if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 2) return;
-    drag.moved = true; guides = {};
-    if (drag.mode === 'm') {
-      let x = o.x + dx, y = o.y + dy; const tol = 12 / z;
-      if (Math.abs(x + o.w / 2 - D.w / 2) < tol) { x = D.w / 2 - o.w / 2; guides.v = 1; }
-      if (Math.abs(y + o.h / 2 - D.h / 2) < tol) { y = D.h / 2 - o.h / 2; guides.h = 1; }
+    drag.moved = true; guides = [];
+    if (drag.mode === 'rot') {
+      let a = Math.atan2(ev.clientY - drag.cy, ev.clientX - drag.cx) * 180 / Math.PI + 90;
+      if (ev.shiftKey) a = Math.round(a / 15) * 15;
+      else { const n = Math.round(a / 45) * 45; if (Math.abs(a - n) < 4) a = n; }   // s'aimante doucement aux angles droits et à 45°
+      e.rot = Math.round(((a % 360) + 540) % 360 - 180);
+    } else if (drag.mode === 'm') {
+      let x = o.x + dx, y = o.y + dy;
+      if (!ev.altKey) {   // Alt : sans aimantation
+        // bords et centres de la page et des autres éléments visibles
+        const xs = [0, D.w / 2, D.w], ys = [0, D.h / 2, D.h], tol = 8 / z;
+        D.els.forEach(t => { if (t.id === e.id || t.hidden) return; xs.push(t.x, t.x + t.w / 2, t.x + t.w); ys.push(t.y, t.y + t.h / 2, t.y + t.h); });
+        const snap = (pos, size, lines) => {
+          let best = null;
+          [0, size / 2, size].forEach(off => lines.forEach(l => { const d = l - (pos + off); if (Math.abs(d) < tol && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, l }; }));
+          return best;
+        };
+        const bx = snap(x, o.w, xs); if (bx) { x += bx.d; guides.push({ v: bx.l }); }
+        const by = snap(y, o.h, ys); if (by) { y += by.d; guides.push({ h: by.l }); }
+      }
       e.x = Math.round(x); e.y = Math.round(y);
     } else {
-      const d = drag.dir; let { x, y, w: ww, h } = o;
-      if (d.includes('e')) ww = o.w + dx; if (d.includes('s')) h = o.h + dy;
-      if (d.includes('w')) { ww = o.w - dx; x = o.x + dx; } if (d.includes('n')) { h = o.h - dy; y = o.y + dy; }
-      if (ev.shiftKey && d.length === 2) { h = ww * o.h / o.w; if (d.includes('n')) y = o.y + o.h - h; }   // Maj : proportions gardées
-      if (ww < 20) { if (d.includes('w')) x -= 20 - ww; ww = 20; } if (h < 20) { if (d.includes('n')) y -= 20 - h; h = 20; }
-      Object.assign(e, { x: Math.round(x), y: Math.round(y), w: Math.round(ww), h: Math.round(h) });
+      // redimensionnement dans les axes de l'élément (il peut être tourné) ; le côté opposé reste fixe à l'écran
+      const d = drag.dir, th = (+o.rot || 0) * Math.PI / 180, cs = Math.cos(th), sn = Math.sin(th);
+      const lx = dx * cs + dy * sn, ly = -dx * sn + dy * cs;
+      const sx = d.includes('e') ? 1 : d.includes('w') ? -1 : 0, sy = d.includes('s') ? 1 : d.includes('n') ? -1 : 0;
+      let ww = Math.max(20, o.w + sx * lx), hh = Math.max(20, o.h + sy * ly);
+      if (ev.shiftKey && sx && sy) hh = Math.max(20, ww * o.h / o.w);   // Maj : proportions gardées
+      if (textual(e)) hh = o.h;   // texte : hauteur automatique
+      const ax = -sx * o.w / 2, ay = -sy * o.h / 2, Ax = o.x + o.w / 2 + ax * cs - ay * sn, Ay = o.y + o.h / 2 + ax * sn + ay * cs;
+      const bx = -sx * ww / 2, by = -sy * hh / 2, cx = Ax - (bx * cs - by * sn), cy = Ay - (bx * sn + by * cs);
+      Object.assign(e, { x: Math.round(cx - ww / 2), y: Math.round(cy - hh / 2), w: Math.round(ww), h: Math.round(hh) });
     }
     render();
   }
@@ -460,6 +499,7 @@
     if (ev.key === 'Escape') {
       if (!q('#ce-pvw').hidden) return closePreview();
       if (!q('#ce-fmtscrim').hidden) return closeFormat();
+      if (!q('#ce-tplscrim').hidden) { q('#ce-tplscrim').hidden = true; return; }
       closePop();
       if (editing) return document.activeElement.blur();
       return select(null);
@@ -569,7 +609,7 @@
     else if (e.type === 'qr') h = `<label class="ce-lbl">Lien<input type="text" data-k="url" value="${esc(e.url)}" style="width:240px" maxlength="500"></label>` + colorIn('fg', e.fg, 'Couleur') + colorIn('bg', e.bg, 'Fond');
     else if (e.kind === 'ticker') h = `<label class="ce-lbl">Texte<input type="text" data-k="text" value="${esc(e.text)}" style="width:260px" maxlength="1000"></label>` + fontSel(e) + sizeNum(e) +
       colorIn('color', e.color, 'Couleur du texte') + colorIn('bg', e.bg, 'Fond') + pick('speed', [[30, 'Lent'], [18, 'Normal'], [10, 'Rapide']], e.speed, 'Vitesse');
-    if (e) h += sepH + `<button class="ce-tb" data-act="pos">Position ▾</button><button class="ce-tb ${e.locked ? 'on' : ''}" data-act="lock" title="Verrouiller">${e.locked ? '🔒 Verrouillé' : '🔓'}</button>` +
+    if (e) h += sepH + `<label class="ce-lbl" title="Rotation en degrés (ou la poignée ronde au-dessus de l'élément)">↻<input type="number" data-k="rot" data-t="n" min="-180" max="180" step="1" value="${Math.round(+e.rot || 0)}" style="width:62px"></label><button class="ce-tb" data-act="pos">Position ▾</button><button class="ce-tb ${e.locked ? 'on' : ''}" data-act="lock" title="Verrouiller">${e.locked ? '🔒 Verrouillé' : '🔓'}</button>` +
       '<button class="ce-tb" data-act="dup" title="Dupliquer (Ctrl+D)">⧉</button><button class="ce-tb" data-act="del" title="Supprimer (Suppr)">🗑</button>';
     c.innerHTML = h;
     c.classList.toggle('empty', !e);
@@ -643,17 +683,21 @@
     let h = '';
     if (panelName === 'modeles') {
       const cats = ['Tous', ...new Set(TPL.map(t => t.cat))];
-      h = `<div class="ce-chips">${cats.map(c => `<button data-cat="${c}" class="${c === tplCat ? 'on' : ''}">${c}</button>`).join('')}</div>
+      h = `<div class="ce-tabs2"><button data-tt="galerie" class="${tplTab === 'galerie' ? 'on' : ''}">Galerie</button><button data-tt="mine" class="${tplTab === 'mine' ? 'on' : ''}">Mes modèles <span>${myTpl.length}</span></button></div>`;
+      if (tplTab === 'mine') h += myTpl.length
+        ? `<div class="ce-tgrid">${myTpl.map(myThumb).join('')}</div><p class="ce-help">Un modèle remplace la page en cours ; Ctrl+Z revient en arrière. Le modèle lui-même ne change pas.</p>`
+        : '<div class="ce-empty">Aucun modèle pour l\'instant.<br>Utilisez <b>Enregistrer ▾ › Enregistrer comme modèle…</b> pour réutiliser une composition.</div>';
+      else h += `<div class="ce-chips">${cats.map(c => `<button data-cat="${c}" class="${c === tplCat ? 'on' : ''}">${c}</button>`).join('')}</div>
         <div class="ce-tgrid">${TPL.map((t, i) => [t, i]).filter(([t]) => tplCat === 'Tous' || t.cat === tplCat).map(([t, i]) => thumb(t, i)).join('')}</div>
         <p class="ce-help">Un modèle remplace la page en cours (format compris) ; tout reste modifiable ensuite, et Ctrl+Z revient en arrière.</p>`;
     }
     if (panelName === 'medias') {
       const note = mediaMode === 'replace' ? "Choisissez l'image de remplacement" : mediaMode === 'bg' ? "Choisissez l'image de fond" : '';
       h = (note ? `<div class="ce-note">${note}<button data-mmode="add">Annuler</button></div>` : '') +
-        `<div class="ce-row"><a class="ce-btn ghost" href="/media" target="_blank" rel="noopener">⇪ Importer…</a><button class="ce-btn ghost" data-refresh="1">↻ Actualiser</button></div>
+        `<div class="ce-row"><button class="ce-btn ghost" data-import="1" ${canImport ? '' : 'disabled title="Votre niveau de droits ne permet pas d\'ajouter des fichiers à la médiathèque"'}>⇪ Importer…</button><button class="ce-btn ghost" data-refresh="1">↻ Actualiser</button></div>
         <label class="ce-search">⌕<input id="ce-msearch" placeholder="Rechercher une image" value="${esc(mediaSearch)}"></label>
         <div id="ce-mgrid"></div>
-        <p class="ce-help">Cliquez pour ajouter au centre, ou glissez sur la page. Importez de nouvelles images dans la Médiathèque, puis « Actualiser ».</p>`;
+        <p class="ce-help">Cliquez pour ajouter au centre, ou glissez sur la page. « Importer » ajoute vos images à la médiathèque de l'aire et place la première sur la page.</p>`;
     }
     if (panelName === 'texte') {
       h = `<button class="ce-btn ce-add" data-add="text:free">+ Ajouter une zone de texte</button><div class="ce-grp">Styles par défaut</div>
@@ -678,11 +722,12 @@
     }
     p.innerHTML = h;
     if (panelName === 'medias') renderMediaGrid();
+    if (panelName === 'modeles' && tplTab === 'mine') LC().images(p, (u, cb) => cb(u + '?w=320'));
   }
   function renderMediaGrid() {
     const g = q('#ce-mgrid'); if (!g) return;
     const s = mediaSearch.trim().toLowerCase(), list = images.filter(m => !s || (m.name || '').toLowerCase().includes(s));
-    g.innerHTML = !images.length ? '<div class="ce-empty">Aucune image dans la médiathèque.<br>Importez-en depuis la page Médiathèque.</div>'
+    g.innerHTML = !images.length ? '<div class="ce-empty">Aucune image dans la médiathèque.<br>Importez-en avec « Importer… ».</div>'
       : !list.length ? '<div class="ce-empty">Aucune image trouvée.</div>'
       : `<div class="ce-pgrid">${list.map(m => `<button class="ce-photo" draggable="true" data-add="img:${m.id}" title="${esc(m.name)}"><img src="${esc(m.url)}?w=320" alt="" loading="lazy" draggable="false"><span>${esc(m.name)}</span></button>`).join('')}</div>`;
   }
@@ -695,7 +740,54 @@
       if (root) { renderMediaGrid(); render(); toast('Médiathèque actualisée'); }
       return;
     }
+    if (ev.target.closest('[data-import]')) { const f = document.getElementById('ce-file'); if (f && canImport) f.click(); return; }
+    const tt = ev.target.closest('[data-tt]'); if (tt) { tplTab = tt.dataset.tt; renderPanel(); return; }
+    const dt = ev.target.closest('[data-deltpl]');
+    if (dt) {
+      const t = myTpl.find(x => x.id === dt.dataset.deltpl);
+      if (!t || !confirm(`Supprimer le modèle « ${t.name} » ? Les compositions créées à partir de lui ne changent pas.`)) return;
+      try { myTpl = await net.invokeMethodAsync('DeleteTemplate', t.id); } catch (x) { toast('Suppression impossible pour le moment.', true); return; }
+      if (root) { renderPanel(); toast('Modèle supprimé'); }
+      return;
+    }
+    const mt = ev.target.closest('[data-mytpl]'); if (mt) { const t = myTpl.find(x => x.id === mt.dataset.mytpl); if (t) loadDoc(t); return; }
     const t = ev.target.closest('[data-tpl]'); if (t) loadTpl(TPL[+t.dataset.tpl]);
+  }
+  // vignette d'un modèle de « Mes modèles » (même rendu que l'écran)
+  function myThumb(t) {
+    let d = null; try { d = JSON.parse(t.doc); } catch (x) { d = null; }
+    if (!d || !(d.w > 0) || !(d.h > 0)) return '';
+    const tw = d.w >= d.h ? 136 : 77, s = tw / d.w;
+    return `<div class="ce-thumb ce-mythumb" data-mytpl="${esc(t.id)}" role="button" tabindex="0"><div class="tv" style="height:${Math.round(d.h * s)}px;width:${tw}px"><div class="mini" style="width:${d.w}px;height:${d.h}px;transform:scale(${s});background:${LC().bg(d)}">${LC().html(d, { mediaUrl, player: true })}</div></div><div class="tn"><span>${esc(t.name)}</span><button type="button" class="ce-del" data-deltpl="${esc(t.id)}" title="Supprimer ce modèle" aria-label="Supprimer le modèle ${esc(t.name)}">×</button></div></div>`;
+  }
+  // part d'un modèle de « Mes modèles » : la page en cours est remplacée (Ctrl+Z revient en arrière)
+  function loadDoc(t) {
+    let d = null; try { d = JSON.parse(t.doc); } catch (x) { d = null; }
+    if (!d || !Array.isArray(d.els)) { toast('Ce modèle est illisible.', true); return; }
+    D = { v: 1, w: d.w, h: d.h, bg: d.bg || '#FFFFFF', els: d.els };
+    uid = 1 + D.els.reduce((m, e) => Math.max(m, parseInt(String(e.id || '').replace(/\D/g, ''), 10) || 0), 0);
+    D.els.forEach(e => { if (!e.id) e.id = nid(); });
+    selId = null; zoom = 1; commit(); renderCtx();
+    D.els.filter(e => e.type === 'qr').forEach(e => fetchQr(e));
+    toast(`Modèle « ${t.name} » appliqué`);
+  }
+  function openTemplateDialog() {
+    q('#ce-tplname').value = (q('#ce-name').value || name || '').trim();
+    q('#ce-tplscrim').hidden = false;
+    q('#ce-tplname').focus(); q('#ce-tplname').select();
+  }
+  async function saveTemplate() {
+    const n = q('#ce-tplname').value.trim();
+    if (!n) { toast('Donnez un nom au modèle.', true); return; }
+    let r;
+    try { r = await net.invokeMethodAsync('SaveTemplate', n, JSON.stringify(D)); }
+    catch (x) { toast('Enregistrement du modèle impossible : la connexion au serveur est interrompue.', true); return; }
+    if (!root) return;
+    if (r && r.error) { toast(r.error, true); return; }
+    myTpl = (r && r.templates) || myTpl;
+    q('#ce-tplscrim').hidden = true;
+    if (panelName === 'modeles') renderPanel();
+    toast(`Modèle « ${n} » ajouté à Mes modèles`);
   }
   function loadTpl(t) {
     D = { v: 1, w: t.w, h: t.h, bg: t.bg, els: t.make() };
@@ -795,5 +887,17 @@
     draw();
   }
 
-  w.LinkiiCompoEditor = { mount, unmount, gallery };
+  // Import d'images (CompositionEditor.razor, InputFile) : le serveur prévient au début et à la fin
+  function importing(n) { if (root) toast(`Import de ${n} image${n > 1 ? 's' : ''} en cours…`); }
+  function imported(list, ids, errors) {
+    if (!root) return;
+    images = list || images;
+    if (panelName === 'medias') renderMediaGrid();
+    render();
+    if (ids && ids.length) addEl('img:' + ids[0]);   // la première image importée se place (ou remplace, selon le mode du panneau)
+    const msg = (ids && ids.length ? `${ids.length} image${ids.length > 1 ? 's' : ''} importée${ids.length > 1 ? 's' : ''} dans la médiathèque.` : '') + ((errors || []).length ? ' ' + errors.join(' ') : '');
+    if (msg.trim()) toast(msg.trim(), !(ids && ids.length));
+  }
+
+  w.LinkiiCompoEditor = { mount, unmount, gallery, importing, imported };
 })(window);

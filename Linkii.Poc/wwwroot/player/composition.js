@@ -7,7 +7,8 @@
 (function (w) {
   'use strict';
   var FONTS = ['IBM Plex Sans', 'Montserrat', 'Poppins', 'Playfair Display', 'Oswald', 'Arial'];
-  var FONT_CSS = 'https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Montserrat:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,400;1,600&family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;0,900;1,400&family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Oswald:wght@300;400;600;700&display=swap';
+  // Polices embarquées (player/fonts, licence OFL) : servies par Linkii et gardées par le Service Worker du player, donc lisibles hors ligne.
+  var FONT_CSS = '/player/fonts/compo-fonts.css';
   var CSS = '.lc-stage{position:absolute;left:0;top:0;transform-origin:0 0;overflow:hidden}' +
     '.lc-el{position:absolute;box-sizing:border-box}' +
     '.lc-tx{white-space:pre-wrap;word-wrap:break-word;outline:none}' +
@@ -176,6 +177,15 @@
     }
     st.appendChild(e);
   }
+
+  // Player : les fichiers de polices sont téléchargés une fois en arrière-plan (le Service Worker les garde) pour qu'une composition s'affiche
+  // avec ses polices même si l'écran perd internet avant de l'avoir jouée.
+  if (w.LinkiiApps && w.fetch) setTimeout(function () {
+    fetch(FONT_CSS).then(function (r) { return r.text(); }).then(function (t) {
+      var re = /url(([^)]+))/g, m;
+      while ((m = re.exec(t))) fetch('/player/fonts/' + m[1].replace(/['"]/g, '')).catch(function () {});
+    }).catch(function () {});
+  }, 8000);
 
   /* ---------- Player : app « composition » (pleine page, mise à l'échelle sans déformation) ---------- */
   if (w.LinkiiApps) w.LinkiiApps.register('composition', function (h) {

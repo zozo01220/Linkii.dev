@@ -223,7 +223,11 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
         m != null && hidden.Count > 0 && (IsFile(m) ? hidden.Contains(m.Id) : m.Settings.Values.SelectMany(AppField.MediaIds).Any(hidden.Contains));
 
     /// <summary>Tous les fichiers sans emploi (même règle que les exports Canva) : filtre « Non utilisés » et mention sur la vignette.</summary>
-    public HashSet<Guid> UnusedIds() => store.Read(d => UnusedExports(d.Media, d.Playlists, d.Screens, null).Select(m => m.Id).ToHashSet());
+    public HashSet<Guid> UnusedIds() => store.Read(d =>
+    {
+        var inTemplates = d.CompositionTemplates.SelectMany(t => AppField.MediaIds(t.Images)).ToHashSet();   // images d'un modèle de composition : utilisées
+        return UnusedExports(d.Media, d.Playlists, d.Screens, null).Select(m => m.Id).Where(id => !inTemplates.Contains(id)).ToHashSet();
+    });
 
     /// <summary>Où sert un fichier : contenus (apps) qui l'ont choisi, listes de lecture qui le diffusent (directement ou par un contenu) et leurs écrans.</summary>
     public MediaUses Uses(Guid mediaId) => store.Read(d =>

@@ -16,6 +16,7 @@ public class Db
     public List<MediaFolder> MediaFolders { get; set; } = new();  // dossiers de la médiathèque (voir <see cref="MediaFolder"/>)
     public List<AreaShare> AreaShares { get; set; } = new();       // partages entre aires de gestion : médias, dossiers, listes de lecture (voir <see cref="AreaShare"/>)
     public List<PlaylistFolder> PlaylistFolders { get; set; } = new();  // dossiers des listes de lecture (voir <see cref="PlaylistFolder"/>)
+    public List<CompositionTemplate> CompositionTemplates { get; set; } = new();   // « Mes modèles » de compositions (voir <see cref="CompositionTemplate"/>)
     public List<Payment> Payments { get; set; } = new();          // paiements de renouvellement enregistrés (voir <see cref="Subscriptions"/>)
     public List<Payout> Payouts { get; set; } = new();            // versements de fin de mois aux revendeurs
     public PlatformSettings Platform { get; set; } = new();      // réglages communs à toutes les organisations (console › Réglages)

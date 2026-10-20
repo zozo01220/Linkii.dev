@@ -105,3 +105,51 @@ public static class Compositions
 
     private static string? Color(string? v) => v != null && Regex.IsMatch(v, "^#[0-9a-fA-F]{6}$") ? v : null;
 }
+
+/// <summary>
+/// « Mes modèles » (§84) : une composition enregistrée comme point de départ réutilisable. Rangé dans l'aire (comme les compositions), visible de ses membres ;
+/// partir d'un modèle crée une nouvelle composition, le modèle ne change pas. Document au même format que <see cref="Compositions"/>.
+/// </summary>
+public class CompositionTemplate : IClientOwned, IAreaOwned
+{
+    public Guid ClientId { get; set; }
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid AreaId { get; set; }
+    public string Name { get; set; } = "";
+    public string Doc { get; set; } = "";
+    /// <summary>Images de la médiathèque utilisées (identifiants, séparés par des virgules) : elles comptent comme « utilisées ».</summary>
+    public string Images { get; set; } = "";
+    public Guid? OwnerId { get; set; }
+    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>Opérations sur « Mes modèles » : enregistrer, renommer, supprimer (dans l'aire ouverte).</summary>
+public static class CompositionTemplates
+{
+    public const int MaxPerArea = 200;
+
+    /// <summary>Enregistre un document comme modèle ; rend l'erreur, ou null.</summary>
+    public static (CompositionTemplate? Template, string? Error) Save(ClientDb d, string name, string doc, Guid? ownerId)
+    {
+        name = (name ?? "").Trim();
+        if (name.Length == 0) return (null, "Donnez un nom au modèle.");
+        if (name.Length > 80) return (null, "Le nom est trop long (80 caractères maximum).");
+        if (Compositions.Clean(doc) is not { } c) return (null, "La composition est trop grande ou illisible : le modèle n'a pas été enregistré.");
+        if (d.CompositionTemplates.Count >= MaxPerArea) return (null, $"Cette aire a déjà {MaxPerArea} modèles : supprimez-en avant d'en ajouter.");
+        var t = new CompositionTemplate { Name = name, Doc = c.Doc, Images = string.Join(",", c.Images), OwnerId = ownerId };
+        d.CompositionTemplates.Add(t);
+        return (t, null);
+    }
+
+    public static string? Rename(ClientDb d, Guid id, string name)
+    {
+        name = (name ?? "").Trim();
+        if (name.Length == 0) return "Donnez un nom au modèle.";
+        if (name.Length > 80) return "Le nom est trop long (80 caractères maximum).";
+        if (d.CompositionTemplates.FirstOrDefault(t => t.Id == id) is not { } t) return "Modèle introuvable.";
+        t.Name = name;
+        return null;
+    }
+
+    public static bool Delete(ClientDb d, Guid id) => d.CompositionTemplates.RemoveAll(t => t.Id == id) > 0;
+}

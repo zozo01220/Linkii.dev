@@ -9,9 +9,9 @@
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 
-@* Compositions (§80) : Mes compositions et la galerie de modèles. La page n'existe que si l'intégration « Compositions » est dans Mes intégrations.
-   Les compositions de « Mes compositions » se placent ensuite dans les listes de lecture, comme n'importe quel contenu. *@
-<HeadContent><link rel="stylesheet" href="compo-editor.css?v=2" /></HeadContent>
+@* Compositions (§80-81, §84) : Mes compositions, et les modèles (galerie Linkii et « Mes modèles » de l'aire). La page n'existe que si l'intégration
+   « Compositions » est dans Mes intégrations. Les compositions de « Mes compositions » se placent ensuite dans les listes de lecture. *@
+<HeadContent><link rel="stylesheet" href="compo-editor.css?v=3" /></HeadContent>
 
 <div class="page-head">
     <div>
@@ -43,8 +43,54 @@ else
 
     @if (tab == "models")
     {
-        <p class="hint cmp-hint">Choisissez un modèle pour démarrer : tout reste modifiable, et rien n'est enregistré tant que vous ne l'avez pas fait.</p>
-        <div @key="galKey" @ref="gal"></div>
+        <div class="cmp-sub" role="tablist" aria-label="Galerie et Mes modèles">
+            <button type="button" role="tab" class="@(sub == "gallery" ? "on" : "")" aria-selected="@(sub == "gallery" ? "true" : "false")" @onclick='() => SetSub("gallery")'>Galerie</button>
+            <button type="button" role="tab" class="@(sub == "mine" ? "on" : "")" aria-selected="@(sub == "mine" ? "true" : "false")" @onclick='() => SetSub("mine")'>Mes modèles <span class="cat-count">@templates.Count</span></button>
+        </div>
+        @if (sub == "gallery")
+        {
+            <p class="hint cmp-hint">Choisissez un modèle pour démarrer : tout reste modifiable, et rien n'est enregistré tant que vous ne l'avez pas fait.</p>
+            <div @key="galKey" @ref="gal"></div>
+        }
+        else if (templates.Count == 0)
+        {
+            <div class="empty">
+                <div class="big">Aucun modèle pour l'instant</div>
+                <p>Enregistrez une composition comme modèle (menu ⋮ d'une composition, ou « Enregistrer ▾ › Enregistrer comme modèle… » dans l'éditeur) pour la réutiliser comme point de départ.</p>
+            </div>
+        }
+        else
+        {
+            <p class="hint cmp-hint">Vos modèles, partagés avec l'aire de gestion. Partir d'un modèle crée une nouvelle composition ; le modèle ne change pas.</p>
+            <div class="cmp-grid">
+                @foreach (var t in templates)
+                {
+                    var tp = t;
+                    var tsize = Compositions.Size(new Dictionary<string, string> { ["doc"] = tp.Doc });
+                    <article class="cmp-card">
+                        <button type="button" class="cmp-open cmp-use" @onclick="() => UseTemplate(tp)" aria-label="Créer une composition à partir de « @tp.Name »"><CompositionThumb Item="TemplateItem(tp)" Files="files" Label="@("Aperçu de " + tp.Name)" /></button>
+                        <div class="cmp-info">
+                            <div class="cmp-t">
+                                <b title="@tp.Name">@tp.Name</b>
+                                <div class="kebab">
+                                    <button type="button" class="kebab-btn" aria-label="Actions pour le modèle @tp.Name" aria-haspopup="menu" aria-expanded="@(menuFor == tp.Id ? "true" : "false")" @onclick="() => menuFor = menuFor == tp.Id ? null : tp.Id"><Ico Name="dots-v" Size="18" /></button>
+                                    @if (menuFor == tp.Id)
+                                    {
+                                        <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                                        <div class="kebab-menu" role="menu">
+                                            <button type="button" role="menuitem" @onclick="() => UseTemplate(tp)"><Ico Name="plus" Size="16" /> Créer une composition</button>
+                                            <button type="button" role="menuitem" @onclick="() => StartRename(tp.Id, tp.Name, true)"><Ico Name="edit" Size="16" /> Renommer…</button>
+                                            <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deletingTpl = tp; }"><Ico Name="trash" Size="16" /> Supprimer…</button>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                            <span class="cmp-m">@(tsize is { } ts ? $"{ts.W} × {ts.H}" : "Format inconnu") · ajouté le @tp.CreatedUtc.ToLocalTime().ToString("d MMMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("fr-CH"))</span>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
     }
     else if (items.Count == 0)
     {
@@ -77,7 +123,9 @@ else
                                     <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
                                     <div class="kebab-menu" role="menu">
                                         <a role="menuitem" href="/compositions/@it.Id"><Ico Name="edit" Size="16" /> Modifier</a>
+                                        <button type="button" role="menuitem" @onclick="() => StartRename(it.Id, it.Name, false)"><Ico Name="pencil-square" Size="16" /> Renommer…</button>
                                         <button type="button" role="menuitem" @onclick="() => Duplicate(it)"><Ico Name="copy" Size="16" /> Dupliquer</button>
+                                        <button type="button" role="menuitem" @onclick="() => SaveAsTemplate(it)"><Ico Name="grid" Size="16" /> Enregistrer comme modèle</button>
                                         <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = it; }"><Ico Name="trash" Size="16" /> Supprimer…</button>
                                     </div>
                                 }
@@ -89,6 +137,20 @@ else
             }
         </div>
     }
+}
+
+@if (renaming is { } rn)
+{
+    <div class="modal-backdrop" @onclick="() => renaming = null"></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="cmp-rn-title">
+        <h3 id="cmp-rn-title">@(rn.Template ? "Renommer le modèle" : "Renommer la composition")</h3>
+        <p class="hint">@(rn.Template ? "Le nom s'affiche dans « Mes modèles »." : "Le nom s'affiche dans le back-office (listes de lecture, Compositions), pas sur les écrans.")</p>
+        <input style="width:100%" maxlength="80" aria-label="Nouveau nom" @bind="renameValue" @bind:event="oninput" @onkeydown='e => { if (e.Key == "Enter") SaveRename(); }' />
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => renaming = null">Annuler</button>
+            <button class="btn" disabled="@string.IsNullOrWhiteSpace(renameValue)" @onclick="SaveRename">Renommer</button>
+        </div>
+    </div>
 }
 
 @if (deleting is { } del)
@@ -110,13 +172,30 @@ else
     </div>
 }
 
+@if (deletingTpl is { } dt)
+{
+    <div class="modal-backdrop" @onclick="() => deletingTpl = null"></div>
+    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="cmp-dt-title">
+        <h3 id="cmp-dt-title">Supprimer le modèle « @dt.Name » ?</h3>
+        <p class="hint">Les compositions créées à partir de ce modèle ne changent pas. Les images de la médiathèque ne sont pas supprimées.</p>
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => deletingTpl = null">Annuler</button>
+            <button class="btn danger-solid" @onclick="() => DeleteTemplate(dt)">Supprimer</button>
+        </div>
+    </div>
+}
+
 @code {
     private bool installed;
-    private string tab = "mine";
+    private string tab = "mine", sub = "gallery";
     private List<MediaItem> items = new(), files = new();
+    private List<CompositionTemplate> templates = new();
     private Dictionary<Guid, List<string>> usage = new();
     private Guid? menuFor;
     private MediaItem? deleting;
+    private CompositionTemplate? deletingTpl;
+    private (Guid Id, bool Template)? renaming;
+    private string renameValue = "";
     private ElementReference gal;
     private int galKey;
     private bool galDrawn;
@@ -135,18 +214,23 @@ else
     {
         installed = Svc.IsInstalled(Compositions.AppId);
         items = Svc.Instances(Compositions.AppId);
+        templates = Store.Read(d => d.CompositionTemplates.OrderByDescending(t => t.CreatedUtc).ToList());
         files = Library.Files().Where(m => m.Type == "image" && m.Status == null && m.FileName != null).ToList();
         usage = Store.Read(d => d.Playlists.SelectMany(p => p.Draft.Select(i => (i.MediaId, p.Name)))
             .Where(x => items.Any(c => c.Id == x.MediaId)).GroupBy(x => x.MediaId).ToDictionary(g => g.Key, g => g.Select(x => x.Name).Distinct().ToList()));
     }
 
+    // La vignette d'un modèle utilise le même rendu qu'une composition
+    private static MediaItem TemplateItem(CompositionTemplate t) => new() { Id = t.Id, Name = t.Name, Settings = new() { ["doc"] = t.Doc } };
+
     private void SetTab(string t) { tab = t; menuFor = null; galDrawn = false; galKey++; }
+    private void SetSub(string s) { sub = s; menuFor = null; galDrawn = false; galKey++; }
 
     private void Create() => Nav.NavigateTo("/compositions/new?back=%2Fcompositions");
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (tab != "models" || galDrawn || !installed) return;
+        if (tab != "models" || sub != "gallery" || galDrawn || !installed) return;
         galDrawn = true;
         self ??= DotNetObjectReference.Create(this);
         try { await JS.InvokeVoidAsync("LinkiiCompoEditor.gallery", gal, self); }
@@ -156,6 +240,38 @@ else
     /// <summary>Un modèle de la galerie : l'éditeur s'ouvre dessus (rien n'est enregistré avant « Enregistrer »).</summary>
     [JSInvokable]
     public void Template(int index) => Nav.NavigateTo($"/compositions/new?tpl={index}&back=%2Fcompositions");
+
+    private void UseTemplate(CompositionTemplate t) => Nav.NavigateTo($"/compositions/new?mytpl={t.Id}&back=%2Fcompositions");
+
+    private void StartRename(Guid id, string current, bool template)
+    {
+        menuFor = null;
+        renaming = (id, template);
+        renameValue = current;
+    }
+
+    private void SaveRename()
+    {
+        if (renaming is not { } rn) return;
+        string? err;
+        try { err = rn.Template ? Store.Write(d => CompositionTemplates.Rename(d, rn.Id, renameValue)) : Svc.RenameInstance(rn.Id, renameValue); }
+        catch (UnauthorizedAccessException e) { err = e.Message; }
+        if (err != null) { Toast.Error(err); return; }
+        renaming = null;
+        Toast.Ok($"Renommé en « {renameValue.Trim()} ».");
+        Load();
+    }
+
+    private void SaveAsTemplate(MediaItem it)
+    {
+        menuFor = null;
+        string? err;
+        try { err = Store.Write(d => CompositionTemplates.Save(d, it.Name, it.Settings.GetValueOrDefault("doc") ?? "", Store.UserId).Error); }
+        catch (UnauthorizedAccessException e) { err = e.Message; }
+        if (err != null) { Toast.Error(err); return; }
+        Toast.Ok($"« {it.Name} » ajouté à Mes modèles.");
+        Load();
+    }
 
     private void Duplicate(MediaItem it)
     {
@@ -172,6 +288,15 @@ else
         deleting = null;
         Svc.DeleteInstance(it.Id);   // retirée aussi des listes de lecture qui l'utilisent
         Toast.Ok($"« {it.Name} » supprimée.");
+        Load();
+    }
+
+    private void DeleteTemplate(CompositionTemplate t)
+    {
+        deletingTpl = null;
+        try { Store.Write(d => { CompositionTemplates.Delete(d, t.Id); }); }
+        catch (UnauthorizedAccessException e) { Toast.Error(e.Message); return; }
+        Toast.Ok($"Modèle « {t.Name} » supprimé.");
         Load();
     }
 }

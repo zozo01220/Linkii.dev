@@ -128,6 +128,21 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         return count;
     }
 
+    /// <summary>Renomme un contenu (ex. une composition depuis la page Compositions) ; rend le message d'erreur, ou null. Le nom ne part pas sur les écrans.</summary>
+    public string? RenameInstance(Guid mediaId, string name)
+    {
+        name = (name ?? "").Trim();
+        if (name.Length == 0) return "Donnez un nom.";
+        if (name.Length > 80) return "Le nom est trop long (80 caractères maximum).";
+        return store.Write<string?>(d =>
+        {
+            if (d.Media.FirstOrDefault(m => m.Id == mediaId && m.AppId != null) is not { } m) return "Contenu introuvable.";
+            if (catalog.Find(m.AppId) is { } app && !d.Access.CanUse(app)) return "Votre niveau de droits ne permet pas d'utiliser cette intégration.";
+            m.Name = name;
+            return null;
+        });
+    }
+
     public void DeleteInstance(Guid mediaId)
     {
         var pdfs = new List<string>();

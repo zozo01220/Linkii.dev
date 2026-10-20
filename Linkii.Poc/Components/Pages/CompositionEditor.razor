@@ -5,14 +5,15 @@
 @using Microsoft.JSInterop
 @inject AppService Svc
 @inject MediaLibrary Library
+@inject MediaImporter Importer
 @inject TenantStore Store
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 
-@* Éditeur de compositions (DEV-POC.md §80) : l'interface est en JS (wwwroot/compo-editor.js, plein écran), le serveur garde le document,
-   calcule les QR codes et liste les images de la médiathèque. Le rendu des calques est celui du player (player/composition.js).
+@* Éditeur de compositions (DEV-POC.md §80, §84) : l'interface est en JS (wwwroot/compo-editor.js, plein écran), le serveur garde le document,
+   calcule les QR codes, liste et importe les images de la médiathèque, et garde « Mes modèles ». Le rendu des calques est celui du player (player/composition.js).
    « /compositions/new » : rien n'est créé tant qu'on n'a pas enregistré (pas de composition vide laissée derrière soi). *@
-<HeadContent><link rel="stylesheet" href="compo-editor.css?v=2" /></HeadContent>
+<HeadContent><link rel="stylesheet" href="compo-editor.css?v=3" /></HeadContent>
 
 @if (!ready)
 {
@@ -27,6 +28,8 @@ else if (!Svc.IsInstalled(Compositions.AppId))
 else
 {
     <div class="ce" @ref="root"></div>
+    @* « Importer » du panneau Médias : le JS ouvre ce sélecteur de fichiers ; les images entrent dans la médiathèque de l'aire. *@
+    <InputFile id="ce-file" OnChange="OnFiles" multiple accept="image/*" style="display:none" />
 }
 
 @code {
@@ -35,11 +38,15 @@ else
     [SupplyParameterFromQuery(Name = "back")] public string? BackParam { get; set; }
     /// <summary>Modèle de la galerie (numéro) pour démarrer une nouvelle composition.</summary>
     [SupplyParameterFromQuery(Name = "tpl")] public int? Tpl { get; set; }
+    /// <summary>Modèle de « Mes modèles » pour démarrer une nouvelle composition.</summary>
+    [SupplyParameterFromQuery(Name = "mytpl")] public Guid? MyTpl { get; set; }
     /// <summary>Liste de lecture où ajouter la composition dès son premier enregistrement (création depuis la liste), et la position visée.</summary>
     [SupplyParameterFromQuery(Name = "addTo")] public Guid? AddTo { get; set; }
     [SupplyParameterFromQuery(Name = "at")] public int? At { get; set; }
 
+    private const int MaxImport = 10;
     private MediaItem? item;
+    private CompositionTemplate? startTemplate;
     private bool ready;
     private Guid? createdId;   // composition créée par le premier enregistrement
     private ElementReference root;
@@ -55,15 +62,27 @@ else
             item = m?.AppId == Compositions.AppId ? m : null;
             ready = item != null;
         }
-        else ready = true;
+        else
+        {
+            startTemplate = MyTpl is { } t ? Store.Read(d => d.CompositionTemplates.FirstOrDefault(x => x.Id == t)) : null;
+            ready = MyTpl == null || startTemplate != null;
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender || !ready || !Svc.IsInstalled(Compositions.AppId)) return;
         self = DotNetObjectReference.Create(this);
-        await JS.InvokeVoidAsync("LinkiiCompoEditor.mount", root,
-            new { name = item?.Name ?? "", doc = item?.Settings.GetValueOrDefault("doc") ?? "", images = Images(), tpl = Tpl }, self);
+        await JS.InvokeVoidAsync("LinkiiCompoEditor.mount", root, new
+        {
+            name = item?.Name ?? startTemplate?.Name ?? "",
+            doc = item?.Settings.GetValueOrDefault("doc") ?? startTemplate?.Doc ?? "",
+            fromTemplate = startTemplate != null,   // document d'un modèle : pas encore enregistré
+            images = Images(),
+            tpl = Tpl,
+            myTemplates = Templates(),
+            canImport = Store.Read(d => d.Access.CanWrite(LevelPages.Media))
+        }, self);
     }
 
     /// <summary>Enregistre le nom et le document (crée la composition au premier enregistrement) ; rend le message d'erreur, ou null.</summary>
@@ -98,6 +117,32 @@ else
         catch (UnauthorizedAccessException) { }
     }
 
+    // ---------- Mes modèles ----------
+
+    private List<object> Templates() => Store.Read(d => d.CompositionTemplates.OrderByDescending(t => t.CreatedUtc)
+        .Select(t => (object)new { id = t.Id.ToString(), name = t.Name, doc = t.Doc }).ToList());
+
+    /// <summary>Enregistre le document comme modèle de « Mes modèles » ; rend { error } ou { templates }.</summary>
+    [JSInvokable]
+    public object SaveTemplate(string name, string doc)
+    {
+        try
+        {
+            var err = Store.Write(d => CompositionTemplates.Save(d, name, doc, Store.UserId).Error);
+            return err != null ? new { error = err } : new { templates = Templates() };
+        }
+        catch (Exception e) when (e is UnauthorizedAccessException or ReadOnlyLevelException) { return new { error = "Votre niveau de droits ne permet pas d'enregistrer un modèle." }; }
+    }
+
+    [JSInvokable]
+    public object DeleteTemplate(string id)
+    {
+        if (Guid.TryParse(id, out var g)) Store.Write(d => { CompositionTemplates.Delete(d, g); });
+        return Templates();
+    }
+
+    // ---------- Médias ----------
+
     /// <summary>Tracé du QR code (le même que celui publié sur l'écran).</summary>
     [JSInvokable]
     public string? Qr(string text) => QrCodes.Encode(text);
@@ -109,6 +154,30 @@ else
         .OrderByDescending(m => m.AddedUtc)
         .Select(m => (object)new { id = m.Id.ToString(), name = m.Name, url = "/media/" + m.FileName, w = m.Width, h = m.Height })
         .ToList();
+
+    // Images choisies dans « Importer » : ajoutées à la médiathèque (racine de l'aire), puis proposées à l'éditeur (la première est placée sur la page).
+    private async Task OnFiles(InputFileChangeEventArgs e)
+    {
+        if (!Store.Read(d => d.Access.CanWrite(LevelPages.Media)))
+        {
+            await JS.InvokeVoidAsync("LinkiiCompoEditor.imported", Images(), Array.Empty<string>(), new[] { "Votre niveau de droits ne permet pas d'ajouter des fichiers à la médiathèque." });
+            return;
+        }
+        var files = e.GetMultipleFiles(MaxImport + 1);
+        var errors = new List<string>();
+        if (files.Count > MaxImport) errors.Add($"Au plus {MaxImport} images à la fois : les suivantes sont ignorées.");
+        var picked = files.Take(MaxImport).ToList();
+        await JS.InvokeVoidAsync("LinkiiCompoEditor.importing", picked.Count);
+        var ids = new List<string>();
+        foreach (var f in picked)
+        {
+            if (!f.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) || !MediaImporter.IsSupported(f.Name)) { errors.Add($"« {f.Name} » n'est pas une image prise en charge."); continue; }
+            var r = await Importer.Import(f, Store.ClientId, null, CancellationToken.None, Store.AreaId, null, Store.UserId);
+            if (r.Item != null) ids.Add(r.Item.Id.ToString());
+            else errors.Add(r.Error ?? $"« {f.Name} » n'a pas pu être importée.");
+        }
+        await JS.InvokeVoidAsync("LinkiiCompoEditor.imported", Images(), ids, errors);
+    }
 
     [JSInvokable]
     public void Leave() => Nav.NavigateTo(Back);

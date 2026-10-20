@@ -143,6 +143,55 @@ public class CompositionsTests(Platform p)
     }
 
     [Fact]
+    public void Mes_modeles_se_creent_se_renomment_et_se_suppriment_dans_l_aire()
+    {
+        var store = p.Services.GetRequiredService<JsonStore>();
+        var img = new MediaItem { ClientId = p.A.Id, Type = "image", Name = "Logo", FileName = Guid.NewGuid().ToString("N") + ".png" };
+        store.Write(db => db.Media.Add(img));
+        var doc = Doc(new { id = "e1", type = "image", media = img.Id.ToString() }, new { id = "e2", type = "text", text = "Modèle" });
+
+        var t = store.Write(db =>
+        {
+            var d = new ClientDb(db, p.A.Id);
+            Assert.Equal("Donnez un nom au modèle.", CompositionTemplates.Save(d, "  ", doc, null).Error);
+            Assert.NotNull(CompositionTemplates.Save(d, "Illisible", "{", null).Error);
+            var (tpl, err) = CompositionTemplates.Save(d, "Accueil hiver", doc, null);
+            Assert.Null(err);
+            return tpl!;
+        });
+        Assert.Equal(img.Id.ToString(), t.Images);
+        Assert.Contains("\"e2\"", t.Doc);
+        // les images d'un modèle comptent comme utilisées dans la médiathèque
+        Assert.Contains(t.Id, store.Read(db => db.CompositionTemplates.Select(x => x.Id).ToList()));
+        Assert.DoesNotContain(store.Read(db => new ClientDb(db, p.B.Id).CompositionTemplates.ToList()), x => x.Id == t.Id);   // autre client : invisible
+
+        store.Write(db =>
+        {
+            var d = new ClientDb(db, p.A.Id);
+            Assert.Null(CompositionTemplates.Rename(d, t.Id, "Accueil été"));
+            Assert.NotNull(CompositionTemplates.Rename(d, Guid.NewGuid(), "x"));
+        });
+        Assert.Equal("Accueil été", store.Read(db => db.CompositionTemplates.First(x => x.Id == t.Id).Name));
+        Assert.False(store.Write(db => CompositionTemplates.Delete(new ClientDb(db, p.B.Id), t.Id)));   // un autre client ne peut pas le supprimer
+        Assert.True(store.Write(db => CompositionTemplates.Delete(new ClientDb(db, p.A.Id), t.Id)));
+    }
+
+    [Fact]
+    public void Renommer_une_composition()
+    {
+        var store = p.Services.GetRequiredService<JsonStore>();
+        var user = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(Claims.Client, p.A.Id.ToString()), new Claim(ClaimTypes.Role, Roles.ClientAdmin) }, "test"));
+        var s = new AppService(new TenantStore(store, new TenantContext(new FixedAuth(user), store)), p.Services.GetRequiredService<AppCatalog>(), p.Services.GetRequiredService<AppProviders>(), p.Services.GetRequiredService<SecretBox>());
+        s.Install(Compositions.AppId);
+        var c = Compositions.Clean(Doc(new { id = "e1", type = "text", text = "A" }))!.Value;
+        var (item, _) = s.SaveInstance(Compositions.AppId, null, "Avant", new Dictionary<string, string> { ["doc"] = c.Doc, ["images"] = "" });
+        Assert.Equal("Donnez un nom.", s.RenameInstance(item!.Id, " "));
+        Assert.Null(s.RenameInstance(item.Id, "Après"));
+        Assert.Equal("Après", s.Instance(item.Id)!.Name);
+        Assert.Equal(c.Doc, s.Instance(item.Id)!.Settings["doc"]);   // le document ne change pas
+    }
+
+    [Fact]
     public async Task Une_composition_enregistree_puis_publiee_arrive_sur_l_ecran_avec_ses_images()
     {
         var store = p.Services.GetRequiredService<JsonStore>();
