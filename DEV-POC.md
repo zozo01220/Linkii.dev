@@ -1750,3 +1750,14 @@ Maquette validée : `maquettes/composition-fenetre-modifier.html`. Remplace le r
 - **Vu** : fenêtre ouverte depuis la ligne (aperçu à gauche, onglets à droite, 5 positions), onglet QR code avec la composition en fond et le QR de comptage à placer. Test `CompositionsTests` (positions identiques à l'Image, angle conservé à la publication). **Pas vu** : composition en angle sur un écran réel, retour de l'éditeur vers la fenêtre, enregistrement d'un QR de comptage de bout en bout.
 
 **Correction (21 octobre 2026) : QR de comptage et aperçu d'une composition.** (1) Le QR de comptage d'une composition se place et se mesure en **% de sa page**, pas de l'écran : l'aperçu de l'onglet « QR code » et celui de l'onglet Contenu ont le format de la page (`Compositions.StageStyle`, 16:9, portrait ou autre) ; le player ne dessine plus ce QR par-dessus la zone (`addQr` ignoré pour l'app composition) mais **dans la page mise à l'échelle** (`composition.js`, `addQr`), donc à la même place sur tous les formats d'écran (avant, un écran portrait le déplaçait). (2) L'aperçu de l'onglet Contenu s'affichait vide quand les écrans de la liste sont en portrait (cadre sans largeur) : il a maintenant la taille de la page. (3) Taille minimale du QR de comptage **3 %** (au lieu de 8 %), pour toutes les apps (`QrTracking.MinSize`, curseur de la fenêtre et player).
+
+## 83. Même mise en page pour l'édition de tous les contenus à aperçu (21 octobre 2026) : codé
+
+Maquette validée : `maquettes/fenetre-media-layout-unique.html`. Remplace la disposition « aperçu, onglets, configuration » en une colonne (correction du §79) : toute fenêtre de contenu qui a un aperçu (Image, Vidéo, Diaporamas, PDF, Canva, documents Google et PowerPoint, Drive, Page web, YouTube, flux, calendrier, Météo, Compositions) s'ouvre ainsi :
+
+- **Tiroir élargi** : jusqu'à 1 480 px (`.modal.app-modal.ci-modal`, avant 1 120 px).
+- **Aperçu à gauche**, grand et identique dans les onglets Contenu et QR code (aperçu de l'écran où le QR se place).
+- **À droite** (340 à 460 px) : onglets « Contenu / QR code » en tête, puis « Configuration » (champs de l'app), puis « Dans cette liste de lecture » (position, durée). Pour une composition : pas de « Configuration », l'encadré bleu vers l'éditeur puis la liste.
+- La disposition `ci-cols.stack` et le paramètre `tabsUnder` d'`AppInstanceForm` sont supprimés. Les apps sans aperçu (texte, horloge, compte à rebours…) gardent leur colonne unique.
+- Aperçu d'une composition : page dans un cadre gris, informations en dessous (format, orientation, nombre d'éléments : `Compositions.ElementCount`).
+- **Vu** : composition (aperçu, onglets à droite, encadré bleu, position et durée) et Diaporama images vide (« + Ajouter des images », configuration, liste de lecture, ⚙ en en-tête). **Pas vu** : les autres apps (Vidéo, PDF, YouTube, Météo…), le portrait d'un autre contenu que la composition, les écrans de moins de 1 100 px.

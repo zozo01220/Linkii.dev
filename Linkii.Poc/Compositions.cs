@@ -79,6 +79,13 @@ public static class Compositions
         catch (JsonException) { return null; }
     }
 
+    /// <summary>Nombre de calques d'une composition (0 si le document est illisible).</summary>
+    public static int ElementCount(IReadOnlyDictionary<string, string> settings)
+    {
+        try { return JsonNode.Parse(settings.GetValueOrDefault("doc") ?? "") is JsonObject d && d["els"] is JsonArray a ? a.Count : 0; }
+        catch (JsonException) { return 0; }
+    }
+
     /// <summary>
     /// Cadre d'aperçu d'une composition (CSS en ligne) : celui de sa page, pas celui de l'écran. Le QR de comptage se place et se mesure en % de cette page
     /// (comme le player, qui le dessine dans la page mise à l'échelle) : la même position à l'aperçu et sur tous les écrans, quel que soit leur format.
