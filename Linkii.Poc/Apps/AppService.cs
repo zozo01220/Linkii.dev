@@ -58,6 +58,12 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
     /// <summary>Rend l'app disponible dans les listes de lecture (page Intégrations), ou le widget dans l'édition des écrans (page Widgets).</summary>
     public void Enable(string appId) => Install(appId);
 
+    /// <summary>Range une intégration dans « Mes intégrations » (prise dans le Store) : elle y reste même désactivée.</summary>
+    public void Mark(string integrationId) => store.Write(d => { RequireAdmin(d); if (!d.Tenant.IntegrationsAdded.Contains(integrationId)) d.Tenant.IntegrationsAdded.Add(integrationId); });
+
+    /// <summary>Remet une intégration dans le Store.</summary>
+    public void Unmark(string integrationId) => store.Write(d => { RequireAdmin(d); d.Tenant.IntegrationsAdded.Remove(integrationId); });
+
     /// <summary>Retire l'app des choix proposés. Non destructif : les contenus et widgets déjà en place restent à l'antenne.</summary>
     public void Disable(string appId) => store.Write(d => { RequireAdmin(d); d.AppInstalls.RemoveAll(a => a.AppId == appId); });
 

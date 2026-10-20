@@ -320,6 +320,9 @@ public class Tenant
     /// <summary>Apps « activées par défaut » déjà activées une fois pour ce client : s'il les désactive ensuite, elles ne se réactivent pas.</summary>
     public List<string> DefaultAppsApplied { get; set; } = new();
 
+    /// <summary>Intégrations prises dans le Store (identifiants de la page Intégrations) : elles restent dans « Mes intégrations » même désactivées. Les intégrations de base y sont d'office.</summary>
+    public List<string> IntegrationsAdded { get; set; } = new();
+
     public string Name { get; set; } = "";
 
     public string Timezone { get; set; } = "Europe/Zurich";

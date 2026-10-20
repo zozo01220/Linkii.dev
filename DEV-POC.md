@@ -1656,3 +1656,36 @@ Maquette validée : `maquettes/carte-ecran-legere.html`. But : une carte plus ba
 - **App Android** : inchangée (rangée sous le nom et état du mur en texte, classes `.gc-apponly`). **Vue liste** : inchangée.
 - Code : fragments `WallPlRow` / `ScreenPlRow` (une seule rangée, rendue dans l'aperçu et, pour l'app, sous le nom).
 - **Vu** (instance de test, 2 lecteurs web, mur 2 × 1) : carte au repos, survol, choix de la liste depuis la bande, liste des écrans du mur au-dessus des commandes, écran hors ligne. **Pas vu** : app Android, écran découpé en zones, licence de base (boutons verrouillés).
+
+## 76. Intégrations : Mes intégrations et Store (20 octobre 2026) : codé
+
+Maquette validée : `maquettes/integrations-store.html`. La page `/integrations` a trois onglets : **Mes intégrations**, **Intégrations Store** et **Comptes connectés** (inchangé).
+
+- **De base, activées d'office** : Image, Diaporama d'images, Vidéo, Diaporama de vidéos, PDF, RSS, Page web, YouTube (`defaultOn` des manifestes, appliqué une fois par client par `AppService.ApplyDefaults`, donc dès la création du compte, plans Base et Growth). Le client peut les désactiver (interrupteur) ; elles ne quittent jamais Mes intégrations.
+- **Mes intégrations** = intégrations de base + intégrations prises dans le Store (`Tenant.IntegrationsAdded`, même désactivées) + toute intégration active. Les autres (Canva, Google Slides / Docs, PowerPoint, Facebook, calendriers, Drives, Home Assistant) sont dans le **Store**, chacune avec un bouton orange **Utiliser** (`.btn-use`).
+- **Utiliser** : l'intégration est activée et rangée dans Mes intégrations (`AppService.Mark`), son tiroir de configuration s'ouvre ; à sa fermeture on revient sur Mes intégrations, la carte clignote. Une plateforme sans connexion au fournisseur (Google, Microsoft, Canva, Dropbox non configurés) refuse avec un message, sans rien ajouter.
+- **En rouge** : une intégration dont le compte n'est pas connecté, l'accès pas autorisé, la connexion pas configurée ou en échec (`hors-ligne` et `mise-a-jour` deviennent rouges dans `MineEntry`), avec son message et un bouton **Corriger** qui rouvre le tiroir. Google Slides / Docs et PowerPoint sont maintenant contrôlés sur le compte (accès Drive).
+- **Tiroirs** : les fenêtres existantes (calendriers, Drives, Home Assistant, Canva) sont devenues des tiroirs à droite (`.as-drawer`) ; les apps simples (base, Facebook, Slides…) ont un tiroir commun : description, compte demandé (se connecter, voir le compte), usage, « Retirer de Mes intégrations » (hors intégrations de base).
+- **Catégories** : boutons de filtre avec compteurs dans les deux onglets (Médias, Web, Documents et design, Calendriers, Fichiers et Drives, Réseaux sociaux, Maison connectée), groupes par catégorie, recherche, vue cartes ou liste.
+- Code : `Integrations.razor` (lignes `Use`, `OpenFor`, `EndUse`, `GroupsOf`), `CatalogView` (`err`, `FlashId`, `id="cat-…"`), `app.css` (fin du fichier).
+- **Vu** (compte neuf, serveur de test) : 8 intégrations de base actives, Store à 16, « Utiliser » sur Nextcloud (tiroir, puis carte rouge « À connecter »), Facebook (tiroir commun, désactivation, Retirer), CalDAV. **Pas vu** : un test réussi de bout en bout (aucun fournisseur configuré), Google / Microsoft / Canva, l'app mobile (`body.is-app`), un membre non administrateur. Les 19 tests en échec le sont aussi sans ces changements (lancés depuis un autre dossier de sortie).
+
+## 77. Intégrations : refonte de la carte et de la liste (20 octobre 2026) : codé
+
+Maquette validée : `maquettes/integrations-carte-liste.html` (variante A, tuile teintée). Remplace `CatalogView` sur la page Intégrations seulement (Widgets l'utilise toujours).
+
+- **Carte** (`IntCard`, compacte : grille dès 176 px, aperçu de 88 px, tuile de 58 px, une seule ligne de pied) : case à cocher en haut à gauche et menu ⋯ (Mes intégrations) ou pastille du prérequis (Store) ; aperçu encadré avec l'icône de l'intégration sur une tuile arrondie teintée de sa couleur (`TileOf`, couleur et pictogramme d'`AppIcon.LookOf`) ; nom ; ligne d'usage suivie du compte connecté (Mes intégrations) ou **description sur 2 lignes (Store seulement)** ; pied : état + Gérer + interrupteur, ou **Utiliser**. En erreur : cadre rouge, message, **Corriger**.
+- **Liste** (`IntRow`) : case, vignette encadrée, nom (description dans le Store ; message d'erreur sinon), état, utilisation ou prérequis, catégorie, actions + ⋯. Case d'en-tête = tout sélectionner. Colonnes d'usage et de catégorie masquées sous 1100 px.
+- **Actions groupées** (barre `.lx-selbar`, Mes intégrations, administrateurs) : Activer, Désactiver, Retirer. Retirer ignore les intégrations de base et Home Assistant ; Activer refuse celles dont la connexion du fournisseur n'est pas configurée (message). La sélection est vidée au changement d'onglet.
+- **Menu ⋯** : Gérer / Corriger, et « Retirer de Mes intégrations » (hors intégrations de base).
+- **Vu** (compte neuf, serveur de test) : cartes et liste des deux onglets, cases, désactivation groupée, Retirer par le menu (Nextcloud revient dans le Store). **Pas vu** : Activer / Retirer groupés sur des sources de calendriers ou de Drives, l'app mobile (`body.is-app`), un membre non administrateur.
+
+## 78. Intégrations : point d'état, détails et interrupteur sur la ligne du nom (20 octobre 2026) : codé
+
+Maquette validée : `maquettes/integrations-carte-liste-v2.html` (point devant le nom, « Corriger » visible).
+
+- **Mes intégrations** : le nom n'est plus un lien. Le menu ⋯ propose **Détails** (page descriptive : `/apps/{id}`, `/apps/agenda` pour les calendriers, `/apps/drive` pour les Drives ; rien pour Home Assistant), **Gérer** (tiroir de configuration) et **Retirer** (hors intégrations de base). Le bouton Gérer quitte les cartes et les lignes.
+- **Store** : le nom est un lien vers les détails (curseur main, bleu et souligné au survol).
+- **État** : la pastille « Active » est remplacée par un petit point devant le nom (`StateDot`) : vert actif, gris désactivé, rouge en erreur. La colonne État de la liste disparaît.
+- **Carte** : l'interrupteur est sur la ligne du nom ; plus de pied de carte, sauf **Corriger** (en erreur) et **Utiliser** (Store). **Liste** : Corriger, interrupteur et ⋯ à droite.
+- **Vu** (mesures dans la page, la capture d'écran n'a pas marché ce jour-là) : interrupteur et nom sur la même ligne, point à gauche du nom, aucune pastille, menu « Détails / Gérer / Retirer », 14 liens dans le Store (pas Home Assistant), ligne Nextcloud en erreur (point rouge, message, Corriger). **Pas vu** : le rendu en capture d'écran, la liste en largeur de bureau.
