@@ -88,7 +88,7 @@ else
                                         <button type="button" role="menuitem" @onclick="() => ToggleSync(row)">@(row.Sync ? "Couper la synchronisation" : "Synchroniser les écrans de cette zone")</button>
                                         @if (!row.IsDefault)
                                         {
-                                            <button type="button" role="menuitem" class="danger" @onclick="() => Delete(row)"><Ico Name="trash" Size="16" /> Supprimer la zone</button>
+                                            <button type="button" role="menuitem" class="danger" @onclick="() => AskDelete(row)"><Ico Name="trash" Size="16" /> Supprimer la zone</button>
                                         }
                                     </div>
                                 }
@@ -119,6 +119,29 @@ else
         <div class="modal-foot">
             <button type="button" class="btn ghost" @onclick="CloseEdit">Annuler</button>
             <button type="button" class="btn" disabled="@(editName.Trim().Length == 0)" @onclick="SaveEdit">Enregistrer</button>
+        </div>
+    </div>
+}
+
+@if (delRow is { } dr)
+{
+    <div class="modal-backdrop" @onclick="() => delRow = null"></div>
+    <div class="modal app-modal sm" role="alertdialog" aria-modal="true" aria-labelledby="dz-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="dz-title">Supprimer la zone « @dr.Name » ?</h3></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => delRow = null"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            @if (delScreens.Count == 0) { <p class="hint" style="margin:0">Aucun écran n'est dans cette zone.</p> }
+            else
+            {
+                <p class="hint" style="margin:0 0 6px">@(delScreens.Count > 1 ? $"Ces {delScreens.Count} écrans seront déplacés" : "Cet écran sera déplacé") dans la zone par défaut de l'aire :</p>
+                <ul style="margin:0;padding-left:20px">@foreach (var n in delScreens) { <li>@n</li> }</ul>
+            }
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn ghost" @onclick="() => delRow = null">Annuler</button>
+            <button type="button" class="btn danger-solid" @onclick="ConfirmDelete">Supprimer</button>
         </div>
     </div>
 }
@@ -259,9 +282,20 @@ else
         Load();
     }
 
-    private async Task Delete(ZoneRow r)
+    private ZoneRow? delRow;
+    private List<string> delScreens = new();
+
+    private void AskDelete(ZoneRow r)
     {
         menuFor = null;
+        delScreens = Store.Read(d => d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.ZoneId == r.Id).Select(s => s.Name).OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase).ToList());
+        delRow = r;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (delRow is not { } r) return;
+        delRow = null;
         var ids = Store.Read(d => d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.ZoneId == r.Id).Select(s => s.Id).ToList());
         var err = Store.Write(d => AreaOps.DeleteZone(d, r.AreaId, r.Id));
         error = err;

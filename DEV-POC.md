@@ -1797,3 +1797,8 @@ Maquette validée : `maquettes/editeur-compositions-etape3.html` (6 scènes). Co
 - **Vue Photos** : la pastille d'origine (OneDrive, GDrive, Canva, PDF) s'affiche en haut à droite de chaque vignette, comme sur les cartes. Google Drive s'écrit « GDrive » partout (cartes, liste, Photos).
 - **Retrait d'une source Drive** (Intégrations › Retirer, une ou plusieurs à la fois) : les dossiers de cette source sont retirés (`DriveService.RemoveFolder`) et les fichiers qu'ils avaient copiés disparaissent de la médiathèque et du disque. Avant, ils restaient sans pouvoir être supprimés, sauf à rouvrir la fenêtre de la source et retirer chaque dossier. Règle : le retrait d'une intégration qui crée des médias emporte ces médias. Cas traité pour l'instant : les sources Drive (Google Drive, OneDrive, Nextcloud, SFTP, Dropbox) ; Canva et PDF gardent leurs exports tant qu'une liste les utilise.
 - Compilation : OK ; rendu non vérifié dans le navigateur.
+
+## 87. Zones : confirmation avant suppression (21 octobre 2026) : codé
+
+- « Supprimer la zone » (page Zones) ouvre d'abord une fenêtre de confirmation. Elle liste les écrans de la zone, qui passeront dans la zone par défaut de l'aire (comportement inchangé de `AreaOps.DeleteZone`), ou indique qu'aucun écran n'y est.
+- Compilation : OK ; rendu non vérifié dans le navigateur.
