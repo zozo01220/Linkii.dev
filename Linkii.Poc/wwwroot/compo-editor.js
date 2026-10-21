@@ -13,6 +13,8 @@
     port: [[1080, 1920, '1080 × 1920 · Full HD (recommandé)'], [2160, 3840, '2160 × 3840 · 4K']]
   };
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  // pastille d'une source : vrai logo si elle en a un (rss, Home Assistant, météo), sinon le pictogramme sur sa couleur
+  const wi = m => m.logo ? `<span class="wi is-brand"><svg width="100%" height="100%"><use href="/brand-logos.svg#${m.logo}" width="100%" height="100%"/></svg></span>` : `<span class="wi" style="background:${m.color}">${m.icon}</span>`;
   const LC = () => w.LinkiiCompo;
 
   // ---------- état de l'éditeur monté ----------
@@ -656,7 +658,7 @@
     const card = s => {
       const m = LC().SRC[s.app] || {}, d = srcData[s.id], n = uses(s.id);
       const st = srcBusy[s.id] ? 'lecture…' : d && d.error ? d.error : d ? 'à jour, lue à ' + new Date(srcAt[s.id]).toLocaleTimeString('fr-CH', { hour: '2-digit', minute: '2-digit' }) : 'pas encore lue';
-      return `<div class="ce-src"><div class="h"><span class="wi" style="background:${m.color}">${m.icon}</span><b>${esc(s.name)}</b><span class="dot ${d && d.error ? 'bad' : d ? 'ok' : ''}"></span><button class="ce-tb" data-srcref="${s.id}" title="Relire les données" aria-label="Relire les données de ${esc(s.name)}">↻</button></div>
+      return `<div class="ce-src"><div class="h">${wi(m)}<b>${esc(s.name)}</b><span class="dot ${d && d.error ? 'bad' : d ? 'ok' : ''}"></span><button class="ce-tb" data-srcref="${s.id}" title="Relire les données" aria-label="Relire les données de ${esc(s.name)}">↻</button></div>
         <div class="meta">${esc(m.name)} · ${esc(st)}</div><div class="uses">${n ? `<span>${n} élément${n > 1 ? 's' : ''}</span>` : `<button class="ce-link" data-add="app:${s.id}">+ Poser un bloc</button>`}</div></div>`;
     };
     const inDoc = sources.filter(s => used.includes(s.id)), other = sources.filter(s => !used.includes(s.id)), missing = used.filter(id => !sources.some(s => s.id === id)).length;
@@ -827,7 +829,7 @@
         `<button class="ce-wrow" draggable="true" data-add="qr:"><span class="wi" style="background:#5A6B80">▣</span><span><b>QR code</b><small>Lien au choix. Pour compter les scans : onglet « QR code » du contenu, dans la liste de lecture</small></span></button>
         <div class="ce-grp">Mes intégrations <small>déjà configurées</small></div>
         <p class="ce-help" style="margin:0 0 10px">Posées comme un bloc : les données se mettent à jour seules sur l'écran. La source garde ses réglages (ville, calendrier…).</p>
-        ${sources.length ? sources.map(s => { const m = SM[s.app] || {}; return `<button class="ce-wrow" draggable="true" data-add="app:${esc(s.id)}"><span class="wi" style="background:${m.color}">${m.icon}</span><span><b>${esc(s.name)}</b><small>${esc(m.name)}</small></span><em class="ce-btag">bloc</em></button>`; }).join('')
+        ${sources.length ? sources.map(s => { const m = SM[s.app] || {}; return `<button class="ce-wrow" draggable="true" data-add="app:${esc(s.id)}">${wi(m)}<span><b>${esc(s.name)}</b><small>${esc(m.name)}</small></span><em class="ce-btag">bloc</em></button>`; }).join('')
           : '<div class="ce-empty">Aucune intégration à poser.<br>Ajoutez une Météo, un Calendrier partagé, un Flux RSS ou des Capteurs Home Assistant dans Mes intégrations.</div>'}
         <a class="ce-link" href="/integrations" target="_blank" rel="noopener">+ Ajouter une intégration depuis le Store</a>
         <div class="ce-grp">Plein écran seulement</div>

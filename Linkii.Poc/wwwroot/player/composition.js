@@ -67,10 +67,10 @@
 
   /* ---------- Sources de données (§85) : blocs et champs ---------- */
   var SRC = {
-    'weather-slide': { name: 'Météo', icon: '⛅', color: '#E0A526', refresh: 10 * 60000 },
+    'weather-slide': { name: 'Météo', icon: '⛅', logo: 'weather', color: '#E0A526', refresh: 10 * 60000 },
     agenda: { name: 'Calendrier', icon: '📅', color: '#2E8B57', refresh: 60000 },
-    rss: { name: 'Flux RSS', icon: '📰', color: '#C0485A', refresh: 5 * 60000 },
-    'ha-sensors': { name: 'Capteurs', icon: '🌡', color: '#41BDF5', refresh: 30000 }
+    rss: { name: 'Flux RSS', icon: '📰', logo: 'rss', color: '#C0485A', refresh: 5 * 60000 },
+    'ha-sensors': { name: 'Capteurs', icon: '🌡', logo: 'ha', color: '#41BDF5', refresh: 30000 }
   };
   var WMO = [[[0], '☀️'], [[1, 2], '🌤️'], [[3], '☁️'], [[45, 48], '🌫️'], [[51, 53, 55, 56, 57], '🌦️'],
     [[61, 63, 65, 66, 67, 80, 81, 82], '🌧️'], [[71, 73, 75, 77, 85, 86], '❄️'], [[95, 96, 99], '⛈️']];
