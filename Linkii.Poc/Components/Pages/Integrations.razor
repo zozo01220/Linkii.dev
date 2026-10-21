@@ -256,45 +256,31 @@ else
 
 @if (cvOpen)
 {
-    @* Canva : le compte se gère dans Comptes connectés ; ici, son état et l'accès à la connexion *@
-    var cv = accounts.FirstOrDefault(a => a.Id == ConnectedAccounts.Canva);
-    <div class="modal-backdrop" @onclick="CloseCanva"></div>
-    <div class="modal app-modal as-drawer" role="dialog" aria-modal="true" aria-labelledby="cvs-title">
-        <div class="modal-head">
-            <AppIcon Id="canva" />
-            <div class="grow">
-                <h3 id="cvs-title">Canva</h3>
-                <small>@(cv is { Lost: false } ? "Vos designs se choisissent depuis une liste de lecture." : canvaReady ? "Connectez votre compte Canva" : "Pas encore disponible sur cette plateforme")</small>
-            </div>
-            <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseCanva"><Ico Name="x" Size="20" /></button>
-        </div>
-        <div class="modal-body">
-            <div class="cvs-account">
-                <AccountLogo Kind="@ConnectedAccounts.Canva" />
-                <div class="grow">
-                    <b>@(cv?.User ?? "Aucun compte connecté")</b>
-                    <small>@(cv == null ? "Nécessaire pour choisir vos designs dans les listes de lecture." : cv.Lost ? "Connexion expirée : reconnectez le compte." : SinceLine(cv))</small>
-                </div>
-                @if (cv != null) { <button type="button" class="btn ghost sm" @onclick="() => ShowAccount(ConnectedAccounts.Canva)">Voir le compte</button> }
-                else if (canvaReady) { <a class="btn sm" href="/canva/connect" target="_top">Connecter Canva</a> }
-            </div>
-            @if (!canvaReady) { <div class="dw-note">Canva n'est pas encore disponible sur cette plateforme (connexion Canva à configurer par l'administrateur Linkii).</div> }
-            @if (cv is { Lost: false })
-            {
-                <h4 class="pe-sub">Dossiers synchronisés <span class="cat-count">@(Store.Read(d => d.Tenant.CanvaFolders.Count))</span></h4>
-                <p class="csd-shared"><Ico Name="folder" Size="14" /> Copiez des dossiers Canva dans la médiathèque (dossier « Canva_médias ») : leurs designs sont exportés en images et utilisables partout.</p>
-                <button type="button" class="btn ghost sm" @onclick="() => cfOpen = true"><Ico Name="folder" Size="14" /> Gérer les dossiers…</button>
-            }
-        </div>
-        <div class="modal-foot">
-            <button class="btn ghost" @onclick="CloseCanva">Fermer</button>
-        </div>
-    </div>
+    <CanvaWizard StartStep="wizStep" OnClose="CloseCanva" OnChanged="Load" />
 }
 
-@if (cfOpen)
+@if (retireCanva is { } rc)
 {
-    <CanvaFoldersDialog OnClose="() => cfOpen = false" OnChanged="Load" />
+    <div class="modal-backdrop" @onclick="() => retireCanva = null"></div>
+    <div class="modal app-modal sm" role="alertdialog" aria-modal="true" aria-labelledby="rc-title">
+        <div class="modal-head">
+            <AppIcon Id="canva" />
+            <div class="grow"><h3 id="rc-title">Retirer l'intégration Canva ?</h3><small>Tout ce que Canva a apporté dans Linkii est retiré en une fois.</small></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => retireCanva = null"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            <ul class="cw-list">
+                <li><b>@rc.Files image@(rc.Files > 1 ? "s" : "") dans la médiathèque</b><small>@rc.Designs design@(rc.Designs > 1 ? "s" : ""), dossier « @CanvaService.MediaFolderName » et dossiers synchronisés compris</small></li>
+                <li><b>@(rc.Playlists.Count == 0 ? "Aucune liste de lecture touchée" : $"Utilisées dans {rc.Playlists.Count} liste{(rc.Playlists.Count > 1 ? "s" : "")} de lecture")</b>@if (rc.Playlists.Count > 0) { <small>« @string.Join(" », « ", rc.Playlists) » : ces éléments disparaissent des listes et des écrans à la prochaine publication.</small> }</li>
+                <li><b>Compte Canva @(rc.User.Length > 0 ? $"de {rc.User} " : "")déconnecté</b><small>L'accès donné à Linkii est supprimé.</small></li>
+            </ul>
+            <p class="acc-hint">Rien n'est supprimé dans Canva. Vous pourrez ajouter l'intégration de nouveau depuis le Store.</p>
+        </div>
+        <div class="modal-foot">
+            <button class="btn ghost" @onclick="() => retireCanva = null">Annuler</button>
+            <button class="btn danger-solid" @onclick="ConfirmRetireCanva">Retirer et tout supprimer</button>
+        </div>
+    </div>
 }
 
 @if (appDrawer is { } did && Svc.Find(did) is { } dm)
@@ -440,7 +426,10 @@ else
     private List<ConnectedAccount> accounts = new();
     private string tab = "mine";   // mine | store | accounts
     private bool accountsTab { get => tab == "accounts"; set { if (value) tab = "accounts"; else if (tab == "accounts") tab = "mine"; } }
-    private bool addMenu, cvOpen, cfOpen, canvaReady, admin = true;   // admin : activation, comptes et connexions ; un membre voit seulement les intégrations de son niveau
+    private int wizStep = 1;
+    private CanvaService.RemovalImpact? retireCanva;
+    private ConnectedAccount? canvaAcc;
+    private bool addMenu, cvOpen, canvaReady, admin = true;   // admin : activation, comptes et connexions ; un membre voit seulement les intégrations de son niveau
     private string? calSource;     // source de calendriers dont la fenêtre « Gérer » est ouverte
     private string? driveSource;   // source Drive dont la fenêtre « Gérer » est ouverte
     private bool haOpen;           // compte Home Assistant : fenêtre de connexion ouverte
@@ -582,7 +571,7 @@ else
     /// <summary>Retire l'intégration ; une source Drive emporte ses dossiers et les fichiers qu'elle avait copiés dans la médiathèque.</summary>
     private async Task RetireCore(string id)
     {
-        if (id == "canva") Canva.RemoveAllFolders(Store.ClientId);
+        if (id == "canva") { Canva.RemoveAllFolders(Store.ClientId); Svc.Uninstall("canva"); Canva.Disconnect(Store.ClientId); }
         if (id.StartsWith("drv-"))
         {
             var source = id[4..];
@@ -593,9 +582,19 @@ else
         Svc.Unmark(id);
     }
 
+    private async Task ConfirmRetireCanva()
+    {
+        retireCanva = null;
+        await RetireCore("canva");
+        selected.Remove("canva");
+        Load();
+        Toast.Ok("Canva retiré : ses images sont supprimées de la médiathèque et le compte est déconnecté.");
+    }
+
     private async Task Retire(CatalogView.Entry e)
     {
         menuId = null;
+        if (e.Id == "canva") { retireCanva = Canva.Impact(Store.ClientId); return; }
         await RetireCore(e.Id);
         selected.Remove(e.Id);
         Load();
@@ -632,7 +631,14 @@ else
             <div class="kebab-backdrop" @onclick="() => menuId = null"></div>
             <div class="kebab-menu" role="menu">
                 @if (DetailsHref(e.Id) is { } href) { <a role="menuitem" href="@href"><Ico Name="info" Size="16" /> Détails</a> }
-                <button type="button" role="menuitem" @onclick="() => { menuId = null; OpenFor(e); }"><Ico Name="edit" Size="16" /> Gérer</button>
+                @if (e.Id == "canva" && admin)
+                {
+                    <button type="button" role="menuitem" @onclick="() => { menuId = null; wizStep = 2; cvOpen = true; }"><Ico Name="folder" Size="16" /> Gérer les dossiers…</button>
+                    <button type="button" role="menuitem" @onclick="() => { menuId = null; wizStep = 1; cvOpen = true; }"><Ico Name="refresh" Size="16" /> Reconnecter ou changer de compte…</button>
+                }
+                else {
+                    <button type="button" role="menuitem" @onclick="() => { menuId = null; OpenFor(e); }"><Ico Name="edit" Size="16" /> Gérer</button>
+                }
                 @if (CanRetire(e.Id)) { <button type="button" role="menuitem" class="danger" @onclick="() => Retire(e)"><Ico Name="x" Size="16" /> Retirer</button> }
             </div>
         }
@@ -719,7 +725,7 @@ else
         </div>;
     }
 
-    private ConnectedAccount? AccountOf(string kind) => accounts.FirstOrDefault(a => a.Id == kind);
+    private ConnectedAccount? AccountOf(string kind) => kind == ConnectedAccounts.Canva ? canvaAcc : accounts.FirstOrDefault(a => a.Id == kind);
 
     /// <summary>État d'une intégration qui passe par un compte Google, Microsoft ou Canva (null : le compte est en ordre).</summary>
     private (string, string, string?)? AccountProblem(string kind, bool configured) => AccountOf(kind) switch
@@ -848,7 +854,7 @@ else
     private static string ReconnectUrl(ConnectedAccount a) => ConnectedAccounts.ConnectUrl(a.Id, ConnectedAccounts.ReconnectPurpose(a));
 
     /// <summary>Types de comptes proposés par « Connecter un compte » : ceux qui ne sont pas encore là.</summary>
-    private IEnumerable<ConnectedAccounts.KindDef> Addable => ConnectedAccounts.Kinds.Where(k => accounts.All(a => a.Id != k.Id));
+    private IEnumerable<ConnectedAccounts.KindDef> Addable => ConnectedAccounts.Kinds.Where(k => k.Id != ConnectedAccounts.Canva && accounts.All(a => a.Id != k.Id));
 
     private bool Available(string kind) => kind switch
     {
@@ -963,6 +969,8 @@ else
         counts = Store.Read(d => d.Media.Where(m => m.AppId != null).GroupBy(m => m.AppId!).ToDictionary(g => g.Key, g => g.Count()));
         tenant = Store.Read(d => d.Tenant);
         accounts = ConnectedAccounts.Of(tenant);
+        canvaAcc = accounts.FirstOrDefault(a => a.Id == ConnectedAccounts.Canva);   // le compte Canva se gère dans la carte de l'intégration, pas dans Comptes connectés
+        accounts.RemoveAll(a => a.Id == ConnectedAccounts.Canva);
         canvaReady = Canva.IsConfigured;
     }
 
@@ -1027,7 +1035,7 @@ else
 
     private void CloseDrive() { driveSource = null; EndUse(); }
     private void CloseHa() { haOpen = false; EndUse(); }
-    private void CloseCanva() { cvOpen = false; cfOpen = false; EndUse(); }
+    private void CloseCanva() { cvOpen = false; Load(); EndUse(); }
     private void CloseAppDrawer() { appDrawer = null; EndUse(); }
 
     /// <summary>Plateforme sans connexion au fournisseur (identifiants de l'application à configurer par l'administrateur Linkii) : null si l'intégration est utilisable.</summary>
@@ -1065,7 +1073,7 @@ else
             Svc.Mark(e.Id);
             Svc.Enable(e.Id);
             Load();
-            if (e.Id == "canva") cvOpen = true; else appDrawer = e.Id;
+            if (e.Id == "canva") { wizStep = 1; cvOpen = true; } else appDrawer = e.Id;
         }
     }
 
@@ -1076,7 +1084,7 @@ else
         if (e.Id == "ha-home") haOpen = true;
         else if (CalSource(e) is { } cal) calSource = cal;
         else if (DrvSource(e) is { } drv) driveSource = drv;
-        else if (e.Id == "canva") cvOpen = true;
+        else if (e.Id == "canva") { wizStep = 2; cvOpen = true; }
         else appDrawer = e.Id;
     }
 
@@ -1110,8 +1118,8 @@ else
             case "ok":
                 if (!enabled.Contains("canva")) { Svc.Enable("canva"); Load(); }
                 var user = AccountOf(ConnectedAccounts.Canva)?.User;
-                Toast.Ok($"Canva connecté{(user is { Length: > 0 } ? $" ({user})" : "")}. Ajoutez vos designs depuis une liste de lecture.");
-                if (accountsTab) ShowAccount(ConnectedAccounts.Canva);
+                Toast.Ok($"Canva connecté{(user is { Length: > 0 } ? $" ({user})" : "")}.");
+                wizStep = 2; cvOpen = true;
                 break;
             case "denied": Toast.Error("Connexion à Canva annulée."); break;
             case "expired": Toast.Error("La demande de connexion à Canva a expiré. Recommencez."); break;

@@ -344,7 +344,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
     public const string MediaFolderName = "Canva_médias";
 
     public record CanvaNode(string Id, string Name);
-    public record CanvaListing(string Id, string Name, List<CanvaNode> Folders, int Designs, string? Continuation);
+    public record CanvaListing(string Id, string Name, List<CanvaNode> Folders, int Designs, List<Design> Items);
     public record SyncState(string Current, int Done, int Total);
 
     private readonly ConcurrentDictionary<Guid, SyncState> syncing = new();
@@ -368,6 +368,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
             }
             var folders = new List<CanvaNode>();
             var designs = 0;
+            var items = new List<Design>();
             string? next = null;
             var pages = 0;
             do
@@ -378,18 +379,18 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
                 {
                     var type = e.GetProperty("type").GetString();
                     if (type == "folder") folders.Add(new(e.GetProperty("folder").GetProperty("id").GetString() ?? "", e.GetProperty("folder").GetProperty("name").GetString() ?? "Dossier"));
-                    else if (type == "design") designs++;
+                    else if (type == "design") { designs++; if (items.Count < MaxDesigns) items.Add(DesignOf(e.GetProperty("design"))); }
                 }
                 next = doc.RootElement.TryGetProperty("continuation", out var c) ? c.GetString() : null;
             } while (next != null && ++pages < 10);
-            return new(folderId, name, folders.OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ToList(), designs, null);
+            return new(folderId, name, folders.OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ToList(), designs, items);
         }
         catch (CanvaException ex) { throw ScopeError(ex); }
         catch (KeyNotFoundException) { throw new CanvaException("Réponse de Canva inattendue."); }
     }
 
     /// <summary>Designs d'un dossier Canva et, si demandé, de tous ses sous-dossiers. Au plus <see cref="MaxDesigns"/> ; les autres sont comptés.</summary>
-    private async Task<(List<Design> Designs, int Skipped)> CollectDesigns(Guid clientId, string rootId, bool subfolders)
+    public async Task<(List<Design> Designs, int Skipped)> CollectDesigns(Guid clientId, string rootId, bool subfolders)
     {
         var designs = new List<Design>();
         var skipped = 0;
@@ -517,6 +518,19 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
         store.Write(d => { d.Clients.First(c => c.Id == clientId).CanvaFolders.RemoveAll(f => f.Id == folderId); });
         DeleteFiles(clientId, store.Read(d => d.Media.Where(m => m.ClientId == clientId && m.Info.GetValueOrDefault("canvaFolder") == key).Select(m => m.Id).ToList()), synced: true);
     }
+
+    /// <summary>Ce qu'emporte le retrait de l'intégration : fichiers de la médiathèque, listes de lecture touchées, nom du compte.</summary>
+    public record RemovalImpact(int Files, int Designs, List<string> Playlists, string User);
+
+    public RemovalImpact Impact(Guid clientId) => store.Read(d =>
+    {
+        var files = d.Media.Where(m => m.ClientId == clientId && (m.Info.ContainsKey("canvaFolder") || m.Info.ContainsKey("canva"))).ToList();
+        var contents = d.Media.Where(m => m.ClientId == clientId && m.AppId == "canva").Select(m => m.Id).ToHashSet();
+        var ids = files.Select(m => m.Id).Concat(contents).ToHashSet();
+        var lists = d.Playlists.Where(p => p.ClientId == clientId && p.Draft.Any(i => ids.Contains(i.MediaId))).Select(p => p.Name).OrderBy(n => n).ToList();
+        var t = d.Clients.FirstOrDefault(c => c.Id == clientId);
+        return new RemovalImpact(files.Count, files.Select(m => m.Info.GetValueOrDefault("canvaDesign") ?? m.Info.GetValueOrDefault("canva") ?? m.Id.ToString()).Distinct().Count(), lists, t?.CanvaUser ?? "");
+    });
 
     /// <summary>Retrait de l'intégration Canva : tous les dossiers synchronisés et leurs fichiers.</summary>
     public void RemoveAllFolders(Guid clientId)
