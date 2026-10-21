@@ -1,0 +1,263 @@
+@inject TenantStore Store
+@inject DriveService Drives
+@inject AppService Svc
+@inject AccountManager Accounts
+@inject GoogleAuth GoogleAuth
+@inject MicrosoftAuth MsAuth
+@inject DropboxAuth DropboxAuth
+@implements IDisposable
+
+@* Intégrations › Drives : assistant d'ajout, dans un tiroir du haut (maquette canva-assistant-ajout.html).
+   1. Connexion du compte (OneDrive et SharePoint, Google Drive, Dropbox : « Se connecter avec… » ; Nextcloud et SFTP : adresse et identifiants) ;
+   2. choix des dossiers en parcourant le compte, avec l'aperçu de leurs fichiers ; 3. validation, puis import avec aperçu dans la médiathèque.
+   Rien n'est gardé avant « Importer » : la source n'est activée et les dossiers ne sont ajoutés qu'à ce moment ; Annuler déconnecte le compte
+   connecté pendant l'assistant. Rouvert depuis le menu de la carte, il sert à gérer les dossiers (étape 2) ou à changer de compte (étape 1). *@
+<WizardShell Icon="@("drv-" + Source)" Title="@(Adding ? "Ajouter " + Def.Name : Def.Name)" Subtitle="@StepLine" Labels="@Labels" Step="step" Done="done" Running="running"
+             CanBack="@(step > 1 && !running)" Hint="@Hint" NextLabel="@NextLabel" NextDisabled="NextDisabled"
+             OnCancel="Cancel" OnClose="Close" OnBack="Back" OnNext="Next">
+    @if (step == 1)
+    {
+        @if (Source is "nextcloud" or "sftp")
+        {
+            <div class="cw-body">
+                <DriveAccountForm Source="@Source" InWizard="true" OnSaved="Refreshed" />
+            </div>
+        }
+        else
+        {
+            <WizardAccount Kind="@Kind" Provider="@Provider" Ready="ready" Connected="connected" Lost="lost" User="@user" Since="since" ConnectUrl="@ConnectUrl"
+                           Missing="@Missing" Permissions="@Permissions" />
+        }
+    }
+    else if (step == 2)
+    {
+        <div class="cw-body">
+            <DriveFolderPicker Source="@Source" Inline="true" Existing="@chosen.Select(c => c.RemoteId).ToList()" OnPicked="Picked" />
+            <div class="dfp-sect">Dossiers choisis <span class="cat-count">@chosen.Count</span></div>
+            <div class="cal-list dsd-list">
+                @foreach (var f in chosen)
+                {
+                    var folder = f;
+                    <div class="cal-row">
+                        <Ico Name="folder" Size="16" />
+                        <div class="cal-id">
+                            <b>@folder.Name</b>
+                            <small title="@folder.Location">@folder.Location@(folders.Any(x => x.Id == folder.Id) ? " · déjà synchronisé" : "")</small>
+                            @if (folder.Subfolders) { <span class="dsd-tags"><span class="badge dsd-sub"><Ico Name="subfolders" Size="12" /> Avec sous-dossiers</span></span> }
+                        </div>
+                        <button type="button" class="btn ghost sm" aria-label="Ne pas copier @folder.Name" @onclick="() => chosen.Remove(folder)">Retirer</button>
+                    </div>
+                }
+                @if (chosen.Count == 0) { <div class="cal-empty">Aucun dossier choisi. Ouvrez un dossier ci-dessus, puis « Ajouter ».</div> }
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="cw-body">
+            @if (planning) { <div class="dfp-empty">Lecture des dossiers…</div> }
+            else
+            {
+                <div class="cw-kpis">
+                    <div><b>@chosen.Count</b><small>dossier@(chosen.Count > 1 ? "s" : "") choisi@(chosen.Count > 1 ? "s" : "")</small></div>
+                    <div><b>@(chosen.Any(c => c.Subfolders) ? "≥ " : "")@estFiles</b><small>fichier@(estFiles > 1 ? "s" : "") à copier</small></div>
+                    <div><b>~ @Minutes min</b><small>durée estimée</small></div>
+                    <div><b>@Removed.Count</b><small>dossier@(Removed.Count > 1 ? "s" : "") retiré@(Removed.Count > 1 ? "s" : "")</small></div>
+                </div>
+                <p class="cw-dest">Destination : médiathèque (fichiers marqués « @Def.Name ») · l'import continue en arrière-plan si vous fermez ce tiroir. @DriveService.MaxFiles fichiers au plus par dossier.</p>
+                @if (Removed.Count > 0) { <p class="cw-dest"><b>Seront retirés</b> avec leurs fichiers : @string.Join(", ", Removed.Select(r => r.Name)).</p> }
+                @if (running)
+                {
+                    <div class="cw-run"><span>@(done ? $"Import terminé : {importedCount} fichier{(importedCount > 1 ? "s" : "")}" : $"Import en cours : fichier {Math.Min(doneNow + 1, Math.Max(totalNow, 1))} / {Math.Max(totalNow, 1)}")</span><span>@Percent %</span></div>
+                    <div class="cw-bar"><i class="@(done ? "ok" : "")" style="width:@Percent%"></i></div>
+                    @foreach (var f in Targets().Where(f => f.LastError.Length > 0)) { <small class="cal-err">@f.Name : @f.LastError</small> }
+                    <div class="cw-grid">
+                        @foreach (var m in imported) { <div class="cw-th"><div class="cw-im"><MediaThumb Media="m" /></div><span>@m.Name</span></div> }
+                        @for (var i = imported.Count; i < Math.Min(18, Math.Max(totalNow, imported.Count)) && !done; i++) { <div class="cw-th wait"><div class="cw-im"></div><span>En attente</span></div> }
+                    </div>
+                }
+                else
+                {
+                    <div class="cw-grid">@foreach (var n in preview.Take(18)) { <div class="cw-th" title="@n.Name"><div class="cw-im"><span class="cw-kind"><Ico Name="@(n.Kind == "video" ? "play" : "image")" Size="18" /></span></div><span>@n.Name</span></div> }</div>
+                }
+            }
+        </div>
+    }
+</WizardShell>
+
+@code {
+    [Parameter, EditorRequired] public string Source { get; set; } = "";
+    [Parameter] public int StartStep { get; set; } = 1;
+    /// <summary>L'intégration n'est pas encore dans Mes intégrations : elle n'y entre qu'au lancement de l'import.</summary>
+    [Parameter] public bool Adding { get; set; }
+    /// <summary>Une autre intégration de Mes intégrations utilise le même compte (Google, Microsoft) : Annuler ne le déconnecte pas.</summary>
+    [Parameter] public bool AccountShared { get; set; }
+    [Parameter] public EventCallback OnAdded { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private static readonly string[] Labels = { "Connexion", "Dossiers", "Import" };
+    private DriveSourceDef Def => DriveSources.Find(Source)!;
+    private string Kind => Source switch { "gdrive" => ConnectedAccounts.Google, "onedrive" => ConnectedAccounts.Microsoft, _ => Source };
+    private string Provider => Source switch { "gdrive" => "Google", "onedrive" => "Microsoft", "dropbox" => "Dropbox", _ => Def.Name };
+    private string ConnectUrl => Source switch { "gdrive" => "/google/connect?for=drive&wiz=drv-gdrive", "onedrive" => "/microsoft/connect?for=drive&wiz=drv-onedrive", _ => "/dropbox/connect?wiz=drv-dropbox" };
+    private string[] Permissions => new[] { "Lire vos dossiers", "Lire les images et vidéos qu'ils contiennent", "Lire le nom de votre profil" };
+
+    private int step = 1;
+    private bool ready, connected, lost;
+    private string user = "", Missing = "";
+    private DateTime? since;
+    private List<DriveFolder> folders = new();       // déjà synchronisés
+    private readonly List<DriveFolder> chosen = new();   // choisis dans l'assistant : rien n'est enregistré avant « Importer »
+    private List<DriveFolder> Removed => folders.Where(f => !chosen.Any(c => c.Id == f.Id)).ToList();
+
+    private bool planning, running, done;
+    private int estFiles, doneNow, totalNow, importedCount;
+    private List<DriveNode> preview = new();
+    private DateTime started;
+    private List<MediaItem> imported = new();
+    private Timer? timer;
+    private int Percent => done ? 100 : totalNow == 0 ? 0 : Math.Min(99, doneNow * 100 / totalNow);
+    private int Minutes => Math.Max(1, (int)Math.Ceiling(estFiles * 3 / 60.0));
+
+    private string StepLine => step switch
+    {
+        1 => "Étape 1 sur 3 — connectez votre compte",
+        2 => "Étape 2 sur 3 — choisissez les dossiers à copier dans la médiathèque",
+        _ => running ? "Étape 3 sur 3 — import" : "Étape 3 sur 3 — vérifiez, puis lancez l'import"
+    };
+
+    private bool NextDisabled => step switch { 1 => !connected, 2 => chosen.Count == 0 && folders.Count == 0, _ => planning || (running && !done) || (!running && chosen.Count == 0 && Removed.Count == 0) };
+    private string NextLabel => step < 3 ? "Suivant" : done ? "Terminer" : running ? "Import…" : "Importer";
+    private string Hint => step switch
+    {
+        1 => connected ? "" : Source is "nextcloud" or "sftp" ? "Enregistrez la connexion pour continuer." : "Connectez un compte pour continuer.",
+        2 => chosen.Count == 0 ? "Choisissez au moins un dossier." : $"{chosen.Count} dossier{(chosen.Count > 1 ? "s" : "")} choisi{(chosen.Count > 1 ? "s" : "")}",
+        _ => running && !done ? "Vous pouvez fermer : l'import continue en arrière-plan." : done ? "Les fichiers sont dans la médiathèque." : ""
+    };
+
+    protected override void OnInitialized()
+    {
+        Refresh();
+        chosen.AddRange(folders.Select(f => new DriveFolder { Id = f.Id, Source = f.Source, Name = f.Name, RemoteId = f.RemoteId, Location = f.Location, WebUrl = f.WebUrl, Subfolders = f.Subfolders }));
+        step = !connected ? 1 : Math.Clamp(StartStep, 1, 2);
+    }
+
+    private void Refresh()
+    {
+        var t = Store.Read(d => d.Tenant);
+        folders = t.DriveFolders.Where(f => f.Source == Source).OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        connected = DriveSources.Configured(t, Source);
+        lost = false; Missing = $"Connectez le compte {Provider} qui a accès à vos dossiers.";
+        switch (Source)
+        {
+            case "gdrive":
+                ready = GoogleAuth.IsConfigured;
+                var g = GoogleAuth.ConnectionOf(t);
+                (user, since) = (g.User, g.Since);
+                if (g.Connected && !connected) Missing = "Compte connecté pour Google Calendar : autorisez aussi la lecture de vos fichiers Drive.";
+                break;
+            case "onedrive":
+                ready = MsAuth.IsConfigured;
+                var m = MicrosoftAuth.ConnectionOf(t);
+                (user, since) = (m.User, m.Since);
+                if (m.Connected && !connected) Missing = "Compte connecté pour les agendas : autorisez aussi la lecture de vos fichiers.";
+                break;
+            case "dropbox":
+                ready = DropboxAuth.IsConfigured;
+                var a = DriveSources.Account(t, "dropbox");
+                (user, since, lost) = (a?.User ?? "", a?.ConnectedUtc, a?.LostUtc != null);
+                break;
+            default:   // Nextcloud, SFTP : la connexion a été enregistrée et testée sans erreur
+                ready = true;
+                connected = connected && DriveSources.Account(t, Source) is { LastError.Length: 0 };
+                break;
+        }
+    }
+
+    private Task Refreshed() { Refresh(); StateHasChanged(); return Task.CompletedTask; }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task Cancel()
+    {
+        // rien ne reste : le compte connecté pendant l'assistant part (sauf s'il sert à une autre intégration)
+        if (Adding && !AccountShared && connected) await Accounts.Disconnect(Kind);
+        await OnClose.InvokeAsync();
+    }
+
+    private void Back() { if (step > 1) step--; }
+
+    private async Task Next()
+    {
+        if (step == 1) step = 2;
+        else if (step == 2) { step = 3; await Prepare(); }
+        else if (!running) await Run();
+        else if (done) await Close();
+    }
+
+    private void Picked(DriveFolderPicker.Picked p)
+    {
+        if (chosen.Any(c => DriveSources.SameRemote(Source, c.RemoteId, p.RemoteId))) return;
+        chosen.Add(new DriveFolder { Source = Source, Name = p.Name.Length > 80 ? p.Name[..80] : p.Name, RemoteId = p.RemoteId, Location = p.Location, WebUrl = p.WebUrl, Subfolders = p.Subfolders });
+    }
+
+    /// <summary>Estimation avant import : fichiers directs de chaque dossier choisi (les sous-dossiers ne sont comptés qu'à la synchronisation).</summary>
+    private async Task Prepare()
+    {
+        planning = true; preview = new(); estFiles = 0;
+        StateHasChanged();
+        var t = Store.Read(d => d.Tenant);
+        foreach (var f in chosen)
+        {
+            try
+            {
+                var l = await Drives.Browse(t, Source, DriveSources.Roots(Source)[0].Key, f.RemoteId);
+                estFiles += Math.Min(DriveService.MaxFiles, l.Files.Count);
+                preview.AddRange(l.Files);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or System.Text.Json.JsonException or KeyNotFoundException or TaskCanceledException) { /* estimation seulement */ }
+        }
+        planning = false;
+    }
+
+    private List<DriveFolder> Targets() => folders.Where(f => chosen.Any(c => c.Id == f.Id)).ToList();
+
+    private async Task Run()
+    {
+        if (Adding) { Svc.Mark("drv-" + Source); Svc.SetDriveSource(Source, true); await OnAdded.InvokeAsync(); }
+        else if (!Store.Read(d => DriveSources.Enabled(d.Tenant, Source))) Svc.SetDriveSource(Source, true);
+        foreach (var f in Removed) await Drives.RemoveFolder(Store.ClientId, f.Id);
+        foreach (var c in chosen.Where(c => !folders.Any(f => f.Id == c.Id))) Store.Write(d => d.Tenant.DriveFolders.Add(c));
+        Refresh();
+        started = DateTime.UtcNow;
+        running = true; done = false;
+        var clientId = Store.ClientId;
+        foreach (var c in chosen) _ = Task.Run(async () => { await Drives.Sync(clientId, c.Id); });
+        timer?.Dispose();
+        timer = new Timer(_ => _ = InvokeAsync(Tick), null, 600, 1500);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task Tick()
+    {
+        Refresh();
+        var mine = Targets();
+        var run = Drives.Running(Store.ClientId).Where(p => mine.Any(f => f.Id == p.FolderId)).ToList();
+        (doneNow, totalNow) = (run.Sum(p => p.Done), run.Sum(p => p.Total));
+        var keys = mine.Select(f => f.Id.ToString()).ToHashSet();
+        var all = Store.Read(d => d.Media.Where(m => m.Info.TryGetValue("drive", out var k) && keys.Contains(k)).OrderByDescending(m => m.AddedUtc).ToList());
+        importedCount = all.Count;
+        imported = all.Take(18).ToList();
+        if (totalNow == 0) totalNow = Math.Max(estFiles, importedCount);
+        var finished = mine.Count == chosen.Count && mine.All(f => f.SyncedUtc is { } s && s >= started) && run.Count == 0;
+        if (finished && !done)
+        {
+            done = true; timer?.Dispose();
+            await OnChanged.InvokeAsync();
+        }
+        StateHasChanged();
+    }
+
+    public void Dispose() => timer?.Dispose();
+}

@@ -5,124 +5,83 @@
 @implements IDisposable
 
 @* Intégrations › Canva : assistant d'ajout, dans un tiroir du haut (maquette canva-assistant-ajout.html).
-   1. Connexion du compte Canva (mêmes composants que la carte du compte) ; 2. choix des dossiers, avec l'aperçu de leurs designs ;
+   1. Connexion du compte Canva ; 2. choix des dossiers, avec l'aperçu de leurs designs ;
    3. validation, puis import avec aperçu : chaque design est exporté en images dans la médiathèque, dossier « Canva_médias ».
    Rouvert depuis le menu de la carte, il sert aussi à gérer les dossiers (étape 2) ou à changer de compte (étape 1). *@
-<div class="modal-backdrop"></div>
-<div class="cw-top" role="dialog" aria-modal="true" aria-labelledby="cw-title">
-    <div class="cw-wrap">
-        <div class="cw-head">
-            <AppIcon Id="canva" />
-            <div class="grow">
-                <h3 id="cw-title">@(folders.Count > 0 ? "Canva" : "Ajouter Canva")</h3>
-                <small>@StepLine</small>
-            </div>
-        </div>
-        <ol class="cw-steps">
-            @for (var i = 1; i <= 3; i++)
-            {
-                var n = i;
-                <li class="@(n == step ? "on" : "") @(n < step || (n == 3 && done) ? "done" : "")"><i>@(n < step || (n == 3 && done) ? "✓" : n.ToString())</i><b>@(n == 1 ? "Connexion" : n == 2 ? "Dossiers" : "Import")</b></li>
-            }
-        </ol>
-
-        @if (step == 1)
-        {
-            <div class="cw-body">
-                <div class="cvs-account">
-                    <AccountLogo Kind="@ConnectedAccounts.Canva" />
-                    <div class="grow">
-                        <b>@(connected ? (user.Length > 0 ? user : "Compte Canva") : lost ? "Connexion expirée" : "Aucun compte connecté")</b>
-                        <small>@(connected ? $"Connecté{(since is { } s ? $" le {s.ToLocalTime():dd.MM.yyyy}" : "")} · lecture seule : rien n'est modifié dans Canva." : lost ? "Reconnectez votre compte Canva." : "Connectez le compte Canva qui contient vos designs.")</small>
-                    </div>
-                    @if (ready)
-                    {
-                        <a class="btn @(connected ? "ghost" : "") sm" href="/canva/connect" target="_top">@(connected ? "Changer de compte" : lost ? "Reconnecter Canva" : "Se connecter avec Canva")</a>
-                    }
-                </div>
-                @if (!ready) { <div class="dw-note">Canva n'est pas encore disponible sur cette plateforme (connexion Canva à configurer par l'administrateur Linkii).</div> }
-                else
-                {
-                    <ul class="cw-perm"><li>Lire vos designs et leur contenu</li><li>Lire vos dossiers</li><li>Lire le nom de votre profil</li><li>Rien n'est modifié ni supprimé dans Canva</li></ul>
-                    <p class="csd-shared"><Ico Name="lock" Size="14" /> Vous passez par la page de connexion de Canva : Linkii ne voit jamais votre mot de passe.</p>
-                }
-            </div>
-        }
-        else if (step == 2)
-        {
-            <div class="cw-body">
-                <div class="cw-pick">
-                    <div class="cw-tree" role="tree">@Node("root", "Tous les designs", "Tous les designs", 0)</div>
-                    <div class="cw-prev">
-                        @if (treeError != null) { <div class="dfp-empty err">@treeError</div> }
-                        else if (Current == null) { <div class="dfp-empty">Chargement…</div> }
-                        else
-                        {
-                            <div class="cw-crumb">Aperçu · <b>@Current.Name</b> — @Current.Designs design@(Current.Designs > 1 ? "s" : "") ici, @Current.Folders.Count sous-dossier@(Current.Folders.Count > 1 ? "s" : "")</div>
-                            @if (Current.Items.Count == 0) { <div class="dfp-empty">Aucun design directement dans ce dossier.</div> }
-                            else
-                            {
-                                <div class="cw-grid">@foreach (var d in Current.Items) { @Thumb(d) }</div>
-                                @if (Current.Designs > Current.Items.Count) { <div class="dfp-ignored">+ @(Current.Designs - Current.Items.Count) autres designs</div> }
-                            }
-                            @if (Current.Folders.Count > 0)
-                            {
-                                <div class="dfp-sect">Sous-dossiers</div>
-                                <div class="cw-chips">@foreach (var f in Current.Folders) { var fo = f; <button type="button" class="btn ghost sm" @onclick="() => Show(fo.Id, fo.Name, null)"><Ico Name="folder" Size="14" /> @fo.Name</button> }</div>
-                            }
-                            <div class="dfp-ignored">Les images téléversées dans Canva ne sont pas copiées, seulement les designs.</div>
-                        }
-                    </div>
-                </div>
-                <label class="dfp-opt cw-opt">
-                    <input type="checkbox" class="ios" checked="@sub" @onchange="e => sub = e.Value is true" />
-                    <span><b>Inclure les sous-dossiers</b> des dossiers cochés <small>@CanvaService.MaxDesigns designs au plus par dossier</small></span>
-                </label>
-            </div>
-        }
-        else
-        {
-            <div class="cw-body">
-                @if (planning) { <div class="dfp-empty">Lecture des dossiers…</div> }
-                else if (planError != null) { <div class="dfp-empty err">@planError</div> }
-                else
-                {
-                    <div class="cw-kpis">
-                        <div><b>@plan.Count</b><small>dossier@(plan.Count > 1 ? "s" : "") choisi@(plan.Count > 1 ? "s" : "")</small></div>
-                        <div><b>@plan.Sum(p => p.Designs.Count)</b><small>designs à copier</small></div>
-                        <div><b>@plan.Sum(p => p.Designs.Sum(d => d.Pages ?? 1))</b><small>images (pages)</small></div>
-                        <div><b>@Removed.Count</b><small>dossier@(Removed.Count > 1 ? "s" : "") retiré@(Removed.Count > 1 ? "s" : "")</small></div>
-                    </div>
-                    <p class="cw-dest">Destination : médiathèque › <b>@CanvaService.MediaFolderName</b> (renommable ensuite). L'import continue en arrière-plan si vous fermez ce tiroir.</p>
-                    @if (Removed.Count > 0) { <p class="cw-dest"><b>Seront retirés</b> avec leurs fichiers : @string.Join(", ", Removed.Select(r => r.Name)).</p> }
-                    @foreach (var p in plan.Where(p => p.Skipped > 0)) { <div class="dsd-warn">« @p.Name » : limite de @CanvaService.MaxDesigns designs atteinte, @p.Skipped ne seront pas copiés.</div> }
-                    @if (running)
-                    {
-                        <div class="cw-run"><span>@(done ? $"Import terminé : {importedCount} image{(importedCount > 1 ? "s" : "")}" : $"Import en cours : design {Math.Min(doneNow + 1, Math.Max(totalNow, 1))} / {Math.Max(totalNow, 1)}")</span><span>@Percent %</span></div>
-                        <div class="cw-bar"><i class="@(done ? "ok" : "")" style="width:@Percent%"></i></div>
-                        @foreach (var f in Folders().Where(f => f.LastError.Length > 0)) { <small class="cal-err">@f.Name : @f.LastError</small> }
-                        <div class="cw-grid">
-                            @foreach (var m in imported) { <div class="cw-th"><div class="cw-im"><MediaThumb Media="m" /></div><span>@m.Name</span></div> }
-                            @for (var i = imported.Count; i < Math.Min(18, Math.Max(totalImages, imported.Count)) && !done; i++) { <div class="cw-th wait"><div class="cw-im"></div><span>En attente</span></div> }
-                        </div>
-                    }
+<WizardShell Icon="canva" Title="@(folders.Count > 0 ? "Canva" : "Ajouter Canva")" Subtitle="@StepLine" Labels="@Labels" Step="step" Done="done" Running="running"
+             CanBack="@(step > 1 && !running)" Hint="@Hint" NextLabel="@NextLabel" NextDisabled="NextDisabled"
+             OnCancel="Cancel" OnClose="Close" OnBack="Back" OnNext="Next">
+    @if (step == 1)
+    {
+        <WizardAccount Kind="@ConnectedAccounts.Canva" Provider="Canva" Ready="ready" Connected="connected" Lost="lost" User="@user" Since="since" ConnectUrl="/canva/connect"
+                       Missing="Connectez le compte Canva qui contient vos designs."
+                       Permissions="@(new[] { "Lire vos designs et leur contenu", "Lire vos dossiers", "Lire le nom de votre profil" })" />
+    }
+    else if (step == 2)
+    {
+        <div class="cw-body">
+            <div class="cw-pick">
+                <div class="cw-tree" role="tree">@Node("root", "Tous les designs", "Tous les designs", 0)</div>
+                <div class="cw-prev">
+                    @if (treeError != null) { <div class="dfp-empty err">@treeError</div> }
+                    else if (Current == null) { <div class="dfp-empty">Chargement…</div> }
                     else
                     {
-                        <div class="cw-grid">@foreach (var d in plan.SelectMany(p => p.Designs).Take(18)) { @Thumb(d) }</div>
+                        <div class="cw-crumb">Aperçu · <b>@Current.Name</b> — @Current.Designs design@(Current.Designs > 1 ? "s" : "") directs, @Current.Folders.Count sous-dossier@(Current.Folders.Count > 1 ? "s" : "")</div>
+                        <div class="cw-sect">À la racine · @Current.Designs design@(Current.Designs > 1 ? "s" : "")</div>
+                        @if (Current.Items.Count == 0) { <div class="dfp-empty">Aucun design directement dans ce dossier.</div> }
+                        else { <div class="cw-grid">@foreach (var d in Current.Items.Take(8)) { @Thumb(d) }</div> }
+                        @foreach (var f in Current.Folders.Take(6))
+                        {
+                            var fo = f;
+                            var l = cache.GetValueOrDefault(fo.Id);
+                            <div class="cw-sect"><button type="button" class="cw-link" @onclick="() => Show(fo.Id, fo.Name, null)">@fo.Name</button> · @(l == null ? "…" : $"{l.Designs} design{(l.Designs > 1 ? "s" : "")}")</div>
+                            @if (l != null && l.Items.Count > 0) { <div class="cw-grid">@foreach (var d in l.Items.Take(5)) { @Thumb(d) }</div> }
+                        }
+                        <div class="cw-skip">ℹ Les images téléversées dans Canva ne sont pas copiées, seulement les designs. @chosen.Count dossier@(chosen.Count > 1 ? "s" : "") coché@(chosen.Count > 1 ? "s" : "").</div>
                     }
-                }
+                </div>
             </div>
-        }
-
-        <div class="cw-foot">
-            @if (!running) { <button type="button" class="btn ghost" @onclick="Cancel">Annuler</button> }
-            else if (!done) { <button type="button" class="btn ghost" @onclick="Close">Fermer</button> }
-            @if (step > 1 && !running) { <button type="button" class="btn ghost" @onclick="Back">Précédent</button> }
-            <span class="grow cw-hint">@Hint</span>
-            <button type="button" class="btn" disabled="@NextDisabled" @onclick="Next">@NextLabel</button>
+            <label class="dfp-opt cw-opt">
+                <input type="checkbox" class="ios" checked="@sub" @onchange="e => sub = e.Value is true" />
+                <span><b>Inclure les sous-dossiers</b> des dossiers cochés <small>@CanvaService.MaxDesigns designs au plus par dossier</small></span>
+            </label>
         </div>
-    </div>
-</div>
+    }
+    else
+    {
+        <div class="cw-body">
+            @if (planning) { <div class="dfp-empty">Lecture des dossiers…</div> }
+            else if (planError != null) { <div class="dfp-empty err">@planError</div> }
+            else
+            {
+                <div class="cw-kpis">
+                    <div><b>@plan.Count</b><small>dossier@(plan.Count > 1 ? "s" : "") choisi@(plan.Count > 1 ? "s" : "")</small></div>
+                    <div><b>@plan.Sum(p => p.Designs.Count)</b><small>designs à importer</small></div>
+                    <div><b>~ @plan.Sum(p => p.Designs.Sum(d => d.Pages ?? 1))</b><small>images (pages)</small></div>
+                    <div><b>~ @Minutes min</b><small>durée estimée</small></div>
+                </div>
+                <p class="cw-dest">Destination : médiathèque › <b>@CanvaService.MediaFolderName</b> (renommable ensuite) · l'import continue en arrière-plan si vous fermez ce tiroir.</p>
+                @if (Removed.Count > 0) { <p class="cw-dest"><b>Seront retirés</b> avec leurs fichiers : @string.Join(", ", Removed.Select(r => r.Name)).</p> }
+                @foreach (var p in plan.Where(p => p.Skipped > 0)) { <div class="dsd-warn">« @p.Name » : limite de @CanvaService.MaxDesigns designs atteinte, @p.Skipped ne seront pas copiés.</div> }
+                @if (running)
+                {
+                    <div class="cw-run"><span>@(done ? $"Import terminé : {plan.Sum(p => p.Designs.Count)} designs, {importedCount} image{(importedCount > 1 ? "s" : "")}" : $"Import en cours : design {Math.Min(doneNow + 1, Math.Max(totalNow, 1))} / {Math.Max(totalNow, 1)}")</span><span>@Percent %</span></div>
+                    <div class="cw-bar"><i class="@(done ? "ok" : "")" style="width:@Percent%"></i></div>
+                    @foreach (var f in folders.Where(f => f.LastError.Length > 0)) { <small class="cal-err">@f.Name : @f.LastError</small> }
+                    <div class="cw-grid">
+                        @foreach (var m in imported) { <div class="cw-th"><div class="cw-im"><MediaThumb Media="m" /></div><span>@m.Name</span></div> }
+                        @for (var i = imported.Count; i < Math.Min(18, Math.Max(totalImages, imported.Count)) && !done; i++) { <div class="cw-th wait"><div class="cw-im"></div><span>En attente</span></div> }
+                    </div>
+                }
+                else
+                {
+                    <div class="cw-grid">@foreach (var d in plan.SelectMany(p => p.Designs).Take(18)) { @Thumb(d) }</div>
+                }
+            }
+        </div>
+    }
+</WizardShell>
 
 @code {
     [Parameter] public int StartStep { get; set; } = 1;
@@ -155,6 +114,8 @@
     private List<MediaItem> imported = new();
     private int importedCount, doneNow, totalNow, totalImages;
     private Timer? timer;
+    private static readonly string[] Labels = { "Connexion", "Dossiers", "Import" };
+    private int Minutes => Math.Max(1, (int)Math.Ceiling(plan.Sum(p => p.Designs.Count) * 6 / 60.0));   // ~ 6 s par design (export chez Canva)
 
     private CanvaService.CanvaListing? Current => cache.GetValueOrDefault(currentId);
     private List<CanvaFolder> Removed => folders.Where(f => !chosen.ContainsKey(f.CanvaId)).ToList();
@@ -240,6 +201,7 @@
         currentId = id;
         open.Add(id);
         await Load(id);
+        if (cache.GetValueOrDefault(id) is { } l) foreach (var k in l.Folders.Take(6)) await Load(k.Id);   // aperçu des sous-dossiers
     }
 
     private async Task Toggle(string id, string name, string location)

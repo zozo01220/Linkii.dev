@@ -7,9 +7,15 @@ public static class AccountPurposes
 
     public static string Parse(string? value) => value is Calendar or All ? value : Drive;
 
-    /// <summary>Page où revenir après la connexion : l'onglet Comptes connectés s'il l'a lancée (?tab=comptes), sinon Intégrations.</summary>
-    public static string ReturnPage(HttpRequest req) =>
-        req.Query["tab"] == ConnectedAccounts.Tab ? "/integrations?tab=" + ConnectedAccounts.Tab : "/integrations";
+    /// <summary>Page où revenir après la connexion : l'onglet Comptes connectés s'il l'a lancée (?tab=comptes), sinon Intégrations ; l'assistant d'ajout qui l'a lancée (?wiz=) se rouvre.</summary>
+    public static string ReturnPage(HttpRequest req)
+    {
+        var parts = new List<string>();
+        if (req.Query["tab"] == ConnectedAccounts.Tab) parts.Add("tab=" + ConnectedAccounts.Tab);
+        var wiz = req.Query["wiz"].ToString();   // assistant d'ajout à rouvrir au retour (identifiant d'intégration)
+        if (wiz.Length is > 0 and <= 40 && wiz.All(c => char.IsAsciiLetterOrDigit(c) || c == '-')) parts.Add("wiz=" + wiz);
+        return "/integrations" + (parts.Count > 0 ? "?" + string.Join("&", parts) : "");
+    }
 }
 
 /// <summary>Un accès d'un compte connecté. Purpose : accès à demander (« calendar » ou « drive ») s'il manque, null s'il va de soi.</summary>

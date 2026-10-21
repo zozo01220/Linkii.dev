@@ -16,7 +16,7 @@
             <small>@Where@(account.ConnectedUtc is { } since ? $" · enregistré le {since.ToLocalTime():dd.MM.yyyy}" : "") · lecture seule : rien n'est modifié sur le serveur.</small>
             @if (Sftp && account.HostKey.Length > 0) { <small class="mono" title="Empreinte du serveur, retenue à la première connexion">@account.HostKey</small> }
         </div>
-        <button type="button" class="btn ghost sm" @onclick="() => OnShowAccount.InvokeAsync(Source)">Voir le compte</button>
+        @if (!InWizard) { <button type="button" class="btn ghost sm" @onclick="() => OnShowAccount.InvokeAsync(Source)">Voir le compte</button> }
         <button type="button" class="btn ghost sm" @onclick="StartEdit">Modifier</button>
     </div>
     @if (account.LastError.Length > 0)
@@ -57,6 +57,8 @@ else
     /// <summary>Connexion enregistrée ou modifiée : la fenêtre et la page Intégrations se mettent à jour.</summary>
     [Parameter] public EventCallback OnSaved { get; set; }
     [Parameter] public EventCallback<string> OnShowAccount { get; set; }
+    /// <summary>Dans l'assistant d'ajout : la source n'est activée qu'au lancement de l'import, et « Voir le compte » n'a pas lieu d'être.</summary>
+    [Parameter] public bool InWizard { get; set; }
 
     private bool Sftp => Source == "sftp";
     private DriveAccount? account;
@@ -142,7 +144,7 @@ else
         {
             var message = await Drives.TestConnection(Store.Read(d => d.Tenant), Source);
             Store.Write(d => { if (d.Tenant.DriveAccounts.FirstOrDefault(x => x.Source == Source) is { } a) a.LastError = ""; });
-            if (!Store.Read(d => DriveSources.Enabled(d.Tenant, Source))) Svc.SetDriveSource(Source, true);
+            if (!InWizard && !Store.Read(d => DriveSources.Enabled(d.Tenant, Source))) Svc.SetDriveSource(Source, true);
             Toast.Ok(message);
         }
         catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or System.Text.Json.JsonException or TaskCanceledException)

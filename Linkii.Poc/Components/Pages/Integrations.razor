@@ -257,9 +257,17 @@ else
 @* Hors de tout bloc conditionnel : « Connecter un compte › Home Assistant » ouvre cette fenêtre sans autre source choisie. *@
 <HaAccountDialog Open="haOpen" OnClose="CloseHa" OnChanged="Load" />
 
-@if (cvOpen)
+@if (wizId is { } wid)
 {
-    <CanvaWizard StartStep="wizStep" Adding="wizAdding" OnAdded='() => pendingUse = "canva"' OnClose="CloseCanva" OnChanged="Load" />
+    @* Assistant d'ajout d'une intégration avec compte (maquette canva-assistant-ajout.html) : tiroir du haut ; n'enregistre rien avant son dernier pas *@
+    @if (wid == "canva")
+    {
+        <CanvaWizard StartStep="wizStep" Adding="wizAdding" OnAdded="() => pendingUse = wid" OnClose="CloseWizard" OnChanged="Load" />
+    }
+    else if (wid.StartsWith("drv-"))
+    {
+        <DriveWizard Source="@wid[4..]" StartStep="wizStep" Adding="wizAdding" AccountShared="AccountShared(wid)" OnAdded="() => pendingUse = wid" OnClose="CloseWizard" OnChanged="Load" />
+    }
 }
 
 @if (retireCanva is { } rc)
@@ -433,7 +441,9 @@ else
     private bool wizAdding;   // assistant Canva ouvert pour ajouter l'intégration (pas encore dans Mes intégrations)
     private CanvaService.RemovalImpact? retireCanva;
     private ConnectedAccount? canvaAcc;
-    private bool addMenu, cvOpen, canvaReady, admin = true;   // admin : activation, comptes et connexions ; un membre voit seulement les intégrations de son niveau
+    private string? wizId;   // intégration dont l'assistant d'ajout est ouvert
+    private bool cvOpen { get => wizId == "canva"; set { if (value) wizId = "canva"; else if (wizId == "canva") wizId = null; } }
+    private bool addMenu, canvaReady, admin = true;   // admin : activation, comptes et connexions ; un membre voit seulement les intégrations de son niveau
     private string? calSource;     // source de calendriers dont la fenêtre « Gérer » est ouverte
     private string? driveSource;   // source Drive dont la fenêtre « Gérer » est ouverte
     private bool haOpen;           // compte Home Assistant : fenêtre de connexion ouverte
@@ -635,15 +645,18 @@ else
             <div class="kebab-backdrop" @onclick="() => menuId = null"></div>
             <div class="kebab-menu" role="menu">
                 @if (DetailsHref(e.Id) is { } href) { <a role="menuitem" href="@href"><Ico Name="info" Size="16" /> Détails</a> }
-                @if (e.Id == "canva" && admin)
+                @if (HasWizard(e.Id) && admin)
                 {
-                    <button type="button" role="menuitem" @onclick="() => { menuId = null; wizStep = 2; wizAdding = false; cvOpen = true; }"><Ico Name="folder" Size="16" /> Gérer les dossiers…</button>
-                    <button type="button" role="menuitem" @onclick="() => { menuId = null; wizStep = 1; wizAdding = false; cvOpen = true; }"><Ico Name="refresh" Size="16" /> Reconnecter ou changer de compte…</button>
+                    <button type="button" role="menuitem" @onclick="() => { menuId = null; OpenWizard(e.Id, 2, false); }"><Ico Name="folder" Size="16" /> @ManageLabel(e.Id)</button>
+                    <hr />
+                    @if (HasSync(e.Id)) { <button type="button" role="menuitem" @onclick="() => { menuId = null; Resync(e.Id); }"><Ico Name="refresh" Size="16" /> Resynchroniser maintenant</button> }
+                    <button type="button" role="menuitem" @onclick="() => { menuId = null; OpenWizard(e.Id, 1, false); }"><Ico Name="user" Size="16" /><span>Reconnecter ou changer de compte…@if (CurrentAccount(e.Id) is { Length: > 0 } cur) { <small class="kebab-sub">Compte actuel : @cur</small> }</span></button>
+                    <hr />
                 }
                 else {
                     <button type="button" role="menuitem" @onclick="() => { menuId = null; OpenFor(e); }"><Ico Name="edit" Size="16" /> Gérer</button>
                 }
-                @if (CanRetire(e.Id)) { <button type="button" role="menuitem" class="danger" @onclick="() => Retire(e)"><Ico Name="x" Size="16" /> Retirer</button> }
+                @if (CanRetire(e.Id)) { <button type="button" role="menuitem" class="danger" @onclick="() => Retire(e)"><Ico Name="x" Size="16" /> @(HasWizard(e.Id) ? "Retirer l'intégration…" : "Retirer")</button> }
             </div>
         }
     </div>;
@@ -695,6 +708,10 @@ else
                 @if (!store && admin) { @SwitchOf(e) }
             </div>
             <div class="int-sub @(store ? "long" : "")" title="@(store ? e.Summary : UsageLine(e.Id))">@(store ? e.Summary : UsageLine(e.Id))</div>
+            @if (!store && ConnectedAccounts.For(e.Id) is { } ak && AccountOf(ak) is { } ac)
+            {
+                <div class="int-acct"><span class="int-av">@Initials(ac.User)</span><div><b>@(ac.User.Length > 0 ? ac.User : ac.Kind)</b><small><span class="int-dot @(ac.Lost ? "bad" : "")"></span>@(ac.Lost ? "Connexion expirée" : ac.Since is { } sn ? $"Connecté le {sn.ToLocalTime():dd.MM.yyyy}" : "Connecté")</small></div></div>
+            }
             @if (err && e.StatusTitle is { Length: > 0 } why) { <div class="cat-err" role="alert"><Ico Name="alert" Size="15" /><span>@why</span></div> }
             @if (store) { <div class="int-foot"><span class="grow"></span><button type="button" class="btn-use" @onclick="() => Use(e)">Utiliser</button></div> }
             else if (err && admin) { <div class="int-foot"><button type="button" class="btn danger-solid sm" @onclick="() => OpenFor(e)">Corriger</button></div> }
@@ -1015,7 +1032,7 @@ else
         Svc.Mark("drv-" + src);
         Svc.SetDriveSource(src, on);
         Load();
-        if (on && !DriveSources.Configured(tenant, src)) { driveSource = src; Toast.Ok($"« {def.Name} » activée : configurez sa connexion."); }
+        if (on && !DriveSources.Configured(tenant, src)) { OpenWizard("drv-" + src, 1, false); Toast.Ok($"« {def.Name} » activée : configurez sa connexion."); }
         else Toast.Ok(on ? $"« {def.Name} » activée : ses dossiers sont proposés dans les listes de lecture." : $"« {def.Name} » désactivée. Les contenus existants restent diffusés.");
     }
 
@@ -1039,7 +1056,36 @@ else
 
     private void CloseDrive() { driveSource = null; EndUse(); }
     private void CloseHa() { haOpen = false; EndUse(); }
-    private void CloseCanva() { cvOpen = false; Load(); EndUse(); }
+    private void CloseCanva() => CloseWizard();
+    private void CloseWizard() { wizId = null; Load(); EndUse(); }
+
+    /// <summary>Intégrations qui s'ajoutent par l'assistant (compte connecté, étapes Connexion › contenu › Import).</summary>
+    private static string Initials(string user) => user.Trim().Length == 0 ? "?" : string.Concat(user.Split([' ', '@', '.'], StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpperInvariant(p[0])));
+
+    private static string ManageLabel(string id) => id == "canva" || id.StartsWith("drv-") ? "Gérer les dossiers…" : id.StartsWith("cal-") ? "Gérer les calendriers…" : "Gérer";
+
+    /// <summary>Intégrations qui copient du contenu dans la médiathèque : « Resynchroniser maintenant ».</summary>
+    private static bool HasSync(string id) => id == "canva" || id.StartsWith("drv-");
+
+    private string CurrentAccount(string id) => ConnectedAccounts.For(id) is { } k ? AccountOf(k)?.User ?? "" : "";
+
+    private void Resync(string id)
+    {
+        var clientId = Store.ClientId;
+        var areaId = Store.AreaId;
+        if (id == "canva") foreach (var f in tenant.CanvaFolders) { var fid = f.Id; _ = Task.Run(() => Canva.SyncFolder(clientId, fid, areaId)); }
+        else foreach (var f in tenant.DriveFolders.Where(f => f.Source == id[4..])) { var fid = f.Id; _ = Task.Run(() => Drives.Sync(clientId, fid)); }
+        Toast.Ok("Synchronisation lancée : les fichiers arrivent dans la médiathèque.");
+    }
+
+    private static bool HasWizard(string id) => id == "canva" || id.StartsWith("drv-");
+
+    private void OpenWizard(string id, int step, bool adding) { pendingUse = null; wizId = id; wizStep = step; wizAdding = adding; }
+
+    private bool InMineId(string id) => AllRows().Any(r => r.E.Id == id && InMine(r));
+
+    /// <summary>Une autre intégration de Mes intégrations utilise le même compte (Google, Microsoft) : annuler un ajout ne le déconnecte pas.</summary>
+    private bool AccountShared(string id) => ConnectedAccounts.For(id) is { } k && ConnectedAccounts.Kind(k).Integrations.Any(i => i != id && InMineId(i));
     private void CloseAppDrawer() { appDrawer = null; EndUse(); }
 
     /// <summary>Plateforme sans connexion au fournisseur (identifiants de l'application à configurer par l'administrateur Linkii) : null si l'intégration est utilisable.</summary>
@@ -1058,7 +1104,7 @@ else
     private void Use(CatalogView.Entry e)
     {
         if (Unavailable(e) is { } why) { Toast.Error(why); return; }
-        if (e.Id == "canva") { wizAdding = true; wizStep = 1; cvOpen = true; return; }   // n'entre dans Mes intégrations qu'au lancement de l'import
+        if (HasWizard(e.Id)) { OpenWizard(e.Id, 1, true); return; }   // n'entre dans Mes intégrations qu'au lancement de l'import
         pendingUse = e.Id;
         if (CalSource(e) is { } cal)
         {
@@ -1088,8 +1134,7 @@ else
         pendingUse = null;
         if (e.Id == "ha-home") haOpen = true;
         else if (CalSource(e) is { } cal) calSource = cal;
-        else if (DrvSource(e) is { } drv) driveSource = drv;
-        else if (e.Id == "canva") { wizStep = 2; wizAdding = false; cvOpen = true; }
+        else if (HasWizard(e.Id)) OpenWizard(e.Id, 2, false);
         else appDrawer = e.Id;
     }
 
@@ -1146,7 +1191,7 @@ else
         Toast.Ok($"Compte {name} connecté{(user.Length > 0 ? $" ({user})" : "")}{(granted.Length > 0 ? $" : {granted} autorisés" : "")}.");
         if (accountsTab) ShowAccount(kind);
         else if (purpose == AccountPurposes.Calendar) calSource = calendarSource;
-        else driveSource = driveSourceId;
+        else if (purpose != AccountPurposes.Calendar) OpenWizard("drv-" + driveSourceId, 2, !InMineId("drv-" + driveSourceId));
     }
 
     // Retour de « Se connecter avec Google » (/google/callback) : Google Calendar, Google Drive ou les deux (Comptes connectés).
@@ -1182,11 +1227,10 @@ else
         switch (q)
         {
             case "ok":
-                if (!DriveSources.Enabled(tenant, "dropbox")) Svc.SetDriveSource("dropbox", true);
                 Load();
                 var user = AccountOf(ConnectedAccounts.Dropbox)?.User;
                 Toast.Ok($"Dropbox connecté{(user is { Length: > 0 } ? $" ({user})" : "")}. Ajoutez vos dossiers.");
-                if (accountsTab) ShowAccount(ConnectedAccounts.Dropbox); else driveSource = "dropbox";
+                if (accountsTab) ShowAccount(ConnectedAccounts.Dropbox); else OpenWizard("drv-dropbox", 2, !InMineId("drv-dropbox"));
                 break;
             case "denied": Toast.Error("Connexion à Dropbox annulée."); break;
             case "scope": Toast.Error("Les autorisations de lecture des fichiers n'ont pas été accordées : vérifiez les permissions de l'application Dropbox (files.metadata.read, files.content.read)."); break;
