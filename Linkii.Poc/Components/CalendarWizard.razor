@@ -1,0 +1,375 @@
+@inject TenantStore Store
+@inject SecretBox Box
+@inject GraphService Graph
+@inject CalendarService Calendars
+@inject GoogleConnector Google
+@inject AppService Svc
+@inject AccountManager Accounts
+@inject GoogleAuth GoogleAuth
+@inject MicrosoftAuth MsAuth
+
+@* Intégrations › Calendriers partagés : assistant d'ajout, dans un tiroir du haut (maquette canva-assistant-ajout.html).
+   1. Connexion (Google, Microsoft 365 : « Se connecter avec… » ; CalDAV, Exchange : adresse et identifiants) ;
+   2. choix des calendriers, avec l'aperçu de leurs événements des 7 prochains jours ; 3. validation : calendriers, événements, puis ajout.
+   Rien n'est gardé avant « Ajouter » : la source n'est activée et les calendriers ne sont enregistrés qu'à ce moment ; Annuler déconnecte le compte
+   connecté pendant l'assistant. Rouvert depuis le menu de la carte, il sert à gérer les calendriers (étape 2) ou à changer de compte (étape 1). *@
+<WizardShell Icon="@("cal-" + Source)" Title="@(Adding ? "Ajouter " + Def.Name : Def.Name)" Subtitle="@StepLine" Labels="@Labels" Step="step" Done="done" Running="done"
+             CanBack="@(step > 1 && !done)" Hint="@Hint" NextLabel="@NextLabel" NextDisabled="NextDisabled"
+             OnCancel="Cancel" OnClose="Close" OnBack="Back" OnNext="Next">
+    @if (step == 1)
+    {
+        @if (Source is "google" or "m365")
+        {
+            <WizardAccount Kind="@Kind" Provider="@Provider" Ready="ready" Connected="connected" Lost="false" User="@user" Since="since" ConnectUrl="@ConnectUrl"
+                           Missing="@Missing" Permissions="@(new[] { "Lire vos agendas et leurs événements", "Lire le nom de votre profil" })" />
+        }
+        else
+        {
+            <div class="cw-body">
+                <div class="dw">
+                    @if (Source == "caldav")
+                    {
+                        <div class="dw-field"><label for="cwc-url">Adresse du serveur</label><input id="cwc-url" class="mono" @bind="url" spellcheck="false" placeholder="https://cloud.organisation.ch/remote.php/dav/" /><small>Nextcloud, iCloud, Zimbra, SOGo, Synology…</small></div>
+                        <div class="dw-field"><label for="cwc-user">Identifiant</label><input id="cwc-user" @bind="user" autocomplete="off" /></div>
+                        <div class="dw-field"><label for="cwc-pwd">Mot de passe</label><input id="cwc-pwd" type="password" @bind="secret" autocomplete="new-password" placeholder="@(hasSecret ? "Laisser vide pour ne pas le changer" : "")" /><small>iCloud, Nextcloud et Zimbra demandent un mot de passe d'application.</small></div>
+                    }
+                    else
+                    {
+                        <div class="dw-field"><label for="cwc-url">Adresse du service EWS</label><input id="cwc-url" class="mono" @bind="url" spellcheck="false" placeholder="https://mail.organisation.ch/EWS/Exchange.asmx" /></div>
+                        <div class="dw-field"><label for="cwc-user">Compte de service</label><input id="cwc-user" @bind="user" autocomplete="off" placeholder="ORGANISATION\linkii ou linkii@organisation.ch" /></div>
+                        <div class="dw-field"><label for="cwc-pwd">Mot de passe</label><input id="cwc-pwd" type="password" @bind="secret" autocomplete="new-password" placeholder="@(hasSecret ? "Laisser vide pour ne pas le changer" : "")" /></div>
+                    }
+                    @if (formError != null) { <div class="err">@formError</div> }
+                    <div class="dw-actions">
+                        <button type="button" class="btn sm" @onclick="SaveConnection">@(connected ? "Mettre à jour la connexion" : "Enregistrer la connexion")</button>
+                    </div>
+                </div>
+                @if (connected) { <div class="cvs-account"><AccountLogo Kind="@Kind" /><div class="grow"><b>@Def.Name · @user</b><small>Connexion enregistrée · lecture seule : rien n'est modifié sur le serveur.</small></div></div> }
+                <p class="csd-shared"><Ico Name="lock" Size="14" /> Identifiants chiffrés sur le serveur Linkii. Le serveur doit être joignable depuis internet.</p>
+            </div>
+        }
+    }
+    else if (step == 2)
+    {
+        <div class="cw-body">
+            <div class="cw-pick">
+                <div class="cw-tree">
+                    @if (loading) { <div class="dfp-empty">Chargement…</div> }
+                    @if (Source is "caldav" or "ews")
+                    {
+                        <div class="cw-add">
+                            <input aria-label="Nom affiché" placeholder="Nom affiché (facultatif)" maxlength="80" @bind="newName" />
+                            <input aria-label="@Def.RefLabel" class="mono" placeholder="@Def.RefPlaceholder" @bind="newRef" spellcheck="false" autocomplete="off" />
+                            <button type="button" class="btn ghost sm" @onclick="AddManual"><Ico Name="plus" Size="14" /> Ajouter</button>
+                            @if (addError != null) { <small class="cal-err">@addError</small> }
+                        </div>
+                    }
+                    @foreach (var group in Groups)
+                    {
+                        @if (group.Items.Count > 0)
+                        {
+                            <div class="cw-sect">@group.Title · @group.Items.Count</div>
+                            @foreach (var c in group.Items)
+                            {
+                                var cal = c;
+                                <div class="cw-node @(focus == cal.Ref ? "sel" : "") @(chosen.ContainsKey(cal.Ref) ? "on" : "")">
+                                    <input type="checkbox" class="cw-chk" checked="@chosen.ContainsKey(cal.Ref)" aria-label="Partager « @cal.Name »" @onchange="() => Check(cal)" />
+                                    <button type="button" class="cw-nm" @onclick="() => Focus(cal)"><Ico Name="calendar" Size="16" /> @cal.Name</button>
+                                    @if (cal.Hint.Length > 0) { <span class="cw-n" title="@cal.Hint">@cal.Hint</span> }
+                                </div>
+                            }
+                        }
+                    }
+                    @if (!loading && Groups.All(g => g.Items.Count == 0)) { <div class="dfp-empty">@(Source is "caldav" or "ews" ? "Ajoutez l'adresse d'un calendrier." : "Aucun agenda trouvé pour ce compte.")</div> }
+                </div>
+                <div class="cw-prev">
+                    @if (focus == null) { <div class="dfp-empty">Sélectionnez un calendrier pour voir ses prochains événements.</div> }
+                    else
+                    {
+                        <div class="cw-crumb">Aperçu · <b>@FocusName</b> — 7 prochains jours</div>
+                        @if (previewing) { <div class="dfp-empty">Lecture du calendrier…</div> }
+                        else if (previewError != null) { <div class="dfp-empty err">@previewError</div> }
+                        else if (events.Count == 0) { <div class="dfp-empty">Aucun événement dans les 7 prochains jours.</div> }
+                        else { @EventRows(events) }
+                    }
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="cw-body">
+            @if (planning) { <div class="dfp-empty">Lecture des calendriers…</div> }
+            else
+            {
+                <div class="cw-kpis">
+                    <div><b>@chosen.Count</b><small>calendrier@(chosen.Count > 1 ? "s" : "") choisi@(chosen.Count > 1 ? "s" : "")</small></div>
+                    <div><b>@planEvents.Count</b><small>événement@(planEvents.Count > 1 ? "s" : "") sur 7 jours</small></div>
+                    <div><b>@Removed.Count</b><small>calendrier@(Removed.Count > 1 ? "s" : "") retiré@(Removed.Count > 1 ? "s" : "")</small></div>
+                    <div><b>immédiat</b><small>aucun fichier à copier</small></div>
+                </div>
+                <p class="cw-dest">Les calendriers sont proposés dans l'app « Calendrier partagé » des listes de lecture ; les écrans lisent leurs événements en direct.</p>
+                @if (Removed.Count > 0) { <p class="cw-dest"><b>Seront retirés</b> : @string.Join(", ", Removed.Select(r => r.Name)).</p> }
+                @foreach (var e in planErrors) { <small class="cal-err">@e</small> }
+                @if (done) { <div class="cw-run"><span>Terminé : @chosen.Count calendrier@(chosen.Count > 1 ? "s" : "") proposé@(chosen.Count > 1 ? "s" : "") dans les listes de lecture.</span><span>100 %</span></div><div class="cw-bar"><i class="ok" style="width:100%"></i></div> }
+                @if (planEvents.Count > 0) { <div class="cw-sect">Prochains événements</div>@EventRows(planEvents.Take(12).ToList()) }
+            }
+        </div>
+    }
+</WizardShell>
+
+@code {
+    [Parameter, EditorRequired] public string Source { get; set; } = "";   // google | m365 | caldav | ews
+    [Parameter] public int StartStep { get; set; } = 1;
+    [Parameter] public bool Adding { get; set; }
+    [Parameter] public bool AccountShared { get; set; }
+    [Parameter] public EventCallback OnAdded { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private record Group(string Title, List<SharedCalendar> Items);
+    private record Ev(string Calendar, EventDto E);
+
+    private static readonly string[] Labels = { "Connexion", "Calendriers", "Validation" };
+    private CalendarSourceDef Def => SharedCalendarSources.Find(Source)!;
+    private string Kind => Source switch { "google" => ConnectedAccounts.Google, "m365" => ConnectedAccounts.Microsoft, _ => Source };
+    private string Provider => Source switch { "google" => "Google", "m365" => "Microsoft", _ => Def.Name };
+    private string ConnectUrl => Source == "google" ? "/google/connect?for=calendar&wiz=cal-google" : "/microsoft/connect?for=calendar&wiz=cal-m365";
+
+    private int step = 1;
+    private bool ready, connected, loading, planning, done, previewing;
+    private string user = "", Missing = "", url = "", secret = "", newName = "", newRef = "";
+    private string? formError, addError, previewError, focus;
+    private bool hasSecret;
+    private DateTime? since;
+    private List<SharedCalendar> existing = new();
+    private readonly Dictionary<string, SharedCalendar> chosen = new();     // par Ref : rien n'est enregistré avant « Ajouter »
+    private readonly List<SharedCalendar> manual = new();                   // CalDAV, Exchange : ajoutés à la main
+    private List<GoogleConnector.GoogleCalendarInfo> googleCalendars = new();
+    private List<GraphService.CalendarInfo> msCalendars = new();
+    private List<GraphService.RoomInfo> rooms = new();
+    private List<Ev> events = new();
+    private List<Ev> planEvents = new();
+    private List<string> planErrors = new();
+    private List<SharedCalendar> Removed => existing.Where(e => !chosen.ContainsKey(e.Ref)).ToList();
+    private string FocusName => AllListed().FirstOrDefault(c => c.Ref == focus)?.Name ?? "";
+
+    private string StepLine => step switch
+    {
+        1 => "Étape 1 sur 3 — connectez votre compte",
+        2 => "Étape 2 sur 3 — choisissez les calendriers à partager",
+        _ => done ? "Étape 3 sur 3 — terminé" : "Étape 3 sur 3 — vérifiez, puis ajoutez les calendriers"
+    };
+
+    private bool NextDisabled => step switch { 1 => !connected, 2 => chosen.Count == 0 && existing.Count == 0, _ => planning || (!done && chosen.Count == 0 && Removed.Count == 0) };
+    private string NextLabel => step < 3 ? "Suivant" : done ? "Terminer" : "Ajouter";
+    private string Hint => step switch
+    {
+        1 => connected ? "" : Source is "caldav" or "ews" ? "Enregistrez la connexion pour continuer." : "Connectez un compte pour continuer.",
+        2 => chosen.Count == 0 ? "Cochez au moins un calendrier." : $"{chosen.Count} calendrier{(chosen.Count > 1 ? "s" : "")} coché{(chosen.Count > 1 ? "s" : "")}",
+        _ => ""
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        Refresh();
+        foreach (var c in existing) chosen[c.Ref] = c;
+        manual.AddRange(existing.Where(_ => Source is "caldav" or "ews"));
+        step = !connected ? 1 : Math.Clamp(StartStep, 1, 2);
+        if (step == 2) await EnterStep2();
+    }
+
+    private void Refresh()
+    {
+        var t = Store.Read(d => d.Tenant);
+        existing = t.SharedCalendars.Where(c => c.Source == Source).OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        var a = SharedCalendarSources.Account(t, Source);
+        connected = SharedCalendarSources.Configured(t, Source);
+        Missing = $"Connectez le compte {Provider} qui a accès à vos agendas.";
+        switch (Source)
+        {
+            case "google":
+                ready = GoogleAuth.IsConfigured;
+                var g = GoogleAuth.ConnectionOf(t);
+                (user, since) = (g.User, g.Since);
+                if (g.Connected && !connected) Missing = "Compte connecté pour Google Drive : autorisez aussi la lecture de vos agendas.";
+                break;
+            case "m365":
+                ready = MsAuth.IsConfigured;
+                var m = MicrosoftAuth.ConnectionOf(t);
+                (user, since) = (m.User, m.Since);
+                if (m.Connected && !connected) Missing = "Compte connecté pour OneDrive : autorisez aussi la lecture de vos agendas.";
+                break;
+            default:
+                ready = true;
+                if (url.Length == 0) url = a?.Url ?? "";
+                if (user.Length == 0) user = a?.User ?? "";
+                hasSecret = a is { Secret.Length: > 0 };
+                connected = connected && a is { Url.Length: > 0, User.Length: > 0 } && a.LastError.Length == 0;
+                break;
+        }
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task Cancel()
+    {
+        // rien ne reste : le compte connecté pendant l'assistant part (sauf s'il sert à une autre intégration)
+        if (Adding && !AccountShared && connected) await Accounts.Disconnect(Kind);
+        await OnClose.InvokeAsync();
+    }
+
+    private void Back() { if (step > 1) step--; }
+
+    private async Task Next()
+    {
+        if (step == 1) { step = 2; await EnterStep2(); }
+        else if (step == 2) { step = 3; await Prepare(); }
+        else if (!done) await Run();
+        else await Close();
+    }
+
+    // ---------- Étape 1 : connexion d'un serveur ----------
+
+    private void SaveConnection()
+    {
+        formError = null;
+        var u = url.Trim(); var usr = user.Trim(); var s = secret.Trim();
+        if (!AppCatalog.IsHttpUrl(u)) { formError = Source == "ews" ? "L'adresse du service EWS doit commencer par https:// (ou http://)." : "L'adresse du serveur doit commencer par https:// (ou http://)."; return; }
+        if (usr.Length == 0) { formError = Source == "ews" ? "Renseignez le compte de service Exchange." : "Renseignez l'identifiant."; return; }
+        if (s.Length == 0 && !hasSecret) { formError = "Renseignez le mot de passe."; return; }
+        Store.Write(d =>
+        {
+            var a = d.Tenant.CalendarAccounts.FirstOrDefault(x => x.Source == Source);
+            if (a == null) d.Tenant.CalendarAccounts.Add(a = new CalendarAccount { Source = Source });
+            a.Url = u; a.User = usr;
+            if (s.Length > 0) a.Secret = Box.Protect(s);
+            a.LastError = "";
+        });
+        secret = "";
+        Refresh();
+    }
+
+    // ---------- Étape 2 : calendriers ----------
+
+    private async Task EnterStep2()
+    {
+        if (Source is "caldav" or "ews" || googleCalendars.Count + msCalendars.Count + rooms.Count > 0) return;
+        loading = true;
+        StateHasChanged();
+        var t = Store.Read(d => d.Tenant);
+        try
+        {
+            if (Source == "google") googleCalendars = await Google.ListCalendars(t);
+            else
+            {
+                msCalendars = await Graph.ListCalendars(t);
+                try { rooms = await Graph.ListRooms(t); } catch (InvalidOperationException) { /* annuaire inaccessible : agendas du compte seulement */ }
+            }
+        }
+        catch (InvalidOperationException ex) { previewError = ex.Message; }
+        loading = false;
+    }
+
+    private IEnumerable<Group> GroupsOf()
+    {
+        SharedCalendar Of(string r, string name, string hint) => existing.FirstOrDefault(e => e.Ref == r) ?? new SharedCalendar { Source = Source, Name = name, Ref = r, Hint = hint };
+        switch (Source)
+        {
+            case "google": yield return new("Mes agendas", googleCalendars.Select(g => Of(g.Id, g.Name, g.Primary ? "principal" : "")).ToList()); break;
+            case "m365":
+                yield return new("Mes agendas", msCalendars.Select(c => Of(GraphService.CalendarRefPrefix + c.Id, c.Name, c.Owner is { Length: > 0 } o ? o : user)).ToList());
+                yield return new("Salles et boîtes", rooms.Select(r => Of(r.Email, r.Name, r.Building ?? r.Email)).ToList());
+                break;
+            default: yield return new("Calendriers", manual.ToList()); break;
+        }
+    }
+
+    private List<Group> Groups => GroupsOf().ToList();
+    private IEnumerable<SharedCalendar> AllListed() => Groups.SelectMany(g => g.Items);
+
+    private void Check(SharedCalendar c)
+    {
+        if (!chosen.Remove(c.Ref)) chosen[c.Ref] = c;
+    }
+
+    private void AddManual()
+    {
+        addError = null;
+        var r = newRef.Trim();
+        var name = newName.Trim();
+        if (r.StartsWith("webcal://", StringComparison.OrdinalIgnoreCase)) r = "https://" + r["webcal://".Length..];
+        if (r.Length == 0) { addError = $"Renseignez le champ « {Def.RefLabel} »."; return; }
+        if (Source == "ews" && !r.Contains('@')) { addError = "Saisissez une adresse e-mail (ex. salle-a101@organisation.ch)."; return; }
+        if (Source == "caldav" && r.Contains("://") && !AppCatalog.IsHttpUrl(r)) { addError = "L'adresse du calendrier doit commencer par https:// (ou http://)."; return; }
+        if (Source == "caldav" && !AppCatalog.IsHttpUrl(r) && !AppCatalog.IsHttpUrl(url.Trim())) { addError = "Saisissez l'adresse complète du calendrier."; return; }
+        if (manual.Any(c => string.Equals(c.Ref, r, StringComparison.OrdinalIgnoreCase))) { addError = "Ce calendrier est déjà dans la liste."; return; }
+        if (name.Length == 0) name = r;
+        if (name.Length > 80) name = name[..80];
+        var cal = new SharedCalendar { Source = Source, Name = name, Ref = r, Hint = r };
+        manual.Add(cal);
+        chosen[cal.Ref] = cal;
+        newName = newRef = "";
+        _ = Focus(cal);
+    }
+
+    private async Task Focus(SharedCalendar c)
+    {
+        focus = c.Ref;
+        events = new(); previewError = null; previewing = true;
+        StateHasChanged();
+        try { events = await EventsOf(c); }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or TaskCanceledException) { previewError = ex.Message; }
+        previewing = false;
+    }
+
+    private async Task<List<Ev>> EventsOf(SharedCalendar c)
+    {
+        var t = Store.Read(d => d.Tenant);
+        var from = DateTime.UtcNow.Date;
+        var list = await Calendars.GetEvents(SharedCalendarSources.Resolve(t, c, Box), t, from, from.AddDays(7));
+        return list.OrderBy(e => e.StartUtc).Select(e => new Ev(c.Name, e)).ToList();
+    }
+
+    private RenderFragment EventRows(List<Ev> list) => __builder =>
+    {
+        <ul class="cw-events">
+            @foreach (var x in list)
+            {
+                <li><span class="cw-when">@(x.E.AllDay ? x.E.StartUtc.ToLocalTime().ToString("ddd dd.MM") + " · journée" : x.E.StartUtc.ToLocalTime().ToString("ddd dd.MM · HH:mm"))</span><span class="cw-ttl">@x.E.Title</span><small>@x.Calendar@(x.E.Location is { Length: > 0 } l ? " · " + l : "")</small></li>
+            }
+        </ul>
+    };
+
+    // ---------- Étape 3 : validation ----------
+
+    private async Task Prepare()
+    {
+        planning = true; planEvents = new(); planErrors = new();
+        StateHasChanged();
+        foreach (var c in chosen.Values)
+        {
+            try { planEvents.AddRange(await EventsOf(c)); }
+            catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or TaskCanceledException) { planErrors.Add($"« {c.Name} » : {ex.Message}"); }
+        }
+        planEvents = planEvents.OrderBy(e => e.E.StartUtc).ToList();
+        planning = false;
+    }
+
+    private async Task Run()
+    {
+        foreach (var c in chosen.Values)
+        {
+            if (existing.Any(e => e.Ref == c.Ref)) continue;
+            var cal = new SharedCalendar { Source = Source, Name = c.Name, Ref = c.Ref, Hint = c.Hint };
+            Store.Write(d => d.Tenant.SharedCalendars.Add(cal));
+        }
+        var gone = Removed.Select(r => r.Id).ToHashSet();
+        if (gone.Count > 0) Store.Write(d => { d.Tenant.SharedCalendars.RemoveAll(x => gone.Contains(x.Id)); });
+        if (Adding) { Svc.Mark("cal-" + Source); await OnAdded.InvokeAsync(); }
+        Svc.SetCalendarSource(Source, true);
+        Refresh();
+        done = true;
+        await OnChanged.InvokeAsync();
+    }
+}

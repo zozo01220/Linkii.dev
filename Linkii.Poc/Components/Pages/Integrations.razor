@@ -268,6 +268,10 @@ else
     {
         <DriveWizard Source="@wid[4..]" StartStep="wizStep" Adding="wizAdding" AccountShared="AccountShared(wid)" OnAdded="() => pendingUse = wid" OnClose="CloseWizard" OnChanged="Load" />
     }
+    else if (wid.StartsWith("cal-"))
+    {
+        <CalendarWizard Source="@wid[4..]" StartStep="wizStep" Adding="wizAdding" AccountShared="AccountShared(wid)" OnAdded="() => pendingUse = wid" OnClose="CloseWizard" OnChanged="Load" />
+    }
 }
 
 @if (retireCanva is { } rc)
@@ -1017,7 +1021,7 @@ else
         Svc.Mark("cal-" + src);
         Svc.SetCalendarSource(src, on);
         Load();
-        if (on && !SharedCalendarSources.Configured(tenant, src)) { calSource = src; Toast.Ok($"« {def.Name} » activée : configurez sa connexion."); }
+        if (on && !SharedCalendarSources.Configured(tenant, src)) { if (HasWizard("cal-" + src)) OpenWizard("cal-" + src, 1, false); else calSource = src; Toast.Ok($"« {def.Name} » activée : configurez sa connexion."); }
         else Toast.Ok(on ? $"« {def.Name} » activée : ses calendriers sont proposés dans les listes de lecture." : $"« {def.Name} » désactivée. Les contenus existants restent diffusés.");
     }
 
@@ -1078,7 +1082,7 @@ else
         Toast.Ok("Synchronisation lancée : les fichiers arrivent dans la médiathèque.");
     }
 
-    private static bool HasWizard(string id) => id == "canva" || id.StartsWith("drv-");
+    private static bool HasWizard(string id) => id == "canva" || id.StartsWith("drv-") || id is "cal-google" or "cal-m365" or "cal-caldav" or "cal-ews";
 
     private void OpenWizard(string id, int step, bool adding) { pendingUse = null; wizId = id; wizStep = step; wizAdding = adding; }
 
@@ -1133,8 +1137,8 @@ else
     {
         pendingUse = null;
         if (e.Id == "ha-home") haOpen = true;
-        else if (CalSource(e) is { } cal) calSource = cal;
         else if (HasWizard(e.Id)) OpenWizard(e.Id, 2, false);
+        else if (CalSource(e) is { } cal) calSource = cal;
         else appDrawer = e.Id;
     }
 
@@ -1190,7 +1194,7 @@ else
         var granted = string.Join(" et ", new[] { hasCalendars ? "agendas" : null, hasFiles ? "fichiers" : null }.OfType<string>());
         Toast.Ok($"Compte {name} connecté{(user.Length > 0 ? $" ({user})" : "")}{(granted.Length > 0 ? $" : {granted} autorisés" : "")}.");
         if (accountsTab) ShowAccount(kind);
-        else if (purpose == AccountPurposes.Calendar) calSource = calendarSource;
+        else if (purpose == AccountPurposes.Calendar) OpenWizard("cal-" + calendarSource, 2, !InMineId("cal-" + calendarSource));
         else if (purpose != AccountPurposes.Calendar) OpenWizard("drv-" + driveSourceId, 2, !InMineId("drv-" + driveSourceId));
     }
 

@@ -52,10 +52,13 @@ public static class SharedCalendarSources
     /// Ce qu'il faut au connecteur pour lire ce calendrier. Une source désactivée continue de servir les contenus existants
     /// (comme une intégration désactivée) ; un calendrier supprimé ne s'affiche plus.
     /// </summary>
-    public static CalendarSource Resolve(Tenant t, Guid calendarId, SecretBox box)
+    public static CalendarSource Resolve(Tenant t, Guid calendarId, SecretBox box) =>
+        Resolve(t, t.SharedCalendars.FirstOrDefault(x => x.Id == calendarId)
+            ?? throw new InvalidOperationException("Ce calendrier a été retiré des calendriers partagés (Intégrations)."), box);
+
+    /// <summary>Même chose pour un calendrier pas encore enregistré (aperçu de l'assistant d'ajout).</summary>
+    public static CalendarSource Resolve(Tenant t, SharedCalendar c, SecretBox box)
     {
-        var c = t.SharedCalendars.FirstOrDefault(x => x.Id == calendarId)
-            ?? throw new InvalidOperationException("Ce calendrier a été retiré des calendriers partagés (Intégrations).");
         var a = Account(t, c.Source);
         var secret = a is { Secret.Length: > 0 } ? box.Unprotect(a.Secret) : "";
         return c.Source switch
