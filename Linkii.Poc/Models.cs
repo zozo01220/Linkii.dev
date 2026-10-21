@@ -399,6 +399,10 @@ public class Tenant
     // Drives (Intégrations) : sources actives (gdrive | onedrive) et dossiers synchronisés. La connexion est celle des calendriers (Google, Microsoft 365).
     public List<string> DrivesEnabled { get; set; } = new();
     public List<DriveFolder> DriveFolders { get; set; } = new();
+    /// <summary>Dossiers Canva synchronisés (Intégrations › Canva) : leurs designs sont exportés dans la médiathèque, dossier « Canva_médias ».</summary>
+    public List<CanvaFolder> CanvaFolders { get; set; } = new();
+    /// <summary>Dossier de la médiathèque qui reçoit les designs Canva synchronisés (créé à la première synchronisation, renommable).</summary>
+    public Guid? CanvaMediaFolderId { get; set; }
     /// <summary>Connexions des Drives qui n'ont pas de compte Google ou Microsoft : Nextcloud, SFTP (identifiants saisis), Dropbox (OAuth).</summary>
     public List<DriveAccount> DriveAccounts { get; set; } = new();
 
@@ -499,6 +503,20 @@ public class DriveFolder
     public int SubfolderCount { get; set; }       // sous-dossiers vus à la dernière synchronisation (directs seulement sans Subfolders)
     public DateTime? SyncedUtc { get; set; }
     public string LastError { get; set; } = "";   // dernière synchronisation en échec ; vide si elle a réussi
+}
+
+/// <summary>Un dossier Canva choisi pour être synchronisé : ses designs (et ceux de ses sous-dossiers si demandé) sont exportés en images dans la médiathèque (Info["canvaFolder"] = Id).</summary>
+public class CanvaFolder
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string CanvaId { get; set; } = "";     // identifiant du dossier chez Canva (« root » : tout le compte)
+    public string Name { get; set; } = "";
+    public string Location { get; set; } = "";    // affichage : chemin du dossier dans Canva
+    public bool Subfolders { get; set; }
+    public int DesignCount { get; set; }
+    public int Skipped { get; set; }              // designs laissés de côté au-delà de CanvaService.MaxDesigns
+    public DateTime? SyncedUtc { get; set; }
+    public string LastError { get; set; } = "";
 }
 
 /// <summary>Connexion d'une source de calendriers partagés (une par source et par client). Microsoft 365 garde ses identifiants dans Ms*.</summary>

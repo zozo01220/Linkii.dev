@@ -279,11 +279,22 @@ else
                 else if (canvaReady) { <a class="btn sm" href="/canva/connect" target="_top">Connecter Canva</a> }
             </div>
             @if (!canvaReady) { <div class="dw-note">Canva n'est pas encore disponible sur cette plateforme (connexion Canva à configurer par l'administrateur Linkii).</div> }
+            @if (cv is { Lost: false })
+            {
+                <h4 class="pe-sub">Dossiers synchronisés <span class="cat-count">@(Store.Read(d => d.Tenant.CanvaFolders.Count))</span></h4>
+                <p class="csd-shared"><Ico Name="folder" Size="14" /> Copiez des dossiers Canva dans la médiathèque (dossier « Canva_médias ») : leurs designs sont exportés en images et utilisables partout.</p>
+                <button type="button" class="btn ghost sm" @onclick="() => cfOpen = true"><Ico Name="folder" Size="14" /> Gérer les dossiers…</button>
+            }
         </div>
         <div class="modal-foot">
             <button class="btn ghost" @onclick="CloseCanva">Fermer</button>
         </div>
     </div>
+}
+
+@if (cfOpen)
+{
+    <CanvaFoldersDialog OnClose="() => cfOpen = false" OnChanged="Load" />
 }
 
 @if (appDrawer is { } did && Svc.Find(did) is { } dm)
@@ -429,7 +440,7 @@ else
     private List<ConnectedAccount> accounts = new();
     private string tab = "mine";   // mine | store | accounts
     private bool accountsTab { get => tab == "accounts"; set { if (value) tab = "accounts"; else if (tab == "accounts") tab = "mine"; } }
-    private bool addMenu, cvOpen, canvaReady, admin = true;   // admin : activation, comptes et connexions ; un membre voit seulement les intégrations de son niveau
+    private bool addMenu, cvOpen, cfOpen, canvaReady, admin = true;   // admin : activation, comptes et connexions ; un membre voit seulement les intégrations de son niveau
     private string? calSource;     // source de calendriers dont la fenêtre « Gérer » est ouverte
     private string? driveSource;   // source Drive dont la fenêtre « Gérer » est ouverte
     private bool haOpen;           // compte Home Assistant : fenêtre de connexion ouverte
@@ -571,6 +582,7 @@ else
     /// <summary>Retire l'intégration ; une source Drive emporte ses dossiers et les fichiers qu'elle avait copiés dans la médiathèque.</summary>
     private async Task RetireCore(string id)
     {
+        if (id == "canva") Canva.RemoveAllFolders(Store.ClientId);
         if (id.StartsWith("drv-"))
         {
             var source = id[4..];
@@ -1015,7 +1027,7 @@ else
 
     private void CloseDrive() { driveSource = null; EndUse(); }
     private void CloseHa() { haOpen = false; EndUse(); }
-    private void CloseCanva() { cvOpen = false; EndUse(); }
+    private void CloseCanva() { cvOpen = false; cfOpen = false; EndUse(); }
     private void CloseAppDrawer() { appDrawer = null; EndUse(); }
 
     /// <summary>Plateforme sans connexion au fournisseur (identifiants de l'application à configurer par l'administrateur Linkii) : null si l'intégration est utilisable.</summary>

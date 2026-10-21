@@ -1802,3 +1802,13 @@ Maquette validée : `maquettes/editeur-compositions-etape3.html` (6 scènes). Co
 
 - « Supprimer la zone » (page Zones) ouvre d'abord une fenêtre de confirmation. Elle liste les écrans de la zone, qui passeront dans la zone par défaut de l'aire (comportement inchangé de `AreaOps.DeleteZone`), ou indique qu'aucun écran n'y est.
 - Compilation : OK ; rendu non vérifié dans le navigateur.
+
+## 88. Canva : dossiers synchronisés vers la médiathèque (21 octobre 2026) : codé, non testé avec un vrai compte Canva
+
+- **Intégrations › Canva › « Gérer les dossiers… »** (`CanvaFoldersDialog`) : liste des dossiers Canva choisis, sélecteur par navigation (`GET /folders/{id}/items`, racine « root »), case « Inclure les sous-dossiers ». Même principe que les Drives : le dossier est synchronisé à l'ajout, puis à la demande (menu du dossier ou « Synchroniser maintenant ») ; pas de synchronisation périodique.
+- **Médiathèque** : chaque design est exporté en images (`CanvaService.Export`) et rangé dans le dossier « Canva_médias » de l'aire (`Tenant.CanvaMediaFolderId`, créé à la première synchronisation, renommable et déplaçable comme tout dossier). Les fichiers portent `Info["canvaFolder"]` (dossier Linkii), `canvaDesign` et `canvaUpdated` (date de modification Canva) ; ils n'ont pas `Info["canva"]` : le nettoyage des exports orphelins ne les touche pas. La pastille d'origine reste « Canva ».
+- **Mises à jour** : à la synchronisation, seuls les designs nouveaux ou modifiés sont exportés de nouveau (l'ancienne version est remplacée, dans le même dossier de la médiathèque) ; un design sorti du dossier Canva quitte la médiathèque. Limite : `CanvaService.MaxDesigns` = 60 designs par dossier (les autres sont comptés et signalés). Une synchronisation tourne en arrière-plan, avec son avancement dans la liste.
+- **Retrait** : retirer un dossier, ou retirer l'intégration Canva (règle du §86), supprime les fichiers synchronisés de la médiathèque. Déconnecter le compte Canva ne les supprime pas.
+- **Droits Canva** : ajout de la permission `folder:read` à la connexion. Un compte connecté avant doit être reconnecté (message explicite si Canva répond 403) ; la permission doit aussi être cochée dans la configuration de l'app chez Canva.
+- **Limites connues** : les images téléversées dans Canva ne sont pas copiées (seulement les designs) ; un fichier supprimé à la main dans « Canva_médias » revient à la synchronisation suivante.
+- Compilation : OK ; rendu et échanges avec Canva non vérifiés.

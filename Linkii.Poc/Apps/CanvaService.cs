@@ -17,7 +17,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
 {
     private const string AuthorizeUrl = "https://www.canva.com/api/oauth/authorize";
     private const string Api = "https://api.canva.com/rest/v1";
-    private const string Scopes = "design:meta:read design:content:read profile:read";
+    private const string Scopes = "design:meta:read design:content:read folder:read profile:read";
 
     // Intégration Canva (portail développeurs) : celle de la plateforme Linkii, identique pour tous les clients
     // (Linkii:Canva:ClientId / ClientSecret / RedirectUri sur le serveur).
@@ -324,18 +324,204 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
     }
 
     /// <summary>Retire de la médiathèque des fichiers exportés depuis Canva (fichiers sur disque compris).</summary>
-    public void DeleteFiles(Guid clientId, IEnumerable<Guid> ids)
+    public void DeleteFiles(Guid clientId, IEnumerable<Guid> ids, bool synced = false)
     {
         var set = ids.ToHashSet();
         if (set.Count == 0) return;
         var removed = store.Write(d =>
         {
-            var list = d.Media.Where(m => m.ClientId == clientId && set.Contains(m.Id) && m.Info.ContainsKey("canva")).ToList();
+            var list = d.Media.Where(m => m.ClientId == clientId && set.Contains(m.Id) && (m.Info.ContainsKey("canva") || synced && m.Info.ContainsKey("canvaFolder"))).ToList();
             foreach (var m in list) d.Media.Remove(m);
             return list;
         });
         foreach (var f in removed.Where(m => m.FileName != null))
             try { File.Delete(Path.Combine(AppPaths.MediaDir, f.FileName!)); } catch (IOException) { }
+    }
+
+    // ---------- Dossiers Canva synchronisés ----------
+
+    public const int MaxDesigns = 60;               // par dossier, sous-dossiers compris : chaque design est un export chez Canva
+    public const string MediaFolderName = "Canva_médias";
+
+    public record CanvaNode(string Id, string Name);
+    public record CanvaListing(string Id, string Name, List<CanvaNode> Folders, int Designs, string? Continuation);
+    public record SyncState(string Current, int Done, int Total);
+
+    private readonly ConcurrentDictionary<Guid, SyncState> syncing = new();
+
+    /// <summary>État de la synchronisation en cours d'un dossier (null : aucune).</summary>
+    public SyncState? Syncing(Guid folderId) => syncing.GetValueOrDefault(folderId);
+
+    private static CanvaException ScopeError(CanvaException ex) =>
+        ex.Message.Contains(" 403") ? new("Canva n'autorise pas encore la lecture des dossiers. Reconnectez Canva dans Intégrations › Comptes connectés pour l'accorder.") : ex;
+
+    /// <summary>Sous-dossiers d'un dossier Canva (« root » : la racine du compte) et nombre de designs directs, pour le sélecteur.</summary>
+    public async Task<CanvaListing> ListFolder(Guid clientId, string folderId)
+    {
+        try
+        {
+            var name = "Tous les designs";
+            if (folderId != "root")
+            {
+                using var f = await Get(clientId, "/folders/" + Uri.EscapeDataString(folderId));
+                name = f.RootElement.GetProperty("folder").GetProperty("name").GetString() ?? "Dossier";
+            }
+            var folders = new List<CanvaNode>();
+            var designs = 0;
+            string? next = null;
+            var pages = 0;
+            do
+            {
+                var q = "?item_types=folder,design&limit=100" + (next == null ? "" : "&continuation=" + Uri.EscapeDataString(next));
+                using var doc = await Get(clientId, "/folders/" + Uri.EscapeDataString(folderId) + "/items" + q);
+                foreach (var e in doc.RootElement.GetProperty("items").EnumerateArray())
+                {
+                    var type = e.GetProperty("type").GetString();
+                    if (type == "folder") folders.Add(new(e.GetProperty("folder").GetProperty("id").GetString() ?? "", e.GetProperty("folder").GetProperty("name").GetString() ?? "Dossier"));
+                    else if (type == "design") designs++;
+                }
+                next = doc.RootElement.TryGetProperty("continuation", out var c) ? c.GetString() : null;
+            } while (next != null && ++pages < 10);
+            return new(folderId, name, folders.OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ToList(), designs, null);
+        }
+        catch (CanvaException ex) { throw ScopeError(ex); }
+        catch (KeyNotFoundException) { throw new CanvaException("Réponse de Canva inattendue."); }
+    }
+
+    /// <summary>Designs d'un dossier Canva et, si demandé, de tous ses sous-dossiers. Au plus <see cref="MaxDesigns"/> ; les autres sont comptés.</summary>
+    private async Task<(List<Design> Designs, int Skipped)> CollectDesigns(Guid clientId, string rootId, bool subfolders)
+    {
+        var designs = new List<Design>();
+        var skipped = 0;
+        var queue = new Queue<string>();
+        var seen = new HashSet<string>();
+        queue.Enqueue(rootId);
+        var visited = 0;
+        while (queue.Count > 0 && visited++ < 200)
+        {
+            var folder = queue.Dequeue();
+            string? next = null;
+            do
+            {
+                var q = "?item_types=folder,design&limit=100" + (next == null ? "" : "&continuation=" + Uri.EscapeDataString(next));
+                using var doc = await Get(clientId, "/folders/" + Uri.EscapeDataString(folder) + "/items" + q);
+                foreach (var e in doc.RootElement.GetProperty("items").EnumerateArray())
+                {
+                    var type = e.GetProperty("type").GetString();
+                    if (type == "folder" && subfolders) queue.Enqueue(e.GetProperty("folder").GetProperty("id").GetString() ?? "");
+                    else if (type == "design")
+                    {
+                        var d = DesignOf(e.GetProperty("design"));
+                        if (!seen.Add(d.Id)) continue;
+                        if (designs.Count < MaxDesigns) designs.Add(d); else skipped++;
+                    }
+                }
+                next = doc.RootElement.TryGetProperty("continuation", out var c) ? c.GetString() : null;
+            } while (next != null);
+        }
+        return (designs, skipped);
+    }
+
+    private static Design DesignOf(JsonElement e)
+    {
+        var thumb = e.TryGetProperty("thumbnail", out var t) ? t : default;
+        return new Design(
+            e.GetProperty("id").GetString() ?? "",
+            e.TryGetProperty("title", out var ti) && ti.GetString() is { Length: > 0 } title ? title : "Design sans titre",
+            thumb.ValueKind == JsonValueKind.Object && thumb.TryGetProperty("url", out var u) ? u.GetString() : null,
+            e.TryGetProperty("page_count", out var pc) && pc.TryGetInt32(out var pages) ? pages : null,
+            e.TryGetProperty("updated_at", out var up) && up.TryGetInt64(out var ts) ? DateTimeOffset.FromUnixTimeSeconds(ts).UtcDateTime : null,
+            thumb.ValueKind == JsonValueKind.Object && thumb.TryGetProperty("width", out var w) && w.TryGetInt32(out var wi) ? wi : null,
+            thumb.ValueKind == JsonValueKind.Object && thumb.TryGetProperty("height", out var h) && h.TryGetInt32(out var hi) ? hi : null);
+    }
+
+    private static string Stamp(Design d) => d.Updated is { } u ? new DateTimeOffset(u, TimeSpan.Zero).ToUnixTimeSeconds().ToString() : "";
+
+    /// <summary>Dossier « Canva_médias » de la médiathèque : retrouvé ou créé à la racine de l'aire.</summary>
+    private Guid MediaFolderFor(Guid clientId, Guid? areaId) => store.Write(d =>
+    {
+        var t = d.Clients.First(c => c.Id == clientId);
+        if (t.CanvaMediaFolderId is { } id && d.MediaFolders.Any(f => f.ClientId == clientId && f.Id == id)) return id;
+        var same = d.MediaFolders.FirstOrDefault(f => f.ClientId == clientId && f.AreaId == (areaId ?? Guid.Empty) && f.ParentId == null && f.Name == MediaFolderName);
+        if (same == null) { same = new MediaFolder { ClientId = clientId, AreaId = areaId ?? Guid.Empty, Name = MediaFolderName }; d.MediaFolders.Add(same); }
+        t.CanvaMediaFolderId = same.Id;
+        return same.Id;
+    });
+
+    private void Mark(Guid clientId, Guid folderId, Action<CanvaFolder> change) =>
+        store.Write(d => { if (d.Clients.FirstOrDefault(c => c.Id == clientId)?.CanvaFolders.FirstOrDefault(f => f.Id == folderId) is { } f) change(f); });
+
+    /// <summary>
+    /// Synchronise un dossier : exporte en images les designs nouveaux ou modifiés depuis la dernière fois, retire ceux qui ont quitté le dossier.
+    /// Les fichiers (Info["canvaFolder"], jamais Info["canva"]) ne sont pas traités comme des exports orphelins : ils restent jusqu'au retrait du dossier.
+    /// Retourne la première erreur rencontrée (les autres designs sont tout de même traités).
+    /// </summary>
+    public async Task<string?> SyncFolder(Guid clientId, Guid folderId, Guid? areaId, CancellationToken ct = default)
+    {
+        if (store.Read(d => d.Clients.FirstOrDefault(c => c.Id == clientId)?.CanvaFolders.FirstOrDefault(f => f.Id == folderId)) is not { } folder) return "Dossier introuvable.";
+        if (!syncing.TryAdd(folderId, new SyncState("Lecture du dossier…", 0, 0))) return null;   // déjà en cours
+        string? error = null;
+        try
+        {
+            var (designs, skipped) = await CollectDesigns(clientId, folder.CanvaId, folder.Subfolders);
+            var key = folderId.ToString();
+            var local = store.Read(d => d.Media.Where(m => m.ClientId == clientId && m.Info.GetValueOrDefault("canvaFolder") == key).ToList());
+
+            var ids = designs.Select(d => d.Id).ToHashSet();
+            DeleteFiles(clientId, local.Where(m => !ids.Contains(m.Info.GetValueOrDefault("canvaDesign") ?? "")).Select(m => m.Id), synced: true);   // sortis du dossier
+
+            var todo = designs.Where(d => !local.Any(m => m.Info.GetValueOrDefault("canvaDesign") == d.Id && m.Info.GetValueOrDefault("canvaUpdated") == Stamp(d))).ToList();
+            var target = MediaFolderFor(clientId, areaId);
+            for (var i = 0; i < todo.Count; i++)
+            {
+                if (ct.IsCancellationRequested) break;
+                var design = todo[i];
+                syncing[folderId] = new SyncState(design.Title, i, todo.Count);
+                var res = await Export(clientId, design, "images", null, ct, areaId);
+                if (res.Error != null) { error ??= $"« {design.Title} » : {res.Error}"; continue; }
+                var old = local.Where(m => m.Info.GetValueOrDefault("canvaDesign") == design.Id).ToList();   // version précédente : remplacée, dans le même dossier de la médiathèque
+                var shelf = old.FirstOrDefault(m => m.FolderId != null)?.FolderId ?? target;
+                var fresh = res.Files.Select(f => f.Id).ToHashSet();
+                store.Write(d =>
+                {
+                    foreach (var m in d.Media.Where(m => fresh.Contains(m.Id)))
+                    {
+                        m.Info.Remove("canva");
+                        m.Info["canvaFolder"] = key; m.Info["canvaDesign"] = design.Id; m.Info["canvaUpdated"] = Stamp(design);
+                        m.FolderId = shelf;
+                    }
+                });
+                DeleteFiles(clientId, old.Select(m => m.Id), synced: true);
+            }
+            Mark(clientId, folderId, f => { f.DesignCount = designs.Count; f.Skipped = skipped; f.SyncedUtc = DateTime.UtcNow; f.LastError = error ?? ""; });
+        }
+        catch (CanvaException ex)
+        {
+            error = ScopeError(ex).Message;
+            Mark(clientId, folderId, f => f.LastError = error);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or KeyNotFoundException)
+        {
+            error = "Canva est injoignable ou a répondu de façon inattendue.";
+            log.LogWarning(ex, "Synchronisation du dossier Canva {Folder}", folderId);
+            Mark(clientId, folderId, f => f.LastError = error);
+        }
+        finally { syncing.TryRemove(folderId, out _); }
+        return error;
+    }
+
+    /// <summary>Retire un dossier synchronisé : ses designs quittent la médiathèque.</summary>
+    public void RemoveFolder(Guid clientId, Guid folderId)
+    {
+        var key = folderId.ToString();
+        store.Write(d => { d.Clients.First(c => c.Id == clientId).CanvaFolders.RemoveAll(f => f.Id == folderId); });
+        DeleteFiles(clientId, store.Read(d => d.Media.Where(m => m.ClientId == clientId && m.Info.GetValueOrDefault("canvaFolder") == key).Select(m => m.Id).ToList()), synced: true);
+    }
+
+    /// <summary>Retrait de l'intégration Canva : tous les dossiers synchronisés et leurs fichiers.</summary>
+    public void RemoveAllFolders(Guid clientId)
+    {
+        foreach (var id in store.Read(d => d.Clients.First(c => c.Id == clientId).CanvaFolders.Select(f => f.Id).ToList())) RemoveFolder(clientId, id);
     }
 
     private static string Base64Url(byte[] b) => Convert.ToBase64String(b).TrimEnd('=').Replace('+', '-').Replace('/', '_');

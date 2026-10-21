@@ -1,0 +1,285 @@
+@inject TenantStore Store
+@inject CanvaService Canva
+@inject Toaster Toast
+@implements IDisposable
+
+@* Intégrations › Canva › Dossiers : les dossiers Canva à copier dans la médiathèque (dossier « Canva_médias », renommable).
+   Chaque design est exporté en images, au plus CanvaService.MaxDesigns par dossier. La synchronisation est lancée à l'ajout et à la demande :
+   seuls les designs nouveaux ou modifiés sont exportés de nouveau. Retirer un dossier retire ses fichiers de la médiathèque. *@
+<div class="modal-backdrop" @onclick="Close"></div>
+<div class="modal app-modal wide as-drawer" role="dialog" aria-modal="true" aria-labelledby="cfd-title">
+    <div class="modal-head">
+        <AppIcon Id="canva" />
+        <div class="grow">
+            <h3 id="cfd-title">Dossiers Canva</h3>
+            <small>Designs copiés dans la médiathèque, dossier « @MediaFolderName »</small>
+        </div>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="modal-body">
+        @if (!connected)
+        {
+            <div class="dw-note">Connectez d'abord votre compte Canva (Intégrations › Comptes connectés).</div>
+        }
+        else
+        {
+            <h4 class="pe-sub csd-first">Dossiers <span class="cat-count">@folders.Count</span></h4>
+            <div class="cal-list dsd-list">
+                @foreach (var f in folders)
+                {
+                    var folder = f;
+                    var state = Canva.Syncing(folder.Id);
+                    <div class="cal-row">
+                        <Ico Name="folder" Size="16" />
+                        <div class="cal-id">
+                            <b>@folder.Name</b>
+                            <small title="@folder.Location">
+                                @folder.Location ·
+                                @if (state != null) { <text>@(state.Total > 0 ? $"export {state.Done + 1} / {state.Total} : {state.Current}" : state.Current)</text> }
+                                else { <text>@folder.DesignCount design@(folder.DesignCount > 1 ? "s" : "") · @(folder.SyncedUtc == null ? "pas encore synchronisé" : "synchronisé " + DriveSources.Ago(folder.SyncedUtc))</text> }
+                            </small>
+                            @if (folder.Subfolders) { <span class="dsd-tags"><span class="badge dsd-sub"><Ico Name="subfolders" Size="12" /> Avec sous-dossiers</span></span> }
+                            @if (folder.Skipped > 0) { <small class="dsd-warn">Limite de @CanvaService.MaxDesigns designs atteinte : @folder.Skipped ne @(folder.Skipped > 1 ? "sont" : "est") pas copié@(folder.Skipped > 1 ? "s" : ""). Choisissez un dossier plus précis.</small> }
+                            @if (folder.LastError.Length > 0) { <small class="cal-err" title="@folder.LastError">@folder.LastError</small> }
+                        </div>
+                        <div class="kebab">
+                            <button type="button" class="kebab-btn" aria-label="Actions pour @folder.Name" aria-haspopup="menu" aria-expanded="@(menuId == folder.Id ? "true" : "false")"
+                                    @onclick="() => menuId = menuId == folder.Id ? null : folder.Id"><Ico Name="dots-v" Size="18" /></button>
+                            @if (menuId == folder.Id)
+                            {
+                                <div class="kebab-backdrop" @onclick="() => menuId = null"></div>
+                                <div class="kebab-menu" role="menu">
+                                    <button type="button" role="menuitem" disabled="@(state != null)" @onclick="() => Sync(folder)"><Ico Name="refresh" Size="16" /> Synchroniser maintenant</button>
+                                    <button type="button" role="menuitemcheckbox" aria-checked="@(folder.Subfolders ? "true" : "false")" disabled="@(state != null)" @onclick="() => ToggleSubfolders(folder)">
+                                        <span class="dsd-chk">@if (folder.Subfolders) { <Ico Name="check" Size="16" /> }</span> Inclure les sous-dossiers
+                                    </button>
+                                    <button type="button" role="menuitem" class="danger" @onclick="() => { menuId = null; confirmId = folder.Id; }"><Ico Name="trash" Size="16" /> Retirer</button>
+                                </div>
+                            }
+                        </div>
+                        @if (confirmId == folder.Id)
+                        {
+                            <div class="cal-confirm" role="alert">
+                                <span class="grow">Retirer ce dossier ? Ses designs quittent la médiathèque (rien n'est supprimé dans Canva).</span>
+                                <button type="button" class="btn ghost sm" @onclick="() => confirmId = null">Annuler</button>
+                                <button type="button" class="btn danger sm" @onclick="() => Remove(folder)">Retirer</button>
+                            </div>
+                        }
+                    </div>
+                }
+                @if (folders.Count == 0) { <div class="cal-empty">Aucun dossier pour l'instant. Ajoutez le premier ci-dessous.</div> }
+                <div class="dsd-add">
+                    <div class="dsd-add-line">
+                        <button type="button" class="btn ghost sm" @onclick="OpenPicker"><Ico Name="folder" Size="14" /> Choisir un dossier…</button>
+                    </div>
+                    <small>Chaque design est exporté en images (une par page) : @CanvaService.MaxDesigns designs au plus par dossier. Les images téléversées dans Canva ne sont pas copiées, seulement les designs. Un design retiré de Canva, ou déplacé hors du dossier, quitte la médiathèque à la synchronisation suivante.</small>
+                </div>
+            </div>
+        }
+    </div>
+    <div class="modal-foot">
+        <button class="btn ghost" disabled="@(folders.Count == 0 || folders.Any(f => Canva.Syncing(f.Id) != null))" @onclick="SyncAll"><Ico Name="refresh" Size="16" /> Synchroniser maintenant</button>
+        <span class="grow"></span>
+        <button class="btn" @onclick="Close">Fermer</button>
+    </div>
+</div>
+
+@if (picking)
+{
+    <div class="modal-backdrop picker-backdrop" @onclick="ClosePicker"></div>
+    <div class="modal app-modal picker dfp" role="dialog" aria-modal="true" aria-labelledby="cfp-title">
+        <div class="modal-head">
+            <AppIcon Id="canva" />
+            <div class="grow">
+                <h3 id="cfp-title">Choisir un dossier Canva</h3>
+                <small>Ouvrez un dossier avec la flèche, ou ajoutez celui qui est ouvert</small>
+            </div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="ClosePicker"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="dfp-body">
+            <div class="dfp-pane">
+                <div class="dfp-tools">
+                    <div class="dfp-crumbs">
+                        @for (var i = 0; i < path.Count; i++)
+                        {
+                            var idx = i;
+                            if (idx > 0) { <span class="sep">›</span> }
+                            <button type="button" @onclick="() => GoTo(idx)">@path[idx].Name</button>
+                        }
+                    </div>
+                </div>
+                <div class="dfp-items">
+                    @if (pickError != null) { <div class="dfp-empty err">@pickError</div> }
+                    else if (listing == null) { <div class="dfp-empty">Chargement…</div> }
+                    else if (listing.Folders.Count == 0) { <div class="dfp-empty">Aucun sous-dossier.</div> }
+                    else
+                    {
+                        <div class="dfp-sect">Dossiers · @listing.Folders.Count</div>
+                        @foreach (var n in listing.Folders)
+                        {
+                            var node = n;
+                            var added = Added(node.Id);
+                            <div class="dfp-it @(added ? "added" : "")">
+                                <button type="button" class="dfp-pick" disabled="@added" @onclick="() => Enter(node)">
+                                    <Ico Name="folder" Size="18" />
+                                    <span class="dfp-nm"><b>@node.Name</b></span>
+                                    @if (added) { <span class="badge neutre">Déjà ajouté</span> }
+                                </button>
+                                <button type="button" class="dfp-open" aria-label="Ouvrir @node.Name" title="Ouvrir" @onclick="() => Enter(node)"><Ico Name="chevron-right" Size="18" /></button>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+        <div class="modal-foot dfp-foot">
+            <div class="dfp-chosen">
+                @if (listing != null) { <b>@listing.Name</b> <span>· @listing.Designs design@(listing.Designs > 1 ? "s" : "") directement dans ce dossier@(Added(listing.Id) ? " · déjà ajouté" : "")</span> }
+            </div>
+            <label class="dfp-opt">
+                <input type="checkbox" class="ios" checked="@sub" @onchange="e => sub = e.Value is true" />
+                <span>
+                    <b>Inclure les sous-dossiers</b>
+                    <small>Les designs de tous les niveaux</small>
+                </span>
+            </label>
+            <div class="dfp-acts">
+                <button type="button" class="btn ghost" @onclick="ClosePicker">Annuler</button>
+                <button type="button" class="btn" disabled="@(listing == null || Added(listing.Id))" @onclick="Pick">@(listing != null ? $"Ajouter « {listing.Name} »" : "Ajouter")</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private const string MediaFolderName = CanvaService.MediaFolderName;
+    private bool connected;
+    private List<CanvaFolder> folders = new();
+    private Guid? menuId, confirmId;
+    private Timer? timer;
+
+    private bool picking, sub;
+    private readonly List<CanvaService.CanvaNode> path = new();
+    private CanvaService.CanvaListing? listing;
+    private string? pickError;
+
+    protected override void OnInitialized()
+    {
+        Load();
+        timer = new Timer(_ => _ = InvokeAsync(Tick), null, 2000, 2000);
+    }
+
+    private void Load()
+    {
+        connected = Canva.ConnectionOf(Store.ClientId).Connected;
+        folders = Store.Read(d => d.Tenant.CanvaFolders.OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
+    }
+
+    private bool wasSyncing;
+
+    /// <summary>Rafraîchit la liste pendant une synchronisation, puis une dernière fois à sa fin (la médiathèque a changé).</summary>
+    private async Task Tick()
+    {
+        var now = folders.Any(f => Canva.Syncing(f.Id) != null);
+        if (now || wasSyncing) { Load(); StateHasChanged(); }
+        if (wasSyncing && !now) await OnChanged.InvokeAsync();
+        wasSyncing = now;
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private bool Added(string canvaId) => folders.Any(f => f.CanvaId == canvaId);
+
+    // ---------- Dossiers ----------
+
+    private void StartSync(CanvaFolder f)
+    {
+        menuId = null;
+        var (clientId, areaId) = (Store.ClientId, Store.AreaId);
+        _ = Task.Run(async () =>
+        {
+            var err = await Canva.SyncFolder(clientId, f.Id, areaId);
+            if (err != null) Toast.Error(err);
+        });
+        wasSyncing = true;
+    }
+
+    private void Sync(CanvaFolder f) { StartSync(f); Load(); }
+
+    private void SyncAll() { foreach (var f in folders) StartSync(f); Load(); }
+
+    private async Task ToggleSubfolders(CanvaFolder f)
+    {
+        menuId = null;
+        var on = !f.Subfolders;
+        Store.Write(d => { if (d.Tenant.CanvaFolders.FirstOrDefault(x => x.Id == f.Id) is { } x) x.Subfolders = on; });
+        Load();
+        StartSync(folders.First(x => x.Id == f.Id));
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task Remove(CanvaFolder f)
+    {
+        confirmId = null;
+        Canva.RemoveFolder(Store.ClientId, f.Id);
+        Toast.Ok($"Dossier « {f.Name} » retiré : ses designs ont quitté la médiathèque.");
+        Load();
+        await OnChanged.InvokeAsync();
+    }
+
+    // ---------- Sélecteur ----------
+
+    private async Task OpenPicker()
+    {
+        picking = true; sub = false; pickError = null;
+        path.Clear();
+        path.Add(new("root", "Tous les designs"));
+        await Open("root");
+    }
+
+    private void ClosePicker() => picking = false;
+
+    private async Task Open(string id)
+    {
+        listing = null; pickError = null;
+        StateHasChanged();
+        try { listing = await Canva.ListFolder(Store.ClientId, id); }
+        catch (CanvaService.CanvaException ex) { pickError = ex.Message; }
+        catch (HttpRequestException) { pickError = "Canva est injoignable. Réessayez dans un instant."; }
+    }
+
+    private async Task Enter(CanvaService.CanvaNode n)
+    {
+        path.Add(n);
+        await Open(n.Id);
+    }
+
+    private async Task GoTo(int index)
+    {
+        path.RemoveRange(index + 1, path.Count - index - 1);
+        await Open(path[index].Id);
+    }
+
+    private async Task Pick()
+    {
+        if (listing == null || Added(listing.Id)) return;
+        var folder = new CanvaFolder
+        {
+            CanvaId = listing.Id,
+            Name = listing.Name,
+            Location = string.Join(" › ", path.Select(p => p.Name)),
+            Subfolders = sub
+        };
+        Store.Write(d => d.Tenant.CanvaFolders.Add(folder));
+        picking = false;
+        Load();
+        StartSync(folder);
+        Toast.Ok($"« {folder.Name} » ajouté : ses designs arrivent dans la médiathèque.");
+        await OnChanged.InvokeAsync();
+    }
+
+    public void Dispose() => timer?.Dispose();
+}
