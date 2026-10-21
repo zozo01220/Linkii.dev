@@ -2,6 +2,7 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:integrations")]
 @inject TenantStore Store
 @inject AppService Svc
+@inject DriveService Drives
 @inject NavigationManager Nav
 @inject Toaster Toast
 @inject CanvaService Canva
@@ -558,21 +559,32 @@ else
         else Toast.Ok($"{done} intégration{(done > 1 ? "s" : "")} {(on ? "activée" : "désactivée")}{(done > 1 ? "s" : "")}.{extra}");
     }
 
-    private void BulkRetire(List<string> ids)
+    private async Task BulkRetire(List<string> ids)
     {
         var gone = ids.Where(CanRetire).ToList();
-        foreach (var id in gone) RetireCore(id);
+        foreach (var id in gone) await RetireCore(id);
         selected.Clear();
         Load();
         Toast.Ok($"{gone.Count} intégration{(gone.Count > 1 ? "s retirées" : " retirée")} de Mes intégrations. Les contenus restent diffusés ; {(gone.Count > 1 ? "elles sont" : "elle est")} de nouveau dans le Store.");
     }
 
-    private void RetireCore(string id) { SetOn(id, false); Svc.Unmark(id); }
+    /// <summary>Retire l'intégration ; une source Drive emporte ses dossiers et les fichiers qu'elle avait copiés dans la médiathèque.</summary>
+    private async Task RetireCore(string id)
+    {
+        if (id.StartsWith("drv-"))
+        {
+            var source = id[4..];
+            foreach (var f in Store.Read(d => d.Tenant.DriveFolders.Where(x => x.Source == source).ToList()))
+                await Drives.RemoveFolder(Store.ClientId, f.Id);
+        }
+        SetOn(id, false);
+        Svc.Unmark(id);
+    }
 
-    private void Retire(CatalogView.Entry e)
+    private async Task Retire(CatalogView.Entry e)
     {
         menuId = null;
-        RetireCore(e.Id);
+        await RetireCore(e.Id);
         selected.Remove(e.Id);
         Load();
         Toast.Ok($"« {e.Name} » retirée de Mes intégrations : elle est de nouveau dans le Store. Ses contenus restent diffusés.");
