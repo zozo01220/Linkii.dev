@@ -259,7 +259,7 @@ else
 
 @if (cvOpen)
 {
-    <CanvaWizard StartStep="wizStep" OnClose="CloseCanva" OnChanged="Load" />
+    <CanvaWizard StartStep="wizStep" Adding="wizAdding" OnAdded='() => pendingUse = "canva"' OnClose="CloseCanva" OnChanged="Load" />
 }
 
 @if (retireCanva is { } rc)
@@ -430,6 +430,7 @@ else
     private string tab = "mine";   // mine | store | accounts
     private bool accountsTab { get => tab == "accounts"; set { if (value) tab = "accounts"; else if (tab == "accounts") tab = "mine"; } }
     private int wizStep = 1;
+    private bool wizAdding;   // assistant Canva ouvert pour ajouter l'intégration (pas encore dans Mes intégrations)
     private CanvaService.RemovalImpact? retireCanva;
     private ConnectedAccount? canvaAcc;
     private bool addMenu, cvOpen, canvaReady, admin = true;   // admin : activation, comptes et connexions ; un membre voit seulement les intégrations de son niveau
@@ -636,8 +637,8 @@ else
                 @if (DetailsHref(e.Id) is { } href) { <a role="menuitem" href="@href"><Ico Name="info" Size="16" /> Détails</a> }
                 @if (e.Id == "canva" && admin)
                 {
-                    <button type="button" role="menuitem" @onclick="() => { menuId = null; wizStep = 2; cvOpen = true; }"><Ico Name="folder" Size="16" /> Gérer les dossiers…</button>
-                    <button type="button" role="menuitem" @onclick="() => { menuId = null; wizStep = 1; cvOpen = true; }"><Ico Name="refresh" Size="16" /> Reconnecter ou changer de compte…</button>
+                    <button type="button" role="menuitem" @onclick="() => { menuId = null; wizStep = 2; wizAdding = false; cvOpen = true; }"><Ico Name="folder" Size="16" /> Gérer les dossiers…</button>
+                    <button type="button" role="menuitem" @onclick="() => { menuId = null; wizStep = 1; wizAdding = false; cvOpen = true; }"><Ico Name="refresh" Size="16" /> Reconnecter ou changer de compte…</button>
                 }
                 else {
                     <button type="button" role="menuitem" @onclick="() => { menuId = null; OpenFor(e); }"><Ico Name="edit" Size="16" /> Gérer</button>
@@ -1057,6 +1058,7 @@ else
     private void Use(CatalogView.Entry e)
     {
         if (Unavailable(e) is { } why) { Toast.Error(why); return; }
+        if (e.Id == "canva") { wizAdding = true; wizStep = 1; cvOpen = true; return; }   // n'entre dans Mes intégrations qu'au lancement de l'import
         pendingUse = e.Id;
         if (CalSource(e) is { } cal)
         {
@@ -1087,7 +1089,7 @@ else
         if (e.Id == "ha-home") haOpen = true;
         else if (CalSource(e) is { } cal) calSource = cal;
         else if (DrvSource(e) is { } drv) driveSource = drv;
-        else if (e.Id == "canva") { wizStep = 2; cvOpen = true; }
+        else if (e.Id == "canva") { wizStep = 2; wizAdding = false; cvOpen = true; }
         else appDrawer = e.Id;
     }
 
@@ -1119,10 +1121,9 @@ else
         switch (q)
         {
             case "ok":
-                if (!enabled.Contains("canva")) { Svc.Enable("canva"); Load(); }
                 var user = AccountOf(ConnectedAccounts.Canva)?.User;
                 Toast.Ok($"Canva connecté{(user is { Length: > 0 } ? $" ({user})" : "")}.");
-                wizStep = 2; cvOpen = true;
+                wizAdding = !enabled.Contains("canva"); wizStep = 2; cvOpen = true;
                 break;
             case "denied": Toast.Error("Connexion à Canva annulée."); break;
             case "expired": Toast.Error("La demande de connexion à Canva a expiré. Recommencez."); break;

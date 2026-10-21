@@ -1,13 +1,14 @@
 @inject TenantStore Store
 @inject CanvaService Canva
 @inject Toaster Toast
+@inject AppService Svc
 @implements IDisposable
 
 @* Intégrations › Canva : assistant d'ajout, dans un tiroir du haut (maquette canva-assistant-ajout.html).
    1. Connexion du compte Canva (mêmes composants que la carte du compte) ; 2. choix des dossiers, avec l'aperçu de leurs designs ;
    3. validation, puis import avec aperçu : chaque design est exporté en images dans la médiathèque, dossier « Canva_médias ».
    Rouvert depuis le menu de la carte, il sert aussi à gérer les dossiers (étape 2) ou à changer de compte (étape 1). *@
-<div class="modal-backdrop" @onclick="Close"></div>
+<div class="modal-backdrop"></div>
 <div class="cw-top" role="dialog" aria-modal="true" aria-labelledby="cw-title">
     <div class="cw-wrap">
         <div class="cw-head">
@@ -16,7 +17,6 @@
                 <h3 id="cw-title">@(folders.Count > 0 ? "Canva" : "Ajouter Canva")</h3>
                 <small>@StepLine</small>
             </div>
-            <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
         </div>
         <ol class="cw-steps">
             @for (var i = 1; i <= 3; i++)
@@ -115,9 +115,10 @@
         }
 
         <div class="cw-foot">
+            @if (!running) { <button type="button" class="btn ghost" @onclick="Cancel">Annuler</button> }
+            else if (!done) { <button type="button" class="btn ghost" @onclick="Close">Fermer</button> }
             @if (step > 1 && !running) { <button type="button" class="btn ghost" @onclick="Back">Précédent</button> }
             <span class="grow cw-hint">@Hint</span>
-            @if (!done) { <button type="button" class="btn ghost" @onclick="Close">@(running ? "Fermer" : "Annuler")</button> }
             <button type="button" class="btn" disabled="@NextDisabled" @onclick="Next">@NextLabel</button>
         </div>
     </div>
@@ -127,6 +128,9 @@
     [Parameter] public int StartStep { get; set; } = 1;
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback OnChanged { get; set; }
+    /// <summary>L'intégration n'est pas encore dans Mes intégrations : elle n'y entre qu'au lancement de l'import. Annuler ne laisse rien (le compte connecté pendant l'assistant est déconnecté).</summary>
+    [Parameter] public bool Adding { get; set; }
+    [Parameter] public EventCallback OnAdded { get; set; }
 
     private int step = 1;
     private bool ready, connected, lost;
@@ -193,6 +197,12 @@
     private List<CanvaFolder> Folders() => folders;
 
     private Task Close() => OnClose.InvokeAsync();
+
+    private Task Cancel()
+    {
+        if (Adding && Canva.ConnectionOf(Store.ClientId).Connected) Canva.Disconnect(Store.ClientId);
+        return OnClose.InvokeAsync();
+    }
 
     // ---------- Navigation ----------
 
@@ -285,6 +295,7 @@
 
     private async Task Run()
     {
+        if (Adding) { Svc.Mark("canva"); Svc.Enable("canva"); await OnAdded.InvokeAsync(); }
         // dossiers décochés : retirés avec leurs fichiers ; dossiers cochés : ajoutés ou mis à jour, puis synchronisés
         foreach (var f in Removed) Canva.RemoveFolder(Store.ClientId, f.Id);
         var toSync = new List<Guid>();
