@@ -403,6 +403,8 @@ public class Tenant
     public List<CanvaFolder> CanvaFolders { get; set; } = new();
     /// <summary>Dossier de la médiathèque qui reçoit les designs Canva synchronisés (créé à la première synchronisation, renommable).</summary>
     public Guid? CanvaMediaFolderId { get; set; }
+    /// <summary>Dossier de la médiathèque de chaque intégration qui y copie des fichiers (clé : « drv-onedrive »…) : « OneDrive_médias »… ; créé à la première synchronisation, renommable.</summary>
+    public Dictionary<string, Guid> IntegrationMediaFolders { get; set; } = new();
     /// <summary>Connexions des Drives qui n'ont pas de compte Google ou Microsoft : Nextcloud, SFTP (identifiants saisis), Dropbox (OAuth).</summary>
     public List<DriveAccount> DriveAccounts { get; set; } = new();
 
@@ -495,6 +497,7 @@ public class DriveFolder
     public string Source { get; set; } = "";      // gdrive | onedrive | nextcloud | sftp | dropbox
     public string Name { get; set; } = "";
     public string RemoteId { get; set; } = "";    // Google : ID du dossier ; Microsoft : « driveId/itemId » ; Nextcloud et SFTP : chemin ; Dropbox : « id:… »
+    public Guid? AreaId { get; set; }             // aire où le dossier a été ajouté : celle du dossier « nom_médias » de la médiathèque
     public string Location { get; set; } = "";    // affichage : emplacement du dossier
     public string WebUrl { get; set; } = "";      // « Ouvrir dans… » ; vide pour les dossiers ajoutés avant (Google : déduite de RemoteId)
     public bool Subfolders { get; set; }          // fichiers des sous-dossiers compris, tous niveaux

@@ -520,6 +520,7 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
                 var todo = remote.Where(f => !present.Contains(f.Id)).ToList();
                 var progress = new SyncProgress(clientId, folderId, folder.Name, "importing", 0, todo.Count, 0, todo.Sum(f => f.Size), todo.Count(f => f.Mime.StartsWith("video/")), "", started);
                 long bytesDone = 0;
+                Guid? target = null;   // dossier « nom_médias » de la source : trouvé ou créé au premier fichier importé
                 RemoteSession? session = null;   // Nextcloud, SFTP, Dropbox : une connexion pour tous les fichiers du dossier
                 try
                 {
@@ -538,7 +539,7 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
                         {
                             item.Info["drive"] = key; item.Info["driveFile"] = f.Id; item.Info["driveVer"] = f.Version;
                             item.Info["driveName"] = f.Name; item.Info["drivePath"] = f.Path; item.Info["driveTime"] = f.Time;
-                            if (shelved.TryGetValue(f.Id, out var shelf)) item.FolderId = shelf;
+                            item.FolderId = shelved.TryGetValue(f.Id, out var shelf) ? shelf : target ??= MediaFolderFor(db, clientId, folder);
                         });
                         changed = true;
                     }
@@ -562,6 +563,23 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
             finally { EndReport(clientId, folderId); }
         }
         finally { gate.Release(); }
+    }
+
+    /// <summary>Nom court de la source dans « nom_médias ».</summary>
+    public static string MediaFolderName(string source) => source switch { "gdrive" => "GoogleDrive", "onedrive" => "OneDrive", "dropbox" => "Dropbox", "nextcloud" => "Nextcloud", "sftp" => "SFTP", _ => source } + "_médias";
+
+    /// <summary>Dossier de la médiathèque qui reçoit les fichiers d'une source Drive : retrouvé (même renommé) ou créé à la racine de l'aire du dossier.</summary>
+    private static Guid MediaFolderFor(Db db, Guid clientId, DriveFolder folder)
+    {
+        var t = db.Clients.First(c => c.Id == clientId);
+        var key = "drv-" + folder.Source;
+        if (t.IntegrationMediaFolders.TryGetValue(key, out var id) && db.MediaFolders.Any(f => f.ClientId == clientId && f.Id == id)) return id;
+        var area = folder.AreaId ?? db.Areas.FirstOrDefault(a => a.ClientId == clientId)?.Id ?? Guid.Empty;
+        var name = MediaFolderName(folder.Source);
+        var same = db.MediaFolders.FirstOrDefault(f => f.ClientId == clientId && f.AreaId == area && f.ParentId == null && f.Name == name);
+        if (same == null) { same = new MediaFolder { ClientId = clientId, AreaId = area, Name = name }; db.MediaFolders.Add(same); }
+        t.IntegrationMediaFolders[key] = same.Id;
+        return same.Id;
     }
 
     /// <summary>Retire un dossier : ses fichiers quittent la médiathèque et les écrans qui l'affichaient.</summary>
