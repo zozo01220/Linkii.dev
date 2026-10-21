@@ -3,6 +3,7 @@
 @inject TenantStore Store
 @inject AppService Svc
 @inject DriveService Drives
+@inject AccountManager Accounts
 @inject NavigationManager Nav
 @inject Toaster Toast
 @inject CanvaService Canva
@@ -55,13 +56,6 @@
         @if (MineHasError) { <span class="tab-alert" title="Une intégration est en erreur"><span class="sr-only">Une intégration est en erreur</span></span> }
     </button>
     <button type="button" role="tab" class="@(tab == "store" ? "on" : "")" aria-selected="@(tab == "store" ? "true" : "false")" @onclick='() => SetTab("store")'>Intégrations Store <span class="cat-count">@StoreCount</span></button>
-    @if (accounts.Count > 0 || accountsTab)
-    {
-        <button type="button" role="tab" class="@(tab == "accounts" ? "on" : "")" aria-selected="@(tab == "accounts" ? "true" : "false")" @onclick='() => SetTab("accounts")'>
-        Comptes connectés <span class="cat-count">@accounts.Count</span>
-        @if (accounts.Any(a => AccState(a).Css == "hors-ligne")) { <span class="tab-alert" title="Un compte doit être reconnecté"><span class="sr-only">Un compte doit être reconnecté</span></span> }
-    </button>
-    }
 </nav>
 }
 
@@ -272,28 +266,33 @@ else
     {
         <CalendarWizard Source="@wid[4..]" StartStep="wizStep" Adding="wizAdding" AccountShared="AccountShared(wid)" OnAdded="() => pendingUse = wid" OnClose="CloseWizard" OnChanged="Load" />
     }
+    else if (wid == "ha-home")
+    {
+        <HaWizard StartStep="wizStep" Adding="wizAdding" OnAdded="() => pendingUse = wid" OnClose="CloseWizard" OnChanged="Load" />
+    }
+    else
+    {
+        <AppAccountWizard AppId="@wid" StartStep="wizStep" Adding="wizAdding" AccountShared="AccountShared(wid)" OnAdded="() => pendingUse = wid" OnClose="CloseWizard" OnChanged="Load" />
+    }
 }
 
-@if (retireCanva is { } rc)
+@if (retireInfo is { } ri)
 {
-    <div class="modal-backdrop" @onclick="() => retireCanva = null"></div>
+    <div class="modal-backdrop" @onclick="() => retireInfo = null"></div>
     <div class="modal app-modal sm" role="alertdialog" aria-modal="true" aria-labelledby="rc-title">
         <div class="modal-head">
-            <AppIcon Id="canva" />
-            <div class="grow"><h3 id="rc-title">Retirer l'intégration Canva ?</h3><small>Tout ce que Canva a apporté dans Linkii est retiré en une fois.</small></div>
-            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => retireCanva = null"><Ico Name="x" Size="20" /></button>
+            <AppIcon Id="@ri.Icon" />
+            <div class="grow"><h3 id="rc-title">Retirer l'intégration @ri.Name ?</h3><small>Tout ce que cette intégration a apporté dans Linkii est retiré en une fois.</small></div>
         </div>
         <div class="modal-body">
             <ul class="cw-list">
-                <li><b>@rc.Files image@(rc.Files > 1 ? "s" : "") dans la médiathèque</b><small>@rc.Designs design@(rc.Designs > 1 ? "s" : ""), dossier « @CanvaService.MediaFolderName » et dossiers synchronisés compris</small></li>
-                <li><b>@(rc.Playlists.Count == 0 ? "Aucune liste de lecture touchée" : $"Utilisées dans {rc.Playlists.Count} liste{(rc.Playlists.Count > 1 ? "s" : "")} de lecture")</b>@if (rc.Playlists.Count > 0) { <small>« @string.Join(" », « ", rc.Playlists) » : ces éléments disparaissent des listes et des écrans à la prochaine publication.</small> }</li>
-                <li><b>Compte Canva @(rc.User.Length > 0 ? $"de {rc.User} " : "")déconnecté</b><small>L'accès donné à Linkii est supprimé.</small></li>
+                @foreach (var l in ri.Lines) { <li><b>@l.Title</b>@if (l.Note.Length > 0) { <small>@l.Note</small> }</li> }
             </ul>
-            <p class="acc-hint">Rien n'est supprimé dans Canva. Vous pourrez ajouter l'intégration de nouveau depuis le Store.</p>
+            <p class="acc-hint">Rien n'est supprimé chez le fournisseur. Vous pourrez ajouter l'intégration de nouveau depuis le Store.</p>
         </div>
         <div class="modal-foot">
-            <button class="btn ghost" @onclick="() => retireCanva = null">Annuler</button>
-            <button class="btn danger-solid" @onclick="ConfirmRetireCanva">Retirer et tout supprimer</button>
+            <button class="btn ghost" @onclick="() => retireInfo = null">Annuler</button>
+            <button class="btn danger-solid" @onclick="ConfirmRetire">Retirer et tout supprimer</button>
         </div>
     </div>
 }
@@ -443,7 +442,7 @@ else
     private bool accountsTab { get => tab == "accounts"; set { if (value) tab = "accounts"; else if (tab == "accounts") tab = "mine"; } }
     private int wizStep = 1;
     private bool wizAdding;   // assistant Canva ouvert pour ajouter l'intégration (pas encore dans Mes intégrations)
-    private CanvaService.RemovalImpact? retireCanva;
+    private RetireInfo? retireInfo;
     private ConnectedAccount? canvaAcc;
     private string? wizId;   // intégration dont l'assistant d'ajout est ouvert
     private bool cvOpen { get => wizId == "canva"; set { if (value) wizId = "canva"; else if (wizId == "canva") wizId = null; } }
@@ -546,7 +545,7 @@ else
     private void PickAll(List<string> visible) { if (visible.All(selected.Contains)) selected.ExceptWith(visible); else selected.UnionWith(visible); }
 
     /// <summary>Les intégrations de base ne se retirent pas (on les désactive) ; Home Assistant se gère par son compte.</summary>
-    private bool CanRetire(string id) => admin && id != "ha-home" && Svc.Find(id) is not { DefaultOn: true };
+    private bool CanRetire(string id) => admin && Svc.Find(id) is not { DefaultOn: true };
 
     /// <summary>Active ou désactive une intégration, quelle que soit sa famille (app, source de calendriers, source Drive).</summary>
     private void SetOn(string id, bool on)
@@ -589,30 +588,96 @@ else
     /// <summary>Retire l'intégration ; une source Drive emporte ses dossiers et les fichiers qu'elle avait copiés dans la médiathèque.</summary>
     private async Task RetireCore(string id)
     {
-        if (id == "canva") { Canva.RemoveAllFolders(Store.ClientId); Svc.Uninstall("canva"); Canva.Disconnect(Store.ClientId); }
-        if (id.StartsWith("drv-"))
+        var keepAccount = AccountShared(id);   // calculé avant le retrait : un compte Google ou Microsoft peut servir à une autre intégration
+        if (id == "canva") { Canva.RemoveAllFolders(Store.ClientId); Svc.Uninstall("canva"); }
+        else if (id.StartsWith("drv-"))
         {
             var source = id[4..];
             foreach (var f in Store.Read(d => d.Tenant.DriveFolders.Where(x => x.Source == source).ToList()))
                 await Drives.RemoveFolder(Store.ClientId, f.Id);
         }
-        SetOn(id, false);
+        else if (id.StartsWith("cal-")) { var source = id[4..]; Store.Write(d => { d.Tenant.SharedCalendars.RemoveAll(c => c.Source == source); }); }
+        else if (id is "google-slides" or "google-docs" or "ms-powerpoint" or "facebook") Svc.Uninstall(id);   // contenus et images converties
+        if (id != "ha-home") SetOn(id, false);
         Svc.Unmark(id);
+        if (ConnectedAccounts.For(id) is { } kind && !keepAccount) await Accounts.Disconnect(kind);   // le compte part avec l'intégration
     }
 
-    private async Task ConfirmRetireCanva()
+    private async Task ConfirmRetire()
     {
-        retireCanva = null;
-        await RetireCore("canva");
-        selected.Remove("canva");
+        var ri = retireInfo;
+        retireInfo = null;
+        if (ri == null) return;
+        await RetireCore(ri.Id);
+        selected.Remove(ri.Id);
         Load();
-        Toast.Ok("Canva retiré : ses images sont supprimées de la médiathèque et le compte est déconnecté.");
+        Toast.Ok($"{ri.Name} retiré : ses fichiers sont supprimés de la médiathèque{(ri.AccountGoes ? " et le compte est déconnecté" : "")}.");
+    }
+
+    private record RetireInfo(string Id, string Name, string Icon, List<(string Title, string Note)> Lines, bool AccountGoes);
+
+    private static string N(int n, string one, string many) => $"{n} {(n > 1 ? many : one)}";
+
+    /// <summary>Ce qui part avec l'intégration : fichiers de la médiathèque, contenus et listes de lecture touchés, compte déconnecté.</summary>
+    private RetireInfo ImpactOf(CatalogView.Entry e)
+    {
+        var id = e.Id;
+        var lines = new List<(string Title, string Note)>();
+        var gone = !AccountShared(id) && ConnectedAccounts.For(id) != null;
+        var user = ConnectedAccounts.For(id) is { } k ? AccountOf(k)?.User ?? "" : "";
+        if (id == "canva")
+        {
+            var c = Canva.Impact(Store.ClientId);
+            lines.Add((N(c.Files, "image", "images") + " dans la médiathèque", $"{N(c.Designs, "design", "designs")}, dossier « {CanvaService.MediaFolderName} » et dossiers synchronisés compris"));
+            lines.Add(Usage(c.Playlists));
+        }
+        else
+        {
+            var (files, contents, lists, note) = Store.Read(d =>
+            {
+                HashSet<Guid> fileIds; List<MediaItem> conts; string nt;
+                if (id.StartsWith("drv-"))
+                {
+                    var keys = d.Tenant.DriveFolders.Where(f => f.Source == id[4..]).Select(f => f.Id.ToString()).ToHashSet();
+                    fileIds = d.Media.Where(m => m.Info.TryGetValue("drive", out var v) && keys.Contains(v)).Select(m => m.Id).ToHashSet();
+                    conts = d.Media.Where(m => m.AppId == "drive" && m.Settings.GetValueOrDefault("folder") is { } fo && keys.Contains(fo)).ToList();
+                    nt = N(keys.Count, "dossier synchronisé", "dossiers synchronisés");
+                }
+                else if (id.StartsWith("cal-"))
+                {
+                    var refs = d.Tenant.SharedCalendars.Where(c => c.Source == id[4..]).Select(c => c.Id.ToString()).ToHashSet();
+                    fileIds = new();
+                    conts = d.Media.Where(m => m.AppId == "agenda" && m.Settings.GetValueOrDefault("calendar") is { } ca && refs.Contains(ca)).ToList();
+                    nt = N(refs.Count, "calendrier partagé", "calendriers partagés");
+                }
+                else if (id == "ha-home") { fileIds = new(); conts = new(); nt = ""; }
+                else
+                {
+                    conts = d.Media.Where(m => m.AppId == id).ToList();
+                    fileIds = conts.SelectMany(m => m.Settings.Values.SelectMany(AppField.MediaIds)).ToHashSet();
+                    nt = "";
+                }
+                var all = fileIds.Concat(conts.Select(m => m.Id)).ToHashSet();
+                var pls = d.Playlists.Where(p => p.Draft.Any(i => all.Contains(i.MediaId))).Select(p => p.Name).OrderBy(x => x).ToList();
+                return (fileIds.Count, conts.Count, pls, nt);
+            });
+            if (files > 0 || id.StartsWith("drv-")) lines.Add((N(files, "fichier", "fichiers") + " dans la médiathèque", note));
+            else if (note.Length > 0) lines.Add((note, ""));
+            if (contents > 0) lines.Add((N(contents, "contenu", "contenus") + " dans les listes de lecture", "ils sont supprimés avec l'intégration"));
+            lines.Add(Usage(lists));
+        }
+        if (gone) lines.Add(((user.Length > 0 ? $"Compte de {user}" : "Compte") + " déconnecté", "L'accès donné à Linkii est supprimé."));
+        else if (ConnectedAccounts.For(id) != null) lines.Add(("Compte conservé", "Une autre intégration l'utilise encore."));
+        return new(id, e.Name, e.Icon, lines, gone);
+
+        (string, string) Usage(List<string> pl) => pl.Count == 0 ? ("Aucune liste de lecture touchée", "")
+            : ($"Utilisé dans {N(pl.Count, "liste de lecture", "listes de lecture")}", $"« {string.Join(" », « ", pl)} » : ces éléments disparaissent des listes et des écrans à la prochaine publication.");
     }
 
     private async Task Retire(CatalogView.Entry e)
     {
         menuId = null;
-        if (e.Id == "canva") { retireCanva = Canva.Impact(Store.ClientId); return; }
+        if (HasWizard(e.Id)) { retireInfo = ImpactOf(e); return; }
         await RetireCore(e.Id);
         selected.Remove(e.Id);
         Load();
@@ -909,15 +974,12 @@ else
         else calSource = kind;
     }
 
+    /// <summary>Le compte se gère dans la carte de son intégration (menu ⋮ › Reconnecter ou changer de compte) : on ouvre l'assistant à l'étape Connexion.</summary>
     private void ShowAccount(string kind)
     {
         calSource = driveSource = null;
-        cvOpen = false;
-        accountsTab = true;
-        flash = kind;
-        accSearch = accFilter = "";
-        openAcc.Add(kind);
-        focusPending = true;
+        var ids = ConnectedAccounts.Kind(kind).Integrations.Where(HasWizard).ToList();
+        if ((ids.FirstOrDefault(InMineId) ?? ids.FirstOrDefault()) is { } id) OpenWizard(id, 1, !InMineId(id));
     }
 
     private bool inApp;   // look « app » : appui long = menu du compte
@@ -978,7 +1040,6 @@ else
     protected override void OnInitialized()
     {
         admin = Store.Read(d => d.Access.IsOrgAdmin);
-        accountsTab = admin && TabParam == ConnectedAccounts.Tab;
         Load();
         CanvaReturn();
         GoogleReturn();
@@ -1066,7 +1127,8 @@ else
     /// <summary>Intégrations qui s'ajoutent par l'assistant (compte connecté, étapes Connexion › contenu › Import).</summary>
     private static string Initials(string user) => user.Trim().Length == 0 ? "?" : string.Concat(user.Split([' ', '@', '.'], StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpperInvariant(p[0])));
 
-    private static string ManageLabel(string id) => id == "canva" || id.StartsWith("drv-") ? "Gérer les dossiers…" : id.StartsWith("cal-") ? "Gérer les calendriers…" : "Gérer";
+    private static string ManageLabel(string id) => id == "canva" || id.StartsWith("drv-") ? "Gérer les dossiers…" : id.StartsWith("cal-") ? "Gérer les calendriers…"
+        : id == "facebook" ? "Voir les Pages…" : id == "ha-home" ? "Voir les entités…" : "Voir les fichiers…";
 
     /// <summary>Intégrations qui copient du contenu dans la médiathèque : « Resynchroniser maintenant ».</summary>
     private static bool HasSync(string id) => id == "canva" || id.StartsWith("drv-");
@@ -1082,7 +1144,7 @@ else
         Toast.Ok("Synchronisation lancée : les fichiers arrivent dans la médiathèque.");
     }
 
-    private static bool HasWizard(string id) => id == "canva" || id.StartsWith("drv-") || id is "cal-google" or "cal-m365" or "cal-caldav" or "cal-ews";
+    private static bool HasWizard(string id) => id == "canva" || id.StartsWith("drv-") || id is "cal-google" or "cal-m365" or "cal-caldav" or "cal-ews" or "google-slides" or "google-docs" or "ms-powerpoint" or "facebook" or "ha-home";
 
     private void OpenWizard(string id, int step, bool adding) { pendingUse = null; wizId = id; wizStep = step; wizAdding = adding; }
 
@@ -1136,8 +1198,7 @@ else
     private void OpenFor(CatalogView.Entry e)
     {
         pendingUse = null;
-        if (e.Id == "ha-home") haOpen = true;
-        else if (HasWizard(e.Id)) OpenWizard(e.Id, 2, false);
+        if (HasWizard(e.Id)) OpenWizard(e.Id, 2, false);
         else if (CalSource(e) is { } cal) calSource = cal;
         else appDrawer = e.Id;
     }
@@ -1185,15 +1246,16 @@ else
     /// Connexion Google ou Microsoft réussie : les intégrations dont l'accès a été accordé sont activées.
     /// Lancée depuis une intégration : sa fenêtre est rouverte pour ajouter des agendas ou des dossiers ; depuis Comptes connectés : le compte est montré.
     /// </summary>
+    private string? WizParam => System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query)["wiz"];
+
     private void Connected(string kind, string purpose, string user, string calendarSource, string driveSourceId, bool hasCalendars, bool hasFiles)
     {
-        if (purpose != AccountPurposes.Drive && hasCalendars && !SharedCalendarSources.Enabled(tenant, calendarSource)) Svc.SetCalendarSource(calendarSource, true);
-        if (purpose != AccountPurposes.Calendar && hasFiles && !DriveSources.Enabled(tenant, driveSourceId)) Svc.SetDriveSource(driveSourceId, true);
         Load();
         var name = ConnectedAccounts.Kind(kind).Name;
         var granted = string.Join(" et ", new[] { hasCalendars ? "agendas" : null, hasFiles ? "fichiers" : null }.OfType<string>());
         Toast.Ok($"Compte {name} connecté{(user.Length > 0 ? $" ({user})" : "")}{(granted.Length > 0 ? $" : {granted} autorisés" : "")}.");
         if (accountsTab) ShowAccount(kind);
+        else if (WizParam is { } w && HasWizard(w)) OpenWizard(w, 2, !InMineId(w));
         else if (purpose == AccountPurposes.Calendar) OpenWizard("cal-" + calendarSource, 2, !InMineId("cal-" + calendarSource));
         else if (purpose != AccountPurposes.Calendar) OpenWizard("drv-" + driveSourceId, 2, !InMineId("drv-" + driveSourceId));
     }
@@ -1251,12 +1313,12 @@ else
         switch (q)
         {
             case "ok" or "nopages":
-                if (!enabled.Contains("facebook")) { Svc.Enable("facebook"); }
                 Load();
                 var user = AccountOf(ConnectedAccounts.Facebook)?.User;
                 if (q == "ok") Toast.Ok($"Facebook connecté{(user is { Length: > 0 } ? $" ({user})" : "")}. Choisissez une de ses Pages depuis une liste de lecture.");
                 else Toast.Error("Facebook est connecté, mais ce compte n'administre aucune Page (ou n'a pas accordé l'accès aux Pages). Reconnectez-vous en cochant vos Pages.");
                 if (accountsTab) ShowAccount(ConnectedAccounts.Facebook);
+                else OpenWizard("facebook", 2, !InMineId("facebook"));
                 break;
             case "denied": Toast.Error("Connexion à Facebook annulée."); break;
             case "expired": Toast.Error("La demande de connexion à Facebook a expiré. Recommencez."); break;

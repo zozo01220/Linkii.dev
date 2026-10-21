@@ -1,0 +1,184 @@
+@inject TenantStore Store
+@inject DriveService Drives
+@inject AppService Svc
+@inject AccountManager Accounts
+@inject GoogleAuth GoogleAuth
+@inject MicrosoftAuth MsAuth
+@inject FacebookAuth FacebookAuth
+
+@* Intégrations › Google Slides, Google Docs, Microsoft PowerPoint, Facebook : assistant d'ajout, dans un tiroir du haut (maquette canva-assistant-ajout.html).
+   1. Connexion du compte ; 2. aperçu de ce que le compte donne (fichiers du Drive, Pages Facebook) : le choix se fait ensuite dans une liste de lecture ;
+   3. validation, puis ajout. Rien n'est gardé avant « Ajouter » ; Annuler déconnecte le compte connecté pendant l'assistant
+   (sauf s'il sert à une autre intégration). *@
+<WizardShell Icon="@AppId" Title="@(Adding ? "Ajouter " + Name : Name)" Subtitle="@StepLine" Labels="@Labels" Step="step" Done="done" Running="done"
+             CanBack="@(step > 1 && !done)" Hint="@Hint" NextLabel="@NextLabel" NextDisabled="NextDisabled"
+             OnCancel="Cancel" OnClose="Close" OnBack="Back" OnNext="Next">
+    @if (step == 1)
+    {
+        <WizardAccount Kind="@Kind" Provider="@Provider" Ready="ready" Connected="connected" Lost="lost" User="@user" Since="since" ConnectUrl="@ConnectUrl"
+                       Missing="@Missing" Permissions="@Permissions" />
+    }
+    else if (step == 2)
+    {
+        <div class="cw-body">
+            @if (loading) { <div class="dfp-empty">Lecture du compte…</div> }
+            else if (error != null) { <div class="dfp-empty err">@error</div> }
+            else if (AppId == "facebook")
+            {
+                <div class="cw-crumb">Aperçu · <b>Pages Facebook</b> — @pages.Count Page@(pages.Count > 1 ? "s" : "") administrée@(pages.Count > 1 ? "s" : "") par ce compte</div>
+                @if (pages.Count == 0) { <div class="dfp-empty">Ce compte n'administre aucune Page (ou n'a pas accordé l'accès aux Pages). Reconnectez-vous en cochant vos Pages.</div> }
+                else
+                {
+                    <ul class="cw-events">@foreach (var p in pages) { <li><span class="cw-when">Page</span><span class="cw-ttl">@p.Name</span></li> }</ul>
+                }
+            }
+            else
+            {
+                <div class="cw-crumb">Aperçu · <b>@FileNoun</b> de votre @(Cloud.IsGoogle ? "Google Drive" : "OneDrive") — @files.Count trouvé@(files.Count > 1 ? "s" : "") à la racine@(more ? " et plus" : "")</div>
+                @if (files.Count == 0) { <div class="dfp-empty">Aucun fichier de ce type à la racine. Vous pourrez chercher dans tous vos dossiers depuis une liste de lecture.</div> }
+                else
+                {
+                    <ul class="cw-events">@foreach (var f in files.Take(20)) { <li><span class="cw-when">@f.Info</span><span class="cw-ttl">@f.Name</span></li> }</ul>
+                }
+            }
+            <div class="cw-skip">ℹ @(AppId == "facebook" ? "Vous choisirez la Page à afficher depuis une liste de lecture." : "Vous choisirez le fichier à diffuser depuis une liste de lecture : Linkii le convertit en images, lues même hors ligne.")</div>
+        </div>
+    }
+    else
+    {
+        <div class="cw-body">
+            <div class="cw-kpis">
+                <div><b>1</b><small>compte @Provider</small></div>
+                <div><b>@(AppId == "facebook" ? pages.Count : files.Count)</b><small>@(AppId == "facebook" ? "Page" : FileNoun.ToLowerInvariant())@((AppId == "facebook" ? pages.Count : files.Count) > 1 ? "s" : "") visible@((AppId == "facebook" ? pages.Count : files.Count) > 1 ? "s" : "")</small></div>
+                <div><b>0</b><small>fichier copié maintenant</small></div>
+                <div><b>immédiat</b><small>prêt à l'emploi</small></div>
+            </div>
+            <p class="cw-dest">Compte : <b>@(user.Length > 0 ? user : Provider)</b> · lecture seule. @Name sera proposé dans les listes de lecture.</p>
+            @if (done) { <div class="cw-run"><span>Terminé : @Name est dans Mes intégrations.</span><span>100 %</span></div><div class="cw-bar"><i class="ok" style="width:100%"></i></div> }
+        </div>
+    }
+</WizardShell>
+
+@code {
+    [Parameter, EditorRequired] public string AppId { get; set; } = "";   // google-slides | google-docs | ms-powerpoint | facebook
+    [Parameter] public int StartStep { get; set; } = 1;
+    [Parameter] public bool Adding { get; set; }
+    [Parameter] public bool AccountShared { get; set; }
+    [Parameter] public EventCallback OnAdded { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private static readonly string[] Labels = { "Connexion", "Aperçu", "Validation" };
+    private CloudFileKind Cloud => CloudFileKind.Of(AppId)!;
+    private string Name => Svc.Find(AppId)?.Name ?? AppId;
+    private string Kind => AppId == "facebook" ? ConnectedAccounts.Facebook : Cloud.IsGoogle ? ConnectedAccounts.Google : ConnectedAccounts.Microsoft;
+    private string Provider => AppId == "facebook" ? "Facebook" : Cloud.IsGoogle ? "Google" : "Microsoft";
+    private string ConnectUrl => AppId == "facebook" ? "/facebook/connect?wiz=facebook"
+        : Cloud.IsGoogle ? $"/google/connect?for=drive&wiz={AppId}" : $"/microsoft/connect?for=drive&wiz={AppId}";
+    private string FileNoun => AppId switch { "google-slides" => "Présentations", "google-docs" => "Documents", _ => "Présentations PowerPoint" };
+    private string[] Permissions => AppId == "facebook"
+        ? new[] { "Lire la liste des Pages que vous administrez", "Lire les publications de ces Pages" }
+        : new[] { "Lire vos fichiers (" + FileNoun.ToLowerInvariant() + ")", "Les convertir en images pour vos écrans", "Lire le nom de votre profil" };
+
+    private int step = 1;
+    private bool ready, connected, lost, loading, done;
+    private string user = "", Missing = "";
+    private string? error;
+    private DateTime? since;
+    private List<DriveNode> files = new();
+    private bool more;
+    private List<FacebookPageAccess> pages = new();
+
+    private string StepLine => step switch
+    {
+        1 => "Étape 1 sur 3 — connectez votre compte",
+        2 => "Étape 2 sur 3 — ce que votre compte donne",
+        _ => done ? "Étape 3 sur 3 — terminé" : "Étape 3 sur 3 — vérifiez, puis ajoutez l'intégration"
+    };
+    private bool NextDisabled => step == 1 && !connected || step == 2 && (loading || error != null);
+    private string NextLabel => step < 3 ? "Suivant" : done ? "Terminer" : "Ajouter";
+    private string Hint => step == 1 && !connected ? "Connectez un compte pour continuer." : "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Refresh();
+        step = !connected ? 1 : Math.Clamp(StartStep, 1, 2);
+        if (step == 2) await Load();
+    }
+
+    private void Refresh()
+    {
+        var t = Store.Read(d => d.Tenant);
+        lost = false;
+        Missing = $"Connectez le compte {Provider} qui a accès à vos fichiers.";
+        if (AppId == "facebook")
+        {
+            ready = FacebookAuth.IsConfigured;
+            connected = FacebookAuth.Has(t);
+            lost = t.FacebookLostUtc != null;
+            user = t.FacebookUser; since = t.FacebookConnectedUtc;
+            Missing = "Connectez le compte Facebook qui administre vos Pages.";
+        }
+        else if (Cloud.IsGoogle)
+        {
+            ready = GoogleAuth.IsConfigured;
+            connected = GoogleAuth.Has(t, GoogleAuth.DriveScope);
+            var g = GoogleAuth.ConnectionOf(t);
+            (user, since) = (g.User, g.Since);
+            if (g.Connected && !connected) Missing = "Compte connecté pour Google Calendar : autorisez aussi la lecture de vos fichiers Drive.";
+        }
+        else
+        {
+            ready = MsAuth.IsConfigured;
+            connected = MicrosoftAuth.Has(t, MicrosoftAuth.DriveScope);
+            var m = MicrosoftAuth.ConnectionOf(t);
+            (user, since) = (m.User, m.Since);
+            if (m.Connected && !connected) Missing = "Compte connecté pour les agendas : autorisez aussi la lecture de vos fichiers.";
+        }
+    }
+
+    private async Task Load()
+    {
+        loading = true; error = null;
+        StateHasChanged();
+        var t = Store.Read(d => d.Tenant);
+        try
+        {
+            if (AppId == "facebook") pages = FacebookAuth.Pages(t);
+            else
+            {
+                var l = await Drives.BrowseFiles(t, Cloud, DriveSources.Roots(Cloud.Source)[0].Key, null);
+                files = l.Files; more = l.More;
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or System.Text.Json.JsonException or KeyNotFoundException or TaskCanceledException) { error = ex.Message; }
+        loading = false;
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task Cancel()
+    {
+        // rien ne reste : le compte connecté pendant l'assistant part (sauf s'il sert à une autre intégration)
+        if (Adding && !AccountShared && connected) await Accounts.Disconnect(Kind);
+        await OnClose.InvokeAsync();
+    }
+
+    private void Back() { if (step > 1) step--; }
+
+    private async Task Next()
+    {
+        if (step == 1) { step = 2; await Load(); }
+        else if (step == 2) step = 3;
+        else if (!done) await Run();
+        else await Close();
+    }
+
+    private async Task Run()
+    {
+        if (Adding) { Svc.Mark(AppId); await OnAdded.InvokeAsync(); }
+        Svc.Enable(AppId);
+        done = true;
+        await OnChanged.InvokeAsync();
+    }
+}

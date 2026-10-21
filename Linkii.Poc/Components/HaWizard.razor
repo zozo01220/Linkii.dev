@@ -1,0 +1,165 @@
+@inject TenantStore Store
+@inject HomeAssistantClient Ha
+@inject AppService Svc
+@inject AccountManager Accounts
+
+@* Intégrations › Home Assistant : assistant d'ajout, dans un tiroir du haut (maquette canva-assistant-ajout.html).
+   1. Connexion : adresse, jeton ou identifiant, testés à l'enregistrement ; 2. aperçu des capteurs, interrupteurs et lumières trouvés ;
+   3. validation, puis ajout. Annuler déconnecte le compte saisi pendant l'assistant : rien ne reste. *@
+<WizardShell Icon="homeassistant" Title="@(Adding ? "Ajouter Home Assistant" : "Home Assistant")" Subtitle="@StepLine" Labels="@Labels" Step="step" Done="done" Running="done"
+             CanBack="@(step > 1 && !done)" Hint="@Hint" NextLabel="@NextLabel" NextDisabled="NextDisabled"
+             OnCancel="Cancel" OnClose="Close" OnBack="Back" OnNext="Next">
+    @if (step == 1)
+    {
+        <div class="cw-body">
+            <div class="dw">
+                <div class="dw-field"><label for="haw-url">Adresse de Home Assistant</label><input id="haw-url" class="mono" @bind="url" spellcheck="false" autocomplete="off" placeholder="https://maison.exemple.ch" /></div>
+                <div class="dw-field"><label for="haw-auth">Connexion</label>
+                    <select id="haw-auth" @bind="auth">
+                        <option value="token">Jeton d'accès longue durée</option>
+                        <option value="password">Identifiant et mot de passe</option>
+                    </select>
+                </div>
+                @if (auth == "password")
+                {
+                    <div class="dw-field"><label for="haw-user">Identifiant Home Assistant</label><input id="haw-user" @bind="user" autocomplete="off" /></div>
+                    <div class="dw-field"><label for="haw-pwd">Mot de passe</label><input id="haw-pwd" type="password" @bind="secret" autocomplete="new-password" placeholder="@SecretPlaceholder" /></div>
+                }
+                else
+                {
+                    <div class="dw-field"><label for="haw-token">Jeton d'accès</label><input id="haw-token" type="password" @bind="secret" autocomplete="new-password" placeholder="@SecretPlaceholder" /><small>Créé dans votre profil Home Assistant, onglet Sécurité.</small></div>
+                }
+                @if (error != null) { <div class="err">@error</div> }
+                <div class="dw-actions">
+                    <button type="button" class="btn sm" disabled="@busy" @onclick="Save">@(busy ? "Test en cours…" : account != null ? "Mettre à jour et tester" : "Enregistrer et tester")</button>
+                </div>
+            </div>
+            @if (account != null)
+            {
+                <div class="cvs-account"><HaLogo /><div class="grow"><b>@(account.AuthMode == "password" ? account.User : "Jeton d'accès")</b><small>@account.Url · connecté · @account.Entities.Count entité(s) trouvée(s)</small></div></div>
+            }
+            <p class="csd-shared"><Ico Name="lock" Size="14" /> Identifiants chiffrés sur le serveur Linkii. Home Assistant doit être joignable depuis internet (https).</p>
+        </div>
+    }
+    else if (step == 2)
+    {
+        <div class="cw-body">
+            <div class="cw-crumb">Aperçu · <b>@(account?.Entities.Count ?? 0) entités</b> trouvées sur @account?.Url</div>
+            <div class="hac-tabs" role="tablist">
+                @foreach (var t in Tabs)
+                {
+                    var domain = t.Domain;
+                    <button type="button" role="tab" class="@(tab == domain ? "on" : "")" aria-selected="@(tab == domain ? "true" : "false")" @onclick="() => tab = domain">@t.Label <small>@CountOf(domain)</small></button>
+                }
+            </div>
+            @if (CountOf(tab) == 0) { <p class="hac-empty">Aucune entité de ce type dans cette instance.</p> }
+            else
+            {
+                <div class="hac-list">
+                    @foreach (var e in (account?.Entities ?? new()).Where(e => e.Domain == tab).Take(60))
+                    {
+                        <div class="hac-row"><span class="hac-txt"><span class="hac-name">@e.Name</span><span class="hac-id">@e.Id</span></span>@if (e.Unit.Length > 0) { <span class="hac-unit">@e.Unit</span> }</div>
+                    }
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="cw-body">
+            <div class="cw-kpis">
+                <div><b>@CountOf(HomeAssistantRules.Sensor)</b><small>capteurs</small></div>
+                <div><b>@CountOf(HomeAssistantRules.Switch)</b><small>interrupteurs</small></div>
+                <div><b>@CountOf(HomeAssistantRules.Light)</b><small>lumières</small></div>
+                <div><b>immédiat</b><small>prêt à l'emploi</small></div>
+            </div>
+            <p class="cw-dest">Ces entités alimentent les widgets Home Assistant (capteurs, interrupteurs, lumières). Un compte pour toute l'organisation.</p>
+            @if (done) { <div class="cw-run"><span>Terminé : Home Assistant est dans Mes intégrations.</span><span>100 %</span></div><div class="cw-bar"><i class="ok" style="width:100%"></i></div> }
+        </div>
+    }
+</WizardShell>
+
+@code {
+    [Parameter] public int StartStep { get; set; } = 1;
+    [Parameter] public bool Adding { get; set; }
+    [Parameter] public EventCallback OnAdded { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private static readonly string[] Labels = { "Connexion", "Entités", "Validation" };
+    private static readonly (string Domain, string Label)[] Tabs =
+    {
+        (HomeAssistantRules.Sensor, "Capteurs"), (HomeAssistantRules.Switch, "Interrupteurs"), (HomeAssistantRules.Light, "Lumières"),
+    };
+
+    private int step = 1;
+    private bool busy, done;
+    private HomeAssistantAccount? account;
+    private string url = "", auth = "token", user = "", secret = "", tab = HomeAssistantRules.Sensor;
+    private string? error;
+
+    private bool Connected => account is { LastError.Length: 0 };
+    private string SecretPlaceholder => account is { Secret.Length: > 0 } ? "Laissez vide pour garder le secret enregistré" : "";
+    private int CountOf(string domain) => account?.Entities.Count(e => e.Domain == domain) ?? 0;
+    private string StepLine => step switch
+    {
+        1 => "Étape 1 sur 3 — connectez votre Home Assistant",
+        2 => "Étape 2 sur 3 — entités trouvées",
+        _ => done ? "Étape 3 sur 3 — terminé" : "Étape 3 sur 3 — vérifiez, puis ajoutez l'intégration"
+    };
+    private bool NextDisabled => step == 1 && !Connected || busy;
+    private string NextLabel => step < 3 ? "Suivant" : done ? "Terminer" : "Ajouter";
+    private string Hint => step == 1 && !Connected ? "Enregistrez la connexion pour continuer." : "";
+
+    protected override void OnInitialized()
+    {
+        account = Store.Read(d => d.Tenant.HomeAssistant);
+        url = account?.Url ?? ""; auth = account?.AuthMode ?? "token"; user = account?.User ?? "";
+        step = !Connected ? 1 : Math.Clamp(StartStep, 1, 2);
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task Cancel()
+    {
+        if (Adding && account != null) await Accounts.Disconnect(ConnectedAccounts.HomeAssistant);   // rien ne reste
+        await OnClose.InvokeAsync();
+    }
+
+    private void Back() { if (step > 1) step--; }
+
+    private async Task Next()
+    {
+        if (step < 3) step++;
+        else if (!done) await Run();
+        else await Close();
+    }
+
+    private async Task Run()
+    {
+        if (Adding) { Svc.Mark("ha-home"); await OnAdded.InvokeAsync(); }
+        done = true;
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task Save()
+    {
+        error = null;
+        var server = url.Trim().TrimEnd('/');
+        if (!server.StartsWith("https://", StringComparison.OrdinalIgnoreCase) || !AppCatalog.IsHttpUrl(server)) { error = "Saisissez l'adresse en https:// (https://maison.exemple.ch)."; return; }
+        if (auth == "password" && user.Trim().Length == 0) { error = "Saisissez l'identifiant Home Assistant."; return; }
+        var same = account != null && account.Url == server && account.AuthMode == auth && account.User == (auth == "password" ? user.Trim() : "");
+        var plain = secret.Length > 0 ? secret : same ? Ha.Conn(account!).Secret : "";
+        if (plain.Length == 0) { error = auth == "password" ? "Saisissez le mot de passe." : "Saisissez le jeton d'accès."; return; }
+        busy = true;
+        try
+        {
+            var fresh = await Ha.Connect(server, auth, user, plain, same ? account : null);
+            Store.Write(d => { d.Tenant.HomeAssistant = fresh; });
+            account = fresh;
+            secret = "";
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally { busy = false; }
+    }
+}
