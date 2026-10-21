@@ -10,10 +10,10 @@
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 
-@* Éditeur de compositions (DEV-POC.md §80, §84) : l'interface est en JS (wwwroot/compo-editor.js, plein écran), le serveur garde le document,
-   calcule les QR codes, liste et importe les images de la médiathèque, et garde « Mes modèles ». Le rendu des calques est celui du player (player/composition.js).
+@* Éditeur de compositions (DEV-POC.md §80, §84, §85) : l'interface est en JS (wwwroot/compo-editor.js, plein écran), le serveur garde le document,
+   calcule les QR codes, liste et importe les images de la médiathèque, garde « Mes modèles », et lit les données des sources (blocs, champs reliés). Le rendu des calques est celui du player (player/composition.js).
    « /compositions/new » : rien n'est créé tant qu'on n'a pas enregistré (pas de composition vide laissée derrière soi). *@
-<HeadContent><link rel="stylesheet" href="compo-editor.css?v=3" /></HeadContent>
+<HeadContent><link rel="stylesheet" href="compo-editor.css?v=4" /></HeadContent>
 
 @if (!ready)
 {
@@ -81,6 +81,7 @@ else
             images = Images(),
             tpl = Tpl,
             myTemplates = Templates(),
+            sources = Sources(),
             canImport = Store.Read(d => d.Access.CanWrite(LevelPages.Media))
         }, self);
     }
@@ -139,6 +140,23 @@ else
     {
         if (Guid.TryParse(id, out var g)) Store.Write(d => { CompositionTemplates.Delete(d, g); });
         return Templates();
+    }
+
+    // ---------- Sources de données (§85) ----------
+
+    /// <summary>Contenus de Mes intégrations utilisables comme source d'un bloc ou de champs (météo, calendrier, RSS, capteurs).</summary>
+    [JSInvokable]
+    public List<object> Sources() => Svc.CompositionSources()
+        .Select(m => (object)new { id = m.Id.ToString("N"), name = m.Name, app = m.AppId })
+        .ToList();
+
+    /// <summary>Données actuelles d'une source (les mêmes que l'écran recevrait) : { data } ou { error }.</summary>
+    [JSInvokable]
+    public async Task<object> SourceData(string id)
+    {
+        if (!Guid.TryParse(id, out var g)) return new { error = "Source introuvable." };
+        var (data, error) = await Svc.SourceData(g);
+        return error != null ? new { error } : new { data };
     }
 
     // ---------- Médias ----------

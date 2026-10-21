@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Compositions, étape 3 : intégrations et champs reliés</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Poppins:wght@300;400;500;600;700&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--row:#EDF1F5;--brand-tint:#EBEDF0;--signal:#3B82C4;--ok:#2E8B57;--bad:#C0392B;--radius:4px}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:#fff;color:var(--ink);font-size:14px;line-height:1.45;overflow:hidden}
+button,select,input{font:inherit;color:inherit}
+h4{margin:0;font-weight:500}
+/* bandeau de la maquette */
+.mock{position:fixed;top:0;left:0;right:0;z-index:100;background:#FFF8E1;border-bottom:1px dashed #E0B84A;padding:6px 16px;font-size:13px;color:#6B5200;display:flex;flex-direction:column;gap:5px}
+.mock .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.mock .sc{border:1px solid #E0B84A;background:#fff;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:13px}
+.mock .sc.on{background:#6B5200;border-color:#6B5200;color:#fff}
+.mock .txt{line-height:1.35}
+.app{position:fixed;left:0;right:0;bottom:0;display:flex;flex-direction:column}
+/* barre du haut (comme l'éditeur actuel) */
+.top{height:58px;flex:none;display:flex;align-items:center;gap:4px;padding:0 12px;border-bottom:1px solid var(--line);background:#fff}
+.tb{height:34px;min-width:34px;border:0;background:none;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:0 9px;cursor:pointer;color:var(--ink);white-space:nowrap}
+.tb:hover{background:var(--bg)}
+.tb svg{width:18px;height:18px;flex:none}
+.sep{width:1px;height:26px;background:var(--line);margin:0 6px;flex:none}
+.back{background:var(--bg);width:40px;height:40px}
+.name{font-weight:500;font-size:16px;border:1px solid transparent;border-radius:4px;padding:5px 8px;width:210px;background:none}
+.fmt{border:1px solid var(--line-2);border-radius:4px;padding:5px 10px;font-size:13px;background:#fff;white-space:nowrap}
+.btn{font-weight:500;cursor:pointer;border:1px solid var(--ink);border-radius:var(--radius);padding:8px 16px;background:var(--ink);color:#fff;display:inline-flex;gap:8px;align-items:center;white-space:nowrap;height:38px}
+.btn.ghost{background:#fff;color:var(--ink);border-color:var(--line-2)}
+.btn.sm{height:32px;padding:4px 12px;font-size:13px}
+/* Aperçu : valeurs / noms des champs */
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:var(--radius);overflow:hidden;height:32px}
+.seg button{border:0;border-right:1px solid var(--line-2);background:#fff;padding:0 11px;cursor:pointer;font-size:13px;white-space:nowrap}
+.seg button:last-child{border-right:0}
+.seg button.on{background:var(--ink);color:#fff;font-weight:500}
+.segl{font-size:12.5px;color:var(--muted);margin-right:6px}
+/* corps */
+.main{flex:1;display:flex;min-height:0}
+.rail{width:80px;flex:none;border-right:1px solid var(--line);display:flex;flex-direction:column;padding:8px 6px;gap:2px;background:#fff}
+.rail button{border:0;background:none;border-radius:6px;padding:10px 2px 8px;display:flex;flex-direction:column;align-items:center;gap:5px;font-size:12px;color:var(--muted);cursor:pointer;position:relative}
+.rail button svg{width:22px;height:22px}
+.rail button:hover{background:var(--bg)}
+.rail button.on{background:var(--brand-tint);color:var(--ink);font-weight:500}
+.rail .new{position:absolute;top:4px;right:4px;width:8px;height:8px;border-radius:50%;background:#E8833A}
+.panel{width:330px;flex:none;border-right:1px solid var(--line);background:#fff;overflow-y:auto;padding:16px}
+.center{flex:1;position:relative;min-width:0;background:#E8ECF1;overflow:hidden}
+.frame{position:absolute;box-shadow:0 2px 18px rgba(11,31,58,.16)}
+.stage{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;overflow:hidden}
+.overlay{position:absolute;inset:0;pointer-events:none}
+.selbox{position:absolute;border:2px solid var(--signal);margin:-1px 0 0 -1px}
+.selbox .hd{position:absolute;width:11px;height:11px;background:#fff;border:1.5px solid var(--signal);margin:-6px 0 0 -6px;border-radius:2px}
+.seltag{position:absolute;left:-2px;top:-24px;background:var(--signal);color:#fff;font-size:11.5px;padding:2px 7px;border-radius:3px 3px 3px 0;white-space:nowrap;display:flex;gap:5px;align-items:center}
+.rowtag{position:absolute;border:2px dashed #E8833A;margin:-1px 0 0 -1px}
+.rowtag span{position:absolute;right:-2px;top:-22px;background:#E8833A;color:#fff;font-size:11px;padding:1px 7px;border-radius:3px 3px 0 3px;white-space:nowrap}
+/* barre contextuelle */
+.ctx{position:absolute;top:12px;left:50%;transform:translateX(-50%);background:#fff;border-radius:8px;box-shadow:0 4px 16px rgba(11,31,58,.14);display:flex;align-items:center;gap:4px;padding:6px 8px;z-index:5;white-space:nowrap;max-width:calc(100% - 24px);overflow-x:auto}
+.ctx select,.ctx input[type=text]{border:1px solid var(--line-2);border-radius:4px;padding:5px 6px;background:#fff;height:32px}
+.ctx .lbl{display:inline-flex;gap:6px;align-items:center;color:var(--muted);font-size:13px;padding:0 4px}
+.ctx .kind{display:inline-flex;gap:6px;align-items:center;font-weight:500;padding:0 6px 0 2px}
+.ctx .sep{height:22px;margin:0 4px}
+.ctx .cb{height:32px;border:1px solid transparent;background:none;border-radius:4px;padding:0 9px;cursor:pointer;display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
+.ctx .cb:hover{background:var(--bg)}
+.ctx .cb.on{background:#EAF2FA;border-color:#B9D3EC;color:#1d4f80;font-weight:500}
+.ctx .sw{width:32px;height:32px;border:1px solid var(--line-2);border-radius:4px;padding:3px;background:#fff}
+.ctx .sw i{display:block;width:100%;height:100%;border-radius:2px}
+.ctx .num{display:inline-flex;align-items:center;border:1px solid var(--line-2);border-radius:4px;overflow:hidden;height:32px}
+.ctx .num button{border:0;background:var(--bg);width:26px;height:32px}.ctx .num span{width:38px;text-align:center}
+/* champ relié (pastille) dans l'éditeur */
+.chain{display:inline-block;width:14px;height:14px;vertical-align:-2px}
+.fd{border-radius:.18em}
+.stage.names .fd{background:rgba(59,130,196,.28);box-shadow:0 0 0 .06em rgba(59,130,196,.7) inset;padding:0 .18em;font-style:normal}
+.stage.mk-2 .wt .fd,.stage.mk-3 .lr .fd{background:rgba(59,130,196,.16);box-shadow:0 .07em 0 rgba(59,130,196,.9)}
+.stage.names .ghost{opacity:.35}
+/* panneaux */
+.ph{display:flex;align-items:center;margin-bottom:12px}.ph h4{flex:1;font-size:16px}
+.search{display:flex;align-items:center;gap:8px;border:1px solid var(--line-2);border-radius:4px;padding:7px 10px;margin-bottom:12px;color:var(--muted)}
+.search input{border:0;outline:none;flex:1;min-width:0}
+.grp{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:18px 0 8px;display:flex;align-items:center;gap:8px}
+.grp small{font-weight:400;letter-spacing:0;text-transform:none;margin-left:auto}
+.help{color:var(--muted);font-size:13px;margin:0 0 10px}
+.wrow{display:flex;gap:12px;align-items:center;border:1px solid var(--line);border-radius:6px;padding:9px 10px;margin-bottom:8px;cursor:grab;background:#fff}
+.wrow:hover{border-color:var(--signal)}
+.wrow.on{border-color:var(--signal);box-shadow:0 0 0 1px var(--signal)}
+.wi{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:16px;flex:none}
+.wrow b{font-weight:500;display:block}.wrow small{color:var(--muted);font-size:12.5px;display:block;line-height:1.3}
+.wrow .t{flex:1;min-width:0}
+.wrow.off{opacity:.55;cursor:default;border-style:dashed}
+.tag{font-size:10.5px;border-radius:3px;padding:1px 6px;font-weight:500;white-space:nowrap;flex:none}
+.tag.blk{background:#EAF2FA;color:#1d4f80}.tag.new{background:#FDEBDC;color:#9A4A0E}.tag.fld{background:#E6F3EC;color:#1E6B42}
+.link{background:none;border:0;color:var(--signal);cursor:pointer;padding:6px 0;font-weight:500}
+.srcard{border:1px solid var(--line);border-radius:6px;padding:11px 12px;margin-bottom:10px}
+.srcard .h{display:flex;gap:10px;align-items:center}
+.srcard .h b{font-weight:500;flex:1}
+.srcard .meta{color:var(--muted);font-size:12.5px;margin-top:6px;line-height:1.5}
+.srcard .uses{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.srcard .uses span{background:var(--row);border-radius:3px;padding:1px 7px;font-size:12px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+.kebab{border:0;background:none;width:28px;height:28px;border-radius:4px;cursor:pointer;color:var(--muted)}
+/* inspecteur à droite */
+.insp{width:330px;flex:none;border-left:1px solid var(--line);background:#fff;overflow-y:auto}
+.insp .ih{display:flex;align-items:center;gap:8px;padding:14px 16px 12px;border-bottom:1px solid var(--line)}
+.insp .ih b{flex:1;font-weight:500;font-size:15px}
+.insp .ib{padding:14px 16px}
+.field{display:grid;gap:6px;margin-bottom:14px}.field>label{font-size:13px;font-weight:500;color:var(--muted)}
+.field select,.field input[type=text],.field input[type=number]{border:1px solid var(--line-2);border-radius:4px;padding:7px 9px;width:100%;background:#fff}
+.inl{display:flex;gap:8px;align-items:center}
+.inl input[type=number]{width:72px}
+.chk{display:flex;gap:8px;align-items:center;font-size:13.5px;margin-bottom:8px}
+.radios{display:grid;gap:6px}.radios label{display:flex;gap:8px;align-items:center;font-size:13.5px}
+.mapr{display:grid;grid-template-columns:1fr auto;gap:6px 10px;align-items:center;font-size:13px;background:var(--bg);border-radius:6px;padding:10px 12px}
+.mapr .k{display:flex;gap:6px;align-items:center}.mapr .v{color:var(--muted)}
+.hint{background:#EAF2FA;color:#1d4f80;border-radius:4px;padding:8px 10px;font-size:13px;margin:4px 0 14px}
+/* calques */
+.ly{display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid var(--row);font-size:13px}
+.ly.on{background:var(--brand-tint)}
+.ly .ic{width:26px;height:26px;border-radius:4px;background:var(--bg);display:grid;place-items:center;font-size:11px;color:var(--muted);font-weight:600;flex:none}
+.ly .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ly .mk{font-size:11px;color:var(--signal);display:inline-flex;gap:3px;align-items:center}
+.ly.dim .nm{opacity:.5}
+/* menus flottants */
+.pop{position:absolute;background:#fff;border-radius:8px;box-shadow:0 8px 28px rgba(11,31,58,.22);padding:6px;z-index:8}
+.pop .pt{font-size:12px;color:var(--muted);padding:6px 10px 4px;display:flex;gap:8px;align-items:center}
+.pop .pt b{color:var(--ink);font-weight:500}
+.pop hr{border:0;border-top:1px solid var(--line);margin:5px 0}
+.pop .mi{display:flex;width:100%;border:0;background:none;padding:6px 10px;border-radius:4px;text-align:left;cursor:pointer;gap:10px;align-items:center}
+.pop .mi:hover,.pop .mi.on{background:var(--bg)}
+.pop .mi.on{box-shadow:inset 2px 0 0 var(--signal)}
+.pop .mi small{color:var(--muted);margin-left:auto;font-size:12.5px;white-space:nowrap}
+.pop .foot{display:flex;gap:8px;align-items:center;padding:8px 10px 4px;font-size:13px;color:var(--muted)}
+/* note de maquette */
+.note{position:absolute;right:14px;bottom:14px;width:340px;background:#FFF8E1;border:1px dashed #E0B84A;color:#5a4500;border-radius:6px;padding:10px 12px;font-size:12.5px;line-height:1.45;z-index:4}
+.note .nt{display:flex;margin-bottom:3px;color:#6B5200;font-weight:600}.note .nt button{margin-left:auto;border:0;background:none;cursor:pointer;color:#6B5200;font-size:15px;line-height:1;padding:0 2px}
+.note ul{margin:4px 0 0;padding-left:18px}.note li{margin:2px 0}
+/* fenêtre */
+.scrim{position:fixed;inset:0;background:rgba(11,31,58,.45);display:grid;place-items:center;z-index:80}
+.modal{background:#fff;border-radius:10px;width:min(720px,94vw);max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(11,31,58,.35);overflow:hidden}
+.modal .mh{display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid var(--line)}.modal .mh h4{flex:1;font-size:17px}
+.modal .mb{padding:16px 20px;overflow-y:auto}
+.modal .mf{display:flex;align-items:center;gap:10px;padding:12px 20px;border-top:1px solid var(--line);background:#FAFBFC}
+.xb{width:34px;height:34px;border:0;border-radius:4px;background:var(--bg);cursor:pointer;font-size:18px}
+.week{display:grid;grid-template-columns:110px 70px 1fr;gap:8px 12px;align-items:center;margin-bottom:6px}
+.week .d{font-weight:500}
+.week .sl{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.week .sl span{border:1px solid var(--line-2);border-radius:4px;padding:3px 8px;font-size:13px;background:#fff}
+.week .sl .closed{border:0;color:var(--muted);padding-left:0}
+.week .sl button{border:1px dashed var(--line-2);background:none;border-radius:4px;padding:3px 8px;font-size:12.5px;color:var(--muted);cursor:pointer}
+.tgl{width:34px;height:20px;border-radius:10px;background:var(--line-2);position:relative;flex:none}
+.tgl::after{content:"";position:absolute;width:16px;height:16px;border-radius:50%;background:#fff;top:2px;left:2px}
+.tgl.on{background:var(--signal)}.tgl.on::after{left:16px}
+.exc{display:grid;grid-template-columns:130px 1fr auto;gap:8px;align-items:center;font-size:13.5px;padding:7px 0;border-bottom:1px solid var(--row)}
+.exc .x{color:var(--muted)}
+.fieldsprev{display:grid;grid-template-columns:repeat(2,1fr);gap:6px 18px;background:var(--bg);border-radius:6px;padding:10px 12px;font-size:13px}
+.fieldsprev div{display:flex;justify-content:space-between;gap:10px}.fieldsprev span{color:var(--muted)}
+.mtabs{display:flex;gap:20px;border-bottom:1px solid var(--line);margin:-4px 0 14px}.mtabs button{border:0;background:none;padding:8px 0;color:var(--muted);cursor:default}.mtabs .on{color:var(--ink);font-weight:500;border-bottom:2px solid var(--signal);margin-bottom:-1px}
+</style>
+</head>
+<body>
+<div class="mock" id="mock">
+  <div class="row"><b>Maquette — étape 3</b>&nbsp;·&nbsp;
+    <button class="sc" data-s="1">1. Intégrations dans l'éditeur</button>
+    <button class="sc" data-s="2">2. Champ dans un texte</button>
+    <button class="sc" data-s="3">3. Liste reliée</button>
+    <button class="sc" data-s="4">4. Panneau Données</button>
+    <button class="sc" data-s="5">5. Afficher si…</button>
+    <button class="sc" data-s="6">6. Source « Horaires »</button>
+  </div>
+  <div class="txt" id="mocktxt"></div>
+</div>
+
+<div class="app" id="app">
+  <div class="top">
+    <button class="tb back" title="Retour"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></button>
+    <input class="name" value="Accueil — hall">
+    <span class="fmt">Paysage · 1920 × 1080</span>
+    <span class="sep"></span>
+    <button class="tb" title="Annuler">↶</button><button class="tb" title="Rétablir">↷</button>
+    <span class="sep"></span>
+    <button class="tb">−</button><span style="font-size:13px;width:40px;text-align:center">52%</span><button class="tb">+</button>
+    <span class="sep"></span>
+    <button class="tb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/></svg>Calques</button>
+    <span style="flex:1"></span>
+    <span class="segl">Aperçu</span>
+    <span class="seg" id="mode"><button data-m="values">Données réelles</button><button data-m="names">Noms des champs</button></span>
+    <span class="sep"></span>
+    <button class="btn ghost">Aperçu</button>
+    <button class="btn ghost">Annuler</button>
+    <button class="btn">Enregistrer ▾</button>
+  </div>
+  <div class="main">
+    <nav class="rail" id="rail">
+      <button data-p="modeles"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12"/></svg>Modèles</button>
+      <button data-p="medias"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg>Médias</button>
+      <button data-p="texte"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg>Texte</button>
+      <button data-p="formes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 3 3 11h10L8 3Z"/><circle cx="17" cy="16" r="4"/><rect x="3" y="14" width="7" height="7"/></svg>Éléments</button>
+      <button data-p="widgets"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><path d="M17 13v8M13 17h8"/></svg>Widgets</button>
+      <button data-p="donnees"><span class="new"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>Données</button>
+    </nav>
+    <aside class="panel" id="panel"></aside>
+    <div class="center" id="center">
+      <div class="ctx" id="ctx"></div>
+      <div class="frame" id="frame"><div class="stage" id="stage"></div><div class="overlay" id="overlay"></div></div>
+      <div id="pops"></div>
+      <div class="note" id="note"></div>
+    </div>
+    <aside class="insp" id="insp"></aside>
+  </div>
+</div>
+<div id="modal"></div>
+
+<script>
+const CHAIN='<svg class="chain" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>';
+const COND='◐';
+let scene=1, mode='values';
+
+/* ---------- la composition (coordonnées en pixels de la page 1920 × 1080) ---------- */
+const BOX={
+  weather:{x:80,y:540,w:600,h:300,tag:'Bloc · Météo — Lausanne'},
+  wtext:{x:80,y:372,w:620,h:140,tag:'Texte · 3 champs reliés'},
+  hours:{x:80,y:880,w:600,h:110,tag:'Badge « Ouvert » · '+COND+' affiché si ouvert'},
+  list:{x:840,y:190,w:1000,h:676,tag:'Liste reliée · Calendrier « Salles de réunion » · 5 lignes'},
+  ticker:{x:760,y:960,w:1160,h:120,tag:'Bandeau · Flux RSS « 24 heures »'}
+};
+const EVENTS=[['08:30','Point équipe','Salle Léman'],['10:00','Visite client — atelier','Salle Jura'],['12:15','Formation sécurité','Auditoire'],['14:00','Comité de direction','Salle Léman'],['16:30','Apéro de bienvenue','Cafétéria']];
+function F(n,v){return '<span class="fd">'+(mode==='names'?'{'+n+'}':v)+'</span>'}
+function stageHtml(){
+  const ink='#0B1F3A', sig='#3B82C4';
+  let h='';
+  h+='<div style="position:absolute;left:0;top:0;width:760px;height:1080px;background:'+ink+'"></div>';
+  h+='<div style="position:absolute;left:80px;top:70px;width:200px;height:96px;border:4px solid #fff;border-radius:10px;color:#fff;font:800 30px/1.05 Poppins;display:grid;place-items:center;text-align:center">VOTRE<br>LOGO</div>';
+  h+='<div style="position:absolute;left:80px;top:205px;color:#fff;font:900 128px/1 \'Playfair Display\'">Bienvenue</div>';
+  h+='<div class="wt" style="position:absolute;left:80px;top:372px;width:620px;color:#C9D6E6;font:400 44px/1.3 Poppins">Il fait '+F('Température','14')+'° à '+F('Ville','Lausanne')+', '+F('Condition','ciel dégagé')+'.</div>';
+  // bloc Météo (intégration weather-slide, rendue à la taille du rectangle)
+  h+='<div style="position:absolute;left:80px;top:540px;width:600px;height:300px;border-radius:24px;background:rgba(255,255,255,.07);color:#fff;font-family:Poppins;padding:30px 34px">'+
+     '<div style="display:flex;align-items:center;gap:26px"><div style="font-size:120px;line-height:1">☀️</div><div><div style="font:600 108px/1 Poppins">14°</div><div style="font-size:30px;opacity:.75;margin-top:6px">Lausanne · ressenti 12°</div></div></div>'+
+     '<div style="display:flex;gap:30px;margin-top:26px;font-size:26px;opacity:.85;white-space:nowrap"><span>jeu. ⛅ 15° / 7°</span><span>ven. 🌧 11° / 6°</span><span>sam. ☀️ 16° / 5°</span></div></div>';
+  // badge horaires (affiché si ouvert)
+  h+='<div style="position:absolute;left:80px;top:880px;width:600px;height:110px;border-radius:55px;background:#E6F3EC;color:#1E6B42;font:500 38px/110px Poppins;padding-left:44px;white-space:nowrap"><span style="display:inline-block;width:22px;height:22px;border-radius:50%;background:#2E8B57;margin-right:18px;vertical-align:1px"></span>Ouvert · '+F('Horaire du jour','08:00 – 18:00')+'</div>';
+  // côté droit
+  h+='<div style="position:absolute;left:840px;top:70px;color:'+ink+';font:700 72px/1 Poppins">Aujourd\'hui</div>';
+  h+='<div style="position:absolute;left:1340px;top:92px;width:500px;text-align:right;color:#5A6B80;font:500 36px/1 Poppins">mercredi 21 octobre</div>';
+  EVENTS.forEach((e,i)=>{const y=190+i*136, g=mode==='names'&&i>0?' ghost':'';
+    const v=mode==='names'?['{Début}','{Titre}','{Lieu}']:e;
+    h+='<div class="lr'+g+'" style="position:absolute;left:840px;top:'+y+'px;width:1000px;height:120px;border-radius:18px;background:#fff;box-shadow:0 2px 10px rgba(11,31,58,.06);font-family:Poppins;display:flex;align-items:center;padding:0 36px;gap:34px">'+
+      '<div style="width:150px;color:'+sig+';font:700 46px/1 Poppins"><span class="fd">'+v[0]+'</span></div>'+
+      '<div style="flex:1;min-width:0;color:'+ink+';font:500 40px/1.1 Poppins;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span class="fd">'+v[1]+'</span></div>'+
+      '<div style="color:#5A6B80;font:400 32px/1 Poppins;white-space:nowrap"><span class="fd">'+v[2]+'</span></div></div>';});
+  h+='<div style="position:absolute;left:760px;top:960px;width:1160px;height:120px;background:'+sig+';color:#fff;font:500 40px/120px Poppins;white-space:nowrap;overflow:hidden;padding-left:50px">'+
+     (mode==='names'?'<span class="fd">{Titre}</span>  ·  <span class="fd">{Titre}</span>  ·  …':'<span class="fd">Le Conseil d\'État présente son budget 2027</span>  ·  <span class="fd">Lausanne : la nouvelle ligne de métro ouvre ses portes</span>')+'</div>';
+  return h;
+}
+
+/* ---------- panneaux de gauche ---------- */
+const P={};
+P.widgets=()=>`
+  <div class="ph"><h4>Widgets et intégrations</h4></div>
+  <div class="search">⌕<input placeholder="Chercher"></div>
+  <div class="grp">Widgets</div>
+  ${row('#3B82C4','🕐','Horloge','Heure, avec ou sans secondes')}
+  ${row('#3B82C4','📅','Date','Jour de la semaine, date')}
+  ${row('#3B82C4','⏳','Compte à rebours','Jours restants jusqu\'à une date')}
+  ${row('#3B82C4','↔','Bandeau défilant','Texte saisi, ou relié à une source',' <span class="tag fld">relié</span>')}
+  ${row('#3B82C4','❝','Citation du jour','Une citation, chaque jour une autre')}
+  ${row('#3B82C4','▦','QR code','Lien, avec comptage des scans (Growth)')}
+  <div class="grp">Mes intégrations <small>déjà configurées</small></div>
+  <p class="help">Posées comme un bloc : le même rendu que sur l'écran, à la taille du rectangle. On ne ressaisit ni ville, ni compte, ni clé.</p>
+  ${row('#E0A526','⛅','Météo — Lausanne','Aujourd\'hui + 3 jours',' <span class="tag blk">bloc</span>','on')}
+  ${row('#2E8B57','📅','Calendrier « Salles de réunion »','Microsoft 365 · événements à venir',' <span class="tag blk">bloc</span>')}
+  ${row('#C0485A','📰','Flux RSS « 24 heures »','Titres des articles',' <span class="tag blk">bloc</span>')}
+  ${row('#41BDF5','🌡','Capteurs « Bâtiment A »','Home Assistant · 4 capteurs',' <span class="tag blk">bloc</span>')}
+  <button class="link">+ Ajouter une intégration depuis le Store</button>
+  <div class="grp">Plein écran seulement</div>
+  ${row('#8A97A8','🌐','Page web','Ne se pose pas dans une composition','','off')}
+  ${row('#8A97A8','f','Facebook','Ne se pose pas dans une composition','','off')}`;
+function row(c,i,b,s,extra,cls){return `<div class="wrow ${cls||''}"><span class="wi" style="background:${c}">${i}</span><span class="t"><b>${b}</b><small>${s}</small></span>${extra||''}</div>`}
+P.donnees=()=>`
+  <div class="ph"><h4>Données</h4><button class="btn sm ghost" id="addsrc">+ Ajouter une source</button></div>
+  <p class="help">Les sources de cette composition. Sur l'écran, les champs et les listes se mettent à jour seuls ; sans connexion, l'écran garde la dernière valeur reçue.</p>
+  ${src('#E0A526','⛅','Météo — Lausanne','WeatherAPI · toutes les 30 min · à jour il y a 4 min','ok',['Bloc météo','Texte · 3 champs'])}
+  ${src('#2E8B57','📅','Calendrier « Salles de réunion »','Microsoft 365 · chaque minute · à jour il y a 20 s','ok',['Liste · 5 lignes'])}
+  ${src('#3B82C4','🕘','Horaires — Accueil','Linkii · saisis dans Linkii · jours fériés : Vaud','ok',['Badge « Ouvert » '+COND,'Badge « Fermé » '+COND,'1 champ'])}
+  ${src('#C0485A','📰','Flux RSS « 24 heures »','toutes les 10 min · dernière lecture en erreur il y a 12 min','warn',['Bandeau'])}
+  <p class="help" style="margin-top:14px">Une source vient de Mes intégrations : la modifier (une autre ville, un autre calendrier) change toutes les compositions et listes de lecture qui l'utilisent. Pour une variante, ajoutez une autre source.</p>`;
+function src(c,i,b,meta,st,uses){return `<div class="srcard"><div class="h"><span class="wi" style="background:${c};width:30px;height:30px;font-size:14px">${i}</span><b>${b}</b><span class="dot" style="background:${st==='ok'?'#2E8B57':'#E0A526'}" title="${st==='ok'?'À jour':'Dernière lecture en erreur'}"></span><button class="kebab">⋮</button></div><div class="meta">${meta}</div><div class="uses">${uses.map(u=>'<span>'+u+'</span>').join('')}</div></div>`}
+P.texte=()=>`
+  <div class="ph"><h4>Texte</h4></div>
+  <div class="grp">Ajouter</div>
+  <div class="wrow"><span class="t"><b style="font-size:20px">Titre</b></span></div>
+  <div class="wrow"><span class="t"><b>Sous-titre</b></span></div>
+  <div class="wrow"><span class="t">Paragraphe</span></div>
+  <div class="grp">Texte avec données</div>
+  <div class="wrow"><span class="t"><b>Texte relié</b><small>« Il fait {Température}° à {Ville} »</small></span><span class="tag fld">relié</span></div>
+  <p class="help">Dans n'importe quel texte : bouton « { } Champ » de la barre, ou taper <b>{</b> pendant l'écriture.</p>`;
+
+/* ---------- barres contextuelles ---------- */
+const CTX={
+ 1:`<span class="kind">⛅ Bloc Météo</span><span class="sep"></span>
+    <span class="lbl">Source</span><select><option>Météo — Lausanne</option><option>Météo — Genève</option><option>+ Nouvelle source météo…</option></select>
+    <span class="lbl">Affichage</span><select><option>Actuelle + 3 jours</option><option>Actuelle seulement</option><option>Heure par heure</option></select>
+    <span class="lbl">Fond</span><select><option>Transparent</option><option>Clair</option><option>Sombre</option></select>
+    <span class="sep"></span><span class="lbl">Police</span><select><option>Poppins</option></select>
+    <span class="sw" title="Couleur du texte"><i style="background:#fff;border:1px solid #ccc"></i></span>
+    <span class="sep"></span><button class="cb">⚙ Réglages de la source</button>`,
+ 2:`<select><option>Poppins</option></select><span class="num"><button>−</button><span>44</span><button>+</button></span>
+    <select><option>Normal</option></select><span class="sw"><i style="background:#C9D6E6"></i></span>
+    <button class="cb">≡</button><span class="sep"></span>
+    <button class="cb on">{ } Champ</button><button class="cb">Valeur de secours…</button>`,
+ 3:`<span class="kind">${CHAIN} Liste reliée</span><span class="sep"></span>
+    <button class="cb on">✎ Modifier la ligne modèle</button>
+    <span class="lbl">Lignes</span><span class="num"><button>−</button><span>5</span><button>+</button></span>
+    <span class="sep"></span><span class="lbl">Aperçu page</span><button class="cb">‹</button><span style="font-size:13px">1 / 2</span><button class="cb">›</button>`,
+ 4:`<span class="lbl" style="padding:0 8px">Cliquez un élément pour le modifier · les pastilles bleues sont des champs reliés</span>`,
+ 5:`<span class="kind">${COND} Badge « Ouvert »</span><span class="sep"></span>
+    <span class="sw"><i style="background:#E6F3EC"></i></span><select><option>Poppins</option></select>
+    <span class="sep"></span><button class="cb on">${COND} Afficher si…</button><button class="cb">{ } Champ</button>`,
+ 6:`<span class="kind">${COND} Badge « Ouvert »</span><span class="sep"></span><button class="cb on">${COND} Afficher si…</button>`
+};
+
+/* ---------- inspecteurs de droite ---------- */
+const INSP={
+ 3:`<div class="ih">${CHAIN}<b>Liste reliée</b><button class="kebab">×</button></div><div class="ib">
+   <div class="field"><label>Source</label><select><option>📅 Calendrier « Salles de réunion »</option><option>🕘 Horaires — Accueil (une ligne par jour)</option><option>📰 Flux RSS « 24 heures »</option><option>🌡 Capteurs « Bâtiment A »</option><option>▦ Tableau « Menu de la semaine »</option></select></div>
+   <div class="field"><label>Éléments</label><select><option>Événements d'aujourd'hui</option><option>En cours et à venir</option><option>7 prochains jours</option></select>
+     <label class="chk" style="font-weight:400;color:var(--ink)"><input type="checkbox" checked> Masquer les événements terminés</label></div>
+   <div class="field"><label>Filtre</label><div class="inl"><select style="width:110px"><option>Lieu</option></select><select style="width:110px"><option>contient</option></select><input type="text" placeholder="ex. Léman"></div></div>
+   <div class="field"><label>Ordre</label><select><option>Heure de début, la plus proche d'abord</option></select></div>
+   <div class="field"><label>S'il y a plus de 5 éléments</label>
+     <div class="radios"><label><input type="radio" name="more" checked> Pages qui tournent toutes les <input type="number" value="8" style="width:52px;padding:2px 4px;border:1px solid var(--line-2);border-radius:4px"> s</label><label><input type="radio" name="more"> Montrer les 5 premiers seulement</label></div></div>
+   <div class="field"><label>Disposition</label><div class="seg" style="width:max-content"><button class="on">Colonne</button><button>Ligne</button><button>Grille</button></div>
+     <div class="inl" style="font-size:13px;color:var(--muted)">Espace entre les lignes <input type="number" value="16"> px</div></div>
+   <div class="field"><label>Ligne modèle : champs utilisés</label>
+     <div class="mapr"><span class="k">${CHAIN} Début</span><span class="v">08:30 · format HH:mm</span><span class="k">${CHAIN} Titre</span><span class="v">Point équipe</span><span class="k">${CHAIN} Lieu</span><span class="v">Salle Léman</span></div>
+     <p class="help" style="margin:6px 0 0">Double-cliquez la ligne orange pour la redessiner : textes, formes, images, comme ailleurs.</p></div>
+   <div class="field"><label>Quand il n'y a rien</label><input type="text" value="Aucune réservation aujourd'hui"></div>
+ </div>`,
+ 5:`<div class="ih"><b>Calques</b></div>
+   ${ly('T','Bandeau · Flux RSS',CHAIN)}${ly('▤','Liste · Calendrier « Salles »',CHAIN)}${ly('T','Aujourd\'hui','')}${ly('📅','Date','')}
+   ${ly('▭','Badge « Fermé »',COND+' si fermé','dim')}${ly('▭','Badge « Ouvert »',COND+' si ouvert','on')}
+   ${ly('⛅','Bloc · Météo — Lausanne','')}${ly('T','Il fait {Température}° à…',CHAIN)}${ly('T','Bienvenue','')}${ly('▭','Logo','')}${ly('▭','Fond gauche','')}
+   <p class="help" style="padding:10px 12px">Un élément masqué par sa condition reste visible en pâle dans l'éditeur, et son calque porte ${COND}.</p>`
+};
+function ly(i,n,m,cls){return `<div class="ly ${cls||''}"><span class="ic">${i}</span><span class="nm">${n}</span><span class="mk">${m}</span></div>`}
+
+/* ---------- menus flottants ---------- */
+const POPS={
+ 2:`<div class="pop" style="top:62px;left:calc(50% + 40px);width:390px">
+   <div class="search" style="margin:4px 4px 6px">⌕<input placeholder="Chercher un champ"></div>
+   <div class="pt">⛅ <b>Météo — Lausanne</b></div>
+   ${mi('Ville','Lausanne')}${mi('Température','14','on')}${mi('Ressenti','12')}${mi('Condition','ciel dégagé')}${mi('Max. aujourd\'hui','17')}${mi('Min. aujourd\'hui','6')}
+   <hr><div class="pt">🕘 <b>Horaires — Accueil</b></div>
+   ${mi('Ouvert maintenant','oui')}${mi('Horaire du jour','08:00 – 18:00')}${mi('Ferme à','18:00')}${mi('Prochaine ouverture','jeudi 08:00')}
+   <hr><div class="pt">📅 <b>Calendrier « Salles de réunion »</b></div>
+   ${mi('Prochain événement · titre','Point équipe')}${mi('Prochain événement · début','08:30')}${mi('Événements aujourd\'hui','5')}
+   <hr><button class="mi" style="color:var(--signal);font-weight:500">+ Ajouter une source…</button>
+   <div class="foot">Format de « Température » : <span class="seg" style="height:26px"><button class="on">14</button><button>14,2</button><button>14 °C</button></span></div></div>`,
+ 4:`<div class="pop" style="top:12px;left:12px;width:420px">
+   <div class="pt">Ajouter une source</div>
+   <div class="pt" style="padding-top:2px">Depuis Mes intégrations</div>
+   ${mi('⛅ Météo','une autre ville')}${mi('📅 Calendrier partagé','Microsoft 365, Google, ICS…')}${mi('📰 Flux RSS / actualités','')}${mi('🌡 Capteurs Home Assistant','')}
+   <hr><div class="pt" style="padding-top:2px">Nouvelles sources</div>
+   <button class="mi">🕘 Horaires d'ouverture <span class="tag new">nouveau</span><small>saisis dans Linkii</small></button>
+   <button class="mi">▦ Tableau <span class="tag new">nouveau</span><small>Google Sheets, Excel en ligne, CSV</small></button></div>`,
+ 5:`<div class="pop" style="top:62px;left:calc(50% - 160px);width:500px;padding:10px 12px">
+   <div style="font-weight:500;margin-bottom:8px">Afficher cet élément</div>
+   <div class="radios"><label><input type="radio" name="vis"> Toujours</label><label><input type="radio" name="vis" checked> Seulement si…</label></div>
+   <div class="inl" style="margin:10px 0 6px 24px;flex-wrap:wrap">
+     <select style="border:1px solid var(--line-2);border-radius:4px;padding:5px 6px"><option>🕘 Horaires · Ouvert maintenant</option></select>
+     <select style="border:1px solid var(--line-2);border-radius:4px;padding:5px 6px"><option>est</option><option>n'est pas</option></select>
+     <select style="border:1px solid var(--line-2);border-radius:4px;padding:5px 6px"><option>oui</option><option>non</option></select></div>
+   <button class="link" style="margin-left:24px">+ et une autre condition</button>
+   <div class="hint" style="margin:8px 0 2px">Pour le message « Fermé » : dupliquez le badge (Ctrl+D) et choisissez « non ». Autres conditions possibles : plage horaire, jour de la semaine, valeur d'un champ (« Température est au-dessous de 0 »), liste vide.</div></div>`
+};
+function mi(n,v,cls){return `<button class="mi ${cls||''}">${n}<small>${v}</small></button>`}
+
+/* ---------- source Horaires ---------- */
+const HOURS=`<div class="scrim"><div class="modal">
+  <div class="mh"><span class="wi" style="background:#3B82C4;width:32px;height:32px;font-size:15px">🕘</span><h4>Horaires — Accueil</h4><button class="xb">×</button></div>
+  <div class="mb">
+    <div class="mtabs"><button class="on">Semaine</button><button>Exceptions et jours fériés</button></div>
+    <div class="field"><label>Nom</label><input type="text" value="Horaires — Accueil"></div>
+    ${wk('Lundi',1,['08:00 – 12:00','13:30 – 18:00'])}${wk('Mardi',1,['08:00 – 18:00'])}${wk('Mercredi',1,['08:00 – 18:00'])}${wk('Jeudi',1,['08:00 – 20:00'])}${wk('Vendredi',1,['08:00 – 17:00'])}${wk('Samedi',1,['09:00 – 12:00'])}${wk('Dimanche',0,[])}
+    <div class="grp" style="margin-top:16px">Prochaines exceptions</div>
+    <div class="exc"><b>mer. 24 décembre</b><span>08:00 – 16:00</span><span class="x">Veille de Noël</span></div>
+    <div class="exc"><b>jeu. 25 décembre</b><span>Fermé</span><span class="x">Noël · jour férié Vaud</span></div>
+    <div class="exc"><b>ven. 26 décembre</b><span>Fermé</span><span class="x">Saint-Étienne · ajouté à la main</span></div>
+    <div class="grp" style="margin-top:16px">Champs fournis, maintenant</div>
+    <div class="fieldsprev"><div>Ouvert maintenant<span>oui</span></div><div>Horaire du jour<span>08:00 – 18:00</span></div><div>Ferme à<span>18:00</span></div><div>Prochaine ouverture<span>jeudi 08:00</span></div><div>Fermeture exceptionnelle<span>non</span></div><div>Liste<span>une ligne par jour</span></div></div>
+  </div>
+  <div class="mf"><span class="help" style="margin:0;flex:1">Utilisé par 2 compositions · fuseau de l'aire (Europe/Zurich)</span><button class="btn ghost">Annuler</button><button class="btn">Enregistrer</button></div>
+</div></div>`;
+function wk(d,on,sl){return `<div class="week"><span class="d">${d}</span><span class="tgl ${on?'on':''}"></span><span class="sl">${on?sl.map(s=>'<span>'+s+'</span>').join('')+'<button>+ plage</button>':'<span class="closed">Fermé</span>'}</span></div>`}
+
+/* ---------- scènes ---------- */
+const SC={
+ 1:{panel:'widgets',sel:'weather',note:`<span class="nt">Intégrations dans l'éditeur<button title="Masquer la note" onclick="this.closest('.note').style.display='none'">×</button></span>Le panneau Widgets montre aussi <i>Mes intégrations</i> déjà configurées. Glissées sur la page, elles deviennent un <b>bloc</b>, dessiné par le même code que sur l'écran.<ul><li>La barre règle l'affichage du bloc (mise en page, fond, police, couleur) ; la source garde ses propres réglages.</li><li>Les intégrations plein écran (page web, Facebook) restent grisées.</li></ul>`,
+   txt:'Le panneau Widgets ajoute « Mes intégrations » : météo, calendrier, RSS, capteurs, déjà configurés dans Intégrations. Un bloc sélectionné : sa barre propose la source, l\'affichage et le style.'},
+ 2:{panel:'texte',sel:'wtext',pop:2,noteLeft:true,note:`<span class="nt">Champ dans un texte<button title="Masquer la note" onclick="this.closest('.note').style.display='none'">×</button></span>Un champ est une <b>pastille</b> dans un texte libre : « Il fait {Température}° à {Ville} ». Le texte autour reste modifiable, la pastille garde la police du texte.<ul><li>Insertion : bouton « { } Champ », ou taper <b>{</b>.</li><li>Valeur de secours si la source n'a rien (par défaut « — »).</li><li>Les valeurs listées sont les vraies, lues maintenant.</li></ul>`,
+   txt:'Le texte est en cours d\'écriture ; « { } Champ » ouvre la liste des champs de toutes les sources disponibles, avec leur valeur actuelle. Les pastilles sont surlignées en bleu.'},
+ 3:{panel:'widgets',sel:'list',insp:3,row:true,note:`<span class="nt">Liste reliée<button title="Masquer la note" onclick="this.closest('.note').style.display='none'">×</button></span>On dessine <b>une seule ligne</b> (cadre orange) ; Linkii la répète pour chaque élément de la source. Les mêmes listes servent pour les horaires (une ligne par jour), un flux RSS, des capteurs, un tableau.<ul><li>Plus d'éléments que de lignes : pages qui tournent.</li><li>Liste vide : un texte de remplacement.</li></ul>`,
+   txt:'Une liste reliée au calendrier « Salles de réunion » : une ligne modèle répétée. À droite, ses réglages : source, filtre, ordre, nombre de lignes, ce qui se passe s\'il y en a trop ou aucune.'},
+ 4:{panel:'donnees',sel:null,mode:'names',pop:4,note:`<span class="nt">Panneau Données<button title="Masquer la note" onclick="this.closest('.note').style.display='none'">×</button></span>Toutes les sources de la composition, leur fraîcheur et ce qui les utilise. « Noms des champs » (en haut) montre la structure au lieu des valeurs.<ul><li>Sources = Mes intégrations, sans rien ressaisir.</li><li>Deux nouvelles sources : <b>Horaires d'ouverture</b> et <b>Tableau</b> (feuille de calcul en ligne).</li><li>Un point orange : dernière lecture en erreur, l'écran garde la dernière valeur.</li></ul>`,
+   txt:'Nouveau bouton « Données » dans le rail : les sources de la composition et leur état. Le menu « + Ajouter une source » est ouvert. L\'aperçu est en mode « Noms des champs ».'},
+ 5:{panel:'donnees',sel:'hours',pop:5,insp:5,noteLeft:true,note:`<span class="nt">Afficher si…<button title="Masquer la note" onclick="this.closest('.note').style.display='none'">×</button></span>Un élément peut ne s'afficher que sous condition. Exemple : badge vert « Ouvert » si l'accueil est ouvert, badge rouge « Fermé » sinon, au même endroit.<ul><li>L'écran réévalue les conditions chaque minute, sans connexion.</li><li>Dans l'éditeur, l'élément masqué est pâle et son calque porte ${COND}.</li></ul>`,
+   txt:'Le badge « Ouvert » est sélectionné ; « Afficher si… » ouvre sa condition. À droite, les calques : ⛓ = relié à une source, ◐ = affiché sous condition.'},
+ 6:{panel:'donnees',sel:'hours',modal:true,txt:'Nouvelle source « Horaires d\'ouverture », saisie dans Linkii (ouverte depuis Données ou Intégrations) : semaine type, plages multiples, exceptions et jours fériés du canton. Elle fournit les champs « Ouvert maintenant », « Ferme à »… et une liste d\'une ligne par jour.'}
+};
+
+function fit(){
+  const mock=document.getElementById('mock'), app=document.getElementById('app');
+  app.style.top=mock.offsetHeight+'px';
+  const c=document.getElementById('center'), f=document.getElementById('frame'), s=document.getElementById('stage');
+  const W=c.clientWidth, H=c.clientHeight, k=Math.min((W-60)/1920,(H-100)/1080);
+  f.style.width=1920*k+'px'; f.style.height=1080*k+'px';
+  f.style.left=(W-1920*k)/2+'px'; f.style.top=Math.max(64,(H-1080*k)/2+20)+'px';
+  s.style.transform='scale('+k+')';
+  const sc=SC[scene], o=document.getElementById('overlay'); o.innerHTML='';
+  if(sc.sel){const b=BOX[sc.sel];
+    o.innerHTML='<div class="selbox" style="left:'+b.x*k+'px;top:'+b.y*k+'px;width:'+b.w*k+'px;height:'+b.h*k+'px">'+
+      ['0,0','50,0','100,0','0,50','100,50','0,100','50,100','100,100'].map(p=>{const[a,bb]=p.split(',');return '<span class="hd" style="left:'+a+'%;top:'+bb+'%"></span>'}).join('')+
+      '<span class="seltag">'+b.tag+'</span></div>';
+    if(sc.row) o.innerHTML+='<div class="rowtag" style="left:'+840*k+'px;top:'+190*k+'px;width:'+1000*k+'px;height:'+120*k+'px"><span>Ligne modèle</span></div>';
+  }
+}
+function show(n){
+  scene=n; const sc=SC[n];
+  if(sc.mode) mode=sc.mode; else if(n!==4) mode='values';
+  document.querySelectorAll('.sc').forEach(b=>b.classList.toggle('on',+b.dataset.s===n));
+  document.getElementById('mocktxt').textContent=sc.txt;
+  document.querySelectorAll('#rail button').forEach(b=>b.classList.toggle('on',b.dataset.p===sc.panel));
+  document.getElementById('panel').innerHTML=(P[sc.panel]||P.widgets)();
+  document.getElementById('ctx').innerHTML=CTX[n]||'';
+  const insp=document.getElementById('insp'); insp.innerHTML=INSP[sc.insp]||''; insp.style.display=sc.insp?'':'none';
+  document.getElementById('pops').innerHTML=POPS[sc.pop]||'';
+  const note=document.getElementById('note'); note.innerHTML=sc.note||''; note.style.display=sc.note?'':'none'; note.style.left=sc.noteLeft?'14px':''; note.style.right=sc.noteLeft?'auto':'';
+  document.getElementById('modal').innerHTML=sc.modal?HOURS:'';
+  render(); requestAnimationFrame(fit);
+}
+function render(){
+  const s=document.getElementById('stage');
+  s.className='stage '+(mode==='names'?'names':'mk-'+scene);
+  s.innerHTML=stageHtml();
+  document.querySelectorAll('#mode button').forEach(b=>b.classList.toggle('on',b.dataset.m===mode));
+}
+document.querySelectorAll('.sc').forEach(b=>b.onclick=()=>show(+b.dataset.s));
+document.querySelectorAll('#mode button').forEach(b=>b.onclick=()=>{mode=b.dataset.m;render();});
+document.getElementById('rail').onclick=e=>{const b=e.target.closest('button');if(!b||!P[b.dataset.p])return;
+  document.querySelectorAll('#rail button').forEach(x=>x.classList.toggle('on',x===b));document.getElementById('panel').innerHTML=P[b.dataset.p]();};
+addEventListener('resize',fit);
+show(1);
+</script>
+</body>
+</html>

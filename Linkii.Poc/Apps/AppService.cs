@@ -195,6 +195,26 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         if (m != null) m.Info[key] = value;
     });
 
+    /// <summary>Sources possibles d'un bloc ou de champs de composition (§85) : contenus configurés des intégrations à données (météo, calendrier, RSS, capteurs).</summary>
+    public List<MediaItem> CompositionSources() =>
+        store.Read(d => d.Media.Where(m => m.AppId != null && Compositions.SourceApps.Contains(m.AppId) && d.Access.CanUse(catalog, m.AppId)).OrderBy(m => m.Name).ToList())
+            .Where(m => !IsIncomplete(m)).ToList();
+
+    /// <summary>Données actuelles d'une source (celles que l'écran recevrait), pour l'éditeur de compositions ; sinon un message d'erreur lisible.</summary>
+    public async Task<(System.Text.Json.JsonElement? Data, string? Error)> SourceData(Guid id)
+    {
+        var m = Instance(id);
+        if (m?.AppId == null || !Compositions.SourceApps.Contains(m.AppId) || catalog.Find(m.AppId) is not { } app || providers.Find(app.Provider) is not { } provider)
+            return (null, "Source introuvable.");
+        try
+        {
+            var tenant = store.Read(d => d.Tenant);
+            var data = await provider.Fetch(new AppRuntime(tenant, RuntimeValues(app, m.Settings, m)));
+            return (data == null ? null : System.Text.Json.JsonSerializer.SerializeToElement(data, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)), null);
+        }
+        catch (Exception ex) { return (null, ex.Message); }
+    }
+
     /// <summary>Contenu auquel il manque encore une information obligatoire (média, lien, fichier…) : ajouté à vide, il reste à configurer.</summary>
     public bool IsIncomplete(MediaItem? m) =>
         m?.AppId != null && catalog.Find(m.AppId) is { } app && AppCatalog.MissingRequired(app, m.Settings, m.Secrets.Keys.ToHashSet()).Count > 0;

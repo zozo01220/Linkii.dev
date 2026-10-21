@@ -1,7 +1,9 @@
 /* Éditeur de compositions (DEV-POC.md §80), monté par la page /compositions/{id} (Components/Pages/CompositionEditor.razor).
    Maquette validée : maquettes/editeur-compositions.html. Rendu des calques : player/composition.js, le même que sur l'écran.
    Appels au serveur (DotNetObjectReference) : Save(nom, document) -> message d'erreur ou null, Qr(texte) -> « côté|tracé »,
-   Images() -> images de la médiathèque, Leave() -> retour à la page d'origine. */
+   Images() -> images de la médiathèque, Leave() -> retour à la page d'origine.
+   Étape 3 (§85, maquette editeur-compositions-etape3.html) : Sources() -> contenus de Mes intégrations utilisables (météo, calendrier, RSS, capteurs),
+   SourceData(id) -> { data, error } : leurs données actuelles, pour les blocs d'intégration et les champs reliés des textes. */
 (function (w) {
   'use strict';
   const WEIGHTS = [[300, 'Léger'], [400, 'Normal'], [500, 'Moyen'], [600, 'Demi-gras'], [700, 'Gras'], [800, 'Extra-gras'], [900, 'Noir']];
@@ -19,6 +21,7 @@
   let selId = null, zoom = 1, z = 1, panelName = 'modeles', panelOpen = true, layersOpen = false, mediaMode = 'add', editing = false;
   let myTpl = [], tplTab = 'galerie', canImport = false;   // « Mes modèles » (§84), import d'images permis par le niveau de droits
   let drag = null, guides = null, images = [], tplCat = 'Tous', mediaSearch = '', popCb = null, nudge = null, qrWait = {}, fmtNew = false, fmtO = 'land';
+  let sources = [], srcData = {}, srcBusy = {}, srcAt = {}, names = false, fieldAnchor = null;   // sources de données (§85) et mode « Noms des champs »
   const q = s => root.querySelector(s);
   const cur = () => D.els.find(e => e.id === selId) || null;
   const byId = id => D.els.find(e => e.id === id);
@@ -130,6 +133,7 @@
     root = el; net = dotnet; ac = new AbortController();
     LC().ensure();
     images = o.images || [];
+    sources = o.sources || []; srcData = {}; srcBusy = {}; srcAt = {}; names = false;
     myTpl = o.myTemplates || []; canImport = !!o.canImport; tplTab = 'galerie';
     name = savedName = o.name || 'Composition';
     let doc = null;
@@ -151,6 +155,7 @@
     savedDoc = tpl || o.fromTemplate ? '' : H[0];   // un modèle choisi (galerie ou Mes modèles) n'est pas encore enregistré
     renderPanel(); render(); renderCtx(); setDirty();
     D.els.filter(e => e.type === 'qr').forEach(fetchQr);
+    LC().sources(D).forEach(id => loadSource(id));
     timer = setInterval(() => { const st = q('#ce-stage'); if (st) LC().tick(st); }, 1000);
     if (fresh && !tpl) openFormat(true);
     if (document.fonts) document.fonts.ready.then(() => { if (root) render(); });
@@ -173,7 +178,8 @@
     img: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg>',
     txt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg>',
     shp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 3 3 11h10L8 3Z"/><circle cx="17" cy="16" r="4"/><rect x="3" y="14" width="7" height="7"/></svg>',
-    wid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'
+    wid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+    data: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>'
   };
   const SHELL = `
 <div class="ce-top">
@@ -189,6 +195,7 @@
   <button class="ce-tb" data-top="bg"><span class="ce-sw" id="ce-bgsw"></span>Fond</button>
   <button class="ce-tb" id="ce-lybtn" data-top="layers">${ICO.layers}Calques</button>
   <span style="flex:1"></span>
+  <span class="ce-seg" id="ce-names" title="Afficher les valeurs actuelles des sources, ou le nom des champs reliés"><button data-top="names0" class="on">Données réelles</button><button data-top="names1">Noms des champs</button></span>
   <span class="ce-dirty" id="ce-dirty"></span>
   <button class="ce-btn ghost" data-top="preview">${ICO.eye}Aperçu</button>
   <button class="ce-btn ghost" data-top="revert" id="ce-revert">Annuler</button>
@@ -201,6 +208,7 @@
     <button data-p="texte">${ICO.txt}Texte</button>
     <button data-p="formes">${ICO.shp}Éléments</button>
     <button data-p="widgets">${ICO.wid}Widgets</button>
+    <button data-p="donnees">${ICO.data}Données</button>
   </nav>
   <aside class="ce-panel" id="ce-panel"></aside>
   <div class="ce-center">
@@ -241,7 +249,9 @@
 
   // ---------- rendu ----------
   const mediaUrl = id => { const m = images.find(x => x.id === id); return m ? m.url : null; };
-  const stageHTML = d => LC().html(d, { mediaUrl });
+  const srcMap = () => { const m = {}; sources.forEach(s => m[s.id] = s); return m; };
+  const opts = extra => Object.assign({ mediaUrl, data: srcData, sources: srcMap(), names }, extra);   // rendu : images, données des sources, noms des champs
+  const stageHTML = d => LC().html(d, opts());
   const loadImages = st => LC().images(st, (u, cb) => cb(u));
 
   function render() {
@@ -253,6 +263,7 @@
     Object.assign(fr.style, { width: fw + 'px', height: fh + 'px', left: Math.max(40, (A.width - fw) / 2) + 'px', top: Math.max(72, (A.height - fh) / 2 + 26) + 'px', marginBottom: '40px' });
     const st = q('#ce-stage');
     Object.assign(st.style, { width: D.w + 'px', height: D.h + 'px', transform: `scale(${z})`, background: LC().bg(D) });
+    st.classList.toggle('ce-names', names);
     if (!editing) {
       st.innerHTML = stageHTML(D);
       loadImages(st);
@@ -374,11 +385,13 @@
       const n = ev.target.closest('.lc-el'); if (!n) return;
       const e = byId(n.dataset.id); if (!e || e.type !== 'text' || e.locked) return;
       const tx = n.querySelector('.lc-tx');
+      tx.querySelectorAll('.lc-fd').forEach(f => f.contentEditable = 'false');   // champ relié : une pastille, supprimée ou gardée d'un bloc
       editing = true; tx.contentEditable = 'true'; tx.focus();
       const r = document.createRange(); r.selectNodeContents(tx); const s = getSelection(); s.removeAllRanges(); s.addRange(r);
       drawOverlay();
       tx.addEventListener('input', () => { e.h = n.offsetHeight; drawOverlay(); });
-      tx.addEventListener('blur', () => { e.text = tx.innerText.replace(/\n$/, ''); editing = false; commit(); renderCtx(); }, { once: true });
+      tx.addEventListener('keydown', ev => { if (ev.key === '{') { ev.preventDefault(); fieldMenu(q('[data-act=field]') || tx); } });   // « { » : liste des champs
+      tx.addEventListener('blur', () => { e.text = serialize(tx).replace(/\n$/, ''); editing = false; closePop(); commit(); renderCtx(); }, { once: true });
     });
 
     // glisser depuis le panneau vers la page
@@ -401,7 +414,8 @@
       if (e.type === 'qr' && key === 'url') { e.qr = ''; fetchQr(e, 500); }
       render();
     });
-    on(ctx, 'change', ev => { if (ev.target.dataset.k) commit(); });
+    on(ctx, 'change', ev => { if (ev.target.dataset.k) commit(); if (ev.target.dataset.k === 'source') loadSource(ev.target.value); });
+    on(ctx, 'mousedown', ev => { if (editing && ev.target.closest('[data-act=field]')) ev.preventDefault(); });   // le texte en cours d'écriture garde le curseur
     on(ctx, 'click', ev => {
       const b = ev.target.closest('button'), e = cur(); if (!b || !e) return;
       if (b.dataset.step) { const [key, d] = b.dataset.step.split(':'); e[key] = Math.max(8, Math.round(e[key] + +d * k())); commit(); renderCtx(); }
@@ -449,6 +463,7 @@
     else if (a === 'closepv') closePreview();
     else if (a === 'revert') revert();
     else if (a === 'save') save(false);
+    else if (a === 'names0' || a === 'names1') { names = a === 'names1'; root.querySelectorAll('#ce-names button').forEach(x => x.classList.toggle('on', x.dataset.top === a)); render(); }
     else if (a === 'savemenu') openPop(b, '<button class="ce-mi" data-o="s">Enregistrer</button><button class="ce-mi" data-o="l">Enregistrer et revenir</button><hr><button class="ce-mi" data-o="t">Enregistrer comme modèle…</button>',
       o => { if (o === 't') openTemplateDialog(); else save(o === 'l'); });
   }
@@ -533,6 +548,11 @@
       : R({ kind: 'arrow', w: 200, h: 120, fill: ink, rot: +v.replace('arrow', '') || 0 });
     else if (kind === 'img') { const m = images.find(x => x.id === v); const r = m && m.w && m.h ? m.h / m.w : .75; e = I({ media: v, w: 720, h: Math.round(720 * r) }); }
     else if (kind === 'qr') e = Q({});
+    else if (kind === 'app') {   // bloc d'une intégration de Mes intégrations (§85)
+      const src = sources.find(x => x.id === v) || { app: 'weather-slide' };
+      const S = { 'weather-slide': [640, 250, 56], agenda: [900, 400, 40], rss: [900, 340, 38], 'ha-sensors': [620, 300, 40] }[src.app] || [600, 300, 40];
+      e = { id: nid(), type: 'app', app: src.app, source: v, x: 0, y: 0, w: S[0], h: S[1], font: 'IBM Plex Sans', size: S[2], weight: 500, color: ink, align: 'left', ls: 0, lh: 1.2, italic: false, bg: 'none', view: 'days', rows: 4, opacity: 1 };
+    }
     else e = W(v, { color: v === 'ticker' ? '#ffffff' : ink, w: v === 'ticker' ? D.w / s : v === 'date' ? 640 : 420 });
     ['x', 'y', 'w', 'h', 'size', 'radius'].forEach(p => { if (typeof e[p] === 'number') e[p] = Math.round(e[p] * s); });
     if (e.type === 'shape' && e.kind === 'line') e.sw = Math.max(1, Math.round(e.sw * s));
@@ -557,6 +577,7 @@
     if (textual(e)) { e.y = Math.round(cy - e.h / 2); }
     commit(); renderCtx();
     if (e.type === 'qr') fetchQr(e);
+    if (e.type === 'app') loadSource(e.source);
   }
   function lum(hex) {
     const h = String(hex || '#ffffff').replace('#', ''), n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h.slice(0, 6), 16) || 0;
@@ -578,6 +599,75 @@
     }, delay || 0);
   }
 
+  // ---------- sources de données (§85) ----------
+  async function loadSource(id, force) {
+    if (!net || !id || srcBusy[id] || (!force && srcData[id])) return;
+    srcBusy[id] = true;
+    if (panelName === 'donnees' && panelOpen) renderPanel();
+    let r = null;
+    try { r = await net.invokeMethodAsync('SourceData', id); } catch (x) { r = { error: 'la connexion au serveur est interrompue' }; }
+    if (!root) return;
+    srcBusy[id] = false; srcAt[id] = Date.now();
+    srcData[id] = r && r.data ? r.data : { error: (r && r.error) || 'aucune donnée' };
+    if (!editing) render();
+    if (panelName === 'donnees' && panelOpen) renderPanel();
+    if (q('#ce-pop.ce-fields')) drawFieldMenu();
+  }
+  // Texte en cours d'écriture -> texte du document : les pastilles redeviennent « {{source:clé}} »
+  function serialize(n) {
+    let s = '';
+    n.childNodes.forEach(c => {
+      if (c.nodeType === 3) s += c.nodeValue.replace(/\u00a0/g, ' ');
+      else if (c.nodeName === 'BR') s += '\n';
+      else if (c.classList && c.classList.contains('lc-fd')) s += '{{' + c.dataset.f + '}}';
+      else if (c.nodeType === 1) { if (/^(DIV|P)$/.test(c.nodeName) && s && !s.endsWith('\n')) s += '\n'; s += serialize(c); }
+    });
+    return s;
+  }
+  // Liste des champs de toutes les sources, avec leur valeur actuelle ; un clic insère le champ au curseur (ou en fin de texte)
+  function fieldMenu(anchor) { fieldAnchor = anchor; sources.forEach(s => loadSource(s.id)); drawFieldMenu(); }
+  function drawFieldMenu() {
+    const h = sources.length ? sources.map(s => {
+      const m = LC().SRC[s.app] || {}, d = srcData[s.id], f = LC().fields(s.app, d);
+      return `<div class="ce-pt"><b>${m.icon || ''} ${esc(s.name)}</b></div>` + (d && d.error ? `<div class="ce-pt">Données indisponibles : ${esc(d.error)}</div>`
+        : !f.length ? `<div class="ce-pt">${d ? 'Aucun champ' : 'Lecture des données…'}</div>`
+        : f.map(x => `<button class="ce-mi" data-o="${s.id}:${esc(x.key)}">${esc(x.label)}<small>${d ? esc(LC().fieldText(s.id, x.key, opts({ names: false }), '—')) : ''}</small></button>`).join(''));
+    }).join('<hr>') : '<div class="ce-pt">Aucune source : ajoutez une Météo, un Calendrier partagé, un Flux RSS ou des Capteurs Home Assistant dans Mes intégrations.</div>';
+    openPop(fieldAnchor, h, o => insertField(o));
+    const p = q('#ce-pop'); p.classList.add('ce-fields');
+    p.addEventListener('mousedown', ev => ev.preventDefault());   // le texte en cours d'écriture garde le curseur
+  }
+  function insertField(f) {
+    const e = cur(); if (!e || e.type !== 'text') return;
+    const tx = editing ? root.querySelector('.lc-tx[contenteditable=true]') : null;
+    if (!tx) { e.text = (e.text || '') + (!e.text || /\s$/.test(e.text) ? '' : ' ') + '{{' + f + '}}'; commit(); renderCtx(); return; }
+    const i = f.indexOf(':'), span = document.createElement('span');
+    span.className = 'lc-fd'; span.contentEditable = 'false'; span.dataset.f = f;
+    span.textContent = LC().fieldText(f.slice(0, i), f.slice(i + 1), opts(), e.fb);
+    const sel = getSelection();
+    let r = sel.rangeCount && tx.contains(sel.getRangeAt(0).startContainer) ? sel.getRangeAt(0) : null;
+    if (r && !r.collapsed && r.toString() === tx.textContent) r.collapse(false);   // tout le texte sélectionné (double-clic) : on ajoute à la fin, sans effacer
+    if (!r) { r = document.createRange(); r.selectNodeContents(tx); r.collapse(false); }
+    r.deleteContents(); r.insertNode(span); r.setStartAfter(span); r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
+    e.h = tx.closest('.lc-el').offsetHeight; drawOverlay();
+  }
+  function dataPanel() {
+    const used = LC().sources(D), uses = id => D.els.filter(e => e.type === 'app' ? e.source === id : e.type === 'text' && String(e.text || '').includes('{{' + id + ':')).length;
+    const card = s => {
+      const m = LC().SRC[s.app] || {}, d = srcData[s.id], n = uses(s.id);
+      const st = srcBusy[s.id] ? 'lecture…' : d && d.error ? d.error : d ? 'à jour, lue à ' + new Date(srcAt[s.id]).toLocaleTimeString('fr-CH', { hour: '2-digit', minute: '2-digit' }) : 'pas encore lue';
+      return `<div class="ce-src"><div class="h"><span class="wi" style="background:${m.color}">${m.icon}</span><b>${esc(s.name)}</b><span class="dot ${d && d.error ? 'bad' : d ? 'ok' : ''}"></span><button class="ce-tb" data-srcref="${s.id}" title="Relire les données" aria-label="Relire les données de ${esc(s.name)}">↻</button></div>
+        <div class="meta">${esc(m.name)} · ${esc(st)}</div><div class="uses">${n ? `<span>${n} élément${n > 1 ? 's' : ''}</span>` : `<button class="ce-link" data-add="app:${s.id}">+ Poser un bloc</button>`}</div></div>`;
+    };
+    const inDoc = sources.filter(s => used.includes(s.id)), other = sources.filter(s => !used.includes(s.id)), missing = used.filter(id => !sources.some(s => s.id === id)).length;
+    return `<p class="ce-help" style="margin-top:0">Les sources de cette composition. Sur l'écran, blocs et champs se mettent à jour seuls ; sans connexion, l'écran garde la dernière valeur reçue.</p>
+      <div class="ce-grp">Utilisées ici</div>${inDoc.length ? inDoc.map(card).join('') : '<div class="ce-empty">Aucune source utilisée.<br>Posez un bloc (panneau Widgets) ou insérez un champ dans un texte (« { } Champ »).</div>'}
+      ${missing ? `<div class="ce-note">${missing} source${missing > 1 ? 's' : ''} introuvable${missing > 1 ? 's' : ''} (supprimée ou d'une autre aire) : ses blocs ne sont pas diffusés, ses champs affichent leur valeur de secours.</div>` : ''}
+      ${other.length ? `<div class="ce-grp">Autres sources disponibles</div>${other.map(card).join('')}` : ''}
+      <div class="ce-row" style="margin-top:14px"><a class="ce-btn ghost" href="/integrations" target="_blank" rel="noopener">+ Ajouter une source</a><button class="ce-btn ghost" data-srclist="1">↻ Actualiser</button></div>
+      <p class="ce-help">Une source est un contenu configuré de Mes intégrations (Météo, Calendrier partagé, Flux RSS, Capteurs Home Assistant). La modifier change toutes les compositions qui l'utilisent.</p>`;
+  }
+
   // ---------- barre contextuelle ----------
   const sepH = '<span class="ce-sep"></span>';
   const fontSel = e => `<select data-k="font" title="Police" aria-label="Police" style="width:150px;font-family:'${e.font}'">${LC().FONTS.map(f => `<option ${f === e.font ? 'selected' : ''} style="font-family:'${f}'">${f}</option>`).join('')}</select>`;
@@ -597,6 +687,8 @@
     if (!e) h = '<span class="ce-hint">Cliquez sur un élément pour le modifier · double-cliquez sur un texte pour écrire · glissez depuis le panneau de gauche</span>';
     else if (textual(e)) {
       h = textTools(e);
+      if (e.type === 'text') h += sepH + `<button class="ce-tb" data-act="field" title="Insérer un champ relié à une source (ou tapez « { » pendant l'écriture)">{ } Champ</button>` +
+        (LC().sources({ els: [e] }).length ? '<button class="ce-tb" data-act="fb" title="Texte affiché quand la source n\'a pas de valeur">Valeur de secours…</button>' : '');
       if (e.kind === 'clock') h += sepH + `<button class="ce-tb ${e.sec ? 'on' : ''}" data-tog="sec">Secondes</button>`;
       if (e.kind === 'countdown') h += sepH + `<label class="ce-lbl">Jusqu'au<input type="date" data-k="until" value="${esc(e.until)}"></label>`;
     }
@@ -606,6 +698,17 @@
       (e.kind === 'rect' ? range('radius', 'Arrondi', 0, 300, 2, e.radius) + (e.stroke ? colorIn('stroke', e.stroke, 'Contour') : '') : '') +
       (e.kind === 'arrow' ? pick('rot', [[0, '→ Droite'], [45, '↘ Bas droite'], [90, '↓ Bas'], [135, '↙ Bas gauche'], [180, '← Gauche'], [225, '↖ Haut gauche'], [270, '↑ Haut'], [315, '↗ Haut droite']], e.rot, 'Direction') : '') +
       (e.kind === 'line' ? range('sw', 'Épaisseur', 1, 40, 1, e.sw) : '') + range('opacity', 'Opacité', 0, 1, .05, e.opacity);
+    else if (e.type === 'app') {
+      const m = LC().SRC[e.app] || {}, same = sources.filter(s => s.app === e.app);
+      if (!same.some(s => s.id === e.source)) same.unshift({ id: e.source, name: 'Source introuvable' });
+      h = `<span class="ce-kind">${m.icon || ''} Bloc ${esc(m.name || '')}</span>` + sepH +
+        `<label class="ce-lbl">Source<select data-k="source" aria-label="Source">${same.map(s => `<option value="${esc(s.id)}" ${s.id === e.source ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>` +
+        (e.app === 'weather-slide' ? pick('view', [['days', 'Actuelle + 3 jours'], ['now', 'Actuelle seulement']], e.view, 'Affichage')
+          : pick('rows', [[2, '2 lignes'], [3, '3 lignes'], [4, '4 lignes'], [5, '5 lignes'], [6, '6 lignes'], [8, '8 lignes']], e.rows, 'Nombre de lignes')) +
+        pick('bg', [['none', 'Fond transparent'], ['light', 'Fond clair'], ['dark', 'Fond sombre']], e.bg, 'Fond') + sepH +
+        fontSel(e) + sizeNum(e) + colorIn('color', e.color, 'Couleur du texte') + pick('weight', WEIGHTS, e.weight, 'Graisse') + sepH +
+        '<button class="ce-tb" data-act="srcset" title="Ouvrir les réglages de cette source (ville, calendrier…) dans un nouvel onglet">⚙ Réglages</button>';
+    }
     else if (e.type === 'qr') h = `<label class="ce-lbl">Lien<input type="text" data-k="url" value="${esc(e.url)}" style="width:240px" maxlength="500"></label>` + colorIn('fg', e.fg, 'Couleur') + colorIn('bg', e.bg, 'Fond');
     else if (e.kind === 'ticker') h = `<label class="ce-lbl">Texte<input type="text" data-k="text" value="${esc(e.text)}" style="width:260px" maxlength="1000"></label>` + fontSel(e) + sizeNum(e) +
       colorIn('color', e.color, 'Couleur du texte') + colorIn('bg', e.bg, 'Fond') + pick('speed', [[30, 'Lent'], [18, 'Normal'], [10, 'Rapide']], e.speed, 'Vitesse');
@@ -621,6 +724,9 @@
     else if (a === 'dup') dup();
     else if (a === 'del') del();
     else if (a === 'replace') { mediaMode = 'replace'; openPanel('medias'); }
+    else if (a === 'field') fieldMenu(b);
+    else if (a === 'fb') { const v = prompt('Texte affiché à la place d\'un champ quand sa source n\'a pas de valeur :', e.fb || '—'); if (v != null) { e.fb = v.slice(0, 40); commit(); } }
+    else if (a === 'srcset' && e.source) w.open('/apps/instance/' + encodeURIComponent(e.source), '_blank', 'noopener');
   }
   function dup() {
     const e = cur(); if (!e) return;
@@ -714,12 +820,20 @@
         <div class="ce-grp">Pictogrammes</div><div class="ce-sgrid">${IC.map(c => `<button class="ce-shp" draggable="true" data-add="icon:${c}">${c}</button>`).join('')}</div>`;
     }
     if (panelName === 'widgets') {
+      const SM = LC().SRC;
       const L = [['clock', '#0B1F3A', '◷', 'Horloge', 'Heure en direct, avec ou sans secondes'], ['date', '#0B1F3A', '▦', 'Date', 'Date du jour, mise à jour à minuit'],
         ['ticker', '#4F6BED', '⇢', 'Bandeau défilant', 'Texte qui défile en continu'], ['countdown', '#E8590C', '⏳', 'Compte à rebours', "Jours restants jusqu'à une date"]];
-      h = L.map(([key, c, i, n, d]) => `<button class="ce-wrow" draggable="true" data-add="w:${key}"><span class="wi" style="background:${c}">${i}</span><span><b>${n}</b><small>${d}</small></span></button>`).join('') +
+      h = '<div class="ce-grp" style="margin-top:0">Widgets</div>' + L.map(([key, c, i, n, d]) => `<button class="ce-wrow" draggable="true" data-add="w:${key}"><span class="wi" style="background:${c}">${i}</span><span><b>${n}</b><small>${d}</small></span></button>`).join('') +
         `<button class="ce-wrow" draggable="true" data-add="qr:"><span class="wi" style="background:#5A6B80">▣</span><span><b>QR code</b><small>Lien au choix. Pour compter les scans : onglet « QR code » du contenu, dans la liste de lecture</small></span></button>
-        <div class="ce-wrow soon"><span class="wi" style="background:#C5CED9">⇄</span><span><b>Plus tard</b><small>Météo, champs reliés à une source (horaires, listes, calendrier)</small></span></div>`;
+        <div class="ce-grp">Mes intégrations <small>déjà configurées</small></div>
+        <p class="ce-help" style="margin:0 0 10px">Posées comme un bloc : les données se mettent à jour seules sur l'écran. La source garde ses réglages (ville, calendrier…).</p>
+        ${sources.length ? sources.map(s => { const m = SM[s.app] || {}; return `<button class="ce-wrow" draggable="true" data-add="app:${esc(s.id)}"><span class="wi" style="background:${m.color}">${m.icon}</span><span><b>${esc(s.name)}</b><small>${esc(m.name)}</small></span><em class="ce-btag">bloc</em></button>`; }).join('')
+          : '<div class="ce-empty">Aucune intégration à poser.<br>Ajoutez une Météo, un Calendrier partagé, un Flux RSS ou des Capteurs Home Assistant dans Mes intégrations.</div>'}
+        <a class="ce-link" href="/integrations" target="_blank" rel="noopener">+ Ajouter une intégration depuis le Store</a>
+        <div class="ce-grp">Plein écran seulement</div>
+        <div class="ce-wrow soon"><span class="wi" style="background:#8A97A8">⌁</span><span><b>Page web, Facebook</b><small>Ne se posent pas dans une composition</small></span></div>`;
     }
+    if (panelName === 'donnees') h = dataPanel();
     p.innerHTML = h;
     if (panelName === 'medias') renderMediaGrid();
     if (panelName === 'modeles' && tplTab === 'mine') LC().images(p, (u, cb) => cb(u + '?w=320'));
@@ -738,6 +852,12 @@
     if (ev.target.closest('[data-refresh]')) {
       try { images = await net.invokeMethodAsync('Images'); } catch (x) { toast('Actualisation impossible pour le moment.', true); return; }
       if (root) { renderMediaGrid(); render(); toast('Médiathèque actualisée'); }
+      return;
+    }
+    const sr = ev.target.closest('[data-srcref]'); if (sr) { loadSource(sr.dataset.srcref, true); return; }
+    if (ev.target.closest('[data-srclist]')) {
+      try { sources = await net.invokeMethodAsync('Sources'); } catch (x) { toast('Actualisation impossible pour le moment.', true); return; }
+      if (root) { renderPanel(); render(); toast('Sources actualisées'); }
       return;
     }
     if (ev.target.closest('[data-import]')) { const f = document.getElementById('ce-file'); if (f && canImport) f.click(); return; }
@@ -798,11 +918,13 @@
 
   // ---------- calques ----------
   function icon(e) {
+    if (e.type === 'app') return (LC().SRC[e.app] || {}).icon || '◇';
     return e.type === 'text' ? 'T' : e.type === 'image' ? '▨' : e.type === 'qr' ? '▣' : e.type === 'widget' ? ({ clock: '◷', date: '▦', ticker: '⇢', countdown: '⏳' })[e.kind] || '◷'
       : ({ circle: '●', line: '—', arrow: '→' })[e.kind] || '■';
   }
   function label(e) {
-    if (e.type === 'text') return String(e.text || '').replace(/\n/g, ' ') || 'Texte';
+    if (e.type === 'text') return String(e.text || '').replace(LC().TOKEN, (m, id, key) => LC().fieldText(id, key, opts({ names: true }))).replace(/\n/g, ' ') || 'Texte';
+    if (e.type === 'app') { const s = sources.find(x => x.id === e.source); return 'Bloc · ' + (s ? s.name : (LC().SRC[e.app] || {}).name || 'intégration'); }
     if (e.type === 'image') { const m = images.find(x => x.id === e.media); return 'Image' + (m ? ' · ' + m.name : ' à choisir'); }
     if (e.type === 'qr') return 'QR code';
     if (e.type === 'widget') return WNAMES[e.kind] || 'Widget';
@@ -858,7 +980,7 @@
   function openPreview() {
     const s = Math.min(innerWidth / D.w, innerHeight / D.h), pf = q('#ce-pf');
     pf.style.cssText = `width:${D.w * s}px;height:${D.h * s}px;left:${(innerWidth - D.w * s) / 2}px;top:${(innerHeight - D.h * s) / 2}px;background:${LC().bg(D)}`;
-    pf.innerHTML = `<div class="lc-stage" style="width:${D.w}px;height:${D.h}px;transform:scale(${s});background:${LC().bg(D)}">${LC().html(D, { mediaUrl, player: true })}</div>`;
+    pf.innerHTML = `<div class="lc-stage" style="width:${D.w}px;height:${D.h}px;transform:scale(${s});background:${LC().bg(D)}">${LC().html(D, opts({ player: true, names: false }))}</div>`;
     loadImages(pf);
     q('#ce-pvw').hidden = false;
   }

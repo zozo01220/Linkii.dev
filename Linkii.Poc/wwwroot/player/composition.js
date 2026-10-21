@@ -2,7 +2,9 @@
    JS volontairement "ancien" comme apps.js (var, pas de fonctions fléchées) : il tourne aussi dans la WebView Android.
    Une composition : { w, h, bg, els: [ … ] }, positions et tailles en pixels de la page ; l'appelant met la scène à l'échelle.
    Calques : text | shape (rect, circle, line, arrow) | image (media : identifiant ; src : adresse posée à la publication)
-             | qr (url ; qr : « côté|tracé » calculé par le serveur) | widget (clock, date, ticker, countdown).
+             | qr (url ; qr : « côté|tracé » calculé par le serveur) | widget (clock, date, ticker, countdown)
+             | app (§85 : bloc d'une intégration de Mes intégrations ; source : identifiant du contenu, app : son intégration).
+   Un texte peut contenir des champs reliés « {{source:clé}} » : valeur lue dans les données de la source (o.data[source]), sinon la valeur de secours.
    Toutes les valeurs venant du document sont filtrées ici (couleurs, polices, nombres) : rien n'est injecté tel quel. */
 (function (w) {
   'use strict';
@@ -17,7 +19,18 @@
     '.lc-qr{width:100%;height:100%;box-sizing:border-box}.lc-qr svg{display:block;width:100%;height:100%}' +
     '.lc-tk{width:100%;height:100%;display:flex;align-items:center;overflow:hidden;white-space:nowrap}' +
     '.lc-tkin{display:inline-flex;animation:lc-tk linear infinite}.lc-tkin span{padding-right:2em}' +
-    '@keyframes lc-tk{from{transform:translateX(0)}to{transform:translateX(-50%)}}';
+    '@keyframes lc-tk{from{transform:translateX(0)}to{transform:translateX(-50%)}}' +
+    '.lc-app{width:100%;height:100%;box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;justify-content:center;line-height:1.2}' +
+    '.lc-app.bg-light,.lc-app.bg-dark{padding:.6em .8em;border-radius:.45em}.lc-app.bg-light{background:rgba(255,255,255,.92)}.lc-app.bg-dark{background:rgba(11,31,58,.88)}' +
+    '.lc-wx{display:flex;align-items:center;gap:.4em}.lc-wx i{font-style:normal;font-size:2.4em;line-height:1}.lc-wx b{font-size:2.3em;font-weight:inherit;line-height:1}' +
+    '.lc-wx span{display:flex;flex-direction:column;font-size:.75em;opacity:.85;min-width:0}.lc-wx span em{font-style:normal;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+    '.lc-days{display:flex;gap:1.2em;margin-top:.5em;font-size:.62em;opacity:.85;white-space:nowrap}' +
+    '.lc-rows{display:flex;flex-direction:column;gap:.35em;min-height:0}.lc-row{display:flex;gap:.7em;align-items:baseline;min-width:0}' +
+    '.lc-row b{flex:none;font-weight:inherit;opacity:.75;font-variant-numeric:tabular-nums}.lc-row span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+    '.lc-row small{flex:none;font-size:.78em;opacity:.7;max-width:40%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+    '.lc-row.lc-news span{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}' +
+    '.lc-ah{font-size:.8em;opacity:.7;margin-bottom:.4em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+    '.lc-wait{opacity:.55;font-size:.7em;text-align:center}';
 
   function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
   function num(v, d, lo, hi) { var n = parseFloat(v); if (!isFinite(n)) n = d; return Math.min(hi, Math.max(lo, n)); }
@@ -52,6 +65,129 @@
     return Math.max(0, Math.round((t - today) / 864e5));
   }
 
+  /* ---------- Sources de données (§85) : blocs et champs ---------- */
+  var SRC = {
+    'weather-slide': { name: 'Météo', icon: '⛅', color: '#E0A526', refresh: 10 * 60000 },
+    agenda: { name: 'Calendrier', icon: '📅', color: '#2E8B57', refresh: 60000 },
+    rss: { name: 'Flux RSS', icon: '📰', color: '#C0485A', refresh: 5 * 60000 },
+    'ha-sensors': { name: 'Capteurs', icon: '🌡', color: '#41BDF5', refresh: 30000 }
+  };
+  var WMO = [[[0], '☀️'], [[1, 2], '🌤️'], [[3], '☁️'], [[45, 48], '🌫️'], [[51, 53, 55, 56, 57], '🌦️'],
+    [[61, 63, 65, 66, 67, 80, 81, 82], '🌧️'], [[71, 73, 75, 77, 85, 86], '❄️'], [[95, 96, 99], '⛈️']];
+  function wmo(code) { for (var i = 0; i < WMO.length; i++) if (WMO[i][0].indexOf(code) !== -1) return WMO[i][1]; return '🌡️'; }
+  function rnd(v) { var n = Math.round(+v); return isFinite(n) ? '' + n : ''; }
+  function tzo(o, tz) { if (tz) o.timeZone = tz; return o; }
+  function hm(ms, tz) { try { return new Date(ms).toLocaleTimeString('fr-CH', tzo({ hour: '2-digit', minute: '2-digit' }, tz)); } catch (x) { var d = new Date(ms); return pad(d.getHours()) + ':' + pad(d.getMinutes()); } }
+  function dayKey(ms, tz) { try { return new Date(ms).toLocaleDateString('fr-CA', tzo({}, tz)); } catch (x) { return new Date(ms).toDateString(); } }
+  function dayName(ms, tz) {
+    var k = dayKey(ms, tz), now = Date.now();
+    if (k === dayKey(now, tz)) return 'aujourd\'hui';
+    if (k === dayKey(now + 864e5, tz)) return 'demain';
+    try { return new Date(ms).toLocaleDateString('fr-CH', tzo({ weekday: 'long', day: 'numeric', month: 'long' }, tz)); } catch (x) { return k; }
+  }
+  // Événements d'un calendrier encore à venir (ou en cours), du plus proche au plus lointain
+  function upcoming(d) {
+    var now = Date.now(), l = [];
+    for (var i = 0; i < ((d && d.events) || []).length; i++) { var e = d.events[i], end = Date.parse(e.end || e.start); if (!(end <= now)) l.push(e); }
+    return l.sort(function (a, b) { return Date.parse(a.start) - Date.parse(b.start); });
+  }
+  function evTime(e, tz, withDay) {
+    var s = Date.parse(e.start), t = e.allDay ? 'Journée' : hm(s, tz);
+    return withDay && dayKey(s, tz) !== dayKey(Date.now(), tz) ? dayName(s, tz).replace(/ \d.*$/, '').slice(0, 3) + '. ' + t : t;
+  }
+  function haVal(x) {
+    if (!x || x.state === 'absent' || x.state === 'unavailable' || x.state === 'unknown') return '—';
+    if (x.state === 'on' || x.state === 'off') return x.state === 'on' ? 'Activé' : 'Désactivé';
+    var n = parseFloat(x.state);
+    return (isFinite(n) && /^-?[\d.]+$/.test(x.state) ? (Math.round(n * 10) / 10 + '').replace('.', ',') : x.state) + (x.unit ? ' ' + x.unit : '');
+  }
+  /** Champs d'une source : [{ key, label, value(données, fuseau) }] ; les capteurs dépendent des données reçues (une entrée par entité). */
+  function fields(app, d) {
+    if (app === 'weather-slide') return [
+      { key: 'city', label: 'Ville', value: function (d) { return d.city; } },
+      { key: 'temp', label: 'Température', value: function (d) { return rnd(d.temp); } },
+      { key: 'tempu', label: 'Température avec unité', value: function (d) { return rnd(d.temp) + ' °' + (d.unit || 'C'); } },
+      { key: 'feel', label: 'Ressenti', value: function (d) { return rnd(d.feel); } },
+      { key: 'text', label: 'Conditions', value: function (d) { return d.text; } },
+      { key: 'icon', label: 'Pictogramme', value: function (d) { return wmo(d.code); } },
+      { key: 'min', label: 'Min. aujourd\'hui', value: function (d) { return rnd(d.min); } },
+      { key: 'max', label: 'Max. aujourd\'hui', value: function (d) { return rnd(d.max); } },
+      { key: 'wind', label: 'Vent', value: function (d) { return rnd(d.wind) + ' km/h'; } },
+      { key: 'humidity', label: 'Humidité', value: function (d) { return rnd(d.humidity) + ' %'; } }];
+    if (app === 'agenda') {
+      var nx = function (d) { return upcoming(d)[0]; };
+      return [
+        { key: 'next.title', label: 'Prochain événement · titre', value: function (d) { var e = nx(d); return e ? e.title : null; } },
+        { key: 'next.time', label: 'Prochain événement · heure', value: function (d, tz) { var e = nx(d); return e ? evTime(e, tz) : null; } },
+        { key: 'next.day', label: 'Prochain événement · jour', value: function (d, tz) { var e = nx(d); return e ? dayName(Date.parse(e.start), tz) : null; } },
+        { key: 'next.where', label: 'Prochain événement · lieu', value: function (d) { var e = nx(d); return e ? e.location : null; } },
+        { key: 'today', label: 'Événements à venir aujourd\'hui', value: function (d, tz) { var k = dayKey(Date.now(), tz); return '' + upcoming(d).filter(function (e) { return dayKey(Date.parse(e.start), tz) === k; }).length; } },
+        { key: 'title', label: 'Titre du calendrier', value: function (d) { return d.title; } }];
+    }
+    if (app === 'rss') return [
+      { key: 'title', label: 'Nom du flux', value: function (d) { return d.title; } },
+      { key: 'i1', label: 'Article 1 · titre', value: function (d) { return d.items && d.items[0] ? d.items[0].title : null; } },
+      { key: 'i2', label: 'Article 2 · titre', value: function (d) { return d.items && d.items[1] ? d.items[1].title : null; } },
+      { key: 'i3', label: 'Article 3 · titre', value: function (d) { return d.items && d.items[2] ? d.items[2].title : null; } }];
+    if (app === 'ha-sensors') return ((d && d.entities) || []).map(function (x) {
+      return { key: 'e:' + x.id, label: x.name || x.id, value: function (d) { for (var i = 0; i < (d.entities || []).length; i++) if (d.entities[i].id === x.id) return haVal(d.entities[i]); return null; } };
+    });
+    return [];
+  }
+  var TOKEN = /\{\{([0-9a-f]{32}):([A-Za-z0-9_.:-]{1,120})\}\}/g;
+  function srcOf(o, id) { return (o.sources && o.sources[id]) || null; }   // { app, name } : sources connues (éditeur) ; sur l'écran, déduites des données
+  /** Valeur (ou nom, mode « Noms des champs ») d'un champ relié. */
+  function fieldText(id, key, o, fb) {
+    var d = o.data && o.data[id], s = srcOf(o, id), app = s ? s.app : d ? ({ weather: 'weather-slide', agenda: 'agenda', rss: 'rss' })[d.kind] || (d.entities ? 'ha-sensors' : '') : '';
+    var f = fields(app, d), def = null;
+    for (var i = 0; i < f.length; i++) if (f[i].key === key) def = f[i];
+    if (o.names) return '{' + (def ? def.label : key.replace(/^e:/, '')) + '}';
+    var v = null;
+    if (d && !d.error && def) { try { v = def.value(d, o.tz); } catch (x) { v = null; } }
+    return v == null || v === '' ? (fb || '—') : String(v);
+  }
+  function textHtml(e, o) {
+    var t = String(e.text == null ? '' : e.text), out = '', last = 0, m;
+    TOKEN.lastIndex = 0;
+    while ((m = TOKEN.exec(t))) {
+      out += esc(t.slice(last, m.index)) + '<span class="lc-fd" data-f="' + m[1] + ':' + esc(m[2]) + '">' + esc(fieldText(m[1], m[2], o, e.fb)) + '</span>';
+      last = TOKEN.lastIndex;
+    }
+    return out + esc(t.slice(last));
+  }
+  function hasFields(e) { TOKEN.lastIndex = 0; return e.type === 'text' && TOKEN.test(String(e.text || '')); }
+
+  function block(e, o) {
+    var d = o.data && o.data[e.source], meta = SRC[e.app] || { name: 'Intégration', icon: '◇' }, tz = o.tz, h = '';
+    var cls = 'lc-app' + (e.bg === 'light' || e.bg === 'dark' ? ' bg-' + e.bg : ''), st = txs(e).replace(/text-align:[a-z]+;/, '');
+    if (!d || d.error) {
+      var msg = d && d.error ? 'Données indisponibles' : o.player ? '' : 'Chargement des données…';
+      return '<div class="' + cls + '" style="' + st + '"><div class="lc-wait">' + meta.icon + ' ' + esc(srcOf(o, e.source) ? srcOf(o, e.source).name : meta.name) + (msg ? '<br>' + msg : '') + '</div></div>';
+    }
+    var rows = Math.round(num(e.rows, 4, 1, 12));
+    if (e.app === 'weather-slide') {
+      h = '<div class="lc-wx"><i>' + wmo(d.code) + '</i><b>' + rnd(d.temp) + '°</b><span><em>' + esc(d.city) + '</em><em>' + esc(d.text) + '</em></span></div>';
+      if (e.view !== 'now' && d.days && d.days.length) {
+        h += '<div class="lc-days">' + d.days.slice(0, 3).map(function (x) {
+          var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(x.date || ''), n = m ? ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'][new Date(+m[1], +m[2] - 1, +m[3]).getDay()] : '';
+          return '<span>' + n + ' ' + wmo(x.code) + ' ' + rnd(x.max) + '° / ' + rnd(x.min) + '°</span>';
+        }).join('') + '</div>';
+      }
+    } else if (e.app === 'agenda') {
+      var ev = upcoming(d).slice(0, rows);
+      h = ev.length ? '<div class="lc-rows">' + ev.map(function (x) {
+        return '<div class="lc-row"><b>' + esc(evTime(x, tz, true)) + '</b><span>' + esc(x.title) + '</span>' + (x.location ? '<small>' + esc(x.location) + '</small>' : '') + '</div>';
+      }).join('') + '</div>' : '<div class="lc-wait">' + esc(e.empty || 'Aucun événement à venir') + '</div>';
+    } else if (e.app === 'rss') {
+      var it = (d.items || []).slice(0, rows);
+      h = (d.title && e.head !== false ? '<div class="lc-ah">' + esc(d.title) + '</div>' : '') +
+        '<div class="lc-rows">' + it.map(function (x) { return '<div class="lc-row lc-news"><b>•</b><span>' + esc(x.title) + '</span></div>'; }).join('') + '</div>';
+    } else if (e.app === 'ha-sensors') {
+      h = '<div class="lc-rows">' + (d.entities || []).slice(0, rows).map(function (x) { return '<div class="lc-row"><span>' + esc(x.name || x.id) + '</span><b>' + esc(haVal(x)) + '</b></div>'; }).join('') + '</div>';
+    }
+    return '<div class="' + cls + '" style="' + st + '">' + h + '</div>';
+  }
+
   // QR code : tracé du serveur ; en attendant (éditeur), un motif neutre
   function qrSvg(e) {
     var fg = col(e.fg, '#000000'), parts = (e.qr || '').split('|'), n = parseInt(parts[0], 10), path = parts[1] || '';
@@ -62,7 +198,8 @@
 
   function inner(e, o) {
     var t = e.type;
-    if (t === 'text') return '<div class="lc-tx" style="' + txs(e) + '">' + esc(e.text) + '</div>';
+    if (t === 'text') return '<div class="lc-tx" style="' + txs(e) + '">' + textHtml(e, o) + '</div>';
+    if (t === 'app') return block(e, o);
     if (t === 'shape') {
       var fill = col(e.fill, '#3B82C4');
       if (e.kind === 'arrow') return '<svg viewBox="0 0 100 60" preserveAspectRatio="none" width="100%" height="100%" style="display:block"><path d="M0 21H60V0L100 30L60 60V39H0Z" fill="' + fill + '"/></svg>';
@@ -92,6 +229,31 @@
   var C = w.LinkiiCompo = {
     FONTS: FONTS,
     textual: textual,
+    SRC: SRC,
+    fields: fields,
+    fieldText: fieldText,
+    TOKEN: TOKEN,
+    /** Sources utilisées par un document (blocs et champs), sans doublon. */
+    sources: function (doc) {
+      var ids = [], els = (doc && doc.els) || [];
+      function add(id) { if (id && ids.indexOf(id) === -1) ids.push(id); }
+      for (var i = 0; i < els.length; i++) {
+        var e = els[i], m;
+        if (e.type === 'app') add(e.source);
+        if (e.type === 'text') { TOKEN.lastIndex = 0; while ((m = TOKEN.exec(String(e.text || '')))) add(m[1]); }
+      }
+      return ids;
+    },
+    /** Redessine les calques reliés à des données (blocs, textes à champs) sans toucher aux autres (bandeaux, images). */
+    refresh: function (root, doc, o) {
+      var els = (doc && doc.els) || [];
+      for (var i = 0; i < els.length; i++) {
+        var e = els[i];
+        if (e.type !== 'app' && !hasFields(e)) continue;
+        var n = root.querySelector('.lc-el[data-id="' + String(e.id).replace(/["\\]/g, '') + '"]');
+        if (n) { var h = inner(e, o); if (n.innerHTML !== h) n.innerHTML = h; }
+      }
+    },
     /** Feuille de style et polices, posées une seule fois dans la page. */
     ensure: function () {
       if (document.getElementById('lc-css')) return;
@@ -203,8 +365,17 @@
     var st = document.createElement('div');
     st.className = 'lc-stage';
     st.style.width = doc.w + 'px'; st.style.height = doc.h + 'px'; st.style.background = C.bg(doc);
-    st.innerHTML = C.html(doc, { player: true, tz: tz });
+    var o = { player: true, tz: tz, data: {} };
+    st.innerHTML = C.html(doc, o);
     el.appendChild(st);
+    // Blocs et champs reliés : données de chaque source (gardées hors ligne par le player), redessinées à chaque lecture
+    var ids = C.sources(doc);
+    for (var si = 0; si < ids.length; si++) (function (id) {
+      if (!h.source) return;
+      var app = null;
+      for (var j = 0; j < doc.els.length; j++) if (doc.els[j].type === 'app' && doc.els[j].source === id) app = doc.els[j].app;
+      h.source(id, function (d) { if (!d) return; o.data[id] = d; C.refresh(st, doc, o); }, (SRC[app] || {}).refresh || 5 * 60000);
+    })(ids[si]);
     addQr(st, h.item.qr, doc);
     var srcs = [];
     h.onStop(function () { for (var i = 0; i < srcs.length; i++) srcs[i].revoke(); });

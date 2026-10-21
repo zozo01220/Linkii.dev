@@ -732,20 +732,23 @@
       },
       every: function (fn, ms) { var id = setInterval(fn, ms); ivs.push(id); return id; },
       fit: function () { el.classList.add('fit'); setTimeout(function () { fitList(el); }, 0); },
-      data: function (draw, refreshMs) {
-        var key = 'lk_d_' + item.dataId, data = null;
-        try { data = JSON.parse(LS.getItem(key) || 'null'); } catch (e) {}
-        var run = function (fresh) { try { draw(data, fresh === true); } catch (e) {} };   // fresh : données tout juste reçues du serveur (et non relues du cache)
-        var load = function () {
-          api(DATA_API + item.dataId)
-            .then(function (d) { data = d; try { LS.setItem(key, JSON.stringify(d)); } catch (e) {} run(true); })
-            .catch(function () { run(); });
-        };
-        run(); load();
-        ivs.push(setInterval(load, refreshMs || 60000));
-        ivs.push(setInterval(run, 15000));
-      }
+      data: function (draw, refreshMs) { feed(item.dataId, draw, refreshMs); },
+      // Source d'une composition (bloc météo, champs d'un calendrier… §85) : mêmes règles que data, adresse /api/data/{élément}/{source}
+      source: function (src, draw, refreshMs) { feed(item.id + '/' + src, draw, refreshMs); }
     };
+    function feed(path, draw, refreshMs) {
+      var key = 'lk_d_' + path.replace('/', '_'), data = null;
+      try { data = JSON.parse(LS.getItem(key) || 'null'); } catch (e) {}
+      var run = function (fresh) { try { draw(data, fresh === true); } catch (e) {} };   // fresh : données tout juste reçues du serveur (et non relues du cache)
+      var load = function () {
+        api(DATA_API + path)
+          .then(function (d) { data = d; try { LS.setItem(key, JSON.stringify(d)); } catch (e) {} run(true); })
+          .catch(function () { run(); });
+      };
+      run(); load();
+      ivs.push(setInterval(load, refreshMs || 60000));
+      ivs.push(setInterval(run, 15000));
+    }
     try { render(host); } catch (e) { el.textContent = ''; }
     return { el: el, stop: stop };
   }

@@ -76,6 +76,39 @@ public class CompositionsTests(Platform p)
     }
 
     [Fact]
+    public void Blocs_et_champs_relies_figent_leurs_sources_a_la_publication()
+    {
+        var meteo = new MediaItem { Id = Guid.NewGuid(), Type = "app", AppId = "weather-slide", Settings = { ["city"] = "Lausanne" }, Secrets = { ["cle"] = "chiffre" } };
+        var autre = new MediaItem { Id = Guid.NewGuid(), Type = "app", AppId = "webpage" };   // pas une source de données
+        var absente = Guid.NewGuid();
+        var doc = Doc(new { id = "e1", type = "app", app = "weather-slide", source = meteo.Id.ToString("N") },
+                      new { id = "e2", type = "app", app = "webpage", source = autre.Id.ToString("N") },
+                      new { id = "e3", type = "app", app = "agenda", source = absente.ToString("N") },
+                      new { id = "e4", type = "text", text = $"Il fait {{{{{meteo.Id:N}:temp}}}}° · {{{{{absente:N}:next.title}}}}" });
+
+        Assert.Equal(new[] { meteo.Id, autre.Id, absente }, Compositions.Sources(doc));
+        var cleaned = JsonNode.Parse(Compositions.Clean(doc)!.Value.Doc)!["els"]!.AsArray();
+        Assert.Equal(new[] { "e1", "e3", "e4" }, cleaned.Select(e => (string)e!["id"]!));   // bloc d'une intégration sans données : refusé
+
+        var r = Compositions.Publish(new Dictionary<string, string> { ["doc"] = doc }, _ => null, id => id == meteo.Id ? meteo : id == autre.Id ? autre : null)!.Value;
+        var els = JsonNode.Parse(r.Settings["doc"])!["els"]!.AsArray();
+        Assert.Equal(new[] { "e1", "e4" }, els.Select(e => (string)e!["id"]!));   // source introuvable : son bloc n'est pas diffusé, ses champs restent (valeur de secours)
+        Assert.Contains("src:" + meteo.Id.ToString("N"), r.Settings.Keys);
+        Assert.DoesNotContain("src:" + absente.ToString("N"), r.Settings.Keys);
+        Assert.DoesNotContain("chiffre", string.Join("", r.Settings.Values));   // secrets : jamais dans les paramètres envoyés à l'écran
+        Assert.Equal("chiffre", r.Secrets["src:" + meteo.Id.ToString("N") + ":cle"]);
+
+        var pub = new PublishedItem { Id = Guid.NewGuid(), AppId = Compositions.AppId, Settings = r.Settings, Secrets = r.Secrets };
+        var s = Compositions.SourceItem(pub, meteo.Id);
+        Assert.NotNull(s);
+        Assert.Equal("weather-slide", s!.AppId);
+        Assert.Equal("Lausanne", s.Settings["city"]);
+        Assert.Equal("chiffre", s.Secrets["cle"]);
+        Assert.Null(Compositions.SourceItem(pub, absente));   // une source non utilisée par la composition publiée ne se lit pas
+        Assert.Null(Compositions.SourceItem(new PublishedItem { AppId = "rss", Settings = r.Settings }, meteo.Id));
+    }
+
+    [Fact]
     public void Le_menu_Compositions_depend_de_l_integration_et_du_niveau_de_droits()
     {
         var catalog = p.Services.GetRequiredService<AppCatalog>();

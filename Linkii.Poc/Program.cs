@@ -710,6 +710,22 @@ api.MapGet("/data/{id:guid}", async (HttpRequest req, Guid id, JsonStore store, 
     return await AppData(published, tenant, catalog, providers, box);
 });
 
+// Source d'une composition publiée (bloc météo, champs d'un calendrier…, §85) : mêmes règles, réglages figés dans la composition à la publication.
+api.MapGet("/data/{id:guid}/{src:guid}", async (HttpRequest req, Guid id, Guid src, JsonStore store, AppCatalog catalog, AppProviders providers, SecretBox box) =>
+{
+    var (denied, tenant, published) = store.Read<(IResult?, Tenant, PublishedItem?)>(db =>
+    {
+        var s = Auth(req, db);
+        var gate = Gate(s, db);
+        if (gate != null) return (gate, null!, null);
+        var pub = PlayerFeed.AllItems(db, s!).FirstOrDefault(x => x.Id == id && x.AppId == Compositions.AppId);
+        return ((IResult?)null, db.Clients.First(c => c.Id == s!.ClientId), pub);
+    });
+    if (denied != null) return denied;
+    if (published == null || Compositions.SourceItem(published, src) is not { } source) return Results.NotFound();
+    return await AppData(source, tenant, catalog, providers, box);
+});
+
 static async Task<IResult> AppData(PublishedItem published, Tenant tenant, AppCatalog catalog, AppProviders providers, SecretBox box)
 {
     var app = catalog.Find(published.AppId);
@@ -792,6 +808,15 @@ api.MapGet("/preview/data/{id:guid}", async (HttpRequest req, Guid id, JsonStore
         PreviewFeed(db, g, notifier)?.Items.FirstOrDefault(x => x.Id == id && x.AppId != null)));
     if (tenant == null || published == null) return Results.NotFound();
     return await AppData(published, tenant, catalog, providers, box);
+});
+
+api.MapGet("/preview/data/{id:guid}/{src:guid}", async (HttpRequest req, Guid id, Guid src, JsonStore store, PreviewGrants grants, Notifier notifier, AppCatalog catalog, AppProviders providers, SecretBox box) =>
+{
+    if (grants.Find(req.Headers["X-Preview"]) is not { } g) return Results.Unauthorized();
+    var (tenant, published) = store.Read(db => (db.Clients.FirstOrDefault(c => c.Id == g.ClientId),
+        PreviewFeed(db, g, notifier)?.Items.FirstOrDefault(x => x.Id == id && x.AppId == Compositions.AppId)));
+    if (tenant == null || published == null || Compositions.SourceItem(published, src) is not { } source) return Results.NotFound();
+    return await AppData(source, tenant, catalog, providers, box);
 });
 
 // Dernier aperçu du direct d'un écran, pour les personnes qui ont accès à l'écran (jamais mis en cache).

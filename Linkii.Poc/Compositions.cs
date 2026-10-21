@@ -8,11 +8,19 @@ namespace Linkii.Poc;
 /// Compositions (éditeur de compositions, voir DEV-POC.md §80) : une page faite de calques (textes, formes, images, QR codes, horloge…),
 /// enregistrée dans le paramètre « doc » d'un contenu de l'app « composition ». Document : { v, w, h, bg, els: [ … ] }, positions en pixels
 /// de la page (w × h). Le rendu est commun à l'éditeur et au player : wwwroot/player/composition.js.
+/// Étape 3 (§85) : un calque « app » pose un bloc d'une intégration de Mes intégrations (source : identifiant du contenu), et un texte peut contenir
+/// des champs « {{source:clé}} » (température, prochain événement…) remplis sur l'écran avec les données de cette source.
 /// </summary>
 public static class Compositions
 {
     public const string AppId = "composition";
     public const int MaxDocLength = 400_000, MaxElements = 400, MinSide = 320, MaxSide = 7680;
+
+    /// <summary>Intégrations utilisables comme source d'un bloc ou de champs : celles qui fournissent des données à l'écran.</summary>
+    public static readonly IReadOnlySet<string> SourceApps = new HashSet<string> { "weather-slide", "agenda", "rss", "ha-sensors" };
+
+    /// <summary>Champ relié dans un texte : {{identifiant du contenu source (32 chiffres hexadécimaux)}:{clé du champ}}.</summary>
+    public static readonly Regex FieldToken = new(@"{{([0-9a-f]{32}):([A-Za-z0-9_.:-]{1,120})}}", RegexOptions.Compiled);
 
     /// <summary>Document vérifié (format, taille, nombre d'éléments) et les images de la médiathèque qu'il utilise, dans l'ordre. Null si illisible.</summary>
     public static (string Doc, List<Guid> Images)? Clean(string? json)
@@ -28,7 +36,8 @@ public static class Compositions
         var clean = new JsonArray();
         foreach (var n in els)
         {
-            if (n is not JsonObject e || Str(e, "type") is not ("text" or "shape" or "image" or "qr" or "widget")) continue;
+            if (n is not JsonObject e || Str(e, "type") is not ("text" or "shape" or "image" or "qr" or "widget" or "app")) continue;
+            if (Str(e, "type") == "app" && (!Guid.TryParse(Str(e, "source"), out _) || !SourceApps.Contains(Str(e, "app") ?? ""))) continue;   // bloc sans source valable
             var copy = (JsonObject)e.DeepClone();
             copy.Remove("src");   // adresse de fichier : posée seulement à la publication
             if (Str(copy, "type") == "image" && Guid.TryParse(Str(copy, "media"), out var id) && !images.Contains(id)) images.Add(id);
@@ -43,12 +52,16 @@ public static class Compositions
     /// les QR codes leur tracé calculé ici, les calques masqués disparaissent. Urls : fichiers que l'écran précharge (lecture hors ligne).
     /// Null si le document est illisible (contenu jamais publié).
     /// </summary>
-    public static (Dictionary<string, string> Settings, List<string> Urls)? Publish(IReadOnlyDictionary<string, string> settings, Func<Guid, MediaItem?> file)
+    public static (Dictionary<string, string> Settings, List<string> Urls, Dictionary<string, string> Secrets)? Publish(IReadOnlyDictionary<string, string> settings, Func<Guid, MediaItem?> file, Func<Guid, MediaItem?>? source = null)
     {
         if (Clean(settings.GetValueOrDefault("doc")) is not { } c) return null;
         var doc = JsonNode.Parse(c.Doc)!.AsObject();
         var els = doc["els"]!.AsArray();
         var urls = new List<string>();
+        // Sources (blocs et champs) : réglages figés à la publication, comme un contenu d'intégration ; l'écran lit leurs données par /api/data/{élément}/{source}.
+        // Une source introuvable (supprimée, d'un autre client) retire ses blocs ; ses champs affichent leur valeur de secours.
+        var sources = new Dictionary<Guid, MediaItem?>();
+        foreach (var id in Sources(els)) sources[id] = source?.Invoke(id) is { AppId: { } a } m && SourceApps.Contains(a) ? m : null;
         foreach (var e in els.OfType<JsonObject>().ToList())
         {
             if (e["hidden"] is JsonValue hv && hv.TryGetValue<bool>(out var hidden) && hidden) { els.Remove(e); continue; }
@@ -66,10 +79,61 @@ public static class Compositions
                     if (QrCodes.Encode(Str(e, "url")) is { } q) e["qr"] = q;
                     else els.Remove(e);
                     break;
+                case "app":
+                    if (!Guid.TryParse(Str(e, "source"), out var sid) || sources.GetValueOrDefault(sid) is not { } src || src.AppId != Str(e, "app")) els.Remove(e);
+                    break;
             }
         }
         var s = new Dictionary<string, string>(settings) { ["doc"] = doc.ToJsonString() };
-        return (s, urls);
+        var secrets = new Dictionary<string, string>();
+        foreach (var (id, m) in sources)
+        {
+            if (m == null) continue;
+            s["src:" + id.ToString("N")] = JsonSerializer.Serialize(new SourceSnapshot(m.AppId!, new Dictionary<string, string>(m.Settings)));
+            foreach (var (k, v) in m.Secrets) secrets["src:" + id.ToString("N") + ":" + k] = v;   // déjà chiffrés ; jamais envoyés à l'écran
+        }
+        return (s, urls, secrets);
+    }
+
+    private record SourceSnapshot(string App, Dictionary<string, string> Settings);
+
+    /// <summary>Sources utilisées par un document : blocs (« source ») et champs des textes, dans l'ordre d'apparition.</summary>
+    public static List<Guid> Sources(string? json)
+    {
+        try { return JsonNode.Parse(json ?? "") is JsonObject d && d["els"] is JsonArray a ? Sources(a) : new(); }
+        catch (JsonException) { return new(); }
+    }
+
+    private static List<Guid> Sources(JsonArray els)
+    {
+        var ids = new List<Guid>();
+        foreach (var e in els.OfType<JsonObject>())
+        {
+            if (Str(e, "type") == "app" && Guid.TryParse(Str(e, "source"), out var id) && !ids.Contains(id)) ids.Add(id);
+            if (Str(e, "type") == "text" && Str(e, "text") is { } t)
+                foreach (Match f in FieldToken.Matches(t))
+                    if (Guid.TryParse(f.Groups[1].Value, out var fid) && !ids.Contains(fid)) ids.Add(fid);
+        }
+        return ids;
+    }
+
+    /// <summary>
+    /// Élément publié d'une source d'une composition publiée (réglages et secrets figés à la publication), pour lire ses données comme un contenu
+    /// d'intégration ordinaire. Null si la composition n'utilisait pas cette source.
+    /// </summary>
+    public static PublishedItem? SourceItem(PublishedItem composition, Guid source)
+    {
+        var key = "src:" + source.ToString("N");
+        if (composition.AppId != AppId || composition.Settings.GetValueOrDefault(key) is not { } raw) return null;
+        SourceSnapshot? snap;
+        try { snap = JsonSerializer.Deserialize<SourceSnapshot>(raw); }
+        catch (JsonException) { return null; }
+        if (snap == null || !SourceApps.Contains(snap.App)) return null;
+        return new PublishedItem
+        {
+            Id = composition.Id, Type = "app", AppId = snap.App, Settings = snap.Settings,
+            Secrets = composition.Secrets.Where(x => x.Key.StartsWith(key + ":")).ToDictionary(x => x.Key[(key.Length + 1)..], x => x.Value)
+        };
     }
 
     /// <summary>Taille de la page d'une composition (celle de son document) ; null si le document est illisible.</summary>
