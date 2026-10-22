@@ -1891,3 +1891,15 @@ Maquette validée : `maquettes/widgets-carte-proposition-v2.html`. Page `Widgets
 - **Cause** : `.cv` était une grille sans largeur bornée. Le nom du design (sans retour à la ligne) imposait sa largeur à la ligne ; la carte de 520 px était dépassée (749 px mesurés).
 - **Correction** : `.cv` a une colonne `minmax(0, 1fr)`. La ligne tient dans la carte (486 px pour 520 px), le nom se tronque avec « … », et le choix « Pages en images / Vidéo » passe dessous (comportement du §93).
 - **Vérifié** : sur une reproduction HTML (markup de `CanvaField`, `app.css` réel) : avant 749 px, après 486 px. Non revérifié dans l'éditeur réel (le Canva n'y est pas connecté sur l'instance de test).
+
+## 98. Programmation d'un contenu : période de diffusion (22 octobre 2026) : codé, testé (unitaires) et vérifié dans le navigateur (onglet, pastille, ligne en attente)
+
+Maquette validée : `maquettes/contenu-programmation-onglet.html`. Mécanisme de la première proposition : « Toujours » par défaut, ou « Période » avec début et fin (date et heure, chacun facultatif).
+- **Modèle** : `PlaylistItem.StartsAt` / `EndsAt` (texte `aaaa-mm-ddTHH:mm`, heure de l'organisation ; null = sans limite). `ContentWindow` (ContentWindow.cs) : `Plays`, `NowIso`, `Chip`, `Valid`, formats.
+- **Publication** : `Notifier.Windowed` copie la période dans `PublishedItem` (`startsAt` / `endsAt` dans le JSON du player). Duplication (`PlaylistOps.Copy`, `PlaylistEditor.Duplicate`) : la période suit la copie.
+- **Player** (`player.js`, `isValidNow`) : même contrôle que la validité par date existante, à l'heure locale de l'écran (`nowIso`, fuseau de l'organisation). Hors période : pas dans la boucle ni la frise, comme les contenus désactivés.
+- **Fenêtre du contenu** : onglet « Programmation » entre « Contenu » et « QR code » pour les apps ; pour une image ou une vidéo, deux onglets « Contenu / Programmation ». Le point bleu signale une période définie. Enregistrement validé avant tout (`SaveAll` : fin après début, dates valides) ; sans heure, début 00:00 et fin 23:59.
+- **Liste** : pastille sous le nom (`pf-win`, « Jusqu'au… » en cours, « Démarre le… » avant, « Terminé le… » après) qui ouvre l'onglet ; ligne en attente (« hors période de diffusion ») ; menu ⋮ : « Programmer… » mis en évidence.
+- **Vérifié** : 5 tests unitaires (`ContentWindowTests`) ; dans le navigateur (instance de test) : résumé de la période, enregistrement, pastille « Démarre le 1 déc. à 8:00 », ligne en attente.
+- **Ajouts hors maquette** : pastille « Depuis le… » quand seul le début est passé (le cas n'était pas dessiné).
+- **Non vérifié** : la diffusion réelle sur un écran (le player n'a pas tourné sur appareil) ; un contenu hors période est écarté au prochain passage de la boucle ; la liste entièrement hors période (écran de repos) ; le rendu visuel (capture indisponible).

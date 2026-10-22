@@ -804,7 +804,15 @@
     var t = todayIso();
     if (i.validFrom && t < i.validFrom) return false;
     if (i.validTo && t > i.validTo) return false;
+    // période de diffusion (onglet Programmation) : aaaa-mm-ddTHH:mm dans le fuseau de l'organisation
+    var now = nowIso();
+    if (i.startsAt && now < i.startsAt) return false;
+    if (i.endsAt && now > i.endsAt) return false;
     return true;
+  }
+  function nowIso() {
+    try { return new Date().toLocaleString('sv-SE', tzOpts()).replace(' ', 'T').slice(0, 16); }
+    catch (e) { var d = new Date(); return todayIso() + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
   }
   function overlaySig(items) {
     return items.filter(function (it) { return !isSlide(it) && it.type === 'app' && isValidNow(it); }).map(function (it) { return it.id || it.placement; }).join('|');

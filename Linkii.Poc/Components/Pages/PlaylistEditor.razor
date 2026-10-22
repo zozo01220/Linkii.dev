@@ -129,7 +129,7 @@
                                     <div>
                                         @Info(row)
                                         @if (durFor == row.It) { <div class="pf-dur">@Dur(row)</div> }
-                                        <span class="start">@(row.Plays ? $"démarre à {Helpers.FormatDuration(row.Start)}" : row.It.Off ? "ignoré dans la boucle" : row.Incomplete ? "à configurer" : row.It.Placement != "full" ? "affiché en continu" : "")</span>
+                                        <span class="start">@(row.Plays ? $"démarre à {Helpers.FormatDuration(row.Start)}" : row.Hold ? "hors période de diffusion" : row.It.Off ? "ignoré dans la boucle" : row.Incomplete ? "à configurer" : row.It.Placement != "full" ? "affiché en continu" : "")</span>
                                     </div>
                                     @Kebab(row)
                                 </div>
@@ -169,12 +169,37 @@ else
     var qrScans = mItem != null && scanCounts.TryGetValue(mItem.Id, out var qc) ? qc.Scans : 0;
     RenderFragment qrTabs = @<div class="se-utabs" role="tablist" aria-label="Réglage du contenu">
         <button type="button" role="tab" aria-selected="@(mTab == "content" ? "true" : "false")" class="@(mTab == "content" ? "on" : "")" @onclick='() => mTab = "content"'><Ico Name="monitor" Size="18" /> Contenu</button>
+        @if (mItem != null)
+        {
+            <button type="button" role="tab" aria-selected="@(mTab == "prog" ? "true" : "false")" class="@(mTab == "prog" ? "on" : "")" @onclick='() => mTab = "prog"'>
+                <Ico Name="calendar" Size="18" /> Programmation
+                @if (mSchedOn) { <span class="tab-dot" title="Une période est définie"></span> }
+            </button>
+        }
         <button type="button" role="tab" aria-selected="@(mTab == "qr" ? "true" : "false")" class="@(mTab == "qr" && !qrAngle ? "on" : "")" disabled="@qrAngle"
                 title="@(qrAngle ? "Le QR code n'est disponible que pour un contenu en pleine page." : "")" @onclick='() => mTab = "qr"'>
             <Ico Name="qr" Size="18" /> QR code
             @if (!growth) { <span class="tab-lock"><Ico Name="lock" Size="12" /> Growth</span> }
             else if (mQrOn && qrScans > 0) { <small class="on-badge">@qrScans</small> }
         </button>
+    </div>;
+    // Onglet « Programmation » : période de diffusion du contenu (début et fin facultatifs), colonne de droite comme « QR code »
+    RenderFragment progPane = @<div class="ci-prog">
+        <h4 class="ci-t">Période de diffusion</h4>
+        <div class="ci-seg" role="radiogroup" aria-label="Période de diffusion">
+            <button type="button" role="radio" aria-checked="@(mSchedOn ? "false" : "true")" class="@(mSchedOn ? "" : "on")" @onclick="() => mSchedOn = false">Toujours</button>
+            <button type="button" role="radio" aria-checked="@(mSchedOn ? "true" : "false")" class="@(mSchedOn ? "on" : "")" @onclick="() => mSchedOn = true">Période</button>
+        </div>
+        @if (mSchedOn)
+        {
+            <div class="ci-sched">
+                <div class="ci-sched-row"><b>Début</b><input type="date" aria-label="Date de début" value="@mFromDate" @onchange='e => mFromDate = e.Value?.ToString() ?? ""' /><input type="time" aria-label="Heure de début" value="@mFromTime" @onchange='e => mFromTime = e.Value?.ToString() ?? ""' /></div>
+                <div class="ci-sched-row"><b>Fin</b><input type="date" aria-label="Date de fin" value="@mToDate" @onchange='e => mToDate = e.Value?.ToString() ?? ""' /><input type="time" aria-label="Heure de fin" value="@mToTime" @onchange='e => mToTime = e.Value?.ToString() ?? ""' /></div>
+                <p class="hint">Laissez un champ vide pour ne pas limiter de ce côté. Heure de l'écran.</p>
+                <div class="ci-sched-sum">@ScheduleSummary()</div>
+            </div>
+        }
+        else { <p class="hint">Le contenu passe en boucle sans limite de date.</p> }
     </div>;
     RenderFragment qrPreview = @<div>
         <h4 class="ci-t">Aperçu de l'écran</h4>
@@ -195,6 +220,10 @@ else
             </div>
         }
     </div>;
+    // l'onglet ouvert remplace la colonne de configuration : « QR code » ou « Programmation » (sans aperçu du contenu pour ce dernier)
+    bool otherOpen = (mTab == "qr" && !qrAngle) || (mTab == "prog" && mItem != null);
+    RenderFragment otherPane = mTab == "prog" ? progPane : qrPane;
+    RenderFragment? otherPreview = mTab == "prog" ? null : qrPreview;
 }
 
 @if (newApp != null && Current is { } target)
@@ -213,7 +242,7 @@ else
         </div>
         <div class="modal-body">
             <AppInstanceForm @key="a.Id" AppId="@a.Id" ShowActions="false" OnSaved="item => AddApp(target, item)" OnRenamed="n => newName = n" @ref="newForm"
-                             ConfTabs="qrTabs" OtherTab="@(mTab == "qr" && !qrAngle)" OtherPane="qrPane" OtherPreview="qrPreview" PreviewQr="PreviewQr" PreviewPortrait="portraitScreens" PreviewPlace="mPlacement" />
+                             ConfTabs="qrTabs" OtherTab="@otherOpen" OtherPane="@otherPane" OtherPreview="@otherPreview" PreviewQr="PreviewQr" PreviewPortrait="portraitScreens" PreviewPlace="mPlacement" />
 </div>
         <div class="modal-foot">
             <button class="btn ghost" @onclick="() => newApp = null">Annuler</button>
@@ -325,8 +354,20 @@ else
         @if (isApp)
         {
             <div class="modal-body">
-                <AppInstanceForm @key="mMedia!.Id" AppId="@(mMedia!.AppId!)" InstanceId="mMedia!.Id" ShowActions="false" OnSaved="_ => SaveSettings()" OnRenamed="n => itemName = n" Extra="appExtra" ConfTabs="qrTabs" OtherTab="@(mTab == "qr" && !qrAngle)" OtherPane="qrPane" OtherPreview="qrPreview" PreviewQr="PreviewQr" PreviewPortrait="portraitScreens" PreviewPlace="mPlacement" OnOpenEditor="OpenCompositionEditor" @ref="itemForm" />
+                <AppInstanceForm @key="mMedia!.Id" AppId="@(mMedia!.AppId!)" InstanceId="mMedia!.Id" ShowActions="false" OnSaved="_ => SaveSettings()" OnRenamed="n => itemName = n" Extra="appExtra" ConfTabs="qrTabs" OtherTab="@otherOpen" OtherPane="@otherPane" OtherPreview="@otherPreview" PreviewQr="PreviewQr" PreviewPortrait="portraitScreens" PreviewPlace="mPlacement" OnOpenEditor="OpenCompositionEditor" @ref="itemForm" />
             </div>
+        }
+        else if (mItem != null)
+        {
+            @* contenu d'une image ou d'une vidéo : deux onglets, comme ceux d'une app (Contenu / Programmation) *@
+            <div class="se-utabs" role="tablist" aria-label="Réglage du contenu">
+                <button type="button" role="tab" aria-selected="@(mTab == "prog" ? "false" : "true")" class="@(mTab == "prog" ? "" : "on")" @onclick='() => mTab = "content"'><Ico Name="monitor" Size="18" /> Contenu</button>
+                <button type="button" role="tab" aria-selected="@(mTab == "prog" ? "true" : "false")" class="@(mTab == "prog" ? "on" : "")" @onclick='() => mTab = "prog"'>
+                    <Ico Name="calendar" Size="18" /> Programmation
+                    @if (mSchedOn) { <span class="tab-dot" title="Une période est définie"></span> }
+                </button>
+            </div>
+            @if (mTab == "prog") { @progPane } else { @listSettings }
         }
         else { @listSettings }
         <div class="@(isApp ? "modal-foot" : "modal-actions")">
@@ -439,23 +480,26 @@ else
     }
 
     /// <summary>Une ligne du fil : place dans la boucle (numéro, départ), durée et couleur de l'app.</summary>
-    private sealed record FlowRow(int Index, PlaylistItem It, MediaItem? M, bool Masked, bool Incomplete, bool Plays, int Seconds, int Start, string Num, string When, string Color, string? AppId);
+    private sealed record FlowRow(int Index, PlaylistItem It, MediaItem? M, bool Masked, bool Incomplete, bool Plays, int Seconds, int Start, string Num, string When, string Color, string? AppId, (string Css, string Text)? Chip, bool Hold);
 
     private List<FlowRow> Rows(Playlist pl)
     {
         var rows = new List<FlowRow>();
         int t = 0, n = 0;
+        var now = ContentWindow.NowIso(zone);   // heure de l'organisation : une période en cours ou passée se lit à cet instant
         for (var i = 0; i < pl.Draft.Count; i++)
         {
             var it = pl.Draft[i];
             var m = media.FirstOrDefault(x => x.Id == it.MediaId);
             var incomplete = Svc.IsIncomplete(m);
-            var plays = !it.Off && it.Placement == "full" && m != null && !incomplete;   // ajouté à vide : pas encore diffusé
+            var inWindow = ContentWindow.Plays(it.StartsAt, it.EndsAt, now);   // hors période : pas dans la boucle ce tour-ci
+            var plays = !it.Off && it.Placement == "full" && m != null && !incomplete && inWindow;   // ajouté à vide : pas encore diffusé
             var secs = plays ? Helpers.ItemSeconds(it, m, Svc.Find(m?.AppId), media) : 0;
             // sous le numéro : l'heure de départ dans la boucle ; un contenu qui n'y passe pas n'a pas d'heure (la raison est dans sa ligne)
             var when = it.Off ? "ignoré" : plays ? Helpers.FormatDuration(t) : "";
             var look = LookId(m);
-            rows.Add(new(i, it, m, MediaLibrary.UsesHidden(m, hidden), incomplete, plays, secs, t, plays ? (++n).ToString() : "–", when, AppIcon.LookOf(look).Color, look));
+            rows.Add(new(i, it, m, MediaLibrary.UsesHidden(m, hidden), incomplete, plays, secs, t, plays ? (++n).ToString() : "–", when, AppIcon.LookOf(look).Color, look,
+                it.Off ? null : ContentWindow.Chip(it.StartsAt, it.EndsAt, now), !it.Off && !inWindow));
             t += secs;
         }
         return rows;
@@ -463,7 +507,7 @@ else
 
     private static string? LookId(MediaItem? m) => m == null ? null : m.AppId ?? (m.Type == "video" ? "video" : "image");
 
-    private string RowClass(FlowRow r) => (r.It.Id == freshId ? "fresh " : "") + (r.It.Off ? "off " : "") + (r.Masked ? "masked" : "");
+    private string RowClass(FlowRow r) => (r.It.Id == freshId ? "fresh " : "") + (r.It.Off ? "off " : "") + (r.Hold ? "hold " : "") + (r.Masked ? "masked" : "");
 
     private bool Draggable(FlowRow r) => !readOnlyHere && durFor != r.It && renameFor != r.It;
 
@@ -502,6 +546,10 @@ else
             else
             {
                 <b class="nm" title="@r.M?.Name">@(r.M?.Name ?? "(supprimé)")</b>
+            }
+            @if (r.Chip is { } chip && !r.Masked && r.M != null)
+            {
+                <button type="button" class="pf-win @chip.Css" title="Ouvrir la programmation du contenu" @onclick="() => OpenProgramming(r)">@chip.Text</button>
             }
             @if (!r.Masked && r.M != null && Current is { } pl)
             {
@@ -555,6 +603,7 @@ else
                         @if (r.M?.AppId != null) { <button type="button" role="menuitem" @onclick="() => StartItemRename(r.It, r.M)"><Ico Name="edit" Size="16" /> Renommer</button> }
                         @if (r.M != null && r.It.Placement == "full") { <button type="button" role="menuitem" @onclick="() => StartDur(r.It)"><Ico Name="clock" Size="16" /> Changer la durée</button> }
                         <button type="button" role="menuitem" @onclick="() => Duplicate(pl, r.It)"><Ico Name="copy" Size="16" /> Dupliquer</button>
+                        @if (r.M != null) { <button type="button" role="menuitem" class="hl" @onclick='() => { menuFor = null; OpenSettings(pl, r.It, r.M, "prog"); }'><Ico Name="calendar" Size="16" /> Programmer…</button> }
                         <button type="button" role="menuitem" @onclick="() => ToggleOff(pl, r.It)"><Ico Name="@(r.It.Off ? "eye" : "eye-off")" Size="16" /> @(r.It.Off ? "Réactiver" : "Désactiver (sans retirer)")</button>
                         @if (growth && r.M?.AppId != null && r.It.Placement == "full") { <button type="button" role="menuitem" @onclick='() => { menuFor = null; OpenSettings(pl, r.It, r.M, "qr"); }'><Ico Name="qr" Size="16" /> QR code et scans</button> }
                         <hr />
@@ -571,7 +620,7 @@ else
         menuFor = null;
         var copy = new PlaylistItem
         {
-            MediaId = it.MediaId, DurationSec = it.DurationSec, DurationMode = it.DurationMode, Placement = it.Placement, Off = it.Off,
+            MediaId = it.MediaId, DurationSec = it.DurationSec, DurationMode = it.DurationMode, Placement = it.Placement, Off = it.Off, StartsAt = it.StartsAt, EndsAt = it.EndsAt,
             QrOn = it.QrOn, QrCode = it.QrOn ? QrTracking.NewCode() : null, QrUrl = it.QrUrl, QrLabel = it.QrLabel, QrBase = it.QrBase, QrX = it.QrX, QrY = it.QrY, QrSize = it.QrSize
         };
         WriteList(d =>
@@ -733,6 +782,7 @@ else
         playlists = Store.Read(d => d.Playlists.Where(p => PlaylistOps.RightOf(d, p) != FolderRight.None).ToList());   // une liste d'un dossier invisible est « introuvable »
         readOnlyHere = Store.Read(d => d.Playlists.FirstOrDefault(p => p.Id == Id) is { } cur && !PlaylistOps.CanEdit(d, cur));
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());   // hors vidéos en conversion / en échec
+        zone = Store.Read(d => d.Tenant.Timezone);
         hidden = MediaLib.HiddenFileIds();   // fichiers des dossiers non accordés : leurs contenus sont masqués
         enabledApps = Svc.Installed().Select(i => Svc.Find(i.AppId)).OfType<AppManifest>().Where(a => !a.ScreenWidget).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
         growth = Store.Read(d => d.Tenant.IsGrowth);
@@ -768,8 +818,13 @@ else
     }
 
     // App : ses réglages sont enregistrés d'abord (validation comprise), puis la position et la durée dans la liste de lecture.
+    private string? ScheduleFrom => mSchedOn ? WindowOf(mFromDate, mFromTime, "00:00") : null;
+    private string? ScheduleTo => mSchedOn ? WindowOf(mToDate, mToTime, "23:59") : null;
+
     private async Task SaveAll()
     {
+        // Période de diffusion : dates bien formées et fin après le début (vérifié avant d'enregistrer quoi que ce soit)
+        if (mItem != null && !ContentWindow.Valid(ScheduleFrom, ScheduleTo, out var windowError)) { mTab = "prog"; Toast.Error(windowError!); return; }
         // QR code activé : une destination valide est nécessaire (vérifié avant d'enregistrer quoi que ce soit)
         if (growth && mMedia?.AppId != null && mPlacement == "full" && mQrOn && QrTracking.Destination(mQrUrl) == null)
         {
@@ -801,6 +856,10 @@ else
 
     // QR code de comptage des scans (onglet « QR code », licence Growth) : réglages en cours d'édition, enregistrés avec la fenêtre
     private string mTab = "content";
+    // Onglet « Programmation » : période de diffusion (aaaa-mm-jj et hh:mm, sans limite si vide)
+    private bool mSchedOn;
+    private string mFromDate = "", mFromTime = "", mToDate = "", mToTime = "";
+    private string zone = "Europe/Zurich";   // fuseau de l'organisation : la période se compare à son heure
     private bool mQrOn;
     private string mQrUrl = "", mQrLabel = "";
     private string? mQrCode;
@@ -840,7 +899,10 @@ else
         mPlacement = it.Placement;
         mMode = it.DurationMode == "fixed" ? "fixed" : "content";
         mSeconds = it.DurationSec;
-        mTab = growth && tab == "qr" && it.Placement == "full" ? "qr" : "content";
+        mTab = tab == "prog" ? "prog" : growth && tab == "qr" && it.Placement == "full" ? "qr" : "content";
+        mSchedOn = it.StartsAt != null || it.EndsAt != null;
+        (mFromDate, mFromTime) = SplitWindow(it.StartsAt);
+        (mToDate, mToTime) = SplitWindow(it.EndsAt);
         mQrOn = it.QrOn; mQrCode = it.QrCode; mQrUrl = it.QrUrl ?? ""; mQrLabel = it.QrLabel ?? "";
         mQrSize = QrTracking.ClampSize(it.QrSize);
         (mQrX, mQrY) = QrTracking.ClampPos(it.QrX, it.QrY, mQrSize);
@@ -855,7 +917,29 @@ else
         Nav.NavigateTo($"/compositions/{compositionId}?back={Uri.EscapeDataString($"/playlists/{Id}")}");
     }
 
-    private void CloseSettings() { mItem = null; mPlaylist = null; mMedia = null; mTab = "content"; }
+    private void CloseSettings() { mItem = null; mPlaylist = null; mMedia = null; mTab = "content"; mSchedOn = false; }
+
+    /// <summary>Ouvre la fenêtre du contenu directement sur son onglet « Programmation » (pastille de la ligne, menu ⋮).</summary>
+    private void OpenProgramming(FlowRow r)
+    {
+        if (Current is { } pl && r.M != null) OpenSettings(pl, r.It, r.M, "prog");
+    }
+
+    private static (string Date, string Time) SplitWindow(string? iso) =>
+        iso == null ? ("", "") : (iso[..10], iso[11..16]);
+
+    /// <summary>Date et heure saisies en une valeur aaaa-mm-ddTHH:mm ; sans heure, début à 00:00 et fin à 23:59. Null si la date est vide.</summary>
+    private static string? WindowOf(string date, string time, string defaultTime) =>
+        date.Length == 0 ? null : date[..Math.Min(10, date.Length)] + "T" + (time.Length == 0 ? defaultTime : time[..Math.Min(5, time.Length)]);   // le navigateur peut ajouter les secondes
+
+    private string ScheduleSummary()
+    {
+        var from = mSchedOn ? WindowOf(mFromDate, mFromTime, "00:00") : null;
+        var to = mSchedOn ? WindowOf(mToDate, mToTime, "23:59") : null;
+        if (from == null && to == null) return "Diffusé sans limite : renseignez au moins une date.";
+        if (from != null && to != null) return $"Diffusé du {ContentWindow.Long(from)} au {ContentWindow.Long(to)}.";
+        return from != null ? $"Diffusé à partir du {ContentWindow.Long(from)}, sans fin." : $"Diffusé tout de suite, jusqu'au {ContentWindow.Long(to!)}.";
+    }
 
     // Adresse encodée dans le QR code de l'aperçu : l'adresse courte réelle (code déjà créé) ou un exemple tant que le contenu n'est pas enregistré.
     private string? QrText => QrTracking.ShortUrl(QrTracking.Origin(Nav.BaseUri), mQrCode ?? "XXXXXXXX");
@@ -898,8 +982,10 @@ else
         var qrOn = mQrOn; var qrUrl = QrTracking.Destination(mQrUrl) ?? mQrUrl.Trim(); var qrLabel = QrTracking.CleanLabel(mQrLabel);
         var qrCode = qrOn ? mQrCode ?? QrTracking.NewCode() : mQrCode ?? item.QrCode; var qrBase = QrTracking.Origin(Nav.BaseUri);
         double qx = mQrX, qy = mQrY, qs = mQrSize;
+        var from = ScheduleFrom; var to = ScheduleTo;
         WriteList(d =>
         {
+            item.StartsAt = from; item.EndsAt = to;
             item.Placement = placement;
             if (content) item.DurationMode = mode;
             if (needsSeconds) item.DurationSec = seconds;

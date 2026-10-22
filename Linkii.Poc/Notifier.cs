@@ -75,9 +75,17 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
             .Where(i => !i.Off)   // désactivé dans la liste : gardé dans le brouillon, jamais publié
             .Select(i => (i, m: db.Media.FirstOrDefault(x => x.Id == i.MediaId && x.ClientId == p.ClientId)))   // jamais un média d'un autre client
             .Where(t => t.m != null && t.m.Status == null)   // une vidéo en cours de conversion n'est pas publiée
-            .Select(t => Snapshot(db, t.i, t.m!, growth))
+            .Select(t => Snapshot(db, t.i, t.m!, growth) is { } s ? Windowed(s, t.i) : null)
             .OfType<PublishedItem>()
             .ToList();
+    }
+
+    /// <summary>Période de diffusion du contenu (onglet Programmation) : le player n'écarte de la boucle que ce qui est hors période.</summary>
+    private static PublishedItem Windowed(PublishedItem s, PlaylistItem i)
+    {
+        s.StartsAt = i.StartsAt;
+        s.EndsAt = i.EndsAt;
+        return s;
     }
 
     /// <summary>Widget d'écran : app en surimpression permanente, à la position libre choisie dans l'éditeur de l'écran.</summary>

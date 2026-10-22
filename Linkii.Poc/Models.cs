@@ -844,6 +844,9 @@ public class PlaylistItem
     public string Placement { get; set; } = "full";   // full = diapo ; sinon app en surimpression permanente
     /// <summary>Désactivé : le contenu garde sa place dans la liste mais n'est pas publié ; la boucle le saute.</summary>
     public bool Off { get; set; }
+    /// <summary>Période de diffusion (onglet Programmation) : début et fin en aaaa-mm-ddTHH:mm, heure de l'organisation ; null = sans limite. Voir <see cref="ContentWindow"/>.</summary>
+    public string? StartsAt { get; set; }
+    public string? EndsAt { get; set; }
 
     // Comptage des scans (licence Growth, contenus pleine page) : un QR code au premier plan, dont l'adresse courte /q/{code} compte puis redirige (voir QrTracking)
     public bool QrOn { get; set; }
@@ -884,6 +887,8 @@ public class PublishedItem
     public Dictionary<string, string> Secrets { get; set; } = new();    // chiffrés, restent sur le serveur
     public string? ValidFrom { get; set; }   // aaaa-mm-jj (apps avec période de validité)
     public string? ValidTo { get; set; }
+    public string? StartsAt { get; set; }   // période de diffusion du contenu (voir <see cref="ContentWindow"/>), copiée depuis la liste à la publication
+    public string? EndsAt { get; set; }
     public double? X { get; set; }        // widget d'écran (Placement = « free ») : position en % et échelle
     public double? Y { get; set; }
     public double? Scale { get; set; }
@@ -896,7 +901,7 @@ public class PublishedItem
     public object ForPlayer() => new
     {
         id = Id, type = Type, url = Url, durationSec = DurationSec, durationMode = DurationMode, placement = Placement, dataId = DataId,
-        appId = AppId, appVersion = AppVersion, mediaId = MediaId, settings = Settings, validFrom = ValidFrom, validTo = ValidTo, x = X, y = Y, scale = Scale, urls = Urls,
+        appId = AppId, appVersion = AppVersion, mediaId = MediaId, settings = Settings, validFrom = ValidFrom, validTo = ValidTo, startsAt = StartsAt, endsAt = EndsAt, x = X, y = Y, scale = Scale, urls = Urls,
         qr = Qr == null ? null : new { d = Qr.Data, x = Qr.X, y = Qr.Y, size = Qr.Size, label = Qr.Label }
     };
 }
