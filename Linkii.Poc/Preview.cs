@@ -46,8 +46,9 @@ public static class PlayerFeed
         : db.Playlists.FirstOrDefault(p => p.Id == s.PlaylistId && p.ClientId == s.ClientId)?.Published ?? new())
         .Concat(s.PublishedLists.Values.SelectMany(l => l)).ToList();   // + listes du planning
 
-    /// <summary>Configuration et contenus publiés d'un écran. whole : le simulateur montre tout le mur dont l'écran fait partie.</summary>
-    public static Dictionary<string, object?> ForScreen(Db db, Screen s, bool whole = false)
+    /// <summary>Configuration et contenus publiés d'un écran. whole : le simulateur montre tout le mur dont l'écran fait partie.
+    /// device : l'appareil lui-même (pas le simulateur) reçoit aussi ses paramètres d'appareil.</summary>
+    public static Dictionary<string, object?> ForScreen(Db db, Screen s, bool whole = false, bool device = false)
     {
         var t = db.Clients.First(c => c.Id == s.ClientId);
         var reseller = db.Resellers.FirstOrDefault(r => r.Id == t.ResellerId);
@@ -66,7 +67,7 @@ public static class PlayerFeed
         var mirror = Helpers.Mirror(db.Areas, s);   // miroir de l'écran, combiné à celui de son mur
         return new()
         {
-            ["version"] = Helpers.Revision(p, s, t, reseller, Helpers.SyncStamp(db.Areas, s)) + (whole ? "|whole" : ""),
+            ["version"] = Helpers.Revision(p, s, t, reseller, Helpers.SyncStamp(db.Areas, db.Screens, s)) + (whole ? "|whole" : ""),
             ["serverNow"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             ["sync"] = epoch is { } e ? new { epoch = Helpers.EpochMs(e) } : null,
             // mur d'écrans : l'écran n'affiche que sa portion (colonne, ligne) de l'image de tout le mur
@@ -80,6 +81,7 @@ public static class PlayerFeed
             ["schedule"] = Planning.ForPlayer(t, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, Sync),   // créneaux du planning de diffusion (null : aucun)
             ["sleep"] = Sleep.ForPlayer(t, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, wall != null),   // plages de mise en veille (null : aucune)
             ["dim"] = Dim.ForPlayer(t, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, wall != null),   // luminosité et contraste selon l'heure (null : aucun réglage)
+            ["device"] = device ? DeviceConfig.ForPlayer(db.Screens, s) : null,   // paramètres de l'appareil (démarrage automatique, fenêtre, moniteur, écrans à ouvrir sur ce PC)
             ["brand"] = BrandDto.From(reseller)
         };
     }

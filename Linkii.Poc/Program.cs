@@ -591,7 +591,7 @@ api.MapGet("/player/playlist", (HttpRequest req, JsonStore store) => store.Read(
 {
     var s = Auth(req, db);
     if (Gate(s, db) is { } denied) return denied;
-    return Results.Ok(PlayerFeed.ForScreen(db, s!));
+    return Results.Ok(PlayerFeed.ForScreen(db, s!, device: true));
 }));
 
 // build : empreinte du code du player (wwwroot/player) ; un écran ouvert se recharge quand elle change (nouvelle version de Linkii).
@@ -613,6 +613,12 @@ api.MapPost("/player/device", (HttpRequest req, DeviceDto body, JsonStore store)
     s!.DeviceKind = body.Kind is "androidtv" or "android" or "windows" ? body.Kind : "web";
     s.DeviceOs = Clean(body.Os, 40); s.DeviceModel = Clean(body.Model, 60); s.DeviceApp = Clean(body.App, 20);
     s.DevicePinSig = Clean(body.PinSig, 16);
+    // PC Windows : identifiant du PC, instance du player et moniteurs (plusieurs écrans sur un même PC, choix du moniteur)
+    s.DeviceHost = s.DeviceKind == "windows" ? Clean(body.Host, 40) : null;
+    s.DeviceInstance = s.DeviceKind == "windows" ? Clean(body.Instance, 40) : null;
+    s.DeviceMonitors = s.DeviceKind == "windows" && body.Monitors != null
+        ? body.Monitors.Where(m => m.N is > 0 and < 17 && m.W > 0 && m.H > 0).Take(16).Select(m => new DeviceMonitor { N = m.N, W = m.W, H = m.H, Primary = m.Primary }).ToList()
+        : new();
     if (body.BootMs is > 0) s.DeviceBootUtc = DateTimeOffset.FromUnixTimeMilliseconds(body.BootMs.Value).UtcDateTime;
     return Results.Ok();
 }));
@@ -865,7 +871,8 @@ record AckDto(string Version, int? W, int? H, string? Stage = null);
 record QrHit(Guid ClientId, Guid ItemId, string? Destination, bool Counts);
 record PlayDto(Guid? MediaId, string? AppId, long Start, int Sec);
 record StartDto(int? W, int? H);
-record DeviceDto(string? Kind, string? Os, string? Model, string? App, long? BootMs, string? PinSig = null);
+record DeviceDto(string? Kind, string? Os, string? Model, string? App, long? BootMs, string? PinSig = null, string? Host = null, string? Instance = null, List<MonitorDto>? Monitors = null);
+record MonitorDto(int N, int W, int H, bool Primary);
 record CommandAckDto(Guid Id, string? Status, string? Detail);
 
 public partial class Program;

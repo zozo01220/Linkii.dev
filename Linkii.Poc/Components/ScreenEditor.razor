@@ -44,7 +44,7 @@
         {
             <button type="button" class="modal-x" aria-label="Planning de l'écran" title="Planning de l'écran : quelle liste passe, quand" @onclick="OpenPlanning"><Ico Name="calendar" Size="20" /></button>
         }
-        <button type="button" class="modal-x" aria-label="Options avancées" title="Options avancées" @onclick="OpenAdvanced"><Ico Name="sliders" Size="20" /></button>
+        <button type="button" class="modal-x" aria-label="Paramètres de l'écran" title="Paramètres de l'écran" @onclick="() => advanced = true"><Ico Name="sliders" Size="20" /></button>
         <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
     </div>
     <div class="modal-body wg-body">
@@ -312,27 +312,8 @@
 
 @if (advanced)
 {
-    @* options avancées de l'écran : matériel, résolution et miroir ; Annuler rétablit les valeurs d'ouverture *@
-    <div class="modal-backdrop picker-backdrop" @onclick="CancelAdvanced"></div>
-    <div class="modal app-modal ci-adv" role="dialog" aria-modal="true" aria-labelledby="se-adv-title">
-        <div class="modal-head">
-            <div class="grow"><h3 id="se-adv-title">Options avancées</h3><small>@name</small></div>
-            <button type="button" class="modal-x" aria-label="Fermer" @onclick="CancelAdvanced"><Ico Name="x" Size="20" /></button>
-        </div>
-        <div class="modal-body">
-            <ScreenFormat Spec="spec" Layout="@layoutId" LayoutChanged="SetLayout" OnChange="StateHasChanged" Compact="true" AdvancedOnly="true" Detected="@detected" />
-            @* Miroir : écran monté à l'envers ou vu dans un miroir ; s'applique dès l'enregistrement, sans publier *@
-            <div class="fmt-block mirror-opts">
-                <label>Miroir de l'affichage</label>
-                <label class="mirror-row"><button type="button" class="switch @(mirrorH ? "on" : "")" role="switch" aria-checked="@(mirrorH ? "true" : "false")" aria-label="Miroir horizontal" @onclick="() => mirrorH = !mirrorH"><span></span></button> <span><b>Horizontal</b><small>Inverse la gauche et la droite.</small></span></label>
-                <label class="mirror-row"><button type="button" class="switch @(mirrorV ? "on" : "")" role="switch" aria-checked="@(mirrorV ? "true" : "false")" aria-label="Miroir vertical" @onclick="() => mirrorV = !mirrorV"><span></span></button> <span><b>Vertical</b><small>Inverse le haut et le bas. Les deux ensemble : écran fixé à l'envers.@(wall != null ? " Dans un mur, le miroir de l'écran s'ajoute à celui du mur." : "")</small></span></label>
-            </div>
-        </div>
-        <div class="modal-foot">
-            <button type="button" class="btn ghost" @onclick="CancelAdvanced">Annuler</button>
-            <button type="button" class="btn" @onclick="() => advanced = false">Valider</button>
-        </div>
-    </div>
+    @* paramètres de l'écran (affichage et appareil) : enregistrés par la fenêtre elle-même, sans publier ; l'éditeur relit ensuite le format *@
+    <ScreenSettingsDialog ScreenId="ScreenId" Orientation="@spec.Orientation" OnClose="() => advanced = false" OnSaved="SettingsSaved" />
 }
 @if (simulate)
 {
@@ -404,7 +385,6 @@
         : string.Join(" · ", Enumerable.Range(0, Def.Sizes.Length).Select(z => playlists.FirstOrDefault(p => p.Id == zonePl[z])?.Name ?? "—"));
     private List<string> errors = new();
     private string name = "", tab = "screen";
-    private string? detected;
     private string search = "";
     private ScreenSpec spec = new();
     private bool saving, confirmPublish, mirrorH, mirrorV;
@@ -529,7 +509,6 @@
         for (var z = 0; z < zonePl.Count; z++) zonePl[z] = s.ZonePlaylist(z);
         spec =new ScreenSpec { Type = s.ScreenType, Orientation = s.Orientation, Resolution = s.Resolution };
         layoutId = ScreenLayouts.Fit(ScreenLayouts.Find(s.Layout).Id, spec);   // découpage encore permis par le format
-        if (s.DetectedW > 0) detected = $"{s.DetectedW}×{s.DetectedH}";
         // copie de travail : rien n'est enregistré avant « Enregistrer »
         widgets = wall != null ? new() : s.Widgets.Select(w => new ScreenWidget { Id = w.Id, AppId = w.AppId, X = w.X, Y = w.Y, Scale = w.Scale, Settings = new(w.Settings) }).ToList();
         foreach (var w in widgets) if (manifests.GetValueOrDefault(w.AppId) is { } m) w.Settings = AppCatalog.WithDefaults(m, w.Settings);
@@ -646,18 +625,14 @@
     }
 
     private bool advanced;
-    private (string Type, string Orientation, string Resolution, string Layout, bool H, bool V)? advSnap;
 
-    private void OpenAdvanced()
+    // Paramètres de l'écran enregistrés : matériel, résolution et miroir relus ; le découpage en cours reste celui que permet le format.
+    private void SettingsSaved()
     {
-        advSnap = (spec.Type, spec.Orientation, spec.Resolution, layoutId, mirrorH, mirrorV);
-        advanced = true;
-    }
-
-    private void CancelAdvanced()
-    {
-        if (advSnap is { } v) { spec.Type = v.Type; spec.Orientation = v.Orientation; spec.Resolution = v.Resolution; layoutId = v.Layout; mirrorH = v.H; mirrorV = v.V; }
-        advanced = false;
+        var s = Store.Read(d => d.Screens.First(x => x.Id == ScreenId));
+        spec.Type = s.ScreenType; spec.Resolution = s.Resolution;
+        (mirrorH, mirrorV) = (s.MirrorH, s.MirrorV);
+        layoutId = ScreenLayouts.Fit(layoutId, spec);
     }
     private void SetLayout(string id) { layoutId = id; pickZone = null; }
 

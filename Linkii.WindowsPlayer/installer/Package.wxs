@@ -1,10 +1,13 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <!-- Linkii Player pour Windows : installation pour l'utilisateur courant (sans droits d'administrateur).
-       Options en ligne de commande : SERVERURL=https://… (adresse du serveur) et AUTOSTART=1 (démarrage avec la session). -->
+  <!-- Linkii Player pour Windows : installation pour l'utilisateur courant (sans droits d'administrateur), rien à saisir.
+       L'adresse du serveur est intégrée (SERVERURL, à changer au passage sur le serveur de production) ; le player démarre à la fin
+       de l'installation et affiche son code d'appairage. Démarrage automatique, fenêtre et moniteur se règlent ensuite depuis le back-office. -->
   <Package Name="Linkii Player" Manufacturer="Linkii" Version="$(ProductVersion)" UpgradeCode="6B3E0F52-7C0E-4A55-9C2B-1E4D6A9D8F31"
            Scope="perUser" Language="1036" InstallerVersion="500">
     <MajorUpgrade DowngradeErrorMessage="Une version plus récente de Linkii Player est déjà installée." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Property Id="SERVERURL" Value="http://localhost:5080" />
 
     <StandardDirectory Id="LocalAppDataFolder">
       <Directory Id="ProgramsSubFolder" Name="Programs">
@@ -14,9 +17,13 @@
     <StandardDirectory Id="ProgramMenuFolder" />
 
     <Component Id="MainExe" Directory="INSTALLFOLDER">
-      <File Id="LinkiiPlayerExe" Source="$(PublishDir)LinkiiPlayer.exe" KeyPath="yes">
-        <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="Linkii Player" Advertise="no" WorkingDirectory="INSTALLFOLDER" />
-      </File>
+      <File Id="LinkiiPlayerExe" Source="$(PublishDir)LinkiiPlayer.exe" KeyPath="yes" />
+    </Component>
+
+    <!-- raccourci du menu Démarrer : dans une installation par utilisateur, sa clé est une valeur sous HKCU (ICE43) -->
+    <Component Id="StartMenu" Directory="ProgramMenuFolder">
+      <Shortcut Id="StartMenuShortcut" Name="Linkii Player" Target="[#LinkiiPlayerExe]" WorkingDirectory="INSTALLFOLDER" />
+      <RegistryValue Root="HKCU" Key="Software\Linkii\Player" Name="StartMenu" Type="integer" Value="1" KeyPath="yes" />
     </Component>
 
     <ComponentGroup Id="PlayerFiles" Directory="INSTALLFOLDER">
@@ -26,22 +33,25 @@
       </Files>
     </ComponentGroup>
 
-    <!-- adresse du serveur : lue par toutes les instances de la session (une adresse donnée en ligne de commande l'emporte) -->
-    <Component Id="ServerUrlValue" Directory="INSTALLFOLDER" Condition="SERVERURL">
+    <!-- adresse du serveur : lue par toutes les instances du player -->
+    <Component Id="ServerUrlValue" Directory="INSTALLFOLDER">
       <RegistryValue Root="HKCU" Key="Software\Linkii\Player" Name="ServerUrl" Type="string" Value="[SERVERURL]" KeyPath="yes" />
     </Component>
 
-    <!-- démarrage avec la session pour l'instance par défaut -->
-    <Component Id="AutoStartValue" Directory="INSTALLFOLDER" Condition="AUTOSTART = &quot;1&quot;">
-      <RegistryValue Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Run" Name="LinkiiPlayer-default" Type="string"
-                     Value="&quot;[INSTALLFOLDER]LinkiiPlayer.exe&quot;" KeyPath="yes" />
-    </Component>
+    <!-- fin de l'installation : le player démarre (il s'inscrit lui-même au démarrage automatique) ;
+         désinstallation : les instances s'arrêtent et sortent du démarrage automatique -->
+    <CustomAction Id="LaunchPlayer" FileRef="LinkiiPlayerExe" ExeCommand="" Return="asyncNoWait" />
+    <CustomAction Id="StopPlayer" FileRef="LinkiiPlayerExe" ExeCommand="--uninstall" Return="ignore" Execute="immediate" />
+    <InstallExecuteSequence>
+      <Custom Action="StopPlayer" Before="InstallValidate" Condition="Installed AND REMOVE=&quot;ALL&quot;" />
+      <Custom Action="LaunchPlayer" After="InstallFinalize" Condition="NOT REMOVE" />
+    </InstallExecuteSequence>
 
     <Feature Id="Main" Title="Linkii Player" Level="1">
       <ComponentRef Id="MainExe" />
+      <ComponentRef Id="StartMenu" />
       <ComponentGroupRef Id="PlayerFiles" />
       <ComponentRef Id="ServerUrlValue" />
-      <ComponentRef Id="AutoStartValue" />
     </Feature>
   </Package>
 </Wix>

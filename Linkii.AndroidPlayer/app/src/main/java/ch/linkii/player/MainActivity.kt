@@ -295,6 +295,13 @@ class MainActivity : Activity() {
             } catch (e: org.json.JSONException) { /* reçu de travers : on garde l'état actuel */ }
         }
 
+        /** Paramètres de l'appareil du back-office (paramètres de l'écran) : { autoStart, … }. Seul le démarrage automatique concerne un boîtier ; il est gardé ici. */
+        @JavascriptInterface
+        fun config(json: String) {
+            try { prefs.autoStart = org.json.JSONObject(json).optBoolean("autoStart", true) }
+            catch (e: org.json.JSONException) { /* reçu de travers : on garde l'état actuel */ }
+        }
+
         /** Redémarrage de l'application demandé depuis le back-office. */
         @JavascriptInterface
         fun restart() { runOnUiThread { restartApp() } }

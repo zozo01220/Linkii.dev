@@ -63,6 +63,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("sleep_applied", false)
         set(v) = sp.edit().putBoolean("sleep_applied", v).apply()
 
+    /** Démarrage automatique avec l'appareil (paramètres de l'écran, back-office) : oui par défaut. */
+    var autoStart: Boolean
+        get() = sp.getBoolean("auto_start", true)
+        set(v) = sp.edit().putBoolean("auto_start", v).apply()
+
     /** Adresse complète du player : l'adresse du serveur, suivie de /player/ sauf si elle le contient déjà. */
     fun playerUrl(): String {
         val base = serverUrl

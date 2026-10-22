@@ -366,6 +366,8 @@ public class Tenant
     public string DefaultScreenType { get; set; } = "tv";
     public string DefaultOrientation { get; set; } = "landscape";
     public string DefaultResolution { get; set; } = "1920x1080";
+    /// <summary>Démarrage automatique des nouveaux écrans (chaque écran peut le changer).</summary>
+    public bool DefaultAutoStart { get; set; } = true;
 
     // Connexion Canva (Connect API) : jeton de renouvellement chiffré (SecretBox), à usage unique (renouvelé à chaque emploi).
     public string CanvaRefreshToken { get; set; } = "";
@@ -594,6 +596,14 @@ public class Screen : IClientOwned, IAreaOwned
     public string? DeviceApp { get; set; }         // version de l'application Linkii Player
     public DateTime? DeviceBootUtc { get; set; }   // dernier démarrage de l'appareil
     public string? DevicePinSig { get; set; }      // empreinte du code technicien reçu de l'organisation (voir TechPin.Sig)
+    public string? DeviceHost { get; set; }        // PC Windows : identifiant du PC (plusieurs écrans d'un même PC le partagent)
+    public string? DeviceInstance { get; set; }    // PC Windows : nom de l'instance du player qui affiche cet écran
+    public List<DeviceMonitor> DeviceMonitors { get; set; } = new();   // PC Windows : moniteurs du PC (1 = principal)
+
+    /// <summary>Paramètres de l'appareil (fenêtre « Paramètres de l'écran », section Appareil) : envoyés à chaque connexion, sans publication. Voir <see cref="DeviceConfig"/>.</summary>
+    public bool AutoStart { get; set; } = true;
+    public bool Windowed { get; set; }             // PC Windows : fenêtre à la taille de la résolution au lieu du plein écran
+    public int Monitor { get; set; } = 1;          // PC Windows : moniteur utilisé
 
     // Contrôle du direct (licence Growth)
     public DateTime? PausedUtc { get; set; }       // pause en cours depuis…
@@ -1105,6 +1115,9 @@ public static class Helpers
             + Dim.Stamp(areas, s)                         // et un réglage de luminosité ou de contraste
             + Planning.Stamp(areas, s);                   // et un créneau du planning
     }
+
+    /// <summary><see cref="SyncStamp(IEnumerable{Area}, Screen)"/> + paramètres de l'appareil (démarrage automatique, fenêtre, moniteur, écrans à ouvrir sur le PC).</summary>
+    public static string SyncStamp(IEnumerable<Area> areas, IEnumerable<Screen> screens, Screen s) => SyncStamp(areas, s) + DeviceConfig.Stamp(screens, s);
 
     public record WallPlace(int Cols, int Rows, int Col, int Row);
 

@@ -1,0 +1,119 @@
+@inject TenantStore Store
+@inject Notifier Notifier
+@inject Toaster Toast
+
+@* « Paramètres de l'écran » : Affichage (matériel, résolution, miroir) et Appareil (démarrage automatique ; sur un PC Windows, fenêtre et moniteur).
+   Tout s'applique dès l'enregistrement, sans publier. La section Appareil n'apparaît qu'une fois l'appareil connu (player Windows ou Android). *@
+<div class="modal-backdrop picker-backdrop" @onclick="Cancel"></div>
+<div class="modal app-modal ci-adv sp-dlg" role="dialog" aria-modal="true" aria-labelledby="sp-title">
+    <div class="modal-head">
+        <div class="grow" style="min-width:0">
+            <h3 id="sp-title">Paramètres de l'écran</h3>
+            <small>@name@if (kind != null && kind != "web") { <text> · </text><span class="sp-dev"><DeviceLogo Kind="@kind" Size="16" />@(os ?? "Appareil")@if (app is { Length: > 0 } && app != "web") { <text> · App @app</text> }</span> }</small>
+        </div>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Cancel"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="modal-body">
+        <div class="sp-sec">Affichage</div>
+        <ScreenFormat Spec="spec" Compact="true" AdvancedOnly="true" Detected="@detected" OnChange="StateHasChanged" />
+        <div class="fmt-block sp-mirror">
+            <label>Miroir de l'affichage</label>
+            <div class="sp-mirror-row">
+                <button type="button" class="switch @(mirrorH ? "on" : "")" role="switch" aria-checked="@(mirrorH ? "true" : "false")" aria-label="Miroir horizontal" title="Inverse la gauche et la droite" @onclick="() => mirrorH = !mirrorH"><span></span></button><span>Horizontal</span>
+                <button type="button" class="switch @(mirrorV ? "on" : "")" role="switch" aria-checked="@(mirrorV ? "true" : "false")" aria-label="Miroir vertical" title="Inverse le haut et le bas ; les deux ensemble : écran fixé à l'envers" @onclick="() => mirrorV = !mirrorV"><span></span></button><span>Vertical</span>
+            </div>
+        </div>
+
+        @if (HasDevice)
+        {
+            <div class="sp-sec">Appareil</div>
+            <div class="sp-row">
+                <div class="grow"><b>Démarrage automatique</b><small>@(IsPc ? "Le player démarre avec Windows et revient tout seul après une coupure." : "Le player démarre avec le boîtier.")</small></div>
+                <button type="button" class="switch @(autoStart ? "on" : "")" role="switch" aria-checked="@(autoStart ? "true" : "false")" aria-label="Démarrage automatique" @onclick="() => autoStart = !autoStart"><span></span></button>
+            </div>
+            @if (IsPc)
+            {
+                <div class="sp-row">
+                    <div class="grow"><b>Afficher dans une fenêtre</b><small>Pour les tests : une fenêtre à la taille de la résolution (réduite si le moniteur est plus petit) au lieu du plein écran.</small></div>
+                    <button type="button" class="switch @(windowed ? "on" : "")" role="switch" aria-checked="@(windowed ? "true" : "false")" aria-label="Afficher dans une fenêtre" @onclick="() => windowed = !windowed"><span></span></button>
+                </div>
+                @if (monitors.Count > 1)
+                {
+                    <div class="fmt-block sp-monitor">
+                        <label id="sp-mon-l">Moniteur</label>
+                        <MonitorPicker Monitors="monitors" Value="monitor" ValueChanged="v => monitor = v" Taken="taken" Windowed="windowed" LabelledBy="sp-mon-l" />
+                        <p class="hint">Liste remontée par le PC. Un moniteur déjà pris par un autre écran de ce PC est signalé.</p>
+                    </div>
+                }
+            }
+            else
+            {
+                <p class="hint">Pas de fenêtre ni de choix du moniteur : un boîtier n'a qu'un écran.</p>
+            }
+        }
+    </div>
+    <div class="modal-foot">
+        <button type="button" class="btn ghost" @onclick="Cancel">Annuler</button>
+        <button type="button" class="btn" disabled="@saving" @onclick="Save">Enregistrer</button>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid ScreenId { get; set; }
+    /// <summary>Orientation en cours d'édition (éditeur d'écran), pour afficher la résolution dans le bon sens.</summary>
+    [Parameter] public string? Orientation { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>Après l'enregistrement (l'éditeur d'écran relit le format).</summary>
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private ScreenSpec spec = new();
+    private string name = "";
+    private string? kind, os, app, detected;
+    private bool mirrorH, mirrorV, autoStart, windowed, saving;
+    private int monitor = 1;
+    private List<DeviceMonitor> monitors = new();
+    private Dictionary<int, string> taken = new();   // moniteur → écran du même PC qui l'occupe en plein écran
+
+    private bool IsPc => kind == "windows";
+    private bool HasDevice => kind is "windows" or "androidtv" or "android";
+
+    protected override void OnInitialized()
+    {
+        var s = Store.Read(d => d.Screens.First(x => x.Id == ScreenId));
+        name = s.Name;
+        (kind, os, app) = (s.DeviceKind, s.DeviceOs, s.DeviceApp);
+        spec = new ScreenSpec { Type = s.ScreenType, Orientation = Orientation ?? s.Orientation, Resolution = s.Resolution };
+        if (s.DetectedW > 0) detected = $"{s.DetectedW} × {s.DetectedH}";
+        (mirrorH, mirrorV) = (s.MirrorH, s.MirrorV);
+        (autoStart, windowed, monitor) = (s.AutoStart, s.Windowed, s.Monitor);
+        monitors = s.DeviceMonitors.OrderBy(m => m.N).ToList();
+        taken = Store.Read(d => DeviceConfig.SamePc(d.Screens, s).Where(x => !x.Windowed).GroupBy(x => x.Monitor).ToDictionary(g => g.Key, g => g.First().Name));
+    }
+
+    private Task Cancel() => OnClose.InvokeAsync();
+
+    private async Task Save()
+    {
+        saving = true;
+        var sp = spec; var (mh, mv, au, wi, mo) = (mirrorH, mirrorV, autoStart, windowed, monitor);
+        try
+        {
+            var changed = Store.Write(d =>
+            {
+                var s = d.Screens.First(x => x.Id == ScreenId);
+                var c = s.ScreenType != sp.Type || s.Resolution != sp.Resolution || s.MirrorH != mh || s.MirrorV != mv
+                    || s.AutoStart != au || s.Windowed != wi || s.Monitor != mo;
+                s.ScreenType = sp.Type; s.Resolution = sp.Resolution;
+                s.Layout = ScreenLayouts.Fit(ScreenLayouts.Find(s.Layout).Id, new ScreenSpec { Type = sp.Type, Orientation = s.Orientation, Resolution = sp.Resolution });   // découpage encore permis
+                s.MirrorH = mh; s.MirrorV = mv;
+                s.AutoStart = au; s.Windowed = wi; s.Monitor = mo;
+                return c;
+            });
+            if (changed) await Notifier.NotifyScreen(ScreenId);   // l'écran recharge sa configuration, sans publication
+        }
+        finally { saving = false; }
+        Toast.Ok($"Paramètres de « {name} » enregistrés.");
+        await OnSaved.InvokeAsync();
+        await OnClose.InvokeAsync();
+    }
+}

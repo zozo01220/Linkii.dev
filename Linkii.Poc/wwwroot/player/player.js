@@ -157,6 +157,8 @@
 
   function unpair() {
     LS.removeItem('lk_token'); LS.removeItem('lk_screen'); LS.removeItem('lk_playlist'); LS.removeItem('lk_acked'); LS.removeItem('lk_brand');
+    // écran supprimé : un écran ajouté sur un PC ferme sa fenêtre (l'application répond true) au lieu d'afficher un code d'appairage
+    try { if (window.LinkiiNative && typeof window.LinkiiNative.unpaired === 'function' && window.LinkiiNative.unpaired()) return; } catch (e) {}
     location.reload();
   }
 
@@ -280,6 +282,10 @@
     // code du menu technicien de l'organisation : confié à l'application Android (chaîne vide : rien d'imposé, l'appareil garde son code)
     if (!PREVIEW && pl.settings && window.LinkiiNative && typeof window.LinkiiNative.techPin === 'function') {
       try { window.LinkiiNative.techPin(pl.settings.techPin ? JSON.stringify(pl.settings.techPin) : ''); } catch (e) {}
+    }
+    // paramètres de l'appareil (démarrage automatique, fenêtre, moniteur, écrans à ouvrir sur ce PC) : confiés à l'application, qui les garde
+    if (!PREVIEW && pl.device && window.LinkiiNative && typeof window.LinkiiNative.config === 'function') {
+      try { window.LinkiiNative.config(JSON.stringify(pl.device)); } catch (e) {}
     }
     cfg.wall = pl.wall || null;
     if (pl.dim !== undefined) cfg.dim = pl.dim || null;

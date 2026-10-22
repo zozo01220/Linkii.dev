@@ -201,6 +201,43 @@
     </div>
 }
 
+@if (settingsFor is { } spId)
+{
+    <ScreenSettingsDialog ScreenId="spId" OnClose="() => settingsFor = null" OnSaved="Reload" />
+}
+
+@if (addPcFrom is { } apf)
+{
+    @* « Ajouter un écran sur ce PC » : nouvel écran déjà appairé, que le PC ouvre de lui-même *@
+    <div class="modal-backdrop picker-backdrop" @onclick="() => addPcFrom = null"></div>
+    <div class="modal app-modal ci-adv sp-dlg sp-add" role="dialog" aria-modal="true" aria-labelledby="ap-title">
+        <div class="modal-head">
+            <div class="grow" style="min-width:0"><h3 id="ap-title">Ajouter un écran sur ce PC</h3><small>PC de « @apf.Name »</small></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => addPcFrom = null"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            <div class="fmt-block"><label for="ap-name">Nom</label><input id="ap-name" maxlength="80" @bind="addPcName" @bind:event="oninput" /></div>
+            @if (apf.DeviceMonitors.Count > 1)
+            {
+                <div class="fmt-block">
+                    <label id="ap-mon-l">Moniteur</label>
+                    <MonitorPicker Monitors="apf.DeviceMonitors.OrderBy(m => m.N).ToList()" Value="addPcMonitor" ValueChanged="v => addPcMonitor = v" Taken="addPcTaken" Windowed="addPcWindowed" LabelledBy="ap-mon-l" />
+                </div>
+            }
+            <div class="sp-row">
+                <div class="grow"><b>Afficher dans une fenêtre</b><small>Utile pour tester plusieurs écrans sur un seul moniteur.</small></div>
+                <button type="button" class="switch @(addPcWindowed ? "on" : "")" role="switch" aria-checked="@(addPcWindowed ? "true" : "false")" aria-label="Afficher dans une fenêtre" @onclick="() => addPcWindowed = !addPcWindowed"><span></span></button>
+            </div>
+            <div class="sp-note">Le PC ouvre le nouvel écran dans quelques secondes. Il hérite de la zone et de la liste de lecture de « @apf.Name », modifiables ensuite.</div>
+            @if (addPcError != null) { <div class="err">@addPcError</div> }
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn ghost" @onclick="() => addPcFrom = null">Annuler</button>
+            <button type="button" class="btn" disabled="@(addPcBusy || string.IsNullOrWhiteSpace(addPcName))" @onclick="AddOnPc">Ajouter</button>
+        </div>
+    </div>
+}
+
 @if (deleting is { Count: > 0 } del)
 {
     var many = del.Count > 1;
@@ -208,7 +245,14 @@
     <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="del-title">
         <h3 id="del-title">Supprimer @(many ? $"{del.Count} écrans" : $"« {del[0].Name} »") ?</h3>
         @if (many) { <p class="hint"><b>@string.Join(", ", del.Select(s => s.Name))</b></p> }
-        <p class="hint">@(many ? "Les écrans seront déconnectés et afficheront" : "L'écran sera déconnecté et affichera") de nouveau un code d'appairage. @(many ? "Leurs listes de lecture ne sont pas supprimées." : "Sa liste de lecture n'est pas supprimée.")</p>
+        @if (!many && del[0].DeviceInstance is { } di && di != "default" && DeviceConfig.IsPc(del[0]))
+        {
+            <p class="hint">L'écran sera déconnecté et sa fenêtre se fermera sur le PC. Sa liste de lecture n'est pas supprimée.</p>
+        }
+        else
+        {
+            <p class="hint">@(many ? "Les écrans seront déconnectés et afficheront" : "L'écran sera déconnecté et affichera") de nouveau un code d'appairage. @(many ? "Leurs listes de lecture ne sont pas supprimées." : "Sa liste de lecture n'est pas supprimée.")</p>
+        }
         <div class="modal-actions">
             <button class="btn ghost" @onclick="() => deleting = null">Annuler</button>
             <button class="btn danger-solid" @onclick="() => Remove(del)">Supprimer</button>
@@ -809,6 +853,7 @@ else if (wallEdit is { } wid)
                                 <button type="button" role="menuitem" class="app-only" disabled="@(!Growth || !gonline)" title="@(!Growth ? Plans.LockedHint : !gonline ? "L'écran est hors ligne" : null)" @onclick='() => { menuFor = null; OpenLive(gs, "preview"); }'><Ico Name="eye" Size="16" /> Aperçu en direct</button>
                                 <button type="button" role="menuitem" class="app-only" disabled="@(!Growth || !gonline)" title="@(!Growth ? Plans.LockedHint : !gonline ? "L'écran est hors ligne" : null)" @onclick='() => { menuFor = null; OpenLive(gs, null); }'><Ico Name="@(gpaused ? "play" : "pause")" Size="16" /> @(gpaused ? "Reprendre" : "Mettre en pause")</button>
                                 <button type="button" role="menuitem" @onclick="() => Edit(gs)"><Ico Name="pencil-square" Size="16" /> Éditer</button>
+                                @PcItems(gs)
                                 <button type="button" role="menuitem" @onclick="() => { menuFor = null; simScreen = gs.Id; }"><Ico Name="play" Size="16" /> Simuler</button>
                                 <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"planning?screen={gs.Id}")'><Ico Name="calendar" Size="16" /> Planning de cet écran…</button>
                                 <button type="button" role="menuitem" @onclick="() => OpenRename(gs)"><Ico Name="edit" Size="16" /> Renommer</button>
@@ -838,13 +883,14 @@ else if (wallEdit is { } wid)
                     <div class="gc-sub">
                         @if (gs.DeviceKind != null)
                         {
-                            <b>@(gs.DeviceOs ?? "Appareil")</b>@if (gs.DeviceApp is { Length: > 0 } gda && gs.DeviceApp != "web") { <text> <span class="sep">·</span> App <span class="mono">@gda</span></text> }@if (gs.DeviceKind == "web" && gs.DeviceModel != null) { <text> <span class="sep">·</span> @gs.DeviceModel</text> }
+                            <b>@(gs.DeviceOs ?? "Appareil")</b>@if (gs.DeviceApp is { Length: > 0 } gda && gs.DeviceApp != "web") { <text> <span class="sep">·</span> App <span class="mono">@gda</span></text> }@if (gs.DeviceKind == "web" && gs.DeviceModel != null) { <text> <span class="sep">·</span> @gs.DeviceModel</text> }@if (MonitorText(gs) is { } gmt) { <text> <span class="sep">·</span> @gmt</text> }
                         }
                         else { <span>En attente des informations de l'écran</span> }
                         <span class="sep"> · </span><span class="gc-pl"><Ico Name="play-box" Size="13" /> @(gs.ZoneCount == 1 ? playlists.FirstOrDefault(p => p.Id == gs.PlaylistId)?.Name ?? "Aucune liste de lecture" : $"{ZonesSummary(gs)} · {gs.ZoneCount} zones")</span>
                     </div>
                     <div class="gc-chips">
                         @if (ShowZones && zoneFilter == null) { <span class="gc-chip">@(gzone?.Name ?? Zone.DefaultName)</span> }
+                        @if (PcCount(gs) is var gpc && gpc > 1) { <span class="gc-chip" title="@PcTitle(gs)">PC partagé · @gpc écrans</span> }
                         @if (gzone is { Sync: true })
                         {
                             @if (synced.Contains(gs.Id)) { <span class="gc-chip sync" title="Cet écran affiche le même contenu, au même moment, que les autres écrans de la zone qui jouent cette liste"><Ico Name="link" Size="12" /> Synchronisé</span> }
@@ -1032,6 +1078,7 @@ else if (wallEdit is { } wid)
                                 @if (IsAsleep(sc)) { <button type="button" role="menuitem" @onclick="async () => { menuFor = null; await Wake(new[] { sc }); }"><Ico Name="sun" Size="16" /> Réveiller</button> }
                                 else if (tenant.SleepEnabled) { <button type="button" role="menuitem" @onclick="async () => { menuFor = null; await SleepNow(new[] { sc }); }"><Ico Name="moon" Size="16" /> Mettre en veille</button> }
                                 <button type="button" role="menuitem" @onclick="() => Edit(sc)"><Ico Name="pencil-square" Size="16" /> Éditer</button>
+                                @PcItems(sc)
                                 <button type="button" role="menuitem" @onclick="() => { menuFor = null; simScreen = sc.Id; }"><Ico Name="play" Size="16" /> Simuler</button>
                                 <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"planning?screen={sc.Id}")'><Ico Name="calendar" Size="16" /> Planning de cet écran…</button>
                                 <button type="button" role="menuitem" @onclick="() => OpenRename(sc)"><Ico Name="edit" Size="16" /> Renommer</button>
@@ -1058,10 +1105,11 @@ else if (wallEdit is { } wid)
                     @if (sc.DeviceKind != null)
                     {
                         <DeviceLogo Kind="@sc.DeviceKind" Size="22" />
-                        <span><b>@(sc.DeviceOs ?? "Appareil")</b>@if (sc.DeviceApp is { Length: > 0 } da && sc.DeviceApp != "web") { <text> <span class="sep">·</span> App <span class="mono">@da</span></text> }@if (sc.DeviceKind == "web" && sc.DeviceModel != null) { <text> <span class="sep">·</span> @sc.DeviceModel</text> }</span>
+                        <span><b>@(sc.DeviceOs ?? "Appareil")</b>@if (sc.DeviceApp is { Length: > 0 } da && sc.DeviceApp != "web") { <text> <span class="sep">·</span> App <span class="mono">@da</span></text> }@if (sc.DeviceKind == "web" && sc.DeviceModel != null) { <text> <span class="sep">·</span> @sc.DeviceModel</text> }@if (MonitorText(sc) is { } smt) { <text> <span class="sep">·</span> @smt</text> }</span>
                     }
                     else { <span class="muted">Appareil : en attente des informations de l'écran</span> }
                 </div>
+                @if (PcCount(sc) is var spc && spc > 1) { <div class="sc-sync"><span class="badge neutre" title="@PcTitle(sc)">PC partagé · @spc écrans</span></div> }
                 @* suivi de la dernière publication : affichée, en cours d'arrivée, ou pas reçue (écran hors ligne, aucune confirmation) *@
                 @if (Store.Read(d => d.Delivery(sc)) is { } dl)
                 {
@@ -1365,6 +1413,65 @@ else if (wallEdit is { } wid)
 
     private void Edit(Screen s) { menuFor = null; editing = s.Id; }
 
+    // ---------- Paramètres de l'écran, plusieurs écrans sur un même PC ----------
+    private Guid? settingsFor;
+    private Screen? addPcFrom;
+    private string addPcName = "";
+    private int addPcMonitor = 1;
+    private bool addPcWindowed, addPcBusy;
+    private string? addPcError;
+    private Dictionary<int, string> addPcTaken = new();
+
+    // Menu ⋮ : paramètres de l'écran ; sur un PC Windows, ajouter un écran déjà appairé
+    private RenderFragment PcItems(Screen s) => @<text>
+        <button type="button" role="menuitem" @onclick="() => { menuFor = null; settingsFor = s.Id; }"><Ico Name="sliders" Size="16" /> Paramètres de l'écran</button>
+        @if (DeviceConfig.IsPc(s))
+        {
+            <button type="button" role="menuitem" class="hl" @onclick="() => OpenAddOnPc(s)"><Ico Name="plus" Size="16" /> <span>Ajouter un écran sur ce PC<small>Nouvel écran déjà appairé, sans code</small></span></button>
+        }
+    </text>;
+
+    /// <summary>Écrans du PC de cet écran, lui compris (1 : seul sur son PC, ou pas un PC).</summary>
+    private int PcCount(Screen s) => DeviceConfig.IsPc(s) ? 1 + DeviceConfig.SamePc(screens, s).Count() : 1;
+
+    private string PcTitle(Screen s) => "Sur le même PC : " + string.Join(", ", screens.Where(x => x.Id == s.Id || DeviceConfig.SamePc(screens, s).Contains(x)).Select(x => x.Name));
+
+    /// <summary>« moniteur 2 » : seulement pour un PC qui a plusieurs moniteurs ou plusieurs écrans.</summary>
+    private string? MonitorText(Screen s) =>
+        DeviceConfig.IsPc(s) && (s.DeviceMonitors.Count > 1 || PcCount(s) > 1) ? (s.Windowed ? $"fenêtre, moniteur {s.Monitor}" : $"moniteur {s.Monitor}") : null;
+
+    private void OpenAddOnPc(Screen s)
+    {
+        menuFor = null; addPcError = null; addPcBusy = false;
+        var mates = DeviceConfig.SamePc(screens, s).Append(s).ToList();
+        addPcTaken = mates.Where(x => !x.Windowed).GroupBy(x => x.Monitor).ToDictionary(g => g.Key, g => g.First().Name);
+        var n = 2;
+        while (screens.Any(x => x.Name == $"{s.Name} {n}")) n++;
+        addPcName = $"{s.Name} {n}";
+        var free = s.DeviceMonitors.OrderBy(m => m.N).FirstOrDefault(m => !addPcTaken.ContainsKey(m.N));
+        addPcMonitor = free?.N ?? s.Monitor;
+        addPcWindowed = free == null;   // tous les moniteurs sont pris : une fenêtre
+        addPcFrom = s;
+    }
+
+    private async Task AddOnPc()
+    {
+        if (addPcFrom is not { } from) return;
+        var n = addPcName.Trim();
+        if (n.Length == 0) return;
+        if (n.Length > 80) n = n[..80];
+        if (!addPcWindowed && addPcTaken.ContainsKey(addPcMonitor)) { addPcError = $"Le moniteur {addPcMonitor} est déjà pris par « {addPcTaken[addPcMonitor]} » : choisissez-en un autre, ou une fenêtre."; return; }
+        addPcBusy = true;
+        var (mon, win) = (addPcMonitor, addPcWindowed);
+        var id = Store.Write(d => d.Screens.FirstOrDefault(x => x.Id == from.Id) is { } src ? DeviceConfig.AddOnSamePc(d, src, n, mon, win).Id : (Guid?)null);
+        if (id == null) { addPcBusy = false; addPcError = "Écran introuvable."; return; }
+        await Notifier.PublishScreen(id.Value);   // il diffuse aussitôt la liste héritée
+        await Notifier.NotifyScreen(from.Id);     // le PC reçoit l'écran à ouvrir avec sa configuration
+        addPcFrom = null;
+        Toast.Ok($"Écran « {n} » ajouté : le PC l'ouvre dans quelques secondes.");
+        Reload();
+    }
+
     private void CloseEdit() { editing = null; Reload(); }
 
     private async Task Pair()
@@ -1383,6 +1490,7 @@ else if (wallEdit is { } wid)
             s.PlaylistId = pid;
             s.ZoneId = zid;
             s.ScreenType = spec.Type; s.Orientation = spec.Orientation; s.Resolution = spec.Resolution;
+            s.AutoStart = d.Tenant.DefaultAutoStart;
             s.Token = Guid.NewGuid().ToString("N");
             s.PairingCode = null;
             return s.Id;

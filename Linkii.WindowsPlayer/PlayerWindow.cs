@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -9,12 +10,13 @@ using Microsoft.Web.WebView2.Wpf;
 namespace Linkii.Player;
 
 /// <summary>
-/// Fenêtre du player : le player web (/player) dans WebView2, plein écran sur un moniteur ou fenêtre de test.
+/// Fenêtre du player : le player web (/player) dans WebView2, plein écran sur un moniteur ou fenêtre de test (paramètres de l'écran, back-office).
 /// Le profil du navigateur est propre à l'instance : appairage, playlist et cache hors ligne ne se mélangent pas entre instances.
 /// </summary>
 internal sealed class PlayerWindow : Window
 {
     public const int ExitRestart = 42;       // redemandé par le back-office : le superviseur relance tout de suite
+    public const int ExitRemoved = 43;       // écran supprimé dans le back-office : le superviseur efface l'instance et s'arrête
     public const int ExitNoRuntime = 3;      // WebView2 absent : inutile de relancer
     public const int ExitBrowserCrash = 10;  // le navigateur a planté : le superviseur relance
 
@@ -25,10 +27,14 @@ internal sealed class PlayerWindow : Window
     if (!h) return;
     window.LinkiiNative = {
       deviceInfo: function () { return h.sync.bridge.DeviceInfo(); },
-      restart: function () { h.bridge.Restart(); }
+      restart: function () { h.bridge.Restart(); },
+      config: function (json) { h.bridge.Config(json); },
+      unpaired: function () { return h.sync.bridge.Unpaired(); }
     };
   } catch (e) {}
 })();";
+
+    private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
 
     private readonly Options options;
     private readonly InstanceStore store;
@@ -36,27 +42,20 @@ internal sealed class PlayerWindow : Window
     private readonly string playerUrl;
     private readonly WebView2 web = new();
     private readonly DispatcherTimer retry = new() { Interval = TimeSpan.FromSeconds(10) };
+    private InstanceSettings settings;
     private bool offlinePage;
 
     public PlayerWindow(Options options, InstanceStore store, string server)
     {
         this.options = options; this.store = store; this.server = server;
+        settings = store.Load();
         playerUrl = InstanceStore.PlayerUrl(server);
 
-        Title = options.Instance == "default" ? "Linkii Player" : $"Linkii Player – {options.Instance}";
         Background = new SolidColorBrush(Color.FromRgb(0x0B, 0x1F, 0x3A));
         WindowStartupLocation = WindowStartupLocation.Manual;
         Content = web;
         web.DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x0B, 0x1F, 0x3A);
-
-        if (options.Kiosk)
-        {
-            WindowStyle = WindowStyle.None;
-            ResizeMode = ResizeMode.NoResize;
-            Topmost = true;
-            Cursor = System.Windows.Input.Cursors.None;
-        }
-        else { Width = 1280; Height = 720; }
+        ApplyStyle();
 
         SourceInitialized += (_, _) => ApplyBounds();
         DpiChanged += (_, _) => Dispatcher.BeginInvoke(ApplyBounds);   // un moniteur d'une autre échelle ne doit pas redimensionner la fenêtre
@@ -66,16 +65,68 @@ internal sealed class PlayerWindow : Window
         Win.KeepAwake(true);
     }
 
-    /// <summary>Position et taille en pixels réels : le moniteur choisi en entier, ou la fenêtre de test demandée.</summary>
+    /// <summary>Plein écran (kiosque) ou fenêtre de test, selon les paramètres de l'écran.</summary>
+    private void ApplyStyle()
+    {
+        Title = settings.Name is { Length: > 0 } n ? $"Linkii Player – {n}" : "Linkii Player";
+        var kiosk = !settings.Windowed;
+        WindowStyle = kiosk ? WindowStyle.None : WindowStyle.SingleBorderWindow;
+        ResizeMode = kiosk ? ResizeMode.NoResize : ResizeMode.CanResize;
+        Topmost = kiosk;
+        Cursor = kiosk ? System.Windows.Input.Cursors.None : null;
+        if (web.CoreWebView2 is { } core) core.Settings.AreBrowserAcceleratorKeysEnabled = options.DevTools || !kiosk;   // en kiosque : ni F5, ni Ctrl+W, ni recherche
+    }
+
+    /// <summary>Position et taille en pixels réels : le moniteur choisi en entier, ou une fenêtre à la taille de la résolution (réduite si le moniteur est plus petit).</summary>
     private void ApplyBounds()
     {
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == IntPtr.Zero) return;
-        if (options.Window is { } w) { Win.SetWindowPos(hwnd, Win.NoTopMost, w.X, w.Y, w.W, w.H, Win.SWP_NOACTIVATE | Win.SWP_SHOWWINDOW); return; }
-        var m = Monitors.Get(options.Monitor);
-        if (options.Kiosk) { Win.SetWindowPos(hwnd, Win.TopMost, m.X, m.Y, m.Width, m.Height, Win.SWP_NOACTIVATE | Win.SWP_SHOWWINDOW); return; }
-        var cw = Math.Min(1280, m.Width - 80); var ch = Math.Min(720, m.Height - 120);   // fenêtre de test sans position : centrée sur le moniteur
-        Win.SetWindowPos(hwnd, Win.NoTopMost, m.X + (m.Width - cw) / 2, m.Y + (m.Height - ch) / 2, cw, ch, Win.SWP_NOACTIVATE | Win.SWP_SHOWWINDOW);
+        var m = Monitors.Get(settings.Monitor);
+        if (!settings.Windowed) { Win.SetWindowPos(hwnd, Win.TopMost, m.X, m.Y, m.Width, m.Height, Win.SWP_NOACTIVATE | Win.SWP_SHOWWINDOW); return; }
+        double w = Math.Max(320, settings.Width), h = Math.Max(180, settings.Height);
+        var k = Math.Min(1, Math.Min((m.Width - 80) / w, (m.Height - 120) / h));
+        int cw = (int)(w * k), ch = (int)(h * k);
+        var shift = options.Instance == "default" ? 0 : 40 * (1 + options.Instance.Sum(c => c) % 5);   // plusieurs fenêtres sur un moniteur : décalées
+        var x = Math.Clamp(m.X + (m.Width - cw) / 2 + shift, m.X, m.X + m.Width - cw);
+        var y = Math.Clamp(m.Y + (m.Height - ch) / 2 + shift, m.Y, m.Y + m.Height - ch);
+        Win.SetWindowPos(hwnd, Win.NoTopMost, x, y, cw, ch, Win.SWP_NOACTIVATE | Win.SWP_SHOWWINDOW);
+    }
+
+    private sealed record OpenDto(string? Instance, string? Token, string? Name, bool AutoStart, bool Windowed, int Monitor, int Width, int Height);
+    private sealed record ConfigDto(string? Name, bool AutoStart, bool Windowed, int Monitor, int Width, int Height, List<OpenDto>? Open);
+
+    /// <summary>Paramètres de l'appareil reçus du back-office : gardés, appliqués aussitôt (démarrage automatique, fenêtre, moniteur), écrans ajoutés ouverts.</summary>
+    private void OnConfig(string json)
+    {
+        ConfigDto? c;
+        try { c = JsonSerializer.Deserialize<ConfigDto>(json, Json); } catch { return; }
+        if (c == null) return;
+        var next = new InstanceSettings
+        {
+            Name = c.Name, AutoStart = c.AutoStart, Windowed = c.Windowed, Monitor = Math.Max(1, c.Monitor),
+            Width = c.Width > 0 ? c.Width : settings.Width, Height = c.Height > 0 ? c.Height : settings.Height
+        };   // Token : plus besoin, l'écran est connecté
+        var display = !next.SameDisplay(settings) || next.Name != settings.Name;
+        var changed = display || next.AutoStart != settings.AutoStart || settings.Token != null;
+        settings = next;
+        if (changed)
+        {
+            store.Save(settings);
+            AutoStart.Set(options.Instance, settings.AutoStart, options.Persistent);
+            Log.Write(store, $"paramètres reçus : démarrage auto {(settings.AutoStart ? "oui" : "non")}, {(settings.Windowed ? $"fenêtre {settings.Width}×{settings.Height}" : "plein écran")}, moniteur {settings.Monitor}");
+        }
+        if (display)
+        {
+            ApplyStyle();
+            Dispatcher.BeginInvoke(ApplyBounds, DispatcherPriority.ApplicationIdle);   // après le changement de style : WPF replace la fenêtre à sa façon, on la remet à sa place ensuite
+        }
+
+        foreach (var o in c.Open ?? new())
+        {
+            if (o.Instance is not { Length: > 0 } inst || o.Token is not { Length: > 0 } tok || !System.Text.RegularExpressions.Regex.IsMatch(inst, "^[A-Za-z0-9_-]{1,40}$")) continue;
+            Launcher.Open(inst, new InstanceSettings { Name = o.Name, Token = tok, AutoStart = o.AutoStart, Windowed = o.Windowed, Monitor = Math.Max(1, o.Monitor), Width = o.Width, Height = o.Height });
+        }
     }
 
     private async Task InitWebAsync()
@@ -108,10 +159,25 @@ internal sealed class PlayerWindow : Window
         core.Settings.IsStatusBarEnabled = false;
         core.Settings.IsPasswordAutosaveEnabled = false;
         core.Settings.IsGeneralAutofillEnabled = false;
-        core.Settings.AreBrowserAcceleratorKeysEnabled = options.DevTools || !options.Kiosk;   // en kiosque : ni F5, ni Ctrl+W, ni recherche
+        core.Settings.AreBrowserAcceleratorKeysEnabled = options.DevTools || settings.Windowed;
 
-        core.AddHostObjectToScript("bridge", new Bridge(options.Instance, () => Dispatcher.BeginInvoke(() => Application.Current.Shutdown(ExitRestart))));
+        core.AddHostObjectToScript("bridge", new Bridge(options.Instance,
+            () => Dispatcher.BeginInvoke(() => Application.Current.Shutdown(ExitRestart)),
+            json => Dispatcher.BeginInvoke(() => OnConfig(json)),
+            () =>
+            {
+                Log.Write(store, "écran supprimé dans le back-office : fermeture");
+                AutoStart.Set(options.Instance, false, options.Persistent);
+                Dispatcher.BeginInvoke(() => Application.Current.Shutdown(ExitRemoved));
+            }));
         await core.AddScriptToExecuteOnDocumentCreatedAsync(InitScript);
+        if (settings.Token is { } token)
+        {
+            // écran ajouté depuis le back-office : déjà appairé, le player démarre directement sur sa liste de lecture
+            var origin = new Uri(server).GetLeftPart(UriPartial.Authority);
+            await core.AddScriptToExecuteOnDocumentCreatedAsync(
+                $"try {{ if (location.origin === {JsonSerializer.Serialize(origin)}) localStorage.setItem('lk_token', {JsonSerializer.Serialize(token)}); }} catch (e) {{}}");
+        }
 
         core.NewWindowRequested += (_, e) => e.Handled = true;   // le player n'ouvre jamais de fenêtre
         core.NavigationCompleted += (_, e) =>

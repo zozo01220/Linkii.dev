@@ -5,29 +5,18 @@ namespace Linkii.Player;
 
 /// <summary>
 /// Linkii Player pour Windows. Un lancement normal démarre un superviseur sans fenêtre qui lance et relance le processus d'affichage
-/// (plantage, fenêtre figée, redémarrage demandé par le back-office). Une instance = un nom, un profil, un appairage.
+/// (plantage, fenêtre figée, redémarrage demandé par le back-office). Une instance = un écran du back-office : un profil, un appairage.
+/// Rien à régler sur le PC : l'adresse du serveur est intégrée, le reste (démarrage automatique, fenêtre, moniteur) vient du back-office.
 /// </summary>
 internal static class Program
 {
     [STAThread]
     private static int Main(string[] args)
     {
-        var o = Options.Parse(args, out var error);
-        if (error != null) { Info(error + "\n\n" + Options.Usage, true); return 2; }
-        if (o.Help) { Info(Options.Usage); return 0; }
-        if (o.ListMonitors)
-        {
-            Info(string.Join("\n", Monitors.All().Select(m => $"{m.Number}  {m.Name}  {m.Width} × {m.Height}  à ({m.X}, {m.Y}){(m.Primary ? "  principal" : "")}")));
-            return 0;
-        }
+        var o = Options.Parse(args);
+        if (o.Uninstall) { Uninstall(); return 0; }
 
         var store = new InstanceStore(o.Instance);
-        if (o.AutoStart != null)
-        {
-            AutoStart.Set(o.Instance, o.AutoStart == "on", o.Persistent);
-            Log.Write(store, "démarrage automatique : " + o.AutoStart);
-            if (o.AutoStart == "off") return 0;   // rien à lancer : on retire seulement l'entrée
-        }
 
         // une seule fois par instance et par session ; le processus d'affichage (--child) appartient au superviseur déjà propriétaire
         Mutex? mutex = null;
@@ -37,14 +26,13 @@ internal static class Program
             if (!created) return 0;   // déjà lancée
         }
 
-        if (o.Reset && !o.Child) { store.Reset(); Log.Write(store, "appairage oublié (--reset)"); }
-
-        return o.Child || o.NoSupervisor ? RunWindow(o, store) : Supervise(o, store);
+        return o.Child ? RunWindow(o, store) : Supervise(o, store);
     }
 
     private static int Supervise(Options o, InstanceStore store)
     {
         Log.Write(store, $"superviseur {Device.Version}, instance {o.Instance}");
+        AutoStart.Set(o.Instance, store.Load().AutoStart, o.Persistent);   // démarrage automatique : oui par défaut, puis selon le back-office
         var crashes = new Queue<DateTime>();
         while (true)
         {
@@ -65,6 +53,7 @@ internal static class Program
             child.WaitForExit();
             var code = child.ExitCode;
             Log.Write(store, $"affichage terminé, code {code}");
+            if (code == PlayerWindow.ExitRemoved) { store.Delete(); return 0; }   // écran supprimé : l'instance disparaît du PC
             if (code is 0 or PlayerWindow.ExitNoRuntime) return code;   // fermé à la main, ou WebView2 à installer
             if (code == PlayerWindow.ExitRestart) continue;
 
@@ -85,18 +74,18 @@ internal static class Program
             e.Handled = true;
             app.Shutdown(PlayerWindow.ExitBrowserCrash);   // le superviseur relance
         };
-
-        var server = InstanceStore.NormalizeServer(o.Server) ?? InstanceStore.NormalizeServer(store.SavedServer) ?? InstanceStore.NormalizeServer(InstanceStore.InstalledServer());
-        if (server == null)
-        {
-            server = InstanceStore.NormalizeServer(new ServerPrompt().Ask());
-            if (server == null) return 0;   // annulé
-        }
-        if (store.SavedServer != server) store.SavedServer = server;
-
-        return app.Run(new PlayerWindow(o, store, server));
+        return app.Run(new PlayerWindow(o, store, InstanceStore.Server()));
     }
 
-    private static void Info(string text, bool error = false) =>
-        MessageBox.Show(text, "Linkii Player", MessageBoxButton.OK, error ? MessageBoxImage.Error : MessageBoxImage.Information);
+    /// <summary>Désinstallation : les instances en cours s'arrêtent et plus aucune ne démarre avec la session.</summary>
+    private static void Uninstall()
+    {
+        AutoStart.RemoveAll();
+        var me = Environment.ProcessId;
+        foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(Environment.ProcessPath!)))
+        {
+            try { if (p.Id != me) p.Kill(true); } catch { }
+            finally { p.Dispose(); }
+        }
+    }
 }
