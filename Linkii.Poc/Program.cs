@@ -610,7 +610,7 @@ api.MapPost("/player/device", (HttpRequest req, DeviceDto body, JsonStore store)
     var s = Auth(req, db);
     if (Gate(s, db) is { } denied) return denied;
     static string? Clean(string? v, int max) => string.IsNullOrWhiteSpace(v) ? null : (v.Trim().Length > max ? v.Trim()[..max] : v.Trim());
-    s!.DeviceKind = body.Kind is "androidtv" or "android" ? body.Kind : "web";
+    s!.DeviceKind = body.Kind is "androidtv" or "android" or "windows" ? body.Kind : "web";
     s.DeviceOs = Clean(body.Os, 40); s.DeviceModel = Clean(body.Model, 60); s.DeviceApp = Clean(body.App, 20);
     s.DevicePinSig = Clean(body.PinSig, 16);
     if (body.BootMs is > 0) s.DeviceBootUtc = DateTimeOffset.FromUnixTimeMilliseconds(body.BootMs.Value).UtcDateTime;

@@ -588,7 +588,7 @@ public class Screen : IClientOwned, IAreaOwned
     public bool MirrorV { get; set; }
 
     // Appareil, remonté par le player (Android : système, modèle, version de l'application)
-    public string? DeviceKind { get; set; }        // androidtv | android | web
+    public string? DeviceKind { get; set; }        // androidtv | android | windows | web
     public string? DeviceOs { get; set; }          // « Android 14 »
     public string? DeviceModel { get; set; }
     public string? DeviceApp { get; set; }         // version de l'application Linkii Player
