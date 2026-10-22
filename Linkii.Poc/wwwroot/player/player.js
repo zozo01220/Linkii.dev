@@ -393,6 +393,46 @@
   // Anneau de l'app Android : tourne dès qu'une publication arrive, jusqu'à ce qu'elle soit prête.
   function working(on) { if (NATIVE && typeof window.LinkiiNative.working === 'function') { try { window.LinkiiNative.working(!!on); } catch (e) {} } }
 
+  /* ---------- Indicateur de publication (web, Windows) ----------
+     Même dessin que l'anneau de l'app Android, en bas à droite : publication reçue (anneau qui tourne autour d'une flèche), chargement
+     (l'anneau se remplit), prête (coche), puis il s'efface. Toujours actif, sans réglage. L'app Android garde son anneau natif (NATIVE) ;
+     l'aperçu du back-office n'en a pas. */
+  var dl = (function () {
+    var el, spin, arc, glyph, hideT, CIRC = 2 * Math.PI * 16;
+    function on() { return !PREVIEW && !NATIVE; }
+    function build() {
+      if (el) return;
+      var st = document.createElement('style');
+      st.textContent = '@keyframes lkspin{to{transform:rotate(360deg)}}';
+      document.head.appendChild(st);
+      el = document.createElement('div');
+      el.id = 'dlbadge';
+      el.setAttribute('aria-hidden', 'true');
+      el.style.cssText = 'position:fixed;right:16px;bottom:16px;width:44px;height:44px;z-index:900;pointer-events:none;opacity:0;transition:opacity .25s';
+      el.innerHTML = '<svg viewBox="0 0 44 44" width="44" height="44"><circle cx="22" cy="22" r="22" fill="rgba(11,31,58,.72)"/>' +
+        '<circle cx="22" cy="22" r="16" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="3"/>' +
+        '<g id="dlspin" style="transform-origin:22px 22px"><circle id="dlarc" cx="22" cy="22" r="16" fill="none" stroke="#4C9AFF" stroke-width="3" stroke-linecap="round" transform="rotate(-90 22 22)"/></g>' +
+        '<path id="dlglyph" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      document.body.appendChild(el);
+      spin = el.querySelector('#dlspin'); arc = el.querySelector('#dlarc'); glyph = el.querySelector('#dlglyph');
+    }
+    function show() { build(); clearTimeout(hideT); el.style.opacity = '1'; }
+    function hide(ms) { clearTimeout(hideT); hideT = setTimeout(function () { if (el) el.style.opacity = '0'; }, ms); }
+    function fill(f) {   // f < 0 : on ne sait pas encore (quart d'anneau qui tourne)
+      var turning = f < 0;
+      spin.style.animation = turning ? 'lkspin 1.1s linear infinite' : 'none';
+      arc.style.strokeDasharray = (turning ? CIRC / 4 : CIRC * Math.min(1, f)) + ' ' + CIRC;
+    }
+    return {
+      // la publication vient d'arriver : on ne sait pas encore ce qu'il y a à charger
+      receive: function () { if (!on()) return; show(); glyph.setAttribute('d', 'M22 15v13M17 23.5l5 5 5-5'); fill(-1); },
+      progress: function (f) { if (!on() || !el) return; fill(f > 0.001 ? f : -1); },
+      // prête : coche, puis l'indicateur s'efface
+      done: function () { if (!on() || !el) return; fill(1); glyph.setAttribute('d', 'M15.5 22.5l4.5 4.5 8.5-9'); hide(1500); },
+      fail: function () { if (!on() || !el) return; hide(400); }
+    };
+  })();
+
   function mediaUrls(items) {
     var urls = [];
     items.forEach(function (i) { if (i.url) urls.push(i.url); (i.urls || []).forEach(function (u) { if (urls.indexOf(u) === -1) urls.push(u); }); });   // apps de la médiathèque : tous leurs fichiers
@@ -416,18 +456,47 @@
     });
   }
 
-  function prefetch(items) {
+  // Télécharge un média dans le cache en comptant les octets reçus (onFraction : 0 à 1, seulement si le serveur annonce la taille du fichier).
+  function fetchToCache(cache, u, onFraction) {
+    return fetch(u, { headers: { 'X-Token': state.token || '' } }).then(function (r) {   // les médias sont protégés : jeton de l'écran
+      if (!r.ok) return;
+      var total = +r.headers.get('Content-Length') || 0;
+      if (!onFraction || !total || !r.body || typeof r.body.tee !== 'function') return cache.put(u, r);
+      var halves = r.body.tee(), reader = halves[1].getReader(), got = 0;
+      (function pump() {
+        return reader.read().then(function (x) { if (x.done) return; got += x.value.length; onFraction(Math.min(1, got / total)); return pump(); });
+      })().catch(function () {});
+      return cache.put(u, new Response(halves[0], { status: r.status, statusText: r.statusText, headers: r.headers }));
+    });
+  }
+
+  // onProgress (facultatif) : avancement 0 à 1 des fichiers à télécharger, pour l'indicateur de publication (le cache local gère ses propres fichiers).
+  function prefetch(items, onProgress) {
     if (NATIVE) return prefetchNative(items);
     if (!window.caches || PREVIEW) return Promise.resolve();   // aperçu : lecture en ligne, le cache d'un écran du même poste n'est pas touché
     return caches.open(CACHE).then(function (cache) {
       var urls = mediaUrls(items);
-      var adds = urls.map(function (u) {
-        return cache.match(u).then(function (hit) {
-          if (hit) return;
-          return fetch(u, { headers: { 'X-Token': state.token || '' } }).then(function (r) { if (r.ok) return cache.put(u, r); });   // les médias sont protégés : jeton de l'écran
-        }).catch(function () { /* quota atteint ou réseau coupé : ce média sera lu en ligne */ });
+      // d'abord ce qui manque, pour que la progression compte tous les fichiers dès le départ
+      var adds = Promise.all(urls.map(function (u) {
+        return cache.match(u).then(function (hit) { return hit ? null : u; }).catch(function () { return u; });
+      })).then(function (missing) {
+        missing = missing.filter(Boolean);
+        var part = {};
+        missing.forEach(function (u) { part[u] = 0; });
+        function report() {
+          if (!onProgress || !missing.length) return;
+          var sum = 0;
+          missing.forEach(function (u) { sum += part[u]; });
+          onProgress(sum / missing.length);
+        }
+        report();
+        return Promise.all(missing.map(function (u) {
+          return fetchToCache(cache, u, function (f) { part[u] = f; report(); })
+            .catch(function () { /* quota atteint ou réseau coupé : ce média sera lu en ligne */ })
+            .then(function () { part[u] = 1; report(); });
+        }));
       });
-      return Promise.all(adds).then(function () {
+      return adds.then(function () {
         // purge : on retire les médias qui ne sont plus dans la playlist
         return cache.keys().then(function (keys) {
           return Promise.all(keys.map(function (k) {
@@ -467,13 +536,15 @@
       if (state.pending && pl.version === state.pending.version) return;
       stage(pl.version, 'downloading');
       working(true);
-      return prefetch(allItems(pl)).then(function () {
+      dl.receive();
+      return prefetch(allItems(pl), dl.progress).then(function () {
         state.pending = pl;
         LS.setItem('lk_playlist', JSON.stringify(pl));
         stage(pl.version, 'ready');
         working(false);
+        dl.done();
         if (!state.timer) next(); // rien ne tourne : on démarre tout de suite
-      }, function (e) { working(false); throw e; });
+      }, function (e) { working(false); dl.fail(); throw e; });
     }).catch(function () {}).then(function () { refreshing = false; });
   }
 
