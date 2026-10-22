@@ -576,6 +576,19 @@ else
         };
         WriteList(d =>
         {
+            // Un contenu d'app (Canva, page web…) a ses propres réglages : la copie en reçoit une instance à elle, sinon changer l'un changerait l'autre.
+            // Fichiers image / vidéo et compositions restent partagés (on ne les modifie pas ici).
+            if (d.Media.FirstOrDefault(x => x.Id == it.MediaId) is { AppId: not null } src && src.AppId != Compositions.AppId)
+            {
+                var name = src.Name.Length > 70 ? src.Name[..70] : src.Name;
+                var inst = new MediaItem
+                {
+                    ClientId = src.ClientId, AreaId = src.AreaId, Name = name + " (copie)", Type = src.Type, AppId = src.AppId, AppVersion = src.AppVersion,
+                    Settings = new(src.Settings), Secrets = new(src.Secrets), Info = new(src.Info), FolderId = src.FolderId, OwnerId = src.OwnerId, AddedUtc = DateTime.UtcNow
+                };
+                d.Media.Add(inst);
+                copy.MediaId = inst.Id;
+            }
             var at = pl.Draft.IndexOf(it);
             pl.Draft.Insert(at < 0 ? pl.Draft.Count : at + 1, copy);
             pl.Touch();

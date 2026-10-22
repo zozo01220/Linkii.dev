@@ -297,6 +297,25 @@ else
     </div>
 }
 
+@if (detailId is { } dtId && DetailsHref(dtId) is { } dtHref && Svc.Find(dtHref["/apps/".Length..]) is { } dt)
+{
+    @* Fiche de l'intégration : tiroir du haut, moitié centrée, un seul bouton centré en bas *@
+    <div class="modal-backdrop" @onclick="() => detailId = null"></div>
+    <div class="cw-top cw-half" role="dialog" aria-modal="true" aria-labelledby="dt-title">
+        <div class="cw-wrap">
+            <div class="cw-head">
+                <AppIcon Id="@dtId" />
+                <div class="grow">
+                    <h3 id="dt-title">@dt.Name</h3>
+                    <small>@dt.Category · version @dt.Version</small>
+                </div>
+            </div>
+            <div class="cw-body"><AppDetailBody App="dt" /></div>
+            <div class="cw-foot center"><button type="button" class="btn" @onclick="() => detailId = null">Fermer</button></div>
+        </div>
+    </div>
+}
+
 @if (appDrawer is { } did && Svc.Find(did) is { } dm)
 {
     @* Tiroir d'une intégration simple : ce qu'elle fait, le compte qu'elle demande, et son usage. Ouvert par « Utiliser » (Store) ou « Gérer » / « Corriger » (Mes intégrations). *@
@@ -467,6 +486,7 @@ else
     private string? pendingUse;         // intégration que « Utiliser » vient d'ouvrir : à la fermeture du tiroir, on la montre dans Mes intégrations
     private string? flashInt;           // intégration mise en évidence un instant dans Mes intégrations
     private bool revealPending;
+    private string? detailId;          // entrée dont le tiroir « Détails » (fiche de l'app) est ouvert
     private string? appDrawer;          // intégration simple (app) dont le tiroir est ouvert
     private bool focusPending;
     private readonly Dictionary<string, ElementReference> accRefs = new();
@@ -714,7 +734,8 @@ else
         {
             <div class="kebab-backdrop" @onclick="() => menuId = null"></div>
             <div class="kebab-menu" role="menu">
-                @if (DetailsHref(e.Id) is { } href) { <a role="menuitem" href="@href"><Ico Name="info" Size="16" /> Détails</a> }
+                @if (DetailsHref(e.Id) != null) { <button type="button" role="menuitem" @onclick="() => { menuId = null; detailId = e.Id; }"><Ico Name="info" Size="16" /> Détails</button> }
+                @ToggleItemOf(e)
                 @if (HasWizard(e.Id) && admin)
                 {
                     <button type="button" role="menuitem" @onclick="() => { menuId = null; OpenWizard(e.Id, 2, false); }"><Ico Name="folder" Size="16" /> @ManageLabel(e.Id)</button>
@@ -731,20 +752,12 @@ else
         }
     </div>;
 
-    /// <summary>Interrupteur d'activation d'une intégration de Mes intégrations (Home Assistant n'en a pas : son compte se gère dans sa fenêtre).</summary>
-    private RenderFragment SwitchOf(CatalogView.Entry e) => @<text>
-        @if (e.Id == "ha-home") { }
-        else if (CalSource(e) is { } src)
-        {
-            <button type="button" class="switch @(e.Off ? "" : "on")" role="switch" aria-checked="@(e.Off ? "false" : "true")" aria-label="@e.Name active" @onclick="() => ToggleSource(src)"><span></span></button>
-        }
-        else if (DrvSource(e) is { } drv)
-        {
-            <button type="button" class="switch @(e.Off ? "" : "on")" role="switch" aria-checked="@(e.Off ? "false" : "true")" aria-label="@e.Name active" @onclick="() => ToggleDrive(drv)"><span></span></button>
-        }
+    /// <summary>Entrée « Activer / Désactiver » du menu ⋯ (Home Assistant n'en a pas : son compte se gère dans sa fenêtre).</summary>
+    private RenderFragment ToggleItemOf(CatalogView.Entry e) => @<text>
+        @if (e.Id == "ha-home" || !admin) { }
         else
         {
-            <button type="button" class="switch @(e.Off ? "" : "on")" role="switch" aria-checked="@(e.Off ? "false" : "true")" aria-label="@e.Name active" @onclick="() => Toggle(e)"><span></span></button>
+            <button type="button" role="menuitem" @onclick="() => { menuId = null; if (CalSource(e) is { } src) ToggleSource(src); else if (DrvSource(e) is { } drv) ToggleDrive(drv); else Toggle(e); }"><Ico Name="power" Size="16" /> @(e.Off ? "Activer" : "Désactiver")</button>
         }
     </text>;
 
@@ -756,7 +769,7 @@ else
 
     /// <summary>Nom : lien vers le détail dans le Store, simple texte dans Mes intégrations (le détail est dans le menu ⋯).</summary>
     private RenderFragment NameOf(CatalogView.Entry e, bool store) => @<text>
-        @if (store && DetailsHref(e.Id) is { } href) { <a class="cat-name int-link" href="@href" title="Voir le détail de @e.Name">@e.Name</a> }
+        @if (store && DetailsHref(e.Id) is { } href) { <a class="cat-name int-link" href="@href" title="Voir le détail de @e.Name" @onclick="() => detailId = e.Id" @onclick:preventDefault="true">@e.Name</a> }
         else { <span class="cat-name">@e.Name</span> }
     </text>;
 
@@ -775,7 +788,6 @@ else
                 @if (!store) { @StateDot(e) }
                 <div class="int-nm">@NameOf(e, store)</div>
                 <span class="grow"></span>
-                @if (!store && admin) { @SwitchOf(e) }
             </div>
             <div class="int-sub @(store ? "long" : "")" title="@(store ? e.Summary : UsageLine(e.Id))">@(store ? e.Summary : UsageLine(e.Id))</div>
             @if (!store && ConnectedAccounts.For(e.Id) is { } ak && AccountOf(ak) is { } ac)
@@ -809,7 +821,6 @@ else
                 else if (admin)
                 {
                     @if (err) { <button type="button" class="btn danger-solid sm" @onclick="() => OpenFor(e)">Corriger</button> }
-                    @SwitchOf(e)
                     @KebabOf(e)
                 }
             </span>
