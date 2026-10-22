@@ -1885,3 +1885,9 @@ Maquette validée : `maquettes/widgets-carte-proposition-v2.html`. Page `Widgets
 - **Désactivée** : icône grisée, fond rayé, pied gris (même langage que les intégrations).
 - Non repris de la maquette : les lignes « Période » et « Source » du tiroir, qui n'existent pas pour tous les widgets. À ajouter si les réglages les fournissent.
 - Vérifié : 9 cartes, pastilles, menu (« Désactiver »), tiroir (aperçu, pastille, description, écrans). Non vu : rendu visuel exact (capture trop petite), vue Liste, mobile.
+
+## 97. Ligne du design Canva qui débordait après remplacement (22 octobre 2026) : corrigé, vérifié sur une reproduction
+
+- **Cause** : `.cv` était une grille sans largeur bornée. Le nom du design (sans retour à la ligne) imposait sa largeur à la ligne ; la carte de 520 px était dépassée (749 px mesurés).
+- **Correction** : `.cv` a une colonne `minmax(0, 1fr)`. La ligne tient dans la carte (486 px pour 520 px), le nom se tronque avec « … », et le choix « Pages en images / Vidéo » passe dessous (comportement du §93).
+- **Vérifié** : sur une reproduction HTML (markup de `CanvaField`, `app.css` réel) : avant 749 px, après 486 px. Non revérifié dans l'éditeur réel (le Canva n'y est pas connecté sur l'instance de test).
