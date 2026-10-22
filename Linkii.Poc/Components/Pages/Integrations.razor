@@ -110,7 +110,7 @@
             {
                 <h2 class="cat-group">@g.Title <span class="cat-count">@g.Items.Count</span></h2>
                 <div class="int-grid">
-                    @foreach (var e in g.Items) { @IntCard(e, store, pickable, g.Title ?? "") }
+                    @foreach (var e in g.Items) { @IntCard(e, store, pickable) }
                 </div>
             }
         }
@@ -300,7 +300,7 @@ else
 @if (detailId is { } dtId && DetailsHref(dtId) is { } dtHref && Svc.Find(dtHref["/apps/".Length..]) is { } dt)
 {
     @* Fiche de l'intégration : tiroir du haut, moitié centrée, un seul bouton centré en bas *@
-    <div class="modal-backdrop" @onclick="() => detailId = null"></div>
+    <div class="modal-backdrop" @onclick="CloseDetails"></div>
     <div class="cw-top cw-half" role="dialog" aria-modal="true" aria-labelledby="dt-title">
         <div class="cw-wrap">
             <div class="cw-head">
@@ -309,9 +309,24 @@ else
                     <h3 id="dt-title">@dt.Name</h3>
                     <small>@dt.Category · version @dt.Version</small>
                 </div>
+                @if (detailEntry is { } de)
+                {
+                    @if (tab == "store") { <button type="button" class="btn-use" @onclick="() => { CloseDetails(); Use(de); }">Utiliser</button> }
+                    else { @PillOf(de) }
+                }
             </div>
-            <div class="cw-body"><AppDetailBody App="dt" /></div>
-            <div class="cw-foot center"><button type="button" class="btn" @onclick="() => detailId = null">Fermer</button></div>
+            <div class="cw-body">
+                <AppDetailBody App="dt" />
+                @if (detailEntry is { } de2 && tab != "store")
+                {
+                    <dl class="int-kv">
+                        <dt>Compte requis</dt><dd>@AccountRequired(de2.Id)</dd>
+                        <dt>Utilisée dans</dt><dd>@UsageText(de2.Id)</dd>
+                        <dt>Compte connecté</dt><dd>@ConnectedUser(de2.Id)</dd>
+                    </dl>
+                }
+            </div>
+            <div class="cw-foot center"><button type="button" class="btn" @onclick="CloseDetails">Fermer</button></div>
         </div>
     </div>
 }
@@ -487,6 +502,7 @@ else
     private string? flashInt;           // intégration mise en évidence un instant dans Mes intégrations
     private bool revealPending;
     private string? detailId;          // entrée dont le tiroir « Détails » (fiche de l'app) est ouvert
+    private CatalogView.Entry? detailEntry;   // la même entrée, pour sa pastille d'état ou son bouton Utiliser
     private string? appDrawer;          // intégration simple (app) dont le tiroir est ouvert
     private bool focusPending;
     private readonly Dictionary<string, ElementReference> accRefs = new();
@@ -734,7 +750,6 @@ else
         {
             <div class="kebab-backdrop" @onclick="() => menuId = null"></div>
             <div class="kebab-menu" role="menu">
-                @if (DetailsHref(e.Id) != null) { <button type="button" role="menuitem" @onclick="() => { menuId = null; detailId = e.Id; }"><Ico Name="info" Size="16" /> Détails</button> }
                 @if (HasWizard(e.Id) && admin)
                 {
                     <button type="button" role="menuitem" @onclick="() => { menuId = null; OpenWizard(e.Id, 2, false); }"><Ico Name="folder" Size="16" /> @ManageLabel(e.Id)</button>
@@ -768,11 +783,28 @@ else
 
     /// <summary>Nom : lien vers le détail dans le Store, simple texte dans Mes intégrations (le détail est dans le menu ⋯).</summary>
     private RenderFragment NameOf(CatalogView.Entry e, bool store) => @<text>
-        @if (store && DetailsHref(e.Id) is { } href) { <a class="cat-name int-link" href="@href" title="Voir le détail de @e.Name" @onclick="() => detailId = e.Id" @onclick:preventDefault="true">@e.Name</a> }
+        @if (store && DetailsHref(e.Id) is { } href) { <a class="cat-name int-link" href="@href" title="Voir le détail de @e.Name" @onclick="() => OpenDetails(e)" @onclick:preventDefault="true">@e.Name</a> }
         else { <span class="cat-name">@e.Name</span> }
     </text>;
 
-    private RenderFragment IntCard(CatalogView.Entry e, bool store, bool pickable, string category = "")
+    /// <summary>Ouvre le tiroir Détails d'une intégration (bouton i de la carte, ou nom dans la liste du Store).</summary>
+    private void OpenDetails(CatalogView.Entry e) { menuId = null; detailId = e.Id; detailEntry = e; }
+
+    private void CloseDetails() { detailId = null; detailEntry = null; }
+
+    /// <summary>Pastille d'état : Erreur (rouge), Désactivée (grise) ou Active (verte).</summary>
+    private RenderFragment PillOf(CatalogView.Entry e)
+    {
+        var err = e.StatusCss == "hors-ligne" && !e.Off;
+        var (css, text) = err ? ("bad", "Erreur") : e.Off ? ("off", "Désactivée") : ("ok", "Active");
+        return @<span class="int-pill @css"><i></i>@text</span>;
+    }
+
+    private string AccountRequired(string id) => ConnectedAccounts.For(id) is { } k ? ConnectedAccounts.Kind(k).Name : "Aucun";
+
+    private string ConnectedUser(string id) => ConnectedAccounts.For(id) is { } k && AccountOf(k) is { Lost: false, User.Length: > 0 } a ? a.User : "—";
+
+    private RenderFragment IntCard(CatalogView.Entry e, bool store, bool pickable)
     {
         var err = !store && e.StatusCss == "hors-ligne" && !e.Off;
         var acc = !store && ConnectedAccounts.For(e.Id) is { } ak ? AccountOf(ak) : null;
@@ -781,11 +813,11 @@ else
             <div class="int-top">
                 <div class="int-logo" aria-hidden="true">@TileOf(e)</div>
                 <div class="int-txt">
-                    <div class="int-nm">@NameOf(e, store)</div>
+                    <div class="int-nm"><span class="cat-name">@e.Name</span></div>
                     <div class="int-sub" title="@sub">@sub</div>
                 </div>
-                @if (store) { @if (category.Length > 0) { <span class="int-tag">@category</span> } }
-                else if (pickable) { @KebabOf(e) }
+                @if (DetailsHref(e.Id) is not null) { <button type="button" class="int-info" title="Détails" aria-label="Détails de @e.Name" @onclick="() => OpenDetails(e)">i</button> }
+                @if (!store && pickable) { @KebabOf(e) }
             </div>
             <div class="int-foot">
                 @if (store)
@@ -798,13 +830,13 @@ else
                 {
                     @if (admin) { <button type="button" class="linklike grow int-fix" title="@e.StatusTitle" @onclick="() => OpenFor(e)">@(e.StatusTitle is { Length: > 0 } why ? why : "Corriger la configuration")</button> }
                     else { <span class="grow">@e.StatusTitle</span> }
-                    <span class="int-pill bad"><i></i>Erreur</span>
+                    @PillOf(e)
                 }
                 else
                 {
                     <span class="int-use">@UsageText(e.Id)</span>
                     <span class="grow"></span>
-                    <span class="int-pill @(e.Off ? "off" : "ok")"><i></i>@(e.Off ? "Désactivée" : "Active")</span>
+                    @PillOf(e)
                 }
             </div>
         </article>;

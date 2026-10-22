@@ -1865,3 +1865,13 @@ Maquette validée : `maquettes/integrations-carte-epuree.html`. `Integrations.In
 - **Store** : étiquette de la catégorie en haut à droite, pied = prérequis (`Need`) + bouton orange Utiliser.
 - Case de sélection (actions groupées) : visible au survol ou cochée, posée en coin de carte pour ne pas toucher la mise en page. Grille à 300 px minimum (une colonne sur mobile). Les lignes de la vue Liste ne changent pas. Le bloc compte, la ligne d'usage et le point d'état des anciennes cartes disparaissent (CSS de la carte en fin de `app.css`).
 - Vu : cartes actives et désactivée (menu Désactiver / Activer, non rogné), Store. Non vu : carte en erreur, mobile.
+
+## 95. Bouton i sur les cartes et tiroir Détails (22 octobre 2026) : codé, vérifié dans le navigateur (Mes intégrations et Store)
+
+Maquette validée : `maquettes/integrations-carte-info.html`.
+- **Bouton i** (`int-info`) : petit « i » italique en serif, rond gris, bleu au survol, en en-tête de carte à gauche du ⋮. Il ouvre le tiroir Détails (`OpenDetails`). Absent quand l'intégration n'a pas de page de détails (Home Assistant).
+- **Store** : le bouton i remplace l'étiquette de catégorie (qui reste visible dans la vue Liste). Le nom de la carte n'est plus cliquable.
+- **Menu ⋮** : « Détails » retiré.
+- **Tiroir Détails** (même gabarit que l'existant) : pastille d'état dans l'en-tête (Active / Désactivée / Erreur) dans Mes intégrations ; bouton orange « Utiliser » à sa place dans le Store. Dans Mes intégrations, un bloc sous la fiche : Compte requis, Utilisée dans, Compte connecté (`int-kv`). Dans le Store, pas de bloc.
+- **Code** : `detailEntry` garde l'entrée ouverte pour sa pastille et son bouton ; `CloseDetails` remet les deux à zéro ; `PillOf` sert aux cartes et au tiroir ; `AccountRequired`, `ConnectedUser` alimentent le bloc.
+- Vérifié : bouton i ouvre le tiroir (Vidéo désactivée : pastille, bloc), Store (Utiliser, pas de bloc), menu ⋮ sans Détails. Non vu : la capture visuelle (le rendu du navigateur n'a pas répondu), la carte en erreur, la vue Liste.
