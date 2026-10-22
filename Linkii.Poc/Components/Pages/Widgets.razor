@@ -30,9 +30,9 @@
 {
     <div class="card empty"><div class="big">Aucun widget trouvé</div></div>
 }
-else
+else if (view == "list")
 {
-    <CatalogView Groups="Groups" View="@view" Compact="true" Noun="Widget" UsageLabel="Utilisé sur">
+    <CatalogView Groups="Groups" View="list" Compact="true" Noun="Widget" UsageLabel="Utilisé sur">
         <Usage>
             @{ var n = screens.GetValueOrDefault(context.Id); }
             <span class="cat-used"><Ico Name="monitor" Size="14" /> @(n == 0 ? "Aucun écran" : $"{n} écran{(n > 1 ? "s" : "")}")</span>
@@ -40,33 +40,37 @@ else
         <Actions>
             @if (admin) { <button type="button" class="switch @(context.Off ? "" : "on")" role="switch" aria-checked="@(context.Off ? "false" : "true")" aria-label="@context.Name actif" @onclick="() => Toggle(context)"><span></span></button> }
         </Actions>
-        <Preview>
-            @switch (context.Id)
-            {
-                case "clock":
-                    <span class="cat-pv-clock">14:32</span>
-                    break;
-                case "weather":
-                    <span class="cat-pv-weather"><Ico Name="sun" Size="12" /> 17°</span>
-                    break;
-                case "qrcode":
-                    <span class="cat-pv-clock"><Ico Name="qr" Size="20" /></span>
-                    break;
-                case "countdown":
-                    <span class="cat-pv-clock">J-12</span>
-                    break;
-                case "quote":
-                    <span class="cat-pv-band">« Une citation par jour »</span>
-                    break;
-                case "text":
-                    <span class="cat-pv-band">Réunion générale jeudi 9 h</span>
-                    break;
-                default:
-                    <span class="cat-pv-clock"><Ico Name="monitor" Size="16" /></span>
-                    break;
-            }
-        </Preview>
     </CatalogView>
+}
+else
+{
+    <div class="wg-grid">
+        @foreach (var e in Groups[0].Items) { @WidgetCard(e) }
+    </div>
+}
+
+@if (detail is { } d)
+{
+    @* Tiroir Détails : aperçu, état, description et écrans (même gabarit que le tiroir des intégrations) *@
+    <div class="modal-backdrop" @onclick="CloseDetail"></div>
+    <div class="cw-top cw-half" role="dialog" aria-modal="true" aria-labelledby="wg-title">
+        <div class="cw-wrap">
+            <div class="cw-head">
+                <AppIcon Id="@d.Icon" />
+                <div class="grow">
+                    <h3 id="wg-title">@d.Name</h3>
+                    <small>@d.Caption</small>
+                </div>
+                <span class="int-pill @(d.Off ? "off" : "ok")"><i></i>@(d.Off ? "Inactif" : "Actif")</span>
+            </div>
+            <div class="cw-body">
+                <div class="wg-dpv">@PreviewOf(d)</div>
+                <p class="wg-ddesc">@d.Summary</p>
+                <dl class="int-kv"><dt>Écrans</dt><dd>@ScreensText(d.Id)</dd></dl>
+            </div>
+            <div class="cw-foot center"><button type="button" class="btn" @onclick="CloseDetail">Fermer</button></div>
+        </div>
+    </div>
 }
 
 @code {
@@ -74,6 +78,8 @@ else
     private HashSet<string> enabled = new();
     private bool admin = true;   // un membre voit seulement les widgets de son niveau de droits, sans pouvoir les activer
     private Dictionary<string, int> screens = new();   // écrans qui portent au moins un widget de ce type
+    private string? menuId;                          // carte dont le menu ⋮ est ouvert
+    private CatalogView.Entry? detail;               // widget dont le tiroir Détails est ouvert
 
     private List<CatalogView.Group> Groups => new()
     {
@@ -103,4 +109,73 @@ else
         Toast.Ok(on ? $"« {a.Name} » activé : il est proposé dans l'édition des écrans." : $"« {a.Name} » désactivé.{still}");
         Load();
     }
+
+    private string ScreensText(string id)
+    {
+        var n = screens.GetValueOrDefault(id);
+        return n == 0 ? "Aucun écran" : $"{n} écran{(n > 1 ? "s" : "")}";
+    }
+
+    private void OpenDetail(CatalogView.Entry e) { menuId = null; detail = e; }
+
+    private void CloseDetail() => detail = null;
+
+    /// <summary>Carte d'un widget : icône, nom, i, ⋮ ; description ; pied avec l'état et le nombre d'écrans.</summary>
+    private RenderFragment WidgetCard(CatalogView.Entry e) => @<article id="cat-@e.Id" class="wg-card @(e.Off ? "off" : "")">
+        <div class="wg-top">
+            <AppIcon Id="@e.Icon" />
+            <div class="wg-id">
+                <span class="wg-name">@e.Name</span>
+                <small>@e.Caption</small>
+            </div>
+            <button type="button" class="wg-info" title="Détails" aria-label="Détails de @e.Name" @onclick="() => OpenDetail(e)">i</button>
+            @if (admin)
+            {
+                <div class="kebab" @onclick:stopPropagation="true">
+                    <button type="button" class="kebab-btn" aria-haspopup="menu" aria-expanded="@(menuId == e.Id ? "true" : "false")" aria-label="Actions pour @e.Name" @onclick="() => menuId = menuId == e.Id ? null : e.Id"><Ico Name="dots-v" Size="18" /></button>
+                    @if (menuId == e.Id)
+                    {
+                        <div class="kebab-backdrop" @onclick="() => menuId = null"></div>
+                        <div class="kebab-menu" role="menu">
+                            <button type="button" role="menuitem" @onclick="() => { menuId = null; Toggle(e); }">@(e.Off ? "Activer" : "Désactiver")</button>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+        <p class="wg-desc">@e.Summary</p>
+        <div class="wg-foot">
+            <span class="int-pill @(e.Off ? "off" : "ok")"><i></i>@(e.Off ? "Inactif" : "Actif")</span>
+            <span class="grow"></span>
+            <span class="cat-used"><Ico Name="monitor" Size="14" /> @ScreensText(e.Id)</span>
+        </div>
+    </article>;
+
+    /// <summary>Mini-écran montrant où le widget se pose (tiroir Détails).</summary>
+    private RenderFragment PreviewOf(CatalogView.Entry e) => @<text>
+        @switch (e.Id)
+        {
+            case "clock":
+                <span class="cat-pv-clock">14:32</span>
+                break;
+            case "weather":
+                <span class="cat-pv-weather"><Ico Name="sun" Size="12" /> 17°</span>
+                break;
+            case "qrcode":
+                <span class="cat-pv-clock"><Ico Name="qr" Size="20" /></span>
+                break;
+            case "countdown":
+                <span class="cat-pv-clock">J-12</span>
+                break;
+            case "quote":
+                <span class="cat-pv-band">« Une citation par jour »</span>
+                break;
+            case "text":
+                <span class="cat-pv-band">Réunion générale jeudi 9 h</span>
+                break;
+            default:
+                <span class="cat-pv-clock"><Ico Name="monitor" Size="16" /></span>
+                break;
+        }
+    </text>;
 }

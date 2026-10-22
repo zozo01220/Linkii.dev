@@ -1875,3 +1875,13 @@ Maquette validée : `maquettes/integrations-carte-info.html`.
 - **Tiroir Détails** (même gabarit que l'existant) : pastille d'état dans l'en-tête (Active / Désactivée / Erreur) dans Mes intégrations ; bouton orange « Utiliser » à sa place dans le Store. Dans Mes intégrations, un bloc sous la fiche : Compte requis, Utilisée dans, Compte connecté (`int-kv`). Dans le Store, pas de bloc.
 - **Code** : `detailEntry` garde l'entrée ouverte pour sa pastille et son bouton ; `CloseDetails` remet les deux à zéro ; `PillOf` sert aux cartes et au tiroir ; `AccountRequired`, `ConnectedUser` alimentent le bloc.
 - Vérifié : bouton i ouvre le tiroir (Vidéo désactivée : pastille, bloc), Store (Utiliser, pas de bloc), menu ⋮ sans Détails. Non vu : la capture visuelle (le rendu du navigateur n'a pas répondu), la carte en erreur, la vue Liste.
+
+## 96. Cartes des widgets épurées, aperçu dans le tiroir Détails (22 octobre 2026) : codé, vérifié dans le navigateur (cartes, menu, tiroir)
+
+Maquette validée : `maquettes/widgets-carte-proposition-v2.html`. Page `Widgets.razor` : la vue Cartes a son propre markup (`WidgetCard`) ; la vue Liste reste sur `CatalogView` (inchangée, interrupteur conservé).
+- **Carte** : icône (`AppIcon`, inchangée), nom, catégorie en sous-titre, bouton i (ouvre le tiroir), ⋮ ; description sur deux lignes ; pied avec la pastille Actif / Inactif et le nombre d'écrans. Plus d'aperçu, plus d'interrupteur.
+- **Menu ⋮** : une seule entrée, « Désactiver » ou « Activer ». « Gérer », « Placer sur un écran… » et « Retirer » ne sont pas repris.
+- **Tiroir Détails** (`detail`, `CloseDetail`) : aperçu 170 px (`PreviewOf`, le même code qu'avant, déplacé), pastille, description, « Écrans » (nombre réel).
+- **Désactivée** : icône grisée, fond rayé, pied gris (même langage que les intégrations).
+- Non repris de la maquette : les lignes « Période » et « Source » du tiroir, qui n'existent pas pour tous les widgets. À ajouter si les réglages les fournissent.
+- Vérifié : 9 cartes, pastilles, menu (« Désactiver »), tiroir (aperçu, pastille, description, écrans). Non vu : rendu visuel exact (capture trop petite), vue Liste, mobile.
