@@ -110,7 +110,7 @@
             {
                 <h2 class="cat-group">@g.Title <span class="cat-count">@g.Items.Count</span></h2>
                 <div class="int-grid">
-                    @foreach (var e in g.Items) { @IntCard(e, store, pickable) }
+                    @foreach (var e in g.Items) { @IntCard(e, store, pickable, g.Title ?? "") }
                 </div>
             }
         }
@@ -773,30 +773,42 @@ else
         else { <span class="cat-name">@e.Name</span> }
     </text>;
 
-    private RenderFragment IntCard(CatalogView.Entry e, bool store, bool pickable)
+    private RenderFragment IntCard(CatalogView.Entry e, bool store, bool pickable, string category = "")
     {
         var err = !store && e.StatusCss == "hors-ligne" && !e.Off;
+        var acc = !store && ConnectedAccounts.For(e.Id) is { } ak ? AccountOf(ak) : null;
+        var sub = acc is { Lost: false, User.Length: > 0 } ? acc.User : acc is { Lost: true } ? "Connexion expirée" : e.Summary;
         return @<article id="cat-@e.Id" class="int-card @(err ? "err" : "") @(!store && e.Off ? "off" : "") @(selected.Contains(e.Id) ? "sel" : "") @(flashInt == e.Id ? "flash" : "")">
-            <div class="int-tl">
-                @if (store) { <span class="int-req">@Need(e.Id)</span> }
-                else if (pickable) { <input type="checkbox" class="sc-check" checked="@selected.Contains(e.Id)" @onchange="() => TogglePick(e.Id)" aria-label="Sélectionner @e.Name" /> }
-                <span class="grow"></span>
-                @if (pickable) { @KebabOf(e) }
+            <div class="int-top">
+                @if (!store && pickable) { <input type="checkbox" class="sc-check int-pick" checked="@selected.Contains(e.Id)" @onchange="() => TogglePick(e.Id)" aria-label="Sélectionner @e.Name" /> }
+                <div class="int-logo" aria-hidden="true">@TileOf(e)</div>
+                <div class="int-txt">
+                    <div class="int-nm">@NameOf(e, store)</div>
+                    <div class="int-sub" title="@sub">@sub</div>
+                </div>
+                @if (store) { @if (category.Length > 0) { <span class="int-tag">@category</span> } }
+                else if (pickable) { @KebabOf(e) }
             </div>
-            <div class="int-pv" aria-hidden="true">@TileOf(e)</div>
-            <div class="int-nmrow">
-                @if (!store) { @StateDot(e) }
-                <div class="int-nm">@NameOf(e, store)</div>
-                <span class="grow"></span>
+            <div class="int-foot">
+                @if (store)
+                {
+                    <span class="int-need">@Need(e.Id)</span>
+                    <span class="grow"></span>
+                    <button type="button" class="btn-use" @onclick="() => Use(e)">Utiliser</button>
+                }
+                else if (err)
+                {
+                    @if (admin) { <button type="button" class="linklike grow int-fix" title="@e.StatusTitle" @onclick="() => OpenFor(e)">@(e.StatusTitle is { Length: > 0 } why ? why : "Corriger la configuration")</button> }
+                    else { <span class="grow">@e.StatusTitle</span> }
+                    <span class="int-pill bad"><i></i>Erreur</span>
+                }
+                else
+                {
+                    <span class="int-use">@UsageText(e.Id)</span>
+                    <span class="grow"></span>
+                    <span class="int-pill @(e.Off ? "off" : "ok")"><i></i>@(e.Off ? "Désactivée" : "Active")</span>
+                }
             </div>
-            <div class="int-sub @(store ? "long" : "")" title="@(store ? e.Summary : UsageLine(e.Id))">@(store ? e.Summary : UsageLine(e.Id))</div>
-            @if (!store && ConnectedAccounts.For(e.Id) is { } ak && AccountOf(ak) is { } ac)
-            {
-                <div class="int-acct"><span class="int-av">@Initials(ac.User)</span><div><b>@(ac.User.Length > 0 ? ac.User : ac.Kind)</b><small><span class="int-dot @(ac.Lost ? "bad" : "")"></span>@(ac.Lost ? "Connexion expirée" : ac.Since is { } sn ? $"Connecté le {sn.ToLocalTime():dd.MM.yyyy}" : "Connecté")</small></div></div>
-            }
-            @if (err && e.StatusTitle is { Length: > 0 } why) { <div class="cat-err" role="alert"><Ico Name="alert" Size="15" /><span>@why</span></div> }
-            @if (store) { <div class="int-foot"><span class="grow"></span><button type="button" class="btn-use" @onclick="() => Use(e)">Utiliser</button></div> }
-            else if (err && admin) { <div class="int-foot"><button type="button" class="btn danger-solid sm" @onclick="() => OpenFor(e)">Corriger</button></div> }
         </article>;
     }
 
