@@ -1,6 +1,8 @@
 @inject TenantStore Store
 @inject CloudFileService Cloud
 @inject PdfService Pdf
+@inject LocalDocuments Documents
+@inject AppService Apps
 @inject Toaster Toast
 
 @* Documents des intégrations, importés depuis le bouton « Importer » de la médiathèque (DEV-POC.md §103) : un PDF de l'ordinateur, un fichier OneDrive ou
@@ -8,17 +10,25 @@
    du dossier « intégration_médias » (PowerPoint_médias, PDF_médias, GoogleSlides_médias…). Un fichier déjà converti est réutilisé en silence. *@
 <section class="di" aria-label="Documents">
     <h4>Documents</h4>
-    <p class="hint">PDF, PowerPoint, Word, Excel, Google Slides, Docs et Sheets : chaque page devient une image, rangée dans une présentation du dossier « …_médias ».</p>
+    <p class="hint">PDF, PowerPoint, Word, Excel (depuis l'ordinateur ou OneDrive), Google Slides, Docs et Sheets : chaque page devient une image, rangée dans une présentation du dossier « …_médias ».</p>
     <div class="di-btns">
-        <label class="btn ghost sm file-btn @(busy ? "disabled" : "")">
-            <InputFile OnChange="PickPdf" accept=".pdf,application/pdf" disabled="@busy" />
-            <Ico Name="upload" Size="15" /> PDF de l'ordinateur
-        </label>
+        @if (LocalDocuments.AllowedExtensions(Apps.IsInstalled) is { Count: > 0 } localExts)
+        {
+            @* les types acceptés suivent les intégrations installées (PowerPoint ; Document PDF pour PDF, Word, Excel) *@
+            <label class="btn ghost sm file-btn @(busy ? "disabled" : "")" title="@LocalDocuments.FormatsText(Apps.IsInstalled)">
+                <InputFile OnChange="PickLocal" accept="@string.Join(",", localExts)" disabled="@busy" />
+                <Ico Name="upload" Size="15" /> Document de l'ordinateur · @LocalDocuments.FormatsText(Apps.IsInstalled)
+            </label>
+        }
         <button type="button" class="btn ghost sm" disabled="@busy" @onclick="() => Open(CloudFileKind.MsDocument)"><BrandLogo Id="drv-onedrive" Size="16" /> OneDrive · PowerPoint, Word, Excel</button>
         <button type="button" class="btn ghost sm" disabled="@busy" @onclick="() => Open(CloudFileKind.Slides)"><BrandLogo Id="drv-gdrive" Size="16" /> Google Slides</button>
         <button type="button" class="btn ghost sm" disabled="@busy" @onclick="() => Open(CloudFileKind.Docs)"><BrandLogo Id="drv-gdrive" Size="16" /> Google Docs</button>
         <button type="button" class="btn ghost sm" disabled="@busy" @onclick="() => Open(CloudFileKind.Sheets)"><BrandLogo Id="drv-gdrive" Size="16" /> Google Sheets</button>
     </div>
+    @if (LocalDocuments.AllowedExtensions(Apps.IsInstalled).Count == 0)
+    {
+        <div class="di-note">Pour importer des documents depuis l'ordinateur, activez l'intégration « Document PDF » ou « Microsoft PowerPoint » dans <a href="/integrations">Intégrations</a>.</div>
+    }
     @if (busy)
     {
         <div class="pr-prog di-prog" role="status" aria-live="polite">
@@ -85,21 +95,18 @@
         finally { busy = false; }
     }
 
-    private async Task PickPdf(InputFileChangeEventArgs e)
+    /// <summary>Un document de l'ordinateur (PDF, PowerPoint, Word, Excel…) : converti en PDF si besoin (LibreOffice), puis en images.</summary>
+    private async Task PickLocal(InputFileChangeEventArgs e)
     {
-        busy = true; error = null; notConnected = null; title = Path.GetFileNameWithoutExtension(e.File.Name); status = "Envoi du PDF…"; pct = null;
+        busy = true; error = null; notConnected = null; title = Path.GetFileNameWithoutExtension(e.File.Name); status = "Envoi du document…"; pct = null;
         StateHasChanged();
         try
         {
-            var saved = await Pdf.SaveSource(e.File);
-            if (saved.Source is not { } sent) { Fail(saved.Error ?? "PDF refusé."); return; }
-            var source = Pdf.ReuseUploaded(Store.ClientId, Store.AreaId, sent, out var reused);   // le même PDF déjà dans la médiathèque est réutilisé
-            var res = await Pdf.Convert(Store.ClientId, Store.AreaId, source, new PdfService.Options("", "none", "landscape", "page", "pdf"), new Progress<string>(OnProgress),
-                meta: source.Hash == null ? null : new PdfService.Meta("sha:" + source.Hash, null, source.Title));
-            if (res.Error != null) { if (!reused) Pdf.Release(source.Id); Fail(res.Error); return; }
-            await Finish(source, res, "pdf", reused, false);
+            if (!LocalDocuments.Allowed(e.File.Name, Apps.IsInstalled)) { Fail(LocalDocuments.NotInstalled(e.File.Name)); return; }
+            var (done, err) = await Documents.Import(e.File, Store.ClientId, Store.AreaId, new Progress<string>(OnProgress));
+            if (done == null) { Fail(err ?? "Import impossible."); return; }
+            await Finish(done.Source, done.Result, done.Src, done.Reused, false);
         }
-        catch (IOException) { Fail("Le fichier n'a pas pu être lu. Réessayez."); }
         finally { busy = false; }
     }
 

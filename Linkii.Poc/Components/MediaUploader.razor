@@ -1,5 +1,7 @@
 @implements IDisposable
 @inject MediaImporter Importer
+@inject LocalDocuments Documents
+@inject AppService Apps
 @inject TenantStore Store
 
 @* Téléversement vers la médiathèque : depuis l'ordinateur (bouton ou glisser-déposer) ou depuis une adresse web.
@@ -59,6 +61,8 @@
         public long Done { get; set; }
         public long? Total { get; set; }
         public string State { get; set; } = "running";   // running | done | processing | error
+        /// <summary>Étape en cours d'un document (lecture, conversion en PDF, page n sur N) : remplace la taille dans la ligne d'import.</summary>
+        public string? Note { get; set; }
         public string? Error { get; set; }
         internal int LastPct = -1;
         public CancellationTokenSource Cts { get; } = new();
@@ -69,13 +73,17 @@
     private bool dragging;
 
     private string What => Accept == "video" ? "vos vidéos" : Accept == "image" ? "vos images" : "vos images et vidéos";
-    private string Formats => Accept == "video" ? "MP4, MOV, AVI, MKV, WEBM…" : Accept == "image" ? "JPG, PNG, GIF, WEBP, SVG" : "Images JPG, PNG, GIF, WEBP, SVG · vidéos MP4, MOV, AVI, MKV…";
+    // les documents acceptés suivent les intégrations installées (PowerPoint ; Document PDF pour PDF, Word, Excel)
+    private string Formats => Accept == "video" ? "MP4, MOV, AVI, MKV, WEBM…" : Accept == "image" ? "JPG, PNG, GIF, WEBP, SVG"
+        : "Images JPG, PNG, GIF, WEBP, SVG · vidéos MP4, MOV, AVI, MKV…" + (LocalDocuments.FormatsText(Apps.IsInstalled) is { Length: > 0 } docs ? " · documents " + docs : "");
+    // les documents (PDF, PowerPoint, Word, Excel…) ne s'importent que là où l'on peut recevoir une présentation : la médiathèque (sans filtre image ou vidéo)
     private string AcceptAttr => string.Join(",", (Accept == "video" ? Array.Empty<string>() : VideoConverter.ImageExts)
-        .Concat(Accept == "image" ? Array.Empty<string>() : VideoConverter.VideoExts.Prepend("video/*")));
+        .Concat(Accept == "image" ? Array.Empty<string>() : VideoConverter.VideoExts.Prepend("video/*"))
+        .Concat(Accept == null ? LocalDocuments.AllowedExtensions(Apps.IsInstalled) : new List<string>()));
 
     public static int Pct(UploadJob j) => j.State is "done" or "processing" ? 100 : j.Total is > 0 ? (int)Math.Min(100, j.Done * 100 / j.Total.Value) : 0;
 
-    private static string JobText(UploadJob j) => j.State switch
+    private static string JobText(UploadJob j) => j.Note != null && j.State == "running" ? j.Note : j.State switch
     {
         "done" => "Terminé",
         "processing" => "Conversion en MP4…",
@@ -90,7 +98,7 @@
         {
             "image" => VideoConverter.ImageExts.Contains(ext),
             "video" => VideoConverter.IsVideo(ext),
-            _ => MediaImporter.IsSupported(name)
+            _ => MediaImporter.IsSupported(name) || LocalDocuments.Allowed(name, Apps.IsInstalled)
         };
     }
 
@@ -105,10 +113,21 @@
         foreach (var (_, job) in queue) jobs.Insert(0, job);
         foreach (var (f, job) in queue)   // un fichier à la fois : la progression reste lisible et le serveur n'est pas saturé
         {
+            if (Accept == null && LocalDocuments.IsDocument(f.Name) && !LocalDocuments.Allowed(f.Name, Apps.IsInstalled)) { Fail(job, LocalDocuments.NotInstalled(f.Name)); await Refresh(); continue; }
             if (!Allowed(f.Name)) { Fail(job, Accept == "video" ? "Ce n'est pas une vidéo." : Accept == "image" ? "Ce n'est pas une image." : "Format non supporté."); await Refresh(); continue; }
             if (!CanUpload()) { Fail(job, "Vous ne pouvez pas téléverser dans ce dossier."); await Refresh(); continue; }
+            if (LocalDocuments.IsDocument(f.Name)) { await Run(job, () => ImportDocument(f, job)); continue; }   // PDF, PowerPoint, Word, Excel… : converti en images, rangé dans une présentation
             await Run(job, () => Importer.Import(f, Store.ClientId, new Progress<long>(n => { job.Done = n; _ = InvokeAsync(() => Notify(job)); }), job.Cts.Token, Store.AreaId, FolderId, Store.UserId));
         }
+    }
+
+    /// <summary>Un document de l'ordinateur : envoyé, puis converti en PDF (Office) et en images ; la ligne d'import dit où il en est.</summary>
+    private async Task<MediaImporter.Result> ImportDocument(IBrowserFile f, UploadJob job)
+    {
+        job.Total = null; job.Note = "Envoi du document…";
+        var (done, error) = await Documents.Import(f, Store.ClientId, Store.AreaId, new Progress<string>(s => { job.Note = s; _ = InvokeAsync(() => Notify(job)); }), job.Cts.Token);
+        job.Note = null;
+        return done == null ? new(null, error ?? "Import impossible.") : new(done.Item, null);
     }
 
     private async Task ImportUrl()
@@ -160,6 +179,7 @@
     private Task Notify(UploadJob job)
     {
         if (ShowJobs) { StateHasChanged(); return Task.CompletedTask; }
+        if (job.Note != null) return Changed.InvokeAsync();   // document : chaque étape (page n sur N) se voit
         var step = job.Total is > 0 ? Pct(job) : (int)(job.Done >> 20);
         if (step == job.LastPct) return Task.CompletedTask;
         job.LastPct = step;

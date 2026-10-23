@@ -3,6 +3,7 @@
 @implements IAsyncDisposable
 @using Microsoft.JSInterop
 @inject MediaLibrary Library
+@inject AppService Apps
 @inject AreaSharing Sharing
 @inject DriveService Drives
 @inject TenantStore Store
@@ -278,7 +279,7 @@ else
                             var failed = job.State == "error";
                             <div class="ph-t up @(failed ? "fail" : "")" title="@job.Name">
                                 @if (failed) { <span class="ph-msg"><Ico Name="x" Size="18" />@(job.Error ?? "Échec")</span> }
-                                else { <span class="ph-msg">@(job.Total is > 0 ? $"{MediaUploader.Pct(job)} %" : "Envoi…")</span><span class="ph-bar" style="width:@(MediaUploader.Pct(job))%"></span> }
+                                else { <span class="ph-msg">@(job.Note != null ? "Conversion…" : job.Total is > 0 ? $"{MediaUploader.Pct(job)} %" : "Envoi…")</span><span class="ph-bar" style="width:@(MediaUploader.Pct(job))%"></span> }
                                 <button type="button" class="ph-x" aria-label="@(failed ? "Retirer" : "Annuler l'import de") @job.Name" @onclick="() => DismissJob(job)"><Ico Name="x" Size="14" /></button>
                             </div>
                         }
@@ -345,13 +346,13 @@ else
                         @if (failed) { <Ico Name="x" Size="22" /><span>@(job.Error ?? "Échec de l'import")</span><div class="acts"><button type="button" @onclick="() => DismissJob(job)">Retirer</button></div> }
                         else
                         {
-                            <span class="pct">@(job.Total is > 0 ? $"{MediaUploader.Pct(job)} %" : Helpers.FormatSize(job.Done))</span>
+                            <span class="pct">@(job.Note != null ? "…" : job.Total is > 0 ? $"{MediaUploader.Pct(job)} %" : Helpers.FormatSize(job.Done))</span>
                             <span class="bar" style="width:@(MediaUploader.Pct(job))%"></span>
                             <button type="button" class="kebab-btn x" aria-label="Annuler l'import de @job.Name" title="Annuler" @onclick="() => DismissJob(job)"><Ico Name="x" Size="15" /></button>
                         }
                     </div>
                     <div class="nm" title="@job.Name">@job.Name</div>
-                    <div class="mt">@(failed ? "Échec de l'import" : job.Total is > 0 ? $"Envoi · {Helpers.FormatSize(job.Done)} / {Helpers.FormatSize(job.Total.Value)}" : "Envoi…")</div>
+                    <div class="mt">@(failed ? "Échec de l'import" : job.Note != null ? job.Note : job.Total is > 0 ? $"Envoi · {Helpers.FormatSize(job.Done)} / {Helpers.FormatSize(job.Total.Value)}" : "Envoi…")</div>
                 </div>
             }
             @foreach (var m in Visible)
@@ -430,7 +431,7 @@ else
     <div class="lx-dropzone @(dragging ? "on" : "")" aria-hidden="@(dragging ? "false" : "true")">
         <Ico Name="upload" Size="40" />
         <span>Déposez pour importer@(currentRow is { } f2 ? $" dans « {f2.Folder.Name} »" : " dans la médiathèque")</span>
-        <small>Images (JPG, PNG, GIF, WEBP, SVG) et vidéos (MP4, MOV, AVI, MKV…) · 2 Go maximum par fichier</small>
+        <small>Images (JPG, PNG, GIF, WEBP, SVG), vidéos (MP4, MOV, AVI, MKV…)@(LocalDocuments.FormatsText(Apps.IsInstalled) is { Length: > 0 } dropDocs ? $" et documents ({dropDocs})" : "") · 2 Go maximum par fichier</small>
         <InputFile OnChange="OnDropped" multiple aria-label="Fichiers à importer" />
     </div>
 }

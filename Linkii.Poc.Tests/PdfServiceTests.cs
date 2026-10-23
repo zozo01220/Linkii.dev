@@ -221,6 +221,93 @@ public class PdfServiceTests : IDisposable
         Assert.Equal(CloudFileKind.Sheets, CloudFileKind.ForPresentation(pres));
     }
 
+
+    [Fact]
+    public void Local_documents_are_recognised_by_extension_and_become_ppt_doc_xls_or_pdf()
+    {
+        foreach (var n in new[] { "a.pdf", "a.PPT", "a.pptx", "a.doc", "a.docx", "a.xls", "a.xlsx", "a.odt", "a.rtf", "a.csv" }) Assert.True(LocalDocuments.IsDocument(n), n);
+        Assert.False(LocalDocuments.IsDocument("a.png"));
+        Assert.False(LocalDocuments.IsDocument("a.mp4"));
+        Assert.Equal("ppt", LocalDocuments.SrcOf("Offre.pptx"));
+        Assert.Equal("doc", LocalDocuments.SrcOf("Note.DOCX"));
+        Assert.Equal("xls", LocalDocuments.SrcOf("Budget.xlsx"));
+        Assert.Equal("pdf", LocalDocuments.SrcOf("Menu.pdf"));
+    }
+
+    [Fact]
+    public async Task A_pdf_from_the_computer_is_one_presentation_in_its_integration_folder_and_a_second_send_reuses_it()
+    {
+        var docs = new LocalDocuments(pdf, new OfficeConverter(NullLogger<OfficeConverter>.Instance), store);
+        var bytes = File.ReadAllBytes(WritePdfPath(WritePdf(Three)));
+        var first = await docs.Import(new MemoryStream(bytes), "Menu.pdf", tenant.Id, null);
+        Assert.Null(first.Error);
+        Assert.Equal(Pres.Type, first.Done!.Item.Type);
+        Assert.False(first.Done.Reused);
+        Assert.Equal("PDF_médias", store.Read(d => d.MediaFolders.Single(f => f.Id == first.Done.Item.FolderId).Name));
+
+        var second = await docs.Import(new MemoryStream(bytes), "Menu copie.pdf", tenant.Id, null);
+        Assert.True(second.Done!.Reused);
+        Assert.Equal(first.Done.Item.Id, second.Done.Item.Id);
+        Assert.Single(store.Read(d => d.Media.Where(Pres.Is).ToList()));
+        Assert.Equal(3, store.Read(d => d.Media.Count(Pres.IsPage)));
+    }
+
+    [Fact]
+    public async Task A_word_document_from_the_computer_is_converted_by_LibreOffice_and_kept_once()
+    {
+        var office = new OfficeConverter(NullLogger<OfficeConverter>.Instance);
+        if (!office.Available) return;   // LibreOffice absent de ce poste : rien à vérifier ici
+        var docs = new LocalDocuments(pdf, office, store);
+        var rtf = Encoding.ASCII.GetBytes(@"{\rtf1\ansi Premiere page\page Deuxieme page\page Troisieme page}");
+
+        var first = await docs.Import(new MemoryStream(rtf), "Note.rtf", tenant.Id, null);
+        Assert.Null(first.Error);
+        Assert.Equal(Pres.Type, first.Done!.Item.Type);
+        Assert.Equal(3, Pres.Pages(first.Done.Item));
+        Assert.Equal("doc", first.Done.Item.Info["src"]);
+        Assert.Equal("Word_médias", store.Read(d => d.MediaFolders.Single(f => f.Id == first.Done.Item.FolderId).Name));
+
+        var again = await docs.Import(new MemoryStream(rtf), "Note.rtf", tenant.Id, null);   // même fichier : pas de seconde conversion
+        Assert.True(again.Done!.Reused);
+        Assert.Equal(first.Done.Item.Id, again.Done.Item.Id);
+        Assert.Single(store.Read(d => d.Media.Where(Pres.Is).ToList()));
+    }
+
+    [Fact]
+    public async Task Without_LibreOffice_an_office_document_is_refused_with_a_clear_message()
+    {
+        var office = new OfficeConverter(NullLogger<OfficeConverter>.Instance);
+        if (office.Available) return;
+        var docs = new LocalDocuments(pdf, office, store);
+        var res = await docs.Import(new MemoryStream(new byte[] { 1, 2, 3 }), "Offre.pptx", tenant.Id, null);
+        Assert.Null(res.Done);
+        Assert.Equal(OfficeConverter.Missing, res.Error);
+    }
+
+
+    [Fact]
+    public void Local_import_follows_the_installed_integrations()
+    {
+        Func<string, bool> none = _ => false, pptOnly = a => a == "ms-powerpoint", pdfOnly = a => a == "pdf", both = _ => true;
+        Assert.Empty(LocalDocuments.AllowedExtensions(none));
+        Assert.Equal("", LocalDocuments.FormatsText(none));
+        Assert.True(LocalDocuments.Allowed("a.pptx", pptOnly));
+        Assert.False(LocalDocuments.Allowed("a.pdf", pptOnly));
+        Assert.False(LocalDocuments.Allowed("a.docx", pptOnly));
+        Assert.True(LocalDocuments.Allowed("a.pdf", pdfOnly));
+        Assert.True(LocalDocuments.Allowed("a.docx", pdfOnly));
+        Assert.True(LocalDocuments.Allowed("a.xlsx", pdfOnly));
+        Assert.False(LocalDocuments.Allowed("a.pptx", pdfOnly));
+        Assert.False(LocalDocuments.Allowed("a.png", both));
+        Assert.Equal("PowerPoint", LocalDocuments.FormatsText(pptOnly));
+        Assert.Equal("PDF, Word, Excel", LocalDocuments.FormatsText(pdfOnly));
+        Assert.Equal("PowerPoint, PDF, Word, Excel", LocalDocuments.FormatsText(both));
+        Assert.DoesNotContain(".pdf", LocalDocuments.AllowedExtensions(pptOnly));
+        Assert.Contains(".pptx", LocalDocuments.AllowedExtensions(pptOnly));
+        Assert.Contains("Document PDF", LocalDocuments.NotInstalled("a.docx"));
+        Assert.Contains("Microsoft PowerPoint", LocalDocuments.NotInstalled("a.pptx"));
+    }
+
     private static string WritePdfPath(string id) => Path.Combine(AppPaths.PdfDir, id + ".pdf");
 
     [Fact]

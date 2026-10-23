@@ -31,6 +31,8 @@ builder.Services.AddSingleton<PushService>();   // notifications push (Firebase)
 builder.Services.AddSingleton<AlertService>();  // alertes de l'organisation : e-mail et/ou notification selon les Réglages
 builder.Services.AddSingleton<PreviewGrants>();   // jetons d'aperçu du simulateur
 builder.Services.AddSingleton<VideoConverter>();
+builder.Services.AddSingleton<OfficeConverter>();   // PowerPoint, Word, Excel… envoyés depuis l'ordinateur : convertis en PDF par LibreOffice (§105)
+builder.Services.AddSingleton<LocalDocuments>();
 builder.Services.AddSingleton<MediaImporter>();
 builder.Services.AddSingleton<WeatherService>();
 builder.Services.AddSingleton<GraphService>();
