@@ -1,34 +1,26 @@
 @inject TenantStore Store
 @inject CloudFileService Cloud
 @inject PdfService Pdf
-@inject LocalDocuments Documents
-@inject AppService Apps
 @inject Toaster Toast
 
-@* Documents des intégrations, importés depuis le bouton « Importer » de la médiathèque (DEV-POC.md §103) : un PDF de l'ordinateur, un fichier OneDrive ou
-   SharePoint (PowerPoint, Word, Excel…), une présentation, un document ou un tableur Google. Chaque page devient une image, rangée dans une présentation
-   du dossier « intégration_médias » (PowerPoint_médias, PDF_médias, GoogleSlides_médias…). Un fichier déjà converti est réutilisé en silence. *@
-<section class="di" aria-label="Documents">
-    <h4>Documents</h4>
-    <p class="hint">PDF, PowerPoint, Word, Excel (depuis l'ordinateur ou OneDrive), Google Slides, Docs et Sheets : chaque page devient une image, rangée dans une présentation du dossier « …_médias ».</p>
-    <div class="di-btns">
-        @if (LocalDocuments.AllowedExtensions(Apps.IsInstalled) is { Count: > 0 } localExts)
+@* Documents des comptes cloud, importés depuis le tiroir « Importer » de la médiathèque (DEV-POC.md §103, maquette mediatheque-importer-final.html) : un fichier
+   OneDrive ou SharePoint (PowerPoint, Word, Excel…), une présentation, un document ou un tableur Google, en tuiles carrées. Les fichiers de l'ordinateur
+   passent par la zone de dépôt du tiroir (MediaUploader). Chaque page devient une image, rangée dans une présentation du dossier « intégration_médias ». *@
+<section class="di" aria-label="Depuis un compte cloud">
+    <h4>Depuis un compte cloud</h4>
+    <p class="hint">Choisissez un fichier dans votre Drive : chaque page devient une image, rangée dans une présentation du dossier « …_médias ». Les fichiers de l'ordinateur se déposent dans la zone ci-dessus.</p>
+    <div class="di-tiles">
+        @foreach (var t in Tiles)
         {
-            @* les types acceptés suivent les intégrations installées (PowerPoint ; Document PDF pour PDF, Word, Excel) *@
-            <label class="btn ghost sm file-btn @(busy ? "disabled" : "")" title="@LocalDocuments.FormatsText(Apps.IsInstalled)">
-                <InputFile OnChange="PickLocal" accept="@string.Join(",", localExts)" disabled="@busy" />
-                <Ico Name="upload" Size="15" /> Document de l'ordinateur · @LocalDocuments.FormatsText(Apps.IsInstalled)
-            </label>
+            var tile = t;
+            var ok = Connected(tile.Kind);
+            <button type="button" class="di-tile @(ok ? "" : "dim")" disabled="@busy" title="@(ok ? $"Choisir {tile.Kind.Noun} dans {tile.Drive}" : $"Compte {tile.Drive} à connecter")" @onclick="() => Open(tile.Kind)">
+                @if (ok) { <span class="di-dot" title="Compte connecté"></span> } else { <span class="di-bd">À connecter</span> }
+                <BrandLogo Id="@tile.Logo" Size="44" />
+                <span class="di-nm">@tile.Name@if (tile.Formats.Length > 0) { <small>@tile.Formats</small> }</span>
+            </button>
         }
-        <button type="button" class="btn ghost sm" disabled="@busy" @onclick="() => Open(CloudFileKind.MsDocument)"><BrandLogo Id="drv-onedrive" Size="16" /> OneDrive · PowerPoint, Word, Excel</button>
-        <button type="button" class="btn ghost sm" disabled="@busy" @onclick="() => Open(CloudFileKind.Slides)"><BrandLogo Id="drv-gdrive" Size="16" /> Google Slides</button>
-        <button type="button" class="btn ghost sm" disabled="@busy" @onclick="() => Open(CloudFileKind.Docs)"><BrandLogo Id="drv-gdrive" Size="16" /> Google Docs</button>
-        <button type="button" class="btn ghost sm" disabled="@busy" @onclick="() => Open(CloudFileKind.Sheets)"><BrandLogo Id="drv-gdrive" Size="16" /> Google Sheets</button>
     </div>
-    @if (LocalDocuments.AllowedExtensions(Apps.IsInstalled).Count == 0)
-    {
-        <div class="di-note">Pour importer des documents depuis l'ordinateur, activez l'intégration « Document PDF » ou « Microsoft PowerPoint » dans <a href="/integrations">Intégrations</a>.</div>
-    }
     @if (busy)
     {
         <div class="pr-prog di-prog" role="status" aria-live="polite">
@@ -95,20 +87,17 @@
         finally { busy = false; }
     }
 
-    /// <summary>Un document de l'ordinateur (PDF, PowerPoint, Word, Excel…) : converti en PDF si besoin (LibreOffice), puis en images.</summary>
-    private async Task PickLocal(InputFileChangeEventArgs e)
+    private record Tile(CloudFileKind Kind, string Name, string Formats, string Logo, string Drive);
+
+    private static readonly Tile[] Tiles =
     {
-        busy = true; error = null; notConnected = null; title = Path.GetFileNameWithoutExtension(e.File.Name); status = "Envoi du document…"; pct = null;
-        StateHasChanged();
-        try
-        {
-            if (!LocalDocuments.Allowed(e.File.Name, Apps.IsInstalled)) { Fail(LocalDocuments.NotInstalled(e.File.Name)); return; }
-            var (done, err) = await Documents.Import(e.File, Store.ClientId, Store.AreaId, new Progress<string>(OnProgress));
-            if (done == null) { Fail(err ?? "Import impossible."); return; }
-            await Finish(done.Source, done.Result, done.Src, done.Reused, false);
-        }
-        finally { busy = false; }
-    }
+        new(CloudFileKind.MsDocument, "OneDrive", "PowerPoint, Word, Excel", "drv-onedrive", "OneDrive"),
+        new(CloudFileKind.Slides, "Google Slides", "", "google-slides", "Google Drive"),
+        new(CloudFileKind.Docs, "Google Docs", "", "google-docs", "Google Drive"),
+        new(CloudFileKind.Sheets, "Google Sheets", "", "google-sheets", "Google Drive"),
+    };
+
+    private bool Connected(CloudFileKind kind) => kind.Connected(Store.Read(d => d.Tenant));
 
     private async Task Finish(PdfService.Source source, PdfService.ConvertResult res, string src, bool reused, bool updated)
     {

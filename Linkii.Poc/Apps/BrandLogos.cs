@@ -11,7 +11,7 @@ public static class BrandLogos
     {
         ["microsoft"] = "microsoft", ["google"] = "google", ["facebook"] = "facebook", ["youtube"] = "youtube", ["canva"] = "canva",
         ["homeassistant"] = "ha", ["ha-sensors"] = "ha", ["ha-switches"] = "ha", ["ha-lights"] = "ha", ["ha-home"] = "ha",
-        ["google-slides"] = "gslides", ["google-docs"] = "gdocs", ["ms-powerpoint"] = "ppt", ["rss"] = "rss",
+        ["google-slides"] = "gslides", ["google-docs"] = "gdocs", ["google-sheets"] = "gsheets", ["ms-powerpoint"] = "ppt", ["rss"] = "rss",
         ["weather"] = "weather", ["weather-slide"] = "weather", ["pdf"] = "pdf",
         ["image"] = "image", ["slideshow-images"] = "images", ["video"] = "video", ["slideshow-videos"] = "videos", ["webpage"] = "web", ["composition"] = "compo",
         ["cal-m365"] = "m365cal", ["cal-google"] = "gcal", ["cal-ews"] = "exchange", ["cal-caldav"] = "caldav", ["cal-ics"] = "ics",
@@ -20,7 +20,7 @@ public static class BrandLogos
     };
 
     // Logos sans fond propre : sur un fond sombre, ils passent sur une pastille blanche.
-    private static readonly HashSet<string> NoBackground = ["microsoft", "google", "dropbox", "onedrive", "gdrive", "sharepoint", "gcal", "gslides", "gdocs", "pdf"];
+    private static readonly HashSet<string> NoBackground = ["microsoft", "google", "dropbox", "onedrive", "gdrive", "sharepoint", "gcal", "gslides", "gdocs", "gsheets", "pdf"];
 
     public static string? Symbol(string? id) => id != null && Map.TryGetValue(id, out var s) ? s : null;
 
