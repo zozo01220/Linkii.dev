@@ -38,7 +38,7 @@ et efface l'instance. Les écrans d'un même PC portent la pastille « PC partag
 ## Installeur
 
 ```powershell
-.\build-installer.ps1 -Version 0.2.0      # artifacts\LinkiiPlayer-0.2.0-x64.msi (autonome, environ 50 Mo)
+.\build-installer.ps1 -Version 0.2.1      # artifacts\LinkiiPlayer-0.2.1-x64.msi (autonome, environ 50 Mo)
 ```
 
 Installation pour l'utilisateur courant, sans droits d'administrateur (`%LOCALAPPDATA%\Programs\Linkii Player`, raccourci dans le menu Démarrer) ;
