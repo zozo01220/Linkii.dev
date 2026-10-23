@@ -1,0 +1,493 @@
+@page "/organisation"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientAdmin")]
+@inject TenantStore Store
+@inject NavigationManager Nav
+@inject Toaster Toast
+@inject Notifier Notifier
+
+@* Organisation : aires, zones, membres et rôles sur une seule page (maquette organisation-acces-refonte.html, §110).
+   Structure : arbre aires › zones et, à chaque nœud, son contenu et qui y a accès. Membres : un rôle et un périmètre par accès, plusieurs possibles. Rôles : ce qu'on peut faire. *@
+
+<div class="page-head">
+    <div>
+        <h1>Organisation</h1>
+        <p class="sub sc-intro">Les aires et leurs zones, les personnes qui y ont accès et ce qu'elles peuvent y faire.</p>
+    </div>
+</div>
+
+<nav class="se-utabs mb-tabs og-tabs" role="tablist" aria-label="Organisation">
+    <button type="button" role="tab" class="@(tab == "structure" ? "on" : "")" aria-selected="@(tab == "structure" ? "true" : "false")" @onclick='() => { tab = "structure"; Load(); }'>Structure <small>@rows.Count aire@(rows.Count > 1 ? "s" : "")</small></button>
+    <button type="button" role="tab" class="@(tab == "members" ? "on" : "")" aria-selected="@(tab == "members" ? "true" : "false")" @onclick='() => { tab = "members"; Load(); }'>Membres <small>@people.Count</small></button>
+    <button type="button" role="tab" class="@(tab == "levels" ? "on" : "")" aria-selected="@(tab == "levels" ? "true" : "false")" @onclick='() => { tab = "levels"; Load(); }'>Rôles <small>@(levels.Count + 1)</small></button>
+</nav>
+
+@if (tab != "structure")
+{
+    <Members View="@tab" />
+}
+else
+{
+    <div class="og-st">
+        <div class="card og-tree" role="tree" aria-label="Structure de l'organisation">
+            <h5>Structure</h5>
+            <button type="button" role="treeitem" class="og-tn root @(cur == "org" ? "on" : "")" @onclick='() => Select("org")'><Ico Name="building" Size="16" /><span class="l">@orgName</span></button>
+            <div class="og-kids root">
+                @foreach (var r in rows)
+                {
+                    var row = r;
+                    <button type="button" role="treeitem" class="og-tn @(cur == "a:" + row.Area.Id ? "on" : "")" @onclick='() => Select("a:" + row.Area.Id)'><Ico Name="map-pin" Size="16" /><span class="l">@row.Area.Name</span><span class="n">@row.Screens</span></button>
+                    <div class="og-kids">
+                        @foreach (var z in OrderedZones(row.Area))
+                        {
+                            var zone = z;
+                            <button type="button" role="treeitem" class="og-tn @(cur == "z:" + zone.Id ? "on" : "")" @onclick='() => Select("z:" + zone.Id)'><Ico Name="@(zone.IsWall ? "monitor" : "box")" Size="15" /><span class="l">@zone.Name</span><span class="n">@ScreensIn(zone.Id).Count</span></button>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="og-tfoot"><button type="button" class="linklike" @onclick="OpenNewArea">+ Aire</button></div>
+        </div>
+
+        <div class="og-panel">
+            @if (cur == "org")
+            {
+                <div class="og-crumb"><b>@orgName</b></div>
+                <div class="og-nh"><Ico Name="building" Size="20" /><h2>@orgName</h2></div>
+                <div class="og-sub" role="tablist">
+                    <button type="button" role="tab" class="@(sub == "content" ? "on" : "")" @onclick='() => sub = "content"'>Contenu</button>
+                    <button type="button" role="tab" class="@(sub == "access" ? "on" : "")" @onclick='() => sub = "access"'>Accès <span class="c">@Accesses().Count</span></button>
+                </div>
+                @if (sub == "content")
+                {
+                    <div class="og-cards">
+                        @foreach (var r in rows)
+                        {
+                            var row = r;
+                            <button type="button" class="og-card" @onclick='() => Select("a:" + row.Area.Id)'>
+                                <b><Ico Name="map-pin" Size="16" /> @row.Area.Name @if (row.Area.Id == currentId) { <span class="pill blue">ouverte</span> }</b>
+                                <small>@Pl(row.Area.Zones.Count, "zone", "zones") · @Pl(row.Screens, "écran", "écrans") · @Pl(row.Playlists, "liste", "listes") · @Pl(row.Media, "média", "médias")</small>
+                            </button>
+                        }
+                        <button type="button" class="og-card add" @onclick="OpenNewArea"><Ico Name="plus" Size="16" /> Nouvelle aire</button>
+                    </div>
+                    @if (rows.Count == 1) { <p class="hint" style="margin-top:12px">Une seule aire pour l'instant. Créez-en d'autres pour séparer des sites ou des équipes : chaque aire a ses écrans, ses listes de lecture et ses médias.</p> }
+                }
+                else { @AccessList() }
+            }
+            else if (SelectedArea is { } area)
+            {
+                var ar = rows.First(x => x.Area.Id == area.Id);
+                <div class="og-crumb">@orgName › <b>@area.Name</b></div>
+                <div class="og-nh">
+                    <Ico Name="map-pin" Size="20" /><h2>@area.Name</h2>
+                    @if (area.Id == currentId) { <span class="pill blue">ouverte</span> }
+                    <span class="grow"></span>
+                    <button type="button" class="btn ghost sm" @onclick="() => OpenArea(area)"><Ico Name="monitor" Size="15" /> Ouvrir ses écrans</button>
+                </div>
+                <div class="og-sub" role="tablist">
+                    <button type="button" role="tab" class="@(sub == "content" ? "on" : "")" @onclick='() => sub = "content"'>Contenu</button>
+                    <button type="button" role="tab" class="@(sub == "access" ? "on" : "")" @onclick='() => sub = "access"'>Accès <span class="c">@Accesses().Count</span></button>
+                </div>
+                @if (sub == "content")
+                {
+                    <p class="hint" style="margin:0 0 10px">@Pl(ar.Screens, "écran", "écrans") · @Pl(ar.Playlists, "liste de lecture", "listes de lecture") · @Pl(ar.Media, "média", "médias")</p>
+                    <label class="lbl" for="og-an" style="margin-top:0">Nom de l'aire</label>
+                    <div class="row" style="flex-wrap:nowrap"><input id="og-an" class="full" maxlength="60" @bind="renameText" @bind:event="oninput" @onkeydown="OnRenameKey" /><button type="button" class="btn ghost" @onclick="RenameArea">Renommer</button></div>
+                    <label class="lbl">Zones <small>(elles classent les écrans de l'aire ; un mur se crée dans Écrans)</small></label>
+                    <AreaZones AreaId="area.Id" OnChanged="Load" />
+                    @if (sleepOn)
+                    {
+                        <label class="lbl">Mise en veille <small>(plages et fuseau de l'aire)</small></label>
+                        <AreaSleep AreaId="area.Id" />
+                    }
+                    @if (dimOn)
+                    {
+                        <label class="lbl">Luminosité et contraste <small>(écrans Android, selon l'heure)</small></label>
+                        <AreaDim AreaId="area.Id" />
+                    }
+                    <div class="og-danger"><button type="button" class="btn danger" @onclick="() => { deleting = ar; deleteError = null; }">Supprimer l'aire</button><small class="muted">Une aire ne se supprime que vide.</small></div>
+                }
+                else { @AccessList() }
+            }
+            else if (SelectedZone is { } zn)
+            {
+                var za = rows.First(x => x.Area.Zones.Any(z => z.Id == zn.Id)).Area;
+                var list = ScreensIn(zn.Id);
+                <div class="og-crumb">@orgName › <a href="" @onclick='() => Select("a:" + za.Id)' @onclick:preventDefault="true">@za.Name</a> › <b>@zn.Name</b></div>
+                <div class="og-nh">
+                    <Ico Name="@(zn.IsWall ? "monitor" : "box")" Size="20" /><h2>@zn.Name</h2>
+                    @if (zn.IsWall) { <span class="pill blue">Mur @zn.WallCols × @zn.WallRows</span> }
+                    @if (zn.Sync && !zn.IsWall) { <span class="pill blue">Synchronisée</span> }
+                    @if (zn.IsDefault) { <span class="pill">Zone par défaut</span> }
+                </div>
+                <div class="og-sub" role="tablist">
+                    <button type="button" role="tab" class="@(sub == "content" ? "on" : "")" @onclick='() => sub = "content"'>Contenu</button>
+                    <button type="button" role="tab" class="@(sub == "access" ? "on" : "")" @onclick='() => sub = "access"'>Accès <span class="c">@Accesses().Count</span></button>
+                </div>
+                @if (sub == "content")
+                {
+                    <div class="card og-set">
+                        @if (zn.IsWall)
+                        {
+                            <div class="og-setrow"><div class="grow"><b>Mur d'écrans</b><small>Une seule image répartie sur @(zn.WallCols * zn.WallRows) écrans, lecture toujours synchronisée. Il se règle dans Écrans.</small></div><a class="btn ghost sm" href="/">Ouvrir Écrans</a></div>
+                        }
+                        else
+                        {
+                            <div class="og-setrow"><div class="grow"><b>Synchroniser la lecture</b><small>Les écrans qui jouent la même liste restent alignés sur la même image.</small></div>
+                                <button type="button" role="switch" aria-checked="@(zn.Sync ? "true" : "false")" class="switch sm @(zn.Sync ? "on" : "")" @onclick="() => ToggleSync(za.Id, zn)"><span></span></button></div>
+                            <div class="og-setrow"><div class="grow"><b>Nom de la zone</b></div>
+                                <input class="og-zname" maxlength="60" value="@zn.Name" aria-label="Nom de la zone" @onchange="e => RenameZone(za.Id, zn, e.Value?.ToString() ?? zn.Name)" /></div>
+                        }
+                    </div>
+                    <div class="lbl">Écrans (@list.Count)</div>
+                    @if (list.Count == 0) { <p class="hint">Aucun écran dans cette zone. Déplacez-en depuis la page Écrans.</p> }
+                    else
+                    {
+                        <div class="og-cards">
+                            @foreach (var s in list) { <div class="og-card plain"><b><Ico Name="monitor" Size="15" /> @s.Name</b><small>@(zn.IsWall ? "Position " + ((s.WallPos ?? 0) + 1) : "Dans cette zone")</small></div> }
+                        </div>
+                    }
+                    @if (!zn.IsDefault && !zn.IsWall) { <div class="og-danger"><button type="button" class="btn danger" @onclick="() => AskDeleteZone(za.Id, zn)">Supprimer la zone</button><small class="muted">Ses écrans retournent dans la zone par défaut.</small></div> }
+                    @if (zoneError != null) { <div class="err">@zoneError</div> }
+                }
+                else { @AccessList() }
+            }
+        </div>
+    </div>
+}
+
+@if (newArea)
+{
+    <div class="modal-backdrop" @onclick="() => newArea = false"></div>
+    <div class="modal app-modal sm" role="dialog" aria-modal="true" aria-labelledby="na-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="na-title">Nouvelle aire de gestion</h3></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => newArea = false"><Ico Name="x" Size="20" /></button>
+        </div>
+        <EditForm Model="this" OnSubmit="CreateArea" class="modal-form">
+            <div class="modal-body">
+                <label class="lbl" for="na-name" style="margin-top:0">Nom</label>
+                <input id="na-name" class="full" maxlength="60" @bind="newName" @bind:event="oninput" placeholder="Ex. : Site de Genève, Bâtiment B" />
+                <p class="hint" style="margin:12px 0 0">L'aire démarre vide : connectez-y des écrans, créez-y des listes de lecture et des médias, ou déplacez-en depuis une autre aire.</p>
+                @if (formError != null) { <div class="err">@formError</div> }
+            </div>
+            <div class="modal-foot">
+                <button type="button" class="btn ghost" @onclick="() => newArea = false">Annuler</button>
+                <button type="submit" class="btn">Créer l'aire</button>
+            </div>
+        </EditForm>
+    </div>
+}
+
+@if (deleting is { } del)
+{
+    <div class="modal-backdrop" @onclick="() => deleting = null"></div>
+    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="da-title">
+        <h3 id="da-title">Supprimer l'aire « @del.Area.Name » ?</h3>
+        <p class="hint">Une aire ne se supprime que vide. Ses zones disparaissent, et ses membres perdent cet accès.</p>
+        @if (deleteError != null) { <div class="err">@deleteError</div> }
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => deleting = null">Annuler</button>
+            <button class="btn danger-solid" @onclick="DeleteArea">Supprimer</button>
+        </div>
+    </div>
+}
+
+@if (delZone is { } dz)
+{
+    <div class="modal-backdrop" @onclick="() => delZone = null"></div>
+    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="dz-title">
+        <h3 id="dz-title">Supprimer la zone « @dz.Zone.Name » ?</h3>
+        <p class="hint">@(dz.Screens == 0 ? "Aucun écran n'est dans cette zone." : $"{dz.Screens} écran{(dz.Screens > 1 ? "s" : "")} retourne{(dz.Screens > 1 ? "nt" : "")} dans la zone par défaut de l'aire.")</p>
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => delZone = null">Annuler</button>
+            <button class="btn danger-solid" @onclick="DeleteZone">Supprimer</button>
+        </div>
+    </div>
+}
+
+@if (grant != null)
+{
+    var g = grant;
+    var candidates = people.Where(u => u.Role == Roles.ClientMember).ToList();
+    <div class="modal-backdrop" @onclick="() => grant = null"></div>
+    <div class="modal app-modal sm" role="dialog" aria-modal="true" aria-labelledby="gr-title">
+        <div class="modal-head">
+            <div class="grow"><h3 id="gr-title">Donner accès à « @NodeName »</h3></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => grant = null"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            @if (candidates.Count == 0) { <p class="hint" style="margin:0">Aucun membre pour l'instant : les administrateurs de l'organisation ont déjà accès à tout. Invitez une personne dans l'onglet Membres.</p> }
+            else
+            {
+                <label class="lbl" for="gr-user" style="margin-top:0">Personne</label>
+                <select id="gr-user" class="full" @bind="g.UserId">
+                    <option value="">Choisir…</option>
+                    @foreach (var u in candidates) { <option value="@u.Id">@u.Label</option> }
+                </select>
+                <label class="lbl" for="gr-role">Rôle</label>
+                <select id="gr-role" class="full" @bind="g.LevelId">
+                    @foreach (var l in levels) { <option value="@l.Id">@l.Name</option> }
+                </select>
+                <p class="hint" style="margin:10px 0 0">Ce rôle s'ajoute à ses autres accès, uniquement ici (@NodeName et ce qu'il contient).</p>
+            }
+            @if (formError != null) { <div class="err">@formError</div> }
+        </div>
+        <div class="modal-foot">
+            <button type="button" class="btn ghost" @onclick="() => grant = null">Annuler</button>
+            <button type="button" class="btn" disabled="@(candidates.Count == 0)" @onclick="Grant">Donner accès</button>
+        </div>
+    </div>
+}
+
+@code {
+    private record AreaRow(Area Area, int Screens, int Playlists, int Media);
+    private record AccessRow(User User, string Role, Guid LevelId, bool Direct, string From, bool Partial, string? Note = null);
+    private record ZoneDelete(Guid AreaId, Zone Zone, int Screens);
+    private class GrantForm { public string UserId = ""; public string LevelId = ""; }
+
+    private List<AreaRow> rows = new();
+    private List<Screen> screens = new();
+    private List<User> people = new();
+    private List<AccessLevel> levels = new();
+    private string orgName = "", tab = "structure", sub = "content", cur = "org", renameText = "", newName = "";
+    private bool sleepOn, dimOn, newArea;
+    private Guid? currentId;
+    private string? formError, deleteError, zoneError;
+    private AreaRow? deleting;
+    private ZoneDelete? delZone;
+    private GrantForm? grant;
+
+    [SupplyParameterFromQuery(Name = "tab")] public string? TabParam { get; set; }
+    [SupplyParameterFromQuery(Name = "created")] public string? Created { get; set; }
+    [SupplyParameterFromQuery(Name = "deleted")] public string? Deleted { get; set; }
+
+    protected override void OnInitialized()
+    {
+        if (TabParam is "members" or "levels" or "structure") tab = TabParam;
+        if (Created != null) Toast.Ok($"Aire « {Created} » créée.");
+        if (Deleted != null) Toast.Ok($"Aire « {Deleted} » supprimée.");
+        (sleepOn, dimOn) = Store.Read(d => (d.Tenant.SleepEnabled, d.Tenant.DimEnabled));
+        Load();
+        if (rows.Count == 1) cur = "a:" + rows[0].Area.Id;   // une seule aire : on l'ouvre d'emblée
+        renameText = SelectedArea?.Name ?? "";
+    }
+
+    private void Load()
+    {
+        (orgName, rows, screens, people, levels, currentId) = Store.Read(d =>
+        {
+            var scr = d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.Token != null).ToList();
+            var list = d.Areas.OrderBy(a => a.CreatedUtc).ToList().Select(a =>
+            {
+                var (s, p, m) = AreaOps.Contents(d, a.Id);
+                return new AreaRow(a, s, p, m);
+            }).ToList();
+            return (d.Tenant.Name, list, scr, d.Users.OrderBy(u => u.Role == Roles.ClientAdmin ? 0 : 1).ThenBy(u => u.Label, StringComparer.CurrentCultureIgnoreCase).ToList(),
+                d.Tenant.Levels.OrderBy(l => l.Kind == null ? 1 : 0).ThenBy(l => l.Kind == LevelKinds.Reader ? 1 : 0).ThenBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase).ToList(), d.Area?.Id);
+        });
+        if (cur.StartsWith("a:") && SelectedArea == null || cur.StartsWith("z:") && SelectedZone == null) cur = "org";   // nœud supprimé entre-temps
+    }
+
+    private static string Pl(int n, string one, string many) => $"{n} {(n == 1 ? one : many)}";
+    private static List<Zone> OrderedZones(Area a) => a.Zones.OrderByDescending(z => z.IsDefault).ThenBy(z => z.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+    private List<Screen> ScreensIn(Guid zoneId) => screens.Where(s => s.ZoneId == zoneId).OrderBy(s => s.WallPos ?? 0).ThenBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+
+    private Area? SelectedArea => cur.StartsWith("a:") && Guid.TryParse(cur[2..], out var id) ? rows.FirstOrDefault(r => r.Area.Id == id)?.Area : null;
+    private Zone? SelectedZone => cur.StartsWith("z:") && Guid.TryParse(cur[2..], out var id) ? rows.SelectMany(r => r.Area.Zones).FirstOrDefault(z => z.Id == id) : null;
+    private string NodeName => cur == "org" ? orgName : SelectedArea?.Name ?? SelectedZone?.Name ?? "";
+
+    private void Select(string node)
+    {
+        cur = node; sub = "content"; zoneError = null; formError = null;
+        renameText = SelectedArea?.Name ?? "";
+    }
+
+    // ---------- Accès : qui peut quoi à ce nœud ----------
+
+    private List<AccessRow> Accesses()
+    {
+        var area = SelectedArea ?? (SelectedZone is { } z ? rows.First(r => r.Area.Zones.Any(x => x.Id == z.Id)).Area : null);
+        var zone = SelectedZone;
+        var res = new List<AccessRow>();
+        foreach (var u in people.Where(u => u.Role == Roles.ClientAdmin && !u.Disabled)) res.Add(new AccessRow(u, "Administrateur", Guid.Empty, false, "Administrateur de l'organisation", false));
+        foreach (var u in people.Where(u => u.Role == Roles.ClientMember))
+            foreach (var a in u.AccessList(levels))
+            {
+                var role = levels.FirstOrDefault(l => l.Id == a.LevelId)?.Name;
+                if (role == null) continue;
+                var p = a.Perimeter;
+                if (cur == "org") { if (p.AllAreas) res.Add(new AccessRow(u, role, a.LevelId, true, "", false)); }
+                else if (zone == null)
+                {
+                    if (p.AllAreas) res.Add(new AccessRow(u, role, a.LevelId, false, "Toute l'organisation", false));
+                    else if (p.AreaIds.Contains(area!.Id)) res.Add(new AccessRow(u, role, a.LevelId, true, "", false));
+                    else if (AccessLevels.Reaches(p, area, screens)) res.Add(new AccessRow(u, role, a.LevelId, false, "Seulement certaines zones ou certains écrans", true));
+                }
+                else
+                {
+                    var inZone = screens.Where(s => s.ZoneId == zone.Id).ToList();
+                    if (p.AllAreas) res.Add(new AccessRow(u, role, a.LevelId, false, "Toute l'organisation", false));
+                    else if (p.AreaIds.Contains(area!.Id)) res.Add(new AccessRow(u, role, a.LevelId, false, "Hérité de l'aire « " + area.Name + " »", false));
+                    else if (p.ZoneIds.Contains(zone.Id)) res.Add(new AccessRow(u, role, a.LevelId, true, "", false));
+                    else if (inZone.Any(s => p.ScreenIds.Contains(s.Id))) res.Add(new AccessRow(u, role, a.LevelId, false, "Certains écrans seulement", true));
+                }
+            }
+        if (zone != null)
+        {
+            // un accès sur l'aire entière (ou toute l'organisation) s'applique à toute l'aire : un accès direct plus petit, d'un autre rôle, n'y change rien
+            var wide = res.Where(r => !r.Direct && !r.Partial && r.LevelId != Guid.Empty).Select(r => r.User.Id).ToHashSet();
+            res = res.Select(r => r.Direct && wide.Contains(r.User.Id) ? r with { Note = "Sans effet : l'accès sur toute l'aire s'applique" } : r).ToList();
+        }
+        return res;
+    }
+
+    private RenderFragment AccessList() => __builder =>
+    {
+        var list = Accesses();
+        var admins = list.Where(a => !a.Direct && a.From == "Administrateur de l'organisation").ToList();
+        <div class="hint og-hint"><Ico Name="info" Size="16" /><span>Un accès donné à une aire vaut pour ses zones, ses écrans et tout ce qui s'y ajoutera. Les administrateurs de l'organisation ont toujours accès à tout.</span></div>
+        <div class="card og-acc-list">
+            @foreach (var a in list.Where(x => x.From != "Administrateur de l'organisation"))
+            {
+                var row = a;
+                <div class="og-ar">
+                    <span class="avatar">@Initials(row.User)</span>
+                    <div class="who"><b>@row.User.Label</b><small>@(row.Direct ? "Accès direct" + (row.Note != null ? " · " + row.Note : "") : row.From)</small></div>
+                    <span class="pill blue">@row.Role</span>
+                    @if (row.Direct) { <button type="button" class="linklike" @onclick="() => Revoke(row)">Retirer</button> }
+                    else { <a class="linklike" href="" @onclick='() => { tab = "members"; }' @onclick:preventDefault="true">Voir</a> }
+                </div>
+            }
+            @if (admins.Count > 0)
+            {
+                <div class="og-ar admin">
+                    <span class="avatar dark"><Ico Name="lock" Size="14" /></span>
+                    <div class="who"><b>@Pl(admins.Count, "administrateur", "administrateurs") de l'organisation</b><small>@string.Join(", ", admins.Take(4).Select(x => x.User.Label))@(admins.Count > 4 ? "…" : "")</small></div>
+                    <span class="pill dark">Administrateur</span>
+                </div>
+            }
+            <div class="og-ar"><button type="button" class="btn ghost sm" @onclick="OpenGrant"><Ico Name="plus" Size="15" /> Donner accès à…</button></div>
+        </div>
+    };
+
+    private static string Initials(User u) => string.Concat(u.Label.Split(' ', '.', '@').Where(w => w.Length > 0).Take(2).Select(w => char.ToUpperInvariant(w[0])));
+
+    private void OpenGrant()
+    {
+        formError = null;
+        grant = new GrantForm { LevelId = (levels.FirstOrDefault(l => l.Kind == LevelKinds.Editor) ?? levels.First()).Id.ToString() };
+    }
+
+    private (Guid? Area, Guid? Zone) Target() => cur == "org" ? (null, null) : SelectedZone is { } z ? (null, z.Id) : (SelectedArea?.Id, null);
+
+    private void Grant()
+    {
+        if (grant is not { } g) return;
+        if (!Guid.TryParse(g.UserId, out var uid)) { formError = "Choisissez une personne."; return; }
+        if (!Guid.TryParse(g.LevelId, out var lid)) { formError = "Choisissez un rôle."; return; }
+        var (a, z) = Target();
+        formError = Store.Write(d => AccessLevels.GrantAccess(d, uid, lid, a, z));
+        if (formError != null) return;
+        grant = null;
+        Toast.Ok("Accès ajouté.");
+        Load();
+    }
+
+    private void Revoke(AccessRow row)
+    {
+        var (a, z) = Target();
+        var err = Store.Write(d => AccessLevels.RevokeAccess(d, row.User.Id, row.LevelId, a, z));
+        if (err != null) { Toast.Error(err); return; }
+        Toast.Ok($"Accès de {row.User.Label} retiré.");
+        Load();
+    }
+
+    // ---------- Aires ----------
+
+    private void OpenNewArea() { formError = null; newName = ""; newArea = true; }
+
+    private void CreateArea()
+    {
+        var name = newName;
+        Area? created = null;
+        formError = Store.Write(d =>
+        {
+            var (a, err) = AreaOps.Create(d, name);
+            if (a == null) return err;
+            created = a;
+            return null;
+        });
+        if (formError != null) return;
+        newArea = false;
+        Nav.NavigateTo("/organisation?created=" + Uri.EscapeDataString(created!.Name), forceLoad: true);   // le menu affiche le sélecteur d'aire dès la deuxième
+    }
+
+    private void RenameArea()
+    {
+        if (SelectedArea is not { } area) return;
+        var n = renameText;
+        formError = Store.Write(d => AreaOps.Rename(d, area.Id, n));
+        if (formError == null) Toast.Ok($"Aire renommée en « {n.Trim()} ».");
+        else Toast.Error(formError);
+        Load();
+    }
+
+    private void OnRenameKey(KeyboardEventArgs e) { if (e.Key == "Enter") RenameArea(); }
+
+    private void OpenArea(Area a)
+    {
+        if (Store.SwitchArea(a.Id)) Nav.NavigateTo("/", forceLoad: true);
+    }
+
+    private void DeleteArea()
+    {
+        if (deleting is not { } del) return;
+        deleteError = Store.Write(d => AreaOps.Delete(d, del.Area.Id));
+        if (deleteError != null) return;
+        deleting = null;
+        Nav.NavigateTo("/organisation?deleted=" + Uri.EscapeDataString(del.Area.Name), forceLoad: true);
+    }
+
+    // ---------- Zones ----------
+
+    private async Task ToggleSync(Guid areaId, Zone z)
+    {
+        var on = !z.Sync;
+        var err = Store.Write(d => AreaOps.SetZoneSync(d, areaId, z.Id, on));
+        zoneError = err;
+        if (err == null)
+        {
+            await Notifier.NotifyZone(z.Id);   // les écrans de la zone rechargent leur configuration
+            Toast.Ok(on ? $"Lecture synchronisée dans la zone « {z.Name} »." : $"Synchronisation coupée dans la zone « {z.Name} ».");
+        }
+        Load();
+    }
+
+    private void RenameZone(Guid areaId, Zone z, string name)
+    {
+        var err = Store.Write(d => AreaOps.RenameZone(d, areaId, z.Id, name));
+        zoneError = err;
+        if (err == null) Toast.Ok($"Zone renommée en « {name.Trim()} ».");
+        Load();
+    }
+
+    private void AskDeleteZone(Guid areaId, Zone z) => delZone = new ZoneDelete(areaId, z, screens.Count(s => s.ZoneId == z.Id));
+
+    private async Task DeleteZone()
+    {
+        if (delZone is not { } dz) return;
+        delZone = null;
+        var ids = screens.Where(s => s.ZoneId == dz.Zone.Id).Select(s => s.Id).ToList();
+        var err = Store.Write(d => AreaOps.DeleteZone(d, dz.AreaId, dz.Zone.Id));
+        zoneError = err;
+        if (err == null)
+        {
+            await Notifier.PublishPlanning(ids);   // leur zone change : planning et synchro peuvent changer
+            foreach (var id in ids) await Notifier.NotifyScreen(id);
+            Toast.Ok($"Zone « {dz.Zone.Name} » supprimée.");
+            cur = "a:" + dz.AreaId;
+        }
+        Load();
+    }
+}

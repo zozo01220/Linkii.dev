@@ -20,6 +20,8 @@ public class Db
     public List<Payment> Payments { get; set; } = new();          // paiements de renouvellement enregistrés (voir <see cref="Subscriptions"/>)
     public List<Payout> Payouts { get; set; } = new();            // versements de fin de mois aux revendeurs
     public PlatformSettings Platform { get; set; } = new();      // réglages communs à toutes les organisations (console › Réglages)
+    /// <summary>Migrations ponctuelles déjà faites (voir <see cref="AccessLevels.MigrateRolesV2"/>).</summary>
+    public List<string> Done { get; set; } = new();
 
     /// <summary>Ancien format mono-client (avant le multi-tenant) : lu une fois pour migration, jamais réécrit.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
@@ -172,6 +174,11 @@ public class User
     public List<AreaRole> AreaRoles { get; set; } = new();
     /// <summary>Périmètre du membre : ce qu'il voit (aires, zones, écrans, dossiers), séparé de son niveau de droits (voir <see cref="Perimeter"/>). Null : celui de son niveau.</summary>
     public Perimeter? Perimeter { get; set; }
+    /// <summary>
+    /// Accès du membre (depuis le 23 octobre 2026) : un rôle (<see cref="AccessLevel"/>) et un périmètre chacun, plusieurs possibles (« Éditeur à Lausanne, Lecteur à Genève »).
+    /// Vide : l'ancien couple <see cref="LevelId"/> + <see cref="Perimeter"/> (lu par <see cref="UserAccess.AccessList"/>). Le premier accès est recopié dans ces deux champs.
+    /// </summary>
+    public List<MemberAccess> Accesses { get; set; } = new();
     /// <summary>Dernière aire ouverte, par organisation (l'équipe Linkii et les revendeurs visitent plusieurs organisations).</summary>
     public Dictionary<Guid, Guid> LastAreas { get; set; } = new();
     /// <summary>Mode d'utilisation : true expert (toutes les fonctions), false simple (vue réduite), null ancien compte = expert.</summary>

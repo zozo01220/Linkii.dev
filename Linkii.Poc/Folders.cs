@@ -124,8 +124,9 @@ public static class FolderAudiences
                 foreach (var s in chain.SelectMany(n => n.Shares))
                 {
                     if (s.Kind == FolderShareKind.User && s.TargetId == u.Id) { direct = true; write |= s.Write; }
-                    else if (s.Kind == FolderShareKind.Level && u.LevelId is { } lid && s.TargetId == lid)
+                    else if (s.Kind == FolderShareKind.Level && u.HasLevel(s.TargetId))
                     {
+                        var lid = s.TargetId;
                         viaLevel ??= lid; write |= s.Write;
                         var cur = perLevel.GetValueOrDefault(lid);
                         perLevel[lid] = (cur.Members + 1, cur.Write | s.Write);

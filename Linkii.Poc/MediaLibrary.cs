@@ -144,7 +144,7 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
             return new ShareCandidate(u.Id, u.Label, ua.Level?.Name ?? "Sans niveau", reason);
         }).ToList();
         var levels = d.Tenant.Levels.Select(l => new ShareCandidate(l.Id, l.Name,
-            d.Users.Count(u => u.LevelId == l.Id) is var n && n > 0 ? $"{n} membre{(n > 1 ? "s" : "")}" : "aucun membre", null)).ToList();
+            d.Users.Count(u => u.HasLevel(l.Id)) is var n && n > 0 ? $"{n} membre{(n > 1 ? "s" : "")}" : "aucun membre", null)).ToList();
         var shares = f.Shares.Select(s =>
         {
             var label = s.Kind == FolderShareKind.Level ? levels.FirstOrDefault(l => l.Id == s.TargetId)?.Label : people.FirstOrDefault(p => p.Id == s.TargetId)?.Label;

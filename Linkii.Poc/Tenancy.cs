@@ -95,18 +95,33 @@ public class AreaAccess
         var areas = db.Areas.Where(a => a.ClientId == clientId).OrderBy(a => a.CreatedUtc).ToList();
         var u = db.Users.FirstOrDefault(x => x.Id == userId);
         var org = u?.Role != Linkii.Poc.Roles.ClientMember;
-        var level = org ? null : db.Clients.FirstOrDefault(c => c.Id == clientId)?.Levels.FirstOrDefault(l => l.Id == u!.LevelId);
-        // le périmètre est celui du membre (ce qu'il voit), pas celui de son niveau ; un membre d'avant la séparation reprend celui de son niveau
-        var perimeter = org || level == null ? null : u!.Perimeter ?? Perimeter.From(level);
-        var scope = perimeter == null ? null : new LevelScope(perimeter, areas, perimeter.ScreenIds.Count > 0 ? db.Screens.Where(s => s.ClientId == clientId) : []);
-        var mine = org ? areas : scope?.Areas ?? new();
+        var levels = db.Clients.FirstOrDefault(c => c.Id == clientId)?.Levels ?? new List<AccessLevel>();
+        // un membre a un ou plusieurs accès (rôle + périmètre) ; ce qu'il voit est l'ensemble de leurs périmètres
+        var accesses = org ? new List<MemberAccess>() : u!.AccessList(levels).Where(a => levels.Any(l => l.Id == a.LevelId)).ToList();
+        var scopes = accesses.Select(a => (Access: a, Level: levels.First(l => l.Id == a.LevelId),
+            Scope: new LevelScope(a.Perimeter, areas, a.Perimeter.ScreenIds.Count > 0 ? db.Screens.Where(s => s.ClientId == clientId) : []))).ToList();
+        var mine = org ? areas : areas.Where(a => scopes.Any(s => s.Scope.Areas.Any(x => x.Id == a.Id))).ToList();
         Guid? last = u != null && u.LastAreas.TryGetValue(clientId, out var l2) ? l2 : null;
         var current = mine.FirstOrDefault(a => a.Id == last) ?? mine.FirstOrDefault();
+        // le rôle qui joue dans l'aire ouverte : un accès sur l'aire entière l'emporte (le plus permissif s'il y en a plusieurs) ; sinon, quand seules des zones
+        // ou des écrans de l'aire sont donnés, le moins permissif (les droits se règlent par aire : ils ne débordent pas sur une zone voisine)
+        (MemberAccess Access, AccessLevel Level, LevelScope Scope)? chosen = null;
+        if (scopes.Count > 0)
+        {
+            var reaching = current == null ? scopes : scopes.Where(s => s.Scope.Areas.Any(x => x.Id == current.Id)).ToList();
+            var wholes = current == null ? [] : reaching.Where(s => s.Access.Perimeter.AllAreas || s.Access.Perimeter.AreaIds.Contains(current.Id)).ToList();
+            static int Rank(AccessLevel l) => new[] { LevelPages.Screens, LevelPages.Playlists, LevelPages.Media }.Sum(d => l.AccessTo(d) == DomainAccess.Write ? 2 : l.AccessTo(d) == DomainAccess.Read ? 1 : 0);
+            chosen = wholes.Count > 0 ? wholes.OrderByDescending(s => Rank(s.Level)).First() : reaching.OrderBy(s => Rank(s.Level)).FirstOrDefault();
+        }
+        var level = chosen?.Level;
+        var perimeter = chosen?.Access.Perimeter;
+        Func<Screen, bool>? sees = scopes.Count == 0 ? null : s => scopes.Any(x => x.Scope.Sees(s));
+        Func<Guid, bool>? seesZone = scopes.Count == 0 ? null : z => scopes.Any(x => x.Scope.SeesZone(z));
         return new AreaAccess
         {
             Shared = SharedView.Build(db, clientId, current?.Id),
             UserId = userId, IsOrgAdmin = org, Level = level, Perimeter = perimeter, Areas = mine, OrgAreaCount = areas.Count,
-            Sees = scope?.Sees, SeesZoneFn = scope?.SeesZone,
+            Sees = sees, SeesZoneFn = seesZone,
             MemberIds = org ? new HashSet<Guid>() : db.Users.Where(x => x.ClientId == clientId && x.Role == Linkii.Poc.Roles.ClientMember).Select(x => x.Id).ToHashSet(),
             Current = current
         };
@@ -428,7 +443,7 @@ public static class Tenancy
         var firstArea = new Area { ClientId = client.Id, Name = Seed.DefaultAreaName };   // une aire dès le départ : invisible tant qu'elle est seule
         AreaOps.EnsureDefaultZone(firstArea);
         db.Areas.Add(firstArea);
-        client.Levels.Add(AccessLevels.NewDefault());
+        AccessLevels.EnsureRoles(client);   // Éditeur et Lecteur d'office
         db.Clients.Add(client);
         db.Users.Add(new User { Email = email, Name = adminName.Trim(), PasswordHash = password == null ? "" : Passwords.Hash(password), Role = Roles.ClientAdmin, ResellerId = reseller.Id, ClientId = client.Id, MustChangePassword = mustChangePassword, CreatedUtc = DateTime.UtcNow, ExpertMode = false });
         return (client, null);
@@ -457,6 +472,7 @@ public static class Seed
             MigrateGoogleAccount(db);
             EnsureAreas(db);
             AccessLevels.Migrate(db);
+            AccessLevels.MigrateRolesV2(db);
             Signup.MarkVerified(db);
             Subscriptions.MigrateResellerShare(db);
             Alerts.Migrate(db);

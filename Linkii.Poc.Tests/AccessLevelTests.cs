@@ -219,14 +219,17 @@ public class AccessLevelTests
     }
 
     [Fact]
-    public void The_default_level_has_no_planning_and_no_settings()
+    public void New_organisations_get_the_editor_and_reader_roles()
     {
         var (created, err) = Tenancy.CreateClient(db, new Reseller { Name = "Linkii" }, "Nouvelle SA", "Zoé", "zoe@nouvelle.ch", "motdepasse1");
         Assert.Null(err);
-        var level = Assert.Single(created!.Levels);
-        Assert.Equal([LevelPages.Screens, LevelPages.Playlists, LevelPages.Media], level.Pages);
-        Assert.True(level.AllAreas && level.AllIntegrations && level.AllWidgets);
-        Assert.False(level.ReadOnly);
+        var editor = Assert.Single(created!.Levels, l => l.Kind == LevelKinds.Editor);
+        Assert.Equal([LevelPages.Screens, LevelPages.Playlists, LevelPages.Media], editor.Pages);   // ni planning ni réglages
+        Assert.True(editor.AllAreas && editor.AllIntegrations && editor.AllWidgets);
+        Assert.False(editor.ReadOnly);
+        var reader = Assert.Single(created.Levels, l => l.Kind == LevelKinds.Reader);
+        Assert.True(reader.ReadOnly);
+        Assert.Equal(DomainAccess.Read, reader.AccessTo(LevelPages.Media));
     }
 
     [Fact]

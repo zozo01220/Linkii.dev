@@ -82,6 +82,8 @@ public class AccessLevel : IPerimeter
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "";
+    /// <summary>Rôle de départ fourni avec l'organisation (<see cref="LevelKinds"/>) : Éditeur ou Lecteur, ni modifiable ni supprimable. Null : rôle sur mesure.</summary>
+    public string? Kind { get; set; }
     /// <summary>Pages cochées (<see cref="LevelPages.Offered"/>).</summary>
     public List<string> Pages { get; set; } = new();
     /// <summary>Toutes les intégrations / tous les widgets, y compris ceux ajoutés plus tard au catalogue.</summary>
@@ -177,6 +179,42 @@ public class AccessLevel : IPerimeter
     }
 }
 
+/// <summary>Rôles de départ : l'Administrateur est le compte administrateur de l'organisation (tous les droits), les deux autres sont des niveaux fixes.</summary>
+public static class LevelKinds
+{
+    public const string Editor = "editor", Reader = "reader";
+    public const string EditorName = "Éditeur", ReaderName = "Lecteur", AdminName = "Administrateur";
+}
+
+/// <summary>Un accès d'un membre : un rôle (niveau de droits) et l'endroit où il s'applique (périmètre).</summary>
+public class MemberAccess
+{
+    public Guid LevelId { get; set; }
+    public Perimeter Perimeter { get; set; } = new();
+}
+
+public static class UserAccess
+{
+    /// <summary>Accès du membre ; pour un compte d'avant les accès multiples : son niveau et son périmètre (ou celui de son niveau).</summary>
+    public static List<MemberAccess> AccessList(this User u, IEnumerable<AccessLevel> levels)
+    {
+        if (u.Accesses.Count > 0) return u.Accesses;
+        if (u.LevelId is not { } id) return new();
+        var lv = levels.FirstOrDefault(l => l.Id == id);
+        return lv == null ? new() : [new MemberAccess { LevelId = id, Perimeter = u.Perimeter ?? Perimeter.From(lv) }];
+    }
+
+    public static bool HasLevel(this User u, Guid levelId) => u.Accesses.Count > 0 ? u.Accesses.Any(a => a.LevelId == levelId) : u.LevelId == levelId;
+
+    /// <summary>Enregistre les accès (le premier est recopié dans l'ancien couple niveau + périmètre, lu par les écrans qui n'ont pas changé).</summary>
+    public static void SetAccesses(this User u, List<MemberAccess> list)
+    {
+        u.Accesses = list;
+        u.LevelId = list.FirstOrDefault()?.LevelId;
+        u.Perimeter = list.FirstOrDefault()?.Perimeter;
+    }
+}
+
 /// <summary>Accès à un domaine d'un niveau de droits.</summary>
 public static class DomainAccess
 {
@@ -261,6 +299,8 @@ public static class AccessLevels
         level.Name = level.Name.Trim();
         if (CheckName(level.Name) is { } e) return e;
         var levels = d.Tenant.Levels;
+        if (levels.FirstOrDefault(l => l.Id == level.Id)?.Kind != null) return "Ce rôle est fourni d'office : il ne se modifie pas. Dupliquez-le pour en faire un rôle sur mesure.";
+        level.Kind = null;
         if (levels.Any(l => l.Id != level.Id && l.Name.Equals(level.Name, StringComparison.CurrentCultureIgnoreCase))) return "Un niveau porte déjà ce nom.";
         level.Pages = level.Pages.Where(LevelPages.Offered.Contains).Distinct().ToList();
         if (level.AllFolders is not ("read" or "write")) level.AllFolders = null;
@@ -275,12 +315,13 @@ public static class AccessLevels
     public static bool Reaches(IPerimeter l, Area a, IEnumerable<Screen> screens) =>
         l.AllAreas || l.AreaIds.Contains(a.Id) || a.Zones.Any(z => l.ZoneIds.Contains(z.Id)) || screens.Any(s => s.AreaId == a.Id && l.ScreenIds.Contains(s.Id));
 
-    public static List<User> MembersOf(ClientDb d, Guid levelId) => d.Users.Where(u => u.Role == Roles.ClientMember && u.LevelId == levelId).ToList();
+    public static List<User> MembersOf(ClientDb d, Guid levelId) => d.Users.Where(u => u.Role == Roles.ClientMember && u.HasLevel(levelId)).ToList();
 
     /// <summary>Un niveau utilisé ne se supprime pas : ses membres sont d'abord réaffectés.</summary>
     public static string? Delete(ClientDb d, Guid levelId)
     {
         if (!d.Access.IsOrgAdmin) return "Seul un administrateur de l'organisation gère les niveaux de droits.";
+        if (d.Tenant.Levels.FirstOrDefault(l => l.Id == levelId)?.Kind != null) return "Ce rôle est fourni d'office : il ne se supprime pas.";
         var used = MembersOf(d, levelId);
         if (used.Count > 0) return $"Ce niveau est donné à {string.Join(", ", used.Take(5).Select(u => u.Label))}{(used.Count > 5 ? $" et {used.Count - 5} autre(s)" : "")} : donnez-leur d'abord un autre niveau.";
         d.Tenant.Levels.RemoveAll(l => l.Id == levelId);
@@ -294,7 +335,11 @@ public static class AccessLevels
     {
         var a = areas.ToHashSet(); var z = zones.ToHashSet();
         foreach (var l in d.Tenant.Levels) { l.AreaIds.RemoveAll(a.Contains); l.ZoneIds.RemoveAll(z.Contains); }
-        foreach (var u in d.Root.Users.Where(u => u.ClientId == d.ClientId && u.Perimeter != null)) { u.Perimeter!.AreaIds.RemoveAll(a.Contains); u.Perimeter.ZoneIds.RemoveAll(z.Contains); }
+        foreach (var u in d.Root.Users.Where(u => u.ClientId == d.ClientId))
+        {
+            if (u.Perimeter != null) { u.Perimeter.AreaIds.RemoveAll(a.Contains); u.Perimeter.ZoneIds.RemoveAll(z.Contains); }
+            foreach (var ac in u.Accesses) { ac.Perimeter.AreaIds.RemoveAll(a.Contains); ac.Perimeter.ZoneIds.RemoveAll(z.Contains); }
+        }
     }
 
     // ---------- Textes d'affichage ----------
@@ -332,6 +377,118 @@ public static class AccessLevels
             if (zones.Count > 0) parts.Add(a.Name + " › " + string.Join(", ", zones));
         }
         return parts.Count == 0 ? "Aucun périmètre" : string.Join(" · ", parts);
+    }
+
+    // ---------- Accès d'un membre, depuis l'arbre de l'organisation ----------
+
+    private static List<MemberAccess> Editable(ClientDb d, User u) =>
+        u.AccessList(d.Tenant.Levels).Select(a => new MemberAccess { LevelId = a.LevelId, Perimeter = a.Perimeter.Copy() }).ToList();
+
+    /// <summary>
+    /// Donne à un membre le rôle <paramref name="levelId"/> sur une aire, une zone, ou (sans les deux) toute l'organisation. Un accès de même rôle existant s'élargit
+    /// au lieu d'en créer un autre.
+    /// </summary>
+    public static string? GrantAccess(ClientDb d, Guid userId, Guid levelId, Guid? areaId, Guid? zoneId)
+    {
+        if (!d.Access.IsOrgAdmin) return "Seul un administrateur de l'organisation donne des accès.";
+        var u = d.Users.FirstOrDefault(x => x.Id == userId);
+        if (u == null || u.Role != Roles.ClientMember) return "Membre introuvable : les administrateurs ont déjà accès à tout.";
+        if (d.Tenant.Levels.All(l => l.Id != levelId)) return "Rôle introuvable.";
+        if (areaId != null && d.Areas.All(a => a.Id != areaId)) return "Aire introuvable.";
+        if (zoneId != null && d.Areas.SelectMany(a => a.Zones).All(z => z.Id != zoneId)) return "Zone introuvable.";
+        var list = Editable(d, u);
+        var acc = list.FirstOrDefault(a => a.LevelId == levelId && !a.Perimeter.AllAreas);
+        if (acc == null) list.Add(acc = new MemberAccess { LevelId = levelId });
+        if (areaId == null && zoneId == null) { acc.Perimeter.AllAreas = true; acc.Perimeter.AreaIds.Clear(); acc.Perimeter.ZoneIds.Clear(); acc.Perimeter.ScreenIds.Clear(); }
+        else if (areaId is { } a)
+        {
+            if (!acc.Perimeter.AreaIds.Contains(a)) acc.Perimeter.AreaIds.Add(a);
+            var zones = d.Areas.First(x => x.Id == a).Zones.Select(z => z.Id).ToHashSet();
+            acc.Perimeter.ZoneIds.RemoveAll(zones.Contains);   // l'aire entière couvre déjà ses zones
+        }
+        else if (zoneId is { } z && !acc.Perimeter.ZoneIds.Contains(z)) acc.Perimeter.ZoneIds.Add(z);
+        u.SetAccesses(list);
+        return null;
+    }
+
+    /// <summary>Retire à un membre l'accès donné directement sur cette aire, cette zone ou l'organisation entière ; un accès sans périmètre disparaît.</summary>
+    public static string? RevokeAccess(ClientDb d, Guid userId, Guid levelId, Guid? areaId, Guid? zoneId)
+    {
+        if (!d.Access.IsOrgAdmin) return "Seul un administrateur de l'organisation retire des accès.";
+        var u = d.Users.FirstOrDefault(x => x.Id == userId);
+        if (u == null || u.Role != Roles.ClientMember) return "Membre introuvable.";
+        var list = Editable(d, u);
+        foreach (var acc in list.Where(a => a.LevelId == levelId))
+        {
+            if (areaId == null && zoneId == null) acc.Perimeter.AllAreas = false;
+            else if (areaId is { } a) acc.Perimeter.AreaIds.Remove(a);
+            else if (zoneId is { } z) acc.Perimeter.ZoneIds.Remove(z);
+        }
+        list.RemoveAll(a => !a.Perimeter.HasScope);
+        u.SetAccesses(list);
+        return null;
+    }
+
+    // ---------- Rôles de départ (23 octobre 2026) ----------
+
+    /// <summary>Éditeur : écrans, listes de lecture et médiathèque en modification, toutes les apps, sans Planning ni gestion des zones.</summary>
+    public static AccessLevel NewEditor()
+    {
+        var l = NewDefault();
+        l.Name = LevelKinds.EditorName; l.Kind = LevelKinds.Editor;
+        return l;
+    }
+
+    /// <summary>Lecteur : voit les écrans, les listes de lecture et la médiathèque, ne modifie ni ne publie rien.</summary>
+    public static AccessLevel NewReader()
+    {
+        var l = new AccessLevel
+        {
+            Name = LevelKinds.ReaderName, Kind = LevelKinds.Reader, Pages = [LevelPages.Screens, LevelPages.Playlists, LevelPages.Media],
+            ScreensAccess = DomainAccess.Read, PlaylistsAccess = DomainAccess.Read, MediaAccess = DomainAccess.Read,
+            PlaylistsVisibility = LevelVisibility.AllRead, MediaVisibility = LevelVisibility.AllRead, AllAreas = true
+        };
+        l.Normalize();
+        return l;
+    }
+
+    /// <summary>
+    /// Chaque organisation a les rôles Éditeur et Lecteur. L'ancien niveau « Utilisateur » d'origine (jamais modifié) devient l'Éditeur : ses membres le gardent ;
+    /// un niveau sur mesure qui porterait déjà un de ces noms est renommé « … (sur mesure) ».
+    /// </summary>
+    public static void EnsureRoles(Tenant c)
+    {
+        if (!c.Levels.Any(l => l.Kind == LevelKinds.Editor))
+        {
+            var legacy = c.Levels.FirstOrDefault(l => l.Kind == null && l.Name == DefaultName && l.AllAreas && l.AllIntegrations && l.AllWidgets
+                && !l.Pages.Contains(LevelPages.Planning) && !l.ManageZones
+                && l.AccessTo(LevelPages.Screens) == DomainAccess.Write && l.AccessTo(LevelPages.Playlists) == DomainAccess.Write && l.AccessTo(LevelPages.Media) == DomainAccess.Write);
+            FreeName(c, LevelKinds.EditorName);
+            if (legacy != null) { legacy.Name = LevelKinds.EditorName; legacy.Kind = LevelKinds.Editor; }
+            else c.Levels.Add(NewEditor());
+        }
+        if (!c.Levels.Any(l => l.Kind == LevelKinds.Reader)) { FreeName(c, LevelKinds.ReaderName); c.Levels.Add(NewReader()); }
+    }
+
+    private static void FreeName(Tenant c, string name)
+    {
+        foreach (var l in c.Levels.Where(l => l.Kind == null && l.Name.Equals(name, StringComparison.CurrentCultureIgnoreCase))) l.Name += " (sur mesure)";
+    }
+
+    /// <summary>
+    /// Une fois (23 octobre 2026) : les rôles de départ sont créés, et tous les membres existants deviennent administrateurs de l'organisation
+    /// (ils gardent leur compte, perdent leur niveau et leur périmètre : à redéfinir dans Organisation › Membres). Un niveau qu'ils avaient reste un rôle sur mesure.
+    /// </summary>
+    public static void MigrateRolesV2(Db db)
+    {
+        foreach (var c in db.Clients) EnsureRoles(c);
+        if (db.Done.Contains("roles-v2")) return;
+        db.Done.Add("roles-v2");
+        foreach (var u in db.Users.Where(u => u.Role == Roles.ClientMember))
+        {
+            u.Role = Roles.ClientAdmin;
+            u.Accesses = new(); u.LevelId = null; u.Perimeter = null;
+        }
     }
 
     // ---------- Démarrage ----------
