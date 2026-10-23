@@ -1,0 +1,78 @@
+@* Sélecteur de lieux de la page Organisation (maquette organisation-echelle.html) : recherche, aires dépliables en zones, cases à trois états.
+   Mode « full » : aires, zones et « Toute l'organisation » ; mode « areas » : aires seulement (filtre). Modifie directement Sel. *@
+<div class="search og-search" style="max-width:none"><Ico Name="search" Size="16" /><input placeholder="Rechercher une aire ou une zone…" aria-label="Rechercher une aire ou une zone" @bind="q" @bind:event="oninput" /></div>
+<div class="og-pk" role="tree">
+    @if (Mode == "full" && q.Length == 0)
+    {
+        <div class="og-pn all" role="treeitem" @onclick="ToggleAll"><button type="button" class="og-ck @(Sel.All ? "on" : "")" aria-label="Toute l'organisation" aria-pressed="@(Sel.All ? "true" : "false")"></button><span class="nm">Toute l'organisation</span><small>y compris les aires créées plus tard</small></div>
+    }
+    @foreach (var a in Areas)
+    {
+        var area = a;
+        var hits = area.Zones.Where(z => q.Length == 0 || z.Name.Contains(q, StringComparison.CurrentCultureIgnoreCase)).ToList();
+        var areaHit = q.Length == 0 || area.Name.Contains(q, StringComparison.CurrentCultureIgnoreCase);
+        if (!areaHit && hits.Count == 0) { continue; }
+        var whole = Sel.All || Sel.Areas.Contains(area.Id);
+        var nz = area.Zones.Count(z => Sel.Zones.Contains(z.Id));
+        var state = whole ? "on" : nz > 0 ? "part" : "";
+        var open = Mode == "full" && (opened.Contains(area.Id) || q.Length > 0 && !areaHit);
+        <div class="og-pn" role="treeitem" @onclick="() => ToggleArea(area)">
+            @if (Mode == "full") { <button type="button" class="og-tw @(open ? "open" : "")" aria-label="@(open ? "Replier" : "Déplier") @area.Name" @onclick="() => Toggle(area.Id)" @onclick:stopPropagation="true"><Ico Name="chevron-right" Size="14" /></button> }
+            <button type="button" class="og-ck @state" aria-label="@area.Name" aria-pressed="@(whole ? "true" : "false")"></button>
+            <span class="nm">@area.Name</span>
+            <small>@(Sel.All ? "toute l'organisation" : whole ? "toute l'aire" : nz > 0 ? $"{nz} zone{(nz > 1 ? "s" : "")} sur {area.Zones.Count}" : $"{area.Zones.Count} zone{(area.Zones.Count > 1 ? "s" : "")}")</small>
+        </div>
+        @if (open)
+        {
+            @foreach (var z in (areaHit && q.Length > 0 ? area.Zones : hits))
+            {
+                var zone = z;
+                <div class="og-pn l1" role="treeitem" @onclick="() => ToggleZone(area, zone)"><button type="button" class="og-ck @(whole || Sel.Zones.Contains(zone.Id) ? "on" : "")" aria-label="@zone.Name"></button><span class="nm">@zone.Name</span>@if (zone.IsWall) { <small>mur</small> }</div>
+            }
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<Area> Areas { get; set; } = [];
+    [Parameter, EditorRequired] public PlaceSel Sel { get; set; } = new();
+    [Parameter] public string Mode { get; set; } = "full";
+    [Parameter] public EventCallback OnChange { get; set; }
+
+    private string q = "";
+    private readonly HashSet<Guid> opened = new();
+
+    private void Toggle(Guid id) { if (!opened.Remove(id)) opened.Add(id); }
+
+    private async Task Changed() => await OnChange.InvokeAsync();
+
+    /// <summary>« Toute l'organisation » cochée et on retire un détail : chaque aire devient cochée une à une.</summary>
+    private void Expand()
+    {
+        if (!Sel.All) return;
+        Sel.All = false;
+        foreach (var a in Areas) Sel.Areas.Add(a.Id);
+    }
+
+    private async Task ToggleAll() { Sel.All = !Sel.All; Sel.Areas.Clear(); Sel.Zones.Clear(); await Changed(); }
+
+    private async Task ToggleArea(Area a)
+    {
+        var on = !(Sel.All || Sel.Areas.Contains(a.Id));
+        Expand();
+        Sel.Areas.Remove(a.Id);
+        foreach (var z in a.Zones) Sel.Zones.Remove(z.Id);
+        if (on) Sel.Areas.Add(a.Id);
+        await Changed();
+    }
+
+    private async Task ToggleZone(Area a, Zone z)
+    {
+        var on = !(Sel.All || Sel.Areas.Contains(a.Id) || Sel.Zones.Contains(z.Id));
+        Expand();
+        if (Sel.Areas.Remove(a.Id)) foreach (var o in a.Zones) Sel.Zones.Add(o.Id);   // l'aire était entière : ses zones restent cochées une à une
+        if (on) Sel.Zones.Add(z.Id); else Sel.Zones.Remove(z.Id);
+        if (a.Zones.Count > 0 && a.Zones.All(x => Sel.Zones.Contains(x.Id))) { foreach (var x in a.Zones) Sel.Zones.Remove(x.Id); Sel.Areas.Add(a.Id); }
+        await Changed();
+    }
+}

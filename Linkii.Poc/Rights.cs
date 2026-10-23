@@ -379,54 +379,159 @@ public static class AccessLevels
         return parts.Count == 0 ? "Aucun périmètre" : string.Join(" · ", parts);
     }
 
-    // ---------- Accès d'un membre, depuis l'arbre de l'organisation ----------
+    // ---------- Accès d'un ou plusieurs membres, depuis la page Organisation ----------
 
     private static List<MemberAccess> Editable(ClientDb d, User u) =>
         u.AccessList(d.Tenant.Levels).Select(a => new MemberAccess { LevelId = a.LevelId, Perimeter = a.Perimeter.Copy() }).ToList();
 
-    /// <summary>
-    /// Donne à un membre le rôle <paramref name="levelId"/> sur une aire, une zone, ou (sans les deux) toute l'organisation. Un accès de même rôle existant s'élargit
-    /// au lieu d'en créer un autre.
-    /// </summary>
-    public static string? GrantAccess(ClientDb d, Guid userId, Guid levelId, Guid? areaId, Guid? zoneId)
+    private static string? CanEditAccess(ClientDb d, string action) =>
+        d.Access.IsOrgAdmin ? null : $"Seul un administrateur de l'organisation {action}.";
+
+    /// <summary>Membres (pas les administrateurs) parmi les personnes données.</summary>
+    private static List<User> MembersAmong(ClientDb d, IEnumerable<Guid> userIds)
     {
-        if (!d.Access.IsOrgAdmin) return "Seul un administrateur de l'organisation donne des accès.";
-        var u = d.Users.FirstOrDefault(x => x.Id == userId);
-        if (u == null || u.Role != Roles.ClientMember) return "Membre introuvable : les administrateurs ont déjà accès à tout.";
-        if (d.Tenant.Levels.All(l => l.Id != levelId)) return "Rôle introuvable.";
-        if (areaId != null && d.Areas.All(a => a.Id != areaId)) return "Aire introuvable.";
-        if (zoneId != null && d.Areas.SelectMany(a => a.Zones).All(z => z.Id != zoneId)) return "Zone introuvable.";
-        var list = Editable(d, u);
-        var acc = list.FirstOrDefault(a => a.LevelId == levelId && !a.Perimeter.AllAreas);
-        if (acc == null) list.Add(acc = new MemberAccess { LevelId = levelId });
-        if (areaId == null && zoneId == null) { acc.Perimeter.AllAreas = true; acc.Perimeter.AreaIds.Clear(); acc.Perimeter.ZoneIds.Clear(); acc.Perimeter.ScreenIds.Clear(); }
-        else if (areaId is { } a)
-        {
-            if (!acc.Perimeter.AreaIds.Contains(a)) acc.Perimeter.AreaIds.Add(a);
-            var zones = d.Areas.First(x => x.Id == a).Zones.Select(z => z.Id).ToHashSet();
-            acc.Perimeter.ZoneIds.RemoveAll(zones.Contains);   // l'aire entière couvre déjà ses zones
-        }
-        else if (zoneId is { } z && !acc.Perimeter.ZoneIds.Contains(z)) acc.Perimeter.ZoneIds.Add(z);
-        u.SetAccesses(list);
+        var ids = userIds.ToHashSet();
+        return d.Users.Where(u => ids.Contains(u.Id) && u.Role == Roles.ClientMember).ToList();
+    }
+
+    private static string? CheckPlaces(ClientDb d, PlaceSel places)
+    {
+        if (!places.Any) return "Choisissez au moins une aire ou une zone.";
+        if (places.Areas.Any(a => d.Areas.All(x => x.Id != a))) return "Aire introuvable.";
+        var zones = d.Areas.SelectMany(a => a.Zones).Select(z => z.Id).ToHashSet();
+        if (places.Zones.Any(z => !zones.Contains(z))) return "Zone introuvable.";
         return null;
     }
 
-    /// <summary>Retire à un membre l'accès donné directement sur cette aire, cette zone ou l'organisation entière ; un accès sans périmètre disparaît.</summary>
-    public static string? RevokeAccess(ClientDb d, Guid userId, Guid levelId, Guid? areaId, Guid? zoneId)
+    /// <summary>
+    /// Donne à des membres le rôle <paramref name="levelId"/> sur des aires, des zones, ou toute l'organisation. Un accès de même rôle déjà là s'élargit au lieu
+    /// d'en créer un autre ; une zone d'une aire déjà couverte n'ajoute rien.
+    /// </summary>
+    public static string? GrantAccess(ClientDb d, IEnumerable<Guid> userIds, Guid levelId, PlaceSel places)
     {
-        if (!d.Access.IsOrgAdmin) return "Seul un administrateur de l'organisation retire des accès.";
-        var u = d.Users.FirstOrDefault(x => x.Id == userId);
-        if (u == null || u.Role != Roles.ClientMember) return "Membre introuvable.";
-        var list = Editable(d, u);
-        foreach (var acc in list.Where(a => a.LevelId == levelId))
+        if (CanEditAccess(d, "donne des accès") is { } e) return e;
+        if (d.Tenant.Levels.All(l => l.Id != levelId)) return "Rôle introuvable.";
+        if (CheckPlaces(d, places) is { } pe) return pe;
+        var users = MembersAmong(d, userIds);
+        if (users.Count == 0) return "Choisissez au moins un membre : les administrateurs ont déjà accès à tout.";
+        foreach (var u in users)
         {
-            if (areaId == null && zoneId == null) acc.Perimeter.AllAreas = false;
-            else if (areaId is { } a) acc.Perimeter.AreaIds.Remove(a);
-            else if (zoneId is { } z) acc.Perimeter.ZoneIds.Remove(z);
+            var list = Editable(d, u);
+            var acc = list.FirstOrDefault(a => a.LevelId == levelId && !a.Perimeter.AllAreas);
+            if (acc == null) list.Add(acc = new MemberAccess { LevelId = levelId });
+            var p = acc.Perimeter;
+            if (places.All) { p.AllAreas = true; p.AreaIds.Clear(); p.ZoneIds.Clear(); p.ScreenIds.Clear(); }
+            else
+            {
+                foreach (var a in places.Areas)
+                {
+                    if (!p.AreaIds.Contains(a)) p.AreaIds.Add(a);
+                    var inArea = d.Areas.First(x => x.Id == a).Zones.Select(z => z.Id).ToHashSet();
+                    p.ZoneIds.RemoveAll(inArea.Contains);   // l'aire entière couvre déjà ses zones
+                    p.ScreenIds.RemoveAll(s => d.Root.Screens.Any(x => x.Id == s && x.AreaId == a));
+                }
+                foreach (var z in places.Zones)
+                {
+                    var area = d.Areas.First(a => a.Zones.Any(x => x.Id == z));
+                    if (!p.AreaIds.Contains(area.Id) && !p.ZoneIds.Contains(z)) p.ZoneIds.Add(z);
+                }
+            }
+            u.SetAccesses(list);
         }
-        list.RemoveAll(a => !a.Perimeter.HasScope);
-        u.SetAccesses(list);
         return null;
+    }
+
+    public static string? GrantAccess(ClientDb d, Guid userId, Guid levelId, Guid? areaId, Guid? zoneId) =>
+        GrantAccess(d, [userId], levelId, new PlaceSel { All = areaId == null && zoneId == null, Areas = areaId is { } a ? [a] : [], Zones = zoneId is { } z ? [z] : [] });
+
+    /// <summary>
+    /// Retire à des membres l'accès donné sur ces lieux (tous rôles confondus) : une aire retirée d'un accès « toutes les aires » laisse les autres aires.
+    /// Un accès sans périmètre disparaît. « Toute l'organisation » retire tous les accès.
+    /// </summary>
+    public static string? RevokeAccess(ClientDb d, IEnumerable<Guid> userIds, PlaceSel places, Guid? onlyLevel = null)
+    {
+        if (CanEditAccess(d, "retire des accès") is { } e) return e;
+        if (!places.Any) return "Choisissez au moins une aire ou une zone.";
+        var users = MembersAmong(d, userIds);
+        if (users.Count == 0) return "Choisissez au moins un membre.";
+        var allAreas = d.Areas.Select(a => a.Id).ToList();
+        foreach (var u in users)
+        {
+            var list = Editable(d, u);
+            foreach (var acc in list.Where(a => onlyLevel == null || a.LevelId == onlyLevel))
+            {
+                var p = acc.Perimeter;
+                if (places.All) { p.AllAreas = false; p.AreaIds.Clear(); p.ZoneIds.Clear(); p.ScreenIds.Clear(); continue; }
+                if (p.AllAreas && places.Areas.Count > 0) { p.AllAreas = false; p.AreaIds = allAreas.Where(a => !places.Areas.Contains(a)).ToList(); }
+                p.AreaIds.RemoveAll(places.Areas.Contains);
+                foreach (var a in places.Areas)
+                {
+                    var inArea = d.Areas.First(x => x.Id == a).Zones.Select(z => z.Id).ToHashSet();
+                    p.ZoneIds.RemoveAll(inArea.Contains);
+                    p.ScreenIds.RemoveAll(s => d.Root.Screens.Any(x => x.Id == s && x.AreaId == a));
+                }
+                foreach (var z in places.Zones)
+                {
+                    var area = d.Areas.FirstOrDefault(a => a.Zones.Any(x => x.Id == z));
+                    if (area != null && p.AreaIds.Contains(area.Id))
+                    {   // l'aire entière était donnée : ses autres zones restent
+                        p.AreaIds.Remove(area.Id);
+                        foreach (var other in area.Zones.Where(x => x.Id != z)) if (!p.ZoneIds.Contains(other.Id)) p.ZoneIds.Add(other.Id);
+                    }
+                    p.ZoneIds.Remove(z);
+                    p.ScreenIds.RemoveAll(s => d.Root.Screens.Any(x => x.Id == s && x.ZoneId == z));
+                }
+            }
+            list.RemoveAll(a => !a.Perimeter.HasScope);
+            u.SetAccesses(list);
+        }
+        return null;
+    }
+
+    public static string? RevokeAccess(ClientDb d, Guid userId, Guid levelId, Guid? areaId, Guid? zoneId) =>
+        RevokeAccess(d, [userId], new PlaceSel { All = areaId == null && zoneId == null, Areas = areaId is { } a ? [a] : [], Zones = zoneId is { } z ? [z] : [] }, levelId);
+
+    /// <summary>
+    /// Remplace le rôle de chaque accès des membres par <paramref name="levelId"/> (leurs lieux ne changent pas) ; les accès qui deviennent de même rôle sont réunis.
+    /// Les administrateurs de la liste sont ignorés. Retourne le nombre de membres changés.
+    /// </summary>
+    public static (int Changed, string? Error) SetRole(ClientDb d, IEnumerable<Guid> userIds, Guid levelId)
+    {
+        if (CanEditAccess(d, "change les rôles") is { } e) return (0, e);
+        if (d.Tenant.Levels.All(l => l.Id != levelId)) return (0, "Rôle introuvable.");
+        var users = MembersAmong(d, userIds).Where(u => u.AccessList(d.Tenant.Levels).Count > 0).ToList();
+        foreach (var u in users)
+        {
+            var merged = new MemberAccess { LevelId = levelId };
+            var p = merged.Perimeter;
+            foreach (var a in u.AccessList(d.Tenant.Levels))
+            {
+                var o = a.Perimeter;
+                p.AllAreas |= o.AllAreas;
+                foreach (var x in o.AreaIds) if (!p.AreaIds.Contains(x)) p.AreaIds.Add(x);
+                foreach (var x in o.ZoneIds) if (!p.ZoneIds.Contains(x)) p.ZoneIds.Add(x);
+                foreach (var x in o.ScreenIds) if (!p.ScreenIds.Contains(x)) p.ScreenIds.Add(x);
+                p.PlaylistsVisibility ??= o.PlaylistsVisibility; p.MediaVisibility ??= o.MediaVisibility;
+            }
+            if (p.AllAreas) { p.AreaIds.Clear(); p.ZoneIds.Clear(); p.ScreenIds.Clear(); }
+            u.SetAccesses([merged]);
+        }
+        return (users.Count, null);
+    }
+
+    /// <summary>Désactive ou réactive des comptes. Ni soi-même, ni le dernier administrateur actif.</summary>
+    public static (int Changed, string? Error) SetDisabled(ClientDb d, IEnumerable<Guid> userIds, bool disabled)
+    {
+        if (CanEditAccess(d, "désactive ou réactive des comptes") is { } e) return (0, e);
+        var ids = userIds.ToHashSet();
+        var users = d.Users.Where(u => ids.Contains(u.Id) && u.Id != d.Access.UserId && u.Disabled != disabled).ToList();
+        if (disabled)
+        {
+            var staying = d.Users.Count(u => u.Role == Roles.ClientAdmin && !u.Disabled && !users.Contains(u));
+            if (users.Any(u => u.Role == Roles.ClientAdmin) && staying == 0) return (0, "L'organisation doit garder au moins un administrateur actif.");
+        }
+        foreach (var u in users) u.Disabled = disabled;
+        return (users.Count, null);
     }
 
     // ---------- Rôles de départ (23 octobre 2026) ----------

@@ -1,0 +1,549 @@
+@* Rôles de l'organisation : le tiroir « Rôles » de la page Organisation (liste, puis formulaire d'un rôle sur mesure, en onglets par domaine) et sa suppression.
+   Administrateur est le compte administrateur (tous les droits) ; Éditeur et Lecteur sont fournis d'office et ne se modifient pas (on les duplique). *@
+@inject TenantStore Store
+@inject Toaster Toast
+@inject AppCatalog Catalog
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+
+@if (Open)
+{
+    <Sheet Title="Rôles" Sub="Ce qu'on peut faire. Où, se règle sur chaque accès d'une personne." Class="lg" OnClose="Close">
+        <ChildContent>
+        <table class="tbl lv-tbl2">
+            <thead><tr><th style="min-width:220px">Rôle</th><th>Intégrations</th><th>Widgets</th><th class="num">Membres</th><th></th></tr></thead>
+            <tbody>
+                <tr class="dim">
+                    <td><span class="lv-ico dark"><Ico Name="lock" Size="18" /></span><b>Administrateur</b><small class="muted" style="display:block">Tous les droits, partout, y compris Organisation et Réglages. Fourni d'office.</small></td>
+                    <td>Toutes</td><td>Tous</td>
+                    <td class="num">@people.Count(u => u.Role == Roles.ClientAdmin)<span class="mb-unit"> membre</span></td><td></td>
+                </tr>
+            @foreach (var l in levels)
+            {
+                var lv = l;
+                var fixedRole = lv.Kind != null;
+                <tr class="@(fixedRole ? "" : "clickable")" @onclick="() => { if (!fixedRole) OpenLevel(lv); }" @oncontextmenu="() => { if (inApp) menuFor = lv.Id; }" @oncontextmenu:preventDefault="inApp">
+                    <td><span class="lv-ico @(fixedRole ? "dark" : "")"><Ico Name="@(fixedRole ? "lock" : "users")" Size="18" /></span><b>@lv.Name</b>@if (lv.ReadOnly) { <span class="pill" style="margin-left:6px">lecture seule</span> }@if (fixedRole) { <span class="pill" style="margin-left:6px">fourni d'office</span> }<small class="muted" style="display:block">@AccessLevels.PagesText(lv, Catalog)</small></td>
+                    <td>@AccessLevels.AppsText(lv, Catalog, false)</td>
+                    <td>@AccessLevels.AppsText(lv, Catalog, true)</td>
+                    @{ var nm = people.Count(u => u.Role == Roles.ClientMember && u.HasLevel(lv.Id)); }
+                    <td class="num">@nm<span class="mb-unit"> membre@(nm > 1 ? "s" : "")</span></td>
+                    <td @onclick:stopPropagation="true">
+                        <div class="kebab">
+                            <button type="button" class="kebab-btn" aria-label="Actions pour le rôle @lv.Name" aria-haspopup="menu" aria-expanded="@(menuFor == lv.Id ? "true" : "false")" @onclick="() => menuFor = menuFor == lv.Id ? null : lv.Id"><Ico Name="dots-v" Size="18" /></button>
+                            @if (menuFor == lv.Id)
+                            {
+                                <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                                <div class="kebab-menu" role="menu">
+                                    @if (!fixedRole) { <button type="button" role="menuitem" @onclick="() => OpenLevel(lv)"><Ico Name="edit" Size="16" /> Modifier</button> }
+                                    <button type="button" role="menuitem" @onclick="() => Duplicate(lv)"><Ico Name="plus" Size="16" /> Dupliquer</button>
+                                    @if (!fixedRole) { <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; levelDelete = lv; levelError = null; }"><Ico Name="trash" Size="16" /> Supprimer</button> }
+                                </div>
+                            }
+                        </div>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+        <p class="hint" style="margin-top:12px">Un rôle dit ce qu'on peut faire ; où on le peut se règle sur chaque membre. Modifier un rôle sur mesure change aussitôt ce que peuvent faire tous ses membres. Les rôles fournis d'office ne se modifient pas : dupliquez-les pour partir de leurs réglages. Un rôle utilisé ne se supprime pas.</p>
+        </ChildContent>
+        <Foot>
+            <button type="button" class="btn ghost" @onclick="() => OpenLevel(null)"><Ico Name="plus" Size="16" /> Nouveau rôle</button>
+            <span class="grow"></span>
+            <button type="button" class="btn" @onclick="Close">Fermer</button>
+        </Foot>
+    </Sheet>
+}
+
+@if (lf != null)
+{
+    var l = lf;
+    var apps = Catalog.All.Where(a => !a.ScreenWidget).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+    var widgets = Catalog.All.Where(a => a.ScreenWidget).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+    var members = l.Id is { } editedId ? people.Count(u => u.LevelId == editedId && u.Role == Roles.ClientMember) : 0;
+    @* Niveau de droits en onglets (§54) : un onglet par domaine, chacun réglé de la même façon (accès, puis visibilité, puis ses propres dossiers). *@
+    <Sheet Title="@(l.Id == null ? "Nouveau rôle" : "Rôle")" Sub="@(l.Id != null ? $"{members} membre{(members > 1 ? "s" : "")}" : null)" Class="lg" Over="true" OnClose="@(() => { lf = null; return Task.CompletedTask; })">
+        <ChildContent>
+        <input id="lv-name" class="lvt-name og-lvname" maxlength="60" @bind="l.Name" @bind:event="oninput" placeholder="Nom du rôle, ex. : Responsable affiches" aria-label="Nom du rôle" />
+        <div class="lvt-body">
+            <nav class="lvt-tabs" role="tablist" aria-label="Réglages du rôle" aria-orientation="vertical">
+                @TabButton("overview", "info", "Vue d'ensemble", "Ce que peut faire ce rôle", "")
+                @TabButton("screens", "monitor", "Écrans et planning", ScreensStatus(), l.Access[LevelPages.Screens] == DomainAccess.None ? "off" : "")
+                @TabButton("playlists", "play", "Listes de lecture", DomainStatus(LevelPages.Playlists), l.Access[LevelPages.Playlists] == DomainAccess.None ? "off" : "")
+                @TabButton("media", "image", "Médiathèque", DomainStatus(LevelPages.Media), l.Access[LevelPages.Media] == DomainAccess.None ? "off" : "")
+                @TabButton("apps", "grid", "Contenus et widgets", $"{AccessLevels.AppsText(l.ToLevel(), Catalog, false)} intégr. · {AccessLevels.AppsText(l.ToLevel(), Catalog, true).ToLowerInvariant()} widgets", "")
+            </nav>
+            <div class="lvt-pane" role="tabpanel">
+                @switch (lvTab)
+                {
+
+                    case "screens":
+                        <h4>Écrans et planning</h4>
+                        <p class="lvt-lead">Les écrans du périmètre.</p>
+                        <section class="lv-sec"><h4>1 · Accès aux écrans</h4><div class="lv-in">
+                            @AccessCards(LevelPages.Screens, "Pas de page Écrans.", "État, aperçu, simulateur.", "Choisir les listes, publier, mettre en pause.")
+                        </div></section>
+                        <section class="lv-sec"><h4>2 · En plus</h4><div class="lv-in">
+                            @Check(l.Planning && l.Access[LevelPages.Screens] != DomainAccess.None ? "all" : "none", "Planning : programmer des listes par créneau", () => { if (l.Access[LevelPages.Screens] != DomainAccess.None) l.Planning = !l.Planning; }, l.Access[LevelPages.Screens] == DomainAccess.None ? "lv-dis" : "")
+                            @Check(l.ManageZones && l.Access[LevelPages.Screens] == DomainAccess.Write ? "all" : "none", "Gérer les zones et les murs dans son périmètre", () => { if (l.Access[LevelPages.Screens] == DomainAccess.Write) l.ManageZones = !l.ManageZones; }, l.Access[LevelPages.Screens] != DomainAccess.Write ? "lv-dis" : "")
+                            @if (l.Access[LevelPages.Screens] != DomainAccess.Write) { <p class="lv-note">Gérer les zones demande « Voir et modifier » ; le planning demande l'accès aux écrans.</p> }
+                        </div></section>
+                        break;
+
+                    case "playlists":
+                        @DomainPane(LevelPages.Playlists)
+                        break;
+
+                    case "media":
+                        @DomainPane(LevelPages.Media)
+                        break;
+
+                    case "apps":
+                        <h4>Contenus et widgets</h4>
+                        <p class="lvt-lead">Les apps avec lesquelles la personne crée des contenus (dans ses listes) et les widgets qu'elle pose sur ses écrans. Les connexions aux comptes restent à l'administrateur.</p>
+                        <div class="lvt-tool">
+                            <span class="lvt-seg" role="tablist">
+                                <button type="button" role="tab" class="@(appTab == "integrations" ? "on" : "")" @onclick='() => appTab = "integrations"'>Intégrations</button>
+                                <button type="button" role="tab" class="@(appTab == "widgets" ? "on" : "")" @onclick='() => appTab = "widgets"'>Widgets</button>
+                            </span>
+                            <div class="search-box"><Ico Name="search" Size="15" /><input placeholder="Rechercher une app" aria-label="Rechercher une app" @bind="appQuery" @bind:event="oninput" /></div>
+                        </div>
+                        var w = appTab == "widgets";
+                        var list = (w ? widgets : apps).Where(a => appQuery.Length == 0 || a.Name.Contains(appQuery, StringComparison.CurrentCultureIgnoreCase)).ToList();
+                        @Check((w ? l.AllWidgets : l.AllIntegrations) ? "all" : "none", w ? "Tous les widgets, y compris les futurs" : "Toutes les intégrations, y compris les futures", () => AllApps(w), "lv-root")
+                        <div class="lvt-apps">
+                            @foreach (var a in list) { var app = a; @Check(AppOn(app) ? "all" : "none", app.Name, () => ToggleApp(app), "", app.Id) }
+                        </div>
+                        @if (list.Count == 0) { <p class="lv-note">Aucune app ne correspond.</p> }
+                        <p class="lv-note">Cocher = utiliser : créer et modifier des contenus avec cette app.</p>
+                        break;
+
+                    default:
+                        <h4>Vue d'ensemble</h4>
+                        <p class="lvt-lead">Ce que les membres de ce rôle peuvent faire, domaine par domaine. Un clic ouvre l'onglet.</p>
+                        <div class="lvt-sum">
+                            @SumCard("screens", "monitor", "Écrans", ScreensStatus(), DomainAccess.Label(l.Access[LevelPages.Screens]), l.Access[LevelPages.Screens])
+                            @SumCard("playlists", "play", "Listes de lecture", VisibilityStatus(LevelPages.Playlists), DomainAccess.Label(l.Access[LevelPages.Playlists]), l.Access[LevelPages.Playlists])
+                            @SumCard("media", "image", "Médiathèque", VisibilityStatus(LevelPages.Media), DomainAccess.Label(l.Access[LevelPages.Media]), l.Access[LevelPages.Media])
+                            @SumCard("apps", "grid", "Contenus et widgets", $"{AccessLevels.AppsText(l.ToLevel(), Catalog, false)} intégrations · {AccessLevels.AppsText(l.ToLevel(), Catalog, true).ToLowerInvariant()} widgets", "", "")
+                            <div class="lvt-card off"><Ico Name="lock" Size="16" /><span class="grow"><b>Réservé aux administrateurs</b><small>Membres, aires, comptes connectés, réglages</small></span></div>
+                        </div>
+                        <section class="lv-sec" style="margin-top:14px"><h4>Raccourci</h4><div class="lv-in">
+                            @Check(AllRead ? "all" : "none", "Tout en lecture seule : chaque domaine passe à « Voir » (plus rien ne se modifie ni ne se publie)", ToggleAllRead)
+                        </div></section>
+                        break;
+                }
+                @if (levelError != null) { <div class="err">@levelError</div> }
+            </div>
+        </div>
+        </ChildContent>
+        <Foot>
+            <span class="lvt-foot grow">@(l.Id == null ? "Le rôle pourra ensuite être donné à des membres." : $"Les changements s'appliquent aussitôt aux {members} membre{(members > 1 ? "s" : "")} de ce rôle.")</span>
+            <button type="button" class="btn ghost" @onclick="() => lf = null">Annuler</button>
+            <button type="button" class="btn" @onclick="SaveLevel">Enregistrer le rôle</button>
+        </Foot>
+    </Sheet>
+}
+
+@if (levelDelete is { } ld)
+{
+    <Sheet Title="@($"Supprimer le rôle « {ld.Name} » ?")" Class="sm" Over="true" OnClose="@(() => { levelDelete = null; return Task.CompletedTask; })">
+        <ChildContent>
+            <p class="hint" style="margin-top:0">Un rôle utilisé ne se supprime pas : ses membres doivent d'abord recevoir un autre rôle.</p>
+            @if (levelError != null) { <div class="err">@levelError</div> }
+        </ChildContent>
+        <Foot>
+            <button class="btn ghost" @onclick="() => levelDelete = null">Annuler</button>
+            <span class="grow"></span>
+            <button class="btn danger-solid" @onclick="DeleteLevel">Supprimer</button>
+        </Foot>
+    </Sheet>
+}
+
+@code {
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>Un rôle a changé (créé, modifié, supprimé) : la page recharge ses données.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+    private List<User> people = new();
+    private List<Area> areas = new();
+    private List<Screen> screens = new();
+    private List<LevelFolder> folders = new();   // dossiers de la médiathèque et des listes de lecture (tous les niveaux, toutes les aires)
+    /// <summary>Dossier vu par le formulaire ; Kind : domaine (LevelPages.Playlists ou LevelPages.Media).</summary>
+    private record LevelFolder(Guid Id, Guid? ParentId, Guid AreaId, string Name, string Path, string Kind, List<FolderShare> Shares, Guid? OwnerId);
+    private List<(Guid? FolderId, Guid AreaId, string Domain)> items = new();   // listes et fichiers de l'organisation (« N visibles sur M »)
+    private HashSet<Guid> memberIds = new();
+    private bool foldersOn;                      // option « Dossiers dans la médiathèque » de l'organisation
+    private List<AccessLevel> levels = new();
+    private Guid? menuFor;
+    private LevelForm? lf;
+    private AccessLevel? levelDelete;
+    private string? levelError;
+    private readonly HashSet<Guid> open = new();
+
+    protected override void OnParametersSet() { if (Open) Load(); }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private bool inApp;   // look « app » : appui long = menu de la carte
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try { inApp = await JS.InvokeAsync<bool>("linkiiPrefs.isApp"); if (inApp) StateHasChanged(); } catch (JSException) { } catch (InvalidOperationException) { }
+    }
+
+    private void Load()
+    {
+        (areas, screens, levels, people) = Store.Read(d => (
+            d.Areas.OrderBy(a => a.CreatedUtc).ToList(),
+            d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.Token != null).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
+            d.Tenant.Levels.OrderBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
+            d.Users.OrderBy(u => u.Role == Roles.ClientAdmin ? 0 : 1).ThenBy(u => u.Label, StringComparer.CurrentCultureIgnoreCase).ToList()));
+        // dossiers des deux sortes, rangés par chemin (« Affiches › Été ») pour que les sous-dossiers suivent leur parent
+        folders = Store.Read(d =>
+        {
+            var media = FolderOps.All(d);
+            var lists = PlaylistFolderOps.All(d);
+            static string PathOf<T>(T f, IReadOnlyCollection<T> all) where T : class, IFolderNode => string.Join(" › ", FolderAccess.Chain(f, all).Reverse().Select(x => x.Name));
+            return media.Select(f => new LevelFolder(f.Id, f.ParentId, f.AreaId, f.Name, PathOf(f, media), LevelPages.Media, f.Shares, f.OwnerId)).OrderBy(f => f.Path, StringComparer.CurrentCultureIgnoreCase)
+                .Concat(lists.Select(f => new LevelFolder(f.Id, f.ParentId, f.AreaId, f.Name, PathOf(f, lists), LevelPages.Playlists, f.Shares, f.OwnerId)).OrderBy(f => f.Path, StringComparer.CurrentCultureIgnoreCase))
+                .ToList();
+        });
+        items = Store.Read(d => d.Root.Playlists.Where(p => p.ClientId == d.ClientId).Select(p => (p.FolderId, p.AreaId, LevelPages.Playlists))
+            .Concat(d.Root.Media.Where(m => m.ClientId == d.ClientId && (MediaLibrary.IsFile(m) || Pres.Is(m)) && !MediaLibrary.IsDrive(m)).Select(m => (m.FolderId, m.AreaId, LevelPages.Media))).ToList());
+        memberIds = people.Where(u => u.Role == Roles.ClientMember).Select(u => u.Id).ToHashSet();
+        foldersOn = Store.Read(d => d.Tenant.FoldersOn);
+    }
+
+    // ---------- Niveaux de droits ----------
+
+    /// <summary>
+    /// Niveau en cours d'édition (§54). Le périmètre garde la forme du modèle : un élément coché donne tout ce qu'il contient. Chaque domaine
+    /// (Écrans, Listes de lecture, Médiathèque) a son accès ; Listes et Médiathèque ont leur visibilité et leurs propres dossiers.
+    /// </summary>
+    private class LevelForm
+    {
+        public Guid? Id; public string OldName = "", Name = "";
+        public bool AllIntegrations, AllWidgets, AllAreas, ManageZones, Planning;
+        public HashSet<string> Apps = new();
+        public HashSet<Guid> Areas = new(), Zones = new(), Screens = new();
+        public Dictionary<string, string> Access = Domains.ToDictionary(d => d, _ => DomainAccess.Write);
+        public Dictionary<string, string> Visibility = new() { [LevelPages.Playlists] = LevelVisibility.All, [LevelPages.Media] = LevelVisibility.All };
+        public HashSet<string> CreateFolders = new(), ShareFolders = new();
+        public Dictionary<Guid, string> FolderModes = new();   // « Dossiers choisis » : dossier → « read » ou « write » (absent : masqué)
+
+        public static LevelForm From(AccessLevel l) => new()
+        {
+            Id = l.Id, OldName = l.Name, Name = l.Name, AllIntegrations = l.AllIntegrations, AllWidgets = l.AllWidgets, Apps = [.. l.Apps],
+            ManageZones = l.ManageZones, Planning = l.Pages.Contains(LevelPages.Planning),
+            AllAreas = l.AllAreas, Areas = [.. l.AreaIds], Zones = [.. l.ZoneIds], Screens = [.. l.ScreenIds],
+            Access = Domains.ToDictionary(d => d, l.AccessTo),
+            Visibility = new() { [LevelPages.Playlists] = l.VisibilityOf(LevelPages.Playlists), [LevelPages.Media] = l.VisibilityOf(LevelPages.Media) },
+            CreateFolders = FolderDomains.Where(l.CreatesFolders).ToHashSet(),
+            ShareFolders = FolderDomains.Where(l.SharesFolders).ToHashSet()
+        };
+
+        public AccessLevel ToLevel() => new()
+        {
+            Id = Id ?? Guid.NewGuid(), Name = Name, AllIntegrations = AllIntegrations, AllWidgets = AllWidgets, Apps = [.. Apps],
+            Pages = Planning ? [LevelPages.Planning] : [], ManageZones = ManageZones,
+            AllAreas = AllAreas, AreaIds = [.. Areas], ZoneIds = [.. Zones], ScreenIds = [.. Screens],
+            ScreensAccess = Access[LevelPages.Screens], PlaylistsAccess = Access[LevelPages.Playlists], MediaAccess = Access[LevelPages.Media],
+            PlaylistsVisibility = Visibility[LevelPages.Playlists], MediaVisibility = Visibility[LevelPages.Media],
+            PlaylistsCreateFolders = true, MediaCreateFolders = true,
+            PlaylistsShareFolders = ShareFolders.Contains(LevelPages.Playlists), MediaShareFolders = ShareFolders.Contains(LevelPages.Media)
+        };
+    }
+
+    private static readonly string[] Domains = { LevelPages.Screens, LevelPages.Playlists, LevelPages.Media };
+    private static readonly string[] FolderDomains = { LevelPages.Playlists, LevelPages.Media };
+    private string lvTab = "overview", appTab = "integrations", appQuery = "", folderQuery = "";
+
+    private void OpenLevel(AccessLevel? l)
+    {
+        menuFor = null; levelError = null; open.Clear();
+        lvTab = "overview"; appTab = "integrations"; appQuery = folderQuery = "";
+        lf = l == null ? new LevelForm { AllIntegrations = true, AllWidgets = true, CreateFolders = [.. FolderDomains], ShareFolders = [.. FolderDomains] } : LevelForm.From(l);
+        if (l != null)
+            foreach (var f in folders)
+                foreach (var s in f.Shares.Where(s => s.Kind == FolderShareKind.Level && s.TargetId == l.Id))
+                    lf.FolderModes[f.Id] = s.Write ? "write" : "read";
+        if (areas.Count == 1) open.Add(areas[0].Id);   // une seule aire : ses zones sont déjà dépliées
+    }
+
+    private void Duplicate(AccessLevel l)
+    {
+        OpenLevel(l);
+        lf!.Id = null; lf.OldName = ""; lf.Name = l.Name + " (copie)";
+    }
+
+    private void SaveLevel()
+    {
+        if (lf is not { } f) return;
+        var level = f.ToLevel();
+        // les dossiers ne sont réécrits que si l'option est active : éteinte, les partages existants restent intacts. Seuls les domaines en
+        // « Dossiers choisis » gardent leurs choix dossier par dossier ; les autres n'ont plus de partage de niveau.
+        var chosen = f.FolderModes.Where(kv => folders.Any(x => x.Id == kv.Key))
+            .ToDictionary(kv => kv.Key, kv => kv.Value);
+        levelError = Store.Write(d => AccessLevels.Save(d, level) ?? (foldersOn ? FolderOps.SetLevelShares(d, level.Id, chosen) : null));
+        if (levelError != null) return;
+        Toast.Ok(f.Id == null ? $"Rôle « {level.Name.Trim()} » créé." : $"Rôle « {level.Name.Trim()} » enregistré : ses membres le reçoivent aussitôt.");
+        lf = null;
+        Load(); _ = OnChanged.InvokeAsync();
+    }
+
+    // ---------- États affichés sous les onglets et dans la vue d'ensemble ----------
+
+    private bool AllRead => lf != null && Domains.Any(d => lf.Access[d] != DomainAccess.None) && Domains.All(d => lf.Access[d] != DomainAccess.Write);
+
+    private void ToggleAllRead()
+    {
+        var target = AllRead ? DomainAccess.Write : DomainAccess.Read;
+        foreach (var d in Domains.Where(d => lf!.Access[d] != DomainAccess.None)) lf!.Access[d] = target;
+    }
+
+    private string ScreensStatus()
+    {
+        var a = lf!.Access[LevelPages.Screens];
+        if (a == DomainAccess.None) return "Aucun accès";
+        return DomainAccess.Label(a) + (lf.Planning ? " · planning" : " · sans planning") + (lf.ManageZones && a == DomainAccess.Write ? " · zones" : "");
+    }
+
+    private string VisibilityShort(string domain) => lf!.Visibility[domain] switch
+    {
+        LevelVisibility.All => lf.Access[domain] == DomainAccess.Write ? "tous les dossiers" : "tous les dossiers, en lecture",
+        LevelVisibility.AllRead => "tous les dossiers, en lecture",
+        LevelVisibility.Chosen => $"{ChosenCount(domain)} dossier{(ChosenCount(domain) > 1 ? "s" : "")} choisi{(ChosenCount(domain) > 1 ? "s" : "")}",
+        _ => domain == LevelPages.Media ? "ses dossiers seulement" : "hors dossier seulement"
+    };
+
+    private int ChosenCount(string domain) => lf!.FolderModes.Keys.Count(id => folders.Any(f => f.Id == id && f.Kind == domain));
+
+    private string DomainStatus(string domain)
+    {
+        var a = lf!.Access[domain];
+        if (a == DomainAccess.None) return "Aucun accès";
+        return foldersOn ? $"{DomainAccess.Label(a)} · {VisibilityShort(domain)}" : DomainAccess.Label(a);
+    }
+
+    private string VisibilityStatus(string domain)
+    {
+        var (visible, total) = VisibleCount(domain);
+        var noun = domain == LevelPages.Playlists ? "listes" : "médias";
+        return $"{visible} {noun} sur {total}" + (foldersOn ? " · " + VisibilityShort(domain) : "");
+    }
+
+    // ---------- Visibilité calculée sur le formulaire (avant enregistrement) ----------
+
+    private HashSet<Guid> ReachedAreas() => areas.Select(a => a.Id).ToHashSet();   // un niveau n'a plus de périmètre : tous les dossiers sont à sa portée
+
+    // Dossier « de l'organisation » : lui ou un parent est partagé, ou créé par un administrateur ; le dossier privé d'un membre n'en est pas
+    private bool OrgFolder(LevelFolder f)
+    {
+        var cur = f;
+        for (var n = 0; cur != null && n < 50; n++)
+        {
+            if (cur.Shares.Count > 0 || cur.OwnerId is not { } o || !memberIds.Contains(o)) return true;
+            cur = cur.ParentId is { } p ? folders.FirstOrDefault(x => x.Id == p && x.Kind == f.Kind) : null;
+        }
+        return false;
+    }
+
+    /// <summary>Droit que le niveau donnerait sur ce dossier : « », « read » ou « write ».</summary>
+    private string Effective(LevelFolder f)
+    {
+        var l = lf!;
+        var write = l.Access[f.Kind] == DomainAccess.Write;
+        var mode = l.Visibility[f.Kind] switch
+        {
+            LevelVisibility.All => OrgFolder(f) ? "write" : "",
+            LevelVisibility.AllRead => OrgFolder(f) ? "read" : "",
+            LevelVisibility.Chosen => l.FolderModes.GetValueOrDefault(f.Id) ?? InheritedMode(f) ?? "",
+            _ => ""
+        };
+        return mode == "write" && !write ? "read" : mode;
+    }
+
+    /// <summary>Éléments (listes ou fichiers) du périmètre que le niveau voit, sur le total du périmètre (hors dossiers privés de la personne).</summary>
+    private (int Visible, int Total) VisibleCount(string domain)
+    {
+        var reach = ReachedAreas();
+        var mine = items.Where(i => i.Domain == domain && reach.Contains(i.AreaId)).ToList();
+        var visible = mine.Count(i => i.FolderId is not { } fid ? domain != LevelPages.Media || !foldersOn : folders.FirstOrDefault(f => f.Id == fid) is { } fd && Effective(fd) != "");
+        return (visible, mine.Count);
+    }
+
+    // Droit donné par un dossier parent choisi (le sous-dossier en hérite)
+    private string? InheritedMode(LevelFolder f)
+    {
+        if (lf == null) return null;
+        var p = f.ParentId;
+        for (var n = 0; p is { } pid && n < FolderAccess.MaxDepth; n++)
+        {
+            if (lf.FolderModes.TryGetValue(pid, out var m)) return m;
+            p = folders.FirstOrDefault(x => x.Id == pid && x.Kind == f.Kind)?.ParentId;
+        }
+        return null;
+    }
+
+    private void SetFolderMode(Guid folderId, string mode)
+    {
+        if (lf == null) return;
+        if (mode == "") lf.FolderModes.Remove(folderId); else lf.FolderModes[folderId] = mode;
+    }
+
+    private void SetAllFolders(string domain, string mode)
+    {
+        var reach = ReachedAreas();
+        foreach (var f in folders.Where(f => f.Kind == domain)) lf!.FolderModes.Remove(f.Id);
+        if (mode != "") foreach (var f in folders.Where(f => f.Kind == domain && f.ParentId == null && reach.Contains(f.AreaId))) lf!.FolderModes[f.Id] = mode;
+    }
+
+    // ---------- Morceaux d'affichage du formulaire ----------
+
+    private RenderFragment TabButton(string id, string icon, string title, string sub, string state) => @<button type="button" role="tab" aria-selected="@(lvTab == id ? "true" : "false")" class="lvt-tab @(lvTab == id ? "on" : "") @state" @onclick="() => lvTab = id">
+        <span class="lvt-ic"><Ico Name="@icon" Size="15" /></span>
+        <span class="lvt-t"><b>@title</b><small title="@sub">@sub</small></span>
+    </button>;
+
+    private RenderFragment SumCard(string tabId, string icon, string title, string text, string badge, string access) => @<button type="button" class="lvt-card" @onclick="() => lvTab = tabId">
+        <Ico Name="@icon" Size="16" />
+        <span class="grow"><b>@title</b><small>@text</small></span>
+        @if (badge.Length > 0) { <span class="lvt-st @access">@badge</span> }
+    </button>;
+
+    private RenderFragment Choice(bool on, string title, string text, Action click, bool disabled = false) => @<button type="button" role="radio" aria-checked="@(on ? "true" : "false")" class="lvt-choice @(on ? "on" : "")" disabled="@disabled" @onclick="click">
+        <b><span class="lvt-rd"></span>@title</b><small>@text</small>
+    </button>;
+
+    private RenderFragment AccessCards(string domain, string none, string read, string write) => __builder =>
+    {
+        var l = lf!;
+        <div class="lvt-choices" role="radiogroup" aria-label="Accès">
+            @Choice(l.Access[domain] == DomainAccess.None, "Aucun", none, () => l.Access[domain] = DomainAccess.None)
+            @Choice(l.Access[domain] == DomainAccess.Read, "Voir", read, () => l.Access[domain] = DomainAccess.Read)
+            @Choice(l.Access[domain] == DomainAccess.Write, "Voir et modifier", write, () => l.Access[domain] = DomainAccess.Write)
+        </div>
+    };
+
+    private RenderFragment DomainPane(string domain) => __builder =>
+    {
+        var l = lf!;
+        var lists = domain == LevelPages.Playlists;
+        var noun = lists ? "listes" : "médias";
+        var write = l.Access[domain] == DomainAccess.Write;
+        var vis = l.Visibility[domain];
+        var (visible, total) = VisibleCount(domain);
+        <h4>@LevelPages.Label(domain)</h4>
+        <p class="lvt-lead">@(lists ? "Quelles listes la personne voit, et ce qu'elle peut en faire." : "Quels médias la personne voit (et peut mettre dans ses contenus), et ce qu'elle peut en faire.") @(lists ? "Les listes rangées hors dossier sont toujours visibles dans le périmètre." : "Les médias à la racine de la médiathèque (dont les fichiers Drive) restent réservés aux administrateurs : les autres ne voient que des dossiers.")</p>
+        <section class="lv-sec"><h4>1 · Accès</h4><div class="lv-in">
+            @if (lists) { @AccessCards(domain, "Pas de page Listes de lecture.", "Voir, essayer, diffuser sur ses écrans.", "Créer, composer, renommer, supprimer.") }
+            else { @AccessCards(domain, "Pas de page Médiathèque (les médias restent utilisables dans les contenus).", "Voir, télécharger, utiliser dans ses contenus.", "Importer, renommer, ranger, supprimer.") }
+        </div></section>
+        @if (!foldersOn)
+        {
+            <p class="lv-note">Les dossiers ne sont pas activés pour l'organisation (Réglages) : tout le contenu du périmètre est visible.</p>
+            return;
+        }
+        <section class="lv-sec"><h4>2 · Dossiers partagés avec ce rôle <span>@ChosenCount(domain) choisi@(ChosenCount(domain) > 1 ? "s" : "")</span></h4><div class="lv-in">
+            <p class="lv-note" style="margin-top:0">Ce que le rôle reçoit en plus, dossier par dossier. Ce que chaque personne voit des autres dossiers (tous, ou seulement ceux qu'on lui partage) se règle sur le membre.</p>
+            @if (true)
+            {
+                var reach = ReachedAreas();
+                var rows = folders.Where(f => f.Kind == domain && (folderQuery.Length == 0 || f.Path.Contains(folderQuery, StringComparison.CurrentCultureIgnoreCase))).ToList();
+                <div class="lvt-picker">
+                    <div class="lvt-ptool">
+                        <div class="search-box"><Ico Name="search" Size="15" /><input placeholder="Rechercher un dossier" aria-label="Rechercher un dossier" @bind="folderQuery" @bind:event="oninput" /></div>
+                        <span class="grow"></span>
+                        <button type="button" class="linklike" @onclick='() => SetAllFolders(domain, "read")'>Tout voir</button>
+                        <button type="button" class="linklike" @onclick='() => SetAllFolders(domain, "")'>Tout retirer</button>
+                    </div>
+                    @if (folders.All(f => f.Kind != domain))
+                    {
+                        <p class="lv-note" style="padding:0 12px 10px">Aucun dossier pour l'instant : créez-en dans @(lists ? "les listes de lecture" : "la médiathèque").</p>
+                    }
+                    else
+                    {
+                        <table class="lvt-tbl">
+                            <thead><tr><th>Dossier</th><th>Masqué</th><th>Voir</th><th>Modifier</th></tr></thead>
+                            <tbody>
+                                @foreach (var fd in rows)
+                                {
+                                    var folder = fd;
+                                    var inReach = reach.Contains(folder.AreaId);
+                                    var own = l.FolderModes.GetValueOrDefault(folder.Id) ?? "";
+                                    var inh = own == "" ? InheritedMode(folder) : null;
+                                    var depth = folder.Path.Count(c => c == '›');
+                                    <tr class="@(inReach ? "" : "off")">
+                                        <td><div class="lvt-nm" style="padding-left:@(depth * 20)px"><Ico Name="folder" Size="15" /><span>@folder.Name</span><span class="lvt-ar">@(areas.FirstOrDefault(a => a.Id == folder.AreaId)?.Name)</span>@if (inh != null) { <span class="lvt-tag">@(inh == "write" && write ? "modification" : "lecture") héritée</span> }@if (!inReach) { <span class="lvt-tag off">hors périmètre</span> }<span class="lvt-cnt">@items.Count(i => i.FolderId == folder.Id) @noun</span></div></td>
+                                        @foreach (var (mode, label) in new[] { ("", "Masqué"), ("read", "Voir"), ("write", "Modifier") })
+                                        {
+                                            var m = mode;
+                                            var dis = !inReach || m == "write" && !write;
+                                            var on = own == m && (m != "" || inh == null);
+                                            var ghost = own == "" && inh != null && (inh == m || inh == "write" && !write && m == "read");
+                                            <td><button type="button" role="radio" aria-checked="@(on ? "true" : "false")" aria-label="@label : @folder.Name" title="@(m == "write" && !write ? "Demande « Voir et modifier »" : label)" class="lvt-dot @(on ? "on" : "") @(on && m == "write" ? "w" : "") @(ghost ? "inh" : "")" disabled="@dis" @onclick="() => SetFolderMode(folder.Id, m)"></button></td>
+                                        }
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                        <div class="lvt-pfoot"><b>@ChosenCount(domain) dossier@(ChosenCount(domain) > 1 ? "s" : "") choisi@(ChosenCount(domain) > 1 ? "s" : "")</b>@(false ? $" · {ChosenCount(domain)} dossier{(ChosenCount(domain) > 1 ? "s" : "")} choisi{(ChosenCount(domain) > 1 ? "s" : "")}" : "").</div>
+                    }
+                </div>
+            }
+        </div></section>
+        <section class="lv-sec"><h4>3 · Ses propres dossiers</h4><div class="lv-in">
+            @Check(l.ShareFolders.Contains(domain) && write ? "all" : "none", lists ? "Partager ses dossiers de listes" : "Partager ses dossiers de médias", () => { if (write && !l.ShareFolders.Remove(domain)) l.ShareFolders.Add(domain); }, write ? "" : "lv-dis")
+            @if (!write) { <p class="lv-note">Demande « Voir et modifier ».</p> }
+        </div></section>
+    };
+
+    private void DeleteLevel()
+    {
+        if (levelDelete is not { } l) return;
+        levelError = Store.Write(d => AccessLevels.Delete(d, l.Id));
+        if (levelError != null) return;
+        Toast.Ok($"Rôle « {l.Name} » supprimé.");
+        levelDelete = null;
+        Load(); _ = OnChanged.InvokeAsync();
+    }
+
+    // Apps : « tout » mémorisé comme un indicateur (les apps ajoutées plus tard au catalogue sont incluses), sinon liste explicite.
+    private bool AppOn(AppManifest a) => lf != null && ((a.ScreenWidget ? lf.AllWidgets : lf.AllIntegrations) || lf.Apps.Contains(a.Id));
+
+    private void ToggleApp(AppManifest a)
+    {
+        var l = lf!;
+        var all = a.ScreenWidget ? l.AllWidgets : l.AllIntegrations;
+        var group = Catalog.All.Where(x => x.ScreenWidget == a.ScreenWidget).ToList();
+        if (all)
+        {   // décocher une app d'un « tout » : les autres restent cochées une à une
+            if (a.ScreenWidget) l.AllWidgets = false; else l.AllIntegrations = false;
+            foreach (var x in group.Where(x => x.Id != a.Id)) l.Apps.Add(x.Id);
+            l.Apps.Remove(a.Id);
+        }
+        else if (!l.Apps.Remove(a.Id))
+        {
+            l.Apps.Add(a.Id);
+            if (group.All(x => l.Apps.Contains(x.Id))) { if (a.ScreenWidget) l.AllWidgets = true; else l.AllIntegrations = true; foreach (var x in group) l.Apps.Remove(x.Id); }
+        }
+    }
+
+    private void AllApps(bool widgets)
+    {
+        var l = lf!;
+        var on = widgets ? !l.AllWidgets : !l.AllIntegrations;
+        if (widgets) l.AllWidgets = on; else l.AllIntegrations = on;
+        foreach (var x in Catalog.All.Where(x => x.ScreenWidget == widgets)) l.Apps.Remove(x.Id);
+    }
+
+    // ---------- Cases ----------
+
+    private RenderFragment Check(string state, string label, Action click, string css = "", string? appId = null) => @<div class="lv-row @css">
+        <button type="button" role="switch" aria-checked="@(state == "all" ? "true" : "false")" aria-label="@(label + (state == "some" ? " (en partie)" : ""))" class="switch sm @(state == "all" ? "on" : state == "some" ? "some" : "")" @onclick="click"><span></span></button>
+        @if (appId != null) { <span class="lv-appico" @onclick="click"><AppIcon Id="@appId" Small="true" /></span> }
+        <span class="lv-lbl" @onclick="click">@label</span>
+    </div>;
+}
