@@ -251,8 +251,10 @@ public class PdfService(JsonStore store, ILogger<PdfService> log)
                 var name = source.Title.Length > 120 ? source.Title[..120] : source.Title;
                 p = new MediaItem { Id = presId, ClientId = clientId, AreaId = areaId ?? Guid.Empty, Name = name, Type = Pres.Type, AddedUtc = DateTime.UtcNow, Width = made.FirstOrDefault(m => Pres.PageOf(m) == 1)?.Width ?? made.FirstOrDefault()?.Width, Height = made.FirstOrDefault(m => Pres.PageOf(m) == 1)?.Height ?? made.FirstOrDefault()?.Height };
                 p.Info["src"] = options.Src; p.Info["pdfId"] = source.Id; p.Info["gen"] = gen; p.Info["synced"] = DateTime.UtcNow.ToString("o");
+                p.FolderId = Pres.FolderFor(d, clientId, p.AreaId, options.Src);   // rangée dans « intégration_médias » (comme Canva)
                 d.Media.Add(p);
             }
+            foreach (var f in made) f.FolderId = p.FolderId;   // ses images suivent sa carte
             p.Info["pages"] = source.Pages.ToString();
             if (meta != null)
             {
@@ -346,7 +348,8 @@ public class PdfService(JsonStore store, ILogger<PdfService> log)
 
         store.Write(d =>
         {
-            foreach (var f in made.Values) d.Media.Add(f);
+            var folder = d.Media.FirstOrDefault(m => m.Id == presId)?.FolderId;
+            foreach (var f in made.Values) { f.FolderId = folder; d.Media.Add(f); }
             foreach (var (c, vk, list) in per)
             {
                 if (d.Media.FirstOrDefault(m => m.Id == c.Id) is not { } live) continue;

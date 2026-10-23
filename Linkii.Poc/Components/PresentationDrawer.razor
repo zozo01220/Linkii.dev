@@ -66,6 +66,18 @@
         }
         @if (error != null) { <div class="err" style="margin-top:12px">@error</div> }
     </div>
+    @if (busy)
+    {
+        @* mise à jour en cours : ce qui se passe (lecture, conversion par Microsoft ou Google, page n sur N) et une barre d'avancement *@
+        <div class="pr-prog" role="status" aria-live="polite">
+            <span class="spinner"></span>
+            <div class="grow">
+                <b>Mise à jour en cours…</b>
+                <small>@(status.Length > 0 ? status : "Lecture du fichier…")</small>
+                <div class="pr-bar-track @(pct == null ? "indet" : "")"><i style="@(pct == null ? "" : $"width:{pct}%")"></i></div>
+            </div>
+        </div>
+    }
     <div class="df">
         @if (CanRefresh) { <button type="button" class="btn sm" disabled="@busy" title="Convertir à nouveau la dernière version du fichier" @onclick="Refresh">@if (busy) { <span class="spinner"></span> } else { <Ico Name="refresh" Size="14" /> } Mettre à jour</button> }
         <span class="grow"></span>
@@ -94,18 +106,28 @@
     private Guid loadedFor;
     private int? selected;
     private bool busy, stale, checkedOk;
+    private string status = "";
+    private int? pct;   // avancement de la conversion des pages (null : étape sans pourcentage)
+
+    private void OnProgress(string s)
+    {
+        status = s;
+        var m = System.Text.RegularExpressions.Regex.Match(s, @"page (\d+) / (\d+)");
+        pct = m.Success && int.TryParse(m.Groups[1].Value, out var n) && int.TryParse(m.Groups[2].Value, out var total) && total > 0 ? Math.Clamp(n * 100 / total, 4, 100) : null;
+        _ = InvokeAsync(StateHasChanged);
+    }
     private string? error;
 
     private string Src => Item.Info.GetValueOrDefault("src") ?? "pdf";
     private string Unit => Pres.Unit(Src);
     private int Pages => Pres.Pages(Item) is > 0 and var n ? n : shown.Count;
     private bool InUse => uses is { Contents.Count: > 0 };
-    private string Letter => Src switch { "ppt" => "P", "gslides" => "S", "gdocs" => "D", "canva" => "C", _ => "PDF" };
-    private string SourceName => Src switch { "ppt" => "PowerPoint · OneDrive", "gslides" => "Google Slides · Google Drive", "gdocs" => "Google Docs · Google Drive", "canva" => "Canva", _ => "Document PDF" };
+    private string Letter => Src switch { "ppt" => "P", "gslides" => "S", "gdocs" => "D", "gsheets" => "X", "doc" => "W", "xls" => "X", "canva" => "C", _ => "PDF" };
+    private string SourceName => Src switch { "ppt" => "PowerPoint · OneDrive", "gslides" => "Google Slides · Google Drive", "gdocs" => "Google Docs · Google Drive", "gsheets" => "Google Sheets · Google Drive", "doc" => "Word · OneDrive", "xls" => "Excel · OneDrive", "canva" => "Canva", _ => "Document PDF" };
 
     private string Key => Item.Info.GetValueOrDefault("key") ?? "";
-    private CloudFileKind? CloudKind => CloudFileKind.Of(Key.Split(':')[0]);
-    private bool CanRefresh => CanEdit && (CloudKind != null && Key.Contains(':') || Src == "canva" && Key.StartsWith("canva:"));
+    private CloudFileKind? CloudKind => CloudFileKind.ForPresentation(Item);
+    private bool CanRefresh => CanEdit && (CloudKind != null && CloudFileKind.RefOf(Item).Length > 0 || Src == "canva" && Key.StartsWith("canva:"));
 
     private DateTime? Modified
     {
@@ -132,12 +154,12 @@
         loadedFor = Item.Id; selected = null; error = null; stale = false; checkedOk = false;
         Load();
         // le fichier a-t-il changé depuis la dernière conversion ? (une lecture, sans rien modifier)
-        if (CloudKind is { } kind && Key.Contains(':') && Modified != null)
+        if (CloudKind is { } kind && CloudFileKind.RefOf(Item).Length > 0 && Modified != null)
         {
             var tenant = Store.Read(d => d.Tenant);
             if (kind.Connected(tenant))
             {
-                var (changed, err) = await Cloud.HasChanged(tenant, kind, new Dictionary<string, string> { ["gfile"] = Key[(Key.IndexOf(':') + 1)..], ["gfileMod"] = Item.Info.GetValueOrDefault("mod") ?? "" });
+                var (changed, err) = await Cloud.HasChanged(tenant, kind, new Dictionary<string, string> { ["gfile"] = CloudFileKind.RefOf(Item), ["gfileMod"] = Item.Info.GetValueOrDefault("mod") ?? "" });
                 stale = changed; checkedOk = !changed && err == null;
             }
         }
@@ -160,7 +182,7 @@
 
     private async Task Refresh()
     {
-        busy = true; error = null;
+        busy = true; error = null; status = ""; pct = null;
         StateHasChanged();
         try
         {
@@ -168,15 +190,15 @@
             var area = Item.AreaId == Guid.Empty ? (Guid?)null : Item.AreaId;
             if (CloudKind is { } kind)
             {
-                var fileRef = Key[(Key.IndexOf(':') + 1)..];
-                var (done, err) = await Cloud.Import(tenant, Item.ClientId, area, kind, fileRef, Item.Info.GetValueOrDefault("pdfId"), PdfService.Options.From(new Dictionary<string, string>(), kind.AppId), force: true);
+                var fileRef = CloudFileKind.RefOf(Item);
+                var (done, err) = await Cloud.Import(tenant, Item.ClientId, area, kind, fileRef, Item.Info.GetValueOrDefault("pdfId"), new PdfService.Options("", "none", "landscape", Pres.Unit(Src), Src), new Progress<string>(OnProgress), force: true);
                 if (done == null) { error = err ?? "Conversion impossible."; Toast.Error(error); return; }
                 Toast.Ok(done.Contents > 0 ? $"« {done.Source.Title} » mis à jour pour {Count(done.Contents, "contenu", "contenus")}." : $"« {done.Source.Title} » mis à jour.");
             }
             else
             {
                 var design = new CanvaService.Design(Key["canva:".Length..], Item.Name, null, null, null, null, null);
-                var res = await Canva.Export(Item.ClientId, design, "images", areaId: area);
+                var res = await Canva.Export(Item.ClientId, design, "images", new Progress<string>(OnProgress), areaId: area);
                 if (res.Error != null) { error = res.Error; Toast.Error(error); return; }
                 foreach (var id in res.Refreshed ?? new()) await Notify.RefreshPages(Item.ClientId, id);
                 Toast.Ok(res.Refreshed is { Count: > 0 } r ? $"« {Item.Name} » mis à jour pour {Count(r.Count, "contenu", "contenus")}." : $"« {Item.Name} » mis à jour.");

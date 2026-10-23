@@ -1,0 +1,127 @@
+@inject TenantStore Store
+@inject CloudFileService Cloud
+@inject PdfService Pdf
+@inject Toaster Toast
+
+@* Documents des intégrations, importés depuis le bouton « Importer » de la médiathèque (DEV-POC.md §103) : un PDF de l'ordinateur, un fichier OneDrive ou
+   SharePoint (PowerPoint, Word, Excel…), une présentation, un document ou un tableur Google. Chaque page devient une image, rangée dans une présentation
+   du dossier « intégration_médias » (PowerPoint_médias, PDF_médias, GoogleSlides_médias…). Un fichier déjà converti est réutilisé en silence. *@
+<section class="di" aria-label="Documents">
+    <h4>Documents</h4>
+    <p class="hint">PDF, PowerPoint, Word, Excel, Google Slides, Docs et Sheets : chaque page devient une image, rangée dans une présentation du dossier « …_médias ».</p>
+    <div class="di-btns">
+        <label class="btn ghost sm file-btn @(busy ? "disabled" : "")">
+            <InputFile OnChange="PickPdf" accept=".pdf,application/pdf" disabled="@busy" />
+            <Ico Name="upload" Size="15" /> PDF de l'ordinateur
+        </label>
+        <button type="button" class="btn ghost sm" disabled="@busy" @onclick="() => Open(CloudFileKind.MsDocument)"><BrandLogo Id="drv-onedrive" Size="16" /> OneDrive · PowerPoint, Word, Excel</button>
+        <button type="button" class="btn ghost sm" disabled="@busy" @onclick="() => Open(CloudFileKind.Slides)"><BrandLogo Id="drv-gdrive" Size="16" /> Google Slides</button>
+        <button type="button" class="btn ghost sm" disabled="@busy" @onclick="() => Open(CloudFileKind.Docs)"><BrandLogo Id="drv-gdrive" Size="16" /> Google Docs</button>
+        <button type="button" class="btn ghost sm" disabled="@busy" @onclick="() => Open(CloudFileKind.Sheets)"><BrandLogo Id="drv-gdrive" Size="16" /> Google Sheets</button>
+    </div>
+    @if (busy)
+    {
+        <div class="pr-prog di-prog" role="status" aria-live="polite">
+            <span class="spinner"></span>
+            <div class="grow">
+                <b>@(title.Length > 0 ? $"Import de « {title} »…" : "Import en cours…")</b>
+                <small>@status</small>
+                <div class="pr-bar-track @(pct == null ? "indet" : "")"><i style="@(pct == null ? "" : $"width:{pct}%")"></i></div>
+            </div>
+        </div>
+    }
+    @if (notConnected is { } nc)
+    {
+        <div class="di-note">Connectez d'abord un compte @(nc.IsGoogle ? "Google" : "Microsoft") (avec l'accès aux fichiers Drive) : <a href="/integrations">Intégrations › Comptes connectés</a>.</div>
+    }
+    @if (error != null) { <div class="err">@error</div> }
+</section>
+
+@if (picking is { } kind)
+{
+    @* rendu dans la mise en page : la fenêtre d'import, centrée par transform, décalerait et rognerait le sélecteur *@
+    <SectionContent SectionName="overlay">
+        <CloudFilePicker Kind="kind" OnPicked="n => Picked(kind, n)" OnClose="() => picking = null" />
+    </SectionContent>
+}
+
+@code {
+    /// <summary>Un document vient d'entrer dans la médiathèque (ou y était déjà) : la page se relit.</summary>
+    [Parameter] public EventCallback OnImported { get; set; }
+
+    private CloudFileKind? picking, notConnected;
+    private bool busy;
+    private string status = "", title = "";
+    private string? error;
+    private int? pct;
+
+    private void Open(CloudFileKind kind)
+    {
+        error = null; notConnected = null;
+        if (!kind.Connected(Store.Read(d => d.Tenant))) { notConnected = kind; return; }
+        picking = kind;
+    }
+
+    private void OnProgress(string s)
+    {
+        status = s;
+        var m = System.Text.RegularExpressions.Regex.Match(s, @"page (\d+) / (\d+)");
+        pct = m.Success && int.TryParse(m.Groups[1].Value, out var n) && int.TryParse(m.Groups[2].Value, out var total) && total > 0 ? Math.Clamp(n * 100 / total, 4, 100) : null;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task Picked(CloudFileKind kind, DriveNode node)
+    {
+        picking = null; busy = true; error = null; title = node.Name; status = "Lecture du fichier…"; pct = null;
+        StateHasChanged();
+        try
+        {
+            var src = kind.SrcOf(node.Name);
+            var (done, err) = await Cloud.Import(Store.Read(d => d.Tenant), Store.ClientId, Store.AreaId, kind, node.Ref, null,
+                new PdfService.Options("", "none", "landscape", Pres.Unit(src), src), new Progress<string>(OnProgress));
+            if (done == null) { Fail(err ?? "Import impossible."); return; }
+            await Finish(done.Source, done.Result, src, done.How == CloudFileService.ImportKind.Reused, done.How == CloudFileService.ImportKind.Updated);
+        }
+        finally { busy = false; }
+    }
+
+    private async Task PickPdf(InputFileChangeEventArgs e)
+    {
+        busy = true; error = null; notConnected = null; title = Path.GetFileNameWithoutExtension(e.File.Name); status = "Envoi du PDF…"; pct = null;
+        StateHasChanged();
+        try
+        {
+            var saved = await Pdf.SaveSource(e.File);
+            if (saved.Source is not { } sent) { Fail(saved.Error ?? "PDF refusé."); return; }
+            var source = Pdf.ReuseUploaded(Store.ClientId, Store.AreaId, sent, out var reused);   // le même PDF déjà dans la médiathèque est réutilisé
+            var res = await Pdf.Convert(Store.ClientId, Store.AreaId, source, new PdfService.Options("", "none", "landscape", "page", "pdf"), new Progress<string>(OnProgress),
+                meta: source.Hash == null ? null : new PdfService.Meta("sha:" + source.Hash, null, source.Title));
+            if (res.Error != null) { if (!reused) Pdf.Release(source.Id); Fail(res.Error); return; }
+            await Finish(source, res, "pdf", reused, false);
+        }
+        catch (IOException) { Fail("Le fichier n'a pas pu être lu. Réessayez."); }
+        finally { busy = false; }
+    }
+
+    private async Task Finish(PdfService.Source source, PdfService.ConvertResult res, string src, bool reused, bool updated)
+    {
+        var folder = Pres.FolderName(src);
+        if (res.Presentation == null)
+        {
+            // une seule page : une image ordinaire, rangée elle aussi dans « intégration_médias » ; le PDF d'origine n'a plus d'usage
+            Store.Write(d =>
+            {
+                var f = Pres.FolderFor(d.Root, Store.ClientId, Store.AreaId ?? Guid.Empty, src);
+                foreach (var img in res.Files) if (d.Media.FirstOrDefault(m => m.Id == img.Id) is { } live) live.FolderId = f;
+            });
+            Pdf.Release(source.Id);
+            Toast.Ok($"« {source.Title} » importé : 1 image dans la médiathèque › {folder}.");
+        }
+        else if (reused) Toast.Ok($"« {source.Title} » est déjà dans la médiathèque : réutilisé.");
+        else if (updated) Toast.Ok($"« {source.Title} » avait changé : mis à jour.");
+        else Toast.Ok($"« {source.Title} » importé : {source.Pages} page{(source.Pages > 1 ? "s" : "")} dans la médiathèque › {folder}.");
+        await OnImported.InvokeAsync();
+    }
+
+    private void Fail(string message) { error = message; Toast.Error(message); }
+}

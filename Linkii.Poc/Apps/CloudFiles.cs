@@ -9,13 +9,21 @@ namespace Linkii.Poc;
 /// <param name="Source">Source Drive du compte connecté : « gdrive » ou « onedrive ».</param>
 /// <param name="Mime">Google : type du fichier natif. Microsoft : vide (le type se reconnaît à l'extension, voir <see cref="Matches"/>).</param>
 /// <param name="Gkind">« slides » ou « docs » : nom d'une page dans le nom des images (« diapositive » ou « page »).</param>
-public record CloudFileKind(string AppId, string Source, string Mime, string Gkind)
+public record CloudFileKind(string AppId, string Source, string Mime, string Gkind, string Noun = "une présentation", string Plural = "Présentations", string[]? Extensions = null)
 {
+    private static readonly string[] PowerPointExtensions = { ".pptx", ".ppt", ".pptm", ".ppsx", ".pps", ".potx", ".odp" };
+    private static readonly string[] WordExtensions = { ".docx", ".doc", ".odt", ".rtf" };
+    private static readonly string[] ExcelExtensions = { ".xlsx", ".xls", ".ods", ".csv" };
+    private static readonly string[] OfficeExtensions = PowerPointExtensions.Concat(WordExtensions).Concat(ExcelExtensions).ToArray();
+
     public static readonly CloudFileKind Slides = new("google-slides", "gdrive", DriveService.SlidesMime, "slides");
-    public static readonly CloudFileKind Docs = new("google-docs", "gdrive", DriveService.DocsMime, "docs");
+    public static readonly CloudFileKind Docs = new("google-docs", "gdrive", DriveService.DocsMime, "docs", "un document", "Documents");
     public static readonly CloudFileKind PowerPoint = new("ms-powerpoint", "onedrive", "", "slides");
 
-    private static readonly string[] PowerPointExtensions = { ".pptx", ".ppt", ".pptm", ".ppsx", ".pps", ".potx", ".odp" };
+    // Fichiers qu'on importe directement dans la médiathèque (bouton « Importer ») : tout document converti en PDF par Microsoft ou par Google, sans app.
+    public static readonly CloudFileKind Sheets = new("google-sheets", "gdrive", DriveService.SheetsMime, "docs", "un tableur", "Tableurs");
+    public static readonly CloudFileKind MsDocument = new("ms-document", "onedrive", "", "docs", "un document", "Documents", OfficeExtensions);
+    public static readonly CloudFileKind[] ImportKinds = { MsDocument, Slides, Docs, Sheets };
 
     public static CloudFileKind? Of(string? appId) => appId == Slides.AppId ? Slides : appId == Docs.AppId ? Docs : appId == PowerPoint.AppId ? PowerPoint : null;
     public static bool IsCloudApp(string? appId) => Of(appId) != null;
@@ -30,8 +38,36 @@ public record CloudFileKind(string AppId, string Source, string Mime, string Gki
 
     public string User(Tenant t) => IsGoogle ? t.GoogleUser : t.MsUser;
 
-    /// <summary>Microsoft : ce nom de fichier est une présentation que Graph sait convertir en PDF.</summary>
-    public bool Matches(string fileName) => PowerPointExtensions.Contains(Path.GetExtension(fileName), StringComparer.OrdinalIgnoreCase);
+    /// <summary>Microsoft : ce nom de fichier est un document que Graph sait convertir en PDF.</summary>
+    public bool Matches(string fileName) => (Extensions ?? PowerPointExtensions).Contains(Path.GetExtension(fileName), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Clé qui reconnaît le fichier d'origine d'une présentation (Info["key"]), quelle que soit l'app ou le bouton d'import qui l'a converti.</summary>
+    public string KeyOf(string fileRef) => (IsGoogle ? "gdrive:" : "onedrive:") + fileRef;
+
+    /// <summary>Anciennes clés (une par app) : retrouvent les présentations créées avant la clé commune.</summary>
+    public string LegacyKeyOf(string fileRef) => AppId + ":" + fileRef;
+
+    /// <summary>Source de la présentation (voir <see cref="Pres"/>) d'après le fichier converti.</summary>
+    public string SrcOf(string fileName)
+    {
+        if (IsGoogle) return Mime == DriveService.SlidesMime ? "gslides" : Mime == DriveService.SheetsMime ? "gsheets" : "gdocs";
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        return PowerPointExtensions.Contains(ext) ? "ppt" : ExcelExtensions.Contains(ext) ? "xls" : "doc";
+    }
+
+    /// <summary>Type de fichier d'une présentation, d'après sa clé (null : un PDF envoyé, un design Canva).</summary>
+    public static CloudFileKind? ForPresentation(MediaItem pres)
+    {
+        var key = pres.Info.GetValueOrDefault("key") ?? "";
+        var src = pres.Info.GetValueOrDefault("src");
+        if (key.StartsWith("onedrive:")) return MsDocument;
+        if (key.StartsWith("gdrive:")) return src == "gslides" ? Slides : src == "gsheets" ? Sheets : Docs;
+        var legacy = Of(key.Split(':')[0]);
+        return legacy == PowerPoint ? MsDocument : legacy;
+    }
+
+    /// <summary>Référence du fichier dans le Drive (après « onedrive: », « gdrive: » ou l'ancienne clé de l'app).</summary>
+    public static string RefOf(MediaItem pres) { var key = pres.Info.GetValueOrDefault("key") ?? ""; return key.Contains(':') ? key[(key.IndexOf(':') + 1)..] : ""; }
 }
 
 /// <summary>
@@ -61,9 +97,10 @@ public class CloudFileService(DriveService drive, PdfService pdf, JsonStore stor
         {
             progress?.Report("Lecture du fichier dans " + (kind.IsGoogle ? "Google Drive…" : "OneDrive…"));
             var file = await drive.CloudFileInfo(t, kind, fileRef);
-            var key = kind.AppId + ":" + fileRef;
+            var key = kind.KeyOf(fileRef);   // le même fichier est reconnu quelle que soit l'app ou le bouton d'import
             var meta = new PdfService.Meta(key, file.Modified, file.Name);
-            var existing = pdf.FindPresentation(clientId, areaId, key) ?? (string.IsNullOrEmpty(reuseId) ? null : pdf.PresentationOfPdf(clientId, reuseId));
+            var existing = pdf.FindPresentation(clientId, areaId, key) ?? pdf.FindPresentation(clientId, areaId, kind.LegacyKeyOf(fileRef))
+                ?? (string.IsNullOrEmpty(reuseId) ? null : pdf.PresentationOfPdf(clientId, reuseId));
             var existingPdf = existing?.Info.GetValueOrDefault("pdfId");
 
             if (existing != null && !force && existing.Info.GetValueOrDefault("mod") == file.Modified && PdfService.Exists(existingPdf))
@@ -95,6 +132,21 @@ public class CloudFileService(DriveService drive, PdfService pdf, JsonStore stor
         {
             return (null, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Utilise une présentation déjà dans la médiathèque pour un contenu : aucun fichier n'est relu dans le Drive, ses images sont réutilisées
+    /// (les pages du rendu demandé qui manquent sont produites à partir du PDF gardé).
+    /// </summary>
+    public async Task<(Imported? Done, string? Error)> UseLibrary(Guid clientId, Guid? areaId, MediaItem pres, PdfService.Options options, IProgress<string>? progress = null, CancellationToken ct = default)
+    {
+        var pdfId = pres.Info.GetValueOrDefault("pdfId");
+        if (!PdfService.Exists(pdfId)) return (null, "Le PDF d'origine n'est plus sur le serveur : importez de nouveau le fichier depuis votre Drive.");
+        var source = new PdfService.Source(pdfId!, pres.Name, Pres.Pages(pres));
+        var res = await pdf.Convert(clientId, areaId, source, options, progress, ct);
+        if (res.Error != null) return (null, res.Error);
+        var file = new DriveService.CloudFile(CloudFileKind.RefOf(pres), pres.Info.GetValueOrDefault("file") ?? pres.Name, pres.Info.GetValueOrDefault("mod") ?? "", "");
+        return (new(source, res, file, ImportKind.Reused), null);
     }
 
     /// <summary>Retire un PDF gardé que plus rien n'utilise (sauf s'il appartient à une présentation).</summary>

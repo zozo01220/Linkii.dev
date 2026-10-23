@@ -180,6 +180,47 @@ public class PdfServiceTests : IDisposable
         Assert.Equal(4, store.Read(d => d.Media.Count(m => Pres.IsPage(m) && m.Info["gen"] == "2" && m.Info["var"] == "none")));   // les 4 pages de base de la nouvelle version
     }
 
+
+    [Fact]
+    public async Task A_presentation_and_its_pages_go_into_the_integration_media_folder_shared_by_all_of_that_source()
+    {
+        var a = await pdf.Convert(tenant.Id, null, new PdfService.Source(WritePdf(Three), "Menu", 3), new PdfService.Options("", "none", "landscape"));
+        var b = await pdf.Convert(tenant.Id, null, new PdfService.Source(WritePdf(Three), "Carte", 3), new PdfService.Options("", "none", "landscape"));
+        var folder = Assert.Single(store.Read(d => d.MediaFolders.ToList()));
+        Assert.Equal("PDF_médias", folder.Name);
+        Assert.Equal(folder.Id, a.Presentation!.FolderId);
+        Assert.Equal(folder.Id, b.Presentation!.FolderId);
+        Assert.All(a.Files.Concat(b.Files), f => Assert.Equal(folder.Id, f.FolderId));   // les pages suivent la carte
+        Assert.Equal("PowerPoint_médias", Pres.FolderName("ppt"));
+        Assert.Equal("GoogleSlides_médias", Pres.FolderName("gslides"));
+        Assert.Equal("Canva_médias", Pres.FolderName("canva"));
+    }
+
+    [Fact]
+    public void Every_integration_document_type_can_be_imported_and_is_recognised_by_a_common_key()
+    {
+        foreach (var name in new[] { "a.pptx", "a.ppt", "a.docx", "a.doc", "a.xlsx", "a.xls", "a.odt", "a.ods", "a.csv" })
+            Assert.True(CloudFileKind.MsDocument.Matches(name), name);
+        Assert.False(CloudFileKind.MsDocument.Matches("a.png"));
+        Assert.Equal("ppt", CloudFileKind.MsDocument.SrcOf("Offre.pptx"));
+        Assert.Equal("doc", CloudFileKind.MsDocument.SrcOf("Note.docx"));
+        Assert.Equal("xls", CloudFileKind.MsDocument.SrcOf("Budget.xlsx"));
+        Assert.Equal("gslides", CloudFileKind.Slides.SrcOf("x"));
+        Assert.Equal("gdocs", CloudFileKind.Docs.SrcOf("x"));
+        Assert.Equal("gsheets", CloudFileKind.Sheets.SrcOf("x"));
+        // l'app PowerPoint et le bouton Importer reconnaissent le même fichier
+        Assert.Equal(CloudFileKind.MsDocument.KeyOf("d/1"), CloudFileKind.PowerPoint.KeyOf("d/1"));
+        var pres = new MediaItem { Type = Pres.Type };
+        pres.Info["key"] = "onedrive:d/1"; pres.Info["src"] = "doc";
+        Assert.Equal(CloudFileKind.MsDocument, CloudFileKind.ForPresentation(pres));
+        Assert.Equal("d/1", CloudFileKind.RefOf(pres));
+        pres.Info["key"] = "ms-powerpoint:d/2";   // ancienne clé (une par app)
+        Assert.Equal(CloudFileKind.MsDocument, CloudFileKind.ForPresentation(pres));
+        Assert.Equal("d/2", CloudFileKind.RefOf(pres));
+        pres.Info["key"] = "gdrive:abc"; pres.Info["src"] = "gsheets";
+        Assert.Equal(CloudFileKind.Sheets, CloudFileKind.ForPresentation(pres));
+    }
+
     private static string WritePdfPath(string id) => Path.Combine(AppPaths.PdfDir, id + ".pdf");
 
     [Fact]

@@ -319,6 +319,7 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
 
     public const string SlidesMime = "application/vnd.google-apps.presentation";
     public const string DocsMime = "application/vnd.google-apps.document";
+    public const string SheetsMime = "application/vnd.google-apps.spreadsheet";
 
     /// <summary>Un fichier choisi : référence (Google : identifiant avec clé de sécurité éventuelle ; Microsoft : « lecteur/élément »), nom, date de dernière modification, adresse web.</summary>
     public record CloudFile(string Ref, string Name, string Modified, string WebUrl);
@@ -347,7 +348,9 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
         var files = items.Where(i => !i.Folder && i.Mime == kind.Mime).OrderBy(i => i.Name, byName).Select(i => Node(i) with { Ref = i.Ref, Kind = "file" }).ToList();
         var office = kind.Mime == SlidesMime
             ? new[] { "application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/vnd.ms-powerpoint" }
-            : new[] { "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword" };
+            : kind.Mime == SheetsMime
+                ? new[] { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel" }
+                : new[] { "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword" };
         return new(self, web, folders, files, items.Count(i => !i.Folder && office.Contains(i.Mime)), more);
     }
 
@@ -397,12 +400,12 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
         {
             using var item = await GraphGet(t, $"{Graph}/drives/{parts[0]}/items/{parts[^1]}?$select=id,name,lastModifiedDateTime,webUrl,file", "Fichier");
             var m = item.RootElement;
-            if (!m.TryGetProperty("file", out _) || !kind.Matches(Str(m, "name"))) throw new InvalidOperationException("Ce fichier n'est pas une présentation PowerPoint.");
+            if (!m.TryGetProperty("file", out _) || !kind.Matches(Str(m, "name"))) throw new InvalidOperationException(kind == CloudFileKind.PowerPoint ? "Ce fichier n'est pas une présentation PowerPoint." : "Ce fichier n'est pas un document que Microsoft sait convertir en PDF.");
             return new(fileRef, Path.GetFileNameWithoutExtension(Str(m, "name")), Str(m, "lastModifiedDateTime"), Str(m, "webUrl"));
         }
         using var doc = await GoogleGet(t, $"{GoogleApi}/{parts[0]}?fields=id,name,mimeType,modifiedTime,webViewLink&supportsAllDrives=true", Keys(parts[0], parts.Length > 1 ? parts[1] : null), "Fichier");
         var r = doc.RootElement;
-        if (Str(r, "mimeType") != kind.Mime) throw new InvalidOperationException(kind.Mime == SlidesMime ? "Ce fichier n'est pas une présentation Google Slides." : "Ce fichier n'est pas un document Google Docs.");
+        if (Str(r, "mimeType") != kind.Mime) throw new InvalidOperationException(kind.Mime == SlidesMime ? "Ce fichier n'est pas une présentation Google Slides." : kind.Mime == SheetsMime ? "Ce fichier n'est pas un tableur Google Sheets." : "Ce fichier n'est pas un document Google Docs.");
         return new(fileRef, Str(r, "name"), Str(r, "modifiedTime"), Str(r, "webViewLink"));
     }
 

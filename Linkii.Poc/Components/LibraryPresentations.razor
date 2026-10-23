@@ -1,0 +1,38 @@
+@inject MediaLibrary Library
+
+@* Présentations déjà dans la médiathèque, proposées sous le bloc « + » d'un contenu (PowerPoint, Google Slides, Google Docs, Document PDF, Canva) :
+   un clic la choisit sans rien importer. Pas dans la médiathèque : on clique sur « + » pour l'importer depuis son compte Drive. *@
+@if (items.Count > 0)
+{
+    <div class="libpres">
+        <div class="libpres-h">Dans votre médiathèque <small>@items.Count</small></div>
+        <div class="libpres-grid">
+            @foreach (var p in items)
+            {
+                var item = p;
+                var n = Pres.Pages(item);
+                <button type="button" class="libpres-card" title="Utiliser « @item.Name »" aria-label="Utiliser la présentation @item.Name" @onclick="() => OnPick.InvokeAsync(item)">
+                    @if (covers.TryGetValue(item.Id, out var cv)) { <img src="/media/@cv.FileName?w=320" alt="" loading="lazy" decoding="async" /> }
+                    <span class="pr-nm">@item.Name</span>
+                    <span class="pr-cnt"><Ico Name="copy" Size="11" />@n</span>
+                    <span class="pr-src">@Pres.Label(item.Info.GetValueOrDefault("src"))</span>
+                </button>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Sources de présentation que ce contenu sait afficher (voir <see cref="Pres"/> : ppt, gslides, gdocs, pdf, canva…).</summary>
+    [Parameter, EditorRequired] public string[] Srcs { get; set; } = Array.Empty<string>();
+    [Parameter] public EventCallback<MediaItem> OnPick { get; set; }
+
+    private List<MediaItem> items = new();
+    private Dictionary<Guid, MediaItem> covers = new();
+
+    protected override void OnInitialized()
+    {
+        items = Library.Entries().Where(m => Pres.Is(m) && Srcs.Contains(m.Info.GetValueOrDefault("src") ?? "")).OrderByDescending(m => m.AddedUtc).ToList();
+        if (items.Count > 0) covers = Library.PresentationCovers();
+    }
+}

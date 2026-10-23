@@ -343,8 +343,10 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
             var name = design.Title.Length > 120 ? design.Title[..120] : design.Title;
             pres = new MediaItem { Id = presId, ClientId = clientId, AreaId = areaId ?? Guid.Empty, Name = name, Type = Pres.Type, AddedUtc = DateTime.UtcNow, Width = files[0].Width, Height = files[0].Height };
             pres.Info["src"] = "canva";
+            pres.FolderId = Pres.FolderFor(d, clientId, pres.AreaId, "canva");   // « Canva_médias »
             d.Media.Add(pres);
         }
+        foreach (var f in files) f.FolderId = pres.FolderId;   // les pages suivent la carte
         pres.Info["key"] = "canva:" + design.Id; pres.Info["gen"] = gen; pres.Info["pages"] = files.Count.ToString(); pres.Info["synced"] = DateTime.UtcNow.ToString("o"); pres.Info["file"] = design.Title;
         if (stamp.Length > 0) pres.Info["mod"] = stamp; else pres.Info.Remove("mod");
         if (existingId == null) return ((List<Guid>?)null, (Guid?)presId);

@@ -31,7 +31,28 @@ public static class Pres
     }
 
     /// <summary>Pastille de source dans l'aperçu de la carte.</summary>
-    public static string Label(string? src) => src switch { "ppt" => "PPT", "gslides" => "GSlides", "gdocs" => "GDocs", "pdf" => "PDF", "canva" => "Canva", _ => "" };
+    public static string Label(string? src) => src switch { "ppt" => "PPT", "gslides" => "GSlides", "gdocs" => "GDocs", "gsheets" => "GSheets", "doc" => "DOC", "xls" => "XLS", "pdf" => "PDF", "canva" => "Canva", _ => "" };
+
+    /// <summary>Nom du dossier de la médiathèque qui reçoit les présentations d'une source (comme « Canva_médias » et « OneDrive_médias »).</summary>
+    public static string FolderName(string? src) => src switch { "ppt" => "PowerPoint", "gslides" => "GoogleSlides", "gdocs" => "GoogleDocs", "gsheets" => "GoogleSheets", "doc" => "Word", "xls" => "Excel", "canva" => "Canva", _ => "PDF" } + "_médias";
+
+    /// <summary>
+    /// Dossier « intégration_médias » de la médiathèque pour une source : retrouvé (même renommé) ou créé à la racine de l'aire, comme pour Canva et les Drives.
+    /// </summary>
+    public static Guid FolderFor(Db db, Guid clientId, Guid areaId, string? src)
+    {
+        var t = db.Clients.First(c => c.Id == clientId);
+        var area = areaId != Guid.Empty ? areaId : db.Areas.FirstOrDefault(a => a.ClientId == clientId)?.Id ?? Guid.Empty;
+        if (src == "canva" && t.CanvaMediaFolderId is { } cid && db.MediaFolders.Any(f => f.ClientId == clientId && f.Id == cid)) return cid;   // le dossier de Canva est déjà celui des exports
+        var key = "pres-" + (src ?? "pdf") + "-" + area;
+        if (t.IntegrationMediaFolders.TryGetValue(key, out var id) && db.MediaFolders.Any(f => f.ClientId == clientId && f.Id == id)) return id;
+        var name = FolderName(src);
+        var same = db.MediaFolders.FirstOrDefault(f => f.ClientId == clientId && f.AreaId == area && f.ParentId == null && f.Name == name);
+        if (same == null) { same = new MediaFolder { ClientId = clientId, AreaId = area, Name = name }; db.MediaFolders.Add(same); }
+        t.IntegrationMediaFolders[key] = same.Id;
+        if (src == "canva") t.CanvaMediaFolderId = same.Id;
+        return same.Id;
+    }
 
     public static string Unit(string? src) => src is "ppt" or "gslides" ? "diapositive" : "page";
 

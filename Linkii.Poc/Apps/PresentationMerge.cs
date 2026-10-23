@@ -67,7 +67,7 @@ public class PresentationMerge(JsonStore store, ILogger<PresentationMerge> log)
                 pgs = (list ?? Enumerable.Range(1, total).ToList()).Take(PdfService.MaxPages).ToList();
             }
             var vk = isCanva ? "none" : Pres.Variant(opts);
-            var key = isCanva ? "canva:" + c.Settings.GetValueOrDefault("design") : c.AppId == "pdf" ? "sha:" + HashOf(pdfId) : c.AppId + ":" + c.Settings.GetValueOrDefault("gfile");
+            var key = isCanva ? "canva:" + c.Settings.GetValueOrDefault("design") : c.AppId == "pdf" ? "sha:" + HashOf(pdfId) : CloudFileKind.Of(c.AppId)!.KeyOf(c.Settings.GetValueOrDefault("gfile") ?? "");
             var title = isCanva ? c.Settings.GetValueOrDefault("designTitle") : c.Settings.GetValueOrDefault("pdfTitle");
             var presId = Guid.NewGuid();
             var first = images[0]!;
@@ -80,10 +80,12 @@ public class PresentationMerge(JsonStore store, ILogger<PresentationMerge> log)
             if (!isCanva) pres.Info["pdfId"] = pdfId;
             if (c.Settings.GetValueOrDefault("gfileMod") is { Length: > 0 } mod) pres.Info["mod"] = mod;
             if ((c.Settings.GetValueOrDefault("gfileName") ?? title) is { Length: > 0 } file) pres.Info["file"] = file;
+            pres.FolderId = Pres.FolderFor(d, clientId, pres.AreaId, pres.Info["src"]);   // rangée dans « intégration_médias »
             d.Media.Add(pres);
             for (var i = 0; i < Math.Min(images.Count, pgs.Count); i++)
             {
                 var img = images[i]!;
+                img.FolderId = pres.FolderId;
                 img.Info.Remove("pdf"); img.Info.Remove("canva");
                 img.Info["pres"] = presId.ToString(); img.Info["var"] = vk; img.Info["pg"] = pgs[i].ToString(); img.Info["gen"] = "1";
             }

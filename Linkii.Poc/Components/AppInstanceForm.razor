@@ -1,4 +1,6 @@
 @inject PdfService Pdf
+@inject CloudFileService Cloud
+@inject MediaLibrary Library
 @inject TenantStore Store
 @inject AppService Apps
 @inject Toaster Toast
@@ -91,6 +93,8 @@ else
                                 <span>@AddHint(sources[0])</span>
                             </div>
                         </div></div>
+                        @* sous le bloc « + » : les présentations déjà dans la médiathèque (un clic les choisit, rien à importer) *@
+                        @if (LibrarySrcs(sources[0]) is { Length: > 0 } lib) { <LibraryPresentations Srcs="lib" OnPick="UseLibrary" /> }
                     }
                     <div class="ci-prevbody" hidden="@(sources.Count > 0 && (sourceOpen || !SourceReady))">
                         @if (sources.Count > 0 && SourceReady) { <button type="button" class="ci-chg" @onclick="OpenSource"><Ico Name="edit" Size="14" /> @ChangeLabel(sources[0])</button> }
@@ -272,6 +276,48 @@ else
         "city" => "Choisir une ville",
         _ => "Ajouter le lien"
     };
+
+    /// <summary>Sources de présentation de la médiathèque que ce champ sait utiliser (aucune : le champ ne porte pas de présentation).</summary>
+    private static string[] LibrarySrcs(AppField s) => s.Type switch
+    {
+        "gfile" => s.Accept switch { "document" => new[] { "gdocs" }, "powerpoint" => new[] { "ppt" }, _ => new[] { "gslides" } },
+        "pdf" => new[] { "pdf", "doc", "xls", "gsheets" },
+        "canva" => new[] { "canva" },
+        _ => Array.Empty<string>()
+    };
+
+    /// <summary>Une présentation déjà dans la médiathèque est choisie : aucun import, ses images sont réutilisées.</summary>
+    private async Task UseLibrary(MediaItem pres)
+    {
+        var src = manifest!.InZone("source").First();
+        var area = Store.AreaId;
+        string? error = null;
+        if (src.Type == "canva")
+        {
+            var pages = Library.PresentationPages(pres.Id);
+            if (pages.Count == 0) error = "Cette présentation n'a plus d'image : mettez-la à jour depuis la médiathèque.";
+            else
+            {
+                values[src.Key] = (pres.Info.GetValueOrDefault("key") ?? "").Replace("canva:", "");
+                values["designTitle"] = pres.Name; values["kind"] = "images"; values["video"] = "";
+                values["pages"] = string.Join(",", pages.Select(p => p.Id));
+            }
+        }
+        else if (src.Type == "gfile")
+        {
+            var kind = CloudFileKind.FromAccept(src.Accept);
+            var (done, err) = await Cloud.UseLibrary(Store.ClientId, area, pres, PdfService.Options.From(values, kind.AppId));
+            if (done == null) error = err; else CloudFileService.Apply(values, done);
+        }
+        else
+        {
+            var (done, err) = await Cloud.UseLibrary(Store.ClientId, area, pres, PdfService.Options.From(values, "pdf"));
+            if (done == null) error = err; else PdfService.Apply(values, done.Source, done.Result);
+        }
+        if (error != null) { Toast.Error(error); return; }
+        Toast.Ok($"« {pres.Name} » est déjà dans la médiathèque : utilisée.");
+        CloseSource();
+    }
 
     private static string AddHint(AppField s) => s.Type switch
     {
