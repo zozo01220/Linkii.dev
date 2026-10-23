@@ -14,6 +14,10 @@ internal sealed class InstanceSettings
     public int Height { get; set; } = 1080;
     /// <summary>Écran ajouté depuis le back-office : jeton posé dans le player avant son premier chargement, effacé dès la première configuration reçue.</summary>
     public string? Token { get; set; }
+    /// <summary>Une configuration du back-office a été reçue : l'écran est appairé (avant, le code d'appairage ne passe pas au premier plan).</summary>
+    public bool Configured { get; set; }
+    /// <summary>Case de la fenêtre de test dans la grille de son moniteur (première libre, gardée ensuite).</summary>
+    public int? Slot { get; set; }
 
     public bool SameDisplay(InstanceSettings o) => Windowed == o.Windowed && Monitor == o.Monitor && Width == o.Width && Height == o.Height;
 }
@@ -42,6 +46,10 @@ internal sealed class InstanceStore
     private string SettingsPath => Path.Combine(Root, "settings.json");
 
     public static bool Exists(string instance) => Directory.Exists(Path.Combine(Base, instance));
+
+    /// <summary>Instances de ce PC et leurs paramètres (rangement des fenêtres de test en grille).</summary>
+    public static IEnumerable<(string Name, InstanceSettings Settings)> All() =>
+        Directory.Exists(Base) ? Directory.GetDirectories(Base).Select(d => Path.GetFileName(d)).Where(n => File.Exists(Path.Combine(Base, n, "settings.json"))).Select(n => (n, new InstanceStore(n).Load())) : [];
 
     public InstanceSettings Load()
     {

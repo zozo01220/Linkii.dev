@@ -175,6 +175,11 @@
                     </div>
                 }
                 <div class="dw-field wide"><ScreenFormat Spec="pairSpec" /></div>
+                @* PC Windows en test : coupé, l'écran s'ouvre en fenêtre dès l'appairage (pas besoin de relancer le player) *@
+                <div class="dw-field wide sp-row pair-full">
+                    <div class="grow"><b>Plein écran</b><small>Coupé : sur un PC Windows, le player passe en fenêtre à la taille de la résolution dès l'appairage. Pratique pour tester plusieurs écrans sur un PC.</small></div>
+                    <button type="button" class="switch @(pairFull ? "on" : "")" role="switch" aria-checked="@(pairFull ? "true" : "false")" aria-label="Plein écran" @onclick="() => pairFull = !pairFull"><span></span></button>
+                </div>
             </div>
             <p class="hint" style="margin:12px 0 0">Matériel et format viennent des Réglages ; la résolution est celle de l'appareil par défaut. Tout reste modifiable ensuite dans l'édition de l'écran.</p>
             @if (error != null) { <div class="err">@error</div> }
@@ -224,9 +229,16 @@
                     <MonitorPicker Monitors="apf.DeviceMonitors.OrderBy(m => m.N).ToList()" Value="addPcMonitor" ValueChanged="v => addPcMonitor = v" Taken="addPcTaken" Windowed="addPcWindowed" LabelledBy="ap-mon-l" />
                 </div>
             }
+            <div class="fmt-block">
+                <label for="ap-res">Résolution</label>
+                <select id="ap-res" @bind="addPcRes">
+                    @foreach (var r in ScreenOptions.Resolutions) { <option value="@r.Id">@r.Label</option> }
+                </select>
+                <small>En fenêtre, la fenêtre prend cette taille (« Test » : quatre fenêtres en 2 × 2 sur un moniteur).</small>
+            </div>
             <div class="sp-row">
-                <div class="grow"><b>Afficher dans une fenêtre</b><small>Utile pour tester plusieurs écrans sur un seul moniteur.</small></div>
-                <button type="button" class="switch @(addPcWindowed ? "on" : "")" role="switch" aria-checked="@(addPcWindowed ? "true" : "false")" aria-label="Afficher dans une fenêtre" @onclick="() => addPcWindowed = !addPcWindowed"><span></span></button>
+                <div class="grow"><b>Plein écran</b><small>Coupé : une fenêtre à la taille de la résolution, utile pour tester plusieurs écrans sur un seul moniteur.</small></div>
+                <button type="button" class="switch @(!addPcWindowed ? "on" : "")" role="switch" aria-checked="@(!addPcWindowed ? "true" : "false")" aria-label="Plein écran" @onclick="() => addPcWindowed = !addPcWindowed"><span></span></button>
             </div>
             <div class="sp-note">Le PC ouvre le nouvel écran dans quelques secondes. Il hérite de la zone et de la liste de lecture de « @apf.Name », modifiables ensuite.</div>
             @if (addPcError != null) { <div class="err">@addPcError</div> }
@@ -436,6 +448,7 @@ else if (wallEdit is { } wid)
     private string? zoneFilter;   // null : toutes les zones ; sinon l'Id de la zone
     private string pairZone = "", zoneTo = "";
     private ScreenSpec pairSpec = new();
+    private bool pairFull = true;   // appairage : plein écran (coupé : fenêtre de test sur un PC Windows)
     private List<(Guid Id, string Name)>? areaMove;   // écrans à déplacer vers une autre aire
 
     private Zone? ZoneOf(Screen s) => zones.FirstOrDefault(z => z.Id == s.ZoneId) ?? zones.FirstOrDefault(z => z.IsDefault);
@@ -1409,7 +1422,7 @@ else if (wallEdit is { } wid)
         LoadGroups();
     }
 
-    private void OpenPair() { code = name = ""; playlistId = null; error = null; pairSpec = ScreenSpec.From(tenant); pairSpec.Resolution = "auto"; pairZone = (FreeZones.FirstOrDefault(z => z.Id.ToString() == zoneFilter) ?? zones.FirstOrDefault(z => z.IsDefault))?.Id.ToString() ?? ""; showPair = true; }
+    private void OpenPair() { code = name = ""; pairFull = true; playlistId = null; error = null; pairSpec = ScreenSpec.From(tenant); pairSpec.Resolution = "auto"; pairZone = (FreeZones.FirstOrDefault(z => z.Id.ToString() == zoneFilter) ?? zones.FirstOrDefault(z => z.IsDefault))?.Id.ToString() ?? ""; showPair = true; }
 
     private void Edit(Screen s) { menuFor = null; editing = s.Id; }
 
@@ -1417,6 +1430,7 @@ else if (wallEdit is { } wid)
     private Guid? settingsFor;
     private Screen? addPcFrom;
     private string addPcName = "";
+    private string addPcRes = "1920x1080";
     private int addPcMonitor = 1;
     private bool addPcWindowed, addPcBusy;
     private string? addPcError;
@@ -1448,9 +1462,10 @@ else if (wallEdit is { } wid)
         var n = 2;
         while (screens.Any(x => x.Name == $"{s.Name} {n}")) n++;
         addPcName = $"{s.Name} {n}";
+        addPcRes = s.Resolution;
         var free = s.DeviceMonitors.OrderBy(m => m.N).FirstOrDefault(m => !addPcTaken.ContainsKey(m.N));
         addPcMonitor = free?.N ?? s.Monitor;
-        addPcWindowed = free == null;   // tous les moniteurs sont pris : une fenêtre
+        addPcWindowed = free == null || s.Windowed;   // tous les moniteurs sont pris, ou l'écran d'origine est déjà en fenêtre (tests) : une fenêtre
         addPcFrom = s;
     }
 
@@ -1462,8 +1477,8 @@ else if (wallEdit is { } wid)
         if (n.Length > 80) n = n[..80];
         if (!addPcWindowed && addPcTaken.ContainsKey(addPcMonitor)) { addPcError = $"Le moniteur {addPcMonitor} est déjà pris par « {addPcTaken[addPcMonitor]} » : choisissez-en un autre, ou une fenêtre."; return; }
         addPcBusy = true;
-        var (mon, win) = (addPcMonitor, addPcWindowed);
-        var id = Store.Write(d => d.Screens.FirstOrDefault(x => x.Id == from.Id) is { } src ? DeviceConfig.AddOnSamePc(d, src, n, mon, win).Id : (Guid?)null);
+        var (mon, win, res) = (addPcMonitor, addPcWindowed, addPcRes);
+        var id = Store.Write(d => d.Screens.FirstOrDefault(x => x.Id == from.Id) is { } src ? DeviceConfig.AddOnSamePc(d, src, n, mon, win, res).Id : (Guid?)null);
         if (id == null) { addPcBusy = false; addPcError = "Écran introuvable."; return; }
         await Notifier.PublishScreen(id.Value);   // il diffuse aussitôt la liste héritée
         await Notifier.NotifyScreen(from.Id);     // le PC reçoit l'écran à ouvrir avec sa configuration
@@ -1478,6 +1493,7 @@ else if (wallEdit is { } wid)
     {
         error = null;
         var spec = pairSpec;
+        var full = pairFull;
         var pid = playlistId;
         var screenName = name;
         Guid? zid = Guid.TryParse(pairZone, out var zg) && zones.Any(z => z.Id == zg) ? zg : zones.FirstOrDefault(z => z.IsDefault)?.Id;
@@ -1491,6 +1507,7 @@ else if (wallEdit is { } wid)
             s.ZoneId = zid;
             s.ScreenType = spec.Type; s.Orientation = spec.Orientation; s.Resolution = spec.Resolution;
             s.AutoStart = d.Tenant.DefaultAutoStart;
+            s.Windowed = !full;
             s.Token = Guid.NewGuid().ToString("N");
             s.PairingCode = null;
             return s.Id;

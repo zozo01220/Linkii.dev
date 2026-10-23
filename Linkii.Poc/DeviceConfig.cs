@@ -68,9 +68,9 @@ public static class DeviceConfig
 
     /// <summary>
     /// « Ajouter un écran sur ce PC » : nouvel écran déjà appairé, sur le PC de <paramref name="from"/>. Il hérite de la zone, de la liste de lecture,
-    /// du découpage et du format de l'écran d'origine (hors mur : un écran de mur n'en transmet pas sa place).
+    /// du découpage et du format de l'écran d'origine (sauf la résolution, choisie à l'ajout) (hors mur : un écran de mur n'en transmet pas sa place).
     /// </summary>
-    public static Screen AddOnSamePc(ClientDb d, Screen from, string name, int monitor, bool windowed)
+    public static Screen AddOnSamePc(ClientDb d, Screen from, string name, int monitor, bool windowed, string? resolution = null)
     {
         var inWall = AreaOps.WallOf(d, from) != null;
         var area = d.Root.Areas.FirstOrDefault(a => a.Id == from.AreaId);
@@ -82,13 +82,14 @@ public static class DeviceConfig
             Token = Guid.NewGuid().ToString("N"),
             PlaylistId = from.PlaylistId,
             Layout = inWall ? ScreenLayouts.Full : from.Layout,
-            ScreenType = from.ScreenType, Orientation = from.Orientation, Resolution = from.Resolution,
+            ScreenType = from.ScreenType, Orientation = from.Orientation, Resolution = ScreenOptions.Resolutions.Any(r => r.Id == resolution) ? resolution! : from.Resolution,
             AutoStart = from.AutoStart, Windowed = windowed, Monitor = monitor,
             // l'appareil est connu d'avance : c'est le même PC
             DeviceKind = from.DeviceKind, DeviceOs = from.DeviceOs, DeviceModel = from.DeviceModel, DeviceApp = from.DeviceApp,
             DeviceHost = from.DeviceHost, DeviceMonitors = from.DeviceMonitors.Select(m => new DeviceMonitor { N = m.N, W = m.W, H = m.H, Primary = m.Primary }).ToList()
         };
         s.DeviceInstance = InstanceFor(s);
+        s.Layout = ScreenLayouts.Fit(s.Layout, new ScreenSpec { Type = s.ScreenType, Orientation = s.Orientation, Resolution = s.Resolution });   // découpage encore permis par la résolution choisie
         if (!inWall) for (var z = 1; z < 3; z++) s.SetZonePlaylist(z, from.ZonePlaylist(z));
         d.Screens.Add(s);
         return s;

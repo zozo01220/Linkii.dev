@@ -2,7 +2,8 @@ using System.Runtime.InteropServices;
 
 namespace Linkii.Player;
 
-internal readonly record struct MonitorInfo(int Number, string Name, int X, int Y, int Width, int Height, bool Primary);
+// Work : zone utile (sans la barre des tâches)
+internal readonly record struct MonitorInfo(int Number, string Name, int X, int Y, int Width, int Height, bool Primary, int WorkX, int WorkY, int WorkWidth, int WorkHeight);
 
 /// <summary>Moniteurs en pixels réels (le programme est « per-monitor DPI » : voir app.manifest).</summary>
 internal static class Monitors
@@ -25,15 +26,15 @@ internal static class Monitors
     /// <summary>Numérotation : 1 = moniteur principal, puis de gauche à droite (et de haut en bas à position égale).</summary>
     public static List<MonitorInfo> All()
     {
-        var found = new List<(string Name, RECT R, bool Primary)>();
+        var found = new List<(string Name, RECT R, RECT W, bool Primary)>();
         EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr m, IntPtr dc, ref RECT r, IntPtr d) =>
         {
             var info = new MONITORINFOEX { Size = Marshal.SizeOf<MONITORINFOEX>() };
-            if (GetMonitorInfo(m, ref info)) found.Add((info.Device, info.Monitor, (info.Flags & 1) != 0));
+            if (GetMonitorInfo(m, ref info)) found.Add((info.Device, info.Monitor, info.Work, (info.Flags & 1) != 0));
             return true;
         }, IntPtr.Zero);
         var ordered = found.OrderByDescending(f => f.Primary).ThenBy(f => f.R.Left).ThenBy(f => f.R.Top).ToList();
-        return ordered.Select((f, i) => new MonitorInfo(i + 1, f.Name, f.R.Left, f.R.Top, f.R.Right - f.R.Left, f.R.Bottom - f.R.Top, f.Primary)).ToList();
+        return ordered.Select((f, i) => new MonitorInfo(i + 1, f.Name, f.R.Left, f.R.Top, f.R.Right - f.R.Left, f.R.Bottom - f.R.Top, f.Primary, f.W.Left, f.W.Top, f.W.Right - f.W.Left, f.W.Bottom - f.W.Top)).ToList();
     }
 
     public static MonitorInfo Get(int number)

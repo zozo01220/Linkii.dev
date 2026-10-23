@@ -718,7 +718,7 @@ public static class ScreenLayouts
     {
         if (spec.Type == "phone") return new[] { All[0] };
         if (spec.Type == "tablet") return All.Where(d => d.Id is Full or "50-50").ToArray();
-        var hd = spec.Resolution is "1280x720" or "1366x768";   // « auto » et Full HD et plus : toutes les possibilités du format
+        var hd = spec.Resolution is "960x540" or "1280x720" or "1366x768";   // « auto » et Full HD et plus : toutes les possibilités du format
         if (spec.Orientation == "portrait")
             return All.Where(d => d.Id is Full or "50-50" || d.Id == "66-33" && !hd).ToArray();
         return hd ? All.Where(d => d.Sizes.Length <= 2).ToArray() : All;
@@ -942,6 +942,7 @@ public static class ScreenOptions
     public static readonly Option[] Resolutions =
     {
         new("auto", "Auto (résolution de l'appareil)"),
+        new("960x540", "Test · 960×540 (4 fenêtres en 2 × 2)"),   // tests sur un PC : quatre écrans « en fenêtre » sur un moniteur Full HD
         new("1280x720", "HD · 1280×720"),
         new("1366x768", "WXGA · 1366×768"),
         new("1920x1080", "Full HD · 1920×1080"),

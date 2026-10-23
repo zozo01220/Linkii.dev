@@ -1,6 +1,6 @@
 ﻿# Compile le player et fabrique l'installeur : artifacts\LinkiiPlayer-<version>-x64.msi
-# Usage : .\build-installer.ps1 [-Version 0.2.0]
-param([string]$Version = '0.2.0')
+# Usage : .\build-installer.ps1 [-Version 0.2.1]
+param([string]$Version = '0.2.1')
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $publish = Join-Path $root 'artifacts\publish'

@@ -72,7 +72,7 @@ internal sealed class PlayerWindow : Window
         var kiosk = !settings.Windowed;
         WindowStyle = kiosk ? WindowStyle.None : WindowStyle.SingleBorderWindow;
         ResizeMode = kiosk ? ResizeMode.NoResize : ResizeMode.CanResize;
-        Topmost = kiosk;
+        Topmost = kiosk && settings.Configured;   // code d'appairage : pas au premier plan, on peut passer au navigateur (Alt+Tab) pour le saisir
         Cursor = kiosk ? System.Windows.Input.Cursors.None : null;
         if (web.CoreWebView2 is { } core) core.Settings.AreBrowserAcceleratorKeysEnabled = options.DevTools || !kiosk;   // en kiosque : ni F5, ni Ctrl+W, ni recherche
     }
@@ -83,14 +83,47 @@ internal sealed class PlayerWindow : Window
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd == IntPtr.Zero) return;
         var m = Monitors.Get(settings.Monitor);
-        if (!settings.Windowed) { Win.SetWindowPos(hwnd, Win.TopMost, m.X, m.Y, m.Width, m.Height, Win.SWP_NOACTIVATE | Win.SWP_SHOWWINDOW); return; }
+        if (!settings.Windowed) { Win.SetWindowPos(hwnd, Topmost ? Win.TopMost : Win.NoTopMost, m.X, m.Y, m.Width, m.Height, Win.SWP_NOACTIVATE | Win.SWP_SHOWWINDOW); return; }
         double w = Math.Max(320, settings.Width), h = Math.Max(180, settings.Height);
-        var k = Math.Min(1, Math.Min((m.Width - 80) / w, (m.Height - 120) / h));
+        var k = Math.Min(1, Math.Min((m.WorkWidth - 80) / w, (m.WorkHeight - 120) / h));
         int cw = (int)(w * k), ch = (int)(h * k);
-        var shift = options.Instance == "default" ? 0 : 40 * (1 + options.Instance.Sum(c => c) % 5);   // plusieurs fenêtres sur un moniteur : décalées
-        var x = Math.Clamp(m.X + (m.Width - cw) / 2 + shift, m.X, m.X + m.Width - cw);
-        var y = Math.Clamp(m.Y + (m.Height - ch) / 2 + shift, m.Y, m.Y + m.Height - ch);
+
+        // Petites fenêtres (résolution « Test ») : rangées en grille sur le moniteur, une case par écran de ce PC, sans se chevaucher (2 × 2 en 960 × 540).
+        var cols = Math.Max(1, (int)Math.Round(m.WorkWidth / (double)cw));
+        var rows = Math.Max(1, (int)Math.Round(m.WorkHeight / (double)ch));
+        if (cols * rows > 1)
+        {
+            var g = Math.Min(1, Math.Min(m.WorkWidth / (double)(cols * cw), m.WorkHeight / (double)(rows * ch)));
+            cw = (int)(cw * g); ch = (int)(ch * g);
+            var slot = Slot(m.Number) % (cols * rows);
+            Win.SetWindowPos(hwnd, Win.NoTopMost, m.WorkX + slot % cols * cw, m.WorkY + slot / cols * ch, cw, ch, Win.SWP_NOACTIVATE | Win.SWP_SHOWWINDOW);
+            return;
+        }
+        var shift = options.Instance == "default" ? 0 : 40 * (1 + options.Instance.Sum(c => c) % 5);   // grandes fenêtres sur un moniteur : décalées
+        var x = Math.Clamp(m.WorkX + (m.WorkWidth - cw) / 2 + shift, m.WorkX, m.WorkX + m.WorkWidth - cw);
+        var y = Math.Clamp(m.WorkY + (m.WorkHeight - ch) / 2 + shift, m.WorkY, m.WorkY + m.WorkHeight - ch);
         Win.SetWindowPos(hwnd, Win.NoTopMost, x, y, cw, ch, Win.SWP_NOACTIVATE | Win.SWP_SHOWWINDOW);
+    }
+
+    /// <summary>Case de cette fenêtre dans la grille : celle déjà prise, sinon la première libre parmi les écrans « en fenêtre » du même moniteur (gardée).</summary>
+    private int Slot(int monitor)
+    {
+        // au démarrage de Windows, toutes les instances se placent en même temps : une à la fois, pour ne pas prendre la même case
+        using var turn = new Mutex(false, @"Local\LinkiiPlayer.slots");
+        try { turn.WaitOne(3000); } catch (AbandonedMutexException) { }
+        try { return PickSlot(monitor); } finally { try { turn.ReleaseMutex(); } catch (ApplicationException) { } }
+    }
+
+    private int PickSlot(int monitor)
+    {
+        var taken = InstanceStore.All().Where(i => i.Name != options.Instance && i.Settings.Windowed && i.Settings.Slot is not null && Monitors.Get(i.Settings.Monitor).Number == monitor)
+            .Select(i => i.Settings.Slot!.Value).ToHashSet();
+        if (settings.Slot is { } mine && !taken.Contains(mine)) return mine;
+        var free = 0;
+        while (taken.Contains(free)) free++;
+        settings.Slot = free;
+        store.Save(settings);
+        return free;
     }
 
     private sealed record OpenDto(string? Instance, string? Token, string? Name, bool AutoStart, bool Windowed, int Monitor, int Width, int Height);
@@ -104,10 +137,10 @@ internal sealed class PlayerWindow : Window
         if (c == null) return;
         var next = new InstanceSettings
         {
-            Name = c.Name, AutoStart = c.AutoStart, Windowed = c.Windowed, Monitor = Math.Max(1, c.Monitor),
+            Configured = true, Slot = settings.Slot, Name = c.Name, AutoStart = c.AutoStart, Windowed = c.Windowed, Monitor = Math.Max(1, c.Monitor),
             Width = c.Width > 0 ? c.Width : settings.Width, Height = c.Height > 0 ? c.Height : settings.Height
         };   // Token : plus besoin, l'écran est connecté
-        var display = !next.SameDisplay(settings) || next.Name != settings.Name;
+        var display = !next.SameDisplay(settings) || next.Name != settings.Name || !settings.Configured;   // premier appairage : le plein écran passe au premier plan
         var changed = display || next.AutoStart != settings.AutoStart || settings.Token != null;
         settings = next;
         if (changed)

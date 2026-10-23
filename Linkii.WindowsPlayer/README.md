@@ -12,6 +12,9 @@ et arrive sur le PC à chaque connexion, sans publication (gardé localement pou
 - **Démarrage automatique** (oui par défaut ; valeur des nouveaux écrans dans Réglages › Contenus et écrans) : entrée `LinkiiPlayer-<instance>` de la clé Run de l'utilisateur.
 - **Afficher dans une fenêtre** (non par défaut) : fenêtre à la taille de la résolution de l'écran, réduite si le moniteur est plus petit ; sinon plein écran.
 - **Moniteur** : proposé quand le PC en a plusieurs (1 = principal, puis de gauche à droite).
+- **Résolution « Test · 960×540 »** : quatre fenêtres en 2 × 2 sur un moniteur Full HD. Les petites fenêtres se rangent en grille sur leur moniteur (une case par écran, gardée dans `settings.json`) au lieu de se chevaucher.
+
+Test sur un PC : dans le tiroir « Connecter un écran », couper **Plein écran** ; tant qu'il n'est pas appairé, le player n'est pas au premier plan (Alt+Tab vers le navigateur pour saisir le code) et passe en fenêtre dès l'appairage, sans relance.
 
 Adresse du serveur : intégrée (`http://localhost:5080` pour l'instant, constante `InstanceStore.DefaultServer` et propriété `SERVERURL` de l'installeur),
 à changer au passage sur le serveur de production.
