@@ -1996,3 +1996,80 @@ Demande : les documents ppt, pptx, doc, xls… doivent s'importer depuis l'ordin
 - **Section « Depuis un compte cloud »** (`DocumentImporter`) : quatre **tuiles carrées de 168 px** (OneDrive · PowerPoint, Word, Excel ; Google Slides ; Google Docs ; Google Sheets) avec le vrai logo (nouveau symbole `gsheets`), point vert si le compte est connecté, tuile grisée avec « À connecter » sinon ; un clic sur une tuile grisée explique comment connecter le compte. Deux colonnes sur téléphone.
 - **Non vérifié** : tuiles en état « connecté » et import réel depuis un Drive ; rendu sur téléphone.
 - **Correctif (23 octobre 2026)** : le sélecteur de fichiers du Drive (`CloudFilePicker`) s'ouvrait derrière le tiroir « Importer » (z-index 1001 contre 110). Il reçoit `Over="true"` depuis `DocumentImporter` et passe à 1100 (voile) et 1101 (fenêtre). Vérifié par les styles calculés (le sélecteur lui-même demande un compte connecté, absent de l'instance de test).
+- **Tiroir d'aperçu d'un média agrandi (23 octobre 2026)** : 400 → 680 px de large (`.lx-drawer.lx-im`), média jusqu'à 60 % de la hauteur de l'écran (46 % avant), marges et titre un peu plus grands ; le tiroir d'une présentation prend la même largeur (680 px) avec 5 diapositives par ligne. Vérifié : tiroir 680 px, zone du média 679 × 509 px sur un écran de 1627 px ; sur téléphone il garde toute la largeur.
+
+## 107. Médiathèque : un seul bouton « Ajouter », tiroir « Depuis le cloud » avec toutes les sources (23 octobre 2026) : codé selon la maquette `maquettes/mediatheque-import-boutons-page.html`, compilé ; non vérifié dans le navigateur (tests faits par l'utilisateur)
+
+- **But** : supprimer les doublons d'import. Avant, on pouvait glisser des fichiers sur la page *et* dans la zone de dépôt du tiroir « Importer », qui contenait aussi le champ d'adresse web et les comptes cloud.
+- **Bouton unique « + Ajouter ▾ »** (`Media.razor`, `.lx-add`) à la place du bouton scindé « Importer » + chevron. Son menu (`.lx-add-menu`) propose :
+  - **Depuis l'ordinateur** : un `<label for>` qui ouvre le sélecteur de fichiers de Windows. Le champ caché est rendu par `MediaUploader` avec le nouveau paramètre `InputId` (sans zone de dépôt ni champ d'adresse) ;
+  - **Depuis une adresse web** : une petite fenêtre sous le bouton (`.lx-url-pop`), avec le champ du lien et « Importer ». Elle appelle `MediaUploader.ImportUrl(string)`, nouvelle méthode publique, et la progression s'affiche dans la grille comme pour les fichiers ;
+  - **Depuis le cloud** : le tiroir du bas ;
+  - **Nouveau dossier**, sous un trait (si les dossiers sont visibles et qu'on peut en créer ici).
+- **Glisser-déposer sur la page** : inchangé (voile `.lx-dropzone`). C'est le seul endroit où l'on dépose.
+- **États vides** : deux boutons, « Depuis l'ordinateur » et « Depuis le cloud » (`EmptyImport`).
+- **Look « app »** : le bouton « Ajouter » est masqué. Le bouton flottant reprend les quatre choix grâce à des sources `[data-fab]` cachées (`.lx-fabsrc`) que `app-fab.js` clique.
+- **Tiroir « Importer depuis le cloud »** (`DocumentImporter`) : il ne contient plus que les sources cloud.
+  - En haut, **Vos comptes connectés** (point vert), dans l'ordre du tableau. En dessous, **À connecter**, par ordre alphabétique : tuiles grises en pointillé, cadenas, mention « Connecter ».
+  - Dix sources :
+    - **un document choisi ici**, comme avant : OneDrive (PowerPoint, Word, Excel), Google Slides, Google Docs, Google Sheets ;
+    - **des dossiers synchronisés** : Canva, Google Drive, SharePoint (source `onedrive`), Dropbox, Nextcloud, SFTP.
+  - Une source « connectée » se lit ainsi :
+    - document : accès aux fichiers du compte Google ou Microsoft (`CloudFileKind.Connected`) ;
+    - Canva : jeton présent ;
+    - Drives : `DriveSources.Configured`.
+- **Tuile verrouillée, ou tuile de dossiers synchronisés** : la page va sur `/integrations?ajouter=<intégration>&etape=1|2&retour=media`.
+  - **Assistant ouvert** :
+    - l'étape 1 sert à connecter le compte ; l'étape 2, à choisir les dossiers quand le compte l'est déjà ;
+    - assistants utilisés : `ms-powerpoint` pour OneDrive, `google-slides`, `google-docs`, `drv-gdrive` pour Google Sheets et Google Drive, `canva`, `drv-*` ;
+    - si la plateforme n'est pas configurée pour ce fournisseur, l'Intégrations affiche le message « pas encore disponible ».
+  - **Retour à la médiathèque** : quand l'assistant se ferme (fin ou Annuler), on revient sur `/media?import=cloud`, qui rouvre le tiroir. Le retour est gardé dans `sessionStorage` (`linkii-wizard-back`), donc il survit à l'aller-retour de connexion chez Google, Microsoft, Canva ou Dropbox.
+- **Retiré** : la zone de dépôt et le champ d'adresse du tiroir, le message « Connectez d'abord un compte… » (`di-note`), `OpenImport` et la fermeture automatique du tiroir au début d'un envoi.
+- **Non vérifié** :
+  - le rendu de la page, du menu et de la fenêtre d'adresse ;
+  - l'ouverture du sélecteur de fichiers par le `<label>` ;
+  - le parcours tuile verrouillée › assistant › retour, avec ou sans connexion OAuth réelle ;
+  - le bouton flottant de l'app ;
+  - l'accès au clavier des choix du menu (le `<label>` « Depuis l'ordinateur » ne réagit pas à Entrée).
+
+## 108. « Connecter un écran » : tiroir du bas (23 octobre 2026) : codé et compilé, non vérifié dans le navigateur
+
+- La fenêtre « Connecter un écran » de la page Écrans passe du tiroir de droite (`.lx-drawer`) au tiroir du bas (`.imp-bottom.lx-pair`, 760 px au plus), comme « Importer » de la médiathèque : voile `.modal-backdrop`, tête `.imp-head`, pied `.imp-foot` (Annuler à gauche, Connecter à droite).
+- Champs sur deux colonnes. Le code, le format d'affichage et « Plein écran » prennent toute la largeur. Une seule colonne sous 640 px.
+
+
+## 109. Page Écrans : affichage « Arborescence », par défaut en mode expert (23 octobre 2026) : codé selon la maquette `maquettes/ecrans-arborescence-30.html`, compilé ; non vérifié dans le navigateur (tests faits par l'utilisateur)
+
+- **Pourquoi** : avec plusieurs aires de gestion (par exemple 10 aires de quelques zones), les cartes à plat ne montrent ni les aires, ni les zones, ni où sont les problèmes.
+- **Bascule d'affichage** : un 3ᵉ bouton « Arborescence » (icône `tree`) dans `ViewToggle` (paramètre `Tree`), en mode expert seulement. Le look app ne le propose pas et garde les cartes.
+  - C'est l'affichage par défaut du mode expert. La clé du navigateur change (`view-screens-arbre`), donc tout le monde démarre sur l'arborescence. Le choix Cartes ou Liste reste ensuite mémorisé.
+  - Le mode simple ne change pas.
+- **Arbre à gauche** (`.tr-tree`) : « Toutes les aires », puis chaque aire avec son nombre d'écrans, une pastille rouge (hors ligne) et un point orange (à publier). L'aire ouverte porte « ouverte ». Le chevron déplie ses zones. « Tout déplier » et « Tout replier » sont en bas.
+- **Toutes les aires** :
+  - des compteurs cliquables (`.tr-kpis`) : Écrans, En ligne, Hors ligne, En veille ou en pause, À publier. Un compteur filtre les écrans, et les aires sans écran concerné se replient en « Rien à signaler » ;
+  - une section repliable par aire (`.tr-area`) : état, « Publier (n) » et « Détail » ;
+  - les zones côte à côte, en **Vignettes** (`.tr-tile` ; un mur prend une vignette double) ou en **Lignes** (`.tr-row` ; un mur tient sur une ligne, ses écrans en dessous). La densité est mémorisée (`screens-densite`).
+- **Une aire ou une zone choisie** : fil d'Ariane, en-tête (état, Planning, Publier, menu ⋯ « Tout sélectionner » et « Gérer les zones… »), puis les cartes habituelles (`Card`) rangées par zone. La puce de zone (`.gc-zchip`) est masquée, puisque la zone est le titre de la section.
+- **Autre aire que celle ouverte** :
+  - choisir l'aire, ou une de ses zones, l'ouvre. C'est le même changement d'aire que « Ouvrir cette aire », avec rechargement. Le nœud est rouvert grâce aux paramètres `?arbre=…&zone=…`, retirés ensuite de l'adresse ;
+  - un clic sur un de ses écrans ouvre son aire et son édition, comme les cartes de consultation.
+  - **Écart avec la maquette** : la maquette montrait les cartes d'une autre aire sans changer d'aire (étiquette « Autre aire »). Les réglages d'un écran ne fonctionnant que dans l'aire ouverte, l'aire est ouverte d'abord.
+- **Publier** : « Publier (n) » d'une section publie aussi les écrans d'une autre aire. La confirmation liste les écrans de toutes les aires (`AllScreens`). En arborescence, le bouton Publier de l'en-tête compte les écrans à publier de toutes les aires affichées.
+- **Recherche et filtres** : la recherche porte aussi sur les noms de zone et d'aire. Les filtres « Aire de gestion » et « État » s'appliquent aussi à l'arborescence.
+- **État d'un écran** (`TScreen.Kind`), dans cet ordre : en veille (`Sleep.State`), en pause, hors ligne, en ligne.
+- **Code** :
+  - `Screens.razor` : `TreeData`, `TreeBody`, `TreeNav`, `TreeKpis`, `TreeSection`, `TreeTile`, `TreeRow`, `TreePaneArea`, etc. ;
+  - `Ico.razor` : icônes `tree`, `layers` et `arrow-right` ;
+  - `app.css` : bloc `.tr-*`. Sous 900 px, l'arbre passe au-dessus et les lignes se réduisent.
+- **Non vérifié** : le rendu réel avec de vraies données, le changement d'aire depuis l'arbre, la publication depuis une autre aire et l'accès au clavier.
+## 110. Organisation : aires, zones, membres et rôles sur une seule page (23 octobre 2026) : codé selon la maquette `maquettes/organisation-acces-refonte.html`, compilé et vérifié dans le navigateur (instance de test) ; migration jamais jouée sur de vraies données
+
+- **Une page** `/organisation` (mode expert, administrateur de l'organisation) remplace Aires de gestion, Zones et Membres. `/areas` et `/members` redirigent (`OrgRedirect.razor`). Un membre qui peut gérer les zones garde la page Zones. Le menu a une seule entrée « Organisation ».
+- **Onglet Structure** : arbre organisation › aires › zones (comptes d'écrans) et, à chaque nœud, **Contenu** (cartes des aires ; aire : renommer, zones via `AreaZones`, veille, luminosité, suppression ; zone : synchronisation, renommer, écrans, suppression, mur renvoyé vers Écrans) et **Accès** (qui peut quoi ici : direct, hérité de l'aire ou de l'organisation, administrateurs regroupés ; « Donner accès à… » et « Retirer »).
+- **Onglets Membres et Rôles** : `Members.razor` est maintenant un composant (paramètre `View`). Un membre a **un ou plusieurs accès** (rôle + périmètre aires › zones › écrans + visibilité des dossiers), ou est administrateur de l'organisation (interrupteur). La liste montre « Éditeur · Lausanne / Lecteur · Genève ».
+- **Rôles** : Administrateur (compte administrateur, tous les droits), **Éditeur** et **Lecteur** fournis d'office (`AccessLevel.Kind`, ni modifiables ni supprimables, dupliquables) et des rôles sur mesure (le formulaire en onglets par domaine d'avant, vocabulaire « rôle »). `AccessLevels.EnsureRoles` les crée ; l'ancien niveau « Utilisateur » jamais modifié devient l'Éditeur.
+- **Modèle** : `User.Accesses` (`MemberAccess` : `LevelId` + `Perimeter`). Vide, `LevelId` + `Perimeter` d'avant sont lus (`UserAccess.AccessList`). Le premier accès est recopié dans ces deux champs (`SetAccesses`). `AccessLevels.GrantAccess` / `RevokeAccess` ajoutent et retirent un accès depuis l'arbre (même rôle : l'accès existant s'élargit).
+- **Règle de rôle par aire** (`AreaAccess.For`) : ce qu'on voit est l'union des périmètres ; le rôle qui joue dans l'aire ouverte est celui d'un accès sur **l'aire entière** (le plus permissif s'il y en a plusieurs) ; sinon, quand seules des zones ou des écrans de l'aire sont donnés, le **moins permissif**. Les droits se vérifiant par page pour l'aire ouverte, un accès plus petit ne déborde pas sur le reste de l'aire. **Écart avec la maquette** (« le plus précis l'emporte ») : un accès « Éditeur » sur une seule zone ne rend pas éditeur dans le reste de l'aire, mais il ne restreint pas non plus un Éditeur de l'aire entière. L'interface le dit (« Sans effet : l'accès sur toute l'aire s'applique », note dans le formulaire du membre).
+- **Migration** (`AccessLevels.MigrateRolesV2`, une fois, marqueur `Db.Done = "roles-v2"`) : tous les membres existants deviennent administrateurs de l'organisation (niveau et périmètre vidés), sur décision du 23 octobre. À redéfinir ensuite dans Organisation › Membres.
+- **Tests** : `OrganisationAccessTests` (accès multiples, aire entière contre zone, accès par zones, ancien format, attribution et retrait, rôles de départ, migration). Dix échecs restent dans la suite (Apps, Pwa, Weather, Signup : sans lien avec cette page).
+- **Non fait** : mode simple sans la page (comme avant) ; pas de vue dédiée à une organisation à une seule aire ; l'arbre n'a pas de glisser-déposer ; l'onglet Rôles reste un onglet (la maquette le montrait en tiroir).

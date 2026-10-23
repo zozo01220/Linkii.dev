@@ -1043,6 +1043,8 @@ else
         if (firstRender)
         {
             try { inApp = await JS.InvokeAsync<bool>("linkiiPrefs.isApp"); if (inApp) StateHasChanged(); } catch (JSException) { } catch (InvalidOperationException) { }
+            // assistant ouvert depuis la médiathèque : le retour survit à la connexion du compte (aller-retour chez Google, Microsoft, Canva…)
+            if (rememberBack && wizId != null) { try { await JS.InvokeVoidAsync("sessionStorage.setItem", BackKey, wizId); } catch (JSException) { } catch (InvalidOperationException) { } }
         }
         if (revealPending && flashInt is { } fi)
         {
@@ -1100,6 +1102,34 @@ else
         MicrosoftReturn();
         DropboxReturn();
         FacebookReturn();
+        AddFromLink();
+    }
+
+    // ---------- Assistant ouvert depuis une autre page (tiroir « Depuis le cloud » de la médiathèque) ----------
+
+    [SupplyParameterFromQuery(Name = "ajouter")] public string? AddParam { get; set; }
+    [SupplyParameterFromQuery(Name = "etape")] public int? StepParam { get; set; }
+    [SupplyParameterFromQuery(Name = "retour")] public string? BackParam { get; set; }
+    private const string BackKey = "linkii-wizard-back";
+    private bool rememberBack;
+
+    // ?ajouter=<intégration>&etape=1|2&retour=media : l'assistant s'ouvre ; sa fermeture ramène à la médiathèque, tiroir ouvert
+    private void AddFromLink()
+    {
+        if (AddParam is not { } id || !HasWizard(id)) return;
+        if (AllRows().FirstOrDefault(r => r.E.Id == id) is { } row && Unavailable(row.E) is { } why) { Toast.Error(why); return; }
+        OpenWizard(id, StepParam == 2 ? 2 : 1, !InMineId(id));
+        rememberBack = BackParam == "media";
+    }
+
+
+    private async Task BackIfAsked(string? closed)
+    {
+        string? back = null;
+        try { back = await JS.InvokeAsync<string?>("sessionStorage.getItem", BackKey); } catch (JSException) { } catch (InvalidOperationException) { }
+        if (back == null) return;
+        try { await JS.InvokeVoidAsync("sessionStorage.removeItem", BackKey); } catch (JSException) { } catch (InvalidOperationException) { }
+        if (back == closed) Nav.NavigateTo("/media?import=cloud");
     }
 
     private void Load()
@@ -1175,8 +1205,8 @@ else
 
     private void CloseDrive() { driveSource = null; EndUse(); }
     private void CloseHa() { haOpen = false; EndUse(); }
-    private void CloseCanva() => CloseWizard();
-    private void CloseWizard() { wizId = null; Load(); EndUse(); }
+    private Task CloseCanva() => CloseWizard();
+    private async Task CloseWizard() { var closed = wizId; wizId = null; Load(); EndUse(); await BackIfAsked(closed); }
 
     /// <summary>Intégrations qui s'ajoutent par l'assistant (compte connecté, étapes Connexion › contenu › Import).</summary>
     private static string Initials(string user) => user.Trim().Length == 0 ? "?" : string.Concat(user.Split([' ', '@', '.'], StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpperInvariant(p[0])));

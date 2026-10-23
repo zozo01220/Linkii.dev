@@ -2,25 +2,32 @@
 @inject CloudFileService Cloud
 @inject PdfService Pdf
 @inject Toaster Toast
+@inject NavigationManager Nav
 
-@* Documents des comptes cloud, importés depuis le tiroir « Importer » de la médiathèque (DEV-POC.md §103, maquette mediatheque-importer-final.html) : un fichier
-   OneDrive ou SharePoint (PowerPoint, Word, Excel…), une présentation, un document ou un tableur Google, en tuiles carrées. Les fichiers de l'ordinateur
-   passent par la zone de dépôt du tiroir (MediaUploader). Chaque page devient une image, rangée dans une présentation du dossier « intégration_médias ». *@
-<section class="di" aria-label="Depuis un compte cloud">
-    <h4>Depuis un compte cloud</h4>
-    <p class="hint">Choisissez un fichier dans votre Drive : chaque page devient une image, rangée dans une présentation du dossier « …_médias ». Les fichiers de l'ordinateur se déposent dans la zone ci-dessus.</p>
-    <div class="di-tiles">
-        @foreach (var t in Tiles)
-        {
-            var tile = t;
-            var ok = Connected(tile.Kind);
-            <button type="button" class="di-tile @(ok ? "" : "dim")" disabled="@busy" title="@(ok ? $"Choisir {tile.Kind.Noun} dans {tile.Drive}" : $"Compte {tile.Drive} à connecter")" @onclick="() => Open(tile.Kind)">
-                @if (ok) { <span class="di-dot" title="Compte connecté"></span> } else { <span class="di-bd">À connecter</span> }
-                <BrandLogo Id="@tile.Logo" Size="44" />
-                <span class="di-nm">@tile.Name@if (tile.Formats.Length > 0) { <small>@tile.Formats</small> }</span>
-            </button>
-        }
-    </div>
+@* Tiroir « Depuis le cloud » de la médiathèque (maquette mediatheque-import-boutons-page.html) : toutes les sources qui apportent des fichiers,
+   les comptes connectés d'abord, puis les autres, verrouillées, par ordre alphabétique.
+   - un document OneDrive (PowerPoint, Word, Excel…), une présentation, un document ou un tableur Google : choisi ici, chaque page devient une image,
+     rangée dans une présentation du dossier « intégration_médias » ;
+   - Canva et les Drives (Google Drive, SharePoint, Dropbox, Nextcloud, SFTP) : des dossiers synchronisés, choisis dans l'assistant de l'intégration.
+   Une source verrouillée ouvre l'assistant d'ajout de son intégration ; à sa fermeture, on revient sur la médiathèque, tiroir ouvert. *@
+<section class="di" aria-label="Sources cloud">
+    @foreach (var grp in new[] { true, false })
+    {
+        var rows = grp ? Tiles.Where(Connected).ToList() : Tiles.Where(t => !Connected(t)).OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        if (rows.Count == 0) continue;
+        <h4>@(grp ? "Vos comptes connectés" : "À connecter")<small>@(grp ? $" · {rows.Count}" : " · par ordre alphabétique · un clic ouvre l'assistant d'ajout")</small></h4>
+        <div class="di-tiles">
+            @foreach (var t in rows)
+            {
+                var tile = t;
+                <button type="button" class="di-tile @(grp ? "" : "lock")" disabled="@busy" title="@(grp ? tile.Kind is { } k ? $"Choisir {k.Noun} dans {tile.Drive}" : $"Choisir les dossiers {tile.Name} synchronisés" : $"Connecter {tile.Name}")" @onclick="() => Open(tile, grp)">
+                    @if (grp) { <span class="di-dot" title="Compte connecté"></span> } else { <span class="di-lk"><Ico Name="lock" Size="15" /></span> }
+                    <BrandLogo Id="@tile.Logo" Size="44" />
+                    <span class="di-nm">@tile.Name@if (!grp) { <small class="di-go">Connecter</small> } else if (tile.Formats.Length > 0) { <small>@tile.Formats</small> }</span>
+                </button>
+            }
+        </div>
+    }
     @if (busy)
     {
         <div class="pr-prog di-prog" role="status" aria-live="polite">
@@ -31,10 +38,6 @@
                 <div class="pr-bar-track @(pct == null ? "indet" : "")"><i style="@(pct == null ? "" : $"width:{pct}%")"></i></div>
             </div>
         </div>
-    }
-    @if (notConnected is { } nc)
-    {
-        <div class="di-note">Connectez d'abord un compte @(nc.IsGoogle ? "Google" : "Microsoft") (avec l'accès aux fichiers Drive) : <a href="/integrations">Intégrations › Comptes connectés</a>.</div>
     }
     @if (error != null) { <div class="err">@error</div> }
 </section>
@@ -51,17 +54,18 @@
     /// <summary>Un document vient d'entrer dans la médiathèque (ou y était déjà) : la page se relit.</summary>
     [Parameter] public EventCallback OnImported { get; set; }
 
-    private CloudFileKind? picking, notConnected;
+    private CloudFileKind? picking;
     private bool busy;
     private string status = "", title = "";
     private string? error;
     private int? pct;
 
-    private void Open(CloudFileKind kind)
+    // Document à choisir (compte connecté) ; sinon l'assistant de l'intégration, au pas « dossiers » si le compte est déjà connecté
+    private void Open(Tile tile, bool connected)
     {
-        error = null; notConnected = null;
-        if (!kind.Connected(Store.Read(d => d.Tenant))) { notConnected = kind; return; }
-        picking = kind;
+        error = null;
+        if (connected && tile.Kind is { } kind) { picking = kind; return; }
+        Nav.NavigateTo($"/integrations?ajouter={Uri.EscapeDataString(tile.Wizard)}&etape={(connected ? 2 : 1)}&retour=media");
     }
 
     private void OnProgress(string s)
@@ -87,17 +91,28 @@
         finally { busy = false; }
     }
 
-    private record Tile(CloudFileKind Kind, string Name, string Formats, string Logo, string Drive);
+    /// <summary>Kind : document importé ici ; null : dossiers synchronisés (Source : Canva ou source Drive). Wizard : intégration dont l'assistant connecte le compte.</summary>
+    private record Tile(CloudFileKind? Kind, string Source, string Name, string Formats, string Logo, string Drive, string Wizard);
 
     private static readonly Tile[] Tiles =
     {
-        new(CloudFileKind.MsDocument, "OneDrive", "PowerPoint, Word, Excel", "drv-onedrive", "OneDrive"),
-        new(CloudFileKind.Slides, "Google Slides", "", "google-slides", "Google Drive"),
-        new(CloudFileKind.Docs, "Google Docs", "", "google-docs", "Google Drive"),
-        new(CloudFileKind.Sheets, "Google Sheets", "", "google-sheets", "Google Drive"),
+        new(CloudFileKind.MsDocument, "", "OneDrive", "PowerPoint, Word, Excel", "drv-onedrive", "OneDrive", "ms-powerpoint"),
+        new(CloudFileKind.Slides, "", "Google Slides", "", "google-slides", "Google Drive", "google-slides"),
+        new(CloudFileKind.Docs, "", "Google Docs", "", "google-docs", "Google Drive", "google-docs"),
+        new(CloudFileKind.Sheets, "", "Google Sheets", "", "google-sheets", "Google Drive", "drv-gdrive"),
+        new(null, "canva", "Canva", "Dossiers synchronisés", "canva", "Canva", "canva"),
+        new(null, "gdrive", "Google Drive", "Dossiers synchronisés", "drv-gdrive", "Google Drive", "drv-gdrive"),
+        new(null, "onedrive", "SharePoint", "Dossiers synchronisés", "drv-sharepoint", "SharePoint", "drv-onedrive"),
+        new(null, "dropbox", "Dropbox", "Dossiers synchronisés", "drv-dropbox", "Dropbox", "drv-dropbox"),
+        new(null, "nextcloud", "Nextcloud", "Dossiers synchronisés", "drv-nextcloud", "Nextcloud", "drv-nextcloud"),
+        new(null, "sftp", "SFTP", "Dossiers synchronisés", "drv-sftp", "SFTP", "drv-sftp"),
     };
 
-    private bool Connected(CloudFileKind kind) => kind.Connected(Store.Read(d => d.Tenant));
+    private bool Connected(Tile t)
+    {
+        var tenant = Store.Read(d => d.Tenant);
+        return t.Kind is { } k ? k.Connected(tenant) : t.Source == "canva" ? tenant.CanvaRefreshToken.Length > 0 : DriveSources.Configured(tenant, t.Source);
+    }
 
     private async Task Finish(PdfService.Source source, PdfService.ConvertResult res, string src, bool reused, bool updated)
     {

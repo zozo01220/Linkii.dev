@@ -5,7 +5,13 @@
 @inject TenantStore Store
 
 @* Téléversement vers la médiathèque : depuis l'ordinateur (bouton ou glisser-déposer) ou depuis une adresse web.
-   Une barre de progression par fichier (ou, avec ShowJobs=false, le parent affiche le pourcentage lui-même). Utilisé par la page Médiathèque et par le sélecteur de médias des apps. *@
+   Une barre de progression par fichier (ou, avec ShowJobs=false, le parent affiche le pourcentage lui-même). Utilisé par la page Médiathèque et par le sélecteur de médias des apps.
+   InputId : pas de zone de dépôt ni de champ d'adresse, seulement un champ de fichiers caché que la page ouvre par un <label for> (menu « Ajouter » de la médiathèque). *@
+@if (InputId != null)
+{
+    <InputFile id="@InputId" class="sr-only" tabindex="-1" OnChange="OnFiles" multiple accept="@AcceptAttr" />
+    return;
+}
 <div class="upl">
     <label class="upl-drop @(dragging ? "over" : "")" @ondragenter="() => dragging = true" @ondragleave="() => dragging = false" @ondrop="() => dragging = false">
         <InputFile OnChange="OnFiles" multiple accept="@AcceptAttr" />
@@ -51,6 +57,8 @@
     /// <summary>Dossier où ranger les fichiers importés (null : racine de l'aire).</summary>
     [Parameter] public Guid? FolderId { get; set; }
     [Parameter] public EventCallback Changed { get; set; }
+    /// <summary>Id du champ de fichiers caché ; avec lui, le composant n'affiche rien d'autre.</summary>
+    [Parameter] public string? InputId { get; set; }
 
     /// <summary>Imports en cours ou en échec, du plus récent au plus ancien.</summary>
     public IReadOnlyList<UploadJob> Jobs => jobs;
@@ -129,6 +137,9 @@
         job.Note = null;
         return done == null ? new(null, error ?? "Import impossible.") : new(done.Item, null);
     }
+
+    /// <summary>Adresse saisie ailleurs (fenêtre « Depuis une adresse web » de la médiathèque) : même file d'imports.</summary>
+    public Task ImportUrl(string address) { url = address; return ImportUrl(); }
 
     private async Task ImportUrl()
     {

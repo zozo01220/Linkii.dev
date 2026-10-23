@@ -1,7 +1,7 @@
-@using Microsoft.JSInterop
+﻿@using Microsoft.JSInterop
 @inject IJSRuntime JS
 
-@* Choix d'affichage cartes / liste, mémorisé dans le navigateur (une clé par page). Masqué sur mobile : cartes uniquement. *@
+@* Choix d'affichage cartes / liste (et arborescence sur la page Écrans), mémorisé dans le navigateur (une clé par page). Masqué sur mobile : cartes uniquement. *@
 <div class="view-toggle" role="group" aria-label="Affichage">
     <button type="button" class="@(Value == "cards" ? "on" : "")" aria-pressed="@(Value == "cards" ? "true" : "false")" title="Cartes" @onclick='() => Set("cards")'><Ico Name="grid" Size="16" /><span class="sr-only">Cartes</span></button>
     @if (Photos)
@@ -9,12 +9,18 @@
         <button type="button" class="@(Value == "photos" ? "on" : "")" aria-pressed="@(Value == "photos" ? "true" : "false")" title="Photos" @onclick='() => Set("photos")'><Ico Name="images" Size="16" /><span class="sr-only">Photos</span></button>
     }
     <button type="button" class="@(Value == "list" ? "on" : "")" aria-pressed="@(Value == "list" ? "true" : "false")" title="Liste" @onclick='() => Set("list")'><Ico Name="menu" Size="16" /><span class="sr-only">Liste</span></button>
+    @if (Tree)
+    {
+        <button type="button" class="@(Value == "tree" ? "on" : "")" aria-pressed="@(Value == "tree" ? "true" : "false")" title="Arborescence : par aire et par zone" @onclick='() => Set("tree")'><Ico Name="tree" Size="16" /><span class="sr-only">Arborescence</span></button>
+    }
 </div>
 
 @code {
     [Parameter, EditorRequired] public string StorageKey { get; set; } = "";
     /// <summary>Propose aussi la vue « photos » (mosaïque groupée par date) ; par défaut dans l'app Android.</summary>
     [Parameter] public bool Photos { get; set; }
+    /// <summary>Propose aussi la vue « arborescence » (écrans rangés par aire et par zone).</summary>
+    [Parameter] public bool Tree { get; set; }
     [Parameter] public string Value { get; set; } = "cards";
     [Parameter] public EventCallback<string> ValueChanged { get; set; }
 
@@ -23,12 +29,12 @@
         if (!firstRender) return;
         string? saved = null;
         try { saved = await JS.InvokeAsync<string?>("linkiiPrefs.get", "view-" + StorageKey); } catch (JSException) { } catch (InvalidOperationException) { }
-        if (saved is "photos" && !Photos) saved = null;
+        if (saved is "photos" && !Photos || saved is "tree" && !Tree) saved = null;
         if (saved == null && Photos)
         {
             try { if (await JS.InvokeAsync<bool>("linkiiPrefs.isApp")) saved = "photos"; } catch (JSException) { } catch (InvalidOperationException) { }
         }
-        if (saved is "cards" or "list" or "photos" && saved != Value) await ValueChanged.InvokeAsync(saved);
+        if (saved is "cards" or "list" or "photos" or "tree" && saved != Value) await ValueChanged.InvokeAsync(saved);
     }
 
     private async Task Set(string v)

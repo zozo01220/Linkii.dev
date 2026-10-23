@@ -6,6 +6,8 @@
 @inject Toaster Toast
 @inject NavigationManager Nav
 @inject ModeService Modes
+@inject IJSRuntime JS
+@using Microsoft.JSInterop
 
 <div class="page-head">
     <div>
@@ -14,10 +16,11 @@
     </div>
     <div class="row head-actions">
         @* Publier : seulement s'il y a des modifications à publier (écrans affichés), en couleur avec leur nombre *@
-        @if (PendingShown.Count > 0)
+        @{ var pendHead = TreeView ? TreePending(TreeScope) : PendingShown; }
+        @if (pendHead.Count > 0)
         {
-            <button class="btn publish-btn" disabled="@bulkPublishing" title="Publier les modifications en attente sur @PendingShown.Count écran@(PendingShown.Count > 1 ? "s" : "")" @onclick="() => AskPublish(PendingShown)">
-                <Ico Name="upload" Size="16" /> @(bulkPublishing ? "Publication…" : "Publier") <span class="cnt">@PendingShown.Count</span>
+            <button class="btn publish-btn" disabled="@bulkPublishing" title="Publier les modifications en attente sur @pendHead.Count écran@(pendHead.Count > 1 ? "s" : "")" @onclick="() => AskPublish(pendHead)">
+                <Ico Name="upload" Size="16" /> @(bulkPublishing ? "Publication…" : "Publier") <span class="cnt">@pendHead.Count</span>
             </button>
         }
         <button class="btn" data-fab="Connecter un écran" @onclick="OpenPair"><Ico Name="plus" Size="16" /> Connecter un écran</button>
@@ -54,12 +57,12 @@
         {
             <a class="tb-btn" href="planning?zone=@pz.Id" title="Planning de diffusion de @(pz.IsWall ? "ce mur" : "cette zone")"><Ico Name="calendar" Size="14" /> Planning @if (pz.Slots.Count > 0) { <span class="tb-n">@pz.Slots.Count</span> }</a>
         }
-        @if (Modes.Expert) { <ViewToggle StorageKey="screens" @bind-Value="view" /> }
+        @if (Modes.Expert) { <ViewToggle StorageKey="screens-arbre" Tree="!isApp" @bind-Value="view" /> }
     </div>
     <FilterChips Groups="FilterGroups" OnClear="ClearFilter" OnResetAll="ResetFilters" />
 
     @* Zone libre choisie : une ligne d'information et un menu d'actions (un mur a tout cela dans sa carte) *@
-    @if (OpenZone is { IsWall: false } oz)
+    @if (!TreeView && OpenZone is { IsWall: false } oz)
     {
         var inZ = InZone;
         <div class="zline" role="region" aria-label="Zone @oz.Name">
@@ -108,6 +111,13 @@
 
 @* Grille à plat des écrans de l'aire ouverte (cartes habituelles), puis ceux des autres aires que le filtre « Aire de gestion » laisse voir (« Tous » par défaut) :
    cartes de consultation, un clic ouvre l'aire de l'écran pour le modifier. *@
+@if (TreeView)
+{
+    @* Mode Expert : écrans rangés par aire puis par zone, arbre à gauche *@
+    @TreeBody()
+}
+else
+{
 <div class="pl-grid @(ListView ? "list" : "")">
     @if (ListView)
     {
@@ -124,6 +134,7 @@
         </button>
     }
 </div>
+}
 
 @if (selectedIds.Count > 0)
 {
@@ -144,16 +155,16 @@
     </div>
 }
 
-@* Connecter un écran : un tiroir à droite (comme l'aperçu d'un média) plutôt qu'une fenêtre ; la page reste visible derrière. *@
+@* Connecter un écran : un tiroir qui vient du bas (comme « Importer » de la médiathèque) ; la page reste visible derrière. *@
 @if (showPair)
 {
-    <div class="lx-drawer-veil" @onclick="() => showPair = false"></div>
-    <aside class="lx-drawer lx-pair" role="dialog" aria-modal="false" aria-labelledby="pair-title">
-        <div class="dh">
-            <b id="pair-title">Connecter un écran</b>
-            <button type="button" class="kebab-btn" title="Fermer" aria-label="Fermer" @onclick="() => showPair = false"><Ico Name="x" Size="16" /></button>
+    <div class="modal-backdrop" @onclick="() => showPair = false"></div>
+    <div class="imp-bottom lx-pair" role="dialog" aria-modal="true" aria-labelledby="pair-title">
+        <div class="imp-head">
+            <h3 id="pair-title">Connecter un écran</h3>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => showPair = false"><Ico Name="x" Size="20" /></button>
         </div>
-        <div class="db">
+        <div class="imp-body">
             <p class="hint" style="margin-top:0">Allumez l'écran, puis saisissez le code à 6 chiffres affiché. <a href="/player/" target="_blank">Ouvrir un écran de test</a></p>
             <div class="dw pair-grid">
                 <div class="dw-field wide"><label for="pair-code">Code</label><input id="pair-code" class="pair-code" @bind="code" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="off" /></div>
@@ -184,12 +195,12 @@
             <p class="hint" style="margin:12px 0 0">Matériel et format viennent des Réglages ; la résolution est celle de l'appareil par défaut. Tout reste modifiable ensuite dans l'édition de l'écran.</p>
             @if (error != null) { <div class="err">@error</div> }
         </div>
-        <div class="df">
+        <div class="imp-foot">
             <button class="btn ghost" @onclick="() => showPair = false">Annuler</button>
             <span class="grow"></span>
             <button class="btn" @onclick="Pair"><Ico Name="plus" Size="15" /> Connecter</button>
         </div>
-    </aside>
+    </div>
 }
 
 @if (renamingScreen != null)
@@ -274,7 +285,7 @@
 
 @if (confirmIds is { } cids)
 {
-    var targets = screens.Where(s => cids.Contains(s.Id)).ToList();
+    var targets = AllScreens.Where(s => cids.Contains(s.Id)).ToList();
     <div class="modal-backdrop" @onclick="() => confirmIds = null"></div>
     <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="pub-title" aria-describedby="pub-desc">
         <h3 id="pub-title">Publier sur @(targets.Count > 1 ? $"{targets.Count} écrans" : "cet écran") ?</h3>
@@ -384,7 +395,7 @@ else if (wallEdit is { } wid)
     private bool cleanQuery;   // paramètre « edit » à retirer de l'adresse
     private Guid? simScreen, simWall;   // simulateur ouvert : un écran, ou un mur entier
     private List<Screen>? deleting;   // écrans en attente de confirmation de suppression
-    private string view = "cards";   // cards | list (mémorisé dans le navigateur)
+    private string view = "tree";   // tree | cards | list (mémorisé dans le navigateur) ; l'arborescence est l'affichage par défaut du mode expert
     private bool ListView => Modes.Expert && view == "list";   // la vue en liste est une fonction du mode expert
     private readonly HashSet<Guid> expandedWalls = new();   // murs dont la liste d'écrans est dépliée (vignettes)
     private void ToggleWallMembers(Guid id) { if (!expandedWalls.Remove(id)) expandedWalls.Add(id); }
@@ -394,7 +405,11 @@ else if (wallEdit is { } wid)
         tenant = Store.Read(d => d.Tenant);
         Reload();
         // « Ouvrir cette aire » depuis un écran d'une autre aire : après le changement d'aire, l'écran choisi s'ouvre directement en édition
-        if (Guid.TryParse(System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query)["edit"], out var wanted)) { cleanQuery = true; if (screens.Any(s => s.Id == wanted)) editing = wanted; }
+        var qs = System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query);
+        if (Guid.TryParse(qs["edit"], out var wanted)) { cleanQuery = true; if (screens.Any(s => s.Id == wanted)) editing = wanted; }
+        // arborescence : nœud choisi dans une autre aire, rouvert après le changement d'aire
+        if (Guid.TryParse(qs["arbre"], out var ta)) { cleanQuery = true; if (ta == area?.Id) { treeArea = ta; treeZone = Guid.TryParse(qs["zone"], out var tz) && zones.Any(z => z.Id == tz) ? tz : null; } }
+        if (area != null) treeOpen.Add(area.Id);
         timer = new Timer(_ => InvokeAsync(() => { Reload(); StateHasChanged(); }), null, 3000, 3000);   // état en ligne / hors ligne
     }
 
@@ -902,7 +917,7 @@ else if (wallEdit is { } wid)
                         <span class="sep"> · </span><span class="gc-pl"><Ico Name="play-box" Size="13" /> @(gs.ZoneCount == 1 ? playlists.FirstOrDefault(p => p.Id == gs.PlaylistId)?.Name ?? "Aucune liste de lecture" : $"{ZonesSummary(gs)} · {gs.ZoneCount} zones")</span>
                     </div>
                     <div class="gc-chips">
-                        @if (ShowZones && zoneFilter == null) { <span class="gc-chip">@(gzone?.Name ?? Zone.DefaultName)</span> }
+                        @if (ShowZones && zoneFilter == null) { <span class="gc-chip gc-zchip">@(gzone?.Name ?? Zone.DefaultName)</span> }
                         @if (PcCount(gs) is var gpc && gpc > 1) { <span class="gc-chip" title="@PcTitle(gs)">PC partagé · @gpc écrans</span> }
                         @if (gzone is { Sync: true })
                         {
@@ -1245,6 +1260,433 @@ else if (wallEdit is { } wid)
         </div>
     };
 
+    // ---------- Affichage « Arborescence » (mode expert) : aires › zones › écrans ----------
+    // Arbre des aires et zones à gauche, compteurs cliquables, une section repliable par aire (vignettes ou lignes).
+    // Une aire choisie dans l'arbre montre les cartes habituelles ; une autre aire que celle ouverte s'ouvre d'abord (changement d'aire).
+    private bool isApp;   // look app : l'arborescence n'est pas proposée
+    private bool TreeView => Modes.Expert && view == "tree" && !isApp;
+    private Guid? treeArea, treeZone;   // nœud choisi (aucun : toutes les aires)
+    private readonly HashSet<Guid> treeOpen = new(), treeFolded = new();   // aires dépliées dans l'arbre, sections repliées
+    private string treeFilter = "";   // compteur choisi : "" | on | off | sleep | pend
+    private string treeDens = "tiles";   // tiles | rows
+    private List<TArea> treeData = new();
+
+    private record TScreen(Screen S, string Kind, bool Pending, string? Wake);   // Kind : on | off | sleep | pause
+    private record TZone(Zone Zone, List<TScreen> Screens);
+    private record TArea(Area Area, bool Own, List<TZone> Zones, GroupArea Group)
+    {
+        public IEnumerable<TScreen> All => Zones.SelectMany(z => z.Screens);
+    }
+    private record TCount(int N, int On, int Off, int Sleep, int Pend);
+
+    private List<Screen> AllScreens => screens.Concat(groupAreas.Where(g => g.Area.Id != area?.Id).SelectMany(g => g.Screens)).ToList();
+
+    private List<TArea> TreeData()
+    {
+        var now = DateTime.UtcNow;
+        return groupAreas.Select(g =>
+        {
+            var own = g.Area.Id == area?.Id;
+            var list = own ? screens : g.Screens;
+            var zs = own ? zones : g.Area.Zones.OrderByDescending(z => z.IsDefault).ThenBy(z => z.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+            var def = zs.FirstOrDefault(z => z.IsDefault);
+            var lists = g.Lists.Values.ToList();
+            var tz = zs.Select(z => new TZone(z, list.Where(s => (zs.FirstOrDefault(x => x.Id == s.ZoneId) ?? def)?.Id == z.Id)
+                    .OrderBy(s => z.IsWall ? s.WallPos ?? int.MaxValue : 0).ThenBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase)
+                    .Select(s =>
+                    {
+                        var sl = Sleep.State(tenant, g.Area, s, z.IsWall, now);
+                        var kind = sl.Asleep ? "sleep" : s.IsPaused(now) ? "pause" : IsOffline(s) ? "off" : "on";
+                        return new TScreen(s, kind, Helpers.HasPending(s, own ? playlists : lists), sl.Wake);
+                    }).ToList()))
+                .Where(z => z.Screens.Count > 0).ToList();
+            return new TArea(g.Area, own, tz, g);
+        }).Where(a => a.Own || a.Zones.Count > 0).ToList();
+    }
+
+    // aires retenues par le filtre « Aire de gestion »
+    private List<TArea> TreeScope => treeData.Where(a => areaFilter == "" || areaFilter == a.Area.Id.ToString()).ToList();
+    private static List<Guid> TreePending(IEnumerable<TArea> data) => data.SelectMany(a => a.All).Where(t => t.Pending).Select(t => t.S.Id).ToList();
+
+    private static TCount TCountOf(IEnumerable<TScreen> src)
+    {
+        var l = src.ToList();
+        return new(l.Count, l.Count(t => t.Kind == "on"), l.Count(t => t.Kind == "off"), l.Count(t => t.Kind is "sleep" or "pause"), l.Count(t => t.Pending));
+    }
+
+    private bool TMatch(TScreen t, TZone z, TArea a) =>
+        (search.Length == 0 || $"{t.S.Name} {z.Zone.Name} {a.Area.Name}".Contains(search, StringComparison.OrdinalIgnoreCase))
+        && treeFilter switch { "on" => t.Kind == "on", "off" => t.Kind == "off", "sleep" => t.Kind is "sleep" or "pause", "pend" => t.Pending, _ => true }
+        && statusFilter switch { "online" => !IsOffline(t.S), "offline" => IsOffline(t.S), "pending" => t.Pending, _ => true };
+
+    private static string TDot(string kind) => kind switch { "off" => "hors-ligne", "sleep" => "veille", "pause" => "pause", _ => "en-ligne" };
+
+    private string TState(TScreen t) => t.Kind switch
+    {
+        "off" => OfflineSince(t.S, DateTime.UtcNow),
+        "sleep" => "En veille" + (t.Wake is { } w ? " · réveil " + w : ""),
+        "pause" => "En pause" + (t.S.PausedUntilUtc is { } pu ? " · reprise " + LocalTime(pu) : ""),
+        _ => "En ligne"
+    };
+
+    private string? TListName(TArea a, Guid? id) => id is not { } pid ? null : a.Own ? playlists.FirstOrDefault(p => p.Id == pid)?.Name : a.Group.Lists.TryGetValue(pid, out var p) ? p.Name : null;
+
+    private string TPl(TArea a, Screen s) => s.ZoneCount == 1 ? TListName(a, s.PlaylistId) ?? "Aucune liste de lecture"
+        : string.Join(" · ", s.ZonePlaylists().Select(id => TListName(a, id) ?? "—")) + $" · {s.ZoneCount} zones";
+
+    private static MediaItem? FirstFull(Playlist? p, List<MediaItem> all) =>
+        p?.Draft.Where(i => i.Placement == "full").Select(i => all.FirstOrDefault(m => m.Id == i.MediaId)).FirstOrDefault(m => m != null);
+
+    private void SelectNode(TArea? a, Guid? zoneId)
+    {
+        CloseMenu();
+        if (a == null) { treeArea = null; treeZone = null; return; }
+        if (!a.Own)
+        {
+            // une autre aire : on l'ouvre (comme « Ouvrir cette aire »), le nœud est rouvert après le rechargement
+            if (Store.SwitchArea(a.Area.Id))
+                Nav.NavigateTo(Nav.GetUriWithQueryParameters(new Dictionary<string, object?> { ["arbre"] = a.Area.Id.ToString(), ["zone"] = zoneId?.ToString() }), forceLoad: true);
+            return;
+        }
+        treeArea = a.Area.Id; treeZone = zoneId; treeOpen.Add(a.Area.Id);
+    }
+
+    private void OpenTreeScreen(TArea a, Screen s) { if (a.Own) Edit(s); else OpenAreaPage(a.Area.Id, s.Id); }
+
+    private void ToggleTreeOpen(Guid id) { if (!treeOpen.Remove(id)) treeOpen.Add(id); }
+
+    private void ToggleFold(Guid id) { if (!treeFolded.Remove(id)) treeFolded.Add(id); treeFilter = ""; }
+
+    private void TreeAll(bool open, List<TArea> data)
+    {
+        foreach (var a in data)
+        {
+            if (open) { treeOpen.Add(a.Area.Id); treeFolded.Remove(a.Area.Id); }
+            else { treeOpen.Remove(a.Area.Id); treeFolded.Add(a.Area.Id); }
+        }
+    }
+
+    private void PickTreeFilter(string f) => treeFilter = f == "" || treeFilter == f ? "" : f;
+
+    private async Task SetDens(string d)
+    {
+        treeDens = d;
+        try { await JS.InvokeVoidAsync("linkiiPrefs.set", "screens-densite", d); } catch (JSException) { }
+    }
+
+    private void SelectPane(IEnumerable<Screen> list)
+    {
+        CloseMenu();
+        foreach (var s in list.Where(s => !selectedIds.Contains(s.Id))) { selectedIds.Add(s.Id); pickOrder.Add(s.Id); }
+    }
+
+    private RenderFragment TreeBody() => __builder =>
+    {
+        var data = TreeScope;
+        var sel = data.FirstOrDefault(a => a.Own && a.Area.Id == treeArea);
+        <div class="tr-wrap">
+            @TreeNav(data, sel)
+            <div class="tr-pane">@if (sel != null) { @TreePaneArea(sel) } else { @TreePaneAll(data) }</div>
+        </div>
+    };
+
+    private RenderFragment TreeNav(List<TArea> data, TArea? sel) => __builder =>
+    {
+        var all = TCountOf(data.SelectMany(a => a.All));
+        <nav class="tr-tree" aria-label="Aires et zones">
+            <h5>Aires de gestion · @data.Count</h5>
+            <button type="button" class="tr-node root @(sel == null ? "on" : "")" @onclick="() => SelectNode(null, null)"><Ico Name="layers" Size="16" /><span class="lbl">Toutes les aires</span>@if (all.Off > 0) { <span class="bad" title="Hors ligne">@all.Off</span> }<span class="n">@all.N</span></button>
+            <div class="tr-sep"></div>
+            @foreach (var a in data)
+            {
+                var ta = a;
+                var c = TCountOf(ta.All);
+                var op = treeOpen.Contains(ta.Area.Id);
+                <button type="button" class="tr-node @(op ? "open" : "") @(sel == ta && treeZone == null ? "on" : "")" title="@(ta.Own ? null : "Ouvrir l'aire « " + ta.Area.Name + " »")" @onclick="() => SelectNode(ta, null)">
+                    <span class="tw" role="button" aria-label="@(op ? "Replier" : "Déplier") @ta.Area.Name" @onclick="() => ToggleTreeOpen(ta.Area.Id)" @onclick:stopPropagation="true"><Ico Name="chevron" Size="14" /></span>
+                    <span class="lbl">@ta.Area.Name</span>
+                    @if (ta.Own) { <span class="open-tag" title="Aire ouverte dans le back-office">ouverte</span> }
+                    @if (c.Pend > 0) { <span class="pdot" title="Modifications à publier"></span> }
+                    @if (c.Off > 0) { <span class="bad" title="Hors ligne">@c.Off</span> }
+                    <span class="n">@c.N</span>
+                </button>
+                @if (op)
+                {
+                    <div class="tr-kids">
+                        @foreach (var z in ta.Zones)
+                        {
+                            var tz = z;
+                            var zc = TCountOf(tz.Screens);
+                            <button type="button" class="tr-node @(sel == ta && treeZone == tz.Zone.Id ? "on" : "")" @onclick="() => SelectNode(ta, tz.Zone.Id)"><Ico Name="@(tz.Zone.IsWall ? "grid" : "box")" Size="14" /><span class="lbl">@tz.Zone.Name</span>@if (zc.Off > 0) { <span class="bad">@zc.Off</span> }<span class="n">@zc.N</span></button>
+                        }
+                    </div>
+                }
+            }
+            <div class="tr-sep"></div>
+            <div class="tr-foot"><button type="button" class="linklike" @onclick="() => TreeAll(true, data)">Tout déplier</button> · <button type="button" class="linklike" @onclick="() => TreeAll(false, data)">Tout replier</button></div>
+        </nav>
+    };
+
+    private RenderFragment TreeKpis(IEnumerable<TScreen> list) => __builder =>
+    {
+        var c = TCountOf(list);
+        <div class="tr-kpis">
+            <button type="button" class="tr-kpi" title="Tout afficher" @onclick='() => PickTreeFilter("")'><b>@c.N</b><small><Ico Name="layers" Size="13" />Écrans</small></button>
+            <button type="button" class="tr-kpi @(treeFilter == "on" ? "on" : "")" aria-pressed="@(treeFilter == "on" ? "true" : "false")" @onclick='() => PickTreeFilter("on")'><b>@c.On</b><small><span class="sc-dot en-ligne"></span>En ligne</small></button>
+            <button type="button" class="tr-kpi @(c.Off > 0 ? "danger" : "") @(treeFilter == "off" ? "on" : "")" aria-pressed="@(treeFilter == "off" ? "true" : "false")" @onclick='() => PickTreeFilter("off")'><b>@c.Off</b><small><span class="sc-dot hors-ligne"></span>Hors ligne</small></button>
+            <button type="button" class="tr-kpi @(treeFilter == "sleep" ? "on" : "")" aria-pressed="@(treeFilter == "sleep" ? "true" : "false")" @onclick='() => PickTreeFilter("sleep")'><b>@c.Sleep</b><small><span class="gd-sleep"></span>En veille ou en pause</small></button>
+            <button type="button" class="tr-kpi @(c.Pend > 0 ? "warn" : "") @(treeFilter == "pend" ? "on" : "")" aria-pressed="@(treeFilter == "pend" ? "true" : "false")" @onclick='() => PickTreeFilter("pend")'><b>@c.Pend</b><small><span class="sc-dot mise-a-jour"></span>À publier</small></button>
+        </div>
+    };
+
+    private RenderFragment TreePaneAll(List<TArea> data) => __builder =>
+    {
+        var hits = data.Sum(a => a.Zones.Sum(z => z.Screens.Count(t => TMatch(t, z, a))));
+        <div class="tr-crumb"><b>Toutes les aires</b><span>· @Plural(data.Count, "aire", "aires") · @Plural(data.Sum(a => a.Zones.Count), "zone", "zones")</span></div>
+        @TreeKpis(data.SelectMany(a => a.All))
+        <div class="tr-tools">
+            <span>
+                @if (treeFilter != "") { @($"{hits} écran{(hits > 1 ? "s" : "")} correspondant{(hits > 1 ? "s" : "")} · ")<button type="button" class="linklike" @onclick='() => PickTreeFilter("")'>Tout afficher</button> }
+                else { <text>Groupés par aire puis par zone. Cliquez sur une aire pour la déplier dans l'arbre.</text> }
+            </span>
+            <span class="grow"></span>
+            <div class="seg" role="group" aria-label="Densité">
+                <button type="button" class="@(treeDens == "tiles" ? "on" : "")" aria-pressed="@(treeDens == "tiles" ? "true" : "false")" @onclick='() => SetDens("tiles")'><Ico Name="grid" Size="14" /> Vignettes</button>
+                <button type="button" class="@(treeDens == "rows" ? "on" : "")" aria-pressed="@(treeDens == "rows" ? "true" : "false")" @onclick='() => SetDens("rows")'><Ico Name="menu" Size="14" /> Lignes</button>
+            </div>
+        </div>
+        @foreach (var a in data) { @TreeSection(a) }
+    };
+
+    private RenderFragment TreeSection(TArea a) => __builder =>
+    {
+        var c = TCountOf(a.All);
+        var hit = a.Zones.Any(z => z.Screens.Any(t => TMatch(t, z, a)));
+        var calm = treeFilter != "" && !hit;
+        var closed = calm || treeFolded.Contains(a.Area.Id);
+        var pend = a.All.Where(t => t.Pending).Select(t => t.S.Id).ToList();
+        <section class="tr-area @(closed ? "closed" : "") @(calm ? "calm" : "")" aria-label="Aire @a.Area.Name">
+            <header class="tr-ah">
+                <button type="button" class="tr-tg" aria-expanded="@(closed ? "false" : "true")" aria-label="@(closed ? "Déplier" : "Replier") @a.Area.Name" @onclick="() => ToggleFold(a.Area.Id)"><Ico Name="chevron" Size="16" /></button>
+                <span class="ap"><Ico Name="map-pin" Size="16" /></span>
+                <h2><button type="button" title="@(a.Own ? null : "Ouvrir l'aire « " + a.Area.Name + " »")" @onclick="() => SelectNode(a, null)">@a.Area.Name</button></h2>
+                @if (a.Own) { <span class="lx-chip">Aire ouverte</span> }
+                <span class="tr-sum">
+                    @if (calm) { <span>Rien à signaler</span> }
+                    else
+                    {
+                        <span>@Plural(c.N, "écran", "écrans")</span>
+                        <span><span class="sc-dot en-ligne"></span>@c.On en ligne</span>
+                        @if (c.Off > 0) { <span class="bad">@c.Off hors ligne</span> }
+                        @if (c.Pend > 0) { <span class="pend">@c.Pend à publier</span> }
+                    }
+                </span>
+                <span class="grow"></span>
+                @if (!calm && pend.Count > 0) { <button type="button" class="btn ghost sm" @onclick="() => AskPublish(pend)"><Ico Name="upload" Size="14" /> Publier (@pend.Count)</button> }
+                @if (!calm) { <button type="button" class="tb-btn" @onclick="() => SelectNode(a, null)">Détail <Ico Name="arrow-right" Size="14" /></button> }
+            </header>
+            @if (!closed)
+            {
+                <div class="tr-zones @treeDens">@foreach (var z in a.Zones) { @TreeZoneBlock(a, z) }</div>
+            }
+        </section>
+    };
+
+    private RenderFragment TreeZoneBlock(TArea a, TZone z) => __builder =>
+    {
+        var hits = z.Screens.Where(t => TMatch(t, z, a)).ToList();
+        if (hits.Count == 0) return;
+        <div class="tr-zg">
+            <div class="tr-zh"><Ico Name="@(z.Zone.IsWall ? "grid" : "box")" Size="13" /> @z.Zone.Name <span class="cnt">· @Plural(z.Screens.Count, "écran", "écrans")</span>@if (z.Zone.Sync) { <span class="sy"><Ico Name="link" Size="12" /> synchronisée</span> }<span class="grow"></span></div>
+            @if (treeDens == "rows")
+            {
+                <div class="tr-rows">
+                    @if (z.Zone.IsWall) { @TreeWallRow(a, z, hits) }
+                    else { foreach (var t in hits) { @TreeRow(a, t, false) } }
+                </div>
+            }
+            else
+            {
+                <div class="tr-tiles">
+                    @if (z.Zone.IsWall) { @TreeWallTile(a, z) }
+                    else { foreach (var t in hits) { @TreeTile(a, t) } }
+                </div>
+            }
+        </div>
+    };
+
+    // aperçu d'une vignette : veille, pause, ou une vignette par zone du découpage (comme les cartes)
+    private RenderFragment TreePreview(TArea a, TScreen t) => __builder =>
+    {
+        var s = t.S;
+        if (t.Kind == "sleep") { <span class="sc-pause-art sc-sleep-art"><small>Écran éteint</small></span> }
+        else if (t.Kind == "pause") { <span class="sc-pause-art"><b>☕</b><small>Petite pause</small></span> }
+        else if (!a.Own) { @LightPreview(s, a.Group) }
+        else
+        {
+            <span class="sc-zones @(s.Orientation == "portrait" ? "dir-col" : "dir-row")">
+                @for (var z = 0; z < s.ZoneCount; z++)
+                {
+                    var zp = playlists.FirstOrDefault(p => p.Id == s.ZonePlaylist(z));
+                    var zt = ZoneThumb(zp);
+                    <span class="sc-zone" style="flex:@(ScreenLayouts.Find(s.Layout).Sizes[z].ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)) 1 0">
+                        @if (zt != null) { <MediaThumb Media="zt" All="media" /> }
+                        else { <span class="sc-empty">@(zp == null ? (s.ZoneCount > 1 ? "+" : "Aucune liste de lecture") : zp.Name)</span> }
+                    </span>
+                }
+            </span>
+        }
+    };
+
+    private RenderFragment TreeTile(TArea a, TScreen t) => __builder =>
+    {
+        var s = t.S;
+        <div class="tr-tile @(t.Kind == "off" ? "is-off" : "")" role="button" tabindex="0" title="Paramètres de l'écran « @s.Name »@(a.Own ? "" : $" (ouvre l'aire {a.Area.Name})")"
+             @onclick="() => OpenTreeScreen(a, s)" @onkeydown='e => { if (e.Key == "Enter") OpenTreeScreen(a, s); }'>
+            <div class="th">
+                @if (a.Own) { <input type="checkbox" class="sc-check ck" aria-label="Sélectionner @s.Name" checked="@selectedIds.Contains(s.Id)" @onchange="() => ToggleSelect(s.Id)" @onclick:stopPropagation="true" /> }
+                <div class="gc-mon @(s.Orientation == "portrait" ? "portrait" : "")">@TreePreview(a, t)</div>
+                @if (t.Pending) { <span class="tp">À publier</span> }
+            </div>
+            <div class="tb">
+                <div class="nm"><span class="sc-dot @TDot(t.Kind)"></span><span class="t">@s.Name</span>@if (s.DeviceKind != null) { <DeviceLogo Kind="@s.DeviceKind" Size="16" /> }</div>
+                @if (t.Kind == "off") { <div class="ln bad">@TState(t)</div> }
+                else if (t.Kind != "on") { <div class="ln sl"><Ico Name="@(t.Kind == "sleep" ? "moon" : "pause")" Size="12" /><span>@TState(t)</span></div> }
+                else { <div class="ln"><Ico Name="play-box" Size="12" /><span>@TPl(a, s)</span></div> }
+            </div>
+        </div>
+    };
+
+    private RenderFragment TreeWallTile(TArea a, TZone z) => __builder =>
+    {
+        var w = z.Zone;
+        var members = z.Screens.Select(x => x.S).ToList();
+        var cells = WallCells(w, members);
+        var c = TCountOf(z.Screens);
+        var port = members.Count > 0 && members.All(x => x.Orientation == "portrait");
+        var all = a.Own ? media : a.Group.MediaAll;
+        var wpl = a.Own ? playlists.FirstOrDefault(p => p.Id == w.PlaylistId) : w.PlaylistId is { } wp && a.Group.Lists.TryGetValue(wp, out var gp) ? gp : null;
+        var thumb = FirstFull(wpl, all);
+        var ar = ((double)w.WallCols * (port ? 9 : 16) / ((double)w.WallRows * (port ? 16 : 9))).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
+        <div class="tr-tile wall @(c.Off == c.N ? "is-off" : "")" style="--cols:@w.WallCols;--rows:@w.WallRows;--ar:@ar" role="button" tabindex="0" title="Mur d'écrans « @w.Name »"
+             @onclick="() => SelectNode(a, w.Id)" @onkeydown='e => { if (e.Key == "Enter") SelectNode(a, w.Id); }'>
+            <div class="th">
+                <div class="gc-frame @(port ? "portrait" : "")">
+                    @foreach (var cell in cells)
+                    {
+                        var cx = (cell.Number - 1) % w.WallCols;
+                        var cy = (cell.Number - 1) / w.WallCols;
+                        <span class="gc-tile @cell.Css" title="@cell.Title">
+                            @if (thumb != null) { <span class="wc-img" style="width:@(w.WallCols * 100)%;height:@(w.WallRows * 100)%;left:-@(cx * 100)%;top:-@(cy * 100)%"><MediaThumb Media="thumb" All="all" /></span> }
+                            <span class="gc-tn">@cell.Number</span>
+                            @if (cell.Screen == null) { <span class="gc-toff">Place libre</span> }
+                            else if (cell.Css == "off") { <span class="gc-toff">Hors ligne</span> }
+                        </span>
+                    }
+                    @if (thumb == null) { <span class="wc-label">@(wpl?.Name ?? "Aucune liste de lecture")</span> }
+                </div>
+            </div>
+            <div class="tb">
+                <div class="nm"><span class="sc-dot @(c.Off > 0 ? "mise-a-jour" : "en-ligne")"></span><span class="t">@w.Name</span><span class="wl">@w.WallCols × @w.WallRows</span></div>
+                @if (c.Off > 0) { <div class="ln bad">Mur incomplet · @(c.N - c.Off) sur @c.N en ligne</div> }
+                else { <div class="ln"><Ico Name="play-box" Size="12" /><span>@(wpl?.Name ?? "Aucune liste de lecture")</span></div> }
+            </div>
+        </div>
+    };
+
+    private RenderFragment TreeRow(TArea a, TScreen t, bool sub) => __builder =>
+    {
+        var s = t.S;
+        <div class="tr-row @(sub ? "sub" : "")" role="button" tabindex="0" title="Paramètres de l'écran « @s.Name »@(a.Own ? "" : $" (ouvre l'aire {a.Area.Name})")"
+             @onclick="() => OpenTreeScreen(a, s)" @onkeydown='e => { if (e.Key == "Enter") OpenTreeScreen(a, s); }'>
+            <span class="sc-dot @TDot(t.Kind)"></span>
+            <span class="nm">@s.Name</span>
+            <span class="mu">@if (s.DeviceKind != null) { <DeviceLogo Kind="@s.DeviceKind" Size="16" /> }@(s.DeviceKind != null ? s.DeviceOs ?? "Appareil" : "En attente")</span>
+            <span class="mu"><Ico Name="play-box" Size="13" />@TPl(a, s)</span>
+            <span class="mu @(t.Kind == "off" ? "bad" : "")">@TState(t)</span>
+            @if (t.Pending) { <span class="tp">À publier</span> } else { <span></span> }
+            <span class="go"><Ico Name="chevron-right" Size="16" /></span>
+        </div>
+    };
+
+    private RenderFragment TreeWallRow(TArea a, TZone z, List<TScreen> hits) => __builder =>
+    {
+        var w = z.Zone;
+        var c = TCountOf(z.Screens);
+        <div class="tr-row wall" role="button" tabindex="0" title="Mur d'écrans « @w.Name »" @onclick="() => SelectNode(a, w.Id)" @onkeydown='e => { if (e.Key == "Enter") SelectNode(a, w.Id); }'>
+            <span class="sc-dot @(c.Off > 0 ? "mise-a-jour" : "en-ligne")"></span>
+            <span class="nm">@w.Name<small>Mur @w.WallCols × @w.WallRows</small></span>
+            <span class="mu"><Ico Name="grid" Size="14" /> @Plural(c.N, "écran", "écrans")</span>
+            <span class="mu"><Ico Name="play-box" Size="13" />@(TListName(a, w.PlaylistId) ?? "Aucune liste de lecture")</span>
+            <span class="mu @(c.Off > 0 ? "bad" : "")">@(c.Off > 0 ? $"Incomplet · {c.N - c.Off} sur {c.N}" : "En ligne")</span>
+            <span></span>
+            <span class="go"><Ico Name="chevron" Size="16" /></span>
+        </div>
+        @foreach (var t in hits) { @TreeRow(a, t, true) }
+    };
+
+    // Aire ouverte choisie dans l'arbre (ou une de ses zones) : les cartes habituelles, rangées par zone
+    private RenderFragment TreePaneArea(TArea a) => __builder =>
+    {
+        var zz = treeZone is { } zid ? a.Zones.FirstOrDefault(z => z.Zone.Id == zid) : null;
+        var zs = zz != null ? new List<TZone> { zz } : a.Zones;
+        var c = TCountOf(zs.SelectMany(z => z.Screens));
+        var pend = zs.SelectMany(z => z.Screens).Where(t => t.Pending).Select(t => t.S.Id).ToList();
+        var shown = 0;
+        <div class="tr-crumb">
+            <button type="button" @onclick="() => SelectNode(null, null)">Toutes les aires</button><Ico Name="chevron-right" Size="13" />
+            @if (zz != null) { <button type="button" @onclick="() => SelectNode(a, null)">@a.Area.Name</button><Ico Name="chevron-right" Size="13" /><b>@zz.Zone.Name</b> }
+            else { <b>@a.Area.Name</b> }
+        </div>
+        <div class="tr-head">
+            <h2><Ico Name="@(zz != null ? (zz.Zone.IsWall ? "grid" : "box") : "map-pin")" Size="20" /> @(zz?.Zone.Name ?? a.Area.Name)</h2>
+            <span class="lx-chip">Aire ouverte</span>
+            <span class="tr-sum">
+                <span>@Plural(c.N, "écran", "écrans")</span>
+                <span><span class="sc-dot en-ligne"></span>@c.On en ligne</span>
+                @if (c.Off > 0) { <span class="bad">@c.Off hors ligne</span> }
+                @if (c.Pend > 0) { <span class="pend">@c.Pend à publier</span> }
+            </span>
+            <span class="grow"></span>
+            <a class="tb-btn" href="@(zz != null ? $"planning?zone={zz.Zone.Id}" : "planning")"><Ico Name="calendar" Size="14" /> Planning</a>
+            @if (pend.Count > 0) { <button type="button" class="btn sm" @onclick="() => AskPublish(pend)"><Ico Name="upload" Size="14" /> Publier (@pend.Count)</button> }
+            <div class="kebab">
+                <button type="button" class="kebab-btn" aria-label="Actions" aria-haspopup="menu" aria-expanded="@(openMenu == "tree" ? "true" : "false")" @onclick='() => Toggle("tree")'><Ico Name="dots-v" Size="18" /></button>
+                @if (openMenu == "tree")
+                {
+                    <div class="kebab-backdrop" @onclick="CloseMenu"></div>
+                    <div class="kebab-menu" role="menu">
+                        <button type="button" role="menuitem" @onclick="() => SelectPane(zs.SelectMany(z => z.Screens).Select(t => t.S))"><Ico Name="check" Size="16" /> Tout sélectionner</button>
+                        @if (manageZones) { <button type="button" role="menuitem" @onclick='() => { CloseMenu(); Nav.NavigateTo("zones"); }'><Ico Name="gear" Size="16" /> Gérer les zones…</button> }
+                    </div>
+                }
+            </div>
+        </div>
+        @foreach (var z in zs)
+        {
+            var hits = z.Screens.Where(t => TMatch(t, z, a)).ToList();
+            if (hits.Count == 0) continue;
+            shown++;
+            var tz = z;
+            <section class="tr-zsec">
+                @if (zz == null)
+                {
+                    <div class="zline">
+                        <span><b>@tz.Zone.Name</b> · @(tz.Zone.IsWall ? $"mur d'écrans {tz.Zone.WallCols} × {tz.Zone.WallRows}" : "zone libre") · @Plural(tz.Screens.Count, "écran", "écrans")</span>
+                        @if (tz.Zone.Sync) { <span class="zstate sync"><Ico Name="link" Size="13" /> Lecture synchronisée</span> }
+                        <div class="grow"></div>
+                        <button type="button" class="linklike" @onclick="() => SelectNode(a, tz.Zone.Id)">Voir la zone seule</button>
+                    </div>
+                }
+                <div class="pl-grid tr-grid">
+                    @if (tz.Zone.IsWall) { @Card(new Entry(tz.Zone, null)) }
+                    else { foreach (var t in hits) { @Card(new Entry(null, t.S)) } }
+                </div>
+            </section>
+        }
+        @if (shown == 0) { <div class="tr-empty">Aucun écran ne correspond.</div> }
+    };
+
     // ---------- Mur d'écrans ----------
     private readonly List<Guid> pickOrder = new();   // ordre dans lequel les écrans ont été cochés : ordre des places du mur
     private bool wallCreate;
@@ -1420,6 +1862,7 @@ else if (wallEdit is { } wid)
         playlists = Store.Read(d => PlaylistOps.Choosable(d));   // listes que la personne voit, et celles déjà en place
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
         LoadGroups();
+        treeData = TreeData();
     }
 
     private void OpenPair() { code = name = ""; pairFull = true; playlistId = null; error = null; pairSpec = ScreenSpec.From(tenant); pairSpec.Resolution = "auto"; pairZone = (FreeZones.FirstOrDefault(z => z.Id.ToString() == zoneFilter) ?? zones.FirstOrDefault(z => z.IsDefault))?.Id.ToString() ?? ""; showPair = true; }
@@ -1593,7 +2036,14 @@ else if (wallEdit is { } wid)
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (cleanQuery && !firstRender) { cleanQuery = false; Nav.NavigateTo(Nav.GetUriWithQueryParameter("edit", (string?)null), replace: true); }
+        if (cleanQuery && !firstRender) { cleanQuery = false; Nav.NavigateTo(Nav.GetUriWithQueryParameters(new Dictionary<string, object?> { ["edit"] = null, ["arbre"] = null, ["zone"] = null }), replace: true); }
+        if (firstRender)
+        {
+            // look app : pas d'arborescence ; densité Vignettes / Lignes mémorisée dans le navigateur
+            string? dens = null;
+            try { isApp = await JS.InvokeAsync<bool>("linkiiPrefs.isApp"); dens = await JS.InvokeAsync<string?>("linkiiPrefs.get", "screens-densite"); } catch (JSException) { } catch (InvalidOperationException) { }
+            if (isApp || dens == "rows") { if (dens == "rows") treeDens = "rows"; StateHasChanged(); }
+        }
         if (focusRename && renamingScreen != null) { focusRename = false; await renameInput.FocusAsync(); }
     }
 

@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Médiathèque — import simplifié</title>
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--row:#EDF1F5;--signal:#3B82C4;--signal-bg:#E4EFF9;--signal-ink:#1F4E7E;--ok:#1E8E5A;--navy:#0B1F3A}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 "IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:#E9EDF2;color:var(--ink);padding:32px}
+h1{font-size:22px;font-weight:500;margin:0 0 4px}
+h2{font-size:13px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:40px 0 12px}
+.lead,.note{color:var(--muted);max-width:940px}.note{font-size:14px;margin:10px 0 0}
+.app{position:relative;display:flex;width:min(1280px,100%);height:760px;background:var(--bg);border:1px solid var(--line-2);border-radius:8px;overflow:hidden}
+.side{width:200px;flex:none;background:#fff;border-right:1px solid var(--line);padding:16px 10px;display:flex;flex-direction:column;font-size:14px}
+.logo{font-size:24px;font-weight:500;padding:0 10px 14px;letter-spacing:-.02em}.logo small{font-size:10px;color:var(--muted);font-weight:400;margin-left:4px}
+.nav{padding:8px 10px;border-radius:6px;color:var(--muted);display:flex;gap:10px;align-items:center}
+.nav.on{background:var(--row);color:var(--ink);font-weight:500;box-shadow:inset 3px 0 0 var(--ink)}
+.nav i{width:14px;height:14px;border:1.5px solid currentColor;border-radius:3px;display:inline-block}
+.sep{height:1px;background:var(--line);margin:10px 4px}
+.main{flex:1;min-width:0;padding:24px 30px;overflow:hidden;position:relative}
+.head{display:flex;align-items:flex-start;justify-content:space-between}
+.head h1{font-size:26px}
+.stats{color:var(--muted);font-size:13px;margin:6px 0 14px}
+.btnp{background:var(--navy);color:#fff;border-radius:6px;padding:10px 18px;font-size:14px;display:inline-flex;gap:8px;align-items:center}
+.folders{display:flex;gap:16px;margin-bottom:18px}
+.fd{width:176px}.fd .sh{height:112px;border-radius:8px;background:linear-gradient(#2d3b52 0 45%,var(--navy) 45%);position:relative}
+.fd .sh span{position:absolute;left:10px;bottom:8px;color:#fff;font-size:13px}
+.fd b{display:block;font-weight:500;margin-top:6px;font-size:14px}.fd small{color:var(--muted);font-size:12px}
+.panel{background:#fff;border:1px solid var(--line);border-radius:8px;padding:14px;height:100%}
+.tools{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+.tools .s{flex:1;border:1px solid var(--line-2);border-radius:6px;padding:8px 10px;color:var(--muted);font-size:14px}
+.tools .b{border:1px solid var(--line-2);border-radius:6px;padding:7px 12px;font-size:13px}
+.cards{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+.mc .t{height:110px;border-radius:6px}.mc b{display:block;font-weight:500;font-size:13.5px;margin-top:6px}.mc small{color:var(--muted);font-size:12px}
+.c1{background:#3a6b4c}.c2{background:#8a8f99}.c3{background:#c8a56a}.c4{background:#4b5f8a}.c5{background:#a3566b}
+/* voile de dépôt (pendant un glisser seulement) */
+.dropveil{position:absolute;inset:0;background:rgba(228,239,249,.92);border:3px dashed var(--signal);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--signal-ink);text-align:center;z-index:5}
+.dropveil .ar{font-size:42px;line-height:1}.dropveil b{font-size:20px;font-weight:500}.dropveil small{font-size:13px;color:var(--muted)}
+/* tiroir du bas */
+.veil{position:absolute;inset:0;background:rgba(11,31,58,.45);z-index:5}
+.drawer{position:absolute;left:50%;transform:translateX(-50%);bottom:0;width:min(1040px,calc(100% - 32px));max-height:92%;background:#fff;border:1px solid var(--line-2);border-bottom:0;border-radius:6px 6px 0 0;box-shadow:0 -10px 30px rgba(11,31,58,.22);display:flex;flex-direction:column;z-index:6}
+.dh{display:flex;align-items:center;gap:12px;padding:16px 24px 6px}
+.dh h3{margin:0;flex:1;font-size:18px;font-weight:500}
+.x{width:30px;height:30px;border:1px solid var(--line-2);border-radius:6px;display:grid;place-items:center;color:var(--muted)}
+.db{padding:0 24px 8px;overflow:auto;min-height:0}
+.grp{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:14px 0 8px}
+.grp small{text-transform:none;letter-spacing:0;font-weight:400}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,150px);gap:12px}
+.tile{position:relative;aspect-ratio:1/1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:10px;border:1px solid var(--line-2);border-radius:12px;background:#fff;text-align:center;font-size:13.5px;font-weight:500;line-height:1.2}
+.tile .ic{width:40px;height:40px;border-radius:9px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:16px}
+.tile small{display:block;font-weight:400;color:var(--muted);font-size:11.5px;margin-top:2px}
+.tile .ok{position:absolute;right:10px;top:10px;width:9px;height:9px;border-radius:50%;background:var(--ok)}
+.tile.dev{border-color:var(--signal);background:var(--signal-bg)}
+.tile.dev .ic{background:var(--signal-ink)}
+.tile.lock{background:var(--row);color:var(--muted);border-style:dashed}
+.tile.lock .ic{filter:grayscale(1);opacity:.55}
+.tile.lock .lk{position:absolute;right:9px;top:8px;font-size:13px}
+.tile.more{border-style:dashed;background:#fff;color:var(--signal-ink)}
+.srch{display:flex;gap:10px;align-items:center;margin:10px 0 0}
+.srch .s{flex:1;border:1px solid var(--line-2);border-radius:6px;padding:7px 10px;color:var(--muted);font-size:14px}
+.df{display:flex;justify-content:space-between;align-items:center;padding:12px 24px 14px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+.btn{font:inherit;font-size:14px;padding:8px 16px;border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--ink)}
+.q{background:var(--signal-bg);color:var(--signal-ink);border-radius:8px;padding:12px 16px;max-width:940px;font-size:14px}.q li{margin:6px 0}
+</style></head><body>
+
+<h1>Importer : un seul dépôt, un tiroir de sources</h1>
+<p class="lead">Les fichiers de l'ordinateur se glissent n'importe où sur la page (un voile apparaît pendant le glisser). Le bouton Importer ouvre un tiroir qui liste toutes les sources : appareil et lien, puis comptes connectés, puis intégrations à connecter.</p>
+
+<h2>1 · Pendant un glisser sur la page</h2>
+<div class="app">
+  <div class="side">
+    <div class="logo">linkii<small>v1.144.0</small></div>
+    <div class="nav"><i></i>Écrans</div><div class="nav"><i></i>Listes de lecture</div><div class="nav"><i></i>Planning</div>
+    <div class="sep"></div>
+    <div class="nav on"><i></i>Médiathèque</div><div class="nav"><i></i>Compositions</div>
+    <div class="sep"></div>
+    <div class="nav"><i></i>Zones</div><div class="nav"><i></i>Membres</div>
+    <div class="sep"></div>
+    <div class="nav"><i></i>Intégrations</div><div class="nav"><i></i>Widgets</div>
+  </div>
+  <div class="main">
+    <div class="head"><div><h1>Médiathèque</h1><div class="stats">7 médias · 23,56 Mo · 3 dossiers · 4 médias non utilisés</div></div><span class="btnp">⤒ Importer ▾</span></div>
+    <div class="folders">
+      <div class="fd"><div class="sh"><span>2 médias</span></div><b>Canva_médias</b><small>modifié le 21 oct.</small></div>
+      <div class="fd"><div class="sh"><span>1 média</span></div><b>GoogleSlides_médias</b><small>modifié le 23 oct.</small></div>
+      <div class="fd"><div class="sh"><span>1 média</span></div><b>PowerPoint_médias</b><small>modifié le 23 oct.</small></div>
+    </div>
+    <div class="panel"><div class="tools"><div class="s">🔍 Rechercher dans la médiathèque</div><span class="b">Filtres</span><span class="b">Récents ▾</span></div>
+      <div class="cards"><div class="mc"><div class="t c1"></div><b>Canva_Flyer_test</b><small>1080×1350</small></div><div class="mc"><div class="t c2"></div><b>Presentation_pitch</b><small>1920×1080</small></div><div class="mc"><div class="t c3"></div><b>Décembre</b><small>1080×1920</small></div><div class="mc"><div class="t c4"></div><b>Story_calendrier</b><small>1080×1920</small></div><div class="mc"><div class="t c5"></div><b>Voiture_2048</b><small>2048×2048</small></div></div>
+    </div>
+    <div class="dropveil"><div class="ar">⤒</div><b>Déposez vos fichiers pour les ajouter</b><small>Images, vidéos, PDF, PowerPoint, Word, Excel · 2 Go maximum par fichier</small></div>
+  </div>
+</div>
+<p class="note">Dans un dossier ouvert, le voile dit « dans <i>nom du dossier</i> » et les fichiers y sont rangés. Plus de zone de dépôt à l'intérieur du tiroir.</p>
+
+<h2>2 · Le tiroir Importer</h2>
+<div class="app">
+  <div class="side">
+    <div class="logo">linkii<small>v1.144.0</small></div>
+    <div class="nav"><i></i>Écrans</div><div class="nav"><i></i>Listes de lecture</div><div class="nav"><i></i>Planning</div>
+    <div class="sep"></div>
+    <div class="nav on"><i></i>Médiathèque</div><div class="nav"><i></i>Compositions</div>
+    <div class="sep"></div>
+    <div class="nav"><i></i>Zones</div><div class="nav"><i></i>Membres</div>
+    <div class="sep"></div>
+    <div class="nav"><i></i>Intégrations</div><div class="nav"><i></i>Widgets</div>
+  </div>
+  <div class="main">
+    <div class="head"><div><h1>Médiathèque</h1><div class="stats">7 médias · 23,56 Mo · 3 dossiers</div></div><span class="btnp">⤒ Importer ▾</span></div>
+    <div class="folders">
+      <div class="fd"><div class="sh"><span>2 médias</span></div><b>Canva_médias</b><small>modifié le 21 oct.</small></div>
+      <div class="fd"><div class="sh"><span>1 média</span></div><b>GoogleSlides_médias</b><small>modifié le 23 oct.</small></div>
+      <div class="fd"><div class="sh"><span>1 média</span></div><b>PowerPoint_médias</b><small>modifié le 23 oct.</small></div>
+    </div>
+    <div class="panel"></div>
+  </div>
+  <div class="veil"></div>
+  <div class="drawer">
+    <div class="dh"><h3>Importer dans la médiathèque</h3><span class="x">×</span></div>
+    <div class="db">
+      <div class="grp">Depuis vos appareils</div>
+      <div class="tiles">
+        <div class="tile dev"><div class="ic">🖥</div>Cet ordinateur<small>Parcourir ou glisser sur la page</small></div>
+        <div class="tile dev"><div class="ic">🔗</div>Lien web<small>Image ou vidéo (https://…)</small></div>
+      </div>
+
+      <div class="grp">Vos comptes connectés <small>· 4</small></div>
+      <div class="tiles">
+        <div class="tile"><span class="ok"></span><div class="ic" style="background:#0F6CBD">O</div>OneDrive<small>PowerPoint, Word, Excel</small></div>
+        <div class="tile"><span class="ok"></span><div class="ic" style="background:#F4B400">S</div>Google Slides</div>
+        <div class="tile"><span class="ok"></span><div class="ic" style="background:#4285F4">D</div>Google Docs</div>
+        <div class="tile"><span class="ok"></span><div class="ic" style="background:#0F9D58">S</div>Google Sheets</div>
+      </div>
+
+      <div class="grp">À connecter <small>· ordre alphabétique · un clic ouvre l'assistant d'ajout</small></div>
+      <div class="srch"><div class="s">🔍 Rechercher une intégration (Canva, Dropbox, SharePoint…)</div></div>
+      <div class="tiles" style="margin-top:12px">
+        <div class="tile lock"><span class="lk">🔒</span><div class="ic" style="background:#00C4CC">C</div>Canva</div>
+        <div class="tile lock"><span class="lk">🔒</span><div class="ic" style="background:#0061FF">D</div>Dropbox</div>
+        <div class="tile lock"><span class="lk">🔒</span><div class="ic" style="background:#0082C9">N</div>Nextcloud</div>
+        <div class="tile lock"><span class="lk">🔒</span><div class="ic" style="background:#555">F</div>SFTP</div>
+        <div class="tile lock"><span class="lk">🔒</span><div class="ic" style="background:#038387">S</div>SharePoint</div>
+        <div class="tile more">+ 21 autres<small>Voir toutes les sources</small></div>
+      </div>
+    </div>
+    <div class="df"><span>Chaque page d'une présentation devient une image, rangée dans le dossier « …_médias » de l'intégration.</span><span class="btn">Fermer</span></div>
+  </div>
+</div>
+
+<h2>Décisions à prendre</h2>
+<div class="q"><ul style="margin:0;padding-left:18px">
+<li><b>Voile de dépôt</b> : toute la page (proposé) ou seulement le bloc des médias.</li>
+<li><b>Sources à connecter</b> : toutes visibles, ou repliées derrière « + 21 autres » comme ici (la recherche les retrouve dans les deux cas).</li>
+<li><b>Mode simple</b> : n'afficher que « Cet ordinateur », « Lien web » et les comptes connectés, sans les verrouillées.</li>
+<li><b>Clic sur une source verrouillée</b> : ouvre l'assistant d'ajout d'intégration, puis revient au tiroir avec la tuile déverrouillée.</li>
+</ul></div>
+</body></html>

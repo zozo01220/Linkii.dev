@@ -44,21 +44,42 @@
         }
         @if (CanUploadHere)
         {
-            <div class="lx-split">
-                <button class="btn lx-imp" data-fab="Importer des médias" @onclick="OpenImport"><Ico Name="upload" Size="16" /> Importer</button>
-                @if (FoldersShown && CanCreateHere) { <button class="btn ghost lx-appfolder" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /> Nouveau dossier</button> }
-                @if (FoldersShown && CanCreateHere)
+            @* Un seul bouton « Ajouter » (maquette mediatheque-import-boutons-page.html) : ordinateur, adresse web, cloud, nouveau dossier.
+               Look « app » : le bouton est masqué, le bouton flottant reprend les mêmes choix (sources [data-fab] cachées, cliquées par app-fab.js). *@
+            <div class="lx-add">
+                <button class="btn lx-add-btn" aria-haspopup="menu" aria-expanded="@(newMenu ? "true" : "false")" @onclick="() => { urlOpen = false; newMenu = !newMenu; }"><Ico Name="plus" Size="16" /> Ajouter <Ico Name="chevron" Size="14" /></button>
+                @if (newMenu)
                 {
-                    <button class="btn lx-car" aria-label="Autres créations" aria-haspopup="menu" aria-expanded="@(newMenu ? "true" : "false")" @onclick="() => newMenu = !newMenu"><Ico Name="chevron" Size="14" /></button>
-                    @if (newMenu)
-                    {
-                        <div class="kebab-backdrop" @onclick="() => newMenu = false"></div>
-                        <div class="kebab-menu" role="menu">
-                            <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenImport(); }"><Ico Name="upload" Size="16" /> Importer des médias</button>
-                            <button type="button" role="menuitem" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /> Nouveau dossier@(currentRow is { } cf ? $" dans « {cf.Folder.Name} »" : "")</button>
-                        </div>
-                    }
+                    <div class="kebab-backdrop" @onclick="() => newMenu = false"></div>
+                    <div class="kebab-menu lx-add-menu" role="menu">
+                        <label for="@FileInputId" role="menuitem" tabindex="0" @onclick="() => newMenu = false"><Ico Name="upload" Size="18" /><span><b>Depuis l'ordinateur</b><small>@ComputerFormats</small></span></label>
+                        <button type="button" role="menuitem" @onclick="OpenUrl"><Ico Name="link" Size="18" /><span><b>Depuis une adresse web</b><small>Lien direct vers une image ou une vidéo</small></span></button>
+                        <button type="button" role="menuitem" @onclick="OpenCloud"><Ico Name="cloud" Size="18" /><span><b>Depuis le cloud</b><small>OneDrive, Google, Canva, Dropbox…</small></span></button>
+                        @if (FoldersShown && CanCreateHere)
+                        {
+                            <span class="sep" role="separator"></span>
+                            <button type="button" role="menuitem" @onclick="OpenNewFolder"><Ico Name="folder" Size="18" /><span><b>Nouveau dossier@(currentRow is { } cf ? $" dans « {cf.Folder.Name} »" : "")</b></span></button>
+                        }
+                    </div>
                 }
+                @if (urlOpen)
+                {
+                    <div class="kebab-backdrop" @onclick="() => urlOpen = false"></div>
+                    <form class="lx-url-pop" role="dialog" aria-labelledby="url-title" @onsubmit="SubmitUrl" @onsubmit:preventDefault>
+                        <b id="url-title">Importer depuis une adresse web</b>
+                        <div class="row">
+                            <input type="url" @ref="urlInput" placeholder="https://exemple.ch/affiche.jpg" @bind="urlValue" @bind:event="oninput" aria-label="Adresse web du fichier" />
+                            <button type="submit" class="btn" disabled="@string.IsNullOrWhiteSpace(urlValue)">Importer</button>
+                        </div>
+                        <small>Lien direct vers une image ou une vidéo. Le fichier est copié dans @(currentRow is { } uf ? $"« {uf.Folder.Name} »" : "la médiathèque").</small>
+                    </form>
+                }
+                <span class="lx-fabsrc" aria-hidden="true">
+                    <label for="@FileInputId" data-fab="Depuis l'ordinateur"><Ico Name="upload" Size="16" /></label>
+                    <button type="button" tabindex="-1" data-fab="Depuis une adresse web" @onclick="OpenUrl"><Ico Name="link" Size="16" /></button>
+                    <button type="button" tabindex="-1" data-fab="Depuis le cloud" @onclick="OpenCloud"><Ico Name="cloud" Size="16" /></button>
+                    @if (FoldersShown && CanCreateHere) { <button type="button" tabindex="-1" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /></button> }
+                </span>
             </div>
         }
         else if (FoldersShown && CanCreateHere)
@@ -95,13 +116,12 @@
             @if (currentRow is { } fe)
             {
                 <p>Glissez ici vos images et vos vidéos depuis l'ordinateur, ou importez-les dans « @fe.Folder.Name ».</p>
-                <button class="btn" @onclick="OpenImport"><Ico Name="upload" Size="16" /> Importer dans « @fe.Folder.Name »</button>
             }
             else
             {
                 <p>Glissez ici vos images et vos vidéos depuis l'ordinateur, ou importez-les. Elles serviront dans vos listes de lecture.</p>
-                <button class="btn" @onclick="OpenImport"><Ico Name="upload" Size="16" /> Importer</button>
             }
+            @EmptyImport
         }
     </div>
 }
@@ -199,7 +219,7 @@ else
             <div class="empty compact">
                 <div class="big">@(currentRow is { } re ? $"Aucun média dans « {re.Folder.Name} »" : "Aucun média à la racine")</div>
                 <p>@(folderId == null ? "Vos médias sont rangés dans les dossiers ci-dessus." : "Ses médias sont rangés dans les sous-dossiers ci-dessus.")@(CanUploadHere ? " Glissez ici ceux qui n'ont pas besoin de dossier, ou importez-les." : "")</p>
-                @if (CanUploadHere) { <button class="btn" @onclick="OpenImport"><Ico Name="upload" Size="16" /> Importer</button> }
+                @if (CanUploadHere) { @EmptyImport }
             </div>
         }
     }
@@ -415,23 +435,23 @@ else
     }
 }
 
-@* Import : la fenêtre (choisir des fichiers ou coller une adresse) et le voile de dépôt restent dans la page, fermés,
+@* Import : le champ de fichiers caché (menu « Ajouter »), le tiroir « Depuis le cloud » et le voile de dépôt restent dans la page, fermés,
    pour que les imports continuent et que les fichiers déposés se lisent depuis leur champ. *@
 @if (CanUploadHere)
 {
+    <MediaUploader InputId="@FileInputId" OnImported="Imported" ShowJobs="false" Changed="StateHasChanged" @ref="uploader" FolderId="folderId" />
     <div style="@(showUpload ? "" : "display:none")">
-        @* tiroir qui vient du bas, de la même largeur que l'assistant d'ajout d'intégration (.cw-top) : zone de dépôt (images, vidéos, documents), puis les comptes cloud *@
+        @* tiroir qui vient du bas, de la même largeur que l'assistant d'ajout d'intégration (.cw-top) : les sources cloud seulement *@
         <div class="modal-backdrop" @onclick="() => showUpload = false"></div>
         <div class="imp-bottom lx-import" role="dialog" aria-modal="true" aria-labelledby="imp-title">
             <div class="imp-head">
-                <h3 id="imp-title">Importer@(currentRow is { } f ? $" dans « {f.Folder.Name} »" : "")</h3>
+                <h3 id="imp-title">Importer depuis le cloud<small>Chaque page d'un document devient une image, rangée dans une présentation du dossier « …_médias ».</small></h3>
                 <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => showUpload = false"><Ico Name="x" Size="20" /></button>
             </div>
             <div class="imp-body">
-                <MediaUploader OnImported="Imported" ShowJobs="false" Changed="UploadChanged" @ref="uploader" FolderId="folderId" />
                 <DocumentImporter OnImported="DocumentImported" />
             </div>
-            <div class="imp-foot"><button class="btn ghost" @onclick="() => showUpload = false">Fermer</button></div>
+            <div class="imp-foot"><span>Une fois le compte connecté, on revient ici et la tuile est déverrouillée.</span><button class="btn ghost" @onclick="() => showUpload = false">Fermer</button></div>
         </div>
     </div>
     <div class="lx-dropzone @(dragging ? "on" : "")" aria-hidden="@(dragging ? "false" : "true")">
@@ -608,7 +628,6 @@ else
     private List<Guid>? confirmDelete;
     private System.Threading.Timer? refreshTimer;
     private MediaUploader? uploader;
-    private int jobsAtOpen;
 
     // Imports en cours ou en échec : affichés comme des vignettes en tête de la grille, avec leur pourcentage.
     private IReadOnlyList<MediaUploader.UploadJob> Jobs => uploader?.Jobs ?? Array.Empty<MediaUploader.UploadJob>();
@@ -654,8 +673,12 @@ else
     private long TotalSize => files.Sum(m => m.Size ?? 0);
     private int UnusedHere => Pool.Count(m => unused.Contains(m.Id));
 
+    // Retour de l'assistant d'ajout d'une intégration lancé depuis le tiroir « Depuis le cloud » : le tiroir se rouvre
+    [SupplyParameterFromQuery(Name = "import")] public string? ImportParam { get; set; }
+
     protected override void OnInitialized()
     {
+        if (ImportParam == "cloud") showUpload = true;
         Reload();
         // pendant une conversion vidéo, la liste se rafraîchit seule
         refreshTimer = new System.Threading.Timer(_ => InvokeAsync(() =>
@@ -942,21 +965,45 @@ else
     // Un document (PDF, PowerPoint, Word, Excel, Google…) est entré dans la médiathèque : sa présentation est dans le dossier « …_médias ».
     private void DocumentImported() { showUpload = false; Reload(); StateHasChanged(); }
 
-    private void OpenImport() { jobsAtOpen = Jobs.Count; showUpload = true; }
+    private const string FileInputId = "lx-add-files";
+    private bool urlOpen;
+    private string urlValue = "";
+    private ElementReference urlInput;
+
+    private string ComputerFormats => LocalDocuments.FormatsText(Apps.IsInstalled).Length > 0 ? "Images, vidéos et documents" : "Images et vidéos";
+
+    // État vide : les deux imports les plus courants, sans passer par le menu
+    private RenderFragment EmptyImport => __builder =>
+    {
+        <div class="lx-empty-acts">
+            <label class="btn" for="@FileInputId"><Ico Name="upload" Size="16" /> Depuis l'ordinateur</label>
+            <button class="btn ghost" @onclick="OpenCloud"><Ico Name="cloud" Size="16" /> Depuis le cloud</button>
+        </div>
+    };
+
+    private void OpenCloud() { newMenu = false; urlOpen = false; showUpload = true; }
+
+    private async Task OpenUrl()
+    {
+        newMenu = false; urlOpen = true; urlValue = "";
+        StateHasChanged();
+        await Task.Yield();
+        try { await urlInput.FocusAsync(); } catch (JSException) { } catch (InvalidOperationException) { }
+    }
+
+    private async Task SubmitUrl()
+    {
+        var u = urlValue.Trim();
+        if (u.Length == 0 || uploader == null) return;
+        urlOpen = false; urlValue = "";
+        await uploader.ImportUrl(u);   // la progression s'affiche dans la grille, comme pour les fichiers
+    }
 
     private void Imported(MediaItem m) { Reload(); Toast.Ok(m.Status == "processing" ? $"« {m.Name} » importé, conversion en MP4 en cours." : $"« {m.Name} » importé."); }
-
-    // Dès qu'un import démarre, la fenêtre se ferme : la progression s'affiche dans la grille.
-    private void UploadChanged()
-    {
-        if (showUpload && Jobs.Count > jobsAtOpen) showUpload = false;
-        StateHasChanged();
-    }
 
     private async Task OnDropped(InputFileChangeEventArgs e)
     {
         dragging = false;
-        jobsAtOpen = Jobs.Count;
         if (uploader != null) await uploader.AddFiles(e);
     }
 
@@ -1124,7 +1171,7 @@ else
     [JSInvokable]
     public Task Escape() => InvokeAsync(() =>
     {
-        if (menuFor != null || newMenu) { menuFor = null; newMenu = false; }
+        if (menuFor != null || newMenu || urlOpen) { menuFor = null; newMenu = false; urlOpen = false; }
         else if (showUpload) showUpload = false;
         else if (openId != null) openId = null;
         else if (picked.Count > 0) picked.Clear();

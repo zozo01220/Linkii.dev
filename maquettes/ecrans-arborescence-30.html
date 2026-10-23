@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Écrans — affichage Arborescence (maquette, 30 écrans)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500&family=JetBrains+Mono:wght@500&display=swap" />
+<link rel="stylesheet" href="../Linkii.Poc/wwwroot/app.css" />
+<style>
+/* Ajouts de la maquette (le reste vient de app.css) */
+.sc-zone img, .wc-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.wc-img { position: absolute; }
+
+/* ---- Proposition : affichage « Arborescence » (mode Expert) ---- */
+.tr-wrap { display: grid; grid-template-columns: 268px minmax(0, 1fr); gap: 20px; align-items: start; }
+.tr-tree { position: sticky; top: 16px; background: #fff; border: 1px solid var(--line); border-radius: var(--card-radius); padding: 10px 8px; max-height: calc(100vh - 32px); overflow: auto; }
+.tr-tree h5 { margin: 4px 8px 8px; font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+.tr-node { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 34px; padding: 5px 8px; border: 0; background: none; font: inherit; font-size: 14px; color: var(--ink); border-radius: var(--radius); cursor: pointer; text-align: left; }
+.tr-node:hover { background: var(--bg); }
+.tr-node.on { background: var(--brand-tint); font-weight: 500; box-shadow: inset 2px 0 0 var(--brand); border-radius: 0 var(--radius) var(--radius) 0; }
+.tr-node .ico-svg { flex: none; color: var(--muted); }
+.tr-node .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-node .n { flex: none; color: var(--muted); font-size: 12.5px; font-weight: 400; min-width: 18px; text-align: right; }
+.tr-node .bad { flex: none; display: inline-grid; place-items: center; min-width: 20px; height: 18px; padding: 0 6px; border-radius: 999px; background: var(--danger-bg); color: var(--danger-ink); font-size: 11.5px; font-weight: 500; }
+.tr-node .pdot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+.tr-node .tw { flex: none; display: inline-grid; place-items: center; width: 18px; height: 18px; margin-left: -4px; border-radius: 3px; color: var(--muted); transition: transform .12s; }
+.tr-node .tw:hover { background: var(--line); color: var(--ink); }
+.tr-node.open > .tw { transform: rotate(0deg); }
+.tr-node:not(.open) > .tw { transform: rotate(-90deg); }
+.tr-node.root { font-weight: 500; }
+.tr-node .open-tag { flex: none; font-size: 11px; color: var(--signal); font-weight: 500; }
+.tr-kids { margin: 0 0 4px 17px; padding-left: 6px; border-left: 1px solid var(--line); }
+.tr-kids .tr-node { font-size: 13.5px; min-height: 30px; }
+.tr-sep { height: 1px; background: var(--row); margin: 6px 4px; }
+.tr-tree .tr-foot { display: flex; gap: 6px; padding: 8px 4px 2px; }
+.tr-tree .tr-foot .linklike { font-size: 13px; }
+
+.tr-crumb { display: flex; align-items: center; gap: 6px; font-size: 13.5px; color: var(--muted); margin: 2px 0 12px; flex-wrap: wrap; }
+.tr-crumb button { border: 0; background: none; padding: 0; font: inherit; color: var(--signal); cursor: pointer; }
+.tr-crumb b { color: var(--ink); font-weight: 500; }
+
+.tr-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+.tr-kpi { display: grid; gap: 2px; padding: 10px 14px; background: #fff; border: 1px solid var(--line); border-radius: var(--card-radius); font: inherit; color: var(--ink); text-align: left; cursor: pointer; transition: border-color .12s; }
+.tr-kpi:hover { border-color: var(--line-2); }
+.tr-kpi b { font-size: 22px; font-weight: 500; line-height: 1.2; }
+.tr-kpi small { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; }
+.tr-kpi small .sc-dot { width: 8px; height: 8px; }
+.tr-kpi.on { border-color: var(--signal); box-shadow: inset 0 0 0 1px var(--signal); }
+.tr-kpi.danger b { color: var(--danger); }
+.tr-kpi.warn b { color: var(--warn); }
+.tr-kpi .gd-sleep { width: 8px; height: 8px; border-radius: 50%; background: #7B8BA3; }
+
+.tr-tools { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--muted); font-size: 13px; }
+.tr-tools .grow { flex: 1; }
+.seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: var(--radius); overflow: hidden; background: #fff; }
+.seg button { border: 0; background: none; padding: 5px 11px; font: inherit; font-size: 13px; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.seg button + button { border-left: 1px solid var(--line-2); }
+.seg button.on { background: var(--brand); color: #fff; }
+
+.tr-area { background: #fff; border: 1px solid var(--line); border-radius: var(--card-radius); margin-bottom: 12px; }
+.tr-ah { display: flex; align-items: center; gap: 10px; padding: 10px 14px; min-height: 52px; }
+.tr-ah .tr-tg { display: inline-grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: var(--radius); background: none; color: var(--muted); cursor: pointer; transition: transform .12s; }
+.tr-ah .tr-tg:hover { background: var(--row); color: var(--ink); }
+.tr-area.closed .tr-tg { transform: rotate(-90deg); }
+.tr-ah h2 { font-size: 16px; font-weight: 500; white-space: nowrap; }
+.tr-ah h2 button { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+.tr-ah h2 button:hover { color: var(--signal); }
+.tr-ah .ap { color: var(--muted); display: inline-flex; }
+.tr-sum { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; flex-wrap: wrap; }
+.tr-sum > span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.tr-sum .sc-dot { width: 8px; height: 8px; }
+.tr-sum .bad { color: var(--danger-ink); background: var(--danger-bg); border-radius: 999px; padding: 1px 9px; }
+.tr-sum .pend { color: var(--warn-ink); background: var(--warn-bg); border-radius: 999px; padding: 1px 9px; }
+.tr-ah .grow { flex: 1; }
+.tr-ah .btn.sm, .tr-ah .tb-btn { white-space: nowrap; }
+.tr-area.closed .tr-zones { display: none; }
+.tr-area.calm .tr-ah { min-height: 44px; }
+.tr-area.calm h2 { color: var(--muted); font-weight: 400; }
+.tr-zones { padding: 0 14px 14px; border-top: 1px solid var(--row); }
+.tr-zh { display: flex; align-items: center; gap: 8px; margin: 14px 0 8px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+.tr-zh .ico-svg { color: var(--muted); }
+.tr-zh .cnt { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.tr-zh .sy { text-transform: none; letter-spacing: 0; font-weight: 400; color: #1F5C93; display: inline-flex; align-items: center; gap: 4px; }
+.tr-zh .grow { flex: 1; }
+.tr-zh .linklike { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 12.5px; }
+
+.tr-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(172px, 1fr)); gap: 10px; }
+/* vignettes : les zones se suivent côte à côte, chacune à la largeur de ses écrans */
+.tr-zones.tiles { display: flex; flex-wrap: wrap; align-items: flex-start; column-gap: 28px; }
+.tr-zones.tiles .tr-zg { min-width: 0; max-width: 100%; }
+.tr-zones.tiles .tr-tiles { display: flex; flex-wrap: wrap; gap: 10px; }
+.tr-zones.tiles .tr-tile { width: 176px; }
+.tr-zones.tiles .tr-tile.wall { width: 362px; }
+.tr-tile { position: relative; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+.tr-tile:hover { border-color: var(--signal); box-shadow: 0 0 0 1px var(--signal); }
+.tr-tile .th { position: relative; aspect-ratio: 16 / 9; display: grid; place-items: center; container-type: size; overflow: hidden; background: #0E1726; }
+.tr-tile .th .gc-mon { border-width: 2px; }
+.tr-tile.is-off .gc-mon, .tr-tile.is-off .gc-frame { filter: grayscale(1) brightness(.6); }
+.tr-tile.is-off { border-color: #EBC3BF; }
+.tr-tile .tp { position: absolute; right: 6px; top: 6px; padding: 1px 7px; border-radius: 999px; background: var(--warn-bg); color: var(--warn-ink); font-size: 11px; font-weight: 500; }
+.tr-tile .ck { position: absolute; left: 7px; top: 7px; z-index: 2; opacity: 0; transition: opacity .12s; }
+.tr-tile:hover .ck, .tr-tile .ck:checked { opacity: 1; }
+.tr-tile .tb { padding: 7px 9px 8px; display: grid; gap: 1px; }
+.tr-tile .nm { display: flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 500; min-width: 0; }
+.tr-tile .nm .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-tile .nm .sc-dot { width: 8px; height: 8px; }
+.tr-tile .nm .dev-logo { flex: none; }
+.tr-tile .ln { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); overflow: hidden; white-space: nowrap; }
+.tr-tile .ln span { overflow: hidden; text-overflow: ellipsis; }
+.tr-tile .ln.bad { color: var(--danger-ink); }
+.tr-tile .ln.sl { color: #4F5F78; }
+.tr-tile.wall { grid-column: span 2; }
+.tr-tile.wall .th { aspect-ratio: 32 / 9.2; }
+.tr-tile.wall .th .gc-frame { width: min(92cqw, calc(84cqh * var(--ar))); }
+.tr-tile.wall .tb .nm .wl { flex: none; font-weight: 400; color: var(--muted); font-size: 12px; }
+.sc-dot.veille { background: #7B8BA3; } .sc-dot.pause { background: var(--warn); }
+
+.tr-rows { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.tr-row { display: grid; grid-template-columns: 18px minmax(160px, 1.4fr) minmax(120px, 1fr) minmax(150px, 1.2fr) minmax(150px, 1fr) 84px 24px; gap: 12px; align-items: center; padding: 8px 12px; font-size: 13.5px; cursor: pointer; background: #fff; }
+.tr-row + .tr-row { border-top: 1px solid var(--row); }
+.tr-row:hover { background: var(--bg); }
+.tr-row .nm { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-row .mu { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+.tr-row .bad { color: var(--danger-ink); }
+.tr-row .tp { justify-self: start; padding: 1px 8px; border-radius: 999px; background: var(--warn-bg); color: var(--warn-ink); font-size: 11.5px; font-weight: 500; }
+.tr-row .go { color: var(--muted); display: inline-flex; }
+.tr-row.wall .nm small { color: var(--muted); font-weight: 400; margin-left: 6px; }
+.tr-row.sub { background: #FAFBFC; }
+.tr-row.sub .nm { font-weight: 400; padding-left: 16px; }
+
+.tr-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: #fff; border: 1px solid var(--line); border-radius: var(--card-radius); margin-bottom: 16px; flex-wrap: wrap; }
+.tr-head h2 { font-size: 20px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.tr-head h2 .ico-svg { color: var(--muted); }
+.tr-head .grow { flex: 1; }
+.tr-zsec { margin-bottom: 22px; }
+.tr-zsec .zline { margin-bottom: 14px; }
+.pl-grid.tr-grid { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+.tr-empty { padding: 28px; text-align: center; color: var(--muted); background: #fff; border: 1px dashed var(--line-2); border-radius: var(--card-radius); }
+
+.view-toggle button.new { position: relative; }
+.view-toggle button.new::after { content: ""; position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: #E07B2E; }
+
+/* bandeau de la maquette (ne fait pas partie de la page) */
+.mk-note { margin: 0 0 18px; padding: 10px 14px; border: 1px dashed var(--line-2); border-radius: var(--card-radius); background: #FFFCF5; color: var(--ink); font-size: 13.5px; }
+.mk-note b { font-weight: 500; }
+.mq-bar { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 2000; display: flex; gap: 4px; align-items: center; background: #0B1F3A; color: #fff; border-radius: 99px; padding: 5px 6px 5px 14px; font-size: 13px; box-shadow: 0 6px 20px rgba(0,0,0,.25); white-space: nowrap; }
+.mq-bar button { font: inherit; font-size: 13px; color: #cfd8e3; background: none; border: 0; border-radius: 99px; padding: 5px 12px; cursor: pointer; }
+.mq-bar button.on { background: #fff; color: #0B1F3A; }
+.mq-bar .vr { width: 1px; height: 18px; background: #34496A; margin: 0 4px; }
+.content { padding-bottom: 90px; }
+</style></head>
+<body>
+
+<div class="mq-bar" role="group" aria-label="États de la maquette">Maquette&nbsp;:
+  <button data-st="cartes">Aujourd'hui · cartes</button>
+  <span class="vr"></span>
+  <button data-st="arbre" class="on">Arborescence</button>
+  <button data-st="lignes">· en lignes</button>
+  <button data-st="aire">· une aire</button>
+  <button data-st="surveiller">· à surveiller</button>
+</div>
+
+<div class="shell has-tabs">
+  <aside class="sidebar">
+    <div class="brand"><span class="wm">link<span class="i"></span><span class="i s"></span></span><span class="ver">v1.144.0</span></div>
+    <div class="area-pick">
+      <button type="button" class="area-btn"><i data-i="pin" data-s="16"></i><span class="area-txt"><b>Lausanne · Siège</b><small>Aire de gestion</small></span><i data-i="chevron" data-s="16"></i></button>
+    </div>
+    <a class="nav active"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></svg> Écrans</a>
+    <a class="nav"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg> Listes de lecture</a>
+    <a class="nav"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></svg> Planning</a>
+    <div class="nav-sep" role="separator"></div>
+    <a class="nav"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg> Médiathèque</a>
+    <a class="nav"><i data-i="grid" data-s="18"></i> Compositions</a>
+    <div class="spacer"></div>
+    <a class="nav"><i data-i="pin" data-s="18"></i> Aires de gestion</a>
+    <a class="nav"><i data-i="box" data-s="18"></i> Zones</a>
+    <a class="nav"><i data-i="users" data-s="18"></i> Membres</a>
+    <div class="nav-sep" role="separator"></div>
+    <a class="nav"><svg viewBox="0 0 24 24"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0V8zM12 17v5" /></svg> Intégrations</a>
+    <a class="nav"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" /></svg> Widgets</a>
+    <div class="nav-sep" role="separator"></div>
+    <a class="nav"><svg viewBox="0 0 24 24"><path d="M3 3v18h18" /><path d="M7 15l4-4 3 3 6-6" /></svg> Statistiques</a>
+    <a class="nav"><i data-i="gear" data-s="18"></i> Réglages</a>
+    <button type="button" class="nav mode-switch" role="switch" aria-checked="true"><span>Passer en mode simple</span><span class="switch on"><span></span></span></button>
+    <div class="user side-user">
+      <button type="button" class="user-btn"><span class="avatar">U</span><span class="who"><b>UNIL</b><small>ludovicgregory.prieur@unil.ch</small></span><svg class="chev" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6" /></svg></button>
+    </div>
+  </aside>
+
+  <div class="main-col">
+    <main class="content">
+      <p class="mk-note" id="note"></p>
+
+      <div class="page-head">
+        <div>
+          <h1>Vos écrans<span class="scr-count">30</span></h1>
+          <p class="sub sc-intro">Choisissez la liste de lecture et les widgets de chaque écran, puis publiez : chaque écran se met à jour indépendamment.</p>
+        </div>
+        <div class="row head-actions">
+          <button class="btn publish-btn"><i data-i="upload" data-s="16"></i> Publier <span class="cnt">5</span></button>
+          <button class="btn"><i data-i="plus" data-s="16"></i> Connecter un écran</button>
+        </div>
+      </div>
+
+      <div class="sc-bar" role="region" aria-label="Filtres et sélection">
+        <div class="search-box grow" style="margin:0"><i data-i="search" data-s="16"></i><input id="q" placeholder="Rechercher des écrans, zones, aires" /></div>
+        <div class="fm"><button type="button" class="tb-btn"><i data-i="sliders" data-s="16"></i> Filtres</button></div>
+        <div class="view-toggle" role="group" aria-label="Affichage">
+          <button type="button" data-v="cartes" title="Cartes"><i data-i="grid" data-s="16"></i></button>
+          <button type="button" data-v="liste" title="Liste (inchangée)"><i data-i="menu" data-s="16"></i></button>
+          <button type="button" data-v="arbre" class="new" title="Arborescence : par aire et par zone"><i data-i="tree" data-s="16"></i></button>
+        </div>
+      </div>
+
+      <div id="view"></div>
+    </main>
+  </div>
+</div>
+
+<script>
+/* ---------- icônes (mêmes tracés que Ico.razor) ---------- */
+const P = {
+  pin: "<path d='M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z'/><circle cx='12' cy='10' r='3'/>",
+  playbox: "<rect x='3' y='5' width='18' height='14' rx='2'/><path d='M10 9.5v5l4.5-2.5z'/>",
+  dots: "<circle cx='12' cy='5' r='1'/><circle cx='12' cy='12' r='1'/><circle cx='12' cy='19' r='1'/>",
+  eye: "<path d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z'/><circle cx='12' cy='12' r='3'/>",
+  pause: "<path d='M10 4H6v16h4zM18 4h-4v16h4z'/>",
+  play: "<path d='M5 3l14 9-14 9z'/>",
+  chevron: "<path d='M6 9l6 6 6-6'/>",
+  right: "<path d='M9 18l6-6-6-6'/>",
+  arrow: "<path d='M5 12h14M13 6l6 6-6 6'/>",
+  tree: "<rect x='9' y='2' width='6' height='5' rx='1'/><rect x='2' y='17' width='6' height='5' rx='1'/><rect x='16' y='17' width='6' height='5' rx='1'/><path d='M12 7v5M5 17v-3h14v3'/>",
+  search: "<circle cx='11' cy='11' r='8'/><path d='M21 21l-4.35-4.35'/>",
+  sliders: "<path d='M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6'/>",
+  upload: "<path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12'/>",
+  plus: "<path d='M12 5v14M5 12h14'/>",
+  grid: "<rect x='3' y='3' width='7' height='7' rx='1'/><rect x='14' y='3' width='7' height='7' rx='1'/><rect x='3' y='14' width='7' height='7' rx='1'/><rect x='14' y='14' width='7' height='7' rx='1'/>",
+  menu: "<path d='M3 12h18M3 6h18M3 18h18'/>",
+  link: "<path d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/><path d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/>",
+  moon: "<path d='M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z'/>",
+  box: "<path d='M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z'/><path d='M3.27 6.96L12 12.01l8.73-5.05M12 22.08V12'/>",
+  users: "<path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75'/>",
+  gear: "<circle cx='12' cy='12' r='3'/><path d='M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z'/>",
+  calendar: "<rect x='3' y='5' width='18' height='16' rx='2'/><path d='M3 10h18M8 3v4M16 3v4'/>",
+  globe: "<circle cx='12' cy='12' r='10'/><path d='M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z'/>",
+  layers: "<path d='M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5'/>",
+  alert: "<path d='M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01'/>"
+};
+const ico = (n, s = 16) => `<svg class="ico-svg" viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n] || ''}</svg>`;
+function paintIcons(root = document) { root.querySelectorAll('i[data-i]').forEach(el => el.outerHTML = ico(el.dataset.i, el.dataset.s || 20)); }
+
+/* ---------- logos d'appareil (DeviceLogo.razor) ---------- */
+const DEV = {
+  androidtv: s => `<svg class="dev-logo" width="${s}" height="${s}" viewBox="0 0 24 24" role="img" aria-label="Android TV"><rect x="1.5" y="3.5" width="21" height="14" rx="2.2" fill="#0B1F3A"/><path d="M7.2 12.8a4.8 4.8 0 0 1 9.6 0z" fill="#3DDC84"/><circle cx="9.9" cy="11.3" r=".65" fill="#0B1F3A"/><circle cx="14.1" cy="11.3" r=".65" fill="#0B1F3A"/><path d="M8.9 7.6l1 1.5M15.1 7.6l-1 1.5" stroke="#3DDC84" stroke-width="1" stroke-linecap="round"/><path d="M8 20.5h8" stroke="#5A6B80" stroke-width="1.6" stroke-linecap="round"/></svg>`,
+  android: s => `<svg class="dev-logo" width="${s}" height="${s}" viewBox="0 0 24 24" role="img" aria-label="Android"><path d="M5.5 15.5a6.5 6.5 0 0 1 13 0z" fill="#3DDC84"/><circle cx="9.3" cy="12.4" r=".8" fill="#fff"/><circle cx="14.7" cy="12.4" r=".8" fill="#fff"/><path d="M8.2 6.6l1.5 2.2M15.8 6.6l-1.5 2.2" stroke="#3DDC84" stroke-width="1.3" stroke-linecap="round"/><rect x="5.5" y="16.5" width="13" height="4" rx="1.5" fill="#3DDC84" opacity=".35"/></svg>`,
+  windows: s => `<svg class="dev-logo" width="${s}" height="${s}" viewBox="0 0 24 24" role="img" aria-label="Windows"><path d="M2 4.6 10.3 3.5v7.7H2zM11.5 3.3 22 1.8v9.4H11.5zM2 12.4h8.3v7.8L2 19.1zM11.5 12.4H22v9.8l-10.5-1.5z" fill="#0078D4"/></svg>`,
+  web: s => `<span class="dev-logo" title="Navigateur" style="display:inline-flex;color:var(--muted)">${ico('globe', s - 2)}</span>`
+};
+const OS = { androidtv: 'Android TV 12', android: 'Android 13', windows: 'Windows 11', web: 'Chrome' };
+const devLogo = (s, n) => s.dev ? DEV[s.dev](n) : '';
+
+/* ---------- données fictives : 8 aires, 30 écrans ---------- */
+const TH = id => `../Linkii.Poc/thumbs/${id}-320.webp`;
+const PL = {
+  acc: ['Accueil visiteurs', '0099104388dc4cfeb82d83066dcacf5a'],
+  menu: ['Menu du jour', 'b7a268df1dcd408f8793ae38b57cc635'],
+  vege: ['Menu végétarien', '75a9ddc74d58465f81b7ea4ea97b227d'],
+  actu: ['Actualités internes', '4979182e84ca41bebe5c2c19916813bd'],
+  evt: ['Événements', '80dce20ba3cc4764a7618b1518e3910d'],
+  promo: ['Promotions', '60d517f6ea1447cdb7da0dcd45e0657e'],
+  bien: ['Bienvenue', 'f315ac8be1f44f3bb68f6f5bc0bb470c'],
+  secu: ['Consignes de sécurité', '584d97ebf4c54ac1bcd986861e8c4201'],
+  cal: ['Calendrier du mois', 'e1c169b89de440b8ba9e6be2e8c58dc1'],
+  aff: ['Affiches', 'b5389a8e18754d31a308d2bfeb381e32'],
+  nat: ['Ambiance', '80dc740c1bb845318bfb8a8bf0d549a4']
+};
+// st : on | off | sleep | pause ; off = « 3 h » (Hors ligne depuis) ou null (Jamais connecté)
+const S = (n, dev, pl, o = {}) => ({ n, dev, pl, st: 'on', ...o });
+const AREAS = [
+  { id: 'lau', n: 'Lausanne · Siège', own: true, zones: [
+    { id: 'lau-acc', n: 'Accueil', sync: true, s: [S('Accueil – entrée', 'androidtv', 'acc'), S('Accueil – ascenseurs', 'androidtv', 'acc', { pend: true }), S('Totem accueil', 'android', 'cal', { port: true })] },
+    { id: 'lau-mur', n: 'Mur du hall', wall: [2, 2], pl: 'evt', s: [S('Hall 1', 'windows', 'evt'), S('Hall 2', 'windows', 'evt'), S('Hall 3', 'windows', 'evt', { st: 'off', off: '25 min' }), S('Hall 4', 'windows', 'evt')] },
+    { id: 'lau-caf', n: 'Cafétéria', s: [S('Cafétéria – caisse', 'androidtv', 'menu'), S('Cafétéria – salle', 'androidtv', 'menu', { zones: [['menu', .7], ['actu', .3]] })] }
+  ] },
+  { id: 'gen', n: 'Genève', zones: [
+    { id: 'gen-acc', n: 'Accueil', s: [S('Réception', 'androidtv', 'bien'), S('Salle d\'attente', 'android', 'actu', { pend: true })] },
+    { id: 'gen-conf', n: 'Salle de conférence', s: [S('Salle Léman', 'windows', 'secu', { st: 'off', off: '3 h' })] }
+  ] },
+  { id: 'fri', n: 'Fribourg', zones: [
+    { id: 'fri-def', n: 'Défaut', s: [S('Entrée principale', 'androidtv', 'bien'), S('Couloir 1er étage', 'androidtv', 'actu')] }
+  ] },
+  { id: 'neu', n: 'Neuchâtel', zones: [
+    { id: 'neu-acc', n: 'Accueil', s: [S('Hall d\'entrée', 'androidtv', 'acc')] },
+    { id: 'neu-cou', n: 'Couloirs', s: [S('Couloir nord', 'android', 'actu', { st: 'off', off: '2 j' }), S('Couloir sud', 'android', 'actu')] }
+  ] },
+  { id: 'sio', n: 'Sion', zones: [
+    { id: 'sio-def', n: 'Défaut', s: [S('Hall', 'androidtv', 'bien', { st: 'sleep' }), S('Espace détente', 'androidtv', 'nat'), S('Vitrine rue', 'android', 'aff', { port: true, pend: true })] }
+  ] },
+  { id: 'yve', n: 'Yverdon', zones: [
+    { id: 'yve-acc', n: 'Accueil', s: [S('Comptoir', 'androidtv', 'promo'), S('Entrée', 'web', 'bien')] },
+    { id: 'yve-ate', n: 'Atelier', s: [S('Atelier – sécurité', 'android', 'secu', { st: 'pause' })] }
+  ] },
+  { id: 'mon', n: 'Montreux', zones: [
+    { id: 'mon-def', n: 'Défaut', s: [S('Réception', 'androidtv', 'bien'), S('Terrasse', 'androidtv', 'promo')] }
+  ] },
+  { id: 'bie', n: 'Bienne', zones: [
+    { id: 'bie-acc', n: 'Accueil', sync: true, s: [S('Accueil gauche', 'androidtv', 'acc'), S('Accueil droite', 'androidtv', 'acc')] },
+    { id: 'bie-show', n: 'Showroom', s: [S('Showroom – entrée', 'androidtv', 'promo', { pend: true }), S('Showroom – fond', 'androidtv', 'promo'), S('Showroom vitrine', null, 'aff', { st: 'off', off: null, port: true })] }
+  ] }
+];
+AREAS.forEach(a => a.zones.forEach(z => z.s.forEach(s => { s.area = a; s.zone = z; })));
+const ALL = AREAS.flatMap(a => a.zones.flatMap(z => z.s));
+
+/* ---------- état d'un écran ---------- */
+const isOff = s => s.st === 'off';
+const dotCls = s => s.st === 'off' ? 'hors-ligne' : s.st === 'sleep' ? 'veille' : s.st === 'pause' ? 'pause' : 'en-ligne';
+const stateText = s => s.st === 'off' ? (s.off ? 'Hors ligne depuis ' + s.off : 'Jamais connecté') : s.st === 'sleep' ? 'En veille · réveil 07:00' : s.st === 'pause' ? 'En pause · reprise 14:30' : 'En ligne';
+const plName = s => s.zones ? s.zones.map(z => PL[z[0]][0]).join(' · ') + ' · ' + s.zones.length + ' zones' : PL[s.pl][0];
+const count = list => ({ n: list.length, on: list.filter(s => s.st === 'on').length, off: list.filter(isOff).length, sleep: list.filter(s => s.st === 'sleep' || s.st === 'pause').length, pend: list.filter(s => s.pend).length });
+const areaScreens = a => a.zones.flatMap(z => z.s);
+
+/* aperçu (sc-zones / pause / veille), comme dans Screens.razor */
+function preview(s) {
+  if (s.st === 'sleep') return `<span class="sc-pause-art sc-sleep-art"><small>Écran éteint</small></span>`;
+  if (s.st === 'pause') return `<span class="sc-pause-art"><b>☕</b><small>Petite pause</small></span>`;
+  const zs = s.zones || [[s.pl, 1]];
+  if (!s.dev && isOff(s)) return `<span class="sc-zones dir-row"><span class="sc-zone" style="flex:1 1 0"><span class="sc-empty">${PL[s.pl][0]}</span></span></span>`;
+  return `<span class="sc-zones ${s.port ? 'dir-col' : 'dir-row'}">${zs.map(z => `<span class="sc-zone" style="flex:${z[1]} 1 0"><img src="${TH(PL[z[0]][1])}" alt="" loading="lazy"></span>`).join('')}</span>`;
+}
+function wallFrame(z) {
+  const [c, r] = z.wall;
+  return `<div class="gc-frame">${z.s.map((s, i) => { const cx = i % c, cy = Math.floor(i / c);
+    return `<button type="button" class="gc-tile ${isOff(s) ? 'off' : ''}"><span class="wc-img" style="width:${c * 100}%;height:${r * 100}%;left:-${cx * 100}%;top:-${cy * 100}%"><img src="${TH(PL[z.pl][1])}" alt=""></span><span class="gc-tn">${i + 1}</span>${isOff(s) ? '<span class="gc-toff">Hors ligne</span>' : ''}</button>`; }).join('')}</div>`;
+}
+const wallAr = z => (z.wall[0] * 16 / (z.wall[1] * 9)).toFixed(4);
+
+/* ---------- cartes actuelles (balisage de Screens.razor) ---------- */
+function plRow(name) {
+  return `<div class="gc-sel">${ico('playbox', 16)}<select aria-label="Liste de lecture"><option>${name}</option><option>— Aucune liste de lecture —</option></select><span class="gc-chev">${ico('chevron', 14)}</span></div>
+  <div class="sc-live gc-live" role="group"><button type="button" class="act" aria-label="Aperçu">${ico('eye', 16)}</button><button type="button" class="act" aria-label="Pause">${ico('pause', 16)}</button></div>`;
+}
+function fullCard(s, showZone = true) {
+  const off = isOff(s), cls = s.st === 'sleep' ? 'sleep' : s.st === 'pause' ? 'warn' : off ? 'bad' : 'ok';
+  const lbl = s.st === 'on' ? 'En ligne' : stateText(s);
+  return `<div class="pl-card gc ${off ? 'is-off' : ''} ${s.st === 'on' ? 'is-on' : ''} ${s.st === 'pause' ? 'is-paused' : ''}">
+  <div class="gc-top">
+    <div class="gc-stage"><div class="gc-mon ${s.port ? 'portrait' : ''}">${preview(s)}</div><button type="button" class="gc-hit" tabindex="-1"></button>
+      <span class="gc-pill ${off ? 'off' : ''}"><span class="gc-d ${cls}"></span>${lbl}</span>
+      ${s.pend ? `<span class="gc-pills-r"><span class="gc-pill warn">À publier</span></span>` : ''}</div>
+    <input type="checkbox" class="sc-check" aria-label="Sélectionner ${s.n}">
+    <div class="kebab"><button type="button" class="kebab-btn" aria-label="Actions">${ico('dots', 18)}</button></div>
+    <div class="gc-ctl">${plRow(plName(s))}</div>
+  </div>
+  <div class="gc-body">
+    <div class="gc-name"><button type="button" class="gc-nm linklike-name">${s.n}</button>${devLogo(s, 20)}</div>
+    <div class="gc-sub">${s.dev ? `<b>${OS[s.dev]}</b> <span class="sep">·</span> App <span class="mono">1.144.0</span>` : '<span>En attente des informations de l\'écran</span>'}<span class="sep"> · </span><span class="gc-pl">${ico('playbox', 13)} ${plName(s)}</span></div>
+    <div class="gc-chips">${showZone ? `<span class="gc-chip">${s.zone.n}</span>` : ''}${s.zone.sync ? `<span class="gc-chip sync">${ico('link', 12)} Synchronisé</span>` : ''}</div>
+  </div>
+</div>`;
+}
+function wallCard(z) {
+  const c = count(z.s), full = c.off === 0;
+  return `<div class="pl-card gc gc-wall" style="--cols:${z.wall[0]};--rows:${z.wall[1]};--ar:${wallAr(z)}" role="group">
+  <div class="gc-top">
+    <div class="gc-stage">${wallFrame(z)}<button type="button" class="gc-hit" tabindex="-1"></button>
+      <span class="gc-pill gc-apponly"><span class="gc-d ${full ? 'ok' : 'warn'}"></span>${full ? `${c.n} sur ${c.n} en ligne` : `Mur incomplet · ${c.n - c.off} sur ${c.n}`}</span></div>
+    <input type="checkbox" class="sc-check">
+    <div class="kebab"><button type="button" class="kebab-btn">${ico('dots', 18)}</button></div>
+    <div class="gc-anchor gc-wchip"><button type="button" class="gc-chip btn-chip">${z.s.map(s => `<span class="sc-dot ${dotCls(s)}"></span>`).join('')}<span>${z.s.length} écrans</span> ${ico('chevron', 12)}</button></div>
+    <div class="gc-ctl">${plRow(PL[z.pl][0])}</div>
+  </div>
+  <div class="gc-body">
+    <div class="gc-name"><button type="button" class="gc-nm linklike-name">${z.n}</button><span class="gc-ico">${ico('grid', 18)}</span></div>
+    <div class="gc-sub">Mur d'écrans ${z.wall[0]} × ${z.wall[1]}<span class="sep"> · </span><span class="gc-pl">${ico('playbox', 13)} ${PL[z.pl][0]}</span></div>
+  </div>
+</div>`;
+}
+function lightCard(s) {
+  const off = isOff(s);
+  return `<div class="pl-card gc gc-light ${off ? 'is-off' : 'is-on'}" role="button" tabindex="0">
+  <div class="gc-top"><div class="gc-stage"><div class="gc-mon ${s.port ? 'portrait' : ''}">${preview(s)}</div>
+    <span class="gc-pill ${off ? 'off' : ''}"><span class="gc-d ${off ? 'bad' : 'ok'}"></span>${off ? stateText(s) : 'En ligne'}</span></div></div>
+  <div class="gc-body">
+    <div class="gc-name"><span class="gc-nm">${s.n}</span>${devLogo(s, 20)}</div>
+    <div class="gc-area">${ico('pin', 13)} ${s.area.n}</div>
+    <div class="gc-sub">${s.dev ? `<b>${OS[s.dev]}</b>` : '<span>En attente des informations de l\'écran</span>'}</div>
+    <div class="gc-plrow"><div class="gc-sel">${ico('playbox', 16)}<span class="gc-selro">${plName(s)}</span></div></div>
+  </div>
+</div>`;
+}
+function zoneCards(z, showZone) { return z.wall ? wallCard(z) : z.s.map(s => fullCard(s, showZone)).join(''); }
+
+/* ---------- vue actuelle : grille à plat ---------- */
+function viewCards() {
+  const own = AREAS.find(a => a.own), others = AREAS.filter(a => !a.own);
+  return `<div class="pl-grid">${own.zones.map(z => zoneCards(z, true)).join('')}${others.flatMap(a => areaScreens(a)).map(lightCard).join('')}</div>`;
+}
+
+/* ---------- proposition : Arborescence ---------- */
+const ui = { sel: { a: null, z: null }, dens: 'tiles', filt: null, open: new Set(['lau']), closed: new Set(), q: '' };
+const match = s => (!ui.q || (s.n + ' ' + s.zone.n + ' ' + s.area.n).toLowerCase().includes(ui.q)) &&
+  (!ui.filt || (ui.filt === 'off' ? isOff(s) : ui.filt === 'pend' ? s.pend : ui.filt === 'sleep' ? (s.st === 'sleep' || s.st === 'pause') : ui.filt === 'on' ? s.st === 'on' : true));
+
+function tree() {
+  const t = count(ALL);
+  return `<nav class="tr-tree" aria-label="Aires et zones">
+  <h5>Aires de gestion · ${AREAS.length}</h5>
+  <button type="button" class="tr-node root ${!ui.sel.a ? 'on' : ''}" data-sel="">${ico('layers', 16)}<span class="lbl">Toutes les aires</span>${t.off ? `<span class="bad" title="Hors ligne">${t.off}</span>` : ''}<span class="n">${t.n}</span></button>
+  <div class="tr-sep"></div>
+  ${AREAS.map(a => { const c = count(areaScreens(a)), op = ui.open.has(a.id);
+    return `<button type="button" class="tr-node ${op ? 'open' : ''} ${ui.sel.a === a.id && !ui.sel.z ? 'on' : ''}" data-sel="${a.id}"><span class="tw" data-tw="${a.id}">${ico('chevron', 14)}</span><span class="lbl">${a.n}</span>${a.own ? '<span class="open-tag" title="Aire ouverte dans le back-office">ouverte</span>' : ''}${c.pend ? '<span class="pdot" title="Modifications à publier"></span>' : ''}${c.off ? `<span class="bad" title="Hors ligne">${c.off}</span>` : ''}<span class="n">${c.n}</span></button>
+    ${op ? `<div class="tr-kids">${a.zones.map(z => { const zc = count(z.s);
+      return `<button type="button" class="tr-node ${ui.sel.z === z.id ? 'on' : ''}" data-sel="${a.id}" data-z="${z.id}">${ico(z.wall ? 'grid' : 'box', 14)}<span class="lbl">${z.n}</span>${zc.off ? `<span class="bad">${zc.off}</span>` : ''}<span class="n">${zc.n}</span></button>`; }).join('')}</div>` : ''}`; }).join('')}
+  <div class="tr-sep"></div>
+  <div class="tr-foot"><button type="button" class="linklike" data-all="open">Tout déplier</button> · <button type="button" class="linklike" data-all="close">Tout replier</button></div>
+</nav>`;
+}
+function kpis(list) {
+  const c = count(list);
+  const k = (f, n, lbl, dot, cls = '') => `<button type="button" class="tr-kpi ${cls} ${ui.filt === f ? 'on' : ''}" data-f="${f}"><b>${n}</b><small>${dot}${lbl}</small></button>`;
+  return `<div class="tr-kpis">${k('', c.n, 'Écrans', ico('layers', 13))}${k('on', c.on, 'En ligne', '<span class="sc-dot en-ligne"></span>')}${k('off', c.off, 'Hors ligne', '<span class="sc-dot hors-ligne"></span>', c.off ? 'danger' : '')}${k('sleep', c.sleep, 'En veille ou en pause', '<span class="gd-sleep"></span>')}${k('pend', c.pend, 'À publier', '<span class="sc-dot mise-a-jour"></span>', c.pend ? 'warn' : '')}</div>`;
+}
+function tile(s) {
+  const ln = s.st === 'off' ? `<div class="ln bad">${stateText(s)}</div>` : s.st !== 'on' ? `<div class="ln sl">${ico(s.st === 'sleep' ? 'moon' : 'pause', 12)}<span>${stateText(s)}</span></div>` : `<div class="ln">${ico('playbox', 12)}<span>${plName(s)}</span></div>`;
+  return `<div class="tr-tile ${isOff(s) ? 'is-off' : ''}" title="Paramètres de l'écran « ${s.n} »${s.area.own ? '' : ' (ouvre l\'aire ' + s.area.n + ')'}"><div class="th"><input type="checkbox" class="sc-check ck" aria-label="Sélectionner ${s.n}"><div class="gc-mon ${s.port ? 'portrait' : ''}">${preview(s)}</div>${s.pend ? '<span class="tp">À publier</span>' : ''}</div>
+  <div class="tb"><div class="nm"><span class="sc-dot ${dotCls(s)}"></span><span class="t">${s.n}</span>${devLogo(s, 16)}</div>${ln}</div></div>`;
+}
+function wallTile(z) {
+  const c = count(z.s);
+  return `<div class="tr-tile wall ${c.off === z.s.length ? 'is-off' : ''}" style="--cols:${z.wall[0]};--rows:${z.wall[1]};--ar:${wallAr(z)}"><div class="th">${wallFrame(z)}</div>
+  <div class="tb"><div class="nm"><span class="sc-dot ${c.off ? 'mise-a-jour' : 'en-ligne'}"></span><span class="t">${z.n}</span><span class="wl">${z.wall[0]} × ${z.wall[1]}</span></div><div class="ln ${c.off ? 'bad' : ''}">${c.off ? `Mur incomplet · ${c.n - c.off} sur ${c.n} en ligne` : ico('playbox', 12) + '<span>' + PL[z.pl][0] + '</span>'}</div></div></div>`;
+}
+function row(s, sub) {
+  return `<div class="tr-row ${sub ? 'sub' : ''}"><span class="sc-dot ${dotCls(s)}"></span><span class="nm">${s.n}</span><span class="mu">${devLogo(s, 16)}${s.dev ? OS[s.dev] : 'En attente'}</span><span class="mu">${ico('playbox', 13)}${plName(s)}</span><span class="mu ${isOff(s) ? 'bad' : ''}">${stateText(s)}</span>${s.pend ? '<span class="tp">À publier</span>' : '<span></span>'}<span class="go">${ico('right', 16)}</span></div>`;
+}
+function wallRow(z) {
+  const c = count(z.s);
+  return `<div class="tr-row wall"><span class="sc-dot ${c.off ? 'mise-a-jour' : 'en-ligne'}"></span><span class="nm">${z.n}<small>Mur ${z.wall[0]} × ${z.wall[1]}</small></span><span class="mu">${ico('grid', 14)} ${c.n} écrans</span><span class="mu">${ico('playbox', 13)}${PL[z.pl][0]}</span><span class="mu ${c.off ? 'bad' : ''}">${c.off ? `Incomplet · ${c.n - c.off} sur ${c.n}` : 'En ligne'}</span><span></span><span class="go">${ico('chevron', 16)}</span></div>` + z.s.filter(match).map(s => row(s, true)).join('');
+}
+function zoneBlock(z) {
+  const list = z.s.filter(match);
+  if (!list.length) return '';
+  const body = ui.dens === 'rows' ? `<div class="tr-rows">${z.wall ? wallRow(z) : list.map(s => row(s)).join('')}</div>`
+    : `<div class="tr-tiles">${z.wall ? wallTile(z) : list.map(tile).join('')}</div>`;
+  return `<div class="tr-zg"><div class="tr-zh">${ico(z.wall ? 'grid' : 'box', 13)} ${z.n} <span class="cnt">· ${z.s.length} écran${z.s.length > 1 ? 's' : ''}</span>${z.sync ? `<span class="sy">${ico('link', 12)} synchronisée</span>` : ''}<span class="grow"></span></div>${body}</div>`;
+}
+function areaSection(a) {
+  const scr = areaScreens(a), c = count(scr), hits = scr.filter(match);
+  const calm = ui.filt && !hits.length;
+  const closed = calm || ui.closed.has(a.id);
+  return `<section class="tr-area ${closed ? 'closed' : ''} ${calm ? 'calm' : ''}" data-a="${a.id}">
+  <header class="tr-ah">
+    <button type="button" class="tr-tg" data-fold="${a.id}" aria-expanded="${!closed}">${ico('chevron', 16)}</button>
+    <span class="ap">${ico('pin', 16)}</span>
+    <h2><button type="button" data-sel="${a.id}">${a.n}</button></h2>
+    ${a.own ? '<span class="lx-chip">Aire ouverte</span>' : ''}
+    <span class="tr-sum">${calm ? '<span>Rien à signaler</span>' : `<span>${c.n} écran${c.n > 1 ? 's' : ''}</span><span><span class="sc-dot en-ligne"></span>${c.on} en ligne</span>${c.off ? `<span class="bad">${c.off} hors ligne</span>` : ''}${c.pend ? `<span class="pend">${c.pend} à publier</span>` : ''}`}</span>
+    <span class="grow"></span>
+    ${!calm && c.pend ? `<button type="button" class="btn ghost sm">${ico('upload', 14)} Publier (${c.pend})</button>` : ''}
+    ${calm ? '' : `<button type="button" class="tb-btn" data-sel="${a.id}">Détail ${ico('arrow', 14)}</button>`}
+  </header>
+  ${closed ? '' : `<div class="tr-zones ${ui.dens}">${a.zones.map(zoneBlock).join('')}</div>`}
+</section>`;
+}
+function paneAll() {
+  const list = ALL.filter(match);
+  return `<div class="tr-crumb"><b>Toutes les aires</b><span>· ${AREAS.length} aires · ${AREAS.reduce((n, a) => n + a.zones.length, 0)} zones</span></div>
+  ${kpis(ALL)}
+  <div class="tr-tools"><span>${ui.filt ? `${list.length} écran${list.length > 1 ? 's' : ''} correspondant${list.length > 1 ? 's' : ''} · <button type="button" class="linklike" data-f="">Tout afficher</button>` : 'Groupés par aire puis par zone. Cliquez sur une aire pour la déplier dans l\'arbre.'}</span><span class="grow"></span>
+    <div class="seg" role="group" aria-label="Densité"><button type="button" data-d="tiles" class="${ui.dens === 'tiles' ? 'on' : ''}">${ico('grid', 14)} Vignettes</button><button type="button" data-d="rows" class="${ui.dens === 'rows' ? 'on' : ''}">${ico('menu', 14)} Lignes</button></div></div>
+  ${AREAS.map(areaSection).join('')}`;
+}
+function paneArea(a, zid) {
+  const zs = zid ? a.zones.filter(z => z.id === zid) : a.zones, scr = zs.flatMap(z => z.s), c = count(scr);
+  const zz = zid && zs[0];
+  return `<div class="tr-crumb"><button type="button" data-sel="">Toutes les aires</button>${ico('right', 13)}${zz ? `<button type="button" data-sel="${a.id}">${a.n}</button>${ico('right', 13)}<b>${zz.n}</b>` : `<b>${a.n}</b>`}</div>
+  <div class="tr-head"><h2>${ico(zz ? (zz.wall ? 'grid' : 'box') : 'pin', 20)} ${zz ? zz.n : a.n}</h2>${a.own ? '<span class="lx-chip">Aire ouverte</span>' : '<span class="lx-chip" title="Modifier un écran ouvre cette aire">Autre aire</span>'}
+    <span class="tr-sum"><span>${c.n} écran${c.n > 1 ? 's' : ''}</span><span><span class="sc-dot en-ligne"></span>${c.on} en ligne</span>${c.off ? `<span class="bad">${c.off} hors ligne</span>` : ''}${c.pend ? `<span class="pend">${c.pend} à publier</span>` : ''}</span>
+    <span class="grow"></span>
+    <a class="tb-btn">${ico('calendar', 14)} Planning</a>${c.pend ? `<button type="button" class="btn sm">${ico('upload', 14)} Publier (${c.pend})</button>` : ''}
+    <div class="kebab"><button type="button" class="kebab-btn">${ico('dots', 18)}</button></div></div>
+  ${zs.map(z => { const list = z.s.filter(match); if (!list.length) return '';
+    return `<section class="tr-zsec">${zz ? '' : `<div class="zline"><span><b>${z.n}</b> · ${z.wall ? `mur d'écrans ${z.wall[0]} × ${z.wall[1]}` : 'zone libre'} · ${z.s.length} écran${z.s.length > 1 ? 's' : ''}</span>${z.sync ? `<span class="zstate sync">${ico('link', 13)} Lecture synchronisée</span>` : ''}<div class="grow"></div><button type="button" class="linklike" data-sel="${a.id}" data-z="${z.id}">Voir la zone seule</button></div>`}
+    <div class="pl-grid tr-grid">${zoneCards(z, false)}</div></section>`; }).join('') || '<div class="tr-empty">Aucun écran ne correspond.</div>'}`;
+}
+function viewTree() {
+  const a = AREAS.find(x => x.id === ui.sel.a);
+  return `<div class="tr-wrap">${tree()}<div class="tr-pane">${a ? paneArea(a, ui.sel.z) : paneAll()}</div></div>`;
+}
+
+/* ---------- textes de la maquette ---------- */
+const NOTES = {
+  cartes: "<b>Aujourd'hui</b> : les 30 écrans des 8 aires à plat. L'aire ouverte (Lausanne) a ses cartes complètes, les 21 autres écrans suivent en cartes de consultation, sans regroupement : on ne voit plus ni les aires ni les zones, ni où sont les problèmes.",
+  arbre: "<b>Proposition, mode Expert</b> : 3ᵉ affichage « Arborescence » (icône ⊤ dans la bascule). Arbre aires › zones à gauche (nombre d'écrans, hors ligne en rouge, point orange = à publier), compteurs cliquables en haut, puis une section repliable par aire avec des vignettes compactes rangées par zone. Proposé d'office au-delà de 10 écrans ; Cartes et Liste restent là.",
+  lignes: "<b>Arborescence en lignes</b> : même regroupement, une ligne par écran (état, appareil, liste de lecture). Un mur tient sur une ligne, ses écrans en dessous. Pratique à 50 ou 100 écrans.",
+  aire: "<b>Une aire choisie dans l'arbre</b> : on retrouve les cartes complètes habituelles (liste de lecture, aperçu, pause, menu ⋯), rangées par zone, avec Publier et Planning de l'aire. Pour une autre aire que celle ouverte, un clic sur l'écran ouvre son aire (comme aujourd'hui).",
+  surveiller: "<b>Compteur « Hors ligne » cliqué</b> : seuls les écrans concernés restent, les aires sans problème se replient en une ligne « Rien à signaler ». Idem pour « À publier » ou « En veille »."
+};
+
+/* ---------- rendu et interactions ---------- */
+let mode = 'arbre';
+function render() {
+  document.getElementById('view').innerHTML = mode === 'cartes' ? viewCards() : viewTree();
+  document.querySelectorAll('.view-toggle button').forEach(b => b.classList.toggle('on', b.dataset.v === (mode === 'cartes' ? 'cartes' : 'arbre')));
+}
+function go(st) {
+  document.querySelectorAll('.mq-bar button').forEach(b => b.classList.toggle('on', b.dataset.st === st));
+  document.getElementById('note').innerHTML = NOTES[st];
+  mode = st === 'cartes' ? 'cartes' : 'arbre';
+  ui.dens = st === 'lignes' ? 'rows' : 'tiles';
+  ui.filt = st === 'surveiller' ? 'off' : null;
+  ui.sel = st === 'aire' ? { a: 'gen', z: null } : { a: null, z: null };
+  if (st === 'aire') ui.open.add('gen');
+  ui.closed.clear();
+  render();
+  window.scrollTo(0, 0);
+}
+document.querySelectorAll('[data-st]').forEach(b => b.onclick = () => go(b.dataset.st));
+document.querySelector('.view-toggle').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.v === 'cartes') go('cartes'); else if (b.dataset.v === 'arbre') go('arbre');
+});
+document.getElementById('q').addEventListener('input', e => { ui.q = e.target.value.trim().toLowerCase(); if (mode !== 'cartes') render(); });
+document.getElementById('view').addEventListener('click', e => {
+  const tw = e.target.closest('[data-tw]');
+  if (tw) { const id = tw.dataset.tw; ui.open.has(id) ? ui.open.delete(id) : ui.open.add(id); render(); return; }
+  const fold = e.target.closest('[data-fold]');
+  if (fold) { const id = fold.dataset.fold; ui.closed.has(id) ? ui.closed.delete(id) : ui.closed.add(id); if (ui.filt) ui.filt = null; render(); return; }
+  const all = e.target.closest('[data-all]');
+  if (all) { AREAS.forEach(a => all.dataset.all === 'open' ? (ui.open.add(a.id), ui.closed.delete(a.id)) : (ui.open.delete(a.id), ui.closed.add(a.id))); render(); return; }
+  const f = e.target.closest('[data-f]');
+  if (f) { ui.filt = ui.filt === f.dataset.f || !f.dataset.f ? null : f.dataset.f; render(); return; }
+  const d = e.target.closest('[data-d]');
+  if (d) { ui.dens = d.dataset.d; render(); return; }
+  const s = e.target.closest('[data-sel]');
+  if (s) { ui.sel = { a: s.dataset.sel || null, z: s.dataset.z || null }; if (ui.sel.a) ui.open.add(ui.sel.a); render(); window.scrollTo(0, 0); }
+});
+paintIcons();
+const st0 = new URLSearchParams(location.search).get('etat');
+go(NOTES[st0] ? st0 : 'arbre');
+</script>
+</body></html>

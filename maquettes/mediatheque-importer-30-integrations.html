@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Médiathèque — tiroir Importer avec 30 intégrations</title>
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--row:#EDF1F5;--signal:#3B82C4;--signal-bg:#E4EFF9;--signal-ink:#1F4E7E;--ok:#1E8E5A;--warn-bg:#FFF4E0;--warn-ink:#8A5A00}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 "IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);padding:32px}
+h1{font-size:22px;font-weight:500;margin:0 0 4px}
+h2{font-size:13px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:40px 0 12px}
+.lead,.note{color:var(--muted);max-width:900px}.note{font-size:14px;margin:10px 0 0}
+.cap{font-size:12px;color:var(--muted);margin:0 0 6px}
+/* « page » derrière le tiroir */
+.stage{position:relative;width:min(1100px,100%);height:760px;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.stage .back{position:absolute;inset:0;background:var(--bg);padding:26px 30px;color:var(--muted)}
+.stage .back b{display:block;font-size:22px;color:var(--ink);font-weight:500}
+.stage .veil{position:absolute;inset:0;background:rgba(11,31,58,.45)}
+/* tiroir du bas : même largeur que l'assistant d'ajout d'intégration (1040 px) */
+.drawer{position:absolute;left:50%;transform:translateX(-50%);bottom:0;width:min(1040px,calc(100% - 32px));max-height:92%;background:#fff;border:1px solid var(--line-2);border-bottom:0;border-radius:6px 6px 0 0;box-shadow:0 -10px 30px rgba(11,31,58,.22);display:flex;flex-direction:column}
+.dh{display:flex;align-items:center;gap:12px;padding:16px 24px 10px}
+.dh h3{margin:0;flex:1;font-size:18px;font-weight:500}
+.x{width:30px;height:30px;border:1px solid var(--line-2);border-radius:6px;display:grid;place-items:center;color:var(--muted)}
+.db{padding:0 24px;overflow:auto;min-height:0}
+.drop{border:2px dashed var(--line-2);border-radius:10px;background:var(--bg);padding:16px 20px;text-align:center}
+.drop b{font-weight:500;font-size:14.5px}.drop u{color:var(--signal);text-decoration:none}
+.drop small{display:block;color:var(--muted);font-size:12px;margin-top:4px}
+.url{display:flex;gap:10px;margin-top:10px}
+.url input{flex:1;font:inherit;font-size:14px;padding:9px 12px;border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--muted)}
+.btn{font:inherit;font-size:14px;padding:8px 16px;border:1px solid var(--line-2);border-radius:6px;background:#fff;color:var(--ink)}
+.btn.off{color:var(--muted);background:var(--row)}
+/* section cloud : en-tête collant (recherche + filtres), puis la grille qui défile */
+.cloud{margin-top:16px;border-top:1px solid var(--line)}
+.ch{position:sticky;top:0;background:#fff;padding:12px 0 10px;z-index:2;border-bottom:1px solid var(--row)}
+.ch .row1{display:flex;align-items:center;gap:12px}
+.ch h4{margin:0;font-size:14px;font-weight:500;white-space:nowrap}.ch h4 small{color:var(--muted);font-weight:400;margin-left:4px}
+.search{flex:1;display:flex;align-items:center;gap:8px;border:1px solid var(--line-2);border-radius:6px;padding:7px 10px;color:var(--muted);font-size:14px;background:#fff}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.chip{font-size:13px;border:1px solid var(--line-2);border-radius:99px;padding:2px 12px;background:#fff;color:var(--ink)}
+.chip.on{background:var(--ink);border-color:var(--ink);color:#fff}.chip small{opacity:.7;margin-left:3px}
+.hint{color:var(--muted);font-size:12.5px;margin:10px 0 0}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,124px);gap:12px;padding:14px 0 18px}
+.tile{position:relative;aspect-ratio:1/1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;padding:8px;border:1px solid var(--line-2);border-radius:12px;background:#fff;text-align:center;font-size:12.5px;font-weight:500;line-height:1.2}
+.tile .ic{width:38px;height:38px;border-radius:9px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:15px}
+.tile small{display:block;font-weight:400;color:var(--muted);font-size:11px;margin-top:2px}
+.tile.dim{background:var(--row);color:var(--muted)}.tile.dim .ic{filter:grayscale(1);opacity:.6}
+.tile .ok{position:absolute;right:8px;top:8px;width:8px;height:8px;border-radius:50%;background:var(--ok)}
+.tile .bd{position:absolute;right:5px;top:5px;font-size:9.5px;font-weight:600;border-radius:99px;padding:0 6px;background:var(--warn-bg);color:var(--warn-ink)}
+.tile.sel{border-color:var(--signal);box-shadow:0 0 0 2px var(--signal-bg)}
+.fade{position:sticky;bottom:0;height:18px;margin-top:-18px;background:linear-gradient(transparent,#fff);pointer-events:none}
+.df{display:flex;justify-content:space-between;align-items:center;padding:12px 24px 14px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+.grp{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:16px 0 0}
+.grp small{text-transform:none;letter-spacing:0;font-weight:400}
+ul.ch2{margin:0;padding-left:18px;max-width:900px;font-size:14px}ul.ch2 li{margin:5px 0}
+.q{background:var(--signal-bg);color:var(--signal-ink);border-radius:8px;padding:12px 16px;max-width:900px;font-size:14px}.q li{margin:6px 0}
+</style></head><body>
+
+<h1>Tiroir « Importer » avec 30 intégrations</h1>
+<p class="lead">Avec quatre tuiles tout tient d'un coup d'œil ; à trente, la section cloud doit se chercher et se filtrer sans repousser la zone de dépôt hors de l'écran. Les noms et logos ci-dessous sont des exemples (pictogrammes de remplacement).</p>
+
+<h2>1 · Proposition : grille qui défile, recherche et filtres collés en haut de la section</h2>
+<div class="stage">
+  <div class="back"><b>Médiathèque</b>7 médias · 9,22 Mo</div>
+  <div class="veil"></div>
+  <div class="drawer">
+    <div class="dh"><h3>Importer</h3><span class="x">×</span></div>
+    <div class="db">
+      <div class="drop"><b>Glissez-déposez vos images, vidéos et documents ici ou <u>parcourez votre ordinateur</u></b>
+        <small>Images JPG, PNG, GIF, WEBP, SVG · vidéos MP4, MOV, AVI, MKV… · documents PowerPoint, PDF, Word, Excel · 2 Go maximum par fichier</small></div>
+      <div class="url"><input value="Ou collez l'adresse d'une image ou d'une vidéo (https://…)" readonly><span class="btn off">🔗 Importer</span></div>
+
+      <div class="cloud">
+        <div class="ch">
+          <div class="row1"><h4>Depuis un compte cloud <small>30</small></h4><div class="search">🔍 Rechercher une intégration (OneDrive, Notion, Figma…)</div></div>
+          <div class="chips" id="chips"></div>
+        </div>
+        <div class="tiles" id="tiles"></div>
+        <div class="fade"></div>
+      </div>
+    </div>
+    <div class="df"><span>Les fichiers de l'ordinateur se déposent dans la zone du haut. Chaque page devient une image, rangée dans le dossier « …_médias » de l'intégration.</span><span class="btn">Fermer</span></div>
+  </div>
+</div>
+<p class="note">La zone de dépôt et le champ d'adresse restent fixes ; seule la section cloud défile (le tiroir ne dépasse jamais 92 % de la hauteur). Recherche, filtres et tuiles sont dans le même bloc : le texte tapé filtre aussitôt la grille et les compteurs des filtres.</p>
+
+<h2>2 · Les états d'une tuile</h2>
+<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start" id="states"></div>
+
+<h2>3 · Variante : tuiles groupées par famille (sans filtres)</h2>
+<div class="stage" style="height:640px">
+  <div class="back"><b>Médiathèque</b>7 médias · 9,22 Mo</div><div class="veil"></div>
+  <div class="drawer">
+    <div class="dh"><h3>Importer</h3><span class="x">×</span></div>
+    <div class="db">
+      <div class="drop"><b>Glissez-déposez vos images, vidéos et documents ici ou <u>parcourez votre ordinateur</u></b></div>
+      <div class="cloud">
+        <div class="ch"><div class="row1"><h4>Depuis un compte cloud <small>30</small></h4><div class="search">🔍 Rechercher une intégration</div></div></div>
+        <div id="grouped"></div>
+      </div>
+    </div>
+    <div class="df"><span></span><span class="btn">Fermer</span></div>
+  </div>
+</div>
+<p class="note">Plus lisible quand on parcourt sans chercher, mais plus long : cinq titres de famille et un défilement plus important.</p>
+
+<h2>Décisions à prendre</h2>
+<div class="q"><ul style="margin:0;padding-left:18px">
+<li><b>Taille des tuiles</b> : 168 px à quatre intégrations, 124 px ici pour tenir 7 par ligne (30 tuiles = 5 lignes). Garder 168 px (environ 6 lignes de 5, plus de défilement) ou 124 px ?</li>
+<li><b>Organisation</b> : grille unique avec filtres (proposition 1), ou groupes par famille (variante 3) ?</li>
+<li><b>Comptes non connectés</b> : les griser en fin de grille (connectés d'abord), ou garder l'ordre alphabétique ? Dans la maquette, les connectés passent en tête.</li>
+<li><b>Seuil</b> : recherche et filtres n'apparaissent qu'à partir de 8 intégrations ; en dessous, les quatre grosses tuiles de la maquette précédente.</li>
+</ul></div>
+
+<script>
+const all=[
+ // [nom, formats, famille, couleur, initiale, connecté]
+ ["OneDrive","PowerPoint, Word, Excel","Microsoft","#0F6CBD","O",1],["SharePoint","Bibliothèques","Microsoft","#038387","S",1],["Teams","Fichiers d'équipe","Microsoft","#5B5FC7","T",0],
+ ["Google Slides","","Google","#F4B400","S",1],["Google Docs","","Google","#4285F4","D",1],["Google Sheets","","Google","#0F9D58","X",1],["Google Drive","Fichiers PDF","Google","#34A853","G",1],
+ ["Dropbox","","Stockage","#0061FF","D",0],["Box","","Stockage","#0061D5","B",0],["Nextcloud","","Stockage","#0082C9","N",0],["iCloud Drive","","Stockage","#3693F3","i",0],["pCloud","","Stockage","#17BED0","p",0],["Mega","","Stockage","#D9272E","M",0],["Synology","","Stockage","#2F6EB5","S",0],["SFTP","","Stockage","#5A6B80","↔",0],
+ ["Canva","","Design","#7D2AE8","C",1],["Figma","","Design","#F24E1E","F",0],["Adobe Express","","Design","#EB1000","A",0],["Miro","","Design","#FFCB2B","M",0],["Lucidchart","","Design","#F96A2B","L",0],["Pitch","","Design","#1A1A1A","P",0],["Prezi","","Design","#3181FF","P",0],
+ ["Notion","","Documents","#2F3437","N",0],["Confluence","","Documents","#1868DB","C",0],["Evernote","","Documents","#00A82D","E",0],["Airtable","","Documents","#18BFFF","A",0],["Coda","","Documents","#F46A54","C",0],["Zoho Show","","Documents","#E42527","Z",0],["OnlyOffice","","Documents","#FF6F3D","O",0],["Collabora","","Documents","#6AA84F","C",0]
+];
+all.sort((a,b)=>b[5]-a[5]);   // connectés d'abord
+const fams=["Microsoft","Google","Stockage","Design","Documents"];
+const tile=(t,extra="")=>`<div class="tile ${t[5]?"":"dim"} ${extra}">${t[5]?'<span class="ok"></span>':'<span class="bd">À connecter</span>'}<span class="ic" style="background:${t[3]}">${t[4]}</span><span>${t[0]}${t[1]?`<small>${t[1]}</small>`:""}</span></div>`;
+document.getElementById("tiles").innerHTML=all.map(t=>tile(t)).join("");
+const count=f=>all.filter(t=>t[2]===f).length;
+document.getElementById("chips").innerHTML=`<span class="chip on">Toutes <small>${all.length}</small></span><span class="chip">Connectées <small>${all.filter(t=>t[5]).length}</small></span>`+fams.map(f=>`<span class="chip">${f} <small>${count(f)}</small></span>`).join("");
+document.getElementById("grouped").innerHTML=fams.map(f=>`<div class="grp">${f} <small>${count(f)}</small></div><div class="tiles" style="padding-top:10px">${all.filter(t=>t[2]===f).map(t=>tile(t)).join("")}</div>`).join("");
+document.getElementById("states").innerHTML=[["Connectée",all.find(t=>t[0]==="OneDrive"),""],["Non connectée",all.find(t=>t[0]==="Figma"),""],["Survolée / choisie",all.find(t=>t[0]==="Google Docs"),"sel"]].map(([c,t,x])=>`<div><p class="cap">${c}</p><div style="width:124px">${tile(t,x)}</div></div>`).join("")+`<p class="note" style="max-width:520px;margin:0">Point vert : compte connecté, un clic ouvre le sélecteur de fichiers du Drive. « À connecter » : un clic explique comment connecter le compte (Intégrations › Comptes connectés).</p>`;
+</script>
+</body></html>
