@@ -33,7 +33,9 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
     public record Connection(bool Connected, string User, DateTime? Since);
     public record Design(string Id, string Title, string? Thumbnail, int? Pages, DateTime? Updated, int? Width, int? Height);
     public record DesignPage(List<Design> Items, string? Continuation);
-    public record ExportResult(List<MediaItem> Files, string? Error);
+    /// <param name="Refreshed">Contenus Canva dont les pages viennent d'être remplacées par celles de la présentation refaite (écrans à prévenir).</param>
+    /// <param name="Reused">Présentation déjà dans la médiathèque et design inchangé : rien n'a été exporté.</param>
+    public record ExportResult(List<MediaItem> Files, string? Error, List<Guid>? Refreshed = null, bool Reused = false, Guid? Presentation = null);
 
     public class CanvaException(string message) : Exception(message);
 
@@ -245,6 +247,13 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
     {
         try
         {
+            // Design à plusieurs pages déjà dans la médiathèque et inchangé depuis (même date de modification) : réutilisé sans rien exporter.
+            var presKey = "canva:" + design.Id;
+            var stamp = Stamp(design);
+            var known = kind == "video" ? null : store.Read(d => d.Media.FirstOrDefault(m => m.ClientId == clientId && Pres.Is(m) && m.AreaId == (areaId ?? Guid.Empty) && m.Info.GetValueOrDefault("key") == presKey));
+            if (known != null && stamp.Length > 0 && known.Info.GetValueOrDefault("mod") == stamp && ExistingPages(known) is { Count: > 1 } kept)
+                return new(kept, null, null, true, known.Id);
+
             var portrait = design is { Width: > 0, Height: > 0 } && design.Height > design.Width;
             object format = kind == "video"
                 ? new { type = "mp4", quality = portrait ? "vertical_1080p" : "horizontal_1080p" }
@@ -294,13 +303,56 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
                 store.Write(d => { item.Name = name.Length > 120 ? name[..120] : name; item.Info["canva"] = design.Id; });
                 files.Add(item);
             }
+            // Plusieurs pages : elles forment une présentation de la médiathèque (créée, ou refaite si le design avait déjà été exporté ; ses contenus passent aux nouvelles pages).
+            List<Guid>? refreshed = null; Guid? presId = null;
+            if (kind != "video" && files.Count > 1) (refreshed, presId) = TagPresentation(clientId, areaId, design, stamp, files, known?.Id);
             PurgeUnused(clientId, design.Id, files.Select(f => f.Id).ToHashSet());
-            return new(files, null);
+            if (presId != null && known != null) Pres.PurgeStale(store, clientId, presId.Value);
+            return new(files, null, refreshed, false, presId);
         }
         catch (CanvaException ex) { return new(new(), ex.Message); }
         catch (HttpRequestException) { return new(new(), "Canva est injoignable. Vérifiez la connexion du serveur et réessayez."); }
         catch (KeyNotFoundException) { return new(new(), "Réponse de Canva inattendue."); }
     }
+
+    /// <summary>Pages de la présentation (dans l'ordre), telles que les contenus Canva les utilisent.</summary>
+    private List<MediaItem> ExistingPages(MediaItem pres) => store.Read(d =>
+    {
+        var gen = pres.Info.GetValueOrDefault("gen") ?? "1";
+        return d.Media.Where(m => Pres.IdOf(m) == pres.Id.ToString() && m.Info.GetValueOrDefault("gen") == gen && m.FileName != null && File.Exists(Path.Combine(AppPaths.MediaDir, m.FileName)))
+            .OrderBy(Pres.PageOf).ToList();
+    });
+
+    /// <summary>
+    /// Les pages exportées deviennent les images d'une présentation. Si le design avait déjà une présentation (<paramref name="existingId"/>), elle passe à une
+    /// nouvelle génération et les contenus Canva du même design reçoivent les nouvelles pages ; leurs identifiants sont rendus pour prévenir les écrans.
+    /// </summary>
+    private (List<Guid>? Refreshed, Guid? Presentation) TagPresentation(Guid clientId, Guid? areaId, Design design, string stamp, List<MediaItem> files, Guid? existingId) => store.Write(d =>
+    {
+        var pres = existingId == null ? null : d.Media.FirstOrDefault(m => m.Id == existingId && Pres.Is(m));
+        var gen = pres != null && int.TryParse(pres.Info.GetValueOrDefault("gen"), out var g) ? (g + 1).ToString() : "1";
+        var presId = pres?.Id ?? Guid.NewGuid();
+        for (var n = 0; n < files.Count; n++)
+        {
+            var f = files[n];
+            f.Info.Remove("canva");   // les pages sont celles de la présentation (jamais retirées avec un contenu)
+            f.Info["pres"] = presId.ToString(); f.Info["var"] = "none"; f.Info["pg"] = (n + 1).ToString(); f.Info["gen"] = gen;
+        }
+        if (pres == null)
+        {
+            var name = design.Title.Length > 120 ? design.Title[..120] : design.Title;
+            pres = new MediaItem { Id = presId, ClientId = clientId, AreaId = areaId ?? Guid.Empty, Name = name, Type = Pres.Type, AddedUtc = DateTime.UtcNow, Width = files[0].Width, Height = files[0].Height };
+            pres.Info["src"] = "canva";
+            d.Media.Add(pres);
+        }
+        pres.Info["key"] = "canva:" + design.Id; pres.Info["gen"] = gen; pres.Info["pages"] = files.Count.ToString(); pres.Info["synced"] = DateTime.UtcNow.ToString("o"); pres.Info["file"] = design.Title;
+        if (stamp.Length > 0) pres.Info["mod"] = stamp; else pres.Info.Remove("mod");
+        if (existingId == null) return ((List<Guid>?)null, (Guid?)presId);
+        var ids = string.Join(",", files.Select(f => f.Id));
+        var touched = d.Media.Where(m => m.ClientId == clientId && m.AppId == "canva" && m.Settings.GetValueOrDefault("design") == design.Id && m.Settings.GetValueOrDefault("kind") != "video").ToList();
+        foreach (var m in touched) m.Settings["pages"] = ids;
+        return (touched.Select(m => m.Id).ToList(), (Guid?)presId);
+    });
 
     /// <summary>
     /// Un nouvel export remplace les précédents du même design : ceux que rien n'utilise (export abandonné avant l'enregistrement,

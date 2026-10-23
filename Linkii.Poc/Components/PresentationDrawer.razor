@@ -1,0 +1,190 @@
+@inject MediaLibrary Library
+@inject CloudFileService Cloud
+@inject CanvaService Canva
+@inject Notifier Notify
+@inject TenantStore Store
+@inject Toaster Toast
+
+@* Tiroir d'une présentation de la médiathèque (§103, maquette mediatheque-presentations-uniques.html) : informations (diapositives, modifié le, converti le,
+   fichier, utilisation), diapositives dont on peut sortir une en image ordinaire, contenus qui l'utilisent ; en bas, mettre à jour et supprimer
+   (inactif tant qu'un contenu l'utilise). *@
+<div class="lx-drawer-veil" @onclick="OnClose"></div>
+<aside class="lx-drawer pr-drawer" role="dialog" aria-modal="false" aria-labelledby="prd-title">
+    <div class="pr-dh">
+        <span class="pr-lg @Src">@Letter</span>
+        <div class="pr-ti">
+            <h3 id="prd-title" title="@Item.Name">@Item.Name</h3>
+            <small>@SourceName@(Path.Length > 0 ? " · " + Path : "")</small>
+        </div>
+        <button type="button" class="kebab-btn" title="Fermer (Échap)" aria-label="Fermer" @onclick="OnClose"><Ico Name="x" Size="18" /></button>
+    </div>
+    <div class="db">
+        <div class="pr-sec">Informations</div>
+        <div class="pr-kv"><span>@(Src is "ppt" or "gslides" ? "Diapositives" : "Pages")</span><b>@Pages@(Pages > shown.Count ? $" ({shown.Count} affichées)" : "")</b></div>
+        @if (Modified is { } mod) { <div class="pr-kv"><span>Modifié le</span><b>@Fmt(mod)</b></div> }
+        @if (Synced is { } syn)
+        {
+            <div class="pr-kv"><span>Converti le</span><b>@Fmt(syn)@if (stale) { <text> · <span class="pr-warn">modifié depuis</span></text> } else if (checkedOk) { <text> · à jour</text> }</b></div>
+        }
+        @if (Item.Info.GetValueOrDefault("file") is { Length: > 0 } file) { <div class="pr-kv"><span>Fichier</span><b title="@file">@file</b></div> }
+        <div class="pr-kv"><span>Utilisation</span><b>@UseSummary</b></div>
+
+        <div class="pr-sec">@(Src is "ppt" or "gslides" ? "Diapositives" : "Pages") <small>Cliquez pour en sortir une en image</small></div>
+        @if (shown.Count == 0) { <p class="hint">Aucune image disponible : mettez la présentation à jour.</p> }
+        else
+        {
+            <div class="pr-slides">
+                @foreach (var s in shown)
+                {
+                    var pg = Pres.PageOf(s);
+                    <button type="button" class="pr-th @(selected == pg ? "on" : "")" aria-pressed="@(selected == pg ? "true" : "false")" aria-label="@Unit @pg" @onclick="() => selected = selected == pg ? null : pg">
+                        <img src="/media/@s.FileName?w=320" alt="" loading="lazy" decoding="async" />
+                        <span>@pg</span>
+                    </button>
+                }
+            </div>
+            @if (selected is { } sel)
+            {
+                <div class="pr-bar">
+                    <span class="grow">@(Src is "ppt" or "gslides" ? "Diapositive" : "Page") @sel sélectionnée</span>
+                    @if (CanEdit) { <button type="button" class="btn sm" disabled="@busy" @onclick="() => ToImage(sel)">Convertir en image</button> }
+                </div>
+            }
+        }
+
+        <div class="pr-sec">Utilisée par (@(uses?.Contents.Count ?? 0))</div>
+        @if (uses == null || uses.Contents.Count == 0) { <p class="hint" style="margin:0">Aucun contenu ne l'utilise : elle reste dans la médiathèque jusqu'à sa suppression.</p> }
+        else
+        {
+            @foreach (var c in uses.Contents)
+            {
+                <a class="pr-use" href="/apps/instance/@c.Id">
+                    <i class="lx-dot"></i><span class="grow">@c.Name</span>
+                    <small>@(c.Lists == 0 ? "dans aucune liste" : Count(c.Lists, "liste", "listes"))@(c.Screens > 0 ? " · " + Count(c.Screens, "écran", "écrans") : "")</small>
+                </a>
+            }
+        }
+        @if (error != null) { <div class="err" style="margin-top:12px">@error</div> }
+    </div>
+    <div class="df">
+        @if (CanRefresh) { <button type="button" class="btn sm" disabled="@busy" title="Convertir à nouveau la dernière version du fichier" @onclick="Refresh">@if (busy) { <span class="spinner"></span> } else { <Ico Name="refresh" Size="14" /> } Mettre à jour</button> }
+        <span class="grow"></span>
+        @if (CanEdit)
+        {
+            <button type="button" class="btn ghost sm icon" title="Renommer" aria-label="Renommer" @onclick="OnRename"><Ico Name="edit" Size="14" /></button>
+            @if (OnFolder.HasDelegate) { <button type="button" class="btn ghost sm" @onclick="OnFolder"><Ico Name="folder" Size="14" /> Ranger…</button> }
+            <button type="button" class="btn danger sm" disabled="@InUse" title="@(InUse ? "Utilisée : retirez-la d'abord des contenus" : "Supprimer la présentation et ses images")" @onclick="OnDelete"><Ico Name="trash" Size="14" /> Supprimer</button>
+        }
+    </div>
+</aside>
+
+@code {
+    [Parameter, EditorRequired] public MediaItem Item { get; set; } = default!;
+    [Parameter] public string Path { get; set; } = "";
+    [Parameter] public bool CanEdit { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnRename { get; set; }
+    [Parameter] public EventCallback OnFolder { get; set; }
+    [Parameter] public EventCallback OnDelete { get; set; }
+    /// <summary>La présentation ou ses images ont changé : la page relit la médiathèque.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private PresentationUses? uses;
+    private List<MediaItem> shown = new();
+    private Guid loadedFor;
+    private int? selected;
+    private bool busy, stale, checkedOk;
+    private string? error;
+
+    private string Src => Item.Info.GetValueOrDefault("src") ?? "pdf";
+    private string Unit => Pres.Unit(Src);
+    private int Pages => Pres.Pages(Item) is > 0 and var n ? n : shown.Count;
+    private bool InUse => uses is { Contents.Count: > 0 };
+    private string Letter => Src switch { "ppt" => "P", "gslides" => "S", "gdocs" => "D", "canva" => "C", _ => "PDF" };
+    private string SourceName => Src switch { "ppt" => "PowerPoint · OneDrive", "gslides" => "Google Slides · Google Drive", "gdocs" => "Google Docs · Google Drive", "canva" => "Canva", _ => "Document PDF" };
+
+    private string Key => Item.Info.GetValueOrDefault("key") ?? "";
+    private CloudFileKind? CloudKind => CloudFileKind.Of(Key.Split(':')[0]);
+    private bool CanRefresh => CanEdit && (CloudKind != null && Key.Contains(':') || Src == "canva" && Key.StartsWith("canva:"));
+
+    private DateTime? Modified
+    {
+        get
+        {
+            var m = Item.Info.GetValueOrDefault("mod") ?? "";
+            if (m.Length > 0 && m.All(char.IsDigit) && long.TryParse(m, out var secs)) return DateTimeOffset.FromUnixTimeSeconds(secs).UtcDateTime;   // Canva : secondes
+            return DateTime.TryParse(m, null, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var d) ? d : null;
+        }
+    }
+
+    private DateTime? Synced => DateTime.TryParse(Item.Info.GetValueOrDefault("synced"), null, System.Globalization.DateTimeStyles.RoundtripKind, out var d) ? d : Item.AddedUtc;
+
+    private static string Fmt(DateTime utc) => utc.ToLocalTime().ToString("dd.MM.yyyy 'à' HH:mm");
+
+    private static string Count(int n, string one, string many) => $"{n} {(n > 1 ? many : one)}";
+
+    private string UseSummary => uses == null || uses.Contents.Count == 0 ? "Aucun contenu"
+        : $"{Count(uses.Contents.Count, "contenu", "contenus")} · {Count(uses.Lists, "liste", "listes")} · {Count(uses.Screens, "écran", "écrans")}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (loadedFor == Item.Id) return;
+        loadedFor = Item.Id; selected = null; error = null; stale = false; checkedOk = false;
+        Load();
+        // le fichier a-t-il changé depuis la dernière conversion ? (une lecture, sans rien modifier)
+        if (CloudKind is { } kind && Key.Contains(':') && Modified != null)
+        {
+            var tenant = Store.Read(d => d.Tenant);
+            if (kind.Connected(tenant))
+            {
+                var (changed, err) = await Cloud.HasChanged(tenant, kind, new Dictionary<string, string> { ["gfile"] = Key[(Key.IndexOf(':') + 1)..], ["gfileMod"] = Item.Info.GetValueOrDefault("mod") ?? "" });
+                stale = changed; checkedOk = !changed && err == null;
+            }
+        }
+    }
+
+    private void Load()
+    {
+        uses = Library.PresentationUses(Item.Id);
+        shown = Library.PresentationPages(Item.Id);
+    }
+
+    private async Task ToImage(int page)
+    {
+        var (img, err) = Library.PageToImage(Item.Id, page);
+        if (img == null) { error = err; Toast.Error(err ?? "Conversion impossible."); return; }
+        error = null;
+        Toast.Ok($"Image « {img.Name} » ajoutée à la médiathèque. Elle reste même si la présentation est mise à jour ou supprimée.");
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task Refresh()
+    {
+        busy = true; error = null;
+        StateHasChanged();
+        try
+        {
+            var tenant = Store.Read(d => d.Tenant);
+            var area = Item.AreaId == Guid.Empty ? (Guid?)null : Item.AreaId;
+            if (CloudKind is { } kind)
+            {
+                var fileRef = Key[(Key.IndexOf(':') + 1)..];
+                var (done, err) = await Cloud.Import(tenant, Item.ClientId, area, kind, fileRef, Item.Info.GetValueOrDefault("pdfId"), PdfService.Options.From(new Dictionary<string, string>(), kind.AppId), force: true);
+                if (done == null) { error = err ?? "Conversion impossible."; Toast.Error(error); return; }
+                Toast.Ok(done.Contents > 0 ? $"« {done.Source.Title} » mis à jour pour {Count(done.Contents, "contenu", "contenus")}." : $"« {done.Source.Title} » mis à jour.");
+            }
+            else
+            {
+                var design = new CanvaService.Design(Key["canva:".Length..], Item.Name, null, null, null, null, null);
+                var res = await Canva.Export(Item.ClientId, design, "images", areaId: area);
+                if (res.Error != null) { error = res.Error; Toast.Error(error); return; }
+                foreach (var id in res.Refreshed ?? new()) await Notify.RefreshPages(Item.ClientId, id);
+                Toast.Ok(res.Refreshed is { Count: > 0 } r ? $"« {Item.Name} » mis à jour pour {Count(r.Count, "contenu", "contenus")}." : $"« {Item.Name} » mis à jour.");
+            }
+            stale = false;
+            Load();
+            await OnChanged.InvokeAsync();
+        }
+        finally { busy = false; }
+    }
+}

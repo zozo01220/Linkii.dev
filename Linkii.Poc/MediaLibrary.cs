@@ -11,7 +11,8 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     /// <summary>Fichier copié depuis un dossier Drive (Info["drive"]) : affiché et utilisable, mais il suit son dossier (ni renommé ni supprimé ici).</summary>
     public static bool IsDrive(MediaItem m) => m.Info.ContainsKey("drive");
 
-    private static bool IsOwnFile(MediaItem m) => IsFile(m) && !IsDrive(m);
+    /// <summary>Élément propre de l'aire qu'on peut renommer, ranger ou supprimer : un fichier (hors Drive) ou une présentation.</summary>
+    private static bool IsOwnFile(MediaItem m) => (IsFile(m) || Pres.Is(m)) && !IsDrive(m);
 
     /// <summary>Dossiers Drive du client, par identifiant (Info["drive"] des fichiers synchronisés).</summary>
     public Dictionary<string, DriveFolder> DriveFolders() => store.Read(d => d.Tenant.DriveFolders.ToDictionary(f => f.Id.ToString()));
@@ -36,12 +37,34 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
         return list.OrderByDescending(m => m.AddedUtc ?? DateTime.MinValue).ThenBy(m => m.Name).ToList();
     }
 
-    private static List<MediaItem> Normal(ClientDb d)
+    /// <summary>
+    /// Ce que la médiathèque affiche : les images et vidéos (hors images de pages de présentation, cachées) et les présentations,
+    /// avec la taille de chacune (celle de ses images).
+    /// </summary>
+    public List<MediaItem> Entries()
+    {
+        var files = Files().Where(m => !Pres.IsPage(m)).ToList();
+        var pres = store.Read(d => Normal(d, Pres.Is));
+        if (pres.Count > 0)
+        {
+            var sizes = store.Read(d => d.Media.Where(Pres.IsPage).GroupBy(m => Pres.IdOf(m)!).ToDictionary(g => g.Key, g => g.Sum(m => m.Size ?? 0)));
+            foreach (var p in pres) p.Size = sizes.GetValueOrDefault(p.Id.ToString());
+            files.AddRange(pres);
+        }
+        return files.OrderByDescending(m => m.AddedUtc ?? DateTime.MinValue).ThenBy(m => m.Name).ToList();
+    }
+
+    /// <summary>Images et vidéos à choisir pour un contenu ou une composition : sans les images de pages de présentation (elles se choisissent par la présentation).</summary>
+    public List<MediaItem> PickableFiles() => Files().Where(m => !Pres.IsPage(m)).ToList();
+
+    private static List<MediaItem> Normal(ClientDb d) => Normal(d, IsFile);
+
+    private static List<MediaItem> Normal(ClientDb d, Func<MediaItem, bool> kind)
     {
         var rights = FolderAccess.Snapshot(d.Access, FolderOps.All(d));
         var rootVisible = !d.Tenant.FoldersOn || d.Access.IsOrgAdmin;
         var shared = d.Access.Shared;
-        return d.Media.Where(m => IsFile(m) && (shared.MediaAll.Contains(m.Id)
+        return d.Media.Where(m => kind(m) && (shared.MediaAll.Contains(m.Id)
             // média d'une autre aire : partagé directement (à la racine), ou dans un dossier partagé ; ceux que seule une liste partagée utilise ne sont pas listés
             ? shared.Media.Contains(m.Id) || m.FolderId is { } sf && rights.GetValueOrDefault(sf) != FolderRight.None
             : m.FolderId is not { } f ? rootVisible || (m.OwnerId != null && m.OwnerId == d.Access.UserId) : rights.GetValueOrDefault(f) != FolderRight.None)).ToList();
@@ -164,6 +187,7 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
 
     public List<string> UsedBy(Guid mediaId) => store.Read(d =>
     {
+        if (d.Media.FirstOrDefault(m => m.Id == mediaId && Pres.Is(m)) is { } pres) return Pres.ContentsOf(d.Media, pres).Select(m => m.Name).Distinct().ToList();   // une présentation : les contenus qui l'affichent
         var names = d.Media.Where(m => m.AppId != null && MediaFields(m).Any(k => AppField.MediaIds(m.Settings.GetValueOrDefault(k)).Contains(mediaId)))
             .Select(m => m.Name).ToList();
         names.AddRange(d.Playlists.Where(p => p.Draft.Any(i => i.MediaId == mediaId)).Select(p => "liste de lecture « " + p.Name + " »"));
@@ -183,9 +207,20 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     /// </summary>
     public int Delete(IReadOnlyCollection<Guid> ids)
     {
+        var pdfs = new List<string>();
+        var removed = 0;
         var files = store.Write(d =>
         {
-            var gone = d.Media.Where(m => ids.Contains(m.Id) && IsOwnFile(m) && !d.Access.Shared.MediaAll.Contains(m.Id) && FolderOps.CanEditFile(d, m)).ToList();   // un média partagé par une autre aire ne se supprime que dans son aire   // les fichiers Drive suivent leur dossier ; ceux d'un dossier qu'on ne modifie pas restent
+            var gone = d.Media.Where(m => ids.Contains(m.Id) && IsOwnFile(m) && !d.Access.Shared.MediaAll.Contains(m.Id) && FolderOps.CanEditFile(d, m)
+                && !(Pres.Is(m) && Pres.ContentsOf(d.Media, m).Count > 0)).ToList();   // une présentation qu'un contenu utilise ne se supprime pas   // un média partagé par une autre aire ne se supprime que dans son aire   // les fichiers Drive suivent leur dossier ; ceux d'un dossier qu'on ne modifie pas restent
+            removed = gone.Count;
+            // une présentation part avec ses images de pages et son PDF d'origine
+            var presIds = gone.Where(Pres.Is).Select(m => m.Id.ToString()).ToHashSet();
+            if (presIds.Count > 0)
+            {
+                pdfs.AddRange(gone.Where(Pres.Is).Select(m => m.Info.GetValueOrDefault("pdfId") ?? ""));
+                gone.AddRange(d.Media.Where(m => m.AppId == null && Pres.IdOf(m) is { } pid && presIds.Contains(pid)));
+            }
             var set = gone.Select(m => m.Id).ToHashSet();
             if (set.Count == 0) return new List<string>();
             DetachFromContent(d, set);
@@ -198,7 +233,8 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
             try { File.Delete(Path.Combine(AppPaths.MediaDir, f)); } catch { }   // déjà absent : sans conséquence
             Thumbnails.Delete(f);
         }
-        return files.Count;
+        foreach (var p in pdfs) PdfService.Delete(p);
+        return removed;
     }
 
     /// <summary>Fichiers exportés depuis Canva (Info["canva"]) que plus rien n'utilise.</summary>
@@ -214,8 +250,9 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     /// <summary>Fichiers de l'aire que la personne ne voit pas (rangés dans un dossier qui ne lui est pas accordé) : masqués dans les listes (§54).</summary>
     public HashSet<Guid> HiddenFileIds()
     {
-        var visible = Files().Select(m => m.Id).ToHashSet();
-        return store.Read(d => d.Media.Where(m => IsFile(m) && !visible.Contains(m.Id)).Select(m => m.Id).ToHashSet());
+        var visible = Entries().Select(m => m.Id).ToHashSet();
+        var visiblePres = visible.Select(id => id.ToString()).ToHashSet();   // les images d'une présentation visible le sont aussi
+        return store.Read(d => d.Media.Where(m => (IsFile(m) || Pres.Is(m)) && !visible.Contains(m.Id) && !(Pres.IsPage(m) && visiblePres.Contains(Pres.IdOf(m)!))).Select(m => m.Id).ToHashSet());
     }
 
     /// <summary>Le contenu montre un fichier masqué : le fichier lui-même, ou un contenu (app) qui en a choisi un dans ses réglages.</summary>
@@ -226,8 +263,91 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     public HashSet<Guid> UnusedIds() => store.Read(d =>
     {
         var inTemplates = d.CompositionTemplates.SelectMany(t => AppField.MediaIds(t.Images)).ToHashSet();   // images d'un modèle de composition : utilisées
-        return UnusedExports(d.Media, d.Playlists, d.Screens, null).Select(m => m.Id).Where(id => !inTemplates.Contains(id)).ToHashSet();
+        var set = UnusedExports(d.Media, d.Playlists, d.Screens, null).Select(m => m.Id).Where(id => !inTemplates.Contains(id)).ToHashSet();
+        // une présentation est sans emploi quand aucune de ses images ne sert (contenu, liste ou écran)
+        foreach (var p in d.Media.Where(Pres.Is))
+        {
+            var pages = d.Media.Where(m => Pres.IdOf(m) == p.Id.ToString()).Select(m => m.Id).ToList();
+            if (pages.All(set.Contains)) set.Add(p.Id);
+        }
+        return set;
     });
+
+    // ---------- Présentations (§103) ----------
+
+    /// <summary>Contenus (apps), listes de lecture et écrans qui affichent une présentation.</summary>
+    public PresentationUses PresentationUses(Guid presId) => store.Read(d =>
+    {
+        if (d.Media.FirstOrDefault(m => m.Id == presId && Pres.Is(m)) is not { } pres) return new PresentationUses(new(), 0, 0);
+        var contents = Pres.ContentsOf(d.Media, pres);
+        var screens = d.Screens.Where(s => s.Token != null).ToList();
+        var rows = contents.Select(c =>
+        {
+            var lists = d.Playlists.Where(p => p.Draft.Any(i => i.MediaId == c.Id)).ToList();
+            return new PresentationUse(c.Id, c.Name, lists.Count, screens.Count(s => lists.Any(l => s.ZonePlaylists().Contains(l.Id))));
+        }).OrderBy(u => u.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        var allLists = d.Playlists.Where(p => p.Draft.Any(i => contents.Any(c => c.Id == i.MediaId))).Select(p => p.Id).ToHashSet();
+        return new PresentationUses(rows, allLists.Count, screens.Count(s => s.ZonePlaylists().Any(z => z is { } zid && allLists.Contains(zid))));
+    });
+
+    /// <summary>Images de la présentation, première page de chaque diapositive (rendu de base), dans l'ordre. Générations anciennes ignorées.</summary>
+    public List<MediaItem> PresentationPages(Guid presId) => store.Read(d =>
+    {
+        if (d.Media.FirstOrDefault(m => m.Id == presId && Pres.Is(m)) is not { } pres) return new List<MediaItem>();
+        var gen = pres.Info.GetValueOrDefault("gen") ?? "1";
+        var mine = d.Media.Where(m => Pres.IdOf(m) == presId.ToString() && m.Info.GetValueOrDefault("gen") == gen && m.FileName != null).ToList();
+        return mine.GroupBy(Pres.PageOf).OrderBy(g => g.Key).Select(g => g.OrderBy(m => m.Info.GetValueOrDefault("var") == "none" ? 0 : 1).First()).ToList();
+    });
+
+    /// <summary>Nombre de contenus qui affichent chaque présentation.</summary>
+    public Dictionary<Guid, int> PresentationUseCounts() => store.Read(d =>
+    {
+        var media = d.Media.ToList();
+        return media.Where(Pres.Is).ToDictionary(p => p.Id, p => Pres.ContentsOf(media, p).Count);
+    });
+
+    /// <summary>Aperçu de la carte : la première page de la présentation.</summary>
+    public Dictionary<Guid, MediaItem> PresentationCovers() => store.Read(d =>
+    {
+        var covers = new Dictionary<Guid, MediaItem>();
+        foreach (var p in d.Media.Where(Pres.Is))
+        {
+            var gen = p.Info.GetValueOrDefault("gen") ?? "1";
+            var first = d.Media.Where(m => Pres.IdOf(m) == p.Id.ToString() && m.Info.GetValueOrDefault("gen") == gen && m.FileName != null)
+                .OrderBy(Pres.PageOf).ThenBy(m => m.Info.GetValueOrDefault("var") == "none" ? 0 : 1).FirstOrDefault();
+            if (first != null) covers[p.Id] = first;
+        }
+        return covers;
+    });
+
+    /// <summary>
+    /// « Convertir en image » : une diapositive ou une page de la présentation devient une image ordinaire de la médiathèque (copie indépendante :
+    /// elle reste si la présentation est mise à jour ou supprimée). Rend l'image, ou un message.
+    /// </summary>
+    public (MediaItem? Item, string? Error) PageToImage(Guid presId, int page)
+    {
+        var made = store.Write<(MediaItem? Item, string? Error)>(d =>
+        {
+            if (d.Media.FirstOrDefault(m => m.Id == presId && Pres.Is(m)) is not { } pres) return (null, "Présentation introuvable.");
+            if (!FolderOps.CanEditFile(d, pres)) return (null, "Vous ne pouvez pas ajouter de fichier ici.");
+            var gen = pres.Info.GetValueOrDefault("gen") ?? "1";
+            var src = d.Media.Where(m => Pres.IdOf(m) == presId.ToString() && Pres.PageOf(m) == page && m.Info.GetValueOrDefault("gen") == gen && m.FileName != null)
+                .OrderBy(m => m.Info.GetValueOrDefault("var") == "none" ? 0 : 1).FirstOrDefault();
+            var from = src == null ? null : Path.Combine(AppPaths.MediaDir, src.FileName!);
+            if (src == null || !File.Exists(from)) return (null, "Cette page n'est plus disponible : mettez la présentation à jour.");
+            var file = Guid.NewGuid().ToString("N") + Path.GetExtension(src.FileName);
+            File.Copy(from, Path.Combine(AppPaths.MediaDir, file));
+            var name = $"{pres.Name} — {Pres.Unit(pres.Info.GetValueOrDefault("src"))} {page}";
+            var item = new MediaItem
+            {
+                ClientId = pres.ClientId, AreaId = pres.AreaId, FolderId = pres.FolderId, OwnerId = d.Access.UserId, Name = name.Length > 120 ? name[..120] : name,
+                Type = "image", FileName = file, Size = src.Size, Width = src.Width, Height = src.Height, AddedUtc = DateTime.UtcNow
+            };
+            d.Root.Media.Add(item);
+            return (item, null);
+        });
+        return made;
+    }
 
     /// <summary>Où sert un fichier : contenus (apps) qui l'ont choisi, listes de lecture qui le diffusent (directement ou par un contenu) et leurs écrans.</summary>
     public MediaUses Uses(Guid mediaId) => store.Read(d =>
@@ -319,3 +439,9 @@ public record FolderShareInfo(MediaFolder Folder, List<ShareRow> Shares, List<Sh
 /// <summary>Un média partagé avec l'aire ouverte : de quelle aire, et quand.</summary>
 public record MediaSharedWithMe(string By, DateTime Utc);
 
+
+/// <summary>Un contenu qui affiche une présentation : nombre de listes de lecture et d'écrans qui le diffusent.</summary>
+public record PresentationUse(Guid Id, string Name, int Lists, int Screens);
+
+/// <summary>Où sert une présentation : ses contenus, et le total de listes et d'écrans.</summary>
+public record PresentationUses(List<PresentationUse> Contents, int Lists, int Screens);

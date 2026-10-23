@@ -235,6 +235,20 @@ else
                     @foreach (var m in Visible)
                     {
                         var item = m;
+                        @if (Pres.Is(item))
+                        {
+                            <tr class="@(picked.Contains(item.Id) ? "picked" : "") @(dragIds.Contains(item.Id) ? "dragging" : "")" draggable="@(CanDrag(item) ? "true" : "false")" @ondragstart="() => StartDrag(item)" @ondragend="EndDrag">
+                                <td>@if (Selectable(item)) { <input type="checkbox" class="sc-check lx-check" checked="@picked.Contains(item.Id)" @onchange="() => Toggle(item.Id)" aria-label="Sélectionner @item.Name" /> }</td>
+                                <td><div class="nm"><span class="mini lx-pres-mini">@PresMini(item)</span><button type="button" title="@item.Name" @onclick="() => Open(item)">@item.Name</button></div></td>
+                                @if (FoldersShown) { <td><small>@PathOf(item)</small></td> }
+                                <td><small>@PresFormat(item)</small></td>
+                                <td class="num">@(item.Size is { } ps ? Helpers.FormatSize(ps) : "—")</td>
+                                <td>@if (unused.Contains(item.Id)) { <span class="lx-state"><i class="lx-dot off"></i><span>Non utilisée</span></span> } else { <span class="lx-state ok"><i class="lx-dot"></i><span>Utilisée@(PresUseCount(item) is var pc and > 0 ? $" · {Plural(pc, "contenu", "contenus")}" : "")</span></span> }</td>
+                                <td><small>@(item.AddedUtc is { } pa ? pa.ToLocalTime().ToString("dd.MM.yyyy") : "—")</small></td>
+                                <td>@Menu(item)</td>
+                            </tr>
+                            continue;
+                        }
                         <tr class="@(picked.Contains(item.Id) ? "picked" : "") @(dragIds.Contains(item.Id) ? "dragging" : "")" draggable="@(CanDrag(item) ? "true" : "false")" @ondragstart="() => StartDrag(item)" @ondragend="EndDrag">
                             <td>@if (Selectable(item)) { <input type="checkbox" class="sc-check lx-check" checked="@picked.Contains(item.Id)" @onchange="() => Toggle(item.Id)" aria-label="Sélectionner @item.Name" /> }</td>
                             <td><div class="nm"><span class="mini">@if (item.Status == null) { <MediaThumb Media="item" /> } else { <Ico Name="@(item.Status == "failed" ? "x" : "hourglass")" Size="16" /> }</span><button type="button" title="@item.Name" @onclick="() => Open(item)">@item.Name</button>@ShareBadge(item, "ph-sharei")</div></td>
@@ -287,6 +301,16 @@ else
                         {
                             var item = m;
                             var failed = item.Status == "failed";
+                            @if (Pres.Is(item))
+                            {
+                                <div class="ph-t lx-pres @(picked.Contains(item.Id) ? "picked" : "") @(dragIds.Contains(item.Id) ? "dragging" : "")" style="--r:@PhotoRatio(item)"
+                                     role="button" tabindex="0" title="@item.Name" aria-label="Ouvrir la présentation @item.Name" @onclick="e => ClickCard(item, e)" @onkeydown='e => { if (e.Key == "Enter") Open(item); }'
+                                     @oncontextmenu="() => LongPress(item)" @oncontextmenu:preventDefault="inApp"
+                                     draggable="@(CanDrag(item) ? "true" : "false")" @ondragstart="() => StartDrag(item)" @ondragend="EndDrag">
+                                    @PresFace(item)
+                                </div>
+                                continue;
+                            }
                             <div class="ph-t @(picked.Contains(item.Id) ? "picked" : "") @(failed ? "fail" : "") @(dragIds.Contains(item.Id) ? "dragging" : "")" style="--r:@PhotoRatio(item)"
                                  role="button" tabindex="0" title="@item.Name" aria-label="Aperçu de @item.Name" @onclick="e => ClickCard(item, e)" @onkeydown='e => { if (e.Key == "Enter") Open(item); }'
                                  @oncontextmenu="() => LongPress(item)" @oncontextmenu:preventDefault="inApp"
@@ -334,6 +358,16 @@ else
             {
                 var item = m;
                 var failed = item.Status == "failed";
+                @if (Pres.Is(item))
+                {
+                    @* présentation : l'aperçu seul (nom au centre de la première diapositive), pastilles dans l'aperçu, pas de légende dessous *@
+                    <div class="lx-mc lx-pres @(picked.Contains(item.Id) ? "picked" : "") @(openId == item.Id ? "open" : "") @(dragIds.Contains(item.Id) ? "dragging" : "")"
+                         role="button" tabindex="0" aria-label="Ouvrir la présentation @item.Name" @onclick="e => ClickCard(item, e)" @onkeydown='e => { if (e.Key == "Enter") Open(item); }'
+                         draggable="@(CanDrag(item) ? "true" : "false")" @ondragstart="() => StartDrag(item)" @ondragend="EndDrag">
+                        <div class="th">@PresFace(item)</div>
+                    </div>
+                    continue;
+                }
                 <div class="lx-mc @(picked.Contains(item.Id) ? "picked" : "") @(failed ? "fail" : "") @(openId == item.Id ? "open" : "") @(dragIds.Contains(item.Id) ? "dragging" : "")"
                      role="button" tabindex="0" aria-label="Aperçu de @item.Name" @onclick="e => ClickCard(item, e)" @onkeydown='e => { if (e.Key == "Enter") Open(item); }'
                      draggable="@(CanDrag(item) ? "true" : "false")" @ondragstart="() => StartDrag(item)" @ondragend="EndDrag">
@@ -371,7 +405,7 @@ else
             <span class="vr"></span>
             @if (pickedShareable.Count > 0) { <button type="button" @onclick="() => { sharingKind = ShareKind.Media; sharingMedia = pickedShareable; }"><Ico Name="share" Size="15" /><span class="lx-lbl">Partager…</span></button> }
             @if (FoldersShown) { <button type="button" disabled="@(pickedEditable.Count == 0)" @onclick="() => folderMove = pickedEditable"><Ico Name="folder" Size="15" /><span class="lx-lbl">Ranger…</span></button> }
-            @if (canMove && pickedOwn.Count > 0) { <button type="button" @onclick="() => bulkMove = true"><Ico Name="move" Size="15" /><span class="lx-lbl">Autre aire…</span></button> }
+            @if (canMove && pickedMovable.Count > 0) { <button type="button" @onclick="() => bulkMove = true"><Ico Name="move" Size="15" /><span class="lx-lbl">Autre aire…</span></button> }
             <span class="vr"></span>
             <button type="button" class="del" @onclick="() => confirmDelete = pickedOwn.Select(x => x.Id).ToList()"><Ico Name="trash" Size="15" /> Supprimer</button>
             <span class="vr"></span>
@@ -402,6 +436,14 @@ else
 
 @if (open is { } om)
 {
+    @if (Pres.Is(om))
+    {
+        <PresentationDrawer Item="om" Path="@PathOf(om)" CanEdit="Own(om)" OnClose="() => openId = null" OnRename="() => OpenRename(om)"
+                            OnFolder="@(FoldersShown ? EventCallback.Factory.Create(this, () => folderMove = new() { (om.Id, om.Name) }) : default)"
+                            OnDelete="() => confirmDelete = new() { om.Id }" OnChanged="Reload" />
+    }
+    else
+    {
     var idx = OpenList.FindIndex(x => x.Id == om.Id);
     <MediaPreviewPanel Item="om" Path="@PathOf(om)" CanEdit="Own(om)" Drive="@(MediaLibrary.IsDrive(om) ? DriveTitle(DriveOf(om)) : null)"
                        CanShare="@Shareable(om)" Shares="@Sharing.RowsOf(ShareKind.Media, om.Id)" SharedBy="@(sharedIn.GetValueOrDefault(om.Id))" CanDelete="@(!foreignMedia.Contains(om.Id))"
@@ -412,6 +454,7 @@ else
                        OnFolder="@(FoldersShown ? EventCallback.Factory.Create(this, () => folderMove = new() { (om.Id, om.Name) }) : default)"
                        OnArea="@(canMove ? EventCallback.Factory.Create(this, () => moving = om) : default)"
                        OnDelete="() => confirmDelete = new() { om.Id }" />
+    }
 }
 
 @if (reparenting is { } rp)
@@ -503,7 +546,7 @@ else
 }
 @if (bulkMove)
 {
-    <AreaMoveDialog Kind="media" Items="pickedOwn.Select(f => (f.Id, f.Name)).ToList()" OnClose="moved => { bulkMove = false; if (moved) Reload(); }" />
+    <AreaMoveDialog Kind="media" Items="pickedMovable" OnClose="moved => { bulkMove = false; if (moved) Reload(); }" />
 }
 
 @if (renaming != null)
@@ -564,13 +607,14 @@ else
 
     // Provenance d'un fichier : téléversé ici, exporté depuis Canva, ou synchronisé depuis un dossier Drive.
     private static readonly (string Key, string Label)[] Sources =
-        { ("upload", "Téléversés"), ("canva", "Canva"), ("pdf", "PDF"), ("gdrive", "Google Drive"), ("onedrive", "OneDrive") };
+        { ("upload", "Téléversés"), ("presentation", "Présentations"), ("canva", "Canva"), ("pdf", "PDF"), ("gdrive", "Google Drive"), ("onedrive", "OneDrive") };
 
     private string SourceOf(MediaItem m) =>
-        MediaLibrary.IsDrive(m) ? (DriveOf(m)?.Source == "onedrive" ? "onedrive" : "gdrive")
+        Pres.Is(m) ? "presentation"
+        : MediaLibrary.IsDrive(m) ? (DriveOf(m)?.Source == "onedrive" ? "onedrive" : "gdrive")
         : m.Info.ContainsKey("canva") || m.Info.ContainsKey("canvaFolder") ? "canva" : m.Info.ContainsKey("pdf") ? "pdf" : "upload";
 
-    private string? SourceLabel(MediaItem m) => SourceOf(m) switch { "onedrive" => "OneDrive", "gdrive" => "GDrive", "canva" => "Canva", "pdf" => "PDF", _ => null };
+    private string? SourceLabel(MediaItem m) => Pres.Is(m) ? Pres.Label(m.Info.GetValueOrDefault("src")) : SourceOf(m) switch { "onedrive" => "OneDrive", "gdrive" => "GDrive", "canva" => "Canva", "pdf" => "PDF", _ => null };
 
     private DriveFolder? DriveOf(MediaItem m) => MediaLibrary.IsDrive(m) ? drives.GetValueOrDefault(m.Info["drive"]) : null;
 
@@ -616,6 +660,33 @@ else
     private MediaItem? moving;
     private bool bulkMove;
     private bool canMove;  // administrateur de l'organisation, avec au moins une autre aire
+
+    // ---------- Présentations (§103) : carte épurée, mêmes pastilles que les médias, dans l'aperçu ----------
+
+    private Dictionary<Guid, MediaItem> covers = new();    // première page de chaque présentation (aperçu de sa carte)
+    private Dictionary<Guid, int> presUses = new();         // contenus qui affichent chaque présentation
+
+    private int PresUseCount(MediaItem m) => presUses.GetValueOrDefault(m.Id);
+
+    private string PresFormat(MediaItem m) => $"Présentation · {Pres.Pages(m)} {Pres.UnitPlural(m.Info.GetValueOrDefault("src"), Pres.Pages(m))} · {Pres.Label(m.Info.GetValueOrDefault("src"))}";
+
+    private RenderFragment PresMini(MediaItem item) => __builder =>
+    {
+        @if (covers.TryGetValue(item.Id, out var cv)) { <img src="/media/@cv.FileName?w=160" alt="" loading="lazy" decoding="async" /> }
+        <span class="pr-nm">@item.Name</span>
+    };
+
+    // l'aperçu : la première diapositive avec le nom au centre ; nombre de pages en haut à gauche (la case de sélection le remplace au survol), source en haut à droite, point d'usage en bas à gauche
+    private RenderFragment PresFace(MediaItem item) => __builder =>
+    {
+        var n = Pres.Pages(item);
+        @if (covers.TryGetValue(item.Id, out var cv)) { <img src="/media/@cv.FileName?w=640" alt="" loading="lazy" decoding="async" /> }
+        <span class="pr-nm">@item.Name</span>
+        @if (Selectable(item)) { <input type="checkbox" class="sc-check lx-check" checked="@picked.Contains(item.Id)" @onclick:stopPropagation="true" @onchange="() => Toggle(item.Id)" aria-label="Sélectionner @item.Name" /> }
+        <span class="pr-cnt" title="@Plural(n, Pres.Unit(item.Info.GetValueOrDefault("src")), Pres.UnitPlural(item.Info.GetValueOrDefault("src"), 2))"><Ico Name="copy" Size="11" />@n</span>
+        <span class="lx-src pr-src">@Pres.Label(item.Info.GetValueOrDefault("src"))</span>
+        <span class="ph-use @(unused.Contains(item.Id) ? "no" : "")" title="@(unused.Contains(item.Id) ? "Non utilisée" : "Utilisée")"></span>
+    };
 
     // ---------- Dossiers (option « Dossiers dans la médiathèque ») ----------
 
@@ -724,7 +795,9 @@ else
         audiences = foldersOn ? Library.Audiences() : new();
         if (!FoldersShown) folderId = null;
         else if (folderId is { } open && !rights.ContainsKey(open)) folderId = null;   // dossier retiré ou supprimé entre-temps
-        allFiles = Library.Files();
+        allFiles = Library.Entries();
+        covers = Library.PresentationCovers();
+        presUses = Library.PresentationUseCounts();
         sharedIn = Library.SharedWithMe();
         sharedOut = Library.SharedOut();
         hasOtherAreas = Sharing.HasOtherAreas();
@@ -815,8 +888,8 @@ else
                     @if (Own(item)) { <button type="button" role="menuitem" @onclick="() => OpenRename(item)"><Ico Name="edit" Size="16" /> Renommer</button> }
                     @if (item.FileName != null) { <a role="menuitem" href="/media/@item.FileName" download="@item.Name" @onclick="() => menuFor = null"><Ico Name="download" Size="16" /> Télécharger</a> }
                     @if (FoldersShown && Selectable(item)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (item.Id, item.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
-                    @if (canMove && Own(item)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; moving = item; }"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
-                    @if (Own(item)) { <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; confirmDelete = new() { item.Id }; }"><Ico Name="trash" Size="16" /> Supprimer</button> }
+                    @if (canMove && Own(item) && !Pres.Is(item)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; moving = item; }"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
+                    @if (Own(item)) { <button type="button" role="menuitem" class="danger" disabled="@(Pres.Is(item) && !unused.Contains(item.Id))" title="@(Pres.Is(item) && !unused.Contains(item.Id) ? "Utilisée : retirez-la d'abord des contenus" : null)" @onclick="() => { menuFor = null; confirmDelete = new() { item.Id }; }"><Ico Name="trash" Size="16" /> Supprimer</button> }
                 </div>
             }
         </div>
@@ -889,9 +962,10 @@ else
     // sélectionnable / rangeable : ses fichiers, et les fichiers Drive (qu on peut ranger dans un dossier mais ni renommer ni supprimer ici)
     private bool Selectable(MediaItem m) => CanEdit(m) && (FoldersShown || !MediaLibrary.IsDrive(m));
     private bool Own(MediaItem m) => !MediaLibrary.IsDrive(m) && CanEdit(m);
-    private bool Shareable(MediaItem m) => hasOtherAreas && Own(m) && m.Status == null && !foreignMedia.Contains(m.Id);
+    private bool Shareable(MediaItem m) => hasOtherAreas && Own(m) && m.Status == null && !foreignMedia.Contains(m.Id) && !Pres.Is(m);   // une présentation ne se partage pas entre aires
     private List<(Guid Id, string Name)> pickedShareable => allFiles.Where(m => picked.Contains(m.Id) && Shareable(m)).Select(m => (m.Id, m.Name)).ToList();
     private List<(Guid Id, string Name)> pickedOwn => allFiles.Where(m => picked.Contains(m.Id) && Own(m)).Select(m => (m.Id, m.Name)).ToList();
+    private List<(Guid Id, string Name)> pickedMovable => allFiles.Where(m => picked.Contains(m.Id) && Own(m) && !Pres.Is(m)).Select(m => (m.Id, m.Name)).ToList();   // les présentations ne changent pas d'aire
 
     // Clic : aperçu ; en cours de sélection (ou Ctrl/Maj + clic) : coche ou décoche.
     private void ClickCard(MediaItem m, MouseEventArgs e)
@@ -923,7 +997,7 @@ else
         }
     }
     // les trois derniers médias prêts d'un dossier : aperçu de sa carte (look app)
-    private List<MediaItem> RecentMedia(Guid folder) => allFiles.Where(m => m.FolderId == folder && m.Status == null).OrderByDescending(m => m.AddedUtc).Take(3).ToList();
+    private List<MediaItem> RecentMedia(Guid folder) => allFiles.Where(m => m.FolderId == folder && m.Status == null).OrderByDescending(m => m.AddedUtc).Take(3).Select(m => Pres.Is(m) ? covers.GetValueOrDefault(m.Id) : m).OfType<MediaItem>().ToList();
     private static string Cap(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];   // « Dimanche 11 octobre »
     private static string PhotoRatio(MediaItem m) =>
         (m.Width is > 0 && m.Height is > 0 ? Math.Clamp(m.Width.Value / (double)m.Height.Value, 0.55, 2.2) : 1.5).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
@@ -1002,9 +1076,11 @@ else
     private void Delete()
     {
         if (confirmDelete == null) return;
-        Library.Delete(confirmDelete);
         var asked = confirmDelete.Count;
-        Toast.Ok(asked > 1 ? $"{asked} médias supprimés." : "Média supprimé.");
+        var done = Library.Delete(confirmDelete);
+        var kept = asked - done;
+        if (done > 0) Toast.Ok(done > 1 ? $"{done} médias supprimés." : "Média supprimé.");
+        if (kept > 0) Toast.Error(kept > 1 ? $"{kept} éléments conservés (présentation utilisée, ou dossier en lecture seule)." : "Élément conservé (présentation utilisée, ou dossier en lecture seule).");
         picked.ExceptWith(confirmDelete);
         if (openId is { } oid && confirmDelete.Contains(oid)) openId = null;
         confirmDelete = null;

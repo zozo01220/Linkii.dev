@@ -368,6 +368,8 @@ public class Tenant
     public string DefaultResolution { get; set; } = "1920x1080";
     /// <summary>Démarrage automatique des nouveaux écrans (chaque écran peut le changer).</summary>
     public bool DefaultAutoStart { get; set; } = true;
+    /// <summary>Fusion automatique des doublons de présentations de la médiathèque (§103) : au démarrage du serveur et quand le réglage est activé.</summary>
+    public bool MergePresentations { get; set; } = true;
 
     // Connexion Canva (Connect API) : jeton de renouvellement chiffré (SecretBox), à usage unique (renouvelé à chaque emploi).
     public string CanvaRefreshToken { get; set; } = "";

@@ -27,7 +27,7 @@
                     <b title="@Name">@Name</b>
                     <span class="muted">· @Summary</span>
                     <span class="grow"></span>
-                    <button type="button" class="btn ghost sm" disabled="@busy" title="Convertir à nouveau la dernière version du fichier" @onclick="() => Run(FileRef)"><Ico Name="refresh" Size="14" /> Mettre à jour</button>
+                    <button type="button" class="btn ghost sm" disabled="@busy" title="Convertir à nouveau la dernière version du fichier" @onclick="() => Run(FileRef, true)"><Ico Name="refresh" Size="14" /> Mettre à jour</button>
                     <button type="button" class="btn ghost sm" disabled="@busy" @onclick="() => picking = true">Changer</button>
                 }
                 else
@@ -40,7 +40,7 @@
         </div>
         @if (busy) { <div class="cv-busy"><span class="spinner"></span> @status</div> }
         @if (error != null) { <div class="err">@error</div> }
-        else if (changed && !busy) { <div class="gf-warn">Le fichier a changé. <button type="button" class="linklike" @onclick="() => Run(FileRef)">Mettre à jour maintenant</button> (sinon, mise à jour automatique selon les options avancées).</div> }
+        else if (changed && !busy) { <div class="gf-warn">Le fichier a changé. <button type="button" class="linklike" @onclick="() => Run(FileRef, true)">Mettre à jour maintenant</button> (sinon, mise à jour automatique selon les options avancées).</div> }
     }
 </div>
 
@@ -107,7 +107,8 @@
     private Task Picked(DriveNode node) { picking = false; return Run(node.Ref); }
 
     /// <summary>Convertit le fichier (nouveau, ou le même à nouveau) puis le passe en images.</summary>
-    private async Task Run(string fileRef)
+    /// <param name="force">« Mettre à jour » : le fichier est converti à nouveau même s'il n'a pas changé ; sinon une présentation déjà dans la médiathèque est réutilisée en silence.</param>
+    private async Task Run(string fileRef, bool force = false)
     {
         busy = true; error = null; changed = false; status = "Conversion du fichier…";
         StateHasChanged();
@@ -116,15 +117,18 @@
             var previous = Values.GetValueOrDefault("pdf") ?? "";
             var sameFile = fileRef == FileRef;
             var (done, err) = await Cloud.Import(Tenant, Store.ClientId, Store.AreaId, Kind, fileRef, sameFile && previous.Length > 0 ? previous : null,
-                PdfService.Options.From(Values), new Progress<string>(s => { status = s; _ = InvokeAsync(StateHasChanged); }));
+                PdfService.Options.From(Values, Kind.AppId), new Progress<string>(s => { status = s; _ = InvokeAsync(StateHasChanged); }), force: force);
             if (done == null) { Fail(err ?? "Conversion impossible."); return; }
 
             var storedId = InstanceId is { } id ? Apps.Instances(Kind.AppId).FirstOrDefault(m => m.Id == id)?.Settings.GetValueOrDefault("pdf") : null;
             CloudFileService.Apply(Values, done);
-            if (previous.Length > 0 && previous != done.Source.Id && previous != storedId) PdfService.Delete(previous);   // choisi pendant cette édition puis remplacé
+            if (previous.Length > 0 && previous != done.Source.Id && previous != storedId) Cloud.Release(previous);   // choisi pendant cette édition puis remplacé
             var n = done.Result.Selected;
-            Toast.Ok(done.Result.Truncated ? $"« {done.Source.Title} » converti : {n} premières {Plural(Unit, n)} sur {done.Source.Pages}."
-                : $"« {done.Source.Title} » converti : {n} {Plural(Unit, n)}.");
+            if (done.How == CloudFileService.ImportKind.Reused) Toast.Ok($"« {done.Source.Title} » est déjà dans la médiathèque : réutilisée.");
+            else if (done.How == CloudFileService.ImportKind.Updated) Toast.Ok(done.Contents > 0 ? $"« {done.Source.Title} » avait changé : mise à jour pour {done.Contents} contenu{(done.Contents > 1 ? "s" : "")}." : $"« {done.Source.Title} » mis à jour : {n} {Plural(Unit, n)}.");
+            else
+                Toast.Ok(done.Result.Truncated ? $"« {done.Source.Title} » converti : {n} premières {Plural(Unit, n)} sur {done.Source.Pages}."
+                    : $"« {done.Source.Title} » converti : {n} {Plural(Unit, n)}.");
             await OnChange.InvokeAsync();
         }
         finally { busy = false; }

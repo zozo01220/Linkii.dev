@@ -71,6 +71,8 @@ builder.Services.AddSingleton<FacebookAuth>();   // « Se connecter avec Faceboo
 builder.Services.AddSingleton<RemoteDrives>();   // sessions Nextcloud (WebDAV), SFTP et Dropbox
 builder.Services.AddSingleton<DriveService>();
 builder.Services.AddSingleton<CloudFileService>();
+builder.Services.AddSingleton<PresentationMerge>();
+builder.Services.AddHostedService<PresentationMergeWorker>();   // fusion des doublons de présentations au démarrage (§103)
 builder.Services.AddHostedService<CloudFilesWorker>();   // Google Slides, Docs et Microsoft PowerPoint : mise à jour quand le fichier change (réglage de chaque contenu, une heure par défaut)
 builder.Services.AddHostedService<DriveSyncWorker>();   // dossiers des Drives : synchronisés toutes les 15 minutes
 builder.Services.AddSingleton<ScanLog>();   // scans des QR codes de comptage (Growth) : journal par client, 90 jours

@@ -42,32 +42,63 @@ public record CloudFileKind(string AppId, string Source, string Mime, string Gki
 /// </summary>
 public class CloudFileService(DriveService drive, PdfService pdf, JsonStore store, Notifier notifier, ILogger<CloudFileService> log)
 {
-    public record Imported(PdfService.Source Source, PdfService.ConvertResult Result, DriveService.CloudFile File);
+    public enum ImportKind { New, Reused, Updated }
+
+    /// <param name="How">Nouvelle conversion, présentation déjà dans la médiathèque réutilisée en silence, ou fichier modifié (tous les contenus mis à jour).</param>
+    /// <param name="Contents">Contenus mis à jour avec la présentation (Updated).</param>
+    public record Imported(PdfService.Source Source, PdfService.ConvertResult Result, DriveService.CloudFile File, ImportKind How = ImportKind.New, int Contents = 0);
 
     /// <summary>
-    /// Convertit le fichier puis le passe en images. <paramref name="reuseId"/> : identifiant du PDF déjà gardé pour ce même fichier
-    /// (mise à jour : le PDF est remplacé, les images précédentes que rien n'utilise sont retirées).
+    /// Convertit le fichier puis le passe en images. Une présentation (plusieurs pages) déjà convertie depuis ce même fichier est réutilisée sans rien refaire
+    /// tant que le fichier n'a pas changé ; s'il a changé (ou si <paramref name="force"/>), il est converti une seule fois et tous les contenus qui l'affichent
+    /// passent aux nouvelles images. <paramref name="reuseId"/> : identifiant du PDF déjà gardé pour ce même fichier (page unique : remplacé, les images
+    /// précédentes que rien n'utilise sont retirées).
     /// </summary>
     public async Task<(Imported? Done, string? Error)> Import(Tenant t, Guid clientId, Guid? areaId, CloudFileKind kind, string fileRef, string? reuseId,
-                                                                PdfService.Options options, IProgress<string>? progress = null, CancellationToken ct = default)
+                                                                PdfService.Options options, IProgress<string>? progress = null, CancellationToken ct = default, bool force = false)
     {
         try
         {
             progress?.Report("Lecture du fichier dans " + (kind.IsGoogle ? "Google Drive…" : "OneDrive…"));
             var file = await drive.CloudFileInfo(t, kind, fileRef);
+            var key = kind.AppId + ":" + fileRef;
+            var meta = new PdfService.Meta(key, file.Modified, file.Name);
+            var existing = pdf.FindPresentation(clientId, areaId, key) ?? (string.IsNullOrEmpty(reuseId) ? null : pdf.PresentationOfPdf(clientId, reuseId));
+            var existingPdf = existing?.Info.GetValueOrDefault("pdfId");
+
+            if (existing != null && !force && existing.Info.GetValueOrDefault("mod") == file.Modified && PdfService.Exists(existingPdf))
+            {
+                var kept = new PdfService.Source(existingPdf!, existing.Name, Pres.Pages(existing));
+                var again = await pdf.Convert(clientId, areaId, kept, options, progress, ct, meta);
+                return again.Error != null ? (null, again.Error) : (new(kept, again, file, ImportKind.Reused), null);
+            }
+
             progress?.Report(kind.IsGoogle ? "Export par Google…" : "Conversion par Microsoft…");
             await using var stream = await drive.ExportPdf(t, kind, fileRef, ct);
-            var saved = await pdf.SaveStream(stream, file.Name, reuseId, ct);
+            var saved = await pdf.SaveStream(stream, file.Name, existingPdf ?? reuseId, ct);
             if (saved.Source is not { } source) return (null, saved.Error ?? "Export refusé.");
-            var res = await pdf.Convert(clientId, areaId, source, options, progress, ct);
-            if (res.Error != null) { if (reuseId != source.Id) PdfService.Delete(source.Id); return (null, res.Error); }
-            return (new(source, res, file), null);
+
+            var contents = 0;
+            if (existing != null && source.Pages > 1)
+            {
+                var done = await pdf.Refresh(clientId, existing.Id, source, file.Modified, file.Name, progress, ct);
+                if (done.Error != null) return (null, done.Error);
+                foreach (var id in done.Contents) await notifier.RefreshPages(clientId, id);   // les écrans reçoivent les nouvelles images sans republier
+                pdf.PurgeStale(clientId, existing.Id);
+                contents = done.Contents.Count;
+            }
+            var res = await pdf.Convert(clientId, areaId, source, options, progress, ct, meta);
+            if (res.Error != null) { if (existing == null && reuseId != source.Id) pdf.Release(source.Id); return (null, res.Error); }
+            return (new(source, res, file, existing != null && source.Pages > 1 ? ImportKind.Updated : ImportKind.New, contents), null);
         }
         catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or IOException || ex is TaskCanceledException && !ct.IsCancellationRequested)
         {
             return (null, ex.Message);
         }
     }
+
+    /// <summary>Retire un PDF gardé que plus rien n'utilise (sauf s'il appartient à une présentation).</summary>
+    public void Release(string? pdfId) => pdf.Release(pdfId);
 
     /// <summary>Le fichier et ses pages dans les valeurs du formulaire.</summary>
     public static void Apply(IDictionary<string, string> values, Imported done)
@@ -132,8 +163,13 @@ public class CloudFileService(DriveService drive, PdfService pdf, JsonStore stor
         if (error != null) return error;
         if (!changed && !force) return null;
 
-        var (done, err) = await Import(t, clientId, item.AreaId == Guid.Empty ? null : item.AreaId, kind, settings["gfile"], settings.GetValueOrDefault("pdf"), PdfService.Options.From(settings), null, ct);
+        var (done, err) = await Import(t, clientId, item.AreaId == Guid.Empty ? null : item.AreaId, kind, settings["gfile"], settings.GetValueOrDefault("pdf"), PdfService.Options.From(settings, item.AppId), null, ct, force: true);
         if (done == null) return err;
+        if (done.How == ImportKind.Updated)   // présentation : refaite une fois pour tous ses contenus (celui-ci compris), écrans déjà prévenus
+        {
+            store.Write(db => { if (db.Media.FirstOrDefault(m => m.Id == mediaId) is { } m) m.Info["gcheck"] = DateTime.UtcNow.ToString("o"); });
+            return null;
+        }
 
         var keep = done.Result.Files.Select(f => f.Id).ToHashSet();
         var fresh = new Dictionary<string, string>(settings);

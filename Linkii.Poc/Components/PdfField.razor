@@ -55,15 +55,19 @@
         try
         {
             var saved = await Pdf.SaveSource(e.File);
-            if (saved.Source is not { } source) { Fail(saved.Error ?? "PDF refusé."); return; }
-            var res = await Pdf.Convert(Store.ClientId, Store.AreaId, source, PdfService.Options.From(Values), new Progress<string>(s => { status = s; _ = InvokeAsync(StateHasChanged); }));
-            if (res.Error != null) { PdfService.Delete(source.Id); Fail(res.Error); return; }
+            if (saved.Source is not { } sent) { Fail(saved.Error ?? "PDF refusé."); return; }
+            // le même PDF déjà dans la médiathèque (même empreinte) est réutilisé : le fichier qu'on vient d'envoyer est effacé
+            var source = Pdf.ReuseUploaded(Store.ClientId, Store.AreaId, sent, out var reused);
+            var res = await Pdf.Convert(Store.ClientId, Store.AreaId, source, PdfService.Options.From(Values, "pdf"), new Progress<string>(s => { status = s; _ = InvokeAsync(StateHasChanged); }),
+                meta: source.Hash == null ? null : new PdfService.Meta("sha:" + source.Hash, null, source.Title));
+            if (res.Error != null) { if (!reused) Pdf.Release(source.Id); Fail(res.Error); return; }
 
             var previous = SourceId;
             var storedId = InstanceId is { } id ? Apps.Instances("pdf").FirstOrDefault(m => m.Id == id)?.Settings.GetValueOrDefault(Field.Key) : null;
             PdfService.Apply(Values, source, res);
-            if (previous.Length > 0 && previous != storedId) PdfService.Delete(previous);   // choisi pendant cette édition puis remplacé
-            Toast.Ok(res.Truncated ? $"« {source.Title} » converti : {res.Selected} premières pages sur {source.Pages}."
+            if (previous.Length > 0 && previous != source.Id && previous != storedId) Pdf.Release(previous);   // choisi pendant cette édition puis remplacé
+            if (reused) Toast.Ok($"« {source.Title} » est déjà dans la médiathèque : réutilisé.");
+            else Toast.Ok(res.Truncated ? $"« {source.Title} » converti : {res.Selected} premières pages sur {source.Pages}."
                 : $"« {source.Title} » converti : {res.Selected} page{(res.Selected > 1 ? "s" : "")}.");
             await OnChange.InvokeAsync();
         }

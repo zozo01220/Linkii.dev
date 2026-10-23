@@ -1,3 +1,4 @@
+@inject Notifier Notify
 @inject CanvaService Canva
 @inject TenantStore Store
 @inject MediaLibrary Library
@@ -181,7 +182,11 @@
             Values["designTitle"] = d.Title;
             Values[FilesKey] = string.Join(",", res.Files.Select(f => f.Id));
             Values[Kind == "video" ? "pages" : "video"] = "";
-            Toast.Ok(Kind == "video" ? $"« {d.Title} » exporté en vidéo." : $"« {d.Title} » exporté : {res.Files.Count} page{(res.Files.Count > 1 ? "s" : "")}.");
+            if (res.Refreshed is { Count: > 0 } refreshed) foreach (var id in refreshed) await Notify.RefreshPages(Store.ClientId, id);   // les écrans qui affichent ce design reçoivent les nouvelles pages
+            Toast.Ok(Kind == "video" ? $"« {d.Title} » exporté en vidéo."
+                : res.Reused ? $"« {d.Title} » est déjà dans la médiathèque : réutilisé."
+                : res.Refreshed is { Count: > 0 } r2 ? $"« {d.Title} » avait changé : mise à jour pour {r2.Count} contenu{(r2.Count > 1 ? "s" : "")}."
+                : $"« {d.Title} » exporté : {res.Files.Count} page{(res.Files.Count > 1 ? "s" : "")}.");
             await OnChange.InvokeAsync();
         }
         finally { busy = false; }
