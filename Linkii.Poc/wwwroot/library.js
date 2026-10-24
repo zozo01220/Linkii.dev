@@ -55,6 +55,13 @@
       depth = 0;
     },
     setDrop: function (drop) { if (current) current.drop = !!drop; },
+    // après un import : amène à l'écran le média (ou le dossier) qui rebondit, s'il est hors de la fenêtre
+    land: function () {
+      var el = d.querySelector('.landed');
+      if (!el || !el.getBoundingClientRect) return;
+      var r = el.getBoundingClientRect(), h = w.innerHeight || d.documentElement.clientHeight;
+      if (r.top < 70 || r.bottom > h - 20) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    },
     detach: function (ref) { if (current && current.ref === ref) current = null; }
   };
   d.addEventListener('keydown', onKey);

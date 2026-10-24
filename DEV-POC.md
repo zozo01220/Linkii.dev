@@ -2096,3 +2096,15 @@ Remplace l'organisation en onglets Structure / Membres / Rôles et l'arbre du §
 - **Bloc d'état vide** : il n'apparaît que si **aucun écran n'est affiché**, en carte, liste ou arborescence (écrans de l'aire ouverte *et* des autres aires, hors recherche et filtres de zone ou d'état, `NothingToShow`). Avant, seuls les écrans de l'aire ouverte comptaient : une aire vide à côté d'une aire garnie montrait le bloc au-dessus des cartes des autres aires. Le texte « Les écrans de vos autres aires restent dans leur aire » disparaît.
 - **Droit de connecter** (`canAdd`, calculé dans `Reload`) : écrans en modification dans l'aire ouverte (`CanWrite(Screens)`) **et** l'aire entière, ou au moins une zone libre que la personne voit. Un membre limité à des écrans isolés ne peut pas en ajouter (l'écran n'irait dans aucune zone qu'il voit). L'appairage range l'écran dans la zone par défaut si elle est visible, sinon dans la première zone libre visible.
 - **Sans ce droit** : bouton d'en-tête « Connecter un écran » verrouillé (désactivé, cadenas, infobulle), carte « + » de la grille retirée, et à la place du bloc, un simple « Aucun écran à afficher » sans bouton. `Pair()` revérifie le droit.
+
+## 113. Médiathèque : le média importé (ou son dossier) rebondit là où il est rangé (24 octobre 2026) : codé, compilé ; jamais vu tourner (tests par l'utilisateur)
+
+- **But** : savoir d'un coup d'œil où un import a été déposé (racine, dossier ouvert, ou dossier « …_médias » créé à la racine).
+- **Après un import** (ordinateur, glisser-déposer, adresse web, tiroir « Depuis le cloud »), `Media.Land` relit la page puis :
+  - le média est dans la vue ouverte : sa carte surgit avec un ressort et un halo bleu (liste : la ligne s'éclaire, sa vignette surgit ; photos : la tuile surgit) ;
+  - il est plus bas dans l'arborescence : c'est le **dossier de la vue** qui y mène qui saute (deux rebonds, écrasement à l'atterrissage, lueur), comme le Dock d'Apple ;
+  - il est hors de la vue (ex. « PowerPoint_médias » est à la racine alors qu'on est dans un dossier) : la page ouvre le dossier parent, puis le dossier saute.
+- Au bout de 2,8 s la marque disparaît ; `linkiiLibrary.land` (library.js) fait défiler la page si l'élément est hors fenêtre. Pour un import cloud, le départ attend 350 ms que le tiroir se referme.
+- `DocumentImporter.OnImported` transporte maintenant l'identifiant du média (présentation ou image). Un document déjà présent (« réutilisé ») rebondit aussi.
+- Styles : `.landed` sur `.lx-fcard`, `.lx-mc`, `.ph-t`, `.lx-tbl tr` (fin d'`app.css`) ; sans animation si le système demande de réduire les mouvements.
+- **Non fait** : les dossiers synchronisés d'un Drive (arrivée au fil de l'eau) ne rebondissent pas.
