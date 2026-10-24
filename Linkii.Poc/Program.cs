@@ -213,6 +213,7 @@ app.Use(async (ctx, next) =>
             awaitsVerification = u.AwaitsVerification;
             roleChanged = !ctx.User.IsInRole(u.Role);   // administrateur de l'organisation ↔ membre : le cookie est refait
             stale = u.LastActiveUtc == null || DateTime.UtcNow - u.LastActiveUtc > TimeSpan.FromHours(1);
+            u.LastRequestUtc = DateTime.UtcNow;   // non persisté
             if (u.Role != Roles.PlatformAdmin && db.Resellers.FirstOrDefault(r => r.Id == u.ResellerId)?.Active != true) return false;
             if (cid == null) return true;
             var c = db.Clients.FirstOrDefault(x => x.Id == cid);

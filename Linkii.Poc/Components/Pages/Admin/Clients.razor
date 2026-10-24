@@ -68,6 +68,11 @@
         <option value="">Toutes les licences</option>
         @foreach (var p in Plans.All) { <option value="@p">@Plans.Label(p)</option> }
     </select>
+    <select @bind="conn" aria-label="Connexion au back-office">
+        <option value="">Connectés ou non</option>
+        <option value="on">Connectés</option>
+        <option value="off">Non connectés</option>
+    </select>
     <select @bind="source" aria-label="Origine">
         <option value="">Toutes les origines</option>
         @foreach (var s in SignupSources.All) { <option value="@s">@SignupSources.Label(s)</option> }
@@ -78,7 +83,7 @@
 <div class="adm-card" style="padding:0;overflow:hidden">
 <div class="tbl-scroll">
 <table class="adm-tbl adm-cards">
-    <thead><tr><th>Client</th><th>Licence</th><th>Écrans</th><th class="r">Utilisateurs</th><th>État</th><th></th></tr></thead>
+    <thead><tr><th>Client</th><th>Licence</th><th>Écrans</th><th class="c">Utilisateurs</th><th>Back-office</th><th>État</th><th></th></tr></thead>
     <tbody>
     @foreach (var c in Filtered)
     {
@@ -86,7 +91,7 @@
         <tr class="@(selId == c.Client.Id ? "sel" : "")" @onclick="() => OpenRow(row)">
             <td>
                 <div class="adm-who">
-                    <div class="adm-av" style="background:@AvatarColor(c.Client.Name)">@Initials(c.Client.Name)</div>
+                    <div class="adm-av" style="background:@AvatarColor(c.Client.Name)">@Initials(c.Client.Name)<i class="adm-dot @(c.Connected ? "on" : "off")" title="@(c.Connected ? "Connecté au back-office" : "Non connecté au back-office")"></i></div>
                     <div><b>@c.Client.Name</b><small>@c.Reseller · @c.Owner?.Email</small></div>
                 </div>
             </td>
@@ -95,12 +100,13 @@
                 <span class="m">@c.Online</span><span class="adm-sub" style="display:inline"> / @c.Screens</span><span class="u"> écrans</span>
                 <div class="adm-bar"><i style="width:@(c.Screens == 0 ? 0 : c.Online * 100 / c.Screens)%;background:@(c.Screens == 0 ? "#C5CED9" : c.Online == c.Screens ? "#1E8E5A" : c.Online > 0 ? "#D79A2B" : "#C8372D")"></i></div>
             </td>
-            <td class="r m">@c.Users.Total<span class="u"> utilisateur@(c.Users.Total > 1 ? "s" : "")</span></td>
+            <td class="c m">@c.Users.Total<span class="u"> utilisateur@(c.Users.Total > 1 ? "s" : "")</span></td>
+            <td><span class="adm-conn @(c.Connected ? "on" : "off")">@(c.Connected ? "Connecté" : "Non connecté")</span></td>
             <td class="st"><span class="adm-st @ClientStates.Css(c.State)">@c.State@(c.State == ClientStates.Trial ? $" · {c.Client.TrialDaysLeft(now)} j" : "")</span></td>
             <td class="r"><Ico Name="chevron-right" Size="16" /></td>
         </tr>
     }
-    @if (!Filtered.Any()) { <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:32px">@(clients.Count == 0 ? "Aucun client pour l'instant." : "Aucun client ne correspond à ces critères.")</td></tr> }
+    @if (!Filtered.Any()) { <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:32px">@(clients.Count == 0 ? "Aucun client pour l'instant." : "Aucun client ne correspond à ces critères.")</td></tr> }
     </tbody>
 </table>
 </div>
@@ -260,7 +266,7 @@
 }
 
 @code {
-    private record Row(Tenant Client, string Reseller, int Screens, int Online, UserStats Users, User? Owner, string State);
+    private record Row(Tenant Client, string Reseller, int Screens, int Online, UserStats Users, User? Owner, string State, bool Connected);
     private record ScreenLine(string Name, string Status, string Detail);
 
     [SupplyParameterFromQuery(Name = "etat")] public string? EtatParam { get; set; }
@@ -272,7 +278,7 @@
 
     private List<Row> clients = new();
     private List<Reseller> resellers = new();
-    private string state = "", plan = "", source = "", search = "";
+    private string state = "", plan = "", source = "", search = "", conn = "";
     private DateTime now = DateTime.UtcNow;
     private int trialDays = 7, purgeDays = 7;
 
@@ -296,6 +302,7 @@
 
     private IEnumerable<Row> Filtered => clients.Where(c => (state == "" || c.State == state)
         && (plan == "" || c.Client.Plan == plan)
+        && (conn == "" || (conn == "on") == c.Connected)
         && (source == "" || (source == "none" ? c.Client.SignupSource == null : c.Client.SignupSource == source))
         && (search.Trim() is not { Length: > 0 } q || c.Client.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
             || c.Owner?.Email.Contains(q, StringComparison.OrdinalIgnoreCase) == true || c.Reseller.Contains(q, StringComparison.OrdinalIgnoreCase)))
@@ -341,7 +348,8 @@
             var owner = Signup.OwnerOf(d, c);
             var scr = d.Screens.Where(s => s.ClientId == c.Id && s.Token != null).ToList();
             return new Row(c, d.Resellers.FirstOrDefault(r => r.Id == c.ResellerId)?.Name ?? "?", scr.Count,
-                scr.Count(s => s.LastSeenUtc is { } ls && now - ls <= TimeSpan.FromSeconds(90)), UserStats.Of(d, c), owner, ClientStates.Of(c, owner, now));
+                scr.Count(s => s.LastSeenUtc is { } ls && now - ls <= TimeSpan.FromSeconds(90)), UserStats.Of(d, c), owner, ClientStates.Of(c, owner, now),
+                d.Users.Any(u => u.ClientId == c.Id && Roles.IsClient(u.Role) && !u.Disabled && u.LastRequestUtc is { } lr && now - lr <= TimeSpan.FromMinutes(10)));
         }).ToList());
         if (selId != null) LoadDrawer();
     }

@@ -215,6 +215,7 @@ public class User
     public DateTime? LastLoginUtc { get; set; }
     public DateTime? WelcomeSentUtc { get; set; }   // e-mail de bienvenue envoyé (une seule fois par compte)
     public DateTime? LastActiveUtc { get; set; }   // dernière requête, mise à jour au plus une fois par heure : utilisateurs actifs sur 30 jours
+    [System.Text.Json.Serialization.JsonIgnore] public DateTime? LastRequestUtc { get; set; }   // dernière requête, en mémoire seulement : « connecté au back-office »
 
     /// <summary>Inscription par e-mail dont l'adresse n'est pas encore confirmée : seul l'écran « Vérifiez votre e-mail » est accessible.</summary>
     public bool AwaitsVerification => EmailVerifiedUtc == null && VerifyTokenHash != null;

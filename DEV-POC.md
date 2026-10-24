@@ -2178,3 +2178,11 @@ Remplace l'organisation en onglets Structure / Membres / Rôles et l'arbre du §
 - **Barre du haut** (`.ag-bar`) : totaux aires / zones / écrans, « Tout déplier » / « Tout replier ». Au départ, seule la première aire est dépliée (`IsOpen`, `areasTouched`) ; avant, tout l'était jusqu'à trois aires. Un clic sur l'aire ne l'ouvre plus dans le tiroir.
 - **CSS** : bloc `.ag-*` à la fin de `app.css`. Les anciennes classes `.og-tw` et `.og-z` ne servent plus à cette page.
 - **Non vérifié** : rendu navigateur (l'app de test verrouillait son .exe, build sans erreur de compilation), mobile (look « app »).
+
+## 121. Clients : état de connexion au back-office (24 octobre 2026) : codé, compile ; rendu navigateur non vérifié
+
+- **Pages** : liste des clients de la console (`Admin/Clients.razor`) et de l'espace revendeur (`ResellerSpace/Clients.razor`).
+- **Colonne « Back-office »** (« Connecté » vert / « Non connecté » rouge) et **filtre** « Connectés ou non / Connectés / Non connectés » (`conn`). La colonne Utilisateurs est centrée (`.c`). **Point vert ou rouge** en bas à droite de l'avatar (`.adm-dot`, survol = libellé).
+- **Définition** : un client est connecté si l'un de ses utilisateurs (rôle client, non désactivé) a fait une requête depuis moins de 10 minutes. Nouveau `User.LastRequestUtc`, **en mémoire seulement** (`[JsonIgnore]`), mis à jour dans le middleware d'authentification de `Program.cs` ; `LastActiveUtc` (horaire, persisté) est inchangé.
+- **Limites** : après un redémarrage tout le monde est « non connecté » jusqu'à la prochaine requête ; les actions dans un circuit Blazor déjà ouvert ne sont pas des requêtes, donc un client qui lit une page sans la recharger passe en rouge après 10 minutes. La vue mobile n'a pas de libellé dédié pour la colonne.
+- **Non vérifié** : rendu navigateur (l'app de test verrouillait son .exe ; build vérifié dans un dossier de sortie séparé).
