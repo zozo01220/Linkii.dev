@@ -125,7 +125,7 @@
       Q({ x: 80, y: 1620, w: 220, h: 220 }),
       T({ x: 340, y: 1660, w: 420, text: 'Inscription\net programme', size: 44, weight: 600, color: '#ffffff' }),
       W('countdown', { x: 720, y: 1665, w: 280, size: 96, weight: 800, color: '#F2B134', align: 'right', font: 'Montserrat' })] }
-  ];
+  ].concat(w.LinkiiCompoTemplates ? w.LinkiiCompoTemplates({ T, R, I, Q, W }) : []);   // modèles par secteur : compo-templates.js
   let samples = null;   // vignettes : un exemplaire de chaque modèle
   const ensureSamples = () => { if (!samples) samples = TPL.map(t => t.make()); };
 
