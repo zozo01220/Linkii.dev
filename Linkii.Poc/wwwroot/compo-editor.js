@@ -164,6 +164,7 @@
   }
 
   function unmount() {
+    closePreview();
     if (ac) ac.abort();
     if (timer) clearInterval(timer);
     if (root) root.innerHTML = '';
@@ -780,8 +781,10 @@
   function openPanel(n) { panelName = n; panelOpen = true; if (n !== 'medias') mediaMode = 'add'; renderPanel(); }
   function togglePanel() { panelOpen = !panelOpen; renderPanel(); render(); }
   function thumb(t, i, big) {
+    if (big) return `<div class="ce-thumb ce-mc" data-tpl="${i}" role="button" tabindex="0" aria-label="Aperçu de ${esc(t.name)}"><div class="ce-mcb"><div class="tv ${t.w >= t.h ? 'land' : 'port'}"><div class="mini" data-w="${t.w}" style="width:${t.w}px;height:${t.h}px;background:${t.bg}">${LC().html({ els: samples[i] }, {})}</div></div>
+      <div class="ce-mca"><button type="button" class="a" data-act="prev" tabindex="-1">${ICO.eye} Aperçu</button><button type="button" class="a p" data-act="use" tabindex="-1">Utiliser</button></div></div><div class="tn"><span>${esc(t.name)}</span></div></div>`;
     const tw = t.w >= t.h ? (big ? 250 : 136) : (big ? 140 : 77), s = tw / t.w;
-    return `<button class="ce-thumb" data-tpl="${i}"><div class="tv" style="height:${Math.round(t.h * s)}px;width:${tw}px"><div class="mini" style="width:${t.w}px;height:${t.h}px;transform:scale(${s});background:${t.bg}">${LC().html({ els: samples[i] }, {})}</div></div><div class="tn"><span>${esc(t.name)}</span><small>${t.w >= t.h ? '' : 'Portrait'}</small></div></button>`;
+    return `<button class="ce-thumb" data-tpl="${i}"><div class="tv" style="height:${Math.round(t.h * s)}px;width:${tw}px"><div class="mini" style="width:${t.w}px;height:${t.h}px;transform:scale(${s});background:${t.bg}">${LC().html({ els: samples[i] }, {})}</div></div><div class="tn"><span>${esc(t.name)}</span></div></button>`;
   }
   function renderPanel() {
     const p = q('#ce-panel');
@@ -873,7 +876,8 @@
       return;
     }
     const mt = ev.target.closest('[data-mytpl]'); if (mt) { const t = myTpl.find(x => x.id === mt.dataset.mytpl); if (t) loadDoc(t); return; }
-    const t = ev.target.closest('[data-tpl]'); if (t) loadTpl(TPL[+t.dataset.tpl]);
+    const t = ev.target.closest('[data-tpl]');
+    if (t) { const l = tplIndexes(tplCat); openPreview({ list: l, at: l.indexOf(+t.dataset.tpl), useLabel: 'Remplacer la page', use: i => { closePreview(); loadTpl(TPL[i]); } }); }
   }
   // vignette d'un modèle de « Mes modèles » (même rendu que l'écran)
   function myThumb(t) {
@@ -995,19 +999,137 @@
     clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), err ? 5000 : 2600);
   }
 
+  // ---------- aperçu d'un modèle (§115) : fenêtre centrée, page vivante, « page seule » ou « sur un écran », images d'exemple ----------
+  // openPreview({ list: numéros de modèles parcourus, at: position, useLabel, use(numéro) }) ; depuis la galerie et depuis le panneau « Modèles » de l'éditeur.
+  let pv = null, pvSamples = true;
+  const tplIndexes = cat => TPL.map((t, i) => i).filter(i => cat === 'Tous' || TPL[i].cat === cat);
+  const PV_PAL = [['#F2C18D', '#C8693F', '#7A3B2A'], ['#9DC7E8', '#4F86B8', '#24476B'], ['#B9D8A8', '#5E9B63', '#2D5B3A'], ['#E7B7C6', '#B9677F', '#6B2F45'], ['#C9C3E8', '#7C70B8', '#3D3478'], ['#F0DD9A', '#D4A23C', '#7A5A14']];
+  // visuel d'exemple dessiné (paysage stylisé) : sert à l'aperçu seulement, jamais enregistré avec le modèle
+  function sampleImg(t, e) {
+    const p = PV_PAL[(t.name.length + e.w) % PV_PAL.length];
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid slice"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${p[0]}"/><stop offset="1" stop-color="${p[1]}"/></linearGradient></defs><rect width="800" height="600" fill="url(#g)"/><circle cx="560" cy="170" r="70" fill="#fff" opacity=".55"/><path d="M0 600V400L190 250 360 420 520 300 800 470V600Z" fill="${p[2]}" opacity=".5"/><path d="M0 600V470L230 360 430 500 640 400 800 520V600Z" fill="${p[2]}" opacity=".8"/></svg>`;
+    return 'data:image/svg+xml,' + encodeURIComponent(svg);
+  }
+  const PV_LIVE = { clock: ['◷', 'heure en direct'], date: ['▦', 'mise à jour à minuit'], ticker: ['⇢', 'texte qui défile'], countdown: ['⏳', 'jours restants'] };
+  function pvRows(t) {
+    const els = t.make(), c = { text: 0, shape: 0, image: 0, qr: 0 }, live = [];
+    els.forEach(e => { if (e.type === 'widget') { if (!live.includes(e.kind)) live.push(e.kind); } else c[e.type] = (c[e.type] || 0) + 1; });
+    const row = (ic, cls, b, s, n) => `<div class="ce-pvr"><span class="ci ${cls}">${ic}</span><div><b>${b}</b>${s ? `<small>${s}</small>` : ''}</div>${n ? `<span class="n">${n}</span>` : ''}</div>`;
+    return row('T', '', 'Textes', '', c.text) + (c.shape ? row('▢', '', 'Formes et fonds', '', c.shape) : '') +
+      (c.image ? row(ICO.img, 'ph', 'Images à choisir', 'dans votre médiathèque', c.image) : '') + (c.qr ? row('▣', '', 'QR code', "lien à régler dans l'éditeur", c.qr) : '') +
+      live.map(k => row(PV_LIVE[k][0], 'live', WNAMES[k], PV_LIVE[k][1] + ' · en direct', '')).join('');
+  }
+  function openPreview(o) {
+    closePreview();
+    if (!o.list.length || o.at < 0) return;
+    LC().ensure();
+    const ov = document.createElement('div');
+    ov.className = 'ce-pv';
+    ov.innerHTML = `<div class="ce-pvd" role="dialog" aria-modal="true" aria-labelledby="ce-pvt">
+      <div class="ce-pvh"><div class="ce-pvtt"><h2 id="ce-pvt"></h2><div class="ce-pvm"></div></div>
+        <div class="ce-pvseg" role="group" aria-label="Affichage"><button type="button" data-v="page">Page seule</button><button type="button" data-v="screen">Sur un écran</button></div>
+        <button type="button" class="ce-pvx" data-pv="close" aria-label="Fermer l'aperçu">×</button></div>
+      <div class="ce-pvb"><div class="ce-pvs"><div class="ce-pva"><div class="ce-pvho"></div></div>
+          <button type="button" class="ce-pvn prev" data-pv="prev" aria-label="Modèle précédent">‹</button><button type="button" class="ce-pvn next" data-pv="next" aria-label="Modèle suivant">›</button><div class="ce-pvc"></div></div>
+        <aside class="ce-pvi"><h3>Ce que contient ce modèle</h3><div class="ce-pvl"></div>
+          <div class="ce-pvbx">Tout reste modifiable après coup (textes, couleurs, format). Rien n'est enregistré avant « Enregistrer ».</div>
+          <div class="ce-pvsw"><button type="button" class="ce-pvtg" data-pv="samples" role="switch" aria-label="Images d'exemple"></button><div><b>Images d'exemple</b><small>Pour l'aperçu seulement. À la création, les emplacements restent « Image à choisir » : vous mettez vos photos.</small></div></div>
+          <div class="ce-pvcta"><button type="button" class="ce-pvbtn" data-pv="use"></button><button type="button" class="ce-pvbtn ghost" data-pv="close">Fermer</button></div></aside></div>
+      <div class="ce-pvmob"><button type="button" class="ce-pvbtn ghost" data-pv="close">Fermer</button><button type="button" class="ce-pvbtn" data-pv="use"></button></div></div>`;
+    document.body.appendChild(ov);
+    pv = { ov, o, pos: o.at, view: 'page', from: document.activeElement, timer: setInterval(() => LC().tick(ov.querySelector('.ce-pvho')), 1000) };
+    ov.querySelectorAll('[data-pv=use]').forEach(b => { b.textContent = o.useLabel || 'Utiliser ce modèle'; });
+    pv.keys = ev => {
+      ev.stopImmediatePropagation();   // l'éditeur dessous ne doit pas réagir (flèches, Suppr, Ctrl+Z)
+      if (ev.key === 'Escape') { ev.preventDefault(); closePreview(); }
+      else if (ev.key === 'ArrowRight') { ev.preventDefault(); pvGo(1); }
+      else if (ev.key === 'ArrowLeft') { ev.preventDefault(); pvGo(-1); }
+      else if (ev.key === 'Tab') {   // le focus reste dans la fenêtre
+        const f = [...ov.querySelectorAll('button:not(:disabled)')].filter(b => b.offsetParent), a = document.activeElement;
+        if (!f.length) return;
+        if (!ov.contains(a)) { ev.preventDefault(); f[0].focus(); }
+        else if (ev.shiftKey && a === f[0]) { ev.preventDefault(); f[f.length - 1].focus(); }
+        else if (!ev.shiftKey && a === f[f.length - 1]) { ev.preventDefault(); f[0].focus(); }
+      }
+    };
+    pv.fit = () => pvFit();
+    document.addEventListener('keydown', pv.keys, true);
+    addEventListener('resize', pv.fit);
+    ov.addEventListener('click', ev => {
+      if (ev.target === ov) { closePreview(); return; }
+      const v = ev.target.closest('[data-v]'); if (v) { pv.view = v.dataset.v; pvShow(); return; }
+      const b = ev.target.closest('[data-pv]'); if (!b) return;
+      const a = b.dataset.pv;
+      if (a === 'close') closePreview();
+      else if (a === 'prev') pvGo(-1);
+      else if (a === 'next') pvGo(1);
+      else if (a === 'samples') { pvSamples = !pvSamples; pvShow(); }
+      else if (a === 'use') pv.o.use(pv.o.list[pv.pos]);
+    });
+    pvShow();
+    ov.querySelector('.ce-pvx').focus();
+  }
+  function closePreview() {
+    if (!pv) return;
+    const p = pv; pv = null;
+    clearInterval(p.timer);
+    document.removeEventListener('keydown', p.keys, true);
+    removeEventListener('resize', p.fit);
+    p.ov.remove();
+    if (p.from && p.from.isConnected && p.from.focus) p.from.focus();
+  }
+  function pvGo(d) { if (!pv) return; const n = pv.pos + d; if (n >= 0 && n < pv.o.list.length) { pv.pos = n; pvShow(); } }
+  function pvShow() {
+    const ov = pv.ov, l = pv.o.list, t = TPL[l[pv.pos]];
+    ov.querySelector('#ce-pvt').textContent = t.name;
+    ov.querySelector('.ce-pvm').innerHTML = `<span class="pill blue">${esc(t.cat)}</span><span class="pill">${t.w} × ${t.h} · ${t.w >= t.h ? 'Paysage' : 'Portrait'}</span>`;
+    ov.querySelectorAll('.ce-pvseg button').forEach(b => { const on = b.dataset.v === pv.view; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+    ov.querySelector('.ce-pvs').classList.toggle('wall', pv.view === 'screen');
+    ov.querySelector('.ce-pvc').innerHTML = `${pv.pos + 1} / ${l.length}<span class="ce-pvk"> · flèches du clavier pour parcourir · Échap pour fermer</span>`;
+    ov.querySelector('.ce-pvn.prev').disabled = pv.pos === 0;
+    ov.querySelector('.ce-pvn.next').disabled = pv.pos === l.length - 1;
+    const tg = ov.querySelector('.ce-pvtg'); tg.classList.toggle('on', pvSamples); tg.setAttribute('aria-checked', pvSamples);
+    const els = t.make();
+    if (pvSamples) els.forEach(e => { if (e.type === 'image' && !e.media) e.src = sampleImg(t, e); });
+    const inner = `<div class="st" style="width:${t.w}px;height:${t.h}px;background:${t.bg}">${LC().html({ els }, {})}</div>`;
+    ov.querySelector('.ce-pvho').innerHTML = pv.view === 'page' ? `<div class="ce-pvpg">${inner}</div>`
+      : `<div class="ce-pvtv"><div class="ce-pvbz"><div class="ce-pvsc">${inner}</div></div><div class="ce-pvst"></div></div>`;
+    LC().images(ov.querySelector('.ce-pvho'), (u, cb) => cb(u));
+    ov.querySelector('.ce-pvl').innerHTML = pvRows(t);
+    pvFit();
+  }
+  function pvFit() {
+    if (!pv) return;
+    const ov = pv.ov, t = TPL[pv.o.list[pv.pos]], a = ov.querySelector('.ce-pva'), phone = matchMedia('(max-width:720px)').matches;
+    const aw = a.clientWidth - (phone ? 24 : 130), ah = a.clientHeight - (phone ? 40 : 56);
+    const b = pv.view === 'screen' ? (phone ? 8 : 14) : 0, stand = pv.view === 'screen' ? (phone ? 16 : 24) : 0;
+    const s = Math.max(.05, Math.min((aw - 2 * b) / t.w, (ah - 2 * b - stand) / t.h)), w2 = t.w * s, h2 = t.h * s;
+    ov.querySelector('.ce-pvho .st').style.transform = `scale(${s})`;
+    const box = ov.querySelector(pv.view === 'page' ? '.ce-pvpg' : '.ce-pvsc');
+    box.style.width = w2 + 'px'; box.style.height = h2 + 'px';
+    if (pv.view === 'screen') ov.querySelector('.ce-pvbz').style.padding = b + 'px';
+  }
+
   // Galerie de modèles de la page Compositions : dotnet.Template(index) ouvre l'éditeur sur le modèle choisi.
   let galCat = 'Tous';
   function gallery(el, dotnet) {
     LC().ensure(); ensureSamples();
+    const fitGal = () => el.querySelectorAll('.ce-mc .tv').forEach(tv => { const m = tv.firstElementChild; if (tv.clientWidth) m.style.transform = `scale(${tv.clientWidth / +m.dataset.w})`; });
     const draw = () => {
       const cats = ['Tous', ...new Set(TPL.map(t => t.cat))];
       el.innerHTML = `<div class="ce-chips">${cats.map(c => `<button type="button" data-cat="${c}" class="${c === galCat ? 'on' : ''}">${c}</button>`).join('')}</div>
-        <div class="ce-tgrid ce-gal">${TPL.map((t, i) => [t, i]).filter(([t]) => galCat === 'Tous' || t.cat === galCat).map(([t, i]) => thumb(t, i, true)).join('')}</div>`;
+        <div class="ce-tgrid ce-gal">${tplIndexes(galCat).map(i => thumb(TPL[i], i, true)).join('')}</div>`;
+      fitGal();
     };
+    const open = i => { const l = tplIndexes(galCat); openPreview({ list: l, at: l.indexOf(i), use: n => { closePreview(); dotnet.invokeMethodAsync('Template', n); } }); };
     el.onclick = ev => {
       const c = ev.target.closest('[data-cat]'); if (c) { galCat = c.dataset.cat; draw(); return; }
-      const t = ev.target.closest('[data-tpl]'); if (t) dotnet.invokeMethodAsync('Template', +t.dataset.tpl);
+      const t = ev.target.closest('[data-tpl]'); if (!t) return;
+      const i = +t.dataset.tpl;
+      if (ev.target.closest('[data-act=use]')) dotnet.invokeMethodAsync('Template', i); else open(i);
     };
+    el.onkeydown = ev => { const t = ev.target.closest && ev.target.closest('.ce-mc'); if (t && ev.target === t && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); open(+t.dataset.tpl); } };
+    if (typeof ResizeObserver === 'function') new ResizeObserver(fitGal).observe(el);
     draw();
   }
 

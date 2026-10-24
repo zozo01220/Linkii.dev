@@ -2115,5 +2115,16 @@ Remplace l'organisation en onglets Structure / Membres / Rôles et l'arbre du §
 - **Total : 26** (galerie de la page Compositions et panneau « Modèles » de l'éditeur). Objectif annoncé : une cinquantaine, donc une ou deux séries de plus.
 - **Nouveaux (20)** : Restauration (Menu du jour, Happy hour), Hôtellerie (Bienvenue à l'hôtel, Nos services), Sport (Résultat du match, Cours collectifs), Entreprise (Réunions du jour, Employé du mois, Jours sans accident), Commerce (Soldes, Produit vedette), Santé (Salle d'attente, Gestes d'hygiène), Éducation (Menu de la cantine), Culture (Exposition, À l'affiche), Immobilier (Bien à vendre), Collectivité (Avis à la population), Transport (Prochains départs), Beauté (Carte des soins).
 - **Conception** : sans photo (emplacements « Image à choisir »), textes d'exemple en français, polices et widgets de l'éditeur seulement (horloge, date, compte à rebours, bandeau défilant, QR), 16:9 sauf Happy hour, Nos services et Exposition en portrait. Tout reste modifiable.
-- **Versions** : `compo-templates.js?v=1`, `compo-editor.js?v=86`.
+- **Versions** : `compo-templates.js?v=1`, `compo-editor.js?v=89`.
 - **Non vérifié** : les vraies polices (Google Fonts non chargées pendant ma vérification, texte rendu en police de repli) ; le texte long peut déborder avec la vraie police, à regarder dans la galerie.
+
+## 115. Galerie de compositions : aperçu d'un modèle (24 octobre 2026) : codé, compilé ; vu dans l'instance de test (ordinateur et téléphone), pas dans un vrai parcours client
+
+- **Maquette validée** : `maquettes/compositions-apercu-modele.html` (survol, aperçu page seule, sur un écran, téléphone). Décisions : fenêtre **centrée** (pas de tiroir du bas : un aperçu a besoin de largeur) et **images d'exemple** activées d'office.
+- **Cartes de la galerie** (`thumb(…, big)`) : case 16:9 (les modèles portrait y tiennent, fond gris), au survol deux boutons **Aperçu** et **Utiliser** (création directe, comme avant) ; un clic ou Entrée sur la carte ouvre l'aperçu. Pas de boutons sur appareil sans survol (appui = aperçu). Vignettes mises à l'échelle par `ResizeObserver`.
+- **Fenêtre d'aperçu** (`openPreview` / `closePreview`, `compo-editor.js` ; styles `.ce-pv*` de `compo-editor.css`) : page à grande taille et vivante (horloge, date, compte à rebours, bandeau en direct) ; bascule **Page seule / Sur un écran** (cadre de téléviseur, paysage ou portrait) ; ‹ › et flèches du clavier parcourent la liste filtrée ; Échap ferme ; focus piégé, rendu au bouton d'origine ; les touches ne traversent pas vers l'éditeur dessous.
+- **Panneau « Ce que contient ce modèle »** calculé depuis le modèle : textes, formes, images à choisir, QR code, widgets en direct. Interrupteur **Images d'exemple** : visuels dessinés en SVG (`sampleImg`), **posés seulement dans l'aperçu** (`e.src` d'un calque de l'aperçu), jamais dans le modèle ni dans la composition créée, qui garde ses emplacements « Image à choisir ». Le choix n'est pas retenu d'une visite à l'autre.
+- **Depuis l'éditeur** : un clic sur un modèle du panneau « Modèles » ouvre la même fenêtre, bouton **Remplacer la page** (Ctrl+Z revient en arrière, comme avant).
+- **Téléphone** (≤ 720 px) : feuille plein écran, page en haut, contenu dessous, barre du bas « Fermer / Utiliser ce modèle ».
+- **Versions** : `compo-editor.js?v=89`, `compo-editor.css?v=6` (page Compositions et éditeur).
+- **Non vérifié** : lecteur d'écran sur la fenêtre ; un seul modèle dans un filtre (flèches grisées) ; un très petit écran en paysage ; Safari.
