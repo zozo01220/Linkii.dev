@@ -18,7 +18,7 @@
         <h1>Compositions</h1>
         <p class="sub">Vos propres pages d'affichage : textes, formes, images, QR codes et horloge, à placer dans vos listes de lecture.</p>
     </div>
-    @if (installed)
+    @if (installed && canWrite)
     {
         <div class="row head-actions">
             <button type="button" class="btn" data-fab="Créer une composition" @onclick="Create"><Ico Name="plus" Size="16" /> Créer une composition</button>
@@ -36,26 +36,33 @@
 }
 else
 {
-    <nav class="tabs" role="tablist" aria-label="Mes compositions et modèles">
-        <button type="button" role="tab" class="@(tab == "mine" ? "on" : "")" aria-selected="@(tab == "mine" ? "true" : "false")" @onclick='() => SetTab("mine")'>Mes compositions <span class="cat-count">@items.Count</span></button>
+    @* Onglets (24 octobre 2026) : ses compositions, celles qu'on lui partage, et pour l'administrateur toute l'organisation ; puis les modèles.
+       Seul dans l'organisation ou en lecture seule : un seul onglet « Compositions » (tout). *@
+    <nav class="tabs" role="tablist" aria-label="Compositions et modèles">
+        @foreach (var t in Tabs)
+        {
+            var key = t.Key;
+            <button type="button" role="tab" class="@(tab == key ? "on" : "")" aria-selected="@(tab == key ? "true" : "false")" @onclick="() => SetTab(key)">@t.Label @if (t.Count > 0) { <span class="cat-count">@t.Count</span> }</button>
+        }
         <button type="button" role="tab" class="@(tab == "models" ? "on" : "")" aria-selected="@(tab == "models" ? "true" : "false")" @onclick='() => SetTab("models")'>Modèles</button>
     </nav>
 
-    @if (tab == "mine") { <NewMark Kind="composition" Ids="@items.Select(c => c.Id)" /> }
-    else if (tab == "models" && sub == "mine") { <NewMark Kind="template" Ids="@templates.Select(t => t.Id)" /> }
+    @if (tab != "models") { <NewMark Kind="composition" Ids="@items.Select(c => c.Id)" /> }
+    else if (sub != "gallery") { <NewMark Kind="template" Ids="@templates.Select(t => t.Id)" /> }
 
     @if (tab == "models")
     {
         <div class="cmp-sub" role="tablist" aria-label="Galerie et Mes modèles">
             <button type="button" role="tab" class="@(sub == "gallery" ? "on" : "")" aria-selected="@(sub == "gallery" ? "true" : "false")" @onclick='() => SetSub("gallery")'>Galerie</button>
-            <button type="button" role="tab" class="@(sub == "mine" ? "on" : "")" aria-selected="@(sub == "mine" ? "true" : "false")" @onclick='() => SetSub("mine")'>Mes modèles <span class="cat-count">@templates.Count</span></button>
+            <button type="button" role="tab" class="@(sub == "mine" ? "on" : "")" aria-selected="@(sub == "mine" ? "true" : "false")" @onclick='() => SetSub("mine")'>Mes modèles <span class="cat-count">@MyTemplates.Count</span></button>
+            @if (SharedTemplates.Count > 0) { <button type="button" role="tab" class="@(sub == "shared" ? "on" : "")" aria-selected="@(sub == "shared" ? "true" : "false")" @onclick='() => SetSub("shared")'>Partagés avec moi <span class="cat-count">@SharedTemplates.Count</span></button> }
         </div>
         @if (sub == "gallery")
         {
             <p class="hint cmp-hint">Choisissez un modèle pour démarrer : tout reste modifiable, et rien n'est enregistré tant que vous ne l'avez pas fait.</p>
             <div @key="galKey" @ref="gal"></div>
         }
-        else if (templates.Count == 0)
+        else if (ShownTemplates.Count == 0)
         {
             <div class="empty">
                 <div class="big">Aucun modèle pour l'instant</div>
@@ -64,11 +71,13 @@ else
         }
         else
         {
-            <p class="hint cmp-hint">Vos modèles, partagés avec l'aire de gestion. Partir d'un modèle crée une nouvelle composition ; le modèle ne change pas.</p>
+            <p class="hint cmp-hint">@(sub == "shared" ? "Les modèles que des collègues vous partagent." : "Vos modèles.") Partir d'un modèle crée une nouvelle composition ; le modèle ne change pas.</p>
             <div class="cmp-grid">
-                @foreach (var t in templates)
+                @foreach (var t in ShownTemplates)
                 {
                     var tp = t;
+                    var tr = tplRights.GetValueOrDefault(tp.Id);
+                    var tsum = tplShares.GetValueOrDefault(tp.Id, ShareSummary.None);
                     var tsize = Compositions.Size(new Dictionary<string, string> { ["doc"] = tp.Doc });
                     <article class="cmp-card" data-nid="@tp.Id">
                         <button type="button" class="cmp-open cmp-use" @onclick="() => UseTemplate(tp)" aria-label="Créer une composition à partir de « @tp.Name »"><CompositionThumb Item="TemplateItem(tp)" Files="files" Contain Label="@("Aperçu de " + tp.Name)" /></button>
@@ -82,20 +91,31 @@ else
                                         <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
                                         <div class="kebab-menu" role="menu">
                                             <button type="button" role="menuitem" @onclick="() => UseTemplate(tp)"><Ico Name="plus" Size="16" /> Créer une composition</button>
-                                            <button type="button" role="menuitem" @onclick="() => StartRename(tp.Id, tp.Name, true)"><Ico Name="edit" Size="16" /> Renommer…</button>
-                                            <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deletingTpl = tp; }"><Ico Name="trash" Size="16" /> Supprimer…</button>
+                                            @if (multi && tr == FolderRight.Owner) { <button type="button" role="menuitem" @onclick="() => Share(ShareKind.Template, tp.Id, tp.Name)"><Ico Name="share" Size="16" /> Partager…</button> }
+                                            @if (tr >= FolderRight.Write) { <button type="button" role="menuitem" @onclick="() => StartRename(tp.Id, tp.Name, true)"><Ico Name="edit" Size="16" /> Renommer…</button> }
+                                            @if (sub == "shared") { <button type="button" role="menuitem" class="danger" @onclick="() => Leave(ShareKind.Template, tp.Id, tp.Name)"><Ico Name="eye-off" Size="16" /> Ne plus voir</button> }
+                                            @if (tr == FolderRight.Owner) { <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deletingTpl = tp; }"><Ico Name="trash" Size="16" /> Supprimer…</button> }
                                         </div>
                                     }
                                 </div>
                             </div>
                             <span class="cmp-m">@(tsize is { } ts ? $"{ts.W} × {ts.H}" : "Format inconnu") · ajouté le @tp.CreatedUtc.ToLocalTime().ToString("d MMMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("fr-CH"))</span>
+                            @if (OwnerName(tp.OwnerId) is { } tow) { <span class="lx-chip cmp-own" title="Modèle de @tow"><Ico Name="users" Size="12" /> @First(tow)</span> }
+                            else if (tsum.Any) { <SharePill Summary="tsum" Clickable="multi && tr == FolderRight.Owner" OnClick="() => Share(ShareKind.Template, tp.Id, tp.Name)" /> }
                         </div>
                     </article>
                 }
             </div>
         }
     }
-    else if (items.Count == 0)
+    else if (Shown.Count == 0 && tab == LibraryTab.Shared)
+    {
+        <div class="empty">
+            <div class="big">Rien n'a encore été partagé avec vous</div>
+            <p>Quand un collègue vous partage une composition, elle apparaît ici. Vous pouvez la placer dans vos listes de lecture, ou la dupliquer pour l'adapter.</p>
+        </div>
+    }
+    else if (Shown.Count == 0)
     {
         <div class="empty">
             <div class="big">Aucune composition</div>
@@ -109,13 +129,16 @@ else
     else
     {
         <div class="cmp-grid">
-            @foreach (var c in items)
+            @foreach (var c in Shown)
             {
                 var it = c;
                 var lists = usage.GetValueOrDefault(it.Id) ?? new();
                 var size = Compositions.Size(it.Settings);
+                var r = rights.GetValueOrDefault(it.Id);
+                var csum = shares.GetValueOrDefault(it.Id, ShareSummary.None);
                 <article class="cmp-card" data-nid="@it.Id">
-                    <a class="cmp-open" href="/compositions/@it.Id" aria-label="Modifier « @it.Name »"><CompositionThumb Item="it" Files="files" Contain Label="@("Aperçu de " + it.Name)" /></a>
+                    @if (r >= FolderRight.Write) { <a class="cmp-open" href="/compositions/@it.Id" aria-label="Modifier « @it.Name »"><CompositionThumb Item="it" Files="files" Contain Label="@("Aperçu de " + it.Name)" /></a> }
+                    else { <div class="cmp-open" title="Lecture seule : dupliquez-la pour l'adapter"><CompositionThumb Item="it" Files="files" Contain Label="@("Aperçu de " + it.Name)" /></div> }
                     <div class="cmp-info">
                         <div class="cmp-t">
                             <b title="@it.Name">@it.Name</b>
@@ -125,16 +148,23 @@ else
                                 {
                                     <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
                                     <div class="kebab-menu" role="menu">
-                                        <a role="menuitem" href="/compositions/@it.Id"><Ico Name="edit" Size="16" /> Modifier</a>
-                                        <button type="button" role="menuitem" @onclick="() => StartRename(it.Id, it.Name, false)"><Ico Name="pencil-square" Size="16" /> Renommer…</button>
-                                        <button type="button" role="menuitem" @onclick="() => Duplicate(it)"><Ico Name="copy" Size="16" /> Dupliquer</button>
-                                        <button type="button" role="menuitem" @onclick="() => SaveAsTemplate(it)"><Ico Name="grid" Size="16" /> Enregistrer comme modèle</button>
-                                        <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = it; }"><Ico Name="trash" Size="16" /> Supprimer…</button>
+                                        @if (r >= FolderRight.Write)
+                                        {
+                                            <a role="menuitem" href="/compositions/@it.Id"><Ico Name="edit" Size="16" /> Modifier</a>
+                                            <button type="button" role="menuitem" @onclick="() => StartRename(it.Id, it.Name, false)"><Ico Name="pencil-square" Size="16" /> Renommer…</button>
+                                        }
+                                        @if (canWrite) { <button type="button" role="menuitem" @onclick="() => Duplicate(it)"><Ico Name="copy" Size="16" /> Dupliquer</button> }
+                                        @if (multi && r == FolderRight.Owner) { <button type="button" role="menuitem" @onclick="() => Share(ShareKind.Composition, it.Id, it.Name)"><Ico Name="share" Size="16" /> Partager…</button> }
+                                        @if (canWrite) { <button type="button" role="menuitem" @onclick="() => SaveAsTemplate(it)"><Ico Name="grid" Size="16" /> Enregistrer comme modèle</button> }
+                                        @if (tab == LibraryTab.Shared && tabs.GetValueOrDefault(it.Id)?.SharedIn == true) { <button type="button" role="menuitem" class="danger" @onclick="() => Leave(ShareKind.Composition, it.Id, it.Name)"><Ico Name="eye-off" Size="16" /> Ne plus voir</button> }
+                                        @if (r == FolderRight.Owner) { <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = it; }"><Ico Name="trash" Size="16" /> Supprimer…</button> }
                                     </div>
                                 }
                             </div>
                         </div>
                         <span class="cmp-m">@(size is { } s ? $"{s.W} × {s.H}" : "Format inconnu") · @(lists.Count == 0 ? "dans aucune liste" : lists.Count == 1 ? "dans « " + lists[0] + " »" : $"dans {lists.Count} listes")</span>
+                        @if (OwnerName(it.OwnerId) is { } ow) { <span class="lx-chip cmp-own" title="@OwnerTitle(ow, r)"><Ico Name="users" Size="12" /> @First(ow)</span> }
+                        else if (csum.Any) { <SharePill Summary="csum" Clickable="multi && r == FolderRight.Owner" OnClick="() => Share(ShareKind.Composition, it.Id, it.Name)" /> }
                     </div>
                 </article>
             }
@@ -188,9 +218,56 @@ else
     </div>
 }
 
+@if (sharing is { } sh)
+{
+    <ShareDialog Kind="@sh.Kind" Items="new() { (sh.Id, sh.Name) }" OnClose="() => sharing = null" OnShared="Load" />
+}
+
 @code {
     private bool installed;
-    private string tab = "mine", sub = "gallery";
+    private string tab = LibraryTab.Mine, sub = "gallery";
+
+    // ---------- Propriétaire, onglets et partage (24 octobre 2026) : comme la médiathèque ----------
+    private Guid? me;
+    private bool multi, readAll, isAdmin, canWrite;
+    private Dictionary<Guid, FolderRight> rights = new(), tplRights = new();
+    private Dictionary<Guid, LibraryTab.Info> tabs = new(), tplTabs = new();
+    private Dictionary<Guid, ShareSummary> shares = new(), tplShares = new();
+    private Dictionary<Guid, string> people = new();
+    private (string Kind, Guid Id, string Name)? sharing;
+    private record TabItem(string Key, string Label, int Count);
+
+    private List<MediaItem> Shown => items.Where(m => tabs.TryGetValue(m.Id, out var i) ? LibraryTab.InTab(tab, i, me, isAdmin) : tab == LibraryTab.All).ToList();
+    private List<CompositionTemplate> MyTemplates => templates.Where(t => !tplTabs.TryGetValue(t.Id, out var i) || readAll || LibraryTab.IsMine(i, me, isAdmin)).ToList();
+    private List<CompositionTemplate> SharedTemplates => readAll ? new() : templates.Where(t => tplTabs.TryGetValue(t.Id, out var i) && LibraryTab.InTab(LibraryTab.Shared, i, me, isAdmin)).ToList();
+    private List<CompositionTemplate> ShownTemplates => sub == "shared" ? SharedTemplates : MyTemplates;
+
+    private List<TabItem> Tabs => !multi || readAll
+        ? new() { new(LibraryTab.All, "Compositions", items.Count) }
+        : new List<TabItem>
+        {
+            new(LibraryTab.Mine, "Mes compositions", items.Count(m => tabs.TryGetValue(m.Id, out var i) && LibraryTab.IsMine(i, me, isAdmin))),
+            new(LibraryTab.Shared, "Partagées avec moi", items.Count(m => tabs.TryGetValue(m.Id, out var i) && LibraryTab.InTab(LibraryTab.Shared, i, me, isAdmin)))
+        }.Concat(isAdmin ? [new TabItem(LibraryTab.All, "Toute l'organisation", 0)] : Array.Empty<TabItem>()).ToList();
+
+    // Élément d'un autre : nom de son propriétaire (null : le sien, ou un élément de l'organisation vu par un administrateur)
+    private string? OwnerName(Guid? owner) =>
+        !multi || owner is { } o && o == me ? null : owner is { } o2 && people.TryGetValue(o2, out var n) ? n : isAdmin ? null : "l'organisation";
+    private static string OwnerTitle(string owner, FolderRight r) => $"Composition de {owner}, " + (r >= FolderRight.Write ? "vous pouvez la modifier" : "vous pouvez l'utiliser");
+    private static string First(string name) => name.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? name;
+
+    private void Share(string kind, Guid id, string name) { menuFor = null; sharing = (kind, id, name); }
+
+    private void Leave(string kind, Guid id, string name)
+    {
+        menuFor = null;
+        string? err;
+        try { err = Store.Write(d => ItemShareOps.Leave(d, kind, id)); }
+        catch (UnauthorizedAccessException e) { err = e.Message; }
+        if (err != null) { Toast.Error(err); return; }
+        Toast.Ok($"« {name} » n'apparaît plus dans vos partages.");
+        Load();
+    }
     private List<MediaItem> items = new(), files = new();
     private List<CompositionTemplate> templates = new();
     private Dictionary<Guid, List<string>> usage = new();
@@ -207,6 +284,7 @@ else
     protected override void OnInitialized()
     {
         Svc.InstallsChanged += OnInstalls;
+        tab = Store.Read(d => d.Users.FirstOrDefault(u => u.Id == d.Access.UserId)?.LibraryTabs.GetValueOrDefault("compositions")) ?? LibraryTab.Mine;
         Load();
     }
 
@@ -217,7 +295,23 @@ else
     {
         installed = Svc.IsInstalled(Compositions.AppId);
         items = Svc.Instances(Compositions.AppId);
-        templates = Store.Read(d => d.CompositionTemplates.OrderByDescending(t => t.CreatedUtc).ToList());
+        templates = Store.Read(d => CompositionTemplates.Visible(d).OrderByDescending(t => t.CreatedUtc).ToList());
+        (me, multi, isAdmin, canWrite, people) = Store.Read(d => (d.Access.UserId, d.Users.Count(u => !u.Disabled) > 1, d.Access.IsOrgAdmin,
+            d.Access.CanWrite(LevelPages.Media), d.Users.ToDictionary(u => u.Id, u => u.Label)));
+        readAll = !isAdmin && !canWrite;   // médiathèque (et donc compositions) en « Voit tout · lecture seule »
+        (rights, tabs, shares, tplRights, tplTabs, tplShares) = Store.Read(d => (
+            items.ToDictionary(m => m.Id, m => CompositionRights.RightOf(d, m)),
+            items.ToDictionary(m => m.Id, m => CompositionRights.TabOf(d, ShareKind.Composition, m.Id, m.OwnerId)),
+            ItemShareOps.Summaries(d, ShareKind.Composition),
+            templates.ToDictionary(t => t.Id, t => CompositionRights.RightOf(d, t)),
+            templates.ToDictionary(t => t.Id, t => CompositionRights.TabOf(d, ShareKind.Template, t.Id, t.OwnerId)),
+            ItemShareOps.Summaries(d, ShareKind.Template)));
+        if (tab != "models")
+        {
+            if (!multi || readAll) tab = LibraryTab.All;
+            else if (tab == LibraryTab.All && !isAdmin) tab = LibraryTab.Mine;
+        }
+        if (sub == "shared" && SharedTemplates.Count == 0) sub = "mine";
         files = Library.PickableFiles().Where(m => m.Type == "image" && m.Status == null && m.FileName != null).ToList();
         usage = Store.Read(d => d.Playlists.SelectMany(p => p.Draft.Select(i => (i.MediaId, p.Name)))
             .Where(x => items.Any(c => c.Id == x.MediaId)).GroupBy(x => x.MediaId).ToDictionary(g => g.Key, g => g.Select(x => x.Name).Distinct().ToList()));
@@ -226,7 +320,13 @@ else
     // La vignette d'un modèle utilise le même rendu qu'une composition
     private static MediaItem TemplateItem(CompositionTemplate t) => new() { Id = t.Id, Name = t.Name, Settings = new() { ["doc"] = t.Doc } };
 
-    private void SetTab(string t) { tab = t; menuFor = null; galDrawn = false; galKey++; }
+    private void SetTab(string t)
+    {
+        tab = t; menuFor = null; galDrawn = false; galKey++;
+        if (t == "models") return;
+        try { Store.Write(d => { if (d.Users.FirstOrDefault(u => u.Id == d.Access.UserId) is { } u) u.LibraryTabs["compositions"] = t; }); }
+        catch (UnauthorizedAccessException) { }   // lecture seule : l'onglet n'est pas retenu
+    }
     private void SetSub(string s) { sub = s; menuFor = null; galDrawn = false; galKey++; }
 
     private void Create() => Nav.NavigateTo("/compositions/new?back=%2Fcompositions");
@@ -269,7 +369,7 @@ else
     {
         menuFor = null;
         string? err;
-        try { err = Store.Write(d => CompositionTemplates.Save(d, it.Name, it.Settings.GetValueOrDefault("doc") ?? "", Store.UserId).Error); }
+        try { err = Store.Write(d => CompositionTemplates.Save(d, it.Name, it.Settings.GetValueOrDefault("doc") ?? "").Error); }
         catch (UnauthorizedAccessException e) { err = e.Message; }
         if (err != null) { Toast.Error(err); return; }
         Toast.Ok($"« {it.Name} » ajouté à Mes modèles.");

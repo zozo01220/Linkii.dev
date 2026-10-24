@@ -1,0 +1,295 @@
+@inject TenantStore Store
+@inject TenantContext Ctx
+@inject Mailer Mail
+@inject ResellerResolver Resolver
+@inject NavigationManager Nav
+@inject Toaster Toast
+@inject AlertService Alerter
+
+@* Fiche membre (24 octobre 2026, maquette membres-proprietaire-partage.html, option A) : tout se règle ici, à la création comme à l'édition.
+   Un rôle (Utilisateur ou Administrateur) ; pour un utilisateur, un choix par page (« Gère les siens » ou « Voit tout · lecture seule ») et ses écrans. *@
+<Sheet Title="@(isNew ? "Nouveau membre" : name)" Sub="@(isNew ? "La personne reçoit une invitation par e-mail." : email)" OnClose="Cancel">
+    <ChildContent>
+        <div class="og-form mb-form">
+            @if (isNew)
+            {
+                <div class="form-grid">
+                    <div><label class="lbl" for="mb-name" style="margin-top:0">Nom</label><input id="mb-name" class="full" maxlength="80" @bind="name" @bind:event="oninput" placeholder="Prénom Nom" /></div>
+                    <div><label class="lbl" for="mb-mail" style="margin-top:0">E-mail</label><input id="mb-mail" class="full" type="email" maxlength="120" @bind="email" autocomplete="off" placeholder="prenom.nom@organisation.ch" /></div>
+                </div>
+            }
+            else
+            {
+                <div class="og-state">
+                    <span class="pill @(status == "Actif" ? "ok" : status == "Invité" ? "warn" : "")">@status</span>
+                    @if (status == "Invité") { <button type="button" class="linklike" disabled="@busy" @onclick="Resend">Renvoyer l'invitation</button> }
+                    <span class="grow"></span>
+                    <label class="lbl" for="mb-name2" style="margin:0">Nom</label><input id="mb-name2" maxlength="80" @bind="name" style="max-width:260px" />
+                </div>
+            }
+
+            <div>
+                <div class="lbl" style="margin-top:0">Rôle</div>
+                <div class="mb-choice">
+                    <button type="button" class="@(admin ? "" : "on")" aria-pressed="@(admin ? "false" : "true")" disabled="@(self && admin)" @onclick="() => { admin = false; error = null; }"><b>Utilisateur</b><span>Gère ce qu'il crée et les écrans qu'on lui attribue</span></button>
+                    <button type="button" class="@(admin ? "on" : "")" aria-pressed="@(admin ? "true" : "false")" @onclick="() => { admin = true; error = null; }"><b>Administrateur</b><span>Voit et gère tout, crée des membres</span></button>
+                </div>
+            </div>
+
+            @if (!admin)
+            {
+                <div>
+                    <div class="lbl" style="margin-top:0">Dans chaque page</div>
+                    <div class="mb-pages">
+                        <div class="mb-prow">
+                            <div><b>Écrans</b><small>@(rights.Screens == PageMode.Own ? "seulement ceux attribués" : "tous, sans les régler")</small></div>
+                            @Seg(rights.Screens, v => rights.Screens = v)
+                        </div>
+                        @if (rights.Screens == PageMode.Own)
+                        {
+                            <div class="mb-scr">
+                                <div class="mb-scrh">
+                                    <span>Ses écrans : <b>@MyScreens.Count sur @screens.Count</b></span>
+                                    @foreach (var c in Chips()) { <span class="pill @(c.Zone ? "blue" : "")">@c.Text</span> }
+                                    @if (!Chips().Any()) { <span class="muted">aucun pour l'instant</span> }
+                                    <span class="grow"></span>
+                                    <button type="button" class="linklike" @onclick="() => pick = !pick">@(pick ? "Fermer" : "Choisir les écrans")</button>
+                                </div>
+                                @if (pick)
+                                {
+                                    <div class="mb-zgrid">
+                                        @foreach (var a in areas)
+                                        {
+                                            @foreach (var z in a.Zones)
+                                            {
+                                                var zone = z;
+                                                var inZone = screens.Where(s => s.ZoneId == zone.Id).ToList();
+                                                var zOn = rights.ZoneIds.Contains(zone.Id);
+                                                <div class="mb-z">
+                                                    <div class="mb-l"><button type="button" class="og-ck @(zOn ? "on" : "")" aria-pressed="@(zOn ? "true" : "false")" aria-label="Toute la zone @zone.Name" @onclick="() => ToggleZone(zone.Id)"></button><b>@(areas.Count > 1 ? $"{a.Name} › {zone.Name}" : zone.Name)</b><small>toute la zone</small></div>
+                                                    @foreach (var s in inZone)
+                                                    {
+                                                        var scr = s;
+                                                        var on = zOn || rights.ScreenIds.Contains(scr.Id);
+                                                        <div class="mb-l sc"><button type="button" class="og-ck @(on ? "on" : "") @(zOn ? "dim" : "")" aria-pressed="@(on ? "true" : "false")" aria-label="@scr.Name" @onclick="() => ToggleScreen(scr, zOn)"></button>@scr.Name</div>
+                                                    }
+                                                    @if (inZone.Count == 0) { <div class="mb-l sc muted">aucun écran</div> }
+                                                </div>
+                                            }
+                                        }
+                                    </div>
+                                    <p class="hint" style="margin:8px 0 0">Cocher une zone donne aussi les écrans qu'on y ajoutera plus tard. Un écran que la personne connecte elle-même lui est attribué d'office.</p>
+                                }
+                            </div>
+                        }
+                        <div class="mb-prow">
+                            <div><b>Médiathèque</b><small>@(rights.Media == PageMode.Own ? "ses médias et ses dossiers" : "tous les médias, sans les modifier")</small></div>
+                            @Seg(rights.Media, v => rights.Media = v)
+                        </div>
+                        <div class="mb-prow">
+                            <div><b>Listes de lecture</b><small>@(rights.Playlists == PageMode.Own ? "ses listes et ses dossiers" : "toutes les listes, sans les modifier")</small></div>
+                            @Seg(rights.Playlists, v => rights.Playlists = v)
+                        </div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <p class="hint" style="margin:0">Un administrateur n'a rien à régler : il voit et gère tout. Dans la médiathèque et les listes, il bascule entre « Mes … » et « Toute l'organisation ».</p>
+            }
+            <div class="og-sum">@Summary()</div>
+            @if (error != null) { <div class="err">@error</div> }
+        </div>
+    </ChildContent>
+    <Foot>
+        @if (isNew)
+        {
+            <select class="mb-copy" aria-label="Copier les accès d'un autre membre" @onchange="CopyFrom">
+                <option value="">Copier les accès de…</option>
+                @foreach (var u in users.Where(u => u.Role == Roles.ClientMember)) { <option value="@u.Id">@u.Label</option> }
+            </select>
+        }
+        else if (!self)
+        {
+            <button type="button" class="linklike og-del" @onclick="ToggleDisabled">@(status == "Désactivé" ? "Réactiver" : "Désactiver")</button>
+            <button type="button" class="linklike og-del" @onclick="() => confirmRemove = true">Retirer de l'organisation</button>
+        }
+        <span class="grow"></span>
+        <button type="button" class="btn ghost" @onclick="Cancel">Annuler</button>
+        <button type="button" class="btn" disabled="@busy" @onclick="Save">@(isNew ? (busy ? "Envoi…" : "Envoyer l'invitation") : "Enregistrer")</button>
+    </Foot>
+</Sheet>
+
+@if (confirmRemove)
+{
+    <Sheet Title="@($"Retirer {name} de l'organisation ?")" Over="true" Class="sm" OnClose="() => confirmRemove = false">
+        <ChildContent><p class="hint" style="margin:0">La personne ne pourra plus se connecter. Ses médias, ses listes de lecture et ses dossiers vous reviennent, avec leurs partages. Les écrans ne changent pas.</p></ChildContent>
+        <Foot>
+            <span class="grow"></span>
+            <button type="button" class="btn ghost" @onclick="() => confirmRemove = false">Annuler</button>
+            <button type="button" class="btn danger-solid" @onclick="Remove">Retirer</button>
+        </Foot>
+    </Sheet>
+}
+
+@code {
+    /// <summary>La personne à modifier ; null : nouveau membre.</summary>
+    [Parameter] public Guid? UserId { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>Enregistré, invité, désactivé ou retiré : la page recharge sa liste.</summary>
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private List<Area> areas = new();
+    private List<Screen> screens = new();
+    private List<User> users = new();
+    private MemberRights rights = new();
+    private bool isNew, admin, self, busy, pick, confirmRemove;
+    private string name = "", email = "", status = "", orgName = "";
+    private string? error;
+
+    protected override void OnInitialized()
+    {
+        isNew = UserId == null;
+        User? user = null;
+        (areas, screens, users, orgName, user) = Store.Read(d => (
+            d.Areas.OrderBy(a => a.CreatedUtc).ToList(),
+            d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.Token != null).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
+            d.Users.OrderBy(u => u.Label, StringComparer.CurrentCultureIgnoreCase).ToList(),
+            d.Tenant.Name, UserId is { } id ? d.Users.FirstOrDefault(u => u.Id == id) : null));
+        if (user != null)
+        {
+            name = user.Name; email = user.Email; status = OrgView.StatusOf(user);
+            admin = user.Role == Roles.ClientAdmin;
+            self = user.Id == Ctx.UserId;
+            rights = (user.Rights ?? new MemberRights()).Copy();
+        }
+        pick = isNew;
+    }
+
+    private RenderFragment Seg(string value, Action<string> set) => __builder =>
+    {
+        <div class="tb-seg mb-seg" role="group">
+            <button type="button" class="@(value == PageMode.Own ? "on" : "")" aria-pressed="@(value == PageMode.Own ? "true" : "false")" @onclick="() => set(PageMode.Own)">Gère les siens</button>
+            <button type="button" class="@(value == PageMode.Read ? "on" : "")" aria-pressed="@(value == PageMode.Read ? "true" : "false")" @onclick="() => set(PageMode.Read)"><Ico Name="eye" Size="13" /> Voit tout · lecture seule</button>
+        </div>
+    };
+
+    private List<Screen> MyScreens => screens.Where(s => s.ZoneId is { } z && rights.ZoneIds.Contains(z) || rights.ScreenIds.Contains(s.Id)).ToList();
+
+    private record Chip(string Text, bool Zone);
+    private IEnumerable<Chip> Chips()
+    {
+        foreach (var a in areas)
+            foreach (var z in a.Zones.Where(z => rights.ZoneIds.Contains(z.Id)))
+                yield return new Chip($"{(areas.Count > 1 ? a.Name + " › " : "")}{z.Name} · {screens.Count(s => s.ZoneId == z.Id)}", true);
+        foreach (var s in screens.Where(s => rights.ScreenIds.Contains(s.Id) && !(s.ZoneId is { } z && rights.ZoneIds.Contains(z))))
+            yield return new Chip(s.Name, false);
+    }
+
+    private void ToggleZone(Guid id) { if (!rights.ZoneIds.Remove(id)) rights.ZoneIds.Add(id); }
+    private void ToggleScreen(Screen s, bool viaZone)
+    {
+        if (viaZone) { Toast.Error("Déjà compris dans la zone : décochez la zone pour choisir écran par écran."); return; }
+        if (!rights.ScreenIds.Remove(s.Id)) rights.ScreenIds.Add(s.Id);
+    }
+
+    private void CopyFrom(ChangeEventArgs e)
+    {
+        if (!Guid.TryParse(e.Value?.ToString(), out var id) || users.FirstOrDefault(u => u.Id == id) is not { } u) return;
+        rights = (u.Rights ?? new MemberRights()).Copy();
+        admin = false; pick = false;
+        Toast.Ok($"Accès de {u.Label} copiés : il ne reste qu'à envoyer l'invitation.");
+    }
+
+    private RenderFragment Summary() => __builder =>
+    {
+        var who = name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "La personne";
+        if (admin)
+        {
+            <text><b>@who verra tout et pourra tout modifier</b> : les écrans, médias et listes de tous les membres, et la page Membres.</text>
+            return;
+        }
+        var k = MyScreens.Count;
+        <text>@who verra :</text>
+        <ul class="mb-sum">
+            <li>@if (rights.Screens == PageMode.Read) { <b>tous les écrans</b><text>, sans pouvoir les régler</text> } else if (k == 0) { <b>aucun écran</b><text> (la page Écrans sera vide, sauf ceux qu'elle connecte)</text> } else { <b>@k écran@(k > 1 ? "s" : "")</b><text> à gérer, et aucun autre</text> }</li>
+            <li>@if (rights.Media == PageMode.Read) { <b>tous les médias</b><text> de l'organisation, sans les modifier</text> } else { <b>ses médias et ses dossiers</b><text>, plus ceux qu'on lui partage</text> }</li>
+            <li>@if (rights.Playlists == PageMode.Read) { <b>toutes les listes</b><text>, sans les modifier</text> } else { <b>ses listes et ses dossiers</b><text>, plus celles qu'on lui partage</text> }</li>
+        </ul>
+    };
+
+    private Task Cancel() => OnClose.InvokeAsync();
+
+    private async Task Save()
+    {
+        if (busy) return;
+        error = null;
+        var r = rights.Copy();
+        var adm = admin;
+        var nm = name;
+        if (UserId is { } id)
+        {
+            error = Store.Write(d => MemberOps.Save(d, id, nm, adm, r));
+            if (error != null) return;
+            Toast.Ok($"Accès de {nm.Trim()} enregistrés.");
+            await OnSaved.InvokeAsync();
+            return;
+        }
+        // Invitation : mot de passe provisoire envoyé par e-mail, à changer à la première connexion.
+        var pwd = Passwords.Generate();
+        var mail = email;
+        User? created = null;
+        Reseller? reseller = null;
+        error = Store.Write(d =>
+        {
+            var (u, err) = MemberOps.Create(d, nm, mail, adm, r, pwd);
+            created = u; reseller = d.Reseller;
+            return err;
+        });
+        if (error != null || created == null) return;
+        busy = true;
+        try
+        {
+            var mailErr = await Mail.SendWelcome(reseller!, Resolver.LoginUrl(reseller!, Nav.BaseUri), $"Vous avez été invité à gérer les écrans de « {orgName} ».", created.Name, created.Email, pwd);
+            if (mailErr == null) Toast.Ok($"Invitation envoyée à {created.Email}.");
+            else Toast.Error($"Compte créé, mais l'e-mail n'a pas pu être envoyé : {mailErr}. Communiquez vous-même le mot de passe provisoire à {created.Email} : {pwd}");
+        }
+        finally { busy = false; }
+        _ = Alerter.Raise(Ctx.RequireClientId(), Alerts.Members, "Nouvelle personne dans l'organisation", $"{created.Label} a été ajouté(e).", "/organisation", except: Ctx.UserId);
+        await OnSaved.InvokeAsync();
+    }
+
+    private async Task Resend()
+    {
+        if (UserId is not { } id) return;
+        busy = true;
+        try
+        {
+            var r = await InviteOps.ResendAsync(Store, Mail, Resolver, Nav.BaseUri, orgName, [id]);
+            if (r.Count == 0) Toast.Error("Cette personne n'est plus en attente d'invitation.");
+            else if (r[0].MailError == null) Toast.Ok($"Invitation renvoyée à {r[0].User.Email}.");
+            else Toast.Error($"L'e-mail n'a pas pu être envoyé : {r[0].MailError}. Communiquez vous-même le nouveau mot de passe provisoire à {r[0].User.Email} : {r[0].Password}");
+        }
+        finally { busy = false; }
+    }
+
+    private async Task ToggleDisabled()
+    {
+        if (UserId is not { } id) return;
+        var disable = status != "Désactivé";
+        (int Changed, string? Error) r = Store.Write(d => AccessLevels.SetDisabled(d, [id], disable));
+        if (r.Error != null) { error = r.Error; return; }
+        Toast.Ok(disable ? $"{name} est désactivé." : $"{name} est réactivé.");
+        await OnSaved.InvokeAsync();
+    }
+
+    private async Task Remove()
+    {
+        if (UserId is not { } id) return;
+        confirmRemove = false;
+        error = Store.Write(d => MemberOps.Remove(d, id));
+        if (error != null) return;
+        Toast.Ok($"{name} a été retiré de l'organisation : ses médias et ses listes sont à vous.");
+        await OnSaved.InvokeAsync();
+    }
+}

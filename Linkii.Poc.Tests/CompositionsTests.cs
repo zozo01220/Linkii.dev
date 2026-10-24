@@ -186,9 +186,9 @@ public class CompositionsTests(Platform p)
         var t = store.Write(db =>
         {
             var d = new ClientDb(db, p.A.Id);
-            Assert.Equal("Donnez un nom au modèle.", CompositionTemplates.Save(d, "  ", doc, null).Error);
-            Assert.NotNull(CompositionTemplates.Save(d, "Illisible", "{", null).Error);
-            var (tpl, err) = CompositionTemplates.Save(d, "Accueil hiver", doc, null);
+            Assert.Equal("Donnez un nom au modèle.", CompositionTemplates.Save(d, "  ", doc).Error);
+            Assert.NotNull(CompositionTemplates.Save(d, "Illisible", "{").Error);
+            var (tpl, err) = CompositionTemplates.Save(d, "Accueil hiver", doc);
             Assert.Null(err);
             return tpl!;
         });

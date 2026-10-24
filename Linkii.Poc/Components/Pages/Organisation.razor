@@ -3,251 +3,119 @@
 @inject TenantStore Store
 @inject NavigationManager Nav
 @inject Toaster Toast
-@inject Mailer Mail
-@inject ResellerResolver Resolver
 
-@* Organisation : aires, zones, personnes et rôles (maquette organisation-echelle.html, §111).
-   Deux vues, Lieux et Personnes, reliées par les mêmes filtres ; actions en lot ; toute fenêtre à formulaire est un tiroir du bas (<Sheet>). *@
+@* Membres (24 octobre 2026, maquette membres-proprietaire-partage.html) : une ligne par personne, son rôle et ce qu'elle fait dans les trois pages.
+   Tout se règle dans la fiche membre (tiroir du bas, <MemberSheet>). Les aires restent une vue à part : elles rangent les écrans, sans effet sur les droits. *@
 
 <div class="page-head">
     <div>
-        <h1>Organisation<span class="lx-cntpill" aria-label="@Totals">@areas.Count</span></h1>
-        <p class="sub sc-intro">@Totals · @(view == "places" ? "Où sont vos écrans, et qui peut y agir." : "Qui a accès, avec quel rôle, et où.")</p>
+        <h1>@(view == "areas" ? "Aires de gestion" : "Membres")<span class="lx-cntpill">@(view == "areas" ? areas.Count : rows.Count)</span></h1>
+        <p class="sub sc-intro">@(view == "areas" ? "Où sont vos écrans : aires et zones." : "Qui gère quoi, en un coup d'œil. Cliquez une ligne pour la modifier.")</p>
     </div>
     <div class="row head-actions">
-        <button type="button" class="btn ghost" @onclick="() => rolesOpen = true"><Ico Name="lock" Size="16" /> Rôles</button>
-        @if (view == "places") { <button type="button" class="btn" data-fab="Nouvelle aire" @onclick="OpenNewArea"><Ico Name="plus" Size="16" /> Nouvelle aire</button> }
-        else { <button type="button" class="btn" data-fab="Inviter une personne" @onclick="() => personSheet = Guid.Empty"><Ico Name="plus" Size="16" /> Inviter une personne</button> }
+        @if (view == "areas") { <button type="button" class="btn" data-fab="Nouvelle aire" @onclick="OpenNewArea"><Ico Name="plus" Size="16" /> Nouvelle aire</button> }
+        else { <button type="button" class="btn" data-fab="Nouveau membre" @onclick="() => sheet = Guid.Empty"><Ico Name="plus" Size="16" /> Nouveau membre</button> }
     </div>
 </div>
 
-<div class="tb-seg og-views" role="tablist" aria-label="Vue">
-    <button type="button" role="tab" class="@(view == "places" ? "on" : "")" aria-selected="@(view == "places" ? "true" : "false")" @onclick='() => SetView("places")'>Lieux <small>@areas.Count</small></button>
-    <button type="button" role="tab" class="@(view == "people" ? "on" : "")" aria-selected="@(view == "people" ? "true" : "false")" @onclick='() => SetView("people")'>Personnes <small>@people.Count</small></button>
+<div class="tabs int-tabs og-views" role="tablist" aria-label="Vue">
+    <button type="button" role="tab" class="@(view == "people" ? "on" : "")" aria-selected="@(view == "people" ? "true" : "false")" @onclick='() => view = "people"'>Membres <span class="cat-count">@rows.Count</span></button>
+    <button type="button" role="tab" class="@(view == "areas" ? "on" : "")" aria-selected="@(view == "areas" ? "true" : "false")" @onclick='() => view = "areas"'>Aires <span class="cat-count">@areas.Count</span></button>
 </div>
 
-@* ---- filtres, toujours visibles ---- *@
-<div class="og-fb">
-    <label class="search og-search"><Ico Name="search" Size="16" /><input placeholder="@(view == "places" ? "Rechercher une aire ou une zone" : "Rechercher un nom ou un e-mail")" aria-label="Rechercher" value="@filter.Q" @oninput="e => { filter.Q = e.Value?.ToString() ?? string.Empty; page = 1; }" /></label>
-    <div class="og-dd">
-        <button type="button" class="og-ddb @(filter.Areas.Count > 0 ? "act" : "")" @onclick="OpenAreaFilter"><span class="k">Aire</span> @(filter.Areas.Count > 0 ? filter.Areas.Count.ToString() : "Toutes") <Ico Name="chevron" Size="14" /></button>
-    </div>
-    <div class="og-dd">
-        <button type="button" class="og-ddb @(filter.Roles.Count > 0 ? "act" : "")" aria-haspopup="menu" aria-expanded="@(menu == "role" ? "true" : "false")" @onclick='() => menu = menu == "role" ? null : "role"'><span class="k">Rôle</span> @(filter.Roles.Count > 0 ? filter.Roles.Count.ToString() : "Tous") <Ico Name="chevron" Size="14" /></button>
-        @if (menu == "role")
-        {
-            <div class="kebab-backdrop" @onclick="() => menu = null"></div>
-            <div class="og-menu" role="menu">
-                @foreach (var r in RoleNames)
-                {
-                    var role = r;
-                    <button type="button" role="menuitemcheckbox" aria-checked="@(filter.Roles.Contains(role) ? "true" : "false")" @onclick="() => ToggleRole(role)"><span class="og-ck @(filter.Roles.Contains(role) ? "on" : "")"></span>@role</button>
-                }
-            </div>
-        }
-    </div>
-    <div class="og-dd">
-        <button type="button" class="og-ddb @(filter.Status.Length > 0 ? "act" : "")" aria-haspopup="menu" aria-expanded="@(menu == "status" ? "true" : "false")" @onclick='() => menu = menu == "status" ? null : "status"'><span class="k">Statut</span> @(filter.Status.Length > 0 ? filter.Status : "Tous") <Ico Name="chevron" Size="14" /></button>
-        @if (menu == "status")
-        {
-            <div class="kebab-backdrop" @onclick="() => menu = null"></div>
-            <div class="og-menu" role="menu">
-                @foreach (var s in new[] { "", "Actif", "Invité", "Désactivé" })
-                {
-                    var st = s;
-                    <button type="button" role="menuitemradio" aria-checked="@(filter.Status == st ? "true" : "false")" @onclick="() => { filter.Status = st; menu = null; page = 1; }"><span class="og-ck @(filter.Status == st ? "on" : "")"></span>@(st.Length == 0 ? "Tous" : st)</button>
-                }
-            </div>
-        }
-    </div>
-    <button type="button" class="og-tg @(filter.Flag ? "on" : "")" aria-pressed="@(filter.Flag ? "true" : "false")" @onclick="() => { filter.Flag = !filter.Flag; page = 1; }">@(view == "places" ? "Sans membre" : "Sans accès")</button>
-    <span class="og-res">@ResultText</span>
-</div>
-@if (filter.Count > 0)
+@if (view == "people")
 {
-    <div class="og-chips">
-        @if (filter.Q.Length > 0) { <span class="og-chip">Texte <b>@filter.Q</b><button type="button" aria-label="Retirer le filtre texte" @onclick='() => { filter.Q = ""; page = 1; }'><Ico Name="x" Size="12" /></button></span> }
-        @if (filter.Areas.Count > 0) { <span class="og-chip">Aire <b>@AreaNames(filter.Areas)</b><button type="button" aria-label="Retirer le filtre aire" @onclick="() => { filter.Areas.Clear(); page = 1; }"><Ico Name="x" Size="12" /></button></span> }
-        @if (filter.Roles.Count > 0) { <span class="og-chip">Rôle <b>@string.Join(", ", filter.Roles)</b><button type="button" aria-label="Retirer le filtre rôle" @onclick="() => { filter.Roles.Clear(); page = 1; }"><Ico Name="x" Size="12" /></button></span> }
-        @if (filter.Status.Length > 0) { <span class="og-chip">Statut <b>@filter.Status</b><button type="button" aria-label="Retirer le filtre statut" @onclick='() => { filter.Status = ""; page = 1; }'><Ico Name="x" Size="12" /></button></span> }
-        @if (filter.Flag) { <span class="og-chip"><b>@(view == "places" ? "Sans membre" : "Sans accès")</b><button type="button" aria-label="Retirer le filtre" @onclick="() => { filter.Flag = false; page = 1; }"><Ico Name="x" Size="12" /></button></span> }
-        @if (filter.Count > 1) { <button type="button" class="linklike" @onclick="ClearFilters">Tout effacer</button> }
-    </div>
-}
-
-@* ---- vue Lieux ---- *@
-@if (view == "places")
-{
-    var shown = V.FilterAreas(filter);
+    var shown = rows.Where(r => q.Length == 0 || r.User.Label.Contains(q, StringComparison.CurrentCultureIgnoreCase) || r.User.Email.Contains(q, StringComparison.CurrentCultureIgnoreCase)).ToList();
+    @if (rows.Count > 8)
+    {
+        <div class="og-fb"><label class="search og-search"><Ico Name="search" Size="16" /><input placeholder="Rechercher un nom ou un e-mail" aria-label="Rechercher" @bind="q" @bind:event="oninput" /></label></div>
+    }
     <div class="card og-list">
         @if (shown.Count == 0)
         {
-            <div class="og-empty">Aucune aire ne correspond à ces filtres.@if (filter.Count > 0) { <text> <button type="button" class="linklike" @onclick="ClearFilters">Tout effacer</button></text> }</div>
+            <div class="og-empty">Aucune personne ne correspond.</div>
         }
         else
         {
-            var q = filter.Q.Trim();
-            <table class="tbl og-tbl">
-                <thead><tr><th style="width:34px"></th><th>Aire / zone</th><th class="num">Zones</th><th class="num">Écrans</th><th>Qui y a accès</th><th></th></tr></thead>
+            <table class="tbl og-tbl mb-tbl">
+                <thead><tr><th>Membre</th><th>Rôle</th><th>Écrans</th><th>Médiathèque</th><th>Listes de lecture</th><th style="width:30px"></th></tr></thead>
                 <tbody>
-                @foreach (var a in shown)
+                @foreach (var r in shown)
                 {
-                    var area = a;
-                    var members = V.MembersOf(area);
-                    var matchArea = q.Length > 0 && area.Name.Contains(q, StringComparison.CurrentCultureIgnoreCase);
-                    var open = openAreas.Contains(area.Id) || matchArea || q.Length > 0 && area.Zones.Any(z => z.Name.Contains(q, StringComparison.CurrentCultureIgnoreCase)) || areas.Count <= 3;
-                    <tr data-nid="@area.Id" class="og-r" @onclick="() => OpenAreaSheet(area)">
-                        <td @onclick:stopPropagation="true"><button type="button" class="og-tw @(open ? "open" : "")" aria-expanded="@(open ? "true" : "false")" aria-label="@(open ? "Replier" : "Déplier") @area.Name" @onclick="() => ToggleOpen(area.Id)"><Ico Name="chevron-right" Size="14" /></button></td>
-                        <td><div class="og-who"><Ico Name="map-pin" Size="16" /><b>@area.Name</b>@if (area.Id == currentId) { <span class="pill blue">ouverte</span> }</div></td>
-                        <td class="num">@area.Zones.Count</td>
-                        <td class="num">@screens.Count(s => s.AreaId == area.Id)</td>
-                        <td>
-                            @if (members.Count > 0)
-                            {
-                                <span class="og-stack">@foreach (var m in members.Take(4)) { <span class="avatar" title="@m.Label">@Initials(m)</span> }</span>
-                                <span class="muted" style="margin-left:6px">@Pl(members.Count, "membre", "membres")</span>
-                            }
-                            else { <span class="pill warn">Aucun membre</span> }
-                            <span class="muted og-adm"> · @Pl(V.Admins.Count, "admin", "admins")</span>
-                        </td>
-                        <td class="og-act" @onclick:stopPropagation="true"><button type="button" class="linklike" @onclick="() => OpenGrant(null, area.Id)">Donner accès…</button></td>
-                    </tr>
-                    @if (open)
-                    {
-                        @foreach (var z in area.Zones.Where(z => q.Length == 0 || matchArea || z.Name.Contains(q, StringComparison.CurrentCultureIgnoreCase)))
+                    var row = r;
+                    <tr data-nid="@row.User.Id" class="og-r @(row.User.Disabled ? "dim" : "")" @onclick="() => sheet = row.User.Id">
+                        <td><div class="og-who"><span class="avatar @(row.User.Disabled ? "off" : "")">@Initials(row.User)</span><div class="og-nm"><b>@row.User.Label</b><small>@(row.User.IsInvited ? "Invitation envoyée" : row.User.Email)@(row.User.Id == me ? " · vous" : "")</small></div></div></td>
+                        <td>@if (row.Admin) { <span class="pill dark">Administrateur</span> } else { <span>Utilisateur</span> }@if (row.User.Disabled) { <span class="pill">Désactivé</span> }</td>
+                        @if (row.Admin)
                         {
-                            var zone = z;
-                            var zm = V.MembersOf(area, zone);
-                            <tr data-nid="@zone.Id" class="og-r og-z" @onclick="() => OpenAreaSheet(area)">
-                                <td></td>
-                                <td><div class="og-who"><Ico Name="@(zone.IsWall ? "monitor" : "box")" Size="15" /><span>@zone.Name</span>@if (zone.IsWall) { <span class="pill blue">Mur</span> }@if (zone.Sync && !zone.IsWall) { <span class="pill blue">Synchronisée</span> }</div></td>
-                                <td></td>
-                                <td class="num">@screens.Count(s => s.ZoneId == zone.Id)</td>
-                                <td class="muted">@Pl(zm.Count, "membre", "membres")</td>
-                                <td></td>
-                            </tr>
+                            <td colspan="3" class="muted">Voit et gère tout, crée des membres</td>
                         }
-                    }
+                        else
+                        {
+                            <td>@if (row.Rights.Screens == PageMode.Read) { @ReadPill() } else if (row.Screens == 0 && row.Rights.ZoneIds.Count == 0) { <span class="pill warn">Aucun écran</span> } else { <div class="mb-acc">@Pl(row.Screens, "écran", "écrans")<small>@Where(row.Rights)</small></div> }</td>
+                            <td>@if (row.Rights.Media == PageMode.Read) { @ReadPill() } else { <span>Les siens</span> }</td>
+                            <td>@if (row.Rights.Playlists == PageMode.Read) { @ReadPill() } else { <span>Les siennes</span> }</td>
+                        }
+                        <td class="muted"><Ico Name="chevron-right" Size="14" /></td>
+                    </tr>
                 }
                 </tbody>
             </table>
         }
     </div>
+    @if (rows.Count <= 1)
+    {
+        <p class="hint">Vous êtes seul dans l'organisation : rien ne change pour vous. Ajoutez un membre pour lui confier des écrans et partager vos médias et vos listes.</p>
+    }
 }
 else
 {
-    @* ---- vue Personnes ---- *@
-    var shown = V.FilterPeople(filter, sortKey, sortDesc);
-    var pages = Math.Max(1, (int)Math.Ceiling(shown.Count / (double)PerPage));
-    if (page > pages) { page = pages; }
-    var rows = shown.Skip((page - 1) * PerPage).Take(PerPage).ToList();
-    var allOn = rows.Count > 0 && rows.All(p => selected.Contains(p.Id));
-    var someOn = rows.Any(p => selected.Contains(p.Id));
     <div class="card og-list">
-        @if (shown.Count == 0)
-        {
-            <div class="og-empty">Aucune personne ne correspond à ces filtres.@if (filter.Count > 0) { <text> <button type="button" class="linklike" @onclick="ClearFilters">Tout effacer</button></text> }</div>
-        }
-        else
-        {
-            @if (selected.Count > 0 && shown.Count > rows.Count && selected.Count < shown.Count)
+        <table class="tbl og-tbl">
+            <thead><tr><th style="width:34px"></th><th>Aire / zone</th><th class="num">Zones</th><th class="num">Écrans</th></tr></thead>
+            <tbody>
+            @foreach (var a in areas)
             {
-                <div class="og-selall"><span>@Pl(selected.Count, "sélectionnée", "sélectionnées").</span><button type="button" class="linklike" @onclick="() => SelectAll(shown)">Sélectionner les @shown.Count personnes du filtre</button></div>
-            }
-            <table class="tbl og-tbl">
-                <thead><tr>
-                    <th style="width:34px"><button type="button" class="og-ck @(allOn ? "on" : someOn ? "part" : "")" aria-label="Tout sélectionner sur cette page" @onclick="() => TogglePage(rows, allOn)"></button></th>
-                    @Th("name", "Personne")@Th("role", "Rôle")<th>Où</th>@Th("status", "Statut")
-                </tr></thead>
-                <tbody>
-                @foreach (var u in rows)
+                var area = a;
+                var open = openAreas.Contains(area.Id) || areas.Count <= 3;
+                <tr data-nid="@area.Id" class="og-r" @onclick="() => OpenAreaSheet(area)">
+                    <td @onclick:stopPropagation="true"><button type="button" class="og-tw @(open ? "open" : "")" aria-expanded="@(open ? "true" : "false")" aria-label="@(open ? "Replier" : "Déplier") @area.Name" @onclick="() => ToggleOpen(area.Id)"><Ico Name="chevron-right" Size="14" /></button></td>
+                    <td><div class="og-who"><Ico Name="map-pin" Size="16" /><b>@area.Name</b></div></td>
+                    <td class="num">@area.Zones.Count</td>
+                    <td class="num">@screens.Count(s => s.AreaId == area.Id)</td>
+                </tr>
+                @if (open)
                 {
-                    var p = u;
-                    var accs = V.AccessesOf(p);
-                    <tr data-nid="@p.Id" class="og-r @(selected.Contains(p.Id) ? "sel" : "") @(p.Disabled ? "dim" : "")" @onclick="() => personSheet = p.Id">
-                        <td @onclick:stopPropagation="true"><button type="button" class="og-ck @(selected.Contains(p.Id) ? "on" : "")" aria-label="Sélectionner @p.Label" aria-pressed="@(selected.Contains(p.Id) ? "true" : "false")" @onclick="() => ToggleSel(p.Id)"></button></td>
-                        <td><div class="og-who"><span class="avatar @(p.Disabled ? "off" : "")">@Initials(p)</span><div class="og-nm"><b>@p.Label</b><small>@p.Email@(p.Id == currentUser ? " · vous" : "")</small></div></div></td>
-                        <td>
-                            @if (OrgView.IsAdmin(p)) { <span class="pill dark">Administrateur</span> }
-                            else if (accs.Count > 0) { @foreach (var r in V.RolesOf(p)) { <span class="pill @(RoleCls(r))">@r</span> } }
-                            else { <span class="pill warn">Aucun accès</span> }
-                        </td>
-                        <td>
-                            <div class="og-wh">
-                                @if (OrgView.IsAdmin(p)) { <span class="og-wc"><Ico Name="map-pin" Size="12" />Toute l'organisation</span> }
-                                else if (accs.Count == 0) { <span class="muted">—</span> }
-                                else
-                                {
-                                    @foreach (var a in accs.Take(2)) { <span class="og-wc" title="@AccessLevels.ScopeText(a.Access.Perimeter, areas, screens)"><Ico Name="map-pin" Size="12" />@if (accs.Count > 1) { <b>@a.Level.Name</b><text> · </text> }@Short(AccessLevels.ScopeText(a.Access.Perimeter, areas, screens))</span> }
-                                    @if (accs.Count > 2) { <span class="og-wc">+@(accs.Count - 2)</span> }
-                                }
-                            </div>
-                        </td>
-                        <td><span class="pill @(StatusCls(p))">@OrgView.StatusOf(p)</span></td>
-                    </tr>
-                }
-                </tbody>
-            </table>
-            @if (shown.Count > PerPage)
-            {
-                <div class="og-pager">
-                    <span>@((page - 1) * PerPage + 1)–@Math.Min(shown.Count, page * PerPage) sur @shown.Count</span>
-                    <span class="grow"></span>
-                    <button type="button" disabled="@(page <= 1)" aria-label="Page précédente" @onclick="() => page--">‹</button>
-                    @foreach (var n in PageWindow(pages))
+                    @foreach (var z in area.Zones)
                     {
-                        var pg = n;
-                        @if (pg == 0) { <span>…</span> }
-                        else { <button type="button" class="@(pg == page ? "on" : "")" @onclick="() => page = pg">@pg</button> }
+                        var zone = z;
+                        <tr data-nid="@zone.Id" class="og-r og-z" @onclick="() => OpenAreaSheet(area)">
+                            <td></td>
+                            <td><div class="og-who"><Ico Name="@(zone.IsWall ? "monitor" : "box")" Size="15" /><span>@zone.Name</span>@if (zone.IsWall) { <span class="pill blue">Mur</span> }@if (zone.Sync && !zone.IsWall) { <span class="pill blue">Synchronisée</span> }</div></td>
+                            <td></td>
+                            <td class="num">@screens.Count(s => s.ZoneId == zone.Id)</td>
+                        </tr>
                     }
-                    <button type="button" disabled="@(page >= pages)" aria-label="Page suivante" @onclick="() => page++">›</button>
-                </div>
+                }
             }
-        }
+            </tbody>
+        </table>
     </div>
-    @if (selected.Count > 0)
-    {
-        var invited = InviteOps.Pending(people.Where(p => selected.Contains(p.Id))).Count;
-        <div class="og-bulk" role="toolbar" aria-label="Actions sur la sélection">
-            <b>@Pl(selected.Count, "sélectionnée", "sélectionnées")</b>
-            <button type="button" @onclick="() => OpenGrant(selected.ToList(), null)">Donner accès à…</button>
-            <button type="button" @onclick="OpenBulkRole">Changer de rôle</button>
-            <button type="button" @onclick="OpenRevoke">Retirer un accès</button>
-            <button type="button" disabled="@(invited == 0)" title="@(invited == 0 ? "Aucune personne invitée dans la sélection" : "")" @onclick="ResendSelected">Renvoyer l'invitation@(invited > 0 ? $" ({invited})" : "")</button>
-            <button type="button" @onclick="() => bulkDisable = true">Désactiver</button>
-            <button type="button" class="x" aria-label="Annuler la sélection" @onclick="() => selected.Clear()"><Ico Name="x" Size="16" /></button>
-        </div>
-    }
+    <p class="hint">Les aires et les zones rangent les écrans. Elles ne donnent aucun droit : on attribue des zones ou des écrans à une personne depuis sa fiche membre.</p>
 }
 
-@* ---- tiroirs du bas ---- *@
-@if (personSheet is { } pid)
+@if (sheet is { } sid)
 {
-    <PersonSheet UserId="@(pid == Guid.Empty ? null : pid)" OnClose="ClosePerson" OnSaved="PersonSaved" />
+    <MemberSheet UserId="@(sid == Guid.Empty ? null : sid)" OnClose="() => sheet = null" OnSaved="Saved" />
 }
-
-<RoleManager Open="rolesOpen" OnClose="CloseRoles" OnChanged="Reload" />
 
 @if (areaSheet is { } aid && areas.FirstOrDefault(a => a.Id == aid) is { } ar)
 {
-    var am = V.MembersOf(ar);
     var scrN = screens.Count(s => s.AreaId == ar.Id);
-    var c = counts.GetValueOrDefault(ar.Id);
-    <Sheet Title="@ar.Name" Sub="@($"{Pl(ar.Zones.Count, "zone", "zones")} · {Pl(scrN, "écran", "écrans")} · {Pl(c.Playlists, "liste de lecture", "listes de lecture")} · {Pl(c.Media, "média", "médias")}")" OnClose="CloseArea">
+    <Sheet Title="@ar.Name" Sub="@($"{Pl(ar.Zones.Count, "zone", "zones")} · {Pl(scrN, "écran", "écrans")}")" OnClose="CloseArea">
         <ChildContent>
             <div class="og-sec">
-                <div class="lbl" style="margin-top:0">Qui a accès <span class="pill">@(am.Count + V.Admins.Count)</span><span class="grow"></span><button type="button" class="linklike" @onclick="() => OpenGrant(null, ar.Id)">+ Donner accès</button></div>
-                @foreach (var m in am.Take(6))
-                {
-                    var role = RoleIn(m, ar);
-                    <div class="og-pr"><span class="avatar">@Initials(m)</span><div class="who"><b>@m.Label</b><small>@role.Scope</small></div><span class="pill @(RoleCls(role.Role))">@role.Role</span></div>
-                }
-                @if (am.Count == 0) { <p class="muted" style="margin:0">Aucun membre : seuls les administrateurs y ont accès.</p> }
-                <div class="og-pr"><span class="avatar dark"><Ico Name="lock" Size="14" /></span><div class="who"><b>@Pl(V.Admins.Count, "administrateur", "administrateurs") de l'organisation</b></div><span class="pill dark">Administrateur</span></div>
-                @if (am.Count > 6) { <button type="button" class="linklike" @onclick="() => SeeMembers(ar)">Voir les @am.Count membres dans Personnes (filtre « @ar.Name »)</button> }
-            </div>
-            <div class="og-sec">
-                <div class="lbl">Zones <small>(elles classent les écrans de l'aire ; un mur se crée dans Écrans)</small></div>
+                <div class="lbl" style="margin-top:0">Zones <small>(elles classent les écrans de l'aire ; un mur se crée dans Écrans)</small></div>
                 <AreaZones AreaId="ar.Id" OnChanged="Reload" />
             </div>
             <div class="og-sec">
@@ -266,7 +134,7 @@ else
         </ChildContent>
         <Foot>
             <button type="button" class="btn danger" @onclick="() => { deleting = ar; deleteError = null; }">Supprimer l'aire</button>
-            <span class="muted" style="font-size:13px">Une aire ne se supprime que vide.</span>
+            <span class="muted" style="font-size:13px">Une aire ne se supprime que sans écran.</span>
             <span class="grow"></span>
             <button type="button" class="btn" @onclick="CloseArea">Fermer</button>
         </Foot>
@@ -275,16 +143,16 @@ else
 
 @if (newArea)
 {
-    <Sheet Title="Nouvelle aire de gestion" Class="sm" OnClose="CloseNewArea">
+    <Sheet Title="Nouvelle aire de gestion" Class="sm" OnClose="() => newArea = false">
         <ChildContent>
             <label class="lbl" for="na-name" style="margin-top:0">Nom</label>
             <input id="na-name" class="full" maxlength="60" @bind="newName" @bind:event="oninput" @onkeydown="OnNewAreaKey" placeholder="Ex. : Site de Genève, Bâtiment B" />
-            <p class="hint" style="margin:12px 0 0">L'aire démarre vide : connectez-y des écrans, créez-y des listes de lecture et des médias, ou déplacez-en depuis une autre aire.</p>
+            <p class="hint" style="margin:12px 0 0">L'aire démarre vide : connectez-y des écrans, ou déplacez-en depuis une autre aire.</p>
             @if (formError != null) { <div class="err">@formError</div> }
         </ChildContent>
         <Foot>
             <span class="grow"></span>
-            <button type="button" class="btn ghost" @onclick="CloseNewArea">Annuler</button>
+            <button type="button" class="btn ghost" @onclick="() => newArea = false">Annuler</button>
             <button type="button" class="btn" @onclick="CreateArea">Créer l'aire</button>
         </Foot>
     </Sheet>
@@ -292,172 +160,39 @@ else
 
 @if (deleting is { } del)
 {
-    <Sheet Title="@($"Supprimer l'aire « {del.Name} » ?")" Class="sm" Over="true" OnClose="CloseDelete">
+    <Sheet Title="@($"Supprimer l'aire « {del.Name} » ?")" Class="sm" Over="true" OnClose="() => deleting = null">
         <ChildContent>
-            <p class="hint" style="margin:0">Une aire ne se supprime que vide. Ses zones disparaissent, et ses membres perdent cet accès.</p>
+            <p class="hint" style="margin:0">Une aire ne se supprime que sans écran. Ses zones disparaissent, et ceux à qui elles étaient attribuées les perdent.</p>
             @if (deleteError != null) { <div class="err">@deleteError</div> }
         </ChildContent>
         <Foot>
             <span class="grow"></span>
-            <button type="button" class="btn ghost" @onclick="CloseDelete">Annuler</button>
+            <button type="button" class="btn ghost" @onclick="() => deleting = null">Annuler</button>
             <button type="button" class="btn danger-solid" @onclick="DeleteArea">Supprimer</button>
         </Foot>
     </Sheet>
 }
 
-@if (areaFilter != null)
-{
-    <Sheet Title="Filtrer par aire" Sub="Les deux vues suivent ce filtre." Class="sm" OnClose="CloseAreaFilter">
-        <ChildContent>
-            <PlacePicker Areas="areas" Sel="areaFilter" Mode="areas" OnChange="StateHasChanged" />
-            <div class="og-sum" style="margin-top:12px">@(areaFilter.Areas.Count == 0 ? "Aucune sélection : toutes les aires." : Pl(areaFilter.Areas.Count, "aire sélectionnée", "aires sélectionnées") + ".")</div>
-        </ChildContent>
-        <Foot>
-            <button type="button" class="linklike" @onclick="() => areaFilter.Areas.Clear()">Tout décocher</button>
-            <span class="grow"></span>
-            <button type="button" class="btn ghost" @onclick="CloseAreaFilter">Annuler</button>
-            <button type="button" class="btn" @onclick="ApplyAreaFilter">Filtrer</button>
-        </Foot>
-    </Sheet>
-}
-
-@if (grant != null)
-{
-    var g = grant;
-    var candidates = people.Where(u => u.Role == Roles.ClientMember && (g.Search.Length == 0 || u.Label.Contains(g.Search, StringComparison.CurrentCultureIgnoreCase) || u.Email.Contains(g.Search, StringComparison.CurrentCultureIgnoreCase))).ToList();
-    <Sheet Title="Donner accès" Sub="@(g.FixedUsers != null ? Pl(g.Users.Count, "personne", "personnes") : g.Users.Count > 0 ? Pl(g.Users.Count, "personne choisie", "personnes choisies") : "à une ou plusieurs personnes")" OnClose="CloseGrant">
-        <ChildContent>
-            <div class="og-form">
-                @if (g.FixedUsers == null)
-                {
-                    <div>
-                        <div class="lbl" style="margin-top:0">Personnes</div>
-                        <label class="search og-search" style="max-width:none"><Ico Name="search" Size="16" /><input placeholder="Rechercher des personnes…" aria-label="Rechercher des personnes" @bind="g.Search" @bind:event="oninput" /></label>
-                        <div class="og-pk og-pk-s">
-                            @foreach (var u in candidates)
-                            {
-                                var m = u;
-                                <div class="og-pn" @onclick="() => g.Toggle(m.Id)"><button type="button" class="og-ck @(g.Users.Contains(m.Id) ? "on" : "")" aria-label="@m.Label"></button><span class="nm">@m.Label</span><small>@m.Email</small></div>
-                            }
-                            @if (candidates.Count == 0) { <div class="og-empty" style="padding:14px">Aucun membre. Invitez une personne dans la vue Personnes (les administrateurs ont déjà accès à tout).</div> }
-                        </div>
-                    </div>
-                }
-                <div>
-                    <label class="lbl" for="gr-role" style="margin-top:0">Rôle</label>
-                    <select id="gr-role" class="full" @bind="g.LevelId">
-                        @foreach (var l in levels) { <option value="@l.Id">@l.Name</option> }
-                    </select>
-                </div>
-                <div>
-                    <div class="lbl" style="margin-top:0">Où</div>
-                    <PlacePicker Areas="areas" Sel="g.Places" Mode="full" OnChange="StateHasChanged" />
-                </div>
-                <div class="og-sum">@GrantSummary(g)</div>
-                @if (formError != null) { <div class="err">@formError</div> }
-            </div>
-        </ChildContent>
-        <Foot>
-            <span class="grow"></span>
-            <button type="button" class="btn ghost" @onclick="CloseGrant">Annuler</button>
-            <button type="button" class="btn" @onclick="DoGrant">Donner accès</button>
-        </Foot>
-    </Sheet>
-}
-
-@if (bulkRole != null)
-{
-    var admins = selected.Count(i => people.Any(p => p.Id == i && OrgView.IsAdmin(p)));
-    <Sheet Title="Changer de rôle" Sub="@Pl(selected.Count, "personne sélectionnée", "personnes sélectionnées")" Class="sm" OnClose="CloseBulkRole">
-        <ChildContent>
-            <label class="lbl" for="br-role" style="margin-top:0">Nouveau rôle</label>
-            <select id="br-role" class="full" @bind="bulkRole.LevelId">
-                @foreach (var l in levels) { <option value="@l.Id">@l.Name</option> }
-            </select>
-            <div class="og-sum" style="margin-top:12px">Leurs lieux ne changent pas : seul le rôle de chacun de leurs accès est remplacé.@(admins > 0 ? $" Les administrateurs de la sélection sont ignorés ({admins})." : "")</div>
-            @if (formError != null) { <div class="err">@formError</div> }
-        </ChildContent>
-        <Foot>
-            <span class="grow"></span>
-            <button type="button" class="btn ghost" @onclick="CloseBulkRole">Annuler</button>
-            <button type="button" class="btn" @onclick="DoBulkRole">Appliquer à @Pl(selected.Count, "personne", "personnes")</button>
-        </Foot>
-    </Sheet>
-}
-
-@if (revoke != null)
-{
-    <Sheet Title="Retirer un accès" Sub="@Pl(selected.Count, "personne sélectionnée", "personnes sélectionnées")" Class="sm" OnClose="CloseRevoke">
-        <ChildContent>
-            <p class="hint" style="margin-top:0">Choisissez les lieux à retirer : tous les accès de ces personnes sur ces lieux (quel que soit le rôle) sont retirés. Un accès « toutes les aires » garde les autres aires.</p>
-            <PlacePicker Areas="areas" Sel="revoke" Mode="full" OnChange="StateHasChanged" />
-            @if (formError != null) { <div class="err">@formError</div> }
-        </ChildContent>
-        <Foot>
-            <span class="grow"></span>
-            <button type="button" class="btn ghost" @onclick="CloseRevoke">Annuler</button>
-            <button type="button" class="btn danger-solid" @onclick="DoRevoke">Retirer</button>
-        </Foot>
-    </Sheet>
-}
-
-@if (bulkDisable)
-{
-    <Sheet Title="@($"Désactiver {Pl(selected.Count, "personne", "personnes")} ?")" Class="sm" OnClose="CloseBulkDisable">
-        <ChildContent>
-            <p class="hint" style="margin:0">Elles ne pourront plus se connecter. Leurs accès sont conservés ; vous pourrez les réactiver.</p>
-            @if (formError != null) { <div class="err">@formError</div> }
-        </ChildContent>
-        <Foot>
-            <span class="grow"></span>
-            <button type="button" class="btn ghost" @onclick="CloseBulkDisable">Annuler</button>
-            <button type="button" class="btn danger-solid" @onclick="DoBulkDisable">Désactiver</button>
-        </Foot>
-    </Sheet>
-}
-
-@if (view == "places")
+@if (view == "areas")
 {
     <NewMark Kind="area" Ids="@areas.Select(a => a.Id)" />
-    <NewMark Kind="orgzone" Ids="@areas.SelectMany(a => a.Zones).Select(z => z.Id)" Via="@areas.SelectMany(a => a.Zones.Select(z => (z.Id, a.Id))).ToDictionary(t => t.Item1, t => t.Item2)" />
 }
 else
 {
-    <NewMark Kind="member" Ids="@people.Select(p => p.Id)" />
+    <NewMark Kind="member" Ids="@rows.Select(r => r.User.Id)" />
 }
 
 @code {
-    private const int PerPage = 12;
-
-    private class GrantForm
-    {
-        public HashSet<Guid> Users = new();
-        /// <summary>Personnes imposées (depuis la sélection) : pas de choix de personnes.</summary>
-        public List<Guid>? FixedUsers;
-        public string Search = "";
-        public string LevelId = "";
-        public PlaceSel Places = new();
-        public void Toggle(Guid id) { if (!Users.Remove(id)) Users.Add(id); }
-    }
-
+    private List<MemberRow> rows = new();
     private List<Area> areas = new();
     private List<Screen> screens = new();
-    private List<User> people = new();
-    private List<AccessLevel> levels = new();
-    private Dictionary<Guid, (int Playlists, int Media)> counts = new();
-    private OrgView V = new([], [], [], []);
-    private OrgFilter filter = new();
-    private string view = "places", sortKey = "name";
-    private bool sortDesc, sleepOn, dimOn, rolesOpen, newArea, bulkDisable;
-    private int page = 1;
-    private string? menu, formError, deleteError;
-    private Guid? currentId, currentUser, areaSheet, personSheet;
-    private readonly HashSet<Guid> openAreas = new(), selected = new();
+    private string view = "people", q = "";
+    private bool sleepOn, dimOn, newArea;
+    private string? formError, deleteError;
+    private Guid? me, currentId, areaSheet, sheet;
+    private readonly HashSet<Guid> openAreas = new();
     private Area? deleting;
     private string renameText = "", newName = "";
-    private PlaceSel? areaFilter, revoke;
-    private GrantForm? grant;
-    private GrantForm? bulkRole;
 
     [SupplyParameterFromQuery(Name = "tab")] public string? TabParam { get; set; }
     [SupplyParameterFromQuery(Name = "created")] public string? Created { get; set; }
@@ -469,95 +204,43 @@ else
         if (Created != null) Toast.Ok($"Aire « {Created} » créée.");
         if (Deleted != null) Toast.Ok($"Aire « {Deleted} » supprimée.");
         (sleepOn, dimOn) = Store.Read(d => (d.Tenant.SleepEnabled, d.Tenant.DimEnabled));
-        currentUser = Ctx.UserId;
+        me = Ctx.UserId;
+        view = TabParam is "areas" || Created != null || Deleted != null ? "areas" : "people";
         Load();
-        view = TabParam is "members" or "levels" ? "people" : OrgView.DefaultView(areas.Count);
-        if (TabParam == "levels") rolesOpen = true;
     }
 
     private void Load()
     {
-        (areas, screens, people, levels, counts, currentId) = Store.Read(d =>
+        (rows, areas, screens, currentId) = Store.Read(d =>
         {
-            var scr = d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.Token != null).ToList();
             var list = d.Areas.OrderBy(a => a.CreatedUtc).ToList();
-            var cnt = list.ToDictionary(a => a.Id, a => { var (_, p, m) = AreaOps.Contents(d, a.Id); return (p, m); });
-            return (list, scr, d.Users.OrderBy(u => u.Role == Roles.ClientAdmin ? 0 : 1).ThenBy(u => u.Label, StringComparer.CurrentCultureIgnoreCase).ToList(),
-                d.Tenant.Levels.OrderBy(l => l.Kind == null ? 1 : 0).ThenBy(l => l.Kind == LevelKinds.Reader ? 1 : 0).ThenBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase).ToList(), cnt, d.Area?.Id);
+            return (MemberOps.Rows(d), list, d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.Token != null).ToList(), d.Area?.Id);
         });
-        V = new OrgView(areas, screens, people, levels);
-        selected.RemoveWhere(id => people.All(p => p.Id != id));
-        filter.Areas.RemoveWhere(id => areas.All(a => a.Id != id));
     }
 
     private Task Reload() { Load(); StateHasChanged(); return Task.CompletedTask; }
-
-    private string Totals => $"{Pl(areas.Count, "aire", "aires")} · {Pl(areas.Sum(a => a.Zones.Count), "zone", "zones")} · {Pl(people.Count, "personne", "personnes")}";
-    private string ResultText => view == "places" ? Pl(V.FilterAreas(filter).Count, "aire", "aires") : Pl(V.FilterPeople(filter).Count, "personne", "personnes");
-    private IEnumerable<string> RoleNames => new[] { OrgView.AdminRole }.Concat(levels.Select(l => l.Name));
+    private void Saved() { sheet = null; Load(); }
 
     private static string Pl(int n, string one, string many) => $"{n} {(n == 1 ? one : many)}";
     private static string Initials(User u) => string.Concat(u.Label.Split(' ', '.', '@').Where(w => w.Length > 0).Take(2).Select(w => char.ToUpperInvariant(w[0])));
-    private static string RoleCls(string role) => role == OrgView.AdminRole ? "dark" : role is LevelKinds.EditorName or LevelKinds.ReaderName ? "blue" : "cus";
-    private static string StatusCls(User u) => u.Disabled ? "" : u.IsInvited ? "warn" : "ok";
-    private static string Short(string s) => s.Length > 34 ? s[..32] + "…" : s;
-    private string AreaNames(IEnumerable<Guid> ids) { var n = ids.Select(i => areas.FirstOrDefault(a => a.Id == i)?.Name).Where(n => n != null).ToList(); return n.Count > 3 ? string.Join(", ", n.Take(3)) + " +" + (n.Count - 3) : string.Join(", ", n); }
+    private static RenderFragment ReadPill() => __builder => { <span class="pill dark"><Ico Name="eye" Size="12" /> Tout · lecture</span> };
 
-    // ---------- filtres, tri, pagination, sélection ----------
-
-    private void SetView(string v) { view = v; page = 1; selected.Clear(); menu = null; }
-    private void ClearFilters() { filter.Clear(); page = 1; }
-    private void ToggleRole(string r) { if (!filter.Roles.Remove(r)) filter.Roles.Add(r); page = 1; }
-    private void ToggleOpen(Guid id) { if (!openAreas.Remove(id)) openAreas.Add(id); }
-    private void ToggleSel(Guid id) { if (!selected.Remove(id)) selected.Add(id); }
-    private void TogglePage(List<User> rows, bool allOn) { foreach (var p in rows) { if (allOn) selected.Remove(p.Id); else selected.Add(p.Id); } }
-    private void SelectAll(List<User> shown) { foreach (var p in shown) selected.Add(p.Id); }
-
-    private RenderFragment Th(string key, string label) => @<th class="og-sort" aria-sort="@(sortKey == key ? (sortDesc ? "descending" : "ascending") : "none")"><button type="button" @onclick="() => Sort(key)">@label@(sortKey == key ? (sortDesc ? " ↓" : " ↑") : "")</button></th>;
-
-    private void Sort(string key) { if (sortKey == key) sortDesc = !sortDesc; else { sortKey = key; sortDesc = false; } }
-
-    /// <summary>Numéros de page affichés : la première, la dernière et celles autour de la page courante ; 0 pour « … ».</summary>
-    private IEnumerable<int> PageWindow(int pages)
+    // « Caisses, Vitrines » : ses zones, puis le nombre d'écrans attribués un à un
+    private string Where(MemberRights r)
     {
-        var shown = Enumerable.Range(1, pages).Where(i => i == 1 || i == pages || Math.Abs(i - page) <= 1).ToList();
-        var last = 0;
-        foreach (var i in shown)
-        {
-            if (i - last > 1) yield return 0;
-            yield return i;
-            last = i;
-        }
+        var names = areas.SelectMany(a => a.Zones.Where(z => r.ZoneIds.Contains(z.Id)).Select(z => areas.Count > 1 ? $"{a.Name} › {z.Name}" : z.Name)).ToList();
+        var single = screens.Count(s => r.ScreenIds.Contains(s.Id) && !(s.ZoneId is { } z && r.ZoneIds.Contains(z)));
+        if (single > 0) names.Add(Pl(single, "écran", "écrans"));
+        var text = string.Join(", ", names);
+        return text.Length > 40 ? text[..38] + "…" : text;
     }
-
-    private void OpenAreaSheet(Area a) { formError = null; renameText = a.Name; areaSheet = a.Id; }
-
-    private void OpenAreaFilter() { menu = null; areaFilter = new PlaceSel { Areas = [.. filter.Areas] }; }
-    private void CloseAreaFilter() => areaFilter = null;
-    private void ApplyAreaFilter() { filter.Areas = [.. areaFilter!.Areas]; areaFilter = null; page = 1; }
-
-    private void SeeMembers(Area a) { areaSheet = null; filter.Clear(); filter.Areas.Add(a.Id); view = "people"; page = 1; }
-
-    // ---------- accès dans une aire ----------
-
-    private (string Role, string Scope) RoleIn(User u, Area a)
-    {
-        var hit = V.AccessesOf(u).FirstOrDefault(x => AccessLevels.Reaches(x.Access.Perimeter, a, screens));
-        if (hit.Level == null) return ("", "");
-        var p = hit.Access.Perimeter;
-        return (hit.Level.Name, p.AllAreas ? "Toute l'organisation" : p.AreaIds.Contains(a.Id) ? "Aire entière" : "Certaines zones ou certains écrans");
-    }
-
-    // ---------- fiche d'une personne, rôles ----------
-
-    private void ClosePerson() => personSheet = null;
-    private async Task PersonSaved() { personSheet = null; Load(); await Task.CompletedTask; }
-    private void CloseRoles() => rolesOpen = false;
 
     // ---------- Aires ----------
 
+    private void ToggleOpen(Guid id) { if (!openAreas.Remove(id)) openAreas.Add(id); }
+    private void OpenAreaSheet(Area a) { formError = null; renameText = a.Name; areaSheet = a.Id; }
+    private void CloseArea() { areaSheet = null; formError = null; }
     private void OpenNewArea() { formError = null; newName = ""; newArea = true; }
-    private void CloseNewArea() => newArea = false;
     private void OnNewAreaKey(KeyboardEventArgs e) { if (e.Key == "Enter") CreateArea(); }
 
     private void CreateArea()
@@ -576,9 +259,6 @@ else
         Nav.NavigateTo("/organisation?created=" + Uri.EscapeDataString(created!.Name), forceLoad: true);   // le menu affiche le sélecteur d'aire dès la deuxième
     }
 
-
-    private void CloseArea() { areaSheet = null; formError = null; }
-
     private void RenameArea()
     {
         if (areaSheet is not { } id) return;
@@ -589,8 +269,6 @@ else
 
     private void OnRenameKey(KeyboardEventArgs e) { if (e.Key == "Enter") RenameArea(); }
 
-    private void CloseDelete() => deleting = null;
-
     private void DeleteArea()
     {
         if (deleting is not { } del) return;
@@ -598,98 +276,5 @@ else
         if (deleteError != null) return;
         deleting = null;
         Nav.NavigateTo("/organisation?deleted=" + Uri.EscapeDataString(del.Name), forceLoad: true);
-    }
-
-    // ---------- actions en lot ----------
-
-    private void OpenGrant(List<Guid>? users, Guid? areaId)
-    {
-        formError = null;
-        grant = new GrantForm
-        {
-            FixedUsers = users, Users = users != null ? [.. users] : new(),
-            LevelId = (levels.FirstOrDefault(l => l.Kind == LevelKinds.Editor) ?? levels.First()).Id.ToString(),
-            Places = new PlaceSel { Areas = areaId is { } a ? [a] : [] }
-        };
-    }
-
-    private void CloseGrant() => grant = null;
-
-    private string GrantSummary(GrantForm g)
-    {
-        var n = g.Places.Areas.Count; var z = g.Places.Zones.Count;
-        var role = levels.FirstOrDefault(l => l.Id.ToString() == g.LevelId)?.Name ?? "";
-        var who = g.Users.Count == 0 ? "Les personnes choisies" : Pl(g.Users.Count, "personne", "personnes");
-        if (g.Places.All) return $"{who} : {role} sur toute l'organisation, y compris les futures aires.";
-        return n + z == 0 ? "Cochez au moins une aire ou une zone."
-            : $"{who} : {role} sur {(n > 0 ? Pl(n, "aire", "aires") : "")}{(n > 0 && z > 0 ? " et " : "")}{(z > 0 ? Pl(z, "zone", "zones") : "")}. Un accès de même rôle déjà là est élargi, pas dupliqué.";
-    }
-
-    private void DoGrant()
-    {
-        if (grant is not { } g) return;
-        if (!Guid.TryParse(g.LevelId, out var lid)) { formError = "Choisissez un rôle."; return; }
-        var ids = g.Users.ToList();
-        var places = g.Places.Copy();
-        formError = Store.Write(d => AccessLevels.GrantAccess(d, ids, lid, places));
-        if (formError != null) return;
-        Toast.Ok(ids.Count > 1 ? $"Accès donné à {ids.Count} personnes." : "Accès donné.");
-        grant = null; selected.Clear();
-        Load();
-    }
-
-    private void OpenBulkRole() { formError = null; bulkRole = new GrantForm { LevelId = (levels.FirstOrDefault(l => l.Kind == LevelKinds.Editor) ?? levels.First()).Id.ToString() }; }
-    private void CloseBulkRole() => bulkRole = null;
-
-    private void DoBulkRole()
-    {
-        if (bulkRole is not { } g || !Guid.TryParse(g.LevelId, out var lid)) return;
-        var ids = selected.ToList();
-        var (n, err) = Store.Write(d => AccessLevels.SetRole(d, ids, lid));
-        formError = err;
-        if (err != null) return;
-        Toast.Ok($"Rôle « {levels.First(l => l.Id == lid).Name} » appliqué à {Pl(n, "personne", "personnes")}.");
-        bulkRole = null; selected.Clear();
-        Load();
-    }
-
-    private void OpenRevoke() { formError = null; revoke = new PlaceSel(); }
-    private void CloseRevoke() => revoke = null;
-
-    private void DoRevoke()
-    {
-        if (revoke is not { } places) return;
-        var ids = selected.ToList();
-        formError = Store.Write(d => AccessLevels.RevokeAccess(d, ids, places));
-        if (formError != null) return;
-        Toast.Ok("Accès retiré.");
-        revoke = null; selected.Clear();
-        Load();
-    }
-
-    private void CloseBulkDisable() { bulkDisable = false; formError = null; }
-
-    private void DoBulkDisable()
-    {
-        var ids = selected.ToList();
-        var (n, err) = Store.Write(d => AccessLevels.SetDisabled(d, ids, true));
-        formError = err;
-        if (err != null) return;
-        Toast.Ok(n == 0 ? "Rien à désactiver (vous-même ne vous désactivez pas)." : $"{Pl(n, "personne désactivée", "personnes désactivées")}.");
-        bulkDisable = false; selected.Clear();
-        Load();
-    }
-
-    private async Task ResendSelected()
-    {
-        var ids = InviteOps.Pending(people.Where(p => selected.Contains(p.Id)));
-        if (ids.Count == 0) return;
-        var orgName = Store.Read(d => d.Tenant.Name);
-        var results = await InviteOps.ResendAsync(Store, Mail, Resolver, Nav.BaseUri, orgName, ids);
-        var failed = results.Where(r => r.MailError != null).ToList();
-        if (failed.Count == 0) Toast.Ok(results.Count == 1 ? $"Invitation renvoyée à {results[0].User.Email}." : $"Invitation renvoyée à {results.Count} personnes.");
-        else Toast.Error($"{(results.Count > failed.Count ? Pl(results.Count - failed.Count, "invitation renvoyée", "invitations renvoyées") + ". " : "")}L'e-mail n'a pas pu partir pour : {string.Join(" ; ", failed.Select(f => $"{f.User.Email} (mot de passe provisoire : {f.Password})"))}.");
-        selected.Clear();
-        Load();
     }
 }

@@ -261,15 +261,15 @@ public class LevelScope
 }
 
 /// <summary>Refus d'une écriture : le niveau de droits de la personne est en lecture seule.</summary>
-public class ReadOnlyLevelException(string? message = null) : UnauthorizedAccessException(message ?? "Votre niveau de droits est en lecture seule : vous ne pouvez rien modifier ni publier.")
+public class ReadOnlyLevelException(string? message = null) : UnauthorizedAccessException(message ?? "Vous êtes en lecture seule : vous ne pouvez rien modifier ni publier.")
 {
     /// <summary>Refus d'une écriture dans un domaine que le niveau ne fait que voir (Écrans, Listes de lecture, Médiathèque).</summary>
-    public static ReadOnlyLevelException For(string domain) => new("Votre niveau de droits permet de voir " + domain switch
+    public static ReadOnlyLevelException For(string domain) => new("Vous êtes en lecture seule : vous voyez " + domain switch
     {
-        LevelPages.Screens => "les écrans, pas de les modifier ni de les publier.",
-        LevelPages.Playlists => "les listes de lecture, pas de les modifier.",
-        LevelPages.Media => "la médiathèque, pas de la modifier.",
-        _ => "cette page, pas de la modifier."
+        LevelPages.Screens => "les écrans sans pouvoir les modifier ni les publier.",
+        LevelPages.Playlists => "les listes de lecture sans pouvoir les modifier.",
+        LevelPages.Media => "la médiathèque sans pouvoir la modifier.",
+        _ => "cette page sans pouvoir la modifier."
     });
 }
 
@@ -338,6 +338,7 @@ public static class AccessLevels
         foreach (var u in d.Root.Users.Where(u => u.ClientId == d.ClientId))
         {
             if (u.Perimeter != null) { u.Perimeter.AreaIds.RemoveAll(a.Contains); u.Perimeter.ZoneIds.RemoveAll(z.Contains); }
+            u.Rights?.ZoneIds.RemoveAll(z.Contains);   // zones attribuées à un utilisateur
             foreach (var ac in u.Accesses) { ac.Perimeter.AreaIds.RemoveAll(a.Contains); ac.Perimeter.ZoneIds.RemoveAll(z.Contains); }
         }
     }

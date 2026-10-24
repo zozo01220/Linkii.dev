@@ -142,23 +142,17 @@ public class PlanningTests
     }
 
     [Fact]
-    public void Moving_a_screen_to_another_area_drops_its_own_planning_and_moving_a_playlist_drops_its_slots()
+    public void Moving_a_screen_to_another_area_keeps_its_own_planning()
     {
         var other = new Area { ClientId = client.Id, Name = "Restaurant Gare" };
         AreaOps.EnsureDefaultZone(other);
         db.Areas.Add(other);
         var s = Sc("Grill", stand);
         s.OwnPlanning = true; s.Slots.Add(Slot(soir, 1, 600, 700));
-        stand.Slots.Add(Slot(soir, 127, 0, Planning.Day));
-        stand.Slots.Add(Slot(menu, 127, 0, Planning.Day));
 
-        Assert.Null(AreaOps.MovePlaylist(As(), soir.Id, other.Id));
-        Assert.Empty(s.Slots);                                      // l'écran n'a plus ce créneau
-        Assert.Equal(menu.Id, Assert.Single(stand.Slots).PlaylistId);   // ni la zone
-
-        Assert.Null(AreaOps.MoveScreen(As(), s.Id, other.Id));
-        Assert.False(s.OwnPlanning);
-        Assert.Empty(s.Slots);
+        Assert.Null(AreaOps.MoveScreen(As(), s.Id, other.Id));   // les listes n'ont plus d'aire (24 octobre 2026) : ses créneaux restent valables
+        Assert.True(s.OwnPlanning);
+        Assert.Equal(soir.Id, Assert.Single(s.Slots).PlaylistId);
     }
 
     [Fact]

@@ -8,13 +8,10 @@ namespace Linkii.Poc;
 /// Filtre global d'isolation : cette liste ne voit, n'ajoute et ne supprime que les lignes de son client.
 /// Tout le code du back-office passe par elle (via <see cref="ClientDb"/>), jamais par la liste brute.
 /// </summary>
-public class ScopedList<T>(List<T> root, Guid clientId, Guid? areaId = null, Func<T, bool>? only = null, SharedView? sharedIn = null) : IEnumerable<T> where T : IClientOwned
+public class ScopedList<T>(List<T> root, Guid clientId, Guid? areaId = null, Func<T, bool>? only = null, Guid? ownerId = null, Guid? addTo = null) : IEnumerable<T> where T : IClientOwned
 {
-    // Avec une aire ouverte, les écrans, listes de lecture et médias des autres aires sont invisibles ; « only » restreint encore (périmètre d'un niveau de droits).
-    private bool InOwn(T x) => x.ClientId == clientId && (areaId == null || x is not IAreaOwned a || a.AreaId == areaId || Shared(x)) && (only == null || only(x));
-
-    // + ce que d'autres aires partagent avec l'aire ouverte, en lecture seule (voir SharedView) ; la suppression ne touche que les éléments de l'aire
-    private bool In(T x) => InOwn(x) || x.ClientId == clientId && sharedIn != null && sharedIn.Has(x!);
+    // Avec une aire (écrans seulement, depuis le 24 octobre 2026), les écrans des autres aires sont invisibles ; « only » restreint encore (écrans attribués).
+    private bool In(T x) => x.ClientId == clientId && (areaId == null || x is not IAreaOwned a || a.AreaId == areaId || Shared(x)) && (only == null || only(x));
 
     /// <summary>Fichiers des dossiers Drive : les connexions sont celles de l'organisation, ils sont communs à toutes les aires.</summary>
     private static bool Shared(T x) => x is MediaItem m && m.AreaId == Guid.Empty && m.Info.ContainsKey("drive");
@@ -24,14 +21,15 @@ public class ScopedList<T>(List<T> root, Guid clientId, Guid? areaId = null, Fun
 
     public int Count => root.Count(In);
 
-    /// <summary>Ajoute une ligne au client, rangée dans l'aire ouverte.</summary>
+    /// <summary>Ajoute une ligne au client, rangée dans l'aire ouverte (<paramref name="addTo"/> pour ce qui n'est pas filtré par aire).</summary>
     public void Add(T item)
     {
         item.ClientId = clientId;
-        if (areaId is { } a && item is IAreaOwned o && o.AreaId == Guid.Empty && !Shared(item)) o.AreaId = a;
+        if ((areaId ?? addTo) is { } a && item is IAreaOwned o && o.AreaId == Guid.Empty && !Shared(item)) o.AreaId = a;
+        if (ownerId != null && item is IOwned w && w.OwnerId == null) w.OwnerId = ownerId;   // ce qu'une personne crée lui appartient
         root.Add(item);
     }
-    public int RemoveAll(Predicate<T> match) => root.RemoveAll(x => InOwn(x) && match(x));
+    public int RemoveAll(Predicate<T> match) => root.RemoveAll(x => In(x) && match(x));
 }
 
 /// <summary>
@@ -58,8 +56,14 @@ public class AreaAccess
     public Func<Guid, bool>? SeesZoneFn { get; init; }
     /// <summary>Membres de l'organisation (ni administrateurs ni équipe Linkii) : un dossier privé est celui d'un membre, sans partage (voir <see cref="FolderAccess"/>).</summary>
     public IReadOnlySet<Guid> MemberIds { get; init; } = new HashSet<Guid>();
-    /// <summary>Ce que d'autres aires partagent avec l'aire ouverte (lecture seule).</summary>
-    public SharedView Shared { get; init; } = SharedView.None;
+    /// <summary>Droits d'un utilisateur (mode par page, écrans) ; null pour un administrateur.</summary>
+    public MemberRights? Rights { get; init; }
+    /// <summary>Ce qu'on a partagé avec la personne (voir <see cref="ItemShare"/>).</summary>
+    public ShareIndex Shares { get; init; } = ShareIndex.None;
+    /// <summary>Comptes de l'organisation : un propriétaire qui n'en fait pas partie (équipe Linkii) vaut « l'organisation ».</summary>
+    public IReadOnlySet<Guid> OrgUserIds { get; init; } = new HashSet<Guid>();
+    /// <summary>Mode d'une page : un administrateur gère tout (comme « Gère les siens », sans limite).</summary>
+    public string ModeOf(string domain) => Rights?.ModeOf(domain) ?? PageMode.Own;
 
     /// <summary>Traitements internes et tests (aucune personne connectée) : aucun filtre d'aire.</summary>
     public static readonly AreaAccess System = new();
@@ -68,8 +72,8 @@ public class AreaAccess
     /// <summary>Accès à un domaine (Écrans, Listes de lecture, Médiathèque) : none, read ou write. L'administrateur a tout.</summary>
     public string AccessTo(string domain) => IsOrgAdmin ? DomainAccess.Write : Level?.AccessTo(domain) ?? DomainAccess.None;
     public bool CanWrite(string domain) => AccessTo(domain) == DomainAccess.Write;
-    /// <summary>Gérer les zones et les murs : administrateurs de l'organisation, et membres dont le niveau le permet (avec les écrans en écriture).</summary>
-    public bool CanManageZones => IsOrgAdmin || Level is { ManageZones: true } && CanWrite(LevelPages.Screens);
+    /// <summary>Gérer les zones et les murs : administrateurs de l'organisation.</summary>
+    public bool CanManageZones => IsOrgAdmin;
     /// <summary>Zones et murs d'une aire : CanManageZones, dans les aires accessibles. Aires, membres et niveaux restent aux administrateurs.</summary>
     public bool CanManage(Guid areaId) => CanManageZones && HasArea(areaId);
     /// <summary>Zones de l'aire ouverte.</summary>
@@ -95,31 +99,22 @@ public class AreaAccess
         var areas = db.Areas.Where(a => a.ClientId == clientId).OrderBy(a => a.CreatedUtc).ToList();
         var u = db.Users.FirstOrDefault(x => x.Id == userId);
         var org = u?.Role != Linkii.Poc.Roles.ClientMember;
-        var levels = db.Clients.FirstOrDefault(c => c.Id == clientId)?.Levels ?? new List<AccessLevel>();
-        // un membre a un ou plusieurs accès (rôle + périmètre) ; ce qu'il voit est l'ensemble de leurs périmètres
-        var accesses = org ? new List<MemberAccess>() : u!.AccessList(levels).Where(a => levels.Any(l => l.Id == a.LevelId)).ToList();
-        var scopes = accesses.Select(a => (Access: a, Level: levels.First(l => l.Id == a.LevelId),
-            Scope: new LevelScope(a.Perimeter, areas, a.Perimeter.ScreenIds.Count > 0 ? db.Screens.Where(s => s.ClientId == clientId) : []))).ToList();
-        var mine = org ? areas : areas.Where(a => scopes.Any(s => s.Scope.Areas.Any(x => x.Id == a.Id))).ToList();
+        // un utilisateur (24 octobre 2026) : un mode par page et ses écrans ; il voit toutes les aires, ses écrans seuls sont filtrés (zones entières ou un à un)
+        var rights = org ? null : u!.Rights ?? new MemberRights();
+        var level = rights?.ToLevel();
+        var perimeter = rights?.ToPerimeter();
+        var scope = perimeter == null || perimeter.AllAreas ? null
+            : new LevelScope(perimeter, areas, perimeter.ScreenIds.Count > 0 ? db.Screens.Where(s => s.ClientId == clientId) : []);
+        var mine = areas;
         Guid? last = u != null && u.LastAreas.TryGetValue(clientId, out var l2) ? l2 : null;
-        var current = mine.FirstOrDefault(a => a.Id == last) ?? mine.FirstOrDefault();
-        // le rôle qui joue dans l'aire ouverte : un accès sur l'aire entière l'emporte (le plus permissif s'il y en a plusieurs) ; sinon, quand seules des zones
-        // ou des écrans de l'aire sont donnés, le moins permissif (les droits se règlent par aire : ils ne débordent pas sur une zone voisine)
-        (MemberAccess Access, AccessLevel Level, LevelScope Scope)? chosen = null;
-        if (scopes.Count > 0)
-        {
-            var reaching = current == null ? scopes : scopes.Where(s => s.Scope.Areas.Any(x => x.Id == current.Id)).ToList();
-            var wholes = current == null ? [] : reaching.Where(s => s.Access.Perimeter.AllAreas || s.Access.Perimeter.AreaIds.Contains(current.Id)).ToList();
-            static int Rank(AccessLevel l) => new[] { LevelPages.Screens, LevelPages.Playlists, LevelPages.Media }.Sum(d => l.AccessTo(d) == DomainAccess.Write ? 2 : l.AccessTo(d) == DomainAccess.Read ? 1 : 0);
-            chosen = wholes.Count > 0 ? wholes.OrderByDescending(s => Rank(s.Level)).First() : reaching.OrderBy(s => Rank(s.Level)).FirstOrDefault();
-        }
-        var level = chosen?.Level;
-        var perimeter = chosen?.Access.Perimeter;
-        Func<Screen, bool>? sees = scopes.Count == 0 ? null : s => scopes.Any(x => x.Scope.Sees(s));
-        Func<Guid, bool>? seesZone = scopes.Count == 0 ? null : z => scopes.Any(x => x.Scope.SeesZone(z));
+        // sans aire mémorisée, celle de ses premiers écrans
+        var current = mine.FirstOrDefault(a => a.Id == last) ?? (scope == null ? null : mine.FirstOrDefault(a => scope.Areas.Any(x => x.Id == a.Id))) ?? mine.FirstOrDefault();
+        Func<Screen, bool>? sees = scope == null ? null : scope.Sees;
+        Func<Guid, bool>? seesZone = scope == null ? null : scope.SeesZone;
         return new AreaAccess
         {
-            Shared = SharedView.Build(db, clientId, current?.Id),
+            Rights = rights, Shares = ShareIndex.For(db, clientId, userId),
+            OrgUserIds = db.Users.Where(x => x.ClientId == clientId && Linkii.Poc.Roles.IsClient(x.Role)).Select(x => x.Id).ToHashSet(),
             UserId = userId, IsOrgAdmin = org, Level = level, Perimeter = perimeter, Areas = mine, OrgAreaCount = areas.Count,
             Sees = sees, SeesZoneFn = seesZone,
             MemberIds = org ? new HashSet<Guid>() : db.Users.Where(x => x.ClientId == clientId && x.Role == Linkii.Poc.Roles.ClientMember).Select(x => x.Id).ToHashSet(),
@@ -145,28 +140,36 @@ public class ClientDb
         Access = access ?? AreaAccess.System;
         // Sans personne connectée (traitements internes, tests) ou pour une organisation encore sans aire : pas de filtre d'aire.
         Guid? area = Access == AreaAccess.System || Access.OrgAreaCount == 0 ? null : Access.Current?.Id ?? NoArea;
+        // L'aire ne range que les écrans (24 octobre 2026) : elle est choisie par le filtre « Aire » des pages Écrans, Planning et Zones.
         Screens = new(root.Screens, clientId, area, Access.Sees);
-        Media = new(root.Media, clientId, area, null, area == null ? null : Access.Shared);
-        MediaFolders = new(root.MediaFolders, clientId, area, null, area == null ? null : Access.Shared);
-        PlaylistFolders = new(root.PlaylistFolders, clientId, area, null, area == null ? null : Access.Shared);
-        CompositionTemplates = new(root.CompositionTemplates, clientId, area);
-        Playlists = new(root.Playlists, clientId, area, null, area == null ? null : Access.Shared);
+        AllScreens = new(root.Screens, clientId, null, Access.Sees, addTo: area);
+        // ce qu'une personne de l'organisation crée lui appartient ; l'équipe Linkii ou un revendeur qui entre dans l'espace crée pour l'organisation.
+        // Médias, listes, dossiers et modèles n'ont plus d'aire : ils sont à leur propriétaire (rangés dans l'aire ouverte, sans effet).
+        var me = Me = Access.UserId is { } uid && root.Users.Any(u => u.Id == uid && u.ClientId == clientId) ? uid : (Guid?)null;
+        Media = new(root.Media, clientId, null, null, me, area);
+        MediaFolders = new(root.MediaFolders, clientId, null, null, me, area);
+        PlaylistFolders = new(root.PlaylistFolders, clientId, null, null, me, area);
+        CompositionTemplates = new(root.CompositionTemplates, clientId, null, null, me, area);
+        Playlists = new(root.Playlists, clientId, null, null, me, area);
         AppInstalls = new(root.AppInstalls, clientId);
         Areas = new(root.Areas, clientId);
     }
 
     internal Db Root => _root;
+    /// <summary>La personne connectée si elle fait partie de l'organisation (null : équipe Linkii, revendeur, traitement interne) : propriétaire de ce qu'elle crée.</summary>
+    public Guid? Me { get; }
     public Tenant Tenant => _root.Clients.First(c => c.Id == ClientId);
     public Reseller? Reseller => _root.Resellers.FirstOrDefault(r => r.Id == Tenant.ResellerId);
+    /// <summary>Écrans de l'aire ouverte (filtre « Aire » des pages Écrans, Planning, Zones) que la personne voit.</summary>
     public ScopedList<Screen> Screens { get; }
+    /// <summary>Écrans de toutes les aires que la personne voit (diffusion d'une liste, utilisation d'un média…).</summary>
+    public ScopedList<Screen> AllScreens { get; }
     public ScopedList<MediaItem> Media { get; }
-    /// <summary>Partages entre aires de l'organisation (voir <see cref="AreaShare"/>).</summary>
-    public List<AreaShare> AreaShares => _root.AreaShares;
-    /// <summary>Dossiers de la médiathèque de l'aire ouverte (voir <see cref="MediaFolder"/>).</summary>
+    /// <summary>Dossiers de la médiathèque (voir <see cref="MediaFolder"/>).</summary>
     public ScopedList<MediaFolder> MediaFolders { get; }
-    /// <summary>Dossiers des listes de lecture de l'aire ouverte (voir <see cref="PlaylistFolder"/>).</summary>
+    /// <summary>Dossiers des listes de lecture (voir <see cref="PlaylistFolder"/>).</summary>
     public ScopedList<PlaylistFolder> PlaylistFolders { get; }
-    /// <summary>« Mes modèles » de compositions de l'aire ouverte (voir <see cref="CompositionTemplate"/>).</summary>
+    /// <summary>« Mes modèles » de compositions (voir <see cref="CompositionTemplate"/>).</summary>
     public ScopedList<CompositionTemplate> CompositionTemplates { get; }
     public ScopedList<Playlist> Playlists { get; }
     public ScopedList<AppInstall> AppInstalls { get; }
@@ -178,11 +181,10 @@ public class ClientDb
     /// <summary>Comptes de l'organisation (administrateurs et membres).</summary>
     public IEnumerable<User> Users => _root.Users.Where(u => u.ClientId == ClientId && Roles.IsClient(u.Role));
     public void AddUser(User u) { u.ClientId = ClientId; u.ResellerId = Tenant.ResellerId; _root.Users.Add(u); }
-    /// <summary>Retire un compte. Ses dossiers de la médiathèque passent à la personne qui agit (administrateur), partages conservés.</summary>
+    /// <summary>Retire un compte. Ses médias, listes et dossiers passent à la personne qui agit (administrateur), partages conservés.</summary>
     public int RemoveUser(Guid id)
     {
-        foreach (var f in _root.MediaFolders.Where(f => f.ClientId == ClientId && f.OwnerId == id)) f.OwnerId = Access.UserId;
-        foreach (var f in _root.PlaylistFolders.Where(f => f.ClientId == ClientId && f.OwnerId == id)) f.OwnerId = Access.UserId;
+        MemberOps.TransferAll(_root, ClientId, id, Access.UserId);
         return _root.Users.RemoveAll(u => u.Id == id && u.ClientId == ClientId && Roles.IsClient(u.Role));
     }
     /// <summary>Adresse déjà prise chez ce revendeur (ou par l'équipe Linkii) : un compte se connecte par son e-mail sur le domaine du revendeur.</summary>
@@ -473,6 +475,7 @@ public static class Seed
             EnsureAreas(db);
             AccessLevels.Migrate(db);
             AccessLevels.MigrateRolesV2(db);
+            MemberOps.MigrateV3(db);
             Signup.MarkVerified(db);
             Subscriptions.MigrateResellerShare(db);
             Alerts.Migrate(db);

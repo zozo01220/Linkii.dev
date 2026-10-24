@@ -6,7 +6,7 @@ namespace Linkii.Poc.Tests;
 /// <summary>Aires de gestion : contenu propre à chaque aire, rôles par aire, migration, zones, déplacements entre aires, comptage pour la console.</summary>
 public class AreasTests
 {
-    // Horizon SA : aires Lausanne et Genève. Claire administre l'organisation ; Marco administre Lausanne ; Sofia est utilisatrice de Genève.
+    // Horizon SA : aires Lausanne et Genève. Claire administre l'organisation ; Marco gère les écrans de Lausanne ; Sofia ceux de Genève.
     readonly Db db = new();
     readonly Tenant client = new() { Name = "Horizon SA" };
     readonly Area lausanne, geneva;
@@ -17,18 +17,19 @@ public class AreasTests
         db.Clients.Add(client);
         lausanne = new Area { ClientId = client.Id, Name = "Lausanne", CreatedUtc = DateTime.UtcNow.AddDays(-2) };
         geneva = new Area { ClientId = client.Id, Name = "Genève", CreatedUtc = DateTime.UtcNow.AddDays(-1) };
+        foreach (var a in new[] { lausanne, geneva }) AreaOps.EnsureDefaultZone(a);
         db.Areas.AddRange(new[] { lausanne, geneva });
         User U(string mail, string role, params Area[] areas)
         {
             var u = new User { Email = mail, Role = role, ClientId = client.Id };
-            if (areas.Length > 0) { var l = new AccessLevel { Name = "Accès " + mail, Pages = [.. LevelPages.Offered], AllIntegrations = true, AllWidgets = true, AreaIds = areas.Select(a => a.Id).ToList() }; client.Levels.Add(l); u.LevelId = l.Id; }
+            if (areas.Length > 0) u.Rights = new MemberRights { ZoneIds = areas.SelectMany(a => a.Zones).Select(z => z.Id).ToList() };
             db.Users.Add(u);
             return u;
         }
         claire = U("claire@horizon.ch", Roles.ClientAdmin);
         marco = U("marco@horizon.ch", Roles.ClientMember, lausanne);
         sofia = U("sofia@horizon.ch", Roles.ClientMember, geneva);
-        Screen S(string name, Area a) { var s = new Screen { ClientId = client.Id, AreaId = a.Id, Name = name, Token = Guid.NewGuid().ToString("N") }; db.Screens.Add(s); return s; }
+        Screen S(string name, Area a) { var s = new Screen { ClientId = client.Id, AreaId = a.Id, ZoneId = a.Zones[0].Id, Name = name, Token = Guid.NewGuid().ToString("N") }; db.Screens.Add(s); return s; }
         S("Accueil Lausanne", lausanne);
         S("Cafétéria", lausanne);
         S("Hall Genève", geneva);
@@ -37,18 +38,19 @@ public class AreasTests
     ClientDb As(User u) => new(db, client.Id, AreaAccess.For(db, client.Id, u.Id));
 
     [Fact]
-    public void An_org_admin_has_every_area_and_a_member_only_his_own()
+    public void Everyone_has_every_area_and_a_user_only_his_screens()
     {
         Assert.Equal(new[] { "Lausanne", "Genève" }, As(claire).Access.Areas.Select(a => a.Name));
         Assert.True(As(claire).Access.CanManage(geneva.Id));
-        Assert.Equal(new[] { "Lausanne" }, As(marco).Access.Areas.Select(a => a.Name));
+        Assert.Equal(new[] { "Lausanne", "Genève" }, As(marco).Access.Areas.Select(a => a.Name));   // les aires ne donnent plus de droits (24 octobre 2026)
+        Assert.Equal(2, As(marco).Screens.Count);
         Assert.False(As(marco).Access.ManagesCurrent);   // les zones et les membres sont réservés aux administrateurs de l'organisation
         Assert.False(As(sofia).Access.ManagesCurrent);   // utilisatrice : contenus, pas les zones ni les membres
         Assert.False(As(marco).Access.CanManage(geneva.Id));
     }
 
     [Fact]
-    public void Only_the_open_area_is_visible_and_new_content_lands_in_it()
+    public void Only_the_screens_of_the_open_area_are_listed_lists_belong_to_their_owner()
     {
         Assert.Equal(2, As(claire).Screens.Count);   // aire ouverte par défaut : la plus ancienne
         Assert.Equal(new[] { "Hall Genève" }, As(sofia).Screens.Select(s => s.Name));
@@ -60,14 +62,15 @@ public class AreasTests
         var pl = new Playlist { Name = "Menus" };
         As(sofia).Playlists.Add(pl);
         Assert.Equal(geneva.Id, pl.AreaId);
-        Assert.Empty(As(marco).Playlists);            // Lausanne ne la voit pas
+        Assert.Empty(As(marco).Playlists.Where(p => PlaylistOps.RightOf(As(marco), p) != FolderRight.None));   // la liste de Sofia ne lui est pas partagée
 
-        marco.LastAreas[client.Id] = geneva.Id;       // une aire qui ne lui est pas confiée est ignorée
-        Assert.Equal(lausanne.Id, As(marco).Area!.Id);
+        marco.LastAreas[client.Id] = geneva.Id;       // il ouvre Genève : aucun de ses écrans n'y est
+        Assert.Equal(geneva.Id, As(marco).Area!.Id);
+        Assert.Empty(As(marco).Screens);
     }
 
     [Fact]
-    public void Drive_files_are_shared_by_every_area_and_a_member_without_area_sees_nothing()
+    public void Drive_files_are_shared_by_every_area_and_a_member_without_screens_sees_none()
     {
         var drive = new MediaItem { ClientId = client.Id, Name = "photo", Type = "image", FileName = "d.jpg" };
         drive.Info["drive"] = Guid.NewGuid().ToString();
@@ -77,7 +80,7 @@ public class AreasTests
 
         var nobody = new User { Email = "nadia@horizon.ch", Role = Roles.ClientMember, ClientId = client.Id };
         db.Users.Add(nobody);
-        Assert.Null(As(nobody).Area);
+        Assert.NotNull(As(nobody).Area);
         Assert.Empty(As(nobody).Screens);
         Assert.Empty(As(nobody).Playlists);
     }
@@ -129,7 +132,7 @@ public class AreasTests
     }
 
     [Fact]
-    public void A_moved_screen_keeps_its_publication_but_loses_playlists_of_its_old_area()
+    public void A_moved_screen_keeps_its_publication_and_its_playlist()
     {
         var pl = new Playlist { ClientId = client.Id, AreaId = lausanne.Id, Name = "Accueil" };
         db.Playlists.Add(pl);
@@ -138,48 +141,21 @@ public class AreasTests
         screen.PublishedVersion = 3;
         Assert.Null(AreaOps.MoveScreen(As(claire), screen.Id, geneva.Id));
         Assert.Equal(geneva.Id, screen.AreaId);
-        Assert.Null(screen.PlaylistId);
+        Assert.Equal(pl.Id, screen.PlaylistId);        // les listes n'ont plus d'aire
         Assert.Equal(3, screen.PublishedVersion);
     }
 
     [Fact]
-    public void A_playlist_moves_with_the_contents_it_alone_uses()
+    public void Lists_and_media_have_no_area_and_are_seen_from_every_area()
     {
-        var file = new MediaItem { ClientId = client.Id, AreaId = lausanne.Id, Name = "affiche", Type = "image", FileName = "a.png" };
-        var slideshow = new MediaItem { ClientId = client.Id, AreaId = lausanne.Id, Name = "Diaporama", Type = "app", AppId = "slideshow-images" };
-        slideshow.Settings["images"] = file.Id.ToString();
-        db.Media.AddRange(new[] { file, slideshow });
-        var pl = new Playlist { ClientId = client.Id, AreaId = lausanne.Id, Name = "Vitrine" };
-        pl.Draft.Add(new PlaylistItem { MediaId = slideshow.Id });
-        db.Playlists.Add(pl);
-        var other = new Playlist { ClientId = client.Id, AreaId = lausanne.Id, Name = "Autre" };
-        other.Draft.Add(new PlaylistItem { MediaId = slideshow.Id });
-        db.Playlists.Add(other);
-        var screen = db.Screens.First(s => s.Name == "Accueil Lausanne");
+        var pl = new Playlist { Name = "Vitrine" };
+        As(marco).Playlists.Add(pl);                  // rangée dans l'aire ouverte (Lausanne), sans effet
+        marco.LastAreas[client.Id] = geneva.Id;       // il ouvre Genève
+        Assert.Contains(As(marco).Playlists, p => p.Id == pl.Id);
+        var screen = db.Screens.First(s => s.Name == "Hall Genève");
         screen.PlaylistId = pl.Id;
-
-        Assert.Contains("Autre", AreaOps.MovePlaylist(As(claire), pl.Id, geneva.Id));   // contenu partagé avec une autre liste : refusé
-        Assert.Equal(lausanne.Id, pl.AreaId);
-
-        other.Draft.Clear();
-        Assert.Null(AreaOps.MovePlaylist(As(claire), pl.Id, geneva.Id));
-        Assert.Equal(geneva.Id, pl.AreaId);
-        Assert.Equal(geneva.Id, slideshow.AreaId);
-        Assert.Equal(geneva.Id, file.AreaId);         // le fichier affiché par le diaporama suit
-        Assert.Null(screen.PlaylistId);               // l'écran de Lausanne n'a plus de liste choisie
-    }
-
-    [Fact]
-    public void A_file_used_in_its_area_does_not_move()
-    {
-        var file = new MediaItem { ClientId = client.Id, AreaId = lausanne.Id, Name = "logo", Type = "image", FileName = "l.png" };
-        var image = new MediaItem { ClientId = client.Id, AreaId = lausanne.Id, Name = "Image", Type = "app", AppId = "image" };
-        image.Settings["image"] = file.Id.ToString();
-        db.Media.AddRange(new[] { file, image });
-        Assert.NotNull(AreaOps.MoveMedia(As(claire), file.Id, geneva.Id));
-        image.Settings["image"] = "";
-        Assert.Null(AreaOps.MoveMedia(As(claire), file.Id, geneva.Id));
-        Assert.Equal(geneva.Id, file.AreaId);
+        Assert.Null(AreaOps.MoveScreen(As(claire), screen.Id, lausanne.Id));
+        Assert.Equal(pl.Id, screen.PlaylistId);       // l'écran déplacé garde sa liste
     }
 
     [Fact]

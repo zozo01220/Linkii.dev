@@ -30,7 +30,7 @@
         else if (!noArea)
         {
             @* pas le droit d'ajouter un écran dans cette aire : bouton verrouillé *@
-            <button class="btn" disabled title="Votre niveau de droits ne permet pas de connecter un écran dans cette aire."><Ico Name="lock" Size="16" /> Connecter un écran</button>
+            <button class="btn" disabled title="Vous êtes en lecture seule sur les écrans : un administrateur peut changer cela dans votre fiche membre."><Ico Name="lock" Size="16" /> Connecter un écran</button>
         }
     </div>
 </div>
@@ -43,7 +43,7 @@
 {
     @* Une seule barre : tout sélectionner, actions de la sélection, zone, état, recherche, tri, affichage *@
     <div class="sc-bar" role="region" aria-label="Filtres et sélection" aria-live="polite">
-        @if (selectedIds.Count > 0)
+        @if (selectedIds.Count > 0 && !ListView)
         {
             <label class="lib-all" title="Tout sélectionner">
                 <input type="checkbox" class="sc-check" checked="@(Shown.Count > 0 && Shown.All(s => selectedIds.Contains(s.Id)))" @onchange="ToggleAll" aria-label="Tout sélectionner" />
@@ -53,6 +53,7 @@
             <Ico Name="search" Size="16" />
             <input placeholder="Rechercher des écrans" aria-label="Rechercher des écrans" @bind="search" @bind:event="oninput" />
         </div>
+        <AreaFilter Value="@areaFilter" AllowAll="true" OnPick="PickAreaFilter" />
         <FilterMenu Groups="FilterGroups" OnPick="PickFilter" OnReset="ResetFilters">
             <Footer>
                 @if (area != null && ShowZones && manageZones)
@@ -137,7 +138,7 @@ else
     @if (ListView)
     {
         @* en-têtes des colonnes (PC) ; masqués au téléphone *@
-        <div class="sc-listhead" aria-hidden="true"><span></span><span>Aperçu</span><span></span><span>Écran</span><span>État</span><span></span><span>En diffusion</span><span></span><span></span></div>
+        <div class="sc-listhead"><span class="sc-lh-check"><input type="checkbox" class="sc-check" checked="@(Shown.Count > 0 && Shown.All(s => selectedIds.Contains(s.Id)))" @onchange="ToggleAll" aria-label="Tout sélectionner" title="Tout sélectionner" /></span><span>Aperçu</span><span></span><span>Écran</span><span>État</span><span>Partage</span><span>En diffusion</span><span></span><span></span></div>
     }
     @foreach (var entry in Entries) { @Card(entry) }
     @foreach (var os in OtherShown) { if (ListView) { @LightRow(os.Screen, os.Area) } else { @LightCard(os.Screen, os.Area) } }
@@ -191,6 +192,16 @@ else
                         @foreach (var p in playlists) { <option value="@p.Id">@p.Name</option> }
                     </select>
                 </div>
+                @if (pairAreas.Count > 1)
+                {
+                    @* l'aire se choisit ici (plus d'aire ouverte dans le menu) : pré-remplie avec le filtre en cours, ou la dernière aire utilisée *@
+                    <div class="dw-field wide">
+                        <label for="pair-area">Aire</label>
+                        <select id="pair-area" value="@area?.Id" @onchange="PairAreaChanged">
+                            @foreach (var a in pairAreas) { <option value="@a.Id">@a.Name</option> }
+                        </select>
+                    </div>
+                }
                 @if (FreeZones.Count > 1)
                 {
                     <div class="dw-field wide">
@@ -361,7 +372,7 @@ else
 
 @if (areaMove is { Count: > 0 } am)
 {
-    <AreaMoveDialog Kind="screen" Items="am" OnClose="AreaMoved" />
+    <AreaMoveDialog Items="am" OnClose="AreaMoved" />
 }
 
 @if (editing is { } eid)
@@ -396,6 +407,11 @@ else if (wallEdit is { } wid)
     <WallDialog ZoneId="wid" OnClose="WallClosed" />
 }
 
+@if (assigning is { } asg)
+{
+    <ScreenAssignSheet Screen="asg" OnClose="() => { assigning = null; Reload(); }" />
+}
+
 <NewMark Kind="screen" Ids="@AllScreens.Select(s => s.Id)" />
 <NewMark Kind="zone" Ids="@zones.Select(z => z.Id)" />
 
@@ -422,6 +438,7 @@ else if (wallEdit is { } wid)
     {
         tenant = Store.Read(d => d.Tenant);
         Reload();
+        areaFilter = Store.Read(d => d.Users.FirstOrDefault(u => u.Id == d.Access.UserId)?.LibraryTabs.GetValueOrDefault("screens-area")) == "one" ? area?.Id.ToString() ?? "" : "";   // filtre « Aire » retenu (par défaut : toutes)
         // « Ouvrir cette aire » depuis un écran d'une autre aire : après le changement d'aire, l'écran choisi s'ouvre directement en édition
         var qs = System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query);
         if (Guid.TryParse(qs["edit"], out var wanted)) { cleanQuery = true; if (screens.Any(s => s.Id == wanted)) editing = wanted; }
@@ -619,6 +636,10 @@ else if (wallEdit is { } wid)
 
     // Droit de connecter un écran dans l'aire ouverte : écrans en modification, et l'aire entière ou une zone libre que la personne voit (l'écran y sera rangé)
     private bool canAdd;
+    private bool canAssign;     // administrateur, avec au moins un utilisateur : « Attribuer… » sur chaque écran
+    private Dictionary<Guid, ShareSummary> screenShares = new();   // pastille « Partagé · N » : les utilisateurs qui gèrent l'écran (visible de l'administrateur)
+    private RenderFragment ScreenShare(Screen s) => screenShares.TryGetValue(s.Id, out var sum) ? @<SharePill Summary="sum" Clickable="canAssign" OnClick="() => assigning = s" /> : (b => { });
+    private Screen? assigning;
 
     // Écrans des autres aires du périmètre (consultation : on ouvre leur aire pour les modifier)
     private List<OtherScreen> OtherAll => groupAreas.Where(g => g.Area.Id != area?.Id)
@@ -908,6 +929,7 @@ else if (wallEdit is { } wid)
                                 <button type="button" role="menuitem" @onclick="() => OpenRename(gs)"><Ico Name="edit" Size="16" /> Renommer</button>
                                 <button type="button" role="menuitem" @onclick="() => AskPublish(new() { gs.Id })"><Ico Name="upload" Size="16" /> Publier</button>
                                 <button type="button" role="menuitem" disabled="@(!Growth || !gonline)" title="@(!Growth ? Plans.LockedHint : !gonline ? "L'écran est hors ligne" : null)" @onclick='() => { menuFor = null; OpenLive(gs, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer</button>
+                                @if (canAssign) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; assigning = gs; }"><Ico Name="users" Size="16" /> Attribuer…</button> }
                                 @if (otherAreas.Count > 0) { <button type="button" role="menuitem" @onclick="() => OpenAreaMove(gs)"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
                                 <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = new() { gs }; }"><Ico Name="trash" Size="16" /> Supprimer</button>
                             </div>
@@ -945,6 +967,7 @@ else if (wallEdit is { } wid)
                             @if (synced.Contains(gs.Id)) { <span class="gc-chip sync" title="Cet écran affiche le même contenu, au même moment, que les autres écrans de la zone qui jouent cette liste"><Ico Name="link" Size="12" /> Synchronisé</span> }
                             else { <span class="gc-chip" title="Aucun autre écran de la zone ne joue cette liste publiée : l'écran reste indépendant">Indépendant</span> }
                         }
+                    <span class="gc-share">@ScreenShare(gs)</span>
                     </div>
                     @* app Android : la même rangée, sous le nom (pas de survol au doigt) ; avec le nom de la zone *@
                     <div class="gc-plrow gc-apponly">@ScreenPlRow(gs, gonline, gpaused, ShowZones && zoneFilter == null ? gzone?.Name ?? Zone.DefaultName : null)</div>
@@ -1116,6 +1139,7 @@ else if (wallEdit is { } wid)
                     <input type="checkbox" class="sc-check" aria-label="Sélectionner @sc.Name" checked="@selectedIds.Contains(sc.Id)" @onchange="() => ToggleSelect(sc.Id)" />
                     <span class="sc-dot @cls @(paused ? "paused" : "")" title="@st"><span class="sr-only sc-st">@(paused ? "En pause" : st)</span></span>
                     <button type="button" class="pl-name linklike-name" title="Paramètres de l'écran « @sc.Name »" @onclick="() => Edit(sc)">@sc.Name</button>
+                    @ScreenShare(sc)
                     @if (paused) { <span class="badge mise-a-jour sc-paused-badge" title="@(sc.PausedUntilUtc is { } pu ? "Reprise automatique à " + LocalTime(pu) : "Reprise manuelle")">En pause</span> }
                     <div class="kebab">
                         <button type="button" class="kebab-btn" aria-label="Actions pour @sc.Name" aria-haspopup="menu" aria-expanded="@(menuFor == sc.Id ? "true" : "false")"
@@ -1133,6 +1157,7 @@ else if (wallEdit is { } wid)
                                 <button type="button" role="menuitem" @onclick="() => OpenRename(sc)"><Ico Name="edit" Size="16" /> Renommer</button>
                                 <button type="button" role="menuitem" @onclick="() => AskPublish(new() { sc.Id })"><Ico Name="upload" Size="16" /> Publier</button>
                                 <button type="button" role="menuitem" disabled="@(!Growth || !online)" title="@(!Growth ? Plans.LockedHint : !online ? "L'écran est hors ligne" : null)" @onclick='() => { menuFor = null; OpenLive(sc, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer</button>
+                                @if (canAssign) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; assigning = sc; }"><Ico Name="users" Size="16" /> Attribuer…</button> }
                                 @if (otherAreas.Count > 0) { <button type="button" role="menuitem" @onclick="() => OpenAreaMove(sc)"><Ico Name="move" Size="16" /> Déplacer vers une autre aire…</button> }
                                 <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = new() { sc }; }"><Ico Name="trash" Size="16" /> Supprimer</button>
                             </div>
@@ -1786,9 +1811,6 @@ else if (wallEdit is { } wid)
         get
         {
             var list = new List<FilterGroup>();
-            if (groupAreas.Count > 1)
-                list.Add(new("area", "Aire de gestion", areaFilter, new[] { new FilterOption("", "Tous", screens.Count + OtherAll.Count) }
-                    .Concat(groupAreas.Select(g => new FilterOption(g.Area.Id.ToString(), g.Area.Name, g.Area.Id == area?.Id ? screens.Count : g.Screens.Count))).ToList()));
             if (area != null && ShowZones && OwnAreaVisible)
                 list.Add(new("zone", "Zone", zoneFilter ?? "", new[] { new FilterOption("", "Toutes", screens.Count) }
                     .Concat(zones.Select(z => new FilterOption(z.Id.ToString(), (z.IsWall ? "Mur " : "") + z.Name, screens.Count(x => ZoneOf(x)?.Id == z.Id)))).ToList()));
@@ -1806,6 +1828,17 @@ else if (wallEdit is { } wid)
     private void ClearFilter(string key) => PickFilter((key, ""));
     private void ResetFilters() { areaFilter = ""; PickZone(null); statusFilter = ""; }
     private void PickArea(string id) { areaFilter = id; if (!OwnAreaVisible) zoneFilter = null; dissolveFor = null; CloseMenu(); }   // les zones sont celles de l'aire ouverte
+
+    // Filtre « Aire » (24 octobre 2026) : une aire choisie est ouverte (ses zones, la connexion d'un écran) ; « Toutes » montre toutes les aires, groupées. Mémorisé par personne.
+    private void PickAreaFilter(string id)
+    {
+        try { Store.Write(d => { if (d.Users.FirstOrDefault(u => u.Id == d.Access.UserId) is { } u) u.LibraryTabs["screens-area"] = id == "" ? "" : "one"; }); }
+        catch (UnauthorizedAccessException) { }   // lecture seule : le choix n'est pas retenu
+        zoneFilter = null; treeArea = null; treeZone = null;
+        Reload();
+        areaFilter = id == "" ? "" : area?.Id.ToString() ?? "";
+        if (area != null) treeOpen.Add(area.Id);
+    }
     private void PickZone(Zone? z) { zoneFilter = z?.Id.ToString(); dissolveFor = null; CloseMenu(); }
 
     private static string ZoneIcon(Zone z) => z.IsWall ? "grid" : z.Sync ? "link" : "box";
@@ -1875,8 +1908,11 @@ else if (wallEdit is { } wid)
         tenant = Store.Read(d => d.Tenant);   // licence : peut changer pendant que la page est ouverte
         (area, manageZones, noArea) = Store.Read(d => (d.Area, d.Access.ManagesCurrent, d.Access.OrgAreaCount > 0 && d.Area == null));
         zones = Store.Read(d => d.Area?.Zones.Where(z => d.Access.SeesZone(z.Id)).OrderByDescending(z => z.IsDefault).ThenBy(z => z.Name, StringComparer.CurrentCultureIgnoreCase).ToList()) ?? new();   // seules les zones du périmètre
-        canAdd = Store.Read(d => d.Area is { } a && d.Access.CanWrite(LevelPages.Screens)
-            && (d.Access.IsOrgAdmin || d.Access.Perimeter is { } p && (p.AllAreas || p.AreaIds.Contains(a.Id)) || a.Zones.Any(z => !z.IsWall && d.Access.SeesZone(z.Id))));
+        // connecter un écran : administrateur, ou utilisateur qui gère ses écrans (l'écran lui est attribué d'office) ; pas en lecture seule
+        canAdd = Store.Read(d => d.Area != null && d.Access.CanWrite(LevelPages.Screens));
+        canAssign = Store.Read(d => d.Access.IsOrgAdmin && d.Users.Any(u => u.Role == Roles.ClientMember));
+        screenShares = !canAssign ? new() : Store.Read(d => d.AllScreens.ToDictionary(s => s.Id, s => MemberOps.ManagersOf(d, s)).Where(x => x.Value.Count > 0)
+            .ToDictionary(x => x.Key, x => new ShareSummary(x.Value.Count, null, x.Value.Select(u => (u.Label, true)).OrderBy(n => n.Item1, StringComparer.CurrentCultureIgnoreCase).ToList())));
         otherAreas = Store.Read(d => d.Access.IsOrgAdmin && d.Area is { } cur ? d.Areas.Where(a => a.Id != cur.Id).OrderBy(a => a.Name).ToList() : new());
         if (zoneFilter != null && !zones.Any(z => z.Id.ToString() == zoneFilter)) zoneFilter = null;
         screens = Store.Read(d => d.Screens.Where(s => s.Token != null).OrderBy(s => s.Name).ToList());
@@ -1888,7 +1924,18 @@ else if (wallEdit is { } wid)
         treeData = TreeData();
     }
 
-    private void OpenPair() { code = name = ""; pairFull = true; playlistId = null; error = null; pairSpec = ScreenSpec.From(tenant); pairSpec.Resolution = "auto"; pairZone = (FreeZones.FirstOrDefault(z => z.Id.ToString() == zoneFilter) ?? zones.FirstOrDefault(z => z.IsDefault) ?? FreeZones.FirstOrDefault())?.Id.ToString() ?? ""; showPair = true; }
+    private List<Area> pairAreas = new();
+
+    // Aire du nouvel écran : elle devient l'aire ouverte (ses zones), et le filtre suit s'il était sur une aire
+    private void PairAreaChanged(ChangeEventArgs e)
+    {
+        if (!Guid.TryParse(e.Value?.ToString(), out var id) || id == area?.Id || !Store.SwitchArea(id)) return;
+        Reload();
+        if (areaFilter != "") areaFilter = id.ToString();
+        pairZone = (zones.FirstOrDefault(z => z.IsDefault) ?? FreeZones.FirstOrDefault())?.Id.ToString() ?? "";
+    }
+
+    private void OpenPair() { pairAreas = Store.Read(AreaFilter.Visible); code = name = ""; pairFull = true; playlistId = null; error = null; pairSpec = ScreenSpec.From(tenant); pairSpec.Resolution = "auto"; pairZone = (FreeZones.FirstOrDefault(z => z.Id.ToString() == zoneFilter) ?? zones.FirstOrDefault(z => z.IsDefault) ?? FreeZones.FirstOrDefault())?.Id.ToString() ?? ""; showPair = true; }
 
     private void Edit(Screen s) { menuFor = null; editing = s.Id; }
 
@@ -1964,14 +2011,15 @@ else if (wallEdit is { } wid)
         var screenName = name;
         Guid? zid = Guid.TryParse(pairZone, out var zg) && zones.Any(z => z.Id == zg) ? zg : (zones.FirstOrDefault(z => z.IsDefault) ?? FreeZones.FirstOrDefault())?.Id;
         if (noArea) { error = "Aucune aire de gestion ne vous est confiée."; return; }
-        if (!canAdd) { error = "Votre niveau de droits ne permet pas de connecter un écran dans cette aire."; return; }
+        if (!canAdd) { error = "Vous êtes en lecture seule sur les écrans : vous ne pouvez pas en connecter."; return; }
         var id = Store.Write(d =>
         {
             var s = d.ClaimScreen(code.Trim());
             if (s == null) return (Guid?)null;
             s.Name = string.IsNullOrWhiteSpace(screenName) ? "Écran " + code : screenName.Trim();
             s.PlaylistId = pid;
-            s.ZoneId = zid;
+            if (zid != null) s.ZoneId = zid;   // sinon la zone par défaut de l'aire (ClaimScreen)
+            MemberOps.AdoptScreen(d, s.Id);   // un utilisateur gère l'écran qu'il connecte
             s.ScreenType = spec.Type; s.Orientation = spec.Orientation; s.Resolution = spec.Resolution;
             s.AutoStart = d.Tenant.DefaultAutoStart;
             s.Windowed = !full;

@@ -14,8 +14,8 @@ public class Db
     public List<PushDevice> PushDevices { get; set; } = new();   // appareils qui reçoivent les notifications (voir <see cref="PushService"/>)
     public List<Area> Areas { get; set; } = new();               // aires de gestion des clients
     public List<MediaFolder> MediaFolders { get; set; } = new();  // dossiers de la médiathèque (voir <see cref="MediaFolder"/>)
-    public List<AreaShare> AreaShares { get; set; } = new();       // partages entre aires de gestion : médias, dossiers, listes de lecture (voir <see cref="AreaShare"/>)
     public List<PlaylistFolder> PlaylistFolders { get; set; } = new();  // dossiers des listes de lecture (voir <see cref="PlaylistFolder"/>)
+    public List<ItemShare> ItemShares { get; set; } = new();        // partages entre personnes : médias, dossiers, listes de lecture (voir <see cref="ItemShare"/>)
     public List<CompositionTemplate> CompositionTemplates { get; set; } = new();   // « Mes modèles » de compositions (voir <see cref="CompositionTemplate"/>)
     public List<Payment> Payments { get; set; } = new();          // paiements de renouvellement enregistrés (voir <see cref="Subscriptions"/>)
     public List<Payout> Payouts { get; set; } = new();            // versements de fin de mois aux revendeurs
@@ -179,6 +179,10 @@ public class User
     /// Vide : l'ancien couple <see cref="LevelId"/> + <see cref="Perimeter"/> (lu par <see cref="UserAccess.AccessList"/>). Le premier accès est recopié dans ces deux champs.
     /// </summary>
     public List<MemberAccess> Accesses { get; set; } = new();
+    /// <summary>Droits d'un utilisateur (depuis le 24 octobre 2026) : un mode par page et ses écrans (voir <see cref="MemberRights"/>). Remplace niveau, périmètre et accès.</summary>
+    public MemberRights? Rights { get; set; }
+    /// <summary>Dernier onglet ouvert par page (Médiathèque, Listes de lecture) : « mine », « shared » ou « all ».</summary>
+    public Dictionary<string, string> LibraryTabs { get; set; } = new();
     /// <summary>Dernière aire ouverte, par organisation (l'équipe Linkii et les revendeurs visitent plusieurs organisations).</summary>
     public Dictionary<Guid, Guid> LastAreas { get; set; } = new();
     /// <summary>Mode d'utilisation : true expert (toutes les fonctions), false simple (vue réduite), null ancien compte = expert.</summary>
@@ -753,7 +757,7 @@ public class ScreenWidget
     public double Scale { get; set; } = 1;               // 0,6 petit · 1 moyen · 1,5 grand
 }
 
-public class MediaItem : IClientOwned, IAreaOwned
+public class MediaItem : IClientOwned, IAreaOwned, IOwned
 {
     public Guid ClientId { get; set; }
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -794,7 +798,7 @@ public interface IFolderNode : IAreaOwned
     List<FolderShare> Shares { get; }
 }
 
-public class MediaFolder : IClientOwned, IFolderNode
+public class MediaFolder : IClientOwned, IFolderNode, IOwned
 {
     public Guid ClientId { get; set; }
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -819,7 +823,7 @@ public static class FolderShareKind
     public const string User = "user", Level = "level";
 }
 
-public class Playlist : IClientOwned, IAreaOwned
+public class Playlist : IClientOwned, IAreaOwned, IOwned
 {
     public Guid ClientId { get; set; }
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -832,6 +836,7 @@ public class Playlist : IClientOwned, IAreaOwned
     public List<PlaylistItem> Draft { get; set; } = new();       // l'ordre de la liste = l'ordre de diffusion
     public List<PublishedItem> Published { get; set; } = new();  // ancien instantané : lu seulement par les écrans jamais publiés depuis
     public Guid? FolderId { get; set; }                            // dossier des listes de lecture (null : racine de l'aire). Voir <see cref="PlaylistFolder"/>
+    public Guid? OwnerId { get; set; }                             // créateur (propriétaire) ; null : liste de l'organisation (d'avant les propriétaires)
 
     /// <summary>À appeler dans un Store.Write après toute modification du contenu de la playlist.</summary>
     public void Touch() { DraftChanged = true; Revision++; UpdatedAt = DateTime.UtcNow; }
@@ -841,7 +846,7 @@ public class Playlist : IClientOwned, IAreaOwned
 /// Dossier des listes de lecture (option « Dossiers », comme la médiathèque). Il appartient à son créateur et à une aire, est privé tant qu'il n'est pas partagé.
 /// Les listes rangées dedans ne sont visibles que si la personne y a un droit ; à la racine, elles restent visibles de tous, comme avant.
 /// </summary>
-public class PlaylistFolder : IClientOwned, IFolderNode
+public class PlaylistFolder : IClientOwned, IFolderNode, IOwned
 {
     public Guid ClientId { get; set; }
     public Guid Id { get; set; } = Guid.NewGuid();

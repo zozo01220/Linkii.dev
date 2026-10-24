@@ -45,21 +45,26 @@ public static class AreaOps
         return null;
     }
 
-    /// <summary>Contenu d'une aire, toutes aires confondues (l'aire ouverte n'a pas d'importance).</summary>
-    public static (int Screens, int Playlists, int Media) Contents(ClientDb d, Guid areaId) =>
-        (d.Root.Screens.Count(s => s.ClientId == d.ClientId && s.AreaId == areaId && s.Token != null),
-         d.Root.Playlists.Count(p => p.ClientId == d.ClientId && p.AreaId == areaId),
-         d.Root.Media.Count(m => m.ClientId == d.ClientId && m.AreaId == areaId && m.Status != "failed"));
+    /// <summary>Écrans d'une aire (depuis le 24 octobre 2026, une aire ne range que des écrans).</summary>
+    public static int ScreenCount(ClientDb d, Guid areaId) => d.Root.Screens.Count(s => s.ClientId == d.ClientId && s.AreaId == areaId && s.Token != null);
 
-    /// <summary>Une aire ne se supprime que vide (rien n'est perdu par mégarde), et jamais la dernière.</summary>
+    /// <summary>
+    /// Une aire ne se supprime que sans écran (rien n'est perdu par mégarde), et jamais la dernière. Les listes, médias et dossiers rangés dedans
+    /// (d'avant le 24 octobre 2026) n'en dépendent plus : ils passent à la plus ancienne aire restante, sans autre effet.
+    /// </summary>
     public static string? Delete(ClientDb d, Guid areaId)
     {
         if (!d.Access.IsOrgAdmin) return "Seul un administrateur de l'organisation supprime les aires.";
         if (d.Areas.Count <= 1) return "L'organisation garde au moins une aire.";
-        var (s, p, m) = Contents(d, areaId);
-        if (s + p + m > 0) return $"Videz d'abord l'aire : {s} écran(s), {p} liste(s) de lecture, {m} média(s). Déplacez-les vers une autre aire ou supprimez-les.";
-        d.Root.Media.RemoveAll(x => x.ClientId == d.ClientId && x.AreaId == areaId);   // vidéos en échec de conversion
-        AccessLevels.Forget(d, [areaId], d.Areas.Where(a => a.Id == areaId).SelectMany(a => a.Zones).Select(z => z.Id));   // les niveaux de droits perdent cette aire
+        var s = ScreenCount(d, areaId);
+        if (s > 0) return $"Videz d'abord l'aire : {s} écran{(s > 1 ? "s" : "")}. Déplacez-{(s > 1 ? "les" : "le")} vers une autre aire ou supprimez-{(s > 1 ? "les" : "le")}.";
+        var other = d.Areas.Where(a => a.Id != areaId).OrderBy(a => a.CreatedUtc).First().Id;
+        foreach (var x in d.Root.Media.Where(x => x.ClientId == d.ClientId && x.AreaId == areaId)) x.AreaId = other;
+        foreach (var x in d.Root.Playlists.Where(x => x.ClientId == d.ClientId && x.AreaId == areaId)) x.AreaId = other;
+        foreach (var x in d.Root.MediaFolders.Where(x => x.ClientId == d.ClientId && x.AreaId == areaId)) x.AreaId = other;
+        foreach (var x in d.Root.PlaylistFolders.Where(x => x.ClientId == d.ClientId && x.AreaId == areaId)) x.AreaId = other;
+        foreach (var x in d.Root.CompositionTemplates.Where(x => x.ClientId == d.ClientId && x.AreaId == areaId)) x.AreaId = other;
+        AccessLevels.Forget(d, [areaId], d.Areas.Where(a => a.Id == areaId).SelectMany(a => a.Zones).Select(z => z.Id));   // ses zones ne sont plus attribuées
         d.Areas.RemoveAll(a => a.Id == areaId);
         return null;
     }
@@ -139,7 +144,7 @@ public static class AreaOps
         if (a == null) return (null, err);
         var (screens, e) = WallScreens(d, a, screenIds, cols, rows, null);
         if (screens == null) return (null, e);
-        if (playlistId is { } pid && !d.Root.Playlists.Any(p => p.Id == pid && p.ClientId == d.ClientId && p.AreaId == areaId)) return (null, "Liste de lecture introuvable.");
+        if (playlistId is { } pid && !d.Root.Playlists.Any(p => p.Id == pid && p.ClientId == d.ClientId)) return (null, "Liste de lecture introuvable.");
         var n = (name ?? "").Trim();
         if (n.Length == 0) n = $"Mur {cols} × {rows}";
         if (CheckName(n) is { } ne) return (null, ne);
@@ -178,7 +183,7 @@ public static class AreaOps
         var (a, err) = Managed(d, areaId);
         if (a == null) return err;
         if (a.Zones.FirstOrDefault(z => z.Id == zoneId) is not { IsWall: true } zone) return "Mur introuvable.";
-        if (playlistId is { } pid && !d.Root.Playlists.Any(p => p.Id == pid && p.ClientId == d.ClientId && p.AreaId == areaId)) return "Liste de lecture introuvable.";
+        if (playlistId is { } pid && !d.Root.Playlists.Any(p => p.Id == pid && p.ClientId == d.ClientId)) return "Liste de lecture introuvable.";
         zone.PlaylistId = playlistId;
         foreach (var s in d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.ZoneId == zone.Id)) JoinWall(s, playlistId);
         return null;
@@ -230,15 +235,15 @@ public static class AreaOps
     public static Zone? WallOf(ClientDb d, Screen s) =>
         d.Root.Areas.FirstOrDefault(x => x.Id == s.AreaId)?.Zones.FirstOrDefault(z => z.Id == s.ZoneId && z.IsWall);
 
-    // ---------- Déplacements entre aires (administrateur de l'organisation) ----------
+    // ---------- Déplacer un écran vers une autre aire (administrateur de l'organisation) ----------
 
     private static string? CheckTarget(ClientDb d, Guid target) =>
-        !d.Access.IsOrgAdmin ? "Seul un administrateur de l'organisation déplace un élément vers une autre aire."
+        !d.Access.IsOrgAdmin ? "Seul un administrateur de l'organisation déplace un écran vers une autre aire."
         : d.Areas.Any(a => a.Id == target) ? null : "Aire introuvable.";
 
     /// <summary>
-    /// L'écran continue d'afficher ce qui y est publié. Ses listes de lecture restent dans l'ancienne aire : il n'en a plus
-    /// (modification à publier) jusqu'à ce qu'on lui en choisisse une de sa nouvelle aire.
+    /// L'écran arrive dans la zone par défaut de l'aire choisie et garde ses listes (elles n'ont plus d'aire, depuis le 24 octobre 2026) et ses créneaux.
+    /// Il continue d'afficher ce qui y est publié.
     /// </summary>
     public static string? MoveScreen(ClientDb d, Guid screenId, Guid target)
     {
@@ -249,69 +254,7 @@ public static class AreaOps
         if (WallOf(d, s) is { } wall) return $"« {s.Name} » fait partie du mur « {wall.Name} » : dissolvez d'abord le mur.";
         s.AreaId = target;
         s.WallPos = null;
-        s.OwnPlanning = false; s.Slots.Clear();   // ses créneaux visaient des listes de l'ancienne aire
         s.ZoneId = EnsureDefaultZone(d.Areas.First(a => a.Id == target)).Id;   // zone par défaut de l'aire d'arrivée
-        bool Elsewhere(Guid? id) => id is { } pid && d.Root.Playlists.FirstOrDefault(p => p.Id == pid)?.AreaId != target;
-        if (Elsewhere(s.PlaylistId)) s.PlaylistId = null;
-        for (var z = 0; z < s.ZonePlaylistIds.Count; z++) if (Elsewhere(s.ZonePlaylistIds[z])) s.ZonePlaylistIds[z] = null;
         return null;
     }
-
-    /// <summary>
-    /// Une liste de lecture part avec les contenus qu'elle utilise (contenus d'apps et fichiers qu'ils affichent), à condition qu'aucune autre
-    /// liste de son aire ne les utilise. Les écrans de l'ancienne aire qui la diffusaient gardent leur publication, sans liste choisie.
-    /// </summary>
-    public static string? MovePlaylist(ClientDb d, Guid playlistId, Guid target)
-    {
-        if (CheckTarget(d, target) is { } e) return e;
-        var pl = d.Root.Playlists.FirstOrDefault(x => x.Id == playlistId && x.ClientId == d.ClientId);
-        if (pl == null) return "Liste de lecture introuvable.";
-        if (pl.AreaId == target) return null;
-        var source = pl.AreaId;
-        var media = d.Root.Media.Where(m => m.ClientId == d.ClientId && m.AreaId == source).ToList();
-        var items = pl.Draft.Select(i => i.MediaId).ToHashSet();
-        var files = media.Where(m => items.Contains(m.Id) && m.AppId != null).SelectMany(Referenced).ToHashSet();
-        var moving = media.Where(m => items.Contains(m.Id) || files.Contains(m.Id)).ToList();
-        var ids = moving.Select(m => m.Id).ToHashSet();
-
-        // contenus partagés avec une autre liste de lecture (ou un autre contenu d'app) de l'aire : on ne les arrache pas
-        var others = d.Root.Playlists.Where(p => p.ClientId == d.ClientId && p.AreaId == source && p.Id != pl.Id && p.Draft.Any(i => ids.Contains(i.MediaId))).Select(p => "« " + p.Name + " »");
-        var apps = media.Where(m => m.AppId != null && !ids.Contains(m.Id) && Referenced(m).Any(ids.Contains)).Select(m => "« " + m.Name + " »");
-        var blockers = others.Concat(apps).Distinct().ToList();
-        if (blockers.Count > 0) return $"Des contenus de cette liste sont aussi utilisés par {string.Join(", ", blockers)}. Dupliquez la liste et retirez-les, ou déplacez aussi ces éléments.";
-
-        pl.AreaId = target;
-        AreaShareOps.Forget(d, ShareKind.Playlist, new[] { pl.Id });   // déplacée : ses partages ne valent plus
-        pl.FolderId = null;   // le dossier appartient à l'aire d'origine : la liste arrive à la racine de la nouvelle
-        foreach (var m in moving.Where(m => !m.Info.ContainsKey("drive"))) { m.AreaId = target; m.FolderId = null; }   // les fichiers Drive restent communs
-        foreach (var s in d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.AreaId == source))
-        {
-            if (s.PlaylistId == pl.Id) s.PlaylistId = null;
-            for (var z = 0; z < s.ZonePlaylistIds.Count; z++) if (s.ZonePlaylistIds[z] == pl.Id) s.ZonePlaylistIds[z] = null;
-            s.Slots.RemoveAll(x => x.PlaylistId == pl.Id);   // plus programmée dans l'ancienne aire (l'instantané de l'écran reste jusqu'à sa prochaine publication)
-        }
-        foreach (var z in d.Areas.Where(a => a.Id == source).SelectMany(a => a.Zones)) z.Slots.RemoveAll(x => x.PlaylistId == pl.Id);
-        return null;
-    }
-
-    /// <summary>Une image ou une vidéo ne part que si aucun contenu ni aucune liste de son aire ne l'utilise.</summary>
-    public static string? MoveMedia(ClientDb d, Guid mediaId, Guid target)
-    {
-        if (CheckTarget(d, target) is { } e) return e;
-        var m = d.Root.Media.FirstOrDefault(x => x.Id == mediaId && x.ClientId == d.ClientId);
-        if (m == null || m.AppId != null) return "Fichier introuvable.";
-        if (m.Info.ContainsKey("drive")) return "Les fichiers d'un dossier Drive sont communs à toutes les aires.";
-        if (m.AreaId == target) return null;
-        var users = d.Root.Media.Where(x => x.ClientId == d.ClientId && x.AreaId == m.AreaId && x.AppId != null && Referenced(x).Contains(m.Id)).Select(x => "« " + x.Name + " »")
-            .Concat(d.Root.Playlists.Where(p => p.ClientId == d.ClientId && p.AreaId == m.AreaId && p.Draft.Any(i => i.MediaId == m.Id)).Select(p => "la liste « " + p.Name + " »"))
-            .Distinct().ToList();
-        if (users.Count > 0) return $"Ce fichier est utilisé par {string.Join(", ", users)}. Retirez-le d'abord, ou déplacez la liste de lecture entière.";
-        m.AreaId = target;
-        AreaShareOps.Forget(d, ShareKind.Media, new[] { m.Id });
-        m.FolderId = null;   // le dossier appartient à l'aire d'origine : le fichier arrive à la racine de la nouvelle
-        return null;
-    }
-
-    /// <summary>Fichiers affichés par un contenu d'app (champs « media » / « medias » : identifiants séparés par des virgules).</summary>
-    private static IEnumerable<Guid> Referenced(MediaItem instance) => instance.Settings.Values.SelectMany(AppField.MediaIds);
 }

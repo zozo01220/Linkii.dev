@@ -1,0 +1,93 @@
+@* Partager avec des personnes (24 octobre 2026, maquette membres-proprietaire-partage.html) : médias, dossiers de médias, listes de lecture, dossiers
+   de listes. Lien vivant : la personne voit l'original dans son onglet « Partagés avec moi ». « Peut utiliser » : le mettre dans ses listes, le diffuser ;
+   « Peut modifier » : en plus ajouter, retirer, renommer (supprimer reste au propriétaire). Un seul élément : on coche ou décoche ; plusieurs : on ajoute. *@
+@inject TenantStore Store
+@inject Toaster Toast
+
+<div class="modal-backdrop" @onclick="Close"></div>
+<div class="modal app-modal sh-modal" role="dialog" aria-modal="true" aria-labelledby="ps-title">
+    <div class="modal-head">
+        <h3 id="ps-title">Partager @(Items.Count == 1 ? $"« {Items[0].Name} »" : $"{Items.Count} {ShareKind.Plural(Kind)}")</h3>
+        <span class="grow"></span>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="modal-body sh-body">
+        <div class="sh-list lx-msl">
+            <div class="sh-row lx-msr @(everyone != null ? "on" : "")">
+                <button type="button" class="og-ck @(everyone != null ? "on" : "")" aria-pressed="@(everyone != null ? "true" : "false")" aria-label="Toute l'organisation" @onclick="ToggleEveryone"></button>
+                <span class="sh-av lv"><Ico Name="users" Size="14" /></span>
+                <span class="grow"><b>Toute l'organisation</b><small>chacun le retrouve dans « Partagés avec moi »</small></span>
+                @if (everyone is { } ev) { @Perm(ev, v => everyone = v) }
+            </div>
+        </div>
+        <div class="search-box sh-search"><Ico Name="search" Size="16" /><input placeholder="Rechercher une personne" aria-label="Rechercher une personne" @bind="query" @bind:event="oninput" /></div>
+        <div class="sh-list lx-msl" style="@(everyone != null ? "opacity:.5" : "")">
+            @foreach (var p in people.Where(Match))
+            {
+                var t = p;
+                var on = chosen.ContainsKey(t.Id);
+                <div class="sh-row lx-msr @(on ? "on" : "")">
+                    <button type="button" class="og-ck @(on ? "on" : "")" aria-pressed="@(on ? "true" : "false")" aria-label="@t.Label" disabled="@(everyone != null)" @onclick="() => Toggle(t.Id)"></button>
+                    <span class="sh-av">@Initials(t.Label)</span>
+                    <span class="grow"><b>@t.Label</b><small>@(t.Note ?? t.Email)</small></span>
+                    @if (on && everyone == null) { @Perm(chosen[t.Id], v => chosen[t.Id] = v) }
+                </div>
+            }
+            @if (people.Count == 0) { <p class="sh-empty">Personne d'autre dans l'organisation pour l'instant.</p> }
+        </div>
+        <p class="sh-lead"><b>Peut utiliser</b> : le mettre dans ses listes et le diffuser, sans le changer. <b>Peut modifier</b> : en plus ajouter, retirer et renommer. Supprimer reste réservé au propriétaire.@(Kind is ShareKind.MediaFolder or ShareKind.PlaylistFolder ? " Le partage vaut pour les sous-dossiers, ajouts futurs compris." : "")</p>
+        @if (error != null) { <div class="err">@error</div> }
+    </div>
+    <div class="modal-actions">
+        <button class="btn ghost" @onclick="Close">Annuler</button>
+        <button class="btn btn-share" disabled="@(Items.Count > 1 && chosen.Count == 0 && everyone == null)" @onclick="Save"><Ico Name="share" Size="15" /> @(Items.Count == 1 ? "Enregistrer" : "Partager")</button>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Kind { get; set; } = ShareKind.Media;
+    [Parameter, EditorRequired] public List<(Guid Id, string Name)> Items { get; set; } = new();
+    [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>Appelé après un partage enregistré (la page recharge ses listes).</summary>
+    [Parameter] public EventCallback OnShared { get; set; }
+
+    private List<ShareTarget> people = new();
+    private readonly Dictionary<Guid, bool> chosen = new();   // personne → peut modifier
+    private bool? everyone;                                   // toute l'organisation : null non, sinon peut modifier
+    private string query = "";
+    private string? error;
+
+    protected override void OnInitialized()
+    {
+        var (all, list) = Store.Read(d => ItemShareOps.TargetsOf(d, Kind, Items.Count == 1 ? Items[0].Id : null));
+        people = list;
+        everyone = all;
+        foreach (var p in list.Where(p => p.Edit != null)) chosen[p.Id] = p.Edit!.Value;
+    }
+
+    private RenderFragment Perm(bool edit, Action<bool> set) => __builder =>
+    {
+        <div class="sh-seg" role="group" aria-label="Droit">
+            <button type="button" class="@(edit ? "" : "on")" @onclick="() => set(false)">Peut utiliser</button>
+            <button type="button" class="@(edit ? "on" : "")" @onclick="() => set(true)">Peut modifier</button>
+        </div>
+    };
+
+    private bool Match(ShareTarget t) => query.Length == 0 || t.Label.Contains(query, StringComparison.CurrentCultureIgnoreCase) || t.Email.Contains(query, StringComparison.CurrentCultureIgnoreCase);
+    private static string Initials(string label) => string.Concat(label.Split(' ', '.', '@').Where(w => w.Length > 0).Take(2).Select(w => char.ToUpperInvariant(w[0])));
+    private void Toggle(Guid id) { if (!chosen.Remove(id)) chosen[id] = false; error = null; }
+    private void ToggleEveryone() { everyone = everyone == null ? false : null; error = null; }
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task Save()
+    {
+        var targets = everyone is { } ev ? new Dictionary<Guid, bool> { [ItemShareOps.Everyone] = ev } : new Dictionary<Guid, bool>(chosen);
+        var ids = Items.Select(i => i.Id).ToList();
+        try { error = Store.Write(d => ItemShareOps.Set(d, Kind, ids, targets)); }
+        catch (UnauthorizedAccessException e) { error = e.Message; }
+        if (error != null) return;
+        Toast.Ok(targets.Count == 0 ? "Partage retiré." : everyone != null ? "Partagé avec toute l'organisation." : $"Partagé avec {targets.Count} personne{(targets.Count > 1 ? "s" : "")}.");
+        await OnShared.InvokeAsync();
+        await OnClose.InvokeAsync();
+    }
+}

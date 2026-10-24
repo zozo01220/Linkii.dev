@@ -8,8 +8,8 @@ public record FolderContents(int Items, int Subfolders);
 
 /// <summary>
 /// Déplacer un dossier dans un autre dossier (médiathèque et listes de lecture). Le propriétaire déplace ; il faut pouvoir écrire dans le dossier d'arrivée,
-/// qui est dans la même aire, ne contient pas déjà un dossier de ce nom, et ne fait pas dépasser <see cref="FolderAccess.MaxDepth"/> niveaux.
-/// Déplacer à la racine <b>dissout</b> le dossier : ses fichiers (ou listes) et ses sous-dossiers vont à la racine de l'aire, le dossier est supprimé.
+/// qui ne contient pas déjà un dossier de ce nom, et ne fait pas dépasser <see cref="FolderAccess.MaxDepth"/> niveaux.
+/// Déplacer à la racine <b>dissout</b> le dossier : ses fichiers (ou listes) et ses sous-dossiers vont à la racine, le dossier est supprimé.
 /// </summary>
 public static class FolderMove
 {
@@ -36,9 +36,8 @@ public static class FolderMove
     {
         if (target == null) return null;
         if (target.Id == f.Id || Subtree(all, f.Id).Contains(target.Id)) return "dans lui-même";
-        if (target.AreaId != f.AreaId) return "autre aire";
         if (targetRight < FolderRight.Write) return "lecture seule";
-        if (all.Any(x => x.Id != f.Id && x.AreaId == f.AreaId && x.ParentId == target.Id && x.Name.Equals(f.Name, StringComparison.CurrentCultureIgnoreCase))) return "nom déjà pris";
+        if (all.Any(x => x.Id != f.Id && x.ParentId == target.Id && x.Name.Equals(f.Name, StringComparison.CurrentCultureIgnoreCase))) return "nom déjà pris";
         if (FolderAccess.Chain(target, all).Count() + Height(all, f.Id) > FolderAccess.MaxDepth) return $"{FolderAccess.MaxDepth} niveaux au plus";
         return null;
     }
@@ -46,7 +45,6 @@ public static class FolderMove
     public static string Explain(string reason) => reason switch
     {
         "dans lui-même" => "Un dossier ne se range pas dans lui-même ni dans l'un de ses sous-dossiers.",
-        "autre aire" => "Un dossier reste dans son aire de gestion.",
         "lecture seule" => "Vous ne pouvez pas écrire dans ce dossier.",
         "nom déjà pris" => "Un dossier porte déjà ce nom à cet endroit.",
         _ => $"Les dossiers ne s'imbriquent pas au-delà de {FolderAccess.MaxDepth} niveaux."
@@ -54,5 +52,5 @@ public static class FolderMove
 
     /// <summary>Un dossier à la racine d'un dossier du même nom ? (dissolution : ses sous-dossiers arrivent à la racine)</summary>
     public static string? RootNameClash<T>(IReadOnlyCollection<T> all, T f) where T : class, IFolderNode =>
-        all.Where(x => x.ParentId == f.Id).FirstOrDefault(c => all.Any(r => r.Id != c.Id && r.Id != f.Id && r.AreaId == f.AreaId && r.ParentId == null && r.Name.Equals(c.Name, StringComparison.CurrentCultureIgnoreCase)))?.Name;
+        all.Where(x => x.ParentId == f.Id).FirstOrDefault(c => all.Any(r => r.Id != c.Id && r.Id != f.Id && r.OwnerId == f.OwnerId && r.ParentId == null && r.Name.Equals(c.Name, StringComparison.CurrentCultureIgnoreCase)))?.Name;
 }

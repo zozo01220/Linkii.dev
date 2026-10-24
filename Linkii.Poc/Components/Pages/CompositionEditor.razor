@@ -64,7 +64,7 @@ else
         }
         else
         {
-            startTemplate = MyTpl is { } t ? Store.Read(d => d.CompositionTemplates.FirstOrDefault(x => x.Id == t)) : null;
+            startTemplate = MyTpl is { } t ? Store.Read(d => CompositionTemplates.Visible(d).FirstOrDefault(x => x.Id == t)) : null;
             ready = MyTpl == null || startTemplate != null;
         }
     }
@@ -120,7 +120,7 @@ else
 
     // ---------- Mes modèles ----------
 
-    private List<object> Templates() => Store.Read(d => d.CompositionTemplates.OrderByDescending(t => t.CreatedUtc)
+    private List<object> Templates() => Store.Read(d => CompositionTemplates.Visible(d).OrderByDescending(t => t.CreatedUtc)
         .Select(t => (object)new { id = t.Id.ToString(), name = t.Name, doc = t.Doc }).ToList());
 
     /// <summary>Enregistre le document comme modèle de « Mes modèles » ; rend { error } ou { templates }.</summary>
@@ -129,10 +129,10 @@ else
     {
         try
         {
-            var err = Store.Write(d => CompositionTemplates.Save(d, name, doc, Store.UserId).Error);
+            var err = Store.Write(d => CompositionTemplates.Save(d, name, doc).Error);
             return err != null ? new { error = err } : new { templates = Templates() };
         }
-        catch (Exception e) when (e is UnauthorizedAccessException or ReadOnlyLevelException) { return new { error = "Votre niveau de droits ne permet pas d'enregistrer un modèle." }; }
+        catch (Exception e) when (e is UnauthorizedAccessException or ReadOnlyLevelException) { return new { error = "Vous êtes en lecture seule : vous ne pouvez pas enregistrer de modèle." }; }
     }
 
     [JSInvokable]
@@ -178,7 +178,7 @@ else
     {
         if (!Store.Read(d => d.Access.CanWrite(LevelPages.Media)))
         {
-            await JS.InvokeVoidAsync("LinkiiCompoEditor.imported", Images(), Array.Empty<string>(), new[] { "Votre niveau de droits ne permet pas d'ajouter des fichiers à la médiathèque." });
+            await JS.InvokeVoidAsync("LinkiiCompoEditor.imported", Images(), Array.Empty<string>(), new[] { "Vous êtes en lecture seule sur la médiathèque : vous ne pouvez pas y ajouter de fichier." });
             return;
         }
         var files = e.GetMultipleFiles(MaxImport + 1);

@@ -59,37 +59,30 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
 
     private static List<MediaItem> Normal(ClientDb d) => Normal(d, IsFile);
 
+    // Écrans de toute l'organisation : un fichier diffusé sur un écran d'une autre aire (ou qu'on ne voit pas) reste « utilisé »
+    private static IEnumerable<Screen> OrgScreens(ClientDb d) => d.Root.Screens.Where(s => s.ClientId == d.ClientId);
+
+    // Ce que la personne voit : ses fichiers, ceux de ses dossiers, ceux qu'on lui partage (ou tout, en lecture seule ; voir Ownership)
     private static List<MediaItem> Normal(ClientDb d, Func<MediaItem, bool> kind)
     {
-        var rights = FolderAccess.Snapshot(d.Access, FolderOps.All(d));
-        var rootVisible = !d.Tenant.FoldersOn || d.Access.IsOrgAdmin;
-        var shared = d.Access.Shared;
-        return d.Media.Where(m => kind(m) && (shared.MediaAll.Contains(m.Id)
-            // média d'une autre aire : partagé directement (à la racine), ou dans un dossier partagé ; ceux que seule une liste partagée utilise ne sont pas listés
-            ? shared.Media.Contains(m.Id) || m.FolderId is { } sf && rights.GetValueOrDefault(sf) != FolderRight.None
-            : m.FolderId is not { } f ? rootVisible || (m.OwnerId != null && m.OwnerId == d.Access.UserId) : rights.GetValueOrDefault(f) != FolderRight.None)).ToList();
+        var list = d.Media.Where(kind).ToList();
+        var rights = FolderOps.RightsOfFiles(d, list);
+        return list.Where(m => rights.GetValueOrDefault(m.Id) != FolderRight.None).ToList();
     }
 
-    // ---------- Partage entre aires (lien vivant, lecture seule) ----------
-
-    /// <summary>Médias d'une autre aire partagés directement avec l'aire ouverte (à sa racine) : identifiant → aire d'origine et date.</summary>
-    public Dictionary<Guid, MediaSharedWithMe> SharedWithMe() => store.Read(d =>
+    /// <summary>Place de chaque fichier visible dans les onglets « Mes médias / Partagés avec moi » (voir <see cref="LibraryTab"/>).</summary>
+    public Dictionary<Guid, LibraryTab.Info> FileTabs() => store.Read(d =>
     {
-        var cur = d.Area?.Id;
-        return d.AreaShares.Where(s => s.ClientId == d.ClientId && s.Kind == ShareKind.Media && s.ToAreaId == cur && d.Access.Shared.Media.Contains(s.ItemId))
-            .GroupBy(s => s.ItemId).ToDictionary(g => g.Key, g =>
-            {
-                var s = g.OrderBy(x => x.SharedUtc).First();
-                return new MediaSharedWithMe(d.Root.Areas.FirstOrDefault(a => a.Id == s.FromAreaId)?.Name ?? "Une autre aire", s.SharedUtc);
-            });
+        var all = FolderOps.All(d).ToDictionary(f => f.Id);
+        return Normal(d, m => IsFile(m) || Pres.Is(m)).ToDictionary(m => m.Id, m =>
+        {
+            var parents = Ownership.Parents(m.FolderId, all);
+            return Ownership.TabInfo(d.Access, ShareKind.Media, m.Id, m.OwnerId, parents);
+        });
     });
 
-    /// <summary>Médias de l'aire ouverte partagés avec d'autres aires (pastille de partage sur la vignette).</summary>
-    public HashSet<Guid> SharedOut() => store.Read(d =>
-    {
-        var mine = d.Media.Where(m => m.AreaId == d.Area?.Id).Select(m => m.Id).ToHashSet();
-        return d.AreaShares.Where(s => s.ClientId == d.ClientId && s.Kind == ShareKind.Media && mine.Contains(s.ItemId)).Select(s => s.ItemId).ToHashSet();
-    });
+    /// <summary>Droit de la personne sur chaque fichier visible (renommer, ranger, supprimer, partager).</summary>
+    public Dictionary<Guid, FolderRight> FileRights() => store.Read(d => FolderOps.RightsOfFiles(d, Normal(d, m => IsFile(m) || Pres.Is(m))));
 
     // ---------- Dossiers (option « Dossiers dans la médiathèque », §49) ----------
 
@@ -98,12 +91,13 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     {
         var all = FolderOps.All(d);
         var rows = new List<FolderRow>();
+        var shared = ItemShareOps.Counts(d, ShareKind.MediaFolder);
         foreach (var f in d.MediaFolders)
         {
             var right = FolderAccess.For(d.Access, f, all);
             if (right == FolderRight.None) continue;
             var owner = d.Users.FirstOrDefault(u => u.Id == f.OwnerId)?.Label ?? "—";
-            rows.Add(new FolderRow(f, right, owner, f.Shares.Count > 0));
+            rows.Add(new FolderRow(f, right, owner, shared.ContainsKey(f.Id), FolderAccess.TabInfo(d.Access, f, all)));
         }
         return rows.OrderBy(r => r.Folder.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     });
@@ -129,37 +123,6 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
         store.Write(d => { FolderOps.Forget(d, plan.folders); });
         return null;
     }
-
-    /// <summary>Partages d'un dossier, et les personnes et niveaux à qui l'on peut en donner (les personnes qui ne le peuvent pas ont une raison).</summary>
-    public FolderShareInfo? ShareInfo(Guid folderId) => store.Read(d =>
-    {
-        if (FolderOps.Find(d, folderId) is not { } f) return null;
-        var area = d.Root.Areas.FirstOrDefault(a => a.Id == f.AreaId)?.Name ?? "";
-        var people = d.Users.Where(u => u.Role == Roles.ClientMember).OrderBy(u => u.Label).Select(u =>
-        {
-            var ua = AreaAccess.For(d.Root, d.ClientId, u.Id);
-            var reason = u.Disabled ? "compte désactivé"
-                : !ua.HasArea(f.AreaId) ? $"ne voit pas l'aire « {area} »"
-                : ua.Level?.Pages.Contains(LevelPages.Media) != true ? "n'a pas la page Médiathèque" : null;
-            return new ShareCandidate(u.Id, u.Label, ua.Level?.Name ?? "Sans niveau", reason);
-        }).ToList();
-        var levels = d.Tenant.Levels.Select(l => new ShareCandidate(l.Id, l.Name,
-            d.Users.Count(u => u.HasLevel(l.Id)) is var n && n > 0 ? $"{n} membre{(n > 1 ? "s" : "")}" : "aucun membre", null)).ToList();
-        var shares = f.Shares.Select(s =>
-        {
-            var label = s.Kind == FolderShareKind.Level ? levels.FirstOrDefault(l => l.Id == s.TargetId)?.Label : people.FirstOrDefault(p => p.Id == s.TargetId)?.Label;
-            return new ShareRow(s.Kind, s.TargetId, label ?? "Retiré de l'organisation", s.Write);
-        }).ToList();
-        return new FolderShareInfo(f, shares, people, levels, FolderAccess.CanShare(d.Access, f), Audience(d, f));
-    });
-
-    /// <summary>Personnes qui ont accès à chaque dossier vu (nombre de l'icône Partage).</summary>
-    public Dictionary<Guid, FolderAudience> Audiences() => store.Read(d => FolderAudiences.Compute(d, FolderOps.All(d), d.MediaFolders.ToList(), LevelPages.Media));
-
-    private static FolderAudience Audience(ClientDb d, MediaFolder f) =>
-        FolderAudiences.Compute(d, FolderOps.All(d), new[] { f }, LevelPages.Media).GetValueOrDefault(f.Id, FolderAudience.None);
-
-    public string? SetShare(Guid folderId, string kind, Guid target, bool? write) => store.Write(d => { return FolderOps.SetShare(d, folderId, kind, target, write); });
 
     public string? TransferOwner(Guid folderId, Guid userId) => store.Write(d => { return FolderOps.TransferOwner(d, folderId, userId); });
 
@@ -211,7 +174,7 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
         var removed = 0;
         var files = store.Write(d =>
         {
-            var gone = d.Media.Where(m => ids.Contains(m.Id) && IsOwnFile(m) && !d.Access.Shared.MediaAll.Contains(m.Id) && FolderOps.CanEditFile(d, m)
+            var gone = d.Media.Where(m => ids.Contains(m.Id) && IsOwnFile(m) && FolderOps.CanDeleteFile(d, m)
                 && !(Pres.Is(m) && Pres.ContentsOf(d.Media, m).Count > 0)).ToList();   // une présentation qu'un contenu utilise ne se supprime pas   // un média partagé par une autre aire ne se supprime que dans son aire   // les fichiers Drive suivent leur dossier ; ceux d'un dossier qu'on ne modifie pas restent
             removed = gone.Count;
             // une présentation part avec ses images de pages et son PDF d'origine
@@ -224,7 +187,7 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
             var set = gone.Select(m => m.Id).ToHashSet();
             if (set.Count == 0) return new List<string>();
             DetachFromContent(d, set);
-            AreaShareOps.Forget(d, ShareKind.Media, set);
+            ItemShareOps.Forget(d, ShareKind.Media, set);
             d.Media.RemoveAll(m => set.Contains(m.Id));
             return gone.Where(m => m.FileName != null).Select(m => m.FileName!).ToList();
         });
@@ -238,7 +201,7 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     }
 
     /// <summary>Fichiers exportés depuis Canva (Info["canva"]) que plus rien n'utilise.</summary>
-    public List<MediaItem> UnusedCanva() => store.Read(d => UnusedCanva(d.Media, d.Playlists, d.Screens));
+    public List<MediaItem> UnusedCanva() => store.Read(d => UnusedCanva(d.Media, d.Playlists, OrgScreens(d)));
 
     /// <summary>
     /// Exports Canva sans emploi : ni dans un contenu, ni dans une liste de lecture, ni dans ce que les écrans ou les listes ont publié
@@ -247,12 +210,27 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     public static List<MediaItem> UnusedCanva(IEnumerable<MediaItem> media, IEnumerable<Playlist> playlists, IEnumerable<Screen> screens) =>
         UnusedExports(media, playlists, screens, "canva");
 
-    /// <summary>Fichiers de l'aire que la personne ne voit pas (rangés dans un dossier qui ne lui est pas accordé) : masqués dans les listes (§54).</summary>
+    /// <summary>
+    /// Fichiers de l'aire que la personne ne voit pas (ni à elle, ni partagés avec elle) : masqués dans les listes (§54). Ceux qu'utilise une liste qu'elle voit
+    /// (la sienne, ou une liste partagée) restent lisibles : partager une liste rend ses médias lisibles.
+    /// </summary>
     public HashSet<Guid> HiddenFileIds()
     {
         var visible = Entries().Select(m => m.Id).ToHashSet();
         var visiblePres = visible.Select(id => id.ToString()).ToHashSet();   // les images d'une présentation visible le sont aussi
-        return store.Read(d => d.Media.Where(m => (IsFile(m) || Pres.Is(m)) && !visible.Contains(m.Id) && !(Pres.IsPage(m) && visiblePres.Contains(Pres.IdOf(m)!))).Select(m => m.Id).ToHashSet());
+        return store.Read(d =>
+        {
+            var rights = PlaylistOps.Rights(d);
+            var used = new HashSet<Guid>();
+            var byId = d.Media.ToDictionary(m => m.Id);
+            foreach (var p in d.Playlists.Where(p => rights.GetValueOrDefault(p.Id) != FolderRight.None))
+                foreach (var i in p.Draft)
+                {
+                    used.Add(i.MediaId);
+                    if (byId.TryGetValue(i.MediaId, out var c) && c.AppId != null) used.UnionWith(c.Settings.Values.SelectMany(AppField.MediaIds));   // fichiers choisis dans un contenu
+                }
+            return d.Media.Where(m => (IsFile(m) || Pres.Is(m)) && !visible.Contains(m.Id) && !used.Contains(m.Id) && !(Pres.IsPage(m) && visiblePres.Contains(Pres.IdOf(m)!))).Select(m => m.Id).ToHashSet();
+        });
     }
 
     /// <summary>Le contenu montre un fichier masqué : le fichier lui-même, ou un contenu (app) qui en a choisi un dans ses réglages.</summary>
@@ -263,7 +241,7 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     public HashSet<Guid> UnusedIds() => store.Read(d =>
     {
         var inTemplates = d.CompositionTemplates.SelectMany(t => AppField.MediaIds(t.Images)).ToHashSet();   // images d'un modèle de composition : utilisées
-        var set = UnusedExports(d.Media, d.Playlists, d.Screens, null).Select(m => m.Id).Where(id => !inTemplates.Contains(id)).ToHashSet();
+        var set = UnusedExports(d.Media, d.Playlists, OrgScreens(d), null).Select(m => m.Id).Where(id => !inTemplates.Contains(id)).ToHashSet();
         // une présentation est sans emploi quand aucune de ses images ne sert (contenu, liste ou écran)
         foreach (var p in d.Media.Where(Pres.Is))
         {
@@ -280,7 +258,7 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     {
         if (d.Media.FirstOrDefault(m => m.Id == presId && Pres.Is(m)) is not { } pres) return new PresentationUses(new(), 0, 0);
         var contents = Pres.ContentsOf(d.Media, pres);
-        var screens = d.Screens.Where(s => s.Token != null).ToList();
+        var screens = d.AllScreens.Where(s => s.Token != null).ToList();
         var rows = contents.Select(c =>
         {
             var lists = d.Playlists.Where(p => p.Draft.Any(i => i.MediaId == c.Id)).ToList();
@@ -340,7 +318,7 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
             var name = $"{pres.Name} — {Pres.Unit(pres.Info.GetValueOrDefault("src"))} {page}";
             var item = new MediaItem
             {
-                ClientId = pres.ClientId, AreaId = pres.AreaId, FolderId = pres.FolderId, OwnerId = d.Access.UserId, Name = name.Length > 120 ? name[..120] : name,
+                ClientId = pres.ClientId, AreaId = pres.AreaId, FolderId = pres.FolderId, OwnerId = d.Me, Name = name.Length > 120 ? name[..120] : name,
                 Type = "image", FileName = file, Size = src.Size, Width = src.Width, Height = src.Height, AddedUtc = DateTime.UtcNow
             };
             d.Root.Media.Add(item);
@@ -354,7 +332,7 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     {
         var contents = d.Media.Where(m => m.AppId != null && MediaFields(m).Any(k => AppField.MediaIds(m.Settings.GetValueOrDefault(k)).Contains(mediaId))).ToList();
         var ids = contents.Select(c => c.Id).Append(mediaId).ToHashSet();
-        var screens = d.Screens.Where(s => s.Token != null).ToList();
+        var screens = d.AllScreens.Where(s => s.Token != null).ToList();
         var lists = d.Playlists.Where(p => p.Draft.Any(i => ids.Contains(i.MediaId)))
             .Select(p => new MediaUse(p.Id, p.Name, screens.Count(s => s.ZonePlaylists().Contains(p.Id))))
             .OrderBy(u => u.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
@@ -425,19 +403,8 @@ public record MediaUses(List<MediaUse> Contents, List<MediaUse> Lists)
 }
 
 /// <summary>Un dossier vu par la personne, avec son droit, le nom de son propriétaire et s'il est partagé.</summary>
-public record FolderRow(MediaFolder Folder, FolderRight Right, string OwnerName, bool Shared);
+public record FolderRow(MediaFolder Folder, FolderRight Right, string OwnerName, bool Shared, LibraryTab.Info Tab);
 
-/// <summary>Une personne ou un niveau à qui partager : <paramref name="Reason"/> dit pourquoi ce n'est pas possible (null : possible).</summary>
-public record ShareCandidate(Guid Id, string Label, string Detail, string? Reason);
-
-/// <summary>Un partage en place sur un dossier.</summary>
-public record ShareRow(string Kind, Guid TargetId, string Label, bool Write);
-
-/// <summary>Partages d'un dossier : ceux en place, les personnes et niveaux possibles, et si la personne peut partager.</summary>
-public record FolderShareInfo(MediaFolder Folder, List<ShareRow> Shares, List<ShareCandidate> People, List<ShareCandidate> Levels, bool CanShare, FolderAudience Audience);
-
-/// <summary>Un média partagé avec l'aire ouverte : de quelle aire, et quand.</summary>
-public record MediaSharedWithMe(string By, DateTime Utc);
 
 
 /// <summary>Un contenu qui affiche une présentation : nombre de listes de lecture et d'écrans qui le diffusent.</summary>

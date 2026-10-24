@@ -4,11 +4,9 @@ namespace Linkii.Poc;
 public enum FolderRight { None, Read, Write, Owner }
 
 /// <summary>
-/// Droits sur les dossiers de la médiathèque (option « Dossiers dans la médiathèque », §49). L'administrateur de l'organisation a tout ; le
-/// propriétaire d'un dossier a tout dessus ; les autres ont le plus fort des partages qui le couvrent (le dossier ou un de ses parents, donné à
-/// la personne ou à son niveau), plus « tous les dossiers » du niveau. Un niveau en lecture seule plafonne à la lecture.
-/// Un dossier privé (sans partage, créé par un autre membre) n'est jamais donné par « tous les dossiers » ; ceux d'un administrateur le sont.
-/// Mêmes règles pour les dossiers des listes de lecture.
+/// Droits sur les dossiers de la médiathèque et des listes de lecture (24 octobre 2026) : l'administrateur de l'organisation a tout ; le propriétaire d'un
+/// dossier (ou d'un dossier qui le contient) a tout dessus ; les autres ont le plus fort des partages qui le couvrent (le dossier ou un de ses parents,
+/// donné à la personne ou à toute l'organisation, voir <see cref="ItemShare"/>). En « Voit tout · lecture seule », tout est visible, rien ne se modifie.
 /// </summary>
 public static class FolderAccess
 {
@@ -17,30 +15,7 @@ public static class FolderAccess
 
     public static FolderRight For<T>(AreaAccess a, T f, IReadOnlyCollection<T> all) where T : class, IFolderNode
     {
-        // dossier d'une autre aire, partagé avec l'aire ouverte : on y écrit comme dans un dossier de l'aire (le renommer ou le supprimer reste à son aire d'origine)
-        if (a.Shared.Has(f)) return a.AccessTo(DomainOf(f)) == DomainAccess.None ? FolderRight.None : a.CanWrite(DomainOf(f)) ? FolderRight.Write : FolderRight.Read;
-        if (a.IsOrgAdmin) return FolderRight.Owner;
-        if (!a.HasArea(f.AreaId)) return FolderRight.None;
-        var domain = DomainOf(f);
-        if (a.UserId is { } uid && f.OwnerId == uid) return Capped(a, domain, FolderRight.Owner);
-
-        var best = FolderRight.None;
-        var level = a.Level;
-        var vis = a.VisibilityOf(domain);
-        foreach (var n in Chain(f, all))
-        {
-            foreach (var s in n.Shares)
-            {
-                var mine = s.Kind == FolderShareKind.User ? s.TargetId == a.UserId
-                    : level != null && s.Kind == FolderShareKind.Level && s.TargetId == level.Id;
-                if (mine) best = Max(best, s.Write ? FolderRight.Write : FolderRight.Read);
-            }
-            // « tous les dossiers » : ceux de l'organisation, c'est-à-dire partagés (avec quelqu'un) ou créés par un administrateur (ou dont le
-            // propriétaire a été retiré) ; jamais le dossier privé d'un autre membre
-            if (vis is LevelVisibility.All or LevelVisibility.AllRead && n.OwnerId != a.UserId && (n.Shares.Count > 0 || !IsMember(a, n.OwnerId)))
-                best = Max(best, vis == LevelVisibility.All ? FolderRight.Write : FolderRight.Read);
-        }
-        return Capped(a, domain, best);
+        return Ownership.Right(a, KindOf(f), f.Id, f.OwnerId, Chain(f, all).Skip(1));
     }
 
     /// <summary>Droits de la personne sur chaque dossier donné.</summary>
@@ -49,18 +24,13 @@ public static class FolderAccess
 
     /// <summary>Domaine d'un dossier : Listes de lecture ou Médiathèque.</summary>
     public static string DomainOf(IFolderNode f) => f is PlaylistFolder ? LevelPages.Playlists : LevelPages.Media;
+    public static string KindOf(IFolderNode f) => f is PlaylistFolder ? ShareKind.PlaylistFolder : ShareKind.MediaFolder;
 
-    /// <summary>Créer un dossier à la racine de l'aire, dans un domaine : administrateur, ou niveau qui le permet (domaine en écriture).</summary>
-    public static bool CanCreateAtRoot(AreaAccess a, string domain) => a.IsOrgAdmin || a.Level is { } l && l.CreatesFolders(domain) && a.CanWrite(domain);
+    /// <summary>Créer un dossier (ou ranger un élément) à la racine : administrateur, ou utilisateur qui gère les siens dans ce domaine.</summary>
+    public static bool CanCreateAtRoot(AreaAccess a, string domain) => a.CanWrite(domain);
 
-    /// <summary>Partager un dossier : son propriétaire, si son niveau le permet (l'administrateur partage tout).</summary>
-    public static bool CanShare<T>(AreaAccess a, T f) where T : class, IFolderNode =>
-        a.IsOrgAdmin || (a.UserId is { } u && f.OwnerId == u && a.HasArea(f.AreaId) && a.Level is { } l && l.SharesFolders(DomainOf(f)) && a.CanWrite(DomainOf(f)));
-
-    /// <summary>Un dossier ne donne rien au-delà de l'accès du niveau à son domaine : « Voir » (ou pas de page) plafonne à la lecture.</summary>
-    private static FolderRight Capped(AreaAccess a, string domain, FolderRight r) => !a.CanWrite(domain) && r > FolderRight.Read ? FolderRight.Read : r;
-    private static FolderRight Max(FolderRight x, FolderRight y) => (FolderRight)Math.Max((int)x, (int)y);
-    private static bool IsMember(AreaAccess a, Guid? ownerId) => ownerId is { } o && a.MemberIds.Contains(o);
+    /// <summary>Partager un dossier : son propriétaire (l'administrateur partage tout).</summary>
+    public static bool CanShare<T>(AreaAccess a, T f, IReadOnlyCollection<T> all) where T : class, IFolderNode => For(a, f, all) == FolderRight.Owner;
 
     /// <summary>Le dossier, puis ses parents jusqu'à la racine de l'aire (sans boucle).</summary>
     public static IEnumerable<T> Chain<T>(T f, IReadOnlyCollection<T> all) where T : class, IFolderNode
@@ -72,76 +42,12 @@ public static class FolderAccess
             cur = cur.ParentId is { } p ? all.FirstOrDefault(x => x.Id == p) : null;
         }
     }
-}
 
-/// <summary>Une personne qui a accès à un dossier : choisie une à une (LevelName null) ou par un niveau de droits.</summary>
-public record AudiencePerson(Guid Id, string Label, bool Write, string? LevelName);
-
-/// <summary>Un niveau de droits avec lequel un dossier est partagé, et combien de ses membres ont réellement accès.</summary>
-public record AudienceLevel(string Name, int Members, bool Write);
-
-/// <summary>
-/// Les personnes qui ont accès à un dossier par un partage (l'icône Partage et son nombre, §53) : membres de l'organisation, comptes actifs,
-/// qui voient l'aire du dossier et ont la page concernée. Chaque personne compte une fois (en direct et par son niveau). Le propriétaire et
-/// les administrateurs ne sont pas comptés ; les partages du dossier parent comptent (le sous-dossier est bien vu par ces personnes).
-/// </summary>
-public class FolderAudience
-{
-    public List<AudiencePerson> People { get; init; } = new();
-    public List<AudienceLevel> Levels { get; init; } = new();
-    public int Count => People.Count;
-    /// <summary>Personnes choisies une à une, puis celles qui n'ont accès que par un niveau.</summary>
-    public int Direct => People.Count(p => p.LevelName == null);
-    public int ByLevel => People.Count(p => p.LevelName != null);
-    public static readonly FolderAudience None = new();
-}
-
-public static class FolderAudiences
-{
-    /// <summary>Public de chaque dossier donné ; page : la page que le membre doit avoir (<see cref="LevelPages.Media"/> ou <see cref="LevelPages.Playlists"/>).</summary>
-    public static Dictionary<Guid, FolderAudience> Compute<T>(ClientDb d, IReadOnlyCollection<T> all, IEnumerable<T> folders, string page) where T : class, IFolderNode
+    /// <summary>Place d'un dossier dans les onglets « Mes … / Partagés avec moi » : propriétaire, espace (dossier le plus haut) et partage reçu.</summary>
+    public static LibraryTab.Info TabInfo<T>(AreaAccess a, T f, IReadOnlyCollection<T> all) where T : class, IFolderNode
     {
-        var levelNames = d.Tenant.Levels.ToDictionary(l => l.Id, l => l.Name);
-        // les accès des membres sont calculés une fois, pas à chaque dossier
-        var members = new List<(User U, AreaAccess A)>();
-        foreach (var u in d.Users.Where(u => u.Role == Roles.ClientMember && !u.Disabled))
-        {
-            var a = AreaAccess.For(d.Root, d.ClientId, u.Id);
-            if (a.Level?.Pages.Contains(page) == true) members.Add((u, a));
-        }
-
-        var result = new Dictionary<Guid, FolderAudience>();
-        foreach (var f in folders)
-        {
-            var chain = FolderAccess.Chain(f, all).ToList();
-            var people = new List<AudiencePerson>();
-            var perLevel = new Dictionary<Guid, (int Members, bool Write)>();
-            foreach (var (u, a) in members)
-            {
-                if (u.Id == f.OwnerId || !a.HasArea(f.AreaId)) continue;
-                bool direct = false, write = false;
-                Guid? viaLevel = null;
-                foreach (var s in chain.SelectMany(n => n.Shares))
-                {
-                    if (s.Kind == FolderShareKind.User && s.TargetId == u.Id) { direct = true; write |= s.Write; }
-                    else if (s.Kind == FolderShareKind.Level && u.HasLevel(s.TargetId))
-                    {
-                        var lid = s.TargetId;
-                        viaLevel ??= lid; write |= s.Write;
-                        var cur = perLevel.GetValueOrDefault(lid);
-                        perLevel[lid] = (cur.Members + 1, cur.Write | s.Write);
-                    }
-                }
-                if (!direct && viaLevel == null) continue;
-                people.Add(new AudiencePerson(u.Id, u.Label, write && a.CanWrite(page), direct ? null : levelNames.GetValueOrDefault(viaLevel!.Value, "Niveau")));
-            }
-            result[f.Id] = new FolderAudience
-            {
-                People = people.OrderBy(p => p.Label, StringComparer.CurrentCultureIgnoreCase).ToList(),
-                Levels = perLevel.Select(kv => new AudienceLevel(levelNames.GetValueOrDefault(kv.Key, "Niveau"), kv.Value.Members, kv.Value.Write)).OrderBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase).ToList()
-            };
-        }
-        return result;
+        var parents = Chain(f, all).Skip(1).Cast<IFolderNode>().ToList();
+        return Ownership.TabInfo(a, KindOf(f), f.Id, f.OwnerId, parents);
     }
 }
 
@@ -180,13 +86,13 @@ public static class FolderOps
             if (RightOf(d, parent) < FolderRight.Write) return ("Vous ne pouvez pas créer de dossier dans celui-ci.", null);
             depth = FolderAccess.Chain(parent, all).Count() + 1;
         }
-        else if (!FolderAccess.CanCreateAtRoot(d.Access, LevelPages.Media)) return ("Votre niveau de droits ne permet pas de créer des dossiers.", null);
+        else if (!FolderAccess.CanCreateAtRoot(d.Access, LevelPages.Media)) return ("Vous ne pouvez pas créer de dossier ici (lecture seule).", null);
         if (depth > FolderAccess.MaxDepth) return ($"Les dossiers ne s'imbriquent pas au-delà de {FolderAccess.MaxDepth} niveaux.", null);
 
         var areaId = parent?.AreaId ?? d.Area?.Id ?? Guid.Empty;
-        if (all.Any(f => f.AreaId == areaId && f.ParentId == parentId && f.Name.Equals(name, StringComparison.CurrentCultureIgnoreCase)))
+        if (all.Any(f => f.ParentId == parentId && (parentId != null || f.OwnerId == d.Me) && f.Name.Equals(name, StringComparison.CurrentCultureIgnoreCase)))
             return ("Un dossier porte déjà ce nom ici.", null);
-        var folder = new MediaFolder { Name = name, ParentId = parentId, AreaId = areaId, OwnerId = d.Access.UserId };
+        var folder = new MediaFolder { Name = name, ParentId = parentId, AreaId = areaId };
         d.MediaFolders.Add(folder);
         return (null, folder);
     }
@@ -197,7 +103,7 @@ public static class FolderOps
         if (RightOf(d, f) != FolderRight.Owner) return "Seul le propriétaire du dossier peut le renommer.";
         name = name.Trim();
         if (CheckName(name) is { } e) return e;
-        if (All(d).Any(x => x.Id != id && x.AreaId == f.AreaId && x.ParentId == f.ParentId && x.Name.Equals(name, StringComparison.CurrentCultureIgnoreCase)))
+        if (All(d).Any(x => x.Id != id && x.ParentId == f.ParentId && (f.ParentId != null || x.OwnerId == f.OwnerId) && x.Name.Equals(name, StringComparison.CurrentCultureIgnoreCase)))
             return "Un dossier porte déjà ce nom ici.";
         f.Name = name;
         return null;
@@ -233,7 +139,7 @@ public static class FolderOps
     {
         var set = folderIds.ToHashSet();
         d.Root.MediaFolders.RemoveAll(f => f.ClientId == d.ClientId && set.Contains(f.Id));
-        AreaShareOps.Forget(d, ShareKind.MediaFolder, set);
+        ItemShareOps.Forget(d, ShareKind.MediaFolder, set);
     }
 
     // ---------- Déplacer un dossier dans un autre (voir FolderMove) ----------
@@ -248,7 +154,7 @@ public static class FolderOps
         var all = All(d);
         if (Find(d, id) is not { } f) return new();
         var list = new List<FolderTarget> { new(null, "Racine de la médiathèque", 0, f.ParentId == null ? "déjà à la racine" : null) };
-        foreach (var g in d.MediaFolders.Where(x => x.AreaId == f.AreaId).Select(x => (Folder: x, Path: string.Join(" › ", FolderAccess.Chain(x, all).Reverse().Select(c => c.Name)))).OrderBy(x => x.Path, StringComparer.CurrentCultureIgnoreCase))
+        foreach (var g in d.MediaFolders.Select(x => (Folder: x, Path: string.Join(" › ", FolderAccess.Chain(x, all).Reverse().Select(c => c.Name)))).OrderBy(x => x.Path, StringComparer.CurrentCultureIgnoreCase))
         {
             if (RightOf(d, g.Folder) == FolderRight.None) continue;
             var reason = g.Folder.Id == f.ParentId ? "déjà ici" : FolderMove.CheckTarget(all, f, g.Folder, RightOf(d, g.Folder)) is { } r ? FolderMove.Explain(r) : null;
@@ -283,48 +189,6 @@ public static class FolderOps
         return null;
     }
 
-    /// <summary>Ajoute, change (write) ou retire (null) le partage d'un dossier pour une personne ou un niveau.</summary>
-    public static string? SetShare(ClientDb d, Guid folderId, string kind, Guid target, bool? write)
-    {
-        if (Find(d, folderId) is not { } f) return "Dossier introuvable.";
-        if (!FolderAccess.CanShare(d.Access, f)) return "Seul le propriétaire du dossier le partage, avec un niveau qui le permet.";
-        if (write != null)
-        {
-            if (kind == FolderShareKind.User)
-            {
-                if (d.Root.Users.FirstOrDefault(u => u.Id == target && u.ClientId == d.ClientId && u.Role == Roles.ClientMember) is not { } member) return "Personne introuvable parmi les membres.";
-                if (member.Disabled) return $"{member.Label} est désactivé.";
-                var ma = AreaAccess.For(d.Root, d.ClientId, member.Id);
-                var area = d.Root.Areas.FirstOrDefault(a => a.Id == f.AreaId)?.Name ?? "";
-                if (!ma.HasArea(f.AreaId)) return $"{member.Label} ne voit pas l'aire « {area} ».";
-                if (ma.Level?.Pages.Contains(LevelPages.Media) != true) return $"{member.Label} n'a pas la page Médiathèque.";
-            }
-            else if (kind == FolderShareKind.Level)
-            {
-                if (!d.Tenant.Levels.Any(l => l.Id == target)) return "Niveau introuvable.";
-            }
-            else return "Type de partage inconnu.";
-        }
-        f.Shares.RemoveAll(s => s.Kind == kind && s.TargetId == target);
-        if (write is { } w) f.Shares.Add(new FolderShare { Kind = kind, TargetId = target, Write = w });
-        return null;
-    }
-
-    /// <summary>Donne au niveau les dossiers choisis (« read » ou « write » par dossier) ; les autres dossiers ne lui sont plus partagés.</summary>
-    public static string? SetLevelShares(ClientDb d, Guid levelId, IReadOnlyDictionary<Guid, string> modes)
-    {
-        if (!d.Access.IsOrgAdmin) return "Seul un administrateur de l'organisation gère les niveaux de droits.";
-        // dossiers de la médiathèque et des listes de lecture : un même choix par niveau
-        var nodes = All(d).Cast<IFolderNode>().Concat(PlaylistFolderOps.All(d));
-        foreach (var f in nodes)
-        {
-            var mode = modes.GetValueOrDefault(f.Id);
-            f.Shares.RemoveAll(s => s.Kind == FolderShareKind.Level && s.TargetId == levelId);
-            if (mode is "read" or "write") f.Shares.Add(new FolderShare { Kind = FolderShareKind.Level, TargetId = levelId, Write = mode == "write" });
-        }
-        return null;
-    }
-
     /// <summary>Change le propriétaire d'un dossier : administrateur seul. Le nouveau propriétaire doit être un compte de l'organisation.</summary>
     public static string? TransferOwner(ClientDb d, Guid folderId, Guid userId)
     {
@@ -349,14 +213,13 @@ public static class FolderOps
             target = Find(d, tid);
             if (target == null || RightOf(d, target) < FolderRight.Write) return (0, new() { "Vous ne pouvez pas ranger de fichier dans ce dossier." });
         }
-        else if (!FolderAccess.CanCreateAtRoot(d.Access, LevelPages.Media)) return (0, new() { "Votre niveau de droits ne permet pas de ranger des fichiers à la racine." });
+        else if (!FolderAccess.CanCreateAtRoot(d.Access, LevelPages.Media)) return (0, new() { "Vous ne pouvez pas ranger de fichier à la racine (médiathèque en lecture seule)." });
 
         foreach (var m in d.Root.Media.Where(x => x.ClientId == d.ClientId && wanted.Contains(x.Id) && (MediaLibrary.IsFile(x) || Pres.Is(x))).ToList())
         {
             if (m.FolderId == folderId) continue;
             // les fichiers Drive sont communs à toutes les aires : on peut les ranger dans le dossier de n'importe laquelle
-            if (target != null && target.AreaId != m.AreaId && !MediaLibrary.IsDrive(m)) { refused.Add($"« {m.Name} » est dans une autre aire."); continue; }
-            if (m.FolderId is { } from && Find(d, from) is { } src && RightOf(d, src) < FolderRight.Write) { refused.Add($"« {m.Name} » : pas d'écriture dans son dossier."); continue; }
+            if (!CanEditFile(d, m)) { refused.Add($"« {m.Name} » : vous ne pouvez pas le ranger (lecture seule)."); continue; }
             m.FolderId = folderId;
             if (Pres.Is(m)) foreach (var pg in d.Root.Media.Where(x => x.ClientId == d.ClientId && Pres.IdOf(x) == m.Id.ToString())) pg.FolderId = folderId;   // les images d'une présentation suivent leur carte
             moved++;
@@ -364,14 +227,23 @@ public static class FolderOps
         return (moved, refused);
     }
 
-    /// <summary>
-    /// Un fichier qu'on peut renommer ou ranger : à la racine (comme avant), ou dans un dossier où l'on écrit ; un média partagé par une autre aire se modifie comme ceux de l'aire.
-    /// Avec les dossiers activés, la racine d'un membre n'est que ses propres fichiers.
-    /// </summary>
-    public static bool CanEditFile(ClientDb d, MediaItem m)
+    /// <summary>Droit de la personne sur un fichier : le sien, celui d'un de ses dossiers, ou un partage (le fichier ou un de ses dossiers). Voir <see cref="Ownership"/>.</summary>
+    public static FolderRight RightOfFile(ClientDb d, MediaItem m)
     {
-        if (m.FolderId is { } fid && Find(d, fid) is { } f) return RightOf(d, f) >= FolderRight.Write;
-        if (d.Access.Shared.MediaAll.Contains(m.Id)) return d.Access.CanWrite(LevelPages.Media);   // média d'une autre aire, partagé : modifiable par l'aire qui le reçoit
-        return m.FolderId is null && d.Access.CanWrite(LevelPages.Media) && (!d.Tenant.FoldersOn || d.Access.IsOrgAdmin || m.OwnerId == null || m.OwnerId == d.Access.UserId);   // hors dossier : selon l'accès à la médiathèque
+        var all = All(d).ToDictionary(f => f.Id);
+        return Ownership.Right(d.Access, ShareKind.Media, m.Id, m.OwnerId, Ownership.Parents(m.FolderId, all));
     }
+
+    /// <summary>Droits de la personne sur des fichiers (une seule lecture des dossiers).</summary>
+    public static Dictionary<Guid, FolderRight> RightsOfFiles(ClientDb d, IEnumerable<MediaItem> files)
+    {
+        var all = All(d).ToDictionary(f => f.Id);
+        return files.ToDictionary(m => m.Id, m => Ownership.Right(d.Access, ShareKind.Media, m.Id, m.OwnerId, Ownership.Parents(m.FolderId, all)));
+    }
+
+    /// <summary>Un fichier qu'on peut renommer ou ranger : le sien, ou un partage « Peut modifier ».</summary>
+    public static bool CanEditFile(ClientDb d, MediaItem m) => RightOfFile(d, m) >= FolderRight.Write;
+
+    /// <summary>Un fichier qu'on peut supprimer : le sien, ou un fichier d'un dossier qu'on modifie (voir <see cref="Ownership.CanDelete"/>).</summary>
+    public static bool CanDeleteFile(ClientDb d, MediaItem m) => Ownership.CanDelete(RightOfFile(d, m), m.FolderId);
 }

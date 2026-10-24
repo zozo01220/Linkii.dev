@@ -37,8 +37,12 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         }
         catch (ReadOnlyLevelException) { }   // un niveau en lecture seule n'active rien : ce sera fait à la prochaine visite d'un administrateur
     }
-    public MediaItem? Instance(Guid id) => store.Read(d => d.Media.FirstOrDefault(m => m.Id == id && m.AppId != null));   // même si l'app a été désactivée
-    public List<MediaItem> Instances(string appId) => store.Read(d => d.Media.Where(m => m.AppId == appId).OrderBy(m => m.Name).ToList());
+    // même si l'app a été désactivée ; une composition n'est visible que de son propriétaire et de ceux à qui elle est partagée (voir CompositionRights)
+    public MediaItem? Instance(Guid id) => store.Read(d => d.Media.FirstOrDefault(m => m.Id == id && m.AppId != null && CompositionRights.RightOf(d, m) != FolderRight.None));
+    public List<MediaItem> Instances(string appId) => store.Read(d => d.Media.Where(m => m.AppId == appId && CompositionRights.RightOf(d, m) != FolderRight.None).OrderBy(m => m.Name).ToList());
+
+    /// <summary>Droit de la personne sur chaque contenu donné (compositions : le sien, ou un partage ; autres contenus : sans restriction).</summary>
+    public Dictionary<Guid, FolderRight> Rights(IEnumerable<MediaItem> items) => store.Read(d => items.ToDictionary(m => m.Id, m => CompositionRights.RightOf(d, m)));
 
     /// <summary>Les apps du client ont changé (ajout, retrait) : le menu latéral (ex. Compositions) se met à jour sans recharger la page. Même session seulement.</summary>
     public event Action? InstallsChanged;
@@ -137,7 +141,8 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         return store.Write<string?>(d =>
         {
             if (d.Media.FirstOrDefault(m => m.Id == mediaId && m.AppId != null) is not { } m) return "Contenu introuvable.";
-            if (catalog.Find(m.AppId) is { } app && !d.Access.CanUse(app)) return "Votre niveau de droits ne permet pas d'utiliser cette intégration.";
+            if (catalog.Find(m.AppId) is { } app && !d.Access.CanUse(app)) return "Vous êtes en lecture seule : vous ne pouvez pas utiliser cette intégration.";
+            if (CompositionRights.RightOf(d, m) < FolderRight.Write) return "Cette composition ne vous appartient pas : vous ne pouvez pas la renommer.";
             m.Name = name;
             return null;
         });
@@ -148,9 +153,11 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         var pdfs = new List<string>();
         var orphans = store.Write(d =>
         {
+            if (d.Media.FirstOrDefault(m => m.Id == mediaId) is { } target && CompositionRights.RightOf(d, target) != FolderRight.Owner) return new List<MediaItem>();   // une composition partagée ne se supprime que chez son propriétaire
             RemoveFromDrafts(d, mediaId);
             var instances = d.Media.Where(m => m.Id == mediaId && m.AppId != null).ToList();
             d.Media.RemoveAll(m => m.Id == mediaId && m.AppId != null);
+            ItemShareOps.Forget(d, ShareKind.Composition, [mediaId]);
             pdfs.AddRange(instances.Where(i => i.AppId == "pdf" || CloudFileKind.IsCloudApp(i.AppId)).Select(i => i.Settings.GetValueOrDefault("pdf") ?? "").Where(id => !Pres.Owns(d.Root, id)));   // le PDF d'une présentation reste avec elle
             return PurgeExports(d, instances);
         });
@@ -253,10 +260,11 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         var oldPdfs = new List<string>();
         var result = store.Write<(MediaItem?, List<string>)>(d =>
         {
-            if (!d.Access.CanUse(m)) return (null, new List<string> { "Votre niveau de droits ne permet pas d'utiliser cette intégration." });
+            if (!d.Access.CanUse(m)) return (null, new List<string> { "Vous êtes en lecture seule : vous ne pouvez pas utiliser cette intégration." });
             if (instanceId == null && !d.AppInstalls.Any(a => a.AppId == appId)) return (null, new List<string> { "Activez d'abord cette intégration dans la page Intégrations." });   // une app désactivée garde ses contenus modifiables
             var item = instanceId is { } id ? d.Media.FirstOrDefault(x => x.Id == id && x.AppId == appId) : new MediaItem { Type = "app", AppId = appId };
             if (item == null) return (null, new List<string> { "Instance introuvable." });
+            if (instanceId != null && CompositionRights.RightOf(d, item) < FolderRight.Write) return (null, new List<string> { "Cette composition vous est partagée en « Peut utiliser » : dupliquez-la pour la modifier." });
 
             var stored = item.Secrets.Keys.ToHashSet();
             var errors = AppCatalog.Validate(m, values, stored);

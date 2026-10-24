@@ -174,7 +174,7 @@ public static class Compositions
 /// « Mes modèles » (§84) : une composition enregistrée comme point de départ réutilisable. Rangé dans l'aire (comme les compositions), visible de ses membres ;
 /// partir d'un modèle crée une nouvelle composition, le modèle ne change pas. Document au même format que <see cref="Compositions"/>.
 /// </summary>
-public class CompositionTemplate : IClientOwned, IAreaOwned
+public class CompositionTemplate : IClientOwned, IAreaOwned, IOwned
 {
     public Guid ClientId { get; set; }
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -187,20 +187,42 @@ public class CompositionTemplate : IClientOwned, IAreaOwned
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 }
 
-/// <summary>Opérations sur « Mes modèles » : enregistrer, renommer, supprimer (dans l'aire ouverte).</summary>
+/// <summary>
+/// Droits sur les compositions et « Mes modèles » (24 octobre 2026) : comme les médias, chacun a les siens, plus ceux qu'on lui partage
+/// (« Peut utiliser » : les mettre dans ses listes, partir d'un modèle ; « Peut modifier » : les changer). Aucun filtre d'aire.
+/// Les autres contenus d'intégrations ne sont pas concernés.
+/// </summary>
+public static class CompositionRights
+{
+    public static bool Is(MediaItem m) => m.AppId == Compositions.AppId;
+
+    public static FolderRight RightOf(ClientDb d, MediaItem m) =>
+        Is(m) ? Ownership.Right(d.Access, ShareKind.Composition, m.Id, m.OwnerId, Array.Empty<IFolderNode>()) : FolderRight.Owner;
+
+    public static FolderRight RightOf(ClientDb d, CompositionTemplate t) =>
+        Ownership.Right(d.Access, ShareKind.Template, t.Id, t.OwnerId, Array.Empty<IFolderNode>());
+
+    public static LibraryTab.Info TabOf(ClientDb d, string kind, Guid id, Guid? ownerId) => Ownership.TabInfo(d.Access, kind, id, ownerId, Array.Empty<IFolderNode>());
+}
+
+/// <summary>Opérations sur « Mes modèles » : enregistrer, renommer, supprimer (ceux de la personne, ou partagés « Peut modifier »).</summary>
 public static class CompositionTemplates
 {
-    public const int MaxPerArea = 200;
+    public const int MaxPerOwner = 200;
 
-    /// <summary>Enregistre un document comme modèle ; rend l'erreur, ou null.</summary>
-    public static (CompositionTemplate? Template, string? Error) Save(ClientDb d, string name, string doc, Guid? ownerId)
+    /// <summary>Modèles que la personne voit : les siens et ceux qu'on lui partage (tous, en lecture seule).</summary>
+    public static List<CompositionTemplate> Visible(ClientDb d) => d.CompositionTemplates.Where(t => CompositionRights.RightOf(d, t) != FolderRight.None).ToList();
+
+    /// <summary>Enregistre un document comme modèle (à la personne connectée) ; rend l'erreur, ou null.</summary>
+    public static (CompositionTemplate? Template, string? Error) Save(ClientDb d, string name, string doc)
     {
         name = (name ?? "").Trim();
         if (name.Length == 0) return (null, "Donnez un nom au modèle.");
         if (name.Length > 80) return (null, "Le nom est trop long (80 caractères maximum).");
         if (Compositions.Clean(doc) is not { } c) return (null, "La composition est trop grande ou illisible : le modèle n'a pas été enregistré.");
-        if (d.CompositionTemplates.Count >= MaxPerArea) return (null, $"Cette aire a déjà {MaxPerArea} modèles : supprimez-en avant d'en ajouter.");
-        var t = new CompositionTemplate { Name = name, Doc = c.Doc, Images = string.Join(",", c.Images), OwnerId = ownerId };
+        if (!d.Access.CanWrite(LevelPages.Media)) return (null, "Vous êtes en lecture seule : vous ne pouvez pas enregistrer de modèle.");
+        if (d.CompositionTemplates.Count(t => t.OwnerId == d.Me) >= MaxPerOwner) return (null, $"Vous avez déjà {MaxPerOwner} modèles : supprimez-en avant d'en ajouter.");
+        var t = new CompositionTemplate { Name = name, Doc = c.Doc, Images = string.Join(",", c.Images) };
         d.CompositionTemplates.Add(t);
         return (t, null);
     }
@@ -211,9 +233,17 @@ public static class CompositionTemplates
         if (name.Length == 0) return "Donnez un nom au modèle.";
         if (name.Length > 80) return "Le nom est trop long (80 caractères maximum).";
         if (d.CompositionTemplates.FirstOrDefault(t => t.Id == id) is not { } t) return "Modèle introuvable.";
+        if (CompositionRights.RightOf(d, t) < FolderRight.Write) return "Ce modèle ne vous appartient pas : vous ne pouvez pas le renommer.";
         t.Name = name;
         return null;
     }
 
-    public static bool Delete(ClientDb d, Guid id) => d.CompositionTemplates.RemoveAll(t => t.Id == id) > 0;
+    /// <summary>Supprime un modèle : son propriétaire (ou un administrateur) seulement.</summary>
+    public static bool Delete(ClientDb d, Guid id)
+    {
+        if (d.CompositionTemplates.FirstOrDefault(t => t.Id == id) is not { } t || CompositionRights.RightOf(d, t) != FolderRight.Owner) return false;
+        d.CompositionTemplates.RemoveAll(x => x.Id == id);
+        ItemShareOps.Forget(d, ShareKind.Template, [id]);
+        return true;
+    }
 }

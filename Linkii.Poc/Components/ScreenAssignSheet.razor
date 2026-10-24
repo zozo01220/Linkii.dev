@@ -1,0 +1,62 @@
+@inject TenantStore Store
+@inject Toaster Toast
+
+@* « Attribuer… » un écran (administrateur, 24 octobre 2026) : les utilisateurs qui le gèrent. Ceux qui l'ont par sa zone le gardent (on retire la zone
+   dans leur fiche) ; ceux en « Voit tout · lecture seule » le voient déjà. Mêmes données que la fiche membre. *@
+<Sheet Title="@($"Qui gère « {Screen.Name} » ?")" Sub="Enregistré tout de suite : la personne voit l'écran apparaître dans sa page Écrans." Class="sm" OnClose="Close">
+    <ChildContent>
+        @if (people.Count == 0)
+        {
+            <p class="hint" style="margin:0">Aucun utilisateur dans l'organisation : seuls les administrateurs gèrent les écrans. Ajoutez un membre dans la page Membres.</p>
+        }
+        @foreach (var p in people)
+        {
+            var row = p;
+            var on = row.ViaZone != null || chosen.Contains(row.User.Id);
+            <div class="og-pr">
+                <button type="button" class="og-ck @(on ? "on" : "") @(row.ViaZone != null || row.ReadAll ? "dim" : "")" aria-pressed="@(on ? "true" : "false")" aria-label="@row.User.Label" disabled="@(row.ViaZone != null || row.ReadAll)" @onclick="() => Toggle(row.User.Id)"></button>
+                <div class="who"><b>@row.User.Label</b><small>@(row.ReadAll ? "voit déjà tous les écrans (lecture seule)" : row.ViaZone != null ? $"par la zone « {row.ViaZone} »" : row.User.Email)</small></div>
+            </div>
+        }
+        @if (error != null) { <div class="err">@error</div> }
+    </ChildContent>
+    <Foot>
+        <span class="grow"></span>
+        <button type="button" class="btn ghost" @onclick="Close">Annuler</button>
+        <button type="button" class="btn" @onclick="Save">Enregistrer</button>
+    </Foot>
+</Sheet>
+
+@code {
+    [Parameter, EditorRequired] public Screen Screen { get; set; } = default!;
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private record Row(User User, bool ReadAll, string? ViaZone);
+    private List<Row> people = new();
+    private readonly HashSet<Guid> chosen = new();
+    private string? error;
+
+    protected override void OnInitialized()
+    {
+        var zoneName = Store.Read(d => d.Root.Areas.SelectMany(a => a.Zones).FirstOrDefault(z => z.Id == Screen.ZoneId)?.Name);
+        people = Store.Read(d => d.Users.Where(u => u.Role == Roles.ClientMember && !u.Disabled).OrderBy(u => u.Label, StringComparer.CurrentCultureIgnoreCase)
+            .Select(u =>
+            {
+                var r = u.Rights ?? new MemberRights();
+                return new Row(u, PageMode.Clean(r.Screens) == PageMode.Read, Screen.ZoneId is { } z && r.ZoneIds.Contains(z) ? zoneName ?? "?" : null);
+            }).ToList());
+        chosen.UnionWith(Store.Read(d => d.Users.Where(u => u.Rights?.ScreenIds.Contains(Screen.Id) == true).Select(u => u.Id).ToList()));
+    }
+
+    private void Toggle(Guid id) { if (!chosen.Remove(id)) chosen.Add(id); error = null; }
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task Save()
+    {
+        var ids = chosen.ToList();
+        error = Store.Write(d => MemberOps.AssignScreen(d, Screen.Id, ids));
+        if (error != null) return;
+        Toast.Ok(ids.Count == 0 ? $"« {Screen.Name} » n'est plus attribué un à un." : $"« {Screen.Name} » attribué à {ids.Count} personne{(ids.Count > 1 ? "s" : "")}.");
+        await OnClose.InvokeAsync();
+    }
+}

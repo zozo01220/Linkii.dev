@@ -1,28 +1,41 @@
 namespace Linkii.Poc;
 
 /// <summary>
-/// Dossiers des listes de lecture d'un client (option « Dossiers », comme la médiathèque) : ce que la personne voit, ce qu'elle peut faire, partages.
-/// Les listes rangées dans un dossier qu'elle ne voit pas n'apparaissent pas dans sa liste.
+/// Dossiers des listes de lecture d'un client (option « Dossiers », comme la médiathèque) : ce que la personne voit, ce qu'elle peut faire.
+/// Elle voit ses listes et ses dossiers, ceux qu'on lui partage, ou tout en lecture seule (voir <see cref="Ownership"/>).
 /// </summary>
 public class PlaylistLibrary(TenantStore store)
 {
-    /// <summary>Dossiers de l'aire que la personne voit, avec son droit sur chacun.</summary>
+    /// <summary>Dossiers de l'aire que la personne voit, avec son droit sur chacun et leur place dans les onglets.</summary>
     public List<PlaylistFolderRow> Folders() => store.Read(d =>
     {
         var all = PlaylistFolderOps.All(d);
         var rows = new List<PlaylistFolderRow>();
+        var shared = ItemShareOps.Counts(d, ShareKind.PlaylistFolder);
         foreach (var f in d.PlaylistFolders)
         {
             var right = FolderAccess.For(d.Access, f, all);
             if (right == FolderRight.None) continue;
             var owner = d.Users.FirstOrDefault(u => u.Id == f.OwnerId)?.Label ?? "—";
-            rows.Add(new PlaylistFolderRow(f, right, owner, f.Shares.Count > 0));
+            rows.Add(new PlaylistFolderRow(f, right, owner, shared.ContainsKey(f.Id), FolderAccess.TabInfo(d.Access, f, all)));
         }
         return rows.OrderBy(r => r.Folder.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     });
 
     /// <summary>Droit de la personne sur chaque liste de l'aire (voir <see cref="PlaylistOps.RightOf"/>).</summary>
-    public Dictionary<Guid, FolderRight> PlaylistRights() => store.Read(d => d.Playlists.ToDictionary(p => p.Id, p => PlaylistOps.RightOf(d, p)));
+    public Dictionary<Guid, FolderRight> PlaylistRights() => store.Read(PlaylistOps.Rights);
+
+    /// <summary>Place de chaque liste visible dans les onglets « Mes listes / Partagées avec moi » (voir <see cref="LibraryTab"/>).</summary>
+    public Dictionary<Guid, LibraryTab.Info> ListTabs() => store.Read(d =>
+    {
+        var folders = PlaylistFolderOps.All(d).ToDictionary(f => f.Id);
+        var rights = PlaylistOps.Rights(d);
+        return d.Playlists.Where(p => rights.GetValueOrDefault(p.Id) != FolderRight.None).ToDictionary(p => p.Id, p =>
+        {
+            var parents = Ownership.Parents(p.FolderId, folders);
+            return Ownership.TabInfo(d.Access, ShareKind.Playlist, p.Id, p.OwnerId, parents);
+        });
+    });
 
     public (string? Error, PlaylistFolder? Folder) CreateFolder(string name, Guid? parentId) => store.Write(d => PlaylistFolderOps.Create(d, name, parentId));
 
@@ -49,37 +62,6 @@ public class PlaylistLibrary(TenantStore store)
         return null;
     }
 
-    /// <summary>Partages d'un dossier de listes, et les personnes et niveaux à qui l'on peut en donner.</summary>
-    public PlaylistShareInfo? ShareInfo(Guid folderId) => store.Read(d =>
-    {
-        if (PlaylistFolderOps.Find(d, folderId) is not { } f) return null;
-        var area = d.Root.Areas.FirstOrDefault(a => a.Id == f.AreaId)?.Name ?? "";
-        var people = d.Users.Where(u => u.Role == Roles.ClientMember).OrderBy(u => u.Label).Select(u =>
-        {
-            var ua = AreaAccess.For(d.Root, d.ClientId, u.Id);
-            var reason = u.Disabled ? "compte désactivé"
-                : !ua.HasArea(f.AreaId) ? $"ne voit pas l'aire « {area} »"
-                : ua.Level?.Pages.Contains(LevelPages.Playlists) != true ? "n'a pas la page Listes de lecture" : null;
-            return new ShareCandidate(u.Id, u.Label, ua.Level?.Name ?? "Sans niveau", reason);
-        }).ToList();
-        var levels = d.Tenant.Levels.Select(l => new ShareCandidate(l.Id, l.Name,
-            d.Users.Count(u => u.HasLevel(l.Id)) is var n && n > 0 ? $"{n} membre{(n > 1 ? "s" : "")}" : "aucun membre", null)).ToList();
-        var shares = f.Shares.Select(s =>
-        {
-            var label = s.Kind == FolderShareKind.Level ? levels.FirstOrDefault(l => l.Id == s.TargetId)?.Label : people.FirstOrDefault(p => p.Id == s.TargetId)?.Label;
-            return new ShareRow(s.Kind, s.TargetId, label ?? "Retiré de l'organisation", s.Write);
-        }).ToList();
-        return new PlaylistShareInfo(f, shares, people, levels, FolderAccess.CanShare(d.Access, f), Audience(d, f));
-    });
-
-    /// <summary>Personnes qui ont accès à chaque dossier vu (nombre de l'icône Partage).</summary>
-    public Dictionary<Guid, FolderAudience> Audiences() => store.Read(d => FolderAudiences.Compute(d, PlaylistFolderOps.All(d), d.PlaylistFolders.ToList(), LevelPages.Playlists));
-
-    private static FolderAudience Audience(ClientDb d, PlaylistFolder f) =>
-        FolderAudiences.Compute(d, PlaylistFolderOps.All(d), new[] { f }, LevelPages.Playlists).GetValueOrDefault(f.Id, FolderAudience.None);
-
-    public string? SetShare(Guid folderId, string kind, Guid target, bool? write) => store.Write(d => PlaylistFolderOps.SetShare(d, folderId, kind, target, write));
-
     /// <summary>Range des listes dans un dossier, ou à la racine (null). Rend le nombre rangé et les refus.</summary>
     public (int Moved, List<string> Refused) MoveLists(IReadOnlyCollection<Guid> ids, Guid? folderId) => store.Write(d => PlaylistFolderOps.Move(d, ids, folderId));
 
@@ -88,7 +70,7 @@ public class PlaylistLibrary(TenantStore store)
     {
         var all = PlaylistFolderOps.All(d);
         var list = new List<(Guid? Id, string Path)>();
-        if (FolderAccess.CanCreateAtRoot(d.Access, LevelPages.Playlists)) list.Add((null, "Listes de lecture de l'aire (racine)"));
+        if (FolderAccess.CanCreateAtRoot(d.Access, LevelPages.Playlists)) list.Add((null, "Mes listes de lecture (racine)"));
         foreach (var f in d.PlaylistFolders)
         {
             if (FolderAccess.For(d.Access, f, all) < FolderRight.Write) continue;
@@ -158,7 +140,5 @@ public static class PlaylistUses
 }
 
 /// <summary>Un dossier de listes vu par la personne, avec son droit, le nom de son propriétaire et s'il est partagé.</summary>
-public record PlaylistFolderRow(PlaylistFolder Folder, FolderRight Right, string OwnerName, bool Shared);
+public record PlaylistFolderRow(PlaylistFolder Folder, FolderRight Right, string OwnerName, bool Shared, LibraryTab.Info Tab);
 
-/// <summary>Partages d'un dossier de listes : ceux en place, les personnes et niveaux possibles, et si la personne peut partager.</summary>
-public record PlaylistShareInfo(PlaylistFolder Folder, List<ShareRow> Shares, List<ShareCandidate> People, List<ShareCandidate> Levels, bool CanShare, FolderAudience Audience);

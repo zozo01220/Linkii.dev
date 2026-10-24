@@ -17,31 +17,6 @@
         <div class="brand"><BrandMark R="reseller" Size="30" /><span class="ver" title="@AppVersion.Full">v@(AppVersion.Short)</span></div>
         <PulsePill Class="side-pulse" />
 
-        @if (Ctx.ClientId != null && multi && areas.Count > 0)
-        {
-            @* Aire de gestion ouverte : tout le back-office (écrans, listes, médias) ne montre que son contenu. *@
-            <div class="area-pick" @onclick:stopPropagation="true">
-                <button type="button" class="area-btn" aria-haspopup="menu" aria-expanded="@(areaMenu ? "true" : "false")" disabled="@(areas.Count < 2)" title="@(areas.Count < 2 ? "Votre aire de gestion" : "Changer d'aire de gestion")" @onclick="() => areaMenu = !areaMenu">
-                    <Ico Name="map-pin" Size="16" />
-                    <span class="area-txt"><b>@(currentArea?.Name ?? "Aucune aire")</b><small>Aire de gestion</small></span>
-                    @if (areas.Count > 1) { <Ico Name="chevron" Size="16" /> }
-                </button>
-                @if (areaMenu)
-                {
-                    <div class="menu-backdrop" @onclick="() => areaMenu = false"></div>
-                    <div class="area-menu" role="menu">
-                        @foreach (var a in areas)
-                        {
-                            var ar = a;
-                            <button type="button" role="menuitem" class="@(ar.Id == currentArea?.Id ? "on" : "")" @onclick="() => SwitchArea(ar.Id)">
-                                <Ico Name="map-pin" Size="15" /><span class="grow">@ar.Name</span>
-                            </button>
-                        }
-                        @if (orgAdmin && Modes.Expert) { <a href="organisation" role="menuitem" class="area-manage" @onclick="() => areaMenu = false"><Ico Name="gear" Size="15" /> Gérer les aires</a> }
-                    </div>
-                }
-            </div>
-        }
         @if (Ctx.ClientId != null)
         {
             @* Pages ouvertes par le niveau de droits du membre (un administrateur les a toutes). *@
@@ -106,7 +81,7 @@
             @if (orgAdmin)
             {
                 <NavLink class="nav" href="organisation">
-                    <Ico Name="building" Size="18" /> Organisation
+                    <Ico Name="team" Size="18" /> Membres
                 </NavLink>
             }
             else if (Sees(LevelPages.Zones))
@@ -213,29 +188,7 @@
         }
         <header class="topbar">
             <button type="button" class="nav-toggle" aria-label="Menu" aria-expanded="@(navOpen ? "true" : "false")" @onclick="() => { navOpen = !navOpen; open = false; }"><Ico Name="menu" Size="22" /></button>
-            <div class="org @(Ctx.ClientId != null && multi && areas.Count > 0 ? "has-area" : "")">@orgName</div>
-            @if (Ctx.ClientId != null && multi && areas.Count > 0)
-            {
-                @* Look « app » : liste déroulante des aires de gestion à la place du nom de l'organisation (masquée sur PC, où le sélecteur est dans le menu latéral). *@
-                <div class="app-area" @onclick:stopPropagation="true">
-                    <button type="button" class="app-area-btn" aria-haspopup="menu" aria-expanded="@(topAreaMenu ? "true" : "false")" disabled="@(areas.Count < 2)" title="@(areas.Count < 2 ? "Votre aire de gestion" : "Changer d'aire de gestion")" @onclick="() => topAreaMenu = !topAreaMenu">
-                        <Ico Name="map-pin" Size="16" /><span>@(currentArea?.Name ?? "Aucune aire")</span>@if (areas.Count > 1) { <Ico Name="chevron" Size="16" /> }
-                    </button>
-                    @if (topAreaMenu)
-                    {
-                        <div class="menu-backdrop" @onclick="() => topAreaMenu = false"></div>
-                        <div class="area-menu" role="menu">
-                            @foreach (var a in areas)
-                            {
-                                var ar = a;
-                                <button type="button" role="menuitem" class="@(ar.Id == currentArea?.Id ? "on" : "")" @onclick="() => { topAreaMenu = false; SwitchArea(ar.Id); }">
-                                    <Ico Name="map-pin" Size="15" /><span class="grow">@ar.Name</span>@if (ar.Id == currentArea?.Id) { <Ico Name="check" Size="15" /> }
-                                </button>
-                            }
-                        </div>
-                    }
-                </div>
-            }
+            <div class="org">@orgName</div>
             @if (Ctx.ClientId != null && !Ctx.IsImpersonating)
             {
                 @* Look « app » : mode simple / expert toujours visible dans la barre du haut (masqué ailleurs par le CSS). *@
@@ -245,8 +198,8 @@
             <PulsePill Class="top-pulse" />
         </header>
         @{ var roDomain = ReadOnlyDomain; }
-        @if (readOnly) { <div class="trial-bar"><Ico Name="lock" Size="16" /><span>Votre niveau de droits est en <b>lecture seule</b> : vous consultez, sans rien modifier ni publier.</span></div> }
-        else if (roDomain != null) { <div class="trial-bar"><Ico Name="lock" Size="16" /><span>Votre niveau de droits permet de <b>voir</b> @(roDomain == LevelPages.Media ? "la médiathèque, sans la modifier" : roDomain == LevelPages.Playlists ? "les listes de lecture, sans les modifier" : "les écrans, sans les modifier ni les publier").</span></div> }
+        @if (readOnly) { <div class="trial-bar"><Ico Name="lock" Size="16" /><span>Vous êtes en <b>lecture seule</b> : vous voyez tout ce que possède l'organisation, sans rien modifier ni publier.</span></div> }
+        else if (roDomain != null) { <div class="trial-bar"><Ico Name="lock" Size="16" /><span><b>Lecture seule</b> : vous voyez @(roDomain == LevelPages.Media ? "tous les médias de l'organisation, sans les modifier" : roDomain == LevelPages.Playlists ? "toutes les listes de l'organisation, sans les modifier" : "tous les écrans de l'organisation, sans les modifier ni les publier").</span></div> }
         @if (SimpleLocked) { <div class="trial-bar"><Ico Name="lock" Size="16" /><span><b>Lecture seule en mode simple.</b> Passez en mode expert pour modifier cette page.</span><button type="button" class="btn sm" @onclick="() => Modes.Switch(true)">Passer en mode expert</button></div> }
         <main class="content @(readOnly || roDomain != null || SimpleLocked ? "ro" : "") @(SimpleLocked ? "ro-simple" : "")">
             @if (ExpertOnlyHere)
@@ -271,7 +224,7 @@
                     <div class="grab"></div>
                     <div class="mh"><span class="avatar">@Initials</span><div class="who2"><b>@(userName)</b><small>@orgName</small></div><button type="button" class="mx" aria-label="Fermer" @onclick="() => more = false"><Ico Name="x" Size="16" /></button></div>
                     <div class="mg">
-                        @if (orgAdmin && Modes.Expert) { <NavLink href="organisation" @onclick="CloseMore"><span class="ic"><Ico Name="building" Size="22" /></span>Organisation</NavLink> }
+                        @if (orgAdmin && Modes.Expert) { <NavLink href="organisation" @onclick="CloseMore"><span class="ic"><Ico Name="team" Size="22" /></span>Membres</NavLink> }
                         @if (Modes.Expert && !orgAdmin && Sees(LevelPages.Zones)) { <NavLink href="zones" @onclick="CloseMore"><span class="ic"><Ico Name="box" Size="22" /></span>Zones</NavLink> }
                         @if (CompositionsMenu) { <NavLink href="compositions" @onclick="CloseMore"><span class="ic"><Ico Name="images" Size="22" /></span>Compositions</NavLink> }
                         @if (Sees(LevelPages.Widgets)) { <NavLink href="widgets" @onclick="CloseMore"><span class="ic"><Ico Name="grid" Size="22" /></span>Widgets</NavLink> }
@@ -356,12 +309,10 @@
 @code {
     private bool more;
     private void CloseMore() => more = false;
-    private bool open, navOpen, areaMenu, topAreaMenu, multi, orgAdmin = true, readOnly;
+    private bool open, navOpen, orgAdmin = true, readOnly;
     private HashSet<string> writable = new();   // domaines (écrans, listes, médiathèque) que le niveau modifie
     // Page d'un domaine que le niveau ne fait que voir : bandeau et boutons d'en-tête masqués, comme en lecture seule
     private string? ReadOnlyDomain => orgAdmin ? null : Services.GetRequiredService<TenantStore>().PageDomain is { } dom && !writable.Contains(dom) ? dom : null;
-    private List<Area> areas = new();
-    private Area? currentArea;
     private HashSet<string> pages = new(LevelPages.All);
     private RightsBoundary? boundary;
 
@@ -386,23 +337,15 @@
     public void Dispose() { Modes.Changed -= OnModeChanged; if (apps != null) apps.InstallsChanged -= OnInstallsChanged; }
     private AppService? apps;
 
-    // Aires visibles dès qu'il y en a deux, ou dès qu'une personne a été invitée : une organisation seule ne voit rien de nouveau.
+    // Droits de la personne connectée : pages du menu, lecture seule (l'aire n'est plus un filtre global : seulement celui des pages Écrans, Planning et Zones).
     private void LoadAreas()
     {
         var store = Services.GetRequiredService<TenantStore>();
-        (areas, currentArea, orgAdmin, readOnly, pages, multi) = store.Read(d => (d.Access.Areas, d.Access.Current, d.Access.IsOrgAdmin, d.Access.ReadOnly,
-            LevelPages.All.Where(p => d.Access.CanSee(p, Catalog)).ToHashSet(),
-            d.Access.OrgAreaCount > 1 || d.Users.Any(u => u.Role == Roles.ClientMember)));
+        (orgAdmin, readOnly, pages) = store.Read(d => (d.Access.IsOrgAdmin, d.Access.ReadOnly, LevelPages.All.Where(p => d.Access.CanSee(p, Catalog)).ToHashSet()));
         compositionsOn = store.Read(d => d.AppInstalls.Any(a => a.AppId == Compositions.AppId));
         writable = store.Read(d => new[] { LevelPages.Screens, LevelPages.Playlists, LevelPages.Media }.Where(d.Access.CanWrite).ToHashSet());
     }
 
-    private void SwitchArea(Guid id)
-    {
-        areaMenu = false;
-        if (id == currentArea?.Id) return;
-        if (Services.GetRequiredService<TenantStore>().SwitchArea(id)) Nav.NavigateTo(Nav.Uri.Contains("/playlists/") ? "/playlists" : Nav.Uri, forceLoad: true);   // tout est relu dans la nouvelle aire
-    }
     private string brand = "#0B1F3A", orgName = "", userName = "", userEmail = "";
     private bool suspended;   // organisation suspendue : écrans coupés, back-office ouvert (bandeau)
     private DateTime? trialEnd;   // essai gratuit de l'organisation ouverte (bandeau)

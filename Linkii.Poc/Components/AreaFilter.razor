@@ -1,0 +1,58 @@
+@inject TenantStore Store
+
+@* Filtre « Aire » des pages Écrans, Planning et Zones (24 octobre 2026, maquette aires-filtre-ecrans.html) : l'aire ne range plus que les écrans,
+   elle n'est plus un filtre global du menu. Choisir une aire l'ouvre (zones, connexion d'un écran, planning) ; « Toutes les aires » (page Écrans)
+   montre les écrans de toutes les aires, groupés. Rien ne s'affiche s'il n'y a qu'une aire. Un utilisateur ne voit que les aires où il a des écrans. *@
+@if (areas.Count > 1)
+{
+    <div class="og-dd area-filter" @onclick:stopPropagation="true">
+        <button type="button" class="og-ddb @(Value != "" ? "act" : "")" aria-haspopup="menu" aria-expanded="@(open ? "true" : "false")" @onclick="() => open = !open">
+            <Ico Name="map-pin" Size="14" /><span class="k">Aire</span> @(areas.FirstOrDefault(a => a.Id.ToString() == Value)?.Name ?? "Toutes") <Ico Name="chevron" Size="14" />
+        </button>
+        @if (open)
+        {
+            <div class="kebab-backdrop" @onclick="() => open = false"></div>
+            <div class="og-menu" role="menu">
+                @if (AllowAll)
+                {
+                    <button type="button" role="menuitemradio" aria-checked="@(Value == "" ? "true" : "false")" @onclick='() => Pick("")'><span class="og-ck @(Value == "" ? "on" : "")"></span>Toutes les aires</button>
+                }
+                @foreach (var a in areas)
+                {
+                    var ar = a;
+                    <button type="button" role="menuitemradio" aria-checked="@(Value == ar.Id.ToString() ? "true" : "false")" @onclick="() => Pick(ar.Id.ToString())"><span class="og-ck @(Value == ar.Id.ToString() ? "on" : "")"></span>@ar.Name</button>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    /// <summary>"" : toutes les aires ; sinon l'identifiant de l'aire.</summary>
+    [Parameter] public string Value { get; set; } = "";
+    /// <summary>Propose « Toutes les aires » (page Écrans).</summary>
+    [Parameter] public bool AllowAll { get; set; }
+    /// <summary>Aire choisie ("" : toutes). Une aire choisie est déjà ouverte (<see cref="TenantStore.SwitchArea"/>) quand ce rappel arrive.</summary>
+    [Parameter] public EventCallback<string> OnPick { get; set; }
+
+    private List<Area> areas = new();
+    private bool open;
+
+    protected override void OnParametersSet() => areas = Store.Read(Visible);
+
+    /// <summary>Aires du filtre : toutes pour un administrateur ; pour un utilisateur, celles où il a des écrans (ou une zone attribuée), et l'aire ouverte.</summary>
+    public static List<Area> Visible(ClientDb d)
+    {
+        var all = d.Access.Areas.OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        if (d.Access.IsOrgAdmin || d.Access.Rights is not { } r || r.Screens == PageMode.Read) return all;
+        var withScreens = d.AllScreens.Select(s => s.AreaId).ToHashSet();
+        return all.Where(a => withScreens.Contains(a.Id) || a.Zones.Any(z => r.ZoneIds.Contains(z.Id)) || a.Id == d.Area?.Id).ToList();
+    }
+
+    private async Task Pick(string id)
+    {
+        open = false;
+        if (Guid.TryParse(id, out var g)) Store.SwitchArea(g);
+        await OnPick.InvokeAsync(id);
+    }
+}
