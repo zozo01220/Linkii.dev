@@ -104,7 +104,7 @@ else
                 var aud = AudienceOf(r.Folder.Id);
                 var preview = FolderPreview(r.Folder.Id);
                 var canMenu = mine || isAdmin;
-                <div class="lx-fcard @(dropOver == r.Folder.Id ? "drop-target" : "")" role="listitem" tabindex="0" draggable="@(r.Right == FolderRight.Owner && !inApp ? "true" : null)" @ondragstart="() => { dragFolder = r.Folder.Id; }" @ondragend="EndDrag" title="@FolderTitle(r)" aria-label="Ouvrir le dossier @r.Folder.Name"
+                <div data-nid="@r.Folder.Id" class="lx-fcard @(dropOver == r.Folder.Id ? "drop-target" : "")" role="listitem" tabindex="0" draggable="@(r.Right == FolderRight.Owner && !inApp ? "true" : null)" @ondragstart="() => { dragFolder = r.Folder.Id; }" @ondragend="EndDrag" title="@FolderTitle(r)" aria-label="Ouvrir le dossier @r.Folder.Name"
                      @onclick="() => OpenFolder(r.Folder.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenFolder(r.Folder.Id); }'
                      @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0 || (dragFolder != null && dragFolder != r.Folder.Id)) dropOver = r.Folder.Id; }" @ondragleave="() => { if (dropOver == r.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(r.Folder.Id)"
                      @oncontextmenu="() => { if (canMenu) menuFor = r.Folder.Id; }" @oncontextmenu:preventDefault="inApp && canMenu">
@@ -222,7 +222,7 @@ else
                         var pl = p;
                         var tile = Tiles(pl).FirstOrDefault();
                         var total = TotalSeconds(pl);
-                        <tr class="@(picked.Contains(pl.Id) ? "picked" : "") @(dragIds.Contains(pl.Id) ? "dragging" : "")" draggable="@(CanDrag(pl) ? "true" : "false")" @ondragstart="() => StartDrag(pl)" @ondragend="EndDrag">
+                        <tr data-nid="@pl.Id" class="@(picked.Contains(pl.Id) ? "picked" : "") @(dragIds.Contains(pl.Id) ? "dragging" : "")" draggable="@(CanDrag(pl) ? "true" : "false")" @ondragstart="() => StartDrag(pl)" @ondragend="EndDrag">
                             <td><input type="checkbox" class="sc-check lx-check" aria-label="Sélectionner @pl.Name" checked="@picked.Contains(pl.Id)" @onchange="() => Toggle(pl.Id)" /></td>
                             <td><div class="nm"><span class="mini">@if (tile != null) { <MediaThumb Media="tile" All="media" /> } else { <Ico Name="image" Size="16" /> }</span><a href="/playlists/@pl.Id">@pl.Name</a>@if (RightOfList(pl) == FolderRight.Read) { <span title="Lecture seule"><Ico Name="lock" Size="13" /></span> }</div></td>
                             @if (foldersOn) { <td><small>@PathOf(pl)</small></td> }
@@ -244,7 +244,7 @@ else
                 var pl = p;
                 var tiles = Tiles(pl).Take(3).ToList();
                 var total = TotalSeconds(pl);
-                <div class="lx-pc @(picked.Contains(pl.Id) ? "picked" : "") @(dragIds.Contains(pl.Id) ? "dragging" : "")"
+                <div data-nid="@pl.Id" class="lx-pc @(picked.Contains(pl.Id) ? "picked" : "") @(dragIds.Contains(pl.Id) ? "dragging" : "")"
                      @oncontextmenu="() => { if (inApp) menuFor = pl.Id; }" @oncontextmenu:preventDefault="inApp"
                      draggable="@(CanDrag(pl) ? "true" : "false")" @ondragstart="() => StartDrag(pl)" @ondragend="EndDrag">
                     <input type="checkbox" class="sc-check lx-check" aria-label="Sélectionner @pl.Name" checked="@picked.Contains(pl.Id)" @onchange="() => Toggle(pl.Id)" />
@@ -438,6 +438,9 @@ else
     </div>
 }
 
+<NewMark Kind="playlist" Ids="@playlists.Select(p => p.Id)" Via="newVia" />
+<NewMark Kind="folder" Ids="@folderRows.Select(r => r.Folder.Id)" Via="newVia" />
+
 @code {
     private bool foldersOpen;   // look « app » : liste des dossiers dépliée
     private List<Playlist> playlists = new();
@@ -524,6 +527,36 @@ else
             : new();
         crumbs = BuildCrumbs();
         picked.IntersectWith(playlists.Select(x => x.Id));
+        newVia = BuildNewVia();
+    }
+
+    // Rebond de ce qui est nouveau (§116) : une liste ou un dossier hors de la vue fait rebondir le dossier de la vue qui y mène
+    private Dictionary<Guid, Guid> newVia = new();
+    private Dictionary<Guid, Guid> BuildNewVia()
+    {
+        var via = new Dictionary<Guid, Guid>();
+        if (!foldersOn) return via;
+        var cache = new Dictionary<Guid, Guid?>();
+        Guid? Child(Guid f) { if (!cache.TryGetValue(f, out var c)) cache[f] = c = FolderChildOnPath(f); return c; }
+        foreach (var p in playlists)
+            if (p.FolderId is { } f && Child(f) is { } c) via[p.Id] = c;
+        foreach (var r in folderRows)
+            if (Child(r.Folder.Id) is { } c2 && c2 != r.Folder.Id) via[r.Folder.Id] = c2;
+        return via;
+    }
+
+    // Dossier de la vue ouverte qui contient (directement ou plus bas) le dossier f ; null s'il n'est pas dans cette vue
+    private Guid? FolderChildOnPath(Guid f)
+    {
+        for (Guid? t = f; t is { } id;)
+        {
+            var row = folderRows.FirstOrDefault(r => r.Folder.Id == id);
+            if (row == null) return null;
+            var p = row.Folder.ParentId;
+            if (p == folderId || (folderId == null && p is { } pp && folderRows.All(x => x.Folder.Id != pp))) return id;
+            t = p;
+        }
+        return null;
     }
 
     private string filter = "", search = "";   // filter : "" | used | pending | unused

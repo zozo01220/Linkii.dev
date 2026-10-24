@@ -396,6 +396,9 @@ else if (wallEdit is { } wid)
     <WallDialog ZoneId="wid" OnClose="WallClosed" />
 }
 
+<NewMark Kind="screen" Ids="@AllScreens.Select(s => s.Id)" />
+<NewMark Kind="zone" Ids="@zones.Select(z => z.Id)" />
+
 @code {
     private List<Screen> screens = new();
     private List<Playlist> playlists = new();
@@ -669,7 +672,7 @@ else if (wallEdit is { } wid)
     {
         var off = IsOffline(s);
         var listName = s.PlaylistId is { } pid && ga.Lists.TryGetValue(pid, out var lp) ? lp.Name : "Aucune liste de lecture";
-        <div class="pl-card gc gc-light @(off ? "is-off" : "is-on")" role="button" tabindex="0" title="Modifier cet écran (aire « @ga.Area.Name »)"
+        <div data-nid="@s.Id" class="pl-card gc gc-light @(off ? "is-off" : "is-on")" role="button" tabindex="0" title="Modifier cet écran (aire « @ga.Area.Name »)"
              @onclick="() => OpenAreaPage(ga.Area.Id, s.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenAreaPage(ga.Area.Id, s.Id); }'>
             <div class="gc-top">
                 <div class="gc-stage">
@@ -692,7 +695,7 @@ else if (wallEdit is { } wid)
         var off = IsOffline(s);
         var st = off ? "Hors ligne" : "En ligne";
         var listName = s.PlaylistId is { } pid && ga.Lists.TryGetValue(pid, out var lp) ? lp.Name : "— Aucune liste de lecture —";
-        <div class="pl-card sc-card scr-card @(off ? "is-off" : "")" role="button" tabindex="0" title="Modifier cet écran (aire « @ga.Area.Name »)"
+        <div data-nid="@s.Id" class="pl-card sc-card scr-card @(off ? "is-off" : "")" role="button" tabindex="0" title="Modifier cet écran (aire « @ga.Area.Name »)"
              @onclick="() => OpenAreaPage(ga.Area.Id, s.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenAreaPage(ga.Area.Id, s.Id); }'>
             <div class="sc-head">
                 <div class="pl-title">
@@ -741,7 +744,7 @@ else if (wallEdit is { } wid)
                 var gwpaused = gm.Count > 0 && gm.All(x => x.IsPaused(DateTime.UtcNow));
                 var gopen = expandedWalls.Contains(gw.Id);
                 var gar = ((double)gw.WallCols * (gport ? 9 : 16) / ((double)gw.WallRows * (gport ? 16 : 9))).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
-                <div class="pl-card gc gc-wall @(gpicked ? "picked" : "") @(gwonline ? "" : "is-off")" style="--cols:@gw.WallCols;--rows:@gw.WallRows;--ar:@gar" role="group" aria-label="Mur d'écrans @gw.Name">
+                <div data-nid="@gw.Id" class="pl-card gc gc-wall @(gpicked ? "picked" : "") @(gwonline ? "" : "is-off")" style="--cols:@gw.WallCols;--rows:@gw.WallRows;--ar:@gar" role="group" aria-label="Mur d'écrans @gw.Name">
                     <div class="gc-top">
                         <div class="gc-stage">
                             <div class="gc-frame @(gport ? "portrait" : "")">
@@ -850,7 +853,7 @@ else if (wallEdit is { } wid)
             var gdl = Store.Read(d => d.Delivery(gs));
             var gsl = Sleep.State(tenant, area, gs, false, gnow);   // en veille : écran éteint, il ne dialogue plus
             var gcls = gsl.Asleep ? "sleep" : gpaused ? "warn" : gst == "En ligne" ? "ok" : gst == "Mise à jour" ? "warn" : "bad";
-            <div class="pl-card gc @(selectedIds.Contains(gs.Id) ? "picked" : "") @(gonline || gsl.Asleep ? "" : "is-off") @(gonline && !gpaused && !gsl.Asleep ? "is-on" : "") @(gpaused ? "is-paused" : "")">
+            <div data-nid="@gs.Id" class="pl-card gc @(selectedIds.Contains(gs.Id) ? "picked" : "") @(gonline || gsl.Asleep ? "" : "is-off") @(gonline && !gpaused && !gsl.Asleep ? "is-on" : "") @(gpaused ? "is-paused" : "")">
                 <div class="gc-top">
                     <div class="gc-stage">
                         <div class="gc-mon @(gs.Orientation == "portrait" ? "portrait" : "")">
@@ -969,7 +972,7 @@ else if (wallEdit is { } wid)
             var wOnl = members.Any(x => ScreenControl.Online(x, DateTime.UtcNow));
             var wExpanded = expandedWalls.Contains(w.Id);
             var wAr = ((double)w.WallCols * (portrait ? 9 : 16) / ((double)w.WallRows * (portrait ? 16 : 9))).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
-            <div class="pl-card sc-card scr-card wall-card @(w.WallCols >= 4 ? "w4" : "") @(opened ? "wide" : "") @(allPicked ? "picked" : "") @(wOnl ? "" : "is-off")" style="--cols:@w.WallCols;--rows:@w.WallRows;--ar:@wAr" role="group" aria-label="Mur d'écrans @w.Name">
+            <div data-nid="@w.Id" class="pl-card sc-card scr-card wall-card @(w.WallCols >= 4 ? "w4" : "") @(opened ? "wide" : "") @(allPicked ? "picked" : "") @(wOnl ? "" : "is-off")" style="--cols:@w.WallCols;--rows:@w.WallRows;--ar:@wAr" role="group" aria-label="Mur d'écrans @w.Name">
                 <div class="sc-head">
                     <div class="pl-title">
                         <input type="checkbox" class="sc-check" aria-label="Sélectionner les @members.Count écrans du mur @w.Name" checked="@allPicked" @onchange="() => ToggleWall(members)" />
@@ -1107,7 +1110,7 @@ else if (wallEdit is { } wid)
         var now = DateTime.UtcNow;
         var online = ScreenControl.Online(sc, now);
         var paused = sc.IsPaused(now);
-        <div class="pl-card sc-card scr-card @(selectedIds.Contains(sc.Id) ? "picked" : "") @(online ? "" : "is-off") @(paused ? "is-paused" : "")">
+        <div data-nid="@sc.Id" class="pl-card sc-card scr-card @(selectedIds.Contains(sc.Id) ? "picked" : "") @(online ? "" : "is-off") @(paused ? "is-paused" : "")">
             <div class="sc-head">
                 <div class="pl-title">
                     <input type="checkbox" class="sc-check" aria-label="Sélectionner @sc.Name" checked="@selectedIds.Contains(sc.Id)" @onchange="() => ToggleSelect(sc.Id)" />
@@ -1514,7 +1517,7 @@ else if (wallEdit is { } wid)
     {
         var hits = z.Screens.Where(t => TMatch(t, z, a)).ToList();
         if (hits.Count == 0) return;
-        <div class="tr-zg">
+        <div class="tr-zg" data-nid="@(z.Zone.IsWall ? null : z.Zone.Id.ToString())">
             <div class="tr-zh"><Ico Name="@(z.Zone.IsWall ? "grid" : "box")" Size="13" /> @z.Zone.Name <span class="cnt">· @Plural(z.Screens.Count, "écran", "écrans")</span>@if (z.Zone.Sync) { <span class="sy"><Ico Name="link" Size="12" /> synchronisée</span> }<span class="grow"></span></div>
             @if (treeDens == "rows")
             {
@@ -1615,7 +1618,7 @@ else if (wallEdit is { } wid)
     private RenderFragment TreeRow(TArea a, TScreen t, bool sub) => __builder =>
     {
         var s = t.S;
-        <div class="tr-row @(sub ? "sub" : "")" role="button" tabindex="0" title="Paramètres de l'écran « @s.Name »@(a.Own ? "" : $" (ouvre l'aire {a.Area.Name})")"
+        <div data-nid="@s.Id" class="tr-row @(sub ? "sub" : "")" role="button" tabindex="0" title="Paramètres de l'écran « @s.Name »@(a.Own ? "" : $" (ouvre l'aire {a.Area.Name})")"
              @onclick="() => OpenTreeScreen(a, s)" @onkeydown='e => { if (e.Key == "Enter") OpenTreeScreen(a, s); }'>
             <span class="sc-dot @TDot(t.Kind)"></span>
             <span class="nm">@s.Name</span>
@@ -1631,7 +1634,7 @@ else if (wallEdit is { } wid)
     {
         var w = z.Zone;
         var c = TCountOf(z.Screens);
-        <div class="tr-row wall" role="button" tabindex="0" title="Mur d'écrans « @w.Name »" @onclick="() => SelectNode(a, w.Id)" @onkeydown='e => { if (e.Key == "Enter") SelectNode(a, w.Id); }'>
+        <div data-nid="@w.Id" class="tr-row wall" role="button" tabindex="0" title="Mur d'écrans « @w.Name »" @onclick="() => SelectNode(a, w.Id)" @onkeydown='e => { if (e.Key == "Enter") SelectNode(a, w.Id); }'>
             <span class="sc-dot @(c.Off > 0 ? "mise-a-jour" : "en-ligne")"></span>
             <span class="nm">@w.Name<small>Mur @w.WallCols × @w.WallRows</small></span>
             <span class="mu"><Ico Name="grid" Size="14" /> @Plural(c.N, "écran", "écrans")</span>

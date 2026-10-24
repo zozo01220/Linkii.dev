@@ -1,0 +1,39 @@
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+@inject TenantStore Store
+@* Rebond de ce qui est nouveau (§116) : à chaque affichage, la liste complète des éléments de la page (avant filtres) est comparée à celle de la dernière visite de
+   cette personne, dans cette aire (wwwroot/newitems.js, mémoire du navigateur). Ce qui est apparu depuis (partage reçu, ajout d'un collègue, import, création)
+   reçoit la classe « landed » : même rebond que les imports de la médiathèque (§113). Les éléments se repèrent par data-nid="identifiant".
+   Via : identifiant -> élément à faire rebondir quand l'élément lui-même n'est pas à l'écran (ex. un média rangé dans un dossier de la vue).
+   La première visite d'une liste sert de point de départ : rien ne rebondit. *@
+
+@code {
+    /// <summary>Famille d'éléments (« media », « folder », « screen », « playlist »…) : une mémoire par famille.</summary>
+    [Parameter, EditorRequired] public string Kind { get; set; } = "";
+    /// <summary>Tous les éléments de la famille que la personne voit sur cette page, sans filtre de recherche ni de dossier.</summary>
+    [Parameter] public IEnumerable<Guid> Ids { get; set; } = Array.Empty<Guid>();
+    /// <summary>Même chose pour les éléments identifiés par un texte (intégrations du catalogue).</summary>
+    [Parameter] public IEnumerable<string>? Keys { get; set; }
+    [Parameter] public IReadOnlyDictionary<Guid, Guid>? Via { get; set; }
+
+    private string? sig;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        var list = Ids.Select(i => i.ToString()).Concat(Keys ?? Array.Empty<string>()).ToArray();
+        var h = new HashCode();
+        foreach (var i in list) h.Add(i);
+        var s = list.Length + ":" + h.ToHashCode();
+        if (s == sig) return;
+        sig = s;
+        try
+        {
+            var scope = $"{Store.ClientId:N}:{Store.UserId?.ToString("N") ?? "-"}:{Store.AreaId?.ToString("N") ?? "-"}";
+            await JS.InvokeVoidAsync("linkiiNew.mark", scope, Kind, list, Via?.ToDictionary(p => p.Key.ToString(), p => p.Value.ToString()));
+        }
+        catch (JSException) { }
+        catch (InvalidOperationException) { }
+        catch (JSDisconnectedException) { }
+        catch (TaskCanceledException) { }
+    }
+}
