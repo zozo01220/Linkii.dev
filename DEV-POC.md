@@ -2171,3 +2171,10 @@ Remplace l'organisation en onglets Structure / Membres / Rôles et l'arbre du §
 - **Organisation** : onglets Membres / Aires au style des Intégrations (`.tabs.int-tabs`, compteur `.cat-count`).
 - **Réglages en onglets** (maquette `maquettes/reglages-onglets.html`) : le menu latéral devient une barre d'onglets (même style qu'Intégrations) ; titres de groupe et icônes masqués, titre `h2` de rubrique masqué, cartes sur deux colonnes sous 1100 px de large. Tout est dans la CSS (`body:not(.is-app)`), `Settings.razor` n'a pas changé : l'app Android garde sa liste.
 - **Non vérifié** : rendu des Réglages et du tiroir dans le navigateur (session de test non ouverte), rubrique « Alertes » en deux colonnes, mobile.
+
+## 120. Onglet Aires en cartes repliables (24 octobre 2026) : codé, compile ; rendu navigateur non vérifié
+
+- **Maquette validée** (widget dans la conversation) : le tableau aire / zone (`og-tbl`) est remplacé par **une carte par aire** (`.ag-card`, `Organisation.razor`). En-tête cliquable (icône, nom, « 3 zones · 2 écrans », chevron) qui plie / déplie ; corps avec une ligne par zone (badges « Mur » / « Synchronisée », nombre d'écrans, « aucun écran » grisé) et les boutons « Ajouter une zone » et « Modifier l'aire » (tous deux ouvrent le tiroir existant de l'aire, `AreaZones` y gère les zones).
+- **Barre du haut** (`.ag-bar`) : totaux aires / zones / écrans, « Tout déplier » / « Tout replier ». Au départ, seule la première aire est dépliée (`IsOpen`, `areasTouched`) ; avant, tout l'était jusqu'à trois aires. Un clic sur l'aire ne l'ouvre plus dans le tiroir.
+- **CSS** : bloc `.ag-*` à la fin de `app.css`. Les anciennes classes `.og-tw` et `.og-z` ne servent plus à cette page.
+- **Non vérifié** : rendu navigateur (l'app de test verrouillait son .exe, build sans erreur de compilation), mobile (look « app »).

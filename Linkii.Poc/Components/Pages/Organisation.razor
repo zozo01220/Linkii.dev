@@ -70,37 +70,42 @@
 }
 else
 {
-    <div class="card og-list">
-        <table class="tbl og-tbl">
-            <thead><tr><th style="width:34px"></th><th>Aire / zone</th><th class="num">Zones</th><th class="num">Écrans</th></tr></thead>
-            <tbody>
-            @foreach (var a in areas)
+    <div class="ag-bar">
+        <span class="ag-tot">@Pl(areas.Count, "aire", "aires")</span><span class="ag-tot">@Pl(areas.Sum(x => x.Zones.Count), "zone", "zones")</span><span class="ag-tot">@Pl(screens.Count, "écran", "écrans")</span>
+        <span class="ag-sp"></span>
+        <button type="button" class="btn ghost sm" @onclick="() => SetAllOpen(true)">Tout déplier</button>
+        <button type="button" class="btn ghost sm" @onclick="() => SetAllOpen(false)">Tout replier</button>
+    </div>
+    @foreach (var a in areas)
+    {
+        var area = a;
+        var open = IsOpen(area.Id);
+        var scrN = screens.Count(s => s.AreaId == area.Id);
+        <div class="card ag-card @(open ? "open" : "")" data-nid="@area.Id">
+            <button type="button" class="ag-hd" aria-expanded="@(open ? "true" : "false")" @onclick="() => ToggleOpen(area.Id)">
+                <span class="ag-ic"><Ico Name="map-pin" Size="18" /></span>
+                <span class="ag-tx"><b>@area.Name</b><small>@Pl(area.Zones.Count, "zone", "zones") · @(scrN == 0 ? "aucun écran" : Pl(scrN, "écran", "écrans"))</small></span>
+                <span class="ag-ch"><Ico Name="chevron-right" Size="16" /></span>
+            </button>
+            @if (open)
             {
-                var area = a;
-                var open = openAreas.Contains(area.Id) || areas.Count <= 3;
-                <tr data-nid="@area.Id" class="og-r" @onclick="() => OpenAreaSheet(area)">
-                    <td @onclick:stopPropagation="true"><button type="button" class="og-tw @(open ? "open" : "")" aria-expanded="@(open ? "true" : "false")" aria-label="@(open ? "Replier" : "Déplier") @area.Name" @onclick="() => ToggleOpen(area.Id)"><Ico Name="chevron-right" Size="14" /></button></td>
-                    <td><div class="og-who"><Ico Name="map-pin" Size="16" /><b>@area.Name</b></div></td>
-                    <td class="num">@area.Zones.Count</td>
-                    <td class="num">@screens.Count(s => s.AreaId == area.Id)</td>
-                </tr>
-                @if (open)
-                {
+                <div class="ag-bd">
                     @foreach (var z in area.Zones)
                     {
                         var zone = z;
-                        <tr data-nid="@zone.Id" class="og-r og-z" @onclick="() => OpenAreaSheet(area)">
-                            <td></td>
-                            <td><div class="og-who"><Ico Name="@(zone.IsWall ? "monitor" : "box")" Size="15" /><span>@zone.Name</span>@if (zone.IsWall) { <span class="pill blue">Mur</span> }@if (zone.Sync && !zone.IsWall) { <span class="pill blue">Synchronisée</span> }</div></td>
-                            <td></td>
-                            <td class="num">@screens.Count(s => s.ZoneId == zone.Id)</td>
-                        </tr>
+                        var n = screens.Count(s => s.ZoneId == zone.Id);
+                        <div class="ag-z @(n == 0 ? "empty" : "")">
+                            <Ico Name="@(zone.IsWall ? "monitor" : "box")" Size="15" /><span>@zone.Name</span>
+                            @if (zone.IsWall) { <span class="pill blue">Mur</span> }
+                            @if (zone.Sync && !zone.IsWall) { <span class="pill blue">Synchronisée</span> }
+                            <span class="ag-n">@(n == 0 ? "aucun écran" : Pl(n, "écran", "écrans"))</span>
+                        </div>
                     }
-                }
+                    <div class="ag-act"><button type="button" class="btn ghost sm" @onclick="() => OpenAreaSheet(area)"><Ico Name="plus" Size="14" /> Ajouter une zone</button><button type="button" class="btn ghost sm" @onclick="() => OpenAreaSheet(area)">Modifier l'aire</button></div>
+                </div>
             }
-            </tbody>
-        </table>
-    </div>
+        </div>
+    }
     <p class="hint">Les aires et les zones rangent les écrans. Elles ne donnent aucun droit : on attribue des zones ou des écrans à une personne depuis sa fiche membre.</p>
 }
 
@@ -237,7 +242,14 @@ else
 
     // ---------- Aires ----------
 
-    private void ToggleOpen(Guid id) { if (!openAreas.Remove(id)) openAreas.Add(id); }
+    private bool areasTouched;
+    private bool IsOpen(Guid id) => areasTouched ? openAreas.Contains(id) : areas.Count > 0 && areas[0].Id == id;
+    private void ToggleOpen(Guid id)
+    {
+        if (!areasTouched) { areasTouched = true; if (areas.Count > 0) openAreas.Add(areas[0].Id); }
+        if (!openAreas.Remove(id)) openAreas.Add(id);
+    }
+    private void SetAllOpen(bool on) { areasTouched = true; openAreas.Clear(); if (on) foreach (var x in areas) openAreas.Add(x.Id); }
     private void OpenAreaSheet(Area a) { formError = null; renameText = a.Name; areaSheet = a.Id; }
     private void CloseArea() { areaSheet = null; formError = null; }
     private void OpenNewArea() { formError = null; newName = ""; newArea = true; }
