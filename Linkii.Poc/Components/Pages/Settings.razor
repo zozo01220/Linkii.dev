@@ -36,7 +36,7 @@
 
     <div class="rg-main">
         <button type="button" class="rg-back" @onclick="() => sub = false"><Ico Name="chevron-right" Size="16" /> Réglages</button>
-        <div @oninput="Touch" @onchange="Touch">
+        <div @oninput="Touch" @onchange="Changed" @onclick="Clicked">
         @switch (Tab)
         {
             case "utilisation":
@@ -97,6 +97,10 @@
                 </div>
                 break;
 
+            case "abonnement":
+                <SubscriptionPanel />
+                break;
+
             case "diffusion":
                 <div class="rg-ph"><h2>Contenus et écrans</h2><p>Valeurs par défaut pour les contenus, les players et les nouveaux écrans.</p></div>
                 <div class="rg-card">
@@ -140,7 +144,7 @@
                 </div>
                 <div class="rg-card">
                     <header><h3>Nouveaux écrans</h3><small>Préréglage à la création, modifiable écran par écran.</small></header>
-                    <div class="rg-body"><ScreenFormat Spec="spec" /></div>
+                    <div class="rg-body"><ScreenFormat Spec="spec" OnChange="Changed" /></div>
                     <div class="sv-row">
                         <div class="t"><b>Démarrage automatique</b><small>Valeur des nouveaux écrans ; chaque écran peut la changer.</small></div>
                         <div class="ctl"><button type="button" class="switch @(autoStart ? "on" : "")" role="switch" aria-checked="@(autoStart ? "true" : "false")" aria-label="Démarrage automatique des nouveaux écrans" @onclick="() => { autoStart = !autoStart; dirty = true; }"><span></span></button></div>
@@ -168,7 +172,7 @@
                         <div class="rg-body">
                             @if (areaCount == 1 && soleAreaId != Guid.Empty)
                             {
-                                <AreaSleep @ref="sleepRef" AreaId="soleAreaId" Embedded="true" OnEdited="Touch" />
+                                <AreaSleep @ref="sleepRef" AreaId="soleAreaId" Embedded="true" OnEdited="Changed" />
                             }
                             else
                             {
@@ -188,7 +192,7 @@
                         <div class="rg-body">
                             @if (areaCount == 1 && soleAreaId != Guid.Empty)
                             {
-                                <AreaDim @ref="dimRef" AreaId="soleAreaId" Embedded="true" OnEdited="Touch" />
+                                <AreaDim @ref="dimRef" AreaId="soleAreaId" Embedded="true" OnEdited="Changed" />
                             }
                             else
                             {
@@ -272,7 +276,7 @@
                     </div>
                     <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
                         <div class="t"><b>Visuel affiché pendant la pause</b><small>Une image de votre médiathèque, sinon le visuel Linkii par défaut.</small></div>
-                        <div class="ctl" style="flex:1;min-width:0">@if (growth) { <MediaField Field="pauseField" Values="pauseValues" /> } else { <span class="muted">Visuel Linkii par défaut</span> }</div>
+                        <div class="ctl" style="flex:1;min-width:0">@if (growth) { <MediaField Field="pauseField" Values="pauseValues" OnChange="Changed" /> } else { <span class="muted">Visuel Linkii par défaut</span> }</div>
                     </div>
                 </div>
                 break;
@@ -296,9 +300,8 @@
                     }
                     else
                     {
-                        <div class="sv-row"><div class="t"><b>Mot de passe actuel</b></div><div class="ctl"><input class="rg-in" type="password" @bind="oldPwd" autocomplete="current-password" aria-label="Mot de passe actuel" /></div></div>
-                        <div class="sv-row"><div class="t"><b>Nouveau mot de passe</b><small>8 caractères minimum.</small></div><div class="ctl"><input class="rg-in" type="password" @bind="newPwd" autocomplete="new-password" aria-label="Nouveau mot de passe" /></div></div>
-                        <div class="sv-row"><div class="t"></div><div class="ctl"><button class="btn ghost" @onclick="ChangePassword">Changer le mot de passe</button></div></div>
+                        <div class="sv-row"><div class="t"><b>Mot de passe actuel</b></div><div class="ctl"><input class="rg-in" type="password" @bind="oldPwd" @bind:after="ChangePassword" autocomplete="current-password" aria-label="Mot de passe actuel" /></div></div>
+                        <div class="sv-row"><div class="t"><b>Nouveau mot de passe</b><small>8 caractères minimum. Enregistré dès que les deux champs sont remplis.</small></div><div class="ctl"><input class="rg-in" type="password" @bind="newPwd" @bind:after="ChangePassword" autocomplete="new-password" aria-label="Nouveau mot de passe" /></div></div>
                     }
                 </div>
                 <div class="rg-card rg-mode">
@@ -321,14 +324,6 @@
             </div>
         }
 
-        @if (dirty && Tab is not ("utilisation" or "compte"))
-        {
-            <div class="rg-savebar" role="region" aria-label="Enregistrement">
-                <span>Modifications non enregistrées</span>
-                <button type="button" class="btn ghost" @onclick="Cancel">Annuler</button>
-                <button type="button" class="btn" @onclick="Save">Enregistrer</button>
-            </div>
-        }
     </div>
 </div>
 
@@ -343,6 +338,7 @@
         ("Organisation", new[] { new NavItem("organisation", "Identité et équipe", "building") }),
         ("Diffusion", new[] { new NavItem("diffusion", "Contenus et écrans", "monitor"), new NavItem("veille", "Veille et luminosité", "moon") }),
         ("Suivi", new[] { new NavItem("supervision", "Alertes et pause", "bell", Growth: true) }),
+        ("Abonnement", new[] { new NavItem("abonnement", "Plan et paiement", "file") }),
         ("Mon compte", new[] { new NavItem("compte", "Compte et confidentialité", "user") }),
     };
 
@@ -365,7 +361,7 @@
     };
 
     // Mode simple : Utilisation, Veille et luminosité, Compte et confidentialité seulement (le reste est en mode expert).
-    private static readonly string[] SimpleTabs = { "utilisation", "veille", "compte" };
+    private static readonly string[] SimpleTabs = { "utilisation", "veille", "abonnement", "compte" };
     private IEnumerable<(string Group, NavItem[] Items)> VisibleGroups => Modes.Expert ? Groups
         : Groups.Select(g => (g.Group, Items: g.Items.Where(i => SimpleTabs.Contains(i.Id)).ToArray())).Where(g => g.Items.Length > 0);
     private string Shown(string id) => Modes.Expert || SimpleTabs.Contains(id) ? id : "utilisation";
@@ -467,7 +463,29 @@
         pinWaiting = waiting.Count <= 3 ? string.Join(", ", waiting) : string.Join(", ", waiting.Take(3)) + "…";
     }
 
-    private void Cancel() => Nav.NavigateTo($"/settings?tab={Tab}", forceLoad: true);
+    // Enregistrement automatique : à chaque réglage modifié (changement de champ, bascule, clic), sans bouton.
+    // Différé de quelques instants : la valeur liée au champ (@bind) et les clics enfants sont déjà appliqués au moment d'enregistrer.
+    private bool saving;
+    private CancellationTokenSource? saveCts;
+    private void Changed() { dirty = true; ScheduleSave(); }
+    private void Clicked() { if (dirty) ScheduleSave(); }
+    private void ScheduleSave()
+    {
+        saveCts?.Cancel();
+        var cts = saveCts = new CancellationTokenSource();
+        _ = SaveLater(cts.Token);
+    }
+    private async Task SaveLater(CancellationToken ct)
+    {
+        try { await Task.Delay(300, ct); } catch (TaskCanceledException) { return; }
+        await InvokeAsync(async () =>
+        {
+            if (!dirty || saving || Tab is "utilisation" or "compte" or "abonnement") return;
+            saving = true;
+            try { await Save(); } finally { saving = false; }
+            StateHasChanged();
+        });
+    }
 
     private async Task Save()
     {
@@ -509,12 +527,15 @@
         });
         if (mergeNow) Merge.Run(Store.ClientId);   // réglage activé à l'instant : les doublons sont fusionnés tout de suite
         await Notifier.NotifyClient(Store.ClientId);   // fuseau / redémarrage : les écrans rechargent leur configuration
-        Nav.NavigateTo($"/settings?tab={Tab}&saved=1", forceLoad: true);
+        dirty = false;
+        LoadPinState(Store.Read(d => d.Tenant));
+        Toast.Ok("Réglages enregistrés.");
     }
 
     private void ChangePassword()
     {
         var uid = Ctx.UserId;
+        if (oldPwd.Length == 0 || newPwd.Length == 0) return;   // enregistré dès que les deux champs sont remplis
         var hash = Root.Read(d => d.Users.FirstOrDefault(u => u.Id == uid)?.PasswordHash ?? "");
         if (Ctx.IsImpersonating || !Passwords.Verify(hash, oldPwd)) { Toast.Error("Mot de passe actuel incorrect."); return; }
         if (newPwd.Length < 8) { Toast.Error("Le nouveau mot de passe est trop court (8 caractères minimum)."); return; }

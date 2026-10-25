@@ -141,7 +141,7 @@ public class Mailer(IConfiguration config, JsonStore store, SecretBox box, ILogg
 
     /// <summary>Bienvenue à l'administrateur, une fois son compte entièrement validé. trialEnd : fin de l'essai gratuit (date affichable), ou null.
     /// signIn : comment se connecter (« votre e-mail et votre mot de passe », « le bouton Continuer avec Microsoft »).</summary>
-    public Task<string?> SendSignupWelcome(Reseller r, string appUrl, string name, string email, string org, int trialDays, string? trialEnd, string signIn, bool pending = false)
+    public Task<string?> SendSignupWelcome(Reseller r, string appUrl, string name, string email, string org, int trialDays, string? trialEnd, string signIn, bool pending = false, string? deleteNote = null)
     {
         var brand = BrandOf(r);
         var who = string.IsNullOrWhiteSpace(name) ? "" : " " + name.Trim().Split(' ')[0];
@@ -152,6 +152,7 @@ public class Mailer(IConfiguration config, JsonStore store, SecretBox box, ILogg
                 ? $"Votre espace « {org} » est créé et vous en êtes l'administrateur. Il vous reste à confirmer votre adresse e-mail avec le lien que vous venez de recevoir : l'essai gratuit ({trialDays} jours) démarre à la confirmation.\n\n"
                 : $"Votre adresse est confirmée et votre espace « {org} » est prêt. Vous en êtes l'administrateur.\n\n") +
             (trial == null ? "" : trial + "\n") +
+            (deleteNote == null ? "" : deleteNote + "\n") +
             $"Adresse de votre espace : {appUrl}\n" +
             $"Connexion : {signIn}\n\n" +
             "Pour bien démarrer :\n1. Ajoutez un écran avec son code d'appairage.\n2. Importez vos images et vidéos dans la médiathèque.\n3. Composez une liste de lecture et publiez-la.\n\n" +
@@ -161,6 +162,7 @@ public class Mailer(IConfiguration config, JsonStore store, SecretBox box, ILogg
             <p style="margin:0 0 16px">{(pending ? $"Votre espace <b>{E(org)}</b> est créé et vous en êtes l'administrateur. Il vous reste à <b>confirmer votre adresse e-mail</b> avec le lien que vous venez de recevoir : l'essai gratuit ({trialDays} jours) démarre à la confirmation." : $"Votre adresse est confirmée et votre espace <b>{E(org)}</b> est prêt. Vous en êtes l'administrateur.")}</p>
             <table role="presentation" style="width:100%;background:#F4F6F8;border-radius:4px;font-size:14px;margin:0 0 18px">
               {(trial == null ? "" : $"""<tr><td style="padding:10px 14px 0">Essai gratuit : <b>{trialDays} jours</b>, jusqu'au <b>{E(trialEnd!)}</b></td></tr>""")}
+              {(deleteNote == null ? "" : $"""<tr><td style="padding:10px 14px 0;color:#5A6B80;font-size:13px">{E(deleteNote)}</td></tr>""")}
               <tr><td style="padding:10px 14px 0">Adresse de votre espace : <a href="{E(appUrl)}" style="color:#3B82C4">{E(appUrl.Replace("https://", "").Replace("http://", ""))}</a></td></tr>
               <tr><td style="padding:10px 14px 10px">Connexion : {E(signIn)}</td></tr>
             </table>
@@ -238,6 +240,26 @@ public class Mailer(IConfiguration config, JsonStore store, SecretBox box, ILogg
             <p style="margin:0;color:#5A6B80;font-size:12px">{SettingsHint}</p>
             """;
         return Send(email, $"{brand} · {title}", Frame(r, html), text, brand, r.SenderEmail);
+    }
+
+    /// <summary>E-mail du parcours d'abonnement (voir <see cref="Lifecycle"/>) : titre, paragraphes, tableau de valeurs facultatif, un bouton.</summary>
+    public Task<string?> SendNotice(Reseller r, string email, string name, Notice n, string? buttonUrl)
+    {
+        var brand = BrandOf(r);
+        var hello = Hello(name);
+        var text = $"{hello}\n\n{n.Title}\n\n" + string.Concat(n.Paras.Select(p => p + "\n\n"))
+            + string.Concat(n.Rows.Select(x => $"{x.Label} : {x.Value}\n")) + (n.Rows.Count > 0 ? "\n" : "")
+            + (buttonUrl != null && n.Button != null ? $"{n.Button} : {buttonUrl}\n\n" : "") + $"— L'équipe {brand}";
+        var rows = n.Rows.Count == 0 ? "" : $"""<table role="presentation" style="width:100%;background:#F4F6F8;border-radius:4px;font-size:14px;margin:0 0 18px">{string.Concat(n.Rows.Select(x => $"""<tr><td style="padding:8px 14px;color:#5A6B80">{E(x.Label)}</td><td style="padding:8px 14px;text-align:right"><b>{E(x.Value)}</b></td></tr>"""))}</table>""";
+        var html = $"""
+            <p style="margin:0 0 14px">{E(hello)}</p>
+            <p style="margin:0 0 14px;font-size:18px;font-weight:600">{E(n.Title)}</p>
+            {string.Concat(n.Paras.Select(p => $"""<p style="margin:0 0 14px">{E(p)}</p>"""))}
+            {rows}
+            {(buttonUrl != null && n.Button != null ? Button(r, buttonUrl, n.Button) : "")}
+            {(n.Footnote != null ? $"""<p style="margin:0;color:#5A6B80;font-size:12px">{E(n.Footnote)}</p>""" : "")}
+            """;
+        return Send(email, n.Subject, Frame(r, html), text, brand, r.SenderEmail);
     }
 
     private const string SettingsHint = "Alertes réglables dans Réglages › Alertes et pause.";

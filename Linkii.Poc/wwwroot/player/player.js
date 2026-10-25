@@ -79,11 +79,12 @@
         throw new Error(String(r.status));
       }
       if (r.status === 401 && !PREVIEW) { unpair(); throw new Error('401'); }
-      if (r.status === 403) {   // client ou revendeur suspendu, ou essai gratuit terminé
+      if (r.status === 403) {   // client ou revendeur suspendu, essai gratuit terminé, ou abonnement résilié
         return r.json().catch(function () { return {}; }).then(function (d) {
-          var trial = d && d.reason === 'trial';
-          $('suspended-title').textContent = trial ? 'Essai terminé' : 'Service suspendu';
-          $('suspended-text').textContent = trial ? "L'essai gratuit de cet espace est terminé. Contactez votre administrateur." : 'Contactez votre administrateur.';
+          var trial = d && d.reason === 'trial', ended = d && d.reason === 'ended';
+          $('suspended-title').textContent = trial ? 'Essai terminé' : ended ? 'Abonnement terminé' : 'Service suspendu';
+          $('suspended-text').textContent = trial ? "L'essai gratuit de cet espace est terminé. Contactez votre administrateur."
+            : ended ? "L'abonnement de cet espace est arrivé à son terme. Contactez votre administrateur." : 'Contactez votre administrateur.';
           $('suspended').style.display = 'flex';
           throw new Error('403');
         });

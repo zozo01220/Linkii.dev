@@ -196,13 +196,202 @@ public static class CompositionRights
 {
     public static bool Is(MediaItem m) => m.AppId == Compositions.AppId;
 
+    /// <summary>Dossiers qui contiennent une composition (du plus proche au plus haut) : vide si elle est à la racine.</summary>
+    private static List<CompositionFolder> Parents(ClientDb d, Guid? folderId) =>
+        folderId == null ? new() : Ownership.Parents(folderId, CompositionFolderOps.All(d).ToDictionary(f => f.Id));
+
     public static FolderRight RightOf(ClientDb d, MediaItem m) =>
-        Is(m) ? Ownership.Right(d.Access, ShareKind.Composition, m.Id, m.OwnerId, Array.Empty<IFolderNode>()) : FolderRight.Owner;
+        Is(m) ? Ownership.Right(d.Access, ShareKind.Composition, m.Id, m.OwnerId, Parents(d, m.FolderId)) : FolderRight.Owner;
 
     public static FolderRight RightOf(ClientDb d, CompositionTemplate t) =>
         Ownership.Right(d.Access, ShareKind.Template, t.Id, t.OwnerId, Array.Empty<IFolderNode>());
 
-    public static LibraryTab.Info TabOf(ClientDb d, string kind, Guid id, Guid? ownerId) => Ownership.TabInfo(d.Access, kind, id, ownerId, Array.Empty<IFolderNode>());
+    public static LibraryTab.Info TabOf(ClientDb d, string kind, Guid id, Guid? ownerId, Guid? folderId = null) =>
+        Ownership.TabInfo(d.Access, kind, id, ownerId, Parents(d, folderId));
+}
+
+/// <summary>
+/// Dossier des compositions (25 octobre 2026), comme ceux de la médiathèque et des listes de lecture : à son créateur, privé tant qu'il n'est pas partagé,
+/// partage « Peut utiliser » / « Peut modifier » qui descend dans les sous-dossiers. Une composition y est rangée par son <see cref="MediaItem.FolderId"/>.
+/// Les modèles ne sont pas rangés dans des dossiers.
+/// </summary>
+public class CompositionFolder : IClientOwned, IFolderNode, IOwned
+{
+    public Guid ClientId { get; set; }
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid AreaId { get; set; }
+    public Guid? ParentId { get; set; }
+    public string Name { get; set; } = "";
+    public Guid? OwnerId { get; set; }
+    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+    public List<FolderShare> Shares { get; set; } = new();
+}
+
+/// <summary>Un dossier de compositions vu par la personne, avec son droit, le nom de son propriétaire et s'il est partagé.</summary>
+public record CompositionFolderRow(CompositionFolder Folder, FolderRight Right, string OwnerName, bool Shared, LibraryTab.Info Tab);
+
+/// <summary>Création, renommage, suppression, partage et rangement des compositions dans les dossiers. Chaque méthode rend un message d'erreur, ou null si c'est fait.</summary>
+public static class CompositionFolderOps
+{
+    public static List<CompositionFolder> All(ClientDb d) => d.Root.CompositionFolders.Where(f => f.ClientId == d.ClientId).ToList();
+
+    public static CompositionFolder? Find(ClientDb d, Guid id) => d.CompositionFolders.FirstOrDefault(f => f.Id == id);
+
+    public static FolderRight RightOf(ClientDb d, CompositionFolder f) => FolderAccess.For(d.Access, f, All(d));
+
+    /// <summary>Les compositions suivent la médiathèque : créer à la racine demande d'y écrire.</summary>
+    public static bool CanCreateAtRoot(ClientDb d) => FolderAccess.CanCreateAtRoot(d.Access, LevelPages.Media);
+
+    /// <summary>Dossiers que la personne voit, avec son droit sur chacun et leur place dans les onglets.</summary>
+    public static List<CompositionFolderRow> Rows(ClientDb d)
+    {
+        var all = All(d);
+        var shared = ItemShareOps.Counts(d, ShareKind.CompositionFolder);
+        var rows = new List<CompositionFolderRow>();
+        foreach (var f in d.CompositionFolders)
+        {
+            var right = FolderAccess.For(d.Access, f, all);
+            if (right == FolderRight.None) continue;
+            var owner = d.Users.FirstOrDefault(u => u.Id == f.OwnerId)?.Label ?? "—";
+            rows.Add(new CompositionFolderRow(f, right, owner, shared.ContainsKey(f.Id), FolderAccess.TabInfo(d.Access, f, all)));
+        }
+        return rows.OrderBy(r => r.Folder.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+    }
+
+    public static (string? Error, CompositionFolder? Folder) Create(ClientDb d, string name, Guid? parentId)
+    {
+        name = name.Trim();
+        if (FolderOps.CheckName(name) is { } e) return (e, null);
+        var all = All(d);
+        CompositionFolder? parent = null;
+        var depth = 1;
+        if (parentId is { } pid)
+        {
+            parent = Find(d, pid);
+            if (parent == null) return ("Dossier introuvable.", null);
+            if (RightOf(d, parent) < FolderRight.Write) return ("Vous ne pouvez pas créer de dossier dans celui-ci.", null);
+            depth = FolderAccess.Chain(parent, all).Count() + 1;
+        }
+        else if (!CanCreateAtRoot(d)) return ("Vous ne pouvez pas créer de dossier ici (lecture seule).", null);
+        if (depth > FolderAccess.MaxDepth) return ($"Les dossiers ne s'imbriquent pas au-delà de {FolderAccess.MaxDepth} niveaux.", null);
+
+        if (all.Any(f => f.ParentId == parentId && (parentId != null || f.OwnerId == d.Me) && f.Name.Equals(name, StringComparison.CurrentCultureIgnoreCase)))
+            return ("Un dossier porte déjà ce nom ici.", null);
+        var folder = new CompositionFolder { Name = name, ParentId = parentId, AreaId = parent?.AreaId ?? d.Area?.Id ?? Guid.Empty };
+        d.CompositionFolders.Add(folder);
+        return (null, folder);
+    }
+
+    public static string? Rename(ClientDb d, Guid id, string name)
+    {
+        if (Find(d, id) is not { } f) return "Dossier introuvable.";
+        if (RightOf(d, f) != FolderRight.Owner) return "Seul le propriétaire du dossier peut le renommer.";
+        name = name.Trim();
+        if (FolderOps.CheckName(name) is { } e) return e;
+        if (All(d).Any(x => x.Id != id && x.ParentId == f.ParentId && (f.ParentId != null || x.OwnerId == f.OwnerId) && x.Name.Equals(name, StringComparison.CurrentCultureIgnoreCase)))
+            return "Un dossier porte déjà ce nom ici.";
+        f.Name = name;
+        return null;
+    }
+
+    /// <summary>Dossier et sous-dossiers à supprimer, avec les compositions qu'ils contiennent. Refusé si un sous-dossier appartient à quelqu'un d'autre.</summary>
+    public static string? PlanDelete(ClientDb d, Guid id, out HashSet<Guid> folderIds, out List<Guid> compositionIds)
+    {
+        folderIds = new(); compositionIds = new();
+        if (Find(d, id) is not { } f) return "Dossier introuvable.";
+        if (RightOf(d, f) != FolderRight.Owner) return "Seul le propriétaire du dossier peut le supprimer.";
+        var all = All(d);
+        var tree = new HashSet<Guid>();
+        var queue = new Queue<Guid>(new[] { id });
+        while (queue.Count > 0)
+        {
+            var cur = queue.Dequeue();
+            if (!tree.Add(cur)) continue;
+            foreach (var child in all.Where(x => x.ParentId == cur)) queue.Enqueue(child.Id);
+        }
+        foreach (var sub in all.Where(x => tree.Contains(x.Id)))
+            if (FolderAccess.For(d.Access, sub, all) != FolderRight.Owner) return $"Le sous-dossier « {sub.Name} » appartient à un autre membre : retirez-le d'abord.";
+        folderIds = tree;
+        compositionIds = d.Root.Media.Where(m => m.ClientId == d.ClientId && CompositionRights.Is(m) && m.FolderId is { } fid && tree.Contains(fid)).Select(m => m.Id).ToList();
+        return null;
+    }
+
+    /// <summary>Retire les dossiers planifiés par <see cref="PlanDelete"/> (après leurs compositions).</summary>
+    public static void Forget(ClientDb d, IEnumerable<Guid> folderIds)
+    {
+        var set = folderIds.ToHashSet();
+        d.Root.CompositionFolders.RemoveAll(f => f.ClientId == d.ClientId && set.Contains(f.Id));
+        ItemShareOps.Forget(d, ShareKind.CompositionFolder, set);
+    }
+
+    // ---------- Déplacer un dossier dans un autre (voir FolderMove) ----------
+
+    public static FolderContents ContentsOf(ClientDb d, Guid id) =>
+        new(d.Root.Media.Count(m => m.ClientId == d.ClientId && CompositionRights.Is(m) && m.FolderId == id), All(d).Count(f => f.ParentId == id));
+
+    public static List<FolderTarget> MoveTargets(ClientDb d, Guid id)
+    {
+        var all = All(d);
+        if (Find(d, id) is not { } f) return new();
+        var list = new List<FolderTarget> { new(null, "Racine des compositions", 0, f.ParentId == null ? "déjà à la racine" : null) };
+        foreach (var g in d.CompositionFolders.Select(x => (Folder: x, Path: string.Join(" › ", FolderAccess.Chain(x, all).Reverse().Select(c => c.Name)))).OrderBy(x => x.Path, StringComparer.CurrentCultureIgnoreCase))
+        {
+            if (RightOf(d, g.Folder) == FolderRight.None) continue;
+            var reason = g.Folder.Id == f.ParentId ? "déjà ici" : FolderMove.CheckTarget(all, f, g.Folder, RightOf(d, g.Folder)) is { } r ? FolderMove.Explain(r) : null;
+            list.Add(new(g.Folder.Id, g.Path, g.Path.Count(c => c == '›'), reason));
+        }
+        return list;
+    }
+
+    /// <summary>Range un dossier dans un autre, ou le dissout (destination : la racine) : ses compositions et ses sous-dossiers vont à la racine.</summary>
+    public static string? MoveFolder(ClientDb d, Guid id, Guid? newParent)
+    {
+        if (Find(d, id) is not { } f) return "Dossier introuvable.";
+        if (RightOf(d, f) != FolderRight.Owner) return "Seul le propriétaire du dossier peut le déplacer.";
+        var all = All(d);
+        if (newParent == null)
+        {
+            if (f.ParentId == null) return null;
+            if (FolderMove.RootNameClash(all, f) is { } clash) return $"Un dossier « {clash} » existe déjà à la racine : renommez-le d'abord.";
+            foreach (var m in d.Root.Media.Where(m => m.ClientId == d.ClientId && CompositionRights.Is(m) && m.FolderId == id)) { m.FolderId = null; m.OwnerId ??= f.OwnerId; }
+            foreach (var c in all.Where(x => x.ParentId == id)) c.ParentId = null;
+            Forget(d, new[] { id });
+            return null;
+        }
+        if (Find(d, newParent.Value) is not { } target) return "Dossier introuvable.";
+        if (f.ParentId == target.Id) return null;
+        if (FolderMove.CheckTarget(all, f, target, RightOf(d, target)) is { } reason) return FolderMove.Explain(reason);
+        f.ParentId = target.Id;
+        return null;
+    }
+
+    /// <summary>Range des compositions dans un dossier, ou à la racine (null). Il faut pouvoir écrire dans le dossier d'arrivée et modifier chaque composition.</summary>
+    public static (int Moved, List<string> Refused) Move(ClientDb d, IEnumerable<Guid> compositionIds, Guid? folderId)
+    {
+        var moved = 0; var refused = new List<string>();
+        var wanted = compositionIds.ToHashSet();
+        if (folderId is { } tid)
+        {
+            if (Find(d, tid) is not { } target || RightOf(d, target) < FolderRight.Write) return (0, new() { "Vous ne pouvez pas ranger de composition dans ce dossier." });
+        }
+        else if (!CanCreateAtRoot(d)) return (0, new() { "Vous ne pouvez pas ranger de composition à la racine (lecture seule)." });
+
+        foreach (var m in d.Root.Media.Where(x => x.ClientId == d.ClientId && wanted.Contains(x.Id) && CompositionRights.Is(x)).ToList())
+        {
+            if (m.FolderId == folderId) continue;
+            if (CompositionRights.RightOf(d, m) < FolderRight.Write) { refused.Add($"« {m.Name} » : vous ne pouvez pas la ranger (lecture seule)."); continue; }
+            m.FolderId = folderId;   // ranger ne change pas le contenu : rien à republier
+            moved++;
+        }
+        return (moved, refused);
+    }
+
+    /// <summary>Range une composition qui vient d'être créée dans le dossier ouvert (si on peut y écrire) ; sans effet sinon, elle reste à la racine.</summary>
+    public static void PlaceNew(ClientDb d, Guid compositionId, Guid? folderId)
+    {
+        if (folderId is not { } fid || Find(d, fid) is not { } f || RightOf(d, f) < FolderRight.Write) return;
+        if (d.Root.Media.FirstOrDefault(m => m.Id == compositionId && m.ClientId == d.ClientId && CompositionRights.Is(m)) is { } m) m.FolderId = fid;
+    }
 }
 
 /// <summary>Opérations sur « Mes modèles » : enregistrer, renommer, supprimer (ceux de la personne, ou partagés « Peut modifier »).</summary>

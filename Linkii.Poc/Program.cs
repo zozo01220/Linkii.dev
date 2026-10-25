@@ -18,6 +18,7 @@ builder.Services.AddSingleton<JsonStore>();
 builder.Services.AddSingleton<ResellerResolver>();
 builder.Services.AddSingleton<NpmProxy>();
 builder.Services.AddSingleton<Mailer>();
+builder.Services.AddSingleton<LifecycleMail>();   // e-mails du parcours d'abonnement (voir Lifecycle)
 builder.Services.AddScoped<Toaster>();
 builder.Services.AddSingleton<PlayLog>();
 builder.Services.AddSingleton<CanvaService>();
@@ -81,6 +82,8 @@ builder.Services.AddSingleton<ScanLog>();   // scans des QR codes de comptage (G
 builder.Services.AddScoped<AppService>();
 builder.Services.AddScoped<MediaLibrary>();
 builder.Services.AddScoped<PlaylistLibrary>();
+builder.Services.AddScoped<CompositionLibrary>();
+builder.Services.AddScoped<ScreenFolderLibrary>();
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(o =>
@@ -436,7 +439,8 @@ app.MapGet("/login/verify/confirm", async (HttpContext ctx, string? t, JsonStore
     if (reseller != null && user!.WelcomeSentUtc == null)
     {
         var err = await mail.SendSignupWelcome(reseller, $"{ctx.Request.Scheme}://{ctx.Request.Host}/", user!.Name, user.Email, client!.Name,
-            store.Read(db => db.Platform.TrialDays), client.TrialEndsUtc is { } end ? Signup.Day(client, end) : null, Signup.SignInHint(user));
+            store.Read(db => Signup.TrialDaysOf(db, client)), client.TrialEndsUtc is { } end ? Signup.Day(client, end) : null, Signup.SignInHint(user),
+            deleteNote: store.Read(db => Lifecycle.WelcomeDeleteNote(db, client)));
         if (err != null) log.LogWarning("E-mail de bienvenue non envoyé à {Email} : {Error}", user.Email, err);
         else store.Write(db => { if (db.Users.FirstOrDefault(u => u.Id == user.Id) is { } u) u.WelcomeSentUtc = DateTime.UtcNow; });
     }
@@ -864,6 +868,14 @@ app.MapPost("/api/push/unregister", (HttpContext ctx, PushRegisterDto body, Json
     return Results.NoContent();
 }).RequireAuthorization().DisableAntiforgery();
 
+// Licence d'une installation sur site : le serveur du client vérifie sa clé chaque jour (voir Enterprise). Réponse : valide, échéance, tolérance.
+app.MapPost("/api/license/check", (HttpContext ctx, LicenseCheckDto body, JsonStore store) =>
+{
+    var from = ctx.Connection.RemoteIpAddress?.ToString() ?? "";
+    var r = store.Write(db => Enterprise.Verify(db, body.Key, from, DateTime.UtcNow));
+    return Results.Json(new { valid = r.Valid, reason = r.Reason, expires = r.Expires, screens = r.Screens, modules = r.Modules, graceDays = r.GraceDays });
+}).DisableAntiforgery();
+
 app.MapHub<ScreenHub>("/hubs/screen");
 
 // ---------- Back-office Blazor ----------
@@ -881,3 +893,4 @@ record CommandAckDto(Guid Id, string? Status, string? Detail);
 
 public partial class Program;
 record PushRegisterDto(string? Token, string? Name);
+record LicenseCheckDto(string? Key);

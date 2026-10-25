@@ -43,9 +43,49 @@
             <div class="val"><input type="number" min="1" max="365" class="mono" style="width:90px" aria-label="Délai de suppression en jours" @bind="purgeDays" /><span class="muted">jours après l'inscription</span></div>
         </div>
         <div class="adm-row">
-            <div>Rappel avant la fin de l'essai<small>Un e-mail part 2 jours avant la fin. À la fin, les écrans affichent « Essai terminé » ; le back-office reste accessible.</small></div>
-            <div class="val"><span class="adm-st ok">Toujours actif</span></div>
+            <div>Licence pendant l'essai<small>Growth d'office : le client essaie tout et choisit sa licence au moment de payer.</small></div>
+            <div class="val"><div class="adm-seg"><button type="button" class="@(trialPlan == Plans.Base ? "on" : "")" @onclick="() => trialPlan = Plans.Base">Base</button><button type="button" class="@(trialPlan == Plans.Growth ? "on" : "")" @onclick="() => trialPlan = Plans.Growth">Growth</button></div></div>
         </div>
+        <div class="adm-row">
+            <div>Conservation après l'essai<small>Sans plan choisi à la fin de l'essai (ou d'un abonnement résilié), les écrans s'arrêtent, les contenus sont conservés ce nombre de jours puis supprimés définitivement. Annoncé dès l'inscription ; avertissements à 15, 7 et 1 jour. Seulement pour les espaces créés en libre-service.</small></div>
+            <div class="val"><input type="number" min="7" max="365" class="mono" style="width:90px" aria-label="Conservation en jours" @bind="retentionDays" /><span class="muted">jours</span></div>
+        </div>
+        <div class="adm-row">
+            <div>Rappel avant la fin de l'essai<small>À la fin, les écrans affichent « Essai terminé » ; le back-office reste ouvert pour choisir un plan.</small></div>
+            <div class="val"><input type="number" min="1" max="14" class="mono" style="width:90px" aria-label="Rappel en jours" @bind="reminderDays" /><span class="muted">jours avant</span></div>
+        </div>
+        <div class="adm-row" style="display:block">
+            <div>Codes d'essai<small>Un lien d'inscription <span class="mono">/login?signup=1&amp;code=SALON30</span> donne la durée du code au lieu de la durée par défaut (salon, partenaire, démonstration).</small></div>
+            <table class="adm-tbl" style="margin:10px 0 6px">
+                <thead><tr><th>Code</th><th>Durée</th><th>Inscriptions</th><th>Actif</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var tc in codes)
+                    {
+                        var t = tc;
+                        <tr><td class="mono"><b>@t.Code</b></td><td><input type="number" min="1" max="365" class="mono" style="width:70px" @bind="t.Days" aria-label="Durée du code" /> j</td><td>@t.Uses</td>
+                            <td><button type="button" class="switch @(t.Active ? "on" : "")" role="switch" aria-checked="@(t.Active ? "true" : "false")" aria-label="Code actif" @onclick="() => t.Active = !t.Active"><span></span></button></td>
+                            <td><button type="button" class="btn ghost sm" @onclick="() => codes.Remove(t)">Retirer</button></td></tr>
+                    }
+                    <tr><td><input class="mono" style="width:140px" placeholder="NOUVEAU-CODE" @bind="newCode" aria-label="Nouveau code" /></td><td><input type="number" min="1" max="365" class="mono" style="width:70px" @bind="newCodeDays" aria-label="Durée du nouveau code" /> j</td><td></td><td></td>
+                        <td><button type="button" class="btn ghost sm" @onclick="AddCode">Ajouter</button></td></tr>
+                </tbody>
+            </table>
+        </div>
+    }
+    else if (section == "journey")
+    {
+        <div style="padding:16px 0 4px" class="muted">E-mails envoyés à l'organisation, de l'inscription à la fin (plan acheté ou suppression). Les e-mails déclenchés par une action partent tout de suite ; les autres partent à 9 h, heure de l'organisation. Les obligatoires ne se coupent pas.</div>
+        @foreach (var (label, when, kind, on) in Journey)
+        {
+            <div class="adm-row">
+                <div>@label<small>@when</small></div>
+                <div class="val">
+                    @if (on == "first") { <button type="button" class="switch @(mailFirst ? "on" : "")" role="switch" aria-checked="@(mailFirst ? "true" : "false")" aria-label="@label" @onclick="() => mailFirst = !mailFirst"><span></span></button> }
+                    else if (on == "tips") { <button type="button" class="switch @(mailTips ? "on" : "")" role="switch" aria-checked="@(mailTips ? "true" : "false")" aria-label="@label" @onclick="() => mailTips = !mailTips"><span></span></button> }
+                    else { <span class="adm-st @(kind == "Obligatoire" ? "ok" : "mute")">@kind</span> }
+                </div>
+            </div>
+        }
     }
     else if (section == "access")
     {
@@ -89,8 +129,16 @@
             <div class="val"><span class="adm-st ok">Automatique</span></div>
         </div>
         <div class="adm-row">
-            <div>Paiement en ligne<small>Stripe n'est pas encore branché : en attendant, le bouton « Paiement reçu » de la page Facturation enregistre le renouvellement à la main.</small></div>
-            <div class="val"><span class="adm-st mute">À venir</span></div>
+            <div>Paiement en ligne<small>Simulation : partout où Stripe interviendrait (choix du plan, écran ajouté, passage à Growth, carte), une fenêtre propose « paiement réussi » ou « refusé » ; les échéances sont payées d'office, sauf refus demandé dans la fiche du client (Facturation). Les paiements simulés comptent comme les vrais et sont marqués « simulé ». Stripe : à brancher (clé secrète à saisir).</small></div>
+            <div class="val"><div class="adm-seg"><button type="button" class="@(paymentMode == PaymentModes.Simulation ? "on" : "")" @onclick="() => paymentMode = PaymentModes.Simulation">Simulation</button><button type="button" class="@(paymentMode == PaymentModes.Stripe ? "on" : "")" disabled="@(!hasStripeKey)" title="@(hasStripeKey ? null : "Saisissez d'abord la clé secrète Stripe")" @onclick="() => paymentMode = PaymentModes.Stripe">Stripe</button></div></div>
+        </div>
+        <div class="adm-row">
+            <div>Clé secrète Stripe<small>Prévue pour le branchement : chiffrée, jamais réaffichée. Tant que Stripe n'est pas branché, elle ne sert à rien.</small></div>
+            <div class="val"><input class="mono" type="password" style="width:220px" @bind="stripeKey" autocomplete="new-password" placeholder="@(hasStripeKey ? "Enregistrée" : "sk_live_…")" aria-label="Clé secrète Stripe" /></div>
+        </div>
+        <div class="adm-row">
+            <div>Paiements simulés<small>@simulatedCount paiement@(simulatedCount > 1 ? "s" : "") simulé@(simulatedCount > 1 ? "s" : ""). À effacer avant la mise en service réelle : les abonnements restent, seul le journal des paiements est vidé.</small></div>
+            <div class="val"><button type="button" class="btn ghost" disabled="@(simulatedCount == 0)" @onclick="ClearSimulated">Effacer</button></div>
         </div>
     }
     else if (section == "addr")
@@ -159,8 +207,49 @@
     private string Example => Root.Read(d => Resolver.HostFor(d, "acme"));
     private static readonly (string Id, string Label, string Icon)[] Sections =
     {
-        ("signup", "Inscription et essai", "user"), ("access", "Suspension et blocage", "lock"), ("billing", "Facturation", "chart"), ("addr", "Adresses", "globe"), ("mail", "E-mails", "mail"), ("terms", "Conditions", "file")
+        ("signup", "Inscription et essai", "user"), ("journey", "Parcours e-mails", "mail-send"), ("access", "Suspension et blocage", "lock"), ("billing", "Facturation", "chart"), ("addr", "Adresses", "globe"), ("mail", "E-mails", "mail"), ("terms", "Conditions", "file")
     };
+
+    // Essai, conservation, codes, parcours e-mails, paiement (voir Billing, Lifecycle)
+    private string trialPlan = Plans.Growth, paymentMode = PaymentModes.Simulation, stripeKey = "", newCode = "";
+    private int retentionDays = 30, reminderDays = 2, newCodeDays = 30, simulatedCount;
+    private bool mailFirst = true, mailTips = true, hasStripeKey;
+    private List<TrialCode> codes = new();
+
+    /// <summary>Le parcours, dans l'ordre : libellé, moment, type, interrupteur (first / tips) ou rien pour un obligatoire.</summary>
+    private static readonly (string Label, string When, string Kind, string? Toggle)[] Journey =
+    {
+        ("Validation de l'adresse", "Immédiat à l'inscription par e-mail ; lien valable selon « Inscription et essai »", "Obligatoire", null),
+        ("Bienvenue", "À la validation : dates de fin d'essai et de suppression sans plan", "Obligatoire", null),
+        ("Premiers pas", "J+1, si aucun écran n'est connecté (case « nouveautés et astuces »)", "Facultatif", "first"),
+        ("Astuces", "J+3 pour un essai court, J+10 et J+20 pour un essai d'un mois (case « nouveautés et astuces »)", "Facultatif", "tips"),
+        ("Rappel de fin d'essai", "Avant la fin, avec une estimation du prix", "Obligatoire", null),
+        ("Essai terminé", "Le jour de la fin, sans plan choisi", "Obligatoire", null),
+        ("Avertissements de suppression", "15, 7 et 1 jour avant, à tous les administrateurs", "Obligatoire", null),
+        ("Suppression effectuée, bonne continuation", "Au terme de la conservation", "Obligatoire", null),
+        ("Plan actif, bonne continuation", "Au choix du plan (fin de séquence)", "Obligatoire", null),
+        ("Écran ajouté", "Immédiat, avec le prorata, aux administrateurs", "Obligatoire", null),
+        ("Passage à Base programmé", "Immédiat, avec ce qui sera verrouillé", "Obligatoire", null),
+        ("Résiliation enregistrée", "Immédiat ; puis avertissements de suppression", "Obligatoire", null),
+        ("Paiement refusé", "Immédiat, compte bloqué, aux administrateurs", "Obligatoire", null),
+    };
+
+    private void AddCode()
+    {
+        var c = global::Linkii.Poc.Billing.NormalizeCode(newCode);   // « Billing » seul désigne ici la page Facturation
+        if (c.Length < 3) { Toast.Error("Le code doit comporter au moins 3 lettres ou chiffres."); return; }
+        if (codes.Any(x => x.Code == c)) { Toast.Error("Ce code existe déjà."); return; }
+        if (newCodeDays is < 1 or > 365) { Toast.Error("La durée doit être comprise entre 1 et 365 jours."); return; }
+        codes.Add(new TrialCode { Code = c, Days = newCodeDays });
+        newCode = ""; newCodeDays = 30;
+    }
+
+    private void ClearSimulated()
+    {
+        var n = Root.Write(d => d.Payments.RemoveAll(p => p.Simulated));
+        simulatedCount = 0;
+        Toast.Ok($"{n} paiement{(n > 1 ? "s" : "")} simulé{(n > 1 ? "s" : "")} effacé{(n > 1 ? "s" : "")}.");
+    }
 
     protected override void OnInitialized()
     {
@@ -172,6 +261,9 @@
         npmReady = Npm.Configured;
         npmReadable = !hasNpmPassword || npmReady || Npm.Problem() is not { } pb || !pb.Contains("illisible");
         (smtpHost, smtpPort, smtpSsl, smtpUser, smtpFrom, hasPassword) = (p.SmtpHost, p.SmtpPort > 0 ? p.SmtpPort : 587, p.SmtpSsl, p.SmtpUser, p.SmtpFrom, p.SmtpPassword != "");
+        (trialPlan, retentionDays, reminderDays, mailFirst, mailTips, paymentMode, hasStripeKey) = (p.TrialPlan, p.RetentionDays, p.TrialReminderDays, p.MailFirstSteps, p.MailTips, p.PaymentMode, p.StripeSecretKey != "");
+        codes = p.TrialCodes.Select(c => new TrialCode { Code = c.Code, Days = c.Days, Active = c.Active, Uses = c.Uses }).ToList();   // copie : rien n'est enregistré avant « Enregistrer »
+        simulatedCount = Root.Read(d => d.Payments.Count(x => x.Simulated));
     }
 
     private void Save() => SaveCore(true);
@@ -190,12 +282,23 @@
         baseDomain = baseDomain.Trim().ToLowerInvariant();
         if (baseDomain != "" && !System.Text.RegularExpressions.Regex.IsMatch(baseDomain, @"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")) { Toast.Error("Le domaine de base n'est pas valide (ex. : linkii.duckdns.org)."); return false; }
         if (npmUrl.Trim() != "" && !Uri.TryCreate(npmUrl.Trim(), UriKind.Absolute, out _) || npmPort is < 1 or > 65535) { Toast.Error("L'adresse de NPM ou le port de destination n'est pas valide."); return false; }
+        if (retentionDays is < 7 or > 365) { Toast.Error("La conservation doit être comprise entre 7 et 365 jours."); return false; }
+        if (reminderDays is < 1 or > 14) { Toast.Error("Le rappel doit partir entre 1 et 14 jours avant la fin de l'essai."); return false; }
+        if (codes.Any(c => c.Days is < 1 or > 365)) { Toast.Error("La durée d'un code doit être comprise entre 1 et 365 jours."); return false; }
+        var stripeEncrypted = stripeKey.Trim() == "" ? null : Box.Protect(stripeKey.Trim());
         var encrypted = smtpPassword == "" ? null : Box.Protect(smtpPassword);
         var npmEncrypted = npmPassword == "" ? null : Box.Protect(npmPassword);
         Root.Write(d =>
         {
             var p = d.Platform;
             p.TrialDays = trialDays; p.VerifyLinkHours = linkHours; p.PurgeUnverifiedDays = purgeDays;
+            p.TrialPlan = trialPlan; p.RetentionDays = retentionDays; p.TrialReminderDays = reminderDays; p.MailFirstSteps = mailFirst; p.MailTips = mailTips;
+            // codes : les inscriptions comptées entre-temps sont gardées
+            p.TrialCodes = codes.Select(c => new TrialCode { Code = c.Code, Days = c.Days, Active = c.Active, Uses = Math.Max(c.Uses, p.TrialCodes.FirstOrDefault(o => o.Code == c.Code)?.Uses ?? 0) }).ToList();
+            if (stripeEncrypted != null) p.StripeSecretKey = stripeEncrypted;
+            hasStripeKey = p.StripeSecretKey != "";
+            p.PaymentMode = paymentMode == PaymentModes.Stripe && hasStripeKey ? PaymentModes.Stripe : PaymentModes.Simulation;
+            paymentMode = p.PaymentMode;
             p.PriceBase = Math.Round(priceBase, 2); p.PriceGrowth = Math.Round(priceGrowth, 2); p.AnnualDiscountPct = annualPct; p.DefaultCommissionPct = commissionPct; p.StripeFeePct = Math.Round(feePct, 2); p.StripeFeeFixed = Math.Round(feeFixed, 2);
             p.BaseDomain = baseDomain; p.SubdomainSeparator = sepChoice; p.NpmUrl = npmUrl.Trim(); p.NpmUser = npmUser.Trim(); p.NpmForwardScheme = npmScheme; p.NpmForwardHost = npmForwardHost.Trim(); p.NpmForwardPort = npmPort;
             if (p.NpmUrl == "") p.NpmPassword = ""; else if (npmEncrypted != null) p.NpmPassword = npmEncrypted;
@@ -204,7 +307,7 @@
             if (p.SmtpHost == "") p.SmtpPassword = ""; else if (encrypted != null) p.SmtpPassword = encrypted;
             hasPassword = p.SmtpPassword != "";
         });
-        smtpPassword = ""; npmPassword = ""; npmReady = Npm.Configured;
+        smtpPassword = ""; npmPassword = ""; stripeKey = ""; npmReady = Npm.Configured;
         if (toast) Toast.Ok("Réglages de la plateforme enregistrés.");
         return true;
     }

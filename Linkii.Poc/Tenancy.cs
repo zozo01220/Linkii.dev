@@ -149,6 +149,8 @@ public class ClientDb
         Media = new(root.Media, clientId, null, null, me, area);
         MediaFolders = new(root.MediaFolders, clientId, null, null, me, area);
         PlaylistFolders = new(root.PlaylistFolders, clientId, null, null, me, area);
+        CompositionFolders = new(root.CompositionFolders, clientId, null, null, me, area);
+        ScreenFolders = new(root.ScreenFolders, clientId, area, null, me, area);
         CompositionTemplates = new(root.CompositionTemplates, clientId, null, null, me, area);
         Playlists = new(root.Playlists, clientId, null, null, me, area);
         AppInstalls = new(root.AppInstalls, clientId);
@@ -169,6 +171,10 @@ public class ClientDb
     public ScopedList<MediaFolder> MediaFolders { get; }
     /// <summary>Dossiers des listes de lecture (voir <see cref="PlaylistFolder"/>).</summary>
     public ScopedList<PlaylistFolder> PlaylistFolders { get; }
+    /// <summary>Dossiers de rangement des écrans de l'aire ouverte (voir <see cref="ScreenFolder"/>).</summary>
+    public ScopedList<ScreenFolder> ScreenFolders { get; }
+    /// <summary>Dossiers des compositions (voir <see cref="CompositionFolder"/>).</summary>
+    public ScopedList<CompositionFolder> CompositionFolders { get; }
     /// <summary>« Mes modèles » de compositions (voir <see cref="CompositionTemplate"/>).</summary>
     public ScopedList<CompositionTemplate> CompositionTemplates { get; }
     public ScopedList<Playlist> Playlists { get; }
@@ -406,12 +412,15 @@ public static class Tenancy
     /// <summary>Un écran ne diffuse que si son client, puis son revendeur, sont actifs, et que l'essai gratuit du client n'est pas terminé.</summary>
     public static bool IsActive(Db db, Screen s) => Blocked(db, s) == null;
 
-    /// <summary>Pourquoi un écran ne diffuse pas : « trial » (essai gratuit terminé), « suspended » (client ou revendeur suspendu), sinon null.</summary>
+    /// <summary>Pourquoi un écran ne diffuse pas : « trial » (essai gratuit terminé sans plan), « ended » (abonnement résilié arrivé à terme),
+    /// « suspended » (client ou revendeur suspendu, ou bloqué), sinon null.</summary>
     public static string? Blocked(Db db, Screen s)
     {
         var c = db.Clients.FirstOrDefault(x => x.Id == s.ClientId);
         if (c == null || c.Suspended || c.Blocked || db.Resellers.FirstOrDefault(r => r.Id == c.ResellerId) is not { Active: true, Suspended: false }) return "suspended";
-        return c.TrialEnded(DateTime.UtcNow) ? "trial" : null;
+        var now = DateTime.UtcNow;
+        if (c.SubscriptionEnded(now)) return "ended";
+        return c.TrialEnded(now) && !c.Subscribed ? "trial" : null;   // abonné pendant l'essai : le premier prélèvement suit la fin de l'essai
     }
 
     /// <summary>Un administrateur ne se connecte que sur le domaine de son revendeur ; l'équipe Linkii sur le domaine principal.</summary>

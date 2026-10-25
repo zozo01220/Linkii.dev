@@ -1,0 +1,106 @@
+@page "/login/entreprise"
+@layout AuthLayout
+@inject JsonStore Store
+@inject LifecycleMail Mails
+
+@* « Parler à un expert » (offre Entreprise) : formulaire court qui qualifie le besoin. Il crée une opportunité dans la console,
+   envoie un accusé de réception à la personne et prévient l'équipe (Linkii, et le revendeur si la demande vient de son site).
+   Sous /login : rendu statique, accessible sans compte, à la marque du revendeur. *@
+<PageTitle>@(Host?.DisplayName ?? "Linkii") · Offre Entreprise</PageTitle>
+
+@if (sent)
+{
+    <div class="auth-ico ok"><Ico Name="check" Size="26" /></div>
+    <h1>Merci, c'est noté</h1>
+    <p class="lead">Nous revenons vers vous sous un jour ouvré pour un échange de 20 minutes. Un accusé de réception vient de partir à @Form!.Email.</p>
+    <a class="btn block" href="/" data-enhance-nav="false">Retour</a>
+}
+else
+{
+    <h1>Parlons de votre projet</h1>
+    <p class="lead">Hébergement dédié ou sur vos serveurs, connexion par votre annuaire, contrat annuel sur facture. Réponse sous un jour ouvré.</p>
+    <EditForm Model="Form" FormName="enterprise" OnSubmit="Submit" method="post" class="auth-form">
+        <label>Nom, prénom</label><InputText @bind-Value="Form!.Name" autocomplete="name" />
+        <label>E-mail professionnel</label><InputText @bind-Value="Form.Email" type="email" autocomplete="email" />
+        <label>Organisation</label><InputText @bind-Value="Form.Org" autocomplete="organization" />
+        <div class="auth-cols">
+            <div><label>Nombre de sites</label><InputSelect @bind-Value="Form.Sites">@foreach (var s in Enterprise.SiteOptions) { <option value="@s">@s</option> }</InputSelect></div>
+            <div><label>Nombre d'écrans</label><InputSelect @bind-Value="Form.Screens">@foreach (var s in Enterprise.ScreenOptions) { <option value="@s">@s</option> }</InputSelect></div>
+        </div>
+        <label>Où installer Linkii ?</label>
+        <InputRadioGroup @bind-Value="Form.Deployment">
+            <div class="ent-dep">
+                <label><InputRadio Value="@Deployments.Cloud" /> <span><b>Cloud Linkii</b><small>Mutualisé, prêt en un jour</small></span></label>
+                <label><InputRadio Value="@Deployments.Dedicated" /> <span><b>Cloud dédié</b><small>Instance isolée à votre nom</small></span></label>
+                <label><InputRadio Value="@Deployments.OnPrem" /> <span><b>Sur site</b><small>Vos serveurs, licence annuelle</small></span></label>
+            </div>
+        </InputRadioGroup>
+        <label>Exigences <small>(facultatif)</small></label>
+        <div class="ent-needs">
+            <label><InputCheckbox @bind-Value="Form.N0" /> @Enterprise.NeedOptions[0]</label>
+            <label><InputCheckbox @bind-Value="Form.N1" /> @Enterprise.NeedOptions[1]</label>
+            <label><InputCheckbox @bind-Value="Form.N2" /> @Enterprise.NeedOptions[2]</label>
+            <label><InputCheckbox @bind-Value="Form.N3" /> @Enterprise.NeedOptions[3]</label>
+            <label><InputCheckbox @bind-Value="Form.N4" /> @Enterprise.NeedOptions[4]</label>
+            <label><InputCheckbox @bind-Value="Form.N5" /> @Enterprise.NeedOptions[5]</label>
+        </div>
+        <label>Votre besoin <small>(facultatif)</small></label><InputTextArea @bind-Value="Form.Message" rows="3" />
+        @if (error != null) { <div class="err">@error</div> }
+        <button class="btn" type="submit">Envoyer ma demande</button>
+    </EditForm>
+}
+
+@code {
+    [CascadingParameter] private HttpContext? Http { get; set; }
+    [SupplyParameterFromForm(FormName = "enterprise")] private EnterpriseForm? Form { get; set; }
+    private Reseller? Host => Http?.Items["reseller"] as Reseller;
+    private string? error;
+    private bool sent;
+
+    public class EnterpriseForm
+    {
+        public string Name { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string Org { get; set; } = "";
+        public string Sites { get; set; } = Enterprise.SiteOptions[1];
+        public string Screens { get; set; } = Enterprise.ScreenOptions[1];
+        public string Deployment { get; set; } = Deployments.Cloud;
+        public bool N0 { get; set; }
+        public bool N1 { get; set; }
+        public bool N2 { get; set; }
+        public bool N3 { get; set; }
+        public bool N4 { get; set; }
+        public bool N5 { get; set; }
+        public string Message { get; set; } = "";
+    }
+
+    protected override void OnInitialized() => Form ??= new();
+
+    private async Task Submit()
+    {
+        error = null;
+        var f = Form!;
+        if (Host == null) { error = "Service indisponible."; return; }
+        if (string.IsNullOrWhiteSpace(f.Name) || string.IsNullOrWhiteSpace(f.Org)) { error = "Nom et organisation obligatoires."; return; }
+        if (!System.Net.Mail.MailAddress.TryCreate(f.Email.Trim(), out _)) { error = "Adresse e-mail invalide."; return; }
+        var needs = new[] { f.N0, f.N1, f.N2, f.N3, f.N4, f.N5 }.Select((on, i) => on ? Enterprise.NeedOptions[i] : null).OfType<string>().ToList();
+        var o = new Opportunity
+        {
+            ResellerId = Host.Id, Name = f.Name.Trim(), Email = f.Email.Trim().ToLowerInvariant(), Org = f.Org.Trim(),
+            Sites = Enterprise.SiteOptions.Contains(f.Sites) ? f.Sites : "", Screens = Enterprise.ScreenOptions.Contains(f.Screens) ? f.Screens : "",
+            Deployment = f.Deployment is Deployments.Dedicated or Deployments.OnPrem ? f.Deployment : Deployments.Cloud, Needs = needs,
+            Message = f.Message.Length > 2000 ? f.Message[..2000] : f.Message
+        };
+        // équipe prévenue : l'équipe Linkii (console), et celle du revendeur si la demande vient de son site
+        Store.Write(db => db.Opportunities.Add(o));
+        var host = Host;
+        var def = Store.Read(db => db.Resellers.FirstOrDefault(r => r.IsDefault));
+        List<(string Email, string Name)> admins = Store.Read(db => db.Users.Where(u => u.Role == Roles.PlatformAdmin && !u.Disabled).Select(u => (u.Email, u.Name)).ToList());
+        List<(string Email, string Name)> team = host.IsDefault ? new()
+            : Store.Read(db => db.Users.Where(u => u.ResellerId == host.Id && u.Role == Roles.ResellerAdmin && !u.Disabled).Select(u => (u.Email, u.Name)).ToList());
+        await Mails.SendTo(host, new[] { (o.Email, o.Name) }, Enterprise.Ack(o));
+        if (def != null) await Mails.SendTo(def, admins, Enterprise.Internal(o));
+        if (team.Count > 0) await Mails.SendTo(host, team, Enterprise.Internal(o) with { Button = null, Path = null });
+        sent = true;
+    }
+}

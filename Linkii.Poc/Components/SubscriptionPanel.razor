@@ -1,0 +1,320 @@
+@inject JsonStore Root
+@inject TenantContext Ctx
+@inject Toaster Toast
+@inject Notifier Notifier
+@inject LifecycleMail Lifecycle
+@inject NavigationManager Nav
+
+@* Réglages › Abonnement (administrateurs) : choisir un plan (essai ou fin d'essai), puis gérer l'abonnement : licence, facturation, carte, reçus,
+   passage à Base (à l'échéance), résiliation (à l'échéance). Tout paiement passe par PayDialog (simulation tant que Stripe n'est pas branché). *@
+@if (c == null) { return; }
+
+@switch (view)
+{
+    case "base":
+        <div class="rg-ph"><h2>Passer à Base</h2><p>Vous gardez Growth jusqu'au @Day(c.NextRenewalUtc). Ensuite, ces fonctions seront verrouillées : rien n'est supprimé, tout revient si vous repassez à Growth.</p></div>
+        <div class="rg-card">
+            @LossRows
+        </div>
+        <div class="rg-card">
+            <div class="sv-row"><div class="t"><b>Aujourd'hui</b></div><div class="ctl">Growth × @screens · @Lifecycle_.Chf(Amount(Plans.Growth, c.BillingPeriod)) @PerLabel</div></div>
+            <div class="sv-row"><div class="t"><b>À partir du @Day(c.NextRenewalUtc)</b></div><div class="ctl">Base × @screens · @Lifecycle_.Chf(Amount(Plans.Base, c.BillingPeriod)) @PerLabel</div></div>
+        </div>
+        <div class="sb-actions">
+            <button type="button" class="btn" @onclick="ConfirmBase">Passer à Base le @Day(c.NextRenewalUtc)</button>
+            <button type="button" class="btn ghost" @onclick='() => view = ""'>Rester en Growth</button>
+        </div>
+        break;
+
+    case "cancel":
+        <div class="rg-ph"><h2>Résilier votre abonnement</h2><p>@Plans.Label(c.Plan) · @screens écran@(screens > 1 ? "s" : "") · @Lifecycle_.Chf(Amount(c.Plan, c.BillingPeriod)) @PerLabel</p></div>
+        <div class="rg-card">
+            <div class="rg-body sb-steps">
+                <div><b>Jusqu'au @Day(c.NextRenewalUtc)</b><span>Tout fonctionne normalement. Vous pouvez annuler la résiliation jusque-là.</span></div>
+                <div><b>@Day(c.NextRenewalUtc)</b><span>Vos écrans cessent de diffuser. Le back-office reste ouvert pour reprendre un plan.</span></div>
+                <div><b>@Day(c.NextRenewalUtc?.AddDays(retention))</b><span><strong>Suppression définitive</strong> de vos contenus et réglages. Nous vous préviendrons @string.Join(", ", global::Linkii.Poc.Lifecycle.DeleteWarnings) jour(s) avant.</span></div>
+            </div>
+        </div>
+        <div class="rg-card">
+            <div class="rg-body">
+                <p style="margin:0 0 4px"><b>Moins cher plutôt que résilier ?</b></p>
+                <p class="hint" style="margin:0">Supprimez les écrans dont vous n'avez plus besoin : ils sortent de la facture à l'échéance.@if (c.IsGrowth) { <text> Ou </text><a href="" @onclick:preventDefault @onclick='() => view = "base"'>passez à Base</a><text> (@Lifecycle_.Chf(unitBase) au lieu de @Lifecycle_.Chf(unitGrowth) par écran).</text> }</p>
+            </div>
+            <div class="rg-body">
+                <p style="margin:0 0 8px"><b>Pourquoi partez-vous ?</b> <span class="muted">(facultatif)</span></p>
+                <div class="seg">
+                    @foreach (var r in Reasons) { var rr = r; <button type="button" class="@(reason == rr ? "on" : "")" @onclick="() => reason = reason == rr ? null : rr">@rr</button> }
+                </div>
+            </div>
+        </div>
+        <div class="sb-actions">
+            <button type="button" class="btn danger-solid" @onclick="ConfirmCancel">Confirmer la résiliation</button>
+            <button type="button" class="btn ghost" @onclick='() => view = ""'>Garder mon abonnement</button>
+        </div>
+        break;
+
+    default:
+        @if (!c.Subscribed)
+        {
+            @* ---------- Choisir mon plan ---------- *@
+            <div class="rg-ph"><h2>Choisir mon plan</h2>
+                <p>@(inTrial ? $"Essai gratuit jusqu'au {Day(c.TrialEndsUtc)} : rien n'est prélevé avant la fin." : ended ? "Votre essai est terminé : vos écrans reprennent dès le paiement." : cancelled ? "Votre abonnement est terminé : reprenez un plan pour que vos écrans diffusent à nouveau." : "Vous payez au nombre d'écrans connectés.")</p></div>
+            <div class="rg-card">
+                <header><h3>Licence</h3></header>
+                <div class="rg-body">
+                    <div class="sb-lic">
+                        <button type="button" class="@(plan == Plans.Base ? "on" : "")" @onclick="() => plan = Plans.Base"><b>Base</b><small>Afficher et planifier vos contenus</small><span>@Lifecycle_.Chf(unitBase) / écran / mois</span></button>
+                        <button type="button" class="@(plan == Plans.Growth ? "on" : "")" @onclick="() => plan = Plans.Growth"><b>Growth</b><small>+ direct, murs d'écrans, statistiques, alertes</small><span>@Lifecycle_.Chf(unitGrowth) / écran / mois</span></button>
+                    </div>
+                    @if (plan == Plans.Base && c.IsGrowth && LossCount > 0)
+                    {
+                        <div class="sb-warn"><b>Vous utilisez des fonctions Growth.</b> Avec Base, elles seront verrouillées (conservées, réactivées si vous repassez à Growth) :
+                            <ul>@LossItems</ul></div>
+                    }
+                </div>
+                <div class="sv-row"><div class="t"><b>Facturation</b><small>Annuelle : 12 mois en un paiement, −@annualPct %.</small></div>
+                    <div class="ctl"><div class="seg"><button type="button" class="@(period == "monthly" ? "on" : "")" @onclick='() => period = "monthly"'>Mensuelle</button><button type="button" class="@(period == "annual" ? "on" : "")" @onclick='() => period = "annual"'>Annuelle <small>−@annualPct %</small></button></div></div></div>
+                <div class="sv-row"><div class="t"><b>Écrans facturés</b><small>Les écrans connectés à votre espace@(unpaired > 0 ? $" ; {unpaired} écran{(unpaired > 1 ? "s" : "")} jamais connecté{(unpaired > 1 ? "s" : "")}, non compté{(unpaired > 1 ? "s" : "")}" : "")@(". Un écran ajouté est facturé au prorata, un écran retiré sort à l'échéance suivante.")</small></div>
+                    <div class="ctl"><b class="sb-n">@screens</b></div></div>
+            </div>
+            <div class="rg-card">
+                <header><h3>Récapitulatif</h3></header>
+                <div class="sv-row"><div class="t"><b>@Plans.Label(plan) × @screens écran@(screens > 1 ? "s" : "")</b><small>@(period == "annual" ? "Par an" : "Par mois"), hors taxes</small></div><div class="ctl"><b>@Lifecycle_.Chf(Amount(plan, period))</b></div></div>
+                <div class="sv-row"><div class="t"><b>Aujourd'hui</b><small>@(inTrial ? $"Premier prélèvement le {Day(c.TrialEndsUtc)}, puis chaque {(period == "annual" ? "année" : "mois")} à cette date." : "Puis chaque " + (period == "annual" ? "année" : "mois") + " à cette date.")</small></div><div class="ctl"><b class="sb-big">@Lifecycle_.Chf(inTrial ? 0 : Amount(plan, period))</b></div></div>
+            </div>
+            <div class="sb-actions">
+                <button type="button" class="btn" disabled="@(screens == 0 && !inTrial)" @onclick="StartSubscribe">Confirmer</button>
+                @if (screens == 0 && !inTrial) { <span class="hint">Connectez au moins un écran pour vous abonner.</span> }
+                <span class="grow"></span>
+                <a class="hint" href="/login/entreprise" data-enhance-nav="false" target="_blank" rel="noopener">Hébergement dédié, sur site ou paiement sur facture ? Offre Entreprise</a>
+            </div>
+            <p class="hint">Un paiement refusé bloque le compte (écrans et back-office) jusqu'au paiement suivant.</p>
+        }
+        else
+        {
+            @* ---------- Abonnement en cours ---------- *@
+            <div class="rg-ph"><h2>Abonnement</h2><p>Votre plan, vos écrans facturés et vos paiements.</p></div>
+            @if (c.CancelAtUtc != null)
+            {
+                <div class="sb-warn"><b>Résiliation programmée.</b> Vos écrans diffusent jusqu'au @Day(c.CancelAtUtc), puis vos contenus seront supprimés le @Day(c.CancelAtUtc?.AddDays(retention)). <button type="button" class="btn sm" @onclick="Resume">Annuler la résiliation</button></div>
+            }
+            <div class="sb-grid">
+                <div class="rg-card">
+                    <header><h3>Votre plan</h3></header>
+                    <div class="sv-row"><div class="t"><b>Licence</b></div><div class="ctl"><span class="pill @(c.IsGrowth ? "blue" : "")">@Plans.Label(c.Plan)</span>@if (c.PendingPlan != null) { <span class="pill warn" style="margin-left:6px">Base le @Day(c.NextRenewalUtc)</span> }</div></div>
+                    <div class="sv-row"><div class="t"><b>Facturation</b></div><div class="ctl">@(c.BillingPeriod == "annual" ? "Annuelle" : "Mensuelle")@if (c.PendingPeriod != null) { <span class="pill warn" style="margin-left:6px">@(c.PendingPeriod == "annual" ? "Annuelle" : "Mensuelle") le @Day(c.NextRenewalUtc)</span> }</div></div>
+                    <div class="sv-row"><div class="t"><b>Montant</b></div><div class="ctl">@Lifecycle_.Chf(Amount(c.PendingPlan ?? c.Plan, c.BillingPeriod)) @PerLabel</div></div>
+                    <div class="sv-row"><div class="t"><b>@(inTrial ? "Premier prélèvement" : "Prochaine échéance")</b></div><div class="ctl">@Day(c.NextRenewalUtc)</div></div>
+                    @if (c.CancelAtUtc == null)
+                    {
+                        <div class="rg-body sb-btns">
+                            @if (c.PendingPlan != null) { <button type="button" class="btn ghost sm" @onclick="UndoBase">Rester en Growth</button> }
+                            else if (c.IsGrowth) { <button type="button" class="btn ghost sm" @onclick='() => view = "base"'>Passer à Base</button> }
+                            else { <button type="button" class="btn ghost sm" @onclick="StartUpgrade">Passer à Growth</button> }
+                            <button type="button" class="btn ghost sm" @onclick="SwitchPeriod">@(c.PendingPeriod != null ? "Garder la facturation actuelle" : c.BillingPeriod == "annual" ? "Passer au mensuel" : $"Passer à l'annuel (−{annualPct} %)")</button>
+                        </div>
+                    }
+                </div>
+                <div class="rg-card">
+                    <header><h3>Écrans facturés</h3></header>
+                    <div class="sv-row"><div class="t"><b>Connectés</b></div><div class="ctl">@screens écran@(screens > 1 ? "s" : "")</div></div>
+                    @if (unpaired > 0) { <div class="sv-row"><div class="t"><b>Jamais connectés</b></div><div class="ctl">@unpaired <span class="muted">(non facturé@(unpaired > 1 ? "s" : ""))</span></div></div> }
+                    <div class="sv-row"><div class="t"><b>Prochaine facture</b></div><div class="ctl">@Lifecycle_.Chf(Amount(c.PendingPlan ?? c.Plan, c.BillingPeriod))</div></div>
+                    <div class="rg-body"><p class="hint" style="margin:0">Un écran ajouté est facturé au prorata ; un écran supprimé sort de la facture à l'échéance suivante.</p></div>
+                </div>
+                <div class="rg-card">
+                    <header><h3>Paiement</h3></header>
+                    <div class="sv-row"><div class="t"><b>Carte</b></div><div class="ctl">@(c.CardLast4.Length > 0 ? $"•••• {c.CardLast4}" : "—")@(c.CardExpiry.Length > 0 ? $" · exp. {c.CardExpiry}" : "")</div></div>
+                    <div class="rg-body"><button type="button" class="btn ghost sm" @onclick="StartCard">Gérer la carte et les reçus</button></div>
+                </div>
+                <div class="rg-card">
+                    <header><h3>Derniers paiements</h3><small>Le reçu de chaque paiement est envoyé par e-mail par le prestataire de paiement.</small></header>
+                    @if (payments.Count == 0) { <div class="rg-body"><p class="hint" style="margin:0">Aucun paiement pour l'instant@(inTrial ? $" : le premier aura lieu le {Day(c.NextRenewalUtc)}" : "").</p></div> }
+                    @foreach (var p in payments)
+                    {
+                        <div class="sv-row"><div class="t"><b>@Day(p.PaidUtc)</b><small>@(p.Label.Length > 0 ? p.Label : $"{Plans.Label(c.Plan)} × {p.Screens}, {(p.Period == "annual" ? "annuel" : "mensuel")}")@(p.Simulated ? " · simulé" : "")</small></div><div class="ctl">@Lifecycle_.Chf(p.Amount)</div></div>
+                    }
+                </div>
+            </div>
+            @if (c.CancelAtUtc == null) { <p style="margin-top:14px"><a href="" class="sb-cancel" @onclick:preventDefault @onclick='() => view = "cancel"'>Résilier mon abonnement</a></p> }
+        }
+        break;
+}
+
+@if (pay != null)
+{
+    <PayDialog Request="pay" AskCard="askCard" OnDone="PayDone" />
+}
+
+@code {
+    private static readonly string[] Reasons = { "Trop cher", "Projet terminé", "Fonction manquante", "Autre outil", "Autre" };
+
+    private Tenant? c;
+    private string view = "";   // "" | base | cancel
+    private string plan = Plans.Growth, period = "monthly";
+    private int screens, unpaired, annualPct, retention;
+    private decimal unitBase, unitGrowth;
+    private bool inTrial, ended, cancelled;
+    private Billing.GrowthUse use = new(0, 0, 0);
+    private List<Payment> payments = new();
+    private string? reason;
+
+    // fenêtre de paiement en cours et ce qu'elle confirme
+    private PayRequest? pay;
+    private bool askCard;
+    private Func<PayDialog.Outcome, Task>? onPaid;
+
+    // « Lifecycle » est aussi le nom du service injecté : alias vers la classe statique
+    private static class Lifecycle_ { public static string Chf(decimal x) => global::Linkii.Poc.Lifecycle.Chf(x); }
+
+    private string PerLabel => c?.BillingPeriod == "annual" ? "/ an" : "/ mois";
+    private int LossCount => use.Walls + use.Alerts + use.Qr;
+
+    protected override void OnInitialized()
+    {
+        Load();
+        if (Nav.Uri.Contains("plan=trial")) Toast.Ok("Plan choisi : le premier prélèvement aura lieu à la fin de l'essai.");
+        else if (Nav.Uri.Contains("plan=paid")) Toast.Ok("Paiement réussi : votre plan est actif.");
+    }
+
+    private void Load()
+    {
+        var cid = Ctx.ClientId;
+        var now = DateTime.UtcNow;
+        (c, screens, unpaired, use, payments, annualPct, retention, unitBase, unitGrowth) = Root.Read(d =>
+        {
+            var t = d.Clients.FirstOrDefault(x => x.Id == cid);
+            if (t == null) return (null, 0, 0, new Billing.GrowthUse(0, 0, 0), new List<Payment>(), 0, 30, 0m, 0m);
+            return (t, Subscriptions.ScreensOf(d, t), d.Screens.Count(s => s.ClientId == t.Id && s.Token == null),
+                Billing.UsageOf(d, t), d.Payments.Where(p => p.ClientId == t.Id).OrderByDescending(p => p.PaidUtc).Take(6).ToList(),
+                d.Platform.AnnualDiscountPct, Math.Max(1, d.Platform.RetentionDays), Billing.Unit(d, Plans.Base), Billing.Unit(d, Plans.Growth));
+        });
+        if (c == null) return;
+        inTrial = c.InTrial(now); ended = c.TrialEnded(now); cancelled = c.CancelAtUtc != null && c.CancelAtUtc <= now;
+        if (!c.Subscribed) { plan = c.Plan; period = c.BillingPeriod; }
+    }
+
+    private string Day(DateTime? utc) => utc is { } u && c != null ? Signup.Day(c, u) : "—";
+    private decimal Amount(string pl, string per) => Root.Read(d => Billing.PeriodAmount(d, pl, per, screens));
+
+    private RenderFragment LossItems => @<text>
+        @if (use.Walls > 0) { <li>@use.Walls mur@(use.Walls > 1 ? "s" : "") d'écrans : la création et le contrôle sont verrouillés</li> }
+        @if (use.Alerts > 0) { <li>Alertes désactivées (écran hors ligne, synchronisation…)</li> }
+        @if (use.Qr > 0) { <li>@use.Qr QR code@(use.Qr > 1 ? "s" : "") : toujours affiché@(use.Qr > 1 ? "s" : ""), ne compte@(use.Qr > 1 ? "nt" : "") plus les scans</li> }
+        <li>Contrôle du direct et supervision</li>
+    </text>;
+
+    private RenderFragment LossRows => @<text>
+        @if (use.Walls > 0) { <div class="sv-row"><div class="t"><b>Murs d'écrans</b><small>@use.Walls mur@(use.Walls > 1 ? "s" : "") : création et contrôle verrouillés. Les murs restent enregistrés.</small></div></div> }
+        @if (use.Alerts > 0) { <div class="sv-row"><div class="t"><b>Alertes</b><small>Désactivées. Vos réglages sont conservés.</small></div></div> }
+        @if (use.Qr > 0) { <div class="sv-row"><div class="t"><b>Comptage des scans QR</b><small>@use.Qr QR code@(use.Qr > 1 ? "s" : "") restent affichés mais ne comptent plus. L'historique est conservé.</small></div></div> }
+        <div class="sv-row"><div class="t"><b>Contrôle du direct, supervision</b><small>Plus d'aperçu ni de commande à distance.</small></div></div>
+        <div class="sv-row"><div class="t"><b>Statistiques</b><small>Masquées. Les données déjà collectées sont conservées.</small></div></div>
+    </text>;
+
+    // ---------- Paiement ----------
+
+    private void Ask(PayRequest req, bool card, Func<PayDialog.Outcome, Task> then) { pay = req; askCard = card; onPaid = then; }
+
+    private async Task PayDone(PayDialog.Outcome o)
+    {
+        var then = onPaid;
+        pay = null; onPaid = null;
+        if (o.Cancelled || then == null) return;
+        if (!o.Paid) { Toast.Error("Paiement refusé (simulation) : rien n'a été enregistré."); return; }
+        await then(o);
+    }
+
+    private void StartSubscribe()
+    {
+        var now = DateTime.UtcNow;
+        var amount = Root.Read(d => Billing.SubscribeNow(d, c!, plan, period, now));
+        var label = $"{Plans.Label(plan)} × {screens} écran{(screens > 1 ? "s" : "")}, {(period == "annual" ? "annuel" : "mensuel")}";
+        Ask(new(amount, label, amount == 0 ? $"Rien n'est prélevé aujourd'hui : premier prélèvement le {Day(c!.TrialEndsUtc)}." : "Premier paiement, puis à chaque échéance."), true, async o =>
+        {
+            var cid = c!.Id;
+            var (p, wasCut) = Root.Write(d =>
+            {
+                var t = d.Clients.First(x => x.Id == cid);
+                var cut = t.IsCut || t.TrialEnded(now) || t.SubscriptionEnded(now);
+                return (Billing.Subscribe(d, t, plan, period, o.Last4, o.Expiry, now, simulated: true), cut);
+            });
+            if (wasCut) await Notifier.NotifyClient(cid);   // les écrans reprennent
+            var n = Root.Read(d => global::Linkii.Poc.Lifecycle.PlanActive(d, d.Clients.First(x => x.Id == cid), now));
+            await Lifecycle.Send(cid, n);
+            // rechargement complet : le bandeau d'essai (ou de fin d'essai) disparaît ; le message s'affiche à l'arrivée
+            Nav.NavigateTo("/settings?tab=abonnement&plan=" + (p == null ? "trial" : "paid"), forceLoad: true);
+        });
+    }
+
+    private void StartUpgrade()
+    {
+        var now = DateTime.UtcNow;
+        var amount = Root.Read(d => Billing.UpgradeProrata(d, c!, now));
+        Ask(new(amount, $"Passage à Growth × {screens} écran{(screens > 1 ? "s" : "")}", amount > 0 ? $"Prorata jusqu'au {Day(c!.NextRenewalUtc)} ({Billing.DaysToRenewal(c!, now)} jours), puis {Lifecycle_.Chf(Amount(Plans.Growth, c!.BillingPeriod))} {PerLabel}." : "Immédiat."), false, async _ =>
+        {
+            var cid = c!.Id;
+            Root.Write(d => Billing.Upgrade(d, d.Clients.First(x => x.Id == cid), now, simulated: true));
+            await Notifier.NotifyClient(cid);
+            Toast.Ok("Vous êtes passé à Growth.");
+            Reload();
+        });
+    }
+
+    private void StartCard() => Ask(new(0, "Changer de carte", "Avec Stripe, ce bouton ouvrira le portail client (carte et reçus)."), true, o =>
+    {
+        var cid = c!.Id;
+        Root.Write(d => { var t = d.Clients.First(x => x.Id == cid); t.CardLast4 = o.Last4; t.CardExpiry = o.Expiry; });
+        Toast.Ok("Carte enregistrée.");
+        Reload();
+        return Task.CompletedTask;
+    });
+
+    private async Task ConfirmBase()
+    {
+        var cid = c!.Id;
+        var n = Root.Write(d => { var t = d.Clients.First(x => x.Id == cid); Billing.ScheduleBase(t); return global::Linkii.Poc.Lifecycle.BaseScheduled(d, t); });
+        await Lifecycle.Send(cid, n, allAdmins: true);
+        Toast.Ok($"Passage à Base programmé pour le {Day(c.NextRenewalUtc)}.");
+        view = "";
+        Reload();
+    }
+
+    private void UndoBase()
+    {
+        var cid = c!.Id;
+        Root.Write(d => Billing.CancelBase(d.Clients.First(x => x.Id == cid)));
+        Toast.Ok("Vous restez en Growth.");
+        Reload();
+    }
+
+    private void SwitchPeriod()
+    {
+        var cid = c!.Id;
+        var undo = c.PendingPeriod != null;
+        var to = c.BillingPeriod == "annual" ? "monthly" : "annual";
+        Root.Write(d => Billing.SwitchPeriod(d.Clients.First(x => x.Id == cid), undo ? null : to));
+        Toast.Ok(undo ? "Facturation inchangée." : to == "annual" ? $"Facturation annuelle à partir du {Day(c.NextRenewalUtc)}." : $"Facturation mensuelle à partir du {Day(c.NextRenewalUtc)}.");
+        Reload();
+    }
+
+    private async Task ConfirmCancel()
+    {
+        var cid = c!.Id;
+        var n = Root.Write(d => { var t = d.Clients.First(x => x.Id == cid); Billing.Cancel(t); return global::Linkii.Poc.Lifecycle.Cancelled(d, t); });
+        await Lifecycle.Send(cid, n, allAdmins: true);
+        Toast.Ok($"Résiliation enregistrée : vos écrans diffusent jusqu'au {Day(c.NextRenewalUtc)}.");
+        view = "";
+        Reload();
+    }
+
+    private void Resume()
+    {
+        var cid = c!.Id;
+        Root.Write(d => Billing.Resume(d.Clients.First(x => x.Id == cid)));
+        Toast.Ok("Résiliation annulée : votre abonnement continue.");
+        Reload();
+    }
+
+    private void Reload() { Load(); StateHasChanged(); }
+}

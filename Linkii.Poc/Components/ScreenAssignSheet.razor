@@ -3,7 +3,7 @@
 
 @* « Attribuer… » un écran (administrateur, 24 octobre 2026) : les utilisateurs qui le gèrent. Ceux qui l'ont par sa zone le gardent (on retire la zone
    dans leur fiche) ; ceux en « Voit tout · lecture seule » le voient déjà. Mêmes données que la fiche membre. *@
-<Sheet Title="@($"Qui gère « {Screen.Name} » ?")" Sub="Enregistré tout de suite : la personne voit l'écran apparaître dans sa page Écrans." Class="sm" OnClose="Close">
+<Sheet Title="@(Multi ? $"Qui gère ces {1 + More.Count} écrans ?" : $"Qui gère « {Screen.Name} » ?")" Sub="@(Multi ? "Les personnes cochées sont ajoutées à chaque écran ; celles qui les gèrent déjà les gardent." : "Enregistré tout de suite : la personne voit l'écran apparaître dans sa page Écrans.")" Class="sm" OnClose="Close">
     <ChildContent>
         @if (people.Count == 0)
         {
@@ -30,6 +30,9 @@
 @code {
     [Parameter, EditorRequired] public Screen Screen { get; set; } = default!;
     [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>Autres écrans attribués en même temps (sélection) : les personnes cochées s'ajoutent à chacun.</summary>
+    [Parameter] public List<Screen> More { get; set; } = new();
+    private bool Multi => More.Count > 0;
 
     private record Row(User User, bool ReadAll, string? ViaZone);
     private List<Row> people = new();
@@ -43,9 +46,9 @@
             .Select(u =>
             {
                 var r = u.Rights ?? new MemberRights();
-                return new Row(u, PageMode.Clean(r.Screens) == PageMode.Read, Screen.ZoneId is { } z && r.ZoneIds.Contains(z) ? zoneName ?? "?" : null);
+                return new Row(u, PageMode.Clean(r.Screens) == PageMode.Read, !Multi && Screen.ZoneId is { } z && r.ZoneIds.Contains(z) ? zoneName ?? "?" : null);
             }).ToList());
-        chosen.UnionWith(Store.Read(d => d.Users.Where(u => u.Rights?.ScreenIds.Contains(Screen.Id) == true).Select(u => u.Id).ToList()));
+        if (!Multi) chosen.UnionWith(Store.Read(d => d.Users.Where(u => u.Rights?.ScreenIds.Contains(Screen.Id) == true).Select(u => u.Id).ToList()));
     }
 
     private void Toggle(Guid id) { if (!chosen.Remove(id)) chosen.Add(id); error = null; }
@@ -54,6 +57,15 @@
     private async Task Save()
     {
         var ids = chosen.ToList();
+        if (Multi)
+        {
+            var all = More.Select(s => s.Id).Append(Screen.Id).ToList();
+            error = Store.Write(d => all.Select(sid => MemberOps.AssignScreen(d, sid, d.Users.Where(u => u.Rights?.ScreenIds.Contains(sid) == true).Select(u => u.Id).Union(ids).ToList())).FirstOrDefault(e => e != null));
+            if (error != null) return;
+            Toast.Ok(ids.Count == 0 ? "Aucune attribution ajoutée." : $"{all.Count} écrans attribués à {ids.Count} personne{(ids.Count > 1 ? "s" : "")} de plus.");
+            await OnClose.InvokeAsync();
+            return;
+        }
         error = Store.Write(d => MemberOps.AssignScreen(d, Screen.Id, ids));
         if (error != null) return;
         Toast.Ok(ids.Count == 0 ? $"« {Screen.Name} » n'est plus attribué un à un." : $"« {Screen.Name} » attribué à {ids.Count} personne{(ids.Count > 1 ? "s" : "")}.");

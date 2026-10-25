@@ -338,4 +338,103 @@ public class MembersTests
         Assert.Contains(db.ItemShares, s => s.ItemId == folder.Id && s.ToUserId == old.Id && s.Edit);
         Assert.Empty(folder.Shares);
     }
+
+    // ---------- Dossiers de compositions (25 octobre 2026) ----------
+
+    MediaItem Compo(User u, string name, Guid? folder = null)
+    {
+        var m = new MediaItem { Name = name, Type = "app", AppId = Compositions.AppId, FolderId = folder };
+        As(u).Media.Add(m);
+        return m;
+    }
+
+    CompositionFolder CFolder(User u, string name, Guid? parent = null)
+    {
+        var (error, f) = CompositionFolderOps.Create(As(u), name, parent);
+        Assert.Null(error);
+        return f!;
+    }
+
+    [Fact]
+    public void A_composition_folder_is_private_until_shared_and_the_share_covers_its_compositions()
+    {
+        var f = CFolder(ines, "Promos");
+        var c = Compo(ines, "Soldes", f.Id);
+        Assert.Equal(FolderRight.None, CompositionRights.RightOf(As(tom), c));
+        Assert.Empty(CompositionFolderOps.Rows(As(tom)));
+
+        Share(ines, ShareKind.CompositionFolder, f.Id, tom.Id);
+        Assert.Equal(FolderRight.Read, CompositionRights.RightOf(As(tom), c));
+        Assert.Single(CompositionFolderOps.Rows(As(tom)));
+        Assert.True(CompositionRights.TabOf(As(tom), ShareKind.Composition, c.Id, c.OwnerId, c.FolderId).SharedIn);
+
+        Share(ines, ShareKind.CompositionFolder, f.Id, tom.Id, edit: true);
+        Assert.Equal(FolderRight.Write, CompositionRights.RightOf(As(tom), c));
+        Assert.Equal(FolderRight.Owner, CompositionRights.RightOf(As(ines), c));
+    }
+
+    [Fact]
+    public void Composition_folders_move_and_rename_only_by_their_owner_and_compositions_need_write()
+    {
+        var a = CFolder(ines, "A"); var b = CFolder(ines, "B");
+        var c = Compo(ines, "Une", null);
+        Assert.NotNull(CompositionFolderOps.Rename(As(tom), a.Id, "Z"));
+        Assert.Null(CompositionFolderOps.Rename(As(ines), a.Id, "Alpha"));
+        Assert.Null(CompositionFolderOps.MoveFolder(As(ines), b.Id, a.Id));
+        Assert.Equal(a.Id, b.ParentId);
+
+        Assert.Equal(1, CompositionFolderOps.Move(As(ines), [c.Id], b.Id).Moved);
+        Assert.Equal(b.Id, c.FolderId);
+        Assert.Equal(0, CompositionFolderOps.Move(As(tom), [c.Id], null).Moved);   // ni propriétaire ni partage
+        Assert.Equal(b.Id, c.FolderId);
+    }
+
+    [Fact]
+    public void Deleting_a_composition_folder_lists_its_tree_and_forgets_its_shares()
+    {
+        var a = CFolder(ines, "A"); var b = CFolder(ines, "B", a.Id);
+        var c = Compo(ines, "Dans B", b.Id);
+        Share(ines, ShareKind.CompositionFolder, a.Id, tom.Id);
+
+        Assert.Null(CompositionFolderOps.PlanDelete(As(ines), a.Id, out var folders, out var compos));
+        Assert.Equal(new[] { a.Id, b.Id }.Order(), folders.Order());
+        Assert.Equal([c.Id], compos);
+        CompositionFolderOps.Forget(As(ines), folders);
+        Assert.Empty(db.CompositionFolders);
+        Assert.DoesNotContain(db.ItemShares, s => s.Kind == ShareKind.CompositionFolder);
+    }
+
+    // ---------- Dossiers de rangement des écrans (25 octobre 2026) ----------
+
+    [Fact]
+    public void Screen_folders_show_to_members_only_through_their_screens_and_deleting_keeps_screens()
+    {
+        var (err, f) = ScreenFolderOps.Create(As(admin), "Magasin", null);
+        Assert.Null(err);
+        Assert.Empty(ScreenFolderOps.Rows(As(ines)));                       // vide : un membre ne le voit pas
+        Assert.Single(ScreenFolderOps.Rows(As(admin)));
+
+        Assert.Equal(1, ScreenFolderOps.Move(As(admin), [caisse1.Id], f!.Id).Moved);
+        Assert.Single(ScreenFolderOps.Rows(As(ines)));                      // il contient un écran qu'elle voit
+        Assert.Empty(ScreenFolderOps.Rows(As(tom)));
+        Assert.NotNull(ScreenFolderOps.Rename(As(ines), f.Id, "X"));        // ni propriétaire ni administrateur
+
+        Assert.Null(ScreenFolderOps.Delete(As(admin), f.Id));
+        Assert.Null(caisse1.FolderId);
+        Assert.Empty(db.ScreenFolders);
+        Assert.Contains(db.Screens, s => s.Id == caisse1.Id);
+    }
+
+    [Fact]
+    public void Wall_members_do_not_go_into_screen_folders()
+    {
+        var (_, f) = ScreenFolderOps.Create(As(admin), "A", null);
+        var wall = new Zone { Name = "Mur", Kind = Zone.Wall, WallCols = 2, WallRows = 1 };
+        area.Zones.Add(wall);
+        caisse1.ZoneId = wall.Id;
+        var (moved, refused) = ScreenFolderOps.Move(As(admin), [caisse1.Id, caisse2.Id], f!.Id);
+        Assert.Equal(1, moved);
+        Assert.Single(refused);
+        Assert.Null(caisse1.FolderId);
+    }
 }

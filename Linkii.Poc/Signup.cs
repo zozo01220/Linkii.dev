@@ -37,7 +37,7 @@ public static class Signup
     /// le jeton est retourné). Une adresse déjà prise par une inscription jamais validée est libérée : la nouvelle inscription la remplace.
     /// </summary>
     public static (Tenant? Client, User? Admin, string? Token, string? Error) Create(Db db, Reseller reseller, string org, string name, string email,
-        string? password, ExternalIdentity? external, Consents consents, DateTime now, bool expert = false)
+        string? password, ExternalIdentity? external, Consents consents, DateTime now, bool expert = false, string? trialCode = null)
     {
         if (!consents.Terms) return (null, null, null, "Acceptez les conditions générales pour créer votre espace.");
         if (external == null && string.IsNullOrEmpty(password)) return (null, null, null, "Choisissez un mot de passe.");
@@ -50,6 +50,7 @@ public static class Signup
         var (client, err) = Tenancy.CreateClient(db, reseller, org, name, email, external == null ? password : null, source: source);
         if (client == null) return (null, null, null, err == "Cette adresse e-mail est déjà utilisée." ? "Cette adresse a déjà un espace. Connectez-vous." : err);
         var admin = db.Users.Last();
+        if (Billing.FindCode(db, trialCode) is { } tc) { client.TrialCode = tc.Code; tc.Uses++; }
         admin.TermsVersion = Terms.Version; admin.TermsAcceptedUtc = now;
         admin.MarketingOptIn = consents.Marketing; admin.MarketingOptInUtc = consents.Marketing ? now : null;
         admin.NewsOptIn = consents.News; admin.NewsOptInUtc = consents.News ? now : null;
@@ -120,9 +121,16 @@ public static class Signup
         u.VerifyTokenHash = null;
         u.VerifyExpiresUtc = null;
         u.VerifySends.Clear();
-        if (client != null && SignupSources.IsSelfService(client.SignupSource) && client.TrialEndsUtc == null && u.Id == OwnerOf(db, client)?.Id)
-            client.TrialEndsUtc = now.AddDays(Math.Max(1, db.Platform.TrialDays));
+        if (client != null && SignupSources.IsSelfService(client.SignupSource) && client.TrialEndsUtc == null && !client.Subscribed && u.Id == OwnerOf(db, client)?.Id)
+        {
+            client.TrialEndsUtc = now.AddDays(TrialDaysOf(db, client));
+            client.Plan = db.Platform.TrialPlan == Plans.Base ? Plans.Base : Plans.Growth;   // l'essai donne la licence choisie dans la console (Growth d'office)
+        }
     }
+
+    /// <summary>Durée d'essai d'une organisation : celle de son code d'essai, sinon la durée par défaut.</summary>
+    public static int TrialDaysOf(Db db, Tenant c) =>
+        c.TrialCode != null && db.Platform.TrialCodes.FirstOrDefault(t => t.Code == c.TrialCode) is { } tc ? Math.Max(1, tc.Days) : Math.Max(1, db.Platform.TrialDays);
 
     /// <summary>Prolonge l'essai de days jours (à partir d'aujourd'hui s'il est terminé) ; les écrans reprennent.</summary>
     public static void Extend(Tenant c, int days, DateTime now)
@@ -202,13 +210,13 @@ public static class Signup
 }
 
 /// <summary>
-/// Toutes les 30 minutes : supprime les inscriptions jamais validées, envoie le rappel 2 jours avant la fin de l'essai,
-/// et prévient les écrans d'une organisation dont l'essai vient de se terminer (ils affichent « Essai terminé »).
+/// Toutes les 30 minutes : supprime les inscriptions jamais validées, traite les échéances (renouvellement, résiliation arrivée à terme),
+/// prévient les écrans d'une organisation dont l'essai vient de se terminer (« Essai terminé »), envoie les e-mails programmés du parcours
+/// (voir <see cref="Lifecycle"/>) et supprime les espaces sans plan au terme de la conservation.
 /// </summary>
-public class SignupWorker(JsonStore store, Mailer mail, Notifier notifier, AlertService alerts, ResellerResolver resolver, ILogger<SignupWorker> log) : BackgroundService
+public class SignupWorker(JsonStore store, Notifier notifier, AlertService alerts, LifecycleMail lifecycle, ILogger<SignupWorker> log) : BackgroundService
 {
     public static readonly TimeSpan Every = TimeSpan.FromMinutes(30);
-    public static readonly TimeSpan ReminderBefore = TimeSpan.FromDays(2);
 
     protected override async Task ExecuteAsync(CancellationToken stop)
     {
@@ -231,30 +239,154 @@ public class SignupWorker(JsonStore store, Mailer mail, Notifier notifier, Alert
         });
         if (purged.Count > 0) log.LogInformation("Inscriptions jamais validées supprimées : {Emails}", string.Join(", ", purged));
 
-        var reminders = store.Read(db => db.Clients
-            .Where(c => c.InTrial(now) && c.TrialEndsUtc - now <= ReminderBefore && c.TrialReminderSentUtc == null)
-            .Select(c => (Client: c, Owner: Signup.OwnerOf(db, c), Reseller: db.Resellers.FirstOrDefault(r => r.Id == c.ResellerId)))
-            .Where(x => x.Owner != null && x.Reseller != null).ToList());
-        foreach (var (c, owner, r) in reminders)
+        // Échéances : résiliations arrivées à terme, renouvellements (simulation : réussis, ou refusés si la console l'a demandé)
+        var due = store.Write(db => Billing.RunDue(db, now));
+        foreach (var d in due)
         {
-            var app = resolver.LoginUrl(r!)[..^"login".Length];
-            var err = await mail.SendTrialReminder(r!, app, owner!.Name, owner.Email, c.Name, Signup.Day(c, c.TrialEndsUtc!.Value), c.TrialDaysLeft(now));
-            if (err != null) log.LogWarning("Rappel de fin d'essai non envoyé à {Email} : {Error}", owner.Email, err);
-            // rappel ci-dessus : envoyé au créateur de l'espace quels que soient les réglages ; l'alerte prévient les autres destinataires choisis
-            await alerts.Raise(c.Id, Alerts.Billing, "Votre essai se termine bientôt", $"Il reste {c.TrialDaysLeft(now)} jour(s) d'essai gratuit.", "/", skipEmail: owner.Email);
-            store.Write(db => { if (db.Clients.FirstOrDefault(x => x.Id == c.Id) is { } x) x.TrialReminderSentUtc = now; });   // une seule tentative
+            if (d.Kind == "renewed") continue;   // le reçu viendra de Stripe ; en simulation, rien à envoyer
+            await notifier.NotifyClient(d.ClientId);
+            if (d.Kind == "failed")
+            {
+                var n = store.Read(db => db.Clients.FirstOrDefault(c => c.Id == d.ClientId) is { } c ? Lifecycle.PaymentFailed(db, c) : null);
+                if (n != null) await lifecycle.Send(d.ClientId, n, allAdmins: true);
+            }
         }
 
+        // Fin d'essai sans plan : écrans prévenus, conservation avant suppression (espaces en libre-service seulement), e-mail « Essai terminé »
         var ended = store.Write(db =>
         {
-            var list = db.Clients.Where(c => c.TrialEnded(now) && c.TrialEndedNotifiedUtc == null).ToList();
-            foreach (var c in list) c.TrialEndedNotifiedUtc = now;
-            return list.Select(c => c.Id).ToList();
+            var list = db.Clients.Where(c => c.TrialEnded(now) && !c.Subscribed && c.TrialEndedNotifiedUtc == null).ToList();
+            var mails = new List<(Guid, Notice?)>();
+            foreach (var c in list)
+            {
+                c.TrialEndedNotifiedUtc = now;
+                if (SignupSources.IsSelfService(c.SignupSource)) c.DeleteOnUtc ??= Billing.DeleteDateAfter(db, now);
+                mails.Add((c.Id, c.DeleteOnUtc != null ? Lifecycle.TrialEnded(db, c) : null));
+            }
+            return mails;
         });
-        foreach (var id in ended)
+        foreach (var (id, n) in ended)
         {
             await notifier.NotifyClient(id);
-            await alerts.Raise(id, Alerts.Billing, "Essai gratuit terminé", "L'espace est suspendu : choisissez un abonnement pour le réactiver.", "/");
+            if (n != null) await lifecycle.Send(id, n);
+            const string title = "Essai gratuit terminé", body = "Vos écrans ne diffusent plus : choisissez un plan pour les réactiver.";
+            if (n != null) await alerts.RaisePush(id, Alerts.Billing, title, body, "/" + Lifecycle.AbonnementPath);   // l'e-mail vient de partir
+            else await alerts.Raise(id, Alerts.Billing, title, body, "/" + Lifecycle.AbonnementPath);
+        }
+
+        await RunScheduled(now);
+        await RunDeletions(now);
+        await RunEnterprise(now);
+    }
+
+    /// <summary>Offre Entreprise : rappels de fin de pilote (7 et 2 jours) et d'échéance des licences sur site (60, 30, 7 jours), au contact et à l'équipe Linkii.</summary>
+    public async Task RunEnterprise(DateTime now)
+    {
+        if (Subscriptions.ToLocal(now).Hour < Lifecycle.SendHour) return;
+        var todo = store.Write(db =>
+        {
+            var list = new List<(Reseller R, string Email, string Name, Notice N)>();
+            var def = db.Resellers.FirstOrDefault(r => r.IsDefault);
+            var team = db.Users.Where(u => u.Role == Roles.PlatformAdmin && !u.Disabled).Select(u => (u.Email, u.Name)).ToList();
+            void Add(Guid resellerId, string email, string name, Notice n)
+            {
+                if ((db.Resellers.FirstOrDefault(r => r.Id == resellerId) ?? def) is { } r) list.Add((r, email, name, n));
+                if (def != null) foreach (var (e, nm) in team) list.Add((def, e, nm, n with { Subject = "[Copie] " + n.Subject, Button = null, Path = null }));
+            }
+            foreach (var o in db.Opportunities.Where(o => o.Status == OpportunityStates.Pilot && o.PilotEndsUtc is { } e && e > now))
+            {
+                var left = (int)Math.Ceiling((o.PilotEndsUtc!.Value - now).TotalDays);
+                var hit = Enterprise.PilotWarnings.Where(w => left <= w && !o.Sent.Contains("pilot" + w)).ToList();
+                if (hit.Count == 0) continue;
+                o.Sent.AddRange(hit.Select(w => "pilot" + w));
+                Add(o.ResellerId, o.Email, o.Name, Enterprise.PilotEnding(o, left, o.PilotEndsUtc!.Value.ToString("d MMMM yyyy", Signup.Fr)));
+            }
+            foreach (var l in db.Licenses.Where(l => !l.Revoked && l.ExpiresUtc > now))
+            {
+                var left = (int)Math.Ceiling((l.ExpiresUtc - now).TotalDays);
+                var hit = Enterprise.LicenseWarnings.Where(w => left <= w && !l.Sent.Contains("lic" + w)).ToList();
+                if (hit.Count == 0) continue;
+                l.Sent.AddRange(hit.Select(w => "lic" + w));
+                var name = db.Opportunities.FirstOrDefault(o => o.Id == l.OpportunityId)?.Name ?? "";
+                Add(l.ResellerId, l.Email, name, Enterprise.LicenseEnding(l, left));
+            }
+            return list;
+        });
+        foreach (var (r, email, name, n) in todo) await lifecycle.SendTo(r, new[] { (email, name) }, n);
+    }
+
+    /// <summary>E-mails programmés (à partir de 9 h, heure de l'organisation) : premiers pas, astuces, rappel de fin d'essai, avertissements de suppression.</summary>
+    public async Task RunScheduled(DateTime now)
+    {
+        var todo = store.Write(db =>
+        {
+            var p = db.Platform;
+            var list = new List<(Guid Id, Notice N, bool All, bool Reminder)>();
+            foreach (var c in db.Clients.Where(c => SignupSources.IsSelfService(c.SignupSource) && !c.Blocked && !c.Suspended))
+            {
+                if (Lifecycle.LocalHour(c, now) < Lifecycle.SendHour) continue;
+                var owner = Signup.OwnerOf(db, c);
+                if (owner == null || !Signup.IsVerified(owner)) continue;
+                if (c.InTrial(now) && !c.Subscribed)
+                {
+                    var day = Lifecycle.TrialDay(db, c, now);
+                    var paired = db.Screens.Any(s => s.ClientId == c.Id && s.Token != null);
+                    if (owner.NewsOptIn && p.MailFirstSteps && day >= 1 && !paired && Mark(c, "first")) list.Add((c.Id, Lifecycle.FirstSteps(c), false, false));
+                    var tips = Lifecycle.TipDays(Signup.TrialDaysOf(db, c));
+                    for (var i = 0; i < tips.Length; i++)
+                        if (owner.NewsOptIn && p.MailTips && day >= tips[i] && Mark(c, "tip" + tips[i]))
+                            list.Add((c.Id, Lifecycle.Tip(c, db.Playlists.Any(x => x.ClientId == c.Id && x.Draft.Count > 0), i), false, false));
+                    if (c.TrialEndsUtc - now <= TimeSpan.FromDays(Math.Max(1, p.TrialReminderDays)) && c.TrialReminderSentUtc == null)
+                    {
+                        c.TrialReminderSentUtc = now;   // une seule tentative
+                        list.Add((c.Id, Lifecycle.TrialReminder(db, c, c.TrialDaysLeft(now)), false, true));
+                    }
+                }
+                if (c.DeleteOnUtc is { } del && !c.Subscribed && del > now)
+                {
+                    // le plus proche des seuils atteints ; les seuils plus lointains déjà dépassés sont marqués sans envoi
+                    var left = (int)Math.Ceiling((del - now).TotalDays);
+                    var hit = Lifecycle.DeleteWarnings.Where(w => left <= w && !c.LifecycleSent.Contains("del" + w)).ToList();
+                    if (hit.Count > 0)
+                    {
+                        foreach (var w in hit) c.LifecycleSent.Add("del" + w);
+                        list.Add((c.Id, Lifecycle.DeleteWarning(c, left), true, false));
+                    }
+                }
+            }
+            return list;
+        });
+        foreach (var (id, n, all, reminder) in todo)
+        {
+            await lifecycle.Send(id, n, all);
+            // rappel de fin d'essai : l'alerte prévient aussi les autres destinataires choisis (application, téléphone)
+            if (reminder) await alerts.RaisePush(id, Alerts.Billing, "Votre essai se termine bientôt", n.Title, "/" + Lifecycle.AbonnementPath);
+        }
+    }
+
+    /// <summary>Note qu'un e-mail du parcours est parti : faux s'il était déjà parti.</summary>
+    private static bool Mark(Tenant c, string key) { if (c.LifecycleSent.Contains(key)) return false; c.LifecycleSent.Add(key); return true; }
+
+    /// <summary>Espaces sans plan arrivés au terme de la conservation : supprimés définitivement, puis « Bonne continuation » au propriétaire.</summary>
+    public async Task RunDeletions(DateTime now)
+    {
+        var gone = store.Write(db =>
+        {
+            var list = new List<(Reseller R, string Email, string Name, string Org, List<string> Files)>();
+            foreach (var c in db.Clients.Where(c => c.DeleteOnUtc is { } del && del <= now && !c.Subscribed && SignupSources.IsSelfService(c.SignupSource)).ToList())
+            {
+                var owner = Signup.OwnerOf(db, c);
+                var r = db.Resellers.FirstOrDefault(x => x.Id == c.ResellerId);
+                var files = Signup.RemoveClient(db, c.Id);
+                if (r != null && owner != null) list.Add((r, owner.Email, owner.Name, c.Name, files));
+                log.LogInformation("Espace « {Org} » supprimé au terme de la conservation", c.Name);
+            }
+            return list;
+        });
+        foreach (var g in gone)
+        {
+            foreach (var f in g.Files) try { File.Delete(Path.Combine(AppPaths.MediaDir, Path.GetFileName(f))); } catch (IOException) { }
+            await lifecycle.SendTo(g.R, new[] { (g.Email, g.Name) }, Lifecycle.Deleted(g.Org));
         }
     }
 }

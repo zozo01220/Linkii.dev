@@ -1,0 +1,69 @@
+@inject JsonStore Root
+
+@* Fenêtre de paiement : le seul endroit où le client paie. En mode simulation, elle remplace Stripe (paiement réussi ou refusé, carte fictive) ;
+   en mode Stripe, c'est ici que s'ouvriront Checkout et le portail client (pas encore branché). *@
+<div class="modal-backdrop" @onclick="Cancel"></div>
+<div class="modal app-modal sm pay-dlg" role="dialog" aria-modal="true" aria-labelledby="pay-title">
+    <div class="modal-head">
+        <h3 id="pay-title">@(Request.Amount > 0 ? "Paiement" : AskCard ? "Carte de paiement" : "Confirmation")</h3>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Cancel"><Ico Name="x" Size="18" /></button>
+    </div>
+    <div class="modal-body">
+        @if (stripe)
+        {
+            <p class="hint" style="margin:0">Le paiement en ligne (Stripe) n'est pas encore branché sur ce serveur. Repassez la console en mode simulation pour essayer le parcours.</p>
+        }
+        else
+        {
+            <div class="pay-sim"><Ico Name="info" Size="15" /> Paiement simulé · Stripe n'est pas encore branché</div>
+            <div class="pay-amt">
+                <span class="v">@Lifecycle.Chf(Request.Amount)</span>
+                <b>@Request.Label</b>
+                @if (Request.Detail.Length > 0) { <small>@Request.Detail</small> }
+            </div>
+            @if (AskCard)
+            {
+                <div class="pay-card">
+                    <div><label class="lbl" for="pay-num">Numéro de carte (fictif)</label><input id="pay-num" class="full mono" @bind="number" autocomplete="off" inputmode="numeric" /></div>
+                    <div><label class="lbl" for="pay-exp">Expiration</label><input id="pay-exp" class="full mono" @bind="expiry" placeholder="MM/AA" autocomplete="off" /></div>
+                </div>
+                <p class="hint" style="margin:8px 0 0">Seuls les 4 derniers chiffres et la date d'expiration sont gardés. Avec Stripe, la carte sera saisie chez Stripe.</p>
+            }
+        }
+    </div>
+    <div class="modal-foot">
+        @if (stripe)
+        {
+            <button type="button" class="btn" @onclick="Cancel">Fermer</button>
+        }
+        else
+        {
+            <button type="button" class="btn danger" @onclick="() => Done(false)">Simuler un refus</button>
+            <span class="grow"></span>
+            <button type="button" class="btn" @onclick="() => Done(true)">@(Request.Amount > 0 ? "Simuler un paiement réussi" : "Simuler l'enregistrement")</button>
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>Résultat : payé (ou carte enregistrée), refusé, ou fenêtre fermée sans rien faire. Last4 / Expiry : carte saisie (AskCard).</summary>
+    public record Outcome(bool Paid, bool Cancelled, string Last4, string Expiry);
+
+    [Parameter, EditorRequired] public PayRequest Request { get; set; } = default!;
+    /// <summary>Demander une carte (premier abonnement, changement de carte).</summary>
+    [Parameter] public bool AskCard { get; set; }
+    [Parameter] public EventCallback<Outcome> OnDone { get; set; }
+
+    private bool stripe;
+    private string number = "4242 4242 4242 4242", expiry = DateTime.UtcNow.AddYears(3).ToString("MM'/'yy", System.Globalization.CultureInfo.InvariantCulture);
+
+    protected override void OnInitialized() => stripe = Root.Read(d => d.Platform.PaymentMode) == PaymentModes.Stripe;
+
+    private Task Cancel() => OnDone.InvokeAsync(new(false, true, "", ""));
+
+    private Task Done(bool paid)
+    {
+        var digits = new string(number.Where(char.IsDigit).ToArray());
+        return OnDone.InvokeAsync(new(paid, false, digits.Length >= 4 ? digits[^4..] : "", expiry.Trim()));
+    }
+}

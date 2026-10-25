@@ -271,11 +271,22 @@ else if (SelClient is { } sc)
                 <div class="adm-acts">
                     @if (Subscriptions.CanRecord(sc.C.NextRenewalUtc, now)) { <button type="button" class="btn ok-o sm" @onclick="() => PayClient(sc)">@(sc.C.NextRenewalUtc == null ? "Premier paiement reçu" : "Paiement reçu")</button> }
                     @if (clientPayments.FirstOrDefault() is { } last) { <button type="button" class="btn ghost sm" @onclick="() => Undo(last)">Annuler le dernier paiement</button> }
-                </div></div>
+                </div>
+                @if (simulation && sc.C.NextRenewalUtc != null && sc.C.CancelAtUtc == null)
+                {
+                    @* Simulation (Stripe pas branché) : l'échéance est payée d'office ; on peut demander qu'elle soit refusée pour essayer le blocage. *@
+                    <div class="adm-ln" style="margin-top:8px"><span>Simulation : prochaine échéance<span class="adm-sub">Payée d'office le @sc.C.NextRenewalUtc.Value.ToString("d MMM yyyy", Fr), sauf si vous choisissez « Refusée » : le compte est alors bloqué et les administrateurs prévenus.</span></span>
+                        <span class="adm-seg"><button type="button" class="@(!sc.C.SimNextRenewalFails ? "on" : "")" @onclick="() => SimFail(sc, false)">Payée</button><button type="button" class="@(sc.C.SimNextRenewalFails ? "on" : "")" @onclick="() => SimFail(sc, true)">Refusée</button></span></div>
+                }
+                @if (sc.C.PendingPlan != null || sc.C.PendingPeriod != null || sc.C.CancelAtUtc != null)
+                {
+                    <div class="adm-note" style="margin-top:6px">@(sc.C.CancelAtUtc is { } ca ? $"Résilié par le client : fin le {ca:d MMM yyyy}." : "")@(sc.C.PendingPlan != null ? " Passage à Base à l'échéance." : "")@(sc.C.PendingPeriod != null ? $" Facturation {(sc.C.PendingPeriod == "annual" ? "annuelle" : "mensuelle")} à l'échéance." : "")</div>
+                }
+            </div>
             <div class="adm-sec"><span class="lb">Historique des paiements</span>
                 @foreach (var h in clientPayments)
                 {
-                    <div class="adm-ln"><span style="color:var(--ink)">@Subscriptions.ToLocal(h.PaidUtc).ToString("d MMM yyyy", Fr)<span class="adm-sub">@(h.First ? "premier paiement" : h.Period == "annual" ? "renouvellement annuel" : "renouvellement mensuel") · jusqu'au @h.ToUtc.ToString("d MMM yyyy", Fr)@(h.Commission > 0 ? " · commission " + Subscriptions.Fmt(h.Commission) : "")</span></span><span class="m">@Subscriptions.Fmt(h.Amount)</span></div>
+                    <div class="adm-ln"><span style="color:var(--ink)">@Subscriptions.ToLocal(h.PaidUtc).ToString("d MMM yyyy", Fr)<span class="adm-sub">@(h.Label.Length > 0 ? h.Label : h.First ? "premier paiement" : h.Period == "annual" ? "renouvellement annuel" : "renouvellement mensuel")@(h.Simulated ? " (simulé)" : "") · jusqu'au @h.ToUtc.ToString("d MMM yyyy", Fr)@(h.Commission > 0 ? " · commission " + Subscriptions.Fmt(h.Commission) : "")</span></span><span class="m">@Subscriptions.Fmt(h.Amount)</span></div>
                 }
                 @if (clientPayments.Count == 0) { <div class="adm-note">Aucun paiement enregistré.</div> }
             </div>
@@ -293,6 +304,13 @@ else if (SelClient is { } sc)
     private static readonly string[] Palette = { "#0B1F3A", "#2A7F62", "#B9792B", "#7A5CC0", "#C0392B", "#2A8A99", "#5A6B80" };
 
     private DateTime now = DateTime.UtcNow;
+    private bool simulation => Root.Read(d => d.Platform.PaymentMode) == PaymentModes.Simulation;
+
+    private void SimFail(CRow c, bool fails)
+    {
+        Root.Write(d => { if (d.Clients.FirstOrDefault(x => x.Id == c.C.Id) is { } x) x.SimNextRenewalFails = fails; });
+        Load();
+    }
     private int year, month;
     private string tab = "Clients", filter = "Tous";
     private Guid? selR, selC;

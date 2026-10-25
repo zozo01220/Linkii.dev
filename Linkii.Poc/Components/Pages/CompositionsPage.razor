@@ -4,6 +4,7 @@
 @using Microsoft.JSInterop
 @inject AppService Svc
 @inject MediaLibrary Library
+@inject CompositionLibrary Folders
 @inject TenantStore Store
 @inject Toaster Toast
 @inject NavigationManager Nav
@@ -15,13 +16,57 @@
 
 <div class="page-head">
     <div>
-        <h1>Compositions</h1>
+        <h1 class="cmp-h1">
+            @if (tab != "models" && currentRow is { } cur)
+            {
+                <button type="button" class="lx-crumb @(dropOver == RootDrop ? "drop-target" : "")" @onclick="() => OpenFolder(null)"
+                        @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = RootDrop; }" @ondragleave="() => { if (dropOver == RootDrop) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(null)">Compositions</button>
+                @foreach (var c in crumbs.Take(crumbs.Count - 1))
+                {
+                    var row = c;
+                    <span class="lx-sl">/</span>
+                    <button type="button" class="lx-crumb @(dropOver == row.Folder.Id ? "drop-target" : "")" @onclick="() => OpenFolder(row.Folder.Id)"
+                            @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = row.Folder.Id; }" @ondragleave="() => { if (dropOver == row.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(row.Folder.Id)">@row.Folder.Name</button>
+                }
+                <span class="lx-sl">/</span>
+                <span>@cur.Folder.Name</span>
+                <span class="lx-right @(cur.Right == FolderRight.Read ? "ro" : "")"><Ico Name="@(cur.Right == FolderRight.Read ? "lock" : "folder")" Size="12" /> @RightLabel(cur)</span>
+                <SharePill Summary="FolderSum(cur.Folder.Id)" Long="true" Clickable="multi && cur.Right == FolderRight.Owner" ReadOnly="cur.Right == FolderRight.Read" OwnerName="@(cur.Folder.OwnerId == me ? null : cur.OwnerName)" OnClick="() => ShareFolder(cur)" />
+            }
+            else
+            {
+                <span>Compositions</span>
+            }
+        </h1>
         <p class="sub">Vos propres pages d'affichage : textes, formes, images, QR codes et horloge, à placer dans vos listes de lecture.</p>
     </div>
-    @if (installed && canWrite)
+    @if (installed && (CanCreateHere || CanCreateFolderHere || (multi && currentRow is { Right: FolderRight.Owner })))
     {
         <div class="row head-actions">
-            <button type="button" class="btn" data-fab="Créer une composition" @onclick="Create"><Ico Name="plus" Size="16" /> Créer une composition</button>
+            @if (multi && tab != "models" && currentRow is { Right: FolderRight.Owner } here)
+            {
+                <button type="button" class="btn btn-share lx-share" @onclick="() => ShareFolder(here)"><Ico Name="users" Size="16" /> Partager…</button>
+            }
+            @if (CanCreateHere)
+            {
+                <div class="lx-split">
+                    <button type="button" class="btn" data-fab="Créer une composition" @onclick="Create"><Ico Name="plus" Size="16" /> Créer une composition</button>
+                    @if (CanCreateFolderHere) { <button type="button" class="btn ghost lx-appfolder" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /> Nouveau dossier</button> }
+                    @if (CanCreateFolderHere)
+                    {
+                        <button type="button" class="btn lx-car" aria-label="Autres créations" aria-haspopup="menu" aria-expanded="@(newMenu ? "true" : "false")" @onclick="() => newMenu = !newMenu"><Ico Name="chevron" Size="14" /></button>
+                        @if (newMenu)
+                        {
+                            <div class="kebab-backdrop" @onclick="() => newMenu = false"></div>
+                            <div class="kebab-menu" role="menu">
+                                <button type="button" role="menuitem" @onclick="() => { newMenu = false; Create(); }"><Ico Name="grid" Size="16" /> Nouvelle composition</button>
+                                <button type="button" role="menuitem" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /> Nouveau dossier@(currentRow is { } cf ? $" dans « {cf.Folder.Name} »" : "")</button>
+                            </div>
+                        }
+                    }
+                </div>
+            }
+            else if (CanCreateFolderHere) { <button type="button" class="btn ghost" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /> Nouveau dossier</button> }
         </div>
     }
 </div>
@@ -108,14 +153,14 @@ else
             </div>
         }
     }
-    else if (Shown.Count == 0 && tab == LibraryTab.Shared)
+    else if (scopeItems.Count == 0 && subfolders.Count == 0 && folderId == null && tab == LibraryTab.Shared)
     {
         <div class="empty">
             <div class="big">Rien n'a encore été partagé avec vous</div>
-            <p>Quand un collègue vous partage une composition, elle apparaît ici. Vous pouvez la placer dans vos listes de lecture, ou la dupliquer pour l'adapter.</p>
+            <p>Quand un collègue vous partage une composition ou un dossier, il apparaît ici. Vous pouvez la placer dans vos listes de lecture, ou la dupliquer pour l'adapter.</p>
         </div>
     }
-    else if (Shown.Count == 0)
+    else if (scopeItems.Count == 0 && subfolders.Count == 0 && folderId == null)
     {
         <div class="empty">
             <div class="big">Aucune composition</div>
@@ -128,39 +173,175 @@ else
     }
     else
     {
-        <div class="cmp-grid">
-            @foreach (var c in Shown)
+        <div class="lx-status">
+            <span class="lx-appoff">@Plural(Shown.Count, "composition", "compositions")@(folderRows.Count > 0 ? $" · {Plural(folderRows.Count, "dossier", "dossiers")}" : "")</span>
+            @if (currentRow is { Right: FolderRight.Read })
+            {
+                <span>Vous pouvez utiliser ces compositions, pas les modifier. Dupliquez-en une pour l'adapter.</span>
+            }
+        </div>
+
+        <section class="lx-fzone" aria-label="Dossiers">
+        @* Dossiers de la position ouverte : mêmes formes, aperçus et actions que la Médiathèque (FolderShape, .lx-fcard), cibles du glisser-déposer. *@
+        @if (subfolders.Count > 0 || CanCreateFolderHere)
+        {
+            <div class="lx-fstrip lx-fgrid" role="list" aria-label="Dossiers">
+                @foreach (var row in subfolders)
+                {
+                    var r = row;
+                    var mine = r.Folder.OwnerId == me;
+                    var sum = FolderSum(r.Folder.Id);
+                    var preview = FolderPreview(r.Folder.Id);
+                    var canMenu = r.Right == FolderRight.Owner;
+                    <div data-nid="@r.Folder.Id" class="lx-fcard @(dropOver == r.Folder.Id ? "drop-target" : "")" role="listitem" tabindex="0" draggable="@(r.Right == FolderRight.Owner && !inApp ? "true" : null)" @ondragstart="() => { dragFolder = r.Folder.Id; }" @ondragend="EndDrag" title="@FolderTitle(r)" aria-label="Ouvrir le dossier @r.Folder.Name"
+                         @onclick="() => OpenFolder(r.Folder.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenFolder(r.Folder.Id); }'
+                         @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0 || (dragFolder != null && dragFolder != r.Folder.Id)) dropOver = r.Folder.Id; }" @ondragleave="() => { if (dropOver == r.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(r.Folder.Id)"
+                         @oncontextmenu="() => { if (canMenu) menuFor = r.Folder.Id; }" @oncontextmenu:preventDefault="inApp && canMenu">
+                        <FolderShape Preview="preview" All="files" Count="ChildCount(r.Folder.Id)" Unit="@FolderUnit(r.Folder.Id)">
+                            <Thumb Context="pm"><CompositionThumb Item="pm" Files="files" Contain Label="@("Aperçu de " + pm.Name)" /></Thumb>
+                            <Badge>
+                                @if (r.Right == FolderRight.Read) { <span class="fbadge ro" title="Dossier de @r.OwnerName"><Ico Name="lock" Size="11" /> @(tab == LibraryTab.Mine ? "Lecture seule" : First(r.OwnerName))</span> }
+                                else if (r.Right == FolderRight.Write) { <span class="fbadge lvl" title="Dossier de @r.OwnerName, vous pouvez le modifier"><Ico Name="users" Size="11" /> @First(r.OwnerName)</span> }
+                                else if (sum.Any) { <span class="fbadge @(sum.Everyone != null ? "lvl" : "sh")"><Ico Name="users" Size="11" /> @(sum.Everyone != null ? "Partagé · tous" : $"Partagé · {sum.People}")</span> }
+                                else if (!mine && tab != LibraryTab.Mine && r.Folder.OwnerId != null) { <span class="fbadge sh" title="Dossier de @r.OwnerName">@First(r.OwnerName)</span> }
+                            </Badge>
+                        </FolderShape>
+                        <div class="fn"><span>@r.Folder.Name</span><small>@FolderDate(r)</small></div>
+                        @if (canMenu)
+                        {
+                            <button type="button" class="fk" aria-label="Actions pour le dossier @r.Folder.Name" aria-haspopup="menu" aria-expanded="@(menuFor == r.Folder.Id ? "true" : "false")"
+                                    @onclick:stopPropagation="true" @onclick="() => menuFor = menuFor == r.Folder.Id ? null : r.Folder.Id"><Ico Name="dots-v" Size="16" /></button>
+                        }
+                        @if (menuFor == r.Folder.Id)
+                        {
+                            <div class="kebab-backdrop" @onclick:stopPropagation="true" @onclick="() => menuFor = null"></div>
+                            <div class="kebab-menu" role="menu" @onclick:stopPropagation="true">
+                                <span class="kebab-note">@r.Folder.Name · @(mine ? "votre dossier" : $"dossier de {r.OwnerName}") · @(sum.Any ? "partagé" : "non partagé")</span>
+                                @if (multi) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; ShareFolder(r); }"><Ico Name="users" Size="16" /> Partager…</button> }
+                                @if (r.Right == FolderRight.Owner)
+                                {
+                                    <button type="button" role="menuitem" @onclick="() => { menuFor = null; renamingFolder = r; renameFolderValue = r.Folder.Name; folderError = null; }"><Ico Name="edit" Size="16" /> Renommer</button>
+                                    <button type="button" role="menuitem" @onclick="() => { menuFor = null; reparenting = (r.Folder.Id, r.Folder.Name); }"><Ico Name="move" Size="16" /> Déplacer…</button>
+                                    <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deletingFolder = r; }"><Ico Name="trash" Size="16" /> Supprimer</button>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+                @if (CanCreateFolderHere)
+                {
+                    <button type="button" class="lx-fcard add" @onclick="OpenNewFolder">
+                        <div class="fv"><span class="fbk"></span><span class="ffr"><Ico Name="plus" Size="22" /></span></div>
+                        <div class="fn"><span>Nouveau dossier</span></div>
+                    </button>
+                }
+            </div>
+        }
+        </section>
+
+        <section class="lx-blk lx-blk-main" aria-label="Compositions">
+        <div class="lx-bh"><Ico Name="grid" Size="16" /> <span>Compositions</span> <small>@Sorted.Count()</small></div>
+        <div class="lx-tools" role="region" aria-label="Recherche et filtres">
+            <div class="search-box">
+                <Ico Name="search" Size="16" />
+                <input placeholder="Rechercher dans toutes les compositions" aria-label="Rechercher des compositions" @bind="search" @bind:event="oninput" />
+            </div>
+            @if (Active) { <span class="lx-count" aria-live="polite">@Plural(Sorted.Count(), "résultat", "résultats")</span> }
+            <FilterMenu Groups="FilterGroups" Extra="@(folderId != null && !scopeAll ? 1 : 0)" OnPick="PickFilter" OnReset="ResetFilters">
+                <Footer>
+                    @if (folderId != null)
+                    {
+                        <div class="fm-note"><span>Chercher dans : @(scopeAll ? "toutes les compositions" : "ce dossier")</span><button type="button" class="linklike" @onclick="() => scopeAll = !scopeAll">Changer</button></div>
+                    }
+                </Footer>
+            </FilterMenu>
+            <select @bind="sort" class="tb-sort" aria-label="Trier">
+                <option value="name">Nom</option>
+                <option value="used">Plus utilisées</option>
+            </select>
+            <ViewToggle StorageKey="compositions" @bind-Value="view" />
+        </div>
+        <FilterChips Groups="FilterGroups" Extra="FilterExtras" OnClear="ClearFilter" OnResetAll="ResetFilters" />
+
+        @if (!Sorted.Any())
+        {
+            @if (Active) { <div class="empty"><div class="big">Aucune composition ne correspond</div><button type="button" class="btn ghost sm" @onclick='() => { search = ""; filter = ""; }'>Effacer la recherche et les filtres</button></div> }
+            else if (subfolders.Count == 0 && currentRow is { } fe)
+            {
+                <div class="empty compact">
+                    <div class="big">Ce dossier est vide</div>
+                    @if (CanCreateHere)
+                    {
+                        <p>Créez une composition dans « @fe.Folder.Name », ou glissez-y des compositions depuis « Compositions ».</p>
+                        <button type="button" class="btn" @onclick="Create"><Ico Name="plus" Size="16" /> Créer une composition</button>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="empty compact">
+                    <div class="big">@(currentRow is { } re ? $"Aucune composition dans « {re.Folder.Name} »" : "Aucune composition à la racine")</div>
+                    <p>@(folderId == null ? "Vos compositions sont rangées dans les dossiers ci-dessus." : "Ses compositions sont rangées dans les sous-dossiers ci-dessus.")@(CanCreateHere ? " Créez ici une composition qui n'a pas besoin de dossier." : "")</p>
+                    @if (CanCreateHere) { <button type="button" class="btn" @onclick="Create"><Ico Name="plus" Size="16" /> Créer une composition</button> }
+                </div>
+            }
+        }
+        else
+        {
+        @if (view == "list")
+        {
+        <div class="lx-tbl-wrap">
+            <table class="lx-tbl">
+                <thead>
+                    <tr>
+                        <th><button type="button" class="@(sort == "name" ? "on" : "")" @onclick='() => sort = "name"'>Nom</button></th>
+                        <th>Emplacement</th>
+                        <th>Format</th>
+                        <th><button type="button" class="@(sort == "used" ? "on" : "")" @onclick='() => sort = "used"'>Listes</button></th>
+                        <th>Propriétaire</th>
+                        <th style="width:44px"><span class="sr-only">Actions</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var c in Sorted)
+                    {
+                        var it = c;
+                        var lists = usage.GetValueOrDefault(it.Id) ?? new();
+                        var size = Compositions.Size(it.Settings);
+                        var r = rights.GetValueOrDefault(it.Id);
+                        var csum = shares.GetValueOrDefault(it.Id, ShareSummary.None);
+                        <tr data-nid="@it.Id" class="@(dragIds.Contains(it.Id) ? "dragging" : "")" draggable="@(r >= FolderRight.Write ? "true" : "false")" @ondragstart="() => StartDrag(it)" @ondragend="EndDrag">
+                            <td><div class="nm"><span class="mini"><CompositionThumb Item="it" Files="files" Contain Label="@("Aperçu de " + it.Name)" /></span>
+                                @if (r >= FolderRight.Write) { <a href="/compositions/@it.Id">@it.Name</a> } else { <span title="Lecture seule : dupliquez-la pour l'adapter">@it.Name</span> }
+                                @if (csum.Any) { <SharePill Summary="csum" Clickable="multi && r == FolderRight.Owner" OnClick="() => Share(ShareKind.Composition, it.Id, it.Name)" /> }
+                                @if (r == FolderRight.Read) { <span title="Lecture seule"><Ico Name="lock" Size="13" /></span> }</div></td>
+                            <td><small>@PathOf(it)</small></td>
+                            <td><small>@(size is { } s ? $"{s.W} × {s.H}" : "Format inconnu")</small></td>
+                            <td><small>@(lists.Count == 0 ? "aucune liste" : lists.Count == 1 ? "« " + lists[0] + " »" : $"{lists.Count} listes")</small></td>
+                            <td><small>@(OwnerName(it.OwnerId) ?? "Moi")</small></td>
+                            <td>@Menu(it)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        }
+        @* sur mobile, toujours en cartes (pas de bascule) *@
+        <div class="cmp-grid @(view == "list" ? "lx-mobile-only" : "")">
+            @foreach (var c in Sorted)
             {
                 var it = c;
                 var lists = usage.GetValueOrDefault(it.Id) ?? new();
                 var size = Compositions.Size(it.Settings);
                 var r = rights.GetValueOrDefault(it.Id);
                 var csum = shares.GetValueOrDefault(it.Id, ShareSummary.None);
-                <article class="cmp-card" data-nid="@it.Id">
+                <article class="cmp-card @(dragIds.Contains(it.Id) ? "dragging" : "")" data-nid="@it.Id" draggable="@(r >= FolderRight.Write ? "true" : "false")" @ondragstart="() => StartDrag(it)" @ondragend="EndDrag">
                     @if (r >= FolderRight.Write) { <a class="cmp-open" href="/compositions/@it.Id" aria-label="Modifier « @it.Name »"><CompositionThumb Item="it" Files="files" Contain Label="@("Aperçu de " + it.Name)" /></a> }
                     else { <div class="cmp-open" title="Lecture seule : dupliquez-la pour l'adapter"><CompositionThumb Item="it" Files="files" Contain Label="@("Aperçu de " + it.Name)" /></div> }
                     <div class="cmp-info">
                         <div class="cmp-t">
                             <b title="@it.Name">@it.Name</b>
-                            <div class="kebab">
-                                <button type="button" class="kebab-btn" aria-label="Actions pour @it.Name" aria-haspopup="menu" aria-expanded="@(menuFor == it.Id ? "true" : "false")" @onclick="() => menuFor = menuFor == it.Id ? null : it.Id"><Ico Name="dots-v" Size="18" /></button>
-                                @if (menuFor == it.Id)
-                                {
-                                    <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
-                                    <div class="kebab-menu" role="menu">
-                                        @if (r >= FolderRight.Write)
-                                        {
-                                            <a role="menuitem" href="/compositions/@it.Id"><Ico Name="edit" Size="16" /> Modifier</a>
-                                            <button type="button" role="menuitem" @onclick="() => StartRename(it.Id, it.Name, false)"><Ico Name="pencil-square" Size="16" /> Renommer…</button>
-                                        }
-                                        @if (canWrite) { <button type="button" role="menuitem" @onclick="() => Duplicate(it)"><Ico Name="copy" Size="16" /> Dupliquer</button> }
-                                        @if (multi && r == FolderRight.Owner) { <button type="button" role="menuitem" @onclick="() => Share(ShareKind.Composition, it.Id, it.Name)"><Ico Name="share" Size="16" /> Partager…</button> }
-                                        @if (canWrite) { <button type="button" role="menuitem" @onclick="() => SaveAsTemplate(it)"><Ico Name="grid" Size="16" /> Enregistrer comme modèle</button> }
-                                        @if (tab == LibraryTab.Shared && tabs.GetValueOrDefault(it.Id)?.SharedIn == true) { <button type="button" role="menuitem" class="danger" @onclick="() => Leave(ShareKind.Composition, it.Id, it.Name)"><Ico Name="eye-off" Size="16" /> Ne plus voir</button> }
-                                        @if (r == FolderRight.Owner) { <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = it; }"><Ico Name="trash" Size="16" /> Supprimer…</button> }
-                                    </div>
-                                }
-                            </div>
+                            @Menu(it)
                         </div>
                         <span class="cmp-m">@(size is { } s ? $"{s.W} × {s.H}" : "Format inconnu") · @(lists.Count == 0 ? "dans aucune liste" : lists.Count == 1 ? "dans « " + lists[0] + " »" : $"dans {lists.Count} listes")</span>
                         @if (OwnerName(it.OwnerId) is { } ow) { <span class="lx-chip cmp-own" title="@OwnerTitle(ow, r)"><Ico Name="users" Size="12" /> @First(ow)</span> }
@@ -169,7 +350,69 @@ else
                 </article>
             }
         </div>
+        }
+        </section>
     }
+    <NewMark Kind="compofolder" Ids="@folderRows.Select(r => r.Folder.Id)" />
+}
+
+@if (creatingFolder)
+{
+    <div class="modal-backdrop" @onclick="() => creatingFolder = false"></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="nfc-title">
+        <h3 id="nfc-title">Nouveau dossier@(folderId is { } ? $" dans « {currentRow?.Folder.Name} »" : "")</h3>
+        <input style="width:100%;margin-top:10px" placeholder="Nom du dossier" maxlength="60" aria-label="Nom du dossier" @bind="newFolderName" @bind:event="oninput" @onkeydown='e => { if (e.Key == "Enter") CreateFolder(); }' />
+        @if (folderError != null) { <div class="err">@folderError</div> }
+        @if (multi) { <p class="hint">Il est à vous : partagez-le ensuite avec des collègues, « Peut utiliser » ou « Peut modifier ».</p> }
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => creatingFolder = false">Annuler</button>
+            <button class="btn" disabled="@string.IsNullOrWhiteSpace(newFolderName)" @onclick="CreateFolder">Créer</button>
+        </div>
+    </div>
+}
+
+@if (renamingFolder is { } rf)
+{
+    <div class="modal-backdrop" @onclick="() => renamingFolder = null"></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="rnfc-title">
+        <h3 id="rnfc-title">Renommer le dossier</h3>
+        <input style="width:100%;margin-top:10px" maxlength="60" aria-label="Nom du dossier" @bind="renameFolderValue" @bind:event="oninput" @onkeydown='e => { if (e.Key == "Enter") RenameFolder(rf); }' />
+        @if (folderError != null) { <div class="err">@folderError</div> }
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => renamingFolder = null">Annuler</button>
+            <button class="btn" disabled="@string.IsNullOrWhiteSpace(renameFolderValue)" @onclick="() => RenameFolder(rf)">Renommer</button>
+        </div>
+    </div>
+}
+
+@if (deletingFolder is { } df)
+{
+    var tree = FolderTree(df.Folder.Id);
+    var inside = items.Where(c => c.FolderId is { } fid && tree.Contains(fid)).ToList();
+    var inLists = inside.SelectMany(c => usage.GetValueOrDefault(c.Id) ?? new()).Distinct().ToList();
+    <div class="modal-backdrop" @onclick="() => deletingFolder = null"></div>
+    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="dfc-title">
+        <h3 id="dfc-title">Supprimer le dossier « @df.Folder.Name » ?</h3>
+        <p class="hint">Le dossier, ses sous-dossiers et leurs compositions@(inside.Count > 0 ? $" ({Plural(inside.Count, "visible", "visibles")} ici)" : "") seront supprimés. Les images de la médiathèque ne sont pas supprimées. Cette action est définitive.</p>
+        @if (inLists.Count > 0)
+        {
+            <p class="hint">Elles sont utilisées par @(inLists.Count == 1 ? "la liste" : $"{inLists.Count} listes") : <b>@string.Join(", ", inLists.Take(5))@(inLists.Count > 5 ? $" et {inLists.Count - 5} autre(s)" : "")</b>. Elles en seront retirées ; les écrans gardent leur version actuelle jusqu'à leur prochaine publication.</p>
+        }
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => deletingFolder = null">Annuler</button>
+            <button class="btn danger-solid" @onclick="() => DeleteFolder(df)">Supprimer</button>
+        </div>
+    </div>
+}
+
+@if (reparenting is { } rp)
+{
+    <FolderReparentDialog Kind="@ShareKind.CompositionFolder" FolderId="rp.Id" FolderName="@rp.Name" OnClose="MovedFolder" />
+}
+
+@if (compMove is { } cm)
+{
+    <CompositionMoveDialog Items="cm" OnClose='n => { compMove = null; if (n > 0) { Toast.Ok(n > 1 ? $"{n} compositions rangées." : "Composition rangée."); Load(); } }' />
 }
 
 @if (renaming is { } rn)
@@ -224,6 +467,222 @@ else
 }
 
 @code {
+    // ---------- Dossiers (25 octobre 2026) : comme la Médiathèque et les Listes de lecture, liés aux onglets ----------
+    private static readonly Guid RootDrop = Guid.Empty;   // cible « racine » du glisser-déposer (fil d'Ariane)
+    private bool canCreateRoot, inApp;
+    private Guid? folderId;                                  // dossier ouvert ; null : racine
+    private List<CompositionFolderRow> folderRows = new();   // dossiers vus par la personne
+    private List<CompositionFolderRow> subfolders = new(), crumbs = new();
+    private HashSet<Guid> tabFolders = new();                // dossiers de l'onglet ouvert (et leurs sous-dossiers)
+    private List<MediaItem> scopeItems = new();              // compositions de l'onglet ouvert, dossiers de l'onglet compris
+    private int sharedRoots;
+    private Dictionary<Guid, ShareSummary> folderShares = new();
+    private bool creatingFolder;
+    private string newFolderName = "", renameFolderValue = "";
+    private string? folderError;
+    private CompositionFolderRow? renamingFolder, deletingFolder;
+    private (Guid Id, string Name)? reparenting;
+    private List<(Guid Id, string Name)>? compMove;
+    private List<Guid> dragIds = new();
+    private Guid? dragFolder, dropOver;
+
+    private CompositionFolderRow? currentRow => folderId is { } id ? folderRows.FirstOrDefault(r => r.Folder.Id == id) : null;
+    // Une composition se crée à la racine comme avant ; dans un dossier, il faut y écrire. Rien ne se crée à la racine de « Partagées avec moi » (dossiers).
+    private bool CanCreateHere => canWrite && (folderId is null || currentRow is { } c && c.Right >= FolderRight.Write);
+    private bool CanCreateFolderHere => tab != "models" && (folderId is null ? canCreateRoot && tab != LibraryTab.Shared : currentRow is { } c && c.Right >= FolderRight.Write);
+
+    private ShareSummary FolderSum(Guid id) => folderShares.GetValueOrDefault(id, ShareSummary.None);
+    private void ShareFolder(CompositionFolderRow r) => Share(ShareKind.CompositionFolder, r.Folder.Id, r.Folder.Name);
+    private static string Plural(int n, string one, string many) => $"{n} {(n > 1 ? many : one)}";
+
+    private string RightLabel(CompositionFolderRow r) =>
+        r.Folder.OwnerId == me ? (r.Shared ? "Votre dossier" : "Votre dossier · privé")
+        : r.Right switch
+        {
+            FolderRight.Read => $"Lecture seule · dossier de {r.OwnerName}",
+            FolderRight.Write => $"Écriture · dossier de {r.OwnerName}",
+            _ => $"Administrateur · dossier de {r.OwnerName}"
+        };
+
+    private string FolderTitle(CompositionFolderRow r) => (r.Folder.OwnerId == me ? "Votre dossier" : $"Dossier de {r.OwnerName}") + (r.Right == FolderRight.Read ? " · lecture seule" : r.Shared ? " · partagé" : " · privé");
+
+    private static readonly System.Globalization.CultureInfo Fr = new("fr-FR");
+    private string FolderDate(CompositionFolderRow r)
+    {
+        var d = r.Folder.CreatedUtc.ToLocalTime();
+        return "créé le " + d.ToString(d.Year == DateTime.Now.Year ? "d MMM" : "d MMM yyyy", Fr);
+    }
+
+    private int ChildCount(Guid id) => items.Count(c => c.FolderId == id) + folderRows.Count(r => r.Folder.ParentId == id);
+    private string FolderUnit(Guid id) => FolderShape.UnitFor(items.Count(c => c.FolderId == id), folderRows.Count(r => r.Folder.ParentId == id), "composition", "compositions");
+
+    // les trois premières compositions d'un dossier : vignettes de sa carte
+    private List<MediaItem> FolderPreview(Guid folder) => items.Where(c => c.FolderId == folder).OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).Take(3).ToList();
+
+    // Le dossier et tous ses sous-dossiers
+    private HashSet<Guid> FolderTree(Guid id)
+    {
+        var tree = new HashSet<Guid>();
+        var queue = new Queue<Guid>(new[] { id });
+        while (queue.Count > 0)
+        {
+            var cur = queue.Dequeue();
+            if (!tree.Add(cur)) continue;
+            foreach (var r in folderRows.Where(x => x.Folder.ParentId == cur)) queue.Enqueue(r.Folder.Id);
+        }
+        return tree;
+    }
+
+    // Ce qui dépend de l'onglet et du dossier ouvert : dossiers de l'onglet, compositions de sa portée, dossiers affichés et fil d'Ariane
+    private void Rebuild()
+    {
+        if (tab == "models") { tabFolders = new(); scopeItems = new(); subfolders = new(); crumbs = new(); return; }
+        (HashSet<Guid> Folders, List<MediaItem> Items) Scope(string t)
+        {
+            var fs = LibraryTab.Folders(t, folderRows.Select(r => (r.Folder.Id, r.Folder.ParentId, r.Tab)), me, isAdmin);
+            return (fs, items.Where(m => (tabs.TryGetValue(m.Id, out var i) ? LibraryTab.InTab(t, i, me, isAdmin) : t == LibraryTab.All) || m.FolderId is { } f && fs.Contains(f)).ToList());
+        }
+        (tabFolders, scopeItems) = Scope(tab);
+        sharedRoots = 0;
+        if (multi && !readAll)
+        {
+            var (sf, sl) = Scope(LibraryTab.Shared);
+            sharedRoots = folderRows.Count(r => sf.Contains(r.Folder.Id) && (r.Folder.ParentId is not { } p || !sf.Contains(p))) + sl.Count(m => m.FolderId is not { } f || !sf.Contains(f));
+        }
+        subfolders = folderRows.Where(r => folderId is { } fid ? r.Folder.ParentId == fid : tabFolders.Contains(r.Folder.Id) && (r.Folder.ParentId is not { } p || !tabFolders.Contains(p))).ToList();
+        crumbs = new();
+        for (var cur = currentRow; cur != null && crumbs.Count < FolderAccess.MaxDepth; cur = cur.Folder.ParentId is { } p ? folderRows.FirstOrDefault(r => r.Folder.Id == p) : null)
+            crumbs.Insert(0, cur);
+    }
+
+    private void OpenFolder(Guid? id) { folderId = id; menuFor = null; scopeAll = true; Rebuild(); }
+
+    // ---------- Bloc des compositions : recherche, filtres, tri, affichage Cartes / Liste (comme les Listes de lecture) ----------
+    private string view = "cards", sort = "name", filter = "", search = "";   // filter : "" | used | unused
+    private bool scopeAll = true, newMenu;   // recherche et filtres : toutes les compositions (défaut) ou le dossier ouvert
+    private bool Active => search.Length > 0 || filter != "";
+    private bool ShowPath => Active && scopeAll;
+    private int UsedIn(MediaItem c) => usage.TryGetValue(c.Id, out var l) ? l.Count : 0;
+
+    private IReadOnlyList<FilterGroup> FilterGroups => new[]
+    {
+        new FilterGroup("use", "Utilisation", filter, new List<FilterOption>
+        {
+            new("", "Toutes"),
+            new("used", "Dans une liste", scopeItems.Count(c => UsedIn(c) > 0), "Placées dans au moins une liste de lecture"),
+            new("unused", "Dans aucune liste", scopeItems.Count(c => UsedIn(c) == 0))
+        })
+    };
+    private IReadOnlyList<FilterExtra> FilterExtras => folderId != null && !scopeAll ? new[] { new FilterExtra("Dans : ce dossier", () => scopeAll = true) } : Array.Empty<FilterExtra>();
+    private void PickFilter((string Key, string Value) p) => filter = p.Value;
+    private void ClearFilter(string key) => filter = "";
+    private void ResetFilters() { scopeAll = true; filter = ""; }
+
+    // Position ouverte (sauf recherche ou filtre dans toutes les compositions), puis filtrées et triées
+    private IEnumerable<MediaItem> Sorted
+    {
+        get
+        {
+            var pool = ShowPath ? scopeItems : Shown;
+            var q = pool.Where(c => filter switch { "used" => UsedIn(c) > 0, "unused" => UsedIn(c) == 0, _ => true })
+                .Where(c => search.Length == 0 || c.Name.Contains(search, StringComparison.OrdinalIgnoreCase));
+            return sort == "used"
+                ? q.OrderByDescending(UsedIn).ThenBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase)
+                : q.OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase);
+        }
+    }
+
+    // Emplacement d'une composition : chemin de son dossier, ou la racine
+    private string PathOf(MediaItem c)
+    {
+        if (c.FolderId is not { } fid || folderRows.FirstOrDefault(r => r.Folder.Id == fid) is not { } row) return !multi ? "Compositions" : OwnerName(c.OwnerId) is { } ow ? $"Compositions de {ow}" : "Mes compositions";
+        var names = new List<string>();
+        for (var cur = row; cur != null && names.Count < FolderAccess.MaxDepth; cur = cur.Folder.ParentId is { } pid ? folderRows.FirstOrDefault(r => r.Folder.Id == pid) : null)
+            names.Insert(0, cur.Folder.Name);
+        return string.Join(" › ", names);
+    }
+
+    // Menu ⋮ d'une composition (carte et ligne de la liste)
+    private RenderFragment Menu(MediaItem it) => __builder =>
+    {
+        var r = rights.GetValueOrDefault(it.Id);
+        <div class="kebab">
+            <button type="button" class="kebab-btn" aria-label="Actions pour @it.Name" aria-haspopup="menu" aria-expanded="@(menuFor == it.Id ? "true" : "false")" @onclick="() => menuFor = menuFor == it.Id ? null : it.Id"><Ico Name="dots-v" Size="18" /></button>
+            @if (menuFor == it.Id)
+            {
+                <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                <div class="kebab-menu" role="menu">
+                    @if (r >= FolderRight.Write)
+                    {
+                        <a role="menuitem" href="/compositions/@it.Id"><Ico Name="edit" Size="16" /> Modifier</a>
+                        <button type="button" role="menuitem" @onclick="() => StartRename(it.Id, it.Name, false)"><Ico Name="pencil-square" Size="16" /> Renommer…</button>
+                    }
+                    @if (canWrite) { <button type="button" role="menuitem" @onclick="() => Duplicate(it)"><Ico Name="copy" Size="16" /> Dupliquer</button> }
+                    @if (r >= FolderRight.Write) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; compMove = new() { (it.Id, it.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
+                    @if (multi && r == FolderRight.Owner) { <button type="button" role="menuitem" @onclick="() => Share(ShareKind.Composition, it.Id, it.Name)"><Ico Name="share" Size="16" /> Partager…</button> }
+                    @if (canWrite) { <button type="button" role="menuitem" @onclick="() => SaveAsTemplate(it)"><Ico Name="grid" Size="16" /> Enregistrer comme modèle</button> }
+                    @if (tab == LibraryTab.Shared && tabs.GetValueOrDefault(it.Id)?.SharedIn == true) { <button type="button" role="menuitem" class="danger" @onclick="() => Leave(ShareKind.Composition, it.Id, it.Name)"><Ico Name="eye-off" Size="16" /> Ne plus voir</button> }
+                    @if (r == FolderRight.Owner) { <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = it; }"><Ico Name="trash" Size="16" /> Supprimer…</button> }
+                </div>
+            }
+        </div>
+    };
+
+    private void OpenNewFolder() { newMenu = false; newFolderName = ""; folderError = null; creatingFolder = true; }
+
+    private void CreateFolder()
+    {
+        var (error, _) = Folders.CreateFolder(newFolderName, folderId);
+        if (error != null) { folderError = error; return; }
+        creatingFolder = false;
+        Toast.Ok($"Dossier « {newFolderName.Trim()} » créé.");
+        Load();
+    }
+
+    private void RenameFolder(CompositionFolderRow rf)
+    {
+        var error = Folders.RenameFolder(rf.Folder.Id, renameFolderValue);
+        if (error != null) { folderError = error; return; }
+        renamingFolder = null;
+        Toast.Ok("Dossier renommé.");
+        Load();
+    }
+
+    private void DeleteFolder(CompositionFolderRow df)
+    {
+        var error = Folders.DeleteFolder(df.Folder.Id);
+        deletingFolder = null;
+        if (error != null) { Toast.Error(error); return; }
+        if (folderId == df.Folder.Id) folderId = df.Folder.ParentId;
+        Toast.Ok($"Dossier « {df.Folder.Name} » supprimé.");
+        Load();
+    }
+
+    private void MovedFolder(bool moved) { reparenting = null; if (moved) Load(); }
+
+    // Glisser-déposer : une composition, ou un dossier, vers un dossier (ou la racine, null)
+    private void StartDrag(MediaItem c) => dragIds = new List<Guid> { c.Id };
+    private void EndDrag() { dragIds = new(); dragFolder = null; dropOver = null; }
+
+    private void DropOn(Guid? target)
+    {
+        if (dragFolder is { } df)   // un dossier glissé sur un autre : il y entre
+        {
+            EndDrag();
+            if (target is { } t && t != df) { var err = Folders.MoveFolder(df, t); if (err != null) Toast.Error(err); else Toast.Ok("Dossier déplacé."); Load(); }
+            return;
+        }
+        var ids = dragIds.ToList();
+        EndDrag();
+        if (ids.Count == 0) return;
+        var (moved, refused) = Folders.MoveCompositions(ids, target);
+        if (refused.Count > 0) Toast.Error(refused[0] + (refused.Count > 1 ? $" (et {refused.Count - 1} autre{(refused.Count > 2 ? "s" : "")})" : ""));
+        if (moved > 0) Toast.Ok(moved > 1 ? $"{moved} compositions rangées." : "Composition rangée.");
+        Load();
+    }
+}
+
+@code {
     private bool installed;
     private string tab = LibraryTab.Mine, sub = "gallery";
 
@@ -237,7 +696,8 @@ else
     private (string Kind, Guid Id, string Name)? sharing;
     private record TabItem(string Key, string Label, int Count);
 
-    private List<MediaItem> Shown => items.Where(m => tabs.TryGetValue(m.Id, out var i) ? LibraryTab.InTab(tab, i, me, isAdmin) : tab == LibraryTab.All).ToList();
+    // Position ouverte : à la racine d'un onglet, ses compositions hors de ses dossiers ; dans un dossier, tout ce qu'il contient
+    private List<MediaItem> Shown => (folderId == null ? scopeItems.Where(m => m.FolderId is not { } f || !tabFolders.Contains(f)) : items.Where(m => m.FolderId == folderId)).ToList();
     private List<CompositionTemplate> MyTemplates => templates.Where(t => !tplTabs.TryGetValue(t.Id, out var i) || readAll || LibraryTab.IsMine(i, me, isAdmin)).ToList();
     private List<CompositionTemplate> SharedTemplates => readAll ? new() : templates.Where(t => tplTabs.TryGetValue(t.Id, out var i) && LibraryTab.InTab(LibraryTab.Shared, i, me, isAdmin)).ToList();
     private List<CompositionTemplate> ShownTemplates => sub == "shared" ? SharedTemplates : MyTemplates;
@@ -247,7 +707,7 @@ else
         : new List<TabItem>
         {
             new(LibraryTab.Mine, "Mes compositions", items.Count(m => tabs.TryGetValue(m.Id, out var i) && LibraryTab.IsMine(i, me, isAdmin))),
-            new(LibraryTab.Shared, "Partagées avec moi", items.Count(m => tabs.TryGetValue(m.Id, out var i) && LibraryTab.InTab(LibraryTab.Shared, i, me, isAdmin)))
+            new(LibraryTab.Shared, "Partagées avec moi", sharedRoots)
         }.Concat(isAdmin ? [new TabItem(LibraryTab.All, "Toute l'organisation", 0)] : Array.Empty<TabItem>()).ToList();
 
     // Élément d'un autre : nom de son propriétaire (null : le sien, ou un élément de l'organisation vu par un administrateur)
@@ -301,7 +761,7 @@ else
         readAll = !isAdmin && !canWrite;   // médiathèque (et donc compositions) en « Voit tout · lecture seule »
         (rights, tabs, shares, tplRights, tplTabs, tplShares) = Store.Read(d => (
             items.ToDictionary(m => m.Id, m => CompositionRights.RightOf(d, m)),
-            items.ToDictionary(m => m.Id, m => CompositionRights.TabOf(d, ShareKind.Composition, m.Id, m.OwnerId)),
+            items.ToDictionary(m => m.Id, m => CompositionRights.TabOf(d, ShareKind.Composition, m.Id, m.OwnerId, m.FolderId)),
             ItemShareOps.Summaries(d, ShareKind.Composition),
             templates.ToDictionary(t => t.Id, t => CompositionRights.RightOf(d, t)),
             templates.ToDictionary(t => t.Id, t => CompositionRights.TabOf(d, ShareKind.Template, t.Id, t.OwnerId)),
@@ -312,6 +772,10 @@ else
             else if (tab == LibraryTab.All && !isAdmin) tab = LibraryTab.Mine;
         }
         if (sub == "shared" && SharedTemplates.Count == 0) sub = "mine";
+        canCreateRoot = Store.Read(CompositionFolderOps.CanCreateAtRoot);
+        (folderRows, folderShares) = Store.Read(d => (CompositionFolderOps.Rows(d), ItemShareOps.Summaries(d, ShareKind.CompositionFolder)));
+        if (folderId is { } open && !folderRows.Any(r => r.Folder.Id == open)) folderId = null;   // dossier retiré entre-temps
+        Rebuild();
         files = Library.PickableFiles().Where(m => m.Type == "image" && m.Status == null && m.FileName != null).ToList();
         usage = Store.Read(d => d.Playlists.SelectMany(p => p.Draft.Select(i => (i.MediaId, p.Name)))
             .Where(x => items.Any(c => c.Id == x.MediaId)).GroupBy(x => x.MediaId).ToDictionary(g => g.Key, g => g.Select(x => x.Name).Distinct().ToList()));
@@ -322,17 +786,22 @@ else
 
     private void SetTab(string t)
     {
-        tab = t; menuFor = null; galDrawn = false; galKey++;
+        tab = t; menuFor = null; galDrawn = false; galKey++; folderId = null;
+        Rebuild();
         if (t == "models") return;
         try { Store.Write(d => { if (d.Users.FirstOrDefault(u => u.Id == d.Access.UserId) is { } u) u.LibraryTabs["compositions"] = t; }); }
         catch (UnauthorizedAccessException) { }   // lecture seule : l'onglet n'est pas retenu
     }
     private void SetSub(string s) { sub = s; menuFor = null; galDrawn = false; galKey++; }
 
-    private void Create() => Nav.NavigateTo("/compositions/new?back=%2Fcompositions");
+    private void Create() => Nav.NavigateTo("/compositions/new?back=%2Fcompositions" + (folderId is { } f ? "&folder=" + f : ""));
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            try { inApp = await JS.InvokeAsync<bool>("linkiiPrefs.isApp"); if (inApp) StateHasChanged(); } catch (JSException) { } catch (InvalidOperationException) { } catch (JSDisconnectedException) { }
+        }
         if (tab != "models" || sub != "gallery" || galDrawn || !installed) return;
         galDrawn = true;
         self ??= DotNetObjectReference.Create(this);
@@ -382,6 +851,7 @@ else
         var name = it.Name.Length > 70 ? it.Name[..70] : it.Name;
         var (copy, errors) = Svc.SaveInstance(Compositions.AppId, null, name + " (copie)", new Dictionary<string, string>(it.Settings));
         if (errors.Count > 0 || copy == null) { Toast.Error(errors.FirstOrDefault() ?? "Duplication impossible."); return; }
+        Folders.PlaceNew(copy.Id, it.FolderId);   // la copie reste dans le dossier de l'original si on peut y écrire
         Toast.Ok($"« {copy.Name} » créée.");
         Load();
     }

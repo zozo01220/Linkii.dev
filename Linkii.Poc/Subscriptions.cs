@@ -26,6 +26,10 @@ public class Payment
     public decimal Commission { get; set; }
     /// <summary>Premier paiement : fixe la date anniversaire et met fin à l'essai.</summary>
     public bool First { get; set; }
+    /// <summary>Paiement simulé (Stripe pas encore branché) : compte comme un vrai, effaçable d'un coup dans la console.</summary>
+    public bool Simulated { get; set; }
+    /// <summary>Paiement hors renouvellement (écran ajouté, passage à Growth) : ne déplace pas la date anniversaire. Vide : renouvellement.</summary>
+    public string Label { get; set; } = "";
 }
 
 /// <summary>Versement d'un mois à un revendeur (dernier jour du mois) : enregistré à la main une fois le virement fait.</summary>
@@ -194,12 +198,17 @@ public static class Subscriptions
     public static bool CanRecord(DateTime? next, DateTime now) => next == null || next.Value.Date <= now.Date.AddDays(7);
 
     /// <summary>Enregistre le paiement d'un renouvellement d'un client (direct ou d'un revendeur). null : rien à enregistrer (renouvellement pas encore proche).</summary>
-    public static Payment? RecordClient(Db db, Tenant c, DateTime now)
+    public static Payment? RecordClient(Db db, Tenant c, DateTime now, bool simulated = false)
     {
         if (!CanRecord(c.NextRenewalUtc, now)) return null;
         var first = c.NextRenewalUtc == null;
         var from = first ? now : c.NextRenewalUtc!.Value;
-        if (first) { c.AnchorDay = now.Day; c.TrialEndsUtc = null; c.TrialReminderSentUtc = null; c.TrialEndedNotifiedUtc = null; }
+        if (first) c.AnchorDay = now.Day;
+        // premier paiement (ou premier prélèvement à la fin d'un essai déjà abonné) : fin de l'essai et de la conservation avant suppression
+        if (c.TrialEndsUtc != null || first) { c.TrialEndsUtc = null; c.TrialReminderSentUtc = null; c.TrialEndedNotifiedUtc = null; c.DeleteOnUtc = null; c.LifecycleSent.Clear(); }
+        if (c.PendingPlan is { } pending) { c.Plan = pending; c.PendingPlan = null; }   // passage à Base programmé : à l'échéance
+        if (c.PendingPeriod is { } per) { c.BillingPeriod = per; c.PendingPeriod = null; }   // mensuel ↔ annuel : idem
+        first = !db.Payments.Any(p => p.ClientId == c.Id);
         var amount = ClientAmount(db, c);
         var fee = FeeOf(db, amount);
         var reseller = db.Resellers.FirstOrDefault(r => r.Id == c.ResellerId);
@@ -208,7 +217,20 @@ public static class Subscriptions
         c.NextRenewalUtc = next;
         if (c.Blocked && c.BlockedReason == PaymentReason && next.Date >= now.Date) { c.Blocked = false; c.BlockedReason = ""; }
         var pay = new Payment { ClientId = c.Id, ResellerId = c.ResellerId, Name = c.Name, PaidUtc = now, FromUtc = from, ToUtc = next, Period = c.BillingPeriod, Screens = ScreensOf(db, c),
-            Amount = amount, Fee = fee, CommissionPct = pct, Commission = CommissionOf(amount, fee, pct, reseller is not { IsDefault: false }), First = first };
+            Amount = amount, Fee = fee, CommissionPct = pct, Commission = CommissionOf(amount, fee, pct, reseller is not { IsDefault: false }), First = first, Simulated = simulated };
+        db.Payments.Add(pay);
+        return pay;
+    }
+
+    /// <summary>Paiement hors renouvellement (écran ajouté, passage à Growth, au prorata) : la date anniversaire ne bouge pas.</summary>
+    public static Payment? RecordExtra(Db db, Tenant c, decimal amount, string label, DateTime now, bool simulated)
+    {
+        if (amount <= 0) return null;
+        var fee = FeeOf(db, amount);
+        var reseller = db.Resellers.FirstOrDefault(r => r.Id == c.ResellerId);
+        var pct = reseller == null ? 0 : CommissionPct(db, reseller);
+        var pay = new Payment { ClientId = c.Id, ResellerId = c.ResellerId, Name = c.Name, PaidUtc = now, FromUtc = now, ToUtc = c.NextRenewalUtc ?? now, Period = c.BillingPeriod,
+            Screens = ScreensOf(db, c), Amount = amount, Fee = fee, CommissionPct = pct, Commission = CommissionOf(amount, fee, pct, reseller is not { IsDefault: false }), Simulated = simulated, Label = label };
         db.Payments.Add(pay);
         return pay;
     }
@@ -243,7 +265,7 @@ public static class Subscriptions
 }
 
 /// <summary>Applique le blocage faute de paiement : au démarrage puis toutes les heures, et prévient les écrans concernés.</summary>
-public class SubscriptionWorker(JsonStore store, Notifier notifier, AlertService alerts, ILogger<SubscriptionWorker> log) : BackgroundService
+public class SubscriptionWorker(JsonStore store, Notifier notifier, AlertService alerts, LifecycleMail lifecycle, ILogger<SubscriptionWorker> log) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -257,7 +279,8 @@ public class SubscriptionWorker(JsonStore store, Notifier notifier, AlertService
                 foreach (var id in ids.Distinct())
                 {
                     await notifier.NotifyClient(id);
-                    await alerts.Raise(id, Alerts.Billing, "Espace suspendu", "Le paiement de l'abonnement n'a pas été reçu à la date prévue : l'espace est suspendu.", "/");
+                    if (store.Read(db => db.Clients.FirstOrDefault(c => c.Id == id) is { } c ? Lifecycle.PaymentFailed(db, c) : null) is { } n) await lifecycle.Send(id, n, allAdmins: true);
+                    await alerts.RaisePush(id, Alerts.Billing, "Espace suspendu", "Le paiement de l'abonnement n'a pas été reçu à la date prévue : l'espace est suspendu.", "/");
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning(ex, "Blocage faute de paiement"); }

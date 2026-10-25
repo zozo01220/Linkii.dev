@@ -58,6 +58,7 @@
             <NavLink class="nav" href="admin" Match="NavLinkMatch.All"><Ico Name="gauge" Size="18" /> Tableau de bord</NavLink>
             <div class="nav-sep" role="separator"></div>
             <NavLink class="nav" href="admin/clients"><Ico Name="building" Size="18" /> Clients</NavLink>
+            <NavLink class="nav" href="admin/opportunities"><Ico Name="mail-send" Size="18" /> Opportunités</NavLink>
             <NavLink class="nav" href="admin/resellers"><Ico Name="team" Size="18" /> Revendeurs</NavLink>
             <NavLink class="nav" href="admin/billing"><Ico Name="chart" Size="18" /> Facturation</NavLink>
             <div class="nav-sep" role="separator"></div>
@@ -174,17 +175,28 @@
         {
             <div class="trial-bar ended"><Ico Name="lock" Size="16" /><span><b>Votre espace est suspendu.</b> Vos écrans ne diffusent plus. Vous pouvez toujours consulter et préparer vos contenus. <a href="@siteUrl" target="_blank" rel="noopener">Contactez-nous</a> pour le réactiver.</span></div>
         }
-        @if (trialEnd is { } end)
+        @if (subEndedLabel != null)
+        {
+            <div class="trial-bar ended"><Ico Name="hourglass" Size="16" /><span class="grow"><b>Votre abonnement est terminé.</b> Vos écrans ne diffusent plus.@(deleteLabel != null ? $" Vos contenus seront supprimés le {deleteLabel}." : "")</span>@PlanButton("Reprendre un plan")</div>
+        }
+        else if (trialEnd is { } end)
         {
             var left = (int)Math.Ceiling((end - DateTime.UtcNow).TotalDays);
             @if (left <= 0)
             {
-                <div class="trial-bar ended"><Ico Name="hourglass" Size="16" /><span><b>Votre essai gratuit est terminé.</b> Vos écrans affichent « Essai terminé ». <a href="@siteUrl" target="_blank" rel="noopener">Contactez-nous</a> pour vous abonner.</span></div>
+                <div class="trial-bar ended"><Ico Name="hourglass" Size="16" /><span class="grow"><b>Votre essai gratuit est terminé.</b> Vos écrans affichent « Essai terminé ».@(deleteLabel != null ? $" Vos contenus seront supprimés le {deleteLabel}." : "")</span>@PlanButton("Choisir mon plan")</div>
             }
             else
             {
-                <div class="trial-bar soon"><Ico Name="hourglass" Size="16" /><span><b>@left jour@(left > 1 ? "s" : "") restant@(left > 1 ? "s" : "")</b> dans votre période d'essai (jusqu'au @trialEndLabel).</span></div>
+                @* bandeau de l'essai : orange les derniers jours *@
+                var total = Math.Max(1, trialTotal);
+                <div class="trial-bar @(left <= 2 ? "soon" : "")"><Ico Name="hourglass" Size="16" /><span class="grow"><b>Essai gratuit</b> · @left jour@(left > 1 ? "s" : "") restant@(left > 1 ? "s" : "") (jusqu'au @trialEndLabel)@(left <= 2 ? " : choisissez un plan pour que vos écrans continuent de diffuser." : ", toutes les fonctions incluses.")</span>
+                    <span class="trial-meter" aria-hidden="true"><i style="width:@(Math.Clamp(100 - left * 100 / total, 4, 100))%"></i></span>@PlanButton("Choisir mon plan")</div>
             }
+        }
+        else if (cancelLabel != null && orgAdmin)
+        {
+            <div class="trial-bar soon"><Ico Name="calendar" Size="16" /><span class="grow">Abonnement résilié : vos écrans diffusent jusqu'au <b>@cancelLabel</b>.</span>@PlanButton("Annuler la résiliation")</div>
         }
         <header class="topbar">
             <button type="button" class="nav-toggle" aria-label="Menu" aria-expanded="@(navOpen ? "true" : "false")" @onclick="() => { navOpen = !navOpen; open = false; }"><Ico Name="menu" Size="22" /></button>
@@ -263,6 +275,7 @@
                     <div class="grab"></div>
                     <div class="mh"><span class="avatar">@Initials</span><div class="who2"><b>@(userName)</b><small>@orgName</small></div><button type="button" class="mx" aria-label="Fermer" @onclick="() => more = false"><Ico Name="x" Size="16" /></button></div>
                     <div class="ml">
+                        @if (adm) { <NavLink href="admin/opportunities" @onclick="CloseMore"><span class="ic"><Ico Name="mail-send" Size="18" /></span><b>Opportunités</b><Ico Name="chevron-right" Size="16" /></NavLink> }
                         @if (adm) { <NavLink href="admin/settings" @onclick="CloseMore"><span class="ic n"><Ico Name="gear" Size="18" /></span><b>Réglages</b><Ico Name="chevron-right" Size="16" /></NavLink> }
                         else { <NavLink href="reseller/brand" @onclick="CloseMore"><span class="ic n"><Ico Name="palette" Size="18" /></span><b>Marque</b><Ico Name="chevron-right" Size="16" /></NavLink> }
                         <NavLink href="account" @onclick="CloseMore"><span class="ic"><Ico Name="user" Size="18" /></span><b>Mon compte</b><Ico Name="chevron-right" Size="16" /></NavLink>
@@ -350,6 +363,12 @@
     private bool suspended;   // organisation suspendue : écrans coupés, back-office ouvert (bandeau)
     private DateTime? trialEnd;   // essai gratuit de l'organisation ouverte (bandeau)
     private string trialEndLabel = "", siteUrl = "";
+    private int trialTotal;
+    private string? subEndedLabel, cancelLabel, deleteLabel;   // abonnement terminé ou résilié, suppression prévue
+    // « Choisir mon plan » : vers Réglages › Abonnement pour un administrateur ; un membre voit seulement le bandeau
+    private RenderFragment PlanButton(string label) => orgAdmin && !Ctx.IsImpersonating
+        ? @<a class="btn sm" href="/settings?tab=abonnement">@label</a>
+        : @<span></span>;
     private Reseller? reseller;
 
     private string Initials =>
@@ -364,11 +383,18 @@
         orgName = cid != null ? Root.Read(d => d.Clients.FirstOrDefault(c => c.Id == cid)?.Name ?? "")
                 : Ctx.IsPlatformAdmin ? "Console administrateur Linkii" : reseller?.Name ?? "";
         if (cid != null) { suspended = Root.Read(d => d.Clients.FirstOrDefault(c => c.Id == cid) is { } cl && (cl.Suspended || d.Resellers.FirstOrDefault(r => r.Id == cl.ResellerId)?.Suspended == true)); siteUrl = Services.GetRequiredService<Mailer>().SiteUrl; }
-        if (cid != null && Root.Read(d => d.Clients.FirstOrDefault(c => c.Id == cid)) is { TrialEndsUtc: { } end } client)
+        if (cid != null && Root.Read(d => d.Clients.FirstOrDefault(c => c.Id == cid)) is { } client)
         {
-            trialEnd = end;
-            trialEndLabel = Signup.Day(client, end);
-            siteUrl = Services.GetRequiredService<Mailer>().SiteUrl;
+            var now = DateTime.UtcNow;
+            if (client is { TrialEndsUtc: { } end, Subscribed: false } && !client.SubscriptionEnded(now))
+            {
+                trialEnd = end;
+                trialEndLabel = Signup.Day(client, end);
+                trialTotal = Root.Read(d => Signup.TrialDaysOf(d, client));
+            }
+            if (client.SubscriptionEnded(now)) subEndedLabel = Signup.Day(client, client.CancelAtUtc!.Value);
+            else if (client.CancelAtUtc is { } cancel) cancelLabel = Signup.Day(client, cancel);
+            if (client.DeleteOnUtc is { } del) deleteLabel = Signup.Day(client, del);
         }
         if (cid == null && Ctx.IsResellerAdmin && reseller?.Suspended == true) suspended = true;   // revendeur suspendu : les écrans de ses clients sont coupés
         if (cid != null) { LoadAreas(); apps = Services.GetRequiredService<AppService>(); apps.InstallsChanged += OnInstallsChanged; }

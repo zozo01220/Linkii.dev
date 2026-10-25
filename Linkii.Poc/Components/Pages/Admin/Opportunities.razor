@@ -1,0 +1,251 @@
+@page "/admin/opportunities"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "PlatformAdmin")]
+@inject JsonStore Root
+@inject Toaster Toast
+@inject SecretBox Box
+@inject Mailer Mail
+@inject ResellerResolver Resolver
+@inject NavigationManager Nav
+
+@* Demandes Entreprise : onglets d'état, tableau, fiche latérale (comme Clients). Pilote de 30 jours sur le cloud Linkii,
+   puis contrat : un client cloud, ou une licence annuelle pour une installation sur site (vérifiée en ligne, ou fichier hors ligne). *@
+<div class="page-head">
+    <div>
+        <h1>Opportunités</h1>
+        <p class="sub sc-intro">Demandes reçues par le formulaire « Parler à un expert » (offre Entreprise), jusqu'au contrat.</p>
+    </div>
+    <a class="btn ghost" href="/login/entreprise" target="_blank" rel="noopener" data-enhance-nav="false"><Ico Name="external" Size="15" /> Voir le formulaire</a>
+</div>
+
+<div class="adm-tabs" role="tablist">
+    <button type="button" class="@(tab == "" ? "on" : "")" @onclick='() => tab = ""'>Toutes <b>@rows.Count</b></button>
+    @foreach (var s in OpportunityStates.All)
+    {
+        var st = s;
+        <button type="button" class="@(tab == st ? "on" : "")" @onclick="() => tab = st">@OpportunityStates.Label(st) <b>@rows.Count(r => r.O.Status == st)</b></button>
+    }
+</div>
+
+<div class="adm-card">
+    @if (Shown.Count == 0)
+    {
+        <div class="adm-note" style="padding:18px">Aucune demande@(tab == "" ? " pour l'instant" : " dans cet état").</div>
+    }
+    else
+    {
+        <table class="adm-tbl">
+            <thead><tr><th>Organisation</th><th>Besoin</th><th>Déploiement</th><th>Statut</th></tr></thead>
+            <tbody>
+                @foreach (var r in Shown)
+                {
+                    var row = r;
+                    <tr class="@(sel == r.O.Id ? "sel" : "")" @onclick="() => Open(row)">
+                        <td><b>@r.O.Org</b><span class="adm-sub">@r.O.Name · @Ago(r.O.CreatedUtc)@(r.Via != null ? " · via " + r.Via : "")</span></td>
+                        <td>@r.O.Sites · @r.O.Screens écrans</td>
+                        <td>@Deployments.Label(r.O.Deployment)</td>
+                        <td><span class="adm-st @OpportunityStates.Css(r.O.Status)">@OpportunityStates.Label(r.O.Status)@(r.O.Status == OpportunityStates.Pilot && r.O.PilotEndsUtc is { } pe ? $" · J-{Math.Max(0, (int)Math.Ceiling((pe - now).TotalDays))}" : "")</span></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@if (Current is { } c)
+{
+    var o = c.O;
+    <div class="adm-veil" @onclick="() => sel = null"></div>
+    <aside class="adm-drawer" role="dialog" aria-label="Opportunité @o.Org">
+        <div class="dh"><div class="top">
+            <div class="grow"><h2>@o.Org</h2><span class="adm-st @OpportunityStates.Css(o.Status)">@OpportunityStates.Label(o.Status)</span> <span class="adm-sub" style="display:inline">reçue le @o.CreatedUtc.ToString("d MMM yyyy", Signup.Fr)</span></div>
+            <button type="button" class="btn ghost icon" aria-label="Fermer" @onclick="() => sel = null"><Ico Name="x" Size="18" /></button>
+        </div></div>
+        <div class="db">
+            <div class="adm-sec"><span class="lb">Demande</span>
+                <div class="adm-ln"><span>Contact</span><span>@o.Name</span></div>
+                <div class="adm-ln"><span>E-mail</span><span><a href="mailto:@o.Email">@o.Email</a></span></div>
+                <div class="adm-ln"><span>Sites · écrans</span><span>@o.Sites · @o.Screens</span></div>
+                <div class="adm-ln"><span>Déploiement</span><span>@Deployments.Label(o.Deployment)</span></div>
+                @if (o.Needs.Count > 0) { <div class="adm-ln"><span>Exigences</span><span style="text-align:right">@string.Join(", ", o.Needs)</span></div> }
+                @if (o.Message.Trim().Length > 0) { <div class="adm-note">« @o.Message.Trim() »</div> }
+                @if (c.Via != null) { <div class="adm-note">Reçue sur le site du revendeur @c.Via : les e-mails au prospect sont à sa marque.</div> }
+            </div>
+            <div class="adm-sec"><span class="lb">Statut</span>
+                <div class="adm-seg">
+                    @foreach (var s in OpportunityStates.All) { var st = s; <button type="button" class="@(o.Status == st ? "on" : "")" @onclick="() => SetStatus(o, st)">@OpportunityStates.Label(st)</button> }
+                </div>
+            </div>
+            <div class="adm-sec"><span class="lb">Pilote</span>
+                @if (c.Client is { } pc)
+                {
+                    <div class="adm-ln"><span>Espace</span><span>@pc.Name</span></div>
+                    <div class="adm-ln"><span>Fin du pilote</span><span>@(o.PilotEndsUtc?.ToString("d MMM yyyy", Signup.Fr) ?? "—")</span></div>
+                    <div class="adm-acts"><button type="button" class="btn ghost sm" @onclick="() => ExtendPilot(o)">Prolonger de 15 jours</button></div>
+                    <div class="adm-note">Rappels au contact et à l'équipe 7 et 2 jours avant la fin. L'espace est un client « Linkii » ordinaire : passez-le en abonné dans Facturation, ou supprimez-le dans Clients.</div>
+                }
+                else
+                {
+                    <div class="adm-note">Crée un espace sur le cloud Linkii, avec toutes les fonctions pendant @Enterprise.PilotDays jours, et envoie au contact ses identifiants (mot de passe provisoire).</div>
+                    <div class="adm-acts"><button type="button" class="btn sm" disabled="@busy" @onclick="() => OpenPilot(o)">Ouvrir un pilote de @Enterprise.PilotDays jours</button></div>
+                }
+            </div>
+            @if (o.Deployment == Deployments.OnPrem || c.License != null)
+            {
+                <div class="adm-sec"><span class="lb">Licence sur site</span>
+                    <div class="adm-seg">
+                        <button type="button" class="@(licMode == LicenseModes.Online ? "on" : "")" @onclick="() => licMode = LicenseModes.Online">Vérifiée en ligne</button>
+                        <button type="button" class="@(licMode == LicenseModes.Offline ? "on" : "")" @onclick="() => licMode = LicenseModes.Offline">Fichier hors ligne</button>
+                    </div>
+                    <div class="adm-note" style="margin-top:6px">@(licMode == LicenseModes.Online ? $"Le serveur du client vérifie la clé chaque jour ; {Enterprise.GraceDays} jours de tolérance s'il est injoignable ou si la licence a expiré." : "Pour un serveur sans accès internet : fichier signé valable jusqu'à l'échéance, à importer à la main. Pas de tolérance : il faut un nouveau fichier avant l'échéance.")</div>
+                    <div class="form-grid" style="padding:8px 0">
+                        <div><label class="lbl">Écrans</label><input type="number" min="1" max="100000" class="full mono" @bind="licScreens" /></div>
+                        <div><label class="lbl">Modules</label><select class="full" @bind="licModules"><option>Growth</option><option>Growth + connexion par annuaire</option><option>Base</option></select></div>
+                        <div><label class="lbl">Valable jusqu'au</label><input type="date" class="full" @bind="licExpires" /></div>
+                    </div>
+                    @if (c.License is { } l)
+                    {
+                        <div class="adm-ln"><span>Émise le</span><span>@l.IssuedUtc.ToString("d MMM yyyy", Signup.Fr)@(l.Revoked ? " · révoquée" : "")</span></div>
+                        @if (l.Mode == LicenseModes.Online) { <div class="adm-ln"><span>Dernière vérification</span><span>@(l.LastCheckUtc is { } lc ? lc.ToLocalTime().ToString("d MMM yyyy HH:mm", Signup.Fr) + (l.LastCheckFrom.Length > 0 ? " · " + l.LastCheckFrom : "") : "jamais")</span></div> }
+                        <div class="lic-key mono">@l.Key</div>
+                    }
+                    <div class="adm-acts">
+                        <button type="button" class="btn sm" @onclick="() => IssueLicense(o)">@(c.License == null ? "Générer la licence" : "Réémettre")</button>
+                        @if (c.License is { } l2)
+                        {
+                            @if (l2.Mode == LicenseModes.Offline) { <a class="btn ghost sm" download="linkii-@(Tenancy.Slugify(o.Org)).lic" href="@LicFile(l2)">Télécharger (.lic)</a> }
+                            <button type="button" class="btn ghost sm" @onclick="() => Revoke(l2)">@(l2.Revoked ? "Rétablir" : "Révoquer")</button>
+                        }
+                    </div>
+                    @if (c.License != null) { <div class="adm-note">Réémettre remplace la clé : l'ancienne ne vaut plus. Rappels d'échéance au contact et à l'équipe 60, 30 et 7 jours avant.</div> }
+                </div>
+            }
+            <div class="adm-sec"><span class="lb">Notes</span>
+                <textarea class="full" rows="4" @bind="notes" placeholder="Appel du…, besoins, interlocuteurs"></textarea>
+                <div class="adm-acts"><button type="button" class="btn ghost sm" @onclick="() => SaveNotes(o)">Enregistrer les notes</button></div>
+            </div>
+        </div>
+    </aside>
+}
+
+@code {
+    private record Row(Opportunity O, string? Via, Tenant? Client, License? License);
+
+    private List<Row> rows = new();
+    private string tab = "";
+    private Guid? sel;
+    private bool busy;
+    private string notes = "", licMode = LicenseModes.Online, licModules = "Growth";
+    private int licScreens = 50;
+    private DateTime licExpires = DateTime.Today.AddYears(1);
+    private DateTime now = DateTime.UtcNow;
+
+    private List<Row> Shown => rows.Where(r => tab == "" || r.O.Status == tab).ToList();
+    private Row? Current => sel is { } id ? rows.FirstOrDefault(r => r.O.Id == id) : null;
+
+    protected override void OnInitialized() => Load();
+
+    private void Load()
+    {
+        now = DateTime.UtcNow;
+        rows = Root.Read(d => d.Opportunities.OrderByDescending(o => o.CreatedUtc).Select(o => new Row(o,
+            d.Resellers.FirstOrDefault(r => r.Id == o.ResellerId) is { IsDefault: false } r ? r.Name : null,
+            o.ClientId is { } cid ? d.Clients.FirstOrDefault(x => x.Id == cid) : null,
+            o.LicenseId is { } lid ? d.Licenses.FirstOrDefault(x => x.Id == lid) : null)).ToList());
+    }
+
+    private void Open(Row r)
+    {
+        sel = r.O.Id;
+        notes = r.O.Notes;
+        if (r.License is { } l) { licMode = l.Mode; licScreens = l.Screens; licModules = l.Modules; licExpires = l.ExpiresUtc.ToLocalTime().Date; }
+        else { licMode = r.O.Needs.Any(n => n.Contains("sans accès internet")) ? LicenseModes.Offline : LicenseModes.Online; licScreens = GuessScreens(r.O.Screens); licModules = "Growth"; licExpires = DateTime.Today.AddYears(1); }
+    }
+
+    private static int GuessScreens(string s) => s switch { "Moins de 50" => 25, "50 à 200" => 100, "200 à 1000" => 500, "Plus de 1000" => 1000, _ => 50 };
+
+    private string Ago(DateTime utc)
+    {
+        var d = now - utc;
+        return d.TotalHours < 1 ? "à l'instant" : d.TotalDays < 1 ? $"il y a {(int)d.TotalHours} h" : $"il y a {(int)d.TotalDays} j";
+    }
+
+    private void SetStatus(Opportunity o, string st)
+    {
+        var id = o.Id;
+        Root.Write(d => { if (d.Opportunities.FirstOrDefault(x => x.Id == id) is { } x) { x.Status = st; x.UpdatedUtc = DateTime.UtcNow; } });
+        Load();
+    }
+
+    private void SaveNotes(Opportunity o)
+    {
+        var id = o.Id; var text = notes;
+        Root.Write(d => { if (d.Opportunities.FirstOrDefault(x => x.Id == id) is { } x) { x.Notes = text; x.UpdatedUtc = DateTime.UtcNow; } });
+        Toast.Ok("Notes enregistrées.");
+        Load();
+    }
+
+    private async Task OpenPilot(Opportunity o)
+    {
+        busy = true;
+        var id = o.Id;
+        var pwd = Passwords.Generate();
+        var (err, reseller) = Root.Write(d =>
+        {
+            var x = d.Opportunities.FirstOrDefault(q => q.Id == id);
+            var r = d.Resellers.FirstOrDefault(q => q.Id == o.ResellerId) ?? d.Resellers.First(q => q.IsDefault);
+            if (x == null) return ("Demande introuvable.", r);
+            var (client, e) = Tenancy.CreateClient(d, r, x.Org, x.Name, x.Email, pwd, mustChangePassword: true, source: SignupSources.Console);
+            if (client == null) return (e, r);
+            client.Plan = Plans.Growth;
+            client.TrialEndsUtc = DateTime.UtcNow.AddDays(Enterprise.PilotDays);
+            x.ClientId = client.Id; x.PilotEndsUtc = client.TrialEndsUtc; x.Status = OpportunityStates.Pilot; x.UpdatedUtc = DateTime.UtcNow; x.Sent.Clear();
+            return ((string?)null, r);
+        });
+        busy = false;
+        if (err != null) { Toast.Error(err); return; }
+        var mailErr = await Mail.SendWelcome(reseller, Resolver.LoginUrl(reseller, Nav.BaseUri), $"Votre pilote « {o.Org} » est ouvert pour {Enterprise.PilotDays} jours, toutes fonctions incluses.", o.Name, o.Email, pwd);
+        Toast.Ok(mailErr == null ? $"Pilote ouvert : identifiants envoyés à {o.Email}." : $"Pilote ouvert, mais l'e-mail n'est pas parti ({mailErr}). Mot de passe provisoire : {pwd}");
+        Load();
+    }
+
+    private void ExtendPilot(Opportunity o)
+    {
+        var id = o.Id;
+        Root.Write(d =>
+        {
+            if (d.Opportunities.FirstOrDefault(x => x.Id == id) is not { ClientId: { } cid } x || d.Clients.FirstOrDefault(c => c.Id == cid) is not { } c) return;
+            Signup.Extend(c, 15, DateTime.UtcNow);
+            x.PilotEndsUtc = c.TrialEndsUtc; x.Sent.Clear();
+        });
+        Toast.Ok("Pilote prolongé de 15 jours.");
+        Load();
+    }
+
+    private void IssueLicense(Opportunity o)
+    {
+        if (licScreens < 1) { Toast.Error("Indiquez le nombre d'écrans."); return; }
+        if (licExpires <= DateTime.Today) { Toast.Error("La date d'échéance doit être dans le futur."); return; }
+        var id = o.Id;
+        var (mode, screens, modules, expires) = (licMode, licScreens, licModules, DateTime.SpecifyKind(licExpires.Date.AddDays(1).AddSeconds(-1), DateTimeKind.Local).ToUniversalTime());
+        Root.Write(d =>
+        {
+            var x = d.Opportunities.First(q => q.Id == id);
+            var l = x.LicenseId is { } lid ? d.Licenses.FirstOrDefault(q => q.Id == lid) : null;
+            l ??= new License { OpportunityId = x.Id, ResellerId = x.ResellerId };
+            l.Org = x.Org; l.Email = x.Email; l.Screens = screens; l.Modules = modules; l.Mode = mode; l.ExpiresUtc = expires; l.IssuedUtc = DateTime.UtcNow; l.Revoked = false; l.Sent.Clear();
+            Enterprise.Issue(d, Box, l);
+            x.LicenseId = l.Id; x.UpdatedUtc = DateTime.UtcNow;
+        });
+        Toast.Ok("Licence émise.");
+        Load();
+    }
+
+    private void Revoke(License l)
+    {
+        var id = l.Id;
+        Root.Write(d => { if (d.Licenses.FirstOrDefault(x => x.Id == id) is { } x) x.Revoked = !x.Revoked; });
+        Load();
+    }
+
+    private string LicFile(License l) => "data:text/plain;charset=utf-8," + Uri.EscapeDataString(Root.Read(d => Enterprise.OfflineFile(d, l)));
+}

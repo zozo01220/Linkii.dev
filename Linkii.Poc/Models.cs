@@ -16,9 +16,13 @@ public class Db
     public List<MediaFolder> MediaFolders { get; set; } = new();  // dossiers de la médiathèque (voir <see cref="MediaFolder"/>)
     public List<PlaylistFolder> PlaylistFolders { get; set; } = new();  // dossiers des listes de lecture (voir <see cref="PlaylistFolder"/>)
     public List<ItemShare> ItemShares { get; set; } = new();        // partages entre personnes : médias, dossiers, listes de lecture (voir <see cref="ItemShare"/>)
+    public List<ScreenFolder> ScreenFolders { get; set; } = new();   // dossiers de rangement des écrans (voir <see cref="ScreenFolder"/>)
+    public List<CompositionFolder> CompositionFolders { get; set; } = new();   // dossiers des compositions (voir <see cref="CompositionFolder"/>)
     public List<CompositionTemplate> CompositionTemplates { get; set; } = new();   // « Mes modèles » de compositions (voir <see cref="CompositionTemplate"/>)
     public List<Payment> Payments { get; set; } = new();          // paiements de renouvellement enregistrés (voir <see cref="Subscriptions"/>)
     public List<Payout> Payouts { get; set; } = new();            // versements de fin de mois aux revendeurs
+    public List<Opportunity> Opportunities { get; set; } = new(); // demandes Entreprise (voir Enterprise)
+    public List<License> Licenses { get; set; } = new();          // licences des installations sur site
     public PlatformSettings Platform { get; set; } = new();      // réglages communs à toutes les organisations (console › Réglages)
     /// <summary>Migrations ponctuelles déjà faites (voir <see cref="AccessLevels.MigrateRolesV2"/>).</summary>
     public List<string> Done { get; set; } = new();
@@ -75,6 +79,39 @@ public class PlatformSettings
     public string SmtpUser { get; set; } = "";
     public string SmtpPassword { get; set; } = "";   // chiffré (SecretBox), jamais réaffiché
     public string SmtpFrom { get; set; } = "";       // adresse d'expédition
+
+    // Essai et abonnement en libre-service (voir Billing)
+    /// <summary>Licence pendant l'essai : Growth d'office (toutes les fonctions), le client choisit sa licence au moment de payer.</summary>
+    public string TrialPlan { get; set; } = Plans.Growth;
+    /// <summary>Conservation des contenus après la fin de l'essai (ou d'un abonnement résilié), puis suppression définitive.</summary>
+    public int RetentionDays { get; set; } = 30;
+    /// <summary>Codes d'essai (lien ?code=…) : leur durée remplace celle par défaut.</summary>
+    public List<TrialCode> TrialCodes { get; set; } = new();
+    /// <summary>simulation : une fenêtre remplace Stripe partout où il interviendrait ; stripe : à brancher (voir Billing).</summary>
+    public string PaymentMode { get; set; } = PaymentModes.Simulation;
+    /// <summary>Clé secrète Stripe (chiffrée) : prévue, pas encore utilisée.</summary>
+    public string StripeSecretKey { get; set; } = "";
+    // Parcours e-mails : les e-mails facultatifs se coupent, les obligatoires non (voir Lifecycle)
+    public bool MailFirstSteps { get; set; } = true;
+    public bool MailTips { get; set; } = true;
+    public int TrialReminderDays { get; set; } = 2;
+    // Licences sur site : clé de signature (privée chiffrée, publique en clair), créée à la première licence
+    public string LicensePrivateKey { get; set; } = "";
+    public string LicensePublicKey { get; set; } = "";
+}
+
+/// <summary>Code d'essai : un lien d'inscription ?code=SALON30 donne cette durée d'essai.</summary>
+public class TrialCode
+{
+    public string Code { get; set; } = "";
+    public int Days { get; set; } = 30;
+    public bool Active { get; set; } = true;
+    public int Uses { get; set; }
+}
+
+public static class PaymentModes
+{
+    public const string Simulation = "simulation", Stripe = "stripe";
 }
 
 /// <summary>Comment une organisation a été créée : inscription libre (e-mail, Google, Microsoft), par un revendeur ou par l'équipe Linkii.</summary>
@@ -324,6 +361,31 @@ public class Tenant
     public DateTime? TrialEndsUtc { get; set; }
     public DateTime? TrialReminderSentUtc { get; set; }   // rappel envoyé 2 jours avant la fin
     public DateTime? TrialEndedNotifiedUtc { get; set; }  // écrans prévenus de la fin de l'essai
+
+    /// <summary>Code d'essai utilisé à l'inscription (voir <see cref="TrialCode"/>).</summary>
+    public string? TrialCode { get; set; }
+
+    // Abonnement en libre-service (voir Billing)
+    /// <summary>Licence qui remplacera l'actuelle à la prochaine échéance (passage de Growth à Base).</summary>
+    public string? PendingPlan { get; set; }
+    /// <summary>Facturation (monthly | annual) qui remplacera l'actuelle à la prochaine échéance.</summary>
+    public string? PendingPeriod { get; set; }
+    /// <summary>Résiliation : l'abonnement s'arrête à cette date (l'échéance en cours), rien n'est coupé avant.</summary>
+    public DateTime? CancelAtUtc { get; set; }
+    /// <summary>Suppression définitive prévue (fin de l'essai ou de l'abonnement + conservation). Effacée dès qu'un plan est pris.</summary>
+    public DateTime? DeleteOnUtc { get; set; }
+    /// <summary>E-mails du parcours déjà envoyés (« first », « tip3 », « del15 »…) : chacun ne part qu'une fois.</summary>
+    public List<string> LifecycleSent { get; set; } = new();
+    /// <summary>Carte enregistrée (en simulation : saisie fictive) : 4 derniers chiffres et expiration, rien d'autre.</summary>
+    public string CardLast4 { get; set; } = "";
+    public string CardExpiry { get; set; } = "";
+    /// <summary>Simulation : la prochaine échéance sera refusée (réglé depuis la console).</summary>
+    public bool SimNextRenewalFails { get; set; }
+
+    /// <summary>Abonné : un premier paiement enregistré.</summary>
+    public bool Subscribed => NextRenewalUtc != null;
+    /// <summary>Abonnement résilié et arrivé à son terme.</summary>
+    public bool SubscriptionEnded(DateTime now) => CancelAtUtc is { } c && c <= now;
 
     public bool TrialEnded(DateTime now) => TrialEndsUtc is { } end && end <= now;
     public bool InTrial(DateTime now) => TrialEndsUtc is { } end && end > now;
@@ -575,6 +637,7 @@ public class Screen : IClientOwned, IAreaOwned
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid AreaId { get; set; }
     public int? WallPos { get; set; }          // place dans la grille si sa zone est un mur (0 = en haut à gauche)
+    public Guid? FolderId { get; set; }        // dossier de rangement de l'aire (null : racine). Voir <see cref="ScreenFolder"/>
     public Guid? ZoneId { get; set; }          // zone de son aire (jamais vide une fois migré : par défaut, la zone « Défaut » de l'aire)
     public string Name { get; set; } = "";
     /// <summary>Mise en veille : suit son aire (inherit), jamais (never) ou grille propre (own, SleepGrid). Voir <see cref="Sleep"/>.</summary>

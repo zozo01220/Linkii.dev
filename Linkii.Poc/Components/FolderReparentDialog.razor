@@ -2,6 +2,8 @@
    ses fichiers (ou listes) et ses sous-dossiers vont à la racine. Fonctionne au doigt comme à la souris (liste de destinations, pas de glisser obligatoire). *@
 @inject MediaLibrary Media
 @inject PlaylistLibrary Lists
+@inject CompositionLibrary Compos
+@inject ScreenFolderLibrary Scr
 @inject Toaster Toast
 
 <div class="modal-backdrop" @onclick="Close"></div>
@@ -25,7 +27,7 @@
                 </button>
             }
         </div>
-        @if (picked && chosen == null)
+        @if (picked && chosen == null && !IsScreens)
         {
             <div class="lx-rpwarn" role="alert">
                 <Ico Name="alert" Size="16" />
@@ -36,8 +38,8 @@
     </div>
     <div class="modal-actions">
         <button class="btn ghost" @onclick="Close">Annuler</button>
-        <button class="btn @(picked && chosen == null ? "danger" : "")" disabled="@(!picked)" @onclick="Move">
-            @(picked && chosen == null ? "Dissoudre et envoyer à la racine" : "Déplacer ici")
+        <button class="btn @(picked && chosen == null && !IsScreens ? "danger" : "")" disabled="@(!picked)" @onclick="Move">
+            @(picked && chosen == null && !IsScreens ? "Dissoudre et envoyer à la racine" : "Déplacer ici")
         </button>
     </div>
 </div>
@@ -56,13 +58,15 @@
     private string? error;
 
     private bool IsLists => Kind == ShareKind.PlaylistFolder;
-    private string ItemWord => IsLists ? "liste de lecture" : "fichier";
-    private string ItemWords => IsLists ? "listes de lecture" : "fichiers";
+    private bool IsCompos => Kind == ShareKind.CompositionFolder;
+    private bool IsScreens => Kind == ScreenFolderOps.Kind;
+    private string ItemWord => IsLists ? "liste de lecture" : IsCompos ? "composition" : IsScreens ? "écran" : "fichier";
+    private string ItemWords => IsLists ? "listes de lecture" : IsCompos ? "compositions" : IsScreens ? "écrans" : "fichiers";
 
     protected override void OnInitialized()
     {
-        targets = IsLists ? Lists.MoveFolderTargets(FolderId) : Media.MoveFolderTargets(FolderId);
-        contents = IsLists ? Lists.ContentsOfFolder(FolderId) : Media.ContentsOfFolder(FolderId);
+        targets = IsLists ? Lists.MoveFolderTargets(FolderId) : IsScreens ? Scr.MoveFolderTargets(FolderId) : IsCompos ? Compos.MoveFolderTargets(FolderId) : Media.MoveFolderTargets(FolderId);
+        contents = IsLists ? Lists.ContentsOfFolder(FolderId) : IsScreens ? Scr.ContentsOfFolder(FolderId) : IsCompos ? Compos.ContentsOfFolder(FolderId) : Media.ContentsOfFolder(FolderId);
     }
 
     private static string Plural(int n, string one, string many) => $"{n} {(n > 1 ? many : one)}";
@@ -71,9 +75,9 @@
     private async Task Move()
     {
         if (!picked) return;
-        var err = IsLists ? Lists.MoveFolder(FolderId, chosen) : Media.MoveFolder(FolderId, chosen);
+        var err = IsLists ? Lists.MoveFolder(FolderId, chosen) : IsScreens ? Scr.MoveFolder(FolderId, chosen) : IsCompos ? Compos.MoveFolder(FolderId, chosen) : Media.MoveFolder(FolderId, chosen);
         if (err != null) { error = err; return; }
-        Toast.Ok(chosen == null ? $"« {FolderName} » dissous : son contenu est à la racine." : $"« {FolderName} » déplacé.");
+        Toast.Ok(chosen == null && !IsScreens ? $"« {FolderName} » dissous : son contenu est à la racine." : $"« {FolderName} » déplacé.");
         await OnClose.InvokeAsync(true);
     }
 }

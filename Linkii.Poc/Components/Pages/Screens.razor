@@ -7,11 +7,13 @@
 @inject NavigationManager Nav
 @inject ModeService Modes
 @inject IJSRuntime JS
+@inject ScreenFolderLibrary Folders
+@inject LifecycleMail Mails
 @using Microsoft.JSInterop
 
 <div class="page-head">
     <div>
-        <h1>Vos écrans<span class="scr-count" aria-label="@(Shown.Count + OtherShown.Count) écran@(Shown.Count + OtherShown.Count > 1 ? "s" : "")">@(Shown.Count + OtherShown.Count)</span></h1>
+        <h1 class="cmp-h1">@if (!TreeView && currentRow is { } cur) { @FolderCrumbs(cur) } else { <span>Vos écrans</span> }<span class="scr-count" aria-label="@(Shown.Count + OtherShown.Count) écran@(Shown.Count + OtherShown.Count > 1 ? "s" : "")">@(Shown.Count + OtherShown.Count)</span></h1>
         <p class="sub sc-intro">Choisissez la liste de lecture et les widgets de chaque écran, puis publiez : chaque écran se met à jour indépendamment.</p>
     </div>
     <div class="row head-actions">
@@ -25,7 +27,19 @@
         }
         @if (canAdd)
         {
-            <button class="btn" data-fab="Connecter un écran" @onclick="OpenPair"><Ico Name="plus" Size="16" /> Connecter un écran</button>
+            <div class="lx-split">
+                <button class="btn" data-fab="Connecter un écran" @onclick="OpenPair"><Ico Name="plus" Size="16" /> Connecter un écran</button>
+                <button type="button" class="btn ghost lx-appfolder" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /> Nouveau dossier</button>
+                <button type="button" class="btn lx-car" aria-label="Autres créations" aria-haspopup="menu" aria-expanded="@(newMenu ? "true" : "false")" @onclick="() => newMenu = !newMenu"><Ico Name="chevron" Size="14" /></button>
+                @if (newMenu)
+                {
+                    <div class="kebab-backdrop" @onclick="() => newMenu = false"></div>
+                    <div class="kebab-menu" role="menu">
+                        <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenPair(); }"><Ico Name="monitor" Size="16" /> Connecter un écran</button>
+                        <button type="button" role="menuitem" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /> Nouveau dossier@(currentRow is { } cf ? $" dans « {cf.Folder.Name} »" : "")</button>
+                    </div>
+                }
+            </div>
         }
         else if (!noArea)
         {
@@ -39,10 +53,63 @@
 {
     <div class="card empty"><div class="big">Aucune aire de gestion ne vous est confiée</div><p>Demandez à un administrateur de votre organisation de vous donner un rôle dans une aire.</p></div>
 }
-@if (screens.Count > 0 || OtherAll.Count > 0)
+@if (Has && !TreeView && (subfolders.Count > 0 || canAdd))
 {
+    <section class="lx-fzone" aria-label="Dossiers">
+    @* Dossiers de la position ouverte : mêmes formes, aperçus et actions que la Médiathèque (FolderShape, .lx-fcard), cibles du glisser-déposer. *@
+    @if (subfolders.Count > 0 || canAdd)
+    {
+        <div class="lx-fstrip lx-fgrid" role="list" aria-label="Dossiers">
+            @foreach (var row in subfolders)
+            {
+                var r = row;
+                var mine = r.Folder.OwnerId == Store.UserId;
+                var preview = FolderPreview(r.Folder.Id);
+                <div data-nid="@r.Folder.Id" class="lx-fcard @(dropOver == r.Folder.Id ? "drop-target" : "")" role="listitem" tabindex="0" draggable="@(r.CanManage && !isApp ? "true" : null)" @ondragstart="() => { dragFolder = r.Folder.Id; }" @ondragend="EndDrag" title="@(mine ? "Votre dossier" : "Dossier de " + r.OwnerName)" aria-label="Ouvrir le dossier @r.Folder.Name"
+                     @onclick="() => OpenFolder(r.Folder.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenFolder(r.Folder.Id); }'
+                     @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0 || (dragFolder != null && dragFolder != r.Folder.Id)) dropOver = r.Folder.Id; }" @ondragleave="() => { if (dropOver == r.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(r.Folder.Id)"
+                     @oncontextmenu="() => { if (r.CanManage) menuFor = r.Folder.Id; }" @oncontextmenu:preventDefault="isApp && r.CanManage">
+                    <FolderShape Preview="preview" All="media" Count="ChildCount(r.Folder.Id)" Unit="@FolderUnit(r.Folder.Id)">
+                        <Badge>
+                            @if (!mine && r.Folder.OwnerId != null) { <span class="fbadge sh" title="Dossier de @r.OwnerName">@First(r.OwnerName)</span> }
+                        </Badge>
+                    </FolderShape>
+                    <div class="fn"><span>@r.Folder.Name</span><small>@FolderDate(r)</small></div>
+                    @if (r.CanManage)
+                    {
+                        <button type="button" class="fk" aria-label="Actions pour le dossier @r.Folder.Name" aria-haspopup="menu" aria-expanded="@(menuFor == r.Folder.Id ? "true" : "false")"
+                                @onclick:stopPropagation="true" @onclick="() => menuFor = menuFor == r.Folder.Id ? null : r.Folder.Id"><Ico Name="dots-v" Size="16" /></button>
+                    }
+                    @if (menuFor == r.Folder.Id)
+                    {
+                        <div class="kebab-backdrop" @onclick:stopPropagation="true" @onclick="() => menuFor = null"></div>
+                        <div class="kebab-menu" role="menu" @onclick:stopPropagation="true">
+                            <span class="kebab-note">@r.Folder.Name · @(mine ? "votre dossier" : $"dossier de {r.OwnerName}")</span>
+                            <button type="button" role="menuitem" @onclick="() => { menuFor = null; renamingFolder = r; renameFolderValue = r.Folder.Name; folderError = null; }"><Ico Name="edit" Size="16" /> Renommer</button>
+                            <button type="button" role="menuitem" @onclick="() => { menuFor = null; reparenting = (r.Folder.Id, r.Folder.Name); }"><Ico Name="move" Size="16" /> Déplacer…</button>
+                            <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deletingFolder = r; }"><Ico Name="trash" Size="16" /> Supprimer</button>
+                        </div>
+                    }
+                </div>
+            }
+            @if (canAdd)
+            {
+                <button type="button" class="lx-fcard add" @onclick="OpenNewFolder">
+                    <div class="fv"><span class="fbk"></span><span class="ffr"><Ico Name="plus" Size="22" /></span></div>
+                    <div class="fn"><span>Nouveau dossier</span></div>
+                </button>
+            }
+        </div>
+    }
+    </section>
+}
+
+<section class="lx-blk lx-blk-main @(Has ? "" : "bare")" aria-label="Écrans">
+@if (Has)
+{
+    <div class="lx-bh"><Ico Name="monitor" Size="16" /> <span>Écrans</span> <small>@(Shown.Count + OtherShown.Count)</small></div>
     @* Une seule barre : tout sélectionner, actions de la sélection, zone, état, recherche, tri, affichage *@
-    <div class="sc-bar" role="region" aria-label="Filtres et sélection" aria-live="polite">
+    <div class="lx-tools sc-bar" role="region" aria-label="Filtres et sélection" aria-live="polite">
         @if (selectedIds.Count > 0 && !ListView)
         {
             <label class="lib-all" title="Tout sélectionner">
@@ -97,7 +164,12 @@
             }
         </div>
     }
-    @if (Shown.Count + OtherShown.Count == 0 && !NothingToShow) { <div class="empty"><div class="big">Aucun écran trouvé</div></div> }
+    @if (Shown.Count + OtherShown.Count == 0 && !NothingToShow)
+    {
+        @if (Filtering) { <div class="empty"><div class="big">Aucun écran trouvé</div></div> }
+        else if (currentRow is { } fe) { <div class="empty compact"><div class="big">Ce dossier est vide</div><p>Glissez-y des écrans, ou rangez-en depuis leur menu ⋮ « Ranger dans un dossier… ».</p></div> }
+        else { <div class="empty compact"><div class="big">Aucun écran à la racine</div><p>Vos écrans sont rangés dans les dossiers ci-dessus.</p></div> }
+    }
 }
 
 @if (!noArea && NothingToShow)
@@ -151,6 +223,7 @@ else
     }
 </div>
 }
+</section>
 
 @if (selectedIds.Count > 0)
 {
@@ -160,8 +233,10 @@ else
         <button type="button" @onclick="ToggleAll">@(Shown.Count > 0 && Shown.All(s => selectedIds.Contains(s.Id)) ? "Tout désélectionner" : $"Tout sélectionner ({Shown.Count})")</button>
         <span class="vr"></span>
         <button type="button" @onclick="() => AskPublish(selectedIds.ToList())"><Ico Name="upload" Size="15" /><span class="lx-lbl">Publier</span></button>
+        @if (canAdd) { <button type="button" @onclick="() => folderMove = screens.Where(s => selectedIds.Contains(s.Id)).Select(s => (s.Id, s.Name)).ToList()"><Ico Name="folder" Size="15" /><span class="lx-lbl">Ranger…</span></button> }
         @if (zones.Count > 1) { <button type="button" @onclick="OpenZoneMove"><Ico Name="box" Size="15" /><span class="lx-lbl">Zone…</span></button> }
         @if (tenant.SleepEnabled) { <button type="button" @onclick="OpenSleep"><Ico Name="moon" Size="15" /><span class="lx-lbl">Veille…</span></button> }
+        @if (canAssign) { <button type="button" @onclick="OpenAssignSelection"><Ico Name="users" Size="15" /><span class="lx-lbl">Attribuer…</span></button> }
         @if (CanAssemble) { <button type="button" @onclick="OpenWall"><Ico Name="grid" Size="15" /><span class="lx-lbl">Mur…</span></button> }
         @if (otherAreas.Count > 0) { <button type="button" @onclick="OpenBulkAreaMove"><Ico Name="move" Size="15" /><span class="lx-lbl">Autre aire…</span></button> }
         <span class="vr"></span>
@@ -172,6 +247,10 @@ else
 }
 
 @* Connecter un écran : un tiroir qui vient du bas (comme « Importer » de la médiathèque) ; la page reste visible derrière. *@
+@if (screenPay != null)
+{
+    <PayDialog Request="screenPay" OnDone="ScreenPayDone" />
+}
 @if (showPair)
 {
     <div class="modal-backdrop" @onclick="() => showPair = false"></div>
@@ -219,6 +298,7 @@ else
                 </div>
             </div>
             <p class="hint" style="margin:12px 0 0">Matériel et format viennent des Réglages ; la résolution est celle de l'appareil par défaut. Tout reste modifiable ensuite dans l'édition de l'écran.</p>
+            @if (pairPrice is { } pp) { <p class="hint" style="margin:12px 0 0"><Ico Name="info" Size="14" /> @pp</p> }
             @if (error != null) { <div class="err">@error</div> }
         </div>
         <div class="imp-foot">
@@ -409,10 +489,64 @@ else if (wallEdit is { } wid)
 
 @if (assigning is { } asg)
 {
-    <ScreenAssignSheet Screen="asg" OnClose="() => { assigning = null; Reload(); }" />
+    <ScreenAssignSheet Screen="asg" More="assigningMore" OnClose="() => { assigning = null; assigningMore = new(); Reload(); }" />
+}
+
+@if (creatingFolder)
+{
+    <div class="modal-backdrop" @onclick="() => creatingFolder = false"></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="nfs-title">
+        <h3 id="nfs-title">Nouveau dossier@(folderId is { } ? $" dans « {currentRow?.Folder.Name} »" : "")</h3>
+        <input style="width:100%;margin-top:10px" placeholder="Nom du dossier" maxlength="60" aria-label="Nom du dossier" @bind="newFolderName" @bind:event="oninput" @onkeydown='e => { if (e.Key == "Enter") CreateFolder(); }' />
+        @if (folderError != null) { <div class="err">@folderError</div> }
+        <p class="hint">Un dossier range vos écrans à l'écran, sans changer leurs droits ni leurs zones.</p>
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => creatingFolder = false">Annuler</button>
+            <button class="btn" disabled="@string.IsNullOrWhiteSpace(newFolderName)" @onclick="CreateFolder">Créer</button>
+        </div>
+    </div>
+}
+
+@if (renamingFolder is { } rf)
+{
+    <div class="modal-backdrop" @onclick="() => renamingFolder = null"></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="rnfs-title">
+        <h3 id="rnfs-title">Renommer le dossier</h3>
+        <input style="width:100%;margin-top:10px" maxlength="60" aria-label="Nom du dossier" @bind="renameFolderValue" @bind:event="oninput" @onkeydown='e => { if (e.Key == "Enter") RenameFolder(rf); }' />
+        @if (folderError != null) { <div class="err">@folderError</div> }
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => renamingFolder = null">Annuler</button>
+            <button class="btn" disabled="@string.IsNullOrWhiteSpace(renameFolderValue)" @onclick="() => RenameFolder(rf)">Renommer</button>
+        </div>
+    </div>
+}
+
+@if (deletingFolder is { } dfo)
+{
+    var inCount = screens.Count(s => s.FolderId == dfo.Folder.Id);
+    <div class="modal-backdrop" @onclick="() => deletingFolder = null"></div>
+    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="dfs-title">
+        <h3 id="dfs-title">Supprimer le dossier « @dfo.Folder.Name » ?</h3>
+        <p class="hint">Seul le dossier disparaît : ses @(inCount > 0 ? Plural(inCount, "écran", "écrans") + " et " : "")sous-dossiers remontent d'un niveau. Aucun écran n'est supprimé ni déconnecté.</p>
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => deletingFolder = null">Annuler</button>
+            <button class="btn danger-solid" @onclick="() => DeleteFolder(dfo)">Supprimer</button>
+        </div>
+    </div>
+}
+
+@if (reparenting is { } rp)
+{
+    <FolderReparentDialog Kind="@ScreenFolderOps.Kind" FolderId="rp.Id" FolderName="@rp.Name" OnClose="MovedFolder" />
+}
+
+@if (folderMove is { } fm)
+{
+    <ScreenMoveDialog Items="fm" OnClose='n => { folderMove = null; if (n > 0) { selectedIds.Clear(); pickOrder.Clear(); Toast.Ok(n > 1 ? $"{n} écrans rangés." : "Écran rangé."); Reload(); } }' />
 }
 
 <NewMark Kind="screen" Ids="@AllScreens.Select(s => s.Id)" />
+<NewMark Kind="screenfolder" Ids="@folderRows.Select(r => r.Folder.Id)" />
 <NewMark Kind="zone" Ids="@zones.Select(z => z.Id)" />
 
 @code {
@@ -518,7 +652,7 @@ else if (wallEdit is { } wid)
     {
         get
         {
-            var q = InZone.Where(s => statusFilter switch
+            var q = InZone.Where(InPosition).Where(s => statusFilter switch
             {
                 "online" => !IsOffline(s),
                 "offline" => IsOffline(s),
@@ -632,14 +766,142 @@ else if (wallEdit is { } wid)
     private bool OwnAreaVisible => areaFilter == "" || areaFilter == area?.Id.ToString();
 
     // Aucun écran n'est affiché, quel que soit le mode (carte, liste, arborescence) : ceux de l'aire ouverte comme ceux des autres aires, hors recherche et filtres de zone ou d'état
-    private bool NothingToShow => Shown.Count + OtherShown.Count == 0 && zoneFilter == null && statusFilter == "" && search.Length == 0;
+    private bool NothingToShow => InZone.Count + OtherShown.Count == 0 && zoneFilter == null && statusFilter == "" && search.Length == 0;
 
     // Droit de connecter un écran dans l'aire ouverte : écrans en modification, et l'aire entière ou une zone libre que la personne voit (l'écran y sera rangé)
     private bool canAdd;
     private bool canAssign;     // administrateur, avec au moins un utilisateur : « Attribuer… » sur chaque écran
     private Dictionary<Guid, ShareSummary> screenShares = new();   // pastille « Partagé · N » : les utilisateurs qui gèrent l'écran (visible de l'administrateur)
     private RenderFragment ScreenShare(Screen s) => screenShares.TryGetValue(s.Id, out var sum) ? @<SharePill Summary="sum" Clickable="canAssign" OnClick="() => assigning = s" /> : (b => { });
+    // ---------- Dossiers de rangement (25 octobre 2026) : comme la Médiathèque, propres à l'aire ----------
+    private static readonly Guid RootDrop = Guid.Empty;
+    private bool Has => screens.Count > 0 || OtherAll.Count > 0;
+    private bool Filtering => search.Length > 0 || statusFilter != "" || zoneFilter != null;
+    private bool newMenu, creatingFolder;
+    private Guid? folderId;                                  // dossier ouvert ; null : racine
+    private List<ScreenFolderRow> folderRows = new(), subfolders = new(), crumbs = new();
+    private string newFolderName = "", renameFolderValue = "";
+    private string? folderError;
+    private ScreenFolderRow? renamingFolder, deletingFolder;
+    private (Guid Id, string Name)? reparenting;
+    private List<(Guid Id, string Name)>? folderMove;
+    private List<Guid> dragIds = new();
+    private Guid? dragFolder, dropOver;
+
+    private ScreenFolderRow? currentRow => folderId is { } id ? folderRows.FirstOrDefault(r => r.Folder.Id == id) : null;
+    private static string First(string name) => name.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? name;
+
+    // Le dossier d'un écran (null : racine, ou dossier que la personne ne voit pas) ; un écran de mur reste à la racine avec son mur
+    private Guid? FolderOf(Screen s) => s.FolderId is { } f && folderRows.Any(r => r.Folder.Id == f) && ZoneOf(s) is not { IsWall: true } ? f : null;
+
+    // Position ouverte : en cartes et en liste, les écrans du dossier ouvert (ou de la racine) ; recherche, filtres et arborescence : tous
+    private bool InPosition(Screen s) => TreeView || Filtering || FolderOf(s) == folderId;
+
+    private int ChildCount(Guid id) => screens.Count(s => FolderOf(s) == id) + folderRows.Count(r => r.Folder.ParentId == id);
+    private string FolderUnit(Guid id) => FolderShape.UnitFor(screens.Count(s => FolderOf(s) == id), folderRows.Count(r => r.Folder.ParentId == id), "écran", "écrans");
+    private List<MediaItem> FolderPreview(Guid id) => screens.Where(s => FolderOf(s) == id)
+        .Select(s => ZoneThumb(playlists.FirstOrDefault(p => p.Id == s.PlaylistId))).Where(m => m != null).Take(3).ToList()!;
+
+    private static readonly System.Globalization.CultureInfo Fr = new("fr-FR");
+    private static string FolderDate(ScreenFolderRow r)
+    {
+        var d = r.Folder.CreatedUtc.ToLocalTime();
+        return "créé le " + d.ToString(d.Year == DateTime.Now.Year ? "d MMM" : "d MMM yyyy", Fr);
+    }
+
+    private void BuildFolders()
+    {
+        if (folderId is { } open && !folderRows.Any(r => r.Folder.Id == open)) folderId = null;   // dossier retiré entre-temps
+        subfolders = folderRows.Where(r => r.Folder.ParentId == folderId || folderId == null && r.Folder.ParentId is { } p && folderRows.All(x => x.Folder.Id != p)).ToList();
+        crumbs = new();
+        for (var cur = currentRow; cur != null && crumbs.Count < FolderAccess.MaxDepth; cur = cur.Folder.ParentId is { } p ? folderRows.FirstOrDefault(r => r.Folder.Id == p) : null)
+            crumbs.Insert(0, cur);
+    }
+
+    private RenderFragment FolderCrumbs(ScreenFolderRow cur) => __builder =>
+    {
+        <button type="button" class="lx-crumb @(dropOver == RootDrop ? "drop-target" : "")" @onclick="() => OpenFolder(null)"
+                @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = RootDrop; }" @ondragleave="() => { if (dropOver == RootDrop) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(null)">Vos écrans</button>
+        @foreach (var c in crumbs.Take(crumbs.Count - 1))
+        {
+            var row = c;
+            <span class="lx-sl">/</span>
+            <button type="button" class="lx-crumb @(dropOver == row.Folder.Id ? "drop-target" : "")" @onclick="() => OpenFolder(row.Folder.Id)"
+                    @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = row.Folder.Id; }" @ondragleave="() => { if (dropOver == row.Folder.Id) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(row.Folder.Id)">@row.Folder.Name</button>
+        }
+        <span class="lx-sl">/</span>
+        <span>@cur.Folder.Name</span>
+    };
+
+    private void OpenFolder(Guid? id) { folderId = id; menuFor = null; selectedIds.Clear(); pickOrder.Clear(); BuildFolders(); }
+
+    private void OpenNewFolder()
+    {
+        newMenu = false; newFolderName = ""; folderError = null; creatingFolder = true;
+        if (view == "tree") view = "cards";   // les dossiers se voient en cartes et en liste, pas dans l'arborescence
+    }
+
+    private void CreateFolder()
+    {
+        var (error, _) = Folders.CreateFolder(newFolderName, TreeView ? null : folderId);
+        if (error != null) { folderError = error; return; }
+        creatingFolder = false;
+        Toast.Ok($"Dossier « {newFolderName.Trim()} » créé.");
+        Reload();
+    }
+
+    private void RenameFolder(ScreenFolderRow rf)
+    {
+        var error = Folders.RenameFolder(rf.Folder.Id, renameFolderValue);
+        if (error != null) { folderError = error; return; }
+        renamingFolder = null;
+        Toast.Ok("Dossier renommé.");
+        Reload();
+    }
+
+    private void DeleteFolder(ScreenFolderRow df)
+    {
+        var error = Folders.DeleteFolder(df.Folder.Id);
+        deletingFolder = null;
+        if (error != null) { Toast.Error(error); return; }
+        if (folderId == df.Folder.Id) folderId = df.Folder.ParentId;
+        Toast.Ok($"Dossier « {df.Folder.Name} » supprimé : ses écrans sont conservés.");
+        Reload();
+    }
+
+    private void MovedFolder(bool moved) { reparenting = null; if (moved) Reload(); }
+
+    // Glisser-déposer : un écran (ou tous ceux qui sont cochés), ou un dossier, vers un dossier ou la racine (null)
+    private bool CanDragScreen(Screen s) => canAdd && !isApp && ZoneOf(s) is not { IsWall: true };
+    private void StartDrag(Screen s) => dragIds = selectedIds.Contains(s.Id) ? selectedIds.ToList() : new List<Guid> { s.Id };
+    private void EndDrag() { dragIds = new(); dragFolder = null; dropOver = null; }
+
+    private void DropOn(Guid? target)
+    {
+        if (dragFolder is { } df)   // un dossier glissé sur un autre : il y entre
+        {
+            EndDrag();
+            if (target is { } t && t != df) { var err = Folders.MoveFolder(df, t); if (err != null) Toast.Error(err); else Toast.Ok("Dossier déplacé."); Reload(); }
+            return;
+        }
+        var ids = dragIds.ToList();
+        EndDrag();
+        if (ids.Count == 0) return;
+        var (moved, refused) = Folders.MoveScreens(ids, target);
+        if (refused.Count > 0) Toast.Error(refused[0] + (refused.Count > 1 ? $" (et {refused.Count - 1} autre{(refused.Count > 2 ? "s" : "")})" : ""));
+        if (moved > 0) { selectedIds.Clear(); pickOrder.Clear(); Toast.Ok(moved > 1 ? $"{moved} écrans rangés." : "Écran rangé."); }
+        Reload();
+    }
+
     private Screen? assigning;
+    private List<Screen> assigningMore = new();   // « Attribuer… » de la barre de sélection : les autres écrans choisis
+    private void OpenAssignSelection()
+    {
+        var picked = screens.Where(s => selectedIds.Contains(s.Id)).ToList();
+        if (picked.Count == 0) return;
+        assigningMore = picked.Skip(1).ToList();
+        assigning = picked[0];
+    }
 
     // Écrans des autres aires du périmètre (consultation : on ouvre leur aire pour les modifier)
     private List<OtherScreen> OtherAll => groupAreas.Where(g => g.Area.Id != area?.Id)
@@ -874,7 +1136,7 @@ else if (wallEdit is { } wid)
             var gdl = Store.Read(d => d.Delivery(gs));
             var gsl = Sleep.State(tenant, area, gs, false, gnow);   // en veille : écran éteint, il ne dialogue plus
             var gcls = gsl.Asleep ? "sleep" : gpaused ? "warn" : gst == "En ligne" ? "ok" : gst == "Mise à jour" ? "warn" : "bad";
-            <div data-nid="@gs.Id" class="pl-card gc @(selectedIds.Contains(gs.Id) ? "picked" : "") @(gonline || gsl.Asleep ? "" : "is-off") @(gonline && !gpaused && !gsl.Asleep ? "is-on" : "") @(gpaused ? "is-paused" : "")">
+            <div data-nid="@gs.Id" draggable="@(CanDragScreen(gs) ? "true" : "false")" @ondragstart="() => StartDrag(gs)" @ondragend="EndDrag" class="pl-card gc @(selectedIds.Contains(gs.Id) ? "picked" : "") @(gonline || gsl.Asleep ? "" : "is-off") @(gonline && !gpaused && !gsl.Asleep ? "is-on" : "") @(gpaused ? "is-paused" : "")">
                 <div class="gc-top">
                     <div class="gc-stage">
                         <div class="gc-mon @(gs.Orientation == "portrait" ? "portrait" : "")">
@@ -927,6 +1189,8 @@ else if (wallEdit is { } wid)
                                 <button type="button" role="menuitem" @onclick="() => { menuFor = null; simScreen = gs.Id; }"><Ico Name="play" Size="16" /> Simuler</button>
                                 <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"planning?screen={gs.Id}")'><Ico Name="calendar" Size="16" /> Planning de cet écran…</button>
                                 <button type="button" role="menuitem" @onclick="() => OpenRename(gs)"><Ico Name="edit" Size="16" /> Renommer</button>
+
+                                @if (canAdd) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (gs.Id, gs.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
                                 <button type="button" role="menuitem" @onclick="() => AskPublish(new() { gs.Id })"><Ico Name="upload" Size="16" /> Publier</button>
                                 <button type="button" role="menuitem" disabled="@(!Growth || !gonline)" title="@(!Growth ? Plans.LockedHint : !gonline ? "L'écran est hors ligne" : null)" @onclick='() => { menuFor = null; OpenLive(gs, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer</button>
                                 @if (canAssign) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; assigning = gs; }"><Ico Name="users" Size="16" /> Attribuer…</button> }
@@ -1133,7 +1397,7 @@ else if (wallEdit is { } wid)
         var now = DateTime.UtcNow;
         var online = ScreenControl.Online(sc, now);
         var paused = sc.IsPaused(now);
-        <div data-nid="@sc.Id" class="pl-card sc-card scr-card @(selectedIds.Contains(sc.Id) ? "picked" : "") @(online ? "" : "is-off") @(paused ? "is-paused" : "")">
+        <div data-nid="@sc.Id" draggable="@(CanDragScreen(sc) ? "true" : "false")" @ondragstart="() => StartDrag(sc)" @ondragend="EndDrag" class="pl-card sc-card scr-card @(selectedIds.Contains(sc.Id) ? "picked" : "") @(online ? "" : "is-off") @(paused ? "is-paused" : "")">
             <div class="sc-head">
                 <div class="pl-title">
                     <input type="checkbox" class="sc-check" aria-label="Sélectionner @sc.Name" checked="@selectedIds.Contains(sc.Id)" @onchange="() => ToggleSelect(sc.Id)" />
@@ -1155,6 +1419,8 @@ else if (wallEdit is { } wid)
                                 <button type="button" role="menuitem" @onclick="() => { menuFor = null; simScreen = sc.Id; }"><Ico Name="play" Size="16" /> Simuler</button>
                                 <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"planning?screen={sc.Id}")'><Ico Name="calendar" Size="16" /> Planning de cet écran…</button>
                                 <button type="button" role="menuitem" @onclick="() => OpenRename(sc)"><Ico Name="edit" Size="16" /> Renommer</button>
+
+                                @if (canAdd) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (sc.Id, sc.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
                                 <button type="button" role="menuitem" @onclick="() => AskPublish(new() { sc.Id })"><Ico Name="upload" Size="16" /> Publier</button>
                                 <button type="button" role="menuitem" disabled="@(!Growth || !online)" title="@(!Growth ? Plans.LockedHint : !online ? "L'écran est hors ligne" : null)" @onclick='() => { menuFor = null; OpenLive(sc, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer</button>
                                 @if (canAssign) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; assigning = sc; }"><Ico Name="users" Size="16" /> Attribuer…</button> }
@@ -1916,6 +2182,8 @@ else if (wallEdit is { } wid)
         otherAreas = Store.Read(d => d.Access.IsOrgAdmin && d.Area is { } cur ? d.Areas.Where(a => a.Id != cur.Id).OrderBy(a => a.Name).ToList() : new());
         if (zoneFilter != null && !zones.Any(z => z.Id.ToString() == zoneFilter)) zoneFilter = null;
         screens = Store.Read(d => d.Screens.Where(s => s.Token != null).OrderBy(s => s.Name).ToList());
+        folderRows = Store.Read(ScreenFolderOps.Rows);
+        BuildFolders();
         selectedIds.IntersectWith(screens.Select(s => s.Id));
         synced = zones.Where(z => z.Sync).SelectMany(z => Helpers.SyncedScreens(screens.Where(s => ZoneOf(s)?.Id == z.Id))).ToHashSet();
         playlists = Store.Read(d => PlaylistOps.Choosable(d));   // listes que la personne voit, et celles déjà en place
@@ -1935,7 +2203,18 @@ else if (wallEdit is { } wid)
         pairZone = (zones.FirstOrDefault(z => z.IsDefault) ?? FreeZones.FirstOrDefault())?.Id.ToString() ?? "";
     }
 
-    private void OpenPair() { pairAreas = Store.Read(AreaFilter.Visible); code = name = ""; pairFull = true; playlistId = null; error = null; pairSpec = ScreenSpec.From(tenant); pairSpec.Resolution = "auto"; pairZone = (FreeZones.FirstOrDefault(z => z.Id.ToString() == zoneFilter) ?? zones.FirstOrDefault(z => z.IsDefault) ?? FreeZones.FirstOrDefault())?.Id.ToString() ?? ""; showPair = true; }
+    private string? pairPrice;   // abonné : ce que coûte un écran de plus (rappel dans la fenêtre)
+    private void SetPairPrice()
+    {
+        var prorata = ScreenProrata();
+        if (prorata <= 0) { pairPrice = null; return; }
+        var unit = Store.Read(d => Billing.PeriodAmount(d.Root, d.Tenant.Plan, d.Tenant.BillingPeriod, 1));
+        pairPrice = Store.Read(d => d.Access.IsOrgAdmin)
+            ? $"Cet écran s'ajoute à votre abonnement : +{Lifecycle.Chf(unit)} {(tenant.BillingPeriod == "annual" ? "par an" : "par mois")}, {Lifecycle.Chf(prorata)} aujourd'hui au prorata."
+            : "Cet écran s'ajoute à l'abonnement de l'organisation : les administrateurs en sont prévenus.";
+    }
+
+    private void OpenPair() { SetPairPrice(); pairAreas = Store.Read(AreaFilter.Visible); code = name = ""; pairFull = true; playlistId = null; error = null; pairSpec = ScreenSpec.From(tenant); pairSpec.Resolution = "auto"; pairZone = (FreeZones.FirstOrDefault(z => z.Id.ToString() == zoneFilter) ?? zones.FirstOrDefault(z => z.IsDefault) ?? FreeZones.FirstOrDefault())?.Id.ToString() ?? ""; showPair = true; }
 
     private void Edit(Screen s) { menuFor = null; editing = s.Id; }
 
@@ -1989,20 +2268,74 @@ else if (wallEdit is { } wid)
         if (n.Length == 0) return;
         if (n.Length > 80) n = n[..80];
         if (!addPcWindowed && addPcTaken.ContainsKey(addPcMonitor)) { addPcError = $"Le moniteur {addPcMonitor} est déjà pris par « {addPcTaken[addPcMonitor]} » : choisissez-en un autre, ou une fenêtre."; return; }
-        addPcBusy = true;
         var (mon, win, res) = (addPcMonitor, addPcWindowed, addPcRes);
-        var id = Store.Write(d => d.Screens.FirstOrDefault(x => x.Id == from.Id) is { } src ? DeviceConfig.AddOnSamePc(d, src, n, mon, win, res).Id : (Guid?)null);
-        if (id == null) { addPcBusy = false; addPcError = "Écran introuvable."; return; }
-        await Notifier.PublishScreen(id.Value);   // il diffuse aussitôt la liste héritée
-        await Notifier.NotifyScreen(from.Id);     // le PC reçoit l'écran à ouvrir avec sa configuration
-        addPcFrom = null;
-        Toast.Ok($"Écran « {n} » ajouté : le PC l'ouvre dans quelques secondes.");
-        Reload();
+        await WithScreenCharge(n, async () =>   // un écran de plus sur le PC : facturé comme tout écran ajouté
+        {
+            addPcBusy = true;
+            var id = Store.Write(d => d.Screens.FirstOrDefault(x => x.Id == from.Id) is { } src ? DeviceConfig.AddOnSamePc(d, src, n, mon, win, res).Id : (Guid?)null);
+            if (id == null) { addPcBusy = false; addPcError = "Écran introuvable."; return false; }
+            await Notifier.PublishScreen(id.Value);   // il diffuse aussitôt la liste héritée
+            await Notifier.NotifyScreen(from.Id);     // le PC reçoit l'écran à ouvrir avec sa configuration
+            addPcFrom = null;
+            Toast.Ok($"Écran « {n} » ajouté : le PC l'ouvre dans quelques secondes.");
+            Reload();
+            return true;
+        });
     }
 
     private void CloseEdit() { editing = null; Reload(); }
 
+    // ---------- Écran ajouté chez un abonné : facturé au prorata ----------
+    private PayRequest? screenPay;
+    private Func<Task>? afterScreenPay;
+
+    /// <summary>Supplément au prorata d'un écran de plus (0 pendant l'essai ou sans abonnement).</summary>
+    private decimal ScreenProrata() { var now = DateTime.UtcNow; return Store.Read(d => Billing.ScreenProrata(d.Root, d.Tenant, now)); }
+
+    /// <summary>Un administrateur paie le prorata dans la fenêtre de paiement avant que l'écran soit connecté ; un utilisateur connecte l'écran
+    /// (prélevé d'office sur la carte enregistrée) et les administrateurs sont prévenus.</summary>
+    private async Task WithScreenCharge(string screenName, Func<Task<bool>> connect)
+    {
+        var prorata = ScreenProrata();
+        if (prorata > 0 && Store.Read(d => d.Access.IsOrgAdmin))
+        {
+            var now = DateTime.UtcNow;
+            var (unit, next) = Store.Read(d => (Billing.PeriodAmount(d.Root, d.Tenant.Plan, d.Tenant.BillingPeriod, 1), d.Tenant.NextRenewalUtc));
+            screenPay = new(prorata, $"+1 écran : « {screenName} »", $"Prorata jusqu'au {Signup.Day(tenant, next!.Value)} ({Billing.DaysToRenewal(tenant, now)} jours), puis {Lifecycle.Chf(unit)} {(tenant.BillingPeriod == "annual" ? "par an" : "par mois")}.");
+            afterScreenPay = async () => { if (await connect()) await ChargeScreen(screenName, prorata); };
+            return;
+        }
+        if (await connect() && prorata > 0) await ChargeScreen(screenName, prorata);
+    }
+
+    private async Task ChargeScreen(string screenName, decimal prorata)
+    {
+        var now = DateTime.UtcNow;
+        var by = Store.Read(d => d.Access.IsOrgAdmin) ? "" : Store.Read(d => d.Root.Users.FirstOrDefault(u => u.Id == d.Access.UserId)?.Name ?? "");
+        var n = Store.Write(d => { Billing.ChargeScreen(d.Root, d.Tenant, screenName, now, simulated: true); return Lifecycle.ScreenAdded(d.Root, d.Tenant, screenName, by, prorata, now); });
+        await Mails.Send(Store.ClientId, n, allAdmins: true);
+    }
+
+    private async Task ScreenPayDone(PayDialog.Outcome o)
+    {
+        var then = afterScreenPay;
+        screenPay = null; afterScreenPay = null;
+        if (o.Cancelled || then == null) return;
+        if (!o.Paid) { Toast.Error("Paiement refusé (simulation) : l'écran n'a pas été connecté."); return; }
+        await then();
+    }
+
     private async Task Pair()
+    {
+        error = null;
+        if (noArea) { error = "Aucune aire de gestion ne vous est confiée."; return; }
+        if (!canAdd) { error = "Vous êtes en lecture seule sur les écrans : vous ne pouvez pas en connecter."; return; }
+        var c0 = code.Trim();
+        if (!Store.Read(d => d.Root.Screens.Any(x => x.Token == null && x.PairingCode == c0))) { error = "Code inconnu."; return; }   // vérifié avant tout paiement
+        await WithScreenCharge(string.IsNullOrWhiteSpace(name) ? "Écran " + c0 : name.Trim(), PairNow);
+    }
+
+    private async Task<bool> PairNow()
     {
         error = null;
         var spec = pairSpec;
@@ -2010,8 +2343,6 @@ else if (wallEdit is { } wid)
         var pid = playlistId;
         var screenName = name;
         Guid? zid = Guid.TryParse(pairZone, out var zg) && zones.Any(z => z.Id == zg) ? zg : (zones.FirstOrDefault(z => z.IsDefault) ?? FreeZones.FirstOrDefault())?.Id;
-        if (noArea) { error = "Aucune aire de gestion ne vous est confiée."; return; }
-        if (!canAdd) { error = "Vous êtes en lecture seule sur les écrans : vous ne pouvez pas en connecter."; return; }
         var id = Store.Write(d =>
         {
             var s = d.ClaimScreen(code.Trim());
@@ -2027,11 +2358,12 @@ else if (wallEdit is { } wid)
             s.PairingCode = null;
             return s.Id;
         });
-        if (id == null) { error = "Code inconnu."; return; }
+        if (id == null) { error = "Code inconnu."; return false; }
         await Notifier.PublishScreen(id.Value);   // l'écran appairé diffuse aussitôt sa liste de lecture
         showPair = false;
         Toast.Ok($"Écran « {(string.IsNullOrWhiteSpace(screenName) ? "Écran " + code : screenName.Trim())} » connecté.");
         Reload();
+        return true;
     }
 
     // ---------- Sélection multiple et publication ----------

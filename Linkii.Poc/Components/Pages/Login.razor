@@ -35,7 +35,7 @@ else
             </EditForm>
             @if (Host.AllowsSignupWith(SignupSources.Email))
             {
-                <p class="auth-alt left">Pas encore d'espace ? <a href="/login?signup=1">Créer un espace</a></p>
+                <p class="auth-alt left">Pas encore d'espace ? <a href="/login?signup=1@(trialCode != null ? "&code=" + Uri.EscapeDataString(trialCode) : "")">Créer un espace</a></p>
             }
         </div>
         @if (anySso)
@@ -90,6 +90,7 @@ else
                     <h1 id="signup-title">Créez votre espace</h1>
                     <span class="trial-tag">Essai gratuit · @trialDays jours · sans carte bancaire</span>
                 </div>
+                <p class="hint" style="margin:-4px 0 12px">Toutes les fonctions pendant l'essai. Sans plan choisi ensuite, vos contenus sont conservés @retentionDays jours puis supprimés ; nous vous préviendrons par e-mail avant chaque étape.</p>
 
                 @if (ssoError != null) { <div class="err">@ssoError</div> }
 
@@ -136,9 +137,13 @@ else
     private Reseller? Host => Http?.Items["reseller"] as Reseller;
     // La fenêtre de création s'ouvre si le revendeur propose l'inscription par e-mail, ou pour la dernière étape d'une inscription par un fournisseur qu'il propose.
     private bool signup => SignupQuery != null && Host is { Active: true } h && (h.AllowsSignupWith(SignupSources.Email) || Ext != null && h.AllowsSignup);
+    [SupplyParameterFromQuery(Name = "code")] private string? CodeQuery { get; set; }
     private ExternalLogin.Ticket? ticket;
     private string? error, ssoError;
-    private int trialDays;
+    private int trialDays, retentionDays;
+    // Code d'essai (lien ?code=…) : gardé dans un cookie pour survivre au passage par Microsoft / Google
+    private string? trialCode;
+    private const string CodeCookie = "lk_trial_code";
 
     // Boutons Microsoft / Google : proposés quand l'application OAuth de la plateforme est configurée (toujours en développement, pour essayer l'écran).
     // Un fournisseur est proposé s'il est configuré sur la plateforme ET que le revendeur l'offre à l'inscription, ou que des personnes de ce revendeur
@@ -175,7 +180,11 @@ else
         Credentials ??= new();
         EmailSignup ??= new();
         if (Http?.User.Identity?.IsAuthenticated == true) { Nav.NavigateTo(Claims.Home(Http.User), forceLoad: true); return; }
-        trialDays = Store.Read(d => d.Platform.TrialDays);
+        var code = CodeQuery ?? Http?.Request.Cookies[CodeCookie];
+        trialCode = Store.Read(d => Billing.FindCode(d, code)?.Code);
+        if (trialCode != null && CodeQuery != null && Http is { Response.HasStarted: false })
+            Http.Response.Cookies.Append(CodeCookie, trialCode, new() { MaxAge = TimeSpan.FromDays(7), HttpOnly = true, SameSite = SameSiteMode.Lax, IsEssential = true });
+        (trialDays, retentionDays) = Store.Read(d => (Billing.TrialDaysFor(d, trialCode), Math.Max(1, d.Platform.RetentionDays)));
         if (Host is { } hh) usedProviders = Store.Read(d => d.Users.Where(u => u.ResellerId == hh.Id && u.ExternalProvider != null).Select(u => u.ExternalProvider!).ToHashSet());
         if (signup && Ext != null)
         {
@@ -223,7 +232,7 @@ else
         if (string.IsNullOrWhiteSpace(m.Organisation) || string.IsNullOrWhiteSpace(m.Email)) { error = "Organisation et e-mail obligatoires."; return; }
         if (m.Password != m.PasswordConfirm) { error = "Les deux mots de passe ne correspondent pas."; m.Password = m.PasswordConfirm = ""; return; }
         var now = DateTime.UtcNow;
-        var (client, admin, token, err) = Store.Write(d => Signup.Create(d, Host!, m.Organisation, m.Name, m.Email, m.Password, null, ConsentsOf(m), now, m.Mode == "expert"));
+        var (client, admin, token, err) = Store.Write(d => Signup.Create(d, Host!, m.Organisation, m.Name, m.Email, m.Password, null, ConsentsOf(m), now, m.Mode == "expert", trialCode));
         if (client == null) { error = err; return; }
         var link = $"{Http!.Request.Scheme}://{Http.Request.Host}/login/verify/confirm?t={Uri.EscapeDataString(token!)}";
         var mailErr = await Mail.SendVerification(Host!, link, admin!.Name, admin.Email, client.Name, Store.Read(d => d.Platform.VerifyLinkHours));
@@ -236,7 +245,8 @@ else
     private async Task SendWelcome(Tenant client, User admin, bool pending)
     {
         var mailErr = await Mail.SendSignupWelcome(Host!, $"{Http!.Request.Scheme}://{Http.Request.Host}/", admin.Name, admin.Email, client.Name,
-            Store.Read(d => d.Platform.TrialDays), client.TrialEndsUtc is { } end ? Signup.Day(client, end) : null, Signup.SignInHint(admin), pending);
+            Store.Read(d => Signup.TrialDaysOf(d, client)), client.TrialEndsUtc is { } end ? Signup.Day(client, end) : null, Signup.SignInHint(admin), pending,
+            Store.Read(d => Lifecycle.WelcomeDeleteNote(d, client)));
         if (mailErr != null) { Log.LogWarning("E-mail de bienvenue non envoyé à {Email} : {Error}", admin.Email, mailErr); return; }
         Store.Write(d => { if (d.Users.FirstOrDefault(u => u.Id == admin.Id) is { } u) u.WelcomeSentUtc = DateTime.UtcNow; });
     }
@@ -250,7 +260,7 @@ else
         if (string.IsNullOrWhiteSpace(m.Organisation)) { error = "Le nom de l'organisation est obligatoire."; return; }
         var now = DateTime.UtcNow;
         var id = ticket.Identity;
-        var (client, admin, _, err) = Store.Write(d => Signup.Create(d, Host!, m.Organisation, string.IsNullOrWhiteSpace(m.Name) ? id.Name : m.Name, id.Email, null, id, ConsentsOf(m), now, m.Mode == "expert"));
+        var (client, admin, _, err) = Store.Write(d => Signup.Create(d, Host!, m.Organisation, string.IsNullOrWhiteSpace(m.Name) ? id.Name : m.Name, id.Email, null, id, ConsentsOf(m), now, m.Mode == "expert", trialCode));
         if (client == null) { error = err; return; }
         if (admin == null || Http == null) { error = "Connexion impossible. Réessayez."; return; }
         Sso.Consume(Ext);

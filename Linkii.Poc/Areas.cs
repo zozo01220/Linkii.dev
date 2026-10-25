@@ -63,6 +63,7 @@ public static class AreaOps
         foreach (var x in d.Root.Playlists.Where(x => x.ClientId == d.ClientId && x.AreaId == areaId)) x.AreaId = other;
         foreach (var x in d.Root.MediaFolders.Where(x => x.ClientId == d.ClientId && x.AreaId == areaId)) x.AreaId = other;
         foreach (var x in d.Root.PlaylistFolders.Where(x => x.ClientId == d.ClientId && x.AreaId == areaId)) x.AreaId = other;
+        foreach (var x in d.Root.CompositionFolders.Where(x => x.ClientId == d.ClientId && x.AreaId == areaId)) x.AreaId = other;
         foreach (var x in d.Root.CompositionTemplates.Where(x => x.ClientId == d.ClientId && x.AreaId == areaId)) x.AreaId = other;
         AccessLevels.Forget(d, [areaId], d.Areas.Where(a => a.Id == areaId).SelectMany(a => a.Zones).Select(z => z.Id));   // ses zones ne sont plus attribuées
         d.Areas.RemoveAll(a => a.Id == areaId);
@@ -253,6 +254,7 @@ public static class AreaOps
         if (s.AreaId == target) return null;
         if (WallOf(d, s) is { } wall) return $"« {s.Name} » fait partie du mur « {wall.Name} » : dissolvez d'abord le mur.";
         s.AreaId = target;
+        s.FolderId = null;   // les dossiers de rangement sont ceux de l'aire
         s.WallPos = null;
         s.ZoneId = EnsureDefaultZone(d.Areas.First(a => a.Id == target)).Id;   // zone par défaut de l'aire d'arrivée
         return null;

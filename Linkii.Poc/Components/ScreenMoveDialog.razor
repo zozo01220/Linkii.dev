@@ -1,0 +1,92 @@
+@* Ranger des écrans dans un dossier de l'aire, ou à la racine. On peut créer le dossier de destination sur place. *@
+@inject ScreenFolderLibrary Library
+
+<div class="modal-backdrop" @onclick="() => OnClose.InvokeAsync(moved)"></div>
+<div class="modal" role="dialog" aria-modal="true" aria-labelledby="scmv-title">
+    <h3 id="scmv-title">Ranger @(Items.Count > 1 ? $"{Items.Count} écrans" : $"« {Items.FirstOrDefault().Name} »") dans un dossier</h3>
+    @if (targets.Count == 0 && !adding)
+    {
+        <p class="hint">Vous n'avez pas de dossier où ranger cet écran : demandez à un propriétaire de vous donner un accès en écriture, ou créez-en un.</p>
+    }
+    else if (targets.Count > 0)
+    {
+        <select style="width:100%;margin-top:10px" aria-label="Dossier de destination" @bind="choice">
+            @for (var i = 0; i < targets.Count; i++)
+            {
+                var n = i;
+                <option value="@n">@targets[n].Path</option>
+            }
+        </select>
+    }
+    @if (adding)
+    {
+        <div class="row" style="gap:8px;margin-top:10px">
+            <input class="grow" placeholder="Nom du nouveau dossier" maxlength="60" aria-label="Nom du nouveau dossier" @bind="newName" @bind:event="oninput" @onkeydown="OnAddKey" />
+            <button type="button" class="btn sm" disabled="@string.IsNullOrWhiteSpace(newName)" @onclick="AddFolder">Créer</button>
+            <button type="button" class="btn ghost sm" @onclick="() => adding = false">Annuler</button>
+        </div>
+        @if (addError != null) { <div class="err">@addError</div> }
+        <p class="hint">Le dossier est créé dans l'emplacement choisi ci-dessus. Vous en serez le propriétaire.</p>
+    }
+    else if (!done)
+    {
+        <button type="button" class="linklike" style="margin-top:8px" @onclick="() => { adding = true; newName = string.Empty; addError = null; }"><Ico Name="folder" Size="14" /> Ajouter un dossier</button>
+    }
+    @if (refused.Count > 0)
+    {
+        <div class="err">
+            @moved rangé@(moved > 1 ? "s" : ""), @refused.Count refusé@(refused.Count > 1 ? "s" : "") :
+            <ul style="margin:6px 0 0;padding-left:18px">@foreach (var r in refused) { <li>@r</li> }</ul>
+        </div>
+    }
+    <div class="modal-actions">
+        @if (done) { <button class="btn" @onclick="() => OnClose.InvokeAsync(moved)">Fermer</button> }
+        else
+        {
+            <button class="btn ghost" @onclick="() => OnClose.InvokeAsync(moved)">Annuler</button>
+            <button class="btn" disabled="@(targets.Count == 0)" @onclick="Move">Ranger</button>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public List<(Guid Id, string Name)> Items { get; set; } = new();
+    [Parameter] public EventCallback<int> OnClose { get; set; }
+
+    private List<(Guid? Id, string Path)> targets = new();
+    private int choice;
+    private List<string> refused = new();
+    private int moved;
+    private bool done;
+    private bool adding;
+    private string newName = "";
+    private string? addError;
+
+    protected override void OnInitialized() => targets = Library.MoveTargets();
+
+    private void Move()
+    {
+        if (choice < 0 || choice >= targets.Count) return;
+        var (count, failures) = Library.MoveScreens(Items.Select(i => i.Id).ToList(), targets[choice].Id);
+        moved = count;
+        refused = failures;
+        if (refused.Count == 0) { OnClose.InvokeAsync(moved); return; }
+        done = true;
+    }
+
+    private void AddFolder()
+    {
+        var parent = choice >= 0 && choice < targets.Count ? targets[choice].Id : null;
+        var (error, folder) = Library.CreateFolder(newName, parent);
+        if (error != null) { addError = error; return; }
+        targets = Library.MoveTargets();
+        choice = Math.Max(0, targets.FindIndex(t => t.Id == folder!.Id));
+        adding = false;
+    }
+
+    private void OnAddKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(newName)) AddFolder();
+        else if (e.Key == "Escape") adding = false;
+    }
+}
