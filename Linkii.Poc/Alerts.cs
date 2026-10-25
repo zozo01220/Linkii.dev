@@ -1,7 +1,7 @@
 namespace Linkii.Poc;
 
 /// <summary>
-/// Alertes de l'organisation (licence Growth) : un interrupteur général, deux canaux (e-mail, notification de l'app Android)
+/// Alertes de l'organisation (licence Pro) : un interrupteur général, deux canaux (e-mail, notification de l'app Android)
 /// et quatre types suivis. Le délai (<see cref="Tenant.AlertOfflineMinutes"/>) ne concerne que les écrans hors ligne ;
 /// les destinataires (<see cref="Tenant.AlertEmail"/>) ne concernent que l'e-mail, les notifications vont aux téléphones des administrateurs.
 /// </summary>

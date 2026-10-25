@@ -21,7 +21,7 @@ public class Db
     public List<CompositionTemplate> CompositionTemplates { get; set; } = new();   // « Mes modèles » de compositions (voir <see cref="CompositionTemplate"/>)
     public List<Payment> Payments { get; set; } = new();          // paiements de renouvellement enregistrés (voir <see cref="Subscriptions"/>)
     public List<Payout> Payouts { get; set; } = new();            // versements de fin de mois aux revendeurs
-    public List<Opportunity> Opportunities { get; set; } = new(); // demandes Entreprise (voir Enterprise)
+    public List<Opportunity> Opportunities { get; set; } = new(); // demandes Enterprise (voir Enterprise)
     public List<License> Licenses { get; set; } = new();          // licences des installations sur site
     public PlatformSettings Platform { get; set; } = new();      // réglages communs à toutes les organisations (console › Réglages)
     /// <summary>Migrations ponctuelles déjà faites (voir <see cref="AccessLevels.MigrateRolesV2"/>).</summary>
@@ -81,7 +81,7 @@ public class PlatformSettings
     public string SmtpFrom { get; set; } = "";       // adresse d'expédition
 
     // Essai et abonnement en libre-service (voir Billing)
-    /// <summary>Licence pendant l'essai : Growth d'office (toutes les fonctions), le client choisit sa licence au moment de payer.</summary>
+    /// <summary>Licence pendant l'essai : Pro d'office (toutes les fonctions), le client choisit sa licence au moment de payer.</summary>
     public string TrialPlan { get; set; } = Plans.Growth;
     /// <summary>Conservation des contenus après la fin de l'essai (ou d'un abonnement résilié), puis suppression définitive.</summary>
     public int RetentionDays { get; set; } = 30;
@@ -366,7 +366,7 @@ public class Tenant
     public string? TrialCode { get; set; }
 
     // Abonnement en libre-service (voir Billing)
-    /// <summary>Licence qui remplacera l'actuelle à la prochaine échéance (passage de Growth à Base).</summary>
+    /// <summary>Licence qui remplacera l'actuelle à la prochaine échéance (passage de Pro à Essential).</summary>
     public string? PendingPlan { get; set; }
     /// <summary>Facturation (monthly | annual) qui remplacera l'actuelle à la prochaine échéance.</summary>
     public string? PendingPeriod { get; set; }
@@ -416,11 +416,11 @@ public class Tenant
     public DateTime? TechPinUtc { get; set; }
     public string TechPinBy { get; set; } = "";
 
-    /// <summary>Licence de l'organisation (voir <see cref="Plans"/>) : Growth ajoute le contrôle du direct, la supervision et les murs d'écrans.</summary>
+    /// <summary>Licence de l'organisation (voir <see cref="Plans"/>) : Pro ajoute le contrôle du direct, la supervision et les murs d'écrans.</summary>
     public string Plan { get; set; } = Plans.Base;
     public bool IsGrowth => Plan == Plans.Growth;
 
-    // Alertes (Growth, voir Alerts) : interrupteur général, canaux, types suivis ; pause des écrans
+    // Alertes (Pro, voir Alerts) : interrupteur général, canaux, types suivis ; pause des écrans
     public bool AlertsOn { get; set; }
     public bool AlertMail { get; set; }
     public bool AlertPush { get; set; }
@@ -682,7 +682,7 @@ public class Screen : IClientOwned, IAreaOwned
     public bool Windowed { get; set; }             // PC Windows : fenêtre à la taille de la résolution au lieu du plein écran
     public int Monitor { get; set; } = 1;          // PC Windows : moniteur utilisé
 
-    // Contrôle du direct (licence Growth)
+    // Contrôle du direct (licence Pro)
     public DateTime? PausedUtc { get; set; }       // pause en cours depuis…
     public DateTime? PausedUntilUtc { get; set; }  // …jusqu'à (null : reprise manuelle)
     public DateTime? CaptureUtc { get; set; }      // dernier aperçu du direct (fichier captures/{id}.jpg)
@@ -761,14 +761,14 @@ public class ScreenCommand
     };
 }
 
-/// <summary>Licences : Base (affichage) et Growth (en plus : contrôle du direct, supervision, statistiques, murs d'écrans).</summary>
+/// <summary>Licences : Essential (affichage) et Pro (en plus : contrôle du direct, supervision, statistiques, murs d'écrans).</summary>
 public static class Plans
 {
     public const string Base = "base";
     public const string Growth = "growth";
     public static readonly string[] All = { Base, Growth };
-    public static string Label(string? p) => p == Growth ? "Growth" : "Base";
-    public const string LockedHint = "Disponible avec la licence Growth";
+    public static string Label(string? p) => p == Growth ? "Pro" : "Essential";
+    public const string LockedHint = "Disponible avec la licence Pro";
 }
 
 /// <summary>Découpages proposés pour un écran. Tailles en % de la largeur (paysage) ou de la hauteur (portrait) :
@@ -936,7 +936,7 @@ public class PlaylistItem
     public string? StartsAt { get; set; }
     public string? EndsAt { get; set; }
 
-    // Comptage des scans (licence Growth, contenus pleine page) : un QR code au premier plan, dont l'adresse courte /q/{code} compte puis redirige (voir QrTracking)
+    // Comptage des scans (licence Pro, contenus pleine page) : un QR code au premier plan, dont l'adresse courte /q/{code} compte puis redirige (voir QrTracking)
     public bool QrOn { get; set; }
     public string? QrCode { get; set; }       // code de l'adresse courte, créé à la première activation et jamais changé (le QR affiché reste valable)
     public string? QrUrl { get; set; }        // destination du visiteur

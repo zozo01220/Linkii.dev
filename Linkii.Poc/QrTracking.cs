@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 namespace Linkii.Poc;
 
 /// <summary>
-/// Comptage des scans de QR code (licence Growth). Le QR affiché sur l'écran n'encode pas la destination mais une adresse courte
+/// Comptage des scans de QR code (licence Pro). Le QR affiché sur l'écran n'encode pas la destination mais une adresse courte
 /// <c>{domaine}/q/{code}</c> : le serveur compte le scan (<see cref="ScanLog"/>) puis redirige. La destination reste donc modifiable
 /// sans changer le QR déjà affiché ni republier.
 /// </summary>
@@ -60,7 +60,7 @@ public static class QrTracking
     }
 
     /// <summary>
-    /// QR publié avec un élément de playlist : seulement pour un contenu pleine page, activé, d'une organisation Growth,
+    /// QR publié avec un élément de playlist : seulement pour un contenu pleine page, activé, d'une organisation Pro,
     /// avec un code, une destination et une adresse d'application valides ; sinon aucun QR.
     /// </summary>
     public static PublishedQr? Overlay(PlaylistItem i, bool growth, string placement)

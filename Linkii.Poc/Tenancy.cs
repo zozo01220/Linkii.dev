@@ -447,7 +447,7 @@ public static class Tenancy
         if (password != null && password.Length < 8) return (null, "Mot de passe trop court (8 caractères minimum).");
         if (db.Users.Any(u => u.Email == email && (u.ResellerId == reseller.Id || u.ResellerId == null)))
             return (null, "Cette adresse e-mail est déjà utilisée.");
-        // Tout nouveau client démarre en licence Growth. Créé par la console ou un revendeur, il est aussitôt en essai gratuit (durée réglée dans la console) ;
+        // Tout nouveau client démarre en licence Pro. Créé par la console ou un revendeur, il est aussitôt en essai gratuit (durée réglée dans la console) ;
         // en libre-service, l'essai ne démarre qu'à la validation de l'adresse e-mail (voir Signup.Verify).
         var client = new Tenant { ResellerId = reseller.Id, Name = clientName.Trim(), SignupSource = source, Plan = Plans.Growth, TechPin = TechPin.Generate(), TechPinUtc = DateTime.UtcNow, TechPinBy = "Création" };
         if (!SignupSources.IsSelfService(source)) client.TrialEndsUtc = DateTime.UtcNow.AddDays(Math.Max(1, db.Platform.TrialDays));

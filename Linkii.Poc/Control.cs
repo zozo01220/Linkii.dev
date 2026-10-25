@@ -6,7 +6,7 @@ namespace Linkii.Poc;
 public record CommandResult(bool Ok, string? Error = null, Guid? Id = null);
 
 /// <summary>
-/// Contrôle du direct (licence Growth) : le back-office envoie une commande à un écran (pause, reprise, redémarrage, rechargement, aperçu),
+/// Contrôle du direct (licence Pro) : le back-office envoie une commande à un écran (pause, reprise, redémarrage, rechargement, aperçu),
 /// par SignalR et, en secours, dans la réponse du sondage du player. L'écran accuse réception puis exécution
 /// (<see cref="ScreenCommand.Status"/>) ; l'état (pause en cours, dernier aperçu) est gardé sur l'écran pour le back-office.
 /// </summary>
@@ -21,7 +21,7 @@ public class ScreenControl(JsonStore store, IHubContext<ScreenHub> hub)
 
     /// <summary>
     /// Envoie une commande à un écran de l'organisation. minutes : durée d'une pause (0 : reprise manuelle seulement).
-    /// Refusée si l'organisation n'a pas la licence Growth, si l'écran est hors ligne ou si une commande identique est déjà en cours.
+    /// Refusée si l'organisation n'a pas la licence Pro, si l'écran est hors ligne ou si une commande identique est déjà en cours.
     /// </summary>
     public async Task<CommandResult> Send(Guid clientId, Guid screenId, string kind, string by, int minutes = 0)
     {

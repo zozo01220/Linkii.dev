@@ -124,7 +124,7 @@ public static class Signup
         if (client != null && SignupSources.IsSelfService(client.SignupSource) && client.TrialEndsUtc == null && !client.Subscribed && u.Id == OwnerOf(db, client)?.Id)
         {
             client.TrialEndsUtc = now.AddDays(TrialDaysOf(db, client));
-            client.Plan = db.Platform.TrialPlan == Plans.Base ? Plans.Base : Plans.Growth;   // l'essai donne la licence choisie dans la console (Growth d'office)
+            client.Plan = db.Platform.TrialPlan == Plans.Base ? Plans.Base : Plans.Growth;   // l'essai donne la licence choisie dans la console (Pro d'office)
         }
     }
 
@@ -279,7 +279,7 @@ public class SignupWorker(JsonStore store, Notifier notifier, AlertService alert
         await RunEnterprise(now);
     }
 
-    /// <summary>Offre Entreprise : rappels de fin de pilote (7 et 2 jours) et d'échéance des licences sur site (60, 30, 7 jours), au contact et à l'équipe Linkii.</summary>
+    /// <summary>Offre Enterprise : rappels de fin de pilote (7 et 2 jours) et d'échéance des licences sur site (60, 30, 7 jours), au contact et à l'équipe Linkii.</summary>
     public async Task RunEnterprise(DateTime now)
     {
         if (Subscriptions.ToLocal(now).Hour < Lifecycle.SendHour) return;

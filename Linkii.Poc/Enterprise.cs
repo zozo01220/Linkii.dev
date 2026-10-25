@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace Linkii.Poc;
 
-/// <summary>Demande Entreprise (formulaire « Parler à un expert ») : suivie dans la console jusqu'au contrat ou à l'abandon.</summary>
+/// <summary>Demande Enterprise (formulaire « Parler à un expert ») : suivie dans la console jusqu'au contrat ou à l'abandon.</summary>
 public class Opportunity
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -59,7 +59,7 @@ public class License
     public string Org { get; set; } = "";
     public string Email { get; set; } = "";
     public int Screens { get; set; }
-    public string Modules { get; set; } = "Growth";
+    public string Modules { get; set; } = "Pro";
     public DateTime IssuedUtc { get; set; } = DateTime.UtcNow;
     public DateTime ExpiresUtc { get; set; }
     /// <summary>online | offline</summary>
@@ -149,7 +149,7 @@ public static class Enterprise
         new() { "Nous revenons vers vous sous un jour ouvré pour un échange de 20 minutes." },
         new() { ("Organisation", o.Org), ("Sites", o.Sites), ("Écrans", o.Screens), ("Déploiement", Deployments.Label(o.Deployment)) }, null, null);
 
-    public static Notice Internal(Opportunity o) => new($"Nouvelle demande Entreprise : {o.Org}", "Nouvelle opportunité",
+    public static Notice Internal(Opportunity o) => new($"Nouvelle demande Enterprise : {o.Org}", "Nouvelle opportunité",
         new List<string> { $"{o.Name} ({o.Email}) · {o.Sites} · {o.Screens} écrans · {Deployments.Label(o.Deployment)}." }
             .Concat(o.Needs.Count > 0 ? new[] { "Exigences : " + string.Join(", ", o.Needs) + "." } : Array.Empty<string>())
             .Concat(o.Message.Trim().Length > 0 ? new[] { "« " + o.Message.Trim() + " »" } : Array.Empty<string>()).ToList(),

@@ -1,10 +1,10 @@
 namespace Linkii.Poc;
 
-/// <summary>Ce qu'un paiement demande au client : montant et libellé (« Growth × 6 écrans, mensuel »). Affiché par la fenêtre de paiement.</summary>
+/// <summary>Ce qu'un paiement demande au client : montant et libellé (« Pro × 6 écrans, mensuel »). Affiché par la fenêtre de paiement.</summary>
 public record PayRequest(decimal Amount, string Label, string Detail);
 
 /// <summary>
-/// Abonnement en libre-service (côté client) : choix du plan, écran ajouté, passage à Base ou à Growth, résiliation.
+/// Abonnement en libre-service (côté client) : choix du plan, écran ajouté, passage à Essential ou à Pro, résiliation.
 /// Le paiement lui-même passe par <c>PayDialog</c> : en mode simulation, une fenêtre remplace Stripe (paiement réussi ou refusé) ;
 /// en mode Stripe, c'est là que se brancheront Checkout et le portail client. Les règles ci-dessous ne dépendent pas du mode.
 /// Prix : écrans appairés × prix de la licence (<see cref="Subscriptions"/>) ; un écran ajouté est facturé au prorata, un écran retiré sort à l'échéance.
@@ -48,7 +48,7 @@ public static class Billing
     public static decimal ScreenProrata(Db db, Tenant c, DateTime now) =>
         c.Subscribed && !c.InTrial(now) ? Math.Round(PeriodAmount(db, c.Plan, c.BillingPeriod, 1) * RemainingShare(c, now), 2) : 0;
 
-    /// <summary>Supplément au prorata du passage de Base à Growth pour les écrans actuels.</summary>
+    /// <summary>Supplément au prorata du passage de Essential à Pro pour les écrans actuels.</summary>
     public static decimal UpgradeProrata(Db db, Tenant c, DateTime now)
     {
         if (!c.Subscribed || c.InTrial(now)) return 0;
@@ -95,15 +95,15 @@ public static class Billing
     public static Payment? ChargeScreen(Db db, Tenant c, string screenName, DateTime now, bool simulated) =>
         Subscriptions.RecordExtra(db, c, ScreenProrata(db, c, now), $"+1 écran ({screenName}), prorata", now, simulated);
 
-    /// <summary>Base → Growth : immédiat, différence au prorata.</summary>
+    /// <summary>Essential → Pro : immédiat, différence au prorata.</summary>
     public static Payment? Upgrade(Db db, Tenant c, DateTime now, bool simulated)
     {
         var amount = UpgradeProrata(db, c, now);
         c.Plan = Plans.Growth; c.PendingPlan = null;
-        return Subscriptions.RecordExtra(db, c, amount, "Passage à Growth, prorata", now, simulated);
+        return Subscriptions.RecordExtra(db, c, amount, "Passage à Pro, prorata", now, simulated);
     }
 
-    /// <summary>Growth → Base : à l'échéance. Rien n'est supprimé, les fonctions Growth se verrouillent.</summary>
+    /// <summary>Pro → Essential : à l'échéance. Rien n'est supprimé, les fonctions Pro se verrouillent.</summary>
     public static void ScheduleBase(Tenant c) { if (c.IsGrowth) c.PendingPlan = Plans.Base; }
     public static void CancelBase(Tenant c) => c.PendingPlan = null;
 
@@ -115,11 +115,11 @@ public static class Billing
     public static void SwitchPeriod(Tenant c, string? period) =>
         c.PendingPeriod = period == null || period == c.BillingPeriod ? null : period == "annual" ? "annual" : "monthly";
 
-    // ---------- Ce que le passage à Base verrouille ----------
+    // ---------- Ce que le passage à Essential verrouille ----------
 
     public record GrowthUse(int Walls, int Alerts, int Qr);
 
-    /// <summary>Fonctions Growth réellement utilisées par l'organisation (murs, alertes actives, QR codes comptés).</summary>
+    /// <summary>Fonctions Pro réellement utilisées par l'organisation (murs, alertes actives, QR codes comptés).</summary>
     public static GrowthUse UsageOf(Db db, Tenant c) => new(
         db.Areas.Where(a => a.ClientId == c.Id).Sum(a => a.Zones.Count(z => z.IsWall)),
         c.AlertsOn ? Math.Max(1, c.AlertTypes.Count) : 0,

@@ -5,7 +5,7 @@ public record Notice(string Subject, string Title, List<string> Paras, List<(str
 
 /// <summary>
 /// Parcours e-mails d'une organisation en libre-service, de l'inscription à la fin (plan acheté ou suppression).
-/// Déclenchés par une action : partent tout de suite (plan actif, écran ajouté, passage à Base, résiliation, paiement refusé).
+/// Déclenchés par une action : partent tout de suite (plan actif, écran ajouté, passage à Essential, résiliation, paiement refusé).
 /// Programmés : partent à partir de 9 h, heure de l'organisation (premiers pas, astuces, rappel de fin d'essai, avertissements de suppression).
 /// Facultatifs (case « nouveautés et astuces » de l'inscription, et réglage de la console) : premiers pas et astuces. Tout le reste est obligatoire.
 /// </summary>
@@ -53,7 +53,7 @@ public static class Lifecycle
             new() { "Importez quelques images ou vidéos dans la médiathèque, rassemblez-les dans une liste de lecture, puis publiez-la sur vos écrans.",
                     "Vous pouvez aussi partir d'un modèle de composition prêt à l'emploi." }, new(), "Créer une liste", "playlists", "Vous recevez ces conseils car vous avez accepté les nouveautés et astuces à l'inscription.")
         : index == 0
-            ? new("Ce que vous pouvez faire avec Growth pendant l'essai", "Trois idées pour profiter de l'essai",
+            ? new("Ce que vous pouvez faire avec Pro pendant l'essai", "Trois idées pour profiter de l'essai",
                 new() { "Assemblez plusieurs écrans en un mur d'écrans, programmez vos diffusions par créneau, ou ajoutez un QR code dont les scans sont comptés.",
                         "Toutes ces fonctions sont incluses pendant l'essai." }, new(), "Ouvrir mon espace", "", "Vous recevez ces conseils car vous avez accepté les nouveautés et astuces à l'inscription.")
             : new("Surveillez vos écrans sans vous déplacer", "Alertes et aperçu en direct",
@@ -65,7 +65,7 @@ public static class Lifecycle
         var screens = Subscriptions.ScreensOf(db, c);
         var when = daysLeft <= 1 ? "demain" : $"dans {daysLeft} jours";
         var rows = screens > 0
-            ? new List<(string, string)> { ($"Growth × {screens} écran{(screens > 1 ? "s" : "")}", Chf(Billing.PeriodAmount(db, Plans.Growth, "monthly", screens)) + " / mois"),
+            ? new List<(string, string)> { ($"Pro × {screens} écran{(screens > 1 ? "s" : "")}", Chf(Billing.PeriodAmount(db, Plans.Growth, "monthly", screens)) + " / mois"),
                                            ($"Base × {screens} écran{(screens > 1 ? "s" : "")}", Chf(Billing.PeriodAmount(db, Plans.Base, "monthly", screens)) + " / mois") }
             : new List<(string, string)>();
         return new($"Votre essai se termine {when}", $"Votre essai se termine le {Signup.Day(c, c.TrialEndsUtc!.Value)}",
@@ -114,8 +114,8 @@ public static class Lifecycle
         if (use.Alerts > 0) lost.Add("les alertes");
         if (use.Qr > 0) lost.Add("le comptage des scans");
         lost.Add("le contrôle du direct");
-        return new($"Votre passage à Base est programmé pour le {Signup.Day(c, c.NextRenewalUtc!.Value)}", "Changement programmé",
-            new() { $"Vous gardez Growth jusqu'au {Signup.Day(c, c.NextRenewalUtc!.Value)}. Ensuite, {string.Join(", ", lost)} seront verrouillés : rien n'est supprimé, tout revient si vous repassez à Growth." },
+        return new($"Votre passage à Essential est programmé pour le {Signup.Day(c, c.NextRenewalUtc!.Value)}", "Changement programmé",
+            new() { $"Vous gardez Pro jusqu'au {Signup.Day(c, c.NextRenewalUtc!.Value)}. Ensuite, {string.Join(", ", lost)} seront verrouillés : rien n'est supprimé, tout revient si vous repassez à Pro." },
             new(), "Annuler le changement", AbonnementPath);
     }
 

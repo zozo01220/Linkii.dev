@@ -65,7 +65,7 @@ builder.Services.AddSingleton<AppProviders>();
 builder.Services.AddSingleton<GoogleAuth>();   // « Se connecter avec Google » (Calendar et Drive, lecture seule)
 builder.Services.AddSingleton<MicrosoftAuth>();   // « Se connecter avec Microsoft » (agendas Microsoft 365 et OneDrive / SharePoint, lecture seule)
 builder.Services.AddSingleton<ExternalLogin>();   // « Continuer avec Microsoft / Google » sur la page de connexion (identité seulement)
-builder.Services.AddSingleton<ScreenControl>();   // contrôle du direct (Growth) : pause, redémarrage, aperçu
+builder.Services.AddSingleton<ScreenControl>();   // contrôle du direct (Pro) : pause, redémarrage, aperçu
 builder.Services.AddHostedService<ScreenWatchWorker>();   // commandes sans réponse, pauses terminées, alertes « écran hors ligne »
 builder.Services.AddHostedService<SubscriptionWorker>();   // comptes bloqués faute de paiement à la date anniversaire
 builder.Services.AddHostedService<SignupWorker>();   // inscriptions non validées supprimées, rappel et fin des essais gratuits
@@ -78,7 +78,7 @@ builder.Services.AddSingleton<PresentationMerge>();
 builder.Services.AddHostedService<PresentationMergeWorker>();   // fusion des doublons de présentations au démarrage (§103)
 builder.Services.AddHostedService<CloudFilesWorker>();   // Google Slides, Docs et Microsoft PowerPoint : mise à jour quand le fichier change (réglage de chaque contenu, une heure par défaut)
 builder.Services.AddHostedService<DriveSyncWorker>();   // dossiers des Drives : synchronisés toutes les 15 minutes
-builder.Services.AddSingleton<ScanLog>();   // scans des QR codes de comptage (Growth) : journal par client, 90 jours
+builder.Services.AddSingleton<ScanLog>();   // scans des QR codes de comptage (Pro) : journal par client, 90 jours
 builder.Services.AddScoped<AppService>();
 builder.Services.AddScoped<MediaLibrary>();
 builder.Services.AddScoped<PlaylistLibrary>();
@@ -493,7 +493,7 @@ app.MapPost("/space/exit", async (HttpContext ctx, JsonStore store) =>
 }).RequireAuthorization().DisableAntiforgery();
 
 // Caddy / Traefik (certificat à la demande) : n'émettre un certificat que pour un domaine déclaré par un revendeur actif.
-// QR code de comptage : le scan est compté (licence Growth, contenu activé, pas un robot) puis le visiteur est redirigé vers la destination.
+// QR code de comptage : le scan est compté (licence Pro, contenu activé, pas un robot) puis le visiteur est redirigé vers la destination.
 // La redirection a toujours lieu tant que le contenu existe, même si le suivi est coupé : un QR encore affiché ne doit jamais être cassé.
 app.MapGet("/q/{code}", (string code, HttpContext ctx, JsonStore store, ScanLog scans) =>
 {

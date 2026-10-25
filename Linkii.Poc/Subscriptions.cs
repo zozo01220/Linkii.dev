@@ -28,7 +28,7 @@ public class Payment
     public bool First { get; set; }
     /// <summary>Paiement simulé (Stripe pas encore branché) : compte comme un vrai, effaçable d'un coup dans la console.</summary>
     public bool Simulated { get; set; }
-    /// <summary>Paiement hors renouvellement (écran ajouté, passage à Growth) : ne déplace pas la date anniversaire. Vide : renouvellement.</summary>
+    /// <summary>Paiement hors renouvellement (écran ajouté, passage à Pro) : ne déplace pas la date anniversaire. Vide : renouvellement.</summary>
     public string Label { get; set; } = "";
 }
 
@@ -206,7 +206,7 @@ public static class Subscriptions
         if (first) c.AnchorDay = now.Day;
         // premier paiement (ou premier prélèvement à la fin d'un essai déjà abonné) : fin de l'essai et de la conservation avant suppression
         if (c.TrialEndsUtc != null || first) { c.TrialEndsUtc = null; c.TrialReminderSentUtc = null; c.TrialEndedNotifiedUtc = null; c.DeleteOnUtc = null; c.LifecycleSent.Clear(); }
-        if (c.PendingPlan is { } pending) { c.Plan = pending; c.PendingPlan = null; }   // passage à Base programmé : à l'échéance
+        if (c.PendingPlan is { } pending) { c.Plan = pending; c.PendingPlan = null; }   // passage à Essential programmé : à l'échéance
         if (c.PendingPeriod is { } per) { c.BillingPeriod = per; c.PendingPeriod = null; }   // mensuel ↔ annuel : idem
         first = !db.Payments.Any(p => p.ClientId == c.Id);
         var amount = ClientAmount(db, c);
@@ -222,7 +222,7 @@ public static class Subscriptions
         return pay;
     }
 
-    /// <summary>Paiement hors renouvellement (écran ajouté, passage à Growth, au prorata) : la date anniversaire ne bouge pas.</summary>
+    /// <summary>Paiement hors renouvellement (écran ajouté, passage à Pro, au prorata) : la date anniversaire ne bouge pas.</summary>
     public static Payment? RecordExtra(Db db, Tenant c, decimal amount, string label, DateTime now, bool simulated)
     {
         if (amount <= 0) return null;

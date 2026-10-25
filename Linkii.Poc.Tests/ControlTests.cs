@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Linkii.Poc.Tests;
 
-/// <summary>Miroir (écran et mur), commandes du direct (Growth), alertes d'écran hors ligne.</summary>
+/// <summary>Miroir (écran et mur), commandes du direct (Pro), alertes d'écran hors ligne.</summary>
 public class ControlTests
 {
     static readonly DateTime Now = new(2026, 10, 10, 12, 0, 0, DateTimeKind.Utc);
@@ -333,7 +333,7 @@ public class ControlApiTests(Platform p)
         Store.Write(db => { db.Clients.First(c => c.Id == p.A.Id).Plan = Plans.Base; db.Screens.First(s => s.Id == id).LastSeenUtc = DateTime.UtcNow; });
         var refused = await Control.Send(p.A.Id, id, ScreenCommand.Restart, "test");
         Assert.False(refused.Ok);
-        Assert.Contains("Growth", refused.Error);
+        Assert.Contains("Pro", refused.Error);
 
         Store.Write(db => { db.Clients.First(c => c.Id == p.A.Id).Plan = Plans.Growth; db.Screens.First(s => s.Id == id).LastSeenUtc = DateTime.UtcNow.AddMinutes(-10); });
         Assert.Contains("hors ligne", (await Control.Send(p.A.Id, id, ScreenCommand.Restart, "test")).Error);
