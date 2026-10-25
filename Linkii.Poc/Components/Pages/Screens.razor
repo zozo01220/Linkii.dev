@@ -49,6 +49,18 @@
     </div>
 </div>
 
+@if (Tabs.Count > 1)
+{
+    @* Onglets (25 octobre 2026) : les écrans qu'on a connectés, ceux d'un collègue qu'on voit, et pour l'administrateur toute l'organisation. Jamais mélangés. *@
+    <nav class="tabs int-tabs lx-utabs" role="tablist" aria-label="Écrans affichés">
+        @foreach (var t in Tabs)
+        {
+            var key = t.Key;
+            <button type="button" role="tab" class="@(tab == key ? "on" : "")" aria-selected="@(tab == key ? "true" : "false")" @onclick="() => SetTab(key)">@t.Label@if (t.Count > 0) { <span class="cat-count">@t.Count</span> }</button>
+        }
+    </nav>
+}
+
 @if (noArea)
 {
     <div class="card empty"><div class="big">Aucune aire de gestion ne vous est confiée</div><p>Demandez à un administrateur de votre organisation de vous donner un rôle dans une aire.</p></div>
@@ -167,12 +179,16 @@
     @if (Shown.Count + OtherShown.Count == 0 && !NothingToShow)
     {
         @if (Filtering) { <div class="empty"><div class="big">Aucun écran trouvé</div></div> }
-        else if (currentRow is { } fe) { <div class="empty compact"><div class="big">Ce dossier est vide</div><p>Glissez-y des écrans, ou rangez-en depuis leur menu ⋮ « Ranger dans un dossier… ».</p></div> }
-        else { <div class="empty compact"><div class="big">Aucun écran à la racine</div><p>Vos écrans sont rangés dans les dossiers ci-dessus.</p></div> }
+        else if (currentRow is { } fe) { <div class="empty compact"><div class="big">Ce dossier est vide</div><p>Glissez-y des écrans, ou rangez-en depuis leur menu ⋮ « Ranger dans un dossier… ».</p>@if (canAdd && OwnAreaVisible) { <button class="btn" @onclick="OpenPair"><Ico Name="plus" Size="16" /> Connecter un écran</button> }</div> }
+        else { <div class="empty compact"><div class="big">Aucun écran à la racine</div><p>Vos écrans sont rangés dans les dossiers ci-dessus.</p>@if (canAdd && OwnAreaVisible) { <button class="btn" @onclick="OpenPair"><Ico Name="plus" Size="16" /> Connecter un écran</button> }</div> }
     }
 }
 
-@if (!noArea && NothingToShow)
+@if (!noArea && NothingToShow && tab == LibraryTab.Shared)
+{
+    <div class="empty"><div class="big">Aucun écran n'est partagé avec vous</div><p>Quand un administrateur vous attribue un écran, il apparaît ici. Vous pouvez le gérer, mais il reste à son propriétaire.</p></div>
+}
+else if (!noArea && NothingToShow)
 {
     @* Rien n'est affiché (aucun filtre) : avec le droit d'ajouter un écran dans l'aire, on explique comment en connecter un ; sinon simple constat, sans bouton *@
     @if (canAdd)
@@ -214,7 +230,7 @@ else
     }
     @foreach (var entry in Entries) { @Card(entry) }
     @foreach (var os in OtherShown) { if (ListView) { @LightRow(os.Screen, os.Area) } else { @LightCard(os.Screen, os.Area) } }
-    @if (canAdd && OwnAreaVisible && !NothingToShow)
+    @if (canAdd && OwnAreaVisible && !NothingToShow && (Shown.Count + OtherShown.Count > 0 || Filtering))
     {
         <button class="pl-card pl-add scr-add" @onclick="OpenPair">
             <span class="pl-plus"><Ico Name="plus" Size="28" /></span>
@@ -571,6 +587,7 @@ else if (wallEdit is { } wid)
     protected override void OnInitialized()
     {
         tenant = Store.Read(d => d.Tenant);
+        tab = Store.Read(d => d.Users.FirstOrDefault(u => u.Id == d.Access.UserId)?.LibraryTabs.GetValueOrDefault("screens")) ?? LibraryTab.Mine;   // onglet retenu (corrigé par LoadTabs selon la personne)
         Reload();
         areaFilter = Store.Read(d => d.Users.FirstOrDefault(u => u.Id == d.Access.UserId)?.LibraryTabs.GetValueOrDefault("screens-area")) == "one" ? area?.Id.ToString() ?? "" : "";   // filtre « Aire » retenu (par défaut : toutes)
         // « Ouvrir cette aire » depuis un écran d'une autre aire : après le changement d'aire, l'écran choisi s'ouvre directement en édition
@@ -583,6 +600,70 @@ else if (wallEdit is { } wid)
     }
 
     private string Status(Screen s) => Store.Read(d => d.Status(s));
+
+    // ---------- Onglets : Mes écrans / Partagés avec moi / Toute l'organisation ----------
+    // Un écran appartient à la personne qui l'a connecté (Screen.OwnerId). Il n'y a pas de partage d'écran : « Partagés avec moi » rassemble
+    // ceux d'un collègue que la personne voit (attribués par un administrateur). Sans propriétaire connu (écrans d'avant), l'écran est à l'administrateur.
+    private string tab = LibraryTab.All;
+    private record TabItem(string Key, string Label, int Count);
+    private List<TabItem> Tabs = new();
+    private Guid? meId;
+    private bool isAdminUser, multiUser, readAllScreens;
+    private HashSet<Guid> orgUsers = new();
+
+    private void LoadTabs()
+    {
+        (meId, isAdminUser, multiUser, readAllScreens, orgUsers) = Store.Read(d => (d.Access.UserId, d.Access.IsOrgAdmin, d.Users.Count(u => !u.Disabled) > 1,
+            !d.Access.IsOrgAdmin && d.Access.ModeOf(LevelPages.Screens) == PageMode.Read, d.Access.OrgUserIds.ToHashSet()));
+        if (!multiUser || readAllScreens) tab = LibraryTab.All;   // seul dans l'organisation, ou en lecture seule : tout est affiché
+        else if (tab == LibraryTab.All && !isAdminUser) tab = LibraryTab.Mine;
+    }
+
+    private bool InTab(string t, Screen s)
+    {
+        Guid? owner = s.OwnerId is { } x && orgUsers.Contains(x) ? x : null;   // un propriétaire hors de l'organisation (équipe Linkii) vaut « l'organisation »
+        return LibraryTab.InTab(t, new LibraryTab.Info(owner, owner, false), meId, isAdminUser);
+    }
+
+    // Les écrans de l'onglet ; un mur reste entier : il apparaît dès qu'un de ses écrans est dans l'onglet
+    private List<Screen> TabFilter(IEnumerable<Screen> list, IEnumerable<Zone> areaZones)
+    {
+        var l = list.ToList();
+        if (tab == LibraryTab.All) return l;
+        var walls = areaZones.Where(z => z.IsWall).Select(z => z.Id).ToHashSet();
+        var kept = l.Where(s => s.ZoneId is { } z && walls.Contains(z) && InTab(tab, s)).Select(s => s.ZoneId!.Value).ToHashSet();
+        return l.Where(s => s.ZoneId is { } z && kept.Contains(z) || InTab(tab, s)).ToList();
+    }
+
+    // Les écrans des autres aires suivent le même onglet ; les onglets sont dressés avec ce qui n'est pas encore filtré
+    private void BuildTabs()
+    {
+        var sharedCount = groupAreas.SelectMany(g => g.Screens).Count(s => InTab(LibraryTab.Shared, s));
+        groupAreas = groupAreas.Select(g => g.Area.Id == area?.Id ? g : g with { Screens = TabFilter(g.Screens, g.Area.Zones) }).ToList();
+        Tabs = !multiUser || readAllScreens ? new()
+            : new List<TabItem> { new(LibraryTab.Mine, "Mes écrans", 0), new(LibraryTab.Shared, "Partagés avec moi", sharedCount) }
+                .Concat(isAdminUser ? [new TabItem(LibraryTab.All, "Toute l'organisation", 0)] : Array.Empty<TabItem>()).ToList();
+    }
+
+    // Dossiers de l'onglet : ceux qui contiennent un de ses écrans (et leurs parents) ; dans « Mes écrans », aussi les siens, même vides
+    private void FilterFolders()
+    {
+        if (tab == LibraryTab.All) return;
+        var byId = folderRows.ToDictionary(r => r.Folder.Id);
+        var keep = new HashSet<Guid>();
+        void Up(Guid? id) { for (var cur = id; cur is { } f && byId.TryGetValue(f, out var r) && keep.Add(f); cur = r.Folder.ParentId) { } }
+        foreach (var s in screens) Up(s.FolderId);
+        if (tab == LibraryTab.Mine) foreach (var r in folderRows.Where(r => r.Folder.OwnerId == meId || isAdminUser && r.Folder.OwnerId == null)) Up(r.Folder.Id);
+        folderRows = folderRows.Where(r => keep.Contains(r.Folder.Id)).ToList();
+    }
+
+    private void SetTab(string t)
+    {
+        tab = t; folderId = null; selectedIds.Clear(); pickOrder.Clear(); menuFor = null;
+        try { Store.Write(d => { if (d.Users.FirstOrDefault(u => u.Id == d.Access.UserId) is { } u) u.LibraryTabs["screens"] = t; }); }
+        catch (Exception) { }   // l'onglet retenu est un confort : sans lui, la page s'ouvre sur « Mes écrans »
+        Reload();
+    }
 
     // ---------- Contrôle du direct (Pro) ----------
     private bool Growth => tenant.IsGrowth;
@@ -926,6 +1007,7 @@ else if (wallEdit is { } wid)
             return d.Access.Areas.OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).Select(a => new GroupArea(a,
                 d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.AreaId == a.Id && s.Token != null && (d.Access.Sees == null || d.Access.Sees(s))).ToList(), lists, allMedia)).ToList();
         });
+        BuildTabs();
         if (areaFilter != "" && !groupAreas.Any(g => g.Area.Id.ToString() == areaFilter)) areaFilter = "";
     }
 
@@ -2181,8 +2263,11 @@ else if (wallEdit is { } wid)
             .ToDictionary(x => x.Key, x => new ShareSummary(x.Value.Count, null, x.Value.Select(u => (u.Label, true)).OrderBy(n => n.Item1, StringComparer.CurrentCultureIgnoreCase).ToList())));
         otherAreas = Store.Read(d => d.Access.IsOrgAdmin && d.Area is { } cur ? d.Areas.Where(a => a.Id != cur.Id).OrderBy(a => a.Name).ToList() : new());
         if (zoneFilter != null && !zones.Any(z => z.Id.ToString() == zoneFilter)) zoneFilter = null;
-        screens = Store.Read(d => d.Screens.Where(s => s.Token != null).OrderBy(s => s.Name).ToList());
+        var rawScreens = Store.Read(d => d.Screens.Where(s => s.Token != null).OrderBy(s => s.Name).ToList());
+        LoadTabs();
+        screens = TabFilter(rawScreens, zones);
         folderRows = Store.Read(ScreenFolderOps.Rows);
+        FilterFolders();
         BuildFolders();
         selectedIds.IntersectWith(screens.Select(s => s.Id));
         synced = zones.Where(z => z.Sync).SelectMany(z => Helpers.SyncedScreens(screens.Where(s => ZoneOf(s)?.Id == z.Id))).ToHashSet();
@@ -2362,6 +2447,7 @@ else if (wallEdit is { } wid)
         await Notifier.PublishScreen(id.Value);   // l'écran appairé diffuse aussitôt sa liste de lecture
         showPair = false;
         Toast.Ok($"Écran « {(string.IsNullOrWhiteSpace(screenName) ? "Écran " + code : screenName.Trim())} » connecté.");
+        if (tab == LibraryTab.Shared) tab = LibraryTab.Mine;   // l'écran connecté est le sien
         Reload();
         return true;
     }

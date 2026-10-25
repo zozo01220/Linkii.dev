@@ -77,6 +77,7 @@ public static class DeviceConfig
         var s = new Screen
         {
             AreaId = from.AreaId,
+            OwnerId = d.Me ?? from.OwnerId,
             ZoneId = inWall && area != null ? AreaOps.EnsureDefaultZone(area).Id : from.ZoneId,
             Name = name,
             Token = Guid.NewGuid().ToString("N"),

@@ -434,6 +434,7 @@ public static class MemberOps
         foreach (var m in root.Media.Where(x => x.ClientId == clientId && x.OwnerId == from)) m.OwnerId = to;
         foreach (var f in root.MediaFolders.Where(x => x.ClientId == clientId && x.OwnerId == from)) f.OwnerId = to;
         foreach (var p in root.Playlists.Where(x => x.ClientId == clientId && x.OwnerId == from)) p.OwnerId = to;
+        foreach (var s in root.Screens.Where(x => x.ClientId == clientId && x.OwnerId == from)) s.OwnerId = to;
         foreach (var f in root.PlaylistFolders.Where(x => x.ClientId == clientId && x.OwnerId == from)) f.OwnerId = to;
         foreach (var f in root.CompositionFolders.Where(x => x.ClientId == clientId && x.OwnerId == from)) f.OwnerId = to;
         foreach (var t in root.CompositionTemplates.Where(x => x.ClientId == clientId && x.OwnerId == from)) t.OwnerId = to;

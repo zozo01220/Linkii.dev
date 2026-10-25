@@ -202,6 +202,7 @@ public class ClientDb
         var s = _root.Screens.FirstOrDefault(x => x.Token == null && x.PairingCode == code);
         if (s == null) return null;
         s.ClientId = ClientId;
+        s.OwnerId = Me;   // l'écran appartient à la personne qui le connecte
         if (Area is { } a) { s.AreaId = a.Id; s.ZoneId = AreaOps.EnsureDefaultZone(a).Id; }   // zone par défaut ; l'appairage peut en choisir une autre
         return s;
     }

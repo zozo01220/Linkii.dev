@@ -631,11 +631,12 @@ public class LegacyTenant : Tenant
     public string PasswordHash { get; set; } = "";
 }
 
-public class Screen : IClientOwned, IAreaOwned
+public class Screen : IClientOwned, IAreaOwned, IOwned
 {
     public Guid ClientId { get; set; }
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid AreaId { get; set; }
+    public Guid? OwnerId { get; set; }         // la personne qui a connecté l'écran (onglets « Mes écrans » / « Partagés avec moi ») ; null : écran d'avant les propriétaires
     public int? WallPos { get; set; }          // place dans la grille si sa zone est un mur (0 = en haut à gauche)
     public Guid? FolderId { get; set; }        // dossier de rangement de l'aire (null : racine). Voir <see cref="ScreenFolder"/>
     public Guid? ZoneId { get; set; }          // zone de son aire (jamais vide une fois migré : par défaut, la zone « Défaut » de l'aire)
