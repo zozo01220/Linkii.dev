@@ -84,6 +84,7 @@ builder.Services.AddScoped<MediaLibrary>();
 builder.Services.AddScoped<PlaylistLibrary>();
 builder.Services.AddScoped<CompositionLibrary>();
 builder.Services.AddScoped<ScreenFolderLibrary>();
+builder.Services.AddScoped<MenuBadges>();   // pastilles du menu latéral, en direct (voir MenuBadges)
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(o =>

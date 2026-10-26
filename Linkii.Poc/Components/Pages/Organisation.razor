@@ -3,6 +3,8 @@
 @inject TenantStore Store
 @inject NavigationManager Nav
 @inject Toaster Toast
+@inject Mailer Mail
+@inject ResellerResolver Resolver
 
 @* Membres (24 octobre 2026, maquette membres-proprietaire-partage.html) : une ligne par personne, son rôle et ce qu'elle fait dans les trois pages.
    Tout se règle dans la fiche membre (tiroir du bas, <MemberSheet>). Les aires restent une vue à part : elles rangent les écrans, sans effet sur les droits. *@
@@ -10,7 +12,7 @@
 <div class="page-head">
     <div>
         <h1>@(view == "areas" ? "Aires de gestion" : "Membres")<span class="lx-cntpill">@(view == "areas" ? areas.Count : rows.Count)</span></h1>
-        <p class="sub sc-intro">@(view == "areas" ? "Où sont vos écrans : aires et zones." : "Qui gère quoi, en un coup d'œil. Cliquez une ligne pour la modifier.")</p>
+        <p class="sub sc-intro">@(view == "areas" ? "Où sont vos écrans : aires et zones." : "Qui gère quoi, en un coup d'œil. Cliquez une ligne ou une carte pour la modifier.")</p>
     </div>
     <div class="row head-actions">
         @if (view == "areas") { <button type="button" class="btn" data-fab="Nouvelle aire" @onclick="OpenNewArea"><Ico Name="plus" Size="16" /> Nouvelle aire</button> }
@@ -19,26 +21,72 @@
 </div>
 
 <div class="tabs int-tabs og-views" role="tablist" aria-label="Vue">
-    <button type="button" role="tab" class="@(view == "people" ? "on" : "")" aria-selected="@(view == "people" ? "true" : "false")" @onclick='() => view = "people"'>Membres <span class="cat-count">@rows.Count</span></button>
-    <button type="button" role="tab" class="@(view == "areas" ? "on" : "")" aria-selected="@(view == "areas" ? "true" : "false")" @onclick='() => view = "areas"'>Aires <span class="cat-count">@areas.Count</span></button>
+    <button type="button" role="tab" class="@(view == "people" ? "on" : "")" aria-selected="@(view == "people" ? "true" : "false")" @onclick='() => { view = "people"; q = ""; }'>Membres <span class="cat-count">@rows.Count</span></button>
+    <button type="button" role="tab" class="@(view == "areas" ? "on" : "")" aria-selected="@(view == "areas" ? "true" : "false")" @onclick='() => { view = "areas"; q = ""; }'>Aires <span class="cat-count">@areas.Count</span></button>
 </div>
 
 @if (view == "people")
 {
-    var shown = rows.Where(r => q.Length == 0 || r.User.Label.Contains(q, StringComparison.CurrentCultureIgnoreCase) || r.User.Email.Contains(q, StringComparison.CurrentCultureIgnoreCase)).ToList();
-    @if (rows.Count > 8)
+    var shown = rows.Where(r => (q.Length == 0 || r.User.Label.Contains(q, StringComparison.CurrentCultureIgnoreCase) || r.User.Email.Contains(q, StringComparison.CurrentCultureIgnoreCase))
+        && (roleFilter == "" || (roleFilter == "adm") == r.Admin)).ToList();
+    <div class="og-fb">
+        <label class="search og-search"><Ico Name="search" Size="16" /><input placeholder="Rechercher un nom ou un e-mail" aria-label="Rechercher" @bind="q" @bind:event="oninput" /></label>
+        <select class="og-role" aria-label="Rôle" @bind="roleFilter">
+            <option value="">Tous les rôles</option>
+            <option value="adm">Administrateurs</option>
+            <option value="usr">Utilisateurs</option>
+        </select>
+        <span class="grow"></span>
+        <ViewToggle StorageKey="members" @bind-Value="peopleView" />
+    </div>
+    @if (shown.Count == 0)
     {
-        <div class="og-fb"><label class="search og-search"><Ico Name="search" Size="16" /><input placeholder="Rechercher un nom ou un e-mail" aria-label="Rechercher" @bind="q" @bind:event="oninput" /></label></div>
+        <div class="card og-list"><div class="og-empty">Aucune personne ne correspond.</div></div>
     }
-    <div class="card og-list">
-        @if (shown.Count == 0)
+    else if (peopleView == "cards")
+    {
+        <div class="og-grid">
+        @foreach (var r in shown)
         {
-            <div class="og-empty">Aucune personne ne correspond.</div>
+            var row = r;
+            <div data-nid="@row.User.Id" class="card og-mc @(row.User.Disabled ? "dim" : "") @(row.User.IsInvited ? "inv" : "")" @onclick="() => sheet = row.User.Id">
+                <div class="og-mc-more">@MemberMenu(row)</div>
+                <div class="og-mc-top">
+                    <span class="avatar l @(row.User.Disabled ? "off" : "")">@Initials(row.User)</span>
+                    <div class="og-nm"><b>@row.User.Label</b><small>@(row.User.IsInvited ? "Invitation envoyée" : row.User.Email)</small></div>
+                </div>
+                <div class="og-wh">
+                    @if (row.Admin) { <span class="pill dark">Administrateur</span> } else { <span class="pill">Utilisateur</span> }
+                    @if (row.User.Id == me) { <span class="pill blue">Vous</span> }
+                    @if (row.User.Disabled) { <span class="pill">Désactivé</span> }
+                    @if (row.User.IsInvited) { <span class="pill warn">En attente</span> }
+                </div>
+                @if (row.Admin)
+                {
+                    <div class="og-all">Voit et gère tout, crée des membres.</div>
+                }
+                else
+                {
+                    <div class="og-rights">
+                        <div class="@(row.Rights.Screens == PageMode.Read ? "ro" : "")">Écrans<b>@if (row.Rights.Screens == PageMode.Read) { <Ico Name="lock" Size="12" /> <text>Lecture</text> } else { @Pl(row.Screens, "écran", "écrans") }</b></div>
+                        <div class="@(row.Rights.Media == PageMode.Read ? "ro" : "")">Médiathèque<b>@if (row.Rights.Media == PageMode.Read) { <Ico Name="lock" Size="12" /> <text>Lecture</text> } else { <text>Les siens</text> }</b></div>
+                        <div class="@(row.Rights.Playlists == PageMode.Read ? "ro" : "")">Listes<b>@if (row.Rights.Playlists == PageMode.Read) { <Ico Name="lock" Size="12" /> <text>Lecture</text> } else { <text>Les siennes</text> }</b></div>
+                    </div>
+                    <div class="og-wh">
+                        @if (row.Rights.Screens == PageMode.Read) { <span class="muted og-sm">Ne modifie aucun écran</span> }
+                        else if (row.Screens == 0 && row.Rights.ZoneIds.Count == 0) { <span class="pill warn">Aucun écran attribué</span> }
+                        else { <span class="muted og-sm">@Where(row.Rights)</span> }
+                    </div>
+                }
+            </div>
         }
-        else
-        {
+        </div>
+    }
+    else
+    {
+        <div class="card og-list">
             <table class="tbl og-tbl mb-tbl">
-                <thead><tr><th>Membre</th><th>Rôle</th><th>Écrans</th><th>Médiathèque</th><th>Listes de lecture</th><th style="width:30px"></th></tr></thead>
+                <thead><tr><th>Membre</th><th>Rôle</th><th>Écrans</th><th>Médiathèque</th><th>Listes de lecture</th><th style="width:40px"></th></tr></thead>
                 <tbody>
                 @foreach (var r in shown)
                 {
@@ -56,13 +104,13 @@
                             <td>@if (row.Rights.Media == PageMode.Read) { @ReadPill() } else { <span>Les siens</span> }</td>
                             <td>@if (row.Rights.Playlists == PageMode.Read) { @ReadPill() } else { <span>Les siennes</span> }</td>
                         }
-                        <td class="muted"><Ico Name="chevron-right" Size="14" /></td>
+                        <td>@MemberMenu(row)</td>
                     </tr>
                 }
                 </tbody>
             </table>
-        }
-    </div>
+        </div>
+    }
     @if (rows.Count <= 1)
     {
         <p class="hint">Vous êtes seul dans l'organisation : rien ne change pour vous. Ajoutez un membre pour lui confier des écrans et partager vos médias et vos listes.</p>
@@ -70,26 +118,32 @@
 }
 else
 {
-    <div class="ag-bar">
+    var shownAreas = areas.Where(a => q.Length == 0 || a.Name.Contains(q, StringComparison.CurrentCultureIgnoreCase) || a.Zones.Any(z => z.Name.Contains(q, StringComparison.CurrentCultureIgnoreCase))).ToList();
+    <div class="og-fb">
+        <label class="search og-search"><Ico Name="search" Size="16" /><input placeholder="Rechercher une aire ou une zone" aria-label="Rechercher" @bind="q" @bind:event="oninput" /></label>
         <span class="ag-tot">@Pl(areas.Count, "aire", "aires")</span><span class="ag-tot">@Pl(areas.Sum(x => x.Zones.Count), "zone", "zones")</span><span class="ag-tot">@Pl(screens.Count, "écran", "écrans")</span>
-        <span class="ag-sp"></span>
-        <button type="button" class="btn ghost sm" @onclick="() => SetAllOpen(true)">Tout déplier</button>
-        <button type="button" class="btn ghost sm" @onclick="() => SetAllOpen(false)">Tout replier</button>
+        <span class="grow"></span>
+        @if (areasView == "list") { <button type="button" class="btn ghost sm" @onclick="() => SetAllOpen(true)">Tout déplier</button> <button type="button" class="btn ghost sm" @onclick="() => SetAllOpen(false)">Tout replier</button> }
+        <ViewToggle StorageKey="areas" @bind-Value="areasView" />
     </div>
-    @foreach (var a in areas)
+    @if (shownAreas.Count == 0)
     {
-        var area = a;
-        var open = IsOpen(area.Id);
-        var scrN = screens.Count(s => s.AreaId == area.Id);
-        <div class="card ag-card @(open ? "open" : "")" data-nid="@area.Id">
-            <button type="button" class="ag-hd" aria-expanded="@(open ? "true" : "false")" @onclick="() => ToggleOpen(area.Id)">
-                <span class="ag-ic"><Ico Name="map-pin" Size="18" /></span>
-                <span class="ag-tx"><b>@area.Name</b><small>@Pl(area.Zones.Count, "zone", "zones") · @(scrN == 0 ? "aucun écran" : Pl(scrN, "écran", "écrans"))</small></span>
-                <span class="ag-ch"><Ico Name="chevron-right" Size="16" /></span>
-            </button>
-            @if (open)
-            {
-                <div class="ag-bd">
+        <div class="card og-list"><div class="og-empty">Aucune aire ne correspond.</div></div>
+    }
+    else if (areasView == "cards")
+    {
+        <div class="og-grid wide">
+        @foreach (var a in shownAreas)
+        {
+            var area = a;
+            var scrN = screens.Count(s => s.AreaId == area.Id);
+            <div class="card og-ac" data-nid="@area.Id">
+                <div class="og-ac-hd">
+                    <span class="ag-ic"><Ico Name="map-pin" Size="18" /></span>
+                    <span class="ag-tx"><b>@area.Name</b><small>@Pl(area.Zones.Count, "zone", "zones") · @(scrN == 0 ? "aucun écran" : Pl(scrN, "écran", "écrans"))</small></span>
+                    @AreaPeople(area)
+                </div>
+                <div class="og-ac-zl">
                     @foreach (var z in area.Zones)
                     {
                         var zone = z;
@@ -101,9 +155,49 @@ else
                             <span class="ag-n">@(n == 0 ? "aucun écran" : Pl(n, "écran", "écrans"))</span>
                         </div>
                     }
-                    <div class="ag-act"><button type="button" class="btn ghost sm" @onclick="() => OpenAreaSheet(area)"><Ico Name="plus" Size="14" /> Ajouter une zone</button><button type="button" class="btn ghost sm" @onclick="() => OpenAreaSheet(area)">Modifier l'aire</button></div>
+                    @if (area.Zones.Count == 0) { <div class="ag-z empty"><span>Aucune zone pour l'instant.</span></div> }
                 </div>
-            }
+                <div class="ag-act"><button type="button" class="btn ghost sm" @onclick="() => OpenAreaSheet(area)"><Ico Name="plus" Size="14" /> Ajouter une zone</button><button type="button" class="btn ghost sm" @onclick="() => OpenAreaSheet(area)">Modifier l'aire</button></div>
+            </div>
+        }
+        </div>
+    }
+    else
+    {
+        <div class="card og-list">
+            <table class="tbl og-tbl">
+                <thead><tr><th>Aire / zone</th><th>Type</th><th>Écrans</th><th>Attribuée à</th><th style="width:100px"></th></tr></thead>
+                <tbody>
+                @foreach (var a in shownAreas)
+                {
+                    var area = a;
+                    var open = IsOpen(area.Id);
+                    var scrN = screens.Count(s => s.AreaId == area.Id);
+                    <tr class="og-r og-ar" data-nid="@area.Id" @onclick="() => ToggleOpen(area.Id)">
+                        <td><span class="og-tw @(open ? "open" : "")"><Ico Name="chevron-right" Size="14" /><span class="ag-ic"><Ico Name="map-pin" Size="16" /></span><b>@area.Name</b></span></td>
+                        <td class="muted">@Pl(area.Zones.Count, "zone", "zones")</td>
+                        <td>@(scrN == 0 ? "aucun écran" : Pl(scrN, "écran", "écrans"))</td>
+                        <td>@AreaPeople(area)</td>
+                        <td class="og-act"><button type="button" class="btn ghost sm" @onclick="() => OpenAreaSheet(area)" @onclick:stopPropagation="true">Modifier</button></td>
+                    </tr>
+                    @if (open)
+                    {
+                        @foreach (var z in area.Zones)
+                        {
+                            var zone = z;
+                            var n = screens.Count(s => s.ZoneId == zone.Id);
+                            <tr class="og-r og-zr" @onclick="() => OpenAreaSheet(area)">
+                                <td><span class="og-zn"><Ico Name="@(zone.IsWall ? "monitor" : "box")" Size="15" />@zone.Name</span></td>
+                                <td>@if (zone.IsWall) { <span class="pill blue">Mur</span> } else if (zone.Sync) { <span class="pill blue">Synchronisée</span> } else { <span class="muted">Zone</span> }</td>
+                                <td class="@(n == 0 ? "muted" : "")">@(n == 0 ? "aucun écran" : Pl(n, "écran", "écrans"))</td>
+                                <td></td><td class="muted og-act"><Ico Name="chevron-right" Size="14" /></td>
+                            </tr>
+                        }
+                        @if (area.Zones.Count == 0) { <tr class="og-zr"><td colspan="5" class="muted"><span class="og-zn">Aucune zone : ajoutez-en une.</span></td></tr> }
+                    }
+                }
+                </tbody>
+            </table>
         </div>
     }
     <p class="hint">Les aires et les zones rangent les écrans. Elles ne donnent aucun droit : on attribue des zones ou des écrans à une personne depuis sa fiche membre.</p>
@@ -191,7 +285,8 @@ else
     private List<MemberRow> rows = new();
     private List<Area> areas = new();
     private List<Screen> screens = new();
-    private string view = "people", q = "";
+    private string view = "people", q = "", roleFilter = "", peopleView = "list", areasView = "cards";
+    private Guid? menuFor;
     private bool sleepOn, dimOn, newArea;
     private string? formError, deleteError;
     private Guid? me, currentId, areaSheet, sheet;
@@ -239,6 +334,62 @@ else
         var text = string.Join(", ", names);
         return text.Length > 40 ? text[..38] + "…" : text;
     }
+
+
+    // ---------- Menu « ⋯ » d'un membre (liste et cartes) ----------
+
+    private RenderFragment MemberMenu(MemberRow row) => __builder =>
+    {
+        var u = row.User;
+        <div class="kebab" @onclick:stopPropagation="true">
+            <button type="button" class="kebab-btn" aria-label="Actions pour @u.Label" aria-haspopup="menu" aria-expanded="@(menuFor == u.Id ? "true" : "false")" @onclick="() => menuFor = menuFor == u.Id ? null : u.Id"><Ico Name="dots-v" Size="18" /></button>
+            @if (menuFor == u.Id)
+            {
+                <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                <div class="kebab-menu" role="menu">
+                    <button type="button" role="menuitem" @onclick="() => { menuFor = null; sheet = u.Id; }">Modifier</button>
+                    @if (u.IsInvited) { <button type="button" role="menuitem" @onclick="() => ResendInvite(u)">Renvoyer l'invitation</button> }
+                    @if (u.Id != me) { <button type="button" role="menuitem" @onclick="() => ToggleDisabled(u)">@(u.Disabled ? "Réactiver" : "Désactiver")</button> }
+                </div>
+            }
+        </div>
+    };
+
+    private async Task ResendInvite(User u)
+    {
+        menuFor = null;
+        var orgName = Store.Read(d => d.Tenant.Name);
+        var r = await InviteOps.ResendAsync(Store, Mail, Resolver, Nav.BaseUri, orgName, [u.Id]);
+        if (r.Count == 0) Toast.Error("Cette personne n'est plus en attente d'invitation.");
+        else if (r[0].MailError == null) Toast.Ok($"Invitation renvoyée à {r[0].User.Email}.");
+        else Toast.Error($"L'e-mail n'a pas pu être envoyé : {r[0].MailError}. Communiquez vous-même le nouveau mot de passe provisoire à {r[0].User.Email} : {r[0].Password}");
+    }
+
+    private void ToggleDisabled(User u)
+    {
+        menuFor = null;
+        var disable = !u.Disabled;
+        (int Changed, string? Error) r = Store.Write(d => AccessLevels.SetDisabled(d, [u.Id], disable));
+        if (r.Error != null) { Toast.Error(r.Error); return; }
+        Toast.Ok(disable ? $"{u.Label} est désactivé." : $"{u.Label} est réactivé.");
+        Load();
+    }
+
+    // Personnes (non administrateurs) à qui une zone ou un écran de l'aire est attribué
+    private RenderFragment AreaPeople(Area area) => __builder =>
+    {
+        var ids = area.Zones.Select(z => z.Id).ToHashSet();
+        var scr = screens.Where(s => s.AreaId == area.Id).Select(s => s.Id).ToHashSet();
+        var who = rows.Where(r => !r.Admin && r.Rights.Screens != PageMode.Read && (r.Rights.ZoneIds.Any(ids.Contains) || r.Rights.ScreenIds.Any(scr.Contains))).Select(r => r.User).ToList();
+        if (who.Count == 0) { <span class="muted">—</span> }
+        else
+        {
+            <span class="og-stack" title="@string.Join(", ", who.Select(w => w.Label))">
+                @foreach (var w in who.Take(3)) { <span class="avatar @(w.Disabled ? "off" : "")">@Initials(w)</span> }
+                @if (who.Count > 3) { <span class="avatar more">+@(who.Count - 3)</span> }
+            </span>
+        }
+    };
 
     // ---------- Aires ----------
 

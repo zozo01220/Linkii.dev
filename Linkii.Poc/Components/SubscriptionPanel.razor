@@ -5,7 +5,7 @@
 @inject LifecycleMail Lifecycle
 @inject NavigationManager Nav
 
-@* Réglages › Abonnement (administrateurs) : choisir un plan (essai ou fin d'essai), puis gérer l'abonnement : licence, facturation, carte, reçus,
+@* Réglages › Abonnement (administrateurs) : choisir un plan (essai ou fin d'essai), puis gérer l'abonnement : plan, facturation, carte, reçus,
    passage à Essential (à l'échéance), résiliation (à l'échéance). Tout paiement passe par PayDialog (simulation tant que Stripe n'est pas branché). *@
 @if (c == null) { return; }
 
@@ -59,32 +59,58 @@
             @* ---------- Choisir mon plan ---------- *@
             <div class="rg-ph"><h2>Choisir mon plan</h2>
                 <p>@(inTrial ? $"Essai gratuit jusqu'au {Day(c.TrialEndsUtc)} : rien n'est prélevé avant la fin." : ended ? "Votre essai est terminé : vos écrans reprennent dès le paiement." : cancelled ? "Votre abonnement est terminé : reprenez un plan pour que vos écrans diffusent à nouveau." : "Vous payez au nombre d'écrans connectés.")</p></div>
-            <div class="rg-card">
-                <header><h3>Licence</h3></header>
-                <div class="rg-body">
-                    <div class="sb-lic">
-                        <button type="button" class="@(plan == Plans.Base ? "on" : "")" @onclick="() => plan = Plans.Base"><b>Essential</b><small>Afficher et planifier vos contenus</small><span>@Lifecycle_.Chf(unitBase) / écran / mois</span></button>
-                        <button type="button" class="@(plan == Plans.Growth ? "on" : "")" @onclick="() => plan = Plans.Growth"><b>Pro</b><small>+ direct, murs d'écrans, statistiques, alertes</small><span>@Lifecycle_.Chf(unitGrowth) / écran / mois</span></button>
-                    </div>
-                    @if (plan == Plans.Base && c.IsGrowth && LossCount > 0)
-                    {
-                        <div class="sb-warn"><b>Vous utilisez des fonctions Pro.</b> Avec Essential, elles seront verrouillées (conservées, réactivées si vous repassez à Pro) :
-                            <ul>@LossItems</ul></div>
-                    }
+            Func<decimal, decimal> perOf = u => period == "annual" ? Math.Round(u * (100 - annualPct) / 100m, 2) : u;
+            <div class="sb-per">
+                <div class="t"><b>Facturation</b><small>Annuelle : 12 mois en un paiement, −@annualPct %.</small></div>
+                <div class="sb-pbtns" role="group" aria-label="Facturation">
+                    <button type="button" class="@(period == "monthly" ? "on" : "")" aria-pressed="@(period == "monthly" ? "true" : "false")" @onclick='() => period = "monthly"'>Mensuelle</button>
+                    <button type="button" class="@(period == "annual" ? "on" : "")" aria-pressed="@(period == "annual" ? "true" : "false")" @onclick='() => period = "annual"'>Annuelle <small>−@annualPct %</small></button>
                 </div>
-                <div class="sv-row"><div class="t"><b>Facturation</b><small>Annuelle : 12 mois en un paiement, −@annualPct %.</small></div>
-                    <div class="ctl"><div class="seg"><button type="button" class="@(period == "monthly" ? "on" : "")" @onclick='() => period = "monthly"'>Mensuelle</button><button type="button" class="@(period == "annual" ? "on" : "")" @onclick='() => period = "annual"'>Annuelle <small>−@annualPct %</small></button></div></div></div>
-                <div class="sv-row"><div class="t"><b>Écrans facturés</b><small>Les écrans connectés à votre espace@(unpaired > 0 ? $" ; {unpaired} écran{(unpaired > 1 ? "s" : "")} jamais connecté{(unpaired > 1 ? "s" : "")}, non compté{(unpaired > 1 ? "s" : "")}" : "")@(". Un écran ajouté est facturé au prorata, un écran retiré sort à l'échéance suivante.")</small></div>
-                    <div class="ctl"><b class="sb-n">@screens</b></div></div>
             </div>
-            <div class="rg-card">
-                <header><h3>Récapitulatif</h3></header>
-                <div class="sv-row"><div class="t"><b>@Plans.Label(plan) × @screens écran@(screens > 1 ? "s" : "")</b><small>@(period == "annual" ? "Par an" : "Par mois"), hors taxes</small></div><div class="ctl"><b>@Lifecycle_.Chf(Amount(plan, period))</b></div></div>
-                <div class="sv-row"><div class="t"><b>Aujourd'hui</b><small>@(inTrial ? $"Premier prélèvement le {Day(c.TrialEndsUtc)}, puis chaque {(period == "annual" ? "année" : "mois")} à cette date." : "Puis chaque " + (period == "annual" ? "année" : "mois") + " à cette date.")</small></div><div class="ctl"><b class="sb-big">@Lifecycle_.Chf(inTrial ? 0 : Amount(plan, period))</b></div></div>
+            <div class="sb-plans" role="radiogroup" aria-label="Plan">
+                <div class="sb-plan @(plan == Plans.Base ? "on" : "")" role="radio" tabindex="0" aria-checked="@(plan == Plans.Base ? "true" : "false")" @onclick="() => plan = Plans.Base" @onkeydown='e => { if (e.Key is "Enter" or " ") plan = Plans.Base; }'>
+                    <div class="nm">Essential<span class="rad"></span></div>
+                    <p class="sub">Afficher et planifier vos contenus</p>
+                    <div class="price"><b>@Lifecycle_.Chf(perOf(unitBase))</b><span>/ écran / mois</span></div>
+                    <div class="note">@(period == "annual" ? $"Facturé {Lifecycle_.Chf(perOf(unitBase) * 12)} par an et par écran" : "")</div>
+                    <ul>
+                        <li><Ico Name="check" Size="16" /> Écrans et listes de lecture</li>
+                        <li><Ico Name="check" Size="16" /> Planning de diffusion</li>
+                        <li><Ico Name="check" Size="16" /> Médiathèque, intégrations et widgets</li>
+                        <li class="no"><Ico Name="lock" Size="16" /> Contrôle du direct</li>
+                        <li class="no"><Ico Name="lock" Size="16" /> Murs d'écrans</li>
+                        <li class="no"><Ico Name="lock" Size="16" /> Statistiques et alertes</li>
+                    </ul>
+                </div>
+                <div class="sb-plan @(plan == Plans.Growth ? "on" : "")" role="radio" tabindex="0" aria-checked="@(plan == Plans.Growth ? "true" : "false")" @onclick="() => plan = Plans.Growth" @onkeydown='e => { if (e.Key is "Enter" or " ") plan = Plans.Growth; }'>
+                    <span class="tag">Le plus complet</span>
+                    <div class="nm">Pro<span class="rad"></span></div>
+                    <p class="sub">Piloter et superviser tout votre parc</p>
+                    <div class="price"><b>@Lifecycle_.Chf(perOf(unitGrowth))</b><span>/ écran / mois</span></div>
+                    <div class="note">@(period == "annual" ? $"Facturé {Lifecycle_.Chf(perOf(unitGrowth) * 12)} par an et par écran" : "")</div>
+                    <ul>
+                        <li><Ico Name="check" Size="16" /> Tout Essential, plus :</li>
+                        <li class="new"><Ico Name="play" Size="16" /> Contrôle du direct</li>
+                        <li class="new"><Ico Name="grid" Size="16" /> Murs d'écrans synchronisés</li>
+                        <li class="new"><Ico Name="chart" Size="16" /> Statistiques de diffusion</li>
+                        <li class="new"><Ico Name="bell" Size="16" /> Alertes écran hors ligne</li>
+                    </ul>
+                </div>
+            </div>
+            @if (plan == Plans.Base && c.IsGrowth && LossCount > 0)
+            {
+                <div class="sb-warn"><b>Vous utilisez des fonctions Pro.</b> Avec Essential, elles seront verrouillées (conservées, réactivées si vous repassez à Pro) :
+                    <ul>@LossItems</ul></div>
+            }
+            <div class="sb-bar">
+                <div class="g"><small>Plan choisi</small><b>@Plans.Label(plan) × @screens écran@(screens > 1 ? "s" : "")</b></div>
+                <div class="g"><small>Écrans facturés</small><b>@screens</b><em>@(unpaired > 0 ? $"{unpaired} jamais connecté{(unpaired > 1 ? "s" : "")}, non compté{(unpaired > 1 ? "s" : "")}" : "suit vos écrans connectés")</em></div>
+                <div class="g"><small>Aujourd'hui</small><b class="sb-big">@Lifecycle_.Chf(inTrial ? 0 : Amount(plan, period))</b><em>@(inTrial ? $"Premier prélèvement le {Day(c.TrialEndsUtc)}, puis chaque {(period == "annual" ? "année" : "mois")}." : "Puis chaque " + (period == "annual" ? "année" : "mois") + " à cette date.")</em></div>
+                <button type="button" class="btn" disabled="@(screens == 0 && !inTrial)" @onclick="StartSubscribe">Confirmer le plan</button>
             </div>
             <div class="sb-actions">
-                <button type="button" class="btn" disabled="@(screens == 0 && !inTrial)" @onclick="StartSubscribe">Confirmer</button>
                 @if (screens == 0 && !inTrial) { <span class="hint">Connectez au moins un écran pour vous abonner.</span> }
+                <span class="hint">Un écran ajouté est facturé au prorata, un écran retiré sort à l'échéance suivante.</span>
                 <span class="grow"></span>
                 <a class="hint" href="/login/entreprise" data-enhance-nav="false" target="_blank" rel="noopener">Hébergement dédié, sur site ou paiement sur facture ? Offre Enterprise</a>
             </div>
@@ -101,7 +127,7 @@
             <div class="sb-grid">
                 <div class="rg-card">
                     <header><h3>Votre plan</h3></header>
-                    <div class="sv-row"><div class="t"><b>Licence</b></div><div class="ctl"><span class="pill @(c.IsGrowth ? "blue" : "")">@Plans.Label(c.Plan)</span>@if (c.PendingPlan != null) { <span class="pill warn" style="margin-left:6px">Base le @Day(c.NextRenewalUtc)</span> }</div></div>
+                    <div class="sv-row"><div class="t"><b>Plan</b></div><div class="ctl"><span class="pill @(c.IsGrowth ? "blue" : "")">@Plans.Label(c.Plan)</span>@if (c.PendingPlan != null) { <span class="pill warn" style="margin-left:6px">Base le @Day(c.NextRenewalUtc)</span> }</div></div>
                     <div class="sv-row"><div class="t"><b>Facturation</b></div><div class="ctl">@(c.BillingPeriod == "annual" ? "Annuelle" : "Mensuelle")@if (c.PendingPeriod != null) { <span class="pill warn" style="margin-left:6px">@(c.PendingPeriod == "annual" ? "Annuelle" : "Mensuelle") le @Day(c.NextRenewalUtc)</span> }</div></div>
                     <div class="sv-row"><div class="t"><b>Montant</b></div><div class="ctl">@Lifecycle_.Chf(Amount(c.PendingPlan ?? c.Plan, c.BillingPeriod)) @PerLabel</div></div>
                     <div class="sv-row"><div class="t"><b>@(inTrial ? "Premier prélèvement" : "Prochaine échéance")</b></div><div class="ctl">@Day(c.NextRenewalUtc)</div></div>

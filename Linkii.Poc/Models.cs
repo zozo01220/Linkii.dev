@@ -26,6 +26,8 @@ public class Db
     public PlatformSettings Platform { get; set; } = new();      // réglages communs à toutes les organisations (console › Réglages)
     /// <summary>Migrations ponctuelles déjà faites (voir <see cref="AccessLevels.MigrateRolesV2"/>).</summary>
     public List<string> Done { get; set; } = new();
+    /// <summary>Ce que chaque personne a déjà vu dans chaque page du menu : base des pastilles rouges « nouveau » (voir <see cref="MenuBadges"/>).</summary>
+    public List<BadgeSeen> BadgeSeen { get; set; } = new();
 
     /// <summary>Ancien format mono-client (avant le multi-tenant) : lu une fois pour migration, jamais réécrit.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
@@ -49,8 +51,8 @@ public class PlatformSettings
     public int PurgeUnverifiedDays { get; set; } = 7;
 
     // Facturation (console › Réglages › Facturation) : prix par écran et par mois selon la licence
-    public decimal PriceBase { get; set; } = 15m;
-    public decimal PriceGrowth { get; set; } = 29m;
+    public decimal PriceBase { get; set; } = 9.90m;
+    public decimal PriceGrowth { get; set; } = 15.90m;
     /// <summary>Remise (en %) d'un client direct qui paie à l'année.</summary>
     public int AnnualDiscountPct { get; set; } = 15;
     /// <summary>Commission (en %) d'un revendeur sur le net payé par ses clients, tant qu'aucun taux particulier ne lui est donné.</summary>
