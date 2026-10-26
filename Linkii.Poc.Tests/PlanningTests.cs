@@ -120,6 +120,44 @@ public class PlanningTests
     }
 
     [Fact]
+    public void The_area_planning_applies_below_the_zone_and_the_screen_and_reaches_every_screen()
+    {
+        var d = As();
+        var s = Sc("Grill", stand);
+        var other = Sc("Hall", entree);
+        Assert.Null(PlanOps.CreateFor(d, lac.Id, lac.Id));
+        Assert.True(lac.OwnPlanning);
+        Assert.Null(PlanOps.Save(d, lac.Id, lac.Id, false, Slot(menu, Weekdays, 11 * 60, 14 * 60), new[] { entree.Id }));   // pas de copie vers les zones
+        Assert.Single(lac.Slots);
+        Assert.Empty(entree.Slots);
+        Assert.Equal(lac.Slots[0], Planning.Pick(Planning.Effective(lac, s), Wed, 12 * 60));   // l'écran suit l'aire
+
+        stand.Slots.Add(Slot(soir, Weekdays, 12 * 60, 13 * 60));   // la zone passe devant l'aire
+        Assert.Equal(soir.Id, Planning.Pick(Planning.Effective(lac, s), Wed, 12 * 60 + 30)!.PlaylistId);
+        Assert.Equal(menu.Id, Planning.Pick(Planning.Effective(lac, s), Wed, 11 * 60 + 30)!.PlaylistId);   // hors créneau de zone : l'aire
+        Assert.Equal(2, Planning.Affected(d, lac.Id, null, null).Count);
+        Assert.Contains(other, Planning.Affected(d, lac.Id, null, null));
+    }
+
+    [Fact]
+    public void Creating_and_removing_a_zone_or_area_planning_goes_back_to_the_level_above()
+    {
+        var d = As();
+        Assert.False(Planning.HasOwn(stand));
+        Assert.Null(PlanOps.CreateFor(d, lac.Id, stand.Id));
+        Assert.True(Planning.HasOwn(stand));   // vide mais créé
+        Assert.Null(PlanOps.Save(d, lac.Id, stand.Id, false, Slot(menu, 1, 600, 700)));
+        Assert.Null(PlanOps.RemoveFor(d, lac.Id, stand.Id));
+        Assert.False(Planning.HasOwn(stand));
+        Assert.Empty(stand.Slots);
+        Assert.NotNull(PlanOps.CreateFor(d, lac.Id, Guid.NewGuid()));   // cible inconnue
+
+        Assert.Null(PlanOps.CreateFor(d, lac.Id, lac.Id));
+        Assert.Null(PlanOps.RemoveFor(d, lac.Id, lac.Id));
+        Assert.False(Planning.HasOwn(lac));
+    }
+
+    [Fact]
     public void A_wall_screen_cannot_get_its_own_planning()
     {
         var wall = new Zone { Name = "Mur hall", Kind = Zone.Wall, WallCols = 2, WallRows = 1 };

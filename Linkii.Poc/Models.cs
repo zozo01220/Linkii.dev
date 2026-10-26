@@ -288,6 +288,10 @@ public class Area : IClientOwned
 
     /// <summary>Luminosité et contraste selon l'heure (voir <see cref="Dim"/>), par défaut des écrans Android de l'aire ; null : aucun réglage.</summary>
     public DimPlan? Dimming { get; set; }
+
+    /// <summary>Planning de diffusion de l'aire (voir <see cref="Planning"/>) : valable pour tous ses écrans, sauf là où une zone ou un écran a le sien. <see cref="OwnPlanning"/> : le planning a été créé (même sans créneau).</summary>
+    public bool OwnPlanning { get; set; }
+    public List<Slot> Slots { get; set; } = new();
 }
 
 /// <summary>
@@ -319,6 +323,9 @@ public class Zone
 
     /// <summary>Planning de diffusion de la zone (voir <see cref="Planning"/>) : valable pour tous ses écrans (un mur compris). Vide : ils jouent leur liste en permanence.</summary>
     public List<Slot> Slots { get; set; } = new();
+
+    /// <summary>Planning propre créé pour la zone (même sans créneau). Sinon elle suit celui de l'aire. Une zone qui a des créneaux a toujours le sien.</summary>
+    public bool OwnPlanning { get; set; }
 }
 
 /// <summary>Journal des entrées dans l'espace d'un client (assistance).</summary>

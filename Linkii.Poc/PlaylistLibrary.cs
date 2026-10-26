@@ -106,7 +106,7 @@ public static class PlaylistUses
             var chosen = screens.Where(s => s.ZonePlaylists().Contains(p.Id)).ToList();
             var pending = chosen.Count(s => !PublishedWith(s, p))
                 + screens.Count(s => !chosen.Contains(s) && s.PublishedListRevs.TryGetValue(p.Id, out var rev) && rev != p.Revision);   // liste du planning modifiée depuis son instantané
-            var slots = zones.SelectMany(z => z.Slots).Concat(screens.SelectMany(s => s.Slots)).Where(x => x.PlaylistId == p.Id).ToList();
+            var slots = areas.SelectMany(a => a.Slots).Concat(zones.SelectMany(z => z.Slots)).Concat(screens.SelectMany(s => s.Slots)).Where(x => x.PlaylistId == p.Id).ToList();
             result[p.Id] = new PlaylistUse(chosen.Count, pending, slots.Count, slots.Count > 0 ? Planning.Describe(slots[0]) : null);
         }
         return result;
@@ -131,6 +131,8 @@ public static class PlaylistUses
         var list = screens.ToList();
         var chosen = list.Where(s => s.ZonePlaylists().Any(z => z is { } zid && set.Contains(zid))).Select(s => s.Name).ToList();
         var slots = new List<string>();
+        foreach (var a in areas)
+            slots.AddRange(a.Slots.Where(x => set.Contains(x.PlaylistId)).Select(x => $"aire « {a.Name} » · {Planning.Describe(x)}"));
         foreach (var z in areas.SelectMany(a => a.Zones))
             slots.AddRange(z.Slots.Where(x => set.Contains(x.PlaylistId)).Select(x => $"zone « {z.Name} » · {Planning.Describe(x)}"));
         foreach (var s in list)

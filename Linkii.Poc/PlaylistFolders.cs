@@ -34,6 +34,7 @@ public static class PlaylistOps
     {
         // (les listes de l'instantané du planning comptent aussi : le calcul « à publier » d'un écran les relit)
         var inUse = d.AllScreens.SelectMany(s => s.ZonePlaylists().OfType<Guid>().Concat(s.Slots.Select(x => x.PlaylistId)).Concat(s.PublishedListRevs.Keys))
+            .Concat(d.Areas.Where(a => d.Access.HasArea(a.Id)).SelectMany(a => a.Slots.Select(x => x.PlaylistId)))
             .Concat(d.Areas.Where(a => d.Access.HasArea(a.Id)).SelectMany(a => a.Zones).Where(z => d.Access.SeesZone(z.Id))
                 .SelectMany(z => z.Slots.Select(x => x.PlaylistId).Concat(z.PlaylistId is { } w ? [w] : Array.Empty<Guid>())))
             .ToHashSet();
@@ -61,6 +62,7 @@ public static class PlaylistOps
         }
         foreach (var s in screens)   // zones 2 et 3 des écrans découpés
             for (var z = 0; z < s.ZonePlaylistIds.Count; z++) if (s.ZonePlaylistIds[z] is { } zid && ids.Contains(zid)) s.ZonePlaylistIds[z] = null;
+        foreach (var a in d.Areas) a.Slots.RemoveAll(x => ids.Contains(x.PlaylistId));
         foreach (var z in d.Areas.SelectMany(a => a.Zones)) z.Slots.RemoveAll(x => ids.Contains(x.PlaylistId));   // plus programmées dans un planning
         foreach (var s in screens) s.Slots.RemoveAll(x => ids.Contains(x.PlaylistId));
         d.Playlists.RemoveAll(x => ids.Contains(x.Id));

@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Planning par cible</title>
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--row:#EDF1F5;--brand:#0B1F3A;--brand-tint:#EBEDF0;--signal:#3B82C4;--ok:#2E7D5B;--radius:4px;--mono:"JetBrains Mono",ui-monospace,Consolas,monospace}
+*{box-sizing:border-box}html,body{margin:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
+h1,h2,h3,p{margin:0;font-weight:500}p{font-weight:400}b{font-weight:500}button{font:inherit;color:inherit}
+svg.i{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.note{background:#FFF8E1;border-bottom:1px dashed #E0B84A;padding:10px 24px;font-size:13px;color:#6B5200}
+.pick{display:flex;gap:18px;align-items:center;flex-wrap:wrap;padding:10px 24px;background:#fff;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted)}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:var(--radius);overflow:hidden}
+.seg button{border:0;background:#fff;padding:5px 12px;font-size:13px;cursor:pointer;color:var(--muted)}
+.seg button.on{background:var(--brand);color:#fff}
+.shell{display:flex;min-height:calc(100vh - 100px)}
+.sidebar{width:240px;background:#fff;border-right:1px solid var(--line);padding:22px 14px;flex:none}
+.sidebar .wm{font-size:26px;font-weight:500;letter-spacing:-.03em;padding:0 10px 22px}
+.nav{display:flex;gap:12px;align-items:center;padding:9px 12px;color:var(--muted);font-size:16px}
+.nav.active{background:var(--brand-tint);color:var(--ink);font-weight:500;box-shadow:inset 2px 0 0 var(--brand);border-radius:0 4px 4px 0}
+main{flex:1;padding:0 40px 60px;min-width:0;position:relative}
+.tabs{display:flex;gap:28px;border-bottom:1px solid var(--line);margin:0 -40px 28px;padding:0 40px}
+.tabs a{padding:16px 0 12px;color:var(--muted);font-size:14px;border-bottom:2px solid transparent;display:flex;gap:8px;align-items:center}
+.tabs a.on{color:var(--ink);font-weight:500;border-color:var(--signal)}
+.tabs .n{font-family:var(--mono);font-size:11px;background:var(--row);border-radius:10px;padding:0 7px}
+.head{display:flex;align-items:flex-end;gap:16px;margin-bottom:20px}.head h1{font-size:28px;line-height:1.2}.head .sub{color:var(--muted);font-size:14px;margin-top:4px}.grow{flex:1}
+.crumb{color:var(--muted);font-size:14px;margin-bottom:4px}.crumb a{color:var(--signal)}
+.btn{font-weight:500;cursor:pointer;border:1px solid var(--brand);border-radius:var(--radius);padding:9px 16px;background:var(--brand);color:#fff;display:inline-flex;gap:8px;align-items:center;white-space:nowrap}
+.btn.ghost{background:#fff;color:var(--ink);border-color:var(--line-2)}
+.btn.sm{padding:5px 12px;font-size:13px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+/* état vide */
+.empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:56px 24px 40px}
+.empty h3{font-size:18px}.empty p{color:var(--muted);max-width:640px}
+.empty .acts{margin-top:8px}
+.scopes{display:flex;gap:14px;margin-top:22px;flex-wrap:wrap;justify-content:center}
+.scope-hint{width:200px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:14px;text-align:left;font-size:13px;color:var(--muted)}
+.scope-hint b{display:flex;gap:8px;align-items:center;color:var(--ink);font-size:14px;margin-bottom:4px}
+/* liste des cibles */
+.block{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.th,.tr{display:grid;grid-template-columns:minmax(260px,1.6fr) 1.5fr 1.2fr 150px;gap:12px;align-items:center;padding:11px 18px}
+.th{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line);background:#FAFBFC}
+.tr{border-bottom:1px solid var(--row);min-height:54px}.tr:last-child{border-bottom:0}
+.tr:hover{background:#F8FAFC}
+.who{display:flex;gap:10px;align-items:center}.who small{color:var(--muted);font-size:12px;display:block;line-height:1.2}
+.l1{padding-left:24px}.l2{padding-left:52px}
+.tag{display:inline-flex;gap:6px;align-items:center;font-size:12px;padding:2px 9px;border-radius:10px;border:1px solid var(--line-2);color:var(--muted);white-space:nowrap}
+.tag.own{background:var(--brand);border-color:var(--brand);color:#fff}
+.tag.inh{background:#EEF4FB;border-color:#CFE0F2;color:#285D91}
+.tag.none{border-style:dashed}
+.now{font-size:13px;color:var(--muted)}.now b{color:var(--ink)}
+.dot{width:8px;height:8px;background:var(--ok);display:inline-block;margin-right:6px}
+.act{justify-self:end}
+.legend{display:flex;gap:18px;font-size:13px;color:var(--muted);margin:14px 2px 0;flex-wrap:wrap}
+/* assistant */
+.veil{position:absolute;inset:0;background:rgba(11,31,58,.38);display:flex;align-items:flex-start;justify-content:center;padding-top:70px;z-index:5}
+.dlg{background:#fff;border-radius:10px;width:620px;max-width:94%;box-shadow:0 20px 60px rgba(11,31,58,.28)}
+.dlg .dh{padding:20px 24px 0;display:flex;gap:12px;align-items:flex-start}
+.dlg .dh h2{font-size:20px;flex:1}
+.dlg .dh .x{color:var(--muted);cursor:pointer;font-size:22px;line-height:1}
+.dots{display:flex;gap:6px;padding:10px 24px 0}.dots i{width:28px;height:3px;background:var(--line)}.dots i.on{background:var(--signal)}
+.dlg .db{padding:16px 24px 8px}
+.dlg .db>p{color:var(--muted);font-size:14px;margin-bottom:16px}
+.dlg .df{display:flex;gap:10px;justify-content:flex-end;padding:14px 24px 20px;border-top:1px solid var(--line);margin-top:12px}
+.dlg .df .l{margin-right:auto}
+.opt{display:flex;gap:14px;align-items:center;border:1px solid var(--line-2);border-radius:8px;padding:13px 16px;margin-bottom:10px;cursor:pointer;background:#fff}
+.opt:hover{border-color:var(--signal)}
+.opt.on{border-color:var(--signal);background:#F4F8FC;box-shadow:inset 3px 0 0 var(--signal)}
+.opt .ic{width:38px;height:38px;border-radius:6px;background:var(--row);display:grid;place-items:center;flex:none}
+.opt.on .ic{background:var(--brand);color:#fff}
+.opt b{display:block}.opt small{color:var(--muted);font-size:13px}
+.opt .r{margin-left:auto;font-size:12px;color:var(--muted);text-align:right}
+.rad{width:16px;height:16px;border:1.5px solid var(--line-2);border-radius:50%;flex:none}
+.opt.on .rad{border-color:var(--signal);background:radial-gradient(var(--signal) 0 45%,#fff 50%)}
+.opt.dis{opacity:.5;cursor:not-allowed}
+.sel{border:1px solid var(--line-2);border-radius:var(--radius);padding:9px 12px;display:flex;align-items:center;gap:8px;margin-bottom:14px}
+.lbl{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+.info{background:#EEF4FB;border:1px solid #CFE0F2;color:#285D91;border-radius:6px;padding:9px 12px;font-size:13px;margin-top:6px}
+/* calendrier */
+.ctx{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.chip{display:inline-flex;gap:8px;align-items:center;border:1px solid var(--line-2);background:#fff;border-radius:var(--radius);padding:6px 12px;font-size:14px}
+.chip small{color:var(--muted)}
+.bar{display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.cal{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.cal .days{display:grid;grid-template-columns:46px repeat(7,1fr);border-bottom:1px solid var(--line);text-align:center;font-size:12px;color:var(--muted)}
+.cal .days div{padding:8px 0}.cal .days b{display:block;font-size:15px;color:var(--ink)}
+.grid{display:grid;grid-template-columns:46px repeat(7,1fr);position:relative}
+.hr{font-family:var(--mono);font-size:10px;color:var(--muted);text-align:right;padding-right:6px;height:30px;border-top:1px solid var(--row)}
+.cell{height:30px;border-top:1px solid var(--row);border-left:1px solid var(--row);position:relative}
+.cell.fall{background:repeating-linear-gradient(135deg,#F4F7FB 0 6px,#fff 6px 12px)}
+.slot{position:absolute;left:3px;right:3px;top:2px;border-radius:3px;padding:2px 6px;font-size:11px;color:#fff;overflow:hidden;z-index:1;line-height:1.25}
+.s1{background:#1D3B63}.s2{background:#3B82C4}.s3{background:#2E7D5B}
+.sm{font-size:12px;color:var(--muted)}
+.hatch{display:inline-block;width:14px;height:10px;background:repeating-linear-gradient(135deg,#C5CED9 0 2px,#fff 2px 5px);border:1px solid var(--line-2);vertical-align:-1px;margin-right:6px}
+.sq{display:inline-block;width:10px;height:10px;margin-right:6px;vertical-align:-1px}
+</style>
+</head>
+<body>
+<div class="note"><b>Proposition :</b> le Planning n'est plus un calendrier vide avec un sélecteur discret. On <b>crée un planning pour une cible</b> (aire, zone ou écran) ; la page liste ensuite les cibles avec leur état. Règle inchangée : la cible la plus précise l'emporte (écran › zone › aire), et hors créneaux on retombe sur le niveau du dessus. Choisissez la vue ci-dessous.</div>
+<div class="pick">
+  Vue <span class="seg" id="vw">
+    <button data-v="vide" class="on">1 · Premier planning</button>
+    <button data-v="a1">2a · Assistant : portée</button>
+    <button data-v="a2">2b · Assistant : cible</button>
+    <button data-v="a1s">2c · Mode simple</button>
+    <button data-v="liste">3 · Liste des cibles</button>
+    <button data-v="cal">4 · Calendrier d'une cible</button>
+  </span>
+</div>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="wm">linkivi</div>
+    <a class="nav"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="1"/><path d="M8 20h8M12 16v4"/></svg>Écrans</a>
+    <a class="nav active"><svg class="i" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>Programmation</a>
+    <a class="nav"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>Contenus</a>
+  </aside>
+  <main id="main"></main>
+</div>
+
+<script>
+const I={
+ plus:'<svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+ monitor:'<svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="1"/><path d="M8 20h8M12 16v4"/></svg>',
+ zone:'<svg class="i" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>',
+ aire:'<svg class="i" viewBox="0 0 24 24"><path d="M3 21V8l9-5 9 5v13M9 21v-6h6v6"/></svg>',
+ cal:'<svg class="i" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="1"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
+ eye:'<svg class="i" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+ chev:'<svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>',
+};
+const tabs=n=>`<div class="tabs"><a>Listes de lecture <span class="n">4</span></a><a class="on">Planning ${n?`<span class="n">${n}</span>`:''}</a></div>`;
+
+const vide=()=>`${tabs(0)}
+ <div class="head"><div class="grow"><h1>Planning</h1><p class="sub">Aucun planning</p></div><button class="btn">${I.plus} Créer un planning</button></div>
+ <div class="empty">
+   <h3>Aucun planning pour l'instant</h3>
+   <p>Sans planning, chaque écran affiche en continu sa liste par défaut. Créez un planning pour diffuser une autre liste à certaines heures, sur un écran, une zone ou toute une aire.</p>
+   <div class="acts"><button class="btn">${I.plus} Créer un planning</button></div>
+   <div class="scopes">
+     <div class="scope-hint"><b>${I.monitor} Un écran</b>Un seul écran a ses propres horaires.</div>
+     <div class="scope-hint"><b>${I.zone} Une zone</b>Tous les écrans de la zone suivent le même planning.</div>
+     <div class="scope-hint"><b>${I.aire} Une aire</b>Toute l'aire, sauf les zones ou écrans qui ont le leur.</div>
+   </div>
+ </div>`;
+
+const dlg=(step,total,title,body,foot)=>`<div class="veil"><div class="dlg">
+  <div class="dh"><h2>${title}</h2><span class="x">×</span></div>
+  <div class="dots">${Array.from({length:total},(_,i)=>`<i class="${i<step?'on':''}"></i>`).join('')}</div>
+  <div class="db">${body}</div>
+  <div class="df">${foot}</div></div></div>`;
+
+const a1=()=>vide()+dlg(1,3,'Créer un planning',`
+  <p>Pour quoi voulez-vous programmer des horaires ?</p>
+  <div class="opt"><span class="ic">${I.monitor}</span><div><b>Un écran</b><small>Horaires propres à un seul écran</small></div><span class="r">3 écrans</span><span class="rad"></span></div>
+  <div class="opt on"><span class="ic">${I.zone}</span><div><b>Une zone</b><small>Tous les écrans de la zone, y compris ceux qu'on y ajoutera</small></div><span class="r">2 zones</span><span class="rad"></span></div>
+  <div class="opt"><span class="ic">${I.aire}</span><div><b>Une aire</b><small>Tous les écrans de l'aire, sauf ceux qui ont leur propre planning</small></div><span class="r">1 aire</span><span class="rad"></span></div>`,
+  `<button class="btn ghost">Annuler</button><button class="btn">Suivant</button>`);
+
+const a2=()=>vide()+dlg(2,3,'Planning d’une zone',`
+  <p>Choisissez la zone concernée.</p>
+  <div class="lbl">Zone</div>
+  <div class="opt on"><span class="ic">${I.zone}</span><div><b>Cafétéria</b><small>Siège · 2 écrans</small></div><span class="rad" style="margin-left:auto"></span></div>
+  <div class="opt"><span class="ic">${I.zone}</span><div><b>Défaut</b><small>Siège · 2 écrans</small></div><span class="rad" style="margin-left:auto"></span></div>
+  <div class="info">Les écrans « Caf 1 » et « Caf 2 » suivront ce planning. Un écran pourra toujours avoir le sien plus tard.</div>`,
+  `<button class="btn ghost l">‹ Retour</button><button class="btn ghost">Annuler</button><button class="btn">Créer et ouvrir le calendrier</button>`);
+
+const a1s=()=>vide()+dlg(1,2,'Créer un planning',`
+  <p>Vous n'avez qu'une zone : le planning s'applique donc à tous vos écrans. Vous pourrez en créer un différent pour un écran précis.</p>
+  <div class="opt on"><span class="ic">${I.aire}</span><div><b>Tous mes écrans</b><small>Zone « Défaut » · 2 écrans</small></div><span class="rad" style="margin-left:auto"></span></div>
+  <div class="opt dis"><span class="ic">${I.monitor}</span><div><b>Un écran précis</b><small>Disponible dès que vous activez le Mode expert ou ajoutez une zone</small></div></div>`,
+  `<button class="btn ghost">Annuler</button><button class="btn">Créer et ouvrir le calendrier</button>`);
+
+const row=(lvl,ic,nm,sub,tag,now,act)=>`<div class="tr"><div class="who l${lvl}">${ic}<div><b>${nm}</b><small>${sub}</small></div></div><div>${tag}</div><div class="now">${now}</div><div class="act">${act}</div></div>`;
+const own=n=>`<span class="tag own">${I.cal.replace('class="i"','class="i" style="width:13px;height:13px"')} Planning propre · ${n} créneaux</span>`;
+const inh=w=>`<span class="tag inh">Suit ${w}</span>`;
+const nonE=`<span class="tag none">Aucun planning</span>`;
+const open=`<button class="btn ghost sm">Ouvrir</button>`, perso=`<button class="btn ghost sm">Personnaliser</button>`, create=`<button class="btn ghost sm">Créer</button>`;
+const liste=()=>`${tabs(4)}
+ <div class="head"><div class="grow"><h1>Planning</h1><p class="sub">4 plannings · 5 écrans couverts</p></div><button class="btn">${I.plus} Créer un planning</button></div>
+ <div class="block">
+  <div class="th"><div>Cible</div><div>Planning</div><div>En ce moment</div><div></div></div>
+  ${row(0,I.aire,'Siège','Aire · 2 zones · 5 écrans',own(6),'<span class="dot"></span><b>Accueil</b> · liste par défaut',open)}
+  ${row(1,I.zone,'Défaut','Zone · 2 écrans',inh('l’aire « Siège »'),'<span class="dot"></span><b>Accueil</b>',perso)}
+  ${row(2,I.monitor,'Ecran Com','Écran',inh('la zone « Défaut »'),'<span class="dot"></span><b>Accueil</b>',perso)}
+  ${row(2,I.monitor,'Ecran Hall','Écran',own(3),'<span class="dot"></span><b>Promo octobre</b> · jusqu’à 18:00',open)}
+  ${row(1,I.zone,'Cafétéria','Zone · 2 écrans',own(5),'<span class="dot"></span><b>Menu du jour</b> · jusqu’à 14:00',open)}
+  ${row(2,I.monitor,'Caf 1','Écran',inh('la zone « Cafétéria »'),'<span class="dot"></span><b>Menu du jour</b>',perso)}
+  ${row(2,I.monitor,'Caf 2','Écran',own(2),'<span class="dot"></span><b>Accueil</b> · hors créneau',open)}
+ </div>
+ <div class="legend"><span><span class="tag own">Planning propre</span> créneaux définis ici</span><span><span class="tag inh">Suit …</span> hérite du niveau du dessus</span><span class="tag none">Aucun planning</span><span>Un écran affiche toujours sa liste par défaut en dehors des créneaux.</span></div>`;
+
+function cal(){
+  const days=['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'],nums=[26,27,28,29,30,31,1];
+  // créneaux : [jour, heure début, durée, classe, label]
+  const slots=[[0,11,3,'s1','Menu du jour'],[1,11,3,'s1','Menu du jour'],[2,11,3,'s1','Menu du jour'],[3,11,3,'s1','Menu du jour'],[4,11,3,'s1','Menu du jour'],[0,16,2,'s2','Happy hour'],[4,16,2,'s2','Happy hour'],[5,10,4,'s3','Brunch']];
+  let h='<div class="grid">';
+  for(let hr=7;hr<=21;hr++){
+    h+=`<div class="hr">${String(hr).padStart(2,'0')}:00</div>`;
+    for(let d=0;d<7;d++){
+      const s=slots.find(x=>x[0]===d&&x[1]===hr);
+      const covered=slots.some(x=>x[0]===d&&hr>=x[1]&&hr<x[1]+x[2]);
+      h+=`<div class="cell ${covered?'':'fall'}">${s?`<div class="slot ${s[3]}" style="height:${s[2]*30-4}px"><b>${s[4]}</b><br>${String(s[1]).padStart(2,'0')}:00 – ${String(s[1]+s[2]).padStart(2,'0')}:00</div>`:''}</div>`;
+    }
+  }
+  h+='</div>';
+  return `${tabs(4)}
+  <div class="crumb"><a>Planning</a> › Cafétéria</div>
+  <div class="head"><div class="grow"><h1>Planning de la zone « Cafétéria »</h1><p class="sub">S'applique à Caf 1 et Caf 2 (Caf 2 a aussi le sien). Hors créneaux : suit l'aire « Siège ».</p></div>
+    <button class="btn ghost">Supprimer ce planning</button></div>
+  <div class="bar"><span class="seg"><button>‹</button></span><b>26 oct. – 1 nov. 2026</b><button class="btn ghost sm">Aujourd'hui</button><button class="btn ghost sm">${I.eye} Que voit l'écran ?</button><span class="grow"></span><span class="seg"><button class="on">Semaine</button><button>Journée</button></span><button class="btn sm">${I.plus} Ajouter un créneau</button></div>
+  <div class="cal"><div class="days"><div></div>${days.map((d,i)=>`<div>${d}<b>${nums[i]}</b></div>`).join('')}</div>${h}</div>
+  <div class="legend"><span><span class="sq s1"></span>Menu du jour</span><span><span class="sq s2"></span>Happy hour</span><span><span class="sq s3"></span>Brunch</span><span><span class="hatch"></span>Hors créneau : liste de l'aire « Siège » (Accueil)</span></div>`;
+}
+
+const V={vide,a1,a2,a1s,liste,cal};
+let v='vide';
+function render(){
+  document.querySelectorAll('#vw button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  document.getElementById('main').innerHTML=V[v]();
+}
+document.getElementById('vw').onclick=e=>{if(e.target.dataset.v){v=e.target.dataset.v;render()}};
+render();
+</script>
+</body>
+</html>

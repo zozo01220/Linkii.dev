@@ -123,9 +123,12 @@ public static class Planning
 
     public static Zone? ZoneOf(Area? area, Screen s) => area?.Zones.FirstOrDefault(z => z.Id == s.ZoneId);
 
-    /// <summary>Créneaux qui s'appliquent à l'écran, par priorité : les siens (s'il a un planning propre), puis ceux de sa zone.</summary>
+    /// <summary>Créneaux qui s'appliquent à l'écran, par priorité : les siens (s'il a un planning propre), puis ceux de sa zone, puis ceux de l'aire.</summary>
     public static List<Slot> Effective(Area? area, Screen s) =>
-        (s.OwnPlanning ? Order(s.Slots) : new List<Slot>()).Concat(Order(ZoneOf(area, s)?.Slots)).ToList();
+        (s.OwnPlanning ? Order(s.Slots) : new List<Slot>()).Concat(Order(ZoneOf(area, s)?.Slots)).Concat(Order(area?.Slots)).ToList();
+
+    public static bool HasOwn(Zone z) => z.OwnPlanning || z.Slots.Count > 0;
+    public static bool HasOwn(Area a) => a.OwnPlanning || a.Slots.Count > 0;
 
     /// <summary>Créneau actif à cet instant parmi une liste déjà ordonnée (null : la liste par défaut).</summary>
     public static T? Pick<T>(IEnumerable<T> ordered, DateOnly date, int minute) where T : class, ITimeSlot =>
@@ -186,9 +189,9 @@ public static class Planning
         return res;
     }
 
-    /// <summary>Écrans dont le planning dépend de la zone (tous ceux qui y sont) ou de l'écran lui-même.</summary>
+    /// <summary>Écrans dont le planning dépend de l'écran lui-même, de la zone (tous ceux qui y sont) ou, sans zone ni écran, de l'aire (tous ses écrans).</summary>
     public static List<Screen> Affected(ClientDb d, Guid areaId, Guid? zoneId, Guid? screenId) =>
-        d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.AreaId == areaId && s.Token != null && (screenId != null ? s.Id == screenId : s.ZoneId == zoneId)).ToList();
+        d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.AreaId == areaId && s.Token != null && (screenId != null ? s.Id == screenId : zoneId == null || s.ZoneId == zoneId)).ToList();
 }
 
 /// <summary>Modifications d'un planning (membres de l'aire). Chaque méthode retourne un message d'erreur, ou null si c'est fait ; l'appelant publie ensuite les écrans touchés.</summary>
@@ -207,6 +210,7 @@ public static class PlanOps
             if (!sc.OwnPlanning) { error = "Cet écran suit le planning de sa zone."; return null; }
             return sc.Slots;
         }
+        if (targetId == areaId) return d.Areas.First(a => a.Id == areaId).Slots;   // le planning de l'aire elle-même
         var z = d.Areas.FirstOrDefault(a => a.Id == areaId)?.Zones.FirstOrDefault(x => x.Id == targetId);
         if (z == null || !d.Access.SeesZone(z.Id)) { error = "Zone introuvable."; return null; }
         return z.Slots;
@@ -225,7 +229,7 @@ public static class PlanOps
         slot.Days &= 127;
         var at = list.FindIndex(x => x.Id == slot.Id);
         if (at >= 0) list[at] = slot; else list.Add(slot);
-        if (!screen && alsoZones != null)
+        if (!screen && targetId != areaId && alsoZones != null)   // le planning de l'aire ne se recopie pas sur des zones
         {
             var area = d.Areas.First(a => a.Id == areaId);
             foreach (var zid in alsoZones.Distinct().Where(z => z != targetId))
@@ -249,6 +253,28 @@ public static class PlanOps
         if (d.Root.Screens.FirstOrDefault(s => s.Id == screenId && s.ClientId == d.ClientId && s.AreaId == areaId) is not { } sc) return "Écran introuvable.";
         if (Planning.ZoneOf(d.Areas.FirstOrDefault(a => a.Id == areaId), sc) is { IsWall: true }) return "Un écran d'un mur suit le planning du mur.";
         sc.OwnPlanning = true;
+        return null;
+    }
+
+    /// <summary>Crée le planning d'une zone (targetId = zone) ou de l'aire (targetId = aire) : vide, il ne change rien tant qu'il n'a pas de créneau.</summary>
+    public static string? CreateFor(ClientDb d, Guid areaId, Guid targetId)
+    {
+        if (Allowed(d, areaId) is { } e) return e;
+        var area = d.Areas.First(a => a.Id == areaId);
+        if (targetId == areaId) { area.OwnPlanning = true; return null; }
+        if (area.Zones.FirstOrDefault(z => z.Id == targetId) is not { } zone || !d.Access.SeesZone(zone.Id)) return "Zone introuvable.";
+        zone.OwnPlanning = true;
+        return null;
+    }
+
+    /// <summary>Supprime le planning d'une zone ou de l'aire (ses créneaux) : les écrans retombent sur le niveau du dessus.</summary>
+    public static string? RemoveFor(ClientDb d, Guid areaId, Guid targetId)
+    {
+        if (Allowed(d, areaId) is { } e) return e;
+        var area = d.Areas.First(a => a.Id == areaId);
+        if (targetId == areaId) { area.OwnPlanning = false; area.Slots.Clear(); return null; }
+        if (area.Zones.FirstOrDefault(z => z.Id == targetId) is not { } zone || !d.Access.SeesZone(zone.Id)) return "Zone introuvable.";
+        zone.OwnPlanning = false; zone.Slots.Clear();
         return null;
     }
 
