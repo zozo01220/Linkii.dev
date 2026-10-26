@@ -39,6 +39,16 @@
   }
 
   w.linkiiNew = {
+    // Fait rebondir ces éléments (identifiants connus du serveur : partages reçus, ajouts de collègues) ; même retard que mark() si la page finit de s'afficher.
+    play: function (ids, via) {
+      if (!ids || !ids.length) return;
+      var tries = 0;
+      (function attempt() {
+        var list = targets(ids, via);
+        if (list.length || ++tries >= 6) { if (list.length) play(list); return; }
+        setTimeout(attempt, 80);
+      })();
+    },
     mark: function (scope, kind, ids, via) {
       var key = 'lk-new:' + scope + ':' + kind, seen = load(key);
       if (seen === undefined) return;
