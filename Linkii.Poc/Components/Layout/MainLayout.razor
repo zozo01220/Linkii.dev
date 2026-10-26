@@ -31,37 +31,30 @@
 
         @if (Ctx.ClientId != null)
         {
-            @* Pages ouvertes par le niveau de droits du membre (un administrateur les a toutes). *@
+            @* Menu en hubs : Écrans, Programmation (listes de lecture + planning), Contenus (médiathèque, compositions, widgets, intégrations), Statistiques.
+               Un hub s'ouvre sur sa première page ; ses pages sont des onglets au-dessus du contenu (voir HubBar). Pages ouvertes par le niveau de droits du membre. *@
             @if (Sees(LevelPages.Screens))
             {
                 <NavLink class="nav" href="" Match="NavLinkMatch.All">
                     <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></svg> Écrans @Pill("screens")
                 </NavLink>
             }
-            @if (Sees(LevelPages.Playlists))
+            @if (ProgTabs.Count > 0)
             {
-                <NavLink class="nav" href="playlists">
-                    <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg> Listes de lecture @Pill("playlists")
+                <NavLink class="@HubClass(ProgTabs)" href="@ProgTabs[0].Path">
+                    <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg> Programmation @Pill("playlists")
                 </NavLink>
             }
-            @if (Sees(LevelPages.Planning) && Modes.Expert)
+            @if (ContentTabs.Count > 0)
             {
-                <NavLink class="nav" href="planning">
-                    <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></svg> Planning
+                <NavLink class="@HubClass(ContentTabs)" href="@ContentTabs[0].Path">
+                    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg> Contenus @Pill("media")
                 </NavLink>
             }
-            @if (Sees(LevelPages.Media))
+            @if (Modes.Expert)
             {
-                <div class="nav-sep" role="separator"></div>
-                <NavLink class="nav" href="media">
-                    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg> Médiathèque @Pill("media")
-                </NavLink>
-            }
-            @if (CompositionsMenu)
-            {
-                @* Apparaît dès que l'intégration « Compositions » est dans Mes intégrations (et que le niveau de droits peut l'utiliser). *@
-                <NavLink class="nav" href="compositions">
-                    <Ico Name="grid" Size="18" /> Compositions @Pill("compositions")
+                <NavLink class="nav" href="stats">
+                    <svg viewBox="0 0 24 24"><path d="M3 3v18h18" /><path d="M7 15l4-4 3 3 6-6" /></svg> Statistiques
                 </NavLink>
             }
         }
@@ -88,48 +81,19 @@
         }
 
         <div class="spacer"></div>
-        @if (Ctx.ClientId != null && Modes.Expert && (orgAdmin || Sees(LevelPages.Zones)))
+        @if (Ctx.ClientId != null && ((Modes.Expert && (orgAdmin || Sees(LevelPages.Zones))) || orgAdmin))
         {
-            @* Administration (mode expert) : une seule page « Organisation » (aires, zones, membres, rôles) pour l'administrateur ; un membre qui peut gérer les zones garde « Zones ». Puis un trait avant Intégrations. *@
-            @if (orgAdmin)
+            @* Administration, en bas juste au-dessus du compte : Organisation (aires, zones, membres, rôles) pour l'administrateur ; un membre qui peut gérer les zones garde « Zones ». *@
+            @if (Modes.Expert && orgAdmin)
             {
                 <NavLink class="nav" href="organisation">
-                    <Ico Name="team" Size="18" /> Membres @Pill("members")
+                    <Ico Name="team" Size="18" /> Organisation @Pill("members")
                 </NavLink>
             }
-            else if (Sees(LevelPages.Zones))
+            else if (Modes.Expert && Sees(LevelPages.Zones))
             {
                 <NavLink class="nav" href="zones">
                     <Ico Name="box" Size="18" /> Zones
-                </NavLink>
-            }
-            <div class="nav-sep" role="separator"></div>
-        }
-        @if (Ctx.ClientId != null && (Sees(LevelPages.Integrations) || Sees(LevelPages.Widgets)))
-        {
-            @if (!Modes.Expert) { <div class="nav-sep" role="separator"></div> }
-            @* Sources de contenus et éléments d'écran : en bas, juste au-dessus du compte (selon les apps du niveau de droits). *@
-            @if (Sees(LevelPages.Integrations))
-            {
-                <NavLink class="nav" href="integrations">
-                    <svg viewBox="0 0 24 24"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0V8zM12 17v5" /></svg> Intégrations @Pill("integrations")
-                </NavLink>
-            }
-            @if (Sees(LevelPages.Widgets))
-            {
-                <NavLink class="nav" href="widgets">
-                    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" /></svg> Widgets
-                </NavLink>
-            }
-        }
-        @if (Ctx.ClientId != null)
-        {
-            @* Statistiques (tous les membres) puis Réglages (administrateurs), sous un trait, juste au-dessus du compte. *@
-            <div class="nav-sep" role="separator"></div>
-            @if (Modes.Expert)
-            {
-                <NavLink class="nav" href="stats">
-                    <svg viewBox="0 0 24 24"><path d="M3 3v18h18" /><path d="M7 15l4-4 3 3 6-6" /></svg> Statistiques
                 </NavLink>
             }
             @if (orgAdmin)
@@ -172,7 +136,7 @@
         </div>
         @if (reseller is { ShowPoweredBy: true, IsDefault: false })
         {
-            <div class="powered">Propulsé par Linkii</div>
+            <div class="powered">Propulsé par Linkivi</div>
         }
     </aside>
 
@@ -226,6 +190,16 @@
         else if (roDomain != null) { <div class="trial-bar"><Ico Name="lock" Size="16" /><span><b>Lecture seule</b> : vous voyez @(roDomain == LevelPages.Media ? "tous les médias de l'organisation, sans les modifier" : roDomain == LevelPages.Playlists ? "toutes les listes de l'organisation, sans les modifier" : "tous les écrans de l'organisation, sans les modifier ni les publier").</span></div> }
         @if (SimpleLocked) { <div class="trial-bar"><Ico Name="lock" Size="16" /><span><b>Lecture seule en mode simple.</b> Passez en mode expert pour modifier cette page.</span><button type="button" class="btn sm" @onclick="() => Modes.Switch(true)">Passer en mode expert</button></div> }
         <main class="content @(readOnly || roDomain != null || SimpleLocked ? "ro" : "") @(SimpleLocked ? "ro-simple" : "")">
+            @if (CurrentHub is { } hub)
+            {
+                @* Pages d'un hub (Programmation, Contenus) : onglets au-dessus du contenu, avec les pastilles de chaque page. *@
+                <nav class="hub-tabs" aria-label="Pages">
+                    @foreach (var t in hub)
+                    {
+                        <NavLink class="hub-tab" href="@t.Path">@t.Label @if (t.Fam != null) { @Pill(t.Fam) }</NavLink>
+                    }
+                </nav>
+            }
             @if (ExpertOnlyHere)
             {
                 <div class="card empty"><div class="big">Disponible en mode expert</div><p>Cette page fait partie des fonctions avancées (planning, aires de gestion, zones, membres, intégrations, widgets). Elle n'est pas affichée en mode simple.</p><button type="button" class="btn" @onclick="() => Modes.Switch(true)">Passer en mode expert</button></div>
@@ -277,7 +251,7 @@
         }
         else if (AdminSpace)
         {
-            @* Look « app » de la console Linkii et de l'espace revendeur : même barre du bas et même feuille « Plus » que l'espace client. *@
+            @* Look « app » de la console Linkivi et de l'espace revendeur : même barre du bas et même feuille « Plus » que l'espace client. *@
             var adm = Ctx.IsPlatformAdmin;
             var root = adm ? "admin" : "reseller";
             @if (more)
@@ -344,7 +318,7 @@
     private bool Sees(string page) => orgAdmin || pages.Contains(page);
     private bool compositionsOn;   // l'intégration « Compositions » est dans Mes intégrations
     private bool CompositionsMenu => Ctx.ClientId != null && compositionsOn && Sees(LevelPages.Compositions);
-    // Console Linkii ou espace revendeur (hors espace client) : barre du bas et feuille « Plus » dans l'app
+    // Console Linkivi ou espace revendeur (hors espace client) : barre du bas et feuille « Plus » dans l'app
     private bool AdminSpace => Ctx.ClientId == null && (Ctx.IsPlatformAdmin || Ctx.IsResellerAdmin);
 
     // Pages du mode expert : en mode simple, leur adresse directe affiche « Disponible en mode expert ».
@@ -354,6 +328,26 @@
     private static readonly string[] SimpleReadOnlyPaths = { "integrations", "widgets" };
     private bool SimpleLocked => !Modes.Expert && Ctx.ClientId != null && SimpleReadOnlyPaths.Any(p => CurrentPath == p || CurrentPath.StartsWith(p + "/"));
     private bool dontShowAgain;
+
+    // Hubs du menu : chaque entrée s'ouvre sur sa première page ; les pages du hub sont des onglets (avec leur pastille) au-dessus du contenu.
+    private record HubTab(string Path, string Label, string? Fam);
+    private List<HubTab> ProgTabs => Ctx.ClientId == null ? new() : new[]
+    {
+        Sees(LevelPages.Playlists) ? new HubTab("playlists", "Listes de lecture", MenuBadges.Playlists) : null,
+        Sees(LevelPages.Planning) && Modes.Expert ? new HubTab("planning", "Planning", null) : null
+    }.OfType<HubTab>().ToList();
+    private List<HubTab> ContentTabs => Ctx.ClientId == null ? new() : new[]
+    {
+        Sees(LevelPages.Media) ? new HubTab("media", "Médiathèque", MenuBadges.MediaFam) : null,
+        CompositionsMenu ? new HubTab("compositions", "Compositions", MenuBadges.Compositions) : null,
+        Sees(LevelPages.Widgets) ? new HubTab("widgets", "Widgets", null) : null,
+        Sees(LevelPages.Integrations) ? new HubTab("integrations", "Intégrations", MenuBadges.Integrations) : null
+    }.OfType<HubTab>().ToList();
+    private string HubClass(List<HubTab> tabs) => InHub(tabs) ? "nav active" : "nav";
+    private bool InHub(List<HubTab> tabs) => tabs.Any(t => t.Path == CurrentPath.Split('/')[0]);
+    // Onglets à afficher : seulement sur la page d'un onglet elle-même (pas dans un éditeur) et si le hub a au moins deux pages.
+    private List<HubTab>? CurrentHub => Ctx.ClientId == null ? null
+        : new[] { ProgTabs, ContentTabs }.FirstOrDefault(h => h.Count > 1 && h.Any(t => t.Path == CurrentPath));
 
     private void ToggleMode() => Modes.Switch(!Modes.Expert);
     private void OnModeChanged() => InvokeAsync(StateHasChanged);
@@ -410,7 +404,7 @@
     private string trialEndLabel = "", siteUrl = "";
     private int trialTotal;
     private string? subEndedLabel, cancelLabel, deleteLabel;   // abonnement terminé ou résilié, suppression prévue
-    // « Choisir mon plan » : vers Réglages › Abonnement pour un administrateur (y compris l'équipe Linkii qui est entrée dans l'espace) ; un membre voit seulement le bandeau
+    // « Choisir mon plan » : vers Réglages › Abonnement pour un administrateur (y compris l'équipe Linkivi qui est entrée dans l'espace) ; un membre voit seulement le bandeau
     private RenderFragment PlanButton(string label) => orgAdmin
         ? @<a class="btn sm" href="/settings?tab=abonnement">@label</a>
         : @<span></span>;
@@ -427,7 +421,7 @@
         brand = reseller?.BrandColor ?? brand;
         var cid = Ctx.ClientId;
         orgName = cid != null ? Root.Read(d => d.Clients.FirstOrDefault(c => c.Id == cid)?.Name ?? "")
-                : Ctx.IsPlatformAdmin ? "Console administrateur Linkii" : reseller?.Name ?? "";
+                : Ctx.IsPlatformAdmin ? "Console administrateur Linkivi" : reseller?.Name ?? "";
         if (cid != null) { suspended = Root.Read(d => d.Clients.FirstOrDefault(c => c.Id == cid) is { } cl && (cl.Suspended || d.Resellers.FirstOrDefault(r => r.Id == cl.ResellerId)?.Suspended == true)); siteUrl = Services.GetRequiredService<Mailer>().SiteUrl; }
         if (cid != null && Root.Read(d => d.Clients.FirstOrDefault(c => c.Id == cid)) is { } client)
         {
