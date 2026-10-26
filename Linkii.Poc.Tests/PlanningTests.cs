@@ -140,6 +140,21 @@ public class PlanningTests
     }
 
     [Fact]
+    public void Next_finds_the_following_slot_today_or_on_a_later_day()
+    {
+        var slots = new List<Slot> { Slot(menu, Weekdays, 11 * 60, 14 * 60), Slot(soir, Weekdays, 18 * 60, 22 * 60) };
+        var (s1, d1) = Planning.Next(slots, Wed, 9 * 60)!.Value;
+        Assert.Equal((menu.Id, Wed), (s1.PlaylistId, d1));                       // avant le premier créneau
+        var (s2, d2) = Planning.Next(slots, Wed, 15 * 60)!.Value;
+        Assert.Equal((soir.Id, Wed), (s2.PlaylistId, d2));                       // entre les deux
+        var (s3, d3) = Planning.Next(slots, Wed, 23 * 60)!.Value;
+        Assert.Equal((menu.Id, Wed.AddDays(1)), (s3.PlaylistId, d3));            // le lendemain
+        var friday = new DateOnly(2026, 10, 16);
+        Assert.Equal(new DateOnly(2026, 10, 19), Planning.Next(slots, friday, 23 * 60)!.Value.Date);   // le week-end n'a pas de créneau : lundi
+        Assert.Null(Planning.Next(new List<Slot>(), Wed, 0));
+    }
+
+    [Fact]
     public void Creating_and_removing_a_zone_or_area_planning_goes_back_to_the_level_above()
     {
         var d = As();

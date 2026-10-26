@@ -134,6 +134,19 @@ public static class Planning
     public static T? Pick<T>(IEnumerable<T> ordered, DateOnly date, int minute) where T : class, ITimeSlot =>
         ordered.FirstOrDefault(s => Matches(s, date, minute));
 
+    /// <summary>Prochain créneau qui commence après cette minute, dans les 7 jours qui suivent (null : aucun). À égalité d'heure, la priorité de la liste ordonnée.</summary>
+    public static (Slot Slot, DateOnly Date)? Next(IEnumerable<Slot> ordered, DateOnly date, int minute)
+    {
+        var list = ordered.ToList();
+        for (var i = 0; i <= 7; i++)
+        {
+            var d = date.AddDays(i);
+            var start = list.Where(s => Matches(s, d, s.From) && (i > 0 || s.From > minute)).OrderBy(s => s.From).FirstOrDefault();
+            if (start != null) return (start, d);
+        }
+        return null;
+    }
+
     public static DateTime LocalNow(Tenant t, Area? area, DateTime nowUtc)
     {
         TimeZoneInfo tz;

@@ -2292,3 +2292,8 @@ Remplace l'organisation en onglets Structure / Membres / Rôles et l'arbre du §
 - Page `/planning` : premier planning (état vide) → liste des cibles en arbre aire › zone › écran (propre / « Suit … » / aucun, liste en cours) → calendrier de la cible (fil d'Ariane, créneaux hérités hachurés, « Supprimer ce planning »). Les liens `?zone=` / `?screen=` ouvrent directement le calendrier (créent le planning de la zone s'il manque).
 - **« Que voit l'écran ? » retiré** (bouton, tiroir et styles).
 - Non fait : la liste n'indique pas encore le nombre d'écrans couverts ; mur d'écrans : un seul planning, celui de la zone (inchangé).
+
+## 133. Pastille de planning sur la carte écran (27 octobre 2026) : codé selon la piste C de `maquettes/carte-ecran-planning.html`, compile, tests verts ; vérifié dans le navigateur avec un écran appairé (cas « prochain » ; cas « en cours » non vu à l'écran)
+- Sur l'aperçu de la carte, à côté de la case : pastille sombre « Jusqu'à 14:00 » quand un créneau passe, claire « Prochain : Liste à 18:00 » (avec le jour s'il n'est pas aujourd'hui) sinon. L'infobulle donne la liste et l'heure. Rien si l'écran n'a aucun créneau à venir dans les 7 jours.
+- Compte le planning propre de l'écran, celui de sa zone et celui de l'aire (`Planning.Effective`). Nouveau `Planning.Next` (prochain créneau sur 7 jours) ; `Screens.razor` : `PlanPill` ; style `.gc-plan`.
+- Pas encore sur la carte des murs ni en vue liste.
