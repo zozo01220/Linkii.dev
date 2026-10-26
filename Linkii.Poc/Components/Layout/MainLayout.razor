@@ -48,7 +48,7 @@
             @if (ContentTabs.Count > 0)
             {
                 <NavLink class="@HubClass(ContentTabs)" href="@ContentTabs[0].Path">
-                    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg> Contenus @Pill("media")
+                    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg> Contenus @Pill(MenuBadges.MediaFam, MenuBadges.Compositions)
                 </NavLink>
             }
             @if (Modes.Expert)
@@ -368,9 +368,11 @@
         _ = Task.Delay(1000).ContinueWith(_ => InvokeAsync(StateHasChanged));   // retire le rebond une fois joué
     }
     private void OnLocationForBadges(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) => Badges.Refresh();
-    private RenderFragment Pill(string fam) => builder =>
+    // Plusieurs familles sur une même pastille (entrée « Contenus » : médiathèque + compositions) : les nombres s'additionnent.
+    private RenderFragment Pill(string fam, params string[] more) => builder =>
     {
-        var b = Badges.Of(fam);
+        var all = new[] { fam }.Concat(more).ToArray();
+        var b = all.Select(Badges.Of).Aggregate((x, y) => new Badge(x.Count + y.Count, x.New + y.New, x.Offline + y.Offline));
         var dot = fam == MenuBadges.Settings;
         if (dot ? b.New == 0 : b.Count == 0 && b.New == 0) return;
         var cls = b.New > 0 ? "red" : b.Offline > 0 ? "orange" : "lt";
@@ -378,7 +380,7 @@
             : b.New > 0 ? $"{b.New} nouveau{(b.New > 1 ? "x" : "")}" + (b.Offline > 0 ? $" · {b.Offline} hors ligne" : "")
             : b.Offline > 0 ? $"{b.Offline} écran{(b.Offline > 1 ? "s" : "")} hors ligne" : "";
         builder.OpenElement(0, "span");
-        builder.AddAttribute(1, "class", $"nbadge {cls}{(dot ? " dot" : "")}{(Badges.Bumping(fam) ? " bump" : "")}");
+        builder.AddAttribute(1, "class", $"nbadge {cls}{(dot ? " dot" : "")}{(all.Any(Badges.Bumping) ? " bump" : "")}");
         if (tip != "") builder.AddAttribute(2, "title", tip);
         if (!dot)
         {

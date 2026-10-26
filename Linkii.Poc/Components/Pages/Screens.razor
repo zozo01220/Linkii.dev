@@ -759,6 +759,16 @@ else if (wallEdit is { } wid)
     private MediaItem? ZoneThumb(Playlist? p) =>
         p?.Draft.Where(i => i.Placement == "full").Select(i => media.FirstOrDefault(m => m.Id == i.MediaId)).FirstOrDefault(m => m != null);
 
+    // Contenus plein écran d'une liste de lecture (6 au plus) : l'aperçu de la TV les enchaîne.
+    private List<MediaItem> ZoneSlides(Playlist? p) =>
+        p == null ? new() : p.Draft.Where(i => i.Placement == "full").Select(i => media.FirstOrDefault(m => m.Id == i.MediaId)).Where(m => m != null).Take(6).ToList()!;
+
+    private RenderFragment SlideThumb(MediaItem m) => __builder =>
+    {
+        if (m.AppId == Compositions.AppId) { <CompositionThumb Item="m" Files="media" Contain="true" /> }
+        else { <MediaThumb Media="m" All="media" /> }
+    };
+
     // « Accueil · Menus · — » : playlist de chaque zone, dans l'ordre.
     private string ZonesSummary(Screen s)
     {
@@ -1299,7 +1309,15 @@ else if (wallEdit is { } wid)
                                         var zp = playlists.FirstOrDefault(p => p.Id == gs.ZonePlaylist(z));
                                         var zt = ZoneThumb(zp);
                                         <span class="sc-zone" style="flex:@(ScreenLayouts.Find(gs.Layout).Sizes[z].ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)) 1 0">
-                                            @if (zt != null) { <MediaThumb Media="zt" All="media" /> }
+                                            @if (ZoneSlides(zp) is { Count: > 1 } zsl)
+                                            {
+                                                @* plusieurs contenus : l'aperçu les enchaîne en fondu, 3 s chacun, comme la liste de lecture *@
+                                                @for (var zi = 0; zi < zsl.Count; zi++)
+                                                {
+                                                    <span class="sc-slide" style="--i:@zi;--n:@zsl.Count">@SlideThumb(zsl[zi])</span>
+                                                }
+                                            }
+                                            else if (zt != null) { <MediaThumb Media="zt" All="media" /> }
                                             else { <span class="sc-empty">@(zp == null ? (gs.ZoneCount > 1 ? "+" : "Aucune liste de lecture") : zp.Name)</span> }
                                         </span>
                                     }

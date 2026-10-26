@@ -1,4 +1,5 @@
 @inject VideoConverter Converter
+@inject WebSnapshot Snap
 @* Vignette d'un contenu : image, image extraite de la vidéo, miniature YouTube ; pour les apps Image / Vidéo / Diaporama / Canva,
    premier fichier choisi dans la médiathèque (si All est fourni) ; sinon icône de l'app.
    Vidéo : une image (ffmpeg, créée à la première demande puis gardée sur le disque) et non un lecteur par vidéo, qui ralentit le défilement
@@ -10,6 +11,7 @@
     else { <video src="/media/@(f.FileName)#t=1" muted preload="metadata"></video> }
 }
 else if (Media.AppId == "youtube" && YouTube.ExtractId(Media.Settings.GetValueOrDefault("url")) is { } yt) { <img src="https://i.ytimg.com/vi/@yt/hqdefault.jpg" alt="" loading="lazy" /> }
+else if (Media.AppId == "webpage" && Snap.Cached(Media.Settings.GetValueOrDefault("url")) != null) { <img src="/webshot/@Media.Id?v=@SnapVersion" alt="" loading="lazy" decoding="async" /> }
 else { <span class="pl-app"><AppIcon Id="@Media.AppId" Tile="false" Size="30" /></span> }
 
 @code {
@@ -18,6 +20,14 @@ else { <span class="pl-app"><AppIcon Id="@Media.AppId" Tile="false" Size="30" />
     [Parameter] public IReadOnlyList<MediaItem>? All { get; set; }
     /// <summary>Plus grande image (aperçu d'écran du QR code) au lieu de la vignette de liste.</summary>
     [Parameter] public bool Wide { get; set; }
+
+    // La capture se fait en arrière-plan : tant qu'elle n'existe pas, l'icône reste ; elle apparaît au prochain affichage.
+    protected override void OnParametersSet()
+    {
+        if (Media.AppId == "webpage") Snap.Ensure(Media.Settings.GetValueOrDefault("url"));
+    }
+
+    private string SnapVersion => Snap.Cached(Media.Settings.GetValueOrDefault("url")) is { } p ? File.GetLastWriteTimeUtc(p).Ticks.ToString() : "";
 
     private MediaItem? Source => Media.AppId == null
         ? Media

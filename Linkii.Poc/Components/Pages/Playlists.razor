@@ -264,22 +264,20 @@ else
             @foreach (var p in Sorted)
             {
                 var pl = p;
-                var tiles = Tiles(pl).Take(3).ToList();
+                var slides = Slides(pl);
                 var total = TotalSeconds(pl);
                 <div data-nid="@pl.Id" class="lx-pc @(picked.Contains(pl.Id) ? "picked" : "") @(dragIds.Contains(pl.Id) ? "dragging" : "")"
                      @oncontextmenu="() => { if (inApp) menuFor = pl.Id; }" @oncontextmenu:preventDefault="inApp"
                      draggable="@(CanDrag(pl) ? "true" : "false")" @ondragstart="() => StartDrag(pl)" @ondragend="EndDrag">
                     <input type="checkbox" class="sc-check lx-check" aria-label="Sélectionner @pl.Name" checked="@picked.Contains(pl.Id)" @onchange="() => Toggle(pl.Id)" />
                     <div class="lx-cwrap">
-                    @if (tiles.Count == 0)
+                    @if (slides.Count == 0)
                     {
                         <a class="pl-cover lx-empty" href="/playlists/@pl.Id" tabindex="-1" aria-hidden="true"><Ico Name="plus" Size="15" /> @(pl.Draft.Count == 0 ? "Ajouter des contenus" : "Aperçu indisponible")</a>
                     }
                     else
                     {
-                        <a class="pl-cover @(tiles.Count <= 1 ? "single" : "")" href="/playlists/@pl.Id" tabindex="-1" aria-hidden="true">
-                            @foreach (var m in tiles) { <div class="pl-tile"><MediaThumb Media="m" All="media" /></div> }
-                        </a>
+                        <PlaylistCover @key="pl.Id" Slides="slides" All="media" Href="@("/playlists/" + pl.Id)" />
                     }
                     @if (RightOfList(pl) == FolderRight.Read) { <span class="lx-lock" title="Dans un dossier partagé en lecture seule"><Ico Name="lock" Size="13" /></span> }
                     <span class="lx-cshare">@ListShare(pl)</span>
@@ -704,6 +702,14 @@ else
     private HashSet<Guid> hidden = new();
     private IEnumerable<MediaItem> Tiles(Playlist p) =>
         p.Draft.Where(i => i.Placement == "full" && !i.Off).Select(i => media.FirstOrDefault(m => m.Id == i.MediaId)).Where(m => m != null && !MediaLibrary.UsesHidden(m, hidden))!;
+
+    // Un contenu par vignette, dans l'ordre de la liste (zone d'affichage de la carte).
+    private List<PlaylistCover.Slide> Slides(Playlist p) =>
+        p.Draft.Where(i => i.Placement == "full" && !i.Off).Select(i => (Item: i, Media: media.FirstOrDefault(m => m.Id == i.MediaId)))
+            .Where(x => x.Media != null && !MediaLibrary.UsesHidden(x.Media, hidden))
+            .Select(x => new PlaylistCover.Slide(x.Media!,
+                Svc.IsIncomplete(x.Media) ? 0 : Helpers.ItemSeconds(x.Item, x.Media, Svc.Find(x.Media!.AppId), media),
+                x.Media!.AppId == null ? (x.Media.Type == "video" ? "Vidéo" : "Image") : x.Media.AppId == Compositions.AppId ? "Composition" : Svc.Find(x.Media.AppId)?.Name ?? "App")).ToList();
 
     private string Meta(Playlist p, int total)
     {

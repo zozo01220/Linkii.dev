@@ -32,6 +32,7 @@ builder.Services.AddSingleton<PushService>();   // notifications push (Firebase)
 builder.Services.AddSingleton<AlertService>();  // alertes de l'organisation : e-mail et/ou notification selon les Réglages
 builder.Services.AddSingleton<PreviewGrants>();   // jetons d'aperçu du simulateur
 builder.Services.AddSingleton<VideoConverter>();
+builder.Services.AddSingleton<WebSnapshot>();
 builder.Services.AddSingleton<OfficeConverter>();   // PowerPoint, Word, Excel… envoyés depuis l'ordinateur : convertis en PDF par LibreOffice (§105)
 builder.Services.AddSingleton<LocalDocuments>();
 builder.Services.AddSingleton<MediaImporter>();
@@ -571,8 +572,27 @@ app.MapGet("/media/{file}", async (HttpContext ctx, string file, JsonStore store
     return Results.File(path, type, enableRangeProcessing: true);
 });
 
+// Capture d'une page web (vignette de l'app « Page web ») : même contrôle d'accès que les médias, servie depuis le disque seulement.
+app.MapGet("/webshot/{id:guid}", (HttpContext ctx, Guid id, JsonStore store, WebSnapshot snap) =>
+{
+    var token = ctx.Request.Headers["X-Token"].ToString();
+    if (string.IsNullOrEmpty(token)) token = ctx.Request.Query["t"].ToString();
+    var userClient = ctx.User.Identity?.IsAuthenticated == true ? ctx.User.GetGuid(Claims.Client) : null;
+    var url = store.Read(db =>
+    {
+        var m = db.Media.FirstOrDefault(x => x.Id == id && x.AppId == "webpage");
+        if (m == null) return null;
+        var ok = userClient == m.ClientId
+            || !string.IsNullOrEmpty(token) && db.Screens.Any(s => s.Token == token && s.ClientId == m.ClientId && Tenancy.IsActive(db, s));
+        return ok ? m.Settings.GetValueOrDefault("url") : null;
+    });
+    if (snap.Cached(url) is not { } path) return Results.NotFound();
+    ctx.Response.Headers.CacheControl = "private, max-age=3600";
+    return Results.File(path, "image/jpeg");
+});
+
 // ---------- API consommée par le player ----------
-var api = app.MapGroup("/api");
+var api =app.MapGroup("/api");
 
 // Les écrans se connectent à une adresse neutre : leur code d'appairage identifie le client. Le domaine (ou ?r=slug)
 // ne sert qu'à habiller l'écran d'appairage aux couleurs du revendeur.

@@ -1,0 +1,61 @@
+@* Zone d'affichage d'une carte de liste de lecture. Un seul contenu : sa vignette en plein cadre. Plusieurs : carrousel 3D (maquette liste-lecture-carte-3d.html,
+   variante A) : le contenu en cours de face à 80 % de la largeur, ses deux voisins inclinés qui dépassent de chaque côté ; un clic sur un voisin ou les flèches
+   font tourner (en boucle). Seules trois vignettes sont affichées à la fois. Les pastilles (type et durée du contenu, position) sont en bas à gauche.
+   Un clic sur le contenu du centre ouvre la liste. *@
+@if (Slides.Count > 0)
+{
+    var s = Slides[Cur];
+    <div class="pl-cover single lx-cov @(Slides.Count > 1 ? "multi" : "")">
+        @if (Slides.Count == 1)
+        {
+            <a class="lx-cov-link" href="@Href" tabindex="-1" aria-hidden="true" title="@s.Media.Name"></a>
+            <div class="pl-tile lx-cov-flat">@Thumb(s, true)</div>
+        }
+        else
+        {
+            @foreach (var d in Offsets)
+            {
+                var idx = (Cur + d + Slides.Count) % Slides.Count;
+                var sl = Slides[idx];
+                var style = d == 0 ? null : $"transform: translate({(d < 0 ? "-" : "")}51%, -50%) translateZ(-70px) rotateY({(d < 0 ? "" : "-")}40deg) scale(.9)";
+                @if (d == 0)
+                {
+                    <a class="lx-cov-it on" href="@Href" tabindex="-1" aria-hidden="true" title="@sl.Media.Name" @key="idx"><span class="pl-tile">@Thumb(sl, true)</span></a>
+                }
+                else
+                {
+                    <button type="button" class="lx-cov-it side" style="@style" title="@sl.Media.Name" aria-label="Aller au contenu @(idx + 1) : @sl.Media.Name" draggable="false" @key="idx"
+                            @onclick="() => cur = idx" @onclick:stopPropagation="true"><span class="pl-tile">@Thumb(sl, false)</span></button>
+                }
+            }
+        }
+        <div class="lx-cov-pills">
+            <span>@s.Label@(s.Seconds > 0 ? " · " + Helpers.FormatDuration(s.Seconds) : "")</span>
+            <span class="mono">@(Cur + 1) / @Slides.Count</span>
+        </div>
+        @if (Slides.Count > 1)
+        {
+            <button type="button" class="lx-cov-nav l" title="Contenu précédent" aria-label="Contenu précédent" draggable="false" @onclick="() => Go(-1)" @onclick:stopPropagation="true"><Ico Name="chevron-left" Size="16" /></button>
+            <button type="button" class="lx-cov-nav r" title="Contenu suivant" aria-label="Contenu suivant" draggable="false" @onclick="() => Go(1)" @onclick:stopPropagation="true"><Ico Name="chevron-right" Size="16" /></button>
+        }
+    </div>
+}
+
+@code {
+    public record Slide(MediaItem Media, int Seconds, string Label);
+
+    [Parameter, EditorRequired] public IReadOnlyList<Slide> Slides { get; set; } = Array.Empty<Slide>();
+    [Parameter] public IReadOnlyList<MediaItem>? All { get; set; }
+    [Parameter] public string Href { get; set; } = "#";
+
+    private int cur;
+    private int Cur => Slides.Count == 0 ? 0 : Math.Min(cur, Slides.Count - 1);
+    private void Go(int d) => cur = (Cur + d + Slides.Count) % Slides.Count;
+    // Deux contenus : un seul voisin (à droite).
+    private int[] Offsets => Slides.Count == 2 ? new[] { 0, 1 } : new[] { -1, 0, 1 };
+
+    private RenderFragment Thumb(Slide s, bool wide) => @<text>
+        @if (s.Media.AppId == Compositions.AppId) { <CompositionThumb Item="s.Media" Files="All ?? Array.Empty<MediaItem>()" Contain="true" /> }
+        else { <MediaThumb Media="s.Media" All="All" Wide="wide" /> }
+    </text>;
+}
