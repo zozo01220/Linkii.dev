@@ -1,4 +1,4 @@
-/* Player Linkii (POC) — JS volontairement "ancien" (var, promesses, pas d'async/await) pour les WebView anciennes. */
+/* Player Linkivi (POC) — JS volontairement "ancien" (var, promesses, pas d'async/await) pour les WebView anciennes. */
 (function () {
   'use strict';
 
@@ -38,7 +38,7 @@
     token: LS.getItem('lk_token'),
     current: null,      // playlist en cours de diffusion {version, items, screen, settings}
     pending: null,      // playlist prête, à appliquer entre deux contenus
-    build: null,        // version du code du player sur le serveur : quand elle change (mise à jour de Linkii), la page se recharge
+    build: null,        // version du code du player sur le serveur : quand elle change (mise à jour de Linkivi), la page se recharge
     acked: LS.getItem('lk_acked'),
     index: 0,
     active: 'layerA',
@@ -140,19 +140,19 @@
   }
 
   /* ---------- Marque du revendeur (white-label) : écran d'appairage compris, mémorisée pour un démarrage hors ligne ---------- */
-  var WORDMARK = '<span class="wm" aria-label="Linkii">link<span class="i"></span><span class="i s"></span></span>';
+  var WORDMARK = '<span class="wm" aria-label="Linkivi">link<span class="i"></span>v<span class="i s"></span></span>';
   function applyBrand(b) {
     if (!b) return;
     try { LS.setItem('lk_brand', JSON.stringify(b)); } catch (e) {}
-    // logo du revendeur + nom ; sans logo : wordmark Linkii, ou initiale du revendeur + nom
+    // logo du revendeur + nom ; sans logo : wordmark Linkivi, ou initiale du revendeur + nom
     var html = b.logoUrl ? '<img src="' + esc(b.logoUrl) + '" alt="" style="height:8vmin;max-width:30vmin;object-fit:contain"> ' + esc(b.name)
-             : b.name === 'Linkii' ? WORDMARK
+             : (b.name === 'Linkivi' || b.name === 'Linkii') ? WORDMARK
              : '<span class="mark">' + esc(b.name.charAt(0).toUpperCase()) + '</span> ' + esc(b.name);
     var els = document.querySelectorAll('.brand');
     for (var i = 0; i < els.length; i++) els[i].innerHTML = html;
     document.documentElement.style.setProperty('--accent', b.color || '#0B1F3A');
     var tag = $('powered');
-    if (tag) tag.textContent = b.poweredBy ? 'Propulsé par Linkii' : 'Affichage dynamique en libre-service';
+    if (tag) tag.textContent = b.poweredBy ? 'Propulsé par Linkivi' : 'Affichage dynamique en libre-service';
   }
   try { applyBrand(JSON.parse(LS.getItem('lk_brand') || 'null')); } catch (e) {}
 
@@ -1334,7 +1334,7 @@
     setOverlays([]);
   }
 
-  // Visuel de la pause, dans la scène (il suit le miroir et l'orientation de l'écran) : image choisie, sinon visuel Linkii.
+  // Visuel de la pause, dans la scène (il suit le miroir et l'orientation de l'écran) : image choisie, sinon visuel Linkivi.
   function showPauseView(p) {
     var el = $('pauseview');
     if (!el) {
@@ -1356,7 +1356,7 @@
       '<ellipse cx="60" cy="94" rx="38" ry="4" fill="#23395A"/></g></svg>' +
       '<div style="margin-top:.8em;font-size:5.2em;font-weight:500;letter-spacing:-.02em;line-height:1.1">Petite pause</div>' +
       '<div style="margin-top:.7em;font-size:2.4em;color:#9AAABD">On revient dans un instant</div>' +
-      '<div style="position:absolute;bottom:2.5em;font-size:2.2em;font-weight:500;letter-spacing:-.03em;color:#5A6B80">linkii<span style="color:#3B82C4">.</span></div>';
+      '<div style="position:absolute;bottom:2.5em;font-size:2.2em;font-weight:500;letter-spacing:-.03em;color:#5A6B80">linkivi<span style="color:#3B82C4">.</span></div>';
     el.style.display = 'flex';
     placePause();
     if (p.image) {

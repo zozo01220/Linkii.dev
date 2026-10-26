@@ -246,7 +246,7 @@ public record SftpCredentials(string Password, string Key, string Passphrase)
 
 /// <summary>
 /// SFTP (SSH.NET). Le serveur est reconnu à son empreinte : retenue à la première connexion, puis exigée (une empreinte différente peut être
-/// celle d'un intrus). Comme les autres Drives, le serveur ne doit pas être sur le réseau interne de Linkii.
+/// celle d'un intrus). Comme les autres Drives, le serveur ne doit pas être sur le réseau interne de Linkivi.
 /// </summary>
 public sealed class SftpSession : RemoteSession
 {

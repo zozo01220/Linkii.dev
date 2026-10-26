@@ -32,10 +32,10 @@ public class Mailer(IConfiguration config, JsonStore store, SecretBox box, ILogg
 
     public bool Configured => Current().Ready;
 
-    /// <summary>Site de Linkii (Linkii:SiteUrl, défaut https://linkii.com) : lien présent au pied de chaque e-mail de la plateforme.</summary>
-    public string SiteUrl => config["Linkii:SiteUrl"] is { Length: > 0 } u ? u.TrimEnd('/') : "https://linkii.com";
+    /// <summary>Site de Linkivi (Linkii:SiteUrl, défaut https://www.linkivi.com) : lien présent au pied de chaque e-mail de la plateforme.</summary>
+    public string SiteUrl => config["Linkii:SiteUrl"] is { Length: > 0 } u ? u.TrimEnd('/') : "https://www.linkivi.com";
 
-    /// <summary>Retourne null si l'e-mail est parti, sinon la raison de l'échec (affichable). Ajoute le pied de page (lien vers le site de Linkii).</summary>
+    /// <summary>Retourne null si l'e-mail est parti, sinon la raison de l'échec (affichable). Ajoute le pied de page (lien vers le site de Linkivi).</summary>
     public async Task<string?> Send(string to, string subject, string html, string text, string? fromName = null, string? replyTo = null)
     {
         var site = SiteUrl;
@@ -52,7 +52,7 @@ public class Mailer(IConfiguration config, JsonStore store, SecretBox box, ILogg
         }
         try
         {
-            using var msg = new MailMessage { From = new MailAddress(smtpCfg.From, fromName ?? "Linkii"), Subject = subject, Body = text, IsBodyHtml = false };
+            using var msg = new MailMessage { From = new MailAddress(smtpCfg.From, fromName ?? "Linkivi"), Subject = subject, Body = text, IsBodyHtml = false };
             msg.To.Add(to);
             // Identifiant de message au domaine de l'expéditeur : un message sans identifiant propre est plus souvent classé en courrier indésirable.
             msg.Headers.Add("Message-ID", $"<{Guid.NewGuid():N}@{new MailAddress(smtpCfg.From).Host}>");
@@ -82,7 +82,7 @@ public class Mailer(IConfiguration config, JsonStore store, SecretBox box, ILogg
     /// intro : phrase d'accueil, ex. « Votre espace « UNIL » est prêt. »</summary>
     public Task<string?> SendWelcome(Reseller r, string loginUrl, string intro, string name, string email, string password)
     {
-        var brand = r.DisplayName is { Length: > 0 } b ? b : "Linkii";
+        var brand = r.DisplayName is { Length: > 0 } b ? b : "Linkivi";
         var hello = string.IsNullOrWhiteSpace(name) ? "Bonjour," : $"Bonjour {name.Trim()},";
         var subject = $"Votre accès à {brand}";
         var text =
@@ -265,7 +265,7 @@ public class Mailer(IConfiguration config, JsonStore store, SecretBox box, ILogg
     private const string SettingsHint = "Alertes réglables dans Réglages › Alertes et pause.";
 
     private static string E(string s) => WebUtility.HtmlEncode(s);
-    private static string BrandOf(Reseller r) => r.DisplayName is { Length: > 0 } b ? b : "Linkii";
+    private static string BrandOf(Reseller r) => r.DisplayName is { Length: > 0 } b ? b : "Linkivi";
     private static string Hello(string name) => string.IsNullOrWhiteSpace(name) ? "Bonjour," : $"Bonjour {name.Trim().Split(' ')[0]},";
     private static string Color(Reseller r) => System.Text.RegularExpressions.Regex.IsMatch(r.BrandColor ?? "", "^#[0-9A-Fa-f]{6}$") ? r.BrandColor! : "#0B1F3A";
 

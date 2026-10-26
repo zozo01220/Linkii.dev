@@ -10,7 +10,7 @@ namespace Linkii.Poc.Tests;
 public class SignupTests
 {
     readonly Db db = new();
-    readonly Reseller linkii = new() { Name = "Linkii", IsDefault = true, AllowSelfSignup = true };
+    readonly Reseller linkii = new() { Name = "Linkivi", IsDefault = true, AllowSelfSignup = true };
     readonly DateTime now = new(2026, 10, 9, 10, 0, 0, DateTimeKind.Utc);
     static readonly Consents Yes = new(Terms: true, Marketing: true, News: false);
 
@@ -236,7 +236,7 @@ public class SignupFlowTests(Platform p)
     public async Task Signup_page_offers_terms_and_both_optional_consents()
     {
         var html = WebUtility.HtmlDecode(await (await p.Client().GetAsync("/login?signup=1")).Content.ReadAsStringAsync());
-        Assert.Contains("conditions générales de Linkii", html);
+        Assert.Contains("conditions générales de Linkivi", html);
         Assert.Contains("offres commerciales", html);
         Assert.Contains("nouveautés et astuces", html);
         Assert.Contains("terms-dialog", html);

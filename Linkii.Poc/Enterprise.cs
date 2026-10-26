@@ -8,7 +8,7 @@ namespace Linkii.Poc;
 public class Opportunity
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    /// <summary>Revendeur dont le site a reçu la demande (marque des e-mails, équipe prévenue). Celui par défaut : Linkii.</summary>
+    /// <summary>Revendeur dont le site a reçu la demande (marque des e-mails, équipe prévenue). Celui par défaut : Linkivi.</summary>
     public Guid ResellerId { get; set; }
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
@@ -24,7 +24,7 @@ public class Opportunity
     /// <summary>Voir <see cref="OpportunityStates"/>.</summary>
     public string Status { get; set; } = OpportunityStates.New;
     public string Notes { get; set; } = "";
-    /// <summary>Espace créé pour le pilote (cloud Linkii), puis pour le client.</summary>
+    /// <summary>Espace créé pour le pilote (cloud Linkivi), puis pour le client.</summary>
     public Guid? ClientId { get; set; }
     public DateTime? PilotEndsUtc { get; set; }
     public Guid? LicenseId { get; set; }
@@ -43,7 +43,7 @@ public static class OpportunityStates
 public static class Deployments
 {
     public const string Cloud = "cloud", Dedicated = "dedicated", OnPrem = "onprem";
-    public static string Label(string d) => d switch { Dedicated => "Cloud dédié", OnPrem => "Sur site", _ => "Cloud Linkii" };
+    public static string Label(string d) => d switch { Dedicated => "Cloud dédié", OnPrem => "Sur site", _ => "Cloud Linkivi" };
 }
 
 /// <summary>
@@ -140,7 +140,7 @@ public static class Enterprise
 
     /// <summary>Fichier hors ligne (.lic) : la clé et la clé publique pour la vérifier, sans appel au serveur.</summary>
     public static string OfflineFile(Db db, License l) =>
-        $"# Licence Linkii · {l.Org}\n# {l.Screens} écrans · {l.Modules} · valable jusqu'au {l.ExpiresUtc:yyyy-MM-dd} · sans tolérance\n" +
+        $"# Licence Linkivi · {l.Org}\n# {l.Screens} écrans · {l.Modules} · valable jusqu'au {l.ExpiresUtc:yyyy-MM-dd} · sans tolérance\n" +
         $"license={l.Key}\npublic-key={db.Platform.LicensePublicKey}\n";
 
     // ---------- Contenus des e-mails ----------
@@ -156,9 +156,9 @@ public static class Enterprise
         new(), "Ouvrir les opportunités", "admin/opportunities");
 
     public static Notice PilotEnding(Opportunity o, int days, string end) => new($"Votre pilote se termine dans {days} jour{(days > 1 ? "s" : "")}", "Faisons le point",
-        new() { $"Votre pilote Linkii se termine le {end}. Répondez à cet e-mail pour planifier un point et recevoir votre devis." }, new(), "Ouvrir mon espace", "");
+        new() { $"Votre pilote Linkivi se termine le {end}. Répondez à cet e-mail pour planifier un point et recevoir votre devis." }, new(), "Ouvrir mon espace", "");
 
-    public static Notice LicenseEnding(License l, int days) => new($"Votre licence Linkii arrive à échéance dans {days} jours", "Pensez au renouvellement",
+    public static Notice LicenseEnding(License l, int days) => new($"Votre licence Linkivi arrive à échéance dans {days} jours", "Pensez au renouvellement",
         new() { $"La licence de {l.Org} ({l.Screens} écrans) expire le {l.ExpiresUtc.ToString("d MMMM yyyy", Signup.Fr)}." ,
                 l.Mode == LicenseModes.Online ? $"Sans renouvellement, vos écrans continueront {GraceDays} jours puis s'arrêteront." : "Le serveur étant sans accès internet, un nouveau fichier de licence devra être importé avant cette date." },
         new(), null, null, "Répondez à cet e-mail pour renouveler.");

@@ -107,7 +107,7 @@ static bool NoClient(ClaimsPrincipal u) => u.GetGuid(Claims.Client) == null;
 builder.Services.AddAuthorization(o =>
 {
     o.AddPolicy("ClientSpace", p => p.RequireClaim(Claims.Client));
-    // Réglages, intégrations, widgets, aires : administrateurs de l'organisation (et équipe Linkii / revendeur qui entrent dans l'espace), pas les membres
+    // Réglages, intégrations, widgets, aires : administrateurs de l'organisation (et équipe Linkivi / revendeur qui entrent dans l'espace), pas les membres
     o.AddPolicy("ClientAdmin", p => p.RequireAssertion(c => c.User.GetGuid(Claims.Client) != null && !c.User.IsInRole(Roles.ClientMember)));
     // Pages d'un membre : ouvertes par son niveau de droits (relu à chaque navigation) ; les administrateurs y accèdent toujours
     foreach (var page in LevelPages.All) o.AddPolicy("Page:" + page, p => p.RequireClaim(Claims.Client).AddRequirements(new PageRequirement(page)));
@@ -278,14 +278,14 @@ app.UseAntiforgery();
 // Manifeste de l'application installable (écran d'accueil iPhone / iPad) : nom et couleur du revendeur du domaine.
 app.MapGet("/manifest.webmanifest", (HttpContext ctx) =>
 {
-    // Installation sur l'écran d'accueil : réservée à Apple (pas d'application iPhone / iPad). Android et Windows ont l'application Linkii :
+    // Installation sur l'écran d'accueil : réservée à Apple (pas d'application iPhone / iPad). Android et Windows ont l'application Linkivi :
     // sans manifeste, Chrome et Edge ne proposent plus d'installer le site. Safari (iPadOS en mode « site de bureau » compris) le reçoit.
     var ua = ctx.Request.Headers.UserAgent.ToString();
     var apple = ua.Contains("iPhone") || ua.Contains("iPad") || ua.Contains("iPod")
         || ua.Contains("Macintosh") && !ua.Contains("Chrome") && !ua.Contains("Edg/") && !ua.Contains("Firefox");
     if (!apple) return Results.NotFound();
     var r = ctx.Items["reseller"] as Reseller;
-    var name = r?.DisplayName is { Length: > 0 } n ? n : "Linkii";
+    var name = r?.DisplayName is { Length: > 0 } n ? n : "Linkivi";
     var color = r?.BrandColor is { Length: > 0 } c ? c : "#0B1F3A";
     ctx.Response.Headers.CacheControl = "no-cache";
     return Results.Json(new
@@ -457,7 +457,7 @@ app.MapPost("/logout", async (HttpContext ctx) =>
     return Results.Redirect("/login");
 });
 
-// ---------- Entrer dans l'espace d'un client (revendeur pour ses clients, équipe Linkii pour tous) : journalisé ----------
+// ---------- Entrer dans l'espace d'un client (revendeur pour ses clients, équipe Linkivi pour tous) : journalisé ----------
 app.MapPost("/space/enter", async (HttpContext ctx, JsonStore store) =>
 {
     var form = await ctx.Request.ReadFormAsync();
@@ -617,7 +617,7 @@ api.MapGet("/player/playlist", (HttpRequest req, JsonStore store) => store.Read(
     return Results.Ok(PlayerFeed.ForScreen(db, s!, device: true));
 }));
 
-// build : empreinte du code du player (wwwroot/player) ; un écran ouvert se recharge quand elle change (nouvelle version de Linkii).
+// build : empreinte du code du player (wwwroot/player) ; un écran ouvert se recharge quand elle change (nouvelle version de Linkivi).
 var playerBuild = PlayerBuild(app.Environment.WebRootPath);
 api.MapGet("/player/version", (HttpRequest req, JsonStore store) => store.Read(db =>
 {

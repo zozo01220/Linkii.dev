@@ -14,7 +14,7 @@ public class ModeService(JsonStore root, TenantContext ctx, NavigationManager na
     /// <summary>Le mode a changé : la barre latérale (mise en page) doit se redessiner.</summary>
     public event Action? Changed;
 
-    /// <summary>Vrai hors espace client, en mode expert, pour un ancien compte, et pendant une consultation par l'équipe Linkii.</summary>
+    /// <summary>Vrai hors espace client, en mode expert, pour un ancien compte, et pendant une consultation par l'équipe Linkivi.</summary>
     public bool Expert
     {
         get

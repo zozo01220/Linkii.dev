@@ -2,11 +2,11 @@ using System.Globalization;
 
 namespace Linkii.Poc;
 
-/// <summary>Un paiement de renouvellement (mensuel ou annuel) d'un client : journal des paiements encaissés par Linkii.</summary>
+/// <summary>Un paiement de renouvellement (mensuel ou annuel) d'un client : journal des paiements encaissés par Linkivi.</summary>
 public class Payment
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    /// <summary>Toujours « client » : les revendeurs ne paient pas Linkii, ils en reçoivent une commission.</summary>
+    /// <summary>Toujours « client » : les revendeurs ne paient pas Linkivi, ils en reçoivent une commission.</summary>
     public string Kind { get; set; } = "client";
     public Guid? ResellerId { get; set; }
     public Guid? ClientId { get; set; }
@@ -21,7 +21,7 @@ public class Payment
     public decimal Amount { get; set; }
     /// <summary>Frais de paiement (estimés tant que Stripe n'envoie pas le montant réel).</summary>
     public decimal Fee { get; set; }
-    /// <summary>Part du revendeur au moment du paiement : taux (commission de Linkii) figé, montant = net (montant moins frais) moins cette commission. 0 pour un client direct.</summary>
+    /// <summary>Part du revendeur au moment du paiement : taux (commission de Linkivi) figé, montant = net (montant moins frais) moins cette commission. 0 pour un client direct.</summary>
     public int CommissionPct { get; set; }
     public decimal Commission { get; set; }
     /// <summary>Premier paiement : fixe la date anniversaire et met fin à l'essai.</summary>
@@ -46,8 +46,8 @@ public class Payout
 }
 
 /// <summary>
-/// Abonnements : tous les clients (directs ou rattachés à un revendeur) paient Linkii au tarif unique, au mois ou à l'année. La date anniversaire est celle du premier
-/// paiement et ne bouge plus ; sans paiement à cette date, le client est bloqué automatiquement (pas de relance). Un revendeur reçoit de Linkii, le dernier jour du mois,
+/// Abonnements : tous les clients (directs ou rattachés à un revendeur) paient Linkivi au tarif unique, au mois ou à l'année. La date anniversaire est celle du premier
+/// paiement et ne bouge plus ; sans paiement à cette date, le client est bloqué automatiquement (pas de relance). Un revendeur reçoit de Linkivi, le dernier jour du mois,
 /// une commission sur le net (montant payé moins frais) des paiements reçus dans le mois ; un paiement annuel est commissionné d'un coup.
 /// En attendant Stripe, un bouton enregistre à la main le paiement du renouvellement.
 /// </summary>
@@ -89,7 +89,7 @@ public static class Subscriptions
     public static decimal FeeOf(Db db, decimal amount) =>
         amount <= 0 ? 0 : Math.Round(amount * db.Platform.StripeFeePct / 100m + db.Platform.StripeFeeFixed, 2);
 
-    /// <summary>Part du revendeur sur le net : le taux est la commission de Linkii ; le revendeur reçoit (montant − frais) moins cette commission, arrondie au centime.</summary>
+    /// <summary>Part du revendeur sur le net : le taux est la commission de Linkivi ; le revendeur reçoit (montant − frais) moins cette commission, arrondie au centime.</summary>
     public static decimal CommissionOf(decimal amount, decimal fee, int pct, bool direct = false)
     {
         if (direct) return 0;
@@ -97,7 +97,7 @@ public static class Subscriptions
         return net - Math.Round(net * pct / 100m, 2);
     }
 
-    /// <summary>Une fois (16 octobre 2026) : le taux était la part du revendeur, il est désormais la commission de Linkii. Recalcule les paiements existants et les versements déjà saisis.</summary>
+    /// <summary>Une fois (16 octobre 2026) : le taux était la part du revendeur, il est désormais la commission de Linkivi. Recalcule les paiements existants et les versements déjà saisis.</summary>
     public static void MigrateResellerShare(Db db)
     {
         if (db.Platform.ResellerShareVersion >= 2) return;

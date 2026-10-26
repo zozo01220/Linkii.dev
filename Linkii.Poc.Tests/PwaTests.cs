@@ -17,7 +17,7 @@ public class PwaTests(Platform p)
         Assert.Equal("application/manifest+json", r.Content.Headers.ContentType?.MediaType);
         using var doc = JsonDocument.Parse(await r.Content.ReadAsStringAsync());
         var m = doc.RootElement;
-        Assert.Equal("Linkii", m.GetProperty("name").GetString());
+        Assert.Equal("Linkivi", m.GetProperty("name").GetString());
         Assert.Equal("standalone", m.GetProperty("display").GetString());
         Assert.Equal("/", m.GetProperty("start_url").GetString());
         Assert.Contains(m.GetProperty("icons").EnumerateArray(), i => i.GetProperty("sizes").GetString() == "192x192");

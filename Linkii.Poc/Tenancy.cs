@@ -33,7 +33,7 @@ public class ScopedList<T>(List<T> root, Guid clientId, Guid? areaId = null, Fun
 }
 
 /// <summary>
-/// Droits de la personne connectée dans une organisation : un administrateur de l'organisation (ou l'équipe Linkii, un revendeur qui entre
+/// Droits de la personne connectée dans une organisation : un administrateur de l'organisation (ou l'équipe Linkivi, un revendeur qui entre
 /// dans l'espace) a tout ; un membre a son <see cref="AccessLevel"/> (pages, apps, périmètre aires › zones › écrans). <see cref="Current"/> est l'aire ouverte.
 /// </summary>
 public class AreaAccess
@@ -54,13 +54,13 @@ public class AreaAccess
     /// <summary>Écrans visibles dans le périmètre (null : aucun filtre).</summary>
     public Func<Screen, bool>? Sees { get; init; }
     public Func<Guid, bool>? SeesZoneFn { get; init; }
-    /// <summary>Membres de l'organisation (ni administrateurs ni équipe Linkii) : un dossier privé est celui d'un membre, sans partage (voir <see cref="FolderAccess"/>).</summary>
+    /// <summary>Membres de l'organisation (ni administrateurs ni équipe Linkivi) : un dossier privé est celui d'un membre, sans partage (voir <see cref="FolderAccess"/>).</summary>
     public IReadOnlySet<Guid> MemberIds { get; init; } = new HashSet<Guid>();
     /// <summary>Droits d'un utilisateur (mode par page, écrans) ; null pour un administrateur.</summary>
     public MemberRights? Rights { get; init; }
     /// <summary>Ce qu'on a partagé avec la personne (voir <see cref="ItemShare"/>).</summary>
     public ShareIndex Shares { get; init; } = ShareIndex.None;
-    /// <summary>Comptes de l'organisation : un propriétaire qui n'en fait pas partie (équipe Linkii) vaut « l'organisation ».</summary>
+    /// <summary>Comptes de l'organisation : un propriétaire qui n'en fait pas partie (équipe Linkivi) vaut « l'organisation ».</summary>
     public IReadOnlySet<Guid> OrgUserIds { get; init; } = new HashSet<Guid>();
     /// <summary>Mode d'une page : un administrateur gère tout (comme « Gère les siens », sans limite).</summary>
     public string ModeOf(string domain) => Rights?.ModeOf(domain) ?? PageMode.Own;
@@ -143,7 +143,7 @@ public class ClientDb
         // L'aire ne range que les écrans (24 octobre 2026) : elle est choisie par le filtre « Aire » des pages Écrans, Planning et Zones.
         Screens = new(root.Screens, clientId, area, Access.Sees);
         AllScreens = new(root.Screens, clientId, null, Access.Sees, addTo: area);
-        // ce qu'une personne de l'organisation crée lui appartient ; l'équipe Linkii ou un revendeur qui entre dans l'espace crée pour l'organisation.
+        // ce qu'une personne de l'organisation crée lui appartient ; l'équipe Linkivi ou un revendeur qui entre dans l'espace crée pour l'organisation.
         // Médias, listes, dossiers et modèles n'ont plus d'aire : ils sont à leur propriétaire (rangés dans l'aire ouverte, sans effet).
         var me = Me = Access.UserId is { } uid && root.Users.Any(u => u.Id == uid && u.ClientId == clientId) ? uid : (Guid?)null;
         Media = new(root.Media, clientId, null, null, me, area);
@@ -158,7 +158,7 @@ public class ClientDb
     }
 
     internal Db Root => _root;
-    /// <summary>La personne connectée si elle fait partie de l'organisation (null : équipe Linkii, revendeur, traitement interne) : propriétaire de ce qu'elle crée.</summary>
+    /// <summary>La personne connectée si elle fait partie de l'organisation (null : équipe Linkivi, revendeur, traitement interne) : propriétaire de ce qu'elle crée.</summary>
     public Guid? Me { get; }
     public Tenant Tenant => _root.Clients.First(c => c.Id == ClientId);
     public Reseller? Reseller => _root.Resellers.FirstOrDefault(r => r.Id == Tenant.ResellerId);
@@ -193,7 +193,7 @@ public class ClientDb
         MemberOps.TransferAll(_root, ClientId, id, Access.UserId);
         return _root.Users.RemoveAll(u => u.Id == id && u.ClientId == ClientId && Roles.IsClient(u.Role));
     }
-    /// <summary>Adresse déjà prise chez ce revendeur (ou par l'équipe Linkii) : un compte se connecte par son e-mail sur le domaine du revendeur.</summary>
+    /// <summary>Adresse déjà prise chez ce revendeur (ou par l'équipe Linkivi) : un compte se connecte par son e-mail sur le domaine du revendeur.</summary>
     public bool EmailTaken(string email) => _root.Users.Any(u => u.Email == email && (u.ResellerId == Tenant.ResellerId || u.ResellerId == null));
 
     /// <summary>Le code à 6 chiffres affiché par un écran non appairé identifie le client : il en prend possession, dans l'aire ouverte.</summary>
@@ -232,7 +232,7 @@ public static class Claims
         if (cid != null)
         {
             claims.Add(new(Client, cid.Value.ToString()));
-            rid ??= db.Clients.FirstOrDefault(c => c.Id == cid)?.ResellerId;   // l'équipe Linkii prend la marque du client visité
+            rid ??= db.Clients.FirstOrDefault(c => c.Id == cid)?.ResellerId;   // l'équipe Linkivi prend la marque du client visité
         }
         if (rid != null) claims.Add(new(Reseller, rid.Value.ToString()));
         if (impersonating) claims.Add(new(Impersonating, "1"));
@@ -389,11 +389,11 @@ public class ResellerResolver(JsonStore store, IConfiguration config)
 public record BrandDto(string Name, string Color, string? LogoUrl, bool PoweredBy)
 {
     public static BrandDto From(Reseller? r) => r == null
-        ? new("Linkii", "#0B1F3A", null, false)
+        ? new("Linkivi", "#0B1F3A", null, false)
         : new(r.DisplayName, r.BrandColor, r.LogoUrl, r.ShowPoweredBy && !r.IsDefault);
 }
 
-/// <summary>Comptes et aires d'une organisation, pour la console Linkii, l'espace revendeur et la facturation.</summary>
+/// <summary>Comptes et aires d'une organisation, pour la console Linkivi, l'espace revendeur et la facturation.</summary>
 public record UserStats(int Total, int Admins, int Members, int Active30, int Invited, int Areas)
 {
     public static UserStats Of(Db db, Tenant c)
@@ -424,7 +424,7 @@ public static class Tenancy
         return c.TrialEnded(now) && !c.Subscribed ? "trial" : null;   // abonné pendant l'essai : le premier prélèvement suit la fin de l'essai
     }
 
-    /// <summary>Un administrateur ne se connecte que sur le domaine de son revendeur ; l'équipe Linkii sur le domaine principal.</summary>
+    /// <summary>Un administrateur ne se connecte que sur le domaine de son revendeur ; l'équipe Linkivi sur le domaine principal.</summary>
     public static bool HostAllows(User u, Reseller host) => u.Role == Roles.PlatformAdmin ? host.IsDefault : u.ResellerId == host.Id;
 
     public static string Slugify(string s)
@@ -440,7 +440,7 @@ public static class Tenancy
         s.Length is >= 2 and <= 40 && s == Slugify(s) && !ReservedSlugs.Contains(s);
 
     /// <summary>Crée un client et son premier administrateur. Retourne null avec un message si l'e-mail est déjà pris chez ce revendeur.
-    /// password null : compte Microsoft ou Google, sans mot de passe Linkii. source : voir <see cref="SignupSources"/>.</summary>
+    /// password null : compte Microsoft ou Google, sans mot de passe Linkivi. source : voir <see cref="SignupSources"/>.</summary>
     public static (Tenant? Client, string? Error) CreateClient(Db db, Reseller reseller, string clientName, string adminName, string email, string? password, bool mustChangePassword = false, string? source = null)
     {
         email = email.Trim().ToLowerInvariant();
@@ -474,10 +474,12 @@ public static class Seed
         store.Write(db =>
         {
             if (db.Resellers.Count == 0)
-                db.Resellers.Add(new Reseller { Name = "Linkii", Slug = "linkii", BrandName = "Linkii", IsDefault = true, AllowSelfSignup = true });
+                db.Resellers.Add(new Reseller { Name = "Linkivi", Slug = "linkii", BrandName = "Linkivi", IsDefault = true, AllowSelfSignup = true });
             else if (!db.Resellers.Any(r => r.IsDefault))
                 db.Resellers[0].IsDefault = true;
             var def = db.Resellers.First(r => r.IsDefault);
+            if (def.Name == "Linkii") def.Name = "Linkivi";   // changement de nom de la marque (26 octobre 2026)
+            if (def.BrandName == "Linkii") def.BrandName = "Linkivi";
 
             MigrateLegacy(db, def, dataPath, log);
             PurgeWidgets(db, dataPath, log);
@@ -497,7 +499,7 @@ public static class Seed
                 var generated = string.IsNullOrEmpty(pwd);
                 if (generated) pwd = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(8)).ToLowerInvariant();
                 db.Users.RemoveAll(u => u.Email == email && u.ResellerId == null);
-                db.Users.Add(new User { Email = email, Name = "Administrateur Linkii", PasswordHash = Passwords.Hash(pwd!), Role = Roles.PlatformAdmin });
+                db.Users.Add(new User { Email = email, Name = "Administrateur Linkivi", PasswordHash = Passwords.Hash(pwd!), Role = Roles.PlatformAdmin });
                 banner = generated ? $"Compte administrateur de la plateforme créé : {email} / {pwd}  (à changer ; affiché une seule fois)"
                                    : $"Compte administrateur de la plateforme créé : {email}";
             }

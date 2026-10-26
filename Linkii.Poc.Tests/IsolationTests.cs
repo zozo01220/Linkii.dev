@@ -168,7 +168,7 @@ public class IsolationTests(Platform p)
     public async Task Reseller_is_resolved_from_the_domain_name()
     {
         var def = await (await p.Client().GetAsync("/login")).Content.ReadAsStringAsync();
-        Assert.Contains("Linkii", def);
+        Assert.Contains("Linkivi", def);
         Assert.DoesNotContain("Acme Affichage", def);
 
         foreach (var host in new[] { "acme.localhost", "affichage.acme.ch" })

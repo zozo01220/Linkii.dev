@@ -33,7 +33,7 @@ public static class HomeAssistantRules
 
     public static string Domain(string entityId) => entityId[..entityId.IndexOf('.')];
 
-    /// <summary>Le domaine d'une entité est-il géré par Linkii (capteur, interrupteur ou lumière) ?</summary>
+    /// <summary>Le domaine d'une entité est-il géré par Linkivi (capteur, interrupteur ou lumière) ?</summary>
     public static bool IsSupported(string entityId) => EntityIdPattern.IsMatch(entityId) && Domains.Contains(Domain(entityId));
 
     /// <summary>Commande autorisée : interrupteurs pour « ha-switches », lumières pour « ha-lights ». Les capteurs ne se commandent pas.</summary>

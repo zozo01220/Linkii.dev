@@ -64,7 +64,7 @@ public class AppManifest
     public string Description { get; set; } = "";
     /// <summary>fixed = durée choisie dans la playlist ; content = l'app décide (fin de la vidéo), plafonnée par le paramètre maxMinutes.</summary>
     public string Duration { get; set; } = "fixed";
-    /// <summary>builtin = écrite par Linkii ; nocode = configurée uniquement par son manifeste.</summary>
+    /// <summary>builtin = écrite par Linkivi ; nocode = configurée uniquement par son manifeste.</summary>
     public string Kind { get; set; } = "builtin";
     public List<string> Placements { get; set; } = new();
     /// <summary>Les paramètres validFrom / validTo (aaaa-mm-jj) limitent la période d'affichage.</summary>

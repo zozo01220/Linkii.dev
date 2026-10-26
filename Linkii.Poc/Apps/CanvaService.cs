@@ -10,7 +10,7 @@ namespace Linkii.Poc;
 /// <summary>
 /// Canva (Connect API) : connexion du compte Canva d'un client (OAuth 2 + PKCE), liste de ses designs,
 /// export d'un design (PNG par page ou MP4) importé dans la médiathèque pour une lecture hors ligne.
-/// L'intégration Canva est celle de la plateforme Linkii : Linkii:Canva:ClientId, Linkii:Canva:ClientSecret et, en production,
+/// L'intégration Canva est celle de la plateforme Linkivi : Linkii:Canva:ClientId, Linkii:Canva:ClientSecret et, en production,
 /// Linkii:Canva:RedirectUri (adresse déclarée chez Canva ; à défaut, https://{Linkii:BaseDomain}/canva/callback).
 /// </summary>
 public class CanvaService(IConfiguration config, JsonStore store, SecretBox box, IHttpClientFactory httpFactory, MediaImporter importer, ILogger<CanvaService> log)
@@ -19,7 +19,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
     private const string Api = "https://api.canva.com/rest/v1";
     private const string Scopes = "design:meta:read design:content:read folder:read profile:read";
 
-    // Intégration Canva (portail développeurs) : celle de la plateforme Linkii, identique pour tous les clients
+    // Intégration Canva (portail développeurs) : celle de la plateforme Linkivi, identique pour tous les clients
     // (Linkii:Canva:ClientId / ClientSecret / RedirectUri sur le serveur).
     private record Creds(string Id, string Secret, string Redirect);
 
@@ -178,7 +178,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
     private async Task<TokenResponse> TokenRequest(Guid clientId, Dictionary<string, string> form)
     {
         var creds = PlatformCreds;
-        if (creds.Id.Length == 0 || creds.Secret.Length == 0) throw new CanvaException("La connexion Canva de la plateforme n'est pas configurée (administrateur Linkii).");
+        if (creds.Id.Length == 0 || creds.Secret.Length == 0) throw new CanvaException("La connexion Canva de la plateforme n'est pas configurée (administrateur Linkivi).");
         using var req = new HttpRequestMessage(HttpMethod.Post, Api + "/oauth/token") { Content = new FormUrlEncodedContent(form) };
         req.Headers.Authorization = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{creds.Id}:{creds.Secret}")));
         using var res = await Http.SendAsync(req);

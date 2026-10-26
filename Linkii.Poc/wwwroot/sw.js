@@ -1,4 +1,4 @@
-/* Service worker du back-office Linkii (installation sur l'écran d'accueil).
+/* Service worker du back-office Linkivi (installation sur l'écran d'accueil).
    Il ne met rien en cache : le back-office a besoin du serveur en direct. Il fournit seulement une page claire quand le réseau est coupé.
    Le player des écrans a son propre service worker (/player/sw.js) : on ne s'en mêle pas. */
 var CACHE = 'linkii-shell-v1';

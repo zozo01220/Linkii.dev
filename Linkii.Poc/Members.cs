@@ -157,7 +157,7 @@ public static class Ownership
         return top != null ? top.OwnerId : ownerId;
     }
 
-    /// <summary>Place d'un élément dans les onglets ; un propriétaire hors de l'organisation (équipe Linkii entrée dans l'espace) vaut « l'organisation » (null).</summary>
+    /// <summary>Place d'un élément dans les onglets ; un propriétaire hors de l'organisation (équipe Linkivi entrée dans l'espace) vaut « l'organisation » (null).</summary>
     public static LibraryTab.Info TabInfo(AreaAccess a, string kind, Guid id, Guid? ownerId, IReadOnlyList<IFolderNode> parents)
     {
         Guid? Known(Guid? u) => u is { } x && a.OrgUserIds.Contains(x) ? x : null;

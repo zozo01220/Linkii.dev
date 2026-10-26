@@ -17,7 +17,7 @@ public class DropboxAuthTests : IDisposable
 
     private sealed class Env : IWebHostEnvironment
     {
-        public string ApplicationName { get; set; } = "Linkii";
+        public string ApplicationName { get; set; } = "Linkivi";
         public IFileProvider WebRootFileProvider { get; set; } = new NullFileProvider();
         public string WebRootPath { get; set; } = "";
         public string EnvironmentName { get; set; } = "Test";

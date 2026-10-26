@@ -3,7 +3,7 @@ using System.Text;
 
 namespace Linkii.Poc;
 
-/// <summary>Conditions générales de Linkii : version en vigueur, enregistrée avec chaque acceptation.</summary>
+/// <summary>Conditions générales de Linkivi : version en vigueur, enregistrée avec chaque acceptation.</summary>
 public static class Terms
 {
     public const string Version = "1.0";
@@ -279,7 +279,7 @@ public class SignupWorker(JsonStore store, Notifier notifier, AlertService alert
         await RunEnterprise(now);
     }
 
-    /// <summary>Offre Enterprise : rappels de fin de pilote (7 et 2 jours) et d'échéance des licences sur site (60, 30, 7 jours), au contact et à l'équipe Linkii.</summary>
+    /// <summary>Offre Enterprise : rappels de fin de pilote (7 et 2 jours) et d'échéance des licences sur site (60, 30, 7 jours), au contact et à l'équipe Linkivi.</summary>
     public async Task RunEnterprise(DateTime now)
     {
         if (Subscriptions.ToLocal(now).Hour < Lifecycle.SendHour) return;
@@ -400,7 +400,7 @@ public static class SessionCookie
         {
             var u = d.Users.First(x => x.Id == userId);
             u.LastLoginUtc = u.LastActiveUtc = DateTime.UtcNow;
-            // mot de passe provisoire reçu par e-mail : sa première utilisation prouve l'adresse (client créé par un revendeur ou par Linkii, membre invité)
+            // mot de passe provisoire reçu par e-mail : sa première utilisation prouve l'adresse (client créé par un revendeur ou par Linkivi, membre invité)
             if (u.EmailVerifiedUtc == null && !u.AwaitsVerification) u.EmailVerifiedUtc = DateTime.UtcNow;
             var p = Claims.Build(d, u);
             return (p, u.AwaitsVerification ? "/login/verify" : u.MustChangePassword ? "/login/password" : Claims.Home(p));

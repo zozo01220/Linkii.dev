@@ -34,7 +34,7 @@ public class NpmProxy(JsonStore store, SecretBox box, IHttpClientFactory httpFac
         if (p.NpmPassword == "") return "Renseignez le mot de passe du compte NPM.";
         try { box.Unprotect(p.NpmPassword); }
         catch (Exception) { return "Le mot de passe enregistré est illisible sur ce serveur (réglages copiés depuis une autre machine) : saisissez-le à nouveau."; }
-        if (p.NpmForwardHost.Trim() == "") return "Renseignez la destination des hôtes (adresse du serveur Linkii vue depuis NPM).";
+        if (p.NpmForwardHost.Trim() == "") return "Renseignez la destination des hôtes (adresse du serveur Linkivi vue depuis NPM).";
         return null;
     });
 

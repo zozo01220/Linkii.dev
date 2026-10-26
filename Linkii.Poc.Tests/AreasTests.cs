@@ -174,7 +174,7 @@ public class AreasTests
     public void A_new_client_starts_with_one_area()
     {
         var d = new Db();
-        var r = new Reseller { Name = "Linkii" };
+        var r = new Reseller { Name = "Linkivi" };
         d.Resellers.Add(r);
         var (c, err) = Tenancy.CreateClient(d, r, "École", "Admin", "admin@ecole.ch", "motdepasse");
         Assert.Null(err);

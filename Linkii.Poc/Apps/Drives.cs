@@ -789,7 +789,7 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
         if (status is 404 or 403 && !text.Contains("accessNotConfigured") && !text.Contains("insufficient") && !text.Contains("rateLimit"))
             throw new InvalidOperationException($"{what} introuvable : vérifiez le lien et que le compte {(t.GoogleUser.Length > 0 ? t.GoogleUser : "Google connecté")} y a accès.");
         if (status == 401) throw new InvalidOperationException("Google a refusé l'accès : reconnectez votre compte dans Intégrations › Google Drive.");
-        if (status == 403 && text.Contains("accessNotConfigured")) throw new InvalidOperationException("L'API Google Drive n'est pas activée pour l'application Google de la plateforme (administrateur Linkii).");
+        if (status == 403 && text.Contains("accessNotConfigured")) throw new InvalidOperationException("L'API Google Drive n'est pas activée pour l'application Google de la plateforme (administrateur Linkivi).");
         if (status == 403 && text.Contains("insufficient")) throw new InvalidOperationException("Accès à Drive non accordé : reconnectez votre compte dans Intégrations › Google Drive.");
         if (status != 200) throw new InvalidOperationException($"Google Drive ({status}) : {GoogleConnector.Describe(text)}");
         return JsonDocument.Parse(text);

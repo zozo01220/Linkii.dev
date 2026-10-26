@@ -8,7 +8,7 @@ namespace Linkii.Poc.Tests;
 public class BillingTests
 {
     readonly Db db = new();
-    readonly Reseller linkii = new() { Name = "Linkii", IsDefault = true, AllowSelfSignup = true };
+    readonly Reseller linkii = new() { Name = "Linkivi", IsDefault = true, AllowSelfSignup = true };
     readonly DateTime now = new(2026, 10, 25, 10, 0, 0, DateTimeKind.Utc);
     static readonly Consents Yes = new(Terms: true, Marketing: false, News: true);
 

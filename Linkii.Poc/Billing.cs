@@ -140,7 +140,7 @@ public static class Billing
         {
             c.NextRenewalUtc = null; c.PendingPlan = null;
             c.TrialEndsUtc = null;   // abonné pendant l'essai puis résilié avant le premier prélèvement
-            if (SignupSources.IsSelfService(c.SignupSource)) c.DeleteOnUtc = DeleteDateAfter(db, now);   // client d'un revendeur ou de Linkii : jamais supprimé automatiquement
+            if (SignupSources.IsSelfService(c.SignupSource)) c.DeleteOnUtc = DeleteDateAfter(db, now);   // client d'un revendeur ou de Linkivi : jamais supprimé automatiquement
             c.LifecycleSent.RemoveAll(k => k.StartsWith("del"));
             done.Add(new(c.Id, "ended", 0));
         }

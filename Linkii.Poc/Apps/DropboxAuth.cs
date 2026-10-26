@@ -8,7 +8,7 @@ namespace Linkii.Poc;
 
 /// <summary>
 /// Compte Dropbox d'une organisation (« Se connecter avec Dropbox », OAuth 2 + PKCE, lecture seule). L'application OAuth est celle de la plateforme
-/// Linkii : Linkii:Dropbox:AppKey, Linkii:Dropbox:AppSecret et, en production, Linkii:Dropbox:RedirectUri (adresse de retour déclarée dans la console
+/// Linkivi : Linkii:Dropbox:AppKey, Linkii:Dropbox:AppSecret et, en production, Linkii:Dropbox:RedirectUri (adresse de retour déclarée dans la console
 /// Dropbox ; à défaut, l'adresse du back-office + /dropbox/callback). Permissions de l'application : files.metadata.read, files.content.read, account_info.read.
 /// Le jeton de renouvellement est chiffré dans <see cref="DriveAccount.Secret"/> ; le jeton d'accès reste en mémoire.
 /// </summary>
@@ -155,7 +155,7 @@ public class DropboxAuth(IConfiguration config, JsonStore store, SecretBox box, 
 
     private async Task<TokenResponse> TokenRequest(Dictionary<string, string> form)
     {
-        if (!IsConfigured) throw new DropboxAuthException("La connexion Dropbox de la plateforme n'est pas configurée (administrateur Linkii).");
+        if (!IsConfigured) throw new DropboxAuthException("La connexion Dropbox de la plateforme n'est pas configurée (administrateur Linkivi).");
         form["client_id"] = AppKey;
         form["client_secret"] = AppSecret;
         var body = string.Join("&", form.Select(kv => kv.Key + "=" + Uri.EscapeDataString(kv.Value)));

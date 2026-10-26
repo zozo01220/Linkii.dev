@@ -1,7 +1,7 @@
 namespace Linkii.Poc;
 
 /// <summary>
-/// Vrais logos des fournisseurs (dessins simplifiés de wwwroot/brand-logos.svg, maquette icones-integrations.html) et pictogrammes Linkii
+/// Vrais logos des fournisseurs (dessins simplifiés de wwwroot/brand-logos.svg, maquette icones-integrations.html) et pictogrammes Linkivi
 /// des sources sans marque. Un logo est affiché tel quel, sans pastille ni recoloration.
 /// </summary>
 public static class BrandLogos

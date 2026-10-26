@@ -45,7 +45,7 @@ public static class Lifecycle
     }
 
     public static Notice FirstSteps(Tenant c) => new("Connectez votre premier écran en 3 minutes", "Votre premier écran",
-        new() { "Branchez un écran ou un mini-PC, ouvrez l'adresse du lecteur Linkii dessus et saisissez dans votre espace le code à six chiffres qu'il affiche.",
+        new() { "Branchez un écran ou un mini-PC, ouvrez l'adresse du lecteur Linkivi dessus et saisissez dans votre espace le code à six chiffres qu'il affiche.",
                 "Ensuite, choisissez la liste de lecture à diffuser : c'est tout." }, new(), "Connecter un écran", "", "Vous recevez ces conseils car vous avez accepté les nouveautés et astuces à l'inscription.");
 
     public static Notice Tip(Tenant c, bool hasPlaylist, int index) => !hasPlaylist
@@ -84,7 +84,7 @@ public static class Lifecycle
         new(), "Garder mon espace", AbonnementPath);
 
     public static Notice Deleted(string org) => new("Vos contenus ont été supprimés : bonne continuation", "Bonne continuation",
-        new() { $"Comme annoncé, votre espace « {org} » et ses contenus ont été supprimés.", "Merci d'avoir essayé Linkii. Vous pouvez revenir quand vous voulez avec un nouvel essai." },
+        new() { $"Comme annoncé, votre espace « {org} » et ses contenus ont été supprimés.", "Merci d'avoir essayé Linkivi. Vous pouvez revenir quand vous voulez avec un nouvel essai." },
         new(), null, null);
 
     public static Notice PlanActive(Db db, Tenant c, DateTime now)

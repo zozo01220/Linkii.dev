@@ -154,7 +154,7 @@ public class ExternalLogin(IConfiguration config, IHttpClientFactory httpFactory
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
         req.Headers.Accept.ParseAdd("application/json");
-        req.Headers.UserAgent.ParseAdd("Linkii");   // exigé par l'API GitHub
+        req.Headers.UserAgent.ParseAdd("Linkivi");   // exigé par l'API GitHub
         using var res = await Http.SendAsync(req);
         if (!res.IsSuccessStatusCode) { log.LogWarning("Lecture de {Url} refusée ({Status})", url, (int)res.StatusCode); return null; }
         return JsonDocument.Parse(await res.Content.ReadAsStringAsync());

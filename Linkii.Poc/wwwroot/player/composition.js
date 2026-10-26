@@ -9,7 +9,7 @@
 (function (w) {
   'use strict';
   var FONTS = ['IBM Plex Sans', 'Montserrat', 'Poppins', 'Playfair Display', 'Oswald', 'Arial'];
-  // Polices embarquées (player/fonts, licence OFL) : servies par Linkii et gardées par le Service Worker du player, donc lisibles hors ligne.
+  // Polices embarquées (player/fonts, licence OFL) : servies par Linkivi et gardées par le Service Worker du player, donc lisibles hors ligne.
   var FONT_CSS = '/player/fonts/compo-fonts.css';
   var CSS = '.lc-stage{position:absolute;left:0;top:0;transform-origin:0 0;overflow:hidden}' +
     '.lc-el{position:absolute;box-sizing:border-box}' +

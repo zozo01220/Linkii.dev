@@ -9,7 +9,7 @@ namespace Linkii.Poc;
 /// <summary>
 /// Compte Google d'une organisation (« Se connecter avec Google », OAuth 2 + PKCE, lecture seule), partagé par Google Calendar et Google Drive.
 /// Chaque intégration demande son accès (agendas, fichiers Drive) ; les accès déjà accordés sont conservés (autorisation incrémentale).
-/// L'application OAuth est celle de la plateforme Linkii : Linkii:Google:ClientId, Linkii:Google:ClientSecret et, en production,
+/// L'application OAuth est celle de la plateforme Linkivi : Linkii:Google:ClientId, Linkii:Google:ClientSecret et, en production,
 /// Linkii:Google:RedirectUri (adresse de retour déclarée dans Google Cloud ; à défaut, l'adresse du back-office + /google/callback).
 /// </summary>
 public class GoogleAuth(IConfiguration config, JsonStore store, SecretBox box, IHttpClientFactory httpFactory, ILogger<GoogleAuth> log)
@@ -177,7 +177,7 @@ public class GoogleAuth(IConfiguration config, JsonStore store, SecretBox box, I
 
     private async Task<TokenResponse> TokenRequest(Dictionary<string, string> form)
     {
-        if (!IsConfigured) throw new GoogleAuthException("La connexion Google de la plateforme n'est pas configurée (administrateur Linkii).");
+        if (!IsConfigured) throw new GoogleAuthException("La connexion Google de la plateforme n'est pas configurée (administrateur Linkivi).");
         form["client_id"] = ClientId;
         form["client_secret"] = ClientSecret;
         using var res = await Http.PostAsync(TokenUrl, new FormUrlEncodedContent(form));

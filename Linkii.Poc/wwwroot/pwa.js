@@ -1,4 +1,4 @@
-/* Installation de Linkii sur l'écran d'accueil : iPhone et iPad seulement (Android et Windows ont l'application Linkii).
+/* Installation de Linkivi sur l'écran d'accueil : iPhone et iPad seulement (Android et Windows ont l'application Linkivi).
    - iPhone / iPad : Safari n'a pas d'API d'installation ; on montre le geste (Partager › Sur l'écran d'accueil).
    Un bandeau propose l'installation (masquable 14 jours). Tout élément portant data-install la déclenche aussi
    et n'est visible que si l'installation est possible (classe can-install sur <html>). JS volontairement simple (ES5). */
@@ -26,7 +26,7 @@
 
   function appName() {
     var m = document.querySelector('meta[name="apple-mobile-web-app-title"]');
-    return (m && m.content) || 'Linkii';
+    return (m && m.content) || 'Linkivi';
   }
   function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 

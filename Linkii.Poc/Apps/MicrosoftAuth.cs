@@ -10,7 +10,7 @@ namespace Linkii.Poc;
 /// Compte Microsoft (professionnel, scolaire ou personnel) d'une organisation (« Se connecter avec Microsoft », OAuth 2 + PKCE, permissions déléguées en lecture seule),
 /// partagé par les calendriers Microsoft 365 et OneDrive / SharePoint. Même principe que <see cref="GoogleAuth"/> : chaque intégration
 /// demande son accès (agendas, fichiers) ; les accès déjà accordés sont conservés.
-/// L'application Entra ID est celle de la plateforme Linkii (multilocataire, comptes personnels acceptés) : Linkii:Microsoft:ClientId, Linkii:Microsoft:ClientSecret et,
+/// L'application Entra ID est celle de la plateforme Linkivi (multilocataire, comptes personnels acceptés) : Linkii:Microsoft:ClientId, Linkii:Microsoft:ClientSecret et,
 /// en production, Linkii:Microsoft:RedirectUri (adresse déclarée dans Entra ; à défaut, l'adresse du back-office + /microsoft/callback).
 /// </summary>
 public class MicrosoftAuth(IConfiguration config, JsonStore store, SecretBox box, IHttpClientFactory httpFactory, ILogger<MicrosoftAuth> log)
@@ -218,7 +218,7 @@ public class MicrosoftAuth(IConfiguration config, JsonStore store, SecretBox box
 
     private async Task<TokenResponse> TokenRequest(Dictionary<string, string> form)
     {
-        if (!IsConfigured) throw new MicrosoftAuthException("La connexion Microsoft de la plateforme n'est pas configurée (administrateur Linkii).");
+        if (!IsConfigured) throw new MicrosoftAuthException("La connexion Microsoft de la plateforme n'est pas configurée (administrateur Linkivi).");
         form["client_id"] = ClientId;
         form["client_secret"] = ClientSecret;
         var http = httpFactory.CreateClient("microsoft");

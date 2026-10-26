@@ -1,6 +1,6 @@
 namespace Linkii.Poc;
 
-/// <summary>État d'un client tel que la console Linkii l'affiche : un seul état à la fois, du plus bloquant au plus ordinaire.</summary>
+/// <summary>État d'un client tel que la console Linkivi l'affiche : un seul état à la fois, du plus bloquant au plus ordinaire.</summary>
 public static class ClientStates
 {
     public const string Active = "Actif", Trial = "Essai", Ended = "Essai terminé", Pending = "À valider", Suspended = "Suspendu", Blocked = "Bloqué", Cancelled = "Résilié";

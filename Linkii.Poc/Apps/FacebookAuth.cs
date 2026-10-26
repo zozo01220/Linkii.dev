@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 namespace Linkii.Poc;
 
 /// <summary>
-/// Compte Facebook d'une organisation (« Se connecter avec Facebook », OAuth 2, lecture seule). L'application est celle de la plateforme Linkii :
+/// Compte Facebook d'une organisation (« Se connecter avec Facebook », OAuth 2, lecture seule). L'application est celle de la plateforme Linkivi :
 /// Linkii:Facebook:AppId, Linkii:Facebook:AppSecret et, en production, Linkii:Facebook:RedirectUri (adresse de retour déclarée dans la console Meta ;
 /// à défaut, l'adresse du back-office + /facebook/callback). Permissions : pages_show_list et pages_read_engagement (en mode développement de l'application
 /// Meta, seuls ses administrateurs et testeurs peuvent se connecter ; ouvrir l'application à tous demande une revue Meta).
@@ -113,7 +113,7 @@ public class FacebookAuth(IConfiguration config, JsonStore store, SecretBox box,
     /// <summary>Échange un code (ou un jeton de courte durée) contre un jeton d'utilisateur. Les secrets partent dans le corps d'une requête POST, jamais dans l'adresse.</summary>
     private async Task<string> TokenRequest(Dictionary<string, string> form)
     {
-        if (!IsConfigured) throw new FacebookAuthException("La connexion Facebook de la plateforme n'est pas configurée (administrateur Linkii).");
+        if (!IsConfigured) throw new FacebookAuthException("La connexion Facebook de la plateforme n'est pas configurée (administrateur Linkivi).");
         form["client_id"] = AppId;
         form["client_secret"] = AppSecret;
         var body = string.Join("&", form.Select(kv => kv.Key + "=" + Uri.EscapeDataString(kv.Value)));

@@ -1,4 +1,4 @@
-/* Apps du catalogue Linkii : un module de rendu par app (JS volontairement "ancien" : var, pas d'async/await).
+/* Apps du catalogue Linkivi : un module de rendu par app (JS volontairement "ancien" : var, pas d'async/await).
    player.js appelle chaque rendu avec un objet "host" :
      host.el, host.item, host.settings   élément DOM, élément publié, paramètres publiés (jamais de secrets)
      host.place, host.compact            position ('full', 'top-left'…) ; true hors pleine page

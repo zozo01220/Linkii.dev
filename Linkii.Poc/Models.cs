@@ -40,7 +40,7 @@ public interface IClientOwned { Guid ClientId { get; set; } }
 /// <summary>Donnée rangée dans une aire de gestion (écran, liste de lecture, média) : partagée par les membres de l'aire, invisible des autres aires.</summary>
 public interface IAreaOwned { Guid AreaId { get; set; } }
 
-/// <summary>Réglages de la plateforme, communs à toutes les organisations quel que soit leur revendeur (console Linkii › Réglages).</summary>
+/// <summary>Réglages de la plateforme, communs à toutes les organisations quel que soit leur revendeur (console Linkivi › Réglages).</summary>
 public class PlatformSettings
 {
     /// <summary>Durée de l'essai gratuit d'une organisation créée en libre-service, à partir de la validation de son adresse e-mail.</summary>
@@ -57,7 +57,7 @@ public class PlatformSettings
     public int AnnualDiscountPct { get; set; } = 15;
     /// <summary>Commission (en %) d'un revendeur sur le net payé par ses clients, tant qu'aucun taux particulier ne lui est donné.</summary>
     public int DefaultCommissionPct { get; set; } = 20;
-    /// <summary>Migration faite : le taux est la commission de Linkii, le revendeur touche le reste.</summary>
+    /// <summary>Migration faite : le taux est la commission de Linkivi, le revendeur touche le reste.</summary>
     public int ResellerShareVersion { get; set; }
     /// <summary>Frais de paiement estimés (Stripe) : pourcentage + montant fixe par paiement. La commission se calcule sur le net, après frais.</summary>
     public decimal StripeFeePct { get; set; } = 2.9m;
@@ -116,7 +116,7 @@ public static class PaymentModes
     public const string Simulation = "simulation", Stripe = "stripe";
 }
 
-/// <summary>Comment une organisation a été créée : inscription libre (e-mail, Google, Microsoft), par un revendeur ou par l'équipe Linkii.</summary>
+/// <summary>Comment une organisation a été créée : inscription libre (e-mail, Google, Microsoft), par un revendeur ou par l'équipe Linkivi.</summary>
 public static class SignupSources
 {
     public const string Email = "email";
@@ -135,13 +135,13 @@ public static class SignupSources
     public static string Label(string? s) => s switch
     {
         Email => "E-mail", Google => "Google", Microsoft => "Microsoft", LinkedIn => "LinkedIn", GitHub => "GitHub",
-        Reseller => "Revendeur", Console => "Linkii", _ => "Non renseignée"
+        Reseller => "Revendeur", Console => "Linkivi", _ => "Non renseignée"
     };
 }
 
 public static class Roles
 {
-    public const string PlatformAdmin = "PlatformAdmin";   // équipe Linkii : console administrateur
+    public const string PlatformAdmin = "PlatformAdmin";   // équipe Linkivi : console administrateur
     public const string ResellerAdmin = "ResellerAdmin";   // revendeur : clients, marque, équipe
     public const string ClientAdmin = "ClientAdmin";       // administrateur de l'organisation (client du revendeur) : toutes les aires, réglages
     public const string ClientMember = "ClientMember";     // membre de l'organisation : un niveau de droits (User.LevelId)
@@ -149,13 +149,13 @@ public static class Roles
     public static bool IsClient(string role) => role is ClientAdmin or ClientMember;
 }
 
-/// <summary>Le revendeur : l'entreprise qui revend Linkii sous sa marque. Résolu à partir du nom de domaine de chaque requête.</summary>
+/// <summary>Le revendeur : l'entreprise qui revend Linkivi sous sa marque. Résolu à partir du nom de domaine de chaque requête.</summary>
 public class Reseller
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "";
     public string Slug { get; set; } = "";             // revendeur.linkii.com
-    public string? CustomDomain { get; set; }          // affichage.revendeur.ch (CNAME vers Linkii)
+    public string? CustomDomain { get; set; }          // affichage.revendeur.ch (CNAME vers Linkivi)
     /// <summary>false : revendeur bloqué (son back-office et celui de ses clients sont fermés, leurs écrans coupés).</summary>
     public bool Active { get; set; } = true;
     /// <summary>Suspendu : les écrans de tous ses clients sont coupés ; son back-office et celui de ses clients restent ouverts.</summary>
@@ -170,8 +170,8 @@ public class Reseller
     public int? NpmHostId { get; set; }
     public string AddressNote { get; set; } = "";
     public DateTime? AddressCheckedUtc { get; set; }
-    public bool IsDefault { get; set; }                // le « revendeur » Linkii lui-même (domaine principal, console administrateur)
-    public bool AllowSelfSignup { get; set; }          // ancien réglage : création de compte en libre-service (offre directe Linkii) ; voir SignupMethods
+    public bool IsDefault { get; set; }                // le « revendeur » Linkivi lui-même (domaine principal, console administrateur)
+    public bool AllowSelfSignup { get; set; }          // ancien réglage : création de compte en libre-service (offre directe Linkivi) ; voir SignupMethods
     /// <summary>Méthodes d'inscription en libre-service que le revendeur propose (e-mail, google, microsoft, linkedin, github). null : réglage d'origine (AllowSelfSignup : toutes, sinon aucune).</summary>
     public List<string>? SignupMethods { get; set; }
     [System.Text.Json.Serialization.JsonIgnore] public IReadOnlyCollection<string> SignupOn => (IReadOnlyCollection<string>?)SignupMethods ?? (AllowSelfSignup ? SignupSources.SignupMethodIds : Array.Empty<string>());
@@ -184,7 +184,7 @@ public class Reseller
     public string? LogoFile { get; set; }              // fichier du dossier brand/
     public string BrandColor { get; set; } = "#0B1F3A";
     public string SenderEmail { get; set; } = "";
-    public bool ShowPoweredBy { get; set; } = true;    // mention « propulsé par Linkii »
+    public bool ShowPoweredBy { get; set; } = true;    // mention « propulsé par Linkivi »
 
     public string DisplayName => string.IsNullOrWhiteSpace(BrandName) ? Name : BrandName;
     public string? LogoUrl => string.IsNullOrEmpty(LogoFile) ? null : "/brand/" + LogoFile;
@@ -199,7 +199,7 @@ public class User
     public string Name { get; set; } = "";
     public string PasswordHash { get; set; } = "";
     public string Role { get; set; } = Roles.ClientAdmin;
-    public Guid? ResellerId { get; set; }   // null pour l'équipe Linkii
+    public Guid? ResellerId { get; set; }   // null pour l'équipe Linkivi
     public Guid? ClientId { get; set; }     // seulement pour un compte d'organisation (administrateur ou membre)
     public bool Disabled { get; set; }
     /// <summary>Ancien choix personnel des notifications (avant le 18 octobre 2026) : ignoré, les alertes se règlent pour l'organisation (voir <see cref="Alerts"/>).</summary>
@@ -222,7 +222,7 @@ public class User
     public MemberRights? Rights { get; set; }
     /// <summary>Dernier onglet ouvert par page (Médiathèque, Listes de lecture) : « mine », « shared » ou « all ».</summary>
     public Dictionary<string, string> LibraryTabs { get; set; } = new();
-    /// <summary>Dernière aire ouverte, par organisation (l'équipe Linkii et les revendeurs visitent plusieurs organisations).</summary>
+    /// <summary>Dernière aire ouverte, par organisation (l'équipe Linkivi et les revendeurs visitent plusieurs organisations).</summary>
     public Dictionary<Guid, Guid> LastAreas { get; set; } = new();
     /// <summary>Mode d'utilisation : true expert (toutes les fonctions), false simple (vue réduite), null ancien compte = expert.</summary>
     public bool? ExpertMode { get; set; }
@@ -239,7 +239,7 @@ public class User
     /// <summary>Envois du lien sur la dernière heure (renvoi limité).</summary>
     public List<DateTime> VerifySends { get; set; } = new();
 
-    /// <summary>Compte créé avec « Continuer avec Microsoft / Google » : fournisseur et identifiant stable du compte chez lui (pas de mot de passe Linkii).</summary>
+    /// <summary>Compte créé avec « Continuer avec Microsoft / Google » : fournisseur et identifiant stable du compte chez lui (pas de mot de passe Linkivi).</summary>
     public string? ExternalProvider { get; set; }
     public string? ExternalId { get; set; }
 
@@ -359,7 +359,7 @@ public class Tenant
 
     /// <summary>Voir <see cref="SignupSources"/> ; null pour une organisation créée avant le 9 octobre 2026.</summary>
     public string? SignupSource { get; set; }
-    /// <summary>Fin de l'essai gratuit (validation + durée réglée dans la console). null : pas d'essai (créée par un revendeur ou Linkii, ou abonnée).</summary>
+    /// <summary>Fin de l'essai gratuit (validation + durée réglée dans la console). null : pas d'essai (créée par un revendeur ou Linkivi, ou abonnée).</summary>
     public DateTime? TrialEndsUtc { get; set; }
     public DateTime? TrialReminderSentUtc { get; set; }   // rappel envoyé 2 jours avant la fin
     public DateTime? TrialEndedNotifiedUtc { get; set; }  // écrans prévenus de la fin de l'essai
@@ -443,7 +443,7 @@ public class Tenant
     public string AlertEmail { get; set; } = "";
     /// <summary>Une pause se termine seule après ce délai (0 : reprise manuelle seulement).</summary>
     public int PauseResumeMinutes { get; set; } = 60;
-    /// <summary>Image de la médiathèque affichée pendant une pause (null : visuel Linkii par défaut).</summary>
+    /// <summary>Image de la médiathèque affichée pendant une pause (null : visuel Linkivi par défaut).</summary>
     public Guid? PauseMediaId { get; set; }
 
     public string DefaultScreenType { get; set; } = "tv";
@@ -680,7 +680,7 @@ public class Screen : IClientOwned, IAreaOwned, IOwned
     public string? DeviceKind { get; set; }        // androidtv | android | windows | web
     public string? DeviceOs { get; set; }          // « Android 14 »
     public string? DeviceModel { get; set; }
-    public string? DeviceApp { get; set; }         // version de l'application Linkii Player
+    public string? DeviceApp { get; set; }         // version de l'application Linkivi Player
     public DateTime? DeviceBootUtc { get; set; }   // dernier démarrage de l'appareil
     public string? DevicePinSig { get; set; }      // empreinte du code technicien reçu de l'organisation (voir TechPin.Sig)
     public string? DeviceHost { get; set; }        // PC Windows : identifiant du PC (plusieurs écrans d'un même PC le partagent)
