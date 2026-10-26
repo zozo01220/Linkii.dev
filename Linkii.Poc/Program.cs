@@ -145,6 +145,7 @@ AppPaths.BrandDir = Path.Combine(dataDir, "brand");
 AppPaths.ThumbDir = Path.Combine(dataDir, "thumbs");
 AppPaths.PdfDir = Path.Combine(dataDir, "pdf");
 AppPaths.CaptureDir = Path.Combine(dataDir, "captures");
+AppPaths.DownloadDir = Path.Combine(dataDir, "downloads");
 Directory.CreateDirectory(AppPaths.MediaDir);
 Directory.CreateDirectory(AppPaths.BrandDir);
 Directory.CreateDirectory(AppPaths.ThumbDir);
@@ -257,6 +258,7 @@ app.Use(async (ctx, next) =>
                || p.StartsWithSegments("/_framework") || p.StartsWithSegments("/_blazor") || p.StartsWithSegments("/logout")
                || p.StartsWithSegments("/internal") || p.StartsWithSegments("/media")   // /media fait son propre contrôle d'accès
                || p.StartsWithSegments("/q")   // adresse courte des QR codes de comptage : scannée par le téléphone d'un visiteur, sans compte
+               || p.StartsWithSegments("/download")   // installeur du player Windows : téléchargé sur le PC de l'écran, souvent sans session
                || p.StartsWithSegments("/canva/callback")   // retour de Canva : identifié par son « state », sur le domaine principal
                || p.StartsWithSegments("/google/callback")  // retour de Google (Drive) : idem
                || p.StartsWithSegments("/dropbox/callback")  // retour de Dropbox : idem
@@ -520,6 +522,18 @@ app.MapGet("/q/{code}", (string code, HttpContext ctx, JsonStore store, ScanLog 
 
 app.MapGet("/internal/tls-allow", (string domain, ResellerResolver resolver) =>
     resolver.IsKnownDomain(domain) ? Results.Ok() : Results.StatusCode(403));
+
+// ---------- Téléchargement du player Windows (public : l'installeur ne contient rien du client) ----------
+// Dernier LinkiiPlayer-*.msi du dossier downloads des données (déposé par build-installer.ps1 en local, à la main sur le serveur).
+app.MapGet("/download/windows", () =>
+{
+    var msi = Directory.Exists(AppPaths.DownloadDir)
+        ? new DirectoryInfo(AppPaths.DownloadDir).GetFiles("LinkiiPlayer-*.msi").OrderByDescending(f => f.LastWriteTimeUtc).FirstOrDefault()
+        : null;
+    return msi == null
+        ? Results.Content("Le player Windows n'est pas encore disponible au téléchargement.", "text/plain; charset=utf-8", statusCode: 404)
+        : Results.File(msi.FullName, "application/x-msi", msi.Name);
+});
 
 // ---------- Médias : l'accès est contrôlé par client ----------
 // Autorisé : un écran du client propriétaire (en-tête X-Token ou ?t=) ou un utilisateur connecté sur l'espace de ce client.

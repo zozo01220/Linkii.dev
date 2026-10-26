@@ -1,0 +1,343 @@
+@* Premier écran (DEV-POC.md §126) : plein écran par-dessus la page Écrans. 1. ce qu'on affiche (la TV au centre, textes modifiés dessus),
+   2. relier l'écran (code), puis la même TV « En direct ». La page Écrans fournit l'appairage (Pair) : facturation et publication comme le tiroir. *@
+@implements IAsyncDisposable
+@using Microsoft.JSInterop
+@inject TenantStore Store
+@inject AppService Svc
+@inject MediaImporter Importer
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<div class="fs-wiz" role="dialog" aria-modal="true" aria-labelledby="fs-q">
+    <div class="fs-top">
+        <Logo Size="26" />
+        @if (step < 3)
+        {
+            <div class="fs-dots" aria-label="Étape @step sur 2"><i class="on"></i><i class="@(step == 2 ? "on" : "")"></i></div>
+            <button type="button" class="fs-later" @onclick="Later">Plus tard</button>
+        }
+        else { <span class="grow"></span> }
+    </div>
+
+    @if (step == 1)
+    {
+        <div class="fs-q">
+            <h1 id="fs-q">Que doit afficher votre écran ?</h1>
+            <p>@(draft.Mode == "url" ? "Collez l'adresse de la page à afficher, sous l'écran." : "Choisissez un point de départ en bas, puis cliquez sur les textes pour les changer.")</p>
+        </div>
+        <div class="fs-tvw" @ref="tvRef">
+            @if (!edited && draft.Mode != "url") { <div class="fs-tip"><Ico Name="edit" Size="13" /> Cliquez sur un texte pour le modifier · ou déposez une photo sur l'écran</div> }
+            @Tv(true)
+            <InputFile class="fs-drop" OnChange="OnPhoto" accept="image/*" title="" aria-label="Déposer une photo" />
+            <div class="fs-droph">Déposez votre photo ici</div>
+        </div>
+
+        <div class="fs-picks">
+            @foreach (var t in FirstScreen.Templates)
+            {
+                <button type="button" class="fs-pick @(draft.Mode == "tpl" && draft.Tpl == t.Id ? "on" : "")" @onclick="() => Pick(t)">
+                    <span class="th" style="background:@t.Bg">@t.Title</span><span class="nm">@t.Name</span>
+                </button>
+            }
+            <label class="fs-pick own @(draft.Mode == "photo" ? "on" : "")">
+                <span class="th">@if (uploading) { <span class="fs-spin"></span> } else { <Ico Name="image" Size="22" /> }</span><span class="nm">Mes photos</span>
+                <InputFile class="sr-only" OnChange="OnPhoto" accept="image/*" />
+            </label>
+            <button type="button" class="fs-pick own @(draft.Mode == "url" ? "on" : "")" @onclick="PickUrl">
+                <span class="th"><Ico Name="globe" Size="22" /></span><span class="nm">Page web</span>
+            </button>
+        </div>
+        @if (draft.Mode == "url")
+        {
+            <div class="fs-url">
+                <input @bind="urlInput" @bind:event="oninput" placeholder="Collez un lien : site web, Google Slides, Canva…" aria-label="Adresse de la page" @onkeydown="UrlKey" />
+                <button type="button" class="btn ghost" @onclick="ApplyUrl">Afficher</button>
+            </div>
+        }
+        @if (error != null) { <div class="err fs-err">@error</div> }
+        <div class="fs-act">
+            <button class="btn fs-big" disabled="@(saving || uploading)" @onclick="Next">@(saving ? "Enregistrement…" : "C'est bon, je le mets sur mon écran") <Ico Name="arrow-right" Size="16" /></button>
+        </div>
+    }
+    else if (step == 2)
+    {
+        <div class="fs-q">
+            <h1 id="fs-q">Allumez votre écran</h1>
+            <p>Il va vous montrer un code. Recopiez-le ici, c'est tout.</p>
+        </div>
+        <div class="fs-pair">
+            <div>
+                <div class="fs-tv"><div class="fs-scr fs-player">
+                    <span class="pw">linkii</span>
+                    <span class="pc"><span>4</span><span>8</span><span>1</span><span>2</span><span>9</span><span>3</span></span>
+                    <small>Ce que vous verrez sur l'écran</small>
+                </div><div class="fs-tvfoot"></div></div>
+                <div class="fs-stand"></div>
+                <div class="fs-devs" role="tablist" aria-label="Appareil">
+                    <button type="button" role="tab" aria-selected="@(device == "web")" class="@(device == "web" ? "on" : "")" @onclick='() => device = "web"'>Navigateur / TV connectée</button>
+                    <button type="button" role="tab" aria-selected="@(device == "android")" class="@(device == "android" ? "on" : "")" @onclick='() => device = "android"'>TV Android</button>
+                    <button type="button" role="tab" aria-selected="@(device == "windows")" class="@(device == "windows" ? "on" : "")" @onclick='() => device = "windows"'>PC Windows</button>
+                </div>
+                <div class="fs-where">
+                    @if (device == "web")
+                    {
+                        <span>Sur l'écran, ouvrez le navigateur et allez sur <b class="fs-addr">@PlayerAddress</b></span>
+                        <a class="btn ghost sm" href="/player/" target="_blank" rel="noopener"><Ico Name="external" Size="14" /> Ouvrir dans mon navigateur</a>
+                    }
+                    else if (device == "android")
+                    {
+                        <span>Sur la TV ou le boîtier Android, installez l'app <b>Linkii Player</b>, puis ouvrez-la.</span>
+                    }
+                    else
+                    {
+                        <span>Sur le PC, installez <b>Linkii Player pour Windows</b>, puis lancez-le. Il démarre ensuite avec le PC.</span>
+                        <a class="btn ghost sm" href="/download/windows" download><Ico Name="download" Size="14" /> Télécharger pour Windows</a>
+                    }
+                </div>
+            </div>
+            <div class="fs-enter">
+                <h2>Le code de votre écran</h2>
+                <p>Les 6 chiffres affichés sur l'écran.</p>
+                <div class="fs-code" @ref="codeRef">
+                    @for (var i = 0; i < 6; i++)
+                    {
+                        <input inputmode="numeric" autocomplete="one-time-code" maxlength="6" aria-label="Chiffre @(i + 1)" disabled="@pairing" />
+                    }
+                </div>
+                <div class="fs-state @(codeError != null ? "bad" : "")" aria-live="polite">
+                    @if (pairing) { <span class="fs-spin"></span> <span>Connexion à l'écran…</span> }
+                    else if (codeError != null) { <span>@codeError</span> }
+                    else { <span>L'écran se relie dès que le code est complet.</span> }
+                </div>
+                <div class="fs-noscreen">Pas d'écran sous la main ? <button type="button" class="fs-linkbtn" @onclick="Later">Je le relierai plus tard</button>. Votre contenu est enregistré.</div>
+                <button type="button" class="fs-later fs-back" @onclick="() => { Sync(); step = 1; }"><span class="fs-flip"><Ico Name="arrow-right" Size="15" /></span> Revenir au contenu</button>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="fs-q">
+            <div class="fs-ok"><Ico Name="check" Size="26" /></div>
+            <h1 id="fs-q">C'est en ligne !</h1>
+            <p>Regardez votre écran : il affiche maintenant votre contenu.</p>
+        </div>
+        <div class="fs-tvw">@Tv(false)</div>
+        <div class="fs-after">
+            <button class="btn" @onclick="Finish">Aller à mes écrans</button>
+            <button class="btn ghost" @onclick="Another">Relier un autre écran</button>
+            <button class="btn ghost" @onclick="Invite">Inviter un collègue</button>
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>1 : le contenu ; 2 : relier l'écran (reprise d'un assistant remis à plus tard dont le contenu est prêt).</summary>
+    [Parameter] public int StartStep { get; set; } = 1;
+    /// <summary>Appairage par la page Écrans : code et liste à diffuser. Renvoie null si l'écran est relié, sinon le message à afficher.</summary>
+    [Parameter, EditorRequired] public Func<string, Guid, Task<string?>> Pair { get; set; } = default!;
+    /// <summary>L'assistant se ferme (plus tard ou terminé) : la page Écrans se recharge.</summary>
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private int step = 1;
+    private FirstScreen.Draft draft = FirstScreen.Draft.From(FirstScreen.Templates[0]);
+    private string urlInput = "";
+    private string device = "web";
+    private bool edited, uploading, saving, pairing;
+    private string? error, codeError;
+    private Guid? listId;
+    private ElementReference tvRef, codeRef;
+    private DotNetObjectReference<FirstScreenWizard>? self;
+    private int boundStep;
+    // Textes affichés sur la TV : recopiés depuis draft seulement quand ils changent hors frappe (modèle, photo). La frappe ne met à jour que draft :
+    // un re-rendu (la page Écrans se rafraîchit toutes les 3 s) ne réécrit pas le texte en cours de saisie, le curseur ne saute pas.
+    private (string Kick, string Title, string Sub) shown;
+    private int gen;
+    private void Sync() { shown = (draft.Kick, draft.Title, draft.Sub); gen++; }
+
+    private string PlayerAddress => new Uri(Nav.BaseUri).Authority + "/player";
+
+    protected override void OnInitialized()
+    {
+        var t = Store.Read(d => d.Tenant);
+        draft = FirstScreen.Draft.Read(t.FirstScreenDraft);
+        urlInput = draft.Url ?? "";
+        listId = Store.Read(d => t.FirstScreenListId is { } id && d.Playlists.Any(p => p.Id == id) ? id : (Guid?)null);
+        step = StartStep == 2 && listId != null ? 2 : 1;
+        Sync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (boundStep == step) return;   // chaque étape se branche une fois, à son premier affichage
+        boundStep = step;
+        self ??= DotNetObjectReference.Create(this);
+        try
+        {
+            if (step == 1) await JS.InvokeVoidAsync("LinkiiFirstScreen.tv", tvRef, self);
+            else if (step == 2) await JS.InvokeVoidAsync("LinkiiFirstScreen.code", codeRef, self);
+        }
+        catch (JSDisconnectedException) { }
+    }
+
+    // ---------- La TV ----------
+    private RenderFragment Tv(bool editable) => __builder =>
+    {
+        var ce = editable ? "true" : null;
+        <div class="fs-tv">
+            <div class="fs-scr" style="background:@draft.Bg">
+                @if (draft.Mode == "url")
+                {
+                    <div class="fs-web"><Ico Name="globe" Size="34" /><b>@(string.IsNullOrWhiteSpace(draft.Url) ? "Votre page web" : Short(draft.Url))</b><small>La page s'affichera ici en plein écran.</small></div>
+                }
+                else
+                {
+                    @if (draft.Mode == "photo" && draft.PhotoFile != null) { <div class="fs-photo" style="background-image:url('/media/@draft.PhotoFile')"></div> }
+                    <div class="fs-slide" @key="gen">
+                        <div class="kick" contenteditable="@ce" spellcheck="false" data-f="kick">@(editable ? shown.Kick : draft.Kick)</div>
+                        <div class="title" contenteditable="@ce" spellcheck="false" data-f="title">@(editable ? shown.Title : draft.Title)</div>
+                        <div class="sub" contenteditable="@ce" spellcheck="false" data-f="sub">@(editable ? shown.Sub : draft.Sub)</div>
+                    </div>
+                }
+                @if (editable) { <div class="fs-clock">@DateTime.Now.ToString("HH:mm")</div> }
+                else { <div class="fs-live"><i></i>En direct</div> }
+            </div>
+            <div class="fs-tvfoot"></div>
+        </div>
+        <div class="fs-stand"></div>
+    };
+
+    private static string Short(string url) => url.Replace("https://", "").Replace("http://", "").TrimEnd('/');
+
+    [JSInvokable]
+    public void SetField(string field, string value)
+    {
+        value = value.Length > 200 ? value[..200] : value;
+        switch (field)
+        {
+            case "kick": draft.Kick = value; break;
+            case "title": draft.Title = value; break;
+            case "sub": draft.Sub = value; break;
+        }
+        if (!edited) { edited = true; InvokeAsync(StateHasChanged); }   // la bulle d'aide disparaît dès la première frappe
+    }
+
+    private void Pick(FirstScreen.Template t)
+    {
+        error = null;
+        // les textes déjà modifiés à la main restent ; seuls les textes du modèle précédent sont remplacés
+        var old = FirstScreen.Templates.FirstOrDefault(x => x.Id == draft.Tpl);
+        var keepTexts = edited && old != null && (draft.Kick != old.Kick || draft.Title != old.Title || draft.Sub != old.Sub);
+        draft.Mode = "tpl"; draft.Tpl = t.Id; draft.Bg = t.Bg;
+        if (!keepTexts) { draft.Kick = t.Kick; draft.Title = t.Title; draft.Sub = t.Sub; }
+        Sync();
+    }
+
+    private void PickUrl() { error = null; draft.Mode = "url"; }
+
+    private void ApplyUrl()
+    {
+        var u = urlInput.Trim();
+        if (u.Length > 0 && !u.Contains("://")) u = "https://" + u;
+        if (u.Length > 0 && (!Uri.TryCreate(u, UriKind.Absolute, out var parsed) || parsed.Scheme is not ("http" or "https"))) { error = "Cette adresse n'est pas valable."; return; }
+        error = null;
+        draft.Url = u.Length > 0 ? u : null;
+    }
+
+    private void UrlKey(KeyboardEventArgs e) { if (e.Key == "Enter") ApplyUrl(); }
+
+    private async Task OnPhoto(InputFileChangeEventArgs e)
+    {
+        error = null;
+        var f = e.File;
+        if (!f.ContentType.StartsWith("image/")) { error = "Choisissez une image (JPG, PNG…)."; return; }
+        uploading = true;
+        StateHasChanged();
+        try
+        {
+            var r = await Importer.Import(f, Store.ClientId, null, default, Store.AreaId, null, Store.UserId);
+            if (r.Item?.FileName == null) { error = r.Error ?? "L'image n'a pas pu être importée."; return; }
+            draft.Mode = "photo"; draft.Photo = r.Item.Id; draft.PhotoFile = r.Item.FileName;
+            if (string.IsNullOrWhiteSpace(draft.Title)) { var t = FirstScreen.Templates[0]; draft.Kick = t.Kick; draft.Title = t.Title; draft.Sub = t.Sub; }
+            Sync();
+            edited = true;
+        }
+        finally { uploading = false; }
+    }
+
+    // ---------- Étape 1 -> 2 : le contenu et « Ma première liste » sont enregistrés ----------
+    private async Task Next()
+    {
+        error = null;
+        if (draft.Mode == "url") { ApplyUrl(); if (error != null) return; if (draft.Url == null) { error = "Collez l'adresse de la page à afficher."; return; } }
+        else if (string.IsNullOrWhiteSpace(draft.Title) && string.IsNullOrWhiteSpace(draft.Kick) && string.IsNullOrWhiteSpace(draft.Sub) && draft.Mode != "photo") { error = "Écrivez au moins un texte sur l'écran."; return; }
+        saving = true;
+        await Task.Yield();
+        try
+        {
+            var appId = draft.Mode == "url" ? "webpage" : Compositions.AppId;
+            if (!Svc.IsInstalled(appId))
+            {
+                if (!Store.Read(d => d.Access.IsOrgAdmin)) { error = "Demandez à un administrateur d'activer cette intégration."; return; }
+                Svc.Install(appId);
+            }
+            var values = new Dictionary<string, string>();
+            if (appId == "webpage") { values["url"] = draft.Url!; values["refreshMin"] = "0"; }
+            else
+            {
+                if (Compositions.Clean(FirstScreen.Doc(draft)) is not { } c) { error = "Le contenu n'a pas pu être préparé."; return; }
+                values["doc"] = c.Doc; values["images"] = string.Join(",", c.Images);
+            }
+            // même contenu qu'au passage précédent s'il est du même type : il est mis à jour au lieu d'être recréé
+            var prev = Store.Read(d => d.Tenant.FirstScreenContentId is { } id ? d.Media.FirstOrDefault(m => m.Id == id && m.AppId == appId)?.Id : null);
+            var (item, errors) = Svc.SaveInstance(appId, prev, FirstScreen.ContentName, values);
+            if (item == null) { error = string.Join(" ", errors); return; }
+            var json = draft.Json();
+            listId = Store.Write(d =>
+            {
+                d.Tenant.FirstScreenDraft = json;
+                d.Tenant.FirstScreenContentId = item.Id;
+                return FirstScreen.PutInList(d, item.Id);
+            });
+            codeError = null;
+            step = 2;
+        }
+        finally { saving = false; }
+    }
+
+    // ---------- Étape 2 : le code ----------
+    [JSInvokable]
+    public async Task CodeEntered(string code)
+    {
+        if (pairing || listId == null) return;
+        pairing = true; codeError = null;
+        await InvokeAsync(StateHasChanged);
+        string? err;
+        try { err = await Pair(code, listId.Value); }
+        finally { pairing = false; }
+        if (err == null) { step = 3; }
+        else
+        {
+            codeError = err == "Code inconnu." ? "Ce code ne correspond à aucun écran. Vérifiez les 6 chiffres affichés." : err;
+            await InvokeAsync(StateHasChanged);
+            try { await JS.InvokeVoidAsync("LinkiiFirstScreen.clearCode", codeRef); } catch (JSDisconnectedException) { }
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>La page Écrans a relié l'écran après un paiement (fenêtre de paiement) : l'assistant passe à « C'est en ligne ».</summary>
+    public void Connected() { step = 3; StateHasChanged(); }
+
+    private void Another() { codeError = null; step = 2; }
+
+    private async Task Later()
+    {
+        Store.Write(d => { if (d.Tenant.FirstScreen == null) d.Tenant.FirstScreen = FirstScreen.Later; });
+        await OnClose.InvokeAsync();
+    }
+
+    private async Task Finish() => await OnClose.InvokeAsync();
+
+    private async Task Invite() { await OnClose.InvokeAsync(); Nav.NavigateTo("/organisation"); }
+
+    public ValueTask DisposeAsync() { self?.Dispose(); return ValueTask.CompletedTask; }
+}

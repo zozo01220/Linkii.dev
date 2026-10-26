@@ -199,7 +199,28 @@ else if (Modes.Expert && !noArea)
 else if (!noArea && NothingToShow)
 {
     @* Rien n'est affiché (aucun filtre) : avec le droit d'ajouter un écran dans l'aire, on explique comment en connecter un ; sinon simple constat, sans bouton *@
-    @if (canAdd)
+    @if (canAdd && OtherAll.Count == 0 && firstLater)
+    {
+        @* Assistant du premier écran remis à plus tard : on reprend là où la personne s'est arrêtée *@
+        <div class="fs-resume">
+            <span class="fs-resume-ic"><Ico Name="monitor" Size="26" /></span>
+            <div class="grow">
+                @if (firstReady)
+                {
+                    <h3>Votre contenu est prêt, il ne manque que l'écran</h3>
+                    <p>Allumez l'écran, ouvrez <b>@(new Uri(Nav.BaseUri).Authority)/player</b> et recopiez le code. Ça prend une minute.</p>
+                }
+                else
+                {
+                    <h3>Votre premier écran en deux minutes</h3>
+                    <p>Choisissez ce qu'il affiche, puis reliez-le avec le code qu'il montre.</p>
+                }
+            </div>
+            @if (firstReady) { <button class="btn ghost" @onclick="() => OpenWizard(1)">Modifier le contenu</button> }
+            <button class="btn" @onclick="() => OpenWizard(firstReady ? 2 : 1)">@(firstReady ? "Relier mon écran" : "Commencer")</button>
+        </div>
+    }
+    else if (canAdd)
     {
         <div class="empty @(OtherAll.Count > 0 ? "compact" : "")">
             @if (OtherAll.Count == 0)
@@ -270,6 +291,14 @@ else
     </div>
 }
 
+@* Premier écran d'un nouveau compte : l'assistant couvre la page (masqué pendant une fenêtre de paiement, sans perdre son état) *@
+@if (wizardOpen)
+{
+    <div style="@(screenPay != null ? "display:none" : null)">
+        <FirstScreenWizard @ref="wizard" StartStep="wizardStart" Pair="PairFromWizard" OnClose="CloseWizard" />
+    </div>
+}
+
 @* Connecter un écran : un tiroir qui vient du bas (comme « Importer » de la médiathèque) ; la page reste visible derrière. *@
 @if (screenPay != null)
 {
@@ -284,7 +313,7 @@ else
             <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => showPair = false"><Ico Name="x" Size="20" /></button>
         </div>
         <div class="imp-body">
-            <p class="hint" style="margin-top:0">Allumez l'écran, puis saisissez le code à 6 chiffres affiché. <a href="/player/" target="_blank">Ouvrir un écran de test</a></p>
+            <p class="hint" style="margin-top:0">Allumez l'écran, puis saisissez le code à 6 chiffres affiché. <a href="/player/" target="_blank">Ouvrir un écran de test</a> · <a href="/download/windows" download>Télécharger le player Windows</a></p>
             <div class="dw pair-grid">
                 <div class="dw-field wide"><label for="pair-code">Code</label><input id="pair-code" class="pair-code" @bind="code" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="off" /></div>
                 <div class="dw-field wide"><label for="pair-name">Nom de l'écran</label><input id="pair-name" @bind="name" placeholder="Ex. Accueil, salle de pause" /></div>
@@ -582,6 +611,32 @@ else if (wallEdit is { } wid)
     private Guid? playlistId;
     private string? error;
     private bool showPair;
+
+    // ---------- Premier écran (assistant, voir FirstScreen) ----------
+    private bool wizardOpen, wizardPairing, firstLater, firstReady;
+    private int wizardStart = 1;
+    private FirstScreenWizard? wizard;
+
+    private void LoadFirstScreen() => (firstLater, firstReady) = Store.Read(d => (d.Tenant.FirstScreen == FirstScreen.Later && !FirstScreen.HasScreen(d),
+        d.Tenant.FirstScreenListId is { } id && d.Playlists.Any(p => p.Id == id)));
+
+    private void OpenWizard(int step) { wizardStart = step; wizardOpen = true; }
+
+    private void CloseWizard() { wizardOpen = false; wizardPairing = false; Reload(); }
+
+    /// <summary>Appairage demandé par l'assistant : mêmes règles que le tiroir (code vérifié, facturation, publication). Null si l'écran est relié.</summary>
+    private async Task<string?> PairFromWizard(string c, Guid listId)
+    {
+        OpenPair();   // valeurs par défaut du tiroir (zone, format, plein écran), sans l'afficher
+        showPair = false;
+        code = c; name = "Mon écran"; playlistId = listId;
+        wizardPairing = true;
+        await Pair();
+        if (screenPay != null) return "Validez le paiement de l'écran pour le relier.";   // la fenêtre de paiement s'affiche ; PairNow préviendra l'assistant
+        wizardPairing = false;
+        return error;
+    }
+
     private Timer? timer;
     private Guid? menuFor, editing;
     private bool cleanQuery;   // paramètre « edit » à retirer de l'adresse
@@ -597,6 +652,7 @@ else if (wallEdit is { } wid)
         tenant = Store.Read(d => d.Tenant);
         tab = Store.Read(d => d.Users.FirstOrDefault(u => u.Id == d.Access.UserId)?.LibraryTabs.GetValueOrDefault("screens")) ?? LibraryTab.Mine;   // onglet retenu (corrigé par LoadTabs selon la personne)
         Reload();
+        wizardOpen = canAdd && !noArea && Store.Read(FirstScreen.ShouldOpen);   // nouveau compte sans écran : l'assistant du premier écran
         areaFilter = Store.Read(d => d.Users.FirstOrDefault(u => u.Id == d.Access.UserId)?.LibraryTabs.GetValueOrDefault("screens-area")) == "one" ? area?.Id.ToString() ?? "" : "";   // filtre « Aire » retenu (par défaut : toutes)
         // « Ouvrir cette aire » depuis un écran d'une autre aire : après le changement d'aire, l'écran choisi s'ouvre directement en édition
         var qs = System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query);
@@ -2283,6 +2339,7 @@ else if (wallEdit is { } wid)
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
         LoadGroups();
         treeData = TreeData();
+        LoadFirstScreen();
     }
 
     private List<Area> pairAreas = new();
@@ -2449,6 +2506,7 @@ else if (wallEdit is { } wid)
             s.Windowed = !full;
             s.Token = Guid.NewGuid().ToString("N");
             s.PairingCode = null;
+            d.Tenant.FirstScreen = FirstScreen.Done;   // un écran relié : l'assistant du premier écran ne revient plus
             return s.Id;
         });
         if (id == null) { error = "Code inconnu."; return false; }
@@ -2456,6 +2514,7 @@ else if (wallEdit is { } wid)
         showPair = false;
         Toast.Ok($"Écran « {(string.IsNullOrWhiteSpace(screenName) ? "Écran " + code : screenName.Trim())} » connecté.");
         if (tab == LibraryTab.Shared) tab = LibraryTab.Mine;   // l'écran connecté est le sien
+        if (wizardPairing) { wizardPairing = false; wizard?.Connected(); }   // relié depuis l'assistant (après un paiement) : « C'est en ligne »
         Reload();
         return true;
     }

@@ -367,6 +367,13 @@ public class Tenant
     /// <summary>Code d'essai utilisé à l'inscription (voir <see cref="TrialCode"/>).</summary>
     public string? TrialCode { get; set; }
 
+    /// <summary>Assistant du premier écran (voir <see cref="Linkii.Poc.FirstScreen"/>) : null = à proposer, « later » = remis à plus tard, « done » = un écran a été relié.</summary>
+    public string? FirstScreen { get; set; }
+    /// <summary>Étape 1 de l'assistant (JSON de FirstScreen.Draft), contenu créé et « Ma première liste » : repris si la personne revient.</summary>
+    public string? FirstScreenDraft { get; set; }
+    public Guid? FirstScreenContentId { get; set; }
+    public Guid? FirstScreenListId { get; set; }
+
     // Abonnement en libre-service (voir Billing)
     /// <summary>Licence qui remplacera l'actuelle à la prochaine échéance (passage de Pro à Essential).</summary>
     public string? PendingPlan { get; set; }
@@ -1331,4 +1338,5 @@ public static class AppPaths
     public static string ThumbDir = "thumbs";
     public static string PdfDir = "pdf";   // PDF d'origine de l'app Document PDF (jamais servis)
     public static string CaptureDir = "captures";   // dernier aperçu du direct de chaque écran
+    public static string DownloadDir = "downloads";   // installeur du player Windows (/download/windows)
 }

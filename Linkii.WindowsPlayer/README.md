@@ -16,8 +16,11 @@ et arrive sur le PC à chaque connexion, sans publication (gardé localement pou
 
 Test sur un PC : dans le tiroir « Connecter un écran », couper **Plein écran** ; tant qu'il n'est pas appairé, le player n'est pas au premier plan (Alt+Tab vers le navigateur pour saisir le code) et passe en fenêtre dès l'appairage, sans relance.
 
-Adresse du serveur : intégrée (`http://localhost:5080` pour l'instant, constante `InstanceStore.DefaultServer` et propriété `SERVERURL` de l'installeur),
-à changer au passage sur le serveur de production.
+Adresse du serveur : intégrée, le serveur de production `https://linkii.duckdns.org` (constante `InstanceStore.DefaultServer` et propriété `SERVERURL` de l'installeur).
+Pour tester contre un serveur local : `msiexec /i LinkiiPlayer-<version>-x64.msi SERVERURL=http://localhost:5080`, ou la valeur `ServerUrl` de `HKCU\Software\Linkii\Player`.
+
+Téléchargement : `build-installer.ps1` copie l'installeur dans `Linkii.Poc/downloads/` ; le back-office le propose à l'adresse `/download/windows`
+(sur le serveur, déposer le `.msi` dans le dossier `downloads` des données, à côté de `data.json`).
 
 ## Plusieurs écrans sur un même PC
 

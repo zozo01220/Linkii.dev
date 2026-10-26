@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Premier écran en 3 étapes</title>
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--brand-tint:#EBEDF0;--signal:#3B82C4;--signal-tint:#EAF2FA;--ok:#1E8E5A;--ok-bg:#E1F0E8;--ok-ink:#155A38;--warn:#B7791F;--warn-bg:#FBF0DC;--warn-ink:#7A4F12;--radius:4px}
+*{box-sizing:border-box}html,body{margin:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
+h1,h2,h3,p{margin:0;font-weight:500}p{font-weight:400}b{font-weight:500}button,input{font:inherit;color:inherit}
+svg{display:block;flex:none}
+.mono{font-family:"JetBrains Mono",Consolas,monospace;font-weight:500}
+
+/* Barre de la maquette */
+.mock{background:#fff;border-bottom:1px dashed var(--line-2);padding:10px 24px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:60}
+.mock>span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:var(--radius);overflow:hidden;flex-wrap:wrap}
+.seg button{border:0;background:#fff;padding:5px 12px;cursor:pointer;font-size:13px;color:var(--muted);border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button.on{background:var(--ink);color:#fff}
+.view{display:none}.view.on{display:block}
+.note{max-width:980px;margin:18px auto 0;background:#fff;border:1px dashed var(--line-2);border-radius:8px;padding:10px 14px;color:var(--muted);font-size:13.5px}
+.note b{color:var(--ink)}
+
+/* Boutons */
+.btn{font-weight:500;cursor:pointer;border:1px solid var(--ink);border-radius:var(--radius);padding:10px 18px;background:var(--ink);color:#fff;display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.btn.ghost{background:#fff;color:var(--ink);border-color:var(--line-2)}
+.btn.link{background:none;border:0;color:var(--muted);padding:10px 4px;font-weight:400}
+.btn.link:hover{color:var(--ink)}
+.btn[disabled]{opacity:.4;cursor:default}
+
+/* Assistant plein écran */
+.wiz{min-height:calc(100vh - 49px);display:flex;flex-direction:column}
+.wtop{display:flex;align-items:center;gap:20px;padding:18px 32px;background:#fff;border-bottom:1px solid var(--line)}
+.wm{font-size:26px;font-weight:500;letter-spacing:-.03em}
+.steps{display:flex;gap:6px;flex:1;justify-content:center;flex-wrap:wrap}
+.st{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:14px;padding:4px 10px}
+.st i{font-style:normal;width:22px;height:22px;border-radius:50%;border:1px solid var(--line-2);display:inline-flex;align-items:center;justify-content:center;font-size:12px}
+.st.on{color:var(--ink);font-weight:500}.st.on i{border-color:var(--ink);background:var(--ink);color:#fff}
+.st.done i{border-color:var(--ok);background:var(--ok);color:#fff}
+.sep{width:28px;height:1px;background:var(--line-2);align-self:center}
+.wbody{flex:1;padding:44px 32px 30px;max-width:1080px;width:100%;margin:0 auto}
+.wbody h1{font-size:28px;line-height:1.2;text-align:center}
+.wbody .lead{color:var(--muted);text-align:center;margin:6px auto 30px;max-width:620px}
+.wfoot{display:flex;align-items:center;gap:12px;padding:16px 32px;background:#fff;border-top:1px solid var(--line)}
+.grow{flex:1}
+
+/* Étape 1 : choix */
+.choices{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.choice{background:#fff;border:1px solid var(--line);border-radius:10px;padding:22px;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:10px;transition:border-color .15s}
+.choice:hover{border-color:var(--line-2)}
+.choice.on{border-color:var(--signal);box-shadow:0 0 0 1px var(--signal)}
+.choice .ic{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff}
+.choice h3{font-size:17px}.choice p{color:var(--muted);font-size:14px}
+.choice .tag{font-size:12px;color:var(--ok-ink);background:var(--ok-bg);border-radius:var(--radius);padding:1px 8px;align-self:flex-start}
+.sub{margin-top:26px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:18px 20px}
+.sub h3{font-size:15px;margin-bottom:12px;display:flex;gap:10px;align-items:center}
+.sub h3 span{color:var(--muted);font-weight:400;font-size:13px}
+.tpls{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.tpl{border:1px solid var(--line);border-radius:8px;overflow:hidden;cursor:pointer;background:#fff;padding:0;text-align:left}
+.tpl.on{border-color:var(--signal);box-shadow:0 0 0 1px var(--signal)}
+.tpl .th{aspect-ratio:16/9;display:flex;flex-direction:column;justify-content:center;padding:10px 12px;color:#fff;gap:3px}
+.tpl .th b{font-size:14px}.tpl .th small{font-size:10px;opacity:.8}
+.tpl .nm{padding:7px 10px;font-size:13px;display:flex;justify-content:space-between}
+.tpl .nm span{color:var(--muted);font-size:12px}
+.drop{border:1.5px dashed var(--line-2);border-radius:8px;padding:26px;text-align:center;color:var(--muted)}
+.drop b{color:var(--ink)}
+.field{display:flex;gap:10px}
+.field input{flex:1;border:1px solid var(--line-2);border-radius:var(--radius);padding:10px 12px;background:#fff}
+.hint{font-size:13px;color:var(--muted);margin-top:8px}
+
+/* Étape 2 : aperçu */
+.prev{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:26px;align-items:start}
+.tv{background:#1B2532;border-radius:10px;padding:12px 12px 0}
+.tvscreen{aspect-ratio:16/9;border-radius:3px;overflow:hidden;position:relative;background:#0B1F3A;color:#fff}
+.tvfoot{height:26px;display:flex;justify-content:center;align-items:center}
+.tvfoot i{width:60px;height:4px;border-radius:2px;background:#2E3B4C}
+.stand{width:120px;height:10px;background:#c9d1db;margin:0 auto;border-radius:0 0 6px 6px}
+.slide{position:absolute;inset:0;padding:6% 7%;display:flex;flex-direction:column;justify-content:space-between;opacity:0;transition:opacity .6s}
+.slide.on{opacity:1}
+.slide .big{font-size:clamp(20px,3.2vw,40px);line-height:1.1}
+.slide .small{opacity:.8;font-size:clamp(11px,1.2vw,15px)}
+.clock{position:absolute;right:4%;top:5%;font-size:clamp(12px,1.4vw,18px);opacity:.85}
+.prog{position:absolute;left:0;bottom:0;height:3px;background:var(--signal);width:0;animation:prog 4s linear infinite}
+@keyframes prog{to{width:100%}}
+.side{display:flex;flex-direction:column;gap:14px}
+.box{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+.box h3{font-size:15px;margin-bottom:8px}
+.it{display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--line);font-size:14px}
+.it:first-of-type{border-top:0}
+.it .sw{width:46px;height:26px;border-radius:3px;flex:none}
+.it .du{margin-left:auto;color:var(--muted);font-size:13px}
+.ok-line{display:flex;gap:10px;align-items:flex-start;background:var(--ok-bg);color:var(--ok-ink);border-radius:8px;padding:12px 14px;font-size:14px}
+
+/* Étape 3 : connecter */
+.dev{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px}
+.devc{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:8px}
+.devc.on{border-color:var(--signal);box-shadow:0 0 0 1px var(--signal)}
+.devc h3{font-size:15px}.devc p{font-size:13px;color:var(--muted)}
+.devc .fast{font-size:11.5px;color:var(--ok-ink);background:var(--ok-bg);border-radius:var(--radius);padding:0 7px;align-self:flex-start}
+.pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px}
+.howto{counter-reset:s;display:flex;flex-direction:column;gap:14px}
+.howto li{list-style:none;display:flex;gap:12px;align-items:flex-start}
+.howto li::before{counter-increment:s;content:counter(s);width:24px;height:24px;flex:none;border-radius:50%;background:var(--brand-tint);display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:500}
+.howto ul{padding:0;margin:0}
+.url{display:inline-flex;gap:8px;align-items:center;background:var(--bg);border:1px solid var(--line);border-radius:var(--radius);padding:4px 10px;font-size:14px}
+.code{display:flex;gap:8px;justify-content:center;margin:14px 0 6px}
+.code input{width:46px;height:56px;text-align:center;font-size:24px;border:1px solid var(--line-2);border-radius:3px;font-family:"JetBrains Mono",Consolas,monospace;font-weight:500;background:#fff}
+.code input:focus{outline:none;border-color:var(--signal);box-shadow:0 0 0 2px var(--signal-tint)}
+.code .dash{align-self:center;color:var(--muted)}
+.or{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px;margin:14px 0}
+.or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}
+.wait{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:14px;justify-content:center;margin-top:8px}
+.spin{width:14px;height:14px;border:2px solid var(--line-2);border-top-color:var(--signal);border-radius:50%;animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* Succès */
+.done-wrap{text-align:center;max-width:640px;margin:0 auto}
+.done-ic{width:64px;height:64px;border-radius:50%;background:var(--ok-bg);color:var(--ok);display:flex;align-items:center;justify-content:center;margin:0 auto 18px}
+.next{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:28px;text-align:left}
+.next .box p{font-size:13px;color:var(--muted);margin-top:2px}
+
+/* Page Écrans */
+.shell{display:flex;min-height:calc(100vh - 49px)}
+.sidebar{width:230px;background:#fff;border-right:1px solid var(--line);padding:22px 14px;flex:none}
+.sidebar .wm{padding:0 10px 26px}
+.nav{display:block;width:100%;text-align:left;border:0;background:none;padding:9px 12px;color:var(--muted);font-size:15px}
+.nav.active{background:var(--brand-tint);color:var(--ink);font-weight:500;box-shadow:inset 2px 0 0 var(--ink);border-radius:0 4px 4px 0}
+main{flex:1;padding:32px 44px 90px;min-width:0}
+.head{display:flex;align-items:flex-start;gap:16px;margin-bottom:22px;flex-wrap:wrap}
+.head h1{font-size:28px;line-height:1.2}.head p{color:var(--muted);margin-top:2px}
+.check{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin-bottom:24px}
+.check .hd{display:flex;align-items:center;gap:12px}
+.check .hd h3{font-size:16px}
+.bar{flex:0 0 160px;height:6px;background:var(--line);border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--ok);width:66%}
+.tasks{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px}
+.task{border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:flex;gap:12px;align-items:flex-start}
+.task .cb{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--line-2);flex:none;display:flex;align-items:center;justify-content:center}
+.task.ok .cb{background:var(--ok);border-color:var(--ok);color:#fff}
+.task.ok b{color:var(--muted);text-decoration:line-through;font-weight:400}
+.task p{font-size:13px;color:var(--muted)}
+.task.cur{border-color:var(--signal);background:var(--signal-tint)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px}
+.card{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.card .scene{aspect-ratio:16/9;position:relative;background:#0B1F3A;color:#fff;padding:14px 16px;display:flex;flex-direction:column;justify-content:flex-end}
+.card .scene b{font-size:18px}
+.badge{display:inline-flex;align-items:center;gap:6px;border-radius:var(--radius);padding:2px 9px;font-size:12px;font-weight:500}
+.badge.demo{background:var(--signal-tint);color:#1F5A92}
+.badge.ok{background:var(--ok-bg);color:var(--ok-ink)}
+.card .scene .badge{position:absolute;top:10px;left:10px}
+.cbody{padding:12px 14px}
+.cbody .n{font-weight:500;font-size:16px}
+.cbody .m{color:var(--muted);font-size:13px}
+.cbody .act{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.cbody .act .btn{padding:7px 12px;font-size:14px}
+.ghostcard{border:1.5px dashed var(--line-2);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--muted);min-height:250px;text-align:center;padding:20px;cursor:pointer;background:transparent}
+.ghostcard b{color:var(--ink)}
+
+/* Player web (TV) */
+.player{min-height:calc(100vh - 49px);background:#0B1F3A;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;padding:40px 16px;text-align:center}
+.player .wm{font-size:44px}
+.player .wm em{font-style:normal;color:var(--signal)}
+.pcode{display:flex;gap:10px}
+.pcode span{width:64px;height:80px;border:1px solid #23395A;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:40px}
+.pcode .d{border:0;width:auto;color:#9AAABD}
+.player p{color:#9AAABD;max-width:560px}
+.player .qr{display:flex;gap:18px;align-items:center;border:1px solid #23395A;border-radius:8px;padding:14px 18px;text-align:left}
+.player .qr p{color:#9AAABD;font-size:14px}
+.player .qr b{color:#fff}
+
+@media(max-width:900px){
+  .choices,.dev,.tpls,.next,.tasks{grid-template-columns:1fr 1fr}
+  .prev,.pair{grid-template-columns:1fr}
+  .sidebar{display:none}main{padding:22px 16px}
+  .wbody{padding:28px 16px}.wtop,.wfoot{padding:14px 16px}
+  .steps .lbl{display:none}
+}
+@media(max-width:560px){.choices,.dev,.tpls,.next,.tasks{grid-template-columns:1fr}.code input{width:38px;height:48px}}
+</style>
+</head>
+<body>
+
+<div class="mock">
+  <span>Maquette</span>
+  <div class="seg" id="seg">
+    <button data-v="v1" class="on">1 · Contenu</button>
+    <button data-v="v2">2 · Aperçu</button>
+    <button data-v="v3">3 · Connecter</button>
+    <button data-v="v4">Terminé</button>
+    <button data-v="v5">Page Écrans (« plus tard »)</button>
+    <button data-v="v6">Côté TV : linkii.duckdns.org/player</button>
+  </div>
+</div>
+
+<!-- Icônes -->
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></symbol>
+  <symbol id="i-img" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m5 12 5 5L20 7"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M11 6l-6 6 6 6"/></symbol>
+  <symbol id="i-tv" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8"/></symbol>
+  <symbol id="i-pc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="1"/><path d="M2 20h20"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="8" width="16" height="8" rx="2"/><circle cx="8" cy="12" r="1"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-qr" viewBox="0 0 29 29"><path fill="currentColor" d="M0 0h7v7H0zM2 2v3h3V2zM22 0h7v7h-7zm2 2v3h3V2zM0 22h7v7H0zm2 2v3h3v-3zM9 0h2v2H9zm4 0h2v4h-2zm4 2h2v2h-2zM9 4h2v4H9zm4 4h4v2h-4zm6-2h2v4h-2zM0 9h4v2H0zm6 0h2v4H6zm4 2h2v2h-2zm4 0h4v2h-4zm6 0h3v2h-3zm5-2h4v2h-4zM0 13h2v4H0zm4 2h4v2H4zm6 0h2v4h-2zm4-2h2v2h-2zm2 2h4v2h-4zm6-2h2v4h-2zm4 0h3v2h-3zM9 21h4v2H9zm6-2h2v4h-2zm4 2h4v2h-4zm6-2h4v2h-4zM9 25h2v4H9zm4 2h4v2h-4zm6-2h2v2h-2zm4 0h2v4h-2zm4 2h2v2h-2z"/></symbol>
+</svg>
+
+<!-- ============ ÉTAPE 1 ============ -->
+<section class="view on" id="v1">
+ <div class="wiz">
+  <div class="wtop">
+    <div class="wm">linkii</div>
+    <div class="steps">
+      <div class="st on"><i>1</i><span class="lbl">Votre contenu</span></div><div class="sep"></div>
+      <div class="st"><i>2</i><span class="lbl">Aperçu</span></div><div class="sep"></div>
+      <div class="st"><i>3</i><span class="lbl">Votre écran</span></div>
+    </div>
+    <button class="btn link" data-go="v5">Je ferai ça plus tard</button>
+  </div>
+  <div class="wbody">
+    <h1>Bienvenue ! Qu'allez-vous afficher en premier ?</h1>
+    <p class="lead">Choisissez un point de départ, vous pourrez tout modifier ensuite. Votre premier écran tourne dans deux minutes.</p>
+
+    <div class="choices" id="choices">
+      <button class="choice on" data-sub="s-tpl">
+        <div class="ic" style="background:#4F6BED"><svg width="22" height="22"><use href="#i-grid"/></svg></div>
+        <h3>Partir d'un modèle</h3>
+        <p>Accueil, menu, annonces, événements… prêt à afficher, il suffit de changer le texte.</p>
+        <span class="tag">Le plus rapide</span>
+      </button>
+      <button class="choice" data-sub="s-up">
+        <div class="ic" style="background:#F0A92E"><svg width="22" height="22"><use href="#i-img"/></svg></div>
+        <h3>Mes images ou vidéos</h3>
+        <p>Glissez vos fichiers : ils défilent en diaporama, 10 secondes chacun.</p>
+      </button>
+      <button class="choice" data-sub="s-url">
+        <div class="ic" style="background:#3A9399"><svg width="22" height="22"><use href="#i-globe"/></svg></div>
+        <h3>Une page web ou une présentation</h3>
+        <p>Collez un lien : site, Google Slides, Canva, PowerPoint en ligne…</p>
+      </button>
+    </div>
+
+    <div class="sub" id="s-tpl">
+      <h3>Choisissez un modèle <span>· 4 suggestions parmi 26</span></h3>
+      <div class="tpls" id="tpls">
+        <button class="tpl on"><div class="th" style="background:#0B1F3A"><b>Bienvenue</b><small>Accueil · horloge · météo</small></div><div class="nm">Accueil <span>Recommandé</span></div></button>
+        <button class="tpl"><div class="th" style="background:#2FA66A"><b>Au menu aujourd'hui</b><small>Plat du jour · prix</small></div><div class="nm">Menu du jour</div></button>
+        <button class="tpl"><div class="th" style="background:#7B5CC4"><b>Cette semaine</b><small>3 événements à venir</small></div><div class="nm">Événements</div></button>
+        <button class="tpl"><div class="th" style="background:#F2541B"><b>-20 % ce week-end</b><small>Offre · QR code</small></div><div class="nm">Promotion</div></button>
+      </div>
+      <p class="hint">Voir tous les modèles →</p>
+    </div>
+    <div class="sub" id="s-up" hidden>
+      <div class="drop"><b>Glissez vos images ou vidéos ici</b><br>ou <u>parcourez votre ordinateur</u> · <u>importez depuis OneDrive, Google Drive…</u></div>
+    </div>
+    <div class="sub" id="s-url" hidden>
+      <div class="field"><input placeholder="https://… (site, Google Slides, Canva, PowerPoint en ligne)"></div>
+      <p class="hint">Linkii reconnaît le lien et choisit le bon affichage.</p>
+    </div>
+  </div>
+  <div class="wfoot">
+    <span class="grow" style="color:var(--muted);font-size:13px">Étape 1 sur 3</span>
+    <button class="btn" data-go="v2">Voir l'aperçu <svg width="16" height="16"><use href="#i-arrow"/></svg></button>
+  </div>
+ </div>
+</section>
+
+<!-- ============ ÉTAPE 2 ============ -->
+<section class="view" id="v2">
+ <div class="wiz">
+  <div class="wtop">
+    <div class="wm">linkii</div>
+    <div class="steps">
+      <div class="st done"><i><svg width="12" height="12"><use href="#i-check"/></svg></i><span class="lbl">Votre contenu</span></div><div class="sep"></div>
+      <div class="st on"><i>2</i><span class="lbl">Aperçu</span></div><div class="sep"></div>
+      <div class="st"><i>3</i><span class="lbl">Votre écran</span></div>
+    </div>
+    <button class="btn link" data-go="v5">Je ferai ça plus tard</button>
+  </div>
+  <div class="wbody">
+    <h1>Voici ce que verra votre écran</h1>
+    <p class="lead">L'aperçu tourne en direct. Modifiez un texte ou ajoutez une image, l'écran suit.</p>
+    <div class="prev">
+      <div>
+        <div class="tv"><div class="tvscreen" id="tvs">
+          <div class="clock mono" id="clk">09:41</div>
+          <div class="slide on" style="background:#0B1F3A"><div class="small">Lundi 26 octobre</div><div><div class="big">Bienvenue chez<br>Atelier Martin</div><div class="small" style="margin-top:8px">Accueil au rez-de-chaussée · 14 °C, ensoleillé</div></div></div>
+          <div class="slide" style="background:#3B82C4"><div class="small">À savoir</div><div><div class="big">Réunion d'équipe<br>jeudi à 10 h</div><div class="small" style="margin-top:8px">Salle Léman</div></div></div>
+          <div class="slide" style="background:#2FA66A"><div class="small">Wi-Fi invités</div><div><div class="big">AtelierMartin-Invités</div><div class="small" style="margin-top:8px">Demandez le mot de passe à l'accueil</div></div></div>
+          <div class="prog"></div>
+        </div><div class="tvfoot"><i></i></div></div>
+        <div class="stand"></div>
+      </div>
+      <div class="side">
+        <div class="box">
+          <h3>Ma première liste · 3 diapositives</h3>
+          <div class="it"><span class="sw" style="background:#0B1F3A"></span>Bienvenue<span class="du">10 s</span></div>
+          <div class="it"><span class="sw" style="background:#3B82C4"></span>Réunion d'équipe<span class="du">10 s</span></div>
+          <div class="it"><span class="sw" style="background:#2FA66A"></span>Wi-Fi invités<span class="du">10 s</span></div>
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <button class="btn ghost" style="padding:7px 12px;font-size:14px">Modifier les textes</button>
+            <button class="btn ghost" style="padding:7px 12px;font-size:14px"><svg width="14" height="14"><use href="#i-plus"/></svg>Ajouter</button>
+          </div>
+        </div>
+        <div class="ok-line"><svg width="18" height="18"><use href="#i-check"/></svg><span>Enregistrée dans <b>Listes de lecture</b>. Il ne reste qu'à la mettre sur un écran.</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="wfoot">
+    <button class="btn link" data-go="v1"><svg width="16" height="16"><use href="#i-back"/></svg>Retour</button>
+    <span class="grow" style="color:var(--muted);font-size:13px;text-align:center">Étape 2 sur 3</span>
+    <button class="btn" data-go="v3">Mettre sur un écran <svg width="16" height="16"><use href="#i-arrow"/></svg></button>
+  </div>
+ </div>
+</section>
+
+<!-- ============ ÉTAPE 3 ============ -->
+<section class="view" id="v3">
+ <div class="wiz">
+  <div class="wtop">
+    <div class="wm">linkii</div>
+    <div class="steps">
+      <div class="st done"><i><svg width="12" height="12"><use href="#i-check"/></svg></i><span class="lbl">Votre contenu</span></div><div class="sep"></div>
+      <div class="st done"><i><svg width="12" height="12"><use href="#i-check"/></svg></i><span class="lbl">Aperçu</span></div><div class="sep"></div>
+      <div class="st on"><i>3</i><span class="lbl">Votre écran</span></div>
+    </div>
+    <button class="btn link" data-go="v5">Je ferai ça plus tard</button>
+  </div>
+  <div class="wbody">
+    <h1>Sur quel appareil allez-vous l'afficher ?</h1>
+    <p class="lead">Ouvrez Linkii sur l'écran : il affiche un code. Saisissez-le ici, c'est tout.</p>
+    <div class="dev" id="dev">
+      <button class="devc on" data-d="web"><svg width="26" height="26"><use href="#i-globe"/></svg><h3>Navigateur</h3><p>TV connectée, PC, tablette : rien à installer.</p><span class="fast">Le plus rapide</span></button>
+      <button class="devc" data-d="android"><svg width="26" height="26"><use href="#i-tv"/></svg><h3>TV Android / Google TV</h3><p>App Linkii depuis le Play Store.</p></button>
+      <button class="devc" data-d="win"><svg width="26" height="26"><use href="#i-pc"/></svg><h3>PC Windows</h3><p>Player plein écran, démarre avec le PC.</p></button>
+      <button class="devc" data-d="box"><svg width="26" height="26"><use href="#i-box"/></svg><h3>Boîtier / clé</h3><p>Fire TV, boîtier Android…</p></button>
+    </div>
+    <div class="pair">
+      <div class="box">
+        <h3 id="howT">Sur l'écran</h3>
+        <ul class="howto" id="how">
+          <li><div>Ouvrez le navigateur de l'écran et allez sur<br><span class="url mono">linkii.duckdns.org/player <svg width="13" height="13"><use href="#i-copy"/></svg></span></div></li>
+          <li><div>Un code à 6 caractères s'affiche en grand.</div></li>
+          <li><div>Saisissez-le à droite, ou scannez le QR code de l'écran avec votre téléphone.</div></li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>Code affiché sur l'écran</h3>
+        <div class="code">
+          <input maxlength="1" value="K"><input maxlength="1" value="7"><input maxlength="1" value="P"><span class="dash">–</span><input maxlength="1"><input maxlength="1"><input maxlength="1">
+        </div>
+        <div class="wait"><span class="spin"></span>On cherche l'écran dès que le code est complet…</div>
+        <div class="or">ou</div>
+        <p style="font-size:14px;color:var(--muted);text-align:center">Scannez le QR code de l'écran avec votre téléphone connecté à Linkii : il se relie tout seul.</p>
+        <div style="margin-top:14px;display:flex;gap:10px;align-items:center;font-size:14px">
+          <span style="color:var(--muted)">Nom de l'écran</span>
+          <input value="Écran de l'accueil" style="flex:1;border:1px solid var(--line-2);border-radius:var(--radius);padding:7px 10px">
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="wfoot">
+    <button class="btn link" data-go="v2"><svg width="16" height="16"><use href="#i-back"/></svg>Retour</button>
+    <span class="grow" style="color:var(--muted);font-size:13px;text-align:center">Étape 3 sur 3</span>
+    <button class="btn" data-go="v4">Connecter et diffuser</button>
+  </div>
+ </div>
+</section>
+
+<!-- ============ TERMINÉ ============ -->
+<section class="view" id="v4">
+ <div class="wiz">
+  <div class="wtop"><div class="wm">linkii</div><div class="grow"></div></div>
+  <div class="wbody">
+   <div class="done-wrap">
+    <div class="done-ic"><svg width="30" height="30"><use href="#i-check"/></svg></div>
+    <h1>« Écran de l'accueil » diffuse votre liste</h1>
+    <p class="lead" style="margin-bottom:0">Regardez l'écran : « Ma première liste » s'affiche déjà. Chaque modification que vous publiez arrive en quelques secondes.</p>
+   </div>
+   <div class="next">
+     <div class="box"><h3>Ajouter vos contenus</h3><p>Images, vidéos, PDF, présentations dans la médiathèque.</p></div>
+     <div class="box"><h3>Connecter un autre écran</h3><p>Même code, même liste ou une autre.</p></div>
+     <div class="box"><h3>Inviter un collègue</h3><p>Pour qu'il mette à jour l'écran à votre place.</p></div>
+   </div>
+   <div style="text-align:center;margin-top:28px"><button class="btn" data-go="v5">Aller à mes écrans</button></div>
+  </div>
+ </div>
+</section>
+
+<!-- ============ PAGE ÉCRANS (assistant quitté) ============ -->
+<section class="view" id="v5">
+ <div class="shell">
+  <aside class="sidebar">
+    <div class="wm">linkii</div>
+    <button class="nav active">Écrans</button>
+    <button class="nav">Listes de lecture</button>
+    <button class="nav">Médiathèque</button>
+    <button class="nav" style="margin-top:20px">Membres</button>
+    <button class="nav">Réglages</button>
+  </aside>
+  <main>
+    <div class="head">
+      <div class="grow"><h1>Vos écrans</h1><p>Choisissez ce que diffuse chaque écran, puis publiez.</p></div>
+      <button class="btn ghost" data-go="v3"><svg width="16" height="16"><use href="#i-plus"/></svg>Connecter un écran</button>
+    </div>
+
+    <div class="check">
+      <div class="hd">
+        <h3 class="grow">Votre premier écran en 3 étapes</h3>
+        <span style="font-size:13px;color:var(--muted)">2 sur 3</span>
+        <div class="bar"><i></i></div>
+        <button class="btn link" style="padding:4px" title="Masquer"><svg width="16" height="16"><use href="#i-x"/></svg></button>
+      </div>
+      <div class="tasks">
+        <div class="task ok"><span class="cb"><svg width="12" height="12"><use href="#i-check"/></svg></span><div><b>Choisir un contenu</b><p>Ma première liste · modèle Accueil</p></div></div>
+        <div class="task ok"><span class="cb"><svg width="12" height="12"><use href="#i-check"/></svg></span><div><b>Voir l'aperçu</b><p>Sur l'écran de démonstration</p></div></div>
+        <div class="task cur"><span class="cb"></span><div><b>Connecter un vrai écran</b><p>Ouvrez linkii.duckdns.org/player sur l'écran et saisissez le code.</p><button class="btn" style="margin-top:8px;padding:6px 12px;font-size:14px" data-go="v3">Connecter maintenant</button></div></div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="scene"><span class="badge demo">Démonstration</span><span style="font-size:12px;opacity:.75">Ma première liste</span><b>Bienvenue chez Atelier Martin</b></div>
+        <div class="cbody">
+          <div class="n">Écran de démonstration</div>
+          <div class="m">Virtuel · tourne dans votre navigateur</div>
+          <div class="act">
+            <button class="btn ghost">Ouvrir l'aperçu</button>
+            <button class="btn ghost" data-go="v3">Remplacer par un vrai écran</button>
+          </div>
+        </div>
+      </div>
+      <button class="ghostcard" data-go="v3"><svg width="28" height="28"><use href="#i-tv"/></svg><b>Connecter un écran</b><span style="font-size:14px">TV, PC, boîtier ou simple navigateur</span></button>
+    </div>
+  </main>
+ </div>
+</section>
+
+<!-- ============ CÔTÉ TV ============ -->
+<section class="view" id="v6">
+ <div class="player">
+  <div class="wm">linkii</div>
+  <div>
+    <p style="margin:0 auto 14px">Saisissez ce code dans Linkii › Écrans › Connecter un écran</p>
+    <div class="pcode mono"><span>K</span><span>7</span><span>P</span><span class="d">–</span><span>4</span><span>M</span><span>2</span></div>
+  </div>
+  <div class="qr">
+    <svg width="86" height="86" style="background:#fff;padding:6px;border-radius:4px;color:#0B1F3A"><use href="#i-qr"/></svg>
+    <div><b>Ou scannez avec votre téléphone</b><p>Connecté à Linkii, il relie cet écran tout seul.</p></div>
+  </div>
+  <p style="font-size:13px">Écran ouvert dans un navigateur · Pour un démarrage automatique, installez l'app Linkii.</p>
+ </div>
+</section>
+
+<div class="note" id="note"></div>
+
+<script>
+const notes={
+  v1:"<b>Au premier lancement</b>, l'assistant remplace la page vide. Le modèle proposé en premier dépend de la réponse à « Où sera votre écran ? » (facultatif). « Je ferai ça plus tard » mène à la page Écrans avec l'écran de démonstration.",
+  v2:"<b>Le simulateur existant</b> joue la liste créée. Elle est déjà enregistrée : rien n'est perdu si l'utilisateur s'arrête ici.",
+  v3:"<b>Navigateur sélectionné par défaut</b> : rien à installer. Les autres cartes changent les consignes de gauche (lien Play Store, téléchargement du player Windows…). Dès que les 6 caractères sont saisis, l'écran est relié et reçoit la liste, sans autre clic.",
+  v4:"<b>Publication automatique</b> de « Ma première liste » sur l'écran relié. Trois suites possibles, aucune obligatoire.",
+  v5:"<b>Si l'assistant est quitté</b> : la page n'est plus vide. Un écran de démonstration virtuel diffuse la liste, et la carte « 3 étapes » rappelle ce qu'il reste à faire. Elle disparaît une fois l'écran connecté, ou avec la croix. Le compte neuf est en mode simple.",
+  v6:"<b>Côté écran</b> : linkii.duckdns.org/player dans n'importe quel navigateur affiche le code et un QR code. Le téléphone connecté au back-office peut scanner pour relier sans rien taper."
+};
+function show(v){
+  document.querySelectorAll('.view').forEach(s=>s.classList.toggle('on',s.id===v));
+  document.querySelectorAll('#seg button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  document.getElementById('note').innerHTML=notes[v];
+  window.scrollTo(0,0);
+}
+document.querySelectorAll('#seg button').forEach(b=>b.onclick=()=>show(b.dataset.v));
+document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>show(b.dataset.go));
+document.querySelectorAll('#choices .choice').forEach(c=>c.onclick=()=>{
+  document.querySelectorAll('#choices .choice').forEach(x=>x.classList.toggle('on',x===c));
+  ['s-tpl','s-up','s-url'].forEach(id=>document.getElementById(id).hidden=id!==c.dataset.sub);
+});
+document.querySelectorAll('#tpls .tpl').forEach(t=>t.onclick=()=>document.querySelectorAll('#tpls .tpl').forEach(x=>x.classList.toggle('on',x===t)));
+const how={
+  web:["Ouvrez le navigateur de l'écran et allez sur<br><span class=\"url mono\">linkii.duckdns.org/player</span>","Un code à 6 caractères s'affiche en grand.","Saisissez-le à droite, ou scannez le QR code de l'écran avec votre téléphone."],
+  android:["Sur la TV, ouvrez le Play Store et cherchez <b>Linkii Player</b>.","Installez et ouvrez l'app : un code s'affiche.","Saisissez-le à droite. L'app redémarrera toute seule avec la TV."],
+  win:["Sur le PC, téléchargez <b>Linkii Player pour Windows</b>.","Lancez-le : un code s'affiche en plein écran.","Saisissez-le à droite. Plusieurs écrans par PC ? Chacun affiche son code."],
+  box:["Installez l'app <b>Linkii Player</b> sur le boîtier.","Ouvrez-la : un code s'affiche.","Saisissez-le à droite."]
+};
+document.querySelectorAll('#dev .devc').forEach(d=>d.onclick=()=>{
+  document.querySelectorAll('#dev .devc').forEach(x=>x.classList.toggle('on',x===d));
+  document.getElementById('how').innerHTML=how[d.dataset.d].map(t=>'<li><div>'+t+'</div></li>').join('');
+});
+let i=0;setInterval(()=>{const s=document.querySelectorAll('#tvs .slide');s[i].classList.remove('on');i=(i+1)%s.length;s[i].classList.add('on')},4000);
+setInterval(()=>{const d=new Date();document.getElementById('clk').textContent=d.toTimeString().slice(0,5)},1000);
+show('v1');
+</script>
+</body>
+</html>
