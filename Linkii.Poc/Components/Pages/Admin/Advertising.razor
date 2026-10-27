@@ -1,0 +1,198 @@
+@page "/admin/ads"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "PlatformAdmin")]
+@inject JsonStore Root
+@inject AdLog Log
+@inject NavigationManager Nav
+@inject Toaster Toast
+
+@* Publicité (§45) : Linkivi joue le rôle de régie. Campagnes (annonceur, période, tarif et part du propriétaire, mode intercalé ou à temps perdu)
+   et relevés mensuels des comptes (à valider, validé, payé : le paiement se fait hors Linkivi). Maquette : maquettes/publicite.html. *@
+<div class="page-head">
+    <div>
+        <span class="crumb-sm">Admin › Publicité</span>
+        <h1>Campagnes</h1>
+        <p class="sub sc-intro">@campaigns.Count campagne@(campaigns.Count > 1 ? "s" : "") · @running en cours · @todayPlays.ToString("N0", Ads.Fr) passages complets aujourd'hui · @accepting compte@(accepting > 1 ? "s" : "") Pro accepte@(accepting > 1 ? "nt" : "") la publicité</p>
+    </div>
+    <button type="button" class="btn" @onclick="Create"><Ico Name="plus" Size="16" /> Nouvelle campagne</button>
+</div>
+
+<div class="adm-tabs" role="tablist">
+    <button type="button" class="@(tab == "campaigns" ? "on" : "")" @onclick='() => tab = "campaigns"'>Campagnes <b>@campaigns.Count</b></button>
+    <button type="button" class="@(tab == "statements" ? "on" : "")" @onclick='() => { tab = "statements"; LoadStatements(); }'>Relevés des comptes</button>
+</div>
+
+@if (tab == "campaigns")
+{
+    <div class="adm-card" style="padding:0">
+        @if (campaigns.Count == 0)
+        {
+            <div class="adm-note" style="padding:18px">Aucune campagne pour l'instant. Créez-en une : annonceur, période, tarif, puis ses spots (paysage 16:9 et portrait 9:16).</div>
+        }
+        else
+        {
+            <table class="adm-tbl">
+                <thead><tr><th>Annonceur · campagne</th><th>Spots</th><th>Période</th><th>Diffusion</th><th>Progression</th><th class="r">Passages complets</th><th class="r">Tarif</th><th>Statut</th></tr></thead>
+                <tbody>
+                    @foreach (var c in campaigns)
+                    {
+                        var id = c.Id;
+                        var total = Log.Total(c.Id);
+                        var (stLabel, stCss) = Status(c);
+                        <tr @onclick='() => Nav.NavigateTo("/admin/ads/" + id)'>
+                            <td><div class="adm-who"><span class="adm-av" style="background:@Color(c.Advertiser)">@Initials(c.Advertiser)</span><div><b>@(c.Advertiser.Length > 0 ? c.Advertiser : "Annonceur à saisir")</b><span class="adm-sub">@(c.Name.Length > 0 ? c.Name : "Sans nom")</span></div></div></td>
+                            <td>@c.Spots.Count(s => s.Ready) <span class="adm-sub" style="display:inline">@Formats(c)</span></td>
+                            <td>@Period(c)</td>
+                            <td><span class="adm-st @(c.Mode == AdModes.Filler ? "warn" : "ac")">@AdModes.Label(c.Mode)</span></td>
+                            <td>
+                                @if (c.MaxPlays > 0)
+                                {
+                                    var pct = Math.Min(100, total * 100 / c.MaxPlays);
+                                    <div class="adm-bar" style="width:90px"><i style="width:@pct%;background:var(--signal)"></i></div><span class="adm-sub">@pct % du plafond</span>
+                                }
+                                else { <span class="adm-sub">@(c.Mode == AdModes.Filler ? "pas de volume garanti" : "sans plafond")</span> }
+                            </td>
+                            <td class="r m">@total.ToString("N0", Ads.Fr)@(c.MaxPlays > 0 ? " / " + c.MaxPlays.ToString("N0", Ads.Fr) : "")</td>
+                            <td class="r m">@c.PricePerPlay.ToString("0.000", Ads.Fr) CHF</td>
+                            <td><span class="adm-st @stCss">@stLabel</span></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+    <p class="adm-note" style="margin-top:12px"><b>Intercalé</b> : le spot s'insère entre deux contenus (par défaut un tous les @Ads.DefaultEveryItems contenus, @Ads.DefaultMaxPerHour par heure et par écran au plus). <b>À temps perdu</b> : le spot ne passe que quand l'écran n'a rien d'autre à afficher, sans volume garanti. Seuls les passages complets sont facturés et reversés.</p>
+}
+else
+{
+    <div class="adm-tools">
+        <select @bind="month" @bind:after="LoadStatements" aria-label="Mois">
+            @foreach (var m in Months) { <option value="@m">@MonthLabel(m)</option> }
+        </select>
+        <span class="adm-note" style="margin:0">Relevé de chaque compte : passages complets de toutes les campagnes, montant brut et part du propriétaire.</span>
+    </div>
+    <div class="adm-card" style="padding:0">
+        @if (statements.Count == 0)
+        {
+            <div class="adm-note" style="padding:18px">Aucun passage de spot sur ce mois.</div>
+        }
+        else
+        {
+            <table class="adm-tbl">
+                <thead><tr><th>Compte</th><th class="r">Complets</th><th class="r">Interrompus</th><th class="r">Temps</th><th class="r">Montant annonceurs</th><th class="r">Part du compte</th><th>Statut</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var s in statements)
+                    {
+                        var row = s;
+                        <tr style="cursor:default">
+                            <td><b>@s.Name</b></td>
+                            <td class="r m">@s.Complete.ToString("N0", Ads.Fr)</td>
+                            <td class="r m">@s.Interrupted.ToString("N0", Ads.Fr)</td>
+                            <td class="r m">@Ads.Human(s.Seconds)</td>
+                            <td class="r m">@Ads.Chf(s.Gross)</td>
+                            <td class="r m">@Ads.Chf(s.Owner)</td>
+                            <td><span class="adm-st @AdStatementStates.Css(s.Status)">@AdStatementStates.Label(s.Status)</span></td>
+                            <td class="r" style="white-space:nowrap">
+                                @if (s.Status == AdStatementStates.ToValidate) { <button type="button" class="btn ghost sm" @onclick="() => SetStatement(row, AdStatementStates.Validated)">Valider</button> }
+                                else if (s.Status == AdStatementStates.Validated) { <button type="button" class="btn ghost sm" @onclick="() => SetStatement(row, AdStatementStates.Paid)">Marquer payé</button> }
+                                <a class="btn ghost sm" href="/admin/ads/statement/@s.ClientId/@month">Relevé</a>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+    <p class="adm-note" style="margin-top:12px">Le mois en cours reste « En cours ». Un mois terminé est « À valider » jusqu'à sa validation ; « Payé » une fois le versement fait (hors Linkivi).</p>
+}
+
+@code {
+    private string tab = "campaigns", month = "";
+    private List<AdCampaign> campaigns = new();
+    private int running, accepting, todayPlays;
+
+    private record StatementRow(Guid ClientId, string Name, int Complete, int Interrupted, long Seconds, decimal Gross, decimal Owner, string Status);
+    private List<StatementRow> statements = new();
+
+    private static readonly TimeZoneInfo Zone = AdReports.Zone("Europe/Zurich");
+    private DateTime LocalNow => TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, Zone);
+    private IEnumerable<string> Months => Enumerable.Range(0, 13).Select(i => LocalNow.AddMonths(-i).ToString("yyyy-MM"));
+
+    protected override void OnInitialized()
+    {
+        month = LocalNow.AddMonths(-1).ToString("yyyy-MM");
+        Load();
+    }
+
+    private void Load()
+    {
+        var now = DateTime.UtcNow;
+        (campaigns, accepting) = Root.Read(db => (db.AdCampaigns.OrderByDescending(c => c.CreatedUtc).ToList(), db.Clients.Count(Ads.On)));
+        running = campaigns.Count(c => Status(c).Label == "En cours");
+        var since = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(LocalNow.Date, DateTimeKind.Unspecified), Zone);
+        todayPlays = Log.ReadAll(since).Count(p => p.Play.Complete);
+    }
+
+    private void Create()
+    {
+        var today = LocalNow.Date;
+        var c = new AdCampaign { Start = today.ToString("yyyy-MM-dd"), End = today.AddMonths(1).ToString("yyyy-MM-dd") };
+        Root.Write(db => db.AdCampaigns.Add(c));
+        Nav.NavigateTo("/admin/ads/" + c.Id);
+    }
+
+    private void LoadStatements()
+    {
+        var (from, to) = AdReports.Month(month, Zone);
+        var plays = Log.ReadAll(from).Where(p => p.Play.StartUtc < to).ToList();
+        statements = Root.Read(db =>
+        {
+            var camps = db.AdCampaigns.ToList();
+            return plays.GroupBy(p => p.ClientId).Select(g =>
+            {
+                var rows = AdReports.Rows(g.Select(x => x.Play), camps);
+                return new StatementRow(g.Key, db.Clients.FirstOrDefault(c => c.Id == g.Key)?.Name ?? "(compte supprimé)", rows.Sum(r => r.Complete), rows.Sum(r => r.Interrupted),
+                    rows.Sum(r => r.Seconds), rows.Sum(r => r.Gross), rows.Sum(r => r.Owner), Ads.StatementStatus(db, g.Key, month, LocalNow));
+            }).OrderByDescending(r => r.Owner).ToList();
+        });
+    }
+
+    private void SetStatement(StatementRow r, string status)
+    {
+        Root.Write(db =>
+        {
+            var s = db.AdStatements.FirstOrDefault(x => x.ClientId == r.ClientId && x.Month == month);
+            if (s == null) db.AdStatements.Add(s = new AdStatement { ClientId = r.ClientId, Month = month });
+            s.Status = status; s.AtUtc = DateTime.UtcNow;
+        });
+        LoadStatements();
+        Toast.Ok(status == AdStatementStates.Paid ? "Relevé marqué payé." : "Relevé validé.");
+    }
+
+    private (string Label, string Css) Status(AdCampaign c)
+    {
+        if (c.Stopped) return ("Arrêtée", "mute");
+        var today = LocalNow.Date;
+        if (Ads.Day(c.End) is { } end && end < today) return ("Terminée", "mute");
+        if (c.MaxPlays > 0 && Log.Total(c.Id) >= c.MaxPlays) return ("Plafond atteint", "mute");
+        if (!c.Spots.Any(s => s.Ready)) return ("Sans spot", "warn");
+        if (Ads.Day(c.Start) is { } start && start > today) return ("Programmée", "ac");
+        if (Ads.Day(c.End) is { } e2 && (e2 - today).TotalDays <= 5) return ("Se termine bientôt", "warn");
+        return ("En cours", "ok");
+    }
+
+    private static string Period(AdCampaign c) =>
+        $"{Ads.Day(c.Start)?.ToString("d MMM", Ads.Fr) ?? "?"} → {Ads.Day(c.End)?.ToString("d MMM yyyy", Ads.Fr) ?? "?"}";
+
+    private static string Formats(AdCampaign c)
+    {
+        var p = c.Spots.Any(s => s.Portrait != null); var l = c.Spots.Any(s => s.Landscape != null);
+        return p && l ? "(P + L)" : p ? "(P seul)" : l ? "(L seul)" : "";
+    }
+
+    private static string MonthLabel(string m) => DateTime.TryParseExact(m + "-01", "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out var d) ? Ads.Fr.TextInfo.ToTitleCase(d.ToString("MMMM yyyy", Ads.Fr)) : m;
+
+    private static string Initials(string s) => string.Concat(s.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => char.ToUpperInvariant(w[0]))) is { Length: > 0 } i ? i : "?";
+
+    private static readonly string[] Palette = { "#C0392B", "#2F7D6B", "#6B4FA0", "#D08A2E", "#2A6AA8", "#8A8F98" };
+    private static string Color(string s) => Palette[(int)((uint)s.Aggregate(17, (h, ch) => h * 31 + ch) % Palette.Length)];
+}

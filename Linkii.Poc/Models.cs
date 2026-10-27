@@ -24,6 +24,9 @@ public class Db
     public List<Opportunity> Opportunities { get; set; } = new(); // demandes Enterprise (voir Enterprise)
     public List<License> Licenses { get; set; } = new();          // licences des installations sur site
     public PlatformSettings Platform { get; set; } = new();      // réglages communs à toutes les organisations (console › Réglages)
+    public List<AdCampaign> AdCampaigns { get; set; } = new();   // publicité : campagnes de la régie Linkivi (voir <see cref="Ads"/>)
+    public List<AdDecision> AdDecisions { get; set; } = new();   // réponses des propriétaires aux spots
+    public List<AdStatement> AdStatements { get; set; } = new(); // relevés mensuels validés ou payés
     /// <summary>Migrations ponctuelles déjà faites (voir <see cref="AccessLevels.MigrateRolesV2"/>).</summary>
     public List<string> Done { get; set; } = new();
     /// <summary>Ce que chaque personne a déjà vu dans chaque page du menu : base des pastilles rouges « nouveau » (voir <see cref="MenuBadges"/>).</summary>
@@ -424,6 +427,18 @@ public class Tenant
     public bool SleepEnabled { get; set; }
     /// <summary>Fonction avancée « Luminosité et contraste » activée dans Réglages (voir <see cref="Dim"/>).</summary>
     public bool DimEnabled { get; set; }
+
+    // Publicité rémunérée (Pro, voir Ads) : désactivée par défaut, réglée dans Réglages › Publicité
+    public bool AdsOn { get; set; }
+    /// <summary>Activation de la publicité : le délai de réponse aux spots déjà en cours part de là.</summary>
+    public DateTime? AdsSinceUtc { get; set; }
+    public bool AdsAllAreas { get; set; } = true;
+    public List<Guid> AdsAreas { get; set; } = new();
+    public List<Guid> AdsScreensOff { get; set; } = new();
+    /// <summary>Catégories d'annonceurs refusées (voir <see cref="AdCategories"/>).</summary>
+    public List<string> AdsExcluded { get; set; } = new() { "alcohol", "gambling" };
+    /// <summary>Spots dont le rappel « 24 h avant l'échéance » est parti.</summary>
+    public List<Guid> AdsReminded { get; set; } = new();
 
     // Menu technicien de l'app Android (voir TechPin)
     public bool TechPinOn { get; set; } = true;       // false : menu sans code
@@ -1214,6 +1229,11 @@ public static class Helpers
 
     /// <summary><see cref="SyncStamp(IEnumerable{Area}, Screen)"/> + paramètres de l'appareil (démarrage automatique, fenêtre, moniteur, écrans à ouvrir sur le PC).</summary>
     public static string SyncStamp(IEnumerable<Area> areas, IEnumerable<Screen> screens, Screen s) => SyncStamp(areas, s) + DeviceConfig.Stamp(screens, s);
+
+    /// <summary>Révision complète d'un écran : <see cref="SyncStamp(IEnumerable{Area}, IEnumerable{Screen}, Screen)"/> + les spots de publicité qu'il diffuse
+    /// (un spot accepté, une échéance passée, une campagne arrêtée : l'écran recharge sa configuration au prochain sondage).</summary>
+    public static string SyncStamp(Db db, Screen s) =>
+        SyncStamp(db.Areas, db.Screens, s) + (db.Clients.FirstOrDefault(c => c.Id == s.ClientId) is { } t ? Ads.Stamp(db, t, s, DateTime.UtcNow) : "");
 
     public record WallPlace(int Cols, int Rows, int Col, int Row);
 

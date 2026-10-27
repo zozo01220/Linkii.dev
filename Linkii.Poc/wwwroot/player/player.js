@@ -364,6 +364,7 @@
     var l = (pl.items || []).slice();
     (pl.zones || []).forEach(function (z) { (z || []).forEach(function (i) { l.push(i); }); });
     ((pl.schedule && pl.schedule.slots) || []).forEach(function (s) { (s.items || []).forEach(function (i) { l.push(i); }); });   // listes du planning : tous leurs fichiers aussi, pour tourner hors ligne
+    ((pl.ads && pl.ads.spots) || []).forEach(function (a) { l.push({ url: a.url }); });   // spots de publicité : préchargés comme les médias
     return l;
   }
 
@@ -392,7 +393,7 @@
   // Un créneau commence ou se termine : on change de liste tout de suite, sans attendre la fin du contenu en cours.
   function scheduleTick() {
     if (PREVIEW && state.free) return;
-    if (!state.current || !state.current.schedule || state.slotUsed === slotIndex(state.current) || state.paused || state.hold || state.asleep) return;
+    if (!state.current || !state.current.schedule || state.slotUsed === slotIndex(state.current) || state.paused || state.hold || state.asleep || adNow) return;   // un spot en cours va jusqu'au bout
     state.shownItem = null;
     next();
   }
@@ -966,11 +967,142 @@
       .catch(function () {})
       .then(function () { flushingPlays = false; });
   }
-  window.addEventListener('pagehide', function () { for (var k in playing) playEnd(k); });   // rechargement nocturne, fermeture : la diffusion en cours est notée
+  window.addEventListener('pagehide', function () { for (var k in playing) playEnd(k); adFinish(false, 'reload'); });   // rechargement nocturne, fermeture : la diffusion en cours est notée
+
+  /* ---------- Publicité (licence Pro, §45) ----------
+     Le serveur envoie { tag, tz, spots: [{ id, campaignId, mode, url, type, format, approx, durationSec, every, everyMin, maxHour, maxDay, from, to }] }
+     seulement pour un écran plein qui l'accepte (jamais dans le simulateur, ni sur un mur ou un écran découpé). Les spots ne sont dans aucune liste :
+     « between » s'intercale entre deux contenus (tous les N contenus ou N minutes, plafond par heure), « filler » ne passe que quand l'écran n'a
+     rien d'autre à afficher. Chaque passage est noté (identifiant unique, heure du serveur, durée réellement affichée sur l'horloge monotone)
+     puis envoyé par lots ; complet = affiché jusqu'au bout de sa durée, sinon la cause de l'interruption (pause, veille, rechargement…). */
+  var adNow = null, adFailed = {}, flushingAds = false, adRr = 0;
+  var adCnt = (function () { try { return JSON.parse(LS.getItem('lk_adcnt') || 'null') || {}; } catch (e) { return {}; } })();   // compteurs du jour et de l'heure, et contenus depuis le dernier spot
+  function adSave() { try { LS.setItem('lk_adcnt', JSON.stringify(adCnt)); } catch (e) {} }
+  function mono() { return window.performance && performance.now ? performance.now() : Date.now(); }
+  function uuid() {
+    var b = new Uint8Array(16), i;
+    if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(b); else for (i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
+    b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128;
+    var h = ''; for (i = 0; i < 16; i++) h += (b[i] + 256).toString(16).slice(1);
+    return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20);
+  }
+  function adDay(tz) { try { return new Date(serverNow()).toLocaleDateString('sv-SE', { timeZone: tz }); } catch (e) { return todayIso(); } }
+  function adKeys(ads) { var d = adDay(ads.tz); return { day: d, hour: d + 'T' + Math.floor(localWeekMinute(serverNow(), ads.tz) % 1440 / 60) }; }
+  function adRoll(ads) {   // nouveaux jour et heure : les compteurs repartent de zéro
+    var k = adKeys(ads);
+    if (adCnt.day !== k.day) { adCnt.day = k.day; adCnt.perDay = {}; }
+    if (adCnt.hour !== k.hour) { adCnt.hour = k.hour; adCnt.perHour = {}; }
+    adCnt.perDay = adCnt.perDay || {}; adCnt.perHour = adCnt.perHour || {};
+    return k;
+  }
+  // Spots du mode demandé qu'on peut passer maintenant : période de la campagne, plafonds du jour (par spot) et de l'heure (par campagne).
+  function adCandidates(mode) {
+    var ads = state.current && state.current.ads;
+    if (!ads || !ads.spots || PREVIEW || (state.current.sync && mode === 'between')) return [];   // zone synchronisée : un spot décalerait les écrans entre eux
+    var k = adRoll(ads), now = Date.now();
+    return ads.spots.filter(function (a) {
+      if (a.mode !== mode || (adFailed[a.id] && now - adFailed[a.id] < 600000)) return false;
+      if (a.from && k.day < a.from || a.to && k.day > a.to) return false;
+      return (adCnt.perDay[a.id] || 0) < a.maxDay && (adCnt.perHour[a.campaignId] || 0) < a.maxHour;
+    });
+  }
+  // Intercalé : le rythme le plus serré des campagnes candidates (tous les N contenus, ou N minutes depuis le dernier spot).
+  function adDue(list) {
+    var since = adCnt.since || 0, last = adCnt.lastAt || 0;
+    return list.some(function (a) { return a.everyMin > 0 ? serverNow() - last >= a.everyMin * 60000 && since >= 1 : since >= a.every; });
+  }
+  // Fin d'un spot : complet s'il est allé au bout de sa durée (son propre minuteur), sinon interrompu avec la cause.
+  function adFinish(complete, cause) {
+    var a = adNow;
+    if (!a) return;
+    adNow = null;
+    clearTimeout(a.timer);
+    var shown = Math.round(mono() - a.t0);
+    var q = loadAdPlays();
+    q.push({ id: a.id, campaignId: a.spot.campaignId, spotId: a.spot.id, start: a.start, shownMs: shown, complete: !!complete && shown >= a.planned - 500,
+      cause: complete ? null : (cause || 'cut'), format: a.spot.format, approx: !!a.spot.approx, offline: a.offline });
+    if (q.length > 5000) q = q.slice(q.length - 5000);
+    saveAdPlays(q);
+    if (q.length >= 50) flushAds();
+  }
+  function loadAdPlays() { try { return JSON.parse(LS.getItem('lk_adplays') || '[]'); } catch (e) { return []; } }
+  function saveAdPlays(q) { try { LS.setItem('lk_adplays', JSON.stringify(q)); } catch (e) {} }
+  function flushAds() {
+    var q = loadAdPlays();
+    if (!q.length || flushingAds || !state.token || PREVIEW) return;
+    flushingAds = true;
+    var batch = q.slice(0, 500);
+    api('/api/player/ad-plays', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(batch) })
+      .then(function () { saveAdPlays(loadAdPlays().slice(batch.length)); })   // les passages notés pendant l'envoi restent en attente
+      .catch(function () {})
+      .then(function () { flushingAds = false; });
+  }
+  // Un contenu de la liste vient d'être affiché : il compte pour le rythme des spots intercalés.
+  function adCounted() { if (state.current && state.current.ads) { adCnt.since = (adCnt.since || 0) + 1; adSave(); } }
+
+  // Passe un spot dans le calque libre (même fondu que les contenus). Renvoie false s'il n'y a rien à passer.
+  function playAd(mode) {
+    var list = adCandidates(mode);
+    if (!list.length || (mode === 'between' && !adDue(list))) return false;
+    var spot = list[adRr++ % list.length], ads = state.current.ads;
+    var layerId = state.active === 'layerA' ? 'layerB' : 'layerA';
+    var layer = $(layerId), old = $(state.active), oldCleanup = state.cleanup, shown = false, src = null, media;
+    layer.innerHTML = '';
+    // visuel centré, jamais déformé ni recadré ; format approché (autre orientation, ratio inhabituel) : sur un fond flouté
+    var bg = document.createElement('div');
+    bg.style.cssText = 'position:absolute;left:0;top:0;right:0;bottom:0;overflow:hidden;background:#0B1F3A';
+    layer.appendChild(bg);
+    var cleanup = function () { if (media && media.tagName === 'VIDEO') { try { media.pause(); media.removeAttribute('src'); media.load(); } catch (e) {} } if (src) src.revoke(); };
+    function start() {
+      if (shown) return; shown = true;
+      layer.classList.add('on'); old.classList.remove('on');
+      setTimeout(function () { if (oldCleanup) oldCleanup(); old.innerHTML = ''; }, 400);
+      state.active = layerId; state.cleanup = cleanup; state.shownItem = null;
+      playEnd();   // le contenu précédent est terminé (le spot, lui, a son propre journal)
+      var k = adRoll(ads);
+      adCnt.perDay[spot.id] = (adCnt.perDay[spot.id] || 0) + 1;
+      adCnt.perHour[spot.campaignId] = (adCnt.perHour[spot.campaignId] || 0) + 1;
+      if (mode === 'between') { adCnt.since = 0; adCnt.lastAt = serverNow(); }
+      adSave();
+      var ms = Math.max(1, spot.durationSec) * 1000;
+      adNow = { id: uuid(), spot: spot, start: Math.round(serverNow()), t0: mono(), planned: ms, offline: netFails >= 2, day: k.day };
+      adNow.timer = state.timer = setTimeout(function () { adFinish(true); next(); }, ms);   // une publication arrivée entre-temps attend la fin du spot
+      state.slideEnd = Date.now() + ms;
+    }
+    function fail() {   // fichier illisible : ce spot est écarté 10 minutes, la boucle reprend
+      if (shown) return; shown = true;
+      adFailed[spot.id] = Date.now();
+      state.timer = setTimeout(next, 500);
+    }
+    if (spot.type === 'video') {
+      media = document.createElement('video');
+      media.muted = true; media.loop = true; media.autoplay = true; media.setAttribute('playsinline', '');   // toujours sans son
+      media.oncanplay = function () { start(); try { media.play(); } catch (e) {} };
+      media.onerror = fail;
+    } else {
+      media = new Image();
+      media.onload = start; media.onerror = fail;
+    }
+    media.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain';
+    layer.appendChild(media);
+    var tag = document.createElement('div');   // mention « Publicité » : toujours affichée, ajoutée par Linkivi
+    tag.textContent = ads.tag || 'Publicité';
+    tag.style.cssText = 'position:absolute;top:1.2em;right:1.2em;z-index:60;background:rgba(11,31,58,.72);color:#fff;font-size:1em;letter-spacing:.06em;text-transform:uppercase;padding:.25em .7em;border-radius:.2em;font-weight:500';
+    layer.appendChild(tag);
+    mediaSrc(spot.url).then(function (m) {
+      src = m;
+      if (spot.approx && spot.type !== 'video') bg.style.cssText += ';background:#0B1F3A url("' + m.src + '") center/cover no-repeat;filter:blur(2.4em) brightness(.75);transform:scale(1.15)';
+      media.src = m.src;
+    });
+    setTimeout(function () { if (!shown) fail(); }, 15000);   // rien d'affiché au bout de 15 s : on passe
+    previewReport();
+    return true;
+  }
 
   /* ---------- Diffusion (double buffer) ---------- */
   function next() {
     clearTimeout(state.timer); state.timer = null;
+    adFinish(false, state.pending ? 'publish' : 'cut');   // un spot encore à l'écran (sans être allé au bout) : passage interrompu
     if (state.paused || state.hold || state.asleep) return;   // simulateur en pause, écran mis en pause depuis le back-office, ou en veille
 
     if (state.pending) {            // remplacement entre deux contenus
@@ -988,6 +1120,7 @@
     if (zoneLoops.some(function (z) { return z.hasSlides(); })) hasOverlay = true;   // écran découpé : les autres zones diffusent
 
     if (!slides.length) {
+      if (playAd('filler')) { $('idle').style.display = 'none'; return; }   // « à temps perdu » : un spot plutôt qu'un écran sans contenu
       playEnd();
       $('idle').style.display = hasOverlay ? 'none' : 'flex';
       state.timer = setTimeout(next, 5000);
@@ -998,6 +1131,7 @@
 
     // zone synchronisée : le contenu et sa durée se déduisent de l'heure commune (simulateur en lecture libre : ordre de la liste)
     var epoch = pl.sync && slides.length > 1 && !state.free ? pl.sync.epoch : null;
+    if (playAd('between')) return;   // spot intercalé : jamais au milieu d'un contenu, toujours entre deux
     var item;
     if (epoch != null) {
       var pick = syncPick(slides, epoch);
@@ -1012,6 +1146,7 @@
     // un seul contenu (ex. porte de salle) : on ne le redessine pas à chaque tour, il se met à jour seul
     if (slides.length === 1 && state.shownItem === item) {
       playStart(item);   // un tour de plus : une diffusion de plus
+      adCounted();
       state.timer = setTimeout(next, Math.max(1, item.durationSec) * 1000);
       state.slideEnd = Date.now() + Math.max(1, item.durationSec) * 1000;
       previewReport();
@@ -1030,6 +1165,7 @@
       state.active = layerId; state.cleanup = newCleanup;
       state.shownItem = item;
       playStart(item);
+      adCounted();
       var ms = epoch != null ? syncLeft(slides, item, epoch) : Math.max(1, item.durationSec) * 1000;
       // durationMode « content » : l'app décide (fin de la vidéo) ; durationSec est le plafond de sécurité
       state.timer = setTimeout(next, ms);
@@ -1283,6 +1419,7 @@
     var el = $('sleepview');
     if (want) {
       clearTimeout(state.timer); state.timer = null;
+      adFinish(false, 'sleep');
       stopContent();
       $('idle').style.display = 'none';
       if (!el) {
@@ -1371,6 +1508,7 @@
     try { LS.setItem('lk_pause', JSON.stringify(p)); } catch (e) {}
     state.hold = true;
     clearTimeout(state.timer); state.timer = null;
+    adFinish(false, 'pause');
     stopContent();
     $('idle').style.display = 'none';   // « Écran prêt » (aucun contenu) ne doit pas recouvrir le visuel de pause
     showPauseView(p);
@@ -1472,6 +1610,8 @@
     setInterval(poll, 5000);   // filet si le temps réel (SignalR) est coupé ou injoignable : une publication arrive en 5 s au plus
     flushPlays();
     setInterval(flushPlays, 60000);
+    flushAds();
+    setInterval(flushAds, 60000);   // passages de spots : envoyés chaque minute (gardés en local hors ligne)
     setInterval(function () { api("/api/player/version").catch(function () {}); }, 15000);   // détecte vite une coupure
     nightlyReload();
     setInterval(sleepTick, 15000);

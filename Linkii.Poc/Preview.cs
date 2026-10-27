@@ -67,7 +67,7 @@ public static class PlayerFeed
         var mirror = Helpers.Mirror(db.Areas, s);   // miroir de l'écran, combiné à celui de son mur
         return new()
         {
-            ["version"] = Helpers.Revision(p, s, t, reseller, Helpers.SyncStamp(db.Areas, db.Screens, s)) + (whole ? "|whole" : ""),
+            ["version"] = Helpers.Revision(p, s, t, reseller, Helpers.SyncStamp(db, s)) + (whole ? "|whole" : ""),
             ["serverNow"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             ["sync"] = epoch is { } e ? new { epoch = Helpers.EpochMs(e) } : null,
             // mur d'écrans : l'écran n'affiche que sa portion (colonne, ligne) de l'image de tout le mur
@@ -82,6 +82,7 @@ public static class PlayerFeed
             ["sleep"] = Sleep.ForPlayer(t, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, wall != null),   // plages de mise en veille (null : aucune)
             ["dim"] = Dim.ForPlayer(t, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, wall != null),   // luminosité et contraste selon l'heure (null : aucun réglage)
             ["device"] = device ? DeviceConfig.ForPlayer(db.Screens, s) : null,   // paramètres de l'appareil (démarrage automatique, fenêtre, moniteur, écrans à ouvrir sur ce PC)
+            ["ads"] = device ? Ads.ForPlayer(db, t, s, DateTime.UtcNow) : null,   // spots de publicité (§45) : jamais dans le simulateur, rien n'y est diffusé ni compté
             ["brand"] = BrandDto.From(reseller)
         };
     }

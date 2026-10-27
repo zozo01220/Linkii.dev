@@ -80,6 +80,8 @@ builder.Services.AddHostedService<PresentationMergeWorker>();   // fusion des do
 builder.Services.AddHostedService<CloudFilesWorker>();   // Google Slides, Docs et Microsoft PowerPoint : mise à jour quand le fichier change (réglage de chaque contenu, une heure par défaut)
 builder.Services.AddHostedService<DriveSyncWorker>();   // dossiers des Drives : synchronisés toutes les 15 minutes
 builder.Services.AddSingleton<ScanLog>();   // scans des QR codes de comptage (Pro) : journal par client, 90 jours
+builder.Services.AddSingleton<AdLog>();   // passages des spots de publicité (§45) : journal par client, 13 mois
+builder.Services.AddHostedService<AdWorker>();   // publicité : rappel aux propriétaires 24 h avant l'échéance de validation d'un spot
 builder.Services.AddScoped<AppService>();
 builder.Services.AddScoped<MediaLibrary>();
 builder.Services.AddScoped<PlaylistLibrary>();
@@ -151,6 +153,9 @@ Directory.CreateDirectory(AppPaths.MediaDir);
 Directory.CreateDirectory(AppPaths.BrandDir);
 Directory.CreateDirectory(AppPaths.ThumbDir);
 Directory.CreateDirectory(AppPaths.PdfDir);
+Ads.Dir = Path.Combine(dataDir, "ads");   // visuels des spots de publicité (§45)
+Directory.CreateDirectory(Ads.Dir);
+app.Services.GetRequiredService<AdLog>();   // plafonds des campagnes : totaux des passages disponibles dès le démarrage
 
 var store0 = app.Services.GetRequiredService<JsonStore>();
 Seed.Run(store0, app.Configuration, store0.Path, app.Logger);
@@ -740,6 +745,40 @@ api.MapPost("/player/plays", (HttpRequest req, List<PlayDto> body, JsonStore sto
     if (denied != null) return denied;
     log.Append(screen!.ClientId, entries);
     return Results.Ok(new { saved = entries.Count });
+});
+
+// Publicité (§45) : passages de spots remontés par lots. Dédoublonnés (identifiant de passage), contrôlés (spot connu, dates, durées, chevauchements),
+// et comptés seulement pour un écran qui a droit à la publicité (licence Pro, réglage activé, aire et écran autorisés).
+api.MapPost("/player/ad-plays", (HttpRequest req, List<AdPlayDto> body, JsonStore store, AdLog log) =>
+{
+    var now = DateTime.UtcNow;
+    var (screen, denied, campaigns, allowed) = store.Read(db =>
+    {
+        var s = Auth(req, db);
+        if (Gate(s, db) is { } no) return ((Screen?)null, (IResult?)no, new List<AdCampaign>(), false);
+        var t = db.Clients.First(c => c.Id == s!.ClientId);
+        return ((Screen?)s, (IResult?)null, db.AdCampaigns.ToList(), Ads.ScreenAllowed(db, t, s!));
+    });
+    if (denied != null) return denied;
+    if (!allowed) return Results.Ok(new { saved = 0 });   // accusé quand même : le player vide sa file
+    var since = now.AddDays(-1);
+    var plays = AdLog.Check(body, screen!.Id, campaigns, log.Read(screen.ClientId, since), now);
+    return Results.Ok(new { saved = log.Append(screen.ClientId, plays).Count });
+});
+
+// Visuels des spots : servis aux écrans (jeton actif) et aux personnes connectées (administration, propriétaires qui valident les spots).
+app.MapGet("/ads/{file}", (HttpContext ctx, string file, JsonStore store) =>
+{
+    if (file != Path.GetFileName(file) || Ads.FileType(file) == null) return Results.NotFound();
+    var token = ctx.Request.Headers["X-Token"].ToString();
+    if (string.IsNullOrEmpty(token)) token = ctx.Request.Query["t"].ToString();
+    var ok = ctx.User.Identity?.IsAuthenticated == true
+        || !string.IsNullOrEmpty(token) && store.Read(db => db.Screens.Any(s => s.Token == token && Tenancy.IsActive(db, s)));
+    var path = Path.Combine(Ads.Dir, file);
+    if (!ok || !File.Exists(path)) return Results.NotFound();
+    if (!mediaTypes.TryGetContentType(file, out var type)) type = "application/octet-stream";
+    ctx.Response.Headers.CacheControl = "private, max-age=86400";
+    return Results.File(path, type, enableRangeProcessing: true);
 });
 
 // Données des apps : l'URL des sources et les secrets restent côté serveur.

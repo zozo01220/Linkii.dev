@@ -1,0 +1,217 @@
+@inject TenantStore Store
+@inject TenantContext Ctx
+@inject Notifier Notifier
+@inject Toaster Toast
+
+@* Réglages › Publicité (licence Pro, §45) : désactivée par défaut. Interrupteur général, aires et écrans autorisés, catégories refusées,
+   spots à valider (accepter / refuser avant l'échéance ; sans réponse, un spot qui respecte les exclusions est diffusé), alertes.
+   Chaque choix est enregistré aussitôt ; les écrans le prennent tout de suite. Les revenus sont dans Statistiques › Publicité (onglet visible si la publicité est activée). *@
+<div class="rg-ph"><h2>Publicité</h2><p>Affichez des spots sur vos écrans et soyez rémunéré pour chaque passage complet.</p></div>
+
+@if (!growth)
+{
+    <div class="sv-upsell"><Ico Name="lock" Size="18" /><span class="grow">La publicité rémunérée est incluse dans la licence <b>Pro</b>. Les spots sont retirés des écrans si la licence repasse en Essential.</span></div>
+}
+
+<div class="rg-card al-master @(growth ? "" : "al-off")" data-tip="@(growth ? null : Plans.LockedHint)">
+    <div class="sv-row">
+        <div class="t"><b>Accepter la publicité sur mes écrans</b><small>Désactivé par défaut. Les spots ne s'affichent que sur les aires et écrans autorisés, jamais dans vos listes de lecture ni votre planning.</small></div>
+        <div class="ctl"><button type="button" class="switch @(on ? "on" : "")" role="switch" aria-checked="@(on ? "true" : "false")" aria-label="Accepter la publicité sur mes écrans" disabled="@(!growth)" @onclick="ToggleOn"><span></span></button></div>
+    </div>
+</div>
+
+@if (growth && on)
+{
+    <div class="ad-set">
+        <div>
+            <div class="rg-card">
+                <header><h3>Spots à valider</h3>@if (pending.Count > 0) { <span class="ad-count">@pending.Count</span> }</header>
+                <div class="rg-body">
+                    <p class="ad-info">Sans réponse sous @(pending.Count > 0 ? HoursLabel(pending[0].Campaign.ValidationHours) : "72 heures"), un spot qui respecte vos exclusions est diffusé. Un rappel vous est envoyé par e-mail 24 h avant l'échéance.</p>
+                    @if (pending.Count == 0) { <p class="hint" style="margin:0">Aucun spot en attente.</p> }
+                    @foreach (var x in pending)
+                    {
+                        var spot = x;
+                        <div class="ad-val">
+                            <AdShot Url="@("/ads/" + (x.Spot.Landscape ?? x.Spot.Portrait))" Type="@(x.Spot.Landscape != null ? x.Spot.LandscapeType : x.Spot.PortraitType)" Portrait="@(x.Spot.Landscape == null)" Small="true" />
+                            <div class="grow">
+                                <b>@x.Campaign.Advertiser · @x.Spot.Name</b>
+                                <small>@AdCategories.Label(x.Campaign.Category) · @x.Spot.DurationSec s · @Formats(x.Spot) · @AdModes.Label(x.Campaign.Mode).ToLowerInvariant()</small>
+                                <small>Reste @Left(x.Deadline)</small>
+                                <div class="row" style="gap:6px;margin-top:8px">
+                                    <button type="button" class="btn sm" @onclick="() => Decide(spot, true)">Accepter</button>
+                                    <button type="button" class="btn ghost sm danger-t" @onclick="() => Decide(spot, false)">Refuser</button>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            @if (decided.Count > 0)
+            {
+                <div class="rg-card">
+                    <header><h3>Spots acceptés et refusés</h3><small>Vous pouvez changer d'avis à tout moment.</small></header>
+                    @foreach (var x in decided)
+                    {
+                        var spot = x;
+                        <div class="sv-row">
+                            <div class="t"><b>@x.Campaign.Advertiser · @x.Spot.Name</b><small>@AdCategories.Label(x.Campaign.Category) · @x.Spot.DurationSec s · @(x.State switch { AdSpotState.Auto => "diffusé sans réponse", AdSpotState.Accepted => "accepté", AdSpotState.Excluded => "catégorie refusée", _ => "refusé" })</small></div>
+                            <div class="ctl">
+                                @if (x.State == AdSpotState.Excluded) { <span class="muted small">—</span> }
+                                else if (x.Plays) { <button type="button" class="btn ghost sm danger-t" @onclick="() => Decide(spot, false)">Retirer</button> }
+                                else { <button type="button" class="btn ghost sm" @onclick="() => Decide(spot, true)">Accepter</button> }
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (alerts.Count > 0)
+            {
+                <div class="rg-card">
+                    <header><h3>Alertes</h3></header>
+                    <div class="rg-body">@foreach (var a in alerts) { <p class="ad-warn">@a</p> }</div>
+                </div>
+            }
+        </div>
+
+        <div>
+            <div class="rg-card">
+                <header><h3>Où afficher de la publicité</h3></header>
+                <div class="sv-row">
+                    <div class="t"><b>Toutes les aires</b><small>Les nouveaux écrans en font partie d'office.</small></div>
+                    <div class="ctl"><button type="button" class="switch @(allAreas ? "on" : "")" role="switch" aria-checked="@(allAreas ? "true" : "false")" aria-label="Toutes les aires" @onclick="ToggleAllAreas"><span></span></button></div>
+                </div>
+                <div class="rg-body ad-where">
+                    @foreach (var a in areas)
+                    {
+                        var aid = a.Id;
+                        var areaOn = allAreas || areaIds.Contains(aid);
+                        <label class="ad-chk area"><input type="checkbox" checked="@areaOn" disabled="@allAreas" @onchange="e => SetArea(aid, (bool)e.Value!)" /><b>@a.Name</b><small>aire · @screens.Count(s => s.AreaId == aid) écran@(screens.Count(s => s.AreaId == aid) > 1 ? "s" : "")</small></label>
+                        @foreach (var s in screens.Where(s => s.AreaId == aid))
+                        {
+                            var sid = s.Id;
+                            var fits = fitting.Contains(sid);
+                            <label class="ad-chk scr @(fits ? "" : "off")"><input type="checkbox" checked="@(fits && areaOn && !screensOff.Contains(sid))" disabled="@(!fits || !areaOn)" @onchange="e => SetScreen(sid, (bool)e.Value!)" />@s.Name<small>@(fits ? (s.Orientation == "portrait" ? "portrait" : "paysage") : walls.Contains(sid) ? "mur : pas de pub" : "écran découpé : pas de pub")</small></label>
+                        }
+                    }
+                    <p class="hint" style="margin:10px 0 0">Un écran découpé en zones ou membre d'un mur ne diffuse pas de publicité.</p>
+                </div>
+            </div>
+
+            <div class="rg-card">
+                <header><h3>Catégories que je refuse</h3><small>Les spots de ces catégories ne vous sont jamais proposés.</small></header>
+                <div class="rg-body ad-tags">
+                    @foreach (var (id, label) in AdCategories.All.Where(c => c.Id != AdCategories.Other))
+                    {
+                        var cid = id;
+                        <label><input type="checkbox" checked="@excluded.Contains(cid)" @onchange="e => SetCategory(cid, (bool)e.Value!)" /> @label</label>
+                    }
+                </div>
+            </div>
+
+            <div class="rg-card">
+                <div class="sv-row"><div class="t"><b>Mes revenus</b><small>Passages complets, temps d'affichage et relevés mensuels.</small></div><div class="ctl"><a href="/stats?tab=pub">Statistiques › Publicité</a></div></div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Le nombre de spots à valider a changé (pastille de la rubrique dans les Réglages).</summary>
+    [Parameter] public EventCallback<int> OnPending { get; set; }
+
+    private bool growth, on, allAreas;
+    private List<Area> areas = new();
+    private List<Screen> screens = new();
+    private HashSet<Guid> areaIds = new(), screensOff = new(), fitting = new(), walls = new();
+    private HashSet<string> excluded = new();
+    private List<AdSpotState> pending = new(), decided = new();
+    private List<string> alerts = new();
+
+    protected override void OnInitialized() => Load();
+
+    private void Load()
+    {
+        var now = DateTime.UtcNow;
+        Store.Read(d =>
+        {
+            var t = d.Tenant;
+            growth = t.IsGrowth; on = t.AdsOn; allAreas = t.AdsAllAreas;
+            areaIds = t.AdsAreas.ToHashSet(); screensOff = t.AdsScreensOff.ToHashSet(); excluded = t.AdsExcluded.ToHashSet();
+            areas = d.Areas.OrderBy(a => a.Name).ToList();
+            screens = d.Root.Screens.Where(s => s.ClientId == t.Id && s.Token != null).OrderBy(s => s.Name).ToList();
+            fitting = screens.Where(s => Ads.ScreenFits(d.Root, s)).Select(s => s.Id).ToHashSet();
+            walls = screens.Where(s => Helpers.Wall(d.Root.Areas, s) != null).Select(s => s.Id).ToHashSet();
+            var states = Ads.States(d.Root, t, now);
+            pending = states.Where(x => x.State == AdSpotState.Pending).OrderBy(x => x.Deadline).ToList();
+            decided = states.Where(x => x.State != AdSpotState.Pending).OrderBy(x => x.Campaign.Advertiser).ToList();
+            // alertes : écrans autorisés hors ligne pendant une campagne en cours, format absent pour des écrans de l'organisation
+            alerts = new();
+            var playing = states.Where(x => x.Plays).ToList();
+            if (playing.Count > 0)
+            {
+                foreach (var s in screens.Where(s => Ads.ScreenAllowed(d.Root, t, s) && !ScreenControl.Online(s, now)))
+                    alerts.Add($"« {s.Name} » est hors ligne{(s.LastSeenUtc is { } ls ? " depuis " + Ago(now - ls) : "")} : les passages prévus ne sont pas comptés tant qu'il n'est pas reconnecté.");
+                var hasPortrait = screens.Any(s => s.Orientation == "portrait" && Ads.ScreenAllowed(d.Root, t, s));
+                var hasLandscape = screens.Any(s => s.Orientation != "portrait" && Ads.ScreenAllowed(d.Root, t, s));
+                foreach (var x in playing.Where(x => hasPortrait && x.Spot.Portrait == null || hasLandscape && x.Spot.Landscape == null))
+                    alerts.Add($"Le spot « {x.Campaign.Advertiser} · {x.Spot.Name} » n'a pas de visuel {(x.Spot.Portrait == null ? "portrait" : "paysage")} : il s'affiche centré sur fond flouté sur ces écrans.");
+            }
+            return 0;
+        });
+    }
+
+    private async Task Save(Action<Tenant> change, string message)
+    {
+        if (!growth) return;
+        Store.Write(d => change(d.Tenant));
+        Load();
+        await OnPending.InvokeAsync(pending.Count);
+        await Notifier.NotifyClient(Store.ClientId);   // les écrans rechargent leur configuration tout de suite (sinon au prochain sondage)
+        Toast.Ok(message);
+    }
+
+    private Task ToggleOn() => Save(t =>
+    {
+        t.AdsOn = !t.AdsOn;
+        if (t.AdsOn) t.AdsSinceUtc = DateTime.UtcNow;   // le délai de réponse aux spots déjà en cours part d'aujourd'hui
+    }, on ? "Publicité désactivée : les spots quittent vos écrans." : "Publicité activée. Validez les spots proposés.");
+
+    private Task ToggleAllAreas() => Save(t =>
+    {
+        t.AdsAllAreas = !t.AdsAllAreas;
+        if (!t.AdsAllAreas && t.AdsAreas.Count == 0) t.AdsAreas = areas.Select(a => a.Id).ToList();   // repart de « toutes cochées »
+    }, "Réglage enregistré.");
+
+    private Task SetArea(Guid id, bool value) => Save(t => { t.AdsAreas.Remove(id); if (value) t.AdsAreas.Add(id); }, "Réglage enregistré.");
+    private Task SetScreen(Guid id, bool value) => Save(t => { t.AdsScreensOff.Remove(id); if (!value) t.AdsScreensOff.Add(id); }, "Réglage enregistré.");
+    private Task SetCategory(string id, bool refuse) => Save(t => { t.AdsExcluded.Remove(id); if (refuse) t.AdsExcluded.Add(id); }, refuse ? "Catégorie refusée." : "Catégorie acceptée.");
+
+    private async Task Decide(AdSpotState x, bool accept)
+    {
+        if (!growth) return;
+        var cid = Store.ClientId;
+        var by = Ctx.Email ?? "";
+        Store.Write(d =>
+        {
+            d.Root.AdDecisions.RemoveAll(a => a.ClientId == cid && a.SpotId == x.Spot.Id);
+            d.Root.AdDecisions.Add(new AdDecision { ClientId = cid, SpotId = x.Spot.Id, Accepted = accept, By = by });
+        });
+        Load();
+        await OnPending.InvokeAsync(pending.Count);
+        await Notifier.NotifyClient(cid);
+        Toast.Ok(accept ? "Spot accepté : il sera diffusé sur vos écrans." : "Spot refusé : il ne sera pas diffusé.");
+    }
+
+    private static string Formats(AdSpot s) => s.Landscape != null && s.Portrait != null ? "2 formats" : s.Landscape != null ? "paysage seul" : "portrait seul";
+    private static string HoursLabel(int h) => h == 168 ? "7 jours" : $"{h} heures";
+    private static string Left(DateTime deadline)
+    {
+        var l = deadline - DateTime.UtcNow;
+        if (l <= TimeSpan.Zero) return "quelques instants";
+        return l.TotalDays >= 1 ? $"{(int)l.TotalDays} jour{((int)l.TotalDays > 1 ? "s" : "")} {l.Hours} h" : l.TotalHours >= 1 ? $"{(int)l.TotalHours} h {l.Minutes:00}" : $"{Math.Max(1, l.Minutes)} min";
+    }
+    private static string Ago(TimeSpan t) => t.TotalHours >= 1 ? $"{(int)t.TotalHours} h" : $"{Math.Max(1, (int)t.TotalMinutes)} min";
+}

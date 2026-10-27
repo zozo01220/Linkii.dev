@@ -207,9 +207,9 @@ public class ClientDb
         return s;
     }
 
-    public Helpers.DeliveryInfo? Delivery(Screen s) => Helpers.Delivery(s, Playlists.FirstOrDefault(p => p.Id == s.PlaylistId), Tenant, Reseller, Helpers.SyncStamp(_root.Areas, _root.Screens, s), DateTime.UtcNow);
+    public Helpers.DeliveryInfo? Delivery(Screen s) => Helpers.Delivery(s, Playlists.FirstOrDefault(p => p.Id == s.PlaylistId), Tenant, Reseller, Helpers.SyncStamp(_root, s), DateTime.UtcNow);
 
-    public string Status(Screen s) => Helpers.Status(s, Playlists.FirstOrDefault(p => p.Id == s.PlaylistId), Tenant, Reseller, Helpers.SyncStamp(_root.Areas, _root.Screens, s));
+    public string Status(Screen s) => Helpers.Status(s, Playlists.FirstOrDefault(p => p.Id == s.PlaylistId), Tenant, Reseller, Helpers.SyncStamp(_root, s));
 }
 
 public static class Claims

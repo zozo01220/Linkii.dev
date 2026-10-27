@@ -1,0 +1,83 @@
+@inject JsonStore Root
+@inject AdLog Log
+
+@* Relevé mensuel des revenus publicitaires d'un compte (décision 13 du §45) : une ligne par campagne et par écran (passages complets, interrompus non payés,
+   temps d'affichage, tarif, part, montant), total, statut, numéro et empreinte. Imprimable (PDF par l'impression du navigateur) et exportable en CSV. *@
+<div class="no-print row" style="gap:8px;margin-bottom:16px">
+    @if (Back != null) { <a class="back-link" href="@Back">← @BackLabel</a> }
+    <span class="grow"></span>
+    <button type="button" class="btn" onclick="window.print()"><Ico Name="download" Size="16" /> Télécharger le PDF</button>
+    <a class="btn ghost" download="releve-publicite-@(Month).csv" href="@csvHref">CSV</a>
+</div>
+
+<article class="ad-doc">
+    <div class="row" style="justify-content:space-between;align-items:baseline"><h1>Relevé de revenus publicitaires</h1><span class="mono muted">N° @number</span></div>
+    <div class="meta">
+        <span>Titulaire</span><b>@clientName</b>
+        <span>Période</span><b>@periodLabel</b>
+        <span>Fuseau</span><b>@tz</b>
+        <span>Règle</span><b>Seuls les passages complets (100 % de la durée prévue) sont rémunérés. Part du propriétaire propre à chaque campagne.</b>
+    </div>
+    <h2>Détail par campagne et par écran</h2>
+    @if (rows.Count == 0) { <p class="muted">Aucun passage de spot sur ce mois.</p> }
+    else
+    {
+        <table>
+            <thead><tr><th>Campagne</th><th>Écran</th><th class="num">Complets</th><th class="num">Interr.</th><th class="num">Temps</th><th class="num">Tarif</th><th class="num">Part</th><th class="num">Montant</th></tr></thead>
+            <tbody>
+                @foreach (var r in rows)
+                {
+                    <tr><td>@r.Campaign @if (r.Filler) { <span class="pill warn">à temps perdu</span> }</td><td>@r.Screen</td><td class="num">@r.Row.Complete.ToString("N0", Ads.Fr)</td><td class="num">@r.Row.Interrupted</td><td class="num">@Ads.Human(r.Row.Seconds)</td><td class="num">@r.Row.Price.ToString("0.000", Ads.Fr)</td><td class="num">@r.Row.SharePct %</td><td class="num">@Ads.Chf(r.Row.Owner)</td></tr>
+                }
+                <tr class="tot"><td><b>Total @periodShort</b></td><td></td><td class="num"><b>@rows.Sum(r => r.Row.Complete).ToString("N0", Ads.Fr)</b></td><td class="num"><b>@rows.Sum(r => r.Row.Interrupted)</b></td><td class="num"><b>@Ads.Human(rows.Sum(r => r.Row.Seconds))</b></td><td></td><td></td><td class="num"><b>@Ads.Chf(rows.Sum(r => r.Row.Owner))</b></td></tr>
+            </tbody>
+        </table>
+    }
+    <h2>Statut</h2>
+    <p><span class="pill @AdStatementStates.Css(status)">@AdStatementStates.Label(status)</span> &nbsp;Le paiement se fait hors Linkivi. Statuts possibles : à valider, validé, payé.</p>
+    <h2>Intégrité</h2>
+    <p class="hash">Empreinte SHA-256 du journal : @hash</p>
+    <p class="muted small">Chaque passage a un identifiant unique et l'heure du serveur ; les passages enregistrés pendant une coupure réseau de l'écran sont signalés (@offline sur ce mois). Captures horodatées en annexe sur demande.</p>
+</article>
+
+@code {
+    [Parameter] public Guid ClientId { get; set; }
+    [Parameter] public string Month { get; set; } = "";
+    [Parameter] public string? Back { get; set; }
+    [Parameter] public string BackLabel { get; set; } = "Retour";
+
+    private record Line(AdRow Row, string Campaign, string Screen, bool Filler);
+    private List<Line> rows = new();
+    private string clientName = "", tz = "", periodLabel = "", periodShort = "", number = "", hash = "", status = "", csvHref = "";
+    private int offline;
+
+    protected override void OnParametersSet()
+    {
+        var t = Root.Read(db => db.Clients.FirstOrDefault(c => c.Id == ClientId));
+        if (t == null || !DateTime.TryParseExact(Month + "-01", "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out _)) return;   // adresse mal formée : document vide
+        clientName = t.Name; tz = t.Timezone;
+        var zone = AdReports.Zone(tz);
+        var (from, to) = AdReports.Month(Month, zone);
+        var plays = Log.Read(ClientId, from).Where(p => p.StartUtc < to).ToList();
+        var first = DateTime.ParseExact(Month + "-01", "yyyy-MM-dd", null);
+        periodLabel = $"{first.ToString("d MMMM", Ads.Fr)} → {first.AddMonths(1).AddDays(-1).ToString("d MMMM yyyy", Ads.Fr)}";
+        periodShort = first.ToString("MMMM", Ads.Fr);
+        hash = AdReports.Fingerprint(plays);
+        number = AdReports.Number("RV", Month, hash);
+        offline = plays.Count(p => p.Offline);
+        (rows, status) = Root.Read(db =>
+        {
+            var camps = db.AdCampaigns.ToList();
+            var list = AdReports.Rows(plays, camps).Select(r =>
+            {
+                var c = camps.FirstOrDefault(x => x.Id == r.CampaignId);
+                return new Line(r, c?.Advertiser ?? "(campagne supprimée)", db.Screens.FirstOrDefault(s => s.Id == r.ScreenId)?.Name ?? "(écran supprimé)", c?.Mode == AdModes.Filler);
+            }).ToList();
+            return (list, Ads.StatementStatus(db, ClientId, Month, TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, zone)));
+        });
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var csv = new List<string[]> { new[] { "Campagne", "Écran", "Passages complets", "Interrompus", "Temps (s)", "Tarif (CHF)", "Part (%)", "Montant (CHF)" } };
+        csv.AddRange(rows.Select(r => new[] { r.Campaign, r.Screen, r.Row.Complete.ToString(), r.Row.Interrupted.ToString(), r.Row.Seconds.ToString(), r.Row.Price.ToString("0.000", inv), r.Row.SharePct.ToString(), r.Row.Owner.ToString("0.00", inv) }));
+        csvHref = "data:text/csv;charset=utf-8," + Uri.EscapeDataString("﻿" + AdReports.Csv(csv));
+    }
+}

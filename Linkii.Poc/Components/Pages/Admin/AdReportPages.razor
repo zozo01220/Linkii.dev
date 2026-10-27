@@ -1,0 +1,94 @@
+@page "/admin/ads/{Id:guid}/report/{Month}"
+@page "/admin/ads/statement/{ClientId:guid}/{Month}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "PlatformAdmin")]
+@inject JsonStore Root
+@inject AdLog Log
+
+@* Documents de l'administration : rapport de preuve d'une campagne (remis à l'annonceur) ou relevé mensuel d'un compte. Imprimables en PDF. *@
+@if (ClientId is { } cid)
+{
+    <AdStatementDoc ClientId="cid" Month="@Month" Back="/admin/ads" BackLabel="Publicité" />
+}
+else if (c == null)
+{
+    <div class="card empty"><div class="big">Campagne introuvable</div><p><a href="/admin/ads">Retour aux campagnes</a></p></div>
+}
+else
+{
+    <div class="no-print row" style="gap:8px;margin-bottom:16px">
+        <a class="back-link" href="/admin/ads/@Id">← Campagne</a>
+        <span class="grow"></span>
+        <button type="button" class="btn" onclick="window.print()"><Ico Name="download" Size="16" /> Télécharger le PDF</button>
+    </div>
+    <article class="ad-doc">
+        <div class="row" style="justify-content:space-between;align-items:baseline"><h1>Preuve de diffusion</h1><span class="mono muted">N° @number</span></div>
+        <div class="meta">
+            <span>Annonceur</span><b>@c.Advertiser</b>
+            <span>Campagne</span><b>@c.Name (@c.Spots.Count spot@(c.Spots.Count > 1 ? "s" : ""), @string.Join(" et ", c.Spots.Select(s => s.DurationSec + " s").Distinct()))</b>
+            <span>Diffusion</span><b>@AdModes.Label(c.Mode)</b>
+            <span>Période</span><b>@periodLabel</b>
+            <span>Fuseau</span><b>Europe/Zurich</b>
+            <span>Définition</span><b>Passage complet : 100 % de la durée prévue, sans pause, veille ni coupure.</b>
+        </div>
+        <h2>Synthèse par semaine</h2>
+        <table>
+            <thead><tr><th>Période</th><th class="num">Complets</th><th class="num">Interrompus</th><th class="num">Temps d'affichage</th><th class="num">Montant</th></tr></thead>
+            <tbody>
+                @foreach (var w in weeks) { <tr><td>@w.Label</td><td class="num">@w.Complete.ToString("N0", Ads.Fr)</td><td class="num">@w.Cut</td><td class="num">@Ads.Human(w.Seconds)</td><td class="num">@Ads.Chf(w.Complete * c.PricePerPlay)</td></tr> }
+                <tr class="tot"><td><b>Total du mois</b></td><td class="num"><b>@weeks.Sum(w => w.Complete).ToString("N0", Ads.Fr)</b></td><td class="num"><b>@weeks.Sum(w => w.Cut)</b></td><td class="num"><b>@Ads.Human(weeks.Sum(w => w.Seconds))</b></td><td class="num"><b>@Ads.Chf(weeks.Sum(w => w.Complete) * c.PricePerPlay)</b></td></tr>
+            </tbody>
+        </table>
+        <h2>Par écran</h2>
+        <table>
+            <thead><tr><th>Écran (compte)</th><th>Format</th><th class="num">Complets</th><th class="num">Temps</th></tr></thead>
+            <tbody>
+                @foreach (var s in screens) { <tr><td>@s.Name</td><td>@s.Format</td><td class="num">@s.Complete.ToString("N0", Ads.Fr)</td><td class="num">@Ads.Human(s.Seconds)</td></tr> }
+            </tbody>
+        </table>
+        <h2>Intégrité</h2>
+        <p class="hash">Empreinte SHA-256 du journal : @hash</p>
+        <p class="muted small">Chaque passage a un identifiant unique ; l'heure est celle du serveur ; deux passages qui se chevauchent sur un même écran sont écartés ; les passages enregistrés pendant une coupure réseau de l'écran sont signalés (@offline). Captures horodatées en annexe sur demande.</p>
+    </article>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    [Parameter] public Guid? ClientId { get; set; }
+    [Parameter] public string Month { get; set; } = "";
+
+    private AdCampaign? c;
+    private record Week(string Label, int Complete, int Cut, long Seconds);
+    private record ScreenLine(string Name, string Format, int Complete, long Seconds);
+    private List<Week> weeks = new();
+    private List<ScreenLine> screens = new();
+    private string number = "", hash = "", periodLabel = "";
+    private int offline;
+
+    protected override void OnParametersSet()
+    {
+        if (ClientId != null) return;
+        c = Root.Read(db => db.AdCampaigns.FirstOrDefault(x => x.Id == Id));
+        if (c == null || !DateTime.TryParseExact(Month + "-01", "yyyy-MM-dd", null, System.Globalization.DateTimeStyles.None, out _)) { c = null; return; }
+        var zone = AdReports.Zone("Europe/Zurich");
+        var (from, to) = AdReports.Month(Month, zone);
+        var plays = Log.ReadAll(from).Where(p => p.Play.StartUtc < to && p.Play.CampaignId == Id).ToList();
+        var first = DateTime.ParseExact(Month + "-01", "yyyy-MM-dd", null);
+        periodLabel = $"{first.ToString("d MMMM", Ads.Fr)} → {first.AddMonths(1).AddDays(-1).ToString("d MMMM yyyy", Ads.Fr)}";
+        hash = AdReports.Fingerprint(plays.Select(p => p.Play));
+        number = AdReports.Number("PD", Month, hash);
+        offline = plays.Count(p => p.Play.Offline);
+        // semaines ISO (lundi), dans le fuseau
+        weeks = plays.GroupBy(p => System.Globalization.ISOWeek.GetWeekOfYear(TimeZoneInfo.ConvertTimeFromUtc(p.Play.StartUtc, zone)))
+            .OrderBy(g => g.Min(p => p.Play.StartUtc))
+            .Select(g => new Week($"Semaine {g.Key}", g.Count(p => p.Play.Complete), g.Count(p => !p.Play.Complete), g.Where(p => p.Play.Complete).Sum(p => (long)p.Play.PlannedMs) / 1000))
+            .ToList();
+        screens = Root.Read(db => plays.GroupBy(p => p.Play.ScreenId).Select(g =>
+        {
+            var s = db.Screens.FirstOrDefault(x => x.Id == g.Key);
+            var org = db.Clients.FirstOrDefault(x => x.Id == g.First().ClientId)?.Name;
+            var fmt = g.Select(p => p.Play.Format).Distinct().ToList();
+            return new ScreenLine($"{s?.Name ?? "(écran supprimé)"} ({org})", fmt.Count > 1 ? "Mixte" : fmt[0] == "portrait" ? "Portrait" : "Paysage",
+                g.Count(p => p.Play.Complete), g.Where(p => p.Play.Complete).Sum(p => (long)p.Play.PlannedMs) / 1000);
+        }).OrderByDescending(x => x.Complete).ToList());
+    }
+}

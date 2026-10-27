@@ -1,0 +1,350 @@
+@page "/admin/ads/{Id:guid}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "PlatformAdmin")]
+@inject JsonStore Root
+@inject AdLog Log
+@inject NavigationManager Nav
+@inject Toaster Toast
+
+@* Une campagne : spots (visuel paysage et/ou portrait, durée 10, 15, 20 ou 30 s), annonceur et période, tarif et part du propriétaire (propres à la campagne),
+   diffusion (intercalée ou à temps perdu, rythme, plafonds, délai de réponse des propriétaires), comptes concernés, résultats et rapport de preuve. *@
+@if (c == null)
+{
+    <div class="card empty"><div class="big">Campagne introuvable</div><p><a href="/admin/ads">Retour aux campagnes</a></p></div>
+}
+else
+{
+    <div class="page-head">
+        <div>
+            <a class="back-link" href="/admin/ads">← Campagnes</a>
+            <h1>@(c.Advertiser.Length > 0 ? c.Advertiser : "Nouvelle campagne")@(c.Name.Length > 0 ? " · " + c.Name : "")</h1>
+            <p class="sub sc-intro">@(Ads.Day(c.Start)?.ToString("d MMM", Ads.Fr)) → @(Ads.Day(c.End)?.ToString("d MMM yyyy", Ads.Fr)) · @AdModes.Label(c.Mode)@(c.Stopped ? " · arrêtée" : "")</p>
+        </div>
+        <div class="row" style="gap:8px">
+            <button type="button" class="btn ghost" @onclick="ToggleStop">@(c.Stopped ? "Reprendre la diffusion" : "Arrêter la diffusion")</button>
+            <button type="button" class="btn" @onclick="Save">Enregistrer</button>
+        </div>
+    </div>
+
+    <div class="adm-tabs" role="tablist">
+        <button type="button" class="@(tab == "edit" ? "on" : "")" @onclick='() => tab = "edit"'>Campagne et spots</button>
+        <button type="button" class="@(tab == "results" ? "on" : "")" @onclick='() => { tab = "results"; LoadResults(); }'>Résultats</button>
+    </div>
+
+    @if (tab == "edit")
+    {
+        <div class="ad-cols">
+            <div>
+                <section class="adm-card">
+                    <div class="adm-ct">Spots <span>pleine page · vidéo sans son</span></div>
+                    @foreach (var s in c.Spots)
+                    {
+                        var spot = s;
+                        <div class="ad-spot">
+                            <div class="row" style="gap:10px;margin-bottom:10px">
+                                <input class="grow" @bind="spot.Name" placeholder="Nom du spot" aria-label="Nom du spot" />
+                                <div class="ad-dur" role="group" aria-label="Durée">
+                                    @foreach (var d in Ads.Durations) { var dd = d; <button type="button" class="@(spot.DurationSec == dd ? "on" : "")" @onclick="() => spot.DurationSec = dd">@dd s</button> }
+                                </div>
+                                <button type="button" class="btn ghost icon" aria-label="Retirer ce spot" title="Retirer ce spot" @onclick="() => RemoveSpot(spot)"><Ico Name="trash" Size="16" /></button>
+                            </div>
+                            <div class="ad-formats">
+                                <div class="ad-fmt">
+                                    <span class="lb"><b>Paysage 16:9</b> · @(spot.Landscape == null ? "absent" : spot.LandscapeType == "video" ? "vidéo" : "image")</span>
+                                    @if (spot.Landscape != null) { <AdShot Url="@("/ads/" + spot.Landscape)" Type="@spot.LandscapeType" Portrait="false" /> }
+                                    else { <label class="ad-drop land"><InputFile OnChange="e => Upload(spot, false, e)" accept=".jpg,.jpeg,.png,.webp,.mp4,.webm" />Choisir un visuel paysage</label> }
+                                    @if (spot.Landscape != null) { <button type="button" class="linklike" @onclick="() => { spot.Landscape = null; spot.LandscapeType = null; }">Retirer</button> }
+                                </div>
+                                <div class="ad-fmt">
+                                    <span class="lb"><b>Portrait 9:16</b> · @(spot.Portrait == null ? "absent" : spot.PortraitType == "video" ? "vidéo" : "image")</span>
+                                    @if (spot.Portrait != null) { <AdShot Url="@("/ads/" + spot.Portrait)" Type="@spot.PortraitType" Portrait="true" /> }
+                                    else { <label class="ad-drop port"><InputFile OnChange="e => Upload(spot, true, e)" accept=".jpg,.jpeg,.png,.webp,.mp4,.webm" />Choisir un visuel portrait</label> }
+                                    @if (spot.Portrait != null) { <button type="button" class="linklike" @onclick="() => { spot.Portrait = null; spot.PortraitType = null; }">Retirer</button> }
+                                </div>
+                                @if (spot.Ready && (spot.Landscape == null || spot.Portrait == null))
+                                {
+                                    <div class="ad-fmt">
+                                        <span class="lb">Rendu sur un écran @(spot.Portrait == null ? "portrait" : "paysage")</span>
+                                        <AdShot Url="@("/ads/" + (spot.Landscape ?? spot.Portrait))" Type="@(spot.LandscapeType ?? spot.PortraitType)" Portrait="@(spot.Portrait == null)" Blur="true" />
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                    @if (uploading) { <p class="adm-note">Envoi du fichier…</p> }
+                    <p class="adm-note">L'étiquette « Publicité » est ajoutée par Linkivi dans l'angle de chaque spot : le propriétaire ne peut pas la retirer. Sans visuel portrait, un écran en portrait affiche le visuel paysage <b>centré sur un fond flouté</b>, jamais déformé ni recadré (et inversement).</p>
+                    <button type="button" class="btn ghost sm" @onclick="AddSpot"><Ico Name="plus" Size="14" /> Ajouter un spot</button>
+                </section>
+
+                <section class="adm-card" style="margin-top:14px">
+                    <div class="adm-ct">Quel visuel sur quel écran</div>
+                    <div class="adm-ln"><span>Écran paysage</span><span>Visuel 16:9</span></div>
+                    <div class="adm-ln"><span>Écran portrait</span><span>Visuel 9:16</span></div>
+                    <div class="adm-ln"><span>Autre ratio (4:3, carré…)</span><span>Visuel le plus proche, centré sur fond flouté</span></div>
+                    <div class="adm-ln"><span>Écran découpé ou mur</span><span>Pas de publicité</span></div>
+                </section>
+            </div>
+
+            <div>
+                <section class="adm-card">
+                    <div class="adm-ct">Annonceur et période</div>
+                    <label class="lbl">Annonceur</label><input class="full" @bind="c.Advertiser" />
+                    <label class="lbl">Campagne</label><input class="full" @bind="c.Name" placeholder="Menu de la rentrée" />
+                    <label class="lbl">Catégorie</label>
+                    <select class="full" @bind="c.Category">@foreach (var (id, label) in AdCategories.All) { <option value="@id">@label</option> }</select>
+                    <small class="adm-sub">Les propriétaires peuvent refuser des catégories.</small>
+                    <div class="form-grid">
+                        <div><label class="lbl">Début</label><input type="date" class="full" value="@c.Start" @onchange='e => c.Start = e.Value?.ToString() ?? ""' /></div>
+                        <div><label class="lbl">Fin</label><input type="date" class="full" value="@c.End" @onchange='e => c.End = e.Value?.ToString() ?? ""' /></div>
+                    </div>
+                </section>
+
+                <section class="adm-card" style="margin-top:14px">
+                    <div class="adm-ct">Tarif et plafonds <span class="adm-plan">propres à cette campagne</span></div>
+                    <div class="form-grid">
+                        <div><label class="lbl">Prix par passage complet (CHF)</label><input type="number" step="0.001" min="0" class="full mono" @bind="c.PricePerPlay" /></div>
+                        <div><label class="lbl">Part du propriétaire (%)</label><input type="number" min="0" max="100" class="full mono" @bind="c.OwnerSharePct" /></div>
+                        <div><label class="lbl">Plafond de passages (0 : aucun)</label><input type="number" min="0" class="full mono" @bind="c.MaxPlays" /></div>
+                        <div><label class="lbl">Plafond par jour et par écran</label><input type="number" min="1" class="full mono" @bind="c.MaxPerDayPerScreen" /></div>
+                    </div>
+                    <p class="adm-note" style="margin-top:10px">Seuls les passages <b>complets</b> (100 % de la durée, sans pause, veille ni coupure) sont facturés et reversés.</p>
+                </section>
+
+                <section class="adm-card" style="margin-top:14px">
+                    <div class="adm-ct">Diffusion</div>
+                    <div class="ad-modes">
+                        <button type="button" class="@(c.Mode == AdModes.Between ? "on" : "")" @onclick="() => c.Mode = AdModes.Between"><b>Intercalé</b><small>Le spot s'insère entre deux contenus, jamais au milieu.</small></button>
+                        <button type="button" class="@(c.Mode == AdModes.Filler ? "on" : "")" @onclick="() => c.Mode = AdModes.Filler"><b>À temps perdu</b><small>Seulement quand l'écran n'a rien d'autre à afficher (trou de planning, liste vide). Aucun volume garanti.</small></button>
+                    </div>
+                    @if (c.Mode == AdModes.Between)
+                    {
+                        <label class="lbl">Rythme</label>
+                        <select class="full" @bind="Rhythm">
+                            @foreach (var (key, label) in Rhythms) { <option value="@key">@label</option> }
+                        </select>
+                    }
+                    <label class="lbl">Plafond par heure et par écran</label>
+                    <input type="number" min="1" max="120" class="full mono" @bind="c.MaxPerHour" />
+                    <small class="adm-sub">@(c.Mode == AdModes.Filler ? "Même dans les creux, l'écran ne passe pas ce spot plus souvent." : $"Par défaut : {Ads.DefaultMaxPerHour}, jamais dépassé.")</small>
+                    <label class="lbl">Délai de réponse du propriétaire</label>
+                    <select class="full" @bind="c.ValidationHours">
+                        @foreach (var h in Ads.ValidationChoices) { <option value="@h">@(h == 168 ? "7 jours" : h + " heures")@(h == Ads.DefaultValidationHours ? " (par défaut)" : "")</option> }
+                    </select>
+                    <small class="adm-sub">Sans réponse, un spot qui respecte les exclusions du propriétaire est diffusé. Rappel par e-mail @Ads.ReminderHours h avant l'échéance.</small>
+                    <label class="lbl">Comptes concernés</label>
+                    <select class="full" @bind="c.AllClients">
+                        <option value="true">Tous les comptes Pro qui acceptent la publicité (@accepting)</option>
+                        <option value="false">Une sélection de comptes…</option>
+                    </select>
+                    @if (!c.AllClients)
+                    {
+                        <div class="ad-pick">
+                            @foreach (var t in proClients)
+                            {
+                                var tid = t.Id;
+                                <label><input type="checkbox" checked="@c.Clients.Contains(tid)" @onchange="e => { if ((bool)e.Value!) c.Clients.Add(tid); else c.Clients.Remove(tid); }" /> @t.Name @if (!t.AdsOn) { <small>(publicité désactivée)</small> }</label>
+                            }
+                            @if (proClients.Count == 0) { <span class="adm-note">Aucun compte Pro.</span> }
+                        </div>
+                    }
+                </section>
+
+                <section class="adm-card" style="margin-top:14px">
+                    <div class="adm-ct">Valeurs par défaut de Linkivi</div>
+                    <div class="adm-ln"><span>Durées de spot</span><span class="m">10, 15, 20, 30 s</span></div>
+                    <div class="adm-ln"><span>Rythme intercalé</span><span class="m">1 spot / @Ads.DefaultEveryItems contenus</span></div>
+                    <div class="adm-ln"><span>Plafond horaire</span><span class="m">@Ads.DefaultMaxPerHour / h / écran</span></div>
+                    <div class="adm-ln"><span>Délai de validation</span><span class="m">@Ads.DefaultValidationHours h</span></div>
+                    <div class="adm-ln"><span>Étiquette « Publicité »</span><span>toujours affichée</span></div>
+                </section>
+
+                @if (Log.Total(c.Id) == 0)
+                {
+                    <div class="adm-danger"><div><b>Supprimer la campagne</b><small>Possible tant qu'aucun passage n'a été compté.</small></div><button type="button" class="btn danger sm" @onclick="Delete">Supprimer</button></div>
+                }
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="adm-tools">
+            <select @bind="month" @bind:after="LoadResults" aria-label="Mois">
+                @foreach (var m in Months) { <option value="@m">@Ads.Fr.TextInfo.ToTitleCase(DateTime.ParseExact(m + "-01", "yyyy-MM-dd", null).ToString("MMMM yyyy", Ads.Fr))</option> }
+            </select>
+            <span class="grow"></span>
+            <a class="btn ghost sm" href="/admin/ads/@Id/report/@month">Rapport de preuve</a>
+            <a class="btn ghost sm" download="campagne-@(Tenancy.Slugify(c.Advertiser))-@(month).csv" href="@CsvHref">Exporter en CSV</a>
+        </div>
+        <div class="adm-k4">
+            <div class="adm-card"><div class="kl">Passages complets</div><div class="kn">@results.Sum(r => r.Row.Complete).ToString("N0", Ads.Fr)</div><div class="ks">sur le mois</div></div>
+            <div class="adm-card"><div class="kl">Temps d'affichage complet</div><div class="kn">@Ads.Human(results.Sum(r => r.Row.Seconds))</div><div class="ks">passages complets × durée</div></div>
+            <div class="adm-card"><div class="kl">Passages interrompus</div><div class="kn">@results.Sum(r => r.Row.Interrupted).ToString("N0", Ads.Fr)</div><div class="ks">non facturés</div></div>
+            <div class="adm-card"><div class="kl">Montant à facturer</div><div class="kn">@Ads.Chf(results.Sum(r => r.Row.Gross))</div><div class="ks">dont @Ads.Chf(results.Sum(r => r.Row.Owner)) reversés</div></div>
+        </div>
+        <div class="adm-card" style="margin-bottom:14px">
+            <div class="adm-ct">Passages complets par jour <span>barres orange : passages interrompus</span></div>
+            <div class="ad-chart">
+                @{ var max = Math.Max(1, days.Count == 0 ? 1 : days.Max(d => d.Complete + d.Cut)); }
+                @foreach (var d in days)
+                {
+                    <div class="col" title="@d.Label : @d.Complete complets, @d.Cut interrompus"><i class="cut" style="height:@(d.Cut * 100 / max)%"></i><i style="height:@(d.Complete * 100 / max)%"></i></div>
+                }
+            </div>
+        </div>
+        <div class="adm-card" style="padding:0">
+            @if (results.Count == 0) { <div class="adm-note" style="padding:18px">Aucun passage ce mois-ci.</div> }
+            else
+            {
+                <table class="adm-tbl">
+                    <thead><tr><th>Écran (compte)</th><th class="r">Complets</th><th class="r">Interrompus</th><th class="r">Temps complet</th><th class="r">Montant</th><th>Dernière diffusion</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in results)
+                        {
+                            <tr style="cursor:default"><td><b>@r.Screen</b> <span class="adm-sub" style="display:inline">(@r.Client)</span></td><td class="r m">@r.Row.Complete</td><td class="r m">@r.Row.Interrupted</td><td class="r m">@Ads.Human(r.Row.Seconds)</td><td class="r m">@Ads.Chf(r.Row.Gross)</td><td class="adm-sub">@r.Last.ToLocalTime().ToString("d.M HH:mm")</td></tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+        <p class="adm-note" style="margin-top:12px">Heures dans le fuseau Europe/Zurich. Les passages détaillés et les agrégats sont conservés 13 mois. Un passage est compté une seule fois (identifiant unique), à l'heure du serveur.</p>
+    }
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private AdCampaign? c;
+    private string tab = "edit", month = "";
+    private bool uploading;
+    private int accepting;
+    private List<Tenant> proClients = new();
+
+    private record ResultRow(AdRow Row, string Screen, string Client, DateTime Last);
+    private List<ResultRow> results = new();
+    private List<(string Label, int Complete, int Cut)> days = new();
+    private string CsvHref = "";
+
+    private static readonly TimeZoneInfo Zone = AdReports.Zone("Europe/Zurich");
+    private DateTime LocalNow => TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, Zone);
+    private IEnumerable<string> Months => Enumerable.Range(0, 13).Select(i => LocalNow.AddMonths(-i).ToString("yyyy-MM"));
+
+    private static readonly (string Key, string Label)[] Rhythms =
+    {
+        ("i3", "Un spot tous les 3 contenus"), ("i4", "Un spot tous les 4 contenus (par défaut)"), ("i6", "Un spot tous les 6 contenus"),
+        ("m5", "Toutes les 5 minutes"), ("m10", "Toutes les 10 minutes"), ("m15", "Toutes les 15 minutes")
+    };
+    private string Rhythm
+    {
+        get => c == null ? "i4" : c.EveryMinutes > 0 ? "m" + c.EveryMinutes : "i" + c.EveryItems;
+        set { if (c == null) return; var n = int.Parse(value[1..]); if (value[0] == 'm') { c.EveryMinutes = n; } else { c.EveryMinutes = 0; c.EveryItems = n; } }
+    }
+
+    protected override void OnParametersSet()
+    {
+        month = LocalNow.ToString("yyyy-MM");
+        // copie de travail : rien n'est écrit avant « Enregistrer »
+        (c, accepting, proClients) = Root.Read(db => (db.AdCampaigns.FirstOrDefault(x => x.Id == Id) is { } x ? Clone(x) : null, db.Clients.Count(Ads.On), db.Clients.Where(t => t.IsGrowth).OrderBy(t => t.Name).ToList()));
+    }
+
+    private static AdCampaign Clone(AdCampaign x)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(x);
+        return System.Text.Json.JsonSerializer.Deserialize<AdCampaign>(json)!;
+    }
+
+    private void AddSpot() => c!.Spots.Add(new AdSpot { Name = "Spot " + (c.Spots.Count + 1) });
+    private void RemoveSpot(AdSpot s) => c!.Spots.Remove(s);
+
+    private async Task Upload(AdSpot spot, bool portrait, InputFileChangeEventArgs e)
+    {
+        var f = e.File;
+        var type = Ads.FileType(f.Name);
+        if (type == null) { Toast.Error("Formats acceptés : JPG, PNG, WebP, MP4, WebM."); return; }
+        uploading = true;
+        try
+        {
+            var name = Guid.NewGuid().ToString("N") + Path.GetExtension(f.Name).ToLowerInvariant();
+            await using (var fs = File.Create(Path.Combine(Ads.Dir, name)))
+                await f.OpenReadStream(type == "video" ? 300_000_000 : 30_000_000).CopyToAsync(fs);
+            if (portrait) { spot.Portrait = name; spot.PortraitType = type; } else { spot.Landscape = name; spot.LandscapeType = type; }
+            Toast.Ok("Visuel ajouté. Enregistrez la campagne pour l'envoyer aux écrans.");
+        }
+        catch (IOException ex) { Toast.Error("Envoi impossible : " + ex.Message); }
+        finally { uploading = false; }
+    }
+
+    private bool Valid()
+    {
+        if (c!.Advertiser.Trim().Length == 0) { Toast.Error("L'annonceur est obligatoire."); return false; }
+        if (Ads.Day(c.Start) is not { } s || Ads.Day(c.End) is not { } e || e < s) { Toast.Error("La période n'est pas valable."); return false; }
+        if (c.PricePerPlay < 0 || c.OwnerSharePct is < 0 or > 100) { Toast.Error("Tarif ou part du propriétaire invalide."); return false; }
+        return true;
+    }
+
+    private void Save()
+    {
+        if (c == null || !Valid()) return;
+        c.Advertiser = c.Advertiser.Trim(); c.Name = c.Name.Trim();
+        c.MaxPerHour = Math.Clamp(c.MaxPerHour, 1, 120); c.MaxPerDayPerScreen = Math.Max(1, c.MaxPerDayPerScreen); c.MaxPlays = Math.Max(0, c.MaxPlays);
+        foreach (var s in c.Spots) { if (!Ads.Durations.Contains(s.DurationSec)) s.DurationSec = 15; s.Name = s.Name.Trim().Length > 0 ? s.Name.Trim() : "Spot"; }
+        var keep = c;
+        Root.Write(db =>
+        {
+            var i = db.AdCampaigns.FindIndex(x => x.Id == keep.Id);
+            var old = i >= 0 ? db.AdCampaigns[i] : null;
+            // un spot dont un visuel change est de nouveau à valider par les propriétaires
+            foreach (var s in keep.Spots)
+                if (old?.Spots.FirstOrDefault(o => o.Id == s.Id) is { } o && (o.Landscape != s.Landscape || o.Portrait != s.Portrait))
+                {
+                    s.CreatedUtc = DateTime.UtcNow;
+                    db.AdDecisions.RemoveAll(d => d.SpotId == s.Id);
+                    foreach (var t in db.Clients) t.AdsReminded.Remove(s.Id);
+                }
+            if (i >= 0) db.AdCampaigns[i] = Clone(keep); else db.AdCampaigns.Add(Clone(keep));
+        });
+        Toast.Ok("Campagne enregistrée. Les écrans la prennent à leur prochaine synchronisation.");
+    }
+
+    private void ToggleStop()
+    {
+        if (c == null) return;
+        c.Stopped = !c.Stopped;
+        var stopped = c.Stopped;
+        Root.Write(db => { if (db.AdCampaigns.FirstOrDefault(x => x.Id == Id) is { } x) x.Stopped = stopped; });
+        Toast.Ok(stopped ? "Diffusion arrêtée : les spots quittent les écrans." : "Diffusion reprise.");
+    }
+
+    private void Delete()
+    {
+        if (Log.Total(Id) > 0) return;
+        Root.Write(db => { db.AdCampaigns.RemoveAll(x => x.Id == Id); db.AdDecisions.RemoveAll(d => c!.Spots.Any(s => s.Id == d.SpotId)); });
+        Nav.NavigateTo("/admin/ads");
+    }
+
+    private void LoadResults()
+    {
+        if (c == null) return;
+        var (from, to) = AdReports.Month(month, Zone);
+        var plays = Log.ReadAll(from).Where(p => p.Play.StartUtc < to && p.Play.CampaignId == Id).ToList();
+        var camps = new List<AdCampaign> { c };
+        (results, var csvRows) = Root.Read(db =>
+        {
+            var rows = AdReports.Rows(plays.Select(p => p.Play), camps);
+            var list = rows.Select(r =>
+            {
+                var s = db.Screens.FirstOrDefault(x => x.Id == r.ScreenId);
+                var cl = plays.First(p => p.Play.ScreenId == r.ScreenId).ClientId;
+                return new ResultRow(r, s?.Name ?? "(écran supprimé)", db.Clients.FirstOrDefault(x => x.Id == cl)?.Name ?? "—", plays.Where(p => p.Play.ScreenId == r.ScreenId).Max(p => p.Play.StartUtc));
+            }).ToList();
+            var csv = new List<string[]> { new[] { "Compte", "Écran", "Passages complets", "Interrompus", "Temps complet (s)", "Prix (CHF)", "Montant (CHF)" } };
+            csv.AddRange(list.Select(x => new[] { x.Client, x.Screen, x.Row.Complete.ToString(), x.Row.Interrupted.ToString(), x.Row.Seconds.ToString(), x.Row.Price.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture), x.Row.Gross.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) }));
+            return (list, csv);
+        });
+        CsvHref = "data:text/csv;charset=utf-8," + Uri.EscapeDataString("﻿" + AdReports.Csv(csvRows));
+        var first = DateTime.ParseExact(month + "-01", "yyyy-MM-dd", null);
+        days = Enumerable.Range(0, DateTime.DaysInMonth(first.Year, first.Month)).Select(i => first.AddDays(i)).Select(d =>
+        {
+            var ofDay = plays.Where(p => TimeZoneInfo.ConvertTimeFromUtc(p.Play.StartUtc, Zone).Date == d).ToList();
+            return (d.ToString("d MMM", Ads.Fr), ofDay.Count(p => p.Play.Complete), ofDay.Count(p => !p.Play.Complete));
+        }).ToList();
+    }
+}

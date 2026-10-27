@@ -4,6 +4,7 @@
 @inject TenantStore Store
 @inject PlayLog PlayLog
 @inject ScanLog ScanLog
+@inject AdLog AdLog
 
 @* Statistiques (mode expert). Maquette validée : maquettes/statistiques.html. Plan Essential : seule la vue d'ensemble est ouverte, les autres onglets sont verrouillés. *@
 <div class="page-head">
@@ -184,10 +185,67 @@ else if (tab == "qr")
         <p class="hint">Taux de scan = scans ÷ passages du contenu sur la période. Le comptage ignore les robots et les doubles scans dans les 10 secondes. Aucune adresse IP n'est conservée.</p>
     }
 }
+else if (tab == "pub" && adsOn)
+{
+    @* Publicité (§45) : onglet présent seulement si la publicité est activée dans Réglages › Publicité. Revenus = part du propriétaire, passages complets seulement. *@
+    <div class="stats">
+        <div class="stat"><div class="n">@adComplete.ToString("N0", Fr)</div><div class="l">Passages complets</div></div>
+        <div class="stat"><div class="n">@Ads.Human(adSeconds)</div><div class="l">Temps d'affichage complet</div></div>
+        <div class="stat"><div class="n">@Ads.Chf(adRevenue)</div><div class="l">Revenus de la période</div></div>
+        <div class="stat"><div class="n">@Ads.Chf(adMonth)</div><div class="l">Cumul du mois</div></div>
+    </div>
+    <div class="st-grid">
+        <section class="card">
+            <h3>Passages complets @(period == "today" ? "par heure" : "par jour")</h3>
+            <StatBars Data="adBuckets" Label="Passages complets" />
+        </section>
+        <section class="card">
+            <h3>Par campagne</h3>
+            @if (adCampaignRows.Count == 0) { <p class="hint">Aucun spot diffusé sur cette période.</p> }
+            else
+            {
+                <table class="tbl st-tbl">
+                    <thead><tr><th>Annonceur</th><th class="num">Complets</th><th class="num">Revenus</th></tr></thead>
+                    <tbody>@foreach (var r in adCampaignRows) { <tr><td><b>@r.Name</b></td><td class="num">@r.Complete</td><td class="num">@Ads.Chf(r.Owner)</td></tr> }</tbody>
+                </table>
+            }
+        </section>
+    </div>
+    <section class="card">
+        <header><h3>Relevés</h3><small>un relevé par mois, avec son numéro et son empreinte</small></header>
+        <table class="tbl st-tbl">
+            <thead><tr><th>Mois</th><th class="num">Passages complets</th><th class="num">Temps d'affichage</th><th class="num">Montant</th><th>Statut</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var m in adMonths)
+                {
+                    <tr>
+                        <td>@m.Label</td><td class="num">@m.Complete.ToString("N0", Fr)</td><td class="num">@Ads.Human(m.Seconds)</td><td class="num">@Ads.Chf(m.Owner)</td>
+                        <td><span class="badge @(m.Status is AdStatementStates.Paid or AdStatementStates.Validated ? "en-ligne" : m.Status == AdStatementStates.ToValidate ? "mise-a-jour" : "neutre")">@AdStatementStates.Label(m.Status)</span></td>
+                        <td><a href="/stats/publicite/releve/@m.Month">Relevé</a></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </section>
+    <p class="hint">Les chiffres sont ceux de la preuve de diffusion de Linkivi : seuls les passages affichés en entier comptent, selon la part de chaque campagne. Conservation 13 mois. Les spots ne figurent ni dans vos listes de lecture ni dans votre planning.</p>
+}
 
 @code {
     private static readonly (string Key, string Label)[] Periods = { ("today", "Aujourd'hui"), ("7", "7 jours"), ("30", "30 jours") };
-    private static readonly (string Key, string Label)[] Tabs = { ("vue", "Vue d'ensemble"), ("diff", "Diffusion"), ("ecr", "Écrans"), ("qr", "Scans QR") };
+    private static readonly (string Key, string Label)[] BaseTabs = { ("vue", "Vue d'ensemble"), ("diff", "Diffusion"), ("ecr", "Écrans"), ("qr", "Scans QR") };
+    // « Publicité » : seulement si la publicité est activée dans Réglages › Publicité (licence Pro), pour garder la page épurée
+    private IEnumerable<(string Key, string Label)> Tabs => adsOn ? BaseTabs.Append(("pub", "Publicité")) : BaseTabs;
+    [SupplyParameterFromQuery(Name = "tab")] public string? TabParam { get; set; }
+
+    // Publicité
+    private bool adsOn;
+    private int adComplete;
+    private long adSeconds;
+    private decimal adRevenue, adMonth;
+    private List<(string Label, string Short, int Count)> adBuckets = new();
+    private List<(string Name, int Complete, decimal Owner)> adCampaignRows = new();
+    private record AdMonth(string Month, string Label, int Complete, long Seconds, decimal Owner, string Status);
+    private List<AdMonth> adMonths = new();
     private static readonly System.Globalization.CultureInfo Fr = System.Globalization.CultureInfo.GetCultureInfo("fr-CH");
 
     private string period = "7", tab = "vue", screenFilter = "";
@@ -219,7 +277,9 @@ else if (tab == "qr")
 
     protected override void OnInitialized()
     {
+        if (TabParam is "vue" or "diff" or "ecr" or "qr" or "pub") tab = TabParam;
         Load();
+        if (tab == "pub" && !adsOn) tab = "vue";
         // l'état des écrans évolue tout seul
         timer = new System.Threading.Timer(_ => InvokeAsync(() => { Load(); StateHasChanged(); }), null, 15000, 15000);
     }
@@ -252,6 +312,37 @@ else if (tab == "qr")
 
         if (growth) LoadScans(since, firstDay);
         else { scanCount = visitorCount = 0; scanRate = null; topHost = null; qrRows = new(); scanBuckets = new(); }
+
+        adsOn = Store.Read(d => Ads.On(d.Tenant));
+        if (adsOn) LoadAds(since, firstDay);
+    }
+
+    /// <summary>Revenus publicitaires : part du propriétaire sur les passages complets (période choisie, mois en cours, relevés des 13 derniers mois).</summary>
+    private void LoadAds(DateTime since, DateTime firstDay)
+    {
+        var nowLocal = Local(DateTime.UtcNow);
+        var yearAgo = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(new DateTime(nowLocal.Year, nowLocal.Month, 1).AddMonths(-12), DateTimeKind.Unspecified), zone);
+        var all = AdLog.Read(Store.ClientId, yearAgo);
+        var camps = Store.Read(d => d.Root.AdCampaigns.ToList());
+        decimal Owner(IEnumerable<AdPlay> l) => AdReports.Rows(l, camps).Sum(r => r.Owner);
+        var inPeriod = all.Where(p => p.StartUtc >= since).ToList();
+        adComplete = inPeriod.Count(p => p.Complete);
+        adSeconds = inPeriod.Where(p => p.Complete).Sum(p => (long)p.PlannedMs) / 1000;
+        adRevenue = Owner(inPeriod);
+        var monthKey = nowLocal.ToString("yyyy-MM");
+        adMonth = Owner(all.Where(p => Local(p.StartUtc).ToString("yyyy-MM") == monthKey));
+        adBuckets = Buckets(inPeriod.Where(p => p.Complete).Select(p => p.StartUtc).ToList(), firstDay);
+        adCampaignRows = inPeriod.GroupBy(p => p.CampaignId).Select(g => (camps.FirstOrDefault(c => c.Id == g.Key)?.Advertiser ?? "(campagne supprimée)", g.Count(p => p.Complete), Owner(g)))
+            .OrderByDescending(r => r.Item3).ToList();
+        var cid = Store.ClientId;
+        // le mois en cours, puis chaque mois qui a des passages
+        adMonths = all.Select(p => Local(p.StartUtc).ToString("yyyy-MM")).Append(monthKey).Distinct().OrderByDescending(m => m).Select(m =>
+        {
+            var l = all.Where(p => Local(p.StartUtc).ToString("yyyy-MM") == m).ToList();
+            var label = Fr.TextInfo.ToTitleCase(DateTime.ParseExact(m + "-01", "yyyy-MM-dd", null).ToString("MMMM yyyy", Fr)) + (m == monthKey ? " (en cours)" : "");
+            return new AdMonth(m, label, l.Count(p => p.Complete), l.Where(p => p.Complete).Sum(p => (long)p.PlannedMs) / 1000, Owner(l),
+                Store.Read(d => Ads.StatementStatus(d.Root, cid, m, nowLocal)));
+        }).ToList();
     }
 
     /// <summary>Scans des QR codes actifs de l'aire ouverte (licence Pro).</summary>

@@ -28,7 +28,7 @@
             {
                 var id = t.Id;
                 <button type="button" class="@(Tab == id ? "on" : "")" aria-current="@(Tab == id ? "page" : null)" @onclick="() => { tab = id; sub = true; }">
-                    <Ico Name="@t.Icon" Size="16" /> <span>@t.Label</span>@if (t.Growth) { <em class="rg-badge">PRO</em> }
+                    <Ico Name="@t.Icon" Size="16" /> <span>@t.Label</span>@if (id == "publicite" && adsPending > 0) { <span class="ad-count" title="@adsPending spot@(adsPending > 1 ? "s" : "") à valider">@adsPending</span> } else if (t.Growth) { <em class="rg-badge">PRO</em> }
                 </button>
             }
         }
@@ -283,6 +283,12 @@
         }
         </div>
 
+        @if (Tab == "publicite")
+        {
+            @* hors de la zone d'enregistrement commun : chaque choix de la publicité s'enregistre aussitôt *@
+            <AdSettings OnPending="n => adsPending = n" />
+        }
+
         @if (Tab == "compte")
         {
             <div class="rg-ph"><h2>Compte et confidentialité</h2><p>Votre accès administrateur.</p></div>
@@ -329,6 +335,7 @@
         ("Organisation", new[] { new NavItem("organisation", "Identité et équipe", "building") }),
         ("Diffusion", new[] { new NavItem("diffusion", "Contenus et écrans", "monitor"), new NavItem("veille", "Veille et luminosité", "moon") }),
         ("Suivi", new[] { new NavItem("supervision", "Alertes et pause", "bell", Growth: true) }),
+        ("Revenus", new[] { new NavItem("publicite", "Publicité", "megaphone", Growth: true) }),
         ("Abonnement", new[] { new NavItem("abonnement", "Plan et paiement", "file") }),
         ("Mon compte", new[] { new NavItem("compte", "Compte et confidentialité", "user") }),
     };
@@ -352,7 +359,8 @@
     };
 
     // Mode simple : Utilisation, Veille et luminosité, Compte et confidentialité seulement (le reste est en mode expert).
-    private static readonly string[] SimpleTabs = { "utilisation", "veille", "abonnement", "compte" };
+    private static readonly string[] SimpleTabs = { "utilisation", "veille", "publicite", "abonnement", "compte" };   // Publicité : une fonction activable, comme la veille
+    private int adsPending;   // spots de publicité à valider (pastille de la rubrique)
     private IEnumerable<(string Group, NavItem[] Items)> VisibleGroups => Modes.Expert ? Groups
         : Groups.Select(g => (g.Group, Items: g.Items.Where(i => SimpleTabs.Contains(i.Id)).ToArray())).Where(g => g.Items.Length > 0);
     private string Shown(string id) => Modes.Expert || SimpleTabs.Contains(id) ? id : "utilisation";
@@ -401,7 +409,8 @@
         (techPinOn, techPin, techPinLocal, techPinUtc, techPinBy) = (t.TechPinOn, t.TechPin, t.TechPinLocal, t.TechPinUtc, t.TechPinBy);
         autoStart = t.DefaultAutoStart; mergePres = t.MergePresentations;
         LoadPinState(t);
-        soleAreaId = areaCount == 1 ? Store.Read(d => d.Areas.First().Id) : Guid.Empty;
+        adsPending = Store.Read(d => Ads.PendingCount(d.Root, d.Tenant, DateTime.UtcNow));
+        soleAreaId =areaCount == 1 ? Store.Read(d => d.Areas.First().Id) : Guid.Empty;
         spec = ScreenSpec.From(t);
         LoadUsage(t);
     }
@@ -471,7 +480,7 @@
         try { await Task.Delay(300, ct); } catch (TaskCanceledException) { return; }
         await InvokeAsync(async () =>
         {
-            if (!dirty || saving || Tab is "utilisation" or "compte" or "abonnement") return;
+            if (!dirty || saving || Tab is "utilisation" or "compte" or "abonnement" or "publicite") return;
             saving = true;
             try { await Save(); } finally { saving = false; }
             StateHasChanged();
