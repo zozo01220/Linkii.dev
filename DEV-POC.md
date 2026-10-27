@@ -2297,3 +2297,10 @@ Remplace l'organisation en onglets Structure / Membres / Rôles et l'arbre du §
 - Sur l'aperçu de la carte, à côté de la case : pastille sombre « Jusqu'à 14:00 » quand un créneau passe, claire « Prochain : Liste à 18:00 » (avec le jour s'il n'est pas aujourd'hui) sinon. L'infobulle donne la liste et l'heure. Rien si l'écran n'a aucun créneau à venir dans les 7 jours.
 - Compte le planning propre de l'écran, celui de sa zone et celui de l'aire (`Planning.Effective`). Nouveau `Planning.Next` (prochain créneau sur 7 jours) ; `Screens.razor` : `PlanPill` ; style `.gc-plan`.
 - Pas encore sur la carte des murs ni en vue liste.
+
+## 134. Icône et couleur des plans (27 octobre 2026) : codé selon `maquette_plans_entete_menu` (couleurs de l'app), compile ; non vérifié à l'écran (l'app tournait, la copie finale du build a échoué)
+- Chaque plan a son icône et sa couleur : **Essential** éclair (`bolt`), fond `#D5E4F7` texte `#0A2A4A` ; **Pro** couronne (`crown`), fond `--warn-bg` texte `--warn-ink` ; **Enterprise** immeuble (`office`), bleu nuit plein `#0B1F3A` texte blanc. Enterprise est une offre sur devis, pas un plan stocké : sa pastille n'apparaît que sur l'offre (lien du panneau d'abonnement, page « Parlons de votre projet »).
+- Nouveau composant `PlanTag.razor` (`Plan` = `Plans.Base`, `Plans.Growth` ou `PlanTag.Enterprise`) et styles `.plan-chip` (`.ess`, `.pro`, `.ent`) dans `app.css`. Nouvelles icônes `bolt`, `crown`, `office` dans `Ico.razor`.
+- Branché dans : panneau d'abonnement (cartes de plan, ligne « Plan »), tableaux Clients et Facturation de la console admin et de l'espace revendeur. Menu latéral déplié : la pastille `.plan-tag` existante reçoit l'icône.
+- **Menu replié** : la pastille du plan (`.brand-plan`, `MainLayout.razor`) s'affiche au-dessus du logo « li », en petit (10,5 px) ; masquée quand le menu est déplié. Si « Essential » paraît trop large dans les 80 px, passer à l'icône seule avec le nom en infobulle.
+- Non touché : points de couleur des tableaux de bord, listes déroulantes et boutons de choix de plan (libellés de formulaire).
