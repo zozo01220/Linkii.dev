@@ -113,8 +113,7 @@ public class ScreenControl(JsonStore store, IHubContext<ScreenHub> hub)
     public static bool SaveCapture(Db db, Screen s, byte[] jpeg, Guid? cmd, DateTime now, bool plain = false)
     {
         if (jpeg.Length < 4 || jpeg[0] != 0xFF || jpeg[1] != 0xD8) return false;   // pas un JPEG
-        Directory.CreateDirectory(AppPaths.CaptureDir);
-        File.WriteAllBytes(CapturePath(s.Id), jpeg);
+        File.WriteAllBytes(CapturePath(s), jpeg);
         s.CaptureUtc = now;
         (s.CaptureW, s.CaptureH) = JpegSize(jpeg);
         (s.CaptureMirrorH, s.CaptureMirrorV) = plain ? (false, false) : Helpers.Mirror(db.Areas, s);
@@ -122,7 +121,13 @@ public class ScreenControl(JsonStore store, IHubContext<ScreenHub> hub)
         return true;
     }
 
-    public static string CapturePath(Guid screenId) => Path.Combine(AppPaths.CaptureDir, screenId.ToString("N") + ".jpg");
+    /// <summary>captures/{organisation}/{écran}.jpg (dossier créé s'il n'existe pas).</summary>
+    public static string CapturePath(Screen s)
+    {
+        var dir = Path.Combine(AppPaths.CaptureDir, s.ClientId.ToString("N"));
+        Directory.CreateDirectory(dir);
+        return Path.Combine(dir, s.Id.ToString("N") + ".jpg");
+    }
 
     /// <summary>Largeur et hauteur d'un JPEG (marqueur SOF), (0, 0) s'il est illisible.</summary>
     public static (int W, int H) JpegSize(byte[] b)

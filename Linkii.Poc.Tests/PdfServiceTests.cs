@@ -103,7 +103,7 @@ public class PdfServiceTests : IDisposable
         Assert.Equal(Pres.Type, pres.Type);
         Assert.Equal(id, pres.Info["pdfId"]);
         Assert.Equal("3", pres.Info["pages"]);
-        Assert.All(res.Files, f => { Assert.Equal("image", f.Type); Assert.Equal(pres.Id.ToString(), f.Info["pres"]); Assert.False(f.Info.ContainsKey("pdf")); Assert.True(File.Exists(Path.Combine(AppPaths.MediaDir, f.FileName!))); });
+        Assert.All(res.Files, f => { Assert.Equal("image", f.Type); Assert.Equal(pres.Id.ToString(), f.Info["pres"]); Assert.False(f.Info.ContainsKey("pdf")); Assert.True(File.Exists(f.FilePath)); });
         Assert.Equal("Programme — page 1", res.Files[0].Name);
         Assert.True(res.Files[0].Height <= 1920 && res.Files[0].Width <= 1080 && res.Files[0].Height > res.Files[0].Width);   // portrait
         Assert.True(res.Files[1].Width <= 1920 && res.Files[1].Height <= 1080 && res.Files[1].Width > res.Files[1].Height);   // paysage
@@ -129,7 +129,7 @@ public class PdfServiceTests : IDisposable
 
         var left = store.Read(d => d.Media.Where(m => m.Info.ContainsKey("pdf")).Select(m => m.Id).ToList());
         Assert.Equal(second.Files.Select(f => f.Id), left);
-        Assert.All(first.Files, f => Assert.False(File.Exists(Path.Combine(AppPaths.MediaDir, f.FileName!))));
+        Assert.All(first.Files, f => Assert.False(File.Exists(f.FilePath)));
     }
 
     [Fact]
@@ -176,7 +176,7 @@ public class PdfServiceTests : IDisposable
         Assert.Equal("4", store.Read(d => d.Media.First(m => m.Id == pres.Id).Info["pages"]));
 
         pdf.PurgeStale(tenant.Id, pres.Id);   // les écrans sont passés aux nouvelles images : les anciennes partent
-        Assert.All(res.Files, f => Assert.False(File.Exists(Path.Combine(AppPaths.MediaDir, f.FileName!))));
+        Assert.All(res.Files, f => Assert.False(File.Exists(f.FilePath)));
         Assert.Equal(4, store.Read(d => d.Media.Count(m => Pres.IsPage(m) && m.Info["gen"] == "2" && m.Info["var"] == "none")));   // les 4 pages de base de la nouvelle version
     }
 
@@ -315,11 +315,11 @@ public class PdfServiceTests : IDisposable
     {
         var path = WritePdfPath(WritePdf(Three));
         await using var s1 = File.OpenRead(path);
-        var first = await pdf.SaveStream(s1, "Menu");
+        var first = await pdf.SaveStream(tenant.Id, s1, "Menu");
         await pdf.Convert(tenant.Id, null, first.Source!, new PdfService.Options("", "none", "landscape"), meta: new PdfService.Meta("sha:" + first.Source!.Hash));
 
         await using var s2 = File.OpenRead(path);
-        var second = await pdf.SaveStream(s2, "Menu");
+        var second = await pdf.SaveStream(tenant.Id, s2, "Menu");
         var kept = pdf.ReuseUploaded(tenant.Id, null, second.Source!, out var reused);
         Assert.True(reused);
         Assert.Equal(first.Source.Id, kept.Id);
@@ -379,7 +379,7 @@ public class PdfServiceTests : IDisposable
         var id = WritePdf(Three);
         var land = await pdf.Convert(tenant.Id, null, new PdfService.Source(id, "Doc", 3), new PdfService.Options("1", background, "landscape"));
         Assert.Equal((1920, 1080), (land.Files[0].Width, land.Files[0].Height));
-        using (var bmp = SKBitmap.Decode(Path.Combine(AppPaths.MediaDir, land.Files[0].FileName!)))   // avant la conversion suivante, qui retire ces pages
+        using (var bmp = SKBitmap.Decode(land.Files[0].FilePath!))   // avant la conversion suivante, qui retire ces pages
         {
             var middle = bmp.GetPixel(960, 540);   // la page (bleue) au centre
             Assert.True(middle.Blue > middle.Red + 100);

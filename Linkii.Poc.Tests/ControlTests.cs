@@ -173,7 +173,8 @@ public class ControlTests
             Assert.Equal(Now, s.CaptureUtc);
             Assert.True(s.CaptureMirrorV);
             Assert.Equal(ScreenCommand.Done, cmd.Status);
-            Assert.True(File.Exists(ScreenControl.CapturePath(s.Id)));
+            Assert.True(File.Exists(ScreenControl.CapturePath(s)));
+            Assert.Equal(s.ClientId.ToString("N"), Path.GetFileName(Path.GetDirectoryName(ScreenControl.CapturePath(s))));   // captures/{organisation}/
         }
         finally { try { Directory.Delete(dir, true); } catch (IOException) { } }
     }

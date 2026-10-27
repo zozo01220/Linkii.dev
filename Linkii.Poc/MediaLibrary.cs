@@ -28,11 +28,11 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
         });
         foreach (var m in list.Where(m => m.Size == null && m.FileName != null))
         {
-            try { var fi = new FileInfo(Path.Combine(AppPaths.MediaDir, m.FileName!)); if (fi.Exists) m.Size = fi.Length; } catch { }
+            try { var fi = new FileInfo(m.FilePath!); if (fi.Exists) m.Size = fi.Length; } catch { }
         }
         foreach (var m in list.Where(m => m.Width == null && m.FileName != null && m.Status == null))
         {
-            if (MediaProbe.Size(Path.Combine(AppPaths.MediaDir, m.FileName!)) is { } d) { m.Width = d.W; m.Height = d.H; }
+            if (MediaProbe.Size(m.FilePath!) is { } d) { m.Width = d.W; m.Height = d.H; }
         }
         return list.OrderByDescending(m => m.AddedUtc ?? DateTime.MinValue).ThenBy(m => m.Name).ToList();
     }
@@ -185,15 +185,15 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
                 gone.AddRange(d.Media.Where(m => m.AppId == null && Pres.IdOf(m) is { } pid && presIds.Contains(pid)));
             }
             var set = gone.Select(m => m.Id).ToHashSet();
-            if (set.Count == 0) return new List<string>();
+            if (set.Count == 0) return new List<MediaItem>();
             DetachFromContent(d, set);
             ItemShareOps.Forget(d, ShareKind.Media, set);
             d.Media.RemoveAll(m => set.Contains(m.Id));
-            return gone.Where(m => m.FileName != null).Select(m => m.FileName!).ToList();
+            return gone.Where(m => m.FileName != null).ToList();
         });
         foreach (var f in files)
         {
-            try { File.Delete(Path.Combine(AppPaths.MediaDir, f)); } catch { }   // déjà absent : sans conséquence
+            try { File.Delete(f.FilePath!); } catch { }   // déjà absent : sans conséquence
             Thumbnails.Delete(f);
         }
         foreach (var p in pdfs) PdfService.Delete(p);
@@ -311,15 +311,16 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
             var gen = pres.Info.GetValueOrDefault("gen") ?? "1";
             var src = d.Media.Where(m => Pres.IdOf(m) == presId.ToString() && Pres.PageOf(m) == page && m.Info.GetValueOrDefault("gen") == gen && m.FileName != null)
                 .OrderBy(m => m.Info.GetValueOrDefault("var") == "none" ? 0 : 1).FirstOrDefault();
-            var from = src == null ? null : Path.Combine(AppPaths.MediaDir, src.FileName!);
+            var from = src?.FilePath;
             if (src == null || !File.Exists(from)) return (null, "Cette page n'est plus disponible : mettez la présentation à jour.");
             var file = Guid.NewGuid().ToString("N") + Path.GetExtension(src.FileName);
-            File.Copy(from, Path.Combine(AppPaths.MediaDir, file));
+            var dir = MediaFiles.Dir(pres.ClientId, d.Me);
+            File.Copy(from, MediaFiles.PathOf(dir, file));
             var name = $"{pres.Name} — {Pres.Unit(pres.Info.GetValueOrDefault("src"))} {page}";
             var item = new MediaItem
             {
                 ClientId = pres.ClientId, AreaId = pres.AreaId, FolderId = pres.FolderId, OwnerId = d.Me, Name = name.Length > 120 ? name[..120] : name,
-                Type = "image", FileName = file, Size = src.Size, Width = src.Width, Height = src.Height, AddedUtc = DateTime.UtcNow
+                Type = "image", Dir = dir, FileName = file, Size = src.Size, Width = src.Width, Height = src.Height, AddedUtc = DateTime.UtcNow
             };
             d.Root.Media.Add(item);
             return (item, null);
@@ -363,7 +364,7 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
         }
         var urls = published.SelectMany(i => (i.Urls ?? new()).Append(i.Url ?? "")).Where(u => u.Length > 0).ToList();
 
-        return candidates.Where(m => !used.Contains(m.Id) && (m.FileName == null || !urls.Any(u => u.Contains(m.FileName)))).ToList();
+        return candidates.Where(m => !used.Contains(m.Id) && (m.FileName == null || !urls.Any(u => u.Contains(Path.GetFileName(m.FileName))))).ToList();
     }
 
     /// <summary>Retire de la médiathèque les exports Canva sans emploi (voir <see cref="UnusedCanva()"/>), fichiers sur le disque compris. Rend leur nombre.</summary>

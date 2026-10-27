@@ -5,6 +5,7 @@ namespace Linkii.Poc;
 /// <summary>
 /// Miniatures des images de la médiathèque : une copie réduite (WebP) créée à la première demande et gardée sur le disque,
 /// pour ne pas télécharger l'original dans les listes. Les formats que Skia ne décode pas (SVG…) gardent leur original.
+/// Rangées comme les médias : thumbs/{organisation}/{membre}/.
 /// </summary>
 public static class Thumbnails
 {
@@ -16,11 +17,11 @@ public static class Thumbnails
     public static int Snap(int w) => Widths.FirstOrDefault(x => x >= w, Widths[^1]);
 
     /// <summary>Chemin de la miniature (créée si besoin), ou null si le fichier ne s'y prête pas (l'original est alors servi).</summary>
-    public static string? Get(string file, int width)
+    public static string? Get(MediaItem m, int width)
     {
-        if (!Decodable.Contains(Path.GetExtension(file).ToLowerInvariant())) return null;
-        var source = Path.Combine(AppPaths.MediaDir, file);
-        var thumb = Path.Combine(AppPaths.ThumbDir, $"{Path.GetFileNameWithoutExtension(file)}-{width}.webp");
+        if (m.FileName is not { } file || !Decodable.Contains(Path.GetExtension(file).ToLowerInvariant())) return null;
+        var source = m.FilePath!;
+        var thumb = PathOf(m.Dir, file, width, ".webp");
         try
         {
             if (File.Exists(thumb) && File.GetLastWriteTimeUtc(thumb) >= File.GetLastWriteTimeUtc(source)) return thumb;
@@ -46,11 +47,11 @@ public static class Thumbnails
     private static readonly SemaphoreSlim PosterSlots = new(2);   // au plus deux extractions ffmpeg à la fois : une grille entière demande ses vignettes d'un coup
 
     /// <summary>Chemin de la vignette d'une vidéo (créée si besoin), ou null si ffmpeg est absent ou l'extraction échoue.</summary>
-    public static async Task<string?> GetVideo(VideoConverter converter, string file, int width, CancellationToken ct)
+    public static async Task<string?> GetVideo(VideoConverter converter, MediaItem m, int width, CancellationToken ct)
     {
-        if (!converter.CanPoster || !VideoConverter.IsVideo(Path.GetExtension(file).ToLowerInvariant())) return null;
-        var source = Path.Combine(AppPaths.MediaDir, file);
-        var thumb = Path.Combine(AppPaths.ThumbDir, $"{Path.GetFileNameWithoutExtension(file)}-{width}.jpg");
+        if (m.FileName is not { } file || !converter.CanPoster || !VideoConverter.IsVideo(Path.GetExtension(file).ToLowerInvariant())) return null;
+        var source = m.FilePath!;
+        var thumb = PathOf(m.Dir, file, width, ".jpg");
         if (File.Exists(thumb) && File.GetLastWriteTimeUtc(thumb) >= File.GetLastWriteTimeUtc(source)) return thumb;
         await PosterSlots.WaitAsync(ct);
         try
@@ -65,12 +66,22 @@ public static class Thumbnails
         finally { PosterSlots.Release(); }
     }
 
-    /// <summary>Supprime les miniatures d'un fichier (lors de sa suppression).</summary>
-    public static void Delete(string file)
+    /// <summary>Miniature dans le dossier qui reflète celui du média (créé s'il n'existe pas).</summary>
+    private static string PathOf(string? dir, string file, int width, string ext)
     {
+        var d = string.IsNullOrEmpty(dir) ? AppPaths.ThumbDir : Path.Combine(AppPaths.ThumbDir, dir);
+        Directory.CreateDirectory(d);
+        return Path.Combine(d, $"{Path.GetFileNameWithoutExtension(file)}-{width}{ext}");
+    }
+
+    /// <summary>Supprime les miniatures d'un fichier (lors de sa suppression).</summary>
+    public static void Delete(MediaItem m)
+    {
+        if (m.FileName is not { } file) return;
         try
         {
-            foreach (var t in Directory.EnumerateFiles(AppPaths.ThumbDir, Path.GetFileNameWithoutExtension(file) + "-*.*")) File.Delete(t);
+            var d = string.IsNullOrEmpty(m.Dir) ? AppPaths.ThumbDir : Path.Combine(AppPaths.ThumbDir, m.Dir);
+            if (Directory.Exists(d)) foreach (var t in Directory.EnumerateFiles(d, Path.GetFileNameWithoutExtension(file) + "-*.*")) File.Delete(t);
         }
         catch { }
     }

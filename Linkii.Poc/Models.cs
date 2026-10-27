@@ -878,6 +878,10 @@ public class MediaItem : IClientOwned, IAreaOwned, IOwned
     public Guid? FolderId { get; set; }
     /// <summary>Membre qui a importé le fichier (null : inconnu). Avec les dossiers activés, il voit ses fichiers restés à la racine.</summary>
     public Guid? OwnerId { get; set; }
+    /// <summary>Sous-dossier de media/ où est rangé le fichier : « organisation/membre » (<see cref="MediaFiles.Dir"/>) ; null : à la racine (fichiers d'avant le rangement).</summary>
+    public string? Dir { get; set; }
+    /// <summary>Chemin du fichier sur le disque. L'adresse /media/{FileName} ne change pas : seul le rangement sur le disque dépend du dossier.</summary>
+    [System.Text.Json.Serialization.JsonIgnore] public string? FilePath => FileName == null ? null : MediaFiles.PathOf(Dir, FileName);
 }
 
 /// <summary>
@@ -1366,4 +1370,85 @@ public static class AppPaths
     public static string PdfDir = "pdf";   // PDF d'origine de l'app Document PDF (jamais servis)
     public static string CaptureDir = "captures";   // dernier aperçu du direct de chaque écran
     public static string DownloadDir = "downloads";   // installeur du player Windows (/download/windows)
+}
+
+/// <summary>
+/// Rangement des fichiers de la médiathèque : media/{organisation}/{membre qui a importé}/, ou media/{organisation}/commun/ pour ceux
+/// qu'aucun membre n'a importés (Drive synchronisé, pages de PDF, exports Canva). Le nom du fichier reste unique sur toute la plateforme.
+/// </summary>
+public static class MediaFiles
+{
+    public const string Shared = "commun";
+
+    /// <summary>Dossier (relatif à media/) d'un fichier de cette organisation et de ce membre, créé s'il n'existe pas.</summary>
+    public static string Dir(Guid clientId, Guid? ownerId)
+    {
+        var dir = NameOf(clientId, ownerId);
+        Directory.CreateDirectory(Path.Combine(AppPaths.MediaDir, dir));
+        return dir;
+    }
+
+    private static string NameOf(Guid clientId, Guid? ownerId) => clientId.ToString("N") + "/" + (ownerId is { } o && o != Guid.Empty ? o.ToString("N") : Shared);
+
+    public static string PathOf(string? dir, string file) => string.IsNullOrEmpty(dir) ? Path.Combine(AppPaths.MediaDir, file) : Path.Combine(AppPaths.MediaDir, dir, file);
+
+    /// <summary>
+    /// Range les fichiers d'avant le rangement (au démarrage ; sans effet quand tout est déjà rangé) : médias, PDF d'origine et aperçus des écrans
+    /// par organisation, visuels de publicité par campagne. Les miniatures restées à la racine sont effacées (refaites à la demande). Rend le nombre de fichiers déplacés.
+    /// </summary>
+    public static int Migrate(Db d)
+    {
+        var moved = 0;
+        bool Move(string from, string to)
+        {
+            if (!File.Exists(from) || File.Exists(to)) return false;
+            try { Directory.CreateDirectory(Path.GetDirectoryName(to)!); File.Move(from, to); moved++; return true; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }   // droits (Linux) : le fichier reste où il est, toujours lu
+        }
+
+        foreach (var m in d.Media.Where(m => m.Dir == null && m.FileName != null && File.Exists(PathOf(null, m.FileName))))
+        {
+            var dir = NameOf(m.ClientId, m.OwnerId);   // dossier créé par Move
+            if (Move(PathOf(null, m.FileName!), PathOf(dir, m.FileName!))) m.Dir = dir;
+        }
+
+        var pdfs = new Dictionary<string, Guid>();
+        foreach (var m in d.Media)
+            foreach (var v in new[] { m.Settings.GetValueOrDefault("pdf"), m.Info.GetValueOrDefault("pdf"), m.Info.GetValueOrDefault("pdfId") })
+                if (!string.IsNullOrEmpty(v)) pdfs.TryAdd(v, m.ClientId);
+        foreach (var (id, cid) in pdfs)
+            if (Guid.TryParseExact(id, "N", out _)) Move(Path.Combine(AppPaths.PdfDir, id + ".pdf"), Path.Combine(AppPaths.PdfDir, cid.ToString("N"), id + ".pdf"));
+
+        foreach (var s in d.Screens)
+            Move(Path.Combine(AppPaths.CaptureDir, s.Id.ToString("N") + ".jpg"), Path.Combine(AppPaths.CaptureDir, s.ClientId.ToString("N"), s.Id.ToString("N") + ".jpg"));
+
+        foreach (var c in d.AdCampaigns)
+            foreach (var f in c.Spots.SelectMany(s => new[] { s.Landscape, s.Portrait }).OfType<string>())
+                Move(Path.Combine(Ads.Dir, f), Path.Combine(Ads.Dir, c.Id.ToString("N"), f));
+
+        try
+        {
+            foreach (var t in Directory.EnumerateFiles(AppPaths.ThumbDir).ToList())
+            {
+                var name = Path.GetFileName(t);
+                if (name.StartsWith("web-")) Move(t, Path.Combine(AppPaths.ThumbDir, "web", name));   // captures de pages web : thumbs/web/
+                else File.Delete(t);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        return moved;
+    }
+
+    /// <summary>Après la suppression d'une organisation : retire ses dossiers restés vides.</summary>
+    public static void RemoveEmptyDirs(Guid clientId)
+    {
+        var root = Path.Combine(AppPaths.MediaDir, clientId.ToString("N"));
+        try
+        {
+            if (!Directory.Exists(root)) return;
+            foreach (var sub in Directory.EnumerateDirectories(root)) if (!Directory.EnumerateFileSystemEntries(sub).Any()) Directory.Delete(sub);
+            if (!Directory.EnumerateFileSystemEntries(root).Any()) Directory.Delete(root);
+        }
+        catch (IOException) { }
+    }
 }

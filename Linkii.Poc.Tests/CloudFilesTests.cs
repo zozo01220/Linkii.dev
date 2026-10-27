@@ -96,20 +96,20 @@ public class CloudFilesTests : IDisposable
         var pdf = new PdfService(new JsonStore(config, new Env()), NullLogger<PdfService>.Instance);
 
         using var ok = new MemoryStream(OnePagePdf());
-        var saved = await pdf.SaveStream(ok, "Journée portes ouvertes");
+        var saved = await pdf.SaveStream(Guid.NewGuid(), ok, "Journée portes ouvertes");
         Assert.NotNull(saved.Source);
         Assert.Equal(1, saved.Source!.Pages);
         Assert.True(PdfService.Exists(saved.Source.Id));
 
         using var broken = new MemoryStream(Encoding.ASCII.GetBytes("pas un pdf"));
-        var failed = await pdf.SaveStream(broken, "Journée portes ouvertes", saved.Source.Id);   // mise à jour d'un fichier déjà gardé
+        var failed = await pdf.SaveStream(Guid.NewGuid(), broken, "Journée portes ouvertes", saved.Source.Id);   // mise à jour d'un fichier déjà gardé
         Assert.Null(failed.Source);
         Assert.NotNull(failed.Error);
         Assert.True(PdfService.Exists(saved.Source.Id));   // l'ancien PDF est conservé
-        Assert.Single(Directory.GetFiles(AppPaths.PdfDir));   // et aucun fichier temporaire ne reste
+        Assert.Single(Directory.GetFiles(AppPaths.PdfDir, "*", SearchOption.AllDirectories));   // et aucun fichier temporaire ne reste
 
         using var again = new MemoryStream(OnePagePdf());
-        var replaced = await pdf.SaveStream(again, "Journée portes ouvertes", saved.Source.Id);
+        var replaced = await pdf.SaveStream(Guid.NewGuid(), again, "Journée portes ouvertes", saved.Source.Id);
         Assert.Equal(saved.Source.Id, replaced.Source!.Id);   // même identifiant : les images sont remplacées, pas dupliquées
     }
 

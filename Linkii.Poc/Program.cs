@@ -174,6 +174,8 @@ store0.Write(d =>
 {
     foreach (var m in d.Media.Where(m => m.Status == "processing")) { m.Status = "failed"; m.Error = "Conversion interrompue par un redémarrage du serveur. Réimportez le fichier."; }
 });
+// fichiers rangés par organisation (médias, PDF, aperçus, miniatures) et par campagne (publicité)
+if (store0.Write(MediaFiles.Migrate) is > 0 and var movedFiles) app.Logger.LogInformation("{Count} fichiers rangés dans les dossiers des organisations.", movedFiles);
 
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions
@@ -553,24 +555,24 @@ app.MapGet("/media/{file}", async (HttpContext ctx, string file, JsonStore store
     if (string.IsNullOrEmpty(token)) token = ctx.Request.Query["t"].ToString();
     var userClient = ctx.User.Identity?.IsAuthenticated == true ? ctx.User.GetGuid(Claims.Client) : null;
 
-    var allowed = store.Read(db =>
+    var m = store.Read(db =>
     {
-        var m = db.Media.FirstOrDefault(x => x.FileName == file);
-        if (m == null) return false;
-        if (userClient == m.ClientId) return true;
-        return !string.IsNullOrEmpty(token) && db.Screens.Any(s => s.Token == token && s.ClientId == m.ClientId && Tenancy.IsActive(db, s));
+        var it = db.Media.FirstOrDefault(x => x.FileName == file);
+        if (it == null) return null;
+        if (userClient == it.ClientId) return it;
+        return !string.IsNullOrEmpty(token) && db.Screens.Any(s => s.Token == token && s.ClientId == it.ClientId && Tenancy.IsActive(db, s)) ? it : null;
     });
-    var path = Path.Combine(AppPaths.MediaDir, file);
-    if (!allowed || !File.Exists(path)) return Results.NotFound();
+    var path = m?.FilePath;   // media/{organisation}/{membre}/{fichier} : l'adresse, elle, ne change pas
+    if (m == null || !File.Exists(path)) return Results.NotFound();
     if (!mediaTypes.TryGetContentType(file, out var type)) type = "application/octet-stream";
-    if (int.TryParse(ctx.Request.Query["w"], out var tw) && tw > 0 && Thumbnails.Get(file, Thumbnails.Snap(tw)) is { } thumbPath)
+    if (int.TryParse(ctx.Request.Query["w"], out var tw) && tw > 0 && Thumbnails.Get(m, Thumbnails.Snap(tw)) is { } thumbPath)
     {
         ctx.Response.Headers.CacheControl = "private, max-age=86400";
         return Results.File(thumbPath, "image/webp");
     }
     if (tw > 0 && VideoConverter.IsVideo(Path.GetExtension(file).ToLowerInvariant()))   // vignette d'une vidéo : une image, pas le fichier
     {
-        if (await Thumbnails.GetVideo(converter, file, Thumbnails.Snap(tw), ctx.RequestAborted) is not { } poster) return Results.NotFound();
+        if (await Thumbnails.GetVideo(converter, m, Thumbnails.Snap(tw), ctx.RequestAborted) is not { } poster) return Results.NotFound();
         ctx.Response.Headers.CacheControl = "private, max-age=86400";
         return Results.File(poster, "image/jpeg");
     }
@@ -773,9 +775,8 @@ app.MapGet("/ads/{file}", (HttpContext ctx, string file, JsonStore store) =>
     if (file != Path.GetFileName(file) || Ads.FileType(file) == null) return Results.NotFound();
     var token = ctx.Request.Headers["X-Token"].ToString();
     if (string.IsNullOrEmpty(token)) token = ctx.Request.Query["t"].ToString();
-    var ok = ctx.User.Identity?.IsAuthenticated == true
-        || !string.IsNullOrEmpty(token) && store.Read(db => db.Screens.Any(s => s.Token == token && Tenancy.IsActive(db, s)));
-    var path = Path.Combine(Ads.Dir, file);
+    var (ok, path) = store.Read(db => (ctx.User.Identity?.IsAuthenticated == true
+        || !string.IsNullOrEmpty(token) && db.Screens.Any(s => s.Token == token && Tenancy.IsActive(db, s)), Ads.PathOf(db, file)));
     if (!ok || !File.Exists(path)) return Results.NotFound();
     if (!mediaTypes.TryGetContentType(file, out var type)) type = "application/octet-stream";
     ctx.Response.Headers.CacheControl = "private, max-age=86400";
@@ -915,9 +916,9 @@ app.MapGet("/screens/{id:guid}/capture.jpg", (HttpContext ctx, Guid id, JsonStor
     var cid = ctx.User.GetGuid(Claims.Client);
     var uid = ctx.User.GetGuid(ClaimTypes.NameIdentifier);
     if (cid == null) return Results.Unauthorized();
-    var ok = store.Read(db => new ClientDb(db, cid.Value, AreaAccess.For(db, cid.Value, uid)).Screens.Any(s => s.Id == id && s.CaptureUtc != null));
-    var path = ScreenControl.CapturePath(id);
-    if (!ok || !File.Exists(path)) return Results.NotFound();
+    var screen = store.Read(db => new ClientDb(db, cid.Value, AreaAccess.For(db, cid.Value, uid)).Screens.FirstOrDefault(s => s.Id == id && s.CaptureUtc != null));
+    var path = screen == null ? null : ScreenControl.CapturePath(screen);
+    if (path == null || !File.Exists(path)) return Results.NotFound();
     ctx.Response.Headers.CacheControl = "no-store";
     return Results.File(path, "image/jpeg");
 }).RequireAuthorization("ClientSpace");

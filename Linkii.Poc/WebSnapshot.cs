@@ -64,7 +64,9 @@ public class WebSnapshot
     public bool Available => Browser != null;
 
     private static string Key(string url) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url.Trim()))).ToLowerInvariant()[..24];
-    private static string PathOf(string url) => Path.Combine(AppPaths.ThumbDir, "web-" + Key(url) + ".jpg");
+    /// <summary>thumbs/web/ : une capture par adresse, commune à toutes les organisations (même page publique, même image).</summary>
+    private static string Dir => Path.Combine(AppPaths.ThumbDir, "web");
+    private static string PathOf(string url) => Path.Combine(Dir, "web-" + Key(url) + ".jpg");
 
     /// <summary>Chemin de la capture déjà faite pour cette adresse, ou null (même périmée : mieux vaut une vieille image que l'icône).</summary>
     public string? Cached(string? url)
@@ -148,7 +150,7 @@ public class WebSnapshot
             using var small = bmp.Resize(new SKImageInfo(w, Math.Max(1, (int)Math.Round(bmp.Height * (double)w / bmp.Width))), SKFilterQuality.Medium);
             if (small == null) return false;
             using var data = SKImage.FromBitmap(small).Encode(SKEncodedImageFormat.Jpeg, 80);
-            Directory.CreateDirectory(AppPaths.ThumbDir);
+            Directory.CreateDirectory(Dir);
             var dest = PathOf(url);
             var tmp = dest + ".tmp";
             await using (var fs = File.Create(tmp)) data.SaveTo(fs);

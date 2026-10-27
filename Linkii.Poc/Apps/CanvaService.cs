@@ -319,7 +319,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
     private List<MediaItem> ExistingPages(MediaItem pres) => store.Read(d =>
     {
         var gen = pres.Info.GetValueOrDefault("gen") ?? "1";
-        return d.Media.Where(m => Pres.IdOf(m) == pres.Id.ToString() && m.Info.GetValueOrDefault("gen") == gen && m.FileName != null && File.Exists(Path.Combine(AppPaths.MediaDir, m.FileName)))
+        return d.Media.Where(m => Pres.IdOf(m) == pres.Id.ToString() && m.Info.GetValueOrDefault("gen") == gen && m.FileName != null && File.Exists(m.FilePath!))
             .OrderBy(Pres.PageOf).ToList();
     });
 
@@ -372,8 +372,8 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
         });
         foreach (var f in removed.Where(m => m.FileName != null))
         {
-            try { File.Delete(Path.Combine(AppPaths.MediaDir, f.FileName!)); } catch (IOException) { }
-            Thumbnails.Delete(f.FileName!);
+            try { File.Delete(f.FilePath!); } catch (IOException) { }
+            Thumbnails.Delete(f);
         }
     }
 
@@ -389,7 +389,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
             return list;
         });
         foreach (var f in removed.Where(m => m.FileName != null))
-            try { File.Delete(Path.Combine(AppPaths.MediaDir, f.FileName!)); } catch (IOException) { }
+            try { File.Delete(f.FilePath!); } catch (IOException) { }
     }
 
     // ---------- Dossiers Canva synchronisés ----------

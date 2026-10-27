@@ -99,7 +99,7 @@ public class PresentationMerge(JsonStore store, ILogger<PresentationMerge> log)
     {
         try
         {
-            var path = Path.Combine(AppPaths.PdfDir, pdfId + ".pdf");
+            var path = PdfService.PathOf(pdfId);
             if (!File.Exists(path)) return "legacy-" + pdfId;
             using var fs = File.OpenRead(path);
             return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(fs));

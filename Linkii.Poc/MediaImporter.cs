@@ -86,7 +86,8 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
             return new(null, $"« {name} » doit être converti, mais aucun convertisseur n'est installé sur le serveur (ffmpeg ou VLC). Importez un MP4 H.264 ou installez-en un.");
 
         var id = Guid.NewGuid().ToString("N");
-        var source = Path.Combine(AppPaths.MediaDir, id + ext);   // chemin du fichier reçu
+        var dir = MediaFiles.Dir(clientId, ownerId);   // media/{organisation}/{membre}/
+        var source = MediaFiles.PathOf(dir, id + ext);   // chemin du fichier reçu
         long written = 0;
         try
         {
@@ -114,7 +115,7 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
         if (isVideo && !needsConversion && converter.Find() != null && dim is { } d0 && !VideoConverter.FitsLimit(d0.W, d0.H))
         {
             needsConversion = true;
-            var original = Path.Combine(AppPaths.MediaDir, id + "-source" + ext);   // la version convertie prendra le nom id.mp4
+            var original = MediaFiles.PathOf(dir, id + "-source" + ext);   // la version convertie prendra le nom id.mp4
             File.Move(source, original);
             source = original;
         }
@@ -123,12 +124,12 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
         if (!needsConversion)
         {
             var px = dim ?? MediaProbe.Size(source);
-            var item = new MediaItem { ClientId = clientId, AreaId = areaId ?? Guid.Empty, FolderId = folderId, OwnerId = ownerId, Name = title, Type = isVideo ? "video" : "image", FileName = id + ext, Size = written, Width = px?.W, Height = px?.H, AddedUtc = DateTime.UtcNow };
+            var item = new MediaItem { ClientId = clientId, AreaId = areaId ?? Guid.Empty, FolderId = folderId, OwnerId = ownerId, Name = title, Type = isVideo ? "video" : "image", Dir = dir, FileName = id + ext, Size = written, Width = px?.W, Height = px?.H, AddedUtc = DateTime.UtcNow };
             store.Write(d => { d.Media.Add(item); });
             return new(item, null);
         }
 
-        var pending = new MediaItem { ClientId = clientId, AreaId = areaId ?? Guid.Empty, FolderId = folderId, OwnerId = ownerId, Name = title, Type = "video", FileName = null, Status = "processing", Size = written, AddedUtc = DateTime.UtcNow };
+        var pending = new MediaItem { ClientId = clientId, AreaId = areaId ?? Guid.Empty, FolderId = folderId, OwnerId = ownerId, Name = title, Type = "video", Dir = dir, FileName = null, Status = "processing", Size = written, AddedUtc = DateTime.UtcNow };
         store.Write(d => { d.Media.Add(pending); });
         _ = Task.Run(() => ConvertInBackground(pending, source, id, dim));
         return new(pending, null);
@@ -136,7 +137,7 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
 
     private async Task ConvertInBackground(MediaItem item, string source, string id, (int W, int H)? dim)
     {
-        var output = Path.Combine(AppPaths.MediaDir, id + ".mp4");
+        var output = MediaFiles.PathOf(item.Dir, id + ".mp4");
         string? error;
         try { error = await converter.ConvertAsync(source, output + ".part", dim); }
         catch (Exception ex) { error = ex.Message; }

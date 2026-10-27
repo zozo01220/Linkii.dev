@@ -154,10 +154,10 @@ public static class Signup
         db.Screens.RemoveAll(s => s.ClientId == cid);
     }
 
-    /// <summary>Supprime définitivement une organisation et tout ce qu'elle contient. Renvoie les fichiers de la médiathèque à effacer du disque.</summary>
+    /// <summary>Supprime définitivement une organisation et tout ce qu'elle contient. Renvoie les fichiers de la médiathèque à effacer du disque (chemins complets).</summary>
     public static List<string> RemoveClient(Db db, Guid cid)
     {
-        var files = db.Media.Where(m => m.ClientId == cid && !string.IsNullOrEmpty(m.FileName)).Select(m => m.FileName!).ToList();
+        var files = db.Media.Where(m => m.ClientId == cid && !string.IsNullOrEmpty(m.FileName)).Select(m => m.FilePath!).ToList();
         db.Users.RemoveAll(u => u.ClientId == cid);
         db.Screens.RemoveAll(s => s.ClientId == cid);
         db.Playlists.RemoveAll(p => p.ClientId == cid);
@@ -372,20 +372,21 @@ public class SignupWorker(JsonStore store, Notifier notifier, AlertService alert
     {
         var gone = store.Write(db =>
         {
-            var list = new List<(Reseller R, string Email, string Name, string Org, List<string> Files)>();
+            var list = new List<(Reseller R, string Email, string Name, string Org, Guid Client, List<string> Files)>();
             foreach (var c in db.Clients.Where(c => c.DeleteOnUtc is { } del && del <= now && !c.Subscribed && SignupSources.IsSelfService(c.SignupSource)).ToList())
             {
                 var owner = Signup.OwnerOf(db, c);
                 var r = db.Resellers.FirstOrDefault(x => x.Id == c.ResellerId);
                 var files = Signup.RemoveClient(db, c.Id);
-                if (r != null && owner != null) list.Add((r, owner.Email, owner.Name, c.Name, files));
+                if (r != null && owner != null) list.Add((r, owner.Email, owner.Name, c.Name, c.Id, files));
                 log.LogInformation("Espace « {Org} » supprimé au terme de la conservation", c.Name);
             }
             return list;
         });
         foreach (var g in gone)
         {
-            foreach (var f in g.Files) try { File.Delete(Path.Combine(AppPaths.MediaDir, Path.GetFileName(f))); } catch (IOException) { }
+            foreach (var f in g.Files) try { File.Delete(f); } catch (IOException) { }
+            MediaFiles.RemoveEmptyDirs(g.Client);
             await lifecycle.SendTo(g.R, new[] { (g.Email, g.Name) }, Lifecycle.Deleted(g.Org));
         }
     }

@@ -42,7 +42,24 @@ public class PdfService(JsonStore store, ILogger<PdfService> log)
     // PDFium n'est pas fait pour être appelé en parallèle : une conversion à la fois.
     private static readonly SemaphoreSlim Gate = new(1, 1);
 
-    private static string PathOf(string id) => Path.Combine(AppPaths.PdfDir, id + ".pdf");
+    /// <summary>Chemin du PDF gardé : pdf/{organisation}/{id}.pdf, ou pdf/{id}.pdf pour ceux d'avant le rangement (l'identifiant est unique sur la plateforme).</summary>
+    public static string PathOf(string id) => Find(id) ?? Path.Combine(AppPaths.PdfDir, id + ".pdf");
+
+    private static string? Find(string id)
+    {
+        var flat = Path.Combine(AppPaths.PdfDir, id + ".pdf");
+        if (File.Exists(flat)) return flat;
+        try { return Directory.EnumerateDirectories(AppPaths.PdfDir).Select(d => Path.Combine(d, id + ".pdf")).FirstOrDefault(File.Exists); }
+        catch (IOException) { return null; }
+    }
+
+    /// <summary>Emplacement d'un nouveau PDF de l'organisation (dossier créé s'il n'existe pas).</summary>
+    private static string NewPath(Guid clientId, string id)
+    {
+        var dir = Path.Combine(AppPaths.PdfDir, clientId.ToString("N"));
+        Directory.CreateDirectory(dir);
+        return Path.Combine(dir, id + ".pdf");
+    }
 
     private static bool ValidId(string id) => Guid.TryParseExact(id, "N", out _);
 
@@ -63,12 +80,12 @@ public class PdfService(JsonStore store, ILogger<PdfService> log)
     // ---------- Fichier source ----------
 
     /// <summary>Garde le PDF reçu sur le serveur après avoir vérifié qu'il s'ouvre (un PDF protégé par mot de passe est refusé).</summary>
-    public async Task<SourceResult> SaveSource(IBrowserFile file, CancellationToken ct = default)
+    public async Task<SourceResult> SaveSource(Guid clientId, IBrowserFile file, CancellationToken ct = default)
     {
         if (!file.Name.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)) return new(null, "Choisissez un fichier PDF (.pdf).");
         if (file.Size > MaxBytes) return new(null, $"« {file.Name} » dépasse la taille maximale ({MaxBytes / 1_000_000} Mo).");
         await using var input = file.OpenReadStream(MaxBytes, ct);
-        return await SaveStream(input, Path.GetFileNameWithoutExtension(file.Name), null, ct);
+        return await SaveStream(clientId, input, Path.GetFileNameWithoutExtension(file.Name), null, ct);
     }
 
     /// <summary>
@@ -76,12 +93,12 @@ public class PdfService(JsonStore store, ILogger<PdfService> log)
     /// <paramref name="id"/> : remplace le contenu d'un PDF déjà gardé (mise à jour d'un document Google) ; sinon un nouvel identifiant.
     /// En cas d'échec, un PDF gardé sous cet identifiant est conservé tel qu'il était.
     /// </summary>
-    public async Task<SourceResult> SaveStream(Stream input, string title, string? id = null, CancellationToken ct = default)
+    public async Task<SourceResult> SaveStream(Guid clientId, Stream input, string title, string? id = null, CancellationToken ct = default)
     {
         var reuse = id != null && ValidId(id);
         var target = reuse ? id! : Guid.NewGuid().ToString("N");
-        var path = PathOf(target);
-        var temp = PathOf(Guid.NewGuid().ToString("N"));   // lu et vérifié avant de remplacer quoi que ce soit
+        var path = (reuse ? Find(target) : null) ?? NewPath(clientId, target);
+        var temp = NewPath(clientId, Guid.NewGuid().ToString("N"));   // lu et vérifié avant de remplacer quoi que ce soit
         try
         {
             await using (var fs = File.Create(temp)) await input.CopyToAsync(fs, ct);
@@ -175,6 +192,7 @@ public class PdfService(JsonStore store, ILogger<PdfService> log)
             await Task.Run(() =>
             {
                 var path = PathOf(source.Id);
+                var dir = MediaFiles.Dir(clientId, null);   // pages d'un PDF : dossier commun de l'organisation
                 using var info = DocLib.Instance.GetDocReader(path, new PageDimensions(1));   // dimensions des pages en points
                 var sizes = pages.Select(p => { using var pr = info.GetPageReader(p - 1); return (W: pr.GetPageWidth(), H: pr.GetPageHeight()); }).ToList();
                 for (var n = 0; n < pages.Count; n++)
@@ -183,12 +201,12 @@ public class PdfService(JsonStore store, ILogger<PdfService> log)
                     progress?.Report($"Conversion du PDF : page {n + 1} / {pages.Count}…");
                     var jpeg = RenderPage(path, pages[n] - 1, sizes[n].W, sizes[n].H, options, out var w, out var h);
                     var file = Guid.NewGuid().ToString("N") + ".jpg";
-                    File.WriteAllBytes(Path.Combine(AppPaths.MediaDir, file), jpeg);
+                    File.WriteAllBytes(MediaFiles.PathOf(dir, file), jpeg);
                     var name = numbered ? $"{source.Title} — {options.Unit} {pages[n]}" : source.Title;
                     var item = new MediaItem
                     {
                         ClientId = clientId, AreaId = areaId ?? Guid.Empty, Name = name.Length > 120 ? name[..120] : name, Type = "image",
-                        FileName = file, Size = jpeg.Length, Width = w, Height = h, AddedUtc = DateTime.UtcNow
+                        Dir = dir, FileName = file, Size = jpeg.Length, Width = w, Height = h, AddedUtc = DateTime.UtcNow
                     };
                     tag(item, pages[n]);
                     files.Add(item);
@@ -197,7 +215,7 @@ public class PdfService(JsonStore store, ILogger<PdfService> log)
         }
         catch (Exception ex)
         {
-            foreach (var f in files) try { File.Delete(Path.Combine(AppPaths.MediaDir, f.FileName!)); } catch (IOException) { }
+            foreach (var f in files) try { File.Delete(f.FilePath!); } catch (IOException) { }
             if (ex is OperationCanceledException) throw;
             log.LogWarning(ex, "Conversion du PDF {Id} impossible", source.Id);
             return (new(), "La conversion du PDF a échoué : le document est peut-être abîmé.");
@@ -206,7 +224,7 @@ public class PdfService(JsonStore store, ILogger<PdfService> log)
         return (files, null);
     }
 
-    private static string MediaPath(MediaItem m) => Path.Combine(AppPaths.MediaDir, m.FileName ?? "");
+    private static string MediaPath(MediaItem m) => m.FilePath ?? "";
 
     private async Task<ConvertResult> ConvertShared(Guid clientId, Guid? areaId, Source source, Options options, List<int> pages, bool truncated, Meta? meta, IProgress<string>? progress, CancellationToken ct)
     {
@@ -375,8 +393,8 @@ public class PdfService(JsonStore store, ILogger<PdfService> log)
     {
         foreach (var f in items.Where(m => m.FileName != null))
         {
-            try { File.Delete(Path.Combine(AppPaths.MediaDir, f.FileName!)); } catch (IOException) { }
-            Thumbnails.Delete(f.FileName!);
+            try { File.Delete(f.FilePath!); } catch (IOException) { }
+            Thumbnails.Delete(f);
         }
     }
 
@@ -441,8 +459,8 @@ public class PdfService(JsonStore store, ILogger<PdfService> log)
         });
         foreach (var f in removed.Where(m => m.FileName != null))
         {
-            try { File.Delete(Path.Combine(AppPaths.MediaDir, f.FileName!)); } catch (IOException) { }
-            Thumbnails.Delete(f.FileName!);
+            try { File.Delete(f.FilePath!); } catch (IOException) { }
+            Thumbnails.Delete(f);
         }
     }
 }

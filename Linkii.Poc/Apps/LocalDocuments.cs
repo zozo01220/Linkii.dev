@@ -80,7 +80,7 @@ public class LocalDocuments(PdfService pdf, OfficeConverter office, JsonStore st
             if (src == "pdf")
             {
                 progress?.Report("Lecture du PDF…");
-                var saved = await pdf.SaveStream(input, title, null, ct);
+                var saved = await pdf.SaveStream(clientId, input, title, null, ct);
                 if (saved.Source is not { } sent) return (null, saved.Error ?? "PDF refusé.");
                 source = pdf.ReuseUploaded(clientId, areaId, sent, out reused);
                 key = "sha:" + source.Hash;
@@ -107,7 +107,7 @@ public class LocalDocuments(PdfService pdf, OfficeConverter office, JsonStore st
                     if (converted == null) return (null, error);
                     await using (converted)
                     {
-                        var saved = await pdf.SaveStream(converted, title, null, ct);
+                        var saved = await pdf.SaveStream(clientId, converted, title, null, ct);
                         if (saved.Source is not { } made) return (null, saved.Error ?? "Le document converti n'a pas pu être lu.");
                         source = made with { Hash = hash };
                     }

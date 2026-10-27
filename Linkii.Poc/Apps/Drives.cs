@@ -599,7 +599,7 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
         var ids = items.Select(m => m.Id).ToHashSet();
         store.Write(db => { db.Media.RemoveAll(m => ids.Contains(m.Id)); });
         foreach (var m in items.Where(m => m.FileName != null))
-            try { File.Delete(Path.Combine(AppPaths.MediaDir, m.FileName!)); } catch (IOException) { }
+            try { File.Delete(m.FilePath!); } catch (IOException) { }
     }
 
     private void Record(Guid clientId, Guid folderId, string error, Listed? listed)

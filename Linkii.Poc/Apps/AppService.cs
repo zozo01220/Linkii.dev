@@ -184,8 +184,8 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
     {
         foreach (var o in items.Where(o => o.FileName != null))
         {
-            try { File.Delete(Path.Combine(AppPaths.MediaDir, o.FileName!)); } catch (IOException) { }
-            Thumbnails.Delete(o.FileName!);
+            try { File.Delete(o.FilePath!); } catch (IOException) { }
+            Thumbnails.Delete(o);
         }
     }
 
@@ -301,7 +301,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
             return (item, errors);
         });
         foreach (var o in orphans.Where(o => o.FileName != null))
-            try { File.Delete(Path.Combine(AppPaths.MediaDir, o.FileName!)); } catch (IOException) { }
+            try { File.Delete(o.FilePath!); } catch (IOException) { }
         foreach (var p in oldPdfs) PdfService.Delete(p);
         return result;
     }

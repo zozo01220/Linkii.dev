@@ -236,6 +236,19 @@ public static class Ads
     };
 
     public static string Dir = "ads";
+
+    /// <summary>Visuels rangés par campagne : ads/{campagne}/{fichier} (dossier créé s'il n'existe pas).</summary>
+    public static string NewPath(Guid campaignId, string file)
+    {
+        var dir = Path.Combine(Dir, campaignId.ToString("N"));
+        Directory.CreateDirectory(dir);
+        return Path.Combine(dir, file);
+    }
+
+    /// <summary>Chemin d'un visuel : dans le dossier de sa campagne, ou à la racine pour ceux d'avant le rangement.</summary>
+    public static string PathOf(Db db, string file) =>
+        db.AdCampaigns.FirstOrDefault(c => c.Spots.Any(s => s.Landscape == file || s.Portrait == file)) is { } c
+        && File.Exists(Path.Combine(Dir, c.Id.ToString("N"), file)) ? Path.Combine(Dir, c.Id.ToString("N"), file) : Path.Combine(Dir, file);
 }
 
 /// <summary>

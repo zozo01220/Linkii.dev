@@ -124,7 +124,7 @@ public static class VideoLength
         if (Helpers.VideoSeconds(f) is { } known) return known;
         if (f.Type != "video" || f.FileName is not { } name || !name.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase)) return null;
         if (Cache.TryGetValue(name, out var s)) return s;
-        if (Mp4Duration.Seconds(Path.Combine(AppPaths.MediaDir, name)) is not { } d) return null;
+        if (Mp4Duration.Seconds(f.FilePath!) is not { } d) return null;
         Cache[name] = d;
         return d;
     }

@@ -112,7 +112,7 @@ public class CloudFileService(DriveService drive, PdfService pdf, JsonStore stor
 
             progress?.Report(kind.IsGoogle ? "Export par Google…" : "Conversion par Microsoft…");
             await using var stream = await drive.ExportPdf(t, kind, fileRef, ct);
-            var saved = await pdf.SaveStream(stream, file.Name, existingPdf ?? reuseId, ct);
+            var saved = await pdf.SaveStream(clientId, stream, file.Name, existingPdf ?? reuseId, ct);
             if (saved.Source is not { } source) return (null, saved.Error ?? "Export refusé.");
 
             var contents = 0;

@@ -2334,3 +2334,21 @@ Remplace l'organisation en onglets Structure / Membres / Rôles et l'arbre du §
 - Le navigateur n'était tué qu'au dépassement des 40 s ; un Chrome headless ne se ferme pas toujours après `--screenshot`, et un arrêt brutal du serveur laissait des orphelins.
 - Maintenant : on attend l'apparition du PNG (40 s au plus), puis le navigateur et ses enfants sont **toujours** arrêtés (`Kill(true)` dans un `finally`). Une adresse dont la capture échoue n'est plus relancée avant 30 min (`Failed`, `RetryAfter`). `WebSnapshot.KillOrphans()`, appelée au démarrage (`Program.cs`), tue les navigateurs dont la ligne de commande contient `linkii-snap-` (PowerShell sous Windows, `pkill` ailleurs).
 - À vérifier : après plusieurs redémarrages du serveur et l'affichage de pages web, plus aucun `chrome.exe --headless` ne doit rester. Sinon, relever la ligne de commande complète d'une instance.
+
+## 136. Fichiers rangés par organisation et par membre (27 octobre 2026) : codé, compile, tests des miniatures, PDF, captures et migration verts ; non vérifié sur l'instance qui tourne
+- Avant : `media/`, `pdf/`, `thumbs/`, `captures/` et `ads/` contenaient tous les fichiers de toutes les organisations à plat.
+- Maintenant :
+  - `media/{organisation}/{membre}/` : le membre qui a importé (`OwnerId`) ; `media/{organisation}/commun/` pour les fichiers qu'aucun membre n'a importés (Drive synchronisé, pages de PDF). Le sous-dossier est gardé dans `MediaItem.Dir`, et le chemin sur le disque est `MediaItem.FilePath` (`MediaFiles.PathOf`).
+  - `thumbs/` reprend la même arborescence que `media/` ; les captures des pages web vont dans `thumbs/web/`, communes à tous (une capture par adresse publique).
+  - `pdf/{organisation}/` (`PdfService.SaveStream` reçoit l'organisation) ; `captures/{organisation}/{écran}.jpg` ; `ads/{campagne}/` (les visuels appartiennent à la régie, pas à une organisation). `adplays/` était déjà un fichier par organisation.
+- **Les adresses ne changent pas** (`/media/{fichier}`, `/ads/{fichier}`) : seul l'emplacement sur le disque change. Les écrans et le player Android ne retéléchargent donc rien.
+- Au démarrage, `MediaFiles.Migrate` range une fois les fichiers existants (médias, PDF retrouvés via leurs contenus, aperçus, visuels de pub) et efface les miniatures restées à la racine (refaites à la demande). Un fichier introuvable reste où il est et continue d'être lu.
+- Un fichier reste dans le dossier de celui qui l'a importé, même si un autre membre en devient propriétaire.
+- À la suppression d'une organisation, ses dossiers de médias vides sont retirés.
+- **Sur le serveur Linux (service systemd)** : rien à faire à la main. Le rangement se fait **automatiquement à chaque démarrage** du service (`systemctl restart linkii` après le déploiement), avant que le serveur réponde aux requêtes. Le premier démarrage déplace les fichiers ; les suivants ne trouvent plus rien à ranger et ne font rien.
+  - Les déplacements restent dans le même dossier de données (`Linkii:DataDir`) : ce sont de simples renommages, quasi instantanés même avec beaucoup de vidéos.
+  - Le journal indique combien de fichiers ont été rangés : `journalctl -u linkii | grep "fichiers rangés"`.
+  - Le compte du service doit pouvoir écrire dans le dossier de données (c'était déjà nécessaire pour les imports). Un fichier qu'il ne peut pas déplacer (mauvais propriétaire, par exemple copié en root) n'empêche pas le démarrage : il reste à la racine et continue d'être servi. Correction : `chown -R <compte-du-service> <DataDir>` puis redémarrer.
+  - Les noms de dossiers sont des identifiants en minuscules (`Guid.ToString("N")`) : aucun souci de casse sous Linux. Les séparateurs sont gérés par .NET (`Path.Combine`).
+  - Prudence avant le premier déploiement : faire une sauvegarde du dossier de données (`tar -czf linkii-avant-136.tar.gz -C <DataDir> .`). Retour en arrière : restaurer cette sauvegarde avec l'ancienne version (l'ancienne version ne lit que les fichiers à la racine).
+  - `deploy/reset-donnees.sh` vide déjà `media`, `thumbs`, `pdf` et `captures` avec leurs sous-dossiers (`find -mindepth 1 -delete`) : inchangé.
