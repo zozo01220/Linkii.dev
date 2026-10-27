@@ -17,8 +17,28 @@ public class WebSnapshot
     private static readonly TimeSpan MaxAge = TimeSpan.FromHours(12);
     private static readonly SemaphoreSlim Slots = new(2);   // deux navigateurs au plus à la fois
     private static readonly HashSet<string> Running = new();   // adresses en cours de capture
+    private static readonly Dictionary<string, DateTime> Failed = new();   // dernière tentative ratée, pour ne pas relancer un navigateur à chaque affichage
+    private static readonly TimeSpan RetryAfter = TimeSpan.FromMinutes(30);
     private string? _browser;
     private bool _searched;
+
+    /// <summary>Au démarrage : tue les navigateurs de capture restés après un arrêt brutal du serveur (reconnus à leur dossier linkii-snap-).</summary>
+    public static void KillOrphans()
+    {
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                using var psi = Process.Start(new ProcessStartInfo("powershell", "-NoProfile -Command \"Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*linkii-snap-*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }\"")
+                { CreateNoWindow = true, UseShellExecute = false });
+            }
+            else
+            {
+                using var p = Process.Start(new ProcessStartInfo("pkill", "-f linkii-snap-") { CreateNoWindow = true, UseShellExecute = false });
+            }
+        }
+        catch { }
+    }
 
     public string? Browser
     {
@@ -60,12 +80,24 @@ public class WebSnapshot
         if (!Available || string.IsNullOrWhiteSpace(url) || !AppCatalog.IsHttpUrl(url)) return;
         var p = PathOf(url);
         if (File.Exists(p) && DateTime.UtcNow - File.GetLastWriteTimeUtc(p) < MaxAge) return;
-        lock (Running) { if (!Running.Add(url)) return; }
+        lock (Running)
+        {
+            if (Failed.TryGetValue(url, out var at) && DateTime.UtcNow - at < RetryAfter) return;
+            if (!Running.Add(url)) return;
+        }
         _ = Task.Run(async () =>
         {
-            try { await Capture(url); }
+            var ok = false;
+            try { ok = await Capture(url); }
             catch { }
-            finally { lock (Running) Running.Remove(url); }
+            finally
+            {
+                lock (Running)
+                {
+                    Running.Remove(url);
+                    if (ok) Failed.Remove(url); else Failed[url] = DateTime.UtcNow;
+                }
+            }
         });
     }
 
@@ -93,11 +125,21 @@ public class WebSnapshot
             }) psi.ArgumentList.Add(a);
             using var proc = Process.Start(psi);
             if (proc == null) return false;
-            _ = proc.StandardOutput.ReadToEndAsync();
-            _ = proc.StandardError.ReadToEndAsync();
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(40));
-            try { await proc.WaitForExitAsync(cts.Token); }
-            catch (OperationCanceledException) { try { proc.Kill(true); } catch { } return false; }
+            try
+            {
+                _ = proc.StandardOutput.ReadToEndAsync();
+                _ = proc.StandardError.ReadToEndAsync();
+                // Chrome headless ne se ferme pas toujours après la capture : on attend le fichier (ou la sortie), puis on tue l'arbre.
+                var deadline = DateTime.UtcNow.AddSeconds(40);
+                while (!proc.HasExited && DateTime.UtcNow < deadline && !File.Exists(png))
+                    await Task.Delay(250);
+                if (!proc.HasExited && File.Exists(png)) await Task.Delay(500);   // laisse finir l'écriture du PNG
+            }
+            finally
+            {
+                // Toujours tuer le navigateur et ses enfants, quelle que soit l'issue (délai, erreur, succès).
+                try { if (!proc.HasExited) proc.Kill(true); } catch { }
+            }
             if (!File.Exists(png)) return false;
 
             using var bmp = SKBitmap.Decode(png);

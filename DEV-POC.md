@@ -2328,3 +2328,9 @@ Remplace l'organisation en onglets Structure / Membres / Rôles et l'arbre du §
 - Branché dans : panneau d'abonnement (cartes de plan, ligne « Plan »), tableaux Clients et Facturation de la console admin et de l'espace revendeur. Menu latéral déplié : la pastille `.plan-tag` existante reçoit l'icône.
 - **Menu replié** : la pastille du plan (`.brand-plan`, `MainLayout.razor`) s'affiche au-dessus du logo « li », en petit (10,5 px) ; masquée quand le menu est déplié. Si « Essential » paraît trop large dans les 80 px, passer à l'icône seule avec le nom en infobulle.
 - Non touché : points de couleur des tableaux de bord, listes déroulantes et boutons de choix de plan (libellés de formulaire).
+
+## 135. Captures web : plus de Chrome headless orphelins (27 octobre 2026) : corrigé dans `WebSnapshot.cs`, compile ; non vérifié en réel
+- Constat : une cinquantaine de processus `chrome.exe --headless=new` (11 instances et leurs enfants) restaient dans le Gestionnaire des tâches, sans Chrome ouvert. Ils venaient de la capture de vignettes de l'app « Page web ».
+- Le navigateur n'était tué qu'au dépassement des 40 s ; un Chrome headless ne se ferme pas toujours après `--screenshot`, et un arrêt brutal du serveur laissait des orphelins.
+- Maintenant : on attend l'apparition du PNG (40 s au plus), puis le navigateur et ses enfants sont **toujours** arrêtés (`Kill(true)` dans un `finally`). Une adresse dont la capture échoue n'est plus relancée avant 30 min (`Failed`, `RetryAfter`). `WebSnapshot.KillOrphans()`, appelée au démarrage (`Program.cs`), tue les navigateurs dont la ligne de commande contient `linkii-snap-` (PowerShell sous Windows, `pkill` ailleurs).
+- À vérifier : après plusieurs redémarrages du serveur et l'affichage de pages web, plus aucun `chrome.exe --headless` ne doit rester. Sinon, relever la ligne de commande complète d'une instance.

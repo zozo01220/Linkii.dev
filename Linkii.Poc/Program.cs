@@ -140,6 +140,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
 });
 
 var app = builder.Build();
+WebSnapshot.KillOrphans();
 app.UseForwardedHeaders();
 
 var dataDir = app.Configuration["Linkii:DataDir"] ?? app.Environment.ContentRootPath;
