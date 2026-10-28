@@ -565,7 +565,7 @@
         stage(pl.version, 'ready');
         working(false);
         dl.done();
-        if (!state.timer) next(); // rien ne tourne : on démarre tout de suite
+        next();   // publication instantanée : la nouvelle version s'affiche aussitôt, sans attendre la fin du contenu en cours (et démarre tout de suite si rien ne tournait)
       }, function (e) { working(false); dl.fail(); throw e; });
     }).catch(function () {}).then(function () { refreshing = false; });
   }
