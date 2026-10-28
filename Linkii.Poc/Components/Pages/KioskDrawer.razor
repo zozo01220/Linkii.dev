@@ -1,4 +1,7 @@
 @using System.Text.Json
+@using Microsoft.JSInterop
+@implements IDisposable
+@inject IJSRuntime JS
 @using Plan = Linkii.Poc.Planning
 @inject TenantStore Store
 @inject Notifier Notifier
@@ -73,12 +76,13 @@ else
                             <div class="kp-logo">@if (k.LogoMediaId is { } lg && Media(lg) is { } lm) { <span><MediaThumb Media="lm" All="media" /></span> }</div>
                             <div class="kp-lg" style="@FontStyle(k.TitleFont, k.TitleColor)">@k.Title</div>
                             <div class="kp-mp" style="@FontStyle(k.PromptFont, k.PromptColor)">@k.Prompt</div>
-                            <div class="kp-g @(k.Accessible ? "low" : "") @(k.BigText ? "big" : "")" style="@GridStyle(cols)">
+                            <div class="kp-g @(k.Accessible ? "low" : "") @(k.BigText ? "big" : "")" style="@GridStyle(cols)" @ref="tileGrid">
                                 @foreach (var t in shownTiles)
                                 {
                                     var tt = t;
                                     var img = tt.ImageMediaId is { } iid ? Media(iid) : null;
-                                    <i class="@(selTile == tt.Id ? "sel" : "") @(img != null ? "shade" : "") @ShadeClass" style="@TileStyle(tt)" @onclick="() => PickTile(tt)">
+                                    <i @key="tt.Id" data-tile="@tt.Id" class="@(selTile == tt.Id ? "sel" : "") @(img != null ? "shade" : "") @ShadeClass" style="@TileStyle(tt)" @onclick="() => PickTile(tt)">
+                                        <span class="kp-tact"><button type="button" @onclick="() => EditTile(tt)" @onclick:stopPropagation="true"><Ico Name="edit" Size="14" /> Modifier</button><button type="button" class="del" @onclick="() => delTile = tt" @onclick:stopPropagation="true"><Ico Name="trash" Size="14" /> Supprimer</button></span>
                                         @if (img != null) { <span class="kp-bgi"><MediaThumb Media="img" All="media" /></span> }
                                         <b style="@TitleStyle(tt)">@tt.Title</b>@if (!string.IsNullOrWhiteSpace(tt.Subtitle)) { <small style="@SubStyle(tt)">@tt.Subtitle</small> }
                                     </i>
@@ -136,43 +140,15 @@ else
                 else if (tab == "tiles")
                 {
                     <div class="kp-ch">
-                        <div><span class="kp-h">Chaque tuile ouvre un contenu de votre médiathèque. Les flèches changent l'ordre.</span></div>
+                        <div><span class="kp-h">Chaque tuile ouvre un contenu de votre médiathèque. Glissez les tuiles de l'aperçu pour changer l'ordre ; survolez-en une pour la modifier ou la supprimer.</span></div>
                         <button type="button" class="btn kp-ora sm" @onclick="NewTile"><Ico Name="plus" Size="14" /> Ajouter une tuile</button>
                     </div>
                     @if (k.Tiles.Count == 0)
                     {
                         <div class="kp-empty"><b>Aucune tuile</b><p>Ajoutez des tuiles pour que les visiteurs puissent choisir : un plan, une brochure, un site, une présentation…</p></div>
                     }
-                    <div class="kp-tl">
-                        @for (var i = 0; i < k.Tiles.Count; i++)
-                        {
-                            var t = k.Tiles[i];
-                            var idx = i;
-                            var m = Media(t.MediaId);
-                            var broken = m == null || !Kiosk.CanOpen(m);
-                            @* carte compacte : miniature, texte, puis quatre boutons-icônes en ligne : tout tient dans la largeur du panneau *@
-                            <div class="kp-tr @(broken ? "err" : "") @(selTile == t.Id ? "sel" : "")" @onclick="() => PickTile(t)">
-                                <span class="kp-sq" style="background:@t.Color">@if (!broken && ThumbOf(t) is { } th) { <MediaThumb Media="th" All="media" /> }</span>
-                                <div class="kp-tx">
-                                    <b>@t.Title</b>
-                                    <small>
-                                        @if (broken) { <span class="kp-bad">Contenu indisponible : tuile non affichée</span> }
-                                        else { <span>@KindLabel(m!) · @m!.Name</span> }
-                                        @if (t.Item.QrOn) { <span class="kp-chip">QR</span> }
-                                        @if (!string.IsNullOrEmpty(t.ShowFrom) || !string.IsNullOrEmpty(t.ShowTo)) { <span class="kp-chip">@Dates(t)</span> }
-                                    </small>
-                                </div>
-                                <div class="kp-acts">
-                                    <button type="button" class="btn ghost sm icon" title="Monter" aria-label="Monter" disabled="@(idx == 0)" @onclick="() => Move(idx, -1)" @onclick:stopPropagation="true">↑</button>
-                                    <button type="button" class="btn ghost sm icon" title="Descendre" aria-label="Descendre" disabled="@(idx == k.Tiles.Count - 1)" @onclick="() => Move(idx, 1)" @onclick:stopPropagation="true">↓</button>
-                                    <button type="button" class="btn ghost sm icon" title="@(broken ? "Remplacer le contenu" : "Modifier la tuile")" aria-label="@(broken ? "Remplacer le contenu" : "Modifier la tuile")" @onclick="() => EditTile(t)" @onclick:stopPropagation="true"><Ico Name="edit" Size="15" /></button>
-                                    <button type="button" class="btn ghost sm icon" title="Supprimer la tuile" aria-label="Supprimer la tuile" @onclick="() => RemoveTile(t)" @onclick:stopPropagation="true"><Ico Name="trash" Size="15" /></button>
-                                </div>
-                            </div>
-                        }
-                    </div>
-                    <details class="kp-adv kp-advbox">
-                        <summary><Ico Name="sliders" Size="16" /> Paramètres avancés <small>pour toutes les tuiles</small></summary>
+                    <section class="kp-advbox">
+                        <h4 class="kp-advh"><Ico Name="sliders" Size="16" /> Paramètres avancés <small>pour toutes les tuiles</small></h4>
                         <p class="kp-h" style="margin-bottom:12px">Ces réglages s'appliquent d'un coup à toutes les tuiles. La taille choisie dans une tuile s'y ajoute.</p>
                         <p class="kp-lbl">Texte</p>
                         <div class="kp-f"><label>Police et couleur</label>
@@ -187,7 +163,7 @@ else
                         @Seg("Espacement", Opts(Kiosk.Gaps), Kiosk.Pick(Kiosk.Gaps, k.TileGap, "normal").Key, v => Edit(c => c.TileGap = v))
                         @Seg("Voile sous le texte (tuiles à image)", Opts(Kiosk.Shades), Kiosk.Pick(Kiosk.Shades, k.TileShade, "normal").Key, v => Edit(c => c.TileShade = v))
                         <button type="button" class="btn ghost sm" @onclick="ResetTileStyle">Rétablir les valeurs par défaut</button>
-                    </details>
+                    </section>
                 }
                 else
                 {
@@ -357,6 +333,16 @@ else
         </div>
     }
 
+    @if (delTile is { } dt)
+    {
+        <div class="modal-backdrop over" @onclick="() => delTile = null"></div>
+        <div class="modal kp-confirm" role="alertdialog" aria-modal="true">
+            <h3>Supprimer la tuile « @dt.Title » ?</h3>
+            <p class="hint">La tuile disparaît du menu de la borne. Le contenu de la médiathèque n'est pas supprimé. Elle ne sera retirée de la borne qu'après « Enregistrer et publier ».</p>
+            <div class="modal-actions"><button class="btn ghost" @onclick="() => delTile = null">Annuler</button><button class="btn danger" @onclick="ConfirmRemove">Supprimer</button></div>
+        </div>
+    }
+
     @if (confirmOff)
     {
         <div class="modal-backdrop over" @onclick="() => confirmOff = false"></div>
@@ -399,7 +385,9 @@ else
     private bool saving, confirmPublish, editor, sim, confirmOff, newTile, planOpen, parOpen;
     private bool headRename;
     private string headValue = "";
-    private KioskTile? editTile;
+    private KioskTile? editTile, delTile;
+    private ElementReference tileGrid;
+    private DotNetObjectReference<KioskDrawer>? self;
     private string? tileError;
     private string cat = "pdf";
 
@@ -570,14 +558,40 @@ else
         editTile = null;
     }
 
-    private void RemoveTile(KioskTile t) => Edit(c => c.Tiles.RemoveAll(x => x.Id == t.Id));
-
-    private void Move(int i, int by) => Edit(c =>
+    private void ConfirmRemove()
     {
-        var j = i + by;
-        if (i < 0 || j < 0 || i >= c.Tiles.Count || j >= c.Tiles.Count) return;
-        (c.Tiles[i], c.Tiles[j]) = (c.Tiles[j], c.Tiles[i]);
-    });
+        if (delTile is not { } t) return;
+        Edit(c => c.Tiles.RemoveAll(x => x.Id == t.Id));
+        if (selTile == t.Id) selTile = null;
+        delTile = null;
+    }
+
+    // Glisser-déposer d'une tuile de l'aperçu (tile-sort.js) : 'to' est sa nouvelle position parmi les tuiles affichées ; les tuiles non affichées (contenu disparu) gardent leur place.
+    [JSInvokable]
+    public void ReorderTile(string id, int to)
+    {
+        if (k == null || !Guid.TryParse(id, out var g)) return;
+        var vis = k.Tiles.Where(t => Media(t.MediaId) is { } mm && Kiosk.CanOpen(mm)).ToList();
+        var slots = k.Tiles.Select((t, i) => (t, i)).Where(x => vis.Contains(x.t)).Select(x => x.i).ToList();
+        var from = vis.FindIndex(t => t.Id == g);
+        to = Math.Clamp(to, 0, vis.Count - 1);
+        if (from < 0 || from == to) return;
+        var moved = vis[from]; vis.RemoveAt(from); vis.Insert(to, moved);
+        for (var i = 0; i < slots.Count; i++) k.Tiles[slots[i]] = vis[i];
+        dirty = true;
+        InvokeAsync(StateHasChanged);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (k == null || s?.Kiosk == null || view != "home") return;
+        self ??= DotNetObjectReference.Create(this);
+        try { await JS.InvokeVoidAsync("linkiiTileSort.init", tileGrid, self); }
+        catch (Exception e) when (e is JSDisconnectedException or InvalidOperationException or JSException) { }   // circuit fermé ou grille absente
+    }
+
+    public void Dispose() => self?.Dispose();
+
 
     // ----- Inactivité -----
     private void AssignList(ChangeEventArgs e)
