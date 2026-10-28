@@ -10,6 +10,7 @@ public class KioskTile
     public Guid MediaId { get; set; }
     public string Title { get; set; } = "";
     public string? Subtitle { get; set; }
+    public double TextScale { get; set; } = 1;     // taille du texte de la tuile : 0,75 petit · 1 normal · 1,3 grand · 1,7 très grand
     public string Color { get; set; } = "#3B82C4";
     public Guid? ImageMediaId { get; set; }     // image de la médiathèque en fond de tuile (sinon la couleur)
     public string? ShowFrom { get; set; }        // aaaa-mm-jj : affichée à partir de…
@@ -55,6 +56,7 @@ public class PublishedKioskTile
     public Guid Id { get; set; }
     public string Title { get; set; } = "";
     public string? Subtitle { get; set; }
+    public double TextScale { get; set; } = 1;
     public string Color { get; set; } = "#3B82C4";
     public string? ImageUrl { get; set; }
     public string? ShowFrom { get; set; }
@@ -80,7 +82,7 @@ public class PublishedKiosk
         lockApp = Config.Lock, noZoom = Config.NoZoom, hideCursor = Config.HideCursor, wake = Config.WakeOnTouch,
         tiles = Tiles.Select(t => new
         {
-            id = t.Id, title = t.Title, subtitle = t.Subtitle, color = t.Color, image = t.ImageUrl, from = t.ShowFrom, to = t.ShowTo,
+            id = t.Id, title = t.Title, subtitle = t.Subtitle, scale = t.TextScale, color = t.Color, image = t.ImageUrl, from = t.ShowFrom, to = t.ShowTo,
             item = t.Item.ForPlayer()
         })
     };
@@ -101,6 +103,11 @@ public static class Kiosk
         (!Planning.IsDate(t.ShowFrom) || DateOnly.Parse(t.ShowFrom!) <= day) && (!Planning.IsDate(t.ShowTo) || DateOnly.Parse(t.ShowTo!) >= day);
 
     /// <summary>Couleur valide (#rrggbb) ou la première de la palette.</summary>
+    public static readonly (double Scale, string Label)[] TextSizes = { (0.75, "Petit"), (1, "Normal"), (1.3, "Grand"), (1.7, "Très grand") };
+
+    /// <summary>Taille de texte valide parmi <see cref="TextSizes"/> (sinon normale).</summary>
+    public static double CleanScale(double s) => TextSizes.Any(x => Math.Abs(x.Scale - s) < 0.01) ? s : 1;
+
     public static string CleanColor(string? c) => c is { Length: 7 } && c[0] == '#' && c.Skip(1).All(Uri.IsHexDigit) ? c.ToUpperInvariant() : Colors[0];
 
     /// <summary>Couleurs par défaut du titre et du message d'invite (celles du player).</summary>

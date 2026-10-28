@@ -80,7 +80,7 @@ else
                                     var img = tt.ImageMediaId is { } iid ? Media(iid) : null;
                                     <i class="@(selTile == tt.Id ? "sel" : "") @(img != null ? "shade" : "")" style="background-color:@tt.Color" @onclick="() => PickTile(tt)">
                                         @if (img != null) { <span class="kp-bgi"><MediaThumb Media="img" All="media" /></span> }
-                                        <b>@tt.Title</b>@if (!string.IsNullOrWhiteSpace(tt.Subtitle)) { <small>@tt.Subtitle</small> }
+                                        <b style="font-size:@((k.BigText ? 4.2 : 3.4) * tt.TextScale)cqw">@tt.Title</b>@if (!string.IsNullOrWhiteSpace(tt.Subtitle)) { <small style="font-size:@((k.BigText ? 2.3 : 1.9) * tt.TextScale)cqw">@tt.Subtitle</small> }
                                     </i>
                                 }
                             </div>
@@ -305,7 +305,11 @@ else
                 <p class="kp-lbl">2 · Titre et sous-titre</p>
                 <div class="kp-f"><input maxlength="60" placeholder="Titre de la tuile" aria-label="Titre de la tuile" @bind="et.Title" @bind:event="oninput" /></div>
                 <div class="kp-f"><input maxlength="80" placeholder="Sous-titre (facultatif)" aria-label="Sous-titre" @bind="et.Subtitle" @bind:event="oninput" /></div>
-                <p class="kp-lbl">3 · Couleur ou image de fond</p>
+                <p class="kp-lbl">Taille du texte de la tuile</p>
+                <div class="kp-seg kp-size" role="group" aria-label="Taille du texte">
+                    @foreach (var sz in Kiosk.TextSizes) { var sv = sz.Scale; <button type="button" class="@(Math.Abs(et.TextScale - sv) < 0.01 ? "on" : "")" @onclick="() => et.TextScale = sv">@sz.Label</button> }
+                </div>
+                <p class="kp-lbl" style="margin-top:14px">3 · Couleur ou image de fond</p>
                 <div class="kp-cols">@foreach (var c in Kiosk.Colors) { var cc = c; <i class="@(et.Color == cc ? "on" : "")" style="background:@cc" @onclick="() => et.Color = cc"></i> }</div>
                 <div class="kp-f">
                     <select aria-label="Image de fond" @onchange="e => et.ImageMediaId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null">
@@ -447,7 +451,7 @@ else
         <select id="@id" aria-label="Police" @onchange="e => setFont(string.IsNullOrEmpty(e.Value?.ToString()) ? null : e.Value!.ToString())">
             @foreach (var f in Kiosk.Fonts) { <option value="@f.Key" selected="@((font ?? "") == f.Key)" style="font-family:@f.Css">@f.Label</option> }
         </select>
-        <input type="color" aria-label="Couleur du texte" title="Couleur du texte" value="@(Kiosk.CleanHex(color) is { Length: > 0 } cc ? cc : defColor)" @onchange="e => setColor(Kiosk.CleanHex(e.Value?.ToString()) is { Length: > 0 } v ? v : null)" />
+        <input type="color" aria-label="Couleur du texte" title="Couleur du texte" value="@(Kiosk.CleanHex(color) is { Length: > 0 } cc ? cc : defColor)" @oninput="e => setColor(Kiosk.CleanHex(e.Value?.ToString()) is { Length: > 0 } v ? v : null)" @onchange="e => setColor(Kiosk.CleanHex(e.Value?.ToString()) is { Length: > 0 } v ? v : null)" />
         @if (!string.IsNullOrEmpty(color)) { <button type="button" class="btn ghost sm" title="Remettre la couleur par défaut" @onclick="() => setColor(null)">Défaut</button> }
     </div>;
 
@@ -502,6 +506,7 @@ else
         if (t.Title.Length == 0) { tileError = "Donnez un titre à la tuile."; return; }
         t.Subtitle = string.IsNullOrWhiteSpace(t.Subtitle) ? null : t.Subtitle.Trim();
         t.Color = Kiosk.CleanColor(t.Color);
+        t.TextScale = Kiosk.CleanScale(t.TextScale);
         t.ShowFrom = Plan.IsDate(t.ShowFrom) ? t.ShowFrom : null;
         t.ShowTo = Plan.IsDate(t.ShowTo) ? t.ShowTo : null;
         if (t.ShowFrom != null && t.ShowTo != null && string.CompareOrdinal(t.ShowFrom, t.ShowTo) > 0) { tileError = "La date de fin précède celle de début."; return; }

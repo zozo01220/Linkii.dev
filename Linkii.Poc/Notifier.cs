@@ -76,7 +76,7 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
             pi.Placement = "full";
             tiles.Add(new PublishedKioskTile
             {
-                Id = t.Id, Title = t.Title, Subtitle = t.Subtitle, Color = Kiosk.CleanColor(t.Color), ImageUrl = Url(t.ImageMediaId),
+                Id = t.Id, Title = t.Title, Subtitle = t.Subtitle, TextScale = Kiosk.CleanScale(t.TextScale), Color = Kiosk.CleanColor(t.Color), ImageUrl = Url(t.ImageMediaId),
                 ShowFrom = t.ShowFrom, ShowTo = t.ShowTo, Item = pi
             });
         }
