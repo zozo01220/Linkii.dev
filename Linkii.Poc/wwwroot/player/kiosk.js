@@ -39,10 +39,11 @@
     '#k-page{position:absolute;left:0;top:0;right:0;bottom:0;display:none;background:#fff}' +
     '#k-page .k-layer{position:absolute;left:0;top:0;right:0;bottom:0;opacity:1}' +
     '#k-page .k-layer img,#k-page .k-layer video{width:100%;height:100%;object-fit:contain}' +
-    '#k-back{position:absolute;right:2.4em;top:2.4em;z-index:30;background:rgba(11,31,58,.88);color:#fff;border:.1em solid rgba(255,255,255,.7);border-radius:3em;font-family:inherit;font-size:1.6em;padding:.35em 1em;cursor:pointer;display:none;box-shadow:0 .2em .8em rgba(0,0,0,.35)}' +
-    '#k-back.low{top:auto;bottom:1.6em}' +
-    '#k-main.paged #k-home{display:none}#k-main.paged #k-page,#k-main.paged #k-back{display:block}' +
-    '#k-main.paged #k-back{display:block}' +
+    '#k-back{position:absolute;left:50%;bottom:3em;transform:translateX(-50%);z-index:30;display:none;align-items:center;gap:.55em;background:rgba(11,31,58,.92);color:#fff;border:.1em solid rgba(255,255,255,.4);border-radius:3em;font-family:inherit;font-size:2.4em;line-height:1;padding:.55em .75em .55em .7em;cursor:pointer;box-shadow:0 .25em 1em rgba(0,0,0,.5);-webkit-tap-highlight-color:transparent}' +
+    '#k-back:active{transform:translateX(-50%) scale(.96)}#k-back svg{width:1.1em;height:1.1em;flex:none}' +
+    '#k-back .k-ring circle{fill:none;stroke-width:3.2}#k-back .k-ring .bg{stroke:rgba(255,255,255,.28)}#k-back .k-ring .fg{stroke:#E8710A;stroke-dasharray:56.5;stroke-dashoffset:0;transform:rotate(-90deg);transform-origin:center}' +
+    '#k-back.run .k-ring .fg{animation:kring var(--ret,30s) linear forwards}@keyframes kring{to{stroke-dashoffset:56.5}}' +
+    '#k-main.paged #k-home{display:none}#k-main.paged #k-page{display:block}#k-main.paged #k-back{display:flex}' +
     '#k-corner{position:absolute;left:0;top:0;width:9em;height:9em;z-index:40}' +
     '#k-pin{position:absolute;left:0;top:0;right:0;bottom:0;z-index:50;background:rgba(11,31,58,.86);display:none;place-items:center;color:#0B1F3A}' +
     '#k-pin.on{display:grid}' +
@@ -127,8 +128,9 @@
     mainEl = el('div'); mainEl.id = 'k-main'; mainEl.style.background = cfg.bg || '#fff';
     homeEl = el('div'); homeEl.id = 'k-home';
     pageEl = el('div'); pageEl.id = 'k-page';
-    backEl = el('button'); backEl.id = 'k-back'; backEl.type = 'button'; backEl.textContent = '← Retour';
-    if (cfg.accessible) backEl.className = 'low';
+    backEl = el('button'); backEl.id = 'k-back'; backEl.type = 'button'; backEl.setAttribute('aria-label', 'Retour à l\x27accueil');
+    // pilule « Accueil » en bas au centre ; l\x27anneau se vide pendant le délai avant le retour automatique (il repart à chaque toucher)
+    backEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><span>Accueil</span><svg class="k-ring" viewBox="0 0 24 24"><circle class="bg" cx="12" cy="12" r="9"/><circle class="fg" cx="12" cy="12" r="9"/></svg>';
     mainEl.appendChild(homeEl); mainEl.appendChild(pageEl); mainEl.appendChild(backEl);
     root.appendChild(touchEl); root.appendChild(mainEl);
     if (cfg.lockApp && !(H && H.preview)) root.appendChild(corner());   // borne verrouillée : accès technicien par le coin
@@ -197,6 +199,10 @@
 
   function arm() {
     clearTimeout(timer); timer = null;
+    if (backEl) {   // anneau du bouton Accueil : repart à zéro à chaque armement du délai
+      backEl.classList.remove('run');
+      if (state === 'page') { backEl.style.setProperty('--ret', Math.max(10, cfg.returnSec || 30) + 's'); void backEl.offsetWidth; backEl.classList.add('run'); }
+    }
     if (state === 'page') timer = setTimeout(function () { goHome('auto'); }, Math.max(10, cfg.returnSec || 30) * 1000);
     else if (state === 'home') timer = setTimeout(goIdle, Math.max(30, cfg.idleSec || 120) * 1000);
   }
