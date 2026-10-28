@@ -23,7 +23,7 @@ else
     var portrait = orientation == "portrait";
     var idlePl = playlists.FirstOrDefault(p => p.Id == draftPlaylist);
     <div class="modal-backdrop" @onclick="Close"></div>
-    <div class="modal app-modal wg-modal" role="dialog" aria-modal="true" aria-labelledby="kp-title">
+    <div class="modal app-modal wg-modal kp-win" role="dialog" aria-modal="true" aria-labelledby="kp-title">
         <div class="modal-head">
             <span class="app-ico" style="--app-c:#C45A00"><Ico Name="hand" Size="22" /></span>
             <div class="grow" style="min-width:0">
@@ -66,14 +66,22 @@ else
                     }
                     else
                     {
+                        @* même mise en page que le player (kiosk.js « drawHome ») : 1 unité = 1 % de la largeur de l'écran ; tuiles en couleur ou image de fond, titre en bas à gauche *@
+                        var shownTiles = k.Tiles.Where(t => Media(t.MediaId) is { } mm && Kiosk.CanOpen(mm)).ToList();
+                        var cols = shownTiles.Count <= 1 ? 1 : portrait ? 2 : shownTiles.Count <= 4 ? 2 : 3;
                         <div class="kp-ks" style="background:@k.Bg">
-                            <div class="kp-lg">@k.Title</div>
-                            @if (!string.IsNullOrWhiteSpace(k.Prompt)) { <div class="kp-mp">@k.Prompt</div> }
-                            <div class="kp-g @(k.Accessible ? "low" : "")">
-                                @foreach (var t in k.Tiles.Where(t => Media(t.MediaId) is { } mm && Kiosk.CanOpen(mm)))
+                            <div class="kp-logo">@if (k.LogoMediaId is { } lg && Media(lg) is { } lm) { <span><MediaThumb Media="lm" All="media" /></span> }</div>
+                            <div class="kp-lg" style="@FontStyle(k.TitleFont, k.TitleColor)">@k.Title</div>
+                            <div class="kp-mp" style="@FontStyle(k.PromptFont, k.PromptColor)">@k.Prompt</div>
+                            <div class="kp-g @(k.Accessible ? "low" : "") @(k.BigText ? "big" : "")" style="grid-template-columns:repeat(@cols, 1fr)">
+                                @foreach (var t in shownTiles)
                                 {
                                     var tt = t;
-                                    <i class="@(selTile == tt.Id ? "sel" : "")" style="background:@tt.Color" title="@tt.Title" @onclick="() => PickTile(tt)">@if (ThumbOf(tt) is { } th) { <MediaThumb Media="th" All="media" /> }</i>
+                                    var img = tt.ImageMediaId is { } iid ? Media(iid) : null;
+                                    <i class="@(selTile == tt.Id ? "sel" : "") @(img != null ? "shade" : "")" style="background-color:@tt.Color" @onclick="() => PickTile(tt)">
+                                        @if (img != null) { <span class="kp-bgi"><MediaThumb Media="img" All="media" /></span> }
+                                        <b>@tt.Title</b>@if (!string.IsNullOrWhiteSpace(tt.Subtitle)) { <small>@tt.Subtitle</small> }
+                                    </i>
                                 }
                             </div>
                         </div>
@@ -103,8 +111,10 @@ else
                 @if (tab == "home")
                 {
                     <div class="dw">
-                        <div class="dw-field"><label for="k-title">Titre</label><input id="k-title" maxlength="60" value="@k.Title" @oninput='e => Edit(c => c.Title = Clean(e.Value, 60, ""))' @onchange='e => Edit(c => c.Title = Clean(e.Value, 60, "Bienvenue"))' /></div>
-                        <div class="dw-field"><label for="k-prompt">Message d'invite</label><input id="k-prompt" maxlength="90" value="@k.Prompt" @oninput='e => Edit(c => c.Prompt = Clean(e.Value, 90, ""))' /></div>
+                        <div class="dw-field"><label for="k-title">Titre</label><input id="k-title" maxlength="60" value="@k.Title" @oninput='e => Edit(c => c.Title = Clean(e.Value, 60, ""))' @onchange='e => Edit(c => c.Title = Clean(e.Value, 60, "Bienvenue"))' />
+                            @FontRow("k-tf", k.TitleFont, k.TitleColor, Kiosk.TitleDefault, v => Edit(c => c.TitleFont = v), v => Edit(c => c.TitleColor = v))</div>
+                        <div class="dw-field"><label for="k-prompt">Message d'invite</label><input id="k-prompt" maxlength="90" value="@k.Prompt" @oninput='e => Edit(c => c.Prompt = Clean(e.Value, 90, ""))' />
+                            @FontRow("k-pf", k.PromptFont, k.PromptColor, Kiosk.PromptDefault, v => Edit(c => c.PromptFont = v), v => Edit(c => c.PromptColor = v))</div>
                         <div class="dw-field"><label for="k-logo">Logo</label>
                             <select id="k-logo" @onchange="e => Edit(c => c.LogoMediaId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null)">
                                 <option value="" selected="@(k.LogoMediaId == null)">— Aucun logo —</option>
@@ -140,21 +150,24 @@ else
                             var idx = i;
                             var m = Media(t.MediaId);
                             var broken = m == null || !Kiosk.CanOpen(m);
+                            @* carte compacte : miniature, texte, puis quatre boutons-icônes en ligne : tout tient dans la largeur du panneau *@
                             <div class="kp-tr @(broken ? "err" : "") @(selTile == t.Id ? "sel" : "")" @onclick="() => PickTile(t)">
                                 <span class="kp-sq" style="background:@t.Color">@if (!broken && ThumbOf(t) is { } th) { <MediaThumb Media="th" All="media" /> }</span>
-                                <div class="grow">
+                                <div class="kp-tx">
                                     <b>@t.Title</b>
                                     <small>
-                                        @if (broken) { <span class="kp-bad">Contenu supprimé ou indisponible : tuile non affichée</span> }
+                                        @if (broken) { <span class="kp-bad">Contenu indisponible : tuile non affichée</span> }
                                         else { <span>@KindLabel(m!) · @m!.Name</span> }
                                         @if (t.Item.QrOn) { <span class="kp-chip">QR</span> }
                                         @if (!string.IsNullOrEmpty(t.ShowFrom) || !string.IsNullOrEmpty(t.ShowTo)) { <span class="kp-chip">@Dates(t)</span> }
                                     </small>
                                 </div>
-                                <button type="button" class="btn ghost sm icon" title="Monter" disabled="@(idx == 0)" @onclick="() => Move(idx, -1)" @onclick:stopPropagation="true">↑</button>
-                                <button type="button" class="btn ghost sm icon" title="Descendre" disabled="@(idx == k.Tiles.Count - 1)" @onclick="() => Move(idx, 1)" @onclick:stopPropagation="true">↓</button>
-                                <button type="button" class="btn ghost sm" @onclick="() => EditTile(t)" @onclick:stopPropagation="true">@(broken ? "Remplacer" : "Modifier")</button>
-                                <button type="button" class="btn ghost sm icon" title="Supprimer la tuile" @onclick="() => RemoveTile(t)" @onclick:stopPropagation="true"><Ico Name="trash" Size="15" /></button>
+                                <div class="kp-acts">
+                                    <button type="button" class="btn ghost sm icon" title="Monter" aria-label="Monter" disabled="@(idx == 0)" @onclick="() => Move(idx, -1)" @onclick:stopPropagation="true">↑</button>
+                                    <button type="button" class="btn ghost sm icon" title="Descendre" aria-label="Descendre" disabled="@(idx == k.Tiles.Count - 1)" @onclick="() => Move(idx, 1)" @onclick:stopPropagation="true">↓</button>
+                                    <button type="button" class="btn ghost sm icon" title="@(broken ? "Remplacer le contenu" : "Modifier la tuile")" aria-label="@(broken ? "Remplacer le contenu" : "Modifier la tuile")" @onclick="() => EditTile(t)" @onclick:stopPropagation="true"><Ico Name="edit" Size="15" /></button>
+                                    <button type="button" class="btn ghost sm icon" title="Supprimer la tuile" aria-label="Supprimer la tuile" @onclick="() => RemoveTile(t)" @onclick:stopPropagation="true"><Ico Name="trash" Size="15" /></button>
+                                </div>
                             </div>
                         }
                     </div>
@@ -325,8 +338,8 @@ else
 
     @if (confirmOff)
     {
-        <div class="modal-backdrop picker-backdrop" @onclick="() => confirmOff = false"></div>
-        <div class="modal" role="alertdialog" aria-modal="true">
+        <div class="modal-backdrop over" @onclick="() => confirmOff = false"></div>
+        <div class="modal kp-confirm" role="alertdialog" aria-modal="true">
             <h3>Repasser « @name » en écran de diffusion ?</h3>
             <p class="hint">La borne ne réagit plus au toucher et diffuse sa liste de lecture. Le menu est conservé. Cette action s'applique et se publie aussitôt ; les autres modifications non enregistrées sont abandonnées.</p>
             <div class="modal-actions"><button class="btn ghost" @onclick="() => confirmOff = false">Annuler</button><button class="btn" @onclick="TurnOff">Repasser en diffusion</button></div>
@@ -428,6 +441,18 @@ else
         <button type="button" class="switch @(on ? "on" : "")" role="switch" aria-checked="@(on ? "true" : "false")" aria-label="@title" @onclick="() => set(!on)"><span></span></button>
         <div><b>@title</b>@if (text.Length > 0) { <small>@text</small> }</div>
     </div>;
+
+    // Police et couleur d'un texte de l'accueil : « Par défaut » remet les valeurs du player.
+    private RenderFragment FontRow(string id, string? font, string? color, string defColor, Action<string?> setFont, Action<string?> setColor) => @<div class="kp-font">
+        <select id="@id" aria-label="Police" @onchange="e => setFont(string.IsNullOrEmpty(e.Value?.ToString()) ? null : e.Value!.ToString())">
+            @foreach (var f in Kiosk.Fonts) { <option value="@f.Key" selected="@((font ?? "") == f.Key)" style="font-family:@f.Css">@f.Label</option> }
+        </select>
+        <input type="color" aria-label="Couleur du texte" title="Couleur du texte" value="@(Kiosk.CleanHex(color) is { Length: > 0 } cc ? cc : defColor)" @onchange="e => setColor(Kiosk.CleanHex(e.Value?.ToString()) is { Length: > 0 } v ? v : null)" />
+        @if (!string.IsNullOrEmpty(color)) { <button type="button" class="btn ghost sm" title="Remettre la couleur par défaut" @onclick="() => setColor(null)">Défaut</button> }
+    </div>;
+
+    private static string FontStyle(string? font, string? color) =>
+        (Kiosk.FontCss(font) is { Length: > 0 } f ? $"font-family:{f};" : "") + (Kiosk.CleanHex(color) is { Length: > 0 } c ? $"color:{c};" : "");
 
     private void SetTab(string key) { tab = key; view = key == "idle" ? "idle" : "home"; }
     private void ZoomBy(double d) => zoom = Math.Clamp(Math.Round(zoom + d, 2), MinZoom, MaxZoom);

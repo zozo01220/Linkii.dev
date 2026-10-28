@@ -28,6 +28,10 @@ public class KioskConfig
     public string Title { get; set; } = "Bienvenue";
     public string Prompt { get; set; } = "Touchez une tuile pour commencer.";
     public string Bg { get; set; } = "#FFFFFF";
+    public string? TitleFont { get; set; }        // clé de Kiosk.Fonts ; null = police par défaut
+    public string? TitleColor { get; set; }       // #rrggbb ; null = couleur par défaut
+    public string? PromptFont { get; set; }
+    public string? PromptColor { get; set; }
     public Guid? LogoMediaId { get; set; }
     public int ReturnSec { get; set; } = 30;      // sans toucher, retour à l'accueil
     public int IdleSec { get; set; } = 120;       // sans toucher à l'accueil, retour à la diffusion
@@ -68,6 +72,8 @@ public class PublishedKiosk
     public object ForPlayer() => new
     {
         title = Config.Title, prompt = Config.Prompt, bg = Config.Bg, logo = LogoUrl,
+        titleFont = Kiosk.FontCss(Config.TitleFont), titleColor = Kiosk.CleanHex(Config.TitleColor),
+        promptFont = Kiosk.FontCss(Config.PromptFont), promptColor = Kiosk.CleanHex(Config.PromptColor),
         returnSec = Config.ReturnSec, idleSec = Config.IdleSec,
         accessible = Config.Accessible, bigText = Config.BigText, wipe = Config.Wipe,
         sound = Config.Sound, volume = Config.Volume,
@@ -96,6 +102,28 @@ public static class Kiosk
 
     /// <summary>Couleur valide (#rrggbb) ou la première de la palette.</summary>
     public static string CleanColor(string? c) => c is { Length: 7 } && c[0] == '#' && c.Skip(1).All(Uri.IsHexDigit) ? c.ToUpperInvariant() : Colors[0];
+
+    /// <summary>Couleurs par défaut du titre et du message d'invite (celles du player).</summary>
+    public const string TitleDefault = "#0B1F3A", PromptDefault = "#5A6B80";
+
+    /// <summary>Polices proposées : des polices présentes sur tout poste Windows (clé, libellé, pile CSS).</summary>
+    public static readonly (string Key, string Label, string Css)[] Fonts =
+    {
+        ("", "Par défaut", ""),
+        ("arial", "Arial", "Arial, Helvetica, sans-serif"),
+        ("verdana", "Verdana", "Verdana, Geneva, sans-serif"),
+        ("trebuchet", "Trebuchet MS", "'Trebuchet MS', Tahoma, sans-serif"),
+        ("georgia", "Georgia", "Georgia, 'Times New Roman', serif"),
+        ("times", "Times New Roman", "'Times New Roman', Times, serif"),
+        ("courier", "Courier New", "'Courier New', Courier, monospace"),
+        ("impact", "Impact", "Impact, 'Arial Narrow Bold', sans-serif")
+    };
+
+    /// <summary>Pile CSS d'une police choisie (chaîne vide = police par défaut).</summary>
+    public static string FontCss(string? key) => Fonts.FirstOrDefault(f => f.Key == key).Css ?? "";
+
+    /// <summary>Couleur #rrggbb valide, sinon chaîne vide (= couleur par défaut).</summary>
+    public static string CleanHex(string? c) => c is { Length: 7 } && c[0] == '#' && c.Skip(1).All(Uri.IsHexDigit) ? c.ToUpperInvariant() : "";
 
     /// <summary>Remet une durée dans ses bornes.</summary>
     public static int Clamp(int v, int min, int max) => Math.Clamp(v, min, max);

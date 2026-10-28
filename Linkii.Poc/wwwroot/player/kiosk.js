@@ -160,6 +160,11 @@
     var cols = tiles.length <= 1 ? 1 : (H.portrait() ? 2 : (tiles.length <= 4 ? 2 : 3));
     var logo = cfg.logo ? '<img src="' + esc(cfg.logo) + '" alt="">' : '';
     homeEl.innerHTML = '<div class="k-logo">' + logo + '</div><h1>' + esc(cfg.title) + '</h1><p>' + esc(cfg.prompt) + '</p>';
+    var h1 = homeEl.querySelector('h1'), pp = homeEl.querySelector('p');   // police et couleur du titre et du message d'invite (réglées dans la fenêtre de la borne)
+    if (cfg.titleFont) h1.style.fontFamily = cfg.titleFont;
+    if (cfg.titleColor) h1.style.color = cfg.titleColor;
+    if (cfg.promptFont) pp.style.fontFamily = cfg.promptFont;
+    if (cfg.promptColor) pp.style.color = cfg.promptColor;
     var g = el('div'); g.id = 'k-tiles'; g.className = 'cols' + cols + (cfg.accessible ? ' low' : '') + (cfg.bigText ? ' big' : '');
     tiles.forEach(function (t) {
       var b = el('button', 'k-tile' + (t.image ? ' shade' : ''));
