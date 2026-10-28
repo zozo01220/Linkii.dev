@@ -61,3 +61,49 @@ internal static class Win
     public static void KeepAwake(bool on) =>
         SetThreadExecutionState(on ? ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED : ES_CONTINUOUS);
 }
+
+/// <summary>
+/// Verrou du clavier d'une borne interactive : bloque la touche Windows, Alt+Tab, Alt+Échap, Ctrl+Échap et Alt+F4 pendant que le player est au premier plan.
+/// (Ctrl+Alt+Suppr reste la propriété de Windows : on ne peut pas le bloquer sans stratégie de groupe.) Le visiteur n'a de toute façon qu'un écran tactile.
+/// </summary>
+internal static class KeyLock
+{
+    private delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
+    [StructLayout(LayoutKind.Sequential)] private struct KBD { public uint VkCode, ScanCode, Flags, Time; public IntPtr Extra; }
+    [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetWindowsHookEx(int id, HookProc proc, IntPtr module, uint thread);
+    [DllImport("user32.dll")] private static extern bool UnhookWindowsHookEx(IntPtr hook);
+    [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
+    [DllImport("kernel32.dll")] private static extern IntPtr GetModuleHandle(string? name);
+
+    private const int WH_KEYBOARD_LL = 13, VK_TAB = 0x09, VK_ESCAPE = 0x1B, VK_F4 = 0x73, VK_LWIN = 0x5B, VK_RWIN = 0x5C, VK_MENU = 0x12, VK_CONTROL = 0x11, VK_APPS = 0x5D;
+    private static IntPtr hook;
+    private static HookProc? proc;   // gardé : le ramasse-miettes ne doit pas le libérer
+
+    public static bool On => hook != IntPtr.Zero;
+
+    public static void Enable()
+    {
+        if (On) return;
+        proc = (code, w, l) =>
+        {
+            if (code >= 0)
+            {
+                var k = Marshal.PtrToStructure<KBD>(l);
+                var alt = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0 || (k.Flags & 0x20) != 0;
+                var ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+                var v = (int)k.VkCode;
+                if (v is VK_LWIN or VK_RWIN or VK_APPS || (alt && v is VK_TAB or VK_ESCAPE or VK_F4) || (ctrl && v == VK_ESCAPE)) return (IntPtr)1;
+            }
+            return CallNextHookEx(hook, code, w, l);
+        };
+        hook = SetWindowsHookEx(WH_KEYBOARD_LL, proc, GetModuleHandle(null), 0);
+    }
+
+    public static void Disable()
+    {
+        if (!On) return;
+        UnhookWindowsHookEx(hook);
+        hook = IntPtr.Zero; proc = null;
+    }
+}

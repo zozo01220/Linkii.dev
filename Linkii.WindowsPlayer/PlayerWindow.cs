@@ -29,6 +29,9 @@ internal sealed class PlayerWindow : Window
       deviceInfo: function () { return h.sync.bridge.DeviceInfo(); },
       restart: function () { h.bridge.Restart(); },
       config: function (json) { h.bridge.Config(json); },
+      kiosk: function (json) { h.bridge.Kiosk(json); },
+      kioskWipe: function () { h.bridge.KioskWipe(); },
+      kioskUnlock: function () { h.bridge.KioskUnlock(); },
       unpaired: function () { return h.sync.bridge.Unpaired(); }
     };
   } catch (e) {}
@@ -44,6 +47,7 @@ internal sealed class PlayerWindow : Window
     private readonly DispatcherTimer retry = new() { Interval = TimeSpan.FromSeconds(10) };
     private InstanceSettings settings;
     private bool offlinePage;
+    private bool kioskLock, kioskUnlocked, kioskHideCursor = true, kioskNoZoom;   // borne interactive (voir OnKiosk)
 
     public PlayerWindow(Options options, InstanceStore store, string server)
     {
@@ -60,7 +64,7 @@ internal sealed class PlayerWindow : Window
         SourceInitialized += (_, _) => ApplyBounds();
         DpiChanged += (_, _) => Dispatcher.BeginInvoke(ApplyBounds);   // un moniteur d'une autre échelle ne doit pas redimensionner la fenêtre
         Loaded += async (_, _) => await InitWebAsync();
-        Closed += (_, _) => Win.KeepAwake(false);
+        Closed += (_, _) => { Win.KeepAwake(false); KeyLock.Disable(); };
         retry.Tick += (_, _) => { offlinePage = false; web.CoreWebView2?.Navigate(playerUrl); };
         Win.KeepAwake(true);
     }
@@ -73,7 +77,7 @@ internal sealed class PlayerWindow : Window
         WindowStyle = kiosk ? WindowStyle.None : WindowStyle.SingleBorderWindow;
         ResizeMode = kiosk ? ResizeMode.NoResize : ResizeMode.CanResize;
         Topmost = kiosk && settings.Configured;   // code d'appairage : pas au premier plan, on peut passer au navigateur (Alt+Tab) pour le saisir
-        Cursor = kiosk ? System.Windows.Input.Cursors.None : null;
+        Cursor = kiosk && kioskHideCursor ? System.Windows.Input.Cursors.None : null;
         if (web.CoreWebView2 is { } core) core.Settings.AreBrowserAcceleratorKeysEnabled = options.DevTools || !kiosk;   // en kiosque : ni F5, ni Ctrl+W, ni recherche
     }
 
@@ -162,6 +166,50 @@ internal sealed class PlayerWindow : Window
         }
     }
 
+    /// <summary>
+    /// Borne interactive : le visiteur n'a qu'un écran tactile. Verrou du clavier et fenêtre toujours au premier plan, zoom par pincement coupé,
+    /// curseur masqué ou non. Une chaîne vide (écran redevenu écran de diffusion) lève tout. Après l'accès technicien, le verrou reste levé jusqu'au redémarrage.
+    /// </summary>
+    private void OnKiosk(string json)
+    {
+        KioskDto? k = null;
+        if (!string.IsNullOrWhiteSpace(json)) { try { k = JsonSerializer.Deserialize<KioskDto>(json, Json); } catch { } }
+        kioskLock = k?.Lock == true;
+        kioskHideCursor = k?.HideCursor ?? true;
+        kioskNoZoom = k?.NoZoom == true;
+        if (web.CoreWebView2 is { } core) core.Settings.IsPinchZoomEnabled = !kioskNoZoom;
+        ApplyKioskLock();
+        ApplyStyle();
+        Log.Write(store, k == null ? "écran de diffusion" : $"borne interactive : verrou {(kioskLock ? "oui" : "non")}, curseur {(kioskHideCursor ? "masqué" : "visible")}");
+    }
+
+    private void ApplyKioskLock()
+    {
+        if (kioskLock && !kioskUnlocked && !settings.Windowed) { KeyLock.Enable(); Topmost = true; }
+        else KeyLock.Disable();
+    }
+
+    /// <summary>Retour à l'accueil : l'historique et les cookies des sites visités par le visiteur sont effacés (pas le stockage du player : jeton, playlist, cache).</summary>
+    private void OnKioskWipe()
+    {
+        try
+        {
+            web.CoreWebView2?.Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.Cookies | CoreWebView2BrowsingDataKinds.BrowsingHistory | CoreWebView2BrowsingDataKinds.DownloadHistory);
+        }
+        catch (Exception ex) { Log.Write(store, "effacement : " + ex.Message); }
+    }
+
+    private void OnKioskUnlock()
+    {
+        kioskUnlocked = true;
+        KeyLock.Disable();
+        Topmost = false;
+        Cursor = null;
+        Log.Write(store, "accès technicien : verrou levé jusqu'au redémarrage");
+    }
+
+    private sealed record KioskDto(bool Lock, bool NoZoom, bool HideCursor, bool Wake);
+
     private async Task InitWebAsync()
     {
         try
@@ -202,7 +250,10 @@ internal sealed class PlayerWindow : Window
                 Log.Write(store, "écran supprimé dans le back-office : fermeture");
                 AutoStart.Set(options.Instance, false, options.Persistent);
                 Dispatcher.BeginInvoke(() => Application.Current.Shutdown(ExitRemoved));
-            }));
+            },
+            json => Dispatcher.BeginInvoke(() => OnKiosk(json)),
+            () => Dispatcher.BeginInvoke(OnKioskWipe),
+            () => Dispatcher.BeginInvoke(OnKioskUnlock)));
         await core.AddScriptToExecuteOnDocumentCreatedAsync(InitScript);
         if (settings.Token is { } token)
         {

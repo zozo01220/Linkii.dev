@@ -273,13 +273,25 @@
     st.fontSize = (cell.w / 100) + 'px';   // 1em = 1 % de la largeur d'un écran
   }
 
+  /* Ce que la borne interactive (kiosk.js) emprunte au player : la scène, le rendu d'un contenu pleine page, l'envoi des statistiques, l'application native. */
+  function kioskHooks() {
+    return {
+      stage: $('stage'), preview: !!PREVIEW,
+      render: renderSlide,
+      portrait: function () { return cfg.orientation === 'portrait'; },
+      techPin: function () { return cfg.techPin; },   // { pin, local } de l'organisation ; null : le code par défaut
+      send: function (q) { return api('/api/player/kiosk-events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(q) }); },
+      native: function (name, json) { if (!PREVIEW && window.LinkiiNative && typeof window.LinkiiNative[name] === 'function') { try { window.LinkiiNative[name](json); } catch (e) {} } }
+    };
+  }
+
   function applyConfig(pl) {
     if (!pl) return;
     if (pl.screen) {
       cfg.orientation = pl.screen.orientation || 'landscape'; cfg.resolution = pl.screen.resolution || 'auto';
       cfg.mirrorH = !!pl.screen.mirrorH; cfg.mirrorV = !!pl.screen.mirrorV;
     }
-    if (pl.settings) { cfg.timezone = pl.settings.timezone || null; if (pl.settings.reloadHour != null) cfg.reloadHour = pl.settings.reloadHour; }
+    if (pl.settings) { cfg.timezone = pl.settings.timezone || null; if (pl.settings.reloadHour != null) cfg.reloadHour = pl.settings.reloadHour; cfg.techPin = pl.settings.techPin; }
     // code du menu technicien de l'organisation : confié à l'application Android (chaîne vide : rien d'imposé, l'appareil garde son code)
     if (!PREVIEW && pl.settings && window.LinkiiNative && typeof window.LinkiiNative.techPin === 'function') {
       try { window.LinkiiNative.techPin(pl.settings.techPin ? JSON.stringify(pl.settings.techPin) : ''); } catch (e) {}
@@ -289,6 +301,7 @@
       try { window.LinkiiNative.config(JSON.stringify(pl.device)); } catch (e) {}
     }
     cfg.wall = pl.wall || null;
+    if (window.LinkiiKiosk) LinkiiKiosk.apply(pl.kiosk || null, kioskHooks());   // borne interactive : menu de tuiles au toucher (null : écran de diffusion)
     if (pl.dim !== undefined) cfg.dim = pl.dim || null;
     layout();
     sleepTick();
@@ -365,6 +378,7 @@
     (pl.zones || []).forEach(function (z) { (z || []).forEach(function (i) { l.push(i); }); });
     ((pl.schedule && pl.schedule.slots) || []).forEach(function (s) { (s.items || []).forEach(function (i) { l.push(i); }); });   // listes du planning : tous leurs fichiers aussi, pour tourner hors ligne
     ((pl.ads && pl.ads.spots) || []).forEach(function (a) { l.push({ url: a.url }); });   // spots de publicité : préchargés comme les médias
+    if (window.LinkiiKiosk) LinkiiKiosk.items(pl.kiosk).forEach(function (i) { l.push(i); });   // borne interactive : fichiers des tuiles, menu utilisable hors ligne
     return l;
   }
 

@@ -35,6 +35,7 @@
                     <div class="kebab-backdrop" @onclick="() => newMenu = false"></div>
                     <div class="kebab-menu lx-add-menu" role="menu">
                         <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenPair(); }"><Ico Name="monitor" Size="18" /><span><b>Connecter un écran</b><small>Avec le code affiché sur l'écran</small></span></button>
+                        <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenPairKiosk(); }"><Ico Name="hand" Size="18" /><span><b>Borne interactive <span class="kiosk-new">Nouveau</span></b><small>PC Windows à écran tactile</small></span></button>
                         <span class="sep" role="separator"></span>
                         <button type="button" role="menuitem" @onclick="OpenNewFolder"><Ico Name="folder" Size="18" /><span><b>Nouveau dossier@(currentRow is { } cf ? $" dans « {cf.Folder.Name} »" : "")</b></span></button>
                     </div>
@@ -52,6 +53,17 @@
         }
     </div>
 </div>
+
+@* Deux familles d'écrans, jamais mélangées : les écrans de diffusion et les bornes interactives (écran tactile, menu de tuiles). *@
+<nav class="tabs int-tabs lx-utabs lx-ktabs" role="tablist" aria-label="Type d'écran">
+    <button type="button" role="tab" class="@(kindFilter == "" ? "on" : "")" aria-selected="@(kindFilter == "" ? "true" : "false")" @onclick='() => kindFilter = ""'>Tous <span class="cnt">@screens.Count</span></button>
+    <button type="button" role="tab" class="@(kindFilter == "broadcast" ? "on" : "")" aria-selected="@(kindFilter == "broadcast" ? "true" : "false")" @onclick='() => kindFilter = "broadcast"'>Écrans de diffusion <span class="cnt">@screens.Count(x => x.Kiosk == null)</span></button>
+    <button type="button" role="tab" class="@(kindFilter == "kiosk" ? "on" : "")" aria-selected="@(kindFilter == "kiosk" ? "true" : "false")" @onclick='() => kindFilter = "kiosk"'>Bornes interactives <span class="cnt">@screens.Count(x => x.Kiosk != null)</span></button>
+</nav>
+@if (kindFilter == "kiosk" && !screens.Any(x => x.Kiosk != null) && canAdd)
+{
+    <div class="card empty"><div class="big">Aucune borne interactive</div><p>Une borne est un écran tactile : le visiteur choisit ce qu'il veut voir dans un menu de tuiles. Sans toucher, elle diffuse comme un écran ordinaire.</p><button type="button" class="btn" @onclick="OpenPairKiosk"><Ico Name="hand" Size="16" /> Connecter une borne</button></div>
+}
 
 @if (Tabs.Count > 1)
 {
@@ -306,16 +318,20 @@ else
     <div class="modal-backdrop" @onclick="() => showPair = false"></div>
     <div class="imp-bottom lx-pair" role="dialog" aria-modal="true" aria-labelledby="pair-title">
         <div class="imp-head">
-            <h3 id="pair-title">Connecter un écran</h3>
+            <h3 id="pair-title">@(pairKiosk ? "Connecter une borne interactive" : "Connecter un écran")</h3>
             <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => showPair = false"><Ico Name="x" Size="20" /></button>
         </div>
         <div class="imp-body">
             <p class="hint" style="margin-top:0">Allumez l'écran, puis saisissez le code à 6 chiffres affiché. <a href="/player/" target="_blank">Ouvrir un écran de test</a> · <a href="/download/windows" download>Télécharger le player Windows</a></p>
+            @if (pairKiosk)
+            {
+                <div class="kiosk-info"><Ico Name="hand" Size="16" /> <span>La borne s'installe sur un PC Windows à écran tactile (Windows 10 ou 11). Sans toucher, elle diffuse comme un écran ordinaire ; le menu de tuiles se compose ensuite dans la page de la borne. Format portrait d'office, modifiable ensuite.</span></div>
+            }
             <div class="dw pair-grid">
                 <div class="dw-field wide"><label for="pair-code">Code</label><input id="pair-code" class="pair-code" @bind="code" placeholder="000000" maxlength="6" inputmode="numeric" autocomplete="off" /></div>
                 <div class="dw-field wide"><label for="pair-name">Nom de l'écran</label><input id="pair-name" @bind="name" placeholder="Ex. Accueil, salle de pause" /></div>
                 <div class="dw-field wide">
-                    <label for="pair-pl">Liste de lecture</label>
+                    <label for="pair-pl">@(pairKiosk ? "Liste de lecture en inactivité" : "Liste de lecture")</label>
                     <select id="pair-pl" @bind="playlistId">
                         <option value="">— Aucune liste de lecture —</option>
                         @foreach (var p in playlists) { <option value="@p.Id">@p.Name</option> }
@@ -517,6 +533,11 @@ else
 else if (liveWall is { } liveWallId)
 {
     <WallLivePanel ZoneId="liveWallId" Action="@liveAction" OnClose="CloseLive" />
+}
+
+@if (kioskOpen is { } kioskId)
+{
+    <KioskDrawer Id="kioskId" OnClose="CloseKiosk" />
 }
 
 @if (simScreen is { } simId)
@@ -815,6 +836,7 @@ else if (wallEdit is { } wid)
     private bool ShowZones => zones.Count > 1 || zones.Any(z => z.Sync);
     private HashSet<Guid> synced = new();   // écrans alignés avec au moins un autre (zone synchronisée, même liste publiée)
 
+    private string kindFilter = "";   // onglet : tous (""), broadcast (écrans de diffusion) ou kiosk (bornes interactives)
     private string statusFilter = "", search = "", sort = "name";   // statusFilter : "" | online | offline | pending
 
     private bool IsOffline(Screen s) => Status(s) is not ("En ligne" or "Mise à jour");
@@ -826,7 +848,7 @@ else if (wallEdit is { } wid)
     {
         get
         {
-            var q = InZone.Where(InPosition).Where(s => statusFilter switch
+            var q = InZone.Where(InPosition).Where(s => kindFilter switch { "kiosk" => s.Kiosk != null, "broadcast" => s.Kiosk == null, _ => true }).Where(s => statusFilter switch
             {
                 "online" => !IsOffline(s),
                 "offline" => IsOffline(s),
@@ -1147,6 +1169,24 @@ else if (wallEdit is { } wid)
         </div>
     };
 
+    /// <summary>Aperçu d'une borne : son accueil (fond, titre, tuiles du menu), pas sa liste de lecture d'inactivité.</summary>
+    private RenderFragment KioskPreview(Screen s) => __builder =>
+    {
+        var k = s.Kiosk!;
+        var shown = k.Tiles.Where(t => media.FirstOrDefault(m => m.Id == t.MediaId) is { } m && Kiosk.CanOpen(m)).ToList();
+        <span class="kp-ck @(s.Orientation == "portrait" ? "port" : "") @(k.Accessible ? "low" : "")" style="background:@k.Bg">
+            <b>@k.Title</b>
+            <span class="g">
+                @foreach (var t in shown)
+                {
+                    var img = t.ImageMediaId is { } iid ? media.FirstOrDefault(m => m.Id == iid) : null;
+                    <i style="background:@t.Color">@if (img != null) { <MediaThumb Media="img" All="media" /> }</i>
+                }
+                @if (shown.Count == 0) { <em>Aucune tuile</em> }
+            </span>
+        </span>
+    };
+
     // Même chose en vue liste : la rangée de consultation reprend le balisage des rangées habituelles (voir Card), pour que toutes les aires aient le même aspect.
     private RenderFragment LightRow(Screen s, GroupArea ga) => __builder =>
     {
@@ -1323,6 +1363,10 @@ else if (wallEdit is { } wid)
                             {
                                 <span class="sc-pause-art"><b>☕</b><small>Petite pause</small></span>
                             }
+                            else if (gs.Kiosk != null)
+                            {
+                                @KioskPreview(gs)
+                            }
                             else
                             {
                                 <span class="sc-zones @(gs.Orientation == "portrait" ? "dir-col" : "dir-row")">
@@ -1347,6 +1391,7 @@ else if (wallEdit is { } wid)
                             }
                         </div>
                         <button type="button" class="gc-hit" tabindex="-1" aria-hidden="true" @onclick="() => Edit(gs)"></button>
+                        @if (gs.Kiosk != null) { <span class="kiosk-hand" title="Borne interactive"><Ico Name="hand" Size="17" /></span> }
                         @if (PlanPill(gs) is { } gpp) { <span class="gc-plan @(gpp.Live ? "live" : "idle")" title="@gpp.Tip"><Ico Name="calendar" Size="13" />@gpp.Text</span> }
                         <span class="gc-pill @(!gonline && !gsl.Asleep && !gpaused ? "off" : "")" title="@(gsl.Asleep ? "Mise en veille : l'écran est éteint" : gst)"><span class="gc-d @gcls"></span>@(gsl.Asleep ? "En veille" + (gsl.Wake is { } wake ? " · réveil " + wake : "") : gpaused ? "En pause" + (gs.PausedUntilUtc is { } pu ? " · reprise " + LocalTime(pu) : "") : !gonline ? OfflineSince(gs, gnow) : gst)</span>
                         @if (gpending || gdl != null)
@@ -1408,6 +1453,7 @@ else if (wallEdit is { } wid)
                         <span class="sep"> · </span><span class="gc-pl"><Ico Name="play-box" Size="13" /> @(gs.ZoneCount == 1 ? playlists.FirstOrDefault(p => p.Id == gs.PlaylistId)?.Name ?? "Aucune liste de lecture" : $"{ZonesSummary(gs)} · {gs.ZoneCount} zones")</span>
                     </div>
                     <div class="gc-chips">
+                        @if (gs.Kiosk != null) { <span class="gc-chip kiosk-chip" title="Borne interactive : écran tactile à menu de tuiles"><Ico Name="hand" Size="12" /> Borne interactive</span> }
                         @if (ShowZones && zoneFilter == null) { <span class="gc-chip gc-zchip">@(gzone?.Name ?? Zone.DefaultName)</span> }
                         @if (PcCount(gs) is var gpc && gpc > 1) { <span class="gc-chip" title="@PcTitle(gs)">PC partagé · @gpc écrans</span> }
                         @if (gzone is { Sync: true })
@@ -1587,6 +1633,7 @@ else if (wallEdit is { } wid)
                     <input type="checkbox" class="sc-check" aria-label="Sélectionner @sc.Name" checked="@selectedIds.Contains(sc.Id)" @onchange="() => ToggleSelect(sc.Id)" />
                     <span class="sc-dot @cls @(paused ? "paused" : "")" title="@st"><span class="sr-only sc-st">@(paused ? "En pause" : st)</span></span>
                     <button type="button" class="pl-name linklike-name" title="Paramètres de l'écran « @sc.Name »" @onclick="() => Edit(sc)">@sc.Name</button>
+                    @if (sc.Kiosk != null) { <span class="badge neutre kiosk-tag" title="Borne interactive"><Ico Name="hand" Size="12" /> Borne</span> }
                     @ScreenShare(sc)
                     @if (paused) { <span class="badge mise-a-jour sc-paused-badge" title="@(sc.PausedUntilUtc is { } pu ? "Reprise automatique à " + LocalTime(pu) : "Reprise manuelle")">En pause</span> }
                     <div class="kebab">
@@ -1649,7 +1696,11 @@ else if (wallEdit is { } wid)
                     {
                         <span class="sc-pause-art"><b>☕</b><small>Petite pause</small></span>
                     }
-                    else
+                    else if (sc.Kiosk != null)
+                            {
+                                @KioskPreview(sc)
+                            }
+                            else
                     {
                     @* une vignette par zone du découpage, à ses proportions *@
                     <span class="sc-zones @(sc.Orientation == "portrait" ? "dir-col" : "dir-row")">
@@ -1665,6 +1716,7 @@ else if (wallEdit is { } wid)
                     </span>
                     }
                 </span>
+                @if (sc.Kiosk != null) { <span class="kiosk-hand" title="Borne interactive"><Ico Name="hand" Size="17" /></span> }
                 <span class="sc-stand"></span>
                 @if (pending) { <span class="badge mise-a-jour sc-pending" title="Liste de lecture, widgets ou choix de liste de lecture modifiés depuis la dernière publication">À publier</span> }
             </button>
@@ -1673,7 +1725,7 @@ else if (wallEdit is { } wid)
             <div class="sc-foot">
                 @if (sc.ZoneCount == 1)
                 {
-                    <label class="sc-lbl" for="pl-@sc.Id">En diffusion</label>
+                    <label class="sc-lbl" for="pl-@sc.Id">@(sc.Kiosk != null ? "En inactivité" : "En diffusion")</label>
                     <select id="pl-@sc.Id" class="sc-select" @onchange="e => Assign(sc, e)">
                     <option value="" selected="@(sc.PlaylistId == null)">— Aucune liste de lecture —</option>
                     @foreach (var p in playlists) { <option value="@p.Id" selected="@(p.Id == sc.PlaylistId)">@p.Name</option> }
@@ -2402,9 +2454,13 @@ else if (wallEdit is { } wid)
             : "Cet écran s'ajoute à l'abonnement de l'organisation : les administrateurs en sont prévenus.";
     }
 
-    private void OpenPair() { SetPairPrice(); pairAreas = Store.Read(AreaFilter.Visible); code = name = ""; pairFull = true; playlistId = null; error = null; pairSpec = ScreenSpec.From(tenant); pairSpec.Resolution = "auto"; pairZone = (FreeZones.FirstOrDefault(z => z.Id.ToString() == zoneFilter) ?? zones.FirstOrDefault(z => z.IsDefault) ?? FreeZones.FirstOrDefault())?.Id.ToString() ?? ""; showPair = true; }
+    private bool pairKiosk;   // « Borne interactive » : l'écran connecté reçoit un menu de tuiles (Screen.Kiosk)
+    private void OpenPairKiosk() { OpenPair(); pairKiosk = true; pairSpec.Orientation = "portrait"; }
+    private void OpenPair() { pairKiosk = false; SetPairPrice(); pairAreas = Store.Read(AreaFilter.Visible); code = name = ""; pairFull = true; playlistId = null; error = null; pairSpec = ScreenSpec.From(tenant); pairSpec.Resolution = "auto"; pairZone = (FreeZones.FirstOrDefault(z => z.Id.ToString() == zoneFilter) ?? zones.FirstOrDefault(z => z.IsDefault) ?? FreeZones.FirstOrDefault())?.Id.ToString() ?? ""; showPair = true; }
 
-    private void Edit(Screen s) { menuFor = null; editing = s.Id; }
+    private Guid? kioskOpen;   // tiroir de la borne ouverte (KioskDrawer)
+    private void CloseKiosk() { kioskOpen = null; Reload(); }
+    private void Edit(Screen s) { menuFor = null; if (s.Kiosk != null) { kioskOpen = s.Id; return; } editing = s.Id; }   // une borne s'ouvre dans son tiroir
 
     // ---------- Paramètres de l'écran, plusieurs écrans sur un même PC ----------
     private Guid? settingsFor;
@@ -2530,6 +2586,7 @@ else if (wallEdit is { } wid)
         var full = pairFull;
         var pid = playlistId;
         var screenName = name;
+        var kiosk = pairKiosk;
         Guid? zid = Guid.TryParse(pairZone, out var zg) && zones.Any(z => z.Id == zg) ? zg : (zones.FirstOrDefault(z => z.IsDefault) ?? FreeZones.FirstOrDefault())?.Id;
         var id = Store.Write(d =>
         {
@@ -2544,13 +2601,15 @@ else if (wallEdit is { } wid)
             s.Windowed = !full;
             s.Token = Guid.NewGuid().ToString("N");
             s.PairingCode = null;
+            if (kiosk) { s.Kiosk = KioskConfig.Starter(); s.KioskRevision = 1; }   // borne interactive : menu vide, à composer dans la page de la borne
             d.Tenant.FirstScreen = FirstScreen.Done;   // un écran relié : l'assistant du premier écran ne revient plus
             return s.Id;
         });
         if (id == null) { error = "Code inconnu."; return false; }
         await Notifier.PublishScreen(id.Value);   // l'écran appairé diffuse aussitôt sa liste de lecture
         showPair = false;
-        Toast.Ok($"Écran « {(string.IsNullOrWhiteSpace(screenName) ? "Écran " + code : screenName.Trim())} » connecté.");
+        Toast.Ok($"{(kiosk ? "Borne" : "Écran")} « {(string.IsNullOrWhiteSpace(screenName) ? "Écran " + code : screenName.Trim())} » connecté{(kiosk ? "e" : "")}.");
+        if (kiosk) { showPair = false; Reload(); kioskOpen = id.Value; return true; }   // la borne s'ouvre dans son tiroir : on compose son menu
         if (tab == LibraryTab.Shared) tab = LibraryTab.Mine;   // l'écran connecté est le sien
         if (wizardPairing) { wizardPairing = false; wizard?.Connected(); }   // relié depuis l'assistant (après un paiement) : « C'est en ligne »
         Reload();

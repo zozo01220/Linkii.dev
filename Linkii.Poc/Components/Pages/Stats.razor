@@ -5,6 +5,7 @@
 @inject PlayLog PlayLog
 @inject ScanLog ScanLog
 @inject AdLog AdLog
+@inject KioskLog KioskLog
 
 @* Statistiques (mode expert). Maquette validée : maquettes/statistiques.html. Plan Essential : seule la vue d'ensemble est ouverte, les autres onglets sont verrouillés. *@
 <div class="page-head">
@@ -27,12 +28,12 @@
         var k = key;
         <button type="button" role="tab" class="@(tab == k ? "on" : "")" aria-selected="@(tab == k ? "true" : "false")" @onclick="() => tab = k">
             @label
-            @if (k != "vue" && !growth) { <span class="badge neutre"><Ico Name="lock" Size="12" /> Pro</span> }
+            @if (k is not ("vue" or "bor") && !growth) { <span class="badge neutre"><Ico Name="lock" Size="12" /> Pro</span> }
         </button>
     }
 </div>
 
-@if (!growth && tab != "vue")
+@if (!growth && tab is not ("vue" or "bor"))
 {
     <section class="card empty">
         <div class="big"><Ico Name="lock" Size="18" /> Disponible avec le plan Pro</div>
@@ -185,6 +186,52 @@ else if (tab == "qr")
         <p class="hint">Taux de scan = scans ÷ passages du contenu sur la période. Le comptage ignore les robots et les doubles scans dans les 10 secondes. Aucune adresse IP n'est conservée.</p>
     }
 }
+else if (tab == "bor" && kiosks.Count > 0)
+{
+    @* Bornes interactives : visites, touchers et tuiles ouvertes (rien de personnel). Les chiffres ne sont plus dans la fenêtre de la borne. *@
+    <section class="card">
+        <header>
+            <h3>Bornes interactives</h3>
+            <small>visites, touchers et tuiles ouvertes</small>
+            <span class="sp"></span>
+            <select @bind="kioskFilter" @bind:after="Load" aria-label="Borne">
+                @foreach (var k in kiosks) { <option value="@k.Id">@k.Name</option> }
+            </select>
+        </header>
+    </section>
+    @if (kioskStats.Visits == 0 && kioskStats.Touches == 0)
+    {
+        <section class="card empty"><div class="big">Aucune visite sur cette période</div><p>Les statistiques apparaissent dès que la borne est touchée. Aucune donnée personnelle n'est collectée : seuls les touchers et les tuiles ouvertes sont comptés.</p></section>
+    }
+    else
+    {
+        <div class="stats">
+            <div class="stat"><div class="n">@kioskStats.Visits.ToString("N0", Fr)</div><div class="l">Visites</div></div>
+            <div class="stat"><div class="n">@kioskStats.AvgSeconds s</div><div class="l">Durée moyenne</div></div>
+            <div class="stat"><div class="n">@kioskStats.Touches.ToString("N0", Fr)</div><div class="l">Touchers</div></div>
+            <div class="stat"><div class="n">@kioskStats.Qr.ToString("N0", Fr)</div><div class="l">QR affichés</div></div>
+        </div>
+        <div class="st-grid">
+            <section class="card">
+                <h3>Tuiles les plus ouvertes</h3>
+                @if (kioskStats.Tiles.Count == 0) { <p class="hint">Aucune tuile ouverte.</p> }
+                else
+                {
+                    <table class="tbl st-tbl">
+                        <thead><tr><th>Tuile</th><th class="num">Ouvertures</th></tr></thead>
+                        <tbody>@foreach (var t in kioskStats.Tiles.Take(8)) { <tr><td><b>@t.Title</b></td><td class="num">@t.Count</td></tr> }</tbody>
+                    </table>
+                }
+            </section>
+            <section class="card">
+                <h3>Visites par heure</h3>
+                <StatBars Data="kioskHours" Label="Visites" />
+                @{ var endTot = Math.Max(1, kioskStats.EndAuto + kioskStats.EndBack); }
+                <p class="hint" style="margin-top:10px">Fin des visites : retour automatique @(kioskStats.EndAuto * 100 / endTot) %, bouton Retour @(kioskStats.EndBack * 100 / endTot) %.</p>
+            </section>
+        </div>
+    }
+}
 else if (tab == "pub" && adsOn)
 {
     @* Publicité (§45) : onglet présent seulement si la publicité est activée dans Réglages › Publicité. Revenus = part du propriétaire, passages complets seulement. *@
@@ -234,7 +281,23 @@ else if (tab == "pub" && adsOn)
     private static readonly (string Key, string Label)[] Periods = { ("today", "Aujourd'hui"), ("7", "7 jours"), ("30", "30 jours") };
     private static readonly (string Key, string Label)[] BaseTabs = { ("vue", "Vue d'ensemble"), ("diff", "Diffusion"), ("ecr", "Écrans"), ("qr", "Scans QR") };
     // « Publicité » : seulement si la publicité est activée dans Réglages › Publicité (licence Pro), pour garder la page épurée
-    private IEnumerable<(string Key, string Label)> Tabs => adsOn ? BaseTabs.Append(("pub", "Publicité")) : BaseTabs;
+    // « Bornes » : seulement si l'organisation a au moins une borne interactive
+    private IEnumerable<(string Key, string Label)> Tabs
+    {
+        get
+        {
+            var t = BaseTabs.AsEnumerable();
+            if (kiosks.Count > 0) t = t.Append(("bor", "Bornes"));
+            if (adsOn) t = t.Append(("pub", "Publicité"));
+            return t;
+        }
+    }
+
+    // Bornes interactives
+    private List<Screen> kiosks = new();
+    private string kioskFilter = "";
+    private KioskStats kioskStats = new();
+    private List<(string Label, string Short, int Count)> kioskHours = new();
     [SupplyParameterFromQuery(Name = "tab")] public string? TabParam { get; set; }
 
     // Publicité
@@ -277,9 +340,10 @@ else if (tab == "pub" && adsOn)
 
     protected override void OnInitialized()
     {
-        if (TabParam is "vue" or "diff" or "ecr" or "qr" or "pub") tab = TabParam;
+        if (TabParam is "vue" or "diff" or "ecr" or "qr" or "pub" or "bor") tab = TabParam;
         Load();
         if (tab == "pub" && !adsOn) tab = "vue";
+        if (tab == "bor" && kiosks.Count == 0) tab = "vue";
         // l'état des écrans évolue tout seul
         timer = new System.Threading.Timer(_ => InvokeAsync(() => { Load(); StateHasChanged(); }), null, 15000, 15000);
     }
@@ -315,6 +379,17 @@ else if (tab == "pub" && adsOn)
 
         adsOn = Store.Read(d => Ads.On(d.Tenant));
         if (adsOn) LoadAds(since, firstDay);
+
+        kiosks = screens.Where(s => s.Kiosk != null).ToList();
+        if (kiosks.Count > 0)
+        {
+            if (!kiosks.Any(k => k.Id.ToString() == kioskFilter)) kioskFilter = kiosks[0].Id.ToString();
+            var ks = kiosks.First(k => k.Id.ToString() == kioskFilter);
+            var events = KioskLog.Read(ks.ClientId, ks.Id, since);
+            kioskStats = Linkii.Poc.KioskLog.Stats(events);
+            kioskHours = Buckets(events.Where(e => e.Type == "visit").Select(e => e.AtUtc).ToList(), firstDay);
+        }
+        else kioskStats = new();
     }
 
     /// <summary>Revenus publicitaires : part du propriétaire sur les passages complets (période choisie, mois en cours, relevés des 13 derniers mois).</summary>

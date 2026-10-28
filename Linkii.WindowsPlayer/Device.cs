@@ -110,10 +110,14 @@ public sealed class Bridge
     private readonly Action restart;
     private readonly Action<string> config;
     private readonly Action removed;
+    private readonly Action<string> kiosk;
+    private readonly Action kioskWipe;
+    private readonly Action kioskUnlock;
 
-    internal Bridge(string instance, Action restart, Action<string> config, Action removed)
+    internal Bridge(string instance, Action restart, Action<string> config, Action removed, Action<string> kiosk, Action kioskWipe, Action kioskUnlock)
     {
         this.instance = instance; this.restart = restart; this.config = config; this.removed = removed;
+        this.kiosk = kiosk; this.kioskWipe = kioskWipe; this.kioskUnlock = kioskUnlock;
     }
 
     public string DeviceInfo() => Device.Json(instance);
@@ -123,6 +127,15 @@ public sealed class Bridge
 
     /// <summary>Paramètres de l'appareil reçus du back-office (JSON du bloc « device »).</summary>
     public void Config(string json) => config(json);
+
+    /// <summary>Borne interactive : réglages reçus ({ lock, noZoom, hideCursor, wake }) ; chaîne vide : l'écran n'est plus une borne.</summary>
+    public void Kiosk(string json) => kiosk(json);
+
+    /// <summary>Retour à l'accueil de la borne : cookies et historique de navigation effacés (le jeton de l'écran, lui, est gardé).</summary>
+    public void KioskWipe() => kioskWipe();
+
+    /// <summary>Accès technicien validé (PIN) : le verrou est levé jusqu'au prochain redémarrage de la borne.</summary>
+    public void KioskUnlock() => kioskUnlock();
 
     /// <summary>Écran supprimé : un écran ajouté sur ce PC ferme sa fenêtre (true) ; l'écran principal du PC revient au code d'appairage (false).</summary>
     public bool Unpaired()

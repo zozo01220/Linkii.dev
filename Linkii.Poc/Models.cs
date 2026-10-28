@@ -741,6 +741,11 @@ public class Screen : IClientOwned, IAreaOwned, IOwned
     public List<ScreenWidget> Widgets { get; set; } = new();
     public int WidgetsRevision { get; set; }
 
+    /// <summary>Borne interactive (écran Windows tactile) : menu de tuiles et réglages. Null : écran de diffusion. Voir <see cref="KioskConfig"/>.</summary>
+    public KioskConfig? Kiosk { get; set; }
+    public int KioskRevision { get; set; }             // +1 à chaque modification du menu ou des réglages : la borne a alors des modifications à publier
+    public PublishedKiosk? PublishedKiosk { get; set; } // ce que la borne affiche depuis sa dernière publication
+
     // Publication propre à l'écran : instantané de sa playlist + de ses widgets. Les autres écrans de la même playlist ne bougent pas.
     public List<PublishedItem> Published { get; set; } = new();   // zone 1 (ou écran entier) + widgets
     public int PublishedVersion { get; set; }          // 0 : jamais publié sur cet écran (repli sur l'ancien instantané de la playlist)
@@ -1167,7 +1172,7 @@ public static class Helpers
     public static string PublishStamp(Screen s, IEnumerable<Playlist> playlists)
     {
         string Rev(Guid? id) => playlists.FirstOrDefault(p => p.Id == id)?.Revision.ToString() ?? "";
-        var stamp = $"{s.PlaylistId}:{Rev(s.PlaylistId)}:{s.WidgetsRevision}";
+        var stamp = $"{s.PlaylistId}:{Rev(s.PlaylistId)}:{s.WidgetsRevision}{Kiosk.Stamp(s)}";
         if (s.Layout != ScreenLayouts.Full)
             stamp += "|" + s.Layout + string.Concat(s.ZonePlaylists().Skip(1).Select(id => $"|{id}:{Rev(id)}"));
         return stamp;

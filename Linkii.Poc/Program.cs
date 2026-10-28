@@ -21,6 +21,7 @@ builder.Services.AddSingleton<Mailer>();
 builder.Services.AddSingleton<LifecycleMail>();   // e-mails du parcours d'abonnement (voir Lifecycle)
 builder.Services.AddScoped<Toaster>();
 builder.Services.AddSingleton<PlayLog>();
+builder.Services.AddSingleton<KioskLog>();
 builder.Services.AddSingleton<CanvaService>();
 builder.Services.AddSingleton<PdfService>();
 builder.Services.AddScoped<TenantContext>();
@@ -750,6 +751,29 @@ api.MapPost("/player/plays", (HttpRequest req, List<PlayDto> body, JsonStore sto
     return Results.Ok(new { saved = entries.Count });
 });
 
+// Borne interactive : visites, touchers, tuiles ouvertes, QR scannés, remontés par lots (gardés en local hors ligne). Aucune donnée personnelle.
+api.MapPost("/player/kiosk-events", (HttpRequest req, List<KioskEventDto> body, JsonStore store, KioskLog log) =>
+{
+    var now = DateTime.UtcNow;
+    var (screen, denied, entries) = store.Read(db =>
+    {
+        var s = Auth(req, db);
+        if (Gate(s, db) is { } no) return ((Screen?)null, (IResult?)no, new List<KioskEvent>());
+        var types = new[] { "visit", "tile", "touch", "qr" };
+        var list = body.Take(500)
+            .Select(e => (e, at: DateTimeOffset.FromUnixTimeMilliseconds(Math.Clamp(e.At, 0, 253402300799000)).UtcDateTime))
+            .Where(x => x.at > now.AddDays(-KioskLog.RetentionDays) && x.at < now.AddMinutes(5) && types.Contains(x.e.Type))
+            .Select(x => new KioskEvent(x.at, s!.Id, x.e.Type, x.e.Tile,
+                x.e.Tile is { } tid ? s.Kiosk?.Tiles.FirstOrDefault(t => t.Id == tid)?.Title ?? (x.e.Title is { Length: <= 80 } n ? n : null) : null,
+                Math.Clamp(x.e.Sec, 0, 86400), x.e.How is "auto" or "back" ? x.e.How : null))
+            .ToList();
+        return ((Screen?)s, (IResult?)null, list);
+    });
+    if (denied != null) return denied;
+    log.Append(screen!.ClientId, entries);
+    return Results.Ok(new { saved = entries.Count });
+});
+
 // Publicité (§45) : passages de spots remontés par lots. Dédoublonnés (identifiant de passage), contrôlés (spot connu, dates, durées, chevauchements),
 // et comptés seulement pour un écran qui a droit à la publicité (licence Pro, réglage activé, aire et écran autorisés).
 api.MapPost("/player/ad-plays", (HttpRequest req, List<AdPlayDto> body, JsonStore store, AdLog log) =>
@@ -962,6 +986,7 @@ app.Run();
 record AckDto(string Version, int? W, int? H, string? Stage = null);
 record QrHit(Guid ClientId, Guid ItemId, string? Destination, bool Counts);
 record PlayDto(Guid? MediaId, string? AppId, long Start, int Sec);
+record KioskEventDto(long At, string Type, Guid? Tile, string? Title, int Sec, string? How);
 record StartDto(int? W, int? H);
 record DeviceDto(string? Kind, string? Os, string? Model, string? App, long? BootMs, string? PinSig = null, string? Host = null, string? Instance = null, List<MonitorDto>? Monitors = null);
 record MonitorDto(int N, int W, int H, bool Primary);

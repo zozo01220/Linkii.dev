@@ -35,6 +35,7 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
             s.PublishedLayout = ScreenLayouts.Find(s.Layout).Id;
             s.PublishedZones = s.ZonePlaylists().Skip(1).Select(Zone).ToList();   // zones 2 et 3 du découpage
             SnapshotLists(db, s);   // listes du planning : leur contenu du moment
+            s.PublishedKiosk = s.Kiosk == null ? null : BuildKiosk(db, s);   // borne interactive : menu de tuiles
             s.PublishedVersion++;
             s.PublishedStamp = Helpers.PublishStamp(s, own);
             s.PublishedUtc = DateTime.UtcNow;
@@ -53,6 +54,35 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
         if (ids.Count == 0) return;
         store.Write(db => { foreach (var s in db.Screens.Where(x => ids.Contains(x.Id))) SnapshotLists(db, s); });
         await NotifyWhere(s => ids.Contains(s.Id));
+    }
+
+    /// <summary>
+    /// Menu de la borne figé : chaque tuile devient le contenu tel que le player sait l'afficher (même instantané qu'un élément de liste de lecture).
+    /// Une tuile dont le contenu a disparu, ou n'est pas prêt, n'est pas publiée : la borne n'affiche jamais de tuile cassée.
+    /// </summary>
+    private PublishedKiosk BuildKiosk(Db db, Screen s)
+    {
+        var k = s.Kiosk!;
+        var growth = db.Clients.FirstOrDefault(c => c.Id == s.ClientId)?.IsGrowth == true;
+        string? Url(Guid? id) => id == null ? null : db.Media.FirstOrDefault(m => m.Id == id && m.ClientId == s.ClientId && m.Type == "image" && m.Status == null && m.FileName != null) is { } m ? "/media/" + m.FileName : null;
+        var tiles = new List<PublishedKioskTile>();
+        foreach (var t in k.Tiles)
+        {
+            var m = db.Media.FirstOrDefault(x => x.Id == t.MediaId && x.ClientId == s.ClientId);
+            if (m == null || !Kiosk.CanOpen(m)) continue;
+            t.Item.MediaId = t.MediaId;
+            t.Item.Placement = "full";
+            if (Snapshot(db, t.Item, m, growth) is not { } pi) continue;
+            pi.Placement = "full";
+            tiles.Add(new PublishedKioskTile
+            {
+                Id = t.Id, Title = t.Title, Subtitle = t.Subtitle, Color = Kiosk.CleanColor(t.Color), ImageUrl = Url(t.ImageMediaId),
+                ShowFrom = t.ShowFrom, ShowTo = t.ShowTo, Item = pi
+            });
+        }
+        var cfg = System.Text.Json.JsonSerializer.Deserialize<KioskConfig>(System.Text.Json.JsonSerializer.Serialize(k))!;   // copie : modifier le brouillon ne change pas ce qui est publié
+        cfg.Tiles = new();
+        return new PublishedKiosk { Config = cfg, LogoUrl = Url(k.LogoMediaId), Tiles = tiles };
     }
 
     /// <summary>Instantané des listes que le planning de l'écran peut faire jouer (une liste supprimée n'y figure plus).</summary>
