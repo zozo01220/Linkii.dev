@@ -68,19 +68,19 @@ else
                     {
                         @* même mise en page que le player (kiosk.js « drawHome ») : 1 unité = 1 % de la largeur de l'écran ; tuiles en couleur ou image de fond, titre en bas à gauche *@
                         var shownTiles = k.Tiles.Where(t => Media(t.MediaId) is { } mm && Kiosk.CanOpen(mm)).ToList();
-                        var cols = shownTiles.Count <= 1 ? 1 : portrait ? 2 : shownTiles.Count <= 4 ? 2 : 3;
+                        var cols = ColsFor(shownTiles.Count, portrait);
                         <div class="kp-ks" style="background:@k.Bg">
                             <div class="kp-logo">@if (k.LogoMediaId is { } lg && Media(lg) is { } lm) { <span><MediaThumb Media="lm" All="media" /></span> }</div>
                             <div class="kp-lg" style="@FontStyle(k.TitleFont, k.TitleColor)">@k.Title</div>
                             <div class="kp-mp" style="@FontStyle(k.PromptFont, k.PromptColor)">@k.Prompt</div>
-                            <div class="kp-g @(k.Accessible ? "low" : "") @(k.BigText ? "big" : "")" style="grid-template-columns:repeat(@cols, 1fr)">
+                            <div class="kp-g @(k.Accessible ? "low" : "") @(k.BigText ? "big" : "")" style="@GridStyle(cols)">
                                 @foreach (var t in shownTiles)
                                 {
                                     var tt = t;
                                     var img = tt.ImageMediaId is { } iid ? Media(iid) : null;
-                                    <i class="@(selTile == tt.Id ? "sel" : "") @(img != null ? "shade" : "")" style="background-color:@tt.Color" @onclick="() => PickTile(tt)">
+                                    <i class="@(selTile == tt.Id ? "sel" : "") @(img != null ? "shade" : "") @ShadeClass" style="@TileStyle(tt)" @onclick="() => PickTile(tt)">
                                         @if (img != null) { <span class="kp-bgi"><MediaThumb Media="img" All="media" /></span> }
-                                        <b style="font-size:@((k.BigText ? 4.2 : 3.4) * tt.TextScale)cqw">@tt.Title</b>@if (!string.IsNullOrWhiteSpace(tt.Subtitle)) { <small style="font-size:@((k.BigText ? 2.3 : 1.9) * tt.TextScale)cqw">@tt.Subtitle</small> }
+                                        <b style="@TitleStyle(tt)">@tt.Title</b>@if (!string.IsNullOrWhiteSpace(tt.Subtitle)) { <small style="@SubStyle(tt)">@tt.Subtitle</small> }
                                     </i>
                                 }
                             </div>
@@ -171,6 +171,23 @@ else
                             </div>
                         }
                     </div>
+                    <details class="kp-adv kp-advbox">
+                        <summary><Ico Name="sliders" Size="16" /> Paramètres avancés <small>pour toutes les tuiles</small></summary>
+                        <p class="kp-h" style="margin-bottom:12px">Ces réglages s'appliquent d'un coup à toutes les tuiles. La taille choisie dans une tuile s'y ajoute.</p>
+                        <p class="kp-lbl">Texte</p>
+                        <div class="kp-f"><label>Police et couleur</label>
+                            @FontRow("k-tlf", k.TileFont, k.TileColor, "#FFFFFF", v => Edit(c => c.TileFont = v), v => Edit(c => c.TileColor = v))</div>
+                        @Seg("Taille", Kiosk.TextSizes.Select(x => (x.Scale.ToString(Inv), x.Label)), Kiosk.CleanScale(k.TileScale).ToString(Inv), v => Edit(c => c.TileScale = double.Parse(v, Inv)))
+                        @Seg("Graisse", Opts(Kiosk.Weights), Kiosk.Pick(Kiosk.Weights, k.TileWeight, "normal").Key, v => Edit(c => c.TileWeight = v))
+                        @Seg("Alignement", Opts(Kiosk.Aligns), Kiosk.Pick(Kiosk.Aligns, k.TileAlign, "left").Key, v => Edit(c => c.TileAlign = v))
+                        @Seg("Position du texte", Opts(Kiosk.Valigns), Kiosk.Pick(Kiosk.Valigns, k.TileValign, "bottom").Key, v => Edit(c => c.TileValign = v))
+                        <p class="kp-lbl" style="margin-top:16px">Tuiles</p>
+                        @Seg("Colonnes", new[] { ("0", "Auto"), ("1", "1"), ("2", "2"), ("3", "3"), ("4", "4") }, Math.Clamp(k.TileCols, 0, 4).ToString(), v => Edit(c => c.TileCols = int.Parse(v)))
+                        @Seg("Forme", Opts(Kiosk.Radii), Kiosk.Pick(Kiosk.Radii, k.TileRadius, "round").Key, v => Edit(c => c.TileRadius = v))
+                        @Seg("Espacement", Opts(Kiosk.Gaps), Kiosk.Pick(Kiosk.Gaps, k.TileGap, "normal").Key, v => Edit(c => c.TileGap = v))
+                        @Seg("Voile sous le texte (tuiles à image)", Opts(Kiosk.Shades), Kiosk.Pick(Kiosk.Shades, k.TileShade, "normal").Key, v => Edit(c => c.TileShade = v))
+                        <button type="button" class="btn ghost sm" @onclick="ResetTileStyle">Rétablir les valeurs par défaut</button>
+                    </details>
                 }
                 else
                 {
@@ -454,6 +471,26 @@ else
         <input type="color" aria-label="Couleur du texte" title="Couleur du texte" value="@(Kiosk.CleanHex(color) is { Length: > 0 } cc ? cc : defColor)" @oninput="e => setColor(Kiosk.CleanHex(e.Value?.ToString()) is { Length: > 0 } v ? v : null)" @onchange="e => setColor(Kiosk.CleanHex(e.Value?.ToString()) is { Length: > 0 } v ? v : null)" />
         @if (!string.IsNullOrEmpty(color)) { <button type="button" class="btn ghost sm" title="Remettre la couleur par défaut" @onclick="() => setColor(null)">Défaut</button> }
     </div>;
+
+    // Aspect commun des tuiles (paramètres avancés de l'onglet Tuiles) : mêmes règles que kiosk.js, 1 unité = 1 % de la largeur de l'écran.
+    private string F(double d) => d.ToString("0.##", Inv);
+    private int ColsFor(int n, bool portrait) => k!.TileCols is > 0 and <= 4 ? k.TileCols : n <= 1 ? 1 : portrait ? 2 : n <= 4 ? 2 : 3;
+    private string GridStyle(int cols) => $"grid-template-columns:repeat({cols},1fr);gap:{F(Kiosk.Pick(Kiosk.Gaps, k!.TileGap, "normal").Value)}cqw;--sh:{F(Kiosk.Pick(Kiosk.Shades, k.TileShade, "normal").Value)};";
+    private string ShadeClass => Kiosk.Pick(Kiosk.Valigns, k!.TileValign, "bottom").Key switch { "top" => "vt", "middle" => "vm", _ => "" };
+    private string TileStyle(KioskTile t)
+    {
+        var v = Kiosk.Pick(Kiosk.Valigns, k!.TileValign, "bottom").Key;
+        return $"background-color:{t.Color};border-radius:{F(Kiosk.Pick(Kiosk.Radii, k.TileRadius, "round").Value)}cqw;justify-content:{(v == "top" ? "flex-start" : v == "middle" ? "center" : "flex-end")};text-align:{Kiosk.Pick(Kiosk.Aligns, k.TileAlign, "left").Key};" + FontStyle(k.TileFont, k.TileColor);
+    }
+    private string TitleStyle(KioskTile t) => $"font-size:{F((k!.BigText ? 4.2 : 3.4) * t.TextScale * Kiosk.CleanScale(k.TileScale))}cqw;font-weight:{F(Kiosk.Pick(Kiosk.Weights, k.TileWeight, "normal").Value)};";
+    private string SubStyle(KioskTile t) => $"font-size:{F((k!.BigText ? 2.3 : 1.9) * t.TextScale * Kiosk.CleanScale(k.TileScale))}cqw;";
+    private static IEnumerable<(string, string)> Opts((string Key, string Label, double Value)[] o) => o.Select(x => (x.Key, x.Label));
+
+    private RenderFragment Seg(string label, IEnumerable<(string Key, string Label)> opts, string cur, Action<string> set) => @<div class="kp-f"><label>@label</label>
+        <div class="kp-seg kp-seg-w" role="group" aria-label="@label">@foreach (var o in opts) { var key = o.Key; <button type="button" class="@(cur == key ? "on" : "")" @onclick="() => set(key)">@o.Label</button> }</div>
+    </div>;
+
+    private void ResetTileStyle() => Edit(c => { c.TileFont = c.TileColor = c.TileWeight = c.TileAlign = c.TileValign = c.TileRadius = c.TileGap = c.TileShade = null; c.TileScale = 1; c.TileCols = 0; });
 
     private static string FontStyle(string? font, string? color) =>
         (Kiosk.FontCss(font) is { Length: > 0 } f ? $"font-family:{f};" : "") + (Kiosk.CleanHex(color) is { Length: > 0 } c ? $"color:{c};" : "");

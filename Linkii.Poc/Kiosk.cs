@@ -45,6 +45,17 @@ public class KioskConfig
     public bool NoZoom { get; set; } = true;
     public bool HideCursor { get; set; } = true;
     public bool WakeOnTouch { get; set; } = true; // un toucher réveille la borne pendant la veille
+    // Aspect commun à toutes les tuiles (paramètres avancés de l'onglet Tuiles) ; null / 0 = valeur par défaut du player
+    public string? TileFont { get; set; }         // clé de Kiosk.Fonts
+    public string? TileColor { get; set; }        // couleur du texte des tuiles (#rrggbb)
+    public double TileScale { get; set; } = 1;    // taille du texte de toutes les tuiles (se cumule avec la taille propre à une tuile)
+    public string? TileWeight { get; set; }       // normal | bold
+    public string? TileAlign { get; set; }        // left | center | right
+    public string? TileValign { get; set; }       // top | middle | bottom
+    public string? TileRadius { get; set; }       // square | round | pill
+    public string? TileGap { get; set; }          // tight | normal | wide
+    public string? TileShade { get; set; }        // voile sous le texte des tuiles à image : none | light | normal | strong
+    public int TileCols { get; set; }             // nombre de colonnes (0 = automatique)
     public List<KioskTile> Tiles { get; set; } = new();
 
     public static KioskConfig Starter() => new();
@@ -80,6 +91,13 @@ public class PublishedKiosk
         accessible = Config.Accessible, bigText = Config.BigText, wipe = Config.Wipe,
         sound = Config.Sound, volume = Config.Volume,
         lockApp = Config.Lock, noZoom = Config.NoZoom, hideCursor = Config.HideCursor, wake = Config.WakeOnTouch,
+        tileStyle = new
+        {
+            font = Kiosk.FontCss(Config.TileFont), color = Kiosk.CleanHex(Config.TileColor), scale = Kiosk.CleanScale(Config.TileScale),
+            weight = Kiosk.Pick(Kiosk.Weights, Config.TileWeight, "normal").Value, align = Kiosk.Pick(Kiosk.Aligns, Config.TileAlign, "left").Key, valign = Kiosk.Pick(Kiosk.Valigns, Config.TileValign, "bottom").Key,
+            radius = Kiosk.Pick(Kiosk.Radii, Config.TileRadius, "round").Value, gap = Kiosk.Pick(Kiosk.Gaps, Config.TileGap, "normal").Value, shade = Kiosk.Pick(Kiosk.Shades, Config.TileShade, "normal").Value,
+            cols = Math.Clamp(Config.TileCols, 0, 4)
+        },
         tiles = Tiles.Select(t => new
         {
             id = t.Id, title = t.Title, subtitle = t.Subtitle, scale = t.TextScale, color = t.Color, image = t.ImageUrl, from = t.ShowFrom, to = t.ShowTo,
@@ -102,13 +120,25 @@ public static class Kiosk
     public static bool ShownOn(PublishedKioskTile t, DateOnly day) =>
         (!Planning.IsDate(t.ShowFrom) || DateOnly.Parse(t.ShowFrom!) <= day) && (!Planning.IsDate(t.ShowTo) || DateOnly.Parse(t.ShowTo!) >= day);
 
-    /// <summary>Couleur valide (#rrggbb) ou la première de la palette.</summary>
     public static readonly (double Scale, string Label)[] TextSizes = { (0.75, "Petit"), (1, "Normal"), (1.3, "Grand"), (1.7, "Très grand") };
 
     /// <summary>Taille de texte valide parmi <see cref="TextSizes"/> (sinon normale).</summary>
     public static double CleanScale(double s) => TextSizes.Any(x => Math.Abs(x.Scale - s) < 0.01) ? s : 1;
 
+    /// <summary>Couleur valide (#rrggbb) ou la première de la palette.</summary>
     public static string CleanColor(string? c) => c is { Length: 7 } && c[0] == '#' && c.Skip(1).All(Uri.IsHexDigit) ? c.ToUpperInvariant() : Colors[0];
+
+    // Options de l'aspect commun des tuiles : (clé, libellé, valeur numérique pour le player : em, opacité ou graisse)
+    public static readonly (string Key, string Label, double Value)[] Weights = { ("normal", "Normal", 500), ("bold", "Gras", 700) };
+    public static readonly (string Key, string Label, double Value)[] Aligns = { ("left", "Gauche", 0), ("center", "Centre", 0), ("right", "Droite", 0) };
+    public static readonly (string Key, string Label, double Value)[] Valigns = { ("top", "Haut", 0), ("middle", "Milieu", 0), ("bottom", "Bas", 0) };
+    public static readonly (string Key, string Label, double Value)[] Radii = { ("square", "Carré", 0), ("round", "Arrondi", 1.6), ("pill", "Très arrondi", 3.6) };
+    public static readonly (string Key, string Label, double Value)[] Gaps = { ("tight", "Serré", 1.2), ("normal", "Normal", 2.4), ("wide", "Large", 4) };
+    public static readonly (string Key, string Label, double Value)[] Shades = { ("none", "Aucun", 0), ("light", "Léger", 0.35), ("normal", "Normal", 0.62), ("strong", "Fort", 0.82) };
+
+    /// <summary>Option choisie dans une liste d'options (la valeur par défaut si la clé est absente ou inconnue).</summary>
+    public static (string Key, string Label, double Value) Pick((string Key, string Label, double Value)[] opts, string? key, string def) =>
+        opts.FirstOrDefault(o => o.Key == key) is { Key: not null } o ? o : opts.First(o2 => o2.Key == def);
 
     /// <summary>Couleurs par défaut du titre et du message d'invite (celles du player).</summary>
     public const string TitleDefault = "#0B1F3A", PromptDefault = "#5A6B80";

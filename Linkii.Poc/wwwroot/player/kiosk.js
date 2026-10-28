@@ -32,7 +32,8 @@
     '#k-tiles.low{flex:1 0 52%;margin-top:auto}' +
     '.k-tile{position:relative;border:0;border-radius:1.6em;color:#fff;text-align:left;font-family:inherit;cursor:pointer;padding:2em 2.4em;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;background-size:cover;background-position:center;-webkit-tap-highlight-color:transparent;transition:transform .1s}' +
     '.k-tile:active{transform:scale(.96)}' +
-    '.k-tile.shade::before{content:"";position:absolute;left:0;top:0;right:0;bottom:0;background:linear-gradient(transparent 40%,rgba(0,0,0,.62))}' +
+    '.k-tile.shade::before{content:"";position:absolute;left:0;top:0;right:0;bottom:0;background:linear-gradient(transparent 40%,rgba(0,0,0,var(--sh,.62)))}' +
+    '.k-tile.shade.vt::before{background:linear-gradient(rgba(0,0,0,var(--sh,.62)),transparent 60%)}.k-tile.shade.vm::before{background:rgba(0,0,0,calc(var(--sh,.62)*.7))}' +
     '.k-tile b,.k-tile small{position:relative;display:block}' +
     '.k-tile b{font-size:3.4em;font-weight:500;line-height:1.15}.k-tile small{font-size:1.9em;font-weight:400;opacity:.9;margin-top:.35em}' +
     '#k-tiles.big .k-tile b{font-size:4.2em}#k-tiles.big .k-tile small{font-size:2.3em}' +
@@ -159,7 +160,8 @@
 
   function drawHome() {
     var tiles = (cfg.tiles || []).filter(shown);
-    var cols = tiles.length <= 1 ? 1 : (H.portrait() ? 2 : (tiles.length <= 4 ? 2 : 3));
+    var ts = cfg.tileStyle || {};   // aspect commun des tuiles (paramètres avancés de la fenêtre de la borne)
+    var cols = ts.cols > 0 ? ts.cols : tiles.length <= 1 ? 1 : (H.portrait() ? 2 : (tiles.length <= 4 ? 2 : 3));
     var logo = cfg.logo ? '<img src="' + esc(cfg.logo) + '" alt="">' : '';
     homeEl.innerHTML = '<div class="k-logo">' + logo + '</div><h1>' + esc(cfg.title) + '</h1><p>' + esc(cfg.prompt) + '</p>';
     var h1 = homeEl.querySelector('h1'), pp = homeEl.querySelector('p');   // police et couleur du titre et du message d'invite (réglées dans la fenêtre de la borne)
@@ -168,16 +170,25 @@
     if (cfg.promptFont) pp.style.fontFamily = cfg.promptFont;
     if (cfg.promptColor) pp.style.setProperty('color', cfg.promptColor, 'important');
     var g = el('div'); g.id = 'k-tiles'; g.className = 'cols' + cols + (cfg.accessible ? ' low' : '') + (cfg.bigText ? ' big' : '');
+    if (ts.gap) g.style.gap = ts.gap + 'em';
+    if (ts.shade != null) g.style.setProperty('--sh', ts.shade);
+    var vj = { top: 'flex-start', middle: 'center', bottom: 'flex-end' }[ts.valign] || 'flex-end';
     tiles.forEach(function (t) {
-      var b = el('button', 'k-tile' + (t.image ? ' shade' : ''));
+      var b = el('button', 'k-tile' + (t.image ? ' shade' : '') + (ts.valign === 'top' ? ' vt' : ts.valign === 'middle' ? ' vm' : ''));
       b.type = 'button';
       b.style.backgroundColor = t.color || '#3B82C4';
       if (t.image) b.style.backgroundImage = 'url(' + t.image + ')';
       b.innerHTML = '<b>' + esc(t.title) + '</b>' + (t.subtitle ? '<small>' + esc(t.subtitle) + '</small>' : '');
-      if (t.scale && t.scale !== 1) {   // taille du texte réglée par tuile
-        var tb = b.querySelector('b'), ts = b.querySelector('small');
-        tb.style.fontSize = ((cfg.bigText ? 4.2 : 3.4) * t.scale) + 'em';
-        if (ts) ts.style.fontSize = ((cfg.bigText ? 2.3 : 1.9) * t.scale) + 'em';
+      if (ts.radius != null) b.style.borderRadius = ts.radius + 'em';
+      if (ts.font) b.style.fontFamily = ts.font;
+      if (ts.color) b.style.setProperty('color', ts.color, 'important');
+      b.style.textAlign = ts.align || 'left'; b.style.justifyContent = vj;
+      var sc = (t.scale || 1) * (ts.scale || 1);   // taille propre à la tuile x taille commune
+      var tb = b.querySelector('b'), tsm = b.querySelector('small');
+      if (ts.weight) tb.style.fontWeight = ts.weight;
+      if (sc !== 1) {
+        tb.style.fontSize = ((cfg.bigText ? 4.2 : 3.4) * sc) + 'em';
+        if (tsm) tsm.style.fontSize = ((cfg.bigText ? 2.3 : 1.9) * sc) + 'em';
       }
       b.addEventListener('click', function () { openTile(t); });
       g.appendChild(b);
