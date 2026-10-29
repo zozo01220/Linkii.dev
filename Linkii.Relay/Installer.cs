@@ -21,7 +21,7 @@ public static class Installer
     private const string UninstallKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\LinkiiRelay";
     public static string DefaultDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Linkii Relay");
 
-    private static bool IsAdmin()
+    internal static bool IsAdmin()
     {
         using var id = WindowsIdentity.GetCurrent();
         return new WindowsPrincipal(id).IsInRole(WindowsBuiltInRole.Administrator);
@@ -42,11 +42,24 @@ public static class Installer
 
     private static bool Has(string[] args, string name) => args.Any(a => a.Equals("/" + name, StringComparison.OrdinalIgnoreCase) || a.Equals("--" + name, StringComparison.OrdinalIgnoreCase));
 
-    private static string Quote(string a) => a.Length > 0 && a.IndexOfAny(new[] { ' ', '"', '\t' }) < 0 ? a : "\"" + a.Replace("\"", "\\\"") + "\"";
+    internal static string Quote(string a) => a.Length > 0 && a.IndexOfAny(new[] { ' ', '"', '\t' }) < 0 ? a : "\"" + a.Replace("\"", "\\\"") + "\"";
 
-    private static void Say(string s = "") => Console.WriteLine(s);
-    private static void Ok(string s) => Console.WriteLine("  OK    " + s);
-    private static void Fail(string s) => Console.WriteLine("  ERREUR  " + s);
+    /// <summary>Trace de l'installation (dossier temporaire de l'utilisateur) : ce qui s'est passé si la fenêtre se ferme ou si l'installation échoue.</summary>
+    public static readonly string LogFile = Path.Combine(Path.GetTempPath(), "LinkiiRelay-installation.log");
+
+    public static void Log(string s)
+    {
+        try { File.AppendAllText(LogFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {s}{Environment.NewLine}"); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
+    /// <summary>Assistant graphique : reçoit chaque ligne de progression (la console n'est alors plus utilisée).</summary>
+    internal static Action<string>? Sink;
+    internal static bool Quiet;
+
+    private static void Say(string s = "") { if (!Quiet) Console.WriteLine(s); Log(s); Sink?.Invoke(s); }
+    private static void Ok(string s) { if (!Quiet) Console.WriteLine("  OK    " + s); Log("OK " + s); Sink?.Invoke("✔  " + s); }
+    private static void Fail(string s) { if (!Quiet) Console.WriteLine("  ERREUR  " + s); Log("ERREUR " + s); Sink?.Invoke("✖  " + s); }
 
     private static string? Ask(string label, bool silent, string? def = null)
     {
@@ -70,16 +83,28 @@ public static class Installer
         var rest = args.Length > 0 && args[0].Equals(cmd, StringComparison.OrdinalIgnoreCase) ? args.Skip(1).ToArray() : args;
         Console.Title = "Relais Linkii";
 
+        Log($"Démarrage {RelayWorker.Version}, commande {cmd}, administrateur : {IsAdmin()}, fichier : {Environment.ProcessPath}");
         if (!IsAdmin())   // même programme, relancé avec les droits administrateur (fenêtre d'autorisation de Windows)
         {
             try
             {
-                Process.Start(new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = true, Verb = "runas", Arguments = string.Join(' ', new[] { cmd }.Concat(rest).Select(Quote)) });
-                return 0;
+                Say("Une fenêtre d'autorisation Windows va s'ouvrir : acceptez-la. L'installation continue dans une nouvelle fenêtre.");
+                using var elevated = Process.Start(new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = true, Verb = "runas", Arguments = string.Join(' ', new[] { cmd }.Concat(rest).Select(Quote)) });
+                if (elevated == null) { Fail("La fenêtre administrateur n'a pas pu s'ouvrir."); Pause(silent); return 1; }
+                elevated.WaitForExit();   // cette fenêtre reste ouverte tant que l'installation tourne : rien ne disparaît sans explication
+                Say(elevated.ExitCode == 0 ? "Installation terminée dans la fenêtre administrateur." : $"La fenêtre administrateur s'est fermée avec une erreur (code {elevated.ExitCode}). Détails : {LogFile}");
+                Pause(silent);
+                return elevated.ExitCode;
             }
             catch (Win32Exception e) when (e.NativeErrorCode == 1223)
             {
                 Say("L'autorisation administrateur a été refusée : rien n'a été installé.");
+                Pause(silent);
+                return 1;
+            }
+            catch (Win32Exception e)
+            {
+                Fail($"Impossible d'obtenir les droits administrateur ({e.Message}). Ouvrez PowerShell « en tant qu'administrateur » et lancez : \"{Environment.ProcessPath}\" install");
                 Pause(silent);
                 return 1;
             }
@@ -106,10 +131,12 @@ public static class Installer
             }
             code = cmd == "uninstall" ? Uninstall(dir, silent || Has(rest, "yes")) : cmd == "quit" ? 0 : await Install(rest, dir, silent);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or Win32Exception)
+        catch (Exception e)   // toute erreur est montrée et gardée dans le journal : la fenêtre ne se ferme jamais sans explication
         {
             Say();
-            Fail(e.Message);
+            Fail(e is IOException or UnauthorizedAccessException or InvalidOperationException or Win32Exception ? e.Message : $"{e.GetType().Name} : {e.Message}");
+            Log(e.ToString());
+            Say($"Détails techniques : {LogFile}");
             code = 1;
         }
         Pause(silent);
@@ -121,7 +148,6 @@ public static class Installer
     private static async Task<int> Install(string[] args, string dir, bool silent)
     {
         var exe = Environment.ProcessPath!;
-        var target = Path.Combine(dir, "Linkii.Relay.exe");
         RelayConfig.Dir = dir;
         var current = RelayConfig.Load();
         var paired = current.Token.Length > 0 && current.Server.Length > 0;
@@ -164,6 +190,16 @@ public static class Installer
         if (pairing == null && !paired) { Say("Installation annulée."); return 1; }
         if (pairing != null) Ok($"Relais « {pairing.Name} » appairé avec {pairing.Server}");
         else Ok($"Appairage actuel conservé ({current.Name})");
+        return InstallCore(dir, pairing);
+    }
+
+    /// <summary>Installation proprement dite (copie, configuration, service, démarrage), après l'appairage. Partagée par la console et l'assistant graphique.</summary>
+    internal static int InstallCore(string dir, PairResult? pairing)
+    {
+        var exe = Environment.ProcessPath!;
+        var target = Path.Combine(dir, "Linkii.Relay.exe");
+        RelayConfig.Dir = dir;
+        var current = RelayConfig.Load();
 
         // 2. Arrêt du service et des processus du relais, puis copie du programme.
         var existed = ServiceExists();
@@ -246,6 +282,11 @@ public static class Installer
             var a = Ask($"Supprimer le relais installé dans {dir} ? (o/N)", false, "n");
             if (a is not ("o" or "O" or "oui" or "Oui" or "y" or "Y")) { Say("Rien n'a été supprimé."); return 0; }
         }
+        return UninstallCore(dir);
+    }
+
+    internal static int UninstallCore(string dir)
+    {
         StopService();
         Ok("Service arrêté");
         var stuck = false;
@@ -272,13 +313,13 @@ public static class Installer
 
     // ---------- utilitaires ----------
 
-    private static string? InstalledDir()
+    internal static string? InstalledDir()
     {
         using var k = Registry.LocalMachine.OpenSubKey(UninstallKey);
         return k?.GetValue("InstallLocation") as string is { Length: > 0 } d ? d : null;
     }
 
-    private static bool ServiceExists()
+    internal static bool ServiceExists()
     {
         try { using var sc = new ServiceController(ServiceName); _ = sc.Status; return true; }
         catch (InvalidOperationException) { return false; }

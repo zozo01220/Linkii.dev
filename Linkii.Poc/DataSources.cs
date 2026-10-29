@@ -64,6 +64,9 @@ public class DataConnection
     public string LoginPassField { get; set; } = "password";
     /// <summary>Où est le jeton dans la réponse JSON (« token », « data.access_token ») ; vide = détecté (token, access_token, accessToken, jwt, id_token).</summary>
     public string TokenPath { get; set; } = "";
+    /// <summary>En-tête qui porte le jeton à chaque lecture (« Authorization », ou « X-Dashboard-Token » pour certaines API) et ce qui le précède (« Bearer » + espace ; vide = le jeton seul).</summary>
+    public string TokenHeader { get; set; } = "Authorization";
+    public string TokenPrefix { get; set; } = "Bearer ";
     // Fichier
     /// <summary>upload (fichier importé, gardé sur le serveur) | url (lu à une adresse web à chaque actualisation).</summary>
     public string FileMode { get; set; } = "upload";
@@ -662,7 +665,7 @@ public class DataSetService
             }
         for (var attempt = 0; ; attempt++)
         {
-            if (login) headers["Authorization"] = "Bearer " + await Token(clientId, c, attempt > 0, ct);
+            if (login) headers[c.TokenHeader.Trim().Length > 0 ? c.TokenHeader.Trim() : "Authorization"] = c.TokenPrefix + await Token(clientId, c, attempt > 0, ct);
             var a = await Call(clientId, c, "GET", url, headers, null, null, max, ct);
             if (a.Status == 401 && login && attempt == 0) continue;   // jeton expiré ou révoqué : une nouvelle connexion, puis un seul nouvel essai
             Status(a.Status);
@@ -1032,6 +1035,12 @@ public static class DataSourceOps
                 try { DataSetService.Join(c.BaseUrl, c.LoginPath); } catch (InvalidOperationException e) { return e.Message.Replace("(ex. /salles)", "(ex. /auth/login)"); }
                 if (!Regex.IsMatch(c.LoginUserField, @"^[\w.\-\[\]]{1,60}$") || !Regex.IsMatch(c.LoginPassField, @"^[\w.\-\[\]]{1,60}$")) return "Nom de champ invalide (lettres, chiffres, point, tiret et souligné).";
                 if (c.TokenPath.Length > 200) return "Chemin du jeton trop long.";
+                c.TokenHeader = string.IsNullOrWhiteSpace(c.TokenHeader) ? "Authorization" : c.TokenHeader.Trim();
+                c.TokenPrefix = string.IsNullOrWhiteSpace(c.TokenPrefix) ? "" : c.TokenPrefix;
+                if (!Regex.IsMatch(c.TokenHeader, "^[A-Za-z0-9-]{1,60}$") || c.TokenHeader.ToLowerInvariant() is "host" or "content-length" or "content-type" or "transfer-encoding" or "connection")
+                    return "Nom d'en-tête invalide (lettres, chiffres et tirets).";
+                if (!Regex.IsMatch(c.TokenPrefix, @"^[\x20-\x7E]{0,20}$")) return "Préfixe du jeton invalide (20 caractères au plus).";
+                if (c.TokenPrefix.Trim().Length > 0 && !c.TokenPrefix.EndsWith(' ')) c.TokenPrefix = c.TokenPrefix.TrimStart() + " ";   // « Bearer » devient « Bearer  » : l'espace avant le jeton
             }
             if (c.Auth == "key" && !Regex.IsMatch(c.KeyHeader.Trim(), "^[A-Za-z0-9-]{1,60}$")) return "Nom d'en-tête invalide (lettres, chiffres et tirets).";
         }

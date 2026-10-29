@@ -262,6 +262,10 @@ public class RelayTests(Platform p)
             valid.Length > 0 && r.Headers.Authorization == "Bearer " + valid
                 ? Microsoft.AspNetCore.Http.Results.Json(new[] { new { salle = "Léman", places = 12 }, new { salle = "Jura", places = 8 } })
                 : Microsoft.AspNetCore.Http.Results.Unauthorized());
+        api.MapGet("/personnes", (Microsoft.AspNetCore.Http.HttpRequest r) =>   // jeton attendu dans un autre en-tête, sans préfixe
+            valid.Length > 0 && r.Headers["X-Dashboard-Token"] == valid
+                ? Microsoft.AspNetCore.Http.Results.Json(new[] { new { nom = "Dupont" } })
+                : Microsoft.AspNetCore.Http.Results.Unauthorized());
         await api.StartAsync();
         var baseUrl = api.Urls.First();
 
@@ -310,6 +314,22 @@ public class RelayTests(Platform p)
             valid = "revoque";
             Assert.Equal("ok", (await data.Refresh(p.A.Id, set.Id))!.Level);
             Assert.Equal(3, logins);
+
+            // jeton attendu dans X-Dashboard-Token, sans « Bearer »
+            var other = Conn("s3cret");
+            other.TokenHeader = "X-Dashboard-Token"; other.TokenPrefix = "";
+            Assert.Null(DataSourceOps.CheckConnection(other));
+            var people = new DataSet { Name = "Personnes", ConnectionId = other.Id, Path = "/personnes" };
+            store.Write(db => { var t = db.Clients.First(c => c.Id == p.A.Id); t.DataConnections.Add(other); t.DataSets.Add(people); });
+            Assert.Equal("ok", (await data.Refresh(p.A.Id, people.Id))!.Level);
+            Assert.Equal("Dupont", data.Table(p.A.Id, people.Id)!.Rows[0][0]);
+
+            // « Bearer » sans espace est complété ; un en-tête invalide est refusé
+            var fix = Conn("s3cret"); fix.TokenPrefix = "Bearer";
+            Assert.Null(DataSourceOps.CheckConnection(fix));
+            Assert.Equal("Bearer ", fix.TokenPrefix);
+            fix.TokenHeader = "Content-Type";
+            Assert.Contains("en-tête", DataSourceOps.CheckConnection(fix));
         }
         finally
         {

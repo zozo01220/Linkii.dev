@@ -26,7 +26,18 @@ public static class Program
         if (cmd is "install" or "uninstall" or "wizard")
         {
             if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("L'installateur est réservé à Windows. Sous Linux : voir linkii-relay.service et le README."); return 2; }
-            return await Installer.Run(args, cmd);
+#if GUI
+            if (cmd == "wizard") return SetupWizard.Run(args);   // double-clic : assistant graphique ; « install » et « uninstall » restent en ligne de commande
+#endif
+            try { return await Installer.Run(args, cmd); }
+            catch (Exception e)   // erreur avant même l'installation : jamais de fenêtre qui disparaît sans rien dire
+            {
+                Console.WriteLine($"ERREUR : {e.GetType().Name} : {e.Message}");
+                Installer.Log(e.ToString());
+                Console.WriteLine($"Détails techniques : {Installer.LogFile}");
+                if (!Console.IsInputRedirected) { Console.Write("Appuyez sur Entrée pour fermer cette fenêtre."); Console.ReadLine(); }
+                return 1;
+            }
         }
         if (cmd is "pair") return await Pair(args);
         if (cmd is "status") { Status(); return 0; }

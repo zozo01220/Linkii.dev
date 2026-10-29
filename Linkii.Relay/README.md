@@ -8,16 +8,19 @@ PostgreSQL, MySQL / MariaDB) et les API ou fichiers qui ne sont pas accessibles 
 
 1. Dans Linkii : **Intégrations › Sources de données › Relais › Installer un relais**. Téléchargez l'installateur Windows et notez le code
    (8 caractères, valable une heure).
-2. Double-cliquez sur `LinkiiRelay-Setup.exe`, acceptez l'autorisation administrateur, saisissez le code.
+2. Double-cliquez sur `LinkiiRelay-Setup.exe` et acceptez l'autorisation administrateur : un **assistant graphique** s'ouvre (Bienvenue ›
+   Code d'installation › Dossier › Prêt à installer › Progression). Saisissez le code à l'étape 2 : il est vérifié auprès de Linkii tout de
+   suite, et un code refusé se corrige sans rien toucher sur le poste.
 
-L'installateur fait tout : appairage, copie dans `C:\Program Files\Linkii Relay`, service Windows `LinkiiRelay` (démarrage automatique,
+L'assistant fait tout : appairage, copie dans `C:\Program Files\Linkii Relay`, service Windows `LinkiiRelay` (démarrage automatique,
 redémarré en cas de panne), entrée dans « Applications et fonctionnalités », démarrage. Rien à créer à la main.
 Windows peut afficher un avertissement SmartScreen (fichier non signé) : « Informations complémentaires » puis « Exécuter quand même ».
 
 Relancé sur un poste déjà installé, il propose de réinstaller (ou ré-appairer avec un nouveau code) ou de désinstaller.
 
 Désinstaller : Applications et fonctionnalités › Relais Linkii, ou relancer l'installateur et choisir « Désinstaller ». Supprimez aussi le
-relais dans Linkii. Si la ligne de commande est préférée :
+relais dans Linkii. Si la ligne de commande est préférée (sans assistant ; en cas de problème, le journal est dans
+`%TEMP%\LinkiiRelay-installation.log`) :
 
 ```
 LinkiiRelay-Setup.exe install /code=ABCD-2345 [/server=https://votre-linkii] [/dir=D:\Linkii] [/silent]
