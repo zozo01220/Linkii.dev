@@ -22,6 +22,10 @@ public record RelayJob
     public string? Url { get; init; }
     public Dictionary<string, string>? Headers { get; init; }
     public int MaxBytes { get; init; } = 2_000_000;
+    /// <summary>http : GET (lecture), ou POST pour l'appel de connexion d'une API (Op = « login ») : le relais refuse tout autre POST.</summary>
+    public string Method { get; init; } = "GET";
+    public string? Body { get; init; }
+    public string? ContentType { get; init; }
 }
 
 public record RelayReply

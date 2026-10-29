@@ -18,7 +18,16 @@ public static class Program
     public static async Task<int> Main(string[] args)
     {
         try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch (IOException) { }   // accents lisibles dans l'invite de commandes Windows
-        var cmd = args.Length > 0 ? args[0].ToLowerInvariant() : "run";
+        var cmd = args.Length > 0 ? args[0].ToLowerInvariant() : "";
+        var isService = OperatingSystem.IsWindows() && Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService();
+        // Windows, double-clic (ni service ni commande) : l'installateur. Sous Linux ou en service : le relais démarre.
+        if (cmd == "" && OperatingSystem.IsWindows() && !isService && Environment.UserInteractive) cmd = "wizard";
+        if (cmd == "") cmd = "run";
+        if (cmd is "install" or "uninstall" or "wizard")
+        {
+            if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("L'installateur est réservé à Windows. Sous Linux : voir linkii-relay.service et le README."); return 2; }
+            return await Installer.Run(args, cmd);
+        }
         if (cmd is "pair") return await Pair(args);
         if (cmd is "status") { Status(); return 0; }
         if (cmd is "-h" or "--help" or "help" or "/?") { Help(); return 0; }
@@ -35,24 +44,28 @@ public static class Program
     private static void Help() => Console.WriteLine("""
         Relais Linkii : lit vos bases de données et API internes pour Linkii.
 
-          Linkii.Relay pair CODE --server https://votre-linkii [--name NOM]
-          Linkii.Relay            (ou run) : démarre le relais
-          Linkii.Relay status
+          Windows : double-cliquez sur LinkiiRelay-Setup.exe et entrez le code d'installation donné par Linkii.
+                    Ligne de commande : install /code=ABCD-2345 [/server=https://votre-linkii] [/dir=C:\dossier] [/silent]
+                                        uninstall [/yes]
 
-        Service Windows (administrateur) :
-          sc.exe create LinkiiRelay binPath= "C:\Linkii\Relay\Linkii.Relay.exe" start= auto
-          sc.exe start LinkiiRelay
-        Linux : voir linkii-relay.service.
+          Linux :   ./Linkii.Relay pair CODE --server https://votre-linkii [--name NOM]
+                    puis le service systemd (linkii-relay.service).
+
+          run       démarre le relais dans cette console (le service Windows ou systemd le fait tout seul)
+          status    affiche la configuration
         """);
 
     private static void Status()
     {
-        var c = RelayConfig.Load();
         Console.WriteLine($"Fichier     : {RelayConfig.PathOf}");
+        RelayConfig c;
+        try { c = RelayConfig.Load(); }
+        catch (UnauthorizedAccessException) { Console.WriteLine("Accès refusé : la configuration est réservée aux administrateurs (lancez cette commande en administrateur)."); return; }
         Console.WriteLine($"Serveur     : {(c.Server.Length > 0 ? c.Server : "(non appairé)")}");
         Console.WriteLine($"Nom         : {c.Name}");
         Console.WriteLine($"Jeton       : {(c.Token.Length > 0 ? "présent" : "absent")}");
         Console.WriteLine($"Hôtes permis: {(c.AllowedHosts.Count == 0 ? "tous" : string.Join(", ", c.AllowedHosts))}");
+        if (RelayPairing.ServerOf(Environment.ProcessPath ?? "") is { } s) Console.WriteLine($"Téléchargé depuis : {s}");
     }
 
     private static async Task<int> Pair(string[] args)
@@ -60,23 +73,16 @@ public static class Program
         string? Opt(string name) { var i = Array.FindIndex(args, a => a.Equals(name, StringComparison.OrdinalIgnoreCase)); return i >= 0 && i + 1 < args.Length ? args[i + 1] : null; }
         var code = args.Length > 1 && !args[1].StartsWith("--") ? args[1] : null;
         var cfg = RelayConfig.Load();
-        var server = (Opt("--server") ?? cfg.Server).TrimEnd('/');
+        var server = (Opt("--server") ?? RelayPairing.ServerOf(Environment.ProcessPath ?? "") ?? cfg.Server).TrimEnd('/');
         if (code == null || server.Length == 0) { Console.Error.WriteLine("Usage : Linkii.Relay pair CODE --server https://votre-linkii [--name NOM]"); return 2; }
-        if (!server.StartsWith("https://", StringComparison.OrdinalIgnoreCase) && !server.StartsWith("http://localhost", StringComparison.OrdinalIgnoreCase))
-        { Console.Error.WriteLine("L'adresse du serveur doit commencer par https://"); return 2; }
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-        try
-        {
-            var res = await http.PostAsJsonAsync(server + "/api/relay/pair", new RelayPairRequest(code, Opt("--name"), Environment.MachineName, RelayWorker.Version), RelayConfig.Json);
-            if (!res.IsSuccessStatusCode) { Console.Error.WriteLine($"Appairage refusé ({(int)res.StatusCode}) : {await res.Content.ReadAsStringAsync()}"); return 1; }
-            var r = await res.Content.ReadFromJsonAsync<RelayPairResponse>(RelayConfig.Json);
-            cfg.Server = server; cfg.Token = r!.Token; cfg.Name = r.Name;
-            cfg.Save();
-            Console.WriteLine($"Relais « {r.Name} » appairé. Configuration : {RelayConfig.PathOf}");
-            Console.WriteLine("Démarrez-le maintenant (service, ou « Linkii.Relay run »).");
-            return 0;
-        }
-        catch (HttpRequestException e) { Console.Error.WriteLine("Serveur injoignable : " + e.Message); return 1; }
+        var (r, err) = await RelayPairing.PairAsync(http, server, code, Opt("--name"));
+        if (r == null) { Console.Error.WriteLine(err); return err!.StartsWith("Appairage") || err.Contains("injoignable") || err.Contains("Code") ? 1 : 2; }
+        cfg.Server = server; cfg.Token = r.Token; cfg.Name = r.Name;
+        cfg.Save();
+        Console.WriteLine($"Relais « {r.Name} » appairé. Configuration : {RelayConfig.PathOf}");
+        Console.WriteLine("Démarrez-le maintenant (service, ou « Linkii.Relay run »).");
+        return 0;
     }
 }
 
@@ -89,7 +95,9 @@ public class RelayConfig
     public List<string> AllowedHosts { get; set; } = new();
 
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
-    public static string PathOf => Path.Combine(AppContext.BaseDirectory, "relay.json");
+    /// <summary>Dossier de relay.json : celui du programme ; l'installateur le règle sur le dossier d'installation.</summary>
+    public static string Dir { get; set; } = AppContext.BaseDirectory;
+    public static string PathOf => Path.Combine(Dir, "relay.json");
 
     public static RelayConfig Load()
     {
@@ -209,8 +217,11 @@ public class RelayWorker : BackgroundService
         {
             if (!Uri.TryCreate(job.Url, UriKind.Absolute, out var u) || u.Scheme is not ("http" or "https")) throw new InvalidOperationException("Adresse invalide.");
             if (!cfg.Allows(u.Host)) throw new InvalidOperationException($"Hôte « {u.Host} » non autorisé par ce relais (AllowedHosts de relay.json).");
-            using var req = new HttpRequestMessage(HttpMethod.Get, u);   // lecture seule : GET uniquement
+            var login = job.Op == "login" && job.Method == "POST";   // seul POST accepté : l'appel de connexion d'une API (utilisateur, mot de passe → jeton)
+            if (job.Method != "GET" && !login) throw new InvalidOperationException("Méthode non autorisée : le relais ne fait que lire.");
+            using var req = new HttpRequestMessage(login ? HttpMethod.Post : HttpMethod.Get, u);
             foreach (var (k, v) in job.Headers ?? new()) req.Headers.TryAddWithoutValidation(k, v);
+            if (login) req.Content = new StringContent(job.Body ?? "", System.Text.Encoding.UTF8, job.ContentType ?? "application/json");
             using var res = await web.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
             await using var s = await res.Content.ReadAsStreamAsync(ct);
             using var ms = new MemoryStream();

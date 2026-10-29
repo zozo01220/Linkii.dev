@@ -549,16 +549,26 @@ app.MapGet("/download/windows", () =>
         : Results.File(msi.FullName, "application/x-msi", msi.Name);
 });
 
-// Relais Linkii (§139, lot 4) : dernière archive LinkiiRelay-{win-x64|linux-x64}*.zip du dossier downloads (déposée par Linkii.Relay/publish.ps1).
-app.MapGet("/download/relay/{os}", (string os) =>
+// Relais Linkii (§139, lot 4), fichiers du dossier downloads déposés par Linkii.Relay/publish.ps1 :
+//  - Windows : LinkiiRelay-Setup.exe, l'installateur (c'est le relais lui-même : il demande le code, installe et démarre le service). Le serveur ajoute
+//    à la fin du fichier « #LINKII-SERVER=https://… » (sans effet sur l'exécutable) : l'installateur connaît ainsi l'adresse du serveur qui l'a servi ;
+//  - Linux : LinkiiRelay-linux-x64.zip (appairage et service systemd en ligne de commande).
+app.MapGet("/download/relay/{os}", async (HttpContext ctx, string os) =>
 {
-    if (os is not ("win-x64" or "linux-x64")) return Results.NotFound();
-    var zip = Directory.Exists(AppPaths.DownloadDir)
-        ? new DirectoryInfo(AppPaths.DownloadDir).GetFiles($"LinkiiRelay-{os}*.zip").OrderByDescending(f => f.LastWriteTimeUtc).FirstOrDefault()
+    var pattern = os switch { "windows" => "LinkiiRelay-Setup*.exe", "linux-x64" => "LinkiiRelay-linux-x64*.zip", _ => null };
+    var file = pattern != null && Directory.Exists(AppPaths.DownloadDir)
+        ? new DirectoryInfo(AppPaths.DownloadDir).GetFiles(pattern).OrderByDescending(f => f.LastWriteTimeUtc).FirstOrDefault()
         : null;
-    return zip == null
-        ? Results.Content("Le relais Linkii n'est pas encore disponible au téléchargement.", "text/plain; charset=utf-8", statusCode: 404)
-        : Results.File(zip.FullName, "application/zip", zip.Name);
+    if (file == null)
+        return pattern == null ? Results.NotFound() : Results.Content("Le relais Linkii n'est pas encore disponible au téléchargement.", "text/plain; charset=utf-8", statusCode: 404);
+    if (os != "windows") return Results.File(file.FullName, "application/zip", "LinkiiRelay-linux-x64.zip");
+    var trailer = System.Text.Encoding.UTF8.GetBytes("\n#LINKII-SERVER=" + ctx.Request.Scheme + "://" + ctx.Request.Host + "\n");
+    ctx.Response.ContentType = "application/octet-stream";
+    ctx.Response.Headers.ContentDisposition = "attachment; filename=\"LinkiiRelay-Setup.exe\"";
+    ctx.Response.ContentLength = file.Length + trailer.Length;
+    await ctx.Response.SendFileAsync(file.FullName);
+    await ctx.Response.Body.WriteAsync(trailer);
+    return Results.Empty;
 });
 
 // ---------- Médias : l'accès est contrôlé par client ----------

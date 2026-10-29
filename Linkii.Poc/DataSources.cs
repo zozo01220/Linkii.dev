@@ -51,11 +51,19 @@ public class DataConnection
     public string Kind { get; set; } = DataKinds.Api;
     // API web
     public string BaseUrl { get; set; } = "";
-    /// <summary>none | key (clé dans un en-tête) | bearer | basic.</summary>
+    /// <summary>none | key (clé dans un en-tête) | bearer | basic | login (utilisateur et mot de passe envoyés à une adresse de connexion, qui rend un jeton Bearer).</summary>
     public string Auth { get; set; } = "none";
     public string KeyHeader { get; set; } = "X-Api-Key";
     public string User { get; set; } = "";
     public string Secret { get; set; } = "";
+    // Auth = login : POST {adresse de base}{LoginPath}, le jeton est lu dans la réponse puis envoyé en « Authorization: Bearer »
+    public string LoginPath { get; set; } = "";
+    /// <summary>json (corps {"username":…,"password":…}) | form (application/x-www-form-urlencoded).</summary>
+    public string LoginFormat { get; set; } = "json";
+    public string LoginUserField { get; set; } = "username";
+    public string LoginPassField { get; set; } = "password";
+    /// <summary>Où est le jeton dans la réponse JSON (« token », « data.access_token ») ; vide = détecté (token, access_token, accessToken, jwt, id_token).</summary>
+    public string TokenPath { get; set; } = "";
     // Fichier
     /// <summary>upload (fichier importé, gardé sur le serveur) | url (lu à une adresse web à chaque actualisation).</summary>
     public string FileMode { get; set; } = "upload";
@@ -615,7 +623,7 @@ public class DataSetService
     public async Task<RawTable> ReadRaw(Guid clientId, DataConnection c, DataSet ds, CancellationToken ct)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var limit = c.Via == "relay" ? DataKinds.Timeout * 2 : DataKinds.Timeout;
+        var limit = (c.Via == "relay" ? DataKinds.Timeout * 2 : DataKinds.Timeout) * (c.Kind == DataKinds.Api && c.Auth == "login" ? 2 : 1);   // la connexion par identifiants est un appel de plus
         cts.CancelAfter(limit);
         try
         {
@@ -643,6 +651,8 @@ public class DataSetService
         var url = c.Kind == DataKinds.File ? c.FileUrl : Join(c.BaseUrl, path);
         var headers = new Dictionary<string, string> { ["Accept"] = "application/json, text/csv, */*" };
         var secret = c.Secret.Length > 0 ? box.Unprotect(c.Secret) : "";
+        var max = DataKinds.MaxBytes * (c.Kind == DataKinds.File ? 5 : 1);
+        var login = c.Kind == DataKinds.Api && c.Auth == "login";
         if (c.Kind == DataKinds.Api)
             switch (c.Auth)
             {
@@ -650,14 +660,33 @@ public class DataSetService
                 case "bearer" when secret.Length > 0: headers["Authorization"] = "Bearer " + secret; break;
                 case "basic": headers["Authorization"] = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes(c.User + ":" + secret)); break;
             }
-        if (c.Via == "relay")   // adresse du réseau interne : le relais l'appelle et rend la réponse
+        for (var attempt = 0; ; attempt++)
         {
-            var rr = await relays.Run(clientId, c.RelayId ?? Guid.Empty, new RelayJob { Kind = "http", Url = url, Headers = headers, MaxBytes = DataKinds.MaxBytes * (c.Kind == DataKinds.File ? 5 : 1) }, ct);
-            Status(rr.Status);
-            return Convert.FromBase64String(rr.Body64 ?? "");
+            if (login) headers["Authorization"] = "Bearer " + await Token(clientId, c, attempt > 0, ct);
+            var a = await Call(clientId, c, "GET", url, headers, null, null, max, ct);
+            if (a.Status == 401 && login && attempt == 0) continue;   // jeton expiré ou révoqué : une nouvelle connexion, puis un seul nouvel essai
+            Status(a.Status);
+            return a.Body;
+        }
+    }
+
+    private sealed record HttpAnswer(int Status, byte[] Body);
+
+    /// <summary>Un appel HTTP, direct ou par le relais (adresse du réseau interne : le relais l'appelle et rend la réponse). Le corps d'une réponse en erreur n'est pas lu.</summary>
+    private async Task<HttpAnswer> Call(Guid clientId, DataConnection c, string method, string url, Dictionary<string, string> headers, string? body, string? contentType, int max, CancellationToken ct)
+    {
+        if (c.Via == "relay")
+        {
+            var rr = await relays.Run(clientId, c.RelayId ?? Guid.Empty, new RelayJob { Kind = "http", Op = method == "POST" ? "login" : "read", Method = method, Body = body, ContentType = contentType, Url = url, Headers = headers, MaxBytes = max }, ct);
+            return new HttpAnswer(rr.Status, rr.Status >= 300 ? Array.Empty<byte>() : Convert.FromBase64String(rr.Body64 ?? ""));
+        }
+        if (method == "POST")
+        {
+            var (status, text) = await http.Request(HttpMethod.Post, url, body, contentType, headers, max, ct);
+            return new HttpAnswer(status, Encoding.UTF8.GetBytes(text));
         }
         using var res = await http.Send(url, ct, headers);
-        Status((int)res.StatusCode);
+        if ((int)res.StatusCode >= 300) return new HttpAnswer((int)res.StatusCode, Array.Empty<byte>());
         await using var s = await res.Content.ReadAsStreamAsync(ct);
         using var ms = new MemoryStream();
         var buf = new byte[16 * 1024];
@@ -665,9 +694,101 @@ public class DataSetService
         while ((n = await s.ReadAsync(buf, ct)) > 0)
         {
             ms.Write(buf, 0, n);
-            if (ms.Length > DataKinds.MaxBytes * (c.Kind == DataKinds.File ? 5 : 1)) throw new InvalidOperationException($"Réponse trop volumineuse (plus de {DataKinds.MaxBytes / 1_000_000} Mo).");
+            if (ms.Length > max) throw new InvalidOperationException($"Réponse trop volumineuse (plus de {DataKinds.MaxBytes / 1_000_000} Mo).");
         }
-        return ms.ToArray();
+        return new HttpAnswer((int)res.StatusCode, ms.ToArray());
+    }
+
+    // ---------- connexion par identifiants (Auth = login) ----------
+
+    private readonly ConcurrentDictionary<Guid, (string Print, string Token, DateTime Until)> tokens = new();
+    private static readonly string[] TokenNames = { "token", "access_token", "accessToken", "jwt", "id_token", "idToken", "bearer" };
+
+    /// <summary>
+    /// Jeton Bearer d'une connexion : celui gardé en mémoire s'il est encore valable (et si les réglages n'ont pas changé), sinon une nouvelle connexion
+    /// (POST des identifiants à l'adresse de connexion). Durée : expires_in de la réponse, ou date d'expiration du jeton JWT, sinon 20 minutes ;
+    /// une réponse 401 de l'API provoque de toute façon une nouvelle connexion.
+    /// </summary>
+    private async Task<string> Token(Guid clientId, DataConnection c, bool renew, CancellationToken ct)
+    {
+        var secret = c.Secret.Length > 0 ? box.Unprotect(c.Secret) : "";
+        var print = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\n", c.BaseUrl, c.LoginPath, c.LoginFormat, c.LoginUserField, c.LoginPassField, c.TokenPath, c.User, secret, c.Via, c.RelayId))));
+        if (!renew && tokens.TryGetValue(c.Id, out var known) && known.Print == print && known.Until > DateTime.UtcNow) return known.Token;
+
+        string user = c.User.Trim(), uf = c.LoginUserField.Trim(), pf = c.LoginPassField.Trim();
+        string body, type;
+        if (c.LoginFormat == "form")
+        {
+            body = Uri.EscapeDataString(uf) + "=" + Uri.EscapeDataString(user) + "&" + Uri.EscapeDataString(pf) + "=" + Uri.EscapeDataString(secret);
+            type = "application/x-www-form-urlencoded";
+        }
+        else
+        {
+            body = JsonSerializer.Serialize(new Dictionary<string, string> { [uf] = user, [pf] = secret });
+            type = "application/json";
+        }
+        var headers = new Dictionary<string, string> { ["Accept"] = "application/json, text/plain, */*" };
+        var a = await Call(clientId, c, "POST", Join(c.BaseUrl, c.LoginPath), headers, body, type, 200_000, ct);
+        if (a.Status is 400 or 401 or 403 or 422) throw new InvalidOperationException($"Connexion refusée par l'API ({a.Status}) : vérifiez l'utilisateur, le mot de passe et le nom des champs.");
+        if (a.Status == 404 || a.Status == 405) throw new InvalidOperationException($"Adresse de connexion introuvable ({a.Status}) : vérifiez le chemin de connexion ({c.LoginPath}).");
+        Status(a.Status);
+        var (token, seconds) = ReadToken(Encoding.UTF8.GetString(a.Body), c.TokenPath);
+        tokens[c.Id] = (print, token, DateTime.UtcNow.AddSeconds(Math.Clamp(seconds - 60, 30, 12 * 3600)));
+        return token;
+    }
+
+    /// <summary>Jeton de la réponse de connexion et sa durée en secondes (20 minutes si elle n'est pas donnée).</summary>
+    public static (string Token, int Seconds) ReadToken(string text, string? tokenPath)
+    {
+        JsonElement root;
+        try { root = JsonDocument.Parse(text.Trim().Length == 0 ? "\"\"" : text).RootElement.Clone(); }
+        catch (JsonException)
+        {
+            var plain = text.Trim();   // certaines API rendent le jeton seul, en texte brut
+            if (string.IsNullOrWhiteSpace(tokenPath) && Regex.IsMatch(plain, @"^[\x21-\x7E]{20,8000}$") && !plain.StartsWith('<')) return (plain, 1200);
+            throw new InvalidOperationException("La réponse de connexion n'est pas du JSON : jeton introuvable.");
+        }
+        JsonElement? hit = null;
+        JsonElement owner = root;
+        if (!string.IsNullOrWhiteSpace(tokenPath))
+        {
+            try { hit = DataTables.Navigate(root, tokenPath!); }
+            catch (InvalidOperationException) { throw new InvalidOperationException($"Jeton introuvable dans la réponse de connexion (chemin : {tokenPath})."); }
+        }
+        else if (root.ValueKind == JsonValueKind.String) hit = root;
+        else
+            foreach (var scope in new[] { root }.Concat(new[] { "data", "result", "response" }.Select(n => root.ValueKind == JsonValueKind.Object && root.TryGetProperty(n, out var x) ? x : default)))
+            {
+                if (scope.ValueKind != JsonValueKind.Object) continue;
+                foreach (var name in TokenNames)
+                    foreach (var p in scope.EnumerateObject())
+                        if (hit == null && p.Name.Equals(name, StringComparison.OrdinalIgnoreCase) && p.Value.ValueKind == JsonValueKind.String) { hit = p.Value; owner = scope; }
+                if (hit != null) break;
+            }
+        if (hit is not { ValueKind: JsonValueKind.String } h || (h.GetString() ?? "").Trim() is not { Length: > 0 } token)
+            throw new InvalidOperationException("Jeton introuvable dans la réponse de connexion : indiquez son emplacement (ex. data.access_token).");
+        if (!Regex.IsMatch(token, @"^[\x21-\x7E]{1,8000}$")) throw new InvalidOperationException("Le jeton rendu par l'API n'a pas un format valide.");
+        var seconds = 1200;
+        if (owner.ValueKind == JsonValueKind.Object)
+            foreach (var p in owner.EnumerateObject())
+                if (p.Value.ValueKind == JsonValueKind.Number && p.Value.TryGetInt32(out var s) && s > 0 && (p.Name.Equals("expires_in", StringComparison.OrdinalIgnoreCase) || p.Name.Equals("expiresIn", StringComparison.OrdinalIgnoreCase))) { seconds = s; break; }
+        if (seconds == 1200 && JwtExpiry(token) is { } exp) seconds = (int)Math.Clamp((exp - DateTime.UtcNow).TotalSeconds, 0, int.MaxValue);
+        return (token, seconds);
+    }
+
+    /// <summary>Date d'expiration (exp) d'un jeton JWT, si lisible.</summary>
+    private static DateTime? JwtExpiry(string token)
+    {
+        var parts = token.Split('.');
+        if (parts.Length != 3) return null;
+        try
+        {
+            var b64 = parts[1].Replace('-', '+').Replace('_', '/');
+            b64 = b64.PadRight(b64.Length + (4 - b64.Length % 4) % 4, '=');
+            using var doc = JsonDocument.Parse(Convert.FromBase64String(b64));
+            return doc.RootElement.TryGetProperty("exp", out var e) && e.TryGetInt64(out var t) ? DateTimeOffset.FromUnixTimeSeconds(t).UtcDateTime : null;
+        }
+        catch (Exception ex) when (ex is FormatException or JsonException or ArgumentOutOfRangeException) { return null; }
     }
 
     private static void Status(int code)
@@ -735,6 +856,14 @@ public class DataSetService
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(25));
             return (await Sql(clientId, c, "test", null, null, cts.Token)).Message ?? "Connexion réussie.";
+        }
+        if (c.Kind == DataKinds.Api && c.Auth == "login")   // seule la connexion est essayée : l'adresse de base seule ne rend pas forcément des données
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(c.Via == "relay" ? DataKinds.Timeout * 2 : DataKinds.Timeout);
+            try { await Token(clientId, c, true, cts.Token); }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new InvalidOperationException("Délai dépassé : l'API de connexion n'a pas répondu à temps."); }
+            return "Connexion réussie · l'API a rendu un jeton. Ajoutez maintenant un jeu de données pour lire un chemin de l'API.";
         }
         var raw = await ReadRaw(clientId, c, new DataSet(), ct);
         return c.Kind == DataKinds.Api
@@ -890,8 +1019,20 @@ public static class DataSourceOps
         if (c.Kind == DataKinds.Api)
         {
             try { SafeHttp.ParseUrl(c.BaseUrl); } catch (InvalidOperationException e) { return e.Message; }
-            if (c.Auth is not ("none" or "key" or "bearer" or "basic")) c.Auth = "none";
+            if (c.Auth is not ("none" or "key" or "bearer" or "basic" or "login")) c.Auth = "none";
             if (c.Auth == "basic" && c.User.Trim().Length == 0) return "Indiquez l'utilisateur de l'authentification Basic.";
+            if (c.Auth == "login")
+            {
+                c.User = c.User.Trim(); c.LoginPath = (c.LoginPath ?? "").Trim(); c.TokenPath = (c.TokenPath ?? "").Trim();
+                c.LoginUserField = string.IsNullOrWhiteSpace(c.LoginUserField) ? "username" : c.LoginUserField.Trim();
+                c.LoginPassField = string.IsNullOrWhiteSpace(c.LoginPassField) ? "password" : c.LoginPassField.Trim();
+                if (c.LoginFormat is not ("json" or "form")) c.LoginFormat = "json";
+                if (c.User.Length == 0) return "Indiquez l'utilisateur de la connexion.";
+                if (c.LoginPath.Length == 0 || c.LoginPath.Length > 300) return "Indiquez le chemin de connexion (ex. /auth/login).";
+                try { DataSetService.Join(c.BaseUrl, c.LoginPath); } catch (InvalidOperationException e) { return e.Message.Replace("(ex. /salles)", "(ex. /auth/login)"); }
+                if (!Regex.IsMatch(c.LoginUserField, @"^[\w.\-\[\]]{1,60}$") || !Regex.IsMatch(c.LoginPassField, @"^[\w.\-\[\]]{1,60}$")) return "Nom de champ invalide (lettres, chiffres, point, tiret et souligné).";
+                if (c.TokenPath.Length > 200) return "Chemin du jeton trop long.";
+            }
             if (c.Auth == "key" && !Regex.IsMatch(c.KeyHeader.Trim(), "^[A-Za-z0-9-]{1,60}$")) return "Nom d'en-tête invalide (lettres, chiffres et tirets).";
         }
         else if (c.Kind == DataKinds.Db)
