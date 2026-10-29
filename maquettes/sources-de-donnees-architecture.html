@@ -1,0 +1,743 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Intégrations personnalisées (sources de données)</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--signal:#3B82C4;--sigbg:#EAF2FA;
+  --ok:#1E8E5A;--okbg:#E1F0E8;--oktx:#155A38;--warn:#B7791F;--warnbg:#FBF0DC;--warntx:#7A4F12;--bad:#C8372D;--badbg:#FBE4E2;--badtx:#8A231C;--r:4px}
+*{box-sizing:border-box}html,body{margin:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.45}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:500;font-size:12.5px}
+.muted{color:var(--muted)}
+
+/* barre de maquette */
+.mock{position:sticky;top:0;z-index:100;background:#FFF8E1;border-bottom:1px dashed #E0B84A;padding:8px 16px;font-size:13px;color:#6B5200;display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.mock b{font-weight:500;margin-right:6px}
+.mock .sc{border:1px solid #E0B84A;background:#fff;border-radius:4px;padding:3px 10px;font-size:13px}
+.mock .sc.on{background:#6B5200;border-color:#6B5200;color:#fff}
+
+.scene{display:none}.scene.on{display:block}
+
+/* cadre de l'app */
+.app{display:grid;grid-template-columns:210px 1fr;min-height:calc(100vh - 40px)}
+.side{background:#fff;border-right:1px solid var(--line);padding:18px 12px}
+.logo{font-weight:500;font-size:22px;letter-spacing:-.03em;padding:0 8px 18px}
+.logo i{font-style:normal;color:var(--signal)}
+.nav a{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:var(--r);color:var(--ink);text-decoration:none;font-size:14px}
+.nav a.on{background:var(--sigbg);color:var(--ink);box-shadow:inset 2px 0 0 var(--signal)}
+.nav a span{width:16px;height:16px;border:1.5px solid var(--muted);border-radius:3px}
+.nav .grp{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:16px 8px 4px}
+.main{padding:26px 30px 60px;min-width:0}
+.head{display:flex;align-items:flex-end;gap:16px;margin-bottom:18px}
+.head h1{font-size:26px;font-weight:500;margin:0}
+.head p{margin:2px 0 0;color:var(--muted)}
+.head .acts{margin-left:auto;display:flex;gap:8px}
+.tabs{display:flex;gap:22px;border-bottom:1px solid var(--line);margin-bottom:20px}
+.tabs a{padding:8px 0;color:var(--muted);text-decoration:none}
+.tabs a.on{color:var(--ink);box-shadow:inset 0 -2px 0 var(--ink)}
+
+.btn{border:1px solid var(--ink);background:var(--ink);color:#fff;border-radius:var(--r);padding:8px 16px;font-weight:500;white-space:nowrap}
+.btn.ghost{background:#fff;color:var(--ink);border-color:var(--line-2)}
+.btn.sm{padding:4px 10px;font-size:13px}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:1px 8px;border-radius:var(--r);white-space:nowrap}
+.pill i{width:7px;height:7px;border-radius:50%}
+.pill.ok{background:var(--okbg);color:var(--oktx)}.pill.ok i{background:var(--ok)}
+.pill.warn{background:var(--warnbg);color:var(--warntx)}.pill.warn i{background:var(--warn)}
+.pill.bad{background:var(--badbg);color:var(--badtx)}.pill.bad i{background:var(--bad)}
+.pill.plan{background:var(--ink);color:#fff}
+.tag{display:inline-block;font-size:11.5px;padding:0 7px;border-radius:3px;background:#EDF1F5;color:var(--muted)}
+.card{background:#fff;border:1px solid var(--line);border-radius:var(--r)}
+.note{border-left:2px solid var(--signal);background:#fff;padding:10px 14px;color:var(--muted);font-size:13px;border-radius:0 var(--r) var(--r) 0}
+.note b{color:var(--ink);font-weight:500}
+h2{font-size:16px;font-weight:500;margin:26px 0 10px}
+h3{font-size:14px;font-weight:500;margin:0 0 6px}
+.ico{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:500;flex:none}
+
+/* ===== Scène 0 : architecture ===== */
+.arch-wrap{max-width:1180px;margin:0 auto;padding:30px 24px 60px}
+.arch-wrap>h1{font-size:28px;font-weight:500;margin:0 0 4px}
+.arch-wrap>.lead{color:var(--muted);margin:0 0 24px;max-width:760px}
+.flow{display:grid;grid-template-columns:repeat(5,1fr);gap:0;align-items:stretch}
+.col{position:relative;padding:0 14px}
+.col+.col::before{content:"";position:absolute;left:-7px;top:44px;width:14px;height:14px;border-top:2px solid var(--line-2);border-right:2px solid var(--line-2);transform:rotate(45deg)}
+.col .lab{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:4px}
+.col h3{font-size:16px;margin-bottom:10px}
+.box{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:9px 11px;margin-bottom:8px;font-size:13px}
+.box b{font-weight:500;display:block;font-size:13.5px}
+.box small{color:var(--muted);display:block}
+.box.key{border-color:var(--ink)}
+.box.relay{border-style:dashed;border-color:var(--signal);background:#F3F8FD}
+.box.cache{background:#F9FAFC}
+.tbl-mini{width:100%;border-collapse:collapse;margin-top:6px;font-size:11.5px}
+.tbl-mini td,.tbl-mini th{border:1px solid var(--line);padding:2px 5px;text-align:left;font-weight:400}
+.tbl-mini th{background:#F5F7FA;color:var(--muted)}
+.arch-band{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:28px}
+.arch-band .card{padding:14px 16px}
+.arch-band ul{margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:13px}
+.arch-band li{margin:3px 0}
+.arch-band li b{color:var(--ink);font-weight:500}
+.words{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:16px}
+.word{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:14px 16px}
+.word .n{font-size:22px;font-weight:500}
+.word .n span{color:var(--signal)}
+.word p{margin:4px 0 0;color:var(--muted);font-size:13px}
+.contract{margin-top:28px;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.code{background:var(--ink);color:#DCE6F2;border-radius:var(--r);padding:14px 16px;font-family:"JetBrains Mono",monospace;font-size:12px;line-height:1.6;white-space:pre;overflow:auto}
+.code .c{color:#7F93AD}.code .k{color:#8FC1F0}.code .s{color:#B9E0C5}
+
+/* ===== Scène 1 : page Sources ===== */
+.src-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px}
+.src{padding:14px;display:flex;flex-direction:column;gap:8px}
+.src .top{display:flex;gap:10px;align-items:center}
+.src .top b{font-weight:500;font-size:15px;display:block}
+.src .top small{color:var(--muted)}
+.src .ds{border-top:1px solid var(--line);padding-top:8px;display:flex;flex-direction:column;gap:5px}
+.src .ds div{display:flex;justify-content:space-between;align-items:center;font-size:13px}
+.src .ds div span{color:var(--muted);font-size:12px}
+.src.new{border:1px dashed var(--line-2);background:transparent;align-items:center;justify-content:center;text-align:center;color:var(--muted);min-height:170px}
+.src.new b{color:var(--ink);font-weight:500}
+.src.new .plus{width:34px;height:34px;border:1px solid var(--line-2);border-radius:50%;display:grid;place-items:center;font-size:20px;color:var(--ink);background:#fff}
+.dslist{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:var(--r)}
+.dslist th{font-weight:400;color:var(--muted);font-size:12px;text-align:left;padding:8px 12px;border-bottom:1px solid var(--line)}
+.dslist td{padding:10px 12px;border-bottom:1px solid var(--line);font-size:13.5px}
+.dslist tr:last-child td{border-bottom:0}
+.dslist td b{font-weight:500}
+
+/* ===== Scène 2 : connexion ===== */
+.drawer{background:#fff;border:1px solid var(--line-2);border-radius:var(--r);max-width:1000px}
+.dh{display:flex;align-items:center;gap:12px;padding:16px 22px;border-bottom:1px solid var(--line)}
+.dh h3{font-size:18px;margin:0}
+.dh small{color:var(--muted)}
+.dh .x{margin-left:auto;border:0;background:none;font-size:20px;color:var(--muted)}
+.steps{display:flex;gap:6px;padding:12px 22px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted)}
+.steps span{display:flex;align-items:center;gap:6px;padding-right:14px}
+.steps span em{font-style:normal;width:20px;height:20px;border-radius:50%;border:1px solid var(--line-2);display:grid;place-items:center;font-size:11px}
+.steps span.on{color:var(--ink)}.steps span.on em{background:var(--ink);border-color:var(--ink);color:#fff}
+.steps span.done em{background:var(--okbg);border-color:var(--ok);color:var(--oktx)}
+.db{display:grid;grid-template-columns:1fr 300px;gap:0}
+.db .l{padding:18px 22px;border-right:1px solid var(--line)}
+.db .r{padding:18px 20px;background:#FAFBFD}
+.types{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:18px}
+.type{border:1px solid var(--line);border-radius:var(--r);padding:10px;text-align:left;background:#fff}
+.type b{display:block;font-weight:500;font-size:13.5px}
+.type small{color:var(--muted);font-size:12px}
+.type.on{border-color:var(--signal);box-shadow:inset 0 0 0 1px var(--signal)}
+.fld{margin-bottom:14px}
+.fld label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+.inp{width:100%;border:1px solid var(--line-2);border-radius:var(--r);padding:7px 10px;background:#fff}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.row3{display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:var(--r);overflow:hidden}
+.seg button{border:0;background:#fff;padding:5px 12px;font-size:13px;border-right:1px solid var(--line-2)}
+.seg button:last-child{border-right:0}
+.seg button.on{background:var(--ink);color:#fff}
+.reach{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.reach .opt{border:1px solid var(--line);border-radius:var(--r);padding:10px 12px;background:#fff}
+.reach .opt.on{border-color:var(--signal);box-shadow:inset 0 0 0 1px var(--signal)}
+.reach .opt b{font-weight:500;display:block}
+.reach .opt small{color:var(--muted);display:block}
+.relaybox{margin-top:10px;border:1px dashed var(--signal);background:#F3F8FD;border-radius:var(--r);padding:10px 12px;font-size:13px;display:flex;align-items:center;gap:10px}
+.okline{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--oktx);margin-top:8px}
+.okline i{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+.df{display:flex;align-items:center;gap:10px;padding:12px 22px;border-top:1px solid var(--line)}
+.df .muted{font-size:13px}
+.df .btn{margin-left:auto}
+.sub-ty{display:none}.sub-ty.on{display:block}
+
+/* ===== Scène 3 : jeu de données ===== */
+.ds-ed{display:grid;grid-template-columns:330px 1fr 270px;background:#fff;border:1px solid var(--line-2);border-radius:var(--r);min-height:560px}
+.ds-ed>div{padding:16px 18px;min-width:0}
+.ds-ed .q{border-right:1px solid var(--line)}
+.ds-ed .opts{border-left:1px solid var(--line);background:#FAFBFD}
+.sql{background:var(--ink);color:#DCE6F2;border-radius:var(--r);padding:10px 12px;font-family:"JetBrains Mono",monospace;font-size:12px;line-height:1.65;white-space:pre-wrap}
+.sql .k{color:#8FC1F0}.sql .p{color:#F2C66D}
+.params{margin-top:12px}
+.params div{display:flex;align-items:center;gap:8px;font-size:13px;margin:5px 0}
+.params code{font-family:"JetBrains Mono",monospace;font-size:12px;background:#FFF5DE;color:#7A4F12;padding:1px 6px;border-radius:3px}
+.prev-h{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.prev-h .muted{font-size:13px}
+.grid{width:100%;border-collapse:collapse;font-size:13px}
+.grid th{text-align:left;font-weight:400;padding:6px 8px;border-bottom:1px solid var(--line-2);vertical-align:bottom}
+.grid th b{display:block;font-weight:500;color:var(--ink)}
+.grid th select{border:1px solid var(--line);border-radius:3px;font-size:11.5px;padding:1px 3px;color:var(--muted);background:#fff;margin-top:3px}
+.grid td{padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+.grid td.n{font-family:"JetBrains Mono",monospace;font-size:12px;text-align:right}
+.grid .th-img{width:30px;height:20px;border-radius:3px;background:linear-gradient(135deg,#C9D6E5,#8FA6C2)}
+.grid tr.off td{color:#A7B3C2}
+.opt-g{margin-bottom:16px}
+.opt-g h3{font-size:13px;color:var(--muted);font-weight:400;margin-bottom:6px}
+.chk{display:flex;align-items:flex-start;gap:8px;font-size:13px;margin:6px 0}
+.chk input{margin-top:3px}
+.sw{width:30px;height:17px;border-radius:9px;background:var(--ink);position:relative;flex:none;margin-top:1px}
+.sw::after{content:"";position:absolute;right:2px;top:2px;width:13px;height:13px;border-radius:50%;background:#fff}
+.sw.off{background:var(--line-2)}.sw.off::after{right:auto;left:2px}
+
+/* ===== Scène 4 : éditeur de compositions ===== */
+.ed{display:grid;grid-template-columns:56px 250px 1fr 270px;background:#fff;border:1px solid var(--line-2);border-radius:var(--r);min-height:600px}
+.rail{border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 0}
+.rail span{width:38px;height:38px;border-radius:var(--r);display:grid;place-items:center;font-size:10.5px;color:var(--muted);text-align:center;line-height:1.1}
+.rail span.on{background:var(--sigbg);color:var(--ink);box-shadow:inset 2px 0 0 var(--signal)}
+.dpanel{border-right:1px solid var(--line);padding:12px 12px;font-size:13px;min-width:0}
+.dpanel h3{font-size:13px;display:flex;justify-content:space-between;align-items:center}
+.dset{border:1px solid var(--line);border-radius:var(--r);margin-bottom:10px}
+.dset .t{display:flex;align-items:center;gap:8px;padding:7px 9px;border-bottom:1px solid var(--line)}
+.dset .t b{font-weight:500}
+.dset .t small{margin-left:auto;color:var(--muted);font-size:11.5px}
+.dset .cols{padding:6px 7px;display:flex;flex-direction:column;gap:3px}
+.colchip{display:flex;align-items:center;gap:7px;padding:3px 6px;border-radius:3px;cursor:grab}
+.colchip:hover{background:#F2F5F9}
+.colchip em{font-style:normal;font-family:"JetBrains Mono",monospace;font-size:10.5px;width:22px;text-align:center;color:var(--muted);border:1px solid var(--line);border-radius:3px}
+.colchip span{margin-left:auto;color:var(--muted);font-size:11.5px;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dpanel .hint{color:var(--muted);font-size:12px;margin:6px 2px 10px}
+.stage{background:#EEF1F5;display:flex;align-items:center;justify-content:center;padding:24px;min-width:0;flex-direction:column;gap:10px}
+.cv-wrap{width:100%;max-width:680px;container-type:inline-size}
+.canvas{width:100%;aspect-ratio:16/9;background:#0B1F3A;color:#fff;border-radius:3px;position:relative;padding:4cqw 4.5cqw;display:grid;grid-template-columns:1.55fr 1fr;grid-template-rows:auto 1fr;column-gap:4.5cqw;row-gap:2.5cqw;font-size:1.7cqw;overflow:hidden}
+.cv-title{grid-column:1/-1;display:flex;align-items:baseline;justify-content:space-between}
+.cv-title b{font-weight:500;font-size:2em}
+.cv-title span{color:#9AAABD;font-size:1.1em}
+.rep{position:relative;outline:2px solid var(--signal);outline-offset:6px;border-radius:2px}
+.rep .badge{position:absolute;bottom:-26px;left:-6px;background:var(--signal);color:#fff;font-size:10.5px;padding:1px 7px;border-radius:3px;white-space:nowrap}
+.rrow{display:grid;grid-template-columns:1fr auto auto;gap:1em;align-items:center;padding:.5em 0;border-bottom:1px solid #23395A}
+.rrow:first-child{outline:1px dashed #6E9BCB;outline-offset:3px}
+.rrow b{font-weight:500;font-size:1.15em}
+.rrow small{display:block;color:#9AAABD;font-size:.85em}
+.rrow .t{font-family:"JetBrains Mono",monospace;font-size:1em}
+.st-pill{font-size:.8em;padding:.15em .6em;border-radius:3px}
+.st-pill.free{background:#1E8E5A}.st-pill.busy{background:#C8372D}
+.kpis{display:flex;flex-direction:column;gap:6%}
+.kpi{border:1px solid #23395A;border-radius:3px;padding:7% 8%}
+.kpi small{color:#9AAABD;display:block;font-size:.9em}
+.kpi b{font-weight:500;font-size:2.2em;font-family:"JetBrains Mono",monospace;letter-spacing:-.02em}
+.kpi b em{font-style:normal;font-size:.45em;color:#9AAABD;margin-left:.3em}
+.bar{height:.5em;background:#23395A;border-radius:2px;margin-top:.5em;overflow:hidden}
+.bar i{display:block;height:100%;width:72%;background:#3B82C4}
+.tok{font-family:"JetBrains Mono",monospace;font-size:.85em;background:#FFF5DE;color:#7A4F12;padding:0 .4em;border-radius:3px}
+.namesw{display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--muted)}
+.props{border-left:1px solid var(--line);padding:12px 14px;font-size:13px;min-width:0}
+.props h3{font-size:14px}
+.pg{border-top:1px solid var(--line);padding:10px 0}
+.pg>label{display:block;color:var(--muted);font-size:12px;margin-bottom:4px}
+.pg .inp{padding:5px 8px;font-size:13px}
+.pg .line{display:flex;gap:6px;align-items:center;margin:5px 0}
+.pg .line .inp{flex:1}
+.cond{background:#F7F9FB;border:1px solid var(--line);border-radius:var(--r);padding:7px 8px;font-size:12.5px;margin-top:6px}
+.cond b{font-weight:500}
+.dot{width:10px;height:10px;border-radius:2px;display:inline-block;vertical-align:-1px}
+
+/* ===== Scène 5 : santé ===== */
+.health{display:grid;grid-template-columns:1fr 300px;gap:16px}
+.timeline{background:#fff;border:1px solid var(--line);border-radius:var(--r)}
+.tl{display:grid;grid-template-columns:110px 18px 1fr auto;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);align-items:start;font-size:13.5px}
+.tl:last-child{border-bottom:0}
+.tl .h{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--muted);padding-top:1px}
+.tl i{width:10px;height:10px;border-radius:50%;margin-top:5px;background:var(--ok)}
+.tl i.w{background:var(--warn)}.tl i.b{background:var(--bad)}
+.tl small{display:block;color:var(--muted)}
+.spark{display:flex;align-items:flex-end;gap:2px;height:44px;margin:8px 0 4px}
+.spark span{flex:1;background:#C9D9EC;border-radius:1px}
+.spark span.b{background:var(--bad)}
+.quota{margin:10px 0}
+.quota div{display:flex;justify-content:space-between;font-size:13px}
+.quota .bar2{height:6px;background:#E8EDF3;border-radius:3px;margin-top:4px;overflow:hidden}
+.quota .bar2 i{display:block;height:100%;background:var(--ink)}
+
+@media (max-width:1000px){
+  .flow{grid-template-columns:1fr}.col+.col::before{display:none}.col{padding:0 0 14px}
+  .arch-band,.words,.contract{grid-template-columns:1fr}
+  .app{grid-template-columns:1fr}.side{display:none}.main{padding:18px 16px 40px}
+  .db,.health{grid-template-columns:1fr}.db .l{border-right:0}
+  .ds-ed,.ed{grid-template-columns:1fr}.rail{display:none}
+  .types{grid-template-columns:1fr 1fr}.reach{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<div class="mock" id="mock">
+  <b>Maquette · Intégrations personnalisées</b>
+  <button class="sc on" data-go="0">0 · Architecture</button>
+  <button class="sc" data-go="1">1 · Sources de données</button>
+  <button class="sc" data-go="2">2 · Connexion</button>
+  <button class="sc" data-go="3">3 · Jeu de données</button>
+  <button class="sc" data-go="4">4 · Dans la composition</button>
+  <button class="sc" data-go="5">5 · Santé</button>
+</div>
+
+<!-- =================================================================== 0 · ARCHITECTURE -->
+<section class="scene on" data-scene="0">
+<div class="arch-wrap">
+  <h1>Comment les données voyagent</h1>
+  <p class="lead">Une source externe n'est jamais lue par l'écran. Le serveur Linkii la lit, la range dans une <b>table</b> au format unique, en garde une copie, puis l'écran reçoit seulement les lignes et colonnes que la composition utilise.</p>
+
+  <div class="flow">
+    <div class="col">
+      <div class="lab">Chez le client</div>
+      <h3>Sources</h3>
+      <div class="box"><b>API web</b><small>REST · JSON ou XML, SOAP, GraphQL</small></div>
+      <div class="box"><b>Base de données</b><small>SQL Server, PostgreSQL, MySQL, Oracle</small></div>
+      <div class="box"><b>Fichier</b><small>CSV, Excel, JSON : importé, par adresse, Drive, SFTP</small></div>
+      <div class="box"><b>Tableur en ligne</b><small>Google Sheets, Excel en ligne</small></div>
+      <div class="box"><b>Envoi direct</b><small>le système du client pousse ses données (webhook)</small></div>
+    </div>
+
+    <div class="col">
+      <div class="lab">Serveur Linkii</div>
+      <h3>Connecteurs</h3>
+      <div class="box key"><b>Un connecteur par type</b><small>Même contrat pour tous : tester, découvrir, lire</small></div>
+      <div class="box"><b>Connexion</b><small>adresse + identifiants, chiffrés (SecretBox), saisis une fois</small></div>
+      <div class="box relay"><b>Relais Linkii</b><small>petit service installé dans le réseau du client, pour une base non exposée. Connexion sortante uniquement, rien à ouvrir dans le pare-feu.</small></div>
+    </div>
+
+    <div class="col">
+      <div class="lab">Serveur Linkii</div>
+      <h3>Jeux de données</h3>
+      <div class="box key"><b>Requête → table</b><small>endpoint + chemin des lignes, requête SELECT, feuille du fichier</small>
+        <table class="tbl-mini"><tr><th>salle</th><th>statut</th><th>places</th></tr><tr><td>Léman</td><td>Libre</td><td>12</td></tr><tr><td>Jura</td><td>Occupée</td><td>8</td></tr></table>
+      </div>
+      <div class="box"><b>Colonnes typées</b><small>texte, nombre, date, image, oui/non, lien</small></div>
+      <div class="box"><b>Planificateur</b><small>actualise toutes les 1 min à 24 h, ou à chaque envoi direct</small></div>
+      <div class="box cache"><b>Dernière copie valable</b><small>gardée si la source tombe : les écrans ne voient jamais d'erreur</small></div>
+    </div>
+
+    <div class="col">
+      <div class="lab">Back-office</div>
+      <h3>Compositions</h3>
+      <div class="box"><b>Champ</b><small><span class="mono">{{Salles:statut}}</span> dans un texte</small></div>
+      <div class="box"><b>Liste reliée</b><small>un modèle de ligne répété, tri, filtre, pages qui défilent</small></div>
+      <div class="box"><b>Indicateur et graphique</b><small>somme, moyenne, nombre, barre de progression</small></div>
+      <div class="box"><b>Afficher si…</b><small>couleur, visibilité, image selon une valeur</small></div>
+      <div class="box"><b>Paramètres d'écran</b><small>le même modèle filtre sur l'étage, la zone ou le nom de l'écran</small></div>
+    </div>
+
+    <div class="col">
+      <div class="lab">Players</div>
+      <h3>Écrans</h3>
+      <div class="box"><b><span class="mono">/api/data/…</span></b><small>la route qui existe déjà : l'écran reçoit sa table filtrée</small></div>
+      <div class="box"><b>Mise à jour poussée</b><small>seulement quand les données changent (empreinte), sans recharger la composition</small></div>
+      <div class="box cache"><b>Hors ligne</b><small>le player garde la dernière table et l'affiche avec son heure</small></div>
+    </div>
+  </div>
+
+  <h2 style="margin-top:34px">Trois mots pour l'utilisateur</h2>
+  <div class="words">
+    <div class="word"><div class="n"><span>1</span> Connexion</div><p>« Où sont les données et comment y entrer. » Une adresse, une clé, un mot de passe. Partagée par tous les jeux de données de ce système.</p></div>
+    <div class="word"><div class="n"><span>2</span> Jeu de données</div><p>« Quelles données je veux. » Une requête qui donne toujours une table propre, avec un aperçu et une fréquence d'actualisation.</p></div>
+    <div class="word"><div class="n"><span>3</span> Liaison</div><p>« Où je les montre. » Un champ, une liste ou un indicateur dans une composition, glissé depuis le panneau Données.</p></div>
+  </div>
+
+  <div class="arch-band">
+    <div class="card"><h3>Reste sur le serveur</h3><ul>
+      <li><b>Identifiants</b> chiffrés, jamais envoyés à l'écran ni au navigateur</li>
+      <li><b>Requêtes</b> et adresses des systèmes</li>
+      <li><b>Historique</b> des lectures, erreurs, durées</li>
+    </ul></div>
+    <div class="card"><h3>Part vers l'écran</h3><ul>
+      <li>Uniquement les <b>colonnes utilisées</b> par la composition</li>
+      <li>Les lignes <b>déjà filtrées</b> pour cet écran</li>
+      <li>L'heure de la lecture, pour l'affichage hors ligne</li>
+    </ul></div>
+    <div class="card"><h3>Ce qui protège</h3><ul>
+      <li><b>Lecture seule</b> : SELECT seulement, compte en lecture conseillé</li>
+      <li>Délai max 10 s, <b>5 000 lignes</b> et 2 Mo par jeu</li>
+      <li>Adresses internes de Linkii refusées (SafeHttp)</li>
+    </ul></div>
+  </div>
+
+  <div class="contract">
+    <div>
+      <h2 style="margin-top:0">Le contrat d'un connecteur</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Ajouter un type de source (OData, MQTT, ERP…) revient à écrire un connecteur. Le reste (planification, copie, éditeur, écrans) ne change pas. Les intégrations actuelles (météo, RSS, capteurs) deviennent des jeux de données comme les autres.</p>
+<div class="code"><span class="k">IConnector</span>
+  Test(connexion)            <span class="c">→ « Connexion réussie » ou erreur</span>
+  Discover(connexion)        <span class="c">→ endpoints, tables, feuilles</span>
+  Read(connexion, requête)   <span class="c">→ Table</span>
+
+<span class="k">Table</span>  <span class="c">// format unique, quel que soit le type</span>
+  columns : [{ key, label, type }]
+  rows    : [[…], […]]
+  readAt, hash, source</div>
+    </div>
+    <div>
+      <h2 style="margin-top:0">Ce que reçoit l'écran</h2>
+      <p class="muted" style="margin-top:0;font-size:13px">Déjà filtré (étage 2), trié, réduit aux trois colonnes utilisées. Le player ne connaît ni la base ni la requête.</p>
+<div class="code">{
+  <span class="k">"columns"</span>: [<span class="s">"salle"</span>, <span class="s">"statut"</span>, <span class="s">"prochaine"</span>],
+  <span class="k">"rows"</span>: [
+    [<span class="s">"Léman"</span>, <span class="s">"Libre"</span>,   <span class="s">"14:00"</span>],
+    [<span class="s">"Jura"</span>,  <span class="s">"Occupée"</span>, <span class="s">"15:30"</span>]
+  ],
+  <span class="k">"readAt"</span>: <span class="s">"2026-10-29T13:42:05Z"</span>,
+  <span class="k">"hash"</span>: <span class="s">"9c1e…"</span>
+}</div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- cadre commun des scènes 1 à 5 -->
+<template id="sidebar">
+  <aside class="side">
+    <div class="logo">linki<i>i</i></div>
+    <nav class="nav">
+      <a><span></span>Écrans</a><a><span></span>Listes de lecture</a><a><span></span>Médiathèque</a><a><span></span>Compositions</a><a><span></span>Planning</a>
+      <div class="grp">Organisation</div>
+      <a class="on"><span></span>Intégrations</a><a><span></span>Membres</a><a><span></span>Réglages</a>
+    </nav>
+  </aside>
+</template>
+
+<!-- =================================================================== 1 · PAGE SOURCES -->
+<section class="scene" data-scene="1">
+<div class="app"><div data-side></div>
+<main class="main">
+  <div class="head">
+    <div><h1>Intégrations</h1><p>Les services prêts à l'emploi et vos propres sources de données.</p></div>
+    <div class="acts"><button class="btn" data-go="2">+ Connecter une source</button></div>
+  </div>
+  <div class="tabs"><a>Mes intégrations</a><a>Store</a><a class="on">Sources de données <span class="pill plan" style="margin-left:4px">Enterprise</span></a></div>
+
+  <h2 style="margin-top:0">Connexions</h2>
+  <div class="src-grid">
+    <div class="card src">
+      <div class="top"><div class="ico" style="background:#5A6B80">SQL</div><div><b>Base des salles</b><small>SQL Server · par le relais SRV-01</small></div></div>
+      <div><span class="pill ok"><i></i>Connectée</span></div>
+      <div class="ds"><div>Occupation des salles <span>il y a 40 s</span></div><div>Réservations du jour <span>il y a 2 min</span></div></div>
+    </div>
+    <div class="card src">
+      <div class="top"><div class="ico" style="background:#3A9399">{ }</div><div><b>API des indicateurs</b><small>REST · clé API</small></div></div>
+      <div><span class="pill ok"><i></i>Connectée</span></div>
+      <div class="ds"><div>Indicateurs du jour <span>il y a 1 min</span></div></div>
+    </div>
+    <div class="card src">
+      <div class="top"><div class="ico" style="background:#2FA66A">CSV</div><div><b>Annonces internes</b><small>Fichier CSV · dossier OneDrive</small></div></div>
+      <div><span class="pill warn"><i></i>Colonne « date » absente</span></div>
+      <div class="ds"><div>Annonces <span>copie de 08:00 conservée</span></div></div>
+    </div>
+    <div class="card src">
+      <div class="top"><div class="ico" style="background:#F2541B">→</div><div><b>Envoi direct</b><small>Webhook · le système pousse</small></div></div>
+      <div><span class="pill ok"><i></i>Dernier envoi 13:38</span></div>
+      <div class="ds"><div>File d'attente <span>reçu il y a 4 min</span></div></div>
+    </div>
+    <div class="card src new" data-go="2" style="cursor:pointer"><div class="plus">+</div><b>Connecter une source</b><span style="font-size:13px">API, base de données, fichier, tableur ou envoi direct.</span></div>
+  </div>
+
+  <h2>Jeux de données</h2>
+  <table class="dslist">
+    <tr><th>Nom</th><th>Connexion</th><th>Lignes</th><th>Actualisation</th><th>Utilisé par</th><th>État</th></tr>
+    <tr><td><b>Occupation des salles</b></td><td class="muted">Base des salles</td><td class="mono">14</td><td>toutes les minutes</td><td>3 compositions · 9 écrans</td><td><span class="pill ok"><i></i>il y a 40 s</span></td></tr>
+    <tr><td><b>Réservations du jour</b></td><td class="muted">Base des salles</td><td class="mono">62</td><td>toutes les 5 min</td><td>1 composition</td><td><span class="pill ok"><i></i>il y a 2 min</span></td></tr>
+    <tr><td><b>Indicateurs du jour</b></td><td class="muted">API des indicateurs</td><td class="mono">1</td><td>toutes les minutes</td><td>2 compositions</td><td><span class="pill ok"><i></i>il y a 1 min</span></td></tr>
+    <tr><td><b>Annonces</b></td><td class="muted">Annonces internes</td><td class="mono">8</td><td>à chaque modification du fichier</td><td>1 liste de lecture</td><td><span class="pill warn"><i></i>Copie de 08:00</span></td></tr>
+    <tr><td><b>File d'attente</b></td><td class="muted">Envoi direct</td><td class="mono">5</td><td>à chaque envoi</td><td>Mur de l'accueil</td><td><span class="pill ok"><i></i>il y a 4 min</span></td></tr>
+  </table>
+  <p class="note" style="margin-top:16px"><b>Pourquoi deux niveaux ?</b> Une même connexion sert souvent plusieurs tableaux (salles, réservations…). Le mot de passe se change à un seul endroit ; chaque jeu de données garde sa propre fréquence et son propre état.</p>
+</main></div>
+</section>
+
+<!-- =================================================================== 2 · CONNEXION -->
+<section class="scene" data-scene="2">
+<div class="app"><div data-side></div>
+<main class="main">
+  <div class="drawer">
+    <div class="dh"><div class="ico" style="background:#5A6B80">+</div><div><h3>Connecter une source</h3><small>Rien n'est enregistré avant la dernière étape.</small></div><button class="x">×</button></div>
+    <div class="steps"><span class="on"><em>1</em>Connexion</span><span><em>2</em>Jeu de données</span><span><em>3</em>Actualisation</span></div>
+    <div class="db">
+      <div class="l">
+        <div class="types">
+          <button class="type" data-ty="api"><b>API web</b><small>REST, SOAP, GraphQL</small></button>
+          <button class="type on" data-ty="db"><b>Base de données</b><small>SQL Server, PostgreSQL…</small></button>
+          <button class="type" data-ty="file"><b>Fichier</b><small>CSV, Excel, JSON</small></button>
+          <button class="type" data-ty="push"><b>Envoi direct</b><small>Votre système pousse</small></button>
+        </div>
+
+        <!-- API -->
+        <div class="sub-ty" data-sub="api">
+          <div class="fld"><label>Nom de la connexion</label><input class="inp" value="API des indicateurs"></div>
+          <div class="fld"><label>Adresse de base</label><input class="inp mono" value="https://api.exemple.ch/v2"></div>
+          <div class="fld"><label>Description de l'API (facultatif)</label><input class="inp mono" value="https://api.exemple.ch/v2/openapi.json"><div class="okline"><i></i>18 endpoints proposés à l'étape suivante</div></div>
+          <div class="fld"><label>Authentification</label>
+            <div class="seg"><button>Aucune</button><button class="on">Clé API</button><button>Bearer</button><button>Basic</button><button>OAuth 2</button></div></div>
+          <div class="row2"><div class="fld"><label>En-tête</label><input class="inp mono" value="X-Api-Key"></div><div class="fld"><label>Clé</label><input class="inp" type="password" value="xxxxxxxxxxxx"></div></div>
+        </div>
+
+        <!-- Base de données -->
+        <div class="sub-ty on" data-sub="db">
+          <div class="row2"><div class="fld"><label>Nom de la connexion</label><input class="inp" value="Base des salles"></div>
+          <div class="fld"><label>Moteur</label><select class="inp"><option>SQL Server</option><option>PostgreSQL</option><option>MySQL / MariaDB</option><option>Oracle</option></select></div></div>
+          <div class="fld"><label>Comment Linkii atteint la base ?</label>
+            <div class="reach">
+              <div class="opt"><b>Directement</b><small>La base est joignable depuis Internet ; l'adresse IP de Linkii est autorisée.</small></div>
+              <div class="opt on"><b>Par le relais Linkii</b><small>La base reste dans votre réseau. Un petit service sur un PC ou serveur la lit pour Linkii.</small></div>
+            </div>
+            <div class="relaybox"><span class="pill ok"><i></i>SRV-01 en ligne</span><span>Relais installé le 12 oct. · version 1.2</span><a style="margin-left:auto;color:var(--signal)">Installer un autre relais</a></div>
+          </div>
+          <div class="row3"><div class="fld"><label>Serveur (vu depuis le relais)</label><input class="inp mono" value="sql-salles.local"></div><div class="fld"><label>Port</label><input class="inp mono" value="1433"></div><div class="fld"><label>Base</label><input class="inp mono" value="Salles"></div></div>
+          <div class="row2"><div class="fld"><label>Utilisateur</label><input class="inp mono" value="linkii_lecture"></div><div class="fld"><label>Mot de passe</label><input class="inp" type="password" value="xxxxxxxxxx"></div></div>
+          <button class="btn ghost sm">Tester la connexion</button>
+          <div class="okline"><i></i>Connexion réussie · 23 tables et vues · l'utilisateur ne peut que lire</div>
+        </div>
+
+        <!-- Fichier -->
+        <div class="sub-ty" data-sub="file">
+          <div class="fld"><label>Nom de la connexion</label><input class="inp" value="Annonces internes"></div>
+          <div class="fld"><label>Où est le fichier ?</label>
+            <div class="seg"><button>Importer</button><button>Adresse web</button><button class="on">Drive connecté</button><button>SFTP</button></div></div>
+          <div class="fld"><label>Fichier</label><input class="inp" value="OneDrive › Communication › annonces.csv"><div class="okline"><i></i>Surveillé : relu dès qu'il change</div></div>
+          <div class="row3"><div class="fld"><label>Séparateur</label><select class="inp"><option>Détecté : point-virgule</option></select></div><div class="fld"><label>Encodage</label><select class="inp"><option>UTF-8</option></select></div><div class="fld"><label>1re ligne</label><select class="inp"><option>Titres</option></select></div></div>
+        </div>
+
+        <!-- Envoi direct -->
+        <div class="sub-ty" data-sub="push">
+          <div class="fld"><label>Nom de la connexion</label><input class="inp" value="File d'attente"></div>
+          <div class="fld"><label>Adresse à donner à votre système</label><input class="inp mono" value="https://linkii.duckdns.org/hook/7f3a…c21" readonly></div>
+          <div class="fld"><label>Jeton (en-tête Authorization)</label><div style="display:flex;gap:8px"><input class="inp mono" value="lk_push_••••••••••••" readonly><button class="btn ghost sm">Copier</button><button class="btn ghost sm">Renouveler</button></div></div>
+          <p class="note">Votre système envoie un <b>POST</b> en JSON ou CSV à chaque changement. Linkii répond en moins d'une seconde, les écrans sont mis à jour aussitôt. En attente du premier envoi…</p>
+        </div>
+      </div>
+
+      <div class="r">
+        <h3>Une connexion, plusieurs jeux de données</h3>
+        <p class="muted" style="font-size:13px;margin:0 0 14px">Vous donnez l'accès une seule fois. Ensuite vous créez autant de jeux de données (tables, requêtes, endpoints) que nécessaire.</p>
+        <h3>Vos identifiants</h3>
+        <p class="muted" style="font-size:13px;margin:0 0 14px">Chiffrés sur le serveur. Ils ne sont jamais envoyés aux écrans, ni réaffichés ici.</p>
+        <h3>Lecture seule</h3>
+        <p class="muted" style="font-size:13px;margin:0 0 14px">Linkii ne fait que lire. Pour une base, créez un utilisateur qui n'a que le droit de lecture : le test le vérifie.</p>
+        <h3>Le relais</h3>
+        <p class="muted" style="font-size:13px;margin:0">Un service Windows ou Linux de quelques Mo, qui appelle Linkii (sortant, HTTPS). Aucun port à ouvrir. Un relais sert plusieurs bases.</p>
+      </div>
+    </div>
+    <div class="df"><span class="muted">Étape 1 sur 3</span><button class="btn" data-go="3">Continuer</button></div>
+  </div>
+</main></div>
+</section>
+
+<!-- =================================================================== 3 · JEU DE DONNÉES -->
+<section class="scene" data-scene="3">
+<div class="app"><div data-side></div>
+<main class="main">
+  <div class="head">
+    <div><h1>Occupation des salles</h1><p>Jeu de données · Base des salles (SQL Server)</p></div>
+    <div class="acts"><button class="btn ghost">Annuler</button><button class="btn">Enregistrer</button></div>
+  </div>
+  <div class="ds-ed">
+    <div class="q">
+      <h3>Ce que je lis</h3>
+      <div class="seg" style="margin-bottom:10px"><button class="on">Choisir une table</button><button>Écrire une requête</button></div>
+      <div class="fld"><label>Table ou vue</label><select class="inp"><option>dbo.v_occupation_salles</option></select></div>
+      <p class="muted" style="font-size:12.5px;margin:-6px 0 10px">Requête générée (modifiable avec « Écrire une requête ») :</p>
+<div class="sql"><span class="k">SELECT</span> salle, etage, statut,
+       prochaine_reunion, places, photo
+<span class="k">FROM</span>   dbo.v_occupation_salles
+<span class="k">WHERE</span>  etage = <span class="p">@etage</span>
+<span class="k">ORDER BY</span> salle</div>
+      <div class="params">
+        <h3 style="margin-top:4px">Paramètres</h3>
+        <div><code>@etage</code> = <select class="inp" style="width:auto;padding:3px 6px"><option>Paramètre de l'écran « Étage »</option><option>Valeur fixe</option><option>Zone de l'écran</option><option>Date du jour</option></select></div>
+        <p class="muted" style="font-size:12.5px;margin:4px 0 0">Chaque écran reçoit seulement ses lignes. Un seul jeu de données pour tous les étages.</p>
+        <p class="muted" style="font-size:12.5px;margin:8px 0 0">Aperçu avec <b style="font-weight:500;color:var(--ink)">Étage = 2</b> <a style="color:var(--signal)">changer</a></p>
+      </div>
+    </div>
+
+    <div>
+      <div class="prev-h"><h3 style="margin:0">Aperçu</h3><span class="muted">6 lignes · lu en 180 ms</span><button class="btn ghost sm" style="margin-left:auto">Relire</button></div>
+      <table class="grid">
+        <tr>
+          <th><b>salle</b><select><option>Texte</option></select></th>
+          <th><b>etage</b><select><option>Nombre</option></select></th>
+          <th><b>statut</b><select><option>Texte</option></select></th>
+          <th><b>prochaine_reunion</b><select><option>Date et heure</option></select></th>
+          <th><b>places</b><select><option>Nombre</option></select></th>
+          <th><b>photo</b><select><option>Image (adresse)</option></select></th>
+        </tr>
+        <tr><td>Léman</td><td class="n">2</td><td>Libre</td><td>14:00</td><td class="n">12</td><td><div class="th-img"></div></td></tr>
+        <tr><td>Jura</td><td class="n">2</td><td>Occupée</td><td>15:30</td><td class="n">8</td><td><div class="th-img"></div></td></tr>
+        <tr><td>Salève</td><td class="n">2</td><td>Libre</td><td>16:00</td><td class="n">20</td><td><div class="th-img"></div></td></tr>
+        <tr><td>Rhône</td><td class="n">2</td><td>Occupée</td><td>13:55</td><td class="n">6</td><td><div class="th-img"></div></td></tr>
+        <tr><td>Aar</td><td class="n">2</td><td>Libre</td><td>—</td><td class="n">4</td><td><div class="th-img"></div></td></tr>
+        <tr class="off"><td>Archives</td><td class="n">2</td><td>Fermée</td><td>—</td><td class="n">0</td><td>—</td></tr>
+      </table>
+      <p class="note" style="margin-top:14px"><b>Types détectés automatiquement</b>, modifiables. Ils servent à l'éditeur : une colonne « Date et heure » se met en forme (14:00, demain, dans 5 min), une colonne « Image » remplit un emplacement d'image.</p>
+      <p class="note" style="margin-top:8px"><b>Pour une API</b> on choisit l'endpoint et « où sont les lignes » dans la réponse (<span class="mono">data.items[*]</span>), en cliquant dans l'arbre JSON. <b>Pour un fichier</b>, la feuille et la ligne des titres.</p>
+    </div>
+
+    <div class="opts">
+      <div class="opt-g"><h3>Actualisation</h3>
+        <select class="inp"><option>Toutes les minutes</option><option>Toutes les 5 min</option><option>Toutes les heures</option><option>Une fois par jour à…</option></select>
+        <div class="chk"><span class="sw off"></span><span>Seulement pendant les heures d'ouverture des écrans</span></div>
+      </div>
+      <div class="opt-g"><h3>Lignes</h3>
+        <div class="chk"><input type="checkbox" checked><span>Masquer les lignes où <b style="font-weight:500">statut = Fermée</b></span></div>
+        <div class="chk"><input type="checkbox"><span>Garder au plus <span class="mono">100</span> lignes</span></div>
+      </div>
+      <div class="opt-g"><h3>Si la source ne répond pas</h3>
+        <div class="chk"><input type="radio" checked name="f"><span>Garder la dernière copie (recommandé)</span></div>
+        <div class="chk"><input type="radio" name="f"><span>Après <span class="mono">2 h</span>, afficher « Données indisponibles »</span></div>
+      </div>
+      <div class="opt-g"><h3>Colonnes envoyées aux écrans</h3>
+        <p class="muted" style="font-size:12.5px;margin:0">Automatique : seulement celles utilisées dans les compositions (aujourd'hui <b style="font-weight:500;color:var(--ink)">salle, statut, prochaine_reunion</b>).</p>
+      </div>
+      <div class="opt-g"><h3>Clé de ligne</h3>
+        <select class="inp"><option>salle</option></select>
+        <p class="muted" style="font-size:12.5px;margin:4px 0 0">Permet d'animer seulement la ligne qui change, sans clignoter toute la liste.</p>
+      </div>
+    </div>
+  </div>
+</main></div>
+</section>
+
+<!-- =================================================================== 4 · ÉDITEUR -->
+<section class="scene" data-scene="4">
+<div class="app"><div data-side></div>
+<main class="main">
+  <div class="head">
+    <div><h1>Salles · étage</h1><p>Composition · un seul modèle pour les écrans de tous les étages</p></div>
+    <div class="acts"><button class="btn ghost">Simuler</button><button class="btn">Enregistrer</button></div>
+  </div>
+  <div class="ed">
+    <div class="rail"><span>Texte</span><span>Formes</span><span>Images</span><span>Apps</span><span class="on">Données</span><span>Calques</span></div>
+
+    <div class="dpanel">
+      <h3>Données <a style="color:var(--signal);font-weight:400;font-size:12.5px">+ Jeu de données</a></h3>
+      <p class="hint">Glissez une colonne sur la page : un champ. Glissez le titre du jeu : une liste.</p>
+      <div class="dset">
+        <div class="t"><span class="ico" style="width:20px;height:20px;font-size:8px;background:#5A6B80">SQL</span><b>Occupation des salles</b><small>40 s</small></div>
+        <div class="cols">
+          <div class="colchip"><em>Aa</em>salle<span>Léman</span></div>
+          <div class="colchip"><em>Aa</em>statut<span>Libre</span></div>
+          <div class="colchip"><em>◷</em>prochaine_reunion<span>14:00</span></div>
+          <div class="colchip"><em>12</em>places<span>12</span></div>
+          <div class="colchip"><em>▣</em>photo<span>image</span></div>
+          <div class="colchip" style="border-top:1px solid var(--line);margin-top:3px;padding-top:6px"><em>Σ</em>Nombre de lignes<span>5</span></div>
+        </div>
+      </div>
+      <div class="dset">
+        <div class="t"><span class="ico" style="width:20px;height:20px;font-size:8px;background:#3A9399">{ }</span><b>Indicateurs du jour</b><small>1 min</small></div>
+        <div class="cols">
+          <div class="colchip"><em>12</em>visiteurs<span>1 284</span></div>
+          <div class="colchip"><em>12</em>objectif<span>1 800</span></div>
+          <div class="colchip"><em>%</em>taux_occupation<span>72</span></div>
+        </div>
+      </div>
+      <div class="dset">
+        <div class="t"><span class="ico" style="width:20px;height:20px;font-size:8px;background:#0B1F3A">⌂</span><b>Cet écran</b><small>fixe</small></div>
+        <div class="cols">
+          <div class="colchip"><em>Aa</em>Nom<span>Hall étage 2</span></div>
+          <div class="colchip"><em>12</em>Étage<span>2</span></div>
+          <div class="colchip"><em>Aa</em>Zone<span>Bâtiment A</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="cv-wrap"><div class="canvas">
+        <div class="cv-title"><b>Salles · étage <span class="tok">2</span></b><span>13:42</span></div>
+        <div class="rep">
+          <span class="badge">Liste reliée · Occupation des salles</span>
+          <div class="rrow"><div><b>Léman</b><small>12 places</small></div><span class="t">14:00</span><span class="st-pill free">Libre</span></div>
+          <div class="rrow"><div><b>Jura</b><small>8 places</small></div><span class="t">15:30</span><span class="st-pill busy">Occupée</span></div>
+          <div class="rrow"><div><b>Salève</b><small>20 places</small></div><span class="t">16:00</span><span class="st-pill free">Libre</span></div>
+          <div class="rrow"><div><b>Rhône</b><small>6 places</small></div><span class="t">13:55</span><span class="st-pill busy">Occupée</span></div>
+          <div style="color:#9AAABD;font-size:.85em;padding-top:.5em">Page 1 / 2</div>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><small>Visiteurs aujourd'hui</small><b>1 284<em>/ 1 800</em></b><div class="bar"><i></i></div></div>
+          <div class="kpi"><small>Salles libres</small><b>3<em>sur 5</em></b></div>
+        </div>
+      </div></div>
+      <div class="namesw"><span class="sw off"></span> Noms des champs <span style="margin-left:14px">Aperçu avec :</span> <select class="inp" style="width:auto;padding:2px 6px;font-size:12.5px"><option>Hall étage 2</option><option>Hall étage 3</option></select></div>
+    </div>
+
+    <div class="props">
+      <h3>Liste reliée</h3>
+      <div class="pg"><label>Jeu de données</label><select class="inp"><option>Occupation des salles</option></select></div>
+      <div class="pg"><label>Lignes</label>
+        <div class="line"><span>Trier par</span><select class="inp"><option>prochaine_reunion ↑</option></select></div>
+        <div class="line"><span>Afficher</span><input class="inp mono" value="5" style="max-width:52px"><span>lignes à la fois</span></div>
+        <div class="line"><span>S'il y en a plus</span><select class="inp"><option>Pages toutes les 8 s</option><option>Défilement continu</option><option>Couper</option></select></div>
+      </div>
+      <div class="pg"><label>Filtre</label>
+        <div class="cond">etage <b>=</b> <span class="tok" style="font-size:11.5px">Cet écran · Étage</span></div>
+      </div>
+      <div class="pg"><label>Modèle de ligne</label>
+        <p class="muted" style="margin:0;font-size:12.5px">La première ligne (pointillés) se modifie comme le reste de la page ; les autres la répètent.</p>
+      </div>
+      <div class="pg"><label>Afficher si… · pastille « statut »</label>
+        <div class="cond"><span class="dot" style="background:#C8372D"></span> si statut <b>=</b> Occupée</div>
+        <div class="cond"><span class="dot" style="background:#1E8E5A"></span> sinon</div>
+      </div>
+      <div class="pg"><label>Si la liste est vide</label><input class="inp" value="Aucune salle à cet étage"></div>
+    </div>
+  </div>
+</main></div>
+</section>
+
+<!-- =================================================================== 5 · SANTÉ -->
+<section class="scene" data-scene="5">
+<div class="app"><div data-side></div>
+<main class="main">
+  <div class="head">
+    <div><h1>Annonces</h1><p>Jeu de données · Annonces internes (CSV sur OneDrive)</p></div>
+    <div class="acts"><button class="btn ghost">Modifier</button><button class="btn">Relire maintenant</button></div>
+  </div>
+  <div class="tabs"><a>Aperçu</a><a>Utilisé par</a><a class="on">Historique</a></div>
+  <div class="health">
+    <div class="timeline">
+      <div class="tl"><span class="h">aujourd'hui 13:40</span><i class="w"></i><div><b style="font-weight:500">Lu, mais une colonne manque</b><small>La colonne « date » n'existe plus dans le fichier. Les écrans gardent la copie de 08:00. 2 compositions utilisent cette colonne.</small></div><button class="btn ghost sm">Voir</button></div>
+      <div class="tl"><span class="h">aujourd'hui 11:02</span><i class="b"></i><div><b style="font-weight:500">Fichier introuvable</b><small>OneDrive a répondu 404 (fichier renommé ?). Copie conservée.</small></div><span></span></div>
+      <div class="tl"><span class="h">aujourd'hui 08:00</span><i></i><div><b style="font-weight:500">8 lignes · 2 modifiées</b><small>Lu en 410 ms · envoyé à 4 écrans</small></div><span></span></div>
+      <div class="tl"><span class="h">hier 17:12</span><i></i><div><b style="font-weight:500">7 lignes · 1 ajoutée</b><small>Lu en 380 ms · envoyé à 4 écrans</small></div><span></span></div>
+      <div class="tl"><span class="h">hier 09:30</span><i></i><div><b style="font-weight:500">Inchangé</b><small>Rien envoyé aux écrans</small></div><span></span></div>
+    </div>
+    <div>
+      <div class="card" style="padding:14px 16px;margin-bottom:14px">
+        <h3>Ce que voient les écrans</h3>
+        <p style="margin:0 0 6px"><span class="pill warn"><i></i>Copie de 08:00</span></p>
+        <p class="muted" style="font-size:13px;margin:0">Rien ne casse à l'écran : la dernière copie valable reste affichée jusqu'à la prochaine lecture réussie.</p>
+      </div>
+      <div class="card" style="padding:14px 16px;margin-bottom:14px">
+        <h3>Lectures des 7 derniers jours</h3>
+        <div class="spark"><span style="height:60%"></span><span style="height:70%"></span><span style="height:55%"></span><span style="height:80%"></span><span style="height:65%"></span><span style="height:75%"></span><span class="b" style="height:30%"></span><span style="height:70%"></span><span style="height:60%"></span><span style="height:85%"></span><span style="height:50%"></span><span class="b" style="height:40%"></span><span style="height:68%"></span><span style="height:72%"></span></div>
+        <p class="muted" style="font-size:12.5px;margin:0">98,6 % réussies · durée moyenne 390 ms</p>
+      </div>
+      <div class="card" style="padding:14px 16px;margin-bottom:14px">
+        <h3>Prévenir</h3>
+        <div class="chk"><span class="sw"></span><span>Alerte si la source échoue plus de <span class="mono">30 min</span> (Alertes globales)</span></div>
+      </div>
+      <div class="card" style="padding:14px 16px">
+        <h3>Utilisation du plan</h3>
+        <div class="quota"><div><span>Jeux de données</span><span class="mono">5 / 25</span></div><div class="bar2"><i style="width:20%"></i></div></div>
+        <div class="quota"><div><span>Lectures aujourd'hui</span><span class="mono">2 140 / 50 000</span></div><div class="bar2"><i style="width:5%"></i></div></div>
+        <div class="quota"><div><span>Relais</span><span class="mono">1 / 3</span></div><div class="bar2"><i style="width:33%"></i></div></div>
+      </div>
+    </div>
+  </div>
+</main></div>
+</section>
+
+<script>
+// Maquette seulement : changer de scène, de type de source.
+const side = document.getElementById('sidebar').content;
+document.querySelectorAll('[data-side]').forEach(n => n.replaceWith(side.cloneNode(true)));
+function go(i) {
+  document.querySelectorAll('.scene').forEach(s => s.classList.toggle('on', s.dataset.scene == i));
+  document.querySelectorAll('.mock .sc').forEach(b => b.classList.toggle('on', b.dataset.go == i));
+  window.scrollTo(0, 0);
+}
+document.addEventListener('click', e => {
+  const g = e.target.closest('[data-go]'); if (g) go(g.dataset.go);
+  const t = e.target.closest('[data-ty]');
+  if (t) {
+    document.querySelectorAll('[data-ty]').forEach(b => b.classList.toggle('on', b === t));
+    document.querySelectorAll('[data-sub]').forEach(s => s.classList.toggle('on', s.dataset.sub === t.dataset.ty));
+  }
+  const s = e.target.closest('.seg button'); if (s) s.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === s));
+  const o = e.target.closest('.reach .opt'); if (o) o.parentNode.querySelectorAll('.opt').forEach(b => b.classList.toggle('on', b === o));
+});
+</script>
+</body>
+</html>

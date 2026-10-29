@@ -1,0 +1,347 @@
+@inject TenantStore Store
+@inject DataSetService Data
+@inject RelayBroker Relays
+@inject SecretBox Box
+@inject Toaster Toast
+
+@* Connexion d'une intégration personnalisée (§139, maquette scène 2) : API web (adresse, authentification), base de données (lot 3 : moteur, serveur,
+   base, utilisateur) ou fichier (importé ou lu à une adresse). Une source du réseau interne passe par un relais Linkii (lot 4).
+   « Tester » lit la source sans rien enregistrer ; « Enregistrer » teste aussi, et garde la connexion même si le test échoue (l'erreur est affichée).
+   Le secret saisi est chiffré aussitôt (SecretBox) et jamais réaffiché : un champ vide garde l'ancien. *@
+<div class="modal-backdrop" @onclick="Close"></div>
+<div class="modal app-modal as-drawer dsx-dlg" role="dialog" aria-modal="true" aria-labelledby="dsc-title">
+    <div class="modal-head">
+        <span class="dsx-ico @kind">@(kind == DataKinds.Api ? "{ }" : kind == DataKinds.Db ? "SQL" : "CSV")</span>
+        <div class="grow">
+            <h3 id="dsc-title">@(isNew ? "Connecter une source" : C.Name)</h3>
+            <small>@(isNew ? "Rien n'est enregistré avant « Enregistrer »." : kind == DataKinds.Api ? "API web" : kind == DataKinds.Db ? "Base de données" : "Fichier")</small>
+        </div>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="modal-body">
+        <div class="dsx-cols">
+            <div class="dw">
+                @if (isNew)
+                {
+                    <div class="dsx-types" role="radiogroup" aria-label="Type de source">
+                        <button type="button" role="radio" aria-checked="@(kind == DataKinds.Api ? "true" : "false")" class="dsx-type @(kind == DataKinds.Api ? "on" : "")" @onclick="() => SetKind(DataKinds.Api)"><b>API web</b><small>JSON ou CSV sur HTTP</small></button>
+                        <button type="button" role="radio" aria-checked="@(kind == DataKinds.Db ? "true" : "false")" class="dsx-type @(kind == DataKinds.Db ? "on" : "")" @onclick="() => SetKind(DataKinds.Db)"><b>Base de données</b><small>SQL Server, PostgreSQL, MySQL</small></button>
+                        <button type="button" role="radio" aria-checked="@(kind == DataKinds.File ? "true" : "false")" class="dsx-type @(kind == DataKinds.File ? "on" : "")" @onclick="() => SetKind(DataKinds.File)"><b>Fichier</b><small>CSV, JSON, Excel</small></button>
+                    </div>
+                }
+                <div class="dw-field"><label for="dsc-name">Nom de la connexion</label><input id="dsc-name" type="text" @bind="C.Name" maxlength="80" placeholder="@(kind == DataKinds.Api ? "API des indicateurs" : kind == DataKinds.Db ? "Base des salles" : "Annonces internes")" /></div>
+
+                @if (kind != DataKinds.File || C.FileMode == "url")
+                {
+                    <div class="dw-field"><label>Comment Linkii atteint @(kind == DataKinds.Db ? "la base" : kind == DataKinds.Api ? "l'API" : "le fichier") ?</label>
+                        <div class="dsx-reach">
+                            <button type="button" class="dsx-type @(C.Via != "relay" ? "on" : "")" aria-pressed="@(C.Via != "relay" ? "true" : "false")" @onclick='() => { C.Via = "direct"; C.DbWindows = false; }'><b>Directement</b><small>@(kind == DataKinds.Db ? "La base est joignable depuis internet ; l'adresse IP de Linkii y est autorisée." : "L'adresse est publique, joignable depuis internet.")</small></button>
+                            <button type="button" class="dsx-type @(C.Via == "relay" ? "on" : "")" aria-pressed="@(C.Via == "relay" ? "true" : "false")" @onclick="UseRelay"><b>Par le relais Linkii</b><small>La source reste dans votre réseau ; un relais installé chez vous la lit pour Linkii.</small></button>
+                        </div>
+                        @if (C.Via == "relay")
+                        {
+                            @if (relays.Count == 0)
+                            {
+                                <div class="dsx-relaybox"><span class="grow">Aucun relais installé.</span><button type="button" class="btn ghost sm" @onclick="() => relayOpen = true">Installer un relais</button></div>
+                            }
+                            else
+                            {
+                                <div class="dsx-relaybox">
+                                    <select aria-label="Relais" @bind="RelayPick">@foreach (var x in relays) { <option value="@x.Id">@x.Name@(Relays.Online(x.Id) ? " · en ligne" : x.TokenHash.Length == 0 ? " · en attente" : " · hors ligne")</option> }</select>
+                                    @if (C.RelayId is { } rid) { @DataSourcesTab.StatePill(Relays.Online(rid) ? "ok" : "bad", Relays.Online(rid) ? "En ligne" : "Hors ligne") }
+                                    <button type="button" class="dsx-link" @onclick="() => relayOpen = true">Installer un autre relais</button>
+                                </div>
+                            }
+                        }
+                    </div>
+                }
+
+                @if (kind == DataKinds.Db)
+                {
+                    <div class="dw-field"><label for="dsc-eng">Moteur</label>
+                        <select id="dsc-eng" value="@C.Engine" @onchange="e => SetEngine(e.Value?.ToString())">@foreach (var (id, label, _) in DataSql.Engines) { <option value="@id">@label</option> }</select>
+                    </div>
+                    <div class="dsx-row3">
+                        <div class="dw-field"><label for="dsc-host">Serveur@(C.Via == "relay" ? " (vu depuis le relais)" : "")</label><input id="dsc-host" type="text" class="mono" @bind="C.Host" spellcheck="false" placeholder="@(C.Engine == DataSql.SqlServer ? "sql-salles.local ou srv\\SQLEXPRESS" : "db.exemple.ch")" /></div>
+                        <div class="dw-field"><label for="dsc-port">Port</label><input id="dsc-port" type="number" class="mono" min="0" max="65535" @bind="C.Port" placeholder="@DataSql.Engines.First(e => e.Id == C.Engine).Port" /></div>
+                    </div>
+                    <div class="dw-field"><label for="dsc-db">Base</label><input id="dsc-db" type="text" class="mono" @bind="C.Database" spellcheck="false" placeholder="Salles" /></div>
+                    @if (C.Engine == DataSql.SqlServer && C.Via == "relay")
+                    {
+                        <label class="dsx-chk"><input type="checkbox" @bind="C.DbWindows" /> Authentification Windows (le compte sous lequel tourne le service du relais)</label>
+                    }
+                    @if (!C.DbWindows)
+                    {
+                        <div class="dsx-row2">
+                            <div class="dw-field"><label for="dsc-du">Utilisateur</label><input id="dsc-du" type="text" class="mono" @bind="C.User" autocomplete="off" placeholder="linkii_lecture" /></div>
+                            <div class="dw-field"><label for="dsc-dp">Mot de passe</label><input id="dsc-dp" type="password" @bind="secret" autocomplete="new-password" placeholder="@SecretPlaceholder" /></div>
+                        </div>
+                    }
+                    <label class="dsx-chk"><input type="checkbox" @bind="C.TrustCert" /> Accepter le certificat du serveur sans le vérifier (certificat interne)</label>
+                    <small class="dsx-muted">Créez un utilisateur qui n'a que le droit de lecture : Linkii ne fait que des SELECT, et le test vous prévient si l'utilisateur peut écrire.</small>
+                }
+
+                @if (kind == DataKinds.Api)
+                {
+                    <div class="dw-field"><label for="dsc-url">Adresse de base</label><input id="dsc-url" type="text" class="mono" @bind="C.BaseUrl" spellcheck="false" placeholder="https://api.exemple.ch/v2" /><small>Chaque jeu de données y ajoute son chemin (ex. /salles). La réponse doit être en JSON ou en CSV.</small></div>
+                    <div class="dw-field"><label>Authentification</label>
+                        <div class="dsx-seg" role="radiogroup">
+                            @foreach (var (id, label) in Auths)
+                            {
+                                var a = id;
+                                <button type="button" role="radio" aria-checked="@(C.Auth == a ? "true" : "false")" class="@(C.Auth == a ? "on" : "")" @onclick="() => C.Auth = a">@label</button>
+                            }
+                        </div>
+                    </div>
+                    @if (C.Auth == "key")
+                    {
+                        <div class="dsx-row2">
+                            <div class="dw-field"><label for="dsc-h">En-tête</label><input id="dsc-h" type="text" class="mono" @bind="C.KeyHeader" spellcheck="false" /></div>
+                            <div class="dw-field"><label for="dsc-k">Clé</label><input id="dsc-k" type="password" @bind="secret" autocomplete="new-password" placeholder="@SecretPlaceholder" /></div>
+                        </div>
+                    }
+                    else if (C.Auth == "bearer")
+                    {
+                        <div class="dw-field"><label for="dsc-t">Jeton</label><input id="dsc-t" type="password" @bind="secret" autocomplete="new-password" placeholder="@SecretPlaceholder" /><small>Envoyé dans l'en-tête « Authorization: Bearer … ».</small></div>
+                    }
+                    else if (C.Auth == "basic")
+                    {
+                        <div class="dsx-row2">
+                            <div class="dw-field"><label for="dsc-u">Utilisateur</label><input id="dsc-u" type="text" class="mono" @bind="C.User" autocomplete="off" /></div>
+                            <div class="dw-field"><label for="dsc-p">Mot de passe</label><input id="dsc-p" type="password" @bind="secret" autocomplete="new-password" placeholder="@SecretPlaceholder" /></div>
+                        </div>
+                    }
+                }
+                else
+                {
+                    <div class="dw-field"><label>Où est le fichier ?</label>
+                        <div class="dsx-seg" role="radiogroup">
+                            <button type="button" role="radio" aria-checked="@(C.FileMode == "upload" ? "true" : "false")" class="@(C.FileMode == "upload" ? "on" : "")" @onclick='() => C.FileMode = "upload"'>Importer</button>
+                            <button type="button" role="radio" aria-checked="@(C.FileMode == "url" ? "true" : "false")" class="@(C.FileMode == "url" ? "on" : "")" @onclick='() => C.FileMode = "url"'>Adresse web</button>
+                        </div>
+                    </div>
+                    @if (C.FileMode == "upload")
+                    {
+                        <div class="dw-field">
+                            <label>Fichier</label>
+                            <div class="dsx-file">
+                                <span class="grow">@(uploadName ?? (C.FileLabel.Length > 0 ? C.FileLabel : "Aucun fichier"))</span>
+                                <label class="btn ghost sm" for="dsc-file">@(C.FileLabel.Length > 0 || uploadName != null ? "Remplacer" : "Choisir un fichier")</label>
+                                <InputFile id="dsc-file" OnChange="OnFile" accept=".csv,.txt,.tsv,.json,.xlsx" style="display:none" />
+                            </div>
+                            <small>CSV, JSON ou Excel (.xlsx), @(DataKinds.MaxBytes * 5 / 1_000_000) Mo au plus. Les jeux de données sont relus à chaque nouvel import.</small>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="dw-field"><label for="dsc-furl">Adresse du fichier</label><input id="dsc-furl" type="text" class="mono" @bind="C.FileUrl" spellcheck="false" placeholder="https://exemple.ch/export/annonces.csv" /><small>Lien direct vers le fichier (par ex. une feuille Google publiée au format CSV). Relu à la fréquence de chaque jeu de données.</small></div>
+                    }
+                    <div class="dw-field"><label for="dsc-sep">Séparateur (CSV)</label>
+                        <select id="dsc-sep" @bind="C.Delimiter">
+                            <option value="">Détecté automatiquement</option>
+                            <option value=";">Point-virgule ;</option>
+                            <option value=",">Virgule ,</option>
+                            <option value="\t">Tabulation</option>
+                            <option value="|">Barre verticale |</option>
+                        </select>
+                    </div>
+                }
+
+                <div class="dsx-test">
+                    <button type="button" class="btn ghost sm" disabled="@busy" @onclick="Test">@(busy && testing ? "Test en cours…" : "Tester la connexion")</button>
+                    @if (testOk != null) { <span class="dsx-ok @(testOk.Contains('⚠') ? "warn" : "")"><i></i>@testOk</span> }
+                </div>
+                @if (error != null) { <div class="err">@error</div> }
+                @if (!isNew && C.LastError.Length > 0 && error == null && testOk == null) { <div class="err">Dernier test en échec : @C.LastError</div> }
+            </div>
+            <aside class="dsx-aside">
+                <h4>Une connexion, plusieurs jeux de données</h4>
+                <p>Vous donnez l'accès une seule fois. Ensuite, chaque jeu de données lit un chemin de l'API ou une feuille du fichier, avec sa propre fréquence.</p>
+                <h4>Vos identifiants</h4>
+                <p>Chiffrés sur le serveur. Ils ne sont jamais envoyés aux écrans, ni réaffichés ici.</p>
+                <h4>Lecture seule</h4>
+                <p>Linkii ne fait que lire : requêtes GET pour une API, une seule instruction SELECT pour une base. En direct, les adresses du réseau interne sont refusées ; une réponse doit arriver en 10 secondes (20 par le relais) et peser 2 Mo au plus.</p>
+                <h4>Le relais</h4>
+                <p>Pour une source de votre réseau interne : un petit service Windows ou Linux qui appelle Linkii (connexion sortante HTTPS). Aucun port à ouvrir.</p>
+            </aside>
+        </div>
+    </div>
+    <div class="modal-foot">
+        @if (!isNew)
+        {
+            @if (!confirmDel)
+            {
+                <button type="button" class="btn danger sm" disabled="@busy" @onclick="() => confirmDel = true">Supprimer</button>
+            }
+            else
+            {
+                <span class="dsx-warn">@(setCount > 0 ? $"Ses {setCount} jeu{(setCount > 1 ? "x" : "")} de données seront supprimés aussi." : "La connexion sera supprimée.")</span>
+                <button type="button" class="btn danger sm" disabled="@busy" @onclick="Delete">Confirmer</button>
+            }
+        }
+        <span class="grow"></span>
+        <button type="button" class="btn ghost" @onclick="Close">Annuler</button>
+        <button type="button" class="btn" disabled="@busy" @onclick="Save">@(busy && !testing ? "Enregistrement…" : isNew ? "Enregistrer et continuer" : "Enregistrer")</button>
+    </div>
+</div>
+@if (relayOpen)
+{
+    <RelayDialog Over="true" OnClose="RelayClosed" OnChanged="RelayChanged" />
+}
+
+@code {
+    [Parameter, EditorRequired] public DataConnection Connection { get; set; } = null!;
+    [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>Connexion enregistrée (et si elle vient d'être créée).</summary>
+    [Parameter] public EventCallback<(DataConnection C, bool Created)> OnSaved { get; set; }
+
+    private DataConnection C = null!;
+    private bool isNew, busy, testing, confirmDel;
+    private string kind = DataKinds.Api, secret = "";
+    private string? error, testOk, uploadName;
+    private byte[]? upload;   // fichier choisi, gardé en mémoire jusqu'à l'enregistrement
+    private int setCount;
+    private List<DataRelay> relays = new();
+    private bool relayOpen;
+    private Guid RelayPick { get => C.RelayId ?? Guid.Empty; set => C.RelayId = value == Guid.Empty ? null : value; }
+
+    private static readonly (string, string)[] Auths = { ("none", "Aucune"), ("key", "Clé API"), ("bearer", "Jeton"), ("basic", "Basic") };
+    private string SecretPlaceholder => !isNew && Connection.Secret.Length > 0 ? "•••••••• (inchangé si vide)" : "";
+
+    protected override void OnInitialized()
+    {
+        C = Connection.Copy();
+        kind = C.Kind;
+        isNew = !Store.Read(d => d.Tenant.DataConnections.Any(x => x.Id == C.Id));
+        setCount = Store.Read(d => d.Tenant.DataSets.Count(x => x.ConnectionId == C.Id));
+        LoadRelays();
+    }
+
+    private void LoadRelays() => relays = Store.Read(d => d.Tenant.DataRelays.Select(r => r.Copy()).OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
+
+    private void UseRelay()
+    {
+        C.Via = "relay";
+        if (C.RelayId == null || !relays.Any(r => r.Id == C.RelayId)) C.RelayId = relays.FirstOrDefault(r => Relays.Online(r.Id))?.Id ?? relays.FirstOrDefault()?.Id;
+    }
+    private void RelayChanged(Guid? id) { LoadRelays(); if (id is { } g && C.Via == "relay") C.RelayId = g; }
+    private void RelayClosed() { relayOpen = false; LoadRelays(); if (C.Via == "relay" && C.RelayId == null) UseRelay(); }
+
+    private void SetEngine(string? e)
+    {
+        if (e == null || !DataSql.Engines.Any(x => x.Id == e)) return;
+        if (C.Port == DataSql.Engines.First(x => x.Id == C.Engine).Port) C.Port = 0;   // port par défaut de l'ancien moteur : remis au défaut du nouveau
+        C.Engine = e;
+        if (e != DataSql.SqlServer) C.DbWindows = false;
+    }
+
+    private void SetKind(string k) { kind = k; C.Kind = k; error = null; testOk = null; }
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task OnFile(InputFileChangeEventArgs e)
+    {
+        error = null; testOk = null;
+        var f = e.File;
+        if (f.Size > DataKinds.MaxBytes * 5) { error = $"Fichier trop volumineux ({DataKinds.MaxBytes * 5 / 1_000_000} Mo au plus)."; return; }
+        var ext = Path.GetExtension(f.Name).ToLowerInvariant();
+        if (ext is not (".csv" or ".txt" or ".tsv" or ".json" or ".xlsx")) { error = "Formats acceptés : CSV, JSON ou Excel (.xlsx)."; return; }
+        using var ms = new MemoryStream();
+        await f.OpenReadStream(DataKinds.MaxBytes * 5).CopyToAsync(ms);
+        upload = ms.ToArray();
+        uploadName = f.Name;
+        if (C.Name.Trim().Length == 0) C.Name = Path.GetFileNameWithoutExtension(f.Name);
+    }
+
+    /// <summary>Connexion telle que saisie, avec le secret (nouveau, chiffré, ou l'ancien).</summary>
+    private DataConnection Draft()
+    {
+        var d = C.Copy();
+        d.Kind = kind;
+        d.Secret = secret.Length > 0 ? Box.Protect(secret) : Connection.Secret;
+        if (d.Kind == DataKinds.Api && d.Auth == "none" || d.Kind == DataKinds.Db && d.DbWindows || d.Kind == DataKinds.File) d.Secret = "";   // rien à garder
+        return d;
+    }
+
+    private async Task Test()
+    {
+        busy = true; testing = true; error = null; testOk = null;
+        try
+        {
+            var d = Draft();
+            var clientId = Store.ClientId;
+            if (kind == DataKinds.File && d.FileMode == "upload" && upload != null)   // fichier pas encore enregistré : lu depuis la mémoire
+            {
+                var raw = DataTables.Parse(upload, null, null, d.Delimiter);
+                testOk = $"Fichier lu · {raw.Rows.Count} ligne{(raw.Rows.Count > 1 ? "s" : "")}, {raw.Headers.Count} colonne{(raw.Headers.Count > 1 ? "s" : "")}.";
+            }
+            else if (DataSourceOps.CheckConnection(d) is { } bad) error = bad;
+            else testOk = await Data.Test(clientId, d);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or IOException) { error = (ex is HttpRequestException ? "Source injoignable : " : "") + ex.Message; }
+        finally { busy = false; testing = false; }
+    }
+
+    private async Task Save()
+    {
+        busy = true; error = null;
+        try
+        {
+            var d = Draft();
+            var clientId = Store.ClientId;
+            if (kind == DataKinds.File && d.FileMode == "upload" && upload != null)
+            {
+                d.FileName = await DataSetService.StoreFile(clientId, d.Id, uploadName!, new MemoryStream(upload), CancellationToken.None);
+                d.FileLabel = uploadName!;
+                d.FileUtc = DateTime.UtcNow;
+            }
+            if (DataSourceOps.CheckConnection(d) is { } bad) { error = bad; return; }
+            string lastError = "";
+            try { testOk = await Data.Test(clientId, d); }
+            catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or IOException) { lastError = (ex is HttpRequestException ? "Source injoignable : " : "") + ex.Message; }
+            d.LastError = lastError;
+            d.TestedUtc = DateTime.UtcNow;
+            var err = Store.Write(db =>
+            {
+                if (!db.Access.IsOrgAdmin) return "Seuls les administrateurs de l'organisation gèrent les sources de données.";
+                if (!DataSourceOps.Allowed(db.Tenant)) return "Les sources de données demandent le plan Pro.";
+                if (d.Via == "relay" && !db.Tenant.DataRelays.Any(r => r.Id == d.RelayId)) return "Relais introuvable : choisissez-en un autre.";
+                var list = db.Tenant.DataConnections;
+                var i = list.FindIndex(x => x.Id == d.Id);
+                if (i < 0) { if (list.Count >= DataKinds.MaxConnections) return $"{DataKinds.MaxConnections} connexions au plus."; list.Add(d); }
+                else list[i] = d;
+                return null;
+            });
+            if (err != null) { error = err; return; }
+            if (lastError.Length > 0) Toast.Error($"« {d.Name} » enregistrée, mais le test a échoué : {lastError}");
+            else Toast.Ok($"Connexion « {d.Name} » enregistrée.");
+            // fichier importé de nouveau : ses jeux de données sont relus aussitôt
+            if (!isNew && upload != null)
+                foreach (var dsId in Store.Read(db => db.Tenant.DataSets.Where(x => x.ConnectionId == d.Id).Select(x => x.Id).ToList())) await Data.Refresh(clientId, dsId);
+            await OnSaved.InvokeAsync((d, isNew));
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException) { error = ex.Message; }
+        finally { busy = false; }
+    }
+
+    private async Task Delete()
+    {
+        busy = true;
+        try
+        {
+            var clientId = Store.ClientId;
+            var (ids, file) = Store.Write(db =>
+            {
+                var ids = db.Tenant.DataSets.Where(x => x.ConnectionId == C.Id).Select(x => x.Id).ToList();
+                db.Tenant.DataSets.RemoveAll(x => x.ConnectionId == C.Id);
+                var file = db.Tenant.DataConnections.FirstOrDefault(x => x.Id == C.Id)?.FileName ?? "";
+                db.Tenant.DataConnections.RemoveAll(x => x.Id == C.Id);
+                return (ids, file);
+            });
+            foreach (var id in ids) Data.Forget(clientId, id);
+            DataSetService.DeleteFile(clientId, file);
+            Toast.Ok($"Connexion « {C.Name} » supprimée.");
+            await OnClose.InvokeAsync();
+        }
+        finally { busy = false; }
+    }
+}

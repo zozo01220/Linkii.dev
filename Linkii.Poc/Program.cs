@@ -83,6 +83,9 @@ builder.Services.AddHostedService<DriveSyncWorker>();   // dossiers des Drives :
 builder.Services.AddSingleton<ScanLog>();   // scans des QR codes de comptage (Pro) : journal par client, 90 jours
 builder.Services.AddSingleton<AdLog>();   // passages des spots de publicité (§45) : journal par client, 13 mois
 builder.Services.AddHostedService<AdWorker>();   // publicité : rappel aux propriétaires 24 h avant l'échéance de validation d'un spot
+builder.Services.AddSingleton<RelayBroker>();   // relais Linkii (§139, lot 4) : tâches confiées aux relais du réseau des clients
+builder.Services.AddSingleton<DataSetService>();   // intégrations personnalisées (§139) : lecture des jeux de données, copie et historique
+builder.Services.AddHostedService<DataSyncWorker>();   // jeux de données relus à leur fréquence (plan Pro)
 builder.Services.AddScoped<AppService>();
 builder.Services.AddScoped<MediaLibrary>();
 builder.Services.AddScoped<PlaylistLibrary>();
@@ -155,6 +158,7 @@ Directory.CreateDirectory(AppPaths.MediaDir);
 Directory.CreateDirectory(AppPaths.BrandDir);
 Directory.CreateDirectory(AppPaths.ThumbDir);
 Directory.CreateDirectory(AppPaths.PdfDir);
+DataSetService.Root = Path.Combine(dataDir, "datasets");   // copies et historiques des jeux de données (§139)
 Ads.Dir = Path.Combine(dataDir, "ads");   // visuels des spots de publicité (§45)
 Directory.CreateDirectory(Ads.Dir);
 app.Services.GetRequiredService<AdLog>();   // plafonds des campagnes : totaux des passages disponibles dès le démarrage
@@ -545,6 +549,18 @@ app.MapGet("/download/windows", () =>
         : Results.File(msi.FullName, "application/x-msi", msi.Name);
 });
 
+// Relais Linkii (§139, lot 4) : dernière archive LinkiiRelay-{win-x64|linux-x64}*.zip du dossier downloads (déposée par Linkii.Relay/publish.ps1).
+app.MapGet("/download/relay/{os}", (string os) =>
+{
+    if (os is not ("win-x64" or "linux-x64")) return Results.NotFound();
+    var zip = Directory.Exists(AppPaths.DownloadDir)
+        ? new DirectoryInfo(AppPaths.DownloadDir).GetFiles($"LinkiiRelay-{os}*.zip").OrderByDescending(f => f.LastWriteTimeUtc).FirstOrDefault()
+        : null;
+    return zip == null
+        ? Results.Content("Le relais Linkii n'est pas encore disponible au téléchargement.", "text/plain; charset=utf-8", statusCode: 404)
+        : Results.File(zip.FullName, "application/zip", zip.Name);
+});
+
 // ---------- Médias : l'accès est contrôlé par client ----------
 // Autorisé : un écran du client propriétaire (en-tête X-Token ou ?t=) ou un utilisateur connecté sur l'espace de ce client.
 // Tout le reste reçoit 404, pour ne pas révéler l'existence d'un fichier d'un autre client.
@@ -826,20 +842,34 @@ api.MapGet("/data/{id:guid}", async (HttpRequest req, Guid id, JsonStore store, 
 });
 
 // Source d'une composition publiée (bloc météo, champs d'un calendrier…, §85) : mêmes règles, réglages figés dans la composition à la publication.
-api.MapGet("/data/{id:guid}/{src:guid}", async (HttpRequest req, Guid id, Guid src, JsonStore store, AppCatalog catalog, AppProviders providers, SecretBox box) =>
+api.MapGet("/data/{id:guid}/{src:guid}", async (HttpRequest req, Guid id, Guid src, JsonStore store, AppCatalog catalog, AppProviders providers, SecretBox box, DataSetService data) =>
 {
-    var (denied, tenant, published) = store.Read<(IResult?, Tenant, PublishedItem?)>(db =>
+    var (denied, tenant, published, own) = store.Read<(IResult?, Tenant, PublishedItem?, IResult?)>(db =>
     {
         var s = Auth(req, db);
         var gate = Gate(s, db);
-        if (gate != null) return (gate, null!, null);
+        if (gate != null) return (gate, null!, null, null);
         var pub = PlayerFeed.AllItems(db, s!).FirstOrDefault(x => x.Id == id && x.AppId == Compositions.AppId);
-        return ((IResult?)null, db.Clients.First(c => c.Id == s!.ClientId), pub);
+        var t = db.Clients.First(c => c.Id == s!.ClientId);
+        return ((IResult?)null, t, pub, pub == null ? null : CompositionData(db, t, pub, src, s, data));
     });
     if (denied != null) return denied;
+    if (own != null) return own;
     if (published == null || Compositions.SourceItem(published, src) is not { } source) return Results.NotFound();
     return await AppData(source, tenant, catalog, providers, box);
 });
+
+// Sources d'une composition servies par Linkii lui-même (§139) : « Cet écran » (nom, zone, paramètres) et jeux de données (dernière copie,
+// réduite aux colonnes utilisées). Null : la source est un contenu d'intégration ordinaire (météo, RSS…).
+static IResult? CompositionData(Db db, Tenant t, PublishedItem pub, Guid src, Screen? screen, DataSetService data)
+{
+    if (Compositions.UsesScreen(pub, src)) return Results.Ok(Compositions.ScreenData(db, screen));
+    if (Compositions.DataRef(pub, src) is not { } keys) return null;
+    if (t.DataSets.FirstOrDefault(d => d.Id == src) is not { } ds) return Results.NotFound();
+    if (data.Table(t.Id, src) is not { } table) return Results.Json(new { error = "Données pas encore lues." }, statusCode: 503);   // l'écran garde ce qu'il avait
+    var stale = DataSetService.IsStale(ds, table, DateTime.UtcNow);
+    return stale ? Results.Ok(new { kind = "table", error = "Données indisponibles" }) : Results.Ok(DataTables.ForScreen(table, keys, false));
+}
 
 static async Task<IResult> AppData(PublishedItem published, Tenant tenant, AppCatalog catalog, AppProviders providers, SecretBox box)
 {
@@ -855,6 +885,23 @@ static async Task<IResult> AppData(PublishedItem published, Tenant tenant, AppCa
     }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 }
+
+// ---------- Relais Linkii (§139, lot 4) : le relais appelle le serveur, jamais l'inverse (voir RelayProtocol.cs) ----------
+api.MapPost("/relay/pair", (RelayPairRequest body, RelayBroker relays) =>
+    relays.Pair(body) is { } r ? Results.Ok(r) : Results.Json(new { error = "Code inconnu ou expiré : créez-en un nouveau dans Intégrations › Sources de données › Relais." }, statusCode: 404));
+
+api.MapGet("/relay/next", async (HttpRequest req, RelayBroker relays, CancellationToken ct) =>
+{
+    if (relays.Auth(req.Headers["X-Relay-Token"]) is not { } who) return Results.Unauthorized();
+    var job = await relays.Next(who.Relay, req.Headers["X-Relay-Machine"], req.Headers["X-Relay-Version"], ct);
+    return job == null ? Results.NoContent() : Results.Ok(job);
+});
+
+api.MapPost("/relay/reply", (HttpRequest req, RelayReply body, RelayBroker relays) =>
+{
+    if (relays.Auth(req.Headers["X-Relay-Token"]) is not { } who) return Results.Unauthorized();
+    return relays.Complete(who.Relay, body) ? Results.Ok() : Results.NotFound();   // tâche inconnue, expirée, ou d'un autre relais
+});   // corps : 30 Mo par défaut (Kestrel), assez pour un fichier de 10 Mo en base64
 
 // Interrupteur ou lumière d'un widget Home Assistant, actionné depuis l'écran tactile. Seule une entité choisie dans ce widget peut être commandée,
 // et seulement dans son domaine (interrupteurs pour « ha-switches », lumières pour « ha-lights »).
@@ -925,11 +972,19 @@ api.MapGet("/preview/data/{id:guid}", async (HttpRequest req, Guid id, JsonStore
     return await AppData(published, tenant, catalog, providers, box);
 });
 
-api.MapGet("/preview/data/{id:guid}/{src:guid}", async (HttpRequest req, Guid id, Guid src, JsonStore store, PreviewGrants grants, Notifier notifier, AppCatalog catalog, AppProviders providers, SecretBox box) =>
+api.MapGet("/preview/data/{id:guid}/{src:guid}", async (HttpRequest req, Guid id, Guid src, JsonStore store, PreviewGrants grants, Notifier notifier, AppCatalog catalog, AppProviders providers, SecretBox box, DataSetService data) =>
 {
     if (grants.Find(req.Headers["X-Preview"]) is not { } g) return Results.Unauthorized();
-    var (tenant, published) = store.Read(db => (db.Clients.FirstOrDefault(c => c.Id == g.ClientId),
-        PreviewFeed(db, g, notifier)?.Items.FirstOrDefault(x => x.Id == id && x.AppId == Compositions.AppId)));
+    var (tenant, published, own) = store.Read(db =>
+    {
+        var t = db.Clients.FirstOrDefault(c => c.Id == g.ClientId);
+        var pub = PreviewFeed(db, g, notifier)?.Items.FirstOrDefault(x => x.Id == id && x.AppId == Compositions.AppId);
+        // écran simulé (ou le premier écran du mur) ; une liste de lecture simulée n'a pas d'écran : « Cet écran » reste vide
+        var screen = g.ScreenId is { } sid ? db.Screens.FirstOrDefault(x => x.Id == sid && x.ClientId == g.ClientId)
+            : g.WallZoneId is { } zid ? db.Screens.Where(x => x.ClientId == g.ClientId && x.ZoneId == zid && x.WallPos != null).OrderBy(x => x.WallPos).FirstOrDefault() : null;
+        return (t, pub, t == null || pub == null ? null : CompositionData(db, t, pub, src, screen, data));
+    });
+    if (own != null) return own;
     if (tenant == null || published == null || Compositions.SourceItem(published, src) is not { } source) return Results.NotFound();
     return await AppData(source, tenant, catalog, providers, box);
 });

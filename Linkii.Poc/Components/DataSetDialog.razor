@@ -1,0 +1,371 @@
+@inject TenantStore Store
+@inject DataSetService Data
+@inject Toaster Toast
+
+@* Jeu de données (§139, maquette scènes 3 et 5) : ce qu'on lit (chemin de l'API, chemin des lignes, feuille Excel), l'aperçu de la table avec le type
+   de chaque colonne (détecté, modifiable), et les réglages : actualisation, lignes masquées, nombre de lignes, comportement en panne.
+   Onglets Historique (lectures, erreurs, copie conservée) et Utilisé par (compositions). Rien n'est enregistré avant « Enregistrer ». *@
+<div class="modal-backdrop" @onclick="Close"></div>
+<div class="modal app-modal dsx-dlg dsx-wide" role="dialog" aria-modal="true" aria-labelledby="dsd-title">
+    <div class="modal-head">
+        <span class="dsx-ico @Connection.Kind">@(Connection.Kind == DataKinds.Api ? "{ }" : Connection.Kind == DataKinds.Db ? "SQL" : "CSV")</span>
+        <div class="grow" style="min-width:0">
+            <input id="dsd-title" class="dsx-title" @bind="D.Name" maxlength="80" placeholder="Nom du jeu de données" aria-label="Nom du jeu de données" />
+            <small>Jeu de données · @Connection.Name</small>
+        </div>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+    @if (!IsNew)
+    {
+        <nav class="tabs dsx-tabs" role="tablist">
+            <button type="button" role="tab" class="@(tab == "set" ? "on" : "")" aria-selected="@(tab == "set" ? "true" : "false")" @onclick='() => tab = "set"'>Réglages</button>
+            <button type="button" role="tab" class="@(tab == "log" ? "on" : "")" aria-selected="@(tab == "log" ? "true" : "false")" @onclick='() => tab = "log"'>Historique</button>
+            <button type="button" role="tab" class="@(tab == "use" ? "on" : "")" aria-selected="@(tab == "use" ? "true" : "false")" @onclick='() => tab = "use"'>Utilisé par <span class="cat-count">@used.Count</span></button>
+        </nav>
+    }
+    <div class="modal-body dsx-body">
+        @if (tab == "set")
+        {
+            <div class="dsx-ed">
+                <div class="dsx-q">
+                    <h4>Ce que je lis</h4>
+                    @if (Connection.Kind == DataKinds.Api)
+                    {
+                        <div class="dw-field"><label for="dsd-path">Chemin</label><input id="dsd-path" type="text" class="mono" @bind="D.Path" spellcheck="false" placeholder="/salles?etage=2" /><small>Ajouté à <span class="mono">@Connection.BaseUrl</span>.</small></div>
+                        <div class="dw-field"><label for="dsd-rows">Où sont les lignes (JSON)</label><input id="dsd-rows" type="text" class="mono" @bind="D.RowsPath" spellcheck="false" placeholder="détecté (ex. data.items)" /><small>Vide : le premier tableau trouvé dans la réponse.</small></div>
+                    }
+                    else if (Connection.Kind == DataKinds.Db)
+                    {
+                        <div class="dsx-seg" role="radiogroup" style="margin-bottom:12px">
+                            <button type="button" role="radio" aria-checked="@(!sqlMode ? "true" : "false")" class="@(!sqlMode ? "on" : "")" @onclick="() => SetSqlMode(false)">Choisir une table</button>
+                            <button type="button" role="radio" aria-checked="@(sqlMode ? "true" : "false")" class="@(sqlMode ? "on" : "")" @onclick="() => SetSqlMode(true)">Écrire une requête</button>
+                        </div>
+                        @if (!sqlMode)
+                        {
+                            <div class="dw-field"><label for="dsd-table">Table ou vue</label>
+                                @if (tables.Count > 0)
+                                {
+                                    <select id="dsd-table" @bind="D.Path"><option value="">— choisir —</option>@foreach (var t in tables) { <option value="@t">@t</option> }</select>
+                                }
+                                else
+                                {
+                                    <input id="dsd-table" type="text" class="mono" @bind="D.Path" spellcheck="false" placeholder="dbo.v_occupation_salles" />
+                                }
+                                <small>@(tablesError ?? (tables.Count > 0 ? $"{tables.Count} tables et vues." : "Liste en lecture…"))</small>
+                            </div>
+                            @if (D.Path.Length > 0 && DataSql.IsTableName(D.Path))
+                            {
+                                <p class="dsx-muted">Requête générée :</p>
+                                <pre class="dsx-sql">@DataSql.TableQuery(Connection.Engine, D.Path, DataKinds.MaxRows)</pre>
+                            }
+                        }
+                        else
+                        {
+                            <div class="dw-field"><label for="dsd-sql">Requête SELECT</label>
+                                <textarea id="dsd-sql" class="dsx-sql-in" rows="9" spellcheck="false" @bind="D.Sql" @bind:event="oninput" placeholder="SELECT salle, etage, statut, prochaine_reunion&#10;FROM dbo.v_occupation_salles&#10;WHERE statut <> 'Fermée'&#10;ORDER BY salle"></textarea>
+                                <small class="@(D.Sql.Trim().Length > 0 && DataSql.Check(D.Sql) != null ? "dsx-warn" : "")">@(D.Sql.Trim().Length > 0 && DataSql.Check(D.Sql) is { } why ? why : "Une seule instruction SELECT (ou WITH … SELECT), exécutée en lecture seule, 10 s et " + DataKinds.MaxRows.ToString("N0") + " lignes au plus.")</small>
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <p class="dsx-muted">@(Connection.FileMode == "url" ? "Fichier lu à son adresse." : "Fichier importé : " + Connection.FileLabel)</p>
+                        <div class="dw-field"><label for="dsd-sheet">Feuille (Excel)</label><input id="dsd-sheet" type="text" @bind="D.Path" placeholder="la première feuille" /></div>
+                        <div class="dw-field"><label for="dsd-rows2">Où sont les lignes (JSON)</label><input id="dsd-rows2" type="text" class="mono" @bind="D.RowsPath" spellcheck="false" placeholder="détecté" /></div>
+                    }
+                    <button type="button" class="btn ghost sm" disabled="@busy" @onclick="Read"><Ico Name="refresh" Size="14" /> @(busy ? "Lecture…" : "Lire l'aperçu")</button>
+                </div>
+
+                <div class="dsx-prev">
+                    <div class="dsx-prev-h">
+                        <h4>Aperçu</h4>
+                        @if (table != null) { <span class="dsx-muted">@table.Rows.Count ligne@(table.Rows.Count > 1 ? "s" : "") · @table.Columns.Count colonne@(table.Columns.Count > 1 ? "s" : "")@(ms != null ? $" · lu en {ms} ms" : fromCopy ? " · dernière copie" : "")</span> }
+                    </div>
+                    @if (error != null) { <div class="err">@error</div> }
+                    @if (table == null)
+                    {
+                        <div class="dsx-empty">@(busy ? "Lecture de la source…" : "Lisez l'aperçu pour voir les colonnes.")</div>
+                    }
+                    else
+                    {
+                        <div class="dsx-grid-wrap">
+                            <table class="dsx-gridt">
+                                <thead><tr>
+                                    @foreach (var c in table.Columns)
+                                    {
+                                        var col = c;
+                                        <th><b title="@col.Label">@col.Label</b><span class="mono">@col.Key</span>
+                                            <select aria-label="Type de @col.Label" value="@col.Type" @onchange="e => SetType(col.Key, e.Value?.ToString())">
+                                                @foreach (var (id, label) in DataKinds.Types) { <option value="@id">@label</option> }
+                                            </select>
+                                        </th>
+                                    }
+                                </tr></thead>
+                                <tbody>
+                                    @foreach (var r in table.Rows.Take(20))
+                                    {
+                                        <tr>@for (var i = 0; i < table.Columns.Count; i++) { var v = i < r.Count ? r[i] : null; <td class="@(table.Columns[i].Type == "number" ? "n" : "")" title="@v">@Show(v, table.Columns[i].Type)</td> }</tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        @if (table.Rows.Count > 20) { <p class="dsx-muted">… et @(table.Rows.Count - 20) autres lignes.</p> }
+                        <p class="dsx-note">Les types servent à l'éditeur et à l'écran : un nombre se met en forme (1 284), une date s'affiche « 14:00 » ou « demain », une image remplit un emplacement. Les champs se nomment par la clé (<span class="mono">@table.Columns[0].Key</span>).</p>
+                    }
+                </div>
+
+                <div class="dsx-opts">
+                    <div class="dsx-og"><h4>Actualisation</h4>
+                        @if (Connection is { Kind: DataKinds.File, FileMode: "upload" })
+                        {
+                            <p class="dsx-muted">À chaque nouvel import du fichier (Modifier la connexion › Remplacer).</p>
+                        }
+                        else
+                        {
+                            <select @bind="D.RefreshMin" aria-label="Actualisation">
+                                @foreach (var (m, label) in DataKinds.Refresh) { <option value="@m">@label</option> }
+                            </select>
+                        }
+                    </div>
+                    <div class="dsx-og"><h4>Masquer les lignes où…</h4>
+                        @foreach (var f in D.Hide)
+                        {
+                            var flt = f;
+                            <div class="dsx-flt">
+                                <select @bind="flt.Key" aria-label="Colonne">@foreach (var c in Cols) { <option value="@c.Key">@c.Label</option> }</select>
+                                <select @bind="flt.Op" aria-label="Condition">@foreach (var (id, label) in DataKinds.Ops) { <option value="@id">@label</option> }</select>
+                                @if (flt.Op is not ("empty" or "notempty")) { <input type="text" @bind="flt.Value" aria-label="Valeur" /> }
+                                <button type="button" class="modal-x" aria-label="Retirer la condition" @onclick="() => { D.Hide.Remove(flt); Rebuild(); }"><Ico Name="x" Size="14" /></button>
+                            </div>
+                        }
+                        <button type="button" class="dsx-link" disabled="@(Cols.Count == 0 || D.Hide.Count >= 10)" @onclick="AddHide">+ Ajouter une condition</button>
+                        @if (D.Hide.Count > 0) { <button type="button" class="dsx-link" @onclick="Rebuild">Appliquer à l'aperçu</button> }
+                    </div>
+                    <div class="dsx-og"><h4>Lignes</h4>
+                        <label class="dsx-chk"><input type="checkbox" checked="@(D.MaxRows > 0)" @onchange='e => { D.MaxRows = e.Value is true ? 100 : 0; Rebuild(); }' /> Garder au plus
+                            <input type="number" min="1" max="@DataKinds.MaxRows" class="dsx-num" disabled="@(D.MaxRows == 0)" value="@(D.MaxRows > 0 ? D.MaxRows : 100)" @onchange="e => { D.MaxRows = int.TryParse(e.Value?.ToString(), out var n) ? Math.Clamp(n, 1, DataKinds.MaxRows) : 100; Rebuild(); }" /> lignes</label>
+                        <small class="dsx-muted">Sinon @DataKinds.MaxRows.ToString("N0") au plus.</small>
+                    </div>
+                    <div class="dsx-og"><h4>Si la source ne répond pas</h4>
+                        <label class="dsx-chk"><input type="radio" name="dsd-stale" checked="@(D.StaleHours == 0)" @onchange="() => D.StaleHours = 0" /> Garder la dernière copie (recommandé)</label>
+                        <label class="dsx-chk"><input type="radio" name="dsd-stale" checked="@(D.StaleHours > 0)" @onchange="() => D.StaleHours = D.StaleHours > 0 ? D.StaleHours : 2" /> Après
+                            <input type="number" min="1" max="720" class="dsx-num" disabled="@(D.StaleHours == 0)" value="@(D.StaleHours > 0 ? D.StaleHours : 2)" @onchange="e => D.StaleHours = int.TryParse(e.Value?.ToString(), out var n) ? Math.Clamp(n, 1, 720) : 2" /> h, afficher « Données indisponibles »</label>
+                    </div>
+                    <div class="dsx-og"><h4>Colonnes envoyées aux écrans</h4>
+                        <p class="dsx-muted">Automatique : seulement celles que les compositions utilisent.</p>
+                    </div>
+                </div>
+            </div>
+        }
+        else if (tab == "log")
+        {
+            var last = history.FirstOrDefault();
+            <div class="dsx-health">
+                <div class="dsx-tl">
+                    @if (history.Count == 0) { <div class="dsx-empty">Pas encore lu.</div> }
+                    @foreach (var h in history)
+                    {
+                        <div class="dsx-tle"><span class="mono">@h.Utc.ToLocalTime().ToString("dd.MM HH:mm:ss")</span><i class="@h.Level"></i><div><b>@h.Message</b><small>@(h.Level == "bad" ? "" : $"{h.Rows} ligne{(h.Rows > 1 ? "s" : "")} · ")lu en @h.Ms ms</small></div></div>
+                    }
+                </div>
+                <div class="dsx-side">
+                    <h4>Ce que voient les écrans</h4>
+                    @if (Data.Table(clientId, D.Id) is { } t)
+                    {
+                        <p>@DataSourcesTab.StatePill(last?.Level == "ok" ? "ok" : "warn", "Copie du " + t.ReadUtc.ToLocalTime().ToString("dd.MM à HH:mm"))</p>
+                        <p class="dsx-muted">@t.Rows.Count lignes. @(last?.Level is "bad" or "warn" ? "La dernière copie valable reste affichée jusqu'à la prochaine lecture réussie." : "")</p>
+                    }
+                    else { <p class="dsx-muted">Rien encore : la première lecture réussie sera envoyée aux écrans.</p> }
+                    <h4>Lectures récentes</h4>
+                    <p class="dsx-muted">@(history.Count == 0 ? "—" : $"{history.Count(h => h.Level != "bad") * 100 / history.Count} % réussies · durée moyenne {(long)history.Average(h => h.Ms)} ms")</p>
+                </div>
+            </div>
+        }
+        else
+        {
+            @if (used.Count == 0) { <div class="dsx-empty">Aucune composition n'utilise ce jeu. Dans l'éditeur, panneau Données : glissez une colonne (un champ) ou ajoutez une liste reliée.</div> }
+            else
+            {
+                <div class="dsx-uses">
+                    @foreach (var (id, name) in used) { <a class="dsx-set" href="/compositions/@id?back=/integrations"><span>@name</span><small>Ouvrir</small></a> }
+                </div>
+            }
+        }
+    </div>
+    <div class="modal-foot">
+        @if (!IsNew)
+        {
+            @if (!confirmDel)
+            {
+                <button type="button" class="btn danger sm" disabled="@busy" @onclick="() => confirmDel = true">Supprimer</button>
+            }
+            else
+            {
+                <span class="dsx-warn">@(used.Count > 0 ? $"Utilisé par {used.Count} composition{(used.Count > 1 ? "s" : "")} : ses listes ne seront plus diffusées." : "Le jeu et sa copie seront supprimés.")</span>
+                <button type="button" class="btn danger sm" disabled="@busy" @onclick="Delete">Confirmer</button>
+            }
+            <button type="button" class="btn ghost sm" disabled="@busy" @onclick="ReadNow" title="Relit la source et met à jour la copie des écrans">Relire maintenant</button>
+        }
+        <span class="grow"></span>
+        <button type="button" class="btn ghost" @onclick="Close">Annuler</button>
+        <button type="button" class="btn" disabled="@busy" @onclick="Save">@(busy ? "Patientez…" : "Enregistrer")</button>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public DataSet DataSet { get; set; } = null!;
+    [Parameter, EditorRequired] public DataConnection Connection { get; set; } = null!;
+    [Parameter] public bool IsNew { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private DataSet D = null!;
+    private Guid clientId;
+    private string tab = "set";
+    private bool busy, confirmDel, fromCopy;
+    private string? error;
+    private RawTable? raw;
+    private DataTable? table;
+    private long? ms;
+    private List<DataReadLog> history = new();
+    private List<(Guid Id, string Name)> used = new();
+    // base de données (lot 3) : table choisie dans la liste lue dans la base, ou requête écrite
+    private bool sqlMode;
+    private List<string> tables = new();
+    private string? tablesError;
+
+    private List<DataColumn> Cols => table?.Columns ?? D.Columns;
+
+    protected override async Task OnInitializedAsync()
+    {
+        D = DataSet.Copy();
+        clientId = Store.ClientId;
+        history = Data.History(clientId, D.Id);
+        used = Store.Read(d => DataSourceOps.UsedBy(d, D.Id).Select(m => (m.Id, m.Name)).ToList());
+        sqlMode = D.Sql.Length > 0;
+        if (!IsNew && Data.Table(clientId, D.Id) is { } t) { table = t; fromCopy = true; }
+        else if (Connection.Kind != DataKinds.Db) await Read();
+        if (Connection.Kind == DataKinds.Db) await LoadTables();
+    }
+
+    private async Task LoadTables()
+    {
+        tablesError = null;
+        try { tables = await Data.Discover(clientId, Connection); if (tables.Count == 0) tablesError = "Aucune table visible pour cet utilisateur."; }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Security.Cryptography.CryptographicException) { tablesError = "Liste impossible : " + ex.Message; }
+    }
+
+    private void SetSqlMode(bool on)
+    {
+        sqlMode = on;
+        if (on && D.Sql.Length == 0 && DataSql.IsTableName(D.Path)) D.Sql = DataSql.TableQuery(Connection.Engine, D.Path, 100).Replace(" TOP (101)", "").Replace(" LIMIT 101", "");   // part de la table choisie
+        if (!on) D.Sql = "";
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task Read()
+    {
+        busy = true; error = null; ms = null; fromCopy = false;
+        try
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            raw = await Data.ReadRaw(clientId, Connection, D, CancellationToken.None);
+            ms = sw.ElapsedMilliseconds;
+            Rebuild();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or IOException or System.Security.Cryptography.CryptographicException)
+        {
+            error = (ex is HttpRequestException ? "Source injoignable : " : "") + ex.Message;
+        }
+        finally { busy = false; }
+    }
+
+    /// <summary>Table de l'aperçu à partir de la dernière lecture brute, avec les types et réglages en cours.</summary>
+    private void Rebuild()
+    {
+        if (raw == null) return;
+        try
+        {
+            table = DataTables.Build(raw, D, DateTime.UtcNow).Table;
+            D.Columns = table.Columns.Select(c => new DataColumn { Key = c.Key, Label = c.Label, Type = c.Type }).ToList();
+        }
+        catch (InvalidOperationException ex) { error = ex.Message; table = null; }
+    }
+
+    private async Task SetType(string key, string? type)
+    {
+        if (D.Columns.FirstOrDefault(c => c.Key == key) is not { } c || type == null) return;
+        c.Type = type;
+        if (raw == null) await Read(); else Rebuild();   // aperçu tiré de la copie : relu pour retyper les valeurs d'origine
+    }
+
+    private void AddHide() { var k = Cols.FirstOrDefault()?.Key; if (k != null) D.Hide.Add(new DataFilter { Key = k }); }
+
+    private static string Show(string? v, string type)
+    {
+        if (string.IsNullOrEmpty(v)) return "—";
+        if (type == "number" && double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n)) return n.ToString("#,##0.##", System.Globalization.CultureInfo.GetCultureInfo("fr-CH"));
+        if (type == "bool") return v == "true" ? "Oui" : v == "false" ? "Non" : v;
+        if (type == "date" && DateTimeOffset.TryParse(v, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeLocal, out var d))
+            return v.Length <= 10 ? d.ToString("dd.MM.yyyy") : d.ToLocalTime().ToString("dd.MM.yyyy HH:mm");
+        return v.Length > 60 ? v[..60] + "…" : v;
+    }
+
+    private async Task Save()
+    {
+        busy = true; error = null;
+        try
+        {
+            var d = D.Copy();
+            var err = Store.Write(db =>
+            {
+                if (!db.Access.IsOrgAdmin) return "Seuls les administrateurs de l'organisation gèrent les sources de données.";
+                if (!DataSourceOps.Allowed(db.Tenant)) return "Les sources de données demandent le plan Pro.";
+                if (!db.Tenant.DataConnections.Any(c => c.Id == d.ConnectionId)) return "Connexion introuvable.";
+                if (DataSourceOps.CheckDataSet(d, db.Tenant.DataSets) is { } bad) return bad;
+                var list = db.Tenant.DataSets;
+                var i = list.FindIndex(x => x.Id == d.Id);
+                if (i < 0) { if (list.Count >= DataKinds.MaxDataSets) return $"{DataKinds.MaxDataSets} jeux de données au plus."; list.Add(d); }
+                else list[i] = d;
+                return null;
+            });
+            if (err != null) { error = err; return; }
+            var r = await Data.Refresh(clientId, d.Id);   // première copie (ou copie retypée) aussitôt
+            if (r?.Level == "bad") Toast.Error($"« {d.Name} » enregistré, mais la lecture a échoué : {r.Message}");
+            else Toast.Ok($"Jeu de données « {d.Name} » enregistré.");
+            await OnSaved.InvokeAsync();
+            await OnClose.InvokeAsync();
+        }
+        finally { busy = false; }
+    }
+
+    private async Task ReadNow()
+    {
+        busy = true;
+        try
+        {
+            var r = await Data.Refresh(clientId, D.Id);
+            history = Data.History(clientId, D.Id);
+            if (Data.Table(clientId, D.Id) is { } t) { table = t; fromCopy = true; raw = null; ms = null; }
+            if (r == null) Toast.Error("Une lecture est déjà en cours.");
+            else if (r.Level == "ok") Toast.Ok("Relu : " + r.Message);
+            else Toast.Error(r.Message);
+        }
+        finally { busy = false; }
+    }
+
+    private async Task Delete()
+    {
+        busy = true;
+        try
+        {
+            Store.Write(db => { db.Tenant.DataSets.RemoveAll(x => x.Id == D.Id); });
+            Data.Forget(clientId, D.Id);
+            Toast.Ok($"Jeu de données « {D.Name} » supprimé.");
+            await OnSaved.InvokeAsync();
+            await OnClose.InvokeAsync();
+        }
+        finally { busy = false; }
+    }
+}

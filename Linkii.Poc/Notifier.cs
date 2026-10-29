@@ -170,7 +170,8 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
         if (app.Id == Compositions.AppId)   // composition : images (fichiers prêts du même client), QR codes et sources de données (contenus d'intégration du même client) résolus maintenant
         {
             if (Compositions.Publish(m.Settings, id => db.Media.FirstOrDefault(x => x.Id == id && x.ClientId == m.ClientId && x.Status == null && x.Type == "image" && x.FileName != null),
-                id => db.Media.FirstOrDefault(x => x.Id == id && x.ClientId == m.ClientId && x.Type == "app")) is not { } c) return null;
+                id => db.Media.FirstOrDefault(x => x.Id == id && x.ClientId == m.ClientId && x.Type == "app"),
+                id => db.Clients.FirstOrDefault(x => x.Id == m.ClientId)?.DataSets.FirstOrDefault(x => x.Id == id)) is not { } c) return null;
             (pi.Settings, pi.Urls, pi.Secrets) = c;
             return pi;
         }

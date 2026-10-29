@@ -8,13 +8,14 @@
 @inject MediaImporter Importer
 @inject CompositionLibrary Folders
 @inject TenantStore Store
+@inject DataSetService Data
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 
 @* Éditeur de compositions (DEV-POC.md §80, §84, §85) : l'interface est en JS (wwwroot/compo-editor.js, plein écran), le serveur garde le document,
    calcule les QR codes, liste et importe les images de la médiathèque, garde « Mes modèles », et lit les données des sources (blocs, champs reliés). Le rendu des calques est celui du player (player/composition.js).
    « /compositions/new » : rien n'est créé tant qu'on n'a pas enregistré (pas de composition vide laissée derrière soi). *@
-<HeadContent><link rel="stylesheet" href="compo-editor.css?v=6" /></HeadContent>
+<HeadContent><link rel="stylesheet" href="compo-editor.css?v=7" /></HeadContent>
 
 @if (!ready)
 {
@@ -148,17 +149,53 @@ else
 
     // ---------- Sources de données (§85) ----------
 
-    /// <summary>Contenus de Mes intégrations utilisables comme source d'un bloc ou de champs (météo, calendrier, RSS, capteurs).</summary>
+    /// <summary>
+    /// Sources d'un bloc, d'une liste ou de champs : contenus de Mes intégrations (météo, calendrier, RSS, capteurs), jeux de données de l'organisation
+    /// (§139, plan Pro, avec leurs colonnes) et « Cet écran » (paramètres connus des écrans, écrans proposés pour l'aperçu).
+    /// </summary>
     [JSInvokable]
-    public List<object> Sources() => Svc.CompositionSources()
-        .Select(m => (object)new { id = m.Id.ToString("N"), name = m.Name, app = m.AppId })
-        .ToList();
+    public List<object> Sources()
+    {
+        var list = Svc.CompositionSources().Select(m => (object)new { id = m.Id.ToString("N"), name = m.Name, app = m.AppId }).ToList();
+        var (allowed, sets, screens) = Store.Read(d => (DataSourceOps.Allowed(d.Tenant), d.Tenant.DataSets.Select(x => x.Copy()).ToList(),
+            d.AllScreens.OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).Take(100).Select(s => (s.Id, s.Name, s.Params.ToList())).ToList()));
+        if (allowed)
+            list.AddRange(sets.OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).Select(s => (object)new
+            {
+                id = s.Id.ToString("N"), name = s.Name, app = "dataset",
+                cols = s.Columns.Select(c => new { key = c.Key, label = c.Label, type = c.Type })
+            }));
+        var pars = screens.SelectMany(s => s.Item3).Where(p => p.Name.Trim().Length > 0).GroupBy(p => DataTables.Slug(p.Name)).Select(g => new { key = g.Key, label = g.First().Name.Trim() });
+        list.Add(new
+        {
+            id = Compositions.ScreenSource.ToString("N"), name = "Cet écran", app = "screen",
+            cols = new[] { new { key = "name", label = "Nom de l'écran" }, new { key = "zone", label = "Zone" }, new { key = "area", label = "Aire" } }.Concat(pars.Select(p => new { key = "p." + p.key, label = p.label })),
+            screens = screens.Select(s => new { id = s.Id.ToString(), name = s.Name, has = s.Item3.Count > 0 })
+        });
+        return list;
+    }
 
-    /// <summary>Données actuelles d'une source (les mêmes que l'écran recevrait) : { data } ou { error }.</summary>
+    /// <summary>
+    /// Données actuelles d'une source (les mêmes que l'écran recevrait) : { data } ou { error }. « Cet écran » : celles de l'écran choisi pour l'aperçu
+    /// (identifiant après « @ »), sinon du premier écran qui a des paramètres. Jeu de données : sa dernière copie (lue maintenant si elle n'existe pas).
+    /// </summary>
     [JSInvokable]
     public async Task<object> SourceData(string id)
     {
+        var at = id.IndexOf('@');
+        Guid? screenId = at > 0 && Guid.TryParse(id[(at + 1)..], out var sg) ? sg : null;
+        if (at > 0) id = id[..at];
         if (!Guid.TryParse(id, out var g)) return new { error = "Source introuvable." };
+        if (g == Compositions.ScreenSource)
+            return new { data = Store.Read(d => Compositions.ScreenData(d.Root, (screenId is { } sid ? d.AllScreens.FirstOrDefault(s => s.Id == sid) : null)
+                ?? d.AllScreens.FirstOrDefault(s => s.Params.Count > 0) ?? d.AllScreens.FirstOrDefault())) };
+        var (clientId, set) = Store.Read(d => (d.ClientId, DataSourceOps.Allowed(d.Tenant) ? d.Tenant.DataSets.FirstOrDefault(x => x.Id == g)?.Copy() : null));
+        if (set != null)
+        {
+            if (Data.Table(clientId, g) == null) await Data.Refresh(clientId, g);
+            if (Data.Table(clientId, g) is not { } t) return new { error = Data.Last(clientId, g)?.Message ?? "Pas encore lu." };
+            return new { data = DataTables.ForScreen(t, null, false) };
+        }
         var (data, error) = await Svc.SourceData(g);
         return error != null ? new { error } : new { data };
     }

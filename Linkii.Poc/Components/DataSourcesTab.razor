@@ -1,0 +1,198 @@
+@inject TenantStore Store
+@inject DataSetService Data
+@inject RelayBroker Relays
+@implements IDisposable
+
+@* Intégrations › Sources de données (§139, maquette maquettes/sources-de-donnees-architecture.html, scène 1) : les connexions de l'organisation
+   en cartes (API web, bases, fichiers), ses jeux de données en tableau (lignes, actualisation, utilisation, état) et ses relais (lot 4). Plan Pro ; administrateurs. *@
+<HeadContent><link rel="stylesheet" href="data-sources.css?v=2" /></HeadContent>
+
+@if (!allowed)
+{
+    <div class="dsx-lock">
+        <PlanTag Plan="@Plans.Growth" Size="15" />
+        <h3>Vos propres données dans vos compositions</h3>
+        <p>Branchez une API web, une base de données ou un fichier (CSV, JSON, Excel) : Linkii le lit à la fréquence choisie, garde la dernière copie et l'affiche dans vos compositions (champs, listes reliées). Disponible avec le plan Pro.</p>
+        <a class="btn" href="/settings?tab=abonnement">Voir les plans</a>
+    </div>
+}
+else
+{
+    <div class="dsx-head">
+        <h2>Connexions</h2>
+        <span class="grow"></span>
+        <button type="button" class="btn sm" disabled="@(connections.Count >= DataKinds.MaxConnections)" @onclick="() => OpenConnection(null)"><Ico Name="plus" Size="15" /> Connecter une source</button>
+    </div>
+    <div class="dsx-grid">
+        @foreach (var c in connections)
+        {
+            var conn = c;
+            var sets = dataSets.Where(d => d.ConnectionId == conn.Id).ToList();
+            var level = ConnLevel(conn, sets);
+            <div class="dsx-card">
+                <div class="dsx-top">
+                    <span class="dsx-ico @(conn.Kind)">@(conn.Kind == DataKinds.Api ? "{ }" : conn.Kind == DataKinds.Db ? "SQL" : FileExt(conn))</span>
+                    <div class="grow" style="min-width:0"><b>@conn.Name</b><small>@Describe(conn)</small></div>
+                    <button type="button" class="btn ghost sm" @onclick="() => OpenConnection(conn)">Modifier</button>
+                </div>
+                <div>@StatePill(level, conn.LastError.Length > 0 ? "Connexion en erreur" : level == "bad" ? "Lecture en échec" : level == "warn" ? "Copie conservée" : sets.Count == 0 ? "Aucun jeu de données" : "Connectée")</div>
+                <div class="dsx-sets">
+                    @foreach (var d in sets)
+                    {
+                        var ds = d;
+                        <button type="button" class="dsx-set" @onclick="() => OpenDataSet(ds, conn)"><span>@ds.Name</span><small>@Ago(Data.Last(clientId, ds.Id))</small></button>
+                    }
+                    <button type="button" class="dsx-add" disabled="@(dataSets.Count >= DataKinds.MaxDataSets)" @onclick="() => NewDataSet(conn)">+ Jeu de données</button>
+                </div>
+            </div>
+        }
+        <button type="button" class="dsx-card dsx-new" disabled="@(connections.Count >= DataKinds.MaxConnections)" @onclick="() => OpenConnection(null)">
+            <span class="dsx-plus"><Ico Name="plus" Size="18" /></span>
+            <b>Connecter une source</b>
+            <small>API web, base de données, fichier CSV, JSON ou Excel.</small>
+        </button>
+    </div>
+
+    @if (dataSets.Count > 0)
+    {
+        <h2 class="dsx-h2">Jeux de données</h2>
+        <div class="tbl-scroll">
+            <table class="tbl dsx-tbl">
+                <thead><tr><th>Nom</th><th>Connexion</th><th class="num">Lignes</th><th>Actualisation</th><th>Utilisé par</th><th>État</th></tr></thead>
+                <tbody>
+                    @foreach (var d in dataSets)
+                    {
+                        var ds = d;
+                        var conn = connections.FirstOrDefault(c => c.Id == ds.ConnectionId);
+                        var last = Data.Last(clientId, ds.Id);
+                        var table = Data.Table(clientId, ds.Id);
+                        <tr class="dsx-row" tabindex="0" @onclick="() => OpenDataSet(ds, conn)" @onkeydown='e => { if (e.Key == "Enter") OpenDataSet(ds, conn); }'>
+                            <td><b>@ds.Name</b></td>
+                            <td class="muted">@(conn?.Name ?? "—")</td>
+                            <td class="num">@(table?.Rows.Count.ToString() ?? "—")</td>
+                            <td>@(conn is { Kind: DataKinds.File, FileMode: "upload" } ? "à chaque import du fichier" : DataKinds.RefreshLabel(ds.RefreshMin).ToLowerInvariant())</td>
+                            <td>@(usage.GetValueOrDefault(ds.Id) is var n && n > 0 ? $"{n} composition{(n > 1 ? "s" : "")}" : "—")</td>
+                            <td>@StatePill(last?.Level ?? "", last == null ? "Pas encore lu" : last.Level == "ok" ? Ago(last) : last.Level == "warn" ? "Copie conservée" : "En échec")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    <div class="dsx-head dsx-h2">
+        <h2>Relais</h2>
+        <span class="grow"></span>
+        <button type="button" class="btn ghost sm" disabled="@(relays.Count >= RelayBroker.MaxPerOrg)" @onclick="() => OpenRelay(null)"><Ico Name="plus" Size="15" /> Installer un relais</button>
+    </div>
+    @if (relays.Count == 0)
+    {
+        <p class="dsx-muted">Pour une base de données ou une API de votre réseau interne, installez un relais sur un PC ou un serveur de ce réseau : il lit les données pour Linkii, sans rien ouvrir dans le pare-feu.</p>
+    }
+    else
+    {
+        <div class="dsx-grid">
+            @foreach (var x in relays)
+            {
+                var rl = x;
+                var online = Relays.Online(rl.Id);
+                var uses = connections.Count(c => c.Via == "relay" && c.RelayId == rl.Id);
+                <button type="button" class="dsx-card dsx-relay" @onclick="() => OpenRelay(rl.Id)">
+                    <div class="dsx-top">
+                        <span class="dsx-ico relay">⇄</span>
+                        <div class="grow" style="min-width:0"><b>@rl.Name</b><small>@(rl.Machine.Length > 0 ? rl.Machine + " · " : "")@(uses == 0 ? "aucune connexion" : $"{uses} connexion{(uses > 1 ? "s" : "")}")</small></div>
+                    </div>
+                    <div>@StatePill(rl.TokenHash.Length == 0 ? "warn" : online ? "ok" : "bad", rl.TokenHash.Length == 0 ? "En attente d'appairage" : online ? "En ligne" : "Hors ligne")</div>
+                </button>
+            }
+        </div>
+    }
+    <p class="dsx-note"><b>Une connexion, plusieurs jeux de données.</b> L'adresse et les identifiants se saisissent une seule fois. Chaque jeu de données lit une partie de cette source (un chemin d'API, une feuille), avec sa propre fréquence. Les écrans ne lisent jamais la source : ils reçoivent la dernière copie gardée par Linkii, même si la source ne répond plus.</p>
+}
+
+@if (editConn != null)
+{
+    <DataConnectionDialog Connection="editConn" OnClose="CloseDialogs" OnSaved="ConnectionSaved" />
+}
+@if (editSet != null && setConn != null)
+{
+    <DataSetDialog DataSet="editSet" Connection="setConn" IsNew="setIsNew" OnClose="CloseDialogs" OnSaved="Reload" />
+}
+@if (relayOpen)
+{
+    <RelayDialog RelayId="relayId" OnClose="CloseRelay" OnChanged="RelayChanged" />
+}
+
+@code {
+    private Guid clientId;
+    private bool allowed;
+    private List<DataConnection> connections = new();
+    private List<DataSet> dataSets = new();
+    private List<DataRelay> relays = new();
+    private bool relayOpen;
+    private Guid? relayId;
+    private Dictionary<Guid, int> usage = new();
+    private DataConnection? editConn, setConn;
+    private DataSet? editSet;
+    private bool setIsNew;
+    private Timer? timer;
+
+    protected override void OnInitialized()
+    {
+        Reload();
+        timer = new Timer(_ => InvokeAsync(StateHasChanged), null, 20000, 20000);   // états et heures de lecture tenus à jour
+    }
+
+    private void Reload()
+    {
+        (clientId, allowed, connections, dataSets) = Store.Read(d => (d.ClientId, DataSourceOps.Allowed(d.Tenant),
+            d.Tenant.DataConnections.Select(c => c.Copy()).OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
+            d.Tenant.DataSets.Select(x => x.Copy()).OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase).ToList()));
+        usage = Store.Read(d => dataSets.ToDictionary(x => x.Id, x => DataSourceOps.UsedBy(d, x.Id).Count));
+        relays = Store.Read(d => d.Tenant.DataRelays.Select(r => r.Copy()).OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
+    }
+
+    private void OpenRelay(Guid? id) { relayId = id; relayOpen = true; }
+    private void CloseRelay() { relayOpen = false; Reload(); }
+    private void RelayChanged(Guid? id) { relayId = id; Reload(); }
+
+    private void OpenConnection(DataConnection? c) => editConn = c?.Copy() ?? new DataConnection();
+    private void OpenDataSet(DataSet ds, DataConnection? c) { if (c == null) return; editSet = ds.Copy(); setConn = c.Copy(); setIsNew = false; }
+    private void NewDataSet(DataConnection c) { editSet = new DataSet { ConnectionId = c.Id, Name = dataSets.Any(d => d.ConnectionId == c.Id) ? "" : c.Name }; setConn = c.Copy(); setIsNew = true; }
+    private void CloseDialogs() { editConn = null; editSet = null; setConn = null; Reload(); }
+
+    /// <summary>Connexion créée : on enchaîne sur son premier jeu de données (étape 2 de la maquette).</summary>
+    private void ConnectionSaved((DataConnection C, bool Created) r)
+    {
+        editConn = null;
+        Reload();
+        if (r.Created && connections.FirstOrDefault(c => c.Id == r.C.Id) is { } c) NewDataSet(c);
+    }
+
+    private string ConnLevel(DataConnection c, List<DataSet> sets)
+    {
+        if (c.LastError.Length > 0) return "bad";
+        var levels = sets.Select(s => Data.Last(clientId, s.Id)?.Level).ToList();
+        return levels.Contains("bad") ? "bad" : levels.Contains("warn") ? "warn" : sets.Count == 0 ? "" : "ok";
+    }
+
+    private static string FileExt(DataConnection c) =>
+        Path.GetExtension(c.FileMode == "url" ? new Uri(c.FileUrl.Length > 0 ? c.FileUrl : "https://x/").AbsolutePath : c.FileLabel).TrimStart('.').ToUpperInvariant() is { Length: > 0 and <= 4 } e ? e : "CSV";
+
+    private string Describe(DataConnection c) => (c.Kind switch
+    {
+        DataKinds.Api => "API web · " + (c.Auth switch { "key" => "clé API", "bearer" => "jeton", "basic" => "utilisateur et mot de passe", _ => "sans authentification" }),
+        DataKinds.Db => DataSql.Engines.FirstOrDefault(e => e.Id == c.Engine).Label + (c.Database.Length > 0 ? " · " + c.Database : ""),
+        _ => c.FileMode == "url" ? "Fichier · lu à son adresse" : "Fichier importé · " + c.FileLabel
+    }) + (c.Via == "relay" ? " · par " + (relays.FirstOrDefault(r => r.Id == c.RelayId)?.Name ?? "un relais supprimé") : "");
+
+    internal static string Ago(DataReadLog? l)
+    {
+        if (l == null) return "pas encore lu";
+        var s = (DateTime.UtcNow - l.Utc).TotalSeconds;
+        return s < 60 ? $"il y a {Math.Max(1, (int)s)} s" : s < 3600 ? $"il y a {(int)(s / 60)} min" : s < 86400 ? $"il y a {(int)(s / 3600)} h" : "le " + l.Utc.ToLocalTime().ToString("dd.MM à HH:mm");
+    }
+
+    internal static RenderFragment StatePill(string level, string text) => @<span class="pill @(level is "ok" or "warn" or "bad" ? level : "") dsx-pill"><i></i>@text</span>;
+
+    public void Dispose() => timer?.Dispose();
+}

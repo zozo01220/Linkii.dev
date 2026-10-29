@@ -24,6 +24,21 @@
             </div>
         </div>
 
+        <div class="sp-sec">Paramètres pour les compositions</div>
+        <p class="hint" style="margin-top:0">Valeurs propres à cet écran (par ex. Étage = 2), lues par les compositions : un champ « Cet écran », ou le filtre d'une liste reliée. Un seul modèle sert ainsi à tous les écrans.</p>
+        <div class="sp-params">
+            @foreach (var p in screenParams)
+            {
+                var sp = p;
+                <div class="sp-param">
+                    <input type="text" @bind="sp.Name" maxlength="40" placeholder="Nom (Étage)" aria-label="Nom du paramètre" />
+                    <input type="text" @bind="sp.Value" maxlength="200" placeholder="Valeur" aria-label="Valeur du paramètre" />
+                    <button type="button" class="modal-x" aria-label="Retirer le paramètre" @onclick="() => screenParams.Remove(sp)"><Ico Name="x" Size="16" /></button>
+                </div>
+            }
+            @if (screenParams.Count < 12) { <button type="button" class="btn ghost sm" @onclick="() => screenParams.Add(new ScreenParam())"><Ico Name="plus" Size="14" /> Ajouter un paramètre</button> }
+        </div>
+
         @if (HasDevice)
         {
             <div class="sp-sec">Appareil</div>
@@ -73,6 +88,7 @@
     private int monitor = 1;
     private List<DeviceMonitor> monitors = new();
     private Dictionary<int, string> taken = new();   // moniteur → écran du même PC qui l'occupe en plein écran
+    private List<ScreenParam> screenParams = new();   // paramètres pour les compositions (§139)
 
     private bool IsPc => kind == "windows";
     private bool HasDevice => kind is "windows" or "androidtv" or "android";
@@ -87,6 +103,7 @@
         (mirrorH, mirrorV) = (s.MirrorH, s.MirrorV);
         (autoStart, windowed, monitor) = (s.AutoStart, s.Windowed, s.Monitor);
         monitors = s.DeviceMonitors.OrderBy(m => m.N).ToList();
+        screenParams = s.Params.Select(p => new ScreenParam { Name = p.Name, Value = p.Value }).ToList();
         taken = Store.Read(d => DeviceConfig.SamePc(d.Screens, s).Where(x => !x.Windowed).GroupBy(x => x.Monitor).ToDictionary(g => g.Key, g => g.First().Name));
     }
 
@@ -96,6 +113,9 @@
     {
         saving = true;
         var sp = spec; var (mh, mv, au, wi, mo) = (mirrorH, mirrorV, autoStart, windowed, monitor);
+        // paramètres nommés, sans doublon de clé (« Étage » et « etage » sont le même paramètre : le premier est gardé)
+        var pars = screenParams.Select(p => new ScreenParam { Name = p.Name.Trim(), Value = p.Value.Trim() }).Where(p => p.Name.Length > 0)
+            .GroupBy(p => DataTables.Slug(p.Name)).Select(g => g.First()).ToList();
         try
         {
             var changed = Store.Write(d =>
@@ -107,6 +127,7 @@
                 s.Layout = ScreenLayouts.Fit(ScreenLayouts.Find(s.Layout).Id, new ScreenSpec { Type = sp.Type, Orientation = s.Orientation, Resolution = sp.Resolution });   // découpage encore permis
                 s.MirrorH = mh; s.MirrorV = mv;
                 s.AutoStart = au; s.Windowed = wi; s.Monitor = mo;
+                s.Params = pars;   // lus par l'écran à la prochaine lecture de la source « Cet écran » : rien à publier
                 return c;
             });
             if (changed) await Notifier.NotifyScreen(ScreenId);   // l'écran recharge sa configuration, sans publication

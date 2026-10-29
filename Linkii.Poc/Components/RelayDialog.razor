@@ -1,0 +1,222 @@
+@inject TenantStore Store
+@inject RelayBroker Relays
+@inject NavigationManager Nav
+@inject Toaster Toast
+@implements IDisposable
+
+@* Relais Linkii (§139, lot 4) : installer (code d'appairage d'une heure, téléchargement, commandes Windows et Linux, attente de la connexion),
+   renommer, ré-appairer (nouveau code : l'ancien jeton est refusé), supprimer (refusé tant qu'une connexion l'utilise). *@
+<div class="modal-backdrop @(Over ? "over" : "")" @onclick="Close"></div>
+<div class="modal app-modal as-drawer dsx-dlg @(Over ? "over" : "")" role="dialog" aria-modal="true" aria-labelledby="rly-title">
+    <div class="modal-head">
+        <span class="dsx-ico relay">⇄</span>
+        <div class="grow">
+            <h3 id="rly-title">@(r == null ? "Installer un relais" : r.Name)</h3>
+            <small>Un petit service dans votre réseau, qui lit pour Linkii les bases et API internes.</small>
+        </div>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="modal-body">
+        @if (r == null)
+        {
+            <div class="dw">
+                <div class="dw-field"><label for="rly-name">Nom du relais</label><input id="rly-name" type="text" @bind="name" maxlength="60" placeholder="SRV-01, Serveur du bâtiment A…" /><small>Vous pourrez le changer ensuite.</small></div>
+                <button type="button" class="btn" disabled="@busy" @onclick="Create">Créer le code d'installation</button>
+                @if (error != null) { <div class="err">@error</div> }
+            </div>
+            <aside class="dsx-aside" style="margin-top:18px">
+                <h4>Pourquoi un relais ?</h4>
+                <p>Une base de données ou une API de votre réseau interne n'est pas joignable depuis internet. Le relais, installé sur un PC ou un serveur de ce réseau, appelle Linkii (connexion sortante HTTPS) et lit les données à sa place.</p>
+                <h4>Rien à ouvrir</h4>
+                <p>Aucun port à ouvrir dans le pare-feu. Le relais ne fait que lire (requêtes SELECT, appels GET). Un relais sert plusieurs sources ; @RelayBroker.MaxPerOrg relais au plus.</p>
+            </aside>
+        }
+        else
+        {
+            var online = Relays.Online(r.Id);
+            var seen = Relays.Seen(r.Id);
+            <div class="dsx-relay-st">
+                @DataSourcesTab.StatePill(r.TokenHash.Length == 0 ? "warn" : online ? "ok" : "bad", r.TokenHash.Length == 0 ? "En attente d'appairage" : online ? "En ligne" : "Hors ligne")
+                @if (r.TokenHash.Length > 0)
+                {
+                    <span class="dsx-muted" style="margin:0">@(seen is { } s ? $"{(s.Machine.Length > 0 ? s.Machine : r.Machine)} · version {(s.Version.Length > 0 ? s.Version : r.Version)} · vu {DataSourcesTab.Ago(new DataReadLog(s.At, "", "", 0, 0, false))}" : $"{r.Machine} · version {r.Version} · pas vu depuis le démarrage du serveur")</span>
+                }
+            </div>
+            <div class="dw-field"><label for="rly-rn">Nom</label>
+                <div class="dsx-row2" style="grid-template-columns:1fr auto"><input id="rly-rn" type="text" @bind="name" maxlength="60" /><button type="button" class="btn ghost sm" disabled="@(busy || name.Trim() == r.Name)" @onclick="Rename">Renommer</button></div>
+            </div>
+
+            @if (r.PairingCode != null && r.CodeUtc is { } cu && DateTime.UtcNow - cu < RelayBroker.CodeLife)
+            {
+                <h4 class="dsx-h4">1. Téléchargez le relais</h4>
+                <p class="dsx-muted">Sur un PC ou un serveur du réseau qui joint vos bases et API (toujours allumé).</p>
+                <div class="dsx-test" style="margin-bottom:14px">
+                    <a class="btn ghost sm" href="/download/relay/win-x64" download><Ico Name="windows" Size="14" /> Windows (zip)</a>
+                    <a class="btn ghost sm" href="/download/relay/linux-x64" download><Ico Name="server" Size="14" /> Linux (zip)</a>
+                </div>
+                <h4 class="dsx-h4">2. Appairez-le avec ce code <span class="dsx-muted" style="display:inline">(valable jusqu'à @cu.Add(RelayBroker.CodeLife).ToLocalTime().ToString("HH:mm"))</span></h4>
+                <div class="dsx-code">@r.PairingCode[..4]-@r.PairingCode[4..]</div>
+                <div class="dsx-cmd"><b>Windows</b> (invite de commandes administrateur, dans le dossier décompressé)
+                    <pre>Linkii.Relay.exe pair @r.PairingCode --server @Server
+sc.exe create LinkiiRelay binPath= "C:\Linkii\Relay\Linkii.Relay.exe" start= auto
+sc.exe start LinkiiRelay</pre>
+                </div>
+                <div class="dsx-cmd"><b>Linux</b> (dans /opt/linkii-relay)
+                    <pre>./Linkii.Relay pair @r.PairingCode --server @Server
+sudo cp linkii-relay.service /etc/systemd/system/ && sudo systemctl enable --now linkii-relay</pre>
+                </div>
+                <p class="dsx-muted">Cette fenêtre passe à « En ligne » dès que le relais se connecte.</p>
+            }
+            else if (r.TokenHash.Length == 0 || !online)
+            {
+                <p class="dsx-muted">@(r.TokenHash.Length == 0 ? "Le code d'installation a expiré." : "Le relais ne se connecte plus : vérifiez que son service tourne, ou ré-appairez-le (nouvelle machine, configuration perdue).")</p>
+            }
+            @if (users.Count > 0)
+            {
+                <h4 class="dsx-h4">Utilisé par</h4>
+                <ul class="dsx-list">@foreach (var u in users) { <li>@u</li> }</ul>
+            }
+            @if (error != null) { <div class="err">@error</div> }
+        }
+    </div>
+    <div class="modal-foot">
+        @if (r != null)
+        {
+            @if (!confirmDel)
+            {
+                <button type="button" class="btn danger sm" disabled="@busy" @onclick="() => confirmDel = true">Supprimer</button>
+            }
+            else
+            {
+                <span class="dsx-warn">Son jeton sera refusé : le relais s'arrêtera.</span>
+                <button type="button" class="btn danger sm" disabled="@busy" @onclick="Delete">Confirmer</button>
+            }
+            <button type="button" class="btn ghost sm" disabled="@busy" @onclick="NewCode" title="Nouveau code : à utiliser sur une nouvelle machine, ou si la configuration du relais est perdue">@(r.TokenHash.Length == 0 ? "Nouveau code" : "Ré-appairer")</button>
+        }
+        <span class="grow"></span>
+        <button type="button" class="btn ghost" @onclick="Close">Fermer</button>
+    </div>
+</div>
+
+@code {
+    [Parameter] public Guid? RelayId { get; set; }
+    [Parameter] public bool Over { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>Relais créé, appairé, renommé ou supprimé.</summary>
+    [Parameter] public EventCallback<Guid?> OnChanged { get; set; }
+
+    private DataRelay? r;
+    private string name = "";
+    private string? error;
+    private bool busy, confirmDel;
+    private List<string> users = new();
+    private Timer? timer;
+
+    private string Server => Nav.BaseUri.TrimEnd('/');
+
+    protected override void OnInitialized()
+    {
+        if (RelayId is { } id) Load(id);
+        timer = new Timer(_ => InvokeAsync(Poll), null, 3000, 3000);   // attente de l'appairage, état en ligne
+    }
+
+    private void Load(Guid id)
+    {
+        r = Store.Read(d => d.Tenant.DataRelays.FirstOrDefault(x => x.Id == id)?.Copy());
+        if (r == null) return;
+        name = r.Name;
+        users = Store.Read(d => d.Tenant.DataConnections.Where(c => c.Via == "relay" && c.RelayId == id).Select(c => c.Name).ToList());
+    }
+
+    private async Task Poll()
+    {
+        if (r == null) return;
+        var code = r.PairingCode;
+        Load(r.Id);
+        if (code != null && r?.PairingCode == null && r?.TokenHash.Length > 0)
+        {
+            Toast.Ok($"Relais « {r.Name} » connecté.");
+            await OnChanged.InvokeAsync(r.Id);
+        }
+        StateHasChanged();
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private string? Guard(ClientDb d) =>
+        !d.Access.IsOrgAdmin ? "Seuls les administrateurs de l'organisation gèrent les relais."
+        : !DataSourceOps.Allowed(d.Tenant) ? "Les sources de données demandent le plan Pro." : null;
+
+    private async Task Create()
+    {
+        busy = true; error = null;
+        try
+        {
+            var n = name.Trim();
+            var (err, id) = Store.Write(d =>
+            {
+                if (Guard(d) is { } g) return (g, (Guid?)null);
+                if (d.Tenant.DataRelays.Count >= RelayBroker.MaxPerOrg) return ($"{RelayBroker.MaxPerOrg} relais au plus.", null);
+                if (n.Length == 0) n = "Relais " + (d.Tenant.DataRelays.Count + 1);
+                var x = new DataRelay { Name = n.Length > 60 ? n[..60] : n, PairingCode = RelayBroker.NewCode(), CodeUtc = DateTime.UtcNow };
+                d.Tenant.DataRelays.Add(x);
+                return ((string?)null, (Guid?)x.Id);
+            });
+            if (err != null) { error = err; return; }
+            Load(id!.Value);
+            await OnChanged.InvokeAsync(id);
+        }
+        finally { busy = false; }
+    }
+
+    private async Task NewCode()
+    {
+        if (r == null) return;
+        var id = r.Id;
+        error = Store.Write(d =>
+        {
+            if (Guard(d) is { } g) return g;
+            if (d.Tenant.DataRelays.FirstOrDefault(x => x.Id == id) is not { } x) return "Relais introuvable.";
+            x.PairingCode = RelayBroker.NewCode(); x.CodeUtc = DateTime.UtcNow; x.TokenHash = "";   // l'ancien jeton est refusé dès maintenant
+            return null;
+        });
+        Load(id);
+        await OnChanged.InvokeAsync(id);
+    }
+
+    private async Task Rename()
+    {
+        if (r == null) return;
+        var (id, n) = (r.Id, name.Trim());
+        if (n.Length == 0) { error = "Donnez un nom au relais."; return; }
+        error = Store.Write(d =>
+        {
+            if (Guard(d) is { } g) return g;
+            if (d.Tenant.DataRelays.FirstOrDefault(x => x.Id == id) is not { } x) return "Relais introuvable.";
+            x.Name = n.Length > 60 ? n[..60] : n;
+            return null;
+        });
+        Load(id);
+        await OnChanged.InvokeAsync(id);
+    }
+
+    private async Task Delete()
+    {
+        if (r == null) return;
+        var id = r.Id;
+        error = Store.Write(d =>
+        {
+            if (Guard(d) is { } g) return g;
+            var used = d.Tenant.DataConnections.Where(c => c.Via == "relay" && c.RelayId == id).Select(c => c.Name).ToList();
+            if (used.Count > 0) return $"Utilisé par {string.Join(", ", used.Select(u => "« " + u + " »"))} : changez d'abord leur accès.";
+            d.Tenant.DataRelays.RemoveAll(x => x.Id == id);
+            return null;
+        });
+        if (error != null) { confirmDel = false; return; }
+        Toast.Ok("Relais supprimé.");
+        await OnChanged.InvokeAsync(null);
+        await OnClose.InvokeAsync();
+    }
+
+    public void Dispose() => timer?.Dispose();
+}

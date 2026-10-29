@@ -19,6 +19,15 @@ public static class Compositions
     /// <summary>Intégrations utilisables comme source d'un bloc ou de champs : celles qui fournissent des données à l'écran.</summary>
     public static readonly IReadOnlySet<string> SourceApps = new HashSet<string> { "weather-slide", "agenda", "rss", "ha-sensors" };
 
+    /// <summary>
+    /// Source « Cet écran » (§139) : nom, zone et paramètres de l'écran qui affiche la composition (champs {{…:name}}, {{…:p.etage}}, filtres des listes).
+    /// Identifiant fixe, le même dans toutes les compositions.
+    /// </summary>
+    public static readonly Guid ScreenSource = new("5c2ee000-5c2e-4e00-a000-000000000000");
+
+    /// <summary>Calques reliés à un jeu de données (§139) : liste reliée (« list », source = identifiant du jeu).</summary>
+    public const string ListType = "list";
+
     /// <summary>Champ relié dans un texte : {{identifiant du contenu source (32 chiffres hexadécimaux)}:{clé du champ}}.</summary>
     public static readonly Regex FieldToken = new(@"{{([0-9a-f]{32}):([A-Za-z0-9_.:-]{1,120})}}", RegexOptions.Compiled);
 
@@ -36,7 +45,8 @@ public static class Compositions
         var clean = new JsonArray();
         foreach (var n in els)
         {
-            if (n is not JsonObject e || Str(e, "type") is not ("text" or "shape" or "image" or "qr" or "widget" or "app")) continue;
+            if (n is not JsonObject e || Str(e, "type") is not ("text" or "shape" or "image" or "qr" or "widget" or "app" or "list")) continue;
+            if (Str(e, "type") == ListType && !Guid.TryParse(Str(e, "source"), out _)) continue;   // liste sans jeu de données
             if (Str(e, "type") == "app" && (!Guid.TryParse(Str(e, "source"), out _) || !SourceApps.Contains(Str(e, "app") ?? ""))) continue;   // bloc sans source valable
             var copy = (JsonObject)e.DeepClone();
             copy.Remove("src");   // adresse de fichier : posée seulement à la publication
@@ -52,7 +62,8 @@ public static class Compositions
     /// les QR codes leur tracé calculé ici, les calques masqués disparaissent. Urls : fichiers que l'écran précharge (lecture hors ligne).
     /// Null si le document est illisible (contenu jamais publié).
     /// </summary>
-    public static (Dictionary<string, string> Settings, List<string> Urls, Dictionary<string, string> Secrets)? Publish(IReadOnlyDictionary<string, string> settings, Func<Guid, MediaItem?> file, Func<Guid, MediaItem?>? source = null)
+    public static (Dictionary<string, string> Settings, List<string> Urls, Dictionary<string, string> Secrets)? Publish(IReadOnlyDictionary<string, string> settings, Func<Guid, MediaItem?> file, Func<Guid, MediaItem?>? source = null,
+        Func<Guid, DataSet?>? dataset = null)
     {
         if (Clean(settings.GetValueOrDefault("doc")) is not { } c) return null;
         var doc = JsonNode.Parse(c.Doc)!.AsObject();
@@ -61,7 +72,13 @@ public static class Compositions
         // Sources (blocs et champs) : réglages figés à la publication, comme un contenu d'intégration ; l'écran lit leurs données par /api/data/{élément}/{source}.
         // Une source introuvable (supprimée, d'un autre client) retire ses blocs ; ses champs affichent leur valeur de secours.
         var sources = new Dictionary<Guid, MediaItem?>();
-        foreach (var id in Sources(els)) sources[id] = source?.Invoke(id) is { AppId: { } a } m && SourceApps.Contains(a) ? m : null;
+        var sets = new Dictionary<Guid, DataSet>();   // jeux de données (§139) : l'écran lit leur dernière copie, réduite aux colonnes utilisées
+        foreach (var id in Sources(els))
+        {
+            if (id == ScreenSource) continue;
+            if (dataset?.Invoke(id) is { } ds) { sets[id] = ds; continue; }
+            sources[id] = source?.Invoke(id) is { AppId: { } a } m && SourceApps.Contains(a) ? m : null;
+        }
         foreach (var e in els.OfType<JsonObject>().ToList())
         {
             if (e["hidden"] is JsonValue hv && hv.TryGetValue<bool>(out var hidden) && hidden) { els.Remove(e); continue; }
@@ -82,9 +99,14 @@ public static class Compositions
                 case "app":
                     if (!Guid.TryParse(Str(e, "source"), out var sid) || sources.GetValueOrDefault(sid) is not { } src || src.AppId != Str(e, "app")) els.Remove(e);
                     break;
+                case ListType:
+                    if (!Guid.TryParse(Str(e, "source"), out var lid) || !sets.ContainsKey(lid)) els.Remove(e);   // jeu supprimé : la liste n'est pas diffusée
+                    break;
             }
         }
         var s = new Dictionary<string, string>(settings) { ["doc"] = doc.ToJsonString() };
+        foreach (var (id, _) in sets) s["ds:" + id.ToString("N")] = JsonSerializer.Serialize(UsedColumns(els, id));
+        if (Sources(els).Contains(ScreenSource)) s["scr"] = "1";
         var secrets = new Dictionary<string, string>();
         foreach (var (id, m) in sources)
         {
@@ -109,13 +131,62 @@ public static class Compositions
         var ids = new List<Guid>();
         foreach (var e in els.OfType<JsonObject>())
         {
-            if (Str(e, "type") == "app" && Guid.TryParse(Str(e, "source"), out var id) && !ids.Contains(id)) ids.Add(id);
+            if (Str(e, "type") is "app" or ListType && Guid.TryParse(Str(e, "source"), out var id) && !ids.Contains(id)) ids.Add(id);
+            if (Str(e, "type") == ListType && e["filter"] is JsonArray fl && fl.OfType<JsonObject>().Any(x => (Str(x, "val") ?? "").StartsWith('@')) && !ids.Contains(ScreenSource))
+                ids.Add(ScreenSource);   // filtre sur un paramètre de l'écran (« = Cet écran · Étage »)
             if (Str(e, "type") == "text" && Str(e, "text") is { } t)
                 foreach (Match f in FieldToken.Matches(t))
                     if (Guid.TryParse(f.Groups[1].Value, out var fid) && !ids.Contains(fid)) ids.Add(fid);
         }
         return ids;
     }
+
+    /// <summary>
+    /// Colonnes d'un jeu qu'utilise la composition (colonnes, tri, filtres et règles de ses listes ; champs des textes, « r2.col », « sum.col »…) :
+    /// seules celles-ci partent vers l'écran.
+    /// </summary>
+    public static List<string> UsedColumns(JsonArray els, Guid dataSet)
+    {
+        var n = dataSet.ToString("N");
+        var keys = new List<string>();
+        void Add(string? k) { if (!string.IsNullOrEmpty(k) && k.Length <= 60 && !keys.Contains(k)) keys.Add(k); }
+        foreach (var e in els.OfType<JsonObject>())
+        {
+            if (Str(e, "type") == ListType && Str(e, "source") is { } src && Guid.TryParse(src, out var g) && g == dataSet)
+            {
+                foreach (var arr in new[] { e["cols"], e["filter"], e["rules"] })
+                    if (arr is JsonArray a) foreach (var x in a.OfType<JsonObject>()) Add(Str(x, "key"));
+                if (e["sort"] is JsonObject so) Add(Str(so, "key"));
+            }
+            if (Str(e, "type") == "text" && Str(e, "text") is { } t)
+                foreach (Match f in FieldToken.Matches(t))
+                    if (f.Groups[1].Value == n) Add(Regex.Replace(f.Groups[2].Value, @"^(r\d+|sum|avg|min|max)\.", "") is var k && k != "_count" ? k : null);
+        }
+        return keys;
+    }
+
+    /// <summary>Jeu de données d'une composition publiée et colonnes à envoyer ; null si la composition ne l'utilisait pas.</summary>
+    public static List<string>? DataRef(PublishedItem composition, Guid source)
+    {
+        if (composition.AppId != AppId || composition.Settings.GetValueOrDefault("ds:" + source.ToString("N")) is not { } raw) return null;
+        try { return JsonSerializer.Deserialize<List<string>>(raw) ?? new(); }
+        catch (JsonException) { return null; }
+    }
+
+    /// <summary>La composition publiée lit-elle « Cet écran » ?</summary>
+    public static bool UsesScreen(PublishedItem composition, Guid source) =>
+        source == ScreenSource && composition.AppId == AppId && composition.Settings.ContainsKey("scr");
+
+    /// <summary>Données de la source « Cet écran » : nom, zone, aire et paramètres (clé → valeur, clé → nom).</summary>
+    public static object ScreenData(Db db, Screen? s) => new
+    {
+        kind = "screen",
+        name = s?.Name ?? "Aperçu",
+        zone = s == null ? "" : db.Areas.FirstOrDefault(a => a.Id == s.AreaId)?.Zones.FirstOrDefault(z => z.Id == s.ZoneId)?.Name ?? "",
+        area = s == null ? "" : db.Areas.FirstOrDefault(a => a.Id == s.AreaId)?.Name ?? "",
+        @params = (s?.Params ?? new()).Where(p => p.Name.Trim().Length > 0).GroupBy(p => DataTables.Slug(p.Name)).ToDictionary(g => g.Key, g => g.First().Value),
+        labels = (s?.Params ?? new()).Where(p => p.Name.Trim().Length > 0).GroupBy(p => DataTables.Slug(p.Name)).ToDictionary(g => g.Key, g => g.First().Name.Trim())
+    };
 
     /// <summary>
     /// Élément publié d'une source d'une composition publiée (réglages et secrets figés à la publication), pour lire ses données comme un contenu

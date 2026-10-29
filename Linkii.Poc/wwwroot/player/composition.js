@@ -30,7 +30,17 @@
     '.lc-row small{flex:none;font-size:.78em;opacity:.7;max-width:40%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
     '.lc-row.lc-news span{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}' +
     '.lc-ah{font-size:.8em;opacity:.7;margin-bottom:.4em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
-    '.lc-wait{opacity:.55;font-size:.7em;text-align:center}';
+    '.lc-wait{opacity:.55;font-size:.7em;text-align:center}' +
+    // liste reliée à un jeu de données (§139) : en-tête facultatif, lignes de hauteur fixe, pages qui alternent ou défilement continu
+    '.lc-list{width:100%;height:100%;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box}' +
+    '.lc-lh,.lc-lr{display:grid;column-gap:.8em;align-items:center;box-sizing:border-box;padding:0 .25em;min-width:0}' +
+    '.lc-lh{font-size:.55em;opacity:.65;text-transform:uppercase;letter-spacing:.06em;flex:none}.lc-lh span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+    '.lc-lb{position:relative;flex:1;min-height:0;overflow:hidden}.lc-pg,.lc-ls{position:absolute;left:0;right:0;top:0}' +
+    '.lc-ls{animation:lc-up linear infinite}@keyframes lc-up{from{transform:translateY(0)}to{transform:translateY(-50%)}}' +
+    '.lc-lr{overflow:hidden}.lc-lt{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+    '.lc-lt small{display:block;font-size:.62em;opacity:.7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:.1em}' +
+    '.lc-lp{justify-self:end;font-size:.72em;padding:.18em .65em;border-radius:.3em;color:#fff;white-space:nowrap;line-height:1.2}' +
+    '.lc-li{height:78%;aspect-ratio:1/1;background-position:center;background-size:cover;background-repeat:no-repeat;border-radius:.2em;justify-self:start}';
 
   function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
   function num(v, d, lo, hi) { var n = parseFloat(v); if (!isFinite(n)) n = d; return Math.min(hi, Math.max(lo, n)); }
@@ -70,7 +80,9 @@
     'weather-slide': { name: 'Météo', icon: '⛅', logo: 'weather', color: '#E0A526', refresh: 10 * 60000 },
     agenda: { name: 'Calendrier', icon: '📅', color: '#2E8B57', refresh: 60000 },
     rss: { name: 'Flux RSS', icon: '📰', logo: 'rss', color: '#C0485A', refresh: 5 * 60000 },
-    'ha-sensors': { name: 'Capteurs', icon: '🌡', logo: 'ha', color: '#41BDF5', refresh: 30000 }
+    'ha-sensors': { name: 'Capteurs', icon: '🌡', logo: 'ha', color: '#41BDF5', refresh: 30000 },
+    dataset: { name: 'Jeu de données', icon: '▦', color: '#5A6B80', refresh: 60000 },   // §139 : copie gardée par le serveur, relue chaque minute
+    screen: { name: 'Cet écran', icon: '⌂', color: '#0B1F3A', refresh: 5 * 60000 }
   };
   var WMO = [[[0], '☀️'], [[1, 2], '🌤️'], [[3], '☁️'], [[45, 48], '🌫️'], [[51, 53, 55, 56, 57], '🌦️'],
     [[61, 63, 65, 66, 67, 80, 81, 82], '🌧️'], [[71, 73, 75, 77, 85, 86], '❄️'], [[95, 96, 99], '⛈️']];
@@ -101,8 +113,118 @@
     var n = parseFloat(x.state);
     return (isFinite(n) && /^-?[\d.]+$/.test(x.state) ? (Math.round(n * 10) / 10 + '').replace('.', ',') : x.state) + (x.unit ? ' ' + x.unit : '');
   }
+  /* ---------- Jeux de données et « Cet écran » (§139) ----------
+     Jeu : { kind: 'table', columns: [{ key, label, type }], rows: [[…]], readAt } (valeurs en texte : nombres invariants, dates ISO, true/false).
+     Cet écran : { kind: 'screen', name, zone, area, params: { clé: valeur }, labels: { clé: nom } } ; filtres « @p.clé », « @name », « @zone ».
+     Champs d'un jeu : « col » (1re ligne), « r2.col » (2e ligne), « _count », « sum.col », « avg.col », « min.col », « max.col ». */
+  var SCREEN = '5c2ee0005c2e4e00a000000000000000';
+  function colIdx(d, key) { var c = (d && d.columns) || []; for (var i = 0; i < c.length; i++) if (c[i].key === key) return i; return -1; }
+  function colOf(d, key) { var i = colIdx(d, key); return i < 0 ? null : d.columns[i]; }
+  function fmtNum(n) { try { return n.toLocaleString('fr-CH', { maximumFractionDigits: 2 }); } catch (x) { return String(Math.round(n * 100) / 100); } }
+  /** Valeur d'une cellule mise en forme selon le type de sa colonne. */
+  function fmt(v, type, tz) {
+    if (v == null || v === '') return '';
+    var s = String(v);
+    if (type === 'number') { var n = parseFloat(s); return isFinite(n) ? fmtNum(n) : s; }
+    if (type === 'bool') return s === 'true' ? 'Oui' : s === 'false' ? 'Non' : s;
+    if (type === 'date') {
+      var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s), ms = m ? new Date(+m[1], +m[2] - 1, +m[3]).getTime() : Date.parse(s);
+      if (!isFinite(ms)) return s;
+      var k = dayKey(ms, tz), today = dayKey(Date.now(), tz), day;
+      try { day = new Date(ms).toLocaleDateString('fr-CH', tzo({ day: 'numeric', month: 'short' }, tz)); } catch (x) { day = k; }
+      if (m) return k === today ? 'aujourd\'hui' : k === dayKey(Date.now() + 864e5, tz) ? 'demain' : day;
+      return k === today ? hm(ms, tz) : (k === dayKey(Date.now() + 864e5, tz) ? 'demain' : day) + ' ' + hm(ms, tz);
+    }
+    return s;
+  }
+  function cmpVal(a, b, type) {
+    if (type === 'number') { var x = parseFloat(a), y = parseFloat(b); if (isFinite(x) && isFinite(y)) return x - y; }
+    if (type === 'date') { var p = Date.parse(a), q = Date.parse(b); if (isFinite(p) && isFinite(q)) return p - q; }
+    return String(a == null ? '' : a).localeCompare(String(b == null ? '' : b), 'fr', { sensitivity: 'base', numeric: true });
+  }
+  /** Valeur de « Cet écran » citée par un filtre (« @p.etage », « @name »…) ; undefined tant que l'écran n'est pas connu. */
+  function screenVal(o, ref) {
+    var s = o.data && o.data[SCREEN];
+    if (!s || s.error) return undefined;
+    var k = String(ref).slice(1);
+    return k.indexOf('p.') === 0 ? (s.params && s.params[k.slice(2)]) || '' : s[k] || '';
+  }
+  /** Condition d'une ligne (filtre ou règle de couleur) ; une colonne absente ne filtre pas. */
+  function cond(f, d, row, o) {
+    var c = colOf(d, f.key); if (!c) return true;
+    var v = row[colIdx(d, f.key)], w = f.val == null ? '' : String(f.val);
+    if (w.charAt(0) === '@') { var sv = screenVal(o, w); if (sv === undefined) return true; w = String(sv); }
+    v = v == null ? '' : String(v).trim(); w = w.trim();
+    var t = c.type === 'number' && !isFinite(parseFloat(w)) ? 'text' : c.type;
+    switch (f.op) {
+      case 'ne': return cmpVal(v, w, t) !== 0;
+      case 'contains': return w !== '' && v.toLowerCase().indexOf(w.toLowerCase()) !== -1;
+      case 'gt': return cmpVal(v, w, t) > 0;
+      case 'lt': return cmpVal(v, w, t) < 0;
+      case 'empty': return v === '';
+      case 'notempty': return v !== '';
+      default: return cmpVal(v, w, t) === 0;
+    }
+  }
+  /** Lignes d'une liste : filtrées (toutes les conditions), triées. */
+  function tableRows(d, e, o) {
+    var rows = ((d && d.rows) || []).slice(), fl = e.filter || [];
+    rows = rows.filter(function (r) { for (var i = 0; i < fl.length; i++) if (fl[i] && fl[i].key && !cond(fl[i], d, r, o)) return false; return true; });
+    var so = e.sort && colOf(d, e.sort.key);
+    if (so) {
+      var i = colIdx(d, e.sort.key), dir = e.sort.dir === 'desc' ? -1 : 1;
+      rows.sort(function (a, b) {
+        var x = a[i], y = b[i];
+        if (x == null || x === '') return y == null || y === '' ? 0 : 1;   // vides en dernier
+        if (y == null || y === '') return -1;
+        return dir * cmpVal(x, y, so.type);
+      });
+    }
+    return rows;
+  }
+  /** Valeur d'un champ d'un jeu de données (null : pas de valeur). */
+  function tableField(d, key, tz) {
+    var rows = d.rows || [];
+    if (key === '_count') return '' + rows.length;
+    var m = /^(sum|avg|min|max)\.(.+)$/.exec(key);
+    if (m) {
+      var i = colIdx(d, m[2]); if (i < 0) return null;
+      var ns = rows.map(function (r) { return parseFloat(r[i]); }).filter(isFinite);
+      if (!ns.length) return null;
+      var v = m[1] === 'sum' || m[1] === 'avg' ? ns.reduce(function (a, b) { return a + b; }, 0) : m[1] === 'min' ? Math.min.apply(null, ns) : Math.max.apply(null, ns);
+      return fmtNum(m[1] === 'avg' ? v / ns.length : v);
+    }
+    var r = /^r(\d+)\.(.+)$/.exec(key), n = r ? +r[1] - 1 : 0, c = colOf(d, r ? r[2] : key);
+    if (!c || !rows[n]) return null;
+    return fmt(rows[n][colIdx(d, c.key)], c.type, tz);
+  }
+  /** Nom d'un champ d'un jeu (mode « Noms des champs ») ; src : données reçues, ou la source connue de l'éditeur (cols). */
+  function tableLabel(src, key) {
+    var cols = (src && (src.columns || src.cols)) || [], L = function (k) { for (var i = 0; i < cols.length; i++) if (cols[i].key === k) return cols[i].label || k; return k; };
+    if (key === '_count') return 'Nombre de lignes';
+    var m = /^(sum|avg|min|max)\.(.+)$/.exec(key);
+    if (m) return ({ sum: 'Somme', avg: 'Moyenne', min: 'Minimum', max: 'Maximum' })[m[1]] + ' · ' + L(m[2]);
+    var r = /^r(\d+)\.(.+)$/.exec(key);
+    return r ? L(r[2]) + ' (ligne ' + r[1] + ')' : L(key);
+  }
+
   /** Champs d'une source : [{ key, label, value(données, fuseau) }] ; les capteurs dépendent des données reçues (une entrée par entité). */
   function fields(app, d) {
+    if (app === 'dataset') {
+      var cs = (d && d.columns) || [], out = [];
+      cs.forEach(function (c) { out.push({ key: c.key, label: c.label || c.key, value: function (d, tz) { return tableField(d, c.key, tz); } }); });
+      out.push({ key: '_count', label: 'Nombre de lignes', value: function (d) { return tableField(d, '_count'); } });
+      cs.forEach(function (c) { if (c.type === 'number') out.push({ key: 'sum.' + c.key, label: 'Somme · ' + (c.label || c.key), value: function (d) { return tableField(d, 'sum.' + c.key); } }); });
+      return out;
+    }
+    if (app === 'screen') {
+      var f = [
+        { key: 'name', label: 'Nom de l\'écran', value: function (d) { return d.name; } },
+        { key: 'zone', label: 'Zone', value: function (d) { return d.zone; } },
+        { key: 'area', label: 'Aire', value: function (d) { return d.area; } }];
+      for (var pk in ((d && d.labels) || {})) (function (k) { f.push({ key: 'p.' + k, label: d.labels[k], value: function (d) { return d.params ? d.params[k] : null; } }); })(pk);
+      return f;
+    }
     if (app === 'weather-slide') return [
       { key: 'city', label: 'Ville', value: function (d) { return d.city; } },
       { key: 'temp', label: 'Température', value: function (d) { return rnd(d.temp); } },
@@ -138,7 +260,12 @@
   function srcOf(o, id) { return (o.sources && o.sources[id]) || null; }   // { app, name } : sources connues (éditeur) ; sur l'écran, déduites des données
   /** Valeur (ou nom, mode « Noms des champs ») d'un champ relié. */
   function fieldText(id, key, o, fb) {
-    var d = o.data && o.data[id], s = srcOf(o, id), app = s ? s.app : d ? ({ weather: 'weather-slide', agenda: 'agenda', rss: 'rss' })[d.kind] || (d.entities ? 'ha-sensors' : '') : '';
+    var d = o.data && o.data[id], s = srcOf(o, id), app = s ? s.app : d ? ({ weather: 'weather-slide', agenda: 'agenda', rss: 'rss', table: 'dataset', screen: 'screen' })[d.kind] || (d.entities ? 'ha-sensors' : '') : '';
+    if (app === 'dataset') {   // jeu de données : toutes les clés (« r2.col », « avg.col »…), pas seulement celles du menu
+      if (o.names) return '{' + tableLabel(d && d.columns ? d : s, key) + '}';
+      var tv = d && !d.error ? tableField(d, key, o.tz) : null;
+      return tv == null || tv === '' ? (fb || '—') : String(tv);
+    }
     var f = fields(app, d), def = null;
     for (var i = 0; i < f.length; i++) if (f[i].key === key) def = f[i];
     if (o.names) return '{' + (def ? def.label : key.replace(/^e:/, '')) + '}';
@@ -188,6 +315,55 @@
     return '<div class="' + cls + '" style="' + st + '">' + h + '</div>';
   }
 
+  /* Liste reliée (§139) : e = { source, cols: [{ key, as: text|small|pill|image, align, w }], rows, sort: { key, dir }, filter: [{ key, op, val }],
+     rules: [{ key, op, val, color }] (1re règle vraie : couleur des pastilles, sinon du texte de la ligne), page: pages|scroll|cut, sec, head, accent, line, empty }.
+     Hauteur d'une ligne = hauteur du calque / nombre de lignes : la même dans l'éditeur et sur l'écran. */
+  function safeUrl(u) { u = String(u || ''); return /^(https?:\/\/|\/media\/)[^"'()<>\s]+$/.test(u) ? u : ''; }
+  function listHtml(e, o) {
+    var d = o.data && o.data[e.source], s = srcOf(o, e.source), st = txs(e).replace(/text-align:[a-z]+;/, '');
+    if (!d || d.error) {
+      var msg = d && d.error ? 'Données indisponibles' : o.player ? '' : 'Chargement des données…';
+      return '<div class="lc-app" style="' + st + '"><div class="lc-wait">▦ ' + esc(s ? s.name : 'Jeu de données') + (msg ? '<br>' + msg : '') + '</div></div>';
+    }
+    var cols = (e.cols || []).filter(function (c) { return c && colOf(d, c.key); });
+    if (!cols.length) return '<div class="lc-app" style="' + st + '"><div class="lc-wait">Choisissez les colonnes de la liste</div></div>';
+    var all = tableRows(d, e, o);
+    if (!all.length) return '<div class="lc-app" style="' + st + '"><div class="lc-wait" style="font-size:.8em">' + esc(e.empty || 'Aucune ligne à afficher') + '</div></div>';
+    var n = Math.round(num(e.rows, 5, 1, 40)), headH = e.head ? num(e.size, 40, 4, 2000) * 1.1 : 0, rowH = Math.max(4, (num(e.h, 400, 10, 1e5) - headH) / n);
+    var line = col(e.line, '') ? 'border-bottom:1px solid ' + e.line + ';' : '', accent = col(e.accent, '#3B82C4');
+    // colonnes de la grille : un texte prend sa part (w), une pastille ou une image sa taille ; « small » se range sous la colonne précédente
+    var groups = [];
+    cols.forEach(function (c) { if (c.as === 'small' && groups.length) groups[groups.length - 1].sub.push(c); else groups.push({ c: c, sub: [] }); });
+    var grid = groups.map(function (g) { return g.c.as === 'pill' || g.c.as === 'image' ? 'auto' : num(g.c.w, 1, .2, 10) + 'fr'; }).join(' ');
+    function rule(r) { var l = e.rules || []; for (var i = 0; i < l.length; i++) if (l[i] && l[i].key && cond(l[i], d, r, o)) return col(l[i].color, ''); return ''; }
+    function val(c, r) { var cc = colOf(d, c.key); return fmt(r[colIdx(d, c.key)], cc.type, o.tz); }
+    function row(r) {
+      var rc = rule(r), pill = false, h = '';
+      groups.forEach(function (g) {
+        var c = g.c, al = 'text-align:' + align(c.align);
+        if (c.as === 'image') { var u = safeUrl(r[colIdx(d, c.key)]); h += '<span class="lc-li"' + (u ? ' style="background-image:url(\'' + esc(u) + '\')"' : '') + '></span>'; return; }
+        if (c.as === 'pill') { pill = true; h += '<span class="lc-lp" style="background:' + (rc || accent) + '">' + esc(val(c, r)) + '</span>'; return; }
+        h += '<span class="lc-lt" style="' + al + '">' + esc(val(c, r)) + g.sub.map(function (x) { return '<small style="text-align:' + align(x.align) + '">' + esc(val(x, r)) + '</small>'; }).join('') + '</span>';
+      });
+      return '<div class="lc-lr" style="grid-template-columns:' + grid + ';height:' + rowH + 'px;' + line + (rc && !pill ? 'color:' + rc + ';' : '') + '">' + h + '</div>';
+    }
+    var head = e.head ? '<div class="lc-lh" style="grid-template-columns:' + grid + ';height:' + headH + 'px">' + groups.map(function (g) {
+      var cc = colOf(d, g.c.key); return '<span style="text-align:' + (g.c.as === 'pill' ? 'right' : align(g.c.align)) + '">' + esc(g.c.label || cc.label || cc.key) + '</span>';
+    }).join('') + '</div>' : '';
+    var body, mode = e.page === 'scroll' || e.page === 'cut' ? e.page : 'pages', sec = num(e.sec, 8, 2, 120);
+    if (mode === 'cut' || all.length <= n) body = '<div class="lc-pg">' + all.slice(0, n).map(row).join('') + '</div>';
+    else if (mode === 'scroll') {
+      var rs = all.map(row).join('');   // deux fois la liste : le défilement boucle sans saut
+      body = '<div class="lc-ls" style="animation-duration:' + Math.round(all.length * sec / n * 10) / 10 + 's">' + rs + rs + '</div>';
+    } else {
+      var pages = Math.ceil(all.length / n), cur = Math.floor(Date.now() / (sec * 1000)) % pages;
+      body = '';
+      for (var p = 0; p < pages; p++) body += '<div class="lc-pg" data-pg="' + p + '"' + (p === cur ? '' : ' style="display:none"') + '>' + all.slice(p * n, p * n + n).map(row).join('') + '</div>';
+      return '<div class="lc-list" style="' + st + '">' + head + '<div class="lc-lb" data-live="pages" data-n="' + pages + '" data-sec="' + sec + '">' + body + '</div></div>';
+    }
+    return '<div class="lc-list" style="' + st + '">' + head + '<div class="lc-lb">' + body + '</div></div>';
+  }
+
   // QR code : tracé du serveur ; en attendant (éditeur), un motif neutre
   function qrSvg(e) {
     var fg = col(e.fg, '#000000'), parts = (e.qr || '').split('|'), n = parseInt(parts[0], 10), path = parts[1] || '';
@@ -200,6 +376,7 @@
     var t = e.type;
     if (t === 'text') return '<div class="lc-tx" style="' + txs(e) + '">' + textHtml(e, o) + '</div>';
     if (t === 'app') return block(e, o);
+    if (t === 'list') return listHtml(e, o);
     if (t === 'shape') {
       var fill = col(e.fill, '#3B82C4');
       if (e.kind === 'arrow') return '<svg viewBox="0 0 100 60" preserveAspectRatio="none" width="100%" height="100%" style="display:block"><path d="M0 21H60V0L100 30L60 60V39H0Z" fill="' + fill + '"/></svg>';
@@ -233,23 +410,26 @@
     fields: fields,
     fieldText: fieldText,
     TOKEN: TOKEN,
-    /** Sources utilisées par un document (blocs et champs), sans doublon. */
+    SCREEN: SCREEN,
+    tableLabel: tableLabel,
+    /** Sources utilisées par un document (blocs, listes, champs ; « Cet écran » si un filtre de liste cite l'écran), sans doublon. */
     sources: function (doc) {
       var ids = [], els = (doc && doc.els) || [];
       function add(id) { if (id && ids.indexOf(id) === -1) ids.push(id); }
       for (var i = 0; i < els.length; i++) {
         var e = els[i], m;
-        if (e.type === 'app') add(e.source);
+        if (e.type === 'app' || e.type === 'list') add(e.source);
+        if (e.type === 'list') (e.filter || []).forEach(function (f) { if (f && String(f.val || '').charAt(0) === '@') add(SCREEN); });
         if (e.type === 'text') { TOKEN.lastIndex = 0; while ((m = TOKEN.exec(String(e.text || '')))) add(m[1]); }
       }
       return ids;
     },
-    /** Redessine les calques reliés à des données (blocs, textes à champs) sans toucher aux autres (bandeaux, images). */
+    /** Redessine les calques reliés à des données (blocs, listes, textes à champs) sans toucher aux autres (bandeaux, images). */
     refresh: function (root, doc, o) {
       var els = (doc && doc.els) || [];
       for (var i = 0; i < els.length; i++) {
         var e = els[i];
-        if (e.type !== 'app' && !hasFields(e)) continue;
+        if (e.type !== 'app' && e.type !== 'list' && !hasFields(e)) continue;
         var n = root.querySelector('.lc-el[data-id="' + String(e.id).replace(/["\\]/g, '') + '"]');
         if (n) { var h = inner(e, o); if (n.innerHTML !== h) n.innerHTML = h; }
       }
@@ -316,6 +496,11 @@
       var list = root.querySelectorAll('[data-live]');
       for (var i = 0; i < list.length; i++) {
         var n = list[i], k = n.getAttribute('data-live'), v;
+        if (k === 'pages') {   // liste reliée en pages : la page de l'instant (la même sur tous les écrans à l'heure)
+          var np = +n.getAttribute('data-n') || 1, cur = Math.floor(Date.now() / ((+n.getAttribute('data-sec') || 8) * 1000)) % np;
+          for (var c = n.firstChild; c; c = c.nextSibling) { var on = +c.getAttribute('data-pg') === cur; if ((c.style.display !== 'none') !== on) c.style.display = on ? '' : 'none'; }
+          continue;
+        }
         v = k === 'clock' ? timeText(n.getAttribute('data-sec') === '1', tz) : k === 'date' ? dateText(tz) : 'J-' + daysTo(n.getAttribute('data-until'));
         if (n.textContent !== v) n.textContent = v;
       }
@@ -372,7 +557,7 @@
     var ids = C.sources(doc);
     for (var si = 0; si < ids.length; si++) (function (id) {
       if (!h.source) return;
-      var app = null;
+      var app = id === SCREEN ? 'screen' : h.settings['ds:' + id] != null ? 'dataset' : null;   // jeu de données : réglage « ds:… » posé à la publication
       for (var j = 0; j < doc.els.length; j++) if (doc.els[j].type === 'app' && doc.els[j].source === id) app = doc.els[j].app;
       h.source(id, function (d) { if (!d) return; o.data[id] = d; C.refresh(st, doc, o); }, (SRC[app] || {}).refresh || 5 * 60000);
     })(ids[si]);

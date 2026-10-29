@@ -520,6 +520,12 @@ public class Tenant
     /// <summary>Compte Home Assistant de l'organisation (un par organisation) : capteurs, interrupteurs et lumières des widgets Home Assistant. Null : pas connecté.</summary>
     public HomeAssistantAccount? HomeAssistant { get; set; }
 
+    /// <summary>Intégrations personnalisées (§139) : connexions aux systèmes de l'organisation (API web, fichiers) et jeux de données lus. Voir <see cref="DataSetService"/>.</summary>
+    public List<DataConnection> DataConnections { get; set; } = new();
+    public List<DataSet> DataSets { get; set; } = new();
+    /// <summary>Relais Linkii installés dans le réseau de l'organisation (§139, lot 4) : lisent ses bases et API internes pour Linkii.</summary>
+    public List<DataRelay> DataRelays { get; set; } = new();
+
     // Compte Google connecté par l'organisation (« Se connecter avec Google », lecture seule), partagé par Google Calendar et Google Drive.
     // GoogleScopes : accès accordés (agendas, fichiers Drive). Jeton de renouvellement chiffré (SecretBox).
     public string GoogleRefreshToken { get; set; } = "";
@@ -687,6 +693,9 @@ public class Screen : IClientOwned, IAreaOwned, IOwned
     public string? DeliveryStage { get; set; }         // downloading | ready
     public DateTime? DeliveryUtc { get; set; }
     public DateTime? LastSeenUtc { get; set; }
+
+    /// <summary>Paramètres d'écran (§139) : nom et valeur libres (« Étage » = 2), lus par les compositions (source « Cet écran ») pour qu'un seul modèle serve à tous les écrans.</summary>
+    public List<ScreenParam> Params { get; set; } = new();
 
     public string ScreenType { get; set; } = "tv";
     public string Orientation { get; set; } = "landscape";   // landscape | portrait
@@ -1456,4 +1465,11 @@ public static class MediaFiles
         }
         catch (IOException) { }
     }
+}
+
+/// <summary>Paramètre d'un écran (§139) : clé = <see cref="DataTables.Slug"/> du nom, lue par le champ {{écran:p.clé}} et les filtres des listes reliées.</summary>
+public class ScreenParam
+{
+    public string Name { get; set; } = "";
+    public string Value { get; set; } = "";
 }
