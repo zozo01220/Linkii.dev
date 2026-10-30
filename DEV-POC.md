@@ -2497,7 +2497,7 @@ Remplace l'organisation en onglets Structure / Membres / Rôles et l'arbre du §
   4. L'apparence (police, couleurs, lignes à la fois, style des colonnes) reste dans la barre au-dessus de la page, tiroir fermé.
 - **Compatibilité** : une colonne en pastille marquée « à gauche » par l'ancien panneau (sans effet jusque-là) passe à gauche ; « Régler › Droite » la remet à droite.
 
-## 142. Format des nombres : décimales, milliers, monnaie (30 octobre 2026) : codé selon `maquettes/formats-nombres.html` (4 scènes, validée), compile ; vérifié dans le navigateur (colonne, champ de texte, enregistrement, rechargement) ; pas vu sur un écran réel
+## 142. Format des nombres : décimales, milliers, monnaie (30 octobre 2026) : codé selon `maquettes/formats-nombres.html` (4 scènes, validée), compile ; vérifié dans le navigateur (colonne, champ de texte, enregistrement, rechargement) ; commité et poussé (6064a55) ; pas vu sur un écran réel
 
 - **Demande** : avec une base SQL (CA du jour par établissement, nombre de transactions, panier moyen), « 16,9 » devait s'écrire « 16,90 » et « 15000 » « 15’000 », avec un symbole monétaire au choix (au moins CHF, Euro, Dollar), **dans les colonnes d'une liste et dans les champs d'un texte**.
 - **Valeurs par défaut** (`composition.js`, `numFmt`), sans aucun réglage : milliers séparés par « ’ » (15’000), virgule décimale ; **décimales automatiques** : dans une colonne, 0 si toutes ses valeurs sont entières, sinon 2 pour toutes (11’851,90 et 991,40 restent alignés) ; pour un champ seul, 0 pour un entier, 2 sinon (le panier moyen 16,9097 donne 16,91). « Nombre de lignes », sommes, moyennes, minimum et maximum suivent la même règle.
