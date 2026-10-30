@@ -24,6 +24,8 @@
   let myTpl = [], tplTab = 'galerie', canImport = false;   // « Mes modèles » (§84), import d'images permis par le niveau de droits
   let drag = null, guides = null, images = [], tplCat = 'Tous', mediaSearch = '', popCb = null, nudge = null, qrWait = {}, fmtNew = false, fmtO = 'land';
   let sources = [], srcData = {}, srcBusy = {}, srcAt = {}, names = false, fieldAnchor = null;   // sources de données (§85) et mode « Noms des champs »
+  let dv = { view: 'sources', set: null, row: 0, open: new Set(['@used']), hidden: false, q: '', ren: null };   // panneau Données (§140) : vue, jeu ouvert, ligne montrée, groupes ouverts, recherche, champ renommé
+  let lcOpen = new Set(), lcFor = null, lcDrag = null, sheet = null, canEditData = false;   // cartes de colonnes ouvertes (liste lcFor), tableau en grand, droit de renommer les champs d'un jeu
   let previewScreen = '';   // « Cet écran » (§139) : écran dont les paramètres servent à l'aperçu (vide : le premier qui en a)
   const q = s => root.querySelector(s);
   const cur = () => D.els.find(e => e.id === selId) || null;
@@ -137,7 +139,8 @@
     LC().ensure();
     images = o.images || [];
     sources = o.sources || []; srcData = {}; srcBusy = {}; srcAt = {}; names = false;
-    myTpl = o.myTemplates || []; canImport = !!o.canImport; tplTab = 'galerie';
+    myTpl = o.myTemplates || []; canImport = !!o.canImport; canEditData = !!o.canEditData; tplTab = 'galerie';
+    dv = { view: 'sources', set: null, row: 0, open: new Set(['@used']), hidden: false, q: '', ren: null }; lcOpen = new Set(); lcFor = null; lcDrag = null; sheet = null;
     name = savedName = o.name || 'Composition';
     let doc = null;
     try { doc = o.doc ? JSON.parse(o.doc) : null; } catch (x) { doc = null; }
@@ -169,7 +172,7 @@
     if (ac) ac.abort();
     if (timer) clearInterval(timer);
     if (root) root.innerHTML = '';
-    root = null; net = null; ac = null; timer = null;
+    root = null; net = null; ac = null; timer = null; sheet = null;
   }
 
   const ICO = {
@@ -306,7 +309,7 @@
   // ---------- historique et enregistrement ----------
   function push() { H = H.slice(0, hi + 1); H.push(JSON.stringify(D)); hi = H.length - 1; if (H.length > 100) { H.shift(); hi--; } }
   function commit() { if (!root) return; render(); push(); setDirty(); q('#ce-undo').disabled = hi <= 0; q('#ce-redo').disabled = true; }
-  function restore(json) { D = JSON.parse(json); if (!cur()) selId = null; render(); renderCtx(); setDirty(); }
+  function restore(json) { D = JSON.parse(json); if (!cur()) selId = null; render(); renderCtx(); setDirty(); if (panelName === 'donnees' && panelOpen) renderPanel(); }
   function undo() { if (hi > 0) restore(H[--hi]); }
   function redo() { if (hi < H.length - 1) restore(H[++hi]); }
   const isDirty = () => JSON.stringify(D) !== savedDoc || name !== savedName;
@@ -387,7 +390,9 @@
     on(w, 'pointerup', () => { if (!drag) return; const m = drag.moved; drag = null; guides = null; if (m) { commit(); renderCtx(); } else drawOverlay(); });   // renderCtx : la rotation et la taille affichées suivent
     on(frame, 'dblclick', ev => {
       const n = ev.target.closest('.lc-el'); if (!n) return;
-      const e = byId(n.dataset.id); if (!e || e.type !== 'text' || e.locked) return;
+      const lh = ev.target.closest('[data-lh]'), le = byId(n.dataset.id);
+      if (lh && le && le.type === 'list' && !le.locked) { renameHead(le, lh); return; }
+      const e = le; if (!e || e.type !== 'text' || e.locked) return;
       const tx = n.querySelector('.lc-tx');
       tx.querySelectorAll('.lc-fd').forEach(f => f.contentEditable = 'false');   // champ relié : une pastille, supprimée ou gardée d'un bloc
       editing = true; tx.contentEditable = 'true'; tx.focus();
@@ -399,7 +404,19 @@
     });
 
     // glisser depuis le panneau vers la page
-    on(panel, 'dragstart', ev => { const a = ev.target.closest('[data-add]'); if (a) ev.dataTransfer.setData('text/linkii-compo', a.dataset.add); });
+    on(panel, 'dragstart', ev => {
+      const gr = ev.target.closest && ev.target.closest('.grip');
+      if (gr) { lcDrag = +gr.closest('[data-ci]').dataset.ci; ev.dataTransfer.setData('text/plain', ''); ev.dataTransfer.effectAllowed = 'move'; return; }   // ordre des colonnes de la liste
+      const a = ev.target.closest('[data-add]'); if (a) ev.dataTransfer.setData('text/linkii-compo', a.dataset.add);
+    });
+    on(panel, 'dragover', ev => { if (lcDrag != null && ev.target.closest('[data-ci]')) ev.preventDefault(); });
+    on(panel, 'drop', ev => {
+      const t = ev.target.closest('[data-ci]'), e = cur(); if (lcDrag == null || !t || !e || e.type !== 'list') return;
+      ev.preventDefault();
+      const to = +t.dataset.ci; if (to !== lcDrag) { e.cols.splice(to, 0, e.cols.splice(lcDrag, 1)[0]); lcOpen = new Set(); commit(); renderPanel(); }
+      lcDrag = null;
+    });
+    on(panel, 'dragend', () => { lcDrag = null; });
     on(area, 'dragover', ev => { if (ev.dataTransfer.types.includes('text/linkii-compo')) ev.preventDefault(); });
     on(area, 'drop', ev => {
       const key = ev.dataTransfer.getData('text/linkii-compo'); if (!key) return;
@@ -408,8 +425,13 @@
       addEl(key, { x: (ev.clientX - r.left) / z, y: (ev.clientY - r.top) / z });
     });
     on(panel, 'click', panelClick);
-    on(panel, 'change', ev => { if (ev.target.id === 'ce-scrsel') { previewScreen = ev.target.value; loadSource(LC().SCREEN, true); } });
-    on(panel, 'input', ev => { if (ev.target.id === 'ce-msearch') { mediaSearch = ev.target.value; renderMediaGrid(); } });
+    on(panel, 'change', ev => { if (ev.target.id === 'ce-scrsel') { previewScreen = ev.target.value; loadSource(LC().SCREEN, true); return; } listInput(ev.target, true); });
+    on(panel, 'input', ev => {
+      const t = ev.target;
+      if (t.id === 'ce-msearch') { mediaSearch = t.value; renderMediaGrid(); return; }
+      if (t.id === 'ce-dq') { dv.q = t.value; renderPanel(); const n = q('#ce-dq'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; }
+      if (t.id !== 'ce-fren' && t.id !== 'ce-cpq') listInput(t, false);
+    });
 
     on(ctx, 'input', ev => {
       const t = ev.target, key = t.dataset.k, e = cur(); if (!key || !e) return;
@@ -519,6 +541,7 @@
     if (!root) return;
     if (ev.key === 'Escape') {
       if (!q('#ce-pvw').hidden) return closePreview();
+      if (sheet) return closeSheet();
       if (!q('#ce-fmtscrim').hidden) return closeFormat();
       if (!q('#ce-tplscrim').hidden) { q('#ce-tplscrim').hidden = true; return; }
       closePop();
@@ -538,7 +561,15 @@
   }
 
   // ---------- sélection, ajout ----------
-  function select(id) { selId = id; drawOverlay(); renderLayers(); renderCtx(); }
+  function select(id) {
+    const was = cur(); selId = id; const e = cur();
+    drawOverlay(); renderLayers(); renderCtx();
+    if (e && e.type === 'list') {   // les données de la liste s'ouvrent à gauche (§140)
+      const reopen = !panelOpen; if (panelName !== 'donnees' || reopen) { panelName = 'donnees'; panelOpen = true; }
+      if (e !== was) { dv.ren = null; renderPanel(); loadSource(e.source); }
+      if (reopen) render();
+    } else if (was && was.type === 'list' && panelName === 'donnees') { Object.assign(dv, { view: 'set', set: was.source, q: '', ren: null }); renderPanel(); }
+  }
   function make(key) {
     const dark = lum(D.bg) < .5, ink = dark ? '#ffffff' : '#0B1F3A', s = k();
     const [kind, v] = key.split(':');
@@ -563,6 +594,7 @@
       e = { id: nid(), type: 'list', source: v, x: 0, y: 0, w: 1100, h: 520, font: 'IBM Plex Sans', size: 40, weight: 400, color: ink, align: 'left', ls: 0, lh: 1.2, italic: false,
         rows: 5, page: 'pages', sec: 8, head: true, accent: '#3B82C4', line: dark ? '#23395A' : '#DDE3EA', empty: 'Aucune ligne à afficher', opacity: 1 };
       resetList(e);
+      e.name = nextName((sources.find(x => x.id === v) || {}).name || 'Liste');
     }
     else if (kind === 'field') {   // colonne glissée du panneau Données : un texte avec ce champ (clé « source:champ »)
       e = T({ w: 640, text: '{{' + key.slice(6) + '}}', size: 60, weight: 500, color: ink });
@@ -572,65 +604,120 @@
     if (e.type === 'shape' && e.kind === 'line') e.sw = Math.max(1, Math.round(e.sw * s));
     return e;
   }
-  // ---------- liste reliée (§139) ----------
-  const OPS = [['eq', '='], ['ne', '≠'], ['contains', 'contient'], ['gt', '>'], ['lt', '<'], ['empty', 'est vide'], ['notempty', 'n\'est pas vide']];
-  const AS = [['text', 'Texte'], ['small', 'Sous la précédente'], ['pill', 'Pastille'], ['image', 'Image']];
+  // ---------- liste reliée (§139, §140) ----------
+  const OPS = [['eq', 'est'], ['ne', 'n\'est pas'], ['contains', 'contient'], ['gt', 'plus grand que'], ['lt', 'plus petit que'], ['empty', 'est vide'], ['notempty', 'n\'est pas vide']];
+  const OPSYM = { eq: '=', ne: '≠', contains: 'contient', gt: '>', lt: '<', empty: 'vide', notempty: 'non vide' };
   const ALIGNS = [['left', 'À gauche'], ['center', 'Au centre'], ['right', 'À droite']];
   const opt = (list, v) => list.map(([a, b]) => `<option value="${esc(a)}" ${String(a) === String(v == null ? '' : v) ? 'selected' : ''}>${esc(b)}</option>`).join('');
-  /** Colonnes du jeu d'une liste : celles des données lues, sinon celles connues du serveur. */
-  function colsOf(id) { const d = srcData[id]; return (d && !d.error && d.columns) || ((sources.find(s => s.id === id) || {}).cols) || []; }
+  /** Colonnes d'un jeu : celles des données lues (sinon connues du serveur), avec le nom lisible et le masquage donnés au jeu. */
+  function colsOf(id) {
+    const s = sources.find(x => x.id === id) || {}, known = s.cols || [], d = srcData[id];
+    return ((d && !d.error && d.columns) || known).map(c => {
+      const kn = known.find(x => x.key === c.key) || {};
+      return { key: c.key, label: c.label || kn.label || c.key, type: c.type || kn.type || 'text', name: kn.name || '', hidden: !!kn.hidden };
+    });
+  }
+  const segs = c => String(c.label || c.key).split('.').filter(Boolean);
+  const technical = s => /[._]|[a-z][A-Z]/.test(s || '');
+  /** « LastStartedAt » → « Last started at », « next_run » → « Next run » ; les sigles restent en capitales. */
+  const humanize = s => String(s || '').replace(/_/g, ' ').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2').trim().split(/\s+/)
+    .map((x, i) => /^[A-Z0-9]{2,}$/.test(x) ? x : i ? x.toLowerCase() : x.charAt(0).toUpperCase() + x.slice(1).toLowerCase()).join(' ');
+  /** Nom lisible d'un champ : celui donné au jeu, sinon son nom d'origine rendu lisible (« Health.LastStartedAt » → « Last started at »). */
+  const fname = c => !c ? '' : c.name || (technical(c.label) ? humanize(segs(c).pop() || c.key) : c.label || c.key);
+  /** Groupe d'un champ : son préfixe (« Config.CustomSettings »), vide s'il n'en a pas. */
+  const fgroup = c => segs(c).slice(0, -1).join('.');
+  const keyName = (id, key) => fname(colsOf(id).find(c => c.key === key)) || key;
+  /** Lignes gardées par une liste (filtre, tri), comme sur l'écran. */
+  const keptRows = e => { const d = srcData[e.source]; return d && !d.error && d.columns ? LC().tableRows(d, e, opts()) : []; };
+  function colValues(e, key, rows) {
+    const d = srcData[e.source], i = d && d.columns ? d.columns.findIndex(c => c.key === key) : -1, t = (colsOf(e.source).find(c => c.key === key) || {}).type;
+    return i < 0 ? [] : (rows || keptRows(e)).map(r => LC().fmt(r[i], t));
+  }
   function resetList(e) {
-    const cs = colsOf(e.source).slice(0, 3);
-    e.cols = cs.map((c, i) => ({ key: c.key, as: 'text', align: i && (c.type === 'number' || c.type === 'date') ? 'right' : 'left', w: i ? 1 : 2 }));
+    const cs = colsOf(e.source).filter(c => !c.hidden && !autoHidden(e.source, c)).slice(0, 3);
+    e.cols = cs.map((c, i) => boolColors({ key: c.key, label: fname(c), as: 'text', align: i && (c.type === 'number' || c.type === 'date') ? 'right' : 'left', w: i ? 1 : 2 }, c));
     e.sort = null; e.filter = []; e.rules = [];
   }
-  /** Fenêtre d'un réglage de la liste sélectionnée : colonnes, tri, filtre (« Cet écran » possible), couleurs. Reste ouverte pendant les changements. */
+  /** Colonne Oui / Non : vert et rouge proposés (modifiables dans Couleurs). */
+  function boolColors(col, c) { if (c && c.type === 'bool') { if (!col.yc) col.yc = '#1E8E5A'; if (!col.nc) col.nc = '#C8372D'; } return col; }
+  /** Nom suivant libre pour une liste (« Plugins » → « Plugins 2 »). */
+  function nextName(base) {
+    const used = D.els.filter(x => x.type === 'list').map(x => x.name), b = String(base || 'Liste').replace(/ \d+$/, '');
+    if (!used.includes(b)) return b;
+    let n = 2; while (used.includes(b + ' ' + n)) n++;
+    return b + ' ' + n;
+  }
+  const filterText = e => (e.filter || []).filter(f => f && f.key).map(f => keyName(e.source, f.key) + ' ' + (OPSYM[f.op] || '=') +
+    (f.op === 'empty' || f.op === 'notempty' ? '' : ' ' + (String(f.val || '').charAt(0) === '@' ? 'cet écran' : f.val || '…'))).join(', ');
+  /** Fenêtre d'apparence de la liste sélectionnée (barre du haut) : lignes à la fois, colonnes (style, alignement, largeur), couleurs et règles. Reste ouverte pendant les changements. */
   function listPop(which) {
     const e = cur(), anchor = q('[data-act=l' + which + ']'); if (!e || e.type !== 'list' || !anchor) return;
-    const cs = colsOf(e.source), cOpts = v => opt(cs.map(c => [c.key, c.label || c.key]), v);
-    const scr = sources.find(s => s.app === 'screen'), scrOpts = scr ? (scr.cols || []).map(c => ['@' + c.key, 'Cet écran · ' + c.label]) : [];
+    const cs = colsOf(e.source), cOpts = v => opt(cs.map(c => [c.key, fname(c)]), v), type = key => (cs.find(c => c.key === key) || {}).type;
+    const title = c => esc(c.label || keyName(e.source, c.key));
     let h = '';
-    if (which === 'cols') {
-      h = '<div class="ce-pt">Colonnes de chaque ligne, de gauche à droite</div>' + (e.cols || []).map((c, i) => `<div class="ce-lrow" data-i="${i}">
-        <select data-f="key" aria-label="Colonne">${cOpts(c.key)}</select><select data-f="as" aria-label="Affichage">${opt(AS, c.as || 'text')}</select>
-        <select data-f="align" aria-label="Alignement">${opt(ALIGNS, c.align || 'left')}</select><select data-f="w" title="Largeur relative" aria-label="Largeur">${opt([[1, '×1'], [2, '×2'], [3, '×3'], [4, '×4']], c.w || 1)}</select>
-        <button class="ce-tb" data-o="up:${i}" data-keep="1" title="Plus à gauche" ${i ? '' : 'disabled'}>←</button><button class="ce-tb" data-o="del:${i}" data-keep="1" title="Retirer">×</button></div>`).join('') +
-        (cs.length ? `<button class="ce-mi" data-o="add" data-keep="1">+ Ajouter une colonne</button>` : '<div class="ce-pt">Colonnes inconnues : relisez le jeu de données.</div>') +
-        '<div class="ce-pt">« Sous la précédente » : en petit sous la colonne de gauche. « Pastille » : sur un fond de couleur (voir Couleurs).</div>';
-    } else if (which === 'sort') {
-      h = `<div class="ce-pt">Trier les lignes par</div><div class="ce-lrow"><select data-s="key" aria-label="Colonne"><option value="">Ordre de la source</option>${cOpts(e.sort && e.sort.key)}</select>
-        <select data-s="dir" aria-label="Sens">${opt([['asc', 'Croissant ↑'], ['desc', 'Décroissant ↓']], e.sort && e.sort.dir)}</select></div>`;
+    if (which === 'rows') {
+      h = `<div class="ce-pt">Lignes à l'écran</div>
+        <div class="ce-lrow"><span class="ce-lk">À la fois</span><select data-p="rows" data-t="n" aria-label="Lignes à la fois">${opt([3, 4, 5, 6, 8, 10, 12, 15].map(n => [n, n + ' lignes']), e.rows)}</select></div>
+        <div class="ce-lrow"><span class="ce-lk">S'il y en a plus</span><select data-p="page" aria-label="S'il y a plus de lignes">${opt([['pages', 'Pages qui alternent'], ['scroll', 'Défilement continu'], ['cut', 'Couper']], e.page || 'pages')}</select></div>` +
+        (e.page === 'cut' ? '' : `<div class="ce-lrow"><span class="ce-lk">${e.page === 'scroll' ? 'Vitesse' : 'Durée d\'une page'}</span><select data-p="sec" data-t="n" aria-label="Durée">${opt(e.page === 'scroll' ? [[2, 'Rapide'], [4, 'Normal'], [8, 'Lent']] : [[5, '5 s'], [8, '8 s'], [12, '12 s'], [20, '20 s'], [30, '30 s']], e.sec)}</select></div>`);
+    } else if (which === 'cols') {
+      h = '<div class="ce-pt">Apparence de chaque colonne. Le champ, le titre et les valeurs se règlent dans le panneau Données, à gauche.</div>' + (e.cols || []).map((c, i) => {
+        const b = type(c.key) === 'bool';
+        return `<div class="ce-lrow" data-i="${i}"><span class="ce-lk" title="${title(c)}">${title(c)}</span>
+          <select data-f="as" aria-label="Style">${opt(b ? [['text', 'Texte coloré'], ['pill', 'Pastille'], ['small', 'Sous la précédente']] : [['text', 'Texte'], ['small', 'Sous la précédente'], ['pill', 'Pastille'], ['image', 'Image']], c.as || 'text')}</select>
+          <select data-f="align" aria-label="Alignement">${opt(ALIGNS, c.align || 'left')}</select>
+          <select data-f="w" data-t="n" title="Largeur relative" aria-label="Largeur">${opt([[1, 'Étroite'], [2, 'Moyenne'], [3, 'Large'], [4, 'Très large']], c.w || 1)}</select></div>`;
+      }).join('') + '<div class="ce-pt">« Sous la précédente » : en petit sous la colonne de gauche. Une pastille ou une image prend sa propre largeur.</div>';
     } else {
-      const arr = which === 'filter' ? (e.filter || []) : (e.rules || []);
-      h = `<div class="ce-pt">${which === 'filter' ? 'Afficher seulement les lignes où… (toutes les conditions)' : 'Couleur des pastilles (ou du texte de la ligne) quand… (la première vraie)'}</div>` +
-        arr.map((f, i) => {
-          const ref = String(f.val || '').charAt(0) === '@', noVal = f.op === 'empty' || f.op === 'notempty';
-          return `<div class="ce-lrow" data-i="${i}"><select data-f="key" aria-label="Colonne">${cOpts(f.key)}</select><select data-f="op" aria-label="Condition">${opt(OPS, f.op || 'eq')}</select>` +
-            (noVal ? '' : (ref ? '' : `<input data-f="val" value="${esc(f.val || '')}" placeholder="valeur" aria-label="Valeur">`) +
-              (which === 'filter' && scrOpts.length ? `<select data-f="ref" title="Comparer à une valeur de l'écran qui affiche la composition" aria-label="Valeur de l'écran"><option value="">valeur fixe</option>${opt(scrOpts, ref ? f.val : '')}</select>` : '')) +
-            (which === 'rules' ? `<input type="color" data-f="color" value="${esc(f.color || '#C8372D')}" aria-label="Couleur">` : '') +
-            `<button class="ce-tb" data-o="del:${i}" data-keep="1" title="Retirer">×</button></div>`;
-        }).join('') + (cs.length ? '<button class="ce-mi" data-o="add" data-keep="1">+ Ajouter une condition</button>' : '') +
-        (which === 'filter' ? '<div class="ce-pt">« Cet écran · Étage » : chaque écran ne garde que ses lignes (paramètres d\'écran, dans Paramètres de l\'écran).</div>' : '');
+      const bools = (e.cols || []).map((c, i) => [c, i]).filter(([c]) => type(c.key) === 'bool');
+      h = `<div class="ce-pt">Couleurs de la liste</div>
+        <div class="ce-lrow"><span class="ce-lk">Pastilles</span><input type="color" data-p="accent" value="${esc(e.accent || '#3B82C4')}" aria-label="Couleur des pastilles"></div>
+        <div class="ce-lrow"><span class="ce-lk">Séparateurs</span><input type="color" data-p="line" value="${esc(e.line || '#DDE3EA')}" aria-label="Couleur des séparateurs"></div>` +
+        bools.map(([c, i]) => `<div class="ce-lrow" data-i="${i}"><span class="ce-lk">${title(c)} · « ${esc(c.yes || 'Oui')} »</span><input type="color" data-f="yc" value="${esc(c.yc || '#1E8E5A')}" aria-label="Couleur de ${esc(c.yes || 'Oui')}">
+          <span class="ce-lk">« ${esc(c.no || 'Non')} »</span><input type="color" data-f="nc" value="${esc(c.nc || '#C8372D')}" aria-label="Couleur de ${esc(c.no || 'Non')}"></div>`).join('') +
+        '<div class="ce-pt">Règles : couleur des pastilles (ou du texte de la ligne) quand… La première vraie l\'emporte.</div>' +
+        (e.rules || []).map((f, i) => {
+          const noVal = f.op === 'empty' || f.op === 'notempty';
+          return `<div class="ce-lrow" data-r="${i}"><select data-g="key" aria-label="Champ">${cOpts(f.key)}</select><select data-g="op" aria-label="Condition">${opt(OPS, f.op || 'eq')}</select>` +
+            (noVal ? '' : `<input data-g="val" value="${esc(f.val || '')}" placeholder="valeur" aria-label="Valeur">`) +
+            `<input type="color" data-g="color" value="${esc(f.color || '#C8372D')}" aria-label="Couleur"><button class="ce-tb" data-o="del:${i}" data-keep="1" title="Retirer">×</button></div>`;
+        }).join('') + (cs.length ? '<button class="ce-mi" data-o="add" data-keep="1">+ Ajouter une règle</button>' : '');
     }
     const done = () => { commit(); renderCtx(); listPop(which); };
     openPop(anchor, h, o => {
-      const [op, i] = String(o).split(':'), list = which === 'cols' ? (e.cols = e.cols || []) : which === 'filter' ? (e.filter = e.filter || []) : (e.rules = e.rules || []);
-      if (op === 'add') list.push(which === 'cols' ? { key: (cs.find(c => !list.some(x => x.key === c.key)) || cs[0]).key, as: 'text', align: 'left', w: 1 }
-        : which === 'filter' ? { key: cs[0].key, op: 'eq', val: '' } : { key: cs[0].key, op: 'eq', val: '', color: '#C8372D' });
-      if (op === 'del') list.splice(+i, 1);
-      if (op === 'up' && +i > 0) list.splice(+i - 1, 0, list.splice(+i, 1)[0]);
+      const [op, i] = String(o).split(':'); e.rules = e.rules || [];
+      if (op === 'add') e.rules.push({ key: cs[0].key, op: 'eq', val: '', color: '#C8372D' });
+      if (op === 'del') e.rules.splice(+i, 1);
       done();
     });
     const p = q('#ce-pop'); p.classList.add('ce-lpop');
-    p.addEventListener('change', ev => {
-      const t = ev.target, row = t.closest('[data-i]');
-      if (t.dataset.s) { e.sort = Object.assign({ key: '', dir: 'asc' }, e.sort || {}, { [t.dataset.s]: t.value }); if (!e.sort.key) e.sort = null; done(); return; }
-      if (!row || !t.dataset.f) return;
-      const it = (which === 'cols' ? e.cols : which === 'filter' ? e.filter : e.rules)[+row.dataset.i]; if (!it) return;
-      if (t.dataset.f === 'ref') it.val = t.value; else it[t.dataset.f] = t.dataset.f === 'w' ? +t.value : t.value;
-      done();
-    });
+    const apply = t => {
+      let v = t.value; if (t.dataset.t === 'n') v = +v;
+      if (t.dataset.p) { e[t.dataset.p] = v; return; }
+      const rr = t.closest('[data-r]'), row = t.closest('[data-i]');
+      if (rr && t.dataset.g) { const it = e.rules[+rr.dataset.r]; if (it) it[t.dataset.g] = v; return; }
+      if (row && t.dataset.f) { const c = e.cols[+row.dataset.i]; if (c) c[t.dataset.f] = v; }
+    };
+    p.addEventListener('input', ev => { if (ev.target.type === 'color') { apply(ev.target); render(); } });
+    p.addEventListener('change', ev => { apply(ev.target); done(); });
+  }
+  /** Titre d'une colonne modifié sur la page : double-clic sur l'en-tête de la liste. */
+  function renameHead(e, lh) {
+    const c = (e.cols || [])[+lh.dataset.lh]; if (!c) return;
+    editing = true; lh.contentEditable = 'true'; lh.classList.add('ce-lhedit'); lh.focus();
+    const r = document.createRange(); r.selectNodeContents(lh); const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    drawOverlay();
+    lh.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); lh.blur(); } if (ev.key === 'Escape') { ev.stopPropagation(); lh.textContent = c.label || ''; lh.blur(); } });
+    lh.addEventListener('blur', () => { const v = lh.textContent.trim().slice(0, 60); editing = false; if (v) c.label = v; commit(); renderCtx(); if (panelName === 'donnees') renderPanel(); }, { once: true });
+  }
+  /** Liste dupliquée à côté (sinon dessous), sous un nouveau nom : même source, à filtrer autrement. */
+  function dupList(e) {
+    const c = Object.assign(JSON.parse(JSON.stringify(e)), { id: nid(), locked: false, name: nextName(e.name || 'Liste') }), gap = Math.round(40 * k());
+    if (e.x + e.w * 2 + gap <= D.w) c.x = e.x + e.w + gap;   // à droite s'il y a la place, sinon dessous, sinon un peu décalée
+    else if (e.y + e.h * 2 + gap <= D.h) c.y = e.y + e.h + gap;
+    else { c.x = Math.min(D.w - e.w, e.x + gap); c.y = Math.min(D.h - e.h, e.y + gap); }
+    D.els.splice(D.els.indexOf(e) + 1, 0, c); selId = c.id; commit(); renderCtx(); renderPanel();
+    toast('Liste dupliquée : donnez-lui un nom et choisissez ses lignes gardées.');
   }
 
   function addEl(key, at) {
@@ -652,6 +739,7 @@
     if (textual(e)) { e.y = Math.round(cy - e.h / 2); }
     commit(); renderCtx();
     if (e.type === 'qr') fetchQr(e);
+    if (e.type === 'list') { panelName = 'donnees'; panelOpen = true; renderPanel(); }   // ses données s'ouvrent à gauche (§140)
     LC().sources({ els: [e] }).forEach(id => loadSource(id));   // bloc, liste reliée, champ glissé depuis le panneau Données
   }
   function lum(hex) {
@@ -687,6 +775,7 @@
     if (!editing) render();
     if (panelName === 'donnees' && panelOpen) renderPanel();
     if (q('#ce-pop.ce-fields')) drawFieldMenu();
+    if (sheet && sheet.set === id) drawSheet();
   }
   // Texte en cours d'écriture -> texte du document : les pastilles redeviennent « {{source:clé}} »
   function serialize(n) {
@@ -726,40 +815,358 @@
     r.deleteContents(); r.insertNode(span); r.setStartAfter(span); r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
     e.h = tx.closest('.lc-el').offsetHeight; drawOverlay();
   }
+  // ---------- panneau Données (§140) : sources, un jeu ouvert (champs groupés et valeurs), recherche ; données de la liste sélectionnée ----------
+  const DI = {
+    pen: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>',
+    hide: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7c1.9 0 3.5-.6 4.9-1.4"/></svg>',
+    show: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+    big: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>'
+  };
+  const TYI = { text: 'Aa', number: '12', date: '◷', bool: '✓', image: '▣', link: '↗' };
+  const GUIDV = /^\{?[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}\}?$/i;
+  /** Champ masqué d'office : vide sur toutes les lignes, ou identifiant technique (GUID) ; '' sinon. */
+  function autoHidden(id, c) {
+    const d = srcData[id]; if (!d || d.error || !d.columns || !(d.rows || []).length) return '';
+    const i = d.columns.findIndex(x => x.key === c.key); if (i < 0) return '';
+    const vs = d.rows.map(r => r[i] == null ? '' : String(r[i]).trim());
+    if (vs.every(v => v === '')) return 'vide sur toutes les lignes';
+    if (vs.every(v => v === '' || GUIDV.test(v))) return 'identifiant technique';
+    return '';
+  }
+  const hiddenWhy = (id, c) => c.hidden ? 'masqué' : autoHidden(id, c);
+  const at = id => srcAt[id] ? new Date(srcAt[id]).toLocaleTimeString('fr-CH', { hour: '2-digit', minute: '2-digit' }) : '';
+  const srcState = s => { const d = srcData[s.id]; return srcBusy[s.id] ? 'lecture…' : d && d.error ? d.error : d ? (d.readAt ? 'copie du ' + new Date(d.readAt).toLocaleString('fr-CH', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'à jour, lue à ' + at(s.id)) : 'pas encore lue'; };
+  const cellRaw = (id, c, r) => { const d = srcData[id], i = d && d.columns ? d.columns.findIndex(x => x.key === c.key) : -1; return r && i >= 0 ? r[i] : null; };
+  function valHtml(id, c, r) {
+    const v = cellRaw(id, c, r);
+    if (v == null || v === '') return '<span class="ce-fe">vide</span>';
+    if (c.type === 'bool' && (v === 'true' || v === 'false')) return `<span class="ce-yn ${v === 'true' ? 'y' : 'n'}">${v === 'true' ? 'Oui' : 'Non'}</span>`;
+    return esc(LC().fmt(v, c.type));
+  }
+  const usesOf = id => D.els.filter(e => e.type === 'list' && e.source === id);
+  /** Champs d'un jeu utilisés par la page : colonnes, filtres, tri et règles de ses listes, champs des textes. */
+  function usedKeys(id) {
+    const ks = new Set();
+    usesOf(id).forEach(e => { (e.cols || []).concat(e.filter || [], e.rules || []).forEach(x => { if (x && x.key) ks.add(x.key); }); if (e.sort && e.sort.key) ks.add(e.sort.key); });
+    D.els.forEach(e => { if (e.type !== 'text') return; const re = new RegExp(LC().TOKEN.source, 'g'); let m; while ((m = re.exec(String(e.text || '')))) if (m[1] === id) ks.add(m[2].replace(/^(r\d+|sum|avg|min|max)\./, '')); });
+    return ks;
+  }
+  function groupsOf(cs) { const g = new Map(); cs.forEach(c => { const k = fgroup(c); if (!g.has(k)) g.set(k, []); g.get(k).push(c); }); return g; }
+  const gTitle = k => { if (!k) return '<b>Champs</b>'; const p = k.split('.'); return (p.length > 1 ? `<span class="path">${esc(p.slice(0, -1).map(humanize).join(' › '))} › </span>` : '') + `<b>${esc(humanize(p[p.length - 1]))}</b>`; };
+  const searchBox = ph => `<label class="ce-search ce-dq">⌕<input id="ce-dq" placeholder="${ph}" value="${esc(dv.q)}" autocomplete="off" aria-label="${ph}">${dv.q ? '<button class="ce-x" data-dclear="1" title="Effacer la recherche" aria-label="Effacer la recherche">×</button>' : ''}</label>`;
+  /** Un champ : nom lisible, valeur entière de la ligne choisie, nom d'origine au survol ; glissé ou cliqué, il se pose sur la page. */
+  function fieldRow(id, c, r, o = {}) {
+    const hid = hiddenWhy(id, c), ren = dv.ren === id + ':' + c.key;
+    const nm = ren ? `<input class="ce-fren" id="ce-fren" value="${esc(fname(c))}" maxlength="60" aria-label="Nom lisible du champ">`
+      : `<span>${o.hl ? o.hl(fname(c)) : esc(fname(c))}</span>${c.name ? '<i class="ce-ftag">renommé</i>' : ''}${hid ? `<i class="ce-ftag off">${esc(hid)}</i>` : ''}`;
+    return `<div class="ce-fr${hid ? ' hid' : ''}" draggable="true" data-add="field:${id}:${esc(c.key)}" title="Glissez sur la page, ou cliquez : ajouté au texte sélectionné, sinon dans un nouveau texte">
+      <em>${TYI[c.type] || 'Aa'}</em><div class="fx"><div class="fl">${nm}</div><div class="fv">${o.val != null ? o.val : valHtml(id, c, r)}</div><div class="fk">${o.hl ? o.hl(c.label) : esc(c.label)}</div></div>` +
+      (canEditData && !ren && id !== LC().SCREEN ? `<span class="fa"><button class="ce-ib" data-fren="${id}:${esc(c.key)}" title="Nom lisible, proposé dans toutes les compositions" aria-label="Renommer ${esc(fname(c))}">${DI.pen}</button>` +
+        `<button class="ce-ib" data-fhide="${id}:${esc(c.key)}" title="${c.hidden ? 'Afficher' : 'Masquer'} ce champ dans toutes les compositions" aria-label="${c.hidden ? 'Afficher' : 'Masquer'} ${esc(fname(c))}">${c.hidden ? DI.show : DI.hide}</button></span>` : '') + '</div>';
+  }
+  const dsCard = s => {
+    const d = srcData[s.id], ls = usesOf(s.id), nf = usedKeys(s.id).size;
+    const use = ls.length ? `Sur la page : ${ls.length} liste${ls.length > 1 ? 's' : ''} (${ls.map(x => esc(x.name || 'sans nom')).join(', ')})` : nf ? `Sur la page : ${nf} champ${nf > 1 ? 's' : ''}` : '';
+    return `<button class="ce-dsrc" data-dset="${s.id}">${wi(LC().SRC.dataset)}<span class="t"><b><span>${esc(s.name)}</span><i class="dot ${d && d.error ? 'bad' : d ? 'ok' : ''}"></i></b>
+      <small>${d && d.rows ? d.rows.length + ' lignes · ' + (d.columns || []).length + ' champs · ' : ''}${esc(srcState(s))}</small>${use ? `<span class="use">${use}</span>` : ''}</span><span class="chev">›</span></button>`;
+  };
+  const appCard = s => {
+    const m = LC().SRC[s.app] || {}, n = D.els.filter(e => e.type === 'app' && e.source === s.id).length;
+    return `<div class="ce-src"><div class="h">${wi(m)}<b>${esc(s.name)}</b><span class="dot ${srcData[s.id] && srcData[s.id].error ? 'bad' : srcData[s.id] ? 'ok' : ''}"></span></div>
+      <div class="meta">${esc(m.name)} · ${esc(srcState(s))}</div><div class="uses">${n ? `<span>${n} bloc${n > 1 ? 's' : ''} sur la page</span>` : ''}<button class="ce-link" data-add="app:${s.id}">+ Poser un bloc</button></div></div>`;
+  };
   function dataPanel() {
-    const used = LC().sources(D), uses = id => D.els.filter(e => e.type === 'app' || e.type === 'list' ? e.source === id : e.type === 'text' && String(e.text || '').includes('{{' + id + ':')).length;
-    const at = id => srcAt[id] ? new Date(srcAt[id]).toLocaleTimeString('fr-CH', { hour: '2-digit', minute: '2-digit' }) : '';
-    const state = s => { const d = srcData[s.id]; return srcBusy[s.id] ? 'lecture…' : d && d.error ? d.error : d ? (d.readAt ? 'copie du ' + new Date(d.readAt).toLocaleString('fr-CH', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'à jour, lue à ' + at(s.id)) : 'pas encore lue'; };
-    const head = (s, m) => { const d = srcData[s.id]; return `<div class="h">${wi(m)}<b>${esc(s.name)}</b><span class="dot ${d && d.error ? 'bad' : d ? 'ok' : ''}"></span><button class="ce-tb" data-srcref="${s.id}" title="Relire les données" aria-label="Relire les données de ${esc(s.name)}">↻</button></div>`; };
-    const TY = { number: '12', date: '◷', image: '▣', bool: '✓', link: '↗' };
-    // colonnes (et champs de l'écran) : glissées sur la page = un texte avec ce champ ; cliquées avec un texte sélectionné = ajoutées à ce texte
-    const chip = (s, key, lbl, type) => `<button class="ce-col" draggable="true" data-add="field:${s.id}:${esc(key)}" title="Glissez sur la page, ou cliquez pour l'ajouter au texte sélectionné"><em>${TY[type] || 'Aa'}</em><span>${esc(lbl)}</span><small>${srcData[s.id] && !srcData[s.id].error ? esc(LC().fieldText(s.id, key, opts({ names: false }), '')) : ''}</small></button>`;
-    const sets = sources.filter(s => s.app === 'dataset'), scr = sources.find(s => s.app === 'screen'), apps = sources.filter(s => s.app !== 'dataset' && s.app !== 'screen');
-    const setCard = s => {
-      const n = uses(s.id), d = srcData[s.id], cs = colsOf(s.id);
-      return `<div class="ce-src">${head(s, LC().SRC.dataset)}<div class="meta">${d && d.rows ? d.rows.length + ' lignes · ' : ''}${esc(state(s))}</div>
-        <div class="ce-cols">${cs.map(c => chip(s, c.key, c.label || c.key, c.type)).join('')}${cs.length ? chip(s, '_count', 'Nombre de lignes', 'number') : '<div class="ce-pt">Colonnes inconnues : relisez le jeu.</div>'}</div>
-        <div class="uses"><button class="ce-link" draggable="true" data-add="list:${s.id}">+ Liste reliée</button>${n ? `<span>${n} élément${n > 1 ? 's' : ''}</span>` : ''}</div></div>`;
-    };
-    const appCard = s => {
-      const m = LC().SRC[s.app] || {}, n = uses(s.id);
-      return `<div class="ce-src">${head(s, m)}<div class="meta">${esc(m.name)} · ${esc(state(s))}</div><div class="uses">${n ? `<span>${n} élément${n > 1 ? 's' : ''}</span>` : `<button class="ce-link" data-add="app:${s.id}">+ Poser un bloc</button>`}</div></div>`;
-    };
+    const e = cur();
+    if (e && e.type === 'list') return listPanel(e);
+    if (dv.q.trim()) return searchPanel();
+    if (dv.view === 'set' && dv.set === LC().SCREEN && sources.some(s => s.id === dv.set)) return screenPanel();
+    if (dv.view === 'set' && sources.some(s => s.id === dv.set && s.app === 'dataset')) return setPanel(dv.set);
+    dv.view = 'sources';
+    return sourcesPanel();
+  }
+  function sourcesPanel() {
+    const used = LC().sources(D), sets = sources.filter(s => s.app === 'dataset'), scr = sources.find(s => s.app === 'screen'), apps = sources.filter(s => s.app !== 'dataset' && s.app !== 'screen');
     const missing = used.filter(id => id !== LC().SCREEN && !sources.some(s => s.id === id)).length;
-    let h = '<p class="ce-help" style="margin-top:0">Glissez une colonne sur la page pour afficher sa valeur, ou « + Liste reliée » pour afficher ses lignes. Sur l\'écran, tout se met à jour seul ; sans connexion, l\'écran garde la dernière copie reçue.</p>';
-    h += `<div class="ce-grp">Jeux de données</div>` + (sets.length ? sets.map(setCard).join('')
-      : '<div class="ce-empty">Aucun jeu de données.<br>Branchez une API ou un fichier dans <a href="/datasources" target="_blank" rel="noopener">Sources de données</a> (plan Pro).</div>');
-    if (scr) {
-      const d = srcData[scr.id], cs = (d && !d.error ? LC().fields('screen', d).map(f => ({ key: f.key, label: f.label })) : scr.cols) || [];
-      h += `<div class="ce-grp">Cet écran</div><div class="ce-src">${head(scr, LC().SRC.screen)}
-        <div class="meta">Valeurs de l'écran qui affiche la composition (paramètres : Écrans › Paramètres de l'écran).</div>
-        <div class="ce-cols">${cs.map(c => chip(scr, c.key, c.label, 'text')).join('')}</div>
-        ${(scr.screens || []).length ? `<label class="ce-lbl ce-scr">Aperçu avec<select id="ce-scrsel">${['<option value="">le premier écran qui a des paramètres</option>'].concat(scr.screens.map(x => `<option value="${esc(x.id)}" ${x.id === previewScreen ? 'selected' : ''}>${esc(x.name)}${x.has ? '' : ' (sans paramètre)'}</option>`)).join('')}</select></label>` : ''}</div>`;
-    }
-    if (apps.length || used.some(id => apps.some(s => s.id === id))) h += `<div class="ce-grp">Intégrations</div>${apps.map(appCard).join('')}`;
+    let h = `<div class="ce-ph"><b>Données</b><button class="ce-ib" data-srclist="1" title="Actualiser la liste des sources" aria-label="Actualiser la liste des sources">↻</button></div>` +
+      searchBox('Chercher un champ ou une valeur…') +
+      '<p class="ce-help" style="margin:0">Ouvrez une source pour voir ses champs et leurs valeurs, puis glissez-les sur la page. Sur l\'écran, tout se met à jour seul ; sans connexion, l\'écran garde la dernière copie reçue.</p>';
+    h += `<div class="ce-grp">Jeux de données${sets.length ? `<small>${sets.length}</small>` : ''}</div>` + (sets.length ? sets.map(dsCard).join('')
+      : '<div class="ce-empty">Aucun jeu de données.<br>Branchez une API, une base ou un fichier dans <a href="/datasources" target="_blank" rel="noopener">Sources de données</a> (plan Pro).</div>');
+    if (scr) h += `<div class="ce-grp">Cet écran</div><button class="ce-dsrc" data-dset="${scr.id}">${wi(LC().SRC.screen)}<span class="t"><b><span>Valeurs de l'écran</span></b><small>Nom, zone, paramètres… de l'écran qui affiche la composition</small></span><span class="chev">›</span></button>`;
+    if (apps.length) h += `<div class="ce-grp">Intégrations</div>${apps.map(appCard).join('')}`;
     if (missing) h += `<div class="ce-note">${missing} source${missing > 1 ? 's' : ''} introuvable${missing > 1 ? 's' : ''} (supprimée ou d'une autre aire) : ses blocs et listes ne sont pas diffusés, ses champs affichent leur valeur de secours.</div>`;
-    return h + `<div class="ce-row" style="margin-top:14px"><a class="ce-btn ghost" href="/datasources" target="_blank" rel="noopener">+ Ajouter une source</a><button class="ce-btn ghost" data-srclist="1">↻ Actualiser</button></div>
-      <p class="ce-help">Intégrations : contenus configurés de Mes intégrations (Météo, Calendrier partagé, Flux RSS, Capteurs). Jeux de données : vos API et fichiers. Les modifier change toutes les compositions qui les utilisent.</p>`;
+    return h + `<div class="ce-row" style="margin-top:14px"><a class="ce-btn ghost" href="/datasources" target="_blank" rel="noopener">+ Ajouter une source</a></div>
+      <p class="ce-help">Intégrations : contenus de Mes intégrations (Météo, Calendrier partagé, Flux RSS, Capteurs). Jeux de données : vos API, bases et fichiers. Les modifier change toutes les compositions qui les utilisent.</p>`;
+  }
+  function setPanel(id) {
+    const s = sources.find(x => x.id === id), d = srcData[id], cs = colsOf(id), rows = (d && !d.error && d.rows) || [];
+    if (dv.row >= rows.length) dv.row = 0;
+    const r = rows[dv.row], shown = c => !hiddenWhy(id, c), vis = cs.filter(c => dv.hidden || shown(c)), nh = cs.filter(c => !shown(c)).length;
+    const ls = usesOf(id), uk = usedKeys(id), used = cs.filter(c => uk.has(c.key));
+    const tc = cs.find(c => c.type === 'text' && shown(c) && cellRaw(id, c, r)), rowName = tc ? LC().fmt(cellRaw(id, tc, r), 'text') : '';
+    let h = `<button class="ce-crumb" data-dback="1">‹ Toutes les sources</button>
+      <div class="ce-sethead">${wi(LC().SRC.dataset)}<div class="t"><b>${esc(s.name)} <i class="dot ${d && d.error ? 'bad' : d ? 'ok' : ''}"></i></b><small>${d && !d.error ? rows.length + ' lignes · ' + cs.length + ' champs · ' : ''}${esc(srcState(s))}</small></div>
+      <button class="ce-ib" data-srcref="${id}" title="Relire les données" aria-label="Relire les données">↻</button></div>`;
+    if (!d) return h + '<div class="ce-empty">Lecture des données…</div>';
+    if (d.error) return h + `<div class="ce-note">Données indisponibles : ${esc(d.error)}</div>`;
+    h += `<div class="ce-tiles"><button class="ce-tile" draggable="true" data-add="list:${id}" title="Glissez sur la page, ou cliquez : une liste de plus"><span class="g">▦</span><span><b>Liste des lignes</b><small>les ${rows.length} lignes</small></span></button>
+      <button class="ce-tile" draggable="true" data-add="field:${id}:_count" title="Glissez sur la page, ou cliquez"><span class="g">${rows.length}</span><span><b>Nombre de lignes</b><small>un chiffre</small></span></button></div>` +
+      searchBox('Chercher dans ce jeu…');
+    if (rows.length) h += `<div class="ce-rownav"><span>Valeurs de la ligne</span><span class="pick"><button data-drow="-1" ${dv.row ? '' : 'disabled'} aria-label="Ligne précédente">‹</button>
+      <span title="${esc(rowName)}"><em>${dv.row + 1}/${rows.length}</em>${esc(rowName)}</span><button data-drow="1" ${dv.row < rows.length - 1 ? '' : 'disabled'} aria-label="Ligne suivante">›</button></span>
+      <button class="ce-ib" data-sheet="${id}" title="Voir toutes les lignes en tableau" aria-label="Voir toutes les lignes en tableau">${DI.big}</button></div>`;
+    if (ls.length || used.length) {
+      const op = dv.open.has('@used');
+      h += `<div class="ce-fg used${op ? ' open' : ''}"><div class="fgh" data-dg="@used"><span class="cv">›</span><b>Sur la page</b><span class="n">${ls.length ? ls.length + ' liste' + (ls.length > 1 ? 's' : '') + ' · ' : ''}${used.length} champ${used.length > 1 ? 's' : ''}</span></div><div class="fgb">` +
+        (op ? ls.map(e => `<button class="ce-lst" data-sel="${e.id}"><span class="g">▦</span><span class="t"><b>${esc(e.name || 'Liste sans nom')}</b><small>${esc(filterText(e) || 'toutes les lignes')} · ${keptRows(e).length} lignes · ${(e.cols || []).length} colonnes</small></span><span class="chev">›</span></button>`).join('') +
+          used.map(c => fieldRow(id, c, r)).join('') : '') + '</div></div>';
+    }
+    const g = groupsOf(vis);
+    g.forEach((list, key) => {
+      const op = g.size === 1 || dv.open.has(key);
+      h += `<div class="ce-fg${op ? ' open' : ''}"><div class="fgh" data-dg="${esc(key)}"><span class="cv">›</span>${gTitle(key)}<span class="n">${list.length}</span></div><div class="fgb">${op ? list.map(c => fieldRow(id, c, r)).join('') : ''}</div></div>`;
+    });
+    if (nh) h += `<button class="ce-hidlink" data-dhid="1">${dv.hidden ? 'Cacher' : 'Afficher'} ${nh > 1 ? 'les ' + nh + ' champs masqués' : 'le champ masqué'} (vides, identifiants techniques ou masqués)</button>`;
+    return h + `<p class="ce-help">Glissez un champ sur la page, ou cliquez dessus : il s'ajoute au texte sélectionné, sinon dans un nouveau texte (valeur de la 1re ligne).${canEditData ? ' Survolez un champ : ✎ lui donne un nom lisible, proposé ensuite partout ; les titres déjà donnés aux listes ne changent pas.' : ''}</p>`;
+  }
+  function screenPanel() {
+    const scr = sources.find(s => s.id === LC().SCREEN), d = srcData[scr.id];
+    const fs = d && !d.error ? LC().fields('screen', d) : (scr.cols || []).map(c => ({ key: c.key, label: c.label }));
+    return `<button class="ce-crumb" data-dback="1">‹ Toutes les sources</button>
+      <div class="ce-sethead">${wi(LC().SRC.screen)}<div class="t"><b>Valeurs de l'écran</b><small>Celles de l'écran qui affiche la composition (Écrans › Paramètres de l'écran)</small></div></div>
+      ${(scr.screens || []).length ? `<label class="ce-lbl ce-scr" style="margin:12px 0 4px">Aperçu avec<select id="ce-scrsel">${['<option value="">le premier écran qui a des paramètres</option>'].concat(scr.screens.map(x => `<option value="${esc(x.id)}" ${x.id === previewScreen ? 'selected' : ''}>${esc(x.name)}${x.has ? '' : ' (sans paramètre)'}</option>`)).join('')}</select></label>` : ''}
+      <div class="ce-fg open"><div class="fgh"><span class="cv">›</span><b>Champs</b><span class="n">${fs.length}</span></div><div class="fgb">` +
+      fs.map(f => fieldRow(scr.id, { key: f.key, label: f.label, type: 'text', name: '' }, null, { val: d && !d.error ? esc(LC().fieldText(scr.id, f.key, opts({ names: false }), '')) || '<span class="ce-fe">vide</span>' : '' })).join('') + '</div></div>';
+  }
+  function searchPanel() {
+    const t = dv.q.trim().toLowerCase(), re = new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig'), hl = s => esc(s).replace(re, '<mark>$1</mark>');
+    const inSet = dv.view === 'set' && sources.some(s => s.id === dv.set && s.app === 'dataset');
+    const scope = inSet ? sources.filter(s => s.id === dv.set) : sources.filter(s => s.app === 'dataset');
+    let h = (inSet ? '<button class="ce-crumb" data-dback="1">‹ Toutes les sources</button>' : '<div class="ce-ph"><b>Données</b></div>') + searchBox(inSet ? 'Chercher dans ce jeu…' : 'Chercher un champ ou une valeur…'), body = '';
+    scope.forEach(s => {
+      const d = srcData[s.id]; if (!d || d.error || !d.columns) return;
+      const hits = [];
+      colsOf(s.id).forEach(c => {
+        if (!dv.hidden && hiddenWhy(s.id, c)) return;
+        const i = d.columns.findIndex(x => x.key === c.key), inName = (fname(c) + ' ' + c.label).toLowerCase().includes(t);
+        const ri = (d.rows || []).findIndex(r => LC().fmt(r[i], c.type).toLowerCase().includes(t));
+        if (inName || ri >= 0) hits.push({ c, ri: ri >= 0 ? ri : 0, inVal: ri >= 0 });
+      });
+      if (!hits.length) return;
+      body += `<div class="ce-rsrc" data-dset="${s.id}">${wi(LC().SRC.dataset)}<b>${esc(s.name)}</b><span>· ${hits.length} résultat${hits.length > 1 ? 's' : ''}</span></div>`;
+      groupsOf(hits.map(x => x.c)).forEach((list, key) => {
+        body += `<div class="ce-fg open"><div class="fgh"><span class="cv">›</span>${gTitle(key)}<span class="n">${list.length}</span></div><div class="fgb">` + list.map(c => {
+          const x = hits.find(y => y.c === c), r = d.rows[x.ri];
+          const v = c.type === 'bool' ? valHtml(s.id, c, r) : (x.inVal && x.ri ? `<small class="where">ligne ${x.ri + 1}</small>` : '') + (hl(LC().fmt(cellRaw(s.id, c, r), c.type) || '') || '<span class="ce-fe">vide</span>');
+          return fieldRow(s.id, c, r, { hl, val: v });
+        }).join('') + '</div></div>';
+      });
+    });
+    const waiting = scope.some(s => !srcData[s.id] || srcBusy[s.id]);
+    return h + (body || `<div class="ce-empty">Aucun champ ni valeur ne contient « ${esc(dv.q.trim())} ».${waiting ? '<br>Des sources sont encore en lecture.' : ''}</div>`) +
+      '<p class="ce-help">La recherche porte sur les noms (lisibles et d\'origine) et sur les valeurs de toutes les lignes.</p>';
+  }
+
+  /** Données de la liste sélectionnée : nom (propre à la liste), source, lignes gardées, ordre, colonnes (champ, titre, valeurs), texte si vide. L'apparence est dans la barre du haut. */
+  function listPanel(e) {
+    if (lcFor !== e.id) { lcFor = e.id; lcOpen = new Set(); }
+    const s = sources.find(x => x.id === e.source), d = srcData[e.source], cs = colsOf(e.source), sets = sources.filter(x => x.app === 'dataset');
+    const fOpts = v => opt(cs.filter(c => !hiddenWhy(e.source, c) || c.key === v).map(c => [c.key, fname(c) + (fgroup(c) ? ' · ' + fgroup(c) : '')]), v);
+    const scr = sources.find(x => x.app === 'screen'), scrOpts = scr ? (scr.cols || []).map(c => ['@' + c.key, 'Cet écran · ' + c.label]) : [];
+    let h = `<button class="ce-crumb" data-dset="${esc(e.source)}">‹ ${esc(s ? s.name : 'Jeu introuvable')}</button>
+      <div class="ce-ph"><b>Données de la liste</b></div>
+      <label class="ce-lbl2" for="ce-lname">Nom de la liste</label><input class="ce-lname" id="ce-lname" data-l="name" value="${esc(e.name || '')}" maxlength="60" placeholder="ex. Plugins">
+      <p class="ce-help" style="margin:4px 0 0">Propre à cette liste : il la distingue dans les calques et dans ce panneau. Il ne s'affiche pas sur l'écran.</p>
+      <div class="ce-lsrc">${wi(LC().SRC.dataset)}<span class="t"><small>Source</small><select class="ce-sel" data-l="source" aria-label="Jeu de données">${(sets.some(x => x.id === e.source) ? '' : `<option value="${esc(e.source)}" selected>Jeu introuvable</option>`) + opt(sets.map(x => [x.id, x.name]), e.source)}</select></span></div>`;
+    if (!d) return h + '<div class="ce-empty">Lecture des données…</div>';
+    if (d.error || !d.columns) return h + `<div class="ce-note">Données indisponibles : ${esc(d.error || 'aucune colonne')}</div>`;
+    const kept = keptRows(e), total = (d.rows || []).length;
+    h += `<div class="ce-grp">Lignes gardées <span class="ce-cnt">${kept.length} sur ${total}</span></div>` + (e.filter || []).map((f, i) => {
+      const c = cs.find(x => x.key === f.key), noVal = f.op === 'empty' || f.op === 'notempty', fv = String(f.val == null ? '' : f.val);
+      let val = '<span></span>';
+      if (!noVal) {
+        const counts = new Map(), ci = c ? d.columns.findIndex(x => x.key === c.key) : -1;
+        if (ci >= 0) d.rows.forEach(r => { const v = r[ci] == null ? '' : String(r[ci]); if (v !== '') counts.set(v, (counts.get(v) || 0) + 1); });
+        if ((counts.size && counts.size <= 50 && ((f.op || 'eq') === 'eq' || f.op === 'ne')) || fv.charAt(0) === '@') {
+          const list = [...counts].sort((a, b) => b[1] - a[1]).map(([v, n]) => [v, LC().fmt(v, c ? c.type : 'text') + ' (' + n + ')']);
+          if (fv && fv.charAt(0) !== '@' && !counts.has(fv)) list.unshift([fv, fv]);
+          val = `<select class="ce-sel" data-lf="val:${i}" aria-label="Valeur"><option value="">(choisir)</option>${opt(list.concat(scrOpts), fv)}</select>`;
+        } else val = `<input class="ce-sel" data-lf="val:${i}" value="${esc(fv)}" placeholder="valeur" aria-label="Valeur">`;
+      }
+      return `<div class="ce-fil"><select class="ce-sel" data-lf="key:${i}" aria-label="Champ">${fOpts(f.key)}</select><select class="ce-sel" data-lf="op:${i}" aria-label="Condition">${opt(OPS, f.op || 'eq')}</select>${val}<button class="ce-ib" data-lfdel="${i}" title="Retirer la condition" aria-label="Retirer la condition">×</button></div>`;
+    }).join('') + '<button class="ce-link" data-lfadd="1">+ Ajouter une condition</button>' +
+      ((e.filter || []).length ? '<p class="ce-help" style="margin:2px 0 0">Les valeurs proposées viennent de la source, avec leur nombre de lignes. Toutes les conditions doivent être vraies ; « Cet écran » garde les lignes de l\'écran qui affiche la page.</p>' : '');
+    h += `<div class="ce-grp">Ordre</div><div class="ce-fil two"><select class="ce-sel" data-ls="key" aria-label="Trier par"><option value="">Ordre de la source</option>${fOpts(e.sort && e.sort.key)}</select>
+      <select class="ce-sel" data-ls="dir" aria-label="Sens">${opt([['asc', 'Croissant ↑'], ['desc', 'Décroissant ↓']], e.sort && e.sort.dir)}</select></div>`;
+    const sug = (e.cols || []).map((c, i) => [c, i]).find(([c]) => { const t = (cs.find(x => x.key === c.key) || {}).type; if (t !== 'text' && t !== 'link') return false; const cm = LC().common(colValues(e, c.key, kept)); return (cm.pre && !c.pre) || (cm.suf && !c.suf); });
+    if (sug) {
+      const cm = LC().common(colValues(e, sug[0].key, kept));
+      h += `<div class="ce-sug"><span>Les valeurs de « ${esc(sug[0].label || keyName(e.source, sug[0].key))} » ${cm.pre ? `commencent toutes par <b>${esc(cm.pre)}</b>` : ''}${cm.pre && cm.suf ? ' et ' : ''}${cm.suf ? `finissent toutes par <b>${esc(cm.suf)}</b>` : ''}.</span><button class="ce-btn sm" data-lclean="${sug[1]}">Raccourcir</button></div>`;
+    }
+    h += `<div class="ce-grp">Colonnes <small>⋮⋮ pour l'ordre · ▾ pour les valeurs</small></div>` + (e.cols || []).map((c, i) => colCard(e, c, i, cs, kept)).join('') +
+      (cs.length ? '<button class="ce-addcol" data-lcadd="1">+ Ajouter une colonne</button>' : '');
+    return h + `<div class="ce-grp">Si aucune ligne n'est gardée</div><input class="ce-lname sm" data-l="empty" value="${esc(e.empty || '')}" maxlength="80" placeholder="Aucune ligne à afficher" aria-label="Texte si aucune ligne">
+      <button class="ce-btn ghost ce-wide" data-ldup="1">⧉ Dupliquer la liste pour un autre filtre</button>
+      <p class="ce-help">Ici, seulement les données : quelles lignes, dans quel ordre, quelles colonnes, sous quels titres. L'apparence (police, couleurs, largeur des colonnes, lignes à la fois) se règle dans la barre au-dessus de la page.</p>`;
+  }
+  function colCard(e, c, i, cs, kept) {
+    const f = cs.find(x => x.key === c.key) || { key: c.key, label: c.key, type: 'text', name: '' }, open = lcOpen.has(i), d = srcData[e.source];
+    const first = kept[0] || (d.rows || [])[0], ci = d.columns.findIndex(x => x.key === c.key), raw = first && ci >= 0 ? first[ci] : null;
+    let b = '';
+    if (open) {
+      b += `<label class="ce-lbl2">Champ</label><select class="ce-sel" data-lc="key:${i}" aria-label="Champ">${opt(cs.map(x => [x.key, fname(x) + (fgroup(x) ? ' · ' + fgroup(x) : '')]), c.key)}</select>`;
+      if (f.type === 'text' || f.type === 'link') {
+        const cm = LC().common(colValues(e, c.key, kept));
+        b += `<span class="ce-lbl2">Rendre les valeurs lisibles${kept.length > 1 ? ` <i>· détecté sur les ${kept.length} lignes gardées</i>` : ''}</span>` +
+          (cm.pre || c.pre ? `<label class="ce-chk"><input type="checkbox" data-lk="pre:${i}" ${c.pre ? 'checked' : ''}><span>Retirer le début commun <q>${esc(cm.pre || '—')}</q></span></label>` : '') +
+          (cm.suf || c.suf ? `<label class="ce-chk"><input type="checkbox" data-lk="suf:${i}" ${c.suf ? 'checked' : ''}><span>Retirer la fin commune <q>${esc(cm.suf || '—')}</q></span></label>` : '') +
+          `<label class="ce-chk"><input type="checkbox" data-lk="space:${i}" ${c.space ? 'checked' : ''}><span>Espacer les mots collés (DatabaseBackup → Database Backup)</span></label>` +
+          (c.map || []).map((m, j) => `<div class="ce-map"><input class="ce-sel" data-lm="a:${i}:${j}" value="${esc(m.a || '')}" placeholder="remplacer…" aria-label="Texte à remplacer"><span>→</span><input class="ce-sel" data-lm="b:${i}:${j}" value="${esc(m.b || '')}" placeholder="par… (vide : retirer)" aria-label="Remplacé par"><button class="ce-ib" data-lmdel="${i}:${j}" title="Retirer" aria-label="Retirer le remplacement">×</button></div>`).join('') +
+          `<button class="ce-link" data-lmadd="${i}">+ Remplacer un mot ou une valeur</button>` +
+          (raw != null && raw !== '' ? `<div class="ce-prev"><s>${esc(LC().fmt(raw, f.type))}</s><br>→ <b>${esc(LC().cellText(raw, c, f.type, undefined, cm))}</b></div>` : '');
+      } else if (f.type === 'date') {
+        const ex = fm => raw ? LC().cellText(raw, Object.assign({}, c, { fmt: fm }), 'date') : '';
+        b += `<span class="ce-lbl2">Écrire la date</span><div class="ce-segs">${[['auto', 'Automatique'], ['time', 'Heure'], ['day', 'Jour'], ['rel', 'Relatif']].map(([fm, t]) => `<button data-lfmt="${i}:${fm}" class="${(c.fmt || 'auto') === fm ? 'on' : ''}">${t}${ex(fm) ? `<small>${esc(ex(fm))}</small>` : ''}</button>`).join('')}</div>`;
+      } else if (f.type === 'bool') {
+        b += `<span class="ce-lbl2">Écrire à la place de Oui / Non <i>· couleurs : barre du haut, Couleurs</i></span>
+          <div class="ce-map"><span class="ce-yn y">Oui</span><span>→</span><input class="ce-sel" data-lc="yes:${i}" value="${esc(c.yes || '')}" placeholder="Oui" maxlength="40" aria-label="Texte à la place de Oui"></div>
+          <div class="ce-map"><span class="ce-yn n">Non</span><span>→</span><input class="ce-sel" data-lc="no:${i}" value="${esc(c.no || '')}" placeholder="Non" maxlength="40" aria-label="Texte à la place de Non"></div>`;
+      } else b += '<p class="ce-help" style="margin:0">Rien d\'autre à régler pour ce type de champ.</p>';
+    }
+    return `<div class="ce-cc${open ? ' open' : ''}" data-ci="${i}"><div class="cch"><span class="grip" draggable="true" title="Glissez pour changer l'ordre">⋮⋮</span>
+      <input class="cti" data-lc="label:${i}" value="${esc(c.label || fname(f))}" maxlength="60" aria-label="Titre de la colonne">
+      <button class="ce-ib" data-lco="${i}" title="Champ et valeurs de la colonne" aria-expanded="${open}">${open ? '▴' : '▾'}</button><button class="ce-ib" data-lcdel="${i}" title="Retirer la colonne" aria-label="Retirer la colonne">×</button></div>
+      <div class="ccs"><em>${TYI[f.type] || 'Aa'}</em><span>${esc(fname(f))}</span><span class="k">${esc(f.label)}</span></div>${open ? `<div class="ccb">${b}</div>` : ''}</div>`;
+  }
+  /** Réglage de données de la liste sélectionnée (panneau) : en direct pendant la saisie, enregistré au changement (le panneau suit pour les menus et cases). */
+  function listInput(t, done) {
+    const e = cur(); if (!e || e.type !== 'list') return false;
+    const ds = t.dataset, menu = t.tagName === 'SELECT';
+    if (menu && !done) return true;
+    if (ds.l) {
+      if (ds.l === 'source') { e.source = t.value; resetList(e); lcOpen = new Set(); loadSource(e.source); }
+      else e[ds.l] = t.value;
+    } else if (ds.lc) {
+      const [key, i] = ds.lc.split(':'), c = (e.cols || [])[+i]; if (!c) return true;
+      if (key === 'key') { const old = colsOf(e.source).find(x => x.key === c.key); if (!c.label || (old && c.label === fname(old))) c.label = keyName(e.source, t.value); c.key = t.value; delete c.pre; delete c.suf; boolColors(c, colsOf(e.source).find(x => x.key === t.value)); }
+      else c[key] = t.value;
+    } else if (ds.lk) { const [key, i] = ds.lk.split(':'); if (e.cols[+i]) e.cols[+i][key] = t.checked; }
+    else if (ds.lm) { const [key, i, j] = ds.lm.split(':'), m = ((e.cols[+i] || {}).map || [])[+j]; if (m) m[key] = t.value; }
+    else if (ds.lf) { const [key, i] = ds.lf.split(':'), f = (e.filter || [])[+i]; if (!f) return true; f[key] = t.value; if (key === 'key') f.val = ''; }
+    else if (ds.ls) { e.sort = Object.assign({ key: '', dir: 'asc' }, e.sort || {}, { [ds.ls]: t.value }); if (!e.sort.key) e.sort = null; }
+    else return false;
+    if (done) { commit(); renderCtx(); if (menu || t.type === 'checkbox' || ds.lf) renderPanel(); }
+    else { render(); if (ds.l === 'name') renderCtx(); }
+    return true;
+  }
+  /** Clics du panneau Données ; true si traité. */
+  function dataClick(ev) {
+    const g = s => ev.target.closest(s), e = cur();
+    let x;
+    if (g('#ce-fren')) return true;
+    if ((x = g('[data-fren]'))) { dv.ren = x.dataset.fren; renderPanel(); return true; }
+    if ((x = g('[data-fhide]'))) { const [id, key] = x.dataset.fhide.split(':'), c = colsOf(id).find(y => y.key === key); if (c) colPref(id, key, c.name, !c.hidden); return true; }
+    if ((x = g('[data-dset]'))) {
+      if (e) { selId = null; drawOverlay(); renderLayers(); renderCtx(); }
+      Object.assign(dv, { view: 'set', set: x.dataset.dset, row: 0, q: '', ren: null }); loadSource(dv.set); renderPanel(); return true;
+    }
+    if (g('[data-dback]')) { Object.assign(dv, { view: 'sources', q: '', ren: null }); renderPanel(); return true; }
+    if (g('[data-dclear]')) { dv.q = ''; renderPanel(); return true; }
+    if ((x = g('[data-drow]'))) { dv.row = Math.max(0, dv.row + +x.dataset.drow); renderPanel(); return true; }
+    if ((x = g('[data-dg]'))) { const key = x.dataset.dg; if (dv.open.has(key)) dv.open.delete(key); else dv.open.add(key); renderPanel(); return true; }
+    if (g('[data-dhid]')) { dv.hidden = !dv.hidden; renderPanel(); return true; }
+    if ((x = g('[data-sheet]'))) { openSheet(x.dataset.sheet); return true; }
+    if ((x = g('[data-sel]'))) { select(x.dataset.sel); return true; }
+    if (!e || e.type !== 'list') return false;
+    if ((x = g('[data-lco]'))) { const i = +x.dataset.lco; if (lcOpen.has(i)) lcOpen.delete(i); else lcOpen.add(i); renderPanel(); return true; }
+    if ((x = g('[data-lcdel]'))) { e.cols.splice(+x.dataset.lcdel, 1); lcOpen = new Set(); commit(); renderPanel(); return true; }
+    if (g('[data-lfadd]')) { const c = colsOf(e.source).find(y => !hiddenWhy(e.source, y)); if (c) { (e.filter = e.filter || []).push({ key: c.key, op: 'eq', val: '' }); commit(); renderPanel(); } return true; }
+    if ((x = g('[data-lfdel]'))) { e.filter.splice(+x.dataset.lfdel, 1); commit(); renderPanel(); return true; }
+    if ((x = g('[data-lclean]'))) { const i = +x.dataset.lclean; Object.assign(e.cols[i], { pre: true, suf: true, space: true }); lcOpen.add(i); commit(); renderPanel(); return true; }
+    if ((x = g('[data-lmadd]'))) { const c = e.cols[+x.dataset.lmadd]; (c.map = c.map || []).push({ a: '', b: '' }); renderPanel(); return true; }   // enregistré avec la saisie
+    if ((x = g('[data-lmdel]'))) { const [i, j] = x.dataset.lmdel.split(':').map(Number); e.cols[i].map.splice(j, 1); commit(); renderPanel(); return true; }
+    if ((x = g('[data-lfmt]'))) { const [i, fm] = x.dataset.lfmt.split(':'); e.cols[+i].fmt = fm; commit(); renderPanel(); return true; }
+    if ((x = g('[data-lcadd]'))) { colPicker(x, e); return true; }
+    if (g('[data-ldup]')) { dupList(e); return true; }
+    return false;
+  }
+  /** Champ ajouté à la liste : choisi dans les champs du jeu, groupés, avec une recherche. */
+  function colPicker(anchor, e) {
+    const cs = colsOf(e.source), g = groupsOf(cs.filter(c => !hiddenWhy(e.source, c))), d = srcData[e.source], r = d && d.rows ? d.rows[0] : null;
+    let h = '<label class="ce-search" style="margin:4px 6px 6px">⌕<input id="ce-cpq" placeholder="Chercher un champ" aria-label="Chercher un champ"></label>';
+    g.forEach((list, key) => {
+      h += `<div class="ce-pt">${gTitle(key)}</div>` + list.map(c => `<button class="ce-mi" data-o="${esc(c.key)}" data-cpn="${esc((fname(c) + ' ' + c.label).toLowerCase())}">${esc(fname(c))}<small>${esc(LC().fmt(cellRaw(e.source, c, r), c.type))}</small></button>`).join('');
+    });
+    openPop(anchor, h, key => {
+      const c = cs.find(x => x.key === key); if (!c) return;
+      (e.cols = e.cols || []).push(boolColors({ key, label: fname(c), as: 'text', align: c.type === 'number' || c.type === 'date' ? 'right' : 'left', w: 1 }, c));
+      lcOpen.add(e.cols.length - 1); commit(); renderPanel();
+    });
+    const p = q('#ce-pop'), s = q('#ce-cpq'); p.classList.add('ce-cpick'); s.focus();
+    s.addEventListener('input', () => { const t = s.value.trim().toLowerCase(); p.querySelectorAll('[data-cpn]').forEach(b => { b.hidden = !!t && !b.dataset.cpn.includes(t); }); });
+  }
+  /** Nom lisible et masquage d'un champ, enregistrés pour le jeu (toutes les compositions). */
+  async function colPref(id, key, nm, hidden) {
+    let err;
+    try { err = await net.invokeMethodAsync('ColumnPref', id, key, nm || '', !!hidden); } catch (x) { err = 'Enregistrement impossible : la connexion au serveur est interrompue.'; }
+    if (!root) return;
+    dv.ren = null;
+    if (err) { toast(err, true); renderPanel(); return; }
+    const s = sources.find(x => x.id === id);
+    if (s) { s.cols = s.cols || []; let c = s.cols.find(x => x.key === key); if (!c) { c = { key, label: key }; s.cols.push(c); } c.name = nm || ''; c.hidden = !!hidden; }
+    renderPanel();
+  }
+  /** Champ en cours de renommage : Entrée ou clic ailleurs enregistre (vide : nom d'origine), Échap annule. */
+  function bindRename(p) {
+    const n = p.querySelector('#ce-fren'); if (!n) return;
+    n.focus(); n.select();
+    let over = false;
+    const end = ok => {
+      if (over) return; over = true;
+      const [id, key] = String(dv.ren).split(':'), c = colsOf(id).find(x => x.key === key), v = n.value.trim();
+      if (ok && c && v !== fname(c)) colPref(id, key, v === humanize(segs(c).pop() || '') || v === c.label ? '' : v, c.hidden);
+      else { dv.ren = null; renderPanel(); }
+    };
+    n.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); end(true); } if (ev.key === 'Escape') { ev.stopPropagation(); end(false); } });
+    n.addEventListener('blur', () => end(true));
+  }
+
+  // ---------- tableau en grand d'un jeu (par-dessus la page) ----------
+  function openSheet(id) { sheet = { set: id, all: false, q: '' }; loadSource(id); drawSheet(); }
+  function closeSheet() { sheet = null; const s = root && q('#ce-sheet'); if (s) s.remove(); }
+  function drawSheet() {
+    if (!sheet || !root) return;
+    let el = q('#ce-sheet');
+    if (!el) { el = document.createElement('div'); el.id = 'ce-sheet'; el.className = 'ce-sheet'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Données du jeu'); q('.ce-center').appendChild(el); bindSheet(el); }
+    const id = sheet.set, s = sources.find(x => x.id === id), d = srcData[id];
+    const head = `<div class="sh">${wi(LC().SRC.dataset)}<div class="t"><b>${esc(s ? s.name : 'Jeu introuvable')}</b><small>${d && d.rows ? d.rows.length + ' lignes · ' + (d.columns || []).length + ' champs · ' : ''}${s ? esc(srcState(s)) : ''}</small></div>`;
+    if (!s || !d || d.error || !d.columns) { el.innerHTML = head + `<button class="ce-xb" data-sh="x" aria-label="Fermer">×</button></div><div class="ce-empty" style="margin:20px">${d && d.error ? 'Données indisponibles : ' + esc(d.error) : 'Lecture des données…'}</div>`; return; }
+    const t = sheet.q.trim().toLowerCase(), cs = colsOf(id), uk = usedKeys(id), ix = c => d.columns.findIndex(x => x.key === c.key);
+    let vis = cs.filter(c => sheet.all || !hiddenWhy(id, c));
+    if (t) vis = vis.filter(c => (fname(c) + ' ' + c.label).toLowerCase().includes(t) || d.rows.some(r => LC().fmt(r[ix(c)], c.type).toLowerCase().includes(t)));
+    const g = groupsOf(vis), order = [...g.values()].flat(), MAX = 300;
+    let h1 = '<th class="n"></th>', h2 = '<th class="n">#</th>';
+    g.forEach((list, key) => {
+      h1 += `<th colspan="${list.length}">${esc(key ? key.split('.').map(humanize).join(' › ') : '')}</th>`;
+      h2 += list.map(c => `<th class="${uk.has(c.key) ? 'used' : ''}" draggable="true" data-add="field:${id}:${esc(c.key)}" title="Glissez sur la page, ou cliquez pour poser ce champ">${esc(fname(c))}<small>${esc(segs(c).pop() || c.key)}</small></th>`).join('');
+    });
+    const body = d.rows.slice(0, MAX).map((r, i) => `<tr><td class="n">${i + 1}</td>${order.map(c => `<td>${valHtml(id, c, r)}</td>`).join('')}</tr>`).join('');
+    el.innerHTML = head + `<span class="ce-seg"><button data-sh="0" class="${sheet.all ? '' : 'on'}">Champs visibles</button><button data-sh="1" class="${sheet.all ? 'on' : ''}">Tous les champs</button></span>
+      <label class="ce-search">⌕<input id="ce-shq" placeholder="Filtrer les colonnes ou les valeurs" value="${esc(sheet.q)}" aria-label="Filtrer les colonnes ou les valeurs"></label><button class="ce-xb" data-sh="x" aria-label="Fermer">×</button></div>
+      <div class="tw">${order.length ? `<table><thead><tr class="g">${h1}</tr><tr class="c">${h2}</tr></thead><tbody>${body}</tbody></table>` : '<div class="ce-empty" style="margin:20px">Aucune colonne ne correspond.</div>'}</div>
+      <div class="sf">Glissez un en-tête sur la page, ou cliquez dessus, pour y poser le champ. Souligné : déjà sur la page.${d.rows.length > MAX ? ` ${MAX} premières lignes sur ${d.rows.length}.` : ''}</div>`;
+  }
+  function bindSheet(el) {
+    on(el, 'click', ev => {
+      const b = ev.target.closest('[data-sh]');
+      if (b) { if (b.dataset.sh === 'x') closeSheet(); else { sheet.all = b.dataset.sh === '1'; drawSheet(); } return; }
+      const a = ev.target.closest('[data-add]'); if (!a) return;
+      closeSheet();
+      if (cur() && cur().type === 'text') insertField(a.dataset.add.slice(6)); else addEl(a.dataset.add);
+    });
+    on(el, 'input', ev => { if (ev.target.id !== 'ce-shq') return; sheet.q = ev.target.value; drawSheet(); const n = q('#ce-shq'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); });
+    on(el, 'dragstart', ev => { const a = ev.target.closest('[data-add]'); if (!a) return; ev.dataTransfer.setData('text/linkii-compo', a.dataset.add); setTimeout(() => { el.style.visibility = 'hidden'; }, 0); });   // la page reçoit le dépôt
+    on(el, 'dragend', closeSheet);
   }
 
   // ---------- barre contextuelle ----------
@@ -803,23 +1210,14 @@
         fontSel(e) + sizeNum(e) + colorIn('color', e.color, 'Couleur du texte') + pick('weight', WEIGHTS, e.weight, 'Graisse') + sepH +
         '<button class="ce-tb" data-act="srcset" title="Ouvrir les réglages de cette source (ville, calendrier…) dans un nouvel onglet">⚙ Réglages</button>';
     }
-    else if (e.type === 'list') {   // liste reliée (§139)
-      const sets = sources.filter(s => s.app === 'dataset'), cs = colsOf(e.source), lab = k => ((cs.find(c => c.key === k) || {}).label || k);
-      if (!sets.some(s => s.id === e.source)) sets.unshift({ id: e.source, name: 'Jeu introuvable' });
-      const nf = (e.filter || []).length, nr = (e.rules || []).length;
-      h = '<span class="ce-kind">▦ Liste reliée</span>' + sepH +
-        `<label class="ce-lbl">Jeu<select data-k="source" aria-label="Jeu de données">${sets.map(s => `<option value="${esc(s.id)}" ${s.id === e.source ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>` +
-        `<button class="ce-tb" data-act="lcols">Colonnes (${(e.cols || []).length}) ▾</button>` +
-        pick('rows', [[3, '3 lignes'], [4, '4 lignes'], [5, '5 lignes'], [6, '6 lignes'], [8, '8 lignes'], [10, '10 lignes'], [12, '12 lignes'], [15, '15 lignes']], e.rows, 'Lignes affichées à la fois') +
-        `<button class="ce-tb ${e.sort && e.sort.key ? 'on' : ''}" data-act="lsort">${e.sort && e.sort.key ? 'Tri : ' + esc(lab(e.sort.key)) + (e.sort.dir === 'desc' ? ' ↓' : ' ↑') : 'Tri'} ▾</button>` +
-        `<button class="ce-tb ${nf ? 'on' : ''}" data-act="lfilter">Filtre${nf ? ' (' + nf + ')' : ''} ▾</button>` +
-        `<button class="ce-tb ${nr ? 'on' : ''}" data-act="lrules">Couleurs${nr ? ' (' + nr + ')' : ''} ▾</button>` + sepH +
-        pick('page', [['pages', 'Pages qui alternent'], ['scroll', 'Défilement continu'], ['cut', 'Couper']], e.page || 'pages', 'S\'il y a plus de lignes') +
-        (e.page === 'cut' ? '' : pick('sec', e.page === 'scroll' ? [[2, 'Rapide'], [4, 'Normal'], [8, 'Lent']] : [[5, '5 s'], [8, '8 s'], [12, '12 s'], [20, '20 s'], [30, '30 s']], e.sec, e.page === 'scroll' ? 'Vitesse' : 'Durée d\'une page')) +
-        `<button class="ce-tb ${e.head ? 'on' : ''}" data-tog="head" title="Noms des colonnes au-dessus des lignes">En-tête</button>` + sepH +
-        fontSel(e) + sizeNum(e) + colorIn('color', e.color, 'Couleur du texte') + pick('weight', WEIGHTS, e.weight, 'Graisse') +
-        colorIn('accent', e.accent || '#3B82C4', 'Couleur des pastilles (sans règle de couleur)') + colorIn('line', e.line || '#DDE3EA', 'Couleur des séparateurs') +
-        '<button class="ce-tb" data-act="lempty" title="Texte affiché quand aucune ligne ne reste">Si vide…</button>';
+    else if (e.type === 'list') {   // liste reliée : apparence seulement (§140) ; ses données se règlent dans le panneau Données
+      const nr = (e.rules || []).length;
+      h = `<span class="ce-kind" title="Nom de la liste (panneau Données)">▦ ${esc(e.name || 'Liste')}</span>` + sepH +
+        fontSel(e) + sizeNum(e) + colorIn('color', e.color, 'Couleur du texte') + pick('weight', WEIGHTS, e.weight, 'Graisse') + sepH +
+        `<button class="ce-tb ${e.head ? 'on' : ''}" data-tog="head" title="Titres des colonnes au-dessus des lignes">En-tête</button>` +
+        `<button class="ce-tb" data-act="lrows" title="Lignes affichées à la fois, et s'il y en a plus">${e.rows} lignes · ${e.page === 'scroll' ? 'défilement' : e.page === 'cut' ? 'coupé' : 'pages ' + e.sec + ' s'} ▾</button>` +
+        '<button class="ce-tb" data-act="lcols" title="Style, alignement et largeur des colonnes">Colonnes ▾</button>' +
+        `<button class="ce-tb ${nr ? 'on' : ''}" data-act="lcolors" title="Couleurs des pastilles, des séparateurs et de Oui / Non ; règles de couleur">Couleurs${nr ? ' (' + nr + ')' : ''} ▾</button>`;
     }
     else if (e.type === 'qr') h = `<label class="ce-lbl">Lien<input type="text" data-k="url" value="${esc(e.url)}" style="width:240px" maxlength="500"></label>` + colorIn('fg', e.fg, 'Couleur') + colorIn('bg', e.bg, 'Fond');
     else if (e.kind === 'ticker') h = `<label class="ce-lbl">Texte<input type="text" data-k="text" value="${esc(e.text)}" style="width:260px" maxlength="1000"></label>` + fontSel(e) + sizeNum(e) +
@@ -838,13 +1236,13 @@
     else if (a === 'replace') { mediaMode = 'replace'; openPanel('medias'); }
     else if (a === 'field') fieldMenu(b);
     else if (a === 'fb') { const v = prompt('Texte affiché à la place d\'un champ quand sa source n\'a pas de valeur :', e.fb || '—'); if (v != null) { e.fb = v.slice(0, 40); commit(); } }
-    else if (a === 'lcols' || a === 'lsort' || a === 'lfilter' || a === 'lrules') listPop(a.slice(1));
-    else if (a === 'lempty') { const v = prompt('Texte affiché quand la liste n\'a aucune ligne :', e.empty || 'Aucune ligne à afficher'); if (v != null) { e.empty = v.slice(0, 80); commit(); } }
+    else if (a === 'lrows' || a === 'lcols' || a === 'lcolors') listPop(a.slice(1));
     else if (a === 'srcset' && e.source) w.open('/apps/instance/' + encodeURIComponent(e.source), '_blank', 'noopener');
   }
   function dup() {
     const e = cur(); if (!e) return;
     const c = Object.assign(JSON.parse(JSON.stringify(e)), { id: nid(), x: e.x + Math.round(40 * k()), y: e.y + Math.round(40 * k()), locked: false });
+    if (c.type === 'list') c.name = nextName(e.name || 'Liste');
     D.els.splice(D.els.indexOf(e) + 1, 0, c); selId = c.id; commit(); renderCtx();
   }
   function del() { const e = cur(); if (!e) return; D.els = D.els.filter(x => x !== e); selId = null; commit(); renderCtx(); }
@@ -954,6 +1352,7 @@
     }
     if (panelName === 'donnees') h = dataPanel();
     p.innerHTML = h;
+    if (panelName === 'donnees') bindRename(p);
     if (panelName === 'medias') renderMediaGrid();
     if (panelName === 'modeles' && tplTab === 'mine') LC().images(p, (u, cb) => cb(u + '?w=320'));
   }
@@ -965,6 +1364,7 @@
       : `<div class="ce-pgrid">${list.map(m => `<button class="ce-photo" draggable="true" data-add="img:${m.id}" title="${esc(m.name)}"><img src="${esc(m.url)}?w=320" alt="" loading="lazy" draggable="false"><span>${esc(m.name)}</span></button>`).join('')}</div>`;
   }
   async function panelClick(ev) {
+    if (panelName === 'donnees' && dataClick(ev)) return;
     const a = ev.target.closest('[data-add]');
     if (a && a.dataset.add.startsWith('field:') && cur() && cur().type === 'text') { insertField(a.dataset.add.slice(6)); return; }   // texte sélectionné : le champ s'y ajoute
     if (a) { addEl(a.dataset.add); return; }
@@ -1048,7 +1448,7 @@
   function label(e) {
     if (e.type === 'text') return String(e.text || '').replace(LC().TOKEN, (m, id, key) => LC().fieldText(id, key, opts({ names: true }))).replace(/\n/g, ' ') || 'Texte';
     if (e.type === 'app') { const s = sources.find(x => x.id === e.source); return 'Bloc · ' + (s ? s.name : (LC().SRC[e.app] || {}).name || 'intégration'); }
-    if (e.type === 'list') { const s = sources.find(x => x.id === e.source); return 'Liste · ' + (s ? s.name : 'jeu introuvable'); }
+    if (e.type === 'list') { const s = sources.find(x => x.id === e.source); return 'Liste · ' + (e.name || (s ? s.name : 'jeu introuvable')); }
     if (e.type === 'image') { const m = images.find(x => x.id === e.media); return 'Image' + (m ? ' · ' + m.name : ' à choisir'); }
     if (e.type === 'qr') return 'QR code';
     if (e.type === 'widget') return WNAMES[e.kind] || 'Widget';

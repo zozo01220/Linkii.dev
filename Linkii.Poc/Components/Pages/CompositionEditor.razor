@@ -86,7 +86,8 @@ else
             tpl = Tpl,
             myTemplates = Templates(),
             sources = Sources(),
-            canImport = Store.Read(d => d.Access.CanWrite(LevelPages.Media))
+            canImport = Store.Read(d => d.Access.CanWrite(LevelPages.Media)),
+            canEditData = Store.Read(d => d.Access.IsOrgAdmin)   // nom lisible et masquage des champs d'un jeu : comme la gestion des sources de données
         }, self);
     }
 
@@ -163,7 +164,7 @@ else
             list.AddRange(sets.OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).Select(s => (object)new
             {
                 id = s.Id.ToString("N"), name = s.Name, app = "dataset",
-                cols = s.Columns.Select(c => new { key = c.Key, label = c.Label, type = c.Type })
+                cols = s.Columns.Select(c => new { key = c.Key, label = c.Label, type = c.Type, name = c.Name, hidden = c.Hidden })
             }));
         var pars = screens.SelectMany(s => s.Item3).Where(p => p.Name.Trim().Length > 0).GroupBy(p => DataTables.Slug(p.Name)).Select(g => new { key = g.Key, label = g.First().Name.Trim() });
         list.Add(new
@@ -198,6 +199,25 @@ else
         }
         var (data, error) = await Svc.SourceData(g);
         return error != null ? new { error } : new { data };
+    }
+
+    /// <summary>
+    /// Nom lisible (vide : celui d'origine) et masquage d'un champ d'un jeu, valables dans toutes les compositions ; ne changent pas les titres
+    /// déjà donnés aux colonnes des listes. Rend le message d'erreur, ou null.
+    /// </summary>
+    [JSInvokable]
+    public string? ColumnPref(string set, string key, string name, bool hidden)
+    {
+        if (!Guid.TryParse(set, out var g)) return "Jeu de données introuvable.";
+        name = (name ?? "").Trim();
+        if (name.Length > 60) name = name[..60];
+        return Store.Write(db =>
+        {
+            if (!db.Access.IsOrgAdmin) return "Seuls les administrateurs de l'organisation renomment ou masquent les champs d'un jeu.";
+            if (db.Tenant.DataSets.FirstOrDefault(x => x.Id == g)?.Columns.FirstOrDefault(c => c.Key == key) is not { } c) return "Champ introuvable.";
+            c.Name = name; c.Hidden = hidden;
+            return (string?)null;
+        });
     }
 
     // ---------- Médias ----------

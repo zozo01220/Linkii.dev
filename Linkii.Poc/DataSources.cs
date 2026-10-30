@@ -124,17 +124,28 @@ public class DataSet
     public DataSet Copy() => new()
     {
         Id = Id, ConnectionId = ConnectionId, Name = Name, Path = Path, RowsPath = RowsPath, Sql = Sql, RefreshMin = RefreshMin, MaxRows = MaxRows, StaleHours = StaleHours, CreatedUtc = CreatedUtc,
-        Columns = Columns.Select(c => new DataColumn { Key = c.Key, Label = c.Label, Type = c.Type }).ToList(),
-        Hide = Hide.Select(f => new DataFilter { Key = f.Key, Op = f.Op, Value = f.Value }).ToList()
+        Columns = Columns.Select(c => c.Copy()).ToList(),
+        Hide =Hide.Select(f => new DataFilter { Key = f.Key, Op = f.Op, Value = f.Value }).ToList()
     };
 }
 
-/// <summary>Colonne d'un jeu : clé (lettres, chiffres, _ ; celle des champs {{jeu:clé}}), libellé d'origine, type (text, number, date, image, bool, link).</summary>
+/// <summary>
+/// Colonne d'un jeu : clé (lettres, chiffres, _ ; celle des champs {{jeu:clé}}), libellé d'origine, type (text, number, date, image, bool, link).
+/// Name et Hidden : nom lisible et champ masqué, donnés dans le panneau Données de l'éditeur de compositions ; gardés quand le jeu est relu.
+/// </summary>
 public class DataColumn
 {
     public string Key { get; set; } = "";
     public string Label { get; set; } = "";
     public string Type { get; set; } = "text";
+    public string Name { get; set; } = "";
+    public bool Hidden { get; set; }
+
+    public DataColumn Copy() => new() { Key = Key, Label = Label, Type = Type, Name = Name, Hidden = Hidden };
+
+    /// <summary>Colonnes relues : nom lisible et masquage repris des colonnes connues de même clé.</summary>
+    public static List<DataColumn> Merge(IEnumerable<DataColumn> fresh, IEnumerable<DataColumn> known) =>
+        fresh.Select(c => new DataColumn { Key = c.Key, Label = c.Label, Type = c.Type, Name = known.FirstOrDefault(k => k.Key == c.Key)?.Name ?? "", Hidden = known.FirstOrDefault(k => k.Key == c.Key)?.Hidden ?? false }).ToList();
 }
 
 public class DataFilter
@@ -927,7 +938,7 @@ public class DataSetService
     private void KeepColumns(Guid clientId, Guid dataSetId, List<DataColumn> cols) => store.Write(db =>
     {
         if (db.Clients.FirstOrDefault(t => t.Id == clientId)?.DataSets.FirstOrDefault(d => d.Id == dataSetId) is { } ds)
-            ds.Columns = cols.Select(c => new DataColumn { Key = c.Key, Label = c.Label, Type = c.Type }).ToList();
+            ds.Columns = DataColumn.Merge(cols, ds.Columns);
     });
 
     private void Save(Guid clientId, Guid dataSetId, DataTable t)

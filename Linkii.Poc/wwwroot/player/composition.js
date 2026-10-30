@@ -315,10 +315,51 @@
     return '<div class="' + cls + '" style="' + st + '">' + h + '</div>';
   }
 
-  /* Liste reliée (§139) : e = { source, cols: [{ key, as: text|small|pill|image, align, w }], rows, sort: { key, dir }, filter: [{ key, op, val }],
-     rules: [{ key, op, val, color }] (1re règle vraie : couleur des pastilles, sinon du texte de la ligne), page: pages|scroll|cut, sec, head, accent, line, empty }.
+  /* Liste reliée (§139, §140) : e = { name, source, cols: [{ key, label, as: text|small|pill|image, align, w, pre, suf, space, map, fmt, yes, no, yc, nc }], rows,
+     sort: { key, dir }, filter: [{ key, op, val }], rules: [{ key, op, val, color }] (1re règle vraie : couleur des pastilles, sinon du texte de la ligne),
+     page: pages|scroll|cut, sec, head, accent, line, empty }. name et label (titre de la colonne) sont propres à la liste.
+     Valeurs d'une colonne : pre / suf retirent le début / la fin communs aux lignes gardées, space espace les mots collés, map remplace des mots
+     ([{ a, b }]), fmt écrit les dates (auto, time, day, rel), yes / no remplacent Oui / Non et yc / nc colorent ces deux valeurs.
      Hauteur d'une ligne = hauteur du calque / nombre de lignes : la même dans l'éditeur et sur l'écran. */
   function safeUrl(u) { u = String(u || ''); return /^(https?:\/\/|\/media\/)[^"'()<>\s]+$/.test(u) ? u : ''; }
+  /** Début et fin communs à des valeurs (au moins deux) : coupés sur un séparateur, la fin peut aussi commencer à une majuscule. */
+  function common(vs) {
+    vs = vs.map(function (v) { return v == null ? '' : String(v); }).filter(function (v) { return v !== ''; });
+    if (vs.length < 2) return { pre: '', suf: '' };
+    var p = vs[0], s = vs[0];
+    vs.forEach(function (v) { while (p && v.indexOf(p) !== 0) p = p.slice(0, -1); while (s && v.slice(-s.length) !== s) s = s.slice(1); });
+    var cut = Math.max(p.lastIndexOf('.'), p.lastIndexOf('_'), p.lastIndexOf('-'), p.lastIndexOf('/'), p.lastIndexOf('\\'), p.lastIndexOf(' '), p.lastIndexOf(':'));
+    p = cut < 0 ? '' : p.slice(0, cut + 1);
+    var u = s.search(/[A-Z._\-\/\\ :]/); s = u < 0 ? '' : s.slice(u);
+    var short = vs.reduce(function (m, v) { return Math.min(m, v.length); }, 1e9);   // jamais une valeur vidée
+    if (p.length + s.length >= short) { if (p.length >= short) p = ''; if (p.length + s.length >= short) s = ''; }
+    return { pre: p, suf: s };
+  }
+  function relTime(ms) {
+    var d = Math.round((ms - Date.now()) / 60000), a = Math.abs(d), t;
+    if (a < 1) return 'maintenant';
+    t = a < 60 ? a + ' min' : a < 1440 ? Math.round(a / 60) + ' h' : Math.round(a / 1440) + ' j';
+    return (d > 0 ? 'dans ' : 'il y a ') + t;
+  }
+  /** Valeur affichée d'une cellule d'après les réglages de sa colonne ; cm : début et fin communs de la colonne (pre / suf). */
+  function cellText(v, c, type, tz, cm) {
+    if (type === 'bool' && (v === 'true' || v === 'false')) return v === 'true' ? (c.yes || 'Oui') : (c.no || 'Non');
+    if (type === 'date' && c.fmt && c.fmt !== 'auto' && v) {
+      var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v)), ms = m ? new Date(+m[1], +m[2] - 1, +m[3]).getTime() : Date.parse(v);
+      if (isFinite(ms)) {
+        if (c.fmt === 'rel') return relTime(ms);
+        if (c.fmt === 'time' && !m) return hm(ms, tz);
+        try { return new Date(ms).toLocaleDateString('fr-CH', tzo({ day: 'numeric', month: 'short' }, tz)); } catch (x) { return dayKey(ms, tz); }
+      }
+    }
+    var s = fmt(v, type, tz);
+    if (type !== 'text' && type !== 'link') return s;
+    if (c.pre && cm && cm.pre && s.indexOf(cm.pre) === 0) s = s.slice(cm.pre.length);
+    if (c.suf && cm && cm.suf && s.slice(-cm.suf.length) === cm.suf) s = s.slice(0, -cm.suf.length);
+    if (c.space) s = s.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2').replace(/_/g, ' ');
+    (c.map || []).forEach(function (x) { if (x && x.a) s = s.split(String(x.a)).join(String(x.b == null ? '' : x.b)); });
+    return s;
+  }
   function listHtml(e, o) {
     var d = o.data && o.data[e.source], s = srcOf(o, e.source), st = txs(e).replace(/text-align:[a-z]+;/, '');
     if (!d || d.error) {
@@ -336,19 +377,22 @@
     cols.forEach(function (c) { if (c.as === 'small' && groups.length) groups[groups.length - 1].sub.push(c); else groups.push({ c: c, sub: [] }); });
     var grid = groups.map(function (g) { return g.c.as === 'pill' || g.c.as === 'image' ? 'auto' : num(g.c.w, 1, .2, 10) + 'fr'; }).join(' ');
     function rule(r) { var l = e.rules || []; for (var i = 0; i < l.length; i++) if (l[i] && l[i].key && cond(l[i], d, r, o)) return col(l[i].color, ''); return ''; }
-    function val(c, r) { var cc = colOf(d, c.key); return fmt(r[colIdx(d, c.key)], cc.type, o.tz); }
+    var cms = {};   // début et fin communs, calculés sur toutes les lignes gardées (pas seulement la page affichée)
+    cols.forEach(function (c) { if ((c.pre || c.suf) && !cms[c.key]) { var i = colIdx(d, c.key); cms[c.key] = common(all.map(function (r) { return fmt(r[i], colOf(d, c.key).type, o.tz); })); } });
+    function val(c, r) { var cc = colOf(d, c.key); return cellText(r[colIdx(d, c.key)], c, cc.type, o.tz, cms[c.key]); }
+    function boolCol(c, r) { var cc = colOf(d, c.key), v = r[colIdx(d, c.key)]; return cc.type === 'bool' ? col(v === 'true' ? c.yc : v === 'false' ? c.nc : '', '') : ''; }
     function row(r) {
       var rc = rule(r), pill = false, h = '';
       groups.forEach(function (g) {
-        var c = g.c, al = 'text-align:' + align(c.align);
+        var c = g.c, al = 'text-align:' + align(c.align), bc = boolCol(c, r);
         if (c.as === 'image') { var u = safeUrl(r[colIdx(d, c.key)]); h += '<span class="lc-li"' + (u ? ' style="background-image:url(\'' + esc(u) + '\')"' : '') + '></span>'; return; }
-        if (c.as === 'pill') { pill = true; h += '<span class="lc-lp" style="background:' + (rc || accent) + '">' + esc(val(c, r)) + '</span>'; return; }
-        h += '<span class="lc-lt" style="' + al + '">' + esc(val(c, r)) + g.sub.map(function (x) { return '<small style="text-align:' + align(x.align) + '">' + esc(val(x, r)) + '</small>'; }).join('') + '</span>';
+        if (c.as === 'pill') { pill = true; h += '<span class="lc-lp" style="background:' + (rc || bc || accent) + '">' + esc(val(c, r)) + '</span>'; return; }
+        h += '<span class="lc-lt" style="' + al + (bc && !rc ? ';color:' + bc : '') + '">' + esc(val(c, r)) + g.sub.map(function (x) { return '<small style="text-align:' + align(x.align) + '">' + esc(val(x, r)) + '</small>'; }).join('') + '</span>';
       });
       return '<div class="lc-lr" style="grid-template-columns:' + grid + ';height:' + rowH + 'px;' + line + (rc && !pill ? 'color:' + rc + ';' : '') + '">' + h + '</div>';
     }
     var head = e.head ? '<div class="lc-lh" style="grid-template-columns:' + grid + ';height:' + headH + 'px">' + groups.map(function (g) {
-      var cc = colOf(d, g.c.key); return '<span style="text-align:' + (g.c.as === 'pill' ? 'right' : align(g.c.align)) + '">' + esc(g.c.label || cc.label || cc.key) + '</span>';
+      var cc = colOf(d, g.c.key); return '<span data-lh="' + (e.cols || []).indexOf(g.c) + '" style="text-align:' + (g.c.as === 'pill' ? 'right' : align(g.c.align)) + '">' + esc(g.c.label || cc.label || cc.key) + '</span>';
     }).join('') + '</div>' : '';
     var body, mode = e.page === 'scroll' || e.page === 'cut' ? e.page : 'pages', sec = num(e.sec, 8, 2, 120);
     if (mode === 'cut' || all.length <= n) body = '<div class="lc-pg">' + all.slice(0, n).map(row).join('') + '</div>';
@@ -412,6 +456,11 @@
     TOKEN: TOKEN,
     SCREEN: SCREEN,
     tableLabel: tableLabel,
+    /** Liste reliée (§140) : lignes gardées (filtre, tri), début et fin communs de valeurs, valeur affichée d'une cellule. */
+    tableRows: tableRows,
+    common: common,
+    cellText: cellText,
+    fmt: fmt,
     /** Sources utilisées par un document (blocs, listes, champs ; « Cet écran » si un filtre de liste cite l'écran), sans doublon. */
     sources: function (doc) {
       var ids = [], els = (doc && doc.els) || [];
