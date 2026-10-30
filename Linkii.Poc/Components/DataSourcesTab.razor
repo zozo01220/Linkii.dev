@@ -1,11 +1,13 @@
 @inject TenantStore Store
 @inject DataSetService Data
 @inject RelayBroker Relays
+@inject Toaster Toast
 @implements IDisposable
 
-@* Intégrations › Sources de données (§139, maquette maquettes/sources-de-donnees-architecture.html, scène 1) : les connexions de l'organisation
-   en cartes (API web, bases, fichiers), ses jeux de données en tableau (lignes, actualisation, utilisation, état) et ses relais (lot 4). Plan Pro ; administrateurs. *@
-<HeadContent><link rel="stylesheet" href="data-sources.css?v=2" /></HeadContent>
+@* Intégrations › Sources de données (§139, maquettes/sources-de-donnees-cartes.html) : relais puis sources en cartes ou en liste, avec recherche et
+   filtres comme le Store ; un clic ouvre un tiroir à droite (trajet, jeux de données, modifier, supprimer avec confirmation). Plan Pro ; administrateurs.
+   Le bouton « Ajouter » est dans l'en-tête de la page (Integrations.razor) et appelle AddSource / AddRelay. *@
+<HeadContent><link rel="stylesheet" href="data-sources.css?v=3" /></HeadContent>
 
 @if (!allowed)
 {
@@ -16,97 +18,170 @@
         <a class="btn" href="/settings?tab=abonnement">Voir les plans</a>
     </div>
 }
+else if (connections.Count == 0 && relays.Count == 0)
+{
+    <div class="dsx-first">
+        <h2>Affichez vos propres données sur vos écrans</h2>
+        <p>Connectez une fois votre source ; Linkii garde une copie à jour et l'envoie aux écrans.</p>
+        <div class="dsx-steps">
+            <div><em>1</em><b>Connecter</b><span>API web, base de données, fichier CSV, JSON ou Excel.</span></div>
+            <div><em>2</em><b>Choisir un jeu de données</b><span>Un chemin d'API, une feuille, une requête, sa fréquence.</span></div>
+            <div><em>3</em><b>L'utiliser</b><span>Reliez ses champs à un bloc dans l'éditeur de compositions.</span></div>
+        </div>
+        <button type="button" class="btn" @onclick="AddSource"><Ico Name="plus" Size="15" /> Connecter une source</button>
+    </div>
+}
 else
 {
-    <div class="dsx-head">
-        <h2>Connexions</h2>
-        <span class="grow"></span>
-        <button type="button" class="btn sm" disabled="@(connections.Count >= DataKinds.MaxConnections)" @onclick="() => OpenConnection(null)"><Ico Name="plus" Size="15" /> Connecter une source</button>
+    var rs = relays.Where(r => (filter is "" or "relay") && Match(r.Name + " " + r.Machine)).ToList();
+    var cs = connections.Where(c => (filter is "" || filter == c.Kind) && Match(c.Name + " " + Describe(c))).ToList();
+    <div class="lib-tools">
+        <div class="search-box grow" style="margin:0">
+            <Ico Name="search" Size="16" />
+            <input placeholder="Rechercher une source ou un relais" aria-label="Rechercher une source ou un relais" @bind="search" @bind:event="oninput" />
+        </div>
+        <ViewToggle StorageKey="datasources" @bind-Value="view" />
     </div>
-    <div class="dsx-grid">
-        @foreach (var c in connections)
+    <div class="int-chips" role="group" aria-label="Filtrer">
+        <button type="button" class="chip @(filter == "" ? "on" : "")" aria-pressed="@(filter == "" ? "true" : "false")" @onclick='() => filter = ""'>Toutes <small>@(relays.Count + connections.Count)</small></button>
+        <button type="button" class="chip @(filter == "relay" ? "on" : "")" aria-pressed="@(filter == "relay" ? "true" : "false")" @onclick='() => filter = "relay"'>Relais <small>@relays.Count</small></button>
+        @foreach (var k in new[] { DataKinds.Api, DataKinds.Db, DataKinds.File })
         {
-            var conn = c;
-            var sets = dataSets.Where(d => d.ConnectionId == conn.Id).ToList();
-            var level = ConnLevel(conn, sets);
-            <div class="dsx-card">
-                <div class="dsx-top">
-                    <span class="dsx-ico @(conn.Kind)">@(conn.Kind == DataKinds.Api ? "{ }" : conn.Kind == DataKinds.Db ? "SQL" : FileExt(conn))</span>
-                    <div class="grow" style="min-width:0"><b>@conn.Name</b><small>@Describe(conn)</small></div>
-                    <button type="button" class="btn ghost sm" @onclick="() => OpenConnection(conn)">Modifier</button>
-                </div>
-                <div>@StatePill(level, conn.LastError.Length > 0 ? "Connexion en erreur" : level == "bad" ? "Lecture en échec" : level == "warn" ? "Copie conservée" : sets.Count == 0 ? "Aucun jeu de données" : "Connectée")</div>
-                <div class="dsx-sets">
-                    @foreach (var d in sets)
-                    {
-                        var ds = d;
-                        <button type="button" class="dsx-set" @onclick="() => OpenDataSet(ds, conn)"><span>@ds.Name</span><small>@Ago(Data.Last(clientId, ds.Id))</small></button>
-                    }
-                    <button type="button" class="dsx-add" disabled="@(dataSets.Count >= DataKinds.MaxDataSets)" @onclick="() => NewDataSet(conn)">+ Jeu de données</button>
-                </div>
-            </div>
+            var kind = k;
+            var n = connections.Count(c => c.Kind == kind);
+            if (n == 0) { continue; }
+            <button type="button" class="chip @(filter == kind ? "on" : "")" aria-pressed="@(filter == kind ? "true" : "false")" @onclick="() => filter = kind">@KindLabel(kind) <small>@n</small></button>
         }
-        <button type="button" class="dsx-card dsx-new" disabled="@(connections.Count >= DataKinds.MaxConnections)" @onclick="() => OpenConnection(null)">
-            <span class="dsx-plus"><Ico Name="plus" Size="18" /></span>
-            <b>Connecter une source</b>
-            <small>API web, base de données, fichier CSV, JSON ou Excel.</small>
-        </button>
     </div>
 
-    @if (dataSets.Count > 0)
+    @if (rs.Count + cs.Count == 0)
     {
-        <h2 class="dsx-h2">Jeux de données</h2>
-        <div class="tbl-scroll">
-            <table class="tbl dsx-tbl">
-                <thead><tr><th>Nom</th><th>Connexion</th><th class="num">Lignes</th><th>Actualisation</th><th>Utilisé par</th><th>État</th></tr></thead>
-                <tbody>
-                    @foreach (var d in dataSets)
-                    {
-                        var ds = d;
-                        var conn = connections.FirstOrDefault(c => c.Id == ds.ConnectionId);
-                        var last = Data.Last(clientId, ds.Id);
-                        var table = Data.Table(clientId, ds.Id);
-                        <tr class="dsx-row" tabindex="0" @onclick="() => OpenDataSet(ds, conn)" @onkeydown='e => { if (e.Key == "Enter") OpenDataSet(ds, conn); }'>
-                            <td><b>@ds.Name</b></td>
-                            <td class="muted">@(conn?.Name ?? "—")</td>
-                            <td class="num">@(table?.Rows.Count.ToString() ?? "—")</td>
-                            <td>@(conn is { Kind: DataKinds.File, FileMode: "upload" } ? "à chaque import du fichier" : DataKinds.RefreshLabel(ds.RefreshMin).ToLowerInvariant())</td>
-                            <td>@(usage.GetValueOrDefault(ds.Id) is var n && n > 0 ? $"{n} composition{(n > 1 ? "s" : "")}" : "—")</td>
-                            <td>@StatePill(last?.Level ?? "", last == null ? "Pas encore lu" : last.Level == "ok" ? Ago(last) : last.Level == "warn" ? "Copie conservée" : "En échec")</td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
+        <p class="dsx-note"><b>Aucun résultat.</b> Essayez un autre mot ou retirez le filtre.</p>
     }
-    <div class="dsx-head dsx-h2">
-        <h2>Relais</h2>
-        <span class="grow"></span>
-        <button type="button" class="btn ghost sm" disabled="@(relays.Count >= RelayBroker.MaxPerOrg)" @onclick="() => OpenRelay(null)"><Ico Name="plus" Size="15" /> Installer un relais</button>
-    </div>
-    @if (relays.Count == 0)
+    @if (rs.Count > 0)
     {
-        <p class="dsx-muted">Pour une base de données ou une API de votre réseau interne, installez un relais sur un PC ou un serveur de ce réseau : il lit les données pour Linkii, sans rien ouvrir dans le pare-feu.</p>
-    }
-    else
-    {
-        <div class="dsx-grid">
-            @foreach (var x in relays)
+        <h2 class="dsx-h2">Relais <span class="cat-count">@rs.Count</span></h2>
+        <div class="@(view == "list" ? "dsx-list" : "dsx-grid")">
+            @if (view == "list") { <div class="dsx-lrow hd"><span></span><span>Relais</span><span>Machine</span><span>État</span><span>Connexions</span></div> }
+            @foreach (var x in rs)
             {
                 var rl = x;
                 var online = Relays.Online(rl.Id);
                 var uses = connections.Count(c => c.Via == "relay" && c.RelayId == rl.Id);
-                <button type="button" class="dsx-card dsx-relay" @onclick="() => OpenRelay(rl.Id)">
-                    <div class="dsx-top">
-                        <span class="dsx-ico relay">⇄</span>
-                        <div class="grow" style="min-width:0"><b>@rl.Name</b><small>@(rl.Machine.Length > 0 ? rl.Machine + " · " : "")@(uses == 0 ? "aucune connexion" : $"{uses} connexion{(uses > 1 ? "s" : "")}")</small></div>
-                    </div>
-                    <div>@StatePill(rl.TokenHash.Length == 0 ? "warn" : online ? "ok" : "bad", rl.TokenHash.Length == 0 ? "En attente d'appairage" : online ? "En ligne" : "Hors ligne")</div>
-                </button>
+                var pill = StatePill(rl.TokenHash.Length == 0 ? "warn" : online ? "ok" : "bad", rl.TokenHash.Length == 0 ? "En attente d'appairage" : online ? "En ligne" : "Hors ligne");
+                @if (view == "list")
+                {
+                    <button type="button" class="dsx-lrow" @onclick="() => ShowRelay(rl.Id)"><span class="dsx-ico relay">⇄</span><b>@rl.Name</b><span class="muted">@(rl.Machine.Length > 0 ? rl.Machine : "—")</span><span>@pill</span><span class="muted">@(uses == 0 ? "aucune" : uses.ToString())</span></button>
+                }
+                else
+                {
+                    <button type="button" class="dsx-card dsx-relay" @onclick="() => ShowRelay(rl.Id)">
+                        <div class="dsx-top">
+                            <span class="dsx-ico relay">⇄</span>
+                            <div class="grow" style="min-width:0"><b>@rl.Name</b><small>@(rl.Machine.Length > 0 ? rl.Machine : "machine non annoncée")</small></div>
+                            @pill
+                        </div>
+                        <div class="dsx-foot">@(uses == 0 ? "Aucune connexion" : $"{uses} connexion{(uses > 1 ? "s" : "")} servie{(uses > 1 ? "s" : "")}")@if (rl.Version.Length > 0) { <span class="grow"></span><span>v@(rl.Version)</span> }</div>
+                    </button>
+                }
             }
         </div>
     }
-    <p class="dsx-note"><b>Une connexion, plusieurs jeux de données.</b> L'adresse et les identifiants se saisissent une seule fois. Chaque jeu de données lit une partie de cette source (un chemin d'API, une feuille), avec sa propre fréquence. Les écrans ne lisent jamais la source : ils reçoivent la dernière copie gardée par Linkii, même si la source ne répond plus.</p>
+    @if (cs.Count > 0)
+    {
+        <h2 class="dsx-h2">Sources <span class="cat-count">@cs.Count</span></h2>
+        <div class="@(view == "list" ? "dsx-list" : "dsx-grid")">
+            @if (view == "list") { <div class="dsx-lrow hd"><span></span><span>Source</span><span>Type</span><span>État</span><span>Jeux de données</span></div> }
+            @foreach (var c in cs)
+            {
+                var conn = c;
+                var sets = dataSets.Where(d => d.ConnectionId == conn.Id).ToList();
+                var level = ConnLevel(conn, sets);
+                var pill = StatePill(level, StateText(conn, level));
+                var last = sets.Select(s => Data.Last(clientId, s.Id)).Where(l => l != null).OrderByDescending(l => l!.Utc).FirstOrDefault();
+                @if (view == "list")
+                {
+                    <button type="button" class="dsx-lrow" @onclick="() => ShowConn(conn.Id)"><span class="dsx-ico @(conn.Kind)">@IcoText(conn)</span><span class="dsx-lname"><b>@conn.Name</b>@if (conn.Via == "relay") { <small>⇄ par un relais</small> }</span><span class="muted">@Describe(conn, false)</span><span>@pill</span><span class="muted">@(sets.Count == 0 ? "aucun" : sets.Count.ToString())</span></button>
+                }
+                else
+                {
+                    <button type="button" class="dsx-card" @onclick="() => ShowConn(conn.Id)">
+                        <div class="dsx-top">
+                            <span class="dsx-ico @(conn.Kind)">@IcoText(conn)</span>
+                            <div class="grow" style="min-width:0"><b>@conn.Name</b><small>@Describe(conn, false)</small></div>
+                            @pill
+                        </div>
+                        <div class="dsx-foot">@(sets.Count == 0 ? "Aucun jeu de données" : $"{sets.Count} jeu{(sets.Count > 1 ? "x" : "")} de données")@if (conn.Via == "relay") { <span class="dsx-via">⇄ relais</span> }<span class="grow"></span><span>@Ago(last)</span></div>
+                    </button>
+                }
+            }
+        </div>
+    }
+}
+
+@if (drawerRelay is { } dr)
+{
+    var online = Relays.Online(dr.Id);
+    var served = connections.Where(c => c.Via == "relay" && c.RelayId == dr.Id).ToList();
+    <div class="dsx-veil" @onclick="CloseDrawer"></div>
+    <aside class="dsx-drawer" role="dialog" aria-label="@dr.Name">
+        <div class="dsx-dh">
+            <span class="dsx-ico relay">⇄</span>
+            <div class="grow" style="min-width:0"><h3>@dr.Name</h3>@StatePill(dr.TokenHash.Length == 0 ? "warn" : online ? "ok" : "bad", dr.TokenHash.Length == 0 ? "En attente d'appairage" : online ? "En ligne" : "Hors ligne")</div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseDrawer"><Ico Name="x" Size="18" /></button>
+        </div>
+        <div class="dsx-db">
+            <h4>Informations</h4>
+            <dl class="dsx-kv">
+                <dt>Machine</dt><dd>@(dr.Machine.Length > 0 ? dr.Machine : "—")</dd>
+                <dt>Version</dt><dd>@(dr.Version.Length > 0 ? dr.Version : "—")</dd>
+                <dt>Créé le</dt><dd>@dr.CreatedUtc.ToLocalTime().ToString("dd.MM.yyyy")</dd>
+            </dl>
+            <h4>Connexions servies <span class="cat-count">@served.Count</span></h4>
+            @if (served.Count == 0) { <p class="dsx-muted">Aucune source n'utilise ce relais.</p> }
+            @foreach (var s in served)
+            {
+                var sc = s;
+                <button type="button" class="dsx-set" @onclick="() => ShowConn(sc.Id)"><span>@sc.Name</span><small>@KindLabel(sc.Kind)</small></button>
+            }
+        </div>
+        @DrawerFoot(() => OpenRelay(dr.Id), $"Le relais « {dr.Name} » sera supprimé et son jeton refusé : il s'arrêtera.", DeleteRelay)
+    </aside>
+}
+@if (drawerConn is { } dc)
+{
+    var sets = dataSets.Where(d => d.ConnectionId == dc.Id).ToList();
+    var level = ConnLevel(dc, sets);
+    var relay = dc.Via == "relay" ? relays.FirstOrDefault(r => r.Id == dc.RelayId) : null;
+    var used = sets.Sum(s => usage.GetValueOrDefault(s.Id));
+    <div class="dsx-veil" @onclick="CloseDrawer"></div>
+    <aside class="dsx-drawer" role="dialog" aria-label="@dc.Name">
+        <div class="dsx-dh">
+            <span class="dsx-ico @(dc.Kind)">@IcoText(dc)</span>
+            <div class="grow" style="min-width:0"><h3>@dc.Name</h3><div class="dsx-meta">@Describe(dc, false) @StatePill(level, StateText(dc, level))</div></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseDrawer"><Ico Name="x" Size="18" /></button>
+        </div>
+        <div class="dsx-db">
+            <div class="dsx-route">
+                <span class="dsx-node">Linkii<small>copie conservée</small></span><i></i>
+                @if (dc.Via == "relay") { <span class="dsx-node r">⇄ @(relay?.Name ?? "relais supprimé")<small>relais</small></span><i></i> }
+                <span class="dsx-node">@KindLabel(dc.Kind)<small>la source</small></span>
+            </div>
+            @if (dc.LastError.Length > 0) { <div class="dsx-alert">@dc.LastError — les écrans gardent la dernière copie.</div> }
+            <div class="dsx-sech"><h4>Jeux de données <span class="cat-count">@sets.Count</span></h4><button type="button" class="btn ghost sm" disabled="@(dataSets.Count >= DataKinds.MaxDataSets)" @onclick="() => NewDataSet(dc)"><Ico Name="plus" Size="14" /> Jeu de données</button></div>
+            @if (sets.Count == 0) { <p class="dsx-muted">Aucun jeu de données : ajoutez-en un pour l'utiliser dans une composition.</p> }
+            @foreach (var d in sets)
+            {
+                var ds = d;
+                var n = usage.GetValueOrDefault(ds.Id);
+                <button type="button" class="dsx-dsrow" @onclick="() => OpenDataSet(ds, dc)">
+                    <span><b>@ds.Name</b><small>@(dc is { Kind: DataKinds.File, FileMode: "upload" } ? "à chaque import du fichier" : DataKinds.RefreshLabel(ds.RefreshMin).ToLowerInvariant()) · @(Data.Table(clientId, ds.Id)?.Rows.Count.ToString() ?? "—") lignes</small></span>
+                    <span class="r">@(n > 0 ? $"{n} composition{(n > 1 ? "s" : "")}" : "Inutilisé")<small>@Ago(Data.Last(clientId, ds.Id))</small></span>
+                </button>
+            }
+        </div>
+        @DrawerFoot(() => OpenConnection(dc), (sets.Count > 0 ? $"Ses {sets.Count} jeu{(sets.Count > 1 ? "x" : "")} de données seront supprimés aussi" + (used > 0 ? $", utilisés dans {used} composition{(used > 1 ? "s" : "")}." : ".") : "La source sera supprimée."), DeleteConn)
+    </aside>
 }
 
 @if (editConn != null)
@@ -135,6 +210,17 @@ else
     private DataSet? editSet;
     private bool setIsNew;
     private Timer? timer;
+    private string search = "", filter = "", view = "cards";   // filter : "" | "relay" | api | db | file ; view mémorisée dans le navigateur
+    private Guid? drawerConnId, drawerRelayId;
+    private bool confirmDel;
+    private string? delError;
+
+    /// <summary>Prévient la page quand le nombre de sources change (pastille du titre de l'onglet).</summary>
+    [Parameter] public EventCallback OnCountChanged { get; set; }
+    private int lastCount = -1;
+
+    private DataConnection? drawerConn => drawerConnId is { } i ? connections.FirstOrDefault(c => c.Id == i) : null;
+    private DataRelay? drawerRelay => drawerRelayId is { } i ? relays.FirstOrDefault(r => r.Id == i) : null;
 
     protected override void OnInitialized()
     {
@@ -149,7 +235,19 @@ else
             d.Tenant.DataSets.Select(x => x.Copy()).OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase).ToList()));
         usage = Store.Read(d => dataSets.ToDictionary(x => x.Id, x => DataSourceOps.UsedBy(d, x.Id).Count));
         relays = Store.Read(d => d.Tenant.DataRelays.Select(r => r.Copy()).OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
+        if (lastCount >= 0 && lastCount != connections.Count) _ = InvokeAsync(OnCountChanged.InvokeAsync);
+        lastCount = connections.Count;
     }
+
+    // ---- appelés par le bouton « Ajouter » de l'en-tête de la page ----
+    public bool CanAddSource => allowed && connections.Count < DataKinds.MaxConnections;
+    public bool CanAddRelay => allowed && relays.Count < RelayBroker.MaxPerOrg;
+    public void AddSource() { if (CanAddSource) { CloseDrawer(); OpenConnection(null); StateHasChanged(); } }
+    public void AddRelay() { if (CanAddRelay) { CloseDrawer(); OpenRelay(null); StateHasChanged(); } }
+
+    private void ShowConn(Guid id) { drawerRelayId = null; drawerConnId = id; confirmDel = false; delError = null; }
+    private void ShowRelay(Guid id) { drawerConnId = null; drawerRelayId = id; confirmDel = false; delError = null; }
+    private void CloseDrawer() { drawerConnId = drawerRelayId = null; confirmDel = false; delError = null; }
 
     private void OpenRelay(Guid? id) { relayId = id; relayOpen = true; }
     private void CloseRelay() { relayOpen = false; Reload(); }
@@ -168,22 +266,92 @@ else
         if (r.Created && connections.FirstOrDefault(c => c.Id == r.C.Id) is { } c) NewDataSet(c);
     }
 
+    /// <summary>Pied du tiroir : Modifier, Supprimer ; un premier clic sur Supprimer affiche le message de confirmation.</summary>
+    private RenderFragment DrawerFoot(Action edit, string warning, Func<Task> delete) => @<div class="dsx-df">
+        @if (delError != null) { <div class="dsx-alert">@delError</div> }
+        @if (confirmDel)
+        {
+            <div class="dsx-confirm" role="alertdialog" aria-label="Confirmer la suppression">
+                <b>Supprimer définitivement ?</b>
+                <span>@warning</span>
+                <div class="dsx-confirm-b">
+                    <button type="button" class="btn ghost sm" @onclick="() => { confirmDel = false; delError = null; }">Annuler</button>
+                    <button type="button" class="btn danger sm" @onclick="delete">Oui, supprimer</button>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="dsx-df-b">
+                <button type="button" class="btn ghost sm" @onclick="edit">Modifier</button>
+                <span class="grow"></span>
+                <button type="button" class="btn danger sm" @onclick="() => { confirmDel = true; delError = null; }">Supprimer</button>
+            </div>
+        }
+    </div>;
+
+    private Task DeleteConn()
+    {
+        if (drawerConn is not { } c) return Task.CompletedTask;
+        var cid = Store.ClientId;
+        var (ids, file) = Store.Write(db =>
+        {
+            var ids = db.Tenant.DataSets.Where(x => x.ConnectionId == c.Id).Select(x => x.Id).ToList();
+            db.Tenant.DataSets.RemoveAll(x => x.ConnectionId == c.Id);
+            var file = db.Tenant.DataConnections.FirstOrDefault(x => x.Id == c.Id)?.FileName ?? "";
+            db.Tenant.DataConnections.RemoveAll(x => x.Id == c.Id);
+            return (ids, file);
+        });
+        foreach (var id in ids) Data.Forget(cid, id);
+        DataSetService.DeleteFile(cid, file);
+        Toast.Ok($"Source « {c.Name} » supprimée.");
+        CloseDrawer();
+        Reload();
+        return Task.CompletedTask;
+    }
+
+    private Task DeleteRelay()
+    {
+        if (drawerRelay is not { } r) return Task.CompletedTask;
+        var id = r.Id;
+        delError = Store.Write(d =>
+        {
+            if (!d.Access.IsOrgAdmin) return "Seuls les administrateurs de l'organisation gèrent les relais.";
+            var used = d.Tenant.DataConnections.Where(c => c.Via == "relay" && c.RelayId == id).Select(c => c.Name).ToList();
+            if (used.Count > 0) return $"Utilisé par {string.Join(", ", used.Select(u => "« " + u + " »"))} : changez d'abord leur accès.";
+            d.Tenant.DataRelays.RemoveAll(x => x.Id == id);
+            return null;
+        });
+        if (delError != null) { confirmDel = false; return Task.CompletedTask; }
+        Toast.Ok("Relais supprimé.");
+        CloseDrawer();
+        Reload();
+        return Task.CompletedTask;
+    }
+
+    private bool Match(string text) => search.Trim().Length == 0 || text.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase);
+    private static string KindLabel(string kind) => kind == DataKinds.Api ? "API web" : kind == DataKinds.Db ? "Base de données" : "Fichier";
+    private static string IcoText(DataConnection c) => c.Kind == DataKinds.Api ? "{ }" : c.Kind == DataKinds.Db ? "SQL" : FileExt(c);
+
+    private static string StateText(DataConnection c, string level) =>
+        c.LastError.Length > 0 ? "Erreur" : level == "bad" ? "Lecture en échec" : level == "warn" ? "Copie conservée" : "Connectée";
+
     private string ConnLevel(DataConnection c, List<DataSet> sets)
     {
         if (c.LastError.Length > 0) return "bad";
         var levels = sets.Select(s => Data.Last(clientId, s.Id)?.Level).ToList();
-        return levels.Contains("bad") ? "bad" : levels.Contains("warn") ? "warn" : sets.Count == 0 ? "" : "ok";
+        return levels.Contains("bad") ? "bad" : levels.Contains("warn") ? "warn" : "ok";
     }
 
     private static string FileExt(DataConnection c) =>
         Path.GetExtension(c.FileMode == "url" ? new Uri(c.FileUrl.Length > 0 ? c.FileUrl : "https://x/").AbsolutePath : c.FileLabel).TrimStart('.').ToUpperInvariant() is { Length: > 0 and <= 4 } e ? e : "CSV";
 
-    private string Describe(DataConnection c) => (c.Kind switch
+    private string Describe(DataConnection c, bool withRelay = true) => (c.Kind switch
     {
         DataKinds.Api => "API web · " + (c.Auth switch { "key" => "clé API", "bearer" => "jeton", "basic" => "utilisateur et mot de passe", "login" => "identifiants puis jeton", _ => "sans authentification" }),
         DataKinds.Db => DataSql.Engines.FirstOrDefault(e => e.Id == c.Engine).Label + (c.Database.Length > 0 ? " · " + c.Database : ""),
         _ => c.FileMode == "url" ? "Fichier · lu à son adresse" : "Fichier importé · " + c.FileLabel
-    }) + (c.Via == "relay" ? " · par " + (relays.FirstOrDefault(r => r.Id == c.RelayId)?.Name ?? "un relais supprimé") : "");
+    }) + (withRelay && c.Via == "relay" ? " · par " + (relays.FirstOrDefault(r => r.Id == c.RelayId)?.Name ?? "un relais supprimé") : "");
 
     internal static string Ago(DataReadLog? l)
     {

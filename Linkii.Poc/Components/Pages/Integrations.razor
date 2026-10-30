@@ -46,6 +46,22 @@
         </div>
       </div>
     }
+    @if (admin && tab == "data" && dataTab is { } dsTab && (dsTab.CanAddSource || dsTab.CanAddRelay))
+    {
+      <div class="row head-actions int-ha">
+        <div class="kebab add-menu">
+            <button class="btn" data-fab="Ajouter" aria-haspopup="menu" aria-expanded="@(addMenu ? "true" : "false")" @onclick="() => addMenu = !addMenu"><Ico Name="plus" Size="16" /> Ajouter <Ico Name="chevron" Size="14" /></button>
+            @if (addMenu)
+            {
+                <div class="kebab-backdrop" @onclick="() => addMenu = false"></div>
+                <div class="kebab-menu" role="menu">
+                    <button type="button" role="menuitem" disabled="@(!dsTab.CanAddSource)" @onclick="() => { addMenu = false; dsTab.AddSource(); }"><span><b>Connecter une source</b><small>API web, base de données, fichier, Excel</small></span></button>
+                    <button type="button" role="menuitem" disabled="@(!dsTab.CanAddRelay)" @onclick="() => { addMenu = false; dsTab.AddRelay(); }"><span><b>Installer un relais</b><small>Pour une source sur votre réseau interne</small></span></button>
+                </div>
+            }
+        </div>
+      </div>
+    }
 </div>
 
 @if (admin)
@@ -56,13 +72,13 @@
         @if (MineHasError) { <span class="tab-alert" title="Une intégration est en erreur"><span class="sr-only">Une intégration est en erreur</span></span> }
     </button>
     <button type="button" role="tab" class="@(tab == "store" ? "on" : "")" aria-selected="@(tab == "store" ? "true" : "false")" @onclick='() => SetTab("store")'>Intégrations Store <span class="cat-count">@StoreCount</span></button>
-    <button type="button" role="tab" class="@(tab == "data" ? "on" : "")" aria-selected="@(tab == "data" ? "true" : "false")" @onclick='() => SetTab("data")'>Sources de données</button>
+    <button type="button" role="tab" class="@(tab == "data" ? "on" : "")" aria-selected="@(tab == "data" ? "true" : "false")" @onclick='() => SetTab("data")'>Sources de données <span class="cat-count">@DataCount</span></button>
 </nav>
 }
 
 @if (tab == "data" && admin)
 {
-    <DataSourcesTab />
+    <DataSourcesTab @ref="dataTab" OnCountChanged="() => StateHasChanged()" />
 }
 else if (!accountsTab)
 {
@@ -545,6 +561,8 @@ else
 
     private List<Row> TabRows(bool store) => AllRows().Where(r => InMine(r) != store).ToList();
 
+    private DataSourcesTab? dataTab;   // l'onglet Sources de données : le bouton « Ajouter » de l'en-tête l'appelle
+    private int DataCount => Store.Read(d => d.Tenant.DataConnections.Count);
     private int MineCount => TabRows(false).Count;
     private int StoreCount => TabRows(true).Count;
     private bool MineHasError => TabRows(false).Any(r => MineEntry(r.E).StatusCss == "hors-ligne" && !r.E.Off);
@@ -1044,8 +1062,11 @@ else
 
     private bool inApp;   // look « app » : appui long = menu du compte
 
+    private bool dataBtnShown;
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (tab == "data" && dataTab != null && !dataBtnShown) { dataBtnShown = true; StateHasChanged(); }   // la référence de l'onglet n'existe qu'après son premier rendu : le bouton « Ajouter » apparaît alors
+        if (tab != "data") dataBtnShown = false;
         if (firstRender)
         {
             try { inApp = await JS.InvokeAsync<bool>("linkiiPrefs.isApp"); if (inApp) StateHasChanged(); } catch (JSException) { } catch (InvalidOperationException) { }
