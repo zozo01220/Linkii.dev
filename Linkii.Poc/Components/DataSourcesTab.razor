@@ -7,7 +7,7 @@
 @* Page Sources de données (§139, maquettes/sources-de-donnees-hub.html) : un sous-onglet « Sources » et un « Relais » (paramètre Section), en cartes ou en liste,
    avec recherche et filtres comme le Store ; un clic ouvre un tiroir à droite (trajet, jeux de données, modifier, supprimer avec confirmation). Plan Pro ; administrateurs.
    Le bouton d'ajout est dans l'en-tête de la page (DataSources.razor) et appelle AddSource / AddRelay. *@
-<HeadContent><link rel="stylesheet" href="data-sources.css?v=4" /></HeadContent>
+<HeadContent><link rel="stylesheet" href="data-sources.css?v=7" /></HeadContent>
 
 @if (!allowed)
 {
@@ -81,7 +81,7 @@ else
     }
     @if (rs.Count > 0)
     {
-        <div class="@(view == "list" ? "dsx-list" : "dsx-grid")">
+        <div class="@(view == "list" ? "dsx-list" : "wg-grid")">
             @if (view == "list") { <div class="dsx-lrow hd"><span></span><span>Relais</span><span>Machine</span><span>État</span><span>Connexions</span></div> }
             @foreach (var x in rs)
             {
@@ -91,25 +91,36 @@ else
                 var pill = StatePill(rl.TokenHash.Length == 0 ? "warn" : online ? "ok" : "bad", rl.TokenHash.Length == 0 ? "En attente d'appairage" : online ? "En ligne" : "Hors ligne");
                 @if (view == "list")
                 {
-                    <button type="button" class="dsx-lrow" @onclick="() => ShowRelay(rl.Id)"><span class="dsx-ico relay">⇄</span><b>@rl.Name</b><span class="muted">@(rl.Machine.Length > 0 ? rl.Machine : "—")</span><span>@pill</span><span class="muted">@(uses == 0 ? "aucune" : uses.ToString())</span></button>
+                    <div class="dsx-lrow-w">
+                        <button type="button" class="dsx-lrow" @onclick="() => ShowRelay(rl.Id)"><span class="dsx-ico relay">⇄</span><b>@rl.Name</b><span class="muted">@(rl.Machine.Length > 0 ? rl.Machine : "—")</span><span>@pill</span><span class="muted">@(uses == 0 ? "aucune" : uses.ToString())</span></button>
+                        @Kebab("r" + rl.Id, rl.Name, () => OpenRelay(rl.Id), () => StartRename("relay", rl.Id, rl.Name), () => AskDelete("relay", rl.Id))
+                    </div>
                 }
                 else
                 {
-                    <button type="button" class="dsx-card dsx-relay" @onclick="() => ShowRelay(rl.Id)">
-                        <div class="dsx-top">
+                    @* Carte au gabarit des widgets : icône, nom, description sur deux lignes, pied grisé avec la pastille d'état *@
+                    <div class="dsx-cw">
+                    <button type="button" class="wg-card dsx-wgc dsx-relay" @onclick="() => ShowRelay(rl.Id)">
+                        <div class="wg-top">
                             <span class="dsx-ico relay">⇄</span>
-                            <div class="grow" style="min-width:0"><b>@rl.Name</b><small>@(rl.Machine.Length > 0 ? rl.Machine : "machine non annoncée")</small></div>
-                            @pill
+                            <div class="wg-id"><span class="wg-name">@rl.Name</span><small>@(rl.Machine.Length > 0 ? rl.Machine : "machine non annoncée")</small></div>
                         </div>
-                        <div class="dsx-foot">@(uses == 0 ? "Aucune connexion" : $"{uses} connexion{(uses > 1 ? "s" : "")} servie{(uses > 1 ? "s" : "")}")@if (rl.Version.Length > 0) { <span class="grow"></span><span>v@(rl.Version)</span> }</div>
+                        <p class="wg-desc">@(uses == 0 ? "Aucune source ne passe par ce relais." : $"Sert {uses} source{(uses > 1 ? "s" : "")} de votre réseau interne.")</p>
+                        <div class="wg-foot">
+                            @IntPill(rl.TokenHash.Length == 0 ? "warn" : online ? "ok" : "bad", rl.TokenHash.Length == 0 ? "En attente d'appairage" : online ? "En ligne" : "Hors ligne")
+                            <span class="grow"></span>
+                            @if (rl.Version.Length > 0) { <span class="muted">v@(rl.Version)</span> }
+                        </div>
                     </button>
+                    @Kebab("r" + rl.Id, rl.Name, () => OpenRelay(rl.Id), () => StartRename("relay", rl.Id, rl.Name), () => AskDelete("relay", rl.Id))
+                    </div>
                 }
             }
         </div>
     }
     @if (cs.Count > 0)
     {
-        <div class="@(view == "list" ? "dsx-list" : "dsx-grid")">
+        <div class="@(view == "list" ? "dsx-list" : "wg-grid")">
             @if (view == "list") { <div class="dsx-lrow hd"><span></span><span>Source</span><span>Type</span><span>État</span><span>Jeux de données</span></div> }
             @foreach (var c in cs)
             {
@@ -120,18 +131,28 @@ else
                 var last = sets.Select(s => Data.Last(clientId, s.Id)).Where(l => l != null).OrderByDescending(l => l!.Utc).FirstOrDefault();
                 @if (view == "list")
                 {
-                    <button type="button" class="dsx-lrow" @onclick="() => ShowConn(conn.Id)"><span class="dsx-ico @(conn.Kind)">@IcoText(conn)</span><span class="dsx-lname"><b>@conn.Name</b>@if (conn.Via == "relay") { <small>⇄ par un relais</small> }</span><span class="muted">@Describe(conn, false)</span><span>@pill</span><span class="muted">@(sets.Count == 0 ? "aucun" : sets.Count.ToString())</span></button>
+                    <div class="dsx-lrow-w">
+                        <button type="button" class="dsx-lrow" @onclick="() => ShowConn(conn.Id)"><span class="dsx-ico @(conn.Kind)">@IcoText(conn)</span><span class="dsx-lname"><b>@conn.Name</b>@if (conn.Via == "relay") { <small>⇄ par un relais</small> }</span><span class="muted">@Describe(conn, false)</span><span>@pill</span><span class="muted">@(sets.Count == 0 ? "aucun" : sets.Count.ToString())</span></button>
+                        @Kebab("c" + conn.Id, conn.Name, () => OpenConnection(conn), () => StartRename("conn", conn.Id, conn.Name), () => AskDelete("conn", conn.Id))
+                    </div>
                 }
                 else
                 {
-                    <button type="button" class="dsx-card" @onclick="() => ShowConn(conn.Id)">
-                        <div class="dsx-top">
+                    <div class="dsx-cw">
+                    <button type="button" class="wg-card dsx-wgc" @onclick="() => ShowConn(conn.Id)">
+                        <div class="wg-top">
                             <span class="dsx-ico @(conn.Kind)">@IcoText(conn)</span>
-                            <div class="grow" style="min-width:0"><b>@conn.Name</b><small>@Describe(conn, false)</small></div>
-                            @pill
+                            <div class="wg-id"><span class="wg-name">@conn.Name</span><small>@KindLabel(conn.Kind)</small></div>
                         </div>
-                        <div class="dsx-foot">@(sets.Count == 0 ? "Aucun jeu de données" : $"{sets.Count} jeu{(sets.Count > 1 ? "x" : "")} de données")@if (conn.Via == "relay") { <span class="dsx-via">⇄ relais</span> }<span class="grow"></span><span>@Ago(last)</span></div>
+                        <p class="wg-desc">@Describe(conn)</p>
+                        <div class="wg-foot">
+                            @IntPill(level, StateText(conn, level))
+                            <span class="grow"></span>
+                            <span class="muted">@(sets.Count == 0 ? "Aucun jeu de données" : $"{sets.Count} jeu{(sets.Count > 1 ? "x" : "")}") · @Ago(last)</span>
+                        </div>
                     </button>
+                    @Kebab("c" + conn.Id, conn.Name, () => OpenConnection(conn), () => StartRename("conn", conn.Id, conn.Name), () => AskDelete("conn", conn.Id))
+                    </div>
                 }
             }
         </div>
@@ -193,14 +214,39 @@ else
             {
                 var ds = d;
                 var n = usage.GetValueOrDefault(ds.Id);
+                <div class="dsx-dsrow-w">
                 <button type="button" class="dsx-dsrow" @onclick="() => OpenDataSet(ds, dc)">
                     <span><b>@ds.Name</b><small>@(dc is { Kind: DataKinds.File, FileMode: "upload" } ? "à chaque import du fichier" : DataKinds.RefreshLabel(ds.RefreshMin).ToLowerInvariant()) · @(Data.Table(clientId, ds.Id)?.Rows.Count.ToString() ?? "—") lignes</small></span>
                     <span class="r">@(n > 0 ? $"{n} composition{(n > 1 ? "s" : "")}" : "Inutilisé")<small>@Ago(Data.Last(clientId, ds.Id))</small></span>
                 </button>
+                @Kebab("s" + ds.Id, ds.Name, () => OpenDataSet(ds, dc), () => StartRename("set", ds.Id, ds.Name), () => AskDelete("set", ds.Id))
+                </div>
             }
         </div>
         @DrawerFoot(() => OpenConnection(dc), (sets.Count > 0 ? $"Ses {sets.Count} jeu{(sets.Count > 1 ? "x" : "")} de données seront supprimés aussi" + (used > 0 ? $", utilisés dans {used} composition{(used > 1 ? "s" : "")}." : ".") : "La source sera supprimée."), DeleteConn)
     </aside>
+}
+
+@if (renKind != null)
+{
+    <div class="modal-backdrop" @onclick="() => renKind = null"></div>
+    <div class="modal app-modal sm" role="dialog" aria-modal="true" aria-labelledby="dsx-rn-t">
+        <div class="modal-head"><h3 id="dsx-rn-t" class="grow">Renommer</h3><button type="button" class="modal-x" aria-label="Fermer" @onclick="() => renKind = null"><Ico Name="x" Size="20" /></button></div>
+        <div class="modal-body">
+            <div class="dw-field"><label for="dsx-rn">@(renKind == "conn" ? "Nom de la source" : renKind == "relay" ? "Nom du relais" : "Nom du jeu de données")</label><input id="dsx-rn" type="text" maxlength="@(renKind == "relay" ? 60 : 80)" @bind="renText" @bind:event="oninput" @onkeydown="RenameKey" autofocus /></div>
+            @if (renError != null) { <div class="err">@renError</div> }
+        </div>
+        <div class="modal-foot"><span class="grow"></span><button type="button" class="btn ghost" @onclick="() => renKind = null">Annuler</button><button type="button" class="btn" @onclick="DoRename">Renommer</button></div>
+    </div>
+}
+@if (delKind != null)
+{
+    <div class="modal-backdrop" @onclick="() => delKind = null"></div>
+    <div class="modal app-modal sm" role="alertdialog" aria-modal="true" aria-labelledby="dsx-dl-t">
+        <div class="modal-head"><h3 id="dsx-dl-t" class="grow">Supprimer définitivement ?</h3><button type="button" class="modal-x" aria-label="Fermer" @onclick="() => delKind = null"><Ico Name="x" Size="20" /></button></div>
+        <div class="modal-body"><p style="margin:0"><b>@delName</b></p><p class="dsx-muted" style="margin:6px 0 0">@delWarn</p>@if (delError != null) { <div class="err">@delError</div> }</div>
+        <div class="modal-foot"><span class="grow"></span><button type="button" class="btn ghost" @onclick="() => delKind = null">Annuler</button><button type="button" class="btn danger" @onclick="DoDelete">Oui, supprimer</button></div>
+    </div>
 }
 
 @if (editConn != null)
@@ -233,6 +279,9 @@ else
     private Guid? drawerConnId, drawerRelayId;
     private bool confirmDel;
     private string? delError;
+    private string? menuFor, renKind, renError, delKind, delName, delWarn;   // menu 3 points ouvert, renommage et suppression demandés depuis un menu
+    private string renText = "";
+    private Guid renId, delId;
 
     /// <summary>Sous-onglet affiché : « sources » ou « relais ».</summary>
     [Parameter] public string Section { get; set; } = "sources";
@@ -297,6 +346,86 @@ else
     }
 
     /// <summary>Pied du tiroir : Modifier, Supprimer ; un premier clic sur Supprimer affiche le message de confirmation.</summary>
+    /// <summary>Menu 3 points d'une carte, d'une ligne ou d'un jeu de données : Modifier, Renommer, Supprimer.</summary>
+    private RenderFragment Kebab(string key, string label, Action edit, Action rename, Action delete) => @<div class="kebab dsx-kb">
+        <button type="button" class="kebab-btn" aria-label="Actions pour @label" aria-haspopup="menu" aria-expanded="@(menuFor == key ? "true" : "false")" @onclick="() => menuFor = menuFor == key ? null : key" @onclick:stopPropagation="true"><Ico Name="dots-v" Size="18" /></button>
+        @if (menuFor == key)
+        {
+            <div class="kebab-backdrop" @onclick="() => menuFor = null" @onclick:stopPropagation="true"></div>
+            <div class="kebab-menu" role="menu">
+                <button type="button" role="menuitem" @onclick="() => { menuFor = null; edit(); }" @onclick:stopPropagation="true">Modifier</button>
+                <button type="button" role="menuitem" @onclick="() => { menuFor = null; rename(); }" @onclick:stopPropagation="true">Renommer</button>
+                <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; delete(); }" @onclick:stopPropagation="true"><Ico Name="trash" Size="16" /> Supprimer</button>
+            </div>
+        }
+    </div>;
+
+    private void StartRename(string kind, Guid id, string current) { renKind = kind; renId = id; renText = current; renError = null; }
+    private void RenameKey(KeyboardEventArgs e) { if (e.Key == "Enter") DoRename(); }
+
+    private void DoRename()
+    {
+        var n = renText.Trim();
+        var max = renKind == "relay" ? 60 : 80;
+        if (n.Length == 0) { renError = "Donnez un nom."; return; }
+        if (n.Length > max) { renError = $"Le nom est trop long ({max} caractères au plus)."; return; }
+        var kind = renKind; var id = renId;
+        renError = Store.Write(d =>
+        {
+            if (!d.Access.IsOrgAdmin) return "Seuls les administrateurs de l'organisation gèrent les sources de données.";
+            if (kind == "conn") { if (d.Tenant.DataConnections.FirstOrDefault(x => x.Id == id) is not { } c) return "Source introuvable."; c.Name = n; }
+            else if (kind == "relay") { if (d.Tenant.DataRelays.FirstOrDefault(x => x.Id == id) is not { } r) return "Relais introuvable."; r.Name = n; }
+            else
+            {
+                if (d.Tenant.DataSets.FirstOrDefault(x => x.Id == id) is not { } s) return "Jeu de données introuvable.";
+                if (d.Tenant.DataSets.Any(x => x.Id != id && x.Name.Equals(n, StringComparison.CurrentCultureIgnoreCase))) return "Un jeu de données porte déjà ce nom.";
+                s.Name = n;
+            }
+            return (string?)null;
+        });
+        if (renError != null) return;
+        renKind = null;
+        Reload();
+        Toast.Ok("Renommé.");
+    }
+
+    private void AskDelete(string kind, Guid id)
+    {
+        delKind = kind; delId = id; delError = null;
+        if (kind == "conn" && connections.FirstOrDefault(c => c.Id == id) is { } c)
+        {
+            var n = dataSets.Count(d => d.ConnectionId == id); var u = dataSets.Where(d => d.ConnectionId == id).Sum(d => usage.GetValueOrDefault(d.Id));
+            delName = c.Name; delWarn = n > 0 ? $"Ses {n} jeu{(n > 1 ? "x" : "")} de données seront supprimés aussi" + (u > 0 ? $", utilisés dans {u} composition{(u > 1 ? "s" : "")}." : ".") : "La source sera supprimée.";
+        }
+        else if (kind == "relay" && relays.FirstOrDefault(r => r.Id == id) is { } r) { delName = r.Name; delWarn = "Le relais sera supprimé et son jeton refusé : il s'arrêtera."; }
+        else if (kind == "set" && dataSets.FirstOrDefault(s => s.Id == id) is { } s) { var u = usage.GetValueOrDefault(id); delName = s.Name; delWarn = u > 0 ? $"Utilisé dans {u} composition{(u > 1 ? "s" : "")} : elles perdront ces données." : "Ce jeu de données n'est utilisé nulle part."; }
+        else delKind = null;
+    }
+
+    private async Task DoDelete()
+    {
+        if (delKind == "conn") await DeleteConn(delId);
+        else if (delKind == "relay") await DeleteRelay(delId);
+        else DeleteSet(delId);
+        if (delError == null) delKind = null;
+    }
+
+    private void DeleteSet(Guid id)
+    {
+        var cid = Store.ClientId;
+        var name = dataSets.FirstOrDefault(s => s.Id == id)?.Name ?? "";
+        delError = Store.Write(d =>
+        {
+            if (!d.Access.IsOrgAdmin) return "Seuls les administrateurs de l'organisation gèrent les sources de données.";
+            d.Tenant.DataSets.RemoveAll(x => x.Id == id);
+            return (string?)null;
+        });
+        if (delError != null) return;
+        Data.Forget(cid, id);
+        Toast.Ok($"Jeu de données « {name} » supprimé.");
+        Reload();
+    }
+
     private RenderFragment DrawerFoot(Action edit, string warning, Func<Task> delete) => @<div class="dsx-df">
         @if (delError != null) { <div class="dsx-alert">@delError</div> }
         @if (confirmDel)
@@ -320,9 +449,12 @@ else
         }
     </div>;
 
-    private Task DeleteConn()
+    private Task DeleteConn() => drawerConn is { } dcn ? DeleteConn(dcn.Id) : Task.CompletedTask;
+    private Task DeleteRelay() => drawerRelay is { } drl ? DeleteRelay(drl.Id) : Task.CompletedTask;
+
+    private Task DeleteConn(Guid connId)
     {
-        if (drawerConn is not { } c) return Task.CompletedTask;
+        if (connections.FirstOrDefault(x => x.Id == connId) is not { } c) return Task.CompletedTask;
         var cid = Store.ClientId;
         var (ids, file) = Store.Write(db =>
         {
@@ -335,15 +467,14 @@ else
         foreach (var id in ids) Data.Forget(cid, id);
         DataSetService.DeleteFile(cid, file);
         Toast.Ok($"Source « {c.Name} » supprimée.");
-        CloseDrawer();
+        if (drawerConnId == c.Id) CloseDrawer();
         Reload();
         return Task.CompletedTask;
     }
 
-    private Task DeleteRelay()
+    private Task DeleteRelay(Guid id)
     {
-        if (drawerRelay is not { } r) return Task.CompletedTask;
-        var id = r.Id;
+        if (relays.All(x => x.Id != id)) return Task.CompletedTask;
         delError = Store.Write(d =>
         {
             if (!d.Access.IsOrgAdmin) return "Seuls les administrateurs de l'organisation gèrent les relais.";
@@ -354,7 +485,7 @@ else
         });
         if (delError != null) { confirmDel = false; return Task.CompletedTask; }
         Toast.Ok("Relais supprimé.");
-        CloseDrawer();
+        if (drawerRelayId == id) CloseDrawer();
         Reload();
         return Task.CompletedTask;
     }
@@ -389,6 +520,9 @@ else
         var s = (DateTime.UtcNow - l.Utc).TotalSeconds;
         return s < 60 ? $"il y a {Math.Max(1, (int)s)} s" : s < 3600 ? $"il y a {(int)(s / 60)} min" : s < 86400 ? $"il y a {(int)(s / 3600)} h" : "le " + l.Utc.ToLocalTime().ToString("dd.MM à HH:mm");
     }
+
+    /// <summary>Pastille d'état des cartes (celle des widgets) : vert, rouge ou grise (copie conservée, en attente).</summary>
+    private static RenderFragment IntPill(string level, string text) => @<span class="int-pill @(level == "ok" ? "ok" : level == "bad" ? "bad" : "off")"><i></i>@text</span>;
 
     internal static RenderFragment StatePill(string level, string text) => @<span class="pill @(level is "ok" or "warn" or "bad" ? level : "") dsx-pill"><i></i>@text</span>;
 
