@@ -1,0 +1,51 @@
+@page "/datasources"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientAdmin")]
+@inject TenantStore Store
+
+@* Sources de données (§139, maquettes/sources-de-donnees-hub.html) : onglet du hub Contenus, mode expert ; sous-onglets Sources et Relais. *@
+<div class="page-head">
+    <div>
+        <h1>Sources de données</h1>
+        <p class="sub sc-intro">Vos données externes, lues par Linkii et utilisables dans les compositions.</p>
+    </div>
+    @if (allowed)
+    {
+        <div class="row head-actions int-ha">
+            @if (sect == "relays")
+            {
+                <button class="btn" data-fab="Installer un relais" disabled="@(tabRef?.CanAddRelay != true)" @onclick="() => tabRef?.AddRelay()"><Ico Name="plus" Size="16" /> Installer un relais</button>
+            }
+            else
+            {
+                <button class="btn" data-fab="Connecter une source" disabled="@(tabRef?.CanAddSource != true)" @onclick="() => tabRef?.AddSource()"><Ico Name="plus" Size="16" /> Connecter une source</button>
+            }
+        </div>
+    }
+</div>
+
+<nav class="tabs int-tabs" role="tablist" aria-label="Sources et relais">
+    <button type="button" role="tab" class="@(sect == "sources" ? "on" : "")" aria-selected="@(sect == "sources" ? "true" : "false")" @onclick='() => sect = "sources"'>Sources <span class="cat-count">@sourceCount</span></button>
+    <button type="button" role="tab" class="@(sect == "relays" ? "on" : "")" aria-selected="@(sect == "relays" ? "true" : "false")" @onclick='() => sect = "relays"'>Relais <span class="cat-count">@relayCount</span></button>
+</nav>
+
+<DataSourcesTab @ref="tabRef" Section="@sect" OnCountChanged="Recount" />
+
+@code {
+    private string sect = "sources";   // sources | relays
+    private bool allowed;
+    private int sourceCount, relayCount;
+    private DataSourcesTab? tabRef;
+
+    protected override void OnInitialized() => Recount();
+
+    private void Recount()
+    {
+        (allowed, sourceCount, relayCount) = Store.Read(d => (DataSourceOps.Allowed(d.Tenant), d.Tenant.DataConnections.Count, d.Tenant.DataRelays.Count));
+        StateHasChanged();
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender) StateHasChanged();   // la référence du composant n'existe qu'après son premier rendu : le bouton d'ajout s'active alors
+    }
+}

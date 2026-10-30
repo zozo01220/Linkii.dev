@@ -707,7 +707,7 @@
       return `<div class="ce-pt"><b>${m.icon || ''} ${esc(s.name)}</b></div>` + (d && d.error ? `<div class="ce-pt">Données indisponibles : ${esc(d.error)}</div>`
         : !f.length ? `<div class="ce-pt">${d ? 'Aucun champ' : 'Lecture des données…'}</div>`
         : f.map(x => `<button class="ce-mi" data-o="${s.id}:${esc(x.key)}">${esc(x.label)}<small>${d ? esc(LC().fieldText(s.id, x.key, opts({ names: false }), '—')) : ''}</small></button>`).join(''));
-    }).join('<hr>') : '<div class="ce-pt">Aucune source : ajoutez un jeu de données (Intégrations › Sources de données), une Météo, un Calendrier partagé, un Flux RSS ou des Capteurs Home Assistant.</div>';
+    }).join('<hr>') : '<div class="ce-pt">Aucune source : ajoutez un jeu de données (Sources de données), une Météo, un Calendrier partagé, un Flux RSS ou des Capteurs Home Assistant.</div>';
     openPop(fieldAnchor, h, o => insertField(o));
     const p = q('#ce-pop'); p.classList.add('ce-fields');
     p.addEventListener('mousedown', ev => ev.preventDefault());   // le texte en cours d'écriture garde le curseur
@@ -748,7 +748,7 @@
     const missing = used.filter(id => id !== LC().SCREEN && !sources.some(s => s.id === id)).length;
     let h = '<p class="ce-help" style="margin-top:0">Glissez une colonne sur la page pour afficher sa valeur, ou « + Liste reliée » pour afficher ses lignes. Sur l\'écran, tout se met à jour seul ; sans connexion, l\'écran garde la dernière copie reçue.</p>';
     h += `<div class="ce-grp">Jeux de données</div>` + (sets.length ? sets.map(setCard).join('')
-      : '<div class="ce-empty">Aucun jeu de données.<br>Branchez une API ou un fichier dans <a href="/integrations?tab=data" target="_blank" rel="noopener">Intégrations › Sources de données</a> (plan Pro).</div>');
+      : '<div class="ce-empty">Aucun jeu de données.<br>Branchez une API ou un fichier dans <a href="/datasources" target="_blank" rel="noopener">Sources de données</a> (plan Pro).</div>');
     if (scr) {
       const d = srcData[scr.id], cs = (d && !d.error ? LC().fields('screen', d).map(f => ({ key: f.key, label: f.label })) : scr.cols) || [];
       h += `<div class="ce-grp">Cet écran</div><div class="ce-src">${head(scr, LC().SRC.screen)}
@@ -758,7 +758,7 @@
     }
     if (apps.length || used.some(id => apps.some(s => s.id === id))) h += `<div class="ce-grp">Intégrations</div>${apps.map(appCard).join('')}`;
     if (missing) h += `<div class="ce-note">${missing} source${missing > 1 ? 's' : ''} introuvable${missing > 1 ? 's' : ''} (supprimée ou d'une autre aire) : ses blocs et listes ne sont pas diffusés, ses champs affichent leur valeur de secours.</div>`;
-    return h + `<div class="ce-row" style="margin-top:14px"><a class="ce-btn ghost" href="/integrations?tab=data" target="_blank" rel="noopener">+ Ajouter une source</a><button class="ce-btn ghost" data-srclist="1">↻ Actualiser</button></div>
+    return h + `<div class="ce-row" style="margin-top:14px"><a class="ce-btn ghost" href="/datasources" target="_blank" rel="noopener">+ Ajouter une source</a><button class="ce-btn ghost" data-srclist="1">↻ Actualiser</button></div>
       <p class="ce-help">Intégrations : contenus configurés de Mes intégrations (Météo, Calendrier partagé, Flux RSS, Capteurs). Jeux de données : vos API et fichiers. Les modifier change toutes les compositions qui les utilisent.</p>`;
   }
 

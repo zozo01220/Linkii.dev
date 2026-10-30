@@ -30,7 +30,7 @@ public record Badge(int Count, int New, int Offline)
 /// </summary>
 public class MenuBadges(JsonStore root, TenantStore store, TenantContext ctx, PlaylistLibrary lists, MediaLibrary media, AppCatalog catalog) : IDisposable
 {
-    public const string Screens = "screens", Playlists = "playlists", MediaFam = "media", Compositions = "compositions", Members = "members", Integrations = "integrations", Settings = "settings";
+    public const string Screens = "screens", Playlists = "playlists", MediaFam = "media", Compositions = "compositions", Members = "members", Integrations = "integrations", DataSources = "datasources", Settings = "settings";
 
     private static readonly TimeSpan Debounce = TimeSpan.FromMilliseconds(500), Tick = TimeSpan.FromSeconds(20), BumpFor = TimeSpan.FromMilliseconds(900);
 
@@ -155,6 +155,9 @@ public class MenuBadges(JsonStore root, TenantStore store, TenantContext ctx, Pl
 
         // Intégrations : seulement le nombre, celui de la page (sans les widgets d'écran ni les apps Agenda/Drive, qui n'ont pas de carte). Les apps de base s'ajoutent d'elles-mêmes à la première visite d'une organisation : ce ne sont pas des nouveautés.
         res[Integrations] = Eval(Integrations, store.Read(d => d.AppInstalls.Where(a => catalog.Find(a.AppId) is { ScreenWidget: false } app && app.Id is not ("agenda" or "drive")).Select(a => new Item(a.Id, null, null, false)).ToList()), false, track: false);
+
+        // Sources de données (§139) : le nombre de sources connectées
+        res[DataSources] = Eval(DataSources, store.Read(d => d.Tenant.DataConnections.Select(c => new Item(c.Id, null, null, false)).ToList()), false, track: false);
 
         // Réglages : le nombre de spots de publicité à valider (§45) ; sinon un point rouge quand l'application a changé de version depuis la dernière visite
         var adsPending = admin ? store.Read(d => Ads.PendingCount(d.Root, d.Tenant, now)) : 0;

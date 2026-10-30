@@ -4,9 +4,9 @@
 @inject Toaster Toast
 @implements IDisposable
 
-@* Intégrations › Sources de données (§139, maquettes/sources-de-donnees-cartes.html) : relais puis sources en cartes ou en liste, avec recherche et
-   filtres comme le Store ; un clic ouvre un tiroir à droite (trajet, jeux de données, modifier, supprimer avec confirmation). Plan Pro ; administrateurs.
-   Le bouton « Ajouter » est dans l'en-tête de la page (Integrations.razor) et appelle AddSource / AddRelay. *@
+@* Page Sources de données (§139, maquettes/sources-de-donnees-hub.html) : un sous-onglet « Sources » et un « Relais » (paramètre Section), en cartes ou en liste,
+   avec recherche et filtres comme le Store ; un clic ouvre un tiroir à droite (trajet, jeux de données, modifier, supprimer avec confirmation). Plan Pro ; administrateurs.
+   Le bouton d'ajout est dans l'en-tête de la page (DataSources.razor) et appelle AddSource / AddRelay. *@
 <HeadContent><link rel="stylesheet" href="data-sources.css?v=3" /></HeadContent>
 
 @if (!allowed)
@@ -18,39 +18,60 @@
         <a class="btn" href="/settings?tab=abonnement">Voir les plans</a>
     </div>
 }
-else if (connections.Count == 0 && relays.Count == 0)
+else if (onRelays ? relays.Count == 0 : connections.Count == 0 && relays.Count == 0)
 {
-    <div class="dsx-first">
-        <h2>Affichez vos propres données sur vos écrans</h2>
-        <p>Connectez une fois votre source ; Linkii garde une copie à jour et l'envoie aux écrans.</p>
-        <div class="dsx-steps">
-            <div><em>1</em><b>Connecter</b><span>API web, base de données, fichier CSV, JSON ou Excel.</span></div>
-            <div><em>2</em><b>Choisir un jeu de données</b><span>Un chemin d'API, une feuille, une requête, sa fréquence.</span></div>
-            <div><em>3</em><b>L'utiliser</b><span>Reliez ses champs à un bloc dans l'éditeur de compositions.</span></div>
+    @if (onRelays)
+    {
+        <div class="dsx-first">
+            <h2>Atteignez vos sources internes</h2>
+            <p>Un relais est un petit programme installé chez vous : il lit les sources de votre réseau interne et les transmet à Linkii.</p>
+            <button type="button" class="btn" disabled="@(!CanAddRelay)" @onclick="AddRelay"><Ico Name="plus" Size="15" /> Installer un relais</button>
         </div>
-        <button type="button" class="btn" @onclick="AddSource"><Ico Name="plus" Size="15" /> Connecter une source</button>
-    </div>
+    }
+    else
+    {
+        <div class="dsx-first">
+            <h2>Affichez vos propres données sur vos écrans</h2>
+            <p>Connectez une fois votre source ; Linkii garde une copie à jour et l'envoie aux écrans.</p>
+            <div class="dsx-steps">
+                <div><em>1</em><b>Connecter</b><span>API web, base de données, fichier CSV, JSON ou Excel.</span></div>
+                <div><em>2</em><b>Choisir un jeu de données</b><span>Un chemin d'API, une feuille, une requête, sa fréquence.</span></div>
+                <div><em>3</em><b>L'utiliser</b><span>Reliez ses champs à un bloc dans l'éditeur de compositions.</span></div>
+            </div>
+            <button type="button" class="btn" @onclick="AddSource"><Ico Name="plus" Size="15" /> Connecter une source</button>
+        </div>
+    }
 }
 else
 {
-    var rs = relays.Where(r => (filter is "" or "relay") && Match(r.Name + " " + r.Machine)).ToList();
-    var cs = connections.Where(c => (filter is "" || filter == c.Kind) && Match(c.Name + " " + Describe(c))).ToList();
+    var rs = !onRelays ? new List<DataRelay>() : relays.Where(r => (filter is "" || (filter == "on") == Relays.Online(r.Id)) && Match(r.Name + " " + r.Machine)).ToList();
+    var cs = onRelays ? new List<DataConnection>() : connections.Where(c => (filter is "" || filter == c.Kind) && Match(c.Name + " " + Describe(c))).ToList();
+    var noun = onRelays ? "un relais" : "une source";
     <div class="lib-tools">
         <div class="search-box grow" style="margin:0">
             <Ico Name="search" Size="16" />
-            <input placeholder="Rechercher une source ou un relais" aria-label="Rechercher une source ou un relais" @bind="search" @bind:event="oninput" />
+            <input placeholder="Rechercher @noun" aria-label="Rechercher @noun" @bind="search" @bind:event="oninput" />
         </div>
         <ViewToggle StorageKey="datasources" @bind-Value="view" />
     </div>
     <div class="int-chips" role="group" aria-label="Filtrer">
-        <button type="button" class="chip @(filter == "" ? "on" : "")" aria-pressed="@(filter == "" ? "true" : "false")" @onclick='() => filter = ""'>Toutes <small>@(relays.Count + connections.Count)</small></button>
-        <button type="button" class="chip @(filter == "relay" ? "on" : "")" aria-pressed="@(filter == "relay" ? "true" : "false")" @onclick='() => filter = "relay"'>Relais <small>@relays.Count</small></button>
-        @foreach (var k in new[] { DataKinds.Api, DataKinds.Db, DataKinds.File })
+        @if (onRelays)
         {
-            var kind = k;
-            var n = connections.Count(c => c.Kind == kind);
-            if (n == 0) { continue; }
-            <button type="button" class="chip @(filter == kind ? "on" : "")" aria-pressed="@(filter == kind ? "true" : "false")" @onclick="() => filter = kind">@KindLabel(kind) <small>@n</small></button>
+            var nOn = relays.Count(r => Relays.Online(r.Id));
+            <button type="button" class="chip @(filter == "" ? "on" : "")" aria-pressed="@(filter == "" ? "true" : "false")" @onclick='() => filter = ""'>Tous <small>@relays.Count</small></button>
+            <button type="button" class="chip @(filter == "on" ? "on" : "")" aria-pressed="@(filter == "on" ? "true" : "false")" @onclick='() => filter = "on"'>En ligne <small>@nOn</small></button>
+            <button type="button" class="chip @(filter == "off" ? "on" : "")" aria-pressed="@(filter == "off" ? "true" : "false")" @onclick='() => filter = "off"'>Hors ligne <small>@(relays.Count - nOn)</small></button>
+        }
+        else
+        {
+            <button type="button" class="chip @(filter == "" ? "on" : "")" aria-pressed="@(filter == "" ? "true" : "false")" @onclick='() => filter = ""'>Toutes <small>@connections.Count</small></button>
+            @foreach (var k in new[] { DataKinds.Api, DataKinds.Db, DataKinds.File })
+            {
+                var kind = k;
+                var n = connections.Count(c => c.Kind == kind);
+                if (n == 0) { continue; }
+                <button type="button" class="chip @(filter == kind ? "on" : "")" aria-pressed="@(filter == kind ? "true" : "false")" @onclick="() => filter = kind">@KindLabel(kind) <small>@n</small></button>
+            }
         }
     </div>
 
@@ -60,7 +81,6 @@ else
     }
     @if (rs.Count > 0)
     {
-        <h2 class="dsx-h2">Relais <span class="cat-count">@rs.Count</span></h2>
         <div class="@(view == "list" ? "dsx-list" : "dsx-grid")">
             @if (view == "list") { <div class="dsx-lrow hd"><span></span><span>Relais</span><span>Machine</span><span>État</span><span>Connexions</span></div> }
             @foreach (var x in rs)
@@ -89,7 +109,6 @@ else
     }
     @if (cs.Count > 0)
     {
-        <h2 class="dsx-h2">Sources <span class="cat-count">@cs.Count</span></h2>
         <div class="@(view == "list" ? "dsx-list" : "dsx-grid")">
             @if (view == "list") { <div class="dsx-lrow hd"><span></span><span>Source</span><span>Type</span><span>État</span><span>Jeux de données</span></div> }
             @foreach (var c in cs)
@@ -215,9 +234,19 @@ else
     private bool confirmDel;
     private string? delError;
 
-    /// <summary>Prévient la page quand le nombre de sources change (pastille du titre de l'onglet).</summary>
+    /// <summary>Sous-onglet affiché : « sources » ou « relais ».</summary>
+    [Parameter] public string Section { get; set; } = "sources";
+    private bool onRelays => Section == "relays";
+    private string shownSection = "sources";
+
+    /// <summary>Prévient la page quand le nombre de sources ou de relais change (pastilles des onglets).</summary>
     [Parameter] public EventCallback OnCountChanged { get; set; }
     private int lastCount = -1;
+
+    protected override void OnParametersSet()
+    {
+        if (shownSection != Section) { shownSection = Section; search = filter = ""; CloseDrawer(); }   // chaque sous-onglet repart sans recherche ni filtre
+    }
 
     private DataConnection? drawerConn => drawerConnId is { } i ? connections.FirstOrDefault(c => c.Id == i) : null;
     private DataRelay? drawerRelay => drawerRelayId is { } i ? relays.FirstOrDefault(r => r.Id == i) : null;
@@ -235,8 +264,9 @@ else
             d.Tenant.DataSets.Select(x => x.Copy()).OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase).ToList()));
         usage = Store.Read(d => dataSets.ToDictionary(x => x.Id, x => DataSourceOps.UsedBy(d, x.Id).Count));
         relays = Store.Read(d => d.Tenant.DataRelays.Select(r => r.Copy()).OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
-        if (lastCount >= 0 && lastCount != connections.Count) _ = InvokeAsync(OnCountChanged.InvokeAsync);
-        lastCount = connections.Count;
+        var count = connections.Count * 1000 + relays.Count;
+        if (lastCount >= 0 && lastCount != count) _ = InvokeAsync(OnCountChanged.InvokeAsync);
+        lastCount = count;
     }
 
     // ---- appelés par le bouton « Ajouter » de l'en-tête de la page ----
