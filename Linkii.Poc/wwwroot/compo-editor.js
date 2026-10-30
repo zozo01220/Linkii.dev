@@ -28,6 +28,7 @@
   let sheet = null, canEditData = false;   // tableau en grand, droit de renommer les champs d'un jeu
   let ld = null;   // tiroir « Modifier la liste » (§141) : { id, tab: cols|rows, sub: colonne réglée ou null, was: la liste à l'ouverture (JSON), keep: conditions mises de côté, warn, flash, drag }
   let fp = null;   // fenêtre « Choisir des champs » (§141) : { mode: multi|one, for: cols|col|text, src, sel: [clés], q, row, all }
+  let cd = null, expert = false;   // tiroir « Modifier le graphique » ; mode expert : menus Données et Graphiques
   let fd = null;   // tiroir « Format du champ » d'un texte (§142) : { id: le texte, n: n-ième champ du texte, was: texte à l'ouverture }
   let previewScreen = '';   // « Cet écran » (§139) : écran dont les paramètres servent à l'aperçu (vide : le premier qui en a)
   const q = s => root.querySelector(s);
@@ -143,7 +144,7 @@
     images = o.images || [];
     sources = o.sources || []; srcData = {}; srcBusy = {}; srcAt = {}; names = false;
     myTpl = o.myTemplates || []; canImport = !!o.canImport; canEditData = !!o.canEditData; tplTab = 'galerie';
-    dv = { view: 'sources', set: null, row: 0, open: new Set(['@used']), hidden: false, q: '', ren: null }; sheet = null; ld = null; fp = null; fd = null;
+    dv = { view: 'sources', set: null, row: 0, open: new Set(['@used']), hidden: false, q: '', ren: null }; sheet = null; ld = null; fp = null; fd = null; cd = null; expert = !!o.expert;
     name = savedName = o.name || 'Composition';
     let doc = null;
     try { doc = o.doc ? JSON.parse(o.doc) : null; } catch (x) { doc = null; }
@@ -158,6 +159,8 @@
     H = []; hi = -1; selId = null; zoom = 1; panelName = fresh && !tpl ? 'modeles' : 'texte'; panelOpen = true; layersOpen = false; mediaMode = 'add';
     editing = false; drag = null; guides = null; tplCat = 'Tous'; mediaSearch = ''; qrWait = {};
     root.innerHTML = SHELL;
+    { const rail = root.querySelector('#ce-rail'), dn = rail.querySelector('[data-p=donnees]');   // Données et Graphiques : mode expert seulement
+      if (expert) dn.insertAdjacentHTML('afterend', `<button data-p="graphiques">${ICO.chart}Graphiques</button>`); else dn.remove(); }
     q('#ce-name').value = name;
     bind();
     push();
@@ -189,6 +192,7 @@
     txt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg>',
     shp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 3 3 11h10L8 3Z"/><circle cx="17" cy="16" r="4"/><rect x="3" y="14" width="7" height="7"/></svg>',
     wid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+    chart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg>',
     data: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>'
   };
   const SHELL = `
@@ -266,8 +270,8 @@
 
   function render() {
     if (!root) return;
-    q('#ce-area').style.right = ld || fd ? drW() + 'px' : '';   // tiroir de la liste ou du champ ouvert : la page se range à sa gauche (§141, §142)
-    q('#ce-ctx').style.display = ld || fd ? 'none' : '';
+    q('#ce-area').style.right = ld || fd || cd ? drW() + 'px' : '';   // tiroir de la liste ou du champ ouvert : la page se range à sa gauche (§141, §142)
+    q('#ce-ctx').style.display = ld || fd || cd ? 'none' : '';
     const A = q('#ce-area').getBoundingClientRect();
     const fit = Math.max(.02, Math.min((A.width - 80) / D.w, (A.height - 110) / D.h));
     z = fit * zoom;
@@ -450,7 +454,7 @@
       if (e.type === 'qr' && key === 'url') { e.qr = ''; fetchQr(e, 500); }
       render();
     });
-    on(ctx, 'change', ev => { if (ev.target.dataset.k) commit(); if (ev.target.dataset.k === 'source') loadSource(ev.target.value); });
+    on(ctx, 'change', ev => { if (ev.target.dataset.k) commit(); if (ev.target.dataset.k === 'source') loadSource(ev.target.value); const ce = cur(); if (ce && ce.type === 'chart' && ev.target.dataset.k) afterChart(); });
     on(ctx, 'mousedown', ev => { if (editing && ev.target.closest('[data-act=field]')) ev.preventDefault(); });   // le texte en cours d'écriture garde le curseur
     on(ctx, 'click', ev => {
       const b = ev.target.closest('button'), e = cur(); if (!b || !e) return;
@@ -482,8 +486,9 @@
 
     on(document, 'pointerdown', ev => { const p = q('#ce-pop'); if (p && !p.contains(ev.target) && !ev.target.closest('[data-top],[data-act]')) closePop(); }, true);
     on(document, 'pointerdown', ldGuard, true);
+    on(document, 'pointerdown', cdGuard, true);
     on(document, 'keydown', keys);
-    on(w, 'resize', () => { render(); drawLd(); drawFd(); });
+    on(w, 'resize', () => { render(); drawLd(); drawFd(); drawCd(); });
     on(w, 'beforeunload', ev => { if (isDirty()) { ev.preventDefault(); ev.returnValue = ''; } });
   }
 
@@ -550,6 +555,12 @@
     if (!root) return;
     if (fp) { if (ev.key === 'Escape') { fp = null; drawFp(); } return; }   // fenêtre de choix des champs (§141)
     if (fd && ev.key === 'Escape') { closeFd(); return; }
+    if (cd) {   // tiroir du graphique : Échap le ferme s'il n'y a rien à appliquer
+      const mod = ev.ctrlKey || ev.metaKey;
+      if (ev.key === 'Escape') { if (cdDirty()) cdWarn(); else closeCd(false); }
+      else if (mod && (/^s$/i.test(ev.key) || (/^[zy]$/i.test(ev.key) && !(ev.target.closest && ev.target.closest('input,select,textarea'))))) { ev.preventDefault(); if (cdDirty()) cdWarn(); }
+      return;
+    }
     if (ld) {   // tiroir de la liste : Échap ferme le 2e tiroir, puis le tiroir s'il n'y a rien à appliquer
       const mod = ev.ctrlKey || ev.metaKey;
       if (ev.key === 'Escape') { if (ld.sub != null) { ld.sub = null; drawLd(); render(); } else if (ldDirty()) ldWarn(); else closeLd(false); }
@@ -581,9 +592,12 @@
   function select(id) {
     if (ld && ld.id !== id) closeLd(false);
     if (fd && fd.id !== id) closeFd();
+    if (cd && cd.id !== id) closeCd(false);
     const was = cur(); selId = id; const e = cur();
     drawOverlay(); renderLayers(); renderCtx(); markList();
-    if (e && e.type === 'list') {   // les données de la liste s'ouvrent à gauche (§140)
+    if (e && e.type === 'chart' && expert) { if (panelName !== 'graphiques' || !panelOpen) { panelName = 'graphiques'; panelOpen = true; render(); } renderPanel(); loadSource(e.source); }   // son résumé s'ouvre à gauche
+    else if (panelName === 'graphiques' && panelOpen) renderPanel();
+    if (e && e.type === 'list' && expert) {   // les données de la liste s'ouvrent à gauche (§140)
       const reopen = !panelOpen; if (panelName !== 'donnees' || reopen) { panelName = 'donnees'; panelOpen = true; }
       if (e !== was) { dv.ren = null; renderPanel(); loadSource(e.source); }
       if (reopen) render();
@@ -619,6 +633,7 @@
     else if (kind === 'field') {   // colonne glissée du panneau Données : un texte avec ce champ (clé « source:champ »)
       e = T({ w: 640, text: '{{' + key.slice(6) + '}}', size: 60, weight: 500, color: ink });
     }
+    else if (kind === 'chart') e = makeChart(v, ink);   // graphique relié à un jeu de données
     else e = W(v, { color: v === 'ticker' ? '#ffffff' : ink, w: v === 'ticker' ? D.w / s : v === 'date' ? 640 : 420 });
     ['x', 'y', 'w', 'h', 'size', 'radius'].forEach(p => { if (typeof e[p] === 'number') e[p] = Math.round(e[p] * s); });
     if (e.type === 'shape' && e.kind === 'line') e.sw = Math.max(1, Math.round(e.sw * s));
@@ -732,6 +747,7 @@
   }
 
   function addEl(key, at) {
+    if (key.startsWith('chart:') && !chartSrc()) { toast('Aucun jeu de données : ajoutez-en un dans Sources de données pour tracer un graphique.', true); return; }
     if (key.startsWith('img:') && mediaMode !== 'add') {
       const id = key.slice(4), e = cur();
       if (mediaMode === 'replace' && e && e.type === 'image') { e.media = id; mediaMode = 'add'; commit(); renderPanel(); renderCtx(); toast('Image remplacée'); return; }
@@ -750,7 +766,8 @@
     if (textual(e)) { e.y = Math.round(cy - e.h / 2); }
     commit(); renderCtx();
     if (e.type === 'qr') fetchQr(e);
-    if (e.type === 'list') { panelName = 'donnees'; panelOpen = true; renderPanel(); }   // ses données s'ouvrent à gauche (§140)
+    if (e.type === 'list' && expert) { panelName = 'donnees'; panelOpen = true; renderPanel(); }   // ses données s'ouvrent à gauche (§140)
+    if (e.type === 'chart') { if (expert) { panelName = 'graphiques'; panelOpen = true; renderPanel(); } openCd('data'); }   // sa source et ses axes se choisissent aussitôt
     LC().sources({ els: [e] }).forEach(id => loadSource(id));   // bloc, liste reliée, champ glissé depuis le panneau Données
   }
   function lum(hex) {
@@ -784,7 +801,8 @@
     srcBusy[id] = false; srcAt[id] = Date.now();
     srcData[id] = r && r.data ? r.data : { error: (r && r.error) || 'aucune donnée' };
     if (!editing) render();
-    if (panelName === 'donnees' && panelOpen) renderPanel();
+    if ((panelName === 'donnees' || panelName === 'graphiques') && panelOpen) renderPanel();
+    if (cd) drawCd();
     if (q('#ce-pop.ce-fields')) drawFieldMenu();
     if (sheet && sheet.set === id) drawSheet();
   }
@@ -859,6 +877,7 @@
   function usedKeys(id) {
     const ks = new Set();
     usesOf(id).forEach(e => { (e.cols || []).concat(e.filter || [], e.rules || []).forEach(x => { if (x && x.key) ks.add(x.key); }); if (e.sort && e.sort.key) ks.add(e.sort.key); });
+    D.els.forEach(e => { if (e.type === 'chart' && e.source === id) { if (e.cat) ks.add(e.cat); (e.series || []).concat(e.filter || []).forEach(x => { if (x && x.key) ks.add(x.key); }); } });
     D.els.forEach(e => { if (e.type !== 'text') return; const re = new RegExp(LC().TOKEN.source, 'g'); let m; while ((m = re.exec(String(e.text || '')))) if (m[1] === id) ks.add(m[2].replace(/^(r\d+|sum|avg|min|max)\./, '')); });
     return ks;
   }
@@ -1577,6 +1596,13 @@
         '<button class="ce-tb" data-act="lcols" title="Style, alignement et largeur des colonnes">Colonnes ▾</button>' +
         `<button class="ce-tb ${nr ? 'on' : ''}" data-act="lcolors" title="Couleurs des pastilles, des séparateurs et de Oui / Non ; règles de couleur">Couleurs${nr ? ' (' + nr + ')' : ''} ▾</button>`;
     }
+    else if (e.type === 'chart') {   // graphique relié : apparence rapide ; données et réglages dans le tiroir
+      const cart = !isOne(e) && !isPart(e);
+      h = `<span class="ce-kind" title="Nom du graphique">${CIC[e.kind]} ${esc(e.name || 'Graphique')}</span>` + sepH + pick('kind', Object.keys(CK).map(k => [k, CK[k][0]]), e.kind, 'Type de graphique') + sepH +
+        fontSel(e) + sizeNum(e) + colorIn('color', e.color, 'Couleur du texte') + sepH +
+        (isOne(e) ? '' : `<button class="ce-tb ${e.vals !== false ? 'on' : ''}" data-tog="vals" title="Valeurs sur le graphique">Valeurs</button>`) + (cart ? `<button class="ce-tb ${e.grid !== false ? 'on' : ''}" data-tog="grid" title="Grille">Grille</button>` : '') +
+        '<button class="ce-tb" data-act="cdopen" title="Source, axes, conditions, apparence">◫ Données…</button>';
+    }
     else if (e.type === 'qr') h = `<label class="ce-lbl">Lien<input type="text" data-k="url" value="${esc(e.url)}" style="width:240px" maxlength="500"></label>` + colorIn('fg', e.fg, 'Couleur') + colorIn('bg', e.bg, 'Fond');
     else if (e.kind === 'ticker') h = `<label class="ce-lbl">Texte<input type="text" data-k="text" value="${esc(e.text)}" style="width:260px" maxlength="1000"></label>` + fontSel(e) + sizeNum(e) +
       colorIn('color', e.color, 'Couleur du texte') + colorIn('bg', e.bg, 'Fond') + pick('speed', [[30, 'Lent'], [18, 'Normal'], [10, 'Rapide']], e.speed, 'Vitesse');
@@ -1595,12 +1621,14 @@
     else if (a === 'field') fieldMenu(b);
     else if (a === 'fb') { const v = prompt('Texte affiché à la place d\'un champ quand sa source n\'a pas de valeur :', e.fb || '—'); if (v != null) { e.fb = v.slice(0, 40); commit(); } }
     else if (a === 'lrows' || a === 'lcols' || a === 'lcolors') listPop(a.slice(1));
+    else if (a === 'cdopen') openCd('data');
     else if (a === 'srcset' && e.source) w.open('/apps/instance/' + encodeURIComponent(e.source), '_blank', 'noopener');
   }
   function dup() {
     const e = cur(); if (!e) return;
     const c = Object.assign(JSON.parse(JSON.stringify(e)), { id: nid(), x: e.x + Math.round(40 * k()), y: e.y + Math.round(40 * k()), locked: false });
     if (c.type === 'list') c.name = nextName(e.name || 'Liste');
+    if (c.type === 'chart') c.name = nextChartName(srcName(e));
     D.els.splice(D.els.indexOf(e) + 1, 0, c); selId = c.id; commit(); renderCtx();
   }
   function del() { const e = cur(); if (!e) return; D.els = D.els.filter(x => x !== e); selId = null; commit(); renderCtx(); }
@@ -1709,6 +1737,7 @@
         <div class="ce-wrow soon"><span class="wi" style="background:#8A97A8">⌁</span><span><b>Page web, Facebook</b><small>Ne se posent pas dans une composition</small></span></div>`;
     }
     if (panelName === 'donnees') h = dataPanel();
+    if (panelName === 'graphiques') h = chartPanel();
     p.innerHTML = h;
     if (panelName === 'donnees') bindRename(p);
     if (panelName === 'medias') renderMediaGrid();
@@ -1722,6 +1751,7 @@
       : `<div class="ce-pgrid">${list.map(m => `<button class="ce-photo" draggable="true" data-add="img:${m.id}" title="${esc(m.name)}"><img src="${esc(m.url)}?w=320" alt="" loading="lazy" draggable="false"><span>${esc(m.name)}</span></button>`).join('')}</div>`;
   }
   async function panelClick(ev) {
+    if (panelName === 'graphiques' && chartClick(ev)) return;
     if (panelName === 'donnees' && dataClick(ev)) return;
     const a = ev.target.closest('[data-add]');
     if (a && a.dataset.add.startsWith('field:') && cur() && cur().type === 'text') { insertField(a.dataset.add.slice(6)); return; }   // texte sélectionné : le champ s'y ajoute
@@ -1796,10 +1826,264 @@
     toast(`Modèle « ${t.name} » appliqué`);
   }
 
+  // ---------- graphiques (menu Graphiques du mode expert) : panneau résumé, tiroir « Modifier le graphique » ----------
+  // Un graphique (type « chart ») est relié à un jeu de données : colonne des catégories, une ou plusieurs séries (colonne + calcul), conditions, ordre.
+  // Son rendu est celui du player (composition.js, chartHtml) ; ici : ajout, panneau de gauche, tiroir, barre du haut.
+  const CK = { bars: ['Barres', 'Comparer des catégories'], hbars: ['Barres horizontales', 'Classements, libellés longs'], line: ['Courbe', 'Évolution dans le temps'], area: ['Aire', 'Évolution et volume'],
+    pie: ['Secteurs', 'Parts d’un tout'], donut: ['Anneau', 'Parts, avec un total au centre'], gauge: ['Jauge', 'Une valeur face à un objectif'], kpi: ['Chiffre clé', 'Un grand nombre et son évolution'] };
+  const CSV = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+  const CIC = { bars: CSV('<path d="M5 20V11M12 20V4M19 20v-6"/>'), hbars: CSV('<path d="M4 5h9M4 12h16M4 19h6"/>'), line: CSV('<path d="M3 17l5-6 4 3 8-9"/>'), area: CSV('<path d="M3 18l5-7 4 3 8-8v12z"/>'),
+    pie: CSV('<path d="M12 3v9h9"/><circle cx="12" cy="12" r="9"/>'), donut: CSV('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/>'), gauge: CSV('<path d="M4 17a8 8 0 0 1 16 0M12 17l4-5"/>'), kpi: CSV('<path d="M5 18V8l-2 1M10 8h4v10h-4zM17 18h4V8h-4z"/>') };
+  const isOne = e => e.kind === 'gauge' || e.kind === 'kpi', isPart = e => e.kind === 'pie' || e.kind === 'donut', oneSeries = e => isOne(e) || isPart(e) || e.kind === 'hbars';
+  const PALN = { ocean: 'Océan', warm: 'Chaude', mono: 'Bleus' };
+  const charts = () => D.els.filter(e => e.type === 'chart');
+  const chartCols = id => colsOf(id).filter(c => !c.hidden && !autoHidden(id, c));
+  const chartSources = () => sources.filter(s => s.app === 'dataset');
+  const chartSrc = () => { const c = cur(), id = c && (c.type === 'chart' || c.type === 'list') ? c.source : null; return chartSources().find(s => s.id === id) || chartSources()[0] || null; };
+  const seriesFor = id => { const n = chartCols(id).find(c => c.type === 'number'); return n ? [{ key: n.key, agg: 'sum', name: fname(n) }] : [{ key: '', agg: 'count', name: '' }]; };
+  function nextChartName(base) {
+    const used = D.els.filter(x => x.type === 'chart').map(x => x.name), b = String(base || 'Graphique').replace(/ \d+$/, '');
+    let n = 1, nm = 'Graphique · ' + b; while (used.includes(nm)) nm = 'Graphique · ' + b + ' ' + ++n;
+    return nm;
+  }
+  function makeChart(kind, ink) {
+    const s = chartSrc(), id = s.id, cs = chartCols(id), one = kind === 'gauge' || kind === 'kpi', ser = seriesFor(id);
+    const cat = one ? null : (kind === 'line' || kind === 'area' ? cs.find(c => c.type === 'date') : null) || cs.find(c => c.type === 'text' && c.key !== ser[0].key) || cs.find(c => c.type === 'date');
+    const S = { bars: [1000, 640], hbars: [900, 620], line: [1000, 640], area: [1000, 640], pie: [760, 560], donut: [760, 560], gauge: [560, 380], kpi: [560, 300] }[kind];
+    return { id: nid(), type: 'chart', kind, source: id, name: nextChartName(s.name), x: 0, y: 0, w: S[0], h: S[1], cat: cat ? cat.key : '', series: ser, filter: [], order: { by: cat && cat.type === 'date' ? 'cat' : 'source', dir: 'asc' },
+      max: 0, other: false, title: '', legend: isPart({ kind }) ? 'right' : 'bottom', vals: true, grid: true, smooth: false, thick: 38, pal: 'ocean', unit: '', gmin: 0, gmax: 100, thrOn: true, thr: [50, 80], cmp: 'none', target: 0,
+      font: 'IBM Plex Sans', size: one ? 36 : 26, weight: 400, color: ink, align: 'left', ls: 0, lh: 1.2, italic: false, opacity: 1 };
+  }
+  /** Aperçu d'un type dans la galerie : dessin simplifié sur le fond sombre de la vignette. */
+  function chartPreview(t) {
+    const c = '#4C9BE0', g = '#34C38F', o = '#F0B23C', arc = (r0, a0, a1) => { const p = (r, a) => (46 + r * Math.cos(a)).toFixed(1) + ',' + (28 + r * Math.sin(a)).toFixed(1), big = a1 - a0 > Math.PI ? 1 : 0; return `M${p(22, a0)}A22,22 0 ${big} 1 ${p(22, a1)}` + (r0 ? `L${p(r0, a1)}A${r0},${r0} 0 ${big} 0 ${p(r0, a0)}Z` : 'L46,28Z'); };
+    const m = {
+      bars: `<rect x="12" y="30" width="12" height="18" fill="${c}"/><rect x="30" y="16" width="12" height="32" fill="${c}"/><rect x="48" y="24" width="12" height="24" fill="${c}"/><rect x="66" y="8" width="12" height="40" fill="${c}"/>`,
+      hbars: `<rect x="12" y="8" width="60" height="9" fill="${c}"/><rect x="12" y="22" width="44" height="9" fill="${c}"/><rect x="12" y="36" width="26" height="9" fill="${c}"/>`,
+      line: `<path d="M8 42L28 26 44 34 66 12 84 18" fill="none" stroke="${c}" stroke-width="3"/>`,
+      area: `<path d="M8 42L28 26 44 34 66 12 84 18V48H8z" fill="${c}" opacity=".35"/><path d="M8 42L28 26 44 34 66 12 84 18" fill="none" stroke="${c}" stroke-width="3"/>`,
+      pie: `<path d="${arc(0, -1.57, 1)}" fill="${c}"/><path d="${arc(0, 1, 3.6)}" fill="${g}"/><path d="${arc(0, 3.6, 4.71)}" fill="${o}"/>`,
+      donut: `<path d="${arc(13, -1.57, 1)}" fill="${c}"/><path d="${arc(13, 1, 3.6)}" fill="${g}"/><path d="${arc(13, 3.6, 4.71)}" fill="${o}"/>`,
+      gauge: `<path d="M20 44A26 26 0 0 1 72 44" fill="none" stroke="rgba(255,255,255,.2)" stroke-width="10"/><path d="M20 44A26 26 0 0 1 64 25" fill="none" stroke="${g}" stroke-width="10"/>`,
+      kpi: '<text x="46" y="38" text-anchor="middle" font-size="26" font-weight="500" fill="#fff">15 6</text>'
+    };
+    return `<svg viewBox="0 0 92 56">${m[t]}</svg>`;
+  }
+  const dataLine = e => {
+    const sr = (e.series || []).map(s => (s.agg === 'count' ? 'Nombre de lignes' : (LC().AGG[s.agg] || 'Somme') + ' de « ' + (s.name || keyName(e.source, s.key)) + ' »')).join(' · ') || 'Aucune série';
+    return sr + (e.cat ? ` par « ${keyName(e.source, e.cat)} »` : '');
+  };
+  function chartPanel() {
+    const e = cur(), ce = e && e.type === 'chart' ? e : null, ds = chartSources();
+    if (!ce) {
+      return `<div class="ce-ph"><b>Graphiques</b></div>
+        ${ds.length ? '' : '<div class="ce-note" style="margin-bottom:10px">Aucun jeu de données. Branchez une API, une base ou un fichier dans <a href="/datasources" target="_blank" rel="noopener">Sources de données</a> pour tracer un graphique.</div>'}
+        <div class="ce-grp" style="margin-top:0">Ajouter un graphique<small>${Object.keys(CK).length} types</small></div>
+        <div class="ce-ctypes${ds.length ? '' : ' off'}">${Object.keys(CK).map(k => `<button class="ce-ctile" ${ds.length ? 'draggable="true"' : 'disabled'} data-add="chart:${k}" title="Glissez sur la page, ou cliquez"><span class="pv">${chartPreview(k)}</span><b>${CK[k][0]}</b><small>${CK[k][1]}</small></button>`).join('')}</div>
+        <p class="ce-help">Après l'ajout, le graphique se relie à une source : choisissez la source, la colonne des catégories et celle des valeurs.</p>
+        ${charts().length ? `<div class="ce-grp">Sur cette page<small>${charts().length}</small></div>` + charts().map(x => `<button class="ce-lst" data-csel="${x.id}"><span class="g">${CIC[x.kind]}</span><span class="t"><b>${esc(x.name || 'Graphique')}</b><small>${CK[x.kind][0]} · ${esc(srcName(x))}</small></span><span class="chev">›</span></button>`).join('') : ''}`;
+    }
+    const d = srcData[ce.source], pal = PALN[ce.pal] || PALN.ocean;
+    return `<div class="ce-ph"><b>Graphiques</b><button class="ce-link" data-csel="none" style="margin:0">‹ Tous les types</button></div>
+      <div class="ce-lcard"><div class="lch"><span class="g">${CIC[ce.kind]}</span><div><small>${CK[ce.kind][0]}</small><b>${esc(ce.name || 'Graphique')}</b></div></div>
+        <div class="lsrc">${wi(LC().SRC.dataset)}<span>Relié à <b>${esc(srcName(ce))}</b></span></div>
+        <button class="ce-srow" data-cdopen="data"><span class="k">Données</span><span class="v">${esc(dataLine(ce))}<small>${ready(ce) ? (() => { const cd = LC().chartData(d, ce, opts()); return isOne(ce) ? cd.rows + ' ligne' + (cd.rows > 1 ? 's' : '') : cd.cats.length + ' point' + (cd.cats.length > 1 ? 's' : ''); })() : 'lecture des données…'}${(ce.filter || []).length ? ' · ' + (ce.filter || []).length + ' condition' + ((ce.filter || []).length > 1 ? 's' : '') : ''}</small></span><span class="chev">›</span></button>
+        <button class="ce-srow" data-cdopen="look"><span class="k">Apparence</span><span class="v">${isOne(ce) ? (ce.kind === 'gauge' && ce.thrOn !== false ? 'Seuils de couleur · ' + (ce.thr || [50, 80]).join(' % et ') + ' %' : 'Texte seul') : 'Légende ' + ({ none: 'masquée', bottom: 'en bas', right: 'à droite' }[ce.legend || 'bottom']) + (ce.vals !== false ? ' · valeurs affichées' : '')}<small>Palette ${esc(pal)}</small></span><span class="chev">›</span></button></div>
+      ${d && d.error ? `<div class="ce-note" style="margin-top:10px">Données indisponibles : ${esc(d.error)}</div>` : ''}
+      <button class="ce-btn ce-wide" data-cdopen="data" style="margin-top:12px">Modifier le graphique</button>
+      <div class="ce-grp">Changer de type</div><div class="ce-cmini">${Object.keys(CK).map(k => `<button class="${ce.kind === k ? 'on' : ''}" data-ckind="${k}" title="${CK[k][0]}" aria-label="${CK[k][0]}">${CIC[k]}</button>`).join('')}</div>
+      <p class="ce-help">Les données et les réglages sont gardés quand on change de type, dans la mesure où le nouveau type les utilise.</p>
+      <button class="ce-link" data-cdup="1" style="margin-top:12px">⧉ Dupliquer « ${esc(ce.name || 'Graphique')} »</button>`;
+  }
+  function changeKind(e, kind) {
+    e.kind = kind;
+    if (isPart(e) && !(e.legend && e.legend !== 'none')) e.legend = 'right';
+  }
+  /** Clics du panneau Graphiques ; true si traité. */
+  function chartClick(ev) {
+    const g = s => ev.target.closest(s), e = cur(); let x;
+    if ((x = g('[data-csel]'))) { select(x.dataset.csel === 'none' ? null : x.dataset.csel); return true; }
+    if ((x = g('[data-cdopen]'))) { openCd(x.dataset.cdopen); return true; }
+    if ((x = g('[data-ckind]')) && e && e.type === 'chart') { changeKind(e, x.dataset.ckind); commit(); renderCtx(); renderPanel(); if (cd) drawCd(); return true; }
+    if (g('[data-cdup]') && e && e.type === 'chart') { dup(); renderPanel(); return true; }
+    return false;
+  }
+  const afterChart = () => { renderCtx(); if (panelName === 'graphiques' && panelOpen) renderPanel(); if (cd) drawCd(); };
+
+  // tiroir « Modifier le graphique » : la page montre le résultat en direct, rien n'est gardé avant « Appliquer »
+  // état : cd = { id, tab: data|look, was: le graphique à l'ouverture (JSON), warn }
+  const cdEl = () => cd && byId(cd.id);
+  const cdDirty = () => { const e = cdEl(); return !!e && JSON.stringify(e) !== cd.was; };
+  function openCd(tab) {
+    const e = cur(); if (!e || e.type !== 'chart') return;
+    if (!cd || cd.id !== e.id) cd = { id: e.id, was: JSON.stringify(e), warn: false };
+    cd.tab = tab === 'look' ? 'look' : 'data'; cd.warn = false;
+    closePop(); loadSource(e.source); render(); drawCd(); renderCtx();
+  }
+  function closeCd(apply) {
+    if (!cd) return;
+    const e = cdEl(), changed = cdDirty();
+    if (e && changed && !apply) { const b = JSON.parse(cd.was); Object.keys(e).forEach(x => delete e[x]); Object.assign(e, b); }
+    cd = null; drawCd();
+    if (changed && apply) commit(); else render();
+    renderCtx(); if (panelName === 'graphiques' && panelOpen) renderPanel();
+  }
+  function cdLive() { if (!cd) return; cd.warn = false; render(); drawCd(); if (panelName === 'graphiques' && panelOpen) renderPanel(); }
+  function cdWarn() { cd.warn = true; drawCd(); const f = q('#ce-cd .ce-ldf'); if (f) { f.classList.remove('shake'); void f.offsetWidth; f.classList.add('shake'); } }
+  function cdGuard(ev) {
+    if (!cd || !root) return;
+    const t = ev.target;
+    if (!root.contains(t) || t.closest('#ce-cd,#ce-pop,#ce-panel')) return;
+    const n = t.closest('.lc-el[data-id]'); if (n && n.dataset.id === cd.id) return;
+    if (cdDirty()) { ev.preventDefault(); ev.stopPropagation(); cdWarn(); return; }
+    closeCd(false);
+  }
+  const selList = (attr, list, v) => `<select class="ce-sel" ${attr}>${opt(list, v)}</select>`;
+  const numberCols = id => chartCols(id).filter(c => c.type === 'number').map(c => [c.key, fname(c)]).concat([['_count', 'Nombre de lignes']]);
+  function cdData(e) {
+    const ok = ready(e), cs = chartCols(e.source), one = isOne(e), part = isPart(e), single1 = oneSeries(e), d = srcData[e.source];
+    const catList = [['', one ? '(aucun regroupement)' : '(tout ensemble)']].concat(cs.map(c => [c.key, fname(c) + (fgroup(c) ? ' · ' + fgroup(c) : '')]));
+    const fOpts = v => opt(cs.filter(c => true).map(c => [c.key, fname(c) + (fgroup(c) ? ' · ' + fgroup(c) : '')]), v);
+    const ser = e.series || [];
+    let h = `<p class="ce-lead">${one ? (e.kind === 'kpi' ? 'Un chiffre calculé à partir d’une colonne de la source, comparé à une période précédente.' : 'Une valeur calculée à partir d’une colonne, comparée à un minimum et un maximum.') : 'Choisissez la source, puis ce qui va sur chaque axe. Le graphique se met à jour tout seul quand la source change.'}</p>
+      <span class="ce-lbl3" style="margin-top:0">Source</span>${selList('data-cd="src" aria-label="Source"', chartSources().map(s => [s.id, s.name]).concat(chartSources().some(s => s.id === e.source) ? [] : [[e.source, 'Jeu introuvable']]), e.source)}
+      <span class="ce-lbl3">${one ? 'Regrouper par (facultatif)' : part ? 'Parts (une par…)' : 'Catégories (axe horizontal)'}</span>${selList('data-cd="cat" aria-label="Colonne des catégories"', catList, e.cat || '')}
+      <p class="ce-help">${one ? 'Avec un regroupement (par mois, par jour…), la valeur affichée est celle du dernier groupe, comparée à l’avant-dernier.' : part ? 'Une part pour chaque valeur différente de cette colonne.' : 'Une barre (ou un point) pour chaque valeur différente de cette colonne. Les lignes identiques sont regroupées.'}</p>
+      <span class="ce-lbl3">${one ? 'Valeur' : part ? 'Valeur à répartir' : 'Valeurs (axe vertical)'}</span>`;
+    ser.forEach((s, i) => {
+      const k = s.agg === 'count' ? '_count' : s.key, cnt = s.agg === 'count';
+      h += `<div class="ce-cser"><span class="sw"><input type="color" data-cd="s:${i}:color" value="${esc(s.color || (LC().PALS[e.pal] || LC().PALS.ocean)[i % 6])}" aria-label="Couleur de la série"></span>
+        ${selList(`data-cd="s:${i}:key" aria-label="Colonne"`, numberCols(e.source).concat(k && !numberCols(e.source).some(x => x[0] === k) ? [[k, keyName(e.source, k)]] : []), k)}
+        ${cnt ? '<span></span>' : selList(`data-cd="s:${i}:agg" aria-label="Calcul"`, [['sum', 'Somme'], ['avg', 'Moyenne'], ['min', 'Minimum'], ['max', 'Maximum']], s.agg || 'sum')}
+        ${single1 || ser.length < 2 ? '<span></span>' : `<button class="ce-ib" data-cdsdel="${i}" title="Retirer la série" aria-label="Retirer la série">×</button>`}</div>`;
+    });
+    if (!single1 && ser.length < 4) h += '<button class="ce-addrow" data-cdsadd="1" style="margin-top:6px">+ Ajouter une série</button>';
+    const fl = e.filter || [], scr = sources.find(x => x.app === 'screen'), scrOpts = scr ? (scr.cols || []).map(c => ['@' + c.key, 'Cet écran · ' + c.label]) : [];
+    h += `<span class="ce-lbl3">Lignes prises en compte${ok ? ` <span class="ce-cnt">${LC().chartData(d, e, opts()).rows} sur ${allRows(e).length}</span>` : ''}</span>`;
+    if (fl.length) h += '<div class="ce-conds" style="margin-left:0">' + fl.map((f, i) => {
+      const c = cs.find(x => x.key === f.key), noVal = f.op === 'empty' || f.op === 'notempty', fv = String(f.val == null ? '' : f.val);
+      let val = '<span></span>';
+      if (!noVal) {
+        const counts = valCounts(e, f.key);
+        if ((counts.length && counts.length <= 50 && (f.op || 'eq') !== 'contains' && f.op !== 'gt' && f.op !== 'lt') || fv.charAt(0) === '@') {
+          const list = counts.map(([v, n]) => [v, LC().fmt(v, c ? c.type : 'text') + ' (' + n + ')']);
+          if (fv && fv.charAt(0) !== '@' && !counts.some(x => x[0] === fv)) list.unshift([fv, fv]);
+          val = selList(`data-cd="f:${i}:val" aria-label="Valeur"`, [['', '(choisir)']].concat(list, scrOpts), fv);
+        } else val = `<input class="ce-sel" data-cd="f:${i}:val" value="${esc(fv)}" placeholder="valeur" aria-label="Valeur">`;
+      }
+      return `<div class="ce-cond">${i ? '<span class="and">et</span>' : ''}<select class="ce-sel" data-cd="f:${i}:key" aria-label="Champ">${fOpts(f.key)}</select><select class="ce-sel" data-cd="f:${i}:op" aria-label="Condition">${opt(OPS, f.op || 'eq')}</select>${val}<button class="ce-ib" data-cdfdel="${i}" title="Retirer la condition" aria-label="Retirer la condition">×</button></div>`;
+    }).join('') + '</div>';
+    h += `<button class="ce-addrow" data-cdfadd="1" style="margin-top:6px" ${cs.length ? '' : 'disabled'}>+ Ajouter une condition</button>`;
+    if (!one) {
+      const od = e.order || { by: 'source', dir: 'asc' };
+      h += `<span class="ce-lbl3">Ordre et nombre de points</span><div class="ce-cduo"><label><small>Trier par</small>${selList('data-cd="orderby" aria-label="Trier par"', [['source', 'Ordre de la source'], ['cat', 'Catégorie'], ['val', 'Valeur']], od.by || 'source')}</label>
+        <label><small>Sens</small><span class="ce-dirseg"${od.by && od.by !== 'source' ? '' : ' aria-disabled="true"'}><button data-cddir="asc" class="${od.dir !== 'desc' ? 'on' : ''}">Croissant</button><button data-cddir="desc" class="${od.dir === 'desc' ? 'on' : ''}">Décroissant</button></span></label>
+        <label><small>Nombre maximum de points</small>${selList('data-cd="max" data-t="n" aria-label="Nombre maximum de points"', [[0, 'Tous']].concat([3, 4, 5, 6, 8, 10, 12, 15, 20, 30].map(n => [n, String(n)])), e.max || 0)}</label></div>
+        <label class="ce-chk" style="margin-top:6px"><input type="checkbox" data-cd="other" ${e.other ? 'checked' : ''}><span>Regrouper le reste dans « Autres »</span></label>`;
+    } else if (e.cat) {
+      const od = e.order || { by: 'cat', dir: 'asc' };
+      h += `<span class="ce-lbl3">Dernier groupe</span><div class="ce-cduo"><label><small>Les groupes sont rangés par</small>${selList('data-cd="orderby" aria-label="Ranger par"', [['source', 'Ordre de la source'], ['cat', 'Catégorie (date ou nom)']], od.by === 'cat' ? 'cat' : 'source')}</label>
+        <label><small>Sens</small><span class="ce-dirseg"><button data-cddir="asc" class="${od.dir !== 'desc' ? 'on' : ''}">Croissant</button><button data-cddir="desc" class="${od.dir === 'desc' ? 'on' : ''}">Décroissant</button></span></label></div>
+        <p class="ce-help">La valeur affichée est celle du dernier groupe dans cet ordre.</p>`;
+    }
+    if (e.kind === 'kpi') h += `<span class="ce-lbl3">Comparaison</span><div class="ce-opts">${[['prev', 'Avec la période précédente', e.cat ? 'avant-dernier groupe' : 'choisissez un regroupement'], ['target', 'Avec un objectif fixe', ''], ['none', 'Aucune', '']].map(([v, t, s]) => `<button class="ce-opt2${(e.cmp || 'none') === v ? ' on' : ''}" data-cdcmp="${v}"><span class="rd"></span><b>${t}</b><span>${s}</span></button>`).join('')}</div>` +
+      (e.cmp === 'target' ? `<div style="margin-top:8px"><small class="ce-mut">Objectif</small><input class="ce-lname sm" data-cd="target" data-t="n" value="${esc(e.target || '')}" placeholder="ex. 14000" aria-label="Objectif"></div>` : '');
+    if (e.kind === 'gauge') h += `<span class="ce-lbl3">Échelle</span><div class="ce-cduo two"><label><small>Minimum</small><input class="ce-lname sm" data-cd="gmin" data-t="n" value="${esc(e.gmin == null ? 0 : e.gmin)}" aria-label="Minimum"></label><label><small>Maximum</small><input class="ce-lname sm" data-cd="gmax" data-t="n" value="${esc(e.gmax == null ? 100 : e.gmax)}" aria-label="Maximum"></label></div>
+      <label class="ce-chk" style="margin-top:8px"><input type="checkbox" data-cd="thrOn" ${e.thrOn !== false ? 'checked' : ''}><span>Colorer selon des seuils</span></label>` +
+      (e.thrOn !== false ? `<div class="ce-cduo two" style="margin-top:6px"><label><small>Rouge sous (% de l'échelle)</small><input class="ce-lname sm" data-cd="thr:0" data-t="n" value="${esc((e.thr || [50, 80])[0])}" aria-label="Seuil bas"></label><label><small>Vert à partir de (%)</small><input class="ce-lname sm" data-cd="thr:1" data-t="n" value="${esc((e.thr || [50, 80])[1])}" aria-label="Seuil haut"></label></div>` : '');
+    // ce que le graphique reçoit
+    if (ok) {
+      const cdta = LC().chartData(d, e, opts()), nf = e.nf, all = []; cdta.series.forEach(s => s.vals.forEach(v => { if (v != null) all.push(v); }));
+      const fv = v => v == null ? '—' : LC().numFmt(v, nf, LC().numDec(all)), shown = oneSeries(e) ? cdta.series.slice(0, 1) : cdta.series;
+      h += `<span class="ce-lbl3">Ce que le graphique reçoit</span>` + (!cdta.cats.length || !shown.length ? '<div class="ce-note">Aucune donnée avec ces réglages.</div>'
+        : `<table class="ce-rtab"><tr><th>${esc(e.cat ? keyName(e.source, e.cat) : 'Ensemble')}</th>${shown.map(s => `<th style="text-align:right">${esc(s.name)}</th>`).join('')}</tr>` +
+          cdta.cats.slice(0, 12).map((c, i) => `<tr class="${isOne(e) && i === cdta.cats.length - 1 ? 'cur' : ''}"><td>${esc(c || '—')}</td>${shown.map(s => `<td class="out" style="text-align:right">${esc(fv(s.vals[i]))}</td>`).join('')}</tr>`).join('') +
+          (cdta.cats.length > 12 ? `<tr><td colspan="${shown.length + 1}" class="in">et ${cdta.cats.length - 12} autre${cdta.cats.length - 12 > 1 ? 's' : ''}</td></tr>` : '') + '</table>');
+    }
+    return h;
+  }
+  function cdLook(e) {
+    const one = isOne(e), part = isPart(e), ln = e.kind === 'line' || e.kind === 'area', d = srcData[e.source], all = [];
+    if (ready(e)) LC().chartData(d, e, opts()).series.forEach(s => s.vals.forEach(v => { if (v != null) all.push(v); }));
+    const chk = (k, on, t) => `<label class="ce-chk"><input type="checkbox" data-cd="${k}" ${on ? 'checked' : ''}><span>${t}</span></label>`, P = LC().PALS;
+    let h = `<p class="ce-lead">Ce qui s'affiche autour des données. La police, la taille et la couleur du texte se règlent dans la barre au-dessus de la page.</p>
+      <span class="ce-lbl3" style="margin-top:0">${one ? 'Libellé' : 'Titre du graphique'}</span><input class="ce-lname" id="ce-cdtitle" data-cd="title" value="${esc(e.title || '')}" maxlength="80" placeholder="${one ? 'Nom de la colonne' : 'Aucun titre'}" aria-label="Titre">
+      <p class="ce-help">${one ? 'Laissez vide pour afficher le nom de la colonne.' : 'Laissez vide pour ne pas afficher de titre.'}</p>`;
+    if (!one) h += `<span class="ce-lbl3">Légende</span><span class="ce-dirseg">${[['none', 'Aucune'], ['bottom', 'En bas'], ['right', 'À droite']].map(([v, t]) => `<button data-cdleg="${v}" class="${(e.legend || 'bottom') === v ? 'on' : ''}">${t}</button>`).join('')}</span>`;
+    h += `<span class="ce-lbl3">Palette</span><div class="ce-opts">${Object.keys(PALN).map(k => `<button class="ce-opt2${(e.pal || 'ocean') === k ? ' on' : ''}" data-cdpal="${k}"><span class="rd"></span><b>${PALN[k]}</b><span class="ce-sws">${P[k].slice(0, 4).map(c => `<i style="background:${c}"></i>`).join('')}</span></button>`).join('')}</div>`;
+    if (!one) h += `<span class="ce-lbl3">Afficher</span>${chk('vals', e.vals !== false, part ? 'Les pourcentages sur le graphique' : 'Les valeurs sur le graphique')}${part ? '' : chk('grid', e.grid !== false, 'La grille')}${ln ? chk('smooth', !!e.smooth, 'Courbe lissée') : ''}`;
+    if (e.kind === 'donut') h += `<span class="ce-lbl3">Épaisseur de l'anneau</span><input type="range" min="15" max="75" step="1" data-cd="thick" data-t="n" value="${e.thick || 38}" style="width:100%" aria-label="Épaisseur de l'anneau">`;
+    if (one || e.kind === 'donut') h += `<span class="ce-lbl3">Unité affichée</span><input class="ce-lname sm" id="ce-cdunit" data-cd="unit" value="${esc(e.unit || '')}" maxlength="12" placeholder="ex. %, repas, CHF" aria-label="Unité"><p class="ce-help">Écrite après la valeur. Pour une monnaie, utilisez plutôt le format ci-dessous.</p>`;
+    return h + nfBlock(e.nf, [...new Set(all)].slice(0, 2), LC().numDec(all), false) + '<p class="ce-help">Mêmes réglages que pour les colonnes et les champs : décimales, séparateur de milliers, monnaie.</p>';
+  }
+  function drawCd() {
+    if (!root) return;
+    let box = q('#ce-cd'); const e = cdEl();
+    if (!cd || !e) { if (box) box.remove(); if (cd && !e) cd = null; return; }
+    if (!box) { box = document.createElement('div'); box.id = 'ce-cd'; q('.ce-center').appendChild(box); bindCd(box); }
+    const ae = document.activeElement, keep = ae && box.contains(ae) && ae.id, ss = keep && ae.selectionStart, missing = !sources.some(s => s.id === e.source), d = srcData[e.source];
+    box.innerHTML = `<div class="ce-ldr" style="width:${ldW()}px" role="dialog" aria-label="Modifier le graphique">
+      <div class="ce-ldh"><div class="top1"><span class="g">${CIC[e.kind]}</span><div class="nm"><small>Modifier le graphique · ${CK[e.kind][0]}</small><input class="ce-ldname" id="ce-cdname" data-cd="name" value="${esc(e.name || '')}" maxlength="60" placeholder="Nom du graphique" aria-label="Nom du graphique"></div>
+        <span class="src">Source : ${missing ? '<b>Jeu introuvable</b>' : `<b>${esc(srcName(e))}</b>`}</span></div>
+        <div class="ce-ltabs"><button data-cdtab="data" class="${cd.tab === 'data' ? 'on' : ''}">Données</button><button data-cdtab="look" class="${cd.tab === 'look' ? 'on' : ''}">Apparence</button></div></div>
+      <div class="ce-ldb">${!d ? '<div class="ce-empty">Lecture des données…</div>' : !ready(e) ? `<div class="ce-note">Données indisponibles : ${esc(d.error || 'aucune colonne')}</div>` : cd.tab === 'data' ? cdData(e) : cdLook(e)}</div>
+      <div class="ce-ldf${cd.warn ? ' warn' : ''}"><button class="ce-btn ghost" data-cdx="0">Annuler</button><span class="note">${cd.warn ? 'Modifications non appliquées. Cliquez sur « Appliquer » pour les garder, ou sur « Annuler » pour revenir en arrière.' : 'La page montre déjà le résultat. Rien n\'est gardé avant « Appliquer ».'}</span><button class="ce-btn" data-cdx="1">Appliquer</button></div></div>`;
+    if (keep) { const n = box.querySelector('#' + keep); if (n) { n.focus(); try { n.setSelectionRange(ss, ss); } catch (x) { /* menu */ } } }
+  }
+  /** Change un réglage du tiroir : name = « src », « cat », « s:0:key », « f:1:op », « title »… */
+  function cdSet(e, name, v, el) {
+    const p = name.split(':');
+    if (el && el.dataset.t === 'n') v = v === '' ? 0 : +v;
+    if (el && el.type === 'checkbox') v = el.checked;
+    if (name === 'src') { if (v !== e.source) { e.source = v; e.cat = ''; e.series = seriesFor(v); e.filter = []; e.order = { by: 'source', dir: 'asc' }; loadSource(v); } }
+    else if (name === 'cat') { e.cat = v; if (isOne(e)) e.order = { by: v ? 'cat' : 'source', dir: 'asc' }; else if (e.order && e.order.by === 'cat' && !v) e.order.by = 'source'; if (v && !isOne(e)) { const c = colsOf(e.source).find(x => x.key === v); if (c && c.type === 'date' && (!e.order || e.order.by === 'source')) e.order = { by: 'cat', dir: 'asc' }; } }
+    else if (p[0] === 's') {
+      const s = (e.series || [])[+p[1]]; if (!s) return;
+      if (p[2] === 'key') { if (v === '_count') { s.key = ''; s.agg = 'count'; s.name = ''; } else { s.key = v; if (s.agg === 'count') s.agg = 'sum'; s.name = fname(colsOf(e.source).find(c => c.key === v)); } }
+      else if (p[2] === 'agg') s.agg = v;
+      else if (p[2] === 'color') s.color = v;
+    }
+    else if (p[0] === 'f') { const f = (e.filter || [])[+p[1]]; if (f) f[p[2]] = v; }
+    else if (name === 'orderby') e.order = Object.assign({ dir: 'asc' }, e.order, { by: v });
+    else if (name === 'thr:0' || name === 'thr:1') { e.thr = (e.thr || [50, 80]).slice(); e.thr[+p[1]] = v; }
+    else e[name] = v;
+  }
+  function bindCd(box) {
+    const live = ev => {
+      const e = cdEl(), t = ev.target.closest('[data-cd]'); if (!cd || !e || !t) return null;
+      return { e, t };
+    };
+    on(box, 'input', ev => {   // texte, nombre, couleur : la page suit sans refaire le tiroir (le curseur reste en place)
+      const r = live(ev); if (!r || r.t.tagName === 'SELECT' || r.t.type === 'checkbox') return;
+      cdSet(r.e, r.t.dataset.cd, r.t.value, r.t); cd.warn = false; render();
+    });
+    on(box, 'change', ev => {   // listes et cases : le tiroir se redessine
+      const r = live(ev); if (!r) return;
+      if (r.t.tagName === 'SELECT' || r.t.type === 'checkbox') { cdSet(r.e, r.t.dataset.cd, r.t.value, r.t); cdLive(); }
+      else { renderCtx(); if (panelName === 'graphiques' && panelOpen) renderPanel(); }
+    });
+    on(box, 'click', ev => {
+      const g = s => ev.target.closest(s), e = cdEl(); if (!cd || !e) return;
+      let x;
+      if ((x = g('[data-cdx]'))) { closeCd(x.dataset.cdx === '1'); return; }
+      if ((x = g('[data-cdtab]'))) { cd.tab = x.dataset.cdtab; drawCd(); return; }
+      if ((x = g('[data-cdsdel]'))) { e.series.splice(+x.dataset.cdsdel, 1); cdLive(); return; }
+      if (g('[data-cdsadd]')) { const used = new Set((e.series || []).map(s => s.key)), n = chartCols(e.source).find(c => c.type === 'number' && !used.has(c.key)); e.series.push(n ? { key: n.key, agg: 'sum', name: fname(n) } : { key: '', agg: 'count', name: '' }); cdLive(); return; }
+      if (g('[data-cdfadd]')) { const f0 = chartCols(e.source)[0]; if (f0) { (e.filter = e.filter || []).push({ key: f0.key, op: 'eq', val: '' }); cdLive(); } return; }
+      if ((x = g('[data-cdfdel]'))) { e.filter.splice(+x.dataset.cdfdel, 1); cdLive(); return; }
+      if ((x = g('[data-cddir]'))) { e.order = Object.assign({ by: 'source' }, e.order, { dir: x.dataset.cddir }); cdLive(); return; }
+      if ((x = g('[data-cdleg]'))) { e.legend = x.dataset.cdleg; cdLive(); return; }
+      if ((x = g('[data-cdpal]'))) { e.pal = x.dataset.cdpal; (e.series || []).forEach(s => delete s.color); cdLive(); return; }
+      if ((x = g('[data-cdcmp]'))) { e.cmp = x.dataset.cdcmp; cdLive(); return; }
+      const na = nfAct(ev); if (na) { const nf = nfApply(e.nf, na); if (LC().nfString(nf) || Object.keys(nf).length) e.nf = nf; else delete e.nf; cdLive(); }
+    });
+  }
+
   // ---------- calques ----------
   function icon(e) {
     if (e.type === 'app') return (LC().SRC[e.app] || {}).icon || '◇';
     if (e.type === 'list') return '▦';
+    if (e.type === 'chart') return '▥';
     return e.type === 'text' ? 'T' : e.type === 'image' ? '▨' : e.type === 'qr' ? '▣' : e.type === 'widget' ? ({ clock: '◷', date: '▦', ticker: '⇢', countdown: '⏳' })[e.kind] || '◷'
       : ({ circle: '●', line: '—', arrow: '→' })[e.kind] || '■';
   }
@@ -1807,6 +2091,7 @@
     if (e.type === 'text') return String(e.text || '').replace(LC().TOKEN, (m, id, key) => LC().fieldText(id, key, opts({ names: true }))).replace(/\n/g, ' ') || 'Texte';
     if (e.type === 'app') { const s = sources.find(x => x.id === e.source); return 'Bloc · ' + (s ? s.name : (LC().SRC[e.app] || {}).name || 'intégration'); }
     if (e.type === 'list') { const s = sources.find(x => x.id === e.source); return 'Liste · ' + (e.name || (s ? s.name : 'jeu introuvable')); }
+    if (e.type === 'chart') return e.name || 'Graphique';
     if (e.type === 'image') { const m = images.find(x => x.id === e.media); return 'Image' + (m ? ' · ' + m.name : ' à choisir'); }
     if (e.type === 'qr') return 'QR code';
     if (e.type === 'widget') return WNAMES[e.kind] || 'Widget';

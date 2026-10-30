@@ -40,7 +40,10 @@
     '.lc-lr{overflow:hidden}.lc-lt{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
     '.lc-lt small{display:block;font-size:.62em;opacity:.7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:.1em}' +
     '.lc-lp{justify-self:end;font-size:.72em;padding:.18em .65em;border-radius:.3em;color:#fff;white-space:nowrap;line-height:1.2}' +
-    '.lc-li{height:78%;aspect-ratio:1/1;background-position:center;background-size:cover;background-repeat:no-repeat;border-radius:.2em;justify-self:start}';
+    '.lc-li{height:78%;aspect-ratio:1/1;background-position:center;background-size:cover;background-repeat:no-repeat;border-radius:.2em;justify-self:start}' +
+    // graphique relié : dessin SVG à la taille du calque ; chiffre clé en texte
+    '.lc-ch{width:100%;height:100%;box-sizing:border-box;overflow:hidden}.lc-ch svg{display:block;width:100%;height:100%}' +
+    '.lc-kpi{display:flex;flex-direction:column;justify-content:center;line-height:1.1}.lc-kpi .l{opacity:.75}.lc-kpi .v{font-weight:600;line-height:1.05;margin:.1em 0}.lc-kpi .v small{font-size:.35em;font-weight:400;opacity:.7}.lc-kpi .dl{font-size:.9em}.lc-kpi .dl span{opacity:.65;margin-left:.5em}';
 
   function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
   function num(v, d, lo, hi) { var n = parseFloat(v); if (!isFinite(n)) n = d; return Math.min(hi, Math.max(lo, n)); }
@@ -463,11 +466,206 @@
     return '<svg viewBox="0 0 10 10"><rect width="10" height="10" fill="none" stroke="' + fg + '" stroke-width=".4" stroke-dasharray=".8 .6"/><text x="5" y="6" font-size="2" text-anchor="middle" fill="' + fg + '">QR</text></svg>';
   }
 
+  // ---------- graphiques reliés à un jeu de données : barres, courbe, aire, secteurs, anneau, jauge, chiffre clé ----------
+  var PALS = {
+    ocean: ['#3B82C4', '#1E8E5A', '#E07B1A', '#C8372D', '#7A5CC4', '#2AA6A6'],
+    warm: ['#C8372D', '#E07B1A', '#E8B730', '#9C4A8F', '#7A5CC4', '#3B82C4'],
+    mono: ['#0B1F3A', '#2B5C8F', '#3B82C4', '#7FB2E0', '#B9D3EC', '#5A6B80']
+  };
+  var AGGN = { sum: 'Somme', avg: 'Moyenne', count: 'Nombre de lignes', min: 'Minimum', max: 'Maximum' };
+  function aggOf(rows, i, agg) {
+    if (agg === 'count') return rows.length;
+    var ns = [];
+    rows.forEach(function (r) { var n = parseFloat(r[i]); if (isFinite(n)) ns.push(n); });
+    if (!ns.length) return null;
+    var s = ns.reduce(function (a, b) { return a + b; }, 0);
+    return agg === 'avg' ? s / ns.length : agg === 'min' ? Math.min.apply(null, ns) : agg === 'max' ? Math.max.apply(null, ns) : s;
+  }
+  /**
+   * Ce que reçoit un graphique : lignes gardées (e.filter), regroupées par la colonne e.cat (sans colonne : un seul groupe), un calcul par série
+   * (e.series : { key, agg, name, color }), ordre e.order { by: source|cat|val, dir }, e.max points dont « Autres » si e.other.
+   * Rend { cats: [libellés], series: [{ name, agg, color, vals }], rows: lignes gardées }.
+   */
+  function chartData(d, e, o) {
+    var fl = (e.filter || []).filter(function (f) { return f && f.key && (f.op === 'empty' || f.op === 'notempty' || (f.val != null && f.val !== '')); });   // une condition encore sans valeur n'écarte rien
+    var rows = tableRows(d, { filter: fl }, o), ci = colIdx(d, e.cat), cc = colOf(d, e.cat);
+    var ser = (e.series || []).filter(function (s) { return s && (s.agg === 'count' || colIdx(d, s.key) >= 0); });
+    var groups = [], map = Object.create(null);
+    if (ci >= 0) rows.forEach(function (r) {
+      var raw = r[ci] == null ? '' : String(r[ci]), g = map[raw];
+      if (!g) { g = map[raw] = { raw: raw, label: fmt(raw, cc.type, o && o.tz) || '—', rows: [] }; groups.push(g); }
+      g.rows.push(r);
+    });
+    else groups.push({ raw: '', label: '', rows: rows });
+    function calc(g) { g.vals = ser.map(function (s) { return aggOf(g.rows, colIdx(d, s.key), s.agg); }); }
+    groups.forEach(calc);
+    var od = e.order || {}, dir = od.dir === 'desc' ? -1 : 1;
+    if (od.by === 'cat' && ci >= 0) groups.sort(function (a, b) { return dir * cmpVal(a.raw, b.raw, cc.type); });
+    else if (od.by === 'val' && ser.length) groups.sort(function (a, b) {
+      if (a.vals[0] == null) return b.vals[0] == null ? 0 : 1;
+      if (b.vals[0] == null) return -1;
+      return dir * (a.vals[0] - b.vals[0]);
+    });
+    var n = Math.round(num(e.max, 0, 0, 200));
+    if (n && groups.length > n) {
+      var rest = groups.slice(n);
+      groups = groups.slice(0, n);
+      if (e.other) { var og = { raw: '', label: 'Autres', rows: [].concat.apply([], rest.map(function (g) { return g.rows; })) }; calc(og); groups.push(og); }
+    }
+    return {
+      cats: groups.map(function (g) { return g.label; }), rows: rows.length,
+      series: ser.map(function (s, k) {
+        var c = colOf(d, s.key);
+        return { name: s.name || (s.agg === 'count' ? 'Nombre de lignes' : c ? c.label || s.key : s.key), agg: s.agg, color: s.color, vals: groups.map(function (g) { return g.vals[k]; }) };
+      })
+    };
+  }
+  function nice(m) { if (!(m > 0)) return 1; var p = Math.pow(10, Math.floor(Math.log10(m))), l = [1, 2, 2.5, 5, 10]; for (var i = 0; i < l.length; i++) if (l[i] * p >= m) return l[i] * p; return 10 * p; }
+  function arcPath(cx, cy, r0, r1, a0, a1) {
+    function p(r, a) { return (cx + r * Math.cos(a)).toFixed(2) + ',' + (cy + r * Math.sin(a)).toFixed(2); }
+    var big = a1 - a0 > Math.PI ? 1 : 0;
+    return 'M' + p(r1, a0) + 'A' + r1 + ',' + r1 + ' 0 ' + big + ' 1 ' + p(r1, a1) + (r0 > 0 ? 'L' + p(r0, a1) + 'A' + r0 + ',' + r0 + ' 0 ' + big + ' 0 ' + p(r0, a0) + 'Z' : 'L' + cx + ',' + cy + 'Z');
+  }
+  function svgT(x, y, t, fs, anchor, extra) { return '<text x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" font-size="' + fs.toFixed(1) + '" text-anchor="' + (anchor || 'start') + '" fill="currentColor"' + (extra || '') + '>' + esc(t) + '</text>'; }
+  function cut(s, n) { s = String(s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+  /** Dessin d'un graphique à axes ou en parts ; w × h : taille du calque en pixels, fs : taille du texte. */
+  function chartSvg(e, cd, o, w, h, fs) {
+    var K = e.kind, pie = K === 'pie' || K === 'donut', pal = PALS[e.pal] || PALS.ocean, ser = pie || K === 'hbars' ? cd.series.slice(0, 1) : cd.series, cats = cd.cats, n = cats.length, g = '';
+    function sc(k) { return (ser[k] && col(ser[k].color, '')) || pal[k % pal.length]; }
+    var all = []; ser.forEach(function (s) { s.vals.forEach(function (v) { if (v != null) all.push(v); }); });
+    var nd = numDec(all), nf = e.nf, showV = e.vals !== false, grid = e.grid !== false;
+    function F(v) { return v == null ? '' : numFmt(v, nf, nd); }
+    var legend = e.legend || 'bottom', items = pie ? cats : ser.map(function (s) { return s.name; });
+    var hasLeg = legend !== 'none' && (pie || ser.length > 1), lw = 0;
+    items.forEach(function (t) { lw = Math.max(lw, cut(t, 22).length); });
+    var legW = hasLeg && legend === 'right' ? lw * fs * .55 + fs * 2.4 : 0, legH = hasLeg && legend === 'bottom' ? fs * 2 : 0;
+    var top = e.title ? fs * 2.1 : fs * .5, x0 = fs * .4, plotW = w - legW - fs * .4, plotH = h - top - legH - fs * .3;
+    if (e.title) g += svgT(w / 2, fs * 1.5, e.title, fs * 1.4, 'middle', ' font-weight="600"');
+    if (hasLeg) {
+      var cx0 = legend === 'right' ? w - legW + fs * .4 : x0, xx = cx0, yy = legend === 'right' ? top + fs : h - fs * .5;
+      items.forEach(function (t, i) {
+        var col0 = pie ? pal[i % pal.length] : sc(i), tw = cut(t, 22).length * fs * .55 + fs * 2.4;
+        g += '<rect x="' + xx.toFixed(1) + '" y="' + (yy - fs * .8).toFixed(1) + '" width="' + (fs * .9).toFixed(1) + '" height="' + (fs * .9).toFixed(1) + '" rx="' + (fs * .15).toFixed(1) + '" fill="' + col0 + '"/>' + svgT(xx + fs * 1.3, yy, cut(t, 22), fs * .95);
+        if (legend === 'right') yy += fs * 1.7; else xx += tw;
+      });
+    }
+    if (pie) {
+      var vs = ser[0].vals.map(function (v) { return v > 0 ? v : 0; }), tot = vs.reduce(function (a, b) { return a + b; }, 0);
+      if (!(tot > 0)) return null;
+      var r = Math.max(10, Math.min(plotW, plotH) / 2 * .94), cx = x0 + plotW / 2, cy = top + plotH / 2, a = -Math.PI / 2, ri = K === 'donut' ? r * (1 - num(e.thick, 38, 10, 85) / 100) : 0;
+      vs.forEach(function (v, i) {
+        if (!v) return;
+        var b = a + v / tot * Math.PI * 2, full = v / tot > .9999;
+        g += '<path d="' + arcPath(cx, cy, ri, r, a, full ? a + Math.PI * 2 - .0001 : b - (vs.length > 1 ? .012 : 0)) + '" fill="' + pal[i % pal.length] + '"/>';
+        if (showV && v / tot >= .04) {
+          var m = (a + b) / 2, rr = ri ? (r + ri) / 2 : r * .62;
+          g += svgT(cx + rr * Math.cos(m), cy + rr * Math.sin(m) + fs * .3, Math.round(v / tot * 100) + ' %', fs * .9, 'middle', ' font-weight="600" style="fill:#fff;stroke:rgba(0,0,0,.35);stroke-width:' + (fs * .12).toFixed(1) + 'px;paint-order:stroke"');
+        }
+        a = b;
+      });
+      if (K === 'donut') g += svgT(cx, cy + fs * .5, F(tot) + (e.unit ? ' ' + e.unit : ''), Math.min(ri * .42, fs * 2.4), 'middle', ' font-weight="600"') + svgT(cx, cy + fs * 1.7 + Math.min(ri * .12, fs * .6), ser[0].name, fs * .85, 'middle', ' opacity=".7"');
+      return g;
+    }
+    var mnv = all.length ? Math.min.apply(null, all) : 0, hi = nice(all.length ? Math.max.apply(null, all.concat([0])) : 1), lo = mnv < 0 ? -nice(-mnv) : 0, span = hi - lo || 1;
+    if (K === 'hbars') {
+      var lab = 0; cats.forEach(function (t) { lab = Math.max(lab, cut(t, 18).length); });
+      var lx = x0 + Math.min(plotW * .35, lab * fs * .56 + fs * .8), ex = fs * (String(F(hi)).length * .6 + .8), px = lx, pw = plotW - (lx - x0) - (showV ? ex : fs * .3), gh = plotH / Math.max(1, n);
+      if (grid) for (var i = 0; i <= 4; i++) g += '<line x1="' + (px + pw * i / 4).toFixed(1) + '" x2="' + (px + pw * i / 4).toFixed(1) + '" y1="' + top.toFixed(1) + '" y2="' + (top + plotH).toFixed(1) + '" stroke="currentColor" stroke-opacity=".15"/>';
+      cats.forEach(function (c, j) {
+        var v = ser[0].vals[j] || 0, bw = Math.max(0, pw * Math.max(v, 0) / span), y = top + gh * j + gh * .16;
+        g += svgT(lx - fs * .5, top + gh * (j + .5) + fs * .32, cut(c, 18), fs * .95, 'end') + '<rect x="' + px.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + (gh * .68).toFixed(1) + '" rx="' + Math.min(4, gh * .1).toFixed(1) + '" fill="' + sc(0) + '"/>';
+        if (showV) g += svgT(px + bw + fs * .4, top + gh * (j + .5) + fs * .3, F(ser[0].vals[j]), fs * .85);
+      });
+      return g;
+    }
+    var tl = 0; for (var t = 0; t <= 4; t++) tl = Math.max(tl, String(F(lo + span * t / 4)).length);
+    var L = x0 + tl * fs * .58 + fs * .7, bot = fs * 1.9, pw2 = plotW - (L - x0) - fs * .3, ph = plotH - bot;
+    function Y(v) { return top + ph - ph * ((v == null ? 0 : v) - lo) / span; }
+    for (var q = 0; q <= 4; q++) {
+      var yv = top + ph - ph * q / 4;
+      if (grid) g += '<line x1="' + L.toFixed(1) + '" x2="' + (L + pw2).toFixed(1) + '" y1="' + yv.toFixed(1) + '" y2="' + yv.toFixed(1) + '" stroke="currentColor" stroke-opacity=".15"/>';
+      g += svgT(L - fs * .5, yv + fs * .3, F(lo + span * q / 4), fs * .8, 'end', ' opacity=".7"');
+    }
+    var gw = pw2 / Math.max(1, n), step = Math.max(1, Math.ceil((Math.min(12, Math.max.apply(null, cats.map(function (c) { return String(c).length; }).concat([1]))) * fs * .56) / gw));
+    cats.forEach(function (c, j) { if (j % step === 0) g += svgT(L + gw * (j + .5), top + ph + fs * 1.4, cut(c, 12), fs * .9, 'middle', ' opacity=".8"'); });
+    if (lo < 0) g += '<line x1="' + L.toFixed(1) + '" x2="' + (L + pw2).toFixed(1) + '" y1="' + Y(0).toFixed(1) + '" y2="' + Y(0).toFixed(1) + '" stroke="currentColor" stroke-opacity=".5"/>';
+    if (K === 'bars') {
+      var bw2 = Math.min(fs * 5, gw * .72 / ser.length);
+      ser.forEach(function (s, k) {
+        s.vals.forEach(function (v, j) {
+          var x = L + gw * (j + .5) - bw2 * ser.length / 2 + k * bw2, y1 = Y(v), y0 = Y(0);
+          g += '<rect x="' + x.toFixed(1) + '" y="' + Math.min(y0, y1).toFixed(1) + '" width="' + Math.max(1, bw2 - 3).toFixed(1) + '" height="' + Math.abs(y0 - y1).toFixed(1) + '" rx="' + Math.min(4, bw2 / 6).toFixed(1) + '" fill="' + sc(k) + '"/>';
+          if (showV && v != null && F(v).length * fs * .5 <= bw2 + gw * .25) g += svgT(x + (bw2 - 3) / 2, v < 0 ? y1 + fs : y1 - fs * .35, F(v), fs * .8, 'middle');
+        });
+      });
+    } else {
+      var area = K === 'area', sm = !!e.smooth;
+      ser.forEach(function (s, k) {
+        var P = s.vals.map(function (v, j) { return [L + gw * (j + .5), Y(v)]; }), d = '';
+        P.forEach(function (p, j) {
+          if (!j) { d = 'M' + p[0].toFixed(1) + ',' + p[1].toFixed(1); return; }
+          var q0 = P[j - 1], mx = (q0[0] + p[0]) / 2;
+          d += sm ? 'C' + mx.toFixed(1) + ',' + q0[1].toFixed(1) + ' ' + mx.toFixed(1) + ',' + p[1].toFixed(1) + ' ' + p[0].toFixed(1) + ',' + p[1].toFixed(1) : 'L' + p[0].toFixed(1) + ',' + p[1].toFixed(1);
+        });
+        if (area && P.length) g += '<path d="' + d + 'L' + P[P.length - 1][0].toFixed(1) + ',' + Y(0).toFixed(1) + 'L' + P[0][0].toFixed(1) + ',' + Y(0).toFixed(1) + 'Z" fill="' + sc(k) + '" fill-opacity=".28"/>';
+        g += '<path d="' + d + '" fill="none" stroke="' + sc(k) + '" stroke-width="' + Math.max(2, fs * .17).toFixed(1) + '" stroke-linejoin="round" stroke-linecap="round"/>';
+        P.forEach(function (p, j) {
+          g += '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="' + Math.max(3, fs * .24).toFixed(1) + '" fill="' + sc(k) + '"/>';
+          if (showV && s.vals[j] != null && gw >= F(s.vals[j]).length * fs * .5) g += svgT(p[0], p[1] - fs * .7, F(s.vals[j]), fs * .8, 'middle');
+        });
+      });
+    }
+    return g;
+  }
+  /** Jauge : demi-cercle gradué entre gmin et gmax, coloré selon les seuils (en % de l'échelle). */
+  function gaugeSvg(e, v, name, w, h, fs, F) {
+    var mn = num(e.gmin, 0, -1e9, 1e9), mx = num(e.gmax, 100, -1e9, 1e9); if (mx <= mn) mx = mn + 1;
+    var f = Math.min(1, Math.max(0, ((v == null ? mn : v) - mn) / (mx - mn))), thr = e.thr || [50, 80], on = e.thrOn !== false;
+    var color = !on ? (PALS[e.pal] || PALS.ocean)[0] : f * 100 < num(thr[0], 50, 0, 100) ? col(e.cLow, '#C8372D') : f * 100 < num(thr[1], 80, 0, 100) ? col(e.cMid, '#E0A030') : col(e.cHigh, '#1E8E5A');
+    var cy = h * .68, r = Math.max(20, Math.min(w / 2 - fs * 1.5, cy - fs * .5)), cx = w / 2, a1 = Math.PI + f * Math.PI;
+    var g = '<path d="' + arcPath(cx, cy, r * .78, r, Math.PI, 2 * Math.PI) + '" fill="currentColor" fill-opacity=".14"/>';
+    if (f > 0) g += '<path d="' + arcPath(cx, cy, r * .78, r, Math.PI, f >= 1 ? 2 * Math.PI - .0001 : a1) + '" fill="' + color + '"/>';
+    g += svgT(cx, cy - r * .08, v == null ? '—' : F(v) + (e.unit ? ' ' + e.unit : ''), r * .42, 'middle', ' font-weight="600"');
+    if (name) g += svgT(cx, cy + fs * 1.6, name, fs, 'middle', ' opacity=".75"');
+    g += svgT(cx - r * .89, cy + fs * 1.1, F(mn), fs * .8, 'middle', ' opacity=".6"') + svgT(cx + r * .89, cy + fs * 1.1, F(mx), fs * .8, 'middle', ' opacity=".6"');
+    return g;
+  }
+  /** Valeur d'une jauge ou d'un chiffre clé : calcul de la 1re série ; avec une colonne de regroupement, la dernière valeur (et l'avant-dernière pour comparer). */
+  function singleValue(d, e, o) {
+    var cd = chartData(d, e, o), s = cd.series[0];
+    if (!s) return null;
+    var n = s.vals.length;
+    return { v: n ? s.vals[n - 1] : null, prev: n > 1 ? s.vals[n - 2] : null, name: s.name, cd: cd };
+  }
+  function chartHtml(e, o) {
+    var d = o.data && o.data[e.source], s = srcOf(o, e.source), st = txs(e).replace(/text-align:[a-z]+;/, ''), wait = function (m) { return '<div class="lc-app" style="' + st + '"><div class="lc-wait">' + m + '</div></div>'; };
+    if (!d || d.error) return wait('▦ ' + esc(s ? s.name : 'Jeu de données') + (d && d.error ? '<br>Données indisponibles' : o.player ? '' : '<br>Chargement des données…'));
+    var W = num(e.w, 600, 10, 1e5), H = num(e.h, 400, 10, 1e5), fs = num(e.size, 26, 8, 400), K = e.kind;
+    if (!(e.series || []).length) return wait('Choisissez les données du graphique');
+    if (K === 'gauge' || K === 'kpi') {
+      var sv = singleValue(d, e, o); if (!sv) return wait('Choisissez les données du graphique');
+      var all = []; sv.cd.series[0].vals.forEach(function (x) { if (x != null) all.push(x); });
+      var F = function (v) { return numFmt(v, e.nf, numDec(all)); }, name = e.title || sv.name;
+      if (K === 'gauge') return '<div class="lc-ch" style="' + st + '"><svg viewBox="0 0 ' + W + ' ' + H + '" font-family="inherit">' + gaugeSvg(e, sv.v, name, W, H, fs, F) + '</svg></div>';
+      var dl = '';
+      if (e.cmp === 'prev' && sv.v != null && sv.prev) { var pc = (sv.v - sv.prev) / Math.abs(sv.prev) * 100; dl = '<div class="dl" style="color:' + (pc > 0 ? '#1E8E5A' : pc < 0 ? '#C8372D' : 'inherit') + '">' + (pc > 0 ? '▲ ' : pc < 0 ? '▼ ' : '') + numFmt(Math.abs(pc), { dec: 1 }) + ' %<span>par rapport à la période précédente</span></div>'; }
+      else if (e.cmp === 'target' && sv.v != null && +e.target) dl = '<div class="dl">' + Math.round(sv.v / e.target * 100) + ' %<span>de l\'objectif · ' + esc(numFmt(+e.target, e.nf)) + '</span></div>';
+      return '<div class="lc-ch lc-kpi" style="' + st + '"><div class="l">' + esc(name) + '</div><div class="v" style="font-size:' + (fs * 2.6) + 'px">' + (sv.v == null ? '—' : esc(F(sv.v)) + (e.unit ? '<small> ' + esc(e.unit) + '</small>' : '')) + '</div>' + dl + '</div>';
+    }
+    var cd = chartData(d, e, o);
+    if (!cd.series.length) return wait('Choisissez les données du graphique');
+    if (!cd.cats.length) return wait(esc(e.empty || 'Aucune ligne à afficher'));
+    var body = chartSvg(e, cd, o, W, H, fs);
+    if (body == null) return wait('Aucune valeur à répartir');
+    return '<div class="lc-ch" style="' + st + '"><svg viewBox="0 0 ' + W + ' ' + H + '" font-family="inherit">' + body + '</svg></div>';
+  }
+
   function inner(e, o) {
     var t = e.type;
     if (t === 'text') return '<div class="lc-tx" style="' + txs(e) + '">' + textHtml(e, o) + '</div>';
     if (t === 'app') return block(e, o);
     if (t === 'list') return listHtml(e, o);
+    if (t === 'chart') return chartHtml(e, o);
     if (t === 'shape') {
       var fill = col(e.fill, '#3B82C4');
       if (e.kind === 'arrow') return '<svg viewBox="0 0 100 60" preserveAspectRatio="none" width="100%" height="100%" style="display:block"><path d="M0 21H60V0L100 30L60 60V39H0Z" fill="' + fill + '"/></svg>';
@@ -513,6 +711,10 @@
     parseNf: parseNf,
     nfString: nfString,
     tableNumber: tableNumber,
+    /** Graphiques : données regroupées (aperçu de l'éditeur), calculs et palettes. */
+    chartData: chartData,
+    AGG: AGGN,
+    PALS: PALS,
     CUR: CUR,
     /** Sources utilisées par un document (blocs, listes, champs ; « Cet écran » si un filtre de liste cite l'écran), sans doublon. */
     sources: function (doc) {
@@ -520,8 +722,8 @@
       function add(id) { if (id && ids.indexOf(id) === -1) ids.push(id); }
       for (var i = 0; i < els.length; i++) {
         var e = els[i], m;
-        if (e.type === 'app' || e.type === 'list') add(e.source);
-        if (e.type === 'list') (e.filter || []).forEach(function (f) { if (f && String(f.val || '').charAt(0) === '@') add(SCREEN); });
+        if (e.type === 'app' || e.type === 'list' || e.type === 'chart') add(e.source);
+        if (e.type === 'list' || e.type === 'chart') (e.filter || []).forEach(function (f) { if (f && String(f.val || '').charAt(0) === '@') add(SCREEN); });
         if (e.type === 'text') { TOKEN.lastIndex = 0; while ((m = TOKEN.exec(String(e.text || '')))) add(m[1]); }
       }
       return ids;
@@ -531,7 +733,7 @@
       var els = (doc && doc.els) || [];
       for (var i = 0; i < els.length; i++) {
         var e = els[i];
-        if (e.type !== 'app' && e.type !== 'list' && !hasFields(e)) continue;
+        if (e.type !== 'app' && e.type !== 'list' && e.type !== 'chart' && !hasFields(e)) continue;
         var n = root.querySelector('.lc-el[data-id="' + String(e.id).replace(/["\\]/g, '') + '"]');
         if (n) { var h = inner(e, o); if (n.innerHTML !== h) n.innerHTML = h; }
       }

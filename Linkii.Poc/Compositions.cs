@@ -28,6 +28,9 @@ public static class Compositions
     /// <summary>Calques reliés à un jeu de données (§139) : liste reliée (« list », source = identifiant du jeu).</summary>
     public const string ListType = "list";
 
+    /// <summary>Graphique relié à un jeu de données : barres, courbe, secteurs, jauge, chiffre clé… (« chart », source = identifiant du jeu).</summary>
+    public const string ChartType = "chart";
+
     /// <summary>Champ relié dans un texte : {{identifiant du contenu source (32 chiffres hexadécimaux)}:{clé du champ}}.</summary>
     /// <summary>Champ relié d'un texte : {{jeu:clé}} ou {{jeu:clé|d2,cCHF}} (format du nombre, §142). Les groupes 1 et 2 sont le jeu et la clé.</summary>
     public static readonly Regex FieldToken = new(@"{{([0-9a-f]{32}):([A-Za-z0-9_.:-]{1,120})(?:\|([A-Za-z0-9,]{1,30}))?}}", RegexOptions.Compiled);
@@ -46,8 +49,8 @@ public static class Compositions
         var clean = new JsonArray();
         foreach (var n in els)
         {
-            if (n is not JsonObject e || Str(e, "type") is not ("text" or "shape" or "image" or "qr" or "widget" or "app" or "list")) continue;
-            if (Str(e, "type") == ListType && !Guid.TryParse(Str(e, "source"), out _)) continue;   // liste sans jeu de données
+            if (n is not JsonObject e || Str(e, "type") is not ("text" or "shape" or "image" or "qr" or "widget" or "app" or "list" or "chart")) continue;
+            if (Str(e, "type") is ListType or ChartType && !Guid.TryParse(Str(e, "source"), out _)) continue;   // liste ou graphique sans jeu de données
             if (Str(e, "type") == "app" && (!Guid.TryParse(Str(e, "source"), out _) || !SourceApps.Contains(Str(e, "app") ?? ""))) continue;   // bloc sans source valable
             var copy = (JsonObject)e.DeepClone();
             copy.Remove("src");   // adresse de fichier : posée seulement à la publication
@@ -101,7 +104,8 @@ public static class Compositions
                     if (!Guid.TryParse(Str(e, "source"), out var sid) || sources.GetValueOrDefault(sid) is not { } src || src.AppId != Str(e, "app")) els.Remove(e);
                     break;
                 case ListType:
-                    if (!Guid.TryParse(Str(e, "source"), out var lid) || !sets.ContainsKey(lid)) els.Remove(e);   // jeu supprimé : la liste n'est pas diffusée
+                case ChartType:
+                    if (!Guid.TryParse(Str(e, "source"), out var lid) || !sets.ContainsKey(lid)) els.Remove(e);   // jeu supprimé : la liste ou le graphique n'est pas diffusé
                     break;
             }
         }
@@ -132,8 +136,8 @@ public static class Compositions
         var ids = new List<Guid>();
         foreach (var e in els.OfType<JsonObject>())
         {
-            if (Str(e, "type") is "app" or ListType && Guid.TryParse(Str(e, "source"), out var id) && !ids.Contains(id)) ids.Add(id);
-            if (Str(e, "type") == ListType && e["filter"] is JsonArray fl && fl.OfType<JsonObject>().Any(x => (Str(x, "val") ?? "").StartsWith('@')) && !ids.Contains(ScreenSource))
+            if (Str(e, "type") is "app" or ListType or ChartType && Guid.TryParse(Str(e, "source"), out var id) && !ids.Contains(id)) ids.Add(id);
+            if (Str(e, "type") is ListType or ChartType && e["filter"] is JsonArray fl && fl.OfType<JsonObject>().Any(x => (Str(x, "val") ?? "").StartsWith('@')) && !ids.Contains(ScreenSource))
                 ids.Add(ScreenSource);   // filtre sur un paramètre de l'écran (« = Cet écran · Étage »)
             if (Str(e, "type") == "text" && Str(e, "text") is { } t)
                 foreach (Match f in FieldToken.Matches(t))
@@ -158,6 +162,12 @@ public static class Compositions
                 foreach (var arr in new[] { e["cols"], e["filter"], e["rules"] })
                     if (arr is JsonArray a) foreach (var x in a.OfType<JsonObject>()) Add(Str(x, "key"));
                 if (e["sort"] is JsonObject so) Add(Str(so, "key"));
+            }
+            if (Str(e, "type") == ChartType && Str(e, "source") is { } csrc && Guid.TryParse(csrc, out var cg) && cg == dataSet)
+            {
+                Add(Str(e, "cat"));
+                foreach (var arr in new[] { e["series"], e["filter"] })
+                    if (arr is JsonArray a) foreach (var x in a.OfType<JsonObject>()) Add(Str(x, "key"));
             }
             if (Str(e, "type") == "text" && Str(e, "text") is { } t)
                 foreach (Match f in FieldToken.Matches(t))
