@@ -160,7 +160,7 @@
     editing = false; drag = null; guides = null; tplCat = 'Tous'; mediaSearch = ''; qrWait = {};
     root.innerHTML = SHELL;
     { const rail = root.querySelector('#ce-rail'), dn = rail.querySelector('[data-p=donnees]');   // Données et Graphiques : mode expert seulement
-      if (expert) dn.insertAdjacentHTML('afterend', `<button data-p="graphiques">${ICO.chart}Graphiques</button>`); else dn.remove(); }
+      if (expert) dn.insertAdjacentHTML('afterend', `<button data-p="graphiques">${ICO.chart}Graphiques</button><button data-p="indicateurs">${ICO.gauge}Indicateurs</button>`); else dn.remove(); }
     q('#ce-name').value = name;
     bind();
     push();
@@ -193,6 +193,7 @@
     shp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 3 3 11h10L8 3Z"/><circle cx="17" cy="16" r="4"/><rect x="3" y="14" width="7" height="7"/></svg>',
     wid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
     chart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg>',
+    gauge: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 17a8 8 0 0 1 16 0M12 17l4-5M4 21h16"/></svg>',
     data: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>'
   };
   const SHELL = `
@@ -454,7 +455,7 @@
       if (e.type === 'qr' && key === 'url') { e.qr = ''; fetchQr(e, 500); }
       render();
     });
-    on(ctx, 'change', ev => { if (ev.target.dataset.k) commit(); if (ev.target.dataset.k === 'source') loadSource(ev.target.value); const ce = cur(); if (ce && ce.type === 'chart' && ev.target.dataset.k) afterChart(); });
+    on(ctx, 'change', ev => { const was0 = (cur() || {}).kind; if (ev.target.dataset.k) commit(); if (ev.target.dataset.k === 'source') loadSource(ev.target.value); const ce = cur(); if (ce && ce.type === 'chart' && ev.target.dataset.k) { if (ev.target.dataset.k === 'kind') { changeKind(ce, ce.kind, was0); commit(); } afterChart(); } });
     on(ctx, 'mousedown', ev => { if (editing && ev.target.closest('[data-act=field]')) ev.preventDefault(); });   // le texte en cours d'écriture garde le curseur
     on(ctx, 'click', ev => {
       const b = ev.target.closest('button'), e = cur(); if (!b || !e) return;
@@ -595,8 +596,8 @@
     if (cd && cd.id !== id) closeCd(false);
     const was = cur(); selId = id; const e = cur();
     drawOverlay(); renderLayers(); renderCtx(); markList();
-    if (e && e.type === 'chart' && expert) { if (panelName !== 'graphiques' || !panelOpen) { panelName = 'graphiques'; panelOpen = true; render(); } renderPanel(); loadSource(e.source); }   // son résumé s'ouvre à gauche
-    else if (panelName === 'graphiques' && panelOpen) renderPanel();
+    if (e && e.type === 'chart' && expert) { if (panelName !== famOf(e) || !panelOpen) { panelName = famOf(e); panelOpen = true; render(); } renderPanel(); loadSource(e.source); }   // son résumé s'ouvre à gauche
+    else if (isChartPanel() && panelOpen) renderPanel();
     if (e && e.type === 'list' && expert) {   // les données de la liste s'ouvrent à gauche (§140)
       const reopen = !panelOpen; if (panelName !== 'donnees' || reopen) { panelName = 'donnees'; panelOpen = true; }
       if (e !== was) { dv.ren = null; renderPanel(); loadSource(e.source); }
@@ -767,7 +768,7 @@
     commit(); renderCtx();
     if (e.type === 'qr') fetchQr(e);
     if (e.type === 'list' && expert) { panelName = 'donnees'; panelOpen = true; renderPanel(); }   // ses données s'ouvrent à gauche (§140)
-    if (e.type === 'chart') { if (expert) { panelName = 'graphiques'; panelOpen = true; renderPanel(); } openCd('data'); }   // sa source et ses axes se choisissent aussitôt
+    if (e.type === 'chart') { if (expert) { panelName = famOf(e); panelOpen = true; renderPanel(); } openCd('data'); }   // sa source et ses axes se choisissent aussitôt
     LC().sources({ els: [e] }).forEach(id => loadSource(id));   // bloc, liste reliée, champ glissé depuis le panneau Données
   }
   function lum(hex) {
@@ -801,7 +802,7 @@
     srcBusy[id] = false; srcAt[id] = Date.now();
     srcData[id] = r && r.data ? r.data : { error: (r && r.error) || 'aucune donnée' };
     if (!editing) render();
-    if ((panelName === 'donnees' || panelName === 'graphiques') && panelOpen) renderPanel();
+    if ((panelName === 'donnees' || isChartPanel()) && panelOpen) renderPanel();
     if (cd) drawCd();
     if (q('#ce-pop.ce-fields')) drawFieldMenu();
     if (sheet && sheet.set === id) drawSheet();
@@ -1597,10 +1598,10 @@
         `<button class="ce-tb ${nr ? 'on' : ''}" data-act="lcolors" title="Couleurs des pastilles, des séparateurs et de Oui / Non ; règles de couleur">Couleurs${nr ? ' (' + nr + ')' : ''} ▾</button>`;
     }
     else if (e.type === 'chart') {   // graphique relié : apparence rapide ; données et réglages dans le tiroir
-      const cart = !isOne(e) && !isPart(e);
-      h = `<span class="ce-kind" title="Nom du graphique">${CIC[e.kind]} ${esc(e.name || 'Graphique')}</span>` + sepH + pick('kind', Object.keys(CK).map(k => [k, CK[k][0]]), e.kind, 'Type de graphique') + sepH +
+      const cart = !isOne(e) && !isPart(e) && e.kind !== 'trend';
+      h = `<span class="ce-kind" title="Nom">${CIC[e.kind]} ${esc(e.name || 'Graphique')}</span>` + sepH + pick('kind', kindsOf(famOf(e)).map(k => [k, CK[k][0]]), e.kind, 'Type') + sepH +
         fontSel(e) + sizeNum(e) + colorIn('color', e.color, 'Couleur du texte') + sepH +
-        (isOne(e) ? '' : `<button class="ce-tb ${e.vals !== false ? 'on' : ''}" data-tog="vals" title="Valeurs sur le graphique">Valeurs</button>`) + (cart ? `<button class="ce-tb ${e.grid !== false ? 'on' : ''}" data-tog="grid" title="Grille">Grille</button>` : '') +
+        (isOne(e) || e.kind === 'trend' ? '' : `<button class="ce-tb ${e.vals !== false ? 'on' : ''}" data-tog="vals" title="Valeurs sur le graphique">Valeurs</button>`) + (cart ? `<button class="ce-tb ${e.grid !== false ? 'on' : ''}" data-tog="grid" title="Grille">Grille</button>` : '') +
         '<button class="ce-tb" data-act="cdopen" title="Source, axes, conditions, apparence">◫ Données…</button>';
     }
     else if (e.type === 'qr') h = `<label class="ce-lbl">Lien<input type="text" data-k="url" value="${esc(e.url)}" style="width:240px" maxlength="500"></label>` + colorIn('fg', e.fg, 'Couleur') + colorIn('bg', e.bg, 'Fond');
@@ -1628,7 +1629,7 @@
     const e = cur(); if (!e) return;
     const c = Object.assign(JSON.parse(JSON.stringify(e)), { id: nid(), x: e.x + Math.round(40 * k()), y: e.y + Math.round(40 * k()), locked: false });
     if (c.type === 'list') c.name = nextName(e.name || 'Liste');
-    if (c.type === 'chart') c.name = nextChartName(srcName(e));
+    if (c.type === 'chart') c.name = nextChartName(srcName(e), e.kind);
     D.els.splice(D.els.indexOf(e) + 1, 0, c); selId = c.id; commit(); renderCtx();
   }
   function del() { const e = cur(); if (!e) return; D.els = D.els.filter(x => x !== e); selId = null; commit(); renderCtx(); }
@@ -1737,7 +1738,7 @@
         <div class="ce-wrow soon"><span class="wi" style="background:#8A97A8">⌁</span><span><b>Page web, Facebook</b><small>Ne se posent pas dans une composition</small></span></div>`;
     }
     if (panelName === 'donnees') h = dataPanel();
-    if (panelName === 'graphiques') h = chartPanel();
+    if (isChartPanel()) h = chartPanel();
     p.innerHTML = h;
     if (panelName === 'donnees') bindRename(p);
     if (panelName === 'medias') renderMediaGrid();
@@ -1751,7 +1752,7 @@
       : `<div class="ce-pgrid">${list.map(m => `<button class="ce-photo" draggable="true" data-add="img:${m.id}" title="${esc(m.name)}"><img src="${esc(m.url)}?w=320" alt="" loading="lazy" draggable="false"><span>${esc(m.name)}</span></button>`).join('')}</div>`;
   }
   async function panelClick(ev) {
-    if (panelName === 'graphiques' && chartClick(ev)) return;
+    if (isChartPanel() && chartClick(ev)) return;
     if (panelName === 'donnees' && dataClick(ev)) return;
     const a = ev.target.closest('[data-add]');
     if (a && a.dataset.add.startsWith('field:') && cur() && cur().type === 'text') { insertField(a.dataset.add.slice(6)); return; }   // texte sélectionné : le champ s'y ajoute
@@ -1830,29 +1831,39 @@
   // Un graphique (type « chart ») est relié à un jeu de données : colonne des catégories, une ou plusieurs séries (colonne + calcul), conditions, ordre.
   // Son rendu est celui du player (composition.js, chartHtml) ; ici : ajout, panneau de gauche, tiroir, barre du haut.
   const CK = { bars: ['Barres', 'Comparer des catégories'], hbars: ['Barres horizontales', 'Classements, libellés longs'], line: ['Courbe', 'Évolution dans le temps'], area: ['Aire', 'Évolution et volume'],
-    pie: ['Secteurs', 'Parts d’un tout'], donut: ['Anneau', 'Parts, avec un total au centre'], gauge: ['Jauge', 'Une valeur face à un objectif'], kpi: ['Chiffre clé', 'Un grand nombre et son évolution'] };
+    pie: ['Secteurs', 'Parts d’un tout'], donut: ['Anneau', 'Parts, avec un total au centre'],
+    kpi: ['Chiffre clé', 'Un grand nombre, son évolution, une mini-courbe'], ring: ['Jauge circulaire', 'Un pourcentage en anneau'], gauge: ['Jauge', 'Une valeur sur une échelle'],
+    progress: ['Barre de progression', 'Où l’on en est face à un objectif'], status: ['Pastille de statut', 'Vert, orange, rouge selon des seuils'], trend: ['Mini-courbe', 'Une tendance, sans axes'] };
+  // menu Indicateurs : une seule valeur calculée (ou une tendance) ; menu Graphiques : le reste
+  const IND = ['kpi', 'ring', 'gauge', 'progress', 'status', 'trend'];
+  const famOf = e => IND.includes(e.kind) ? 'indicateurs' : 'graphiques';
+  function isChartPanel() { return panelName === 'graphiques' || panelName === 'indicateurs'; }
+  const kindsOf = fam => Object.keys(CK).filter(k => (fam === 'indicateurs') === IND.includes(k));
+  const FAMW = { graphiques: 'graphique', indicateurs: 'indicateur' };
   const CSV = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
   const CIC = { bars: CSV('<path d="M5 20V11M12 20V4M19 20v-6"/>'), hbars: CSV('<path d="M4 5h9M4 12h16M4 19h6"/>'), line: CSV('<path d="M3 17l5-6 4 3 8-9"/>'), area: CSV('<path d="M3 18l5-7 4 3 8-8v12z"/>'),
-    pie: CSV('<path d="M12 3v9h9"/><circle cx="12" cy="12" r="9"/>'), donut: CSV('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/>'), gauge: CSV('<path d="M4 17a8 8 0 0 1 16 0M12 17l4-5"/>'), kpi: CSV('<path d="M5 18V8l-2 1M10 8h4v10h-4zM17 18h4V8h-4z"/>') };
-  const isOne = e => e.kind === 'gauge' || e.kind === 'kpi', isPart = e => e.kind === 'pie' || e.kind === 'donut', oneSeries = e => isOne(e) || isPart(e) || e.kind === 'hbars';
+    pie: CSV('<path d="M12 3v9h9"/><circle cx="12" cy="12" r="9"/>'), donut: CSV('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/>'), gauge: CSV('<path d="M4 17a8 8 0 0 1 16 0M12 17l4-5"/>'), kpi: CSV('<path d="M5 18V8l-2 1M10 8h4v10h-4zM17 18h4V8h-4z"/>'),
+    ring: CSV('<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 8 8"/>'), progress: CSV('<rect x="3" y="9" width="18" height="6" rx="3"/><path d="M3 12h9"/>'), status: CSV('<circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="9"/>'), trend: CSV('<path d="M3 17l5-6 4 3 8-9"/>') };
+  const isOne = e => ['gauge', 'kpi', 'ring', 'progress', 'status'].includes(e.kind), hasThr = e => ['gauge', 'ring', 'progress', 'status'].includes(e.kind), isPart = e => e.kind === 'pie' || e.kind === 'donut', oneSeries = e => isOne(e) || isPart(e) || e.kind === 'hbars' || e.kind === 'trend';
   const PALN = { ocean: 'Océan', warm: 'Chaude', mono: 'Bleus' };
   const charts = () => D.els.filter(e => e.type === 'chart');
   const chartCols = id => colsOf(id).filter(c => !c.hidden && !autoHidden(id, c));
   const chartSources = () => sources.filter(s => s.app === 'dataset');
   const chartSrc = () => { const c = cur(), id = c && (c.type === 'chart' || c.type === 'list') ? c.source : null; return chartSources().find(s => s.id === id) || chartSources()[0] || null; };
   const seriesFor = id => { const n = chartCols(id).find(c => c.type === 'number'); return n ? [{ key: n.key, agg: 'sum', name: fname(n) }] : [{ key: '', agg: 'count', name: '' }]; };
-  function nextChartName(base) {
-    const used = D.els.filter(x => x.type === 'chart').map(x => x.name), b = String(base || 'Graphique').replace(/ \d+$/, '');
-    let n = 1, nm = 'Graphique · ' + b; while (used.includes(nm)) nm = 'Graphique · ' + b + ' ' + ++n;
+  function nextChartName(base, kind) {
+    const used = D.els.filter(x => x.type === 'chart').map(x => x.name), b = String(base || 'Graphique').replace(/ \d+$/, ''), pre = IND.includes(kind) ? 'Indicateur' : 'Graphique';
+    let n = 1, nm = pre + ' · ' + b; while (used.includes(nm)) nm = pre + ' · ' + b + ' ' + ++n;
     return nm;
   }
   function makeChart(kind, ink) {
-    const s = chartSrc(), id = s.id, cs = chartCols(id), one = kind === 'gauge' || kind === 'kpi', ser = seriesFor(id);
-    const cat = one ? null : (kind === 'line' || kind === 'area' ? cs.find(c => c.type === 'date') : null) || cs.find(c => c.type === 'text' && c.key !== ser[0].key) || cs.find(c => c.type === 'date');
-    const S = { bars: [1000, 640], hbars: [900, 620], line: [1000, 640], area: [1000, 640], pie: [760, 560], donut: [760, 560], gauge: [560, 380], kpi: [560, 300] }[kind];
-    return { id: nid(), type: 'chart', kind, source: id, name: nextChartName(s.name), x: 0, y: 0, w: S[0], h: S[1], cat: cat ? cat.key : '', series: ser, filter: [], order: { by: cat && cat.type === 'date' ? 'cat' : 'source', dir: 'asc' },
-      max: 0, other: false, title: '', legend: isPart({ kind }) ? 'right' : 'bottom', vals: true, grid: true, smooth: false, thick: 38, pal: 'ocean', unit: '', gmin: 0, gmax: 100, thrOn: true, thr: [50, 80], cmp: 'none', target: 0,
-      font: 'IBM Plex Sans', size: one ? 36 : 26, weight: 400, color: ink, align: 'left', ls: 0, lh: 1.2, italic: false, opacity: 1 };
+    const s = chartSrc(), id = s.id, cs = chartCols(id), one = isOne({ kind }), ser = seriesFor(id);
+    const cat = one ? null : (kind === 'line' || kind === 'area' || kind === 'trend' ? cs.find(c => c.type === 'date') : null) || cs.find(c => c.type === 'text' && c.key !== ser[0].key) || cs.find(c => c.type === 'date');
+    const S = { bars: [1000, 640], hbars: [900, 620], line: [1000, 640], area: [1000, 640], pie: [760, 560], donut: [760, 560], gauge: [560, 380], kpi: [560, 300], ring: [420, 380], progress: [900, 220], status: [560, 220], trend: [900, 260] }[kind];
+    const st = kind === 'status';
+    return { id: nid(), type: 'chart', kind, source: id, name: nextChartName(s.name, kind), x: 0, y: 0, w: S[0], h: S[1], cat: cat ? cat.key : '', series: ser, filter: [], order: { by: cat && cat.type === 'date' ? 'cat' : 'source', dir: 'asc' },
+      max: 0, other: false, title: '', legend: isPart({ kind }) ? 'right' : 'bottom', vals: true, grid: true, smooth: false, thick: kind === 'ring' ? 24 : 38, pal: 'ocean', unit: '', gmin: 0, gmax: 100, thrOn: true, thr: st ? [10, 15] : [50, 80], inv: st, rules: ['Normal', 'Attention', 'Critique'], spark: false, cmp: 'none', target: 0,
+      font: 'IBM Plex Sans', size: kind === 'kpi' || kind === 'gauge' ? 36 : one || kind === 'trend' ? 30 : 26, weight: 400, color: ink, align: 'left', ls: 0, lh: 1.2, italic: false, opacity: 1 };
   }
   /** Aperçu d'un type dans la galerie : dessin simplifié sur le fond sombre de la vignette. */
   function chartPreview(t) {
@@ -1865,7 +1876,11 @@
       pie: `<path d="${arc(0, -1.57, 1)}" fill="${c}"/><path d="${arc(0, 1, 3.6)}" fill="${g}"/><path d="${arc(0, 3.6, 4.71)}" fill="${o}"/>`,
       donut: `<path d="${arc(13, -1.57, 1)}" fill="${c}"/><path d="${arc(13, 1, 3.6)}" fill="${g}"/><path d="${arc(13, 3.6, 4.71)}" fill="${o}"/>`,
       gauge: `<path d="M20 44A26 26 0 0 1 72 44" fill="none" stroke="rgba(255,255,255,.2)" stroke-width="10"/><path d="M20 44A26 26 0 0 1 64 25" fill="none" stroke="${g}" stroke-width="10"/>`,
-      kpi: '<text x="46" y="38" text-anchor="middle" font-size="26" font-weight="500" fill="#fff">15 6</text>'
+      kpi: `<text x="10" y="34" font-size="20" font-weight="500" fill="#fff">15 600</text><path d="M10 48L26 42 42 45 58 36 72 40 84 30" fill="none" stroke="${c}" stroke-width="2.5"/>`,
+      ring: `<circle cx="46" cy="28" r="18" fill="none" stroke="rgba(255,255,255,.18)" stroke-width="9"/><path d="M46 10A18 18 0 1 1 29 34" fill="none" stroke="${g}" stroke-width="9"/>`,
+      progress: `<rect x="10" y="22" width="72" height="12" rx="6" fill="rgba(255,255,255,.18)"/><rect x="10" y="22" width="52" height="12" rx="6" fill="${g}"/>`,
+      status: `<circle cx="46" cy="28" r="20" fill="${g}" opacity=".25"/><circle cx="46" cy="28" r="12" fill="${g}"/>`,
+      trend: `<path d="M8 40L22 28 36 34 52 14 62 20 84 8V50H8z" fill="${c}" opacity=".3"/><path d="M8 40L22 28 36 34 52 14 62 20 84 8" fill="none" stroke="${c}" stroke-width="3"/>`
     };
     return `<svg viewBox="0 0 92 56">${m[t]}</svg>`;
   }
@@ -1875,29 +1890,34 @@
   };
   function chartPanel() {
     const e = cur(), ce = e && e.type === 'chart' ? e : null, ds = chartSources();
+    const fam = ce ? famOf(ce) : panelName, ind = fam === 'indicateurs', W1 = FAMW[fam], T1 = ind ? 'Indicateurs' : 'Graphiques', ks = kindsOf(fam), mine = charts().filter(x => famOf(x) === fam);
     if (!ce) {
-      return `<div class="ce-ph"><b>Graphiques</b></div>
-        ${ds.length ? '' : '<div class="ce-note" style="margin-bottom:10px">Aucun jeu de données. Branchez une API, une base ou un fichier dans <a href="/datasources" target="_blank" rel="noopener">Sources de données</a> pour tracer un graphique.</div>'}
-        <div class="ce-grp" style="margin-top:0">Ajouter un graphique<small>${Object.keys(CK).length} types</small></div>
-        <div class="ce-ctypes${ds.length ? '' : ' off'}">${Object.keys(CK).map(k => `<button class="ce-ctile" ${ds.length ? 'draggable="true"' : 'disabled'} data-add="chart:${k}" title="Glissez sur la page, ou cliquez"><span class="pv">${chartPreview(k)}</span><b>${CK[k][0]}</b><small>${CK[k][1]}</small></button>`).join('')}</div>
-        <p class="ce-help">Après l'ajout, le graphique se relie à une source : choisissez la source, la colonne des catégories et celle des valeurs.</p>
-        ${charts().length ? `<div class="ce-grp">Sur cette page<small>${charts().length}</small></div>` + charts().map(x => `<button class="ce-lst" data-csel="${x.id}"><span class="g">${CIC[x.kind]}</span><span class="t"><b>${esc(x.name || 'Graphique')}</b><small>${CK[x.kind][0]} · ${esc(srcName(x))}</small></span><span class="chev">›</span></button>`).join('') : ''}`;
+      return `<div class="ce-ph"><b>${T1}</b></div>
+        ${ds.length ? '' : `<div class="ce-note" style="margin-bottom:10px">Aucun jeu de données. Branchez une API, une base ou un fichier dans <a href="/datasources" target="_blank" rel="noopener">Sources de données</a> pour poser un ${W1}.</div>`}
+        <div class="ce-grp" style="margin-top:0">Ajouter un ${W1}<small>${ks.length} types</small></div>
+        <div class="ce-ctypes${ds.length ? '' : ' off'}">${ks.map(k => `<button class="ce-ctile" ${ds.length ? 'draggable="true"' : 'disabled'} data-add="chart:${k}" title="Glissez sur la page, ou cliquez"><span class="pv">${chartPreview(k)}</span><b>${CK[k][0]}</b><small>${CK[k][1]}</small></button>`).join('')}</div>
+        <p class="ce-help">${ind ? 'Après l\'ajout, l\'indicateur se relie à une source : colonne, calcul (somme, moyenne, dernière valeur…) et lignes prises en compte. Il se met à jour tout seul.' : 'Après l\'ajout, le graphique se relie à une source : choisissez la source, la colonne des catégories et celle des valeurs.'}</p>
+        ${mine.length ? `<div class="ce-grp">Sur cette page<small>${mine.length}</small></div>` + mine.map(x => `<button class="ce-lst" data-csel="${x.id}"><span class="g">${CIC[x.kind]}</span><span class="t"><b>${esc(x.name || 'Graphique')}</b><small>${CK[x.kind][0]} · ${esc(srcName(x))}</small></span><span class="chev">›</span></button>`).join('') : ''}`;
     }
     const d = srcData[ce.source], pal = PALN[ce.pal] || PALN.ocean;
-    return `<div class="ce-ph"><b>Graphiques</b><button class="ce-link" data-csel="none" style="margin:0">‹ Tous les types</button></div>
+    return `<div class="ce-ph"><b>${T1}</b><button class="ce-link" data-csel="none" style="margin:0">‹ Tous les types</button></div>
       <div class="ce-lcard"><div class="lch"><span class="g">${CIC[ce.kind]}</span><div><small>${CK[ce.kind][0]}</small><b>${esc(ce.name || 'Graphique')}</b></div></div>
         <div class="lsrc">${wi(LC().SRC.dataset)}<span>Relié à <b>${esc(srcName(ce))}</b></span></div>
         <button class="ce-srow" data-cdopen="data"><span class="k">Données</span><span class="v">${esc(dataLine(ce))}<small>${ready(ce) ? (() => { const cd = LC().chartData(d, ce, opts()); return isOne(ce) ? cd.rows + ' ligne' + (cd.rows > 1 ? 's' : '') : cd.cats.length + ' point' + (cd.cats.length > 1 ? 's' : ''); })() : 'lecture des données…'}${(ce.filter || []).length ? ' · ' + (ce.filter || []).length + ' condition' + ((ce.filter || []).length > 1 ? 's' : '') : ''}</small></span><span class="chev">›</span></button>
-        <button class="ce-srow" data-cdopen="look"><span class="k">Apparence</span><span class="v">${isOne(ce) ? (ce.kind === 'gauge' && ce.thrOn !== false ? 'Seuils de couleur · ' + (ce.thr || [50, 80]).join(' % et ') + ' %' : 'Texte seul') : 'Légende ' + ({ none: 'masquée', bottom: 'en bas', right: 'à droite' }[ce.legend || 'bottom']) + (ce.vals !== false ? ' · valeurs affichées' : '')}<small>Palette ${esc(pal)}</small></span><span class="chev">›</span></button></div>
+        <button class="ce-srow" data-cdopen="look"><span class="k">Apparence</span><span class="v">${ce.kind === 'trend' ? 'Courbe pleine' + (ce.fillArea === false ? ' sans aire' : ' avec aire') : isOne(ce) ? (hasThr(ce) && ce.thrOn !== false ? 'Seuils de couleur · ' + (ce.thr || [50, 80]).join(ce.kind === 'status' ? ' et ' : ' % et ') + (ce.kind === 'status' ? '' : ' %') + (ce.inv ? ' · plus bas = mieux' : '') : ce.kind === 'kpi' ? 'Mini-courbe ' + (ce.spark ? 'visible' : 'masquée') : 'Texte seul') : 'Légende ' + ({ none: 'masquée', bottom: 'en bas', right: 'à droite' }[ce.legend || 'bottom']) + (ce.vals !== false ? ' · valeurs affichées' : '')}<small>Palette ${esc(pal)}</small></span><span class="chev">›</span></button></div>
       ${d && d.error ? `<div class="ce-note" style="margin-top:10px">Données indisponibles : ${esc(d.error)}</div>` : ''}
-      <button class="ce-btn ce-wide" data-cdopen="data" style="margin-top:12px">Modifier le graphique</button>
-      <div class="ce-grp">Changer de type</div><div class="ce-cmini">${Object.keys(CK).map(k => `<button class="${ce.kind === k ? 'on' : ''}" data-ckind="${k}" title="${CK[k][0]}" aria-label="${CK[k][0]}">${CIC[k]}</button>`).join('')}</div>
+      <button class="ce-btn ce-wide" data-cdopen="data" style="margin-top:12px">Modifier l${ind ? '’indicateur' : 'e graphique'}</button>
+      <div class="ce-grp">Changer de type</div><div class="ce-cmini">${ks.map(k => `<button class="${ce.kind === k ? 'on' : ''}" data-ckind="${k}" title="${CK[k][0]}" aria-label="${CK[k][0]}">${CIC[k]}</button>`).join('')}</div>
       <p class="ce-help">Les données et les réglages sont gardés quand on change de type, dans la mesure où le nouveau type les utilise.</p>
       <button class="ce-link" data-cdup="1" style="margin-top:12px">⧉ Dupliquer « ${esc(ce.name || 'Graphique')} »</button>`;
   }
-  function changeKind(e, kind) {
-    e.kind = kind;
+  function changeKind(e, kind, prev) {
+    const was = prev || e.kind; e.kind = kind;
     if (isPart(e) && !(e.legend && e.legend !== 'none')) e.legend = 'right';
+    if (kind === 'status' && was !== 'status') { e.thr = [10, 15]; e.inv = true; if (!e.rules) e.rules = ['Normal', 'Attention', 'Critique']; }
+    if (was === 'status' && kind !== 'status') { e.thr = [50, 80]; e.inv = false; }
+    if (kind === 'ring' && !e.thick) e.thick = 24;
+    if (kind === 'trend' && !e.cat) { const c = chartCols(e.source).find(x => x.type === 'date') || chartCols(e.source).find(x => x.type === 'text'); if (c) e.cat = c.key; }
   }
   /** Clics du panneau Graphiques ; true si traité. */
   function chartClick(ev) {
@@ -1908,7 +1928,7 @@
     if (g('[data-cdup]') && e && e.type === 'chart') { dup(); renderPanel(); return true; }
     return false;
   }
-  const afterChart = () => { renderCtx(); if (panelName === 'graphiques' && panelOpen) renderPanel(); if (cd) drawCd(); };
+  const afterChart = () => { renderCtx(); if (isChartPanel() && panelOpen) renderPanel(); if (cd) drawCd(); };
 
   // tiroir « Modifier le graphique » : la page montre le résultat en direct, rien n'est gardé avant « Appliquer »
   // état : cd = { id, tab: data|look, was: le graphique à l'ouverture (JSON), warn }
@@ -1926,9 +1946,9 @@
     if (e && changed && !apply) { const b = JSON.parse(cd.was); Object.keys(e).forEach(x => delete e[x]); Object.assign(e, b); }
     cd = null; drawCd();
     if (changed && apply) commit(); else render();
-    renderCtx(); if (panelName === 'graphiques' && panelOpen) renderPanel();
+    renderCtx(); if (isChartPanel() && panelOpen) renderPanel();
   }
-  function cdLive() { if (!cd) return; cd.warn = false; render(); drawCd(); if (panelName === 'graphiques' && panelOpen) renderPanel(); }
+  function cdLive() { if (!cd) return; cd.warn = false; render(); drawCd(); if (isChartPanel() && panelOpen) renderPanel(); }
   function cdWarn() { cd.warn = true; drawCd(); const f = q('#ce-cd .ce-ldf'); if (f) { f.classList.remove('shake'); void f.offsetWidth; f.classList.add('shake'); } }
   function cdGuard(ev) {
     if (!cd || !root) return;
@@ -1945,9 +1965,10 @@
     const catList = [['', one ? '(aucun regroupement)' : '(tout ensemble)']].concat(cs.map(c => [c.key, fname(c) + (fgroup(c) ? ' · ' + fgroup(c) : '')]));
     const fOpts = v => opt(cs.filter(c => true).map(c => [c.key, fname(c) + (fgroup(c) ? ' · ' + fgroup(c) : '')]), v);
     const ser = e.series || [];
-    let h = `<p class="ce-lead">${one ? (e.kind === 'kpi' ? 'Un chiffre calculé à partir d’une colonne de la source, comparé à une période précédente.' : 'Une valeur calculée à partir d’une colonne, comparée à un minimum et un maximum.') : 'Choisissez la source, puis ce qui va sur chaque axe. Le graphique se met à jour tout seul quand la source change.'}</p>
+    const trend = e.kind === 'trend';
+    let h = `<p class="ce-lead">${one ? ({ kpi: 'Un chiffre calculé à partir d’une colonne de la source, comparé à une période précédente.', progress: 'Une valeur calculée à partir d’une colonne, comparée à un objectif.', status: 'Une valeur calculée à partir d’une colonne, dont la couleur et le texte suivent des règles.' }[e.kind] || 'Une valeur calculée à partir d’une colonne, comparée à un minimum et un maximum.') : trend ? 'Une courbe sans axes : un point par valeur de la colonne choisie, calculé à partir d’une colonne.' : 'Choisissez la source, puis ce qui va sur chaque axe. Le graphique se met à jour tout seul quand la source change.'}</p>
       <span class="ce-lbl3" style="margin-top:0">Source</span>${selList('data-cd="src" aria-label="Source"', chartSources().map(s => [s.id, s.name]).concat(chartSources().some(s => s.id === e.source) ? [] : [[e.source, 'Jeu introuvable']]), e.source)}
-      <span class="ce-lbl3">${one ? 'Regrouper par (facultatif)' : part ? 'Parts (une par…)' : 'Catégories (axe horizontal)'}</span>${selList('data-cd="cat" aria-label="Colonne des catégories"', catList, e.cat || '')}
+      <span class="ce-lbl3">${one ? 'Regrouper par (facultatif)' : part ? 'Parts (une par…)' : trend ? 'Un point par…' : 'Catégories (axe horizontal)'}</span>${selList('data-cd="cat" aria-label="Colonne des catégories"', catList, e.cat || '')}
       <p class="ce-help">${one ? 'Avec un regroupement (par mois, par jour…), la valeur affichée est celle du dernier groupe, comparée à l’avant-dernier.' : part ? 'Une part pour chaque valeur différente de cette colonne.' : 'Une barre (ou un point) pour chaque valeur différente de cette colonne. Les lignes identiques sont regroupées.'}</p>
       <span class="ce-lbl3">${one ? 'Valeur' : part ? 'Valeur à répartir' : 'Valeurs (axe vertical)'}</span>`;
     ser.forEach((s, i) => {
@@ -1988,9 +2009,15 @@
     }
     if (e.kind === 'kpi') h += `<span class="ce-lbl3">Comparaison</span><div class="ce-opts">${[['prev', 'Avec la période précédente', e.cat ? 'avant-dernier groupe' : 'choisissez un regroupement'], ['target', 'Avec un objectif fixe', ''], ['none', 'Aucune', '']].map(([v, t, s]) => `<button class="ce-opt2${(e.cmp || 'none') === v ? ' on' : ''}" data-cdcmp="${v}"><span class="rd"></span><b>${t}</b><span>${s}</span></button>`).join('')}</div>` +
       (e.cmp === 'target' ? `<div style="margin-top:8px"><small class="ce-mut">Objectif</small><input class="ce-lname sm" data-cd="target" data-t="n" value="${esc(e.target || '')}" placeholder="ex. 14000" aria-label="Objectif"></div>` : '');
-    if (e.kind === 'gauge') h += `<span class="ce-lbl3">Échelle</span><div class="ce-cduo two"><label><small>Minimum</small><input class="ce-lname sm" data-cd="gmin" data-t="n" value="${esc(e.gmin == null ? 0 : e.gmin)}" aria-label="Minimum"></label><label><small>Maximum</small><input class="ce-lname sm" data-cd="gmax" data-t="n" value="${esc(e.gmax == null ? 100 : e.gmax)}" aria-label="Maximum"></label></div>
-      <label class="ce-chk" style="margin-top:8px"><input type="checkbox" data-cd="thrOn" ${e.thrOn !== false ? 'checked' : ''}><span>Colorer selon des seuils</span></label>` +
-      (e.thrOn !== false ? `<div class="ce-cduo two" style="margin-top:6px"><label><small>Rouge sous (% de l'échelle)</small><input class="ce-lname sm" data-cd="thr:0" data-t="n" value="${esc((e.thr || [50, 80])[0])}" aria-label="Seuil bas"></label><label><small>Vert à partir de (%)</small><input class="ce-lname sm" data-cd="thr:1" data-t="n" value="${esc((e.thr || [50, 80])[1])}" aria-label="Seuil haut"></label></div>` : '');
+    if (e.kind === 'gauge' || e.kind === 'ring') h += `<span class="ce-lbl3">Échelle</span><div class="ce-cduo two"><label><small>Minimum</small><input class="ce-lname sm" data-cd="gmin" data-t="n" value="${esc(e.gmin == null ? 0 : e.gmin)}" aria-label="Minimum"></label><label><small>Maximum</small><input class="ce-lname sm" data-cd="gmax" data-t="n" value="${esc(e.gmax == null ? 100 : e.gmax)}" aria-label="Maximum"></label></div>`;
+    if (e.kind === 'progress') h += `<span class="ce-lbl3">Objectif</span><input class="ce-lname sm" data-cd="target" data-t="n" value="${esc(e.target || '')}" placeholder="ex. 80000" aria-label="Objectif"><p class="ce-help">La barre se remplit jusqu’à cette valeur. Sans objectif, l’échelle va jusqu’à 100.</p>`;
+    if (e.kind === 'status') {
+      const thr = e.thr || [10, 15], rl = e.rules || ['Normal', 'Attention', 'Critique'], cl = [e.cHigh || '#1E8E5A', e.cMid || '#E0A030', e.cLow || '#C8372D'], inv = !!e.inv;
+      const row = (i, c, w, tv) => `<div class="ce-cser" style="grid-template-columns:26px 1fr 70px 90px"><span class="sw" style="background:${c}"></span><input class="ce-lname sm" data-cd="rules:${i}" value="${esc(rl[i] || '')}" maxlength="20" aria-label="Texte de la règle"><span class="ce-mut">${w}</span>${tv}</div>`;
+      const tin = i => `<input class="ce-lname sm" data-cd="thr:${i}" data-t="n" value="${esc(thr[i])}" aria-label="Seuil">`;
+      h += `<span class="ce-lbl3">Règles (sur la valeur)</span>` + (inv ? row(0, cl[0], 'jusqu’à', tin(0)) + row(1, cl[1], 'jusqu’à', tin(1)) + row(2, cl[2], 'au-delà', '<span></span>')
+        : row(0, cl[0], 'à partir de', tin(1)) + row(1, cl[1], 'à partir de', tin(0)) + row(2, cl[2], 'en dessous', '<span></span>')) + '<p class="ce-help">Le texte de la règle s’affiche à côté de la pastille. Réglez le sens (plus haut ou plus bas = mieux) dans Apparence.</p>';
+    }
     // ce que le graphique reçoit
     if (ok) {
       const cdta = LC().chartData(d, e, opts()), nf = e.nf, all = []; cdta.series.forEach(s => s.vals.forEach(v => { if (v != null) all.push(v); }));
@@ -2003,7 +2030,7 @@
     return h;
   }
   function cdLook(e) {
-    const one = isOne(e), part = isPart(e), ln = e.kind === 'line' || e.kind === 'area', d = srcData[e.source], all = [];
+    const one = isOne(e) || e.kind === 'trend', part = isPart(e), ln = e.kind === 'line' || e.kind === 'area', d = srcData[e.source], all = [];
     if (ready(e)) LC().chartData(d, e, opts()).series.forEach(s => s.vals.forEach(v => { if (v != null) all.push(v); }));
     const chk = (k, on, t) => `<label class="ce-chk"><input type="checkbox" data-cd="${k}" ${on ? 'checked' : ''}><span>${t}</span></label>`, P = LC().PALS;
     let h = `<p class="ce-lead">Ce qui s'affiche autour des données. La police, la taille et la couleur du texte se règlent dans la barre au-dessus de la page.</p>
@@ -2011,8 +2038,15 @@
       <p class="ce-help">${one ? 'Laissez vide pour afficher le nom de la colonne.' : 'Laissez vide pour ne pas afficher de titre.'}</p>`;
     if (!one) h += `<span class="ce-lbl3">Légende</span><span class="ce-dirseg">${[['none', 'Aucune'], ['bottom', 'En bas'], ['right', 'À droite']].map(([v, t]) => `<button data-cdleg="${v}" class="${(e.legend || 'bottom') === v ? 'on' : ''}">${t}</button>`).join('')}</span>`;
     h += `<span class="ce-lbl3">Palette</span><div class="ce-opts">${Object.keys(PALN).map(k => `<button class="ce-opt2${(e.pal || 'ocean') === k ? ' on' : ''}" data-cdpal="${k}"><span class="rd"></span><b>${PALN[k]}</b><span class="ce-sws">${P[k].slice(0, 4).map(c => `<i style="background:${c}"></i>`).join('')}</span></button>`).join('')}</div>`;
+    if (e.kind === 'kpi') h += `<span class="ce-lbl3">Afficher</span>${chk('spark', !!e.spark, 'Une mini-courbe (nécessite un regroupement dans Données)')}`;
+    if (e.kind === 'trend') h += `<span class="ce-lbl3">Afficher</span>${chk('fillArea', e.fillArea !== false, 'L’aire sous la courbe')}`;
+    if (hasThr(e)) {
+      const lw = e.kind === 'status' ? 'la valeur' : 'l’échelle';
+      h += `<span class="ce-lbl3">Couleurs</span>` + (e.kind === 'status' ? '' : chk('thrOn', e.thrOn !== false, 'Colorer selon des seuils') + (e.thrOn !== false ? `<div class="ce-cduo two" style="margin-top:6px"><label><small>${e.inv ? 'Vert jusqu’à' : 'Rouge sous'} (% de ${lw})</small><input class="ce-lname sm" data-cd="thr:${e.inv ? 1 - 1 : 0}" data-t="n" value="${esc((e.thr || [50, 80])[0])}" aria-label="Premier seuil"></label><label><small>${e.inv ? 'Rouge au-delà de' : 'Vert à partir de'} (%)</small><input class="ce-lname sm" data-cd="thr:1" data-t="n" value="${esc((e.thr || [50, 80])[1])}" aria-label="Second seuil"></label></div>` : ''))
+        + chk('inv', !!e.inv, 'Plus bas = mieux (temps d’attente, erreurs, stock bas…)');
+    }
     if (!one) h += `<span class="ce-lbl3">Afficher</span>${chk('vals', e.vals !== false, part ? 'Les pourcentages sur le graphique' : 'Les valeurs sur le graphique')}${part ? '' : chk('grid', e.grid !== false, 'La grille')}${ln ? chk('smooth', !!e.smooth, 'Courbe lissée') : ''}`;
-    if (e.kind === 'donut') h += `<span class="ce-lbl3">Épaisseur de l'anneau</span><input type="range" min="15" max="75" step="1" data-cd="thick" data-t="n" value="${e.thick || 38}" style="width:100%" aria-label="Épaisseur de l'anneau">`;
+    if (e.kind === 'donut' || e.kind === 'ring') h += `<span class="ce-lbl3">Épaisseur de l'anneau</span><input type="range" min="${e.kind === 'ring' ? 8 : 15}" max="${e.kind === 'ring' ? 60 : 75}" step="1" data-cd="thick" data-t="n" value="${e.thick || (e.kind === 'ring' ? 24 : 38)}" style="width:100%" aria-label="Épaisseur de l'anneau">`;
     if (one || e.kind === 'donut') h += `<span class="ce-lbl3">Unité affichée</span><input class="ce-lname sm" id="ce-cdunit" data-cd="unit" value="${esc(e.unit || '')}" maxlength="12" placeholder="ex. %, repas, CHF" aria-label="Unité"><p class="ce-help">Écrite après la valeur. Pour une monnaie, utilisez plutôt le format ci-dessous.</p>`;
     return h + nfBlock(e.nf, [...new Set(all)].slice(0, 2), LC().numDec(all), false) + '<p class="ce-help">Mêmes réglages que pour les colonnes et les champs : décimales, séparateur de milliers, monnaie.</p>';
   }
@@ -2022,8 +2056,9 @@
     if (!cd || !e) { if (box) box.remove(); if (cd && !e) cd = null; return; }
     if (!box) { box = document.createElement('div'); box.id = 'ce-cd'; q('.ce-center').appendChild(box); bindCd(box); }
     const ae = document.activeElement, keep = ae && box.contains(ae) && ae.id, ss = keep && ae.selectionStart, missing = !sources.some(s => s.id === e.source), d = srcData[e.source];
-    box.innerHTML = `<div class="ce-ldr" style="width:${ldW()}px" role="dialog" aria-label="Modifier le graphique">
-      <div class="ce-ldh"><div class="top1"><span class="g">${CIC[e.kind]}</span><div class="nm"><small>Modifier le graphique · ${CK[e.kind][0]}</small><input class="ce-ldname" id="ce-cdname" data-cd="name" value="${esc(e.name || '')}" maxlength="60" placeholder="Nom du graphique" aria-label="Nom du graphique"></div>
+    const fw = IND.includes(e.kind) ? 'indicateur' : 'graphique';
+    box.innerHTML = `<div class="ce-ldr" style="width:${ldW()}px" role="dialog" aria-label="Modifier l${fw === 'indicateur' ? '’indicateur' : 'e graphique'}">
+      <div class="ce-ldh"><div class="top1"><span class="g">${CIC[e.kind]}</span><div class="nm"><small>Modifier l${fw === 'indicateur' ? '’indicateur' : 'e graphique'} · ${CK[e.kind][0]}</small><input class="ce-ldname" id="ce-cdname" data-cd="name" value="${esc(e.name || '')}" maxlength="60" placeholder="Nom de l${fw === 'indicateur' ? '’indicateur' : 'e graphique'}" aria-label="Nom"></div>
         <span class="src">Source : ${missing ? '<b>Jeu introuvable</b>' : `<b>${esc(srcName(e))}</b>`}</span></div>
         <div class="ce-ltabs"><button data-cdtab="data" class="${cd.tab === 'data' ? 'on' : ''}">Données</button><button data-cdtab="look" class="${cd.tab === 'look' ? 'on' : ''}">Apparence</button></div></div>
       <div class="ce-ldb">${!d ? '<div class="ce-empty">Lecture des données…</div>' : !ready(e) ? `<div class="ce-note">Données indisponibles : ${esc(d.error || 'aucune colonne')}</div>` : cd.tab === 'data' ? cdData(e) : cdLook(e)}</div>
@@ -2046,6 +2081,7 @@
     else if (p[0] === 'f') { const f = (e.filter || [])[+p[1]]; if (f) f[p[2]] = v; }
     else if (name === 'orderby') e.order = Object.assign({ dir: 'asc' }, e.order, { by: v });
     else if (name === 'thr:0' || name === 'thr:1') { e.thr = (e.thr || [50, 80]).slice(); e.thr[+p[1]] = v; }
+    else if (p[0] === 'rules') { e.rules = (e.rules || ['Normal', 'Attention', 'Critique']).slice(); e.rules[+p[1]] = v; }
     else e[name] = v;
   }
   function bindCd(box) {
@@ -2060,7 +2096,7 @@
     on(box, 'change', ev => {   // listes et cases : le tiroir se redessine
       const r = live(ev); if (!r) return;
       if (r.t.tagName === 'SELECT' || r.t.type === 'checkbox') { cdSet(r.e, r.t.dataset.cd, r.t.value, r.t); cdLive(); }
-      else { renderCtx(); if (panelName === 'graphiques' && panelOpen) renderPanel(); }
+      else { renderCtx(); if (isChartPanel() && panelOpen) renderPanel(); }
     });
     on(box, 'click', ev => {
       const g = s => ev.target.closest(s), e = cdEl(); if (!cd || !e) return;

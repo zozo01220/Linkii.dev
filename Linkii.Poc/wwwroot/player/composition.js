@@ -621,7 +621,7 @@
   function gaugeSvg(e, v, name, w, h, fs, F) {
     var mn = num(e.gmin, 0, -1e9, 1e9), mx = num(e.gmax, 100, -1e9, 1e9); if (mx <= mn) mx = mn + 1;
     var f = Math.min(1, Math.max(0, ((v == null ? mn : v) - mn) / (mx - mn))), thr = e.thr || [50, 80], on = e.thrOn !== false;
-    var color = !on ? (PALS[e.pal] || PALS.ocean)[0] : f * 100 < num(thr[0], 50, 0, 100) ? col(e.cLow, '#C8372D') : f * 100 < num(thr[1], 80, 0, 100) ? col(e.cMid, '#E0A030') : col(e.cHigh, '#1E8E5A');
+    var color = !on ? (PALS[e.pal] || PALS.ocean)[0] : thrCol(e, f * 100);
     var cy = h * .68, r = Math.max(20, Math.min(w / 2 - fs * 1.5, cy - fs * .5)), cx = w / 2, a1 = Math.PI + f * Math.PI;
     var g = '<path d="' + arcPath(cx, cy, r * .78, r, Math.PI, 2 * Math.PI) + '" fill="currentColor" fill-opacity=".14"/>';
     if (f > 0) g += '<path d="' + arcPath(cx, cy, r * .78, r, Math.PI, f >= 1 ? 2 * Math.PI - .0001 : a1) + '" fill="' + color + '"/>';
@@ -629,6 +629,57 @@
     if (name) g += svgT(cx, cy + fs * 1.6, name, fs, 'middle', ' opacity=".75"');
     g += svgT(cx - r * .89, cy + fs * 1.1, F(mn), fs * .8, 'middle', ' opacity=".6"') + svgT(cx + r * .89, cy + fs * 1.1, F(mx), fs * .8, 'middle', ' opacity=".6"');
     return g;
+  }
+  /** Couleur selon les seuils e.thr (deux valeurs) : vert / orange / rouge, inversés si e.inv (« plus bas = mieux »). */
+  function thrCol(e, x) {
+    var thr = e.thr || [50, 80], a = num(thr[0], 50, -1e9, 1e9), b = num(thr[1], 80, -1e9, 1e9), lo = col(e.cLow, '#C8372D'), mi = col(e.cMid, '#E0A030'), hi = col(e.cHigh, '#1E8E5A');
+    if (e.inv) return x <= a ? hi : x <= b ? mi : lo;
+    return x < a ? lo : x < b ? mi : hi;
+  }
+  /** Tracé d'une mini-courbe (sans axes) dans une boîte x, y, w, h ; vals peut contenir des null. */
+  function sparkPath(vals, x, y, w, h) {
+    var ns = vals.filter(function (v) { return v != null; }); if (ns.length < 2) return null;
+    var mx = Math.max.apply(null, ns), mn = Math.min.apply(null, ns), n = vals.length, P = [];
+    vals.forEach(function (v, i) { if (v != null) P.push([x + w * i / (n - 1), y + h - h * (v - mn) / ((mx - mn) || 1)]); });
+    return { d: 'M' + P.map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join('L'), last: P[P.length - 1], x: x, y: y, w: w, h: h };
+  }
+  /** Jauge circulaire : anneau rempli entre gmin et gmax, valeur au centre. */
+  function ringSvg(e, v, name, w, h, fs, F) {
+    var mn = num(e.gmin, 0, -1e9, 1e9), mx = num(e.gmax, 100, -1e9, 1e9); if (mx <= mn) mx = mn + 1;
+    var f = Math.min(1, Math.max(0, ((v == null ? mn : v) - mn) / (mx - mn))), on = e.thrOn !== false, color = !on ? (PALS[e.pal] || PALS.ocean)[0] : thrCol(e, f * 100);
+    var lab = name ? fs * 1.8 : 0, cx = w / 2, cy = (h - lab) / 2, r = Math.max(20, Math.min(w / 2 - fs * .5, cy - fs * .3)), ri = r * (1 - num(e.thick, 24, 8, 60) / 100);
+    var g = '<path d="' + arcPath(cx, cy, ri, r, -Math.PI / 2, 1.5 * Math.PI - .0001) + '" fill="currentColor" fill-opacity=".14"/>';
+    if (f > 0) g += '<path d="' + arcPath(cx, cy, ri, r, -Math.PI / 2, f >= 1 ? 1.5 * Math.PI - .0002 : -Math.PI / 2 + f * 2 * Math.PI) + '" fill="' + color + '"/>';
+    g += svgT(cx, cy + ri * .22, v == null ? '—' : F(v) + (e.unit ? ' ' + e.unit : ''), ri * .6, 'middle', ' font-weight="600"');
+    if (name) g += svgT(cx, h - fs * .5, name, fs, 'middle', ' opacity=".75"');
+    return g;
+  }
+  /** Barre de progression face à un objectif (e.target, sinon gmax). */
+  function progressSvg(e, v, name, w, h, fs, F) {
+    var goal = +e.target > 0 ? +e.target : num(e.gmax, 100, 1, 1e12), f = v == null ? 0 : Math.max(0, v / goal), on = e.thrOn !== false, color = !on ? (PALS[e.pal] || PALS.ocean)[0] : thrCol(e, f * 100);
+    var bh = Math.max(10, fs * 1.3), by = h / 2 - bh / 2 + fs * .2, pad = fs * .6, bw = w - pad * 2, u = e.unit ? ' ' + e.unit : '';
+    var g = svgT(pad, by - fs * .9, name, fs * 1.1) + svgT(w - pad, by - fs * .9, (v == null ? '—' : F(v) + u) + ' / ' + F(goal) + u, fs * 1.1, 'end', ' opacity=".8"');
+    g += '<rect x="' + pad + '" y="' + by.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + bh.toFixed(1) + '" rx="' + (bh / 2).toFixed(1) + '" fill="currentColor" fill-opacity=".14"/>';
+    if (f > 0) g += '<rect x="' + pad + '" y="' + by.toFixed(1) + '" width="' + Math.max(bh, bw * Math.min(f, 1)).toFixed(1) + '" height="' + bh.toFixed(1) + '" rx="' + (bh / 2).toFixed(1) + '" fill="' + color + '"/>';
+    if (v != null) g += svgT(pad, by + bh + fs * 1.5, Math.round(f * 100) + ' % de l\'objectif' + (f < 1 ? ' · il reste ' + F(goal - v) + u : ''), fs * .9, 'start', ' opacity=".75"');
+    return g;
+  }
+  /** Pastille de statut : couleur et mot selon deux seuils sur la valeur (e.rules : trois textes). */
+  function statusSvg(e, v, name, w, h, fs, F) {
+    var thr = e.thr || [10, 15], a = num(thr[0], 10, -1e9, 1e9), b = num(thr[1], 15, -1e9, 1e9), rl = e.rules || ['Normal', 'Attention', 'Critique'], rank, c;
+    if (v == null) { c = '#8A97A8'; rank = -1; } else { c = thrCol(e, v); rank = e.inv ? (v <= a ? 0 : v <= b ? 1 : 2) : (v < a ? 2 : v < b ? 1 : 0); }
+    var r = Math.min(h * .3, w * .12), cx = r * 1.6, cy = h / 2, tx = cx + r * 1.7;
+    return '<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="' + (r * 1.45).toFixed(1) + '" fill="' + c + '" fill-opacity=".22"/><circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="' + r.toFixed(1) + '" fill="' + c + '"/>'
+      + (name ? svgT(tx, cy - fs * .5, name, fs, 'start', ' opacity=".75"') : '') + svgT(tx, cy + fs * 1.5, rank < 0 ? '—' : rl[rank] || '', fs * 2.2, 'start', ' font-weight="600"')
+      + (v == null ? '' : svgT(w - fs * .6, cy + fs * 1.5, F(v) + (e.unit ? ' ' + e.unit : ''), fs * 1.6, 'end', ' opacity=".75"'));
+  }
+  /** Mini-courbe : la série de la 1re valeur, sans axes, dernière valeur en haut à droite. */
+  function trendSvg(e, cd, name, w, h, fs, F) {
+    var vals = cd.series[0].vals, last = null; vals.forEach(function (v) { if (v != null) last = v; });
+    var top = fs * 2.4, sp = sparkPath(vals, fs * .6, top + fs * .5, w - fs * 1.2, h - top - fs * 1.2), g = svgT(fs * .6, fs * 1.6, name, fs, 'start', ' opacity=".75"') + (last == null ? '' : svgT(w - fs * .6, fs * 1.9, F(last) + (e.unit ? ' ' + e.unit : ''), fs * 1.7, 'end', ' font-weight="600"'));
+    if (!sp) return g;
+    var c = (PALS[e.pal] || PALS.ocean)[0];
+    return g + (e.fillArea !== false ? '<path d="' + sp.d + 'L' + (sp.x + sp.w) + ',' + (sp.y + sp.h) + 'L' + sp.x + ',' + (sp.y + sp.h) + 'Z" fill="' + c + '" fill-opacity=".25"/>' : '') + '<path d="' + sp.d + '" fill="none" stroke="' + c + '" stroke-width="' + Math.max(2, fs * .17).toFixed(1) + '" stroke-linejoin="round" stroke-linecap="round"/><circle cx="' + sp.last[0].toFixed(1) + '" cy="' + sp.last[1].toFixed(1) + '" r="' + Math.max(3, fs * .26).toFixed(1) + '" fill="' + c + '"/>';
   }
   /** Valeur d'une jauge ou d'un chiffre clé : calcul de la 1re série ; avec une colonne de regroupement, la dernière valeur (et l'avant-dernière pour comparer). */
   function singleValue(d, e, o) {
@@ -642,20 +693,25 @@
     if (!d || d.error) return wait('▦ ' + esc(s ? s.name : 'Jeu de données') + (d && d.error ? '<br>Données indisponibles' : o.player ? '' : '<br>Chargement des données…'));
     var W = num(e.w, 600, 10, 1e5), H = num(e.h, 400, 10, 1e5), fs = num(e.size, 26, 8, 400), K = e.kind;
     if (!(e.series || []).length) return wait('Choisissez les données du graphique');
-    if (K === 'gauge' || K === 'kpi') {
+    if (K === 'gauge' || K === 'kpi' || K === 'ring' || K === 'progress' || K === 'status') {
       var sv = singleValue(d, e, o); if (!sv) return wait('Choisissez les données du graphique');
       var all = []; sv.cd.series[0].vals.forEach(function (x) { if (x != null) all.push(x); });
       var F = function (v) { return numFmt(v, e.nf, numDec(all)); }, name = e.title || sv.name;
-      if (K === 'gauge') return '<div class="lc-ch" style="' + st + '"><svg viewBox="0 0 ' + W + ' ' + H + '" font-family="inherit">' + gaugeSvg(e, sv.v, name, W, H, fs, F) + '</svg></div>';
+      var one = { gauge: gaugeSvg, ring: ringSvg, progress: progressSvg, status: statusSvg }[K];
+      if (one) return '<div class="lc-ch" style="' + st + '"><svg viewBox="0 0 ' + W + ' ' + H + '" font-family="inherit">' + one(e, sv.v, name, W, H, fs, F) + '</svg></div>';
       var dl = '';
       if (e.cmp === 'prev' && sv.v != null && sv.prev) { var pc = (sv.v - sv.prev) / Math.abs(sv.prev) * 100; dl = '<div class="dl" style="color:' + (pc > 0 ? '#1E8E5A' : pc < 0 ? '#C8372D' : 'inherit') + '">' + (pc > 0 ? '▲ ' : pc < 0 ? '▼ ' : '') + numFmt(Math.abs(pc), { dec: 1 }) + ' %<span>par rapport à la période précédente</span></div>'; }
       else if (e.cmp === 'target' && sv.v != null && +e.target) dl = '<div class="dl">' + Math.round(sv.v / e.target * 100) + ' %<span>de l\'objectif · ' + esc(numFmt(+e.target, e.nf)) + '</span></div>';
-      return '<div class="lc-ch lc-kpi" style="' + st + '"><div class="l">' + esc(name) + '</div><div class="v" style="font-size:' + (fs * 2.6) + 'px">' + (sv.v == null ? '—' : esc(F(sv.v)) + (e.unit ? '<small> ' + esc(e.unit) + '</small>' : '')) + '</div>' + dl + '</div>';
+      var sk = e.spark && sv.cd.cats.length > 1 ? sparkPath(sv.cd.series[0].vals, 2, 4, 96, 32) : null, sc0 = (PALS[e.pal] || PALS.ocean)[0];
+      if (sk) dl += '<svg viewBox="0 0 100 40" preserveAspectRatio="none" style="position:absolute;right:5%;bottom:14%;width:38%;height:38%;overflow:visible"><path d="' + sk.d + 'L98,36L2,36Z" fill="' + sc0 + '" fill-opacity=".25"/><path d="' + sk.d + '" fill="none" stroke="' + sc0 + '" stroke-width="3" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>';
+      return '<div class="lc-ch lc-kpi" style="position:relative;' + st + '"><div class="l">' + esc(name) + '</div><div class="v" style="font-size:' + (fs * 2.6) + 'px">' + (sv.v == null ? '—' : esc(F(sv.v)) + (e.unit ? '<small> ' + esc(e.unit) + '</small>' : '')) + '</div>' + dl + '</div>';
     }
     var cd = chartData(d, e, o);
     if (!cd.series.length) return wait('Choisissez les données du graphique');
     if (!cd.cats.length) return wait(esc(e.empty || 'Aucune ligne à afficher'));
-    var body = chartSvg(e, cd, o, W, H, fs);
+    var body;
+    if (K === 'trend') { var tall = []; cd.series[0].vals.forEach(function (x) { if (x != null) tall.push(x); }); body = trendSvg(e, cd, e.title || cd.series[0].name, W, H, fs, function (v) { return numFmt(v, e.nf, numDec(tall)); }); }
+    else body = chartSvg(e, cd, o, W, H, fs);
     if (body == null) return wait('Aucune valeur à répartir');
     return '<div class="lc-ch" style="' + st + '"><svg viewBox="0 0 ' + W + ' ' + H + '" font-family="inherit">' + body + '</svg></div>';
   }
