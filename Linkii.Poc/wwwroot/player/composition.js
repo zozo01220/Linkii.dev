@@ -349,6 +349,7 @@
       if (isFinite(ms)) {
         if (c.fmt === 'rel') return relTime(ms);
         if (c.fmt === 'time' && !m) return hm(ms, tz);
+        if (c.fmt === 'dt' && !m) { try { return new Date(ms).toLocaleDateString('fr-CH', tzo({ day: 'numeric', month: 'short' }, tz)) + ' ' + hm(ms, tz); } catch (x) { return dayKey(ms, tz) + ' ' + hm(ms, tz); } }
         try { return new Date(ms).toLocaleDateString('fr-CH', tzo({ day: 'numeric', month: 'short' }, tz)); } catch (x) { return dayKey(ms, tz); }
       }
     }
@@ -380,19 +381,22 @@
     var cms = {};   // début et fin communs, calculés sur toutes les lignes gardées (pas seulement la page affichée)
     cols.forEach(function (c) { if ((c.pre || c.suf) && !cms[c.key]) { var i = colIdx(d, c.key); cms[c.key] = common(all.map(function (r) { return fmt(r[i], colOf(d, c.key).type, o.tz); })); } });
     function val(c, r) { var cc = colOf(d, c.key); return cellText(r[colIdx(d, c.key)], c, cc.type, o.tz, cms[c.key]); }
+    // alignement d'une colonne : le même pour son titre et ses valeurs ; une pastille sans alignement choisi reste à droite, une image à gauche (§141)
+    function side(c) { return c.align ? align(c.align) : c.as === 'pill' ? 'right' : 'left'; }
+    function self(c) { var a = side(c); return a === 'right' ? 'end' : a === 'center' ? 'center' : 'start'; }
     function boolCol(c, r) { var cc = colOf(d, c.key), v = r[colIdx(d, c.key)]; return cc.type === 'bool' ? col(v === 'true' ? c.yc : v === 'false' ? c.nc : '', '') : ''; }
     function row(r) {
       var rc = rule(r), pill = false, h = '';
       groups.forEach(function (g) {
-        var c = g.c, al = 'text-align:' + align(c.align), bc = boolCol(c, r);
-        if (c.as === 'image') { var u = safeUrl(r[colIdx(d, c.key)]); h += '<span class="lc-li"' + (u ? ' style="background-image:url(\'' + esc(u) + '\')"' : '') + '></span>'; return; }
-        if (c.as === 'pill') { pill = true; h += '<span class="lc-lp" style="background:' + (rc || bc || accent) + '">' + esc(val(c, r)) + '</span>'; return; }
+        var c = g.c, al = 'text-align:' + side(c), bc = boolCol(c, r);
+        if (c.as === 'image') { var u = safeUrl(r[colIdx(d, c.key)]); h += '<span class="lc-li" style="justify-self:' + self(c) + (u ? ';background-image:url(\'' + esc(u) + '\')' : '') + '"></span>'; return; }
+        if (c.as === 'pill') { pill = true; h += '<span class="lc-lp" style="justify-self:' + self(c) + ';background:' + (rc || bc || accent) + '">' + esc(val(c, r)) + '</span>'; return; }
         h += '<span class="lc-lt" style="' + al + (bc && !rc ? ';color:' + bc : '') + '">' + esc(val(c, r)) + g.sub.map(function (x) { return '<small style="text-align:' + align(x.align) + '">' + esc(val(x, r)) + '</small>'; }).join('') + '</span>';
       });
       return '<div class="lc-lr" style="grid-template-columns:' + grid + ';height:' + rowH + 'px;' + line + (rc && !pill ? 'color:' + rc + ';' : '') + '">' + h + '</div>';
     }
     var head = e.head ? '<div class="lc-lh" style="grid-template-columns:' + grid + ';height:' + headH + 'px">' + groups.map(function (g) {
-      var cc = colOf(d, g.c.key); return '<span data-lh="' + (e.cols || []).indexOf(g.c) + '" style="text-align:' + (g.c.as === 'pill' ? 'right' : align(g.c.align)) + '">' + esc(g.c.label || cc.label || cc.key) + '</span>';
+      var cc = colOf(d, g.c.key); return '<span data-lh="' + (e.cols || []).indexOf(g.c) + '" style="text-align:' + side(g.c) + '">' + esc(g.c.label || cc.label || cc.key) + '</span>';
     }).join('') + '</div>' : '';
     var body, mode = e.page === 'scroll' || e.page === 'cut' ? e.page : 'pages', sec = num(e.sec, 8, 2, 120);
     if (mode === 'cut' || all.length <= n) body = '<div class="lc-pg">' + all.slice(0, n).map(row).join('') + '</div>';
