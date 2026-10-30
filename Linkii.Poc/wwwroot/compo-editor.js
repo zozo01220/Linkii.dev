@@ -28,6 +28,7 @@
   let sheet = null, canEditData = false;   // tableau en grand, droit de renommer les champs d'un jeu
   let ld = null;   // tiroir « Modifier la liste » (§141) : { id, tab: cols|rows, sub: colonne réglée ou null, was: la liste à l'ouverture (JSON), keep: conditions mises de côté, warn, flash, drag }
   let fp = null;   // fenêtre « Choisir des champs » (§141) : { mode: multi|one, for: cols|col|text, src, sel: [clés], q, row, all }
+  let fd = null;   // tiroir « Format du champ » d'un texte (§142) : { id: le texte, n: n-ième champ du texte, was: texte à l'ouverture }
   let previewScreen = '';   // « Cet écran » (§139) : écran dont les paramètres servent à l'aperçu (vide : le premier qui en a)
   const q = s => root.querySelector(s);
   const cur = () => D.els.find(e => e.id === selId) || null;
@@ -142,7 +143,7 @@
     images = o.images || [];
     sources = o.sources || []; srcData = {}; srcBusy = {}; srcAt = {}; names = false;
     myTpl = o.myTemplates || []; canImport = !!o.canImport; canEditData = !!o.canEditData; tplTab = 'galerie';
-    dv = { view: 'sources', set: null, row: 0, open: new Set(['@used']), hidden: false, q: '', ren: null }; sheet = null; ld = null; fp = null;
+    dv = { view: 'sources', set: null, row: 0, open: new Set(['@used']), hidden: false, q: '', ren: null }; sheet = null; ld = null; fp = null; fd = null;
     name = savedName = o.name || 'Composition';
     let doc = null;
     try { doc = o.doc ? JSON.parse(o.doc) : null; } catch (x) { doc = null; }
@@ -265,8 +266,8 @@
 
   function render() {
     if (!root) return;
-    q('#ce-area').style.right = ld ? ldW() + 'px' : '';   // tiroir de la liste ouvert : la page se range à sa gauche (§141)
-    q('#ce-ctx').style.display = ld ? 'none' : '';
+    q('#ce-area').style.right = ld || fd ? drW() + 'px' : '';   // tiroir de la liste ou du champ ouvert : la page se range à sa gauche (§141, §142)
+    q('#ce-ctx').style.display = ld || fd ? 'none' : '';
     const A = q('#ce-area').getBoundingClientRect();
     const fit = Math.max(.02, Math.min((A.width - 80) / D.w, (A.height - 110) / D.h));
     z = fit * zoom;
@@ -482,7 +483,7 @@
     on(document, 'pointerdown', ev => { const p = q('#ce-pop'); if (p && !p.contains(ev.target) && !ev.target.closest('[data-top],[data-act]')) closePop(); }, true);
     on(document, 'pointerdown', ldGuard, true);
     on(document, 'keydown', keys);
-    on(w, 'resize', () => { render(); drawLd(); });
+    on(w, 'resize', () => { render(); drawLd(); drawFd(); });
     on(w, 'beforeunload', ev => { if (isDirty()) { ev.preventDefault(); ev.returnValue = ''; } });
   }
 
@@ -548,6 +549,7 @@
   function keys(ev) {
     if (!root) return;
     if (fp) { if (ev.key === 'Escape') { fp = null; drawFp(); } return; }   // fenêtre de choix des champs (§141)
+    if (fd && ev.key === 'Escape') { closeFd(); return; }
     if (ld) {   // tiroir de la liste : Échap ferme le 2e tiroir, puis le tiroir s'il n'y a rien à appliquer
       const mod = ev.ctrlKey || ev.metaKey;
       if (ev.key === 'Escape') { if (ld.sub != null) { ld.sub = null; drawLd(); render(); } else if (ldDirty()) ldWarn(); else closeLd(false); }
@@ -578,6 +580,7 @@
   // ---------- sélection, ajout ----------
   function select(id) {
     if (ld && ld.id !== id) closeLd(false);
+    if (fd && fd.id !== id) closeFd();
     const was = cur(); selId = id; const e = cur();
     drawOverlay(); renderLayers(); renderCtx(); markList();
     if (e && e.type === 'list') {   // les données de la liste s'ouvrent à gauche (§140)
@@ -990,9 +993,16 @@
   function cellOut(e, c, kept, r) {
     const d = srcData[e.source], i = d && d.columns ? d.columns.findIndex(x => x.key === c.key) : -1, row = r || kept[0];
     if (i < 0 || !row) return '';
-    return LC().cellText(row[i], c, typeOf(e, c.key), undefined, c.pre || c.suf ? LC().common(colValues(e, c.key, kept)) : null);
+    const t = typeOf(e, c.key), cm = t === 'number' ? { nd: LC().numDec(rawVals(e, c.key, kept)) } : c.pre || c.suf ? LC().common(colValues(e, c.key, kept)) : null;
+    return LC().cellText(row[i], c, t, undefined, cm);
+  }
+  /** Valeurs brutes (non mises en forme) d'une colonne pour les lignes données. */
+  function rawVals(e, key, rows) {
+    const d = srcData[e.source], i = d && d.columns ? d.columns.findIndex(c => c.key === key) : -1;
+    return i < 0 ? [] : (rows || keptRows(e)).map(r => r[i]);
   }
   function howText(c, t) {
+    if (t === 'number') return nfDesc(c.nf);
     if (t === 'date') return { time: 'heure', rel: 'relatif', dt: 'jour et heure', day: 'jour' }[c.fmt] || 'automatique';
     if (t === 'bool') return (c.yes || 'Oui') + ' / ' + (c.no || 'Non');
     return (t === 'text' || t === 'link') && (c.pre || c.suf || c.space || (c.map || []).length) ? 'valeur raccourcie' : 'valeur reçue';
@@ -1027,20 +1037,97 @@
       <p class="ce-help" style="margin-top:20px">Ici, seulement les données : quelles colonnes, quelles lignes. L'apparence (police, couleurs, lignes à la fois) se règle dans la barre au-dessus de la page.</p>`;
   }
   /** Champs reliés d'un texte : [[source, clé]]. */
-  function textFields(e) { const out = [], re = new RegExp(LC().TOKEN.source, 'g'); let m; while ((m = re.exec(String(e.text || '')))) out.push([m[1], m[2]]); return out; }
+  function textFields(e) { const out = [], re = new RegExp(LC().TOKEN.source, 'g'); let m; while ((m = re.exec(String(e.text || '')))) out.push([m[1], m[2], m[3] || '']); return out; }
   function fieldLabel(id, key) {
     const s = sources.find(x => x.id === id); if (!s) return key;
+    if (key === '_count') return 'Nombre de lignes';
     if (s.app === 'dataset') return keyName(id, key.replace(/^(r\d+|sum|avg|min|max)\./, ''));
     const f = LC().fields(s.app, srcData[id]).find(x => x.key === key); return f ? f.label : key;
   }
   /** Panneau de gauche quand un texte est sélectionné : ses champs, et « Insérer un champ… ». */
   function textPanel(e) {
-    const fs = textFields(e), shown = String(e.text || '').replace(new RegExp(LC().TOKEN.source, 'g'), (x, id, key) => LC().fieldText(id, key, opts({ names: false }), e.fb || '—'));
+    const fs = textFields(e), shown = String(e.text || '').replace(new RegExp(LC().TOKEN.source, 'g'), (x, id, key, nfs) => LC().fieldText(id, key, opts({ names: false }), e.fb || '—', nfs));
     return `<div class="ce-ph"><b>Données</b></div>
       <div class="ce-lcard"><div class="lch"><span class="g">T</span><div><small>Texte sélectionné</small><b>${esc(shown.length > 120 ? shown.slice(0, 120) + '…' : shown)}</b></div></div>
-        <div class="ce-srow static"><span class="k">Champs</span><span class="v">${fs.length ? '<span class="ce-tchips">' + fs.map(([id, key]) => `<span>${esc(fieldLabel(id, key))}</span>`).join('') + '</span>' : 'Aucun : le texte est fixe.'}</span><span></span></div></div>
+        <div class="ce-srow static"><span class="k">Champs</span><span class="v">${fs.length ? '<span class="ce-tchips">' + fs.map(([id, key, nfs], n) => isNumField(id, key) ? `<button class="ce-chipf${fd && fd.n === n ? ' on' : ''}" data-fdchip="${n}" title="Régler le format de ce nombre">${esc(fieldLabel(id, key))}<span class="f">${esc(LC().fieldText(id, key, opts({ names: false }), e.fb || '—', nfs))}</span><span>⚙</span></button>` : `<span>${esc(fieldLabel(id, key))}</span>`).join('') + '</span>' + (fs.some(x => isNumField(x[0], x[1])) ? '<small>Cliquez un nombre pour régler son format</small>' : '') : 'Aucun : le texte est fixe.'}</span><span></span></div></div>
       <button class="ce-btn ghost ce-wide" data-fptext="1" style="margin-top:10px" ${sources.length ? '' : 'disabled'}>+ Insérer un champ…</button>
       <p class="ce-help" style="margin-top:18px">${sources.length ? 'Un champ affiche une valeur de la source à la place du texte fixe. Sur l\'écran, elle se met à jour seule.' : 'Aucune source : ajoutez un jeu de données (Sources de données) ou une intégration (Météo, Calendrier partagé, Flux RSS, Capteurs).'}</p>`;
+  }
+
+  // ---------- format des nombres (§142, maquette formats-nombres.html) : le même bloc pour une colonne de liste et pour un champ de texte ----------
+  const NF_PRE = [['nb', 'Nombre', {}], ['int', 'Entier', { dec: 0 }], ['chf', 'Montant CHF', { dec: 2, cur: 'CHF' }], ['eur', 'Montant €', { dec: 2, cur: 'EUR' }], ['usd', 'Montant $', { dec: 2, cur: 'USD' }]];
+  const nfDesc = nf => { nf = nf || {}; return [nf.dec === 0 || nf.dec > 0 ? nf.dec + ' décimale' + (nf.dec > 1 ? 's' : '') : 'décimales auto', nf.th === false ? 'sans milliers' : 'milliers', nf.cur || ''].filter(Boolean).join(' · '); };
+  /** Champ d'un jeu de données qui est un nombre (colonne nombre, « Nombre de lignes », somme, moyenne…) : seuls ceux-là ont un format. */
+  function isNumField(id, key) {
+    const s = sources.find(x => x.id === id); if (!s || s.app !== 'dataset') return false;
+    if (key === '_count' || /^(sum|avg|min|max)\./.test(key)) return true;
+    const c = colsOf(id).find(x => x.key === key.replace(/^r\d+\./, ''));
+    return !!c && c.type === 'number';
+  }
+  /** Nouveau format après un clic du bloc : [genre, valeur] vient des attributs data-nfp / nfd / nfth / nfc / nfpos. */
+  function nfAct(ev) {
+    const x = ev.target.closest('[data-nfp],[data-nfd],[data-nfth],[data-nfc],[data-nfpos]'); if (!x) return null;
+    const d = x.dataset, k = ['nfp', 'nfd', 'nfth', 'nfc', 'nfpos'].find(n => n in d);
+    return [k, d[k]];
+  }
+  function nfApply(nf, [k, v]) {
+    let o = Object.assign({}, nf || {});
+    if (k === 'nfp') o = Object.assign({}, NF_PRE.find(p => p[0] === v)[2]);
+    else if (k === 'nfd') { if (v === 'auto') delete o.dec; else o.dec = +v; }
+    else if (k === 'nfth') { if (o.th === false) delete o.th; else o.th = false; }
+    else if (k === 'nfc') { if (v) o.cur = v; else { delete o.cur; delete o.pos; } }
+    else if (k === 'nfpos') { if (v === 'before') o.pos = 'before'; else delete o.pos; }
+    return o;
+  }
+  /** Le bloc « Format du nombre » : formats prêts à l'emploi, décimales, milliers, monnaie, exemples. vals : valeurs reçues d'exemple ; nd : décimales d'une colonne en automatique. */
+  function nfBlock(nf, vals, nd, column) {
+    const L = LC(), f = nf || {}, cur = L.nfString(f), v0 = vals.length ? vals[0] : 1250.5, fm = (n, g) => L.numFmt(n, g, nd);
+    const seg = (k, list, v) => '<span class="ce-dirseg">' + list.map(([a, b]) => `<button data-${k}="${a}" class="${String(a) === String(v) ? 'on' : ''}">${b}</button>`).join('') + '</span>';
+    const dec = f.dec === 0 || f.dec > 0 ? f.dec : 'auto';
+    return `<span class="ce-lbl3">Format du nombre</span><div class="ce-nfpre">${NF_PRE.map(([id, t, g]) => `<button class="ce-pre${L.nfString(g) === cur ? ' on' : ''}" data-nfp="${id}">${t}<small>${esc(fm(v0, g))}</small></button>`).join('')}</div>
+      <span class="ce-lbl3">Décimales</span>${seg('nfd', [['auto', 'Automatique'], [0, '0'], [1, '1'], [2, '2'], [3, '3']], dec)}
+      <p class="ce-hintline">${dec === 'auto' ? (column ? 'Automatique : toute la colonne a le même nombre de décimales (2 s\'il y en a), pour que les montants restent alignés.' : 'Automatique : aucune décimale pour un nombre entier, 2 sinon.') : 'Toujours ' + dec + ' décimale' + (dec > 1 ? 's' : '') + ' (arrondi).'}</p>
+      <span class="ce-lbl3">Milliers</span><button class="ce-sw${f.th === false ? '' : ' on'}" data-nfth="1"><span class="tg"></span><span><b>Séparer les milliers</b><small>15000 s'écrit 15’000</small></span></button>
+      <span class="ce-lbl3">Monnaie</span>${seg('nfc', [['', 'Aucune'], ['CHF', 'CHF'], ['EUR', 'Euro €'], ['USD', 'Dollar $']], f.cur || '')}
+      ${f.cur ? '<div style="margin-top:8px">' + seg('nfpos', [['after', 'Après : ' + fm(1250.5, { dec: 2, cur: f.cur })], ['before', 'Avant : ' + fm(1250.5, { dec: 2, cur: f.cur, pos: 'before' })]], f.pos === 'before' ? 'before' : 'after') + '</div>' : ''}
+      <div class="ce-ex"><div class="t">Exemples</div>${(vals.length ? vals : [1250.5]).slice(0, 2).map(n => `<div class="r"><s>reçu : ${esc(String(n))}</s><b>${esc(fm(n, f))}</b></div>`).join('')}</div>`;
+  }
+  // tiroir « Format du champ » : s'ouvre depuis un nombre du panneau Données d'un texte ; le texte se met à jour en direct, gardé à la fermeture
+  const drW = () => fd && !ld ? Math.min(ldW(), 520) : ldW();
+  const fdEl = () => fd && byId(fd.id);
+  function openFd(n) {
+    const e = cur(); if (!e || e.type !== 'text') return;
+    if (!fd || fd.id !== e.id) fd = { id: e.id, n, was: e.text };
+    fd.n = n; render(); drawFd(); renderPanel(); renderCtx();
+  }
+  function closeFd() {
+    if (!fd) return;
+    const e = fdEl(), changed = e && e.text !== fd.was;
+    fd = null; drawFd();
+    if (changed) commit(); else render();
+    renderCtx(); if (panelName === 'donnees' && panelOpen) renderPanel();
+  }
+  function drawFd() {
+    if (!root) return;
+    let box = q('#ce-fd'); const e = fdEl(), f = e && textFields(e)[fd.n];
+    if (!fd || !e || !f) { if (box) box.remove(); if (fd && (!e || !f)) fd = null; return; }
+    if (!box) { box = document.createElement('div'); box.id = 'ce-fd'; q('.ce-center').appendChild(box); bindFd(box); }
+    const [id, key, nfs] = f, nf = LC().parseNf(nfs), d = srcData[id], n = d && !d.error ? LC().tableNumber(d, key) : null, nm = fieldLabel(id, key);
+    box.innerHTML = `<div class="ce-ldr" style="width:${drW()}px" role="dialog" aria-label="Format du champ"><div class="ce-subh"><div><button class="sback" data-fdx="1">‹ Retour au texte</button><h3>Format du champ « ${esc(nm)} »</h3></div></div>
+      <div class="ce-ldb"><div class="ce-fcard"><span class="ty">12</span><div class="t"><b>${esc(nm)}</b><small>${esc(key)}</small></div></div>${nfBlock(nf, n == null ? [] : [n], undefined, false)}</div>
+      <div class="ce-ldf"><span class="note">Ce format ne change que ce champ, dans ce texte.</span><button class="ce-btn" data-fdx="1">OK</button></div></div>`;
+  }
+  function bindFd(box) {
+    on(box, 'click', ev => {
+      const e = fdEl(); if (!fd || !e) return;
+      if (ev.target.closest('[data-fdx]')) { closeFd(); return; }
+      const a = nfAct(ev); if (!a) return;
+      const f = textFields(e)[fd.n]; if (!f) return;
+      const nfs = LC().nfString(nfApply(LC().parseNf(f[2]), a));
+      let i = 0;
+      e.text = String(e.text || '').replace(new RegExp(LC().TOKEN.source, 'g'), (m, id, key) => i++ === fd.n ? '{{' + id + ':' + key + (nfs ? '|' + nfs : '') + '}}' : m);
+      render(); drawFd(); renderPanel();
+    });
   }
 
   // tiroir « Modifier la liste » : la page montre le résultat en direct, rien n'est gardé avant « Appliquer »
@@ -1182,6 +1269,9 @@
         <div class="ce-ynr"><span class="ce-yn y">Oui</span><span>→</span><input class="ce-lname sm" id="ce-ldyes" data-ldct="yes" value="${esc(c.yes || '')}" placeholder="Oui" maxlength="40" aria-label="Texte à la place de Oui"></div>
         <div class="ce-ynr"><span class="ce-yn n">Non</span><span>→</span><input class="ce-lname sm" id="ce-ldno" data-ldct="no" value="${esc(c.no || '')}" placeholder="Non" maxlength="40" aria-label="Texte à la place de Non"></div>
         <p class="ce-help" style="margin:2px 0 0">Les couleurs se règlent dans la barre au-dessus de la page (Couleurs).</p>`;
+    } else if (f.type === 'number') {
+      const raw = rawVals(e, c.key, kept).map(parseFloat).filter(isFinite);
+      b += nfBlock(c.nf, [...new Set(raw)].slice(0, 2), LC().numDec(raw), true);
     } else b += '<p class="ce-help">Rien d\'autre à régler pour ce champ.</p>';
     const al = c.align || (c.as === 'pill' ? 'right' : 'left');
     return b + `<span class="ce-lbl3">Alignement</span><span class="ce-dirseg">${[['left', 'Gauche'], ['center', 'Centre'], ['right', 'Droite']].map(([v, t]) => `<button data-ldal="${v}" class="${al === v ? 'on' : ''}">${t}</button>`).join('')}</span>
@@ -1199,6 +1289,7 @@
       if (g('[data-ldadd]')) { openFp('multi', 'cols'); return; }
       if (g('[data-ldchg]')) { openFp('one', 'col'); return; }
       if ((x = g('[data-ldfmt]')) && c) { c.fmt = x.dataset.ldfmt; ldLive(); return; }
+      const na = c && nfAct(ev); if (na) { const nf = nfApply(c.nf, na); if (LC().nfString(nf) || Object.keys(nf).length) c.nf = nf; else delete c.nf; ldLive(); return; }
       if ((x = g('[data-ldal]')) && c) { c.align = x.dataset.ldal; ldLive(); return; }
       if ((x = g('[data-ldmdel]')) && c) { c.map.splice(+x.dataset.ldmdel, 1); ldLive(); return; }
       if ((x = g('[data-ldq]'))) { const qf = quickField(e); if (qf) { e.filter = (e.filter || []).filter(f => !(f.key === qf.key && (f.op || 'eq') === 'eq')); e.filter.unshift({ key: qf.key, op: 'eq', val: x.dataset.ldq }); ldLive(); } return; }
@@ -1339,7 +1430,7 @@
       const c = e.cols[ld.sub], nc = cs.find(x => x.key === f.sel[0]), old = c && cs.find(x => x.key === c.key);
       if (c && nc) {
         if (!c.label || (old && c.label === fname(old))) c.label = fname(nc);
-        c.key = nc.key; delete c.pre; delete c.suf; delete c.map;
+        c.key = nc.key; delete c.pre; delete c.suf; delete c.map; delete c.nf;
         if (nc.type === 'date' && !c.fmt) c.fmt = 'time';
         boolColors(c, nc);
       }
@@ -1365,6 +1456,7 @@
     if ((x = g('[data-sheet]'))) { openSheet(x.dataset.sheet); return true; }
     if ((x = g('[data-sel]'))) { select(x.dataset.sel); return true; }
     if (g('[data-fptext]')) { openFp('one', 'text'); return true; }
+    if ((x = g('[data-fdchip]'))) { openFd(+x.dataset.fdchip); return true; }
     if (!e || e.type !== 'list') return false;
     if ((x = g('[data-ldopen]'))) { if (ld) { ld.tab = x.dataset.ldopen; ld.sub = null; drawLd(); render(); } else openLd(x.dataset.ldopen); return true; }
     if (g('[data-ldadd]')) { openFp('multi', 'cols'); return true; }

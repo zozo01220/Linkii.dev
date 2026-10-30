@@ -120,7 +120,39 @@
   var SCREEN = '5c2ee0005c2e4e00a000000000000000';
   function colIdx(d, key) { var c = (d && d.columns) || []; for (var i = 0; i < c.length; i++) if (c[i].key === key) return i; return -1; }
   function colOf(d, key) { var i = colIdx(d, key); return i < 0 ? null : d.columns[i]; }
-  function fmtNum(n) { try { return n.toLocaleString('fr-CH', { maximumFractionDigits: 2 }); } catch (x) { return String(Math.round(n * 100) / 100); } }
+  /* Nombres (§142) : milliers séparés (15’000), virgule décimale, symbole monétaire facultatif. nf = { dec: 'auto' | 0..3, th: false (sans séparateur de milliers),
+     cur: CHF | EUR | USD, pos: 'before' (CHF 16,90 ; sinon 16,90 CHF) } ; nd : décimales communes d'une colonne en automatique, sinon 0 pour un entier et 2 sinon. */
+  var CUR = { CHF: 'CHF', EUR: '€', USD: '$' };
+  function numFmt(n, nf, nd) {
+    nf = nf || {};
+    var d = nf.dec === 0 || nf.dec > 0 ? Math.min(3, +nf.dec) : (nd != null ? nd : (n % 1 === 0 ? 0 : 2)), s = Math.abs(n).toFixed(d), p = s.split('.');
+    var i = nf.th === false ? p[0] : p[0].replace(/\B(?=(\d{3})+(?!\d))/g, '’');
+    s = (n < 0 && +s !== 0 ? '-' : '') + i + (p[1] ? ',' + p[1] : '');
+    var c = CUR[nf.cur];
+    return c ? (nf.pos === 'before' ? c + ' ' + s : s + ' ' + c) : s;
+  }
+  function fmtNum(n) { return numFmt(n); }
+  /** Décimales d'une colonne en automatique : 0 si toutes ses valeurs sont entières, sinon 2 pour toutes (les montants restent alignés). */
+  function numDec(vs) { for (var i = 0; i < vs.length; i++) { var n = parseFloat(vs[i]); if (isFinite(n) && n % 1 !== 0) return 2; } return 0; }
+  /** Format d'un champ de texte, écrit après « | » dans le jeton : « d2,t0,cCHF,pb » (décimales, sans milliers, monnaie, symbole avant). */
+  function parseNf(s) {
+    var nf = {};
+    String(s || '').split(',').forEach(function (p) {
+      var m;
+      if ((m = /^d(auto|[0-3])$/.exec(p))) { if (m[1] !== 'auto') nf.dec = +m[1]; }
+      else if (p === 't0') nf.th = false;
+      else if ((m = /^c(CHF|EUR|USD)$/.exec(p))) nf.cur = m[1];
+      else if (p === 'pb') nf.pos = 'before';
+    });
+    return nf;
+  }
+  function nfString(nf) {
+    var a = [];
+    if (nf && (nf.dec === 0 || nf.dec > 0)) a.push('d' + nf.dec);
+    if (nf && nf.th === false) a.push('t0');
+    if (nf && CUR[nf.cur]) { a.push('c' + nf.cur); if (nf.pos === 'before') a.push('pb'); }
+    return a.join(',');
+  }
   /** Valeur d'une cellule mise en forme selon le type de sa colonne. */
   function fmt(v, type, tz) {
     if (v == null || v === '') return '';
@@ -183,20 +215,29 @@
     return rows;
   }
   /** Valeur d'un champ d'un jeu de données (null : pas de valeur). */
-  function tableField(d, key, tz) {
+  function tableField(d, key, tz, nf) {
+    var rows = d.rows || [], nn = tableNumber(d, key);
+    if (nn != null) return nf ? numFmt(nn, nf) : fmtNum(nn);   // nombre, avec le format du champ (§142)
+    var r = /^r(\d+)\.(.+)$/.exec(key), n = r ? +r[1] - 1 : 0, c = colOf(d, r ? r[2] : key);
+    if (!c || !rows[n]) return null;
+    return fmt(rows[n][colIdx(d, c.key)], c.type, tz);
+  }
+  /** Valeur numérique d'un champ d'un jeu (« _count », « sum.col », « r2.col » d'une colonne nombre…) ; null si ce n'est pas un nombre. */
+  function tableNumber(d, key) {
     var rows = d.rows || [];
-    if (key === '_count') return '' + rows.length;
+    if (key === '_count') return rows.length;
     var m = /^(sum|avg|min|max)\.(.+)$/.exec(key);
     if (m) {
       var i = colIdx(d, m[2]); if (i < 0) return null;
       var ns = rows.map(function (r) { return parseFloat(r[i]); }).filter(isFinite);
       if (!ns.length) return null;
       var v = m[1] === 'sum' || m[1] === 'avg' ? ns.reduce(function (a, b) { return a + b; }, 0) : m[1] === 'min' ? Math.min.apply(null, ns) : Math.max.apply(null, ns);
-      return fmtNum(m[1] === 'avg' ? v / ns.length : v);
+      return m[1] === 'avg' ? v / ns.length : v;
     }
     var r = /^r(\d+)\.(.+)$/.exec(key), n = r ? +r[1] - 1 : 0, c = colOf(d, r ? r[2] : key);
-    if (!c || !rows[n]) return null;
-    return fmt(rows[n][colIdx(d, c.key)], c.type, tz);
+    if (!c || c.type !== 'number' || !rows[n]) return null;
+    var x = parseFloat(rows[n][colIdx(d, c.key)]);
+    return isFinite(x) ? x : null;
   }
   /** Nom d'un champ d'un jeu (mode « Noms des champs ») ; src : données reçues, ou la source connue de l'éditeur (cols). */
   function tableLabel(src, key) {
@@ -256,14 +297,14 @@
     });
     return [];
   }
-  var TOKEN = /\{\{([0-9a-f]{32}):([A-Za-z0-9_.:-]{1,120})\}\}/g;
+  var TOKEN = /\{\{([0-9a-f]{32}):([A-Za-z0-9_.:-]{1,120})(?:\|([A-Za-z0-9,]{1,30}))?\}\}/g;   // 3e groupe : format du nombre (§142), « d2,cCHF »
   function srcOf(o, id) { return (o.sources && o.sources[id]) || null; }   // { app, name } : sources connues (éditeur) ; sur l'écran, déduites des données
   /** Valeur (ou nom, mode « Noms des champs ») d'un champ relié. */
-  function fieldText(id, key, o, fb) {
+  function fieldText(id, key, o, fb, nfs) {
     var d = o.data && o.data[id], s = srcOf(o, id), app = s ? s.app : d ? ({ weather: 'weather-slide', agenda: 'agenda', rss: 'rss', table: 'dataset', screen: 'screen' })[d.kind] || (d.entities ? 'ha-sensors' : '') : '';
     if (app === 'dataset') {   // jeu de données : toutes les clés (« r2.col », « avg.col »…), pas seulement celles du menu
       if (o.names) return '{' + tableLabel(d && d.columns ? d : s, key) + '}';
-      var tv = d && !d.error ? tableField(d, key, o.tz) : null;
+      var tv = d && !d.error ? tableField(d, key, o.tz, nfs ? parseNf(nfs) : null) : null;
       return tv == null || tv === '' ? (fb || '—') : String(tv);
     }
     var f = fields(app, d), def = null;
@@ -277,7 +318,7 @@
     var t = String(e.text == null ? '' : e.text), out = '', last = 0, m;
     TOKEN.lastIndex = 0;
     while ((m = TOKEN.exec(t))) {
-      out += esc(t.slice(last, m.index)) + '<span class="lc-fd" data-f="' + m[1] + ':' + esc(m[2]) + '">' + esc(fieldText(m[1], m[2], o, e.fb)) + '</span>';
+      out += esc(t.slice(last, m.index)) + '<span class="lc-fd" data-f="' + m[1] + ':' + esc(m[2]) + (m[3] ? '|' + m[3] : '') + '">' + esc(fieldText(m[1], m[2], o, e.fb, m[3])) + '</span>';
       last = TOKEN.lastIndex;
     }
     return out + esc(t.slice(last));
@@ -353,6 +394,7 @@
         try { return new Date(ms).toLocaleDateString('fr-CH', tzo({ day: 'numeric', month: 'short' }, tz)); } catch (x) { return dayKey(ms, tz); }
       }
     }
+    if (type === 'number' && v != null && v !== '') { var nn = parseFloat(v); if (isFinite(nn)) return numFmt(nn, c.nf, cm && cm.nd); }   // format de la colonne (§142)
     var s = fmt(v, type, tz);
     if (type !== 'text' && type !== 'link') return s;
     if (c.pre && cm && cm.pre && s.indexOf(cm.pre) === 0) s = s.slice(cm.pre.length);
@@ -380,6 +422,7 @@
     function rule(r) { var l = e.rules || []; for (var i = 0; i < l.length; i++) if (l[i] && l[i].key && cond(l[i], d, r, o)) return col(l[i].color, ''); return ''; }
     var cms = {};   // début et fin communs, calculés sur toutes les lignes gardées (pas seulement la page affichée)
     cols.forEach(function (c) { if ((c.pre || c.suf) && !cms[c.key]) { var i = colIdx(d, c.key); cms[c.key] = common(all.map(function (r) { return fmt(r[i], colOf(d, c.key).type, o.tz); })); } });
+    cols.forEach(function (c) { if (colOf(d, c.key).type === 'number' && !cms[c.key]) { var i = colIdx(d, c.key); cms[c.key] = { nd: numDec(all.map(function (r) { return r[i]; })) }; } });   // décimales communes à toutes les lignes (§142)
     function val(c, r) { var cc = colOf(d, c.key); return cellText(r[colIdx(d, c.key)], c, cc.type, o.tz, cms[c.key]); }
     // alignement d'une colonne : le même pour son titre et ses valeurs ; une pastille sans alignement choisi reste à droite, une image à gauche (§141)
     function side(c) { return c.align ? align(c.align) : c.as === 'pill' ? 'right' : 'left'; }
@@ -465,6 +508,12 @@
     common: common,
     cellText: cellText,
     fmt: fmt,
+    numFmt: numFmt,
+    numDec: numDec,
+    parseNf: parseNf,
+    nfString: nfString,
+    tableNumber: tableNumber,
+    CUR: CUR,
     /** Sources utilisées par un document (blocs, listes, champs ; « Cet écran » si un filtre de liste cite l'écran), sans doublon. */
     sources: function (doc) {
       var ids = [], els = (doc && doc.els) || [];

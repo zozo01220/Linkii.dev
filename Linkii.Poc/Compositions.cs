@@ -29,7 +29,8 @@ public static class Compositions
     public const string ListType = "list";
 
     /// <summary>Champ relié dans un texte : {{identifiant du contenu source (32 chiffres hexadécimaux)}:{clé du champ}}.</summary>
-    public static readonly Regex FieldToken = new(@"{{([0-9a-f]{32}):([A-Za-z0-9_.:-]{1,120})}}", RegexOptions.Compiled);
+    /// <summary>Champ relié d'un texte : {{jeu:clé}} ou {{jeu:clé|d2,cCHF}} (format du nombre, §142). Les groupes 1 et 2 sont le jeu et la clé.</summary>
+    public static readonly Regex FieldToken = new(@"{{([0-9a-f]{32}):([A-Za-z0-9_.:-]{1,120})(?:\|([A-Za-z0-9,]{1,30}))?}}", RegexOptions.Compiled);
 
     /// <summary>Document vérifié (format, taille, nombre d'éléments) et les images de la médiathèque qu'il utilise, dans l'ordre. Null si illisible.</summary>
     public static (string Doc, List<Guid> Images)? Clean(string? json)
