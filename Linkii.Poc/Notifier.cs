@@ -169,7 +169,7 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
             pi.DurationSec = (int.TryParse(m.Settings.GetValueOrDefault("maxMinutes"), out var mm) ? Math.Clamp(mm, 1, 240) : 30) * 60;
         if (app.Id == Compositions.AppId)   // composition : images (fichiers prêts du même client), QR codes et sources de données (contenus d'intégration du même client) résolus maintenant
         {
-            if (Compositions.Publish(m.Settings, id => db.Media.FirstOrDefault(x => x.Id == id && x.ClientId == m.ClientId && x.Status == null && x.Type == "image" && x.FileName != null),
+            if (Compositions.Publish(m.Settings, id => db.Media.FirstOrDefault(x => x.Id == id && x.ClientId == m.ClientId && x.Status == null && (x.Type == "image" || x.Type == "video") && x.FileName != null),
                 id => db.Media.FirstOrDefault(x => x.Id == id && x.ClientId == m.ClientId && x.Type == "app"),
                 id => db.Clients.FirstOrDefault(x => x.Id == m.ClientId)?.DataSets.FirstOrDefault(x => x.Id == id)) is not { } c) return null;
             (pi.Settings, pi.Urls, pi.Secrets) = c;

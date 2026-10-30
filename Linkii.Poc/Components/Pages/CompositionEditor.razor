@@ -84,6 +84,7 @@ else
             doc = item?.Settings.GetValueOrDefault("doc") ?? startTemplate?.Doc ?? "",
             fromTemplate = startTemplate != null,   // document d'un modèle : pas encore enregistré
             images = Images(),
+            videos = Videos(),
             tpl = Tpl,
             myTemplates = Templates(),
             sources = Sources(),
@@ -234,6 +235,14 @@ else
         .Where(m => m.Type == "image" && m.Status == null && m.FileName != null)
         .OrderByDescending(m => m.AddedUtc)
         .Select(m => (object)new { id = m.Id.ToString(), name = m.Name, url = "/media/" + m.FileName, w = m.Width, h = m.Height })
+        .ToList();
+
+    /// <summary>Vidéos prêtes de la médiathèque (MP4 convertis à l'import) visibles par la personne, les plus récentes d'abord.</summary>
+    [JSInvokable]
+    public List<object> Videos() => Library.PickableFiles()
+        .Where(m => m.Type == "video" && m.Status == null && m.FileName != null)
+        .OrderByDescending(m => m.AddedUtc)
+        .Select(m => (object)new { id = m.Id.ToString(), name = m.Name, url = "/media/" + m.FileName, w = m.Width, h = m.Height, sec = double.TryParse(m.Info.GetValueOrDefault("durationSec"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) ? (int)Math.Round(d) : 0, size = m.Size })
         .ToList();
 
     // Images choisies dans « Importer » : ajoutées à la médiathèque (racine de l'aire), puis proposées à l'éditeur (la première est placée sur la page).

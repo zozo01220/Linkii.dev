@@ -49,12 +49,12 @@ public static class Compositions
         var clean = new JsonArray();
         foreach (var n in els)
         {
-            if (n is not JsonObject e || Str(e, "type") is not ("text" or "shape" or "image" or "qr" or "widget" or "app" or "list" or "chart")) continue;
+            if (n is not JsonObject e || Str(e, "type") is not ("text" or "shape" or "image" or "video" or "icon" or "qr" or "widget" or "app" or "list" or "chart")) continue;
             if (Str(e, "type") is ListType or ChartType && !Guid.TryParse(Str(e, "source"), out _)) continue;   // liste ou graphique sans jeu de données
             if (Str(e, "type") == "app" && (!Guid.TryParse(Str(e, "source"), out _) || !SourceApps.Contains(Str(e, "app") ?? ""))) continue;   // bloc sans source valable
             var copy = (JsonObject)e.DeepClone();
             copy.Remove("src");   // adresse de fichier : posée seulement à la publication
-            if (Str(copy, "type") == "image" && Guid.TryParse(Str(copy, "media"), out var id) && !images.Contains(id)) images.Add(id);
+            if (Str(copy, "type") is "image" or "video" && Guid.TryParse(Str(copy, "media"), out var id) && !images.Contains(id)) images.Add(id);
             clean.Add(copy);
         }
         var result = new JsonObject { ["v"] = 1, ["w"] = w, ["h"] = h, ["bg"] = Color(Str(doc, "bg")) ?? "#FFFFFF", ["els"] = clean };
@@ -89,8 +89,9 @@ public static class Compositions
             switch (Str(e, "type"))
             {
                 case "image":
+                case "video":   // vidéo de la médiathèque : même traitement qu'une image (adresse /media/…, préchargée pour la lecture hors ligne) ; seulement si la conversion est terminée
                     var f = Guid.TryParse(Str(e, "media"), out var id) ? file(id) : null;
-                    if (f?.FileName == null) { els.Remove(e); continue; }
+                    if (f?.FileName == null || f.Status != null) { els.Remove(e); continue; }
                     var url = "/media/" + f.FileName;
                     e["src"] = url;
                     e.Remove("media");
@@ -142,6 +143,9 @@ public static class Compositions
             if (Str(e, "type") == "text" && Str(e, "text") is { } t)
                 foreach (Match f in FieldToken.Matches(t))
                     if (Guid.TryParse(f.Groups[1].Value, out var fid) && !ids.Contains(fid)) ids.Add(fid);
+            if (e["show"] is JsonArray sh)   // « Afficher si… » : champ ou liste vide d'un jeu
+                foreach (var c in sh.OfType<JsonObject>())
+                    if (Str(c, "k") is "field" or "empty" && Guid.TryParse(Str(c, "source"), out var cid) && !ids.Contains(cid)) ids.Add(cid);
         }
         return ids;
     }
@@ -169,6 +173,9 @@ public static class Compositions
                 foreach (var arr in new[] { e["series"], e["filter"] })
                     if (arr is JsonArray a) foreach (var x in a.OfType<JsonObject>()) Add(Str(x, "key"));
             }
+            if (e["show"] is JsonArray sh)
+                foreach (var c in sh.OfType<JsonObject>())
+                    if (Str(c, "k") == "field" && Str(c, "source") is { } ssrc && Guid.TryParse(ssrc, out var sg) && sg == dataSet) Add(Regex.Replace(Str(c, "key") ?? "", @"^(rd+|sum|avg|min|max).", "") is var sk && sk != "_count" ? sk : null);
             if (Str(e, "type") == "text" && Str(e, "text") is { } t)
                 foreach (Match f in FieldToken.Matches(t))
                     if (f.Groups[1].Value == n) Add(Regex.Replace(f.Groups[2].Value, @"^(r\d+|sum|avg|min|max)\.", "") is var k && k != "_count" ? k : null);

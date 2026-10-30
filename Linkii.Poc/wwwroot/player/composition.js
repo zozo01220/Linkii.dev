@@ -41,6 +41,8 @@
     '.lc-lt small{display:block;font-size:.62em;opacity:.7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:.1em}' +
     '.lc-lp{justify-self:end;font-size:.72em;padding:.18em .65em;border-radius:.3em;color:#fff;white-space:nowrap;line-height:1.2}' +
     '.lc-li{height:78%;aspect-ratio:1/1;background-position:center;background-size:cover;background-repeat:no-repeat;border-radius:.2em;justify-self:start}' +
+    // « Afficher si… » : un élément masqué par sa condition ; dans l'éditeur il reste visible, en pâle
+    '.lc-ifoff{opacity:.28!important}' +
     // graphique relié : dessin SVG à la taille du calque ; chiffre clé en texte
     '.lc-ch{width:100%;height:100%;box-sizing:border-box;overflow:hidden}.lc-ch svg{display:block;width:100%;height:100%}' +
     '.lc-kpi{display:flex;flex-direction:column;justify-content:center;line-height:1.1}.lc-kpi .l{opacity:.75}.lc-kpi .v{font-weight:600;line-height:1.05;margin:.1em 0}.lc-kpi .v small{font-size:.35em;font-weight:400;opacity:.7}.lc-kpi .dl{font-size:.9em}.lc-kpi .dl span{opacity:.65;margin-left:.5em}';
@@ -200,6 +202,51 @@
       case 'notempty': return v !== '';
       default: return cmpVal(v, w, t) === 0;
     }
+  }
+  /**
+   * « Afficher si… » : e.show = liste de conditions, toutes vraies pour afficher l'élément.
+   *   { k: 'time', from: 'HH:MM', to: 'HH:MM' }  plage horaire (passe minuit si from > to)
+   *   { k: 'days', days: [0..6] }                 jours de la semaine (0 = dimanche)
+   *   { k: 'field', source, key, op, val }        valeur d'un champ d'un jeu (ou d'une source) : eq, ne, contains, gt, lt, empty, notempty
+   *   { k: 'empty', source, not }                 le jeu n'a aucune ligne (not : il en a)
+   * Plage et jours se réévaluent chaque seconde (tick) ; les champs au dessin, quand les données changent.
+   */
+  function nowIn(tz) {
+    var d = new Date();
+    try {
+      var t = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz || undefined }).split(':'),
+        wd = d.toLocaleDateString('en-US', { weekday: 'short', timeZone: tz || undefined });
+      return { min: (+t[0] % 24) * 60 + (+t[1]), dow: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(wd) };
+    } catch (x) { return { min: d.getHours() * 60 + d.getMinutes(), dow: d.getDay() }; }
+  }
+  function hm(s) { var m = /^(\d{1,2}):(\d{2})$/.exec(String(s || '').trim()); return m ? Math.min(23, +m[1]) * 60 + Math.min(59, +m[2]) : null; }
+  function timeCond(c, now) {
+    if (c.k === 'days') return !(c.days || []).length || c.days.indexOf(now.dow) !== -1;
+    var a = hm(c.from), b = hm(c.to);
+    if (a == null || b == null || a === b) return true;
+    return a < b ? now.min >= a && now.min < b : now.min >= a || now.min < b;
+  }
+  function numOf(s) { s = String(s == null ? '' : s).replace(/[’'  ]/g, '').replace(',', '.'); return s !== '' && isFinite(+s) ? +s : null; }
+  function dataCond(c, o) {
+    if (!c.source) return true;
+    var d = o.data && o.data[c.source];
+    if (c.k === 'empty') { var n = d && d.rows ? d.rows.length : 0; return c.not ? n > 0 : n === 0; }
+    if (o.names) return true;
+    var raw = fieldText(c.source, c.key || '', o, ''), w = String(c.val == null ? '' : c.val).trim(), v = String(raw == null ? '' : raw).trim();
+    if (c.op === 'empty') return v === '';
+    if (c.op === 'notempty') return v !== '';
+    var nv = numOf(v), nw = numOf(w);
+    if (c.op === 'contains') return w !== '' && v.toLowerCase().indexOf(w.toLowerCase()) !== -1;
+    if (c.op === 'gt') return nv != null && nw != null ? nv > nw : v > w;
+    if (c.op === 'lt') return nv != null && nw != null ? nv < nw : v < w;
+    var eq = nv != null && nw != null ? nv === nw : v.toLowerCase() === w.toLowerCase();
+    return c.op === 'ne' ? !eq : eq;
+  }
+  function showConds(e) { return (e.show || []).filter(function (c) { return c && (c.k === 'time' || c.k === 'days' || ((c.k === 'field' || c.k === 'empty') && c.source)); }); }
+  function showOk(conds, o, tz) {
+    var now = nowIn(tz);
+    for (var i = 0; i < conds.length; i++) if (!(conds[i].k === 'time' || conds[i].k === 'days' ? timeCond(conds[i], now) : dataCond(conds[i], o))) return false;
+    return true;
   }
   /** Lignes d'une liste : filtrées (toutes les conditions), triées. */
   function tableRows(d, e, o) {
@@ -416,8 +463,9 @@
     if (!cols.length) return '<div class="lc-app" style="' + st + '"><div class="lc-wait">Choisissez les colonnes de la liste</div></div>';
     var all = tableRows(d, e, o);
     if (!all.length) return '<div class="lc-app" style="' + st + '"><div class="lc-wait" style="font-size:.8em">' + esc(e.empty || 'Aucune ligne à afficher') + '</div></div>';
-    var n = Math.round(num(e.rows, 5, 1, 40)), headH = e.head ? num(e.size, 40, 4, 2000) * 1.1 : 0, rowH = Math.max(4, (num(e.h, 400, 10, 1e5) - headH) / n);
-    var line = col(e.line, '') ? 'border-bottom:1px solid ' + e.line + ';' : '', accent = col(e.accent, '#3B82C4');
+    var tbl = e.look === 'table', tot = tbl && e.total;   // présentation « Tableau » : en-tête marqué, lignes alternées, traits, ligne de total
+    var n = Math.round(num(e.rows, 5, 1, 40)), headH = e.head ? num(e.size, 40, 4, 2000) * 1.1 : 0, rowH = Math.max(4, (num(e.h, 400, 10, 1e5) - headH) / (n + (tot ? 1 : 0)));
+    var line = tbl ? (e.tline === false ? '' : 'border-bottom:1px solid ' + (col(e.line, '') || 'rgba(127,127,127,.4)') + ';') : col(e.line, '') ? 'border-bottom:1px solid ' + e.line + ';' : '', accent = col(e.accent, '#3B82C4');
     // colonnes de la grille : un texte prend sa part (w), une pastille ou une image sa taille ; « small » se range sous la colonne précédente
     var groups = [];
     cols.forEach(function (c) { if (c.as === 'small' && groups.length) groups[groups.length - 1].sub.push(c); else groups.push({ c: c, sub: [] }); });
@@ -431,7 +479,7 @@
     function side(c) { return c.align ? align(c.align) : c.as === 'pill' ? 'right' : 'left'; }
     function self(c) { var a = side(c); return a === 'right' ? 'end' : a === 'center' ? 'center' : 'start'; }
     function boolCol(c, r) { var cc = colOf(d, c.key), v = r[colIdx(d, c.key)]; return cc.type === 'bool' ? col(v === 'true' ? c.yc : v === 'false' ? c.nc : '', '') : ''; }
-    function row(r) {
+    function row(r, ri) {
       var rc = rule(r), pill = false, h = '';
       groups.forEach(function (g) {
         var c = g.c, al = 'text-align:' + side(c), bc = boolCol(c, r);
@@ -439,9 +487,22 @@
         if (c.as === 'pill') { pill = true; h += '<span class="lc-lp" style="justify-self:' + self(c) + ';background:' + (rc || bc || accent) + '">' + esc(val(c, r)) + '</span>'; return; }
         h += '<span class="lc-lt" style="' + al + (bc && !rc ? ';color:' + bc : '') + '">' + esc(val(c, r)) + g.sub.map(function (x) { return '<small style="text-align:' + align(x.align) + '">' + esc(val(x, r)) + '</small>'; }).join('') + '</span>';
       });
-      return '<div class="lc-lr" style="grid-template-columns:' + grid + ';height:' + rowH + 'px;' + line + (rc && !pill ? 'color:' + rc + ';' : '') + '">' + h + '</div>';
+      return '<div class="lc-lr" style="grid-template-columns:' + grid + ';height:' + rowH + 'px;' + line + (tbl && e.zebra !== false && ri % 2 ? 'background:rgba(127,127,127,.13);' : '') + (rc && !pill ? 'color:' + rc + ';' : '') + '">' + h + '</div>';
     }
-    var head = e.head ? '<div class="lc-lh" style="grid-template-columns:' + grid + ';height:' + headH + 'px">' + groups.map(function (g) {
+    function totalRow() {   // ligne de total : somme, moyenne ou nombre sur chaque colonne de nombres ; « Total » dans la première colonne
+      var fn = e.totfn === 'avg' || e.totfn === 'count' ? e.totfn : 'sum', h = '';
+      groups.forEach(function (g, gi) {
+        var c = g.c, cc = colOf(d, c.key), al = 'text-align:' + side(c), t = '';
+        if (!gi) t = e.totlabel != null && e.totlabel !== '' ? String(e.totlabel).slice(0, 30) : 'Total';
+        else if (c.as !== 'pill' && c.as !== 'image' && cc.type === 'number') {
+          var i = colIdx(d, c.key), ns = all.map(function (r) { return parseFloat(r[i]); }).filter(isFinite), sm = ns.reduce(function (a, b) { return a + b; }, 0);
+          t = fn === 'count' ? String(ns.length) : ns.length ? cellText(String(fn === 'avg' ? sm / ns.length : sm), c, 'number', o.tz, cms[c.key]) : '';
+        }
+        h += '<span class="lc-lt" style="' + al + ';font-weight:600">' + esc(t) + '</span>';
+      });
+      return '<div class="lc-lr lc-tot" style="grid-template-columns:' + grid + ';height:' + rowH + 'px;border-top:2px solid currentColor">' + h + '</div>';
+    }
+    var head = e.head ? '<div class="lc-lh" style="' + (tbl ? 'background:rgba(127,127,127,.22);font-weight:600;opacity:1;text-transform:none;letter-spacing:0;font-size:.7em;' : '') + 'grid-template-columns:' + grid + ';height:' + headH + 'px">' + groups.map(function (g) {
       var cc = colOf(d, g.c.key); return '<span data-lh="' + (e.cols || []).indexOf(g.c) + '" style="text-align:' + side(g.c) + '">' + esc(g.c.label || cc.label || cc.key) + '</span>';
     }).join('') + '</div>' : '';
     var body, mode = e.page === 'scroll' || e.page === 'cut' ? e.page : 'pages', sec = num(e.sec, 8, 2, 120);
@@ -453,9 +514,9 @@
       var pages = Math.ceil(all.length / n), cur = Math.floor(Date.now() / (sec * 1000)) % pages;
       body = '';
       for (var p = 0; p < pages; p++) body += '<div class="lc-pg" data-pg="' + p + '"' + (p === cur ? '' : ' style="display:none"') + '>' + all.slice(p * n, p * n + n).map(row).join('') + '</div>';
-      return '<div class="lc-list" style="' + st + '">' + head + '<div class="lc-lb" data-live="pages" data-n="' + pages + '" data-sec="' + sec + '">' + body + '</div></div>';
+      return '<div class="lc-list" style="' + st + '">' + head + '<div class="lc-lb" data-live="pages" data-n="' + pages + '" data-sec="' + sec + '">' + body + '</div>' + (tot ? totalRow() : '') + '</div>';
     }
-    return '<div class="lc-list" style="' + st + '">' + head + '<div class="lc-lb">' + body + '</div></div>';
+    return '<div class="lc-list" style="' + st + '">' + head + '<div class="lc-lb">' + body + '</div>' + (tot ? totalRow() : '') + '</div>';
   }
 
   // QR code : tracé du serveur ; en attendant (éditeur), un motif neutre
@@ -735,6 +796,16 @@
       if (!url) return o.player ? '' : '<div class="lc-img empty" style="' + rr + '">Image à choisir</div>';
       return '<div class="lc-img" data-src="' + esc(url) + '" style="' + rr + 'background-size:' + (e.fit === 'contain' ? 'contain' : 'cover') + '"></div>';
     }
+    if (t === 'icon') {   // icône de la bibliothèque : trait (fin, normal, épais) ou plein, couleur du calque
+      var ic = ICON_BY[e.icon], sw = { fine: 1.2, thick: 2.6 }[e.stroke] || 1.8;
+      if (!ic) return o.player ? '' : '<div class="lc-img empty">Icône à choisir</div>';
+      return '<svg viewBox="0 0 24 24" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" fill="' + (e.fill ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="' + sw + '" stroke-linecap="round" stroke-linejoin="round" style="display:block;color:' + col(e.color, '#ffffff') + '">' + ic[3] + '</svg>';
+    }
+    if (t === 'video') {   // vidéo de la médiathèque (MP4 sans son, convertie à l'import) : toujours muette ; début et fin facultatifs
+      var vu = e.src || (o.mediaUrl ? o.mediaUrl(e.media) : null), vr = 'border-radius:' + num(e.radius, 0, 0, 4000) + 'px;';
+      if (!vu) return o.player ? '' : '<div class="lc-img empty" style="' + vr + '">Vidéo à choisir</div>';
+      return '<video class="lc-vid" data-vsrc="' + esc(vu) + '" data-vs="' + num(e.vstart, 0, 0, 86400) + '" data-ve="' + num(e.vend, 0, 0, 86400) + '" data-vloop="' + (e.loop === false ? 0 : 1) + '" muted playsinline preload="auto" style="width:100%;height:100%;display:block;' + vr + 'object-fit:' + (e.fit === 'contain' ? 'contain' : 'cover') + '"></video>';
+    }
     if (t === 'qr') return '<div class="lc-qr" style="background:' + col(e.bg, '#ffffff') + ';padding:6%">' + qrSvg(e) + '</div>';
     if (t === 'widget') {
       if (e.kind === 'clock') return '<div class="lc-tx" style="' + txs(e) + '" data-live="clock" data-sec="' + (e.sec ? 1 : 0) + '">' + timeText(e.sec, o.tz) + '</div>';
@@ -748,7 +819,44 @@
     return '';
   }
 
+  /** Bibliothèque d'icônes (tracés sur une grille de 24, trait fin arrondi) : [identifiant, catégorie, nom, tracé]. Seuls ces tracés sont dessinés : un identifiant inconnu ne donne rien. */
+  var ICONS = (function () {
+    function P(d) { return '<path d="' + d + '"/>'; }
+    function Ci(x, y, r) { return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '"/>'; }
+    return [
+      ['fleche-droite', 'Flèches', 'Flèche vers la droite', P('M4 12h16M14 6l6 6-6 6')], ['fleche-gauche', 'Flèches', 'Flèche vers la gauche', P('M20 12H4M10 6l-6 6 6 6')], ['fleche-haut', 'Flèches', 'Flèche vers le haut', P('M12 20V4M6 10l6-6 6 6')],
+      ['fleche-bas', 'Flèches', 'Flèche vers le bas', P('M12 4v16M6 14l6 6 6-6')], ['chevron', 'Flèches', 'Chevron', P('M9 5l7 7-7 7')], ['fleche-diagonale', 'Flèches', 'Flèche en diagonale', P('M7 17L17 7M8 7h9v9')], ['tourner', 'Flèches', 'Tourner à droite', P('M4 20v-6a4 4 0 0 1 4-4h12M16 6l4 4-4 4')],
+      ['wifi', 'Services', 'Wi-Fi', P('M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0') + Ci(12, 19.5, 1)], ['cafe', 'Services', 'Café', P('M4 8h13v6a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5zM17 10h2a2 2 0 0 1 0 4h-2M8 3v2M12 3v2')],
+      ['toilettes', 'Services', 'Toilettes', Ci(8, 5, 2) + Ci(16, 5, 2) + P('M8 8v10M5 12h6M16 8l-3 10h6z')], ['ascenseur', 'Services', 'Ascenseur', '<rect x="5" y="3" width="14" height="18" rx="2"/>' + P('M9 9l3-3 3 3M9 15l3 3 3-3')],
+      ['parking', 'Services', 'Parking', '<rect x="4" y="3" width="16" height="18" rx="3"/>' + P('M10 17V8h3a3 3 0 0 1 0 6h-3')], ['accessibilite', 'Services', 'Accessibilité', Ci(12, 4.5, 1.8) + P('M12 8v6l4 6M7 11h10M9 20a5 5 0 0 1 0-8')],
+      ['telephone', 'Services', 'Téléphone', P('M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A15 15 0 0 1 3 6a2 2 0 0 1 2-2')], ['escalier', 'Services', 'Escalier', P('M3 20h5v-4h5v-4h5V8h3')],
+      ['sortie', 'Services', 'Sortie de secours', P('M14 4h6v16h-6M4 12h10M10 8l4 4-4 4')], ['restaurant', 'Services', 'Restaurant', P('M7 3v8a2 2 0 0 0 2 2v8M5 3v5M9 3v5M17 21V3c-2 1-3 4-3 8h3')],
+      ['accueil', 'Services', 'Accueil', P('M18 16v-5a6 6 0 0 0-12 0v5l-2 2h16zM10 21h4')], ['sante', 'Services', 'Santé', P('M9 3h6v6h6v6h-6v6H9v-6H3V9h6z')],
+      ['bus', 'Lieux et transports', 'Bus', '<rect x="4" y="4" width="16" height="13" rx="2"/>' + P('M4 11h16M7 20v-3M17 20v-3M8 14h.01M16 14h.01')], ['train', 'Lieux et transports', 'Train', '<rect x="5" y="3" width="14" height="15" rx="3"/>' + P('M5 11h14M8 21l2-3M16 21l-2-3M9 14.5h.01M15 14.5h.01')],
+      ['velo', 'Lieux et transports', 'Vélo', Ci(6, 17, 3) + Ci(18, 17, 3) + P('M6 17l4-8h5l3 8M10 9L8 6H6M13 17l2-8')], ['voiture', 'Lieux et transports', 'Voiture', P('M5 16h14l-1.5-6a2 2 0 0 0-2-1.5h-7a2 2 0 0 0-2 1.5zM5 16v3M19 16v3M8 13h.01M16 13h.01')],
+      ['avion', 'Lieux et transports', 'Avion', P('M10 14L3 17l1-2 6-3V6a2 2 0 0 1 4 0v6l6 3 1 2-7-3v4l2 2v1l-3-1-3 1v-1l2-2z')], ['batiment', 'Lieux et transports', 'Bâtiment', P('M4 21V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v17M15 9h4a1 1 0 0 1 1 1v11M3 21h18M8 7h3M8 11h3M8 15h3')],
+      ['maison', 'Lieux et transports', 'Maison', P('M3 11l9-8 9 8M5 10v10h14V10M10 20v-6h4v6')], ['position', 'Lieux et transports', 'Position', P('M12 21s-7-6-7-11a7 7 0 0 1 14 0c0 5-7 11-7 11z') + Ci(12, 10, 2)], ['carte', 'Lieux et transports', 'Plan', P('M9 4L3 6v14l6-2 6 2 6-2V4l-6 2zM9 4v14M15 6v14')],
+      ['soleil', 'Météo', 'Soleil', Ci(12, 12, 4) + P('M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4')], ['nuage', 'Météo', 'Nuage', P('M7 18a4 4 0 0 1-.5-8A6 6 0 0 1 18 11a3.5 3.5 0 0 1-.5 7z')],
+      ['pluie', 'Météo', 'Pluie', P('M7 14a4 4 0 0 1-.5-8A6 6 0 0 1 18 7a3.5 3.5 0 0 1-.5 7zM8 17l-1 3M12 17l-1 3M16 17l-1 3')], ['neige', 'Météo', 'Neige', P('M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9')],
+      ['vent', 'Météo', 'Vent', P('M3 8h10a3 3 0 1 0-3-3M3 12h15a3 3 0 1 1-3 3M3 16h7')], ['orage', 'Météo', 'Orage', P('M7 14a4 4 0 0 1-.5-8A6 6 0 0 1 18 7a3.5 3.5 0 0 1-.5 7M12 12l-2 4h4l-2 4')],
+      ['lune', 'Météo', 'Lune', P('M20 14A8 8 0 0 1 10 4a8 8 0 1 0 10 10z')], ['thermometre', 'Météo', 'Température', P('M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0z')],
+      ['information', 'Alertes', 'Information', Ci(12, 12, 9) + P('M12 11v6M12 7.5v.5')], ['attention', 'Alertes', 'Attention', P('M12 3l10 18H2zM12 10v5M12 18v.5')], ['interdit', 'Alertes', 'Interdit', Ci(12, 12, 9) + P('M5.6 5.6l12.8 12.8')],
+      ['valide', 'Alertes', 'Validé', Ci(12, 12, 9) + P('M8 12.5l3 3 5-6')], ['danger', 'Alertes', 'Danger', P('M8 3h8l5 5v8l-5 5H8l-5-5V8zM12 8v5M12 16v.5')], ['question', 'Alertes', 'Question', Ci(12, 12, 9) + P('M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 1-1 1.7M12 17v.5')],
+      ['coche', 'Alertes', 'Coche', P('M5 12.5l4.5 4.5L19 7')], ['croix', 'Alertes', 'Croix', P('M6 6l12 12M18 6L6 18')], ['feu', 'Alertes', 'Feu', P('M12 3c1 4 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-3-1-5 1-9z')],
+      ['horloge', 'Divers', 'Horloge', Ci(12, 12, 9) + P('M12 7v5l3 2')], ['calendrier', 'Divers', 'Calendrier', '<rect x="3" y="5" width="18" height="16" rx="2"/>' + P('M3 10h18M8 3v4M16 3v4')], ['personne', 'Divers', 'Personne', Ci(12, 8, 4) + P('M4 21a8 8 0 0 1 16 0')],
+      ['coeur', 'Divers', 'Cœur', P('M12 20s-8-5-8-11a4.5 4.5 0 0 1 8-2.5A4.5 4.5 0 0 1 20 9c0 6-8 11-8 11z')], ['etoile', 'Divers', 'Étoile', P('M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z')],
+      ['courrier', 'Divers', 'Courrier', '<rect x="3" y="6" width="18" height="12" rx="1"/>' + P('M3 7l9 7 9-7')], ['cle', 'Divers', 'Clé', Ci(8, 15, 4) + P('M11 12l8-8M16 7l2 2M14 9l2 2')], ['cadenas', 'Divers', 'Cadenas', '<rect x="5" y="11" width="14" height="10" rx="1"/>' + P('M8 11V8a4 4 0 0 1 8 0v3')],
+      ['appareil-photo', 'Divers', 'Appareil photo', P('M4 8h3l2-3h6l2 3h3v11H4z') + Ci(12, 13.5, 3.5)], ['imprimante', 'Divers', 'Imprimante', P('M7 9V3h10v6M7 17H4v-7h16v7h-3') + '<rect x="7" y="14" width="10" height="7"/>'],
+      ['ampoule', 'Divers', 'Idée', P('M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0 0 12 3z')], ['drapeau', 'Divers', 'Drapeau', P('M5 21V4M5 5h13l-2 4 2 4H5')],
+      ['panier', 'Divers', 'Panier', P('M3 4h2l2 12h11l2-8H6') + Ci(9, 20, .6) + Ci(17, 20, .6)], ['trophee', 'Divers', 'Trophée', P('M8 4h8v5a4 4 0 0 1-8 0zM8 6H4v1a3 3 0 0 0 3 3M16 6h4v1a3 3 0 0 1-3 3M12 13v4M8 21h8M10 17h4')],
+      ['recherche', 'Divers', 'Recherche', Ci(11, 11, 7) + P('M21 21l-5-5')], ['reglages', 'Divers', 'Réglages', Ci(12, 12, 3) + P('M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1')],
+      ['euro', 'Divers', 'Euro', P('M17 6a7 7 0 1 0 0 12M5 10h9M5 14h9')], ['pouce', 'Divers', 'J’aime', P('M7 11v9H4v-9zM7 11l4-8c1.5 0 2.5 1 2.5 2.5V9h5a2 2 0 0 1 2 2.3l-1 6a2 2 0 0 1-2 1.7H7')]
+    ];
+  })();
+  var ICON_BY = {}; ICONS.forEach(function (i) { ICON_BY[i[0]] = i; });
+
   var C = w.LinkiiCompo = {
+    ICONS: ICONS,
     FONTS: FONTS,
     textual: textual,
     SRC: SRC,
@@ -781,6 +889,7 @@
         if (e.type === 'app' || e.type === 'list' || e.type === 'chart') add(e.source);
         if (e.type === 'list' || e.type === 'chart') (e.filter || []).forEach(function (f) { if (f && String(f.val || '').charAt(0) === '@') add(SCREEN); });
         if (e.type === 'text') { TOKEN.lastIndex = 0; while ((m = TOKEN.exec(String(e.text || '')))) add(m[1]); }
+        showConds(e).forEach(function (c) { if (c.k === 'field' || c.k === 'empty') add(c.source); });
       }
       return ids;
     },
@@ -804,10 +913,17 @@
     el: function (e, o) {
       o = o || {};
       if (!e || e.hidden && o.player) return '';
-      var st = 'left:' + num(e.x, 0, -1e5, 1e5) + 'px;top:' + num(e.y, 0, -1e5, 1e5) + 'px;width:' + num(e.w, 100, 1, 1e5) + 'px;' +
+      var sc = showConds(e), sattr = '', soff = false;
+      if (sc.length && !o.names) {
+        var stat = sc.filter(function (c) { return c.k === 'field' || c.k === 'empty'; }), dyn = sc.filter(function (c) { return c.k === 'time' || c.k === 'days'; }), sok = showOk(stat, o, o.tz);
+        soff = !(sok && showOk(dyn, o, o.tz));
+        sattr = ' data-if="' + (o.player ? 'hide' : 'dim') + '" data-ifs="' + (sok ? 1 : 0) + '" data-ift="' + esc(JSON.stringify(dyn)) + '"';
+        if (!sok && o.player) return '';   // un champ ne change qu'avec les données : l'écran redessine alors ; plage et jours sont rendus puis suivis par tick
+      }
+      var st ='left:' + num(e.x, 0, -1e5, 1e5) + 'px;top:' + num(e.y, 0, -1e5, 1e5) + 'px;width:' + num(e.w, 100, 1, 1e5) + 'px;' +
         (textual(e) ? '' : 'height:' + num(e.h, 100, 1, 1e5) + 'px;') + 'opacity:' + num(e.opacity, 1, 0, 1) + ';' +
-        (e.rot ? 'transform:rotate(' + num(e.rot, 0, -360, 360) + 'deg);' : '') + (e.hidden ? 'display:none;' : '');
-      return '<div class="lc-el' + (textual(e) ? ' lc-auto' : '') + '" data-id="' + esc(e.id) + '" style="' + st + '">' + inner(e, o) + '</div>';
+        (e.rot ? 'transform:rotate(' + num(e.rot, 0, -360, 360) + 'deg);' : '') + (e.hidden || (soff && o.player) ? 'display:none;' : '');
+      return '<div class="lc-el' + (textual(e) ? ' lc-auto' : '') + (soff && !o.player ? ' lc-ifoff' : '') + '" data-id="' + esc(e.id) + '"' + sattr + ' style="' + st + '">' + inner(e, o) + '</div>';
     },
     html: function (doc, o) { var s = ''; for (var i = 0; i < (doc.els || []).length; i++) s += C.el(doc.els[i], o); return s; },
     bg: function (doc) { return col(doc.bg, '#FFFFFF'); },
@@ -851,8 +967,30 @@
         C.images(st, function (u, cb) { cb(u + (u.indexOf('?') < 0 ? '?w=480' : '')); });
       })(list[i]);
     },
+    /** Branche les vidéos : adresse (copie locale hors ligne côté player), lecture muette, boucle, début et fin. */
+    videos: function (root, loader) {
+      var list = root.querySelectorAll('video.lc-vid[data-vsrc]');
+      for (var i = 0; i < list.length; i++) (function (v) {
+        if (v.getAttribute('data-vdone')) return;
+        v.setAttribute('data-vdone', '1');
+        var a = +v.getAttribute('data-vs') || 0, b = +v.getAttribute('data-ve') || 0, loop = v.getAttribute('data-vloop') !== '0';
+        v.muted = true; v.defaultMuted = true;
+        v.addEventListener('loadedmetadata', function () { if (a) { try { v.currentTime = a; } catch (x) { /* pas encore prête */ } } });
+        v.addEventListener('timeupdate', function () { if (b && b > a && v.currentTime >= b) { if (loop) { v.currentTime = a; v.play().catch(function () {}); } else v.pause(); } });
+        v.addEventListener('ended', function () { if (loop) { v.currentTime = a; v.play().catch(function () {}); } });
+        loader(v.getAttribute('data-vsrc'), function (src) { v.src = src; var pr = v.play(); if (pr && pr.catch) pr.catch(function () {}); });
+      })(list[i]);
+    },
     /** Met à jour horloges, dates et comptes à rebours. */
     tick: function (root, tz) {
+      var ifs = root.querySelectorAll('[data-if]'), now0 = ifs.length ? nowIn(tz) : null;
+      for (var j = 0; j < ifs.length; j++) {   // « Afficher si… » : plage horaire et jours
+        var z = ifs[j], zc, zok = z.getAttribute('data-ifs') === '1';
+        try { zc = JSON.parse(z.getAttribute('data-ift') || '[]'); } catch (x) { zc = []; }
+        for (var q = 0; zok && q < zc.length; q++) if (!timeCond(zc[q], now0)) zok = false;
+        if (z.getAttribute('data-if') === 'hide') { var dz = zok ? '' : 'none'; if (z.style.display !== dz) z.style.display = dz; }
+        else if (z.classList.contains('lc-ifoff') === zok) z.classList.toggle('lc-ifoff', !zok);
+      }
       var list = root.querySelectorAll('[data-live]');
       for (var i = 0; i < list.length; i++) {
         var n = list[i], k = n.getAttribute('data-live'), v;
@@ -925,6 +1063,7 @@
     var srcs = [];
     h.onStop(function () { for (var i = 0; i < srcs.length; i++) srcs[i].revoke(); });
     C.images(st, function (url, cb) { h.media(url).then(function (m) { srcs.push(m); cb(m.src); }); });
+    C.videos(st, function (url, cb) { h.media(url).then(function (m) { srcs.push(m); cb(m.src); }); });
     // La scène fait la taille de la page (ex. 2160 × 3840) : tant qu'elle n'est pas mise à l'échelle elle déborde de l'écran. Elle reste donc
     // cachée jusqu'au premier calcul réussi, et l'échelle suit la taille de la zone (ResizeObserver) : l'élément n'a pas encore de taille à l'insertion.
     st.style.visibility = 'hidden';
