@@ -31,6 +31,13 @@ public static class Compositions
     /// <summary>Graphique relié à un jeu de données : barres, courbe, secteurs, jauge, chiffre clé… (« chart », source = identifiant du jeu).</summary>
     public const string ChartType = "chart";
 
+    /// <summary>
+    /// Réservation de salle : porte de salle, pastille, forme sur un plan ou tableau (« room »). Une salle est un contenu « Calendrier partagé » dont l'interrupteur
+    /// « Utiliser dans les compositions réservation de salle » est activé. « source » : l'identifiant du contenu, ou « screen » (le calendrier de l'écran qui affiche la
+    /// composition) ; tableau : « all » (toutes les salles) ou « list » (identifiants choisis). À la publication, « roomIds » liste les salles dont l'écran recevra les données.
+    /// </summary>
+    public const string RoomType = "room";
+
     /// <summary>Champ relié dans un texte : {{identifiant du contenu source (32 chiffres hexadécimaux)}:{clé du champ}}.</summary>
     /// <summary>Champ relié d'un texte : {{jeu:clé}} ou {{jeu:clé|d2,cCHF}} (format du nombre, §142). Les groupes 1 et 2 sont le jeu et la clé.</summary>
     public static readonly Regex FieldToken = new(@"{{([0-9a-f]{32}):([A-Za-z0-9_.:-]{1,120})(?:\|([A-Za-z0-9,]{1,30}))?}}", RegexOptions.Compiled);
@@ -49,10 +56,12 @@ public static class Compositions
         var clean = new JsonArray();
         foreach (var n in els)
         {
-            if (n is not JsonObject e || Str(e, "type") is not ("text" or "shape" or "image" or "video" or "icon" or "qr" or "widget" or "app" or "list" or "chart")) continue;
+            if (n is not JsonObject e || Str(e, "type") is not ("text" or "shape" or "image" or "video" or "icon" or "room" or "qr" or "widget" or "app" or "list" or "chart")) continue;
             if (Str(e, "type") is ListType or ChartType && !Guid.TryParse(Str(e, "source"), out _)) continue;   // liste ou graphique sans jeu de données
             if (Str(e, "type") == "app" && (!Guid.TryParse(Str(e, "source"), out _) || !SourceApps.Contains(Str(e, "app") ?? ""))) continue;   // bloc sans source valable
+            if (Str(e, "type") == RoomType && Str(e, "kind") != "board" && Str(e, "source") != "screen" && !Guid.TryParse(Str(e, "source"), out _)) continue;   // salle sans calendrier
             var copy = (JsonObject)e.DeepClone();
+            copy.Remove("roomIds");   // recalculé à la publication
             copy.Remove("src");   // adresse de fichier : posée seulement à la publication
             if (Str(copy, "type") is "image" or "video" && Guid.TryParse(Str(copy, "media"), out var id) && !images.Contains(id)) images.Add(id);
             clean.Add(copy);
@@ -67,12 +76,22 @@ public static class Compositions
     /// Null si le document est illisible (contenu jamais publié).
     /// </summary>
     public static (Dictionary<string, string> Settings, List<string> Urls, Dictionary<string, string> Secrets)? Publish(IReadOnlyDictionary<string, string> settings, Func<Guid, MediaItem?> file, Func<Guid, MediaItem?>? source = null,
-        Func<Guid, DataSet?>? dataset = null)
+        Func<Guid, DataSet?>? dataset = null, Func<List<Guid>>? rooms = null)
     {
         if (Clean(settings.GetValueOrDefault("doc")) is not { } c) return null;
         var doc = JsonNode.Parse(c.Doc)!.AsObject();
         var els = doc["els"]!.AsArray();
         var urls = new List<string>();
+        // Salles : les éléments « room » reçoivent la liste des salles dont l'écran lira les données (toutes pour « celle de cet écran » : l'écran choisit la sienne)
+        var allRooms = rooms?.Invoke() ?? new List<Guid>();
+        foreach (var e in els.OfType<JsonObject>().Where(x => Str(x, "type") == RoomType))
+        {
+            IEnumerable<Guid> ids;
+            if (Str(e, "kind") == "board") ids = Str(e, "scope") == "list" && e["list"] is JsonArray la ? la.Select(x => Guid.TryParse(x?.GetValue<string>(), out var g) ? g : Guid.Empty).Where(allRooms.Contains) : allRooms;
+            else if (Str(e, "source") == "screen") ids = allRooms;
+            else ids = Guid.TryParse(Str(e, "source"), out var one) && allRooms.Contains(one) ? new[] { one } : Array.Empty<Guid>();
+            e["roomIds"] = new JsonArray(ids.Distinct().Select(g => (JsonNode)JsonValue.Create(g.ToString("N"))).ToArray());
+        }
         // Sources (blocs et champs) : réglages figés à la publication, comme un contenu d'intégration ; l'écran lit leurs données par /api/data/{élément}/{source}.
         // Une source introuvable (supprimée, d'un autre client) retire ses blocs ; ses champs affichent leur valeur de secours.
         var sources = new Dictionary<Guid, MediaItem?>();
@@ -138,6 +157,12 @@ public static class Compositions
         foreach (var e in els.OfType<JsonObject>())
         {
             if (Str(e, "type") is "app" or ListType or ChartType && Guid.TryParse(Str(e, "source"), out var id) && !ids.Contains(id)) ids.Add(id);
+            if (Str(e, "type") == RoomType)
+            {
+                if (e["roomIds"] is JsonArray ri) foreach (var x in ri) if (Guid.TryParse(x?.GetValue<string>(), out var rid) && !ids.Contains(rid)) ids.Add(rid);
+                if (Guid.TryParse(Str(e, "source"), out var rs) && !ids.Contains(rs)) ids.Add(rs);
+                if (Str(e, "source") == "screen" && !ids.Contains(ScreenSource)) ids.Add(ScreenSource);   // le calendrier de l'écran est une valeur de « Cet écran »
+            }
             if (Str(e, "type") is ListType or ChartType && e["filter"] is JsonArray fl && fl.OfType<JsonObject>().Any(x => (Str(x, "val") ?? "").StartsWith('@')) && !ids.Contains(ScreenSource))
                 ids.Add(ScreenSource);   // filtre sur un paramètre de l'écran (« = Cet écran · Étage »)
             if (Str(e, "type") == "text" && Str(e, "text") is { } t)
@@ -200,6 +225,7 @@ public static class Compositions
     {
         kind = "screen",
         name = s?.Name ?? "Aperçu",
+        room = s?.RoomCalendarId is { } rc ? rc.ToString("N") : "",
         zone = s == null ? "" : db.Areas.FirstOrDefault(a => a.Id == s.AreaId)?.Zones.FirstOrDefault(z => z.Id == s.ZoneId)?.Name ?? "",
         area = s == null ? "" : db.Areas.FirstOrDefault(a => a.Id == s.AreaId)?.Name ?? "",
         @params = (s?.Params ?? new()).Where(p => p.Name.Trim().Length > 0).GroupBy(p => DataTables.Slug(p.Name)).ToDictionary(g => g.Key, g => g.First().Value),

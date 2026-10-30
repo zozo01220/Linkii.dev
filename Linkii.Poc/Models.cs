@@ -697,6 +697,9 @@ public class Screen : IClientOwned, IAreaOwned, IOwned
     /// <summary>Paramètres d'écran (§139) : nom et valeur libres (« Étage » = 2), lus par les compositions (source « Cet écran ») pour qu'un seul modèle serve à tous les écrans.</summary>
     public List<ScreenParam> Params { get; set; } = new();
 
+    /// <summary>Calendrier de la salle de cet écran (contenu « Calendrier partagé » utilisé comme salle) : lu par les compositions de réservation de salle (porte de salle). Null : « Salle non choisie ».</summary>
+    public Guid? RoomCalendarId { get; set; }
+
     public string ScreenType { get; set; } = "tv";
     public string Orientation { get; set; } = "landscape";   // landscape | portrait
     public string Resolution { get; set; } = "1920x1080";    // "auto" ou "LxH" (paysage)

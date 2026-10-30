@@ -39,6 +39,17 @@
             @if (screenParams.Count < 12) { <button type="button" class="btn ghost sm" @onclick="() => screenParams.Add(new ScreenParam())"><Ico Name="plus" Size="14" /> Ajouter un paramètre</button> }
         </div>
 
+        @if (roomCalendars.Count > 0)
+        {
+            <div class="sp-sec">Calendrier de la salle</div>
+            <p class="hint" style="margin-top:0">Pour les compositions « Réservation de salle » : la porte de salle de cet écran lit ce calendrier. Une même composition sert toutes les tablettes. Sans calendrier choisi, l'écran affiche « Salle non choisie » en gris, jamais un faux « Libre ».</p>
+            <select class="sp-room" style="width:100%" aria-label="Calendrier de la salle" @bind="roomCalendar">
+                <option value="">(aucun)</option>
+                @foreach (var r in roomCalendars) { <option value="@r.Id">@r.Name</option> }
+                @if (roomCalendar != "" && !roomCalendars.Any(r => r.Id.ToString() == roomCalendar)) { <option value="@roomCalendar">Calendrier introuvable ou plus utilisé comme salle</option> }
+            </select>
+        }
+
         @if (HasDevice)
         {
             <div class="sp-sec">Appareil</div>
@@ -89,6 +100,8 @@
     private List<DeviceMonitor> monitors = new();
     private Dictionary<int, string> taken = new();   // moniteur → écran du même PC qui l'occupe en plein écran
     private List<ScreenParam> screenParams = new();   // paramètres pour les compositions (§139)
+    private List<(Guid Id, string Name)> roomCalendars = new();   // calendriers utilisés comme salle (interrupteur dans Mes intégrations)
+    private string roomCalendar = "";
 
     private bool IsPc => kind == "windows";
     private bool HasDevice => kind is "windows" or "androidtv" or "android";
@@ -104,6 +117,8 @@
         (autoStart, windowed, monitor) = (s.AutoStart, s.Windowed, s.Monitor);
         monitors = s.DeviceMonitors.OrderBy(m => m.N).ToList();
         screenParams = s.Params.Select(p => new ScreenParam { Name = p.Name, Value = p.Value }).ToList();
+        roomCalendars = Store.Read(d => d.Media.Where(m => m.AppId == "agenda" && m.Settings.GetValueOrDefault("room") == "true").OrderBy(m => m.Name).Select(m => (m.Id, m.Settings.GetValueOrDefault("roomName") is { Length: > 0 } n ? n : m.Name)).ToList());
+        roomCalendar = s.RoomCalendarId?.ToString() ?? "";
         taken = Store.Read(d => DeviceConfig.SamePc(d.Screens, s).Where(x => !x.Windowed).GroupBy(x => x.Monitor).ToDictionary(g => g.Key, g => g.First().Name));
     }
 
@@ -113,6 +128,7 @@
     {
         saving = true;
         var sp = spec; var (mh, mv, au, wi, mo) = (mirrorH, mirrorV, autoStart, windowed, monitor);
+        Guid? room = Guid.TryParse(roomCalendar, out var rg) ? rg : null;
         // paramètres nommés, sans doublon de clé (« Étage » et « etage » sont le même paramètre : le premier est gardé)
         var pars = screenParams.Select(p => new ScreenParam { Name = p.Name.Trim(), Value = p.Value.Trim() }).Where(p => p.Name.Length > 0)
             .GroupBy(p => DataTables.Slug(p.Name)).Select(g => g.First()).ToList();
@@ -121,12 +137,13 @@
             var changed = Store.Write(d =>
             {
                 var s = d.Screens.First(x => x.Id == ScreenId);
-                var c = s.ScreenType != sp.Type || s.Resolution != sp.Resolution || s.MirrorH != mh || s.MirrorV != mv
+                var c = s.RoomCalendarId != room || s.ScreenType != sp.Type || s.Resolution != sp.Resolution || s.MirrorH != mh || s.MirrorV != mv
                     || s.AutoStart != au || s.Windowed != wi || s.Monitor != mo;
                 s.ScreenType = sp.Type; s.Resolution = sp.Resolution;
                 s.Layout = ScreenLayouts.Fit(ScreenLayouts.Find(s.Layout).Id, new ScreenSpec { Type = sp.Type, Orientation = s.Orientation, Resolution = sp.Resolution });   // découpage encore permis
                 s.MirrorH = mh; s.MirrorV = mv;
                 s.AutoStart = au; s.Windowed = wi; s.Monitor = mo;
+                s.RoomCalendarId = room;   // lu avec la source « Cet écran » : rien à publier
                 s.Params = pars;   // lus par l'écran à la prochaine lecture de la source « Cet écran » : rien à publier
                 return c;
             });

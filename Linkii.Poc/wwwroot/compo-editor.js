@@ -161,13 +161,14 @@
     root.innerHTML = SHELL;
     { const rail = root.querySelector('#ce-rail'), dn = rail.querySelector('[data-p=donnees]');   // Données et Graphiques : mode expert seulement
       if (expert) dn.insertAdjacentHTML('afterend', `<button data-p="graphiques">${ICO.chart}Graphiques</button><button data-p="indicateurs">${ICO.gauge}Indicateurs</button>`); else dn.remove(); }
+    simRoom = ''; simSt = 'auto'; syncSalles();
     q('#ce-name').value = name;
     bind();
     push();
     savedDoc = tpl || o.fromTemplate ? '' : H[0];   // un modèle choisi (galerie ou Mes modèles) n'est pas encore enregistré
     renderPanel(); render(); renderCtx(); setDirty();
     D.els.filter(e => e.type === 'qr').forEach(fetchQr);
-    LC().sources(D).forEach(id => loadSource(id));
+    LC().sources(D).forEach(id => loadSource(id)); if (D.els.some(e => e.type === 'room')) loadRooms();
     timer = setInterval(() => { const st = q('#ce-stage'); if (st) LC().tick(st); }, 1000);
     if (fresh && !tpl) openFormat(true);
     if (document.fonts) document.fonts.ready.then(() => { if (root) render(); });
@@ -193,6 +194,7 @@
     shp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 3 3 11h10L8 3Z"/><circle cx="17" cy="16" r="4"/><rect x="3" y="14" width="7" height="7"/></svg>',
     wid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
     chart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg>',
+    room: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="1"/><path d="M12 4v16M12 12h3"/></svg>',
     gauge: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 17a8 8 0 0 1 16 0M12 17l4-5M4 21h16"/></svg>',
     data: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>'
   };
@@ -265,7 +267,7 @@
   // ---------- rendu ----------
   const mediaUrl = id => { const m = images.find(x => x.id === id) || videos.find(x => x.id === id); return m ? m.url : null; };
   const srcMap = () => { const m = {}; sources.forEach(s => m[s.id] = s); return m; };
-  const opts = extra => Object.assign({ mediaUrl, data: srcData, sources: srcMap(), names }, extra);   // rendu : images, données des sources, noms des champs
+  const opts = extra => Object.assign({ mediaUrl, data: roomData(), sources: srcMap(), names, rooms: roomSrcs().map(x => x.id), roomSim: simSt }, extra);   // rendu : images, données des sources, noms des champs
   const stageHTML = d => LC().html(d, opts());
   const loadImages = st => { LC().images(st, (u, cb) => cb(u)); LC().videos(st, (u, cb) => cb(u)); };
 
@@ -287,7 +289,7 @@
       st.querySelectorAll('.lc-auto').forEach(n => { const e = byId(n.dataset.id); if (e) e.h = n.offsetHeight; });
       markList();
     }
-    drawOverlay(); renderLayers();
+    drawOverlay(); renderLayers(); renderSim();
     q('#ce-zoomv').textContent = Math.round(zoom * 100) + '%';
     q('#ce-undo').disabled = hi <= 0; q('#ce-redo').disabled = hi >= H.length - 1;
     q('#ce-bgsw').style.background = LC().bg(D);
@@ -597,7 +599,8 @@
     if (cd && cd.id !== id) closeCd(false);
     const was = cur(); selId = id; const e = cur();
     drawOverlay(); renderLayers(); renderCtx(); markList();
-    if (e && e.type === 'chart' && expert) { if (panelName !== famOf(e) || !panelOpen) { panelName = famOf(e); panelOpen = true; render(); } renderPanel(); loadSource(e.source); }   // son résumé s'ouvre à gauche
+    if (e && e.type === 'room' && roomSrcs().length) { if (panelName !== 'salles' || !panelOpen) { panelName = 'salles'; panelOpen = true; render(); } renderPanel(); loadRooms(); }
+    else if (e && e.type === 'chart' && expert) { if (panelName !== famOf(e) || !panelOpen) { panelName = famOf(e); panelOpen = true; render(); } renderPanel(); loadSource(e.source); }   // son résumé s'ouvre à gauche
     else if (isChartPanel() && panelOpen) renderPanel();
     if (e && e.type === 'list' && expert) {   // les données de la liste s'ouvrent à gauche (§140)
       const reopen = !panelOpen; if (panelName !== 'donnees' || reopen) { panelName = 'donnees'; panelOpen = true; }
@@ -621,6 +624,13 @@
       : R({ kind: 'arrow', w: 200, h: 120, fill: ink, rot: +v.replace('arrow', '') || 0 });
     else if (kind === 'img') { const m = images.find(x => x.id === v); const r = m && m.w && m.h ? m.h / m.w : .75; e = I({ media: v, w: 720, h: Math.round(720 * r) }); }
     else if (kind === 'svg') e = { id: nid(), type: 'icon', icon: v, x: 0, y: 0, w: 200, h: 200, color: dark ? '#ffffff' : ink, stroke: 'normal', fill: false, opacity: 1 };
+    else if (kind === 'room') {   // réservation de salle : porte (plein cadre), pastille, forme de plan ou tableau
+      const [rk, rid] = v.split('@'), rs = roomSrcs(), used = new Set(D.els.filter(x => x.type === 'room').map(x => x.source));
+      const S = { door: [D.w / s, D.h / s], dot: [140, 140], rect: [300, 230], circle: [240, 240], board: [1160, 560] }[rk] || [300, 230];
+      e = { id: nid(), type: 'room', kind: rk, source: rk === 'door' || rk === 'board' ? 'screen' : rid || (rs.find(x => !used.has(x.id)) || rs[0] || {}).id || 'screen', x: 0, y: 0, w: S[0], h: S[1], font: 'IBM Plex Sans',
+        size: rk === 'board' ? 30 : rk === 'rect' || rk === 'circle' ? 26 : 40, weight: 400, color: rk === 'door' ? '#ffffff' : rk === 'board' ? ink : '#0B1F3A', align: 'left', ls: 0, lh: 1.2, italic: false, opacity: 1,
+        showTitle: false, nextN: 2, label: true, scope: 'all', list: [] };
+    }
     else if (kind === 'vid') { const m = videos.find(x => x.id === v), r = m && m.w && m.h ? m.h / m.w : .5625; e = { id: nid(), type: 'video', media: v, x: 0, y: 0, w: 960, h: Math.round(960 * r), fit: 'cover', loop: true, radius: 0, vstart: 0, vend: 0, opacity: 1 }; }
     else if (kind === 'qr') e = Q({});
     else if (kind === 'app') {   // bloc d'une intégration de Mes intégrations (§85)
@@ -773,6 +783,7 @@
     commit(); renderCtx();
     if (e.type === 'qr') fetchQr(e);
     if (e.type === 'list' && expert) { panelName = 'donnees'; panelOpen = true; renderPanel(); }   // ses données s'ouvrent à gauche (§140)
+    if (e.type === 'room') { panelName = 'salles'; panelOpen = true; loadRooms(); renderPanel(); }
     if (e.type === 'chart') { if (expert) { panelName = famOf(e); panelOpen = true; renderPanel(); } openCd('data'); }   // sa source et ses axes se choisissent aussitôt
     LC().sources({ els: [e] }).forEach(id => loadSource(id));   // bloc, liste reliée, champ glissé depuis le panneau Données
   }
@@ -1621,6 +1632,16 @@
         (isOne(e) || e.kind === 'trend' ? '' : `<button class="ce-tb ${e.vals !== false ? 'on' : ''}" data-tog="vals" title="Valeurs sur le graphique">Valeurs</button>`) + (cart ? `<button class="ce-tb ${e.grid !== false ? 'on' : ''}" data-tog="grid" title="Grille">Grille</button>` : '') +
         '<button class="ce-tb" data-act="cdopen" title="Source, axes, conditions, apparence">◫ Données…</button>';
     }
+    else if (e.type === 'room') {
+      const rs = roomSrcs(), dk = e.kind === 'door', col3 = (k, d, t) => colorIn(k, e[k] || d, t);
+      h = `<span class="ce-kind">${ICO.room} ${ROOMK[e.kind] || 'Salle'}</span>` + sepH +
+        (e.kind === 'board' ? `<button class="ce-tb on" data-act="roomlist" title="Les salles du tableau">Salles : ${e.scope === 'list' ? (e.list || []).length : 'toutes'} ▾</button>`
+          : pick('source', [['screen', 'Salle de cet écran']].concat(rs.map(x => [x.id, roomLabel(x)])), e.source || 'screen', 'Salle')) + sepH +
+        fontSel(e) + sizeNum(e) + colorIn('color', e.color, 'Couleur du texte') + sepH +
+        col3('cFree', '#1E8E5A', 'Couleur : libre') + col3('cSoon', '#D9822B', 'Couleur : bientôt occupé') + col3('cBusy', '#C8372D', 'Couleur : occupé') +
+        (dk ? sepH + `<button class="ce-tb ${e.showTitle ? 'on' : ''}" data-tog="showTitle" title="Montrer le titre des réunions (si le calendrier l'autorise : réglage « Sur l'écran » du calendrier)">Titre de la réunion</button>` + pick('nextN', [[0, 'Sans suite'], [1, 'Ensuite : 1'], [2, 'Ensuite : 2'], [3, 'Ensuite : 3']], e.nextN == null ? 2 : e.nextN, 'Rendez-vous suivants')
+          : e.kind === 'rect' || e.kind === 'circle' ? sepH + `<button class="ce-tb ${e.label !== false ? 'on' : ''}" data-tog="label" title="Nom et état dans la forme">Nom et état</button>` : '');
+    }
     else if (e.type === 'icon') { const ic = LC().ICONS.find(i => i[0] === e.icon); h = `<span class="ce-kind">${ic ? iconSvg(ic[3]).replace('<svg', '<svg width="16" height="16" style="vertical-align:-3px"') : ''} ${esc(ic ? ic[2] : 'Icône')}</span>` + sepH + '<button class="ce-tb" data-act="iconchange">⇄ Changer</button>' + colorIn('color', e.color, 'Couleur') + pick('stroke', [['fine', 'Trait fin'], ['normal', 'Trait normal'], ['thick', 'Trait épais']], e.stroke || 'normal', 'Épaisseur du trait') + `<button class="ce-tb ${e.fill ? 'on' : ''}" data-tog="fill" title="Remplir l'icône">Plein</button>`; }
     else if (e.type === 'video') h = `<span class="ce-kind">▶ Vidéo</span>` + sepH + `<button class="ce-tb ${e.loop !== false ? 'on' : ''}" data-tog="loop" title="Rejouer sans fin (la vidéo est toujours sans son)">↻ En boucle</button>` + pick('fit', [['cover', 'Remplir'], ['contain', 'Entière']], e.fit, 'Cadrage') + sepH +
       `<label class="ce-lbl" title="Début de la lecture, en secondes">Début<input type="number" data-k="vstart" data-t="n" min="0" step="0.5" value="${+e.vstart || 0}" style="width:64px"></label><label class="ce-lbl" title="Fin de la lecture, en secondes (0 : jusqu'au bout)">Fin<input type="number" data-k="vend" data-t="n" min="0" step="0.5" value="${+e.vend || 0}" style="width:64px"></label>` + sepH + `<button class="ce-tb" data-act="replace">⇄ Remplacer</button>`;
@@ -1638,6 +1659,7 @@
     if (a === 'pos') posMenu(b);
     else if (a === 'lock') { e.locked = !e.locked; commit(); renderCtx(); }
     else if (a === 'ifpop') ifPop(b);
+    else if (a === 'roomlist') roomListPop(b);
     else if (a === 'iconchange') { iconMode = 'replace'; openPanel('formes'); }
     else if (a === 'dup') dup();
     else if (a === 'del') del();
@@ -1807,11 +1829,69 @@
     }
     if (panelName === 'donnees') h = dataPanel();
     if (isChartPanel()) h = chartPanel();
+    if (panelName === 'salles') h = roomPanel();
     p.innerHTML = h;
     if (panelName === 'donnees') bindRename(p);
     if (panelName === 'medias') renderMediaGrid();
     if (panelName === 'modeles' && tplTab === 'mine') LC().images(p, (u, cb) => cb(u + '?w=320'));
   }
+  // ---------- réservation de salle : menu Salles (visible seulement si un calendrier est utilisé comme salle), porte, pastille, plan, tableau ----------
+  // Une salle = un contenu « Calendrier partagé » dont l'interrupteur « Utiliser dans les compositions réservation de salle » est activé. L'état se calcule dans composition.js (roomState).
+  const ROOMK = { door: 'Porte de salle', dot: 'Pastille d’état', rect: 'Forme · rectangle', circle: 'Forme · cercle', board: 'Tableau des salles' };
+  const roomSrcs = () => sources.filter(x => x.room);
+  const roomLabel = x => x.roomName || x.name;
+  let simRoom = '', simSt = 'auto';   // simulation (éditeur seulement) : salle de l'écran, et état forcé
+  function roomData() {   // « Cet écran » reçoit une salle d'essai : celle de l'écran en aperçu, ou la simulée
+    const rs = roomSrcs(); if (!rs.length) return srcData;
+    const sd = srcData[LC().SCREEN] || {}, room = simRoom || sd.room || rs[0].id;
+    return Object.assign({}, srcData, { [LC().SCREEN]: Object.assign({ kind: 'screen', params: {}, labels: {} }, sd, { room }) });
+  }
+  function loadRooms() { roomSrcs().forEach(x => loadSource(x.id)); loadSource(LC().SCREEN); }
+  function syncSalles() {   // le menu n'existe que s'il y a au moins une salle
+    const rail = q('#ce-rail'); if (!rail) return;
+    const b = rail.querySelector('[data-p=salles]'), has = roomSrcs().length > 0;
+    if (has && !b) rail.insertAdjacentHTML('beforeend', `<button data-p="salles">${ICO.room}Salles</button>`);
+    if (!has && b) { b.remove(); if (panelName === 'salles') { panelName = 'texte'; renderPanel(); } }
+  }
+  const roomDot = id => { const d = srcData[id]; const st = d && !d.error ? LC().roomState(d, {}, Date.now()).st : 'none'; return { free: '#1E8E5A', busy: '#C8372D', soon: '#D9822B', none: '#7A8696' }[st]; };
+  function roomPanel() {
+    const rs = roomSrcs();
+    const tile = (k, bg, pv, n, d) => `<button class="ce-ctile" draggable="true" data-add="room:${k}" title="Glissez sur la page, ou cliquez"><span class="pv" style="background:${bg}">${pv}</span><b>${n}</b><small>${d}</small></button>`;
+    const svg = x => `<svg viewBox="0 0 92 56" width="100%" height="100%">${x}</svg>`;
+    const R = '#C8372D', G = '#1E8E5A', A = '#D9822B';
+    return `<div class="ce-ph"><b>Salles</b></div>
+      <div class="ce-grp" style="margin-top:0">Ajouter<small>4 modèles</small></div>
+      <div class="ce-ctypes">${tile('door', R, svg('<text x="46" y="34" text-anchor="middle" fill="#fff" font-size="15" font-weight="800">OCCUPÉ</text>'), 'Porte de salle', 'Plein écran de tablette : Libre ou Occupé. Lit le calendrier de l’écran')}
+        ${tile('dot', '#0E1E38', svg(`<circle cx="46" cy="28" r="22" fill="${G}" opacity=".25"/><circle cx="46" cy="28" r="14" fill="${G}"/>`), 'Pastille d’état', 'Verte, orange ou rouge, pour une salle')}
+        ${tile('rect', '#EEF2F7', svg(`<rect x="8" y="8" width="24" height="18" fill="${R}cc" stroke="${R}"/><rect x="36" y="8" width="20" height="18" fill="${G}cc" stroke="${G}"/><rect x="60" y="8" width="24" height="18" fill="${A}cc" stroke="${A}"/><rect x="8" y="32" width="34" height="16" fill="${G}cc" stroke="${G}"/>`), 'Forme sur un plan', 'Rectangle ou cercle qui change de couleur sur votre plan')}
+        ${tile('board', '#0E1E38', svg(`${[R, G, A].map((c, i) => `<circle cx="14" cy="${14 + i * 14}" r="4" fill="${c}"/><rect x="26" y="${11 + i * 14}" width="${[50, 40, 46][i]}" height="6" rx="2" fill="#fff" opacity=".7"/>`).join('')}`), 'Tableau des salles', 'Plusieurs salles : état, jusqu’à, ensuite')}</div>
+      <p class="ce-help">Une seule composition « Porte de salle » sert toutes les tablettes : chaque écran lit son calendrier (Paramètres de l’écran › Calendrier de la salle). Pour un plan : posez l’image du plan en fond (menu Médias), puis une forme par salle.</p>
+      <div class="ce-grp">Salles utilisables<small>${rs.length}</small></div>
+      ${rs.map(x => `<button class="ce-lst" data-add="room:rect@${x.id}" title="Ajouter une forme pour cette salle"><span class="g" style="background:none"><i class="ce-dot" style="background:${roomDot(x.id)}"></i></span><span class="t"><b>${esc(roomLabel(x))}</b><small>Calendrier ${esc(x.name)}</small></span><span class="chev">+</span></button>`).join('')}
+      <p class="ce-help">Ce sont vos calendriers utilisés comme salle (interrupteur dans Mes intégrations). Cliquez une salle pour poser sa forme sur la page.</p>`;
+  }
+  function roomListPop(anchor) {
+    const e = cur(); if (!e || e.type !== 'room') return;
+    const rs = roomSrcs(), all = e.scope !== 'list', has = id => all || (e.list || []).includes(id);
+    const row = (on, t, sub, o) => `<button class="ce-mi ce-swr" data-o="${o}" data-keep="1" role="switch" aria-checked="${on}"><span class="t">${esc(t)}<small>${esc(sub)}</small></span><span class="ce-sw${on ? ' on' : ''}"><i></i></span></button>`;
+    openPop(anchor, '<div class="ce-pt">Salles du tableau</div>' + row(all, 'Toutes les salles', 'y compris celles qui s’ajouteront', 'all') + '<hr>' + rs.map(x => row(has(x.id), roomLabel(x), x.name, 'r:' + x.id)).join(''), o => {
+      if (o === 'all') { e.scope = all ? 'list' : 'all'; if (e.scope === 'list' && !(e.list || []).length) e.list = rs.map(x => x.id); }
+      else if (String(o).startsWith('r:')) { const id = String(o).slice(2); e.list = rs.map(x => x.id).filter(x => (x === id ? !has(id) : has(x))); e.scope = 'list'; }
+      commit(); renderCtx(); render(); roomListPop(q('[data-act=roomlist]') || anchor);
+    });
+  }
+  function renderSim() {   // simulation, dans l'éditeur seulement : salle de l'écran et état
+    const has = root && D.els.some(e => e.type === 'room') && roomSrcs().length; let box = root && q('#ce-sim');
+    if (!has) { if (box) box.remove(); return; }
+    if (!box) {
+      box = document.createElement('div'); box.id = 'ce-sim'; box.className = 'ce-sim'; q('.ce-center').appendChild(box);
+      on(box, 'change', ev => { if (ev.target.dataset.sim === 'room') { simRoom = ev.target.value; render(); } });
+      on(box, 'click', ev => { const b = ev.target.closest('[data-simst]'); if (b) { simSt = b.dataset.simst; render(); } });
+    }
+    const rs = roomSrcs();
+    box.innerHTML = `<b>Simuler</b><select data-sim="room" aria-label="Salle simulée">${opt([['', 'Salle de l’écran en aperçu']].concat(rs.map(x => [x.id, roomLabel(x)])), simRoom)}</select><span class="ce-dirseg">${[['auto', 'Réel'], ['free', 'Libre'], ['soon', 'Bientôt'], ['busy', 'Occupé'], ['none', 'Non choisie']].map(([v, t]) => `<button data-simst="${v}" class="${simSt === v ? 'on' : ''}">${t}</button>`).join('')}</span><span class="ce-mut">éditeur seulement</span>`;
+  }
+
   // ---------- bibliothèque d'icônes (panneau Éléments) : tracés de composition.js (ICONS), couleur, trait et remplissage réglés dans la barre ----------
   const iconSvg = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
   function iconGrid() {
@@ -1859,7 +1939,7 @@
     }
     const sr = ev.target.closest('[data-srcref]'); if (sr) { loadSource(sr.dataset.srcref, true); return; }
     if (ev.target.closest('[data-srclist]')) {
-      try { sources = await net.invokeMethodAsync('Sources'); } catch (x) { toast('Actualisation impossible pour le moment.', true); return; }
+      try { sources = await net.invokeMethodAsync('Sources'); syncSalles(); } catch (x) { toast('Actualisation impossible pour le moment.', true); return; }
       if (root) { renderPanel(); render(); toast('Sources actualisées'); }
       return;
     }
@@ -2214,7 +2294,7 @@
     if (e.type === 'app') return (LC().SRC[e.app] || {}).icon || '◇';
     if (e.type === 'list') return '▦';
     if (e.type === 'chart') return '▥';
-    return e.type === 'text' ? 'T' : e.type === 'image' ? '▨' : e.type === 'video' ? '▶' : e.type === 'icon' ? '◇' : e.type === 'qr' ? '▣' : e.type === 'widget' ? ({ clock: '◷', date: '▦', ticker: '⇢', countdown: '⏳' })[e.kind] || '◷'
+    return e.type === 'text' ? 'T' : e.type === 'image' ? '▨' : e.type === 'video' ? '▶' : e.type === 'icon' ? '◇' : e.type === 'room' ? '▭' : e.type === 'qr' ? '▣' : e.type === 'widget' ? ({ clock: '◷', date: '▦', ticker: '⇢', countdown: '⏳' })[e.kind] || '◷'
       : ({ circle: '●', line: '—', arrow: '→' })[e.kind] || '■';
   }
   function label(e) {
@@ -2222,6 +2302,7 @@
     if (e.type === 'app') { const s = sources.find(x => x.id === e.source); return 'Bloc · ' + (s ? s.name : (LC().SRC[e.app] || {}).name || 'intégration'); }
     if (e.type === 'list') { const s = sources.find(x => x.id === e.source); return 'Liste · ' + (e.name || (s ? s.name : 'jeu introuvable')); }
     if (e.type === 'chart') return e.name || 'Graphique';
+    if (e.type === 'room') { const s0 = sources.find(x => x.id === e.source); return (ROOMK[e.kind] || 'Salle') + ' · ' + (e.kind === 'board' ? (e.scope === 'list' ? (e.list || []).length + ' salles' : 'toutes les salles') : e.source === 'screen' ? 'salle de l’écran' : s0 ? roomLabel(s0) : 'salle introuvable'); }
     if (e.type === 'icon') { const ic = LC().ICONS.find(i => i[0] === e.icon); return 'Icône · ' + (ic ? ic[2] : 'à choisir'); }
     if (e.type === 'video') { const m = videos.find(x => x.id === e.media); return 'Vidéo' + (m ? ' · ' + m.name : ' à choisir'); }
     if (e.type === 'image') { const m = images.find(x => x.id === e.media); return 'Image' + (m ? ' · ' + m.name : ' à choisir'); }

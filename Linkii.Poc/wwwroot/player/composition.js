@@ -777,12 +777,117 @@
     return '<div class="lc-ch" style="' + st + '"><svg viewBox="0 0 ' + W + ' ' + H + '" font-family="inherit">' + body + '</svg></div>';
   }
 
+  // ---------- Réservation de salle ----------
+  // Une salle est un calendrier partagé (données « agenda » : événements + bloc « room » des réglages). L'état se calcule ici, avec l'heure de l'écran :
+  // occupé (un rendez-vous en cours), bientôt occupé (un rendez-vous commence dans les « soon » minutes), libre ; « none » : pas de calendrier ou pas de données.
+  // Le calcul se refait chaque seconde (tick), donc l'écran suit l'heure même sans nouvelle lecture du calendrier.
+  var ROOM_COL = { free: '#1E8E5A', busy: '#C8372D', soon: '#D9822B', none: '#7A8696' };
+  var ROOM_WORD = { free: 'LIBRE', busy: 'OCCUPÉ', soon: 'BIENTÔT OCCUPÉ', none: 'SALLE NON CHOISIE' };
+  var roomReg = {};   // calques « room » dessinés : redessinés par tick quand l'état ou l'heure change
+  function hhmm(ms, tz) { try { return new Date(ms).toLocaleTimeString('fr-CH', { hour: '2-digit', minute: '2-digit', timeZone: tz || undefined }); } catch (x) { return ''; } }
+  function roomId(e, o) { return e.source === 'screen' ? String((o.data && o.data[SCREEN] && o.data[SCREEN].room) || '') : String(e.source || ''); }
+  function boardIds(e, o) { return e.roomIds || (e.scope === 'list' ? e.list || [] : o.rooms || []); }
+  /** État d'une salle à l'instant now : { st, until, title, next: [{ from, to, title }], name, cap, place, note }. */
+  function roomState(d, o, now) {
+    var tz = o.tz, r = (d && d.room) || {}, res = { st: 'none', until: null, title: '', next: [], name: r.name || '', cap: r.cap || 0, place: r.place || '', note: '' };
+    if (!d) { res.note = 'wait'; return res; }
+    if (d.error) { res.note = 'error'; return res; }
+    var allDay = !!r.allDay, soon = r.soon == null ? 10 : +r.soon, tk = dayKey(now, tz), evs = [];
+    (d.events || []).forEach(function (x) {
+      var s = Date.parse(x.start), e = Date.parse(x.end);
+      if (!isFinite(s) || !isFinite(e) || e <= s || (x.allDay && !allDay)) return;
+      evs.push({ s: s, e: e, title: x.title || '' });
+    });
+    evs.sort(function (a, b) { return a.s - b.s; });
+    var cur = null, i;
+    for (i = 0; i < evs.length; i++) if (evs[i].s <= now && now < evs[i].e) { cur = evs[i]; break; }
+    var end = now;
+    if (cur) {   // la période occupée se prolonge tant qu'un autre rendez-vous commence avant sa fin
+      end = cur.e;
+      for (i = 0; i < evs.length; i++) if (evs[i].s <= end && evs[i].e > end) end = evs[i].e;
+      res.st = 'busy'; res.until = end; res.title = cur.title;
+    }
+    var after = evs.filter(function (x) { return x.s >= (cur ? end : now) && dayKey(x.s, tz) === tk; });
+    res.next = after.slice(0, 6).map(function (x) { return { from: x.s, to: x.e, title: x.title }; });
+    if (!cur) {
+      var nx = null;
+      for (i = 0; i < evs.length; i++) if (evs[i].s > now) { nx = evs[i]; break; }
+      if (nx && soon > 0 && nx.s - now <= soon * 60000) { res.st = 'soon'; res.until = nx.s; res.title = nx.title; }
+      else { res.st = 'free'; res.until = nx && dayKey(nx.s, tz) === tk ? nx.s : null; }
+    }
+    return res;
+  }
+  /** Simulation de l'éditeur (o.roomSim) : force l'état, avec les heures du calendrier ou des valeurs d'exemple. */
+  function roomSim(res, o, now) {
+    var s = o.roomSim; if (!s || s === 'auto') return res;
+    var tz = o.tz, h = function (m) { return now + m * 60000; };
+    if (s === 'none') return { st: 'none', until: null, title: '', next: [], name: res.name, cap: res.cap, place: res.place, note: 'sim' };
+    var out = Object.assign({}, res, { st: s });
+    if (s === 'busy') { out.until = res.st === 'busy' ? res.until : h(48); out.title = res.title || 'Réunion d’équipe'; }
+    if (s === 'soon') { out.until = res.st === 'soon' ? res.until : h(8); out.title = res.title || 'Atelier'; }
+    if (s === 'free') out.until = res.st === 'free' ? res.until : h(190);
+    if (!out.next.length) out.next = [{ from: h(s === 'busy' ? 48 : 190), to: h(s === 'busy' ? 108 : 250), title: 'Point projet' }];
+    return out;
+  }
+  function roomName(e, o, id, st) { return st.name || (srcOf(o, id) && srcOf(o, id).name) || 'Salle'; }
+  function roomNone(st) { return st.note === 'wait' ? 'LECTURE…' : st.note === 'error' ? 'DONNÉES INDISPONIBLES' : null; }
+  function roomHtml(e, o) {
+    var now = Date.now(), tz = o.tz, W = num(e.w, 1280, 10, 1e5), H = num(e.h, 800, 10, 1e5), k = Math.min(W / 1280, H / 800), P = function (v) { return (v * k).toFixed(1) + 'px'; };
+    var C = { free: col(e.cFree, ROOM_COL.free), busy: col(e.cBusy, ROOM_COL.busy), soon: col(e.cSoon, ROOM_COL.soon), none: col(e.cNone, ROOM_COL.none) };
+    var fam = 'font-family:' + (FONTS.indexOf(e.font) >= 0 ? "'" + e.font + "',sans-serif" : 'inherit') + ';';
+    function one(id) { var d = o.data && o.data[id]; return roomSim(roomState(d, o, now), o, now); }
+    if (e.kind === 'board') {
+      var ids = boardIds(e, o), rows = ids.map(function (id) { var st = one(id); return { id: id, st: st, name: roomName(e, o, id, st) }; });
+      rows.sort(function (a, b) { return String(a.name).localeCompare(String(b.name), 'fr'); });
+      if (!rows.length) return '<div class="lc-room" style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;opacity:.7;' + fam + 'font-size:' + P(34) + '">Aucune salle</div>';
+      var fs = num(e.size, 30, 8, 400), rh = H / (rows.length + 1), cc = 'grid-template-columns:2.2fr 1.7fr 1fr 2.4fr;display:grid;align-items:center;padding:0 ' + (fs * .6) + 'px;box-sizing:border-box;height:' + rh.toFixed(1) + 'px;';
+      var h = '<div style="' + cc + 'background:rgba(127,127,127,.22);font-weight:600;font-size:' + (fs * .8) + 'px;border-radius:8px 8px 0 0"><span>Salle</span><span>État</span><span>Jusqu’à</span><span>Ensuite</span></div>';
+      rows.forEach(function (r, i) {
+        var st = r.st, c = C[st.st], nx = st.next[0];
+        h += '<div style="' + cc + (i % 2 ? 'background:rgba(127,127,127,.12);' : '') + 'border-bottom:1px solid rgba(127,127,127,.3);font-size:' + fs + 'px"><span class="lc-lt">' + esc(r.name) + '</span>' +
+          '<span style="display:flex;align-items:center;gap:' + (fs * .4) + 'px"><i style="width:' + (fs * .8) + 'px;height:' + (fs * .8) + 'px;border-radius:50%;background:' + c + ';display:inline-block;flex:none"></i><b style="font-weight:600">' + esc({ free: 'Libre', busy: 'Occupé', soon: 'Bientôt occupé', none: '—' }[st.st]) + '</b></span>' +
+          '<span>' + (st.until && st.st !== 'none' ? hhmm(st.until, tz) : '') + '</span><span class="lc-lt" style="opacity:.8;font-size:' + (fs * .85) + 'px">' + (nx ? hhmm(nx.from, tz) + ' ' + esc(nx.title) : '') + '</span></div>';
+      });
+      return '<div class="lc-room" style="width:100%;height:100%;' + fam + '">' + h + '</div>';
+    }
+    var id = roomId(e, o), st = id ? one(id) : roomSim({ st: 'none', until: null, title: '', next: [], name: '', cap: 0, place: '', note: '' }, o, now), c = C[st.st], name = roomName(e, o, id, st);
+    if (e.kind === 'dot') { var sz = Math.min(W, H); return '<div class="lc-room" style="display:flex;align-items:center;justify-content:center;width:100%;height:100%"><div style="width:' + (sz * .72).toFixed(1) + 'px;height:' + (sz * .72).toFixed(1) + 'px;border-radius:50%;background:' + c + ';box-shadow:0 0 0 ' + (sz * .1).toFixed(1) + 'px ' + c + '40"></div></div>'; }
+    var word = roomNone(st) || ROOM_WORD[st.st];
+    if (e.kind === 'rect' || e.kind === 'circle') {
+      var f2 = num(e.size, 24, 8, 400), tc = col(e.color, '#0B1F3A');
+      return '<div class="lc-room" style="width:100%;height:100%;box-sizing:border-box;background:' + c + 'cc;border:' + Math.max(2, f2 * .16).toFixed(1) + 'px solid ' + c + ';border-radius:' + (e.kind === 'circle' ? '50%' : Math.min(14, H * .08) + 'px') + ';display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:' + tc + ';' + fam + '">' +
+        (e.label === false ? '' : '<div style="font-size:' + f2 + 'px;font-weight:600;line-height:1.1">' + esc(String(name).replace(/^Salle /, '')) + '</div><div style="font-size:' + (f2 * .75).toFixed(1) + 'px;opacity:.75">' + esc(({ free: 'Libre', busy: 'Occupé', soon: 'Bientôt', none: '—' })[st.st]) + '</div>') + '</div>';
+    }
+    // porte de salle : plein cadre, couleur de l'état
+    var tc2 = col(e.color, '#ffffff'), sub = '';
+    if (st.st === 'busy') sub = e.showTitle && st.title ? esc(st.title) + ' · jusqu’à ' + hhmm(st.until, tz) : 'Jusqu’à ' + hhmm(st.until, tz);
+    else if (st.st === 'soon') sub = 'Un rendez-vous commence à ' + hhmm(st.until, tz);
+    else if (st.st === 'free') sub = st.until ? 'Libre jusqu’à ' + hhmm(st.until, tz) : 'Libre pour le reste de la journée';
+    else sub = st.note === 'wait' || st.note === 'error' ? '' : 'Associez un calendrier à cet écran<br>(Paramètres de l’écran › Calendrier de la salle)';
+    var nN = num(e.nextN, 2, 0, 5), nx2 = st.next.slice(0, nN), none = st.st === 'none';
+    var showN = !none && nN > 0, long = word.length > 9;
+    return '<div class="lc-room" style="position:relative;width:100%;height:100%;overflow:hidden;background:' + c + ';color:' + tc2 + ';' + fam + '">' +
+      '<div style="position:absolute;left:' + P(70) + ';top:' + P(56) + ';font-size:' + P(40) + ';font-weight:500;line-height:1.1">' + esc(none ? '' : name) + '</div>' +
+      (none || (!st.cap && !st.place) ? '' : '<div style="position:absolute;left:' + P(70) + ';top:' + P(112) + ';font-size:' + P(26) + ';opacity:.8">' + [st.cap ? st.cap + ' places' : '', st.place].filter(Boolean).map(esc).join(' · ') + '</div>') +
+      '<div data-live="clock" data-sec="0" style="position:absolute;right:' + P(70) + ';top:' + P(56) + ';font-size:' + P(54) + ';font-weight:500;text-align:right">' + timeText(false, tz) + '</div>' +
+      '<div style="position:absolute;left:' + P(70) + ';top:' + P(none ? 230 : 250) + ';right:' + P(40) + ';font-size:' + P(none ? 100 : long ? 130 : 200) + ';font-weight:800;letter-spacing:-.02em;line-height:1.02">' + esc(word).replace('SALLE ', 'SALLE<br>') + '</div>' +
+      (sub ? '<div style="position:absolute;left:' + P(74) + ';top:' + P(none ? 520 : long ? 410 : 480) + ';right:' + P(40) + ';font-size:' + P(none ? 34 : 40) + ';opacity:.95;line-height:1.25">' + sub + '</div>' : '') +
+      (showN ? '<div style="position:absolute;left:0;right:0;bottom:0;height:' + P(170) + ';background:rgba(0,0,0,.22)"></div><div style="position:absolute;left:' + P(70) + ';bottom:' + P(104) + ';font-size:' + P(22) + ';letter-spacing:.08em;text-transform:uppercase;opacity:.75">Ensuite aujourd’hui</div>' +
+        '<div style="position:absolute;left:' + P(70) + ';right:' + P(40) + ';bottom:' + P(34) + ';font-size:' + P(34) + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
+        (nx2.length ? nx2.map(function (x) { return hhmm(x.from, tz) + ' – ' + hhmm(x.to, tz) + ' &nbsp; ' + (e.showTitle && x.title ? esc(x.title) : 'Occupé'); }).join('&nbsp;&nbsp;&nbsp;·&nbsp;&nbsp;&nbsp;') : 'Plus de rendez-vous aujourd’hui') + '</div>' : '') + '</div>';
+  }
+  function roomBlock(e, o) {
+    roomReg[e.id] = { e: e, o: o };
+    return '<div class="lc-roomw" data-rid="' + esc(e.id) + '" style="width:100%;height:100%">' + roomHtml(e, o) + '</div>';
+  }
+
   function inner(e, o) {
     var t = e.type;
     if (t === 'text') return '<div class="lc-tx" style="' + txs(e) + '">' + textHtml(e, o) + '</div>';
     if (t === 'app') return block(e, o);
     if (t === 'list') return listHtml(e, o);
     if (t === 'chart') return chartHtml(e, o);
+    if (t === 'room') return roomBlock(e, o);
     if (t === 'shape') {
       var fill = col(e.fill, '#3B82C4');
       if (e.kind === 'arrow') return '<svg viewBox="0 0 100 60" preserveAspectRatio="none" width="100%" height="100%" style="display:block"><path d="M0 21H60V0L100 30L60 60V39H0Z" fill="' + fill + '"/></svg>';
@@ -857,6 +962,7 @@
 
   var C = w.LinkiiCompo = {
     ICONS: ICONS,
+    roomState: roomState,
     FONTS: FONTS,
     textual: textual,
     SRC: SRC,
@@ -890,6 +996,10 @@
         if (e.type === 'list' || e.type === 'chart') (e.filter || []).forEach(function (f) { if (f && String(f.val || '').charAt(0) === '@') add(SCREEN); });
         if (e.type === 'text') { TOKEN.lastIndex = 0; while ((m = TOKEN.exec(String(e.text || '')))) add(m[1]); }
         showConds(e).forEach(function (c) { if (c.k === 'field' || c.k === 'empty') add(c.source); });
+        if (e.type === 'room') {
+          if (e.source === 'screen') add(SCREEN); else if (e.source) add(e.source);
+          (e.roomIds || []).forEach(add); (e.list || []).forEach(add);
+        }
       }
       return ids;
     },
@@ -990,6 +1100,13 @@
         for (var q = 0; zok && q < zc.length; q++) if (!timeCond(zc[q], now0)) zok = false;
         if (z.getAttribute('data-if') === 'hide') { var dz = zok ? '' : 'none'; if (z.style.display !== dz) z.style.display = dz; }
         else if (z.classList.contains('lc-ifoff') === zok) z.classList.toggle('lc-ifoff', !zok);
+      }
+      var rooms = root.querySelectorAll('.lc-roomw[data-rid]');
+      for (var rm = 0; rm < rooms.length; rm++) {   // salles : l'état suit l'heure sans nouvelle lecture du calendrier
+        var rg = roomReg[rooms[rm].getAttribute('data-rid')];
+        if (!rg) continue;
+        var rh = roomHtml(rg.e, rg.o);
+        if (rooms[rm]._h !== rh) { rooms[rm].innerHTML = rh; rooms[rm]._h = rh; }
       }
       var list = root.querySelectorAll('[data-live]');
       for (var i = 0; i < list.length; i++) {

@@ -171,7 +171,8 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
         {
             if (Compositions.Publish(m.Settings, id => db.Media.FirstOrDefault(x => x.Id == id && x.ClientId == m.ClientId && x.Status == null && (x.Type == "image" || x.Type == "video") && x.FileName != null),
                 id => db.Media.FirstOrDefault(x => x.Id == id && x.ClientId == m.ClientId && x.Type == "app"),
-                id => db.Clients.FirstOrDefault(x => x.Id == m.ClientId)?.DataSets.FirstOrDefault(x => x.Id == id)) is not { } c) return null;
+                id => db.Clients.FirstOrDefault(x => x.Id == m.ClientId)?.DataSets.FirstOrDefault(x => x.Id == id),
+                () => db.Media.Where(x => x.ClientId == m.ClientId && x.Type == "app" && x.AppId == "agenda" && x.Settings.GetValueOrDefault("room") == "true").Select(x => x.Id).ToList()) is not { } c) return null;
             (pi.Settings, pi.Urls, pi.Secrets) = c;
             return pi;
         }

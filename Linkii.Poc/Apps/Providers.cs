@@ -119,10 +119,14 @@ public class CalendarProvider(CalendarService calendars, SecretBox box) : IAppPr
     {
         var (from, to) = Window(rt, rt.GetInt("days", 7, 1, 14));
         var events = await calendars.GetEvents(Source(rt), rt.Client, from, to);
+        // Salle (réservation) : les titres et lieux ne quittent le serveur que si l'organisation l'a choisi
+        var room = rt.Get("room") == "true";
+        var titles = !room || rt.Get("roomPrivacy") == "title";
         return new
         {
             kind = "agenda", title = rt.Get("title"), fetchedAt = DateTime.UtcNow, showTitles = true,
-            events = events.Select(e => new { title = e.Title, start = e.StartUtc, end = e.EndUtc, allDay = e.AllDay, location = e.Location })
+            room = room ? new { name = rt.Get("roomName"), cap = rt.GetInt("roomCap", 0, 0, 5000), place = rt.Get("roomPlace"), allDay = rt.Get("roomAllDay") == "true", soon = rt.GetInt("roomSoon", 10, 0, 60), privacy = titles ? "title" : "busy" } : null,
+            events = events.Select(e => new { title = titles ? e.Title : "", start = e.StartUtc, end = e.EndUtc, allDay = e.AllDay, location = titles ? e.Location : "" })
         };
     }
 
