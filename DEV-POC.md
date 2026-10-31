@@ -2584,3 +2584,6 @@ Remplace l'organisation en onglets Structure / Membres / Rôles et l'arbre du §
 - **Écarts avec la maquette** : sous-titre du Store « depuis n'importe quelle page » (la configuration s'ouvre sur la page Intégrations, pas dans le tiroir) ; Store masqué en mode simple.
 - **Où** : `Components/QuickBar.razor`, `StoreDrawer.razor`, `Layout/MainLayout.razor`, `Pages/Integrations.razor`, `Ico.razor` (star, help, card, phone), section « Barre des accès rapides » et « Tiroir Store » à la fin de `app.css`.
 - **Non fait / à vérifier** : téléchargement réel des installeurs (dossier `downloads` vide en local) ; « Utiliser » pour les autres intégrations que Facebook ; menus au clavier (Échap) ; version mobile de la barre (à voir plus tard).
+
+### Pastille « Pro » partout (31 octobre 2026)
+- Les pastilles jaunes « PRO » en texte seul (Réglages › Alertes et pause, Publicité ; classe `.rg-badge`, supprimée) sont remplacées par `PlanTag` (couronne + « Pro », jaune) : une seule définition du plan dans toute l'app. Seules ces deux pastilles existaient en jaune ; les mentions « Pro » avec cadenas (onglet du direct, statistiques) sont grises et gardées.
