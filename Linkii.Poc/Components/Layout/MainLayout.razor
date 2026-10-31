@@ -52,12 +52,6 @@
                     <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg> Contenus @Pill(MenuBadges.MediaFam, MenuBadges.Compositions)
                 </NavLink>
             }
-            @if (Modes.Expert)
-            {
-                <NavLink class="nav" href="stats">
-                    <svg viewBox="0 0 24 24"><path d="M3 3v18h18" /><path d="M7 15l4-4 3 3 6-6" /></svg> Statistiques
-                </NavLink>
-            }
         }
         else if (Ctx.IsPlatformAdmin)
         {
@@ -100,15 +94,23 @@
             }
             @if (orgAdmin)
             {
-                <NavLink class="nav" href="settings">
+                @* Sur ordinateur, Réglages est dans la barre des accès rapides (nav-legacy : masqué à partir de 901 px). *@
+                <NavLink class="nav nav-legacy" href="settings">
                     <Ico Name="gear" Size="18" /> Réglages @Pill("settings")
                 </NavLink>
             }
         }
+        @if (Ctx.ClientId != null && Modes.Expert)
+        {
+            @* Statistiques : en bas du menu, juste au-dessus du mode expert. *@
+            <NavLink class="nav" href="stats">
+                <svg viewBox="0 0 24 24"><path d="M3 3v18h18" /><path d="M7 15l4-4 3 3 6-6" /></svg> Statistiques
+            </NavLink>
+        }
         @if (Ctx.ClientId != null && !Ctx.IsImpersonating)
         {
-            @* Installer le player : panneau avec les installeurs Windows, Android et le player web. *@
-            <button type="button" class="nav" @onclick="() => playerOpen = true"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg> Installer le player</button>
+            @* Installer le player : panneau avec les installeurs Windows, Android et le player web. Sur ordinateur, le menu « Player » de la barre des accès rapides le remplace. *@
+            <button type="button" class="nav nav-legacy" @onclick="() => playerOpen = true"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg> Installer le player</button>
             @* Mode d'utilisation : au-dessus du compte. Simple masque la planification, l'administration et les intégrations. *@
             <button type="button" class="nav mode-switch" role="switch" aria-checked="@(Modes.Expert ? "true" : "false")" @onclick="ToggleMode">
                 <svg class="mode-ic" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10" /></svg>
@@ -116,8 +118,8 @@
                 <span class="switch @(Modes.Expert ? "on" : "")"><span></span></span>
             </button>
         }
-        @* Compte : en bas du menu latéral ; le menu s'ouvre vers le haut. *@
-        <div class="user side-user" @onclick:stopPropagation="true">
+        @* Compte : en bas du menu latéral sur petit écran ; sur ordinateur, l'avatar de la barre des accès rapides le remplace. *@
+        <div class="user side-user nav-legacy" @onclick:stopPropagation="true">
             <button type="button" class="user-btn" @onclick="() => open = !open" aria-haspopup="true" aria-expanded="@(open ? "true" : "false")">
                 <span class="avatar">@Initials</span>
                 <span class="who"><b title="@orgName">@orgName</b><small title="@userEmail">@userEmail</small></span>
@@ -189,6 +191,15 @@
             }
             @if (AdminSpace) { <span class="app-space">@(Ctx.IsPlatformAdmin ? "Admin" : "Revendeur")</span> }
         </header>
+        @* Ordinateur : barre des accès rapides (Player, Store, Aide, Réglages, compte). Masquée dans l'app et sur petit écran, où la barre ci-dessus reste. *@
+        <QuickBar OrgName="@orgName" Email="@userEmail" Initials="@Initials" SiteUrl="@siteUrl" PlanLabel="@PlanLabel" Trial="@(trialEnd != null)"
+                  ShowPlayer="@(Ctx.ClientId != null && !Ctx.IsImpersonating)"
+                  ShowStore="@(Ctx.ClientId != null && orgAdmin && Modes.Expert && Sees(LevelPages.Integrations))"
+                  ShowAccount="@(Ctx.ClientId == null || Ctx.IsClientMember && !Ctx.IsImpersonating)"
+                  ShowBilling="@(Ctx.ClientId != null && orgAdmin)"
+                  ShowOrganisation="@(Ctx.ClientId != null && orgAdmin && Modes.Expert)"
+                  SettingsHref="@(Ctx.ClientId != null && orgAdmin ? "settings" : null)"
+                  SettingsBadge="@(Pill("settings"))" />
         @{ var roDomain = ReadOnlyDomain; }
         @if (readOnly) { <div class="trial-bar"><Ico Name="lock" Size="16" /><span>Vous êtes en <b>lecture seule</b> : vous voyez tout ce que possède l'organisation, sans rien modifier ni publier.</span></div> }
         else if (roDomain != null) { <div class="trial-bar"><Ico Name="lock" Size="16" /><span><b>Lecture seule</b> : vous voyez @(roDomain == LevelPages.Media ? "tous les médias de l'organisation, sans les modifier" : roDomain == LevelPages.Playlists ? "toutes les listes de l'organisation, sans les modifier" : "tous les écrans de l'organisation, sans les modifier ni les publier").</span></div> }

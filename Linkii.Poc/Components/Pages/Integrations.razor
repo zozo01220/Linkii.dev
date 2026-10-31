@@ -451,10 +451,10 @@ else
 @code {
     // Catégories affichées, dans l'ordre (boutons de filtre et titres des groupes), dans « Mes intégrations » comme dans le Store.
     // Calendriers et Drives sont des familles de sources, pas des apps.
-    private const string CalendarsGroup = "Calendriers", DrivesGroup = "Fichiers et Drives", HomeGroup = "Maison connectée";
-    private static readonly string[] Sections = { "Médias", "Web", "Documents et design", CalendarsGroup, DrivesGroup, "Réseaux sociaux", HomeGroup, "Autres" };
+    internal const string CalendarsGroup = "Calendriers", DrivesGroup = "Fichiers et Drives", HomeGroup = "Maison connectée";
+    internal static readonly string[] Sections = { "Médias", "Web", "Documents et design", CalendarsGroup, DrivesGroup, "Réseaux sociaux", HomeGroup, "Autres" };
 
-    private static string SectionOf(AppManifest a) => a.Id switch
+    internal static string SectionOf(AppManifest a) => a.Id switch
     {
         "image" or "slideshow-images" or "video" or "slideshow-videos" or "pdf" or "composition" => "Médias",
         "rss" or "webpage" or "youtube" or "weather-slide" => "Web",
@@ -1098,6 +1098,7 @@ else
     {
         admin = Store.Read(d => d.Access.IsOrgAdmin);
         if (TabParam == "data") { Nav.NavigateTo("/datasources", replace: true); return; }   // ancien lien : les Sources de données ont leur propre onglet
+        if (TabParam == "store" && admin) tab = "store";   // lien « Ouvrir le Store complet » du tiroir de la barre du haut
         Load();
         CanvaReturn();
         GoogleReturn();
@@ -1105,6 +1106,20 @@ else
         DropboxReturn();
         FacebookReturn();
         AddFromLink();
+    }
+
+    // ---------- Store en accès rapide (barre du haut) : ?utiliser=<intégration> ----------
+
+    [SupplyParameterFromQuery(Name = "utiliser")] public string? UseParam { get; set; }
+    private string? usedParam;
+
+    // « Utiliser » du tiroir Store de la barre du haut : le même geste que le bouton du Store, sur l'intégration demandée.
+    protected override void OnParametersSet()
+    {
+        if (UseParam is not { Length: > 0 } id || id == usedParam) return;
+        usedParam = id;
+        if (!admin || AllRows().FirstOrDefault(r => r.E.Id == id) is not { } row || InMine(row)) return;
+        Use(row.E);
     }
 
     // ---------- Assistant ouvert depuis une autre page (tiroir « Depuis le cloud » de la médiathèque) ----------

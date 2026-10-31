@@ -1,0 +1,143 @@
+@inject AppService Svc
+@inject TenantStore Store
+@using Linkii.Poc.Components.Pages
+@inject NavigationManager Nav
+
+@* Store en accès rapide : tiroir ouvert depuis le bouton « Store » de la barre des accès rapides, sur n'importe quelle page.
+   Suggestions « pour cette page » en premier, puis le Store complet par catégorie, puis ce qui est déjà dans Mes intégrations.
+   « Utiliser » ouvre la configuration de l'intégration dans la page Intégrations (?utiliser=). Maquette : barre-haut-raccourcis.html. *@
+<div class="sd-veil" @onclick="Close"></div>
+<aside class="sd" role="dialog" aria-modal="true" aria-labelledby="sd-title">
+    <div class="sd-h">
+        <div>
+            <h3 id="sd-title">Store</h3>
+            <small>Ajoutez une intégration depuis n'importe quelle page.</small>
+        </div>
+        <button type="button" class="sd-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="18" /></button>
+    </div>
+    <div class="sd-search">
+        <div class="search-box" style="margin:0">
+            <Ico Name="search" Size="16" />
+            <input placeholder="Rechercher une intégration…" aria-label="Rechercher une intégration" @bind="search" @bind:event="oninput" />
+        </div>
+        <div class="sd-chips" role="group" aria-label="Filtrer">
+            <button type="button" class="chip @(filter == "" ? "on" : "")" aria-pressed="@(filter == "" ? "true" : "false")" @onclick='() => filter = ""'>Pour cette page</button>
+            <button type="button" class="chip @(filter == "*" ? "on" : "")" aria-pressed="@(filter == "*" ? "true" : "false")" @onclick='() => filter = "*"'>Tout</button>
+            @foreach (var s in Sections)
+            {
+                var sec = s;
+                <button type="button" class="chip @(filter == sec ? "on" : "")" aria-pressed="@(filter == sec ? "true" : "false")" @onclick="() => filter = sec">@sec</button>
+            }
+        </div>
+    </div>
+    <div class="sd-body">
+        @{ var shown = Shown(); }
+        @if (shown.Store.Count == 0 && shown.Mine.Count == 0)
+        {
+            <p class="sd-empty">Aucune intégration trouvée.</p>
+        }
+        @if (shown.Store.Count > 0)
+        {
+            @if (shown.Groups == null)
+            {
+                <div class="sd-grp">Suggérées pour @pageLabel</div>
+                @foreach (var i in shown.Store) { @Row(i) }
+            }
+            else
+            {
+                @foreach (var g in shown.Groups)
+                {
+                    <div class="sd-grp">@g.Key</div>
+                    @foreach (var i in g) { @Row(i) }
+                }
+            }
+        }
+        @if (shown.Mine.Count > 0)
+        {
+            <div class="sd-grp">Déjà dans Mes intégrations</div>
+            @foreach (var i in shown.Mine) { @Row(i) }
+        }
+    </div>
+    <div class="sd-foot">
+        <a href="/integrations?tab=store" @onclick="Close">Ouvrir le Store complet <Ico Name="external" Size="14" /></a>
+    </div>
+</aside>
+
+@code {
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private record Item(string Id, string Name, string Summary, string Section, bool Mine, bool On);
+
+    private List<Item> items = new();
+    private string search = "", filter = "", pageLabel = "Écrans";
+    private string[] priority = Array.Empty<string>();
+
+    // Pages (premier segment de l'adresse) -> intitulé et intégrations proposées en premier.
+    private static readonly string[] ForScreens = { "google-slides", "canva", "facebook", "weather-slide", "ms-powerpoint", "google-docs" };
+    private static readonly string[] ForContent = { "canva", "google-slides", "google-docs", "ms-powerpoint", "facebook", "weather-slide", "drv-gdrive", "drv-onedrive" };
+    private static readonly string[] ForProgram = { "cal-google", "cal-m365", "cal-ics", "weather-slide" };
+
+    protected override void OnInitialized()
+    {
+        var tenant = Store.Read(d => d.Tenant);
+        var enabled = Svc.Installed().Select(a => a.AppId).ToHashSet();
+        var added = tenant.IntegrationsAdded.ToHashSet();
+        items = Svc.Catalog.Where(a => !a.ScreenWidget && a.Id is not ("agenda" or "drive"))
+            .Select(a => new Item(a.Id, a.Name, a.Summary, Integrations.SectionOf(a), a.DefaultOn || added.Contains(a.Id) || enabled.Contains(a.Id), enabled.Contains(a.Id))).ToList();
+        items.AddRange(SharedCalendarSources.All.Select(s => { var on = SharedCalendarSources.Enabled(tenant, s.Id); return new Item("cal-" + s.Id, s.Name, s.Summary, Integrations.CalendarsGroup, on || added.Contains("cal-" + s.Id), on); }));
+        items.AddRange(DriveSources.All.Select(s => { var on = DriveSources.Enabled(tenant, s.Id); return new Item("drv-" + s.Id, s.Name, s.Summary, Integrations.DrivesGroup, on || added.Contains("drv-" + s.Id), on); }));
+        var ha = tenant.HomeAssistant != null;
+        items.Add(new Item("ha-home", "Home Assistant", "Capteurs, interrupteurs et lumières de votre Home Assistant.", Integrations.HomeGroup, ha, ha));
+        items = items.OrderBy(i => Array.IndexOf(Integrations.Sections, i.Section)).ThenBy(i => i.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+
+        (pageLabel, priority) = Nav.ToBaseRelativePath(Nav.Uri).Split('?')[0].Trim('/').Split('/')[0] switch
+        {
+            "media" or "compositions" or "widgets" or "datasources" => ("Contenus", ForContent),
+            "playlists" or "planning" => ("Programmation", ForProgram),
+            _ => ("Écrans", ForScreens)
+        };
+    }
+
+    // Sections qui ont au moins une intégration (boutons de filtre).
+    private IEnumerable<string> Sections => Integrations.Sections.Where(s => items.Any(i => i.Section == s));
+
+    private (List<Item> Store, List<Item> Mine, List<IGrouping<string, Item>>? Groups) Shown()
+    {
+        var q = search.Trim();
+        bool Match(Item i) => q.Length == 0 || (i.Name + " " + i.Summary + " " + i.Section).Contains(q, StringComparison.OrdinalIgnoreCase);
+        var pool = items.Where(i => Match(i) && (filter is "" or "*" || filter == i.Section)).ToList();
+        var mine = pool.Where(i => i.Mine).ToList();
+        var store = pool.Where(i => !i.Mine).ToList();
+        if (filter == "" && q.Length == 0)
+        {
+            // Pour cette page : les suggestions de la page (à défaut, les premières du Store) ; le reste du Store est derrière « Tout ».
+            var sug = priority.Select(id => store.FirstOrDefault(i => i.Id == id)).OfType<Item>().ToList();
+            return (sug.Count > 0 ? sug : store.Take(4).ToList(), mine, null);
+        }
+        if (filter == "" ) return (store, mine, null);
+        return (store, mine, store.GroupBy(i => i.Section).ToList());
+    }
+
+    private RenderFragment Row(Item i) => @<div class="sd-it">
+        <span class="sd-tile">@Tile(i)</span>
+        <div class="grow"><b>@i.Name</b><small>@i.Summary</small></div>
+        @if (!i.Mine) { <button type="button" class="btn-use" @onclick="() => Use(i)">Utiliser</button> }
+        else if (i.On) { <span class="sd-ok"><Ico Name="check" Size="14" /> Actif</span> }
+        else { <span class="sd-off">Désactivée</span> }
+    </div>;
+
+    private RenderFragment Tile(Item i)
+    {
+        var look = AppIcon.LookOf(i.Id);
+        if (BrandLogos.Has(i.Id)) return @<BrandLogo Id="@i.Id" Size="26" />;
+        return @<span class="sd-ico" style="--c:@look.Color">@if (look.Icon is { } ic) { <Ico Name="@ic" Size="22" /> } else { <span>@(Svc.Find(i.Id)?.Icon ?? "🧩")</span> }</span>;
+    }
+
+    private async Task Use(Item i)
+    {
+        await Close();
+        Nav.NavigateTo("/integrations?utiliser=" + Uri.EscapeDataString(i.Id));
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+}

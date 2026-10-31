@@ -1,0 +1,123 @@
+@inject NavigationManager Nav
+@implements IDisposable
+
+@* Barre des accès rapides (ordinateur seulement) : nom de l'organisation, puis Player, Store, Aide, Réglages et le compte.
+   Remplace l'ancienne barre du haut (masquée sur ordinateur) ; le menu latéral ne garde que la navigation et le mode expert.
+   Maquette : barre-haut-raccourcis.html. *@
+<header class="qbar" aria-label="Accès rapides">
+    <div class="org">@OrgName</div>
+    <div class="grow"></div>
+
+    @if (ShowPlayer)
+    {
+        <div class="qb-wrap">
+            <button type="button" class="qb-btn @(menu == "player" ? "on" : "")" data-t="Installer le player" aria-haspopup="menu" aria-expanded="@(menu == "player" ? "true" : "false")" @onclick='() => Toggle("player")'>
+                <Ico Name="download" Size="19" /><span>Player</span>
+            </button>
+            @if (menu == "player")
+            {
+                <div class="qb-back" @onclick="Shut"></div>
+                <div class="qb-pop" role="menu" style="width:340px">
+                    <div class="lab">Installer le player sur un écran</div>
+                    @if (win != null)
+                    {
+                        <a class="pi" role="menuitem" href="/download/windows" download @onclick="Shut"><PlayerLogo Kind="Windows" Size="22" /><div><b>Windows</b><small>.msi · @Size(win)</small></div><span class="ver">v@(win.Version)</span></a>
+                    }
+                    else
+                    {
+                        <div class="pi soon" role="menuitem" aria-disabled="true"><PlayerLogo Kind="Windows" Size="22" /><div><b>Windows</b><small>Pas encore disponible</small></div></div>
+                    }
+                    @if (android != null)
+                    {
+                        <a class="pi" role="menuitem" href="/download/android" download @onclick="Shut"><PlayerLogo Kind="Android" Size="22" /><div><b>Android et Android TV</b><small>.apk · @Size(android)</small></div><span class="ver">v@(android.Version)</span></a>
+                    }
+                    else
+                    {
+                        <div class="pi soon" role="menuitem" aria-disabled="true"><PlayerLogo Kind="Android" Size="22" /><div><b>Android et Android TV</b><small>Pas encore disponible</small></div></div>
+                    }
+                    <a class="pi" role="menuitem" href="/player/" target="_blank" rel="noopener" @onclick="Shut"><PlayerLogo Kind="Navigateur" Size="22" /><div><b>Navigateur</b><small>Sans installation</small></div><span class="ver">↗</span></a>
+                    <div class="pi soon" role="menuitem" aria-disabled="true"><PlayerLogo Kind="Linux" Size="22" /><div><b>Linux</b><small>Bientôt disponible</small></div></div>
+                    <hr />
+                    @* Installation de l'application web sur le téléphone : visible seulement quand le navigateur sait l'installer (pwa.js) *@
+                    <button type="button" class="pi install-item" role="menuitem" data-install @onclick="Shut"><Ico Name="phone" Size="18" /><div>Installer l'application mobile<small>Gérer vos écrans depuis le téléphone</small></div></button>
+                </div>
+            }
+        </div>
+    }
+    @if (ShowStore)
+    {
+        <button type="button" class="qb-btn store" data-t="Store d'intégrations" aria-haspopup="dialog" @onclick="() => { menu = null; store = true; }">
+            <Ico Name="star" Size="19" /><span>Store</span>
+        </button>
+    }
+    <span class="sep2" aria-hidden="true"></span>
+    @if (SiteUrl.Length > 0)
+    {
+        <a class="qb-btn" data-t="Aide" aria-label="Aide" href="@SiteUrl" target="_blank" rel="noopener"><Ico Name="help" Size="19" /></a>
+    }
+    @if (SettingsHref != null)
+    {
+        <a class="qb-btn" data-t="Réglages" aria-label="Réglages" href="@SettingsHref"><Ico Name="gear" Size="19" />@SettingsBadge</a>
+    }
+    <div class="qb-wrap">
+        <button type="button" class="qb-me @(menu == "me" ? "on" : "")" aria-haspopup="menu" aria-expanded="@(menu == "me" ? "true" : "false")" aria-label="Compte" @onclick='() => Toggle("me")'>
+            <span class="avatar">@Initials</span><Ico Name="chevron" Size="14" />
+        </button>
+        @if (menu == "me")
+        {
+            <div class="qb-back" @onclick="Shut"></div>
+            <div class="qb-pop me" role="menu" style="width:300px">
+                <div class="qb-who"><span class="avatar l">@Initials</span><div><b title="@OrgName">@OrgName</b><small title="@Email">@Email</small></div></div>
+                @if (PlanLabel != null)
+                {
+                    <div class="qb-plan"><span>Plan</span><a href="@(ShowBilling ? "/settings?tab=abonnement" : null)" @onclick="Shut"><PlanTag Plan="@(PlanLabel == "Pro" ? Plans.Growth : Plans.Base)" Title="Plan de votre organisation" />@if (Trial) { <span class="plan-chip trial" title="Essai gratuit en cours"><Ico Name="hourglass" Size="13" />Essai</span> }</a></div>
+                }
+                <hr />
+                @if (ShowAccount) { <a class="pi" role="menuitem" href="account" @onclick="Shut"><Ico Name="user" Size="18" />Mon compte</a> }
+                @if (ShowBilling) { <a class="pi" role="menuitem" href="settings?tab=abonnement" @onclick="Shut"><Ico Name="card" Size="18" />Abonnement et facturation</a> }
+                @if (ShowOrganisation) { <a class="pi" role="menuitem" href="organisation" @onclick="Shut"><Ico Name="team" Size="18" />Organisation</a> }
+                @if (SiteUrl.Length > 0) { <a class="pi" role="menuitem" href="@SiteUrl" target="_blank" rel="noopener" @onclick="Shut"><Ico Name="help" Size="18" />Aide et contact</a> }
+                <hr />
+                <form method="post" action="/logout"><button type="submit" role="menuitem" class="pi out"><Ico Name="logout" Size="18" />Se déconnecter</button></form>
+            </div>
+        }
+    </div>
+</header>
+
+@if (store) { <StoreDrawer OnClose="() => store = false" /> }
+
+@code {
+    [Parameter] public string OrgName { get; set; } = "";
+    [Parameter] public string Email { get; set; } = "";
+    [Parameter] public string Initials { get; set; } = "";
+    [Parameter] public string SiteUrl { get; set; } = "";
+    [Parameter] public string? PlanLabel { get; set; }
+    [Parameter] public bool Trial { get; set; }
+    [Parameter] public bool ShowPlayer { get; set; }
+    [Parameter] public bool ShowStore { get; set; }
+    [Parameter] public bool ShowAccount { get; set; }
+    [Parameter] public bool ShowBilling { get; set; }
+    [Parameter] public bool ShowOrganisation { get; set; }
+    /// <summary>Adresse de la page Réglages ; null : pas de bouton.</summary>
+    [Parameter] public string? SettingsHref { get; set; }
+    /// <summary>Pastille de Réglages (nouveauté, spots à valider), la même que dans le menu latéral.</summary>
+    [Parameter] public RenderFragment? SettingsBadge { get; set; }
+
+    private string? menu;
+    private bool store;
+    private PlayerDownloads.Item? win, android;
+
+    protected override void OnInitialized()
+    {
+        win = PlayerDownloads.Latest("windows");
+        android = PlayerDownloads.Latest("android");
+        Nav.LocationChanged += OnNav;
+    }
+
+    private void OnNav(object? s, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) => InvokeAsync(() => { menu = null; StateHasChanged(); });
+    public void Dispose() => Nav.LocationChanged -= OnNav;
+
+    private void Toggle(string m) => menu = menu == m ? null : m;
+    private void Shut() => menu = null;
+    private static string Size(PlayerDownloads.Item i) => i.SizeMb.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture).Replace('.', ',') + " Mo";
+}
