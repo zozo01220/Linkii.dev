@@ -2587,3 +2587,8 @@ Remplace l'organisation en onglets Structure / Membres / Rôles et l'arbre du §
 
 ### Pastille « Pro » partout (31 octobre 2026)
 - Les pastilles jaunes « PRO » en texte seul (Réglages › Alertes et pause, Publicité ; classe `.rg-badge`, supprimée) sont remplacées par `PlanTag` (couronne + « Pro », jaune) : une seule définition du plan dans toute l'app. Seules ces deux pastilles existaient en jaune ; les mentions « Pro » avec cadenas (onglet du direct, statistiques) sont grises et gardées.
+
+### Icônes de la barre (31 octobre 2026)
+
+- Store : **boutique** (`store`) ; Player : **écran avec flèche** (`monitor-down`, aussi dans l'entrée « Installer le player » du menu sur petit écran). Choisies dans `maquettes/barre-icones-store-player.html` et `barre-icones-store-2.html`. Ajoutées à `Ico.razor`.
+- La boutique est aussi sur l'onglet « Intégrations » du hub Contenus (`HubTab.Icon`) et sur l'onglet du Store de la page Intégrations, **renommé « Store »** (avant : « Intégrations Store »).
