@@ -29,7 +29,7 @@ internal sealed class InstanceSettings
 internal sealed class InstanceStore
 {
     /// <summary>Adresse du serveur intégrée au player (l'installeur peut en poser une autre : SERVERURL).</summary>
-    public const string DefaultServer = "https://linkii.duckdns.org";
+    public const string DefaultServer = "https://linkivi.duckdns.org";
 
     public static string Base => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Linkii", "Player");
 

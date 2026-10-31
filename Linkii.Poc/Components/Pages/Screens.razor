@@ -322,7 +322,22 @@ else
             <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => showPair = false"><Ico Name="x" Size="20" /></button>
         </div>
         <div class="imp-body">
-            <p class="hint" style="margin-top:0">Allumez l'écran, puis saisissez le code à 6 chiffres affiché. <a href="/player/" target="_blank">Ouvrir un écran de test</a> · <a href="/download/windows" download>Télécharger le player Windows</a></p>
+            @if (!pairKiosk)
+            {
+                @* Étape 1 : installer le player sur l'écran (logos officiels, un clic télécharge ou ouvre) *@
+                <div class="pair-step"><i>1</i> Installez le player sur l'écran <span>(une fois par écran)</span></div>
+                <div class="pair-picks">
+                    <a class="pair-pick" href="/download/windows" download><PlayerLogo Kind="Windows" Size="28" /><b>Windows</b><small>@PickMeta(winPlayer, ".msi")</small></a>
+                    <a class="pair-pick" href="/download/android" download><PlayerLogo Kind="Android" Size="28" /><b>Android / TV</b><small>@PickMeta(androidPlayer, ".apk")</small></a>
+                    <a class="pair-pick" href="/player/" target="_blank" rel="noopener"><PlayerLogo Kind="Navigateur" Size="28" /><b>Navigateur</b><small>Sans installation</small></a>
+                    <span class="pair-pick off"><PlayerLogo Kind="Linux" Size="28" /><b>Linux</b><small>Bientôt</small></span>
+                </div>
+                <div class="pair-step"><i>2</i> Saisissez le code à 6 chiffres affiché sur l'écran</div>
+            }
+            else
+            {
+                <p class="hint" style="margin-top:0">Allumez la borne, puis saisissez le code à 6 chiffres affiché.</p>
+            }
             @if (pairKiosk)
             {
                 <div class="kiosk-info"><Ico Name="hand" Size="16" /> <span>La borne s'installe sur un PC Windows à écran tactile (Windows 10 ou 11). Sans toucher, elle diffuse comme un écran ordinaire ; le menu de tuiles se compose ensuite dans la page de la borne. Format portrait d'office, modifiable ensuite.</span></div>
@@ -360,10 +375,9 @@ else
                 @* PC Windows en test : coupé, l'écran s'ouvre en fenêtre dès l'appairage (pas besoin de relancer le player) *@
                 <div class="dw-field wide sp-row pair-full">
                     <div class="grow"><b>Plein écran</b><small>Coupé : sur un PC Windows, le player passe en fenêtre à la taille de la résolution dès l'appairage. Pratique pour tester plusieurs écrans sur un PC.</small></div>
-                    <button type="button" class="switch @(pairFull ? "on" : "")" role="switch" aria-checked="@(pairFull ? "true" : "false")" aria-label="Plein écran" @onclick="() => pairFull = !pairFull"><span></span></button>
+                    <button type="button" class="switch navy @(pairFull ? "on" : "")" role="switch" aria-checked="@(pairFull ? "true" : "false")" aria-label="Plein écran" @onclick="() => pairFull = !pairFull"><span></span></button>
                 </div>
             </div>
-            <p class="hint" style="margin:12px 0 0">Matériel et format viennent des Réglages ; la résolution est celle de l'appareil par défaut. Tout reste modifiable ensuite dans l'édition de l'écran.</p>
             @if (pairPrice is { } pp) { <p class="hint" style="margin:12px 0 0"><Ico Name="info" Size="14" /> @pp</p> }
             @if (error != null) { <div class="err">@error</div> }
         </div>
@@ -2453,9 +2467,11 @@ else if (wallEdit is { } wid)
             : "Cet écran s'ajoute à l'abonnement de l'organisation : les administrateurs en sont prévenus.";
     }
 
+    private PlayerDownloads.Item? winPlayer, androidPlayer;
+    private static string PickMeta(PlayerDownloads.Item? i, string ext) => i == null ? "Indisponible" : $"v{i.Version} · {ext}";
     private bool pairKiosk;   // « Borne interactive » : l'écran connecté reçoit un menu de tuiles (Screen.Kiosk)
     private void OpenPairKiosk() { OpenPair(); pairKiosk = true; pairSpec.Orientation = "portrait"; }
-    private void OpenPair() { pairKiosk = false; SetPairPrice(); pairAreas = Store.Read(AreaFilter.Visible); code = name = ""; pairFull = true; playlistId = null; error = null; pairSpec = ScreenSpec.From(tenant); pairSpec.Resolution = "auto"; pairZone = (FreeZones.FirstOrDefault(z => z.Id.ToString() == zoneFilter) ?? zones.FirstOrDefault(z => z.IsDefault) ?? FreeZones.FirstOrDefault())?.Id.ToString() ?? ""; showPair = true; }
+    private void OpenPair() { winPlayer = PlayerDownloads.Latest("windows"); androidPlayer = PlayerDownloads.Latest("android"); pairKiosk = false; SetPairPrice(); pairAreas = Store.Read(AreaFilter.Visible); code = name = ""; pairFull = true; playlistId = null; error = null; pairSpec = ScreenSpec.From(tenant); pairSpec.Resolution = "auto"; pairZone = (FreeZones.FirstOrDefault(z => z.Id.ToString() == zoneFilter) ?? zones.FirstOrDefault(z => z.IsDefault) ?? FreeZones.FirstOrDefault())?.Id.ToString() ?? ""; showPair = true; }
 
     private Guid? kioskOpen;   // tiroir de la borne ouverte (KioskDrawer)
     private void CloseKiosk() { kioskOpen = null; Reload(); }

@@ -100,7 +100,7 @@
     private List<DeviceMonitor> monitors = new();
     private Dictionary<int, string> taken = new();   // moniteur → écran du même PC qui l'occupe en plein écran
     private List<ScreenParam> screenParams = new();   // paramètres pour les compositions (§139)
-    private List<(Guid Id, string Name)> roomCalendars = new();   // calendriers utilisés comme salle (interrupteur dans Mes intégrations)
+    private List<(Guid Id, string Name)> roomCalendars = new();   // calendriers utilisés comme salle (interrupteur « Salle » dans Intégrations)
     private string roomCalendar = "";
 
     private bool IsPc => kind == "windows";
@@ -117,7 +117,7 @@
         (autoStart, windowed, monitor) = (s.AutoStart, s.Windowed, s.Monitor);
         monitors = s.DeviceMonitors.OrderBy(m => m.N).ToList();
         screenParams = s.Params.Select(p => new ScreenParam { Name = p.Name, Value = p.Value }).ToList();
-        roomCalendars = Store.Read(d => d.Media.Where(m => m.AppId == "agenda" && m.Settings.GetValueOrDefault("room") == "true").OrderBy(m => m.Name).Select(m => (m.Id, m.Settings.GetValueOrDefault("roomName") is { Length: > 0 } n ? n : m.Name)).ToList());
+        roomCalendars = Store.Read(d => SharedCalendarSources.RoomContents(d.Tenant).Select(m => (m.Id, m.Name)).ToList());
         roomCalendar = s.RoomCalendarId?.ToString() ?? "";
         taken = Store.Read(d => DeviceConfig.SamePc(d.Screens, s).Where(x => !x.Windowed).GroupBy(x => x.Monitor).ToDictionary(g => g.Key, g => g.First().Name));
     }

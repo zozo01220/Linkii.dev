@@ -72,7 +72,7 @@ internal sealed class PlayerWindow : Window
     /// <summary>Plein écran (kiosque) ou fenêtre de test, selon les paramètres de l'écran.</summary>
     private void ApplyStyle()
     {
-        Title = settings.Name is { Length: > 0 } n ? $"Linkii Player – {n}" : "Linkii Player";
+        Title = settings.Name is { Length: > 0 } n ? $"Linkivi – {n}" : "Linkivi";
         var kiosk = !settings.Windowed;
         WindowStyle = kiosk ? WindowStyle.None : WindowStyle.SingleBorderWindow;
         ResizeMode = kiosk ? ResizeMode.NoResize : ResizeMode.CanResize;
@@ -221,8 +221,8 @@ internal sealed class PlayerWindow : Window
         catch (WebView2RuntimeNotFoundException)
         {
             Log.Write(store, "WebView2 absent");
-            MessageBox.Show("Linkii Player a besoin de Microsoft Edge WebView2 Runtime.\n\nInstallez-le depuis https://developer.microsoft.com/microsoft-edge/webview2/ puis relancez le player.",
-                "Linkii Player", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show("Linkivi a besoin de Microsoft Edge WebView2 Runtime.\n\nInstallez-le depuis https://developer.microsoft.com/microsoft-edge/webview2/ puis relancez le player.",
+                "Linkivi", MessageBoxButton.OK, MessageBoxImage.Warning);
             Application.Current.Shutdown(ExitNoRuntime);
             return;
         }

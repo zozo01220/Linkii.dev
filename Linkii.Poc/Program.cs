@@ -538,15 +538,24 @@ app.MapGet("/internal/tls-allow", (string domain, ResellerResolver resolver) =>
     resolver.IsKnownDomain(domain) ? Results.Ok() : Results.StatusCode(403));
 
 // ---------- Téléchargement du player Windows (public : l'installeur ne contient rien du client) ----------
-// Dernier LinkiiPlayer-*.msi du dossier downloads des données (déposé par build-installer.ps1 en local, à la main sur le serveur).
+// Dernier Linkivi-*.msi du dossier downloads des données (déposé par build-installer.ps1 en local, à la main sur le serveur).
 app.MapGet("/download/windows", () =>
 {
     var msi = Directory.Exists(AppPaths.DownloadDir)
-        ? new DirectoryInfo(AppPaths.DownloadDir).GetFiles("LinkiiPlayer-*.msi").OrderByDescending(f => f.LastWriteTimeUtc).FirstOrDefault()
+        ? new DirectoryInfo(AppPaths.DownloadDir).GetFiles("Linkivi-*.msi").OrderByDescending(f => f.LastWriteTimeUtc).FirstOrDefault()
         : null;
     return msi == null
         ? Results.Content("Le player Windows n'est pas encore disponible au téléchargement.", "text/plain; charset=utf-8", statusCode: 404)
         : Results.File(msi.FullName, "application/x-msi", msi.Name);
+});
+
+// Player Android (APK) : dernier Linkivi-*.apk du même dossier ; installation directe sur une TV, un boîtier ou une tablette.
+app.MapGet("/download/android", () =>
+{
+    var apk = PlayerDownloads.Latest("android");
+    return apk == null
+        ? Results.Content("Le player Android n'est pas encore disponible au téléchargement.", "text/plain; charset=utf-8", statusCode: 404)
+        : Results.File(apk.Path, "application/vnd.android.package-archive", apk.Name);
 });
 
 // Relais Linkii (§139, lot 4), fichiers du dossier downloads déposés par Linkii.Relay/publish.ps1 :

@@ -170,9 +170,9 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
         if (app.Id == Compositions.AppId)   // composition : images (fichiers prêts du même client), QR codes et sources de données (contenus d'intégration du même client) résolus maintenant
         {
             if (Compositions.Publish(m.Settings, id => db.Media.FirstOrDefault(x => x.Id == id && x.ClientId == m.ClientId && x.Status == null && (x.Type == "image" || x.Type == "video") && x.FileName != null),
-                id => db.Media.FirstOrDefault(x => x.Id == id && x.ClientId == m.ClientId && x.Type == "app"),
+                id => db.Media.FirstOrDefault(x => x.Id == id && x.ClientId == m.ClientId && x.Type == "app") ?? SharedCalendarSources.RoomContent(db.Clients.FirstOrDefault(x => x.Id == m.ClientId), id),
                 id => db.Clients.FirstOrDefault(x => x.Id == m.ClientId)?.DataSets.FirstOrDefault(x => x.Id == id),
-                () => db.Media.Where(x => x.ClientId == m.ClientId && x.Type == "app" && x.AppId == "agenda" && x.Settings.GetValueOrDefault("room") == "true").Select(x => x.Id).ToList()) is not { } c) return null;
+                () => db.Clients.FirstOrDefault(x => x.Id == m.ClientId)?.SharedCalendars.Where(x => x.Room).Select(x => x.Id).ToList() ?? new List<Guid>()) is not { } c) return null;
             (pi.Settings, pi.Urls, pi.Secrets) = c;
             return pi;
         }

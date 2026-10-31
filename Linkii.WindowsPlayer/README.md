@@ -1,4 +1,4 @@
-# Linkii Player — Windows
+# Linkivi — Windows
 
 Coquille .NET 8 (WPF) autour de WebView2 : elle charge le player web (`Linkii.Poc/wwwroot/player`). Le player garde l'appairage par code, la diffusion
 et le cache hors ligne ; la coquille ajoute le plein écran, le démarrage automatique, l'anti-veille, la relance et les infos d'appareil.
@@ -16,8 +16,8 @@ et arrive sur le PC à chaque connexion, sans publication (gardé localement pou
 
 Test sur un PC : dans le tiroir « Connecter un écran », couper **Plein écran** ; tant qu'il n'est pas appairé, le player n'est pas au premier plan (Alt+Tab vers le navigateur pour saisir le code) et passe en fenêtre dès l'appairage, sans relance.
 
-Adresse du serveur : intégrée, le serveur de production `https://linkii.duckdns.org` (constante `InstanceStore.DefaultServer` et propriété `SERVERURL` de l'installeur).
-Pour tester contre un serveur local : `msiexec /i LinkiiPlayer-<version>-x64.msi SERVERURL=http://localhost:5080`, ou la valeur `ServerUrl` de `HKCU\Software\Linkii\Player`.
+Adresse du serveur : intégrée, le serveur de production `https://linkivi.duckdns.org` (constante `InstanceStore.DefaultServer` et propriété `SERVERURL` de l'installeur).
+Pour tester contre un serveur local : `msiexec /i Linkivi-<version>-x64.msi SERVERURL=http://localhost:5080`, ou la valeur `ServerUrl` de `HKCU\Software\Linkii\Player`.
 
 Téléchargement : `build-installer.ps1` copie l'installeur dans `Linkii.Poc/downloads/` ; le back-office le propose à l'adresse `/download/windows`
 (sur le serveur, déposer le `.msi` dans le dossier `downloads` des données, à côté de `data.json`).
@@ -41,10 +41,10 @@ et efface l'instance. Les écrans d'un même PC portent la pastille « PC partag
 ## Installeur
 
 ```powershell
-.\build-installer.ps1 -Version 0.2.1      # artifacts\LinkiiPlayer-0.2.1-x64.msi (autonome, environ 50 Mo)
+.\build-installer.ps1 -Version 0.3.1      # artifacts\Linkivi-0.3.1-x64.msi (autonome, environ 50 Mo)
 ```
 
-Installation pour l'utilisateur courant, sans droits d'administrateur (`%LOCALAPPDATA%\Programs\Linkii Player`, raccourci dans le menu Démarrer) ;
+Installation pour l'utilisateur courant, sans droits d'administrateur (`%LOCALAPPDATA%\Programs\Linkivi`, raccourci dans le menu Démarrer) ;
 le player démarre à la fin de l'installation. La désinstallation arrête les instances et retire leurs démarrages automatiques.
 Prérequis : Windows 10 ou 11 avec Microsoft Edge WebView2 Runtime (présent sur Windows 11 et Windows 10 à jour).
 Non signé pour l'instant : SmartScreen peut avertir au premier lancement.

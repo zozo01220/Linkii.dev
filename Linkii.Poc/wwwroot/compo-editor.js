@@ -1836,7 +1836,7 @@
     if (panelName === 'modeles' && tplTab === 'mine') LC().images(p, (u, cb) => cb(u + '?w=320'));
   }
   // ---------- réservation de salle : menu Salles (visible seulement si un calendrier est utilisé comme salle), porte, pastille, plan, tableau ----------
-  // Une salle = un contenu « Calendrier partagé » dont l'interrupteur « Utiliser dans les compositions réservation de salle » est activé. L'état se calcule dans composition.js (roomState).
+  // Une salle = un calendrier (Intégrations › Calendrier partagé) dont l'interrupteur « Salle » est activé. L'état se calcule dans composition.js (roomState).
   const ROOMK = { door: 'Porte de salle', dot: 'Pastille d’état', rect: 'Forme · rectangle', circle: 'Forme · cercle', board: 'Tableau des salles' };
   const roomSrcs = () => sources.filter(x => x.room);
   const roomLabel = x => x.roomName || x.name;
@@ -1868,7 +1868,7 @@
       <p class="ce-help">Une seule composition « Porte de salle » sert toutes les tablettes : chaque écran lit son calendrier (Paramètres de l’écran › Calendrier de la salle). Pour un plan : posez l’image du plan en fond (menu Médias), puis une forme par salle.</p>
       <div class="ce-grp">Salles utilisables<small>${rs.length}</small></div>
       ${rs.map(x => `<button class="ce-lst" data-add="room:rect@${x.id}" title="Ajouter une forme pour cette salle"><span class="g" style="background:none"><i class="ce-dot" style="background:${roomDot(x.id)}"></i></span><span class="t"><b>${esc(roomLabel(x))}</b><small>Calendrier ${esc(x.name)}</small></span><span class="chev">+</span></button>`).join('')}
-      <p class="ce-help">Ce sont vos calendriers utilisés comme salle (interrupteur dans Mes intégrations). Cliquez une salle pour poser sa forme sur la page.</p>`;
+      <p class="ce-help">Ce sont vos calendriers utilisés comme salle (interrupteur « Salle » sur le calendrier, dans Intégrations). Cliquez une salle pour poser sa forme sur la page.</p>`;
   }
   function roomListPop(anchor) {
     const e = cur(); if (!e || e.type !== 'room') return;

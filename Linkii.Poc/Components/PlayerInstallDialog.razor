@@ -1,0 +1,54 @@
+@inject NavigationManager Nav
+
+@* Installer le player : un seul panneau, une ligne par plateforme (logo, version, bouton). Ouvert depuis le menu latéral ;
+   la version et la taille viennent du fichier déposé sur le serveur (PlayerDownloads). Maquette : installer-player-allege.html. *@
+<div class="modal-backdrop" @onclick="Close"></div>
+<div class="modal app-modal as-drawer pi-dlg" role="dialog" aria-modal="true" aria-labelledby="pi-title">
+    <div class="modal-head">
+        <div class="grow">
+            <h3 id="pi-title">Installer le player</h3>
+            <small>À installer sur l'écran. Il affiche ensuite un code à saisir dans « Connecter un écran ».</small>
+        </div>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="pi-list">
+        <div class="pi-row">
+            <PlayerLogo Kind="Windows" Size="30" />
+            <div class="grow"><b>Windows</b><small>@Meta(win, "PC, mini-PC")</small></div>
+            @if (win != null) { <a class="btn sm" href="/download/windows" download><Ico Name="download" Size="14" /> Télécharger</a> }
+        </div>
+        <div class="pi-row">
+            <PlayerLogo Kind="Android" Size="30" />
+            <div class="grow"><b>Android et Android TV</b><small>@Meta(android, "Box, TV, tablette")</small></div>
+            @if (android != null) { <a class="btn sm" href="/download/android" download><Ico Name="download" Size="14" /> Télécharger</a> }
+        </div>
+        <div class="pi-row soon">
+            <PlayerLogo Kind="Linux" Size="30" />
+            <div class="grow"><b>Linux</b><small>Bientôt disponible</small></div>
+        </div>
+        <div class="pi-row">
+            <PlayerLogo Kind="Navigateur" Size="30" />
+            <div class="grow"><b>Navigateur</b><small>@PlayerAddress</small></div>
+            <a class="btn ghost sm" href="/player/" target="_blank" rel="noopener">Ouvrir <Ico Name="external" Size="14" /></a>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private PlayerDownloads.Item? win, android;
+
+    private string PlayerAddress => new Uri(Nav.BaseUri).Authority + "/player/";
+
+    protected override void OnInitialized()
+    {
+        win = PlayerDownloads.Latest("windows");
+        android = PlayerDownloads.Latest("android");
+    }
+
+    private static string Meta(PlayerDownloads.Item? i, string fallback) =>
+        i == null ? "Pas encore disponible" : $"v{i.Version} · {i.SizeMb.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture).Replace('.', ',')} Mo";
+
+    private Task Close() => OnClose.InvokeAsync();
+}

@@ -18,7 +18,7 @@ android {
 
         // Adresse du back-office (modifiable sur l'appareil : écran « serveur injoignable »).
         // Surcharge possible : gradlew bundleRelease -PserverUrl=https://app.exemple.ch
-        val serverUrl = (project.findProperty("serverUrl") as String?) ?: "https://linkii.duckdns.org"
+        val serverUrl = (project.findProperty("serverUrl") as String?) ?: "https://linkivi.duckdns.org"
         buildConfigField("String", "DEFAULT_SERVER_URL", "\"$serverUrl\"")
 
         // Notifications (Firebase Cloud Messaging) : valeurs du projet Firebase, à passer en -P ou dans ~/.gradle/gradle.properties.

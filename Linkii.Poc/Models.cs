@@ -658,6 +658,15 @@ public class SharedCalendar
     public string Name { get; set; } = "";
     public string Ref { get; set; } = "";         // adresse de la boîte, ID Google, chemin CalDAV ; lien ICS : chiffré
     public string Hint { get; set; } = "";        // affichage (le lien ICS n'est jamais réaffiché en entier)
+
+    // Réservation de salle : le calendrier est une salle. Réglé sur la ligne du calendrier (Intégrations), sans contenu intermédiaire.
+    public bool Room { get; set; }
+    public string RoomName { get; set; } = "";    // vide : le nom du calendrier
+    public int RoomCap { get; set; }
+    public string RoomPlace { get; set; } = "";
+    public bool RoomAllDay { get; set; }          // un événement sur la journée entière rend la salle occupée
+    public int RoomSoon { get; set; } = 10;       // « bientôt occupé » : minutes avant (0 : jamais)
+    public bool RoomTitles { get; set; }          // false : seulement « Occupé » (les titres ne quittent pas le serveur)
 }
 
 /// <summary>Format du POC mono-client : le compte administrateur vivait dans le tenant.</summary>

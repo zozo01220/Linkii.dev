@@ -2,8 +2,8 @@ plugins {
     id("com.android.application")
 }
 
-// Fichiers de sortie : linkii-player-debug.apk, linkii-player-release.aab
-base { archivesName.set("linkii-player") }
+// Fichiers de sortie : Linkivi-<version>-debug.apk, Linkivi-<version>-release.aab
+base { archivesName.set("Linkivi-1.3.1") }
 
 android {
     namespace = "ch.linkii.player"
@@ -13,12 +13,12 @@ android {
         applicationId = "ch.linkii.player"
         minSdk = 24
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3.0"
+        versionCode = 5
+        versionName = "1.3.1"
 
         // Adresse neutre du serveur Linkii (modifiable sur l'appareil dans le menu technicien).
         // Surcharge possible : gradlew bundleRelease -PserverUrl=https://app.exemple.ch
-        val serverUrl = (project.findProperty("serverUrl") as String?) ?: "https://linkii.duckdns.org"
+        val serverUrl = (project.findProperty("serverUrl") as String?) ?: "https://linkivi.duckdns.org"
         buildConfigField("String", "DEFAULT_SERVER_URL", "\"$serverUrl\"")
     }
 

@@ -4,7 +4,7 @@ using System.Windows;
 namespace Linkii.Player;
 
 /// <summary>
-/// Linkii Player pour Windows. Un lancement normal démarre un superviseur sans fenêtre qui lance et relance le processus d'affichage
+/// Linkivi pour Windows. Un lancement normal démarre un superviseur sans fenêtre qui lance et relance le processus d'affichage
 /// (plantage, fenêtre figée, redémarrage demandé par le back-office). Une instance = un écran du back-office : un profil, un appairage.
 /// Rien à régler sur le PC : l'adresse du serveur est intégrée, le reste (démarrage automatique, fenêtre, moniteur) vient du back-office.
 /// </summary>

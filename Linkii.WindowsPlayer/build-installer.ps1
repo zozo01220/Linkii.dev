@@ -1,6 +1,6 @@
-﻿# Compile le player et fabrique l'installeur : artifacts\LinkiiPlayer-<version>-x64.msi
-# Usage : .\build-installer.ps1 [-Version 0.3.0]
-param([string]$Version = '0.3.0')
+﻿# Compile le player et fabrique l'installeur : artifacts\Linkivi-<version>-x64.msi
+# Usage : .\build-installer.ps1 [-Version 0.3.1]
+param([string]$Version = '0.3.1')
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $publish = Join-Path $root 'artifacts\publish'
@@ -17,5 +17,5 @@ Get-ChildItem "$root\artifacts\*.msi" | ForEach-Object { "{0}  ({1:N1} Mo)" -f $
 # Téléchargement depuis le back-office (/download/windows) : la dernière version remplace les précédentes
 $downloads = Join-Path $root '..\Linkii.Poc\downloads'
 New-Item -ItemType Directory -Force $downloads | Out-Null
-Get-ChildItem "$downloads\LinkiiPlayer-*.msi" -ErrorAction SilentlyContinue | Remove-Item -Force
-Copy-Item "$root\artifacts\LinkiiPlayer-$Version-x64.msi" $downloads
+Get-ChildItem "$downloads\Linkivi-*.msi" -ErrorAction SilentlyContinue | Remove-Item -Force
+Copy-Item "$root\artifacts\Linkivi-$Version-x64.msi" $downloads

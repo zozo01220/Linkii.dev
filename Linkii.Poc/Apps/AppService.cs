@@ -38,7 +38,8 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         catch (ReadOnlyLevelException) { }   // un niveau en lecture seule n'active rien : ce sera fait à la prochaine visite d'un administrateur
     }
     // même si l'app a été désactivée ; une composition n'est visible que de son propriétaire et de ceux à qui elle est partagée (voir CompositionRights)
-    public MediaItem? Instance(Guid id) => store.Read(d => d.Media.FirstOrDefault(m => m.Id == id && m.AppId != null && CompositionRights.RightOf(d, m) != FolderRight.None));
+    public MediaItem? Instance(Guid id) => store.Read(d => d.Media.FirstOrDefault(m => m.Id == id && m.AppId != null && CompositionRights.RightOf(d, m) != FolderRight.None)
+        ?? SharedCalendarSources.RoomContent(d.Tenant, id));   // une salle (calendrier) se lit comme un contenu
     public List<MediaItem> Instances(string appId) => store.Read(d => d.Media.Where(m => m.AppId == appId && CompositionRights.RightOf(d, m) != FolderRight.None).OrderBy(m => m.Name).ToList());
 
     /// <summary>Droit de la personne sur chaque contenu donné (compositions : le sien, ou un partage ; autres contenus : sans restriction).</summary>
@@ -204,8 +205,8 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
 
     /// <summary>Sources possibles d'un bloc ou de champs de composition (§85) : contenus configurés des intégrations à données (météo, calendrier, RSS, capteurs).</summary>
     public List<MediaItem> CompositionSources() =>
-        store.Read(d => d.Media.Where(m => m.AppId != null && Compositions.SourceApps.Contains(m.AppId) && d.Access.CanUse(catalog, m.AppId)).OrderBy(m => m.Name).ToList())
-            .Where(m => !IsIncomplete(m)).ToList();
+        store.Read(d => d.Media.Where(m => m.AppId != null && Compositions.SourceApps.Contains(m.AppId) && d.Access.CanUse(catalog, m.AppId)).OrderBy(m => m.Name).ToList()
+            .Where(m => !IsIncomplete(m)).Concat(SharedCalendarSources.RoomContents(d.Tenant)).ToList());
 
     /// <summary>Données actuelles d'une source (celles que l'écran recevrait), pour l'éditeur de compositions ; sinon un message d'erreur lisible.</summary>
     public async Task<(System.Text.Json.JsonElement? Data, string? Error)> SourceData(Guid id)
@@ -336,6 +337,8 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         if (!ok || providers.Find(m.Provider) is not { } provider || !m.Data) return (ok, message, null);
         try
         {
+        if (m.Id == "agenda")   // réglages de salle : posés par le calendrier (Intégrations), absents du formulaire du contenu
+            foreach (var (k, raw) in values) if (k.StartsWith("room", StringComparison.Ordinal) && !v.ContainsKey(k)) v[k] = raw.Trim();
             var tenant = store.Read(d => d.Tenant);
             var data = await provider.Fetch(new AppRuntime(tenant, RuntimeValues(m, values, instance)));
             return (true, message, data == null ? null : System.Text.Json.JsonSerializer.SerializeToElement(data));

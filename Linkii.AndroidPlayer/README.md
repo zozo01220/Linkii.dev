@@ -1,4 +1,4 @@
-# Linkii Player — application Android
+# Linkivi — application Android
 
 Coquille native autour du player web (`Linkii.Poc/wwwroot/player`). Le player garde l'appairage par code, la diffusion
 et le cache hors ligne (service worker + Cache Storage) ; l'application ajoute le démarrage automatique, le plein écran
@@ -12,8 +12,8 @@ JDK 17 ou plus (celui d'Android Studio convient), SDK Android 35.
 
 ```bash
 cd Linkii.AndroidPlayer
-./gradlew :app:assembleDebug          # app/build/outputs/apk/debug/linkii-player-debug.apk
-./gradlew :app:bundleRelease          # app/build/outputs/bundle/release/linkii-player-release.aab (Google Play)
+./gradlew :app:assembleDebug          # app/build/outputs/apk/debug/Linkivi-1.3.1-debug.apk
+./gradlew :app:bundleRelease          # app/build/outputs/bundle/release/Linkivi-1.3.1-release.aab (Google Play)
 ```
 
 Adresse du serveur par défaut : `-PserverUrl=https://app.exemple.ch` (modifiable ensuite sur l'appareil).
@@ -36,7 +36,7 @@ Le player (`wwwroot/player`) est servi par le serveur : un changement de `player
    $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
    & $adb connect 192.168.x.x:5555        # accepter « Autoriser le débogage ? » sur l'appareil
    & $adb devices                         # doit afficher « device » (pas « unauthorized »)
-   & $adb install -r app\build\outputs\apk\debug\linkii-player-debug.apk
+   & $adb install -r app\build\outputs\apk\debug\Linkivi-1.3.1-debug.apk
    ```
    `-r` garde l'appairage, les réglages et les médias déjà téléchargés. Erreurs : `INSTALL_FAILED_UPDATE_INCOMPATIBLE` (autre signature : désinstaller d'abord, l'appairage est perdu), `INSTALL_FAILED_VERSION_DOWNGRADE` (ajouter `-d`), `no devices/emulators found` (`connect` pas fait ou ADB réseau inactif).
 4. Contrôler : republier l'écran, puis menu technicien (« dont images… vidéos… »), puis couper le réseau.

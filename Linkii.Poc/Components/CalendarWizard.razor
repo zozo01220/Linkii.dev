@@ -76,6 +76,15 @@
                                     <input type="checkbox" class="cw-chk" checked="@chosen.ContainsKey(cal.Ref)" aria-label="Partager « @cal.Name »" @onchange="() => Check(cal)" />
                                     <button type="button" class="cw-nm" @onclick="() => Focus(cal)"><Ico Name="calendar" Size="16" /> @cal.Name</button>
                                     @if (cal.Hint.Length > 0) { <span class="cw-n" title="@cal.Hint">@cal.Hint</span> }
+                                    @if (Origin(cal) is { Length: > 0 } origin) { <span class="badge neutre" title="Reconnu comme salle par @Provider">@origin</span> }
+                                    @if (chosen.ContainsKey(cal.Ref))
+                                    {
+                                        var room = Draft(cal).Room;
+                                        <span class="cal-roomsw" title="Utiliser ce calendrier comme salle pour les compositions de réservation de salle">
+                                            <span>Salle</span>
+                                            <button type="button" class="switch @(room ? "on" : "")" role="switch" aria-checked="@(room ? "true" : "false")" aria-label="Utiliser @cal.Name comme salle" @onclick="() => ToggleRoom(cal)"><span></span></button>
+                                        </span>
+                                    }
                                 </div>
                             }
                         }
@@ -86,6 +95,25 @@
                     @if (focus == null) { <div class="dfp-empty">Sélectionnez un calendrier pour voir ses prochains événements.</div> }
                     else
                     {
+                        @if (FocusCal is { } fc && chosen.ContainsKey(fc.Ref) && Draft(fc) is { Room: true } d)
+                        {
+                            <div class="cal-room cw-room">
+                                <label>Nom de la salle<input maxlength="60" placeholder="@fc.Name" @bind="d.RoomName" /></label>
+                                <label>Capacité<input type="number" min="0" max="5000" placeholder="personnes" @bind="d.RoomCap" /></label>
+                                <label>Lieu (facultatif)<input maxlength="80" @bind="d.RoomPlace" /></label>
+                                <label>Bientôt occupé
+                                    <select @bind="d.RoomSoon">
+                                        <option value="10">10 minutes avant</option>
+                                        <option value="5">5 minutes avant</option>
+                                        <option value="0">Jamais</option>
+                                    </select>
+                                </label>
+                                <div class="cal-room-sw"><span>Les événements sur la journée entière rendent la salle occupée</span>
+                                    <button type="button" class="switch @(d.RoomAllDay ? "on" : "")" role="switch" aria-checked="@(d.RoomAllDay ? "true" : "false")" aria-label="Journée entière : salle occupée" @onclick="() => d.RoomAllDay = !d.RoomAllDay"><span></span></button></div>
+                                <div class="cal-room-sw"><span>Afficher le titre des réunions sur l'écran <small>Sinon seulement « Occupé » : les titres ne quittent jamais le serveur.</small></span>
+                                    <button type="button" class="switch @(d.RoomTitles ? "on" : "")" role="switch" aria-checked="@(d.RoomTitles ? "true" : "false")" aria-label="Afficher le titre des réunions" @onclick="() => d.RoomTitles = !d.RoomTitles"><span></span></button></div>
+                            </div>
+                        }
                         <div class="cw-crumb">Aperçu · <b>@FocusName</b> — 7 prochains jours</div>
                         @if (previewing) { <div class="dfp-empty">Lecture du calendrier…</div> }
                         else if (previewError != null) { <div class="dfp-empty err">@previewError</div> }
@@ -109,6 +137,10 @@
                     <div><b>immédiat</b><small>aucun fichier à copier</small></div>
                 </div>
                 <p class="cw-dest">Les calendriers sont proposés dans l'app « Calendrier partagé » des listes de lecture ; les écrans lisent leurs événements en direct.</p>
+                @if (chosen.Values.Where(c => Draft(c).Room).ToList() is { Count: > 0 } roomCals)
+                {
+                    <p class="cw-dest"><b>Utilisés comme salle</b> (@roomCals.Count) : @string.Join(", ", roomCals.Select(c => SharedCalendarSources.RoomName(Draft(c)))). Ils sont proposés comme « Calendrier de la salle » dans les réglages des écrans.</p>
+                }
                 @if (Removed.Count > 0) { <p class="cw-dest"><b>Seront retirés</b> : @string.Join(", ", Removed.Select(r => r.Name)).</p> }
                 @foreach (var e in planErrors) { <small class="cal-err">@e</small> }
                 @if (done) { <div class="cw-run"><span>Terminé : @chosen.Count calendrier@(chosen.Count > 1 ? "s" : "") proposé@(chosen.Count > 1 ? "s" : "") dans les listes de lecture.</span><span>100 %</span></div><div class="cw-bar"><i class="ok" style="width:100%"></i></div> }
@@ -276,7 +308,10 @@
         SharedCalendar Of(string r, string name, string hint) => existing.FirstOrDefault(e => e.Ref == r) ?? new SharedCalendar { Source = Source, Name = name, Ref = r, Hint = hint };
         switch (Source)
         {
-            case "google": yield return new("Mes agendas", googleCalendars.Select(g => Of(g.Id, g.Name, g.Primary ? "principal" : "")).ToList()); break;
+            case "google":
+                yield return new("Mes agendas", googleCalendars.Where(g => !IsGoogleResource(g.Id)).Select(g => Of(g.Id, g.Name, g.Primary ? "principal" : "")).ToList());
+                yield return new("Ressources de l'organisation", googleCalendars.Where(g => IsGoogleResource(g.Id)).Select(g => Of(g.Id, g.Name, "")).ToList());
+                break;
             case "m365":
                 yield return new("Mes agendas", msCalendars.Select(c => Of(GraphService.CalendarRefPrefix + c.Id, c.Name, c.Owner is { Length: > 0 } o ? o : user)).ToList());
                 yield return new("Salles et boîtes", rooms.Select(r => Of(r.Email, r.Name, r.Building ?? r.Email)).ToList());
@@ -291,6 +326,47 @@
     private void Check(SharedCalendar c)
     {
         if (!chosen.Remove(c.Ref)) chosen[c.Ref] = c;
+    }
+
+    // ---------- Salle : réglages gardés ici jusqu'à « Ajouter » ----------
+
+    private readonly Dictionary<string, SharedCalendar> drafts = new(StringComparer.OrdinalIgnoreCase);
+    private SharedCalendar? FocusCal => focus == null ? null : AllListed().FirstOrDefault(c => c.Ref == focus);
+
+    private static bool IsGoogleResource(string id) => id.EndsWith("@resource.calendar.google.com", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Salle d'office : ressource Google Workspace ou salle de l'annuaire Microsoft (si le calendrier n'est pas déjà enregistré).</summary>
+    private string Origin(SharedCalendar c) => Source switch
+    {
+        "google" when IsGoogleResource(c.Ref) => "Ressource",
+        "m365" when rooms.Any(r => string.Equals(r.Email, c.Ref, StringComparison.OrdinalIgnoreCase)) => "Annuaire",
+        _ => ""
+    };
+
+    private SharedCalendar Draft(SharedCalendar c)
+    {
+        if (drafts.TryGetValue(c.Ref, out var d)) return d;
+        d = new SharedCalendar { Name = c.Name, Ref = c.Ref, Room = c.Room, RoomName = c.RoomName, RoomCap = c.RoomCap, RoomPlace = c.RoomPlace, RoomAllDay = c.RoomAllDay, RoomSoon = c.RoomSoon, RoomTitles = c.RoomTitles };
+        if (!existing.Any(e => e.Ref == c.Ref) && Origin(c).Length > 0)
+        {
+            d.Room = true;
+            if (Source == "m365" && rooms.FirstOrDefault(r => string.Equals(r.Email, c.Ref, StringComparison.OrdinalIgnoreCase)) is { } r)
+                (d.RoomCap, d.RoomPlace) = (r.Capacity ?? 0, r.Building ?? "");
+        }
+        return drafts[c.Ref] = d;
+    }
+
+    private void ToggleRoom(SharedCalendar c)
+    {
+        var d = Draft(c);
+        d.Room = !d.Room;
+    }
+
+    private void ApplyRoom(SharedCalendar target)
+    {
+        if (!drafts.TryGetValue(target.Ref, out var d)) return;
+        (target.Room, target.RoomName, target.RoomCap, target.RoomPlace, target.RoomAllDay, target.RoomSoon, target.RoomTitles) =
+            (d.Room, d.RoomName.Trim(), Math.Clamp(d.RoomCap, 0, 5000), d.RoomPlace.Trim(), d.RoomAllDay, d.RoomSoon is 0 or 5 ? d.RoomSoon : 10, d.RoomTitles);
     }
 
     private void AddManual()
@@ -360,8 +436,15 @@
     {
         foreach (var c in chosen.Values)
         {
-            if (existing.Any(e => e.Ref == c.Ref)) continue;
+            if (existing.Any(e => e.Ref == c.Ref))
+            {
+                if (!drafts.ContainsKey(c.Ref)) continue;
+                var id = c.Id;
+                Store.Write(d => { if (d.Tenant.SharedCalendars.FirstOrDefault(x => x.Id == id) is { } x) ApplyRoom(x); });
+                continue;
+            }
             var cal = new SharedCalendar { Source = Source, Name = c.Name, Ref = c.Ref, Hint = c.Hint };
+            ApplyRoom(cal);
             Store.Write(d => d.Tenant.SharedCalendars.Add(cal));
         }
         var gone = Removed.Select(r => r.Id).ToHashSet();

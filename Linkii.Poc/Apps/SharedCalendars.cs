@@ -75,6 +75,25 @@ public static class SharedCalendarSources
     public static string CalDavUrl(string server, string path) =>
         AppCatalog.IsHttpUrl(path) || server.Length == 0 ? path : server.TrimEnd('/') + "/" + path.TrimStart('/');
 
+    /// <summary>
+    /// Une salle est un calendrier dont l'interrupteur « Salle » est activé (Intégrations). Pour les compositions et les écrans elle se présente comme un
+    /// contenu « Calendrier partagé » (même identifiant que le calendrier) : le reste du code lit ses données comme celles de n'importe quelle source.
+    /// </summary>
+    public static MediaItem RoomContent(Tenant t, SharedCalendar c) => new()
+    {
+        ClientId = t.Id, Id = c.Id, Type = "app", AppId = "agenda", Name = RoomName(c),
+        Settings = new()
+        {
+            ["calendar"] = c.Id.ToString(), ["title"] = RoomName(c), ["days"] = "7", ["room"] = "true", ["roomName"] = RoomName(c),
+            ["roomCap"] = c.RoomCap.ToString(), ["roomPlace"] = c.RoomPlace, ["roomAllDay"] = c.RoomAllDay ? "true" : "false",
+            ["roomSoon"] = c.RoomSoon.ToString(), ["roomPrivacy"] = c.RoomTitles ? "title" : "busy"
+        }
+    };
+
+    public static string RoomName(SharedCalendar c) => c.RoomName.Trim().Length > 0 ? c.RoomName.Trim() : c.Name;
+    public static List<MediaItem> RoomContents(Tenant t) => t.SharedCalendars.Where(c => c.Room).OrderBy(c => RoomName(c), StringComparer.CurrentCultureIgnoreCase).Select(c => RoomContent(t, c)).ToList();
+    public static MediaItem? RoomContent(Tenant? t, Guid id) => t != null && t.SharedCalendars.FirstOrDefault(c => c.Id == id && c.Room) is { } c ? RoomContent(t, c) : null;
+
     /// <summary>Lien ICS raccourci pour l'affichage : domaine et fin du chemin, jamais le jeton complet.</summary>
     public static string ShortLink(string url) =>
         Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.Host + "/…/" + (u.Segments.LastOrDefault()?.Trim('/') is { Length: > 0 and <= 40 } last ? last : "") : "";

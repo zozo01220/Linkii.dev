@@ -132,8 +132,31 @@
                 <div class="cal-row">
                     <Ico Name="calendar" Size="16" />
                     <div class="cal-id"><b>@cal.Name</b><small title="@cal.Hint">@cal.Hint</small></div>
+                    <span class="cal-roomsw" title="Utiliser ce calendrier comme salle pour les compositions de réservation de salle">
+                        <span>Salle</span>
+                        <button type="button" class="switch @(cal.Room ? "on" : "")" role="switch" aria-checked="@(cal.Room ? "true" : "false")" aria-label="Utiliser @cal.Name comme salle" @onclick="() => ToggleRoom(cal)"><span></span></button>
+                    </span>
                     <span class="badge neutre">@(lists > 0 ? $"{lists} liste{(lists > 1 ? "s" : "")}" : contents > 0 ? $"{contents} contenu{(contents > 1 ? "s" : "")}" : "Non utilisé")</span>
                     <button type="button" class="kebab-btn" title="Retirer" aria-label="Retirer @cal.Name" @onclick="() => confirmId = cal.Id"><Ico Name="trash" Size="16" /></button>
+                    @if (cal.Room)
+                    {
+                        <div class="cal-room">
+                            <label>Nom de la salle<input maxlength="60" placeholder="@cal.Name" @bind="cal.RoomName" @bind:after="() => SaveRoom(cal)" /></label>
+                            <label>Capacité<input type="number" min="0" max="5000" placeholder="personnes" @bind="cal.RoomCap" @bind:after="() => SaveRoom(cal)" /></label>
+                            <label>Lieu (facultatif)<input maxlength="80" @bind="cal.RoomPlace" @bind:after="() => SaveRoom(cal)" /></label>
+                            <label>Bientôt occupé
+                                <select @bind="cal.RoomSoon" @bind:after="() => SaveRoom(cal)">
+                                    <option value="10">10 minutes avant</option>
+                                    <option value="5">5 minutes avant</option>
+                                    <option value="0">Jamais</option>
+                                </select>
+                            </label>
+                            <div class="cal-room-sw"><span>Les événements sur la journée entière rendent la salle occupée</span>
+                                <button type="button" class="switch @(cal.RoomAllDay ? "on" : "")" role="switch" aria-checked="@(cal.RoomAllDay ? "true" : "false")" aria-label="Journée entière : salle occupée" @onclick="() => { cal.RoomAllDay = !cal.RoomAllDay; SaveRoom(cal); }"><span></span></button></div>
+                            <div class="cal-room-sw"><span>Afficher le titre des réunions sur l'écran <small>Sinon seulement « Occupé » : les titres ne quittent jamais le serveur.</small></span>
+                                <button type="button" class="switch @(cal.RoomTitles ? "on" : "")" role="switch" aria-checked="@(cal.RoomTitles ? "true" : "false")" aria-label="Afficher le titre des réunions" @onclick="() => { cal.RoomTitles = !cal.RoomTitles; SaveRoom(cal); }"><span></span></button></div>
+                        </div>
+                    }
                     @if (confirmId == cal.Id)
                     {
                         <div class="cal-confirm" role="alert">
@@ -258,6 +281,24 @@
                 .GroupBy(m => m.Settings["calendar"]).ToDictionary(g => g.Key, g => g.Select(m => m.Id).ToHashSet());
             return byCal.ToDictionary(kv => kv.Key, kv => (kv.Value.Count, d.Playlists.Count(p => p.Draft.Any(i => kv.Value.Contains(i.MediaId)))));
         });
+    }
+
+    private async Task ToggleRoom(SharedCalendar c)
+    {
+        c.Room = !c.Room;
+        await SaveRoom(c);
+    }
+
+    /// <summary>Réglages de salle du calendrier : enregistrés tout de suite ; les écrans et les compositions les lisent à la prochaine lecture / publication.</summary>
+    private async Task SaveRoom(SharedCalendar c)
+    {
+        var (room, name, cap, place, allDay, soon, titles) = (c.Room, c.RoomName.Trim(), Math.Clamp(c.RoomCap, 0, 5000), c.RoomPlace.Trim(), c.RoomAllDay, c.RoomSoon is 0 or 5 ? c.RoomSoon : 10, c.RoomTitles);
+        Store.Write(d =>
+        {
+            if (d.Tenant.SharedCalendars.FirstOrDefault(x => x.Id == c.Id) is not { } x) return;
+            (x.Room, x.RoomName, x.RoomCap, x.RoomPlace, x.RoomAllDay, x.RoomSoon, x.RoomTitles) = (room, name, cap, place, allDay, soon, titles);
+        });
+        await Changed();
     }
 
     private async Task Changed()
