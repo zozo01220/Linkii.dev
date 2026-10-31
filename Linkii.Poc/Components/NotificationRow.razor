@@ -1,0 +1,46 @@
+@* Une ligne du centre de notifications : pastille de gravité, titre, texte, catégorie et heure ; en haut à droite, le bouton d'action et (au survol) lu / non lu et supprimer.
+   Partagée par l'aperçu de la cloche (Compact) et la page Notifications. Maquette : centre-notifications.html. *@
+@{ var cat = Notifs.Category(N.Kind); var unread = !Read; }
+<div class="nt sev-@(N.Severity) @(unread ? "unread" : "") @(Compact ? "compact" : "")" role="listitem" @onclick="() => OnOpen.InvokeAsync(N)">
+    @if (Selecting) { <input type="checkbox" class="ios nt-ck" checked="@Selected" aria-label="Sélectionner" @onclick:stopPropagation="true" @onchange="() => OnPick.InvokeAsync(N)" /> }
+    <span class="nt-ico"><Ico Name="@(N.ResolvedUtc != null ? "check" : cat.Icon)" Size="18" /></span>
+    <div class="nt-tx">
+        <div class="nt-ti">@N.Title@if (N.Count > 1) { <span class="nt-n">× @N.Count</span> }</div>
+        @if (N.Body.Length > 0) { <div class="nt-bd">@N.Body</div> }
+        <div class="nt-mt"><span class="nt-cat">@cat.Label</span><span>@Notifs.When(N.UpdatedUtc, DateTime.UtcNow, Timezone)</span></div>
+    </div>
+    @if (!Compact)
+    {
+        <div class="nt-act" @onclick:stopPropagation="true">
+            <span class="nt-hov">
+                <button type="button" title="@(unread ? "Marquer comme lue" : "Marquer comme non lue")" aria-label="@(unread ? "Marquer comme lue" : "Marquer comme non lue")" @onclick="() => OnToggle.InvokeAsync(N)"><Ico Name="@(unread ? "check" : "eye")" Size="14" /></button>
+                <button type="button" title="Supprimer" aria-label="Supprimer" @onclick="() => OnDelete.InvokeAsync(N)"><Ico Name="trash" Size="14" /></button>
+            </span>
+            @if (Action != null) { <button type="button" class="nt-go" @onclick="() => OnOpen.InvokeAsync(N)">@Action</button> }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Notification N { get; set; } = null!;
+    [Parameter] public bool Read { get; set; }
+    [Parameter] public bool Compact { get; set; }
+    [Parameter] public bool Selecting { get; set; }
+    [Parameter] public bool Selected { get; set; }
+    [Parameter] public string Timezone { get; set; } = "UTC";
+    [Parameter] public EventCallback<Notification> OnOpen { get; set; }
+    [Parameter] public EventCallback<Notification> OnToggle { get; set; }
+    [Parameter] public EventCallback<Notification> OnDelete { get; set; }
+    [Parameter] public EventCallback<Notification> OnPick { get; set; }
+
+    /// <summary>Libellé du bouton d'action, selon la page qu'il ouvre.</summary>
+    private string? Action => N.Path switch
+    {
+        var p when p.StartsWith("/settings?tab=abonnement") => "Voir l'abonnement",
+        var p when p.StartsWith("/settings") => "Régler",
+        "/organisation" => "Organisation",
+        "/media" => "Voir",
+        "/" => "Voir les écrans",
+        _ => "Ouvrir",
+    };
+}

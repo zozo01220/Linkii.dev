@@ -18,9 +18,33 @@
     '#kiosk.on{display:block}' +
     'body.k-open #idle{display:none!important}' +   /* l'écran « Rien à afficher » de la diffusion ne recouvre pas l'accueil */
     '#kiosk.nocursor,#kiosk.nocursor *{cursor:none!important}' +
-    '#k-touch{position:absolute;left:0;top:0;right:0;bottom:0;display:none}' +
-    '#k-touch .k-prompt{position:absolute;left:50%;bottom:4em;transform:translateX(-50%);background:rgba(11,31,58,.82);color:#fff;border:.15em solid rgba(255,255,255,.85);border-radius:3em;padding:.9em 2.4em;font-size:2.2em;white-space:nowrap;animation:kp 1.8s infinite}' +
-    '@keyframes kp{50%{opacity:.45}}' +
+    '#k-touch{position:absolute;left:0;top:0;right:0;bottom:0;display:none;container-type:size}' +
+    '.kt{position:absolute;left:0;top:0;right:0;bottom:0;pointer-events:none;overflow:hidden;container-type:size;--u:1cqmin}' +
+    '.kt.kt-land{--u:.55cqmin}' +
+    '.kt .kt-c{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}' +
+    '.kt .kt-h{width:1em;height:1em;display:block}' +
+    '.kt-pill .kt-c{background:rgba(11,31,58,.82);color:#fff;border:calc(.5 * var(--u)) solid rgba(255,255,255,.85);border-radius:calc(12 * var(--u));padding:calc(3 * var(--u)) calc(6 * var(--u));font-size:calc(4.4 * var(--u));white-space:nowrap;animation:kt-pulse 1.8s infinite}' +
+    '.kt-round .kt-ring{position:absolute;left:50%;top:50%;width:calc(34 * var(--u));height:calc(34 * var(--u));border-radius:50%;border:calc(.8 * var(--u)) solid #fff;animation:kt-ring 2.4s infinite both}' +
+    '.kt-round .kt-ring.r2{animation-delay:1.2s}' +
+    '.kt-round .kt-dot{width:calc(34 * var(--u));height:calc(34 * var(--u));border-radius:50%;background:#E8710A;color:#fff;display:grid;place-items:center;font-size:calc(17 * var(--u));box-shadow:0 calc(2 * var(--u)) calc(8 * var(--u)) rgba(0,0,0,.53)}' +
+    '.kt .kt-lbl{position:absolute;left:0;right:0;top:calc(50% + calc(24 * var(--u)));text-align:center;color:#fff;font-size:calc(6 * var(--u));font-weight:700;text-shadow:0 calc(.4 * var(--u)) calc(2 * var(--u)) rgba(0,0,0,.65)}' +
+    '.kt-glass .kt-card{width:calc(76 * var(--u));padding:calc(9 * var(--u)) calc(6 * var(--u)) calc(8 * var(--u));text-align:center;color:#fff;background:rgba(255,255,255,.16);-webkit-backdrop-filter:blur(calc(2.4 * var(--u)));backdrop-filter:blur(calc(2.4 * var(--u)));border:calc(.3 * var(--u)) solid rgba(255,255,255,.4);border-radius:calc(6 * var(--u));box-shadow:0 calc(3 * var(--u)) calc(10 * var(--u)) rgba(0,0,0,.4)}' +
+    '.kt-glass .kt-card .kt-h{font-size:calc(15 * var(--u));margin:0 auto calc(3 * var(--u));animation:kt-tap 1.6s infinite}' +
+    '.kt-glass .kt-card h3{margin:0;font-size:calc(8 * var(--u));font-weight:800}' +
+    '.kt-glass .kt-card p{margin:calc(2 * var(--u)) 0 0;font-size:calc(4.6 * var(--u));color:#E6EEF7}' +
+    '.kt-icon .kt-halo{width:calc(46 * var(--u));height:calc(46 * var(--u));border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.33) 0%,rgba(255,255,255,0) 70%);animation:kt-pulse 2.2s infinite}' +
+    '.kt-icon .kt-ico{font-size:calc(20 * var(--u));color:#fff;animation:kt-tapc 1.6s infinite;filter:drop-shadow(0 calc(1 * var(--u)) calc(3 * var(--u)) rgba(0,0,0,.6))}' +
+    '.kt-icon .kt-lbl{top:calc(50% + calc(17 * var(--u)));font-size:calc(5 * var(--u));letter-spacing:calc(.3 * var(--u));text-transform:uppercase;font-weight:600}' +
+    '.kt-band .kt-band-in{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);background:rgba(11,31,58,.78);padding:calc(8 * var(--u)) calc(6 * var(--u));text-align:center;color:#fff;border-top:calc(.4 * var(--u)) solid rgba(255,255,255,.6);border-bottom:calc(.4 * var(--u)) solid rgba(255,255,255,.6)}' +
+    '.kt-band .kt-band-in h3{margin:0;font-size:calc(9 * var(--u));font-weight:800}' +
+    '.kt-band .kt-band-in .kt-h{margin:calc(3 * var(--u)) auto 0;font-size:calc(9 * var(--u));animation:kt-tap 1.6s infinite}' +
+    '.kt-button .kt-btn{background:#E8710A;color:#fff;border-radius:calc(7 * var(--u));padding:calc(6 * var(--u)) calc(12 * var(--u));text-align:center;box-shadow:0 calc(2 * var(--u)) 0 #A9540A,0 calc(4 * var(--u)) calc(10 * var(--u)) rgba(0,0,0,.45);animation:kt-pulse 1.8s infinite}' +
+    '.kt-button .kt-btn b{display:block;font-size:calc(10 * var(--u));font-weight:800}' +
+    '.kt-button .kt-btn span{display:block;margin-top:calc(1.5 * var(--u));font-size:calc(4.4 * var(--u));opacity:.92}' +
+    '@keyframes kt-pulse{0%,100%{transform:translate(-50%,-50%) scale(1)}50%{transform:translate(-50%,-50%) scale(1.06)}}' +
+    '@keyframes kt-ring{0%{transform:translate(-50%,-50%) scale(.6);opacity:.7}100%{transform:translate(-50%,-50%) scale(1.8);opacity:0}}' +
+    '@keyframes kt-tap{0%,100%{transform:translateY(0)}50%{transform:translateY(-calc(3 * var(--u)))}}' +
+    '@keyframes kt-tapc{0%,100%{transform:translate(-50%,-50%)}50%{transform:translate(-50%,-62%)}}' +
     '#k-main{position:absolute;left:0;top:0;right:0;bottom:0;display:none;color:#0B1F3A;overflow:hidden}' +
     '#k-home{position:absolute;left:0;top:0;right:0;bottom:0;display:flex;flex-direction:column;padding:4.5em 5em 5em;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;touch-action:pan-y}' +
     '#k-home .k-logo{display:flex;gap:1em;align-items:center;font-size:2.2em;color:#5A6B80;font-weight:500;min-height:2.2em}' +
@@ -117,6 +141,19 @@
     return c;
   }
 
+  /* Bouton « Touchez l’écran pour commencer » au centre de l’écran d’attente, dans le style choisi (onglet Inactivité de la fenêtre de la borne) */
+  var HAND = '<svg class="kt-h" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M9 11V5.5a1.5 1.5 0 0 1 3 0V10m0-1.5a1.5 1.5 0 0 1 3 0V11m0-1a1.5 1.5 0 0 1 3 0v5.5A6 6 0 0 1 12 21.5h-.5a6 6 0 0 1-4.7-2.3L4 15.6a1.6 1.6 0 0 1 2.4-2.1L9 15.5"/></svg>';
+  function touchHtml(style) {
+    var s = ['round', 'glass', 'icon', 'band', 'button'].indexOf(style) >= 0 ? style : 'pill', m;
+    if (s === 'round') m = '<i class="kt-ring"></i><i class="kt-ring r2"></i><div class="kt-c kt-dot">' + HAND + '</div><div class="kt-lbl">Touchez l’écran<br>pour commencer</div>';
+    else if (s === 'glass') m = '<div class="kt-c kt-card">' + HAND + '<h3>Touchez l’écran</h3><p>pour commencer</p></div>';
+    else if (s === 'icon') m = '<div class="kt-c kt-halo"></div><div class="kt-c kt-ico">' + HAND + '</div><div class="kt-lbl">Touchez pour commencer</div>';
+    else if (s === 'band') m = '<div class="kt-band-in"><h3>Touchez l’écran<br>pour commencer</h3>' + HAND + '</div>';
+    else if (s === 'button') m = '<div class="kt-c kt-btn"><b>Commencer</b><span>Touchez l’écran</span></div>';
+    else m = '<div class="kt-c">Touchez l’écran pour commencer</div>';
+    return '<div class="kt kt-' + s + (H && H.portrait && !H.portrait() ? ' kt-land' : '') + '">' + m + '</div>';
+  }
+
   /* ---------- Construction ---------- */
   function build() {
     css();
@@ -125,7 +162,7 @@
     root.innerHTML = '';
     root.className = (cfg.hideCursor ? 'nocursor ' : '') + 'on';
     touchEl = el('div'); touchEl.id = 'k-touch';
-    touchEl.appendChild(el('div', 'k-prompt', 'Touchez l’écran pour commencer'));
+    touchEl.innerHTML = touchHtml(cfg.touchStyle);
     mainEl = el('div'); mainEl.id = 'k-main'; mainEl.style.background = cfg.bg || '#fff';
     homeEl = el('div'); homeEl.id = 'k-home';
     pageEl = el('div'); pageEl.id = 'k-page';
@@ -164,6 +201,8 @@
     var cols = ts.cols > 0 ? ts.cols : tiles.length <= 1 ? 1 : (H.portrait() ? 2 : (tiles.length <= 4 ? 2 : 3));
     var logo = cfg.logo ? '<img src="' + esc(cfg.logo) + '" alt="">' : '';
     homeEl.innerHTML = '<div class="k-logo">' + logo + '</div><h1>' + esc(cfg.title) + '</h1><p>' + esc(cfg.prompt) + '</p>';
+    var lg = homeEl.querySelector('.k-logo img');   // logo placé par glisser-déposer dans la fenêtre de la borne (% de l'accueil)
+    if (lg && cfg.logoX != null && cfg.logoY != null) { lg.style.position = 'absolute'; lg.style.left = cfg.logoX + '%'; lg.style.top = cfg.logoY + '%'; if (cfg.logoW) { lg.style.width = cfg.logoW + '%'; lg.style.height = 'auto'; lg.style.maxWidth = 'none'; } }
     var h1 = homeEl.querySelector('h1'), pp = homeEl.querySelector('p');   // police et couleur du titre et du message d'invite (réglées dans la fenêtre de la borne)
     if (cfg.titleFont) h1.style.fontFamily = cfg.titleFont;
     if (cfg.titleColor) h1.style.setProperty('color', cfg.titleColor, 'important');
@@ -186,6 +225,8 @@
       var sc = (t.scale || 1) * (ts.scale || 1);   // taille propre à la tuile x taille commune
       var tb = b.querySelector('b'), tsm = b.querySelector('small');
       if (ts.weight) tb.style.fontWeight = ts.weight;
+      if (t.titleColor) tb.style.setProperty('color', t.titleColor, 'important');   // couleurs propres à la tuile
+      if (t.subColor && tsm) tsm.style.setProperty('color', t.subColor, 'important');
       if (sc !== 1) {
         tb.style.fontSize = ((cfg.bigText ? 4.2 : 3.4) * sc) + 'em';
         if (tsm) tsm.style.fontSize = ((cfg.bigText ? 2.3 : 1.9) * sc) + 'em';
@@ -199,7 +240,9 @@
 
   /* ---------- États : idle (diffusion) · home · page ---------- */
   function setState(s) {
+    var was = state;
     state = s;
+    if (was === 'idle' && s !== 'idle' && H.visitStart) H.visitStart();   // le visiteur touche l'écran
     document.body.classList.toggle('k-open', s !== 'idle');
     touchEl.style.display = s === 'idle' ? 'block' : 'none';
     mainEl.style.display = s === 'idle' ? 'none' : 'block';
@@ -251,6 +294,7 @@
     endVisit(pendingHow || 'auto'); pendingHow = null;
     if (cfg.wipe && H.native) H.native('kioskWipe', '');
     setState('idle');
+    if (H.visitEnd) H.visitEnd();   // retour à la diffusion après une visite
   }
 
   function openTile(t) {

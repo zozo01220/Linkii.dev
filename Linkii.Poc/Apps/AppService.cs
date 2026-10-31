@@ -223,6 +223,19 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         catch (Exception ex) { return (null, ex.Message); }
     }
 
+    /// <summary>Données d'un contenu Facebook ou Météo enregistré, pour sa vignette (cache de 15 minutes du fournisseur) ; null si illisible.</summary>
+    public async Task<System.Text.Json.JsonElement?> ThumbData(MediaItem m)
+    {
+        if (m.AppId is not ("facebook" or "weather-slide") || catalog.Find(m.AppId) is not { } app || providers.Find(app.Provider) is not { } provider) return null;
+        try
+        {
+            var tenant = store.Read(d => d.Tenant);
+            var data = await provider.Fetch(new AppRuntime(tenant, RuntimeValues(app, m.Settings, m)));
+            return data == null ? null : System.Text.Json.JsonSerializer.SerializeToElement(data, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        }
+        catch { return null; }
+    }
+
     /// <summary>Contenu auquel il manque encore une information obligatoire (média, lien, fichier…) : ajouté à vide, il reste à configurer.</summary>
     public bool IsIncomplete(MediaItem? m) =>
         m?.AppId != null && catalog.Find(m.AppId) is { } app && AppCatalog.MissingRequired(app, m.Settings, m.Secrets.Keys.ToHashSet()).Count > 0;
@@ -324,6 +337,8 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         }
         if (instance != null)   // secrets enregistrés hors formulaire (jeton d'une connexion OAuth)
             foreach (var (k, enc) in instance.Secrets) if (!v.ContainsKey(k)) v[k] = box.Unprotect(enc);
+        if (m.Id == "agenda")   // réglages de salle : posés par le calendrier (Intégrations), absents du formulaire du contenu
+            foreach (var (k, raw) in values) if (k.StartsWith("room", StringComparison.Ordinal) && !v.ContainsKey(k)) v[k] = raw.Trim();
         return v;
     }
 
@@ -337,8 +352,6 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         if (!ok || providers.Find(m.Provider) is not { } provider || !m.Data) return (ok, message, null);
         try
         {
-        if (m.Id == "agenda")   // réglages de salle : posés par le calendrier (Intégrations), absents du formulaire du contenu
-            foreach (var (k, raw) in values) if (k.StartsWith("room", StringComparison.Ordinal) && !v.ContainsKey(k)) v[k] = raw.Trim();
             var tenant = store.Read(d => d.Tenant);
             var data = await provider.Fetch(new AppRuntime(tenant, RuntimeValues(m, values, instance)));
             return (true, message, data == null ? null : System.Text.Json.JsonSerializer.SerializeToElement(data));

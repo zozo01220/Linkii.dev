@@ -292,7 +292,7 @@ Renommé **Matériel** : téléviseur, moniteur, totem / borne, **tablette Andro
 - **Texte libre** : l'app `text` est un widget d'écran (comme horloge et météo), avec largeur en % et défilement ; elle n'est plus proposée dans les playlists (les contenus existants restent diffusés).
 
 ### Domaines
-- Le revendeur est déduit du **nom de domaine** de chaque requête (`ResellerResolver`) : domaine propre déclaré, ou `slug.<Linkii:BaseDomain>` (défaut `linkii.com`), ou `slug.localhost` en local (ex. `http://acme.localhost:5080`). Domaine neutre (localhost, IP) = revendeur par défaut ; sous-domaine inconnu = 404.
+- Le revendeur est déduit du **nom de domaine** de chaque requête (`ResellerResolver`) : domaine propre déclaré, ou `slug.<Linkii:BaseDomain>` (défaut `linkivi.com`), ou `slug.localhost` en local (ex. `http://acme.localhost:5080`). Domaine neutre (localhost, IP) = revendeur par défaut ; sous-domaine inconnu = 404.
 - Un compte ne se connecte que sur le domaine de son revendeur ; l'équipe Linkii sur le domaine principal. Le cookie est revérifié à chaque requête HTTP (compte actif, domaine, client et revendeur non suspendus).
 - **Domaine propre** : déclaré par l'équipe Linkii (console › Revendeurs), le revendeur crée un CNAME vers `Linkii:CnameTarget`. Caddy émet le certificat à la demande en interrogeant `GET /internal/tls-allow?domain=` (voir `deploy/Caddyfile`).
 - **Écrans** : adresse neutre, le **code d'appairage identifie le client**. Le domaine (ou `?r=slug` sur l'URL du player) ne sert qu'à habiller l'écran d'appairage ; ensuite la marque vient du client de l'écran et est mémorisée pour un démarrage hors ligne.
@@ -414,7 +414,7 @@ Inscription libre et gratuite (revendeurs avec `AllowSelfSignup`, Linkii par dé
 - **Clients créés par un revendeur ou par Linkii** : pas d'essai ; validés à la première connexion avec le mot de passe provisoire reçu par e-mail. Migration : les comptes déjà connectés sont validés (`Signup.MarkVerified`).
 - **Console › Clients et accès** : colonnes Inscription (`Tenant.SignupSource` : E-mail, Google, Microsoft, Revendeur, Linkii), Créé le, État (À valider / Validé), Essai (jours restants), E-mails (consentements) ; filtres par état et par type d'inscription ; actions renvoyer le lien, valider, essai, entrer, suspendre.
 - **Tâche de fond** (`SignupWorker`, toutes les 30 min) : suppression des inscriptions jamais validées après 7 jours (réglable), rappel de fin d'essai, écrans prévenus à la fin de l'essai.
-- **E-mails** : tous les e-mails de la plateforme portent en pied de page un lien vers le site (`Linkii:SiteUrl`, défaut `https://linkii.com`). Sans SMTP, leur contenu (lien de confirmation compris) est écrit dans le journal du serveur, pour tester en local.
+- **E-mails** : tous les e-mails de la plateforme portent en pied de page un lien vers le site (`Linkii:SiteUrl`, défaut `https://linkivi.com`). Sans SMTP, leur contenu (lien de confirmation compris) est écrit dans le journal du serveur, pour tester en local.
 - **Tests** : `SignupTests` (consentements, lien, renvoi, correction, remplacement, Microsoft/Google, purge, fin d'essai, migration) et `SignupFlowTests` (lien de bout en bout, player « Essai terminé », page d'inscription).
 
 ## 16. Comptes connectés (9 octobre 2026)
@@ -1419,7 +1419,7 @@ Page Revendeurs refaite sur le modèle de la page Clients (§58) : mêmes onglet
 ### Limites
 - Vérifié contre un **faux NPM** (script local) : test de connexion, création de l'hôte avec le certificat générique, panne puis état « En attente », blocage et déblocage. Jamais essayé sur le vrai NPM (192.168.1.120:81) : à tester avec un compte NPM dédié.
 - Non essayés : suspension (bandeau chez le revendeur et ses clients), suppression avec retrait de l'hôte, « Relancer », « Vérifier » (le contrôle HTTPS part du serveur : il peut échouer à cause du routage interne).
-- Prérequis réseau : certificat `*.linkii.duckdns.org` dans NPM et séparateur « . » (un hôte `digisignit-linkii…` existant n'est pas migré).
+- Prérequis réseau : certificat `*.linkivi.duckdns.org` dans NPM et séparateur « . » (un hôte `digisignit-linkii…` existant n'est pas migré).
 
 ### Mot de passe de l'administrateur d'un revendeur (16 octobre 2026)
 - Fiche revendeur › Informations › « Définir un mot de passe » : mot de passe provisoire (généré ou saisi, 8 caractères minimum), à changer à la prochaine connexion, avec envoi facultatif par e-mail (au nom de « Linkii Revendeur »). Vérifié : connexion sur `acme-affichage.localhost` avec le mot de passe défini, puis demande de nouveau mot de passe.
@@ -1435,7 +1435,7 @@ Page Revendeurs refaite sur le modèle de la page Clients (§58) : mêmes onglet
 - Vérifié : après avoir activé e-mail et Google chez le revendeur de test, sa page de connexion n'affiche que « Continuer avec Google » et « Créer un espace ». Non vérifié : le cas d'un fournisseur désactivé mais encore utilisé, et le parcours complet d'inscription par fournisseur (clés OAuth absentes en test).
 
 ### Compléments §59 : exploitation, diagnostics et déploiement (16 octobre 2026)
-- **Diagnostic NPM** (`NpmProxy.Problem()`) : le test de connexion et la création disent précisément ce qui manque (adresse, identifiant, mot de passe, destination des hôtes) ou que le **mot de passe enregistré est illisible sur ce serveur** (réglages copiés d'une autre machine : le chiffrement SecretBox dépend des clés de protection de données du serveur, à ressaisir). Si le certificat générique manque, le message donne le domaine cherché et les certificats `*.…` trouvés dans NPM (cause typique : « Domaine de base » vide, donc `linkii.com` par défaut).
+- **Diagnostic NPM** (`NpmProxy.Problem()`) : le test de connexion et la création disent précisément ce qui manque (adresse, identifiant, mot de passe, destination des hôtes) ou que le **mot de passe enregistré est illisible sur ce serveur** (réglages copiés d'une autre machine : le chiffrement SecretBox dépend des clés de protection de données du serveur, à ressaisir). Si le certificat générique manque, le message donne le domaine cherché et les certificats `*.…` trouvés dans NPM (cause typique : « Domaine de base » vide, donc `linkivi.com` par défaut).
 - **Identifiant NPM** : texte libre envoyé tel quel au champ `identity` de l'API ; adresse de l'API en `http://hôte:81` (le port 81 de NPM n'est en général pas en HTTPS). Éviter le remplissage automatique du navigateur sur ce champ.
 - **Une instance = une base** : chaque serveur Linkii a son `data.json`. L'hôte NPM envoie vers une instance précise (destination des hôtes) ; si elle ne connaît pas le revendeur (autre base), elle sert la marque Linkii par défaut et la connexion du revendeur échoue (« E-mail ou mot de passe incorrect »). Créer les revendeurs sur l'instance vers laquelle NPM pointe.
 - **Connexion** : le mot de passe est aussi essayé sans espaces de début ou de fin (copié depuis un e-mail). Un administrateur de revendeur ne se connecte que sur l'adresse de son revendeur.
@@ -2376,7 +2376,7 @@ Remplace l'organisation en onglets Structure / Membres / Rôles et l'arbre du §
 - Avant : le player téléchargeait la nouvelle version, la gardait en attente (`state.pending`) et ne l'appliquait qu'**à la fin du contenu en cours** (`next()` au prochain tour). Les bornes interactives, elles, appliquaient la publication aussitôt.
 - Maintenant : dès que les fichiers sont téléchargés (état « prête »), `refresh()` appelle `next()` : la liste, les widgets, les zones, la configuration (format, veille, luminosité) et le menu de la borne passent en direct, avec le fondu habituel entre deux calques ; la diffusion repart du premier contenu de la nouvelle liste. Un spot publicitaire en cours est marqué « publish » (passage interrompu) comme avant.
 - **Un seul changement pour tous les players** : le player web, Windows (WebView2) et Android (WebView) chargent le même `player.js`, qui est toujours revalidé par le serveur (`no-cache`) ; aucun correctif natif. L'écran en pause, mis en pause depuis le back-office ou en veille garde la nouvelle version en attente jusqu'à sa reprise.
-- Vérification : publier une liste différente pendant qu'une vidéo longue joue ; l'écran doit changer sans attendre la fin de la vidéo (délai = téléchargement des fichiers manquants). Les players qui se connectent à https://linkii.duckdns.org ne l'auront qu'après déploiement du serveur.
+- Vérification : publier une liste différente pendant qu'une vidéo longue joue ; l'écran doit changer sans attendre la fin de la vidéo (délai = téléchargement des fichiers manquants). Les players qui se connectent à https://linkivi.duckdns.org ne l'auront qu'après déploiement du serveur.
 
 ## 139. Intégrations personnalisées : sources de données dans les compositions (29 octobre 2026) : architecture et maquette validées ; lots 1 à 4 codés le 29 oct., compilés, tests verts (relais et SQL Server réels), non vérifiés dans le navigateur (tests par l'utilisateur)
 - **Demande** : brancher Linkii sur les données du client (API, base de données, CSV, etc.) et s'en servir dans les compositions. Maquette validée le 29 oct. : `maquettes/sources-de-donnees-architecture.html` (6 scènes). Elle élargit `maquettes/integration-personnalisee.html` (assistant seul, 28 oct.).
@@ -2598,3 +2598,63 @@ Remplace l'organisation en onglets Structure / Membres / Rôles et l'arbre du §
 - Les intégrations déjà dans Mes intégrations et actives affichent **« Déjà utilisée »** (avant : « Actif »).
 - Le bouton orange **« Utiliser »** devient une icône **bac + flèche** (`install`), carré arrondi cerclé orange (`.btn-use-ic`, info-bulle « Utiliser »), dans le tiroir et dans l'onglet Store de la page Intégrations (cartes et liste). Le bouton texte reste dans le tiroir « Détails » d'une intégration. Choix fait dans `maquettes/store-bouton-utiliser-icone.html`.
 - L'icône boutique des onglets « Intégrations » (hub Contenus) et « Store » est **orange** (#E8590C), comme celle du bouton Store de la barre.
+
+## 151. Centre de notifications (31 octobre 2026) : analyse, maquettes validées, codé et vérifié dans le navigateur ; non commité
+
+### Point de départ (existant)
+- **Alertes §64** : `AlertService.Raise(clientId, kind, title, body, path, …)` est déjà l'unique point d'entrée. Il envoie par e-mail et/ou notification mobile (Firebase) selon `Tenant.AlertsOn / AlertMail / AlertPush / AlertTypes`, Pro seulement, 4 types (`Alerts.All` : écrans, synchronisations, équipe, abonnement). **Rien n'est conservé** : une fois envoyée, l'alerte n'existe plus nulle part dans l'app.
+- **Pastilles du menu** (`MenuBadges`) : compteurs d'état en direct (nombre / nouveau / hors ligne). Ce sont des états, pas un historique ; elles restent.
+- **Barre des accès rapides §150** (`QuickBar.razor`) : Player, Store | Aide, Réglages, compte. « Notifications » y avait été écartée « pour l'instant ».
+
+### Idée directrice
+Le centre n'est pas un second système d'alertes : c'est un **troisième canal** (« Dans l'app ») de `AlertService.Raise`, qui garde une trace lisible et lue/non lue. Même interrupteur général, mêmes types ; `Raise` écrit d'abord une ligne dans le centre, puis envoie e-mail et mobile comme aujourd'hui. Aucun nouveau réglage à part (cohérent avec le choix du §64).
+
+### Ce qui peut être notifié (détail en scène 5 de la maquette)
+- **Écrans** : hors ligne / retour en ligne (existe) ; commande échouée ; stockage de l'appareil presque plein ; écran jamais connecté après 24 h ; nouvelle version du player ; redémarrages en boucle, mur désynchronisé.
+- **Diffusion et planning** : publication terminée / échouée ; médias non téléchargés par un écran ; contenu qui expire dans 3 jours ; écran sans liste ; conflit de planning ; (option) début / fin de créneau.
+- **Synchronisations** : dossier connecté en échec (existe), rétabli ; nouveaux fichiers importés ; conversion PDF / Slides / Docs / Canva terminée ou échouée.
+- **Intégrations et données** : compte connecté expiré ou révoqué ; quota d'API météo ; source de données en erreur ou vide ; relais hors ligne ; calendrier de salle inaccessible ; Home Assistant injoignable.
+- **Équipe et partage** : personne ajoutée (existe) ; contenu partagé avec soi ou partage retiré ; rôle changé ; invitation acceptée ou expirée ; inscription à valider.
+- **Abonnement** : fin d'essai, espace suspendu (existent) ; paiement refusé ; facture ; quota d'écrans atteint ; changement de plan.
+- **Publicité** : campagne à valider / validée / refusée ; démarre / se termine ; rémunération du mois.
+- **Interactions** : seuil de scans QR ; borne en panne ; salle réservée ou annulée.
+- **Système** : nouveautés Linkivi, maintenance, incident ; (revendeurs) nouveau client, essai expirant, facturation.
+
+### Modèle de données proposé
+- `Notification` : `Id`, `ClientId`, `UserId?` (nul = tous les administrateurs de l'espace), `Kind` (le type d'alerte) + `Category`, `Severity` (info, ok, warn, error), `Title`, `Body`, `Path` (page ouverte), `CreatedUtc`, `DedupeKey?`, `ResolvedUtc?`, `Count` (regroupement).
+- **Lu / non lu par personne** : table `NotificationRead` (`NotificationId`, `UserId`, `ReadUtc`), car une notification d'équipe est vue par plusieurs administrateurs.
+- **Déduplication / regroupement** : `DedupeKey` (ex. `screen-offline:<écran>`) ; une panne réseau qui fait tomber 10 écrans produit une seule ligne « 10 écrans hors ligne ». Une notification liée à un état **se résout** (écran revenu : la ligne passe en vert et se range dans les lues).
+- **Conservation** : 90 jours (alertes d'abonnement critiques : 1 an), nettoyage par un worker existant.
+- **Destinataires** : administrateurs par défaut ; les membres reçoivent ce qui les concerne (partage reçu, rôle changé, leur publication). Respecter le périmètre de partage §117 : ne jamais notifier d'un élément que la personne ne peut pas voir.
+- **Temps réel** : réutiliser le mécanisme de MenuBadges (même circuit que les pastilles) pour la pastille de la cloche et le rebond d'un nouvel élément (NewMark).
+
+### Design retenu dans la maquette
+1. **Cloche** dans la barre des accès rapides, entre Aide et Réglages, pastille rouge (nombre, « 9+ »). Un clic ouvre un **aperçu** (5 dernières, onglets À lire / Toutes, « Tout marquer comme lu », « Tout voir », lien Réglages). Ouvrir l'aperçu ne marque rien ; cliquer une ligne la marque lue et ouvre la page concernée.
+2. **Page Notifications** : onglets **À lire / Lues / Toutes**, filtres par catégorie avec compteurs, recherche, groupes Aujourd'hui / Hier / Plus ancien, point bleu sur les non lues, au survol marquer lue-non lue et supprimer, bouton d'action direct (« Reconnecter », « Voir l'écran »), sélection multiple.
+3. **États** : « Vous êtes à jour », regroupement, résolution automatique, **bandeau rouge persistant** pour les cas bloquants (paiement refusé, espace suspendu).
+4. **Mobile / app** : pas de barre du haut, donc entrée **Notifications** dans la feuille « Plus » avec pastille, pastille sur « Plus » ; la notification Firebase ouvre la bonne page et la marque lue.
+5. **Réglages** : colonne « Dans l'app » ajoutée à E-mail et Mobile dans Réglages › Alertes et pause ; types ajoutés à `Alerts.All`.
+
+### Décisions à prendre
+- **Licence** : centre offert à toutes les licences pour les types système / abonnement / écrans (information, pas d'envoi), e-mail et mobile restant Pro ? (recommandé) ou tout Pro comme les alertes actuelles.
+- **Mode simple / expert** : cloche toujours visible, mais catégories Intégrations, Publicité, Interactions seulement en expert (principe « avancé activable »).
+- **Bruit** : par défaut, seulement les événements qui demandent une action ou signalent un problème ; les « bonnes nouvelles » (publication réussie, retour en ligne) en option, repliées.
+- **Rétroactivité** : pas de reprise de l'historique, le centre démarre vide (message de bienvenue « Nouveau »).
+- **Revendeurs** : même cloche dans la console revendeur (nouveaux clients, essais) dans un second temps.
+
+### Ordre de mise en œuvre proposé
+1. Modèle + `Raise` écrit dans le centre + cloche/aperçu/page (types existants : écrans, synchro, équipe, abonnement).
+2. Colonne « Dans l'app » dans Réglages, filtres, regroupement, résolution.
+3. Nouveaux types un par un (publication, comptes connectés expirés, partage reçu, publicité…), chacun ajouté à `Alerts.All` sans écran de réglage de plus.
+4. Mobile : entrée dans « Plus », ouverture depuis la notification système.
+
+### Codé le 31 octobre 2026 (maquettes validées : `centre-notifications.html`, `centre-notifications-reglages-v2.html`)
+
+- **Modèle** (`Notifications.cs`) : `Notification` (`Db.Notifications`, par organisation : type, gravité, titre, texte, page, regroupement `DedupeKey` + `Count`, `Subjects`, `ResolvedUtc`, `ReadBy` / `DeletedBy` par personne). `NotificationCenter` : `Add` (regroupe le même événement 6 h, remet « non lu », purge à 90 jours, 1 an pour l'abonnement), `Back` (des écrans de retour résolvent la notification « hors ligne » : rangée dans les lues, verte), `For`, `Unread`, `SetRead`, `ReadAll`, `Delete` (disparaît pour de bon quand tous les administrateurs l'ont supprimée), `Seed` (message de bienvenue une fois par organisation existante).
+- **Un seul point d'entrée** : `AlertService.Raise` / `RaisePush` écrivent aussi dans le centre (`Alerts.InCenter`) : **abonnement et nouveautés toujours** (toutes licences), les autres types seulement en Pro avec alertes activées, « Par notification » et type suivi. Nouveaux paramètres : `severity`, `dedupe`, `subjects`, `good` (bonne nouvelle : envoyée seulement si `Tenant.AlertGood`). Écrans : le retour en ligne seul est une bonne nouvelle (avant : e-mail envoyé d'office), il résout toujours la notification. Synchronisation : regroupée par dossier.
+- **Catégories** : `Alerts.All` passe à 5 (Écrans, Synchronisations, Équipe et partage, Abonnement, Nouveautés et système ; id `system`, constante `Alerts.News`). `Alerts.Defaults` = écrans, synchronisations, équipe, abonnement ; `Alerts.Always` (abonnement) ne se coupe pas. `Tenant.AlertTypes` démarre avec les défauts, `Alerts.Migrate` v2 les pose aux organisations qui n'avaient rien choisi. **Seules les catégories qui ont un producteur sont proposées** : publication, intégrations, publicité, interactions de l'analyse n'ont pas encore d'événement branché (à ajouter un par un dans `Alerts.All` + un appel à `Raise`).
+- **Interface** : `NotificationBell` dans la barre des accès rapides (entre Aide et Réglages, administrateurs, pas en mode « entrer dans l'espace »), pastille rouge en direct (même circuit que MenuBadges : `JsonStore.Changed`, regroupé sur 500 ms), aperçu des 5 dernières (À lire / Toutes) ; `Pages/Notifications.razor` (`/notifications` : À lire / Lues / Toutes, filtres par catégorie avec compteurs, recherche, groupes Aujourd'hui / Hier / Plus ancien, lu-non lu et suppression au survol, sélection multiple) ; `NotificationRow`, `NotificationCount` (pastille dans la feuille « Plus » de l'app, entrée « Notifications »). CSS `nt-*` à la fin de `app.css`.
+- **Réglages › Alertes et pause** : plus d'étapes numérotées. Une carte : Activer les alertes, Par e-mail (+ destinataires), Par notification (cloche + téléphones, sans distinguer), résumé « De quoi être prévenu » avec bouton **Choisir…** qui ouvre une fenêtre (brouillon : Annuler ne change rien, Valider enregistre ; délai « Alerter après » sous Écrans ; « Rétablir les choix par défaut » ; bonnes nouvelles). Pause des écrans inchangée.
+- **Interrupteurs** : tous les `.switch.on` / `.switch-ui` / `input.ios` passent du bleu clair au **bleu nuit de la marque** (`var(--brand)`, donc la couleur du revendeur) ; l'état partiel (`.switch.some`) suit. Inchangés : interrupteur de l'app sur fond sombre (`.is-app .app-mode`), forme Material du menu (déjà `--brand`).
+- **Tests** : `NotificationTests` (8 : règles du centre, bonnes nouvelles, lu / supprimé par personne, regroupement, résolution, isolement et purge, message de bienvenue) ; `ControlTests` (migration : types par défaut). Suite complète : 14 échecs (Billing, Signup, Apps, Pwa, Weather), aucun lié aux notifications.
+- **Vérifié dans le navigateur** (instance locale, espace de test créé par inscription) : carte et fenêtre des Réglages, cloche et aperçu, page Notifications (marquer lu, filtrer, supprimer, tout lire, onglet Lues), pastille qui disparaît. **Pas vu** : version app Android (feuille « Plus », `is-app`), notification reçue de bout en bout (écran réellement hors ligne), e-mail, licence Essential dans le navigateur, mode simple, regroupement sur plusieurs heures.

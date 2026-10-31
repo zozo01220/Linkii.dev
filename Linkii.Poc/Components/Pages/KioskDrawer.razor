@@ -61,10 +61,12 @@ else
                 <div class="wg-stage @(portrait ? "portrait" : "")">
                     @if (view == "idle")
                     {
-                        <div class="kp-ks idle">
-                            <span class="kp-mp">Diffusion en inactivité</span>
-                            <b class="kp-lg">@(idlePl?.Name ?? "Aucune liste de lecture")</b>
-                            <span class="kp-mp">Un toucher affiche l'accueil</span>
+                        @* ce que voit le visiteur au repos : le premier contenu plein écran de la liste de lecture, avec le bouton « Touchez l'écran » dans le style choisi *@
+                        var idleThumb = idlePl?.Draft.Where(i => i.Placement == "full").Select(i => Media(i.MediaId)).FirstOrDefault(m => m != null);
+                        <div class="kp-ks idle kp-idle">
+                            @if (idleThumb != null) { <span class="wg-zone-img">@if (idleThumb.AppId == Compositions.AppId) { <CompositionThumb Item="idleThumb" Files="media" Contain="true" /> } else { <MediaThumb Media="idleThumb" All="media" /> }</span> }
+                            <span class="kp-idle-tag">Diffusion en inactivité · @(idlePl?.Name ?? "aucune liste de lecture")</span>
+                            <div class="@("kt kt-" + Kiosk.TouchKey(k.TouchStyle) + (portrait ? "" : " kt-land"))">@TouchMarkup(Kiosk.TouchKey(k.TouchStyle))</div>
                         </div>
                     }
                     else
@@ -72,8 +74,8 @@ else
                         @* même mise en page que le player (kiosk.js « drawHome ») : 1 unité = 1 % de la largeur de l'écran ; tuiles en couleur ou image de fond, titre en bas à gauche *@
                         var shownTiles = k.Tiles.Where(t => Media(t.MediaId) is { } mm && Kiosk.CanOpen(mm)).ToList();
                         var cols = ColsFor(shownTiles.Count, portrait);
-                        <div class="kp-ks" style="background:@k.Bg">
-                            <div class="kp-logo">@if (k.LogoMediaId is { } lg && Media(lg) is { } lm) { <span><MediaThumb Media="lm" All="media" /></span> }</div>
+                        <div class="kp-ks" style="background:@k.Bg" @ref="homeStage">
+                            <div class="kp-logo">@if (k.LogoMediaId is { } lg && Media(lg) is { } lm) { <span class="kp-logo-box @(k.LogoX != null && k.LogoY != null ? "free" : "") @(k.LogoW != null ? "sized" : "")" style="@LogoPos()" title="Glissez pour placer le logo, tirez un coin pour le redimensionner"><MediaThumb Media="lm" All="media" /><i class="kp-rz nw" data-rz="nw"></i><i class="kp-rz ne" data-rz="ne"></i><i class="kp-rz sw" data-rz="sw"></i><i class="kp-rz se" data-rz="se"></i></span> }</div>
                             <div class="kp-lg" style="@FontStyle(k.TitleFont, k.TitleColor)">@k.Title</div>
                             <div class="kp-mp" style="@FontStyle(k.PromptFont, k.PromptColor)">@k.Prompt</div>
                             <div class="kp-g @(k.Accessible ? "low" : "") @(k.BigText ? "big" : "")" style="@GridStyle(cols)" @ref="tileGrid">
@@ -84,7 +86,7 @@ else
                                     <i @key="tt.Id" data-tile="@tt.Id" class="@(selTile == tt.Id ? "sel" : "") @(img != null ? "shade" : "") @ShadeClass" style="@TileStyle(tt)" @onclick="() => PickTile(tt)">
                                         <span class="kp-tact"><button type="button" @onclick="() => EditTile(tt)" @onclick:stopPropagation="true"><Ico Name="edit" Size="14" /> Modifier</button><button type="button" class="del" @onclick="() => delTile = tt" @onclick:stopPropagation="true"><Ico Name="trash" Size="14" /> Supprimer</button></span>
                                         @if (img != null) { <span class="kp-bgi"><MediaThumb Media="img" All="media" /></span> }
-                                        <b style="@TitleStyle(tt)">@tt.Title</b>@if (!string.IsNullOrWhiteSpace(tt.Subtitle)) { <small style="@SubStyle(tt)">@tt.Subtitle</small> }
+                                        <b style="@(TitleStyle(tt) + ColorStyle(tt.TitleColor))">@tt.Title</b>@if (!string.IsNullOrWhiteSpace(tt.Subtitle)) { <small style="@(SubStyle(tt) + ColorStyle(tt.SubColor))">@tt.Subtitle</small> }
                                     </i>
                                 }
                             </div>
@@ -119,11 +121,28 @@ else
                             @FontRow("k-tf", k.TitleFont, k.TitleColor, Kiosk.TitleDefault, v => Edit(c => c.TitleFont = v), v => Edit(c => c.TitleColor = v))</div>
                         <div class="dw-field"><label for="k-prompt">Message d'invite</label><input id="k-prompt" maxlength="90" value="@k.Prompt" @oninput='e => Edit(c => c.Prompt = Clean(e.Value, 90, ""))' />
                             @FontRow("k-pf", k.PromptFont, k.PromptColor, Kiosk.PromptDefault, v => Edit(c => c.PromptFont = v), v => Edit(c => c.PromptColor = v))</div>
-                        <div class="dw-field"><label for="k-logo">Logo</label>
-                            <select id="k-logo" @onchange="e => Edit(c => c.LogoMediaId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null)">
-                                <option value="" selected="@(k.LogoMediaId == null)">— Aucun logo —</option>
-                                @foreach (var im in Images) { <option value="@im.Id" selected="@(im.Id == k.LogoMediaId)">@im.Name</option> }
-                            </select></div>
+                        @{ var curLogo = k.LogoMediaId is { } lid ? Media(lid) : null; }
+                        <div class="dw-field"><label>Logo</label>
+                            <div class="kl-cur">
+                                <span class="kl-pv">@if (curLogo != null) { <MediaThumb Media="curLogo" All="media" /> } else { <small>Aucun</small> }</span>
+                                <span class="kl-nm"><b>@(curLogo?.Name ?? "Aucun logo")</b><small>@(curLogo == null ? "Choisissez une image de la médiathèque" : "Glissez-le dans l'aperçu pour le placer, tirez un coin pour le redimensionner")</small></span>
+                                <button type="button" class="btn ghost sm" aria-expanded="@logoPick" @onclick="() => logoPick = !logoPick">@(curLogo == null ? "Choisir" : "Changer")</button>
+                                @if (curLogo != null) { <button type="button" class="btn ghost sm icon" title="Retirer le logo" aria-label="Retirer le logo" @onclick="() => SelectLogo(null)"><Ico Name="x" Size="15" /></button> }
+                            </div>
+                            @if (logoPick)
+                            {
+                                <div class="kl-pop"><div class="kl-grid">
+                                    <button type="button" class="kl-card none @(k.LogoMediaId == null ? "on" : "")" @onclick="() => SelectLogo(null)"><span class="t"><small>Aucun</small></span><span class="n">Aucun logo</span></button>
+                                    @foreach (var im in Images)
+                                    {
+                                        var li = im;
+                                        <button type="button" class="kl-card @(li.Id == k.LogoMediaId ? "on" : "")" title="@li.Name" @onclick="() => SelectLogo(li.Id)"><span class="t"><MediaThumb Media="li" All="media" /></span><span class="n">@li.Name</span></button>
+                                    }
+                                    @if (Images.Count == 0) { <span class="kp-h" style="grid-column:1/-1">Aucune image dans la médiathèque. Ajoutez-en une dans Contenus.</span> }
+                                </div></div>
+                            }
+                            @if (curLogo != null && k.LogoX != null) { <button type="button" class="btn ghost sm" style="margin-top:6px" @onclick="() => Edit(c => { c.LogoX = c.LogoY = c.LogoW = null; })">Remettre le logo à sa place et à sa taille d'origine</button> }
+                        </div>
                         <div class="dw-field"><label>Fond</label>
                             <div class="kp-cols">@foreach (var c in Backgrounds) { var cc = c; <i class="@(string.Equals(k.Bg, cc, StringComparison.OrdinalIgnoreCase) ? "on" : "")" style="background:@cc" title="@cc" @onclick="() => Edit(x => x.Bg = cc)"></i> }</div></div>
                         <div class="dw-field"><label for="k-ret">Retour à l'accueil après</label>
@@ -174,6 +193,11 @@ else
                                 <option value="" selected="@(draftPlaylist == null)">— Aucune liste de lecture —</option>
                                 @foreach (var p in playlists) { <option value="@p.Id" selected="@(p.Id == draftPlaylist)">@p.Name</option> }
                             </select></div>
+                        <div class="dw-field"><label for="k-touch">Bouton « Touchez l'écran pour commencer »</label>
+                            <select id="k-touch" @onchange="e => Edit(c => c.TouchStyle = Kiosk.TouchKey(e.Value?.ToString()))">
+                                @foreach (var ts in Kiosk.TouchStyles) { <option value="@ts.Key" selected="@(Kiosk.TouchKey(k.TouchStyle) == ts.Key)">@ts.Label</option> }
+                            </select>
+                            <span class="kp-h">Il s'affiche au centre de l'écran tant que personne n'a touché la borne. L'aperçu de gauche montre le style choisi.</span></div>
                         <div class="dw-field"><label>Widgets</label><div class="kp-plain">@(s.Widgets.Count == 0 ? "Aucun widget" : string.Join(", ", s.Widgets.Select(w => WidgetName(w.AppId))))</div></div>
                         <div><button type="button" class="btn" @onclick="() => editor = true"><Ico Name="edit" Size="15" /> Modifier la liste et les widgets</button></div>
                         <p class="hint">Même éditeur que pour un écran de diffusion. La liste et les widgets partent sur la borne à la publication.</p>
@@ -302,6 +326,11 @@ else
                 <div class="kp-seg kp-size" role="group" aria-label="Taille du texte">
                     @foreach (var sz in Kiosk.TextSizes) { var sv = sz.Scale; <button type="button" class="@(Math.Abs(et.TextScale - sv) < 0.01 ? "on" : "")" @onclick="() => et.TextScale = sv">@sz.Label</button> }
                 </div>
+                <p class="kp-lbl">Couleur du texte</p>
+                <div class="kp-row">
+                    <div class="kp-f"><label>Titre</label>@TileColorPick("Couleur du titre", et.TitleColor, v => et.TitleColor = v)</div>
+                    <div class="kp-f"><label>Sous-titre</label>@TileColorPick("Couleur du sous-titre", et.SubColor, v => et.SubColor = v)</div>
+                </div>
                 <p class="kp-lbl" style="margin-top:14px">3 · Couleur ou image de fond</p>
                 <div class="kp-cols">@foreach (var c in Kiosk.Colors) { var cc = c; <i class="@(et.Color == cc ? "on" : "")" style="background:@cc" @onclick="() => et.Color = cc"></i> }</div>
                 <div class="kp-f">
@@ -386,7 +415,8 @@ else
     private bool headRename;
     private string headValue = "";
     private KioskTile? editTile, delTile;
-    private ElementReference tileGrid;
+    private ElementReference tileGrid, homeStage;
+    private bool logoPick;
     private DotNetObjectReference<KioskDrawer>? self;
     private string? tileError;
     private string cat = "pdf";
@@ -474,11 +504,31 @@ else
     private string SubStyle(KioskTile t) => $"font-size:{F((k!.BigText ? 2.3 : 1.9) * t.TextScale * Kiosk.CleanScale(k.TileScale))}cqw;";
     private static IEnumerable<(string, string)> Opts((string Key, string Label, double Value)[] o) => o.Select(x => (x.Key, x.Label));
 
+    // Bouton « Touchez l'écran » : même balisage que kiosk.js (touchHtml)
+    private const string Hand = "<svg class=\"kt-h\" viewBox=\"0 0 24 24\"><path fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M9 11V5.5a1.5 1.5 0 0 1 3 0V10m0-1.5a1.5 1.5 0 0 1 3 0V11m0-1a1.5 1.5 0 0 1 3 0v5.5A6 6 0 0 1 12 21.5h-.5a6 6 0 0 1-4.7-2.3L4 15.6a1.6 1.6 0 0 1 2.4-2.1L9 15.5\"/></svg>";
+    private static MarkupString TouchMarkup(string s) => new(s switch
+    {
+        "round" => "<i class=\"kt-ring\"></i><i class=\"kt-ring r2\"></i><div class=\"kt-c kt-dot\">" + Hand + "</div><div class=\"kt-lbl\">Touchez l’écran<br>pour commencer</div>",
+        "glass" => "<div class=\"kt-c kt-card\">" + Hand + "<h3>Touchez l’écran</h3><p>pour commencer</p></div>",
+        "icon" => "<div class=\"kt-c kt-halo\"></div><div class=\"kt-c kt-ico\">" + Hand + "</div><div class=\"kt-lbl\">Touchez pour commencer</div>",
+        "band" => "<div class=\"kt-band-in\"><h3>Touchez l’écran<br>pour commencer</h3>" + Hand + "</div>",
+        "button" => "<div class=\"kt-c kt-btn\"><b>Commencer</b><span>Touchez l’écran</span></div>",
+        _ => "<div class=\"kt-c\">Touchez l’écran pour commencer</div>"
+    });
+
+    // Couleur propre à la tuile : vide = couleur commune des tuiles (Paramètres avancés), sinon blanc.
+    private RenderFragment TileColorPick(string label, string? color, Action<string?> set) => @<div class="kp-font">
+        <input type="color" aria-label="@label" title="@label" value="@(Kiosk.CleanHex(color) is { Length: > 0 } cc ? cc : Kiosk.CleanHex(k!.TileColor) is { Length: > 0 } tc ? tc : "#FFFFFF")" @oninput="e => set(Kiosk.CleanHex(e.Value?.ToString()) is { Length: > 0 } v ? v : null)" @onchange="e => set(Kiosk.CleanHex(e.Value?.ToString()) is { Length: > 0 } v ? v : null)" />
+        @if (!string.IsNullOrEmpty(color)) { <button type="button" class="btn ghost sm" title="Remettre la couleur par défaut" @onclick="() => set(null)">Défaut</button> }
+    </div>;
+
     private RenderFragment Seg(string label, IEnumerable<(string Key, string Label)> opts, string cur, Action<string> set) => @<div class="kp-f"><label>@label</label>
         <div class="kp-seg kp-seg-w" role="group" aria-label="@label">@foreach (var o in opts) { var key = o.Key; <button type="button" class="@(cur == key ? "on" : "")" @onclick="() => set(key)">@o.Label</button> }</div>
     </div>;
 
     private void ResetTileStyle() => Edit(c => { c.TileFont = c.TileColor = c.TileWeight = c.TileAlign = c.TileValign = c.TileRadius = c.TileGap = c.TileShade = null; c.TileScale = 1; c.TileCols = 0; });
+
+    private static string ColorStyle(string? c) => Kiosk.CleanHex(c) is { Length: > 0 } h ? $"color:{h};" : "";
 
     private static string FontStyle(string? font, string? color) =>
         (Kiosk.FontCss(font) is { Length: > 0 } f ? $"font-family:{f};" : "") + (Kiosk.CleanHex(color) is { Length: > 0 } c ? $"color:{c};" : "");
@@ -532,6 +582,8 @@ else
         t.Subtitle = string.IsNullOrWhiteSpace(t.Subtitle) ? null : t.Subtitle.Trim();
         t.Color = Kiosk.CleanColor(t.Color);
         t.TextScale = Kiosk.CleanScale(t.TextScale);
+        t.TitleColor = Kiosk.CleanHex(t.TitleColor) is { Length: > 0 } tcl ? tcl : null;
+        t.SubColor = Kiosk.CleanHex(t.SubColor) is { Length: > 0 } scl ? scl : null;
         t.ShowFrom = Plan.IsDate(t.ShowFrom) ? t.ShowFrom : null;
         t.ShowTo = Plan.IsDate(t.ShowTo) ? t.ShowTo : null;
         if (t.ShowFrom != null && t.ShowTo != null && string.CompareOrdinal(t.ShowFrom, t.ShowTo) > 0) { tileError = "La date de fin précède celle de début."; return; }
@@ -588,7 +640,32 @@ else
         self ??= DotNetObjectReference.Create(this);
         try { await JS.InvokeVoidAsync("linkiiTileSort.init", tileGrid, self); }
         catch (Exception e) when (e is JSDisconnectedException or InvalidOperationException or JSException) { }   // circuit fermé ou grille absente
+        try { await JS.InvokeVoidAsync("linkiiLogoDrag.init", homeStage, self); }
+        catch (Exception e) when (e is JSDisconnectedException or InvalidOperationException or JSException) { }
     }
+
+    // Logo placé par glisser-déposer dans l'aperçu (logo-drag.js) : position en % de l'accueil, coin haut gauche.
+    [JSInvokable]
+    public void MoveLogo(double x, double y)
+    {
+        if (k == null) return;
+        k.LogoX = Math.Clamp(x, 0, 100); k.LogoY = Math.Clamp(y, 0, 100);
+        dirty = true;
+        InvokeAsync(StateHasChanged);
+    }
+
+    // Logo redimensionné (logo-drag.js) : position, puis largeur en % de l'accueil ; la hauteur suit les proportions du logo.
+    [JSInvokable]
+    public void ResizeLogo(double x, double y, double w)
+    {
+        if (k == null) return;
+        k.LogoX = Math.Clamp(x, 0, 100); k.LogoY = Math.Clamp(y, 0, 100); k.LogoW = Math.Clamp(w, 3, 95);
+        dirty = true;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private string LogoPos() => k!.LogoX is double x && k.LogoY is double y ? $"left:{F(x)}%;top:{F(y)}%;" + (k.LogoW is double w ? $"width:{F(w)}%;" : "") : "";
+    private void SelectLogo(Guid? id) { Edit(c => c.LogoMediaId = id); logoPick = false; }
 
     public void Dispose() => self?.Dispose();
 

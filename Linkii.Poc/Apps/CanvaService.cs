@@ -25,7 +25,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
 
     private Creds PlatformCreds => new(config["Linkii:Canva:ClientId"] ?? "", config["Linkii:Canva:ClientSecret"] ?? "", ServerRedirect);
 
-    private string ServerRedirect => config["Linkii:Canva:RedirectUri"] is { Length: > 0 } r ? r : $"https://{config["Linkii:BaseDomain"] ?? "linkii.com"}/canva/callback";
+    private string ServerRedirect => config["Linkii:Canva:RedirectUri"] is { Length: > 0 } r ? r : $"https://{config["Linkii:BaseDomain"] ?? "linkivi.com"}/canva/callback";
 
     /// <summary>Intégration de la plateforme utilisable : identifiant et secret présents dans la configuration du serveur.</summary>
     public bool IsConfigured => PlatformCreds is { Id.Length: > 0, Secret.Length: > 0 };
@@ -183,7 +183,11 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
         req.Headers.Authorization = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{creds.Id}:{creds.Secret}")));
         using var res = await Http.SendAsync(req);
         var body = await res.Content.ReadAsStringAsync();
-        if (!res.IsSuccessStatusCode) throw new CanvaException($"Canva a refusé l'authentification ({(int)res.StatusCode}).");
+        if (!res.IsSuccessStatusCode)
+        {
+            log.LogWarning("Canva /oauth/token : {Status} {Body}", (int)res.StatusCode, body.Length > 300 ? body[..300] : body);
+            throw new CanvaException($"Canva a refusé l'authentification ({(int)res.StatusCode}).");
+        }
         return JsonSerializer.Deserialize<TokenResponse>(body) ?? throw new CanvaException("Réponse de Canva illisible.");
     }
 

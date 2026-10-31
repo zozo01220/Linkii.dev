@@ -20,7 +20,7 @@ public class WebSnapshot
     private static readonly Dictionary<string, DateTime> Failed = new();   // dernière tentative ratée, pour ne pas relancer un navigateur à chaque affichage
     private static readonly TimeSpan RetryAfter = TimeSpan.FromMinutes(30);
     private string? _browser;
-    private bool _searched;
+    private bool _searched, _warned;
 
     /// <summary>Au démarrage : tue les navigateurs de capture restés après un arrêt brutal du serveur (reconnus à leur dossier linkii-snap-).</summary>
     public static void KillOrphans()
@@ -79,7 +79,8 @@ public class WebSnapshot
     /// <summary>Lance la capture en arrière-plan si elle manque ou est périmée (sans attendre).</summary>
     public void Ensure(string? url)
     {
-        if (!Available || string.IsNullOrWhiteSpace(url) || !AppCatalog.IsHttpUrl(url)) return;
+        if (string.IsNullOrWhiteSpace(url) || !AppCatalog.IsHttpUrl(url)) return;
+        if (!Available) { if (!_warned) { _warned = true; Console.Error.WriteLine("[WebSnapshot] aucun navigateur (Chrome, Edge, Chromium) trouvé sur le serveur : pas de vignette de page web. Installez-en un ou définissez LINKII_CHROME."); } return; }
         var p = PathOf(url);
         if (File.Exists(p) && DateTime.UtcNow - File.GetLastWriteTimeUtc(p) < MaxAge) return;
         lock (Running)
@@ -91,9 +92,10 @@ public class WebSnapshot
         {
             var ok = false;
             try { ok = await Capture(url); }
-            catch { }
+            catch (Exception ex) { Console.Error.WriteLine($"[WebSnapshot] {url} : {ex.Message}"); }
             finally
             {
+                if (!ok) Console.Error.WriteLine($"[WebSnapshot] capture impossible pour {url} (page non publique, navigateur {Browser}, délai dépassé ou page vide) ; nouvel essai dans 30 min.");
                 lock (Running)
                 {
                     Running.Remove(url);
@@ -107,7 +109,7 @@ public class WebSnapshot
     {
         var uri = SafeHttp.ParseUrl(url);
         var addresses = await Dns.GetHostAddressesAsync(uri.Host);
-        if (addresses.Length == 0 || addresses.Any(a => !SafeHttp.IsPublic(a))) return false;
+        if (addresses.Length == 0 || addresses.Any(a => !SafeHttp.IsPublic(a))) { Console.Error.WriteLine($"[WebSnapshot] adresse refusée (non publique) : {string.Join(", ", addresses.Select(a => a.ToString()))}"); return false; }
 
         await Slots.WaitAsync();
         var work = Path.Combine(Path.GetTempPath(), "linkii-snap-" + Guid.NewGuid().ToString("N"));
@@ -127,10 +129,11 @@ public class WebSnapshot
             }) psi.ArgumentList.Add(a);
             using var proc = Process.Start(psi);
             if (proc == null) return false;
+            Task<string>? errTask = null;
             try
             {
                 _ = proc.StandardOutput.ReadToEndAsync();
-                _ = proc.StandardError.ReadToEndAsync();
+                errTask = proc.StandardError.ReadToEndAsync();
                 // Chrome headless ne se ferme pas toujours après la capture : on attend le fichier (ou la sortie), puis on tue l'arbre.
                 var deadline = DateTime.UtcNow.AddSeconds(40);
                 while (!proc.HasExited && DateTime.UtcNow < deadline && !File.Exists(png))
@@ -142,13 +145,18 @@ public class WebSnapshot
                 // Toujours tuer le navigateur et ses enfants, quelle que soit l'issue (délai, erreur, succès).
                 try { if (!proc.HasExited) proc.Kill(true); } catch { }
             }
-            if (!File.Exists(png)) return false;
+            if (!File.Exists(png))
+            {
+                var err = errTask is { IsCompletedSuccessfully: true } ? errTask.Result.Trim() : "";
+                Console.Error.WriteLine($"[WebSnapshot] le navigateur n'a pas produit d'image (code {(proc.HasExited ? proc.ExitCode.ToString() : "non terminé")}) {(err.Length > 300 ? err[..300] : err)}");
+                return false;
+            }
 
             using var bmp = SKBitmap.Decode(png);
-            if (bmp == null) return false;
+            if (bmp == null) { Console.Error.WriteLine("[WebSnapshot] image illisible (SkiaSharp)."); return false; }
             var w = Math.Min(960, bmp.Width);
             using var small = bmp.Resize(new SKImageInfo(w, Math.Max(1, (int)Math.Round(bmp.Height * (double)w / bmp.Width))), SKFilterQuality.Medium);
-            if (small == null) return false;
+            if (small == null) { Console.Error.WriteLine("[WebSnapshot] redimensionnement impossible."); return false; }
             using var data = SKImage.FromBitmap(small).Encode(SKEncodedImageFormat.Jpeg, 80);
             Directory.CreateDirectory(Dir);
             var dest = PathOf(url);

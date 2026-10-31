@@ -1,0 +1,24 @@
+@inject NotificationCenter Center
+@inject TenantContext Ctx
+@inject JsonStore Root
+@implements IDisposable
+
+@* Nombre de notifications à lire, en pastille rouge (feuille « Plus » de l'app, où il n'y a pas de barre des accès rapides). Rien tant qu'il n'y en a pas. *@
+@if (unread > 0) { <span class="nt-count">@(unread > 9 ? "9+" : unread.ToString())</span> }
+
+@code {
+    private int unread;
+    private Guid cid, me;
+    private Timer? later;
+
+    protected override void OnInitialized()
+    {
+        if (Ctx.ClientId is not { } c || Ctx.UserId is not { } u) return;
+        (cid, me) = (c, u);
+        unread = Center.Unread(cid, me);
+        Root.Changed += OnChanged;
+    }
+
+    private void OnChanged() { later?.Dispose(); later = new Timer(_ => InvokeAsync(() => { unread = Center.Unread(cid, me); StateHasChanged(); }), null, 500, Timeout.Infinite); }
+    public void Dispose() { Root.Changed -= OnChanged; later?.Dispose(); }
+}

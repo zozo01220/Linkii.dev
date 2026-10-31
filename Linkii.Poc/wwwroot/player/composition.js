@@ -219,10 +219,10 @@
       return { min: (+t[0] % 24) * 60 + (+t[1]), dow: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(wd) };
     } catch (x) { return { min: d.getHours() * 60 + d.getMinutes(), dow: d.getDay() }; }
   }
-  function hm(s) { var m = /^(\d{1,2}):(\d{2})$/.exec(String(s || '').trim()); return m ? Math.min(23, +m[1]) * 60 + Math.min(59, +m[2]) : null; }
+  function hmMin(s) { var m = /^(\d{1,2}):(\d{2})$/.exec(String(s || '').trim()); return m ? Math.min(23, +m[1]) * 60 + Math.min(59, +m[2]) : null; }
   function timeCond(c, now) {
     if (c.k === 'days') return !(c.days || []).length || c.days.indexOf(now.dow) !== -1;
-    var a = hm(c.from), b = hm(c.to);
+    var a = hmMin(c.from), b = hmMin(c.to);
     if (a == null || b == null || a === b) return true;
     return a < b ? now.min >= a && now.min < b : now.min >= a || now.min < b;
   }

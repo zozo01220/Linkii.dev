@@ -29,7 +29,7 @@ public class RelayTests(Platform p)
     public void Code_d_installation_remis_en_forme(string? saisi, string? attendu) => Assert.Equal(attendu, RelayPairing.CleanCode(saisi));
 
     [Theory]
-    [InlineData("https://linkii.duckdns.org", true)]
+    [InlineData("https://linkivi.duckdns.org", true)]
     [InlineData("http://localhost:5093", true)]
     [InlineData("http://linkii.exemple.ch", false)]
     [InlineData("linkii.exemple.ch", false)]

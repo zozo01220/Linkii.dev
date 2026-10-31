@@ -19,7 +19,7 @@ else
     @* Page en deux parties : connexion par e-mail à gauche, connexion rapide (Microsoft, Google, LinkedIn, GitHub) dans un panneau à droite.
        La création d'un espace s'ouvre dans une fenêtre par-dessus (?signup=1) ; on la ferme en revenant sur /login. *@
     var anySso = ShowGoogle || ShowMicrosoft || ShowLinkedIn || ShowGitHub;
-    <div class="auth-split @(anySso ? "with-side" : "")" inert="@signup">
+    <div class="auth-split @(anySso ? "with-side" : "")" inert="@(signup || playerOpen)">
         <div class="split-main">
             <h1>Bon retour</h1>
             <p class="lead">Connectez-vous à votre espace @Host.DisplayName.</p>
@@ -37,6 +37,7 @@ else
             {
                 <p class="auth-alt left">Pas encore d'espace ? <a href="/login?signup=1@(trialCode != null ? "&code=" + Uri.EscapeDataString(trialCode) : "")">Créer un espace</a></p>
             }
+            <p class="auth-alt left"><a class="auth-player-link" href="/login?player=1"><Ico Name="monitor-down" Size="16" /> Installer un player</a></p>
         </div>
         @if (anySso)
         {
@@ -121,6 +122,43 @@ else
         </div>
         <TermsDialog />
     }
+
+    @if (playerOpen)
+    {
+        @* Installer un player (maquette connexion-telecharger-player.html, option C) : tiroir à droite, on le ferme en revenant sur /login.
+           Les téléchargements sont publics : pas besoin d'être connecté pour installer le player sur l'écran. *@
+        <a class="auth-modal-backdrop" href="/login" aria-label="Fermer" tabindex="-1"></a>
+        <div class="auth-drawer" role="dialog" aria-modal="true" aria-labelledby="pi-title">
+            <div class="modal-head">
+                <div class="grow">
+                    <h3 id="pi-title">Installer le player</h3>
+                    <small>À installer sur l'écran. Il affiche ensuite un code à saisir dans « Connecter un écran ».</small>
+                </div>
+                <a class="auth-close modal-x" href="/login" aria-label="Fermer"><Ico Name="x" Size="20" /></a>
+            </div>
+            <div class="pi-list">
+                <div class="pi-row">
+                    <PlayerLogo Kind="Windows" Size="30" />
+                    <div class="grow"><b>Windows</b><small>@PlayerMeta(win)</small></div>
+                    @if (win != null) { <a class="btn sm" href="/download/windows" download><Ico Name="download" Size="14" /> Télécharger</a> }
+                </div>
+                <div class="pi-row">
+                    <PlayerLogo Kind="Android" Size="30" />
+                    <div class="grow"><b>Android et Android TV</b><small>@PlayerMeta(android)</small></div>
+                    @if (android != null) { <a class="btn sm" href="/download/android" download><Ico Name="download" Size="14" /> Télécharger</a> }
+                </div>
+                <div class="pi-row soon">
+                    <PlayerLogo Kind="Linux" Size="30" />
+                    <div class="grow"><b>Linux</b><small>Bientôt disponible</small></div>
+                </div>
+                <div class="pi-row">
+                    <PlayerLogo Kind="Navigateur" Size="30" />
+                    <div class="grow"><b>Navigateur</b><small>Sans installation</small></div>
+                    <a class="btn ghost sm" href="/player/" target="_blank" rel="noopener">Ouvrir <Ico Name="external" Size="14" /></a>
+                </div>
+            </div>
+        </div>
+    }
 }
 
 @code {
@@ -129,6 +167,11 @@ else
     [SupplyParameterFromForm(FormName = "signup")] private SignupModel? EmailSignup { get; set; }
     [SupplyParameterFromForm(FormName = "signup-sso")] private SignupModel? SsoSignup { get; set; }
     [SupplyParameterFromQuery(Name = "signup")] private string? SignupQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "player")] private string? PlayerQuery { get; set; }
+    private bool playerOpen => PlayerQuery != null && !signup;
+    private PlayerDownloads.Item? win = PlayerDownloads.Latest("windows"), android = PlayerDownloads.Latest("android");
+    private static string PlayerMeta(PlayerDownloads.Item? i) =>
+        i == null ? "Pas encore disponible" : $"v{i.Version} · {i.SizeMb.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture).Replace('.', ',')} Mo";
     [SupplyParameterFromQuery(Name = "ext")] private string? Ext { get; set; }
     [SupplyParameterFromQuery(Name = "sso")] private string? SsoQuery { get; set; }
     [SupplyParameterFromQuery(Name = "p")] private string? ProviderQuery { get; set; }

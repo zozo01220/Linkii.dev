@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Centre de notifications</title>
+<style>
+:root{--bg:#F5F7FA;--surface:#fff;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--row:#EDF1F5;--brand:#0B1F3A;--brand-tint:#EEF1F5;--signal:#3B82C4;--ok:#1E8E5A;--ok-bg:#E1F0E8;--ok-ink:#155A38;--warn:#B7791F;--warn-bg:#FBF0DC;--warn-ink:#7A4F12;--danger:#C8372D;--danger-bg:#FBE4E2;--danger-ink:#8A231C;--info-bg:#E4EEF8;--info-ink:#1F5A92;--store:#E8590C;--radius:4px}
+*{box-sizing:border-box}html,body{margin:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
+h1,h2,h3,p{margin:0;font-weight:500}p{font-weight:400}b,strong{font-weight:500}
+svg{fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+button{font:inherit;color:inherit;cursor:pointer}
+.mock{background:#FFF8E1;border-bottom:1px dashed #E0B84A;padding:10px 20px;font-size:13px;color:#6B5200;position:sticky;top:0;z-index:50}
+.scenes{display:flex;gap:6px;flex-wrap:wrap;padding:14px 24px 0;max-width:1240px;margin:0 auto}
+.scenes button{border:1px solid var(--line-2);background:#fff;border-radius:18px;padding:5px 14px;font-size:13.5px}
+.scenes button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.scene{display:none;max-width:1240px;margin:0 auto;padding:18px 24px 60px}.scene.on{display:block}
+.lead{color:var(--muted);margin:0 0 14px;max-width:820px}
+h2.t{font-size:22px;margin-bottom:4px}
+.note{background:#fff;border:1px solid var(--line);border-left:3px solid var(--signal);border-radius:var(--radius);padding:10px 14px;font-size:13.5px;color:var(--muted);margin:14px 0}
+.note b{color:var(--ink)}
+
+/* --- fenêtre d'application (reprise de la barre §150) --- */
+.win{background:var(--bg);border:1px solid var(--line-2);border-radius:8px;overflow:hidden;display:flex;min-height:640px;position:relative}
+.side{width:210px;background:#fff;border-right:1px solid var(--line);padding:18px 12px;display:flex;flex-direction:column;gap:2px;flex:none}
+.side .logo{font-size:24px;font-weight:500;letter-spacing:-.03em;padding:2px 10px 20px}
+.side .logo i{font-style:normal;color:#CC8400}
+.side .nav{display:flex;align-items:center;gap:11px;padding:8px 11px;color:var(--muted);border-radius:var(--radius);font-size:14.5px}
+.side .nav svg{width:17px;height:17px}.side .nav.act{background:var(--brand-tint);color:var(--ink);font-weight:500;box-shadow:inset 2px 0 0 var(--brand);border-radius:0 4px 4px 0}
+.side .sp{flex:1}
+.col{flex:1;min-width:0;display:flex;flex-direction:column}
+.qbar{height:58px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:6px;padding:0 20px;position:relative;z-index:5}
+.qbar .org{font-weight:500;margin-right:auto}
+.qb{display:inline-flex;align-items:center;gap:7px;height:36px;border:0;background:none;border-radius:18px;padding:0 10px;font-size:14px}
+.qb svg{width:19px;height:19px}.qb.store{font-weight:500}.qb.store svg{color:var(--store)}
+.qb:hover,.ic:hover{background:var(--bg)}
+.sep{width:1px;height:24px;background:var(--line);margin:0 4px}
+.ic{width:36px;height:36px;display:grid;place-items:center;border:0;background:none;border-radius:50%;position:relative}
+.ic svg{width:19px;height:19px}
+.ic.open{background:var(--brand-tint)}
+.ic .dot{position:absolute;top:3px;right:2px;min-width:17px;height:17px;border-radius:9px;background:var(--danger);color:#fff;font-size:10.5px;font-weight:600;display:grid;place-items:center;padding:0 4px;border:2px solid #fff;box-sizing:content-box;line-height:1}
+.ic .dot.new{animation:pop .5s}
+@keyframes pop{0%{transform:scale(.4)}60%{transform:scale(1.25)}100%{transform:scale(1)}}
+.av{width:32px;height:32px;border-radius:50%;background:var(--ink);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:500;margin-left:4px}
+.body{padding:26px 32px 40px;flex:1;overflow:auto}
+.ph{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+.ph h1{font-size:26px;letter-spacing:-.01em;line-height:1.2}.ph .sub{color:var(--muted);margin-top:2px;font-size:14px}
+
+/* --- boutons --- */
+.btn{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 14px;border:1px solid var(--line-2);background:#fff;border-radius:var(--radius);font-size:14px}
+.btn:hover{border-color:var(--ink)}.btn svg{width:16px;height:16px}
+.btn.pri{background:var(--brand);border-color:var(--brand);color:#fff}
+.btn.sm{height:30px;padding:0 10px;font-size:13px}
+.lnk{border:0;background:none;color:var(--signal);padding:0;font-size:13.5px}.lnk:hover{text-decoration:underline}
+
+/* --- popover cloche --- */
+.pop{position:absolute;right:62px;top:54px;width:400px;background:#fff;border:1px solid var(--line-2);border-radius:10px;box-shadow:0 14px 34px rgba(11,31,58,.2);z-index:20;display:none;overflow:hidden}
+.pop.on{display:block}
+.pop-h{display:flex;align-items:center;justify-content:space-between;padding:13px 16px 9px}
+.pop-h b{font-size:16px}
+.pop-t{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid var(--line)}
+.pop-t button{border:0;background:none;padding:7px 8px 8px;font-size:13.5px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+.pop-t button.on{color:var(--ink);font-weight:500;border-color:var(--brand)}
+.pop-l{max-height:380px;overflow:auto}
+.pop-f{border-top:1px solid var(--line);display:flex;justify-content:space-between;padding:10px 16px;background:#FAFBFC}
+
+/* --- ligne de notification --- */
+.nt{display:flex;gap:12px;padding:12px 16px;border-bottom:1px solid var(--row);position:relative;cursor:pointer;background:#fff}
+.nt:hover{background:#FAFBFC}
+.nt.unread{background:#F6F9FD}
+.nt.unread::before{content:"";position:absolute;left:5px;top:50%;width:6px;height:6px;margin-top:-3px;border-radius:50%;background:var(--signal)}
+.nt .ico{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;flex:none}
+.nt .ico svg{width:18px;height:18px}
+.sev-error .ico{background:var(--danger-bg);color:var(--danger)}
+.sev-warn .ico{background:var(--warn-bg);color:var(--warn)}
+.sev-ok .ico{background:var(--ok-bg);color:var(--ok)}
+.sev-info .ico{background:var(--info-bg);color:var(--info-ink)}
+.nt .tx{flex:1;min-width:0}
+.nt .ti{font-size:14.5px;line-height:1.35}.nt.unread .ti{font-weight:500}
+.nt .bd{font-size:13.5px;color:var(--muted);margin-top:1px}
+.nt .mt{display:flex;gap:8px;align-items:center;margin-top:6px;font-size:12.5px;color:var(--muted);flex-wrap:wrap}
+.cat{background:var(--row);border-radius:10px;padding:0 8px;font-size:12px;color:var(--muted)}
+.nt .act{display:flex;align-items:flex-start;gap:4px;flex:none}
+.nt .hov{display:none;gap:2px}
+.nt:hover .hov{display:flex}
+.nt .hov button{width:30px;height:30px;border:0;background:#fff;border:1px solid var(--line);border-radius:50%;display:grid;place-items:center}
+.nt .hov button:hover{border-color:var(--ink)}.nt .hov svg{width:14px;height:14px}
+.nt .go{border:1px solid var(--line-2);background:#fff;border-radius:var(--radius);height:28px;padding:0 10px;font-size:12.5px;white-space:nowrap}
+.nt .go:hover{border-color:var(--ink)}
+.nt .ck{display:none;margin-top:8px}
+.sel .nt .ck{display:block}
+.grp{padding:14px 16px 6px;font-size:12.5px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;background:var(--bg)}
+.empty{padding:50px 20px;text-align:center;color:var(--muted)}
+.empty svg{width:42px;height:42px;color:var(--line-2);margin-bottom:8px}
+
+/* --- page --- */
+.panel{background:#fff;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:14px}
+.tabs button{border:0;background:none;padding:9px 14px;font-size:14.5px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;display:flex;align-items:center;gap:7px}
+.tabs button.on{color:var(--ink);font-weight:500;border-color:var(--brand)}
+.tabs .n{background:var(--danger);color:#fff;border-radius:9px;font-size:11px;font-weight:600;padding:0 6px;line-height:17px}
+.tabs .n.g{background:var(--row);color:var(--muted)}
+.bar2{display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line-2);background:#fff;border-radius:16px;height:30px;padding:0 12px;font-size:13px;display:inline-flex;align-items:center;gap:6px}
+.chip.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.chip small{opacity:.7;font-size:12px}
+.search{display:flex;align-items:center;gap:7px;border:1px solid var(--line-2);border-radius:var(--radius);padding:0 10px;height:34px;background:#fff;min-width:200px}
+.search svg{width:15px;height:15px;color:var(--muted)}.search input{border:0;outline:0;font:inherit;font-size:14px;width:100%;background:none}
+.selbar{display:none;align-items:center;gap:10px;background:var(--ink);color:#fff;border-radius:var(--radius);padding:7px 12px;margin-bottom:10px;font-size:14px}
+.selbar.on{display:flex}.selbar button{background:none;border:0;color:#fff;text-decoration:underline;font-size:13.5px}
+
+/* --- réglages / cartes --- */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+.cd{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
+.cd h3{font-size:15.5px;display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.cd h3 .ci{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--brand-tint)}
+.cd h3 svg{width:15px;height:15px}
+.cd ul{margin:0;padding:0 0 0 18px;font-size:13.5px;color:var(--muted)}.cd li{margin:2px 0}
+.tag{display:inline-block;font-size:11px;font-weight:600;border-radius:9px;padding:0 7px;line-height:17px;margin-left:4px;vertical-align:1px}
+.tag.p{background:#FFF3C4;color:#7A5B00}.tag.n{background:var(--info-bg);color:var(--info-ink)}.tag.e{background:var(--row);color:var(--muted)}
+table.mx{width:100%;border-collapse:collapse;font-size:13.5px;background:#fff;border:1px solid var(--line)}
+table.mx th{text-align:left;font-weight:500;font-size:12.5px;color:var(--muted);background:#FAFBFC;padding:8px 10px;border-bottom:1px solid var(--line)}
+table.mx td{padding:8px 10px;border-bottom:1px solid var(--row);vertical-align:top}
+.sw{width:34px;height:20px;border-radius:10px;background:var(--ok);position:relative;display:inline-block}
+.sw::after{content:"";position:absolute;right:2px;top:2px;width:16px;height:16px;border-radius:50%;background:#fff}
+.sw.off{background:var(--line-2)}.sw.off::after{right:auto;left:2px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.rline{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--row)}
+.rline:last-child{border:0}.rline .l{flex:1}.rline .l small{display:block;color:var(--muted);font-size:13px}
+.rline .ch{display:flex;gap:14px;font-size:12.5px;color:var(--muted);align-items:center}
+
+/* --- téléphone --- */
+.phones{display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start}
+.phone{width:300px;height:600px;border:8px solid #1b2a3f;border-radius:34px;background:var(--bg);overflow:hidden;position:relative;display:flex;flex-direction:column}
+.phone .top{height:52px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 14px;gap:8px;flex:none;margin-top:18px}
+.phone .top b{flex:1;font-size:16px}.phone .top .ic{width:34px;height:34px}
+.phone .scr{flex:1;overflow:auto}
+.phone .tb{height:58px;background:#fff;border-top:1px solid var(--line);display:flex;flex:none}
+.phone .tb span{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:10.5px;color:var(--muted);gap:2px;position:relative}
+.phone .tb svg{width:20px;height:20px}.phone .tb span.act{color:var(--ink);font-weight:500}
+.phone .tb .dot{position:absolute;top:6px;left:54%;background:var(--danger);color:#fff;border-radius:8px;font-size:10px;padding:0 5px;font-weight:600;line-height:15px}
+.phone .nt{padding:10px 12px 10px 16px}.phone .nt .ico{width:32px;height:32px}.phone .nt .ti{font-size:13.5px}.phone .nt .bd{font-size:12.5px}
+.sheet{position:absolute;left:0;right:0;bottom:58px;background:#fff;border-top:1px solid var(--line-2);border-radius:14px 14px 0 0;padding:10px 6px 6px;box-shadow:0 -8px 24px rgba(11,31,58,.18)}
+.sheet .it{display:flex;align-items:center;gap:12px;padding:11px 14px;font-size:14.5px}.sheet .it svg{width:19px;height:19px;color:var(--muted)}
+.sheet .it .dot{margin-left:auto;background:var(--danger);color:#fff;border-radius:9px;font-size:11px;padding:0 7px;line-height:18px;font-weight:600}
+.push{background:#fff;border-radius:14px;box-shadow:0 6px 20px rgba(0,0,0,.25);padding:11px 13px;display:flex;gap:10px;margin:8px;font-size:13px}
+.push .ap{width:30px;height:30px;border-radius:7px;background:var(--brand);color:#fff;display:grid;place-items:center;font-weight:500;flex:none;font-size:14px}
+.push small{color:var(--muted);display:block}
+@media(max-width:900px){.side{display:none}.two{grid-template-columns:1fr}.pop{right:10px;width:calc(100% - 20px)}}
+</style>
+</head>
+<body>
+<div class="mock"><b>Centre de notifications.</b> Maquette cliquable : la cloche s'ouvre, on peut marquer comme lu, filtrer, sélectionner. Rien n'est codé. Les écrans reprennent la barre des accès rapides et le style de l'application.</div>
+
+<div class="scenes" id="scenes">
+  <button data-s="1" class="on">1 · La cloche</button>
+  <button data-s="2">2 · La page Notifications</button>
+  <button data-s="3">3 · Cas particuliers</button>
+  <button data-s="4">4 · Mobile et app</button>
+  <button data-s="5">5 · Ce qui est notifié</button>
+  <button data-s="6">6 · Réglages et canaux</button>
+</div>
+
+<!-- ============ 1 · LA CLOCHE ============ -->
+<section class="scene on" id="s1">
+  <h2 class="t">1 · La cloche dans la barre des accès rapides</h2>
+  <p class="lead">Une icône cloche entre <b>Aide</b> et <b>Réglages</b>, avec une pastille rouge (nombre de notifications à lire, « 9+ » au-delà). Un clic ouvre un aperçu des dernières ; « Tout voir » ouvre la page complète. Cliquez la cloche ci-dessous.</p>
+  <div class="win" id="win1">
+    <div class="side" data-side></div>
+    <div class="col">
+      <div class="qbar" data-qbar></div>
+      <div class="pop" id="pop1"></div>
+      <div class="body">
+        <div class="ph"><div><h1>Écrans</h1><p class="sub">12 écrans · 9 en ligne</p></div></div>
+        <div class="cards">
+          <div class="cd"><h3>Salle d'attente</h3><p style="color:var(--muted);font-size:13.5px">En ligne · Liste « Accueil »</p></div>
+          <div class="cd"><h3>Hall d'entrée</h3><p style="color:var(--danger);font-size:13.5px">Hors ligne depuis 25 min</p></div>
+          <div class="cd"><h3>Réfectoire</h3><p style="color:var(--muted);font-size:13.5px">En ligne · Planning du jour</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>Comportement.</b> La pastille se met à jour en direct (même mécanisme que les pastilles du menu, MenuBadges). Un nouveau message la fait rebondir une fois. Ouvrir l'aperçu ne marque rien comme lu : on lit en cliquant sur la ligne (qui ouvre aussi la page concernée) ou avec « Tout marquer comme lu ».</div>
+</section>
+
+<!-- ============ 2 · LA PAGE ============ -->
+<section class="scene" id="s2">
+  <h2 class="t">2 · La page Notifications</h2>
+  <p class="lead">Trois onglets : <b>À lire</b>, <b>Lues</b>, <b>Toutes</b>. Filtres par catégorie, recherche, regroupement par jour. Au survol : marquer comme lue / non lue, supprimer. Le bouton d'action ouvre directement l'élément concerné.</p>
+  <div class="win">
+    <div class="side" data-side="notif"></div>
+    <div class="col">
+      <div class="qbar" data-qbar></div>
+      <div class="body" id="page2"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 3 · CAS PARTICULIERS ============ -->
+<section class="scene" id="s3">
+  <h2 class="t">3 · États et cas particuliers</h2>
+  <div class="two">
+    <div>
+      <p class="lead"><b>Tout est lu</b> : message rassurant, rien d'alarmant, lien vers les lues.</p>
+      <div class="panel"><div class="empty"><svg viewBox="0 0 24 24" style="stroke-width:1.4"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg><br><b style="color:var(--ink)">Vous êtes à jour</b><br>Aucune notification à lire.<br><button class="lnk" style="margin-top:8px">Voir les notifications lues</button></div></div>
+    </div>
+    <div>
+      <p class="lead"><b>Regroupement</b> : dix écrans qui tombent en même temps (coupure réseau) forment une seule ligne, pas dix.</p>
+      <div class="panel" id="grp3"></div>
+    </div>
+  </div>
+  <div class="two" style="margin-top:22px">
+    <div>
+      <p class="lead"><b>Notification qui se résout toute seule</b> : « Hall d'entrée hors ligne » reste à lire tant que l'écran est hors ligne ; quand il revient, la ligne passe en vert « de nouveau en ligne » et se range dans les lues.</p>
+      <div class="panel" id="res3"></div>
+    </div>
+    <div>
+      <p class="lead"><b>Notification de niveau « bloquant »</b> (paiement échoué, espace suspendu) : bandeau rouge persistant en haut de toutes les pages, en plus de la cloche, jusqu'à résolution.</p>
+      <div style="background:var(--danger-bg);color:var(--danger-ink);border:1px solid #E9B7B3;border-radius:var(--radius);padding:10px 14px;display:flex;align-items:center;gap:12px;font-size:14px"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg><span style="flex:1"><b>Paiement refusé.</b> Vos écrans seront suspendus le 4 novembre.</span><button class="btn sm pri">Mettre à jour la carte</button></div>
+    </div>
+  </div>
+  <div class="note"><b>Durée de conservation.</b> Proposition : 90 jours, puis suppression automatique (les alertes critiques d'abonnement restent 1 an). Les notifications lues de plus de 30 jours sont repliées par défaut.</div>
+</section>
+
+<!-- ============ 4 · MOBILE ============ -->
+<section class="scene" id="s4">
+  <h2 class="t">4 · App mobile (Android) et notification système</h2>
+  <p class="lead">Sur l'app, il n'y a pas de barre du haut des accès rapides : la cloche vit dans la feuille <b>Plus</b> (avec sa pastille) et la pastille remonte sur « Plus » dans la barre du bas. La notification système (Firebase, déjà en place) ouvre directement la bonne page.</p>
+  <div class="phones">
+    <div class="phone"><div class="top"><b>Écrans</b></div><div class="scr"><div style="padding:14px"><div class="cd" style="margin-bottom:10px"><b>Hall d'entrée</b><p style="color:var(--danger);font-size:13px">Hors ligne depuis 25 min</p></div><div class="cd"><b>Salle d'attente</b><p style="color:var(--muted);font-size:13px">En ligne</p></div></div></div>
+      <div class="sheet"><div class="it"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>Notifications<span class="dot">4</span></div><div class="it"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>Réglages</div><div class="it"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="M12 17.5h.01M9.5 9.3a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.2-2.5 3.8"/></svg>Aide</div></div>
+      <div class="tb"><span><svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8"/></svg>Écrans</span><span><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 10h18"/></svg>Planning</span><span><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>Contenus</span><span class="act"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>Plus<b class="dot">4</b></span></div></div>
+    <div class="phone"><div class="top"><b>Notifications</b><button class="lnk">Tout lire</button></div><div class="scr" id="ph4"></div>
+      <div class="tb"><span><svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8"/></svg>Écrans</span><span><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 10h18"/></svg>Planning</span><span><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>Contenus</span><span class="act"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>Plus</span></div></div>
+    <div class="phone" style="background:linear-gradient(#2b3c55,#1b2a3f)"><div style="margin-top:60px;color:#fff;text-align:center;font-size:42px;font-weight:300">09:41</div>
+      <div class="push" style="margin-top:34px"><div class="ap">L</div><div><b>Hall d'entrée est hors ligne</b><small>Linkivi · il y a 1 min</small><span style="color:var(--muted)">Aucun signal depuis 25 minutes.</span></div></div>
+      <div class="push"><div class="ap">L</div><div><b>Synchronisation échouée</b><small>Linkivi · il y a 12 min</small><span style="color:var(--muted)">Google Drive « Menus » : connexion expirée.</span></div></div>
+      <p style="color:#fff;opacity:.7;text-align:center;font-size:12.5px;margin-top:18px;padding:0 18px">Un toucher ouvre la page concernée et marque la notification comme lue.</p></div>
+  </div>
+</section>
+
+<!-- ============ 5 · CE QUI EST NOTIFIÉ ============ -->
+<section class="scene" id="s5">
+  <h2 class="t">5 · Ce qui peut être notifié</h2>
+  <p class="lead">Recensement à partir des fonctions de l'application. <span class="tag p">Existe</span> = déjà envoyé aujourd'hui par e-mail ou notification (alertes §64) ; <span class="tag n">Nouveau</span> = événement qui existe dans le code mais ne prévient personne ; <span class="tag e">Option</span> = utile mais à valider.</p>
+  <div class="cards" id="catalog"></div>
+</section>
+
+<!-- ============ 6 · RÉGLAGES ============ -->
+<section class="scene" id="s6">
+  <h2 class="t">6 · Réglages : le centre devient un canal de plus</h2>
+  <p class="lead">On n'ajoute pas de nouvelle page de réglages : dans <b>Réglages › Alertes et pause</b> (§64), la colonne « Dans l'app » s'ajoute à E-mail et Notification mobile. Le même interrupteur général, les mêmes types ; on ajoute des types.</p>
+  <div class="panel" style="max-width:860px;padding:6px 20px 14px">
+    <div class="rline"><div class="l"><b>Activer les alertes</b><small>Interrupteur général de l'organisation</small></div><span class="sw"></span></div>
+    <div class="rline" style="font-size:12.5px;color:var(--muted)"><div class="l">Comment être prévenu</div><div class="ch"><span>Dans l'app</span><span>E-mail</span><span>Mobile</span></div></div>
+    <div id="set6"></div>
+  </div>
+  <div class="note"><b>Décision à prendre.</b> Le centre « Dans l'app » est-il réservé à la licence Pro comme les alertes actuelles, ou offert à tous ? Proposition : le centre est <b>offert à toutes les licences</b> pour les types système, abonnement et écrans (c'est de l'information, pas un envoi) ; les canaux e-mail et mobile restent Pro.</div>
+</section>
+
+<script>
+const I={
+ bell:'<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
+ screen:'<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
+ sync:'<path d="M21 12a9 9 0 0 0-15-6.7L3 8M3 3v5h5M3 12a9 9 0 0 0 15 6.7L21 16M21 21v-5h-5"/>',
+ user:'<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+ card:'<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>',
+ send:'<path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/>',
+ share:'<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>',
+ plug:'<path d="M9 2v6M15 2v6"/><path d="M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M12 18v4"/>',
+ qr:'<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h3M20 17v4"/>',
+ cal:'<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 10h18M8 2v4M16 2v4"/>',
+ coin:'<circle cx="12" cy="12" r="9.5"/><path d="M14.5 9a2.5 2.5 0 0 0-2.5-1.5c-1.5 0-2.5.8-2.5 2 0 3 5 1.5 5 4.2 0 1.2-1 2-2.5 2A2.7 2.7 0 0 1 9 14.5M12 6v1.5M12 16.5V18"/>',
+ star:'<path d="M12 2l3 6.5 7 .8-5.2 4.8 1.4 7L12 17.5 5.8 21l1.4-7L2 9.3l7-.8z"/>',
+ check:'<path d="M20 6L9 17l-5-5"/>',
+ trash:'<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>',
+ dotc:'<circle cx="12" cy="12" r="4"/>',
+ warn:'<path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+ help:'<circle cx="12" cy="12" r="9.5"/><path d="M9.5 9.3a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.2-2.5 3.8M12 17.5h.01"/>',
+ gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
+ player:'<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M12 6.5v6M9.5 10.5L12 13l2.5-2.5"/><path d="M8 21h8M12 17v4"/>',
+ store:'<path d="M3 9l1.5-5h15L21 9"/><path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/><path d="M5 12v8h14v-8"/><path d="M10 20v-5h4v5"/>',
+ search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
+ eye:'<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/>',
+ list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>'
+};
+const sv=(k,w)=>`<svg viewBox="0 0 24 24"${w?` width="${w}" height="${w}"`:''}>${I[k]}</svg>`;
+
+const CATS={screens:['Écrans','screen'],diff:['Diffusion','send'],sync:['Synchronisations','sync'],integ:['Intégrations','plug'],team:['Équipe et partage','user'],bill:['Abonnement','card'],pub:['Publicité','coin'],inter:['Interactions','qr'],sys:['Système','star']};
+let N=[
+ {id:1,c:'screens',s:'error',t:'Hall d\'entrée est hors ligne',b:'Aucun signal depuis 25 minutes.',m:'il y a 2 min',go:'Voir l\'écran',r:0},
+ {id:2,c:'sync',s:'warn',t:'Synchronisation Google Drive échouée',b:'Dossier « Menus de la semaine » : la connexion a expiré.',m:'il y a 18 min',go:'Reconnecter',r:0},
+ {id:3,c:'team',s:'info',t:'Camille Rochat a partagé « Accueil été » avec vous',b:'Liste de lecture, lecture seule.',m:'il y a 1 h',go:'Ouvrir',r:0},
+ {id:4,c:'bill',s:'warn',t:'Votre essai gratuit se termine dans 3 jours',b:'Choisissez un plan pour garder vos écrans actifs.',m:'il y a 3 h',go:'Choisir un plan',r:0},
+ {id:5,c:'diff',s:'ok',t:'Publication terminée sur 8 écrans',b:'La liste « Promotions d\'automne » est en cours de diffusion.',m:'09:12',go:'Voir',r:1},
+ {id:6,c:'integ',s:'warn',t:'Météo : quota presque atteint',b:'92 % des appels du mois utilisés (WeatherAPI).',m:'08:40',go:'Voir l\'intégration',r:1},
+ {id:7,c:'inter',s:'info',t:'Le QR « Menu du jour » a été scanné 100 fois',b:'Seuil atteint ce mois-ci.',m:'hier 17:05',go:'Statistiques',r:0,d:'Hier'},
+ {id:8,c:'screens',s:'ok',t:'Salle d\'attente est de nouveau en ligne',b:'Hors ligne pendant 12 minutes.',m:'hier 14:30',go:'Voir l\'écran',r:1,d:'Hier'},
+ {id:9,c:'pub',s:'info',t:'Une campagne publicitaire attend votre validation',b:'« Rentrée 2026 » · 3 écrans · 14 jours.',m:'hier 11:02',go:'Examiner',r:0,d:'Hier'},
+ {id:10,c:'diff',s:'error',t:'Publication échouée sur « Réfectoire »',b:'L\'écran n\'a pas téléchargé 2 vidéos (espace insuffisant).',m:'lundi 16:48',go:'Voir',r:1,d:'Plus ancien'},
+ {id:11,c:'sys',s:'info',t:'Nouveau : le centre de notifications',b:'Retrouvez ici tout ce qui demande votre attention.',m:'lundi 08:00',go:'En savoir plus',r:1,d:'Plus ancien'},
+ {id:12,c:'team',s:'info',t:'Marc Dubois a rejoint l\'organisation',b:'Rôle : éditeur.',m:'vendredi',go:'Organisation',r:1,d:'Plus ancien'}
+];
+let tab='unread',cat='all',q='',selMode=false,picked=new Set();
+
+function row(n,opts={}){
+ const meta=`<div class="mt"><span class="cat">${CATS[n.c][0]}</span><span>${n.m}</span></div>`;
+ return `<div class="nt sev-${n.s} ${n.r?'':'unread'}" data-id="${n.id}">
+  <input type="checkbox" class="ck" ${picked.has(n.id)?'checked':''} data-ck="${n.id}">
+  <div class="ico">${sv(CATS[n.c][1])}</div>
+  <div class="tx"><div class="ti">${n.t}</div><div class="bd">${n.b}</div>${meta}</div>
+  <div class="act">${opts.compact?'':`<span class="hov"><button title="${n.r?'Marquer comme non lue':'Marquer comme lue'}" data-tg="${n.id}">${sv(n.r?'dotc':'check')}</button><button title="Supprimer" data-del="${n.id}">${sv('trash')}</button></span>`}${opts.compact?'':`<button class="go">${n.go}</button>`}</div></div>`;
+}
+const unread=()=>N.filter(n=>!n.r).length;
+
+/* --- barre et menu latéral --- */
+function qbar(){const u=unread();return `<span class="org">LPR Unil</span>
+ <button class="qb">${sv('player')}Player</button><button class="qb store">${sv('store')}Store</button><span class="sep"></span>
+ <button class="ic">${sv('help')}</button>
+ <button class="ic bellbtn" title="Notifications">${sv('bell')}${u?`<span class="dot">${u>9?'9+':u}</span>`:''}</button>
+ <button class="ic">${sv('gear')}</button><span class="av">LU</span>`}
+function side(act){const it=[['screen','Écrans'],['cal','Programmation'],['list','Contenus']];
+ return `<div class="logo">linki<i>i</i></div>`+it.map(x=>`<div class="nav">${sv(x[0])}${x[1]}</div>`).join('')+`<div class="sp"></div><div class="nav">${sv('user')}Organisation</div>`}
+
+/* --- popover --- */
+let popTab='unread';
+function pop(){
+ const list=(popTab==='unread'?N.filter(n=>!n.r):N).slice(0,5);
+ const u=unread();
+ return `<div class="pop-h"><b>Notifications</b><button class="lnk" data-readall>Tout marquer comme lu</button></div>
+ <div class="pop-t"><button class="${popTab==='unread'?'on':''}" data-pt="unread">À lire (${u})</button><button class="${popTab==='all'?'on':''}" data-pt="all">Toutes</button></div>
+ <div class="pop-l">${list.length?list.map(n=>row(n,{compact:1})).join(''):`<div class="empty">${sv('bell')}<br>Vous êtes à jour</div>`}</div>
+ <div class="pop-f"><button class="lnk" data-goto="2">Tout voir</button><button class="lnk" data-goto="6">${sv('gear',13)} Réglages</button></div>`}
+
+/* --- page --- */
+function page(){
+ const u=unread();
+ let list=N.filter(n=>tab==='all'||(tab==='unread'?!n.r:n.r));
+ if(cat!=='all')list=list.filter(n=>n.c===cat);
+ if(q)list=list.filter(n=>(n.t+n.b).toLowerCase().includes(q));
+ const counts={};N.filter(n=>tab==='all'||(tab==='unread'?!n.r:n.r)).forEach(n=>counts[n.c]=(counts[n.c]||0)+1);
+ const groups={};list.forEach(n=>{const g=n.d||'Aujourd\'hui';(groups[g]=groups[g]||[]).push(n)});
+ const body=list.length?['Aujourd\'hui','Hier','Plus ancien'].filter(g=>groups[g]).map(g=>`<div class="grp">${g}</div>${groups[g].map(n=>row(n)).join('')}`).join(''):
+  `<div class="empty">${sv('bell')}<br><b style="color:var(--ink)">${tab==='unread'?'Vous êtes à jour':'Rien à afficher'}</b><br>${tab==='unread'?'Aucune notification à lire.':'Aucune notification ne correspond.'}</div>`;
+ return `<div class="ph"><div><h1>Notifications</h1><p class="sub">${u?`${u} à lire`:'Tout est lu'} · conservées 90 jours</p></div>
+  <div class="row" style="display:flex;gap:8px"><button class="btn" data-selmode>${sv('check')}Sélectionner</button><button class="btn" data-readall>${sv('eye')}Tout marquer comme lu</button><button class="btn" data-goto="6">${sv('gear')}Régler les alertes</button></div></div>
+  <div class="tabs"><button data-tab="unread" class="${tab==='unread'?'on':''}">À lire ${u?`<span class="n">${u}</span>`:''}</button><button data-tab="read" class="${tab==='read'?'on':''}">Lues <span class="n g">${N.length-u}</span></button><button data-tab="all" class="${tab==='all'?'on':''}">Toutes</button></div>
+  <div class="bar2"><div class="chips"><button class="chip ${cat==='all'?'on':''}" data-cat="all">Toutes les catégories</button>${Object.keys(CATS).filter(k=>counts[k]).map(k=>`<button class="chip ${cat===k?'on':''}" data-cat="${k}">${sv(CATS[k][1],13)}${CATS[k][0]} <small>${counts[k]}</small></button>`).join('')}</div>
+   <div class="search" style="margin-left:auto">${sv('search')}<input placeholder="Rechercher" value="${q}" data-q></div></div>
+  <div class="selbar ${selMode&&picked.size?'on':''}"><span>${picked.size} sélectionnée(s)</span><button data-bulk="read">Marquer comme lues</button><button data-bulk="del">Supprimer</button><button data-bulk="x">Annuler</button></div>
+  <div class="panel ${selMode?'sel':''}">${body}</div>`}
+
+function paint(){
+ document.querySelectorAll('[data-qbar]').forEach(e=>e.innerHTML=qbar());
+ document.querySelectorAll('[data-side]').forEach(e=>e.innerHTML=side(e.dataset.side==='notif'));
+ document.getElementById('pop1').innerHTML=pop();
+ document.getElementById('page2').innerHTML=page();
+ document.getElementById('ph4').innerHTML=N.slice(0,7).map(n=>row(n,{compact:1})).join('');
+ document.getElementById('grp3').innerHTML=`<div class="nt sev-error unread"><div class="ico">${sv('screen')}</div><div class="tx"><div class="ti">10 écrans sont hors ligne</div><div class="bd">Hall, Réfectoire, Salle 2, Salle 3 et 6 autres · Site « Campus Nord »</div><div class="mt"><span class="cat">Écrans</span><span>il y a 4 min</span></div></div><div class="act"><button class="go">Voir les écrans</button></div></div>`;
+ document.getElementById('res3').innerHTML=`<div class="nt sev-ok"><div class="ico">${sv('screen')}</div><div class="tx"><div class="ti">Hall d'entrée est de nouveau en ligne</div><div class="bd">Hors ligne pendant 25 minutes.</div><div class="mt"><span class="cat">Écrans</span><span>09:44 · remplace « hors ligne » de 09:19</span></div></div></div>`;
+}
+document.addEventListener('click',e=>{
+ const t=e.target;
+ const sc=t.closest('#scenes button');if(sc){go(sc.dataset.s);return}
+ const gt=t.closest('[data-goto]');if(gt){go(gt.dataset.goto);return}
+ if(t.closest('.bellbtn')){const p=document.getElementById('pop1');const win=t.closest('.win');
+   if(win&&win.id==='win1'){p.classList.toggle('on');t.closest('.bellbtn').classList.toggle('open')}else go(2);return}
+ if(t.closest('[data-readall]')){N.forEach(n=>n.r=1);paint();return}
+ const pt=t.closest('[data-pt]');if(pt){popTab=pt.dataset.pt;paint();return}
+ const tb=t.closest('[data-tab]');if(tb){tab=tb.dataset.tab;paint();return}
+ const ct=t.closest('[data-cat]');if(ct){cat=ct.dataset.cat;paint();return}
+ const tg=t.closest('[data-tg]');if(tg){const n=N.find(x=>x.id==tg.dataset.tg);n.r=n.r?0:1;paint();return}
+ const dl=t.closest('[data-del]');if(dl){N=N.filter(x=>x.id!=dl.dataset.del);paint();return}
+ if(t.closest('[data-selmode]')){selMode=!selMode;picked.clear();paint();return}
+ const ck=t.closest('[data-ck]');if(ck){const i=+ck.dataset.ck;picked.has(i)?picked.delete(i):picked.add(i);paint();return}
+ const bk=t.closest('[data-bulk]');if(bk){const k=bk.dataset.bulk;if(k==='read')N.forEach(n=>picked.has(n.id)&&(n.r=1));if(k==='del')N=N.filter(n=>!picked.has(n.id));picked.clear();if(k==='x')selMode=false;paint();return}
+ const nt=t.closest('.nt');if(nt&&nt.dataset.id&&!t.closest('.go')){const n=N.find(x=>x.id==nt.dataset.id);if(n&&!n.r){n.r=1;paint()}}
+});
+document.addEventListener('input',e=>{if(e.target.matches('[data-q]')){q=e.target.value.toLowerCase();const pos=e.target.selectionStart;paint();const i=document.querySelector('[data-q]');i.focus();i.setSelectionRange(pos,pos)}});
+function go(s){document.querySelectorAll('.scene').forEach(x=>x.classList.toggle('on',x.id==='s'+s));document.querySelectorAll('#scenes button').forEach(b=>b.classList.toggle('on',b.dataset.s==s));scrollTo(0,0)}
+
+/* --- catalogue des notifications possibles --- */
+const CAT=[
+ ['screens','Écrans',[['e','Écran hors ligne / de retour en ligne (délai réglable)'],['n','Commande échouée (redémarrage, capture, pause, veille)'],['n','Espace de stockage de l\'appareil presque plein'],['n','Écran jamais connecté après 24 h (code de jumelage non utilisé)'],['n','Nouvelle version du player disponible pour l\'écran'],['n','Écran qui redémarre en boucle / mur d\'écrans désynchronisé'],['o','Écran sorti de veille hors des plages prévues']]],
+ ['diff','Diffusion et planning',[['n','Publication terminée / échouée (par écran ou groupée)'],['n','Médias non téléchargés par un écran (préchargement hors ligne)'],['n','Créneau de planning qui démarre ou se termine (option)'],['n','Contenu qui expire dans 3 jours (période de diffusion)'],['n','Liste vide ou écran sans liste assignée'],['n','Conflit de planning (deux créneaux sur la même plage)']]],
+ ['sync','Synchronisations',[['e','Dossier connecté non synchronisé (Drive, OneDrive, Nextcloud, SFTP, Dropbox)'],['n','Synchronisation rétablie'],['n','Nouveaux fichiers importés depuis un dossier connecté'],['n','Conversion terminée ou échouée (PDF, Slides, Docs, Canva)']]],
+ ['integ','Intégrations et données',[['n','Compte connecté expiré ou révoqué (Google, Microsoft, Facebook, Canva…)'],['n','Quota d\'API presque atteint (météo)'],['n','Source de données en erreur ou vide'],['n','Relais de données hors ligne'],['n','Calendrier de salle inaccessible'],['n','Instance Home Assistant injoignable']]],
+ ['team','Équipe et partage',[['e','Personne ajoutée à l\'organisation'],['n','Contenu partagé avec vous / partage retiré'],['n','Votre rôle ou vos accès ont changé'],['n','Invitation acceptée ou expirée'],['n','Demande d\'inscription à valider (administrateur)']]],
+ ['bill','Abonnement et compte',[['e','Fin d\'essai proche (J-7, J-3, J-1) / terminée'],['e','Espace suspendu'],['n','Paiement refusé, facture disponible, renouvellement à venir'],['n','Quota d\'écrans atteint, limite du plan dépassée'],['n','Changement de plan confirmé'],['o','Stockage de la médiathèque presque plein']]],
+ ['pub','Publicité rémunérée',[['n','Campagne à valider / validée / refusée'],['n','Campagne qui démarre ou se termine'],['n','Rémunération du mois disponible (Pro)']]],
+ ['inter','Interactions et statistiques',[['n','Seuil de scans QR atteint'],['n','Borne interactive : première utilisation, panne'],['n','Salle réservée / réservation annulée (réservation de salle)'],['o','Pic ou chute de fréquentation (statistiques)']]],
+ ['sys','Système et produit',[['n','Nouveautés de Linkivi, mises à jour du player'],['n','Maintenance planifiée, incident en cours'],['n','Conseils d\'activation (premier écran, première liste)'],['o','Revendeurs : nouveau client, essai expirant, facturation']]]
+];
+const tg=k=>k==='e'?'<span class="tag p">Existe</span>':k==='n'?'<span class="tag n">Nouveau</span>':'<span class="tag e">Option</span>';
+document.getElementById('catalog').innerHTML=CAT.map(c=>`<div class="cd"><h3><span class="ci">${sv(CATS[c[0]][1])}</span>${c[1]}</h3><ul style="list-style:none;padding:0">${c[2].map(x=>`<li style="padding:5px 0;border-bottom:1px solid var(--row)">${tg(x[0])} ${x[1]}</li>`).join('')}</ul></div>`).join('');
+
+/* --- réglages --- */
+const R=[['Écrans hors ligne','Avec délai : 15 min',1,1,1],['Diffusion','Publication terminée, échouée',1,0,1],['Synchronisations et conversions','',1,1,1],['Intégrations et comptes connectés','Expiration, quota, relais',1,1,1],['Équipe et partage','',1,1,0],['Abonnement et facturation','Toujours dans l\'app',1,1,1],['Publicité','Campagnes à valider',1,0,0],['Interactions','QR, bornes, salles',1,0,0],['Nouveautés et système','Dans l\'app seulement',1,0,0]];
+const chk=(v,lock)=>`<span class="sw ${v?'':'off'}" ${lock?'style="opacity:.55"':''}></span>`;
+document.getElementById('set6').innerHTML=R.map(r=>`<div class="rline"><div class="l"><b>${r[0]}</b><small>${r[1]}</small></div><div class="ch">${chk(r[2],r[0].startsWith('Abonn')||r[0].startsWith('Nouv'))}${chk(r[3])}${chk(r[4])}</div></div>`).join('');
+paint();
+</script>
+</body>
+</html>

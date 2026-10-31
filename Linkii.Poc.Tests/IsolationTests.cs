@@ -193,7 +193,7 @@ public class IsolationTests(Platform p)
     {
         var c = p.Client();
         Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/internal/tls-allow?domain=affichage.acme.ch")).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/internal/tls-allow?domain=acme.linkii.com")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/internal/tls-allow?domain=acme.linkivi.com")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await c.GetAsync("/internal/tls-allow?domain=evil.example.org")).StatusCode);
     }
 

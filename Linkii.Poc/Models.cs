@@ -31,6 +31,8 @@ public class Db
     public List<string> Done { get; set; } = new();
     /// <summary>Ce que chaque personne a déjà vu dans chaque page du menu : base des pastilles rouges « nouveau » (voir <see cref="MenuBadges"/>).</summary>
     public List<BadgeSeen> BadgeSeen { get; set; } = new();
+    /// <summary>Centre de notifications (cloche) : une ligne par événement et par organisation (voir <see cref="NotificationCenter"/>).</summary>
+    public List<Notification> Notifications { get; set; } = new();
 
     /// <summary>Ancien format mono-client (avant le multi-tenant) : lu une fois pour migration, jamais réécrit.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
@@ -157,7 +159,7 @@ public class Reseller
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "";
-    public string Slug { get; set; } = "";             // revendeur.linkii.com
+    public string Slug { get; set; } = "";             // revendeur.linkivi.com
     public string? CustomDomain { get; set; }          // affichage.revendeur.ch (CNAME vers Linkivi)
     /// <summary>false : revendeur bloqué (son back-office et celui de ses clients sont fermés, leurs écrans coupés).</summary>
     public bool Active { get; set; } = true;
@@ -454,9 +456,10 @@ public class Tenant
     // Alertes (Pro, voir Alerts) : interrupteur général, canaux, types suivis ; pause des écrans
     public bool AlertsOn { get; set; }
     public bool AlertMail { get; set; }
-    public bool AlertPush { get; set; }
-    public List<string> AlertTypes { get; set; } = new();
-    public int AlertsVersion { get; set; }   // 1 : réglages d'alertes migrés (voir Alerts.Migrate)
+    public bool AlertPush { get; set; }   // « Par notification » : la cloche de l'application et les téléphones des administrateurs
+    public bool AlertGood { get; set; }   // aussi les bonnes nouvelles (retour en ligne, synchronisation rétablie)
+    public List<string> AlertTypes { get; set; } = new(Alerts.Defaults);   // types suivis ; au départ ceux de Alerts.Defaults
+    public int AlertsVersion { get; set; }   // 1 : réglages d'alertes migrés ; 2 : types par défaut posés (voir Alerts.Migrate)
     /// <summary>Ancien interrupteur « Prévenir quand un écran tombe » (avant le 18 octobre 2026) : lu une fois par <see cref="Alerts.Migrate"/>.</summary>
     public bool AlertOffline { get; set; }
     /// <summary>Délai avant l'alerte « écran hors ligne ».</summary>

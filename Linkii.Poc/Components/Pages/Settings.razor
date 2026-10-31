@@ -210,23 +210,21 @@
                 {
                     <div class="sv-upsell"><Ico Name="lock" Size="18" /><span class="grow">Les alertes, le contrôle du direct (aperçu, pause, redémarrage) et les murs d'écrans sont inclus dans la licence <b>Pro</b>.</span></div>
                 }
-                @* Alertes en 3 étapes : ① interrupteur général ② canaux (e-mail, notification) ③ types suivis. Couper ① garde les choix de ② et ③. *@
+                @* Alertes (§151, maquette centre-notifications-reglages-v2.html) : un interrupteur, deux canaux, un bouton qui ouvre le choix des catégories. Couper l'interrupteur garde tous les choix. *@
                 var alertsLive = growth && alertsOn;
-                <div class="rg-card al-master @(growth ? "" : "al-off")" data-tip="@(growth ? null : Plans.LockedHint)">
-                    <div class="sv-row"><span class="al-num">1</span>
+                var followed = Alerts.All.Where(a => alertTypes.Contains(a.Id) || Alerts.Always(a.Id)).ToList();
+                <div class="rg-card @(growth ? "" : "al-off")" data-tip="@(growth ? null : Plans.LockedHint)">
+                    <div class="sv-row">
                         <div class="t"><b>Activer les alertes</b><small>Un seul interrupteur pour tout couper ou tout rallumer, sans perdre vos choix.</small></div>
                         <div class="ctl"><button type="button" class="switch @(alertsOn ? "on" : "")" role="switch" aria-checked="@(alertsOn ? "true" : "false")" aria-label="Activer les alertes" disabled="@(!growth)" @onclick="() => { alertsOn = !alertsOn; dirty = true; }"><span></span></button></div>
                     </div>
-                </div>
-                <div class="rg-card @(alertsLive ? "" : "al-off")">
-                    <header><span class="al-num">2</span><h3>Comment être prévenu</h3></header>
-                    <div class="sv-row">
+                    <div class="sv-row @(alertsLive ? "" : "al-off")">
                         <div class="t"><b>Par e-mail</b><small>Un message dans la boîte e-mail.</small></div>
                         <div class="ctl"><button type="button" class="switch @(alertMail ? "on" : "")" role="switch" aria-checked="@(alertMail ? "true" : "false")" aria-label="Par e-mail" disabled="@(!alertsLive)" @onclick="() => { alertMail = !alertMail; dirty = true; }"><span></span></button></div>
                     </div>
                     @if (alertMail)
                     {
-                        <div class="al-sub">
+                        <div class="al-sub @(alertsLive ? "" : "al-off")">
                             <select class="rg-in" @bind="alertTarget" disabled="@(!alertsLive)" aria-label="Destinataires des e-mails">
                                 <option value="admins">Tous les administrateurs</option>
                                 <option value="custom">Une adresse dédiée…</option>
@@ -234,35 +232,21 @@
                             @if (alertTarget == "custom") { <input class="rg-in" type="email" placeholder="alertes@exemple.ch" aria-label="Adresse des alertes" @bind="alertEmail" disabled="@(!alertsLive)" /> }
                         </div>
                     }
-                    <div class="sv-row">
-                        <div class="t"><b>Par notification</b><small>Sur les téléphones où l'app Linkivi est installée et connectée avec un compte administrateur@(pushDevices > 0 ? $" ({pushDevices} enregistré{(pushDevices > 1 ? "s" : "")})" : " (aucun enregistré pour l'instant)").</small></div>
+                    <div class="sv-row @(alertsLive ? "" : "al-off")">
+                        <div class="t"><b>Par notification</b><small>Sur tous vos appareils de gestion : la cloche de l'application sur ordinateur et les téléphones où l'app Linkivi est connectée avec un compte administrateur@(pushDevices > 0 ? $" ({pushDevices} enregistré{(pushDevices > 1 ? "s" : "")})" : " (aucun enregistré pour l'instant)").</small></div>
                         <div class="ctl"><button type="button" class="switch @(alertPush ? "on" : "")" role="switch" aria-checked="@(alertPush ? "true" : "false")" aria-label="Par notification" disabled="@(!alertsLive)" @onclick="() => { alertPush = !alertPush; dirty = true; }"><span></span></button></div>
                     </div>
                     @if (alertsLive && !alertMail && !alertPush)
                     {
                         <div class="sv-row"><div class="t"><small class="al-warn">Aucun canal choisi : aucune alerte ne sera envoyée.</small></div></div>
                     }
-                </div>
-                <div class="rg-card @(alertsLive ? "" : "al-off")">
-                    <header><span class="al-num">3</span><h3>De quoi être prévenu</h3></header>
-                    @foreach (var (id, label, hint) in Alerts.All)
-                    {
-                        var kind = id;
-                        var on = alertTypes.Contains(kind);
-                        <div class="sv-row">
-                            <div class="t"><b>@label</b><small>@hint</small></div>
-                            <div class="ctl"><button type="button" class="switch @(on ? "on" : "")" role="switch" aria-checked="@(on ? "true" : "false")" aria-label="@label" disabled="@(!alertsLive)" @onclick="() => { if (!alertTypes.Remove(kind)) alertTypes.Add(kind); dirty = true; }"><span></span></button></div>
+                    <div class="al-sum @(alertsLive ? "" : "al-off")">
+                        <div class="t"><b>De quoi être prévenu</b>
+                            <small>@followed.Count catégorie@(followed.Count > 1 ? "s" : "") suivie@(followed.Count > 1 ? "s" : "")@(alertGood ? ", bonnes nouvelles comprises" : ", problèmes et actions à faire seulement").</small>
+                            <div class="al-chips">@foreach (var a in followed.Take(4)) { <span>@a.Label</span> }@if (followed.Count > 4) { <span class="more">+ @(followed.Count - 4)</span> }</div>
                         </div>
-                        @if (kind == Alerts.Screens && on)
-                        {
-                            <div class="al-sub al-inline">
-                                <span>Alerter après</span>
-                                <select class="rg-in short" @bind="alertMinutes" disabled="@(!alertsLive)" aria-label="Délai avant l'alerte">
-                                    @foreach (var (m, l) in AlertDelays) { <option value="@m">@l</option> }
-                                </select>
-                            </div>
-                        }
-                    }
+                        <button type="button" class="btn" disabled="@(!alertsLive)" @onclick="OpenAlertDialog"><Ico Name="sliders" Size="16" /> Choisir…</button>
+                    </div>
                 </div>
                 <div class="rg-card">
                     <header><h3>Pause des écrans</h3><small>Se lance depuis la carte d'un écran (bouton Pause).</small></header>
@@ -282,6 +266,51 @@
                 break;
         }
         </div>
+
+        @if (Tab == "supervision" && alertDlg)
+        {
+            @* hors de la zone d'enregistrement commun : le choix travaille sur une copie, « Valider » l'applique *@
+            <div class="modal-backdrop" @onclick="CloseAlertDialog"></div>
+            <div class="modal app-modal wide al-dlg" role="dialog" aria-modal="true" aria-labelledby="al-title">
+                <div class="modal-head">
+                    <div class="grow"><h3 id="al-title">De quoi être prévenu</h3><small class="muted">Ces choix valent pour l'e-mail et les notifications.</small></div>
+                    <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseAlertDialog"><Ico Name="x" Size="20" /></button>
+                </div>
+                <div class="modal-body">
+                    @foreach (var (id, label, hint) in Alerts.All)
+                    {
+                        var kind = id;
+                        var always = Alerts.Always(kind);
+                        var on = always || dTypes.Contains(kind);
+                        <div class="sv-row">
+                            <div class="t"><b>@label</b><small>@hint</small></div>
+                            <div class="ctl">
+                                @if (always) { <span class="al-always">Toujours suivi</span> }
+                                <button type="button" class="switch @(on ? "on" : "")" role="switch" aria-checked="@(on ? "true" : "false")" aria-label="@label" disabled="@always" @onclick="() => { if (!dTypes.Remove(kind)) dTypes.Add(kind); }"><span></span></button>
+                            </div>
+                        </div>
+                        @if (kind == Alerts.Screens && on)
+                        {
+                            <div class="al-sub al-inline">
+                                <span>Alerter après</span>
+                                <select class="rg-in short" @bind="dMinutes" aria-label="Délai avant l'alerte">
+                                    @foreach (var (m, l) in AlertDelays) { <option value="@m">@l</option> }
+                                </select>
+                            </div>
+                        }
+                    }
+                    <div class="sv-row">
+                        <div class="t"><b>Aussi me prévenir des bonnes nouvelles</b><small>Écran de nouveau en ligne, synchronisation rétablie. Désactivé : seuls les problèmes et les actions à faire sont notifiés.</small></div>
+                        <div class="ctl"><button type="button" class="switch @(dGood ? "on" : "")" role="switch" aria-checked="@(dGood ? "true" : "false")" aria-label="Bonnes nouvelles" @onclick="() => dGood = !dGood"><span></span></button></div>
+                    </div>
+                </div>
+                <div class="modal-foot">
+                    <button type="button" class="al-reset" @onclick="ResetAlertDialog">Rétablir les choix par défaut</button>
+                    <button type="button" class="btn" @onclick="CloseAlertDialog">Annuler</button>
+                    <button type="button" class="btn primary" @onclick="ApplyAlertDialog">Valider</button>
+                </div>
+            </div>
+        }
 
         @if (Tab == "publicite")
         {
@@ -344,7 +373,10 @@
     private static readonly (int Min, string Label)[] PauseDelays = { (15, "15 minutes"), (30, "30 minutes"), (60, "1 heure"), (240, "4 heures"), (0, "Jamais (reprise manuelle)") };
 
     // Alertes et pause (Pro)
-    private bool growth, alertsOn, alertMail, alertPush;
+    private bool growth, alertsOn, alertMail, alertPush, alertGood, alertDlg;
+    private HashSet<string> dTypes = new();   // brouillon de la fenêtre « De quoi être prévenu »
+    private bool dGood;
+    private int dMinutes = 10;
     private HashSet<string> alertTypes = new();
     private int pushDevices;   // téléphones des administrateurs qui reçoivent les notifications
     private int alertMinutes = 10, pauseMinutes = 60;
@@ -394,6 +426,7 @@
         var t = Store.Read(d => d.Tenant);
         name = t.Name; timezone = t.Timezone; duration = t.DefaultDurationSec; reloadHour = t.ReloadHour;
         growth = t.IsGrowth; (alertsOn, alertMail, alertPush, alertTypes) = (t.AlertsOn, t.AlertMail, t.AlertPush, t.AlertTypes.ToHashSet());
+        alertGood = t.AlertGood;
         var cid = t.Id;
         pushDevices = Root.Read(d => { var admins = d.Users.Where(u => u.ClientId == cid && u.Role == Roles.ClientAdmin && !u.Disabled).Select(u => u.Id).ToHashSet(); return d.PushDevices.Count(p => admins.Contains(p.UserId)); });
         alertMinutes = AlertDelays.Any(a => a.Min == t.AlertOfflineMinutes) ? t.AlertOfflineMinutes : 10;
@@ -467,6 +500,15 @@
     // Différé de quelques instants : la valeur liée au champ (@bind) et les clics enfants sont déjà appliqués au moment d'enregistrer.
     private bool saving;
     private CancellationTokenSource? saveCts;
+    private void OpenAlertDialog() { dTypes = alertTypes.ToHashSet(); dGood = alertGood; dMinutes = alertMinutes; alertDlg = true; }
+    private void CloseAlertDialog() => alertDlg = false;
+    private void ResetAlertDialog() { dTypes = Alerts.Defaults.ToHashSet(); dGood = false; dMinutes = 10; }
+    private void ApplyAlertDialog()
+    {
+        (alertTypes, alertGood, alertMinutes, alertDlg) = (dTypes, dGood, dMinutes, false);
+        dirty = true; ScheduleSave();
+    }
+
     private void Changed() { dirty = true; ScheduleSave(); }
     private void Clicked() { if (dirty) ScheduleSave(); }
     private void ScheduleSave()
@@ -517,7 +559,7 @@
             t.DefaultAutoStart = autoStart; t.MergePresentations = mergePres;
             if (t.IsGrowth)   // alertes et pause : licence Pro (contrôlée ici aussi, pas seulement dans l'interface)
             {
-                t.AlertsOn = alertsOn; t.AlertMail = alertMail; t.AlertPush = alertPush;
+                t.AlertsOn = alertsOn; t.AlertMail = alertMail; t.AlertPush = alertPush; t.AlertGood = alertGood;
                 t.AlertTypes = Alerts.All.Select(a => a.Id).Where(alertTypes.Contains).ToList();
                 t.AlertOfflineMinutes = alertMinutes;
                 t.AlertEmail = target;   // e-mail coupé : le choix reste (masqué) pour plus tard

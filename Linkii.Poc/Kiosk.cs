@@ -10,6 +10,8 @@ public class KioskTile
     public Guid MediaId { get; set; }
     public string Title { get; set; } = "";
     public string? Subtitle { get; set; }
+    public string? TitleColor { get; set; }        // couleur du titre de la tuile (#rrggbb) ; null = couleur commune des tuiles
+    public string? SubColor { get; set; }          // couleur du sous-titre ; null = couleur commune
     public double TextScale { get; set; } = 1;     // taille du texte de la tuile : 0,75 petit · 1 normal · 1,3 grand · 1,7 très grand
     public string Color { get; set; } = "#3B82C4";
     public Guid? ImageMediaId { get; set; }     // image de la médiathèque en fond de tuile (sinon la couleur)
@@ -34,6 +36,9 @@ public class KioskConfig
     public string? PromptFont { get; set; }
     public string? PromptColor { get; set; }
     public Guid? LogoMediaId { get; set; }
+    public double? LogoX { get; set; }            // position du logo (coin haut gauche) en % de la largeur de l'accueil ; null = place d'origine
+    public double? LogoY { get; set; }            // … et de sa hauteur
+    public double? LogoW { get; set; }            // largeur du logo en % de la largeur de l'accueil (hauteur selon ses proportions) ; null = taille d'origine
     public int ReturnSec { get; set; } = 30;      // sans toucher, retour à l'accueil
     public int IdleSec { get; set; } = 120;       // sans toucher à l'accueil, retour à la diffusion
     public bool Accessible { get; set; }          // tuiles et bouton Retour dans la moitié basse de l'écran
@@ -55,6 +60,7 @@ public class KioskConfig
     public string? TileRadius { get; set; }       // square | round | pill
     public string? TileGap { get; set; }          // tight | normal | wide
     public string? TileShade { get; set; }        // voile sous le texte des tuiles à image : none | light | normal | strong
+    public string TouchStyle { get; set; } = "pill";   // bouton « Touchez l'écran » de la diffusion en inactivité : clé de Kiosk.TouchStyles
     public int TileCols { get; set; }             // nombre de colonnes (0 = automatique)
     public List<KioskTile> Tiles { get; set; } = new();
 
@@ -67,6 +73,8 @@ public class PublishedKioskTile
     public Guid Id { get; set; }
     public string Title { get; set; } = "";
     public string? Subtitle { get; set; }
+    public string? TitleColor { get; set; }
+    public string? SubColor { get; set; }
     public double TextScale { get; set; } = 1;
     public string Color { get; set; } = "#3B82C4";
     public string? ImageUrl { get; set; }
@@ -85,11 +93,14 @@ public class PublishedKiosk
     public object ForPlayer() => new
     {
         title = Config.Title, prompt = Config.Prompt, bg = Config.Bg, logo = LogoUrl,
+        logoX = Config.LogoX is double lx && Config.LogoY != null ? Math.Clamp(lx, 0, 100) : (double?)null, logoY = Config.LogoY is double ly && Config.LogoX != null ? Math.Clamp(ly, 0, 100) : (double?)null,
+        logoW = Config.LogoW is double lw && Config.LogoX != null && Config.LogoY != null ? Math.Clamp(lw, 3, 95) : (double?)null,
         titleFont = Kiosk.FontCss(Config.TitleFont), titleColor = Kiosk.CleanHex(Config.TitleColor),
         promptFont = Kiosk.FontCss(Config.PromptFont), promptColor = Kiosk.CleanHex(Config.PromptColor),
         returnSec = Config.ReturnSec, idleSec = Config.IdleSec,
         accessible = Config.Accessible, bigText = Config.BigText, wipe = Config.Wipe,
         sound = Config.Sound, volume = Config.Volume,
+        touchStyle = Kiosk.TouchKey(Config.TouchStyle),
         lockApp = Config.Lock, noZoom = Config.NoZoom, hideCursor = Config.HideCursor, wake = Config.WakeOnTouch,
         tileStyle = new
         {
@@ -100,7 +111,7 @@ public class PublishedKiosk
         },
         tiles = Tiles.Select(t => new
         {
-            id = t.Id, title = t.Title, subtitle = t.Subtitle, scale = t.TextScale, color = t.Color, image = t.ImageUrl, from = t.ShowFrom, to = t.ShowTo,
+            id = t.Id, title = t.Title, subtitle = t.Subtitle, titleColor = Kiosk.CleanHex(t.TitleColor), subColor = Kiosk.CleanHex(t.SubColor), scale = t.TextScale, color = t.Color, image = t.ImageUrl, from = t.ShowFrom, to = t.ShowTo,
             item = t.Item.ForPlayer()
         })
     };
@@ -121,6 +132,14 @@ public static class Kiosk
         (!Planning.IsDate(t.ShowFrom) || DateOnly.Parse(t.ShowFrom!) <= day) && (!Planning.IsDate(t.ShowTo) || DateOnly.Parse(t.ShowTo!) >= day);
 
     public static readonly (double Scale, string Label)[] TextSizes = { (0.75, "Petit"), (1, "Normal"), (1.3, "Grand"), (1.7, "Très grand") };
+
+    /// <summary>Styles du bouton « Touchez l'écran pour commencer » (clé, libellé).</summary>
+    public static readonly (string Key, string Label)[] TouchStyles =
+    {
+        ("pill", "Pilule centrée"), ("round", "Pastille ronde et ondes"), ("glass", "Carte vitrée"),
+        ("icon", "Icône seule et halo"), ("band", "Bande pleine largeur"), ("button", "Gros bouton « Commencer »")
+    };
+    public static string TouchKey(string? k) => TouchStyles.Any(x => x.Key == k) ? k! : "pill";
 
     /// <summary>Taille de texte valide parmi <see cref="TextSizes"/> (sinon normale).</summary>
     public static double CleanScale(double s) => TextSizes.Any(x => Math.Abs(x.Scale - s) < 0.01) ? s : 1;

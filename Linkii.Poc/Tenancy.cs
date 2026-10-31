@@ -330,8 +330,8 @@ public class TenantStore(JsonStore root, TenantContext ctx, Microsoft.AspNetCore
 /// <summary>Résolution du revendeur à partir du nom de domaine de la requête : créer un revendeur ne demande aucun déploiement.</summary>
 public class ResellerResolver(JsonStore store, IConfiguration config)
 {
-    public string BaseDomainOf(Db db) => (db.Platform.BaseDomain is { Length: > 0 } b ? b : config["Linkii:BaseDomain"] ?? "linkii.com").Trim().ToLowerInvariant();
-    /// <summary>Séparateur entre le sous-domaine et le domaine de base : "." (défaut) ou "-" (ex. DuckDNS : acme-linkii.duckdns.org). DuckDNS n'accepte pas les sous-domaines : "-" par défaut sur *.duckdns.org.</summary>
+    public string BaseDomainOf(Db db) => (db.Platform.BaseDomain is { Length: > 0 } b ? b : config["Linkii:BaseDomain"] ?? "linkivi.com").Trim().ToLowerInvariant();
+    /// <summary>Séparateur entre le sous-domaine et le domaine de base : "." (défaut) ou "-" (ex. DuckDNS : acme-linkivi.duckdns.org). DuckDNS n'accepte pas les sous-domaines : "-" par défaut sur *.duckdns.org.</summary>
     public string SepOf(Db db) => db.Platform.SubdomainSeparator is { Length: > 0 } s ? s : config["Linkii:SubdomainSeparator"] is { Length: > 0 } x ? x : BaseDomainOf(db).EndsWith(".duckdns.org") ? "-" : ".";
 
     /// <summary>Adresse (sans schéma) d'un revendeur sur le domaine de la plateforme.</summary>
@@ -491,6 +491,7 @@ public static class Seed
             Signup.MarkVerified(db);
             Subscriptions.MigrateResellerShare(db);
             Alerts.Migrate(db);
+            NotificationCenter.Seed(db);
 
             if (!db.Users.Any(u => u.Role == Roles.PlatformAdmin))
             {

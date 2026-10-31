@@ -1,12 +1,12 @@
-# Linkii — Charte graphique (option B · Corporate)
+# Linkivi — Charte graphique (option B · Corporate)
 
 > Validée le 6 octobre 2026. Ton : rigoureux, institutionnel, sobre.
 
 ## Logo
-- Wordmark minuscule `linkii`, IBM Plex Sans 500, interlettrage -0,03 em.
-- Les points des deux « i » sont **carrés** ; le point du second « i » est en **Signal**.
-- Icône d'app : les deux « i » blancs sur carré Nuit (rayon 4 px).
-- Fond clair : wordmark Nuit. Fond sombre : wordmark Blanc, point Signal inchangé.
+- Wordmark minuscule `linkivi`, IBM Plex Sans 500, interlettrage -0,03 em.
+- Les points des deux « i » sont **carrés** dans le wordmark du back-office ; le point du **dernier « i » est orange** (`#CC8400` sur fond clair, `#F2A81D` sur fond sombre). Logos de référence : `Branding/Logo/` (points ronds).
+- Icône d'app : « li » blancs sur carré Nuit, point rond orange `#F2A81D` sur le i.
+- Fond clair : wordmark Nuit, point orange `#CC8400`. Fond sombre : wordmark Blanc, point orange `#F2A81D`.
 
 ## Couleurs
 
@@ -17,7 +17,7 @@
 | Bordure | Brume | `#DDE3EA` | Bordures, séparateurs |
 | Fond | Gris clair | `#F5F7FA` | Fond de page du back-office |
 | Surface | Blanc | `#FFFFFF` | Cartes, tableaux, champs |
-| Accent | Signal | `#3B82C4` | Point du logo, sélection, focus, liens — jamais en aplat large |
+| Accent | Signal | `#3B82C4` | Sélection, focus, liens (le point du logo est orange, plus bleu) — jamais en aplat large |
 
 ### États des écrans
 

@@ -1,0 +1,77 @@
+@inject NotificationCenter Center
+@inject TenantContext Ctx
+@inject JsonStore Root
+@inject NavigationManager Nav
+@implements IDisposable
+
+@* Cloche de la barre des accès rapides : pastille rouge (notifications à lire) et aperçu des dernières. Se met à jour en direct (même mécanisme que les pastilles du menu).
+   Ouvrir l'aperçu ne marque rien comme lu : on lit en cliquant une ligne ou « Tout marquer comme lu ». Maquette : centre-notifications.html. *@
+@if (Ctx.ClientId is { } && Ctx.UserId is { } && !Ctx.IsImpersonating)
+{
+    <div class="qb-wrap">
+        <button type="button" class="qb-btn @(open ? "on" : "")" data-t="Notifications" aria-label="@(unread > 0 ? $"Notifications, {unread} à lire" : "Notifications")" aria-haspopup="dialog" aria-expanded="@(open ? "true" : "false")" @onclick="Toggle">
+            <Ico Name="bell" Size="19" />
+            @if (unread > 0) { <span class="nt-dot @(bump ? "bump" : "")">@(unread > 9 ? "9+" : unread.ToString())</span> }
+        </button>
+        @if (open)
+        {
+            <div class="qb-back" @onclick="Close"></div>
+            <div class="qb-pop nt-pop" role="dialog" aria-label="Notifications">
+                <div class="nt-pop-h"><b>Notifications</b><button type="button" class="nt-link" disabled="@(unread == 0)" @onclick="ReadAll">Tout marquer comme lu</button></div>
+                <div class="nt-pop-t" role="tablist">
+                    <button type="button" role="tab" class="@(unreadOnly ? "on" : "")" @onclick="() => unreadOnly = true">À lire (@unread)</button>
+                    <button type="button" role="tab" class="@(!unreadOnly ? "on" : "")" @onclick="() => unreadOnly = false">Toutes</button>
+                </div>
+                <div class="nt-pop-l" role="list">
+                    @{ var shown = rows.Where(n => !unreadOnly || !IsRead(n)).Take(5).ToList(); }
+                    @if (shown.Count == 0) { <div class="nt-empty"><Ico Name="bell" Size="34" /><b>Vous êtes à jour</b><span>Aucune notification à lire.</span></div> }
+                    @foreach (var n in shown) { <NotificationRow N="n" Read="IsRead(n)" Compact="true" Timezone="@tz" OnOpen="Open" /> }
+                </div>
+                <div class="nt-pop-f"><a href="notifications" @onclick="Close">Tout voir</a><a href="settings?tab=supervision" @onclick="Close"><Ico Name="gear" Size="13" /> Réglages</a></div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private bool open, unreadOnly = true, bump;
+    private int unread;
+    private List<Notification> rows = new();
+    private string tz = "UTC";
+    private Guid cid, me;
+    private Timer? later;
+
+    protected override void OnInitialized()
+    {
+        if (Ctx.ClientId is not { } c || Ctx.UserId is not { } u) return;
+        (cid, me) = (c, u);
+        tz = Root.Read(d => d.Clients.FirstOrDefault(x => x.Id == c)?.Timezone ?? "UTC");
+        Load();
+        Root.Changed += OnChanged;
+    }
+
+    private bool IsRead(Notification n) => n.ReadBy.Contains(me);
+
+    private void Load()
+    {
+        var all = Center.For(cid, me);
+        var u = all.Count(n => !IsRead(n));
+        bump = u > unread && unread >= 0 && rows.Count > 0;   // une nouvelle notification : la pastille rebondit une fois
+        unread = u; rows = all.Take(30).ToList();
+    }
+
+    // la base change souvent (écrans, états) : on regroupe les mises à jour sur une demi-seconde
+    private void OnChanged() { later?.Dispose(); later = new Timer(_ => InvokeAsync(() => { Load(); StateHasChanged(); }), null, 500, Timeout.Infinite); }
+
+    private void Toggle() { open = !open; bump = false; if (open) Load(); }
+    private void Close() => open = false;
+    private void ReadAll() { Center.ReadAll(cid, me); Load(); }
+    private void Open(Notification n)
+    {
+        Center.SetRead(cid, me, new[] { n.Id }, true);
+        open = false; Load();
+        Nav.NavigateTo(n.Path.TrimStart('/'));
+    }
+
+    public void Dispose() { Root.Changed -= OnChanged; later?.Dispose(); }
+}

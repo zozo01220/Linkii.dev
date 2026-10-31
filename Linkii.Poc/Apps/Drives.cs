@@ -621,7 +621,7 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
             return first ? f.Name : null;
         });
         if (alert != null)
-            _ = alerts.Raise(clientId, Alerts.Sync, "Synchronisation en échec", $"Le dossier « {alert} » n'a pas pu être synchronisé : {error}", "/media");
+            _ = alerts.Raise(clientId, Alerts.Sync, "Synchronisation en échec", $"Le dossier « {alert} » n'a pas pu être synchronisé : {error}", "/media", dedupe: "sync:" + alert);
     }
 
     // ---------- Contenu d'un dossier ----------

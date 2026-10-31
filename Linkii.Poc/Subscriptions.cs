@@ -280,7 +280,7 @@ public class SubscriptionWorker(JsonStore store, Notifier notifier, AlertService
                 {
                     await notifier.NotifyClient(id);
                     if (store.Read(db => db.Clients.FirstOrDefault(c => c.Id == id) is { } c ? Lifecycle.PaymentFailed(db, c) : null) is { } n) await lifecycle.Send(id, n, allAdmins: true);
-                    await alerts.RaisePush(id, Alerts.Billing, "Espace suspendu", "Le paiement de l'abonnement n'a pas été reçu à la date prévue : l'espace est suspendu.", "/");
+                    await alerts.RaisePush(id, Alerts.Billing, "Espace suspendu", "Le paiement de l'abonnement n'a pas été reçu à la date prévue : l'espace est suspendu.", "/", severity: Notifs.Error);
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning(ex, "Blocage faute de paiement"); }

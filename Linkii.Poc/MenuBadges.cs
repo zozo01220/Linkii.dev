@@ -159,9 +159,9 @@ public class MenuBadges(JsonStore root, TenantStore store, TenantContext ctx, Pl
         // Sources de données (§139) : le nombre de sources connectées
         res[DataSources] = Eval(DataSources, store.Read(d => d.Tenant.DataConnections.Select(c => new Item(c.Id, null, null, false)).ToList()), false, track: false);
 
-        // Réglages : le nombre de spots de publicité à valider (§45) ; sinon un point rouge quand l'application a changé de version depuis la dernière visite
+        // Réglages : le nombre de spots de publicité à valider (§45), rien d'autre : un changement de version de l'application ne vaut pas un point rouge (aucun onglet n'a rien de nouveau à montrer)
         var adsPending = admin ? store.Read(d => Ads.PendingCount(d.Root, d.Tenant, now)) : 0;
-        res[Settings] = new Badge(adsPending, admin && me != null && VersionNew(me.Value, open == Settings) ? 1 : 0, 0);
+        res[Settings] = new Badge(adsPending, 0, 0);
         tabs = tabCounts;
         return res;
 
@@ -210,16 +210,6 @@ public class MenuBadges(JsonStore root, TenantStore store, TenantContext ctx, Pl
         }
     }
 
-    private bool VersionNew(Guid me, bool onPage)
-    {
-        var mark = root.Read(d => d.BadgeSeen.FirstOrDefault(b => b.UserId == me && b.Family == Settings)?.Mark);
-        if (mark == null || onPage)
-        {
-            if (mark != AppVersion.Short) Remember(me, Settings, new HashSet<Guid>(), null, AppVersion.Short);
-            return false;
-        }
-        return mark != AppVersion.Short;
-    }
 
     private void Remember(Guid me, string fam, HashSet<Guid> ids, HashSet<Guid>? shared, string? mark = null) => root.Write(d =>
     {

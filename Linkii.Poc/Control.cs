@@ -196,7 +196,7 @@ public static class ScreenAlerts
 }
 
 /// <summary>Toutes les minutes : commandes sans réponse, pauses terminées, et alerte quand un écran tombe (ou revient) si l'organisation l'a activée.</summary>
-public class ScreenWatchWorker(JsonStore store, Mailer mail, AlertService alerts, ILogger<ScreenWatchWorker> log) : BackgroundService
+public class ScreenWatchWorker(JsonStore store, Mailer mail, AlertService alerts, NotificationCenter center, ILogger<ScreenWatchWorker> log) : BackgroundService
 {
     private readonly DateTime started = DateTime.UtcNow;
 
@@ -230,10 +230,13 @@ public class ScreenWatchWorker(JsonStore store, Mailer mail, AlertService alerts
                 ? string.Join(", ", down.Take(3).Select(d => $"{d.Name} (depuis {d.Since})")) + (down.Count > 3 ? "…" : "")
                 : string.Join(", ", back.Take(3)) + (back.Count > 3 ? "…" : "");
             await alerts.Raise(c.Id, Alerts.Screens, title, body, "/",
-                buildMail: (r, app, name, email) => mail.SendScreenAlert(r, app, c.Name, name, email, down, back, c.AlertOfflineMinutes));
+                buildMail: (r, app, name, email) => mail.SendScreenAlert(r, app, c.Name, name, email, down, back, c.AlertOfflineMinutes),
+                severity: b.Down.Count > 0 ? Notifs.Error : Notifs.Ok, dedupe: b.Down.Count > 0 ? $"screens-down:{string.Join(",", down.Select(d => d.Name).Order())}" : null,
+                subjects: down.Select(d => d.Name), good: b.Down.Count == 0);
+            center.Back(c.Id, back);
             if (b.Down.Count > 0 && b.Back.Count > 0)   // les retours du même passage : notification seule (déjà dans l'e-mail)
                 await alerts.RaisePush(c.Id, Alerts.Screens, b.Back.Count == 1 ? $"Écran de retour : {back[0]}" : $"{b.Back.Count} écrans de retour",
-                    string.Join(", ", back.Take(3)) + (back.Count > 3 ? "…" : ""), "/");
+                    string.Join(", ", back.Take(3)) + (back.Count > 3 ? "…" : ""), "/", good: true);
         }
     }
 

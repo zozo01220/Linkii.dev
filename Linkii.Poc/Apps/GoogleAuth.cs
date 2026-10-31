@@ -88,7 +88,11 @@ public class GoogleAuth(IConfiguration config, JsonStore store, SecretBox box, I
                 ["redirect_uri"] = p.Redirect
             });
             // consentement granulaire : l'utilisateur peut décocher les accès demandés (depuis Comptes connectés, un seul suffit)
-            if (!ScopesFor(p.Purpose).Any(t.Scope.Split(' ').Contains)) return back + "scope";
+            if (!ScopesFor(p.Purpose).Any(t.Scope.Split(' ').Contains))
+            {
+                log.LogWarning("Google : accès accordé « {Scope} », demandé pour {Purpose}", t.Scope, p.Purpose);
+                return back + "scope";
+            }
             if (t.RefreshToken.Length == 0) return back + "error";
             access[p.ClientId] = new Access(t.AccessToken, DateTime.UtcNow.AddSeconds(Math.Max(60, t.ExpiresIn) - 60));
             var refresh = box.Protect(t.RefreshToken);

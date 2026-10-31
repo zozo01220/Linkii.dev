@@ -1,10 +1,12 @@
 @inject VideoConverter Converter
 @inject WebSnapshot Snap
+@implements IDisposable
 @* Vignette d'un contenu : image, image extraite de la vidéo, miniature YouTube ; pour les apps Image / Vidéo / Diaporama / Canva,
    premier fichier choisi dans la médiathèque (si All est fourni) ; sinon icône de l'app.
    Vidéo : une image (ffmpeg, créée à la première demande puis gardée sur le disque) et non un lecteur par vidéo, qui ralentit le défilement
    des listes ; sans ffmpeg sur le serveur, on retombe sur un lecteur par vidéo (ancien comportement). *@
-@if (Source is { } f && f.FileName != null && f.Status == null)
+@if (Media.AppId == Compositions.AppId) { <CompositionThumb Item="Media" Files="All ?? Array.Empty<MediaItem>()" Contain="true" /> }
+else if (Source is { } f && f.FileName != null && f.Status == null)
 {
     if (f.Type == "image") { <img src="/media/@f.FileName?w=@(Wide ? 640 : 320)" alt="" loading="lazy" decoding="async" /> }
     else if (Converter.CanPoster) { <img src="/media/@f.FileName?w=@(Wide ? 640 : 320)" alt="" loading="lazy" decoding="async" /> }
@@ -12,9 +14,66 @@
 }
 else if (Media.AppId == "youtube" && YouTube.ExtractId(Media.Settings.GetValueOrDefault("url")) is { } yt) { <img src="https://i.ytimg.com/vi/@yt/hqdefault.jpg" alt="" loading="lazy" /> }
 else if (Media.AppId == "webpage" && Snap.Cached(Media.Settings.GetValueOrDefault("url")) != null) { <img src="/webshot/@Media.Id?v=@SnapVersion" alt="" loading="lazy" decoding="async" /> }
+else if (Media.AppId == "facebook" && fbPosts.Count > 0)
+{
+    <div class="fb-thumb">
+        @if (fbPosts.Take(4).Where(p => p.Picture != null).ToList() is { Count: > 0 } pics)
+        {
+            <div class="fb-thumb-grid n@(pics.Count)">@foreach (var p in pics) { <img src="@p.Picture" alt="" loading="lazy" referrerpolicy="no-referrer" /> }</div>
+        }
+        else { <div class="fb-thumb-txt"><b>@fbPage</b><span>@fbPosts[0].Message</span></div> }
+    </div>
+}
+else if (Media.AppId == "webpage" && Uri.TryCreate(Media.Settings.GetValueOrDefault("url"), UriKind.Absolute, out var wu))
+{
+    @* Pas (encore) de capture : le site en carte de navigateur plutôt que l'icône seule. *@
+    <div class="web-thumb"><div class="web-bar"><i></i><i></i><i></i></div><div class="web-body"><AppIcon Id="@Media.AppId" Tile="false" Size="26" /><b>@wu.Host.Replace("www.", "")</b></div></div>
+}
+else if (Media.AppId == "weather-slide" && wx != null)
+{
+    <div class="wx-thumb">
+        <small>@wx.City</small>
+        <div><span>@WeatherService.Icon(wx.Code)</span><b>@wx.Temp°</b></div>
+        <small>@wx.Text</small>
+    </div>
+}
 else { <span class="pl-app"><AppIcon Id="@Media.AppId" Tile="false" Size="30" /></span> }
 
 @code {
+    [Inject] private AppService Apps { get; set; } = default!;
+    private record FbPost(string? Message, string? Picture);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, (DateTime At, string Page, List<FbPost> Posts)> fbCache = new();
+    private List<FbPost> fbPosts = new();
+    private string fbPage = "";
+    private record Wx(string City, string Text, int Code, double Temp);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, (DateTime At, Wx Data)> wxCache = new();
+    private Wx? wx;
+    private CancellationTokenSource? poll;
+    public void Dispose() { poll?.Cancel(); poll?.Dispose(); }
+
+    // Facebook : publications de la Page (cache du fournisseur de 15 minutes, ici 5) ; tant qu'elles ne sont pas lues, l'icône reste.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Media.AppId == "weather-slide") { await LoadWeather(); return; }
+        if (Media.AppId != "facebook") return;
+        if (fbCache.TryGetValue(Media.Id, out var hit) && DateTime.UtcNow - hit.At < TimeSpan.FromMinutes(5)) { fbPage = hit.Page; fbPosts = hit.Posts; return; }
+        if (await Apps.ThumbData(Media) is not { } d || !d.TryGetProperty("posts", out var posts) || posts.ValueKind != System.Text.Json.JsonValueKind.Array) return;
+        string? S(System.Text.Json.JsonElement e, string k) => e.TryGetProperty(k, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
+        fbPage = S(d, "page") ?? "";
+        fbPosts = posts.EnumerateArray().Select(p => new FbPost(S(p, "message"), S(p, "picture"))).ToList();
+        fbCache[Media.Id] = (DateTime.UtcNow, fbPage, fbPosts);
+    }
+
+    private async Task LoadWeather()
+    {
+        if (wxCache.TryGetValue(Media.Id, out var hit) && DateTime.UtcNow - hit.At < TimeSpan.FromMinutes(5)) { wx = hit.Data; return; }
+        if (await Apps.ThumbData(Media) is not { } d) return;
+        string S(string k) => d.TryGetProperty(k, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() ?? "" : "";
+        double N(string k) => d.TryGetProperty(k, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Number ? v.GetDouble() : 0;
+        wx = new Wx(S("city"), S("text"), d.TryGetProperty("code", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.Number ? c.GetInt32() : -1, Math.Round(N("temp")));
+        wxCache[Media.Id] = (DateTime.UtcNow, wx);
+    }
+
     [Parameter, EditorRequired] public MediaItem Media { get; set; } = default!;
     /// <summary>Médias du client : permet d'afficher le fichier choisi par une app de la médiathèque.</summary>
     [Parameter] public IReadOnlyList<MediaItem>? All { get; set; }
@@ -24,7 +83,27 @@ else { <span class="pl-app"><AppIcon Id="@Media.AppId" Tile="false" Size="30" />
     // La capture se fait en arrière-plan : tant qu'elle n'existe pas, l'icône reste ; elle apparaît au prochain affichage.
     protected override void OnParametersSet()
     {
-        if (Media.AppId == "webpage") Snap.Ensure(Media.Settings.GetValueOrDefault("url"));
+        if (Media.AppId != "webpage") return;
+        var url = Media.Settings.GetValueOrDefault("url");
+        Snap.Ensure(url);
+        if (Snap.Cached(url) == null && poll == null) _ = WaitForSnapshot(url);
+    }
+
+    // La capture prend quelques secondes : on revérifie toutes les 3 s (jusqu'à 90 s) pour que l'image apparaisse sans recharger la page.
+    private async Task WaitForSnapshot(string? url)
+    {
+        poll = new CancellationTokenSource();
+        var ct = poll.Token;
+        try
+        {
+            for (var i = 0; i < 30 && !ct.IsCancellationRequested; i++)
+            {
+                await Task.Delay(3000, ct);
+                if (Snap.Cached(url) != null) { await InvokeAsync(StateHasChanged); return; }
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
     }
 
     private string SnapVersion => Snap.Cached(Media.Settings.GetValueOrDefault("url")) is { } p ? File.GetLastWriteTimeUtc(p).Ticks.ToString() : "";

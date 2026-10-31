@@ -279,6 +279,8 @@
       stage: $('stage'), preview: !!PREVIEW,
       render: renderSlide,
       portrait: function () { return cfg.orientation === 'portrait'; },
+      visitStart: function () { adVisitStart(); },
+      visitEnd: function () { adVisitEnd(); },
       techPin: function () { return cfg.techPin; },   // { pin, local } de l'organisation ; null : le code par défaut
       send: function (q) { return api('/api/player/kiosk-events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(q) }); },
       native: function (name, json) { if (!PREVIEW && window.LinkiiNative && typeof window.LinkiiNative[name] === 'function') { try { window.LinkiiNative[name](json); } catch (e) {} } }
@@ -1055,9 +1057,9 @@
   function adCounted() { if (state.current && state.current.ads) { adCnt.since = (adCnt.since || 0) + 1; adSave(); } }
 
   // Passe un spot dans le calque libre (même fondu que les contenus). Renvoie false s'il n'y a rien à passer.
-  function playAd(mode) {
+  function playAd(mode, force) {
     var list = adCandidates(mode);
-    if (!list.length || (mode === 'between' && !adDue(list))) return false;
+    if (!list.length || (mode === 'between' && !force && !adDue(list))) return false;   // force : borne, fin de visite (le rythme « tous les N contenus » n'a pas de sens, les plafonds restent)
     var spot = list[adRr++ % list.length], ads = state.current.ads;
     var layerId = state.active === 'layerA' ? 'layerB' : 'layerA';
     var layer = $(layerId), old = $(state.active), oldCleanup = state.cleanup, shown = false, src = null, media;
@@ -1111,6 +1113,15 @@
     setTimeout(function () { if (!shown) fail(); }, 15000);   // rien d'affiché au bout de 15 s : on passe
     previewReport();
     return true;
+  }
+
+  // Borne interactive : un visiteur qui touche l'écran interrompt le spot en cours (il n'est pas compté complet) ;
+  // quand la borne revient à la diffusion après une visite, un spot passe (plafonds par heure et par jour des campagnes respectés).
+  function adVisitStart() { if (adNow) { adFinish(false, 'touch'); next(); } }
+  function adVisitEnd() {
+    if (adNow || !state.current || state.paused || state.hold || state.asleep || !adCandidates('between').length) return;
+    clearTimeout(state.timer); state.timer = null;
+    if (!playAd('between', true)) next();
   }
 
   /* ---------- Diffusion (double buffer) ---------- */

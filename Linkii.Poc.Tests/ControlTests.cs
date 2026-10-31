@@ -281,7 +281,7 @@ public class ControlTests
         Assert.True(before.AlertsOn && before.AlertMail && before.AlertPush);
         Assert.Equal(Alerts.All.Select(a => a.Id), before.AlertTypes);
         Assert.False(off.AlertsOn || off.AlertMail || off.AlertPush);   // tout coupé, comme une nouvelle organisation
-        Assert.Empty(off.AlertTypes);
+        Assert.Equal(Alerts.Defaults, off.AlertTypes);   // types par défaut (centre de notifications)
 
         before.AlertsOn = false;
         Alerts.Migrate(db);   // une seule fois

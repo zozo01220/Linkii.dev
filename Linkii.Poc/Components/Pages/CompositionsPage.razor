@@ -299,6 +299,7 @@ else
             <table class="lx-tbl">
                 <thead>
                     <tr>
+                        <th style="width:34px"><input type="checkbox" class="sc-check lx-check" checked="@AllPicked" @onchange="ToggleAll" aria-label="Tout sélectionner" /></th>
                         <th><button type="button" class="@(sort == "name" ? "on" : "")" @onclick='() => sort = "name"'>Nom</button></th>
                         <th>Emplacement</th>
                         <th>Format</th>
@@ -315,9 +316,10 @@ else
                         var size = Compositions.Size(it.Settings);
                         var r = rights.GetValueOrDefault(it.Id);
                         var csum = shares.GetValueOrDefault(it.Id, ShareSummary.None);
-                        <tr data-nid="@it.Id" class="@(dragIds.Contains(it.Id) ? "dragging" : "")" draggable="@(r >= FolderRight.Write ? "true" : "false")" @ondragstart="() => StartDrag(it)" @ondragend="EndDrag">
+                        <tr data-nid="@it.Id" class="@(dragIds.Contains(it.Id) ? "dragging" : "") @(picked.Contains(it.Id) ? "picked" : "")" draggable="@(r >= FolderRight.Write ? "true" : "false")" @ondragstart="() => StartDrag(it)" @ondragend="EndDrag">
+                            <td>@if (Selectable(it)) { <input type="checkbox" class="sc-check lx-check" checked="@picked.Contains(it.Id)" @onchange="() => Toggle(it.Id)" aria-label="Sélectionner @it.Name" /> }</td>
                             <td><div class="nm"><span class="mini"><CompositionThumb Item="it" Files="files" Contain Label="@("Aperçu de " + it.Name)" /></span>
-                                @if (r >= FolderRight.Write) { <a href="/compositions/@it.Id">@it.Name</a> } else { <span title="Lecture seule : dupliquez-la pour l'adapter">@it.Name</span> }
+                                @if (r >= FolderRight.Write) { <a href="/compositions/@it.Id" @onclick="() => Click(it)" @onclick:preventDefault="@(picked.Count > 0)">@it.Name</a> } else { <span title="Lecture seule : dupliquez-la pour l'adapter">@it.Name</span> }
                                 @if (csum.Any) { <SharePill Summary="csum" Clickable="multi && r == FolderRight.Owner" OnClick="() => Share(ShareKind.Composition, it.Id, it.Name)" /> }
                                 @if (r == FolderRight.Read) { <span title="Lecture seule"><Ico Name="lock" Size="13" /></span> }</div></td>
                             <td><small>@PathOf(it)</small></td>
@@ -332,7 +334,7 @@ else
         </div>
         }
         @* sur mobile, toujours en cartes (pas de bascule) *@
-        <div class="cmp-grid @(view == "list" ? "lx-mobile-only" : "")">
+        <div class="cmp-grid @(picked.Count > 0 ? "cmp-selecting" : "") @(view == "list" ? "lx-mobile-only" : "")">
             @foreach (var c in Sorted)
             {
                 var it = c;
@@ -340,8 +342,9 @@ else
                 var size = Compositions.Size(it.Settings);
                 var r = rights.GetValueOrDefault(it.Id);
                 var csum = shares.GetValueOrDefault(it.Id, ShareSummary.None);
-                <article class="cmp-card @(dragIds.Contains(it.Id) ? "dragging" : "")" data-nid="@it.Id" draggable="@(r >= FolderRight.Write ? "true" : "false")" @ondragstart="() => StartDrag(it)" @ondragend="EndDrag">
-                    @if (r >= FolderRight.Write) { <a class="cmp-open" href="/compositions/@it.Id" aria-label="Modifier « @it.Name »"><CompositionThumb Item="it" Files="files" Contain Label="@("Aperçu de " + it.Name)" /></a> }
+                <article class="cmp-card @(dragIds.Contains(it.Id) ? "dragging" : "") @(picked.Contains(it.Id) ? "picked" : "")" data-nid="@it.Id" draggable="@(r >= FolderRight.Write ? "true" : "false")" @ondragstart="() => StartDrag(it)" @ondragend="EndDrag">
+                    @if (Selectable(it)) { <input type="checkbox" class="sc-check lx-check" checked="@picked.Contains(it.Id)" @onchange="() => Toggle(it.Id)" aria-label="Sélectionner @it.Name" /> }
+                    @if (r >= FolderRight.Write) { <a class="cmp-open" href="/compositions/@it.Id" aria-label="Modifier « @it.Name »" @onclick="() => Click(it)" @onclick:preventDefault="@(picked.Count > 0)"><CompositionThumb Item="it" Files="files" Contain Label="@("Aperçu de " + it.Name)" /></a> }
                     else { <div class="cmp-open" title="Lecture seule : dupliquez-la pour l'adapter"><CompositionThumb Item="it" Files="files" Contain Label="@("Aperçu de " + it.Name)" /></div> }
                     <div class="cmp-info">
                         <div class="cmp-t">
@@ -358,6 +361,45 @@ else
         }
         </section>
     }
+}
+
+@if (picked.Count > 0 && tab != "models")
+{
+    <div class="lx-selbar" role="region" aria-label="Sélection">
+        <b>@picked.Count sélectionnée@(picked.Count > 1 ? "s" : "")</b>
+        <button type="button" @onclick="ToggleAll">@(AllPicked ? "Tout désélectionner" : $"Tout sélectionner ({Sorted.Count(Selectable)})")</button>
+        <span class="vr"></span>
+        @if (multi && pickedOwner.Count > 0) { <button type="button" @onclick="() => sharingMany = pickedOwner"><Ico Name="share" Size="15" /><span class="lx-lbl">Partager…</span></button> }
+        <button type="button" disabled="@(pickedEditable.Count == 0)" @onclick="() => compMove = pickedEditable"><Ico Name="folder" Size="15" /><span class="lx-lbl">Ranger…</span></button>
+        <span class="vr"></span>
+        <button type="button" class="del" disabled="@(pickedOwner.Count == 0)" @onclick="() => deletingMany = pickedOwner.Select(x => x.Id).ToList()"><Ico Name="trash" Size="15" /> Supprimer</button>
+        <span class="vr"></span>
+        <button type="button" title="Tout désélectionner" aria-label="Tout désélectionner" @onclick="() => picked.Clear()"><Ico Name="x" Size="15" /></button>
+    </div>
+}
+
+@if (deletingMany is { Count: > 0 } dmany)
+{
+    var inLists = dmany.SelectMany(id => usage.GetValueOrDefault(id) ?? new()).Distinct().ToList();
+    <div class="modal-backdrop" @onclick="() => deletingMany = null"></div>
+    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="cmp-dm-title">
+        <h3 id="cmp-dm-title">Supprimer @(dmany.Count > 1 ? $"ces {dmany.Count} compositions" : "cette composition") ?</h3>
+        @if (inLists.Count > 0)
+        {
+            <p class="hint">Elles sont utilisées par @(inLists.Count == 1 ? "la liste" : $"{inLists.Count} listes") : <b>@string.Join(", ", inLists.Take(5))@(inLists.Count > 5 ? $" et {inLists.Count - 5} autre(s)" : "")</b>. Elles en seront retirées ; les écrans gardent leur version actuelle jusqu'à la prochaine publication.</p>
+        }
+        else { <p class="hint">Aucune liste de lecture ne les utilise.</p> }
+        <p class="hint">Les images de la médiathèque ne sont pas supprimées. Cette action est définitive.</p>
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => deletingMany = null">Annuler</button>
+            <button class="btn danger-solid" @onclick="DeleteMany">Supprimer</button>
+        </div>
+    </div>
+}
+
+@if (sharingMany is { Count: > 0 } smany)
+{
+    <ShareDialog Kind="@ShareKind.Composition" Items="smany" OnClose="() => sharingMany = null" OnShared="() => { picked.Clear(); Load(); }" />
 }
 
 @if (creatingFolder)
@@ -416,7 +458,7 @@ else
 
 @if (compMove is { } cm)
 {
-    <CompositionMoveDialog Items="cm" OnClose='n => { compMove = null; if (n > 0) { Toast.Ok(n > 1 ? $"{n} compositions rangées." : "Composition rangée."); Load(); } }' />
+    <CompositionMoveDialog Items="cm" OnClose='n => { compMove = null; if (n > 0) { picked.Clear(); Toast.Ok(n > 1 ? $"{n} compositions rangées." : "Composition rangée."); Load(); } }' />
 }
 
 @if (renaming is { } rn)
@@ -559,7 +601,7 @@ else
             crumbs.Insert(0, cur);
     }
 
-    private void OpenFolder(Guid? id) { folderId = id; menuFor = null; scopeAll = true; Rebuild(); }
+    private void OpenFolder(Guid? id) { folderId = id; picked.Clear(); menuFor = null; scopeAll = true; Rebuild(); }
 
     // ---------- Bloc des compositions : recherche, filtres, tri, affichage Cartes / Liste (comme les Listes de lecture) ----------
     private string view = "cards", sort = "name", filter = "", search = "";   // filter : "" | used | unused
@@ -737,6 +779,32 @@ else
     private Dictionary<Guid, List<string>> usage = new();
     private Guid? menuFor;
     private MediaItem? deleting;
+
+    // ---------- Sélection multiple : cases à cocher et barre flottante (comme la Médiathèque) ----------
+    private readonly HashSet<Guid> picked = new();
+    private List<Guid>? deletingMany;
+    private List<(Guid Id, string Name)>? sharingMany;
+    private bool Selectable(MediaItem m) => rights.GetValueOrDefault(m.Id) >= FolderRight.Write;
+    private void Toggle(Guid id) { if (!picked.Remove(id)) picked.Add(id); }
+    private void Click(MediaItem m) { if (picked.Count > 0 && Selectable(m)) Toggle(m.Id); }   // en cours de sélection, un clic sur la carte coche au lieu d'ouvrir l'éditeur
+    private bool AllPicked => Sorted.Any(Selectable) && Sorted.Where(Selectable).All(m => picked.Contains(m.Id));
+    private void ToggleAll()
+    {
+        var vis = Sorted.Where(Selectable).Select(m => m.Id).ToList();
+        if (vis.All(picked.Contains)) picked.ExceptWith(vis); else picked.UnionWith(vis);
+    }
+    private List<(Guid Id, string Name)> pickedEditable => items.Where(m => picked.Contains(m.Id) && Selectable(m)).Select(m => (m.Id, m.Name)).ToList();
+    private List<(Guid Id, string Name)> pickedOwner => items.Where(m => picked.Contains(m.Id) && rights.GetValueOrDefault(m.Id) == FolderRight.Owner).Select(m => (m.Id, m.Name)).ToList();
+
+    private void DeleteMany()
+    {
+        if (deletingMany == null) return;
+        var ids = deletingMany; deletingMany = null;
+        foreach (var id in ids) Svc.DeleteInstance(id);   // retirées aussi des listes de lecture qui les utilisent
+        picked.ExceptWith(ids);
+        Toast.Ok(ids.Count > 1 ? $"{ids.Count} compositions supprimées." : "Composition supprimée.");
+        Load();
+    }
     private CompositionTemplate? deletingTpl;
     private (Guid Id, bool Template)? renaming;
     private string renameValue = "";
@@ -781,6 +849,7 @@ else
         if (folderId is { } open && !folderRows.Any(r => r.Folder.Id == open)) folderId = null;   // dossier retiré entre-temps
         Rebuild();
         files = Library.PickableFiles().Where(m => m.Type == "image" && m.Status == null && m.FileName != null).ToList();
+        picked.IntersectWith(items.Where(Selectable).Select(c => c.Id));   // une composition supprimée ou devenue illisible quitte la sélection
         usage = Store.Read(d => d.Playlists.SelectMany(p => p.Draft.Select(i => (i.MediaId, p.Name)))
             .Where(x => items.Any(c => c.Id == x.MediaId)).GroupBy(x => x.MediaId).ToDictionary(g => g.Key, g => g.Select(x => x.Name).Distinct().ToList()));
     }
@@ -790,7 +859,7 @@ else
 
     private void SetTab(string t)
     {
-        tab = t; menuFor = null; galDrawn = false; galKey++; folderId = null;
+        tab = t; menuFor = null; galDrawn = false; galKey++; folderId = null; picked.Clear();
         Rebuild();
         if (t == "models") return;
         try { Store.Write(d => { if (d.Users.FirstOrDefault(u => u.Id == d.Access.UserId) is { } u) u.LibraryTabs["compositions"] = t; }); }

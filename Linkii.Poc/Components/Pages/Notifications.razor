@@ -1,0 +1,118 @@
+@page "/notifications"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientAdmin")]
+@inject NotificationCenter Center
+@inject TenantContext Ctx
+@inject JsonStore Root
+@inject NavigationManager Nav
+@implements IDisposable
+
+@* Centre de notifications : À lire, Lues, Toutes ; filtres par catégorie, recherche, groupes par jour ; lu / non lu et suppression, un par un ou par sélection.
+   Les notifications viennent d'AlertService (voir Alerts) ; le choix de ce qui est notifié se fait dans Réglages › Alertes et pause. Maquette : centre-notifications.html. *@
+<div class="page-head">
+    <div>
+        <h1>Notifications</h1>
+        <p class="sub">@(unread > 0 ? $"{unread} à lire" : "Tout est lu") · conservées 90 jours</p>
+    </div>
+    <div class="row head-actions">
+        <button type="button" class="btn" @onclick="ToggleSelect"><Ico Name="check" Size="16" /> @(selecting ? "Terminer" : "Sélectionner")</button>
+        <button type="button" class="btn" disabled="@(unread == 0)" @onclick="ReadAll"><Ico Name="eye" Size="16" /> Tout marquer comme lu</button>
+        <a class="btn" href="settings?tab=supervision"><Ico Name="gear" Size="16" /> Régler les alertes</a>
+    </div>
+</div>
+
+<div class="nt-tabs" role="tablist">
+    <button type="button" role="tab" class="@(tab == "unread" ? "on" : "")" @onclick='() => SetTab("unread")'>À lire @if (unread > 0) { <span class="nt-cnt">@unread</span> }</button>
+    <button type="button" role="tab" class="@(tab == "read" ? "on" : "")" @onclick='() => SetTab("read")'>Lues <span class="nt-cnt g">@(all.Count - unread)</span></button>
+    <button type="button" role="tab" class="@(tab == "all" ? "on" : "")" @onclick='() => SetTab("all")'>Toutes</button>
+</div>
+
+<div class="nt-bar">
+    <div class="nt-chips">
+        <button type="button" class="nt-chip @(cat == null ? "on" : "")" @onclick="() => cat = null">Toutes les catégories</button>
+        @foreach (var (kind, n) in Counts())
+        {
+            var c = Notifs.Category(kind);
+            <button type="button" class="nt-chip @(cat == kind ? "on" : "")" @onclick="() => cat = kind"><Ico Name="@c.Icon" Size="13" />@c.Label <small>@n</small></button>
+        }
+    </div>
+    <label class="nt-search"><Ico Name="search" Size="15" /><input type="search" placeholder="Rechercher" aria-label="Rechercher" @bind="query" @bind:event="oninput" /></label>
+</div>
+
+@if (selecting && picked.Count > 0)
+{
+    <div class="nt-sel"><span>@picked.Count sélectionnée@(picked.Count > 1 ? "s" : "")</span><button type="button" @onclick="() => BulkRead(true)">Marquer comme lues</button><button type="button" @onclick="() => BulkRead(false)">Marquer comme non lues</button><button type="button" @onclick="BulkDelete">Supprimer</button></div>
+}
+
+<div class="nt-panel" role="list">
+    @{ var list = Filtered(); }
+    @if (list.Count == 0)
+    {
+        <div class="nt-empty"><Ico Name="bell" Size="40" /><b>@(tab == "unread" && query.Length == 0 && cat == null ? "Vous êtes à jour" : "Rien à afficher")</b>
+            <span>@(tab == "unread" && query.Length == 0 && cat == null ? "Aucune notification à lire." : "Aucune notification ne correspond.")</span>
+            @if (tab == "unread" && all.Count > 0) { <button type="button" class="nt-link" @onclick='() => SetTab("read")'>Voir les notifications lues</button> }
+        </div>
+    }
+    @foreach (var g in list.GroupBy(n => Notifs.DayLabel(n.UpdatedUtc, DateTime.UtcNow, tz)).OrderBy(g => Array.IndexOf(Days, g.Key)))
+    {
+        <div class="nt-grp">@g.Key</div>
+        @foreach (var n in g)
+        {
+            <NotificationRow @key="n.Id" N="n" Read="IsRead(n)" Timezone="@tz" Selecting="selecting" Selected="picked.Contains(n.Id)"
+                             OnOpen="Open" OnToggle="Toggle" OnDelete="Delete" OnPick="Pick" />
+        }
+    }
+</div>
+
+@code {
+    private static readonly string[] Days = { "Aujourd'hui", "Hier", "Plus ancien" };
+    private List<Notification> all = new();
+    private string tab = "unread", query = "", tz = "UTC";
+    private string? cat;
+    private bool selecting;
+    private readonly HashSet<Guid> picked = new();
+    private int unread;
+    private Guid cid, me;
+    private Timer? later;
+
+    protected override void OnInitialized()
+    {
+        cid = Ctx.RequireClientId(); me = Ctx.UserId ?? Guid.Empty;
+        tz = Root.Read(d => d.Clients.FirstOrDefault(x => x.Id == cid)?.Timezone ?? "UTC");
+        Load();
+        Root.Changed += OnChanged;
+    }
+
+    private bool IsRead(Notification n) => n.ReadBy.Contains(me);
+    private void Load() { all = Center.For(cid, me); unread = all.Count(n => !IsRead(n)); }
+    private void OnChanged() { later?.Dispose(); later = new Timer(_ => InvokeAsync(() => { Load(); StateHasChanged(); }), null, 500, Timeout.Infinite); }
+
+    private List<Notification> Filtered() => all
+        .Where(n => tab == "all" || (tab == "unread" ? !IsRead(n) : IsRead(n)))
+        .Where(n => cat == null || n.Kind == cat)
+        .Where(n => query.Length == 0 || n.Title.Contains(query, StringComparison.CurrentCultureIgnoreCase) || n.Body.Contains(query, StringComparison.CurrentCultureIgnoreCase))
+        .ToList();
+
+    /// <summary>Catégories présentes dans l'onglet courant, avec leur nombre.</summary>
+    private IEnumerable<(string Kind, int N)> Counts() => all
+        .Where(n => tab == "all" || (tab == "unread" ? !IsRead(n) : IsRead(n)))
+        .GroupBy(n => n.Kind).Select(g => (g.Key, g.Count()));
+
+    private void SetTab(string t) { tab = t; cat = null; picked.Clear(); }
+    private void ToggleSelect() { selecting = !selecting; picked.Clear(); }
+    private void Pick(Notification n) { if (!picked.Remove(n.Id)) picked.Add(n.Id); }
+    private void ReadAll() { Center.ReadAll(cid, me); Load(); }
+    private void Toggle(Notification n) { Center.SetRead(cid, me, new[] { n.Id }, !IsRead(n)); Load(); }
+    private void Delete(Notification n) { Center.Delete(cid, me, new[] { n.Id }); Load(); }
+    private void BulkRead(bool read) { Center.SetRead(cid, me, picked, read); picked.Clear(); Load(); }
+    private void BulkDelete() { Center.Delete(cid, me, picked); picked.Clear(); Load(); }
+
+    private void Open(Notification n)
+    {
+        if (selecting) { Pick(n); return; }
+        Center.SetRead(cid, me, new[] { n.Id }, true);
+        Load();
+        Nav.NavigateTo(n.Path.TrimStart('/'));
+    }
+
+    public void Dispose() { Root.Changed -= OnChanged; later?.Dispose(); }
+}
