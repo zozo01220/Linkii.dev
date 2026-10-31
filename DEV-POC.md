@@ -2592,3 +2592,8 @@ Remplace l'organisation en onglets Structure / Membres / Rôles et l'arbre du §
 
 - Store : **boutique** (`store`) ; Player : **écran avec flèche** (`monitor-down`, aussi dans l'entrée « Installer le player » du menu sur petit écran). Choisies dans `maquettes/barre-icones-store-player.html` et `barre-icones-store-2.html`. Ajoutées à `Ico.razor`.
 - La boutique est aussi sur l'onglet « Intégrations » du hub Contenus (`HubTab.Icon`) et sur l'onglet du Store de la page Intégrations, **renommé « Store »** (avant : « Intégrations Store »).
+
+### Tiroir Store et bouton « Utiliser » (31 octobre 2026)
+- Le tiroir s'ouvre sur **« Tout »** ; la puce **« Pour cette page »** est en évidence (orange clair, icône boutique ; orange plein quand elle est choisie).
+- Les intégrations déjà dans Mes intégrations et actives affichent **« Déjà utilisée »** (avant : « Actif »).
+- Le bouton orange **« Utiliser »** devient une icône **bac + flèche** (`install`), carré arrondi cerclé orange (`.btn-use-ic`, info-bulle « Utiliser »), dans le tiroir et dans l'onglet Store de la page Intégrations (cartes et liste). Le bouton texte reste dans le tiroir « Détails » d'une intégration. Choix fait dans `maquettes/store-bouton-utiliser-icone.html`.
