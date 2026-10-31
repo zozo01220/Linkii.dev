@@ -2597,3 +2597,4 @@ Remplace l'organisation en onglets Structure / Membres / Rôles et l'arbre du §
 - Le tiroir s'ouvre sur **« Tout »** ; la puce **« Pour cette page »** est en évidence (orange clair, icône boutique ; orange plein quand elle est choisie).
 - Les intégrations déjà dans Mes intégrations et actives affichent **« Déjà utilisée »** (avant : « Actif »).
 - Le bouton orange **« Utiliser »** devient une icône **bac + flèche** (`install`), carré arrondi cerclé orange (`.btn-use-ic`, info-bulle « Utiliser »), dans le tiroir et dans l'onglet Store de la page Intégrations (cartes et liste). Le bouton texte reste dans le tiroir « Détails » d'une intégration. Choix fait dans `maquettes/store-bouton-utiliser-icone.html`.
+- L'icône boutique des onglets « Intégrations » (hub Contenus) et « Store » est **orange** (#E8590C), comme celle du bouton Store de la barre.
