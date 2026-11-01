@@ -6,7 +6,7 @@
    (balisage ContentPreview, classes cp-stage / fit-cover), le QR code au premier plan, à glisser à la souris ou au doigt ; il s'aimante aux axes du centre.
    Position et largeur en % de l'écran, comme le player. Le glisser est géré par qr-place.js ; Blazor est prévenu au lâcher. *@
 <div class="pv-box">
-<div class="cp-stage qr-stage @(Fit == "cover" ? "fit-cover" : "")" style="@(Media?.AppId == Compositions.AppId ? Compositions.StageStyle(Media.Settings) : null)" @ref="stage" aria-label="Aperçu de l'écran">
+<div class="cp-stage qr-stage @(Fit == "cover" ? "fit-cover" : "") @(isYt && Format == "portrait" ? "portrait" : "")" style="@(Media?.AppId == Compositions.AppId ? Compositions.StageStyle(Media.Settings) : null)" @ref="stage" aria-label="Aperçu de l'écran">
     @if (Media != null && Media.FileName != null && Media.Status == null && (Media.Type == "image" || Converter.CanPoster))
     {
         <img src="/media/@Media.FileName?w=640" alt="" />
@@ -14,6 +14,10 @@
     else if (Media?.AppId == Compositions.AppId && All != null)
     {
         <div class="qr-bg"><CompositionThumb Item="Media" Files="All" Contain="true" /></div>   @* la composition : le QR de comptage se place par-dessus *@
+    }
+    else if (isYt && YouTube.ExtractId(Media!.Settings.GetValueOrDefault("url")) is { } yt)
+    {
+        <div class="qr-bg"><img src="https://i.ytimg.com/vi/@yt/@(Format == "portrait" ? "hqdefault" : "mqdefault").jpg" alt="" style="object-fit:cover" /></div>
     }
     else if (Media != null)
     {
@@ -30,10 +34,21 @@
         </div>
     }
 </div>
+@if (isYt)
+{
+    <div class="seg cp-fmt" role="group" aria-label="Format de l'aperçu" title="Purement visuel : pour placer le QR code selon le format de la vidéo"><button type="button" class="@(Format == "portrait" ? "" : "on")" @onclick="SetLandscape">Paysage</button><button type="button" class="@(Format == "portrait" ? "on" : "")" @onclick="SetPortrait">Portrait</button></div>
+}
 </div>
 
 @code {
     [Parameter] public MediaItem? Media { get; set; }
+    /// <summary>YouTube : format de l'aperçu (landscape / portrait), purement visuel, modifiable ici comme dans l'onglet Contenu.</summary>
+    [Parameter] public string? Format { get; set; }
+    [Parameter] public EventCallback<string> FormatChanged { get; set; }
+    private bool isYt => Media?.AppId == "youtube";
+    private Task SetFormat(string f) { Format = f; return FormatChanged.InvokeAsync(f); }
+    private Task SetLandscape() => SetFormat("landscape");
+    private Task SetPortrait() => SetFormat("portrait");
     [Parameter] public IReadOnlyList<MediaItem>? All { get; set; }
     /// <summary>Cadrage de l'aperçu « contain » (entier) ou « cover » (rogné), comme l'onglet Contenu.</summary>
     [Parameter] public string Fit { get; set; } = "contain";

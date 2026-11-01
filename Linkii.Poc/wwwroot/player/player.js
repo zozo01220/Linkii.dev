@@ -131,6 +131,9 @@
   // sans fin anticipée : c'est le créneau qui le remplace). Sinon : fin décidée par l'app pour une durée « content ».
   function slideOpts(item, origin, onEnded, onFailed) {
     if (origin != null) return { sync: { origin: origin, now: serverNow } };
+    // YouTube : la vidéo ne boucle jamais dans une liste, à sa fin on passe au contenu suivant (la durée fixée reste un plafond) ;
+    // la liste elle-même recommence au début quand elle arrive au bout (voir next() et zoneLoop)
+    if (item.type === 'app' && item.appId === 'youtube') return { onEnded: onEnded, onFailed: onFailed };
     return item.durationMode === 'content' ? { onEnded: onEnded, onFailed: onFailed } : null;
   }
   // Durée à laisser à un contenu affiché : jusqu'à la fin de son créneau commun (1 ms s'il est déjà en retard : le suivant le remplace aussitôt).
@@ -259,10 +262,10 @@
     cell.w = W; cell.h = H;
     sizeZones();
     placePause();
+    if (window.LinkiiEmergency) LinkiiEmergency.place();
   }
   window.addEventListener('resize', layout);
 
-    if (window.LinkiiEmergency) LinkiiEmergency.place();
   // Visuel de pause : chaque écran d'un mur affiche le visuel en entier dans sa propre case, pas une tranche du visuel du mur.
   var cell = { w: 1920, h: 1080 };   // taille de la scène d'un écran (un mur en compte colonnes × lignes)
   function placePause() {
@@ -306,6 +309,7 @@
     cfg.wall = pl.wall || null;
     if (window.LinkiiKiosk) LinkiiKiosk.apply(pl.kiosk || null, kioskHooks());   // borne interactive : menu de tuiles au toucher (null : écran de diffusion)
     if (pl.dim !== undefined) cfg.dim = pl.dim || null;
+    if (pl.sleep !== undefined) cfg.sleep = pl.sleep || null;   // plages de veille (et veille manuelle) de la version qui devient courante
     layout();
     sleepTick();
     dimTick();
@@ -711,36 +715,48 @@
     } else el.appendChild(host);
     function coverOn() { clearTimeout(coverTimer); if (cover) cover.classList.remove('off'); }
     function coverOff(delay) { if (!cover) return; clearTimeout(coverTimer); coverTimer = setTimeout(function () { if (!dead) cover.classList.add('off'); }, delay); }
+    var noteEl = null, stallTimer = null, retryTimer = null, hostParent = host.parentNode;
     function note(text) {
-      var n = document.createElement('div');
-      n.className = 'yt-note'; n.textContent = text;
-      el.appendChild(n);
+      if (noteEl && noteEl.parentNode) noteEl.parentNode.removeChild(noteEl);
+      noteEl = document.createElement('div');
+      noteEl.className = 'yt-note'; noteEl.textContent = text;
+      el.appendChild(noteEl);
     }
-    function fallbackIframe() {   // API injoignable : lecteur intégré simple
-      host.innerHTML = '';
-      var fr = document.createElement('iframe');
-      var q = '?autoplay=1&mute=' + (o.sound ? 0 : 1) + '&controls=0&modestbranding=1&rel=0&playsinline=1&iv_load_policy=3&disablekb=1';
-      if (o.playlistId) fr.src = 'https://www.youtube-nocookie.com/embed/videoseries' + q + '&list=' + o.playlistId + '&loop=1';
-      else fr.src = 'https://www.youtube-nocookie.com/embed/' + o.videoId + q + '&loop=1&playlist=' + o.videoId + (o.start > 0 ? '&start=' + o.start : '') + (o.end > o.start ? '&end=' + o.end : '');
-      fr.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
-      fr.setAttribute('frameborder', '0');
-      fr.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
-      host.appendChild(fr);
-      coverOff(4500);   // sans l'API, l'état de lecture est inconnu : le voile ne couvre que le titre du début
+    // Pas de réseau (API injoignable, lecture bloquée) : message à l'écran, jamais de boucle ; la liste passe au contenu suivant
+    // et, si la vidéo est toujours à l'écran (contenu seul), on réessaie un peu plus tard.
+    function offline() {
+      if (dead) return;
+      coverOn();
+      note('Pas de réseau : la vidéo YouTube ne peut pas être lue');
+      if (opts && opts.onFailed) setTimeout(function () { if (!dead) opts.onFailed(); }, 4000);
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(function () {
+        if (dead) return;
+        if (noteEl && noteEl.parentNode) noteEl.parentNode.removeChild(noteEl);
+        try { if (ytp && ytp.destroy) ytp.destroy(); } catch (x) {}
+        ytp = null;
+        var nh = document.createElement('div');   // YT.Player remplace son élément : on repart d'un neuf
+        nh.style.cssText = host.style.cssText; nh.id = 'yt' + Math.random().toString(36).slice(2, 9);
+        hostParent.appendChild(nh); host = nh;
+        start();
+      }, 15000);
     }
     function restart(p) {
       try { if (o.playlistId) p.playVideoAt(0); else p.seekTo(o.start || 0); p.playVideo(); } catch (x) {}
     }
-    ytLoad(function (YT) {
-      if (dead) return;
-      if (!YT) { fallbackIframe(); return; }
-      // Quand l'API est déjà chargée (2e vidéo d'une boucle), ce rappel s'exécute avant que le widget soit inséré dans la page :
-      // YT.Player ne trouvait alors pas son élément par identifiant et laissait un écran vide. On attend l'insertion et on passe l'élément lui-même.
-      setTimeout(function () {
+    function start() {
+      ytLoad(function (YT) {
         if (dead) return;
-        create(YT);
-      }, 0);
-    });
+        if (!YT) { offline(); return; }
+        // Quand l'API est déjà chargée (2e vidéo d'une boucle), ce rappel s'exécute avant que le widget soit inséré dans la page :
+        // YT.Player ne trouvait alors pas son élément par identifiant et laissait un écran vide. On attend l'insertion et on passe l'élément lui-même.
+        setTimeout(function () {
+          if (dead) return;
+          create(YT);
+        }, 0);
+      });
+    }
+    start();
     function create(YT) {
       var vars = { autoplay: 1, mute: o.sound ? 0 : 1, controls: 0, rel: 0, modestbranding: 1, playsinline: 1, iv_load_policy: 3, disablekb: 1, origin: location.origin };
       var params = { host: 'https://www.youtube-nocookie.com', playerVars: vars };
@@ -758,23 +774,30 @@
           }, 2500);
         },
         onStateChange: function (e) {
+          clearTimeout(stallTimer);
+          if (e.data === 3) stallTimer = setTimeout(function () { if (!dead && (navigator.onLine === false || !opts || opts.onFailed)) offline(); }, 20000);   // chargement qui n'aboutit pas : réseau perdu
           if (e.data === 1) coverOff(1500);   // en lecture : le titre du début disparaît seul après quelques secondes
           else coverOn();                     // pause, chargement, fin (suggestions) : voile noir
           if (e.data === 0) {                     // terminée
-            if (opts && opts.onEnded) opts.onEnded(); // diaporama : on passe au contenu suivant
+            if (o.playlistId && opts && opts.onEnded) {   // liste YouTube : on ne passe au contenu suivant qu'à la fin de sa dernière vidéo
+              try { var pi = e.target.getPlaylistIndex(), pn = (e.target.getPlaylist() || []).length; if (pn > 1 && pi < pn - 1) return; } catch (x) {}
+            }
+            if (opts && opts.onEnded) opts.onEnded(); // liste de lecture : on passe au contenu suivant
+            else if (opts && opts.sync) { /* créneau commun (écrans synchronisés) : le créneau suivant remplace la vidéo, pas de boucle */ }
             else restart(e.target);                 // seule / en incrustation : boucle
           } else if (e.data === 5 || (e.data === -1 && !o.sound)) {   // prête mais pas lancée : on insiste
             try { if (!o.sound) e.target.mute(); e.target.playVideo(); } catch (x) {}
           }
         },
         onError: function (e) {
+          if (navigator.onLine === false) { offline(); return; }
           note('YouTube : ' + (YT_ERRORS[e.data] || ('erreur ' + e.data)));
           if (opts && opts.onFailed) setTimeout(opts.onFailed, 5000);
         }
       };
       ytp = new YT.Player(host, params);
     }
-    return function () { dead = true; clearTimeout(coverTimer); try { if (ytp && ytp.destroy) ytp.destroy(); } catch (x) {} };
+    return function () { dead = true; clearTimeout(coverTimer); clearTimeout(stallTimer); clearTimeout(retryTimer); try { if (ytp && ytp.destroy) ytp.destroy(); } catch (x) {} };
   }
 
   // App du catalogue : son rendu vient de apps.js (LinkiiApps) ; l'agenda réutilise le moteur des listes de données.
@@ -1461,29 +1484,6 @@
     }
   }
 
-  /* ---------- Luminosité et contraste selon l'heure (fuseau de l'aire) ----------
-     Le serveur envoie { tz, profiles: [{ b, c }, …], grid } : grid a un chiffre par heure de la semaine (lundi 00 h en premier), l'indice du profil.
-     Contraste : toujours un filtre sur la scène. Luminosité : dans l'application Android, LinkiiNative.setBrightness règle la vraie luminosité de
-     l'écran (smartphone, tablette) et renvoie true ; sinon (Android TV, navigateur, aperçu), un filtre assombrit l'image. */
-  var dimSig = '';
-  function dimTick() {
-    if (state.pending && state.pending.dim !== undefined) cfg.dim = state.pending.dim || null;   // un nouveau réglage s'applique aussitôt
-    var d = state.emergency ? null : cfg.dim, b = 100, c = 100;
-    if (d && d.profiles && d.profiles.length && d.grid) {
-      var p = d.profiles[+d.grid.charAt(Math.floor(localWeekMinute(serverNow(), d.tz) / 60))] || d.profiles[0];
-      b = p.b; c = p.c;
-    }
-    var sig = b + ',' + c;
-    if (sig === dimSig) return;
-    dimSig = sig;
-    var real = false;
-    if (!PREVIEW && window.LinkiiNative && typeof window.LinkiiNative.setBrightness === 'function') {
-      try { real = !!window.LinkiiNative.setBrightness(b); } catch (e) {}
-    }
-    var f = [];
-    if (b < 100 && !real) f.push('brightness(' + (b / 100) + ')');
-    if (c !== 100) f.push('contrast(' + (c / 100) + ')');
-    $('stage').style.filter = f.join(' ');
   /* ---------- Urgence (emergency.js) : le player lui prête la scène et arrête ou reprend les contenus ---------- */
   function emergencyInit() {
     if (!window.LinkiiEmergency) return;
@@ -1509,6 +1509,29 @@
     });
   }
 
+  /* ---------- Luminosité et contraste selon l'heure (fuseau de l'aire) ----------
+     Le serveur envoie { tz, profiles: [{ b, c }, …], grid } : grid a un chiffre par heure de la semaine (lundi 00 h en premier), l'indice du profil.
+     Contraste : toujours un filtre sur la scène. Luminosité : dans l'application Android, LinkiiNative.setBrightness règle la vraie luminosité de
+     l'écran (smartphone, tablette) et renvoie true ; sinon (Android TV, navigateur, aperçu), un filtre assombrit l'image. */
+  var dimSig = '';
+  function dimTick() {
+    if (state.pending && state.pending.dim !== undefined) cfg.dim = state.pending.dim || null;   // un nouveau réglage s'applique aussitôt
+    var d = state.emergency ? null : cfg.dim, b = 100, c = 100;
+    if (d && d.profiles && d.profiles.length && d.grid) {
+      var p = d.profiles[+d.grid.charAt(Math.floor(localWeekMinute(serverNow(), d.tz) / 60))] || d.profiles[0];
+      b = p.b; c = p.c;
+    }
+    var sig = b + ',' + c;
+    if (sig === dimSig) return;
+    dimSig = sig;
+    var real = false;
+    if (!PREVIEW && window.LinkiiNative && typeof window.LinkiiNative.setBrightness === 'function') {
+      try { real = !!window.LinkiiNative.setBrightness(b); } catch (e) {}
+    }
+    var f = [];
+    if (b < 100 && !real) f.push('brightness(' + (b / 100) + ')');
+    if (c !== 100) f.push('contrast(' + (c / 100) + ')');
+    $('stage').style.filter = f.join(' ');
   }
 
   var pauseTimer = null;
@@ -1613,6 +1636,7 @@
     conn.on('PlaylistChanged', function () { refresh(); });
     conn.on('Identify', function (label) { identify(String(label)); });
     conn.on('Command', function (c) { handleCommand(c); });
+    conn.on('Emergency', function (e) { if (window.LinkiiEmergency) LinkiiEmergency.apply(e || null); });   // urgence : affichée ou retirée sans attendre le sondage
     conn.onreconnecting(markOffline);
     conn.onreconnected(function () { setOnline(true); refresh(); });
     function start() {
@@ -1631,12 +1655,12 @@
         if (state.build && d.build !== state.build) { location.reload(); return; }
         state.build = d.build;
       }
+      if (window.LinkiiEmergency && d.emergency !== undefined) LinkiiEmergency.apply(d.emergency);   // urgence en cours (ou null : levée)
       var cur = state.pending ? state.pending.version : (state.current && state.current.version);
       if (d.version !== cur) refresh();
       ack();
       (d.commands || []).forEach(handleCommand);   // ordres du back-office que le temps réel n'a pas livrés
     }).catch(function () {});
-    conn.on('Emergency', function (e) { if (window.LinkiiEmergency) LinkiiEmergency.apply(e || null); });   // urgence : affichée ou retirée sans attendre le sondage
   }
 
   /* ---------- Rechargement nocturne (heure réglée dans les paramètres du tenant) ---------- */
@@ -1655,9 +1679,10 @@
       var saved = JSON.parse(LS.getItem('lk_playlist') || 'null');
       if (saved) { state.pending = saved; }   // passe par next() => config + apps appliquées
     } catch (e) {}
-      if (window.LinkiiEmergency && d.emergency !== undefined) LinkiiEmergency.apply(d.emergency);   // urgence en cours (ou null : levée)
+    emergencyInit();
     layout();
     next();
+    if (window.LinkiiEmergency) LinkiiEmergency.restore();   // une urgence connue avant l'arrêt s'affiche même sans réseau
     refresh();
     connectHub();
     setInterval(poll, 5000);   // filet si le temps réel (SignalR) est coupé ou injoignable : une publication arrive en 5 s au plus
@@ -1679,10 +1704,8 @@
   function previewPrepare(pl) {
     if (SOUND) return;
     var lists = [pl.items || []].concat(pl.zones || []).concat(((pl.schedule && pl.schedule.slots) || []).map(function (s) { return s.items || []; }));
-    emergencyInit();
     for (var i = 0; i < lists.length; i++)
       for (var k = 0; k < lists[i].length; k++) { var s = lists[i][k].settings; if (s && s.sound) s.sound = 'false'; }
-    if (window.LinkiiEmergency) LinkiiEmergency.restore();   // une urgence connue avant l'arrêt s'affiche même sans réseau
   }
 
   function previewReport() {

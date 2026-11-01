@@ -1,9 +1,12 @@
 @* QR code de comptage des scans, dessiné par-dessus un aperçu (vignette de la ligne, image seule, diapositives du carrousel et de la grille) :
    même position et même taille que sur l'écran (en % de l'aperçu, qui a les proportions de l'écran). Le parent doit être positionné (position: relative / absolute).
    Mini : vignette de liste, sans le texte (trop petit pour être lu). *@
+@using Microsoft.JSInterop
+@implements IDisposable
+@inject IJSRuntime JS
 @if (n > 0)
 {
-    <div class="qr-badge @(Mini ? "mini" : "")" style="left:@Pct(Qr!.X);top:@Pct(Qr.Y);width:@Pct(Qr.Size)" aria-hidden="true">
+    <div class="qr-badge @(Mini ? "mini" : "") @(Movable ? "mv" : "")" @ref="box" tabindex="@(Movable ? 0 : null)" role="@(Movable ? "slider" : null)" title="@(Movable ? "Glisser pour déplacer le QR code" : null)" aria-label="@(Movable ? "QR code : glisser pour le déplacer, flèches du clavier pour l'ajuster" : null)" aria-hidden="@(Movable ? null : "true")" style="left:@Pct(Qr!.X);top:@Pct(Qr.Y);width:@Pct(Qr.Size)">
         <svg viewBox="0 0 @n @n" shape-rendering="crispEdges"><path d="@path" fill="#0B1F3A" /></svg>
         @if (!Mini && !string.IsNullOrWhiteSpace(Qr.Label)) { <span class="qr-lbl">@Qr.Label</span> }
     </div>
@@ -12,6 +15,26 @@
 @code {
     [Parameter] public PublishedQr? Qr { get; set; }
     [Parameter] public bool Mini { get; set; }
+    /// <summary>Le QR code se glisse à la souris ou au doigt (flèches du clavier aussi) ; la position en % de l'aperçu est rendue au lâcher.</summary>
+    [Parameter] public EventCallback<(double X, double Y)> OnMoved { get; set; }
+    private bool Movable => OnMoved.HasDelegate;
+    private ElementReference box;
+    private bool attached;
+    private DotNetObjectReference<QrBadge>? self;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (n == 0 || !Movable) { attached = false; return; }
+        if (attached || box.Context == null) return;
+        attached = true;
+        self ??= DotNetObjectReference.Create(this);
+        try { await JS.InvokeVoidAsync("linkiiQr.init", null, box, self); } catch { attached = false; }
+    }
+
+    [JSInvokable]
+    public Task Moved(double x, double y) => OnMoved.InvokeAsync((x, y));
+
+    public void Dispose() => self?.Dispose();
 
     private int n;
     private string path = "";

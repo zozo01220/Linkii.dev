@@ -274,6 +274,34 @@ public class YouTubeProvider(SafeHttp http) : IAppProvider
         return Describe((int)res.StatusCode, body, link.Contains("/playlist"));
     }
 
+    /// <summary>Format de la vidéo (largeur / hauteur) pour l'aperçu : oEmbed donne les dimensions du lecteur ; un Short (adresse /shorts/ valide) est vertical.
+    /// Null si YouTube ne répond pas : l'aperçu garde alors le format de l'écran.</summary>
+    public static async Task<double?> Ratio(SafeHttp http, string videoId)
+    {
+        double? ratio = null;
+        try
+        {
+            using var res = await http.Send("https://www.youtube.com/oembed?format=json&url=" + Uri.EscapeDataString("https://www.youtube.com/watch?v=" + videoId));
+            if (res.IsSuccessStatusCode)
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+                if (doc.RootElement.TryGetProperty("width", out var w) && doc.RootElement.TryGetProperty("height", out var h) && w.TryGetInt32(out var wi) && h.TryGetInt32(out var hi) && wi > 0 && hi > 0)
+                    ratio = wi / (double)hi;
+            }
+        }
+        catch { }
+        if (ratio is null or >= 1)
+        {
+            try
+            {
+                using var res = await http.Send("https://www.youtube.com/shorts/" + videoId);   // une vidéo ordinaire est renvoyée vers /watch
+                if (res.IsSuccessStatusCode && res.RequestMessage?.RequestUri?.AbsolutePath.StartsWith("/shorts/", StringComparison.OrdinalIgnoreCase) == true) ratio = 9 / 16.0;
+            }
+            catch { }
+        }
+        return ratio;
+    }
+
     /// <summary>Interprète la réponse d'oEmbed : 200 = intégrable, 401 / 403 = privée ou intégration désactivée, 404 = introuvable.</summary>
     public static string Describe(int status, string body, bool playlist)
     {

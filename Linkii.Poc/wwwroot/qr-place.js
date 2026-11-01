@@ -7,8 +7,9 @@
   var SNAP = 2;   // % : distance d'aimantation au centre
 
   function init(stage, box, dotnet) {
+    stage = stage || (box && box.parentElement);   // QrBadge : l'aperçu est le parent du QR code
     if (!stage || !box || box.__lkQr) return;
-    box.__lkQr = true;
+    box.__lkQr = true; box.__lkDn = dotnet;
     var gv = stage.querySelector('.qr-guide.v'), gh = stage.querySelector('.qr-guide.h');
     var dx = 0, dy = 0, dragging = false, x = 0, y = 0;
 
@@ -63,5 +64,20 @@
     });
   }
 
-  w.linkiiQr = { init: init };
+  // Emplacement prédéfini (tl, t, tr, l, r, bl, b, br) : calculé avec les vraies dimensions du QR code et de l'aperçu, marge de 2 %.
+  function place(key) {
+    var box = document.querySelector('.qr-badge.mv, .qr-box');
+    if (!box || !box.__lkDn) return;
+    var stage = box.parentElement, r = stage.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    var bw = box.offsetWidth / r.width * 100, bh = box.offsetHeight / r.height * 100, M = 2;
+    var cx = (100 - bw) / 2, cy = (100 - bh) / 2, L = M, R = 100 - bw - M, T = M, B = 100 - bh - M;
+    var spots = { tl: [L, T], t: [cx, T], tr: [R, T], l: [L, cy], r: [R, cy], bl: [L, B], b: [cx, B], br: [R, B] };
+    var p = spots[key]; if (!p) return;
+    var x = Math.max(0, Math.min(100 - bw, p[0])), y = Math.max(0, Math.min(100 - bh, p[1]));
+    box.style.left = x + '%'; box.style.top = y + '%';
+    box.__lkDn.invokeMethodAsync('Moved', x, y);
+  }
+
+  w.linkiiQr = { init: init, place: place };
 })(window);

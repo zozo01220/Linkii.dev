@@ -75,6 +75,60 @@ public static class Dim
         return b.ToString();
     }
 
+    /// <summary>Teinte d'une case ou d'une frise : d'autant plus foncée que la luminosité est basse (du blanc à la nuit de la charte).</summary>
+    public static string Shade(DimProfile p)
+    {
+        var a = (100 - p.Brightness) / 100.0;
+        return $"rgb({(int)Math.Round(255 - a * 244)},{(int)Math.Round(255 - a * 224)},{(int)Math.Round(255 - a * 197)})";
+    }
+
+    /// <summary>
+    /// Repères « jour dès, soirée dès, nuit dès » quand le réglage est le même tous les jours et suit le schéma nuit › jour › soirée › nuit
+    /// (3 profils : jour, soirée, nuit) ; null sinon (le réglage se lit alors jour par jour).
+    /// </summary>
+    public static int[]? Thresholds(DimPlan? p)
+    {
+        if (!Valid(p) || p!.Profiles.Count != 3) return null;
+        var day = p.Grid[..24];
+        for (var d = 1; d < 7; d++) if (p.Grid.Substring(d * 24, 24) != day) return null;
+        int t0 = 0, t1, t2;
+        while (t0 < 24 && day[t0] == '2') t0++;
+        t1 = t0; while (t1 < 24 && day[t1] == '0') t1++;
+        t2 = t1; while (t2 < 24 && day[t2] == '1') t2++;
+        if (t1 == t0 || t2 == t1 || t2 > 23) return null;
+        for (var h = t2; h < 24; h++) if (day[h] != '2') return null;
+        return new[] { t0, t1, t2 };
+    }
+
+    /// <summary>Semaine entière à partir des trois repères (jour dès t[0], soirée dès t[1], nuit dès t[2]).</summary>
+    public static string GridFrom(int[] t)
+    {
+        var day = new StringBuilder();
+        for (var h = 0; h < 24; h++) day.Append(h >= t[2] || h < t[0] ? '2' : h >= t[1] ? '1' : '0');
+        return string.Concat(Enumerable.Repeat(day.ToString(), 7));
+    }
+
+    /// <summary>Phrase courte d'un réglage, pour les listes (« Soirée dès 17 h · Nuit dès 19 h »).</summary>
+    public static string Summary(DimPlan? p)
+    {
+        if (!Active(p)) return "Aucun réglage : l'image est affichée telle quelle";
+        return Thresholds(p) is { } t
+            ? $"{p!.Profiles[1].Name} dès {t[1]} h · {p.Profiles[2].Name} dès {t[2]} h"
+            : "Horaires différents selon les jours";
+    }
+
+    /// <summary>Frise d'une journée (le lundi) : suites d'heures consécutives de même profil, en nombre d'heures.</summary>
+    public static List<(int Hours, DimProfile Profile)> Strip(DimPlan p)
+    {
+        var res = new List<(int, DimProfile)>();
+        for (var h = 0; h < 24; h++)
+        {
+            var pr = p.Profiles[Math.Min(p.Grid[h] - '0', p.Profiles.Count - 1)];
+            if (res.Count > 0 && ReferenceEquals(res[^1].Item2, pr)) res[^1] = (res[^1].Item1 + 1, pr); else res.Add((1, pr));
+        }
+        return res;
+    }
+
     /// <summary>Réglage qui s'applique à l'écran (null : aucun). Un écran d'un mur suit toujours son aire.</summary>
     public static DimPlan? Effective(Tenant t, Area? area, Screen s, bool inWall)
     {

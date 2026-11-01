@@ -4,6 +4,9 @@
 @inject MediaLibrary Library
 @inject TenantStore Store
 @inject NavigationManager Nav
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+@inject SafeHttp Http
 
 @* Zone « Aperçu » de la fenêtre de configuration d'un contenu (standard Linkivi, voir DEV-POC.md) : montre ce que le contenu affichera.
    - fichiers (Image, Vidéo, diaporamas, Canva) et dossier Drive : une image fixe pour un seul élément, carrousel 3D dès qu'il y en a plusieurs ;
@@ -16,7 +19,7 @@
             <div class="cp-stage cmp-stage" style="@Compositions.StageStyle(Values)">
                 <CompositionThumb Item="new MediaItem { Settings = Values }" Files="allFiles" Contain="true" />
                 @if (Instance != null) { <button type="button" class="cmp-pvlink" aria-label="Modifier dans l'éditeur de compositions" @onclick="OpenEditor"><span><Ico Name="edit" Size="15" /> Modifier dans l'éditeur</span></button> }
-                <QrBadge Qr="Qr" />
+                <QrBadge Qr="Qr" OnMoved="OnQrMoved" />
             </div>
             break;
 
@@ -27,11 +30,11 @@
             }
             else if (files.Count == 1)
             {
-                <div class="cp-stage @(Fit == "cover" ? "fit-cover" : "") @(Portrait ? "portrait" : "")">
+                <div class="cp-stage @(Fit == "cover" ? "fit-cover" : "") @StageShape(VideoRatio(files[0]))" style="@RatioStyle(VideoRatio(files[0]))">
                     @if (files[0].FileName != null && files[0].Status == null && (files[0].Type == "image" || Converter.CanPoster)) { <img src="/media/@files[0].FileName?w=640" alt="@files[0].Name" /> }
                     else { <MediaThumb Media="files[0]" /> }
                     @if (files[0].Type == "video") { <span class="car-play" aria-hidden="true"></span> }
-                    <QrBadge Qr="Qr" />
+                    <QrBadge Qr="Qr" OnMoved="OnQrMoved" />
                 </div>
                 <div class="cp-info"><b>@files[0].Name</b><span>@(files[0].Type == "video" ? "Vidéo" : "Image")</span></div>
             }
@@ -58,11 +61,12 @@
                 }
                 else if (Manifest.Id == "youtube" && YouTube.ExtractId(SourceValue) is { } yt)
                 {
-                    <div class="cp-stage"><img src="https://i.ytimg.com/vi/@yt/hqdefault.jpg" alt="" /><span class="car-play" aria-hidden="true"></span><QrBadge Qr="Qr" /></div>
+                    <div class="cp-stage fit-cover @StageShape(YtShown)" style="@RatioStyle(YtShown)"><img src="https://i.ytimg.com/vi/@yt/@(YtShown is < 1 ? "hqdefault" : "mqdefault").jpg" alt="" /><span class="car-play" aria-hidden="true"></span><QrBadge Qr="Qr" OnMoved="OnQrMoved" /></div>
+                    <div class="seg cp-fmt" role="group" aria-label="Format de l'aperçu"><button type="button" class="@(fmtPortrait ? "" : "on")" @onclick="SetLandscape">Paysage</button><button type="button" class="@(fmtPortrait ? "on" : "")" @onclick="SetPortrait">Portrait</button></div>
                 }
                 else if (Manifest.Id == "webpage")
                 {
-                    <div class="cp-browser"><div class="cp-url">@SourceValue</div><div class="cp-frame"><iframe src="@SourceValue" title="Aperçu de la page" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms" tabindex="-1"></iframe></div><QrBadge Qr="Qr" /></div>
+                    <div class="cp-browser"><div class="cp-url">@SourceValue</div><div class="cp-frame"><iframe src="@SourceValue" title="Aperçu de la page" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms" tabindex="-1"></iframe></div><QrBadge Qr="Qr" OnMoved="OnQrMoved" /></div>
                 }
                 else if (result.Data is { } fb && fb.TryGetProperty("posts", out var posts) && posts.ValueKind == JsonValueKind.Array)
                 {
@@ -79,7 +83,7 @@
                             }
                         </div>
                         @if (shown.Count == 0) { <div class="cp-row">Aucune publication lisible pour le moment.</div> }
-                        <QrBadge Qr="Qr" />
+                        <QrBadge Qr="Qr" OnMoved="OnQrMoved" />
                     </div>
                 }
                 else if (result.Data is { } d && d.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
@@ -90,7 +94,7 @@
                         {
                             <div class="cp-row"><span><b>@Str(it, "title")</b>@if (Str(it, "summary") is { Length: > 0 } su) { <small>@su</small> }</span></div>
                         }
-                        <QrBadge Qr="Qr" />
+                        <QrBadge Qr="Qr" OnMoved="OnQrMoved" />
                     </div>
                 }
                 else if (result.Data is { } dd && dd.TryGetProperty("events", out var evs) && evs.ValueKind == JsonValueKind.Array)
@@ -113,7 +117,7 @@
                             </div>
                         }
                         @if (list.Count == 0) { <div class="cp-row">Aucun événement à venir sur cette période.</div> }
-                        <QrBadge Qr="Qr" />
+                        <QrBadge Qr="Qr" OnMoved="OnQrMoved" />
                     </div>
                 }
             }
@@ -136,11 +140,44 @@
     [Parameter] public EventCallback<(string Kind, string Text)> OnNotice { get; set; }
     /// <summary>QR code de comptage des scans de ce contenu (réglages en cours) : dessiné sur l'image et sur chaque diapositive, comme sur l'écran.</summary>
     [Parameter] public PublishedQr? Qr { get; set; }
+    /// <summary>Le QR code se déplace directement dans l'aperçu (position en % de l'aperçu) ; sans appelant, il reste fixe.</summary>
+    [Parameter] public EventCallback<(double X, double Y)> OnQrMoved { get; set; }
     /// <summary>Format de l'écran qui jouera le contenu : portrait (9:16) ou paysage (16:9, par défaut).</summary>
     [Parameter] public bool Portrait { get; set; }
     /// <summary>Position du contenu dans la liste de lecture (full, top-left, top-right, bottom-left, bottom-right) : la Météo la montre telle qu'à l'écran.</summary>
     [Parameter] public string Place { get; set; } = "full";
     private string? lastDriveInfo;
+
+    // Format des vidéos : l'aperçu prend celui de la vidéo (portrait, carré, paysage) et non celui de l'écran.
+    // Fichiers de la médiathèque : dimensions déjà lues dans le fichier ; à défaut (webm, mov…), le navigateur les lit dans les métadonnées.
+    private readonly Dictionary<Guid, double> probed = new();
+    private readonly HashSet<Guid> probing = new();
+    private double? ytRatio;
+    /// <summary>Format de l'aperçu YouTube (landscape / portrait), purement visuel : détecté, puis modifiable pour placer le QR code au bon endroit. Partagé avec l'onglet QR code.</summary>
+    [Parameter] public string? Format { get; set; }
+    [Parameter] public EventCallback<string> FormatChanged { get; set; }
+    private double? YtShown => Format == "portrait" ? 9 / 16.0 : Format == "landscape" ? 16 / 9.0 : ytRatio;
+    private bool fmtPortrait => YtShown is < 1;
+    private Task SetFormat(string f) { Format = f; return FormatChanged.InvokeAsync(f); }
+    private Task SetLandscape() => SetFormat("landscape");
+    private Task SetPortrait() => SetFormat("portrait");   // YouTube : lu par le serveur (oEmbed, Shorts) quand la vidéo est recherchée
+    private double? VideoRatio(MediaItem f) =>
+        f.Type != "video" ? null : f.Width is > 0 && f.Height is > 0 ? f.Width.Value / (double)f.Height.Value : probed.TryGetValue(f.Id, out var r) ? r : null;
+    /// <summary>Format inconnu : celui de l'écran. Plus haut que large, ou presque carré : cadre debout (hauteur limitée).</summary>
+    private string StageShape(double? ratio) => ratio is { } r ? (r < 1.6 ? "portrait" : "") : Portrait ? "portrait" : "";
+    private static string? RatioStyle(double? ratio) => ratio is { } r ? "aspect-ratio:" + Math.Round(Math.Clamp(r, 0.3, 4), 4).ToString(CultureInfo.InvariantCulture) : null;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (files.Count != 1 || files[0].Type != "video" || files[0].FileName == null || VideoRatio(files[0]) != null || !probing.Add(files[0].Id)) return;
+        var f = files[0];
+        try
+        {
+            var d = await JS.InvokeAsync<int[]?>("linkiiVideo.size", "/media/" + f.FileName);
+            if (d is { Length: 2 } && d[0] > 0 && d[1] > 0) { probed[f.Id] = d[0] / (double)d[1]; StateHasChanged(); }
+        }
+        catch { }
+    }
 
     // Cadrage choisi (réglage « fit » de l'app) : l'aperçu le reproduit.
     private string Fit => Values.GetValueOrDefault("fit") == "cover" ? "cover" : "contain";
@@ -185,7 +222,12 @@
     {
         if (kind != "provider") return;
         loading = true; loaded = false; StateHasChanged();
-        try { result = await Apps.Preview(Manifest, Values, Instance); loaded = true; }
+        try
+        {
+            result = await Apps.Preview(Manifest, Values, Instance); loaded = true;
+            ytRatio = Manifest.Id == "youtube" && result.Ok && YouTube.ExtractId(SourceValue) is { } vid ? await YouTubeProvider.Ratio(Http, vid) : null;
+            if (Manifest.Id == "youtube" && Format == null) await SetFormat(ytRatio is < 1 ? "portrait" : "landscape");
+        }
         finally { loading = false; }
         await OnNotice.InvokeAsync((!result.Ok ? "bad" : result.Message.StartsWith("⚠") ? "warn" : "ok", result.Message));
     }

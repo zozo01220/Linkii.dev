@@ -8,12 +8,20 @@
 </div>
 @if (Mode == Dim.Own)
 {
-    <div style="margin-top:12px"><DimEditor Plan="Plan" PlanChanged="PlanChanged" Asleep="@Asleep" /></div>
+    <p class="hint" style="margin:12px 0">Partez du réglage de l'aire et changez ce qui doit différer pour cet écran.@if (Dim.Active(AreaPlan)) { <text> </text><button type="button" class="linklike" style="padding:0;font-size:13px" @onclick="FromArea">Repartir de l'aire</button> }</p>
+    <DimEditor Plan="Plan" PlanChanged="PlanChanged" Asleep="@Asleep" />
     <small class="muted">Les heures suivent le fuseau de l'aire.</small>
+}
+else if (Mode == Dim.Inherit)
+{
+    <div class="dm-inh">
+        <div class="top">@Inherited</div>
+        <DimStrip Plan="AreaPlan" />
+    </div>
 }
 else
 {
-    <p class="hint" style="margin:10px 0 0">@(Mode == Dim.Never ? "L'image est affichée telle quelle, quelle que soit l'heure." : Inherited)</p>
+    <p class="hint" style="margin:10px 0 0">L'image est affichée telle quelle, quelle que soit l'heure.</p>
 }
 
 @code {
@@ -25,16 +33,20 @@ else
     [Parameter] public string Inherited { get; set; } = "L'écran suit le réglage de son aire.";
     /// <summary>Grille de veille qui s'applique à l'écran, pour hachurer ces heures dans l'éditeur.</summary>
     [Parameter] public string? Asleep { get; set; }
+    /// <summary>Réglage de l'aire de l'écran : montré quand l'écran la suit, et point de départ d'un réglage propre.</summary>
+    [Parameter] public DimPlan? AreaPlan { get; set; }
     [Parameter] public string Name { get; set; } = "dim-mode";
     /// <summary>false : seulement « Suit l'aire » et « Personnalisé » (« aucun réglage » s'obtient en coupant l'interrupteur).</summary>
     [Parameter] public bool AllowNever { get; set; } = true;
 
     private static readonly (string, string)[] Modes = { (Dim.Never, "Aucun réglage"), (Dim.Inherit, "Suit l'aire"), (Dim.Own, "Personnalisé") };
 
+    private Task FromArea() { Plan = AreaPlan!.Clone(); return PlanChanged.InvokeAsync(Plan); }
+
     private async Task Pick(string mode)
     {
         Mode = mode;
-        if (mode == Dim.Own && !Dim.Valid(Plan)) { Plan = Dim.Suggested(); await PlanChanged.InvokeAsync(Plan); }
+        if (mode == Dim.Own && !Dim.Valid(Plan)) { Plan = Dim.Active(AreaPlan) ? AreaPlan!.Clone() : Dim.Suggested(); await PlanChanged.InvokeAsync(Plan); }
         await ModeChanged.InvokeAsync(mode);
     }
 }

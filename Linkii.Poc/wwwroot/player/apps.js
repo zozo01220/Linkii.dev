@@ -513,11 +513,11 @@
     });
   });
 
-  // Transition entre deux médias d'un diaporama : type (fondu, glissement, zoom, aucune) et vitesse.
+  // Transition entre deux médias d'un diaporama : type (fondu, glissements, volet, iris, zooms, flou, retournement, aucune) et vitesse.
   // maxMs : plafond (une image ne doit pas passer plus de temps en transition qu'affichée).
   var SPEEDS = { fast: 400, normal: 800, slow: 1500, 'very-slow': 3000 };
   function swapper(h, maxMs) {
-    var kind = /^(fade|slide|zoom|none)$/.test(h.settings.transition || '') ? h.settings.transition : 'fade';
+    var kind = /^(fade|slide|slide-up|wipe|iris|zoom|zoom-out|blur|flip|none)$/.test(h.settings.transition || '') ? h.settings.transition : 'fade';
     var ms = kind === 'none' ? 0 : Math.min(SPEEDS[h.settings.speed] || 800, maxMs || Infinity);
     h.el.className += ' tr-' + kind;
     h.el.style.setProperty('--tr', ms + 'ms');

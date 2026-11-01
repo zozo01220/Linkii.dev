@@ -13,7 +13,7 @@ namespace Linkii.Poc;
 /// </summary>
 public static class QrTracking
 {
-    public const double DefaultX = 78, DefaultY = 70, DefaultSize = 19, MinSize = 3, MaxSize = 45;
+    public const double DefaultX = 79, DefaultY = 63, DefaultSize = 19, MinSize = 3, MaxSize = 45;
     public const int LabelMax = 60, UrlMax = 2000;
 
     private const string Alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";   // sans les caractères qui se ressemblent (0/O, 1/l/I)
@@ -51,12 +51,12 @@ public static class QrTracking
 
     public static double ClampSize(double v) => Math.Clamp(double.IsFinite(v) ? v : DefaultSize, MinSize, MaxSize);
 
-    /// <summary>Position bornée pour que le QR reste entièrement dans la zone (sa hauteur dépasse sa largeur à cause du texte : marge prudente).</summary>
+    /// <summary>Position bornée. À droite : le QR reste dans la zone (sa largeur est sa taille). En bas : seulement une borne large, car sa hauteur en % dépend du format de l'écran (paysage : plus haut que large ; portrait : plus bas) ; l'aperçu la borne avec ses vraies dimensions.</summary>
     public static (double X, double Y) ClampPos(double x, double y, double size)
     {
         if (!double.IsFinite(x)) x = DefaultX;
         if (!double.IsFinite(y)) y = DefaultY;
-        return (Math.Clamp(x, 0, 100 - size), Math.Clamp(y, 0, 100 - size));
+        return (Math.Clamp(x, 0, 100 - size), Math.Clamp(y, 0, 97));   // en bas : la hauteur du QR dépend du format de l'écran (le glisser la borne exactement)
     }
 
     /// <summary>

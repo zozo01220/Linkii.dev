@@ -190,13 +190,27 @@
                     @if (dimEnabled)
                     {
                         <div class="rg-body">
-                            @if (areaCount == 1 && soleAreaId != Guid.Empty)
+                            @if (!dimSaved)
                             {
-                                <AreaDim @ref="dimRef" AreaId="soleAreaId" Embedded="true" OnEdited="Changed" />
+                                <p class="hint" style="margin:0">Enregistrez, puis réglez la luminosité de chaque aire.</p>
                             }
                             else
                             {
-                                <p class="hint" style="margin:0">Enregistrez, puis réglez la luminosité de chaque aire dans <a href="/organisation">Organisation</a>.</p>
+                                <div class="dm-ov">
+                                    @foreach (var r in dimRows)
+                                    {
+                                        var row = r;
+                                        <div class="dm-ov-r">
+                                            <div class="who"><b>@row.Name</b><small>@row.Info</small></div>
+                                            <div><DimStrip Plan="row.Plan" /></div>
+                                            <button type="button" class="btn ghost sm" @onclick="() => dimArea = row.Id">Régler</button>
+                                        </div>
+                                    }
+                                </div>
+                                @if (dimOwnScreens > 0)
+                                {
+                                    <p class="hint" style="margin:10px 0 0">@(dimOwnScreens == 1 ? "1 écran a" : dimOwnScreens + " écrans ont") un réglage propre : ouvrez l'écran concerné pour le modifier.</p>
+                                }
                             }
                         </div>
                     }
@@ -359,7 +373,20 @@
     </div>
 </div>
 
+@if (dimArea is { } daId && dimRows.FirstOrDefault(r => r.Id == daId) is { } dr)
+{
+    @* Même fenêtre d'édition que dans Organisation : un seul éditeur de luminosité *@
+    <Sheet Title="@dr.Name" Sub="@dr.Info" OnClose="() => dimArea = null">
+        <ChildContent>
+            <div class="lbl" style="margin-top:0">Luminosité et contraste <small>(écrans Android, selon l'heure)</small></div>
+            <AreaDim AreaId="daId" OnSaved="DimSaved" />
+        </ChildContent>
+        <Foot><span class="grow"></span><button type="button" class="btn" @onclick="() => dimArea = null">Fermer</button></Foot>
+    </Sheet>
+}
+
 @code {
+    private void DimSaved() => LoadDimRows();
     [SupplyParameterFromQuery(Name = "tab")] public string? TabParam { get; set; }
 
     private record NavItem(string Id, string Label, string Icon, bool Growth = false);
@@ -408,7 +435,22 @@
     private bool dirty, sub;   // sub : look « app », une rubrique ouverte (liste des rubriques masquée)
     private void Touch() => dirty = true;
     private AreaSleep? sleepRef;
-    private AreaDim? dimRef;
+    // Luminosité : vue d'ensemble des aires ; « Régler » ouvre la fenêtre de l'aire (AreaDim), le seul éditeur
+    private record DimRow(Guid Id, string Name, string Info, DimPlan? Plan);
+    private List<DimRow> dimRows = new();
+    private int dimOwnScreens;
+    private Guid? dimArea;
+    private bool dimSaved => dimEnabled == Store.Read(d => d.Tenant.DimEnabled);   // l'interrupteur vient d'être activé : à enregistrer d'abord
+    private void LoadDimRows()
+    {
+        (dimRows, dimOwnScreens) = Store.Read(d => (
+            d.Areas.Select(a =>
+            {
+                var scr = d.Screens.Count(s => s.AreaId == a.Id);
+                return new DimRow(a.Id, a.Name, $"{a.Zones.Count} zone{(a.Zones.Count > 1 ? "s" : "")} · {scr} écran{(scr > 1 ? "s" : "")}", a.Dimming?.Clone());
+            }).ToList(),
+            d.Screens.Count(s => Dim.Mode(s) == Dim.Own)));
+    }
 
     private string name = "", timezone = "", email = "";
     private int duration, reloadHour;
@@ -451,6 +493,7 @@
         adsPending = Store.Read(d => Ads.PendingCount(d.Root, d.Tenant, DateTime.UtcNow));
         soleAreaId =areaCount == 1 ? Store.Read(d => d.Areas.First().Id) : Guid.Empty;
         spec = ScreenSpec.From(t);
+        LoadDimRows();
         LoadUsage(t);
     }
 
@@ -545,7 +588,6 @@
         if (growth && alertsOn && alertMail && alertTarget == "custom" && !System.Net.Mail.MailAddress.TryCreate(target, out _)) { Toast.Error("L'adresse des alertes n'est pas valide."); return; }
         // plages de veille et profils de luminosité (composants de l'aire) : enregistrés avec le reste, sans second bouton
         if (sleepEnabled && sleepRef != null) await sleepRef.Persist();
-        if (dimEnabled && dimRef != null && !await dimRef.Persist()) return;
         var pauseImage = AppField.MediaIds(pauseValues.GetValueOrDefault("pause")) is { Count: > 0 } ids ? ids[0] : (Guid?)null;
         var mergeNow = false;
 

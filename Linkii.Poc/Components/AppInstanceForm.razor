@@ -60,13 +60,13 @@ else
             @* colonne de gauche : aperçu, puis les onglets de l'appelant (« Contenu / QR code ») sous l'aperçu *@
             <div class="ci-left" hidden="@(!(hasPreview || OtherTab))">
             @* autre onglet de l'appelant (ex. « QR code ») : sa propre colonne d'aperçu ; l'aperçu du contenu est seulement masqué, il garde son état *@
-            @if (OtherTab && OtherPreview != null)
+            @if (OtherTab && OtherPreview != null && !hasPreview)
             {
                 <section class="ci-prev" aria-label="Aperçu de l'écran">@OtherPreview</section>
             }
             @if (hasPreview)
             {
-                <section class="ci-prev" aria-label="Aperçu" hidden="@(OtherTab && OtherPreview != null)">
+                <section class="ci-prev" aria-label="Aperçu">
                     <h4 class="ci-t">Aperçu</h4>
                     @* La source (lien, fichier, dossier, calendrier…) se choisit dans l'aperçu : « + » tant que rien n'est choisi, puis bouton « Changer » sur l'aperçu. *@
                     @if (sourceOpen && sources.Count > 0)
@@ -98,7 +98,7 @@ else
                     }
                     <div class="ci-prevbody" hidden="@(sources.Count > 0 && (sourceOpen || !SourceReady))">
                         @if (sources.Count > 0 && SourceReady) { <button type="button" class="ci-chg" @onclick="OpenSource"><Ico Name="edit" Size="14" /> @ChangeLabel(sources[0])</button> }
-                        <ContentPreview @ref="previewRef" Manifest="manifest" Values="values" Instance="instance" Qr="PreviewQr" Portrait="PreviewPortrait" Place="PreviewPlace" OnNotice="OnPreviewNotice" OnEdit="OpenEditor" />
+                        <ContentPreview @ref="previewRef" Manifest="manifest" Values="values" Instance="instance" Qr="PreviewQr" OnQrMoved="PreviewQrMoved" Portrait="PreviewPortrait" Place="PreviewPlace" Format="@PreviewFormat" FormatChanged="PreviewFormatChanged" OnNotice="OnPreviewNotice" OnEdit="OpenEditor" />
                     </div>
                 </section>
             }
@@ -224,6 +224,7 @@ else
     public MediaItem? PickedMedia()
     {
         if (manifest == null) return null;
+        if (manifest.Id == "youtube" && YouTube.ExtractId(values.GetValueOrDefault("url")) != null) return new MediaItem { AppId = "youtube", Settings = values };   // pas encore enregistré : le lien saisi suffit pour l'image de fond
         var ids = manifest.Settings.Where(f => f.IsMedia && AppCatalog.IsVisible(f, values))
             .SelectMany(f => AppField.MediaIds(values.GetValueOrDefault(f.Key))).ToList();
         return ids.Count == 0 ? null : Store.Read(d => d.Media.FirstOrDefault(x => x.Id == ids[0]));
@@ -366,10 +367,14 @@ else
     [Parameter] public RenderFragment? OtherPreview { get; set; }
     /// <summary>QR code de comptage des scans, dessiné sur l'aperçu du contenu.</summary>
     [Parameter] public PublishedQr? PreviewQr { get; set; }
+    [Parameter] public EventCallback<(double X, double Y)> PreviewQrMoved { get; set; }
     /// <summary>L'aperçu reproduit un écran portrait (carrousel et image debout).</summary>
     [Parameter] public bool PreviewPortrait { get; set; }
     /// <summary>Position choisie dans la liste de lecture (full, top-left…) : l'aperçu de la Météo la reproduit.</summary>
     [Parameter] public string PreviewPlace { get; set; } = "full";
+    /// <summary>Format de l'aperçu YouTube (landscape / portrait), partagé avec l'onglet QR code.</summary>
+    [Parameter] public string? PreviewFormat { get; set; }
+    [Parameter] public EventCallback<string> PreviewFormatChanged { get; set; }
 
     // Résultat de la recherche, du test ou du dossier : une notification (toast) comme partout dans l'app, qui disparaît seule.
     private Task OnPreviewNotice((string Kind, string Text) n) { Notify(n.Kind != "bad", n.Text); return Task.CompletedTask; }

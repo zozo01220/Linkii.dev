@@ -200,7 +200,7 @@ else
     </div>;
     RenderFragment qrPreview = @<div>
         <h4 class="ci-t">Aperçu de l'écran</h4>
-        <QrPlacer Media="(newForm ?? itemForm)?.PickedMedia() ?? mMedia" Fit="@((newForm ?? itemForm)?.PreviewFit ?? "contain")" All="media" Text="@(growth && mQrOn ? QrText : null)" X="mQrX" Y="mQrY" Size="mQrSize" Label="@mQrLabel" OnMoved="QrMoved" />
+        <QrPlacer Format="@mFormat" FormatChanged="SetFormatValue" Media="(newForm ?? itemForm)?.PickedMedia() ?? mMedia" Fit="@((newForm ?? itemForm)?.PreviewFit ?? "contain")" All="media" Text="@(growth && mQrOn ? QrText : null)" X="mQrX" Y="mQrY" Size="mQrSize" Label="@mQrLabel" OnMoved="QrMoved" />
     </div>;
     RenderFragment qrPane = @<div class="ci-qr">
         <div class="ci-qr-master">
@@ -208,9 +208,15 @@ else
             <input type="checkbox" class="ios" checked="@(growth && mQrOn)" disabled="@(!growth)" aria-label="Compter les scans du QR code" @onchange="e => ToggleQr(e.Value is true)" />
         </div>
         @if (!growth) { <div class="ci-qr-locked">@Plans.LockedHint.</div> }
-        else
+        else if (mQrOn)
         {
-            <div class="qr-fields @(mQrOn ? "" : "off")" inert="@(!mQrOn)">
+            <div class="qr-fields">
+                <div class="dw-field"><label>Emplacement</label>
+                    <div class="qr-pos" role="group" aria-label="Emplacement du QR code">
+                        @foreach (var (key, label) in QrSpots) { if (key == "c") { <span aria-hidden="true"></span> continue; } <button type="button" class="qr-pos-@key" title="@label" aria-label="@label" @onclick="() => PlaceQr(key)"><i></i></button> }
+                    </div>
+                    <small>Ou glissez le QR code directement dans l'aperçu.</small>
+                </div>
                 <div class="dw-field"><label for="qr-url">Adresse de destination *</label><input id="qr-url" type="text" inputmode="url" maxlength="@QrTracking.UrlMax" placeholder="https://…" @bind="mQrUrl" @bind:event="oninput" /></div>
                 <div class="dw-field"><label for="qr-lbl">Texte sous le QR code</label><input id="qr-lbl" type="text" maxlength="@QrTracking.LabelMax" @bind="mQrLabel" @bind:event="oninput" /></div>
                 <div class="dw-field"><label for="qr-size">Taille <span class="mono">@Math.Round(mQrSize) %</span></label><input id="qr-size" type="range" min="@QrTracking.MinSize" max="@QrTracking.MaxSize" step="1" value="@Math.Round(mQrSize)" @oninput="ChangeQrSize" /></div>
@@ -239,7 +245,7 @@ else
         </div>
         <div class="modal-body">
             <AppInstanceForm @key="a.Id" AppId="@a.Id" ShowActions="false" OnSaved="item => AddApp(target, item)" OnRenamed="n => newName = n" @ref="newForm"
-                             ConfTabs="qrTabs" OtherTab="@otherOpen" OtherPane="@otherPane" OtherPreview="@otherPreview" PreviewQr="PreviewQr" PreviewPortrait="portraitScreens" PreviewPlace="mPlacement" />
+                             ConfTabs="qrTabs" OtherTab="@otherOpen" OtherPane="@otherPane" OtherPreview="@otherPreview" PreviewQr="PreviewQr" PreviewQrMoved="QrMoved" PreviewPortrait="portraitScreens" PreviewPlace="mPlacement" PreviewFormat="@mFormat" PreviewFormatChanged="SetFormatValue" />
 </div>
         <div class="modal-foot">
             <button class="btn ghost" @onclick="() => newApp = null">Annuler</button>
@@ -311,16 +317,6 @@ else
         @* réglages de ce contenu dans la liste (position, durée) : pour une app, à droite de l'aperçu (colonne de configuration), sinon sous le titre *@
         @{
             RenderFragment listSettings = @<div class="dw">
-            @if (mMedia?.Type == "app")
-            {
-                <div class="dw-field">
-                    <label>Position à l'écran</label>
-                    <select @bind="mPlacement">
-                        @foreach (var o in PlacementsFor(mMedia)) { <option value="@o.Id">@o.Label</option> }
-                    </select>
-                    <small>Pleine page : le contenu passe à son tour dans la boucle. Angle ou bandeau : il reste affiché en permanence.</small>
-                </div>
-            }
             @if (mPlacement != "full")
             {
                 <div class="dw-note">Ce contenu reste affiché en permanence pendant toute la boucle : il n'a pas de durée.</div>
@@ -351,7 +347,7 @@ else
         @if (isApp)
         {
             <div class="modal-body">
-                <AppInstanceForm @key="mMedia!.Id" AppId="@(mMedia!.AppId!)" InstanceId="mMedia!.Id" ShowActions="false" OnSaved="_ => SaveSettings()" OnRenamed="n => itemName = n" Extra="appExtra" ConfTabs="qrTabs" OtherTab="@otherOpen" OtherPane="@otherPane" OtherPreview="@otherPreview" PreviewQr="PreviewQr" PreviewPortrait="portraitScreens" PreviewPlace="mPlacement" OnOpenEditor="OpenCompositionEditor" @ref="itemForm" />
+                <AppInstanceForm @key="mMedia!.Id" AppId="@(mMedia!.AppId!)" InstanceId="mMedia!.Id" ShowActions="false" OnSaved="_ => SaveSettings()" OnRenamed="n => itemName = n" Extra="appExtra" ConfTabs="qrTabs" OtherTab="@otherOpen" OtherPane="@otherPane" OtherPreview="@otherPreview" PreviewQr="PreviewQr" PreviewQrMoved="QrMoved" PreviewPortrait="portraitScreens" PreviewPlace="mPlacement" PreviewFormat="@mFormat" PreviewFormatChanged="SetFormatValue" OnOpenEditor="OpenCompositionEditor" @ref="itemForm" />
             </div>
         }
         else if (mItem != null)
@@ -729,6 +725,7 @@ else
         // réglages du QR code pour le nouveau contenu : mêmes champs que la fenêtre d'un contenu, réinitialisés
         mItem = null; mPlaylist = null; mMedia = null; mPlacement = "full";
         mTab = "content"; mQrOn = false; mQrCode = null; mQrUrl = ""; mQrLabel = "";
+        mFormat = null;
         mQrSize = QrTracking.DefaultSize; (mQrX, mQrY) = (QrTracking.DefaultX, QrTracking.DefaultY);
     }
 
@@ -862,6 +859,8 @@ else
     private bool mQrOn;
     private string mQrUrl = "", mQrLabel = "";
     private string? mQrCode;
+    private string? mFormat;   // format de l'aperçu YouTube (visuel seulement)
+    private void SetFormatValue(string f) { mFormat = f; }
     private double mQrX = QrTracking.DefaultX, mQrY = QrTracking.DefaultY, mQrSize = QrTracking.DefaultSize;
     private bool growth;
     private Dictionary<Guid, (int Scans, int Visitors)> scanCounts = new();
@@ -895,7 +894,8 @@ else
     private void OpenSettings(Playlist pl, PlaylistItem it, MediaItem? m, string tab = "content")
     {
         mPlaylist = pl; mItem = it; mMedia = m; itemName = null;
-        mPlacement = it.Placement;
+        mFormat = null;
+        mPlacement = m?.Type == "app" && PlacementsFor(m).Any(o => o.Id == "full") ? "full" : it.Placement;   // un contenu est toujours en pleine page (sauf widgets d'angle)
         mMode = it.DurationMode == "fixed" ? "fixed" : "content";
         mSeconds = it.DurationSec;
         mTab = tab == "prog" ? "prog" : growth && tab == "qr" && it.Placement == "full" ? "qr" : "content";
@@ -944,7 +944,7 @@ else
     private string? QrText => QrTracking.ShortUrl(QrTracking.Origin(Nav.BaseUri), mQrCode ?? "XXXXXXXX");
 
     // QR dessiné sur les aperçus de la fenêtre (image, carrousel, grille) : réglages en cours, seulement si le contenu est en pleine page
-    private PublishedQr? PreviewQr => growth && mQrOn && mPlacement == "full" && !string.IsNullOrWhiteSpace(mQrUrl) ? QrTracking.Build(QrText, mQrX, mQrY, mQrSize, mQrLabel) : null;
+    private PublishedQr? PreviewQr => growth && mQrOn && mPlacement == "full" ? QrTracking.Build(QrText, mQrX, mQrY, mQrSize, mQrLabel) : null;
 
     // QR de la vignette d'une ligne : celui qui sera publié (réglages enregistrés)
     private PublishedQr? RowQr(PlaylistItem it) => growth ? QrTracking.Overlay(it, true, it.Placement) : null;
@@ -960,6 +960,18 @@ else
         if (!double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v)) return;
         mQrSize = QrTracking.ClampSize(v);
         (mQrX, mQrY) = QrTracking.ClampPos(mQrX, mQrY, mQrSize);
+    }
+
+    private static readonly (string Key, string Label)[] QrSpots =
+    {
+        ("tl", "En haut à gauche"), ("t", "En haut"), ("tr", "En haut à droite"),
+        ("l", "À gauche"), ("c", ""), ("r", "À droite"),
+        ("bl", "En bas à gauche"), ("b", "En bas"), ("br", "En bas à droite"),
+    };
+    /// <summary>Emplacement prédéfini : calculé dans le navigateur avec les vraies dimensions de l'aperçu (marge de 2 %).</summary>
+    private async Task PlaceQr(string key)
+    {
+        try { await JS.InvokeVoidAsync("linkiiQr.place", key); } catch { }
     }
 
     private void QrMoved((double X, double Y) p) => (mQrX, mQrY) = QrTracking.ClampPos(p.X, p.Y, mQrSize);
