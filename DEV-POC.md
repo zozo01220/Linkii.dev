@@ -3030,3 +3030,5 @@ Une vraie TV (lisibilité à distance, taille du texte sur 1920×1080 et portrai
 
 ### Non vérifié
 Rendu et réglage de l'appui maintenu sur un vrai téléphone et au clavier ; ordre des modèles et ergonomie de l'onglet Modèles (à l'essai par l'utilisateur). Pas encore de réglage « modèle Exercice affiche toujours un bandeau EXERCICE » (idée de la maquette, non faite).
+
+- **Correction (1er novembre, même jour)** : la barre de progression ne se remplissait pas (transition CSS non fiable) ; elle est maintenant tracée image par image par `hold-confirm.js` (vérifié dans le navigateur : 46 % à 0,7 s, remise à zéro au relâchement, déclenchement à 1,5 s). `pointerleave` ne coupe plus l'appui quand le doigt passe sur le texte du bouton.
