@@ -181,11 +181,7 @@ public static class ScreenAlerts
             var delay = TimeSpan.FromMinutes(Math.Clamp(c.AlertOfflineMinutes, 1, 1440));
             if (now - startedUtc < delay) continue;
             var screens = db.Screens.Where(s => s.ClientId == c.Id && s.Token != null && s.LastSeenUtc != null).ToList();
-            // un écran en veille ne dialogue plus (veille matérielle) : ce n'est pas une panne, ni les 5 minutes qui suivent son réveil
-            bool Sleeping(Screen s) =>
-                Sleep.State(c, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, Helpers.Wall(db.Areas, s) != null, now).Asleep
-                || Sleep.State(c, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, Helpers.Wall(db.Areas, s) != null, now.AddMinutes(-5)).Asleep;
-            var down = screens.Where(s => s.OfflineAlertUtc == null && now - s.LastSeenUtc > delay && !Sleeping(s)).ToList();
+            var down = screens.Where(s => s.OfflineAlertUtc == null && now - s.LastSeenUtc > delay && !IsSleeping(db, c, s, now)).ToList();
             var back = screens.Where(s => s.OfflineAlertUtc != null && ScreenControl.Online(s, now)).ToList();
             foreach (var s in down) s.OfflineAlertUtc = now;
             foreach (var s in back) s.OfflineAlertUtc = null;
@@ -193,10 +189,18 @@ public static class ScreenAlerts
         }
         return batches;
     }
+
+    /// <summary>Un écran en veille ne dialogue plus (veille matérielle) : ce n'est pas une panne, ni les 5 minutes qui suivent son réveil.</summary>
+    public static bool IsSleeping(Db db, Tenant c, Screen s, DateTime now)
+    {
+        var area = db.Areas.FirstOrDefault(a => a.Id == s.AreaId);
+        var inWall = Helpers.Wall(db.Areas, s) != null;
+        return Sleep.State(c, area, s, inWall, now).Asleep || Sleep.State(c, area, s, inWall, now.AddMinutes(-5)).Asleep;
+    }
 }
 
 /// <summary>Toutes les minutes : commandes sans réponse, pauses terminées, et alerte quand un écran tombe (ou revient) si l'organisation l'a activée.</summary>
-public class ScreenWatchWorker(JsonStore store, Mailer mail, AlertService alerts, NotificationCenter center, ILogger<ScreenWatchWorker> log) : BackgroundService
+public class ScreenWatchWorker(JsonStore store, Mailer mail, AlertService alerts, NotificationCenter center, IEventPublisher events, ILogger<ScreenWatchWorker> log) : BackgroundService
 {
     private readonly DateTime started = DateTime.UtcNow;
 
@@ -212,11 +216,12 @@ public class ScreenWatchWorker(JsonStore store, Mailer mail, AlertService alerts
 
     public async Task Run(DateTime now)
     {
-        var work = store.Write(db =>
+        var (work, screenEvents) = store.Write(db =>
         {
             foreach (var s in db.Screens.Where(s => s.Commands.Count > 0 || s.PausedUtc != null)) ScreenControl.Expire(s, now);
-            return ScreenAlerts.Plan(db, now, started);
+            return (ScreenAlerts.Plan(db, now, started), ScreenEvents.Plan(db, now, started));
         });
+        foreach (var e in screenEvents) events.Publish(e.ClientId, e.Type, e.Data);   // webhooks (API) : indépendants des réglages d'alertes
         foreach (var b in work)
         {
             var c = b.Client;

@@ -759,6 +759,8 @@ public class Screen : IClientOwned, IAreaOwned, IOwned
     public bool ForcedSleep { get; set; }                       // mise en veille manuelle (menu ⋮ « Mettre en veille ») : l'écran dort jusqu'à « Réveiller », quelles que soient ses plages
     public DateTime? WakeUntilUtc { get; set; }               // réveil manuel : l'écran reste éveillé jusque-là malgré ses plages de veille (voir Sleep)
     public DateTime? OfflineAlertUtc { get; set; }              // alerte « écran hors ligne » envoyée à cette date (une seule par panne)
+    /// <summary>Événement « screen.offline » envoyé aux webhooks à cette date (un seul par panne) ; indépendant de <see cref="OfflineAlertUtc"/> (voir <see cref="ScreenEvents"/>).</summary>
+    public DateTime? ApiOfflineUtc { get; set; }
 
     /// <summary>Planning de diffusion propre à l'écran (<see cref="Slots"/>, prioritaires sur ceux de sa zone) ; sinon il suit celui de sa zone. Voir <see cref="Planning"/>.</summary>
     public bool OwnPlanning { get; set; }

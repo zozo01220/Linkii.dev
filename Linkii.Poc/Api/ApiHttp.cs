@@ -319,6 +319,7 @@ public static class ApiRegistration
     {
         s.AddSingleton(TimeProvider.System);
         s.AddSingleton<IApiModule, CoreApiModule>();
+        s.AddSingleton<IApiModule, ScreensApiModule>();   // supervision : GET /screens, screen.offline, screen.online
         s.AddSingleton<ApiRegistry>();
         s.AddSingleton<ApiKeyService>();
         s.AddSingleton<ApiUsage>();

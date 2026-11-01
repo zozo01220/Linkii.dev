@@ -802,3 +802,187 @@ public class ApiHttpTests(Platform p)
             Assert.Contains(endpoints, e => e.Metadata.GetMetadata<ApiRoute>() == r && e.RoutePattern.RawText == "/api/v1" + r.Path);
     }
 }
+
+/// <summary>Supervision (§153) : événements screen.offline / screen.online et lecture des écrans par l'API.</summary>
+public class ScreenEventsTests : IDisposable
+{
+    private readonly ApiFixture f = new(new IApiModule[] { new ScreensApiModule() });
+    private readonly DateTime now = new(2026, 11, 1, 10, 0, 0, DateTimeKind.Utc);
+    private readonly DateTime started = new(2026, 11, 1, 6, 0, 0, DateTimeKind.Utc);
+    public void Dispose() => f.Dispose();
+
+    private Screen Paired(string name = "Hall d'entrée", DateTime? seen = null)
+    {
+        var s = new Screen { ClientId = f.Tenant.Id, Name = name, Token = Guid.NewGuid().ToString("N"), LastSeenUtc = seen ?? now.AddSeconds(-5) };
+        f.Store.Write(db => db.Screens.Add(s));
+        return s;
+    }
+
+    private List<ScreenEvent> Plan(DateTime at) => f.Store.Write(db => ScreenEvents.Plan(db, at, started));
+
+    [Fact]
+    public void An_offline_screen_is_signalled_once_then_again_when_it_is_back()
+    {
+        f.Hook(events: "screen.*");
+        f.Store.Write(_ => f.Tenant.AlertOfflineMinutes = 5);
+        var s = Paired(seen: now.AddMinutes(-10));
+
+        var down = Assert.Single(Plan(now));
+        Assert.Equal(ScreenEvents.Offline, down.Type);
+        Assert.Empty(Plan(now.AddMinutes(1)));   // une seule fois par panne
+
+        f.Store.Write(_ => s.LastSeenUtc = now.AddMinutes(4).AddSeconds(-5));
+        var up = Assert.Single(Plan(now.AddMinutes(4)));
+        Assert.Equal(ScreenEvents.Online, up.Type);
+        Assert.Contains("downtimeMinutes", JsonSerializer.Serialize(up.Data));
+        Assert.Empty(Plan(now.AddMinutes(5)));
+    }
+
+    [Fact]
+    public void A_short_loss_of_signal_is_not_a_failure()
+    {
+        f.Hook(events: "screen.offline");
+        f.Store.Write(_ => f.Tenant.AlertOfflineMinutes = 15);
+        Paired(seen: now.AddMinutes(-10));
+        Assert.Empty(Plan(now));
+        Assert.Single(Plan(now.AddMinutes(6)));
+    }
+
+    [Fact]
+    public void Nothing_is_sent_during_the_grace_period_after_a_server_start()
+    {
+        f.Hook(events: "screen.*");
+        f.Store.Write(_ => f.Tenant.AlertOfflineMinutes = 15);
+        Paired(seen: now.AddHours(-3));
+        Assert.Empty(f.Store.Write(db => ScreenEvents.Plan(db, started.AddMinutes(5), started)));
+    }
+
+    [Fact]
+    public void Events_follow_the_webhooks_not_the_alert_settings()
+    {
+        f.Store.Write(_ => { f.Tenant.AlertsOn = false; f.Tenant.AlertMail = false; f.Tenant.AlertPush = false; f.Tenant.AlertOfflineMinutes = 5; });
+        var s = Paired(seen: now.AddMinutes(-10));
+        Assert.Empty(Plan(now));   // personne n'écoute : rien, et pas de repère posé
+        Assert.Null(s.ApiOfflineUtc);
+        f.Hook(events: "screen.*");
+        Assert.Single(Plan(now));  // alertes coupées, mais un webhook actif : l'événement part
+    }
+
+    [Fact]
+    public void Essential_organisations_and_cut_spaces_send_nothing()
+    {
+        f.Hook(events: "screen.*");
+        f.Store.Write(_ => f.Tenant.AlertOfflineMinutes = 5);
+        Paired(seen: now.AddMinutes(-10));
+        f.Store.Write(_ => f.Tenant.Plan = Plans.Base);
+        Assert.Empty(Plan(now));
+        f.Store.Write(_ => { f.Tenant.Plan = Plans.Growth; f.Tenant.Suspended = true; });
+        Assert.Empty(Plan(now));
+    }
+
+    [Fact]
+    public void A_sleeping_screen_is_not_a_failure_and_unpaired_screens_are_ignored()
+    {
+        f.Hook(events: "screen.*");
+        f.Store.Write(_ => f.Tenant.AlertOfflineMinutes = 5);
+        var asleep = Paired("Veille", now.AddHours(-2));
+        f.Store.Write(_ => { f.Tenant.SleepEnabled = true; asleep.ForcedSleep = true; });
+        f.Store.Write(db => db.Screens.Add(new Screen { ClientId = f.Tenant.Id, Name = "Jamais appairé", LastSeenUtc = now.AddHours(-2) }));
+        Assert.Empty(Plan(now));
+    }
+
+    [Fact]
+    public async Task The_event_reaches_a_subscribed_webhook_signed_end_to_end()
+    {
+        var (_, secret) = f.Hook(events: "screen.offline");
+        f.Store.Write(_ => f.Tenant.AlertOfflineMinutes = 5);
+        Paired("Salle d'attente", now.AddMinutes(-10));
+        foreach (var e in Plan(now)) f.Bus.Publish(e.ClientId, e.Type, e.Data);
+        while (f.Bus.Reader.TryRead(out var ev)) f.Dispatcher.FanOut(ev);
+        await f.Dispatcher.TickAndWait();
+        var call = Assert.Single(f.Receiver.Calls);
+        Assert.Equal("screen.offline", call.Headers["Linkivi-Event"]);
+        Assert.True(WebhookSignature.Verify(call.Headers["Linkivi-Signature"], call.Body, secret, f.Time.Now, TimeSpan.FromMinutes(5)));
+        using var doc = JsonDocument.Parse(call.Body);
+        Assert.Equal("Salle d'attente", doc.RootElement.GetProperty("data").GetProperty("screen").GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public void The_module_adds_its_scope_events_routes_and_joins_the_read_only_template()
+    {
+        Assert.Contains(f.Registry.Scopes, s => s.Id == "screens:read");
+        Assert.Contains(f.Registry.Events, e => e.Id == "screen.offline");
+        Assert.Contains("screens:read", f.Registry.Templates.First(t => t.Name == "Lecture seule").Scopes);
+        Assert.True(f.Registry.IsValidSubscription("screen.*"));
+    }
+}
+
+[Collection("platform")]
+public class ScreensApiHttpTests(Platform p)
+{
+    private (Tenant T, string Key, Screen S) Org(string[]? scopes = null)
+    {
+        var store = p.Services.GetRequiredService<JsonStore>();
+        var t = new Tenant { Name = "Org " + Guid.NewGuid().ToString("N")[..6], Plan = Plans.Growth, ResellerId = p.R1.Id };
+        var on = new Screen { ClientId = t.Id, Name = "Accueil", Token = Guid.NewGuid().ToString("N"), LastSeenUtc = DateTime.UtcNow.AddSeconds(-5), Params = new() { new() { Name = "Étage", Value = "2" } } };
+        var off = new Screen { ClientId = t.Id, Name = "Réfectoire", Token = Guid.NewGuid().ToString("N"), LastSeenUtc = DateTime.UtcNow.AddHours(-3) };
+        store.Write(db => { db.Clients.Add(t); db.Screens.Add(on); db.Screens.Add(off); db.Screens.Add(new Screen { ClientId = t.Id, Name = "Non appairé" }); });
+        var c = p.Services.GetRequiredService<ApiKeyService>().Create(t.Id, null, "Supervision", "Lecture seule", scopes ?? new[] { "screens:read" }, null, null);
+        Assert.Null(c.Error);
+        return (t, c.Secret!, on);
+    }
+
+    private static async Task<(HttpStatusCode Status, JsonElement Json)> Get(HttpClient c, string url, string key)
+    {
+        var r = new HttpRequestMessage(HttpMethod.Get, url);
+        r.Headers.Add("Authorization", "Bearer " + key);
+        var res = await c.SendAsync(r);
+        return (res.StatusCode, JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement.Clone());
+    }
+
+    [Fact]
+    public async Task The_list_shows_paired_screens_with_their_state_and_parameters()
+    {
+        var (_, key, on) = Org();
+        var r = await Get(p.Client(), "/api/v1/screens", key);
+        Assert.Equal(HttpStatusCode.OK, r.Status);
+        var data = r.Json.GetProperty("data").EnumerateArray().ToList();
+        Assert.Equal(new[] { "Accueil", "Réfectoire" }, data.Select(d => d.GetProperty("name").GetString()));   // le non appairé n'y est pas
+        Assert.True(data[0].GetProperty("online").GetBoolean());   // « updating » tant que la dernière publication n'est pas affichée
+        Assert.Equal("offline", data[1].GetProperty("status").GetString());
+        Assert.Equal("Étage", data[0].GetProperty("params")[0].GetProperty("name").GetString());
+        Assert.Equal(on.Id, data[0].GetProperty("id").GetGuid());
+        Assert.DoesNotContain(on.Token!, r.Json.GetRawText());
+    }
+
+    [Fact]
+    public async Task The_list_filters_by_status_and_pages_with_a_cursor()
+    {
+        var (_, key, _) = Org();
+        var c = p.Client();
+        var off = await Get(c, "/api/v1/screens?status=offline", key);
+        Assert.Equal("Réfectoire", Assert.Single(off.Json.GetProperty("data").EnumerateArray()).GetProperty("name").GetString());
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, (await Get(c, "/api/v1/screens?status=nimporte", key)).Status);
+
+        var first = await Get(c, "/api/v1/screens?limit=1", key);
+        Assert.Equal("Accueil", Assert.Single(first.Json.GetProperty("data").EnumerateArray()).GetProperty("name").GetString());
+        var next = first.Json.GetProperty("next").GetString();
+        var second = await Get(c, "/api/v1/screens?limit=1&cursor=" + next, key);
+        Assert.Equal("Réfectoire", Assert.Single(second.Json.GetProperty("data").EnumerateArray()).GetProperty("name").GetString());
+        Assert.False(second.Json.TryGetProperty("next", out _));
+    }
+
+    [Fact]
+    public async Task An_organisation_only_sees_its_own_screens_and_needs_the_screens_scope()
+    {
+        var (_, ka, a) = Org(); var (_, kb, b) = Org();
+        var c = p.Client();
+        Assert.Equal(HttpStatusCode.OK, (await Get(c, $"/api/v1/screens/{a.Id}", ka)).Status);
+        Assert.Equal(HttpStatusCode.NotFound, (await Get(c, $"/api/v1/screens/{a.Id}", kb)).Status);
+        Assert.Equal(HttpStatusCode.NotFound, (await Get(c, $"/api/v1/screens/{b.Id}", ka)).Status);
+        var (_, noScope, _) = Org(new[] { "account:read" });
+        var denied = await Get(c, "/api/v1/screens", noScope);
+        Assert.Equal(HttpStatusCode.Forbidden, denied.Status);
+        Assert.Equal("scope_missing", denied.Json.GetProperty("code").GetString());
+    }
+}
