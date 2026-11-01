@@ -3060,3 +3060,14 @@ Réglages › Approbation, fiche membre (interrupteurs exclusifs, résumé), ent
 
 ### Non vérifié
 Approbation dans le navigateur avec un vrai contenu (comparaison avant/après, vignettes) : la liste d'essai était vide, la logique est couverte par les tests. Écran « Mettre à jour la demande », rappel et péremption en vrai (testés par code), e-mails réels (serveur d'envoi non configuré en local), mobile (feuille « Plus »), mur d'écrans. Pas de lien « Ouvrir dans le simulateur » dans le tiroir (aperçu par vignettes à la place). Pas d'événement webhook « approbation » (restent les événements `screen.published` existants, émis à l'approbation).
+
+## 163. Médiathèque : menu ⋮ sur la carte, icônes dans tous les menus ⋮ (1er novembre 2026) : compilé et vérifié dans le navigateur
+
+- **Carte média** (vue « Cartes ») : menu ⋮ en haut à droite de la légende (la zone blanche sous l'aperçu), `CardMenu` dans `Media.razor`. Entrées : **Voir** (aperçu), **Partager…** (propriétaire, organisation de plus d'une personne), **Ranger…** (dossiers, médias modifiables), **Supprimer** (droit de suppression ; grisé pour une présentation utilisée). Le menu complet (renommer, télécharger) reste celui de la vue Liste. Pas de menu sur les présentations (aperçu seul), les imports en cours ni les échecs.
+- **Icônes** : contrôle de tous les menus ⋮ de l'application (entrées `role="menuitem"` et blocs `kebab-menu`). Il manquait des icônes dans quatre menus : **Zones** et **Aires/Zones** (« Synchroniser / Couper la synchronisation » → `refresh`), **Membres** (Modifier → `edit`, Renvoyer l'invitation → `mail-send`, Désactiver / Réactiver → `power`), **Widgets** (Activer / Désactiver → `power`). Les autres menus en avaient déjà (le menu « Connecter un compte » porte les logos des fournisseurs). Les menus de **choix** (filtres, zone, sous-dossiers : `menuitemradio` / `menuitemcheckbox`) ne sont pas des menus d'actions et gardent leur coche.
+- Style : `.lx-mc .cap` / `.mc-k` dans `app.css` ; la carte passe au-dessus de ses voisines quand son menu est ouvert.
+
+### Vérifié
+Cartes avec ⋮ et menu (Voir, Partager…, Ranger…, Supprimer, tous avec icône) ; « Voir » ouvre l'aperçu ; menu des membres avec icônes.
+### Non vérifié
+Menu de la carte sur mobile et dans l'app Android ; Partager et Ranger depuis la carte (même code que le menu de la liste) ; menus Zones, Aires et Widgets à l'écran (icônes ajoutées, compilés).

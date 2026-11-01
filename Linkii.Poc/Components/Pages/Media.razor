@@ -423,8 +423,12 @@ else
                             @ShareBadge(item, "ph-share")
                         }
                     </div>
-                    <div class="nm" title="@item.Name">@if (FoldersShown && item.FolderId is { } fid && rights.GetValueOrDefault(fid) == FolderRight.Read) { <Ico Name="lock" Size="12" /> }@item.Name</div>
-                    <div class="mt">@(ShowPath ? PathOf(item) : Details(item))</div>
+                    @* légende (zone blanche du bas) : nom et détails, menu ⋮ en haut à droite *@
+                    <div class="cap">
+                        <div class="nm" title="@item.Name">@if (FoldersShown && item.FolderId is { } fid && rights.GetValueOrDefault(fid) == FolderRight.Read) { <Ico Name="lock" Size="12" /> }@item.Name</div>
+                        <div class="mt">@(ShowPath ? PathOf(item) : Details(item))</div>
+                        @if (!failed && item.Status == null) { @CardMenu(item) }
+                    </div>
                 </div>
             }
         </div>
@@ -968,6 +972,26 @@ else
     private string FolderTitle(FolderRow r) => (r.Folder.OwnerId == Store.UserId ? "Votre dossier" : $"Dossier de {r.OwnerName}") + (r.Right == FolderRight.Read ? " · lecture seule" : r.Shared ? " · partagé" : " · privé");
 
     private static string Plural(int n, string one, string many) => $"{n} {(n > 1 ? many : one)}";
+
+    /// <summary>Menu ⋮ de la carte (vue en cartes) : Voir, Partager, Ranger, Supprimer. Le menu complet (renommer, télécharger…) reste celui de la liste.</summary>
+    private RenderFragment CardMenu(MediaItem item) => __builder =>
+    {
+        var open = menuFor == item.Id;
+        <div class="kebab mc-k" @onclick:stopPropagation="true">
+            <button type="button" class="kebab-btn" aria-label="Actions pour @item.Name" aria-haspopup="menu" aria-expanded="@(open ? "true" : "false")"
+                    @onclick="() => menuFor = open ? null : item.Id"><Ico Name="dots-v" Size="18" /></button>
+            @if (open)
+            {
+                <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                <div class="kebab-menu" role="menu">
+                    <button type="button" role="menuitem" @onclick="() => { menuFor = null; Open(item); }"><Ico Name="eye" Size="16" /> Voir</button>
+                    @if (Shareable(item)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingKind = ShareKind.Media; sharingMedia = new() { (item.Id, item.Name) }; }"><Ico Name="share" Size="16" /> Partager…</button> }
+                    @if (FoldersShown && Selectable(item)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (item.Id, item.Name) }; }"><Ico Name="folder" Size="16" /> Ranger…</button> }
+                    @if (CanDel(item)) { <button type="button" role="menuitem" class="danger" disabled="@(Pres.Is(item) && !unused.Contains(item.Id))" title="@(Pres.Is(item) && !unused.Contains(item.Id) ? "Utilisée : retirez-la d'abord des contenus" : null)" @onclick="() => { menuFor = null; confirmDelete = new() { item.Id }; }"><Ico Name="trash" Size="16" /> Supprimer</button> }
+                </div>
+            }
+        </div>
+    };
 
     private RenderFragment Menu(MediaItem item) => __builder =>
     {
