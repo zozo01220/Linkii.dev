@@ -400,6 +400,8 @@ else
                          role="button" tabindex="0" aria-label="Ouvrir la présentation @item.Name" @onclick="e => ClickCard(item, e)" @onkeydown='e => { if (e.Key == "Enter") Open(item); }'
                          draggable="@(CanDrag(item) ? "true" : "false")" @ondragstart="() => StartDrag(item)" @ondragend="EndDrag">
                         <div class="th">@PresFace(item)</div>
+                        @* menu ⋮ sur l'aperçu (hors de .th, qui rogne) : une carte empilée n'a pas de légende *@
+                        @CardMenu(item, true)
                     </div>
                     continue;
                 }
@@ -484,6 +486,7 @@ else
     @if (Pres.Is(om))
     {
         <PresentationDrawer Item="om" Path="@PathOf(om)" CanEdit="Own(om)" OnClose="() => openId = null" OnRename="() => OpenRename(om)"
+                            OnShare="@(Shareable(om) ? EventCallback.Factory.Create(this, () => { sharingKind = ShareKind.Media; sharingMedia = new() { (om.Id, om.Name) }; }) : default)"
                             OnFolder="@(FoldersShown ? EventCallback.Factory.Create(this, () => folderMove = new() { (om.Id, om.Name) }) : default)"
                             OnDelete="() => confirmDelete = new() { om.Id }" OnChanged="Reload" />
     }
@@ -974,10 +977,10 @@ else
     private static string Plural(int n, string one, string many) => $"{n} {(n > 1 ? many : one)}";
 
     /// <summary>Menu ⋮ de la carte (vue en cartes) : Voir, Partager, Ranger, Supprimer. Le menu complet (renommer, télécharger…) reste celui de la liste.</summary>
-    private RenderFragment CardMenu(MediaItem item) => __builder =>
+    private RenderFragment CardMenu(MediaItem item, bool overlay = false) => __builder =>
     {
         var open = menuFor == item.Id;
-        <div class="kebab mc-k" @onclick:stopPropagation="true">
+        <div class="kebab mc-k @(overlay ? "ov" : "")" @onclick:stopPropagation="true">
             <button type="button" class="kebab-btn" aria-label="Actions pour @item.Name" aria-haspopup="menu" aria-expanded="@(open ? "true" : "false")"
                     @onclick="() => menuFor = open ? null : item.Id"><Ico Name="dots-v" Size="18" /></button>
             @if (open)
