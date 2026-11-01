@@ -33,13 +33,16 @@ public class CoreApiModule : IApiModule
 
     public static readonly ApiRoute Me = new("GET", "/me", AccountRead, RateClass.Read, "Informations sur la clé et l'organisation");
     public static readonly ApiRoute WebhookList = new("GET", "/webhooks", WebhooksManage, RateClass.Read, "Lister les adresses de webhook");
-    public static readonly ApiRoute WebhookCreate = new("POST", "/webhooks", WebhooksManage, RateClass.Write, "Ajouter une adresse de webhook (le secret n'est rendu qu'une fois)");
+    public static readonly ApiRoute WebhookCreate = new("POST", "/webhooks", WebhooksManage, RateClass.Write, "Ajouter une adresse de webhook (le secret n'est rendu qu'une fois)",
+        Body: "{ \"name\": \"Supervision Teams\", \"url\": \"https://hooks.exemple.ch/linkivi\", \"events\": [\"screen.offline\", \"screen.online\"] }");
     public static readonly ApiRoute WebhookGet = new("GET", "/webhooks/{id}", WebhooksManage, RateClass.Read, "Lire une adresse de webhook");
-    public static readonly ApiRoute WebhookUpdate = new("PATCH", "/webhooks/{id}", WebhooksManage, RateClass.Write, "Modifier une adresse (nom, adresse, événements, actif)");
+    public static readonly ApiRoute WebhookUpdate = new("PATCH", "/webhooks/{id}", WebhooksManage, RateClass.Write, "Modifier une adresse (nom, adresse, événements, actif)",
+        Body: "{ \"name\": \"Nouveau nom\", \"events\": [\"screen.*\"], \"active\": true }");
     public static readonly ApiRoute WebhookDelete = new("DELETE", "/webhooks/{id}", WebhooksManage, RateClass.Write, "Supprimer une adresse de webhook");
     public static readonly ApiRoute WebhookRotate = new("POST", "/webhooks/{id}/rotate-secret", WebhooksManage, RateClass.Write, "Renouveler le secret (l'ancien reste signé 24 h)");
     public static readonly ApiRoute WebhookTest = new("POST", "/webhooks/{id}/test", WebhooksManage, RateClass.Write, "Envoyer un événement « ping » d'essai");
-    public static readonly ApiRoute WebhookDeliveries = new("GET", "/webhooks/{id}/deliveries", WebhooksManage, RateClass.Read, "Journal des livraisons d'une adresse (pagination par curseur)");
+    public static readonly ApiRoute WebhookDeliveries = new("GET", "/webhooks/{id}/deliveries", WebhooksManage, RateClass.Read, "Journal des livraisons d'une adresse (pagination par curseur)",
+        Query: "limit:integer:1 à 100 (50 par défaut); cursor:string:valeur « next » de la page précédente; status:string:« problems » pour les échecs et attentes seulement");
 
     public IEnumerable<ApiRoute> Routes { get; } = new[] { Me, WebhookList, WebhookCreate, WebhookGet, WebhookUpdate, WebhookDelete, WebhookRotate, WebhookTest, WebhookDeliveries };
 
@@ -135,20 +138,42 @@ public static class ApiDocs
         foreach (var r in reg.Routes)
         {
             if (paths[r.Path] is not JsonObject item) paths[r.Path] = item = new JsonObject();
+            var parameters = new JsonArray();
+            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(r.Path, @"\{(\w+)\}"))
+                parameters.Add(new JsonObject { ["name"] = m.Groups[1].Value, ["in"] = "path", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string", ["format"] = "uuid" } });
+            foreach (var q in (r.Query ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var p = q.Split(':', 3, StringSplitOptions.TrimEntries);
+                var schema = p[1] == "integer" ? new JsonObject { ["type"] = "integer" } : p[1] == "uuid" ? new JsonObject { ["type"] = "string", ["format"] = "uuid" } : new JsonObject { ["type"] = "string" };
+                parameters.Add(new JsonObject { ["name"] = p[0], ["in"] = "query", ["required"] = false, ["description"] = p.Length > 2 ? p[2] : "", ["schema"] = schema });
+            }
+            var problem = new JsonObject { ["content"] = new JsonObject { ["application/problem+json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/Problem" } } } };
+            JsonObject Resp(string text) => new JsonObject { ["description"] = text, ["content"] = problem["content"]!.DeepClone() };
             var op = new JsonObject
             {
                 ["summary"] = r.Summary,
+                ["tags"] = new JsonArray(reg.Scope(r.Scope)?.Group ?? "Autres"),
+                ["parameters"] = parameters,
                 ["security"] = new JsonArray(new JsonObject { ["bearerAuth"] = new JsonArray() }),
                 ["x-linkivi-scope"] = r.Scope,
                 ["x-linkivi-rate-class"] = r.Class,
                 ["responses"] = new JsonObject
                 {
                     ["200"] = new JsonObject { ["description"] = "Succès" },
-                    ["401"] = new JsonObject { ["description"] = "Clé absente, inconnue, révoquée ou expirée" },
-                    ["403"] = new JsonObject { ["description"] = "Accès manquant, plan insuffisant ou espace suspendu" },
-                    ["429"] = new JsonObject { ["description"] = "Trop de requêtes (en-tête Retry-After)" },
+                    ["401"] = Resp("Clé absente, inconnue, révoquée ou expirée"),
+                    ["403"] = Resp("Accès manquant, plan insuffisant ou espace suspendu"),
+                    ["404"] = Resp("Ressource introuvable (ou d'une autre organisation)"),
+                    ["422"] = Resp("Requête invalide, limite atteinte ou Idempotency-Key réutilisée avec un autre corps"),
+                    ["429"] = Resp("Trop de requêtes (en-tête Retry-After)"),
                 }
             };
+            if (r.Body != null)
+                op["requestBody"] = new JsonObject
+                {
+                    ["required"] = true,
+                    ["content"] = new JsonObject { [r.BodyType] = new JsonObject { ["schema"] = new JsonObject { ["type"] = r.BodyType == "application/json" ? "object" : "string" }, ["example"] = r.BodyType == "application/json" ? JsonNode.Parse(r.Body) : r.Body } }
+                };
+            if (r.Method == "POST") op["parameters"]!.AsArray().Add(new JsonObject { ["name"] = "Idempotency-Key", ["in"] = "header", ["required"] = false, ["description"] = "Rejeu sans effet pendant 24 h (100 caractères au plus)", ["schema"] = new JsonObject { ["type"] = "string" } });
             item[r.Method.ToLowerInvariant()] = op;
         }
         return new JsonObject
@@ -156,12 +181,46 @@ public static class ApiDocs
             ["openapi"] = "3.0.3",
             ["info"] = new JsonObject { ["title"] = "API Linkivi", ["version"] = ApiRegistry.Version },
             ["servers"] = new JsonArray(new JsonObject { ["url"] = baseUrl + "/api/v1" }),
-            ["components"] = new JsonObject { ["securitySchemes"] = new JsonObject { ["bearerAuth"] = new JsonObject { ["type"] = "http", ["scheme"] = "bearer" } } },
+            ["components"] = new JsonObject
+            {
+                ["securitySchemes"] = new JsonObject { ["bearerAuth"] = new JsonObject { ["type"] = "http", ["scheme"] = "bearer", ["description"] = "Clé d'API « lkv_… » créée dans Contenus › API et webhooks" } },
+                ["schemas"] = new JsonObject
+                {
+                    ["Problem"] = new JsonObject
+                    {
+                        ["type"] = "object",
+                        ["properties"] = new JsonObject
+                        {
+                            ["code"] = new JsonObject { ["type"] = "string", ["description"] = "Code stable, lisible par un programme" }, ["status"] = new JsonObject { ["type"] = "integer" },
+                            ["title"] = new JsonObject { ["type"] = "string" }, ["detail"] = new JsonObject { ["type"] = "string" }, ["requestId"] = new JsonObject { ["type"] = "string" },
+                        }
+                    }
+                }
+            },
             ["paths"] = paths,
         };
     }
 
     private static string E(string s) => WebUtility.HtmlEncode(s);
+
+    public const string SwaggerVersion = "5.17.14";
+
+    /// <summary>
+    /// Page « Essayer » : Swagger UI (chargé depuis jsDelivr, version figée) sur le descriptif OpenAPI de ce serveur. On y colle sa clé (Authorize) puis on envoie
+    /// de vraies requêtes à l'adresse du revendeur. À remplacer par des fichiers servis par Linkivi si l'on veut s'affranchir du CDN.
+    /// </summary>
+    public static string SwaggerHtml(Reseller? reseller)
+    {
+        var color = reseller?.BrandColor is { Length: 7 } c && c[0] == '#' && c.Skip(1).All(Uri.IsHexDigit) ? c : "#0B1F3A";
+        var name = E(reseller?.DisplayName ?? "Linkivi");
+        var cdn = $"https://cdn.jsdelivr.net/npm/swagger-ui-dist@{SwaggerVersion}";
+        return $"<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Essayer l'API {name}</title>"
+            + $"<link rel=\"stylesheet\" href=\"{cdn}/swagger-ui.css\"><style>body{{margin:0;font-family:'IBM Plex Sans','Segoe UI',system-ui,sans-serif}}"
+            + $"header{{background:#fff;border-bottom:1px solid #DDE3EA;padding:14px 24px;display:flex;gap:12px;align-items:center}}header b{{font-size:20px;color:{color}}}header span{{color:#5A6B80}}header a{{margin-left:auto;color:#3B82C4}}"
+            + $".swagger-ui .topbar{{display:none}}.swagger-ui .btn.authorize{{color:{color};border-color:{color}}}.swagger-ui .btn.authorize svg{{fill:{color}}}</style></head><body>"
+            + $"<header><b>{name}</b><span>Essayer l'API · version {ApiRegistry.Version}</span><a href=\"/docs/api\">Documentation</a></header><div id=\"ui\"></div>"
+            + $"<script src=\"{cdn}/swagger-ui-bundle.js\"></script><script>window.ui=SwaggerUIBundle({{url:'/api/v1/openapi.json',dom_id:'#ui',persistAuthorization:true,docExpansion:'list',tryItOutEnabled:true}});</script></body></html>";
+    }
 
     public static string Html(ApiRegistry reg, Reseller? reseller, string baseUrl)
     {
@@ -177,7 +236,7 @@ public static class ApiDocs
           .Append("pre{background:#0B1F3A;color:#DCE6F2;border-radius:4px;padding:12px 14px;overflow:auto;font-size:12.5px}table{border-collapse:collapse;width:100%;font-size:14px}")
           .Append("td,th{text-align:left;border-bottom:1px solid #EDF1F5;padding:7px 10px;vertical-align:top}th{color:var(--muted);font-weight:500;background:#FAFBFC}")
           .Append("</style></head><body>")
-          .Append($"<header><b>{name}</b><span>Documentation de l'API · version {ApiRegistry.Version}</span></header><main>");
+          .Append($"<header><b>{name}</b><span>Documentation de l'API · version {ApiRegistry.Version}</span><a href=\"/docs/api/try\" style=\"margin-left:auto;color:#3B82C4\">Essayer en ligne</a></header><main>");
 
         sb.Append("<section id=\"demarrer\"><h2>Premier appel</h2><p>Un administrateur crée une clé dans <b>Contenus › API et webhooks</b> (plan Pro, mode Expert). Elle n'est affichée qu'une seule fois. ")
           .Append("Envoyez-la dans l'en-tête <code>Authorization</code> ; <code>/me</code> répond avec l'organisation et les accès de la clé.</p>")

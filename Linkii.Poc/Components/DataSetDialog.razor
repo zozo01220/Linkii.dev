@@ -1,6 +1,7 @@
 @inject TenantStore Store
 @inject DataSetService Data
 @inject Toaster Toast
+@inject NavigationManager Nav
 
 @* Jeu de données (§139, maquette scènes 3 et 5) : ce qu'on lit (chemin de l'API, chemin des lignes, feuille Excel), l'aperçu de la table avec le type
    de chaque colonne (détecté, modifiable), et les réglages : actualisation, lignes masquées, nombre de lignes, comportement en panne.
@@ -8,7 +9,7 @@
 <div class="modal-backdrop" @onclick="Close"></div>
 <div class="modal app-modal dsx-dlg dsx-wide" role="dialog" aria-modal="true" aria-labelledby="dsd-title">
     <div class="modal-head">
-        <span class="dsx-ico @Connection.Kind">@(Connection.Kind == DataKinds.Api ? "{ }" : Connection.Kind == DataKinds.Db ? "SQL" : "CSV")</span>
+        <span class="dsx-ico @Connection.Kind">@(Connection.Kind == DataKinds.Api ? "{ }" : Connection.Kind == DataKinds.Db ? "SQL" : Connection.Kind == DataKinds.Push ? "→" : "CSV")</span>
         <div class="grow" style="min-width:0">
             <input id="dsd-title" class="dsx-title" @bind="D.Name" maxlength="80" placeholder="Nom du jeu de données" aria-label="Nom du jeu de données" />
             <small>Jeu de données · @Connection.Name</small>
@@ -28,8 +29,21 @@
         {
             <div class="dsx-ed">
                 <div class="dsx-q">
-                    <h4>Ce que je lis</h4>
-                    @if (Connection.Kind == DataKinds.Api)
+                    <h4>@(Connection.Kind == DataKinds.Push ? "Ce que je reçois" : "Ce que je lis")</h4>
+                    @if (Connection.Kind == DataKinds.Push)
+                    {
+                        <p class="dsx-muted">Votre système envoie ses lignes à cette adresse avec une clé d'API (accès « Envoi de données », créée dans <a href="/apiwebhooks">API et webhooks</a>). Les colonnes et leurs types se déduisent du premier envoi.</p>
+                        @if (IsNew) { <p class="dsx-muted">Enregistrez le jeu pour afficher son adresse d'envoi.</p> }
+                        else
+                        {
+                            <div class="dw-field"><label>Adresse d'envoi</label><pre class="dsx-sql">PUT  @Nav.BaseUri.TrimEnd('/')/api/v1/datasets/@D.Id/rows   (remplace toutes les lignes)
+POST @Nav.BaseUri.TrimEnd('/')/api/v1/datasets/@D.Id/rows   (ajoute ; ?key=colonne met à jour)</pre></div>
+                            <div class="dw-field"><label>Exemple</label><pre class="dsx-sql">curl -X PUT @Nav.BaseUri.TrimEnd('/')/api/v1/datasets/@D.Id/rows \
+  -H "Authorization: Bearer lkv_votre_clé" -H "Content-Type: application/json" \
+  -d '[{"salle":"A1","occupee":true},{"salle":"A2","occupee":false}]'</pre></div>
+                        }
+                    }
+                    else if (Connection.Kind == DataKinds.Api)
                     {
                         <div class="dw-field"><label for="dsd-path">Chemin</label><input id="dsd-path" type="text" class="mono" @bind="D.Path" spellcheck="false" placeholder="/salles?etage=2" /><small>Ajouté à <span class="mono">@Connection.BaseUrl</span>.</small></div>
                         <div class="dw-field"><label for="dsd-rows">Où sont les lignes (JSON)</label><input id="dsd-rows" type="text" class="mono" @bind="D.RowsPath" spellcheck="false" placeholder="détecté (ex. data.items)" /><small>Vide : le premier tableau trouvé dans la réponse.</small></div>
@@ -116,7 +130,11 @@
 
                 <div class="dsx-opts">
                     <div class="dsx-og"><h4>Actualisation</h4>
-                        @if (Connection is { Kind: DataKinds.File, FileMode: "upload" })
+                        @if (Connection.Kind == DataKinds.Push)
+                        {
+                            <p class="dsx-muted">À chaque envoi de votre système. Les écrans relisent la copie chaque minute.</p>
+                        }
+                        else if (Connection is { Kind: DataKinds.File, FileMode: "upload" })
                         {
                             <p class="dsx-muted">À chaque nouvel import du fichier (Modifier la connexion › Remplacer).</p>
                         }
@@ -244,7 +262,7 @@
         used = Store.Read(d => DataSourceOps.UsedBy(d, D.Id).Select(m => (m.Id, m.Name)).ToList());
         sqlMode = D.Sql.Length > 0;
         if (!IsNew && Data.Table(clientId, D.Id) is { } t) { table = t; fromCopy = true; }
-        else if (Connection.Kind != DataKinds.Db) await Read();
+        else if (Connection.Kind is not (DataKinds.Db or DataKinds.Push)) await Read();
         if (Connection.Kind == DataKinds.Db) await LoadTables();
     }
 

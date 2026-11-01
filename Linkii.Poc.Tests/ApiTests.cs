@@ -986,3 +986,283 @@ public class ScreensApiHttpTests(Platform p)
         Assert.Equal("scope_missing", denied.Json.GetProperty("code").GetString());
     }
 }
+
+public sealed class RecordingEvents : IEventPublisher
+{
+    public readonly List<(Guid Client, string Type, string Json)> Items = new();
+    public void Publish(Guid clientId, string type, object? data = null) { lock (Items) Items.Add((clientId, type, JsonSerializer.Serialize(data))); }
+}
+
+/// <summary>Événements de publication (screen.published, screen.applied) et de panne de données (data.failed, data.recovered).</summary>
+public class DataAndPublishEventsTests : IDisposable
+{
+    private readonly ApiFixture f = new(new IApiModule[] { new ScreensApiModule(), new DataApiModule() });
+    public void Dispose() => f.Dispose();
+
+    [Fact]
+    public void The_modules_declare_their_events_and_scopes()
+    {
+        foreach (var e in new[] { "screen.published", "screen.applied", "data.failed", "data.recovered" }) Assert.True(f.Registry.IsKnownEvent(e), e);
+        Assert.Contains("data:write", f.Registry.Templates.First(t => t.Name == "Envoi de données").Scopes);
+        Assert.Contains("data:read", f.Registry.Templates.First(t => t.Name == "Lecture seule").Scopes);
+    }
+
+    private (DataSetService Svc, RecordingEvents Rec, DataSet Ds) Failing()
+    {
+        var rec = new RecordingEvents();
+        var svc = new DataSetService(f.Store, new SafeHttp(), new SecretBox(new EphemeralDataProtectionProvider()), new RelayBroker(f.Store), rec);
+        var conn = new DataConnection { Kind = DataKinds.File, FileMode = "upload", FileName = "", Name = "Fichier" };   // aucun fichier : la lecture échoue
+        var ds = new DataSet { ConnectionId = conn.Id, Name = "Salles" };
+        f.Store.Write(_ => { f.Tenant.DataConnections.Add(conn); f.Tenant.DataSets.Add(ds); });
+        return (svc, rec, ds);
+    }
+
+    [Fact]
+    public async Task A_failing_source_is_signalled_once_not_at_every_reading()
+    {
+        var (svc, rec, ds) = Failing();
+        await svc.Refresh(f.Tenant.Id, ds.Id);
+        await svc.Refresh(f.Tenant.Id, ds.Id);
+        await svc.Refresh(f.Tenant.Id, ds.Id);
+        var failed = Assert.Single(rec.Items);
+        Assert.Equal("data.failed", failed.Type);
+        Assert.Contains("Salles", failed.Json);
+        svc.Forget(f.Tenant.Id, ds.Id);
+    }
+
+    [Fact]
+    public void Direct_send_datasets_are_never_read_and_never_due()
+    {
+        var (svc, _, _) = Failing();
+        var conn = new DataConnection { Kind = DataKinds.Push, Name = "Envoi" };
+        Assert.False(svc.Due(f.Tenant.Id, conn, new DataSet(), DateTime.UtcNow));
+        Assert.Null(svc.Refresh(f.Tenant.Id, Guid.NewGuid()).Result);
+        Assert.Null(DataSourceOps.CheckConnection(conn));
+    }
+
+    [Fact]
+    public void Pushed_rows_replace_append_and_upsert_by_key()
+    {
+        var rec = new RecordingEvents();
+        var svc = new DataSetService(f.Store, new SafeHttp(), new SecretBox(new EphemeralDataProtectionProvider()), new RelayBroker(f.Store), rec);
+        var conn = new DataConnection { Kind = DataKinds.Push, Name = "Envoi direct" };
+        var ds = new DataSet { ConnectionId = conn.Id, Name = "Occupation" };
+        f.Store.Write(_ => { f.Tenant.DataConnections.Add(conn); f.Tenant.DataSets.Add(ds); });
+        var cid = f.Tenant.Id;
+        static RawTable Raw(params string[][] rows) => new(new() { "Salle", "Occupée", "Personnes" }, rows.Select(r => r.Select(x => (string?)x).ToList()).ToList());
+
+        var first = svc.Push(cid, ds.Id, Raw(new[] { "A1", "oui", "3" }, new[] { "A2", "non", "0" }), DataSetService.PushMode.Replace);
+        Assert.True(first.Ok, first.Error);
+        Assert.Equal(2, first.Rows);
+        var t = svc.Table(cid, ds.Id)!;
+        Assert.Equal(new[] { "salle", "occupee", "personnes" }, t.Columns.Select(c => c.Key));
+        Assert.Equal("number", t.Columns[2].Type);
+        Assert.Equal("bool", t.Columns[1].Type);
+
+        var add = svc.Push(cid, ds.Id, Raw(new[] { "A3", "non", "1" }), DataSetService.PushMode.Append);
+        Assert.Equal((3, 1, 0), (add.Rows, add.Added, add.Updated));
+
+        var up = svc.Push(cid, ds.Id, new RawTable(new() { "Salle", "Personnes" }, new() { new() { "A1", "9" }, new() { "A4", "2" } }), DataSetService.PushMode.Upsert, "Salle");
+        Assert.True(up.Ok, up.Error);
+        Assert.Equal((4, 1, 1), (up.Rows, up.Added, up.Updated));
+        t = svc.Table(cid, ds.Id)!;
+        var a1 = t.Rows.First(r => r[0] == "A1");
+        Assert.Equal("9", a1[2]);
+        Assert.Equal("true", a1[1]);   // la colonne absente de l'envoi garde sa valeur
+
+        Assert.Contains("Colonne clé inconnue", svc.Push(cid, ds.Id, Raw(new[] { "A5", "non", "1" }), DataSetService.PushMode.Upsert, "inconnue").Error);
+        Assert.Contains("absente", svc.Push(cid, ds.Id, new RawTable(new() { "Salle" }, new() { new() { "B1" } }), DataSetService.PushMode.Replace).Error);
+        Assert.Equal(4, svc.Table(cid, ds.Id)!.Rows.Count);   // un envoi refusé ne change rien
+
+        Assert.Equal(1, svc.RemoveRows(cid, ds.Id, "Salle", "A2").Removed);
+        Assert.Equal(3, svc.RemoveRows(cid, ds.Id, null, null).Removed);
+        Assert.Empty(svc.Table(cid, ds.Id)!.Rows);
+        Assert.Contains("Envoi par l'API", svc.History(cid, ds.Id)[0].Message);
+        svc.Forget(cid, ds.Id);
+    }
+
+    [Fact]
+    public void The_row_limit_is_never_exceeded_silently()
+    {
+        var svc = new DataSetService(f.Store, new SafeHttp(), new SecretBox(new EphemeralDataProtectionProvider()), new RelayBroker(f.Store));
+        var conn = new DataConnection { Kind = DataKinds.Push, Name = "Envoi" };
+        var ds = new DataSet { ConnectionId = conn.Id, Name = "Petit", MaxRows = 3 };
+        f.Store.Write(_ => { f.Tenant.DataConnections.Add(conn); f.Tenant.DataSets.Add(ds); });
+        RawTable Rows(int n) => new(new() { "n" }, Enumerable.Range(1, n).Select(i => new List<string?> { i.ToString() }).ToList());
+        Assert.True(svc.Push(f.Tenant.Id, ds.Id, Rows(2), DataSetService.PushMode.Replace).Ok);
+        Assert.Contains("Limite de 3 lignes", svc.Push(f.Tenant.Id, ds.Id, Rows(2), DataSetService.PushMode.Append).Error);
+        svc.Forget(f.Tenant.Id, ds.Id);
+    }
+
+    [Fact]
+    public async Task Publishing_a_screen_emits_screen_published_through_the_notifier()
+    {
+        // même contrat que l'événement émis par Notifier.PublishScreen : charge utile avec l'écran et la version
+        var s = new Screen { ClientId = f.Tenant.Id, Name = "Hall", Token = "t" };
+        f.Store.Write(db => db.Screens.Add(s));
+        f.Hook(events: "screen.*");
+        f.Bus.Publish(f.Tenant.Id, ScreenEvents.Published, new { screen = f.Store.Read(db => ScreenEvents.Brief(db, s)), version = 3, publishedAt = DateTime.UtcNow });
+        while (f.Bus.Reader.TryRead(out var ev)) Assert.Equal(1, f.Dispatcher.FanOut(ev));
+        await f.Dispatcher.TickAndWait();
+        Assert.Contains("\"version\":3", Assert.Single(f.Receiver.Calls).Body);
+    }
+}
+
+[Collection("platform")]
+public class DataApiHttpTests(Platform p)
+{
+    private (Tenant T, string Key) Org(string template = "Envoi de données", string[]? scopes = null)
+    {
+        var store = p.Services.GetRequiredService<JsonStore>();
+        var t = new Tenant { Name = "Org " + Guid.NewGuid().ToString("N")[..6], Plan = Plans.Growth, ResellerId = p.R1.Id };
+        store.Write(db => db.Clients.Add(t));
+        var c = p.Services.GetRequiredService<ApiKeyService>().Create(t.Id, null, "ERP", template, scopes ?? new[] { "data:read", "data:write" }, null, null);
+        Assert.Null(c.Error);
+        return (t, c.Secret!);
+    }
+
+    private static async Task<(HttpStatusCode Status, JsonElement Json)> Call(HttpClient c, HttpMethod m, string url, string key, string? body = null, string type = "application/json")
+    {
+        var r = new HttpRequestMessage(m, url);
+        r.Headers.Add("Authorization", "Bearer " + key);
+        if (body != null) r.Content = new StringContent(body, System.Text.Encoding.UTF8, type);
+        var res = await c.SendAsync(r);
+        var text = await res.Content.ReadAsStringAsync();
+        return (res.StatusCode, text.Length > 0 && text[0] == '{' ? JsonDocument.Parse(text).RootElement.Clone() : default);
+    }
+
+    private static async Task<string> Dataset(HttpClient c, string key, string name = "Occupation")
+    {
+        var r = await Call(c, HttpMethod.Post, "/api/v1/datasets", key, JsonSerializer.Serialize(new { name, columns = new object[] { new { name = "Salle" }, new { name = "Étage", type = "number" } } }));
+        Assert.Equal(HttpStatusCode.Created, r.Status);
+        return r.Json.GetProperty("id").GetString()!;
+    }
+
+    [Fact]
+    public async Task A_direct_send_dataset_is_created_filled_read_and_emptied_through_the_api()
+    {
+        var (_, key) = Org();
+        var c = p.Client();
+        var created = await Call(c, HttpMethod.Post, "/api/v1/datasets", key, "{\"name\":\"Occupation\",\"columns\":[{\"name\":\"Salle\"},{\"name\":\"Étage\",\"type\":\"number\"}]}");
+        Assert.Equal(HttpStatusCode.Created, created.Status);
+        Assert.Equal("push", created.Json.GetProperty("source").GetString());
+        Assert.True(created.Json.GetProperty("writable").GetBoolean());
+        Assert.Equal(new[] { "salle", "etage" }, created.Json.GetProperty("columns").EnumerateArray().Select(x => x.GetProperty("key").GetString()));
+        var id = created.Json.GetProperty("id").GetString();
+
+        var put = await Call(c, HttpMethod.Put, $"/api/v1/datasets/{id}/rows", key, "{\"rows\":[{\"Salle\":\"A1\",\"Étage\":1},{\"Salle\":\"A2\",\"Étage\":2}]}");
+        Assert.Equal(HttpStatusCode.OK, put.Status);
+        Assert.Equal(2, put.Json.GetProperty("rows").GetInt32());
+
+        var rows = await Call(c, HttpMethod.Get, $"/api/v1/datasets/{id}/rows", key);
+        var first = rows.Json.GetProperty("data")[0];
+        Assert.Equal("A1", first.GetProperty("salle").GetString());
+        Assert.Equal(JsonValueKind.Number, first.GetProperty("etage").ValueKind);   // typé, pas en texte
+        Assert.Equal(2, rows.Json.GetProperty("total").GetInt32());
+
+        var csv = await Call(c, HttpMethod.Put, $"/api/v1/datasets/{id}/rows", key, "Salle;Étage\nB1;3\nB2;4\nB3;5", "text/csv");
+        Assert.Equal(3, csv.Json.GetProperty("rows").GetInt32());
+
+        var up = await Call(c, HttpMethod.Post, $"/api/v1/datasets/{id}/rows?key=Salle", key, "[{\"Salle\":\"B1\",\"Étage\":9},{\"Salle\":\"C1\",\"Étage\":1}]");
+        Assert.Equal((1, 1), (up.Json.GetProperty("added").GetInt32(), up.Json.GetProperty("updated").GetInt32()));
+
+        var del = await Call(c, HttpMethod.Delete, $"/api/v1/datasets/{id}/rows?key=Salle&value=B2", key);
+        Assert.Equal(1, del.Json.GetProperty("removed").GetInt32());
+        var clear = await Call(c, HttpMethod.Delete, $"/api/v1/datasets/{id}/rows", key);
+        Assert.Equal(3, clear.Json.GetProperty("removed").GetInt32());
+        Assert.Equal(HttpStatusCode.NoContent, (await Call(c, HttpMethod.Delete, $"/api/v1/datasets/{id}", key)).Status);
+        Assert.Equal(HttpStatusCode.NotFound, (await Call(c, HttpMethod.Get, $"/api/v1/datasets/{id}", key)).Status);
+    }
+
+    [Fact]
+    public async Task Bad_bodies_names_and_columns_are_refused_with_a_clear_error()
+    {
+        var (_, key) = Org();
+        var c = p.Client();
+        var id = await Dataset(c, key);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, (await Call(c, HttpMethod.Put, $"/api/v1/datasets/{id}/rows", key, "", "application/json")).Status);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, (await Call(c, HttpMethod.Put, $"/api/v1/datasets/{id}/rows", key, "<html>pas des données</html>", "text/html")).Status);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, (await Call(c, HttpMethod.Post, "/api/v1/datasets", key, "{\"name\":\"Occupation\"}")).Status);   // nom déjà pris
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, (await Call(c, HttpMethod.Post, "/api/v1/datasets", key, "{\"name\":\"X\",\"columns\":[{\"name\":\"a\",\"type\":\"inconnu\"}]}")).Status);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, (await Call(c, HttpMethod.Delete, $"/api/v1/datasets/{id}/rows?key=Salle", key)).Status);   // key sans value
+    }
+
+    [Fact]
+    public async Task Datasets_are_isolated_and_writes_need_the_write_scope()
+    {
+        var (_, ka) = Org(); var (_, kb) = Org();
+        var c = p.Client();
+        var id = await Dataset(c, ka);
+        Assert.Equal(HttpStatusCode.NotFound, (await Call(c, HttpMethod.Get, $"/api/v1/datasets/{id}", kb)).Status);
+        Assert.Equal(HttpStatusCode.NotFound, (await Call(c, HttpMethod.Put, $"/api/v1/datasets/{id}/rows", kb, "[{\"a\":1}]")).Status);
+        Assert.Equal(HttpStatusCode.NotFound, (await Call(c, HttpMethod.Delete, $"/api/v1/datasets/{id}", kb)).Status);
+        Assert.Empty((await Call(c, HttpMethod.Get, "/api/v1/datasets", kb)).Json.GetProperty("data").EnumerateArray());
+
+        var (_, readOnly) = Org("Lecture seule", new[] { "data:read" });
+        var denied = await Call(c, HttpMethod.Put, "/api/v1/datasets/" + Guid.NewGuid() + "/rows", readOnly, "[{\"a\":1}]");
+        Assert.Equal(HttpStatusCode.Forbidden, denied.Status);
+        Assert.Equal("scope_missing", denied.Json.GetProperty("code").GetString());
+        Assert.Equal(HttpStatusCode.OK, (await Call(c, HttpMethod.Get, "/api/v1/datasets", readOnly)).Status);
+    }
+
+    [Fact]
+    public async Task Datasets_read_from_a_source_are_listed_but_cannot_be_written_and_a_used_one_cannot_be_deleted()
+    {
+        var (t, key) = Org();
+        var c = p.Client();
+        var store = p.Services.GetRequiredService<JsonStore>();
+        var api = new DataConnection { Kind = DataKinds.Api, Name = "API", BaseUrl = "https://exemple.ch" };
+        var ext = new DataSet { ConnectionId = api.Id, Name = "Lu depuis une API" };
+        store.Write(_ => { t.DataConnections.Add(api); t.DataSets.Add(ext); });
+        var list = await Call(c, HttpMethod.Get, "/api/v1/datasets", key);
+        var item = Assert.Single(list.Json.GetProperty("data").EnumerateArray());
+        Assert.False(item.GetProperty("writable").GetBoolean());
+        Assert.Equal("api", item.GetProperty("source").GetString());
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, (await Call(c, HttpMethod.Put, $"/api/v1/datasets/{ext.Id}/rows", key, "[{\"a\":1}]")).Status);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, (await Call(c, HttpMethod.Delete, $"/api/v1/datasets/{ext.Id}", key)).Status);
+
+        var id = await Dataset(c, key, "Utilisé");
+        store.Write(db => db.Media.Add(new MediaItem { ClientId = t.Id, Name = "Compo", Type = "app", AppId = Compositions.AppId, Settings = new() { ["doc"] = "{\"ds\":\"" + Guid.Parse(id).ToString("N") + "\"}" } }));
+        var used = await Call(c, HttpMethod.Delete, $"/api/v1/datasets/{id}", key);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, used.Status);
+        Assert.Contains("utilisé", used.Json.GetProperty("detail").GetString());
+    }
+}
+
+/// <summary>Descriptif OpenAPI enrichi et page « Essayer » (Swagger UI).</summary>
+[Collection("platform")]
+public class SwaggerTests(Platform p)
+{
+    [Fact]
+    public async Task The_openapi_describes_parameters_bodies_tags_and_errors()
+    {
+        using var doc = JsonDocument.Parse(await p.Client().GetStringAsync("/api/v1/openapi.json"));
+        var paths = doc.RootElement.GetProperty("paths");
+        var list = paths.GetProperty("/screens").GetProperty("get");
+        Assert.Contains(list.GetProperty("parameters").EnumerateArray(), x => x.GetProperty("name").GetString() == "status" && x.GetProperty("in").GetString() == "query");
+        Assert.Equal("Écrans", list.GetProperty("tags")[0].GetString());
+
+        var one = paths.GetProperty("/screens/{id}").GetProperty("get");
+        Assert.Contains(one.GetProperty("parameters").EnumerateArray(), x => x.GetProperty("name").GetString() == "id" && x.GetProperty("in").GetString() == "path" && x.GetProperty("required").GetBoolean());
+
+        var create = paths.GetProperty("/datasets").GetProperty("post");
+        Assert.Equal("Occupation des salles", create.GetProperty("requestBody").GetProperty("content").GetProperty("application/json").GetProperty("example").GetProperty("name").GetString());
+        Assert.Contains(create.GetProperty("parameters").EnumerateArray(), x => x.GetProperty("name").GetString() == "Idempotency-Key" && x.GetProperty("in").GetString() == "header");
+        Assert.True(create.GetProperty("responses").TryGetProperty("422", out _));
+        Assert.True(doc.RootElement.GetProperty("components").GetProperty("schemas").TryGetProperty("Problem", out _));
+        Assert.Equal("bearer", doc.RootElement.GetProperty("components").GetProperty("securitySchemes").GetProperty("bearerAuth").GetProperty("scheme").GetString());
+    }
+
+    [Fact]
+    public async Task The_try_page_is_public_branded_and_points_at_this_servers_openapi()
+    {
+        var html = await p.Client().GetStringAsync("/docs/api/try");
+        Assert.Contains("SwaggerUIBundle", html);
+        Assert.Contains("/api/v1/openapi.json", html);
+        Assert.Contains("swagger-ui-dist@" + ApiDocs.SwaggerVersion, html);
+        var acme = await p.Client("affichage.acme.ch").GetStringAsync("/docs/api/try");
+        Assert.Contains("Acme Affichage", acme);
+        Assert.Contains("#ff0000", acme);
+        Assert.Contains("/docs/api/try", await p.Client().GetStringAsync("/docs/api"));   // lien depuis la documentation
+    }
+}

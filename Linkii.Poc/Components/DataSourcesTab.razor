@@ -65,7 +65,7 @@ else
         else
         {
             <button type="button" class="chip @(filter == "" ? "on" : "")" aria-pressed="@(filter == "" ? "true" : "false")" @onclick='() => filter = ""'>Toutes <small>@connections.Count</small></button>
-            @foreach (var k in new[] { DataKinds.Api, DataKinds.Db, DataKinds.File })
+            @foreach (var k in new[] { DataKinds.Api, DataKinds.Db, DataKinds.File, DataKinds.Push })
             {
                 var kind = k;
                 var n = connections.Count(c => c.Kind == kind);
@@ -216,7 +216,7 @@ else
                 var n = usage.GetValueOrDefault(ds.Id);
                 <div class="dsx-dsrow-w">
                 <button type="button" class="dsx-dsrow" @onclick="() => OpenDataSet(ds, dc)">
-                    <span><b>@ds.Name</b><small>@(dc is { Kind: DataKinds.File, FileMode: "upload" } ? "à chaque import du fichier" : DataKinds.RefreshLabel(ds.RefreshMin).ToLowerInvariant()) · @(Data.Table(clientId, ds.Id)?.Rows.Count.ToString() ?? "—") lignes</small></span>
+                    <span><b>@ds.Name</b><small>@(dc is { Kind: DataKinds.Push } ? "reçu par l'API" : dc is { Kind: DataKinds.File, FileMode: "upload" } ? "à chaque import du fichier" : DataKinds.RefreshLabel(ds.RefreshMin).ToLowerInvariant()) · @(Data.Table(clientId, ds.Id)?.Rows.Count.ToString() ?? "—") lignes</small></span>
                     <span class="r">@(n > 0 ? $"{n} composition{(n > 1 ? "s" : "")}" : "Inutilisé")<small>@Ago(Data.Last(clientId, ds.Id))</small></span>
                 </button>
                 @Kebab("s" + ds.Id, ds.Name, () => OpenDataSet(ds, dc), () => StartRename("set", ds.Id, ds.Name), () => AskDelete("set", ds.Id))
@@ -491,8 +491,8 @@ else
     }
 
     private bool Match(string text) => search.Trim().Length == 0 || text.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase);
-    private static string KindLabel(string kind) => kind == DataKinds.Api ? "API web" : kind == DataKinds.Db ? "Base de données" : "Fichier";
-    private static string IcoText(DataConnection c) => c.Kind == DataKinds.Api ? "{ }" : c.Kind == DataKinds.Db ? "SQL" : FileExt(c);
+    private static string KindLabel(string kind) => kind == DataKinds.Api ? "API web" : kind == DataKinds.Db ? "Base de données" : kind == DataKinds.Push ? "Envoi direct" : "Fichier";
+    private static string IcoText(DataConnection c) => c.Kind == DataKinds.Api ? "{ }" : c.Kind == DataKinds.Db ? "SQL" : c.Kind == DataKinds.Push ? "→" : FileExt(c);
 
     private static string StateText(DataConnection c, string level) =>
         c.LastError.Length > 0 ? "Erreur" : level == "bad" ? "Lecture en échec" : level == "warn" ? "Copie conservée" : "Connectée";
@@ -511,6 +511,7 @@ else
     {
         DataKinds.Api => "API web · " + (c.Auth switch { "key" => "clé API", "bearer" => "jeton", "basic" => "utilisateur et mot de passe", "login" => "identifiants puis jeton", _ => "sans authentification" }),
         DataKinds.Db => DataSql.Engines.FirstOrDefault(e => e.Id == c.Engine).Label + (c.Database.Length > 0 ? " · " + c.Database : ""),
+        DataKinds.Push => "Envoi direct · votre système envoie ses lignes par l'API",
         _ => c.FileMode == "url" ? "Fichier · lu à son adresse" : "Fichier importé · " + c.FileLabel
     }) + (withRelay && c.Via == "relay" ? " · par " + (relays.FirstOrDefault(r => r.Id == c.RelayId)?.Name ?? "un relais supprimé") : "");
 

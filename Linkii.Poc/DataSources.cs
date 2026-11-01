@@ -24,6 +24,8 @@ public static class DataKinds
     public const string File = "file";
     /// <summary>Base de données (lot 3) : SQL Server, PostgreSQL, MySQL, en direct ou par le relais.</summary>
     public const string Db = "db";
+    /// <summary>Envoi direct (API, §153) : le système du client pousse ses lignes (<c>PUT/POST /api/v1/datasets/{id}/rows</c>) ; Linkii ne lit rien.</summary>
+    public const string Push = "push";
 
     public const int MaxConnections = 20, MaxDataSets = 25;
     public const int MaxRows = 5000, MaxColumns = 60, MaxCell = 2000, MaxBytes = 2_000_000;
@@ -586,7 +588,9 @@ public class DataSetService
     private readonly ConcurrentDictionary<(Guid, Guid), SemaphoreSlim> running = new();
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    public DataSetService(JsonStore store, SafeHttp http, SecretBox box, RelayBroker relays) { this.store = store; this.http = http; this.box = box; this.relays = relays; }
+    private readonly IEventPublisher? events;
+
+    public DataSetService(JsonStore store, SafeHttp http, SecretBox box, RelayBroker relays, IEventPublisher? events = null) { this.store = store; this.http = http; this.box = box; this.relays = relays; this.events = events; }
 
     public static string Dir(Guid clientId) => Path.Combine(Root, clientId.ToString("N"));
     public static string FilesDir(Guid clientId) => Path.Combine(Dir(clientId), "files");
@@ -625,6 +629,7 @@ public class DataSetService
     /// <summary>Jeu à lire maintenant : jamais lu, ou dernière lecture plus ancienne que sa fréquence (fichier importé : seulement à l'import).</summary>
     public bool Due(Guid clientId, DataConnection c, DataSet ds, DateTime now)
     {
+        if (c.Kind == DataKinds.Push) return false;   // envoi direct : rien à lire, la table arrive par l'API
         var last = Last(clientId, ds.Id);
         if (last == null) return true;
         if (c.Kind == DataKinds.File && c.FileMode == "upload") return c.FileUtc is { } f && f > last.Utc;
@@ -636,6 +641,7 @@ public class DataSetService
     /// <summary>Lit la source d'une connexion pour ce jeu (table brute), en 10 secondes au plus (20 par le relais : aller-retour en plus).</summary>
     public async Task<RawTable> ReadRaw(Guid clientId, DataConnection c, DataSet ds, CancellationToken ct)
     {
+        if (c.Kind == DataKinds.Push) throw new InvalidOperationException("Ce jeu reçoit ses données par l'API : il n'y a rien à lire.");
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var limit = (c.Via == "relay" ? DataKinds.Timeout * 2 : DataKinds.Timeout) * (c.Kind == DataKinds.Api && c.Auth == "login" ? 2 : 1);   // la connexion par identifiants est un appel de plus
         cts.CancelAfter(limit);
@@ -865,6 +871,7 @@ public class DataSetService
     /// <summary>Teste une connexion : rend un message lisible, ou lève une exception avec la cause.</summary>
     public async Task<string> Test(Guid clientId, DataConnection c, CancellationToken ct = default)
     {
+        if (c.Kind == DataKinds.Push) return "Envoi direct : rien à tester ici. Les lignes arrivent par l'API (voir le jeu de données).";
         if (c.Kind == DataKinds.Db)
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -901,7 +908,7 @@ public class DataSetService
     {
         var found = store.Read(db => db.Clients.FirstOrDefault(t => t.Id == clientId) is { } t && t.DataSets.FirstOrDefault(d => d.Id == dataSetId) is { } ds
             && t.DataConnections.FirstOrDefault(c => c.Id == ds.ConnectionId) is { } c ? (c.Copy(), ds.Copy()) : ((DataConnection, DataSet)?)null);
-        if (found is not { } f) return null;
+        if (found is not { } f || f.Item1.Kind == DataKinds.Push) return null;   // envoi direct : rien à relire
         var gate = running.GetOrAdd((clientId, dataSetId), _ => new SemaphoreSlim(1, 1));
         if (!await gate.WaitAsync(0, ct)) return null;
         try
@@ -929,8 +936,123 @@ public class DataSetService
             {
                 entry = new DataReadLog(now, "bad", (e is HttpRequestException ? "Source injoignable : " : "") + e.Message + (Table(clientId, dataSetId) != null ? " Copie précédente conservée." : ""), 0, sw.ElapsedMilliseconds, false);
             }
+            // webhooks (API) : un « data.failed » au passage en échec (pas à chaque relecture), un « data.recovered » au retour
+            var before = Last(clientId, dataSetId);
+            var wasBad = before is { Level: "bad" or "warn" };
+            if (entry.Level != "ok" && !wasBad)
+                events?.Publish(clientId, "data.failed", new { dataset = new { id = dataSetId, name = f.Item2.Name }, level = entry.Level, message = entry.Message, copyKept = Table(clientId, dataSetId) != null, readAt = now });
+            else if (entry.Level == "ok" && wasBad)
+                events?.Publish(clientId, "data.recovered", new { dataset = new { id = dataSetId, name = f.Item2.Name }, rows = entry.Rows, readAt = now });
             Append(clientId, dataSetId, entry);
             return entry;
+        }
+        finally { gate.Release(); }
+    }
+
+    // ---------- envoi direct (API) ----------
+
+    public enum PushMode { Replace, Append, Upsert }
+    public record PushResult(bool Ok, string? Error, int Rows, int Added, int Updated, bool Changed);
+
+    private static PushResult Fail(string e) => new(false, e, 0, 0, 0, false);
+
+    /// <summary>
+    /// Reçoit des lignes par l'API pour un jeu « Envoi direct » : remplace la table (<see cref="PushMode.Replace"/>), ajoute des lignes ou, avec une colonne clé,
+    /// met à jour les lignes qui ont la même clé (<see cref="PushMode.Upsert"/>). Types et colonnes suivent le jeu (détectés au premier envoi) ; une colonne
+    /// inconnue est ajoutée en mode ajout, une colonne qui manque fait échouer un remplacement. La limite de lignes n'est jamais dépassée en silence.
+    /// </summary>
+    public PushResult Push(Guid clientId, Guid dataSetId, RawTable raw, PushMode mode, string? keyColumn = null)
+    {
+        var found = store.Read(db => db.Clients.FirstOrDefault(t => t.Id == clientId) is { } t && t.DataSets.FirstOrDefault(d => d.Id == dataSetId) is { } ds
+            && t.DataConnections.FirstOrDefault(c => c.Id == ds.ConnectionId) is { } c ? (c.Kind, ds.Copy()) : ((string, DataSet)?)null);
+        if (found is not { } f) return Fail("Jeu de données introuvable.");
+        if (f.Item1 != DataKinds.Push) return Fail("Ce jeu de données est lu depuis sa source : seuls les jeux « Envoi direct » reçoivent des lignes.");
+        var gate = running.GetOrAdd((clientId, dataSetId), _ => new SemaphoreSlim(1, 1));
+        gate.Wait();
+        try
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var now = DateTime.UtcNow;
+            DataTable table; List<string> missing;
+            try { (table, missing) = DataTables.Build(raw, f.Item2, now); }
+            catch (InvalidOperationException e) { return Fail(e.Message); }
+            var old = Table(clientId, dataSetId);
+            int added = table.Rows.Count, updated = 0;
+            DataTable result = table;
+            if (mode == PushMode.Replace)
+            {
+                if (missing.Count > 0 && old != null) return Fail($"Colonne{(missing.Count > 1 ? "s" : "")} absente{(missing.Count > 1 ? "s" : "")} : {string.Join(", ", missing)}.");
+            }
+            else if (old != null)
+            {
+                var key = keyColumn == null ? null : DataTables.Slug(keyColumn);
+                var merged = Combine(old, table, mode == PushMode.Upsert ? key : null, now, out added, out updated, out var error);
+                if (merged == null) return Fail(error!);
+                result = merged;
+            }
+            else if (mode == PushMode.Upsert && keyColumn != null && !table.Columns.Any(c => c.Key == DataTables.Slug(keyColumn))) return Fail($"Colonne clé inconnue : {keyColumn}.");
+            var limit = f.Item2.MaxRows > 0 ? Math.Min(f.Item2.MaxRows, DataKinds.MaxRows) : DataKinds.MaxRows;
+            if (result.Rows.Count > limit) return Fail($"Limite de {limit} lignes dépassée ({result.Rows.Count}).");
+            var changed = old?.Hash != result.Hash;
+            Save(clientId, dataSetId, changed ? result : result with { ReadUtc = now });
+            KeepColumns(clientId, dataSetId, result.Columns);
+            var what = mode == PushMode.Replace ? $"{result.Rows.Count} ligne{(result.Rows.Count > 1 ? "s" : "")} reçue{(result.Rows.Count > 1 ? "s" : "")}" : $"{added} ajoutée{(added > 1 ? "s" : "")}, {updated} mise{(updated > 1 ? "s" : "")} à jour";
+            Append(clientId, dataSetId, new DataReadLog(now, "ok", "Envoi par l'API : " + what, result.Rows.Count, sw.ElapsedMilliseconds, changed));
+            return new PushResult(true, null, result.Rows.Count, added, updated, changed);
+        }
+        finally { gate.Release(); }
+    }
+
+    /// <summary>Ajoute les lignes reçues à la table gardée (colonnes en union) ; avec une clé, une ligne qui a la même valeur est mise à jour, les colonnes absentes de l'envoi gardent leur valeur.</summary>
+    private static DataTable? Combine(DataTable old, DataTable inc, string? keyKey, DateTime now, out int added, out int updated, out string? error)
+    {
+        added = updated = 0; error = null;
+        var cols = old.Columns.Select(c => c.Copy()).ToList();
+        foreach (var c in inc.Columns.Where(c => !cols.Any(x => x.Key == c.Key))) cols.Add(c.Copy());
+        if (keyKey != null && !cols.Any(c => c.Key == keyKey)) { error = "Colonne clé inconnue."; return null; }
+        var rows = old.Rows.Select(r => cols.Select((c, i) => i < r.Count ? r[i] : null).ToList()).ToList();
+        var keyIdx = keyKey == null ? -1 : cols.FindIndex(c => c.Key == keyKey);
+        var map = inc.Columns.Select(c => cols.FindIndex(x => x.Key == c.Key)).ToList();   // colonne reçue → colonne de la table
+        foreach (var r in inc.Rows)
+        {
+            var incoming = new string?[cols.Count];
+            var present = new bool[cols.Count];
+            for (var j = 0; j < map.Count; j++) { incoming[map[j]] = j < r.Count ? r[j] : null; present[map[j]] = true; }
+            var existing = keyIdx >= 0 && !string.IsNullOrEmpty(incoming[keyIdx]) ? rows.FindIndex(x => x[keyIdx] == incoming[keyIdx]) : -1;
+            if (existing >= 0) { for (var i = 0; i < cols.Count; i++) if (present[i]) rows[existing][i] = incoming[i]; updated++; }
+            else { rows.Add(incoming.ToList()); added++; }
+        }
+        return new DataTable(cols, rows, now, DataTables.Hash(cols, rows));
+    }
+
+    /// <summary>Retire les lignes d'un jeu « Envoi direct » : toutes, ou celles dont la colonne clé a cette valeur. Rend le nombre de lignes retirées.</summary>
+    public (int? Removed, string? Error) RemoveRows(Guid clientId, Guid dataSetId, string? keyColumn, string? value)
+    {
+        var ok = store.Read(db => db.Clients.FirstOrDefault(t => t.Id == clientId) is { } t && t.DataSets.FirstOrDefault(d => d.Id == dataSetId) is { } ds
+            && t.DataConnections.FirstOrDefault(c => c.Id == ds.ConnectionId)?.Kind == DataKinds.Push);
+        if (!ok) return (null, "Jeu de données « Envoi direct » introuvable.");
+        var gate = running.GetOrAdd((clientId, dataSetId), _ => new SemaphoreSlim(1, 1));
+        gate.Wait();
+        try
+        {
+            var old = Table(clientId, dataSetId);
+            if (old == null) return (0, null);
+            var now = DateTime.UtcNow;
+            List<List<string?>> kept;
+            if (keyColumn == null) kept = new();
+            else
+            {
+                var i = old.Columns.FindIndex(c => c.Key == DataTables.Slug(keyColumn));
+                if (i < 0) return (null, $"Colonne clé inconnue : {keyColumn}.");
+                kept = old.Rows.Where(r => (i < r.Count ? r[i] : null) != value).ToList();
+            }
+            var removed = old.Rows.Count - kept.Count;
+            if (removed > 0)
+            {
+                Save(clientId, dataSetId, new DataTable(old.Columns, kept, now, DataTables.Hash(old.Columns, kept)));
+                Append(clientId, dataSetId, new DataReadLog(now, "ok", $"Envoi par l'API : {removed} ligne{(removed > 1 ? "s" : "")} retirée{(removed > 1 ? "s" : "")}", kept.Count, 0, true));
+            }
+            return (removed, null);
         }
         finally { gate.Release(); }
     }
@@ -1071,6 +1193,7 @@ public static class DataSourceOps
             if (c.FileMode == "url") { try { SafeHttp.ParseUrl(c.FileUrl); } catch (InvalidOperationException e) { return e.Message; } }
             else if (c.FileName.Length == 0) return "Importez un fichier CSV, JSON ou Excel.";
         }
+        else if (c.Kind == DataKinds.Push) { c.Via = "direct"; c.RelayId = null; }   // envoi direct : aucun réglage de lecture
         else return "Type de connexion inconnu.";
         if (c.Kind == DataKinds.File && c.FileMode == "upload") c.Via = "direct";   // fichier importé : déjà sur le serveur
         if (c.Via != "relay") { c.Via = "direct"; c.RelayId = null; }

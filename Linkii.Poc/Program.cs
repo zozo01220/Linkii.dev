@@ -755,7 +755,7 @@ static string PlayerBuild(string webRoot)
 }
 
 // Accusé de publication : stage « downloading » / « ready » (étapes avant l'affichage), sinon la version est affichée.
-api.MapPost("/player/ack", (HttpRequest req, AckDto body, JsonStore store) => store.Write(db =>
+api.MapPost("/player/ack", (HttpRequest req, AckDto body, JsonStore store, IEventPublisher events) => store.Write(db =>
 {
     var s = Auth(req, db);
     if (Gate(s, db) is { } denied) return denied;
@@ -764,7 +764,11 @@ api.MapPost("/player/ack", (HttpRequest req, AckDto body, JsonStore store) => st
         s!.DeliveryRevision = body.Version; s.DeliveryStage = body.Stage; s.DeliveryUtc = DateTime.UtcNow;
         return Results.Ok();
     }
-    if (s!.AppliedRevision != body.Version) s.AppliedUtc = DateTime.UtcNow;
+    if (s!.AppliedRevision != body.Version)
+    {
+        s.AppliedUtc = DateTime.UtcNow;
+        if (s.PublishedUtc != null) events.Publish(s.ClientId, ScreenEvents.Applied, new { screen = ScreenEvents.Brief(db, s), version = s.PublishedVersion, appliedAt = s.AppliedUtc });   // webhooks (API)
+    }
     s.AppliedRevision = body.Version;
     if (body.W > 0 && body.H > 0) { s.DetectedW = body.W; s.DetectedH = body.H; }
     return Results.Ok();

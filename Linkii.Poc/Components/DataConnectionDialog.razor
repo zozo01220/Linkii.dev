@@ -11,10 +11,10 @@
 <div class="modal-backdrop" @onclick="Close"></div>
 <div class="modal app-modal as-drawer dsx-dlg" role="dialog" aria-modal="true" aria-labelledby="dsc-title">
     <div class="modal-head">
-        <span class="dsx-ico @kind">@(kind == DataKinds.Api ? "{ }" : kind == DataKinds.Db ? "SQL" : "CSV")</span>
+        <span class="dsx-ico @kind">@(kind == DataKinds.Api ? "{ }" : kind == DataKinds.Db ? "SQL" : kind == DataKinds.Push ? "→" : "CSV")</span>
         <div class="grow">
             <h3 id="dsc-title">@(isNew ? "Connecter une source" : C.Name)</h3>
-            <small>@(isNew ? "Rien n'est enregistré avant « Enregistrer »." : kind == DataKinds.Api ? "API web" : kind == DataKinds.Db ? "Base de données" : "Fichier")</small>
+            <small>@(isNew ? "Rien n'est enregistré avant « Enregistrer »." : kind == DataKinds.Api ? "API web" : kind == DataKinds.Db ? "Base de données" : kind == DataKinds.Push ? "Envoi direct" : "Fichier")</small>
         </div>
         <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
     </div>
@@ -27,11 +27,16 @@
                         <button type="button" role="radio" aria-checked="@(kind == DataKinds.Api ? "true" : "false")" class="dsx-type @(kind == DataKinds.Api ? "on" : "")" @onclick="() => SetKind(DataKinds.Api)"><b>API web</b><small>JSON ou CSV sur HTTP</small></button>
                         <button type="button" role="radio" aria-checked="@(kind == DataKinds.Db ? "true" : "false")" class="dsx-type @(kind == DataKinds.Db ? "on" : "")" @onclick="() => SetKind(DataKinds.Db)"><b>Base de données</b><small>SQL Server, PostgreSQL, MySQL</small></button>
                         <button type="button" role="radio" aria-checked="@(kind == DataKinds.File ? "true" : "false")" class="dsx-type @(kind == DataKinds.File ? "on" : "")" @onclick="() => SetKind(DataKinds.File)"><b>Fichier</b><small>CSV, JSON, Excel</small></button>
+                        <button type="button" role="radio" aria-checked="@(kind == DataKinds.Push ? "true" : "false")" class="dsx-type @(kind == DataKinds.Push ? "on" : "")" @onclick="() => SetKind(DataKinds.Push)"><b>Envoi direct</b><small>Votre système pousse ses lignes par l'API</small></button>
                     </div>
                 }
-                <div class="dw-field"><label for="dsc-name">Nom de la connexion</label><input id="dsc-name" type="text" @bind="C.Name" maxlength="80" placeholder="@(kind == DataKinds.Api ? "API des indicateurs" : kind == DataKinds.Db ? "Base des salles" : "Annonces internes")" /></div>
+                <div class="dw-field"><label for="dsc-name">Nom de la connexion</label><input id="dsc-name" type="text" @bind="C.Name" maxlength="80" placeholder="@(kind == DataKinds.Api ? "API des indicateurs" : kind == DataKinds.Db ? "Base des salles" : kind == DataKinds.Push ? "Données de l'ERP" : "Annonces internes")" /></div>
 
-                @if (kind != DataKinds.File || C.FileMode == "url")
+                @if (kind == DataKinds.Push)
+                {
+                    <p class="dsx-muted">Linkii ne lit rien : votre système (ERP, caisse, capteurs, script…) envoie ses lignes avec une clé d'API (accès « Envoi de données », créée dans <a href="/apiwebhooks">API et webhooks</a>). Après l'enregistrement, ajoutez un jeu de données : son adresse d'envoi et un exemple prêt à copier s'y affichent.</p>
+                }
+                @if (kind != DataKinds.Push && (kind != DataKinds.File || C.FileMode == "url"))
                 {
                     <div class="dw-field"><label>Comment Linkii atteint @(kind == DataKinds.Db ? "la base" : kind == DataKinds.Api ? "l'API" : "le fichier") ?</label>
                         <div class="dsx-reach">
@@ -139,7 +144,7 @@
                         }
                     }
                 }
-                else
+                else if (kind == DataKinds.File)
                 {
                     <div class="dw-field"><label>Où est le fichier ?</label>
                         <div class="dsx-seg" role="radiogroup">
@@ -174,11 +179,14 @@
                     </div>
                 }
 
+                @if (kind != DataKinds.Push)
+                {
                 <div class="dsx-test">
                     <button type="button" class="btn ghost" disabled="@busy" @onclick="Test">@(busy && testing ? "Test en cours…" : "Tester la connexion")</button>
                     @if (testOk != null) { <span class="dsx-ok @(testOk.Contains('⚠') ? "warn" : "")"><i></i>@testOk</span> }
                     else { <span class="hint">Vérifiez l'accès avant d'enregistrer : rien n'est écrit. Les identifiants sont chiffrés sur le serveur ; Linkii ne fait que lire.</span> }
                 </div>
+                }
                 @if (error != null) { <div class="err">@error</div> }
                 @if (!isNew && C.LastError.Length > 0 && error == null && testOk == null) { <div class="err">Dernier test en échec : @C.LastError</div> }
             </div>

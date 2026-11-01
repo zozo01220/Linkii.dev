@@ -320,6 +320,7 @@ public static class ApiRegistration
         s.AddSingleton(TimeProvider.System);
         s.AddSingleton<IApiModule, CoreApiModule>();
         s.AddSingleton<IApiModule, ScreensApiModule>();   // supervision : GET /screens, screen.offline, screen.online
+        s.AddSingleton<IApiModule, DataApiModule>();   // envoi direct de données : /datasets, data.failed, data.recovered
         s.AddSingleton<ApiRegistry>();
         s.AddSingleton<ApiKeyService>();
         s.AddSingleton<ApiUsage>();
@@ -372,5 +373,6 @@ public static class ApiRegistration
         group.MapFallback(ctx => ApiProblem.Write(ctx, ApiCodes.NotFound, "Cette route n'existe pas."));
         app.MapGet("/api/v1/openapi.json", (HttpContext ctx) => Results.Text(ApiDocs.OpenApi(registry, $"{ctx.Request.Scheme}://{ctx.Request.Host}").ToJsonString(ApiJson.Options), "application/json")).AllowAnonymous();
         app.MapGet("/docs/api", (HttpContext ctx) => Results.Content(ApiDocs.Html(registry, ctx.Items["reseller"] as Reseller, $"{ctx.Request.Scheme}://{ctx.Request.Host}"), "text/html; charset=utf-8")).AllowAnonymous();
+        app.MapGet("/docs/api/try", (HttpContext ctx) => Results.Content(ApiDocs.SwaggerHtml(ctx.Items["reseller"] as Reseller), "text/html; charset=utf-8")).AllowAnonymous();
     }
 }

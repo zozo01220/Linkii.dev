@@ -18,7 +18,10 @@ public record ApiTemplate(string Name, string Hint, string[] Scopes, int Order =
 public record EventType(string Id, string Group, string Label);
 
 /// <summary>Route déclarée : sert au branchement, au contrôle d'accès, au débit et à la documentation OpenAPI.</summary>
-public record ApiRoute(string Method, string Path, string Scope, string Class, string Summary);
+/// <param name="Query">Paramètres de requête, séparés par « ; » : <c>nom:type:description</c> (types : string, integer, uuid). Sert à OpenAPI et à Swagger UI.</param>
+/// <param name="Body">Exemple de corps (JSON ou CSV) ; null : pas de corps.</param>
+/// <param name="BodyType">Type de contenu de l'exemple.</param>
+public record ApiRoute(string Method, string Path, string Scope, string Class, string Summary, string? Query = null, string? Body = null, string BodyType = "application/json");
 
 public interface IApiModule
 {

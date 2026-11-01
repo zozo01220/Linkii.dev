@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.SignalR;
 namespace Linkii.Poc;
 
 /// <summary>Publication d'une playlist + notification SignalR des écrans concernés.</summary>
-public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog catalog)
+public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog catalog, IEventPublisher events)
 {
     /// <summary>Ancien instantané au niveau de la playlist (lu par les écrans jamais publiés depuis). L'interface publie écran par écran : <see cref="PublishScreen"/>.</summary>
     public async Task Publish(Guid playlistId)
@@ -39,6 +39,7 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
             s.PublishedVersion++;
             s.PublishedStamp = Helpers.PublishStamp(s, own);
             s.PublishedUtc = DateTime.UtcNow;
+            events.Publish(s.ClientId, ScreenEvents.Published, new { screen = ScreenEvents.Brief(db, s), version = s.PublishedVersion, publishedAt = s.PublishedUtc });   // webhooks (API) : sans attente, jamais d'erreur
             return true;
         });
         if (ok) await NotifyScreen(screenId);

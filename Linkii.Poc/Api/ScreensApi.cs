@@ -20,9 +20,12 @@ public class ScreensApiModule : IApiModule
     {
         new EventType(ScreenEvents.Offline, "Écrans", "Un écran ne répond plus (après le délai d'alerte des Réglages)"),
         new EventType(ScreenEvents.Online, "Écrans", "Un écran signalé hors ligne est de retour"),
+        new EventType(ScreenEvents.Published, "Écrans", "Une publication part vers un écran (sa liste, ses widgets, sa configuration)"),
+        new EventType(ScreenEvents.Applied, "Écrans", "Un écran affiche une nouvelle version publiée"),
     };
 
-    public static readonly ApiRoute List = new("GET", "/screens", Read, RateClass.Read, "Lister les écrans appairés et leur état (filtres status et areaId, pagination par curseur)");
+    public static readonly ApiRoute List = new("GET", "/screens", Read, RateClass.Read, "Lister les écrans appairés et leur état (filtres status et areaId, pagination par curseur)",
+        Query: "status:string:online, offline ou updating; areaId:uuid:aire de gestion; limit:integer:1 à 200 (50 par défaut); cursor:string:valeur « next » de la page précédente");
     public static readonly ApiRoute One = new("GET", "/screens/{id}", Read, RateClass.Read, "Lire un écran");
 
     public IEnumerable<ApiRoute> Routes { get; } = new[] { List, One };
@@ -70,7 +73,7 @@ public record ScreenEvent(Guid ClientId, string Type, object Data);
 /// <summary>État d'un écran vu de l'API, et détection des pannes à signaler aux webhooks.</summary>
 public static class ScreenEvents
 {
-    public const string Offline = "screen.offline", Online = "screen.online";
+    public const string Offline = "screen.offline", Online = "screen.online", Published = "screen.published", Applied = "screen.applied";
 
     public static ScreenDto View(Db db, Tenant c, Screen s, DateTime now)
     {
@@ -85,7 +88,7 @@ public static class ScreenEvents
             s.ScreenType, s.Orientation, s.DetectedW is { } w ? $"{w}x{s.DetectedH}" : s.Resolution, s.Params.Select(p => new ParamDto(p.Name, p.Value)).ToList());
     }
 
-    private static object Brief(Db db, Screen s)
+    public static object Brief(Db db, Screen s)
     {
         var area = db.Areas.FirstOrDefault(a => a.Id == s.AreaId);
         var zone = area?.Zones.FirstOrDefault(z => z.Id == s.ZoneId);
