@@ -129,8 +129,8 @@ class MainActivity : Activity() {
         if (on) {
             blackout = View(this).apply { setBackgroundColor(Color.BLACK); isClickable = true }
             root.addView(blackout, FrameLayout.LayoutParams(-1, -1))
-            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            window.attributes = window.attributes.apply { screenBrightness = 0f }
+            // l'écran reste allumé (luminosité minimale) : un appareil qui s'éteint seul ne se rallume pas toujours
+            window.attributes = window.attributes.apply { screenBrightness = 0.01f }
         } else {
             blackout?.let { root.removeView(it) }
             blackout = null
@@ -142,6 +142,12 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         hideSystemBars()
+        // Après la veille matérielle : écran de verrouillage sans code (« glisser ») levé, pour que le player apparaisse sans toucher à l'appareil
+        try {
+            val km = getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+            if (Build.VERSION.SDK_INT >= 26) km.requestDismissKeyguard(this, null)
+            else @Suppress("DEPRECATION") window.addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD)
+        } catch (_: Exception) {}
         // Verrouillage de l'app (kiosque) seulement si l'appareil l'autorise sans fenêtre de confirmation
         val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         if (dpm.isLockTaskPermitted(packageName)) try { startLockTask() } catch (_: Exception) {}
@@ -384,6 +390,12 @@ class MainActivity : Activity() {
             *(if (prefs.pinManaged) emptyArray() else arrayOf<Pair<String, () -> Unit>>("Définir le code PIN" to { askNewPin() })),
             "Autoriser le démarrage automatique" to { requestOverlayPermission() },
             "Activer la mise en veille de l'écran" to { requestSleepAdmin() },
+            (if (prefs.sleepBlack) "Veille : écran noir (appuyer pour verrouiller l'écran)" else "Veille : écran verrouillé (appuyer pour écran noir)") to {
+                prefs.sleepBlack = !prefs.sleepBlack
+                prefs.sleepApplied = false
+                sleeper.apply()
+                Toast.makeText(this, if (prefs.sleepBlack) "Veille en écran noir, écran toujours allumé." else "Veille avec écran verrouillé.", Toast.LENGTH_LONG).show()
+            },
             "Désappairer cet écran" to { confirmUnpair() },
             "Quitter l'application" to { quit() }
         )
@@ -420,7 +432,7 @@ class MainActivity : Activity() {
             (if (ms.lastError.isNotEmpty()) "  dernier échec : ${ms.lastError}\n" else "") +
             "Version : ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})\n" +
             "Réseau : ${if (online) "connecté" else "hors ligne"}\n" +
-            "Mise en veille : ${if (prefs.sleepJson.isEmpty()) "aucune plage" else "plages reçues"}, écran ${if (SleepController.isAdmin(this)) "éteint pour de bon" else "noir seulement (droit non activé)"}, alarmes ${if (sleeper.exactAlarms()) "exactes" else "approximatives"}\n" +
+            "Mise en veille : ${if (prefs.sleepJson.isEmpty()) "aucune plage" else "plages reçues"}, écran ${if (prefs.sleepBlack) "noir (luminosité minimale, choix technicien)" else if (SleepController.isAdmin(this)) "éteint pour de bon" else "noir seulement (droit non activé)"}, alarmes ${if (sleeper.exactAlarms()) "exactes" else "approximatives"}\n" +
             "Stockage libre : ${"%.1f".format(freeGb)} Go\n" +
             "PIN : ${if (prefs.pin.isEmpty()) "non défini" else "défini"}" +
             (if (prefs.orgPin == null) "" else if (prefs.pinManaged || !prefs.hasDevicePin) " (géré par l'organisation)" else " (propre à l'appareil)")

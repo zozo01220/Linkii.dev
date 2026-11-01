@@ -68,6 +68,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("auto_start", true)
         set(v) = sp.edit().putBoolean("auto_start", v).apply()
 
+    /** Veille « écran noir » au lieu du verrouillage matériel : l'écran reste allumé à luminosité minimale (appareils qui ne se rallument pas seuls). */
+    var sleepBlack: Boolean
+        get() = sp.getBoolean("sleep_black", false)
+        set(v) = sp.edit().putBoolean("sleep_black", v).apply()
+
     /** Adresse complète du player : l'adresse du serveur, suivie de /player/ sauf si elle le contient déjà. */
     fun playerUrl(): String {
         val base = serverUrl

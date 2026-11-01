@@ -40,6 +40,8 @@ class SleepController(private val ctx: Context, private val prefs: Prefs) {
     fun setSchedule(json: String) {
         if (json == prefs.sleepJson) return
         prefs.sleepJson = json
+        // le réveil relevé pendant une veille précédente ne vaut plus : seul celui du serveur compte (sinon « Mettre en veille » juste après « Réveiller » est ignoré)
+        prefs.wakeUntilMs = try { if (json.isEmpty()) 0L else JSONObject(json).optLong("wakeUntil", 0) } catch (_: Exception) { 0L }
         prefs.sleepApplied = false
         apply()
     }
@@ -108,7 +110,7 @@ class SleepController(private val ctx: Context, private val prefs: Prefs) {
         val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
         if (sleeping) {
             // verrouille à l'entrée dans la plage, et si quelqu'un a rallumé l'écran pendant la plage
-            val hardware = isAdmin(ctx)
+            val hardware = isAdmin(ctx) && !prefs.sleepBlack
             if (hardware) { if (!prefs.sleepApplied || pm.isInteractive) lock() }
             else listener?.invoke(true)
             prefs.sleepApplied = true
@@ -127,8 +129,8 @@ class SleepController(private val ctx: Context, private val prefs: Prefs) {
     @Suppress("DEPRECATION")
     private fun wake(pm: PowerManager) {
         try {
-            pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE, "linkii:wake").acquire(10_000)
-        } catch (_: Exception) {}
+            pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE, "linkii:wake").apply { setReferenceCounted(false) }.acquire(15_000)
+        } catch (e: Exception) { android.util.Log.w("Linkii", "Réveil de l'écran : $e") }
         // premier plan : autorisé par « Affichage par-dessus les autres applications » (menu technicien) ou si l'app est l'écran d'accueil
         try { ctx.startActivity(Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)) } catch (_: Exception) {}
     }
