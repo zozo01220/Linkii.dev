@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — API et webhooks</title>
+<style>
+:root{--bg:#F5F7FA;--surface:#fff;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--row:#EDF1F5;--brand:#0B1F3A;--brand-tint:#EEF1F5;--signal:#3B82C4;--ok:#1E8E5A;--ok-bg:#E1F0E8;--ok-ink:#155A38;--warn:#B7791F;--warn-bg:#FBF0DC;--warn-ink:#7A4F12;--danger:#C8372D;--danger-bg:#FBE4E2;--danger-ink:#8A231C;--info-bg:#E4EEF8;--info-ink:#1F5A92;--store:#E8590C;--pro-bg:#FFF3C4;--pro-ink:#7A5B00;--radius:4px}
+*{box-sizing:border-box}html,body{margin:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
+h1,h2,h3,p{margin:0;font-weight:500}p{font-weight:400}b,strong{font-weight:500}
+svg{fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+button{font:inherit;color:inherit;cursor:pointer}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;font-size:12.5px}
+.mock{background:#FFF8E1;border-bottom:1px dashed #E0B84A;padding:10px 20px;font-size:13px;color:#6B5200;position:sticky;top:0;z-index:60;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.mock .ph{margin-left:auto;display:flex;align-items:center;gap:8px}
+.seg{display:inline-flex;border:1px solid #E0B84A;border-radius:16px;overflow:hidden;background:#fff}
+.seg button{border:0;background:none;padding:3px 12px;font-size:12.5px}.seg button.on{background:#6B5200;color:#fff}
+.scenes{display:flex;gap:6px;flex-wrap:wrap;padding:14px 24px 0;max-width:1280px;margin:0 auto}
+.scenes button{border:1px solid var(--line-2);background:#fff;border-radius:18px;padding:5px 14px;font-size:13.5px}
+.scenes button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.scene{display:none;max-width:1280px;margin:0 auto;padding:18px 24px 60px}.scene.on{display:block}
+.lead{color:var(--muted);margin:0 0 14px;max-width:860px}
+h2.t{font-size:22px;margin-bottom:4px}
+.note{background:#fff;border:1px solid var(--line);border-left:3px solid var(--signal);border-radius:var(--radius);padding:10px 14px;font-size:13.5px;color:var(--muted);margin:14px 0}
+.note b{color:var(--ink)}
+.note.dec{border-left-color:var(--store)}
+
+/* fenêtre d'application */
+.win{background:var(--bg);border:1px solid var(--line-2);border-radius:8px;overflow:hidden;display:flex;min-height:660px;position:relative}
+.side{width:200px;background:#fff;border-right:1px solid var(--line);padding:18px 12px;display:flex;flex-direction:column;gap:2px;flex:none}
+.side .logo{font-size:24px;font-weight:500;letter-spacing:-.03em;padding:2px 10px 20px}.side .logo i{font-style:normal;color:#CC8400}
+.side .nav{display:flex;align-items:center;gap:11px;padding:8px 11px;color:var(--muted);border-radius:var(--radius);font-size:14.5px}
+.side .nav svg{width:17px;height:17px}.side .nav.act{background:var(--brand-tint);color:var(--ink);font-weight:500;box-shadow:inset 2px 0 0 var(--brand);border-radius:0 4px 4px 0}
+.side .sp{flex:1}
+.side .tog{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);padding:8px 11px;border-top:1px solid var(--line)}
+.col{flex:1;min-width:0;display:flex;flex-direction:column}
+.qbar{height:54px;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:6px;padding:0 20px;position:relative}
+.qbar .org{font-weight:500;margin-right:auto}
+.ic{width:34px;height:34px;display:grid;place-items:center;border-radius:50%;position:relative}.ic svg{width:19px;height:19px}
+.ic .dot{position:absolute;top:2px;right:0;min-width:16px;height:16px;border-radius:8px;background:var(--danger);color:#fff;font-size:10.5px;font-weight:600;display:grid;place-items:center;padding:0 4px;border:2px solid #fff}
+.av{width:32px;height:32px;border-radius:50%;background:var(--ink);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:500;margin-left:4px}
+.hubtabs{display:flex;gap:2px;border-bottom:1px solid var(--line);background:#fff;padding:0 24px;overflow:auto}
+.hubtabs span{padding:12px 14px;font-size:14.5px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;display:flex;gap:7px;align-items:center}
+.hubtabs span.on{color:var(--ink);font-weight:500;border-color:var(--brand)}
+.hubtabs .lk{width:13px;height:13px;color:var(--muted)}
+.body{padding:24px 28px 40px;flex:1;overflow:auto;position:relative}
+.head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:14px;flex-wrap:wrap}
+.head h1{font-size:25px;letter-spacing:-.01em;line-height:1.2}.head .sub{color:var(--muted);font-size:14px;margin-top:2px}
+.subtabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:14px}
+.subtabs button{border:0;background:none;padding:8px 14px;font-size:14.5px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;display:flex;gap:7px;align-items:center}
+.subtabs button.on{color:var(--ink);font-weight:500;border-color:var(--brand)}
+.subtabs em{font-style:normal;background:var(--row);color:var(--muted);border-radius:9px;font-size:11.5px;padding:0 7px;line-height:18px}
+.subtabs em.r{background:var(--danger);color:#fff}
+.subtabs .sp{flex:1}.subtabs a{align-self:center;color:var(--signal);font-size:13.5px;display:flex;gap:5px;align-items:center;padding-bottom:4px}
+.subtabs a svg{width:14px;height:14px}
+
+.btn{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 14px;border:1px solid var(--line-2);background:#fff;border-radius:var(--radius);font-size:14px;white-space:nowrap}
+.btn:hover{border-color:var(--ink)}.btn svg{width:16px;height:16px}
+.btn.pri{background:var(--brand);border-color:var(--brand);color:#fff}
+.btn.sm{height:30px;padding:0 10px;font-size:13px}
+.btn.dng{color:var(--danger);border-color:#E7B6B2}.btn.dng:hover{border-color:var(--danger)}
+.btn[disabled]{opacity:.5;cursor:default}
+.lnk{border:0;background:none;color:var(--signal);padding:0;font-size:13.5px}.lnk:hover{text-decoration:underline}
+.tools{display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.search{display:flex;align-items:center;gap:7px;border:1px solid var(--line-2);border-radius:var(--radius);padding:0 10px;height:34px;background:#fff;min-width:210px}
+.search svg{width:15px;height:15px;color:var(--muted)}.search input{border:0;outline:0;font:inherit;font-size:14px;width:100%;background:none}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line-2);background:#fff;border-radius:16px;height:30px;padding:0 12px;font-size:13px;display:inline-flex;align-items:center;gap:6px}
+.chip.on{background:var(--ink);border-color:var(--ink);color:#fff}.chip small{opacity:.7;font-size:12px}
+select,input[type=text],input[type=url]{font:inherit;font-size:14px;color:var(--ink);padding:7px 10px;border:1px solid var(--line-2);border-radius:var(--radius);background:#fff;outline:none;width:100%}
+select:focus,input:focus{border-color:var(--brand)}
+label.f{display:block;font-size:13px;font-weight:500;margin:14px 0 5px}label.f small{font-weight:400;color:var(--muted)}
+.hint{font-size:12.5px;color:var(--muted);margin-top:4px}
+
+table.tb{width:100%;border-collapse:collapse;font-size:14px;background:#fff;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+table.tb th{text-align:left;font-weight:500;font-size:12.5px;color:var(--muted);background:#FAFBFC;padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.tb td{padding:10px 12px;border-bottom:1px solid var(--row);vertical-align:middle}
+table.tb tr.rw{cursor:pointer}table.tb tr.rw:hover td{background:#FAFBFC}
+table.tb tr:last-child td{border:0}
+td .sub2{display:block;color:var(--muted);font-size:12.5px}
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:11px;padding:0 9px;line-height:21px;font-size:12.5px;white-space:nowrap}
+.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.pill.ok{background:var(--ok-bg);color:var(--ok-ink)}.pill.warn{background:var(--warn-bg);color:var(--warn-ink)}
+.pill.err{background:var(--danger-bg);color:var(--danger-ink)}.pill.off{background:var(--row);color:var(--muted)}.pill.info{background:var(--info-bg);color:var(--info-ink)}
+.tag{display:inline-block;font-size:11px;font-weight:600;border-radius:9px;padding:0 7px;line-height:17px;vertical-align:1px}
+.tag.p{background:var(--pro-bg);color:var(--pro-ink)}.tag.n{background:var(--info-bg);color:var(--info-ink)}.tag.g{background:var(--row);color:var(--muted)}
+.gab{display:inline-block;background:var(--brand-tint);border-radius:var(--radius);padding:0 8px;line-height:22px;font-size:12.5px}
+.more{width:30px;height:30px;border:0;background:none;border-radius:50%;display:grid;place-items:center}.more:hover{background:var(--row)}.more svg{width:17px;height:17px}
+
+/* cartes webhooks */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
+.cd{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:15px 17px;cursor:pointer;position:relative}
+.cd:hover{border-color:var(--line-2);box-shadow:0 2px 8px rgba(11,31,58,.07)}
+.cd.bad{border-color:#E7B6B2}
+.cd h3{font-size:15.5px;display:flex;align-items:center;gap:8px;margin-bottom:2px}
+.cd .url{color:var(--muted);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cd .ev{display:flex;gap:5px;flex-wrap:wrap;margin:10px 0}
+.ev{display:flex;gap:5px;flex-wrap:wrap}
+.ev i,.sc i{font-style:normal;background:var(--row);border-radius:10px;padding:0 8px;font-size:12px;line-height:20px;font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace}
+.cd .ft{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--muted);border-top:1px solid var(--row);padding-top:9px;margin-top:4px}
+.cd.add{border-style:dashed;display:flex;align-items:center;justify-content:center;gap:10px;color:var(--muted);min-height:150px}
+.sw{width:34px;height:20px;border-radius:10px;background:var(--brand);position:relative;display:inline-block;flex:none}
+.sw::after{content:"";position:absolute;right:2px;top:2px;width:16px;height:16px;border-radius:50%;background:#fff}
+.sw.off{background:var(--line-2)}.sw.off::after{right:auto;left:2px}
+
+.banner{display:flex;gap:12px;align-items:center;border-radius:var(--radius);padding:11px 14px;margin-bottom:14px;font-size:14px}
+.banner svg{width:20px;height:20px;flex:none}.banner .x{flex:1}
+.banner.err{background:var(--danger-bg);color:var(--danger-ink);border:1px solid #E7B6B2}
+.banner.warn{background:var(--warn-bg);color:var(--warn-ink);border:1px solid #E8D3A3}
+.banner.info{background:var(--info-bg);color:var(--info-ink);border:1px solid #BFD5EC}
+
+/* tiroir et fenêtre */
+.scrim{position:absolute;inset:0;background:rgba(11,31,58,.32);display:none;z-index:30}.scrim.on{display:block}
+.drawer{position:absolute;top:0;right:0;bottom:0;width:500px;max-width:92%;background:#fff;border-left:1px solid var(--line-2);box-shadow:-10px 0 30px rgba(11,31,58,.16);z-index:31;display:none;flex-direction:column}
+.drawer.on{display:flex}
+.dh{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:18px 22px 12px;border-bottom:1px solid var(--line)}
+.dh h2{font-size:19px}.dh .sub{color:var(--muted);font-size:13px}
+.dh .x{border:0;background:none;width:32px;height:32px;border-radius:50%;font-size:20px;line-height:1}.dh .x:hover{background:var(--row)}
+.db{flex:1;overflow:auto;padding:6px 22px 20px}
+.df{border-top:1px solid var(--line);padding:12px 22px;display:flex;gap:8px;justify-content:space-between;align-items:center;background:#FAFBFC}
+.modal{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:640px;max-width:94%;max-height:92%;background:#fff;border-radius:8px;box-shadow:0 20px 50px rgba(11,31,58,.3);z-index:32;display:none;flex-direction:column;overflow:hidden}
+.modal.on{display:flex}
+.modal .dh{border:0;padding-bottom:4px}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:6px 14px;font-size:14px;padding:12px 0;border-bottom:1px solid var(--row)}
+.kv dt{color:var(--muted)}.kv dd{margin:0}
+.sec{font-size:12.5px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:18px 0 6px}
+
+/* gabarits d'accès */
+.tpls{display:grid;gap:8px}
+.tpl{display:flex;gap:11px;border:1px solid var(--line-2);border-radius:var(--radius);padding:10px 12px;cursor:pointer;background:#fff}
+.tpl:hover{border-color:var(--muted)}.tpl.on{border-color:var(--brand);background:var(--brand-tint);box-shadow:inset 0 0 0 1px var(--brand)}
+.tpl .rd{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--line-2);margin-top:3px;flex:none;background:#fff}
+.tpl.on .rd{border:5px solid var(--brand)}
+.tpl b{display:block;font-size:14.5px}.tpl small{color:var(--muted);font-size:13px}
+.tpl .sc{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+.scg{border:1px solid var(--line);border-radius:var(--radius);margin-top:8px}
+.scg .gh{padding:7px 12px;background:#FAFBFC;font-size:12.5px;font-weight:500;color:var(--muted);border-bottom:1px solid var(--line)}
+.ck{display:flex;gap:10px;align-items:flex-start;padding:7px 12px;font-size:14px;border-bottom:1px solid var(--row);cursor:pointer}
+.ck:last-child{border:0}
+.ck .bx{width:17px;height:17px;border:1.5px solid var(--line-2);border-radius:3px;flex:none;margin-top:2px;display:grid;place-items:center;background:#fff}
+.ck.on .bx{background:var(--brand);border-color:var(--brand);color:#fff}.ck .bx svg{width:12px;height:12px;stroke-width:3;display:none}.ck.on .bx svg{display:block}
+.ck small{display:block;color:var(--muted);font-size:12.5px}
+.ck code{background:var(--row);border-radius:3px;padding:0 5px}
+
+/* code */
+.code{background:#0B1F3A;color:#DCE6F2;border-radius:var(--radius);padding:12px 14px;font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.6;overflow:auto;position:relative;white-space:pre}
+.code .c{color:#7F95AE}.code .k{color:#8CC4FF}.code .s{color:#B8E3A6}
+.code .cp{position:absolute;top:8px;right:8px;background:rgba(255,255,255,.12);border:0;color:#fff;border-radius:3px;font-size:12px;padding:2px 9px;font-family:inherit}
+.keybox{display:flex;gap:8px;align-items:center;background:#FAFBFC;border:1px solid var(--line-2);border-radius:var(--radius);padding:9px 12px;font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;font-size:13px;word-break:break-all}
+.keybox .btn{margin-left:auto}
+.tl{border-left:2px solid var(--line);margin:6px 0 0 6px;padding-left:16px}
+.tl div{position:relative;padding:5px 0;font-size:13.5px}
+.tl div::before{content:"";position:absolute;left:-23px;top:11px;width:10px;height:10px;border-radius:50%;background:var(--line-2);border:2px solid #fff}
+.tl div.ok::before{background:var(--ok)}.tl div.er::before{background:var(--danger)}.tl div.nx::before{background:#fff;border:2px solid var(--line-2)}
+.bars{display:flex;align-items:flex-end;gap:2px;height:46px;margin-top:6px}
+.bars i{flex:1;background:var(--signal);opacity:.7;border-radius:1px 1px 0 0;min-height:2px}
+.bars i.e{background:var(--danger);opacity:.85}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:8px 0}
+.stat{border:1px solid var(--line);border-radius:var(--radius);padding:9px 12px}.stat b{font-size:19px;display:block;font-weight:500}.stat span{font-size:12.5px;color:var(--muted)}
+.testres{margin-top:8px;border-radius:var(--radius);padding:8px 12px;font-size:13.5px;display:none}
+.testres.on{display:block}.testres.ok{background:var(--ok-bg);color:var(--ok-ink)}
+
+/* documentation */
+.doc{display:grid;grid-template-columns:200px 1fr;gap:0;background:#fff;border:1px solid var(--line);border-radius:var(--radius);min-height:520px}
+.doc nav{border-right:1px solid var(--line);padding:14px 8px;font-size:14px}
+.doc nav a{display:block;padding:6px 10px;color:var(--muted);border-radius:var(--radius)}.doc nav a.on{background:var(--brand-tint);color:var(--ink);font-weight:500}
+.doc nav .g{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding:12px 10px 4px}
+.doc main{padding:20px 26px;min-width:0}
+.doc h2{font-size:20px;margin-bottom:6px}.doc h3{font-size:15.5px;margin:18px 0 6px}
+.doc p{color:var(--muted);font-size:14.5px;margin:0 0 10px}
+.tabs2{display:flex;gap:2px;margin:10px 0 0}.tabs2 button{border:1px solid var(--line-2);border-bottom:0;background:#fff;padding:3px 12px;font-size:12.5px;border-radius:4px 4px 0 0}.tabs2 button.on{background:#0B1F3A;color:#fff;border-color:#0B1F3A}
+
+/* contrat */
+.flow{display:grid;grid-template-columns:1fr 60px 1.2fr;gap:0;align-items:start}
+.mod{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px}
+.mod h3{font-size:15.5px;margin-bottom:8px}.mod h4{margin:10px 0 3px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:500}
+.arrow{display:grid;place-items:center;height:100%;color:var(--muted);font-size:24px}
+.rowx{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.mini{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:11px 14px;font-size:13.5px}
+.mini .lbl{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+.glow{animation:glow 2s ease-out 1}
+@keyframes glow{0%{background:#FFF3C4}100%{background:transparent}}
+.empty{padding:46px 20px;text-align:center;color:var(--muted);background:#fff;border:1px dashed var(--line-2);border-radius:var(--radius)}
+.empty svg{width:42px;height:42px;color:var(--line-2);margin-bottom:8px}
+.twocol{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.use{display:grid;gap:12px}
+.use .u{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:12px 16px}
+.use .u .top{display:flex;justify-content:space-between;font-size:14px}.use .meter{height:7px;background:var(--row);border-radius:4px;margin-top:8px;overflow:hidden}.use .meter i{display:block;height:100%;background:var(--brand)}
+.nt{display:flex;gap:12px;padding:12px 16px;border-bottom:1px solid var(--row);background:#fff}
+.nt .ico{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;flex:none}.nt .ico svg{width:18px;height:18px}
+.nt.warn .ico{background:var(--warn-bg);color:var(--warn)}.nt.error .ico{background:var(--danger-bg);color:var(--danger)}.nt.ok .ico{background:var(--ok-bg);color:var(--ok)}
+.nt .ti{font-size:14.5px}.nt .bd{font-size:13.5px;color:var(--muted)}.nt .mt{font-size:12.5px;color:var(--muted);margin-top:4px}
+.nt .go{align-self:flex-start;border:1px solid var(--line-2);background:#fff;border-radius:var(--radius);height:28px;padding:0 10px;font-size:12.5px;white-space:nowrap}
+.panel{background:#fff;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+@media(max-width:900px){.flow,.twocol,.rowx{grid-template-columns:1fr}.arrow{display:none}.side{display:none}}
+</style>
+</head>
+<body>
+<div class="mock"><b>API et webhooks.</b> <span>Maquette cliquable : créez une clé, ouvrez une adresse de webhook, envoyez un test, lisez le journal. Rien n'est codé.</span>
+ <div class="ph">Catalogue affiché :
+  <div class="seg" id="phase"><button data-p="socle" class="on">Socle seul</button><button data-p="full">Avec les fonctions</button></div>
+ </div>
+</div>
+
+<div class="scenes" id="scenes">
+ <button data-s="1" class="on">1 · Où ça se range</button>
+ <button data-s="2">2 · Clés</button>
+ <button data-s="3">3 · Créer une clé</button>
+ <button data-s="4">4 · Webhooks</button>
+ <button data-s="5">5 · Journal</button>
+ <button data-s="6">6 · Documentation</button>
+ <button data-s="7">7 · Alertes et quotas</button>
+ <button data-s="8">8 · Une fonction qui s'ajoute</button>
+</div>
+
+<section class="scene on" id="s1">
+ <h2 class="t">1 · Où ça se range</h2>
+ <p class="lead">Un onglet <b>API et webhooks</b> dans le hub Contenus, juste après <b>Sources de données</b> : même public (administrateur, mode Expert) et même licence (Pro). Les trois états ci-dessous : mode Expert avec licence Pro, mode Expert en Essential, mode simple.</p>
+ <div class="tools"><div class="seg" id="st1"><button data-m="pro" class="on">Expert · Pro</button><button data-m="ess">Expert · Essential</button><button data-m="simple">Mode simple</button></div></div>
+ <div class="win" id="win1"></div>
+ <div class="note"><b>Mode simple :</b> l'onglet n'existe pas du tout (ni lecture seule, ni cadenas), comme « Sources de données ». <b>Essential :</b> l'onglet est visible avec la pastille Pro, la page explique à quoi ça sert et propose de passer à Pro ; aucune clé ne peut être créée.</div>
+ <div class="note dec"><b>Décision à prendre.</b> Hub Contenus (cohérent avec Sources de données, retenu ici) ou Réglages › « Développeurs » ? L'API ne concerne pas que le contenu (écrans, urgence), mais Réglages est déjà chargé et masqué aux membres.</div>
+</section>
+
+<section class="scene" id="s2">
+ <h2 class="t">2 · Clés</h2>
+ <p class="lead">La liste des clés de l'organisation. On voit d'un coup d'œil laquelle expire, laquelle ne sert jamais, laquelle est révoquée. Cliquer une ligne ouvre le tiroir de la clé.</p>
+ <div class="tools"><div class="seg" id="st2"><button data-m="list" class="on">Avec des clés</button><button data-m="empty">Aucune clé</button></div></div>
+ <div class="win" id="win2"></div>
+ <div class="note"><b>Renouveler une clé</b> crée une nouvelle clé identique (même nom, mêmes accès) et laisse l'ancienne valable 24 h : on change la clé dans l'outil sans coupure. <b>Révoquer</b> coupe immédiatement et demande confirmation. Seuls les administrateurs voient cette page ; une clé n'agit jamais en dehors de l'organisation.</div>
+</section>
+
+<section class="scene" id="s3">
+ <h2 class="t">3 · Créer une clé</h2>
+ <p class="lead">Une fenêtre en deux temps : on choisit un <b>gabarit</b> (pas une liste de cases), puis la clé s'affiche <b>une seule fois</b> avec un exemple prêt à copier. « Personnalisée » ouvre la liste des accès pour ceux qui la veulent.</p>
+ <div class="tools"><button class="btn pri" id="openMk">Ouvrir la fenêtre</button> <span class="hint">Le catalogue de gabarits change avec le sélecteur du haut.</span></div>
+ <div class="win" id="win3"></div>
+ <div class="note"><b>Adresses autorisées</b> (⚙ options avancées) : limiter la clé à certaines adresses IP, utile pour une centrale d'alarme à poste fixe. Proposition, pas indispensable au premier lot.</div>
+</section>
+
+<section class="scene" id="s4">
+ <h2 class="t">4 · Webhooks</h2>
+ <p class="lead">Les adresses qui reçoivent les événements. Chaque carte montre l'état et la dernière livraison. Une adresse désactivée automatiquement le dit clairement et se réactive en un clic. Cliquez une carte.</p>
+ <div class="win" id="win4"></div>
+ <div class="note"><b>Catalogue d'événements.</b> Les cases viennent du registre : en « Socle seul », il n'y a que <code>ping</code> ; en « Avec les fonctions », les événements des modules apparaissent d'eux-mêmes, groupés par catégorie, sans retoucher cet écran.</div>
+</section>
+
+<section class="scene" id="s5">
+ <h2 class="t">5 · Journal des livraisons</h2>
+ <p class="lead">Chaque événement envoyé, avec son résultat. On filtre sur les échecs, on ouvre le détail (corps, signature, réponse, tentatives) et on peut <b>renvoyer</b>. Conservé 30 jours.</p>
+ <div class="win" id="win5"></div>
+</section>
+
+<section class="scene" id="s6">
+ <h2 class="t">6 · Documentation</h2>
+ <p class="lead">Une page d'aide générée depuis les déclarations des modules, à l'adresse et aux couleurs du revendeur. Elle contient surtout ce dont un intégrateur a besoin dans l'heure : premier appel, signature à vérifier, limites, codes d'erreur.</p>
+ <div class="win" id="win6"></div>
+ <div class="note"><b>Référence complète</b> (toutes les routes, essayables) : page OpenAPI générée, liée depuis la barre de gauche. Le texte écrit à la main se limite aux sections « Démarrer ».</div>
+</section>
+
+<section class="scene" id="s7">
+ <h2 class="t">7 · Alertes et quotas</h2>
+ <p class="lead">Pas de second système d'alerte : les incidents d'API passent par le <b>centre de notifications</b> (nouvelle catégorie « Intégrations et API »), et l'usage s'ajoute à la page <b>Réglages › Utilisation</b>.</p>
+ <div class="twocol">
+  <div><div class="sec" style="margin-top:0">Dans le centre de notifications</div><div class="panel" id="nts"></div>
+   <div class="hint" style="margin-top:8px">Aussi par e-mail et sur mobile selon les choix d'alerte de l'organisation. L'abonnement et les nouveautés restent toujours suivis ; « Intégrations et API » est suivi par défaut dès qu'une clé existe.</div></div>
+  <div><div class="sec" style="margin-top:0">Réglages › Utilisation</div><div class="use" id="use"></div></div>
+ </div>
+ <div class="note dec"><b>Décision à prendre.</b> Limites par organisation proposées : 10 clés, 5 adresses de webhook, 60 requêtes/min par clé, 30 jours de journal. Acceptables, ou à régler par la console (par client) ?</div>
+</section>
+
+<section class="scene" id="s8">
+ <h2 class="t">8 · Une fonction qui s'ajoute</h2>
+ <p class="lead">Ce que veut dire « le socle est compatible avec la suite » : une fonction future ne touche à aucun écran ci-dessus. Elle déclare ses éléments, et ils apparaissent là où il faut.</p>
+ <div class="flow">
+  <div class="mod">
+   <h3>Module « Urgence » (exemple, plus tard)</h3>
+   <h4>Accès déclarés</h4><div class="ev"><i>emergency:write</i><i>emergency:read</i></div>
+   <h4>Routes déclarées</h4><div class="ev"><i>POST /emergency</i><i>GET /emergency/{id}</i><i>DELETE /emergency/{id}</i></div>
+   <h4>Événements déclarés</h4><div class="ev"><i>emergency.started</i><i>emergency.ended</i><i>emergency.acknowledged</i></div>
+   <h4>Gabarit rejoint</h4><div class="ev"><i>Alerte d'urgence seule</i></div>
+   <h4>Documentation</h4><div class="hint">résumés et exemples de chaque route et de chaque événement</div>
+  </div>
+  <div class="arrow">→</div>
+  <div>
+   <div class="rowx">
+    <div class="mini"><div class="lbl">Créer une clé › Gabarits</div><div class="tpl on" style="margin:0"><span class="rd"></span><div><b class="glow">Alerte d'urgence seule</b><small>Déclencher et lever une urgence</small></div></div></div>
+    <div class="mini"><div class="lbl">Créer une clé › Personnalisée</div><div class="ck on" style="padding:3px 0"><span class="bx"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span><div class="glow"><code>emergency:write</code><small>Déclencher et lever une urgence</small></div></div></div>
+   </div>
+   <div class="rowx">
+    <div class="mini"><div class="lbl">Webhooks › Événements</div><div class="ck on" style="padding:3px 0"><span class="bx"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span><div class="glow"><code>emergency.started</code><small>Une urgence est affichée sur les écrans</small></div></div></div>
+    <div class="mini"><div class="lbl">Documentation › Référence</div><div class="glow" style="font-size:13.5px"><code>POST /api/v1/emergency</code><div class="hint">Déclencher une urgence · accès <code>emergency:write</code> · plan Pro</div></div></div>
+   </div>
+   <div class="mini"><div class="lbl">Ce que le module appelle dans son code métier</div><div class="code" style="white-space:pre-wrap"><span class="c">// une seule ligne, sans attente, sans erreur possible</span>
+events.<span class="k">Publish</span>(organisation, <span class="s">"emergency.started"</span>, données);</div></div>
+  </div>
+ </div>
+ <div class="note"><b>Test d'acceptation du socle :</b> un faux module « essai » est branché dans les tests ; ses accès, routes et événements doivent apparaître seuls dans la création de clé, les cases de webhook et la documentation. Si un écran doit être modifié, le socle est mal découpé.</div>
+</section>
+
+<script>
+/* ---------- données ---------- */
+const I={
+ bell:'<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
+ help:'<circle cx="12" cy="12" r="9.5"/><path d="M9.5 9.3a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.2-2.5 3.8M12 17.5h.01"/>',
+ gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
+ screen:'<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
+ cal:'<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 10h18M8 2v4M16 2v4"/>',
+ folder:'<path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+ lock:'<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+ search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
+ plus:'<path d="M12 5v14M5 12h14"/>',
+ dots:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+ check:'<path d="M20 6L9 17l-5-5"/>',
+ warn:'<path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+ ext:'<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+ key:'<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/>',
+ hook:'<path d="M9 2v6M15 2v6"/><path d="M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M12 18v4"/>',
+ send:'<path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/>',
+ copy:'<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'
+};
+const sv=(k,w)=>`<svg viewBox="0 0 24 24"${w?` width="${w}" height="${w}"`:''}>${I[k]}</svg>`;
+
+let PH='socle';  // socle | full
+const SCOPES={
+ socle:[['Compte',[['account:read','Lire les informations de la clé et de l\'organisation'],['webhooks:manage','Gérer ses adresses de webhook']]]],
+ full:[['Compte',[['account:read','Lire les informations de la clé et de l\'organisation'],['webhooks:manage','Gérer ses adresses de webhook']]],
+       ['Écrans',[['screens:read','Lister les écrans et leur état'],['screens:write','Modifier les paramètres d\'un écran']]],
+       ['Urgence',[['emergency:write','Déclencher et lever une urgence']]],
+       ['Contenus et données',[['data:write','Envoyer des lignes dans un jeu de données'],['media:write','Importer des médias dans un dossier']]]]
+};
+const TPLS={
+ socle:[['Lecture seule','Lire les informations du compte',['account:read']],['Gestion des webhooks','Gérer ses adresses de webhook',['account:read','webhooks:manage']]],
+ full:[['Lecture seule','Consulter les écrans et leur état',['account:read','screens:read']],['Alerte d\'urgence seule','Déclencher et lever une urgence',['emergency:write']],['Intégration complète','Tout, sauf la gestion des webhooks',['account:read','screens:read','screens:write','emergency:write','data:write','media:write']]]
+};
+const EVENTS={
+ socle:[['Système',[['ping','Événement d\'essai envoyé par le bouton « Envoyer un test »']]]],
+ full:[['Système',[['ping','Événement d\'essai envoyé par le bouton « Envoyer un test »']]],
+       ['Écrans',[['screen.offline','Un écran ne répond plus (après le délai d\'alerte)'],['screen.online','Un écran est de retour en ligne'],['screen.published','Une publication est terminée ou a échoué']]],
+       ['Contenus et données',[['content.published','Une liste ou une composition est publiée'],['data.failed','Une source de données ne peut plus être lue']]],
+       ['Urgence',[['emergency.started','Une urgence est affichée sur les écrans'],['emergency.ended','Une urgence est levée ou expirée'],['emergency.acknowledged','Un écran a accusé réception d\'une urgence']]]]
+};
+const KEYS=[
+ {id:1,n:'Supervision Zabbix',p:'lkv_7Hq2…x9Kd',g:'Lecture seule',by:'Camille Rochat',on:'12 sept.',last:'il y a 2 min',calls:'14 230',st:'ok',exp:'Jamais'},
+ {id:2,n:'Alarme incendie bâtiment B',p:'lkv_Qm4t…c7Zp',g:'Alerte d\'urgence seule',by:'Camille Rochat',on:'hier',last:'Jamais utilisée',calls:'0',st:'info',exp:'dans 1 an'},
+ {id:3,n:'Zapier',p:'lkv_Bx9a…2Lre',g:'Intégration complète',by:'Nadia Perret',on:'3 août',last:'hier 16:20',calls:'2 910',st:'warn',exp:'dans 9 jours'},
+ {id:4,n:'Ancien script RH',p:'lkv_Ft3w…m0Qs',g:'Lecture seule',by:'Nadia Perret',on:'14 mars',last:'il y a 6 mois',calls:'0',st:'off',exp:'Révoquée le 2 oct.'},
+ {id:5,n:'Essai agence',p:'lkv_Zk8e…h4Vn',g:'Lecture seule',by:'Camille Rochat',on:'20 juin',last:'il y a 2 mois',calls:'0',st:'off',exp:'Expirée le 20 sept.'}
+];
+const KEYS_SOCLE=[{id:1,n:'Essai de connexion',p:'lkv_7Hq2…x9Kd',g:'Lecture seule',by:'Camille Rochat',on:'aujourd\'hui',last:'il y a 4 min',calls:'12',st:'ok',exp:'dans 30 jours'}];
+const STL={ok:['ok','Active'],info:['info','Jamais utilisée'],warn:['warn','Expire bientôt'],off:['off','Inactive'],err:['err','Erreurs']};
+const HOOKS=[
+ {id:1,n:'Supervision Teams',u:'https://hooks.exemple.ch/linkivi/supervision',ev:['screen.offline','screen.online'],st:'ok',last:'il y a 2 min',rate:'99,8 %',med:'240 ms',on:1},
+ {id:2,n:'Tickets GLPI',u:'https://glpi.exemple.ch/plugins/webhook/linkivi',ev:['screen.offline','screen.online','screen.published'],st:'err',last:'il y a 2 h',rate:'0 %',med:'timeout',on:0,why:'10 échecs consécutifs (HTTP 503)'},
+ {id:3,n:'Journal d\'audit',u:'https://siem.exemple.ch/in/linkivi',ev:['content.published','screen.published'],st:'ok',last:'il y a 14 min',rate:'100 %',med:'180 ms',on:1}
+];
+const HOOKS_SOCLE=[{id:1,n:'Récepteur d\'essai',u:'https://webhook.site/7c1e-…',ev:['ping'],st:'ok',last:'il y a 4 min',rate:'100 %',med:'320 ms',on:1}];
+const JR=[
+ ['evt_9f31','screen.offline','Supervision Teams','ok','200','1','14:36','Salle d\'attente'],
+ ['evt_9f30','screen.published','Tickets GLPI','err','503','5 / 5','14:31','abandonné'],
+ ['evt_9f2e','content.published','Journal d\'audit','ok','200','1','14:22',''],
+ ['evt_9f2a','screen.online','Supervision Teams','ok','200','1','14:20',''],
+ ['evt_9f27','screen.offline','Tickets GLPI','warn','503','3 / 5','14:02','prochaine tentative 16:02'],
+ ['evt_9f21','ping','Supervision Teams','ok','200','1','13:50','Envoyer un test'],
+ ['evt_9f1b','screen.published','Journal d\'audit','ok','200','1','13:12',''],
+ ['evt_9f10','screen.offline','Supervision Teams','warn','timeout','2 / 5','12:41','prochaine tentative 12:46']
+];
+const JR_SOCLE=[['evt_0a14','ping','Récepteur d\'essai','ok','200','1','14:48','Envoyer un test'],['evt_0a0b','ping','Récepteur d\'essai','err','404','5 / 5','14:20','abandonné · adresse corrigée depuis'],['evt_09ff','ping','Récepteur d\'essai','ok','200','2 / 5','14:18','succès à la 2e tentative']];
+const keys=()=>PH==='full'?KEYS:KEYS_SOCLE, hooks=()=>PH==='full'?HOOKS:HOOKS_SOCLE, jr=()=>PH==='full'?JR:JR_SOCLE;
+const $=s=>document.querySelector(s);
+const pill=(st,txt)=>`<span class="pill ${STL[st]?STL[st][0]:st}">${txt}</span>`;
+
+/* ---------- coque d'application ---------- */
+function shell(inner,tab,opts){
+ opts=opts||{};
+ const tabs=['Médiathèque','Listes','Compositions','Intégrations','Sources de données','API et webhooks'];
+ const hub=tabs.map(t=>{
+  if(opts.simple&&['Intégrations','Sources de données','API et webhooks'].includes(t))return '';
+  const lk=(opts.ess&&['Sources de données','API et webhooks'].includes(t))?`<span class="tag p">Pro</span>`:'';
+  return `<span class="${t===tab?'on':''}">${t}${lk}</span>`}).join('');
+ return `<div class="side"><div class="logo">linkivi<i>.</i></div>
+  <div class="nav">${sv('screen')}Écrans</div><div class="nav">${sv('cal')}Programmation</div><div class="nav act">${sv('folder')}Contenus</div><div class="sp"></div>
+  <div class="tog">Mode expert <span class="sw ${opts.simple?'off':''}" style="margin-left:auto"></span></div></div>
+ <div class="col"><div class="qbar"><span class="org">Atelier Dupraz SA</span><span class="ic">${sv('help')}</span><span class="ic">${sv('bell')}<b class="dot">1</b></span><span class="ic">${sv('gear')}</span><span class="av">CR</span></div>
+ <div class="hubtabs">${hub}</div><div class="body">${inner}</div></div>`;
+}
+const head=(sub,btn)=>`<div class="head"><div><h1>API et webhooks</h1><p class="sub">${sub}</p></div>${btn||''}</div>`;
+function subtabs(cur){
+ const nh=hooks().length, nk=keys().filter(k=>k.st!=='off').length;
+ const bad=hooks().some(h=>!h.on);
+ return `<div class="subtabs"><button data-st="keys" class="${cur==='keys'?'on':''}">Clés<em>${nk}</em></button><button data-st="hooks" class="${cur==='hooks'?'on':''}">Webhooks<em ${bad?'class="r"':''}>${nh}</em></button><button data-st="log" class="${cur==='log'?'on':''}">Journal</button><span class="sp"></span><a href="#" data-doc>Documentation ${sv('ext')}</a></div>`;
+}
+const x=`<button class="x" data-close>×</button>`;
+
+/* ---------- scène 1 ---------- */
+let m1='pro';
+function r1(){
+ const w=$('#win1');
+ if(m1==='simple'){w.innerHTML=shell(`<div class="head"><div><h1>Médiathèque</h1><p class="sub">Contenu inchangé : l'onglet API et webhooks n'est pas affiché.</p></div></div><div class="empty">${sv('folder')}<div>Médiathèque (inchangée)</div></div>`,'Médiathèque',{simple:1});return}
+ if(m1==='ess'){w.innerHTML=shell(head('Connectez Linkivi à vos outils : alarmes, supervision, automatisations.')+`<div class="empty" style="padding:50px">${sv('lock')}<h3 style="color:var(--ink);font-size:18px;margin-bottom:6px">L'API et les webhooks font partie du plan Pro</h3><p style="max-width:520px;margin:0 auto 14px">Déclenchez une urgence depuis une centrale d'alarme, recevez un message quand un écran tombe, envoyez des données depuis votre système. Vos clés et vos adresses restent inchangées si vous repassez en Essential : elles sont simplement suspendues.</p><button class="btn pri">Passer à Pro</button> <button class="btn">Voir la documentation</button></div>`,'API et webhooks',{ess:1});return}
+ w.innerHTML=shell(head('Clés d\'accès et adresses de webhook de votre organisation.')+`<div class="banner info">${sv('key')}<div class="x">Aucune clé pour l'instant. Commencez par créer une clé : elle vous donne un accès sécurisé à l'API.</div><button class="btn pri sm">Créer une clé</button></div>`+subtabs('keys')+`<div class="hint">Les trois sous-onglets sont détaillés dans les scènes suivantes.</div>`,'API et webhooks');
+}
+
+/* ---------- scène 2 : clés ---------- */
+let m2='list',f2='all',drawerKey=null;
+function keyRow(k){const s=STL[k.st];return `<tr class="rw" data-key="${k.id}"><td><b>${k.n}</b><span class="sub2 mono">${k.p}</span></td><td><span class="gab">${k.g}</span></td><td>${k.by}<span class="sub2">${k.on}</span></td><td ${k.st==='info'?'style="color:var(--muted)"':''}>${k.last}</td><td>${k.calls}</td><td>${pill(k.st,s[1])}${k.st==='warn'?`<span class="sub2">${k.exp}</span>`:''}${k.st==='off'?`<span class="sub2">${k.exp}</span>`:''}</td><td><button class="more">${sv('dots')}</button></td></tr>`}
+function r2(){
+ const w=$('#win2');
+ const all=m2==='empty'?[]:keys();
+ const L=all.filter(k=>f2==='all'||(f2==='act'&&['ok','info'].includes(k.st))||(f2==='watch'&&['warn','info'].includes(k.st))||(f2==='off'&&k.st==='off'));
+ const cnt=t=>all.filter(k=>t==='act'?['ok','info'].includes(k.st):t==='watch'?['warn','info'].includes(k.st):k.st==='off').length;
+ let body=head('Clés d\'accès et adresses de webhook de votre organisation.',`<button class="btn pri" data-mk>${sv('plus')}Créer une clé</button>`)+subtabs('keys');
+ if(!all.length) body+=`<div class="empty">${sv('key')}<h3 style="color:var(--ink);font-size:17px;margin-bottom:4px">Aucune clé</h3><p style="max-width:460px;margin:0 auto 14px">Une clé permet à un autre système (alarme, supervision, automatisation) d'appeler Linkivi. Elle n'est affichée qu'une seule fois, à sa création.</p><button class="btn pri" data-mk>Créer une clé</button></div>`;
+ else body+=`<div class="tools"><div class="search">${sv('search')}<input placeholder="Rechercher une clé"></div><div class="chips"><span class="chip ${f2==='all'?'on':''}" data-f="all">Toutes <small>${all.length}</small></span><span class="chip ${f2==='act'?'on':''}" data-f="act">Actives <small>${cnt('act')}</small></span><span class="chip ${f2==='watch'?'on':''}" data-f="watch">À surveiller <small>${cnt('watch')}</small></span><span class="chip ${f2==='off'?'on':''}" data-f="off">Révoquées ou expirées <small>${cnt('off')}</small></span></div></div>
+ <table class="tb"><tr><th>Nom</th><th>Accès</th><th>Créée par</th><th>Dernière utilisation</th><th>Appels (30 j)</th><th>État</th><th></th></tr>${L.map(keyRow).join('')}</table>`;
+ w.innerHTML=shell(body,'API et webhooks')+`<div class="scrim" data-close></div><aside class="drawer" id="dk"></aside>`;
+ if(drawerKey)openKey(drawerKey);
+}
+function openKey(id){
+ drawerKey=id;const k=keys().find(z=>z.id==id);if(!k)return;
+ const bars=Array.from({length:30},(_,i)=>{const v=k.calls==='0'?0:Math.round(8+Math.abs(Math.sin(i*1.7+k.id))*38);return `<i style="height:${Math.max(v,2)}px"></i>`}).join('');
+ const dis=k.st==='off';
+ $('#dk').innerHTML=`<div class="dh"><div><h2>${k.n}</h2><div class="sub mono">${k.p}</div></div>${x}</div>
+ <div class="db"><dl class="kv"><dt>État</dt><dd>${pill(k.st,STL[k.st][1])}</dd><dt>Accès</dt><dd><span class="gab">${k.g}</span></dd><dt>Agit au nom de</dt><dd>${k.by} <span class="hint" style="display:block">Les médias importés par cette clé lui appartiennent.</span></dd><dt>Créée</dt><dd>${k.on}</dd><dt>Expiration</dt><dd>${k.exp}</dd><dt>Dernière utilisation</dt><dd>${k.last}</dd></dl>
+ <div class="sec">Appels des 30 derniers jours</div><div class="bars">${bars}</div><div class="hint">${k.calls} appels · 0,4 % d'erreurs</div>
+ <div class="sec">Accès accordés</div><div class="ev">${(TPLS.full.find(t=>t[0]===k.g)||TPLS.full[0])[2].map(s=>`<i>${s}</i>`).join('')}</div>
+ ${dis?'':`<div class="sec">Renouveler</div><p class="hint" style="margin:0">Crée une nouvelle clé identique ; l'ancienne reste valable 24 h pour laisser le temps de changer la clé dans l'outil.</p>`}</div>
+ <div class="df"><span>${dis?'':`<button class="btn" data-renew>Renouveler</button>`}</span><span>${dis?'':`<button class="btn dng" data-revoke>Révoquer</button>`}</span></div>`;
+ $('#dk').classList.add('on');$('#win2 .scrim').classList.add('on');
+}
+
+/* ---------- scène 3 : création ---------- */
+let tplSel=0,custom=false,mkStep=1,scopesOn=new Set();
+function r3(){
+ const w=$('#win3');
+ w.innerHTML=shell(head('Clés d\'accès et adresses de webhook de votre organisation.',`<button class="btn pri">${sv('plus')}Créer une clé</button>`)+subtabs('keys')+`<div class="hint">Fenêtre de création ouverte par-dessus la liste.</div>`,'API et webhooks')+`<div class="scrim on"></div><div class="modal on" id="mk"></div>`;
+ drawMk();
+}
+function drawMk(){
+ const T=TPLS[PH];if(tplSel>=T.length)tplSel=0;
+ if(mkStep===2){
+  $('#mk').innerHTML=`<div class="dh"><div><h2>Clé créée</h2><div class="sub">Copiez-la maintenant : elle ne sera plus jamais affichée.</div></div></div>
+  <div class="db"><div class="banner warn" style="margin-top:12px">${sv('warn')}<div class="x">Linkivi ne conserve qu'une empreinte de cette clé. Si vous la perdez, il faudra en créer une autre.</div></div>
+  <label class="f">Votre clé</label><div class="keybox"><span id="kv">lkv_Zr7mQ2c9XhPd4VtLs8Kw3NfYb6Ae1GjU5H2k</span><button class="btn sm" data-copy>${sv('copy')}Copier</button></div>
+  <label class="f">Premier essai <small>(copiez et collez dans un terminal)</small></label>
+  <div class="code"><button class="cp" data-copy>Copier</button><span class="k">curl</span> https://affichage.exemple.ch/api/v1/me \\
+  -H <span class="s">"Authorization: Bearer lkv_Zr7mQ2c9…H2k"</span></div>
+  <div class="hint">Répond avec le nom de la clé, l'organisation et les accès accordés. <a class="lnk" href="#" data-doc>Voir la documentation</a></div></div>
+  <div class="df"><span class="hint">Nom : Intégration essai · ${T[tplSel][0]}</span><button class="btn pri" data-done>J'ai copié la clé</button></div>`;return}
+ const tp=T.map((t,i)=>`<div class="tpl ${!custom&&i===tplSel?'on':''}" data-tpl="${i}"><span class="rd"></span><div><b>${t[0]}</b><small>${t[1]}</small><div class="sc">${t[2].map(s=>`<i>${s}</i>`).join('')}</div></div></div>`).join('')
+  +`<div class="tpl ${custom?'on':''}" data-tpl="custom"><span class="rd"></span><div><b>Personnalisée</b><small>Choisir les accès un par un</small></div></div>`;
+ const sg=custom?SCOPES[PH].map(g=>`<div class="scg"><div class="gh">${g[0]}</div>${g[1].map(s=>`<div class="ck ${scopesOn.has(s[0])?'on':''}" data-sc="${s[0]}"><span class="bx">${sv('check')}</span><div><code>${s[0]}</code><small>${s[1]}</small></div></div>`).join('')}</div>`).join(''):'';
+ $('#mk').innerHTML=`<div class="dh"><div><h2>Créer une clé</h2><div class="sub">Une clé donne à un autre système un accès à votre organisation.</div></div><button class="x" data-closemk>×</button></div>
+ <div class="db"><label class="f">Nom <small>pour la reconnaître plus tard</small></label><input type="text" value="Intégration essai">
+ <label class="f">Accès</label><div class="tpls">${tp}</div>${sg}
+ <label class="f">Expiration</label><select><option>Dans 90 jours</option><option>Dans 1 an</option><option>Dans 30 jours</option><option>Jamais (déconseillé)</option></select><div class="hint">Un rappel est envoyé 14 jours avant l'expiration.</div>
+ <details style="margin-top:14px"><summary style="cursor:pointer;font-size:13.5px;color:var(--signal)">⚙ Options avancées</summary><label class="f">Adresses IP autorisées <small>facultatif</small></label><input type="text" placeholder="203.0.113.10, 198.51.100.0/24"><div class="hint">Vide : la clé fonctionne depuis n'importe où.</div></details></div>
+ <div class="df"><button class="btn" data-closemk>Annuler</button><button class="btn pri" data-create>Créer la clé</button></div>`;
+}
+
+/* ---------- scène 4 : webhooks ---------- */
+let drawerHook=null,hookMode='edit',evSel=new Set();
+function hookCard(h){return `<div class="cd ${h.on?'':'bad'}" data-hook="${h.id}"><h3>${h.n}${pill(h.st==='err'?'err':'ok',h.on?'Actif':'Désactivé')}</h3><div class="url mono">${h.u}</div><div class="ev">${h.ev.map(e=>`<i>${e}</i>`).join('')}</div><div class="ft"><span>Dernière livraison ${h.last}</span><span>${h.rate} · ${h.med}</span></div></div>`}
+function r4(){
+ const w=$('#win4');const H=hooks();const bad=H.find(h=>!h.on);
+ let body=head('Clés d\'accès et adresses de webhook de votre organisation.',`<button class="btn pri" data-newhook>${sv('plus')}Ajouter une adresse</button>`)+subtabs('hooks');
+ if(bad)body+=`<div class="banner err">${sv('warn')}<div class="x"><b>« ${bad.n} » est désactivé</b> depuis 2 h : ${bad.why}. Les événements des dernières 24 h sont gardés.</div><button class="btn sm" data-openhook="${bad.id}">Voir</button><button class="btn pri sm" data-react="${bad.id}">Réactiver et rejouer</button></div>`;
+ body+=`<div class="cards">${H.map(hookCard).join('')}<div class="cd add" data-newhook>${sv('plus',22)}Ajouter une adresse</div></div>`;
+ w.innerHTML=shell(body,'API et webhooks')+`<div class="scrim" data-close></div><aside class="drawer" id="dh"></aside>`;
+ if(drawerHook)openHook(drawerHook,hookMode);
+}
+function evGroups(){return EVENTS[PH].map(g=>`<div class="scg"><div class="gh" style="display:flex;justify-content:space-between">${g[0]}<button class="lnk" style="font-size:12.5px" data-all="${g[0]}">Tout cocher</button></div>${g[1].map(e=>`<div class="ck ${evSel.has(e[0])?'on':''}" data-ev="${e[0]}"><span class="bx">${sv('check')}</span><div><code>${e[0]}</code><small>${e[1]}</small></div></div>`).join('')}</div>`).join('')}
+function openHook(id,mode){
+ drawerHook=id;hookMode=mode||'edit';
+ const n=id==='new';const h=n?{n:'',u:'',ev:[],st:'ok',on:1,rate:'',med:'',last:''}:hooks().find(z=>z.id==id);if(!h)return;
+ if(!n&&mode!=='keep'&&!evSel.size)evSel=new Set(h.ev);
+ if(n&&hookMode==='new'&&evSel.size===0&&false)evSel=new Set();
+ const D=$('#dh');
+ if(hookMode==='created'){
+  D.innerHTML=`<div class="dh"><div><h2>Adresse ajoutée</h2><div class="sub">Gardez le secret : il sert à vérifier que les messages viennent de Linkivi.</div></div>${x}</div>
+  <div class="db"><div class="banner warn" style="margin-top:12px">${sv('warn')}<div class="x">Le secret n'est affiché qu'une fois. Vous pourrez en générer un nouveau (l'ancien reste valable 24 h).</div></div>
+  <label class="f">Secret de signature</label><div class="keybox"><span>whsec_8Gd2LqXp7Rt3Mv9ZkB4Nc6YaWe1HjUs5</span><button class="btn sm" data-copy>${sv('copy')}Copier</button></div>
+  <p class="hint" style="margin-top:10px">Chaque envoi porte l'en-tête <code>Linkivi-Signature</code> ; la documentation donne le code de vérification en trois langages.</p></div>
+  <div class="df"><span></span><button class="btn pri" data-closehook>Terminé</button></div>`;
+ }else{
+  const off=!n&&!h.on;
+  D.innerHTML=`<div class="dh"><div><h2>${n?'Ajouter une adresse':h.n}</h2>${n?'':`<div class="sub">${pill(off?'err':'ok',off?'Désactivé':'Actif')}</div>`}</div>${x}</div>
+  <div class="db">
+  ${off?`<div class="banner err" style="margin-top:12px">${sv('warn')}<div class="x">${h.why}. Corrigez le récepteur, puis réactivez.</div></div>`:''}
+  <label class="f">Nom</label><input type="text" value="${h.n}" placeholder="Supervision Teams">
+  <label class="f">Adresse de réception <small>HTTPS obligatoire</small></label><input type="url" class="mono" value="${h.u}" placeholder="https://exemple.ch/hooks/linkivi">
+  <div class="hint">Les adresses internes ou privées sont refusées. Pas de redirection suivie. Réponse attendue : 2xx en moins de 10 s.</div>
+  ${n?'':`<div class="stats"><div class="stat"><b>${h.rate}</b><span>livrés (7 j)</span></div><div class="stat"><b>${h.med}</b><span>délai médian</span></div><div class="stat"><b>${off?'10':'0'}</b><span>échecs de suite</span></div></div>`}
+  <div class="sec">Événements envoyés</div>${evGroups()}
+  ${n?'':`<div class="sec">Secret de signature</div><div class="keybox"><span>whsec_••••••••••••••••••••••••</span><button class="btn sm">Afficher</button></div><div class="hint">« Renouveler » crée un nouveau secret ; l'ancien reste valable 24 h pour changer sans coupure.</div><button class="btn sm" style="margin-top:8px">Renouveler le secret</button>
+  <div class="sec">Essai</div><button class="btn" data-test>${sv('send')}Envoyer un test</button><div class="testres" id="tr"></div>`}
+  </div>
+  <div class="df"><span>${n?'':`<button class="btn dng sm">Supprimer</button>`}</span><span style="display:flex;gap:8px">${n?'':off?`<button class="btn pri" data-react="${h.id}">Réactiver et rejouer</button>`:`<button class="btn">Désactiver</button>`}<button class="btn ${n?'pri':''}" data-savehook="${n?'new':''}">${n?'Ajouter':'Enregistrer'}</button></span></div>`;
+ }
+ D.classList.add('on');$('#win4 .scrim').classList.add('on');
+}
+
+/* ---------- scène 5 : journal ---------- */
+let f5='all',drawerLog=null;
+function r5(){
+ const w=$('#win5');const R=jr();
+ const L=R.filter(r=>f5==='all'||(f5==='err'&&['err','warn'].includes(r[3])));
+ let body=head('Clés d\'accès et adresses de webhook de votre organisation.')+subtabs('log')+
+ `<div class="tools"><div class="chips"><span class="chip ${f5==='all'?'on':''}" data-f5="all">Toutes <small>${R.length}</small></span><span class="chip ${f5==='err'?'on':''}" data-f5="err">Échecs et attentes <small>${R.filter(r=>['err','warn'].includes(r[3])).length}</small></span></div>
+ <select style="width:auto"><option>Toutes les adresses</option>${hooks().map(h=>`<option>${h.n}</option>`)}</select><select style="width:auto"><option>Tous les événements</option>${EVENTS[PH].flatMap(g=>g[1]).map(e=>`<option>${e[0]}</option>`)}</select><span class="hint" style="margin-left:auto">Conservé 30 jours</span></div>
+ <table class="tb"><tr><th>Événement</th><th>Adresse</th><th>Résultat</th><th>Tentatives</th><th>Heure</th></tr>${L.map(r=>`<tr class="rw" data-lg="${r[0]}"><td><span class="mono">${r[1]}</span><span class="sub2">${r[0]}${r[7]?' · '+r[7]:''}</span></td><td>${r[2]}</td><td>${pill(r[3]==='ok'?'ok':r[3]==='warn'?'warn':'err',r[3]==='ok'?'Livré '+r[4]:r[3]==='warn'?'En attente':r[5]==='5 / 5'?'Abandonné '+r[4]:'Échec '+r[4])}</td><td>${r[5]}</td><td>${r[6]}</td></tr>`).join('')}</table>`;
+ w.innerHTML=shell(body,'API et webhooks')+`<div class="scrim" data-close></div><aside class="drawer" id="dl"></aside>`;
+ if(drawerLog)openLog(drawerLog);
+}
+function openLog(id){
+ drawerLog=id;const r=jr().find(z=>z[0]===id);if(!r)return;const bad=r[3]!=='ok';
+ $('#dl').innerHTML=`<div class="dh"><div><h2 class="mono" style="font-size:16px">${r[1]}</h2><div class="sub">${r[0]} · ${r[2]} · ${r[6]}</div></div>${x}</div>
+ <div class="db"><div class="sec">Tentatives</div><div class="tl">${bad?`<div class="er">1 · ${r[6]} · ${r[4]==='timeout'?'délai de 10 s dépassé':'HTTP '+r[4]}</div><div class="er">2 · +1 min · ${r[4]==='timeout'?'délai de 10 s dépassé':'HTTP '+r[4]}</div><div class="er">3 · +5 min · ${r[4]==='timeout'?'délai de 10 s dépassé':'HTTP '+r[4]}</div>${r[5]==='5 / 5'?`<div class="er">4 · +30 min · HTTP ${r[4]}</div><div class="er">5 · +2 h · HTTP ${r[4]}</div><div class="nx">Abandonné : adresse désactivée</div>`:`<div class="nx">${r[7]}</div>`}`:`<div class="ok">1 · ${r[6]} · HTTP ${r[4]} en 212 ms</div>`}</div>
+ <div class="sec">Envoyé</div><div class="code"><span class="c">POST ${hooks().find(h=>h.n===r[2])?.u||''}</span>
+Linkivi-Event: ${r[1]}
+Linkivi-Delivery: dlv_${r[0].slice(4)}a
+Linkivi-Signature: t=1798810560,v1=5257a869…e1c4
+Content-Type: application/json</div>
+ <div class="code" style="margin-top:6px">{
+  <span class="k">"id"</span>: <span class="s">"${r[0]}"</span>,
+  <span class="k">"type"</span>: <span class="s">"${r[1]}"</span>,
+  <span class="k">"apiVersion"</span>: <span class="s">"2026-11"</span>,
+  <span class="k">"createdAt"</span>: <span class="s">"2026-11-01T14:36:02Z"</span>,
+  <span class="k">"organisationId"</span>: <span class="s">"4f0c…a91"</span>,
+  <span class="k">"data"</span>: { <span class="k">"ping"</span>: <span class="s">true</span> }
+}</div>
+ <div class="sec">Réponse du récepteur</div><div class="code">${bad?(r[4]==='timeout'?'(aucune réponse en 10 s)':'HTTP '+r[4]+' Service Unavailable\n\nTry again later.'):'HTTP 200 OK\n\n{ "received": true }'}</div></div>
+ <div class="df"><span class="hint">Corps conservé 30 jours</span><button class="btn pri">Renvoyer</button></div>`;
+ $('#dl').classList.add('on');$('#win5 .scrim').classList.add('on');
+}
+
+/* ---------- scène 6 : documentation ---------- */
+let docLang='curl';
+function r6(){
+ const ver={curl:`<span class="c"># 1. Calculer la signature attendue</span>
+echo -n "$T.$CORPS" | openssl dgst -sha256 -hmac "$SECRET"
+<span class="c"># 2. La comparer à v1, puis refuser si |maintenant - T| > 5 min</span>`,
+  node:`<span class="k">const</span> crypto = require(<span class="s">'crypto'</span>);
+<span class="k">function</span> verifier(corps, entete, secret) {
+  <span class="k">const</span> [t, v1] = entete.split(<span class="s">','</span>).map(p =&gt; p.split(<span class="s">'='</span>)[1]);
+  <span class="k">if</span> (Math.abs(Date.now()/1000 - t) &gt; 300) <span class="k">return</span> false;
+  <span class="k">const</span> attendu = crypto.createHmac(<span class="s">'sha256'</span>, secret).update(t + <span class="s">'.'</span> + corps).digest(<span class="s">'hex'</span>);
+  <span class="k">return</span> crypto.timingSafeEqual(Buffer.from(attendu), Buffer.from(v1));
+}`,
+  cs:`<span class="k">static bool</span> Verifier(<span class="k">string</span> corps, <span class="k">string</span> entete, <span class="k">string</span> secret) {
+  <span class="k">var</span> p = entete.Split(<span class="s">','</span>).Select(x =&gt; x.Split(<span class="s">'='</span>)[1]).ToArray();
+  <span class="k">if</span> (Math.Abs(DateTimeOffset.UtcNow.ToUnixTimeSeconds() - <span class="k">long</span>.Parse(p[0])) &gt; 300) <span class="k">return false</span>;
+  <span class="k">using var</span> h = <span class="k">new</span> HMACSHA256(Encoding.UTF8.GetBytes(secret));
+  <span class="k">var</span> attendu = Convert.ToHexString(h.ComputeHash(Encoding.UTF8.GetBytes(p[0] + <span class="s">"."</span> + corps))).ToLower();
+  <span class="k">return</span> CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(attendu), Encoding.UTF8.GetBytes(p[1]));
+}`};
+ $('#win6').innerHTML=`<div class="side" style="display:none"></div><div class="col"><div class="qbar"><span class="org" style="display:flex;gap:10px;align-items:center"><span class="logo" style="font-size:20px;font-weight:500;letter-spacing:-.03em">affichage<span style="color:#CC8400">.</span>exemple</span><span class="tag g">Documentation de l'API</span></span><span class="tag n">v1</span></div>
+ <div class="body" style="padding:20px"><div class="doc"><nav><div class="g">Démarrer</div><a class="on">Premier appel</a><a>Authentification</a><a>Erreurs</a><a>Limites et quotas</a><a>Idempotence</a><div class="g">Webhooks</div><a>Recevoir des événements</a><a>Vérifier la signature</a><a>Réessais</a><div class="g">Référence</div><a>Routes (OpenAPI) ${sv('ext',12)}</a><a>Événements</a><a>Accès (scopes)</a></nav>
+ <main><h2>Premier appel</h2><p>Créez une clé dans <b>Contenus › API et webhooks</b>, puis appelez <code>/me</code> : la réponse vous confirme l'organisation et les accès.</p>
+ <div class="code"><button class="cp">Copier</button><span class="k">curl</span> https://affichage.exemple.ch/api/v1/me \\
+  -H <span class="s">"Authorization: Bearer lkv_votre_clé"</span></div>
+ <h3>Vérifier la signature d'un webhook</h3><p>Chaque envoi porte <code>Linkivi-Signature: t=…,v1=…</code>. Calculez <code>HMAC-SHA256(secret, t + "." + corps)</code>, comparez avec <code>v1</code> sans fuite de temps, et refusez les messages de plus de 5 minutes.</p>
+ <div class="tabs2" id="lang"><button data-l="curl" class="${docLang==='curl'?'on':''}">Shell</button><button data-l="node" class="${docLang==='node'?'on':''}">Node.js</button><button data-l="cs" class="${docLang==='cs'?'on':''}">C#</button></div>
+ <div class="code" style="border-radius:0 4px 4px 4px">${ver[docLang]}</div>
+ <h3>Limites</h3><table class="tb"><tr><th>Classe</th><th>Limite par clé</th><th>Réponse au-delà</th></tr><tr><td>Lecture</td><td>60 requêtes / minute</td><td rowspan="3">429 + <code>Retry-After</code></td></tr><tr><td>Écriture</td><td>30 requêtes / minute</td></tr><tr><td>Urgence</td><td>10 requêtes / minute</td></tr></table>
+ <h3>Erreurs</h3><div class="code">{ <span class="k">"type"</span>: <span class="s">"https://affichage.exemple.ch/docs/erreurs#scope_missing"</span>,
+  <span class="k">"code"</span>: <span class="s">"scope_missing"</span>, <span class="k">"status"</span>: 403,
+  <span class="k">"detail"</span>: <span class="s">"Cette clé n'a pas l'accès « emergency:write »."</span>,
+  <span class="k">"requestId"</span>: <span class="s">"req_01HX…"</span> }</div></main></div></div></div>`;
+}
+
+/* ---------- scène 7 ---------- */
+function r7(){
+ const N=[['error','Webhook « Tickets GLPI » désactivé','10 échecs de suite (HTTP 503). Les événements des 24 dernières heures sont conservés.','il y a 2 h','Voir'],['warn','La clé « Zapier » expire dans 9 jours','Renouvelez-la avant le 10 novembre pour ne pas couper l\'automatisation.','hier 08:00','Renouveler'],['ok','Webhook « Tickets GLPI » rétabli','Réactivé par Camille Rochat ; 14 événements rejoués.','hier 15:12','Voir le journal']];
+ $('#nts').innerHTML=N.map(n=>`<div class="nt ${n[0]}"><span class="ico">${sv(n[0]==='ok'?'check':'warn')}</span><div style="flex:1"><div class="ti">${n[1]}</div><div class="bd">${n[2]}</div><div class="mt"><span class="tag g">Intégrations et API</span> ${n[3]}</div></div><button class="go">${n[4]}</button></div>`).join('');
+ const U=[['Clés d\'API','4 sur 10',40],['Adresses de webhook','3 sur 5',60],['Appels ce mois-ci','48 210',null],['Événements livrés ce mois-ci','12 904',null],['Journal conservé','30 jours',null]];
+ $('#use').innerHTML=U.map(u=>`<div class="u"><div class="top"><span>${u[0]}</span><b>${u[1]}</b></div>${u[2]?`<div class="meter"><i style="width:${u[2]}%"></i></div>`:''}</div>`).join('');
+}
+
+/* ---------- navigation et événements ---------- */
+function go(s){document.querySelectorAll('.scene').forEach(z=>z.classList.toggle('on',z.id==='s'+s));document.querySelectorAll('#scenes button').forEach(b=>b.classList.toggle('on',b.dataset.s==s));scrollTo(0,0)}
+function all(){r1();r2();r3();r4();r5();r6();r7()}
+document.addEventListener('click',e=>{
+ const t=e.target;let el;
+ if(el=t.closest('#scenes button'))return go(el.dataset.s);
+ if(el=t.closest('#phase button')){PH=el.dataset.p;document.querySelectorAll('#phase button').forEach(b=>b.classList.toggle('on',b===el));evSel=new Set();drawerKey=drawerHook=drawerLog=null;return all()}
+ if(el=t.closest('#st1 button')){m1=el.dataset.m;document.querySelectorAll('#st1 button').forEach(b=>b.classList.toggle('on',b===el));return r1()}
+ if(el=t.closest('#st2 button')){m2=el.dataset.m;drawerKey=null;document.querySelectorAll('#st2 button').forEach(b=>b.classList.toggle('on',b===el));return r2()}
+ if(el=t.closest('[data-st]')){const w=el.closest('.scene').id;const m={keys:2,hooks:4,log:5}[el.dataset.st];return go(m)}
+ if(el=t.closest('[data-doc]')){e.preventDefault();return go(6)}
+ if(el=t.closest('[data-f]')){f2=el.dataset.f;return r2()}
+ if(el=t.closest('[data-f5]')){f5=el.dataset.f5;return r5()}
+ if(el=t.closest('[data-mk]')){mkStep=1;custom=false;return go(3)}
+ if(t.closest('#openMk')){mkStep=1;return r3()}
+ if((el=t.closest('[data-key]'))&&!t.closest('.more'))return openKey(el.dataset.key);
+ if(el=t.closest('[data-hook]'))return(evSel=new Set(),openHook(+el.dataset.hook,'edit'));
+ if(el=t.closest('[data-openhook]'))return(evSel=new Set(),openHook(+el.dataset.openhook,'edit'));
+ if(el=t.closest('[data-newhook]'))return(evSel=new Set(),openHook('new','new'));
+ if(el=t.closest('[data-lg]'))return openLog(el.dataset.lg);
+ if(el=t.closest('[data-tpl]')){if(el.dataset.tpl==='custom'){custom=true;scopesOn=new Set(['account:read'])}else{custom=false;tplSel=+el.dataset.tpl}return drawMk()}
+ if(el=t.closest('[data-sc]')){const s=el.dataset.sc;scopesOn.has(s)?scopesOn.delete(s):scopesOn.add(s);return drawMk()}
+ if(el=t.closest('[data-ev]')){const s=el.dataset.ev;evSel.has(s)?evSel.delete(s):evSel.add(s);return openHookKeep()}
+ if(el=t.closest('[data-all]')){const g=EVENTS[PH].find(z=>z[0]===el.dataset.all);g[1].forEach(z=>evSel.add(z[0]));return openHookKeep()}
+ if(t.closest('[data-create]')){mkStep=2;return drawMk()}
+ if(t.closest('[data-done]')||t.closest('[data-closemk]')){mkStep=1;return go(2)}
+ if(el=t.closest('[data-copy]')){const o=el.textContent;el.textContent='Copié ✓';setTimeout(()=>el.innerHTML=o,1200);return}
+ if(t.closest('[data-savehook]')){const nw=t.closest('[data-savehook]').dataset.savehook==='new';return nw?openHook('new','created'):(closeAll(),0)}
+ if(t.closest('[data-closehook]')){return closeAll()}
+ if(el=t.closest('[data-react]')){const h=HOOKS.find(z=>z.id==el.dataset.react);if(h){h.on=1;h.st='ok';h.why='';h.rate='—';h.med='—'}closeAll();return r4()}
+ if(t.closest('[data-test]')){const r=$('#tr');r.className='testres on ok';r.innerHTML='✓ <b>ping</b> livré : HTTP 200 en 212 ms. <a class="lnk" href="#" data-lgjump>Voir dans le journal</a>';return}
+ if(t.closest('[data-lgjump]')){e.preventDefault();return go(5)}
+ if(t.closest('[data-renew]')){const b=t.closest('[data-renew]');b.textContent='Nouvelle clé créée ✓';b.disabled=true;return}
+ if(t.closest('[data-revoke]')){const b=t.closest('[data-revoke]');if(b.dataset.c){b.textContent='Révoquée ✓';b.disabled=true}else{b.dataset.c=1;b.textContent='Confirmer la révocation'}return}
+ if(el=t.closest('#lang button')){docLang=el.dataset.l;return r6()}
+ if(t.closest('[data-close]')||t.matches('.scrim')){closeAll()}
+});
+function openHookKeep(){const y=$('#dh .db').scrollTop;openHook(drawerHook,hookMode==='new'?'new':'keep');$('#dh .db').scrollTop=y}
+function closeAll(){drawerKey=drawerHook=drawerLog=null;evSel=new Set();document.querySelectorAll('.drawer,.scrim:not(.on-fixed)').forEach(z=>{if(!z.closest('#win3'))z.classList.remove('on')})}
+all();
+</script>
+</body>
+</html>

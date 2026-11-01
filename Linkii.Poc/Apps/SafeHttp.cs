@@ -47,7 +47,7 @@ public class SafeHttp
         return _download.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
     }
 
-    private static async ValueTask<Stream> Connect(SocketsHttpConnectionContext ctx, CancellationToken ct)
+    internal static async ValueTask<Stream> Connect(SocketsHttpConnectionContext ctx, CancellationToken ct)
     {
         var addresses = await Dns.GetHostAddressesAsync(ctx.DnsEndPoint.Host, ct);
         var allowed = addresses.Where(IsPublic).ToArray();

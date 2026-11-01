@@ -37,6 +37,7 @@ public static class Notifs
         Alerts.Sync => ("refresh", "Synchronisations"),
         Alerts.Members => ("team", "Équipe et partage"),
         Alerts.Billing => ("card", "Abonnement"),
+        Alerts.Integrations => ("link", "Intégrations et API"),
         _ => ("star", "Nouveautés et système"),
     };
 

@@ -189,6 +189,16 @@
             </div>
 
             <div class="adm-sec">
+                <span class="lb">API et webhooks</span>
+                <div class="adm-note">Limites de cette organisation. Laissez vide pour la valeur par défaut. L'API est réservée à la licence Pro.</div>
+                <div class="adm-ln"><span>Clés d'API (défaut @ApiLimits.DefaultKeys)</span><input type="number" min="0" max="1000" style="width:90px" placeholder="@ApiLimits.DefaultKeys" @bind="apiKeys" /></div>
+                <div class="adm-ln"><span>Adresses de webhook (défaut @ApiLimits.DefaultWebhooks)</span><input type="number" min="0" max="1000" style="width:90px" placeholder="@ApiLimits.DefaultWebhooks" @bind="apiHooks" /></div>
+                <div class="adm-ln"><span>Requêtes par minute et par clé (défaut @ApiLimits.DefaultRatePerMinute)</span><input type="number" min="1" max="@ApiLimits.MaxRatePerMinute" style="width:90px" placeholder="@ApiLimits.DefaultRatePerMinute" @bind="apiRate" /></div>
+                <div class="adm-ln"><span>Jours de journal des livraisons (défaut @ApiLimits.DefaultJournalDays)</span><input type="number" min="1" max="365" style="width:90px" placeholder="@ApiLimits.DefaultJournalDays" @bind="apiDays" /></div>
+                <div class="adm-acts"><button type="button" class="btn ghost sm" @onclick="() => SaveApiLimits(c0.Client.Id)">Enregistrer les limites</button></div>
+            </div>
+
+            <div class="adm-sec">
                 <span class="lb">Informations</span>
                 <div class="adm-ln"><span>Administrateur</span><span>@(o?.Name) <span class="adm-sub">@o?.Email</span></span></div>
                 <div class="adm-ln"><span>Revendeur</span><span>@c0.Reseller</span></div>
@@ -285,6 +295,7 @@
     // Fiche ouverte
     private Guid? selId;
     private string tab = "Aperçu";
+    private int? apiKeys, apiHooks, apiRate, apiDays;   // limites API de l'organisation ouverte (null : valeur par défaut)
     private List<ScreenLine> drawerScreens = new();
     private List<User> clientUsers = new();
     private List<AccessLevel> clientLevels = new();
@@ -355,9 +366,23 @@
     }
 
     // Écrans, utilisateurs et accès de la fiche ouverte (lecture seule).
+    private void SaveApiLimits(Guid clientId)
+    {
+        Root.Write(d =>
+        {
+            var c = d.Clients.First(x => x.Id == clientId);
+            c.ApiMaxKeys = apiKeys is { } k and >= 0 ? Math.Min(k, 1000) : null;
+            c.ApiMaxWebhooks = apiHooks is { } h and >= 0 ? Math.Min(h, 1000) : null;
+            c.ApiRatePerMinute = apiRate is { } r and >= 1 ? Math.Min(r, ApiLimits.MaxRatePerMinute) : null;
+            c.ApiJournalDays = apiDays is { } j and >= 1 ? Math.Min(j, 365) : null;
+        });
+        Toast.Ok("Limites enregistrées.");
+    }
+
     private void LoadDrawer()
     {
         var id = selId!.Value;
+        (apiKeys, apiHooks, apiRate, apiDays) = Root.Read(d => d.Clients.FirstOrDefault(x => x.Id == id) is { } t ? (t.ApiMaxKeys, t.ApiMaxWebhooks, t.ApiRatePerMinute, t.ApiJournalDays) : ((int?)null, (int?)null, (int?)null, (int?)null));
         (drawerScreens, clientUsers, clientLevels, drawerLog) = Root.Read(d =>
         {
             var c = d.Clients.FirstOrDefault(x => x.Id == id);

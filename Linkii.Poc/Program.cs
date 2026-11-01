@@ -32,6 +32,8 @@ builder.Services.AddSingleton<Notifier>();
 builder.Services.AddSingleton<PushService>();   // notifications push (Firebase) vers l'app Android du back-office
 builder.Services.AddSingleton<NotificationCenter>();   // centre de notifications : la cloche et la page Notifications
 builder.Services.AddSingleton<AlertService>();  // alertes de l'organisation : e-mail et/ou notification selon les Réglages
+builder.Services.AddSingleton<IApiAlerts, ApiAlerts>();   // API et webhooks (§154) : alertes « Intégrations et API »
+builder.Services.AddLinkiiApi();   // socle de l'API publique : clés, scopes, webhooks, journal (voir Api/)
 builder.Services.AddSingleton<PreviewGrants>();   // jetons d'aperçu du simulateur
 builder.Services.AddSingleton<VideoConverter>();
 builder.Services.AddSingleton<WebSnapshot>();
@@ -212,6 +214,8 @@ app.Use(async (ctx, next) =>
 });
 
 app.UseAuthentication();
+app.UseRateLimiter();   // limites par clé de l'API publique (les routes /api/v1 seules choisissent une classe de débit)
+app.UseApiV1();   // identifiant de requête, usage par clé, idempotence
 app.UseAuthorization();
 
 // Session : le compte doit exister, être actif, correspondre au domaine, et son client / revendeur ne pas être suspendus.
@@ -280,6 +284,7 @@ app.Use(async (ctx, next) =>
                || p.StartsWithSegments("/facebook/callback")  // retour de Facebook : idem
                || p.StartsWithSegments("/microsoft/callback")  // retour de Microsoft : idem
                || p.StartsWithSegments("/linkedin/callback") || p.StartsWithSegments("/github/callback")  // retours de LinkedIn et GitHub (connexion seulement)
+               || p.StartsWithSegments("/docs")   // documentation publique de l'API (aux couleurs du revendeur)
                || p.StartsWithSegments("/manifest.webmanifest");   // le navigateur le demande sans cookie de session
     if (!open && ctx.User.Identity?.IsAuthenticated != true)
     {
@@ -1051,6 +1056,7 @@ app.MapPost("/api/license/check", (HttpContext ctx, LicenseCheckDto body, JsonSt
     return Results.Json(new { valid = r.Valid, reason = r.Reason, expires = r.Expires, screens = r.Screens, modules = r.Modules, graceDays = r.GraceDays });
 }).DisableAntiforgery();
 
+app.MapLinkiiApi();   // /api/v1, /api/v1/openapi.json, /docs/api
 app.MapHub<ScreenHub>("/hubs/screen");
 
 // ---------- Back-office Blazor ----------

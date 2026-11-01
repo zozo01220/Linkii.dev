@@ -7,7 +7,7 @@ namespace Linkii.Poc;
 /// </summary>
 public static class Alerts
 {
-    public const string Screens = "screens", Sync = "sync", Members = "members", Billing = "billing", News = "system";
+    public const string Screens = "screens", Sync = "sync", Members = "members", Billing = "billing", News = "system", Integrations = "integrations";
 
     public static readonly (string Id, string Label, string Hint)[] All =
     {
@@ -15,18 +15,19 @@ public static class Alerts
         (Sync, "Synchronisations", "Un dossier connecté n'a pas pu être synchronisé."),
         (Members, "Équipe et partage", "Une personne est ajoutée à l'organisation."),
         (Billing, "Abonnement", "Fin d'essai proche ou terminée, paiement refusé, espace suspendu."),
+        (Integrations, "Intégrations et API", "Adresse de webhook désactivée, clé d'API qui expire."),
         (News, "Nouveautés et système", "Nouvelles fonctions de Linkivi, maintenance, incident en cours."),
     };
 
     /// <summary>Choix d'une organisation qui n'en a pas fait : ce qui demande une action ou signale un problème. Abonnement est toujours suivi (<see cref="Always"/>).</summary>
-    public static readonly string[] Defaults = { Screens, Sync, Members, Billing };
+    public static readonly string[] Defaults = { Screens, Sync, Members, Billing, Integrations };
 
     /// <summary>Types toujours suivis : l'abonnement, car un espace suspendu ne doit jamais passer inaperçu.</summary>
     public static bool Always(string kind) => kind == Billing;
 
     /// <summary>La notification entre dans le centre de notifications (cloche) : toujours pour l'abonnement et les nouveautés, sinon licence Pro + alertes activées + « par notification » + type suivi.</summary>
     public static bool InCenter(Tenant c, string kind, bool good = false) =>
-        (!good || c.AlertGood) && (kind is Billing or News || c.IsGrowth && c.AlertsOn && c.AlertPush && c.AlertTypes.Contains(kind));
+        (!good || c.AlertGood) && (kind is Billing or News or Integrations || c.IsGrowth && c.AlertsOn && c.AlertPush && c.AlertTypes.Contains(kind));
 
     /// <summary>L'organisation veut être prévenue de ce type, par au moins un canal.</summary>
     public static bool Wants(Tenant c, string kind, bool good = false) =>
@@ -59,6 +60,12 @@ public static class Alerts
         {
             c.AlertsVersion = 2;
             if (!c.AlertsOn && c.AlertTypes.Count == 0) c.AlertTypes = new(Defaults);
+        }
+        // 1er novembre 2026 (API et webhooks) : la nouvelle catégorie est suivie par les organisations qui avaient activé leurs alertes
+        foreach (var c in db.Clients.Where(c => c.AlertsVersion < 3))
+        {
+            c.AlertsVersion = 3;
+            if (c.AlertsOn && !c.AlertTypes.Contains(Integrations)) c.AlertTypes.Add(Integrations);
         }
     }
 }

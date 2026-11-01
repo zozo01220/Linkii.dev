@@ -459,7 +459,7 @@ public class Tenant
     public bool AlertPush { get; set; }   // « Par notification » : la cloche de l'application et les téléphones des administrateurs
     public bool AlertGood { get; set; }   // aussi les bonnes nouvelles (retour en ligne, synchronisation rétablie)
     public List<string> AlertTypes { get; set; } = new(Alerts.Defaults);   // types suivis ; au départ ceux de Alerts.Defaults
-    public int AlertsVersion { get; set; }   // 1 : réglages d'alertes migrés ; 2 : types par défaut posés (voir Alerts.Migrate)
+    public int AlertsVersion { get; set; }   // 1 : réglages d'alertes migrés ; 3 : catégorie « Intégrations et API » ; 2 : types par défaut posés (voir Alerts.Migrate)
     /// <summary>Ancien interrupteur « Prévenir quand un écran tombe » (avant le 18 octobre 2026) : lu une fois par <see cref="Alerts.Migrate"/>.</summary>
     public bool AlertOffline { get; set; }
     /// <summary>Délai avant l'alerte « écran hors ligne ».</summary>
@@ -528,6 +528,15 @@ public class Tenant
     public List<DataSet> DataSets { get; set; } = new();
     /// <summary>Relais Linkii installés dans le réseau de l'organisation (§139, lot 4) : lisent ses bases et API internes pour Linkii.</summary>
     public List<DataRelay> DataRelays { get; set; } = new();
+
+    /// <summary>API publique et webhooks (§154) : clés d'accès et adresses qui reçoivent les événements de l'organisation. Voir <see cref="ApiKeyService"/>, <see cref="WebhookService"/>.</summary>
+    public List<ApiKey> ApiKeys { get; set; } = new();
+    public List<WebhookEndpoint> Webhooks { get; set; } = new();
+    /// <summary>Limites propres à l'organisation (console › fiche du client). Null : valeur par défaut de <see cref="ApiLimits"/>.</summary>
+    public int? ApiMaxKeys { get; set; }
+    public int? ApiMaxWebhooks { get; set; }
+    public int? ApiRatePerMinute { get; set; }
+    public int? ApiJournalDays { get; set; }
 
     // Compte Google connecté par l'organisation (« Se connecter avec Google », lecture seule), partagé par Google Calendar et Google Drive.
     // GoogleScopes : accès accordés (agendas, fichiers Drive). Jeton de renouvellement chiffré (SecretBox).

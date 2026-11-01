@@ -2658,3 +2658,282 @@ Le centre n'est pas un second système d'alertes : c'est un **troisième canal**
 - **Interrupteurs** : tous les `.switch.on` / `.switch-ui` / `input.ios` passent du bleu clair au **bleu nuit de la marque** (`var(--brand)`, donc la couleur du revendeur) ; l'état partiel (`.switch.some`) suit. Inchangés : interrupteur de l'app sur fond sombre (`.is-app .app-mode`), forme Material du menu (déjà `--brand`).
 - **Tests** : `NotificationTests` (8 : règles du centre, bonnes nouvelles, lu / supprimé par personne, regroupement, résolution, isolement et purge, message de bienvenue) ; `ControlTests` (migration : types par défaut). Suite complète : 14 échecs (Billing, Signup, Apps, Pwa, Weather), aucun lié aux notifications.
 - **Vérifié dans le navigateur** (instance locale, espace de test créé par inscription) : carte et fenêtre des Réglages, cloche et aperçu, page Notifications (marquer lu, filtrer, supprimer, tout lire, onglet Lues), pastille qui disparaît. **Pas vu** : version app Android (feuille « Plus », `is-app`), notification reçue de bout en bout (écran réellement hors ligne), e-mail, licence Essential dans le navigateur, mode simple, regroupement sur plusieurs heures.
+## 153. API publique et webhooks : analyse (1er novembre 2026) : analyse seule, rien codé, maquette à faire avant tout code
+
+### Point de départ (existant, relevé dans le code)
+- **Aucune API publique.** Les routes `/api/*` de `Program.cs` sont celles des players (jeton d'écran : `/player/*`, `/pairing/*`, `/data/*`, `/relay/*`), plus `/api/push/register` et `/api/license/check`. Le back-office est du Blazor Server avec cookie. Il n'y a ni authentification Bearer entrante, ni limitation de débit (aucun `AddRateLimiter`), ni OpenAPI.
+- **Tout ce qui sort est déjà protégé** : `SafeHttp` refuse les adresses internes (SSRF), `SecretBox` chiffre les secrets. Les deux se réutilisent tels quels pour les webhooks.
+- **Les événements existent déjà, éparpillés** : `ScreenWatchWorker` (hors ligne / retour), `AlertService.Raise` (point d'entrée unique des alertes et du centre de notifications §151), `ScanLog` (scans QR, anonymisés), `KioskLog`, `Notifier.PublishScreen` (publication), `DataSyncWorker` (source en échec), spots publicitaires. Aucun ne parle à l'extérieur.
+- **Les journaux vivent hors de `data.json`** (`scans/*.jsonl`, `datasets/*.log.json`, `adplays/`). Le journal des livraisons de webhooks doit suivre ce modèle, pas `data.json`.
+- **Temps réel jusqu'à l'écran** : `ScreenHub` (SignalR, un groupe par écran) avec un filet de sondage toutes les 5 s dans `player.js`. C'est le canal qui porterait une urgence.
+- **Multi-organisation et revendeur** : `ClientId` = organisation, `ResellerResolver` résout le revendeur par nom de domaine. L'adresse de l'API serait donc celle du revendeur (`https://affichage.revendeur.ch/api/v1`) : white-label sans travail de plus.
+- **« Envoi direct » `/hook/…`** est déjà annoncé au §139 (lot 5, non codé) : c'est le webhook **entrant** qui alimente un jeu de données. La clé d'API et ce jeton doivent être **un seul mécanisme**, pas deux.
+
+### Ce que la proposition suppose et qui n'existe pas chez nous
+1. **Pas de validation de contenu.** `content.submitted / approved / rejected` et `POST /content/{id}/submit` supposent un circuit de relecture. Le modèle actuel (§117) est propriétaire + lecture seule + partage ; seule la publicité a un « à valider ». **Écarter ces trois événements de la v1.** L'équivalent réel est `content.published` (brouillon → publié, `Notifier.PublishScreen`). Un circuit d'approbation serait un projet à part, à ne pas glisser dans l'API.
+2. **Pas d'urgence.** Écartée au §37 (« créneau d'urgence prioritaire sur tout »). C'est la fonction de plus forte valeur, mais la plus lourde côté player (voir plus bas).
+3. **La salle n'est pas un objet qui a un statut.** C'est un calendrier Google/Microsoft lu en **lecture seule** (`calendar.readonly`, `Calendars.Read`). `PUT /rooms/{id}/status` est impossible tel quel : il faudrait soit des droits d'écriture (nouveau consentement chez chaque client), soit un état propre à Linkivi posé par-dessus. Les événements `room.booked / released` ne seraient détectés qu'à la relecture du calendrier (environ 1 min de retard). **Reporter les salles après la v1.**
+4. **« Contenu » est ambigu.** Chez nous : média, contenu configuré (app), liste de lecture, composition. Un `POST /content` générique n'a pas de sens. Proposer des ressources précises (voir ci-dessous).
+5. **Vocabulaire** : `TenantId` devient `organisation` (jamais dans le corps, toujours déduite de la clé) ; `screenGroups` devient **aire › zone › écran** (+ mur). Les cibles d'une urgence se disent « Toute l'organisation / une aire / une zone / des écrans ».
+6. **Licence** : sources de données et alertes sont Pro (`Tenant.IsGrowth`). L'API suivrait : **Pro** (Enterprise n'est qu'une licence). Visible en **mode Expert** seulement et réservée aux administrateurs (principe « avancé activable »).
+7. **Pas de rate limiting existant** : à ajouter avec le limiteur intégré d'ASP.NET (partition par clé), ce n'est pas du « déjà fait ».
+
+### Cas où ça servirait (par valeur décroissante)
+
+| # | Cas | Ce qu'il faut | Nouveauté côté player |
+|---|---|---|---|
+| A | **Alarme / évacuation** : centrale incendie, contrôle d'accès, bouton panique, confinement d'école, code bleu d'hôpital, arrêt de ligne d'usine, enfant perdu en centre commercial. L'alarme appelle l'API ; le message s'affiche en moins de 5 s sur les écrans du bâtiment B ; la fin d'alerte le retire. | `POST/DELETE /emergency`, `Idempotency-Key` (l'alarme réessaie), expiration | **Oui, lourde** : voir « Urgence » |
+| B | **Données poussées plutôt que lues** : le MES envoie « jours sans accident » et la production du jour, le guichet envoie le numéro appelé, le parking son taux, le CRM l'objectif du mois. | `POST` de lignes vers un jeu de données (= `/hook` du §139) | Aucune (jeux de données existants) |
+| C | **Supervision du parc** : `screen.offline` vers Teams, Slack, Zabbix, Uptime Kuma, ServiceNow ou GLPI (ticket automatique) ; `GET /screens` pour un inventaire ou un tableau de bord interne. **Très fort pour un revendeur** qui surveille 200 écrans de plusieurs clients dans son outil. | Webhooks + `GET /screens` | Aucune (`ScreenWatchWorker` existe) |
+| D | **Automatisation sans code** (Zapier, Make, n8n, Power Automate) : « une ligne est ajoutée dans Sheets » devient une diapo, « une offre d'emploi est publiée » un affichage, « un événement est créé » un message. | Clé + webhooks = connecteur générique | Aucune |
+| E | **Publication depuis un système tiers** : siège → 40 franchises, WordPress/Drupal qui publie une actualité, DAM vers médiathèque, menu du jour depuis la caisse, programme du jour depuis le logiciel d'hôtel. | `POST /media` (import par adresse ou envoi) dans un dossier, éventuellement ajout à une liste | Aucune |
+| F | **Paramètres d'écran pilotés** : la GTB (gestion technique du bâtiment) ou un outil d'événements change « Étage », « Langue », « Mode soirée » (`Screen.Params` du §139). | `PUT /screens/{id}/params` | Aucune (déjà lu par les compositions) |
+| G | **Scans QR vers le CRM / l'analytique** : `qr.scanned` vers HubSpot, Mailchimp, Matomo. | Webhook, **agrégé** (voir ci-dessous) | Aucune |
+| H | **Traçabilité / conformité** : `content.published` et `screen.published` vers un SIEM ou un journal d'audit (banque, hôpital, administration). | Webhook | Aucune |
+| I | **Salles** : un capteur de présence libère une réservation fantôme après 10 min sans personne ; un outil de facility management reçoit les changements. | Surcharge de statut Linkivi + webhook | Léger (état de salle) |
+| J | **Revendeurs** : créer une organisation, inviter, poser une licence depuis leur ERP. | Clé de **niveau revendeur** | Aucune. À part, v2 |
+
+Lecture : B, C, D, E, F, H ne demandent **rien dans le player** et réutilisent l'existant ; seuls A (et I) touchent les écrans.
+
+### Urgence : ce que « un simple POST » cache
+- **Priorité** : un message d'urgence passe devant la liste, le planning (§132), la borne, la composition et les zones d'un écran découpé. Ce n'est pas un créneau de plus : c'est une **surcouche plein écran** décidée par le player.
+- **Acheminement** : la publication normale (§138) télécharge une révision de fichiers puis fait `refresh()`. Pour une urgence c'est trop lourd et trop lent ; il faut un **message texte seul, hors révision**, poussé par `ScreenHub` (groupe de l'écran) avec le filet de sondage de 5 s. Objectif : moins de 5 s, même si SignalR est coupé.
+- **Veille** : un écran en veille (`Sleep`) doit **se réveiller** (réutiliser `WakeUntil`) ; la luminosité réduite (`Dim`) doit être levée. Sur Android, la veille matérielle (admin appareil) est concernée.
+- **Écrans hors ligne** : ils ne peuvent pas la recevoir. L'urgence a une **expiration absolue** (`expiresAt`) que le player applique lui-même, sinon elle reste à l'écran pour toujours après un retour réseau.
+- **Rapport de réception** : comme `DeliveryRevision`, chaque écran accuse réception. Réponse de l'API et page : « 17 écrans sur 19 l'affichent, 2 hors ligne ». C'est ce que l'exploitant demandera en premier.
+- **Niveaux** : `info` (bandeau), `warning` (bandeau + couleur), `critical` (plein écran, texte très grand). Un seul gabarit lisible, pas un éditeur.
+- **Levée** : `DELETE` ; et automatique à l'expiration. Plusieurs urgences actives : la plus grave, puis la plus récente.
+- **Les trois players** (web, Windows WebView2, Android WebView) chargent le même `player.js` : un seul changement, sans correctif natif (même argument que le §138). La veille Android demande un point en plus.
+- **Test** : un bouton « Essayer sur… » (comme le simulateur) pour déclencher une urgence d'essai sur un seul écran, indispensable : personne n'ose tester une alarme réelle.
+
+### Webhooks : ce que je garderais, ce que j'adapterais
+- **Événements v1** : `screen.offline`, `screen.online`, `screen.published` (réussie / échouée), `content.published`, `data.failed` (source en échec), `emergency.started / ended / acknowledged`. Ensuite : `media.imported`, `sync.failed`, `account.expired`, puis `room.*`.
+- **`qr.scanned` : agrégé.** Le journal des scans est anonyme à dessein (`ScanLog`, empreinte du jour, 90 jours). Le webhook ne doit **jamais** porter d'adresse IP ni d'empreinte : seulement code QR, composition, écran, compteur. Un événement par scan noierait le destinataire : proposer « tous les N scans » ou un résumé par heure.
+- **Un bus d'événements, pas un cinquième canal d'alerte** : un `IEventPublisher.Publish(organisation, type, data)` appelé depuis le code métier, auquel s'abonnent les webhooks. `AlertService.Raise` l'appelle pour ses événements, mais les webhooks portent aussi des événements qui ne sont **pas** des alertes (`qr.scanned`, `content.published`) : ne pas les fusionner de force.
+- **Livraison** : « au moins une fois », **ordre non garanti** (le dire dans la documentation, l'`id` d'événement sert à dédupliquer). Écriture au journal d'abord, envoi par un worker (même modèle que `DataSyncWorker`), reprise au redémarrage depuis le journal. Réessais 1 min, 5 min, 30 min, 2 h, 6 h puis abandon. Délai 5 à 10 s, 2xx attendu, **pas de redirection**, HTTPS imposé (HTTP seulement sur localhost), `SafeHttp` pour les adresses.
+- **Désactivation automatique** après N abandons consécutifs : à régler à environ 10, avec une notification dans le centre (§151, catégorie « Intégrations et données » déjà prévue) plutôt qu'un e-mail à part, puis un bouton « Réactiver » qui rejoue les événements manqués (24 h).
+- **Signature** : en-tête `Linkivi-Signature` (`t=…,v1=HMAC-SHA256(secret, t + "." + corps)`), comme proposé. Le secret doit être **restituable** pour signer : il est donc chiffré avec `SecretBox` (≠ clé d'API qui, elle, est seulement hachée). **Rotation avec chevauchement** : deux secrets valides 24 h.
+- **Charge utile minimale** : identifiants + quelques champs ; le destinataire rappelle `GET` pour le reste. Évite de diffuser des données par erreur et garde le format stable.
+
+### Clés d'API : ce que j'adapterais
+- **Préfixe `lkv_`** (le produit s'appelle Linkivi depuis le §148).
+- **Affichée une seule fois, hachée en base** : d'accord (SHA-256). Préfixe visible pour la reconnaître. Date d'expiration facultative, dernière utilisation visible.
+- **Gabarits plutôt que cases à cocher** : « Alerte d'urgence seule », « Lecture seule », « Intégration complète », puis « Personnalisée » (liste des scopes) en option. Un exploitant qui configure une centrale d'alarme ne doit pas choisir entre six scopes. Scopes retenus : `screens:read`, `emergency:write`, `media:write`, `data:write` (envoi direct), `screens:write` (paramètres), `webhooks:manage`. `content:*` et `rooms:*` repoussés.
+- **Qui crée une clé** : un administrateur seulement. La clé agit **au nom** de cette personne (propriétaire des médias créés), affichée « créé par l'API · nom de la clé ». Elle ne voit que l'organisation.
+- **Idempotence** : en-tête `Idempotency-Key` sur tous les `POST`, mémorisé 24 h avec l'empreinte du corps (même clé + autre corps = erreur 422).
+- **Débit** : limite par clé (par exemple 60 requêtes/min), et une limite plus basse pour l'urgence ; réponse 429 avec `Retry-After`.
+- **Revendeur** : même mécanisme, clé de niveau revendeur à part (provisionnement), v2.
+
+### Ressources v1 proposées (remplace la liste de la proposition)
+```
+GET    /api/v1/screens                  liste + état (en ligne, liste, version, dernière vue, aire, zone)
+GET    /api/v1/screens/{id}
+PUT    /api/v1/screens/{id}/params      paramètres d'écran (Étage, Langue…)
+POST   /api/v1/emergency                message prioritaire (cibles, niveau, expiration)
+GET    /api/v1/emergency/{id}           rapport de réception écran par écran
+DELETE /api/v1/emergency/{id}           lever
+POST   /api/v1/datasets/{id}/rows       envoi direct (= /hook du §139)
+POST   /api/v1/media                    importer par adresse ou par envoi, dans un dossier
+GET/POST/DELETE /api/v1/webhooks        gérer ses abonnements (scope webhooks:manage)
+```
+Exemple d'urgence : cibles `{"zones": [...]}`, `{"areas": [...]}` ou `{"screens": [...]}` ; `level` : `info | warning | critical` ; `expiresInMinutes` obligatoire (max 24 h), pas d'urgence éternelle.
+
+### Où dans l'interface (à valider par une maquette)
+- **Intégrations › onglet « API et webhooks »**, à côté de « Sources de données » : même public (administrateur, Pro, mode Expert). Trois sous-onglets : **Clés** (créer, gabarit, expiration, révoquer, dernière utilisation), **Webhooks** (adresse, événements en cases, secret, « Envoyer un test », état, réactiver), **Journal** (livraisons : événement, code, tentatives, détail du corps, « Renvoyer »).
+- **Urgence** : une carte « Urgence » dans la page Écrans (Expert) pour la déclencher et la lever à la main, avec le rapport « 17 / 19 écrans ». Même fonction que l'API, utile pour essayer et pour les cas sans système d'alarme.
+- **Pastille** (§123) : un point rouge sur « Écrans » tant qu'une urgence est active ; notification dans le centre à l'envoi et à la levée.
+- **Documentation** : page OpenAPI/Swagger servie à l'adresse du revendeur, aux couleurs du revendeur ; exemples `curl` prêts à copier dans la fenêtre de création de clé.
+
+### Ordre proposé (différent de la proposition)
+1. **Clés d'API + écran « Clés » + `GET /screens`** : la création et la révocation de clé doivent venir **avec** le premier lot, pas à la fin (sans cela, aucune clé ne se crée). Valide toute la chaîne (authentification, scopes, débit, OpenAPI) sur une lecture sans risque.
+2. **Webhooks** (publisher, signature, réessais, journal, test) avec seulement les événements déjà natifs (`screen.offline/online`, `screen.published`, `data.failed`) : couvre C, D, H sans toucher au player.
+3. **Envoi direct de données + `PUT params` + `POST media`** : couvre B, E, F ; remplace le lot 5 du §139.
+4. **Urgence** (API, surcouche du player, rapport de réception, essai, carte dans Écrans) : le plus lourd et le plus risqué, car il touche tous les players et la veille. **À passer en tête si un client réel l'attend**, puisqu'il est indépendant des lots 2 et 3.
+5. Plus tard : `room.*`, `qr.scanned` agrégé, clé de revendeur, application Zapier/Make officielle.
+
+### Décisions à prendre
+- **Urgence en premier ou en lot 4** ? (dépend d'un client réel)
+- **Licence** : API entière en Pro (recommandé), ou lecture en Essential et écriture en Pro ?
+- **Mode Expert** : onglet et carte masqués en mode simple (recommandé).
+- **Salles** : repoussées (recommandé), ou surcharge de statut dès la v1 ?
+- **Circuit d'approbation** : abandonné de l'API, à rouvrir comme projet à part ?
+- **Préfixe** `lkv_` et nom de l'en-tête `Linkivi-Signature` : confirmés ?
+- **Plafond** de l'urgence (24 h) et de la limite de débit : valeurs par défaut acceptables ?
+
+### Non vérifié / à vérifier avant de coder
+- Le délai réel d'une poussée par `ScreenHub` jusqu'à l'écran et jusqu'au réveil d'un écran Android en veille matérielle.
+- Le comportement du player quand l'urgence expire alors que l'écran est hors ligne.
+- Le volume de scans QR sur un gros parc (agrégation).
+
+## 154. Socle API et webhooks : l'infrastructure avant toute fonction (1er novembre 2026) : analyse seule, rien codé
+
+Suite du §153 : on construit **d'abord le socle**, sans aucune fonction métier (ni urgence, ni données, ni médias), mais de façon que chacune s'y branche plus tard **en déclarant quatre choses et sans toucher au socle**.
+
+### Le critère de réussite du socle
+Le socle est fini quand, **sans une seule fonction métier**, on peut faire tout ceci de bout en bout :
+1. Un administrateur crée une clé (gabarit, expiration), la voit une seule fois, la révoque.
+2. `GET /api/v1/me` répond avec l'organisation, les scopes et l'usage de la clé ; clé révoquée ou expirée : 401 ; espace suspendu : 403 ; trop d'appels : 429.
+3. Il enregistre une adresse de webhook, choisit des événements, clique « Envoyer un test » : l'événement `ping` est signé, livré, visible dans le journal.
+4. Un récepteur en panne déclenche les réessais, puis l'abandon, puis la désactivation de l'adresse avec une notification dans le centre ; « Réactiver » et « Renvoyer » fonctionnent.
+5. Un `POST` répété avec la même `Idempotency-Key` ne fait rien de plus.
+6. La documentation OpenAPI se génère **à partir des déclarations**, sans texte écrit à la main pour les fonctions à venir.
+
+La seule « fonction » livrée est donc `me`, `ping` et la gestion de ses propres webhooks : elles servent de **modèle** aux suivantes.
+
+### Le contrat d'extension (ce qui rend le socle compatible avec la suite)
+Une fonction future s'ajoute avec **un module** qui déclare :
+- ses **scopes** (id, libellé en français, explication, licence requise, Expert oui/non) ;
+- ses **routes** sous `/api/v1` (chaque route nomme le scope exigé et sa classe de débit) ;
+- ses **types d'événements** (id, catégorie, version de la charge utile, exemple, règle d'agrégation éventuelle) ;
+- sa **documentation** (résumés, exemples) : lue par OpenAPI et par la fenêtre de création de clé.
+
+Et elle **émet** ses événements par un seul appel : `Publish(organisation, type, données)`.
+
+Ce que ça donne pour les fonctions du §153 : l'urgence ajoute un scope, trois routes, trois événements ; l'envoi direct ajoute un scope et une route ; la supervision n'ajoute qu'un appel `Publish` dans `ScreenWatchWorker` ; les salles ajouteront un module plus tard. Le socle ne change pas. Si une fonction oblige à modifier le socle, c'est le signe que le socle était mal découpé.
+
+### Les briques
+
+**1. Identité : clés et principal d'API**
+- `ApiKey` : id, organisation, nom, **hachage** (SHA-256, jamais la clé), préfixe visible, gabarit + scopes, créateur (la clé agit **au nom** de cette personne), création, expiration, dernière utilisation, révocation.
+- **Un principal d'API explicite** (`Kind`, `ClientId`, `ResellerId?`, `KeyId`, `OwnerId`) plutôt qu'un simple `ClientId` : `Kind = organisation` aujourd'hui, mais `reseller` (provisionnement, §153 cas J) s'ajoutera sans refaire le modèle. **À décider maintenant** : c'est ce qui est le plus pénible à changer après.
+- Schéma d'authentification **dédié** (`AuthenticationHandler`) : l'application n'a aujourd'hui que le cookie. Les routes `/api/v1` n'acceptent **que** la clé (jamais le cookie : sinon risque CSRF) ; les pages et routes existantes n'acceptent **jamais** une clé. Le groupe `/api` actuel (players, jeton d'écran) reste **intact**, `/api/v1` est un groupe frère.
+- La clé ne donne que l'organisation : le `ClientId` vient de la clé, jamais de la requête (isolation, comme `IClientOwned` partout dans le code).
+- Recherche par hachage dans un **index en mémoire** reconstruit au démarrage et à chaque création/révocation (révocation immédiate, pas de délai de cache).
+- Échecs d'authentification limités par adresse (anti-devinette) et **jamais journalisés avec la clé** (masquer `Authorization` dans les journaux).
+- Format de clé : `lkv_` + 32 octets aléatoires en base 32/62 + courte somme de contrôle (permet aux scanners de secrets, par exemple GitHub, de la reconnaître, et d'écarter une faute de frappe sans interroger la base).
+
+**2. Catalogue de scopes et gabarits**
+- Registre déclaratif : `resource:action` (`screens:read`, `emergency:write`, `data:write`…). Les **gabarits** (« Lecture seule », « Alerte d'urgence seule », « Intégration complète ») sont des listes de scopes, définies à côté des modules : un module qui ajoute un scope décide à quels gabarits il appartient.
+- **Licence et mode Expert** portés par le scope : le socle refuse (403 explicite « Réservé au plan Pro ») et l'interface masque. Une seule règle de licence pour toute l'API (Pro), posée une fois.
+
+**3. Chaîne de traitement d'une requête**
+- **Versionnement dans l'adresse** (`/api/v1`) ; changement incompatible = `/api/v2`, jamais de modification silencieuse. Règle de dépréciation écrite (en-tête `Deprecation` / `Sunset`).
+- **Erreurs** : un seul format (`application/problem+json`) avec un **code stable** lisible par un programme (`invalid_key`, `scope_missing`, `plan_required`, `rate_limited`, `idempotency_conflict`…) et un message en français ; identifiant de requête (`X-Request-Id`) renvoyé et journalisé.
+- **Pagination** par curseur (pas par numéro de page) dès la première liste ; filtres et tri nommés de la même façon partout.
+- **Débit** : limiteur intégré d'ASP.NET (`Microsoft.AspNetCore.RateLimiting`, disponible en .NET 8), partitionné **par clé**, avec des **classes** nommées (lecture, écriture, urgence, test) que chaque route choisit ; en-têtes `RateLimit-*` et `Retry-After`. Compteurs en mémoire : valable tant qu'il n'y a qu'un serveur (à écrire dans la limite connue).
+- **Idempotence** : en-tête `Idempotency-Key` pris en charge par la chaîne (pas par chaque route) : on garde 24 h la clé, l'empreinte du corps et la réponse ; même clé et autre corps = 422 ; requête identique en cours = 409. Stockage hors `data.json`.
+- **Contrôles communs** : espace actif (`Tenancy.IsActive`, suspendu = 403), licence, taille maximale du corps, HTTPS, dates en UTC ISO 8601, identifiants exposés en texte (les `Guid` existants conviennent, ils ne changent jamais).
+- **Journal d'usage** par clé : compteurs par jour (appels, erreurs), alimentent « Dernière utilisation » et la page Réglages › Utilisation (maquette `reglages-utilisation.html` existante).
+
+**4. Bus d'événements**
+- **Catalogue déclaratif** des types (`screen.offline`, `emergency.started`, …) avec leur version de charge utile. Un type non déclaré ne peut pas être émis (test automatique).
+- `Publish(organisation, type, données)` :
+  - **ne bloque jamais et ne lève jamais** : il met l'événement dans une file mémoire et c'est tout. C'est essentiel, car il sera appelé **à l'intérieur de `store.Write`** (c'est le cas de `ScreenWatchWorker`), sous le verrou global de `JsonStore` : aucun accès disque ni réseau à cet endroit ;
+  - la **recherche des abonnés** se fait dans le répartiteur (lecture du magasin), pas à l'émission ;
+  - l'**enveloppe** est figée dès le départ : `id`, `type`, `apiVersion`, `createdAt` (UTC), `organisationId`, `data`. Chaque adresse de webhook mémorise la **version d'API** de sa création : les évolutions futures de `data` ne cassent pas un abonné existant.
+- Abonnements par type avec joker (`screen.*`). Le même bus accueillera plus tard des abonnés **internes** (par exemple le centre de notifications) : un seul chemin d'émission pour tout.
+- **Règles d'agrégation** déclarées par type (par exemple `qr.scanned` : un résumé par heure, pas un événement par scan) : le socle sait regrouper, la fonction choisit.
+
+**5. Webhooks sortants**
+- `WebhookEndpoint` : adresse, événements, **secret chiffré** (`SecretBox` : il doit pouvoir être relu pour signer, contrairement à la clé), état (actif, désactivé, pourquoi), version d'API, rotation du secret avec deux secrets valides 24 h.
+- **Signature** `Linkivi-Signature: t=<horodatage>,v1=<HMAC-SHA256(secret, t + "." + corps)>` + `Linkivi-Event`, `Linkivi-Delivery` (identifiant de livraison, stable d'une tentative à l'autre pour dédupliquer). Documenter le code de vérification en trois langages dans la page d'aide.
+- **Livraison au moins une fois, ordre non garanti** (écrit dans la documentation).
+- **Envoi** : réessais 1 min, 5 min, 30 min, 2 h, 6 h puis abandon ; délai 10 s ; 2xx = succès, 410 = désactivation immédiate ; **pas de redirection** ; HTTPS imposé (HTTP seulement vers localhost) ; **concurrence limitée par adresse** (un récepteur lent ne bloque pas les autres) ; file plafonnée par adresse (par exemple 1 000) : au-delà on écarte les plus anciens en laissant une trace.
+- **Réseau** : `SafeHttp` apporte déjà le contrôle des adresses **au moment de la connexion** (`ConnectCallback`, donc contre le « DNS rebinding »), mais il est écrit pour des lectures : redirections acceptées, GET, agent `LinkiiBot`. Il faut une **variante** pour des POST (sans redirection, délai propre, en-têtes de signature) qui garde le même contrôle d'adresse. À faire dans le socle, pas dans chaque fonction.
+- **Désactivation automatique** après environ 10 abandons consécutifs ou 24 h sans succès : notification dans le centre (nouvelle catégorie « Intégrations et API » de `Alerts.All`, annoncée au §151) et e-mail aux administrateurs selon leurs réglages d'alerte ; « Réactiver » rejoue ce qui a été manqué sur 24 h.
+- Bouton « Envoyer un test » (`ping`), « Renvoyer » une livraison, journal lisible (corps, en-têtes, réponse tronquée à 2 Ko).
+
+**6. Stockage (point d'attention principal)**
+- `JsonStore` écrit **tout `data.json` à chaque `Write`** et déclenche `Changed` (qui rafraîchit les pastilles). Conséquence : **rien de fréquent ne doit passer par lui**. Interdits : « dernière utilisation » à chaque appel, journal de livraisons, clés d'idempotence, compteurs de débit.
+- Dans `data.json` (petit, rarement modifié) : `ApiKey`, `WebhookEndpoint`.
+- **Hors `data.json`**, par organisation, sur le modèle de `ScanLog` et du rangement du §136 : journal des livraisons (fichier ajouté en fin, états « en attente / tentative / livrée / abandonnée », **file reconstruite au démarrage** depuis ce journal), idempotence (24 h), compteurs d'usage. Conservation 30 jours, purge par le même worker.
+- « Dernière utilisation » et compteurs : **en mémoire**, enregistrés toutes les quelques minutes et à l'arrêt.
+- Si le volume grossit (beaucoup d'organisations, événements fréquents), le journal pourrait passer dans SQLite ; le découpage en un seul service d'accès (`IDeliveryJournal`) le permet sans toucher au reste. Pas nécessaire au départ.
+
+**7. Interface d'administration (maquette avant code)**
+- Intégrations › **API et webhooks** (administrateur, Pro, Expert) : sous-onglets **Clés**, **Webhooks**, **Journal**, et un lien « Documentation ».
+- **Les écrans utilisent les mêmes services que l'API** (`ApiKeys`, `Webhooks`), pas un second code : ce que fait l'interface, l'API peut le faire, et inversement.
+- Le catalogue d'événements et de scopes s'affiche **depuis le registre** : une nouvelle fonction apparaît toute seule dans les cases à cocher, sans retoucher l'écran.
+- Fenêtre de création de clé : nom, gabarit, expiration, **exemple `curl` prêt à copier** ; la clé n'est montrée qu'une fois.
+
+**8. Documentation**
+- OpenAPI généré depuis les déclarations des modules. En .NET 8 il faut ajouter un paquet (Swashbuckle ou NSwag) ; à choisir au moment du lot, en vérifiant la compatibilité avec les « minimal APIs » utilisées par le projet. Page servie à l'adresse du **revendeur**, à ses couleurs.
+
+**9. Tests (le socle est testé sans fonction métier)**
+- Isolation : la clé de l'organisation A ne voit jamais l'organisation B (test sur chaque route déclarée, automatique).
+- Authentification : clé inconnue, expirée, révoquée, suspendue, mauvais scope, licence insuffisante.
+- Idempotence, débit, format d'erreur, pagination.
+- Webhooks : signature (vecteurs de test publiés), réessais avec horloge simulée, abandon, désactivation, reprise après redémarrage, récepteur lent, récepteur qui répond en redirection, adresse interne refusée.
+- **Tests de contrat** : chaque scope et chaque type d'événement est documenté et a un exemple valide ; chaque `Publish` du code appartient au catalogue.
+- Un faux récepteur de test (petit serveur local) partagé par tous les tests de webhooks.
+
+### Décisions à fixer maintenant (coûteuses à changer après)
+| Sujet | Proposition |
+|---|---|
+| Adresse et version | `/api/v1`, groupe frère de `/api` (players), clé seulement |
+| Principal | `Kind` (organisation, plus tard revendeur) + `ClientId` + `KeyId` + `OwnerId` |
+| Format de clé | `lkv_` + aléatoire + somme de contrôle |
+| Scopes | `ressource:action`, gabarits déclarés par les modules |
+| Erreurs | `problem+json` + code stable |
+| Pagination | par curseur |
+| Enveloppe d'événement | `id`, `type`, `apiVersion`, `createdAt`, `organisationId`, `data` |
+| Signature | `Linkivi-Signature: t=…,v1=…` |
+| Version de la charge utile | épinglée par adresse de webhook |
+| Livraison | au moins une fois, ordre non garanti |
+| Licence | Pro, une seule règle dans le socle |
+| Vocabulaire | « organisation », jamais `TenantId` |
+| Où stocker | clés et adresses dans `data.json`, tout le reste dehors |
+
+### Lots du socle
+1. **Noyau** : modèles, service de clés, schéma d'authentification, registre de scopes et gabarits, chaîne de requête (erreurs, pagination, débit, licence, suspension), `GET /me`. Tests d'isolation et d'authentification.
+2. **Bus et webhooks** : catalogue d'événements, `Publish`, répartiteur, journal, worker, signature, variante de `SafeHttp`, réessais, désactivation, `ping`. Tests.
+3. **Idempotence, usage, OpenAPI** : mémoire des clés d'idempotence, compteurs, page de documentation.
+4. **Interface** (après maquette validée) : Clés, Webhooks, Journal, catégorie d'alerte « Intégrations et API ».
+5. **Durcissement** : tests de contrat, charge du répartiteur (un récepteur lent parmi beaucoup), revue de sécurité de l'ensemble avant de brancher la première fonction.
+
+Taille relative : lots 1 et 2 sont les plus gros ; 3 et 5 sont moyens ; 4 dépend de la maquette. Aucune fonction métier n'est comptée ici.
+
+### Ce que ça change pour le §153
+Les lots 1 à 3 du §153 (clés, webhooks, données/médias) **disparaissent en tant que lots séparés** : ils deviennent « socle » + « une fonction par module ». L'urgence reste le seul lot qui demande un travail propre dans le player, indépendant du socle.
+
+### Risques et limites assumées
+- **Verrou global de `JsonStore`** : toute lenteur sous `Write` bloque l'application, d'où la règle « rien de fréquent dans `data.json` » et un `Publish` sans entrée-sortie.
+- **Un seul serveur** : file, limiteur de débit et index de clés en mémoire supposent une seule instance (cas actuel). À écrire dans la documentation d'exploitation ; une deuxième instance demanderait un stockage partagé.
+- **Reprise après arrêt brutal** : la file est reconstruite depuis le journal ; une livraison en cours au moment de l'arrêt peut être envoyée deux fois (d'où « au moins une fois »).
+- **Données personnelles** : les charges utiles ne portent que des identifiants et des états, jamais de données de visiteurs (adresses IP, empreintes du journal de scans). Le destinataire est choisi par le client ; le dire dans l'aide (loi suisse sur la protection des données, hébergement du récepteur hors de Suisse).
+- **Récepteur malveillant ou lent** : délai de 10 s, réponse tronquée, concurrence limitée par adresse, file plafonnée.
+- **Rien n'a été essayé** : toute cette analyse vient de la lecture du code (`Program.cs`, `JsonStore.cs`, `SafeHttp.cs`, `Alerts.cs`, `Notifications.cs`) ; la disponibilité du limiteur de débit et le choix du générateur OpenAPI sont à confirmer à la compilation.
+
+### Décisions à prendre
+- **Valider le contrat d'extension** (module = scopes + routes + événements + documentation) et l'ordre des lots du socle.
+- **Principal avec `Kind`** dès maintenant (clé de revendeur prévue, non codée) : oui ?
+- **Format de clé** `lkv_` avec somme de contrôle : confirmé ?
+- **Générateur OpenAPI** : Swashbuckle ou NSwag (à trancher au lot 3) ?
+- **Maquette** : faire d'abord les trois sous-onglets (Clés, Webhooks, Journal) et la fenêtre de création de clé, avant le lot 4.
+
+## 155. Maquette de l'onglet « API et webhooks » (1er novembre 2026) : maquette faite, à valider ; rien codé
+
+- **Fichier** : `maquettes/api-webhooks.html`, 8 scènes cliquables, vérifiée dans le navigateur (rendu, tiroirs, fenêtre de création, bascule de catalogue). Un sélecteur en haut montre le catalogue **« Socle seul »** (accès `account:read` et `webhooks:manage`, événement `ping`) ou **« Avec les fonctions »** (écrans, urgence, données, médias) : les cases viennent du registre, aucun écran ne change.
+- **Scènes** : 1 emplacement (onglet du hub Contenus après Sources de données ; états Expert Pro, Expert Essential avec invitation à passer à Pro, mode simple sans onglet) ; 2 Clés (liste, filtres, tiroir, renouveler avec 24 h de chevauchement, révoquer avec confirmation, état vide) ; 3 Créer une clé (gabarits, « Personnalisée », expiration, adresses IP en option avancée, clé montrée une seule fois avec exemple `curl`) ; 4 Webhooks (cartes, bandeau rouge d'une adresse désactivée, tiroir : secret, événements groupés, « Envoyer un test », « Réactiver et rejouer ») ; 5 Journal (filtres, tentatives, corps signé, réponse, « Renvoyer ») ; 6 Documentation (premier appel, vérification de signature en trois langages, limites, erreurs, aux couleurs du revendeur) ; 7 Alertes (centre de notifications, catégorie « Intégrations et API ») et quotas (Réglages › Utilisation) ; 8 une fonction qui s'ajoute (un module déclare accès, routes, événements, documentation, et ils apparaissent seuls).
+- **Décisions à prendre (affichées dans la maquette)** : emplacement (hub Contenus, retenu, ou Réglages › Développeurs) ; limites par organisation (10 clés, 5 adresses de webhook, 60 requêtes/min par clé, 30 jours de journal) fixes ou réglables par la console ; adresses IP autorisées dès le premier lot ou plus tard.
+- **Ajouts par rapport au §154** : renouvellement de clé avec chevauchement de 24 h ; « Agit au nom de » visible sur la clé ; rappel 14 jours avant l'expiration ; clé « jamais utilisée » signalée ; état des clés « à surveiller ».
+
+## 156. Socle API et webhooks : codé (1er novembre 2026) : maquette `maquettes/api-webhooks.html` (§155), analyse §153-154 ; tests du socle verts, vérifié dans le navigateur (clé, API, webhook, journal)
+
+Décisions du 1er novembre : onglet dans le hub Contenus (Réglages › Développeurs écarté « pour le moment ») ; **limites réglables par organisation dans la console** (valeurs par défaut : 10 clés, 5 adresses de webhook, 60 requêtes/min par clé, 30 jours de journal) ; **adresses IP autorisées dès le premier lot**.
+
+### Ce qui existe (dossier `Linkii.Poc/Api/`)
+- **`ApiRegistry.cs`** : contrat d'extension. Un module (`IApiModule`) déclare ses accès (`ApiScope`), gabarits (`ApiTemplate`, ceux de même nom s'additionnent), événements (`EventType`) et routes (`ApiRoute` : méthode, chemin, accès, classe de débit, résumé) ; `ApiRouter.Map` branche chaque route avec ses contrôles. Le registre refuse au démarrage un doublon, un accès ou une classe de débit inconnus. `ApiLimits` : valeurs par défaut et surcharges (`Tenant.ApiMaxKeys / ApiMaxWebhooks / ApiRatePerMinute / ApiJournalDays`), débit par classe (lecture = limite, écriture = moitié, urgence = un sixième). **L'API est réservée au plan Pro** (`ApiLimits.Allowed`).
+- **`ApiKeys.cs`** : `ApiKey` (empreinte SHA-256 seule en base, préfixe affichable, accès, adresses IP, expiration, révocation, renouvellement, dernière utilisation), format `lkv_` + 43 caractères + somme de contrôle CRC32 (une faute de frappe est écartée sans interroger la base), `IpRule` (adresse ou CIDR, IPv4 et IPv6), `ApiKeyService` (création avec limites et validation, révocation, **renouvellement avec ancienne clé valable 24 h**, authentification par index mémoire, rappel d'expiration à 14 jours une seule fois), `ApiUsage` (appels et erreurs par clé et par jour, `apidata/usage.json`).
+- **`ApiHttp.cs`** : codes d'erreur stables (`ApiCodes`) et réponse `application/problem+json` avec `requestId` ; schéma d'authentification `ApiKey` (`Authorization: Bearer lkv_…`, le cookie n'est jamais accepté sur `/api/v1` ni la clé ailleurs, une clé ne marche que sur le domaine de son revendeur) ; blocage d'une adresse après 20 échecs par minute ; `ApiGuard` (accès, plan Pro, espace suspendu) ; limiteur de débit ASP.NET par clé et par classe (429 + `Retry-After`) ; idempotence des POST (`Idempotency-Key`, 24 h, `apidata/idempotency.jsonl`, même clé et autre corps = 422, en cours = 409, rejeu signalé par `Idempotency-Replayed`) ; `X-Request-Id`.
+- **`Webhooks.cs`** : `WebhookEndpoint` (secret chiffré par `SecretBox`, ancien secret signé 24 h après renouvellement, version d'API figée), `IEventPublisher` / `EventBus` (file mémoire bornée, **ne bloque ni ne lève jamais**, type non déclaré ignoré et journalisé), `WebhookJournal` (un fichier par organisation `apidata/webhooks/{id}.jsonl`, hors data.json, file reconstruite au démarrage, purge selon la conservation de l'organisation, journaux des organisations supprimées nettoyés), `WebhookSender` (POST, 10 s, aucune redirection, réponse tronquée à 2 Ko, même contrôle d'adresse que `SafeHttp` à la connexion), `WebhookSignature` (`Linkivi-Signature: t=…,v1=…`, deux `v1` pendant le chevauchement), `WebhookService` (créer, modifier, supprimer, renouveler le secret, essai, réactiver avec rejeu des dernières 24 h, renvoyer une livraison, statistiques 7 jours), `WebhookDispatcher` (une livraison par adresse abonnée, **réessais à 1 min, 5 min, 30 min, 2 h : 5 tentatives**, concurrence 2 par adresse, file plafonnée à 1 000, 10 échecs consécutifs ou une réponse 410 désactivent l'adresse et alertent), `ApiMaintenanceWorker` (dernières utilisations et compteurs toutes les 5 min, purge et rappels toutes les heures).
+- **`ApiCore.cs`** : module « noyau », seule fonction livrée : `GET /me`, `GET/POST /webhooks`, `GET/PATCH/DELETE /webhooks/{id}`, `POST /webhooks/{id}/rotate-secret`, `POST /webhooks/{id}/test`, `GET /webhooks/{id}/deliveries` (pagination par curseur) ; accès `account:read` et `webhooks:manage` ; événement `ping`. `ApiDocs` : **`/api/v1/openapi.json`** et page **`/docs/api`** (publique, aux couleurs et au nom du revendeur) générées depuis le registre.
+- **Alertes** : nouvelle catégorie `Alerts.Integrations` (« Intégrations et API ») : toujours dans le centre de notifications, suivie par défaut, ajoutée aux organisations qui avaient activé leurs alertes (`Alerts.Migrate`, version 3). Notifie : adresse désactivée, clé qui expire.
+- **Interface** : `Pages/ApiWebhooks.razor` (`/apiwebhooks`, onglet « API et webhooks » du hub Contenus après Sources de données, mode Expert, administrateurs, aussi dans la feuille « Plus » de l'app) selon la maquette : Clés (liste, filtres, tiroir avec appels sur 30 jours, renouveler, révoquer avec confirmation), fenêtre de création (gabarits du registre, « Personnalisée », expiration, adresses IP en option avancée, clé montrée une seule fois avec exemple `curl`), Webhooks (cartes, bandeau d'une adresse désactivée, tiroir : événements groupés du registre, secret, essai, réactiver et rejouer), Journal (filtres, tentatives, contenu, renvoyer). Style `wwwroot/api-webhooks.css`. Organisation en Essential : page explicative avec invitation à passer à Pro.
+- **Console** : fiche d'un client › Aperçu › section « API et webhooks » : les quatre limites (vide = valeur par défaut).
+
+### Règles à ne pas casser
+- `JsonStore` réécrit tout data.json à chaque `Write` : **rien de fréquent n'y passe** (dernière utilisation en mémoire et enregistrée par lot, compteurs, journal, idempotence en fichiers à part).
+- `Publish` est appelé jusque sous le verrou du magasin : aucun accès disque ni réseau.
+- Une fonction future n'ajoute qu'un module (accès, routes, événements, documentation) et des appels à `Publish` ; elle ne touche ni la chaîne de requête ni les écrans.
+- Développement et tests : `Linkii:Api:AllowLocalWebhooks=true` autorise http et le réseau local pour les adresses de réception (jamais en production).
+
+### Tests (`ApiTests.cs`, 61 tests, verts)
+Format et empreinte des clés, limites par défaut et surcharge, plan Pro, validation, authentification (inconnue, révoquée, expirée, adresse IP, autre revendeur), renouvellement, dernière utilisation sans écriture de data.json, registre (module ajouté, incohérences refusées, jokers), signature (vecteurs, rejeu trop ancien), livraison signée et journalisée, **calendrier exact des réessais**, désactivation après 10 échecs, 410, réactivation avec rejeu, abonnements et isolation entre organisations, essai sans réessai, rotation du secret, adresses refusées, journal repris après redémarrage, purge, et la chaîne HTTP complète (401 `problem+json`, plan, accès, suspension, isolation, débit, idempotence, OpenAPI, documentation).
+
+### Non fait / non vérifié
+- Aucune fonction métier branchée : pas d'événement `screen.offline` ni d'urgence (le socle les attend : un module + un `Publish`). Prochaines étapes du §153 : supervision (une ligne dans `ScreenWatchWorker`), envoi direct de données, import de médias, urgence.
+- Réglages › Utilisation (maquette scène 7) : la page n'affiche pas encore l'usage de l'API.
+- Limites de débit en mémoire et un seul serveur supposé (une 2e instance demanderait un stockage partagé).
+- **Vérifié dans le navigateur** (instance locale, client de test Pro, récepteur Node local) : onglet du hub, création d'une clé et exemple `curl`, appel réel `GET /api/v1/me` (200) et sans clé (401 `missing_key`), création d'un webhook par l'API avec `Idempotency-Key`, « Envoyer un test » livré (HTTP 200, signature reçue) et échec 404 visible, journal et détail d'une livraison, section « API et webhooks » de la fiche client dans la console. **Pas vu** : captures d'écran (le volet ne se dessinait pas), renouvellement et révocation à l'écran, mode Essential, mobile ; envoi réseau réel hors `AllowLocalWebhooks` (contrôle d'adresse de `SafeHttp`) jamais essayé contre un serveur.
+- Suite complète : 23 échecs dont 9 viennent du dossier de sortie à part utilisé ici (tests qui lisent `Linkii.Poc/Apps` en chemin relatif : HomeAssistant, WidgetLogic, CloudFiles) ; les 14 autres (Billing, Signup, Apps, Pwa, Weather) sont ceux d'avant, sans lien avec ce code.

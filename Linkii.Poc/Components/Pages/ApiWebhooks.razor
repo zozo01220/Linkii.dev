@@ -1,0 +1,649 @@
+@page "/apiwebhooks"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientAdmin")]
+@using Microsoft.JSInterop
+@using System.Text.Json
+@inject TenantStore Store
+@inject JsonStore Root
+@inject ApiKeyService Keys
+@inject WebhookService Hooks
+@inject WebhookJournal Journal
+@inject ApiUsage Usage
+@inject ApiRegistry Registry
+@inject IJSRuntime JS
+@inject Toaster Toast
+@inject NavigationManager Nav
+@implements IDisposable
+
+@* API et webhooks (§154, maquettes/api-webhooks.html) : onglet du hub Contenus, mode expert, plan Pro, administrateurs.
+   Trois sous-onglets : Clés (création avec gabarits, clé montrée une seule fois, renouvellement, révocation), Webhooks (adresses, événements, secret, essai),
+   Journal des livraisons. Les accès, gabarits et événements viennent du registre (ApiRegistry) : une fonction qui s'ajoute apparaît ici sans toucher cette page. *@
+<HeadContent><link rel="stylesheet" href="api-webhooks.css?v=1" /></HeadContent>
+
+<div class="page-head">
+    <div>
+        <h1>API et webhooks</h1>
+        <p class="sub">Clés d'accès et adresses de webhook de votre organisation.</p>
+    </div>
+    @if (allowed)
+    {
+        <div class="row head-actions">
+            @if (sect == "keys")
+            {
+                <button type="button" class="btn" @onclick="OpenCreateKey"><Ico Name="plus" Size="16" /> Créer une clé</button>
+            }
+            else if (sect == "hooks")
+            {
+                <button type="button" class="btn" @onclick="NewHook"><Ico Name="plus" Size="16" /> Ajouter une adresse</button>
+            }
+        </div>
+    }
+</div>
+
+@if (!allowed)
+{
+    <div class="apx-lock">
+        <PlanTag Plan="@Plans.Growth" Size="15" />
+        <h3>Connectez Linkivi à vos outils</h3>
+        <p>Déclenchez une action depuis une centrale d'alarme, recevez un message quand un écran ne répond plus, envoyez des données depuis votre système. Vos clés et vos adresses restent enregistrées si vous quittez le plan Pro : elles sont simplement suspendues.</p>
+        <a class="btn" href="/settings?tab=abonnement">Voir les plans</a>
+    </div>
+}
+else
+{
+    var activeKeys = keys.Count(k => k.State(DateTime.UtcNow) is not (ApiKey.Revoked or ApiKey.Expired));
+    var offHooks = hooks.Count(h => !h.Active);
+    <div class="apx-tabs" role="tablist">
+        <button type="button" role="tab" class="@(sect == "keys" ? "on" : "")" @onclick='() => SetSect("keys")'>Clés <span class="cat-count">@activeKeys</span></button>
+        <button type="button" role="tab" class="@(sect == "hooks" ? "on" : "")" @onclick='() => SetSect("hooks")'>Webhooks <span class="cat-count @(offHooks > 0 ? "bad" : "")">@hooks.Count</span></button>
+        <button type="button" role="tab" class="@(sect == "log" ? "on" : "")" @onclick='() => SetSect("log")'>Journal</button>
+        <span class="grow"></span>
+        <a class="doc" href="/docs/api" target="_blank" rel="noopener"><Ico Name="link" Size="14" /> Documentation</a>
+    </div>
+
+    @if (sect == "keys") { @KeysView }
+    else if (sect == "hooks") { @HooksView }
+    else { @LogView }
+}
+
+@code {
+    private Guid clientId;
+    private bool allowed;
+    private string tz = "Europe/Zurich";
+    private int maxKeys, maxHooks, journalDays;
+    private string sect = "keys";
+    private List<ApiKey> keys = new();
+    private List<WebhookEndpoint> hooks = new();
+    private Dictionary<Guid, string> owners = new();
+    private Timer? timer;
+
+    [SupplyParameterFromQuery(Name = "tab")] public string? TabParam { get; set; }
+
+    protected override void OnInitialized()
+    {
+        clientId = Store.ClientId;
+        Reload();
+        timer = new Timer(_ => InvokeAsync(() => { if (sect == "log" || delivery != null || hkOpen) { Reload(); StateHasChanged(); } }), null, 4000, 4000);
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (TabParam is "keys" or "hooks" or "log") sect = TabParam;
+    }
+
+    public void Dispose() => timer?.Dispose();
+
+    private void Reload()
+    {
+        (allowed, tz, maxKeys, maxHooks, journalDays) = Store.Read(d => (ApiLimits.Allowed(d.Tenant), d.Tenant.Timezone, ApiLimits.Keys(d.Tenant), ApiLimits.Webhooks(d.Tenant), ApiLimits.JournalDays(d.Tenant)));
+        keys = Keys.List(clientId);
+        hooks = Hooks.List(clientId);
+        owners = Root.Read(db => db.Users.Where(u => u.ClientId == clientId).ToDictionary(u => u.Id, u => string.IsNullOrWhiteSpace(u.Name) ? u.Email : u.Name));
+    }
+
+    private void SetSect(string s) { sect = s; CloseAll(); Nav.NavigateTo("/apiwebhooks?tab=" + s, replace: true); }
+    private void CloseAll() { openKey = null; mkOpen = false; hkOpen = false; delivery = null; confirmRevoke = false; confirmDelete = false; }
+    private string Ago(DateTime? utc) => utc == null ? "—" : Notifs.When(utc.Value, DateTime.UtcNow, tz);
+    private string Owner(Guid? id) => id is { } g && owners.TryGetValue(g, out var n) ? n : "—";
+    private async Task Copy(string text)
+    {
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", text); Toast.Ok("Copié"); }
+        catch (JSException) { Toast.Error("Copie impossible : sélectionnez le texte à la main."); }
+    }
+
+    // ---------- Clés ----------
+    private string keyFilter = "all", keySearch = "";
+    private ApiKey? openKey;
+    private bool confirmRevoke;
+
+    private static (string Level, string Text) KeyState(ApiKey k) => k.State(DateTime.UtcNow) switch
+    {
+        ApiKey.Active => ("ok", "Active"),
+        ApiKey.Unused => ("", "Jamais utilisée"),
+        ApiKey.Expiring => ("warn", k.RenewedUtc != null ? "Remplacée" : "Expire bientôt"),
+        ApiKey.Expired => ("bad", "Expirée"),
+        _ => ("", "Révoquée"),
+    };
+
+    private bool KeyMatches(ApiKey k)
+    {
+        var s = k.State(DateTime.UtcNow);
+        var okFilter = keyFilter switch
+        {
+            "active" => s is ApiKey.Active or ApiKey.Unused,
+            "watch" => s is ApiKey.Expiring or ApiKey.Unused,
+            "off" => s is ApiKey.Revoked or ApiKey.Expired,
+            _ => true,
+        };
+        return okFilter && (keySearch.Trim().Length == 0 || (k.Name + " " + k.Prefix).Contains(keySearch.Trim(), StringComparison.OrdinalIgnoreCase));
+    }
+
+    private RenderFragment KeysView => @<div>
+        @if (keys.Count == 0)
+        {
+            <div class="apx-empty">
+                <Ico Name="lock" Size="40" />
+                <h3>Aucune clé</h3>
+                <p>Une clé permet à un autre système (alarme, supervision, automatisation) d'appeler Linkivi. Elle n'est affichée qu'une seule fois, à sa création.</p>
+                <button type="button" class="btn" @onclick="OpenCreateKey"><Ico Name="plus" Size="16" /> Créer une clé</button>
+            </div>
+        }
+        else
+        {
+            var now = DateTime.UtcNow;
+            <div class="apx-tools">
+                <div class="search-box"><Ico Name="search" Size="16" /><input placeholder="Rechercher une clé" aria-label="Rechercher une clé" @bind="keySearch" @bind:event="oninput" /></div>
+                <div class="apx-chips" role="group" aria-label="Filtrer">
+                    <button type="button" class="chip @(keyFilter == "all" ? "on" : "")" @onclick='() => keyFilter = "all"'>Toutes <small>@keys.Count</small></button>
+                    <button type="button" class="chip @(keyFilter == "active" ? "on" : "")" @onclick='() => keyFilter = "active"'>Actives <small>@keys.Count(k => k.State(now) is ApiKey.Active or ApiKey.Unused)</small></button>
+                    <button type="button" class="chip @(keyFilter == "watch" ? "on" : "")" @onclick='() => keyFilter = "watch"'>À surveiller <small>@keys.Count(k => k.State(now) is ApiKey.Expiring or ApiKey.Unused)</small></button>
+                    <button type="button" class="chip @(keyFilter == "off" ? "on" : "")" @onclick='() => keyFilter = "off"'>Révoquées ou expirées <small>@keys.Count(k => k.State(now) is ApiKey.Revoked or ApiKey.Expired)</small></button>
+                </div>
+            </div>
+            <table class="apx-tbl">
+                <tr><th>Nom</th><th>Accès</th><th>Créée par</th><th>Dernière utilisation</th><th>Appels (30 j)</th><th>État</th></tr>
+                @foreach (var k in keys.Where(KeyMatches))
+                {
+                    var key = k;
+                    var (lv, tx) = KeyState(key);
+                    var last = Keys.LastUsed(key);
+                    <tr class="rw" @onclick="() => { openKey = key; confirmRevoke = false; }">
+                        <td><b>@key.Name</b><small class="mono">@key.Prefix</small></td>
+                        <td><span class="apx-gab">@key.Template</span></td>
+                        <td>@Owner(key.OwnerId)<small>@key.CreatedUtc.ToLocalTime().ToString("d MMM yyyy")</small></td>
+                        <td>@(last == null ? "Jamais utilisée" : Ago(last))</td>
+                        <td>@Usage.Total(key.Id).ToString("N0")</td>
+                        <td>@DataSourcesTab.StatePill(lv, tx)@if (lv == "warn" && key.ExpiresUtc is { } e) { <small>@(key.RenewedUtc != null ? "valable jusqu'au " : "expire le ")@e.ToLocalTime().ToString("d MMM HH:mm")</small> }</td>
+                    </tr>
+                }
+            </table>
+            <p class="apx-note">@keys.Count(k => k.Counts(now)) clé@(keys.Count(k => k.Counts(now)) > 1 ? "s" : "") sur @maxKeys autorisée@(maxKeys > 1 ? "s" : "") pour votre organisation.</p>
+        }
+        @if (openKey != null) { @KeyDrawer }
+        @if (mkOpen) { @CreateKeyDialog }
+    </div>;
+
+    private RenderFragment KeyDrawer => @<div>
+        <div class="modal-backdrop" @onclick="() => openKey = null"></div>
+        <div class="modal app-modal as-drawer" role="dialog" aria-modal="true" aria-label="@openKey!.Name">
+            <div class="modal-head">
+                <div class="grow"><h3>@openKey.Name</h3><small class="apx-mono">@openKey.Prefix</small></div>
+                <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => openKey = null"><Ico Name="x" Size="20" /></button>
+            </div>
+            <div class="modal-body">
+                @{ var (lv, tx) = KeyState(openKey); var series = Usage.Series(openKey.Id); var max = Math.Max(1, series.Calls.Max()); var off = openKey.State(DateTime.UtcNow) is ApiKey.Revoked or ApiKey.Expired; }
+                <dl class="apx-kv">
+                    <dt>État</dt><dd>@DataSourcesTab.StatePill(lv, tx)</dd>
+                    <dt>Accès</dt><dd><span class="apx-gab">@openKey.Template</span></dd>
+                    <dt>Agit au nom de</dt><dd>@Owner(openKey.OwnerId)<div class="apx-hint">Les médias importés avec cette clé lui appartiennent.</div></dd>
+                    <dt>Créée</dt><dd>@openKey.CreatedUtc.ToLocalTime().ToString("d MMM yyyy HH:mm")</dd>
+                    <dt>Expiration</dt><dd>@(openKey.RevokedUtc is { } rv ? "Révoquée le " + rv.ToLocalTime().ToString("d MMM yyyy") : openKey.ExpiresUtc is { } ex ? ex.ToLocalTime().ToString("d MMM yyyy HH:mm") : "Jamais")</dd>
+                    <dt>Dernière utilisation</dt><dd>@(Keys.LastUsed(openKey) is { } lu ? Ago(lu) : "Jamais utilisée")</dd>
+                    @if (openKey.AllowedIps.Count > 0) { <dt>Adresses autorisées</dt><dd class="apx-mono">@string.Join(", ", openKey.AllowedIps)</dd> }
+                </dl>
+                <div class="apx-sec">Appels des 30 derniers jours</div>
+                <div class="apx-bars">@foreach (var n in series.Calls) { <i style="height:@(Math.Max(2, (int)(46.0 * n / max)))px" title="@n"></i> }</div>
+                <div class="apx-hint">@series.Calls.Sum().ToString("N0") appels · @series.Errors erreur@(series.Errors > 1 ? "s" : "")</div>
+                <div class="apx-sec">Accès accordés</div>
+                <div class="apx-ev">@foreach (var s in openKey.Scopes) { <i>@s</i> }</div>
+                @if (!off && openKey.RenewedUtc == null)
+                {
+                    <div class="apx-sec">Renouveler</div>
+                    <p class="apx-hint" style="margin:0">Crée une nouvelle clé identique ; l'ancienne reste valable 24 h pour laisser le temps de changer la clé dans l'outil.</p>
+                }
+            </div>
+            <div class="modal-foot">
+                @if (!off)
+                {
+                    @if (openKey.RenewedUtc == null) { <button type="button" class="btn ghost" @onclick="RenewKey"><Ico Name="refresh" Size="15" /> Renouveler</button> }
+                    <span class="grow"></span>
+                    @if (confirmRevoke)
+                    {
+                        <button type="button" class="btn ghost" @onclick="() => confirmRevoke = false">Annuler</button>
+                        <button type="button" class="btn danger" @onclick="RevokeKey">Confirmer la révocation</button>
+                    }
+                    else { <button type="button" class="btn danger" @onclick="() => confirmRevoke = true">Révoquer</button> }
+                }
+            </div>
+        </div>
+    </div>;
+
+    private void RevokeKey()
+    {
+        if (openKey == null) return;
+        Keys.Revoke(clientId, openKey.Id);
+        Toast.Ok($"Clé « {openKey.Name} » révoquée : elle ne fonctionne plus.");
+        openKey = null; confirmRevoke = false; Reload();
+    }
+
+    private void RenewKey()
+    {
+        if (openKey == null) return;
+        var r = Keys.Renew(clientId, openKey.Id);
+        if (r.Key == null) { Toast.Error(r.Error); return; }
+        openKey = null; Reload();
+        mkOpen = true; mkStep = 2; mkKey = r.Key; mkSecret = r.Secret; mkRenewed = true;
+    }
+
+    // ---------- Création d'une clé ----------
+    private bool mkOpen, mkAdv, mkRenewed;
+    private int mkStep = 1;
+    private string mkName = "", mkTemplate = "", mkExpiry = "90", mkIps = "";
+    private HashSet<string> mkScopes = new();
+    private string? mkError, mkSecret;
+    private ApiKey? mkKey;
+    private const string Custom = "__custom";
+
+    private void OpenCreateKey()
+    {
+        mkOpen = true; mkStep = 1; mkRenewed = false; mkName = ""; mkExpiry = "90"; mkIps = ""; mkError = null; mkSecret = null; mkKey = null; mkAdv = false;
+        PickTemplate(Registry.Templates.FirstOrDefault()?.Name ?? Custom);
+    }
+
+    private void PickTemplate(string name)
+    {
+        mkTemplate = name;
+        mkScopes = name == Custom ? new() { "account:read" } : Registry.Templates.First(t => t.Name == name).Scopes.ToHashSet();
+    }
+
+    private void ToggleScope(string id) { if (!mkScopes.Remove(id)) mkScopes.Add(id); }
+
+    private void CreateKey()
+    {
+        mkError = null;
+        DateTime? exp = mkExpiry switch { "30" => DateTime.UtcNow.AddDays(30), "90" => DateTime.UtcNow.AddDays(90), "365" => DateTime.UtcNow.AddYears(1), _ => null };
+        var ips = mkIps.Split(new[] { ',', ';', '\n', '\r', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        var r = Keys.Create(clientId, Store.UserId, mkName, mkTemplate == Custom ? "Personnalisée" : mkTemplate, mkScopes, exp, ips);
+        if (r.Key == null) { mkError = r.Error; return; }
+        mkKey = r.Key; mkSecret = r.Secret; mkStep = 2; Reload();
+    }
+
+    private void CloseCreate() { mkOpen = false; mkSecret = null; mkKey = null; }
+
+    private string Curl => $"curl {Nav.BaseUri.TrimEnd('/')}/api/v1/me \\\n  -H \"Authorization: Bearer {mkSecret}\"";
+
+    private RenderFragment CreateKeyDialog => @<div>
+        <div class="modal-backdrop" @onclick="() => { if (mkStep == 1) CloseCreate(); }"></div>
+        <div class="modal app-modal" role="dialog" aria-modal="true" aria-label="@(mkStep == 1 ? "Créer une clé" : "Clé créée")">
+            @if (mkStep == 1)
+            {
+                <div class="modal-head">
+                    <div class="grow"><h3>Créer une clé</h3><small>Une clé donne à un autre système un accès à votre organisation.</small></div>
+                    <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseCreate"><Ico Name="x" Size="20" /></button>
+                </div>
+                <div class="modal-body">
+                    <div class="apx-field" style="margin-top:0"><label for="mk-name">Nom <small>pour la reconnaître plus tard</small></label><input id="mk-name" type="text" maxlength="80" placeholder="Supervision, Alarme bâtiment B…" @bind="mkName" @bind:event="oninput" /></div>
+                    <div class="apx-field"><label>Accès</label>
+                        <div class="apx-tpls">
+                            @foreach (var t in Registry.Templates)
+                            {
+                                var tp = t;
+                                <button type="button" class="apx-tpl @(mkTemplate == tp.Name ? "on" : "")" @onclick="() => PickTemplate(tp.Name)">
+                                    <span class="rd"></span>
+                                    <span><b>@tp.Name</b><small>@tp.Hint</small><span class="apx-ev">@foreach (var s in tp.Scopes) { <i>@s</i> }</span></span>
+                                </button>
+                            }
+                            <button type="button" class="apx-tpl @(mkTemplate == Custom ? "on" : "")" @onclick="() => PickTemplate(Custom)">
+                                <span class="rd"></span><span><b>Personnalisée</b><small>Choisir les accès un par un</small></span>
+                            </button>
+                        </div>
+                        @if (mkTemplate == Custom)
+                        {
+                            @foreach (var g in Registry.ScopeGroups)
+                            {
+                                <div class="apx-scg"><div class="gh">@g.Key</div>
+                                    @foreach (var s in g)
+                                    {
+                                        var sc = s;
+                                        <label class="apx-ck"><input type="checkbox" checked="@mkScopes.Contains(sc.Id)" @onchange="() => ToggleScope(sc.Id)" /><span><code>@sc.Id</code><small>@sc.Label</small></span></label>
+                                    }
+                                </div>
+                            }
+                        }
+                    </div>
+                    <div class="apx-field"><label for="mk-exp">Expiration</label>
+                        <select id="mk-exp" @bind="mkExpiry"><option value="30">Dans 30 jours</option><option value="90">Dans 90 jours</option><option value="365">Dans 1 an</option><option value="never">Jamais (déconseillé)</option></select>
+                        <div class="apx-hint">Un rappel est envoyé 14 jours avant l'expiration.</div>
+                    </div>
+                    <div class="apx-field">
+                        <button type="button" class="lnk" style="border:0;background:none;padding:0;color:var(--signal);cursor:pointer" @onclick="() => mkAdv = !mkAdv">⚙ Options avancées</button>
+                        @if (mkAdv)
+                        {
+                            <div class="apx-field"><label for="mk-ips">Adresses IP autorisées <small>facultatif</small></label><textarea id="mk-ips" placeholder="203.0.113.10, 198.51.100.0/24" @bind="mkIps"></textarea>
+                                <div class="apx-hint">Vide : la clé fonctionne depuis n'importe où. Une adresse ou une plage (CIDR) par ligne ou séparée par des virgules.</div></div>
+                        }
+                    </div>
+                    @if (mkError != null) { <div class="apx-err">@mkError</div> }
+                </div>
+                <div class="modal-foot">
+                    <button type="button" class="btn ghost" @onclick="CloseCreate">Annuler</button>
+                    <span class="grow"></span>
+                    <button type="button" class="btn" disabled="@(mkName.Trim().Length == 0 || mkScopes.Count == 0)" @onclick="CreateKey">Créer la clé</button>
+                </div>
+            }
+            else
+            {
+                <div class="modal-head">
+                    <div class="grow"><h3>@(mkRenewed ? "Clé renouvelée" : "Clé créée")</h3><small>Copiez-la maintenant : elle ne sera plus jamais affichée.</small></div>
+                </div>
+                <div class="modal-body">
+                    <div class="apx-banner warn"><span class="x">Linkivi ne conserve qu'une empreinte de cette clé. Si vous la perdez, il faudra en créer une autre.@(mkRenewed ? " L'ancienne clé reste valable 24 heures." : "")</span></div>
+                    <div class="apx-field" style="margin-top:0"><label>Votre clé</label>
+                        <div class="apx-keybox"><span>@mkSecret</span><button type="button" class="btn sm" @onclick="() => Copy(mkSecret!)"><Ico Name="copy" Size="14" /> Copier</button></div></div>
+                    <div class="apx-field"><label>Premier essai <small>(à coller dans un terminal)</small></label>
+                        <pre class="apx-code">@Curl</pre>
+                        <div class="apx-hint">Répond avec le nom de la clé, l'organisation et les accès accordés. <a href="/docs/api" target="_blank" rel="noopener">Voir la documentation</a></div></div>
+                </div>
+                <div class="modal-foot"><span class="apx-hint">@mkKey?.Name · @mkKey?.Template</span><span class="grow"></span><button type="button" class="btn" @onclick="CloseCreate">J'ai copié la clé</button></div>
+            }
+        </div>
+    </div>;
+
+    // ---------- Webhooks ----------
+    private bool hkOpen, confirmDelete;
+    private Guid? hkId;
+    private string hkName = "", hkUrl = "";
+    private HashSet<string> hkEvents = new();
+    private List<string> hkPatterns = new();
+    private string? hkError, hkSecret, hkTest;
+    private bool hkTestOk, hkBusy;
+
+    private void NewHook()
+    {
+        CloseAll();
+        hkOpen = true; hkId = null; hkName = ""; hkUrl = ""; hkEvents = new() { "ping" }; hkPatterns = new(); hkError = null; hkSecret = null; hkTest = null;
+    }
+
+    private void OpenHook(WebhookEndpoint e)
+    {
+        CloseAll();
+        hkOpen = true; hkId = e.Id; hkName = e.Name; hkUrl = e.Url; hkError = null; hkSecret = null; hkTest = null;
+        hkEvents = e.Events.Where(Registry.IsKnownEvent).ToHashSet();
+        hkPatterns = e.Events.Where(p => !Registry.IsKnownEvent(p)).ToList();   // abonnements avec joker (« screen.* ») posés par l'API : conservés tels quels
+    }
+
+    private void ToggleEvent(string id) { if (!hkEvents.Remove(id)) hkEvents.Add(id); }
+    private void AllOfGroup(IGrouping<string, EventType> g) { foreach (var e in g) hkEvents.Add(e.Id); }
+
+    private void SaveHook()
+    {
+        hkError = null;
+        var events = hkEvents.Concat(hkPatterns).ToList();
+        if (hkId == null)
+        {
+            var r = Hooks.Create(clientId, Store.UserId, hkName, hkUrl, events);
+            if (r.Endpoint == null) { hkError = r.Error; return; }
+            hkId = r.Endpoint.Id; hkSecret = r.Secret; Reload();
+            return;
+        }
+        var err = Hooks.Update(clientId, hkId.Value, hkName, hkUrl, events);
+        if (err != null) { hkError = err; return; }
+        Toast.Ok("Adresse enregistrée."); hkOpen = false; Reload();
+    }
+
+    private async Task TestHook()
+    {
+        if (hkId == null) return;
+        hkBusy = true; hkTest = null; StateHasChanged();
+        var d = await Hooks.SendTest(clientId, hkId.Value);
+        hkBusy = false;
+        var a = d?.Attempts.LastOrDefault();
+        hkTestOk = d?.Status == Delivery.Delivered;
+        hkTest = hkTestOk ? $"✓ « ping » livré : HTTP {a?.Status} en {a?.Ms} ms." : $"✗ Échec : {(a?.Status is { } s ? "HTTP " + s : a?.Error ?? "aucune réponse")}.";
+        Reload();
+    }
+
+    private void RotateSecret()
+    {
+        if (hkId == null) return;
+        hkSecret = Hooks.RotateSecret(clientId, hkId.Value);
+        if (hkSecret == null) Toast.Error("Adresse introuvable.");
+    }
+
+    private void ReactivateHook(Guid id)
+    {
+        var n = Hooks.Reactivate(clientId, id);
+        Toast.Ok(n > 0 ? $"Adresse réactivée : {n} événement{(n > 1 ? "s" : "")} rejoué{(n > 1 ? "s" : "")}." : "Adresse réactivée.");
+        Reload(); if (hkOpen && hkId == id) hkOpen = false;
+    }
+
+    private void DisableHook()
+    {
+        if (hkId == null) return;
+        Hooks.Disable(clientId, hkId.Value, "Désactivée à la main", notify: false);
+        Toast.Ok("Adresse désactivée."); hkOpen = false; Reload();
+    }
+
+    private void DeleteHook()
+    {
+        if (hkId == null) return;
+        Hooks.Delete(clientId, hkId.Value);
+        Toast.Ok("Adresse supprimée."); hkOpen = false; confirmDelete = false; Reload();
+    }
+
+    private RenderFragment HooksView => @<div>
+        @{ var bad = hooks.FirstOrDefault(h => !h.Active); }
+        @if (bad != null)
+        {
+            <div class="apx-banner err"><span class="x"><b>« @bad.Name » est désactivé</b>@(bad.DisabledUtc is { } du ? " depuis " + Ago(du) : "") : @bad.DisabledReason. Les événements des dernières 24 heures sont gardés.</span>
+                <button type="button" class="btn sm" @onclick="() => OpenHook(bad)">Voir</button>
+                <button type="button" class="btn sm" @onclick="() => ReactivateHook(bad.Id)">Réactiver et rejouer</button></div>
+        }
+        <div class="apx-cards">
+            @foreach (var h in hooks)
+            {
+                var hk = h;
+                var st = Hooks.Stats(clientId, hk.Id);
+                <button type="button" class="apx-card @(hk.Active ? "" : "bad")" @onclick="() => OpenHook(hk)">
+                    <h3>@hk.Name @DataSourcesTab.StatePill(hk.Active ? "ok" : "bad", hk.Active ? "Actif" : "Désactivé")</h3>
+                    <div class="url apx-mono">@hk.Url</div>
+                    <div class="apx-ev">@foreach (var e in hk.Events.Take(6)) { <i>@e</i> }@if (hk.Events.Count > 6) { <i>+@(hk.Events.Count - 6)</i> }</div>
+                    <div class="ft"><span>Dernière livraison @(st.LastUtc == null ? "—" : Ago(st.LastUtc))</span><span>@(st.RatePercent is { } r ? r + " %" : "—")@(st.MedianMs is { } m ? " · " + m + " ms" : "")</span></div>
+                </button>
+            }
+            <button type="button" class="apx-card add" @onclick="NewHook"><Ico Name="plus" Size="22" /> Ajouter une adresse</button>
+        </div>
+        <p class="apx-note">@hooks.Count adresse@(hooks.Count > 1 ? "s" : "") sur @maxHooks autorisée@(maxHooks > 1 ? "s" : "") pour votre organisation.</p>
+        @if (hkOpen) { @HookDrawer }
+    </div>;
+
+    private RenderFragment HookDrawer => @<div>
+        <div class="modal-backdrop" @onclick="() => hkOpen = false"></div>
+        <div class="modal app-modal as-drawer" role="dialog" aria-modal="true" aria-label="@(hkId == null ? "Ajouter une adresse" : hkName)">
+            @{ var cur = hkId == null ? null : hooks.FirstOrDefault(x => x.Id == hkId); var st = cur == null ? null : Hooks.Stats(clientId, cur.Id); }
+            <div class="modal-head">
+                <div class="grow"><h3>@(hkSecret != null && cur != null ? "Secret de signature" : hkId == null ? "Ajouter une adresse" : cur?.Name)</h3>
+                    @if (cur != null) { @DataSourcesTab.StatePill(cur.Active ? "ok" : "bad", cur.Active ? "Actif" : "Désactivé") }</div>
+                <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => hkOpen = false"><Ico Name="x" Size="20" /></button>
+            </div>
+            <div class="modal-body">
+                @if (hkSecret != null)
+                {
+                    <div class="apx-banner warn"><span class="x">Gardez ce secret : il sert à vérifier que les messages viennent de Linkivi. Il n'est affiché qu'une fois ; vous pourrez en générer un nouveau (l'ancien reste valable 24 h).</span></div>
+                    <div class="apx-keybox"><span>@hkSecret</span><button type="button" class="btn sm" @onclick="() => Copy(hkSecret!)"><Ico Name="copy" Size="14" /> Copier</button></div>
+                    <p class="apx-hint" style="margin-top:10px">Chaque envoi porte l'en-tête <code>Linkivi-Signature</code> ; la <a href="/docs/api#webhooks" target="_blank" rel="noopener">documentation</a> donne le code de vérification.</p>
+                }
+                else
+                {
+                    @if (cur is { Active: false }) { <div class="apx-banner err"><span class="x">@cur.DisabledReason. Corrigez le récepteur, puis réactivez.</span></div> }
+                    <div class="apx-field" style="margin-top:0"><label for="hk-name">Nom</label><input id="hk-name" type="text" maxlength="80" placeholder="Supervision Teams" @bind="hkName" @bind:event="oninput" /></div>
+                    <div class="apx-field"><label for="hk-url">Adresse de réception <small>HTTPS obligatoire</small></label><input id="hk-url" type="url" class="apx-mono" placeholder="https://exemple.ch/hooks/linkivi" @bind="hkUrl" @bind:event="oninput" />
+                        <div class="apx-hint">Les adresses du réseau interne sont refusées. Redirections non suivies. Réponse attendue : 2xx en moins de 10 s.</div></div>
+                    @if (st != null)
+                    {
+                        <div class="apx-stats">
+                            <div class="apx-stat"><b>@(st.RatePercent is { } r ? r + " %" : "—")</b><span>livrés (7 j)</span></div>
+                            <div class="apx-stat"><b>@(st.MedianMs is { } m ? m + " ms" : "—")</b><span>délai médian</span></div>
+                            <div class="apx-stat"><b>@st.Consecutive</b><span>échecs de suite</span></div>
+                        </div>
+                    }
+                    <div class="apx-sec">Événements envoyés</div>
+                    @foreach (var g in Registry.EventGroups)
+                    {
+                        var grp = g;
+                        <div class="apx-scg"><div class="gh">@grp.Key<button type="button" @onclick="() => AllOfGroup(grp)">Tout cocher</button></div>
+                            @foreach (var e in grp)
+                            {
+                                var ev = e;
+                                <label class="apx-ck"><input type="checkbox" checked="@hkEvents.Contains(ev.Id)" @onchange="() => ToggleEvent(ev.Id)" /><span><code>@ev.Id</code><small>@ev.Label</small></span></label>
+                            }
+                        </div>
+                    }
+                    @if (hkPatterns.Count > 0) { <p class="apx-hint">Abonnements avec joker posés par l'API, conservés : @string.Join(", ", hkPatterns).</p> }
+                    @if (cur != null)
+                    {
+                        <div class="apx-sec">Secret de signature</div>
+                        <div class="apx-keybox"><span>whsec_••••••••••••••••••••••••</span></div>
+                        <div class="apx-hint">« Renouveler » crée un nouveau secret ; l'ancien reste valable 24 h pour changer sans coupure.</div>
+                        <button type="button" class="btn sm" style="margin-top:8px" @onclick="RotateSecret"><Ico Name="refresh" Size="14" /> Renouveler le secret</button>
+                        <div class="apx-sec">Essai</div>
+                        <button type="button" class="btn" disabled="@(hkBusy || !cur.Active)" @onclick="TestHook">@(hkBusy ? "Envoi…" : "Envoyer un test")</button>
+                        @if (hkTest != null) { <div class="apx-test @(hkTestOk ? "ok" : "bad")">@hkTest <button type="button" class="lnk" style="border:0;background:none;color:inherit;text-decoration:underline;cursor:pointer" @onclick='() => { logHook = cur.Id; SetSect("log"); }'>Voir dans le journal</button></div> }
+                    }
+                    @if (hkError != null) { <div class="apx-err">@hkError</div> }
+                }
+            </div>
+            <div class="modal-foot">
+                @if (hkSecret != null) { <span class="grow"></span><button type="button" class="btn" @onclick="() => hkOpen = false">Terminé</button> }
+                else
+                {
+                    @if (cur != null)
+                    {
+                        @if (confirmDelete) { <button type="button" class="btn danger" @onclick="DeleteHook">Confirmer la suppression</button> }
+                        else { <button type="button" class="btn danger" @onclick="() => confirmDelete = true">Supprimer</button> }
+                    }
+                    <span class="grow"></span>
+                    @if (cur is { Active: false }) { <button type="button" class="btn" @onclick="() => ReactivateHook(cur.Id)">Réactiver et rejouer</button> }
+                    else if (cur != null) { <button type="button" class="btn ghost" @onclick="DisableHook">Désactiver</button> }
+                    <button type="button" class="btn" disabled="@(hkName.Trim().Length == 0 || hkUrl.Trim().Length == 0)" @onclick="SaveHook">@(hkId == null ? "Ajouter" : "Enregistrer")</button>
+                }
+            </div>
+        </div>
+    </div>;
+
+    // ---------- Journal ----------
+    private string logFilter = "all";
+    private Guid? logHook;
+    private Delivery? delivery;
+
+    private static (string Level, string Text) DeliveryState(Delivery d)
+    {
+        var code = d.Attempts.LastOrDefault() is { } a ? (a.Status is { } s ? s.ToString() : "délai") : "";
+        return d.Status switch
+        {
+            Delivery.Delivered => ("ok", "Livré " + code),
+            Delivery.Pending => ("warn", "En attente"),
+            Delivery.Abandoned => ("bad", "Abandonné " + code),
+            _ => ("bad", "Échec " + code),
+        };
+    }
+
+    private RenderFragment LogView => @<div>
+        @{
+            var all = Journal.Query(clientId, logHook, logFilter == "problems", null, 100);
+            var nProblems = Journal.Count(clientId, true);
+        }
+        <div class="apx-tools">
+            <div class="apx-chips" role="group" aria-label="Filtrer">
+                <button type="button" class="chip @(logFilter == "all" ? "on" : "")" @onclick='() => logFilter = "all"'>Toutes <small>@Journal.Count(clientId)</small></button>
+                <button type="button" class="chip @(logFilter == "problems" ? "on" : "")" @onclick='() => logFilter = "problems"'>Échecs et attentes <small>@nProblems</small></button>
+            </div>
+            <select aria-label="Adresse" @onchange="e => logHook = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null">
+                <option value="">Toutes les adresses</option>
+                @foreach (var h in hooks) { <option value="@h.Id" selected="@(logHook == h.Id)">@h.Name</option> }
+            </select>
+            <span class="apx-note" style="margin-left:auto">Conservé @journalDays jours</span>
+        </div>
+        @if (all.Count == 0)
+        {
+            <div class="apx-empty"><Ico Name="link" Size="40" /><h3>Aucune livraison</h3><p>Les événements envoyés à vos adresses apparaîtront ici, avec leur résultat. Essayez le bouton « Envoyer un test » d'une adresse.</p></div>
+        }
+        else
+        {
+            <table class="apx-tbl">
+                <tr><th>Événement</th><th>Adresse</th><th>Résultat</th><th>Tentatives</th><th>Heure</th></tr>
+                @foreach (var x in all)
+                {
+                    var d = x;
+                    var (lv, tx) = DeliveryState(d);
+                    <tr class="rw" @onclick="() => delivery = d">
+                        <td><span class="mono">@d.EventType</span><small>@d.EventId@(d.Test ? " · essai" : "")@(d.Note != null ? " · " + d.Note : "")</small></td>
+                        <td>@d.EndpointName</td>
+                        <td>@DataSourcesTab.StatePill(lv, tx)@if (d.Status == Delivery.Pending && d.NextUtc is { } nx) { <small>prochaine tentative @nx.ToLocalTime().ToString("HH:mm")</small> }</td>
+                        <td>@d.Attempts.Count / @WebhookDispatcher.MaxAttempts</td>
+                        <td>@Ago(d.QueuedUtc)</td>
+                    </tr>
+                }
+            </table>
+        }
+        @if (delivery != null) { @DeliveryDrawer }
+    </div>;
+
+    private void ResendDelivery()
+    {
+        if (delivery == null) return;
+        var err = Hooks.Resend(clientId, delivery.Id);
+        if (err != null) { Toast.Error(err); return; }
+        Toast.Ok("Livraison renvoyée : elle part dans quelques secondes.");
+        delivery = null;
+    }
+
+    private static string Pretty(string json)
+    {
+        try { return JsonSerializer.Serialize(JsonDocument.Parse(json).RootElement, new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }); }
+        catch (JsonException) { return json; }
+    }
+
+    private RenderFragment DeliveryDrawer => @<div>
+        <div class="modal-backdrop" @onclick="() => delivery = null"></div>
+        <div class="modal app-modal as-drawer" role="dialog" aria-modal="true" aria-label="@delivery!.EventType">
+            <div class="modal-head">
+                <div class="grow"><h3 class="apx-mono" style="font-size:16px">@delivery.EventType</h3><small>@delivery.EventId · @delivery.EndpointName · @Ago(delivery.QueuedUtc)</small></div>
+                <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => delivery = null"><Ico Name="x" Size="20" /></button>
+            </div>
+            <div class="modal-body">
+                @{ var (lv, tx) = DeliveryState(delivery); }
+                <div>@DataSourcesTab.StatePill(lv, tx)@if (delivery.Note != null) { <span class="apx-hint"> @delivery.Note</span> }</div>
+                <div class="apx-sec">Tentatives</div>
+                <div class="apx-tl">
+                    @foreach (var (a, i) in delivery.Attempts.Select((a, i) => (a, i)))
+                    {
+                        var ok = a.Status is >= 200 and < 300;
+                        <div class="@(ok ? "ok" : "er")">@(i + 1) · @a.AtUtc.ToLocalTime().ToString("HH:mm:ss") · @(a.Status is { } s ? $"HTTP {s} en {a.Ms} ms" : a.Error)</div>
+                    }
+                    @if (delivery.Status == Delivery.Pending && delivery.NextUtc is { } nx) { <div>prochaine tentative à @nx.ToLocalTime().ToString("HH:mm")</div> }
+                    @if (delivery.Status == Delivery.Abandoned) { <div>Abandonné@(delivery.Note != null ? " : " + delivery.Note : "")</div> }
+                </div>
+                <div class="apx-sec">Contenu envoyé</div>
+                <pre class="apx-code">@Pretty(delivery.Payload)</pre>
+                <p class="apx-hint">Chaque envoi porte <code>Linkivi-Event</code>, <code>Linkivi-Delivery</code> et <code>Linkivi-Signature</code>.</p>
+                @if (delivery.Attempts.LastOrDefault() is { Response.Length: > 0 } last)
+                {
+                    <div class="apx-sec">Réponse du récepteur</div>
+                    <pre class="apx-code">@last.Response</pre>
+                }
+            </div>
+            <div class="modal-foot"><span class="apx-hint">Conservé @journalDays jours</span><span class="grow"></span>
+                <button type="button" class="btn" disabled="@(delivery.Test)" @onclick="ResendDelivery">Renvoyer</button></div>
+        </div>
+    </div>;
+}
