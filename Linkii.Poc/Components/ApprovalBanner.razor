@@ -1,0 +1,50 @@
+@inject TenantStore Store
+@inject JsonStore Root
+@implements IDisposable
+
+@* Bandeau de l'auteur sur la page Écrans (§162, maquette approbation-publications.html, scène 2) : ses demandes en attente (l'écran garde sa version),
+   et un refus récent avec le commentaire de l'approbateur. Rien pour une personne qui n'est pas soumise. *@
+@if (waiting.Count > 0)
+{
+    <div class="ap-bnr wait" role="status">
+        <Ico Name="clock" Size="20" />
+        <div class="tx"><b>@(waiting.Count == 1 ? $"En attente d'approbation : {waiting[0].Title}" : $"{waiting.Count} publications en attente d'approbation")</b>
+            <small>Les écrans concernés continuent de diffuser leur version précédente.</small></div>
+        <a class="btn sm" href="approvals@(waiting.Count == 1 ? "?r=" + waiting[0].Id.ToString("N") : "")">Voir @(waiting.Count == 1 ? "la demande" : "les demandes")</a>
+    </div>
+}
+@foreach (var r in refused)
+{
+    <div class="ap-bnr ko" role="status">
+        <Ico Name="x" Size="20" />
+        <div class="tx"><b>Demande refusée par @r.DecidedByName : @r.Title</b>
+            @if (!string.IsNullOrWhiteSpace(r.Comment)) { <small>« @r.Comment »</small> }</div>
+        <a class="btn sm" href="approvals?r=@r.Id.ToString("N")">Voir</a>
+    </div>
+}
+
+@code {
+    private List<ApprovalRequest> waiting = new(), refused = new();
+    private Timer? later;
+
+    protected override void OnInitialized()
+    {
+        Load();
+        Root.Changed += OnChanged;
+    }
+
+    private void Load()
+    {
+        (waiting, refused) = Store.Read(d =>
+        {
+            if (!Approvals.Active(d.Tenant) || d.Access.UserId is not { } me) return (new List<ApprovalRequest>(), new List<ApprovalRequest>());
+            var mine = d.Root.ApprovalRequests.Where(r => r.ClientId == d.ClientId && r.AuthorId == me).ToList();
+            var since = DateTime.UtcNow.AddDays(-3);
+            return (mine.Where(r => r.Open).OrderBy(r => r.CreatedUtc).ToList(),
+                mine.Where(r => r.Status == ApprovalStatus.Refused && r.DecidedUtc >= since).OrderByDescending(r => r.DecidedUtc).Take(2).ToList());
+        });
+    }
+
+    private void OnChanged() { later?.Dispose(); later = new Timer(_ => InvokeAsync(() => { Load(); StateHasChanged(); }), null, 500, Timeout.Infinite); }
+    public void Dispose() { Root.Changed -= OnChanged; later?.Dispose(); }
+}

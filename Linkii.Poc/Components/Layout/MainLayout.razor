@@ -52,6 +52,13 @@
                     <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg> Contenus @Pill(MenuBadges.MediaFam, MenuBadges.Compositions)
                 </NavLink>
             }
+            @if (approvalsMenu)
+            {
+                @* Approbation des publications (§162, plan Pro) : demandes à décider (orange), ou demandes de la personne soumise *@
+                <NavLink class="nav" href="approvals">
+                    <Ico Name="shield" Size="18" /> Approbations @ApprovalPill()
+                </NavLink>
+            }
         }
         else if (Ctx.IsPlatformAdmin)
         {
@@ -198,7 +205,7 @@
                   ShowAccount="@(Ctx.ClientId == null || Ctx.IsClientMember && !Ctx.IsImpersonating)"
                   ShowBilling="@(Ctx.ClientId != null && orgAdmin)"
                   ShowOrganisation="@(Ctx.ClientId != null && orgAdmin && Modes.Expert)"
-                  ShowNotifications="@(Ctx.ClientId != null && orgAdmin)"
+                  ShowNotifications="@(Ctx.ClientId != null && (orgAdmin || approvalsMenu))"
                   ShowEmergency="@(Ctx.ClientId != null && orgAdmin && !Ctx.IsImpersonating)"
                   SettingsHref="@(Ctx.ClientId != null && orgAdmin ? "settings" : null)"
                   SettingsBadge="@(Pill("settings"))" />
@@ -252,7 +259,8 @@
                         @if (Modes.Expert) { <NavLink href="stats" @onclick="CloseMore"><span class="ic n"><Ico Name="chart" Size="22" /></span>Statistiques</NavLink> }
                     </div>
                     <div class="ml">
-                        @if (orgAdmin) { <NavLink href="notifications" @onclick="CloseMore"><span class="ic n"><Ico Name="bell" Size="18" /></span><b>Notifications</b><NotificationCount /><Ico Name="chevron-right" Size="16" /></NavLink> }
+                        @if (approvalsMenu) { <NavLink href="approvals" @onclick="CloseMore"><span class="ic n"><Ico Name="shield" Size="18" /></span><b>Approbations</b>@ApprovalPill()<Ico Name="chevron-right" Size="16" /></NavLink> }
+                        @if (orgAdmin || approvalsMenu) { <NavLink href="notifications" @onclick="CloseMore"><span class="ic n"><Ico Name="bell" Size="18" /></span><b>Notifications</b><NotificationCount /><Ico Name="chevron-right" Size="16" /></NavLink> }
                         @if (orgAdmin) { <NavLink href="settings" @onclick="CloseMore"><span class="ic n"><Ico Name="gear" Size="18" /></span><b>Réglages</b><Ico Name="chevron-right" Size="16" /></NavLink> }
                         @* « Mon compte » est dans Réglages pour l'administrateur ; le membre sans Réglages le garde ici *@
                         @if (!orgAdmin && !Ctx.IsImpersonating)
@@ -339,6 +347,17 @@
     private RightsBoundary? boundary;
 
     private bool Sees(string page) => orgAdmin || pages.Contains(page);
+    private bool approvalsMenu;   // approbation des publications active et la personne concernée (soumise, approbatrice ou administratrice)
+    private RenderFragment ApprovalPill() => builder =>
+    {
+        var n = Badges.Of(MenuBadges.ApprovalsFam).Count;
+        if (n == 0) return;
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", "nbadge orange");
+        builder.AddAttribute(2, "title", $"{n} demande{(n > 1 ? "s" : "")} à approuver");
+        builder.AddContent(3, n > 999 ? "999+" : n.ToString());
+        builder.CloseElement();
+    };
     private bool compositionsOn;   // l'intégration « Compositions » est dans Mes intégrations
     private bool CompositionsMenu => Ctx.ClientId != null && compositionsOn && Sees(LevelPages.Compositions);
     // Console Linkivi ou espace revendeur (hors espace client) : barre du bas et feuille « Plus » dans l'app
@@ -392,7 +411,13 @@
         InvokeAsync(StateHasChanged);
         _ = Task.Delay(1000).ContinueWith(_ => InvokeAsync(StateHasChanged));   // retire le rebond une fois joué
     }
-    private void OnLocationForBadges(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) => Badges.Refresh();
+    private void OnLocationForBadges(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        // l'approbation vient d'être activée ou coupée (Réglages) : l'entrée du menu suit à la navigation suivante
+        var now = Services.GetRequiredService<TenantStore>().Read(d => ApprovalOps.Involved(d.Root, d.Tenant, d.Access.UserId, d.Access.IsOrgAdmin));
+        if (now != approvalsMenu) { approvalsMenu = now; InvokeAsync(StateHasChanged); }
+        Badges.Refresh();
+    }
     // Plusieurs familles sur une même pastille (entrée « Contenus » : médiathèque + compositions) : les nombres s'additionnent.
     private RenderFragment Pill(string fam, params string[] more) => builder =>
     {
@@ -447,6 +472,7 @@
         var store = Services.GetRequiredService<TenantStore>();
         (orgAdmin, readOnly, pages) = store.Read(d => (d.Access.IsOrgAdmin, d.Access.ReadOnly, LevelPages.All.Where(p => d.Access.CanSee(p, Catalog)).ToHashSet()));
         compositionsOn = store.Read(d => d.AppInstalls.Any(a => a.AppId == Compositions.AppId));
+        approvalsMenu = store.Read(d => ApprovalOps.Involved(d.Root, d.Tenant, d.Access.UserId, d.Access.IsOrgAdmin));
         writable = store.Read(d => new[] { LevelPages.Screens, LevelPages.Playlists, LevelPages.Media }.Where(d.Access.CanWrite).ToHashSet());
     }
 

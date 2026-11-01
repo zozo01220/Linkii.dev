@@ -26,6 +26,8 @@ public class Notification : IClientOwned
     public DateTime? ResolvedUtc { get; set; }
     public List<Guid> ReadBy { get; set; } = new();
     public List<Guid> DeletedBy { get; set; } = new();
+    /// <summary>Personnes à qui elle s'adresse (approbation : approbateurs d'un périmètre, auteur d'une demande). Null : les administrateurs de l'organisation.</summary>
+    public List<Guid>? ForUsers { get; set; }
 }
 
 public static class Notifs
@@ -38,6 +40,7 @@ public static class Notifs
         Alerts.Members => ("team", "Équipe et partage"),
         Alerts.Billing => ("card", "Abonnement"),
         Alerts.Integrations => ("link", "Intégrations et API"),
+        Approvals.Kind => ("shield", "Approbations"),
         _ => ("star", "Nouveautés et système"),
     };
 
@@ -78,9 +81,17 @@ public class NotificationCenter(JsonStore store)
     /// <summary>Un même événement (même <see cref="Notification.DedupeKey"/>) se regroupe pendant ce délai.</summary>
     private static readonly TimeSpan Merge = TimeSpan.FromHours(6);
 
+    /// <summary>Visible par un administrateur (équipe Linkivi et revendeur compris) quand elle n'est adressée à personne en particulier, et par ses destinataires.</summary>
+    private static bool Sees(Db db, Notification n, Guid userId)
+    {
+        if (n.ForUsers is { } to && to.Contains(userId)) return true;
+        return n.ForUsers == null && db.Users.FirstOrDefault(u => u.Id == userId)?.Role != Roles.ClientMember;
+    }
+
     /// <param name="readBy">Personne qui vient d'agir : elle n'a pas à la lire.</param>
+    /// <param name="forUsers">Destinataires (approbation) ; null : les administrateurs.</param>
     public void Add(Guid clientId, string kind, string severity, string title, string body, string path = "/", Guid? readBy = null,
-        string? dedupe = null, IEnumerable<string>? subjects = null)
+        string? dedupe = null, IEnumerable<string>? subjects = null, IEnumerable<Guid>? forUsers = null)
     {
         var now = DateTime.UtcNow;
         store.Write(db =>
@@ -93,7 +104,7 @@ public class NotificationCenter(JsonStore store)
                 if (readBy is { } who) same.ReadBy.Add(who);
                 return;
             }
-            var n = new Notification { ClientId = clientId, Kind = kind, Severity = severity, Title = title, Body = body, Path = path, DedupeKey = dedupe, Subjects = subjects?.ToList() ?? new() };
+            var n = new Notification { ClientId = clientId, Kind = kind, Severity = severity, Title = title, Body = body, Path = path, DedupeKey = dedupe, Subjects = subjects?.ToList() ?? new(), ForUsers = forUsers?.ToList() };
             if (readBy is { } r) n.ReadBy.Add(r);
             db.Notifications.Add(n);
         });
@@ -128,9 +139,9 @@ public class NotificationCenter(JsonStore store)
 
     /// <summary>Notifications visibles par cette personne, les plus récentes d'abord.</summary>
     public List<Notification> For(Guid clientId, Guid userId) => store.Read(db => db.Notifications
-        .Where(n => n.ClientId == clientId && !n.DeletedBy.Contains(userId)).OrderByDescending(n => n.UpdatedUtc).ToList());
+        .Where(n => n.ClientId == clientId && !n.DeletedBy.Contains(userId) && Sees(db, n, userId)).OrderByDescending(n => n.UpdatedUtc).ToList());
 
-    public int Unread(Guid clientId, Guid userId) => store.Read(db => db.Notifications.Count(n => n.ClientId == clientId && !n.DeletedBy.Contains(userId) && !n.ReadBy.Contains(userId)));
+    public int Unread(Guid clientId, Guid userId) => store.Read(db => db.Notifications.Count(n => n.ClientId == clientId && !n.DeletedBy.Contains(userId) && !n.ReadBy.Contains(userId) && Sees(db, n, userId)));
 
     public void SetRead(Guid clientId, Guid userId, IEnumerable<Guid> ids, bool read)
     {
@@ -144,7 +155,7 @@ public class NotificationCenter(JsonStore store)
 
     public void ReadAll(Guid clientId, Guid userId) => store.Write(db =>
     {
-        foreach (var n in db.Notifications.Where(n => n.ClientId == clientId && !n.ReadBy.Contains(userId) && !n.DeletedBy.Contains(userId))) n.ReadBy.Add(userId);
+        foreach (var n in db.Notifications.Where(n => n.ClientId == clientId && !n.ReadBy.Contains(userId) && !n.DeletedBy.Contains(userId) && Sees(db, n, userId))) n.ReadBy.Add(userId);
     });
 
     public void Delete(Guid clientId, Guid userId, IEnumerable<Guid> ids)
@@ -156,7 +167,7 @@ public class NotificationCenter(JsonStore store)
                 if (!n.DeletedBy.Contains(userId)) n.DeletedBy.Add(userId);
             // une notification supprimée par tous les administrateurs disparaît pour de bon
             var admins = db.Users.Where(u => u.ClientId == clientId && u.Role == Roles.ClientAdmin).Select(u => u.Id).ToList();
-            db.Notifications.RemoveAll(n => n.ClientId == clientId && admins.Count > 0 && admins.All(n.DeletedBy.Contains));
+            db.Notifications.RemoveAll(n => n.ClientId == clientId && (n.ForUsers is { Count: > 0 } to ? to.All(n.DeletedBy.Contains) : admins.Count > 0 && admins.All(n.DeletedBy.Contains)));
         });
     }
 

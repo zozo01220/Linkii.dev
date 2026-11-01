@@ -1,0 +1,102 @@
+@inject TenantStore Store
+@inject ApprovalService Service
+@inject Toaster Toast
+
+@* Réglages › Approbation (plan Pro, §162, maquette approbation-publications.html, scène 5) : désactivée par défaut. Qui est soumis et qui approuve se règle dans la fiche
+   de chaque membre ; ici l'interrupteur général, les délais, le repli quand aucun approbateur ne couvre un écran, la durée de l'historique.
+   Chaque choix est enregistré aussitôt. Hors plan Pro, la carte est visible mais verrouillée. *@
+<div class="rg-ph"><h2>Approbation des publications</h2><p>Faites valider les publications de certains membres avant qu'elles n'arrivent sur les écrans.</p></div>
+
+@if (!growth)
+{
+    <div class="sv-upsell"><Ico Name="lock" Size="18" /><span class="grow">L'approbation des publications est incluse dans la licence <b>Pro</b>. Les demandes en attente sont refusées si la licence repasse à Essential.</span><a class="btn sm" href="settings?tab=abonnement">Découvrir le plan Pro</a></div>
+}
+
+<div class="rg-card al-master @(growth ? "" : "al-off")" data-tip="@(growth ? null : Plans.LockedHint)">
+    <div class="sv-row">
+        <div class="t"><b>Approuver les publications de certains membres</b><small>Désactivé par défaut. Les membres que vous désignez ne publient plus directement : un approbateur décide d'abord, et l'écran garde sa version en attendant. Les administrateurs ne sont jamais soumis.</small></div>
+        <div class="ctl"><button type="button" class="switch @(on ? "on" : "")" role="switch" aria-checked="@(on ? "true" : "false")" aria-label="Approuver les publications de certains membres" disabled="@(!growth)" @onclick="ToggleOn"><span></span></button></div>
+    </div>
+    @if (growth && on)
+    {
+        <div class="sv-row">
+            <div class="t"><b>Qui est soumis, qui approuve</b><small>@Summary · se règle dans la fiche de chaque membre.</small></div>
+            <div class="ctl"><a class="btn sm" href="organisation">Voir les membres</a></div>
+        </div>
+    }
+</div>
+
+@if (growth && on)
+{
+    <div class="rg-card">
+        <header><h3>Délais</h3></header>
+        <div class="sv-row">
+            <div class="t"><b>Rappeler les approbateurs après</b><small>Un seul rappel par demande.</small></div>
+            <div class="ctl"><select aria-label="Rappel" value="@reminder" @onchange="e => Set(t => t.ApprovalReminderHours = int.Parse(e.Value!.ToString()!))">@Opt(new[] { 4, 12, 24, 48, 72 }, reminder, h => h < 48 ? $"{h} heures" : $"{h / 24} jours")</select></div>
+        </div>
+        <div class="sv-row">
+            <div class="t"><b>Demande périmée après</b><small>Elle n'est pas supprimée : elle passe en « Périmée » et l'auteur est prévenu.</small></div>
+            <div class="ctl"><select aria-label="Péremption" value="@expire" @onchange="e => Set(t => t.ApprovalExpireDays = int.Parse(e.Value!.ToString()!))">@Opt(new[] { 3, 7, 14, 30 }, expire, d => $"{d} jours")</select></div>
+        </div>
+    </div>
+
+    <div class="rg-card">
+        <header><h3>Si personne ne peut approuver</h3></header>
+        <div class="sv-row">
+            <div class="t"><b>Quand aucun approbateur ne couvre un écran</b><small>Recommandé : les administrateurs reçoivent la demande.</small></div>
+            <div class="ctl"><div class="tb-seg" role="group" aria-label="Sans approbateur">
+                <button type="button" class="@(noApprover == Approvals.ToAdmins ? "on" : "")" aria-pressed="@(noApprover == Approvals.ToAdmins ? "true" : "false")" @onclick="() => Set(t => t.ApprovalNoApprover = Approvals.ToAdmins)">Aux administrateurs</button>
+                <button type="button" class="@(noApprover == Approvals.Direct ? "on" : "")" aria-pressed="@(noApprover == Approvals.Direct ? "true" : "false")" @onclick="() => Set(t => t.ApprovalNoApprover = Approvals.Direct)">Publier sans approbation</button>
+            </div></div>
+        </div>
+    </div>
+
+    <div class="rg-card">
+        <header><h3>Historique</h3></header>
+        <div class="sv-row">
+            <div class="t"><b>Conserver les décisions</b><small>Qui a demandé, qui a décidé, quand et pourquoi.</small></div>
+            <div class="ctl"><select aria-label="Historique" value="@keep" @onchange="e => Set(t => t.ApprovalKeepMonths = int.Parse(e.Value!.ToString()!))">@Opt(new[] { 3, 6, 12, 24 }, keep, m => $"{m} mois")</select></div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool growth, on;
+    private int reminder = 24, expire = 7, keep = 12, submitted, approvers;
+    private string noApprover = Approvals.ToAdmins;
+    private string Summary => $"{submitted} personne{(submitted > 1 ? "s" : "")} soumise{(submitted > 1 ? "s" : "")}, {approvers} approbateur{(approvers > 1 ? "s" : "")}";
+
+    protected override void OnInitialized() => Load();
+
+    private void Load() => (growth, on, reminder, expire, keep, noApprover, submitted, approvers) = Store.Read(d =>
+    {
+        var t = d.Tenant;
+        var members = d.Users.Where(u => u.Role == Roles.ClientMember && !u.Disabled).ToList();
+        return (t.IsGrowth, t.ApprovalOn, t.ApprovalReminderHours, t.ApprovalExpireDays, t.ApprovalKeepMonths, t.ApprovalNoApprover,
+            members.Count(u => u.Rights is { SubmitApproval: true }), members.Count(u => u.Rights is { Approver: true }));
+    });
+
+    private RenderFragment Opt(int[] values, int current, Func<int, string> label) => __builder =>
+    {
+        foreach (var v in values.Contains(current) ? values : values.Append(current).Order().ToArray()) { <option value="@v" selected="@(v == current)">@label(v)</option> }
+    };
+
+    private void Set(Action<Tenant> change)
+    {
+        if (!growth) return;
+        Store.Write(d => change(d.Tenant));
+        Load();
+        Toast.Ok("Réglage enregistré.");
+    }
+
+    private async Task ToggleOn()
+    {
+        if (!growth) return;
+        var turnOn = !on;
+        Store.Write(d => d.Tenant.ApprovalOn = turnOn);
+        // couper l'option refuse tout de suite les demandes en attente (l'auteur est prévenu) : republier se fait alors directement
+        if (!turnOn) await Service.Tick(DateTime.UtcNow);
+        Load();
+        Toast.Ok(turnOn ? "Approbation activée. Désignez les membres soumis et les approbateurs dans leur fiche." : "Approbation désactivée : tout le monde publie directement, les demandes en attente sont refusées.");
+    }
+}

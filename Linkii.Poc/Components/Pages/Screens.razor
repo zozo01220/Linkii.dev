@@ -3,6 +3,7 @@
 @implements IDisposable
 @inject TenantStore Store
 @inject Notifier Notifier
+@inject ScreenPublisher Publisher
 @inject Toaster Toast
 @inject NavigationManager Nav
 @inject ModeService Modes
@@ -53,6 +54,8 @@
         }
     </div>
 </div>
+
+<ApprovalBanner />
 
 @* Deux familles d'écrans, jamais mélangées : les écrans de diffusion et les bornes interactives (écran tactile, menu de tuiles). *@
 <nav class="tabs int-tabs lx-utabs lx-ktabs" role="tablist" aria-label="Type d'écran">
@@ -474,8 +477,16 @@ else
     var targets = AllScreens.Where(s => cids.Contains(s.Id)).ToList();
     <div class="modal-backdrop" @onclick="() => confirmIds = null"></div>
     <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="pub-title" aria-describedby="pub-desc">
-        <h3 id="pub-title">Publier sur @(targets.Count > 1 ? $"{targets.Count} écrans" : "cet écran") ?</h3>
-        <p class="hint" id="pub-desc">Chaque écran affichera immédiatement sa liste de lecture et ses widgets dans leur état actuel.</p>
+        @if (confirmNeeds)
+        {
+            <h3 id="pub-title">Demander l'approbation pour @(targets.Count > 1 ? $"{targets.Count} écrans" : "cet écran") ?</h3>
+            <p class="hint" id="pub-desc">Un approbateur décide de ce contenu avant qu'il n'arrive sur l'écran, qui diffuse d'ici là sa version actuelle.</p>
+        }
+        else
+        {
+            <h3 id="pub-title">Publier sur @(targets.Count > 1 ? $"{targets.Count} écrans" : "cet écran") ?</h3>
+            <p class="hint" id="pub-desc">Chaque écran affichera immédiatement sa liste de lecture et ses widgets dans leur état actuel.</p>
+        }
         <ul class="pub-list">
             @foreach (var t in targets)
             {
@@ -487,9 +498,15 @@ else
                 </li>
             }
         </ul>
+        @if (confirmNeeds)
+        {
+            @if (confirmReplaces.Count > 0) { <p class="hint ap-replace"><Ico Name="clock" Size="14" /> Elle remplacera @(confirmReplaces.Count > 1 ? "les demandes" : "la demande") n° @string.Join(", ", confirmReplaces) encore en attente.</p> }
+            <label class="lbl" for="pub-note">Un mot pour l'approbateur (facultatif)</label>
+            <textarea id="pub-note" class="full" rows="2" maxlength="300" @bind="confirmNote" @bind:event="oninput" placeholder="Ce qui change et pourquoi"></textarea>
+        }
         <div class="modal-actions">
             <button class="btn ghost" @onclick="() => confirmIds = null">Annuler</button>
-            <button class="btn" disabled="@bulkPublishing" @onclick="ConfirmPublish"><Ico Name="upload" Size="16" /> @(bulkPublishing ? "Publication…" : "Publier")</button>
+            <button class="btn" disabled="@bulkPublishing" @onclick="ConfirmPublish"><Ico Name="@(confirmNeeds ? "shield" : "upload")" Size="16" /> @(bulkPublishing ? (confirmNeeds ? "Envoi…" : "Publication…") : confirmNeeds ? "Demander l'approbation" : "Publier")</button>
         </div>
     </div>
 }
@@ -2533,7 +2550,7 @@ else if (wallEdit is { } wid)
             addPcBusy = true;
             var id = Store.Write(d => d.Screens.FirstOrDefault(x => x.Id == from.Id) is { } src ? DeviceConfig.AddOnSamePc(d, src, n, mon, win, res).Id : (Guid?)null);
             if (id == null) { addPcBusy = false; addPcError = "Écran introuvable."; return false; }
-            await Notifier.PublishScreen(id.Value);   // il diffuse aussitôt la liste héritée
+            await Publisher.Initial(id.Value);   // il diffuse aussitôt la liste héritée (nouvel écran : rien à approuver)
             await Notifier.NotifyScreen(from.Id);     // le PC reçoit l'écran à ouvrir avec sa configuration
             addPcFrom = null;
             Toast.Ok($"Écran « {n} » ajouté : le PC l'ouvre dans quelques secondes.");
@@ -2621,7 +2638,7 @@ else if (wallEdit is { } wid)
             return s.Id;
         });
         if (id == null) { error = "Code inconnu."; return false; }
-        await Notifier.PublishScreen(id.Value);   // l'écran appairé diffuse aussitôt sa liste de lecture
+        await Publisher.Initial(id.Value);   // l'écran appairé diffuse aussitôt sa liste de lecture (première diffusion : rien à approuver)
         showPair = false;
         Toast.Ok($"{(kiosk ? "Borne" : "Écran")} « {(string.IsNullOrWhiteSpace(screenName) ? "Écran " + code : screenName.Trim())} » connecté{(kiosk ? "e" : "")}.");
         if (kiosk) { showPair = false; Reload(); kioskOpen = id.Value; return true; }   // la borne s'ouvre dans son tiroir : on compose son menu
@@ -2635,6 +2652,9 @@ else if (wallEdit is { } wid)
     private readonly HashSet<Guid> selectedIds = new();
     private bool bulkPublishing;
     private List<Guid>? confirmIds;   // écrans à publier, en attente de confirmation
+    private bool confirmNeeds;        // la personne est soumise à approbation : elle dépose une demande (voir Approvals)
+    private string confirmNote = "";
+    private List<int> confirmReplaces = new();   // demandes encore en attente que celle-ci remplacera
 
     private void ToggleSelect(Guid id) { pickOrder.RemoveAll(x => x == id); if (!selectedIds.Remove(id)) { selectedIds.Add(id); pickOrder.Add(id); } }
 
@@ -2642,19 +2662,27 @@ else if (wallEdit is { } wid)
     private void AskPublish(List<Guid> ids)
     {
         menuFor = null;
-        if (ids.Count > 0) confirmIds = ids;
+        if (ids.Count == 0) return;
+        (confirmNeeds, confirmReplaces) = Store.Read(d => (ApprovalOps.NeedsApproval(d.Root, d.Tenant, d.Access.UserId, ids),
+            d.Root.ApprovalRequests.Where(r => r.ClientId == d.ClientId && r.Open && r.Screens.Any(s => ids.Contains(s.ScreenId))).Select(r => r.Number).Order().ToList()));
+        confirmNote = "";
+        confirmIds = ids;
     }
 
     // Chaque écran reçoit sa propre publication (sa liste de lecture et ses widgets, dans leur état actuel). Les autres écrans ne changent pas.
+    // Une personne soumise à approbation dépose une demande à la place : les écrans gardent leur version jusqu'à la décision.
     private async Task ConfirmPublish()
     {
         if (confirmIds is not { } ids) return;
         bulkPublishing = true;
-        try { foreach (var id in ids) await Notifier.PublishScreen(id); }
+        ScreenPublisher.Result res;
+        try { res = await Publisher.Publish(ids, confirmNote); }
         finally { bulkPublishing = false; }
         confirmIds = null;
+        if (res.Error != null) { Toast.Error(res.Error); return; }
         foreach (var id in ids) selectedIds.Remove(id);
-        Toast.Ok($"Publié sur {ids.Count} écran{(ids.Count > 1 ? "s" : "")} à {DateTime.Now:HH:mm}.");
+        if (res.Request is { } rq) Toast.Ok($"Demande n° {rq.Number} envoyée : les écrans gardent leur version jusqu'à la décision.");
+        else Toast.Ok($"Publié sur {ids.Count} écran{(ids.Count > 1 ? "s" : "")} à {DateTime.Now:HH:mm}.");
         Reload();
     }
 

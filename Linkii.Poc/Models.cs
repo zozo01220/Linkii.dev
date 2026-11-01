@@ -33,6 +33,8 @@ public class Db
     public List<BadgeSeen> BadgeSeen { get; set; } = new();
     /// <summary>Centre de notifications (cloche) : une ligne par événement et par organisation (voir <see cref="NotificationCenter"/>).</summary>
     public List<Notification> Notifications { get; set; } = new();
+    /// <summary>Demandes d'approbation des publications (Pro, voir <see cref="Approvals"/>) : une ligne par demande et par organisation.</summary>
+    public List<ApprovalRequest> ApprovalRequests { get; set; } = new();
 
     /// <summary>Ancien format mono-client (avant le multi-tenant) : lu une fois pour migration, jamais réécrit.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
@@ -441,6 +443,14 @@ public class Tenant
     public List<string> AdsExcluded { get; set; } = new() { "alcohol", "gambling" };
     /// <summary>Spots dont le rappel « 24 h avant l'échéance » est parti.</summary>
     public List<Guid> AdsReminded { get; set; } = new();
+
+    // Approbation des publications (Pro, voir Approvals) : désactivée par défaut, réglée dans Réglages › Approbation
+    public bool ApprovalOn { get; set; }
+    public int ApprovalReminderHours { get; set; } = 24;
+    public int ApprovalExpireDays { get; set; } = 7;
+    /// <summary>Écran qu'aucun approbateur ne couvre : « admins » (les administrateurs reçoivent la demande) ou « publish » (publication directe).</summary>
+    public string ApprovalNoApprover { get; set; } = Approvals.ToAdmins;
+    public int ApprovalKeepMonths { get; set; } = 12;
 
     // Menu technicien de l'app Android (voir TechPin)
     public bool TechPinOn { get; set; } = true;       // false : menu sans code

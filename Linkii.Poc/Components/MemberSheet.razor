@@ -97,6 +97,75 @@
             {
                 <p class="hint" style="margin:0">Un administrateur n'a rien à régler : il voit et gère tout. Dans la médiathèque et les listes, il bascule entre « Mes … » et « Toute l'organisation ».</p>
             }
+            @if (approvalOn)
+            {
+                @* Approbation des publications (§162, plan Pro, maquette approbation-publications.html, scène 1) : soumis ou approbateur, jamais les deux *@
+                <div>
+                    <div class="lbl" style="margin-top:0">Approbation <PlanTag Plan="@Plans.Growth" Size="12" Title="Disponible avec le plan Pro" /></div>
+                    @if (admin)
+                    {
+                        <p class="hint" style="margin:0">Un administrateur approuve toutes les publications, sur tous les écrans, et n'y est jamais soumis.</p>
+                    }
+                    else
+                    {
+                        <div class="mb-pages mb-apr">
+                            <div class="mb-prow">
+                                <div><b>Ses publications doivent être approuvées</b><small>Quand elle publie sur un écran, la diffusion attend la décision d'un approbateur.</small></div>
+                                <input type="checkbox" class="ios" aria-label="Ses publications doivent être approuvées" checked="@rights.SubmitApproval" disabled="@rights.Approver" @onchange="e => rights.SubmitApproval = (bool)e.Value!" />
+                            </div>
+                            <div class="mb-prow">
+                                <div><b>Peut approuver les publications</b><small>@(rights.SubmitApproval ? "Indisponible : cette personne est soumise à approbation." : "Reçoit les demandes de son périmètre et décide.")</small></div>
+                                <input type="checkbox" class="ios" aria-label="Peut approuver les publications" checked="@rights.Approver" disabled="@rights.SubmitApproval" @onchange="e => rights.Approver = (bool)e.Value!" />
+                            </div>
+                            @if (rights.Approver)
+                            {
+                                <div class="mb-scope">
+                                    <div class="tb-seg mb-seg" role="group" aria-label="Ce qu'il peut approuver">
+                                        <button type="button" class="@(rights.ApprovalScope == Approvals.ScopeAll ? "on" : "")" aria-pressed="@(rights.ApprovalScope == Approvals.ScopeAll ? "true" : "false")" @onclick="() => rights.ApprovalScope = Approvals.ScopeAll">Tout ce qu'il voit</button>
+                                        <button type="button" class="@(rights.ApprovalScope == Approvals.ScopeChosen ? "on" : "")" aria-pressed="@(rights.ApprovalScope == Approvals.ScopeChosen ? "true" : "false")" @onclick="() => rights.ApprovalScope = Approvals.ScopeChosen">Zones et écrans choisis</button>
+                                    </div>
+                                    @if (rights.ApprovalScope == Approvals.ScopeChosen)
+                                    {
+                                        <div class="mb-scrh" style="margin-top:8px">
+                                            <span>Il approuve : <b>@ApprovalCover.Count sur @screens.Count</b> écran@(screens.Count > 1 ? "s" : "")</span>
+                                            <span class="grow"></span>
+                                            <button type="button" class="linklike" @onclick="() => pickApr = !pickApr">@(pickApr ? "Fermer" : "Choisir les écrans")</button>
+                                        </div>
+                                        @if (pickApr)
+                                        {
+                                            <div class="mb-zgrid">
+                                                @foreach (var a in areas)
+                                                {
+                                                    @foreach (var z in a.Zones)
+                                                    {
+                                                        var zone = z;
+                                                        var inZone = screens.Where(s => s.ZoneId == zone.Id).ToList();
+                                                        var zOn = rights.ApprovalZoneIds.Contains(zone.Id);
+                                                        <div class="mb-z">
+                                                            <div class="mb-l"><button type="button" class="og-ck @(zOn ? "on" : "")" aria-pressed="@(zOn ? "true" : "false")" aria-label="Toute la zone @zone.Name" @onclick="() => { if (!rights.ApprovalZoneIds.Remove(zone.Id)) rights.ApprovalZoneIds.Add(zone.Id); }"></button><b>@(areas.Count > 1 ? $"{a.Name} › {zone.Name}" : zone.Name)</b><small>toute la zone</small></div>
+                                                            @foreach (var s in inZone)
+                                                            {
+                                                                var scr = s;
+                                                                var on = zOn || rights.ApprovalScreenIds.Contains(scr.Id);
+                                                                <div class="mb-l sc"><button type="button" class="og-ck @(on ? "on" : "") @(zOn ? "dim" : "")" aria-pressed="@(on ? "true" : "false")" aria-label="@scr.Name" @onclick="() => ToggleApprovalScreen(scr, zOn)"></button>@scr.Name</div>
+                                                            }
+                                                            @if (inZone.Count == 0) { <div class="mb-l sc muted">aucun écran</div> }
+                                                        </div>
+                                                    }
+                                                }
+                                            </div>
+                                        }
+                                    }
+                                    @if (Uncovered > 0)
+                                    {
+                                        <div class="mb-warn"><Ico Name="alert" Size="16" /><span>@Uncovered écran@(Uncovered > 1 ? "s" : "") @(Uncovered > 1 ? "n'ont" : "n'a") aucun approbateur : @(noApprover == Approvals.Direct ? "leurs publications partiront sans approbation." : "les demandes iront aux administrateurs.")</span></div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
             <div class="og-sum">@Summary()</div>
             @if (error != null) { <div class="err">@error</div> }
         </div>
@@ -144,6 +213,29 @@
     private List<User> users = new();
     private MemberRights rights = new();
     private bool isNew, admin, self, busy, pick, confirmRemove;
+    private bool approvalOn, pickApr;   // approbation des publications active (plan Pro) ; choix des écrans à approuver ouvert
+    private string noApprover = Approvals.ToAdmins;
+    private HashSet<Guid> othersCover = new();   // écrans déjà couverts par les autres approbateurs
+
+    /// <summary>Écrans que cette personne approuverait, d'après ses choix en cours.</summary>
+    private HashSet<Guid> ApprovalCover
+    {
+        get
+        {
+            if (!rights.Approver) return new();
+            var scope = rights.ApprovalScope == Approvals.ScopeChosen ? new MemberRights { Screens = PageMode.Own, ZoneIds = rights.ApprovalZoneIds, ScreenIds = rights.ApprovalScreenIds } : rights;
+            return (PageMode.Clean(scope.Screens) == PageMode.Read ? screens : screens.Where(s => s.ZoneId is { } z && scope.ZoneIds.Contains(z) || scope.ScreenIds.Contains(s.Id))).Select(s => s.Id).ToHashSet();
+        }
+    }
+
+    /// <summary>Écrans qu'aucun approbateur ne couvre (les administrateurs reçoivent leurs demandes, ou la publication part directement).</summary>
+    private int Uncovered => screens.Count(s => !othersCover.Contains(s.Id) && !ApprovalCover.Contains(s.Id));
+
+    private void ToggleApprovalScreen(Screen s, bool viaZone)
+    {
+        if (viaZone) { Toast.Error("Déjà compris dans la zone : décochez la zone pour choisir écran par écran."); return; }
+        if (!rights.ApprovalScreenIds.Remove(s.Id)) rights.ApprovalScreenIds.Add(s.Id);
+    }
     private string name = "", email = "", status = "", orgName = "";
     private string? error;
 
@@ -156,6 +248,8 @@
             d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.Token != null).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
             d.Users.OrderBy(u => u.Label, StringComparer.CurrentCultureIgnoreCase).ToList(),
             d.Tenant.Name, UserId is { } id ? d.Users.FirstOrDefault(u => u.Id == id) : null));
+        (approvalOn, noApprover, othersCover) = Store.Read(d => (Approvals.Active(d.Tenant), d.Tenant.ApprovalNoApprover,
+            d.Users.Where(u => u.Id != UserId && u.Role == Roles.ClientMember && !u.Disabled && u.Rights is { Approver: true }).SelectMany(u => ApprovalOps.ScreensOf(d.Root, d.ClientId, u)).ToHashSet()));
         if (user != null)
         {
             name = user.Name; email = user.Email; status = OrgView.StatusOf(user);
@@ -215,6 +309,8 @@
             <li>@if (rights.Screens == PageMode.Read) { <b>tous les écrans</b><text>, sans pouvoir les régler</text> } else if (k == 0) { <b>aucun écran</b><text> (la page Écrans sera vide, sauf ceux qu'elle connecte)</text> } else { <b>@k écran@(k > 1 ? "s" : "")</b><text> à gérer, et aucun autre</text> }</li>
             <li>@if (rights.Media == PageMode.Read) { <b>tous les médias</b><text> de l'organisation, sans les modifier</text> } else { <b>ses médias et ses dossiers</b><text>, plus ceux qu'on lui partage</text> }</li>
             <li>@if (rights.Playlists == PageMode.Read) { <b>toutes les listes</b><text>, sans les modifier</text> } else { <b>ses listes et ses dossiers</b><text>, plus celles qu'on lui partage</text> }</li>
+            @if (approvalOn && rights.SubmitApproval) { <li><b>Ses publications seront approuvées</b><text> par un approbateur avant d'arriver sur les écrans</text></li> }
+            @if (approvalOn && rights.Approver) { <li><b>Approuve les publications</b><text> de @ApprovalCover.Count écran@(ApprovalCover.Count > 1 ? "s" : "")</text></li> }
         </ul>
     };
 

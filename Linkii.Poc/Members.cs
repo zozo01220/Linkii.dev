@@ -19,6 +19,14 @@ public class MemberRights
     public string Playlists { get; set; } = PageMode.Own;
     public List<Guid> ZoneIds { get; set; } = new();
     public List<Guid> ScreenIds { get; set; } = new();
+    /// <summary>Approbation (Pro, voir <see cref="Approvals"/>) : ses publications sur un écran attendent la décision d'un approbateur. Exclusif avec <see cref="Approver"/>.</summary>
+    public bool SubmitApproval { get; set; }
+    /// <summary>Approuve les publications de son périmètre (<see cref="ApprovalScope"/>).</summary>
+    public bool Approver { get; set; }
+    /// <summary>« all » : tout ce qu'il voit (<see cref="ZoneIds"/> et <see cref="ScreenIds"/>, ou tout en lecture seule) ; « chosen » : <see cref="ApprovalZoneIds"/> et <see cref="ApprovalScreenIds"/>.</summary>
+    public string ApprovalScope { get; set; } = Approvals.ScopeAll;
+    public List<Guid> ApprovalZoneIds { get; set; } = new();
+    public List<Guid> ApprovalScreenIds { get; set; } = new();
 
     public string ModeOf(string domain) => PageMode.Clean(domain switch
     {
@@ -28,12 +36,19 @@ public class MemberRights
         _ => null
     });
 
-    public MemberRights Copy() => new() { Screens = Screens, Media = Media, Playlists = Playlists, ZoneIds = [.. ZoneIds], ScreenIds = [.. ScreenIds] };
+    public MemberRights Copy() => new()
+    {
+        Screens = Screens, Media = Media, Playlists = Playlists, ZoneIds = [.. ZoneIds], ScreenIds = [.. ScreenIds],
+        SubmitApproval = SubmitApproval, Approver = Approver, ApprovalScope = ApprovalScope, ApprovalZoneIds = [.. ApprovalZoneIds], ApprovalScreenIds = [.. ApprovalScreenIds]
+    };
 
     public void Clean()
     {
         Screens = PageMode.Clean(Screens); Media = PageMode.Clean(Media); Playlists = PageMode.Clean(Playlists);
         ZoneIds = ZoneIds.Distinct().ToList(); ScreenIds = ScreenIds.Distinct().ToList();
+        if (Approver) SubmitApproval = false;   // soumis ou approbateur, jamais les deux : pas d'auto-approbation
+        ApprovalScope = ApprovalScope == Approvals.ScopeChosen ? Approvals.ScopeChosen : Approvals.ScopeAll;
+        ApprovalZoneIds = ApprovalZoneIds.Distinct().ToList(); ApprovalScreenIds = ApprovalScreenIds.Distinct().ToList();
     }
 
     /// <summary>Niveau de droits équivalent, lu par les contrôles existants (pages du menu, écriture par domaine, apps) : toutes les apps, sans gestion des zones.</summary>

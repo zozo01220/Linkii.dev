@@ -1,0 +1,315 @@
+@page "/approvals"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@inject TenantStore Store
+@inject ApprovalService Service
+@inject TenantContext Ctx
+@inject NavigationManager Nav
+@inject Toaster Toast
+@inject JsonStore Root
+@implements IDisposable
+
+@* Approbation des publications (§162, maquette approbation-publications.html, scènes 3 et 4). Un approbateur voit les demandes de son périmètre (À approuver, Historique),
+   un administrateur toutes ; l'auteur voit les siennes (Mes demandes). Cliquer une ligne ouvre le tiroir de décision : ce qui change, avant et après, aperçu, échanges. *@
+@if (!involved)
+{
+    <div class="card empty"><div class="big">@(active ? "Pas d'approbation pour votre compte" : "Approbation non activée")</div>
+        <p>@(active ? "Cette page est réservée aux personnes dont les publications doivent être approuvées, aux approbateurs et aux administrateurs." : "Un administrateur l'active dans Réglages › Approbation (plan Pro).")</p></div>
+}
+else
+{
+    <div class="page-head">
+        <div>
+            <h1>@(decider ? "Approbations" : "Mes demandes")</h1>
+            <p class="sub">@(decider ? "Publications en attente de décision dans votre périmètre." : "Ce que vous avez envoyé à approuver.")</p>
+        </div>
+        @if (decider && !admin) { <div class="row head-actions"><span class="sub">@ScopeText</span></div> }
+    </div>
+
+    @if (decider)
+    {
+        <div class="nt-tabs" role="tablist">
+            <button type="button" role="tab" class="@(tab == "todo" ? "on" : "")" @onclick='() => tab = "todo"'>À approuver @if (todo.Count > 0) { <span class="nt-cnt">@todo.Count</span> }</button>
+            <button type="button" role="tab" class="@(tab == "done" ? "on" : "")" @onclick='() => tab = "done"'>Historique <span class="nt-cnt g">@done.Count</span></button>
+        </div>
+    }
+
+    <div class="ap-bar">
+        @if (zones.Count > 1)
+        {
+            <select aria-label="Zone" @bind="zone"><option value="">Toutes les zones</option>@foreach (var z in zones) { <option value="@z">@z</option> }</select>
+        }
+        <span class="grow"></span>
+        <label class="nt-search"><Ico Name="search" Size="15" /><input type="search" placeholder="Rechercher" aria-label="Rechercher" @bind="query" @bind:event="oninput" /></label>
+    </div>
+
+    <div class="nt-panel" role="list">
+        @{ var list = Shown(); }
+        @if (list.Count == 0)
+        {
+            <div class="nt-empty"><Ico Name="shield" Size="40" /><b>@(decider && tab == "todo" ? "Rien à approuver" : "Aucune demande")</b>
+                <span>@(decider && tab == "todo" ? "Les nouvelles demandes apparaissent ici et dans la cloche." : "Les demandes décidées apparaîtront ici.")</span></div>
+        }
+        @foreach (var r in list)
+        {
+            var req = r;
+            <div class="ap-row" role="listitem" tabindex="0" @onclick="() => Open(req.Id)" @onkeydown='e => { if (e.Key == "Enter") Open(req.Id); }'>
+                <span class="ap-th"><Ico Name="@(req.Wall ? "grid" : "monitor")" Size="20" /></span>
+                <div class="ap-mid">
+                    <div class="ap-ti"><b>@req.Title</b>@if (req.Wall) { <span class="tag n">Mur</span> }</div>
+                    <div class="ap-bd">@(req.AuthorId == me ? "Envoyée par vous" : req.AuthorName) · n° @req.Number@(ZoneOf(req) is { Length: > 0 } zn ? " · " + zn : "")</div>
+                    <div class="ap-sum">@Chips(req)</div>
+                </div>
+                <div class="ap-rt"><span>@Notifs.When(req.CreatedUtc, DateTime.UtcNow, tz)</span>@Status(req)</div>
+            </div>
+        }
+    </div>
+    @if (decider && tab == "todo" && list.Count > 0) { <p class="hint" style="margin-top:10px">Les plus anciennes d'abord. Un rappel part après @reminderHours h sans réponse.</p> }
+}
+
+@if (opened is { } r0)
+{
+    var canDecide = opened != null && CanDecide(r0);
+    var mine = r0.AuthorId == me;
+    var before = r0.Lines.Where(l => l.Change != ApprovalLine.Add).ToList();
+    var after = r0.Lines.Where(l => l.Change != ApprovalLine.Del).ToList();
+    <div class="lx-drawer-veil" @onclick="Close"></div>
+    <aside class="lx-drawer ap-drawer" role="dialog" aria-modal="false" aria-labelledby="ap-title">
+        <div class="dh ap-dh">
+            <div class="ap-dt"><b id="ap-title">@r0.Title</b><small>@(mine ? "Envoyée par vous" : r0.AuthorName) · demande n° @r0.Number · @Notifs.When(r0.CreatedUtc, DateTime.UtcNow, tz)</small></div>
+            @Status(r0)
+            <button type="button" class="kebab-btn" title="Fermer" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="18" /></button>
+        </div>
+        <div class="db">
+            @if (!r0.Open)
+            {
+                <div class="ap-bnr @(r0.Status == ApprovalStatus.Approved ? "ok" : r0.Status == ApprovalStatus.Refused ? "ko" : "info")" role="status">
+                    <Ico Name="@(r0.Status == ApprovalStatus.Approved ? "check" : r0.Status == ApprovalStatus.Refused ? "x" : "clock")" Size="20" />
+                    <div class="tx"><b>@Decision(r0)</b>@if (!string.IsNullOrWhiteSpace(r0.Comment)) { <small>« @r0.Comment »</small> }</div>
+                </div>
+            }
+
+            <h4>Ce qui change</h4>
+            <div class="ap-sum">@Chips(r0)</div>
+            @if (r0.Screens.Count > 1) { <p class="hint">@(r0.Wall ? "Mur d'écrans : une seule décision pour" : "Une seule décision pour") @r0.Screens.Count écrans (@string.Join(", ", r0.Screens.Select(s => s.Name))).</p> }
+
+            <h4>Avant / après</h4>
+            <div class="ap-cmp">
+                <div class="ap-col"><h5>Diffusé aujourd'hui <span>@before.Count</span></h5>
+                    @foreach (var l in before) { <div class="ap-it @(l.Change == ApprovalLine.Del ? "del" : "")"><span>@l.Name</span><small>@(l.Change == ApprovalLine.Mod ? l.PreviousSec : l.DurationSec) s</small></div> }
+                    @if (before.Count == 0) { <div class="ap-it muted">Rien n'est diffusé.</div> }</div>
+                <div class="ap-col"><h5>Après publication <span>@after.Count</span></h5>
+                    @foreach (var l in after) { <div class="ap-it @(l.Change == ApprovalLine.Add ? "add" : l.Change == ApprovalLine.Mod ? "mod" : "")"><span>@l.Name</span><small>@l.DurationSec s</small></div> }
+                    @if (after.Count == 0) { <div class="ap-it muted">L'écran n'afficherait plus rien.</div> }</div>
+            </div>
+
+            @if (Thumbs(after) is { Count: > 0 } thumbs)
+            {
+                <h4>Aperçu du nouveau contenu</h4>
+                <div class="ap-strip">
+                    @foreach (var (line, m) in thumbs) { <figure><div class="ap-tn"><MediaThumb Media="m" All="allMedia" /></div><figcaption>@line.Name</figcaption></figure> }
+                </div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(r0.Note))
+            {
+                <h4>Message de l'auteur</h4>
+                <div class="ap-msg"><small>@r0.AuthorName</small>@r0.Note</div>
+            }
+
+            @if (r0.Open && canDecide)
+            {
+                <h4>@(refusing ? "Motif du refus" : "Commentaire (facultatif)")</h4>
+                <textarea class="full @(refusing && refuseError ? "err" : "")" rows="3" maxlength="400" aria-label="Commentaire" @bind="comment" @bind:event="oninput"
+                          placeholder="@(refusing ? "Expliquez ce qu'il faut corriger…" : "Un mot pour l'auteur")"></textarea>
+                @if (refusing) { <p class="hint @(refuseError ? "ap-err" : "")">Obligatoire : l'auteur le lira dans sa notification.</p> }
+            }
+            @if (error != null) { <div class="err">@error</div> }
+        </div>
+        <div class="df">
+            @if (r0.Open && canDecide)
+            {
+                @if (refusing)
+                {
+                    <button type="button" class="btn ghost" @onclick="() => { refusing = false; refuseError = false; }">Annuler</button>
+                    <span class="grow"></span>
+                    <button type="button" class="btn danger-solid" disabled="@busy" @onclick="Refuse">Confirmer le refus</button>
+                }
+                else
+                {
+                    <button type="button" class="btn danger" disabled="@busy" @onclick="() => refusing = true">Refuser…</button>
+                    <span class="grow"></span>
+                    <button type="button" class="btn ap-ok" disabled="@busy" @onclick="Approve"><Ico Name="check" Size="16" /> Approuver et publier</button>
+                }
+            }
+            else if (r0.Open && (mine || admin))
+            {
+                <button type="button" class="btn ghost" disabled="@busy" @onclick="Withdraw">Retirer la demande</button>
+                <span class="grow"></span>
+                @if (mine) { <button type="button" class="btn" disabled="@busy" @onclick="Resubmit"><Ico Name="upload" Size="16" /> Mettre à jour la demande</button> }
+            }
+            else
+            {
+                <span class="grow"></span><button type="button" class="btn ghost" @onclick="Close">Fermer</button>
+            }
+        </div>
+    </aside>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "r")] public string? R { get; set; }
+
+    private bool active, involved, admin, decider;
+    private Guid? me;
+    private string tz = "Europe/Zurich", tab = "todo", zone = "", query = "", comment = "", scopeText = "";
+    private int reminderHours = 24;
+    private List<ApprovalRequest> rows = new(), todo = new(), done = new();
+    private List<string> zones = new();
+    private Dictionary<Guid, string> zoneOfRequest = new();
+    private List<MediaItem> allMedia = new();
+    private Dictionary<Guid, MediaItem> mediaById = new();
+    private Guid? openId;
+    private bool refusing, refuseError, busy;
+    private string? error;
+    private Timer? later;
+    private HashSet<Guid> deciderOf = new();
+
+    private ApprovalRequest? opened => openId is { } id ? rows.FirstOrDefault(r => r.Id == id) : null;
+    private string ScopeText => scopeText;
+
+    protected override void OnInitialized() { Load(); Root.Changed += OnChanged; }
+
+    protected override void OnParametersSet()
+    {
+        if (Guid.TryParse(R, out var id) && rows.Any(r => r.Id == id) && openId != id) { openId = id; refusing = false; comment = ""; error = null; }
+    }
+
+    private void Load()
+    {
+        (active, involved, admin, me, tz, reminderHours, rows, deciderOf, zoneOfRequest, zones, allMedia, scopeText) = Store.Read(d =>
+        {
+            var t = d.Tenant;
+            var isAdmin = d.Access.IsOrgAdmin;
+            var uid = d.Access.UserId;
+            var list = Approvals.Active(t) ? ApprovalOps.Visible(d.Root, t, uid, isAdmin) : new List<ApprovalRequest>();
+            var screenZone = d.Root.Screens.Where(s => s.ClientId == d.ClientId).ToDictionary(s => s.Id, s => s.ZoneId);
+            var zoneName = d.Root.Areas.Where(a => a.ClientId == d.ClientId).SelectMany(a => a.Zones).ToDictionary(z => z.Id, z => z.Name);
+            var byReq = list.ToDictionary(r => r.Id, r => r.Screens.Select(s => screenZone.GetValueOrDefault(s.ScreenId)).Where(z => z != null).Select(z => zoneName.GetValueOrDefault(z!.Value)).FirstOrDefault(n => n != null) ?? "");
+            var me2 = uid is { } u ? d.Root.Users.FirstOrDefault(x => x.Id == u) : null;
+            var scope = "";
+            if (!isAdmin && me2?.Rights is { Approver: true } rg)
+            {
+                var set = ApprovalOps.ScreensOf(d.Root, d.ClientId, me2);
+                scope = $"Périmètre : {set.Count} écran{(set.Count > 1 ? "s" : "")}";
+            }
+            return (Approvals.Active(t), ApprovalOps.Involved(d.Root, t, uid, isAdmin), isAdmin, uid, t.Timezone, Approvals.Reminder(t), list,
+                list.Where(r => ApprovalOps.CanDecide(d.Root, t, r, uid, isAdmin)).Select(r => r.Id).ToHashSet(), byReq,
+                byReq.Values.Where(n => n.Length > 0).Distinct().Order().ToList(), d.Media.Where(m => m.Status == null).ToList(), scope);
+        });
+        decider = admin || deciderOf.Count > 0 || Store.Read(d => d.Users.FirstOrDefault(x => x.Id == me)?.Rights?.Approver == true);
+        todo = rows.Where(r => r.Open && deciderOf.Contains(r.Id)).OrderBy(r => r.CreatedUtc).ToList();
+        done = rows.Where(r => !r.Open || !deciderOf.Contains(r.Id)).ToList();
+        mediaById = allMedia.ToDictionary(m => m.Id);
+        if (!decider) tab = "mine";
+        else if (tab == "mine") tab = "todo";
+    }
+
+    private void OnChanged() { later?.Dispose(); later = new Timer(_ => InvokeAsync(() => { Load(); StateHasChanged(); }), null, 500, Timeout.Infinite); }
+    public void Dispose() { Root.Changed -= OnChanged; later?.Dispose(); }
+
+    private List<ApprovalRequest> Shown()
+    {
+        var src = !decider ? rows.OrderBy(r => r.Open ? 0 : 1).ThenByDescending(r => r.CreatedUtc).ToList() : tab == "todo" ? todo : done;
+        var q = query.Trim();
+        return src.Where(r => zone.Length == 0 || ZoneOf(r) == zone)
+            .Where(r => q.Length == 0 || r.Title.Contains(q, StringComparison.CurrentCultureIgnoreCase) || r.AuthorName.Contains(q, StringComparison.CurrentCultureIgnoreCase) || ("n° " + r.Number).Contains(q, StringComparison.CurrentCultureIgnoreCase) || r.Number.ToString() == q).ToList();
+    }
+
+    private string ZoneOf(ApprovalRequest r) => zoneOfRequest.GetValueOrDefault(r.Id) ?? "";
+    private bool CanDecide(ApprovalRequest r) => deciderOf.Contains(r.Id);
+
+    private List<(ApprovalLine Line, MediaItem Media)> Thumbs(List<ApprovalLine> after) =>
+        after.Where(l => l.Change != ApprovalLine.Same && l.MediaId is { } id && mediaById.ContainsKey(id)).Take(8).Select(l => (l, mediaById[l.MediaId!.Value])).ToList()
+        is { Count: > 0 } changed ? changed
+        : after.Where(l => l.MediaId is { } id && mediaById.ContainsKey(id)).Take(8).Select(l => (l, mediaById[l.MediaId!.Value])).ToList();
+
+    private RenderFragment Chips(ApprovalRequest r) => __builder =>
+    {
+        if (r.Added > 0) { <span class="ap-df add">+@r.Added élément@(r.Added > 1 ? "s" : "")</span> }
+        if (r.Removed > 0) { <span class="ap-df del">−@r.Removed élément@(r.Removed > 1 ? "s" : "")</span> }
+        if (r.Changed > 0) { <span class="ap-df mod">@r.Changed modifié@(r.Changed > 1 ? "s" : "")</span> }
+        if (r.Added + r.Removed + r.Changed == 0) { <span class="ap-df mod">aucun changement de contenu</span> }
+    };
+
+    private RenderFragment Status(ApprovalRequest r) => __builder =>
+    {
+        var cls = r.Status switch { ApprovalStatus.Wait => "wait", ApprovalStatus.Approved => "ok", ApprovalStatus.Refused => "ko", _ => "off" };
+        <span class="ap-st @cls"><i></i>@ApprovalStatus.Label(r.Status)</span>
+    };
+
+    private string Decision(ApprovalRequest r) => r.Status switch
+    {
+        ApprovalStatus.Approved => $"Approuvée par {r.DecidedByName} et publiée",
+        ApprovalStatus.Refused => $"Refusée par {r.DecidedByName}",
+        ApprovalStatus.Withdrawn => "Retirée par son auteur",
+        ApprovalStatus.Expired => "Demande périmée",
+        ApprovalStatus.Replaced => "Remplacée par une demande plus récente",
+        _ => ""
+    };
+
+    private void Open(Guid id)
+    {
+        openId = id; refusing = false; refuseError = false; comment = ""; error = null;
+        Nav.NavigateTo("approvals?r=" + id.ToString("N"), replace: true);
+    }
+
+    private void Close()
+    {
+        openId = null; refusing = false; refuseError = false; comment = ""; error = null;
+        Nav.NavigateTo("approvals", replace: true);
+    }
+
+    private async Task Approve()
+    {
+        if (opened is not { } r || busy) return;
+        busy = true; error = null;
+        try
+        {
+            error = await Service.Approve(Store.ClientId, r.Id, Ctx.UserId, Ctx.DisplayName, admin, comment);
+            if (error == null) { Toast.Ok($"Approuvée : {r.Title} est publié."); Load(); comment = ""; }
+        }
+        finally { busy = false; }
+    }
+
+    private async Task Refuse()
+    {
+        if (opened is not { } r || busy) return;
+        if (string.IsNullOrWhiteSpace(comment)) { refuseError = true; return; }
+        busy = true; error = null;
+        try
+        {
+            error = await Service.Refuse(Store.ClientId, r.Id, Ctx.UserId, Ctx.DisplayName, admin, comment);
+            if (error == null) { Toast.Ok($"Refusée : {r.AuthorName} est prévenu(e)."); refusing = false; refuseError = false; comment = ""; Load(); }
+        }
+        finally { busy = false; }
+    }
+
+    private void Withdraw()
+    {
+        if (opened is not { } r) return;
+        error = Service.Withdraw(Store.ClientId, r.Id, Ctx.UserId, admin);
+        if (error == null) { Toast.Ok("Demande retirée."); Load(); }
+    }
+
+    private async Task Resubmit()
+    {
+        if (opened is not { } r || Ctx.UserId is not { } uid || busy) return;
+        busy = true; error = null;
+        try
+        {
+            var res = await Service.Resubmit(Store.ClientId, uid, r.Id);
+            error = res.Error;
+            if (res.Request is { } nr) { Toast.Ok($"Demande n° {nr.Number} envoyée avec l'état actuel de votre brouillon."); Load(); Open(nr.Id); }
+        }
+        finally { busy = false; }
+    }
+}

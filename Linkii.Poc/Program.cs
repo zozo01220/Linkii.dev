@@ -31,6 +31,11 @@ builder.Services.AddScoped<ModeService>();
 builder.Services.AddSingleton<Notifier>();
 builder.Services.AddSingleton<PushService>();   // notifications push (Firebase) vers l'app Android du back-office
 builder.Services.AddSingleton<NotificationCenter>();   // centre de notifications : la cloche et la page Notifications
+builder.Services.AddSingleton<IScreenPublishing>(sp => sp.GetRequiredService<Notifier>());
+builder.Services.AddSingleton<IApprovalNotices, ApprovalNotices>();   // approbation des publications (§162) : notifications adressées et e-mails
+builder.Services.AddSingleton<ApprovalService>();
+builder.Services.AddScoped<ScreenPublisher>();   // toute publication d'écran faite pour une personne passe ici (demande d'approbation si elle y est soumise)
+builder.Services.AddHostedService<ApprovalWorker>();   // rappel après 24 h, péremption après 7 jours, refus si la brique n'agit plus
 builder.Services.AddSingleton<AlertService>();  // alertes de l'organisation : e-mail et/ou notification selon les Réglages
 builder.Services.AddSingleton<IApiAlerts, ApiAlerts>();   // API et webhooks (§154) : alertes « Intégrations et API »
 builder.Services.AddSingleton<IEmergencyPush, HubEmergencyPush>();   // intégration « Alerte d'urgence » (§159) : message temps réel vers les écrans

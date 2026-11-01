@@ -30,7 +30,7 @@ public record Badge(int Count, int New, int Offline)
 /// </summary>
 public class MenuBadges(JsonStore root, TenantStore store, TenantContext ctx, PlaylistLibrary lists, MediaLibrary media, AppCatalog catalog) : IDisposable
 {
-    public const string Screens = "screens", Playlists = "playlists", MediaFam = "media", Compositions = "compositions", Members = "members", Integrations = "integrations", DataSources = "datasources", Settings = "settings";
+    public const string Screens = "screens", Playlists = "playlists", MediaFam = "media", Compositions = "compositions", Members = "members", Integrations = "integrations", DataSources = "datasources", Settings = "settings", ApprovalsFam = "approvals";
 
     private static readonly TimeSpan Debounce = TimeSpan.FromMilliseconds(500), Tick = TimeSpan.FromSeconds(20), BumpFor = TimeSpan.FromMilliseconds(900);
 
@@ -152,6 +152,9 @@ public class MenuBadges(JsonStore root, TenantStore store, TenantContext ctx, Pl
 
         if (admin)
             res[Members] = Eval(Members, store.Read(d => d.Users.Where(u => !u.Disabled).Select(u => new Item(u.Id, u.Id, null, false)).ToList()), false);
+
+        // Approbations (§162) : demandes en attente que la personne peut décider (orange)
+        res[ApprovalsFam] = new Badge(store.Read(d => ApprovalOps.PendingFor(d.Root, d.ClientId, d.Access.UserId, d.Access.IsOrgAdmin)), 0, 0);
 
         // Intégrations : seulement le nombre, celui de la page (sans les widgets d'écran ni les apps Agenda/Drive, qui n'ont pas de carte). Les apps de base s'ajoutent d'elles-mêmes à la première visite d'une organisation : ce ne sont pas des nouveautés.
         res[Integrations] = Eval(Integrations, store.Read(d => d.AppInstalls.Where(a => catalog.Find(a.AppId) is { ScreenWidget: false } app && app.Id is not ("agenda" or "drive")).Select(a => new Item(a.Id, null, null, false)).ToList()), false, track: false);

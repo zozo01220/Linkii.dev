@@ -5,6 +5,7 @@
 @using Plan = Linkii.Poc.Planning
 @inject TenantStore Store
 @inject Notifier Notifier
+@inject ScreenPublisher Publisher
 @inject NavigationManager Nav
 @inject Toaster Toast
 
@@ -209,15 +210,24 @@ else
         <div class="modal-foot">
             @if (confirmPublish)
             {
-                <span class="confirm-line" role="alert">Publier maintenant ? La borne affichera aussitôt son menu de @k.Tiles.Count tuile@(k.Tiles.Count > 1 ? "s" : "") et « @(idlePl?.Name ?? "aucune liste de lecture") » en inactivité.</span>
-                <button class="btn ghost" @onclick="() => confirmPublish = false">Retour</button>
-                <button class="btn" disabled="@saving" @onclick="() => SaveAll(true)"><Ico Name="upload" Size="16" /> Confirmer la publication</button>
+                @if (needsApproval)
+                {
+                    <span class="confirm-line" role="alert">Demander l'approbation ? Un approbateur décide avant que la borne n'affiche son menu de @k.Tiles.Count tuile@(k.Tiles.Count > 1 ? "s" : "") ; d'ici là elle garde sa version.</span>
+                    <button class="btn ghost" @onclick="() => confirmPublish = false">Retour</button>
+                    <button class="btn" disabled="@saving" @onclick="() => SaveAll(true)"><Ico Name="shield" Size="16" /> Envoyer pour approbation</button>
+                }
+                else
+                {
+                    <span class="confirm-line" role="alert">Publier maintenant ? La borne affichera aussitôt son menu de @k.Tiles.Count tuile@(k.Tiles.Count > 1 ? "s" : "") et « @(idlePl?.Name ?? "aucune liste de lecture") » en inactivité.</span>
+                    <button class="btn ghost" @onclick="() => confirmPublish = false">Retour</button>
+                    <button class="btn" disabled="@saving" @onclick="() => SaveAll(true)"><Ico Name="upload" Size="16" /> Confirmer la publication</button>
+                }
             }
             else
             {
                 <button class="btn ghost" @onclick="Close">Annuler</button>
                 <button class="btn ghost" disabled="@saving" @onclick="() => SaveAll(false)">Enregistrer</button>
-                <button class="btn" disabled="@saving" @onclick="() => confirmPublish = true">Enregistrer et publier</button>
+                <button class="btn" disabled="@saving" @onclick="() => confirmPublish = true">@(needsApproval ? "Enregistrer et demander l'approbation" : "Enregistrer et publier")</button>
             }
         </div>
     </div>
@@ -412,6 +422,7 @@ else
     private double zoom = 1;
     private Guid? selTile;
     private bool saving, confirmPublish, editor, sim, confirmOff, newTile, planOpen, parOpen;
+    private bool needsApproval;   // la personne est soumise à approbation : « publier » dépose une demande (voir Approvals)
     private bool headRename;
     private string headValue = "";
     private KioskTile? editTile, delTile;
@@ -432,6 +443,7 @@ else
         s = Store.Read(d => d.Screens.FirstOrDefault(x => x.Id == Id && x.Token != null));
         if (s?.Kiosk == null) return;
         tenant = Store.Read(d => d.Tenant);
+        needsApproval = Store.Read(d => ApprovalOps.NeedsApproval(d.Root, d.Tenant, d.Access.UserId, new[] { Id }));
         playlists = Store.Read(d => PlaylistOps.Choosable(d));
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
         if (loadedFor != Id) { ResetDraft(); loadedFor = Id; }
@@ -693,6 +705,7 @@ else
         if (k == null) return;
         var kd = Copy(k); var (o, r, au, pl) = (orientation, resolution, autoStart, draftPlaylist);
         saving = true;
+        ScreenPublisher.Result? pub = null;
         try
         {
             var formatChanged = Store.Write(d =>
@@ -703,18 +716,20 @@ else
                 sc.Orientation = o; sc.Resolution = r; sc.AutoStart = au; sc.PlaylistId = pl;
                 return changed;
             });
-            if (publish) await Notifier.PublishScreen(Id);
+            if (publish) pub = await Publisher.Publish([Id]);
             else if (formatChanged) await Notifier.NotifyScreen(Id);   // le format s'applique sans attendre la publication
         }
         finally { saving = false; }
-        Toast.Ok(publish ? $"Borne « {name} » enregistrée et publiée." : $"Borne « {name} » enregistrée.");
+        if (pub?.Error != null) Toast.Error(pub.Error);
+        else Toast.Ok(pub?.Request is { } rq ? $"Borne « {name} » enregistrée. Demande n° {rq.Number} envoyée : elle garde sa version jusqu'à la décision."
+            : publish ? $"Borne « {name} » enregistrée et publiée." : $"Borne « {name} » enregistrée.");
         await OnClose.InvokeAsync();
     }
 
     private async Task TurnOff()
     {
         Store.Write(d => { if (d.Screens.FirstOrDefault(x => x.Id == Id) is { } sc) { sc.Kiosk = null; sc.PublishedKiosk = null; } });
-        await Notifier.PublishScreen(Id);   // la borne reçoit tout de suite sa configuration d'écran de diffusion
+        await Publisher.Initial(Id);   // la borne reçoit tout de suite sa configuration d'écran de diffusion (retour à la diffusion simple : rien à approuver)
         Toast.Ok("L'écran est repassé en diffusion simple.");   // la fenêtre se ferme : la borne passe dans l'onglet des écrans de diffusion
         await OnClose.InvokeAsync();
     }

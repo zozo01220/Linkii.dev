@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.SignalR;
 namespace Linkii.Poc;
 
 /// <summary>Publication d'une playlist + notification SignalR des écrans concernés.</summary>
-public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog catalog, IEventPublisher events)
+public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog catalog, IEventPublisher events) : IScreenPublishing
 {
     /// <summary>Ancien instantané au niveau de la playlist (lu par les écrans jamais publiés depuis). L'interface publie écran par écran : <see cref="PublishScreen"/>.</summary>
     public async Task Publish(Guid playlistId)
@@ -22,27 +22,51 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
     /// <summary>
     /// Publie sur un seul écran : instantané de la playlist de chaque zone et de ses widgets. Les autres écrans des mêmes playlists gardent leur version.
     /// </summary>
+    /// <remarks>
+    /// Publication directe : l'interface passe par <see cref="ScreenPublisher"/>, qui demande d'abord l'approbation aux personnes qui y sont soumises (voir <see cref="Approvals"/>).
+    /// </remarks>
     public async Task PublishScreen(Guid screenId)
     {
         var ok = store.Write(db =>
         {
             var s = db.Screens.FirstOrDefault(x => x.Id == screenId);
             if (s == null) return false;
-            var own = db.Playlists.Where(x => x.ClientId == s.ClientId).ToList();
-            List<PublishedItem> Zone(Guid? id) => own.FirstOrDefault(x => x.Id == id) is { } p ? Items(db, p) : new();
-            var wall = Helpers.Wall(db.Areas, s) != null;   // écran d'un mur : jamais de widgets
-            s.Published = Zone(s.PlaylistId).Concat(wall ? Enumerable.Empty<PublishedItem>() : s.Widgets.Select(Widget).OfType<PublishedItem>()).ToList();
-            s.PublishedLayout = ScreenLayouts.Find(s.Layout).Id;
-            s.PublishedZones = s.ZonePlaylists().Skip(1).Select(Zone).ToList();   // zones 2 et 3 du découpage
-            SnapshotLists(db, s);   // listes du planning : leur contenu du moment
-            s.PublishedKiosk = s.Kiosk == null ? null : BuildKiosk(db, s);   // borne interactive : menu de tuiles
-            s.PublishedVersion++;
-            s.PublishedStamp = Helpers.PublishStamp(s, own);
-            s.PublishedUtc = DateTime.UtcNow;
-            events.Publish(s.ClientId, ScreenEvents.Published, new { screen = ScreenEvents.Brief(db, s), version = s.PublishedVersion, publishedAt = s.PublishedUtc });   // webhooks (API) : sans attente, jamais d'erreur
+            ApplySnapshot(db, s, Build(db, s));
             return true;
         });
         if (ok) await NotifyScreen(screenId);
+    }
+
+    /// <summary>Ce que publier cet écran figerait maintenant : listes de ses zones, widgets, planning, borne. Ne change rien (la demande d'approbation le garde tel quel).</summary>
+    public ScreenSnapshot Build(Db db, Screen s)
+    {
+        var own = db.Playlists.Where(x => x.ClientId == s.ClientId).ToList();
+        List<PublishedItem> Zone(Guid? id) => own.FirstOrDefault(x => x.Id == id) is { } p ? Items(db, p) : new();
+        var wall = Helpers.Wall(db.Areas, s) != null;   // écran d'un mur : jamais de widgets
+        var (lists, revs) = ListsFor(db, s);   // listes du planning : leur contenu du moment
+        return new ScreenSnapshot
+        {
+            Published = Zone(s.PlaylistId).Concat(wall ? Enumerable.Empty<PublishedItem>() : s.Widgets.Select(Widget).OfType<PublishedItem>()).ToList(),
+            Layout = ScreenLayouts.Find(s.Layout).Id,
+            Zones = s.ZonePlaylists().Skip(1).Select(Zone).ToList(),   // zones 2 et 3 du découpage
+            Lists = lists, ListRevs = revs,
+            Kiosk = s.Kiosk == null ? null : BuildKiosk(db, s),   // borne interactive : menu de tuiles
+            Stamp = Helpers.PublishStamp(s, own)
+        };
+    }
+
+    /// <summary>Fait diffuser à l'écran ce contenu figé (publication directe, ou demande approuvée), puis annonce la publication aux webhooks. L'écran est prévenu par l'appelant.</summary>
+    public void ApplySnapshot(Db db, Screen s, ScreenSnapshot snap)
+    {
+        s.Published = snap.Published;
+        s.PublishedLayout = snap.Layout;
+        s.PublishedZones = snap.Zones;
+        s.PublishedLists = snap.Lists; s.PublishedListRevs = snap.ListRevs; s.PlanningRevision++;
+        s.PublishedKiosk = snap.Kiosk;
+        s.PublishedVersion++;
+        s.PublishedStamp = snap.Stamp;
+        s.PublishedUtc = DateTime.UtcNow;
+        events.Publish(s.ClientId, ScreenEvents.Published, new { screen = ScreenEvents.Brief(db, s), version = s.PublishedVersion, publishedAt = s.PublishedUtc });   // webhooks (API) : sans attente, jamais d'erreur
     }
 
     /// <summary>
@@ -89,13 +113,18 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
     /// <summary>Instantané des listes que le planning de l'écran peut faire jouer (une liste supprimée n'y figure plus).</summary>
     private void SnapshotLists(Db db, Screen s)
     {
+        (s.PublishedLists, s.PublishedListRevs) = ListsFor(db, s);
+        s.PlanningRevision++;
+    }
+
+    private (Dictionary<Guid, List<PublishedItem>> Lists, Dictionary<Guid, int> Revs) ListsFor(Db db, Screen s)
+    {
         var area = db.Areas.FirstOrDefault(a => a.Id == s.AreaId);
         var own = db.Playlists.Where(x => x.ClientId == s.ClientId).ToList();
-        s.PublishedLists = Planning.Effective(area, s).Select(x => x.PlaylistId).Distinct()
+        var lists = Planning.Effective(area, s).Select(x => x.PlaylistId).Distinct()
             .Select(id => own.FirstOrDefault(p => p.Id == id)).OfType<Playlist>()
             .ToDictionary(p => p.Id, p => Items(db, p));
-        s.PublishedListRevs = s.PublishedLists.Keys.ToDictionary(id => id, id => own.First(p => p.Id == id).Revision);
-        s.PlanningRevision++;
+        return (lists, lists.Keys.ToDictionary(id => id, id => own.First(p => p.Id == id).Revision));
     }
 
     /// <summary>Ce qu'une publication figerait de la playlist (aussi joué tel quel par le simulateur « Essayer »).</summary>
@@ -198,6 +227,8 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
     }
 
     public Task NotifyScreen(Guid screenId) => NotifyWhere(s => s.Id == screenId);
+
+    public string? AppName(string appId) => catalog.Find(appId)?.Name;
 
     /// <summary>Identifier les écrans : chacun affiche son numéro en très grand pendant 5 s (assemblage d'un mur).</summary>
     public async Task Identify(IReadOnlyList<Guid> screenIds)
