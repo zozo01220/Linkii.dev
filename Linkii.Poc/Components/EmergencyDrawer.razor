@@ -1,0 +1,230 @@
+@inherits EmergencyComponent
+@inject Toaster Toast
+
+@* Tiroir de l'alerte d'urgence (§159, maquettes/urgence.html, scène 3) : formulaire (titre, message, aperçu, cibles, essai sur un seul écran, confirmation),
+   rapport écran par écran, historique. Et la fenêtre de confirmation pour lever l'urgence, ouverte par la pastille, le bandeau ou le rapport. *@
+@if (Ui.Open is { } mode)
+{
+    var s = Snap;
+    <div class="modal-backdrop" @onclick="Ui.Close"></div>
+    <div class="modal app-modal as-drawer" role="dialog" aria-modal="true" aria-label="Urgence">
+        <div class="modal-head">
+            <span style="color:var(--alert)"><Ico Name="alert" Size="22" /></span>
+            <div class="grow">
+                <h3>@(mode == "form" ? "Déclencher une urgence" : mode == "report" ? "Rapport de l'urgence" : "Urgences")</h3>
+                <small>@(mode == "form" ? "Plein écran rouge, tout de suite, jusqu'à ce que vous la leviez." : mode == "report" ? "Quels écrans l'affichent." : "En cours et historique d'un an.")</small>
+            </div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="Ui.Close"><Ico Name="x" Size="20" /></button>
+        </div>
+        @if (mode != "report")
+        {
+            <nav class="emx-tabs" role="tablist">
+                <button type="button" role="tab" class="@(mode == "form" ? "on" : "")" @onclick="Ui.OpenForm">Déclencher</button>
+                <button type="button" role="tab" class="@(mode == "history" ? "on" : "")" @onclick="Ui.OpenHistory">Urgences @if (s.ActiveCount > 0) { <span class="cat-count">@s.ActiveCount</span> }</button>
+            </nav>
+        }
+        <div class="modal-body">
+            @if (mode == "form") { @FormBody }
+            else if (mode == "report") { @ReportBody }
+            else { @HistoryBody }
+        </div>
+        <div class="modal-foot">
+            @if (mode == "form")
+            {
+                <button type="button" class="btn ghost" disabled="@(testScreen == Guid.Empty)" @onclick="Test"><Ico Name="monitor" Size="15" /> Essayer sur un écran</button>
+                <span class="grow"></span>
+                <button type="button" class="btn emx-btn-red" disabled="@(!FormValid)" @onclick="() => confirmSend = true">Déclencher l'urgence</button>
+            }
+            else if (mode == "report" && Ui.ReportId is { } rid && Svc.Get(ClientId, rid) is { EndedUtc: null })
+            {
+                <span class="grow"></span>
+                <button type="button" class="btn emx-btn-red" @onclick="() => Ui.AskLift(rid)">Lever l'urgence</button>
+            }
+            else { <span class="grow"></span><button type="button" class="btn" @onclick="Ui.Close">Fermer</button> }
+        </div>
+    </div>
+}
+
+@if (confirmSend)
+{
+    var c = Counts();
+    <div class="modal-backdrop over" @onclick="() => confirmSend = false"></div>
+    <div class="modal app-modal sm over" role="alertdialog" aria-modal="true" aria-label="Confirmer l'urgence">
+        <div class="modal-head"><div class="grow"><h3 style="color:var(--alert)">Afficher « @title.Trim() » sur @TargetLabel ?</h3></div></div>
+        <div class="modal-body">
+            <p>Le message passe en <b>plein écran rouge</b> sur les <b>@c.Online écran@(c.Online > 1 ? "s" : "") en ligne</b> dans les 5 secondes@(c.Asleep > 0 ? $", et réveille {c.Asleep} écran{(c.Asleep > 1 ? "s" : "")} en veille" : "")@(c.Offline > 0 ? $". {c.Offline} hors ligne la recevr{(c.Offline > 1 ? "ont" : "a")} à leur retour" : ""). Il reste affiché jusqu'à ce que vous le leviez.</p>
+            @if (error != null) { <div class="emx-err">@error</div> }
+        </div>
+        <div class="modal-foot"><button type="button" class="btn ghost" @onclick="() => confirmSend = false">Annuler</button><span class="grow"></span><button type="button" class="btn emx-btn-red" @onclick="Send">Oui, déclencher maintenant</button></div>
+    </div>
+}
+
+@if (Ui.LiftId is { } lid && Svc.Report(ClientId, lid) is { } lr)
+{
+    <div class="modal-backdrop over" @onclick="Ui.CancelLift"></div>
+    <div class="modal app-modal sm over" role="alertdialog" aria-modal="true" aria-label="Lever l'urgence">
+        <div class="modal-head"><div class="grow"><h3>Lever l'urgence « @lr.Emergency.Title » ?</h3></div></div>
+        <div class="modal-body">
+            <p>Le message disparaît de <b>@lr.Displayed écran@(lr.Displayed > 1 ? "s" : "")</b> qui l'affiche@(lr.Displayed > 1 ? "nt" : "") : @(lr.Displayed > 1 ? "ils reprennent" : "il reprend") leur diffusion normale (fondu d'une seconde) et les écrans réveillés retrouvent leur plage de veille.@(lr.Offline > 0 ? $" Les {lr.Offline} écrans hors ligne la retireront à leur retour." : "") <b>Pour la relancer, il faudra la déclencher de nouveau.</b></p>
+        </div>
+        <div class="modal-foot"><button type="button" class="btn ghost" @onclick="Ui.CancelLift">Annuler</button><span class="grow"></span><button type="button" class="btn emx-btn-red" @onclick="() => Lift(lid)">Lever l'urgence</button></div>
+    </div>
+}
+
+@code {
+    private string title = "", message = "", kind = "all", error = "", testMessage = "";
+    private HashSet<Guid> picked = new();
+    private Guid testScreen;
+    private bool confirmSend, tested;
+
+    private const string Warn = "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><path d='M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z'/><path d='M12 9v4M12 17h.01'/></svg>";
+
+    private bool FormValid => title.Trim().Length is > 0 and <= Emergencies.MaxTitle && message.Trim().Length is > 0 and <= Emergencies.MaxMessage && (kind == "all" || picked.Count > 0);
+
+    private record Lists(List<(Guid Id, string Name, int N)> Areas, List<(Guid Id, string Name, int N)> Zones, List<(Guid Id, string Name, string State)> Screens);
+
+    private Lists Load() => Root.Read(db =>
+    {
+        var paired = db.Screens.Where(s => s.ClientId == ClientId && s.Token != null).ToList();
+        var areas = db.Areas.Where(a => a.ClientId == ClientId).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        var now = DateTime.UtcNow;
+        return new Lists(
+            areas.Select(a => (a.Id, a.Name, paired.Count(s => s.AreaId == a.Id))).Where(x => x.Item3 > 0).ToList(),
+            areas.SelectMany(a => a.Zones.Select(z => (z.Id, areas.Count > 1 ? $"{a.Name} › {z.Name}" : z.Name, paired.Count(s => s.ZoneId == z.Id)))).Where(x => x.Item3 > 0).ToList(),
+            paired.OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).Select(s => (s.Id, s.Name, ScreenControl.Online(s, now) ? "en ligne" : "hors ligne")).ToList());
+    });
+
+    /// <summary>Ce qui va se passer pour les cibles choisies : en ligne, en veille (réveillés), hors ligne.</summary>
+    private (int Online, int Asleep, int Offline) Counts() => Root.Read(db =>
+    {
+        var t = db.Clients.First(c => c.Id == ClientId);
+        var now = DateTime.UtcNow;
+        var targets = Emergencies.Targets(db, ClientId, new Emergency { TargetKind = kind, TargetIds = picked.ToList() });
+        var asleep = targets.Where(s => Sleep.State(t, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, Helpers.Wall(db.Areas, s) != null, now).Asleep).Select(s => s.Id).ToHashSet();
+        var online = targets.Count(s => !asleep.Contains(s.Id) && ScreenControl.Online(s, now));
+        return (online, asleep.Count, targets.Count - online - asleep.Count);
+    });
+
+    private string TargetLabel => kind switch { "areas" => picked.Count > 1 ? "ces aires" : "cette aire", "zones" => picked.Count > 1 ? "ces zones" : "cette zone", "screens" => picked.Count > 1 ? "ces écrans" : "cet écran", _ => "tous les écrans" };
+
+    private void SetKind(string k) { kind = k; picked.Clear(); error = ""; }
+    private void Toggle(Guid id) { if (!picked.Remove(id)) picked.Add(id); }
+
+    private EmergencyRequest Request(bool test) =>
+        new(title, message, test ? "screens" : kind, test ? new() { testScreen } : picked.ToList(), test, "backoffice", Ctx.DisplayName, Ctx.UserId, null);
+
+    private void Send()
+    {
+        error = "";
+        var r = Svc.Trigger(ClientId, Request(false));
+        if (r.Emergency == null) { error = r.Error ?? "Urgence refusée."; return; }
+        var n = Svc.Report(ClientId, r.Emergency.Id)?.Targeted ?? 0;
+        Toast.Ok($"Urgence déclenchée sur {n} écran{(n > 1 ? "s" : "")}.");
+        confirmSend = false; title = message = ""; kind = "all"; picked.Clear(); tested = false;
+        Ui.Close();
+    }
+
+    private void Test()
+    {
+        error = "";
+        var r = Svc.Trigger(ClientId, Request(true));
+        tested = r.Emergency != null;
+        testMessage = r.Emergency != null ? $"Essai envoyé sur « {Load().Screens.FirstOrDefault(x => x.Id == testScreen).Name} » · il s'arrête dans {Emergencies.TestSeconds} s." : r.Error ?? "Essai refusé.";
+    }
+
+    private void Lift(Guid id)
+    {
+        var ok = Svc.Lift(ClientId, id, Ctx.DisplayName);
+        if (ok) Toast.Ok("Urgence levée : les écrans reprennent leur diffusion.");
+        Ui.CancelLift();
+        if (Ui.Open == "report") Ui.Close();
+    }
+
+    private static string StateText(EmergencyLine l) => l.State switch { "displayed" => l.Woke ? "Réveillé, affichée" : "Affichée", "waking" => "Réveil en cours", "pending" => "En attente", _ => "Hors ligne" };
+    private static string StateCss(EmergencyLine l) => l.State switch { "displayed" => "ok", "waking" or "pending" => "warn", _ => "bad" };
+
+    private RenderFragment FormBody => @<div>
+        @{ var lists = Load(); var longText = message.Length > 110 || title.Length > 22; }
+        @if (testScreen == Guid.Empty && lists.Screens.Count > 0) { testScreen = lists.Screens[0].Id; }
+        <div class="emx-f" style="margin-top:6px"><label for="em-title">Titre <small>court, en capitales sur l'écran</small><span class="cnt">@title.Length/@Emergencies.MaxTitle</span></label>
+            <input id="em-title" type="text" maxlength="@Emergencies.MaxTitle" placeholder="Évacuation" @bind="title" @bind:event="oninput" /></div>
+        <div class="emx-f"><label for="em-msg">Message <span class="cnt">@message.Length/@Emergencies.MaxMessage</span></label>
+            <textarea id="em-msg" maxlength="@Emergencies.MaxMessage" placeholder="Évacuation du bâtiment B. Quittez les lieux par les issues de secours." @bind="message" @bind:event="oninput"></textarea></div>
+        <div class="emx-sec">Aperçu</div>
+        <div class="emx-tv @(tested ? "test" : "")">
+            @if (tested) { <div class="emx-test-lbl">ESSAI · ceci n'est pas une vraie alerte</div> }
+            <div class="emx-em @(longText ? "long" : "")"><div class="ico">@((MarkupString)Warn)</div><div class="ti">@(title.Trim().Length > 0 ? title.Trim() : "Titre")</div><div class="me">@(message.Trim().Length > 0 ? message.Trim() : "Message")</div><div class="ft">Depuis maintenant</div></div>
+        </div>
+        <div class="emx-sec">Écrans concernés</div>
+        <button type="button" class="emx-radio @(kind == "all" ? "on" : "")" @onclick='() => SetKind("all")'><span class="rd"></span><span><b>Tous les écrans</b><small>@lists.Screens.Count écran@(lists.Screens.Count > 1 ? "s" : "") appairé@(lists.Screens.Count > 1 ? "s" : "")</small></span></button>
+        @if (lists.Areas.Count > 1)
+        {
+            <button type="button" class="emx-radio @(kind == "areas" ? "on" : "")" @onclick='() => SetKind("areas")'><span class="rd"></span><span><b>Une ou plusieurs aires</b><small>Aires de gestion</small></span></button>
+            @if (kind == "areas") { <div class="emx-pick">@foreach (var a in lists.Areas) { var id = a.Id; <label><input type="checkbox" checked="@picked.Contains(id)" @onchange="() => Toggle(id)" /> @a.Name <small style="color:var(--muted)">· @a.N écran@(a.N > 1 ? "s" : "")</small></label> }</div> }
+        }
+        @if (lists.Zones.Count > 1)
+        {
+            <button type="button" class="emx-radio @(kind == "zones" ? "on" : "")" @onclick='() => SetKind("zones")'><span class="rd"></span><span><b>Une ou plusieurs zones</b><small>Zones d'une aire</small></span></button>
+            @if (kind == "zones") { <div class="emx-pick">@foreach (var z in lists.Zones) { var id = z.Id; <label><input type="checkbox" checked="@picked.Contains(id)" @onchange="() => Toggle(id)" /> @z.Name <small style="color:var(--muted)">· @z.N écran@(z.N > 1 ? "s" : "")</small></label> }</div> }
+        }
+        <button type="button" class="emx-radio @(kind == "screens" ? "on" : "")" @onclick='() => SetKind("screens")'><span class="rd"></span><span><b>Des écrans choisis</b><small>Choisir dans la liste</small></span></button>
+        @if (kind == "screens") { <div class="emx-pick">@foreach (var sc in lists.Screens) { var id = sc.Id; <label><input type="checkbox" checked="@picked.Contains(id)" @onchange="() => Toggle(id)" /> @sc.Name <small style="color:var(--muted)">· @sc.State</small></label> }</div> }
+        @{ var c = Counts(); }
+        @if (kind == "all" || picked.Count > 0)
+        {
+            <div class="emx-sec">Ce qui va se passer</div>
+            <p class="emx-note" style="font-size:14px">@c.Online écran@(c.Online > 1 ? "s" : "") en ligne l'afficheront dans les 5 secondes · <b style="color:var(--ink)">@c.Asleep écran@(c.Asleep > 1 ? "s" : "") en veille @(c.Asleep > 1 ? "seront réveillés" : "sera réveillé")</b> · @c.Offline hors ligne la recevr@(c.Offline > 1 ? "ont" : "a") à leur retour.</p>
+        }
+        <div class="emx-sec">Essayer avant de déclencher</div>
+        <p class="emx-note" style="font-size:14px">Envoie ce message sur <b style="color:var(--ink)">un seul écran de votre choix</b>, pour vérifier la taille et la lisibilité à distance, sans déclencher la vraie alerte. Un bandeau « ESSAI » s'affiche et il s'arrête seul après @Emergencies.TestSeconds secondes.</p>
+        <div class="emx-f" style="margin-top:8px"><select aria-label="Écran d'essai" @bind="testScreen">@foreach (var sc in lists.Screens) { <option value="@sc.Id">@sc.Name (@sc.State)</option> }</select></div>
+        @if (testMessage.Length > 0) { <div class="emx-test">@testMessage</div> }
+        @if (error.Length > 0 && !confirmSend) { <div class="emx-err">@error</div> }
+    </div>;
+
+    private RenderFragment ReportBody => @<div>
+        @if (Ui.ReportId is { } id && Svc.Report(ClientId, id) is { } r)
+        {
+            <div class="emx-sec" style="margin-top:6px">@(r.Emergency.IsActive(DateTime.UtcNow) ? "En cours" : "Terminée") · @r.Displayed écran@(r.Displayed > 1 ? "s" : "") sur @r.Targeted @(r.Displayed > 1 ? "l'affichent" : "l'affiche")</div>
+            <p class="emx-note">« @r.Emergency.Title » · depuis @Hm(r.Emergency.StartedUtc) · @r.Emergency.StartedBy@(r.Emergency.EndedUtc is { } end ? $" · levée à {Hm(end)} par {r.Emergency.EndedBy}" : "")</p>
+            <table class="emx-tbl" style="margin-top:10px">
+                <tr><th>Écran</th><th>État</th><th>Heure</th></tr>
+                @foreach (var l in r.Lines)
+                {
+                    <tr><td>@l.Name</td><td><span class="emx-pill @StateCss(l)">@StateText(l)</span></td><td>@(l.AtUtc is { } at ? Hm(at) : "")</td></tr>
+                }
+            </table>
+            <p class="emx-note" style="margin-top:8px">Les écrans hors ligne la recevront à leur retour tant que l'urgence est active.</p>
+        }
+        else { <p class="emx-note">Urgence introuvable.</p> }
+    </div>;
+
+    private RenderFragment HistoryBody => @<div>
+        @{ var active = Svc.Active(ClientId).Where(e => !e.Test).ToList(); var hist = Svc.History(ClientId, 50).Where(e => e.EndedUtc != null).ToList(); }
+        @if (active.Count == 0 && hist.Count == 0) { <p class="emx-note" style="margin-top:8px">Aucune urgence pour l'instant. Elles sont gardées un an.</p> }
+        @if (active.Count > 0)
+        {
+            <div class="emx-sec" style="margin-top:6px">En cours</div>
+            <table class="emx-tbl">
+                @foreach (var e in active)
+                {
+                    var id = e.Id;
+                    <tr><td><b>@e.Title</b><small>depuis @Hm(e.StartedUtc) · @e.StartedBy</small></td>
+                        <td style="text-align:right;white-space:nowrap"><button type="button" class="btn ghost sm" @onclick="() => Ui.OpenReport(id)">Rapport</button> <button type="button" class="btn sm emx-btn-red" @onclick="() => Ui.AskLift(id)">Lever</button></td></tr>
+                }
+            </table>
+        }
+        @if (hist.Count > 0)
+        {
+            <div class="emx-sec">Historique</div>
+            <table class="emx-tbl">
+                <tr><th>Début</th><th>Message</th><th>Durée</th></tr>
+                @foreach (var e in hist)
+                {
+                    var id = e.Id;
+                    <tr style="cursor:pointer" @onclick="() => Ui.OpenReport(id)"><td>@e.StartedUtc.ToLocalTime().ToString("d MMM HH:mm")<small>@e.StartedBy</small></td><td>@e.Title<small>@(e.Via == "api" ? "API" : "Back-office")</small></td><td>@Emergencies.Duration(e, DateTime.UtcNow)<small>levée par @e.EndedBy</small></td></tr>
+                }
+            </table>
+        }
+    </div>;
+}

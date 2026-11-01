@@ -358,7 +358,7 @@ public static class AccessLevels
 
     public static string AppsText(AccessLevel l, AppCatalog catalog, bool widgets)
     {
-        var all = catalog.All.Where(a => a.ScreenWidget == widgets).ToList();
+        var all = catalog.All.Where(a => a.ScreenWidget == widgets && !a.IsFeature).ToList();
         if (widgets ? l.AllWidgets : l.AllIntegrations) return "Tous";
         var n = all.Count(a => l.Apps.Contains(a.Id));
         return n == 0 ? "Aucun" : $"{n} sur {all.Count}";

@@ -52,6 +52,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
     public AppInstall Install(string appId)
     {
         var m = catalog.Find(appId) ?? throw new InvalidOperationException("App inconnue.");
+        if (m.Plan == Plans.Growth && !store.Read(d => d.Tenant.IsGrowth)) throw new InvalidOperationException($"« {m.Name} » fait partie du plan Pro.");
         var added = false;
         var install = store.Write(d =>
         {
@@ -79,7 +80,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
     /// <summary>Retire l'app des choix proposés. Non destructif : les contenus et widgets déjà en place restent à l'antenne.</summary>
     public void Disable(string appId)
     {
-        store.Write(d => { RequireAdmin(d); d.AppInstalls.RemoveAll(a => a.AppId == appId); });
+        store.Write(d => { RequireAdmin(d); d.AppInstalls.RemoveAll(a => a.AppId == appId); if (appId == Emergencies.AppId) Emergencies.EndAll(d.Tenant, DateTime.UtcNow, "intégration retirée"); });
         InstallsChanged?.Invoke();
     }
 
@@ -267,6 +268,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
     public (MediaItem? Item, List<string> Errors) SaveInstance(string appId, Guid? instanceId, string name, IReadOnlyDictionary<string, string> values)
     {
         var m = catalog.Find(appId) ?? throw new InvalidOperationException("App inconnue.");
+        if (m.Plan == Plans.Growth && !store.Read(d => d.Tenant.IsGrowth)) throw new InvalidOperationException($"« {m.Name} » fait partie du plan Pro.");
         if (string.IsNullOrWhiteSpace(name)) return (null, new() { "Donnez un nom à cette instance." });
         if (name.Trim().Length > 80) return (null, new() { "Le nom est trop long (80 caractères maximum)." });
 

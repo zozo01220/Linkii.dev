@@ -337,6 +337,18 @@ public class WebhookService(JsonStore store, ApiRegistry registry, SecretBox box
         return events.FirstOrDefault(e => !registry.IsValidSubscription(e)) is { } bad ? $"Événement inconnu : {bad}." : null;
     }
 
+    /// <summary>Un événement d'une intégration du Store ne peut être choisi que si elle est installée (un joker qui n'en couvre que des non installées est refusé aussi).</summary>
+    private string? CheckApps(Db db, Guid clientId, IEnumerable<string> patterns)
+    {
+        foreach (var p in patterns)
+        {
+            var matched = registry.Events.Where(e => ApiRegistry.Matches(p, e.Id)).ToList();
+            if (matched.Count > 0 && matched.All(e => e.App != null && !db.AppInstalls.Any(a => a.ClientId == clientId && a.AppId == e.App)))
+                return $"L'événement « {p} » demande l'intégration « {matched[0].App} » : installez-la depuis le Store.";
+        }
+        return null;
+    }
+
     private static string NewSecret()
     {
         const string alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -363,6 +375,7 @@ public class WebhookService(JsonStore store, ApiRegistry registry, SecretBox box
             if (c == null) return "Organisation introuvable.";
             if (!ApiLimits.Allowed(c)) return "L'API fait partie du plan Pro.";
             if (c.Webhooks.Count >= ApiLimits.Webhooks(c)) return $"Limite atteinte : {ApiLimits.Webhooks(c)} adresses au plus.";
+            if (CheckApps(db, clientId, list) is { } missing) return missing;
             c.Webhooks.Add(e);
             return null;
         });
@@ -381,6 +394,7 @@ public class WebhookService(JsonStore store, ApiRegistry registry, SecretBox box
         {
             var e = db.Clients.FirstOrDefault(c => c.Id == clientId)?.Webhooks.FirstOrDefault(w => w.Id == id);
             if (e == null) return "Adresse introuvable.";
+            if (CheckApps(db, clientId, list.Where(p => !e.Events.Contains(p)).ToList()) is { } missing) return missing;   // seuls les événements ajoutés sont contrôlés
             e.Name = name; e.Url = url!.Trim(); e.Events = list;
             return null;
         });

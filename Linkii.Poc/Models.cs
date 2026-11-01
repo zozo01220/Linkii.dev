@@ -532,6 +532,8 @@ public class Tenant
     /// <summary>API publique et webhooks (§154) : clés d'accès et adresses qui reçoivent les événements de l'organisation. Voir <see cref="ApiKeyService"/>, <see cref="WebhookService"/>.</summary>
     public List<ApiKey> ApiKeys { get; set; } = new();
     public List<WebhookEndpoint> Webhooks { get; set; } = new();
+    /// <summary>Urgences de l'organisation (intégration « Alerte d'urgence », §159) : en cours et historique d'un an. Voir <see cref="EmergencyService"/>.</summary>
+    public List<Emergency> Emergencies { get; set; } = new();
     /// <summary>Limites propres à l'organisation (console › fiche du client). Null : valeur par défaut de <see cref="ApiLimits"/>.</summary>
     public int? ApiMaxKeys { get; set; }
     public int? ApiMaxWebhooks { get; set; }
@@ -761,6 +763,9 @@ public class Screen : IClientOwned, IAreaOwned, IOwned
     public DateTime? OfflineAlertUtc { get; set; }              // alerte « écran hors ligne » envoyée à cette date (une seule par panne)
     /// <summary>Événement « screen.offline » envoyé aux webhooks à cette date (un seul par panne) ; indépendant de <see cref="OfflineAlertUtc"/> (voir <see cref="ScreenEvents"/>).</summary>
     public DateTime? ApiOfflineUtc { get; set; }
+    /// <summary>Dernière urgence que cet écran a confirmée afficher (rapport de réception, §159).</summary>
+    public Guid? EmergencyAckId { get; set; }
+    public DateTime? EmergencyAckUtc { get; set; }
 
     /// <summary>Planning de diffusion propre à l'écran (<see cref="Slots"/>, prioritaires sur ceux de sa zone) ; sinon il suit celui de sa zone. Voir <see cref="Planning"/>.</summary>
     public bool OwnPlanning { get; set; }

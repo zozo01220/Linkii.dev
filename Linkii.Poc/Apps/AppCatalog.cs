@@ -66,6 +66,10 @@ public class AppManifest
     public string Duration { get; set; } = "fixed";
     /// <summary>builtin = écrite par Linkivi ; nocode = configurée uniquement par son manifeste.</summary>
     public string Kind { get; set; } = "builtin";
+    /// <summary>Plan exigé pour utiliser l'app (« growth » : Pro) ; vide : tous les plans.</summary>
+    public string? Plan { get; set; }
+    /// <summary>Fonction installable qui n'est pas un contenu ni un widget (ex. « Alerte d'urgence ») : jamais proposée dans les listes de lecture ni dans les droits des membres.</summary>
+    public bool IsFeature => Kind == "feature";
     public List<string> Placements { get; set; } = new();
     /// <summary>Les paramètres validFrom / validTo (aaaa-mm-jj) limitent la période d'affichage.</summary>
     public bool Validity { get; set; }
@@ -123,7 +127,7 @@ public class AppCatalog
         var p = new List<string>();
         if (!Regex.IsMatch(m.Id, "^[a-z][a-z0-9-]{1,40}$")) p.Add("identifiant invalide");
         if (string.IsNullOrWhiteSpace(m.Name)) p.Add("nom manquant");
-        if (m.Placements.Count == 0 || m.Placements.Any(x => !AllPlacements.Contains(x))) p.Add("positions invalides");
+        if (!m.IsFeature && (m.Placements.Count == 0 || m.Placements.Any(x => !AllPlacements.Contains(x)))) p.Add("positions invalides");
         if (m.Duration is not ("fixed" or "content")) p.Add("durée invalide");
         if (m.Data && string.IsNullOrEmpty(m.Provider)) p.Add("données demandées sans fournisseur");
         if (m.Validity && !(m.Settings.Any(f => f.Key == "validFrom") && m.Settings.Any(f => f.Key == "validTo"))) p.Add("période de validité sans validFrom / validTo");

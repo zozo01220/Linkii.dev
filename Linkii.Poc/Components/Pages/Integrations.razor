@@ -2,6 +2,7 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:integrations")]
 @inject TenantStore Store
 @inject AppService Svc
+@inject EmergencyService Emergency
 @inject DriveService Drives
 @inject AccountManager Accounts
 @inject NavigationManager Nav
@@ -368,15 +369,29 @@ else
                 </div>
                 @if (!Available(dKind)) { <div class="int-drawer-note">@ConnectedAccounts.Kind(dKind).Name n'est pas encore disponible sur cette plateforme (connexion à configurer par l'administrateur Linkivi).</div> }
             }
+            else if (dm.IsFeature)
+            {
+                <div class="int-drawer-note">Installée : le bouton rouge <b>« Urgence »</b> est maintenant dans la barre du haut, sur toutes les pages. Pour déclencher une urgence depuis une alarme ou un script, créez une clé du gabarit « Alerte d'urgence seule » dans <a href="/apiwebhooks">API et webhooks</a>. Réservée au plan Pro.</div>
+            }
             else
             {
                 <div class="int-drawer-note">Cette intégration ne demande aucun compte : elle est prête à l'emploi. Désactivez-la avec l'interrupteur pour ne plus la proposer dans les listes de lecture.</div>
             }
+            @if (dm.IsFeature)
+            {
+                <div class="int-drawer-use">
+                    <span>@(Emergency.Active(tenant.Id).Count(e => !e.Test) is var n and > 0 ? $"{n} urgence{(n > 1 ? "s" : "")} en cours" : "Aucune urgence en cours")</span>
+                    <a class="btn ghost sm" href="/apiwebhooks">Clés d'API</a>
+                </div>
+            }
+            else
+            {
             <div class="int-drawer-use">
                 <span>@UsageText(did)</span>
                 @if (did == Compositions.AppId) { <a class="btn ghost sm" href="/compositions">Ouvrir Compositions</a> }
                 else { <a class="btn ghost sm" href="/apps/@did">Voir les contenus</a> }
             </div>
+            }
         </div>
         <div class="modal-foot">
             @if (!dm.DefaultOn) { <button type="button" class="int-remove" @onclick="() => RetireApp(dm)">Retirer de Mes intégrations</button> }
@@ -452,7 +467,7 @@ else
     // Catégories affichées, dans l'ordre (boutons de filtre et titres des groupes), dans « Mes intégrations » comme dans le Store.
     // Calendriers et Drives sont des familles de sources, pas des apps.
     internal const string CalendarsGroup = "Calendriers", DrivesGroup = "Fichiers et Drives", HomeGroup = "Maison connectée";
-    internal static readonly string[] Sections = { "Médias", "Web", "Documents et design", CalendarsGroup, DrivesGroup, "Réseaux sociaux", HomeGroup, "Autres" };
+    internal static readonly string[] Sections = { "Médias", "Web", "Documents et design", CalendarsGroup, DrivesGroup, "Réseaux sociaux", HomeGroup, "Sécurité", "Autres" };
 
     internal static string SectionOf(AppManifest a) => a.Id switch
     {
@@ -460,6 +475,7 @@ else
         "rss" or "webpage" or "youtube" or "weather-slide" => "Web",
         "canva" or "google-slides" or "google-docs" or "ms-powerpoint" => "Documents et design",
         "facebook" => "Réseaux sociaux",
+        "emergency" => "Sécurité",
         _ => "Autres"
     };
 
@@ -1258,6 +1274,7 @@ else
     /// <summary>Plateforme sans connexion au fournisseur (identifiants de l'application à configurer par l'administrateur Linkivi) : null si l'intégration est utilisable.</summary>
     private string? Unavailable(CatalogView.Entry e)
     {
+        if (Svc.Find(e.Id) is { Plan: Plans.Growth } paid && !tenant.IsGrowth) return $"« {paid.Name} » fait partie du plan Pro.";
         var kind = ConnectedAccounts.For(e.Id);
         // Facebook reste utilisable avec un jeton collé à la main
         return kind == null || kind == ConnectedAccounts.Facebook || Available(kind) ? null

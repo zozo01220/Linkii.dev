@@ -57,7 +57,7 @@
   /* ---------- Indicateur hors ligne ---------- */
   var netFails = 0;
   function showOffline() { $("offline").style.display = netFails >= 2 ? "block" : "none"; }
-  function setOnline(ok) { netFails = ok ? 0 : netFails + 1; showOffline(); }
+  function setOnline(ok) { netFails = ok ? 0 : netFails + 1; showOffline(); if (ok && window.LinkiiEmergency) LinkiiEmergency.reachable(); }
   function markOffline() { netFails = 2; showOffline(); }
   window.addEventListener("offline", markOffline);
   window.addEventListener("online", function () { if (PREVIEW) refresh(); else api("/api/player/version").catch(function () {}); });
@@ -262,6 +262,7 @@
   }
   window.addEventListener('resize', layout);
 
+    if (window.LinkiiEmergency) LinkiiEmergency.place();
   // Visuel de pause : chaque écran d'un mur affiche le visuel en entier dans sa propre case, pas une tranche du visuel du mur.
   var cell = { w: 1920, h: 1080 };   // taille de la scène d'un écran (un mur en compte colonnes × lignes)
   function placePause() {
@@ -409,7 +410,7 @@
   // Un créneau commence ou se termine : on change de liste tout de suite, sans attendre la fin du contenu en cours.
   function scheduleTick() {
     if (PREVIEW && state.free) return;
-    if (!state.current || !state.current.schedule || state.slotUsed === slotIndex(state.current) || state.paused || state.hold || state.asleep || adNow) return;   // un spot en cours va jusqu'au bout
+    if (!state.current || !state.current.schedule || state.slotUsed === slotIndex(state.current) || state.paused || state.hold || state.asleep || state.emergency || adNow) return;   // un spot en cours va jusqu'au bout
     state.shownItem = null;
     next();
   }
@@ -1119,7 +1120,7 @@
   // quand la borne revient à la diffusion après une visite, un spot passe (plafonds par heure et par jour des campagnes respectés).
   function adVisitStart() { if (adNow) { adFinish(false, 'touch'); next(); } }
   function adVisitEnd() {
-    if (adNow || !state.current || state.paused || state.hold || state.asleep || !adCandidates('between').length) return;
+    if (adNow || !state.current || state.paused || state.hold || state.asleep || state.emergency || !adCandidates('between').length) return;
     clearTimeout(state.timer); state.timer = null;
     if (!playAd('between', true)) next();
   }
@@ -1128,7 +1129,7 @@
   function next() {
     clearTimeout(state.timer); state.timer = null;
     adFinish(false, state.pending ? 'publish' : 'cut');   // un spot encore à l'écran (sans être allé au bout) : passage interrompu
-    if (state.paused || state.hold || state.asleep) return;   // simulateur en pause, écran mis en pause depuis le back-office, ou en veille
+    if (state.paused || state.hold || state.asleep || state.emergency) return;   // simulateur en pause, écran mis en pause depuis le back-office, ou en veille
 
     if (state.pending) {            // remplacement entre deux contenus
       state.current = state.pending; state.pending = null; state.index = 0;
@@ -1433,7 +1434,7 @@
     if (PREVIEW) return;
     // une nouvelle plage s'applique aussitôt, sans attendre la fin du contenu en cours
     if (state.pending && state.pending.sleep !== undefined) cfg.sleep = state.pending.sleep || null;
-    var sl = cfg.sleep, sig = sl ? JSON.stringify(sl) : '';
+    var sl = state.emergency ? null : cfg.sleep, sig = sl ? JSON.stringify(sl) : '';
     if (sig !== sleepSig && window.LinkiiNative && typeof window.LinkiiNative.sleepSchedule === 'function') {
       sleepSig = sig;
       try { window.LinkiiNative.sleepSchedule(sig); } catch (e) {}
@@ -1467,7 +1468,7 @@
   var dimSig = '';
   function dimTick() {
     if (state.pending && state.pending.dim !== undefined) cfg.dim = state.pending.dim || null;   // un nouveau réglage s'applique aussitôt
-    var d = cfg.dim, b = 100, c = 100;
+    var d = state.emergency ? null : cfg.dim, b = 100, c = 100;
     if (d && d.profiles && d.profiles.length && d.grid) {
       var p = d.profiles[+d.grid.charAt(Math.floor(localWeekMinute(serverNow(), d.tz) / 60))] || d.profiles[0];
       b = p.b; c = p.c;
@@ -1483,6 +1484,31 @@
     if (b < 100 && !real) f.push('brightness(' + (b / 100) + ')');
     if (c !== 100) f.push('contrast(' + (c / 100) + ')');
     $('stage').style.filter = f.join(' ');
+  /* ---------- Urgence (emergency.js) : le player lui prête la scène et arrête ou reprend les contenus ---------- */
+  function emergencyInit() {
+    if (!window.LinkiiEmergency) return;
+    LinkiiEmergency.init({
+      stage: $('stage'), preview: !!PREVIEW,
+      cell: function () { return cell; }, wall: function () { return cfg.wall; }, now: serverNow,
+      enter: function () {
+        state.emergency = true;
+        clearTimeout(state.timer); state.timer = null;
+        adFinish(false, 'emergency');
+        stopContent();
+        $('idle').style.display = 'none';
+        var sv = $('sleepview'); if (sv) sv.style.display = 'none';   // l'urgence réveille l'écran
+        state.asleep = false;
+        sleepTick(); dimTick();
+      },
+      leave: function () {
+        state.emergency = false;
+        sleepTick(); dimTick();   // l'écran retrouve sa plage de veille et sa luminosité
+        if (!state.hold) next();
+      },
+      ack: function (id) { return api('/api/player/emergency-ack', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) }); }
+    });
+  }
+
   }
 
   var pauseTimer = null;
@@ -1610,6 +1636,7 @@
       ack();
       (d.commands || []).forEach(handleCommand);   // ordres du back-office que le temps réel n'a pas livrés
     }).catch(function () {});
+    conn.on('Emergency', function (e) { if (window.LinkiiEmergency) LinkiiEmergency.apply(e || null); });   // urgence : affichée ou retirée sans attendre le sondage
   }
 
   /* ---------- Rechargement nocturne (heure réglée dans les paramètres du tenant) ---------- */
@@ -1628,6 +1655,7 @@
       var saved = JSON.parse(LS.getItem('lk_playlist') || 'null');
       if (saved) { state.pending = saved; }   // passe par next() => config + apps appliquées
     } catch (e) {}
+      if (window.LinkiiEmergency && d.emergency !== undefined) LinkiiEmergency.apply(d.emergency);   // urgence en cours (ou null : levée)
     layout();
     next();
     refresh();
@@ -1651,8 +1679,10 @@
   function previewPrepare(pl) {
     if (SOUND) return;
     var lists = [pl.items || []].concat(pl.zones || []).concat(((pl.schedule && pl.schedule.slots) || []).map(function (s) { return s.items || []; }));
+    emergencyInit();
     for (var i = 0; i < lists.length; i++)
       for (var k = 0; k < lists[i].length; k++) { var s = lists[i][k].settings; if (s && s.sound) s.sound = 'false'; }
+    if (window.LinkiiEmergency) LinkiiEmergency.restore();   // une urgence connue avant l'arrêt s'affiche même sans réseau
   }
 
   function previewReport() {

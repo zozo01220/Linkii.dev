@@ -33,6 +33,11 @@ builder.Services.AddSingleton<PushService>();   // notifications push (Firebase)
 builder.Services.AddSingleton<NotificationCenter>();   // centre de notifications : la cloche et la page Notifications
 builder.Services.AddSingleton<AlertService>();  // alertes de l'organisation : e-mail et/ou notification selon les Réglages
 builder.Services.AddSingleton<IApiAlerts, ApiAlerts>();   // API et webhooks (§154) : alertes « Intégrations et API »
+builder.Services.AddSingleton<IEmergencyPush, HubEmergencyPush>();   // intégration « Alerte d'urgence » (§159) : message temps réel vers les écrans
+builder.Services.AddSingleton<IEmergencyNotices, EmergencyNotices>();
+builder.Services.AddSingleton<EmergencyService>();
+builder.Services.AddScoped<EmergencyUi>();   // état du bouton, du bandeau et du tiroir d'urgence du back-office
+builder.Services.AddHostedService<EmergencyWorker>();   // fin des essais, rappel après 12 h, historique d'un an
 builder.Services.AddLinkiiApi();   // socle de l'API publique : clés, scopes, webhooks, journal (voir Api/)
 builder.Services.AddSingleton<PreviewGrants>();   // jetons d'aperçu du simulateur
 builder.Services.AddSingleton<VideoConverter>();
@@ -694,8 +699,17 @@ api.MapGet("/player/version", (HttpRequest req, JsonStore store) => store.Read(d
     var s = Auth(req, db);
     if (Gate(s, db) is { } denied) return denied;
     // serverNow : horloge de référence du player (lecture synchronisée) ; commands : ordres du back-office pas encore accusés (filet si SignalR est coupé)
-    return Results.Ok(new { version = Notifier.Revision(db, s!), build = playerBuild, serverNow = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), commands = ScreenControl.Pending(s!, DateTime.UtcNow), wakeUntil = Sleep.Woken(s!, DateTime.UtcNow) ? Helpers.EpochMs(s!.WakeUntilUtc!.Value) : 0L });   // wakeUntil : réveil manuel demandé (l'app Android le sonde pendant la veille)
+    return Results.Ok(new { version = Notifier.Revision(db, s!), build = playerBuild, serverNow = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), commands = ScreenControl.Pending(s!, DateTime.UtcNow), wakeUntil = Math.Max(Sleep.Woken(s!, DateTime.UtcNow) ? Helpers.EpochMs(s!.WakeUntilUtc!.Value) : 0L, Emergencies.WakeUntilMs(db, s!, DateTime.UtcNow)), emergency = Emergencies.PayloadFor(db, s!, DateTime.UtcNow) });   // urgence : réveille l'écran et le message (null : aucun)   // wakeUntil : réveil manuel demandé (l'app Android le sonde pendant la veille)
 }));
+
+// Urgence : l'écran confirme afficher le message (rapport de réception du back-office et de l'API).
+api.MapPost("/player/emergency-ack", (HttpRequest req, EmergencyAckDto body, JsonStore store, EmergencyService emergencies) =>
+{
+    var id = store.Read(db => { var s = Auth(req, db); return Gate(s, db) is null ? s?.Id : null; });
+    if (id == null) return Results.Unauthorized();
+    emergencies.Ack(id.Value, body.Id);
+    return Results.Ok();
+});
 
 // Appareil : système, modèle et version de l'application, remontés au démarrage puis régulièrement.
 api.MapPost("/player/device", (HttpRequest req, DeviceDto body, JsonStore store) => store.Write(db =>
@@ -1069,6 +1083,7 @@ app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 app.Run();
 
 record AckDto(string Version, int? W, int? H, string? Stage = null);
+record EmergencyAckDto(Guid Id);
 record QrHit(Guid ClientId, Guid ItemId, string? Destination, bool Counts);
 record PlayDto(Guid? MediaId, string? AppId, long Start, int Sec);
 record KioskEventDto(long At, string Type, Guid? Tile, string? Title, int Sec, string? How);

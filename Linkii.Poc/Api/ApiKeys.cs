@@ -222,6 +222,9 @@ public class ApiKeyService(JsonStore store, ApiRegistry registry, TimeProvider t
             var c = db.Clients.FirstOrDefault(x => x.Id == clientId);
             if (c == null) return "Organisation introuvable.";
             if (!ApiLimits.Allowed(c)) return "L'API fait partie du plan Pro.";
+            foreach (var sc in list)
+                if (registry.Scope(sc)?.App is { } app && !db.AppInstalls.Any(a => a.ClientId == clientId && a.AppId == app))
+                    return $"L'accès « {sc} » demande l'intégration « {app} » : installez-la depuis le Store.";
             if (c.ApiKeys.Count(k => k.Counts(now)) >= ApiLimits.Keys(c)) return $"Limite atteinte : {ApiLimits.Keys(c)} clés au plus. Révoquez une clé inutilisée.";
             c.ApiKeys.Add(key);
             return null;

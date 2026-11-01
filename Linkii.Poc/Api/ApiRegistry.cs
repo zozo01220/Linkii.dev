@@ -9,13 +9,14 @@ namespace Linkii.Poc;
 // puis émet ses événements par IEventPublisher.Publish. Les écrans (création de clé, cases des webhooks, documentation) lisent le registre.
 
 /// <summary>Un accès (« screens:read ») : il apparaît dans « Personnalisée » à la création d'une clé.</summary>
-public record ApiScope(string Id, string Group, string Label);
+/// <param name="App">Intégration (Store) dont l'accès dépend : sans elle, la clé ne peut pas l'avoir et la route répond 403 (vide : toujours disponible).</param>
+public record ApiScope(string Id, string Group, string Label, string? App = null);
 
 /// <summary>Gabarit de clé. Plusieurs modules peuvent déclarer le même nom : leurs accès s'additionnent.</summary>
 public record ApiTemplate(string Name, string Hint, string[] Scopes, int Order = 100);
 
 /// <summary>Type d'événement que les webhooks peuvent recevoir (« screen.offline »).</summary>
-public record EventType(string Id, string Group, string Label);
+public record EventType(string Id, string Group, string Label, string? App = null);
 
 /// <summary>Route déclarée : sert au branchement, au contrôle d'accès, au débit et à la documentation OpenAPI.</summary>
 /// <param name="Query">Paramètres de requête, séparés par « ; » : <c>nom:type:description</c> (types : string, integer, uuid). Sert à OpenAPI et à Swagger UI.</param>
@@ -99,6 +100,17 @@ public class ApiRegistry
         var dup = list.GroupBy(key).FirstOrDefault(g => g.Count() > 1);
         if (dup != null) throw new InvalidOperationException($"Deux modules déclarent le même {what} : « {dup.Key} ».");
         return list;
+    }
+
+    /// <summary>Ce que voit une organisation : les accès, gabarits et événements des intégrations qu'elle a installées, plus ceux du socle.</summary>
+    public IEnumerable<ApiScope> ScopesFor(Func<string, bool> installed) => Scopes.Where(s => s.App == null || installed(s.App));
+    public IEnumerable<IGrouping<string, ApiScope>> ScopeGroupsFor(Func<string, bool> installed) => ScopesFor(installed).GroupBy(s => s.Group);
+    public IEnumerable<EventType> EventsFor(Func<string, bool> installed) => Events.Where(e => e.App == null || installed(e.App));
+    public IEnumerable<IGrouping<string, EventType>> EventGroupsFor(Func<string, bool> installed) => EventsFor(installed).GroupBy(e => e.Group);
+    public IEnumerable<ApiTemplate> TemplatesFor(Func<string, bool> installed)
+    {
+        var ok = ScopesFor(installed).Select(s => s.Id).ToHashSet();
+        return Templates.Select(t => t with { Scopes = t.Scopes.Where(ok.Contains).ToArray() }).Where(t => t.Scopes.Length > 0);
     }
 
     public ApiScope? Scope(string id) => Scopes.FirstOrDefault(s => s.Id == id);

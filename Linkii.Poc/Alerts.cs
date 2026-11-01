@@ -87,8 +87,9 @@ public class AlertService(JsonStore store, Mailer mail, PushService push, Notifi
     /// <param name="dedupe">Clé de regroupement : le même événement se regroupe dans une seule notification.</param>
     /// <param name="subjects">Éléments concernés (écrans en panne), pour résoudre la notification quand ils sont rétablis.</param>
     /// <param name="good">Bonne nouvelle (retour en ligne, synchronisation rétablie) : envoyée seulement si l'organisation les a demandées.</param>
+    /// <param name="force">Envoie aussi l'e-mail aux administrateurs même si l'organisation a coupé ses alertes (rappel d'urgence active).</param>
     public async Task Raise(Guid clientId, string kind, string title, string body, string path = "/", Guid? except = null, string? skipEmail = null, MailBuilder? buildMail = null,
-        string? severity = null, string? dedupe = null, IEnumerable<string>? subjects = null, bool good = false)
+        string? severity = null, string? dedupe = null, IEnumerable<string>? subjects = null, bool good = false, bool force = false)
     {
         try
         {
@@ -96,15 +97,15 @@ public class AlertService(JsonStore store, Mailer mail, PushService push, Notifi
             {
                 var c = db.Clients.FirstOrDefault(x => x.Id == clientId);
                 if (c == null) return (null, new(), null, false, false);
-                var w = Alerts.Wants(c, kind, good);
+                var w = Alerts.Wants(c, kind, good) || force;   // force : rappel qu'on veut aussi par e-mail, même si l'organisation a coupé ses alertes
                 var actor = except == null ? null : db.Users.FirstOrDefault(u => u.Id == except)?.Email;
-                var list = w && c.AlertMail ? Alerts.Recipients(db, c).Where(r => !Same(r.Email, skipEmail) && !Same(r.Email, actor)).ToList() : new();
+                var list = w && (c.AlertMail || force) ? Alerts.Recipients(db, c).Where(r => !Same(r.Email, skipEmail) && !Same(r.Email, actor)).ToList() : new();
                 return (c, list, db.Resellers.FirstOrDefault(r => r.Id == c.ResellerId), w, Alerts.InCenter(c, kind, good));
             });
             if (client == null) return;
             if (inCenter) center.Add(clientId, kind, severity ?? DefaultSeverity(kind, good), title, body, path, except, dedupe, subjects);
             if (!wants) return;
-            if (client.AlertPush) await push.ToClientAdmins(clientId, kind, title, body, path, except);
+            if (client.AlertPush && Alerts.Wants(client, kind, good)) await push.ToClientAdmins(clientId, kind, title, body, path, except);
             if (rcpt.Count == 0 || reseller == null) return;
             var app = resolver.LoginUrl(reseller)[..^"login".Length];
             foreach (var (email, name) in rcpt)

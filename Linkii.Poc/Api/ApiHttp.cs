@@ -17,7 +17,7 @@ namespace Linkii.Poc;
 public static class ApiCodes
 {
     public const string MissingKey = "missing_key", InvalidKey = "invalid_key", KeyRevoked = "key_revoked", KeyExpired = "key_expired", IpNotAllowed = "ip_not_allowed",
-        TooManyFailures = "too_many_failures", ScopeMissing = "scope_missing", PlanRequired = "plan_required", SpaceSuspended = "space_suspended", RateLimited = "rate_limited",
+        IntegrationMissing = "integration_missing", TooManyFailures = "too_many_failures", ScopeMissing = "scope_missing", PlanRequired = "plan_required", SpaceSuspended = "space_suspended", RateLimited = "rate_limited",
         IdempotencyConflict = "idempotency_conflict", RequestInProgress = "request_in_progress", NotFound = "not_found", InvalidRequest = "invalid_request", LimitReached = "limit_reached";
 
     public static readonly (string Code, int Status, string Title)[] All =
@@ -28,6 +28,7 @@ public static class ApiCodes
         (KeyExpired, 401, "Cette clé a expiré."),
         (IpNotAllowed, 403, "Cette clé n'est pas autorisée depuis cette adresse IP."),
         (TooManyFailures, 429, "Trop d'essais avec une clé invalide. Réessayez dans une minute."),
+        (IntegrationMissing, 403, "Cette fonction vient d'une intégration qui n'est pas installée : installez-la depuis le Store."),
         (ScopeMissing, 403, "Cette clé n'a pas l'accès nécessaire."),
         (PlanRequired, 403, "L'API fait partie du plan Pro."),
         (SpaceSuspended, 403, "L'espace de cette organisation est suspendu."),
@@ -160,7 +161,9 @@ public class ApiGuard(string scope) : IEndpointFilter
             var t = db.Clients.FirstOrDefault(x => x.Id == cid);
             if (t == null) return ApiCodes.InvalidKey;
             if (t.IsCut || db.Resellers.FirstOrDefault(r => r.Id == t.ResellerId) is not { Active: true, Suspended: false }) return ApiCodes.SpaceSuspended;
-            return ApiLimits.Allowed(t) ? null : ApiCodes.PlanRequired;
+            if (!ApiLimits.Allowed(t)) return ApiCodes.PlanRequired;
+            // accès d'une intégration du Store (ex. « Alerte d'urgence ») : elle doit être installée
+            return http.RequestServices.GetRequiredService<ApiRegistry>().Scope(scope)?.App is { } app && !db.AppInstalls.Any(a => a.ClientId == cid && a.AppId == app) ? ApiCodes.IntegrationMissing : null;
         });
         if (code != null) return ApiProblem.Result(http, code);
         return await next(context);
@@ -320,6 +323,7 @@ public static class ApiRegistration
         s.AddSingleton(TimeProvider.System);
         s.AddSingleton<IApiModule, CoreApiModule>();
         s.AddSingleton<IApiModule, ScreensApiModule>();   // supervision : GET /screens, screen.offline, screen.online
+        s.AddSingleton<IApiModule, EmergencyApiModule>();   // urgence : POST/GET/DELETE /emergency (intégration « Alerte d'urgence »)
         s.AddSingleton<IApiModule, DataApiModule>();   // envoi direct de données : /datasets, data.failed, data.recovered
         s.AddSingleton<ApiRegistry>();
         s.AddSingleton<ApiKeyService>();
