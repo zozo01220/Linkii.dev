@@ -534,6 +534,8 @@ public class Tenant
     public List<WebhookEndpoint> Webhooks { get; set; } = new();
     /// <summary>Urgences de l'organisation (intégration « Alerte d'urgence », §159) : en cours et historique d'un an. Voir <see cref="EmergencyService"/>.</summary>
     public List<Emergency> Emergencies { get; set; } = new();
+    /// <summary>Modèles de message d'urgence de l'organisation (rédigés une fois, un clic les place dans le formulaire). Null : jamais ouverts, les modèles de base de <see cref="Linkii.Poc.Emergencies.DefaultTemplates"/> sont créés à la première lecture.</summary>
+    public List<EmergencyTemplate>? EmergencyTemplates { get; set; }
     /// <summary>Limites propres à l'organisation (console › fiche du client). Null : valeur par défaut de <see cref="ApiLimits"/>.</summary>
     public int? ApiMaxKeys { get; set; }
     public int? ApiMaxWebhooks { get; set; }

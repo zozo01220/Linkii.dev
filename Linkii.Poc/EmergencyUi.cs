@@ -6,7 +6,7 @@ namespace Linkii.Poc;
 /// </summary>
 public class EmergencyUi
 {
-    /// <summary>null, form (déclencher), report (rapport d'une urgence) ou history.</summary>
+    /// <summary>null, form (déclencher), report (rapport d'une urgence), history ou templates (modèles de message).</summary>
     public string? Open { get; private set; }
     /// <summary>Urgence dont le rapport est ouvert, ou dont la levée attend la confirmation.</summary>
     public Guid? ReportId { get; private set; }
@@ -15,6 +15,7 @@ public class EmergencyUi
 
     public void OpenForm() { Open = "form"; Changed?.Invoke(); }
     public void OpenReport(Guid id) { Open = "report"; ReportId = id; Changed?.Invoke(); }
+    public void OpenTemplates() { Open = "templates"; Changed?.Invoke(); }
     public void OpenHistory() { Open = "history"; Changed?.Invoke(); }
     public void Close() { Open = null; ReportId = null; Changed?.Invoke(); }
     /// <summary>Un clic sur la pastille ou le bandeau : la fenêtre de confirmation pour lever l'urgence.</summary>

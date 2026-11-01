@@ -3015,3 +3015,18 @@ Installation depuis le Store, bouton rouge dans la barre, formulaire et aperçu,
 
 ### Non vérifié
 Une vraie TV (lisibilité à distance, taille du texte sur 1920×1080 et portrait) ; le **réveil d'un appareil Android en veille matérielle** et son délai réel (60 s attendus) ; le player Windows ; un mur d'écrans et une borne interactive ; le message SignalR (le sondage de 5 s a couvert les essais) ; l'e-mail de rappel de 12 h avec un vrai serveur de messagerie ; l'affichage pour une organisation Essential et sur un vrai téléphone.
+
+## 161. Alerte d'urgence : modèles de message et déclenchement à l'appui maintenu (1er novembre 2026) : d'après `maquettes/urgence-idees.html` (idée 5) ; 2 tests de plus ; essayé par l'utilisateur (non vérifié dans le navigateur par moi)
+
+### Décisions
+- **Appui maintenu de 1,5 s** sur le dernier bouton rouge, celui de la fenêtre de confirmation de l'urgence (« Maintenir pour déclencher ») : un simple clic ne fait rien, la barre se remplit pendant l'appui, et le déclenchement part à la fin. Pas de fenêtre de plus. Lever l'urgence reste un clic avec confirmation.
+- **Modèles de message** : l'organisation rédige les siens une fois ; dans le formulaire, un clic sur un modèle remplit le titre et le message (il reste à choisir les écrans). Quatre **modèles de base modifiables** pour démarrer : Évacuation, Confinement, Alerte météo, Exercice (titre « EXERCICE »). Dix modèles au plus ; nom 24 caractères, titre 40, message 300.
+
+### Réalisation
+- `Tenant.EmergencyTemplates` (null tant que jamais ouvert) ; `EmergencyTemplate`, `Emergencies.DefaultTemplates()`, `MaxTemplates`, `MaxTemplateName`. `EmergencyService.Templates` enregistre les modèles de base à la première lecture (identifiants stables), `SaveTemplate` (ajout/modification, validation), `DeleteTemplate`.
+- Tiroir : puces « Modèles » en tête du formulaire + « Gérer les modèles » ; onglet **Modèles** (liste, modifier, supprimer, nouveau). `EmergencyUi.OpenTemplates`.
+- `wwwroot/hold-confirm.js` : tout `<button data-hold="1500">` n'obéit qu'à l'appui tenu (souris, doigt, Entrée/Espace) ; le clic réel est bloqué, seul celui du minuteur passe à Blazor. Chargé par `App.razor`. CSS `.em-hold` dans `emergency.css` (v=3).
+- Inclut la correction des fenêtres de confirmation devant le voile (`.em-dlg`).
+
+### Non vérifié
+Rendu et réglage de l'appui maintenu sur un vrai téléphone et au clavier ; ordre des modèles et ergonomie de l'onglet Modèles (à l'essai par l'utilisateur). Pas encore de réglage « modèle Exercice affiche toujours un bandeau EXERCICE » (idée de la maquette, non faite).

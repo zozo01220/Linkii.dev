@@ -34,6 +34,15 @@ public class Emergency
     public bool IsActive(DateTime now) => EndedUtc == null && (!Test || now < StartedUtc.AddSeconds(Emergencies.TestSeconds));
 }
 
+/// <summary>Modèle de message d'urgence : un nom court (le bouton) et le titre et le message qu'il place dans le formulaire.</summary>
+public class EmergencyTemplate
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Name { get; set; } = "";
+    public string Title { get; set; } = "";
+    public string Message { get; set; } = "";
+}
+
 public record EmergencyLine(Guid ScreenId, string Name, string State, bool Woke, DateTime? AtUtc);
 public record EmergencyReport(Emergency Emergency, List<EmergencyLine> Lines)
 {
@@ -49,6 +58,17 @@ public static class Emergencies
 {
     public const string AppId = "emergency";
     public const int TestSeconds = 30, ReminderHours = 12, KeepDays = 365, MaxTitle = 40, MaxMessage = 300, WakeMinutes = 3;
+    public const int MaxTemplates = 10, MaxTemplateName = 24;
+
+    /// <summary>Modèles de base, modifiables : une ébauche pour démarrer.</summary>
+    public static List<EmergencyTemplate> DefaultTemplates() => new()
+    {
+        new() { Name = "Évacuation", Title = "Évacuation", Message = "Évacuation du bâtiment. Quittez les lieux calmement par les issues de secours et rejoignez le point de rassemblement." },
+        new() { Name = "Confinement", Title = "Confinement", Message = "Restez à l'intérieur, fermez portes et fenêtres, éloignez-vous des vitres et attendez les consignes." },
+        new() { Name = "Alerte météo", Title = "Alerte météo", Message = "Alerte tempête. Restez à l'abri, éloignez-vous des vitres et ne sortez pas jusqu'à nouvel ordre." },
+        new() { Name = "Exercice", Title = "EXERCICE", Message = "EXERCICE : ceci est un exercice d'évacuation, suivez la procédure habituelle." },
+    };
+
     public static readonly string[] Kinds = { "all", "areas", "zones", "screens" };
 
     /// <summary>L'intégration est utilisable : plan Pro, espace actif, et « Alerte d'urgence » installée dans le Store.</summary>
@@ -207,6 +227,51 @@ public class EmergencyService(JsonStore store, IEmergencyPush push, IEventPublis
         Changed?.Invoke(clientId);
         return new EmergencyResult(created, null, null);
     }
+
+    /// <summary>Modèles de l'organisation. À la première lecture, les modèles de base sont enregistrés pour qu'on puisse les modifier.</summary>
+    public List<EmergencyTemplate> Templates(Guid clientId)
+    {
+        var list = store.Read(db => db.Clients.FirstOrDefault(c => c.Id == clientId)?.EmergencyTemplates?.Select(Copy).ToList());
+        if (list != null) return list;
+        return store.Write(db =>
+        {
+            var t = db.Clients.FirstOrDefault(c => c.Id == clientId);
+            return t == null ? new() : (t.EmergencyTemplates ??= Emergencies.DefaultTemplates()).Select(Copy).ToList();
+        });
+    }
+
+    private static EmergencyTemplate Copy(EmergencyTemplate x) => new() { Id = x.Id, Name = x.Name, Title = x.Title, Message = x.Message };
+
+    /// <summary>Ajoute (id vide) ou modifie un modèle. Rend le message d'erreur, ou null si tout va bien.</summary>
+    public string? SaveTemplate(Guid clientId, Guid? id, string? name, string? title, string? message)
+    {
+        name = (name ?? "").Trim(); title = (title ?? "").Trim(); message = (message ?? "").Trim();
+        if (name.Length == 0 || name.Length > Emergencies.MaxTemplateName) return $"Donnez un nom au modèle ({Emergencies.MaxTemplateName} caractères au plus).";
+        if (title.Length == 0 || title.Length > Emergencies.MaxTitle) return $"Le titre doit faire de 1 à {Emergencies.MaxTitle} caractères.";
+        if (message.Length == 0 || message.Length > Emergencies.MaxMessage) return $"Le message doit faire de 1 à {Emergencies.MaxMessage} caractères.";
+        string? error = null;
+        store.Write(db =>
+        {
+            var t = db.Clients.FirstOrDefault(c => c.Id == clientId);
+            if (t == null) { error = "Organisation introuvable."; return; }
+            var list = t.EmergencyTemplates ??= Emergencies.DefaultTemplates();
+            var m = id is { } i ? list.FirstOrDefault(x => x.Id == i) : null;
+            if (m == null)
+            {
+                if (list.Count >= Emergencies.MaxTemplates) { error = $"{Emergencies.MaxTemplates} modèles au plus."; return; }
+                list.Add(m = new EmergencyTemplate());
+            }
+            m.Name = name; m.Title = title; m.Message = message;
+        });
+        return error;
+    }
+
+    public void DeleteTemplate(Guid clientId, Guid id) => store.Write(db =>
+    {
+        var t = db.Clients.FirstOrDefault(c => c.Id == clientId);
+        if (t == null) return;
+        (t.EmergencyTemplates ??= Emergencies.DefaultTemplates()).RemoveAll(x => x.Id == id);
+    });
 
     /// <summary>Lève une urgence en cours. Rend false si elle n'existe pas ou n'est plus en cours.</summary>
     public bool Lift(Guid clientId, Guid id, string by)

@@ -11,8 +11,8 @@
         <div class="modal-head">
             <span style="color:var(--alert)"><Ico Name="alert" Size="22" /></span>
             <div class="grow">
-                <h3>@(mode == "form" ? "Déclencher une urgence" : mode == "report" ? "Rapport de l'urgence" : "Urgences")</h3>
-                <small>@(mode == "form" ? "Plein écran rouge, tout de suite, jusqu'à ce que vous la leviez." : mode == "report" ? "Quels écrans l'affichent." : "En cours et historique d'un an.")</small>
+                <h3>@(mode == "form" ? "Déclencher une urgence" : mode == "report" ? "Rapport de l'urgence" : mode == "templates" ? "Modèles de message" : "Urgences")</h3>
+                <small>@(mode == "form" ? "Plein écran rouge, tout de suite, jusqu'à ce que vous la leviez." : mode == "report" ? "Quels écrans l'affichent." : mode == "templates" ? "Rédigés une fois, un clic les place dans le formulaire." : "En cours et historique d'un an.")</small>
             </div>
             <button type="button" class="modal-x" aria-label="Fermer" @onclick="Ui.Close"><Ico Name="x" Size="20" /></button>
         </div>
@@ -21,11 +21,13 @@
             <nav class="emx-tabs" role="tablist">
                 <button type="button" role="tab" class="@(mode == "form" ? "on" : "")" @onclick="Ui.OpenForm">Déclencher</button>
                 <button type="button" role="tab" class="@(mode == "history" ? "on" : "")" @onclick="Ui.OpenHistory">Urgences @if (s.ActiveCount > 0) { <span class="cat-count">@s.ActiveCount</span> }</button>
+                <button type="button" role="tab" class="@(mode == "templates" ? "on" : "")" @onclick="Ui.OpenTemplates">Modèles</button>
             </nav>
         }
         <div class="modal-body">
             @if (mode == "form") { @FormBody }
             else if (mode == "report") { @ReportBody }
+            else if (mode == "templates") { @TemplatesBody }
             else { @HistoryBody }
         </div>
         <div class="modal-foot">
@@ -49,25 +51,26 @@
 {
     var c = Counts();
     <div class="modal-backdrop over" @onclick="() => confirmSend = false"></div>
-    <div class="modal app-modal sm over" role="alertdialog" aria-modal="true" aria-label="Confirmer l'urgence">
-        <div class="modal-head"><div class="grow"><h3 style="color:var(--alert)">Afficher « @title.Trim() » sur @TargetLabel ?</h3></div></div>
-        <div class="modal-body">
+    <div class="em-dlg" role="alertdialog" aria-modal="true" aria-label="Confirmer l'urgence">
+        <div class="em-dlg-h"><h3 style="color:var(--alert)">Afficher « @title.Trim() » sur @TargetLabel ?</h3></div>
+        <div class="em-dlg-b">
             <p>Le message passe en <b>plein écran rouge</b> sur les <b>@c.Online écran@(c.Online > 1 ? "s" : "") en ligne</b> dans les 5 secondes@(c.Asleep > 0 ? $", et réveille {c.Asleep} écran{(c.Asleep > 1 ? "s" : "")} en veille" : "")@(c.Offline > 0 ? $". {c.Offline} hors ligne la recevr{(c.Offline > 1 ? "ont" : "a")} à leur retour" : ""). Il reste affiché jusqu'à ce que vous le leviez.</p>
             @if (error != null) { <div class="emx-err">@error</div> }
         </div>
-        <div class="modal-foot"><button type="button" class="btn ghost" @onclick="() => confirmSend = false">Annuler</button><span class="grow"></span><button type="button" class="btn emx-btn-red" @onclick="Send">Oui, déclencher maintenant</button></div>
+        <div class="em-dlg-f"><button type="button" class="btn ghost" @onclick="() => confirmSend = false">Annuler</button><span class="grow"></span><button type="button" class="btn emx-btn-red em-hold" data-hold="1500" @onclick="Send"><i class="em-hold-fill"></i><span>Maintenir pour déclencher</span></button></div>
+        <p class="em-hold-tip">Gardez le doigt ou le clic appuyé 1,5 seconde : pas de fenêtre de plus, mais impossible de partir par erreur.</p>
     </div>
 }
 
 @if (Ui.LiftId is { } lid && Svc.Report(ClientId, lid) is { } lr)
 {
     <div class="modal-backdrop over" @onclick="Ui.CancelLift"></div>
-    <div class="modal app-modal sm over" role="alertdialog" aria-modal="true" aria-label="Lever l'urgence">
-        <div class="modal-head"><div class="grow"><h3>Lever l'urgence « @lr.Emergency.Title » ?</h3></div></div>
-        <div class="modal-body">
+    <div class="em-dlg" role="alertdialog" aria-modal="true" aria-label="Lever l'urgence">
+        <div class="em-dlg-h"><h3>Lever l'urgence « @lr.Emergency.Title » ?</h3></div>
+        <div class="em-dlg-b">
             <p>Le message disparaît de <b>@lr.Displayed écran@(lr.Displayed > 1 ? "s" : "")</b> qui l'affiche@(lr.Displayed > 1 ? "nt" : "") : @(lr.Displayed > 1 ? "ils reprennent" : "il reprend") leur diffusion normale (fondu d'une seconde) et les écrans réveillés retrouvent leur plage de veille.@(lr.Offline > 0 ? $" Les {lr.Offline} écrans hors ligne la retireront à leur retour." : "") <b>Pour la relancer, il faudra la déclencher de nouveau.</b></p>
         </div>
-        <div class="modal-foot"><button type="button" class="btn ghost" @onclick="Ui.CancelLift">Annuler</button><span class="grow"></span><button type="button" class="btn emx-btn-red" @onclick="() => Lift(lid)">Lever l'urgence</button></div>
+        <div class="em-dlg-f"><button type="button" class="btn ghost" @onclick="Ui.CancelLift">Annuler</button><span class="grow"></span><button type="button" class="btn emx-btn-red" @onclick="() => Lift(lid)">Lever l'urgence</button></div>
     </div>
 }
 
@@ -76,6 +79,17 @@
     private HashSet<Guid> picked = new();
     private Guid testScreen;
     private bool confirmSend, tested;
+    private Guid? editTpl;
+    private string tplName = "", tplTitle = "", tplMessage = "", tplError = "";
+
+    private void UseTemplate(EmergencyTemplate t) { title = t.Title; message = t.Message; error = ""; tested = false; testMessage = ""; }
+    private void EditTemplate(EmergencyTemplate? t) { editTpl = t?.Id ?? Guid.Empty; tplName = t?.Name ?? ""; tplTitle = t?.Title ?? ""; tplMessage = t?.Message ?? ""; tplError = ""; }
+    private void SaveTemplate()
+    {
+        tplError = Svc.SaveTemplate(ClientId, editTpl == Guid.Empty ? null : editTpl, tplName, tplTitle, tplMessage) ?? "";
+        if (tplError.Length == 0) editTpl = null;
+    }
+    private void DeleteTemplate(Guid id) { Svc.DeleteTemplate(ClientId, id); if (editTpl == id) editTpl = null; }
 
     private const string Warn = "<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'><path d='M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z'/><path d='M12 9v4M12 17h.01'/></svg>";
 
@@ -144,9 +158,14 @@
     private static string StateCss(EmergencyLine l) => l.State switch { "displayed" => "ok", "waking" or "pending" => "warn", _ => "bad" };
 
     private RenderFragment FormBody => @<div>
-        @{ var lists = Load(); var longText = message.Length > 110 || title.Length > 22; }
+        @{ var lists = Load(); var longText = message.Length > 110 || title.Length > 22; var tpls = Svc.Templates(ClientId); }
         @if (testScreen == Guid.Empty && lists.Screens.Count > 0) { testScreen = lists.Screens[0].Id; }
-        <div class="emx-f" style="margin-top:6px"><label for="em-title">Titre <small>court, en capitales sur l'écran</small><span class="cnt">@title.Length/@Emergencies.MaxTitle</span></label>
+        <div class="emx-sec" style="margin-top:6px">Modèles</div>
+        <div class="emx-mods">
+            @foreach (var t in tpls) { var m = t; <button type="button" class="emx-mod @(title.Trim() == m.Title && message.Trim() == m.Message ? "on" : "")" @onclick="() => UseTemplate(m)">@m.Name</button> }
+            <button type="button" class="emx-mod add" @onclick="Ui.OpenTemplates">Gérer les modèles</button>
+        </div>
+        <div class="emx-f" style="margin-top:10px"><label for="em-title">Titre <small>court, en capitales sur l'écran</small><span class="cnt">@title.Length/@Emergencies.MaxTitle</span></label>
             <input id="em-title" type="text" maxlength="@Emergencies.MaxTitle" placeholder="Évacuation" @bind="title" @bind:event="oninput" /></div>
         <div class="emx-f"><label for="em-msg">Message <span class="cnt">@message.Length/@Emergencies.MaxMessage</span></label>
             <textarea id="em-msg" maxlength="@Emergencies.MaxMessage" placeholder="Évacuation du bâtiment B. Quittez les lieux par les issues de secours." @bind="message" @bind:event="oninput"></textarea></div>
@@ -180,6 +199,33 @@
         <div class="emx-f" style="margin-top:8px"><select aria-label="Écran d'essai" @bind="testScreen">@foreach (var sc in lists.Screens) { <option value="@sc.Id">@sc.Name (@sc.State)</option> }</select></div>
         @if (testMessage.Length > 0) { <div class="emx-test">@testMessage</div> }
         @if (error.Length > 0 && !confirmSend) { <div class="emx-err">@error</div> }
+    </div>;
+
+    private RenderFragment TemplatesBody => @<div>
+        @{ var tpls = Svc.Templates(ClientId); }
+        <p class="emx-note" style="margin-top:6px">Un modèle place son titre et son message dans le formulaire : il reste à choisir les écrans et à déclencher. Les quatre modèles de base sont là pour démarrer, modifiez-les à votre façon.</p>
+        <table class="emx-tbl">
+            @foreach (var t in tpls)
+            {
+                var m = t;
+                <tr><td><b>@m.Name</b><small>@m.Title · @m.Message</small></td>
+                    <td style="text-align:right;white-space:nowrap"><button type="button" class="btn ghost sm" @onclick="() => EditTemplate(m)">Modifier</button> <button type="button" class="btn ghost sm" @onclick="() => DeleteTemplate(m.Id)">Supprimer</button></td></tr>
+            }
+        </table>
+        @if (tpls.Count == 0) { <p class="emx-note">Aucun modèle pour l'instant.</p> }
+        @if (editTpl == null)
+        {
+            <button type="button" class="btn" style="margin-top:12px" disabled="@(tpls.Count >= Emergencies.MaxTemplates)" @onclick="() => EditTemplate(null)">+ Nouveau modèle</button>
+        }
+        else
+        {
+            <div class="emx-sec">@(editTpl == Guid.Empty ? "Nouveau modèle" : "Modifier le modèle")</div>
+            <div class="emx-f" style="margin-top:6px"><label for="tp-name">Nom <small>le bouton du formulaire</small><span class="cnt">@tplName.Length/@Emergencies.MaxTemplateName</span></label><input id="tp-name" type="text" maxlength="@Emergencies.MaxTemplateName" @bind="tplName" @bind:event="oninput" /></div>
+            <div class="emx-f"><label for="tp-title">Titre <span class="cnt">@tplTitle.Length/@Emergencies.MaxTitle</span></label><input id="tp-title" type="text" maxlength="@Emergencies.MaxTitle" @bind="tplTitle" @bind:event="oninput" /></div>
+            <div class="emx-f"><label for="tp-msg">Message <span class="cnt">@tplMessage.Length/@Emergencies.MaxMessage</span></label><textarea id="tp-msg" maxlength="@Emergencies.MaxMessage" @bind="tplMessage" @bind:event="oninput"></textarea></div>
+            @if (tplError.Length > 0) { <div class="emx-err">@tplError</div> }
+            <div style="display:flex;gap:8px;margin-top:10px"><button type="button" class="btn" @onclick="SaveTemplate">Enregistrer</button><button type="button" class="btn ghost" @onclick="() => editTpl = null">Annuler</button></div>
+        }
     </div>;
 
     private RenderFragment ReportBody => @<div>

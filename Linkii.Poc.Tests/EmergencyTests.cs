@@ -52,6 +52,31 @@ public class EmergencyTests : IDisposable
         new(title, message, "all", new(), test, "backoffice", "Camille Rochat", null, null);
 
     [Fact]
+    public void Templates_start_with_four_editable_defaults()
+    {
+        var list = svc.Templates(f.Tenant.Id);
+        Assert.Equal(new[] { "Évacuation", "Confinement", "Alerte météo", "Exercice" }, list.Select(t => t.Name));
+        Assert.Equal(list.Select(t => t.Id), svc.Templates(f.Tenant.Id).Select(t => t.Id));   // enregistrés dès la première lecture : les identifiants restent les mêmes
+
+        Assert.Null(svc.SaveTemplate(f.Tenant.Id, list[0].Id, "Évacuation B", "Évacuation B", "Sortez par la gauche."));
+        Assert.Equal("Évacuation B", svc.Templates(f.Tenant.Id)[0].Name);
+
+        svc.DeleteTemplate(f.Tenant.Id, list[1].Id);
+        Assert.Equal(3, svc.Templates(f.Tenant.Id).Count);
+    }
+
+    [Fact]
+    public void Templates_are_validated_and_capped()
+    {
+        Assert.NotNull(svc.SaveTemplate(f.Tenant.Id, null, "", "T", "M"));
+        Assert.NotNull(svc.SaveTemplate(f.Tenant.Id, null, "N", new string('x', Emergencies.MaxTitle + 1), "M"));
+        Assert.NotNull(svc.SaveTemplate(f.Tenant.Id, null, "N", "T", new string('x', Emergencies.MaxMessage + 1)));
+        for (var i = svc.Templates(f.Tenant.Id).Count; i < Emergencies.MaxTemplates; i++) Assert.Null(svc.SaveTemplate(f.Tenant.Id, null, "M" + i, "T", "M"));
+        Assert.NotNull(svc.SaveTemplate(f.Tenant.Id, null, "Un de trop", "T", "M"));
+        Assert.Equal(Emergencies.MaxTemplates, svc.Templates(f.Tenant.Id).Count);
+    }
+
+    [Fact]
     public async Task An_emergency_goes_to_every_paired_screen_and_is_announced()
     {
         var a = Add("Hall"); var b = Add("Cafétéria"); var unpaired = Add("Pas appairé", paired: false);
