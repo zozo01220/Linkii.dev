@@ -3033,7 +3033,7 @@ Rendu et réglage de l'appui maintenu sur un vrai téléphone et au clavier ; or
 
 - **Correction (1er novembre, même jour)** : la barre de progression ne se remplissait pas (transition CSS non fiable) ; elle est maintenant tracée image par image par `hold-confirm.js` (vérifié dans le navigateur : 46 % à 0,7 s, remise à zéro au relâchement, déclenchement à 1,5 s). `pointerleave` ne coupe plus l'appui quand le doigt passe sur le texte du bouton.
 
-## 162. Approbation des publications (1er novembre 2026) : d'après `maquettes/approbation-publications.html` ; plan Pro ; 22 tests de plus ; vérifié dans le navigateur (dépôt, refus, notification)
+## 162. Approbation des publications (1er novembre 2026) : d'après `maquettes/approbation-publications.html` ; plan Pro ; 22 tests de plus ; vérifié dans le navigateur (dépôt, refus, notification) ; **commité et poussé le 1er novembre (bb761b7)**
 
 ### Décisions (validées avec l'utilisateur)
 - **Par membre** : dans sa fiche, un utilisateur est « soumis à approbation » ou « approbateur », **jamais les deux** (pas d'auto-approbation ; `MemberRights.Clean` impose l'exclusion). Les administrateurs approuvent tout et ne sont jamais soumis.
