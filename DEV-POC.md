@@ -3166,3 +3166,10 @@ Menu de la carte sur mobile et dans l'app Android ; Partager et Ranger depuis la
 - **Retiré de la fenêtre** : onglets Accueil / Tuiles, logo glissable, paramètres avancés des tuiles, tiroir de tuile, « grand texte » (les tailles se règlent par élément). Champs `KioskConfig.Title`, `Tiles`… gardés pour la migration, plus utilisés.
 - **À vérifier** : fenêtre de la borne (aperçu, 2 zones, enregistrer/publier), publication sur un vrai player (pages, sous-pages, Retour, QR), « hauteur de fauteuil » (la page est comprimée dans le bas), stats par tuile (`tile` = identifiant de l'élément).
 - **Compléments du 3 nov. (suite)** : pages **défilables** (`KioskPage.Len` de 1 à 6 écrans, « Fond et longueur » dans l'éditeur, repères orange, défilement au doigt dans `kiosk.js` `dragScroll` qui projette le geste sur l'axe vertical de la scène, pivotée ou en miroir) ; **miroir horizontal / vertical** dans les réglages de la borne ; **données des compositions** ouvertes par une tuile (`PlayerFeed.DataItems` : `/api/data` retrouve aussi les contenus des tuiles) ; aperçu « Inactivité » en 2 zones corrigé.
+
+## 169. Player Raspberry Pi OS 64 bits (3 novembre 2026) : coquille `Linkii.RaspberryPlayer` ;
+
+- **Projet** `Linkii.RaspberryPlayer` (.NET 8, arm64, `linkivi-pi`) : coquille autour de Chromium en kiosque, comme Windows/Android. Superviseur avec relance (plantage, page figée, redémarrage du back-office), protocole de débogage (port local 9222) pour injecter `window.LinkiiNative` : `deviceInfo`, `restart`, `config`, `capture` (capture de la page, `?plain=true`).
+- **Serveur** : `/api/player/device` accepte le type `raspberrypi` ; logo Raspberry dans `DeviceLogo`.
+- **Paquet** : `build-package.ps1` → `artifacts/linkivi-pi-0.1.0.tar.gz` ; `install.sh` (Chromium, démarrage `~/.config/autostart`, session automatique, pas de veille d'écran).
+- **Pas encore** : veille matérielle, luminosité, menu technicien, téléchargement depuis le back-office, choix dans « Connecter un écran ». Jamais essayé sur un vrai Pi.
