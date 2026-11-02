@@ -118,6 +118,11 @@
                                 <div class="wg-tx-b">@body</div>
                             }
                         }
+                        else if (wid.AppId == "rss-widget")
+                        {
+                            @* bandeau défilant : même rendu que sur l'écran (apps.js « rss-widget »), titres d'exemple *@
+                            <div class="wg-tk"><span class="wg-tk-run" style="animation-duration:@(RssSeconds(wid))s">Titre de l'actualité 1<span class="wg-tk-sep">•</span>Titre de l'actualité 2<span class="wg-tk-sep">•</span>Titre de l'actualité 3<span class="wg-tk-sep">•</span>Titre de l'actualité 4</span></div>
+                        }
                         else if (wid.AppId == "qrcode")
                         {
                             @* même tracé que sur l'écran (calculé par QrCodes) *@
@@ -593,6 +598,11 @@
     // Texte libre : largeur, couleurs et alignement choisis (couleurs vérifiées : on les écrit dans un style).
     private static string TextStyle(ScreenWidget w)
     {
+        if (w.AppId == "rss-widget")
+        {
+            var rw = int.TryParse(w.Settings.GetValueOrDefault("width"), out var rv) ? Math.Clamp(rv, 10, 100) : 100;
+            return $"width:{rw}%;overflow:hidden;padding:.5em .8em;";
+        }
         if (w.AppId == "qrcode") return "background:#fff;color:#0B1F3A;border-color:transparent;padding:.9em;";
         if (w.AppId is "quote" or "countdown")
         {
@@ -609,6 +619,9 @@
 
     private static int ScrollSeconds(ScreenWidget w) =>
         (int)Math.Round(Math.Max(8, (w.Settings.GetValueOrDefault("body")?.Length ?? 20) * 0.22) * (w.Settings.GetValueOrDefault("scrollSpeed") switch { "slow" => 1.6, "fast" => 0.6, _ => 1.0 }));
+
+    private static int RssSeconds(ScreenWidget w) =>
+        (int)Math.Round(24 * (w.Settings.GetValueOrDefault("scrollSpeed") switch { "slow" => 1.6, "fast" => 0.6, _ => 1.0 }));
 
     private static string ClockText(ScreenWidget w)
     {
@@ -657,7 +670,7 @@
     private void Add(AppManifest a, double? x, double? y)
     {
         var n = widgets.Count;
-        var w = new ScreenWidget { AppId = a.Id, Settings = AppCatalog.WithDefaults(a, null), X = x ?? (a.Id == "clock" ? 72 : 4), Y = y ?? (a.Id == "text" ? 80 : 4 + n * 6 % 60), Scale = 1 };
+        var w = new ScreenWidget { AppId = a.Id, Settings = AppCatalog.WithDefaults(a, null), X = x ?? (a.Id == "clock" ? 72 : a.Id == "rss-widget" ? 0 : 4), Y = y ?? (a.Id == "text" ? 80 : a.Id == "rss-widget" ? 92 : 4 + n * 6 % 60), Scale = 1 };
         widgets.Add(w);
         selected = w.Id;
         errors.Clear();
