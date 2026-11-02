@@ -30,7 +30,7 @@ public record Badge(int Count, int New, int Offline)
 /// </summary>
 public class MenuBadges(JsonStore root, TenantStore store, TenantContext ctx, PlaylistLibrary lists, MediaLibrary media, AppCatalog catalog) : IDisposable
 {
-    public const string Screens = "screens", Playlists = "playlists", MediaFam = "media", Compositions = "compositions", Members = "members", Integrations = "integrations", DataSources = "datasources", Settings = "settings", ApprovalsFam = "approvals";
+    public const string Screens = "screens", Playlists = "playlists", MediaFam = "media", Compositions = "compositions", Members = "members", Integrations = "integrations", DataSources = "datasources", InteractiveLists = "ilists", Settings = "settings", ApprovalsFam = "approvals";
 
     private static readonly TimeSpan Debounce = TimeSpan.FromMilliseconds(500), Tick = TimeSpan.FromSeconds(20), BumpFor = TimeSpan.FromMilliseconds(900);
 
@@ -158,6 +158,9 @@ public class MenuBadges(JsonStore root, TenantStore store, TenantContext ctx, Pl
 
         // Intégrations : seulement le nombre, celui de la page (sans les widgets d'écran ni les apps Agenda/Drive, qui n'ont pas de carte). Les apps de base s'ajoutent d'elles-mêmes à la première visite d'une organisation : ce ne sont pas des nouveautés.
         res[Integrations] = Eval(Integrations, store.Read(d => d.AppInstalls.Where(a => catalog.Find(a.AppId) is { ScreenWidget: false } app && app.Id is not ("agenda" or "drive")).Select(a => new Item(a.Id, null, null, false)).ToList()), false, track: false);
+
+        // Listes interactives (§168) : le nombre, comme les sources de données
+        res[InteractiveLists] = Eval(InteractiveLists, store.Read(d => d.InteractiveLists.Select(l => new Item(l.Id, null, null, false)).ToList()), false, track: false);
 
         // Sources de données (§139) : le nombre de sources connectées
         res[DataSources] = Eval(DataSources, store.Read(d => d.Tenant.DataConnections.Select(c => new Item(c.Id, null, null, false)).ToList()), false, track: false);
