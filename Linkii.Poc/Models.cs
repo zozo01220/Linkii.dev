@@ -9,6 +9,7 @@ public class Db
     public List<Screen> Screens { get; set; } = new();
     public List<MediaItem> Media { get; set; } = new();
     public List<Playlist> Playlists { get; set; } = new();
+    public List<InteractiveList> InteractiveLists { get; set; } = new();   // listes interactives des bornes (voir <see cref="InteractiveList"/>)
     public List<AccessLogEntry> AccessLog { get; set; } = new();
     public List<AppInstall> AppInstalls { get; set; } = new();   // apps du catalogue ajoutées par chaque client
     public List<PushDevice> PushDevices { get; set; } = new();   // appareils qui reçoivent les notifications (voir <see cref="PushService"/>)

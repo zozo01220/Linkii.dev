@@ -655,6 +655,7 @@ else if (wallEdit is { } wid)
     private List<Screen> screens = new();
     private List<Playlist> playlists = new();
     private List<MediaItem> media = new();
+    private List<InteractiveList> interactiveLists = new();   // listes interactives des bornes (aperçu des cartes)
     private Tenant tenant = new();
     private string code = "", name = "";
     private Guid? playlistId;
@@ -1210,22 +1211,19 @@ else if (wallEdit is { } wid)
         </div>
     };
 
-    /// <summary>Aperçu d'une borne : son accueil (fond, titre, tuiles du menu), pas sa liste de lecture d'inactivité.</summary>
+    /// <summary>Aperçu d'une borne : la page d'accueil de sa liste interactive, pas sa liste de lecture d'inactivité.</summary>
     private RenderFragment KioskPreview(Screen s) => __builder =>
     {
         var k = s.Kiosk!;
-        var shown = k.Tiles.Where(t => media.FirstOrDefault(m => m.Id == t.MediaId) is { } m && Kiosk.CanOpen(m)).ToList();
-        <span class="kp-ck @(s.Orientation == "portrait" ? "port" : "") @(k.Accessible ? "low" : "")" style="background:@k.Bg">
-            <b>@k.Title</b>
-            <span class="g">
-                @foreach (var t in shown)
-                {
-                    var img = t.ImageMediaId is { } iid ? media.FirstOrDefault(m => m.Id == iid) : null;
-                    <i style="background:@t.Color">@if (img != null) { <MediaThumb Media="img" All="media" /> }</i>
-                }
-                @if (shown.Count == 0) { <em>Aucune tuile</em> }
-            </span>
-        </span>
+        var list = interactiveLists.FirstOrDefault(l => l.Id == k.ListId);
+        if (list != null)
+        {
+            <span class="kp-ck il"><InteractiveListThumb List="list" Files="media" /></span>
+        }
+        else
+        {
+            <span class="kp-ck @(s.Orientation == "portrait" ? "port" : "")" style="background:#fff"><b>Aucune liste interactive</b></span>
+        }
     };
 
     // Même chose en vue liste : la rangée de consultation reprend le balisage des rangées habituelles (voir Card), pour que toutes les aires aient le même aspect.
@@ -2487,6 +2485,7 @@ else if (wallEdit is { } wid)
         synced = zones.Where(z => z.Sync).SelectMany(z => Helpers.SyncedScreens(screens.Where(s => ZoneOf(s)?.Id == z.Id))).ToHashSet();
         playlists = Store.Read(d => PlaylistOps.Choosable(d));   // listes que la personne voit, et celles déjà en place
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
+        interactiveLists = Store.Read(d => d.InteractiveLists.ToList());
         LoadGroups();
         treeData = TreeData();
         LoadFirstScreen();
@@ -2663,7 +2662,13 @@ else if (wallEdit is { } wid)
             s.Windowed = !full;
             s.Token = Guid.NewGuid().ToString("N");
             s.PairingCode = null;
-            if (kiosk) { s.Kiosk = KioskConfig.Starter(); s.KioskRevision = 1; }   // borne interactive : menu vide, à composer dans la page de la borne
+            if (kiosk)
+            {
+                s.Kiosk = KioskConfig.Starter(); s.KioskRevision = 1;   // borne interactive : liste interactive de départ (titre et message), à composer dans Listes interactives
+                var starter = InteractiveLists.Starter(InteractiveLists.Cap("Accueil — " + s.Name, 80), spec.Orientation);
+                d.InteractiveLists.Add(starter);
+                s.Kiosk.ListId = starter.Id;
+            }
             d.Tenant.FirstScreen = FirstScreen.Done;   // un écran relié : l'assistant du premier écran ne revient plus
             return s.Id;
         });

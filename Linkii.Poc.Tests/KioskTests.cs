@@ -58,6 +58,19 @@ public class KioskTests
         Assert.DoesNotContain("secret", json);
     }
 
+[Fact]
+    public void Data_of_a_content_opened_by_a_kiosk_tile_can_be_requested_by_the_screen()
+    {
+        var item = new PublishedItem { Id = Guid.NewGuid(), Type = "app", AppId = Compositions.AppId };
+        var page = new PublishedKioskPage { Id = Guid.NewGuid() };
+        page.Els.Add(new PublishedKioskEl { Id = Guid.NewGuid(), Action = new PublishedKioskAction { Type = "media", Item = item } });
+        var s = new Screen { PublishedKiosk = new PublishedKiosk { Pages = { page } } };
+        var db = new Db();
+        Assert.DoesNotContain(PlayerFeed.AllItems(db, s), i => i.Id == item.Id);   // la liste de lecture de l'écran ne les contient pas
+        Assert.Contains(PlayerFeed.DataItems(db, s), i => i.Id == item.Id);        // mais /api/data les retrouve
+    }
+
+
     [Fact]
     public void Stats_count_visits_tiles_and_how_visits_end()
     {

@@ -46,6 +46,10 @@ public static class PlayerFeed
         : db.Playlists.FirstOrDefault(p => p.Id == s.PlaylistId && p.ClientId == s.ClientId)?.Published ?? new())
         .Concat(s.PublishedLists.Values.SelectMany(l => l)).ToList();   // + listes du planning
 
+    /// <summary>Contenus dont l'écran peut demander les données (/api/data) : ceux de ses listes, plus ceux ouverts par les tuiles de sa borne interactive (compositions reliées à des jeux de données, météo, calendrier…).</summary>
+    public static List<PublishedItem> DataItems(Db db, Screen s) =>
+        AllItems(db, s).Concat(s.PublishedKiosk?.Pages.SelectMany(p => p.Els).Select(e => e.Action.Item).OfType<PublishedItem>() ?? Enumerable.Empty<PublishedItem>()).ToList();
+
     /// <summary>Configuration et contenus publiés d'un écran. whole : le simulateur montre tout le mur dont l'écran fait partie.
     /// device : l'appareil lui-même (pas le simulateur) reçoit aussi ses paramètres d'appareil.</summary>
     public static Dictionary<string, object?> ForScreen(Db db, Screen s, bool whole = false, bool device = false)

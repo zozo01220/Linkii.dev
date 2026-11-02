@@ -153,6 +153,7 @@ public class ClientDb
         ScreenFolders = new(root.ScreenFolders, clientId, area, null, me, area);
         CompositionTemplates = new(root.CompositionTemplates, clientId, null, null, me, area);
         Playlists = new(root.Playlists, clientId, null, null, me, area);
+        InteractiveLists = new(root.InteractiveLists, clientId);
         AppInstalls = new(root.AppInstalls, clientId);
         Areas = new(root.Areas, clientId);
     }
@@ -178,6 +179,8 @@ public class ClientDb
     /// <summary>« Mes modèles » de compositions (voir <see cref="CompositionTemplate"/>).</summary>
     public ScopedList<CompositionTemplate> CompositionTemplates { get; }
     public ScopedList<Playlist> Playlists { get; }
+    /// <summary>Listes interactives des bornes (voir <see cref="InteractiveList"/>) : communes à l'organisation.</summary>
+    public ScopedList<InteractiveList> InteractiveLists { get; }
     public ScopedList<AppInstall> AppInstalls { get; }
     /// <summary>Toutes les aires de l'organisation (pages réservées aux administrateurs).</summary>
     public ScopedList<Area> Areas { get; }

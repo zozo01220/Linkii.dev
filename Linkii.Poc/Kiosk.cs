@@ -28,6 +28,8 @@ public class KioskTile
 /// </summary>
 public class KioskConfig
 {
+    /// <summary>Liste interactive affichée par la borne (voir <see cref="InteractiveList"/>). Titre, message, logo, fond et tuiles ci-dessous sont l'ancien menu : gardés pour la migration, plus utilisés.</summary>
+    public Guid? ListId { get; set; }
     public string Title { get; set; } = "Bienvenue";
     public string Prompt { get; set; } = "Touchez une tuile pour commencer.";
     public string Bg { get; set; } = "#FFFFFF";
@@ -88,10 +90,21 @@ public class PublishedKiosk
 {
     public KioskConfig Config { get; set; } = new();
     public string? LogoUrl { get; set; }
-    public List<PublishedKioskTile> Tiles { get; set; } = new();
+    public List<PublishedKioskTile> Tiles { get; set; } = new();   // ancien menu : vide depuis les listes interactives
+    public List<PublishedKioskPage> Pages { get; set; } = new();   // pages de la liste interactive ; la première est l'accueil
 
     public object ForPlayer() => new
     {
+        pages = Pages.Select(p => new
+        {
+            id = p.Id, name = p.Name, bg = p.Bg, bgImage = p.BgImageUrl, len = p.Len,
+            els = p.Els.Select(e => new
+            {
+                id = e.Id, kind = e.Kind, x = e.X, y = e.Y, w = e.W, h = e.H, text = e.Text, sub = e.Sub, color = e.Color, image = e.ImageUrl, textColor = e.TextColor,
+                font = Kiosk.FontCss(e.Font), size = e.FontSize, bold = e.Bold, align = e.Align, valign = e.Valign, radius = e.Radius, from = e.ShowFrom, to = e.ShowTo,
+                action = new { type = e.Action.Type, page = e.Action.PageId, item = e.Action.Item?.ForPlayer() }
+            })
+        }),
         title = Config.Title, prompt = Config.Prompt, bg = Config.Bg, logo = LogoUrl,
         logoX = Config.LogoX is double lx && Config.LogoY != null ? Math.Clamp(lx, 0, 100) : (double?)null, logoY = Config.LogoY is double ly && Config.LogoX != null ? Math.Clamp(ly, 0, 100) : (double?)null,
         logoW = Config.LogoW is double lw && Config.LogoX != null && Config.LogoY != null ? Math.Clamp(lw, 3, 95) : (double?)null,

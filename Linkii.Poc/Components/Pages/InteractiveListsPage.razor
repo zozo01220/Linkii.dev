@@ -1,0 +1,155 @@
+@page "/interactive-lists"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:playlists")]
+@inject TenantStore Store
+@inject NavigationManager Nav
+@inject Toaster Toast
+
+@* Listes interactives (§168) : l'environnement tactile des bornes, créé une fois et assigné à une ou plusieurs bornes.
+   Un seul bouton crée une liste (en haut à droite) ; les cartes ouvrent l'éditeur. Maquette : maquettes/liste-interactive-editeur.html. *@
+<div class="lx-top">
+    <div class="lx-title">
+        <h1><span>Listes de lecture</span><span class="lx-cntpill" aria-label="@lists.Count liste(s) interactive(s)">@lists.Count</span></h1>
+        <p class="sub">Une liste interactive est l'écran tactile d'une borne : des pages, des tuiles, des textes et des images. Chaque tuile ouvre un contenu ou une autre page.</p>
+    </div>
+    <span class="grow"></span>
+    <div class="btns">
+        @if (canWrite)
+        {
+            <button type="button" class="btn" data-fab="Nouvelle liste interactive" @onclick="Create"><Ico Name="plus" Size="16" /> Nouvelle liste interactive</button>
+        }
+    </div>
+</div>
+
+<PlaylistsTabs Active="interactive" />
+
+@if (lists.Count == 0)
+{
+    <div class="empty">
+        <div class="big">Aucune liste interactive</div>
+        <p>Créez l'écran tactile de vos bornes : disposez des tuiles où vous voulez, choisissez les couleurs et les images, puis reliez chaque tuile à un contenu.</p>
+    </div>
+}
+else
+{
+    <div class="il-grid">
+        @foreach (var l in lists)
+        {
+            var list = l;
+            var users = UsedBy(list);
+            <div class="il-card" role="button" tabindex="0" @onclick="() => Open(list)" @onkeydown='e => { if (e.Key == "Enter") Open(list); }' title="Modifier « @list.Name »">
+                <div class="il-pv"><InteractiveListThumb List="list" Files="media" /></div>
+                <div class="il-meta">
+                    <div class="il-row">
+                        <b>@list.Name</b>
+                        @if (canWrite)
+                        {
+                            <button type="button" class="btn ghost sm icon" aria-label="Plus d'actions" title="Plus d'actions" aria-haspopup="menu" @onclick="() => menuFor = menuFor == list.Id ? null : list.Id" @onclick:stopPropagation="true"><Ico Name="dots-v" Size="16" /></button>
+                        }
+                    </div>
+                    <small>@Plural(list.Pages.Sum(p => p.Els.Count(e => e.Kind == "tile")), "tuile", "tuiles") · @Plural(list.Pages.Count, "page", "pages") · @(InteractiveLists.Portrait(list.Orientation) ? "Portrait" : "Paysage")</small>
+                    <small class="@(users.Count == 0 ? "il-off" : "")">@(users.Count == 0 ? "Non utilisée" : "Utilisée par " + string.Join(", ", users.Take(2).Select(u => u.Name)) + (users.Count > 2 ? $" et {users.Count - 2} autre(s)" : ""))</small>
+                </div>
+                @if (menuFor == list.Id)
+                {
+                    <div class="kebab-backdrop" @onclick="() => menuFor = null" @onclick:stopPropagation="true"></div>
+                    <div class="kebab-menu il-menu" role="menu" @onclick:stopPropagation="true">
+                        <button type="button" role="menuitem" @onclick="() => Duplicate(list)"><Ico Name="copy" Size="16" /><span>Dupliquer</span></button>
+                        <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = list; }"><Ico Name="trash" Size="16" /><span>Supprimer</span></button>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@if (deleting is { } del)
+{
+    var users = UsedBy(del);
+    <div class="modal-backdrop" @onclick="() => deleting = null"></div>
+    <div class="modal" role="alertdialog" aria-modal="true" style="max-width:460px">
+        <h3>Supprimer « @del.Name » ?</h3>
+        @if (users.Count > 0)
+        {
+            <p class="hint">Cette liste est affichée par @string.Join(", ", users.Select(u => "« " + u.Name + " »")). Choisissez-en une autre sur ces bornes avant de la supprimer.</p>
+            <div class="modal-actions"><button class="btn" @onclick="() => deleting = null">Compris</button></div>
+        }
+        else
+        {
+            <p class="hint">Les pages et leurs tuiles sont supprimées. Les contenus de la médiathèque ne le sont pas.</p>
+            <div class="modal-actions"><button class="btn ghost" @onclick="() => deleting = null">Annuler</button><button class="btn danger" @onclick="ConfirmDelete">Supprimer</button></div>
+        }
+    </div>
+}
+
+@code {
+    private List<InteractiveList> lists = new();
+    private List<MediaItem> media = new();
+    private List<Screen> kiosks = new();
+    private bool canWrite;
+    private Guid? menuFor;
+    private InteractiveList? deleting;
+
+    protected override void OnInitialized() => Load();
+
+    private void Load()
+    {
+        (lists, media, kiosks, canWrite) = Store.Read(d => (
+            d.InteractiveLists.OrderBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
+            d.Media.Where(m => m.Status == null && m.Type == "image" && m.FileName != null).ToList(),
+            d.AllScreens.Where(s => s.Kiosk?.ListId != null).ToList(),
+            d.Access.CanWrite(LevelPages.Playlists)));
+    }
+
+    private List<Screen> UsedBy(InteractiveList l) => InteractiveLists.UsedBy(kiosks, l.Id);
+    private static string Plural(int n, string one, string many) => $"{n} {(n > 1 ? many : one)}";
+
+    private void Create() => Nav.NavigateTo("/interactive/new?back=/interactive-lists");
+    private void Open(InteractiveList l) => Nav.NavigateTo($"/interactive/{l.Id}?back=/interactive-lists");
+
+    private void Duplicate(InteractiveList src)
+    {
+        menuFor = null;
+        try
+        {
+            Store.Write(d =>
+            {
+                if (d.InteractiveLists.Count >= InteractiveLists.MaxLists) throw new InvalidOperationException($"Au plus {InteractiveLists.MaxLists} listes interactives.");
+                var c = System.Text.Json.JsonSerializer.Deserialize<InteractiveList>(System.Text.Json.JsonSerializer.Serialize(src))!;
+                var map = c.Pages.ToDictionary(p => p.Id, _ => Guid.NewGuid());
+                foreach (var p in c.Pages)
+                {
+                    p.Id = map[p.Id];
+                    foreach (var e in p.Els)
+                    {
+                        e.Id = Guid.NewGuid();
+                        if (e.Action.PageId is { } pg && map.TryGetValue(pg, out var np)) e.Action.PageId = np;   // les tuiles de la copie mènent aux pages de la copie
+                        e.Action.Item.Id = Guid.NewGuid(); e.Action.Item.QrCode = null;   // un QR dupliqué aurait le même compteur : le code est recréé à l'enregistrement
+                    }
+                }
+                c.Id = Guid.NewGuid(); c.Name = InteractiveLists.Cap(src.Name + " (copie)", 80); c.Revision = 1; c.CreatedUtc = c.UpdatedUtc = DateTime.UtcNow;
+                d.InteractiveLists.Add(c);
+            });
+            Toast.Ok("Liste dupliquée.");
+        }
+        catch (Exception e) when (e is InvalidOperationException or UnauthorizedAccessException) { Toast.Error(e.Message); }
+        Load();
+    }
+
+    private void ConfirmDelete()
+    {
+        if (deleting is not { } l) return;
+        deleting = null;
+        try
+        {
+            var ok = Store.Write(d =>
+            {
+                if (InteractiveLists.UsedBy(d.AllScreens, l.Id).Count > 0) return false;
+                d.InteractiveLists.RemoveAll(x => x.Id == l.Id);
+                return true;
+            });
+            if (ok) Toast.Ok("Liste supprimée.");
+        }
+        catch (UnauthorizedAccessException e) { Toast.Error(e.Message); }
+        Load();
+    }
+}

@@ -1,0 +1,118 @@
+@page "/interactive/new"
+@page "/interactive/{Id:guid}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:playlists")]
+@implements IAsyncDisposable
+@using Microsoft.JSInterop
+@inject TenantStore Store
+@inject MediaLibrary Library
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+@* Éditeur de liste interactive (§168) : l'interface est en JS (wwwroot/ilist-editor.js, plein écran), le serveur garde la liste, range et contrôle le document.
+   « /interactive/new » : rien n'est créé tant qu'on n'a pas enregistré. *@
+<HeadContent><link rel="stylesheet" href="ilist-editor.css?v=1" /></HeadContent>
+
+@if (!ready)
+{
+    <div class="page-head"><div><h1>Liste interactive introuvable</h1><p class="sub">Elle a peut-être été supprimée.</p></div></div>
+    <a class="btn ghost" href="@Back">← Retour</a>
+}
+else
+{
+    <div @ref="root"></div>
+}
+
+@code {
+    [Parameter] public Guid? Id { get; set; }
+    [SupplyParameterFromQuery(Name = "back")] public string? BackParam { get; set; }
+    /// <summary>Orientation d'une nouvelle liste (celle de la borne qui la demande).</summary>
+    [SupplyParameterFromQuery(Name = "o")] public string? Orientation { get; set; }
+
+    private InteractiveList? list;
+    private bool ready, canWrite;
+    private Guid? createdId;
+    private ElementReference root;
+    private DotNetObjectReference<InteractiveEditor>? self;
+
+    private string Back => BackParam is { Length: > 1 } b && b.StartsWith('/') && !b.StartsWith("//") && !b.Contains('\\') ? b : "/interactive-lists";
+
+    protected override void OnParametersSet()
+    {
+        if (Id is { } id)
+        {
+            list = Store.Read(d => d.InteractiveLists.FirstOrDefault(l => l.Id == id));
+            ready = list != null;
+        }
+        else
+        {
+            list = InteractiveLists.Starter("", Orientation == "landscape" ? "landscape" : "portrait");
+            ready = true;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !ready || list == null) return;
+        canWrite = Store.Read(d => d.Access.CanWrite(LevelPages.Playlists));
+        self = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("LinkiiIListEditor.mount", root, new
+        {
+            id = Id?.ToString(),
+            name = list.Name,
+            doc = InteractiveLists.ToDoc(list),
+            images = Images(),
+            contents = Contents(),
+            growth = Store.Read(d => d.Tenant.IsGrowth)
+        }, self);
+    }
+
+    /// <summary>Enregistre le document (crée la liste au premier enregistrement) ; rend { error } ou { ok }.</summary>
+    [JSInvokable]
+    public object Save(string name, string doc)
+    {
+        try
+        {
+            return Store.Write(d =>
+            {
+                if (!d.Access.CanWrite(LevelPages.Playlists)) return (object)new { error = "Vous êtes en lecture seule : vous ne pouvez pas enregistrer de liste." };
+                var target = Id ?? createdId;
+                var l = target is { } g ? d.InteractiveLists.FirstOrDefault(x => x.Id == g) : null;
+                if (target != null && l == null) return new { error = "Cette liste a été supprimée." };
+                var isNew = l == null;
+                if (isNew)
+                {
+                    if (d.InteractiveLists.Count >= InteractiveLists.MaxLists) return new { error = $"Au plus {InteractiveLists.MaxLists} listes interactives." };
+                    l = new InteractiveList();
+                }
+                var err = InteractiveLists.Apply(l!, name, doc, mid => d.Media.FirstOrDefault(m => m.Id == mid && m.Status == null), d.Tenant.IsGrowth, Nav.BaseUri);
+                if (err != null) return new { error = err };
+                if (isNew) { d.InteractiveLists.Add(l!); createdId = l!.Id; }
+                else InteractiveLists.Touch(d.Root.Screens.Where(s => s.ClientId == d.ClientId), l!.Id);   // les bornes qui l'affichent ont des modifications à publier
+                return new { ok = true };
+            });
+        }
+        catch (Exception e) when (e is UnauthorizedAccessException or ReadOnlyLevelException) { return new { error = "Vous êtes en lecture seule : vous ne pouvez pas enregistrer de liste." }; }
+    }
+
+    private List<object> Images() => Library.PickableFiles()
+        .Where(m => m.Type == "image" && m.Status == null && m.FileName != null)
+        .OrderByDescending(m => m.AddedUtc)
+        .Select(m => (object)new { id = m.Id.ToString(), name = m.Name, url = "/media/" + m.FileName + "?w=640", w = m.Width, h = m.Height })
+        .ToList();
+
+    /// <summary>Contenus qu'une tuile peut ouvrir : prêts, ni image de fond de présentation, ni page de présentation.</summary>
+    private List<object> Contents() => Store.Read(d => d.Media.Where(m => Kiosk.CanOpen(m) && !Pres.IsPage(m))
+        .OrderBy(m => m.Name, StringComparer.CurrentCultureIgnoreCase)
+        .Select(m => (object)new { id = m.Id.ToString(), name = m.Name, cat = InteractiveCats.Of(m), thumb = m.Type == "image" && m.FileName != null ? "/media/" + m.FileName + "?w=160" : null }).ToList());
+
+    [JSInvokable]
+    public void Leave() => Nav.NavigateTo(Back);
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await JS.InvokeVoidAsync("LinkiiIListEditor.unmount"); }
+        catch (JSDisconnectedException) { }
+        catch (InvalidOperationException) { }
+        self?.Dispose();
+    }
+}

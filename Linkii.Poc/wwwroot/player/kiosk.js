@@ -8,6 +8,7 @@
   'use strict';
 
   var cfg = null, H = null, sig = '', root = null, touchEl = null, mainEl = null, homeEl = null, pageEl = null, backEl = null;
+  var curPage = null, stack = [], backLbl = null;
   var state = 'idle', timer = null, cleanup = null, visit = null, pageStart = 0, curTile = null, queue = [], flushT = null;
 
   function el(tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
@@ -68,7 +69,13 @@
     '#k-back:active{transform:translateX(-50%) scale(.96)}#k-back svg{width:1.1em;height:1.1em;flex:none}' +
     '#k-back .k-ring circle{fill:none;stroke-width:3.2}#k-back .k-ring .bg{stroke:rgba(255,255,255,.28)}#k-back .k-ring .fg{stroke:#E8710A;stroke-dasharray:56.5;stroke-dashoffset:0;transform:rotate(-90deg);transform-origin:center}' +
     '#k-back.run .k-ring .fg{animation:kring var(--ret,30s) linear forwards}@keyframes kring{to{stroke-dashoffset:56.5}}' +
-    '#k-main.paged #k-home{display:none}#k-main.paged #k-page{display:block}#k-main.paged #k-back{display:flex}' +
+    '#k-main.paged #k-home{display:none}#k-main.paged #k-page{display:block}#k-main.paged #k-back,#k-main.sub #k-back{display:flex}' +
+    '#k-home.pg{display:block;padding:0;overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;background-size:cover;background-position:center;background-attachment:local}' +
+    '#k-pgi{position:absolute;left:0;right:0;top:0;bottom:0}#k-pgi.low{top:38%}' +
+    '.k-el{position:absolute;box-sizing:border-box;margin:0}' +
+    '.k-el.k-text{display:flex;flex-direction:column;justify-content:center;line-height:1.15;white-space:pre-wrap;overflow:hidden;color:#fff}' +
+    '.k-el.k-img{object-fit:contain;pointer-events:none}' +
+    '.k-el.k-tile{padding:.7em .8em;font-size:inherit}.k-el.k-tile b{font-weight:500;line-height:1.15;font-size:1em}.k-el.k-tile small{font-size:.56em;margin-top:.3em}' +
     '#k-corner{position:absolute;left:0;top:0;width:9em;height:9em;z-index:40}' +
     '#k-pin{position:absolute;left:0;top:0;right:0;bottom:0;z-index:50;background:rgba(11,31,58,.86);display:none;place-items:center;color:#0B1F3A}' +
     '#k-pin.on{display:grid}' +
@@ -184,7 +191,9 @@
       root.addEventListener('touchmove', function (e) { if (e.touches && e.touches.length > 1) e.preventDefault(); }, { passive: false });
       root.addEventListener('wheel', function (e) { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
     }
-    backEl.addEventListener('click', function () { goHome('back'); });
+    backEl.addEventListener('click', function () {
+      if (state === 'home' && stack.length) { curPage = stack.pop(); drawHome(); setState('home'); } else goHome('back');
+    });
     setState('idle');
     if (H.preview) openHome(false);   // simulateur : on voit l'accueil, ce que voit le visiteur (la diffusion reprend après le délai sans toucher)
   }
@@ -195,7 +204,101 @@
   }
   function shown(t) { var d = today(); return !(t.from && t.from > d) && !(t.to && t.to < d); }
 
+  /* Défilement au doigt d'une page plus longue qu'un écran (téléphone, tablette, écran tactile) : le glissement vertical fait défiler, avec un peu d'élan ;
+     un glissement n'ouvre pas la tuile touchée en fin de geste. La souris et la molette défilent normalement (overflow). */
+  var dragged = false, momentum = null;
+  function dragScroll(sc) {
+    if (sc._ds) return; sc._ds = true;
+    var id = null, x0 = 0, y0 = 0, s0 = 0, moved = false, v = 0, lx = 0, ly = 0, lt = 0, ax = 0, ay = 1;
+    /* Le player met la scène à l'échelle, la pivote (téléphone tenu dans l'autre sens que le format : 90°) et peut la mettre en miroir.
+       L'axe « vers le bas de la page » vu de l'écran est l'image du vecteur (0, 1) par la transformation de la scène : un déplacement du doigt
+       se projette dessus, ce qui donne le défilement en pixels de la page. */
+    function axis() {
+      var m = null, t = H && H.stage ? getComputedStyle(H.stage).transform : 'none';
+      try { m = t && t !== 'none' ? new DOMMatrix(t) : null; } catch (e) { m = null; }
+      var c = m ? m.c : 0, d = m ? m.d : 1, n = c * c + d * d || 1;
+      ax = c / n; ay = d / n;
+    }
+    sc.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'mouse') return;
+      if (momentum) { cancelAnimationFrame(momentum); momentum = null; }
+      axis(); id = e.pointerId; x0 = lx = e.clientX; y0 = ly = e.clientY; s0 = sc.scrollTop; moved = false; v = 0; lt = e.timeStamp;
+    });
+    sc.addEventListener('pointermove', function (e) {
+      if (e.pointerId !== id) return;
+      var dx = e.clientX - x0, dy = e.clientY - y0;
+      if (!moved && Math.abs(dx) + Math.abs(dy) < 8) return;
+      moved = true; dragged = true;
+      sc.scrollTop = s0 - (dx * ax + dy * ay);
+      var dt = e.timeStamp - lt; if (dt > 0) v = 0.8 * v + 0.2 * (((lx - e.clientX) * ax + (ly - e.clientY) * ay) / dt); lx = e.clientX; ly = e.clientY; lt = e.timeStamp;
+    });
+    function end(e) {
+      if (e.pointerId !== id) return; id = null;
+      if (!moved) return;
+      setTimeout(function () { dragged = false; }, 350);
+      var last = performance.now();
+      (function step(now) {
+        var dt = now - last; last = now; sc.scrollTop += v * dt; v *= Math.pow(0.95, dt / 16);
+        if (Math.abs(v) > 0.02) momentum = requestAnimationFrame(step); else momentum = null;
+      })(last);
+    }
+    sc.addEventListener('pointerup', end); sc.addEventListener('pointercancel', end);
+    sc.addEventListener('click', function (e) { if (dragged) { e.stopPropagation(); e.preventDefault(); } }, true);   // fin d'un glissement : pas de toucher sur la tuile
+  }
+
+  function pages() { return (cfg && cfg.pages && cfg.pages.length) ? cfg.pages : null; }
+  function pageById(id) { var p = pages(); if (!p) return null; for (var i = 0; i < p.length; i++) if (p[i].id === id) return p[i]; return p[0]; }
+  function homeId() { var p = pages(); return p ? p[0].id : null; }
+
+  /* Page d'une liste interactive : éléments posés librement, en % de la page (1em = 1 % de la largeur ; la taille du texte est en % de la largeur) */
+  function drawPage() {
+    var pg = pageById(curPage); curPage = pg.id;
+    homeEl.className = 'pg'; homeEl.innerHTML = '';
+    homeEl.style.background = pg.bg || '#0B1F3A';
+    if (pg.bgImage) { homeEl.style.backgroundImage = 'url(' + pg.bgImage + ')'; }
+    var len = Math.max(1, Math.min(6, pg.len || 1));   // page plus longue qu'un écran : le visiteur la fait défiler vers le bas
+    var inner = el('div'); inner.id = 'k-pgi'; if (cfg.accessible && len === 1) inner.className = 'low'; homeEl.appendChild(inner);
+    if (len > 1) { inner.style.position = 'relative'; inner.style.top = 'auto'; inner.style.bottom = 'auto'; inner.style.height = (len * 100) + '%'; }
+    homeEl.scrollTop = 0;
+    homeEl.style.touchAction = len > 1 ? 'none' : '';   // le défilement au doigt est géré ici (dragScroll) : il ne dépend pas de la règle touch-action du player, qui bloque les gestes sur téléphone
+    homeEl.style.overscrollBehavior = len > 1 ? 'contain' : '';
+    if (len > 1) dragScroll(homeEl);
+    pg.els.filter(shown).forEach(function (e) {
+      var n;
+      if (e.kind === 'image') { n = el('img', 'k-el k-img'); n.src = e.image; n.alt = ''; }
+      else if (e.kind === 'text') { n = el('div', 'k-el k-text'); n.textContent = e.text; n.style.color = e.textColor; n.style.justifyContent = 'center'; }
+      else {
+        n = el('button', 'k-el k-tile' + (e.image ? ' shade' : '') + (e.valign === 'top' ? ' vt' : e.valign === 'middle' ? ' vm' : ''));
+        n.type = 'button'; n.style.backgroundColor = e.color || '#3B82C4';
+        if (e.image) n.style.backgroundImage = 'url(' + e.image + ')';
+        n.innerHTML = '<b>' + esc(e.text) + '</b>' + (e.sub ? '<small>' + esc(e.sub) + '</small>' : '');
+        n.style.color = e.textColor; n.style.justifyContent = ({ top: 'flex-start', middle: 'center', bottom: 'flex-end' })[e.valign] || 'flex-end';
+        if (e.action && e.action.type !== 'none') n.addEventListener('click', function () { act(e); }); else n.style.cursor = 'default';
+      }
+      n.style.left = e.x + '%'; n.style.top = (e.y / len) + '%'; n.style.width = e.w + '%'; n.style.height = (e.h / len) + '%';
+      n.style.fontSize = e.size + 'em'; if (e.font) n.style.fontFamily = e.font;
+      n.style.textAlign = e.align || 'left'; if (e.kind === 'text') n.style.alignItems = ({ center: 'center', right: 'flex-end' })[e.align] || 'flex-start';
+      if (e.kind !== 'image') n.style.fontWeight = e.bold ? 700 : 500;
+      if (e.kind === 'tile') n.style.borderRadius = (e.radius || 0) + 'em';
+      inner.appendChild(n);
+    });
+    mainEl.style.background = pg.bg || '#0B1F3A';
+  }
+
+  /* Ce qu'un élément fait au toucher */
+  function act(e) {
+    var a = e.action || {};
+    if (a.type === 'media' && a.item) return openTile({ id: e.id, title: e.text, item: a.item });
+    if (a.type === 'page') { stack.push(curPage); curPage = a.page; }
+    else if (a.type === 'home') { stack = []; curPage = homeId(); }
+    else if (a.type === 'back') { curPage = stack.length ? stack.pop() : homeId(); }
+    else return;
+    drawHome(); setState('home');
+  }
+
   function drawHome() {
+    if (pages()) return drawPage();
+    homeEl.className = '';
     var tiles = (cfg.tiles || []).filter(shown);
     var ts = cfg.tileStyle || {};   // aspect commun des tuiles (paramètres avancés de la fenêtre de la borne)
     var cols = ts.cols > 0 ? ts.cols : tiles.length <= 1 ? 1 : (H.portrait() ? 2 : (tiles.length <= 4 ? 2 : 3));
@@ -246,7 +349,10 @@
     document.body.classList.toggle('k-open', s !== 'idle');
     touchEl.style.display = s === 'idle' ? 'block' : 'none';
     mainEl.style.display = s === 'idle' ? 'none' : 'block';
-    mainEl.className = s === 'page' ? 'paged' : '';
+    var sub = s === 'home' && stack.length > 0;
+    mainEl.className = s === 'page' ? 'paged' : sub ? 'sub' : '';
+    var lb = backEl && backEl.querySelector('span');
+    if (lb) lb.textContent = (s === 'page' && (stack.length || curPage !== homeId())) || sub ? 'Retour' : 'Accueil';
     if (H.native) H.native('kioskState', s);
     arm();
   }
@@ -277,6 +383,7 @@
 
   function openHome(fresh) {
     if (fresh && !visit) visit = Date.now();
+    if (fresh) { stack = []; curPage = homeId(); }
     drawHome();
     setState('home');
   }
@@ -284,6 +391,7 @@
   function goHome(how) {
     if (curTile) { stopPage(); curTile = null; }
     if (how === 'auto' || how === 'back') pendingHow = how;
+    if (how === 'auto') { stack = []; curPage = homeId(); }   // délai écoulé : retour à l'accueil de la liste ; « Retour » revient à la page d'où l'on vient
     drawHome();
     setState('home');
   }
@@ -292,6 +400,7 @@
   function goIdle() {
     if (curTile) { stopPage(); curTile = null; }
     endVisit(pendingHow || 'auto'); pendingHow = null;
+    stack = []; curPage = homeId();
     if (cfg.wipe && H.native) H.native('kioskWipe', '');
     setState('idle');
     if (H.visitEnd) H.visitEnd();   // retour à la diffusion après une visite
@@ -340,6 +449,10 @@
   /* Fichiers des tuiles, à précharger comme ceux des listes (menu utilisable hors ligne). */
   function items(k) {
     var l = [];
+    ((k && k.pages) || []).forEach(function (p) {
+      if (p.bgImage) l.push({ url: p.bgImage });
+      p.els.forEach(function (e) { if (e.image) l.push({ url: e.image }); if (e.action && e.action.item) l.push(e.action.item); });
+    });
     ((k && k.tiles) || []).forEach(function (t) { if (t.item) l.push(t.item); if (t.image) l.push({ url: t.image }); });
     if (k && k.logo) l.push({ url: k.logo });
     return l;

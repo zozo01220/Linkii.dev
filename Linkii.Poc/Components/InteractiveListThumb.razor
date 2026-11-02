@@ -1,0 +1,43 @@
+@* Aperçu d'une page de liste interactive : mêmes positions (en % de la page) et même habillage que sur la borne ; le texte suit la largeur (cqw = 1 % de la largeur de l'aperçu). *@
+@if (Pg != null)
+{
+    <div class="il-th @(InteractiveLists.Portrait(List!.Orientation) ? "p" : "l")" style="@Back(Pg)" role="img" aria-label="@Label">
+        @foreach (var e in Pg.Els)
+        {
+            var im = e.ImageId is { } iid ? Files.FirstOrDefault(m => m.Id == iid) : null;
+            <i class="il-e @e.Kind @(e.Kind == "tile" && im != null ? "shade" : "")" style="@Pos(e, im)">
+                @if (e.Kind == "text") { <span>@e.Text</span> }
+                else if (e.Kind == "tile") { <b>@e.Text</b>@if (!string.IsNullOrEmpty(e.Sub)) { <small>@e.Sub</small> } }
+            </i>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public InteractiveList? List { get; set; }
+    [Parameter] public IEnumerable<MediaItem> Files { get; set; } = Array.Empty<MediaItem>();
+    /// <summary>Page montrée (0 = l'accueil).</summary>
+    [Parameter] public int Index { get; set; }
+    [Parameter] public string Label { get; set; } = "Aperçu de la liste interactive";
+
+    private KioskPage? Pg => List?.Pages.ElementAtOrDefault(Index) ?? List?.Pages.FirstOrDefault();
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+    private static string F(double d) => d.ToString("0.##", Inv);
+
+    private string Back(KioskPage p)
+    {
+        var bg = Files.FirstOrDefault(m => m.Id == p.BgImageId);
+        return $"background-color:{p.Bg};" + (bg?.FileName != null ? $"background-image:url(/media/{bg.FileName}?w=320);" : "");
+    }
+
+    private string Pos(KioskEl e, MediaItem? im)
+    {
+        var s = $"left:{F(e.X)}%;top:{F(e.Y)}%;width:{F(e.W)}%;height:{F(e.H)}%;font-size:{F(e.FontSize)}cqw;color:{e.TextColor};font-weight:{(e.Bold ? 700 : 500)};text-align:{e.Align};";
+        if (Kiosk.FontCss(e.Font) is { Length: > 0 } ff) s += $"font-family:{ff};";
+        if (e.Kind == "tile")
+            s += $"background-color:{e.Color};border-radius:{F(e.Radius)}cqw;justify-content:{(e.Valign == "top" ? "flex-start" : e.Valign == "middle" ? "center" : "flex-end")};padding:{F(e.FontSize * 0.7)}cqw {F(e.FontSize * 0.8)}cqw;";
+        else if (e.Kind == "text") s += $"align-items:{(e.Align == "center" ? "center" : e.Align == "right" ? "flex-end" : "flex-start")};";
+        if (im?.FileName != null) s += $"background-image:url(/media/{im.FileName}?w=320);";
+        return s;
+    }
+}

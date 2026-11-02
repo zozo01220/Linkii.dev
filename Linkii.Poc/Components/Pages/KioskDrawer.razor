@@ -1,7 +1,5 @@
 @using System.Text.Json
 @using Microsoft.JSInterop
-@implements IDisposable
-@inject IJSRuntime JS
 @using Plan = Linkii.Poc.Planning
 @inject TenantStore Store
 @inject Notifier Notifier
@@ -9,10 +7,10 @@
 @inject NavigationManager Nav
 @inject Toaster Toast
 
-@* Borne interactive : même fenêtre que l'éditeur d'un écran de diffusion (aperçu à gauche, onglets à droite, icônes Planning et Paramètres en tiroirs, pied Annuler / Enregistrer / Enregistrer et publier).
+@* Borne interactive (§168) : la fenêtre ne garde que l'essentiel. La liste interactive (ce que le visiteur touche) se crée et se règle dans Listes de lecture › Listes interactives ;
+   ici on choisit celle de la borne, ce que l'écran diffuse quand personne ne touche (une liste de lecture, ou deux : haut/bas en portrait, gauche/droite en paysage) et les réglages.
    Tout se règle sur une copie de travail : rien n'est enregistré avant « Enregistrer », rien ne part sur la borne avant la publication (même workflow que les écrans).
-   Sans toucher, la borne diffuse comme un écran ordinaire : sa liste de lecture et ses widgets se règlent avec l'éditeur de l'écran, son planning dans le menu Planning.
-   Les statistiques de la borne sont dans Statistiques › Bornes. Maquette validée : maquettes/borne-config-epuree.html. *@
+   Les statistiques de la borne sont dans Statistiques › Bornes. Maquette validée : maquettes/liste-interactive-editeur.html. *@
 
 @if (s?.Kiosk is null || k is null)
 {
@@ -25,7 +23,10 @@
 else
 {
     var portrait = orientation == "portrait";
-    var idlePl = playlists.FirstOrDefault(p => p.Id == draftPlaylist);
+    var list = CurrentList;
+    var zoneDef = ScreenLayouts.Find(layout);
+    var split = zoneDef.Sizes.Length > 1;
+    var tileCount = list?.Pages.Sum(p => p.Els.Count(e => e.Kind == "tile")) ?? 0;
     <div class="modal-backdrop" @onclick="Close"></div>
     <div class="modal app-modal wg-modal kp-win" role="dialog" aria-modal="true" aria-labelledby="kp-title">
         <div class="modal-head">
@@ -47,7 +48,7 @@ else
                         <span class="badge @(Offline ? "hors-ligne" : "en-ligne")">@(Offline ? "Hors ligne" : "En ligne")</span>
                         <span class="kiosk-tag badge neutre"><Ico Name="hand" Size="12" /> Borne · @(portrait ? "Portrait" : "Paysage")</span>
                         @if (dirty) { <span class="badge mise-a-jour" title="Modifications pas encore enregistrées">Non enregistré</span> }
-                        else if (Pending) { <span class="badge mise-a-jour" title="Menu, réglages, liste de lecture ou widgets modifiés depuis la dernière publication">À publier</span> }
+                        else if (Pending) { <span class="badge mise-a-jour" title="Liste interactive, réglages, liste de lecture ou widgets modifiés depuis la dernière publication">À publier</span> }
                     </div>
                 }
                 <small>Modifier la borne</small>
@@ -62,36 +63,28 @@ else
                 <div class="wg-stage @(portrait ? "portrait" : "")">
                     @if (view == "idle")
                     {
-                        @* ce que voit le visiteur au repos : le premier contenu plein écran de la liste de lecture, avec le bouton « Touchez l'écran » dans le style choisi *@
-                        var idleThumb = idlePl?.Draft.Where(i => i.Placement == "full").Select(i => Media(i.MediaId)).FirstOrDefault(m => m != null);
-                        <div class="kp-ks idle kp-idle">
-                            @if (idleThumb != null) { <span class="wg-zone-img">@if (idleThumb.AppId == Compositions.AppId) { <CompositionThumb Item="idleThumb" Files="media" Contain="true" /> } else { <MediaThumb Media="idleThumb" All="media" /> }</span> }
-                            <span class="kp-idle-tag">Diffusion en inactivité · @(idlePl?.Name ?? "aucune liste de lecture")</span>
+                        @* ce que voit le visiteur au repos : le premier contenu plein écran de chaque zone, avec le bouton « Touchez l'écran » dans le style choisi *@
+                        <div class="kp-ks idle kp-idle kd-zones @(portrait ? "col" : "row")">
+                            @for (var z = 0; z < zoneDef.Sizes.Length; z++)
+                            {
+                                var zi = z;
+                                var pl = playlists.FirstOrDefault(p => p.Id == ZoneList(zi));
+                                var thumb = pl?.Draft.Where(i => i.Placement == "full").Select(i => Media(i.MediaId)).FirstOrDefault(m => m != null);
+                                <div class="kd-zone" style="flex:@F(zoneDef.Sizes[zi])">
+                                    @if (thumb != null) { <span class="wg-zone-img">@if (thumb.AppId == Compositions.AppId) { <CompositionThumb Item="thumb" Files="media" Contain="true" /> } else { <MediaThumb Media="thumb" All="media" /> }</span> }
+                                    <span class="kp-idle-tag">@(split ? $"Zone {zi + 1} · " : "Diffusion en inactivité · ")@(pl?.Name ?? "aucune liste de lecture")</span>
+                                </div>
+                            }
                             <div class="@("kt kt-" + Kiosk.TouchKey(k.TouchStyle) + (portrait ? "" : " kt-land"))">@TouchMarkup(Kiosk.TouchKey(k.TouchStyle))</div>
                         </div>
                     }
+                    else if (list != null)
+                    {
+                        <div class="kd-home"><InteractiveListThumb List="list" Files="media" /></div>
+                    }
                     else
                     {
-                        @* même mise en page que le player (kiosk.js « drawHome ») : 1 unité = 1 % de la largeur de l'écran ; tuiles en couleur ou image de fond, titre en bas à gauche *@
-                        var shownTiles = k.Tiles.Where(t => Media(t.MediaId) is { } mm && Kiosk.CanOpen(mm)).ToList();
-                        var cols = ColsFor(shownTiles.Count, portrait);
-                        <div class="kp-ks" style="background:@k.Bg" @ref="homeStage">
-                            <div class="kp-logo">@if (k.LogoMediaId is { } lg && Media(lg) is { } lm) { <span class="kp-logo-box @(k.LogoX != null && k.LogoY != null ? "free" : "") @(k.LogoW != null ? "sized" : "")" style="@LogoPos()" title="Glissez pour placer le logo, tirez un coin pour le redimensionner"><MediaThumb Media="lm" All="media" /><i class="kp-rz nw" data-rz="nw"></i><i class="kp-rz ne" data-rz="ne"></i><i class="kp-rz sw" data-rz="sw"></i><i class="kp-rz se" data-rz="se"></i></span> }</div>
-                            <div class="kp-lg" style="@FontStyle(k.TitleFont, k.TitleColor)">@k.Title</div>
-                            <div class="kp-mp" style="@FontStyle(k.PromptFont, k.PromptColor)">@k.Prompt</div>
-                            <div class="kp-g @(k.Accessible ? "low" : "") @(k.BigText ? "big" : "")" style="@GridStyle(cols)" @ref="tileGrid">
-                                @foreach (var t in shownTiles)
-                                {
-                                    var tt = t;
-                                    var img = tt.ImageMediaId is { } iid ? Media(iid) : null;
-                                    <i @key="tt.Id" data-tile="@tt.Id" class="@(selTile == tt.Id ? "sel" : "") @(img != null ? "shade" : "") @ShadeClass" style="@TileStyle(tt)" @onclick="() => PickTile(tt)">
-                                        <span class="kp-tact"><button type="button" @onclick="() => EditTile(tt)" @onclick:stopPropagation="true"><Ico Name="edit" Size="14" /> Modifier</button><button type="button" class="del" @onclick="() => delTile = tt" @onclick:stopPropagation="true"><Ico Name="trash" Size="14" /> Supprimer</button></span>
-                                        @if (img != null) { <span class="kp-bgi"><MediaThumb Media="img" All="media" /></span> }
-                                        <b style="@(TitleStyle(tt) + ColorStyle(tt.TitleColor))">@tt.Title</b>@if (!string.IsNullOrWhiteSpace(tt.Subtitle)) { <small style="@(SubStyle(tt) + ColorStyle(tt.SubColor))">@tt.Subtitle</small> }
-                                    </i>
-                                }
-                            </div>
-                        </div>
+                        <div class="kd-none"><Ico Name="hand" Size="28" /><b>Aucune liste interactive</b><small>Choisissez-en une à droite.</small></div>
                     }
                     <button type="button" class="wg-sim" title="Voir ce que voit le visiteur (dernière publication)" @onclick="() => sim = true" @onclick:stopPropagation="true"><Ico Name="play" Size="14" /> Simuler</button>
                 </div>
@@ -106,104 +99,64 @@ else
                 </div>
             </div>
 
-            <div class="wg-side">
-                <div class="se-utabs" role="tablist">
-                    @foreach (var t in Tabs)
+            <div class="wg-side kd-side">
+                <section class="kd-sec">
+                    <h4>Liste interactive</h4>
+                    <p class="kp-h">Ce que le visiteur touche : pages, tuiles, textes et images.</p>
+                    @if (list != null)
                     {
-                        var key = t.Key;
-                        <button type="button" role="tab" aria-selected="@(tab == key ? "true" : "false")" class="@(tab == key ? "on" : "")" @onclick="() => SetTab(key)"><Ico Name="@t.Icon" Size="18" /> @t.Label@if (key == "tiles") { <small>@k.Tiles.Count</small> }</button>
-                    }
-                </div>
-
-                @if (tab == "home")
-                {
-                    <div class="dw">
-                        <div class="dw-field"><label for="k-title">Titre</label><input id="k-title" maxlength="60" value="@k.Title" @oninput='e => Edit(c => c.Title = Clean(e.Value, 60, ""))' @onchange='e => Edit(c => c.Title = Clean(e.Value, 60, "Bienvenue"))' />
-                            @FontRow("k-tf", k.TitleFont, k.TitleColor, Kiosk.TitleDefault, v => Edit(c => c.TitleFont = v), v => Edit(c => c.TitleColor = v))</div>
-                        <div class="dw-field"><label for="k-prompt">Message d'invite</label><input id="k-prompt" maxlength="90" value="@k.Prompt" @oninput='e => Edit(c => c.Prompt = Clean(e.Value, 90, ""))' />
-                            @FontRow("k-pf", k.PromptFont, k.PromptColor, Kiosk.PromptDefault, v => Edit(c => c.PromptFont = v), v => Edit(c => c.PromptColor = v))</div>
-                        @{ var curLogo = k.LogoMediaId is { } lid ? Media(lid) : null; }
-                        <div class="dw-field"><label>Logo</label>
-                            <div class="kl-cur">
-                                <span class="kl-pv">@if (curLogo != null) { <MediaThumb Media="curLogo" All="media" /> } else { <small>Aucun</small> }</span>
-                                <span class="kl-nm"><b>@(curLogo?.Name ?? "Aucun logo")</b><small>@(curLogo == null ? "Choisissez une image de la médiathèque" : "Glissez-le dans l'aperçu pour le placer, tirez un coin pour le redimensionner")</small></span>
-                                <button type="button" class="btn ghost sm" aria-expanded="@logoPick" @onclick="() => logoPick = !logoPick">@(curLogo == null ? "Choisir" : "Changer")</button>
-                                @if (curLogo != null) { <button type="button" class="btn ghost sm icon" title="Retirer le logo" aria-label="Retirer le logo" @onclick="() => SelectLogo(null)"><Ico Name="x" Size="15" /></button> }
-                            </div>
-                            @if (logoPick)
-                            {
-                                <div class="kl-pop"><div class="kl-grid">
-                                    <button type="button" class="kl-card none @(k.LogoMediaId == null ? "on" : "")" @onclick="() => SelectLogo(null)"><span class="t"><small>Aucun</small></span><span class="n">Aucun logo</span></button>
-                                    @foreach (var im in Images)
-                                    {
-                                        var li = im;
-                                        <button type="button" class="kl-card @(li.Id == k.LogoMediaId ? "on" : "")" title="@li.Name" @onclick="() => SelectLogo(li.Id)"><span class="t"><MediaThumb Media="li" All="media" /></span><span class="n">@li.Name</span></button>
-                                    }
-                                    @if (Images.Count == 0) { <span class="kp-h" style="grid-column:1/-1">Aucune image dans la médiathèque. Ajoutez-en une dans Contenus.</span> }
-                                </div></div>
-                            }
-                            @if (curLogo != null && k.LogoX != null) { <button type="button" class="btn ghost sm" style="margin-top:6px" @onclick="() => Edit(c => { c.LogoX = c.LogoY = c.LogoW = null; })">Remettre le logo à sa place et à sa taille d'origine</button> }
+                        <div class="kd-list">
+                            <span class="kd-lth"><InteractiveListThumb List="list" Files="media" /></span>
+                            <span class="kd-lnm"><b>@list.Name</b><small>@(tileCount > 1 ? $"{tileCount} tuiles" : $"{tileCount} tuile") · @(list.Pages.Count > 1 ? $"{list.Pages.Count} pages" : "1 page") · @(InteractiveLists.Portrait(list.Orientation) ? "Portrait" : "Paysage")</small></span>
+                            <button type="button" class="btn ghost sm" @onclick="() => OpenEditor(list.Id)"><Ico Name="edit" Size="14" /> Modifier</button>
                         </div>
-                        <div class="dw-field"><label>Fond</label>
-                            <div class="kp-cols">@foreach (var c in Backgrounds) { var cc = c; <i class="@(string.Equals(k.Bg, cc, StringComparison.OrdinalIgnoreCase) ? "on" : "")" style="background:@cc" title="@cc" @onclick="() => Edit(x => x.Bg = cc)"></i> }</div></div>
-                        <div class="dw-field"><label for="k-ret">Retour à l'accueil après</label>
-                            <select id="k-ret" @onchange="e => Edit(c => c.ReturnSec = Kiosk.Clamp(Num(e.Value, 30), Kiosk.MinReturn, Kiosk.MaxReturn))">
-                                @foreach (var v in new[] { 15, 30, 60, 120 }) { <option value="@v" selected="@(k.ReturnSec == v)">@v secondes sans toucher</option> }
-                            </select></div>
-                        <div class="dw-field"><label for="k-idle">Retour à la diffusion après</label>
-                            <select id="k-idle" @onchange="e => Edit(c => c.IdleSec = Kiosk.Clamp(Num(e.Value, 120), Kiosk.MinIdle, Kiosk.MaxIdle))">
-                                @foreach (var v in new[] { 60, 120, 300, 600 }) { <option value="@v" selected="@(k.IdleSec == v)">@(v / 60) minute@(v > 60 ? "s" : "") à l'accueil</option> }
-                            </select></div>
-                        <p class="hint">La grille s'adapte au format et au nombre de tuiles. Une tuile dont le contenu a disparu n'apparaît pas sur la borne.</p>
-                    </div>
-                }
-                else if (tab == "tiles")
-                {
-                    <div class="kp-ch">
-                        <div><span class="kp-h">Chaque tuile ouvre un contenu de votre médiathèque. Glissez les tuiles de l'aperçu pour changer l'ordre ; survolez-en une pour la modifier ou la supprimer.</span></div>
-                        <button type="button" class="btn kp-ora sm" @onclick="NewTile"><Ico Name="plus" Size="14" /> Ajouter une tuile</button>
-                    </div>
-                    @if (k.Tiles.Count == 0)
-                    {
-                        <div class="kp-empty"><b>Aucune tuile</b><p>Ajoutez des tuiles pour que les visiteurs puissent choisir : un plan, une brochure, un site, une présentation…</p></div>
+                        @if (list.Orientation != orientation)
+                        {
+                            <div class="kd-warn" role="alert">Cette liste est en @(InteractiveLists.Portrait(list.Orientation) ? "portrait" : "paysage") et la borne en @(portrait ? "portrait" : "paysage") : elle serait déformée. Changez le format de la borne (icône des paramètres) ou choisissez une autre liste.</div>
+                        }
                     }
-                    <section class="kp-advbox">
-                        <h4 class="kp-advh"><Ico Name="sliders" Size="16" /> Paramètres avancés <small>pour toutes les tuiles</small></h4>
-                        <p class="kp-h" style="margin-bottom:12px">Ces réglages s'appliquent d'un coup à toutes les tuiles. La taille choisie dans une tuile s'y ajoute.</p>
-                        <p class="kp-lbl">Texte</p>
-                        <div class="kp-f"><label>Police et couleur</label>
-                            @FontRow("k-tlf", k.TileFont, k.TileColor, "#FFFFFF", v => Edit(c => c.TileFont = v), v => Edit(c => c.TileColor = v))</div>
-                        @Seg("Taille", Kiosk.TextSizes.Select(x => (x.Scale.ToString(Inv), x.Label)), Kiosk.CleanScale(k.TileScale).ToString(Inv), v => Edit(c => c.TileScale = double.Parse(v, Inv)))
-                        @Seg("Graisse", Opts(Kiosk.Weights), Kiosk.Pick(Kiosk.Weights, k.TileWeight, "normal").Key, v => Edit(c => c.TileWeight = v))
-                        @Seg("Alignement", Opts(Kiosk.Aligns), Kiosk.Pick(Kiosk.Aligns, k.TileAlign, "left").Key, v => Edit(c => c.TileAlign = v))
-                        @Seg("Position du texte", Opts(Kiosk.Valigns), Kiosk.Pick(Kiosk.Valigns, k.TileValign, "bottom").Key, v => Edit(c => c.TileValign = v))
-                        <p class="kp-lbl" style="margin-top:16px">Tuiles</p>
-                        @Seg("Colonnes", new[] { ("0", "Auto"), ("1", "1"), ("2", "2"), ("3", "3"), ("4", "4") }, Math.Clamp(k.TileCols, 0, 4).ToString(), v => Edit(c => c.TileCols = int.Parse(v)))
-                        @Seg("Forme", Opts(Kiosk.Radii), Kiosk.Pick(Kiosk.Radii, k.TileRadius, "round").Key, v => Edit(c => c.TileRadius = v))
-                        @Seg("Espacement", Opts(Kiosk.Gaps), Kiosk.Pick(Kiosk.Gaps, k.TileGap, "normal").Key, v => Edit(c => c.TileGap = v))
-                        @Seg("Voile sous le texte (tuiles à image)", Opts(Kiosk.Shades), Kiosk.Pick(Kiosk.Shades, k.TileShade, "normal").Key, v => Edit(c => c.TileShade = v))
-                        <button type="button" class="btn ghost sm" @onclick="ResetTileStyle">Rétablir les valeurs par défaut</button>
-                    </section>
-                }
-                else
-                {
-                    <p class="hint" style="margin-top:0">Quand personne ne touche l'écran, la borne diffuse comme un écran ordinaire. Le premier toucher interrompt la diffusion et affiche l'accueil.</p>
-                    <div class="dw">
-                        <div class="dw-field"><label for="k-pl">Liste de lecture en inactivité</label>
-                            <select id="k-pl" @onchange="AssignList">
-                                <option value="" selected="@(draftPlaylist == null)">— Aucune liste de lecture —</option>
-                                @foreach (var p in playlists) { <option value="@p.Id" selected="@(p.Id == draftPlaylist)">@p.Name</option> }
-                            </select></div>
-                        <div class="dw-field"><label for="k-touch">Bouton « Touchez l'écran pour commencer »</label>
-                            <select id="k-touch" @onchange="e => Edit(c => c.TouchStyle = Kiosk.TouchKey(e.Value?.ToString()))">
-                                @foreach (var ts in Kiosk.TouchStyles) { <option value="@ts.Key" selected="@(Kiosk.TouchKey(k.TouchStyle) == ts.Key)">@ts.Label</option> }
-                            </select>
-                            <span class="kp-h">Il s'affiche au centre de l'écran tant que personne n'a touché la borne. L'aperçu de gauche montre le style choisi.</span></div>
-                        <div class="dw-field"><label>Widgets</label><div class="kp-plain">@(s.Widgets.Count == 0 ? "Aucun widget" : string.Join(", ", s.Widgets.Select(w => WidgetName(w.AppId))))</div></div>
-                        <div><button type="button" class="btn" @onclick="() => editor = true"><Ico Name="edit" Size="15" /> Modifier la liste et les widgets</button></div>
-                        <p class="hint">Même éditeur que pour un écran de diffusion. La liste et les widgets partent sur la borne à la publication.</p>
+                    <div class="dw-field">
+                        <label for="k-list">@(list == null ? "Choisir la liste de la borne" : "Changer de liste")</label>
+                        <select id="k-list" @onchange="AssignInteractive">
+                            <option value="" selected="@(k.ListId == null)">— Aucune liste interactive —</option>
+                            @foreach (var l in Compatible) { <option value="@l.Id" selected="@(l.Id == k.ListId)">@l.Name@(l.Orientation != orientation ? " (" + (InteractiveLists.Portrait(l.Orientation) ? "portrait" : "paysage") + ")" : "")</option> }
+                        </select>
                     </div>
-                }
+                    <div><button type="button" class="btn ghost sm" @onclick="OpenCreate"><Ico Name="plus" Size="14" /> Créer une liste interactive</button></div>
+                </section>
+
+                <section class="kd-sec">
+                    <h4>Quand personne ne touche</h4>
+                    <p class="kp-h">L'écran diffuse ces listes de lecture. Le premier toucher interrompt la diffusion et ouvre la liste interactive.</p>
+                    <div class="kp-seg" role="group" aria-label="Découpage de l'écran">
+                        <button type="button" class="@(!split ? "on" : "")" @onclick="() => SetSplit(false)">Plein écran</button>
+                        <button type="button" class="@(split ? "on" : "")" disabled="@(!CanSplit)" title="@(CanSplit ? "" : "Ce format d'écran n'est pas découpé")" @onclick="() => SetSplit(true)">2 zones</button>
+                    </div>
+                    <div class="kd-zonesrow">
+                        <div class="kd-scr @(portrait ? "p" : "l") @(split ? "two" : "")" aria-hidden="true">
+                            @for (var z = 0; z < zoneDef.Sizes.Length; z++) { <div style="flex:@F(zoneDef.Sizes[z])">@(split ? "Zone " + (z + 1) : "Plein écran")</div> }
+                        </div>
+                        <div class="kd-zsel">
+                            @for (var z = 0; z < zoneDef.Sizes.Length; z++)
+                            {
+                                var zi = z;
+                                <div class="dw-field">
+                                    <label for="@("k-z" + zi)">@(split ? ZoneName(zi, portrait) : "Liste de lecture")</label>
+                                    <select id="@("k-z" + zi)" @onchange="e => SetZoneList(zi, e)">
+                                        <option value="" selected="@(ZoneList(zi) == null)">— Aucune liste de lecture —</option>
+                                        @foreach (var p in playlists) { <option value="@p.Id" selected="@(p.Id == ZoneList(zi))">@p.Name</option> }
+                                    </select>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </section>
+
+                <section class="kd-sec">
+                    <button type="button" class="kd-fold" @onclick="() => parOpen = true">
+                        <span><b>Réglages</b><small>Retours automatiques, accessibilité, bouton « Touchez l'écran », veille, verrouillage</small></span><Ico Name="sliders" Size="18" />
+                    </button>
+                </section>
             </div>
         </div>
 
@@ -212,13 +165,13 @@ else
             {
                 @if (needsApproval)
                 {
-                    <span class="confirm-line" role="alert">Demander l'approbation ? Un approbateur décide avant que la borne n'affiche son menu de @k.Tiles.Count tuile@(k.Tiles.Count > 1 ? "s" : "") ; d'ici là elle garde sa version.</span>
+                    <span class="confirm-line" role="alert">Demander l'approbation ? Un approbateur décide avant que la borne n'affiche « @(list?.Name ?? "sa liste interactive") » ; d'ici là elle garde sa version.</span>
                     <button class="btn ghost" @onclick="() => confirmPublish = false">Retour</button>
                     <button class="btn" disabled="@saving" @onclick="() => SaveAll(true)"><Ico Name="shield" Size="16" /> Envoyer pour approbation</button>
                 }
                 else
                 {
-                    <span class="confirm-line" role="alert">Publier maintenant ? La borne affichera aussitôt son menu de @k.Tiles.Count tuile@(k.Tiles.Count > 1 ? "s" : "") et « @(idlePl?.Name ?? "aucune liste de lecture") » en inactivité.</span>
+                    <span class="confirm-line" role="alert">Publier maintenant ? La borne affichera aussitôt « @(list?.Name ?? "aucune liste interactive") » et, en inactivité, @(split ? "ses deux zones de diffusion" : "« " + (playlists.FirstOrDefault(p => p.Id == ZoneList(0))?.Name ?? "aucune liste de lecture") + " »").</span>
                     <button class="btn ghost" @onclick="() => confirmPublish = false">Retour</button>
                     <button class="btn" disabled="@saving" @onclick="() => SaveAll(true)"><Ico Name="upload" Size="16" /> Confirmer la publication</button>
                 }
@@ -239,7 +192,7 @@ else
             <div class="kp-dh"><h2 id="kp-plan-t">Planning de la borne</h2><button type="button" class="modal-x" aria-label="Fermer" @onclick="() => planOpen = false"><Ico Name="x" Size="20" /></button></div>
             <div class="kp-db">
                 <p class="kp-h" style="margin-bottom:12px">Le planning ne se règle pas ici : il se gère dans le menu Planning, pour un écran, une borne, une zone ou une aire. Un visiteur qui touche l'écran passe toujours avant le planning ; à son départ, le créneau en cours reprend.</p>
-                @if (SlotRows.Count == 0) { <div class="kp-empty"><b>Aucun planning</b><p>La borne diffuse sa liste de lecture en permanence.</p></div> }
+                @if (SlotRows.Count == 0) { <div class="kp-empty"><b>Aucun planning</b><p>La borne diffuse ses listes de lecture en permanence.</p></div> }
                 else
                 {
                     <div class="kp-pl">
@@ -258,7 +211,7 @@ else
     {
         <div class="kp-veil over" @onclick="() => parOpen = false"></div>
         <div class="kp-drawer over" role="dialog" aria-modal="true" aria-labelledby="kp-par-t">
-            <div class="kp-dh"><h2 id="kp-par-t">Paramètres de la borne</h2><button type="button" class="modal-x" aria-label="Fermer" @onclick="() => parOpen = false"><Ico Name="x" Size="20" /></button></div>
+            <div class="kp-dh"><h2 id="kp-par-t">Réglages de la borne</h2><button type="button" class="modal-x" aria-label="Fermer" @onclick="() => parOpen = false"><Ico Name="x" Size="20" /></button></div>
             <div class="kp-db">
                 <p class="kp-lbl">Format</p>
                 <div class="kp-seg" role="group" aria-label="Orientation">
@@ -271,9 +224,27 @@ else
                     </select>
                     <span class="kp-h">@(s.DetectedW is > 0 ? $"Détectée : {Math.Max(s.DetectedW ?? 0, s.DetectedH ?? 0)} × {Math.Min(s.DetectedW ?? 0, s.DetectedH ?? 0)}." : "Détectée à la première connexion.") Le format s'applique dès l'enregistrement.</span></div>
 
+                <p class="kp-lbl" style="margin-top:18px">Miroir de l'affichage</p>
+                @Switch("Miroir horizontal", "Inverse la gauche et la droite.", mirrorH, v => { mirrorH = v; dirty = true; })
+                @Switch("Miroir vertical", "Inverse le haut et le bas ; les deux ensemble : écran fixé à l'envers. S'applique dès l'enregistrement.", mirrorV, v => { mirrorV = v; dirty = true; })
+
+                <p class="kp-lbl" style="margin-top:18px">Retours automatiques</p>
+                <div class="kp-f"><label for="k-ret">Retour à l'accueil après</label>
+                    <select id="k-ret" @onchange="e => Edit(c => c.ReturnSec = Kiosk.Clamp(Num(e.Value, 30), Kiosk.MinReturn, Kiosk.MaxReturn))">
+                        @foreach (var v in new[] { 15, 30, 60, 120 }) { <option value="@v" selected="@(k.ReturnSec == v)">@v secondes sans toucher</option> }
+                    </select></div>
+                <div class="kp-f"><label for="k-idle">Retour à la diffusion après</label>
+                    <select id="k-idle" @onchange="e => Edit(c => c.IdleSec = Kiosk.Clamp(Num(e.Value, 120), Kiosk.MinIdle, Kiosk.MaxIdle))">
+                        @foreach (var v in new[] { 60, 120, 300, 600 }) { <option value="@v" selected="@(k.IdleSec == v)">@(v / 60) minute@(v > 60 ? "s" : "") à l'accueil</option> }
+                    </select></div>
+                <div class="kp-f"><label for="k-touch">Bouton « Touchez l'écran pour commencer »</label>
+                    <select id="k-touch" @onchange="e => Edit(c => c.TouchStyle = Kiosk.TouchKey(e.Value?.ToString()))">
+                        @foreach (var ts in Kiosk.TouchStyles) { <option value="@ts.Key" selected="@(Kiosk.TouchKey(k.TouchStyle) == ts.Key)">@ts.Label</option> }
+                    </select>
+                    <span class="kp-h">Il s'affiche au centre de l'écran tant que personne n'a touché la borne (aperçu « Inactivité »).</span></div>
+
                 <p class="kp-lbl" style="margin-top:18px">Accessibilité</p>
-                @Switch("Tuiles à hauteur de fauteuil", "Les tuiles et le bouton Retour se placent dans la moitié basse de l'écran.", k.Accessible, v => Edit(c => c.Accessible = v))
-                @Switch("Grand texte", "Titres et sous-titres des tuiles agrandis.", k.BigText, v => Edit(c => c.BigText = v))
+                @Switch("Tuiles à hauteur de fauteuil", "La liste interactive et le bouton Retour se placent dans la moitié basse de l'écran.", k.Accessible, v => Edit(c => c.Accessible = v))
 
                 <p class="kp-lbl" style="margin-top:18px">Session du visiteur</p>
                 @Switch("Tout remettre à zéro", "Documents en page 1, vidéos arrêtées ; historique et cookies des sites effacés sur l'appareil.", k.Wipe, v => Edit(c => c.Wipe = v))
@@ -296,89 +267,13 @@ else
                 @Switch("Un toucher réveille la borne pendant la veille", "", k.WakeOnTouch, v => Edit(c => c.WakeOnTouch = v))
                 @Switch("Démarrer avec Windows", "La borne s'ouvre seule à l'allumage du PC.", autoStart, v => { autoStart = v; dirty = true; })
                 <span class="kp-h">La mise en veille et la luminosité se règlent dans les paramètres de l'écran (éditeur de l'écran).</span>
+                <div style="margin-top:8px"><button type="button" class="btn ghost sm" @onclick="() => editor = true"><Ico Name="edit" Size="14" /> Widgets et réglages de l'écran…</button></div>
 
                 <p class="kp-lbl" style="margin-top:18px">Mode d'affichage</p>
-                <span class="kp-h" style="margin-bottom:8px">Repasser l'écran en diffusion simple. Le menu de la borne est conservé, mais n'est plus affiché.</span>
+                <span class="kp-h" style="margin-bottom:8px">Repasser l'écran en diffusion simple. La liste interactive est conservée, mais n'est plus affichée.</span>
                 <button type="button" class="btn danger" @onclick="() => confirmOff = true">Repasser en écran de diffusion</button>
             </div>
             <div class="kp-df"><span class="kp-h" style="margin-right:auto">Les réglages se valident avec « Enregistrer ».</span><button type="button" class="btn" @onclick="() => parOpen = false">Fermer</button></div>
-        </div>
-    }
-
-    @if (editTile is { } et)
-    {
-        <div class="kp-veil over" @onclick="() => editTile = null"></div>
-        <div class="kp-drawer over" role="dialog" aria-modal="true" aria-labelledby="kp-dt">
-            <div class="kp-dh"><h2 id="kp-dt">@(newTile ? "Ajouter une tuile" : "Modifier la tuile")</h2><button type="button" class="modal-x" aria-label="Fermer" @onclick="() => editTile = null"><Ico Name="x" Size="20" /></button></div>
-            <div class="kp-db">
-                <p class="kp-lbl">1 · Ce que la tuile ouvre</p>
-                <div class="kp-cats">
-                    @foreach (var c in Cats)
-                    {
-                        var ck = c.Key;
-                        <button type="button" class="@(cat == ck ? "on" : "")" @onclick="() => cat = ck">@c.Label <small>@Pickable.Count(m => Cat(m) == ck)</small></button>
-                    }
-                </div>
-                @if (Pickable.Count(m => Cat(m) == cat) == 0) { <div class="kp-empty"><b>Rien dans cette catégorie</b><p>Ajoutez un contenu dans la médiathèque (menu Contenus), puis revenez ici.</p></div> }
-                <div class="kp-pick">
-                    @foreach (var m in Pickable.Where(m => Cat(m) == cat))
-                    {
-                        var mm = m;
-                        <button type="button" class="kp-pk @(et.MediaId == mm.Id ? "on" : "")" @onclick="() => PickMedia(mm)">
-                            <span class="t"><MediaThumb Media="mm" All="media" /></span><span class="n">@mm.Name</span>
-                        </button>
-                    }
-                </div>
-                <p class="kp-lbl">2 · Titre et sous-titre</p>
-                <div class="kp-f"><input maxlength="60" placeholder="Titre de la tuile" aria-label="Titre de la tuile" @bind="et.Title" @bind:event="oninput" /></div>
-                <div class="kp-f"><input maxlength="80" placeholder="Sous-titre (facultatif)" aria-label="Sous-titre" @bind="et.Subtitle" @bind:event="oninput" /></div>
-                <p class="kp-lbl">Taille du texte de la tuile</p>
-                <div class="kp-seg kp-size" role="group" aria-label="Taille du texte">
-                    @foreach (var sz in Kiosk.TextSizes) { var sv = sz.Scale; <button type="button" class="@(Math.Abs(et.TextScale - sv) < 0.01 ? "on" : "")" @onclick="() => et.TextScale = sv">@sz.Label</button> }
-                </div>
-                <p class="kp-lbl">Couleur du texte</p>
-                <div class="kp-row">
-                    <div class="kp-f"><label>Titre</label>@TileColorPick("Couleur du titre", et.TitleColor, v => et.TitleColor = v)</div>
-                    <div class="kp-f"><label>Sous-titre</label>@TileColorPick("Couleur du sous-titre", et.SubColor, v => et.SubColor = v)</div>
-                </div>
-                <p class="kp-lbl" style="margin-top:14px">3 · Couleur ou image de fond</p>
-                <div class="kp-cols">@foreach (var c in Kiosk.Colors) { var cc = c; <i class="@(et.Color == cc ? "on" : "")" style="background:@cc" @onclick="() => et.Color = cc"></i> }</div>
-                <div class="kp-f">
-                    <select aria-label="Image de fond" @onchange="e => et.ImageMediaId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null">
-                        <option value="" selected="@(et.ImageMediaId == null)">— Couleur unie —</option>
-                        @foreach (var im in Images) { <option value="@im.Id" selected="@(im.Id == et.ImageMediaId)">@im.Name</option> }
-                    </select></div>
-                @if (tenant.IsGrowth)
-                {
-                    <p class="kp-lbl">4 · Sur la page ouverte</p>
-                    @Switch("QR code « Emporter sur mon téléphone »", "Le visiteur repart avec un lien. Les scans sont comptés dans les statistiques de scans.", et.Item.QrOn, v => et.Item.QrOn = v)
-                    @if (et.Item.QrOn)
-                    {
-                        <div class="kp-f"><input placeholder="https://… (adresse que le visiteur ouvrira)" aria-label="Adresse du QR code" @bind="et.Item.QrUrl" @bind:event="oninput" /></div>
-                        <div class="kp-f"><input maxlength="60" placeholder="Texte sous le QR code (facultatif)" aria-label="Texte sous le QR code" @bind="et.Item.QrLabel" @bind:event="oninput" /></div>
-                    }
-                }
-                <details class="kp-adv">
-                    <summary>Options avancées</summary>
-                    <div class="kp-row">
-                        <div class="kp-f"><label>Afficher du</label><input type="date" value="@et.ShowFrom" @onchange="e => et.ShowFrom = e.Value?.ToString()" /></div>
-                        <div class="kp-f"><label>au (inclus)</label><input type="date" value="@et.ShowTo" @onchange="e => et.ShowTo = e.Value?.ToString()" /></div>
-                    </div>
-                    <span class="kp-h">Hors de ces dates, la tuile n'est pas affichée.</span>
-                </details>
-                @if (tileError != null) { <div class="err">@tileError</div> }
-            </div>
-            <div class="kp-df"><button type="button" class="btn ghost" @onclick="() => editTile = null">Annuler</button><button type="button" class="btn kp-ora" @onclick="SaveTile">@(newTile ? "Ajouter la tuile" : "Valider")</button></div>
-        </div>
-    }
-
-    @if (delTile is { } dt)
-    {
-        <div class="modal-backdrop over" @onclick="() => delTile = null"></div>
-        <div class="modal kp-confirm" role="alertdialog" aria-modal="true">
-            <h3>Supprimer la tuile « @dt.Title » ?</h3>
-            <p class="hint">La tuile disparaît du menu de la borne. Le contenu de la médiathèque n'est pas supprimé. Elle ne sera retirée de la borne qu'après « Enregistrer et publier ».</p>
-            <div class="modal-actions"><button class="btn ghost" @onclick="() => delTile = null">Annuler</button><button class="btn danger" @onclick="ConfirmRemove">Supprimer</button></div>
         </div>
     }
 
@@ -387,7 +282,7 @@ else
         <div class="modal-backdrop over" @onclick="() => confirmOff = false"></div>
         <div class="modal kp-confirm" role="alertdialog" aria-modal="true">
             <h3>Repasser « @name » en écran de diffusion ?</h3>
-            <p class="hint">La borne ne réagit plus au toucher et diffuse sa liste de lecture. Le menu est conservé. Cette action s'applique et se publie aussitôt ; les autres modifications non enregistrées sont abandonnées.</p>
+            <p class="hint">La borne ne réagit plus au toucher et diffuse sa liste de lecture. La liste interactive est conservée. Cette action s'applique et se publie aussitôt ; les autres modifications non enregistrées sont abandonnées.</p>
             <div class="modal-actions"><button class="btn ghost" @onclick="() => confirmOff = false">Annuler</button><button class="btn" @onclick="TurnOff">Repasser en diffusion</button></div>
         </div>
     }
@@ -409,32 +304,22 @@ else
     private Tenant tenant = new();
     private List<Playlist> playlists = new();
     private List<MediaItem> media = new();
+    private List<InteractiveList> lists = new();
 
     // copie de travail : rien n'est écrit avant « Enregistrer »
     private KioskConfig? k;
-    private string name = "", orientation = "landscape", resolution = "auto";
-    private bool autoStart;
-    private Guid? draftPlaylist;
+    private string name = "", orientation = "landscape", resolution = "auto", layout = ScreenLayouts.Full;
+    private bool autoStart, mirrorH, mirrorV;
+    private List<Guid?> zonePl = new();
     private Guid? loadedFor;
     private bool dirty;
 
-    private string tab = "home", view = "home";
+    private string view = "home";
     private double zoom = 1;
-    private Guid? selTile;
-    private bool saving, confirmPublish, editor, sim, confirmOff, newTile, planOpen, parOpen;
+    private bool saving, confirmPublish, editor, sim, confirmOff, planOpen, parOpen;
     private bool needsApproval;   // la personne est soumise à approbation : « publier » dépose une demande (voir Approvals)
     private bool headRename;
     private string headValue = "";
-    private KioskTile? editTile, delTile;
-    private ElementReference tileGrid, homeStage;
-    private bool logoPick;
-    private DotNetObjectReference<KioskDrawer>? self;
-    private string? tileError;
-    private string cat = "pdf";
-
-    private static readonly (string Key, string Label, string Icon)[] Tabs = { ("home", "Accueil", "grid"), ("tiles", "Tuiles", "menu"), ("idle", "Inactivité", "play") };
-    private static readonly (string Key, string Label)[] Cats = { ("media", "Médias"), ("pdf", "PDF"), ("pres", "Présentations"), ("compo", "Compositions"), ("web", "Pages web") };
-    private static readonly string[] Backgrounds = { "#FFFFFF", "#F5F7FA", "#EBEDF0", "#0B1F3A", "#101822" };
 
     protected override void OnParametersSet() => Load();
 
@@ -446,13 +331,16 @@ else
         needsApproval = Store.Read(d => ApprovalOps.NeedsApproval(d.Root, d.Tenant, d.Access.UserId, new[] { Id }));
         playlists = Store.Read(d => PlaylistOps.Choosable(d));
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
+        lists = Store.Read(d => d.InteractiveLists.OrderBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
         if (loadedFor != Id) { ResetDraft(); loadedFor = Id; }
     }
 
     private void ResetDraft()
     {
         k = Copy(s!.Kiosk!);
-        name = s.Name; orientation = s.Orientation; resolution = s.Resolution; autoStart = s.AutoStart; draftPlaylist = s.PlaylistId;
+        name = s.Name; orientation = s.Orientation; resolution = s.Resolution; autoStart = s.AutoStart; (mirrorH, mirrorV) = (s.MirrorH, s.MirrorV);
+        layout = ScreenLayouts.Fit(ScreenLayouts.Find(s.Layout).Id, Spec);
+        zonePl = s.ZonePlaylists().Take(ScreenLayouts.Find(layout).Sizes.Length).ToList();
         dirty = false;
     }
 
@@ -462,59 +350,24 @@ else
     private bool Pending => s != null && Helpers.HasPending(s, playlists);
 
     private MediaItem? Media(Guid id) => media.FirstOrDefault(m => m.Id == id);
-    private List<MediaItem> Images => media.Where(m => m.Type == "image" && m.FileName != null && !Pres.IsPage(m)).OrderBy(m => m.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
-    private List<MediaItem> Pickable => media.Where(m => Kiosk.CanOpen(m) && !Pres.IsPage(m)).OrderBy(m => m.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
-    private MediaItem? ThumbOf(KioskTile t) => t.ImageMediaId is { } i && Media(i) is { } im ? im : Media(t.MediaId);
+    private InteractiveList? CurrentList => lists.FirstOrDefault(l => l.Id == k?.ListId);
+    private IEnumerable<InteractiveList> Compatible => lists.Where(l => l.Orientation == orientation || l.Id == k?.ListId);
+    // Une borne est un écran tactile de PC Windows : elle se découpe comme un écran de télévision, quel que soit le type enregistré (un « smartphone » ne se découpe pas).
+    private ScreenSpec Spec => new() { Type = "tv", Orientation = orientation, Resolution = resolution };
+    private bool CanSplit => ScreenLayouts.For(Spec).Any(d => d.Sizes.Length > 1);
 
-    private static string Cat(MediaItem m) =>
-        m.Type is "image" or "video" || m.AppId == "image" ? "media"
-        : m.AppId == "pdf" ? "pdf"
-        : m.AppId is "ms-powerpoint" or "google-slides" or "google-docs" or "canva" ? "pres"
-        : m.AppId == Compositions.AppId ? "compo"
-        : m.AppId == "webpage" ? "web" : "other";
-
-    private static string KindLabel(MediaItem m) => Cat(m) switch
-    {
-        "media" => m.Type == "video" ? "Vidéo" : "Image", "pdf" => "PDF", "pres" => "Présentation", "compo" => "Composition", "web" => "Page web", _ => "Contenu"
-    };
-
-    private static string Dates(KioskTile t) =>
-        (string.IsNullOrEmpty(t.ShowFrom) ? "" : "dès le " + FrDate(t.ShowFrom)) + (!string.IsNullOrEmpty(t.ShowFrom) && !string.IsNullOrEmpty(t.ShowTo) ? " " : "") + (string.IsNullOrEmpty(t.ShowTo) ? "" : "jusqu'au " + FrDate(t.ShowTo));
-    private static string FrDate(string iso) => DateOnly.TryParse(iso, out var d) ? d.ToString("d MMM", System.Globalization.CultureInfo.GetCultureInfo("fr-FR")) : iso;
-    private static string WidgetName(string appId) => appId switch { "clock" => "Horloge", "weather" => "Météo", "text" => "Texte", "qrcode" => "QR code", "countdown" => "Compte à rebours", _ => appId };
-    private static string Clean(object? v, int max, string fallback) { var t = (v?.ToString() ?? "").Trim(); if (t.Length > max) t = t[..max]; return t.Length == 0 ? fallback : t; }
+    private static string Fm(double d) => d.ToString("0.##", Inv);
+    private string F(double d) => Fm(d);
     private static int Num(object? v, int fallback) => int.TryParse(v?.ToString(), out var n) ? n : fallback;
+    private static string ZoneName(int z, bool portrait) => z == 0 ? (portrait ? "Zone du haut" : "Zone de gauche") : z == 1 ? (portrait ? "Zone du bas" : "Zone de droite") : "Zone " + (z + 1);
 
-    /// <summary>Un réglage du menu : sur la copie de travail seulement, enregistré avec « Enregistrer ».</summary>
+    /// <summary>Un réglage de la borne : sur la copie de travail seulement, enregistré avec « Enregistrer ».</summary>
     private void Edit(Action<KioskConfig> change) { if (k != null) { change(k); dirty = true; } }
 
     private RenderFragment Switch(string title, string text, bool on, Action<bool> set) => @<div class="kp-sw">
         <button type="button" class="switch @(on ? "on" : "")" role="switch" aria-checked="@(on ? "true" : "false")" aria-label="@title" @onclick="() => set(!on)"><span></span></button>
         <div><b>@title</b>@if (text.Length > 0) { <small>@text</small> }</div>
     </div>;
-
-    // Police et couleur d'un texte de l'accueil : « Par défaut » remet les valeurs du player.
-    private RenderFragment FontRow(string id, string? font, string? color, string defColor, Action<string?> setFont, Action<string?> setColor) => @<div class="kp-font">
-        <select id="@id" aria-label="Police" @onchange="e => setFont(string.IsNullOrEmpty(e.Value?.ToString()) ? null : e.Value!.ToString())">
-            @foreach (var f in Kiosk.Fonts) { <option value="@f.Key" selected="@((font ?? "") == f.Key)" style="font-family:@f.Css">@f.Label</option> }
-        </select>
-        <input type="color" aria-label="Couleur du texte" title="Couleur du texte" value="@(Kiosk.CleanHex(color) is { Length: > 0 } cc ? cc : defColor)" @oninput="e => setColor(Kiosk.CleanHex(e.Value?.ToString()) is { Length: > 0 } v ? v : null)" @onchange="e => setColor(Kiosk.CleanHex(e.Value?.ToString()) is { Length: > 0 } v ? v : null)" />
-        @if (!string.IsNullOrEmpty(color)) { <button type="button" class="btn ghost sm" title="Remettre la couleur par défaut" @onclick="() => setColor(null)">Défaut</button> }
-    </div>;
-
-    // Aspect commun des tuiles (paramètres avancés de l'onglet Tuiles) : mêmes règles que kiosk.js, 1 unité = 1 % de la largeur de l'écran.
-    private string F(double d) => d.ToString("0.##", Inv);
-    private int ColsFor(int n, bool portrait) => k!.TileCols is > 0 and <= 4 ? k.TileCols : n <= 1 ? 1 : portrait ? 2 : n <= 4 ? 2 : 3;
-    private string GridStyle(int cols) => $"grid-template-columns:repeat({cols},1fr);gap:{F(Kiosk.Pick(Kiosk.Gaps, k!.TileGap, "normal").Value)}cqw;--sh:{F(Kiosk.Pick(Kiosk.Shades, k.TileShade, "normal").Value)};";
-    private string ShadeClass => Kiosk.Pick(Kiosk.Valigns, k!.TileValign, "bottom").Key switch { "top" => "vt", "middle" => "vm", _ => "" };
-    private string TileStyle(KioskTile t)
-    {
-        var v = Kiosk.Pick(Kiosk.Valigns, k!.TileValign, "bottom").Key;
-        return $"background-color:{t.Color};border-radius:{F(Kiosk.Pick(Kiosk.Radii, k.TileRadius, "round").Value)}cqw;justify-content:{(v == "top" ? "flex-start" : v == "middle" ? "center" : "flex-end")};text-align:{Kiosk.Pick(Kiosk.Aligns, k.TileAlign, "left").Key};" + FontStyle(k.TileFont, k.TileColor);
-    }
-    private string TitleStyle(KioskTile t) => $"font-size:{F((k!.BigText ? 4.2 : 3.4) * t.TextScale * Kiosk.CleanScale(k.TileScale))}cqw;font-weight:{F(Kiosk.Pick(Kiosk.Weights, k.TileWeight, "normal").Value)};";
-    private string SubStyle(KioskTile t) => $"font-size:{F((k!.BigText ? 2.3 : 1.9) * t.TextScale * Kiosk.CleanScale(k.TileScale))}cqw;";
-    private static IEnumerable<(string, string)> Opts((string Key, string Label, double Value)[] o) => o.Select(x => (x.Key, x.Label));
 
     // Bouton « Touchez l'écran » : même balisage que kiosk.js (touchHtml)
     private const string Hand = "<svg class=\"kt-h\" viewBox=\"0 0 24 24\"><path fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M9 11V5.5a1.5 1.5 0 0 1 3 0V10m0-1.5a1.5 1.5 0 0 1 3 0V11m0-1a1.5 1.5 0 0 1 3 0v5.5A6 6 0 0 1 12 21.5h-.5a6 6 0 0 1-4.7-2.3L4 15.6a1.6 1.6 0 0 1 2.4-2.1L9 15.5\"/></svg>";
@@ -528,27 +381,9 @@ else
         _ => "<div class=\"kt-c\">Touchez l’écran pour commencer</div>"
     });
 
-    // Couleur propre à la tuile : vide = couleur commune des tuiles (Paramètres avancés), sinon blanc.
-    private RenderFragment TileColorPick(string label, string? color, Action<string?> set) => @<div class="kp-font">
-        <input type="color" aria-label="@label" title="@label" value="@(Kiosk.CleanHex(color) is { Length: > 0 } cc ? cc : Kiosk.CleanHex(k!.TileColor) is { Length: > 0 } tc ? tc : "#FFFFFF")" @oninput="e => set(Kiosk.CleanHex(e.Value?.ToString()) is { Length: > 0 } v ? v : null)" @onchange="e => set(Kiosk.CleanHex(e.Value?.ToString()) is { Length: > 0 } v ? v : null)" />
-        @if (!string.IsNullOrEmpty(color)) { <button type="button" class="btn ghost sm" title="Remettre la couleur par défaut" @onclick="() => set(null)">Défaut</button> }
-    </div>;
-
-    private RenderFragment Seg(string label, IEnumerable<(string Key, string Label)> opts, string cur, Action<string> set) => @<div class="kp-f"><label>@label</label>
-        <div class="kp-seg kp-seg-w" role="group" aria-label="@label">@foreach (var o in opts) { var key = o.Key; <button type="button" class="@(cur == key ? "on" : "")" @onclick="() => set(key)">@o.Label</button> }</div>
-    </div>;
-
-    private void ResetTileStyle() => Edit(c => { c.TileFont = c.TileColor = c.TileWeight = c.TileAlign = c.TileValign = c.TileRadius = c.TileGap = c.TileShade = null; c.TileScale = 1; c.TileCols = 0; });
-
-    private static string ColorStyle(string? c) => Kiosk.CleanHex(c) is { Length: > 0 } h ? $"color:{h};" : "";
-
-    private static string FontStyle(string? font, string? color) =>
-        (Kiosk.FontCss(font) is { Length: > 0 } f ? $"font-family:{f};" : "") + (Kiosk.CleanHex(color) is { Length: > 0 } c ? $"color:{c};" : "");
-
-    private void SetTab(string key) { tab = key; view = key == "idle" ? "idle" : "home"; }
     private void ZoomBy(double d) => zoom = Math.Clamp(Math.Round(zoom + d, 2), MinZoom, MaxZoom);
-    private void SetOrientation(string o) { orientation = o; dirty = true; }
-    private void SetResolution(ChangeEventArgs e) { resolution = e.Value?.ToString() ?? "auto"; dirty = true; }
+    private void SetOrientation(string o) { orientation = o; layout = ScreenLayouts.Fit(layout, Spec); FitZones(); dirty = true; }
+    private void SetResolution(ChangeEventArgs e) { resolution = e.Value?.ToString() ?? "auto"; layout = ScreenLayouts.Fit(layout, Spec); FitZones(); dirty = true; }
 
     // ----- Nom -----
     private void StartHeadRename() { headValue = name; headRename = true; }
@@ -561,131 +396,38 @@ else
         name = n; headRename = false;
     }
 
-    // ----- Tuiles -----
-    private KioskTile Clone(KioskTile t) => Copy(t);
-
-    private void PickTile(KioskTile t) { selTile = t.Id; view = "home"; }
-
-    private void NewTile()
+    // ----- Liste interactive -----
+    private void AssignInteractive(ChangeEventArgs e)
     {
-        editTile = new KioskTile { Color = Kiosk.Colors[k!.Tiles.Count % Kiosk.Colors.Length] }; newTile = true; tileError = null;
-        cat = Cats.Select(c => c.Key).FirstOrDefault(key => Pickable.Any(m => Cat(m) == key)) ?? "media";   // la première catégorie qui contient quelque chose
-    }
-    private void EditTile(KioskTile t)
-    {
-        editTile = Clone(t); newTile = false; tileError = null;
-        if (Media(t.MediaId) is { } m) cat = Cat(m);
+        var g = Guid.TryParse(e.Value?.ToString(), out var x) ? x : (Guid?)null;
+        Edit(c => c.ListId = g);
     }
 
-    private void PickMedia(MediaItem m)
+    // Modifier ou créer une liste quitte la fenêtre : la copie de travail est enregistrée d'abord (sans publier), comme avant d'ouvrir l'éditeur d'écran.
+    private Task OpenEditor(Guid id) => SaveAll(false, $"/interactive/{id}?back=/screens");
+    private Task OpenCreate() => SaveAll(false, $"/interactive/new?o={orientation}&back=/screens");
+
+    // ----- Inactivité : une zone, ou deux (haut/bas en portrait, gauche/droite en paysage) -----
+    private Guid? ZoneList(int z) => zonePl.ElementAtOrDefault(z);
+
+    private void FitZones()
     {
-        if (editTile == null) return;
-        var before = editTile.MediaId != Guid.Empty ? Media(editTile.MediaId)?.Name : null;
-        editTile.MediaId = m.Id;
-        if (string.IsNullOrWhiteSpace(editTile.Title) || editTile.Title == before) editTile.Title = m.Name;   // le titre suit le contenu tant qu'on ne l'a pas changé
+        var n = ScreenLayouts.Find(layout).Sizes.Length;
+        while (zonePl.Count < n) zonePl.Add(null);
+        if (zonePl.Count > n) zonePl.RemoveRange(n, zonePl.Count - n);
     }
 
-    private void SaveTile()
+    private void SetSplit(bool two)
     {
-        if (editTile is not { } t) return;
-        if (t.MediaId == Guid.Empty || Media(t.MediaId) == null) { tileError = "Choisissez le contenu que la tuile ouvre."; return; }
-        t.Title = (t.Title ?? "").Trim();
-        if (t.Title.Length == 0) { tileError = "Donnez un titre à la tuile."; return; }
-        t.Subtitle = string.IsNullOrWhiteSpace(t.Subtitle) ? null : t.Subtitle.Trim();
-        t.Color = Kiosk.CleanColor(t.Color);
-        t.TextScale = Kiosk.CleanScale(t.TextScale);
-        t.TitleColor = Kiosk.CleanHex(t.TitleColor) is { Length: > 0 } tcl ? tcl : null;
-        t.SubColor = Kiosk.CleanHex(t.SubColor) is { Length: > 0 } scl ? scl : null;
-        t.ShowFrom = Plan.IsDate(t.ShowFrom) ? t.ShowFrom : null;
-        t.ShowTo = Plan.IsDate(t.ShowTo) ? t.ShowTo : null;
-        if (t.ShowFrom != null && t.ShowTo != null && string.CompareOrdinal(t.ShowFrom, t.ShowTo) > 0) { tileError = "La date de fin précède celle de début."; return; }
-        if (t.Item.QrOn)
-        {
-            if (!tenant.IsGrowth) t.Item.QrOn = false;
-            else if (QrTracking.Destination(t.Item.QrUrl) is not { } dest) { tileError = "Saisissez l'adresse (https://…) que le QR code doit ouvrir."; return; }
-            else
-            {
-                t.Item.QrUrl = dest;
-                if (!QrTracking.IsCode(t.Item.QrCode)) t.Item.QrCode = QrTracking.NewCode();   // le code ne change plus : le QR affiché reste valable
-                t.Item.QrBase = QrTracking.Origin(Nav.BaseUri);
-                t.Item.QrLabel = QrTracking.CleanLabel(t.Item.QrLabel);
-            }
-        }
-        t.Item.MediaId = t.MediaId;
-        var tile = t;
-        Edit(c =>
-        {
-            var i = c.Tiles.FindIndex(x => x.Id == tile.Id);
-            if (i >= 0) c.Tiles[i] = tile; else c.Tiles.Add(tile);
-        });
-        selTile = tile.Id;
-        editTile = null;
-    }
-
-    private void ConfirmRemove()
-    {
-        if (delTile is not { } t) return;
-        Edit(c => c.Tiles.RemoveAll(x => x.Id == t.Id));
-        if (selTile == t.Id) selTile = null;
-        delTile = null;
-    }
-
-    // Glisser-déposer d'une tuile de l'aperçu (tile-sort.js) : 'to' est sa nouvelle position parmi les tuiles affichées ; les tuiles non affichées (contenu disparu) gardent leur place.
-    [JSInvokable]
-    public void ReorderTile(string id, int to)
-    {
-        if (k == null || !Guid.TryParse(id, out var g)) return;
-        var vis = k.Tiles.Where(t => Media(t.MediaId) is { } mm && Kiosk.CanOpen(mm)).ToList();
-        var slots = k.Tiles.Select((t, i) => (t, i)).Where(x => vis.Contains(x.t)).Select(x => x.i).ToList();
-        var from = vis.FindIndex(t => t.Id == g);
-        to = Math.Clamp(to, 0, vis.Count - 1);
-        if (from < 0 || from == to) return;
-        var moved = vis[from]; vis.RemoveAt(from); vis.Insert(to, moved);
-        for (var i = 0; i < slots.Count; i++) k.Tiles[slots[i]] = vis[i];
+        layout = two ? "50-50" : ScreenLayouts.Full;
+        FitZones();
         dirty = true;
-        InvokeAsync(StateHasChanged);
     }
 
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    private void SetZoneList(int z, ChangeEventArgs e)
     {
-        if (k == null || s?.Kiosk == null || view != "home") return;
-        self ??= DotNetObjectReference.Create(this);
-        try { await JS.InvokeVoidAsync("linkiiTileSort.init", tileGrid, self); }
-        catch (Exception e) when (e is JSDisconnectedException or InvalidOperationException or JSException) { }   // circuit fermé ou grille absente
-        try { await JS.InvokeVoidAsync("linkiiLogoDrag.init", homeStage, self); }
-        catch (Exception e) when (e is JSDisconnectedException or InvalidOperationException or JSException) { }
-    }
-
-    // Logo placé par glisser-déposer dans l'aperçu (logo-drag.js) : position en % de l'accueil, coin haut gauche.
-    [JSInvokable]
-    public void MoveLogo(double x, double y)
-    {
-        if (k == null) return;
-        k.LogoX = Math.Clamp(x, 0, 100); k.LogoY = Math.Clamp(y, 0, 100);
-        dirty = true;
-        InvokeAsync(StateHasChanged);
-    }
-
-    // Logo redimensionné (logo-drag.js) : position, puis largeur en % de l'accueil ; la hauteur suit les proportions du logo.
-    [JSInvokable]
-    public void ResizeLogo(double x, double y, double w)
-    {
-        if (k == null) return;
-        k.LogoX = Math.Clamp(x, 0, 100); k.LogoY = Math.Clamp(y, 0, 100); k.LogoW = Math.Clamp(w, 3, 95);
-        dirty = true;
-        InvokeAsync(StateHasChanged);
-    }
-
-    private string LogoPos() => k!.LogoX is double x && k.LogoY is double y ? $"left:{F(x)}%;top:{F(y)}%;" + (k.LogoW is double w ? $"width:{F(w)}%;" : "") : "";
-    private void SelectLogo(Guid? id) { Edit(c => c.LogoMediaId = id); logoPick = false; }
-
-    public void Dispose() => self?.Dispose();
-
-
-    // ----- Inactivité -----
-    private void AssignList(ChangeEventArgs e)
-    {
-        draftPlaylist = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null;
+        FitZones();
+        zonePl[z] = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null;
         dirty = true;
     }
 
@@ -695,15 +437,22 @@ else
         editor = false;
         var keep = k; var keepDirty = dirty;
         Load();
-        if (s != null) { draftPlaylist = s.PlaylistId; name = s.Name; orientation = s.Orientation; resolution = s.Resolution; }
+        if (s != null)
+        {
+            name = s.Name; orientation = s.Orientation; resolution = s.Resolution; (mirrorH, mirrorV) = (s.MirrorH, s.MirrorV);
+            layout = ScreenLayouts.Fit(ScreenLayouts.Find(s.Layout).Id, Spec);
+            zonePl = s.ZonePlaylists().Take(ScreenLayouts.Find(layout).Sizes.Length).ToList();
+        }
         k = keep; dirty = keepDirty;
     }
 
     // ----- Enregistrer / publier : même déroulement que l'éditeur d'écran -----
-    private async Task SaveAll(bool publish)
+    private async Task SaveAll(bool publish) => await SaveAll(publish, null);
+
+    private async Task SaveAll(bool publish, string? then)
     {
         if (k == null) return;
-        var kd = Copy(k); var (o, r, au, pl) = (orientation, resolution, autoStart, draftPlaylist);
+        var kd = Copy(k); var (o, r, au, lay) = (orientation, resolution, autoStart, layout); var (mh, mv) = (mirrorH, mirrorV); var zones = zonePl.ToList();
         saving = true;
         ScreenPublisher.Result? pub = null;
         try
@@ -711,9 +460,11 @@ else
             var formatChanged = Store.Write(d =>
             {
                 var sc = d.Screens.First(x => x.Id == Id);
-                if (JsonSerializer.Serialize(sc.Kiosk) != JsonSerializer.Serialize(kd)) { sc.Kiosk = kd; sc.KioskRevision++; }   // menu ou réglages modifiés = à publier
-                var changed = sc.Orientation != o || sc.Resolution != r;
-                sc.Orientation = o; sc.Resolution = r; sc.AutoStart = au; sc.PlaylistId = pl;
+                if (JsonSerializer.Serialize(sc.Kiosk) != JsonSerializer.Serialize(kd)) { sc.Kiosk = kd; sc.KioskRevision++; }   // liste choisie ou réglages modifiés = à publier
+                var changed = sc.Orientation != o || sc.Resolution != r || sc.MirrorH != mh || sc.MirrorV != mv;   // le miroir s'applique aussitôt, comme le format
+                sc.Orientation = o; sc.Resolution = r; sc.AutoStart = au; sc.MirrorH = mh; sc.MirrorV = mv;
+                sc.Layout = lay;   // autre découpage ou autre liste dans une zone = modification à publier
+                for (var z = 0; z < zones.Count; z++) sc.SetZonePlaylist(z, zones[z]);
                 return changed;
             });
             if (publish) pub = await Publisher.Publish([Id]);
@@ -721,9 +472,10 @@ else
         }
         finally { saving = false; }
         if (pub?.Error != null) Toast.Error(pub.Error);
-        else Toast.Ok(pub?.Request is { } rq ? $"Borne « {name} » enregistrée. Demande n° {rq.Number} envoyée : elle garde sa version jusqu'à la décision."
+        else if (then == null) Toast.Ok(pub?.Request is { } rq ? $"Borne « {name} » enregistrée. Demande n° {rq.Number} envoyée : elle garde sa version jusqu'à la décision."
             : publish ? $"Borne « {name} » enregistrée et publiée." : $"Borne « {name} » enregistrée.");
-        await OnClose.InvokeAsync();
+        if (then != null) Nav.NavigateTo(then);
+        else await OnClose.InvokeAsync();
     }
 
     private async Task TurnOff()

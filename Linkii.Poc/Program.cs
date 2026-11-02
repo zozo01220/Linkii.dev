@@ -194,6 +194,7 @@ store0.Write(d =>
 });
 // fichiers rangés par organisation (médias, PDF, aperçus, miniatures) et par campagne (publicité)
 if (store0.Write(MediaFiles.Migrate) is > 0 and var movedFiles) app.Logger.LogInformation("{Count} fichiers rangés dans les dossiers des organisations.", movedFiles);
+if (store0.Write(InteractiveLists.Migrate) is > 0 and var listsMade) app.Logger.LogInformation("{Count} menus de bornes convertis en listes interactives.", listsMade);
 
 app.UseDefaultFiles();
 app.UseStaticFiles(new StaticFileOptions
@@ -831,7 +832,7 @@ api.MapPost("/player/kiosk-events", (HttpRequest req, List<KioskEventDto> body, 
             .Select(e => (e, at: DateTimeOffset.FromUnixTimeMilliseconds(Math.Clamp(e.At, 0, 253402300799000)).UtcDateTime))
             .Where(x => x.at > now.AddDays(-KioskLog.RetentionDays) && x.at < now.AddMinutes(5) && types.Contains(x.e.Type))
             .Select(x => new KioskEvent(x.at, s!.Id, x.e.Type, x.e.Tile,
-                x.e.Tile is { } tid ? s.Kiosk?.Tiles.FirstOrDefault(t => t.Id == tid)?.Title ?? (x.e.Title is { Length: <= 80 } n ? n : null) : null,
+                x.e.Tile is { } tid ? db.InteractiveLists.Where(l => l.Id == s.Kiosk?.ListId).SelectMany(l => l.Pages).SelectMany(p => p.Els).FirstOrDefault(el => el.Id == tid)?.Text is { Length: > 0 } tt ? tt : (x.e.Title is { Length: <= 80 } n ? n : null) : null,
                 Math.Clamp(x.e.Sec, 0, 86400), x.e.How is "auto" or "back" ? x.e.How : null))
             .ToList();
         return ((Screen?)s, (IResult?)null, list);
@@ -884,7 +885,7 @@ api.MapGet("/data/{id:guid}", async (HttpRequest req, Guid id, JsonStore store, 
         var s = Auth(req, db);
         var gate = Gate(s, db);
         if (gate != null) return (gate, null!, null);
-        var pub = PlayerFeed.AllItems(db, s!).FirstOrDefault(x => x.Id == id && x.AppId != null);   // toutes les zones de l'écran
+        var pub = PlayerFeed.DataItems(db, s!).FirstOrDefault(x => x.Id == id && x.AppId != null);   // toutes les zones de l'écran
         return ((IResult?)null, db.Clients.First(c => c.Id == s!.ClientId), pub);
     });
     if (denied != null) return denied;
@@ -900,7 +901,7 @@ api.MapGet("/data/{id:guid}/{src:guid}", async (HttpRequest req, Guid id, Guid s
         var s = Auth(req, db);
         var gate = Gate(s, db);
         if (gate != null) return (gate, null!, null, null);
-        var pub = PlayerFeed.AllItems(db, s!).FirstOrDefault(x => x.Id == id && x.AppId == Compositions.AppId);
+        var pub = PlayerFeed.DataItems(db, s!).FirstOrDefault(x => x.Id == id && x.AppId == Compositions.AppId);
         var t = db.Clients.First(c => c.Id == s!.ClientId);
         return ((IResult?)null, t, pub, pub == null ? null : CompositionData(db, t, pub, src, s, data));
     });
@@ -963,7 +964,7 @@ api.MapPost("/player/app/{id:guid}/switch", async (HttpRequest req, Guid id, HaS
         var s = Auth(req, db);
         var gate = Gate(s, db);
         if (gate != null) return (gate, null, null);
-        var pub = PlayerFeed.AllItems(db, s!).FirstOrDefault(x => x.Id == id && HomeAssistantRules.IsHaApp(x.AppId));
+        var pub = PlayerFeed.DataItems(db, s!).FirstOrDefault(x => x.Id == id && HomeAssistantRules.IsHaApp(x.AppId));
         return ((IResult?)null, db.Clients.First(c => c.Id == s!.ClientId).HomeAssistant, pub);
     });
     if (denied != null) return denied;
@@ -1000,7 +1001,7 @@ static (Dictionary<string, object?> Feed, List<PublishedItem> Items)? PreviewFee
     var feed = PlayerFeed.ForScreen(db, s, whole: g.WallZoneId != null);
     // mur : format du jeton (réglages du mur essayés dans le simulateur, pas forcément encore appliqués)
     feed["screen"] = g.WallZoneId != null ? new { orientation = g.Orientation, resolution = g.Resolution } : new { orientation = s.Orientation, resolution = PlayerFeed.Resolution(s) };
-    return (feed, PlayerFeed.AllItems(db, s));
+    return (feed, PlayerFeed.DataItems(db, s));
 }
 
 api.MapGet("/preview/playlist", (HttpRequest req, JsonStore store, PreviewGrants grants, Notifier notifier, AppCatalog catalog) =>

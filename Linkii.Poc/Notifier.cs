@@ -90,24 +90,37 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
         var k = s.Kiosk!;
         var growth = db.Clients.FirstOrDefault(c => c.Id == s.ClientId)?.IsGrowth == true;
         string? Url(Guid? id) => id == null ? null : db.Media.FirstOrDefault(m => m.Id == id && m.ClientId == s.ClientId && m.Type == "image" && m.Status == null && m.FileName != null) is { } m ? "/media/" + m.FileName : null;
-        var tiles = new List<PublishedKioskTile>();
-        foreach (var t in k.Tiles)
+        var list = db.InteractiveLists.FirstOrDefault(l => l.Id == k.ListId && l.ClientId == s.ClientId);
+        var pages = new List<PublishedKioskPage>();
+        foreach (var p in list?.Pages ?? new())
         {
-            var m = db.Media.FirstOrDefault(x => x.Id == t.MediaId && x.ClientId == s.ClientId);
-            if (m == null || !Kiosk.CanOpen(m)) continue;
-            t.Item.MediaId = t.MediaId;
-            t.Item.Placement = "full";
-            if (Snapshot(db, t.Item, m, growth) is not { } pi) continue;
-            pi.Placement = "full";
-            tiles.Add(new PublishedKioskTile
+            var pp = new PublishedKioskPage { Id = p.Id, Name = p.Name, Bg = p.Bg, BgImageUrl = Url(p.BgImageId), Len = Math.Clamp(p.Len, 1, InteractiveLists.MaxLen) };
+            foreach (var e in p.Els)
             {
-                Id = t.Id, Title = t.Title, Subtitle = t.Subtitle, TitleColor = Kiosk.CleanHex(t.TitleColor), SubColor = Kiosk.CleanHex(t.SubColor), TextScale = Kiosk.CleanScale(t.TextScale), Color = Kiosk.CleanColor(t.Color), ImageUrl = Url(t.ImageMediaId),
-                ShowFrom = t.ShowFrom, ShowTo = t.ShowTo, Item = pi
-            });
+                var act = new PublishedKioskAction { Type = e.Action.Type, PageId = e.Action.PageId };
+                if (e.Kind == "tile" && e.Action.Type == "media")
+                {
+                    // une tuile dont le contenu a disparu, ou n'est pas prêt, n'est pas publiée : la borne n'affiche jamais de tuile cassée
+                    var m = db.Media.FirstOrDefault(x => x.Id == e.Action.MediaId && x.ClientId == s.ClientId);
+                    if (m == null || !Kiosk.CanOpen(m)) continue;
+                    e.Action.Item.MediaId = m.Id;
+                    e.Action.Item.Placement = "full";
+                    if (Snapshot(db, e.Action.Item, m, growth) is not { } pi) continue;
+                    pi.Placement = "full";
+                    act.Item = pi;
+                }
+                if (e.Kind == "image" && Url(e.ImageId) == null) continue;
+                pp.Els.Add(new PublishedKioskEl
+                {
+                    Id = e.Id, Kind = e.Kind, X = e.X, Y = e.Y, W = e.W, H = e.H, Text = e.Text, Sub = e.Sub, Color = e.Color, ImageUrl = Url(e.ImageId), TextColor = e.TextColor,
+                    Font = e.Font, FontSize = e.FontSize, Bold = e.Bold, Align = e.Align, Valign = e.Valign, Radius = e.Radius, ShowFrom = e.ShowFrom, ShowTo = e.ShowTo, Action = act
+                });
+            }
+            pages.Add(pp);
         }
         var cfg = System.Text.Json.JsonSerializer.Deserialize<KioskConfig>(System.Text.Json.JsonSerializer.Serialize(k))!;   // copie : modifier le brouillon ne change pas ce qui est publié
         cfg.Tiles = new();
-        return new PublishedKiosk { Config = cfg, LogoUrl = Url(k.LogoMediaId), Tiles = tiles };
+        return new PublishedKiosk { Config = cfg, Pages = pages };
     }
 
     /// <summary>Instantané des listes que le planning de l'écran peut faire jouer (une liste supprimée n'y figure plus).</summary>
