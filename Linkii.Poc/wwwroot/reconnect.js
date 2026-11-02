@@ -4,7 +4,7 @@
     var banner = null, title = null, desc = null, timer = null, down = false, found = false, blocked = [];
 
     var CSS = '.lk-lock{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:16px;'
-        + 'background:rgba(11,31,58,.62);backdrop-filter:blur(3px);cursor:wait;font:400 15px/1.5 "IBM Plex Sans",sans-serif;color:#0B1F3A}'
+        + 'background:rgba(11,31,58,.78);cursor:wait;font:400 15px/1.5 "IBM Plex Sans",sans-serif;color:#0B1F3A}'
         + '.lk-box{width:min(420px,100%);background:#fff;border-radius:14px;padding:32px 28px 26px;text-align:center;'
         + 'box-shadow:0 20px 60px rgba(11,31,58,.35)}'
         + '.lk-spin{width:44px;height:44px;margin:0 auto 18px;border-radius:50%;border:4px solid #DDE3EA;'
@@ -36,12 +36,12 @@
         setText(false);
         // Le reste de la page devient inerte : ni clic, ni tabulation, ni lecteur d'écran.
         blocked = Array.prototype.slice.call(document.body.children);
-        blocked.forEach(function (el) { el.inert = true; });
+        blocked.forEach(function (el) { el.inert = true; el.style.visibility = 'hidden'; });   // plus rien à peindre derrière : vidéos et animations de la page ne tournent plus pour rien
         document.body.appendChild(banner);
     }
 
     function hide() {
-        blocked.forEach(function (el) { el.inert = false; });
+        blocked.forEach(function (el) { el.inert = false; el.style.visibility = ''; });
         blocked = [];
         if (banner) { banner.remove(); banner = null; }
     }
@@ -67,17 +67,30 @@
     });
     window.addEventListener('pageshow', function () { leaving = false; });
 
+    // Sonde espacée au fil du temps (2 s, puis jusqu'à 15 s) et suspendue quand l'onglet est caché.
+    var tries = 0;
+    function schedule() {
+        clearTimeout(timer);
+        timer = setTimeout(function () {
+            if (!down) return;
+            if (!document.hidden) probe();
+            tries++;
+            schedule();
+        }, Math.min(2000 + tries * 1000, 15000));
+    }
+
     function start() {
         if (down || leaving) return;
         down = true;
+        tries = 0;
         show();
         probe();
-        timer = setInterval(probe, 2000);
+        schedule();
     }
 
     function stop() {
         down = false;
-        clearInterval(timer);
+        clearTimeout(timer);
         hide();
     }
 
