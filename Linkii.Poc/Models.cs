@@ -474,6 +474,10 @@ public class Tenant
     public bool AlertOffline { get; set; }
     /// <summary>Délai avant l'alerte « écran hors ligne ».</summary>
     public int AlertOfflineMinutes { get; set; } = 10;
+    // Batterie des écrans Android (Pro) : affichage sur les cartes et la liste, alerte sous le seuil
+    public bool BatteryOn { get; set; }
+    public bool BatteryAlert { get; set; }
+    public int BatteryLowPct { get; set; } = 20;
     /// <summary>Destinataire des e-mails d'alerte ; vide : tous les administrateurs de l'organisation.</summary>
     public string AlertEmail { get; set; } = "";
     /// <summary>Une pause se termine seule après ce délai (0 : reprise manuelle seulement).</summary>
@@ -751,6 +755,9 @@ public class Screen : IClientOwned, IAreaOwned, IOwned
     public string? DeviceModel { get; set; }
     public string? DeviceApp { get; set; }         // version de l'application Linkivi Player
     public DateTime? DeviceBootUtc { get; set; }   // dernier démarrage de l'appareil
+    public int? BatteryPct { get; set; }           // batterie (smartphone et tablette Android seulement ; null sinon), dernier niveau connu
+    public bool BatteryCharging { get; set; }      // l'appareil est branché
+    public bool BatteryAlertSent { get; set; }     // alerte « batterie faible » envoyée (une seule par descente sous le seuil)
     public string? DevicePinSig { get; set; }      // empreinte du code technicien reçu de l'organisation (voir TechPin.Sig)
     public string? DeviceHost { get; set; }        // PC Windows : identifiant du PC (plusieurs écrans d'un même PC le partagent)
     public string? DeviceInstance { get; set; }    // PC Windows : nom de l'instance du player qui affiche cet écran

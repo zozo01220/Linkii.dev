@@ -270,11 +270,11 @@ else if (!noArea && NothingToShow)
 }
 else
 {
-<div class="pl-grid @(ListView ? "list" : "")">
+<div class="pl-grid @(ListView ? "list" : "") @(ListView && BatteryCol ? "bat-col" : "")">
     @if (ListView)
     {
         @* en-têtes des colonnes (PC) ; masqués au téléphone *@
-        <div class="sc-listhead"><span class="sc-lh-check"><input type="checkbox" class="sc-check" checked="@(Shown.Count > 0 && Shown.All(s => selectedIds.Contains(s.Id)))" @onchange="ToggleAll" aria-label="Tout sélectionner" title="Tout sélectionner" /></span><span>Aperçu</span><span></span><span>Écran</span><span>État</span><span>Partage</span><span>En diffusion</span><span></span><span></span></div>
+        <div class="sc-listhead"><span class="sc-lh-check"><input type="checkbox" class="sc-check" checked="@(Shown.Count > 0 && Shown.All(s => selectedIds.Contains(s.Id)))" @onchange="ToggleAll" aria-label="Tout sélectionner" title="Tout sélectionner" /></span><span>Aperçu</span><span></span><span>Écran</span><span>État</span>@if (BatteryCol) { <span class="c">Batterie</span> }<span>Partage</span><span>En diffusion</span><span></span><span></span></div>
     }
     @foreach (var entry in Entries) { @Card(entry) }
     @foreach (var os in OtherShown) { if (ListView) { @LightRow(os.Screen, os.Area) } else { @LightCard(os.Screen, os.Area) } }
@@ -780,6 +780,16 @@ else if (wallEdit is { } wid)
 
     // ---------- Contrôle du direct (Pro) ----------
     private bool Growth => tenant.IsGrowth;
+
+    // Batterie des écrans Android (Pro, réglage « Batterie » des Réglages) : vide pour tout écran qui ne la remonte pas (TV, Windows, navigateur)
+    private bool BatteryShown => Growth && tenant.BatteryOn;
+    private bool BatteryCol => BatteryShown && Shown.Any(s => s.BatteryPct != null);
+    private RenderFragment Bat(Screen s) => __builder =>
+    {
+        if (!BatteryShown || s.BatteryPct is not { } p) return;
+        var low = p <= tenant.BatteryLowPct && !s.BatteryCharging;
+        <span class="bat @(p <= 5 && !s.BatteryCharging ? "crit" : low ? "low" : "")" title="Batterie @p %@(s.BatteryCharging ? ", en charge" : "")"><span class="ic"><i style="width:@(p)%"></i></span>@p %@if (s.BatteryCharging) { <span class="bolt" aria-hidden="true">⚡</span> }</span>
+    };
     private Guid? liveFor;
     private string? liveAction;
     private static readonly MarkupString LockIcon = new("<svg class=\"lk\" width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><rect x=\"5\" y=\"11\" width=\"14\" height=\"9\" rx=\"2\"/><path d=\"M8 11V8a4 4 0 0 1 8 0v3\"/></svg>");
@@ -1495,7 +1505,7 @@ else if (wallEdit is { } wid)
                     <div class="gc-sub">
                         @if (gs.DeviceKind != null)
                         {
-                            <b>@(gs.DeviceOs ?? "Appareil")</b>@if (gs.DeviceApp is { Length: > 0 } gda && gs.DeviceApp != "web") { <text> <span class="sep">·</span> App <span class="mono">@gda</span></text> }@if (gs.DeviceKind == "web" && gs.DeviceModel != null) { <text> <span class="sep">·</span> @gs.DeviceModel</text> }@if (MonitorText(gs) is { } gmt) { <text> <span class="sep">·</span> @gmt</text> }
+                            <b>@(gs.DeviceOs ?? "Appareil")</b>@if (gs.DeviceApp is { Length: > 0 } gda && gs.DeviceApp != "web") { <text> <span class="sep">·</span> App <span class="mono">@gda</span></text> }@if (gs.DeviceKind == "web" && gs.DeviceModel != null) { <text> <span class="sep">·</span> @gs.DeviceModel</text> }@if (MonitorText(gs) is { } gmt) { <text> <span class="sep">·</span> @gmt</text> }<span class="bat-in">@Bat(gs)</span>
                         }
                         else { <span>En attente des informations de l'écran</span> }
                         <span class="sep"> · </span><span class="gc-pl"><Ico Name="play-box" Size="13" /> @(gs.ZoneCount == 1 ? playlists.FirstOrDefault(p => p.Id == gs.PlaylistId)?.Name ?? "Aucune liste de lecture" : $"{ZonesSummary(gs)} · {gs.ZoneCount} zones")</span>
@@ -1726,9 +1736,11 @@ else if (wallEdit is { } wid)
                     {
                         <DeviceLogo Kind="@sc.DeviceKind" Size="22" />
                         <span><b>@(sc.DeviceOs ?? "Appareil")</b>@if (sc.DeviceApp is { Length: > 0 } da && sc.DeviceApp != "web") { <text> <span class="sep">·</span> App <span class="mono">@da</span></text> }@if (sc.DeviceKind == "web" && sc.DeviceModel != null) { <text> <span class="sep">·</span> @sc.DeviceModel</text> }@if (MonitorText(sc) is { } smt) { <text> <span class="sep">·</span> @smt</text> }</span>
+                        <span class="bat-in">@Bat(sc)</span>
                     }
                     else { <span class="muted">Appareil : en attente des informations de l'écran</span> }
                 </div>
+                @if (BatteryCol) { <span class="bat-cell">@Bat(sc)</span> }
                 @if (PcCount(sc) is var spc && spc > 1) { <div class="sc-sync"><span class="badge neutre" title="@PcTitle(sc)">PC partagé · @spc écrans</span></div> }
                 @* suivi de la dernière publication : affichée, en cours d'arrivée, ou pas reçue (écran hors ligne, aucune confirmation) *@
                 @if (Store.Read(d => d.Delivery(sc)) is { } dl)

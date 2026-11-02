@@ -190,6 +190,27 @@ public static class ScreenAlerts
         return batches;
     }
 
+    /// <summary>
+    /// Écrans Android dont la batterie vient de passer sous le seuil (une seule alerte par descente ; ré-armée quand l'écran est branché ou remonte de 5 points).
+    /// Marque les écrans (<see cref="Screen.BatteryAlertSent"/> ) : à appeler dans un Write.
+    /// </summary>
+    public static List<(Tenant Client, List<Screen> Low)> PlanBattery(Db db, DateTime now)
+    {
+        var res = new List<(Tenant, List<Screen>)>();
+        foreach (var c in db.Clients.Where(c => c.IsGrowth && c.BatteryOn && c.BatteryAlert && Alerts.Wants(c, Alerts.Screens) && !c.IsCut))
+        {
+            var limit = Math.Clamp(c.BatteryLowPct, 5, 50);
+            var low = new List<Screen>();
+            foreach (var s in db.Screens.Where(s => s.ClientId == c.Id && s.Token != null && s.BatteryPct != null))
+            {
+                if (s.BatteryAlertSent) { if (s.BatteryCharging || s.BatteryPct > limit + 5) s.BatteryAlertSent = false; }
+                else if (!s.BatteryCharging && s.BatteryPct <= limit && ScreenControl.Online(s, now)) { s.BatteryAlertSent = true; low.Add(s); }
+            }
+            if (low.Count > 0) res.Add((c, low));
+        }
+        return res;
+    }
+
     /// <summary>Un écran en veille ne dialogue plus (veille matérielle) : ce n'est pas une panne, ni les 5 minutes qui suivent son réveil.</summary>
     public static bool IsSleeping(Db db, Tenant c, Screen s, DateTime now)
     {
@@ -216,11 +237,17 @@ public class ScreenWatchWorker(JsonStore store, Mailer mail, AlertService alerts
 
     public async Task Run(DateTime now)
     {
-        var (work, screenEvents) = store.Write(db =>
+        var (work, screenEvents, lowBattery) = store.Write(db =>
         {
             foreach (var s in db.Screens.Where(s => s.Commands.Count > 0 || s.PausedUtc != null)) ScreenControl.Expire(s, now);
-            return (ScreenAlerts.Plan(db, now, started), ScreenEvents.Plan(db, now, started));
+            return (ScreenAlerts.Plan(db, now, started), ScreenEvents.Plan(db, now, started), ScreenAlerts.PlanBattery(db, now));
         });
+        foreach (var (c, low) in lowBattery)
+        {
+            var list = low.Select(s => $"{s.Name} ({s.BatteryPct} %)").ToList();
+            await alerts.Raise(c.Id, Alerts.Screens, low.Count == 1 ? $"Batterie faible : {low[0].Name}" : $"{low.Count} écrans sur batterie faible",
+                string.Join(", ", list.Take(3)) + (list.Count > 3 ? "…" : ""), "/", severity: Notifs.Warn);
+        }
         foreach (var e in screenEvents) events.Publish(e.ClientId, e.Type, e.Data);   // webhooks (API) : indépendants des réglages d'alertes
         foreach (var b in work)
         {

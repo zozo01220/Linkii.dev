@@ -227,6 +227,30 @@ public class ControlTests
     }
 
     [Fact]
+    public void A_low_battery_is_reported_once_per_descent_and_never_for_a_charging_screen()
+    {
+        var (db, c, a) = World();
+        On(c); c.BatteryOn = c.BatteryAlert = true; c.BatteryLowPct = 20;
+        var low = Seen(db, c, a, "Tablette", Now.AddSeconds(-10)); low.BatteryPct = 15;
+        var plugged = Seen(db, c, a, "Vitrine", Now.AddSeconds(-10)); (plugged.BatteryPct, plugged.BatteryCharging) = (10, true);
+        var fine = Seen(db, c, a, "Hall", Now.AddSeconds(-10)); fine.BatteryPct = 80;
+        Seen(db, c, a, "TV", Now.AddSeconds(-10));   // ne remonte pas de batterie : jamais signalée
+
+        var batch = Assert.Single(ScreenAlerts.PlanBattery(db, Now));
+        Assert.Equal(new[] { low }, batch.Low);
+        Assert.Empty(ScreenAlerts.PlanBattery(db, Now.AddMinutes(1)));   // une seule alerte par descente
+        low.BatteryPct = 22;                                              // remonte, mais pas de 5 points au-dessus du seuil
+        Assert.Empty(ScreenAlerts.PlanBattery(db, Now.AddMinutes(2)));
+        low.BatteryPct = 30;                                              // ré-armée
+        Assert.Empty(ScreenAlerts.PlanBattery(db, Now.AddMinutes(3)));
+        low.BatteryPct = 12; low.LastSeenUtc = Now.AddMinutes(4);
+        Assert.Single(ScreenAlerts.PlanBattery(db, Now.AddMinutes(4)));
+        c.BatteryAlert = false;
+        low.BatteryAlertSent = false;
+        Assert.Empty(ScreenAlerts.PlanBattery(db, Now.AddMinutes(5)));   // réglage coupé
+    }
+
+    [Fact]
     public void A_screen_that_comes_back_is_reported_once_and_can_fall_again()
     {
         var (db, c, a) = World();
@@ -373,6 +397,22 @@ public class ControlApiTests(Platform p)
         Assert.True((await Control.Send(p.A.Id, id, ScreenCommand.Resume, "test")).Ok);
         Assert.False(Store.Read(db => db.Screens.First(x => x.Id == id).IsPaused(DateTime.UtcNow)));
         Store.Write(db => db.Clients.First(x => x.Id == p.A.Id).Plan = Plans.Base);
+    }
+
+    [Fact]
+    public async Task Only_an_android_phone_or_tablet_keeps_a_battery_level()
+    {
+        var id = ScreenOf(p.TokenA);
+        var c = p.Client();
+        await c.SendAsync(Post("/api/player/device", p.TokenA, new { kind = "android", os = "Android 14", model = "Pixel", app = "1.3.5", battery = 42, charging = true }));
+        var s = Store.Read(db => db.Screens.First(x => x.Id == id));
+        Assert.Equal((42, true), (s.BatteryPct, s.BatteryCharging));
+        foreach (var kind in new[] { "androidtv", "windows", "web" })
+        {
+            await c.SendAsync(Post("/api/player/device", p.TokenA, new { kind, os = "x", battery = 42 }));
+            Assert.Null(Store.Read(db => db.Screens.First(x => x.Id == id)).BatteryPct);
+            await c.SendAsync(Post("/api/player/device", p.TokenA, new { kind = "android", os = "Android 14", battery = 42 }));
+        }
     }
 
     [Fact]

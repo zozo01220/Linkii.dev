@@ -262,6 +262,22 @@
                         <button type="button" class="btn" disabled="@(!alertsLive)" @onclick="OpenAlertDialog"><Ico Name="sliders" Size="16" /> Choisir…</button>
                     </div>
                 </div>
+                <div class="rg-card @(growth ? "" : "al-off")" data-tip="@(growth ? null : Plans.LockedHint)">
+                    <header><h3>Batterie des écrans Android</h3><small>Smartphones et tablettes avec l'application Linkivi Player. Les autres écrans (TV, Windows, navigateur) n'affichent rien.</small></header>
+                    <div class="sv-row">
+                        <div class="t"><b>Afficher la batterie</b><small>Le niveau apparaît sur la carte de l'écran et dans une colonne de la liste.</small></div>
+                        <div class="ctl"><button type="button" class="switch @(batteryOn ? "on" : "")" role="switch" aria-checked="@(batteryOn ? "true" : "false")" aria-label="Afficher la batterie" disabled="@(!growth)" @onclick="() => { batteryOn = !batteryOn; dirty = true; }"><span></span></button></div>
+                    </div>
+                    <div class="sv-row @(growth && batteryOn ? "" : "al-off")">
+                        <div class="t"><b>Prévenir quand la batterie est faible</b><small>Une alerte par descente sous le seuil, sauf si l'écran est en charge. Envoyée selon vos canaux, dans la catégorie « Écrans ».</small></div>
+                        <div class="ctl">
+                            <select class="rg-in short" @bind="batteryLow" disabled="@(!growth || !batteryOn)" aria-label="Seuil de batterie faible">
+                                @foreach (var p in new[] { 10, 15, 20, 30, 40 }) { <option value="@p">Sous @p %</option> }
+                            </select>
+                            <button type="button" class="switch @(batteryAlert ? "on" : "")" role="switch" aria-checked="@(batteryAlert ? "true" : "false")" aria-label="Prévenir quand la batterie est faible" disabled="@(!growth || !batteryOn)" @onclick="() => { batteryAlert = !batteryAlert; dirty = true; }"><span></span></button>
+                        </div>
+                    </div>
+                </div>
                 <div class="rg-card">
                     <header><h3>Pause des écrans</h3><small>Se lance depuis la carte d'un écran (bouton Pause).</small></header>
                     <div class="sv-row @(growth ? "" : "locked-row")" data-tip="@(growth ? null : Plans.LockedHint)">
@@ -413,6 +429,8 @@
     private HashSet<string> alertTypes = new();
     private int pushDevices;   // téléphones des administrateurs qui reçoivent les notifications
     private int alertMinutes = 10, pauseMinutes = 60;
+    private bool batteryOn, batteryAlert;
+    private int batteryLow = 20;
     private string alertTarget = "admins", alertEmail = "";
     private readonly AppField pauseField = new() { Key = "pause", Type = "media", Accept = "image", Label = "Visuel de pause" };
     private Dictionary<string, string> pauseValues = new() { ["pause"] = "" };
@@ -475,6 +493,7 @@
         name = t.Name; timezone = t.Timezone; duration = t.DefaultDurationSec; reloadHour = t.ReloadHour;
         growth = t.IsGrowth; (alertsOn, alertMail, alertPush, alertTypes) = (t.AlertsOn, t.AlertMail, t.AlertPush, t.AlertTypes.ToHashSet());
         alertGood = t.AlertGood;
+        (batteryOn, batteryAlert, batteryLow) = (t.BatteryOn, t.BatteryAlert, t.BatteryLowPct is 10 or 15 or 20 or 30 or 40 ? t.BatteryLowPct : 20);
         var cid = t.Id;
         pushDevices = Root.Read(d => { var admins = d.Users.Where(u => u.ClientId == cid && u.Role == Roles.ClientAdmin && !u.Disabled).Select(u => u.Id).ToHashSet(); return d.PushDevices.Count(p => admins.Contains(p.UserId)); });
         alertMinutes = AlertDelays.Any(a => a.Min == t.AlertOfflineMinutes) ? t.AlertOfflineMinutes : 10;
@@ -610,6 +629,7 @@
                 t.AlertsOn = alertsOn; t.AlertMail = alertMail; t.AlertPush = alertPush; t.AlertGood = alertGood;
                 t.AlertTypes = Alerts.All.Select(a => a.Id).Where(alertTypes.Contains).ToList();
                 t.AlertOfflineMinutes = alertMinutes;
+                t.BatteryOn = batteryOn; t.BatteryAlert = batteryAlert; t.BatteryLowPct = batteryLow;
                 t.AlertEmail = target;   // e-mail coupé : le choix reste (masqué) pour plus tard
                 t.PauseResumeMinutes = pauseMinutes;
                 t.PauseMediaId = pauseImage is { } pm && d.Media.Any(m => m.Id == pm && m.Type == "image") ? pauseImage : null;

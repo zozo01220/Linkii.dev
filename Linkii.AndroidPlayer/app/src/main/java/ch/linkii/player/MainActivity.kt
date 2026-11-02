@@ -268,11 +268,17 @@ class MainActivity : Activity() {
         fun deviceInfo(): String {
             val tv = (getSystemService(Context.UI_MODE_SERVICE) as android.app.UiModeManager).currentModeType == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
             val model = if (Build.MODEL.startsWith(Build.MANUFACTURER, ignoreCase = true)) Build.MODEL else "${Build.MANUFACTURER} ${Build.MODEL}"
-            return org.json.JSONObject()
+            val bat = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))   // intent « collant » : niveau actuel, sans permission
+            val scale = bat?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1) ?: -1
+            val level = bat?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val plugged = (bat?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
+            val json = org.json.JSONObject()
                 .put("kind", if (tv) "androidtv" else "android").put("os", "Android ${Build.VERSION.RELEASE}")
                 .put("model", model.replaceFirstChar { it.uppercase() }).put("app", BuildConfig.VERSION_NAME)
                 .put("bootMs", System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime())
-                .put("pinSig", prefs.orgPinSig() ?: "").toString()
+                .put("pinSig", prefs.orgPinSig() ?: "")
+            if (!tv && level >= 0 && scale > 0) json.put("battery", level * 100 / scale).put("charging", plugged)   // smartphone et tablette seulement
+            return json.toString()
         }
 
         /** Plages de mise en veille du serveur : { tz, ranges } ou chaîne vide (aucune). L'appareil les garde et les applique seul. */

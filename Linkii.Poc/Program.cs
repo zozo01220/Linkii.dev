@@ -731,6 +731,9 @@ api.MapPost("/player/device", (HttpRequest req, DeviceDto body, JsonStore store)
     s.DeviceMonitors = s.DeviceKind == "windows" && body.Monitors != null
         ? body.Monitors.Where(m => m.N is > 0 and < 17 && m.W > 0 && m.H > 0).Take(16).Select(m => new DeviceMonitor { N = m.N, W = m.W, H = m.H, Primary = m.Primary }).ToList()
         : new();
+    // batterie : seuls un smartphone ou une tablette Android la remontent (ni la TV, ni Windows, ni le navigateur) ; sinon vide
+    if (s.DeviceKind == "android" && body.Battery is >= 0 and <= 100) { s.BatteryPct = body.Battery; s.BatteryCharging = body.Charging == true; }
+    else { s.BatteryPct = null; s.BatteryCharging = false; s.BatteryAlertSent = false; }
     if (body.BootMs is > 0) s.DeviceBootUtc = DateTimeOffset.FromUnixTimeMilliseconds(body.BootMs.Value).UtcDateTime;
     return Results.Ok();
 }));
@@ -1093,7 +1096,7 @@ record QrHit(Guid ClientId, Guid ItemId, string? Destination, bool Counts);
 record PlayDto(Guid? MediaId, string? AppId, long Start, int Sec);
 record KioskEventDto(long At, string Type, Guid? Tile, string? Title, int Sec, string? How);
 record StartDto(int? W, int? H);
-record DeviceDto(string? Kind, string? Os, string? Model, string? App, long? BootMs, string? PinSig = null, string? Host = null, string? Instance = null, List<MonitorDto>? Monitors = null);
+record DeviceDto(string? Kind, string? Os, string? Model, string? App, long? BootMs, string? PinSig = null, string? Host = null, string? Instance = null, List<MonitorDto>? Monitors = null, int? Battery = null, bool? Charging = null);
 record MonitorDto(int N, int W, int H, bool Primary);
 record CommandAckDto(Guid Id, string? Status, string? Detail);
 
