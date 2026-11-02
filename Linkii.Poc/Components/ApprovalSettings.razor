@@ -12,10 +12,15 @@
     <div class="sv-upsell"><Ico Name="lock" Size="18" /><span class="grow">L'approbation des publications est incluse dans la licence <b>Pro</b>. Les demandes en attente sont refusées si la licence repasse à Essential.</span><a class="btn sm" href="settings?tab=abonnement">Découvrir le plan Pro</a></div>
 }
 
+@if (growth && !enough && !on)
+{
+    <div class="sv-upsell"><Ico Name="users" Size="18" /><span class="grow">L'approbation est disponible à partir de 2 utilisateurs : ajoutez un membre pour pouvoir l'activer.</span><a class="btn sm" href="organisation">Ajouter un membre</a></div>
+}
+
 <div class="rg-card al-master @(growth ? "" : "al-off")" data-tip="@(growth ? null : Plans.LockedHint)">
     <div class="sv-row">
         <div class="t"><b>Approuver les publications de certains membres</b><small>Désactivé par défaut. Les membres que vous désignez ne publient plus directement : un approbateur décide d'abord, et l'écran garde sa version en attendant. Les administrateurs ne sont jamais soumis.</small></div>
-        <div class="ctl"><button type="button" class="switch @(on ? "on" : "")" role="switch" aria-checked="@(on ? "true" : "false")" aria-label="Approuver les publications de certains membres" disabled="@(!growth)" @onclick="ToggleOn"><span></span></button></div>
+        <div class="ctl"><button type="button" class="switch @(on ? "on" : "")" role="switch" aria-checked="@(on ? "true" : "false")" aria-label="Approuver les publications de certains membres" disabled="@(!growth || (!on && !enough))" @onclick="ToggleOn"><span></span></button></div>
     </div>
     @if (growth && on)
     {
@@ -61,18 +66,18 @@
 }
 
 @code {
-    private bool growth, on;
+    private bool growth, on, enough;
     private int reminder = 24, expire = 7, keep = 12, submitted, approvers;
     private string noApprover = Approvals.ToAdmins;
     private string Summary => $"{submitted} personne{(submitted > 1 ? "s" : "")} soumise{(submitted > 1 ? "s" : "")}, {approvers} approbateur{(approvers > 1 ? "s" : "")}";
 
     protected override void OnInitialized() => Load();
 
-    private void Load() => (growth, on, reminder, expire, keep, noApprover, submitted, approvers) = Store.Read(d =>
+    private void Load() => (growth, on, enough, reminder, expire, keep, noApprover, submitted, approvers) = Store.Read(d =>
     {
         var t = d.Tenant;
         var members = d.Users.Where(u => u.Role == Roles.ClientMember && !u.Disabled).ToList();
-        return (t.IsGrowth, t.ApprovalOn, t.ApprovalReminderHours, t.ApprovalExpireDays, t.ApprovalKeepMonths, t.ApprovalNoApprover,
+        return (t.IsGrowth, t.ApprovalOn, Approvals.EnoughUsers(d.Users), t.ApprovalReminderHours, t.ApprovalExpireDays, t.ApprovalKeepMonths, t.ApprovalNoApprover,
             members.Count(u => u.Rights is { SubmitApproval: true }), members.Count(u => u.Rights is { Approver: true }));
     });
 
@@ -93,6 +98,7 @@
     {
         if (!growth) return;
         var turnOn = !on;
+        if (turnOn && !enough) return;
         Store.Write(d => d.Tenant.ApprovalOn = turnOn);
         // couper l'option refuse tout de suite les demandes en attente (l'auteur est prévenu) : republier se fait alors directement
         if (!turnOn) await Service.Tick(DateTime.UtcNow);

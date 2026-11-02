@@ -141,7 +141,7 @@ public record ApiAuthResult(ApiIdentity? Identity, string? Code)
 public record ApiKeyCreated(ApiKey? Key, string? Secret, string? Error);
 
 /// <summary>Création, révocation, renouvellement et authentification des clés. Les écrans d'administration et l'API passent par ici.</summary>
-public class ApiKeyService(JsonStore store, ApiRegistry registry, TimeProvider time, ILogger<ApiKeyService> log)
+public class ApiKeyService(JsonStore store, ApiRegistry registry, TimeProvider time)
 {
     private readonly ConcurrentDictionary<string, (Guid Client, Guid Key)> index = new();
     private readonly ConcurrentDictionary<Guid, DateTime> touched = new();

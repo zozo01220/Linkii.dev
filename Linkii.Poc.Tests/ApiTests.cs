@@ -75,7 +75,7 @@ public class ApiFixture : IDisposable
         Tenant.ResellerId = Reseller.Id;
         Store.Write(db => { db.Resellers.Add(Reseller); db.Clients.Add(Tenant); });
         Registry = new ApiRegistry(new IApiModule[] { new CoreApiModule() }.Concat(extra ?? Array.Empty<IApiModule>()));
-        Keys = new ApiKeyService(Store, Registry, Time, NullLogger<ApiKeyService>.Instance);
+        Keys = new ApiKeyService(Store, Registry, Time);
         Bus = new EventBus(Registry, Time, NullLogger<EventBus>.Instance);
         Journal = new WebhookJournal(Path.Combine(Dir, "apidata", "webhooks"), Time);
         var sender = new WebhookSender(Receiver, allowLocal: false);

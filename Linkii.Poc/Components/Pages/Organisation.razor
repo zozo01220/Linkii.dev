@@ -60,6 +60,7 @@
                     @if (row.User.Id == me) { <span class="pill blue">Vous</span> }
                     @if (row.User.Disabled) { <span class="pill">Désactivé</span> }
                     @if (row.User.IsInvited) { <span class="pill warn">En attente</span> }
+                    @if (approvalOn) { @ApprovalPill(row) }
                 </div>
                 @if (row.Admin)
                 {
@@ -86,7 +87,7 @@
     {
         <div class="card og-list">
             <table class="tbl og-tbl mb-tbl">
-                <thead><tr><th>Membre</th><th>Rôle</th><th>Écrans</th><th>Médiathèque</th><th>Listes de lecture</th><th style="width:40px"></th></tr></thead>
+                <thead><tr><th>Membre</th><th>Rôle</th><th>Écrans</th><th>Médiathèque</th><th>Listes de lecture</th>@if (approvalOn) { <th>Approbation</th> }<th style="width:40px"></th></tr></thead>
                 <tbody>
                 @foreach (var r in shown)
                 {
@@ -104,6 +105,7 @@
                             <td>@if (row.Rights.Media == PageMode.Read) { @ReadPill() } else { <span>Les siens</span> }</td>
                             <td>@if (row.Rights.Playlists == PageMode.Read) { @ReadPill() } else { <span>Les siennes</span> }</td>
                         }
+                        @if (approvalOn) { <td>@ApprovalPill(row)</td> }
                         <td>@MemberMenu(row)</td>
                     </tr>
                 }
@@ -287,7 +289,7 @@ else
     private List<Screen> screens = new();
     private string view = "people", q = "", roleFilter = "", peopleView = "list", areasView = "cards";
     private Guid? menuFor;
-    private bool sleepOn, dimOn, newArea;
+    private bool sleepOn, dimOn, newArea, approvalOn;   // approvalOn : option Approbation active (plan Pro), affiche les marques sur cartes et liste
     private string? formError, deleteError;
     private Guid? me, currentId, areaSheet, sheet;
     private readonly HashSet<Guid> openAreas = new();
@@ -303,7 +305,7 @@ else
     {
         if (Created != null) Toast.Ok($"Aire « {Created} » créée.");
         if (Deleted != null) Toast.Ok($"Aire « {Deleted} » supprimée.");
-        (sleepOn, dimOn) = Store.Read(d => (d.Tenant.SleepEnabled, d.Tenant.DimEnabled));
+        (sleepOn, dimOn, approvalOn) = Store.Read(d => (d.Tenant.SleepEnabled, d.Tenant.DimEnabled, Approvals.Active(d.Tenant)));
         me = Ctx.UserId;
         view = TabParam is "areas" || Created != null || Deleted != null ? "areas" : "people";
         Load();
@@ -323,6 +325,11 @@ else
 
     private static string Pl(int n, string one, string many) => $"{n} {(n == 1 ? one : many)}";
     private static string Initials(User u) => string.Concat(u.Label.Split(' ', '.', '@').Where(w => w.Length > 0).Take(2).Select(w => char.ToUpperInvariant(w[0])));
+    private static RenderFragment ApprovalPill(MemberRow row) => __builder =>
+    {
+        if (row.Admin || row.Rights.Approver) { <span class="pill ap-apr" title="Approuve les publications"><Ico Name="shield" Size="12" /> Approbateur</span> }
+        else if (row.Rights.SubmitApproval) { <span class="pill ap-sub" title="Ses publications doivent être approuvées">Soumis approbation</span> }
+    };
     private static RenderFragment ReadPill() => __builder => { <span class="pill dark"><Ico Name="eye" Size="12" /> Tout · lecture</span> };
 
     // « Caisses, Vitrines » : ses zones, puis le nombre d'écrans attribués un à un

@@ -19,6 +19,10 @@ public static class Approvals
     /// <summary>La brique agit : plan Pro, option activée, espace non coupé. Sinon tout le monde publie directement.</summary>
     public static bool Active(Tenant t) => t.IsGrowth && t.ApprovalOn && !t.IsCut;
 
+    /// <summary>L'approbation suppose un approbateur et une personne soumise : il faut au moins deux utilisateurs (administrateurs et membres actifs).</summary>
+    public const int MinUsers = 2;
+    public static bool EnoughUsers(IEnumerable<User> users) => users.Count(u => !u.Disabled) >= MinUsers;
+
     public static int Reminder(Tenant t) => Math.Clamp(t.ApprovalReminderHours, 1, 720);
     public static int ExpireDays(Tenant t) => Math.Clamp(t.ApprovalExpireDays, 1, 90);
     public static int KeepMonths(Tenant t) => Math.Clamp(t.ApprovalKeepMonths, 1, 60);
@@ -255,7 +259,7 @@ public class ApprovalService(JsonStore store, IScreenPublishing screens, IApprov
     {
         var text = comment?.Trim();
         if (!approve && string.IsNullOrEmpty(text)) return "Expliquez ce qu'il faut corriger : l'auteur le lira dans sa notification.";
-        var (error, req, published) = store.Write(db =>
+        var (error, req, published) = store.Write<(string? Error, ApprovalRequest? Request, List<Guid> Done)>(db =>
         {
             var t = db.Clients.FirstOrDefault(c => c.Id == clientId);
             var r = db.ApprovalRequests.FirstOrDefault(x => x.Id == requestId && x.ClientId == clientId);
