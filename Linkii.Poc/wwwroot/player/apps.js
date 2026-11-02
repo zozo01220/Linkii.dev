@@ -285,14 +285,16 @@
   });
 
   /* ---------- Flux RSS / actualités ---------- */
-  A.register('rss', function (h) {
+  // « rss » : contenu de la liste de lecture (pleine page ou bandeau) ; « rss-widget » : widget d'écran, toujours en bandeau défilant
+  function rssApp(h) {
     var s = h.settings, el = h.el;
     if (!h.compact) el.className += ' dl';
     h.data(function (d) {
       var items = (d && d.items) || [];
+      if (s.count > 0) items = items.slice(0, +s.count);
       if (h.compact) {   // bandeau : titres défilants
         var txt = items.map(function (i) { return h.esc(i.title); }).join('<i class="sep">•</i>');
-        h.ticker(txt || h.esc('Aucune actualité'), true);
+        h.ticker(txt || h.esc('Aucune actualité'), true, { slow: 1.6, normal: 1, fast: 0.6 }[s.scrollSpeed] || 1);
         return;
       }
       var html = '<div class="dl-h">' + h.esc((d && d.title) || 'Actualités') + '</div>';
@@ -304,7 +306,9 @@
       el.innerHTML = html + (items.length ? '' : '<div class="dl-empty">Aucune actualité</div>');
       h.fit();
     }, 5 * 60 * 1000);
-  });
+  }
+  A.register('rss', rssApp);
+  A.register('rss-widget', rssApp);
 
   /* ---------- Facebook : publications d'une Page (mur de 4, carte unique, dernière publication) ---------- */
   A.register('facebook', function (h) {
