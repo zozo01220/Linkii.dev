@@ -6,6 +6,20 @@
 
   function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
+
+    // Comme le player (keepFreeInside) : un widget ne déborde jamais de l'écran, sa taille réelle dépendant des données (ville, vent…).
+    // Affichage seulement (translate) : la position enregistrée ne change pas.
+    function fit(canvas) {
+      if (!canvas) return;
+      var cw = canvas.clientWidth, ch = canvas.clientHeight;
+      canvas.querySelectorAll('[data-wid]').forEach(function (el) {
+        if (el.classList.contains('dragging')) return;
+        el.style.translate = '';
+        var dx = Math.min(0, cw - (el.offsetLeft + el.offsetWidth)), dy = Math.min(0, ch - (el.offsetTop + el.offsetHeight));
+        var x = Math.max(dx, -el.offsetLeft), y = Math.max(dy, -el.offsetTop);
+        if (x || y) { el.style.translate = x + 'px ' + y + 'px'; el.__fit = { x: x, y: y }; } else el.__fit = null;
+      });
+    }
   function attach(canvas, dotnet) {
     if (!canvas || canvas.__lkw) return;
     canvas.__lkw = true;
@@ -17,10 +31,20 @@
       return { x: Math.round(x / cw * 1000) / 10, y: Math.round(y / ch * 1000) / 10 };
     }
 
+    // la position affichée peut différer de l'enregistrée (translate de fit) : on la fige avant de déplacer
+    function bake(el) {
+      if (!el.__fit) return;
+      var cw = canvas.clientWidth, ch = canvas.clientHeight;
+      el.style.left = Math.round((el.offsetLeft + el.__fit.x) / cw * 1000) / 10 + '%';
+      el.style.top = Math.round((el.offsetTop + el.__fit.y) / ch * 1000) / 10 + '%';
+      el.style.translate = ''; el.__fit = null;
+    }
+
     canvas.addEventListener('pointerdown', function (e) {
       var el = e.target.closest('[data-wid]');
       if (!el || !canvas.contains(el) || e.button > 0 || e.target.closest('.wg-gear')) return;
       e.preventDefault();
+      bake(el);
       el.setPointerCapture(e.pointerId);
       drag = { el: el, dx: e.clientX - el.offsetLeft, dy: e.clientY - el.offsetTop, moved: false, p: null };
       el.classList.add('dragging');
@@ -64,6 +88,7 @@
       var k = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
       if (!k) return;
       e.preventDefault();
+      bake(el);
       var step = e.shiftKey ? 5 : 1;
       var cw = canvas.clientWidth, ch = canvas.clientHeight;
       var p = pos(el, el.offsetLeft + k[0] * step * cw / 100, el.offsetTop + k[1] * step * ch / 100);
@@ -72,5 +97,5 @@
     });
   }
 
-  w.linkiiWidgets = { attach: attach };
+  w.linkiiWidgets = { attach: attach, fit: fit };
 })(window);

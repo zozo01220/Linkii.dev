@@ -93,7 +93,7 @@
                 @foreach (var w in widgets)
                 {
                     var wid = w;
-                    <div class="wg-item @(selected == wid.Id ? "sel" : "")" data-wid="@wid.Id" tabindex="0" role="button"
+                    <div class="wg-item @(selected == wid.Id ? "sel" : "") @(HomeAssistantRules.IsHaApp(wid.AppId) ? "wg-item-ha" : "")" data-wid="@wid.Id" tabindex="0" role="button"
                          aria-label="@Label(wid) — flèches pour déplacer, Entrée pour régler"
                          style="left:@Pct(wid.X);top:@Pct(wid.Y);--s:@wid.Scale.ToString(Inv);@TextStyle(wid)"
                          @onclick="() => OpenSettings(wid)" @onfocus="() => selected = wid.Id" @onkeydown="e => OnItemKey(e, wid)">
@@ -564,9 +564,14 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (focusHead && headRename) { focusHead = false; await headInput.FocusAsync(); }
-        if (!firstRender) return;
+        if (!firstRender)
+        {
+            if (widgets.Count > 0 && canvas.Context != null) await JS.InvokeVoidAsync("linkiiWidgets.fit", canvas);   // comme le player : un widget ne dépasse jamais de l'écran
+            return;
+        }
         self = DotNetObjectReference.Create(this);
         await JS.InvokeVoidAsync("linkiiWidgets.attach", canvas, self);
+        await JS.InvokeVoidAsync("linkiiWidgets.fit", canvas);
     }
 
     [JSInvokable]
