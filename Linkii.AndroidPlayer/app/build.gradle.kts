@@ -3,7 +3,7 @@ plugins {
 }
 
 // Fichiers de sortie : Linkivi-<version>-debug.apk, Linkivi-<version>-release.aab
-base { archivesName.set("Linkivi-1.3.4") }
+base { archivesName.set("Linkivi-1.3.5") }
 
 android {
     namespace = "ch.linkii.player"
