@@ -28,7 +28,7 @@ public static class Thumbnails
             lock (Gate)
             {
                 if (File.Exists(thumb)) return thumb;
-                using var bmp = SKBitmap.Decode(source);
+                using var bmp = ImageOrient.Decode(source);   // remise à l'endroit (EXIF) : une photo en portrait reste en portrait
                 if (bmp == null) return null;
                 if (bmp.Width <= width) return null;   // déjà plus petite que la miniature : l'original suffit
                 var h = Math.Max(1, (int)Math.Round(bmp.Height * (double)width / bmp.Width));

@@ -360,6 +360,7 @@ else
                                     @if (SourceLabel(item) is { } psrc) { <span class="lx-src" title="@(MediaLibrary.IsDrive(item) ? DriveTitle(DriveOf(item)) : null)">@if (MediaLibrary.IsDrive(item)) { <Ico Name="folder" Size="11" /> }@psrc</span> }
                                     <span class="ph-use @(unused.Contains(item.Id) ? "no" : "")" title="@(unused.Contains(item.Id) ? "Non utilisé" : "Utilisé dans une liste")"></span>
                                     @ShareBadge(item, "ph-share")
+                                    @RotBtns(item, true)
                                 }
                             </div>
                         }
@@ -423,6 +424,7 @@ else
                             @if (item.Type == "video") { <span class="lx-badge"><Ico Name="play" Size="11" />@(Seconds(item) is { } s ? Helpers.FormatDuration(s) : "")</span> }
                             @if (unused.Contains(item.Id)) { <span class="lx-unused">Non utilisé</span> }
                             @ShareBadge(item, "ph-share")
+                            @RotBtns(item, false)
                         }
                     </div>
                     @* légende (zone blanche du bas) : nom et détails, menu ⋮ en haut à droite *@
@@ -976,6 +978,28 @@ else
 
     private static string Plural(int n, string one, string many) => $"{n} {(n > 1 ? many : one)}";
 
+    private readonly HashSet<Guid> rotating = new();
+
+    /// <summary>Pivoter à gauche / à droite, au survol de l'image (images modifiables seulement) : le fichier est réécrit aussitôt dans son nouveau sens.</summary>
+    private RenderFragment RotBtns(MediaItem item, bool small) => __builder =>
+    {
+        if (!MediaLibrary.CanRotate(item) || !CanEdit(item)) return;
+        <span class="rot @(small ? "sm" : "") @(rotating.Contains(item.Id) ? "busy" : "")" role="group" aria-label="Pivoter l'image" @onclick:stopPropagation="true">
+            <button type="button" title="Pivoter à gauche" aria-label="Pivoter @item.Name à gauche" @onclick="() => Rotate(item, false)"><Ico Name="rotate-left" Size="@(small ? 15 : 17)" /></button>
+            <button type="button" title="Pivoter à droite" aria-label="Pivoter @item.Name à droite" @onclick="() => Rotate(item, true)"><Ico Name="rotate-right" Size="@(small ? 15 : 17)" /></button>
+        </span>
+    };
+
+    private async Task Rotate(MediaItem item, bool right)
+    {
+        menuFor = null;
+        if (!rotating.Add(item.Id)) return;
+        bool ok;
+        try { ok = await Task.Run(() => Library.Rotate(item.Id, right)); }
+        finally { rotating.Remove(item.Id); }
+        if (ok) { Toast.Ok("Orientation enregistrée."); Reload(); } else Toast.Error("Impossible de pivoter cette image.");
+    }
+
     /// <summary>Menu ⋮ de la carte (vue en cartes) : Voir, Partager, Ranger, Supprimer. Le menu complet (renommer, télécharger…) reste celui de la liste.</summary>
     private RenderFragment CardMenu(MediaItem item, bool overlay = false) => __builder =>
     {
@@ -988,6 +1012,11 @@ else
                 <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
                 <div class="kebab-menu" role="menu">
                     <button type="button" role="menuitem" @onclick="() => { menuFor = null; Open(item); }"><Ico Name="eye" Size="16" /> Voir</button>
+                    @if (MediaLibrary.CanRotate(item) && CanEdit(item))
+                    {
+                        <button type="button" role="menuitem" @onclick="() => Rotate(item, false)"><Ico Name="rotate-left" Size="16" /> Pivoter à gauche</button>
+                        <button type="button" role="menuitem" @onclick="() => Rotate(item, true)"><Ico Name="rotate-right" Size="16" /> Pivoter à droite</button>
+                    }
                     @if (Shareable(item)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingKind = ShareKind.Media; sharingMedia = new() { (item.Id, item.Name) }; }"><Ico Name="share" Size="16" /> Partager…</button> }
                     @if (FoldersShown && Selectable(item)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (item.Id, item.Name) }; }"><Ico Name="folder" Size="16" /> Ranger…</button> }
                     @if (CanDel(item)) { <button type="button" role="menuitem" class="danger" disabled="@(Pres.Is(item) && !unused.Contains(item.Id))" title="@(Pres.Is(item) && !unused.Contains(item.Id) ? "Utilisée : retirez-la d'abord des contenus" : null)" @onclick="() => { menuFor = null; confirmDelete = new() { item.Id }; }"><Ico Name="trash" Size="16" /> Supprimer</button> }

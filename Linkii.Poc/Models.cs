@@ -938,6 +938,8 @@ public class MediaItem : IClientOwned, IAreaOwned, IOwned
     public long? Size { get; set; }                // octets (images et vidéos) ; complété à la lecture pour les fichiers importés avant
     public int? Width { get; set; }                // pixels (images et vidéos) ; lus dans le fichier pour ceux importés avant
     public int? Height { get; set; }
+    /// <summary>Compteur de rotations du fichier : ajouté aux adresses des miniatures pour que les navigateurs les rechargent.</summary>
+    public int Rev { get; set; }
     public DateTime? AddedUtc { get; set; }
     /// <summary>Dossier de la médiathèque (null : racine de l'aire). Voir <see cref="MediaFolder"/>.</summary>
     public Guid? FolderId { get; set; }

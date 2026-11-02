@@ -58,6 +58,7 @@ public static class MediaProbe
     {
         using var fs = File.OpenRead(path);
         var b = new byte[9];
+        var exif = 1;
         if (fs.ReadByte() != 0xFF || fs.ReadByte() != 0xD8) return null;
         while (true)
         {
@@ -68,13 +69,40 @@ public static class MediaProbe
             if (c is 0xD8 or 0x01 or (>= 0xD0 and <= 0xD7)) continue;   // marqueurs sans contenu
             if (fs.Read(b, 0, 2) < 2) return null;
             var len = BinaryPrimitives.ReadUInt16BigEndian(b);
+            if (c == 0xE1 && len > 16)   // APP1 : EXIF, dont l'orientation de la photo
+            {
+                var ex = new byte[len - 2];
+                if (fs.Read(ex, 0, ex.Length) < ex.Length) return null;
+                exif = ExifOrientation(ex);
+                continue;
+            }
             if (c is >= 0xC0 and <= 0xCF and not 0xC4 and not 0xC8 and not 0xCC)   // SOFn : précision, hauteur puis largeur
             {
                 if (fs.Read(b, 0, 5) < 5) return null;
-                return (BinaryPrimitives.ReadUInt16BigEndian(b.AsSpan(3)), BinaryPrimitives.ReadUInt16BigEndian(b.AsSpan(1)));
+                int w = BinaryPrimitives.ReadUInt16BigEndian(b.AsSpan(3)), h = BinaryPrimitives.ReadUInt16BigEndian(b.AsSpan(1));
+                return exif >= 5 ? (h, w) : (w, h);   // orientations 5 à 8 : la photo est affichée tournée d'un quart de tour
             }
             fs.Seek(len - 2, SeekOrigin.Current);
         }
+    }
+
+    /// <summary>Étiquette d'orientation (1 à 8) d'un bloc APP1 « Exif » ; 1 si absente.</summary>
+    private static int ExifOrientation(byte[] a)
+    {
+        if (a.Length < 14 || a[0] != 'E' || a[1] != 'x' || a[2] != 'i' || a[3] != 'f') return 1;
+        var le = a[6] == 'I';
+        ushort U16(int o) => o + 2 > a.Length ? (ushort)0 : le ? BinaryPrimitives.ReadUInt16LittleEndian(a.AsSpan(o)) : BinaryPrimitives.ReadUInt16BigEndian(a.AsSpan(o));
+        uint U32(int o) => o + 4 > a.Length ? 0 : le ? BinaryPrimitives.ReadUInt32LittleEndian(a.AsSpan(o)) : BinaryPrimitives.ReadUInt32BigEndian(a.AsSpan(o));
+        var ifd = 6 + (int)U32(10);
+        if (ifd < 6 || ifd + 2 > a.Length) return 1;
+        int n = U16(ifd);
+        for (var i = 0; i < n; i++)
+        {
+            var e = ifd + 2 + i * 12;
+            if (e + 12 > a.Length) break;
+            if (U16(e) == 0x0112) { var v = U16(e + 8); return v is >= 1 and <= 8 ? v : 1; }
+        }
+        return 1;
     }
 
     private static (int, int)? Webp(string path)

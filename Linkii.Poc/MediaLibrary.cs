@@ -34,6 +34,11 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
         {
             if (MediaProbe.Size(m.FilePath!) is { } d) { m.Width = d.W; m.Height = d.H; }
         }
+        // photos JPEG importées avant la lecture de l'orientation : dimensions relues une fois (une photo en portrait n'est plus comptée en paysage)
+        foreach (var m in list.Where(m => m.Type == "image" && m.Width > 0 && m.FileName != null && m.Status == null && Path.GetExtension(m.FileName).ToLowerInvariant() is ".jpg" or ".jpeg" && DimsChecked.TryAdd(m.Id, true)))
+        {
+            if (MediaProbe.Size(m.FilePath!) is { } d) { m.Width = d.W; m.Height = d.H; }
+        }
         return list.OrderByDescending(m => m.AddedUtc ?? DateTime.MinValue).ThenBy(m => m.Name).ToList();
     }
 
@@ -156,6 +161,32 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
         names.AddRange(d.Playlists.Where(p => p.Draft.Any(i => i.MediaId == mediaId)).Select(p => "liste de lecture « " + p.Name + " »"));
         return names.Distinct().ToList();
     });
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, bool> DimsChecked = new();
+    private static readonly object RotateGate = new();
+
+    /// <summary>Image que l'on peut pivoter : un fichier de la médiathèque (pas Drive) en JPEG, PNG ou WebP, prêt.</summary>
+    public static bool CanRotate(MediaItem m) => m.Type == "image" && m.AppId == null && m.Status == null && !IsDrive(m) && m.FileName != null && ImageOrient.CanRotate(m.FileName);
+
+    /// <summary>Pivote l'image d'un quart de tour et enregistre le fichier dans son nouveau sens (miniatures recréées à la demande).</summary>
+    public bool Rotate(Guid id, bool right)
+    {
+        var m = store.Read(d => d.Media.FirstOrDefault(x => x.Id == id && IsOwnFile(x) && CanRotate(x) && FolderOps.CanEditFile(d, x)));
+        if (m == null || !File.Exists(m.FilePath)) return false;
+        (int W, int H)? size;
+        lock (RotateGate) size = ImageOrient.Rotate(m.FilePath!, right);
+        if (size is not { } s) return false;
+        long len = 0;
+        try { len = new FileInfo(m.FilePath!).Length; } catch { }
+        store.Write(d =>
+        {
+            if (d.Media.FirstOrDefault(x => x.Id == id) is not { } t) return;
+            t.Width = s.W; t.Height = s.H; t.Rev++;
+            if (len > 0) t.Size = len;
+        });
+        Thumbnails.Delete(m);
+        return true;
+    }
 
     public void Rename(Guid id, string name)
     {

@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Pivoter les images au survol</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--brand:#0B1F3A;--row:#E8ECF1;--signal:#3B82C4;--ok:#2E9E6B;--mono:"IBM Plex Mono",monospace}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;color:var(--ink);font-size:14px;line-height:1.45;background:#fff;overflow:hidden}
+button{font:inherit;color:inherit}
+.mock{position:fixed;top:0;left:0;right:0;height:44px;z-index:100;background:#FFF8E1;border-bottom:1px dashed #E0B84A;padding:0 16px;font-size:13px;color:#6B5200;display:flex;gap:8px;align-items:center;white-space:nowrap;overflow-x:auto}
+.mock button{border:1px solid #E0B84A;background:#fff;border-radius:4px;padding:3px 11px;cursor:pointer;font-size:13px}
+.mock button.on{background:#6B5200;color:#fff}
+.mock label{display:inline-flex;gap:5px;align-items:center;margin-left:10px;cursor:pointer}
+.mock .sp{flex:1}
+.wrap{position:fixed;top:44px;left:0;right:0;bottom:0;display:flex}
+.page{flex:1;overflow:auto;background:var(--bg);padding:24px 40px 60px}
+h1{margin:0 0 4px;font-size:24px;font-weight:500}
+.sub{color:var(--muted);margin-bottom:18px}
+.scene{display:none}.scene.on{display:block}
+/* ---- cartes (reprend .lx-mgrid / .lx-mc) ---- */
+.lx-mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:24px 20px}
+.lx-mc{position:relative;min-width:0;cursor:pointer;border-radius:8px}
+.lx-mc .th{position:relative;aspect-ratio:16/10;border-radius:8px;overflow:hidden;background:var(--row);border:1px solid rgba(11,31,58,.06)}
+.lx-mc:hover .th{border-color:var(--line-2)}
+.lx-mc .nm{font-size:14.5px;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lx-mc .mt{font-size:12px;color:var(--muted)}
+.th img,.ph-t img{position:absolute;display:block;object-fit:cover;max-width:none;transition:transform .28s ease}
+.th img{left:50%;top:50%}
+.lx-badge{position:absolute;right:6px;bottom:6px;display:inline-flex;gap:4px;align-items:center;background:rgba(11,31,58,.72);color:#fff;font-size:11.5px;border-radius:3px;padding:1px 6px;font-family:var(--mono)}
+.lx-unused{position:absolute;right:6px;top:6px;background:rgba(255,255,255,.95);color:var(--muted);font-size:11px;border-radius:3px;padding:1px 6px;z-index:2}
+.vid{position:absolute;inset:0;background:linear-gradient(135deg,#27405F,#0B1F3A);display:grid;place-items:center;color:#fff}
+.chk{position:absolute;top:8px;left:8px;width:18px;height:18px;border-radius:3px;border:1.5px solid #fff;background:rgba(255,255,255,.85);opacity:0;z-index:3;transition:opacity .12s}
+.lx-mc:hover .chk,.ph-t:hover .chk{opacity:1}
+/* ---- NOUVEAU : paire de boutons de rotation ---- */
+.rot{position:absolute;left:50%;bottom:10px;transform:translate(-50%,6px);z-index:4;display:flex;gap:2px;padding:3px;border-radius:999px;background:rgba(11,31,58,.78);backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
+.lx-mc:hover .rot,.lx-mc:focus-within .rot,.ph-t:hover .rot,.ph-t:focus-within .rot{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+.rot button{width:30px;height:30px;border-radius:50%;border:0;background:transparent;color:#fff;display:grid;place-items:center;cursor:pointer;padding:0}
+.rot button:hover{background:rgba(255,255,255,.22)}
+.rot button:active{background:rgba(255,255,255,.34)}
+.rot button:focus-visible{outline:2px solid #fff;outline-offset:-2px}
+.rot svg{width:17px;height:17px}
+.rot.sm{bottom:7px;padding:2px}.rot.sm button{width:26px;height:26px}.rot.sm svg{width:15px;height:15px}
+.rot.busy button{opacity:.45;pointer-events:none}
+.ro .rot{display:none}
+/* ---- photos (reprend .ph-grid / .ph-t) ---- */
+.ph-grid{--rh:170px;display:flex;flex-wrap:wrap;gap:4px}
+.ph-grid::after{content:"";flex-grow:1e6}
+.ph-t{position:relative;flex-grow:calc(var(--r,1.5) * 100);flex-basis:calc(var(--r,1.5) * var(--rh));height:var(--rh);min-width:60px;border-radius:4px;overflow:hidden;background:var(--row);cursor:pointer;transition:flex-basis .28s,flex-grow .28s}
+.ph-t img{left:50%;top:50%}
+.ph-t::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.28),transparent 38%);opacity:0;transition:opacity .12s;pointer-events:none;z-index:1}
+.ph-t:hover::after{opacity:1}
+.ph-use{position:absolute;left:7px;bottom:7px;z-index:2;width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 2px rgba(255,255,255,.9)}
+.ph-use.no{background:#D9A441}
+.ph-dur{position:absolute;right:6px;bottom:6px;z-index:2;background:rgba(11,31,58,.72);color:#fff;font-size:11px;border-radius:3px;padding:1px 6px;font-family:var(--mono)}
+.ph-t .rot{bottom:9px}
+/* ---- notes ---- */
+.side{width:330px;flex:none;border-left:1px solid var(--line);background:#fff;overflow:auto;padding:22px 22px 40px;font-size:13px}
+.side h2{font-size:15px;margin:0 0 8px;font-weight:600}
+.side h3{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:20px 0 6px;font-weight:600}
+.side ul{margin:0;padding-left:18px}.side li{margin:4px 0}
+.side code{font-family:var(--mono);font-size:12px;background:var(--row);padding:0 4px;border-radius:3px}
+.tip{display:inline-block;background:var(--brand);color:#fff;border-radius:4px;padding:2px 8px;font-size:12px}
+#toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:var(--brand);color:#fff;padding:9px 16px;border-radius:6px;font-size:13px;opacity:0;pointer-events:none;transition:.2s;z-index:200}
+#toast.on{opacity:1;transform:translate(-50%,0)}#toast.ok{background:#1F7A52}
+.demo{display:flex;gap:6px;align-items:center;margin:8px 0}
+.demo .rot{position:static;opacity:1;transform:none;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="mock">
+  <b>Maquette — Contenus : pivoter une image au survol</b>
+  <button data-s="cards" class="on">Mode cartes</button>
+  <button data-s="photos">Mode photos</button>
+  <label><input type="checkbox" id="ro"> Dossier en lecture seule</label>
+  <span class="sp"></span>
+  <span>Survolez une image, puis cliquez sur ⟲ ou ⟳</span>
+</div>
+
+<div class="wrap">
+<div class="page">
+  <h1>Contenus</h1>
+  <div class="sub">8 médias · 24,6 Mo</div>
+
+  <!-- ============ MODE CARTES ============ -->
+  <div class="scene on" id="cards">
+    <div class="lx-mgrid" id="g1"></div>
+  </div>
+
+  <!-- ============ MODE PHOTOS ============ -->
+  <div class="scene" id="photos">
+    <div class="ph-grid" id="g2"></div>
+  </div>
+</div>
+
+<aside class="side">
+  <h2>Ce que montre la maquette</h2>
+  <p>Deux boutons ronds, regroupés en pastille sombre, apparaissent <b>au survol de l'image</b>, centrés en bas.</p>
+  <div class="demo"><span class="rot"><button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></button><button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button></span> <span class="tip">⟲ gauche · ⟳ droite</span></div>
+
+  <h3>Règles</h3>
+  <ul>
+    <li><b>Images seulement</b> (JPG, PNG, WebP…). Rien sur les vidéos, présentations, PDF — la 6<sup>e</sup> carte / la vidéo de la grille n'ont pas les boutons.</li>
+    <li>Un clic = un quart de tour (90°). L'image tourne avec une courte animation.</li>
+    <li><b>Enregistrement automatique</b> : dès le clic, le fichier est réécrit dans sa nouvelle orientation (pas de bouton « Enregistrer »). Un message « Orientation enregistrée » confirme ; les boutons sont brièvement grisés pendant l'écriture.</li>
+    <li>La rotation est <b>enregistrée dans le fichier</b> : la miniature, l'aperçu et l'affichage sur les écrans sont tous pivotés, partout où l'image est utilisée.</li>
+    <li><b>Mode photos</b> : la tuile change de proportions (paysage ↔ portrait) et la rangée se réorganise.</li>
+    <li>Absents si l'on n'a pas le droit de modifier (dossier en lecture seule, média partagé) — cochez la case en haut pour voir.</li>
+    <li>Info-bulles : « Pivoter à gauche » / « Pivoter à droite ».</li>
+  </ul>
+
+  <h3>Hors survol</h3>
+  <ul>
+    <li><b>Application mobile</b> (pas de survol) : les deux actions « Pivoter à gauche / à droite » sont ajoutées au menu ⋮ et à l'appui long.</li>
+    <li>Le menu ⋮ des cartes reçoit aussi les deux entrées, pour le clavier.</li>
+  </ul>
+
+  <h3>Compatibilité avec l'existant</h3>
+  <ul>
+    <li>Coin haut-gauche : case de sélection · haut-droite : « Non utilisé » / source · bas-gauche : point d'usage · bas-droite : durée / partage. La pastille de rotation reste au <b>centre bas</b>, sans chevauchement.</li>
+  </ul>
+</aside>
+</div>
+
+<div id="toast"></div>
+<script>
+const ICON_L='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>';
+const ICON_R='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>';
+const PLAY='<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4l14 8-14 8z"/></svg>';
+const IMGS=[
+ ['DSC02907','../demo-images/01-lac-barque.jpg','3072×2304 · 2,55 Mo'],
+ ['DSC02904','../demo-images/02-lac-automne.jpg','3072×2304 · 2,4 Mo'],
+ ['DSC02891','../demo-images/03-montagnes-neige.jpg','3072×2304 · 2,62 Mo'],
+ ['DSC02879','../demo-images/04-cote-turquoise.jpg','3072×2304 · 2,42 Mo'],
+ ['DSC02803','../demo-images/04-cote-turquoise.jpg','3072×2304 · 2,56 Mo'],
+ ['DSC02799','../demo-images/01-lac-barque.jpg','3072×2304 · 2,69 Mo'],
+ ['DSC02793','../demo-images/02-lac-automne.jpg','3072×2304 · 2,75 Mo'],
+];
+function rotBtns(cls){return `<span class="rot ${cls||''}" role="group" aria-label="Pivoter l'image"><button type="button" data-d="-90" title="Pivoter à gauche" aria-label="Pivoter à gauche">${ICON_L}</button><button type="button" data-d="90" title="Pivoter à droite" aria-label="Pivoter à droite">${ICON_R}</button></span>`}
+
+const g1=document.getElementById('g1'), g2=document.getElementById('g2');
+IMGS.forEach((m,i)=>{
+  g1.insertAdjacentHTML('beforeend',`<div class="lx-mc" data-rot="0"><div class="th"><img src="${m[1]}" alt=""><span class="chk"></span>${i%3==1?'<span class="lx-unused">Non utilisé</span>':''}${rotBtns()}</div><div class="nm">${m[0]}</div><div class="mt">${m[2]}</div></div>`);
+});
+g1.insertAdjacentHTML('beforeend',`<div class="lx-mc"><div class="th"><div class="vid"><svg width="34" height="34" viewBox="0 0 24 24" fill="currentColor" opacity=".8"><path d="M6 4l14 8-14 8z"/></svg></div><span class="chk"></span><span class="lx-badge">${PLAY}0:42</span></div><div class="nm">Accueil-saison.mp4</div><div class="mt">1920×1080 · 18,2 Mo — <i>pas de rotation (vidéo)</i></div></div>`);
+
+IMGS.forEach((m,i)=>{
+  g2.insertAdjacentHTML('beforeend',`<div class="ph-t" data-rot="0" title="${m[0]}"><img src="${m[1]}" alt=""><span class="chk"></span><span class="ph-use ${i%3==1?'no':''}"></span>${rotBtns('sm')}</div>`);
+});
+g2.insertAdjacentHTML('beforeend',`<div class="ph-t" style="--r:1.78" title="Accueil-saison.mp4"><div class="vid"></div><span class="chk"></span><span class="ph-dur">${PLAY} 0:42</span></div>`);
+
+/* géométrie : l'image tournée est dessinée dans une boîte inversée puis pivotée */
+function layout(t){
+  const img=t.querySelector('img'); if(!img||!img.naturalWidth) return;
+  const deg=+t.dataset.rot||0, quarter=Math.abs(deg/90)%2===1;
+  const nat=img.naturalWidth/img.naturalHeight;
+  if(t.classList.contains('ph-t')){
+    t.style.setProperty('--r',(quarter?1/nat:nat).toFixed(3));
+  }
+  const W=t.clientWidth, H=t.clientHeight; if(!W||!H) return;
+  // boîte de l'image avant rotation : si 90°, largeur/hauteur échangées
+  const w=quarter?H:W, h=quarter?W:H;
+  img.style.width=w+'px'; img.style.height=h+'px';
+  img.style.marginLeft=(-w/2)+'px'; img.style.marginTop=(-h/2)+'px';
+  img.style.transform='rotate('+deg+'deg)';
+}
+let tt;function toast(msg,done){const el=document.getElementById('toast');el.textContent=msg;el.classList.add('on');el.classList.toggle('ok',!!done);clearTimeout(tt);if(done)tt=setTimeout(()=>el.classList.remove('on'),1800)}
+const tiles=[...document.querySelectorAll('[data-rot]')];
+const ro=new ResizeObserver(es=>es.forEach(e=>layout(e.target.closest('[data-rot]')||e.target)));
+tiles.forEach(t=>{
+  const th=t.classList.contains('ph-t')?t:t.querySelector('.th');
+  ro.observe(th);
+  const img=t.querySelector('img');
+  img.addEventListener('load',()=>{ if(t.classList.contains('ph-t')) t.style.setProperty('--r',(img.naturalWidth/img.naturalHeight).toFixed(3)); layout(t); });
+  if(img.complete) img.dispatchEvent(new Event('load'));
+  t.querySelectorAll('.rot button').forEach(b=>b.addEventListener('click',e=>{
+    e.stopPropagation();
+    const rb=t.querySelector('.rot'); rb.classList.add('busy');
+    t.dataset.rot=(+t.dataset.rot)+(+b.dataset.d);
+    layout(t);
+    toast('Enregistrement…');
+    setTimeout(()=>{rb.classList.remove('busy'); layout(t); toast('✓ Orientation enregistrée',true)},700);
+  }));
+});
+
+document.querySelectorAll('.mock [data-s]').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.mock [data-s]').forEach(x=>x.classList.toggle('on',x===b));
+  document.querySelectorAll('.scene').forEach(s=>s.classList.toggle('on',s.id===b.dataset.s));
+  tiles.forEach(layout);
+});
+document.getElementById('ro').onchange=e=>document.querySelector('.page').classList.toggle('ro',e.target.checked);
+</script>
+</body>
+</html>
