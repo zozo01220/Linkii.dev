@@ -149,8 +149,11 @@
     let doc = null;
     try { doc = o.doc ? JSON.parse(o.doc) : null; } catch (x) { doc = null; }
     const fresh = !doc || !Array.isArray(doc.els);
-    const tpl = fresh && Number.isInteger(o.tpl) && TPL[o.tpl] ? TPL[o.tpl] : null;   // départ depuis la galerie de la page Compositions
-    D = tpl ? { v: 1, w: tpl.w, h: tpl.h, bg: tpl.bg, els: tpl.make() }
+    const dt = fresh && expert && Number.isInteger(o.dtpl) && DTPL[o.dtpl] && chartSources().some(s => s.id === o.ds) ? DTPL[o.dtpl] : null;   // modèle « jeux de données » (§167) : relié au jeu choisi
+    const tpl = dt || (fresh && Number.isInteger(o.tpl) && TPL[o.tpl] ? TPL[o.tpl] : null);   // départ depuis la galerie de la page Compositions
+    let dels = null;
+    if (dt) { try { dels = dt.make(o.ds); } catch (x) { dels = []; } }   // jeu sans les colonnes voulues : page vide plutôt qu'une erreur
+    D = tpl ? { v: 1, w: tpl.w, h: tpl.h, bg: tpl.bg, els: dt ? dels : tpl.make() }
       : fresh ? { v: 1, w: 1920, h: 1080, bg: '#FFFFFF', els: [] } : { v: 1, w: doc.w, h: doc.h, bg: doc.bg || '#FFFFFF', els: doc.els };
     if (tpl && !o.name) name = savedName = tpl.name;
     uid = 1 + D.els.reduce((m, e) => Math.max(m, parseInt(String(e.id || '').replace(/\D/g, ''), 10) || 0), 0);
@@ -2025,12 +2028,12 @@
   const chartSrc = () => { const c = cur(), id = c && (c.type === 'chart' || c.type === 'list') ? c.source : null; return chartSources().find(s => s.id === id) || chartSources()[0] || null; };
   const seriesFor = id => { const n = chartCols(id).find(c => c.type === 'number'); return n ? [{ key: n.key, agg: 'sum', name: fname(n) }] : [{ key: '', agg: 'count', name: '' }]; };
   function nextChartName(base, kind) {
-    const used = D.els.filter(x => x.type === 'chart').map(x => x.name), b = String(base || 'Graphique').replace(/ \d+$/, ''), pre = IND.includes(kind) ? 'Indicateur' : 'Graphique';
+    const used = (D ? D.els : []).filter(x => x.type === 'chart').map(x => x.name), b = String(base || 'Graphique').replace(/ \d+$/, ''), pre = IND.includes(kind) ? 'Indicateur' : 'Graphique';
     let n = 1, nm = pre + ' · ' + b; while (used.includes(nm)) nm = pre + ' · ' + b + ' ' + ++n;
     return nm;
   }
-  function makeChart(kind, ink) {
-    const s = chartSrc(), id = s.id, cs = chartCols(id), one = isOne({ kind }), ser = seriesFor(id);
+  function makeChart(kind, ink, srcId) {
+    const s = (srcId && chartSources().find(x => x.id === srcId)) || chartSrc(), id = s.id, cs = chartCols(id), one = isOne({ kind }), ser = seriesFor(id);
     const cat = one ? null : (kind === 'line' || kind === 'area' || kind === 'trend' ? cs.find(c => c.type === 'date') : null) || cs.find(c => c.type === 'text' && c.key !== ser[0].key) || cs.find(c => c.type === 'date');
     const S = { bars: [1000, 640], hbars: [900, 620], line: [1000, 640], area: [1000, 640], pie: [760, 560], donut: [760, 560], gauge: [560, 380], kpi: [560, 300], ring: [420, 380], progress: [900, 220], status: [560, 220], trend: [900, 260] }[kind];
     const st = kind === 'status';
@@ -2484,25 +2487,148 @@
     if (pv.view === 'screen') ov.querySelector('.ce-pvbz').style.padding = b + 'px';
   }
 
-  // Galerie de modèles de la page Compositions : dotnet.Template(index) ouvre l'éditeur sur le modèle choisi.
+  // ---------- modèles « jeux de données » (§167) ----------
+  // Groupe de la galerie (page Compositions) réservé au mode expert, à la licence Pro et à une organisation qui a au moins un jeu de données.
+  // Chaque modèle se relie au jeu choisi : colonnes de catégories, de valeurs et de dates repérées par leur type. Pas d'aperçu en grand : une fenêtre demande le jeu.
+  const DCAT = 'Modèles de données';
+  const dData = id => { const cs = chartCols(id); return { cs, num: cs.filter(c => c.type === 'number'), txt: cs.filter(c => c.type === 'text'), date: cs.find(c => c.type === 'date') }; };
+  const dCh = (id, kind, ink, o) => Object.assign(makeChart(kind, ink, id), o);
+  const dSrcName = id => (chartSources().find(s => s.id === id) || {}).name || 'Données';
+  const dTitle = (text, sub, ink, mut) => [T({ x: 120, y: 80, w: 1500, text, size: 84, weight: 700, color: ink, font: 'Poppins' })]
+    .concat(sub ? [T({ x: 120, y: 195, w: 1500, text: sub, size: 36, color: mut, font: 'IBM Plex Sans' })] : []);
+  const dClock = (ink, y) => [W('date', { x: 120, y, w: 700, size: 32, weight: 400, color: ink }), W('clock', { x: 1500, y: y - 20, w: 300, size: 60, color: ink, align: 'right' })];
+  /** Liste reliée : les `n` premières colonnes visibles (ou celles de `pick`), 1re colonne large, nombres et dates à droite. */
+  function dList(id, o, n, pick) {
+    const cs = pick || chartCols(id).slice(0, n);
+    const e = Object.assign({ id: nid(), type: 'list', source: id, x: 120, y: 280, w: 1680, h: 700, font: 'IBM Plex Sans', size: 38, weight: 400, color: '#ffffff', align: 'left', ls: 0, lh: 1.2, italic: false,
+      rows: 8, page: 'scroll', sec: 4, head: true, accent: '#3B82C4', line: '#23395A', empty: 'Aucune ligne à afficher', opacity: 1, look: 'table' }, o);
+    e.cols = cs.map((c, i) => boolColors({ key: c.key, label: fname(c), as: 'text', align: i && (c.type === 'number' || c.type === 'date') ? 'right' : 'left', w: i ? 1 : 2 }, c));
+    e.sort = o.sort || null; e.filter = []; e.rules = o.rules || [];
+    e.name = o.name || 'Liste · ' + dSrcName(id);
+    return e;
+  }
+  const NIGHT = '#0B1F3A', CARD = '#16304F', MUT = '#9FB4CC';
+  const DTPL = [
+    { name: 'Chiffres clés', cat: DCAT, w: 1920, h: 1080, bg: NIGHT, need: {}, d: 'Jusqu\'à 4 chiffres : la somme de chacune de vos colonnes de nombres (à changer en moyenne, minimum ou maximum).',
+      pv: 'kpi', make: id => {
+        const d = dData(id), cols = d.num.slice(0, 4), n = Math.max(1, cols.length), cw = Math.floor((1680 - (n - 1) * 40) / n), els = dTitle('Nos chiffres clés', 'Mis à jour automatiquement', '#ffffff', MUT);
+        for (let i = 0; i < n; i++) {
+          const x = 120 + i * (cw + 40), c = cols[i];
+          els.push(R({ x, y: 340, w: cw, h: 420, fill: CARD, radius: 24 }),
+            dCh(id, 'kpi', '#ffffff', { x: x + 30, y: 380, w: cw - 60, h: 340, size: n > 3 ? 30 : 40, series: c ? [{ key: c.key, agg: 'sum', name: fname(c) }] : seriesFor(id), name: 'Chiffre clé · ' + (c ? fname(c) : 'Lignes') }));
+        }
+        return els.concat(dClock(MUT, 940));
+      } },
+    { name: 'Classement', cat: DCAT, w: 1920, h: 1080, bg: NIGHT, need: { txt: 1 }, d: 'Barres horizontales triées du plus grand au plus petit (8 au plus).',
+      pv: 'rank', make: id => dTitle('Le classement', 'Du plus grand au plus petit', '#ffffff', MUT).concat([
+        dCh(id, 'hbars', '#ffffff', { x: 120, y: 270, w: 1680, h: 720, size: 34, order: { by: 'val', dir: 'desc' }, max: 8, name: 'Classement · ' + dSrcName(id) })]) },
+    { name: 'Évolution', cat: DCAT, w: 1920, h: 1080, bg: NIGHT, need: { num: 1 }, d: 'Courbe de la première colonne de nombres, rangée par date (sinon dans l\'ordre de la source).',
+      pv: 'line', make: id => dTitle('Évolution', 'Au fil du temps', '#ffffff', MUT).concat([
+        dCh(id, 'area', '#ffffff', { x: 120, y: 270, w: 1680, h: 720, size: 30, smooth: true, name: 'Évolution · ' + dSrcName(id) })]) },
+    { name: 'Répartition', cat: DCAT, w: 1920, h: 1080, bg: '#FFFFFF', need: { txt: 1 }, d: 'Anneau avec légende : une part par valeur de la colonne de catégories (6 au plus, le reste en « Autres »).',
+      pv: 'donut', make: id => dTitle('Répartition', 'Part de chaque catégorie', '#0B1F3A', '#5A6B80').concat([
+        dCh(id, 'donut', '#0B1F3A', { x: 120, y: 270, w: 1680, h: 720, size: 36, order: { by: 'val', dir: 'desc' }, max: 6, other: true, legend: 'right', name: 'Répartition · ' + dSrcName(id) })]) },
+    { name: 'Objectif', cat: DCAT, w: 1920, h: 1080, bg: NIGHT, need: { num: 1 }, d: 'Jauge de la somme d\'une colonne de nombres sur une échelle de 0 à 100, à régler dans « Modifier le graphique ».',
+      pv: 'gauge', make: id => dTitle('Objectif du mois', 'Où nous en sommes', '#ffffff', MUT).concat([
+        dCh(id, 'gauge', '#ffffff', { x: 420, y: 270, w: 1080, h: 720, size: 56, gmin: 0, gmax: 100, name: 'Objectif · ' + dSrcName(id) })]) },
+    { name: 'Tableau défilant', cat: DCAT, w: 1920, h: 1080, bg: NIGHT, need: {}, d: 'Les 5 premières colonnes du jeu de données dans un tableau qui défile tout seul quand il y a plus de lignes que de place.',
+      pv: 'table', make: id => dTitle('Tableau', dSrcName(id), '#ffffff', MUT).concat([dList(id, { total: false }, 5)]) },
+    { name: 'Podium', cat: DCAT, w: 1920, h: 1080, bg: NIGHT, need: { txt: 1, num: 1 }, d: 'Les trois premières lignes, triées sur la première colonne de nombres : le nom et le score.',
+      pv: 'podium', make: id => {
+        const d = dData(id), t = d.txt[0], n = d.num[0];
+        return dTitle('Le podium', 'Les meilleurs résultats', '#ffffff', MUT).concat([
+          dList(id, { y: 320, h: 600, rows: 3, page: 'cut', size: 64, look: 'list', head: false, sort: { key: n.key, dir: 'desc' }, name: 'Podium · ' + dSrcName(id) }, 0, [t, n].map((c, i) => i ? Object.assign({}, c) : c))]);
+      } },
+    { name: 'Gros compteur', cat: DCAT, w: 1920, h: 1080, bg: '#145C3E', need: { num: 1 }, d: 'Un seul grand chiffre plein écran (somme d\'une colonne), fait pour les données envoyées par une autre application.',
+      pv: 'big', make: id => [
+        dCh(id, 'kpi', '#ffffff', { x: 160, y: 140, w: 1600, h: 800, size: 120, name: 'Compteur · ' + dSrcName(id) })].concat(dClock('#CFE8DA', 960)) },
+    { name: 'Agenda', cat: DCAT, w: 1920, h: 1080, bg: '#F5F7FA', need: { date: 1 }, d: 'Un tableau trié par date, les plus proches en premier. Intitulé, lieu et autres colonnes suivent.',
+      pv: 'agenda', make: id => {
+        const d = dData(id);
+        return dTitle('Prochains rendez-vous', 'Les plus proches en premier', '#0B1F3A', '#5A6B80').concat([
+          dList(id, { color: '#0B1F3A', line: '#DDE3EA', rows: 6, page: 'pages', sec: 8, size: 42, sort: { key: d.date.key, dir: 'asc' }, name: 'Agenda · ' + dSrcName(id) }, 4, [d.date].concat(d.cs.filter(c => c.key !== d.date.key).slice(0, 3)))]);
+      } },
+    { name: 'État des services', cat: DCAT, w: 1920, h: 1080, bg: NIGHT, need: { txt: 2 }, d: 'Une ligne par service : le nom et son état en pastille. « Panne » rouge, « Ralenti » orange, « Opérationnel » vert (règles à adapter).',
+      pv: 'status', make: id => {
+        const d = dData(id), a = d.txt[0], b = d.txt[1], pc = Object.assign({}, b);
+        const e = dList(id, { rows: 8, page: 'scroll', size: 46, look: 'list', head: false, name: 'États · ' + dSrcName(id),
+          rules: [{ key: b.key, op: 'eq', val: 'Panne', color: '#C8372D' }, { key: b.key, op: 'eq', val: 'Ralenti', color: '#E0A030' }, { key: b.key, op: 'eq', val: 'Opérationnel', color: '#1E8E5A' }] }, 0, [a, pc]);
+        e.cols[1].as = 'pill';
+        return dTitle('État des services', 'Mis à jour en continu', '#ffffff', MUT).concat([e]);
+      } }
+  ];
+  /** Visuel stylisé d'un modèle de données dans la galerie (unité cqw : tout suit la largeur de la vignette). */
+  function dPreview(k) {
+    const col = '#5BA3E0', hd = (t, s, c) => `<h4>${t}</h4><div class="dt"${c ? ` style="color:${c}"` : ''}>${s}</div>`;
+    const tb = (head, rows) => `<table class="tb"><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr>${rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</table>`;
+    const pl = (c, t) => `<span class="pill" style="background:${c}">${t}</span>`;
+    const m = {
+      kpi: () => `<div class="t">${hd('Nos chiffres clés', 'Mis à jour automatiquement')}<div class="kp"><div><strong>1 248</strong><span>visiteurs</span></div><div><strong>98</strong><span>satisfaction</span></div><div><strong>37</strong><span>en cours</span></div><div><strong>4,6</strong><span>note moyenne</span></div></div></div>`,
+      rank: () => `<div class="t">${hd('Le classement', 'Du plus grand au plus petit')}<div class="bars">${[['Nord', 100, 482], ['Centre', 82, 395], ['Est', 66, 318], ['Ouest', 51, 246], ['Sud', 37, 178]].map(r => `<div><span>${r[0]}</span><i style="width:${r[1]}%"></i><em>${r[2]}</em></div>`).join('')}</div></div>`,
+      line: () => `<div class="t">${hd('Évolution', 'Au fil du temps')}<div style="margin-top:auto"><svg viewBox="0 0 300 110"><g stroke="rgba(255,255,255,.14)"><path d="M0 20H300M0 55H300M0 90H300"/></g><path d="M0 85L40 70L80 76L120 52L160 58L200 34L240 40L300 14V110H0Z" fill="rgba(91,163,224,.22)"/><path d="M0 85L40 70L80 76L120 52L160 58L200 34L240 40L300 14" fill="none" stroke="${col}" stroke-width="3.5" stroke-linejoin="round"/></svg></div></div>`,
+      donut: () => `<div class="t">${hd('Répartition', 'Part de chaque catégorie', '#5A6B80')}<div style="display:flex;align-items:center;gap:5cqw;margin-top:auto"><svg viewBox="0 0 110 110" style="width:42%"><g fill="none" stroke-width="20" transform="rotate(-90 55 55)"><circle cx="55" cy="55" r="38" stroke="#5BA3E0" stroke-dasharray="105 239"/><circle cx="55" cy="55" r="38" stroke="#F2A93B" stroke-dasharray="65 239" stroke-dashoffset="-105"/><circle cx="55" cy="55" r="38" stroke="#3FB27F" stroke-dasharray="45 239" stroke-dashoffset="-170"/><circle cx="55" cy="55" r="38" stroke="#C8D3E0" stroke-dasharray="24 239" stroke-dashoffset="-215"/></g></svg><div style="font-size:2.9cqw;display:grid;gap:1.4cqw"><span><i class="dot" style="background:#5BA3E0"></i>Standard</span><span><i class="dot" style="background:#F2A93B"></i>Urgent</span><span><i class="dot" style="background:#3FB27F"></i>Planifié</span><span><i class="dot" style="background:#C8D3E0"></i>Autres</span></div></div></div>`,
+      gauge: () => `<div class="t" style="align-items:center">${hd('Objectif du mois', 'Où nous en sommes')}<svg viewBox="0 0 200 118" style="width:60%;margin:auto"><path d="M20 100A80 80 0 0 1 180 100" fill="none" stroke="rgba(255,255,255,.16)" stroke-width="18" stroke-linecap="round"/><path d="M20 100A80 80 0 0 1 150 38" fill="none" stroke="#3FB27F" stroke-width="18" stroke-linecap="round"/><text x="100" y="98" text-anchor="middle" fill="#fff" font-size="34" font-weight="700">72 %</text></svg></div>`,
+      table: () => `<div class="t">${hd('Tableau', 'Défile tout seul')}${tb(['N°', 'Nom', 'État', 'Total'], [['1042', 'Martin SA', pl('#3FB27F', 'Livrée'), '1 240'], ['1043', 'Atelier', pl('#F2A93B', 'En cours'), '380'], ['1044', 'Duc &amp; Fils', pl('#5BA3E0', 'Reçue'), '2 075'], ['1045', 'Lambert', pl('#3FB27F', 'Livrée'), '560']])}</div>`,
+      podium: () => `<div class="t">${hd('Le podium', 'Les meilleurs résultats')}<div class="podium"><div style="background:#8CA3BD;height:62%"><strong>2</strong>Léa M.<b>840</b></div><div style="background:#F2C14E;color:#0B1F3A;height:100%"><strong>1</strong>Hugo B.<b>912</b></div><div style="background:#C98A5A;height:46%"><strong>3</strong>Sara D.<b>779</b></div></div></div>`,
+      big: () => `<div class="t" style="background:linear-gradient(160deg,#145C3E,#0B3B29)"><div class="big"><strong>127</strong><span>jours sans incident</span></div></div>`,
+      agenda: () => `<div class="t">${hd('Prochains rendez-vous', 'Les plus proches en premier', '#5A6B80')}${tb(['Heure', 'Intitulé', 'Lieu'], [['14:10', 'Point d\'équipe', 'Salle A'], ['15:00', 'Présentation', 'Salle B'], ['16:30', 'Atelier', 'Hall'], ['17:45', 'Clôture', 'Salle A']])}</div>`,
+      status: () => `<div class="t">${hd('État des services', 'Mis à jour en continu')}<table class="tb">${[['#3FB27F', 'Site web', 'Opérationnel'], ['#3FB27F', 'Messagerie', 'Opérationnel'], ['#F2A93B', 'Impression', 'Ralenti'], ['#E5484D', 'Visioconférence', 'Panne']].map(r => `<tr><td><i class="dot" style="background:${r[0]}"></i>${r[1]}</td><td style="text-align:right">${pl(r[0], r[2])}</td></tr>`).join('')}</table></div>`
+    };
+    return m[k]();
+  }
+  /** Ce qui manque à un jeu de données pour un modèle (texte), vide s'il convient ; un jeu dont les colonnes ne sont pas encore connues convient. */
+  function dLack(t, ds) {
+    const cs = (ds.cols || []).filter(c => !c.hidden); if (!cs.length) return '';
+    const n = ty => cs.filter(c => c.type === ty).length, need = t.need || {}, out = [];
+    if ((need.num || 0) > n('number')) out.push('une colonne de nombres');
+    if ((need.txt || 0) > n('text')) out.push(need.txt > 1 ? 'deux colonnes de texte' : 'une colonne de texte');
+    if ((need.date || 0) > n('date')) out.push('une colonne de dates');
+    return out.length ? 'il manque ' + out.join(' et ') : '';
+  }
+
+  // Galerie de modèles de la page Compositions : dotnet.Template(index) ouvre l'éditeur sur le modèle choisi ;
+  // dsets (jeux de données, vide si le groupe « Modèles de données » n'est pas permis) : dotnet.DataTemplate(index, jeu).
   let galCat = 'Tous';
-  function gallery(el, dotnet) {
+  function gallery(el, dotnet, dsets) {
     LC().ensure(); ensureSamples();
-    const fitGal = () => el.querySelectorAll('.ce-mc .tv').forEach(tv => { const m = tv.firstElementChild; if (tv.clientWidth) m.style.transform = `scale(${tv.clientWidth / +m.dataset.w})`; });
+    dsets = dsets || [];
+    if (galCat === DCAT && !dsets.length) galCat = 'Tous';
+    const fitGal = () => el.querySelectorAll('.ce-mc .tv').forEach(tv => { const m = tv.firstElementChild; if (tv.clientWidth && m.dataset.w) m.style.transform = `scale(${tv.clientWidth / +m.dataset.w})`; });
+    const dThumb = (t, i) => `<div class="ce-thumb ce-mc" data-dtpl="${i}" role="button" tabindex="0" aria-label="Choisir le jeu de données de ${esc(t.name)}"><div class="ce-mcb"><div class="tv land"><div class="ce-dpv" style="background:${t.bg}">${dPreview(t.pv)}</div></div>
+      <div class="ce-mca"><button type="button" class="a p" data-act="dpick" tabindex="-1">Utiliser</button></div></div><div class="tn"><span>${esc(t.name)}</span></div></div>`;
     const draw = () => {
-      const cats = ['Tous', ...new Set(TPL.map(t => t.cat))];
-      el.innerHTML = `<div class="ce-chips">${cats.map(c => `<button type="button" data-cat="${c}" class="${c === galCat ? 'on' : ''}">${c}</button>`).join('')}</div>
-        <div class="ce-tgrid ce-gal">${tplIndexes(galCat).map(i => thumb(TPL[i], i, true)).join('')}</div>`;
+      const cats = ['Tous', ...new Set(TPL.map(t => t.cat)), ...(dsets.length ? [DCAT] : [])];
+      el.innerHTML = `<div class="ce-chips">${cats.map(c => `<button type="button" data-cat="${c}" class="${c === DCAT ? 'dcat ' : ''}${c === galCat ? 'on' : ''}">${c}</button>`).join('')}</div>
+        <div class="ce-tgrid ce-gal">${galCat === DCAT ? DTPL.map(dThumb).join('') : tplIndexes(galCat).map(i => thumb(TPL[i], i, true)).join('')}</div>`;
       fitGal();
     };
     const open = i => { const l = tplIndexes(galCat); openPreview({ list: l, at: l.indexOf(i), use: n => { closePreview(); dotnet.invokeMethodAsync('Template', n); } }); };
+    /** Fenêtre « Choisir le jeu de données » : colonnes reliées et jeux qui conviennent. */
+    const pick = i => {
+      const t = DTPL[i], ov = document.createElement('div'); ov.className = 'ce-dd';
+      const close = () => { ov.remove(); document.removeEventListener('keydown', onKey, true); };
+      const onKey = ev => { if (ev.key === 'Escape') { ev.stopPropagation(); close(); } };
+      const ok = dsets.filter(s => !dLack(t, s));
+      ov.innerHTML = `<div class="ce-ddd" role="dialog" aria-modal="true" aria-labelledby="ce-ddt"><h2 id="ce-ddt">${esc(t.name)}</h2><p>${esc(t.d)}</p>
+        <label for="ce-dds">Jeu de données</label><select id="ce-dds">${dsets.map(s => { const l = dLack(t, s); return `<option value="${esc(s.id)}"${l ? ' disabled' : ''}>${esc(s.name)}${l ? ' — ' + l : ''}</option>`; }).join('')}</select>
+        ${ok.length ? '' : '<p class="ce-ddw">Aucun de vos jeux de données ne convient à ce modèle.</p>'}
+        <div class="ce-ddb"><button type="button" class="ce-ddg" data-d="close">Annuler</button><button type="button" class="ce-ddp" data-d="use"${ok.length ? '' : ' disabled'}>Utiliser ce modèle</button></div></div>`;
+      ov.onclick = ev => {
+        if (ev.target === ov) { close(); return; }
+        const b = ev.target.closest('[data-d]'); if (!b) return;
+        if (b.dataset.d === 'close') close(); else if (b.dataset.d === 'use') { const v = ov.querySelector('#ce-dds').value; close(); dotnet.invokeMethodAsync('DataTemplate', i, v); }
+      };
+      document.body.appendChild(ov); document.addEventListener('keydown', onKey, true);
+      const sel = ov.querySelector('#ce-dds'); if (ok.length) sel.value = ok[0].id; sel.focus();
+    };
     el.onclick = ev => {
       const c = ev.target.closest('[data-cat]'); if (c) { galCat = c.dataset.cat; draw(); return; }
+      const dt = ev.target.closest('[data-dtpl]'); if (dt) { pick(+dt.dataset.dtpl); return; }
       const t = ev.target.closest('[data-tpl]'); if (!t) return;
       const i = +t.dataset.tpl;
       if (ev.target.closest('[data-act=use]')) dotnet.invokeMethodAsync('Template', i); else open(i);
     };
-    el.onkeydown = ev => { const t = ev.target.closest && ev.target.closest('.ce-mc'); if (t && ev.target === t && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); open(+t.dataset.tpl); } };
+    el.onkeydown = ev => { const t = ev.target.closest && ev.target.closest('.ce-mc'); if (t && ev.target === t && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); if (t.dataset.dtpl != null) pick(+t.dataset.dtpl); else open(+t.dataset.tpl); } };
     if (typeof ResizeObserver === 'function') new ResizeObserver(fitGal).observe(el);
     draw();
   }

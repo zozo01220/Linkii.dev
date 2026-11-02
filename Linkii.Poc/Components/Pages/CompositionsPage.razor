@@ -9,6 +9,7 @@
 @inject Toaster Toast
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject ModeService Modes
 
 @* Compositions (§80-81, §84) : Mes compositions, et les modèles (galerie Linkivi et « Mes modèles » de l'aire). La page n'existe que si l'intégration
    « Compositions » est dans Mes intégrations. Les compositions de « Mes compositions » se placent ensuite dans les listes de lecture. *@
@@ -94,7 +95,7 @@ else
             var key = t.Key;
             <button type="button" role="tab" class="@(tab == key ? "on" : "")" aria-selected="@(tab == key ? "true" : "false")" @onclick="() => SetTab(key)">@t.Label @if (t.Count > 0) { <span class="cat-count">@t.Count</span> }<TabNew Family="compositions" Tab="@key" /></button>
         }
-        <button type="button" role="tab" class="@(tab == "models" ? "on" : "")" aria-selected="@(tab == "models" ? "true" : "false")" @onclick='() => SetTab("models")'>Modèles</button>
+        <button type="button" role="tab" class="tab-feature @(tab == "models" ? "on" : "")" aria-selected="@(tab == "models" ? "true" : "false")" @onclick='() => SetTab("models")'>Modèles</button>
     </nav>
 
     @if (tab != "models") { <NewMark Family="compositions" Tab="@tab" Ids="@items.Select(c => c.Id).Concat(folderRows.Select(r => r.Folder.Id))" /> }
@@ -878,9 +879,18 @@ else
         if (tab != "models" || sub != "gallery" || galDrawn || !installed) return;
         galDrawn = true;
         self ??= DotNetObjectReference.Create(this);
-        try { await JS.InvokeVoidAsync("LinkiiCompoEditor.gallery", gal, self); }
+        try { await JS.InvokeVoidAsync("LinkiiCompoEditor.gallery", gal, self, DataSetsForGallery()); }
         catch (JSDisconnectedException) { }
     }
+
+    /// <summary>Jeux de données proposés par le groupe « Modèles de données » : seulement en mode expert, avec la licence Pro, et s'il y en a au moins un (sinon : liste vide, pas de groupe).</summary>
+    private object[] DataSetsForGallery() =>
+        !Modes.Expert ? Array.Empty<object>() : Store.Read(d => !DataSourceOps.Allowed(d.Tenant) ? Array.Empty<object>() : d.Tenant.DataSets.OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase)
+            .Select(s => (object)new { id = s.Id.ToString("N"), name = s.Name, cols = s.Columns.Select(c => new { key = c.Key, label = c.Label, type = c.Type, name = c.Name, hidden = c.Hidden }).ToList() }).ToArray());
+
+    /// <summary>Un modèle « jeux de données » avec le jeu choisi : l'éditeur s'ouvre dessus (rien n'est enregistré avant « Enregistrer »).</summary>
+    [JSInvokable]
+    public void DataTemplate(int index, string dataset) => Nav.NavigateTo($"/compositions/new?dtpl={index}&ds={Uri.EscapeDataString(dataset)}&back=%2Fcompositions");
 
     /// <summary>Un modèle de la galerie : l'éditeur s'ouvre dessus (rien n'est enregistré avant « Enregistrer »).</summary>
     [JSInvokable]
