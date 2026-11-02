@@ -7,7 +7,7 @@
 <div class="page-head">
     <div>
         <h1>Facturation</h1>
-        <p class="sub sc-intro">Tous les clients paient Linkivi au tarif unique, à leur date anniversaire ; sans paiement, le compte est bloqué. Les revendeurs reçoivent leur commission le dernier jour du mois.</p>
+        <p class="sub sc-intro">Tarif unique Linkivi, payé à la date anniversaire. <span class="n-hint" title="Sans paiement à la date anniversaire, le compte est bloqué ; le paiement suivant le débloque. Les revendeurs reçoivent leur commission le dernier jour du mois.">Comment ça marche <Ico Name="info" Size="13" /></span></p>
     </div>
     <div class="row adm-month" style="gap:8px">
         <button type="button" class="btn ghost icon" aria-label="Mois précédent" @onclick="() => Shift(-1)"><Ico Name="chevron" Size="16" /></button>
@@ -16,27 +16,40 @@
     </div>
 </div>
 
-<div class="adm-k4">
+@{ var payoutRows = rrows.Where(r => r.PayState is Subscriptions.PayoutDue or Subscriptions.PayoutOpen).ToList(); var payoutSum = payoutRows.Sum(r => r.Payout?.Amount ?? r.Share.Commission); }
+<div class="n-todo">
+    @if (blockedCount > 0)
+    {
+        <button type="button" class="n-act bad" @onclick='() => Todo("Clients", "Bloqués")'><span class="ic"><Ico Name="lock" Size="18" /></span><div><b>@blockedCount compte@(blockedCount > 1 ? "s" : "") bloqué@(blockedCount > 1 ? "s" : "")</b><small>@Subscriptions.Fmt(blockedSum) CHF dus</small></div><span class="go"><Ico Name="chevron-right" Size="16" /></span></button>
+    }
+    @if (renewals.Count > 0)
+    {
+        <button type="button" class="n-act warn" @onclick='() => Todo("Paiements", "Tous")'><span class="ic"><Ico Name="card" Size="18" /></span><div><b>@renewals.Count paiement@(renewals.Count > 1 ? "s" : "") à encaisser</b><small>@(dueCount > 0 ? Subscriptions.Fmt(dueSum) + " CHF sous 30 jours" : "échéances ouvertes")</small></div><span class="go"><Ico Name="chevron-right" Size="16" /></span></button>
+    }
+    @if (payoutRows.Count > 0)
+    {
+        <button type="button" class="n-act ac" @onclick='() => Todo("Revendeurs", "Tous")'><span class="ic"><Ico Name="mail-send" Size="18" /></span><div><b>@payoutRows.Count versement@(payoutRows.Count > 1 ? "s" : "") à faire</b><small>@Subscriptions.Fmt(payoutSum) CHF le @Subscriptions.PayoutDate(year, month).ToString("d MMM", Fr)</small></div><span class="go"><Ico Name="chevron-right" Size="16" /></span></button>
+    }
+    @if (blockedCount == 0 && renewals.Count == 0 && payoutRows.Count == 0)
+    {
+        <div class="n-act" style="cursor:default"><span class="ic" style="background:var(--ok-bg);color:var(--ok-ink)"><Ico Name="check" Size="18" /></span><div><b>Rien à traiter</b><small>Aucun paiement ni versement en attente.</small></div></div>
+    }
+</div>
+
+<div class="n-k3">
     <div class="adm-card"><div class="kl">Chiffre d'affaires mensuel</div><div class="kn">@Subscriptions.Fmt(mrr) <small class="muted" style="font-size:12px">CHF</small></div>
         <div class="adm-stk"><i style="flex:@Math.Max(1, (double)grossBase);background:#9DB6D3"></i><i style="flex:@Math.Max(1, (double)grossGrowth);background:#2F6FB5"></i></div>
-        <div class="ks"><span class="adm-dot" style="background:#9DB6D3"></span>Essential @Subscriptions.Fmt(grossBase) · <span class="adm-dot" style="background:#2F6FB5"></span>Pro @Subscriptions.Fmt(grossGrowth)<br />Remises annuelles : −@Subscriptions.Fmt(Math.Max(0, grossBase + grossGrowth - mrr))</div></div>
-    <div class="adm-card"><div class="kl">Encaissé en @MonthLabel.ToLowerInvariant()</div><div class="kn" style="color:var(--ok)">@Subscriptions.Fmt(paidSum) <small class="muted" style="font-size:12px">CHF</small></div><div class="ks">@monthPayments.Count paiement@(monthPayments.Count > 1 ? "s" : "") · frais −@Subscriptions.Fmt(feeSum) · net @Subscriptions.Fmt(paidSum - feeSum)</div></div>
-    <div class="adm-card"><div class="kl">Part des revendeurs</div><div class="kn">@Subscriptions.Fmt(commissionSum) <small class="muted" style="font-size:12px">CHF</small></div><div class="ks">à verser le @Subscriptions.PayoutDate(year, month).ToString("d MMM", Fr) · net Linkivi <b>@Subscriptions.Fmt(paidSum - feeSum - commissionSum)</b></div></div>
-    <div class="adm-card"><div class="kl">Bloqués faute de paiement</div><div class="kn" style="color:@(blockedCount > 0 ? "var(--danger)" : "inherit")">@blockedCount</div><div class="ks">@(blockedCount > 0 ? Subscriptions.Fmt(blockedSum) + " CHF dus" : "aucun")</div></div>
+        <div class="ks"><span class="adm-dot" style="position:static;display:inline-block;background:#9DB6D3"></span> Essential @Subscriptions.Fmt(grossBase) · <span class="adm-dot" style="position:static;display:inline-block;background:#2F6FB5"></span> Pro @Subscriptions.Fmt(grossGrowth) · remises −@Subscriptions.Fmt(Math.Max(0, grossBase + grossGrowth - mrr))</div></div>
+    <div class="adm-card"><div class="kl">Encaissé en @MonthLabel.ToLowerInvariant()</div><div class="kn" style="color:var(--ok)">@Subscriptions.Fmt(paidSum) <small class="muted" style="font-size:12px">CHF</small></div><div class="ks">@monthPayments.Count paiement@(monthPayments.Count > 1 ? "s" : "") · net après frais @Subscriptions.Fmt(paidSum - feeSum)</div></div>
+    <div class="adm-card"><div class="kl">Part des revendeurs</div><div class="kn">@Subscriptions.Fmt(commissionSum) <small class="muted" style="font-size:12px">CHF</small></div><div class="ks">net Linkivi <b>@Subscriptions.Fmt(paidSum - feeSum - commissionSum)</b></div></div>
+</div>
+<div class="n-line">
+    <span><b>@clientCount</b> clients (@billedClients actifs)</span><span><b>@billedScreens</b> écrans facturés</span><span><b>@userCount</b> utilisateurs</span><span><b>@resellerCount</b> revendeurs</span>
+    <span>·</span><span>Essential @Subscriptions.Fmt(prices.Base) · Pro @Subscriptions.Fmt(prices.Growth) CHF / écran / mois · annuel −@prices.AnnualPct % <a href="admin/settings">Modifier dans Réglages</a></span>
 </div>
 
-<div class="adm-card adm-cnt">
-    <span><b>@resellerCount</b>revendeurs</span>
-    <span><b>@clientCount</b>clients <small>(@billedClients actifs)</small></span>
-    <span><b>@billedScreens</b>écrans facturés</span>
-    <span><b>@userCount</b>utilisateurs</span>
-    <span><b>@dueCount</b>renouvellements sous 30 jours <small>(@Subscriptions.Fmt(dueSum) CHF)</small></span>
-    <span class="grow"></span>
-    <span class="muted">Essential @Subscriptions.Fmt(prices.Base) · Pro @Subscriptions.Fmt(prices.Growth) CHF / écran / mois · annuel −@prices.AnnualPct %</span>
-</div>
-
-<div class="adm-tabs seg" role="tablist" aria-label="Vue">
-    @foreach (var (id, n) in new[] { ("Clients", crows.Count), ("Revendeurs", rrows.Count), ("Paiements", renewals.Count + monthPayments.Count), ("Versements", rrows.Count(r => r.PayState is Subscriptions.PayoutDue or Subscriptions.PayoutOpen)) })
+<div class="adm-tabs" role="tablist" aria-label="Vue">
+    @foreach (var (id, n) in new[] { ("Clients", crows.Count), ("Revendeurs", rrows.Count), ("Paiements", renewals.Count + monthPayments.Count) })
     {
         var t = id;
         <button type="button" class="@(tab == t ? "on" : "")" @onclick="() => SetTab(t)">@t <b>@n</b></button>
@@ -45,139 +58,112 @@
 
 @if (tab == "Clients")
 {
-    <div class="adm-chips">
-        @foreach (var f in new[] { "Tous", "Directs", "Via un revendeur", "À renouveler" })
-        {
-            var ff = f;
-            <button type="button" class="@(filter == ff ? "on" : "")" @onclick="() => filter = ff">@ff</button>
-        }
+    <div class="n-bar">
+        <div class="adm-chips" style="margin:0">
+            @foreach (var f in new[] { "Tous", "Directs", "Via un revendeur", "À renouveler", "Bloqués" })
+            {
+                var ff = f;
+                <button type="button" class="@(filter == ff ? "on" : "")" @onclick="() => filter = ff">@f</button>
+            }
+        </div>
+        <span class="grow"></span>
+        <div class="search-box" style="max-width:240px;margin:0"><Ico Name="search" Size="16" /><input placeholder="Rechercher un client…" aria-label="Rechercher" @bind="q" @bind:event="oninput" /></div>
     </div>
     <div class="adm-card" style="padding:0;overflow:hidden"><div class="tbl-scroll">
-    <table class="adm-tbl">
-        <thead><tr><th>Client</th><th>Revendeur</th><th>Licence</th><th class="r">Écrans</th><th class="r">Util.</th><th>Paiement</th><th class="r">CHF / mois</th><th>Renouvellement</th></tr></thead>
+    <table class="adm-tbl n-tbl">
+        <thead><tr><th>Client</th><th>Licence</th><th class="r">Montant</th><th>Renouvellement</th><th></th></tr></thead>
         <tbody>
         @foreach (var c in FilteredClients)
         {
             var row = c;
             <tr class="@(selC == c.C.Id ? "sel" : "")" @onclick="() => OpenC(row)">
-                <td><div class="adm-who"><div class="adm-av" style="background:@AvatarColor(c.R.Name)">@Initials(c.C.Name)</div><div><b>@c.C.Name</b><small><span class="adm-st @ClientStates.Css(c.State)">@c.State</span></small></div></div></td>
-                <td>@(c.Direct ? "Linkii (direct)" : c.R.Name)</td>
-                <td><PlanTag Plan="@c.C.Plan" /></td>
-                <td class="r m">@c.Screens</td>
-                <td class="r m">@c.Users</td>
-                <td>@(c.C.BillingPeriod == "annual" ? "Annuel" : "Mensuel")</td>
-                <td class="r m">@(c.Billable ? Subscriptions.Fmt(c.Monthly) : "—")</td>
-                <td>@Renewal(c.Sub, c.C.NextRenewalUtc, c.C.Blocked && c.C.BlockedReason == Subscriptions.PaymentReason)
-                    @if (Subscriptions.CanRecord(c.C.NextRenewalUtc, now) && (c.C.NextRenewalUtc != null || c.Billable || c.C.TrialEndsUtc != null)) { <button type="button" class="btn ok-o sm" style="margin-left:6px" @onclick:stopPropagation="true" @onclick="() => PayClient(row)">@(c.C.NextRenewalUtc == null ? "Premier paiement" : "Paiement reçu")</button> }</td>
+                <td><div class="adm-who"><div class="adm-av" style="background:@AvatarColor(c.R.Name)">@Initials(c.C.Name)</div><div class="n-pair"><b>@c.C.Name</b><small>@(c.Direct ? "direct" : "via " + c.R.Name) · <span class="adm-st @ClientStates.Css(c.State)">@c.State</span></small></div></div></td>
+                <td><div class="n-pair"><span><PlanTag Plan="@c.C.Plan" /></span><small>@c.Screens écran@(c.Screens > 1 ? "s" : "") · @c.Users util.</small></div></td>
+                <td class="r m">@if (c.Billable) { @Subscriptions.Fmt(c.PeriodAmount)<small class="adm-sub">/ @(c.C.BillingPeriod == "annual" ? "an" : "mois")</small> } else { <span>—</span> }</td>
+                <td>@Renewal(c.Sub, c.C.NextRenewalUtc, c.C.Blocked && c.C.BlockedReason == Subscriptions.PaymentReason)</td>
+                <td class="r">@if (Subscriptions.CanRecord(c.C.NextRenewalUtc, now) && (c.C.NextRenewalUtc != null || c.Billable || c.C.TrialEndsUtc != null)) { <button type="button" class="btn ok-o sm" @onclick:stopPropagation="true" @onclick="() => PayClient(row)">@(c.C.NextRenewalUtc == null ? "Premier paiement" : "Encaisser")</button> }</td>
             </tr>
         }
+        @if (!FilteredClients.Any()) { <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:28px">Aucun client.</td></tr> }
         </tbody>
     </table></div></div>
-    <div class="adm-note">Le premier paiement d'un client fixe sa date anniversaire et met fin à son essai. Un client d'un revendeur paie Linkivi comme un client direct ; le revendeur en reçoit une commission.</div>
 }
 else if (tab == "Revendeurs")
 {
     <div class="adm-card" style="padding:0;overflow:hidden"><div class="tbl-scroll">
-    <table class="adm-tbl">
-        <thead><tr><th>Revendeur</th><th class="r">Clients</th><th class="r">Écrans</th><th class="r">Util.</th><th class="r">CA mensuel</th><th class="r">Commission Linkivi</th><th class="r">Part acquise (@MonthLabel.Split(' ')[0].ToLowerInvariant())</th><th>IBAN</th></tr></thead>
+    <table class="adm-tbl n-tbl">
+        <thead><tr><th>Revendeur</th><th class="r">Clients · écrans</th><th class="r">CA mensuel</th><th class="r">Part du mois</th><th>Versement</th><th></th></tr></thead>
         <tbody>
         @foreach (var r in rrows)
         {
             var row = r;
             <tr class="@(selR == r.R.Id ? "sel" : "")" @onclick="() => OpenR(row)">
-                <td><div class="adm-who"><div class="adm-av" style="background:@AvatarColor(r.R.Name)">@Initials(r.R.Name)</div><div><b>@r.R.Name</b><small>@(r.R.Active ? (r.R.Suspended ? "Suspendu" : "Actif") : "Bloqué")</small></div></div></td>
-                <td class="r m">@r.Clients</td>
-                <td class="r m">@r.Screens</td>
-                <td class="r m">@r.Users</td>
+                <td><div class="adm-who"><div class="adm-av" style="background:@AvatarColor(r.R.Name)">@Initials(r.R.Name)</div><div class="n-pair"><b>@r.R.Name</b><small>@(r.R.Active ? (r.R.Suspended ? "Suspendu" : "commission Linkivi " + r.Pct + " %" + (r.R.CommissionPct == null ? "" : " (particulière)")) : "Bloqué")</small></div></div></td>
+                <td class="r m">@r.Clients · @r.Screens</td>
                 <td class="r m">@Subscriptions.Fmt(r.Mrr)</td>
-                <td class="r m">@r.Pct %@(r.R.CommissionPct == null ? "" : "*")</td>
-                <td class="r m"><b>@Subscriptions.Fmt(r.Share.Commission)</b></td>
-                <td>@if (r.HasIban) { <span class="adm-st ok">Renseigné</span> } else { <span class="adm-st warn">Manquant</span> }</td>
+                <td class="r m"><b>@Subscriptions.Fmt(r.Payout?.Amount ?? r.Share.Commission)</b></td>
+                <td><div class="n-stat"><span class="adm-st @(r.PayState == Subscriptions.PayoutDone ? "ok" : r.PayState == Subscriptions.PayoutDue ? "warn" : "mute")">@r.PayState</span>
+                    @if (r.Payout is { } po) { <small>le @Subscriptions.ToLocal(po.PaidUtc).ToString("d MMM yyyy", Fr)@(po.Reference != "" ? " · " + po.Reference : "")</small> }
+                    else if (!r.HasIban) { <small style="color:var(--warn-ink)">IBAN manquant</small> }
+                    else if (r.PayState == Subscriptions.PayoutOpen) { <small>le @Subscriptions.PayoutDate(year, month).ToString("d MMM", Fr)</small> }</div></td>
+                <td class="r">
+                    @if (r.Payout != null) { <button type="button" class="btn ghost sm" @onclick:stopPropagation="true" @onclick="() => Unpay(row)">Annuler</button> }
+                    else if (r.Share.Commission > 0) { <button type="button" class="btn ok-o sm" @onclick:stopPropagation="true" @onclick="() => OpenPay(row)">Marquer versé</button> }
+                </td>
             </tr>
         }
-        @if (rrows.Count == 0) { <tr><td colspan="8" style="text-align:center;color:var(--muted);padding:28px">Aucun revendeur.</td></tr> }
+        @if (rrows.Count == 0) { <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:28px">Aucun revendeur.</td></tr> }
         </tbody>
+        @if (rrows.Count > 0)
+        {
+            <tfoot><tr><td>Total</td><td class="r m">@rrows.Sum(r => r.Clients) · @rrows.Sum(r => r.Screens)</td><td class="r m">@Subscriptions.Fmt(rrows.Sum(r => r.Mrr))</td><td class="r m">@Subscriptions.Fmt(rrows.Sum(r => r.Payout?.Amount ?? r.Share.Commission))</td><td colspan="2"></td></tr></tfoot>
+        }
     </table></div></div>
-    <div class="adm-note">Part du revendeur = (montant payé − frais) − commission de Linkivi (taux), sur les paiements reçus dans le mois. * : taux particulier (taux par défaut : @prices.DefaultPct %). Le taux se règle dans la fiche du revendeur.</div>
+    <div class="adm-note" style="margin-top:10px">Part du revendeur = (montant payé − frais) − commission de Linkivi, sur les paiements reçus dans le mois, versée le dernier jour du mois (taux par défaut : @prices.DefaultPct %, réglable dans la fiche du revendeur). « Marquer versé » fige le montant.</div>
 }
-else if (tab == "Paiements")
+else
 {
-    <div class="adm-sec" style="margin-top:0"><span class="lb">À encaisser</span></div>
+    <div class="adm-sec" style="margin-top:0"><span class="lb">À encaisser · @renewals.Count</span></div>
     <div class="adm-card" style="padding:0;overflow:hidden"><div class="tbl-scroll">
-    <table class="adm-tbl">
-        <thead><tr><th>Client</th><th>Revendeur</th><th>Paiement</th><th>Renouvellement</th><th class="r">Montant CHF</th><th></th></tr></thead>
+    <table class="adm-tbl n-tbl">
         <tbody>
         @foreach (var x in renewals)
         {
             var rn = x;
             <tr style="cursor:default">
-                <td><b>@rn.Name</b><small class="adm-sub">@rn.Detail</small></td>
-                <td>@rn.Reseller</td>
-                <td>@rn.Period</td>
+                <td><div class="n-pair"><b>@rn.Name</b><small>@rn.Reseller · @rn.Period · @rn.Detail</small></div></td>
                 <td>@Renewal(rn.State, rn.Next, rn.Blocked)</td>
                 <td class="r m">@Subscriptions.Fmt(rn.Amount)</td>
                 <td class="r"><button type="button" class="btn ok-o sm" @onclick="() => PayRenewal(rn)">@(rn.Next == null ? "Premier paiement" : "Paiement reçu")</button></td>
             </tr>
         }
-        @if (renewals.Count == 0) { <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">Rien à encaisser pour le moment.</td></tr> }
+        @if (renewals.Count == 0) { <tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px">Rien à encaisser pour le moment.</td></tr> }
         </tbody>
     </table></div></div>
 
-    <div class="adm-sec"><span class="lb">Paiements enregistrés en @MonthLabel.ToLowerInvariant()</span></div>
+    <div class="adm-sec"><span class="lb">Enregistrés en @MonthLabel.ToLowerInvariant() · @monthPayments.Count</span></div>
     <div class="adm-card" style="padding:0;overflow:hidden"><div class="tbl-scroll">
-    <table class="adm-tbl">
-        <thead><tr><th>Date</th><th>Client</th><th>Période couverte</th><th class="r">Payé</th><th class="r">Frais</th><th class="r">Commission</th><th></th></tr></thead>
+    <table class="adm-tbl n-tbl">
+        <thead><tr><th>Date</th><th>Client</th><th>Période couverte</th><th class="r">Payé → net</th><th class="r">Commission</th><th></th></tr></thead>
         <tbody>
         @foreach (var p in monthPayments)
         {
             var pay = p;
             <tr style="cursor:default">
                 <td>@Subscriptions.ToLocal(pay.PaidUtc).ToString("d MMM", Fr)</td>
-                <td><b>@pay.Name</b><small class="adm-sub">@ResellerName(pay.ResellerId) · @(pay.First ? "premier paiement" : pay.Period == "annual" ? "annuel" : "mensuel") · @pay.Screens écran@(pay.Screens > 1 ? "s" : "")</small></td>
+                <td><div class="n-pair"><b>@pay.Name</b><small>@ResellerName(pay.ResellerId) · @(pay.First ? "premier paiement" : pay.Period == "annual" ? "annuel" : "mensuel") · @pay.Screens écran@(pay.Screens > 1 ? "s" : "")@(pay.Simulated ? " · simulé" : "")</small></div></td>
                 <td>@pay.FromUtc.ToString("d MMM", Fr) → @pay.ToUtc.ToString("d MMM yyyy", Fr)</td>
-                <td class="r m">@Subscriptions.Fmt(pay.Amount)</td>
-                <td class="r m">−@Subscriptions.Fmt(pay.Fee)</td>
+                <td class="r m">@Subscriptions.Fmt(pay.Amount) → @Subscriptions.Fmt(pay.Amount - pay.Fee)</td>
                 <td class="r m">@(pay.Commission > 0 ? Subscriptions.Fmt(pay.Commission) + " (" + pay.CommissionPct + " %)" : "—")</td>
                 <td class="r">@if (IsLatest(pay)) { <button type="button" class="btn ghost sm" @onclick="() => Undo(pay)">Annuler</button> }</td>
             </tr>
         }
-        @if (monthPayments.Count == 0) { <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px">Aucun paiement enregistré ce mois-ci.</td></tr> }
+        @if (monthPayments.Count == 0) { <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">Aucun paiement enregistré ce mois-ci.</td></tr> }
         </tbody>
     </table></div></div>
-    <div class="adm-note">« Paiement reçu » enregistre à la main le renouvellement (en attendant Stripe) : la prochaine date anniversaire avance d'un mois ou d'un an, un compte bloqué faute de paiement est débloqué et la commission du revendeur est calculée sur le net.</div>
+    <div class="adm-note" style="margin-top:10px">« Paiement reçu » enregistre à la main le renouvellement (en attendant Stripe) : la prochaine date anniversaire avance d'un mois ou d'un an, un compte bloqué faute de paiement est débloqué et la commission du revendeur est calculée sur le net.</div>
 }
-else
-{
-    <div class="adm-card" style="padding:0;overflow:hidden"><div class="tbl-scroll">
-    <table class="adm-tbl">
-        <thead><tr><th>Revendeur</th><th class="r">Paiements</th><th class="r">Payé</th><th class="r">Frais</th><th class="r">Net</th><th class="r">Taux</th><th class="r">À verser CHF</th><th>IBAN</th><th>Statut</th><th></th></tr></thead>
-        <tbody>
-        @foreach (var r in rrows)
-        {
-            var row = r;
-            <tr style="cursor:default">
-                <td><b>@r.R.Name</b></td>
-                <td class="r m">@r.Share.Payments</td>
-                <td class="r m">@Subscriptions.Fmt(r.Share.Gross)</td>
-                <td class="r m">−@Subscriptions.Fmt(r.Share.Fees)</td>
-                <td class="r m">@Subscriptions.Fmt(r.Share.Net)</td>
-                <td class="r m">@r.Pct %</td>
-                <td class="r m"><b>@Subscriptions.Fmt(r.Payout?.Amount ?? r.Share.Commission)</b></td>
-                <td>@if (r.HasIban) { <span class="adm-st ok">Renseigné</span> } else { <span class="adm-st warn">Manquant</span> }</td>
-                <td><span class="adm-st @(r.PayState == Subscriptions.PayoutDone ? "ok" : r.PayState == Subscriptions.PayoutDue ? "warn" : "mute")">@r.PayState</span>
-                    @if (r.Payout is { } po) { <small class="adm-sub">le @Subscriptions.ToLocal(po.PaidUtc).ToString("d MMM yyyy", Fr)@(po.Reference != "" ? " · " + po.Reference : "")</small> }
-                    else if (r.PayState == Subscriptions.PayoutOpen) { <small class="adm-sub">le @Subscriptions.PayoutDate(year, month).ToString("d MMM", Fr)</small> }</td>
-                <td class="r">
-                    @if (r.Payout != null) { <button type="button" class="btn ghost sm" @onclick="() => Unpay(row)">Annuler</button> }
-                    else if (r.Share.Commission > 0) { <button type="button" class="btn ok-o sm" @onclick="() => OpenPay(row)">Marquer versé</button> }
-                </td>
-            </tr>
-        }
-        </tbody>
-        <tfoot><tr><td>Total</td><td class="r m">@rrows.Sum(r => r.Share.Payments)</td><td class="r m">@Subscriptions.Fmt(rrows.Sum(r => r.Share.Gross))</td><td class="r m">−@Subscriptions.Fmt(rrows.Sum(r => r.Share.Fees))</td><td class="r m">@Subscriptions.Fmt(rrows.Sum(r => r.Share.Net))</td><td></td><td class="r m">@Subscriptions.Fmt(rrows.Sum(r => r.Payout?.Amount ?? r.Share.Commission))</td><td colspan="3"></td></tr></tfoot>
-    </table></div></div>
-    <div class="adm-note">Versement le dernier jour du mois, sur les paiements reçus dans le mois. Une fois le virement fait, « Marquer versé » fige le montant ; un paiement annulé après le versement n'est plus possible.</div>
-}
+
 
 @if (payOf is { } po2)
 {
@@ -312,7 +298,7 @@ else if (SelClient is { } sc)
         Load();
     }
     private int year, month;
-    private string tab = "Clients", filter = "Tous";
+    private string tab = "Clients", filter = "Tous", q = "";
     private Guid? selR, selC;
     private PriceView prices = new(9.90m, 15.90m, 15, 20);
     private List<RRow> rrows = new();
@@ -335,7 +321,8 @@ else if (SelClient is { } sc)
 
     private RRow? SelRow => selR is { } id ? rrows.FirstOrDefault(r => r.R.Id == id) : null;
     private CRow? SelClient => selC is { } id ? crows.FirstOrDefault(c => c.C.Id == id) : null;
-    private IEnumerable<CRow> FilteredClients => crows.Where(c => filter switch { "Directs" => c.Direct, "Via un revendeur" => !c.Direct, "À renouveler" => c.Sub == Subscriptions.Soon || c.Sub == Subscriptions.Unpaid || c.Sub == Subscriptions.FirstDue, _ => true });
+    private IEnumerable<CRow> FilteredClients => crows.Where(c => filter switch { "Directs" => c.Direct, "Via un revendeur" => !c.Direct, "À renouveler" => c.Sub == Subscriptions.Soon || c.Sub == Subscriptions.Unpaid || c.Sub == Subscriptions.FirstDue, "Bloqués" => c.C.Blocked && c.C.BlockedReason == Subscriptions.PaymentReason, _ => true })
+        .Where(c => q.Trim() == "" || c.C.Name.Contains(q.Trim(), StringComparison.OrdinalIgnoreCase) || c.R.Name.Contains(q.Trim(), StringComparison.OrdinalIgnoreCase));
 
     private bool IsLatest(Payment p) => Root.Read(db => db.Payments.Where(x => x.ClientId == p.ClientId).OrderByDescending(x => x.PaidUtc).FirstOrDefault()?.Id == p.Id);
 
@@ -389,7 +376,10 @@ else if (SelClient is { } sc)
         Load();
     }
 
-    private void SetTab(string t) { tab = t; filter = "Tous"; selR = selC = null; }
+    private void SetTab(string t) { tab = t; filter = "Tous"; q = ""; selR = selC = null; }
+
+    // Cartes « À traiter » : ouvrent la bonne vue, déjà filtrée
+    private void Todo(string t, string f) { SetTab(t); filter = f; }
 
     private void Load()
     {
