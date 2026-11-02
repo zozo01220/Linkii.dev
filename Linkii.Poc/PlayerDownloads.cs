@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace Linkii.Poc;
 
-/// <summary>Installeurs du player déposés dans le dossier downloads des données : Linkivi-&lt;version&gt;-x64.msi (Windows), Linkivi-&lt;version&gt;-*.apk (Android).
+/// <summary>Installeurs du player déposés dans le dossier downloads des données : Linkivi-&lt;version&gt;-x64.msi (Windows), Linkivi-&lt;version&gt;-*.apk (Android), linkivi-pi-&lt;version&gt;.tar.gz (Linux, Raspberry Pi OS 64 bits).
 /// La version et la taille viennent du fichier : rien à tenir à jour à la main.</summary>
 public static class PlayerDownloads
 {
@@ -10,7 +10,7 @@ public static class PlayerDownloads
 
     public static Item? Latest(string platform)
     {
-        var pattern = platform switch { "windows" => "Linkivi-*.msi", "android" => "Linkivi-*.apk", _ => null };
+        var pattern = platform switch { "windows" => "Linkivi-*.msi", "android" => "Linkivi-*.apk", "linux" => "linkivi-pi-*.tar.gz", _ => null };
         if (pattern == null || !Directory.Exists(AppPaths.DownloadDir)) return null;
         var file = new DirectoryInfo(AppPaths.DownloadDir).GetFiles(pattern).OrderByDescending(f => f.LastWriteTimeUtc).FirstOrDefault();
         if (file == null) return null;

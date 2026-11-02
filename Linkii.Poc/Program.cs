@@ -575,6 +575,15 @@ app.MapGet("/download/android", () =>
         : Results.File(apk.Path, "application/vnd.android.package-archive", apk.Name);
 });
 
+// Player Linux (Raspberry Pi OS 64 bits) : dernier linkivi-pi-*.tar.gz du même dossier, déposé par build-package.ps1.
+app.MapGet("/download/linux", () =>
+{
+    var pkg = PlayerDownloads.Latest("linux");
+    return pkg == null
+        ? Results.Content("Le player Linux n'est pas encore disponible au téléchargement.", "text/plain; charset=utf-8", statusCode: 404)
+        : Results.File(pkg.Path, "application/gzip", pkg.Name);
+});
+
 // Relais Linkii (§139, lot 4), fichiers du dossier downloads déposés par Linkii.Relay/publish.ps1 :
 //  - Windows : LinkiiRelay-Setup.exe, l'installateur (c'est le relais lui-même : il demande le code, installe et démarre le service). Le serveur ajoute
 //    à la fin du fichier « #LINKII-SERVER=https://… » (sans effet sur l'exécutable) : l'installateur connaît ainsi l'adresse du serveur qui l'a servi ;
