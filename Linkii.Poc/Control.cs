@@ -10,7 +10,7 @@ public record CommandResult(bool Ok, string? Error = null, Guid? Id = null);
 /// par SignalR et, en secours, dans la réponse du sondage du player. L'écran accuse réception puis exécution
 /// (<see cref="ScreenCommand.Status"/>) ; l'état (pause en cours, dernier aperçu) est gardé sur l'écran pour le back-office.
 /// </summary>
-public class ScreenControl(JsonStore store, IHubContext<ScreenHub> hub)
+public class ScreenControl(JsonStore store, IHubContext<ScreenHub> hub, HistoryLog history)
 {
     /// <summary>Une commande sans accusé après ce délai est déclarée en échec.</summary>
     public static readonly TimeSpan Timeout = TimeSpan.FromMinutes(2);
@@ -42,6 +42,8 @@ public class ScreenControl(JsonStore store, IHubContext<ScreenHub> hub)
                 return ("Une commande de pause est déjà en cours.", null);
             if (kind == ScreenCommand.Restart && s.Commands.Any(c => c.Kind == kind && c.Open))
                 return ("Un redémarrage est déjà en cours.", null);
+            if (kind is ScreenCommand.Reboot or ScreenCommand.PowerOff && s.Commands.Any(c => c.Kind is ScreenCommand.Reboot or ScreenCommand.PowerOff && c.Open))
+                return ("Une commande de l'appareil est déjà en cours.", null);
 
             var cmd = new ScreenCommand { Kind = kind, By = by, SentUtc = now };
             switch (kind)
@@ -57,7 +59,10 @@ public class ScreenControl(JsonStore store, IHubContext<ScreenHub> hub)
                 case ScreenCommand.Resume:
                     s.PausedUtc = null; s.PausedUntilUtc = null;
                     break;
-                case ScreenCommand.Restart or ScreenCommand.Reload or ScreenCommand.Capture:
+                case ScreenCommand.Restart or ScreenCommand.Reload or ScreenCommand.Capture or ScreenCommand.Reboot:
+                    break;
+                case ScreenCommand.PowerOff:
+                    s.PoweredOffUtc = now.AddMinutes(2);   // l'écran va se taire : ce n'est pas une panne (voir PoweredOff)
                     break;
                 default:
                     return ("Commande inconnue.", null);
@@ -67,6 +72,14 @@ public class ScreenControl(JsonStore store, IHubContext<ScreenHub> hub)
             return (null, cmd);
         });
         if (r.Cmd is not { } c) return new(false, r.Error);
+        var label = kind switch { ScreenCommand.Pause => "Pause", ScreenCommand.Resume => "Reprise", ScreenCommand.Restart => "Redémarrage", ScreenCommand.Reload => "Rechargement",
+            ScreenCommand.Reboot => "Redémarrage de l'appareil", ScreenCommand.PowerOff => "Extinction de l'appareil", _ => null };
+        if (label != null)
+        {
+            var name = store.Read(db => db.Screens.FirstOrDefault(x => x.Id == screenId)?.Name);
+            history.Record(clientId, History.Screens, History.Player, $"{label} demandé{(kind is ScreenCommand.Pause or ScreenCommand.Resume or ScreenCommand.PowerOff ? "e" : "")} sur « {name} »", kind is ScreenCommand.PowerOff ? Notifs.Warn : Notifs.Info, c.Detail, by,
+                targetKind: "screen", targetId: screenId, targetName: name);
+        }
         await hub.Clients.Group(ScreenHub.Group(screenId)).SendAsync("Command", Payload(c));
         return new(true, null, c.Id);
     }
@@ -86,20 +99,24 @@ public class ScreenControl(JsonStore store, IHubContext<ScreenHub> hub)
         c.Status = status;
         if (!string.IsNullOrWhiteSpace(detail)) c.Detail = detail.Length > 200 ? detail[..200] : detail;
         if (status == ScreenCommand.Failed && c.Kind == ScreenCommand.Pause) { s.PausedUtc = null; s.PausedUntilUtc = null; }   // la pause n'a pas eu lieu
+        if (status == ScreenCommand.Failed && c.Kind == ScreenCommand.PowerOff) s.PoweredOffUtc = null;   // l'appareil n'a pas pu s'éteindre
         return true;
     }
 
-    /// <summary>L'écran se reconnecte après un redémarrage demandé : la commande est exécutée.</summary>
+    /// <summary>Extinction demandée et pas encore démentie : l'écran se tait exprès, ni alerte ni pastille « hors ligne » tant qu'il n'est pas revenu.</summary>
+    public static bool PoweredOff(Screen s) => s.PoweredOffUtc is { } p && (s.LastSeenUtc is not { } l || l <= p);
+
+    /// <summary>L'écran se reconnecte après un redémarrage (de l'application ou de l'appareil) demandé : la commande est exécutée.</summary>
     public static void CompleteRestarts(Screen s, DateTime now)
     {
-        foreach (var c in s.Commands.Where(c => c.Kind == ScreenCommand.Restart && c.Open && now - c.SentUtc < TimeSpan.FromMinutes(10)))
+        foreach (var c in s.Commands.Where(c => c.Kind is ScreenCommand.Restart or ScreenCommand.Reboot && c.Open && now - c.SentUtc < TimeSpan.FromMinutes(10)))
             if (c.Status == ScreenCommand.Received) c.Status = ScreenCommand.Done;
     }
 
     /// <summary>Commandes restées sans réponse : en échec. Pause terminée : état effacé.</summary>
     public static void Expire(Screen s, DateTime now)
     {
-        foreach (var c in s.Commands.Where(c => c.Open && now - c.SentUtc > Timeout))
+        foreach (var c in s.Commands.Where(c => c.Open && now - c.SentUtc > (c.Kind == ScreenCommand.Reboot ? TimeSpan.FromMinutes(10) : Timeout)))   // un PC met du temps à redémarrer
         {
             c.Detail = c.Status == ScreenCommand.Received ? "sans suite" : "l'écran n'a pas répondu";
             c.Status = ScreenCommand.Failed;
@@ -216,12 +233,13 @@ public static class ScreenAlerts
     {
         var area = db.Areas.FirstOrDefault(a => a.Id == s.AreaId);
         var inWall = Helpers.Wall(db.Areas, s) != null;
+        if (ScreenControl.PoweredOff(s)) return true;   // éteint depuis le back-office
         return Sleep.State(c, area, s, inWall, now).Asleep || Sleep.State(c, area, s, inWall, now.AddMinutes(-5)).Asleep;
     }
 }
 
 /// <summary>Toutes les minutes : commandes sans réponse, pauses terminées, et alerte quand un écran tombe (ou revient) si l'organisation l'a activée.</summary>
-public class ScreenWatchWorker(JsonStore store, Mailer mail, AlertService alerts, NotificationCenter center, IEventPublisher events, ILogger<ScreenWatchWorker> log) : BackgroundService
+public class ScreenWatchWorker(JsonStore store, Mailer mail, AlertService alerts, NotificationCenter center, IEventPublisher events, HistoryLog history, ILogger<ScreenWatchWorker> log) : BackgroundService
 {
     private readonly DateTime started = DateTime.UtcNow;
 
@@ -237,13 +255,18 @@ public class ScreenWatchWorker(JsonStore store, Mailer mail, AlertService alerts
 
     public async Task Run(DateTime now)
     {
-        var (work, screenEvents, lowBattery) = store.Write(db =>
+        var (work, screenEvents, lowBattery, hist) = store.Write(db =>
         {
             foreach (var s in db.Screens.Where(s => s.Commands.Count > 0 || s.PausedUtc != null)) ScreenControl.Expire(s, now);
-            return (ScreenAlerts.Plan(db, now, started), ScreenEvents.Plan(db, now, started), ScreenAlerts.PlanBattery(db, now));
+            db.Screens.RemoveAll(s => s.Token == null && s.RepairTo != null && s.RepairUtc is { } r && now - r > TimeSpan.FromMinutes(10));   // écrans provisoires des ré-appairages : le jeton est remis depuis longtemps
+            return (ScreenAlerts.Plan(db, now, started), ScreenEvents.Plan(db, now, started), ScreenAlerts.PlanBattery(db, now), ScreenHistory.Plan(db, now, started));
         });
+        foreach (var (cid, e) in hist) history.Add(cid, e);   // historique des écrans : indépendant des réglages d'alertes
         foreach (var (c, low) in lowBattery)
         {
+            foreach (var s in low)
+                history.Record(c.Id, History.Screens, History.Battery, $"« {s.Name} » : batterie à {s.BatteryPct} %", Notifs.Warn, $"Sous le seuil de {Math.Clamp(c.BatteryLowPct, 5, 50)} %", "Player",
+                    targetKind: "screen", targetId: s.Id, targetName: s.Name);
             var list = low.Select(s => $"{s.Name} ({s.BatteryPct} %)").ToList();
             await alerts.Raise(c.Id, Alerts.Screens, low.Count == 1 ? $"Batterie faible : {low[0].Name}" : $"{low.Count} écrans sur batterie faible",
                 string.Join(", ", list.Take(3)) + (list.Count > 3 ? "…" : ""), "/", severity: Notifs.Warn);

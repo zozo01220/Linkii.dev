@@ -9,6 +9,7 @@
 @inject AppService Apps
 @inject PresentationMerge Merge
 @inject ModeService Modes
+@inject HistoryLog Hist
 
 @* Réglages : navigation latérale groupée, une carte par sujet, un réglage par ligne (libellé à gauche, contrôle à droite).
    Les modifications de toutes les sections s'enregistrent ensemble : la barre du bas n'apparaît qu'après un changement. « Utilisation » et « Compte » n'en ont pas besoin. *@
@@ -609,10 +610,15 @@
         if (sleepEnabled && sleepRef != null) await sleepRef.Persist();
         var pauseImage = AppField.MediaIds(pauseValues.GetValueOrDefault("pause")) is { Count: > 0 } ids ? ids[0] : (Guid?)null;
         var mergeNow = false;
+        var changes = new List<string[]>();
+        void Diff(string label, object? before, object? after) { if (!Equals(before, after)) changes.Add(new[] { label, $"{Show(before)} → {Show(after)}" }); }
 
         Store.Write(d =>
         {
             var t = d.Tenant;
+            Diff("Nom de l'organisation", t.Name, name.Trim()); Diff("Fuseau horaire", t.Timezone, timezone); Diff("Durée par défaut (s)", t.DefaultDurationSec, duration); Diff("Redémarrage des écrans", t.ReloadHour, reloadHour);
+            Diff("Mise en veille", t.SleepEnabled, sleepEnabled); Diff("Luminosité", t.DimEnabled, dimEnabled); Diff("Code du menu technicien", t.TechPinOn, techPinOn); Diff("Fusion des présentations", t.MergePresentations, mergePres);
+            if (t.IsGrowth) { Diff("Alertes", t.AlertsOn, alertsOn); Diff("Alertes par e-mail", t.AlertMail, alertMail); Diff("Alertes par notification", t.AlertPush, alertPush); Diff("Délai hors ligne (min)", t.AlertOfflineMinutes, alertMinutes); Diff("Suivi de la batterie", t.BatteryOn, batteryOn); }
             t.Name = name.Trim(); t.Timezone = timezone;
             t.DefaultDurationSec = duration; t.ReloadHour = reloadHour;
             t.SleepEnabled = sleepEnabled; t.DimEnabled = dimEnabled;
@@ -635,12 +641,15 @@
                 t.PauseMediaId = pauseImage is { } pm && d.Media.Any(m => m.Id == pm && m.Type == "image") ? pauseImage : null;
             }
         });
+        if (changes.Count > 0) Hist.By(Ctx, History.Settings, changes.Count == 1 ? $"Réglage modifié : {changes[0][0]}" : $"{changes.Count} réglages modifiés", Notifs.Info, changes.Count == 1 ? changes[0][1] : string.Join(", ", changes.Select(c => c[0])), "settings", null, null, "settings", facts: changes);
         if (mergeNow) Merge.Run(Store.ClientId);   // réglage activé à l'instant : les doublons sont fusionnés tout de suite
         await Notifier.NotifyClient(Store.ClientId);   // fuseau / redémarrage : les écrans rechargent leur configuration
         dirty = false;
         LoadPinState(Store.Read(d => d.Tenant));
         Toast.Ok("Réglages enregistrés.");
     }
+
+    private static string Show(object? v) => v switch { true => "activé", false => "désactivé", null => "—", _ => v.ToString() ?? "" };
 
     private void ChangePassword()
     {
@@ -650,6 +659,7 @@
         if (Ctx.IsImpersonating || !Passwords.Verify(hash, oldPwd)) { Toast.Error("Mot de passe actuel incorrect."); return; }
         if (newPwd.Length < 8) { Toast.Error("Le nouveau mot de passe est trop court (8 caractères minimum)."); return; }
         Root.Write(d => { d.Users.First(u => u.Id == uid).PasswordHash = Passwords.Hash(newPwd); });
+        Hist.By(Ctx, History.Members, "Mot de passe modifié", Notifs.Info, null, "user", uid);
         oldPwd = newPwd = "";
         Toast.Ok("Mot de passe modifié.");
     }

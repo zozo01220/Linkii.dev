@@ -122,6 +122,11 @@ public sealed class Bridge
 
     public string DeviceInfo() => Device.Json(instance);
 
+    /// <summary>Commandes de l'appareil du back-office : redémarrer ou éteindre le PC (tous les écrans qu'il affiche), couper ou rallumer les moniteurs (veille).</summary>
+    public bool Reboot() { PcPower.Reboot(); return true; }
+    public bool PowerOff() { PcPower.Off(); return true; }
+    public void DisplayPower(bool on) => PcPower.Display(instance, on);
+
     /// <summary>Redémarrage demandé par le back-office : le superviseur relance l'affichage aussitôt.</summary>
     public void Restart() => restart();
 

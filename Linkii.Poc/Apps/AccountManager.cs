@@ -5,12 +5,13 @@ namespace Linkii.Poc;
 /// à l'annulation d'un assistant d'ajout (rien ne reste) et au retrait d'une intégration (le compte part avec elle).
 /// Un compte Google ou Microsoft est partagé par plusieurs intégrations : il ne part qu'avec la dernière (<see cref="UsedByOthers"/>).
 /// </summary>
-public class AccountManager(TenantStore store, MicrosoftAuth ms, GoogleAuth google, CanvaService canva, DropboxAuth dropbox, FacebookAuth facebook)
+public class AccountManager(TenantStore store, MicrosoftAuth ms, GoogleAuth google, CanvaService canva, DropboxAuth dropbox, FacebookAuth facebook, HistoryLog history, TenantContext hctx)
 {
     /// <summary>Retire le compte de l'organisation (type de <see cref="ConnectedAccounts"/>).</summary>
     public async Task Disconnect(string kind)
     {
         var clientId = store.ClientId;
+        history.By(hctx, History.Integrations, $"Compte {ConnectedAccounts.Kind(kind).Name} déconnecté", Notifs.Warn, null, "account", null, ConnectedAccounts.Kind(kind).Name, "integrations");
         switch (kind)
         {
             case ConnectedAccounts.Microsoft: ms.Disconnect(clientId); break;

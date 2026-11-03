@@ -4,7 +4,7 @@ namespace Linkii.Poc;
 /// Les apps du client connecté : installation depuis le catalogue, instances (paramétrées, dans la médiathèque), désinstallation.
 /// Les paramètres d'une instance sont un brouillon : ils ne partent sur les écrans qu'à la publication d'une playlist.
 /// </summary>
-public class AppService(TenantStore store, AppCatalog catalog, AppProviders providers, SecretBox box)
+public class AppService(TenantStore store, AppCatalog catalog, AppProviders providers, SecretBox box, HistoryLog? history = null, TenantContext? hctx = null)
 {
     public IReadOnlyList<AppManifest> Catalog => catalog.All;
     public AppManifest? Find(string? appId) => catalog.Find(appId);
@@ -64,7 +64,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
             added = true;
             return a;
         });
-        if (added) InstallsChanged?.Invoke();
+        if (added) { Remember($"Intégration « {m.Name} » activée", Notifs.Info, appId, m.Name); InstallsChanged?.Invoke(); }
         return install;
     }
 
@@ -78,9 +78,12 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
     public void Unmark(string integrationId) => store.Write(d => { RequireAdmin(d); d.Tenant.IntegrationsAdded.Remove(integrationId); });
 
     /// <summary>Retire l'app des choix proposés. Non destructif : les contenus et widgets déjà en place restent à l'antenne.</summary>
+    private void Remember(string title, string level, string appId, string? name) { if (history != null && hctx != null) history.By(hctx, History.Integrations, title, level, null, "app", null, name, "integrations"); }
+
     public void Disable(string appId)
     {
         store.Write(d => { RequireAdmin(d); d.AppInstalls.RemoveAll(a => a.AppId == appId); if (appId == Emergencies.AppId) Emergencies.EndAll(d.Tenant, DateTime.UtcNow, "intégration retirée"); });
+        Remember($"Intégration « {catalog.Find(appId)?.Name ?? appId} » désactivée", Notifs.Warn, appId, catalog.Find(appId)?.Name);
         InstallsChanged?.Invoke();
     }
 

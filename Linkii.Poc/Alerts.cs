@@ -74,7 +74,7 @@ public static class Alerts
 /// Envoie une alerte par les canaux choisis par l'organisation. Ne lève jamais d'exception.
 /// Chaque alerte entre aussi dans le centre de notifications (<see cref="NotificationCenter"/>) quand l'organisation le veut (<see cref="Alerts.InCenter"/>).
 /// </summary>
-public class AlertService(JsonStore store, Mailer mail, PushService push, NotificationCenter center, ResellerResolver resolver, ILogger<AlertService> log)
+public class AlertService(JsonStore store, Mailer mail, PushService push, NotificationCenter center, ResellerResolver resolver, HistoryLog history, ILogger<AlertService> log)
 {
     /// <summary>Contenu d'un e-mail propre à un type (écrans) : reçoit le revendeur, l'adresse de l'espace, le nom et l'adresse du destinataire.</summary>
     public delegate Task<string?> MailBuilder(Reseller r, string appUrl, string name, string email);
@@ -103,6 +103,7 @@ public class AlertService(JsonStore store, Mailer mail, PushService push, Notifi
                 return (c, list, db.Resellers.FirstOrDefault(r => r.Id == c.ResellerId), w, Alerts.InCenter(c, kind, good));
             });
             if (client == null) return;
+            Remember(clientId, kind, title, body, path, severity, good);
             if (inCenter) center.Add(clientId, kind, severity ?? DefaultSeverity(kind, good), title, body, path, except, dedupe, subjects);
             if (!wants) return;
             if (client.AlertPush && Alerts.Wants(client, kind, good)) await push.ToClientAdmins(clientId, kind, title, body, path, except);
@@ -129,6 +130,17 @@ public class AlertService(JsonStore store, Mailer mail, PushService push, Notifi
             if (c.AlertPush && Alerts.Wants(c, kind, good)) await push.ToClientAdmins(clientId, kind, title, body, path);
         }
         catch (Exception ex) { log.LogWarning(ex, "Notification « {Title} » non envoyée", title); }
+    }
+
+    /// <summary>
+    /// Toute alerte entre dans l'historique, que l'organisation l'ait demandée ou non. Les écrans y entrent par <see cref="ScreenHistory"/> (qui date la panne sans attendre le délai d'alerte).
+    /// Synchronisations et intégrations sont aussi des lignes du diagnostic.
+    /// </summary>
+    private void Remember(Guid clientId, string kind, string title, string body, string path, string? severity, bool good)
+    {
+        if (kind == Alerts.Screens) return;
+        var cat = kind switch { Alerts.Sync => History.Sync, Alerts.Members => History.Members, Alerts.Billing => History.Account, Alerts.Integrations => History.Integrations, _ => History.Settings };
+        history.Record(clientId, History.Activity, cat, title, severity ?? DefaultSeverity(kind, good), body, "Système", path: path, tech: kind is Alerts.Sync or Alerts.Integrations);
     }
 
     private static string DefaultSeverity(string kind, bool good) => good ? Notifs.Ok : kind switch

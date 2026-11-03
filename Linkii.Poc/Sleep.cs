@@ -65,7 +65,7 @@ public static class Sleep
 
     /// <summary>Ce que reçoit le player : fuseau et plages (null : pas de veille).</summary>
     public static object? ForPlayer(Tenant t, Area? area, Screen s, bool inWall) =>
-        t.SleepEnabled && s.ForcedSleep
+        s.ForcedSleep   // la mise en veille manuelle ne dépend plus de l'interrupteur des plages : elle suit le droit « Éteindre l'écran »
             ? new { tz = TimeZone(t, area), ranges = new List<int[]> { new[] { 0, WeekMinutes } }, wakeUntil = 0L }   // mise en veille manuelle : toute la semaine, jusqu'au réveil
         : EffectiveGrid(t, area, s, inWall) is { } g
             ? new { tz = TimeZone(t, area), ranges = Ranges(g), wakeUntil = Woken(s, DateTime.UtcNow) ? Helpers.EpochMs(s.WakeUntilUtc!.Value) : 0L }   // wakeUntil : réveil manuel en cours (0 : aucun)
@@ -83,7 +83,7 @@ public static class Sleep
     /// <summary>L'écran est-il en veille à cet instant ? (carte de l'écran dans le back-office)</summary>
     public static (bool Asleep, string? Wake) State(Tenant t, Area? area, Screen s, bool inWall, DateTime nowUtc)
     {
-        if (t.SleepEnabled && s.ForcedSleep) return (true, null);   // mise en veille manuelle : jusqu'au réveil
+        if (s.ForcedSleep) return (true, null);   // mise en veille manuelle : jusqu'au réveil
         if (EffectiveGrid(t, area, s, inWall) is not { } grid || Woken(s, nowUtc)) return (false, null);   // réveil manuel : éveillé malgré la plage
         TimeZoneInfo tz;
         try { tz = TimeZoneInfo.FindSystemTimeZoneById(TimeZone(t, area)); } catch { tz = TimeZoneInfo.Utc; }

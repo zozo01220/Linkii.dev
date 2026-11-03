@@ -210,7 +210,7 @@ public interface IApprovalNotices
 public record SubmitResult(ApprovalRequest? Request, string? Error, List<Guid> Approvers);
 
 /// <summary>Dépôt, décision, retrait, rappel et péremption des demandes d'approbation.</summary>
-public class ApprovalService(JsonStore store, IScreenPublishing screens, IApprovalNotices notices, ILogger<ApprovalService> log)
+public class ApprovalService(JsonStore store, IScreenPublishing screens, IApprovalNotices notices, ILogger<ApprovalService> log, HistoryLog? history = null)
 {
     private const string Path = "/approvals";
 
@@ -286,6 +286,9 @@ public class ApprovalService(JsonStore store, IScreenPublishing screens, IApprov
             return (null, r, done);
         });
         if (error != null || req == null) return error;
+        history?.Record(clientId, History.Activity, History.Approval, req.Status == ApprovalStatus.Expired ? $"Demande périmée : {req.Title}" : approve ? $"Publication approuvée : {req.Title}" : $"Publication refusée : {req.Title}",
+            approve ? Notifs.Ok : Notifs.Warn, string.IsNullOrWhiteSpace(text) ? null : $"« {text} »", byName, byUserId, "approval", req.Id, req.Title, "approvals",
+            facts: new() { new[] { "Auteur de la demande", req.AuthorName ?? "" }, new[] { "Décidée par", byName } });
         foreach (var id in published) await screens.NotifyScreen(id);
         if (req.Status == ApprovalStatus.Expired)
             await notices.Tell(clientId, [req.AuthorId], $"Demande périmée : {req.Title}", req.Comment ?? "", Notifs.Warn, "approval-end:" + req.Id);
@@ -305,6 +308,7 @@ public class ApprovalService(JsonStore store, IScreenPublishing screens, IApprov
         if (!r.Open) return "Cette demande n'est plus en attente.";
         if (!byAdmin && r.AuthorId != byUserId) return "Seul l'auteur (ou un administrateur) retire une demande.";
         Close(r, ApprovalStatus.Withdrawn, null, null);
+        history?.Record(clientId, History.Activity, History.Approval, $"Demande retirée : {r.Title}", Notifs.Info, null, r.AuthorName, r.AuthorId, "approval", r.Id, r.Title, "approvals");
         return (string?)null;
     });
 
@@ -410,7 +414,7 @@ public class ApprovalNotices(JsonStore store, NotificationCenter center, Mailer 
 /// Passerelle de l'interface vers la publication d'un écran : une personne soumise à approbation dépose une demande au lieu de publier. Toute publication faite
 /// pour une personne passe ici, jamais par <see cref="Notifier.PublishScreen"/> (un test le vérifie dans les pages).
 /// </summary>
-public class ScreenPublisher(Notifier notifier, ApprovalService approvals, TenantContext ctx, JsonStore store)
+public class ScreenPublisher(Notifier notifier, ApprovalService approvals, TenantContext ctx, JsonStore store, HistoryLog history)
 {
     /// <param name="Published">Écrans publiés tout de suite.</param>
     /// <param name="Request">Demande déposée (la publication attend la décision) ; null : publié.</param>
@@ -426,10 +430,25 @@ public class ScreenPublisher(Notifier notifier, ApprovalService approvals, Tenan
         if (store.Read(db => db.Clients.FirstOrDefault(c => c.Id == client) is { } t && ApprovalOps.NeedsApproval(db, t, user, screenIds)))
         {
             var r = await approvals.Submit(client, user!.Value, screenIds, note);
+            if (r.Request != null) Log(client, screenIds, "Publication en attente d'approbation", Notifs.Warn, note);
             return new Result(0, r.Request, r.Error);
         }
         foreach (var id in screenIds) await notifier.PublishScreen(id);
+        Log(client, screenIds, "Publication", Notifs.Ok, note);
         return new Result(screenIds.Count, null, null);
+    }
+
+    /// <summary>Historique : qui a publié, sur quels écrans (un seul nom pour un écran, le nombre sinon), avec leur liste de lecture.</summary>
+    private void Log(Guid client, IReadOnlyCollection<Guid> ids, string what, string level, string? note)
+    {
+        var screens = store.Read(db => db.Screens.Where(s => ids.Contains(s.Id)).Select(s => (s.Id, s.Name, List: db.Playlists.FirstOrDefault(p => p.Id == s.PlaylistId)?.Name)).ToList());
+        if (screens.Count == 0) return;
+        var title = screens.Count == 1 ? $"{what} sur « {screens[0].Name} »" : $"{what} sur {screens.Count} écrans";
+        var facts = new List<string[]> { new[] { "Écrans", string.Join(", ", screens.Select(s => s.Name)) } };
+        foreach (var l in screens.Select(s => s.List).Where(n => n != null).Distinct().Take(3)) facts.Add(new[] { "Liste de lecture", l! });
+        if (!string.IsNullOrWhiteSpace(note)) facts.Add(new[] { "Message", note! });
+        history.By(ctx, History.Publish, title, level, screens.Count > 1 ? string.Join(", ", screens.Select(s => s.Name).Take(4)) : null, "screen", screens.Count == 1 ? screens[0].Id : null,
+            screens[0].Name, "/", facts: facts);
     }
 
     /// <summary>Première diffusion d'un écran qu'on vient de connecter, ou mur créé par un administrateur : rien à approuver.</summary>

@@ -43,6 +43,7 @@ cd Linkii.RaspberryPlayer
 - Veille matérielle (écran éteint) : le player passe en écran noir sur ses plages, mais l'écran reste allumé (à faire avec `wlr-randr` ou `vcgencmd display_power`).
 - Luminosité, menu technicien (PIN), médiathèque native, mode borne.
 - Écran supprimé dans le back-office : le player revient au code d'appairage (pas de désinstallation).
+- Démarrage automatique : réglé depuis le back-office (paramètres de l écran › Appareil), appliqué au prochain démarrage de la session (start.sh lit settings.json).
 - Téléchargement depuis le back-office (`/download/...`) et choix « Raspberry Pi » dans « Connecter un écran ».
 - Plusieurs écrans sur un même Pi.
 - Vidéo : un Pi 5 n'a plus de décodeur H.264 matériel (le logiciel suffit en 1080p) ; éviter la 4K.

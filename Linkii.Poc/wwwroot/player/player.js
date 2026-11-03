@@ -1393,6 +1393,17 @@
       if (N && typeof N.restart === 'function') {   // application Android : le serveur voit l'exécution quand l'écran se reconnecte
         setTimeout(function () { try { N.restart(); } catch (e) { cmdAck(c.id, 'failed', "Redémarrage refusé par l'appareil"); } }, 800);
       } else { cmdAck(c.id, 'done', 'Page rechargée (hors application Android)'); setTimeout(function () { location.reload(); }, 600); }
+    } else if (c.kind === 'reboot' || c.kind === 'poweroff') {
+      // matériel : Windows et Raspberry (la coquille exécute), Android seulement pour redémarrer s'il est propriétaire de l'appareil
+      var fn = c.kind === 'reboot' ? 'reboot' : 'powerOff';
+      if (N && typeof N[fn] === 'function') {
+        if (c.kind === 'poweroff') cmdAck(c.id, 'done');   // l'appareil ne répondra plus : c'est exécuté dès que l'ordre part
+        setTimeout(function () {
+          var ok = false;
+          try { ok = N[fn]() !== false; } catch (e) { ok = false; }
+          if (!ok) cmdAck(c.id, 'failed', c.kind === 'reboot' ? "Redémarrage refusé par l'appareil" : "Extinction refusée par l'appareil");
+        }, 800);
+      } else cmdAck(c.id, 'failed', c.kind === 'reboot' ? 'Cet appareil ne peut pas être redémarré depuis Linkivi' : 'Cet appareil ne peut pas être éteint depuis Linkivi');
     } else if (c.kind === 'capture') {
       if (N && typeof N.capture === 'function') {
         try { N.capture(c.id, location.origin + '/api/player/capture?cmd=' + c.id, state.token || ''); }
@@ -1463,6 +1474,14 @@
       try { window.LinkiiNative.sleepSchedule(sig); } catch (e) {}
     }
     var want = !!sl && isAsleep(sl, serverNow());
+    // Windows et Raspberry : la veille coupe vraiment l'affichage (écran noir en plus, au cas où l'appareil ne sait pas le faire).
+    // L'ordre est renvoyé aussi quand l'état n'a pas changé mais que cette page ne l'a pas encore donné (page rechargée ou player redémarré
+    // pendant la veille : l'affichage est resté coupé alors que le player croit être éveillé).
+    var Nv = window.LinkiiNative;
+    if (Nv && typeof Nv.displayPower === 'function' && state.displaySent !== !want) {
+      state.displaySent = !want;
+      try { Nv.displayPower(!want); } catch (e) {}
+    }
     if (want === !!state.asleep) return;
     state.asleep = want;
     var el = $('sleepview');

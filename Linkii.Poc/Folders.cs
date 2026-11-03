@@ -23,8 +23,8 @@ public static class FolderAccess
         folders.ToDictionary(f => f.Id, f => For(a, f, folders));
 
     /// <summary>Domaine d'un dossier : Listes de lecture ou Médiathèque.</summary>
-    public static string DomainOf(IFolderNode f) => f is PlaylistFolder ? LevelPages.Playlists : LevelPages.Media;
-    public static string KindOf(IFolderNode f) => f switch { PlaylistFolder => ShareKind.PlaylistFolder, CompositionFolder => ShareKind.CompositionFolder, _ => ShareKind.MediaFolder };
+    public static string DomainOf(IFolderNode f) => f is PlaylistFolder or InteractiveListFolder ? LevelPages.Playlists : LevelPages.Media;
+    public static string KindOf(IFolderNode f) => f switch { PlaylistFolder => ShareKind.PlaylistFolder, InteractiveListFolder => ShareKind.IListFolder, CompositionFolder => ShareKind.CompositionFolder, _ => ShareKind.MediaFolder };
 
     /// <summary>Créer un dossier (ou ranger un élément) à la racine : administrateur, ou utilisateur qui gère les siens dans ce domaine.</summary>
     public static bool CanCreateAtRoot(AreaAccess a, string domain) => a.CanWrite(domain);

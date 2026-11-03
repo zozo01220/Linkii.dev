@@ -8,11 +8,20 @@ namespace Linkii.Poc;
 /// Les images et les MP4 d'au plus 1080p sont publiés tels quels ; toute autre vidéo (autre format, ou plus grande que 1080p) est convertie en arrière-plan en MP4 H.264 1080p max (statut « processing » puis prête).
 /// La progression est rapportée en octets reçus.
 /// </summary>
-public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp http)
+public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp http, HistoryLog history)
 {
     public const long MaxBytes = 2_000_000_000;
 
     public record Result(MediaItem? Item, string? Error);
+
+    /// <summary>Historique : un média déposé (la personne est retrouvée par son identifiant ; sans elle, le dépôt vient d'une synchronisation).</summary>
+    private void Remember(MediaItem m, Guid? ownerId)
+    {
+        var who = ownerId == null ? null : store.Read(d => d.Users.FirstOrDefault(u => u.Id == ownerId)?.Name);
+        var folder = m.FolderId == null ? null : store.Read(d => d.MediaFolders.FirstOrDefault(f => f.Id == m.FolderId)?.Name);
+        history.Record(m.ClientId, History.Activity, History.Media, $"{(m.Type == "video" ? "Vidéo" : "Image")} « {m.Name} » ajoutée", Notifs.Info,
+            folder == null ? null : $"Dossier « {folder} »", who ?? "Système", ownerId, m.Type, m.Id, m.Name, "media");
+    }
 
     public static bool IsSupported(string fileName)
     {
@@ -126,11 +135,13 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
             var px = dim ?? MediaProbe.Size(source);
             var item = new MediaItem { ClientId = clientId, AreaId = areaId ?? Guid.Empty, FolderId = folderId, OwnerId = ownerId, Name = title, Type = isVideo ? "video" : "image", Dir = dir, FileName = id + ext, Size = written, Width = px?.W, Height = px?.H, AddedUtc = DateTime.UtcNow };
             store.Write(d => { d.Media.Add(item); });
+            Remember(item, ownerId);
             return new(item, null);
         }
 
         var pending = new MediaItem { ClientId = clientId, AreaId = areaId ?? Guid.Empty, FolderId = folderId, OwnerId = ownerId, Name = title, Type = "video", Dir = dir, FileName = null, Status = "processing", Size = written, AddedUtc = DateTime.UtcNow };
         store.Write(d => { d.Media.Add(pending); });
+        Remember(pending, ownerId);
         _ = Task.Run(() => ConvertInBackground(pending, source, id, dim));
         return new(pending, null);
     }
@@ -152,11 +163,13 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
             var size = new FileInfo(output).Length;
             var px = MediaProbe.Size(output);
             store.Write(d => { item.FileName = id + ".mp4"; item.Status = null; item.Error = null; item.Size = size; item.Width = px?.W; item.Height = px?.H; });
+            history.Record(item.ClientId, History.Diag, History.Media, $"Vidéo « {item.Name} » convertie en MP4", Notifs.Ok, $"{size / 1_048_576} Mo", "Système", targetKind: "media", targetId: item.Id, targetName: item.Name, path: "media", tech: true);
         }
         else
         {
             try { File.Delete(source); } catch { }
             store.Write(d => { item.Status = "failed"; item.Error = error; });
+            history.Record(item.ClientId, History.Diag, History.Media, $"Vidéo « {item.Name} » : conversion impossible", Notifs.Error, error, "Système", targetKind: "media", targetId: item.Id, targetName: item.Name, path: "media", tech: true);
         }
     }
 }

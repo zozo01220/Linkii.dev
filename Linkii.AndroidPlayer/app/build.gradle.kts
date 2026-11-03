@@ -3,7 +3,7 @@ plugins {
 }
 
 // Fichiers de sortie : Linkivi-<version>-debug.apk, Linkivi-<version>-release.aab
-base { archivesName.set("Linkivi-1.3.5") }
+base { archivesName.set("Linkivi-1.3.6") }
 
 android {
     namespace = "ch.linkii.player"
@@ -13,8 +13,8 @@ android {
         applicationId = "ch.linkii.player"
         minSdk = 24
         targetSdk = 35
-        versionCode = 9
-        versionName = "1.3.5"
+        versionCode = 10
+        versionName = "1.3.6"
 
         // Adresse neutre du serveur Linkii (modifiable sur l'appareil dans le menu technicien).
         // Surcharge possible : gradlew bundleRelease -PserverUrl=https://app.exemple.ch

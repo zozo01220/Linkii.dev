@@ -5,6 +5,7 @@
 @inject NavigationManager Nav
 @inject Toaster Toast
 @inject AlertService Alerter
+@inject HistoryLog Hist
 
 @* Fiche membre (24 octobre 2026, maquette membres-proprietaire-partage.html, option A) : tout se règle ici, à la création comme à l'édition.
    Un rôle (Utilisateur ou Administrateur) ; pour un utilisateur, un choix par page (« Gère les siens » ou « Voit tout · lecture seule ») et ses écrans. *@
@@ -96,6 +97,28 @@
             else
             {
                 <p class="hint" style="margin:0">Un administrateur n'a rien à régler : il voit et gère tout. Dans la médiathèque et les listes, il bascule entre « Mes … » et « Toute l'organisation ».</p>
+            }
+            @if (powerOn && !admin)
+            {
+                @* Commandes de l'appareil (plan Pro, maquette ecrans-alimentation-droits.html) : trois droits séparés, sur ses écrans seulement *@
+                <div>
+                    <div class="lbl" style="margin-top:0">Commandes de l'appareil <PlanTag Plan="@Plans.Growth" Size="12" Title="Disponible avec le plan Pro" /></div>
+                    <div class="mb-pages">
+                        <div class="mb-prow">
+                            <div><b>Éteindre l'écran</b><small>Coupe l'affichage, l'appareil reste allumé : on peut le réveiller à distance.</small></div>
+                            <input type="checkbox" class="ios" aria-label="Éteindre l'écran" checked="@rights.ScreenOff" @onchange="e => rights.ScreenOff = (bool)e.Value!" />
+                        </div>
+                        <div class="mb-prow">
+                            <div><b>Redémarrer l'appareil</b><small>Le Raspberry, le PC ou la tablette redémarre : l'écran revient tout seul.</small></div>
+                            <input type="checkbox" class="ios" aria-label="Redémarrer l'appareil" checked="@rights.DeviceRestart" @onchange="e => rights.DeviceRestart = (bool)e.Value!" />
+                        </div>
+                        <div class="mb-prow">
+                            <div><b>Éteindre l'appareil</b><small>Arrêt complet. <b>Linkivi ne peut pas le rallumer</b> : il faut quelqu'un sur place, ou un réveil programmé.</small></div>
+                            <input type="checkbox" class="ios" aria-label="Éteindre l'appareil" checked="@rights.DevicePowerOff" @onchange="e => rights.DevicePowerOff = (bool)e.Value!" />
+                        </div>
+                    </div>
+                    <p class="hint" style="margin:8px 0 0"><Ico Name="lock" Size="14" /> Seulement sur ses écrans : ceux qu'il a connectés et ceux qu'on lui a attribués. Même avec « Voit tout · lecture seule », les autres écrans n'ont ni bouton ni menu.</p>
+                </div>
             }
             @if (approvalOn)
             {
@@ -213,7 +236,8 @@
     private List<User> users = new();
     private MemberRights rights = new();
     private bool isNew, admin, self, busy, pick, confirmRemove;
-    private bool approvalOn, pickApr;   // approbation des publications active (plan Pro) ; choix des écrans à approuver ouvert
+    private bool powerOn;   // commandes de l'appareil : plan Pro
+    private bool approvalOn, pickApr;   //approbation des publications active (plan Pro) ; choix des écrans à approuver ouvert
     private string noApprover = Approvals.ToAdmins;
     private HashSet<Guid> othersCover = new();   // écrans déjà couverts par les autres approbateurs
 
@@ -248,7 +272,8 @@
             d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.Token != null).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
             d.Users.OrderBy(u => u.Label, StringComparer.CurrentCultureIgnoreCase).ToList(),
             d.Tenant.Name, UserId is { } id ? d.Users.FirstOrDefault(u => u.Id == id) : null));
-        (approvalOn, noApprover, othersCover) = Store.Read(d => (Approvals.Active(d.Tenant), d.Tenant.ApprovalNoApprover,
+        powerOn = Store.Read(d => d.Tenant.IsGrowth);
+        (approvalOn, noApprover, othersCover) =Store.Read(d => (Approvals.Active(d.Tenant), d.Tenant.ApprovalNoApprover,
             d.Users.Where(u => u.Id != UserId && u.Role == Roles.ClientMember && !u.Disabled && u.Rights is { Approver: true }).SelectMany(u => ApprovalOps.ScreensOf(d.Root, d.ClientId, u)).ToHashSet()));
         if (user != null)
         {
@@ -309,6 +334,11 @@
             <li>@if (rights.Screens == PageMode.Read) { <b>tous les écrans</b><text>, sans pouvoir les régler</text> } else if (k == 0) { <b>aucun écran</b><text> (la page Écrans sera vide, sauf ceux qu'elle connecte)</text> } else { <b>@k écran@(k > 1 ? "s" : "")</b><text> à gérer, et aucun autre</text> }</li>
             <li>@if (rights.Media == PageMode.Read) { <b>tous les médias</b><text> de l'organisation, sans les modifier</text> } else { <b>ses médias et ses dossiers</b><text>, plus ceux qu'on lui partage</text> }</li>
             <li>@if (rights.Playlists == PageMode.Read) { <b>toutes les listes</b><text>, sans les modifier</text> } else { <b>ses listes et ses dossiers</b><text>, plus celles qu'on lui partage</text> }</li>
+            @if (powerOn && (rights.ScreenOff || rights.DeviceRestart || rights.DevicePowerOff))
+            {
+                var what = new[] { rights.ScreenOff ? "éteindre l'écran" : null, rights.DeviceRestart ? "redémarrer l'appareil" : null, rights.DevicePowerOff ? "l'éteindre" : null }.Where(x => x != null);
+                <li><b>Peut @string.Join(", ", what)</b><text> de ses écrans seulement</text></li>
+            }
             @if (approvalOn && rights.SubmitApproval) { <li><b>Ses publications seront approuvées</b><text> par un approbateur avant d'arriver sur les écrans</text></li> }
             @if (approvalOn && rights.Approver) { <li><b>Approuve les publications</b><text> de @ApprovalCover.Count écran@(ApprovalCover.Count > 1 ? "s" : "")</text></li> }
         </ul>
@@ -343,6 +373,7 @@
             return err;
         });
         if (error != null || created == null) return;
+        Hist.By(Ctx, History.Members, $"{created.Name} invité{(adm ? " comme administrateur" : "")}", Notifs.Info, $"Invitation envoyée à {created.Email}", "user", created.Id, created.Name, "organisation");
         busy = true;
         try
         {
@@ -385,6 +416,7 @@
         confirmRemove = false;
         error = Store.Write(d => MemberOps.Remove(d, id));
         if (error != null) return;
+        Hist.By(Ctx, History.Members, $"{name} retiré de l'organisation", Notifs.Warn, null, "user", id, name, "organisation");
         Toast.Ok($"{name} a été retiré de l'organisation : ses médias et ses listes sont à vous.");
         await OnSaved.InvokeAsync();
     }

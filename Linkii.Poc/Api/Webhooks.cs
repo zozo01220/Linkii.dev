@@ -528,7 +528,7 @@ public class WebhookService(JsonStore store, ApiRegistry registry, SecretBox box
 /// Répartiteur : lit le bus, crée une livraison par adresse abonnée (écrite au journal d'abord), puis envoie. Réessais à 1 min, 5 min, 30 min, 2 h (5 tentatives),
 /// concurrence limitée par adresse, 10 échecs consécutifs ou une réponse 410 désactivent l'adresse.
 /// </summary>
-public class WebhookDispatcher(EventBus bus, WebhookJournal journal, WebhookSender sender, WebhookService svc, JsonStore store, TimeProvider time, ILogger<WebhookDispatcher> log) : BackgroundService
+public class WebhookDispatcher(EventBus bus, WebhookJournal journal, WebhookSender sender, WebhookService svc, JsonStore store, TimeProvider time, ILogger<WebhookDispatcher> log, HistoryLog? history = null) : BackgroundService
 {
     public static readonly TimeSpan[] Backoff = { TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(30), TimeSpan.FromHours(2) };
     public const int MaxAttempts = 5, DisableAfter = 10, QueueCap = 1000, PerEndpoint = 2;
@@ -611,6 +611,9 @@ public class WebhookDispatcher(EventBus bus, WebhookJournal journal, WebhookSend
                 if (d.Attempts.Count >= MaxAttempts) { d.Status = Delivery.Abandoned; d.NextUtc = null; }
                 else d.NextUtc = Now + Backoff[d.Attempts.Count - 1];
                 var why = r.Status is { } s ? $"HTTP {s}" : r.Error ?? "aucune réponse";
+                history?.Record(d.ClientId, History.Diag, History.Integrations, $"Webhook « {e.Name} » : livraison de « {d.EventType} » en échec", d.Status == Delivery.Abandoned ? Notifs.Error : Notifs.Warn,
+                    $"{why} · tentative {d.Attempts.Count}/{MaxAttempts}{(d.Status == Delivery.Abandoned ? " · abandonnée" : $" · nouvel essai {Backoff[Math.Min(d.Attempts.Count, Backoff.Length) - 1].TotalMinutes:0} min plus tard")}", "Système", targetKind: "webhook", targetId: e.Id, targetName: e.Name, path: "apiwebhooks", tech: true,
+                    facts: new() { new[] { "Événement", d.EventType }, new[] { "Réponse", why }, new[] { "Durée", $"{r.Ms} ms" }, new[] { "Serveur", Uri.TryCreate(e.Url, UriKind.Absolute, out var wu) ? wu.Host : "—" } });
                 if (r.Status == 410) { d.Status = Delivery.Abandoned; d.NextUtc = null; svc.Disable(d.ClientId, e.Id, "Le récepteur répond 410 (adresse supprimée de son côté)", notify: true); }
                 else if (failures >= DisableAfter) svc.Disable(d.ClientId, e.Id, $"{DisableAfter} échecs consécutifs ({why})", notify: true);
             }

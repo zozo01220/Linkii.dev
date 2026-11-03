@@ -27,6 +27,8 @@ else
     [SupplyParameterFromQuery(Name = "back")] public string? BackParam { get; set; }
     /// <summary>Orientation d'une nouvelle liste (celle de la borne qui la demande).</summary>
     [SupplyParameterFromQuery(Name = "o")] public string? Orientation { get; set; }
+    /// <summary>Dossier où ranger une nouvelle liste (celui que la page des listes avait ouvert).</summary>
+    [SupplyParameterFromQuery(Name = "dossier")] public Guid? FolderParam { get; set; }
 
     private InteractiveList? list;
     private bool ready, canWrite;
@@ -78,11 +80,12 @@ else
                 var target = Id ?? createdId;
                 var l = target is { } g ? d.InteractiveLists.FirstOrDefault(x => x.Id == g) : null;
                 if (target != null && l == null) return new { error = "Cette liste a été supprimée." };
+                if (l != null && !InteractiveListOps.CanEdit(d, l)) return new { error = "Cette liste est en lecture seule : dupliquez-la pour l'adapter." };
                 var isNew = l == null;
                 if (isNew)
                 {
                     if (d.InteractiveLists.Count >= InteractiveLists.MaxLists) return new { error = $"Au plus {InteractiveLists.MaxLists} listes interactives." };
-                    l = new InteractiveList();
+                    l = new InteractiveList { FolderId = FolderParam is { } fp && InteractiveFolderOps.Find(d, fp) is { } ff && InteractiveFolderOps.RightOf(d, ff) >= FolderRight.Write ? fp : null };
                 }
                 var err = InteractiveLists.Apply(l!, name, doc, mid => d.Media.FirstOrDefault(m => m.Id == mid && m.Status == null), d.Tenant.IsGrowth, Nav.BaseUri);
                 if (err != null) return new { error = err };

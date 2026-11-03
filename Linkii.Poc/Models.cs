@@ -10,6 +10,7 @@ public class Db
     public List<MediaItem> Media { get; set; } = new();
     public List<Playlist> Playlists { get; set; } = new();
     public List<InteractiveList> InteractiveLists { get; set; } = new();   // listes interactives des bornes (voir <see cref="InteractiveList"/>)
+    public List<InteractiveListFolder> InteractiveListFolders { get; set; } = new();   // dossiers des listes interactives (voir <see cref="InteractiveListFolder"/>)
     public List<AccessLogEntry> AccessLog { get; set; } = new();
     public List<AppInstall> AppInstalls { get; set; } = new();   // apps du catalogue ajoutées par chaque client
     public List<PushDevice> PushDevices { get; set; } = new();   // appareils qui reçoivent les notifications (voir <see cref="PushService"/>)
@@ -760,6 +761,10 @@ public class Screen : IClientOwned, IAreaOwned, IOwned
     public bool BatteryCharging { get; set; }      // l'appareil est branché
     public bool BatteryAlertSent { get; set; }     // alerte « batterie faible » envoyée (une seule par descente sous le seuil)
     public string? DevicePinSig { get; set; }      // empreinte du code technicien reçu de l'organisation (voir TechPin.Sig)
+    public Guid? RepairTo { get; set; }            // écran provisoire d'un player réinstallé, rattaché à un écran existant (voir ClientDb.RePair) : il reçoit le jeton de cet écran
+    public DateTime? RepairUtc { get; set; }
+    public bool DeviceOwner { get; set; }          // Android : l'application est propriétaire de l'appareil (mise en service dédiée) : elle peut le redémarrer
+    public DateTime? PoweredOffUtc { get; set; }   // extinction demandée depuis le back-office : pas d'alerte « hors ligne » jusqu'au retour de l'écran
     public string? DeviceHost { get; set; }        // PC Windows : identifiant du PC (plusieurs écrans d'un même PC le partagent)
     public string? DeviceInstance { get; set; }    // PC Windows : nom de l'instance du player qui affiche cet écran
     public List<DeviceMonitor> DeviceMonitors { get; set; } = new();   // PC Windows : moniteurs du PC (1 = principal)
@@ -783,6 +788,12 @@ public class Screen : IClientOwned, IAreaOwned, IOwned
     public DateTime? OfflineAlertUtc { get; set; }              // alerte « écran hors ligne » envoyée à cette date (une seule par panne)
     /// <summary>Événement « screen.offline » envoyé aux webhooks à cette date (un seul par panne) ; indépendant de <see cref="OfflineAlertUtc"/> (voir <see cref="ScreenEvents"/>).</summary>
     public DateTime? ApiOfflineUtc { get; set; }
+    /// <summary>Suivi de l'historique (voir <see cref="ScreenHistory"/>) : dernier état noté (en ligne, en veille), début de la panne, réveil attendu non encore confirmé.</summary>
+    public bool? HistOnline { get; set; }
+    public bool? HistAsleep { get; set; }
+    public DateTime? HistOfflineUtc { get; set; }
+    public DateTime? HistWakeUtc { get; set; }
+    public string? HistWakeNote { get; set; }
     /// <summary>Dernière urgence que cet écran a confirmée afficher (rapport de réception, §159).</summary>
     public Guid? EmergencyAckId { get; set; }
     public DateTime? EmergencyAckUtc { get; set; }
@@ -839,6 +850,8 @@ public class Screen : IClientOwned, IAreaOwned, IOwned
 public class ScreenCommand
 {
     public const string Pause = "pause", Resume = "resume", Restart = "restart", Reload = "reload", Capture = "capture";
+    /// <summary>Commandes de l'appareil (droits « Commandes de l'appareil », plan Pro) : redémarrer ou éteindre le matériel (l'écran, lui, passe par la veille).</summary>
+    public const string Reboot = "reboot", PowerOff = "poweroff";
     public const string Sent = "sent", Received = "received", Done = "done", Failed = "failed";
 
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -854,7 +867,7 @@ public class ScreenCommand
     public static string Label(string kind) => kind switch
     {
         Pause => "Pause", Resume => "Reprise de l'affichage", Restart => "Redémarrage de l'application",
-        Reload => "Rechargement des listes", Capture => "Aperçu du direct", _ => kind
+        Reload => "Rechargement des listes", Capture => "Aperçu du direct", Reboot => "Redémarrage de l'appareil", PowerOff => "Extinction de l'appareil", _ => kind
     };
 }
 

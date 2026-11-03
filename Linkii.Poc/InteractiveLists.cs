@@ -52,11 +52,15 @@ public class KioskPage
 /// Liste interactive : l'environnement tactile d'une borne (pages, tuiles, textes, images, fond). Elle se crée dans Listes de lecture › Listes interactives
 /// et s'assigne à une ou plusieurs bornes ; la première page est l'accueil. Les tuiles ouvrent des contenus de la médiathèque ou d'autres pages.
 /// </summary>
-public class InteractiveList : IClientOwned
+public class InteractiveList : IClientOwned, IOwned
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid ClientId { get; set; }
     public string Name { get; set; } = "";
+    /// <summary>Personne qui a créé la liste (elle lui appartient, comme une liste de lecture) ; null : liste d'avant les propriétaires, à l'organisation.</summary>
+    public Guid? OwnerId { get; set; }
+    /// <summary>Dossier où elle est rangée (null : racine). Voir <see cref="InteractiveListFolder"/>.</summary>
+    public Guid? FolderId { get; set; }
     public string Orientation { get; set; } = "portrait";   // portrait | landscape
     public List<KioskPage> Pages { get; set; } = new();
     public int Revision { get; set; }
@@ -294,4 +298,20 @@ public static class InteractiveCats
         : m.AppId is "ms-powerpoint" or "google-slides" or "google-docs" or "canva" ? "pres"
         : m.AppId == Compositions.AppId ? "compo"
         : m.AppId == "webpage" ? "web" : "other";
+}
+
+/// <summary>
+/// Dossier de listes interactives (comme <see cref="PlaylistFolder"/>) : il appartient à celui qui l'a créé, se partage en « Peut utiliser » ou « Peut modifier »,
+/// et s'imbrique sur <see cref="FolderAccess.MaxDepth"/> niveaux. Une liste rangée dedans n'est visible que si la personne y a un droit.
+/// </summary>
+public class InteractiveListFolder : IClientOwned, IFolderNode, IOwned
+{
+    public Guid ClientId { get; set; }
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid AreaId { get; set; }
+    public Guid? ParentId { get; set; }
+    public string Name { get; set; } = "";
+    public Guid? OwnerId { get; set; }
+    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+    public List<FolderShare> Shares { get; set; } = new();
 }

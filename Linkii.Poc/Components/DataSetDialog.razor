@@ -1,6 +1,8 @@
 @inject TenantStore Store
 @inject DataSetService Data
 @inject Toaster Toast
+@inject HistoryLog Hist
+@inject TenantContext HCtx
 @inject NavigationManager Nav
 
 @* Jeu de données (§139, maquette scènes 3 et 5) : ce qu'on lit (chemin de l'API, chemin des lignes, feuille Excel), l'aperçu de la table avec le type
@@ -349,6 +351,7 @@ POST @Nav.BaseUri.TrimEnd('/')/api/v1/datasets/@D.Id/rows   (ajoute ; ?key=colon
                 return null;
             });
             if (err != null) { error = err; return; }
+            Hist.By(HCtx, History.Integrations, $"Jeu de données « {d.Name} » enregistré", Notifs.Info, null, "dataset", d.Id, d.Name, "datasources");
             var r = await Data.Refresh(clientId, d.Id);   // première copie (ou copie retypée) aussitôt
             if (r?.Level == "bad") Toast.Error($"« {d.Name} » enregistré, mais la lecture a échoué : {r.Message}");
             else Toast.Ok($"Jeu de données « {d.Name} » enregistré.");
@@ -380,6 +383,7 @@ POST @Nav.BaseUri.TrimEnd('/')/api/v1/datasets/@D.Id/rows   (ajoute ; ?key=colon
         {
             Store.Write(db => { db.Tenant.DataSets.RemoveAll(x => x.Id == D.Id); });
             Data.Forget(clientId, D.Id);
+            Hist.By(HCtx, History.Integrations, $"Jeu de données « {D.Name} » supprimé", Notifs.Warn, null, "dataset", D.Id, D.Name, "datasources");
             Toast.Ok($"Jeu de données « {D.Name} » supprimé.");
             await OnSaved.InvokeAsync();
             await OnClose.InvokeAsync();

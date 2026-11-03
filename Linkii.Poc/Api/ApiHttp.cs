@@ -260,9 +260,20 @@ public static class ApiPipeline
             branch.Use(async (ctx, next) =>
             {
                 ctx.Response.Headers["X-Request-Id"] = ctx.TraceIdentifier;
+                var timer = System.Diagnostics.Stopwatch.StartNew();
                 await next();
                 if (ctx.Items[ApiAuth.ItemKey] is Guid keyId)
                     ctx.RequestServices.GetRequiredService<ApiUsage>().Record(keyId, ctx.Response.StatusCode >= 400);
+                // historique (diagnostic) : erreurs serveur, accès refusés et limites atteintes d'une clé d'API
+                var code = ctx.Response.StatusCode;
+                if ((code >= 500 || code is 401 or 403 or 429) && Guid.TryParse(ctx.User.FindFirst(ApiAuth.Client)?.Value, out var apiClient)
+                    && ctx.RequestServices.GetService<HistoryLog>() is { } hist)
+                {
+                    var keyName = ctx.User.FindFirst(ApiAuth.KeyName)?.Value;
+                    hist.Record(apiClient, History.Diag, History.Integrations, $"API : {ctx.Request.Method} {ctx.Request.Path} → {code}", code >= 500 ? Notifs.Error : Notifs.Warn,
+                        keyName == null ? null : $"Clé « {keyName} »", "API", targetKind: "apikey", targetName: keyName, path: "apiwebhooks", tech: true,
+                        facts: new() { new[] { "Requête", $"{ctx.Request.Method} {ctx.Request.Path}" }, new[] { "Code", code.ToString() }, new[] { "Durée", $"{timer.ElapsedMilliseconds} ms" }, new[] { "Identifiant", ctx.TraceIdentifier } });
+                }
             });
             branch.Use(Idempotency);
         });
@@ -331,7 +342,7 @@ public static class ApiRegistration
         s.AddSingleton<ApiFailureThrottle>();
         s.AddSingleton<IdempotencyStore>();
         s.AddSingleton<EventBus>();
-        s.AddSingleton<IEventPublisher>(sp => sp.GetRequiredService<EventBus>());
+        s.AddSingleton<IEventPublisher>(sp => sp.GetService<HistoryLog>() is { } h ? new HistoryEvents(sp.GetRequiredService<EventBus>(), h) : sp.GetRequiredService<EventBus>());   // l'historique écoute aussi le bus
         s.AddSingleton<WebhookJournal>();
         s.AddSingleton<WebhookSender>();
         s.AddSingleton<WebhookService>();

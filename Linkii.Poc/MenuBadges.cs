@@ -124,7 +124,7 @@ public class MenuBadges(JsonStore root, TenantStore store, TenantContext ctx, Pl
         var (screens, offline) = store.Read(d =>
         {
             var all = d.AllScreens.ToList();
-            bool Down(Screen s) => s.Token != null && s.LastSeenUtc != null && !ScreenControl.Online(s, now)
+            bool Down(Screen s) => s.Token != null && s.LastSeenUtc != null && !ScreenControl.Online(s, now) && !ScreenControl.PoweredOff(s)
                 && !Sleep.State(d.Tenant, d.Root.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, Helpers.Wall(d.Root.Areas, s) != null, now).Asleep;
             return (all.Select(s => new Item(s.Id, s.OwnerId, new LibraryTab.Info(s.OwnerId, s.OwnerId, false), false)).ToList(), all.Count(Down));
         });

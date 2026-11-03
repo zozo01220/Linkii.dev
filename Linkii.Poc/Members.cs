@@ -27,6 +27,10 @@ public class MemberRights
     public string ApprovalScope { get; set; } = Approvals.ScopeAll;
     public List<Guid> ApprovalZoneIds { get; set; } = new();
     public List<Guid> ApprovalScreenIds { get; set; } = new();
+    /// <summary>Commandes de l'appareil (Pro, voir <see cref="DevicePower"/>), seulement sur les écrans qu'il a connectés ou qu'on lui a attribués : éteindre l'écran (veille et réveil), redémarrer l'appareil, l'éteindre.</summary>
+    public bool ScreenOff { get; set; }
+    public bool DeviceRestart { get; set; }
+    public bool DevicePowerOff { get; set; }
 
     public string ModeOf(string domain) => PageMode.Clean(domain switch
     {
@@ -39,7 +43,8 @@ public class MemberRights
     public MemberRights Copy() => new()
     {
         Screens = Screens, Media = Media, Playlists = Playlists, ZoneIds = [.. ZoneIds], ScreenIds = [.. ScreenIds],
-        SubmitApproval = SubmitApproval, Approver = Approver, ApprovalScope = ApprovalScope, ApprovalZoneIds = [.. ApprovalZoneIds], ApprovalScreenIds = [.. ApprovalScreenIds]
+        SubmitApproval = SubmitApproval, Approver = Approver, ApprovalScope = ApprovalScope, ApprovalZoneIds = [.. ApprovalZoneIds], ApprovalScreenIds = [.. ApprovalScreenIds],
+        ScreenOff = ScreenOff, DeviceRestart = DeviceRestart, DevicePowerOff = DevicePowerOff
     };
 
     public void Clean()
@@ -77,25 +82,27 @@ public class MemberRights
 public static class ShareKind
 {
     public const string Media = "media", MediaFolder = "mediafolder", Playlist = "playlist", PlaylistFolder = "playlistfolder";
+    public const string IList = "ilist", IListFolder = "ilistfolder";
     public const string Composition = "composition", Template = "template", CompositionFolder = "compositionfolder";
-    public static string Domain(string kind) => kind is Playlist or PlaylistFolder ? LevelPages.Playlists : LevelPages.Media;
-    public static bool IsFolder(string kind) => kind is MediaFolder or PlaylistFolder or CompositionFolder;
+    public static string Domain(string kind) => kind is Playlist or PlaylistFolder or IList or IListFolder ? LevelPages.Playlists : LevelPages.Media;
+    public static bool IsFolder(string kind) => kind is MediaFolder or PlaylistFolder or CompositionFolder or IListFolder;
     /// <summary>Type de dossier qui peut contenir ce type d'élément (le dossier lui-même : celui de son contenu).</summary>
     public static string FolderOf(string kind) => kind switch
     {
         Playlist or PlaylistFolder => PlaylistFolder,
+        IList or IListFolder => IListFolder,
         Composition or Template or CompositionFolder => CompositionFolder,
         _ => MediaFolder
     };
     public static string Label(string kind) => kind switch
     {
-        Media => "média", MediaFolder => "dossier de médias", Playlist => "liste de lecture", PlaylistFolder => "dossier de listes",
+        Media => "média", MediaFolder => "dossier de médias", Playlist => "liste de lecture", PlaylistFolder => "dossier de listes", IList => "liste interactive", IListFolder => "dossier de listes interactives",
         Composition => "composition", CompositionFolder => "dossier de compositions", _ => "modèle"
     };
     /// <summary>Pluriel, pour « Partager 3 … ».</summary>
     public static string Plural(string kind) => kind switch
     {
-        Media => "médias", MediaFolder => "dossiers de médias", Playlist => "listes de lecture", PlaylistFolder => "dossiers de listes",
+        Media => "médias", MediaFolder => "dossiers de médias", Playlist => "listes de lecture", PlaylistFolder => "dossiers de listes", IList => "listes interactives", IListFolder => "dossiers de listes interactives",
         Composition => "compositions", CompositionFolder => "dossiers de compositions", _ => "modèles"
     };
 }
@@ -256,6 +263,8 @@ public static class ItemShareOps
         ShareKind.MediaFolder => FolderOps.Find(d, id) is { } f ? FolderOps.RightOf(d, f) : null,
         ShareKind.Playlist => d.Playlists.FirstOrDefault(p => p.Id == id) is { } p ? PlaylistOps.RightOf(d, p) : null,
         ShareKind.PlaylistFolder => PlaylistFolderOps.Find(d, id) is { } pf ? PlaylistFolderOps.RightOf(d, pf) : null,
+        ShareKind.IList => d.InteractiveLists.FirstOrDefault(l => l.Id == id) is { } il ? InteractiveListOps.RightOf(d, il) : null,
+        ShareKind.IListFolder => InteractiveFolderOps.Find(d, id) is { } ilf ? InteractiveFolderOps.RightOf(d, ilf) : null,
         ShareKind.Composition => d.Media.FirstOrDefault(m => m.Id == id && CompositionRights.Is(m)) is { } c ? CompositionRights.RightOf(d, c) : null,
         ShareKind.Template => d.CompositionTemplates.FirstOrDefault(t => t.Id == id) is { } t ? CompositionRights.RightOf(d, t) : null,
         ShareKind.CompositionFolder => CompositionFolderOps.Find(d, id) is { } cf ? CompositionFolderOps.RightOf(d, cf) : null,
@@ -268,6 +277,8 @@ public static class ItemShareOps
         ShareKind.Template => d.Root.CompositionTemplates.FirstOrDefault(t => t.Id == id && t.ClientId == d.ClientId)?.OwnerId,
         ShareKind.MediaFolder => d.Root.MediaFolders.FirstOrDefault(f => f.Id == id && f.ClientId == d.ClientId)?.OwnerId,
         ShareKind.Playlist => d.Root.Playlists.FirstOrDefault(p => p.Id == id && p.ClientId == d.ClientId)?.OwnerId,
+        ShareKind.IList => d.Root.InteractiveLists.FirstOrDefault(l => l.Id == id && l.ClientId == d.ClientId)?.OwnerId,
+        ShareKind.IListFolder => d.Root.InteractiveListFolders.FirstOrDefault(f => f.Id == id && f.ClientId == d.ClientId)?.OwnerId,
         ShareKind.CompositionFolder => d.Root.CompositionFolders.FirstOrDefault(f => f.Id == id && f.ClientId == d.ClientId)?.OwnerId,
         _ => d.Root.PlaylistFolders.FirstOrDefault(f => f.Id == id && f.ClientId == d.ClientId)?.OwnerId
     };
@@ -448,6 +459,8 @@ public static class MemberOps
     {
         foreach (var m in root.Media.Where(x => x.ClientId == clientId && x.OwnerId == from)) m.OwnerId = to;
         foreach (var f in root.MediaFolders.Where(x => x.ClientId == clientId && x.OwnerId == from)) f.OwnerId = to;
+        foreach (var l in root.InteractiveLists.Where(x => x.ClientId == clientId && x.OwnerId == from)) l.OwnerId = to;
+        foreach (var f in root.InteractiveListFolders.Where(x => x.ClientId == clientId && x.OwnerId == from)) f.OwnerId = to;
         foreach (var p in root.Playlists.Where(x => x.ClientId == clientId && x.OwnerId == from)) p.OwnerId = to;
         foreach (var s in root.Screens.Where(x => x.ClientId == clientId && x.OwnerId == from)) s.OwnerId = to;
         foreach (var f in root.PlaylistFolders.Where(x => x.ClientId == clientId && x.OwnerId == from)) f.OwnerId = to;
@@ -466,6 +479,8 @@ public static class MemberOps
         ShareKind.MediaFolder => root.MediaFolders.Any(f => f.Id == s.ItemId && f.OwnerId == to),
         ShareKind.CompositionFolder => root.CompositionFolders.Any(f => f.Id == s.ItemId && f.OwnerId == to),
         ShareKind.Playlist => root.Playlists.Any(p => p.Id == s.ItemId && p.OwnerId == to),
+        ShareKind.IList => root.InteractiveLists.Any(l => l.Id == s.ItemId && l.OwnerId == to),
+        ShareKind.IListFolder => root.InteractiveListFolders.Any(f => f.Id == s.ItemId && f.OwnerId == to),
         _ => root.PlaylistFolders.Any(f => f.Id == s.ItemId && f.OwnerId == to)
     };
 

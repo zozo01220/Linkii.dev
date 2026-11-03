@@ -11,6 +11,8 @@
 @inject ApiRegistry Registry
 @inject IJSRuntime JS
 @inject Toaster Toast
+@inject HistoryLog Hist
+@inject TenantContext HCtx
 @inject NavigationManager Nav
 @implements IDisposable
 
@@ -231,6 +233,7 @@ else
     {
         if (openKey == null) return;
         Keys.Revoke(clientId, openKey.Id);
+        Hist.By(HCtx, History.Integrations, $"Clé d'API « {openKey.Name} » révoquée", Notifs.Warn, null, "apikey", openKey.Id, openKey.Name, "apiwebhooks");
         Toast.Ok($"Clé « {openKey.Name} » révoquée : elle ne fonctionne plus.");
         openKey = null; confirmRevoke = false; Reload();
     }
@@ -240,6 +243,7 @@ else
         if (openKey == null) return;
         var r = Keys.Renew(clientId, openKey.Id);
         if (r.Key == null) { Toast.Error(r.Error); return; }
+        Hist.By(HCtx, History.Integrations, $"Clé d'API « {r.Key.Name} » renouvelée", Notifs.Info, "L'ancienne clé reste valable 24 h", "apikey", r.Key.Id, r.Key.Name, "apiwebhooks");
         openKey = null; Reload();
         mkOpen = true; mkStep = 2; mkKey = r.Key; mkSecret = r.Secret; mkRenewed = true;
     }
@@ -274,6 +278,7 @@ else
         var ips = mkIps.Split(new[] { ',', ';', '\n', '\r', ' ' }, StringSplitOptions.RemoveEmptyEntries);
         var r = Keys.Create(clientId, Store.UserId, mkName, mkTemplate == Custom ? "Personnalisée" : mkTemplate, mkScopes, exp, ips);
         if (r.Key == null) { mkError = r.Error; return; }
+        Hist.By(HCtx, History.Integrations, $"Clé d'API « {r.Key.Name} » créée", Notifs.Info, $"{r.Key.Scopes.Count} accès", "apikey", r.Key.Id, r.Key.Name, "apiwebhooks");
         mkKey = r.Key; mkSecret = r.Secret; mkStep = 2; Reload();
     }
 
@@ -392,11 +397,13 @@ else
         {
             var r = Hooks.Create(clientId, Store.UserId, hkName, hkUrl, events);
             if (r.Endpoint == null) { hkError = r.Error; return; }
+            Hist.By(HCtx, History.Integrations, $"Adresse de webhook « {r.Endpoint.Name} » ajoutée", Notifs.Info, null, "webhook", r.Endpoint.Id, r.Endpoint.Name, "apiwebhooks");
             hkId = r.Endpoint.Id; hkSecret = r.Secret; Reload();
             return;
         }
         var err = Hooks.Update(clientId, hkId.Value, hkName, hkUrl, events);
         if (err != null) { hkError = err; return; }
+        Hist.By(HCtx, History.Integrations, $"Adresse de webhook « {hkName} » modifiée", Notifs.Info, null, "webhook", hkId, hkName, "apiwebhooks");
         Toast.Ok("Adresse enregistrée."); hkOpen = false; Reload();
     }
 
@@ -437,6 +444,7 @@ else
     {
         if (hkId == null) return;
         Hooks.Delete(clientId, hkId.Value);
+        Hist.By(HCtx, History.Integrations, $"Adresse de webhook « {hkName} » supprimée", Notifs.Warn, null, "webhook", hkId, hkName, "apiwebhooks");
         Toast.Ok("Adresse supprimée."); hkOpen = false; confirmDelete = false; Reload();
     }
 

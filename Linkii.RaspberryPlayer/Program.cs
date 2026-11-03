@@ -41,12 +41,17 @@ internal static class Program
         var exe = FindChromium();
         if (exe == null) { Log.Write("Chromium introuvable (sudo apt install chromium)"); await Task.Delay(TimeSpan.FromSeconds(30)); return false; }
 
+        // le player (re)démarre : l'affichage est allumé, même s'il l'a été éteint par la veille avant un redémarrage (la veille le recoupe si besoin)
+        _ = Task.Run(() => Power.Display(true));
+
         var psi = new ProcessStartInfo(exe) { UseShellExecute = false };
         foreach (var a in new[]
         {
             "--kiosk", "--noerrdialogs", "--disable-infobars", "--no-first-run", "--disable-session-crashed-bubble",
             "--autoplay-policy=no-user-gesture-required", "--check-for-update-interval=31536000",
             "--disable-features=Translate,TranslateUI", "--password-store=basic", "--ozone-platform-hint=auto",
+            "--disable-pinch", "--overscroll-history-navigation=0", "--disable-translate", "--disable-sync", "--no-default-browser-check",   // poste dédié : aucun geste, aucune proposition du navigateur
+            "--disable-component-update", "--disable-background-networking", "--hide-crash-restore-bubble",
             $"--remote-debugging-port={DebugPort}", "--remote-allow-origins=*",
             "--user-data-dir=" + Paths.Profile, "about:blank"
         }) psi.ArgumentList.Add(a);
@@ -121,6 +126,7 @@ internal static class Program
         while (!chrome.HasExited)
         {
             await Task.Delay(TimeSpan.FromSeconds(15));
+            if (Power.IsOff) { failed = 0; continue; }   // affichage coupé par la veille : une page muette n'est pas une page figée
             try { await cdp.Send("Runtime.evaluate", new { expression = "1" }, 10_000); failed = 0; }
             catch { failed++; }
             if (failed >= 4) { Log.Write("page figée : arrêt"); Kill(chrome); return; }
@@ -138,6 +144,9 @@ internal static class Program
             deviceInfo: function () { return device; },
             config: function (j) { send('config', [String(j)]); },
             restart: function () { send('restart'); },
+            reboot: function () { send('reboot'); return true; },
+            powerOff: function () { send('poweroff'); return true; },
+            displayPower: function (on) { send('display', [on ? '1' : '0']); },
             capture: function (id, url, token) { send('capture', [String(id), String(url), String(token)]); },
             unpaired: function () { return false; }
           };
@@ -154,6 +163,13 @@ internal static class Program
             switch (fn)
             {
                 case "restart": Log.Write("redémarrage demandé"); restart(); break;
+                case "reboot": Power.Reboot(); break;
+                case "poweroff": Power.Off(); break;
+                case "display":
+                    var on = a.Length > 0 && a[0] == "1";
+                    Power.Display(on);
+                    if (on) { try { await cdp.Send("Page.bringToFront"); } catch { } }   // la page reprend la main sur l'affichage rallumé
+                    break;
                 case "config": try { File.WriteAllText(Path.Combine(Paths.Data, "settings.json"), a[0]); } catch { } break;
                 case "capture": await Capture(cdp, a[0], a[1], a[2]); break;
             }

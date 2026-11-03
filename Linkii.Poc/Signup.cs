@@ -397,9 +397,11 @@ public static class SessionCookie
 {
     public static async Task<string> SignIn(Microsoft.AspNetCore.Http.HttpContext http, JsonStore store, Guid userId)
     {
+        Guid? cid = null; var uname = "";
         var (principal, next) = store.Write(d =>
         {
             var u = d.Users.First(x => x.Id == userId);
+            cid = u.ClientId; uname = u.Name;
             u.LastLoginUtc = u.LastActiveUtc = DateTime.UtcNow;
             // mot de passe provisoire reçu par e-mail : sa première utilisation prouve l'adresse (client créé par un revendeur ou par Linkivi, membre invité)
             if (u.EmailVerifiedUtc == null && !u.AwaitsVerification) u.EmailVerifiedUtc = DateTime.UtcNow;
@@ -409,6 +411,8 @@ public static class SessionCookie
         await Microsoft.AspNetCore.Authentication.AuthenticationHttpContextExtensions.SignInAsync(http,
             Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme, principal,
             new Microsoft.AspNetCore.Authentication.AuthenticationProperties { IsPersistent = true });
+        if (cid is { } c && http.RequestServices.GetService<HistoryLog>() is { } hist)
+            hist.Record(c, History.Activity, History.Login, $"{uname} s'est connecté", Notifs.Info, http.Connection.RemoteIpAddress is { } ip ? $"Depuis {ip}" : null, uname, userId, "user", userId, uname);
         return next;
     }
 }

@@ -3,6 +3,8 @@
    « Peut modifier » : en plus ajouter, retirer, renommer (supprimer reste au propriétaire). Un seul élément : on coche ou décoche ; plusieurs : on ajoute. *@
 @inject TenantStore Store
 @inject Toaster Toast
+@inject HistoryLog Hist
+@inject TenantContext HCtx
 
 <div class="modal-backdrop" @onclick="Close"></div>
 <div class="modal app-modal sh-modal" role="dialog" aria-modal="true" aria-labelledby="ps-title">
@@ -79,6 +81,17 @@
     private void ToggleEveryone() { everyone = everyone == null ? false : null; error = null; }
     private Task Close() => OnClose.InvokeAsync();
 
+    /// <summary>Historique : qui a partagé quoi, avec qui (ou le retrait du partage).</summary>
+    private void LogShare(Dictionary<Guid, bool> targets)
+    {
+        var with = targets.ContainsKey(ItemShareOps.Everyone) ? "toute l'organisation"
+            : string.Join(", ", Store.Read(d => d.Users.Where(u => targets.ContainsKey(u.Id)).Select(u => u.Name).ToList()));
+        var what = Items.Count == 1 ? $"« {Items[0].Name} »" : $"{Items.Count} {ShareKind.Plural(Kind)}";
+        var edit = targets.Values.Any(v => v) ? " (peut modifier)" : targets.Count > 0 ? " (peut utiliser)" : "";
+        Hist.By(HCtx, History.Members, targets.Count == 0 ? $"Partage retiré : {what}" : $"{what} partagé", Notifs.Info,
+            targets.Count == 0 ? null : $"Avec {with}{edit}", Kind, Items.Count == 1 ? Items[0].Id : null, Items.Count > 0 ? Items[0].Name : null);
+    }
+
     private async Task Save()
     {
         var targets = everyone is { } ev ? new Dictionary<Guid, bool> { [ItemShareOps.Everyone] = ev } : new Dictionary<Guid, bool>(chosen);
@@ -86,6 +99,7 @@
         try { error = Store.Write(d => ItemShareOps.Set(d, Kind, ids, targets)); }
         catch (UnauthorizedAccessException e) { error = e.Message; }
         if (error != null) return;
+        LogShare(targets);
         Toast.Ok(targets.Count == 0 ? "Partage retiré." : everyone != null ? "Partagé avec toute l'organisation." : $"Partagé avec {targets.Count} personne{(targets.Count > 1 ? "s" : "")}.");
         await OnShared.InvokeAsync();
         await OnClose.InvokeAsync();

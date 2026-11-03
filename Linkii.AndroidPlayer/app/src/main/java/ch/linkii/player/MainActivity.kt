@@ -71,6 +71,10 @@ class MainActivity : Activity() {
     private var blackout: View? = null
     private var dimPercent = 100   // luminosité demandée par le back-office (100 : celle de l'appareil)
 
+    /** L'application est propriétaire de l'appareil (mise en service dédiée) : seule à pouvoir le redémarrer. */
+    private fun isDeviceOwner(): Boolean =
+        (getSystemService(Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager).isDeviceOwnerApp(packageName)
+
     /** Téléviseur ou boîtier relié à un écran : mode « télévision », interface Leanback ou pas d'écran tactile (le rétroéclairage n'est alors pas à nous). */
     private fun isTv(): Boolean {
         val pm = packageManager
@@ -277,6 +281,7 @@ class MainActivity : Activity() {
                 .put("model", model.replaceFirstChar { it.uppercase() }).put("app", BuildConfig.VERSION_NAME)
                 .put("bootMs", System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime())
                 .put("pinSig", prefs.orgPinSig() ?: "")
+                .put("owner", isDeviceOwner())   // propriétaire de l'appareil (mise en service dédiée) : le back-office peut le redémarrer
             if (!tv && level >= 0 && scale > 0) json.put("battery", level * 100 / scale).put("charging", plugged)   // smartphone et tablette seulement
             return json.toString()
         }
@@ -317,6 +322,20 @@ class MainActivity : Activity() {
         /** Redémarrage de l'application demandé depuis le back-office. */
         @JavascriptInterface
         fun restart() { runOnUiThread { restartApp() } }
+
+        /**
+         * Redémarrage de l'appareil demandé depuis le back-office. Android ne l'accorde qu'à l'application propriétaire de l'appareil
+         * (mise en service dédiée : adb shell dpm set-device-owner ch.linkii.player/.SleepAdmin). Renvoie false sinon (le player le signale).
+         * Éteindre l'appareil n'existe pas pour une application : pas de powerOff ici.
+         */
+        @JavascriptInterface
+        fun reboot(): Boolean {
+            if (!isDeviceOwner() || Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return false
+            return try {
+                (getSystemService(Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager).reboot(SleepController.admin(this@MainActivity))
+                true
+            } catch (e: Exception) { false }
+        }
 
         /** Aperçu du direct demandé depuis le back-office : capture l'écran et l'envoie à l'adresse donnée ; en cas d'échec, le player en rend compte. */
         @JavascriptInterface

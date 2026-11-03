@@ -153,7 +153,8 @@ public class ClientDb
         ScreenFolders = new(root.ScreenFolders, clientId, area, null, me, area);
         CompositionTemplates = new(root.CompositionTemplates, clientId, null, null, me, area);
         Playlists = new(root.Playlists, clientId, null, null, me, area);
-        InteractiveLists = new(root.InteractiveLists, clientId);
+        InteractiveLists = new(root.InteractiveLists, clientId, null, null, me, area);
+        InteractiveListFolders = new(root.InteractiveListFolders, clientId, null, null, me, area);
         AppInstalls = new(root.AppInstalls, clientId);
         Areas = new(root.Areas, clientId);
     }
@@ -181,6 +182,7 @@ public class ClientDb
     public ScopedList<Playlist> Playlists { get; }
     /// <summary>Listes interactives des bornes (voir <see cref="InteractiveList"/>) : communes à l'organisation.</summary>
     public ScopedList<InteractiveList> InteractiveLists { get; }
+    public ScopedList<InteractiveListFolder> InteractiveListFolders { get; }
     public ScopedList<AppInstall> AppInstalls { get; }
     /// <summary>Toutes les aires de l'organisation (pages réservées aux administrateurs).</summary>
     public ScopedList<Area> Areas { get; }
@@ -208,6 +210,21 @@ public class ClientDb
         s.OwnerId = Me;   // l'écran appartient à la personne qui le connecte
         if (Area is { } a) { s.AreaId = a.Id; s.ZoneId = AreaOps.EnsureDefaultZone(a).Id; }   // zone par défaut ; l'appairage peut en choisir une autre
         return s;
+    }
+
+    /// <summary>
+    /// Un player réinstallé affiche un nouveau code : l'écran existant lui est rendu (même nom, listes et réglages), sans écran en double.
+    /// L'écran reçoit un nouveau jeton : l'ancien appareil est déconnecté. Réservé à qui modifie l'écran (administrateur, ou membre à qui il appartient).
+    /// </summary>
+    public (Screen? Screen, string? Error) RePair(string code, Guid screenId)
+    {
+        if (AllScreens.FirstOrDefault(x => x.Id == screenId && x.Token != null) is not { } s) return (null, "Écran introuvable.");
+        if (!Access.IsOrgAdmin && !(Access.CanWrite(LevelPages.Screens) && DevicePower.Mine(Access, s))) return (null, "Vous ne pouvez pas modifier cet écran.");
+        var c = code.Trim();
+        if (_root.Screens.FirstOrDefault(x => x.Token == null && x.RepairTo == null && x.PairingCode == c) is not { } t) return (null, "Code inconnu : vérifiez celui qui s'affiche sur l'écran.");
+        s.Token = Guid.NewGuid().ToString("N");
+        t.PairingCode = null; t.RepairTo = s.Id; t.RepairUtc = DateTime.UtcNow;
+        return (s, null);
     }
 
     public Helpers.DeliveryInfo? Delivery(Screen s) => Helpers.Delivery(s, Playlists.FirstOrDefault(p => p.Id == s.PlaylistId), Tenant, Reseller, Helpers.SyncStamp(_root, s), DateTime.UtcNow);

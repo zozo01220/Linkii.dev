@@ -3,6 +3,8 @@
 @inject RelayBroker Relays
 @inject SecretBox Box
 @inject Toaster Toast
+@inject HistoryLog Hist
+@inject TenantContext HCtx
 
 @* Connexion d'une intégration personnalisée (§139, maquette scène 2) : API web (adresse, authentification), base de données (lot 3 : moteur, serveur,
    base, utilisateur) ou fichier (importé ou lu à une adresse). Une source du réseau interne passe par un relais Linkii (lot 4).
@@ -339,6 +341,7 @@
                 return null;
             });
             if (err != null) { error = err; return; }
+            Hist.By(HCtx, History.Integrations, isNew ? $"Connexion de données « {d.Name} » créée" : $"Connexion de données « {d.Name} » modifiée", lastError.Length > 0 ? Notifs.Warn : Notifs.Info, lastError.Length > 0 ? $"Test échoué : {lastError}" : null, "connection", d.Id, d.Name, "datasources");
             if (lastError.Length > 0) Toast.Error($"« {d.Name} » enregistrée, mais le test a échoué : {lastError}");
             else Toast.Ok($"Connexion « {d.Name} » enregistrée.");
             // fichier importé de nouveau : ses jeux de données sont relus aussitôt
@@ -366,6 +369,7 @@
             });
             foreach (var id in ids) Data.Forget(clientId, id);
             DataSetService.DeleteFile(clientId, file);
+            Hist.By(HCtx, History.Integrations, $"Connexion de données « {C.Name} » supprimée", Notifs.Warn, null, "connection", C.Id, C.Name, "datasources");
             Toast.Ok($"Connexion « {C.Name} » supprimée.");
             await OnClose.InvokeAsync();
         }

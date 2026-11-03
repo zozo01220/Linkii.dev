@@ -21,6 +21,7 @@ builder.Services.AddSingleton<Mailer>();
 builder.Services.AddSingleton<LifecycleMail>();   // e-mails du parcours d'abonnement (voir Lifecycle)
 builder.Services.AddScoped<Toaster>();
 builder.Services.AddSingleton<PlayLog>();
+builder.Services.AddSingleton<HistoryLog>();   // historique : activité, écrans, diagnostic (page Historique)
 builder.Services.AddSingleton<KioskLog>();
 builder.Services.AddSingleton<CanvaService>();
 builder.Services.AddSingleton<PdfService>();
@@ -102,6 +103,7 @@ builder.Services.AddHostedService<DataSyncWorker>();   // jeux de données relus
 builder.Services.AddScoped<AppService>();
 builder.Services.AddScoped<MediaLibrary>();
 builder.Services.AddScoped<PlaylistLibrary>();
+builder.Services.AddScoped<InteractiveListLibrary>();
 builder.Services.AddScoped<CompositionLibrary>();
 builder.Services.AddScoped<ScreenFolderLibrary>();
 builder.Services.AddScoped<MenuBadges>();   // pastilles du menu latéral, en direct (voir MenuBadges)
@@ -124,6 +126,19 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
     });
 
 static bool NoClient(ClaimsPrincipal u) => u.GetGuid(Claims.Client) == null;
+
+/// <summary>Retour d'un fournisseur (Google, Microsoft, Dropbox…) : redirige, et note dans l'historique le compte relié (ou la tentative refusée).</summary>
+static async Task<IResult> AccountLinked(HttpContext ctx, string provider, Task<string> complete)
+{
+    var to = await complete;
+    if (ctx.User.GetGuid(Claims.Client) is { } cid)
+    {
+        var failed = to.Contains("error", StringComparison.OrdinalIgnoreCase) || to.Contains("erreur", StringComparison.OrdinalIgnoreCase) || to.Contains("denied", StringComparison.OrdinalIgnoreCase);
+        ctx.RequestServices.GetRequiredService<HistoryLog>().Record(cid, History.Activity, History.Integrations, failed ? $"Connexion du compte {provider} refusée ou interrompue" : $"Compte {provider} connecté",
+            failed ? Notifs.Warn : Notifs.Ok, null, ctx.User.Identity?.Name, ctx.User.GetGuid(ClaimTypes.NameIdentifier), "account", null, provider, "integrations", tech: failed);
+    }
+    return Results.Redirect(to);
+}
 builder.Services.AddAuthorization(o =>
 {
     o.AddPolicy("ClientSpace", p => p.RequireClaim(Claims.Client));
@@ -212,6 +227,21 @@ app.UseStaticFiles(new StaticFileOptions   // logos des revendeurs : publics (af
 {
     FileProvider = new PhysicalFileProvider(AppPaths.BrandDir),
     RequestPath = "/brand"
+});
+
+// Historique (diagnostic) : une exception non gérée d'une requête, rangée dans l'espace de la personne connectée (puis relancée : la réponse d'erreur reste celle de l'application).
+app.Use(async (ctx, next) =>
+{
+    try { await next(); }
+    catch (Exception ex) when (ex is not OperationCanceledException && ctx.User.GetGuid(Claims.Client) is { })
+    {
+        var cid = ctx.User.GetGuid(Claims.Client)!.Value;
+        var first = ex.StackTrace?.Split('\n').Take(4).Select(l => l.Trim());
+        ctx.RequestServices.GetRequiredService<HistoryLog>().Record(cid, History.Diag, History.Server, $"Erreur serveur : {ctx.Request.Method} {ctx.Request.Path}", Notifs.Error, ex.Message, "Système",
+            tech: true, facts: new() { new[] { "Type", ex.GetType().Name }, new[] { "Requête", $"{ctx.Request.Method} {ctx.Request.Path}" }, new[] { "Identifiant", ctx.TraceIdentifier } },
+            trace: ex.Message + (first == null ? "" : "\n" + string.Join("\n", first)));
+        throw;
+    }
 });
 
 // Revendeur de la requête, déduit du nom de domaine. Un sous-domaine inconnu n'existe pas.
@@ -344,8 +374,8 @@ app.MapGet("/canva/connect", (HttpContext ctx, CanvaService canva) =>
     var back = $"{ctx.Request.Scheme}://{ctx.Request.Host}" + AccountPurposes.ReturnPage(ctx.Request);
     return Results.Redirect(canva.StartAuthorization(cid.Value, back));
 });
-app.MapGet("/canva/callback", async (HttpRequest req, CanvaService canva) =>
-    Results.Redirect(await canva.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
+app.MapGet("/canva/callback", async (HttpContext ctx, HttpRequest req, CanvaService canva) =>
+    await AccountLinked(ctx, "Canva", canva.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
 
 // Compte Google : « Se connecter avec Google » depuis Intégrations › Google Calendar (?for=calendar), Google Drive (?for=drive)
 // ou Comptes connectés (?for=all&tab=comptes : retour sur cet onglet),
@@ -359,10 +389,10 @@ app.MapGet("/google/connect", (HttpContext ctx, GoogleAuth google) =>
     var here = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
     return Results.Redirect(google.StartAuthorization(cid.Value, purpose, here + AccountPurposes.ReturnPage(ctx.Request), here));
 });
-app.MapGet("/google/callback", async (HttpRequest req, GoogleAuth google, ExternalLogin sso) =>
-    Results.Redirect(sso.Owns(req.Query["state"])   // « Continuer avec Google » de la page de connexion : même adresse de retour
-        ? await sso.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"], req.Query["error_description"])
-        : await google.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
+app.MapGet("/google/callback", async (HttpContext ctx, HttpRequest req, GoogleAuth google, ExternalLogin sso) =>
+    sso.Owns(req.Query["state"])   // « Continuer avec Google » de la page de connexion : même adresse de retour
+        ? Results.Redirect(await sso.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"], req.Query["error_description"]))
+        : await AccountLinked(ctx, "Google", google.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
 
 // Compte Dropbox : « Se connecter avec Dropbox » depuis Intégrations › Dropbox ou Comptes connectés (?tab=comptes : retour sur cet onglet),
 // application OAuth de la plateforme, lecture seule. Un seul compte par organisation.
@@ -374,8 +404,8 @@ app.MapGet("/dropbox/connect", (HttpContext ctx, DropboxAuth dropbox) =>
     var here = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
     return Results.Redirect(dropbox.StartAuthorization(cid.Value, here + AccountPurposes.ReturnPage(ctx.Request), here));
 });
-app.MapGet("/dropbox/callback", async (HttpRequest req, DropboxAuth dropbox) =>
-    Results.Redirect(await dropbox.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
+app.MapGet("/dropbox/callback", async (HttpContext ctx, HttpRequest req, DropboxAuth dropbox) =>
+    await AccountLinked(ctx, "Dropbox", dropbox.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
 
 // Compte Facebook : « Se connecter avec Facebook » depuis Intégrations › Comptes connectés (retour sur cet onglet) ou la fenêtre d'un contenu Facebook,
 // application Meta de la plateforme, lecture seule des Pages administrées. Un seul compte par organisation.
@@ -387,8 +417,8 @@ app.MapGet("/facebook/connect", (HttpContext ctx, FacebookAuth facebook) =>
     var here = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
     return Results.Redirect(facebook.StartAuthorization(cid.Value, here + AccountPurposes.ReturnPage(ctx.Request), here));
 });
-app.MapGet("/facebook/callback", async (HttpRequest req, FacebookAuth facebook) =>
-    Results.Redirect(await facebook.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
+app.MapGet("/facebook/callback", async (HttpContext ctx, HttpRequest req, FacebookAuth facebook) =>
+    await AccountLinked(ctx, "Facebook", facebook.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
 
 // Compte Microsoft : « Se connecter avec Microsoft » depuis Intégrations › Microsoft 365 (?for=calendar), OneDrive et SharePoint (?for=drive)
 // ou Comptes connectés (?for=all&tab=comptes : retour sur cet onglet),
@@ -402,10 +432,10 @@ app.MapGet("/microsoft/connect", (HttpContext ctx, MicrosoftAuth microsoft) =>
     var here = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
     return Results.Redirect(microsoft.StartAuthorization(cid.Value, purpose, here + AccountPurposes.ReturnPage(ctx.Request), here));
 });
-app.MapGet("/microsoft/callback", async (HttpRequest req, MicrosoftAuth microsoft, ExternalLogin sso) =>
-    Results.Redirect(sso.Owns(req.Query["state"])   // « Continuer avec Microsoft » de la page de connexion : même adresse de retour
-        ? await sso.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"], req.Query["error_description"])
-        : await microsoft.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"], req.Query["error_description"])));
+app.MapGet("/microsoft/callback", async (HttpContext ctx, HttpRequest req, MicrosoftAuth microsoft, ExternalLogin sso) =>
+    sso.Owns(req.Query["state"])   // « Continuer avec Microsoft » de la page de connexion : même adresse de retour
+        ? Results.Redirect(await sso.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"], req.Query["error_description"]))
+        : await AccountLinked(ctx, "Microsoft", microsoft.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"], req.Query["error_description"])));
 
 // ---------- Création de compte et connexion : Microsoft / Google / LinkedIn / GitHub, confirmation de l'adresse e-mail ----------
 
@@ -683,6 +713,8 @@ api.MapPost("/pairing/start", (StartDto? body, HttpContext ctx, JsonStore store)
 api.MapGet("/pairing/status", (Guid screenId, JsonStore store) => store.Read(db =>
 {
     var s = db.Screens.FirstOrDefault(x => x.Id == screenId);
+    if (s?.RepairTo is { } to)   // player réinstallé associé à un écran existant : il reprend le jeton de cet écran
+        return db.Screens.FirstOrDefault(x => x.Id == to && x.Token != null) is { } target ? Results.Ok(new { paired = true, token = target.Token, code = (string?)null }) : Results.NotFound();
     return s == null
         ? Results.NotFound()
         : Results.Ok(new { paired = s.Token != null, token = s.Token, code = s.PairingCode });
@@ -735,6 +767,7 @@ api.MapPost("/player/device", (HttpRequest req, DeviceDto body, JsonStore store)
     s!.DeviceKind = body.Kind is "androidtv" or "android" or "windows" or "raspberrypi" ? body.Kind : "web";
     s.DeviceOs = Clean(body.Os, 40); s.DeviceModel = Clean(body.Model, 60); s.DeviceApp = Clean(body.App, 20);
     s.DevicePinSig = Clean(body.PinSig, 16);
+    s.DeviceOwner = s.DeviceKind is "android" or "androidtv" && body.Owner == true;
     // PC Windows : identifiant du PC, instance du player et moniteurs (plusieurs écrans sur un même PC, choix du moniteur)
     s.DeviceHost = s.DeviceKind == "windows" ? Clean(body.Host, 40) : null;
     s.DeviceInstance = s.DeviceKind == "windows" ? Clean(body.Instance, 40) : null;
@@ -1106,7 +1139,7 @@ record QrHit(Guid ClientId, Guid ItemId, string? Destination, bool Counts);
 record PlayDto(Guid? MediaId, string? AppId, long Start, int Sec);
 record KioskEventDto(long At, string Type, Guid? Tile, string? Title, int Sec, string? How);
 record StartDto(int? W, int? H);
-record DeviceDto(string? Kind, string? Os, string? Model, string? App, long? BootMs, string? PinSig = null, string? Host = null, string? Instance = null, List<MonitorDto>? Monitors = null, int? Battery = null, bool? Charging = null);
+record DeviceDto(string? Kind, string? Os, string? Model, string? App, long? BootMs, string? PinSig = null, string? Host = null, string? Instance = null, List<MonitorDto>? Monitors = null, int? Battery = null, bool? Charging = null, bool? Owner = null);
 record MonitorDto(int N, int W, int H, bool Primary);
 record CommandAckDto(Guid Id, string? Status, string? Detail);
 

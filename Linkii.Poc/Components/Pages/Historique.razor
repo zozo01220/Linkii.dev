@@ -1,0 +1,312 @@
+@page "/history"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientSpace")]
+@implements IDisposable
+@inject HistoryLog Hist
+@inject TenantContext Ctx
+@inject JsonStore Root
+@inject NavigationManager Nav
+
+@* Historique (maquette validée : maquettes/historique.html). Trois onglets : Activité (qui a fait quoi), Écrans (hors ligne, veille et réveil attendus contre constatés, player),
+   Diagnostic (erreurs et avertissements techniques). Une personne qui n'administre pas l'organisation ne voit que ses propres actions. Les lignes viennent de HistoryLog. *@
+<div class="page-head">
+    <div>
+        <h1>Historique</h1>
+        <p class="sub">@(admin ? "Ce qui s'est passé sur vos écrans et dans votre espace, et qui l'a fait." : "Vos dernières actions dans l'espace.")</p>
+    </div>
+    <div class="row head-actions">
+        <div class="seg" role="group" aria-label="Période">
+            @foreach (var (key, label) in Periods)
+            {
+                var k = key;
+                <button type="button" class="@(period == k ? "on" : "")" @onclick="() => { period = k; shown = Page; Load(); }">@label</button>
+            }
+        </div>
+        <a class="btn" download="historique-@(DateTime.Now.ToString("yyyy-MM-dd")).csv" href="@CsvHref"><Ico Name="download" Size="16" /> Exporter CSV</a>
+    </div>
+</div>
+
+@if (admin)
+{
+    <div class="tabs" role="tablist">
+        <button type="button" role="tab" class="@(tab == "act" ? "on" : "")" aria-selected="@(tab == "act" ? "true" : "false")" @onclick='() => SetTab("act")'>Activité <span class="hs-cnt">@Count("act")</span></button>
+        <button type="button" role="tab" class="@(tab == "ecr" ? "on" : "")" aria-selected="@(tab == "ecr" ? "true" : "false")" @onclick='() => SetTab("ecr")'>Écrans <span class="hs-cnt">@Count("ecr")</span></button>
+        <button type="button" role="tab" class="@(tab == "diag" ? "on" : "")" aria-selected="@(tab == "diag" ? "true" : "false")" @onclick='() => SetTab("diag")'>Diagnostic <span class="hs-cnt @(Count("diag", errorsOnly: true) > 0 ? "bad" : "")">@Count("diag")</span></button>
+    </div>
+}
+
+<div class="hs-filters">
+    <label class="nt-search"><Ico Name="search" Size="15" /><input type="search" placeholder="Rechercher" aria-label="Rechercher" @bind="query" @bind:event="oninput" /></label>
+    <button type="button" class="nt-chip @(cat == null ? "on" : "")" @onclick="() => { cat = null; shown = Page; }">Tout</button>
+    @foreach (var (id, label) in Cats())
+    {
+        var c = id;
+        <button type="button" class="nt-chip @(cat == c ? "on" : "")" @onclick="() => { cat = c; shown = Page; }">@label</button>
+    }
+    @if (tab == "diag")
+    {
+        <button type="button" class="nt-chip @(level == "error" ? "on" : "")" @onclick='() => { level = level == "error" ? "" : "error"; shown = Page; }'><span class="hs-dot error"></span>Erreurs</button>
+        <button type="button" class="nt-chip @(level == "warn" ? "on" : "")" @onclick='() => { level = level == "warn" ? "" : "warn"; shown = Page; }'><span class="hs-dot warn"></span>Avertissements</button>
+    }
+    @if (tab == "act" && admin && People().Count > 1)
+    {
+        <select class="hs-sel" aria-label="Membre" @bind="who" @bind:after="() => shown = Page">
+            <option value="">Tous les membres</option>
+            @foreach (var (name, id) in People()) { <option value="@id">@name</option> }
+        </select>
+    }
+    @if (tab == "ecr")
+    {
+        <select class="hs-sel" aria-label="Écran" @bind="target" @bind:after="() => shown = Page">
+            <option value="">Tous les écrans</option>
+            @foreach (var (name, id) in ScreenChoices()) { <option value="@id">@name</option> }
+        </select>
+    }
+</div>
+
+@if (tab == "ecr" && target != "" && Guid.TryParse(target, out var tid))
+{
+    <section class="card hs-strip-card">
+        <header><h3>Disponibilité, dernières 24 h</h3><small>1 case = 30 min</small></header>
+        <div class="hs-strip">@foreach (var st in Strip(tid)) { <i class="@st"></i> }</div>
+        <div class="hs-axis"><span>-24 h</span><span>-18 h</span><span>-12 h</span><span>-6 h</span><span>maintenant</span></div>
+        <div class="hs-legend"><span class="ok">En ligne</span><span class="sl">En veille (prévu)</span><span class="off">Hors ligne</span></div>
+    </section>
+}
+
+@if (tab == "diag" && admin)
+{
+    <div class="stats">
+        <div class="stat"><div class="n @(Count("diag", errorsOnly: true) > 0 ? "bad" : "")">@Count("diag", errorsOnly: true)</div><div class="l">Erreurs sur la période</div></div>
+        <div class="stat"><div class="n">@list.Count(e => e.Level == Notifs.Warn)</div><div class="l">Avertissements</div></div>
+        <div class="stat"><div class="n">@list.Count(e => e.Cat == History.Sleep && e.Level == Notifs.Error)</div><div class="l">Réveils non confirmés</div></div>
+        <div class="stat"><div class="n @(offlineNow > 0 ? "bad" : "ok")">@offlineNow<small> / @screenTotal</small></div><div class="l">Écrans hors ligne maintenant</div></div>
+    </div>
+}
+
+@{ var visible = Filtered(); }
+<div class="nt-panel hs-panel" role="list">
+    @if (visible.Count == 0)
+    {
+        <div class="nt-empty"><Ico Name="clock" Size="40" /><b>Rien à afficher</b>
+            <span>@(list.Count == 0 && query.Length == 0 && cat == null ? "Aucun événement sur cette période." : "Aucune ligne ne correspond à ces filtres.")</span></div>
+    }
+    else if (tab == "diag")
+    {
+        <table class="tbl hs-tbl">
+            <thead><tr><th>Heure</th><th>Niveau</th><th>Source</th><th>Message</th><th>Cible</th></tr></thead>
+            <tbody>
+            @foreach (var e in visible.Take(shown))
+            {
+                <tr class="hs-row @(e.Level == Notifs.Error ? "err" : "")" @onclick="() => open = e" tabindex="0" @onkeydown='k => { if (k.Key == "Enter") open = e; }'>
+                    <td class="mono">@Stamp(e.AtUtc)</td>
+                    <td><span class="hs-pill @e.Level">@LevelLabel(e.Level)</span></td>
+                    <td>@History.Label(e.Cat)</td>
+                    <td>@e.Title@if (!string.IsNullOrEmpty(e.Detail)) { <div class="hs-sub">@e.Detail</div> }</td>
+                    <td>@e.TargetName</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+    else
+    {
+        @foreach (var g in visible.Take(shown).GroupBy(e => LocalDay(e.AtUtc)))
+        {
+            <div class="nt-grp">@DayText(g.Key)</div>
+            @foreach (var e in g)
+            {
+                <div class="hs-ev" role="listitem" tabindex="0" @onclick="() => open = e" @onkeydown='k => { if (k.Key == "Enter") open = e; }'>
+                    <span class="hs-t">@Hm(e.AtUtc)</span>
+                    <span class="hs-ic @e.Level">@History.Mark(e.Level)</span>
+                    <div class="hs-what"><b>@e.Title</b>
+                        @if (!string.IsNullOrEmpty(e.Detail)) { <div class="hs-sub">@e.Detail</div> }
+                        else if (e.Before != null || e.After != null) { <div class="hs-sub">@e.Before → @e.After</div> }
+                    </div>
+                    <span class="hs-who">@e.Actor</span>
+                </div>
+            }
+        }
+    }
+    @if (visible.Count > shown) { <button type="button" class="hs-more" @onclick="() => shown += Page">Afficher les @Math.Min(Page, visible.Count - shown) suivantes</button> }
+</div>
+<p class="hint hs-keep">Conservation : @History.KeepDays jours pour l'activité et les écrans, @History.KeepDiagDays jours pour le diagnostic. Aucun mot de passe ni jeton n'est enregistré.</p>
+
+@if (open is { } o)
+{
+    <div class="lx-drawer-veil" @onclick="() => open = null"></div>
+    <aside class="lx-drawer" role="dialog" aria-modal="false" aria-labelledby="hs-title">
+        <div class="dh"><b id="hs-title" title="@o.Title">@o.Title</b><button type="button" class="kebab-btn" title="Fermer" aria-label="Fermer" @onclick="() => open = null"><Ico Name="x" Size="18" /></button></div>
+        <div class="db">
+            <p class="hint">@History.Label(o.Cat) · @FullDate(o.AtUtc)</p>
+            @if (!string.IsNullOrEmpty(o.Detail)) { <p class="hs-detail">@o.Detail</p> }
+            <dl>
+                <dt>Niveau</dt><dd><span class="hs-pill @o.Level">@LevelLabel(o.Level)</span></dd>
+                @if (!string.IsNullOrEmpty(o.Actor)) { <dt>Auteur</dt><dd>@o.Actor</dd> }
+                @if (!string.IsNullOrEmpty(o.TargetName)) { <dt>Cible</dt><dd>@o.TargetName</dd> }
+                @if (o.Facts != null) { @foreach (var f in o.Facts) { <dt>@f[0]</dt><dd>@f[1]</dd> } }
+            </dl>
+            @if (o.Before != null || o.After != null)
+            {
+                <h4>Avant → après</h4>
+                <pre class="hs-pre">- @o.Before
++ @o.After</pre>
+            }
+            @if (!string.IsNullOrEmpty(o.Trace))
+            {
+                <h4>Chronologie</h4>
+                <pre class="hs-pre">@o.Trace</pre>
+            }
+        </div>
+        <div class="df">
+            @if (o.TargetKind == "screen" && o.TargetId is { } sid) { <button type="button" class="btn" @onclick="() => OnlyScreen(sid)">Tout l'historique de cet écran</button> }
+            @if (!string.IsNullOrEmpty(o.Path)) { <button type="button" class="btn primary" @onclick="() => Go(o.Path)">Ouvrir</button> }
+        </div>
+    </aside>
+}
+
+@code {
+    private const int Page = 100;
+    private static readonly (string Key, string Label)[] Periods = { ("today", "Aujourd'hui"), ("7", "7 jours"), ("30", "30 jours"), ("90", "90 jours") };
+
+    [SupplyParameterFromQuery(Name = "tab")] public string? TabQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "screen")] public string? ScreenQuery { get; set; }
+
+    private List<HistoryEntry> all = new(), list = new();
+    private string tab = "act", period = "7", query = "", level = "", who = "", target = "";
+    private string? cat;
+    private int shown = Page, offlineNow, screenTotal;
+    private HistoryEntry? open;
+    private bool admin;
+    private Guid cid, me;
+    private TimeZoneInfo zone = TimeZoneInfo.Utc;
+    private Timer? later;
+
+    protected override void OnInitialized()
+    {
+        cid = Ctx.RequireClientId(); me = Ctx.UserId ?? Guid.Empty;
+        admin = !Ctx.IsClientMember;
+        var tzId = Root.Read(d => d.Clients.FirstOrDefault(c => c.Id == cid)?.Timezone ?? "UTC");
+        try { zone = TimeZoneInfo.FindSystemTimeZoneById(tzId); } catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException) { }
+        Hist.Added += OnAdded;
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (admin && TabQuery is "act" or "ecr" or "diag") tab = TabQuery!;
+        if (admin && Guid.TryParse(ScreenQuery, out var s)) { target = s.ToString(); tab = "ecr"; }
+        Load();
+    }
+
+    private DateTime Since() => period == "today" ? TimeZoneInfo.ConvertTimeToUtc(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, zone).Date, zone) : DateTime.UtcNow.AddDays(-int.Parse(period));
+
+    private void Load()
+    {
+        all = Hist.Read(cid, Since());
+        if (!admin) all = all.Where(e => e.ActorId == me).ToList();
+        list = ForTab(tab);
+        (offlineNow, screenTotal) = Root.Read(d =>
+        {
+            var now = DateTime.UtcNow;
+            var screens = d.Screens.Where(s => s.ClientId == cid && s.Token != null && s.LastSeenUtc != null).ToList();
+            return (screens.Count(s => !ScreenControl.Online(s, now) && !ScreenAlerts.IsSleeping(d, d.Clients.First(c => c.Id == cid), s, now)), screens.Count);
+        });
+    }
+
+    private void OnAdded(Guid client)
+    {
+        if (client != cid) return;
+        later?.Dispose();
+        later = new Timer(_ => InvokeAsync(() => { Load(); StateHasChanged(); }), null, 600, Timeout.Infinite);
+    }
+
+    private List<HistoryEntry> ForTab(string t) => t switch
+    {
+        "ecr" => all.Where(e => e.Channel == History.Screens).ToList(),
+        "diag" => all.Where(e => e.Channel == History.Diag || e.Tech).ToList(),
+        _ => all.Where(e => e.Channel == History.Activity).ToList(),
+    };
+
+    private int Count(string t, bool errorsOnly = false) => ForTab(t).Count(e => !errorsOnly || e.Level == Notifs.Error);
+
+    private void SetTab(string t) { tab = t; cat = null; level = ""; query = ""; shown = Page; Load(); }
+
+    private IEnumerable<(string Id, string Label)> Cats() => tab switch
+    {
+        "ecr" => History.ScreenCats,
+        "diag" => list.Select(e => e.Cat).Distinct().Select(c => (c, History.Label(c))),
+        _ => History.ActivityCats,
+    };
+
+    private List<(string Name, string Id)> People() => list.Where(e => e.ActorId != null && e.Actor != null).GroupBy(e => e.ActorId!.Value).Select(g => (g.First().Actor!, g.Key.ToString())).OrderBy(p => p.Item1).ToList();
+
+    private List<(string Name, string Id)> ScreenChoices() => list.Where(e => e.TargetId != null && e.TargetName != null).GroupBy(e => e.TargetId!.Value).Select(g => (g.First().TargetName!, g.Key.ToString())).OrderBy(p => p.Item1).ToList();
+
+    private List<HistoryEntry> Filtered() => list
+        .Where(e => cat == null || (tab == "diag" ? e.Cat == cat : History.Filter(e.Cat) == cat))
+        .Where(e => level == "" || e.Level == level)
+        .Where(e => who == "" || e.ActorId?.ToString() == who)
+        .Where(e => tab != "ecr" || target == "" || e.TargetId?.ToString() == target)
+        .Where(e => query.Length == 0 || e.Title.Contains(query, StringComparison.CurrentCultureIgnoreCase) || (e.Detail?.Contains(query, StringComparison.CurrentCultureIgnoreCase) ?? false)
+                    || (e.Actor?.Contains(query, StringComparison.CurrentCultureIgnoreCase) ?? false) || (e.TargetName?.Contains(query, StringComparison.CurrentCultureIgnoreCase) ?? false))
+        .ToList();
+
+    /// <summary>Frise des dernières 24 h d'un écran : une case par demi-heure (en ligne, en veille prévue, hors ligne), déduite de ses lignes d'historique.</summary>
+    private List<string> Strip(Guid screen)
+    {
+        var now = DateTime.UtcNow;
+        var start = now.AddHours(-24);
+        var events = Hist.Read(cid, start.AddDays(-7)).Where(e => e.Channel == History.Screens && e.TargetId == screen && e.Cat is History.Offline or History.Sleep)
+            .OrderBy(e => e.AtUtc).ToList();
+        var state = "ok";
+        foreach (var e in events.Where(e => e.AtUtc < start)) state = StateAfter(e, state);
+        var cells = new List<string>();
+        for (var i = 0; i < 48; i++)
+        {
+            var end = start.AddMinutes(30 * (i + 1));
+            foreach (var e in events.Where(e => e.AtUtc >= start.AddMinutes(30 * i) && e.AtUtc < end)) state = StateAfter(e, state);
+            cells.Add(state);
+        }
+        return cells;
+    }
+
+    private static string StateAfter(HistoryEntry e, string state)
+    {
+        var t = e.Title;
+        if (t.Contains("mis en veille")) return "sl";
+        if (t.EndsWith("hors ligne") || t.Contains("réveil non confirmé")) return "off";
+        if (t.Contains("de retour en ligne") || t.Contains("réveil confirmé") || t.Contains("réveil prévu")) return "ok";
+        return state;
+    }
+
+    private void OnlyScreen(Guid id) { target = id.ToString(); tab = "ecr"; cat = null; level = ""; query = ""; open = null; shown = Page; Load(); }
+    private void Go(string path) { open = null; Nav.NavigateTo(path.TrimStart('/')); }
+
+    // ---------- Affichage ----------
+    private static readonly System.Globalization.CultureInfo Fr = System.Globalization.CultureInfo.GetCultureInfo("fr-CH");
+    private DateTime Local(DateTime utc) => TimeZoneInfo.ConvertTimeFromUtc(utc, zone);
+    private DateTime LocalDay(DateTime utc) => Local(utc).Date;
+    private string Hm(DateTime utc) => Local(utc).ToString("HH:mm", Fr);
+    private string Stamp(DateTime utc) => Local(utc).ToString(Local(utc).Date == Local(DateTime.UtcNow).Date ? "HH:mm:ss" : "d MMM HH:mm", Fr);
+    private string FullDate(DateTime utc) => Local(utc).ToString("dddd d MMMM yyyy · HH:mm:ss", Fr);
+    private string DayText(DateTime day)
+    {
+        var today = Local(DateTime.UtcNow).Date;
+        return day == today ? "Aujourd'hui" : day == today.AddDays(-1) ? "Hier" : day.ToString("dddd d MMMM", Fr);
+    }
+    private static string LevelLabel(string level) => level switch { Notifs.Error => "Erreur", Notifs.Warn => "Avertissement", Notifs.Ok => "OK", _ => "Info" };
+
+    private string CsvHref
+    {
+        get
+        {
+            var sb = new System.Text.StringBuilder("Date;Canal;Niveau;Catégorie;Titre;Détail;Auteur;Cible\n");
+            static string Q(string? s) => "\"" + (s ?? "").Replace("\"", "\"\"") + "\"";
+            foreach (var e in Filtered().Take(5000))
+                sb.Append(Local(e.AtUtc).ToString("yyyy-MM-dd HH:mm:ss")).Append(';').Append(e.Channel).Append(';').Append(e.Level).Append(';').Append(History.Label(e.Cat)).Append(';')
+                  .Append(Q(e.Title)).Append(';').Append(Q(e.Detail)).Append(';').Append(Q(e.Actor)).Append(';').Append(Q(e.TargetName)).Append('\n');
+            return "data:text/csv;charset=utf-8," + Uri.EscapeDataString("﻿" + sb);
+        }
+    }
+
+    public void Dispose() { Hist.Added -= OnAdded; later?.Dispose(); }
+}

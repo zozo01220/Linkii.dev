@@ -6,6 +6,7 @@
 @inject ExternalLogin Sso
 @inject IWebHostEnvironment Env
 @inject ILogger<Login> Log
+@inject HistoryLog Hist
 
 <PageTitle>@(Host?.DisplayName ?? "Linkivi") · @(signup ? "Créer un espace" : "Connexion")</PageTitle>
 
@@ -329,7 +330,13 @@ else
             if (u.ClientId != null && d.Clients.FirstOrDefault(c => c.Id == u.ClientId) is not { Blocked: false }) return (null, "Cet espace est bloqué. Contactez votre revendeur.");
             return (u.Id, (string?)null);
         });
-        if (result != null) { error = result; return; }
+        if (result != null)
+        {
+            error = result;
+            if (Store.Read(d => d.Users.FirstOrDefault(x => x.Email == email)?.ClientId) is { } failedFor)   // historique : une tentative sur un compte connu (jamais le mot de passe saisi)
+                Hist.Record(failedFor, History.Activity, History.Login, $"Échec de connexion : {email}", Notifs.Warn, Http?.Connection.RemoteIpAddress is { } ip ? $"Depuis {ip}" : null, "Système", targetKind: "user", targetName: email);
+            return;
+        }
         Nav.NavigateTo(await SessionCookie.SignIn(Http!, Store, userId!.Value), forceLoad: true);   // adresse à confirmer, mot de passe provisoire, ou accueil
     }
 }

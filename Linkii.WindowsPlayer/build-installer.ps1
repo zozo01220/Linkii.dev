@@ -1,6 +1,6 @@
 ﻿# Compile le player et fabrique l'installeur : artifacts\Linkivi-<version>-x64.msi
 # Usage : .\build-installer.ps1 [-Version 0.3.1]
-param([string]$Version = '0.3.1')
+param([string]$Version = '0.3.2')
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $publish = Join-Path $root 'artifacts\publish'

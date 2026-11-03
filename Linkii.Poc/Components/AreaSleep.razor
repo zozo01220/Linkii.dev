@@ -1,6 +1,8 @@
 @inject TenantStore Store
 @inject Notifier Notifier
 @inject Toaster Toast
+@inject HistoryLog Hist
+@inject TenantContext HCtx
 
 @* Mise en veille d'une aire : son fuseau horaire et ses plages, par défaut de tous ses écrans (chacun peut les remplacer). Voir Sleep. *@
 @if (loaded)
@@ -44,17 +46,25 @@
 
     private Task Save() => Persist();
 
+    /// <summary>Résumé lisible d'une grille pour l'historique : « 52 h de veille par semaine (Europe/Zurich) ».</summary>
+    private static string Describe(string? g, string? z) =>
+        !Sleep.Any(g) ? "Aucune plage de veille" : $"{g!.Count(c => c == '1')} h de veille par semaine{(string.IsNullOrEmpty(z) ? "" : $" ({z})")}";
+
     /// <summary>Enregistre le fuseau et les plages (appelé par le bouton de la fenêtre, ou par « Enregistrer » des Réglages).</summary>
     public async Task<bool> Persist()
     {
         var g = Sleep.Valid(grid) ? grid! : new string('0', Sleep.Cells);
         var z = tz;
+        string? areaName = null, before = null;
         Store.Write(d =>
         {
             if (d.Areas.FirstOrDefault(a => a.Id == AreaId) is not { } a) return;
+            areaName = a.Name; before = Describe(a.SleepGrid, a.SleepTz);
             a.SleepGrid = Sleep.Any(g) ? g : null;
             a.SleepTz = string.IsNullOrEmpty(z) ? null : z;
         });
+        var after = Describe(Sleep.Any(g) ? g : null, string.IsNullOrEmpty(z) ? null : z);
+        if (before != after) Hist.By(HCtx, History.Sleep, $"Plage de veille de l'aire « {areaName} » modifiée", Notifs.Info, null, "area", AreaId, areaName, null, before, after, channel: History.Screens);
         await Notifier.NotifyArea(AreaId);   // les écrans de l'aire rechargent leur configuration
         Toast.Ok("Mise en veille enregistrée.");
         await OnSaved.InvokeAsync();

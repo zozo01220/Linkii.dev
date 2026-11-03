@@ -28,6 +28,9 @@ internal sealed class PlayerWindow : Window
     window.LinkiiNative = {
       deviceInfo: function () { return h.sync.bridge.DeviceInfo(); },
       restart: function () { h.bridge.Restart(); },
+      reboot: function () { h.bridge.Reboot(); return true; },
+      powerOff: function () { h.bridge.PowerOff(); return true; },
+      displayPower: function (on) { h.bridge.DisplayPower(!!on); },
       config: function (json) { h.bridge.Config(json); },
       kiosk: function (json) { h.bridge.Kiosk(json); },
       kioskWipe: function () { h.bridge.KioskWipe(); },

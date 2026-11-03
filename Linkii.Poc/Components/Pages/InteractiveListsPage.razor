@@ -1,80 +1,358 @@
 @page "/interactive-lists"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:playlists")]
+@implements IDisposable
 @inject TenantStore Store
+@inject InteractiveListLibrary Library
 @inject NavigationManager Nav
 @inject Toaster Toast
 
-@* Listes interactives (§168) : l'environnement tactile des bornes, créé une fois et assigné à une ou plusieurs bornes.
-   Un seul bouton crée une liste (en haut à droite) ; les cartes ouvrent l'éditeur. Maquette : maquettes/liste-interactive-editeur.html. *@
+@* Listes interactives (§168) : l'environnement tactile des bornes, créé une fois et assigné à une ou plusieurs bornes. Même squelette que les listes de lecture (§51) :
+   fil d'Ariane en titre, dossiers (créer, ranger, partager, déplacer), cartes ou tableau, sélection multiple et barre noire d'actions.
+   Les droits suivent les listes de lecture : une liste est à son créateur, se partage en « Peut utiliser » / « Peut modifier », et se range dans des dossiers. *@
 <div class="lx-top">
     <div class="lx-title">
-        <h1><span>Listes interactives</span><span class="lx-cntpill" aria-label="@lists.Count liste(s) interactive(s)">@lists.Count</span></h1>
-        <p class="sub">Une liste interactive est l'écran tactile d'une borne : des pages, des tuiles, des textes et des images. Chaque tuile ouvre un contenu ou une autre page.</p>
+    <h1>
+        @if (currentRow is { } cur)
+        {
+            <button type="button" class="lx-crumb" @onclick="() => OpenFolder(null)">Listes interactives</button>
+            @foreach (var c in crumbs.Take(crumbs.Count - 1))
+            {
+                var row = c;
+                <span class="lx-sl">/</span>
+                <button type="button" class="lx-crumb" @onclick="() => OpenFolder(row.Folder.Id)">@row.Folder.Name</button>
+            }
+            <span class="lx-sl">/</span>
+            <span>@cur.Folder.Name</span>
+            <span class="lx-right @(cur.Right == FolderRight.Read ? "ro" : "")"><Ico Name="@(cur.Right == FolderRight.Read ? "lock" : "folder")" Size="12" /> @RightLabel(cur)</span>
+            <SharePill Summary="FolderSum(cur.Folder.Id)" Long="true" Clickable="multi && cur.Right == FolderRight.Owner" ReadOnly="cur.Right == FolderRight.Read" OwnerName="@(cur.Folder.OwnerId == me ? null : cur.OwnerName)" OnClick="() => ShareFolder(cur)" />
+        }
+        else
+        {
+            <span>Listes interactives</span>
+        }
+        <span class="lx-cntpill" aria-label="@Plural(Scoped.Count, "liste", "listes")">@Scoped.Count</span>
+    </h1>
+    <p class="sub">Une liste interactive est l'écran tactile d'une borne : des pages, des tuiles, des textes et des images. Chaque tuile ouvre un contenu ou une autre page.</p>
     </div>
     <span class="grow"></span>
     <div class="btns">
-        @if (canWrite)
+        @if (multi && currentRow is { Right: FolderRight.Owner } here)
         {
-            <button type="button" class="btn" data-fab="Nouvelle liste interactive" @onclick="Create"><Ico Name="plus" Size="16" /> Nouvelle liste interactive</button>
+            <button class="btn btn-share lx-share" @onclick="() => ShareFolder(here)"><Ico Name="users" Size="16" /> Partager…</button>
+        }
+        @if (CanCreateListHere)
+        {
+            <div class="lx-add">
+                @if (CanCreateFolderHere)
+                {
+                    <button type="button" class="btn lx-add-btn" aria-haspopup="menu" aria-expanded="@(newMenu ? "true" : "false")" @onclick="() => newMenu = !newMenu"><Ico Name="plus" Size="16" /> Ajouter <Ico Name="chevron" Size="14" /></button>
+                    @if (newMenu)
+                    {
+                        <div class="kebab-backdrop" @onclick="() => newMenu = false"></div>
+                        <div class="kebab-menu lx-add-menu" role="menu">
+                            <button type="button" role="menuitem" @onclick="() => { newMenu = false; Create(); }"><Ico Name="grid" Size="18" /><span><b>Nouvelle liste interactive</b><small>Pages, tuiles et images pour une borne tactile</small></span></button>
+                            <span class="sep" role="separator"></span>
+                            <button type="button" role="menuitem" @onclick="OpenNewFolder"><Ico Name="folder" Size="18" /><span><b>Nouveau dossier@(currentRow is { } cf ? $" dans « {cf.Folder.Name} »" : "")</b></span></button>
+                        </div>
+                    }
+                }
+                else
+                {
+                    <button type="button" class="btn lx-add-btn" @onclick="Create"><Ico Name="plus" Size="16" /> Ajouter</button>
+                }
+                <span class="lx-fabsrc" aria-hidden="true">
+                    <button type="button" tabindex="-1" data-fab="Nouvelle liste interactive" @onclick="Create"><Ico Name="plus" Size="16" /></button>
+                    @if (CanCreateFolderHere) { <button type="button" tabindex="-1" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /></button> }
+                </span>
+            </div>
+        }
+        else if (CanCreateFolderHere)
+        {
+            <button class="btn ghost" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /> Nouveau dossier</button>
         }
     </div>
 </div>
 
-@if (lists.Count == 0)
+<div class="lx-status">
+    <span class="lx-appoff">@Plural(Scoped.Count, "liste", "listes")@(folderRows.Count > 0 ? $" · {Plural(folderRows.Count, "dossier", "dossiers")}" : "")</span>
+    @if (currentRow is { Right: FolderRight.Read })
+    {
+        <span>Vous pouvez voir et afficher ces listes, pas les modifier. Dupliquez-en une pour l'adapter.</span>
+    }
+</div>
+
+@if (lists.Count == 0 && folderRows.Count == 0)
 {
     <div class="empty">
         <div class="big">Aucune liste interactive</div>
         <p>Créez l'écran tactile de vos bornes : disposez des tuiles où vous voulez, choisissez les couleurs et les images, puis reliez chaque tuile à un contenu.</p>
+        @if (CanCreateListHere) { <button class="btn" @onclick="Create"><Ico Name="plus" Size="16" /> Nouvelle liste interactive</button> }
     </div>
 }
 else
 {
-    <div class="il-grid">
-        @foreach (var l in lists)
-        {
-            var list = l;
-            var users = UsedBy(list);
-            <div class="il-card" role="button" tabindex="0" @onclick="() => Open(list)" @onkeydown='e => { if (e.Key == "Enter") Open(list); }' title="Modifier « @list.Name »">
-                <div class="il-pv"><InteractiveListThumb List="list" Files="media" /></div>
-                <div class="il-meta">
-                    <div class="il-row">
-                        <b>@list.Name</b>
-                        @if (canWrite)
-                        {
-                            <button type="button" class="btn ghost sm icon" aria-label="Plus d'actions" title="Plus d'actions" aria-haspopup="menu" @onclick="() => menuFor = menuFor == list.Id ? null : list.Id" @onclick:stopPropagation="true"><Ico Name="dots-v" Size="16" /></button>
-                        }
-                    </div>
-                    <small>@Plural(list.Pages.Sum(p => p.Els.Count(e => e.Kind == "tile")), "tuile", "tuiles") · @Plural(list.Pages.Count, "page", "pages") · @(InteractiveLists.Portrait(list.Orientation) ? "Portrait" : "Paysage")</small>
-                    <small class="@(users.Count == 0 ? "il-off" : "")">@(users.Count == 0 ? "Non utilisée" : "Utilisée par " + string.Join(", ", users.Take(2).Select(u => u.Name)) + (users.Count > 2 ? $" et {users.Count - 2} autre(s)" : ""))</small>
+    <section class="lx-fzone" aria-label="Dossiers">
+    @if (subfolders.Count > 0 || CanCreateFolderHere)
+    {
+        <div class="lx-fstrip lx-fgrid" role="list" aria-label="Dossiers">
+            @foreach (var row in subfolders)
+            {
+                var r = row;
+                var mine = r.Folder.OwnerId == me;
+                var sum = FolderSum(r.Folder.Id);
+                var canMenu = r.Right == FolderRight.Owner;
+                <div data-nid="@r.Folder.Id" class="lx-fcard" role="listitem" tabindex="0" @onclick="() => OpenFolder(r.Folder.Id)" @onkeydown='e => { if (e.Key == "Enter") OpenFolder(r.Folder.Id); }'>
+                    <FolderShape Preview="Array.Empty<MediaItem>()" All="media" Count="ChildCount(r.Folder.Id)" Unit="@FolderUnit(r.Folder.Id)">
+                        <Badge>
+                            @if (r.Right == FolderRight.Read) { <span class="fbadge ro" title="Dossier de @r.OwnerName"><Ico Name="lock" Size="11" /> Lecture seule</span> }
+                            else if (r.Right == FolderRight.Write) { <span class="fbadge lvl" title="Dossier de @r.OwnerName, vous pouvez le modifier"><Ico Name="users" Size="11" /> @First(r.OwnerName)</span> }
+                            else if (sum.Any) { <span class="fbadge @(sum.Everyone != null ? "lvl" : "sh")"><Ico Name="users" Size="11" /> @(sum.Everyone != null ? "Partagé · tous" : $"Partagé · {sum.People}")</span> }
+                            else if (!mine && r.Folder.OwnerId != null) { <span class="fbadge sh" title="Dossier de @r.OwnerName">@First(r.OwnerName)</span> }
+                        </Badge>
+                    </FolderShape>
+                    <div class="fn"><span>@r.Folder.Name</span><small>@r.Folder.CreatedUtc.ToLocalTime().ToString("d MMM yyyy")</small></div>
+                    @if (canMenu)
+                    {
+                        <button type="button" class="fk" aria-label="Actions pour le dossier @r.Folder.Name" aria-haspopup="menu" aria-expanded="@(menuFor == r.Folder.Id ? "true" : "false")"
+                                @onclick:stopPropagation="true" @onclick="() => menuFor = menuFor == r.Folder.Id ? null : r.Folder.Id"><Ico Name="dots-v" Size="16" /></button>
+                    }
+                    @if (menuFor == r.Folder.Id)
+                    {
+                        <div class="kebab-backdrop" @onclick:stopPropagation="true" @onclick="() => menuFor = null"></div>
+                        <div class="kebab-menu" role="menu" @onclick:stopPropagation="true">
+                            <span class="kebab-note">@r.Folder.Name · @(mine ? "votre dossier" : $"dossier de {r.OwnerName}") · @(sum.Any ? "partagé" : "non partagé")</span>
+                            @if (multi) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; ShareFolder(r); }"><Ico Name="users" Size="16" /> Partager…</button> }
+                            <button type="button" role="menuitem" @onclick="() => { menuFor = null; renamingFolder = r; renameFolderValue = r.Folder.Name; folderError = null; }"><Ico Name="edit" Size="16" /> Renommer</button>
+                            <button type="button" role="menuitem" @onclick="() => { menuFor = null; reparenting = (r.Folder.Id, r.Folder.Name); }"><Ico Name="move" Size="16" /> Déplacer…</button>
+                            <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deletingFolder = r; }"><Ico Name="trash" Size="16" /> Supprimer</button>
+                        </div>
+                    }
                 </div>
-                @if (menuFor == list.Id)
-                {
-                    <div class="kebab-backdrop" @onclick="() => menuFor = null" @onclick:stopPropagation="true"></div>
-                    <div class="kebab-menu il-menu" role="menu" @onclick:stopPropagation="true">
-                        <button type="button" role="menuitem" @onclick="() => Duplicate(list)"><Ico Name="copy" Size="16" /><span>Dupliquer</span></button>
-                        <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = list; }"><Ico Name="trash" Size="16" /><span>Supprimer</span></button>
-                    </div>
-                }
+            }
+            @if (CanCreateFolderHere)
+            {
+                <button type="button" class="lx-fcard add" @onclick="OpenNewFolder">
+                    <div class="fv"><span class="fbk"></span><span class="ffr"><Ico Name="plus" Size="22" /></span></div>
+                    <div class="fn"><span>Nouveau dossier</span></div>
+                </button>
+            }
+        </div>
+    }
+    </section>
+    <section class="lx-blk lx-blk-main" aria-label="Listes interactives">
+        <div class="lx-bh"><Ico Name="grid" Size="16" /> <span>Listes</span> <small>@Sorted.Count</small></div>
+    <div class="lx-tools" role="region" aria-label="Recherche et tri">
+        <div class="search-box">
+            <Ico Name="search" Size="16" />
+            <input data-lx-search placeholder="Rechercher dans toutes les listes interactives" aria-label="Rechercher des listes interactives" @bind="search" @bind:event="oninput" />
+        </div>
+        @if (search.Length > 0) { <span class="lx-count" aria-live="polite">@Plural(Sorted.Count, "résultat", "résultats")</span> }
+        <select @bind="sort" class="tb-sort" aria-label="Trier">
+            <option value="recent">Récentes</option>
+            <option value="name">Nom</option>
+            <option value="used">Plus utilisées</option>
+        </select>
+        <ViewToggle StorageKey="ilists" @bind-Value="view" />
+    </div>
+
+    @if (Sorted.Count == 0)
+    {
+        @if (search.Length > 0) { <div class="empty"><div class="big">Aucune liste ne correspond</div><button class="btn ghost sm" @onclick='() => search = ""'>Effacer la recherche</button></div> }
+        else
+        {
+            <div class="empty compact">
+                <div class="big">@(currentRow is { } re ? $"Aucune liste dans « {re.Folder.Name} »" : "Aucune liste à la racine")</div>
+                <p>@(folderId == null ? "Vos listes sont rangées dans les dossiers ci-dessus." : "Ses listes sont rangées dans les sous-dossiers ci-dessus, ou ce dossier est vide.")@(CanCreateListHere ? " Créez ici une liste interactive." : "")</p>
+                @if (CanCreateListHere) { <button class="btn" @onclick="Create"><Ico Name="plus" Size="16" /> Nouvelle liste interactive</button> }
             </div>
         }
+    }
+    else
+    {
+        @if (view == "list")
+        {
+        <div class="lx-tbl-wrap">
+            <table class="lx-tbl @(picked.Count > 0 ? "lx-selecting" : "")">
+                <thead>
+                    <tr>
+                        <th style="width:34px"><input type="checkbox" class="sc-check lx-check" checked="@AllPicked" @onchange="ToggleAll" aria-label="Tout sélectionner" /></th>
+                        <th><button type="button" class="@(sort == "name" ? "on" : "")" @onclick='() => sort = "name"'>Nom</button></th>
+                        <th>Emplacement</th>
+                        <th class="num">Pages</th>
+                        <th class="num">Tuiles</th>
+                        <th><button type="button" class="@(sort == "used" ? "on" : "")" @onclick='() => sort = "used"'>Bornes</button></th>
+                        <th><button type="button" class="@(sort == "recent" ? "on" : "")" @onclick='() => sort = "recent"'>Modifiée</button></th>
+                        <th style="width:44px"><span class="sr-only">Actions</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var l in Sorted)
+                    {
+                        var il = l;
+                        <tr data-nid="@il.Id" class="@(picked.Contains(il.Id) ? "picked" : "")">
+                            <td><input type="checkbox" class="sc-check lx-check" aria-label="Sélectionner @il.Name" checked="@picked.Contains(il.Id)" @onchange="() => Toggle(il.Id)" /></td>
+                            <td><div class="nm"><span class="mini il-mini"><InteractiveListThumb List="il" Files="media" /></span><a href="/interactive/@il.Id?back=/interactive-lists" @onclick:preventDefault="true" @onclick="() => Open(il)">@il.Name</a>@ListShare(il)@if (RightOf(il) == FolderRight.Read) { <span title="Lecture seule"><Ico Name="lock" Size="13" /></span> }</div></td>
+                            <td><small>@PathOf(il)</small></td>
+                            <td class="num">@il.Pages.Count</td>
+                            <td class="num">@Tiles(il)</td>
+                            <td>@UseText(il)</td>
+                            <td><small>@Ago(il)</small></td>
+                            <td>@Menu(il)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        }
+        <div class="lx-pgrid @(picked.Count > 0 ? "lx-selecting" : "") @(view == "list" ? "lx-mobile-only" : "")">
+            @foreach (var l in Sorted)
+            {
+                var il = l;
+                <div data-nid="@il.Id" class="lx-pc @(picked.Contains(il.Id) ? "picked" : "")">
+                    <input type="checkbox" class="sc-check lx-check" aria-label="Sélectionner @il.Name" checked="@picked.Contains(il.Id)" @onchange="() => Toggle(il.Id)" />
+                    <div class="lx-cwrap">
+                        <a class="il-cov" href="/interactive/@il.Id?back=/interactive-lists" title="@(RightOf(il) >= FolderRight.Write ? "Modifier" : "Voir") « @il.Name »" @onclick:preventDefault="true" @onclick="() => Open(il)"><InteractiveListThumb List="il" Files="media" /></a>
+                        @if (RightOf(il) == FolderRight.Read) { <span class="lx-lock" title="Lecture seule"><Ico Name="lock" Size="13" /></span> }
+                        <span class="lx-cshare">@ListShare(il)</span>
+                    </div>
+                    <div class="lx-pbody">
+                        <div class="grow">
+                            <a class="pl-name" href="/interactive/@il.Id?back=/interactive-lists" title="@il.Name" @onclick:preventDefault="true" @onclick="() => Open(il)">@il.Name</a>
+                            @if (OwnerOf(il) is { } ow) { <span class="lx-chip" title="Liste de @ow"><Ico Name="users" Size="12" /> @First(ow)</span> }
+                            <div class="lx-meta">@Plural(Tiles(il), "tuile", "tuiles") · @Plural(il.Pages.Count, "page", "pages") · @(InteractiveLists.Portrait(il.Orientation) ? "portrait" : "paysage")</div>
+                            @if (search.Length > 0) { <div class="lx-path"><Ico Name="folder" Size="12" /><span>@PathOf(il)</span></div> }
+                            <div class="lx-meta @(UsedBy(il).Count == 0 ? "il-off" : "")">@UseText(il)</div>
+                        </div>
+                        @Menu(il)
+                    </div>
+                </div>
+            }
+        </div>
+    }
+    </section>
+
+    @if (picked.Count > 0)
+    {
+        var editable = PickedEditable();
+        var owned = lists.Where(x => picked.Contains(x.Id) && RightOf(x) == FolderRight.Owner).ToList();
+        <div class="lx-selbar" role="region" aria-label="Sélection">
+            <b>@picked.Count sélectionnée@(picked.Count > 1 ? "s" : "")</b>
+            <button type="button" @onclick="ToggleAll">@(AllPicked ? "Tout désélectionner" : $"Tout sélectionner ({Sorted.Count})")</button>
+            <span class="vr"></span>
+            <button type="button" disabled="@(editable.Count == 0)" title="@(editable.Count == 0 ? "Aucune liste modifiable dans la sélection" : null)" @onclick="() => listMove = editable"><Ico Name="folder" Size="15" /><span class="lx-lbl">Ranger…</span></button>
+            <button type="button" disabled="@(!canWrite)" @onclick="DuplicatePicked"><Ico Name="copy" Size="15" /><span class="lx-lbl">Dupliquer</span></button>
+            @if (multi && owned.Count > 0)
+            {
+                <button type="button" @onclick="() => { sharingKind = ShareKind.IList; sharingItems = owned.Select(x => (x.Id, x.Name)).ToList(); }"><Ico Name="share" Size="15" /><span class="lx-lbl">Partager…</span></button>
+            }
+            <span class="vr"></span>
+            <button type="button" class="del" disabled="@(!lists.Any(x => picked.Contains(x.Id) && CanDel(x)))" title="@(!lists.Any(x => picked.Contains(x.Id) && CanDel(x)) ? "Aucune de ces listes n'est à vous" : null)"
+                    @onclick="() => deleting = lists.Where(x => picked.Contains(x.Id)).ToList()">
+                <Ico Name="trash" Size="15" /> Supprimer
+            </button>
+            <span class="vr"></span>
+            <button type="button" title="Tout désélectionner" aria-label="Tout désélectionner" @onclick="() => picked.Clear()"><Ico Name="x" Size="15" /></button>
+        </div>
+    }
+}
+
+@if (renamingList is { } rl)
+{
+    <div class="modal-backdrop" @onclick="() => renamingList = null"></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="ilrn-title">
+        <h3 id="ilrn-title">Renommer la liste interactive</h3>
+        <input style="width:100%;margin-top:10px" maxlength="80" aria-label="Nom de la liste" @bind="renameValue" @bind:event="oninput" @onkeydown='e => { if (e.Key == "Enter") RenameList(); }' />
+        @if (folderError != null) { <div class="err">@folderError</div> }
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => renamingList = null">Annuler</button>
+            <button class="btn" disabled="@string.IsNullOrWhiteSpace(renameValue)" @onclick="RenameList">Renommer</button>
+        </div>
     </div>
 }
 
-@if (deleting is { } del)
+@if (creatingFolder)
 {
-    var users = UsedBy(del);
+    <div class="modal-backdrop" @onclick="() => creatingFolder = false"></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="ilnf-title">
+        <h3 id="ilnf-title">Nouveau dossier@(folderId is { } ? $" dans « {currentRow?.Folder.Name} »" : "")</h3>
+        <input style="width:100%;margin-top:10px" placeholder="Nom du dossier" maxlength="60" aria-label="Nom du dossier" @bind="newFolderName" @bind:event="oninput" @onkeydown='e => { if (e.Key == "Enter") CreateFolder(); }' />
+        @if (folderError != null) { <div class="err">@folderError</div> }
+        @if (multi) { <p class="hint">Il est à vous : partagez-le ensuite avec des collègues, « Peut utiliser » ou « Peut modifier ».</p> }
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => creatingFolder = false">Annuler</button>
+            <button class="btn" disabled="@string.IsNullOrWhiteSpace(newFolderName)" @onclick="CreateFolder">Créer</button>
+        </div>
+    </div>
+}
+
+@if (renamingFolder is { } rf)
+{
+    <div class="modal-backdrop" @onclick="() => renamingFolder = null"></div>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="ilrf-title">
+        <h3 id="ilrf-title">Renommer le dossier</h3>
+        <input style="width:100%;margin-top:10px" maxlength="60" aria-label="Nom du dossier" @bind="renameFolderValue" @bind:event="oninput" @onkeydown='e => { if (e.Key == "Enter") RenameFolder(rf); }' />
+        @if (folderError != null) { <div class="err">@folderError</div> }
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => renamingFolder = null">Annuler</button>
+            <button class="btn" disabled="@string.IsNullOrWhiteSpace(renameFolderValue)" @onclick="() => RenameFolder(rf)">Renommer</button>
+        </div>
+    </div>
+}
+
+@if (deletingFolder is { } df)
+{
+    var inside = lists.Where(p => p.FolderId == df.Folder.Id).ToList();
+    <div class="modal-backdrop" @onclick="() => deletingFolder = null"></div>
+    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="ildf-title">
+        <h3 id="ildf-title">Supprimer le dossier « @df.Folder.Name » ?</h3>
+        <p class="hint">Le dossier, ses sous-dossiers et leurs listes@(inside.Count > 0 ? $" ({inside.Count} visible{(inside.Count > 1 ? "s" : "")} ici)" : "") seront supprimés. Les contenus restent dans la médiathèque. Cette action est définitive.</p>
+        @if (folderError != null) { <div class="err">@folderError</div> }
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="() => deletingFolder = null">Annuler</button>
+            <button class="btn danger-solid" @onclick="() => DeleteFolder(df)">Supprimer</button>
+        </div>
+    </div>
+}
+
+@if (reparenting is { } rp)
+{
+    <FolderReparentDialog Kind="@ShareKind.IListFolder" FolderId="rp.Id" FolderName="@rp.Name" OnClose="MovedFolder" />
+}
+
+@if (sharingItems is { } shi)
+{
+    <ShareDialog Kind="@sharingKind" Items="shi" OnClose="() => sharingItems = null" OnShared="Load" />
+}
+
+@if (listMove is { } lm)
+{
+    <InteractiveMoveDialog Items="lm" OnClose='n => { listMove = null; if (n > 0) { picked.Clear(); Toast.Ok(n > 1 ? $"{n} listes rangées." : "Liste rangée."); Load(); } }' />
+}
+
+@if (deleting is { Count: > 0 } del)
+{
+    var gone = del.Where(x => CanDel(x) && UsedBy(x).Count == 0).ToList();
+    var busy = del.Where(x => CanDel(x) && UsedBy(x).Count > 0).ToList();
+    var kept = del.Where(x => !CanDel(x)).ToList();
     <div class="modal-backdrop" @onclick="() => deleting = null"></div>
-    <div class="modal" role="alertdialog" aria-modal="true" style="max-width:460px">
-        <h3>Supprimer « @del.Name » ?</h3>
-        @if (users.Count > 0)
+    <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="ildel-title" style="max-width:480px">
+        @if (gone.Count == 0)
         {
-            <p class="hint">Cette liste est affichée par @string.Join(", ", users.Select(u => "« " + u.Name + " »")). Choisissez-en une autre sur ces bornes avant de la supprimer.</p>
-            <div class="modal-actions"><button class="btn" @onclick="() => deleting = null">Compris</button></div>
+            <h3 id="ildel-title">Rien à supprimer</h3>
+            @if (busy.Count > 0) { <p class="hint">@string.Join(", ", busy.Select(x => $"« {x.Name} »")) @(busy.Count > 1 ? "sont affichées" : "est affichée") par des bornes : choisissez-en une autre sur ces bornes avant de supprimer.</p> }
+            @if (kept.Count > 0) { <p class="hint"><Ico Name="lock" Size="13" /> @(kept.Count > 1 ? "Ces listes ne sont pas à vous" : "Cette liste n'est pas à vous") : seul son propriétaire la supprime.</p> }
+            <div class="modal-actions"><button class="btn" @onclick="() => deleting = null">Fermer</button></div>
         }
         else
         {
-            <p class="hint">Les pages et leurs tuiles sont supprimées. Les contenus de la médiathèque ne le sont pas.</p>
-            <div class="modal-actions"><button class="btn ghost" @onclick="() => deleting = null">Annuler</button><button class="btn danger" @onclick="ConfirmDelete">Supprimer</button></div>
+            <h3 id="ildel-title">Supprimer @(gone.Count > 1 ? $"{gone.Count} listes interactives" : $"« {gone[0].Name} »") ?</h3>
+            <p class="hint">@(gone.Count > 1 && gone.Count <= 4 ? string.Join(", ", gone.Select(x => $"« {x.Name} »")) + ". " : "")Les pages et leurs tuiles sont supprimées. Les contenus de la médiathèque ne le sont pas.</p>
+            @if (busy.Count > 0) { <p class="hint"><Ico Name="alert" Size="13" /> Non supprimée@(busy.Count > 1 ? "s" : "") (affichée@(busy.Count > 1 ? "s" : "") par une borne) : @string.Join(", ", busy.Select(x => $"« {x.Name} »")).</p> }
+            @if (kept.Count > 0) { <p class="hint"><Ico Name="lock" Size="13" /> Non supprimée@(kept.Count > 1 ? "s" : "") (lecture seule) : @string.Join(", ", kept.Select(x => $"« {x.Name} »")).</p> }
+            <div class="modal-actions">
+                <button class="btn ghost" @onclick="() => deleting = null">Annuler</button>
+                <button class="btn danger-solid" @onclick="() => Delete(gone)">Supprimer@(gone.Count > 1 ? $" {gone.Count} listes" : "")</button>
+            </div>
         }
     </div>
 }
@@ -83,71 +361,211 @@ else
     private List<InteractiveList> lists = new();
     private List<MediaItem> media = new();
     private List<Screen> kiosks = new();
-    private bool canWrite;
-    private Guid? menuFor;
-    private InteractiveList? deleting;
+    private List<InteractiveFolderRow> folderRows = new();
+    private Dictionary<Guid, FolderRight> rights = new();
+    private Dictionary<Guid, ShareSummary> listShares = new(), folderShares = new();
+    private bool canWrite, canRoot, multi;
+    private Guid? me, folderId, menuFor;
+    private string search = "", sort = "recent", view = "cards", newFolderName = "", renameFolderValue = "", renameValue = "", sharingKind = ShareKind.IList;
+    private string? folderError;
+    private bool newMenu, creatingFolder;
+    private readonly HashSet<Guid> picked = new();
+    private List<InteractiveList>? deleting;
+    private InteractiveList? renamingList;
+    private InteractiveFolderRow? renamingFolder, deletingFolder;
+    private (Guid Id, string Name)? reparenting;
+    private List<(Guid Id, string Name)>? sharingItems, listMove;
+    private List<InteractiveFolderRow> subfolders = new(), crumbs = new();
 
     protected override void OnInitialized() => Load();
 
     private void Load()
     {
-        (lists, media, kiosks, canWrite) = Store.Read(d => (
-            d.InteractiveLists.OrderBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
+        var folders = Library.Folders();
+        (lists, media, kiosks, canWrite, canRoot, multi, me, listShares, folderShares) = Store.Read(d => (
+            d.InteractiveLists.Where(l => InteractiveListOps.RightOf(d, l) != FolderRight.None).ToList(),
             d.Media.Where(m => m.Status == null && m.Type == "image" && m.FileName != null).ToList(),
             d.AllScreens.Where(s => s.Kiosk?.ListId != null).ToList(),
-            d.Access.CanWrite(LevelPages.Playlists)));
+            d.Access.CanWrite(LevelPages.Playlists),
+            FolderAccess.CanCreateAtRoot(d.Access, LevelPages.Playlists),
+            d.Users.Count(u => !u.Disabled) > 1,
+            d.Me,
+            ItemShareOps.Summaries(d, ShareKind.IList),
+            ItemShareOps.Summaries(d, ShareKind.IListFolder)));
+        rights = Library.ListRights();
+        folderRows = folders;
+        if (folderId is { } fid && folderRows.All(r => r.Folder.Id != fid)) folderId = null;
+        Rebuild();
+        picked.RemoveWhere(id => lists.All(l => l.Id != id));
     }
 
-    private List<Screen> UsedBy(InteractiveList l) => InteractiveLists.UsedBy(kiosks, l.Id);
-    private static string Plural(int n, string one, string many) => $"{n} {(n > 1 ? many : one)}";
+    // dossiers de la position ouverte, et chemin jusqu'au dossier ouvert
+    private void Rebuild()
+    {
+        subfolders = folderRows.Where(r => r.Folder.ParentId == folderId || (folderId == null && r.Folder.ParentId is { } p && folderRows.All(x => x.Folder.Id != p))).ToList();
+        crumbs = new();
+        for (var cur = currentRow; cur != null && crumbs.Count < FolderAccess.MaxDepth + 1; cur = cur.Folder.ParentId is { } pid ? folderRows.FirstOrDefault(r => r.Folder.Id == pid) : null) crumbs.Insert(0, cur);
+    }
 
-    private void Create() => Nav.NavigateTo("/interactive/new?back=/interactive-lists");
-    private void Open(InteractiveList l) => Nav.NavigateTo($"/interactive/{l.Id}?back=/interactive-lists");
+    private InteractiveFolderRow? currentRow => folderId is { } id ? folderRows.FirstOrDefault(r => r.Folder.Id == id) : null;
+    private void OpenFolder(Guid? id) { folderId = id; picked.Clear(); search = ""; menuFor = null; Rebuild(); }
+
+    // listes de la position ouverte (à la racine : aussi celles dont le dossier n'est pas visible) ; une recherche porte sur toutes
+    private List<InteractiveList> Scoped => search.Length > 0 ? lists : lists.Where(l => InPosition(l)).ToList();
+    private bool InPosition(InteractiveList l) => l.FolderId == folderId || (folderId == null && l.FolderId is { } f && folderRows.All(r => r.Folder.Id != f));
+
+    private List<InteractiveList> Sorted => Scoped
+        .Where(l => search.Length == 0 || l.Name.Contains(search, StringComparison.CurrentCultureIgnoreCase))
+        .OrderBy(l => sort switch { "used" => -UsedBy(l).Count, _ => 0 })
+        .ThenBy(l => sort == "name" || sort == "used" ? l.Name : "", StringComparer.CurrentCultureIgnoreCase)
+        .ThenByDescending(l => sort == "recent" ? l.UpdatedUtc : DateTime.MinValue)
+        .ToList();
+
+    private bool CanCreateListHere => canWrite && (folderId == null ? canRoot : currentRow is { } c && c.Right >= FolderRight.Write);
+    private bool CanCreateFolderHere => canWrite && (folderId == null ? canRoot : currentRow is { } c && c.Right >= FolderRight.Write);
+
+    private FolderRight RightOf(InteractiveList l) => rights.GetValueOrDefault(l.Id);
+    private bool CanEdit(InteractiveList l) => RightOf(l) >= FolderRight.Write;
+    private bool CanDel(InteractiveList l) => Ownership.CanDelete(RightOf(l), l.FolderId);
+    private List<Screen> UsedBy(InteractiveList l) => InteractiveLists.UsedBy(kiosks, l.Id);
+    private static int Tiles(InteractiveList l) => l.Pages.Sum(p => p.Els.Count(e => e.Kind == "tile"));
+    private static string Plural(int n, string one, string many) => $"{n} {(n > 1 ? many : one)}";
+    private string UseText(InteractiveList l) { var u = UsedBy(l); return u.Count == 0 ? "Non utilisée" : "Utilisée par " + string.Join(", ", u.Take(2).Select(x => x.Name)) + (u.Count > 2 ? $" et {u.Count - 2} autre{(u.Count > 3 ? "s" : "")}" : ""); }
+    private static string Ago(InteractiveList l) => Notifs.When(l.UpdatedUtc, DateTime.UtcNow, "UTC");
+
+    // ---------- Partage, propriétaire, emplacement ----------
+    private ShareSummary FolderSum(Guid id) => folderShares.GetValueOrDefault(id, ShareSummary.None);
+    private ShareSummary ListSum(Guid id) => listShares.GetValueOrDefault(id, ShareSummary.None);
+    private RenderFragment ListShare(InteractiveList l) => __builder =>
+    {
+        var sum = ListSum(l.Id);
+        if (sum.Any) { <SharePill Summary="sum" Clickable="multi && RightOf(l) == FolderRight.Owner" ReadOnly="RightOf(l) == FolderRight.Read" OnClick="() => { sharingKind = ShareKind.IList; sharingItems = new() { (l.Id, l.Name) }; }" /> }
+    };
+    private void ShareFolder(InteractiveFolderRow r) { sharingKind = ShareKind.IListFolder; sharingItems = new() { (r.Folder.Id, r.Folder.Name) }; }
+
+    private string? OwnerOf(InteractiveList l)
+    {
+        if (l.OwnerId == null || l.OwnerId == me) return null;
+        return Store.Read(d => d.Users.FirstOrDefault(u => u.Id == l.OwnerId)?.Label);
+    }
+
+    private static string First(string name) => name.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? name;
+
+    private string RightLabel(InteractiveFolderRow r) =>
+        r.Right == FolderRight.Read ? "lecture seule" : r.Right == FolderRight.Write ? $"dossier de {First(r.OwnerName)}" : r.Shared ? "partagé" : "privé";
+
+    private string PathOf(InteractiveList l)
+    {
+        if (l.FolderId is not { } fid || folderRows.FirstOrDefault(r => r.Folder.Id == fid) is not { } row) return "Racine";
+        var names = new List<string>();
+        for (var cur = row; cur != null && names.Count < FolderAccess.MaxDepth; cur = cur.Folder.ParentId is { } pid ? folderRows.FirstOrDefault(r => r.Folder.Id == pid) : null) names.Insert(0, cur.Folder.Name);
+        return string.Join(" › ", names);
+    }
+
+    private int ChildCount(Guid folder) => lists.Count(l => l.FolderId == folder) + folderRows.Count(r => r.Folder.ParentId == folder);
+    private string FolderUnit(Guid folder) => ChildCount(folder) > 1 ? " éléments" : " élément";
+
+    // ---------- Menu d'une liste ----------
+    private RenderFragment Menu(InteractiveList l) => __builder =>
+    {
+        var canEdit = CanEdit(l);
+        <div class="kebab">
+            <button type="button" class="kebab-btn" aria-label="Actions pour @l.Name" aria-haspopup="menu" aria-expanded="@(menuFor == l.Id ? "true" : "false")"
+                    @onclick="() => menuFor = menuFor == l.Id ? null : l.Id"><Ico Name="dots-v" Size="18" /></button>
+            @if (menuFor == l.Id)
+            {
+                <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                <div class="kebab-menu" role="menu">
+                    <button type="button" role="menuitem" @onclick="() => Open(l)"><Ico Name="pencil-square" Size="16" /> @(canEdit ? "Éditer" : "Voir")</button>
+                    @if (canEdit) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; renamingList = l; renameValue = l.Name; folderError = null; }"><Ico Name="edit" Size="16" /> Renommer</button> }
+                    @if (canWrite) { <button type="button" role="menuitem" @onclick="() => Duplicate(l)"><Ico Name="copy" Size="16" /> Dupliquer</button> }
+                    @if (multi && RightOf(l) == FolderRight.Owner) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingKind = ShareKind.IList; sharingItems = new() { (l.Id, l.Name) }; }"><Ico Name="share" Size="16" /> Partager…</button> }
+                    @if (canEdit) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; listMove = new() { (l.Id, l.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
+                    @if (CanDel(l)) { <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = new() { l }; }"><Ico Name="trash" Size="16" /> Supprimer</button> }
+                </div>
+            }
+        </div>
+    };
+
+    // ---------- Actions ----------
+    private void Create() { newMenu = false; Nav.NavigateTo("/interactive/new?back=/interactive-lists" + (folderId is { } f ? "&dossier=" + f : "")); }
+    private void Open(InteractiveList l) { menuFor = null; Nav.NavigateTo($"/interactive/{l.Id}?back=/interactive-lists"); }
 
     private void Duplicate(InteractiveList src)
     {
         menuFor = null;
-        try
-        {
-            Store.Write(d =>
-            {
-                if (d.InteractiveLists.Count >= InteractiveLists.MaxLists) throw new InvalidOperationException($"Au plus {InteractiveLists.MaxLists} listes interactives.");
-                var c = System.Text.Json.JsonSerializer.Deserialize<InteractiveList>(System.Text.Json.JsonSerializer.Serialize(src))!;
-                var map = c.Pages.ToDictionary(p => p.Id, _ => Guid.NewGuid());
-                foreach (var p in c.Pages)
-                {
-                    p.Id = map[p.Id];
-                    foreach (var e in p.Els)
-                    {
-                        e.Id = Guid.NewGuid();
-                        if (e.Action.PageId is { } pg && map.TryGetValue(pg, out var np)) e.Action.PageId = np;   // les tuiles de la copie mènent aux pages de la copie
-                        e.Action.Item.Id = Guid.NewGuid(); e.Action.Item.QrCode = null;   // un QR dupliqué aurait le même compteur : le code est recréé à l'enregistrement
-                    }
-                }
-                c.Id = Guid.NewGuid(); c.Name = InteractiveLists.Cap(src.Name + " (copie)", 80); c.Revision = 1; c.CreatedUtc = c.UpdatedUtc = DateTime.UtcNow;
-                d.InteractiveLists.Add(c);
-            });
-            Toast.Ok("Liste dupliquée.");
-        }
+        try { Library.Duplicate(src.Id); Toast.Ok("Liste dupliquée."); }
         catch (Exception e) when (e is InvalidOperationException or UnauthorizedAccessException) { Toast.Error(e.Message); }
         Load();
     }
 
-    private void ConfirmDelete()
+    private void DuplicatePicked()
     {
-        if (deleting is not { } l) return;
-        deleting = null;
-        try
-        {
-            var ok = Store.Write(d =>
-            {
-                if (InteractiveLists.UsedBy(d.AllScreens, l.Id).Count > 0) return false;
-                d.InteractiveLists.RemoveAll(x => x.Id == l.Id);
-                return true;
-            });
-            if (ok) Toast.Ok("Liste supprimée.");
-        }
-        catch (UnauthorizedAccessException e) { Toast.Error(e.Message); }
+        var n = 0;
+        try { foreach (var id in picked.ToList()) { Library.Duplicate(id); n++; } }
+        catch (Exception e) when (e is InvalidOperationException or UnauthorizedAccessException) { Toast.Error(e.Message); }
+        if (n > 0) Toast.Ok(n > 1 ? $"{n} listes dupliquées." : "Liste dupliquée.");
+        picked.Clear();
         Load();
     }
+
+    private void RenameList()
+    {
+        if (renamingList is not { } l) return;
+        var err = Library.RenameList(l.Id, renameValue);
+        if (err != null) { folderError = err; return; }
+        renamingList = null; folderError = null;
+        Toast.Ok("Liste renommée.");
+        Load();
+    }
+
+    private void Delete(List<InteractiveList> gone)
+    {
+        deleting = null;
+        var (removed, refused) = Library.RemoveLists(gone.Select(x => x.Id).ToList());
+        if (removed > 0) Toast.Ok(removed > 1 ? $"{removed} listes supprimées." : "Liste supprimée.");
+        if (refused.Count > 0) Toast.Error(string.Join(" ", refused));
+        picked.Clear();
+        Load();
+    }
+
+    private void OpenNewFolder() { newMenu = false; creatingFolder = true; newFolderName = ""; folderError = null; }
+
+    private void CreateFolder()
+    {
+        var (err, folder) = Library.CreateFolder(newFolderName, folderId);
+        if (err != null) { folderError = err; return; }
+        creatingFolder = false; folderError = null;
+        Toast.Ok($"Dossier « {folder!.Name} » créé.");
+        Load();
+    }
+
+    private void RenameFolder(InteractiveFolderRow r)
+    {
+        var err = Library.RenameFolder(r.Folder.Id, renameFolderValue);
+        if (err != null) { folderError = err; return; }
+        renamingFolder = null; folderError = null;
+        Toast.Ok("Dossier renommé.");
+        Load();
+    }
+
+    private void DeleteFolder(InteractiveFolderRow r)
+    {
+        var err = Library.DeleteFolder(r.Folder.Id);
+        if (err != null) { folderError = err; return; }
+        deletingFolder = null; folderError = null;
+        if (folderId == r.Folder.Id) folderId = r.Folder.ParentId;
+        Toast.Ok($"Dossier « {r.Folder.Name} » supprimé.");
+        Load();
+    }
+
+    private void MovedFolder(bool moved) { reparenting = null; if (moved) Load(); }
+
+    // ---------- Sélection ----------
+    private bool AllPicked => Sorted.Count > 0 && Sorted.All(l => picked.Contains(l.Id));
+    private void Toggle(Guid id) { if (!picked.Remove(id)) picked.Add(id); }
+    private void ToggleAll() { if (AllPicked) picked.Clear(); else foreach (var l in Sorted) picked.Add(l.Id); }
+    private List<(Guid Id, string Name)> PickedEditable() => lists.Where(x => picked.Contains(x.Id) && CanEdit(x)).Select(x => (x.Id, x.Name)).ToList();
+
+    public void Dispose() { }
 }

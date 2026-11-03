@@ -4,7 +4,7 @@ namespace Linkii.Poc;
 /// Médiathèque d'un client : ses images et ses vidéos (les autres contenus sont des apps).
 /// Les apps Image, Vidéo et Diaporamas y prennent leurs fichiers (champs « media » / « medias »).
 /// </summary>
-public class MediaLibrary(TenantStore store, AppCatalog catalog)
+public class MediaLibrary(TenantStore store, AppCatalog catalog, HistoryLog history, TenantContext ctx)
 {
     public static bool IsFile(MediaItem m) => m.Type is "image" or "video" && m.AppId == null;
 
@@ -107,9 +107,20 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
         return rows.OrderBy(r => r.Folder.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     });
 
-    public (string? Error, MediaFolder? Folder) CreateFolder(string name, Guid? parentId) => store.Write(d => { return FolderOps.Create(d, name, parentId); });
+    public (string? Error, MediaFolder? Folder) CreateFolder(string name, Guid? parentId)
+    {
+        var r = store.Write(d => FolderOps.Create(d, name, parentId));
+        if (r.Folder != null) history.By(ctx, History.Media, $"Dossier « {r.Folder.Name} » créé", Notifs.Info, null, "folder", r.Folder.Id, r.Folder.Name, "media");
+        return r;
+    }
 
-    public string? RenameFolder(Guid id, string name) => store.Write(d => { return FolderOps.Rename(d, id, name); });
+    public string? RenameFolder(Guid id, string name)
+    {
+        var old = store.Read(d => d.MediaFolders.FirstOrDefault(x => x.Id == id)?.Name);
+        var err = store.Write(d => FolderOps.Rename(d, id, name));
+        if (err == null && old != null && old != name.Trim()) history.By(ctx, History.Media, $"Dossier « {old} » renommé", Notifs.Info, null, "folder", id, name.Trim(), "media", old, name.Trim());
+        return err;
+    }
 
     /// <summary>Déplacement d'un dossier dans un autre, ou à la racine (le dossier est alors dissous : ses fichiers et sous-dossiers vont à la racine).</summary>
     public string? MoveFolder(Guid id, Guid? newParent) => store.Write(d => FolderOps.MoveFolder(d, id, newParent));
@@ -126,13 +137,23 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
         if (plan.err != null) return plan.err;
         Delete(plan.files);
         store.Write(d => { FolderOps.Forget(d, plan.folders); });
+        history.By(ctx, History.Media, "Dossier supprimé avec son contenu", Notifs.Warn, null, "folder", id, null, "media");
         return null;
     }
 
     public string? TransferOwner(Guid folderId, Guid userId) => store.Write(d => { return FolderOps.TransferOwner(d, folderId, userId); });
 
     /// <summary>Range des fichiers dans un dossier, ou à la racine (null). Rend le nombre rangé et les refus.</summary>
-    public (int Moved, List<string> Refused) MoveFiles(IReadOnlyCollection<Guid> ids, Guid? folderId) => store.Write(d => { return FolderOps.Move(d, ids, folderId); });
+    public (int Moved, List<string> Refused) MoveFiles(IReadOnlyCollection<Guid> ids, Guid? folderId)
+    {
+        var r = store.Write(d => FolderOps.Move(d, ids, folderId));
+        if (r.Moved > 0)
+        {
+            var dest = folderId == null ? "la racine" : $"« {store.Read(d => d.MediaFolders.FirstOrDefault(x => x.Id == folderId)?.Name)} »";
+            history.By(ctx, History.Media, $"{r.Moved} média{(r.Moved > 1 ? "s" : "")} rangé{(r.Moved > 1 ? "s" : "")} dans {dest}", Notifs.Info, null, "media", null, null, "media");
+        }
+        return r;
+    }
 
     /// <summary>Où ranger : la racine (si la personne peut y ranger) et les dossiers où elle écrit, avec leur chemin.</summary>
     public List<(Guid? Id, string Path)> MoveTargets() => store.Read(d =>
@@ -192,7 +213,9 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     {
         name = name.Trim();
         if (name.Length == 0) return;
-        store.Write(d => { if (d.Media.FirstOrDefault(m => m.Id == id && IsOwnFile(m)) is { } m && FolderOps.CanEditFile(d, m)) m.Name = name.Length > 120 ? name[..120] : name; });
+        string? old = null;
+        store.Write(d => { if (d.Media.FirstOrDefault(m => m.Id == id && IsOwnFile(m)) is { } m && FolderOps.CanEditFile(d, m)) { old = m.Name; m.Name = name.Length > 120 ? name[..120] : name; } });
+        if (old != null && old != name) history.By(ctx, History.Media, $"« {old} » renommé", Notifs.Info, null, "media", id, name, "media", old, name);
     }
 
     /// <summary>
@@ -202,12 +225,14 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
     public int Delete(IReadOnlyCollection<Guid> ids)
     {
         var pdfs = new List<string>();
+        var names = new List<string>();
         var removed = 0;
         var files = store.Write(d =>
         {
             var gone = d.Media.Where(m => ids.Contains(m.Id) && IsOwnFile(m) && FolderOps.CanDeleteFile(d, m)
                 && !(Pres.Is(m) && Pres.ContentsOf(d.Media, m).Count > 0)).ToList();   // une présentation qu'un contenu utilise ne se supprime pas   // un média partagé par une autre aire ne se supprime que dans son aire   // les fichiers Drive suivent leur dossier ; ceux d'un dossier qu'on ne modifie pas restent
             removed = gone.Count;
+            names.AddRange(gone.Select(m => m.Name));
             // une présentation part avec ses images de pages et son PDF d'origine
             var presIds = gone.Where(Pres.Is).Select(m => m.Id.ToString()).ToHashSet();
             if (presIds.Count > 0)
@@ -228,6 +253,7 @@ public class MediaLibrary(TenantStore store, AppCatalog catalog)
             Thumbnails.Delete(f);
         }
         foreach (var p in pdfs) PdfService.Delete(p);
+        if (removed > 0) history.By(ctx, History.Media, removed == 1 ? $"« {names[0]} » supprimé" : $"{removed} médias supprimés", Notifs.Info, removed > 1 ? string.Join(", ", names.Take(8)) + (names.Count > 8 ? "…" : "") : null, "media", null, names.FirstOrDefault(), "media");
         return removed;
     }
 
