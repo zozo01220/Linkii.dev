@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 
 namespace Linkii.Pi;
 
@@ -49,6 +50,79 @@ internal static class Power
                 Thread.Sleep(2500);
                 Wayland(true); X11(true);   // seconde passe : la télévision a eu le temps de se resynchroniser
             }
+        }
+    }
+
+    // ---- Orientation de l'écran (portrait / paysage du back-office) ----
+
+    private static string? appliedTransform;
+
+    /// <summary>Sens de rotation d'un écran en portrait : « 90 » ou « 270 » (selon le montage du moniteur), dans ~/.config/linkivi/portrait-transform ; 270 par défaut.</summary>
+    private static string PortraitTransform()
+    {
+        try
+        {
+            var f = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", "linkivi", "portrait-transform");
+            var v = File.Exists(f) ? File.ReadAllText(f).Trim() : "";
+            if (v is "90" or "270") return v;
+        }
+        catch { }
+        return "270";
+    }
+
+    /// <summary>Au démarrage : l'orientation reçue la dernière fois (settings.json) est appliquée avant que le back-office ne réponde.</summary>
+    public static void OrientFromSettings()
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(Paths.Data, "settings.json")));
+            if (doc.RootElement.TryGetProperty("width", out var w) && doc.RootElement.TryGetProperty("height", out var h) && w.TryGetInt32(out var wi) && h.TryGetInt32(out var hi) && wi > 0 && hi > 0)
+                Orient(hi > wi);
+        }
+        catch { /* pas encore de réglage reçu : l'écran reste comme il est */ }
+    }
+
+    /// <summary>
+    /// Fait pivoter la sortie vidéo (Wayland, wlr-randr) : portrait → le sens choisi, paysage → normal. Le player n'a alors plus à pivoter sa scène.
+    /// Réessaie pendant une trentaine de secondes : au démarrage de la session, la sortie vidéo n'est pas toujours prête.
+    /// </summary>
+    public static void Orient(bool portrait)
+    {
+        var want = portrait ? PortraitTransform() : "normal";
+        lock (gate)
+        {
+            if (appliedTransform == want) return;
+            var env = SessionEnv();
+            for (var i = 0; i < 20; i++)
+            {
+                if (Exec("wlr-randr", [], 5000, out var list, env) == 0)
+                {
+                    var outputs = new List<(string Name, bool Enabled, string Transform)>();
+                    string? name = null; var enabled = false; var transform = "normal";
+                    void Flush() { if (name != null) outputs.Add((name, enabled, transform)); }
+                    foreach (var raw in list.Split('\n'))
+                    {
+                        if (raw.Length == 0) continue;
+                        if (!char.IsWhiteSpace(raw[0])) { Flush(); name = raw.Split(' ')[0]; enabled = false; transform = "normal"; continue; }
+                        var line = raw.Trim();
+                        if (line.StartsWith("Enabled:")) enabled = line.Contains("yes");
+                        else if (line.StartsWith("Transform:")) transform = line["Transform:".Length..].Trim();
+                    }
+                    Flush();
+                    var live = outputs.Where(o => o.Enabled).ToList();
+                    if (live.Count > 0)
+                    {
+                        var ok = true;
+                        foreach (var o in live.Where(o => o.Transform != want))
+                            ok &= Exec("wlr-randr", ["--output", o.Name, "--transform", want], 5000, out _, env) == 0;
+                        Log.Write($"orientation de l'écran : {want} ({string.Join(", ", live.Select(o => o.Name))}) {(ok ? "appliquée" : "refusée")}");
+                        if (ok) appliedTransform = want;
+                        return;
+                    }
+                }
+                Thread.Sleep(1500);
+            }
+            Log.Write("orientation de l'écran : aucune sortie vidéo trouvée (wlr-randr absent, ou session X11)");
         }
     }
 

@@ -43,6 +43,7 @@ internal static class Program
 
         // le player (re)démarre : l'affichage est allumé, même s'il l'a été éteint par la veille avant un redémarrage (la veille le recoupe si besoin)
         _ = Task.Run(() => Power.Display(true));
+        _ = Task.Run(Power.OrientFromSettings);   // l'orientation reçue la dernière fois, tout de suite
 
         var psi = new ProcessStartInfo(exe) { UseShellExecute = false };
         foreach (var a in new[]
@@ -170,7 +171,10 @@ internal static class Program
                     Power.Display(on);
                     if (on) { try { await cdp.Send("Page.bringToFront"); } catch { } }   // la page reprend la main sur l'affichage rallumé
                     break;
-                case "config": try { File.WriteAllText(Path.Combine(Paths.Data, "settings.json"), a[0]); } catch { } break;
+                case "config":
+                    try { File.WriteAllText(Path.Combine(Paths.Data, "settings.json"), a[0]); } catch { }
+                    Power.OrientFromSettings();   // l'orientation du back-office (portrait / paysage) s'applique à l'écran du Pi
+                    break;
                 case "capture": await Capture(cdp, a[0], a[1], a[2]); break;
             }
         }

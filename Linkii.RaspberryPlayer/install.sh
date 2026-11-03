@@ -1,6 +1,6 @@
 #!/bin/bash
 # Linkivi pour Raspberry Pi OS (64 bits) : à lancer depuis le dossier décompressé, avec l'utilisateur qui affichera l'écran (pas root).
-#   ./install.sh [--server https://mon-serveur] [--keyboard ch]
+#   ./install.sh [--server https://mon-serveur] [--keyboard ch] [--rotate 90|270]
 set -e
 
 if [ "$(id -u)" = "0" ]; then echo "Lancez ce script avec l'utilisateur de la session, sans sudo."; exit 1; fi
@@ -8,10 +8,12 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 DEST="$HOME/.local/share/linkivi-app"
 SERVER=""
 KEYBOARD=""
+ROTATE=""     # sens de rotation d'un écran en portrait : 90 ou 270 selon le montage du moniteur (270 par défaut)
 while [ $# -gt 0 ]; do
   case "$1" in
     --server) SERVER="$2"; shift 2 ;;
     --keyboard) KEYBOARD="$2"; shift 2 ;;
+    --rotate) ROTATE="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -75,13 +77,18 @@ EOF
 if command -v labwc >/dev/null; then
   mkdir -p "$HOME/.config/labwc"
   [ -f "$HOME/.config/labwc/autostart" ] && [ ! -f "$HOME/.config/labwc/autostart.avant-linkivi" ] && cp "$HOME/.config/labwc/autostart" "$HOME/.config/labwc/autostart.avant-linkivi"
-  echo "$EXEC &" > "$HOME/.config/labwc/autostart"
+  AUTOSTART="$HOME/.config/labwc/autostart"
+  echo "$EXEC &" > "$AUTOSTART"   # l'orientation (portrait / paysage) vient du back-office : le player fait pivoter l'écran lui-même, plus de ligne wlr-randr ici
 fi
 # Wayfire : barre des tâches retirée
 if [ -f "$HOME/.config/wayfire.ini" ] || command -v wayfire >/dev/null; then
   mkdir -p "$HOME/.config/autostart"
   printf '[Desktop Entry]\nType=Application\nName=Barre\nHidden=true\n' > "$HOME/.config/autostart/wf-panel-pi.desktop"
 fi
+# Sens de rotation d'un écran en portrait (./install.sh --rotate 90 ou 270) : gardé pour toutes les installations suivantes
+mkdir -p "$HOME/.config/linkivi"
+case "$ROTATE" in 90|270) echo "$ROTATE" > "$HOME/.config/linkivi/portrait-transform" ;; esac
+
 # Clavier : choisir sa disposition une fois pour toutes (./install.sh --keyboard ch), au lieu de la demander sur l'écran
 if [ -n "$KEYBOARD" ] && command -v raspi-config >/dev/null; then sudo raspi-config nonint do_configure_keyboard "$KEYBOARD" || true; fi
 
