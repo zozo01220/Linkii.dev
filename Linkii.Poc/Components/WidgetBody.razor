@@ -1,0 +1,162 @@
+@inject TenantStore Store
+
+@* Contenu d'un widget d'écran dans l'aperçu : même mise en page que le widget du player (apps.js), valeurs d'exemple.
+   Partagé par l'éditeur d'écran et la fenêtre de la borne ; le cadre déplaçable (.wg-item) reste à la charge de l'appelant. *@
+@{ var wid = Widget; }
+@if (wid.AppId == "clock")
+{
+    <div class="wg-time">@ClockText(wid)</div>
+    @if (wid.Settings.GetValueOrDefault("showDate") != "false") { <div class="wg-sub">@DateTime.Now.ToString("dddd d MMMM", Fr)</div> }
+}
+else if (wid.AppId == "text")
+{
+    @* texte libre : mêmes tailles que sur l'écran (apps.js « text ») *@
+    var title = wid.Settings.GetValueOrDefault("title") ?? "";
+    var body = wid.Settings.GetValueOrDefault("body") is { Length: > 0 } bt ? bt : "Votre texte…";
+    @if (wid.Settings.GetValueOrDefault("scroll") == "loop")
+    {
+        <div class="wg-tk"><span class="wg-tk-run" style="animation-duration:@(ScrollSeconds(wid))s">@if (title.Length > 0) { <b>@title</b><span class="wg-tk-sep">·</span> }@body.ReplaceLineEndings(" · ")</span></div>
+    }
+    else
+    {
+        @if (title.Length > 0) { <div class="wg-tx-t">@title</div> }
+        <div class="wg-tx-b">@body</div>
+    }
+}
+else if (wid.AppId == "rss-widget")
+{
+    @* bandeau défilant : même rendu que sur l'écran (apps.js « rss-widget »), titres d'exemple *@
+    <div class="wg-tk"><span class="wg-tk-run" style="animation-duration:@(RssSeconds(wid))s">Titre de l'actualité 1<span class="wg-tk-sep">•</span>Titre de l'actualité 2<span class="wg-tk-sep">•</span>Titre de l'actualité 3<span class="wg-tk-sep">•</span>Titre de l'actualité 4</span></div>
+}
+else if (wid.AppId == "qrcode")
+{
+    @* même tracé que sur l'écran (calculé par QrCodes) *@
+    if (QrCodes.Build(wid.Settings.GetValueOrDefault("content") is { Length: > 0 } qc ? qc : "https://linkii.ch") is { } qr)
+    {
+        <svg class="wg-qr" viewBox="0 0 @qr.Size @qr.Size" shape-rendering="crispEdges" aria-hidden="true"><path d="@qr.Path" fill="#0B1F3A" /></svg>
+    }
+    @if (wid.Settings.GetValueOrDefault("label") is { Length: > 0 } ql) { <div class="wg-ql">@ql</div> }
+}
+else if (wid.AppId == "countdown")
+{
+    var cd = Countdown.Compute(DateTime.Now, wid.Settings.GetValueOrDefault("date"), wid.Settings.GetValueOrDefault("format") == "detailed", wid.Settings.GetValueOrDefault("after") != "keep", wid.Settings.GetValueOrDefault("doneText"));
+    <div class="wg-cd @(cd.Hidden ? "off" : "")">
+        <div class="wg-cd-l">@(wid.Settings.GetValueOrDefault("label") is { Length: > 0 } cl ? cl : "Intitulé ?")</div>
+        <div class="wg-cd-n @(cd.Unit.Length == 0 ? "txt" : "")">@cd.Big</div>
+        @if (cd.Unit.Length > 0) { <div class="wg-cd-u">@cd.Unit</div> }
+        @if (cd.Hidden) { <div class="wg-cd-u">(masqué : date passée)</div> }
+    </div>
+}
+else if (wid.AppId == "quote")
+{
+    var qs = Quotes.Parse(wid.Settings.GetValueOrDefault("quotes"));
+    var q = qs.Count == 0 ? ("Votre citation…", (string?)null) : qs[Quotes.Index(DateTime.Now, wid.Settings.GetValueOrDefault("mode"), int.TryParse(wid.Settings.GetValueOrDefault("interval"), out var qi) ? qi : 30, qs.Count)];
+    <div class="wg-q-t">“@q.Item1”</div>
+    @if (q.Item2 is { Length: > 0 }) { <div class="wg-q-a">— @q.Item2</div> }
+}
+else if (HomeAssistantRules.IsHaApp(wid.AppId))
+{
+    @* widgets Home Assistant : même structure et mêmes dimensions que le widget du player (apps.js « haApp »), toutes les entités choisies ;
+       valeurs en direct sur l'écran seulement. La taille doit rester celle du vrai widget : c'est elle qui borne la position au glisser-déposer. *@
+    var haIds = HomeAssistantRules.ParseEntities(wid.Settings.GetValueOrDefault("entities"));
+    var haTitle = wid.Settings.GetValueOrDefault("title") ?? "";
+    var haSwitch = wid.AppId != "ha-sensors";
+    <div class="wg-ha">
+        @if (haTitle.Length > 0) { <div class="wg-ha-t">@haTitle</div> }
+        @if (haIds.Count == 0)
+        {
+            <div class="wg-ha-none">Aucune entité choisie</div>
+        }
+        else
+        {
+            <div class="wg-ha-list">
+                @foreach (var id in haIds)
+                {
+                    <div class="wg-ha-row">
+                        <span class="wg-ha-n">@HaName(id)</span>
+                        <span class="wg-ha-v">@HaValue(wid.AppId, id)</span>
+                        @if (haSwitch) { <span class="wg-ha-sw"></span> }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+else
+{
+    @* même mise en page que le widget de l'écran (apps.js « weather ») ; valeurs d'exemple *@
+    <div class="wg-wx">
+        <span class="wg-ico">⛅</span><span class="wg-temp">18°</span>
+        <span class="wg-wxinfo"><b class="wg-city">@(string.IsNullOrWhiteSpace(wid.Settings.GetValueOrDefault("city")) ? "Ville ?" : wid.Settings["city"])</b><span class="wg-rng">↓ 12°  ↑ 20°  ·  💨 8 km/h</span></span>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public ScreenWidget Widget { get; set; } = default!;
+
+    private static readonly System.Globalization.CultureInfo Fr = new("fr-CH");
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+
+    /// <summary>Nom d'une entité Home Assistant, d'après le cache du compte de l'organisation (l'identifiant sinon).</summary>
+    private string HaName(string entityId) =>
+        Store.Read(d => d.Tenant.HomeAssistant)?.Entities.FirstOrDefault(e => e.Id == entityId)?.Name ?? entityId;
+
+    /// <summary>Valeur d'exemple d'une entité dans l'aperçu : même encombrement que sur l'écran (« Éteint » pour une commande, « — » et l'unité pour un capteur).</summary>
+    private string HaValue(string appId, string entityId)
+    {
+        if (appId != "ha-sensors") return "Éteint";
+        var unit = Store.Read(d => d.Tenant.HomeAssistant)?.Entities.FirstOrDefault(e => e.Id == entityId)?.Unit ?? "";
+        return unit.Length > 0 ? "— " + unit : "—";
+    }
+
+    // Texte libre : largeur, couleurs et alignement choisis (couleurs vérifiées : on les écrit dans un style).
+    public static string TextStyle(ScreenWidget w)
+    {
+        if (w.AppId == "rss-widget")
+        {
+            var rw = int.TryParse(w.Settings.GetValueOrDefault("width"), out var rv) ? Math.Clamp(rv, 10, 100) : 100;
+            return $"width:{rw}%;overflow:hidden;padding:.5em .8em;";
+        }
+        if (w.AppId == "qrcode") return "background:#fff;color:#0B1F3A;border-color:transparent;padding:.9em;";
+        if (w.AppId is "quote" or "countdown")
+        {
+            var qw = w.AppId == "quote" && int.TryParse(w.Settings.GetValueOrDefault("width"), out var q) ? Math.Clamp(q, 10, 100) : 0;
+            return "white-space:normal;" + (qw > 0 ? $"width:{qw}%;" : "text-align:center;");
+        }
+        if (w.AppId != "text") return "";
+        static string Color(string? c, string fallback) => System.Text.RegularExpressions.Regex.IsMatch(c ?? "", "^#[0-9A-Fa-f]{6}$") ? c! : fallback;
+        var width = int.TryParse(w.Settings.GetValueOrDefault("width"), out var pw) ? Math.Clamp(pw, 10, 100) : 40;
+        var scroll = w.Settings.GetValueOrDefault("scroll") == "loop";
+        return $"width:{width}%;background:{Color(w.Settings.GetValueOrDefault("bg"), "#0B1F3A")};color:{Color(w.Settings.GetValueOrDefault("fg"), "#ffffff")};border-color:transparent;"
+             + (scroll ? "white-space:nowrap;overflow:hidden;padding:.5em .8em" : $"white-space:normal;text-align:{(w.Settings.GetValueOrDefault("align") == "left" ? "left" : "center")}");
+    }
+
+    private static int ScrollSeconds(ScreenWidget w) =>
+        (int)Math.Round(Math.Max(8, (w.Settings.GetValueOrDefault("body")?.Length ?? 20) * 0.22) * (w.Settings.GetValueOrDefault("scrollSpeed") switch { "slow" => 1.6, "fast" => 0.6, _ => 1.0 }));
+
+    private static int RssSeconds(ScreenWidget w) =>
+        (int)Math.Round(24 * (w.Settings.GetValueOrDefault("scrollSpeed") switch { "slow" => 1.6, "fast" => 0.6, _ => 1.0 }));
+
+    private static string ClockText(ScreenWidget w)
+    {
+        var now = DateTime.Now;
+        var twelve = w.Settings.GetValueOrDefault("format") == "12";
+        var secs = w.Settings.GetValueOrDefault("showSeconds") == "true";
+        return now.ToString((twelve ? "h:mm" : "HH:mm") + (secs ? ":ss" : "") + (twelve ? " tt" : ""), twelve ? Inv : Fr);
+    }
+
+    /// <summary>Emplacement d'un widget en clair : « Haut gauche · Zone 1 » (la zone seulement si l'écran est découpé).</summary>
+    public static string Where(ScreenWidget w, ScreenLayouts.Def def, bool portrait)
+    {
+        static string Third(double v, string a, string b, string c) => v < 100.0 / 3 ? a : v < 200.0 / 3 ? b : c;
+        var v = Third(w.Y, "Haut", "Milieu", "Bas");
+        var h = Third(w.X, "gauche", "centre", "droite");
+        var pos = v == "Milieu" && h == "centre" ? "Centre" : v == "Milieu" ? "Milieu " + h : v + (h == "centre" ? " centre" : " " + h);
+        if (def.Sizes.Length < 2) return pos;
+        var along = portrait ? w.Y : w.X;
+        double total = def.Sizes.Sum(), acc = 0;
+        var zone = def.Sizes.Length;
+        for (var i = 0; i < def.Sizes.Length; i++) { acc += def.Sizes[i]; if (along < acc / total * 100) { zone = i + 1; break; } }
+        return $"{pos} · Zone {zone}";
+    }
+}

@@ -1,16 +1,20 @@
 @using System.Text.Json
 @using Microsoft.JSInterop
 @using Plan = Linkii.Poc.Planning
+@implements IDisposable
 @inject TenantStore Store
+@inject AppService Svc
 @inject Notifier Notifier
 @inject ScreenPublisher Publisher
 @inject NavigationManager Nav
 @inject Toaster Toast
+@inject IJSRuntime JS
 
-@* Borne interactive (§168) : la fenêtre ne garde que l'essentiel. La liste interactive (ce que le visiteur touche) se crée et se règle dans Listes de lecture › Listes interactives ;
-   ici on choisit celle de la borne, ce que l'écran diffuse quand personne ne touche (une liste de lecture, ou deux : haut/bas en portrait, gauche/droite en paysage) et les réglages.
+@* Borne interactive (§168, refonte §169) : la fenêtre montre côte à côte l'accueil (la liste interactive) et l'inactivité (ce que la borne diffuse quand personne ne touche), comme l'éditeur d'écran de diffusion.
+   La liste interactive se crée et se règle dans Listes de lecture › Listes interactives ; ici on choisit celle de la borne.
+   Inactivité : une zone ou deux, une liste de lecture par zone (choisie sur l'aperçu), les widgets et le bouton « Touchez l'écran », déplaçable à la souris.
    Tout se règle sur une copie de travail : rien n'est enregistré avant « Enregistrer », rien ne part sur la borne avant la publication (même workflow que les écrans).
-   Les statistiques de la borne sont dans Statistiques › Bornes. Maquette validée : maquettes/liste-interactive-editeur.html. *@
+   Les réglages du visiteur, le verrouillage et l'appareil sont dans le tiroir de l'en-tête. Maquette validée : maquettes/borne-config-epuree.html. *@
 
 @if (s?.Kiosk is null || k is null)
 {
@@ -27,6 +31,8 @@ else
     var zoneDef = ScreenLayouts.Find(layout);
     var split = zoneDef.Sizes.Length > 1;
     var tileCount = list?.Pages.Sum(p => p.Els.Count(e => e.Kind == "tile")) ?? 0;
+    var touchKey = Kiosk.TouchKey(k.TouchStyle);
+    var touchMoved = k.TouchX != null && k.TouchY != null;
     <div class="modal-backdrop" @onclick="Close"></div>
     <div class="modal app-modal wg-modal kp-win" role="dialog" aria-modal="true" aria-labelledby="kp-title">
         <div class="modal-head">
@@ -54,109 +60,184 @@ else
                 <small>Modifier la borne</small>
             </div>
             <button type="button" class="modal-x" aria-label="Planning de la borne" title="Planning de la borne : quelle liste passe, quand" @onclick="() => planOpen = true"><Ico Name="calendar" Size="20" /></button>
-            <button type="button" class="modal-x" aria-label="Paramètres de la borne" title="Paramètres de la borne" @onclick="() => parOpen = true"><Ico Name="sliders" Size="20" /></button>
+            <button type="button" class="modal-x" aria-label="Réglages de la borne" title="Réglages de la borne" @onclick="() => parOpen = true"><Ico Name="sliders" Size="20" /></button>
             <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
         </div>
 
         <div class="modal-body wg-body">
-            <div class="wg-stage-wrap" style="--z: @zoom.ToString(Inv)">
-                <div class="wg-stage @(portrait ? "portrait" : "")">
-                    @if (view == "idle")
-                    {
-                        @* ce que voit le visiteur au repos : le premier contenu plein écran de chaque zone, avec le bouton « Touchez l'écran » dans le style choisi *@
-                        <div class="kp-ks idle kp-idle kd-zones @(portrait ? "col" : "row")">
-                            @for (var z = 0; z < zoneDef.Sizes.Length; z++)
-                            {
-                                var zi = z;
-                                var pl = playlists.FirstOrDefault(p => p.Id == ZoneList(zi));
-                                var thumb = pl?.Draft.Where(i => i.Placement == "full").Select(i => Media(i.MediaId)).FirstOrDefault(m => m != null);
-                                <div class="kd-zone" style="flex:@F(zoneDef.Sizes[zi])">
-                                    @if (thumb != null) { <span class="wg-zone-img">@if (thumb.AppId == Compositions.AppId) { <CompositionThumb Item="thumb" Files="media" Contain="true" /> } else { <MediaThumb Media="thumb" All="media" /> }</span> }
-                                    <span class="kp-idle-tag">@(split ? $"Zone {zi + 1} · " : "Diffusion en inactivité · ")@(pl?.Name ?? "aucune liste de lecture")</span>
-                                </div>
-                            }
-                            <div class="@("kt kt-" + Kiosk.TouchKey(k.TouchStyle) + (portrait ? "" : " kt-land"))">@TouchMarkup(Kiosk.TouchKey(k.TouchStyle))</div>
+            @* Aperçus côte à côte, sur la même zone bleu nuit que l'éditeur d'écran *@
+            <div class="kd-prev">
+                <div class="kd-wrap">
+                    <div class="kd-pvgrid @(portrait ? "portrait" : "")">
+                        <div class="kd-pv">
+                            <h3>Accueil</h3>
+                            <p>Ce que le visiteur touche : la liste interactive.</p>
+                            <div class="wg-stage kd-st @(portrait ? "portrait" : "")">
+                                @if (list != null) { <div class="kd-home"><InteractiveListThumb List="list" Files="media" /></div> }
+                                else { <div class="kd-none"><Ico Name="hand" Size="28" /><b>Aucune liste interactive</b><small>Choisissez-en une à droite.</small></div> }
+                            </div>
                         </div>
-                    }
-                    else if (list != null)
-                    {
-                        <div class="kd-home"><InteractiveListThumb List="list" Files="media" /></div>
-                    }
-                    else
-                    {
-                        <div class="kd-none"><Ico Name="hand" Size="28" /><b>Aucune liste interactive</b><small>Choisissez-en une à droite.</small></div>
-                    }
-                    <button type="button" class="wg-sim" title="Voir ce que voit le visiteur (dernière publication)" @onclick="() => sim = true" @onclick:stopPropagation="true"><Ico Name="play" Size="14" /> Simuler</button>
+                        <div class="kd-pv">
+                            <h3>Inactivité</h3>
+                            <p>Ce que la borne diffuse quand personne ne touche.</p>
+                            <div class="wg-stage kd-st kd-idle @(portrait ? "portrait" : "")" @ref="canvas">
+                                @* zones du découpage, sous les widgets : chacune reçoit sa liste de lecture, comme sur un écran de diffusion *@
+                                <div class="wg-zones @(portrait ? "dir-col" : "dir-row")">
+                                    @for (var z = 0; z < zoneDef.Sizes.Length; z++)
+                                    {
+                                        var zone = z;
+                                        var zp = playlists.FirstOrDefault(p => p.Id == ZoneList(zone));
+                                        var zt = ZoneThumb(zp);
+                                        <div class="wg-zone @(zp == null ? "empty" : "") @(zt != null ? "has-img" : "")" style="flex:@F(zoneDef.Sizes[zone]) 1 0">
+                                            @if (zt != null) { <span class="wg-zone-img">@if (zt.AppId == Compositions.AppId) { <CompositionThumb Item="zt" Files="media" Contain="true" /> } else { <MediaThumb Media="zt" All="media" /> }</span> }
+                                            @if (split) { <span class="wg-zone-n">Zone @(zone + 1)</span> }
+                                            @if (zp == null)
+                                            {
+                                                <button type="button" class="wg-zone-add" title="Choisir la liste de lecture de la zone @(zone + 1)" @onclick="() => pickZone = pickZone == zone ? null : zone">
+                                                    <Ico Name="plus" Size="22" /><span>Liste de lecture</span>
+                                                </button>
+                                            }
+                                            else
+                                            {
+                                                <button type="button" class="wg-zone-pl" title="Changer la liste de lecture de la zone @(zone + 1)" @onclick="() => pickZone = pickZone == zone ? null : zone">
+                                                    <Ico Name="menu" Size="14" /> @zp.Name
+                                                </button>
+                                            }
+                                            @if (pickZone == zone)
+                                            {
+                                                <div class="kebab-backdrop" @onclick="() => pickZone = null"></div>
+                                                <div class="kebab-menu wg-zone-menu" role="menu">
+                                                    @foreach (var p in playlists)
+                                                    {
+                                                        var pl = p;
+                                                        <button type="button" role="menuitem" class="@(pl.Id == ZoneList(zone) ? "on" : "")" @onclick="() => SetZone(zone, pl.Id)"><Ico Name="menu" Size="16" /> @pl.Name</button>
+                                                    }
+                                                    @if (playlists.Count == 0) { <span class="hint" style="padding:8px 10px">Aucune liste de lecture. Créez-en une dans Listes de lecture.</span> }
+                                                    @if (zp != null) { <button type="button" role="menuitem" class="danger" @onclick="() => SetZone(zone, null)"><Ico Name="x" Size="16" /> Vider la zone</button> }
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                                @* bouton « Touchez l'écran » : se déplace à la souris (le calque est décalé depuis le centre de l'écran) *@
+                                <div class="@("kt kt-" + touchKey + (portrait ? "" : " kt-land"))" data-x="@Fm(k.TouchX ?? 50)" data-y="@Fm(k.TouchY ?? 50)" title="Glissez pour déplacer le bouton"
+                                     style="@TouchShift(touchKey)">@TouchMarkup(touchKey)</div>
+                                @foreach (var w in widgets)
+                                {
+                                    var wid = w;
+                                    <div class="wg-item @(selected == wid.Id ? "sel" : "") @(HomeAssistantRules.IsHaApp(wid.AppId) ? "wg-item-ha" : "")" data-wid="@wid.Id" tabindex="0" role="button"
+                                         aria-label="@Label(wid) — flèches pour déplacer, Entrée pour régler"
+                                         style="left:@Pct(wid.X);top:@Pct(wid.Y);--s:@wid.Scale.ToString(Inv);@WidgetBody.TextStyle(wid)"
+                                         @onclick="() => OpenSettings(wid)" @onfocus="() => selected = wid.Id" @onkeydown="e => OnItemKey(e, wid)">
+                                        <button type="button" class="wg-gear" title="Régler « @Label(wid) »" aria-label="Régler « @Label(wid) »" @onclick="() => OpenSettings(wid)" @onclick:stopPropagation="true"><Ico Name="sliders" Size="14" /></button>
+                                        <WidgetBody Widget="wid" />
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div class="kp-view" role="group" aria-label="État de la borne">
-                    <button type="button" class="@(view == "home" ? "on" : "")" @onclick='() => view = "home"'>Accueil</button>
-                    <button type="button" class="@(view == "idle" ? "on" : "")" @onclick='() => view = "idle"'>Inactivité</button>
-                </div>
-                <div class="wg-zoom" role="group" aria-label="Zoom de l'aperçu">
-                    <button type="button" aria-label="Réduire" title="Réduire" disabled="@(zoom <= MinZoom + 0.001)" @onclick="() => ZoomBy(-0.1)"><Ico Name="minus" Size="16" /></button>
-                    <span>@Math.Round(zoom * 100) %</span>
-                    <button type="button" aria-label="Agrandir" title="Agrandir" disabled="@(zoom >= MaxZoom - 0.001)" @onclick="() => ZoomBy(0.1)"><Ico Name="plus" Size="16" /></button>
+                <div class="kd-ph">
+                    <span class="hint">Comme pour un écran de diffusion : cliquez sur une zone de l'aperçu Inactivité pour choisir sa liste de lecture ; glissez les widgets et le bouton « Touchez l'écran » pour les placer.</span>
+                    <button type="button" class="btn ghost sm" title="Voir ce que voit le visiteur (dernière publication)" @onclick="() => sim = true"><Ico Name="play" Size="14" /> Simuler</button>
                 </div>
             </div>
 
-            <div class="wg-side kd-side">
-                <section class="kd-sec">
-                    <h4>Liste interactive</h4>
-                    <p class="kp-h">Ce que le visiteur touche : pages, tuiles, textes et images.</p>
-                    @if (list != null)
-                    {
-                        <div class="kd-list">
-                            <span class="kd-lth"><InteractiveListThumb List="list" Files="media" /></span>
-                            <span class="kd-lnm"><b>@list.Name</b><small>@(tileCount > 1 ? $"{tileCount} tuiles" : $"{tileCount} tuile") · @(list.Pages.Count > 1 ? $"{list.Pages.Count} pages" : "1 page") · @(InteractiveLists.Portrait(list.Orientation) ? "Portrait" : "Paysage")</small></span>
-                            <button type="button" class="btn ghost sm" @onclick="() => OpenEditor(list.Id)"><Ico Name="edit" Size="14" /> Modifier</button>
-                        </div>
-                        @if (list.Orientation != orientation)
-                        {
-                            <div class="kd-warn" role="alert">Cette liste est en @(InteractiveLists.Portrait(list.Orientation) ? "portrait" : "paysage") et la borne en @(portrait ? "portrait" : "paysage") : elle serait déformée. Changez le format de la borne (icône des paramètres) ou choisissez une autre liste.</div>
-                        }
-                    }
-                    <div class="dw-field">
-                        <label for="k-list">@(list == null ? "Choisir la liste de la borne" : "Changer de liste")</label>
-                        <select id="k-list" @onchange="AssignInteractive">
-                            <option value="" selected="@(k.ListId == null)">— Aucune liste interactive —</option>
-                            @foreach (var l in Compatible) { <option value="@l.Id" selected="@(l.Id == k.ListId)">@l.Name@(l.Orientation != orientation ? " (" + (InteractiveLists.Portrait(l.Orientation) ? "portrait" : "paysage") + ")" : "")</option> }
-                        </select>
-                    </div>
-                    <div><button type="button" class="btn ghost sm" @onclick="OpenCreate"><Ico Name="plus" Size="14" /> Créer une liste interactive</button></div>
-                </section>
+            @* tiroir de configuration : onglets Écran et Widgets, comme l'éditeur d'écran de diffusion *@
+            <div class="kd-conf">
+                <div class="se-utabs" role="tablist">
+                    <button type="button" role="tab" aria-selected="@(tab == "screen" ? "true" : "false")" class="@(tab == "screen" ? "on" : "")" @onclick='() => tab = "screen"'><Ico Name="monitor" Size="18" /> Écran</button>
+                    <button type="button" role="tab" aria-selected="@(tab == "widgets" ? "true" : "false")" class="@(tab == "widgets" ? "on" : "")" @onclick='() => tab = "widgets"'><Ico Name="grid" Size="18" /> Widgets <small>@widgets.Count</small></button>
+                </div>
 
-                <section class="kd-sec">
-                    <h4>Quand personne ne touche</h4>
-                    <p class="kp-h">L'écran diffuse ces listes de lecture. Le premier toucher interrompt la diffusion et ouvre la liste interactive.</p>
-                    <div class="kp-seg" role="group" aria-label="Découpage de l'écran">
-                        <button type="button" class="@(!split ? "on" : "")" @onclick="() => SetSplit(false)">Plein écran</button>
-                        <button type="button" class="@(split ? "on" : "")" disabled="@(!CanSplit)" title="@(CanSplit ? "" : "Ce format d'écran n'est pas découpé")" @onclick="() => SetSplit(true)">2 zones</button>
-                    </div>
-                    <div class="kd-zonesrow">
-                        <div class="kd-scr @(portrait ? "p" : "l") @(split ? "two" : "")" aria-hidden="true">
-                            @for (var z = 0; z < zoneDef.Sizes.Length; z++) { <div style="flex:@F(zoneDef.Sizes[z])">@(split ? "Zone " + (z + 1) : "Plein écran")</div> }
-                        </div>
-                        <div class="kd-zsel">
-                            @for (var z = 0; z < zoneDef.Sizes.Length; z++)
+                @if (tab == "screen")
+                {
+                    <div class="kd-pane">
+                        <div class="kd-blk">
+                            <h4>Liste interactive</h4>
+                            @if (list != null)
                             {
-                                var zi = z;
-                                <div class="dw-field">
-                                    <label for="@("k-z" + zi)">@(split ? ZoneName(zi, portrait) : "Liste de lecture")</label>
-                                    <select id="@("k-z" + zi)" @onchange="e => SetZoneList(zi, e)">
-                                        <option value="" selected="@(ZoneList(zi) == null)">— Aucune liste de lecture —</option>
-                                        @foreach (var p in playlists) { <option value="@p.Id" selected="@(p.Id == ZoneList(zi))">@p.Name</option> }
-                                    </select>
+                                <div class="kd-lrow">
+                                    <span class="kd-lth"><InteractiveListThumb List="list" Files="media" /></span>
+                                    <span><b>@list.Name</b>@(tileCount > 1 ? $"{tileCount} tuiles" : $"{tileCount} tuile") · @(list.Pages.Count > 1 ? $"{list.Pages.Count} pages" : "1 page") · @(InteractiveLists.Portrait(list.Orientation) ? "Portrait" : "Paysage")</span>
                                 </div>
                             }
+                            <div class="dw-field">
+                                <label for="k-list">@(list == null ? "Choisir la liste de la borne" : "Changer de liste")</label>
+                                <select id="k-list" @onchange="AssignInteractive">
+                                    <option value="" selected="@(k.ListId == null)">— Aucune liste interactive —</option>
+                                    @foreach (var l in Compatible) { <option value="@l.Id" selected="@(l.Id == k.ListId)">@l.Name@(l.Orientation != orientation ? " (" + (InteractiveLists.Portrait(l.Orientation) ? "portrait" : "paysage") + ")" : "")</option> }
+                                </select>
+                            </div>
+                            @if (list != null && list.Orientation != orientation)
+                            {
+                                <div class="kd-warn" role="alert">Cette liste est en @(InteractiveLists.Portrait(list.Orientation) ? "portrait" : "paysage") et la borne en @(portrait ? "portrait" : "paysage") : elle serait déformée. Changez le format ou choisissez une autre liste.</div>
+                            }
+                        </div>
+
+                        <div class="kd-blk">
+                            <h4>Format de l'écran</h4>
+                            <div class="kp-seg kd-seg" role="group" aria-label="Orientation">
+                                <button type="button" class="@(!portrait ? "on" : "")" @onclick='() => SetOrientation("landscape")'><i class="ori l"></i> Paysage</button>
+                                <button type="button" class="@(portrait ? "on" : "")" @onclick='() => SetOrientation("portrait")'><i class="ori p"></i> Portrait</button>
+                            </div>
+                            <span class="kp-h kd-hint">Le format s'applique dès l'enregistrement.</span>
+                        </div>
+
+                        <div class="kd-blk">
+                            <h4>Inactivité</h4>
+                            <p class="kp-h kd-d">Le premier toucher interrompt la diffusion et ouvre la liste interactive.</p>
+                            <label class="kd-l">Découpage de l'écran</label>
+                            <div class="kp-seg kd-seg" role="group" aria-label="Découpage de l'écran">
+                                <button type="button" class="@(!split ? "on" : "")" @onclick="() => SetSplit(false)">Plein écran</button>
+                                <button type="button" class="@(split ? "on" : "")" disabled="@(!CanSplit)" title="@(CanSplit ? "" : "Ce format d'écran n'est pas découpé")" @onclick="() => SetSplit(true)">2 zones</button>
+                            </div>
+                            <div class="dw-field" style="margin-top:14px">
+                                <label for="k-touch">Bouton « Touchez l'écran pour commencer »</label>
+                                <select id="k-touch" @onchange="e => Edit(c => c.TouchStyle = Kiosk.TouchKey(e.Value?.ToString()))">
+                                    @foreach (var ts in Kiosk.TouchStyles) { <option value="@ts.Key" selected="@(touchKey == ts.Key)">@ts.Label</option> }
+                                </select>
+                            </div>
+                            <span class="kp-h kd-hint">Affiché au centre tant que personne n'a touché la borne ; glissez-le sur l'aperçu pour le déplacer.@if (touchMoved) { <text> </text><button type="button" class="kd-link" @onclick="ResetTouch">Recentrer</button> }</span>
                         </div>
                     </div>
-                </section>
-
-                <section class="kd-sec">
-                    <button type="button" class="kd-fold" @onclick="() => parOpen = true">
-                        <span><b>Réglages</b><small>Retours automatiques, accessibilité, bouton « Touchez l'écran », veille, verrouillage</small></span><Ico Name="sliders" Size="18" />
-                    </button>
-                </section>
+                }
+                else
+                {
+                    @* widgets de l'écran d'inactivité : posés sur l'aperçu par glisser-déposer (ou un clic) ; une seule liste, d'abord les widgets déjà sur l'écran (régler, retirer), puis ceux qu'on peut ajouter (+) *@
+                    var free = available.ToList();
+                    <div class="kd-pane">
+                        @if (free.Count > 6) { <input id="wg-search" type="text" placeholder="Rechercher" aria-label="Rechercher un widget" @bind="search" @bind:event="oninput" style="margin:14px 0 8px" /> }
+                        @if (widgets.Count + free.Count > 0)
+                        {
+                            <div class="wg-list" style="margin-top:14px">
+                                @foreach (var w in widgets)
+                                {
+                                    var wid = w;
+                                    <div class="wg-lrow on @(selected == wid.Id ? "sel" : "")">
+                                        <button type="button" class="wg-lmain" title="Régler « @Label(wid) »" @onclick="() => OpenSettings(wid)">
+                                            <AppIcon Id="@wid.AppId" Small="true" Size="16" /> <span class="wg-placed-t"><b>@Label(wid)</b><small>@Where(wid)</small></span>
+                                        </button>
+                                        <button type="button" class="btn ghost sm icon" title="Régler « @Label(wid) »" aria-label="Régler « @Label(wid) »" @onclick="() => OpenSettings(wid)"><Ico Name="sliders" Size="15" /></button>
+                                        <button type="button" class="btn ghost sm icon" title="Retirer « @Label(wid) »" aria-label="Retirer « @Label(wid) »" @onclick="() => Remove(wid)"><Ico Name="trash" Size="15" /></button>
+                                    </div>
+                                }
+                                @foreach (var a in free.Where(x => string.IsNullOrWhiteSpace(search) || x.Name.Contains(search.Trim(), StringComparison.CurrentCultureIgnoreCase)))
+                                {
+                                    var app = a;
+                                    <div class="wg-lrow" draggable="true" title="Glissez vers l'aperçu, ou cliquez sur + pour ajouter"
+                                         ondragstart="event.dataTransfer.setData('text/plain', '@app.Id'); event.dataTransfer.effectAllowed = 'copy';">
+                                        <span class="wg-lmain"><AppIcon Id="@app.Id" Small="true" Size="16" /> <span class="wg-placed-t"><b>@app.Name</b></span></span>
+                                        <button type="button" class="btn sm icon" title="Ajouter « @app.Name »" aria-label="Ajouter « @app.Name »" @onclick="() => Add(app)"><Ico Name="plus" Size="15" /></button>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        @if (available.Count == 0 && widgets.Count == 0) { <p class="hint">Aucun widget actif. <a href="/widgets">Activez-les dans la page Widgets</a>.</p> }
+                        <span class="kp-h kd-hint">Ces widgets s'affichent uniquement sur l'écran d'inactivité, par-dessus la diffusion.</span>
+                        @foreach (var e in errors) { <div class="err">@e</div> }
+                    </div>
+                }
             </div>
         </div>
 
@@ -171,7 +252,7 @@ else
                 }
                 else
                 {
-                    <span class="confirm-line" role="alert">Publier maintenant ? La borne affichera aussitôt « @(list?.Name ?? "aucune liste interactive") » et, en inactivité, @(split ? "ses deux zones de diffusion" : "« " + (playlists.FirstOrDefault(p => p.Id == ZoneList(0))?.Name ?? "aucune liste de lecture") + " »").</span>
+                    <span class="confirm-line" role="alert">Publier maintenant ? La borne affichera aussitôt « @(list?.Name ?? "aucune liste interactive") » et, en inactivité, @(split ? "ses deux zones de diffusion" : "« " + (playlists.FirstOrDefault(p => p.Id == ZoneList(0))?.Name ?? "aucune liste de lecture") + " »")@(widgets.Count > 0 ? $" avec {widgets.Count} widget{(widgets.Count > 1 ? "s" : "")}" : "").</span>
                     <button class="btn ghost" @onclick="() => confirmPublish = false">Retour</button>
                     <button class="btn" disabled="@saving" @onclick="() => SaveAll(true)"><Ico Name="upload" Size="16" /> Confirmer la publication</button>
                 }
@@ -209,71 +290,91 @@ else
 
     @if (parOpen)
     {
+        @* réglages de la borne en trois onglets : Visiteur · Verrouillage · Appareil *@
         <div class="kp-veil over" @onclick="() => parOpen = false"></div>
-        <div class="kp-drawer over" role="dialog" aria-modal="true" aria-labelledby="kp-par-t">
+        <div class="kp-drawer kd-par over" role="dialog" aria-modal="true" aria-labelledby="kp-par-t">
             <div class="kp-dh"><h2 id="kp-par-t">Réglages de la borne</h2><button type="button" class="modal-x" aria-label="Fermer" @onclick="() => parOpen = false"><Ico Name="x" Size="20" /></button></div>
-            <div class="kp-db">
-                <p class="kp-lbl">Format</p>
-                <div class="kp-seg" role="group" aria-label="Orientation">
-                    <button type="button" class="@(orientation != "portrait" ? "on" : "")" @onclick='() => SetOrientation("landscape")'><i class="ori l"></i> Paysage</button>
-                    <button type="button" class="@(orientation == "portrait" ? "on" : "")" @onclick='() => SetOrientation("portrait")'><i class="ori p"></i> Portrait</button>
-                </div>
-                <div class="kp-f" style="margin-top:14px"><label for="k-res">Résolution</label>
-                    <select id="k-res" @onchange="SetResolution">
-                        @foreach (var r in new[] { "auto", "1920x1080", "3840x2160", "1280x720" }) { <option value="@r" selected="@(resolution == r)">@(r == "auto" ? "Automatique (celle de l'écran)" : r.Replace("x", " × "))</option> }
-                    </select>
-                    <span class="kp-h">@(s.DetectedW is > 0 ? $"Détectée : {Math.Max(s.DetectedW ?? 0, s.DetectedH ?? 0)} × {Math.Min(s.DetectedW ?? 0, s.DetectedH ?? 0)}." : "Détectée à la première connexion.") Le format s'applique dès l'enregistrement.</span></div>
-
-                <p class="kp-lbl" style="margin-top:18px">Miroir de l'affichage</p>
-                @Switch("Miroir horizontal", "Inverse la gauche et la droite.", mirrorH, v => { mirrorH = v; dirty = true; })
-                @Switch("Miroir vertical", "Inverse le haut et le bas ; les deux ensemble : écran fixé à l'envers. S'applique dès l'enregistrement.", mirrorV, v => { mirrorV = v; dirty = true; })
-
-                <p class="kp-lbl" style="margin-top:18px">Retours automatiques</p>
-                <div class="kp-f"><label for="k-ret">Retour à l'accueil après</label>
-                    <select id="k-ret" @onchange="e => Edit(c => c.ReturnSec = Kiosk.Clamp(Num(e.Value, 30), Kiosk.MinReturn, Kiosk.MaxReturn))">
-                        @foreach (var v in new[] { 15, 30, 60, 120 }) { <option value="@v" selected="@(k.ReturnSec == v)">@v secondes sans toucher</option> }
-                    </select></div>
-                <div class="kp-f"><label for="k-idle">Retour à la diffusion après</label>
-                    <select id="k-idle" @onchange="e => Edit(c => c.IdleSec = Kiosk.Clamp(Num(e.Value, 120), Kiosk.MinIdle, Kiosk.MaxIdle))">
-                        @foreach (var v in new[] { 60, 120, 300, 600 }) { <option value="@v" selected="@(k.IdleSec == v)">@(v / 60) minute@(v > 60 ? "s" : "") à l'accueil</option> }
-                    </select></div>
-                <div class="kp-f"><label for="k-touch">Bouton « Touchez l'écran pour commencer »</label>
-                    <select id="k-touch" @onchange="e => Edit(c => c.TouchStyle = Kiosk.TouchKey(e.Value?.ToString()))">
-                        @foreach (var ts in Kiosk.TouchStyles) { <option value="@ts.Key" selected="@(Kiosk.TouchKey(k.TouchStyle) == ts.Key)">@ts.Label</option> }
-                    </select>
-                    <span class="kp-h">Il s'affiche au centre de l'écran tant que personne n'a touché la borne (aperçu « Inactivité »).</span></div>
-
-                <p class="kp-lbl" style="margin-top:18px">Accessibilité</p>
-                @Switch("Tuiles à hauteur de fauteuil", "La liste interactive et le bouton Retour se placent dans la moitié basse de l'écran.", k.Accessible, v => Edit(c => c.Accessible = v))
-
-                <p class="kp-lbl" style="margin-top:18px">Session du visiteur</p>
-                @Switch("Tout remettre à zéro", "Documents en page 1, vidéos arrêtées ; historique et cookies des sites effacés sur l'appareil.", k.Wipe, v => Edit(c => c.Wipe = v))
-                @Switch("Son des vidéos", "Sinon les vidéos s'ouvrent sans son.", k.Sound, v => Edit(c => c.Sound = v))
-                @if (k.Sound)
-                {
-                    <div class="kp-f" style="margin-left:54px;max-width:260px"><label for="k-vol">Volume</label>
-                        <select id="k-vol" @onchange="e => Edit(c => c.Volume = Kiosk.Clamp(Num(e.Value, 60), 10, 100))">
-                            @foreach (var v in new[] { 30, 60, 80, 100 }) { <option value="@v" selected="@(k.Volume == v)">@v %</option> }
-                        </select></div>
-                }
-
-                <p class="kp-lbl" style="margin-top:18px">Verrouillage</p>
-                @Switch("Empêcher de quitter l'application", "Bloque la touche Windows, Alt+Tab et Alt+F4 ; la fenêtre reste au premier plan.", k.Lock, v => Edit(c => c.Lock = v))
-                @Switch("Désactiver le zoom", "Évite le zoom par pincement ou molette.", k.NoZoom, v => Edit(c => c.NoZoom = v))
-                @Switch("Masquer le curseur de la souris", "Seul le toucher est utilisé.", k.HideCursor, v => Edit(c => c.HideCursor = v))
-                <span class="kp-h">Accès technicien : appui long de 5 s dans le coin en haut à gauche de l'écran, puis le code PIN technicien de l'organisation (à régler dans <a href="/settings">Réglages</a>). Il permet de quitter le mode borne ou de redémarrer.</span>
-
-                <p class="kp-lbl" style="margin-top:18px">Veille et appareil</p>
-                @Switch("Un toucher réveille la borne pendant la veille", "", k.WakeOnTouch, v => Edit(c => c.WakeOnTouch = v))
-                @Switch("Démarrer avec Windows", "La borne s'ouvre seule à l'allumage du PC.", autoStart, v => { autoStart = v; dirty = true; })
-                <span class="kp-h">La mise en veille et la luminosité se règlent dans les paramètres de l'écran (éditeur de l'écran).</span>
-                <div style="margin-top:8px"><button type="button" class="btn ghost sm" @onclick="() => editor = true"><Ico Name="edit" Size="14" /> Widgets et réglages de l'écran…</button></div>
-
-                <p class="kp-lbl" style="margin-top:18px">Mode d'affichage</p>
-                <span class="kp-h" style="margin-bottom:8px">Repasser l'écran en diffusion simple. La liste interactive est conservée, mais n'est plus affichée.</span>
-                <button type="button" class="btn danger" @onclick="() => confirmOff = true">Repasser en écran de diffusion</button>
+            <div class="se-utabs kd-ptabs" role="tablist">
+                <button type="button" role="tab" aria-selected="@(parTab == "vis" ? "true" : "false")" class="@(parTab == "vis" ? "on" : "")" @onclick='() => parTab = "vis"'>Visiteur</button>
+                <button type="button" role="tab" aria-selected="@(parTab == "ver" ? "true" : "false")" class="@(parTab == "ver" ? "on" : "")" @onclick='() => parTab = "ver"'>Verrouillage</button>
+                <button type="button" role="tab" aria-selected="@(parTab == "app" ? "true" : "false")" class="@(parTab == "app" ? "on" : "")" @onclick='() => parTab = "app"'>Appareil</button>
             </div>
-            <div class="kp-df"><span class="kp-h" style="margin-right:auto">Les réglages se valident avec « Enregistrer ».</span><button type="button" class="btn" @onclick="() => parOpen = false">Fermer</button></div>
+            <div class="kp-db">
+                @if (parTab == "vis")
+                {
+                    <div class="kd-blk">
+                        <h4>Retours automatiques</h4>
+                        <p class="kp-h kd-d">Quand la borne revient d'elle-même en arrière.</p>
+                        <div class="kd-two">
+                            <div class="dw-field"><label for="k-ret">Retour à l'accueil après</label>
+                                <select id="k-ret" @onchange="e => Edit(c => c.ReturnSec = Kiosk.Clamp(Num(e.Value, 30), Kiosk.MinReturn, Kiosk.MaxReturn))">
+                                    @foreach (var v in new[] { 15, 30, 60, 120 }) { <option value="@v" selected="@(k.ReturnSec == v)">@v s sans toucher</option> }
+                                </select></div>
+                            <div class="dw-field"><label for="k-idle">Retour à la diffusion après</label>
+                                <select id="k-idle" @onchange="e => Edit(c => c.IdleSec = Kiosk.Clamp(Num(e.Value, 120), Kiosk.MinIdle, Kiosk.MaxIdle))">
+                                    @foreach (var v in new[] { 60, 120, 300, 600 }) { <option value="@v" selected="@(k.IdleSec == v)">@(v / 60) min à l'accueil</option> }
+                                </select></div>
+                        </div>
+                    </div>
+                    <div class="kd-blk">
+                        <h4>Accessibilité</h4>
+                        @Switch("Tuiles à hauteur de fauteuil", "La liste interactive et le bouton Retour se placent dans la moitié basse de l'écran.", k.Accessible, v => Edit(c => c.Accessible = v))
+                    </div>
+                    <div class="kd-blk">
+                        <h4>Session du visiteur</h4>
+                        @Switch("Tout remettre à zéro", "Documents en page 1, vidéos arrêtées ; historique et cookies des sites effacés sur l'appareil.", k.Wipe, v => Edit(c => c.Wipe = v))
+                        @Switch("Son des vidéos", "Sinon les vidéos s'ouvrent sans son.", k.Sound, v => Edit(c => c.Sound = v))
+                        @if (k.Sound)
+                        {
+                            <div class="dw-field" style="margin-left:54px;max-width:200px"><label for="k-vol">Volume</label>
+                                <select id="k-vol" @onchange="e => Edit(c => c.Volume = Kiosk.Clamp(Num(e.Value, 60), 10, 100))">
+                                    @foreach (var v in new[] { 30, 60, 80, 100 }) { <option value="@v" selected="@(k.Volume == v)">@v %</option> }
+                                </select></div>
+                        }
+                    </div>
+                }
+                else if (parTab == "ver")
+                {
+                    <div class="kd-blk">
+                        <h4>Verrouillage</h4>
+                        <p class="kp-h kd-d">Empêche le visiteur de sortir de la borne.</p>
+                        @Switch("Empêcher de quitter l'application", "Bloque la touche Windows, Alt+Tab et Alt+F4 ; la fenêtre reste au premier plan.", k.Lock, v => Edit(c => c.Lock = v))
+                        @Switch("Désactiver le zoom", "Évite le zoom par pincement ou molette.", k.NoZoom, v => Edit(c => c.NoZoom = v))
+                        @Switch("Masquer le curseur de la souris", "Seul le toucher est utilisé.", k.HideCursor, v => Edit(c => c.HideCursor = v))
+                    </div>
+                    <div class="kd-blk">
+                        <h4>Accès technicien</h4>
+                        <div class="kd-note">Appui long de 5 s dans le coin en haut à gauche de l'écran, puis le code PIN technicien de l'organisation (à régler dans <a href="/settings">Réglages</a>). Il permet de quitter le mode borne ou de redémarrer.</div>
+                    </div>
+                }
+                else
+                {
+                    <div class="kd-blk">
+                        <h4>Affichage</h4>
+                        <div class="dw-field"><label for="k-res">Résolution</label>
+                            <select id="k-res" @onchange="SetResolution">
+                                @foreach (var r in new[] { "auto", "1920x1080", "3840x2160", "1280x720" }) { <option value="@r" selected="@(resolution == r)">@(r == "auto" ? "Automatique (celle de l'écran)" : r.Replace("x", " × "))</option> }
+                            </select>
+                            <span class="kp-h kd-hint">@(s.DetectedW is > 0 ? $"Détectée : {Math.Max(s.DetectedW ?? 0, s.DetectedH ?? 0)} × {Math.Min(s.DetectedW ?? 0, s.DetectedH ?? 0)}." : "Détectée à la première connexion.") Le format s'applique dès l'enregistrement.</span></div>
+                        <div style="margin-top:8px">
+                            @Switch("Miroir horizontal", "Inverse la gauche et la droite.", mirrorH, v => { mirrorH = v; dirty = true; })
+                            @Switch("Miroir vertical", "Inverse le haut et le bas ; les deux ensemble : écran fixé à l'envers. S'applique dès l'enregistrement.", mirrorV, v => { mirrorV = v; dirty = true; })
+                        </div>
+                    </div>
+                    <div class="kd-blk">
+                        <h4>Veille et démarrage</h4>
+                        @Switch("Un toucher réveille la borne pendant la veille", "", k.WakeOnTouch, v => Edit(c => c.WakeOnTouch = v))
+                        @Switch("Démarrer avec Windows", "La borne s'ouvre seule à l'allumage du PC.", autoStart, v => { autoStart = v; dirty = true; })
+                        <span class="kp-h kd-hint">La mise en veille et la luminosité se règlent dans les <button type="button" class="kd-link" @onclick="() => editor = true">paramètres de l'écran</button>.</span>
+                    </div>
+                    <div class="kd-blk">
+                        <h4>Mode d'affichage</h4>
+                        <p class="kp-h kd-d">Repasser l'écran en diffusion simple. La liste interactive est conservée mais n'est plus affichée.</p>
+                        <button type="button" class="btn danger sm" @onclick="() => confirmOff = true">Repasser en écran de diffusion</button>
+                    </div>
+                }
+            </div>
+            <div class="kp-df"><span class="kp-h" style="margin-right:auto">Valider avec « Enregistrer ».</span><button type="button" class="btn" @onclick="() => parOpen = false">Fermer</button></div>
         </div>
     }
 
@@ -287,6 +388,10 @@ else
         </div>
     }
 
+    @if (settingsOpen && Sel is { } sw && manifests.GetValueOrDefault(sw.AppId) is { } sm)
+    {
+        <WidgetSettingsDialog Widget="sw" Manifest="sm" OnClose="CloseSettings" OnRemove="() => Remove(sw)" />
+    }
     @if (editor) { <ScreenEditor ScreenId="s.Id" OnClose="EditorClosed" /> }
     @if (sim) { <SimulatorDialog ScreenId="s.Id" Stacked="true" OnClose="() => sim = false" /> }
 }
@@ -296,7 +401,7 @@ else
     [Parameter] public EventCallback OnClose { get; set; }
 
     private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
-    private const double MinZoom = 0.5, MaxZoom = 2;
+    private static readonly System.Globalization.CultureInfo Fr = new("fr-CH");
 
     private Task Close() => OnClose.InvokeAsync();
 
@@ -314,14 +419,120 @@ else
     private Guid? loadedFor;
     private bool dirty;
 
-    private string view = "home";
-    private double zoom = 1;
+    private string tab = "screen", parTab = "vis", search = "";
     private bool saving, confirmPublish, editor, sim, confirmOff, planOpen, parOpen;
     private bool needsApproval;   // la personne est soumise à approbation : « publier » dépose une demande (voir Approvals)
     private bool headRename;
     private string headValue = "";
+    private int? pickZone;   // zone dont le choix de liste de lecture est ouvert
+    private List<string> errors = new();
+
+    // widgets de l'écran d'inactivité (copie de travail, comme l'éditeur d'écran)
+    private List<ScreenWidget> widgets = new();
+    private List<AppManifest> available = new();
+    private Dictionary<string, AppManifest> manifests = new();
+    private Guid? selected;
+    private bool settingsOpen;
+    private ElementReference canvas;
+    private DotNetObjectReference<KioskDrawer>? self;
+    private bool attached;
+
+    protected override void OnInitialized()
+    {
+        // Proposés : les widgets actifs (page Widgets). Un widget désactivé déjà posé reste réglable.
+        manifests = Svc.Catalog.Where(a => a.ScreenWidget).ToDictionary(a => a.Id);
+        var on = Svc.Installed().Select(a => a.AppId).ToHashSet();
+        available = manifests.Values.Where(a => on.Contains(a.Id)).OrderBy(a => a.Name).ToList();
+    }
 
     protected override void OnParametersSet() => Load();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (canvas.Context == null) return;   // l'aperçu n'existe pas tant que la borne n'est pas chargée
+        if (!attached)
+        {
+            attached = true;
+            self = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("linkiiWidgets.attach", canvas, self);
+            await JS.InvokeVoidAsync("linkiiWidgets.attachTouch", canvas, self);
+        }
+        if (widgets.Count > 0) await JS.InvokeVoidAsync("linkiiWidgets.fit", canvas);   // comme le player : un widget ne dépasse jamais de l'écran
+    }
+
+    public void Dispose() => self?.Dispose();
+
+    // Le bouton « Touchez l'écran » a été glissé : centre en % de l'écran d'attente.
+    [JSInvokable]
+    public Task TouchMoved(double x, double y)
+    {
+        Edit(c => { c.TouchX = x; c.TouchY = y; });
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private void ResetTouch() => Edit(c => { c.TouchX = null; c.TouchY = null; });
+
+    // Calque décalé depuis le centre ; la bande pleine largeur ne se déplace qu'en hauteur.
+    private string TouchShift(string key) =>
+        k?.TouchX is double x && k.TouchY is double y ? $"transform:translate({Fm(key == "band" ? 0 : x - 50)}%,{Fm(y - 50)}%)" : "";
+
+    [JSInvokable]
+    public Task Moved(string id, double x, double y)
+    {
+        if (Guid.TryParse(id, out var g) && widgets.FirstOrDefault(w => w.Id == g) is { } w) { w.X = x; w.Y = y; selected = g; dirty = true; }
+        return InvokeAsync(StateHasChanged);
+    }
+
+    // Widget glissé depuis la liste vers l'aperçu : posé sous le curseur (point de dépôt = centre approximatif du widget).
+    [JSInvokable]
+    public Task Dropped(string appId, double x, double y)
+    {
+        if (manifests.GetValueOrDefault(appId) is { } a && available.Any(v => v.Id == appId)) Add(a, Math.Clamp(x - 8, 0, 90), Math.Clamp(y - 6, 0, 90));
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private ScreenWidget? Sel => widgets.FirstOrDefault(w => w.Id == selected);
+    private string Label(ScreenWidget w) => manifests.GetValueOrDefault(w.AppId)?.Name ?? w.AppId;
+    private string Where(ScreenWidget w) => WidgetBody.Where(w, ScreenLayouts.Find(layout), orientation == "portrait");
+    private static string Pct(double v) => v.ToString("0.#", Inv) + "%";
+
+    private void OpenSettings(ScreenWidget w) { selected = w.Id; tab = "widgets"; settingsOpen = true; }
+    private void CloseSettings() { settingsOpen = false; dirty = true; }
+    private void OnItemKey(KeyboardEventArgs e, ScreenWidget w) { if (e.Key == "Enter") OpenSettings(w); }
+
+    // Nouveau widget : en haut à droite pour une horloge, en haut à gauche sinon, décalé s'il y en a déjà un.
+    private void Add(AppManifest a) => Add(a, null, null);
+
+    private void Add(AppManifest a, double? x, double? y)
+    {
+        var n = widgets.Count;
+        var w = new ScreenWidget { AppId = a.Id, Settings = AppCatalog.WithDefaults(a, null), X = x ?? (a.Id == "clock" ? 72 : a.Id == "rss-widget" ? 0 : 4), Y = y ?? (a.Id == "text" ? 80 : a.Id == "rss-widget" ? 92 : 4 + n * 6 % 60), Scale = 1 };
+        widgets.Add(w);
+        selected = w.Id;
+        errors.Clear();
+        dirty = true;
+        settingsOpen = a.Settings.Any(f => f.Required && string.IsNullOrEmpty(f.Default));   // un réglage obligatoire (ex. la ville) : on l'ouvre aussitôt
+    }
+
+    private void Remove(ScreenWidget w)
+    {
+        widgets.Remove(w);
+        selected = widgets.FirstOrDefault()?.Id;
+        settingsOpen = false;
+        dirty = true;
+    }
+
+    private void LoadWidgets()
+    {
+        widgets = s!.Widgets.Select(w => new ScreenWidget { Id = w.Id, AppId = w.AppId, X = w.X, Y = w.Y, Scale = w.Scale, Settings = new(w.Settings) }).ToList();
+        foreach (var w in widgets) if (manifests.GetValueOrDefault(w.AppId) is { } m) w.Settings = AppCatalog.WithDefaults(m, w.Settings);
+        selected = widgets.FirstOrDefault()?.Id;
+    }
+
+    private static bool WidgetsEqual(List<ScreenWidget> a, List<ScreenWidget> b) => JsonSerializer.Serialize(a) == JsonSerializer.Serialize(b);
+
+    // Premier contenu plein écran d'une liste de lecture : ce que la zone affichera au démarrage.
+    private MediaItem? ZoneThumb(Playlist? p) => p?.Draft.Where(i => i.Placement == "full").Select(i => Media(i.MediaId)).FirstOrDefault(m => m != null);
 
     private void Load()
     {
@@ -341,6 +552,7 @@ else
         name = s.Name; orientation = s.Orientation; resolution = s.Resolution; autoStart = s.AutoStart; (mirrorH, mirrorV) = (s.MirrorH, s.MirrorV);
         layout = ScreenLayouts.Fit(ScreenLayouts.Find(s.Layout).Id, Spec);
         zonePl = s.ZonePlaylists().Take(ScreenLayouts.Find(layout).Sizes.Length).ToList();
+        LoadWidgets();
         dirty = false;
     }
 
@@ -381,7 +593,6 @@ else
         _ => "<div class=\"kt-c\">Touchez l’écran pour commencer</div>"
     });
 
-    private void ZoomBy(double d) => zoom = Math.Clamp(Math.Round(zoom + d, 2), MinZoom, MaxZoom);
     private void SetOrientation(string o) { orientation = o; layout = ScreenLayouts.Fit(layout, Spec); FitZones(); dirty = true; }
     private void SetResolution(ChangeEventArgs e) { resolution = e.Value?.ToString() ?? "auto"; layout = ScreenLayouts.Fit(layout, Spec); FitZones(); dirty = true; }
 
@@ -403,10 +614,6 @@ else
         Edit(c => c.ListId = g);
     }
 
-    // Modifier ou créer une liste quitte la fenêtre : la copie de travail est enregistrée d'abord (sans publier), comme avant d'ouvrir l'éditeur d'écran.
-    private Task OpenEditor(Guid id) => SaveAll(false, $"/interactive/{id}?back=/screens");
-    private Task OpenCreate() => SaveAll(false, $"/interactive/new?o={orientation}&back=/screens");
-
     // ----- Inactivité : une zone, ou deux (haut/bas en portrait, gauche/droite en paysage) -----
     private Guid? ZoneList(int z) => zonePl.ElementAtOrDefault(z);
 
@@ -421,13 +628,15 @@ else
     {
         layout = two ? "50-50" : ScreenLayouts.Full;
         FitZones();
+        pickZone = null;
         dirty = true;
     }
 
-    private void SetZoneList(int z, ChangeEventArgs e)
+    private void SetZone(int z, Guid? playlistId)
     {
         FitZones();
-        zonePl[z] = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null;
+        zonePl[z] = playlistId;
+        pickZone = null;
         dirty = true;
     }
 
@@ -442,16 +651,29 @@ else
             name = s.Name; orientation = s.Orientation; resolution = s.Resolution; (mirrorH, mirrorV) = (s.MirrorH, s.MirrorV);
             layout = ScreenLayouts.Fit(ScreenLayouts.Find(s.Layout).Id, Spec);
             zonePl = s.ZonePlaylists().Take(ScreenLayouts.Find(layout).Sizes.Length).ToList();
+            LoadWidgets();
         }
         k = keep; dirty = keepDirty;
     }
 
     // ----- Enregistrer / publier : même déroulement que l'éditeur d'écran -----
-    private async Task SaveAll(bool publish) => await SaveAll(publish, null);
-
-    private async Task SaveAll(bool publish, string? then)
+    private async Task SaveAll(bool publish)
     {
         if (k == null) return;
+        errors = new(); confirmPublish = false;
+        foreach (var w in widgets)
+        {
+            if (manifests.GetValueOrDefault(w.AppId) is not { } m) continue;
+            var errs = AppCatalog.Validate(m, w.Settings, new HashSet<string>());
+            if (errs.Count > 0) { errors = errs.Select(x => $"{m.Name} : {x}").ToList(); Toast.Error(errors[0]); selected = w.Id; tab = "widgets"; settingsOpen = true; return; }
+        }
+        var wlist = widgets.Select(w => new ScreenWidget
+        {
+            Id = w.Id, AppId = w.AppId, X = w.X, Y = w.Y, Scale = w.Scale,
+            Settings = manifests.GetValueOrDefault(w.AppId) is { } m
+                ? m.Settings.Where(f => !f.IsSecret && AppCatalog.IsVisible(f, w.Settings)).ToDictionary(f => f.Key, f => (w.Settings.GetValueOrDefault(f.Key) ?? "").Trim())
+                : new(w.Settings)
+        }).ToList();
         var kd = Copy(k); var (o, r, au, lay) = (orientation, resolution, autoStart, layout); var (mh, mv) = (mirrorH, mirrorV); var zones = zonePl.ToList();
         saving = true;
         ScreenPublisher.Result? pub = null;
@@ -465,6 +687,7 @@ else
                 sc.Orientation = o; sc.Resolution = r; sc.AutoStart = au; sc.MirrorH = mh; sc.MirrorV = mv;
                 sc.Layout = lay;   // autre découpage ou autre liste dans une zone = modification à publier
                 for (var z = 0; z < zones.Count; z++) sc.SetZonePlaylist(z, zones[z]);
+                if (!WidgetsEqual(sc.Widgets, wlist)) { sc.Widgets = wlist; sc.WidgetsRevision++; }   // modification à publier
                 return changed;
             });
             if (publish) pub = await Publisher.Publish([Id]);
@@ -472,10 +695,9 @@ else
         }
         finally { saving = false; }
         if (pub?.Error != null) Toast.Error(pub.Error);
-        else if (then == null) Toast.Ok(pub?.Request is { } rq ? $"Borne « {name} » enregistrée. Demande n° {rq.Number} envoyée : elle garde sa version jusqu'à la décision."
+        else Toast.Ok(pub?.Request is { } rq ? $"Borne « {name} » enregistrée. Demande n° {rq.Number} envoyée : elle garde sa version jusqu'à la décision."
             : publish ? $"Borne « {name} » enregistrée et publiée." : $"Borne « {name} » enregistrée.");
-        if (then != null) Nav.NavigateTo(then);
-        else await OnClose.InvokeAsync();
+        await OnClose.InvokeAsync();
     }
 
     private async Task TurnOff()

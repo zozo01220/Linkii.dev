@@ -63,6 +63,8 @@ public class KioskConfig
     public string? TileGap { get; set; }          // tight | normal | wide
     public string? TileShade { get; set; }        // voile sous le texte des tuiles à image : none | light | normal | strong
     public string TouchStyle { get; set; } = "pill";   // bouton « Touchez l'écran » de la diffusion en inactivité : clé de Kiosk.TouchStyles
+    public double? TouchX { get; set; }           // centre du bouton « Touchez l'écran » en % de la largeur de l'écran d'attente ; null = au centre
+    public double? TouchY { get; set; }           // … et de sa hauteur
     public int TileCols { get; set; }             // nombre de colonnes (0 = automatique)
     public List<KioskTile> Tiles { get; set; } = new();
 
@@ -114,6 +116,8 @@ public class PublishedKiosk
         accessible = Config.Accessible, bigText = Config.BigText, wipe = Config.Wipe,
         sound = Config.Sound, volume = Config.Volume,
         touchStyle = Kiosk.TouchKey(Config.TouchStyle),
+        touchX = Config.TouchX is double tx && Config.TouchY != null ? Math.Clamp(tx, 5, 95) : (double?)null,
+        touchY = Config.TouchY is double ty && Config.TouchX != null ? Math.Clamp(ty, 5, 95) : (double?)null,
         lockApp = Config.Lock, noZoom = Config.NoZoom, hideCursor = Config.HideCursor, wake = Config.WakeOnTouch,
         tileStyle = new
         {

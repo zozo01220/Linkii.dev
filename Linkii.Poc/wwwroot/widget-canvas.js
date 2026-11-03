@@ -97,5 +97,38 @@
     });
   }
 
-  w.linkiiWidgets = { attach: attach, fit: fit };
+  // Bouton « Touchez l'écran » de la borne : le calque .kt se décale depuis le centre de l'écran d'attente.
+  // À la fin du déplacement, dotnet.TouchMoved(x, y) reçoit le centre du bouton en % du canevas.
+  function attachTouch(canvas, dotnet) {
+    if (!canvas || canvas.__lkt) return;
+    canvas.__lkt = true;
+    var d = null;
+    canvas.addEventListener('pointerdown', function (e) {
+      var kt = canvas.querySelector('.kt'), h = e.target.closest && e.target.closest('.kt > *');
+      if (!kt || !h || e.button > 0) return;
+      e.preventDefault();
+      h.setPointerCapture(e.pointerId);
+      var r = canvas.getBoundingClientRect();
+      d = { kt: kt, h: h, sx: e.clientX, sy: e.clientY, w: r.width, ht: r.height, x0: parseFloat(kt.getAttribute('data-x')) || 50, y0: parseFloat(kt.getAttribute('data-y')) || 50, band: kt.classList.contains('kt-band') };
+      d.x = d.x0; d.y = d.y0; d.moved = false;
+      kt.classList.add('dragging');
+    });
+    canvas.addEventListener('pointermove', function (e) {
+      if (!d) return;
+      d.x = d.band ? 50 : clamp(d.x0 + (e.clientX - d.sx) / d.w * 100, 5, 95);
+      d.y = clamp(d.y0 + (e.clientY - d.sy) / d.ht * 100, 5, 95);
+      d.kt.style.transform = 'translate(' + (d.x - 50) + '%,' + (d.y - 50) + '%)';
+      d.moved = true;
+    });
+    function end() {
+      if (!d) return;
+      var m = d; d = null;
+      m.kt.classList.remove('dragging');
+      if (m.moved) dotnet.invokeMethodAsync('TouchMoved', Math.round(m.x * 10) / 10, Math.round(m.y * 10) / 10);
+    }
+    canvas.addEventListener('pointerup', end);
+    canvas.addEventListener('pointercancel', end);
+  }
+
+  w.linkiiWidgets = { attach: attach, fit: fit, attachTouch: attachTouch };
 })(window);

@@ -170,6 +170,11 @@
     root.className = (cfg.hideCursor ? 'nocursor ' : '') + 'on';
     touchEl = el('div'); touchEl.id = 'k-touch';
     touchEl.innerHTML = touchHtml(cfg.touchStyle);
+    // bouton déplacé dans l'éditeur : on décale tout le calque depuis le centre (la bande pleine largeur ne se déplace qu'en hauteur)
+    if (cfg.touchX != null && cfg.touchY != null && touchEl.firstChild) {
+      var tdx = cfg.touchStyle === 'band' ? 0 : cfg.touchX - 50;
+      touchEl.firstChild.style.transform = 'translate(' + tdx + '%,' + (cfg.touchY - 50) + '%)';
+    }
     mainEl = el('div'); mainEl.id = 'k-main'; mainEl.style.background = cfg.bg || '#fff';
     homeEl = el('div'); homeEl.id = 'k-home';
     pageEl = el('div'); pageEl.id = 'k-page';

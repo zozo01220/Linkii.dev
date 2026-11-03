@@ -1,0 +1,43 @@
+@* Réglages d'un widget d'écran : fenêtre au-dessus de l'éditeur ; les valeurs s'écrivent dans la copie de travail de l'appelant, rien n'est enregistré ici. *@
+<div class="modal-backdrop picker-backdrop" @onclick="Close"></div>
+<div class="modal app-modal sm wg-settings @(HomeAssistantRules.IsHaApp(Manifest.Id) ? "wg-settings-ha" : "")" role="dialog" aria-modal="true" aria-label="Réglages : @Manifest.Name">
+    <div class="modal-head">
+        <AppIcon Id="@Manifest.Id" Small="true" Size="18" />
+        <div class="grow" style="min-width:0"><h3>@Manifest.Name</h3><small>Réglages du widget</small></div>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="modal-body">
+        <div class="dw">
+            <div class="dw-field">
+                <label>Taille</label>
+                <select value="@Widget.Scale.ToString(Inv)" @onchange="SetScale">
+                    @foreach (var (v, l) in Sizes) { <option value="@v.ToString(Inv)" selected="@(Math.Abs(Widget.Scale - v) < 0.01)">@l</option> }
+                </select>
+            </div>
+            <AppForm @key="Widget.Id" Manifest="Manifest" Values="Widget.Settings" />
+        </div>
+    </div>
+    <div class="modal-foot">
+        <button type="button" class="btn danger" @onclick="Remove"><Ico Name="trash" Size="16" /> Retirer</button>
+        <span class="grow"></span>
+        <button type="button" class="btn" @onclick="Close">OK</button>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ScreenWidget Widget { get; set; } = default!;
+    [Parameter, EditorRequired] public AppManifest Manifest { get; set; } = default!;
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnRemove { get; set; }
+
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+    private static readonly (double Value, string Label)[] Sizes = { (0.6, "Petite"), (1, "Moyenne"), (1.5, "Grande"), (2.2, "Très grande") };
+
+    private Task Close() => OnClose.InvokeAsync();
+    private Task Remove() => OnRemove.InvokeAsync();
+
+    private void SetScale(ChangeEventArgs e)
+    {
+        if (double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float, Inv, out var v)) Widget.Scale = v;
+    }
+}
