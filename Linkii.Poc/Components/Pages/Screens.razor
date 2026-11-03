@@ -1440,9 +1440,13 @@ else if (wallEdit is { } wid)
                 var gmenu = "wall:" + gw.Id;
                 var gwonline = gm.Any(x => ScreenControl.Online(x, DateTime.UtcNow));
                 var gwpaused = gm.Count > 0 && gm.All(x => x.IsPaused(DateTime.UtcNow));
+                // état du bandeau : en veille (tous dorment), en ligne (rien d'hors ligne, tous les emplacements pris), hors ligne (aucun), sinon mur incomplet
+                var gasleep = gm.Count(x => IsAsleep(x, true));
+                var gnoff = gm.Count(x => !ScreenControl.Online(x, DateTime.UtcNow) && !IsAsleep(x, true));
+                var gwstate = gm.Count > 0 && gasleep == gm.Count ? "sleep" : gm.Count > 0 && gnoff == 0 && gm.Count == gplaces ? "on" : gwonline || gasleep > 0 ? "part" : "off";
                 var gopen = expandedWalls.Contains(gw.Id);
                 var gar = ((double)gw.WallCols * (gport ? 9 : 16) / ((double)gw.WallRows * (gport ? 16 : 9))).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
-                <div data-nid="@gw.Id" class="pl-card gc gc-wall @(gpicked ? "picked" : "") @(gwonline ? "" : "is-off")" style="--cols:@gw.WallCols;--rows:@gw.WallRows;--ar:@gar" role="group" aria-label="Mur d'écrans @gw.Name">
+                <div data-nid="@gw.Id" class="pl-card gc gc-wall @(gpicked ? "picked" : "") @(gwstate == "off" ? "is-off" : gwstate == "on" ? "is-on" : gwstate == "sleep" ? "is-sleep" : "is-part")" style="--cols:@gw.WallCols;--rows:@gw.WallRows;--ar:@gar" role="group" aria-label="Mur d'écrans @gw.Name">
                     <div class="gc-top">
                         <div class="gc-stage">
                             <div class="gc-frame @(gport ? "portrait" : "")">
@@ -1462,7 +1466,9 @@ else if (wallEdit is { } wid)
                             </div>
                             @if (manageZones) { <button type="button" class="gc-hit" tabindex="-1" aria-hidden="true" title="Réorganiser le mur" @onclick="() => wallEdit = gw.Id"></button> }
                             @* app Android : l'état du mur en texte ; sur PC, la pastille des écrans (posée sur l'aperçu, plus bas) le remplace *@
-                            <span class="gc-pill gc-apponly"><span class="gc-d @(gfull ? "ok" : gonl > 0 ? "warn" : "bad")"></span>@(gfull ? $"{gonl} sur {gplaces} en ligne" : $"Mur incomplet · {gonl} sur {gplaces}")</span>
+                            @* bandeau de l'état du mur, comme les écrans : vert en ligne, rouge hors ligne, indigo en veille, orange incomplet (sur PC la pastille des écrans est au-dessus) *@
+                            @{ var gon = gm.Count(x => ScreenControl.Online(x, DateTime.UtcNow)); var gwsl = gasleep > 0 ? $" · {gasleep} en veille" : ""; }
+                            <span class="gc-pill gc-apponly @(gwstate == "off" ? "off" : "")"><span class="gc-d @(gwstate == "on" ? "ok" : gwstate == "sleep" ? "sleep" : gwstate == "part" ? "warn" : "bad")"></span>@(gwstate == "sleep" ? "En veille" : gwstate == "off" ? "Hors ligne" : gwstate == "on" ? $"{gon} sur {gplaces} en ligne{gwsl}" : $"Mur incomplet · {gon} sur {gplaces} en ligne{gwsl}")</span>
                             @if (gpend) { <span class="gc-pills-r"><span class="gc-pill warn" title="Liste du mur ou contenus modifiés depuis la dernière publication">À publier</span></span> }
                         </div>
                         <input type="checkbox" class="sc-check" aria-label="Sélectionner les @gm.Count écrans du mur @gw.Name" checked="@gpicked" @onchange="() => ToggleWall(gm)" />
