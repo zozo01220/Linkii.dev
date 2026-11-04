@@ -523,3 +523,49 @@ public class AppsTests(Platform p)
         }
     }
 }
+
+/// <summary>Onglet « Médias » de la liste de lecture (§175) : un média glissé dans le fil devient un contenu « Image » ou « Vidéo » déjà rempli.</summary>
+[Collection("platform")]
+public class AppsFromMediaTests(Platform p)
+{
+    AppService ServiceFor(Tenant client)
+    {
+        var store = p.Services.GetRequiredService<JsonStore>();
+        var user = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(Claims.Client, client.Id.ToString()), new Claim(ClaimTypes.Role, Roles.ClientAdmin) }, "test"));
+        return new AppService(new TenantStore(store, new TenantContext(new FixedAuth(user), store)), p.Services.GetRequiredService<AppCatalog>(), p.Services.GetRequiredService<AppProviders>(), p.Services.GetRequiredService<SecretBox>());
+    }
+
+    [Fact]
+    public void Une_image_et_une_video_deviennent_des_contenus_Image_et_Video_remplis()
+    {
+        var store = p.Services.GetRequiredService<JsonStore>();
+        var s = ServiceFor(p.A);
+        s.Install("image"); s.Install("video");
+        var img = new MediaItem { ClientId = p.A.Id, Type = "image", Name = "Affiche", FileName = Guid.NewGuid().ToString("N") + ".jpg" };
+        var vid = new MediaItem { ClientId = p.A.Id, Type = "video", Name = "Teaser", FileName = Guid.NewGuid().ToString("N") + ".mp4" };
+        store.Write(db => { db.Media.Add(img); db.Media.Add(vid); });
+
+        var a = s.CreateFromMedia(img)!;
+        Assert.Equal("image", a.AppId);
+        Assert.Equal("Affiche", a.Name);
+        Assert.Equal(img.Id.ToString(), a.Settings["media"]);
+        Assert.Equal("contain", a.Settings["fit"]);   // réglages par défaut de l'app
+        Assert.False(s.IsIncomplete(a));               // prêt à diffuser, rien à configurer
+
+        var b = s.CreateFromMedia(vid)!;
+        Assert.Equal("video", b.AppId);
+        Assert.Equal(vid.Id.ToString(), b.Settings["media"]);
+    }
+
+    [Fact]
+    public void Un_fichier_d_un_autre_client_ou_un_contenu_d_app_est_refuse()
+    {
+        var store = p.Services.GetRequiredService<JsonStore>();
+        var s = ServiceFor(p.A);
+        s.Install("image");
+        var other = new MediaItem { ClientId = p.B.Id, Type = "image", Name = "Autre client", FileName = Guid.NewGuid().ToString("N") + ".jpg" };
+        store.Write(db => db.Media.Add(other));
+        Assert.Null(s.CreateFromMedia(other));
+        Assert.Null(s.CreateFromMedia(new MediaItem { ClientId = p.A.Id, Type = "app", AppId = "webpage", Name = "Site" }));
+    }
+}

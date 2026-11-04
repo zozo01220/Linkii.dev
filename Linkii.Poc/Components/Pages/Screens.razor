@@ -40,13 +40,13 @@
                     <div class="kebab-menu lx-add-menu" role="menu">
                         <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenPair(); }"><Ico Name="monitor" Size="18" /><span><b>Écran de diffusion</b><small>Avec le code affiché sur l'écran</small></span></button>
                         <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenPairKiosk(); }"><Ico Name="hand" Size="18" /><span><b>Borne interactive <span class="kiosk-new">Nouveau</span></b><small>Borne à écran tactile</small></span></button>
-                        <span class="sep" role="separator"></span>
-                        <button type="button" role="menuitem" @onclick="OpenNewFolder"><Ico Name="folder" Size="18" /><span><b>Nouveau dossier@(currentRow is { } cf ? $" dans « {cf.Folder.Name} »" : "")</b></span></button>
+                        @if (FolderOps) { <span class="sep" role="separator"></span> }
+                        @if (FolderOps) { <button type="button" role="menuitem" @onclick="OpenNewFolder"><Ico Name="folder" Size="18" /><span><b>Nouveau dossier@(currentRow is { } cf ? $" dans « {cf.Folder.Name} »" : "")</b></span></button> }
                     </div>
                 }
                 <span class="lx-fabsrc" aria-hidden="true">
                     <button type="button" tabindex="-1" data-fab="Connecter un écran" @onclick="OpenPair"><Ico Name="plus" Size="16" /></button>
-                    <button type="button" tabindex="-1" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /></button>
+                    @if (FolderOps) { <button type="button" tabindex="-1" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /></button> }
                 </span>
             </div>
         }
@@ -87,11 +87,11 @@
 {
     <div class="card empty"><div class="big">Aucune aire de gestion ne vous est confiée</div><p>Demandez à un administrateur de votre organisation de vous donner un rôle dans une aire.</p></div>
 }
-@if (Has && !TreeView && (subfolders.Count > 0 || canAdd))
+@if (Has && !TreeView && (subfolders.Count > 0 || FolderOps))
 {
     <section class="lx-fzone" aria-label="Dossiers">
     @* Dossiers de la position ouverte : mêmes formes, aperçus et actions que la Médiathèque (FolderShape, .lx-fcard), cibles du glisser-déposer. *@
-    @if (subfolders.Count > 0 || canAdd)
+    @if (subfolders.Count > 0 || FolderOps)
     {
         <div class="lx-fstrip lx-fgrid" role="list" aria-label="Dossiers">
             @foreach (var row in subfolders)
@@ -126,7 +126,7 @@
                     }
                 </div>
             }
-            @if (canAdd)
+            @if (FolderOps)
             {
                 <button type="button" class="lx-fcard add" @onclick="OpenNewFolder">
                     <div class="fv"><span class="fbk"></span><span class="ffr"><Ico Name="plus" Size="22" /></span></div>
@@ -165,7 +165,7 @@
         </FilterMenu>
         @if (area != null && ShowZones && OpenZone is { } pz)
         {
-            <a class="tb-btn" href="planning?zone=@pz.Id" title="Planning de diffusion de @(pz.IsWall ? "ce mur" : "cette zone")"><Ico Name="calendar" Size="14" /> Planning @if (pz.Slots.Count > 0) { <span class="tb-n">@pz.Slots.Count</span> }</a>
+            @if (Modes.Expert) { <a class="tb-btn" href="planning?zone=@pz.Id" title="Planning de diffusion de @(pz.IsWall ? "ce mur" : "cette zone")"><Ico Name="calendar" Size="14" /> Planning @if (pz.Slots.Count > 0) { <span class="tb-n">@pz.Slots.Count</span> }</a> }
         }
         @if (Modes.Expert) { <ViewToggle StorageKey="screens-arbre" Tree="!isApp" @bind-Value="view" /> }
     </div>
@@ -293,9 +293,9 @@ else
         <button type="button" @onclick="ToggleAll">@(Shown.Count > 0 && Shown.All(s => selectedIds.Contains(s.Id)) ? "Tout désélectionner" : $"Tout sélectionner ({Shown.Count})")</button>
         <span class="vr"></span>
         <button type="button" @onclick="() => AskPublish(selectedIds.ToList())"><Ico Name="upload" Size="15" /><span class="lx-lbl">Publier</span></button>
-        @if (canAdd) { <button type="button" @onclick="() => folderMove = screens.Where(s => selectedIds.Contains(s.Id)).Select(s => (s.Id, s.Name)).ToList()"><Ico Name="folder" Size="15" /><span class="lx-lbl">Ranger…</span></button> }
+        @if (FolderOps) { <button type="button" @onclick="() => folderMove = screens.Where(s => selectedIds.Contains(s.Id)).Select(s => (s.Id, s.Name)).ToList()"><Ico Name="folder" Size="15" /><span class="lx-lbl">Ranger…</span></button> }
         @if (zones.Count > 1) { <button type="button" @onclick="OpenZoneMove"><Ico Name="box" Size="15" /><span class="lx-lbl">Zone…</span></button> }
-        @if (tenant.SleepEnabled) { <button type="button" @onclick="OpenSleep"><Ico Name="moon" Size="15" /><span class="lx-lbl">Veille…</span></button> }
+        @if (tenant.SleepEnabled && Modes.Expert) { <button type="button" @onclick="OpenSleep"><Ico Name="moon" Size="15" /><span class="lx-lbl">Veille…</span></button> }
         @{ var selScreens = screens.Where(s => selectedIds.Contains(s.Id)).ToList(); }
         @if (DevicePower.Kinds.Any(k => CanDevAny(selScreens, k)))
         {
@@ -1011,9 +1011,10 @@ else if (wallEdit is { } wid)
     private DevicePower.Plan? powerPlan;
     private bool powerBusy, powerBar;
 
-    private bool CanDev(Screen s, string kind) => DevicePower.Can(acc, s, kind);
+    // mode simple : aucune commande de l'appareil (éteindre l'écran, redémarrer, éteindre), ni au survol ni dans les menus
+    private bool CanDev(Screen s, string kind) => Modes.Expert && DevicePower.Can(acc, s, kind);
     /// <summary>Un mur se commande en entier : le droit sur un seul de ses écrans suffit.</summary>
-    private bool CanDevAny(IEnumerable<Screen> list, string kind) => DevicePower.Has(acc, kind) && list.Any(s => DevicePower.Mine(acc, s));
+    private bool CanDevAny(IEnumerable<Screen> list, string kind) => Modes.Expert && DevicePower.Has(acc, kind) && list.Any(s => DevicePower.Mine(acc, s));
 
     /// <summary>Groupe « Appareil » du menu ⋮ : redémarrer et éteindre l'appareil, seulement pour qui en a le droit sur ces écrans.</summary>
     private RenderFragment PowerItems(IReadOnlyList<Screen> list, bool online) => __builder =>
@@ -1046,7 +1047,7 @@ else if (wallEdit is { } wid)
     private string repairCode = "";
     private string? repairError;
 
-    private bool CanRepair(Screen s) => acc.IsOrgAdmin || acc.CanWrite(LevelPages.Screens) && DevicePower.Mine(acc, s);
+    private bool CanRepair(Screen s) => Modes.Expert && (acc.IsOrgAdmin || acc.CanWrite(LevelPages.Screens) && DevicePower.Mine(acc, s));
 
     private void OpenRepair(Screen s) { repairFor = s; repairCode = ""; repairError = null; }
 
@@ -1194,7 +1195,9 @@ else if (wallEdit is { } wid)
     private Guid? FolderOf(Screen s) => s.FolderId is { } f && folderRows.Any(r => r.Folder.Id == f) && ZoneOf(s) is not { IsWall: true } ? f : null;
 
     // Position ouverte : en cartes et en liste, les écrans du dossier ouvert (ou de la racine) ; recherche, filtres et arborescence : tous
-    private bool InPosition(Screen s) => TreeView || Filtering || FolderOf(s) == folderId;
+    private bool InPosition(Screen s) => TreeView || Filtering || Modes.Simple || FolderOf(s) == folderId;   // mode simple : tous les écrans à plat
+    /// <summary>Dossiers : créer, ranger, glisser. Jamais en mode simple (les dossiers existants restent intacts pour le mode expert).</summary>
+    private bool FolderOps => canAdd && Modes.Expert;
 
     private int ChildCount(Guid id) => screens.Count(s => FolderOf(s) == id) + folderRows.Count(r => r.Folder.ParentId == id);
     private string FolderUnit(Guid id) => FolderShape.UnitFor(screens.Count(s => FolderOf(s) == id), folderRows.Count(r => r.Folder.ParentId == id), "écran", "écrans");
@@ -1211,7 +1214,8 @@ else if (wallEdit is { } wid)
     private void BuildFolders()
     {
         if (folderId is { } open && !folderRows.Any(r => r.Folder.Id == open)) folderId = null;   // dossier retiré entre-temps
-        subfolders = folderRows.Where(r => r.Folder.ParentId == folderId || folderId == null && r.Folder.ParentId is { } p && folderRows.All(x => x.Folder.Id != p)).ToList();
+        if (Modes.Simple) folderId = null;
+        subfolders = Modes.Simple ? new() : folderRows.Where(r => r.Folder.ParentId == folderId || folderId == null && r.Folder.ParentId is { } p && folderRows.All(x => x.Folder.Id != p)).ToList();
         crumbs = new();
         for (var cur = currentRow; cur != null && crumbs.Count < FolderAccess.MaxDepth; cur = cur.Folder.ParentId is { } p ? folderRows.FirstOrDefault(r => r.Folder.Id == p) : null)
             crumbs.Insert(0, cur);
@@ -1271,7 +1275,7 @@ else if (wallEdit is { } wid)
     private void MovedFolder(bool moved) { reparenting = null; if (moved) Reload(); }
 
     // Glisser-déposer : un écran (ou tous ceux qui sont cochés), ou un dossier, vers un dossier ou la racine (null)
-    private bool CanDragScreen(Screen s) => canAdd && !isApp && ZoneOf(s) is not { IsWall: true };
+    private bool CanDragScreen(Screen s) => FolderOps && !isApp && ZoneOf(s) is not { IsWall: true };
     private void StartDrag(Screen s) => dragIds = selectedIds.Contains(s.Id) ? selectedIds.ToList() : new List<Guid> { s.Id };
     private void EndDrag() { dragIds = new(); dragFolder = null; dropOver = null; }
 
@@ -1483,7 +1487,7 @@ else if (wallEdit is { } wid)
                                     <button type="button" role="menuitem" @onclick="() => { CloseMenu(); AskPublish(gm.Select(x => x.Id).ToList()); }"><Ico Name="upload" Size="16" /> Publier le mur</button>
                                     @if (gplaced) { <button type="button" role="menuitem" @onclick="() => { CloseMenu(); simWall = gw.Id; }"><Ico Name="play" Size="16" /> Simuler le mur</button> }
                                     <button type="button" role="menuitem" @onclick="() => IdentifyWall(gw, gm)"><Ico Name="monitor" Size="16" /> Identifier sur les écrans</button>
-                                    <button type="button" role="menuitem" disabled="@(!Growth || !gwonline)" title="@(!Growth ? Plans.LockedHint : !gwonline ? "Aucun écran du mur n'est en ligne" : null)" @onclick='() => { CloseMenu(); OpenWallLive(gw, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer les players</button>
+                                    @if (Modes.Expert) { <button type="button" role="menuitem" disabled="@(!Growth || !gwonline)" title="@(!Growth ? Plans.LockedHint : !gwonline ? "Aucun écran du mur n'est en ligne" : null)" @onclick='() => { CloseMenu(); OpenWallLive(gw, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer les players</button> }
                                     @PowerItems(gm, gwonline)
                                     @if (manageZones)
                                     {
@@ -1616,7 +1620,7 @@ else if (wallEdit is { } wid)
                     <div class="gc-quick" role="group" aria-label="Actions rapides">
                         <button type="button" class="gc-q" title="Simuler" aria-label="Simuler" @onclick="() => simScreen = gs.Id"><Ico Name="play" Size="18" /></button>
                         <button type="button" class="gc-q" title="Éditer" aria-label="Éditer" @onclick="() => Edit(gs)"><Ico Name="pencil-square" Size="18" /></button>
-                        <button type="button" class="gc-q" disabled="@(gdl is { State: "wip" } || bulkPublishing)" title="@(gdl is { State: "wip" } || bulkPublishing ? "Publication en cours" : "Publier")" aria-label="Publier" @onclick="() => AskPublish(new() { gs.Id })"><Ico Name="upload" Size="18" /></button>
+                        @if (Modes.Expert) { <button type="button" class="gc-q" disabled="@(gdl is { State: "wip" } || bulkPublishing)" title="@(gdl is { State: "wip" } || bulkPublishing ? "Publication en cours" : "Publier")" aria-label="Publier" @onclick="() => AskPublish(new() { gs.Id })"><Ico Name="upload" Size="18" /></button> }
                         @if (gsl.Asleep && CanDev(gs, DevicePower.ScreenOff))
                         {
                             <button type="button" class="gc-q" disabled="@(!Growth)" title="@(Growth ? "Réveiller" : Plans.LockedHint)" aria-label="Réveiller" @onclick="async () => await Wake(new[] { gs })"><Ico Name="sun" Size="18" /></button>
@@ -1656,12 +1660,12 @@ else if (wallEdit is { } wid)
                                 @if (!HCtx.IsClientMember) { <button type="button" role="menuitem" class="pc-quick" @onclick='() => { menuFor = null; Nav.NavigateTo($"history?screen={gs.Id}"); }'><Ico Name="clock" Size="16" /> Historique</button> }
                                 @PcItems(gs)
                                 <button type="button" role="menuitem" class="pc-quick" @onclick="() => { menuFor = null; simScreen = gs.Id; }"><Ico Name="play" Size="16" /> Simuler</button>
-                                <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"planning?screen={gs.Id}")'><Ico Name="calendar" Size="16" /> Planning de cet écran…</button>
+                                @if (Modes.Expert) { <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"planning?screen={gs.Id}")'><Ico Name="calendar" Size="16" /> Planning de cet écran…</button> }
                                 <button type="button" role="menuitem" @onclick="() => OpenRename(gs)"><Ico Name="edit" Size="16" /> Renommer</button>
 
-                                @if (canAdd) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (gs.Id, gs.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
-                                <button type="button" role="menuitem" class="pc-quick" disabled="@(gdl is { State: "wip" } || bulkPublishing)" @onclick="() => AskPublish(new() { gs.Id })"><Ico Name="upload" Size="16" /> Publier</button>
-                                <button type="button" role="menuitem" disabled="@(!Growth || !gonline)" title="@(!Growth ? Plans.LockedHint : !gonline ? "L'écran est hors ligne" : null)" @onclick='() => { menuFor = null; OpenLive(gs, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer le player</button>
+                                @if (FolderOps) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (gs.Id, gs.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
+                                @if (Modes.Expert) { <button type="button" role="menuitem" class="pc-quick" disabled="@(gdl is { State: "wip" } || bulkPublishing)" @onclick="() => AskPublish(new() { gs.Id })"><Ico Name="upload" Size="16" /> Publier</button> }
+                                @if (Modes.Expert) { <button type="button" role="menuitem" disabled="@(!Growth || !gonline)" title="@(!Growth ? Plans.LockedHint : !gonline ? "L'écran est hors ligne" : null)" @onclick='() => { menuFor = null; OpenLive(gs, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer le player</button> }
                                 @PowerItems(new[] { gs }, gonline)
                                 @if (CanRepair(gs)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; OpenRepair(gs); }"><Ico Name="monitor" Size="16" /> Associer un nouveau code…</button> }
                                 @if (canAssign) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; assigning = gs; }"><Ico Name="users" Size="16" /> Attribuer…</button> }
@@ -1737,9 +1741,9 @@ else if (wallEdit is { } wid)
                                     @if (CanDevAny(members, DevicePower.ScreenOff) && members.Any(x => !IsAsleep(x, true))) { <button type="button" role="menuitem" disabled="@(!Growth || !wOnl)" title="@(!Growth ? Plans.LockedHint : wOnl ? null : "Aucun écran du mur n'est en ligne")" @onclick="async () => { CloseMenu(); await SleepNow(members); }"><Ico Name="moon" Size="16" /> Éteindre les écrans</button> }
                                     <button type="button" role="menuitem" @onclick="() => { CloseMenu(); AskPublish(members.Select(x => x.Id).ToList()); }"><Ico Name="upload" Size="16" /> Publier le mur</button>
                                     @if (placed) { <button type="button" role="menuitem" @onclick="() => { CloseMenu(); simWall = w.Id; }"><Ico Name="play" Size="16" /> Simuler le mur</button> }
-                                    <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"planning?zone={w.Id}")'><Ico Name="calendar" Size="16" /> Planning du mur…</button>
+                                    @if (Modes.Expert) { <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"planning?zone={w.Id}")'><Ico Name="calendar" Size="16" /> Planning du mur…</button> }
                                     <button type="button" role="menuitem" @onclick="() => IdentifyWall(w, members)"><Ico Name="monitor" Size="16" /> Identifier sur les écrans</button>
-                                    <button type="button" role="menuitem" disabled="@(!Growth || !wOnl)" title="@(!Growth ? Plans.LockedHint : !wOnl ? "Aucun écran du mur n'est en ligne" : null)" @onclick='() => { CloseMenu(); OpenWallLive(w, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer les players</button>
+                                    @if (Modes.Expert) { <button type="button" role="menuitem" disabled="@(!Growth || !wOnl)" title="@(!Growth ? Plans.LockedHint : !wOnl ? "Aucun écran du mur n'est en ligne" : null)" @onclick='() => { CloseMenu(); OpenWallLive(w, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer les players</button> }
                                     @PowerItems(members, wOnl)
                                     @if (manageZones)
                                     {
@@ -1842,10 +1846,14 @@ else if (wallEdit is { } wid)
                 </div>
                 @* contrôle du direct du mur (Pro) : s'applique à tous ses écrans en ligne *@
                 @{ var wOnline = members.Any(x => ScreenControl.Online(x, DateTime.UtcNow)); var wPaused = members.Count > 0 && members.All(x => x.IsPaused(DateTime.UtcNow)); }
+                @if (Modes.Expert)
+                {
+                @* mode simple : ni pause ni aperçu en direct *@
                 <div class="sc-live" role="group" aria-label="Contrôle du direct du mur @w.Name">
                     <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth ? (wOnline ? "Aperçu" : "Aucun écran du mur n'est en ligne") : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !wOnline)" @onclick='() => OpenWallLive(w, "preview")'><Ico Name="eye" Size="15" /> <span>Aperçu</span>@if (!Growth) { @LockIcon }</button>
                     <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth ? (wOnline ? (wPaused ? "Reprendre" : "Pause") : "Aucun écran du mur n'est en ligne") : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !wOnline)" @onclick='() => OpenWallLive(w, null)'><Ico Name="@(wPaused ? "play" : "pause")" Size="15" /> <span>@(wPaused ? "Reprendre" : "Pause")</span>@if (!Growth) { @LockIcon }</button>
                 </div>
+                }
             </div>
             return;
         }
@@ -1878,12 +1886,12 @@ else if (wallEdit is { } wid)
                                 @if (!HCtx.IsClientMember) { <button type="button" role="menuitem" @onclick='() => { menuFor = null; Nav.NavigateTo($"history?screen={sc.Id}"); }'><Ico Name="clock" Size="16" /> Historique</button> }
                                 @PcItems(sc)
                                 <button type="button" role="menuitem" @onclick="() => { menuFor = null; simScreen = sc.Id; }"><Ico Name="play" Size="16" /> Simuler</button>
-                                <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"planning?screen={sc.Id}")'><Ico Name="calendar" Size="16" /> Planning de cet écran…</button>
+                                @if (Modes.Expert) { <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"planning?screen={sc.Id}")'><Ico Name="calendar" Size="16" /> Planning de cet écran…</button> }
                                 <button type="button" role="menuitem" @onclick="() => OpenRename(sc)"><Ico Name="edit" Size="16" /> Renommer</button>
 
-                                @if (canAdd) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (sc.Id, sc.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
-                                <button type="button" role="menuitem" @onclick="() => AskPublish(new() { sc.Id })"><Ico Name="upload" Size="16" /> Publier</button>
-                                <button type="button" role="menuitem" disabled="@(!Growth || !online)" title="@(!Growth ? Plans.LockedHint : !online ? "L'écran est hors ligne" : null)" @onclick='() => { menuFor = null; OpenLive(sc, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer le player</button>
+                                @if (FolderOps) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (sc.Id, sc.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
+                                @if (Modes.Expert) { <button type="button" role="menuitem" @onclick="() => AskPublish(new() { sc.Id })"><Ico Name="upload" Size="16" /> Publier</button> }
+                                @if (Modes.Expert) { <button type="button" role="menuitem" disabled="@(!Growth || !online)" title="@(!Growth ? Plans.LockedHint : !online ? "L'écran est hors ligne" : null)" @onclick='() => { menuFor = null; OpenLive(sc, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer le player</button> }
                                 @PowerItems(new[] { sc }, online)
                                 @if (CanRepair(sc)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; OpenRepair(sc); }"><Ico Name="monitor" Size="16" /> Associer un nouveau code…</button> }
                                 @if (canAssign) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; assigning = sc; }"><Ico Name="users" Size="16" /> Attribuer…</button> }
@@ -1972,10 +1980,14 @@ else if (wallEdit is { } wid)
                 }
             </div>
             @* contrôle du direct (Pro) : verrouillé en licence Essential, avec une bulle au survol *@
+            @if (Modes.Expert)
+            {
+            @* mode simple : ni pause ni aperçu en direct *@
             <div class="sc-live" role="group" aria-label="Contrôle du direct de @sc.Name">
                 <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth ? (online ? "Aperçu" : "L'écran est hors ligne") : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !online)" @onclick='() => OpenLive(sc, "preview")'><Ico Name="eye" Size="15" /> <span>Aperçu</span>@if (!Growth) { @LockIcon }</button>
                 <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth ? (online ? (paused ? "Reprendre" : "Pause") : "L'écran est hors ligne") : null)" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !online)" @onclick='() => OpenLive(sc, null)'><Ico Name="@(paused ? "play" : "pause")" Size="15" /> <span>@(paused ? "Reprendre" : "Pause")</span>@if (!Growth) { @LockIcon }</button>
             </div>
+            }
         </div>
     };
 
@@ -1994,10 +2006,14 @@ else if (wallEdit is { } wid)
             }
             else { <span class="gc-selro">@(gwpl?.Name ?? "Aucune liste de lecture")</span> }
         </div>
+        @if (Modes.Expert)
+        {
+        @* mode simple : ni pause ni aperçu en direct *@
         <div class="sc-live gc-live" role="group" aria-label="Contrôle du direct du mur @gw.Name">
             <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth ? (gwonline ? "Aperçu" : "Aucun écran du mur n'est en ligne") : null)" aria-label="Aperçu" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !gwonline)" @onclick='() => OpenWallLive(gw, "preview")'><Ico Name="eye" Size="16" />@if (!Growth) { @LockIcon }</button>
             <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth ? (gwonline ? (gwpaused ? "Reprendre" : "Pause") : "Aucun écran du mur n'est en ligne") : null)" aria-label="@(gwpaused ? "Reprendre" : "Pause")" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !gwonline)" @onclick='() => OpenWallLive(gw, null)'><Ico Name="@(gwpaused ? "play" : "pause")" Size="16" />@if (!Growth) { @LockIcon }</button>
         </div>
+        }
     };
 
     private RenderFragment ScreenPlRow(Screen gs, bool gonline, bool gpaused, string? zoneName) => __builder =>
@@ -2035,10 +2051,14 @@ else if (wallEdit is { } wid)
             }
         </div>
         @if (zoneName != null) { <span class="gc-zapp">@zoneName</span> }
+        @if (Modes.Expert)
+        {
+        @* mode simple : ni pause ni aperçu en direct *@
         <div class="sc-live gc-live" role="group" aria-label="Contrôle du direct de @gs.Name">
             <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth ? (gonline ? "Aperçu" : "L'écran est hors ligne") : null)" aria-label="Aperçu" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !gonline)" @onclick='() => OpenLive(gs, "preview")'><Ico Name="eye" Size="16" />@if (!Growth) { @LockIcon }</button>
             <button type="button" class="act @(Growth ? "" : "locked")" data-tip="@(Growth ? null : Plans.LockedHint)" title="@(Growth ? (gonline ? (gpaused ? "Reprendre" : "Pause") : "L'écran est hors ligne") : null)" aria-label="@(gpaused ? "Reprendre" : "Pause")" aria-disabled="@(Growth ? null : "true")" disabled="@(Growth && !gonline)" @onclick='() => OpenLive(gs, null)'><Ico Name="@(gpaused ? "play" : "pause")" Size="16" />@if (!Growth) { @LockIcon }</button>
         </div>
+        }
     };
 
     // ---------- Affichage « Arborescence » (mode expert) : aires › zones › écrans ----------

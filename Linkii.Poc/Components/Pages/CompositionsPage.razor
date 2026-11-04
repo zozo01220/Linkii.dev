@@ -371,7 +371,7 @@ else
         <button type="button" @onclick="ToggleAll">@(AllPicked ? "Tout désélectionner" : $"Tout sélectionner ({Sorted.Count(Selectable)})")</button>
         <span class="vr"></span>
         @if (multi && pickedOwner.Count > 0) { <button type="button" @onclick="() => sharingMany = pickedOwner"><Ico Name="share" Size="15" /><span class="lx-lbl">Partager…</span></button> }
-        <button type="button" disabled="@(pickedEditable.Count == 0)" @onclick="() => compMove = pickedEditable"><Ico Name="folder" Size="15" /><span class="lx-lbl">Ranger…</span></button>
+        @if (Modes.Expert) { <button type="button" disabled="@(pickedEditable.Count == 0)" @onclick="() => compMove = pickedEditable"><Ico Name="folder" Size="15" /><span class="lx-lbl">Ranger…</span></button> }
         <span class="vr"></span>
         <button type="button" class="del" disabled="@(pickedOwner.Count == 0)" @onclick="() => deletingMany = pickedOwner.Select(x => x.Id).ToList()"><Ico Name="trash" Size="15" /> Supprimer</button>
         <span class="vr"></span>
@@ -536,7 +536,7 @@ else
     private CompositionFolderRow? currentRow => folderId is { } id ? folderRows.FirstOrDefault(r => r.Folder.Id == id) : null;
     // Une composition se crée à la racine comme avant ; dans un dossier, il faut y écrire. Rien ne se crée à la racine de « Partagées avec moi » (dossiers).
     private bool CanCreateHere => canWrite && (folderId is null || currentRow is { } c && c.Right >= FolderRight.Write);
-    private bool CanCreateFolderHere => tab != "models" && (folderId is null ? canCreateRoot && tab != LibraryTab.Shared : currentRow is { } c && c.Right >= FolderRight.Write);
+    private bool CanCreateFolderHere => Modes.Expert && tab != "models" && (folderId is null ? canCreateRoot && tab != LibraryTab.Shared : currentRow is { } c && c.Right >= FolderRight.Write);
 
     private ShareSummary FolderSum(Guid id) => folderShares.GetValueOrDefault(id, ShareSummary.None);
     private void ShareFolder(CompositionFolderRow r) => Share(ShareKind.CompositionFolder, r.Folder.Id, r.Folder.Name);
@@ -596,7 +596,8 @@ else
             var (sf, sl) = Scope(LibraryTab.Shared);
             sharedRoots = folderRows.Count(r => sf.Contains(r.Folder.Id) && (r.Folder.ParentId is not { } p || !sf.Contains(p))) + sl.Count(m => m.FolderId is not { } f || !sf.Contains(f));
         }
-        subfolders = folderRows.Where(r => folderId is { } fid ? r.Folder.ParentId == fid : tabFolders.Contains(r.Folder.Id) && (r.Folder.ParentId is not { } p || !tabFolders.Contains(p))).ToList();
+        subfolders = Modes.Simple ? new()   // mode simple : pas de dossiers, toutes les compositions à plat (voir Shown)
+            : folderRows.Where(r => folderId is { } fid ? r.Folder.ParentId == fid : tabFolders.Contains(r.Folder.Id) && (r.Folder.ParentId is not { } p || !tabFolders.Contains(p))).ToList();
         crumbs = new();
         for (var cur = currentRow; cur != null && crumbs.Count < FolderAccess.MaxDepth; cur = cur.Folder.ParentId is { } p ? folderRows.FirstOrDefault(r => r.Folder.Id == p) : null)
             crumbs.Insert(0, cur);
@@ -665,7 +666,7 @@ else
                         <button type="button" role="menuitem" @onclick="() => StartRename(it.Id, it.Name, false)"><Ico Name="pencil-square" Size="16" /> Renommer…</button>
                     }
                     @if (canWrite) { <button type="button" role="menuitem" @onclick="() => Duplicate(it)"><Ico Name="copy" Size="16" /> Dupliquer</button> }
-                    @if (r >= FolderRight.Write) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; compMove = new() { (it.Id, it.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
+                    @if (Modes.Expert && r >= FolderRight.Write) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; compMove = new() { (it.Id, it.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
                     @if (multi && r == FolderRight.Owner) { <button type="button" role="menuitem" @onclick="() => Share(ShareKind.Composition, it.Id, it.Name)"><Ico Name="share" Size="16" /> Partager…</button> }
                     @if (canWrite) { <button type="button" role="menuitem" @onclick="() => SaveAsTemplate(it)"><Ico Name="grid" Size="16" /> Enregistrer comme modèle</button> }
                     @if (tab == LibraryTab.Shared && tabs.GetValueOrDefault(it.Id)?.SharedIn == true) { <button type="button" role="menuitem" class="danger" @onclick="() => Leave(ShareKind.Composition, it.Id, it.Name)"><Ico Name="eye-off" Size="16" /> Ne plus voir</button> }
@@ -744,7 +745,7 @@ else
     private record TabItem(string Key, string Label, int Count);
 
     // Position ouverte : à la racine d'un onglet, ses compositions hors de ses dossiers ; dans un dossier, tout ce qu'il contient
-    private List<MediaItem> Shown => (folderId == null ? scopeItems.Where(m => m.FolderId is not { } f || !tabFolders.Contains(f)) : items.Where(m => m.FolderId == folderId)).ToList();
+    private List<MediaItem> Shown => Modes.Simple ? scopeItems : (folderId == null ? scopeItems.Where(m => m.FolderId is not { } f || !tabFolders.Contains(f)) : items.Where(m => m.FolderId == folderId)).ToList();
     private List<CompositionTemplate> MyTemplates => templates.Where(t => !tplTabs.TryGetValue(t.Id, out var i) || readAll || LibraryTab.IsMine(i, me, isAdmin)).ToList();
     private List<CompositionTemplate> SharedTemplates => readAll ? new() : templates.Where(t => tplTabs.TryGetValue(t.Id, out var i) && LibraryTab.InTab(LibraryTab.Shared, i, me, isAdmin)).ToList();
     private List<CompositionTemplate> ShownTemplates => sub == "shared" ? SharedTemplates : MyTemplates;

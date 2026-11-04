@@ -1,7 +1,10 @@
 ﻿@using Microsoft.JSInterop
 @inject IJSRuntime JS
+@inject ModeService Modes
 
 @* Choix d'affichage cartes / liste (et arborescence sur la page Écrans), mémorisé dans le navigateur (une clé par page). Masqué sur mobile : cartes uniquement. *@
+@if (Modes.Expert)
+{
 <div class="view-toggle" role="group" aria-label="Affichage">
     <button type="button" class="@(Value == "cards" ? "on" : "")" aria-pressed="@(Value == "cards" ? "true" : "false")" title="Cartes" @onclick='() => Set("cards")'><Ico Name="grid" Size="16" /><span class="sr-only">Cartes</span></button>
     @if (Photos)
@@ -14,6 +17,7 @@
         <button type="button" class="@(Value == "tree" ? "on" : "")" aria-pressed="@(Value == "tree" ? "true" : "false")" title="Arborescence : par aire et par zone" @onclick='() => Set("tree")'><Ico Name="tree" Size="16" /><span class="sr-only">Arborescence</span></button>
     }
 </div>
+}
 
 @code {
     [Parameter, EditorRequired] public string StorageKey { get; set; } = "";
@@ -27,6 +31,8 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
+        // mode simple : cartes seulement, le choix est masqué (le choix mémorisé revient en mode expert)
+        if (Modes.Simple) { if (Value != "cards") await ValueChanged.InvokeAsync("cards"); return; }
         string? saved = null;
         try { saved = await JS.InvokeAsync<string?>("linkiiPrefs.get", "view-" + StorageKey); } catch (JSException) { } catch (InvalidOperationException) { }
         if (saved is "photos" && !Photos || saved is "tree" && !Tree) saved = null;

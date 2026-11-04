@@ -6,6 +6,7 @@
 @inject NavigationManager Nav
 @inject Toaster Toast
 @inject MediaLibrary MediaLib
+@inject ModeService Modes
 @using Microsoft.JSInterop
 @implements IDisposable
 
@@ -24,13 +25,55 @@
     <div class="pf" @ref="flowRoot">
         @if (!readOnlyHere)
         {
-            @* Apps activées (hors widgets d'écran) : on les glisse dans le fil, ou un clic les ajoute à la fin, à vide ; le contenu se complète ensuite. *@
+            @* « Ajouter au fil » en deux onglets (maquette liste-diffusion-tiroir-simple.html, §175) :
+               Médias : les images et vidéos de la médiathèque, ajoutées comme « Image » ou « Vidéo » ; Intégrations : les apps activées (hors widgets d'écran), à vide.
+               On les glisse dans le fil, ou un clic les ajoute à la fin. *@
             <aside class="pf-apps" aria-label="Ajouter au fil">
                 <div class="pf-apps-h">
                     <h3>Ajouter au fil</h3>
-                    <p>Glissez une app dans le fil, ou cliquez pour l'ajouter à la fin.</p>
-                    <label class="search-box"><Ico Name="search" Size="16" /><input placeholder="Rechercher une app" aria-label="Rechercher une app" @bind="appSearch" @bind:event="oninput" /></label>
+                    <p>Glissez un média ou une app dans le fil, ou cliquez pour l'ajouter à la fin.</p>
+                    <div class="pf-tabs" role="tablist" aria-label="Ajouter au fil">
+                        <button type="button" role="tab" aria-selected="@(pickTab == "media" ? "true" : "false")" class="@(pickTab == "media" ? "on" : "")" @onclick='() => pickTab = "media"'><Ico Name="images" Size="15" /> Médias <span class="c">@pickFiles.Count</span></button>
+                        <button type="button" role="tab" aria-selected="@(pickTab == "apps" ? "true" : "false")" class="@(pickTab == "apps" ? "on" : "")" @onclick='() => pickTab = "apps"'><Ico Name="grid" Size="15" /> Intégrations <span class="c">@enabledApps.Count</span></button>
+                    </div>
+                    @if (pickTab == "media")
+                    {
+                        <label class="search-box"><Ico Name="search" Size="16" /><input placeholder="Rechercher un média" aria-label="Rechercher un média" @bind="medSearch" @bind:event="oninput" /></label>
+                        <div class="pf-chips" role="group" aria-label="Type de média">
+                            <button type="button" class="@(medKind == "" ? "on" : "")" @onclick='() => medKind = ""'>Tous</button>
+                            <button type="button" class="@(medKind == "image" ? "on" : "")" @onclick='() => medKind = "image"'>Images</button>
+                            <button type="button" class="@(medKind == "video" ? "on" : "")" @onclick='() => medKind = "video"'>Vidéos</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <label class="search-box"><Ico Name="search" Size="16" /><input placeholder="Rechercher une app" aria-label="Rechercher une app" @bind="appSearch" @bind:event="oninput" /></label>
+                    }
                 </div>
+                @if (pickTab == "media")
+                {
+                    <div class="pf-apps-l pf-meds">
+                        @if (pickFiles.Count == 0)
+                        {
+                            <p class="hint">Aucune image ni vidéo dans la médiathèque. <a href="/media">Importez-en dans Contenus</a>.</p>
+                        }
+                        else if (!PickerFiles.Any())
+                        {
+                            <p class="hint">Aucun média trouvé.</p>
+                        }
+                        @foreach (var f in PickerFiles)
+                        {
+                            var file = f;
+                            <button type="button" class="pf-med" draggable="true" data-med="@file.Id" title="Ajouter « @file.Name » à la fin" @onclick="() => AddMedia(file, null)">
+                                <span class="pf-med-th"><MediaThumb Media="file" All="media" /><span class="pf-med-ty"><AppIcon Id="@(file.Type == "video" ? "video" : "image")" Small="true" /></span></span>
+                                <span class="pf-med-tx"><b>@file.Name</b><small>@MediaMeta(file)</small></span>
+                                <span class="pf-med-add" aria-hidden="true"><Ico Name="plus" Size="14" /></span>
+                            </button>
+                        }
+                    </div>
+                }
+                else
+                {
                 <div class="pf-apps-l">
                     @if (enabledApps.Count == 0)
                     {
@@ -49,7 +92,9 @@
                     }
                     @if (enabledApps.Count > 0 && !PickerApps.Any()) { <p class="hint">Aucune app trouvée.</p> }
                 </div>
-                <div class="pf-apps-f"><a href="/integrations">Toutes les intégrations…</a></div>
+                @* mode simple : pas de lien vers la page Intégrations *@
+                @if (Modes.Expert) { <div class="pf-apps-f"><a href="/integrations">Toutes les intégrations…</a></div> }
+                }
             </aside>
         }
 
@@ -74,17 +119,21 @@
                     <p class="sub">@active contenu@(active > 1 ? "s" : "")@(total > 0 ? $" · boucle de {Helpers.FormatDuration(total)}" : "")</p>
                     @if (outside > 0) { <p class="sub" role="note"><Ico Name="monitor" Size="14" /> Cette liste est aussi diffusée sur @outside écran@(outside > 1 ? "s" : "") hors de votre périmètre : vos modifications les concerneront à leur prochaine publication.</p> }
                 </div>
-                @if (pl.Draft.Count > 0) { <button type="button" class="btn ghost" @onclick="() => trying = true"><Ico Name="play" Size="16" /> Essayer sur…</button> }
+                @if (pl.Draft.Count > 0) { <button type="button" class="btn ghost" title="Voir la liste sur un écran ou un mur, sans rien publier" @onclick="() => trying = true"><Ico Name="play" Size="16" /> Aperçu</button> }
             </div>
 
             @* Frise de la boucle : chaque contenu diffusé y prend une place proportionnelle à sa durée *@
             <div class="pf-strip-wrap">
                 <div class="pf-strip-top">
                     <span class="lbl">Une boucle dure <b>@Helpers.FormatDuration(total)</b> puis recommence au contenu 1</span>
-                    <div class="pf-seg" role="group" aria-label="Affichage du fil">
-                        <button type="button" class="@(view == "lines" ? "on" : "")" aria-pressed="@(view == "lines" ? "true" : "false")" @onclick='() => SetView("lines")'><Ico Name="menu" Size="14" /> Lignes</button>
-                        <button type="button" class="@(view == "cards" ? "on" : "")" aria-pressed="@(view == "cards" ? "true" : "false")" @onclick='() => SetView("cards")'><Ico Name="grid" Size="14" /> Cartes</button>
-                    </div>
+                    @* mode simple : vue Lignes seulement, sans choix *@
+                    @if (Modes.Expert)
+                    {
+                        <div class="pf-seg" role="group" aria-label="Affichage du fil">
+                            <button type="button" class="@(view == "lines" ? "on" : "")" aria-pressed="@(view == "lines" ? "true" : "false")" @onclick='() => SetView("lines")'><Ico Name="menu" Size="14" /> Lignes</button>
+                            <button type="button" class="@(view == "cards" ? "on" : "")" aria-pressed="@(view == "cards" ? "true" : "false")" @onclick='() => SetView("cards")'><Ico Name="grid" Size="14" /> Cartes</button>
+                        </div>
+                    }
                 </div>
                 <div class="pf-strip">
                     @foreach (var r in rows.Where(r => r.Plays))
@@ -104,13 +153,15 @@
                         @if (view == "lines")
                         {
                             <div class="pf-rail"><span class="pf-num">@row.Num</span>@if (row.When.Length > 0) { <span class="t">@row.When</span> }</div>
-                            <div class="pf-it">
+                            <div class="pf-it @(Modes.Simple ? "simple" : "")">
                                 <span class="h" aria-hidden="true"><Ico Name="grip" Size="16" /></span>
                                 @Thumb(row)
                                 @Info(row)
-                                @if (ScanOn(row)) { @Scan(row) } else { <span class="pf-scan none" aria-hidden="true">—</span> }
-                                <div class="pf-dur">@Dur(row)<small>durée</small></div>
-                                @Kebab(row)
+                                @if (Modes.Expert && ScanOn(row)) { @Scan(row) }
+                                else if (Modes.Expert) { <span class="pf-scan none" aria-hidden="true">—</span> }
+                                <div class="pf-dur">@Dur(row)<small>durée</small>@if (Modes.Simple) { @Steps(row) }</div>
+                                @* mode simple : pas de menu ⋮, les actions sont sur la carte (nom, durée, programmer, retirer) *@
+                                @if (Modes.Expert) { @Kebab(row) } else { @SimpleActions(row) }
                             </div>
                         }
                         else
@@ -140,7 +191,7 @@
                     {
                         <div class="pf-u pf-end-row">
                             <div class="pf-rail"><span class="pf-loop"><Ico Name="refresh" Size="16" /></span><span class="t">@Helpers.FormatDuration(total)</span></div>
-                            <div class="pf-end"><Ico Name="plus" Size="16" /> @(pl.Draft.Count == 0 ? "Glissez une app ici pour commencer la liste de lecture" : "Glissez une app ici pour l'ajouter à la fin · ensuite la boucle recommence au contenu 1")</div>
+                            <div class="pf-end"><Ico Name="plus" Size="16" /> @(pl.Draft.Count == 0 ? "Glissez un média ou une app ici pour commencer la liste de lecture" : "Glissez un média ou une app ici pour l'ajouter à la fin · ensuite la boucle recommence au contenu 1")</div>
                         </div>
                     }
                     else
@@ -429,6 +480,44 @@ else
     private string? flowInitId;
     private DotNetObjectReference<PlaylistEditor>? selfRef;
 
+    // ---------- Onglet « Médias » : images et vidéos de la médiathèque, ajoutées comme contenus « Image » ou « Vidéo » ----------
+    private string pickTab = "media", medSearch = "", medKind = "";
+    private List<MediaItem> pickFiles = new();
+    private IEnumerable<MediaItem> PickerFiles => pickFiles
+        .Where(m => medKind.Length == 0 || m.Type == medKind)
+        .Where(m => medSearch.Length == 0 || m.Name.Contains(medSearch, StringComparison.OrdinalIgnoreCase));
+
+    private static string MediaMeta(MediaItem m) =>
+        (m.Type == "video" ? "Vidéo" : "Image")
+        + (m.Type == "video" && Helpers.VideoSeconds(m) is { } vs ? $" · {Helpers.FormatDuration(vs)}" : m.Width is { } w && m.Height is { } h ? $" · {w} × {h}" : "");
+
+    /// <summary>Ajoute un fichier de la médiathèque au fil (à la position donnée, par défaut à la fin), comme un contenu « Image » ou « Vidéo » déjà rempli.</summary>
+    private void AddMedia(MediaItem file, int? position)
+    {
+        if (Current is not { } pl) return;
+        var appId = file.Type == "video" ? "video" : "image";
+        if (!enabledApps.Any(a => a.Id == appId)) { Toast.Error($"L'intégration « {(appId == "video" ? "Vidéo" : "Image")} » n'est pas disponible."); return; }
+        if (Svc.CreateFromMedia(file) is not { } item) { Toast.Error("Ce média ne peut pas être ajouté."); return; }
+        var dur = file.Type == "video" ? Helpers.VideoSeconds(file) ?? 30 : Store.Read(d => d.Tenant.DefaultDurationSec);
+        var at = position is { } i && i >= 0 && i < pl.Draft.Count ? i : pl.Draft.Count;
+        var row = new PlaylistItem { MediaId = item.Id, DurationSec = dur, DurationMode = "fixed", Placement = "full" };
+        WriteList(d =>
+        {
+            pl.Draft.Insert(at, row);
+            pl.Touch();
+        });
+        Toast.Ok($"« {file.Name} » ajouté comme {(appId == "video" ? "vidéo" : "image")} en position {at + 1}.");
+        Reload();
+        Flash(row.Id);
+    }
+
+    [JSInvokable]
+    public Task DropMedia(string id, int at)
+    {
+        if (Guid.TryParse(id, out var g) && pickFiles.FirstOrDefault(m => m.Id == g) is { } file) AddMedia(file, at);
+        return InvokeAsync(StateHasChanged);
+    }
+
     [JSInvokable]
     public Task DropApp(string appId, int at)
     {
@@ -538,13 +627,18 @@ else
                     <button type="button" class="btn ghost sm" @onclick="() => renameFor = null">Annuler</button>
                 </div>
             }
+            else if (Modes.Simple && !readOnlyHere && r.M?.AppId != null)
+            {
+                @* mode simple : un clic sur le nom le renomme sur place *@
+                <button type="button" class="nm pf-nm-ed" title="Cliquer pour renommer" @onclick="() => StartItemRename(r.It, r.M)">@r.M.Name<Ico Name="edit" Size="14" /></button>
+            }
             else
             {
                 <b class="nm" title="@r.M?.Name">@(r.M?.Name ?? "(supprimé)")</b>
             }
             @if (r.Chip is { } chip && !r.Masked && r.M != null)
             {
-                <button type="button" class="pf-win @chip.Css" title="Ouvrir la programmation du contenu" @onclick="() => OpenProgramming(r)">@chip.Text</button>
+                <button type="button" class="pf-win @chip.Css" title="Ouvrir la programmation du contenu" @onclick="() => ChipClick(r)">@chip.Text</button>
             }
             @if (!r.Masked && r.M != null && Current is { } pl)
             {
@@ -607,6 +701,118 @@ else
                 </div>
             }
         </div>;
+
+    // ---------- Mode simple : actions sur la carte du fil (maquette liste-diffusion-tiroir-simple.html, §175) ----------
+    // Durée : − / + de 5 secondes au survol ; Programmer : période de diffusion dans une petite fenêtre ; Retirer : corbeille, avec « Annuler ».
+    // pastille de période : en mode simple elle ouvre la petite fenêtre « Programmer » de la carte, en expert l'onglet Programmation
+    private void ChipClick(FlowRow r) { if (Modes.Simple && !readOnlyHere) OpenSched(r.It); else OpenProgramming(r); }
+
+    private bool StepsOn(FlowRow r) => !r.Masked && r.M != null && r.It.Placement == "full" && !readOnlyHere && durFor != r.It;
+
+    private RenderFragment Steps(FlowRow r) =>
+        @<span class="pf-steps">@if (StepsOn(r))
+        {
+            <button type="button" title="5 secondes de moins" aria-label="5 secondes de moins" @onclick="() => StepDur(r, -5)">−</button>
+            <button type="button" title="5 secondes de plus" aria-label="5 secondes de plus" @onclick="() => StepDur(r, 5)">+</button>
+        }</span>;
+
+    private RenderFragment SimpleActions(FlowRow r) =>
+        @<div class="pf-acts">
+            @if (!r.Masked && r.M != null && !readOnlyHere && Current is { } pl)
+            {
+                var set = r.It.StartsAt != null || r.It.EndsAt != null;
+                <button type="button" class="pf-act @(set ? "set" : "") @(schedFor == r.It ? "on" : "")" title="Programmer : période de diffusion" aria-label="Programmer" aria-expanded="@(schedFor == r.It ? "true" : "false")" @onclick="() => { if (schedFor == r.It) schedFor = null; else OpenSched(r.It); }"><Ico Name="calendar" Size="18" /></button>
+                <button type="button" class="pf-act del" title="Retirer de la liste" aria-label="Retirer de la liste" @onclick="() => RemoveWithUndo(pl, r.It)"><Ico Name="trash" Size="18" /></button>
+                @if (schedFor == r.It)
+                {
+                    <div class="kebab-backdrop" @onclick="() => schedFor = null"></div>
+                    <div class="pf-sched" role="dialog" aria-label="Période de diffusion">
+                        <h4>Période de diffusion</h4>
+                        <div class="ci-seg" role="radiogroup" aria-label="Période de diffusion">
+                            <button type="button" role="radio" aria-checked="@(sOn ? "false" : "true")" class="@(sOn ? "" : "on")" @onclick="() => sOn = false">Toujours</button>
+                            <button type="button" role="radio" aria-checked="@(sOn ? "true" : "false")" class="@(sOn ? "on" : "")" @onclick="() => sOn = true">Entre deux dates</button>
+                        </div>
+                        @if (sOn)
+                        {
+                            <div class="pf-sched-d">
+                                <label>Du<input type="date" aria-label="Date de début" value="@sFrom" @onchange='e => sFrom = e.Value?.ToString() ?? ""' /></label>
+                                <label>Au<input type="date" aria-label="Date de fin" value="@sTo" @onchange='e => sTo = e.Value?.ToString() ?? ""' /></label>
+                            </div>
+                            <p class="hint">En dehors de ces dates, le contenu est sauté : la boucle continue sans lui. Laissez un champ vide pour ne pas limiter de ce côté.</p>
+                        }
+                        else { <p class="hint">Le contenu passe à chaque boucle, sans limite de dates.</p> }
+                        <div class="pf-sched-f">
+                            <button type="button" class="btn ghost sm" @onclick="() => schedFor = null">Annuler</button>
+                            <button type="button" class="btn sm" @onclick="() => SaveSched(pl)">Valider</button>
+                        </div>
+                    </div>
+                }
+            }
+        </div>;
+
+    private void StepDur(FlowRow r, int delta)
+    {
+        if (Current is not { } pl || r.M == null) return;
+        var it = r.It;
+        var cur = Helpers.ItemSeconds(it, r.M, Svc.Find(r.M.AppId), media);
+        var secs = Math.Clamp(cur + delta, 1, 86400);
+        var content = ContentDuration(r.M);
+        WriteList(d =>
+        {
+            it.DurationSec = secs;
+            if (content) it.DurationMode = "fixed";
+            pl.Touch();
+        });
+        Reload();
+    }
+
+    // Programmer (mode simple) : dates seulement ; l'heure déjà réglée en mode expert est gardée
+    private PlaylistItem? schedFor;
+    private bool sOn;
+    private string sFrom = "", sTo = "", sFromTime = "", sToTime = "";
+
+    private void OpenSched(PlaylistItem it)
+    {
+        menuFor = null; durFor = null; renameFor = null;
+        schedFor = it;
+        sOn = it.StartsAt != null || it.EndsAt != null;
+        (sFrom, sFromTime) = SplitWindow(it.StartsAt);
+        (sTo, sToTime) = SplitWindow(it.EndsAt);
+        if (!sOn) { sFrom = ContentWindow.NowIso(zone)[..10]; sTo = ""; }
+    }
+
+    private void SaveSched(Playlist pl)
+    {
+        if (schedFor is not { } it) return;
+        var from = sOn ? WindowOf(sFrom, sFromTime, "00:00") : null;
+        var to = sOn ? WindowOf(sTo, sToTime, "23:59") : null;
+        if (sOn && from == null && to == null) { Toast.Error("Renseignez au moins une date, ou choisissez « Toujours »."); return; }
+        if (!ContentWindow.Valid(from, to, out var error)) { Toast.Error(error ?? "Période invalide."); return; }
+        WriteList(d => { it.StartsAt = from; it.EndsAt = to; pl.Touch(); });
+        schedFor = null;
+        Toast.Ok(from == null && to == null ? "Diffusé sans limite de dates."
+            : from != null && to != null ? $"Programmé du {ContentWindow.Long(from)} au {ContentWindow.Long(to)}."
+            : from != null ? $"Programmé à partir du {ContentWindow.Long(from)}." : $"Programmé jusqu'au {ContentWindow.Long(to!)}.");
+        Reload();
+    }
+
+    // Retirer (mode simple) : tout de suite, avec « Annuler » dans le message
+    private void RemoveWithUndo(Playlist pl, PlaylistItem it)
+    {
+        var at = pl.Draft.IndexOf(it);
+        if (at < 0) return;
+        var name = media.FirstOrDefault(x => x.Id == it.MediaId)?.Name ?? "Contenu";
+        WriteList(d => { pl.Draft.Remove(it); pl.Touch(); });
+        Reload();
+        Toast.Ok($"« {name} » retiré de la liste.", "Annuler", () => InvokeAsync(() =>
+        {
+            if (Current is not { } cur || cur.Draft.Contains(it)) return;
+            WriteList(d => { cur.Draft.Insert(Math.Min(at, cur.Draft.Count), it); cur.Touch(); });
+            Reload();
+            Flash(it.Id);
+            StateHasChanged();
+        }));
+    }
 
     // ---------- Actions du menu ⋮ ----------
     // Dupliquer : le même contenu passe une seconde fois, juste après (QR de comptage : une adresse courte à lui)
@@ -780,7 +986,9 @@ else
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());   // hors vidéos en conversion / en échec
         zone = Store.Read(d => d.Tenant.Timezone);
         hidden = MediaLib.HiddenFileIds();   // fichiers des dossiers non accordés : leurs contenus sont masqués
-        enabledApps = Svc.Installed().Select(i => Svc.Find(i.AppId)).OfType<AppManifest>().Where(a => !a.ScreenWidget && !a.IsFeature).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        // onglet « Médias » : images et vidéos prêtes (ni en conversion ni en échec), les plus récentes d'abord
+        pickFiles = MediaLib.PickableFiles().Where(m => m.Type is "image" or "video" && m.Status == null && !hidden.Contains(m.Id)).OrderByDescending(m => m.AddedUtc).ToList();
+        enabledApps = Svc.Installed().Select(i => Svc.Find(i.AppId)).OfType<AppManifest>().Where(a => !a.ScreenWidget && !a.IsFeature && SimpleMode.Offers(Modes.Expert, a.Id)).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();   // mode simple : intégrations de base seulement
         growth = Store.Read(d => d.Tenant.IsGrowth);
         outside = Store.Read(d => d.Access.Sees is { } sees ? d.Root.Screens.Count(s => s.ClientId == d.ClientId && s.Token != null && !sees(s) && s.ZonePlaylists().Contains(Id)) : 0);
         portraitScreens = Store.Read(d => d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.Token != null && s.ZonePlaylists().Contains(Id)).ToList() is { Count: > 0 } ps && ps.All(s => s.Orientation == "portrait"));
@@ -1042,7 +1250,8 @@ else
         if (focusDur && durFor != null) { focusDur = false; try { await JS.InvokeVoidAsync("linkiiFlow.select", durInput); } catch (JSException) { } }
         if (firstRender)
         {
-            try { if (await JS.InvokeAsync<string?>("linkiiPrefs.get", "pl-flow") is "cards") { view = "cards"; StateHasChanged(); } } catch (JSException) { }
+            // mode simple : toujours en lignes
+            try { if (Modes.Expert && await JS.InvokeAsync<string?>("linkiiPrefs.get", "pl-flow") is "cards") { view = "cards"; StateHasChanged(); } } catch (JSException) { }
         }
         // Le fil n'existe qu'une fois la liste de lecture chargée ; le script ignore un second appel sur le même élément.
         if (flowRoot.Context != null && flowRoot.Id != flowInitId)

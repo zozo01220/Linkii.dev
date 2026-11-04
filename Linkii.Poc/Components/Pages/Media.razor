@@ -8,6 +8,7 @@
 @inject TenantStore Store
 @inject Toaster Toast
 @inject IJSRuntime JS
+@inject ModeService Modes
 
 @* Médiathèque épurée (§51) : même squelette que les listes de lecture. Vignettes « galerie » (l'image d'abord), un clic ouvre l'aperçu
    (infos, où le média sert, actions), la case au survol sélectionne. On importe en déposant des fichiers n'importe où sur la page. *@
@@ -49,8 +50,16 @@
             @* Un seul bouton « Ajouter » (maquette mediatheque-import-boutons-page.html) : ordinateur, adresse web, cloud, nouveau dossier.
                Look « app » : le bouton est masqué, le bouton flottant reprend les mêmes choix (sources [data-fab] cachées, cliquées par app-fab.js). *@
             <div class="lx-add">
+                @if (Modes.Simple)
+                {
+                    @* mode simple : ajout depuis l ordinateur seulement, le bouton ouvre directement le choix des fichiers *@
+                    <label for="@FileInputId" class="btn lx-add-btn" role="button" tabindex="0"><Ico Name="plus" Size="16" /> Ajouter</label>
+                }
+                else
+                {
                 <button class="btn lx-add-btn" aria-haspopup="menu" aria-expanded="@(newMenu ? "true" : "false")" @onclick="() => { urlOpen = false; newMenu = !newMenu; }"><Ico Name="plus" Size="16" /> Ajouter <Ico Name="chevron" Size="14" /></button>
-                @if (newMenu)
+                }
+                @if (newMenu && Modes.Expert)
                 {
                     <div class="kebab-backdrop" @onclick="() => newMenu = false"></div>
                     <div class="kebab-menu lx-add-menu" role="menu">
@@ -78,8 +87,11 @@
                 }
                 <span class="lx-fabsrc" aria-hidden="true">
                     <label for="@FileInputId" data-fab="Depuis l'ordinateur"><Ico Name="upload" Size="16" /></label>
-                    <button type="button" tabindex="-1" data-fab="Depuis une adresse web" @onclick="OpenUrl"><Ico Name="link" Size="16" /></button>
-                    <button type="button" tabindex="-1" data-fab="Depuis le cloud" @onclick="OpenCloud"><Ico Name="cloud" Size="16" /></button>
+                    @if (Modes.Expert)
+                    {
+                        <button type="button" tabindex="-1" data-fab="Depuis une adresse web" @onclick="OpenUrl"><Ico Name="link" Size="16" /></button>
+                        <button type="button" tabindex="-1" data-fab="Depuis le cloud" @onclick="OpenCloud"><Ico Name="cloud" Size="16" /></button>
+                    }
                     @if (FoldersShown && CanCreateHere) { <button type="button" tabindex="-1" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /></button> }
                 </span>
             </div>
@@ -776,7 +788,7 @@ else
         _ = SetDrop();
     }
 
-    private bool FoldersShown => foldersOn;   // dossiers visibles en mode simple comme en mode expert
+    private bool FoldersShown => foldersOn && Modes.Expert;   // mode simple : pas de dossiers, tous les médias à plat (les dossiers restent intacts pour le mode expert)
     private FolderRow? currentRow => folderId is { } id ? folderRows.FirstOrDefault(r => r.Folder.Id == id) : null;
     // À la racine de « Partagés avec moi », on n'importe rien (ce qu'on importe est à soi) ; dans un dossier, il faut pouvoir le modifier.
     private bool CanCreateHere => folderId is null ? canCreateRoot && tab != LibraryTab.Shared : currentRow is { } c && c.Right >= FolderRight.Write;

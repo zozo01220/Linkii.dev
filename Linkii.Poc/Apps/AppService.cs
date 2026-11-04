@@ -261,6 +261,28 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         });
     }
 
+    /// <summary>
+    /// Contenu « Image » ou « Vidéo » déjà rempli avec un fichier de la médiathèque (média glissé dans le fil d'une liste de lecture) :
+    /// même instance que celle qu'on obtiendrait en ajoutant l'intégration puis en choisissant le fichier. Null si l'intégration n'est pas utilisable.
+    /// </summary>
+    public MediaItem? CreateFromMedia(MediaItem file)
+    {
+        var appId = file.Type == "video" ? "video" : "image";
+        var m = catalog.Find(appId);
+        if (m == null || file.AppId != null || file.Type is not ("image" or "video")) return null;
+        return store.Write<MediaItem?>(d =>
+        {
+            if (!d.AppInstalls.Any(a => a.AppId == appId) || !d.Access.CanUse(m)) return null;
+            if (!d.Media.Any(x => x.Id == file.Id && x.AppId == null)) return null;   // le fichier doit exister dans la médiathèque de l'organisation
+            var settings = AppCatalog.WithDefaults(m, null);
+            settings["media"] = file.Id.ToString();
+            var name = file.Name.Length > 80 ? file.Name[..80] : file.Name;
+            var item = new MediaItem { Type = "app", AppId = appId, Name = name, AppVersion = m.Version, Settings = settings };
+            d.Media.Add(item);
+            return item;
+        });
+    }
+
     /// <summary>Playlists dont le brouillon contient cette instance.</summary>
     public List<Playlist> PlaylistsUsing(Guid mediaId) => store.Read(d => d.Playlists.Where(p => p.Draft.Any(i => i.MediaId == mediaId)).ToList());
 

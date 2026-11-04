@@ -5,6 +5,7 @@
 @inject InteractiveListLibrary Library
 @inject NavigationManager Nav
 @inject Toaster Toast
+@inject ModeService Modes
 
 @* Listes interactives (§168) : l'environnement tactile des bornes, créé une fois et assigné à une ou plusieurs bornes. Même squelette que les listes de lecture (§51) :
    fil d'Ariane en titre, dossiers (créer, ranger, partager, déplacer), cartes ou tableau, sélection multiple et barre noire d'actions.
@@ -239,7 +240,7 @@ else
             <b>@picked.Count sélectionnée@(picked.Count > 1 ? "s" : "")</b>
             <button type="button" @onclick="ToggleAll">@(AllPicked ? "Tout désélectionner" : $"Tout sélectionner ({Sorted.Count})")</button>
             <span class="vr"></span>
-            <button type="button" disabled="@(editable.Count == 0)" title="@(editable.Count == 0 ? "Aucune liste modifiable dans la sélection" : null)" @onclick="() => listMove = editable"><Ico Name="folder" Size="15" /><span class="lx-lbl">Ranger…</span></button>
+            @if (Modes.Expert) { <button type="button" disabled="@(editable.Count == 0)" title="@(editable.Count == 0 ? "Aucune liste modifiable dans la sélection" : null)" @onclick="() => listMove = editable"><Ico Name="folder" Size="15" /><span class="lx-lbl">Ranger…</span></button> }
             <button type="button" disabled="@(!canWrite)" @onclick="DuplicatePicked"><Ico Name="copy" Size="15" /><span class="lx-lbl">Dupliquer</span></button>
             @if (multi && owned.Count > 0)
             {
@@ -402,7 +403,8 @@ else
     // dossiers de la position ouverte, et chemin jusqu'au dossier ouvert
     private void Rebuild()
     {
-        subfolders = folderRows.Where(r => r.Folder.ParentId == folderId || (folderId == null && r.Folder.ParentId is { } p && folderRows.All(x => x.Folder.Id != p))).ToList();
+        // mode simple : pas de dossiers, toutes les listes à plat (voir Scoped)
+        subfolders = Modes.Simple ? new() : folderRows.Where(r => r.Folder.ParentId == folderId || (folderId == null && r.Folder.ParentId is { } p && folderRows.All(x => x.Folder.Id != p))).ToList();
         crumbs = new();
         for (var cur = currentRow; cur != null && crumbs.Count < FolderAccess.MaxDepth + 1; cur = cur.Folder.ParentId is { } pid ? folderRows.FirstOrDefault(r => r.Folder.Id == pid) : null) crumbs.Insert(0, cur);
     }
@@ -411,7 +413,7 @@ else
     private void OpenFolder(Guid? id) { folderId = id; picked.Clear(); search = ""; menuFor = null; Rebuild(); }
 
     // listes de la position ouverte (à la racine : aussi celles dont le dossier n'est pas visible) ; une recherche porte sur toutes
-    private List<InteractiveList> Scoped => search.Length > 0 ? lists : lists.Where(l => InPosition(l)).ToList();
+    private List<InteractiveList> Scoped => search.Length > 0 || Modes.Simple ? lists : lists.Where(l => InPosition(l)).ToList();
     private bool InPosition(InteractiveList l) => l.FolderId == folderId || (folderId == null && l.FolderId is { } f && folderRows.All(r => r.Folder.Id != f));
 
     private List<InteractiveList> Sorted => Scoped
@@ -422,7 +424,7 @@ else
         .ToList();
 
     private bool CanCreateListHere => canWrite && (folderId == null ? canRoot : currentRow is { } c && c.Right >= FolderRight.Write);
-    private bool CanCreateFolderHere => canWrite && (folderId == null ? canRoot : currentRow is { } c && c.Right >= FolderRight.Write);
+    private bool CanCreateFolderHere => Modes.Expert && canWrite && (folderId == null ? canRoot : currentRow is { } c && c.Right >= FolderRight.Write);
 
     private FolderRight RightOf(InteractiveList l) => rights.GetValueOrDefault(l.Id);
     private bool CanEdit(InteractiveList l) => RightOf(l) >= FolderRight.Write;
@@ -480,7 +482,7 @@ else
                     @if (canEdit) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; renamingList = l; renameValue = l.Name; folderError = null; }"><Ico Name="edit" Size="16" /> Renommer</button> }
                     @if (canWrite) { <button type="button" role="menuitem" @onclick="() => Duplicate(l)"><Ico Name="copy" Size="16" /> Dupliquer</button> }
                     @if (multi && RightOf(l) == FolderRight.Owner) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingKind = ShareKind.IList; sharingItems = new() { (l.Id, l.Name) }; }"><Ico Name="share" Size="16" /> Partager…</button> }
-                    @if (canEdit) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; listMove = new() { (l.Id, l.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
+                    @if (canEdit && Modes.Expert) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; listMove = new() { (l.Id, l.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
                     @if (CanDel(l)) { <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deleting = new() { l }; }"><Ico Name="trash" Size="16" /> Supprimer</button> }
                 </div>
             }

@@ -1,4 +1,4 @@
-/* Fil d'une liste de lecture (§73) : glisser une app de la colonne de gauche dans le fil, ou déplacer un contenu du fil.
+/* Fil d'une liste de lecture (§73) : glisser une app ou un média (§175) de la colonne de gauche dans le fil, ou déplacer un contenu du fil.
    Un trait bleu montre l'endroit du dépôt (au-dessus / au-dessous en vue Lignes, à gauche / à droite en vue Cartes).
    Au lâcher, la page enregistre : DropApp(appId, position) ou MoveItem(de, vers). Le DOM n'est jamais réordonné ici. */
 (function (w, d) {
@@ -24,12 +24,15 @@
 
     root.addEventListener('dragstart', function (e) {
       var ap = e.target.closest && e.target.closest('.pf-app[data-app]');
+      var md = e.target.closest && e.target.closest('.pf-med[data-med]');
       var u = e.target.closest && e.target.closest('.pf-u[data-i][draggable="true"]');
-      if (ap) { drag = { kind: 'app', app: ap.getAttribute('data-app') }; ap.classList.add('dragging'); var f = flow(); if (f) f.classList.add('drag-app'); }
+      // média de l'onglet « Médias » : ajouté comme Image ou Vidéo (DropMedia)
+      if (md) { drag = { kind: 'media', id: md.getAttribute('data-med') }; md.classList.add('dragging'); var fm = flow(); if (fm) fm.classList.add('drag-app'); }
+      else if (ap) { drag = { kind: 'app', app: ap.getAttribute('data-app') }; ap.classList.add('dragging'); var f = flow(); if (f) f.classList.add('drag-app'); }
       else if (u) { drag = { kind: 'item', i: +u.getAttribute('data-i') }; u.classList.add('dragging'); }
       else return;
       e.dataTransfer.setData('text/plain', 'linkii');
-      e.dataTransfer.effectAllowed = drag.kind === 'app' ? 'copy' : 'move';
+      e.dataTransfer.effectAllowed = drag.kind === 'item' ? 'move' : 'copy';
     });
     root.addEventListener('dragend', clear);
 
@@ -59,6 +62,7 @@
       clear();
       if (at == null) return;
       if (dr.kind === 'app') dotnet.invokeMethodAsync('DropApp', dr.app, at);
+      else if (dr.kind === 'media') dotnet.invokeMethodAsync('DropMedia', dr.id, at);
       else if (at !== dr.i && at !== dr.i + 1) dotnet.invokeMethodAsync('MoveItem', dr.i, at);
     });
   }
