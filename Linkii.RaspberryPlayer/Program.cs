@@ -51,7 +51,7 @@ internal static class Program
             "--kiosk", "--noerrdialogs", "--disable-infobars", "--no-first-run", "--disable-session-crashed-bubble",
             "--autoplay-policy=no-user-gesture-required", "--check-for-update-interval=31536000",
             "--disable-features=Translate,TranslateUI", "--password-store=basic", "--ozone-platform-hint=auto",
-            "--disable-pinch", "--overscroll-history-navigation=0", "--disable-translate", "--disable-sync", "--no-default-browser-check",   // poste dédié : aucun geste, aucune proposition du navigateur
+            "--touch-events=enabled", "--disable-pinch", "--overscroll-history-navigation=0", "--disable-translate", "--disable-sync", "--no-default-browser-check",   // poste dédié : aucun geste, aucune proposition du navigateur
             "--disable-component-update", "--disable-background-networking", "--hide-crash-restore-bubble",
             $"--remote-debugging-port={DebugPort}", "--remote-allow-origins=*",
             "--user-data-dir=" + Paths.Profile, "about:blank"

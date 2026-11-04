@@ -1,0 +1,55 @@
+L'outil est prêt : [deploy-players.ps1](deploy-players.ps1), à la racine du projet. Je l'ai seulement lancé en simulation (`-DryRun`) : il calcule bien les versions et affiche ce qu'il copierait, sans rien modifier. Il n'a pas encore compilé ni copié de vrai installeur. Aucun fichier de version n'a changé.
+
+**Ce qu'il fait pour chaque player**
+1. Il augmente la version : Windows dans le `.csproj` et `build-installer.ps1`, Android dans `build.gradle.kts` (avec le `versionCode`), Pi dans son `.csproj`.
+2. Il compile en réutilisant les scripts existants pour Windows et le Pi, et `gradlew` pour Android. Si aucun JDK 17 n'est installé, il prend celui d'Android Studio.
+3. Il copie l'installeur sur le serveur dans le dossier `downloads` : le fichier est envoyé sous un nom temporaire, renommé, puis il remplace les anciennes versions du même player.
+4. Si une compilation échoue, la version de ce player revient comme avant et rien n'est publié.
+
+Il n'y a pas de commit automatique.
+
+**Utilisation**
+```bash
+.\deploy-players.ps1
+```
+Sans option : les trois players, version corrective +1. D'après la simulation, ce serait Windows 0.3.1 → 0.3.2, Android 1.3.5 → 1.3.6 (code 9 → 10), Pi 0.1.0 → 0.1.1.
+
+Options utiles :
+- `-Targets windows,pi` : seulement ces players.
+- `-Bump minor` : 0.3.1 → 0.4.0 (aussi `major` ou `none`).
+- `-WindowsVersion 0.4.0` : imposer la version d'un player (`-AndroidVersion`, `-PiVersion`).
+- `-BuildOnly` : compiler sans copier.
+- `-DeployOnly` : copier les derniers installeurs déjà compilés.
+- `-DryRun` : simuler.
+- `-Server` et `-RemoteDir` : choisir un autre serveur ou dossier.
+
+**Ce que j'ai supposé**
+- Le serveur par défaut est `root@192.168.1.249` et le dossier `/var/lib/linkii/downloads`. Ce sont les valeurs de `deploy-apk.ps1` et de la note de déploiement Windows, pas celles que tu m'avais données. Si ton serveur est autre, passe `-Server` ou dis-le-moi et je change le défaut.
+- L'APK déployé est celui de debug, comme dans `deploy-apk.ps1` : l'outil ne produit pas de version « release ».
+- Il faut que `ssh` et `scp` marchent déjà depuis ce PC, avec une clé qui évite le mot de passe à chaque copie.
+
+Je peux lancer un vrai déploiement des trois players si tu veux.
+
+Installation RPI
+pkill -x linkivi-pi; pkill chromium; sleep 2
+curl -fL -o linkivi-pi.tar.gz https://linkivi.duckdns.org/download/linux
+tar -xzf linkivi-pi.tar.gz && cd linkivi-pi-[numero_version]
+bash install.sh --keyboard ch
+sudo reboot
+
+Installation Android
+Aller sur la page de login https://linkivi.duckdns.org/ et télécharger le nouvel APK
+
+Installation Windows
+Aller sur la page de login https://linkivi.duckdns.org/ et télécharger le nouvel EXE
+
+Installation Android TV
+Depuis Powershell :
+Connection
+$adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
+& $adb connect 192.168.1.XXX:5555
+Installation
+& $adb -s 192.168.1.XXX:5555 install -r "C:\DEV\En-cours\Linkii\Linkii.AndroidPlayer\app\build\outputs\apk\debug\Linkivi-1.3.6-debug.apk"
+Démarrer l'app
+& $adb -s 192.168.1.XXX:5555 shell monkey -p ch.linkii.player -c android.intent.category.LAUNCHER 1
+

@@ -16,7 +16,7 @@
 @* Éditeur de compositions (DEV-POC.md §80, §84, §85) : l'interface est en JS (wwwroot/compo-editor.js, plein écran), le serveur garde le document,
    calcule les QR codes, liste et importe les images de la médiathèque, garde « Mes modèles », et lit les données des sources (blocs, champs reliés). Le rendu des calques est celui du player (player/composition.js).
    « /compositions/new » : rien n'est créé tant qu'on n'a pas enregistré (pas de composition vide laissée derrière soi). *@
-<HeadContent><link rel="stylesheet" href="compo-editor.css?v=11" /></HeadContent>
+<HeadContent><link rel="stylesheet" href="compo-editor.css?v=13" /></HeadContent>
 
 @if (!ready)
 {
@@ -92,6 +92,7 @@ else
             ds = Ds,
             myTemplates = Templates(),
             sources = Sources(),
+            screens = ScreenChoices(),   // « Nouvelle composition » : écran concerné, sa résolution et son orientation
             expert = Modes.Expert,   // menus Données et Graphiques : mode expert seulement
             canImport = Store.Read(d => d.Access.CanWrite(LevelPages.Media)),
             canEditData = Store.Read(d => d.Access.IsOrgAdmin)   // nom lisible et masquage des champs d'un jeu : comme la gestion des sources de données
@@ -130,6 +131,25 @@ else
         }
         catch (UnauthorizedAccessException) { }
     }
+
+    // ---------- Écrans existants (fenêtre « Nouvelle composition ») ----------
+
+    /// <summary>Écrans connectés avec leur taille dans leur orientation (largeur W, hauteur H). Sans résolution connue : 1920 × 1080, l'orientation est appliquée quand même.</summary>
+    private List<object> ScreenChoices() => Store.Read(d =>
+    {
+        var areas = d.Areas.ToList();
+        return d.AllScreens.Where(s => s.Token != null).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).Take(200).Select(s =>
+        {
+            var p = (s.Resolution ?? "").Split('x');
+            var known = p.Length == 2 && int.TryParse(p[0], out var a) && int.TryParse(p[1], out var b) && a > 0 && b > 0;
+            var (x, y) = known ? (int.Parse(p[0]), int.Parse(p[1])) : (1920, 1080);
+            var (big, small) = (Math.Max(x, y), Math.Min(x, y));
+            var portrait = s.Orientation == "portrait";
+            var area = areas.FirstOrDefault(r => r.Id == s.AreaId);
+            var zone = area?.Zones.FirstOrDefault(z => z.Id == s.ZoneId)?.Name;
+            return (object)new { id = s.Id.ToString("N"), name = s.Name, place = string.Join(" › ", new[] { area?.Name, zone }.Where(n => !string.IsNullOrWhiteSpace(n))), w = portrait ? small : big, h = portrait ? big : small, def = !known };
+        }).ToList();
+    });
 
     // ---------- Mes modèles ----------
 

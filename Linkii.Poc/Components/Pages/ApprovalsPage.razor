@@ -180,12 +180,17 @@ else
 
     protected override void OnParametersSet()
     {
-        if (Guid.TryParse(R, out var id) && rows.Any(r => r.Id == id) && openId != id) { openId = id; refusing = false; comment = ""; error = null; }
+        if (Guid.TryParse(R, out var id) && rows.Any(r => r.Id == id) && openId != id) { openId = id; refusing = false; comment = ""; error = null; Seen(id); }
+    }
+
+    /// <summary>L'auteur ouvre une demande décidée : son bandeau de la page Écrans disparaît.</summary>
+    private void Seen(Guid id)
+    {
+        if (rows.FirstOrDefault(r => r.Id == id) is { Open: false, AuthorSeenUtc: null } r && r.AuthorId == me) Service.MarkSeen(Store.ClientId, id, me);
     }
 
     private void Load()
-    {
-        (active, involved, admin, me, tz, reminderHours, rows, deciderOf, zoneOfRequest, zones, allMedia, scopeText) = Store.Read(d =>
+    {        (active, involved, admin, me, tz, reminderHours, rows, deciderOf, zoneOfRequest, zones, allMedia, scopeText) = Store.Read(d =>
         {
             var t = d.Tenant;
             var isAdmin = d.Access.IsOrgAdmin;
@@ -258,7 +263,7 @@ else
 
     private void Open(Guid id)
     {
-        openId = id; refusing = false; refuseError = false; comment = ""; error = null;
+        openId = id; refusing = false; refuseError = false; comment = ""; error = null; Seen(id);
         Nav.NavigateTo("approvals?r=" + id.ToString("N"), replace: true);
     }
 

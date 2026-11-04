@@ -225,7 +225,7 @@
       ax = c / n; ay = d / n;
     }
     sc.addEventListener('pointerdown', function (e) {
-      if (e.pointerType === 'mouse') return;
+      if (e.pointerType === 'mouse' && !window.LinkiiNative) return;   // dans une coquille (Raspberry…) un écran tactile peut être vu comme une souris : le glissement fait défiler aussi
       if (momentum) { cancelAnimationFrame(momentum); momentum = null; }
       axis(); id = e.pointerId; x0 = lx = e.clientX; y0 = ly = e.clientY; s0 = sc.scrollTop; moved = false; v = 0; lt = e.timeStamp;
     });

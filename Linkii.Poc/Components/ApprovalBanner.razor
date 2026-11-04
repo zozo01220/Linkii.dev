@@ -1,5 +1,6 @@
 @inject TenantStore Store
 @inject JsonStore Root
+@inject ApprovalService Service
 @implements IDisposable
 
 @* Bandeau de l'auteur sur la page Écrans (§162, maquette approbation-publications.html, scène 2) : ses demandes en attente (l'écran garde sa version),
@@ -19,7 +20,8 @@
         <Ico Name="x" Size="20" />
         <div class="tx"><b>Demande refusée par @r.DecidedByName : @r.Title</b>
             @if (!string.IsNullOrWhiteSpace(r.Comment)) { <small>« @r.Comment »</small> }</div>
-        <a class="btn sm" href="approvals?r=@r.Id.ToString("N")">Voir</a>
+        <a class="btn sm" href="approvals?r=@r.Id.ToString("N")" @onclick="() => Seen(r)">Voir</a>
+        <button type="button" class="kebab-btn" title="Fermer" aria-label="Fermer" @onclick="() => Seen(r)"><Ico Name="x" Size="16" /></button>
     </div>
 }
 
@@ -41,8 +43,14 @@
             var mine = d.Root.ApprovalRequests.Where(r => r.ClientId == d.ClientId && r.AuthorId == me).ToList();
             var since = DateTime.UtcNow.AddDays(-3);
             return (mine.Where(r => r.Open).OrderBy(r => r.CreatedUtc).ToList(),
-                mine.Where(r => r.Status == ApprovalStatus.Refused && r.DecidedUtc >= since).OrderByDescending(r => r.DecidedUtc).Take(2).ToList());
+                mine.Where(r => r.Status == ApprovalStatus.Refused && r.AuthorSeenUtc == null && r.DecidedUtc >= since).OrderByDescending(r => r.DecidedUtc).Take(2).ToList());
         });
+    }
+
+    private void Seen(ApprovalRequest r)
+    {
+        if (Store.Read(d => d.Access.UserId) is { } me) Service.MarkSeen(Store.ClientId, r.Id, me);
+        refused.Remove(r);
     }
 
     private void OnChanged() { later?.Dispose(); later = new Timer(_ => InvokeAsync(() => { Load(); StateHasChanged(); }), null, 500, Timeout.Infinite); }

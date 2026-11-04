@@ -1,31 +1,49 @@
 @inject TenantStore Store
 @inject Toaster Toast
+@inject NotificationCenter Center
+@inject TenantContext Ctx
 
 @* « Attribuer… » un écran (administrateur, 24 octobre 2026) : les utilisateurs qui le gèrent. Ceux qui l'ont par sa zone le gardent (on retire la zone
-   dans leur fiche) ; ceux en « Voit tout · lecture seule » le voient déjà. Mêmes données que la fiche membre. *@
-<Sheet Title="@(Multi ? $"Qui gère ces {1 + More.Count} écrans ?" : $"Qui gère « {Screen.Name} » ?")" Sub="@(Multi ? "Les personnes cochées sont ajoutées à chaque écran ; celles qui les gèrent déjà les gardent." : "Enregistré tout de suite : la personne voit l'écran apparaître dans sa page Écrans.")" Class="sm" OnClose="Close">
-    <ChildContent>
-        @if (people.Count == 0)
-        {
-            <p class="hint" style="margin:0">Aucun utilisateur dans l'organisation : seuls les administrateurs gèrent les écrans. Ajoutez un membre dans la page Membres.</p>
-        }
-        @foreach (var p in people)
-        {
-            var row = p;
-            var on = row.ViaZone != null || chosen.Contains(row.User.Id);
-            <div class="og-pr">
-                <button type="button" class="og-ck @(on ? "on" : "") @(row.ViaZone != null || row.ReadAll ? "dim" : "")" aria-pressed="@(on ? "true" : "false")" aria-label="@row.User.Label" disabled="@(row.ViaZone != null || row.ReadAll)" @onclick="() => Toggle(row.User.Id)"></button>
-                <div class="who"><b>@row.User.Label</b><small>@(row.ReadAll ? "voit déjà tous les écrans (lecture seule)" : row.ViaZone != null ? $"par la zone « {row.ViaZone} »" : row.User.Email)</small></div>
-            </div>
-        }
-        @if (error != null) { <div class="err">@error</div> }
-    </ChildContent>
-    <Foot>
+   dans leur fiche) ; ceux en « Voit tout · lecture seule » le voient déjà. Mêmes données que la fiche membre.
+   Même tiroir de droite que le partage des médias (ShareDialog) : on y attribue, et on y retire (case décochée ou « Retirer »). *@
+<div class="modal-backdrop" @onclick="Close"></div>
+<div class="modal app-modal sh-modal" role="dialog" aria-modal="true" aria-labelledby="as-title">
+    <div class="modal-head">
+        <h3 id="as-title">@(Multi ? $"Qui gère ces {1 + More.Count} écrans ?" : $"Qui gère « {Screen.Name} » ?")</h3>
         <span class="grow"></span>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="modal-body sh-body">
+        @if (people.Count > 0)
+        {
+            <div class="search-box sh-search"><Ico Name="search" Size="16" /><input placeholder="Rechercher une personne" aria-label="Rechercher une personne" @bind="query" @bind:event="oninput" /></div>
+        }
+        <div class="sh-list lx-msl">
+            @foreach (var p in people.Where(Match))
+            {
+                var row = p;
+                var fixedRow = row.ViaZone != null || row.ReadAll;
+                var on = row.ViaZone != null || chosen.Contains(row.User.Id);
+                <div class="sh-row lx-msr @(on ? "on" : "")">
+                    <button type="button" class="og-ck @(on ? "on" : "") @(fixedRow ? "dim" : "")" aria-pressed="@(on ? "true" : "false")" aria-label="@row.User.Label" disabled="@fixedRow" @onclick="() => Toggle(row.User.Id)"></button>
+                    <span class="sh-av">@Initials(row.User.Label)</span>
+                    <span class="grow"><b>@row.User.Label</b><small>@(row.ReadAll ? "voit déjà tous les écrans (lecture seule)" : row.ViaZone != null ? $"par la zone « {row.ViaZone} »" : row.User.Email)</small></span>
+                    @if (!Multi && !row.ReadAll && (row.ViaZone != null || saved.Contains(row.User.Id)))
+                    {
+                        <button type="button" class="btn danger sm" title="@(row.ViaZone != null ? "Retirer cet écran à cette personne (elle garde les autres écrans de la zone) : elle en est prévenue" : "Retirer l'écran à cette personne : elle en est prévenue")" @onclick="() => Revoke(row)">Retirer</button>
+                    }
+                </div>
+            }
+            @if (people.Count == 0) { <p class="sh-empty">Aucun utilisateur dans l'organisation : seuls les administrateurs gèrent les écrans. Ajoutez un membre dans la page Membres.</p> }
+        </div>
+        <p class="sh-lead">@(Multi ? "Les personnes cochées sont ajoutées à chaque écran ; celles qui les gèrent déjà les gardent." : "Enregistré tout de suite : la personne voit l'écran apparaître dans sa page Écrans. « Retirer » (ou décocher) lui enlève l'écran : elle en est prévenue. Si elle l'a par une zone, elle garde les autres écrans de la zone.")</p>
+        @if (error != null) { <div class="err">@error</div> }
+    </div>
+    <div class="modal-actions">
         <button type="button" class="btn ghost" @onclick="Close">Annuler</button>
-        <button type="button" class="btn" @onclick="Save">Enregistrer</button>
-    </Foot>
-</Sheet>
+        <button type="button" class="btn btn-share" @onclick="Save"><Ico Name="share" Size="15" /> Enregistrer</button>
+    </div>
+</div>
 
 @code {
     [Parameter, EditorRequired] public Screen Screen { get; set; } = default!;
@@ -36,8 +54,9 @@
 
     private record Row(User User, bool ReadAll, string? ViaZone);
     private List<Row> people = new();
-    private readonly HashSet<Guid> chosen = new();
+    private readonly HashSet<Guid> chosen = new(), saved = new();   // saved : ceux qui gèrent l'écran en base (pour prévenir ceux qui le perdent)
     private string? error;
+    private string query = "";
 
     protected override void OnInitialized()
     {
@@ -48,8 +67,28 @@
                 var r = u.Rights ?? new MemberRights();
                 return new Row(u, PageMode.Clean(r.Screens) == PageMode.Read, !Multi && Screen.ZoneId is { } z && r.ZoneIds.Contains(z) ? zoneName ?? "?" : null);
             }).ToList());
-        if (!Multi) chosen.UnionWith(Store.Read(d => d.Users.Where(u => u.Rights?.ScreenIds.Contains(Screen.Id) == true).Select(u => u.Id).ToList()));
+        if (!Multi) { saved.UnionWith(Store.Read(d => d.Users.Where(u => u.Rights?.ScreenIds.Contains(Screen.Id) == true).Select(u => u.Id).ToList())); chosen.UnionWith(saved); }
     }
+
+    private bool Match(Row r) => query.Length == 0 || r.User.Label.Contains(query, StringComparison.CurrentCultureIgnoreCase) || r.User.Email.Contains(query, StringComparison.CurrentCultureIgnoreCase);
+    private static string Initials(string label) => string.Concat(label.Split(' ', '.', '@').Where(w => w.Length > 0).Take(2).Select(w => char.ToUpperInvariant(w[0])));
+
+    /// <summary>Retire l'écran à une personne tout de suite (sans attendre « Enregistrer ») et la prévient.</summary>
+    private void Revoke(Row row)
+    {
+        var u = row.User;
+        error = Store.Write(d => MemberOps.RevokeScreen(d, Screen.Id, u.Id));
+        if (error != null) return;
+        chosen.Remove(u.Id); saved.Remove(u.Id);
+        var i = people.IndexOf(row);
+        if (i >= 0) people[i] = row with { ViaZone = null };
+        Tell(new[] { u.Id });
+        Toast.Ok($"« {Screen.Name} » retiré à {u.Label}, qui en est prévenu(e).");
+    }
+
+    /// <summary>Notification (cloche) à ceux qui perdent la gestion de l'écran.</summary>
+    private void Tell(IEnumerable<Guid> users) =>
+        Center.Add(Ctx.RequireClientId(), Alerts.Members, Notifs.Warn, $"Vous ne gérez plus « {Screen.Name} »", "Un administrateur vous a retiré cet écran : il n'apparaît plus dans votre page Écrans.", "/", Ctx.UserId, null, null, users);
 
     private void Toggle(Guid id) { if (!chosen.Remove(id)) chosen.Add(id); error = null; }
     private Task Close() => OnClose.InvokeAsync();
@@ -68,6 +107,8 @@
         }
         error = Store.Write(d => MemberOps.AssignScreen(d, Screen.Id, ids));
         if (error != null) return;
+        var lost = saved.Where(id => !chosen.Contains(id)).ToList();
+        if (lost.Count > 0) Tell(lost);
         Toast.Ok(ids.Count == 0 ? $"« {Screen.Name} » n'est plus attribué un à un." : $"« {Screen.Name} » attribué à {ids.Count} personne{(ids.Count > 1 ? "s" : "")}.");
         await OnClose.InvokeAsync();
     }

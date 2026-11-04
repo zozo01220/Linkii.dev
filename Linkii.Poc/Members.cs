@@ -431,6 +431,23 @@ public static class MemberOps
         return null;
     }
 
+    /// <summary>
+    /// Retire un écran à une personne, même s'il lui vient de sa zone : la zone est alors remplacée par ses autres écrans, attribués un à un
+    /// (les écrans ajoutés plus tard à cette zone ne lui viennent plus d'office).
+    /// </summary>
+    public static string? RevokeScreen(ClientDb d, Guid screenId, Guid userId)
+    {
+        if (AdminOnly(d, "retire un écran") is { } e) return e;
+        if (d.Root.Screens.FirstOrDefault(s => s.Id == screenId && s.ClientId == d.ClientId) is not { } screen) return "Écran introuvable.";
+        if (d.Users.FirstOrDefault(u => u.Id == userId && u.Role == Roles.ClientMember) is not { } user) return "Compte introuvable.";
+        var r = user.Rights ??= new MemberRights();
+        r.ScreenIds.Remove(screenId);
+        if (screen.ZoneId is { } z && r.ZoneIds.Remove(z))
+            foreach (var other in d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.ZoneId == z && s.Id != screenId))
+                if (!r.ScreenIds.Contains(other.Id)) r.ScreenIds.Add(other.Id);
+        return null;
+    }
+
     /// <summary>Un utilisateur qui connecte un écran le gère d'office.</summary>
     public static void AdoptScreen(ClientDb d, Guid screenId)
     {

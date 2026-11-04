@@ -150,26 +150,32 @@ public static class Ads
     public static int PendingCount(Db db, Tenant t, DateTime now) => States(db, t, now).Count(x => x.State == AdSpotState.Pending);
 
     /// <summary>
-    /// L'écran peut diffuser de la pub : compte qui l'accepte, aire autorisée, écran non exclu, pleine page (pas découpé en zones) et hors d'un mur.
+    /// L'écran peut diffuser de la pub : compte qui l'accepte, aire autorisée, écran non exclu. Un écran découpé en zones passe le spot sur tout l'écran,
+    /// un mur sur tout le mur (un seul spot pour l'ensemble, compté une fois).
     /// </summary>
     public static bool ScreenAllowed(Db db, Tenant t, Screen s) =>
-        On(t) && s.Token != null && (t.AdsAllAreas || t.AdsAreas.Contains(s.AreaId)) && !t.AdsScreensOff.Contains(s.Id)
-        && ScreenFits(db, s);
+        On(t) && s.Token != null && (t.AdsAllAreas || t.AdsAreas.Contains(s.AreaId)) && !t.AdsScreensOff.Contains(s.Id);
 
-    /// <summary>Écran plein (découpage publié « plein écran ») et hors d'un mur : les seuls où un spot pleine page a sa place (décision 7).</summary>
-    public static bool ScreenFits(Db db, Screen s) =>
-        (s.PublishedVersion > 0 ? s.PublishedLayout : s.Layout) == ScreenLayouts.Full && Helpers.Wall(db.Areas, s) == null;
+    /// <summary>Écran découpé en zones (découpage publié) : le spot recouvre toutes les zones.</summary>
+    public static bool IsSplit(Screen s) => (s.PublishedVersion > 0 ? s.PublishedLayout : s.Layout) != ScreenLayouts.Full;
 
     /// <summary>Format du visuel pour l'écran : celui de son orientation, sinon l'autre (centré sur fond flouté, jamais déformé ni recadré).</summary>
-    public static (string Url, string Type, string Format, bool Approx)? Visual(AdSpot spot, Screen s)
+    public static (string Url, string Type, string Format, bool Approx)? Visual(AdSpot spot, Screen s, Helpers.WallPlace? wall = null)
     {
         var portrait = s.Orientation == "portrait";
+        double ratio;
+        if (wall != null)   // mur : le visuel couvre l'image de tout le mur (colonnes × lignes écrans)
+        {
+            double sw = portrait ? 9 : 16, sh = portrait ? 16 : 9, ww = sw * wall.Cols, wh = sh * wall.Rows;
+            portrait = wh > ww;
+            ratio = Math.Max(ww, wh) / Math.Min(ww, wh);
+        }
+        else ratio = s.DetectedW is int w and > 0 && s.DetectedH is int h and > 0 ? (double)Math.Max(w, h) / Math.Min(w, h) : 16 / 9.0;
         var (file, type, format) = portrait
             ? (spot.Portrait ?? spot.Landscape, spot.Portrait != null ? spot.PortraitType : spot.LandscapeType, spot.Portrait != null ? "portrait" : "landscape")
             : (spot.Landscape ?? spot.Portrait, spot.Landscape != null ? spot.LandscapeType : spot.PortraitType, spot.Landscape != null ? "landscape" : "portrait");
         if (file == null) return null;
         // ratio inhabituel (4:3, carré…) : le visuel le plus proche, centré sur fond flouté
-        var ratio = s.DetectedW is int w and > 0 && s.DetectedH is int h and > 0 ? (double)Math.Max(w, h) / Math.Min(w, h) : 16 / 9.0;
         var approx = format != (portrait ? "portrait" : "landscape") || Math.Abs(ratio - 16 / 9.0) > 0.12;
         return ("/ads/" + file, type ?? "image", format, approx);
     }
@@ -201,8 +207,9 @@ public static class Ads
     /// <summary>Ce que reçoit le player (null : pas de publicité sur cet écran). Jamais dans le simulateur : aucun spot n'y passe ni n'y est compté.</summary>
     public static object? ForPlayer(Db db, Tenant t, Screen s, DateTime now)
     {
+        var wall = Helpers.Wall(db.Areas, s);
         var spots = Playable(db, t, s, now)
-            .Select(x => (x.Campaign, x.Spot, V: Visual(x.Spot, s)))
+            .Select(x => (x.Campaign, x.Spot, V: Visual(x.Spot, s, wall)))
             .Where(x => x.V != null)
             .Select(x => new
             {
@@ -212,7 +219,8 @@ public static class Ads
                 maxHour = Math.Max(1, x.Campaign.MaxPerHour), maxDay = Math.Max(1, x.Campaign.MaxPerDayPerScreen),
                 from = x.Campaign.Start, to = x.Campaign.End
             }).ToList();
-        return spots.Count == 0 ? null : new { tag = Tag, tz = t.Timezone, spots };
+        // master : seul l'écran n° 1 d'un mur note les passages (un spot de mur = un passage, pas un par écran)
+        return spots.Count == 0 ? null : new { tag = Tag, tz = t.Timezone, master = wall == null || s.WallPos == 0, spots };
     }
 
     /// <summary>Montant d'un passage complet pour le propriétaire.</summary>

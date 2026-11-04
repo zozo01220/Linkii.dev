@@ -316,7 +316,7 @@ app.Use(async (ctx, next) =>
     var p = ctx.Request.Path;
     var open = p.StartsWithSegments("/login") || p.StartsWithSegments("/api") || p.StartsWithSegments("/hubs")
                || p.StartsWithSegments("/_framework") || p.StartsWithSegments("/_blazor") || p.StartsWithSegments("/logout")
-               || p.StartsWithSegments("/internal") || p.StartsWithSegments("/media")   // /media fait son propre contrôle d'accès
+               || p.StartsWithSegments("/internal") || p.StartsWithSegments("/media") || p.StartsWithSegments("/ads")   // /media et /ads font leur propre contrôle d'accès (jeton de l'écran ou session)
                || p.StartsWithSegments("/q")   // adresse courte des QR codes de comptage : scannée par le téléphone d'un visiteur, sans compte
                || p.StartsWithSegments("/download")   // installeur du player Windows : téléchargé sur le PC de l'écran, souvent sans session
                || p.StartsWithSegments("/canva/callback")   // retour de Canva : identifié par son « state », sur le domaine principal

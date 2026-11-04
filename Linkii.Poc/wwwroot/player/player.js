@@ -485,10 +485,13 @@
     });
   }
 
+  // Un média est une image ou une vidéo : une page HTML (connexion, erreur) reçue à sa place n'est pas un fichier valide.
+  function badType(r) { return /^text\/html/i.test((r.headers && r.headers.get('Content-Type')) || ''); }
+
   // Télécharge un média dans le cache en comptant les octets reçus (onFraction : 0 à 1, seulement si le serveur annonce la taille du fichier).
   function fetchToCache(cache, u, onFraction) {
     return fetch(u, { headers: { 'X-Token': state.token || '' } }).then(function (r) {   // les médias sont protégés : jeton de l'écran
-      if (!r.ok) return;
+      if (!r.ok || badType(r)) return;   // page de connexion ou d'erreur renvoyée à la place du fichier : jamais mise en cache
       var total = +r.headers.get('Content-Length') || 0;
       if (!onFraction || !total || !r.body || typeof r.body.tee !== 'function') return cache.put(u, r);
       var halves = r.body.tee(), reader = halves[1].getReader(), got = 0;
@@ -507,7 +510,7 @@
       var urls = mediaUrls(items);
       // d'abord ce qui manque, pour que la progression compte tous les fichiers dès le départ
       var adds = Promise.all(urls.map(function (u) {
-        return cache.match(u).then(function (hit) { return hit ? null : u; }).catch(function () { return u; });
+        return cache.match(u).then(function (hit) { return hit && !badType(hit) ? null : u; }).catch(function () { return u; });
       })).then(function (missing) {
         missing = missing.filter(Boolean);
         var part = {};
@@ -545,7 +548,7 @@
     if (NATIVE) return Promise.resolve({ src: online, revoke: function () {} });   // l'app sert le fichier local s'il existe (le jeton ne sert qu'en repli en ligne)
     if (PREVIEW || !window.caches || !window.URL || !URL.createObjectURL) return Promise.resolve({ src: online, revoke: function () {} });
     return caches.open(CACHE).then(function (c) { return c.match(url); }).then(function (hit) {
-      if (!hit) return { src: online, revoke: function () {} };
+      if (!hit || badType(hit)) return { src: online, revoke: function () {} };   // absent, ou entrée invalide restée en cache : lecture en ligne
       return hit.blob().then(function (b) {
         var u = URL.createObjectURL(b);
         return { src: u, revoke: function () { try { URL.revokeObjectURL(u); } catch (e) {} } };
@@ -1011,7 +1014,7 @@
 
   /* ---------- Publicité (licence Pro, §45) ----------
      Le serveur envoie { tag, tz, spots: [{ id, campaignId, mode, url, type, format, approx, durationSec, every, everyMin, maxHour, maxDay, from, to }] }
-     seulement pour un écran plein qui l'accepte (jamais dans le simulateur, ni sur un mur ou un écran découpé). Les spots ne sont dans aucune liste :
+     pour un écran qui l'accepte (jamais dans le simulateur) ; master : faux pour les écrans d'un mur autres que le n° 1, qui ne notent aucun passage. Écran découpé : le spot recouvre toutes les zones. Mur : un spot sur tout le mur, planifié dans la boucle commune. Les spots ne sont dans aucune liste :
      « between » s'intercale entre deux contenus (tous les N contenus ou N minutes, plafond par heure), « filler » ne passe que quand l'écran n'a
      rien d'autre à afficher. Chaque passage est noté (identifiant unique, heure du serveur, durée réellement affichée sur l'horloge monotone)
      puis envoyé par lots ; complet = affiché jusqu'au bout de sa durée, sinon la cause de l'interruption (pause, veille, rechargement…). */
@@ -1057,7 +1060,12 @@
     if (!a) return;
     adNow = null;
     clearTimeout(a.timer);
+    if (a.ov) {   // écran découpé : le calque plein écran s'efface, les zones reparaissent dessous
+      var ov = a.ov; ov.style.opacity = '0';
+      setTimeout(function () { if (a.cleanup) a.cleanup(); if (ov.parentNode) ov.parentNode.removeChild(ov); }, 450);
+    }
     var shown = Math.round(mono() - a.t0);
+    if (a.nocount) return;   // mur : seul l'écran n° 1 note le passage
     var q = loadAdPlays();
     q.push({ id: a.id, campaignId: a.spot.campaignId, spotId: a.spot.id, start: a.start, shownMs: shown, complete: !!complete && shown >= a.planned - 500,
       cause: complete ? null : (cause || 'cut'), format: a.spot.format, approx: !!a.spot.approx, offline: a.offline });
@@ -1082,11 +1090,67 @@
 
   // Passe un spot dans le calque libre (même fondu que les contenus). Renvoie false s'il n'y a rien à passer.
   function playAd(mode, force) {
+    var wallSync = state.current && state.current.sync && !state.free;   // zone synchronisée (mur compris)
+    if (wallSync) {   // mur : « à temps perdu » se déduit de l'heure commune, tous les écrans passent le même spot au même moment
+      if (mode !== 'filler') return false;
+      var fl = wallSpots('filler');
+      if (!fl.length) return false;
+      var fe = fl.map(function (a) { return { spot: a, durationSec: Math.max(1, a.durationSec) }; }), fp = syncPick(fe, state.current.sync.epoch);
+      return showAd(fe[fp.index].spot, mode, { ms: fp.left, wall: true });
+    }
     var list = adCandidates(mode);
     if (!list.length || (mode === 'between' && !force && !adDue(list))) return false;   // force : borne, fin de visite (le rythme « tous les N contenus » n'a pas de sens, les plafonds restent)
-    var spot = list[adRr++ % list.length], ads = state.current.ads;
+    return showAd(list[adRr++ % list.length], mode, null);
+  }
+
+  // Mur : spots du mode demandé, dans un ordre identique sur tous les écrans (période de la campagne respectée ; les plafonds se règlent dans wallAdPlan).
+  function wallSpots(mode) {
+    var ads = state.current && state.current.ads;
+    if (!ads || !ads.spots || PREVIEW) return [];
+    var k = adKeys(ads);
+    return ads.spots.filter(function (a) { return a.mode === mode && !(a.from && k.day < a.from || a.to && k.day > a.to); })
+      .sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
+  }
+  function gcd(a, b) { return b ? gcd(b, a % b) : a; }
+  // Mur : la boucle des contenus où des spots sont intercalés, calculée seulement à partir de la liste et de l'heure commune (même résultat sur chaque écran).
+  // Un spot tous les N contenus (N : le rythme le plus serré des campagnes, relevé si le plafond par heure l'exige) ; les spots tournent dans l'ordre.
+  function wallAdPlan(pl, slides) {
+    if (!pl.sync || state.free || !slides.length) return null;
+    var c = wallSpots('between');
+    if (!c.length) return null;
+    var n = slides.length, avg = 0, adMs = 0, camps = {}, nc = 0, minMax = 1e9, every = 1e9;
+    slides.forEach(function (s) { avg += Math.max(1, s.durationSec) * 1000; }); avg /= n;
+    c.forEach(function (a) {
+      adMs += Math.max(1, a.durationSec) * 1000;
+      if (!camps[a.campaignId]) { camps[a.campaignId] = 1; nc++; }
+      minMax = Math.min(minMax, a.maxHour);
+      every = Math.min(every, a.everyMin > 0 ? Math.max(1, Math.round(a.everyMin * 60000 / avg)) : Math.max(1, a.every));
+    });
+    adMs /= c.length;
+    for (var g = 0; g < 60 && 3600000 / (every * avg + adMs) / nc > minMax; g++) every++;   // plafond par heure et par campagne
+    var m = c.length, r1 = n / gcd(n, every), rounds = r1 * m / gcd(r1, m);
+    if (rounds * (every + 1) > 600) rounds = r1;
+    var out = [], r, j;
+    for (r = 0; r < rounds; r++) {
+      for (j = 0; j < every; j++) out.push(slides[(r * every + j) % n]);
+      out.push({ ad: c[r % m], type: 'ad', durationSec: Math.max(1, c[r % m].durationSec) });
+    }
+    return out;
+  }
+
+  // Affiche un spot sur toute la scène : l'écran entier, tout l'écran d'un écran découpé (calque par-dessus les zones) ou tout le mur.
+  // o (mur) : { ms: temps restant du créneau commun, wall: true } ; le spot dure jusqu'à la fin du créneau.
+  function showAd(spot, mode, o) {
+    var ads = state.current.ads;
+    var split = zoneLoops.length > 0, ov = null;
     var layerId = state.active === 'layerA' ? 'layerB' : 'layerA';
     var layer = $(layerId), old = $(state.active), oldCleanup = state.cleanup, shown = false, src = null, media;
+    if (split) {
+      ov = document.createElement('div');
+      ov.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;z-index:4;overflow:hidden;opacity:0;transition:opacity .4s;background:#0B1F3A;font-size:' + ((parseFloat($('stage').style.width) || 1920) / 100) + 'px';
+      $('content').appendChild(ov);
+      layer = ov;
+    }
     layer.innerHTML = '';
     // visuel centré, jamais déformé ni recadré ; format approché (autre orientation, ratio inhabituel) : sur un fond flouté
     var bg = document.createElement('div');
@@ -1095,22 +1159,30 @@
     var cleanup = function () { if (media && media.tagName === 'VIDEO') { try { media.pause(); media.removeAttribute('src'); media.load(); } catch (e) {} } if (src) src.revoke(); };
     function start() {
       if (shown) return; shown = true;
-      layer.classList.add('on'); old.classList.remove('on');
-      setTimeout(function () { if (oldCleanup) oldCleanup(); old.innerHTML = ''; }, 400);
-      state.active = layerId; state.cleanup = cleanup; state.shownItem = null;
+      if (ov) ov.style.opacity = '1';   // écran découpé : le calque couvre toutes les zones, qui continuent dessous
+      else {
+        layer.classList.add('on'); old.classList.remove('on');
+        setTimeout(function () { if (oldCleanup) oldCleanup(); old.innerHTML = ''; }, 400);
+        state.active = layerId; state.cleanup = cleanup;
+      }
+      state.shownItem = null;
       playEnd();   // le contenu précédent est terminé (le spot, lui, a son propre journal)
       var k = adRoll(ads);
-      adCnt.perDay[spot.id] = (adCnt.perDay[spot.id] || 0) + 1;
-      adCnt.perHour[spot.campaignId] = (adCnt.perHour[spot.campaignId] || 0) + 1;
-      if (mode === 'between') { adCnt.since = 0; adCnt.lastAt = serverNow(); }
-      adSave();
-      var ms = Math.max(1, spot.durationSec) * 1000;
-      adNow = { id: uuid(), spot: spot, start: Math.round(serverNow()), t0: mono(), planned: ms, offline: netFails >= 2, day: k.day };
+      if (!o) {   // mur : pas de compteurs locaux, le rythme et le plafond sont dans le planning commun
+        adCnt.perDay[spot.id] = (adCnt.perDay[spot.id] || 0) + 1;
+        adCnt.perHour[spot.campaignId] = (adCnt.perHour[spot.campaignId] || 0) + 1;
+        if (mode === 'between') { adCnt.since = 0; adCnt.lastAt = serverNow(); }
+        adSave();
+      }
+      var full = Math.max(1, spot.durationSec) * 1000, ms = o && o.ms ? Math.max(1, o.ms) : full;
+      adNow = { id: uuid(), spot: spot, start: Math.round(serverNow()), t0: mono(), planned: full, offline: netFails >= 2, day: k.day,
+        ov: ov, cleanup: ov ? cleanup : null, nocount: !!(o && o.wall && ads.master === false) };
       adNow.timer = state.timer = setTimeout(function () { adFinish(true); next(); }, ms);   // une publication arrivée entre-temps attend la fin du spot
       state.slideEnd = Date.now() + ms;
     }
     function fail() {   // fichier illisible : ce spot est écarté 10 minutes, la boucle reprend
       if (shown) return; shown = true;
+      if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
       adFailed[spot.id] = Date.now();
       state.timer = setTimeout(next, 500);
     }
@@ -1148,6 +1220,17 @@
     if (!playAd('between', true)) next();
   }
 
+  // Écran dont le contenu principal dure longtemps (zone fixe d'un écran découpé, contenu unique) : aucune « fin de contenu » ne vient déclencher le spot.
+  // Toutes les 5 s, si un spot est dû (rythme en minutes, ou contenus des autres zones) et que la fin du contenu en cours est loin, il passe maintenant.
+  setInterval(function () {
+    if (PREVIEW || adNow || !state.current || !state.current.ads || state.current.kiosk || state.pending || state.paused || state.hold || state.asleep || state.emergency) return;
+    if (!(state.slideEnd - Date.now() > 45000)) return;   // un contenu se termine bientôt : le spot passera entre deux contenus comme d'habitude
+    var l = adCandidates('between');
+    if (!l.length || !adDue(l)) return;
+    clearTimeout(state.timer); state.timer = null;
+    if (!playAd('between', true)) next();
+  }, 5000);
+
   /* ---------- Diffusion (double buffer) ---------- */
   function next() {
     clearTimeout(state.timer); state.timer = null;
@@ -1179,6 +1262,7 @@
     $('idle').style.display = 'none';
 
     // zone synchronisée : le contenu et sa durée se déduisent de l'heure commune (simulateur en lecture libre : ordre de la liste)
+    slides = wallAdPlan(pl, slides) || slides;   // mur : les spots font partie de la boucle commune (même spot, même instant sur tous les écrans)
     var epoch = pl.sync && slides.length > 1 && !state.free ? pl.sync.epoch : null;
     if (playAd('between')) return;   // spot intercalé : jamais au milieu d'un contenu, toujours entre deux
     var item;
@@ -1186,6 +1270,7 @@
       var pick = syncPick(slides, epoch);
       if (pick.left < 80) { state.timer = setTimeout(next, pick.left + 5); return; }   // à quelques ms d'une frontière : on attend qu'elle passe
       item = slides[pick.index];
+      if (item.ad) { showAd(item.ad, 'between', { ms: pick.left, wall: true }); return; }   // créneau de spot du mur
       state.index = pick.index + 1;
     } else {
       item = slides[state.index % slides.length];
@@ -1339,7 +1424,7 @@
         item = slides[pick.index]; idx = pick.index + 1;
       } else { item = slides[idx % slides.length]; idx++; }
       if (slides.length === 1 && shownItem === item) {   // un seul contenu : il continue (une vidéo seule boucle d'elle-même)
-        playStart(item, key);
+        playStart(item, key); adCounted();
         timer = setTimeout(step, Math.max(1, item.durationSec) * 1000);
         return;
       }
@@ -1354,7 +1439,7 @@
         layer.classList.add('on'); old.classList.remove('on');
         setTimeout(function () { if (oldCleanup) oldCleanup(); old.innerHTML = ''; }, 400);
         active = 1 - active; cleanup = c; shownItem = item;
-        playStart(item, key);
+        playStart(item, key); adCounted();   // un contenu de zone compte pour le rythme des spots
         timer = setTimeout(step, epoch != null ? syncLeft(slides, item, epoch) : Math.max(1, item.durationSec) * 1000);
       }, function () { if (!shown) { shown = true; timer = setTimeout(step, 1000); } });
     }

@@ -92,11 +92,10 @@
                         @foreach (var s in screens.Where(s => s.AreaId == aid))
                         {
                             var sid = s.Id;
-                            var fits = fitting.Contains(sid);
-                            <label class="ad-chk scr @(fits ? "" : "off")"><input type="checkbox" class="ios" checked="@(fits && areaOn && !screensOff.Contains(sid))" disabled="@(!fits || !areaOn)" @onchange="e => SetScreen(sid, (bool)e.Value!)" />@s.Name<small>@(fits ? (s.Orientation == "portrait" ? "portrait" : "paysage") : walls.Contains(sid) ? "mur : pas de pub" : "écran découpé : pas de pub")</small></label>
+                            <label class="ad-chk scr"><input type="checkbox" class="ios" checked="@(areaOn && !screensOff.Contains(sid))" disabled="@(!areaOn)" @onchange="e => SetScreen(sid, (bool)e.Value!)" />@s.Name<small>@(walls.ContainsKey(sid) ? "mur : pub sur tout le mur" : splits.Contains(sid) ? "écran découpé : pub en plein écran" : s.Orientation == "portrait" ? "portrait" : "paysage")</small></label>
                         }
                     }
-                    <p class="hint" style="margin:10px 0 0">Un écran découpé en zones ou membre d'un mur ne diffuse pas de publicité.</p>
+                    <p class="hint" style="margin:10px 0 0">Sur un écran découpé en zones, le spot passe en plein écran par-dessus toutes les zones. Sur un mur, un seul spot passe sur le mur entier (les écrans du mur s'activent ensemble).</p>
                 </div>
             </div>
 
@@ -125,7 +124,8 @@
     private bool growth, on, allAreas;
     private List<Area> areas = new();
     private List<Screen> screens = new();
-    private HashSet<Guid> areaIds = new(), screensOff = new(), fitting = new(), walls = new();
+    private HashSet<Guid> areaIds = new(), screensOff = new(), splits = new();
+    private Dictionary<Guid, List<Guid>> walls = new();   // écran d'un mur → tous les écrans de ce mur (ils s'activent ensemble)
     private HashSet<string> excluded = new();
     private List<AdSpotState> pending = new(), decided = new();
     private List<string> alerts = new();
@@ -142,8 +142,9 @@
             areaIds = t.AdsAreas.ToHashSet(); screensOff = t.AdsScreensOff.ToHashSet(); excluded = t.AdsExcluded.ToHashSet();
             areas = d.Areas.OrderBy(a => a.Name).ToList();
             screens = d.Root.Screens.Where(s => s.ClientId == t.Id && s.Token != null).OrderBy(s => s.Name).ToList();
-            fitting = screens.Where(s => Ads.ScreenFits(d.Root, s)).Select(s => s.Id).ToHashSet();
-            walls = screens.Where(s => Helpers.Wall(d.Root.Areas, s) != null).Select(s => s.Id).ToHashSet();
+            var inWall = screens.Where(s => Helpers.Wall(d.Root.Areas, s) != null).ToList();
+            walls = inWall.ToDictionary(s => s.Id, s => inWall.Where(m => m.ZoneId == s.ZoneId).Select(m => m.Id).ToList());
+            splits = screens.Where(s => !walls.ContainsKey(s.Id) && Ads.IsSplit(s)).Select(s => s.Id).ToHashSet();
             var states = Ads.States(d.Root, t, now);
             pending = states.Where(x => x.State == AdSpotState.Pending).OrderBy(x => x.Deadline).ToList();
             decided = states.Where(x => x.State != AdSpotState.Pending).OrderBy(x => x.Campaign.Advertiser).ToList();
@@ -186,7 +187,14 @@
     }, "Réglage enregistré.");
 
     private Task SetArea(Guid id, bool value) => Save(t => { t.AdsAreas.Remove(id); if (value) t.AdsAreas.Add(id); }, "Réglage enregistré.");
-    private Task SetScreen(Guid id, bool value) => Save(t => { t.AdsScreensOff.Remove(id); if (!value) t.AdsScreensOff.Add(id); }, "Réglage enregistré.");
+    private Task SetScreen(Guid id, bool value) => Save(t =>
+    {
+        foreach (var x in walls.TryGetValue(id, out var mates) ? mates : new List<Guid> { id })
+        {
+            t.AdsScreensOff.Remove(x);
+            if (!value) t.AdsScreensOff.Add(x);
+        }
+    }, "Réglage enregistré.");
     private Task SetCategory(string id, bool refuse) => Save(t => { t.AdsExcluded.Remove(id); if (refuse) t.AdsExcluded.Add(id); }, refuse ? "Catégorie refusée." : "Catégorie acceptée.");
 
     private async Task Decide(AdSpotState x, bool accept)

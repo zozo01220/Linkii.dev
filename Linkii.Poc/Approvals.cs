@@ -91,6 +91,8 @@ public class ApprovalRequest : IClientOwned
     /// <summary>Commentaire de la décision (motif obligatoire d'un refus) ou raison de la péremption.</summary>
     public string? Comment { get; set; }
     public DateTime? RemindedUtc { get; set; }
+    /// <summary>Quand l'auteur a pris connaissance de la décision (ferme le bandeau de refus sur la page Écrans).</summary>
+    public DateTime? AuthorSeenUtc { get; set; }
 
     public bool Open => Status == ApprovalStatus.Wait;
     public int Added => Lines.Count(l => l.Change == ApprovalLine.Add);
@@ -310,6 +312,14 @@ public class ApprovalService(JsonStore store, IScreenPublishing screens, IApprov
         Close(r, ApprovalStatus.Withdrawn, null, null);
         history?.Record(clientId, History.Activity, History.Approval, $"Demande retirée : {r.Title}", Notifs.Info, null, r.AuthorName, r.AuthorId, "approval", r.Id, r.Title, "approvals");
         return (string?)null;
+    });
+
+    /// <summary>L'auteur a vu la décision : le bandeau de la page Écrans ne revient plus.</summary>
+    public void MarkSeen(Guid clientId, Guid requestId, Guid? byUserId) => store.Write(db =>
+    {
+        var r = db.ApprovalRequests.FirstOrDefault(x => x.Id == requestId && x.ClientId == clientId && !x.Open && x.AuthorId == byUserId);
+        if (r != null && r.AuthorSeenUtc == null) r.AuthorSeenUtc = DateTime.UtcNow;
+        return 0;
     });
 
     /// <summary>Met à jour une demande en attente avec l'état actuel du brouillon : la validation repart à zéro (nouvelle demande, l'ancienne est remplacée).</summary>

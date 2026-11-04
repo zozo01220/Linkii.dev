@@ -46,14 +46,14 @@
     e.x = Math.max(0, Math.min(100 - e.w, e.x + n * 2)); e.y = Math.max(0, Math.min(100 - e.h, e.y + n * 2));
     return e;
   }
-  function add(e) { page().els.push(e); S.sel = e.id; dirty(); draw(); return e; }
+  function add(e) { page().els.push(e); S.sel = e.id; S.multi = []; dirty(); draw(); return e; }
   function addTile(o) { return add(place(newEl('tile', Object.assign({ x: 8, y: 30, w: 40, h: hIn(40) * 0.9, text: 'Nouvelle tuile', color: PAL[page().els.filter(function (x) { return x.kind === 'tile'; }).length % 7] }, o || {})))); }
   function lowest() { var m = 0; page().els.forEach(function (e) { m = Math.max(m, e.y + e.h); }); return m; }
   function layout(n, cols) {
     var gap = 3, cw = (90 - gap * (cols - 1)) / cols, rows = Math.ceil(n / cols), y0 = Math.min(lowest() + 2, 70);
     var ch = Math.min((97 - y0 - hIn(gap) * (rows - 1)) / rows, hIn(cw) * 1.1);
     for (var i = 0; i < n; i++) page().els.push(newEl('tile', { x: 5 + (i % cols) * (cw + gap), y: y0 + Math.floor(i / cols) * (ch + hIn(gap)), w: cw, h: ch, text: 'Tuile ' + (i + 1), color: PAL[i % 7] }));
-    S.sel = null; dirty(); draw();
+    S.sel = null; S.multi = []; dirty(); draw();
   }
 
   /* ---------- Rendu d'un élément (scène, vignette, aperçu) : W = largeur de la page en pixels ---------- */
@@ -123,7 +123,7 @@
     S = {
       id: o.id || null, name: o.name || '', orientation: doc.orientation === 'landscape' ? 'landscape' : 'portrait',
       pages: (doc.pages && doc.pages.length ? doc.pages : [{ id: uid(), name: 'Accueil', bg: '#0B1F3A', len: 1, els: [] }]),
-      cur: 0, sel: null, tool: 'tile', dirty: false, images: o.images || [], contents: o.contents || [], growth: !!o.growth, saving: false, pop: null
+      cur: 0, sel: null, multi: [], tool: 'tile', dirty: false, images: o.images || [], contents: o.contents || [], growth: !!o.growth, saving: false, pop: null
     };
     S.pages.forEach(function (p) { p.els = p.els || []; p.len = p.len || 1; p.els.forEach(function (e) { e.action = e.action || { type: 'none', item: { qrOn: false } }; e.action.item = e.action.item || { qrOn: false }; }); });
     root.className = 'ie'; root.innerHTML = SHELL;
@@ -178,7 +178,20 @@
     var tag = (ev.target.tagName || '').toLowerCase(), typing = tag === 'input' || tag === 'textarea' || tag === 'select' || ev.target.isContentEditable;
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's') { ev.preventDefault(); save(); return; }
     if (ev.key === 'Escape') { if (S.preview) closePreview(); else closePop(); return; }
-    if (typing || !S.sel) return;
+    if (typing) return;
+    if (S.multi.length > 1) {   // plusieurs éléments sélectionnés : suppression, copie et flèches valent pour tous
+      var k = ev.key.toLowerCase();
+      if ((ev.ctrlKey || ev.metaKey) && k === 'd') { ev.preventDefault(); dup(); }
+      else if (ev.key === 'Delete' || ev.key === 'Backspace') { ev.preventDefault(); remove(); }
+      else if (ev.key.indexOf('Arrow') === 0) {
+        ev.preventDefault(); var s2 = ev.shiftKey ? 3 : 0.5;
+        S.multi.forEach(function (id) { var t = elOf(id); if (!t) return; if (ev.key === 'ArrowLeft') t.x -= s2; else if (ev.key === 'ArrowRight') t.x += s2; else if (ev.key === 'ArrowUp') t.y -= s2; else t.y += s2; });
+        dirty(); drawStage();
+      }
+      return;
+    }
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'a') { ev.preventDefault(); setSel(page().els.map(function (x) { return x.id; })); return; }   // Ctrl+A : tout sélectionner
+    if (!S.sel) return;
     var e = elOf(S.sel); if (!e) return;
     if (ev.key === 'Delete' || ev.key === 'Backspace') { ev.preventDefault(); remove(); }
     else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'd') { ev.preventDefault(); dup(); }
@@ -188,8 +201,21 @@
       dirty(); drawStage();
     }
   }
-  function remove() { var p = page(); p.els = p.els.filter(function (x) { return x.id !== S.sel; }); S.sel = null; dirty(); draw(); }
-  function dup() { var e = elOf(S.sel); if (!e) return; var c = clone(e); c.id = uid(); c.x = Math.min(c.x + 3, 100 - c.w); c.y = Math.min(c.y + hIn(3), 100 - c.h); if (c.action && c.action.item) { delete c.action.item.qrCode; } page().els.push(c); S.sel = c.id; dirty(); draw(); }
+  function remove() { var p = page(), ids = S.multi.length > 1 ? S.multi : [S.sel]; p.els = p.els.filter(function (x) { return ids.indexOf(x.id) < 0; }); S.sel = null; S.multi = []; dirty(); draw(); }
+  /** Sélection : un élément (poignées) ou plusieurs (Ctrl/Cmd/Maj + clic, rectangle à la souris). */
+  function setSel(ids) {
+    ids = ids.filter(function (id) { return elOf(id); });
+    if (ids.length > 1) { S.multi = ids; S.sel = null; } else { S.multi = []; S.sel = ids[0] || null; }
+    drawStage(); drawCtx();
+  }
+  function selIds() { return S.multi.length > 1 ? S.multi.slice() : S.sel ? [S.sel] : []; }
+  function dup() {
+    if (S.multi.length > 1) {
+      var ids = [];
+      S.multi.forEach(function (id) { var o = elOf(id); if (!o) return; var c = clone(o); c.id = uid(); c.x = Math.min(c.x + 3, 100 - c.w); c.y = c.y + hIn(3); if (c.action && c.action.item) { delete c.action.item.qrCode; } page().els.push(c); ids.push(c.id); });
+      dirty(); draw(); setSel(ids); return;
+    }
+    var e = elOf(S.sel); if (!e) return; var c = clone(e); c.id = uid(); c.x = Math.min(c.x + 3, 100 - c.w); c.y = Math.min(c.y + hIn(3), 100 - c.h); if (c.action && c.action.item) { delete c.action.item.qrCode; } page().els.push(c); S.sel = c.id; dirty(); draw(); }
 
   /* ---------- Rendu général ---------- */
   function draw() { drawFmt(); drawPanel(); drawStage(); drawCtx(); drawPages(); }
@@ -251,6 +277,7 @@
     if (S.cur > 0) { var bk = document.createElement('div'); bk.className = 'ie-backpill'; bk.style.top = (97 / (page().len || 1)) + '%'; bk.style.bottom = 'auto'; bk.style.transform = 'translate(-50%,-100%)'; bk.textContent = '← Retour'; bk.title = 'La borne ajoute ce bouton sur les pages autres que l’accueil'; pg.appendChild(bk); }
     var sel = S.sel && elOf(S.sel);
     if (sel) { var n = pg.querySelector('[data-id="' + sel.id + '"]'); if (n) { n.classList.add('sel'); handles(pg, sel); } }
+    S.multi.forEach(function (id) { var m = pg.querySelector('[data-id="' + id + '"]'); if (m) m.classList.add('sel'); });
     pg.addEventListener('pointerdown', onDown);
     pg.addEventListener('dblclick', onDbl);
   }
@@ -265,8 +292,25 @@
   var drag = null;
   function onDown(ev) {
     if (ev.button !== 0) return;
-    var hd = ev.target.closest('.ie-hd'), n = ev.target.closest('.ie-el');
-    if (!hd && !n) { S.sel = null; drawStage(); drawCtx(); return; }
+    var hd = ev.target.closest('.ie-hd'), n = ev.target.closest('.ie-el'), add = ev.ctrlKey || ev.metaKey || ev.shiftKey;
+    if (!hd && add && n) {   // Ctrl/Cmd/Maj + clic : ajoute l'élément à la sélection, ou le retire
+      var ids = selIds(), at = ids.indexOf(n.dataset.id); if (at >= 0) ids.splice(at, 1); else ids.push(n.dataset.id);
+      ev.preventDefault(); setSel(ids);
+      if (S.multi.indexOf(n.dataset.id) < 0) return;
+    }
+    if (!hd && n && S.multi.length > 1 && S.multi.indexOf(n.dataset.id) >= 0) {   // glisser un élément de la sélection : tous suivent
+      ev.preventDefault();
+      drag = { mode: 'group', id: n.dataset.id, x0: ev.clientX, y0: ev.clientY, moved: false, os: S.multi.map(function (id) { var t = elOf(id); return { id: id, x: t.x, y: t.y }; }) };
+      document.addEventListener('pointermove', onMove, true); document.addEventListener('pointerup', onUp, true);
+      return;
+    }
+    if (!hd && !n) {   // page vide : on désélectionne et on trace un rectangle de sélection
+      ev.preventDefault();
+      var base = add ? selIds() : []; if (!add) { S.sel = null; S.multi = []; drawStage(); drawCtx(); }
+      drag = { mode: 'band', add: add, base: base, x0: ev.clientX, y0: ev.clientY, rect: $('#ie-stage').getBoundingClientRect(), moved: false, hits: [] };
+      document.addEventListener('pointermove', onMove, true); document.addEventListener('pointerup', onUp, true);
+      return;
+    }
     var id = hd ? S.sel : n.dataset.id, e = elOf(id); if (!e) return;
     ev.preventDefault();
     if (S.sel !== id) { S.sel = id; drawStage(); drawCtx(); }
@@ -275,6 +319,23 @@
   }
   function onMove(ev) {
     if (!drag) return;
+    if (drag.mode === 'band' || drag.mode === 'group') {
+      var Hp = stageW / aspect(), pdx = (ev.clientX - drag.x0) / stageW * 100, pdy = (ev.clientY - drag.y0) / Hp * 100;
+      if (Math.abs(ev.clientX - drag.x0) + Math.abs(ev.clientY - drag.y0) > 3) drag.moved = true;
+      if (!drag.moved) return;
+      var pg0 = $('#ie-stage');
+      if (drag.mode === 'group') {
+        drag.os.forEach(function (o) { var t = elOf(o.id), nd = t && pg0.querySelector('[data-id="' + o.id + '"]'); if (!t) return; t.x = o.x + pdx; t.y = o.y + pdy; if (nd) { nd.style.left = t.x + '%'; nd.style.top = (t.y / (page().len || 1)) + '%'; } });
+        return;
+      }
+      var r = drag.rect, ax = (drag.x0 - r.left) / stageW * 100, ay = (drag.y0 - r.top) / Hp * 100, bx = (ev.clientX - r.left) / stageW * 100, by = (ev.clientY - r.top) / Hp * 100;
+      var x1 = Math.min(ax, bx), x2 = Math.max(ax, bx), y1 = Math.min(ay, by), y2 = Math.max(ay, by);
+      drag.hits = page().els.filter(function (t) { return t.x < x2 && t.x + t.w > x1 && t.y < y2 && t.y + t.h > y1; }).map(function (t) { return t.id; });
+      var bd = pg0.querySelector('.ie-band'); if (!bd) { bd = document.createElement('i'); bd.className = 'ie-band'; pg0.appendChild(bd); }
+      bd.style.left = x1 + '%'; bd.style.width = (x2 - x1) + '%'; bd.style.top = (y1 / (page().len || 1)) + '%'; bd.style.height = ((y2 - y1) / (page().len || 1)) + '%';
+      [].forEach.call(pg0.querySelectorAll('.ie-el'), function (nd) { nd.classList.toggle('sel', drag.hits.indexOf(nd.dataset.id) >= 0 || drag.base.indexOf(nd.dataset.id) >= 0); });
+      return;
+    }
     var e = elOf(drag.id), len = page().len || 1, H = stageW / aspect(), dx = (ev.clientX - drag.x0) / stageW * 100, dy = (ev.clientY - drag.y0) / H * 100, o = drag.o;
     if (Math.abs(ev.clientX - drag.x0) + Math.abs(ev.clientY - drag.y0) > 3) drag.moved = true;
     if (!drag.moved) return;
@@ -306,6 +367,17 @@
   }
   function onUp() {
     document.removeEventListener('pointermove', onMove, true); document.removeEventListener('pointerup', onUp, true);
+    if (drag && drag.mode === 'band') {   // fin du rectangle : les éléments touchés forment la sélection
+      var bd = drag; drag = null;
+      if (bd.moved) setSel(bd.add ? bd.base.concat(bd.hits.filter(function (id) { return bd.base.indexOf(id) < 0; })) : bd.hits); else drawStage();
+      return;
+    }
+    if (drag && drag.mode === 'group') {
+      var gd = drag; drag = null;
+      if (gd.moved) { dirty(); S.multi.forEach(function (id) { var t = elOf(id); if (t) { t.x = Math.round(t.x * 10) / 10; t.y = Math.round(t.y * 10) / 10; } }); drawStage(); }
+      else setSel([gd.id]);   // simple clic sur un élément de la sélection : lui seul reste
+      return;
+    }
     if (drag && drag.moved) { dirty(); var e = elOf(drag.id); if (e) { e.x = Math.round(e.x * 10) / 10; e.y = Math.round(e.y * 10) / 10; e.w = Math.round(e.w * 10) / 10; e.h = Math.round(e.h * 10) / 10; } }
     drag = null; drawStage();
   }
@@ -324,6 +396,12 @@
   function chip(label, key, extra) { return '<button class="ie-chip ' + (extra || '') + '" data-pop="' + key + '">' + label + '</button>'; }
   function drawCtx() {
     var c = $('#ie-ctx'), e = S.sel && elOf(S.sel), h;
+    if (S.multi.length > 1) {
+      c.className = 'ie-ctx';
+      c.innerHTML = '<span class="ie-hint">' + S.multi.length + ' éléments sélectionnés · glissez pour les déplacer · Ctrl + clic pour ajouter ou retirer</span><span class="ie-sep sm"></span><button class="ie-ib" data-do="dup" title="Dupliquer (Ctrl+D)">' + ICO.dup + '</button><button class="ie-ib" data-do="del" title="Supprimer">' + ICO.del + '</button>';
+      c.onclick = function (ev) { var d = ev.target.closest('[data-do]'); if (d) { if (d.dataset.do === 'del') remove(); else dup(); } };
+      return;
+    }
     if (!e) { c.className = 'ie-ctx empty'; c.innerHTML = '<span class="ie-hint">Touchez un élément pour le modifier</span>'; return; }
     c.className = 'ie-ctx';
     var tail = '<span class="ie-sep sm"></span><button class="ie-ib" data-do="dup" title="Dupliquer (Ctrl+D)">' + ICO.dup + '</button><button class="ie-ib" data-do="del" title="Supprimer">' + ICO.del + '</button>';
@@ -486,7 +564,7 @@
       var m = ev.target.closest('.ie-pgm'); if (m) { ev.stopPropagation(); return popAt(m, pageMenu); }
       var add_ = ev.target.closest('[data-add]');
       if (add_) { if (S.pages.length >= 30) return toast('Au plus 30 pages par liste.', true); var bgc = page().bg; S.pages.push({ id: uid(), name: 'Page ' + (S.pages.length + 1), bg: bgc, bgImageId: page().bgImageId || null, len: 1, els: [] }); S.cur = S.pages.length - 1; S.sel = null; dirty(); draw(); return; }
-      var g = ev.target.closest('.ie-pg'); if (g && !g.classList.contains('on')) { S.cur = parseInt(g.dataset.i, 10); S.sel = null; draw(); }
+      var g = ev.target.closest('.ie-pg'); if (g && !g.classList.contains('on')) { S.cur = parseInt(g.dataset.i, 10); S.sel = null; S.multi = []; draw(); }
     };
     bar.ondblclick = function (ev) { var g = ev.target.closest('.ie-pg[data-i]'); if (g) rename(parseInt(g.dataset.i, 10)); };
   }
@@ -505,7 +583,7 @@
         if (!confirm('Supprimer la page « ' + S.pages[i].name + ' » ?' + (used ? ' Des tuiles y mènent : elles devront être reliées à une autre page.' : ''))) return;
         var gone = S.pages.splice(i, 1)[0];
         S.pages.forEach(function (x) { x.els.forEach(function (e) { if (e.action && e.action.pageId === gone.id) { e.action.pageId = null; } }); });
-        S.cur = Math.max(0, i - 1); S.sel = null; dirty(); draw();
+        S.cur = Math.max(0, i - 1); S.sel = null; S.multi = []; dirty(); draw();
       }
     });
   }

@@ -8,10 +8,6 @@
   'use strict';
   const WEIGHTS = [[300, 'Léger'], [400, 'Normal'], [500, 'Moyen'], [600, 'Demi-gras'], [700, 'Gras'], [800, 'Extra-gras'], [900, 'Noir']];
   const WNAMES = { clock: 'Horloge', date: 'Date', ticker: 'Bandeau défilant', countdown: 'Compte à rebours' };
-  const RES = {
-    land: [[1920, 1080, '1920 × 1080 · Full HD (recommandé)'], [3840, 2160, '3840 × 2160 · 4K'], [1280, 720, '1280 × 720 · HD']],
-    port: [[1080, 1920, '1080 × 1920 · Full HD (recommandé)'], [2160, 3840, '2160 × 3840 · 4K']]
-  };
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   // pastille d'une source : vrai logo si elle en a un (rss, Home Assistant, météo), sinon le pictogramme sur sa couleur
   const wi = m => m.logo ? `<span class="wi is-brand"><svg width="100%" height="100%"><use href="/brand-logos.svg#${m.logo}" width="100%" height="100%"/></svg></span>` : `<span class="wi" style="background:${m.color}">${m.icon}</span>`;
@@ -22,7 +18,7 @@
   let D, name = '', savedDoc = '', savedName = '', H = [], hi = -1, uid = 1;
   let selId = null, zoom = 1, z = 1, panelName = 'modeles', panelOpen = true, layersOpen = false, mediaMode = 'add', editing = false;
   let myTpl = [], tplTab = 'galerie', canImport = false;   // « Mes modèles » (§84), import d'images permis par le niveau de droits
-  let drag = null, guides = null, images = [], videos = [], mediaTab = 'img', iconCat = 'Tous', iconQ = '', iconMode = 'add', tplCat = 'Tous', mediaSearch = '', popCb = null, nudge = null, qrWait = {}, fmtNew = false, fmtO = 'land';
+  let drag = null, guides = null, images = [], videos = [], mediaTab = 'img', iconCat = 'Tous', iconQ = '', iconMode = 'add', tplCat = 'Tous', mediaSearch = '', popCb = null, nudge = null, qrWait = {}, fmtNew = false, fmtO = 'land', fmtScr = '', fmtTpl = -1, fmtStart = 'blank', scrList = [];
   let sources = [], srcData = {}, srcBusy = {}, srcAt = {}, names = false, fieldAnchor = null;   // sources de données (§85) et mode « Noms des champs »
   let dv = { view: 'sources', set: null, row: 0, open: new Set(['@used']), hidden: false, q: '', ren: null };   // panneau Données (§140) : vue, jeu ouvert, ligne montrée, groupes ouverts, recherche, champ renommé
   let sheet = null, canEditData = false;   // tableau en grand, droit de renommer les champs d'un jeu
@@ -32,8 +28,10 @@
   let fd = null;   // tiroir « Format du champ » d'un texte (§142) : { id: le texte, n: n-ième champ du texte, was: texte à l'ouverture }
   let previewScreen = '';   // « Cet écran » (§139) : écran dont les paramètres servent à l'aperçu (vide : le premier qui en a)
   const q = s => root.querySelector(s);
-  const cur = () => D.els.find(e => e.id === selId) || null;
+  let multi = [];   // sélection de plusieurs éléments (Ctrl/Cmd/Maj + clic, ou rectangle tracé à la souris) : leurs identifiants ; vide si 0 ou 1 élément
+  const cur = () => multi.length > 1 ? null : D.els.find(e => e.id === selId) || null;
   const byId = id => D.els.find(e => e.id === id);
+  const group = () => multi.length > 1 ? multi.map(byId).filter(Boolean) : [];
   const textual = e => LC().textual(e);
   const nid = () => 'e' + (uid++);
   const k = () => Math.min(D.w, D.h) / 1080;   // échelle des éléments ajoutés : même aspect en Full HD et en 4K
@@ -142,6 +140,7 @@
     root = el; net = dotnet; ac = new AbortController();
     LC().ensure();
     images = o.images || []; videos = o.videos || []; mediaTab = 'img';
+    scrList = o.screens || [];
     sources = o.sources || []; srcData = {}; srcBusy = {}; srcAt = {}; names = false;
     myTpl = o.myTemplates || []; canImport = !!o.canImport; canEditData = !!o.canEditData; tplTab = 'galerie';
     dv = { view: 'sources', set: null, row: 0, open: new Set(['@used']), hidden: false, q: '', ren: null }; sheet = null; ld = null; fp = null; fd = null; cd = null; expert = !!o.expert;
@@ -159,7 +158,7 @@
     uid = 1 + D.els.reduce((m, e) => Math.max(m, parseInt(String(e.id || '').replace(/\D/g, ''), 10) || 0), 0);
     D.els.forEach(e => { if (!e.id) e.id = nid(); });
     ensureSamples();
-    H = []; hi = -1; selId = null; zoom = 1; panelName = fresh && !tpl ? 'modeles' : 'texte'; panelOpen = true; layersOpen = false; mediaMode = 'add';
+    H = []; hi = -1; selId = null; multi = []; zoom = 1; panelName = fresh && !tpl ? 'modeles' : 'texte'; panelOpen = true; layersOpen = false; mediaMode = 'add';
     editing = false; drag = null; guides = null; tplCat = 'Tous'; mediaSearch = ''; qrWait = {};
     root.innerHTML = SHELL;
     { const rail = root.querySelector('#ce-rail'), dn = rail.querySelector('[data-p=donnees]');   // Données et Graphiques : mode expert seulement
@@ -240,19 +239,24 @@
 </div>
 <div class="ce-scrim" id="ce-fmtscrim" hidden><div class="ce-modal" role="dialog" aria-modal="true" aria-labelledby="ce-fmttitle">
   <div class="ce-mh"><h4 id="ce-fmttitle">Nouvelle composition</h4><button class="ce-xb" data-fmt="close" aria-label="Fermer">×</button></div>
-  <div class="ce-mb">
-    <div class="ce-oris" id="ce-oris">
-      <button class="ce-ori" data-o="land"><span class="scr" style="width:86px;height:50px">16:9</span>Paysage</button>
-      <button class="ce-ori" data-o="port"><span class="scr" style="width:32px;height:56px">9:16</span>Portrait</button>
-      <button class="ce-ori" data-o="custom"><span class="scr" style="width:62px;height:50px;border-style:dashed">⤡</span>Personnalisé</button>
+  <div class="ce-mb ce-fm">
+    <div class="ce-fb" id="ce-fb1"><div class="ce-fbt">Pour un écran existant</div><div class="ce-scrs" id="ce-scrs"></div></div>
+    <div class="ce-or" id="ce-or">OU</div>
+    <div class="ce-fb" id="ce-fb2"><div class="ce-fbt" id="ce-fb2t">Réglages manuels</div>
+      <div class="ce-field"><label><span class="st">1</span>Orientation</label>
+        <div class="ce-oris" id="ce-oris">
+          <button type="button" class="ce-ori" data-o="land"><span class="scr" style="width:86px;height:50px">16:9</span>Paysage</button>
+          <button type="button" class="ce-ori" data-o="port"><span class="scr" style="width:32px;height:56px">9:16</span>Portrait</button>
+          <button type="button" class="ce-ori" data-o="custom"><span class="scr" style="width:62px;height:50px;border-style:dashed">⤡</span>Personnalisé</button>
+        </div></div>
+      <div class="ce-field" id="ce-resfield"><label for="ce-cw"><span class="st">2</span>Résolution en pixels</label>
+        <div class="ce-wh"><span class="wl">W</span><input id="ce-cw" type="number" min="320" max="7680" value="1080" aria-label="Largeur (W)"><span>×</span><span class="wl">H</span><input id="ce-ch" type="number" min="320" max="7680" value="1920" aria-label="Hauteur (H)"></div>
+        <p class="ce-help" style="margin:0" id="ce-reshelp">Pour un mur de 2 écrans Full HD côte à côte : 3840 × 1080.</p></div>
+      <div class="ce-field" id="ce-startfield"><label><span class="st">3</span>Point de départ</label>
+        <div class="ce-radios"><label><input type="radio" name="ce-start" value="blank" checked> Page vide</label><label><input type="radio" name="ce-start" value="tpl"> Choisir un modèle</label></div>
+        <div class="ce-tpls" id="ce-tpls" hidden></div></div>
+      <p class="ce-help" id="ce-fmthelp">Si le rapport d'aspect change, les éléments gardent leur place : vérifiez la mise en page.</p>
     </div>
-    <div class="ce-field" id="ce-resfield"><label for="ce-res">Résolution</label><select id="ce-res"></select></div>
-    <div class="ce-field" id="ce-customfield"><label>Taille en pixels</label>
-      <div class="ce-wh"><input id="ce-cw" type="number" min="320" max="7680" value="3840" aria-label="Largeur"> × <input id="ce-ch" type="number" min="320" max="7680" value="1080" aria-label="Hauteur"></div>
-      <p class="ce-help" style="margin:0">Pour un mur de 2 écrans Full HD côte à côte : 3840 × 1080. Pour un mur 2 × 2 : 3840 × 2160.</p></div>
-    <div class="ce-field" id="ce-startfield"><label>Point de départ</label>
-      <div class="ce-radios"><label><input type="radio" name="ce-start" value="tpl" checked> Choisir un modèle</label><label><input type="radio" name="ce-start" value="blank"> Page vide</label></div></div>
-    <p class="ce-help" id="ce-fmthelp">Si le rapport d'aspect change, les éléments gardent leur place : vérifiez la mise en page.</p>
   </div>
   <div class="ce-mf"><button class="ce-btn ghost" data-fmt="close">Annuler</button><button class="ce-btn" data-fmt="ok" id="ce-fmtok">Créer</button></div>
 </div></div>
@@ -309,6 +313,8 @@
   }
   function ratio(a, b) { const g = (x, y) => y ? g(y, x % y) : x; const r = `${a / g(a, b)}:${b / g(a, b)}`; return r.length > 7 ? (a / b).toFixed(2) + ':1' : r; }
 
+  const bounds = els => { const x1 = Math.min(...els.map(e => e.x)), y1 = Math.min(...els.map(e => e.y)), x2 = Math.max(...els.map(e => e.x + e.w)), y2 = Math.max(...els.map(e => e.y + e.h)); return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 }; };
+
   function drawOverlay() {
     const e = cur(), ov = q('#ce-ov');
     let h = '';
@@ -326,6 +332,17 @@
         h += `<button class="ce-ladd" data-ladd="1" title="Ajouter des colonnes" aria-label="Ajouter des colonnes" style="left:${L + Wd + 10}px;top:${Tp + (e.head ? e.size * 1.1 * z / 2 : 0) - 14}px">+</button>`;
       if (drag && drag.moved) h += `<div class="ce-tag" style="left:${L + Wd / 2}px;top:${Tp + Ht}px">${drag.mode === 'rot' ? `${Math.round(r)}°` : drag.mode === 'r' ? `${Math.round(e.w)} × ${Math.round(e.h)}` : `x ${Math.round(e.x)} · y ${Math.round(e.y)}`}</div>`;
     }
+    const gr = group().filter(x => !x.hidden);
+    if (gr.length) {   // plusieurs éléments : un cadre par élément et un cadre pointillé autour de l'ensemble (pas de poignées)
+      gr.forEach(x => h += `<div class="ce-selwrap" style="left:${x.x * z}px;top:${x.y * z}px;width:${x.w * z}px;height:${x.h * z}px;transform:rotate(${+x.rot || 0}deg)"><div class="ce-selbox${x.locked ? ' locked' : ''}"></div></div>`);
+      const b = bounds(gr);
+      h += `<div class="ce-grpbox" style="left:${b.x * z}px;top:${b.y * z}px;width:${b.w * z}px;height:${b.h * z}px"></div>`;
+      if (drag && drag.mode === 'g' && drag.moved) h += `<div class="ce-tag" style="left:${(b.x + b.w / 2) * z}px;top:${(b.y + b.h) * z}px">${gr.length} éléments · x ${Math.round(b.x)} · y ${Math.round(b.y)}</div>`;
+    }
+    if (drag && drag.mode === 'band' && drag.moved) {   // rectangle de sélection tracé à la souris
+      (drag.hits || []).forEach(id => { const x = byId(id); if (x) h += `<div class="ce-selwrap" style="left:${x.x * z}px;top:${x.y * z}px;width:${x.w * z}px;height:${x.h * z}px;transform:rotate(${+x.rot || 0}deg)"><div class="ce-selbox"></div></div>`; });
+      const r = drag.rect; h += `<div class="ce-band" style="left:${r.x * z}px;top:${r.y * z}px;width:${r.w * z}px;height:${r.h * z}px"></div>`;
+    }
     (guides || []).forEach(g => h += g.v != null
       ? `<div class="ce-guide" style="left:${g.v * z}px;top:0;width:1px;height:100%"></div>`
       : `<div class="ce-guide" style="top:${g.h * z}px;left:0;height:1px;width:100%"></div>`);
@@ -335,7 +352,12 @@
   // ---------- historique et enregistrement ----------
   function push() { H = H.slice(0, hi + 1); H.push(JSON.stringify(D)); hi = H.length - 1; if (H.length > 100) { H.shift(); hi--; } }
   function commit() { if (!root) return; render(); push(); setDirty(); q('#ce-undo').disabled = hi <= 0; q('#ce-redo').disabled = true; }
-  function restore(json) { D = JSON.parse(json); if (!cur()) selId = null; render(); renderCtx(); setDirty(); if (panelName === 'donnees' && panelOpen) renderPanel(); }
+  function restore(json) {
+    D = JSON.parse(json);
+    multi = multi.filter(id => byId(id));
+    if (multi.length < 2) multi = []; else selId = multi[multi.length - 1];
+    if (!multi.length && !cur()) selId = null;
+    render(); renderCtx(); setDirty(); if (panelName === 'donnees' && panelOpen) renderPanel(); }
   function undo() { if (hi > 0) restore(H[--hi]); }
   function redo() { if (hi < H.length - 1) restore(H[++hi]); }
   const isDirty = () => JSON.stringify(D) !== savedDoc || name !== savedName;
@@ -387,8 +409,19 @@
       const f = ev.target.closest('[data-fmt]');
       if (f) { if (f.dataset.fmt === 'ok') applyFormat(); else closeFormat(); }
       const o = ev.target.closest('.ce-ori');
-      if (o) { fmtO = o.dataset.o; fmtUI(); }
+      if (o && !o.disabled) fmtSetO(o.dataset.o);
+      const ms = ev.target.closest('[data-ms]');
+      if (ms) fmtPick(ms.dataset.ms);
+      const mt = ev.target.closest('[data-mt]');
+      if (mt) { fmtTpl = +mt.dataset.mt === fmtTpl ? -1 : +mt.dataset.mt; fmtUI(); }
     });
+    on(root, 'input', ev => {   // taille tapée : l'orientation suit
+      if (ev.target.id !== 'ce-cw' && ev.target.id !== 'ce-ch') return;
+      const w = +q('#ce-cw').value, h = +q('#ce-ch').value;
+      fmtO = w * 9 === h * 16 ? 'land' : h * 9 === w * 16 ? 'port' : 'custom';
+      fmtUI();
+    });
+    on(root, 'change', ev => { if (ev.target.name === 'ce-start') { fmtStart = ev.target.value; fmtUI(); } });
     on(q('#ce-name'), 'input', ev => { name = ev.target.value; setDirty(); });
     on(q('#ce-rail'), 'click', ev => { const b = ev.target.closest('button'); if (!b) return; if (panelName === b.dataset.p && panelOpen) togglePanel(); else openPanel(b.dataset.p); });
     on(q('#ce-pull'), 'click', togglePanel);
@@ -404,7 +437,14 @@
         ev.preventDefault(); return;
       }
       if (hd && e0) { drag = { mode: 'r', dir: hd.dataset.d, sx: ev.clientX, sy: ev.clientY, o: Object.assign({}, e0) }; ev.preventDefault(); return; }
-      const n = ev.target.closest('.lc-el');
+      const n = ev.target.closest('.lc-el'), add = ev.ctrlKey || ev.metaKey || ev.shiftKey;
+      if (n && add) toggleSel(n.dataset.id);   // Ctrl/Cmd/Maj + clic : ajoute l'élément à la sélection, ou le retire
+      if (n && multi.length > 1 && multi.includes(n.dataset.id)) {   // glisser un élément de la sélection : tous suivent
+        const gr = group().filter(x => !x.locked);
+        drag = { mode: 'g', id: n.dataset.id, sx: ev.clientX, sy: ev.clientY, os: gr.map(x => ({ id: x.id, x: x.x, y: x.y })), o: gr.length ? bounds(gr) : { x: 0, y: 0, w: 0, h: 0 } };
+        ev.preventDefault(); return;
+      }
+      if (n && add) { ev.preventDefault(); return; }
       if (n) {
         const again = selId === n.dataset.id, lh = ev.target.closest('[data-lh]');
         if (!again) select(n.dataset.id);
@@ -412,12 +452,18 @@
         if (e && !e.locked) drag = { mode: 'm', sx: ev.clientX, sy: ev.clientY, o: Object.assign({}, e), head };
         else if (head != null) openLd('cols', head);
         ev.preventDefault();
-      } else select(null);
+      } else startBand(ev, frame);
     });
-    on(area, 'pointerdown', ev => { if (ev.target === area) { closePop(); if (editing) document.activeElement.blur(); select(null); } });
+    on(area, 'pointerdown', ev => { if (ev.target === area) { closePop(); if (editing) document.activeElement.blur(); startBand(ev, frame); } });
     on(w, 'pointermove', move);
     on(w, 'pointerup', () => {
       if (!drag) return;
+      if (drag.mode === 'band') {   // fin du rectangle : les éléments touchés forment la sélection (Ctrl/Cmd/Maj : ajoutés à celle d'avant)
+        const d = drag; drag = null;
+        if (d.moved) pickMany(d.add ? d.base.concat((d.hits || []).filter(id => !d.base.includes(id))) : d.hits || []); else drawOverlay();
+        return;
+      }
+      if (drag.mode === 'g' && !drag.moved) { const id = drag.id; drag = null; select(id); return; }   // simple clic sur un élément de la sélection : lui seul reste
       const m = drag.moved, head = drag.head; drag = null; guides = null;
       if (m) { commit(); renderCtx(); } else if (head != null) openLd('cols', head); else drawOverlay();   // renderCtx : la rotation et la taille affichées suivent
     });
@@ -464,7 +510,9 @@
     on(ctx, 'change', ev => { const was0 = (cur() || {}).kind; if (ev.target.dataset.k) commit(); if (ev.target.dataset.k === 'source') loadSource(ev.target.value); const ce = cur(); if (ce && ce.type === 'chart' && ev.target.dataset.k) { if (ev.target.dataset.k === 'kind') { changeKind(ce, ce.kind, was0); commit(); } afterChart(); } });
     on(ctx, 'mousedown', ev => { if (editing && ev.target.closest('[data-act=field]')) ev.preventDefault(); });   // le texte en cours d'écriture garde le curseur
     on(ctx, 'click', ev => {
-      const b = ev.target.closest('button'), e = cur(); if (!b || !e) return;
+      const b = ev.target.closest('button'), e = cur();
+      if (b && multi.length > 1) { if (b.dataset.mt) alignGroup(b.dataset.mt); else if (b.dataset.act === 'dup') dup(); else if (b.dataset.act === 'del') del(); return; }
+      if (!b || !e) return;
       if (b.dataset.step) { const [key, d] = b.dataset.step.split(':'); e[key] = Math.max(8, Math.round(e[key] + +d * k())); commit(); renderCtx(); }
       else if (b.dataset.set) { const [key, v] = b.dataset.set.split(':'); e[key] = v; commit(); renderCtx(); }
       else if (b.dataset.tog) { e[b.dataset.tog] = !e[b.dataset.tog]; commit(); renderCtx(); }
@@ -474,7 +522,8 @@
     on(layers, 'click', ev => {
       const r = ev.target.closest('.ce-ly'); if (!r) return;
       const e = byId(r.dataset.id), b = ev.target.closest('[data-ly]');
-      if (b) { e[b.dataset.ly] = !e[b.dataset.ly]; if (e.hidden && selId === e.id) selId = null; commit(); renderCtx(); }
+      if (b) { e[b.dataset.ly] = !e[b.dataset.ly]; if (e.hidden) dropSel(e.id); commit(); renderCtx(); }
+      else if (ev.ctrlKey || ev.metaKey || ev.shiftKey) toggleSel(e.id);
       else select(e.id);
     });
     let lyDrag = null;
@@ -517,8 +566,60 @@
       o => { if (o === 't') openTemplateDialog(); else save(o === 'l'); });
   }
 
+  /** Début d'un rectangle de sélection sur la page vide (sans Ctrl/Cmd/Maj, la sélection d'avant est d'abord retirée). */
+  function startBand(ev, frame) {
+    const add = ev.ctrlKey || ev.metaKey || ev.shiftKey;
+    if (!add) select(null);
+    const base = multi.length > 1 ? multi.slice() : cur() ? [selId] : [];
+    drag = { mode: 'band', add, base, fr: frame.getBoundingClientRect(), sx: ev.clientX, sy: ev.clientY };
+    ev.preventDefault();
+  }
+  /** Sélectionne ces éléments (Ctrl/Cmd/Maj + clic les ajoute ou les retire un à un). */
+  function pickMany(ids) {
+    ids = ids.filter(id => { const x = byId(id); return x && !x.hidden; });
+    if (ids.length < 2) { select(ids[0] || null); return; }
+    if (ld) closeLd(false);
+    if (fd) closeFd();
+    if (cd) closeCd(false);
+    multi = ids; selId = ids[ids.length - 1];
+    drawOverlay(); renderLayers(); renderCtx(); markList();
+  }
+  function toggleSel(id) {
+    const ids = multi.length > 1 ? multi.slice() : selId && cur() ? [selId] : [], i = ids.indexOf(id);
+    if (i >= 0) ids.splice(i, 1); else ids.push(id);
+    pickMany(ids);
+  }
+  /** Un élément disparaît de la sélection (masqué, supprimé). */
+  function dropSel(id) {
+    if (multi.includes(id)) { multi = multi.filter(x => x !== id); if (multi.length < 2) { selId = multi[0] || null; multi = []; } else selId = multi[multi.length - 1]; }
+    else if (selId === id) selId = null;
+  }
+
   function move(ev) {
     if (!drag) return;
+    if (drag.mode === 'band') {
+      const fr = drag.fr, x1 = (Math.min(drag.sx, ev.clientX) - fr.left) / z, y1 = (Math.min(drag.sy, ev.clientY) - fr.top) / z, x2 = (Math.max(drag.sx, ev.clientX) - fr.left) / z, y2 = (Math.max(drag.sy, ev.clientY) - fr.top) / z;
+      if (!drag.moved && Math.abs(ev.clientX - drag.sx) + Math.abs(ev.clientY - drag.sy) < 4) return;
+      drag.moved = true; drag.rect = { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+      drag.hits = D.els.filter(t => !t.hidden && !t.locked && t.x < x2 && t.x + t.w > x1 && t.y < y2 && t.y + t.h > y1).map(t => t.id);   // les calques verrouillés (fond) ne sont pas pris
+      drawOverlay(); return;
+    }
+    if (drag.mode === 'g') {   // déplacement de toute la sélection, aimantée sur l'ensemble
+      const dx = (ev.clientX - drag.sx) / z, dy = (ev.clientY - drag.sy) / z, o = drag.o;
+      if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 2) return;
+      drag.moved = true; guides = [];
+      let x = o.x + dx, y = o.y + dy;
+      if (!ev.altKey) {
+        const xs = [0, D.w / 2, D.w], ys = [0, D.h / 2, D.h], tol = 8 / z, ids = new Set(multi);
+        D.els.forEach(t => { if (ids.has(t.id) || t.hidden) return; xs.push(t.x, t.x + t.w / 2, t.x + t.w); ys.push(t.y, t.y + t.h / 2, t.y + t.h); });
+        const snap = (pos, size, lines) => { let best = null; [0, size / 2, size].forEach(off => lines.forEach(l => { const d = l - (pos + off); if (Math.abs(d) < tol && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, l }; })); return best; };
+        const bx = snap(x, o.w, xs); if (bx) { x += bx.d; guides.push({ v: bx.l }); }
+        const by = snap(y, o.h, ys); if (by) { y += by.d; guides.push({ h: by.l }); }
+      }
+      const mx = Math.round(x - o.x), my = Math.round(y - o.y);
+      drag.os.forEach(p => { const t = byId(p.id); if (t) { t.x = p.x + mx; t.y = p.y + my; } });
+      render(); return;
+    }
     const e = cur(); if (!e) return;
     const dx = (ev.clientX - drag.sx) / z, dy = (ev.clientY - drag.sy) / z, o = drag.o;
     if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 2) return;
@@ -588,6 +689,14 @@
     if (mod && key === 's') { ev.preventDefault(); save(false); return; }
     if (mod && key === 'z') { ev.preventDefault(); if (ev.shiftKey) redo(); else undo(); return; }
     if (mod && key === 'y') { ev.preventDefault(); redo(); return; }
+    if (mod && key === 'a') { ev.preventDefault(); pickMany(D.els.filter(x => !x.hidden && !x.locked).map(x => x.id)); return; }   // Ctrl+A : tout sélectionner (hors fond verrouillé)
+    if (multi.length > 1) {
+      if (mod && key === 'd') { ev.preventDefault(); dup(); return; }
+      if (ev.key === 'Delete' || ev.key === 'Backspace') { ev.preventDefault(); del(); return; }
+      const st = ev.shiftKey ? 10 : 1, mv = { ArrowLeft: [-st, 0], ArrowRight: [st, 0], ArrowUp: [0, -st], ArrowDown: [0, st] }[ev.key];
+      if (mv) { ev.preventDefault(); group().forEach(t => { if (!t.locked) { t.x += mv[0]; t.y += mv[1]; } }); render(); clearTimeout(nudge); nudge = setTimeout(commit, 400); }
+      return;
+    }
     const e = cur(); if (!e) return;
     if (mod && key === 'd') { ev.preventDefault(); dup(); return; }
     if (ev.key === 'Delete' || ev.key === 'Backspace') { ev.preventDefault(); del(); return; }
@@ -600,7 +709,8 @@
     if (ld && ld.id !== id) closeLd(false);
     if (fd && fd.id !== id) closeFd();
     if (cd && cd.id !== id) closeCd(false);
-    const was = cur(); selId = id; const e = cur();
+    const was = cur(), wasMulti = multi.length > 1; multi = []; selId = id; const e = cur();
+    if (wasMulti && e === was) { drawOverlay(); renderLayers(); renderCtx(); return; }
     drawOverlay(); renderLayers(); renderCtx(); markList();
     if (e && e.type === 'room' && roomSrcs().length) { if (panelName !== 'salles' || !panelOpen) { panelName = 'salles'; panelOpen = true; render(); } renderPanel(); loadRooms(); }
     else if (e && e.type === 'chart' && expert) { if (panelName !== famOf(e) || !panelOpen) { panelName = famOf(e); panelOpen = true; render(); } renderPanel(); loadSource(e.source); }   // son résumé s'ouvre à gauche
@@ -759,7 +869,7 @@
     if (e.x + e.w * 2 + gap <= D.w) c.x = e.x + e.w + gap;   // à droite s'il y a la place, sinon dessous, sinon un peu décalée
     else if (e.y + e.h * 2 + gap <= D.h) c.y = e.y + e.h + gap;
     else { c.x = Math.min(D.w - e.w, e.x + gap); c.y = Math.min(D.h - e.h, e.y + gap); }
-    D.els.splice(D.els.indexOf(e) + 1, 0, c); selId = c.id; commit(); renderCtx(); renderPanel();
+    D.els.splice(D.els.indexOf(e) + 1, 0, c); selId = c.id; multi = []; commit(); renderCtx(); renderPanel();
     toast('Liste dupliquée : donnez-lui un nom et choisissez ses lignes gardées.');
   }
 
@@ -772,7 +882,7 @@
       if (mediaMode === 'replace' && e && e.type === 'image') { e.media = id; mediaMode = 'add'; commit(); renderPanel(); renderCtx(); toast('Image remplacée'); return; }
       if (mediaMode === 'bg') {
         const b = I({ media: id, x: 0, y: 0, w: D.w, h: D.h, locked: true });
-        D.els.unshift(b); selId = b.id; mediaMode = 'add'; commit(); renderPanel(); renderCtx(); toast('Image de fond ajoutée (calque verrouillé, tout en bas)'); return;
+        D.els.unshift(b); selId = b.id; multi = []; mediaMode = 'add'; commit(); renderPanel(); renderCtx(); toast('Image de fond ajoutée (calque verrouillé, tout en bas)'); return;
       }
     }
     const e = make(key);
@@ -780,7 +890,7 @@
     const cx = at ? at.x : D.w / 2, cy = at ? at.y : D.h / 2;
     e.x = Math.round(cx - e.w / 2); e.y = Math.round(cy - e.h / 2);
     if (e.kind === 'ticker') { e.x = 0; e.y = D.h - e.h; }
-    selId = e.id;
+    selId = e.id; multi = [];
     render();
     if (textual(e)) { e.y = Math.round(cy - e.h / 2); }
     commit(); renderCtx();
@@ -1493,7 +1603,7 @@
     if ((x = g('[data-fren]'))) { dv.ren = x.dataset.fren; renderPanel(); return true; }
     if ((x = g('[data-fhide]'))) { const [id, key] = x.dataset.fhide.split(':'), c = colsOf(id).find(y => y.key === key); if (c) colPref(id, key, c.name, !c.hidden); return true; }
     if ((x = g('[data-dset]'))) {
-      if (e) { selId = null; drawOverlay(); renderLayers(); renderCtx(); }
+      if (e) { selId = null; multi = []; drawOverlay(); renderLayers(); renderCtx(); }
       Object.assign(dv, { view: 'set', set: x.dataset.dset, row: 0, q: '', ren: null }); loadSource(dv.set); renderPanel(); return true;
     }
     if (g('[data-dback]')) { Object.assign(dv, { view: 'sources', q: '', ren: null }); renderPanel(); return true; }
@@ -1589,11 +1699,30 @@
   const textTools = e => fontSel(e) + sizeNum(e) + colorIn('color', e.color, 'Couleur du texte') + pick('weight', WEIGHTS, e.weight, 'Graisse') +
     `<button class="ce-tb ${e.italic ? 'on' : ''}" data-tog="italic" title="Italique"><i style="font-family:serif;font-size:17px">I</i></button>` + alignBtns(e) +
     pick('ls', [[-0.02, 'Serré'], [0, 'Normal'], [0.1, 'Large'], [0.25, 'Très large']], e.ls, 'Interlettrage');
+  /** Barre d'outils d'une sélection multiple : aligner les éléments les uns sur les autres, dupliquer, supprimer. */
+  function multiTools() {
+    const al = [['l', 'Aligner à gauche', 'M4 4v16M8 7h12M8 13h7'], ['c', 'Centrer horizontalement', 'M12 3v18M5 7h14M8 13h8'], ['r', 'Aligner à droite', 'M20 4v16M4 7h12M9 13h7'],
+      ['t', 'Aligner en haut', 'M4 4h16M7 8v12M13 8v7'], ['m', 'Centrer verticalement', 'M3 12h18M7 5v14M13 8v8'], ['b', 'Aligner en bas', 'M4 20h16M7 4v12M13 9v7']];
+    return `<span class="ce-kind">${multi.length} éléments sélectionnés</span>` + sepH +
+      al.map(([a, t, d]) => `<button class="ce-tb" data-mt="${a}" title="${t}" aria-label="${t}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="${d}"/></svg></button>`).join('') + sepH +
+      '<button class="ce-tb" data-act="dup" title="Dupliquer (Ctrl+D)">⧉</button><button class="ce-tb" data-act="del" title="Supprimer (Suppr)">🗑</button>' +
+      '<span class="ce-hint" style="margin-left:10px">Ctrl + clic : ajouter ou retirer · glissez pour déplacer l\'ensemble</span>';
+  }
+  function alignGroup(a) {
+    const g = group().filter(x => !x.locked); if (g.length < 2) return;
+    const b = bounds(g);
+    g.forEach(t => {
+      if (a === 'l') t.x = b.x; else if (a === 'r') t.x = b.x + b.w - t.w; else if (a === 'c') t.x = Math.round(b.x + (b.w - t.w) / 2);
+      else if (a === 't') t.y = b.y; else if (a === 'b') t.y = b.y + b.h - t.h; else if (a === 'm') t.y = Math.round(b.y + (b.h - t.h) / 2);
+    });
+    commit(); renderCtx();
+  }
   function renderCtx() {
     if (!root) return;
     const e = cur(), c = q('#ce-ctx');
     let h = '';
-    if (!e) h = '<span class="ce-hint">Cliquez sur un élément pour le modifier · double-cliquez sur un texte pour écrire · glissez depuis le panneau de gauche</span>';
+    if (multi.length > 1) h = multiTools();
+    else if (!e) h = '<span class="ce-hint">Cliquez sur un élément pour le modifier · double-cliquez sur un texte pour écrire · glissez depuis le panneau de gauche</span>';
     else if (textual(e)) {
       h = textTools(e);
       if (e.type === 'text') h += sepH + `<button class="ce-tb" data-act="field" title="Insérer un champ relié à une source (ou tapez « { » pendant l'écriture)">{ } Champ</button>` +
@@ -1719,13 +1848,25 @@
     });
   }
   function dup() {
+    if (multi.length > 1) {   // toute la sélection : copies décalées, qui forment la nouvelle sélection
+      const off = Math.round(40 * k()), ids = [];
+      group().forEach(e => {
+        const c = Object.assign(JSON.parse(JSON.stringify(e)), { id: nid(), x: e.x + off, y: e.y + off, locked: false });
+        if (c.type === 'list') c.name = nextName(e.name || 'Liste');
+        if (c.type === 'chart') c.name = nextChartName(srcName(e), e.kind);
+        D.els.push(c); ids.push(c.id);
+      });
+      commit(); pickMany(ids); return;
+    }
     const e = cur(); if (!e) return;
     const c = Object.assign(JSON.parse(JSON.stringify(e)), { id: nid(), x: e.x + Math.round(40 * k()), y: e.y + Math.round(40 * k()), locked: false });
     if (c.type === 'list') c.name = nextName(e.name || 'Liste');
     if (c.type === 'chart') c.name = nextChartName(srcName(e), e.kind);
     D.els.splice(D.els.indexOf(e) + 1, 0, c); selId = c.id; commit(); renderCtx();
   }
-  function del() { const e = cur(); if (!e) return; D.els = D.els.filter(x => x !== e); selId = null; commit(); renderCtx(); }
+  function del() {
+    if (multi.length > 1) { const ids = new Set(multi.filter(id => !(byId(id) || {}).locked)); D.els = D.els.filter(x => !ids.has(x.id)); selId = null; multi = []; commit(); renderCtx(); return; }
+    const e = cur(); if (!e) return; D.els = D.els.filter(x => x !== e); selId = null; commit(); renderCtx(); }
   function order(e, to) {
     const i = D.els.indexOf(e); D.els.splice(i, 1);
     const j = to === 'top' ? D.els.length : to === 'bottom' ? 0 : to === 'up' ? Math.min(D.els.length, i + 1) : Math.max(0, i - 1);
@@ -1974,7 +2115,7 @@
     D = { v: 1, w: d.w, h: d.h, bg: d.bg || '#FFFFFF', els: d.els };
     uid = 1 + D.els.reduce((m, e) => Math.max(m, parseInt(String(e.id || '').replace(/\D/g, ''), 10) || 0), 0);
     D.els.forEach(e => { if (!e.id) e.id = nid(); });
-    selId = null; zoom = 1; commit(); renderCtx();
+    selId = null; multi = []; zoom = 1; commit(); renderCtx();
     D.els.filter(e => e.type === 'qr').forEach(e => fetchQr(e));
     toast(`Modèle « ${t.name} » appliqué`);
   }
@@ -1998,7 +2139,7 @@
   }
   function loadTpl(t) {
     D = { v: 1, w: t.w, h: t.h, bg: t.bg, els: t.make() };
-    selId = null; zoom = 1; commit(); renderCtx();
+    selId = null; multi = []; zoom = 1; commit(); renderCtx();
     D.els.filter(e => e.type === 'qr').forEach(e => fetchQr(e));
     toast(`Modèle « ${t.name} » appliqué`);
   }
@@ -2317,45 +2458,79 @@
   function renderLayers() {
     if (!layersOpen) return;
     q('#ce-layers').innerHTML = `<div class="ce-lh"><b>Calques</b><span>${D.els.length} élément${D.els.length > 1 ? 's' : ''}</span><button class="ce-tb" data-top="layers" aria-label="Fermer les calques">×</button></div>` +
-      [...D.els].reverse().map(e => `<div class="ce-ly${e.id === selId ? ' on' : ''}${e.hidden ? ' hid' : ''}" data-id="${esc(e.id)}" draggable="true"><span class="ic">${icon(e)}</span><span class="nm">${esc(label(e))}</span>${(e.show || []).length ? "<span class=\"cnd\" title=\"Affiché sous condition\">◐</span>" : ""}
+      [...D.els].reverse().map(e => `<div class="ce-ly${(multi.length > 1 ? multi.includes(e.id) : e.id === selId) ? ' on' : ''}${e.hidden ? ' hid' : ''}" data-id="${esc(e.id)}" draggable="true"><span class="ic">${icon(e)}</span><span class="nm">${esc(label(e))}</span>${(e.show || []).length ? "<span class=\"cnd\" title=\"Affiché sous condition\">◐</span>" : ""}
         <button data-ly="hidden" class="${e.hidden ? 'on' : ''}" title="${e.hidden ? 'Afficher' : 'Masquer'}">${e.hidden ? '◌' : '👁'}</button><button data-ly="locked" class="${e.locked ? 'on' : ''}" title="${e.locked ? 'Déverrouiller' : 'Verrouiller'}">${e.locked ? '🔒' : '🔓'}</button></div>`).join('') +
       '<p class="ce-lnote">Glissez une ligne pour changer l\'ordre. Le calque du haut s\'affiche au premier plan. Un calque masqué n\'est pas diffusé.</p>';
   }
 
   // ---------- format ----------
+  // Nouvelle composition : bloc 1 = un écran existant (taille et orientation reprises), OU bloc 2 = réglages à la main (portrait, 1080 × 1920, page vide).
   function openFormat(isNew) {
-    fmtNew = isNew;
-    fmtO = isNew ? 'land' : D.w * 9 === D.h * 16 ? 'land' : D.h * 9 === D.w * 16 ? 'port' : 'custom';
+    fmtNew = isNew; fmtScr = ''; fmtTpl = -1; fmtStart = 'blank';
+    fmtO = isNew ? 'port' : D.w * 9 === D.h * 16 ? 'land' : D.h * 9 === D.w * 16 ? 'port' : 'custom';
+    q('#ce-cw').value = isNew ? 1080 : D.w; q('#ce-ch').value = isNew ? 1920 : D.h;
     q('#ce-fmttitle').textContent = isNew ? 'Nouvelle composition' : 'Format de la composition';
     q('#ce-fmtok').textContent = isNew ? 'Créer' : 'Appliquer';
+    q('#ce-fb2t').textContent = 'Réglages manuels'; q('#ce-fb2t').style.display = isNew ? '' : 'none';
+    const withScr = isNew && scrList.length > 0;
+    q('#ce-fb1').style.display = q('#ce-or').style.display = withScr ? '' : 'none';
     q('#ce-startfield').style.display = isNew ? '' : 'none';
     q('#ce-fmthelp').style.display = isNew ? 'none' : '';
-    if (fmtO === 'custom') { q('#ce-cw').value = D.w; q('#ce-ch').value = D.h; }
-    fmtUI();
+    const blank = root.querySelector('input[name=ce-start][value=blank]'); if (blank) blank.checked = true;
+    fmtScreens(); fmtUI();
     q('#ce-fmtscrim').hidden = false;
   }
+  function fmtScreens() {
+    q('#ce-scrs').innerHTML = scrList.map(s => `<button type="button" class="ce-sr${s.id === fmtScr ? ' on' : ''}" data-ms="${esc(s.id)}" aria-pressed="${s.id === fmtScr}"><span class="ic${s.h > s.w ? ' p' : ''}"></span><span class="nm">${esc(s.name)}${s.place ? `<small>${esc(s.place)}</small>` : ''}</span><span class="dm"><b>W</b>${s.w} × <b>H</b>${s.h}${s.def ? '<i>par défaut</i>' : ''}</span></button>`).join('');
+  }
+  function fmtPick(id) {
+    const s = scrList.find(x => x.id === id);
+    fmtScr = !s || id === fmtScr ? '' : id;
+    if (fmtScr) { fmtO = s.h > s.w ? 'port' : 'land'; q('#ce-cw').value = s.w; q('#ce-ch').value = s.h; }
+    fmtScreens(); fmtUI();
+  }
+  function fmtSetO(o) {   // l'orientation tourne la taille déjà saisie
+    fmtO = o;
+    if (o !== 'custom') {
+      const w = +q('#ce-cw').value || 1920, h = +q('#ce-ch').value || 1080, big = Math.max(w, h), small = Math.min(w, h);
+      q('#ce-cw').value = o === 'land' ? big : small; q('#ce-ch').value = o === 'land' ? small : big;
+    }
+    fmtUI();
+  }
+  const fmtDims = () => { const c = v => Math.min(7680, Math.max(320, Math.round(+v) || 320)); return [c(q('#ce-cw').value), c(q('#ce-ch').value)]; };
   function fmtUI() {
-    root.querySelectorAll('.ce-ori').forEach(b => b.classList.toggle('on', b.dataset.o === fmtO));
-    const c = fmtO === 'custom';
-    q('#ce-resfield').style.display = c ? 'none' : ''; q('#ce-customfield').style.display = c ? '' : 'none';
-    if (!c) q('#ce-res').innerHTML = RES[fmtO].map(([ww, hh, l], i) => `<option value="${i}" ${!fmtNew && ww === D.w && hh === D.h ? 'selected' : ''}>${l}</option>`).join('');
+    root.querySelectorAll('.ce-ori').forEach(b => { b.classList.toggle('on', b.dataset.o === fmtO); b.disabled = !!fmtScr; });
+    q('#ce-cw').disabled = q('#ce-ch').disabled = !!fmtScr;   // un écran choisi fixe l'orientation et la taille ; le point de départ reste libre
+    q('#ce-oris').closest('.ce-field').classList.toggle('lock', !!fmtScr); q('#ce-resfield').classList.toggle('lock', !!fmtScr);
+    q('#ce-fb2').classList.toggle('off', !!fmtScr);
+    q('#ce-reshelp').style.display = fmtScr ? 'none' : '';
+    const box = q('#ce-tpls'), show = fmtNew && fmtStart === 'tpl';
+    box.hidden = !show;
+    if (!show) return;
+    const idx = tplIndexes('Tous').filter(i => fmtO === 'custom' || (fmtO === 'land' ? TPL[i].w >= TPL[i].h : TPL[i].h > TPL[i].w));
+    if (!idx.includes(fmtTpl)) fmtTpl = -1;
+    box.innerHTML = idx.length ? idx.map(i => thumb(TPL[i], i).replace('data-tpl=', 'data-mt=').replace('class="ce-thumb"', `class="ce-thumb${i === fmtTpl ? ' on' : ''}" type="button"`)).join('') : '<p class="ce-help" style="margin:0">Aucun modèle dans cette orientation.</p>';
   }
   function closeFormat() { q('#ce-fmtscrim').hidden = true; }
+  const scaleEls = (els, f) => els.forEach(e => { ['x', 'y', 'w', 'h'].forEach(p => e[p] = Math.round(e[p] * f)); if (e.size) e.size = Math.round(e.size * f); if (e.sw) e.sw = Math.max(1, Math.round(e.sw * f)); if (e.radius) e.radius = Math.round(e.radius * f); });
   function applyFormat() {
-    let ww, hh;
-    if (fmtO === 'custom') { ww = Math.min(7680, Math.max(320, +q('#ce-cw').value || 0)); hh = Math.min(7680, Math.max(320, +q('#ce-ch').value || 0)); }
-    else [ww, hh] = RES[fmtO][+q('#ce-res').value];
+    const [ww, hh] = fmtDims();
     closeFormat();
     if (fmtNew) {
-      const tpl = (root.querySelector('input[name=ce-start]:checked') || {}).value === 'tpl';
-      D.w = ww; D.h = hh; selId = null; zoom = 1; commit(); renderCtx();
-      if (tpl) { tplCat = 'Tous'; openPanel('modeles'); } else openPanel('texte');
+      const t = fmtStart === 'tpl' && fmtTpl >= 0 ? TPL[fmtTpl] : null;
+      if (t) {   // modèle choisi dans la fenêtre : il prend la taille voulue (mêmes proportions : tout suit)
+        D = { v: 1, w: ww, h: hh, bg: t.bg, els: t.make() };
+        D.els.forEach(e => { if (!e.id) e.id = nid(); });
+        if (Math.abs(ww / hh - t.w / t.h) < .01 && ww !== t.w) scaleEls(D.els, ww / t.w);
+        name = t.name; q('#ce-name').value = name;
+      } else { D.w = ww; D.h = hh; }
+      selId = null; multi = []; zoom = 1; commit(); renderCtx();
+      if (t) { D.els.filter(e => e.type === 'qr').forEach(fetchQr); openPanel('texte'); }
+      else if (fmtStart === 'tpl') { tplCat = 'Tous'; openPanel('modeles'); }
+      else openPanel('texte');
       return;
     }
-    if (Math.abs(ww / hh - D.w / D.h) < .01) {   // même proportions : tout suit (positions, tailles, textes)
-      const f = ww / D.w;
-      D.els.forEach(e => { ['x', 'y', 'w', 'h'].forEach(p => e[p] = Math.round(e[p] * f)); if (e.size) e.size = Math.round(e.size * f); if (e.sw) e.sw = Math.max(1, Math.round(e.sw * f)); if (e.radius) e.radius = Math.round(e.radius * f); });
-    }
+    if (Math.abs(ww / hh - D.w / D.h) < .01) scaleEls(D.els, ww / D.w);   // même proportions : tout suit (positions, tailles, textes)
     D.w = ww; D.h = hh; commit();
   }
 

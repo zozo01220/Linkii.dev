@@ -74,25 +74,44 @@
                     <small>Ce que vous verrez sur l'écran</small>
                 </div><div class="fs-tvfoot"></div></div>
                 <div class="fs-stand"></div>
+                <div class="fs-ask">Sur quel appareil s'affiche votre écran ?</div>
                 <div class="fs-devs" role="tablist" aria-label="Appareil">
-                    <button type="button" role="tab" aria-selected="@(device == "web")" class="@(device == "web" ? "on" : "")" @onclick='() => device = "web"'>Navigateur / TV connectée</button>
-                    <button type="button" role="tab" aria-selected="@(device == "android")" class="@(device == "android" ? "on" : "")" @onclick='() => device = "android"'>TV Android</button>
-                    <button type="button" role="tab" aria-selected="@(device == "windows")" class="@(device == "windows" ? "on" : "")" @onclick='() => device = "windows"'>PC Windows</button>
+                    <button type="button" role="tab" aria-selected="@(device == "web")" class="@(device == "web" ? "on" : "")" @onclick='() => device = "web"'>
+                        <span class="fs-tag">Le plus simple</span><PlayerLogo Kind="Navigateur" Size="30" /><b>Navigateur</b><small>TV connectée</small>
+                    </button>
+                    <button type="button" role="tab" aria-selected="@(device == "android")" class="@(device == "android" ? "on" : "")" @onclick='() => device = "android"'>
+                        <PlayerLogo Kind="Android" Size="30" /><b>TV Android</b><small>Application</small>
+                    </button>
+                    <button type="button" role="tab" aria-selected="@(device == "windows")" class="@(device == "windows" ? "on" : "")" @onclick='() => device = "windows"'>
+                        <PlayerLogo Kind="Windows" Size="30" /><b>PC Windows</b><small>Installateur</small>
+                    </button>
+                    <button type="button" role="tab" aria-selected="@(device == "linux")" class="@(device == "linux" ? "on" : "")" @onclick='() => device = "linux"'>
+                        <PlayerLogo Kind="Linux" Size="30" /><b>Linux</b><small>Raspberry Pi</small>
+                    </button>
                 </div>
                 <div class="fs-where">
                     @if (device == "web")
                     {
-                        <span>Sur l'écran, ouvrez le navigateur et allez sur <b class="fs-addr">@PlayerAddress</b></span>
+                        <div class="fs-st"><span class="fs-n">1</span><span>Sur l'écran, ouvrez le navigateur et allez sur cette adresse</span></div>
+                        <div class="fs-addrbox"><code>@PlayerAddress</code><button type="button" class="fs-copy" @onclick="CopyAddress"><Ico Name="copy" Size="14" /> @(copied ? "Copié" : "Copier")</button></div>
+                        <div class="fs-st"><span class="fs-n">2</span><span>Recopiez le code à 6 chiffres affiché</span></div>
                         <a class="btn fs-cta" href="/player/" target="_blank" rel="noopener"><Ico Name="external" Size="17" /> Ouvrir dans mon navigateur</a>
-                    }
-                    else if (device == "android")
-                    {
-                        <span>Sur la TV ou le boîtier Android, installez l'app <b>Linkivi Player</b>, puis ouvrez-la.</span>
                     }
                     else
                     {
-                        <span>Sur le PC, installez <b>Linkivi Player pour Windows</b>, puis lancez-le. Il démarre ensuite avec le PC.</span>
-                        <a class="btn fs-cta" href="/download/windows" download><Ico Name="download" Size="17" /> Télécharger pour Windows</a>
+                        var (name, href) = device switch
+                        {
+                            "android" => ("Android", "/download/android"),
+                            "linux" => ("Linux", "/download/linux"),
+                            _ => ("Windows", "/download/windows")
+                        };
+                        <div class="fs-st"><span class="fs-n">1</span><span>
+                            @if (device == "android") { <text>Sur la TV ou le boîtier Android, installez l'app <b>Linkivi Player</b>.</text> }
+                            else if (device == "linux") { <text>Sur le Raspberry Pi ou le mini-PC, installez <b>Linkivi Player pour Linux</b>.</text> }
+                            else { <text>Sur le PC, installez <b>Linkivi Player pour Windows</b>. Il démarre ensuite avec le PC.</text> }
+                        </span></div>
+                        <a class="btn fs-cta" href="@href" download><Ico Name="download" Size="17" /> Télécharger pour @name</a>
+                        <div class="fs-st"><span class="fs-n">2</span><span>Lancez-le, puis recopiez le code à 6 chiffres</span></div>
                     }
                 </div>
             </div>
@@ -157,6 +176,12 @@
     private void Sync() { shown = (draft.Kick, draft.Title, draft.Sub); gen++; }
 
     private string PlayerAddress => new Uri(Nav.BaseUri).Authority + "/player";
+
+    private bool copied;
+    private async Task CopyAddress()
+    {
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", PlayerAddress); copied = true; } catch { }
+    }
 
     protected override void OnInitialized()
     {
