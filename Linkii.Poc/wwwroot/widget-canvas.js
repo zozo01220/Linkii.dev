@@ -50,9 +50,24 @@
       el.classList.add('dragging');
     });
 
+    // aide à l'alignement (§177) : bords et centres de l'écran et des autres widgets, écarts égaux ; Alt : sans aimantation
+    function rectOf(el) { var f = el.__fit || { x: 0, y: 0 }; return { x: el.offsetLeft + f.x, y: el.offsetTop + f.y, w: el.offsetWidth, h: el.offsetHeight }; }
+    function snapOpts() { var cw = canvas.clientWidth, ch = canvas.clientHeight; return { W: cw, H: ch, sx: 1, sy: 1, unit: function (v, A) { return Math.round(v / (A ? cw : ch) * 1000) / 10 + ' %'; } }; }
+    function drawSnap(g) { var old = canvas.querySelector(':scope > .lx-snap'); if (old) old.remove(); if (g) canvas.insertAdjacentHTML('beforeend', w.LxSnap.svg(g, snapOpts())); }
+    function snapped(el, left, top, ev) {
+      if (!w.LxSnap || ev.altKey) { drawSnap(null); return { left: left, top: top }; }
+      var os = [].filter.call(canvas.querySelectorAll('[data-wid]'), function (o) { return o !== el && o.offsetWidth; }).map(rectOf), o = snapOpts();
+      var b = { x: left, y: top, w: el.offsetWidth, h: el.offsetHeight };
+      w.LxSnap.move(b, os, o, null);
+      b.x = clamp(b.x, 0, Math.max(0, o.W - b.w)); b.y = clamp(b.y, 0, Math.max(0, o.H - b.h));
+      drawSnap(w.LxSnap.guides(b, os, o, false));
+      return { left: b.x, top: b.y };
+    }
+
     canvas.addEventListener('pointermove', function (e) {
       if (!drag) return;
-      var p = pos(drag.el, e.clientX - drag.dx, e.clientY - drag.dy);
+      var sp = snapped(drag.el, e.clientX - drag.dx, e.clientY - drag.dy, e);
+      var p = pos(drag.el, sp.left, sp.top);
       drag.el.style.left = p.x + '%';
       drag.el.style.top = p.y + '%';
       drag.p = p; drag.moved = true;
@@ -61,7 +76,7 @@
     function end() {
       if (!drag) return;
       var d = drag; drag = null;
-      d.el.classList.remove('dragging');
+      d.el.classList.remove('dragging'); drawSnap(null);
       if (d.moved && d.p) { justDragged = true; setTimeout(function () { justDragged = false; }, 0); dotnet.invokeMethodAsync('Moved', d.el.getAttribute('data-wid'), d.p.x, d.p.y); }
     }
     // Le clic qui suit un déplacement ne doit pas ouvrir les réglages du widget

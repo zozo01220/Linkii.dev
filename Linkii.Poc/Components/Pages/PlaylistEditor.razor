@@ -39,10 +39,48 @@
                     @if (pickTab == "media")
                     {
                         <label class="search-box"><Ico Name="search" Size="16" /><input placeholder="Rechercher un média" aria-label="Rechercher un média" @bind="medSearch" @bind:event="oninput" /></label>
-                        <div class="pf-chips" role="group" aria-label="Type de média">
-                            <button type="button" class="@(medKind == "" ? "on" : "")" @onclick='() => medKind = ""'>Tous</button>
-                            <button type="button" class="@(medKind == "image" ? "on" : "")" @onclick='() => medKind = "image"'>Images</button>
-                            <button type="button" class="@(medKind == "video" ? "on" : "")" @onclick='() => medKind = "video"'>Vidéos</button>
+                        @* filtre en liste déroulante, « Importer » sur la même ligne, collé au bord droit de la colonne (§177) *@
+                        <div class="pf-medbar">
+                            <select class="pf-medkind" aria-label="Type de média" @bind="medKind">
+                                <option value="">Tous les médias</option>
+                                <option value="image">Images</option>
+                                <option value="video">Vidéos</option>
+                            </select>
+                            @if (canImport)
+                            {
+                                @* Importer dans la médiathèque sans quitter la liste : ordinateur seulement en mode simple ; ordinateur, adresse web et cloud en expert (§176) *@
+                                <span class="pf-imp">
+                                    @if (Modes.Simple)
+                                    {
+                                        <label for="@ImportInputId" class="pf-imp-btn" role="button" tabindex="0" title="Importer des images ou des vidéos depuis l'ordinateur"><Ico Name="upload" Size="14" /> Importer</label>
+                                    }
+                                    else
+                                    {
+                                        <button type="button" class="pf-imp-btn" aria-haspopup="menu" aria-expanded="@(impMenu ? "true" : "false")" @onclick="() => { impUrl = false; impMenu = !impMenu; }"><Ico Name="upload" Size="14" /> Importer <Ico Name="chevron" Size="12" /></button>
+                                        @if (impMenu)
+                                        {
+                                            <div class="kebab-backdrop" @onclick="() => impMenu = false"></div>
+                                            <div class="kebab-menu pf-imp-menu" role="menu">
+                                                <label for="@ImportInputId" role="menuitem" tabindex="0" @onclick="() => impMenu = false"><Ico Name="upload" Size="18" /><span><b>Depuis l'ordinateur</b><small>Images et vidéos</small></span></label>
+                                                <button type="button" role="menuitem" @onclick="OpenImportUrl"><Ico Name="link" Size="18" /><span><b>Depuis une adresse web</b><small>Lien direct vers une image ou une vidéo</small></span></button>
+                                                <button type="button" role="menuitem" @onclick="() => { impMenu = false; impCloud = true; }"><Ico Name="cloud" Size="18" /><span><b>Depuis le cloud</b><small>OneDrive, Google, Canva, Dropbox…</small></span></button>
+                                            </div>
+                                        }
+                                        @if (impUrl)
+                                        {
+                                            <div class="kebab-backdrop" @onclick="() => impUrl = false"></div>
+                                            <form class="lx-url-pop pf-imp-url" role="dialog" aria-labelledby="pf-url-t" @onsubmit="SubmitImportUrl" @onsubmit:preventDefault>
+                                                <b id="pf-url-t">Importer depuis une adresse web</b>
+                                                <div class="row">
+                                                    <input type="url" @ref="impUrlInput" placeholder="https://exemple.ch/affiche.jpg" @bind="impUrlValue" @bind:event="oninput" aria-label="Adresse web du fichier" />
+                                                    <button type="submit" class="btn" disabled="@string.IsNullOrWhiteSpace(impUrlValue)">Importer</button>
+                                                </div>
+                                                <small>Lien direct vers une image ou une vidéo. Le fichier est copié dans la médiathèque.</small>
+                                            </form>
+                                        }
+                                    }
+                                </span>
+                            }
                         </div>
                     }
                     else
@@ -53,9 +91,20 @@
                 @if (pickTab == "media")
                 {
                     <div class="pf-apps-l pf-meds">
-                        @if (pickFiles.Count == 0)
+                        @* imports en cours : en tête de la liste, avec leur progression *@
+                        @foreach (var j in ImportJobs)
                         {
-                            <p class="hint">Aucune image ni vidéo dans la médiathèque. <a href="/media">Importez-en dans Contenus</a>.</p>
+                            var job = j;
+                            var failed = job.State == "error";
+                            <div class="pf-med pf-med-job @(failed ? "fail" : "")" role="status">
+                                <span class="pf-med-th">@if (failed) { <Ico Name="x" Size="16" /> } else { <span class="pf-med-bar" style="width:@(MediaUploader.Pct(job))%"></span> }</span>
+                                <span class="pf-med-tx"><b>@job.Name</b><small>@(failed ? job.Error ?? "Échec de l'import" : job.Note ?? (job.Total is > 0 ? $"Import · {MediaUploader.Pct(job)} %" : "Import…"))</small></span>
+                                <button type="button" class="pf-med-x" aria-label="@(failed ? "Retirer" : "Annuler l'import")" title="@(failed ? "Retirer" : "Annuler")" @onclick="() => DismissImport(job)"><Ico Name="x" Size="14" /></button>
+                            </div>
+                        }
+                        @if (pickFiles.Count == 0 && ImportJobs.Count == 0)
+                        {
+                            <p class="hint">Aucune image ni vidéo dans la médiathèque.@(canImport ? " Cliquez sur « Importer » pour en ajouter depuis votre ordinateur." : "")</p>
                         }
                         else if (!PickerFiles.Any())
                         {
@@ -64,9 +113,13 @@
                         @foreach (var f in PickerFiles)
                         {
                             var file = f;
-                            <button type="button" class="pf-med" draggable="true" data-med="@file.Id" title="Ajouter « @file.Name » à la fin" @onclick="() => AddMedia(file, null)">
+                            var fresh = freshFiles.Contains(file.Id);
+                            var busy = file.Status != null;   // vidéo en conversion : visible, ajoutable une fois prête
+                            <button type="button" class="pf-med @(fresh ? "fresh" : "") @(busy ? "busy" : "")" draggable="@(busy ? "false" : "true")" data-med="@(busy ? null : file.Id)" data-fresh="@(fresh ? file.Id : null)"
+                                    disabled="@busy" title="@(busy ? "Conversion en cours : le média sera ajoutable dans un instant" : $"Ajouter « {file.Name} » à la fin")" @onclick="() => AddMedia(file, null)">
                                 <span class="pf-med-th"><MediaThumb Media="file" All="media" /><span class="pf-med-ty"><AppIcon Id="@(file.Type == "video" ? "video" : "image")" Small="true" /></span></span>
-                                <span class="pf-med-tx"><b>@file.Name</b><small>@MediaMeta(file)</small></span>
+                                <span class="pf-med-tx"><b>@file.Name</b><small>@(busy ? "Conversion en cours…" : MediaMeta(file))</small></span>
+                                @if (fresh) { <span class="pf-med-new">Nouveau</span> }
                                 <span class="pf-med-add" aria-hidden="true"><Ico Name="plus" Size="14" /></span>
                             </button>
                         }
@@ -96,6 +149,23 @@
                 @if (Modes.Expert) { <div class="pf-apps-f"><a href="/integrations">Toutes les intégrations…</a></div> }
                 }
             </aside>
+            @* import depuis l'onglet Médias : champ de fichiers caché (ouvert par « Importer ») et fenêtre « Depuis le cloud » (expert), gardés dans la page pour que l'import continue *@
+            @if (canImport)
+            {
+                <MediaUploader InputId="@ImportInputId" OnImported="Imported" ShowJobs="false" Changed="StateHasChanged" @ref="importer" />
+                @if (impCloud && Modes.Expert)
+                {
+                    <div class="modal-backdrop" @onclick="() => impCloud = false"></div>
+                    <div class="imp-bottom lx-import" role="dialog" aria-modal="true" aria-labelledby="pf-imp-title">
+                        <div class="imp-head">
+                            <h3 id="pf-imp-title">Importer depuis le cloud<small>Chaque page d'un document devient une image, rangée dans une présentation du dossier « …_médias ».</small></h3>
+                            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => impCloud = false"><Ico Name="x" Size="20" /></button>
+                        </div>
+                        <div class="imp-body"><DocumentImporter OnImported="CloudImported" /></div>
+                        <div class="imp-foot"><span>Une fois le compte connecté, on revient ici et la tuile est déverrouillée.</span><button class="btn ghost" @onclick="() => impCloud = false">Fermer</button></div>
+                    </div>
+                }
+            }
         }
 
         <div class="pf-main">
@@ -483,13 +553,78 @@ else
     // ---------- Onglet « Médias » : images et vidéos de la médiathèque, ajoutées comme contenus « Image » ou « Vidéo » ----------
     private string pickTab = "media", medSearch = "", medKind = "";
     private List<MediaItem> pickFiles = new();
+    // les médias importés depuis le tiroir passent en tête, avec la pastille « Nouveau » ; puis les plus récents
     private IEnumerable<MediaItem> PickerFiles => pickFiles
-        .Where(m => medKind.Length == 0 || m.Type == medKind)
-        .Where(m => medSearch.Length == 0 || m.Name.Contains(medSearch, StringComparison.OrdinalIgnoreCase));
+        .Where(m => freshFiles.Contains(m.Id) || medKind.Length == 0 || m.Type == medKind)
+        .Where(m => freshFiles.Contains(m.Id) || medSearch.Length == 0 || m.Name.Contains(medSearch, StringComparison.OrdinalIgnoreCase))
+        .OrderByDescending(m => freshFiles.Contains(m.Id)).ThenByDescending(m => m.AddedUtc);
+
+    // ---------- Import depuis le tiroir (§176) : le média entre dans la médiathèque et apparaît en tête de l'onglet Médias ----------
+    private const string ImportInputId = "pf-import-files";
+    private MediaUploader? importer;
+    private bool canImport, impMenu, impUrl, impCloud;
+    private string impUrlValue = "";
+    private ElementReference impUrlInput;
+    private readonly HashSet<Guid> freshFiles = new();
+    private bool revealFresh;
+    private IReadOnlyList<MediaUploader.UploadJob> ImportJobs => importer?.Jobs ?? Array.Empty<MediaUploader.UploadJob>();
+
+    private async Task OpenImportUrl()
+    {
+        impMenu = false; impUrl = true; impUrlValue = "";
+        StateHasChanged();
+        await Task.Yield();
+        try { await impUrlInput.FocusAsync(); } catch (JSException) { } catch (InvalidOperationException) { }
+    }
+
+    private async Task SubmitImportUrl()
+    {
+        var u = impUrlValue.Trim();
+        if (u.Length == 0 || importer == null) return;
+        impUrl = false; impUrlValue = "";
+        pickTab = "media";
+        await importer.ImportUrl(u);
+    }
+
+    private void DismissImport(MediaUploader.UploadJob job)
+    {
+        if (job.State == "running") importer?.Cancel(job); else importer?.Dismiss(job);
+    }
+
+    // Média importé : rechargé, mis en tête de la liste et signalé ; une vidéo en conversion devient ajoutable dès qu'elle est prête
+    private void Imported(MediaItem m)
+    {
+        freshFiles.Add(m.Id);
+        pickTab = "media";
+        Reload();
+        revealFresh = true;
+        if (m.Status != null) _ = WatchConversion(m.Id);
+        Toast.Ok(m.Status == "processing" ? $"« {m.Name} » importé dans la médiathèque, conversion en MP4 en cours." : $"« {m.Name} » importé dans la médiathèque : glissez-le dans le fil.");
+    }
+
+    private async Task WatchConversion(Guid id)
+    {
+        for (var i = 0; i < 200; i++)   // au plus ~10 minutes
+        {
+            await Task.Delay(3000);
+            var status = Store.Read(d => d.Media.FirstOrDefault(x => x.Id == id)?.Status);
+            if (status == null || status == "error") break;
+        }
+        await InvokeAsync(() => { Reload(); StateHasChanged(); });
+    }
+
+    // Document importé depuis le cloud : ses pages entrent dans la médiathèque (présentation du dossier « …_médias »)
+    private void CloudImported(Guid? id)
+    {
+        impCloud = false;
+        Reload();
+        StateHasChanged();
+        Toast.Ok("Document importé dans la médiathèque : ses pages sont rangées dans une présentation, à retrouver dans Contenus.");
+    }
 
     private static string MediaMeta(MediaItem m) =>
-        (m.Type == "video" ? "Vidéo" : "Image")
-        + (m.Type == "video" && Helpers.VideoSeconds(m) is { } vs ? $" · {Helpers.FormatDuration(vs)}" : m.Width is { } w && m.Height is { } h ? $" · {w} × {h}" : "");
+        (m.Width is { } w && m.Height is { } h ? $"{w} × {h}" : m.Type == "video" ? "Vidéo" : "Image")
+        + (m.Type == "video" && Helpers.VideoSeconds(m) is { } vs ? $" · {Helpers.FormatDuration(vs)}" : "");
 
     /// <summary>Ajoute un fichier de la médiathèque au fil (à la position donnée, par défaut à la fin), comme un contenu « Image » ou « Vidéo » déjà rempli.</summary>
     private void AddMedia(MediaItem file, int? position)
@@ -987,7 +1122,9 @@ else
         zone = Store.Read(d => d.Tenant.Timezone);
         hidden = MediaLib.HiddenFileIds();   // fichiers des dossiers non accordés : leurs contenus sont masqués
         // onglet « Médias » : images et vidéos prêtes (ni en conversion ni en échec), les plus récentes d'abord
-        pickFiles = MediaLib.PickableFiles().Where(m => m.Type is "image" or "video" && m.Status == null && !hidden.Contains(m.Id)).OrderByDescending(m => m.AddedUtc).ToList();
+        // (une vidéo importée depuis le tiroir reste visible pendant sa conversion)
+        pickFiles = MediaLib.PickableFiles().Where(m => m.Type is "image" or "video" && (m.Status == null || m.Status == "processing" && freshFiles.Contains(m.Id)) && !hidden.Contains(m.Id)).OrderByDescending(m => m.AddedUtc).ToList();
+        canImport = !readOnlyHere && Store.Read(d => d.Access.CanWrite(LevelPages.Media));
         enabledApps = Svc.Installed().Select(i => Svc.Find(i.AppId)).OfType<AppManifest>().Where(a => !a.ScreenWidget && !a.IsFeature && SimpleMode.Offers(Modes.Expert, a.Id)).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();   // mode simple : intégrations de base seulement
         growth = Store.Read(d => d.Tenant.IsGrowth);
         outside = Store.Read(d => d.Access.Sees is { } sees ? d.Root.Screens.Count(s => s.ClientId == d.ClientId && s.Token != null && !sees(s) && s.ZonePlaylists().Contains(Id)) : 0);
@@ -1248,6 +1385,7 @@ else
         if (focusRename && renaming) { focusRename = false; await renameInput.FocusAsync(); }
         if (focusItemRename && renameFor != null) { focusItemRename = false; try { await renameItemInput.FocusAsync(); } catch (JSException) { } }
         if (focusDur && durFor != null) { focusDur = false; try { await JS.InvokeVoidAsync("linkiiFlow.select", durInput); } catch (JSException) { } }
+        if (revealFresh) { revealFresh = false; try { await JS.InvokeVoidAsync("linkiiFlow.revealMedia"); } catch (JSException) { } }   // média importé : amené en vue en tête de la liste
         if (firstRender)
         {
             // mode simple : toujours en lignes

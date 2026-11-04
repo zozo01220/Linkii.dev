@@ -73,8 +73,14 @@
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
+  // Média qui vient d'être importé dans l'onglet « Médias » : la liste remonte pour le montrer (il est en tête)
+  function revealMedia() {
+    var el = d.querySelector('.pf-med[data-fresh]');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
   // Champ de durée ouvert : focus et texte sélectionné, prêt à être remplacé
   function select(el) { if (el) { el.focus(); if (el.select) el.select(); } }
 
-  w.linkiiFlow = { init: init, reveal: reveal, select: select };
+  w.linkiiFlow = { init: init, reveal: reveal, revealMedia: revealMedia, select: select };
 })(window, document);

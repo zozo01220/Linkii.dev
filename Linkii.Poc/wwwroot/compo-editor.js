@@ -349,9 +349,10 @@
       (drag.hits || []).forEach(id => { const x = byId(id); if (x) h += `<div class="ce-selwrap" style="left:${x.x * z}px;top:${x.y * z}px;width:${x.w * z}px;height:${x.h * z}px;transform:rotate(${+x.rot || 0}deg)"><div class="ce-selbox"></div></div>`; });
       const r = drag.rect; h += `<div class="ce-band" style="left:${r.x * z}px;top:${r.y * z}px;width:${r.w * z}px;height:${r.h * z}px"></div>`;
     }
-    (guides || []).forEach(g => h += g.v != null
-      ? `<div class="ce-guide" style="left:${g.v * z}px;top:0;width:1px;height:100%"></div>`
-      : `<div class="ce-guide" style="top:${g.h * z}px;left:0;height:1px;width:100%"></div>`);
+    // lignes d'alignement, écarts égaux et tailles égales (§177)
+    if (guides) h += LxSnap.svg(guides, snapOpts());
+    // sélection en rangée ou en colonne : une pastille par écart, à tirer pour les changer tous
+    if (gr.length > 1 && (!drag || drag.mode === 'gap') && !gr.some(x => +x.rot)) h += LxSnap.gapPills(LxSnap.arrange(gr), snapOpts());
     ov.innerHTML = h;
   }
 
@@ -450,6 +451,11 @@
         ev.preventDefault(); return;
       }
       if (hd && e0) { drag = { mode: 'r', dir: hd.dataset.d, sx: ev.clientX, sy: ev.clientY, o: Object.assign({}, e0) }; ev.preventDefault(); return; }
+      const gp = ev.target.closest('.lx-gp');
+      if (gp) {   // pastille d'écart entre éléments sélectionnés (§177)
+        const ar = LxSnap.arrange(group().filter(x => !x.hidden));
+        if (ar) { drag = { mode: 'gap', A: ar.A, items: ar.items.map(x => x.id), g0: ar.gaps[+gp.dataset.gap], sx: ev.clientX, sy: ev.clientY }; ev.preventDefault(); return; }
+      }
       const n = ev.target.closest('.lc-el'), add = ev.ctrlKey || ev.metaKey || ev.shiftKey;
       if (n && add) toggleSel(n.dataset.id);   // Ctrl/Cmd/Maj + clic : ajoute l'élément à la sélection, ou le retire
       if (n && multi.length > 1 && multi.includes(n.dataset.id)) {   // glisser un élément de la sélection : tous suivent
@@ -520,6 +526,7 @@
       if (e.type === 'qr' && key === 'url') { e.qr = ''; fetchQr(e, 500); }
       render();
     });
+    on(ctx, 'change', ev => { if (ev.target.dataset.mgap != null && multi.length > 1) gapGroup(Math.max(0, Math.round(+ev.target.value || 0))); });   // écart de la sélection (§177)
     on(ctx, 'change', ev => { const was0 = (cur() || {}).kind; if (ev.target.dataset.k) commit(); if (ev.target.dataset.k === 'source') loadSource(ev.target.value); const ce = cur(); if (ce && ce.type === 'chart' && ev.target.dataset.k) { if (ev.target.dataset.k === 'kind') { changeKind(ce, ce.kind, was0); commit(); } afterChart(); } });
     on(ctx, 'mousedown', ev => { if (editing && ev.target.closest('[data-act=field]')) ev.preventDefault(); });   // le texte en cours d'écriture garde le curseur
     on(ctx, 'click', ev => {
@@ -617,60 +624,69 @@
       drag.hits = D.els.filter(t => !t.hidden && !t.locked && t.x < x2 && t.x + t.w > x1 && t.y < y2 && t.y + t.h > y1).map(t => t.id);   // les calques verrouillés (fond) ne sont pas pris
       drawOverlay(); return;
     }
+    if (drag.mode === 'gap') {   // pastille d'écart d'une rangée / colonne sélectionnée : tous les écarts changent ensemble (§177)
+      const dd = (drag.A ? ev.clientX - drag.sx : ev.clientY - drag.sy) / z;
+      if (!drag.moved && Math.abs(dd) < 1) return;
+      drag.moved = true;
+      let g = drag.g0 + dd; if (ev.shiftKey) g = Math.round(g / 10) * 10; g = Math.max(0, Math.round(g));
+      drag.g = g; LxSnap.setGap(drag.items.map(byId).filter(Boolean), drag.A, g);
+      render(); return;
+    }
     if (drag.mode === 'g') {   // déplacement de toute la sélection, aimantée sur l'ensemble
-      const dx = (ev.clientX - drag.sx) / z, dy = (ev.clientY - drag.sy) / z, o = drag.o;
+      let dx = (ev.clientX - drag.sx) / z, dy = (ev.clientY - drag.sy) / z; const o = drag.o;
       if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 2) return;
-      drag.moved = true; guides = [];
-      let x = o.x + dx, y = o.y + dy;
-      if (!ev.altKey) {
-        const xs = [0, D.w / 2, D.w], ys = [0, D.h / 2, D.h], tol = 8 / z, ids = new Set(multi);
-        D.els.forEach(t => { if (ids.has(t.id) || t.hidden) return; xs.push(t.x, t.x + t.w / 2, t.x + t.w); ys.push(t.y, t.y + t.h / 2, t.y + t.h); });
-        const snap = (pos, size, lines) => { let best = null; [0, size / 2, size].forEach(off => lines.forEach(l => { const d = l - (pos + off); if (Math.abs(d) < tol && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, l }; })); return best; };
-        const bx = snap(x, o.w, xs); if (bx) { x += bx.d; guides.push({ v: bx.l }); }
-        const by = snap(y, o.h, ys); if (by) { y += by.d; guides.push({ h: by.l }); }
-      }
-      const mx = Math.round(x - o.x), my = Math.round(y - o.y);
+      drag.moved = true; guides = null;
+      let lock = null; if (ev.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) { dy = 0; lock = false; } else { dx = 0; lock = true; } }   // Maj : déplacement droit
+      const b = { x: o.x + dx, y: o.y + dy, w: o.w, h: o.h };
+      const ids = new Set(multi), os = snapTargets(t => !ids.has(t.id));
+      if (!ev.altKey) LxSnap.move(b, os, snapOpts(), lock);   // Alt : sans aimantation
+      b.x = Math.round(b.x); b.y = Math.round(b.y);
+      if (!ev.altKey) guides = LxSnap.guides(b, os, snapOpts(), false);
+      const mx = b.x - o.x, my = b.y - o.y;
       drag.os.forEach(p => { const t = byId(p.id); if (t) { t.x = p.x + mx; t.y = p.y + my; } });
       render(); return;
     }
     const e = cur(); if (!e) return;
-    const dx = (ev.clientX - drag.sx) / z, dy = (ev.clientY - drag.sy) / z, o = drag.o;
+    let dx = (ev.clientX - drag.sx) / z, dy = (ev.clientY - drag.sy) / z; const o = drag.o;
     if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 2) return;
-    drag.moved = true; guides = [];
+    drag.moved = true; guides = null;
     if (drag.mode === 'rot') {
       let a = Math.atan2(ev.clientY - drag.cy, ev.clientX - drag.cx) * 180 / Math.PI + 90;
       if (ev.shiftKey) a = Math.round(a / 15) * 15;
       else { const n = Math.round(a / 45) * 45; if (Math.abs(a - n) < 4) a = n; }   // s'aimante doucement aux angles droits et à 45°
       e.rot = Math.round(((a % 360) + 540) % 360 - 180);
     } else if (drag.mode === 'm') {
-      let x = o.x + dx, y = o.y + dy;
-      if (!ev.altKey) {   // Alt : sans aimantation
-        // bords et centres de la page et des autres éléments visibles
-        const xs = [0, D.w / 2, D.w], ys = [0, D.h / 2, D.h], tol = 8 / z;
-        D.els.forEach(t => { if (t.id === e.id || t.hidden) return; xs.push(t.x, t.x + t.w / 2, t.x + t.w); ys.push(t.y, t.y + t.h / 2, t.y + t.h); });
-        const snap = (pos, size, lines) => {
-          let best = null;
-          [0, size / 2, size].forEach(off => lines.forEach(l => { const d = l - (pos + off); if (Math.abs(d) < tol && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, l }; }));
-          return best;
-        };
-        const bx = snap(x, o.w, xs); if (bx) { x += bx.d; guides.push({ v: bx.l }); }
-        const by = snap(y, o.h, ys); if (by) { y += by.d; guides.push({ h: by.l }); }
-      }
-      e.x = Math.round(x); e.y = Math.round(y);
+      // bords et centres de la page et des autres éléments visibles, écarts égaux (§177) ; Alt : sans aimantation, Maj : déplacement droit
+      let lock = null; if (ev.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) { dy = 0; lock = false; } else { dx = 0; lock = true; } }
+      const b = { x: o.x + dx, y: o.y + dy, w: o.w, h: o.h }, os = snapTargets(t => t.id !== e.id);
+      if (!ev.altKey) LxSnap.move(b, os, snapOpts(), lock);
+      e.x = Math.round(b.x); e.y = Math.round(b.y);
+      if (!ev.altKey) guides = LxSnap.guides({ x: e.x, y: e.y, w: e.w, h: e.h }, os, snapOpts(), false);
     } else {
       // redimensionnement dans les axes de l'élément (il peut être tourné) ; le côté opposé reste fixe à l'écran
       const d = drag.dir, th = (+o.rot || 0) * Math.PI / 180, cs = Math.cos(th), sn = Math.sin(th);
       const lx = dx * cs + dy * sn, ly = -dx * sn + dy * cs;
       const sx = d.includes('e') ? 1 : d.includes('w') ? -1 : 0, sy = d.includes('s') ? 1 : d.includes('n') ? -1 : 0;
       let ww = Math.max(20, o.w + sx * lx), hh = Math.max(20, o.h + sy * ly);
-      if (ev.shiftKey && sx && sy) hh = Math.max(20, ww * o.h / o.w);   // Maj : proportions gardées
+      const ratio = ev.shiftKey && sx && sy;
+      if (ratio) hh = Math.max(20, ww * o.h / o.w);   // Maj : proportions gardées
       if (textual(e)) hh = o.h;   // texte : hauteur automatique
       const ax = -sx * o.w / 2, ay = -sy * o.h / 2, Ax = o.x + o.w / 2 + ax * cs - ay * sn, Ay = o.y + o.h / 2 + ax * sn + ay * cs;
       const bx = -sx * ww / 2, by = -sy * hh / 2, cx = Ax - (bx * cs - by * sn), cy = Ay - (bx * sn + by * cs);
-      Object.assign(e, { x: Math.round(cx - ww / 2), y: Math.round(cy - hh / 2), w: Math.round(ww), h: Math.round(hh) });
+      const b = { x: cx - ww / 2, y: cy - hh / 2, w: ww, h: hh };
+      if (!(+o.rot) && !ratio && !ev.altKey) {   // élément droit : le bord tiré s'aimante aux autres, et à la même taille (§177)
+        const os = snapTargets(t => t.id !== e.id), dirs = textual(e) ? d.replace(/[ns]/g, '') : d;
+        LxSnap.resize(b, dirs, os, snapOpts());
+        if (b.w < 20) { if (d.includes('w')) b.x = o.x + o.w - 20; b.w = 20; } if (b.h < 20) { if (d.includes('n')) b.y = o.y + o.h - 20; b.h = 20; }
+        Object.assign(e, { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) });
+        guides = LxSnap.guides({ x: e.x, y: e.y, w: e.w, h: e.h }, os, snapOpts(), true);
+      } else Object.assign(e, { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.w), h: Math.round(b.h) });
     }
     render();
   }
+  /** cibles de l'aimantation : les éléments visibles (cadre non tourné) ; options de la page pour LxSnap (§177) */
+  const snapTargets = keep => D.els.filter(t => !t.hidden && keep(t)).map(t => ({ x: t.x, y: t.y, w: t.w, h: t.h }));
+  const snapOpts = () => ({ W: D.w, H: D.h, sx: z, sy: z });
 
   function keys(ev) {
     if (!root) return;
@@ -1719,11 +1735,30 @@
       ['t', 'Aligner en haut', 'M4 4h16M7 8v12M13 8v7'], ['m', 'Centrer verticalement', 'M3 12h18M7 5v14M13 8v8'], ['b', 'Aligner en bas', 'M4 20h16M7 4v12M13 9v7']];
     return `<span class="ce-kind">${multi.length} éléments sélectionnés</span>` + sepH +
       al.map(([a, t, d]) => `<button class="ce-tb" data-mt="${a}" title="${t}" aria-label="${t}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="${d}"/></svg></button>`).join('') + sepH +
+      spaceTools() + sepH +
       '<button class="ce-tb" data-act="dup" title="Dupliquer (Ctrl+D)">⧉</button><button class="ce-tb" data-act="del" title="Supprimer (Suppr)">🗑</button>' +
       '<span class="ce-hint" style="margin-left:10px">Ctrl + clic : ajouter ou retirer · glissez pour déplacer l\'ensemble</span>';
   }
+  /** Répartir, écart, ranger en grille, même taille (§177) : boutons et champ de la barre d'une sélection multiple. */
+  function spaceTools() {
+    const g = group().filter(x => !x.locked && !x.hidden), ar = LxSnap.arrange(g), I = LxSnap.ICONS, n = g.length;
+    const eq = ar && ar.gaps.every(v => Math.abs(v - ar.gaps[0]) < 1), gv = ar ? (eq ? Math.round(ar.gaps[0]) : '') : 40;
+    const bt = (a, t, d, dis) => `<button class="ce-tb" data-mt="${a}" title="${t}" aria-label="${t}"${dis ? ' disabled' : ''}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg></button>`;
+    return bt('dh', 'Répartir horizontalement : écarts égaux', I.dh, n < 3) + bt('dv', 'Répartir verticalement : écarts égaux', I.dv, n < 3) +
+      `<label class="ce-lbl" title="${ar ? 'Écart entre chaque élément' : 'Écart utilisé pour ranger en grille'}">Écart <input class="ce-mgap" data-mgap="1" type="number" min="0" value="${gv}" placeholder="—" aria-label="Écart en px"></label>` +
+      bt('grid', "Ranger en grille, avec l'écart indiqué", I.grid) + sepH + bt('sw', 'Même largeur (la plus grande)', I.sw) + bt('sh', 'Même hauteur (la plus grande)', I.sh);
+  }
+  /** Applique un écart à la sélection : rangée ou colonne si elle en forme une, sinon rangement en grille. */
+  function gapGroup(v) {
+    const g = group().filter(x => !x.locked && !x.hidden); if (g.length < 2) return;
+    const ar = LxSnap.arrange(g); if (ar) LxSnap.setGap(ar.items, ar.A, v); else LxSnap.tidy(g, v);
+    g.forEach(t => { t.x = Math.round(t.x); t.y = Math.round(t.y); }); commit(); renderCtx();
+  }
   function alignGroup(a) {
     const g = group().filter(x => !x.locked); if (g.length < 2) return;
+    if (a === 'dh' || a === 'dv') { if (g.length < 3) return; if (LxSnap.distribute(g, a === 'dh') == null) { toast('Pas assez de place pour répartir : indiquez un écart ou rangez en grille.'); return; } g.forEach(t => { t.x = Math.round(t.x); t.y = Math.round(t.y); }); commit(); renderCtx(); return; }
+    if (a === 'grid') { const f = q('#ce-ctx .ce-mgap'); gapGroup(Math.max(0, Math.round(+(f && f.value) || 40))); return; }
+    if (a === 'sw' || a === 'sh') { LxSnap.sameSize(g.filter(t => !(a === 'sh' && textual(t))), a === 'sw'); commit(); renderCtx(); return; }
     const b = bounds(g);
     g.forEach(t => {
       if (a === 'l') t.x = b.x; else if (a === 'r') t.x = b.x + b.w - t.w; else if (a === 'c') t.x = Math.round(b.x + (b.w - t.w) / 2);

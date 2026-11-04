@@ -278,6 +278,7 @@
     var sel = S.sel && elOf(S.sel);
     if (sel) { var n = pg.querySelector('[data-id="' + sel.id + '"]'); if (n) { n.classList.add('sel'); handles(pg, sel); } }
     S.multi.forEach(function (id) { var m = pg.querySelector('[data-id="' + id + '"]'); if (m) m.classList.add('sel'); });
+    if (S.multi.length > 1 && (!drag || drag.mode === 'gap')) pg.insertAdjacentHTML('beforeend', LxSnap.gapPills(LxSnap.arrange(grpEls()), snapO()));   // écarts d'une rangée / colonne sélectionnée (§177)
     pg.addEventListener('pointerdown', onDown);
     pg.addEventListener('dblclick', onDbl);
   }
@@ -292,6 +293,14 @@
   var drag = null;
   function onDown(ev) {
     if (ev.button !== 0) return;
+    var gp = ev.target.closest('.lx-gp');
+    if (gp) {   // pastille d'écart : tous les écarts de la rangée / colonne changent ensemble (§177)
+      var ar = LxSnap.arrange(grpEls()); if (!ar) return;
+      ev.preventDefault();
+      drag = { mode: 'gap', A: ar.A, items: ar.items.map(function (t) { return t.id; }), g0: ar.gaps[+gp.dataset.gap], x0: ev.clientX, y0: ev.clientY, moved: false };
+      document.addEventListener('pointermove', onMove, true); document.addEventListener('pointerup', onUp, true);
+      return;
+    }
     var hd = ev.target.closest('.ie-hd'), n = ev.target.closest('.ie-el'), add = ev.ctrlKey || ev.metaKey || ev.shiftKey;
     if (!hd && add && n) {   // Ctrl/Cmd/Maj + clic : ajoute l'élément à la sélection, ou le retire
       var ids = selIds(), at = ids.indexOf(n.dataset.id); if (at >= 0) ids.splice(at, 1); else ids.push(n.dataset.id);
@@ -319,13 +328,29 @@
   }
   function onMove(ev) {
     if (!drag) return;
+    if (drag.mode === 'gap') {
+      var so0 = snapO(), dd = drag.A ? (ev.clientX - drag.x0) / so0.sx : (ev.clientY - drag.y0) / so0.sy;
+      if (Math.abs(ev.clientX - drag.x0) + Math.abs(ev.clientY - drag.y0) > 2) drag.moved = true;
+      if (!drag.moved) return;
+      var g = Math.max(0, drag.g0 + dd), px = so0.unit(1000, drag.A) / 1000;   // px réels de l'écran par unité
+      if (ev.shiftKey) g = Math.round(g * px / 10) * 10 / px;
+      LxSnap.setGap(drag.items.map(elOf).filter(Boolean), drag.A, g); drawStage(); return;
+    }
     if (drag.mode === 'band' || drag.mode === 'group') {
       var Hp = stageW / aspect(), pdx = (ev.clientX - drag.x0) / stageW * 100, pdy = (ev.clientY - drag.y0) / Hp * 100;
       if (Math.abs(ev.clientX - drag.x0) + Math.abs(ev.clientY - drag.y0) > 3) drag.moved = true;
       if (!drag.moved) return;
       var pg0 = $('#ie-stage');
       if (drag.mode === 'group') {
-        drag.os.forEach(function (o) { var t = elOf(o.id), nd = t && pg0.querySelector('[data-id="' + o.id + '"]'); if (!t) return; t.x = o.x + pdx; t.y = o.y + pdy; if (nd) { nd.style.left = t.x + '%'; nd.style.top = (t.y / (page().len || 1)) + '%'; } });
+        // l'ensemble s'aimante comme un seul bloc (§177) ; Alt : sans aimantation, Maj : déplacement droit
+        var lk = null; if (ev.shiftKey) { if (Math.abs(pdx) * aspect() > Math.abs(pdy)) { pdy = 0; lk = false; } else { pdx = 0; lk = true; } }
+        var gs = drag.os.map(function (o) { var t = elOf(o.id) || { w: 0, h: 0 }; return { x: o.x, y: o.y, w: t.w, h: t.h }; }), bb = boundsOf(gs), so = snapO(), os = others(drag.os.map(function (o) { return o.id; }));
+        var bx = { x: bb.x + pdx, y: bb.y + pdy, w: bb.w, h: bb.h };
+        if (!ev.altKey) LxSnap.move(bx, os, so, lk);
+        var mx = bx.x - bb.x, my = bx.y - bb.y;
+        drag.os.forEach(function (o) { var t = elOf(o.id), nd = t && pg0.querySelector('[data-id="' + o.id + '"]'); if (!t) return; t.x = o.x + mx; t.y = o.y + my; if (nd) { nd.style.left = t.x + '%'; nd.style.top = (t.y / (page().len || 1)) + '%'; } });
+        [].forEach.call(pg0.querySelectorAll('.lx-gp'), function (n) { n.remove(); });
+        drawSnap(ev.altKey ? null : LxSnap.guides(bx, os, so, false));
         return;
       }
       var r = drag.rect, ax = (drag.x0 - r.left) / stageW * 100, ay = (drag.y0 - r.top) / Hp * 100, bx = (ev.clientX - r.left) / stageW * 100, by = (ev.clientY - r.top) / Hp * 100;
@@ -339,31 +364,63 @@
     var e = elOf(drag.id), len = page().len || 1, H = stageW / aspect(), dx = (ev.clientX - drag.x0) / stageW * 100, dy = (ev.clientY - drag.y0) / H * 100, o = drag.o;
     if (Math.abs(ev.clientX - drag.x0) + Math.abs(ev.clientY - drag.y0) > 3) drag.moved = true;
     if (!drag.moved) return;
-    var d = drag.mode, T = 1.2;
-    if (d === 'move') {
-      var nx = o.x + dx, ny = o.y + dy, gx = null, gy = null;
-      [[nx, 0], [nx + e.w / 2, e.w / 2], [nx + e.w, e.w]].forEach(function (c, i) { [0, 50, 100].forEach(function (t) { if (gx === null && Math.abs(c[0] - t) < T) { nx = t - c[1]; gx = t; } }); });
-      var tg = []; for (var q = 0; q <= len * 2; q++) tg.push(q * 50);
-      [[ny, 0], [ny + e.h / 2, e.h / 2], [ny + e.h, e.h]].forEach(function (c) { tg.forEach(function (t) { if (gy === null && Math.abs(c[0] - t) < T) { ny = t - c[1]; gy = t; } }); });
-      e.x = nx; e.y = ny; guides(gx, gy);
+    var d = drag.mode, so = snapO(), os = others([e.id]);
+    if (d === 'move') {   // bords et centres de la page et des autres éléments, écarts égaux (§177) ; Alt : sans aimantation, Maj : déplacement droit
+      var lock = null; if (ev.shiftKey) { if (Math.abs(dx) * aspect() > Math.abs(dy)) { dy = 0; lock = false; } else { dx = 0; lock = true; } }
+      var b = { x: o.x + dx, y: o.y + dy, w: e.w, h: e.h };
+      if (!ev.altKey) LxSnap.move(b, os, so, lock);
+      e.x = b.x; e.y = b.y; drawSnap(ev.altKey ? null : LxSnap.guides(b, os, so, false));
     } else {
       var x = o.x, y = o.y, wd = o.w, ht = o.h;
       if (d.indexOf('e') >= 0) wd = o.w + dx;
       if (d.indexOf('s') >= 0) ht = o.h + dy;
       if (d.indexOf('w') >= 0) { wd = o.w - dx; x = o.x + dx; }
       if (d.indexOf('n') >= 0) { ht = o.h - dy; y = o.y + dy; }
+      if (!ev.altKey) { var rb = { x: x, y: y, w: wd, h: ht }; LxSnap.resize(rb, d, os, so); x = rb.x; y = rb.y; wd = rb.w; ht = rb.h; }   // le bord tiré s'aimante, et à la même taille (§177)
       if (wd < 3) { if (d.indexOf('w') >= 0) x = o.x + o.w - 3; wd = 3; }
       if (ht < 2) { if (d.indexOf('n') >= 0) y = o.y + o.h - 2; ht = 2; }
       e.x = x; e.y = y; e.w = wd; e.h = ht;
+      drawSnap(ev.altKey ? null : LxSnap.guides({ x: x, y: y, w: wd, h: ht }, os, so, true));
     }
     var pg = $('#ie-stage'), nd = pg.querySelector('[data-id="' + e.id + '"]');
     if (nd) { nd.style.left = e.x + '%'; nd.style.top = (e.y / len) + '%'; nd.style.width = e.w + '%'; nd.style.height = (e.h / len) + '%'; }
     [].forEach.call(pg.querySelectorAll('.ie-hd'), function (hd) { pg.removeChild(hd); }); handles(pg, e);
   }
-  function guides(gx, gy) {
-    var pg = $('#ie-stage'); [].forEach.call(pg.querySelectorAll('.ie-guide'), function (g) { pg.removeChild(g); });
-    if (gx !== null) { var a = document.createElement('i'); a.className = 'ie-guide v'; a.style.left = gx + '%'; pg.appendChild(a); }
-    if (gy !== null) { var b = document.createElement('i'); b.className = 'ie-guide h'; b.style.top = (gy / (page().len || 1)) + '%'; pg.appendChild(b); }
+  // ---------- aide à l'alignement (snap-guides.js, §177) ----------
+  // x et w en % de la largeur, y et h en % de la hauteur d'une page ; les valeurs affichées sont en px de l'écran réel
+  function snapO() {
+    var len = page().len || 1, Hp = stageW / aspect(), r = S.orientation === 'portrait' ? [1080, 1920] : [1920, 1080], ys = [];
+    for (var q = 0; q <= len * 2; q++) ys.push(q * 50);
+    return { W: 100, H: 100 * len, sx: stageW / 100, sy: Hp / 100, xs: [0, 50, 100], ys: ys, unit: function (v, A) { return Math.round(v * (A ? r[0] : r[1]) / 100); } };
+  }
+  function others(skip) { return page().els.filter(function (t) { return skip.indexOf(t.id) < 0; }).map(function (t) { return { x: t.x, y: t.y, w: t.w, h: t.h }; }); }
+  function boundsOf(L) { var x = Math.min.apply(null, L.map(function (r) { return r.x; })), y = Math.min.apply(null, L.map(function (r) { return r.y; })); return { x: x, y: y, w: Math.max.apply(null, L.map(function (r) { return r.x + r.w; })) - x, h: Math.max.apply(null, L.map(function (r) { return r.y + r.h; })) - y }; }
+  function drawSnap(g) { var pg = $('#ie-stage'); if (!pg) return; [].forEach.call(pg.querySelectorAll('.lx-snap'), function (n) { n.remove(); }); if (g) pg.insertAdjacentHTML('beforeend', LxSnap.svg(g, snapO())); }
+  function grpEls() { return S.multi.map(elOf).filter(Boolean); }
+  /** outils de la sélection multiple : aligner, répartir, écart (px de l'écran), ranger en grille, même taille */
+  function grpDo(a, val) {
+    var g = grpEls(); if (g.length < 2) return;
+    var b = boundsOf(g), so = snapO(), pxX = so.unit(1000, true) / 1000, pxY = so.unit(1000, false) / 1000;
+    var al = { l: function (t) { t.x = b.x; }, c: function (t) { t.x = b.x + (b.w - t.w) / 2; }, r: function (t) { t.x = b.x + b.w - t.w; }, t: function (t) { t.y = b.y; }, m: function (t) { t.y = b.y + (b.h - t.h) / 2; }, b: function (t) { t.y = b.y + b.h - t.h; } };
+    if (al[a]) g.forEach(al[a]);
+    else if (a === 'dh' || a === 'dv') { if (g.length < 3) return; if (LxSnap.distribute(g, a === 'dh') == null) { toast('Pas assez de place pour répartir : indiquez un écart ou rangez en grille.', true); return; } }
+    else if (a === 'sw' || a === 'sh') LxSnap.sameSize(g, a === 'sw');
+    else if (a === 'gap' || a === 'grid') {
+      var px = Math.max(0, Math.round(+val || 0)), ar = a === 'gap' ? LxSnap.arrange(g) : null;
+      if (ar) LxSnap.setGap(ar.items, ar.A, px / (ar.A ? pxX : pxY)); else LxSnap.tidy(g, px / pxX, px / pxY);
+    }
+    g.forEach(function (t) { t.x = Math.round(t.x * 100) / 100; t.y = Math.round(t.y * 100) / 100; t.w = Math.round(t.w * 100) / 100; t.h = Math.round(t.h * 100) / 100; });
+    dirty(); drawStage(); drawCtx();
+  }
+  function multiTools() {
+    var g = grpEls(), ar = LxSnap.arrange(g), so = snapO(), I = LxSnap.ICONS, n = g.length;
+    var gv = ar ? (ar.gaps.every(function (v) { return Math.abs(so.unit(v, ar.A) - so.unit(ar.gaps[0], ar.A)) < 1; }) ? so.unit(ar.gaps[0], ar.A) : '') : 40;
+    var bt = function (a, t, d, dis) { return '<button class="ie-ib" data-grp="' + a + '" title="' + t + '" aria-label="' + t + '"' + (dis ? ' disabled' : '') + '><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="' + d + '"/></svg></button>'; };
+    return bt('l', 'Aligner à gauche', 'M4 4v16M8 7h12M8 13h7') + bt('c', 'Centrer horizontalement', 'M12 3v18M5 7h14M8 13h8') + bt('r', 'Aligner à droite', 'M20 4v16M4 7h12M9 13h7') +
+      bt('t', 'Aligner en haut', 'M4 4h16M7 8v12M13 8v7') + bt('m', 'Centrer verticalement', 'M3 12h18M7 5v14M13 8v8') + bt('b', 'Aligner en bas', 'M4 20h16M7 4v12M13 9v7') + '<span class="ie-sep sm"></span>' +
+      bt('dh', 'Répartir horizontalement : écarts égaux', I.dh, n < 3) + bt('dv', 'Répartir verticalement : écarts égaux', I.dv, n < 3) +
+      '<label class="ie-gapf" title="' + (ar ? 'Écart entre chaque élément, en px de l’écran' : 'Écart utilisé pour ranger en grille, en px de l’écran') + '">Écart <input type="number" min="0" data-grpgap="1" value="' + gv + '" placeholder="—" aria-label="Écart en px"> px</label>' +
+      bt('grid', 'Ranger en grille, avec l’écart indiqué', I.grid) + '<span class="ie-sep sm"></span>' + bt('sw', 'Même largeur (la plus grande)', I.sw) + bt('sh', 'Même hauteur (la plus grande)', I.sh);
   }
   function onUp() {
     document.removeEventListener('pointermove', onMove, true); document.removeEventListener('pointerup', onUp, true);
@@ -374,11 +431,12 @@
     }
     if (drag && drag.mode === 'group') {
       var gd = drag; drag = null;
-      if (gd.moved) { dirty(); S.multi.forEach(function (id) { var t = elOf(id); if (t) { t.x = Math.round(t.x * 10) / 10; t.y = Math.round(t.y * 10) / 10; } }); drawStage(); }
+      if (gd.moved) { dirty(); S.multi.forEach(function (id) { var t = elOf(id); if (t) { t.x = Math.round(t.x * 100) / 100; t.y = Math.round(t.y * 100) / 100; } }); drawStage(); drawCtx(); }
       else setSel([gd.id]);   // simple clic sur un élément de la sélection : lui seul reste
       return;
     }
-    if (drag && drag.moved) { dirty(); var e = elOf(drag.id); if (e) { e.x = Math.round(e.x * 10) / 10; e.y = Math.round(e.y * 10) / 10; e.w = Math.round(e.w * 10) / 10; e.h = Math.round(e.h * 10) / 10; } }
+    if (drag && drag.mode === 'gap') { var gg = drag; drag = null; if (gg.moved) { dirty(); gg.items.forEach(function (id) { var t = elOf(id); if (t) { t.x = Math.round(t.x * 100) / 100; t.y = Math.round(t.y * 100) / 100; } }); } drawStage(); drawCtx(); return; }
+    if (drag && drag.moved) { dirty(); var e = elOf(drag.id); if (e) { e.x = Math.round(e.x * 100) / 100; e.y = Math.round(e.y * 100) / 100; e.w = Math.round(e.w * 100) / 100; e.h = Math.round(e.h * 100) / 100; } }
     drag = null; drawStage();
   }
   function onDbl(ev) {   // double clic : modifier le texte sur place
@@ -398,8 +456,12 @@
     var c = $('#ie-ctx'), e = S.sel && elOf(S.sel), h;
     if (S.multi.length > 1) {
       c.className = 'ie-ctx';
-      c.innerHTML = '<span class="ie-hint">' + S.multi.length + ' éléments sélectionnés · glissez pour les déplacer · Ctrl + clic pour ajouter ou retirer</span><span class="ie-sep sm"></span><button class="ie-ib" data-do="dup" title="Dupliquer (Ctrl+D)">' + ICO.dup + '</button><button class="ie-ib" data-do="del" title="Supprimer">' + ICO.del + '</button>';
-      c.onclick = function (ev) { var d = ev.target.closest('[data-do]'); if (d) { if (d.dataset.do === 'del') remove(); else dup(); } };
+      c.innerHTML = '<span class="ie-hint">' + S.multi.length + ' éléments</span><span class="ie-sep sm"></span>' + multiTools() + '<span class="ie-sep sm"></span><button class="ie-ib" data-do="dup" title="Dupliquer (Ctrl+D)">' + ICO.dup + '</button><button class="ie-ib" data-do="del" title="Supprimer">' + ICO.del + '</button>';
+      c.onclick = function (ev) {
+        var gb = ev.target.closest('[data-grp]'); if (gb) { var f = c.querySelector('[data-grpgap]'); grpDo(gb.dataset.grp, f && f.value !== '' ? f.value : 40); return; }
+        var d = ev.target.closest('[data-do]'); if (d) { if (d.dataset.do === 'del') remove(); else dup(); }
+      };
+      c.onchange = function (ev) { if (ev.target.dataset.grpgap) grpDo('gap', ev.target.value); };
       return;
     }
     if (!e) { c.className = 'ie-ctx empty'; c.innerHTML = '<span class="ie-hint">Touchez un élément pour le modifier</span>'; return; }
