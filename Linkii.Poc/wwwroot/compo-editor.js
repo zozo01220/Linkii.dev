@@ -240,25 +240,31 @@
 <div class="ce-scrim" id="ce-fmtscrim" hidden><div class="ce-modal" role="dialog" aria-modal="true" aria-labelledby="ce-fmttitle">
   <div class="ce-mh"><h4 id="ce-fmttitle">Nouvelle composition</h4><button class="ce-xb" data-fmt="close" aria-label="Fermer">×</button></div>
   <div class="ce-mb ce-fm">
-    <div class="ce-fb" id="ce-fb1"><div class="ce-fbt">Pour un écran existant</div><div class="ce-scrs" id="ce-scrs"></div></div>
+    <div class="ce-fb" id="ce-fb1"><div class="ce-fbt">Pour un écran existant</div>
+      <select id="ce-scrsel" aria-label="Écran existant"></select>
+      <p class="ce-help" id="ce-scrhint" style="margin:0"></p></div>
     <div class="ce-or" id="ce-or">OU</div>
-    <div class="ce-fb" id="ce-fb2"><div class="ce-fbt" id="ce-fb2t">Réglages manuels</div>
+    <div class="ce-fb" id="ce-fb2"><div class="ce-fbt" id="ce-fb2h"><span>Format libre</span><button type="button" class="ce-lnk" id="ce-free" data-free="1" hidden>Passer en format libre</button></div>
       <div class="ce-field"><label><span class="st">1</span>Orientation</label>
         <div class="ce-oris" id="ce-oris">
           <button type="button" class="ce-ori" data-o="land"><span class="scr" style="width:86px;height:50px">16:9</span>Paysage</button>
           <button type="button" class="ce-ori" data-o="port"><span class="scr" style="width:32px;height:56px">9:16</span>Portrait</button>
-          <button type="button" class="ce-ori" data-o="custom"><span class="scr" style="width:62px;height:50px;border-style:dashed">⤡</span>Personnalisé</button>
         </div></div>
       <div class="ce-field" id="ce-resfield"><label for="ce-cw"><span class="st">2</span>Résolution en pixels</label>
         <div class="ce-wh"><span class="wl">W</span><input id="ce-cw" type="number" min="320" max="7680" value="1080" aria-label="Largeur (W)"><span>×</span><span class="wl">H</span><input id="ce-ch" type="number" min="320" max="7680" value="1920" aria-label="Hauteur (H)"></div>
         <p class="ce-help" style="margin:0" id="ce-reshelp">Pour un mur de 2 écrans Full HD côte à côte : 3840 × 1080.</p></div>
       <div class="ce-field" id="ce-startfield"><label><span class="st">3</span>Point de départ</label>
         <div class="ce-radios"><label><input type="radio" name="ce-start" value="blank" checked> Page vide</label><label><input type="radio" name="ce-start" value="tpl"> Choisir un modèle</label></div>
-        <div class="ce-tpls" id="ce-tpls" hidden></div></div>
+        <div class="ce-tplsel" id="ce-tplsel" hidden></div></div>
       <p class="ce-help" id="ce-fmthelp">Si le rapport d'aspect change, les éléments gardent leur place : vérifiez la mise en page.</p>
     </div>
   </div>
   <div class="ce-mf"><button class="ce-btn ghost" data-fmt="close">Annuler</button><button class="ce-btn" data-fmt="ok" id="ce-fmtok">Créer</button></div>
+</div></div>
+<div class="ce-scrim ce-front" id="ce-pickscrim" hidden><div class="ce-modal ce-pick" role="dialog" aria-modal="true" aria-labelledby="ce-picktitle">
+  <div class="ce-mh"><h4 id="ce-picktitle">Choisir un modèle</h4><button class="ce-xb" data-pick="close" aria-label="Fermer">×</button></div>
+  <div class="ce-mb ce-pickb"><div class="ce-chips" id="ce-pickcats"></div><div class="ce-pickgrid" id="ce-pickgrid"></div></div>
+  <div class="ce-mf"><span class="ce-pickname" id="ce-pickname"></span><button class="ce-btn ghost" data-pick="close">Annuler</button><button class="ce-btn" data-pick="ok" id="ce-pickok" disabled>Choisir ce modèle</button></div>
 </div></div>
 <div class="ce-scrim" id="ce-tplscrim" hidden><div class="ce-modal" role="dialog" aria-modal="true" aria-labelledby="ce-tpltitle">
   <div class="ce-mh"><h4 id="ce-tpltitle">Enregistrer comme modèle</h4><button class="ce-xb" data-tplm="close" aria-label="Fermer">×</button></div>
@@ -410,18 +416,25 @@
       if (f) { if (f.dataset.fmt === 'ok') applyFormat(); else closeFormat(); }
       const o = ev.target.closest('.ce-ori');
       if (o && !o.disabled) fmtSetO(o.dataset.o);
-      const ms = ev.target.closest('[data-ms]');
-      if (ms) fmtPick(ms.dataset.ms);
-      const mt = ev.target.closest('[data-mt]');
-      if (mt) { fmtTpl = +mt.dataset.mt === fmtTpl ? -1 : +mt.dataset.mt; fmtUI(); }
+      if (ev.target.closest('[data-free]')) fmtPick('');   // retour aux réglages libres : on garde la taille de l'écran comme point de départ
+      const pk = ev.target.closest('[data-pick]');
+      if (pk) { const a = pk.dataset.pick; if (a === 'open') openPicker(); else if (a === 'ok') pickOk(); else closePicker(); }
+      const pc = ev.target.closest('[data-pcat]');
+      if (pc) { pickCat = pc.dataset.pcat; drawPicker(); }
+      if (ev.target.closest('[data-pall]')) { pickAll = !pickAll; drawPicker(); }
+      const pt = ev.target.closest('[data-pt]');
+      if (pt) { pickSel = +pt.dataset.pt; drawPicker(); }
     });
+    on(root, 'dblclick', ev => { const pt = ev.target.closest('[data-pt]'); if (pt) { pickSel = +pt.dataset.pt; pickOk(); } });
     on(root, 'input', ev => {   // taille tapée : l'orientation suit
       if (ev.target.id !== 'ce-cw' && ev.target.id !== 'ce-ch') return;
-      const w = +q('#ce-cw').value, h = +q('#ce-ch').value;
-      fmtO = w * 9 === h * 16 ? 'land' : h * 9 === w * 16 ? 'port' : 'custom';
+      fmtO = (+q('#ce-cw').value) >= (+q('#ce-ch').value) ? 'land' : 'port';
       fmtUI();
     });
-    on(root, 'change', ev => { if (ev.target.name === 'ce-start') { fmtStart = ev.target.value; fmtUI(); } });
+    on(root, 'change', ev => {
+      if (ev.target.id === 'ce-scrsel') fmtPick(ev.target.value);
+      else if (ev.target.name === 'ce-start') { fmtStart = ev.target.value; if (fmtStart === 'tpl' && fmtTpl < 0) openPicker(); fmtUI(); }
+    });
     on(q('#ce-name'), 'input', ev => { name = ev.target.value; setDirty(); });
     on(q('#ce-rail'), 'click', ev => { const b = ev.target.closest('button'); if (!b) return; if (panelName === b.dataset.p && panelOpen) togglePanel(); else openPanel(b.dataset.p); });
     on(q('#ce-pull'), 'click', togglePanel);
@@ -678,6 +691,7 @@
     if (ev.key === 'Escape') {
       if (!q('#ce-pvw').hidden) return closePreview();
       if (sheet) return closeSheet();
+      if (!q('#ce-pickscrim').hidden) return closePicker();
       if (!q('#ce-fmtscrim').hidden) return closeFormat();
       if (!q('#ce-tplscrim').hidden) { q('#ce-tplscrim').hidden = true; return; }
       closePop();
@@ -2467,11 +2481,11 @@
   // Nouvelle composition : bloc 1 = un écran existant (taille et orientation reprises), OU bloc 2 = réglages à la main (portrait, 1080 × 1920, page vide).
   function openFormat(isNew) {
     fmtNew = isNew; fmtScr = ''; fmtTpl = -1; fmtStart = 'blank';
-    fmtO = isNew ? 'port' : D.w * 9 === D.h * 16 ? 'land' : D.h * 9 === D.w * 16 ? 'port' : 'custom';
+    fmtO = isNew ? 'port' : D.w >= D.h ? 'land' : 'port';
     q('#ce-cw').value = isNew ? 1080 : D.w; q('#ce-ch').value = isNew ? 1920 : D.h;
     q('#ce-fmttitle').textContent = isNew ? 'Nouvelle composition' : 'Format de la composition';
     q('#ce-fmtok').textContent = isNew ? 'Créer' : 'Appliquer';
-    q('#ce-fb2t').textContent = 'Réglages manuels'; q('#ce-fb2t').style.display = isNew ? '' : 'none';
+    q('#ce-fb2h').style.display = isNew ? '' : 'none';
     const withScr = isNew && scrList.length > 0;
     q('#ce-fb1').style.display = q('#ce-or').style.display = withScr ? '' : 'none';
     q('#ce-startfield').style.display = isNew ? '' : 'none';
@@ -2480,21 +2494,22 @@
     fmtScreens(); fmtUI();
     q('#ce-fmtscrim').hidden = false;
   }
-  function fmtScreens() {
-    q('#ce-scrs').innerHTML = scrList.map(s => `<button type="button" class="ce-sr${s.id === fmtScr ? ' on' : ''}" data-ms="${esc(s.id)}" aria-pressed="${s.id === fmtScr}"><span class="ic${s.h > s.w ? ' p' : ''}"></span><span class="nm">${esc(s.name)}${s.place ? `<small>${esc(s.place)}</small>` : ''}</span><span class="dm"><b>W</b>${s.w} × <b>H</b>${s.h}${s.def ? '<i>par défaut</i>' : ''}</span></button>`).join('');
+  function fmtScreens() {   // liste déroulante, écrans regroupés par aire › zone ; « Aucun écran » ramène au format libre
+    const opt = s => `<option value="${esc(s.id)}"${s.id === fmtScr ? ' selected' : ''}>${esc(s.name)} · W${s.w} × H${s.h}${s.def ? ' (par défaut)' : ''}</option>`;
+    const groups = [...new Set(scrList.map(s => s.place || ''))];
+    q('#ce-scrsel').innerHTML = `<option value=""${fmtScr ? '' : ' selected'}>Aucun écran précis (format libre)</option>` +
+      groups.map(g => { const o = scrList.filter(s => (s.place || '') === g).map(opt).join(''); return g ? `<optgroup label="${esc(g)}">${o}</optgroup>` : o; }).join('');
   }
   function fmtPick(id) {
     const s = scrList.find(x => x.id === id);
-    fmtScr = !s || id === fmtScr ? '' : id;
-    if (fmtScr) { fmtO = s.h > s.w ? 'port' : 'land'; q('#ce-cw').value = s.w; q('#ce-ch').value = s.h; }
+    fmtScr = s ? id : '';   // vide : retour au format libre, la taille de l'écran reste dans les champs et se modifie
+    if (s) { fmtO = s.h > s.w ? 'port' : 'land'; q('#ce-cw').value = s.w; q('#ce-ch').value = s.h; }
     fmtScreens(); fmtUI();
   }
   function fmtSetO(o) {   // l'orientation tourne la taille déjà saisie
     fmtO = o;
-    if (o !== 'custom') {
-      const w = +q('#ce-cw').value || 1920, h = +q('#ce-ch').value || 1080, big = Math.max(w, h), small = Math.min(w, h);
-      q('#ce-cw').value = o === 'land' ? big : small; q('#ce-ch').value = o === 'land' ? small : big;
-    }
+    const w = +q('#ce-cw').value || 1920, h = +q('#ce-ch').value || 1080, big = Math.max(w, h), small = Math.min(w, h);
+    q('#ce-cw').value = o === 'land' ? big : small; q('#ce-ch').value = o === 'land' ? small : big;
     fmtUI();
   }
   const fmtDims = () => { const c = v => Math.min(7680, Math.max(320, Math.round(+v) || 320)); return [c(q('#ce-cw').value), c(q('#ce-ch').value)]; };
@@ -2504,14 +2519,45 @@
     q('#ce-oris').closest('.ce-field').classList.toggle('lock', !!fmtScr); q('#ce-resfield').classList.toggle('lock', !!fmtScr);
     q('#ce-fb2').classList.toggle('off', !!fmtScr);
     q('#ce-reshelp').style.display = fmtScr ? 'none' : '';
-    const box = q('#ce-tpls'), show = fmtNew && fmtStart === 'tpl';
+    q('#ce-free').hidden = !fmtScr;
+    const s = scrList.find(x => x.id === fmtScr);
+    q('#ce-scrhint').textContent = s ? `${s.h > s.w ? 'Portrait' : 'Paysage'}${s.def ? ' · résolution inconnue : 1920 × 1080 appliqué' : ''}` : '';
+    q('#ce-scrhint').style.display = s ? '' : 'none';
+    if (fmtTpl >= 0 && (TPL[fmtTpl].w >= TPL[fmtTpl].h) !== (fmtO === 'land')) fmtTpl = -1;   // le modèle choisi ne va plus avec l'orientation
+    const box = q('#ce-tplsel'), show = fmtNew && fmtStart === 'tpl';
     box.hidden = !show;
     if (!show) return;
-    const idx = tplIndexes('Tous').filter(i => fmtO === 'custom' || (fmtO === 'land' ? TPL[i].w >= TPL[i].h : TPL[i].h > TPL[i].w));
-    if (!idx.includes(fmtTpl)) fmtTpl = -1;
-    box.innerHTML = idx.length ? idx.map(i => thumb(TPL[i], i).replace('data-tpl=', 'data-mt=').replace('class="ce-thumb"', `class="ce-thumb${i === fmtTpl ? ' on' : ''}" type="button"`)).join('') : '<p class="ce-help" style="margin:0">Aucun modèle dans cette orientation.</p>';
+    const t = fmtTpl >= 0 ? TPL[fmtTpl] : null;
+    box.innerHTML = t ? `${thumbW(t, fmtTpl, t.w >= t.h ? 120 : 68, 'data-pick="open" tabindex="-1" title="Changer de modèle"')}<button type="button" class="ce-btn ghost" data-pick="open">Changer de modèle</button>`
+      : '<span class="ce-help" style="margin:0">Aucun modèle choisi : la galerie s\'ouvrira à gauche.</span><button type="button" class="ce-btn ghost" data-pick="open">Choisir un modèle…</button>';
   }
   function closeFormat() { q('#ce-fmtscrim').hidden = true; }
+
+  // Choix d'un modèle : fenêtre au premier plan, grandes vignettes, Annuler ou Choisir ce modèle
+  let pickSel = -1, pickCat = 'Tous', pickAll = false;
+  const thumbW = (t, i, tw, attr) => { const s = tw / t.w; return `<button type="button" class="ce-thumb" ${attr}><div class="tv" style="height:${Math.round(t.h * s)}px;width:${tw}px"><div class="mini" style="width:${t.w}px;height:${t.h}px;transform:scale(${s});background:${t.bg}">${LC().html({ els: samples[i] }, {})}</div></div><div class="tn"><span>${esc(t.name)}</span></div></button>`; };
+  function openPicker() { pickSel = fmtTpl; pickCat = 'Tous'; pickAll = false; drawPicker(); q('#ce-pickscrim').hidden = false; }
+  function closePicker() {
+    q('#ce-pickscrim').hidden = true;
+    if (fmtTpl < 0 && fmtStart === 'tpl') { fmtStart = 'blank'; const b = root.querySelector('input[name=ce-start][value=blank]'); if (b) b.checked = true; fmtUI(); }   // rien choisi : retour à la page vide
+  }
+  function drawPicker() {
+    const land = fmtO === 'land', all = pickAll && !fmtScr;
+    q('#ce-pickcats').innerHTML = ['Tous', ...new Set(TPL.map(t => t.cat))].map(c => `<button type="button" data-pcat="${esc(c)}" class="${c === pickCat ? 'on' : ''}">${esc(c)}</button>`).join('') +
+      (fmtScr ? '' : `<button type="button" data-pall="1" class="dcat${all ? ' on' : ''}">Toutes les orientations</button>`);
+    const idx = TPL.map((t, i) => i).filter(i => (pickCat === 'Tous' || TPL[i].cat === pickCat) && (all || (TPL[i].w >= TPL[i].h) === land));
+    q('#ce-pickgrid').innerHTML = idx.length ? idx.map(i => thumbW(TPL[i], i, TPL[i].w >= TPL[i].h ? 240 : 140, `data-pt="${i}"`).replace('class="ce-thumb"', `class="ce-thumb${i === pickSel ? ' on' : ''}"`)).join('') : '<p class="ce-help">Aucun modèle dans cette catégorie pour cette orientation.</p>';
+    q('#ce-pickok').disabled = pickSel < 0;
+    q('#ce-pickname').textContent = pickSel >= 0 ? TPL[pickSel].name : '';
+  }
+  function pickOk() {
+    if (pickSel < 0) return;
+    fmtTpl = pickSel; fmtStart = 'tpl';
+    const b = root.querySelector('input[name=ce-start][value=tpl]'); if (b) b.checked = true;
+    q('#ce-pickscrim').hidden = true;
+    const tl = TPL[fmtTpl].w >= TPL[fmtTpl].h;
+    if ((fmtO === 'land') !== tl) fmtSetO(tl ? 'land' : 'port'); else fmtUI();   // modèle d'une autre orientation : le format suit
+  }
   const scaleEls = (els, f) => els.forEach(e => { ['x', 'y', 'w', 'h'].forEach(p => e[p] = Math.round(e[p] * f)); if (e.size) e.size = Math.round(e.size * f); if (e.sw) e.sw = Math.max(1, Math.round(e.sw * f)); if (e.radius) e.radius = Math.round(e.radius * f); });
   function applyFormat() {
     const [ww, hh] = fmtDims();
