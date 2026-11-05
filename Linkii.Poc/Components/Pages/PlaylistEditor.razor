@@ -63,7 +63,7 @@
                 @foreach (var r in rows)
                 {
                     var row = r;
-                    <div class="pf-u pfx-u @RowClass(row) @(pickAt == row.Index ? "pick" : "")" data-i="@row.Index" data-id="@row.It.Id" draggable="@(Draggable(row) ? "true" : "false")" @key="row.It">
+                    <div class="pf-u pfx-u @RowClass(row) @(pickAt == row.Index ? "pick" : "")" data-i="@row.Index" data-id="@row.It.Id" data-drag="@(Draggable(row) ? "1" : null)" @key="row.It">
                         @if (!readOnlyHere) { <button type="button" class="pfx-ins" title="Insérer ici le prochain contenu choisi" aria-label="Insérer avant le contenu @(row.Index + 1)" @onclick="() => PickAt(row.Index)"><Ico Name="plus" Size="12" /></button> }
                         @Card(row)
                         <div class="pfx-when @WhenClass(row)">@When(row)</div>
@@ -92,6 +92,7 @@
             var tabs = LibTabs().ToList();
             if (!tabs.Any(t => t.Key == libTab) && tabs.Count > 0) libTab = tabs[0].Key;
             <section class="pfx-lib" aria-label="Bibliothèque">
+                <div class="pfx-libh"><b>Ajouter au fil</b><span>Choisissez un type de contenu, puis cliquez ou glissez dans le fil.</span></div>
                 <div class="pfx-tabs" role="tablist" aria-label="Types de contenus">
                     @foreach (var t in tabs)
                     {
@@ -103,11 +104,10 @@
                 </div>
                 <div class="pfx-tools">
                     <label class="search-box"><Ico Name="search" Size="16" /><input placeholder="Rechercher" aria-label="Rechercher dans la bibliothèque" @bind="libSearch" @bind:event="oninput" /></label>
-                    <span class="pfx-hint">
-                        @if (pickAt is { } pa) { <b>Le prochain contenu choisi sera inséré en position @(pa + 1).</b> <button type="button" class="pf-link" @onclick="() => pickAt = null">Annuler</button> }
-                        else { @LibHint() }
-                    </span>
-                    <span class="grow"></span>
+                    @if (pickAt is { } pa)
+                    {
+                        <span class="pfx-hint"><b>Le prochain contenu choisi sera inséré en position @(pa + 1).</b> <button type="button" class="pf-link" @onclick="() => pickAt = null">Annuler</button></span>
+                    }
                     @LibAction()
                 </div>
                 <div class="pfx-grid">@LibGrid()</div>
@@ -690,15 +690,6 @@ else
         yield return new("app", "Intégrations", "var(--muted)", OtherApps.Count());
     }
 
-    private string LibHint() => libTab switch
-    {
-        "img" or "vid" => "Cliquez pour ajouter à la fin, ou glissez dans le fil.",
-        "cmp" => "Vos compositions : une même composition peut servir dans plusieurs listes.",
-        "pres" => "Chaque page devient une vue du contenu.",
-        "web" => "La page est rechargée à chaque passage.",
-        _ => "Ajoutée avec ses réglages par défaut ; s'il manque une information, la carte l'indique en orange."
-    };
-
     // Bouton d'ajout propre à l'onglet
     private RenderFragment LibAction() => libTab switch
     {
@@ -764,7 +755,7 @@ else
     // Vignette de la bibliothèque : un clic ajoute (à la fin, ou à l'endroit choisi par « + »), on peut aussi la glisser dans le fil.
     // Aperçu : l'icône de l'intégration (appId), une composition, ou la vignette du média ou du contenu.
     private RenderFragment Tile(string drag, string name, string sub, MediaItem? m, string? appId, Action add, int used, bool busy = false, bool fresh = false, string? len = null) =>
-        @<button type="button" class="pfx-tile @(fresh ? "fresh" : "") @(busy ? "busy" : "")" draggable="@(busy ? "false" : "true")" data-add="@(busy ? null : drag)" data-fresh="@(fresh ? "1" : null)" disabled="@busy"
+        @<button type="button" class="pfx-tile @(fresh ? "fresh" : "") @(busy ? "busy" : "")" data-add="@(busy ? null : drag)" data-fresh="@(fresh ? "1" : null)" disabled="@busy"
                  title="@(busy ? "Conversion en cours : le média sera ajoutable dans un instant" : $"Ajouter « {name} »{(pickAt is { } p ? $" en position {p + 1}" : " à la fin")}")" @onclick="add">
             <span class="pfx-tb">
                 @if (appId != null) { <span class="pfx-app" style="background:@AppIcon.LookOf(appId).Color"><AppIcon Id="@appId" Tile="false" Size="34" /></span> }

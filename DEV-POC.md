@@ -3289,3 +3289,11 @@ Règles réunies dans `SimpleMode` (`ModeService.cs`) ; c'est un affichage, les 
 - Mode simple : toutes les intégrations attribuées à l'utilisateur + le standard (plus le filtre des 6 intégrations du mode simple dans ce tiroir).
 - Fenêtre « Régler » (centrée, par-dessus le tiroir) : flèches ‹ › vers le contenu voisin, et en pied Retirer du fil, Dupliquer, Désactiver / Réactiver.
 - Pas fait : redimensionnement du tiroir à la poignée (seulement réduit / agrandi), jamais essayé au doigt sur tablette.
+
+## 187. Liste de diffusion : glisser-déplacer fluide, recherche pleine largeur, fil séparé de la bibliothèque (5 novembre 2026) : d'après `maquettes/liste-diffusion-glisser-deplacer.html` ; compilé, vérifié dans le navigateur
+- Glisser aux événements pointeur (`playlist-flow.js`, version 5), à la place du glisser HTML5 : souris, doigt et stylet. La carte (ou la vignette) saisie est portée par le pointeur (inclinaison, ombre), un vide en pointillés bleus marque l'arrivée, les autres cartes glissent d'un cran dès que le pointeur dépasse leur milieu (transform, 0,25 s), la carte se pose dans le vide au lâcher. Hors du fil, une vignette disparaît en fondu et les cartes se referment ; Échap annule ; le fil défile près des bords.
+- Le DOM de la page n'est jamais déplacé pendant le glisser : seuls des transform sont posés, retirés dès que Blazor a redessiné le fil (MutationObserver, repli à 0,9 s). Enregistrement par `MoveItem(de, vers)` et `DropAdd(clé, position)` ; un clic après un glisser est ignoré.
+- Cartes : `data-drag` remplace `draggable`. Le survol (Régler, Supprimer) est coupé pendant un glisser.
+- Recherche de la bibliothèque sur toute la largeur ; la mention « Cliquez pour ajouter à la fin… » est retirée (reste le message d'insertion après un « + »).
+- Le fil est dans une bande grise en creux ; la bibliothèque a son titre « Ajouter au fil » et une ombre à sa limite haute.
+- Pas fait : jamais essayé au doigt sur une tablette (cartes en `touch-action: none`, vignettes en `pan-y`).

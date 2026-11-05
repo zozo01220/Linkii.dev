@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Glisser-déplacer dans le fil</title>
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--row:#EDF1F5;--signal:#3B82C4;--danger:#C8372D;
+  --shadow-hover:0 8px 20px rgba(11,31,58,.16),0 2px 5px rgba(11,31,58,.08);--ease:cubic-bezier(.2,.8,.2,1)}
+*{box-sizing:border-box}html,body{margin:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
+h2,p{margin:0;font-weight:500}p{font-weight:400}b{font-weight:500}button{font:inherit;color:inherit}
+svg{display:block;flex:none}
+.mono{font-family:"JetBrains Mono",Consolas,monospace;font-weight:500;font-variant-numeric:tabular-nums}
+.note{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:#fff;border-bottom:1px dashed var(--line-2);padding:8px 16px;color:var(--muted);font-size:13px}
+.note b{color:var(--ink)}
+.note label{display:flex;gap:6px;align-items:center;cursor:pointer}
+.wrap{max-width:1180px;margin:22px auto 60px;padding:0 20px}
+.intro{margin:0 0 14px;color:var(--muted);font-size:14px}
+.drawer{background:#fff;border-radius:16px;box-shadow:0 8px 30px rgba(11,31,58,.14);overflow:hidden}
+.head{display:flex;align-items:center;gap:14px;padding:14px 22px 10px}
+.head h2{font-size:21px;flex:1}
+.total{display:flex;align-items:center;gap:12px;background:var(--ink);color:#fff;border-radius:12px;padding:6px 16px}
+.total small{display:block;font-size:11.5px;line-height:1.2;color:#fff;opacity:.85}
+.total b{display:block;font-size:22px;line-height:1.15;color:#fff}
+.total .sep{border-left:1px solid rgba(255,255,255,.25);padding-left:12px}
+
+/* fil */
+.filwrap{margin:0 16px;border:1px solid var(--line-2);border-radius:14px;background:#E9EEF4;box-shadow:inset 0 2px 6px rgba(11,31,58,.08);position:relative}
+.libh{display:flex;align-items:baseline;gap:12px;padding:14px 24px 0;margin-top:16px;border-top:1px solid var(--line);box-shadow:0 -10px 18px -14px rgba(11,31,58,.25)}
+.libh b{font-size:16px}.libh span{font-size:12.5px;color:var(--muted)}
+.fil{position:relative;display:flex;align-items:flex-start;overflow-x:auto;overflow-y:hidden;padding:18px 20px 12px 6px;scrollbar-width:thin;min-height:250px}
+.slot{flex:none;width:206px;padding-left:34px;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative;will-change:transform}
+.slot::before{content:"";position:absolute;left:5px;width:24px;top:86px;border-top:2px dashed var(--line-2)}
+.slot:first-child::before{display:none}
+.card{position:relative;width:172px;height:172px;border-radius:12px;overflow:hidden;background:var(--ink) center/cover;box-shadow:0 1px 3px rgba(11,31,58,.14);transition:box-shadow .15s,transform .15s;touch-action:none;user-select:none;cursor:grab}
+.card .ft{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:flex-end;gap:6px;padding:28px 8px 8px 10px;background:linear-gradient(transparent,rgba(5,14,28,.85));color:#fff}
+.card .nm{flex:1;min-width:0;font-size:13px;font-weight:500;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .nm small{display:block;font-size:11.5px;font-weight:400;opacity:.8}
+.card .dur{flex:none;display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 7px;border-radius:7px;background:#fff;color:var(--ink);font-size:13px;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.card .num{position:absolute;left:8px;top:8px;width:26px;height:26px;border-radius:50%;background:rgba(11,31,58,.82);color:#fff;font-size:13px;font-weight:500;display:grid;place-items:center}
+.card .ty{position:absolute;right:8px;top:8px;height:24px;border-radius:12px;padding:0 10px;background:rgba(11,31,58,.78);color:#fff;font-size:11.5px;font-weight:500;display:flex;align-items:center;transition:opacity .12s}
+.card .hv{position:absolute;inset:0;background:rgba(11,31,58,.38);opacity:0;transition:opacity .15s;display:grid;place-items:center}
+.card .hv .set{width:48px;height:48px;border-radius:50%;border:0;background:#fff;display:grid;place-items:center;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.25)}
+.card .hv .x{position:absolute;top:8px;right:8px;width:30px;height:30px;border-radius:8px;border:0;background:rgba(255,255,255,.95);color:var(--danger);display:grid;place-items:center;cursor:pointer}
+.card .hv .x:hover{background:var(--danger);color:#fff}
+.card .hv .gr{position:absolute;top:5px;left:50%;transform:translateX(-50%);color:#fff}
+body:not(.dragging) .card:hover{box-shadow:var(--shadow-hover);transform:translateY(-2px)}
+body:not(.dragging) .card:hover .hv{opacity:1}
+body:not(.dragging) .card:hover .ty{opacity:0}
+.when{font-size:12px;color:var(--muted);white-space:nowrap}
+.g-cmp{background-image:linear-gradient(135deg,#123A6B,#2C64B8)}
+.g-web{background:#fff}
+.g-web .bd{position:absolute;inset:0;display:grid;place-items:center;color:#3E9AA0;font-weight:600;padding-bottom:30px}
+.g-web .bar{position:absolute;left:0;right:0;top:0;height:22px;background:#EDF1F5}
+
+/* emplacement laissé par la carte déplacée : un vide en pointillés */
+.slot.ph .card,.slot.ph .when{visibility:hidden}
+.slot.ph::after{content:"";position:absolute;left:34px;top:0;width:172px;height:172px;border:2px dashed var(--signal);background:rgba(59,130,196,.08);border-radius:12px}
+.slot.ph.in::after{animation:phin .22s var(--ease)}
+@keyframes phin{from{opacity:0;transform:scale(.9)}to{opacity:1;transform:none}}
+.slot.pop .card{animation:pop .3s var(--ease)}
+@keyframes pop{from{transform:scale(.7);opacity:0}to{transform:none;opacity:1}}
+.slot.gone{pointer-events:none}
+/* fin de fil */
+.endslot{flex:none;width:206px;padding-left:34px;position:relative}
+.end{width:172px;height:172px;border:2px dashed var(--line-2);border-radius:12px;background:#fff;color:var(--muted);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:14px;text-align:center;font-size:12.5px;line-height:1.35;transition:all .15s}
+.fil.over .end{border-color:var(--signal);background:#EAF3FC;color:var(--signal)}
+
+/* carte portée par le doigt / la souris */
+.ghost{position:fixed;left:0;top:0;z-index:999;pointer-events:none;will-change:transform}
+.ghost .card{cursor:grabbing;transform:scale(1.05) rotate(3deg);box-shadow:0 18px 36px rgba(11,31,58,.32),0 4px 10px rgba(11,31,58,.18);transition:none}
+.ghost.land{transition:transform .22s var(--ease)}
+.ghost.land .card{transition:transform .22s var(--ease),box-shadow .22s;transform:none;box-shadow:var(--shadow-hover)}
+.ghost.tile{width:130px}
+.ghost.tile .tb{aspect-ratio:1;border-radius:10px;background:#dfe5ec center/cover;box-shadow:0 18px 36px rgba(11,31,58,.32);transform:rotate(3deg) scale(1.05)}
+.ghost.fade{transition:opacity .2s,transform .2s;opacity:0}
+body.dragging,body.dragging *{cursor:grabbing!important}
+
+/* bibliothèque */
+.tabs{display:flex;gap:2px;padding:0 20px;border-bottom:1px solid var(--line)}
+.tabs span{padding:11px 12px 9px;font-weight:500;color:var(--muted);font-size:14.5px;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs span.on{color:var(--ink);border-bottom-color:var(--ink)}
+.tools{padding:12px 24px 4px;display:flex;gap:10px}
+.search{flex:1;display:flex;align-items:center;gap:8px;border:1px solid var(--line-2);border-radius:8px;padding:0 12px;height:38px;color:var(--muted)}
+.btn{background:var(--signal);color:#fff;border:0;border-radius:8px;height:38px;padding:0 16px;font-weight:500}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:14px;padding:10px 24px 22px}
+.tile{touch-action:none;user-select:none;cursor:grab;min-width:0}
+.tile .tb{aspect-ratio:1;border-radius:10px;border:1px solid var(--line);background:#dfe5ec center/cover;display:grid;place-items:center;transition:box-shadow .15s,transform .15s}
+.tile:hover .tb{box-shadow:var(--shadow-hover);transform:translateY(-2px)}
+.tile .tn{font-size:13px;font-weight:500;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile.used{opacity:.55}
+
+.rules{margin-top:20px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 22px}
+.rules h2{font-size:16px;margin-bottom:6px}
+.rules ol{margin:0;padding-left:20px;font-size:14px;line-height:1.6}
+.rules li{margin:3px 0}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-loop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-tune" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+  <symbol id="i-grip" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="9" r="1.6"/><circle cx="12" cy="9" r="1.6"/><circle cx="16" cy="9" r="1.6"/><circle cx="8" cy="15" r="1.6"/><circle cx="12" cy="15" r="1.6"/><circle cx="16" cy="15" r="1.6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+</svg>
+
+<div class="note">
+  <b>Maquette, rien n'est codé.</b>
+  <span>Essayez : saisissez une carte et passez-la au-dessus des autres, ou glissez une vignette de la bibliothèque dans le fil.</span>
+  <label><input type="checkbox" id="slow"> Ralentir (pour bien voir l'animation)</label>
+  <label><input type="checkbox" id="auto" checked> Défilement automatique aux bords</label>
+</div>
+
+<div class="wrap">
+  <p class="intro">Même tiroir que la maquette précédente (sans frise ni pastilles de couleur), avec le comportement du glisser-déplacer.</p>
+  <div class="drawer">
+    <div class="head">
+      <h2>Vitrine</h2>
+      <div class="total"><svg width="20" height="20"><use href="#i-loop"/></svg><span><small>Durée totale de la boucle</small><b class="mono" id="tot">0:00</b></span><span class="sep"><small>Contenus</small><b class="mono" id="cnt">0</b></span></div>
+    </div>
+    <div class="filwrap"><div class="fil" id="fil"></div></div>
+    <div class="libh"><b>Ajouter au fil</b><span>Choisissez un type de contenu, puis cliquez ou glissez dans le fil.</span></div>
+    <div class="tabs"><span class="on">Images 4</span><span>Vidéos 2</span><span>Compositions 3</span><span>Présentations 2</span><span>Pages web 4</span><span>Intégrations 5</span></div>
+    <div class="tools"><div class="search"><svg width="16" height="16"><use href="#i-search"/></svg>Rechercher</div><button class="btn">Importer</button></div>
+    <div class="grid" id="grid"></div>
+  </div>
+
+  <div class="rules">
+    <h2>Comportement proposé</h2>
+    <ol>
+      <li><b>Saisir une carte</b> : elle se soulève (légère inclinaison, ombre) et suit la souris ou le doigt. À sa place reste un <b>vide en pointillés bleus</b>.</li>
+      <li><b>Dès qu'elle dépasse le milieu d'une autre carte</b>, celle-ci <b>glisse</b> d'un cran pour lui faire de la place (0,25 s, mouvement doux). Le vide se déplace avec : on voit toujours où elle va atterrir.</li>
+      <li><b>Lâcher</b> : la carte vient se poser dans le vide en glissant, sans saut. « passe à … » de toutes les cartes se met à jour en direct pendant le déplacement.</li>
+      <li><b>Depuis la bibliothèque</b> : même principe. En entrant dans le fil, le vide apparaît et les cartes s'écartent ; en sortant du fil, elles se referment. Lâché hors du fil, la vignette disparaît en fondu, rien n'est ajouté.</li>
+      <li><b>Bords du fil</b> : le fil défile tout seul quand on s'approche de la gauche ou de la droite. Le <b>Supprimer</b> au survol referme aussi le trou en glissant.</li>
+      <li>Les boutons « + » entre les cartes ne sont plus nécessaires pour insérer ; ils pourraient rester seulement pour le clic.</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+const IMG='../demo-images/';
+let items=[
+  {id:1,n:'Image lac',t:'Image',img:IMG+'02-lac-automne.jpg',d:8},
+  {id:2,n:'329648',t:'Vidéo',img:IMG+'03-montagnes-neige.jpg',d:30},
+  {id:3,n:'Bienvenue',t:'Composition',cls:'g-cmp',txt:'Bienvenue',d:10},
+  {id:4,n:'uhd_30fps',t:'Vidéo',img:IMG+'01-lac-barque.jpg',d:30},
+  {id:5,n:'unil.ch',t:'Page web',cls:'g-web',txt:'unil.ch',d:60},
+  {id:6,n:'Côte turquoise',t:'Image',img:IMG+'04-cote-turquoise.jpg',d:10}
+];
+const LIB=[
+  {n:'lac-barque',t:'Image',img:IMG+'01-lac-barque.jpg',d:10},
+  {n:'lac-automne',t:'Image',img:IMG+'02-lac-automne.jpg',d:10},
+  {n:'montagnes-neige',t:'Image',img:IMG+'03-montagnes-neige.jpg',d:10},
+  {n:'cote-turquoise',t:'Image',img:IMG+'04-cote-turquoise.jpg',d:10},
+  {n:'Horaires',t:'Composition',cls:'g-cmp',txt:'Horaires',d:10},
+  {n:'Menu du jour',t:'Composition',cls:'g-cmp',txt:'Menu',d:10}
+];
+let seq=100;
+const fil=document.getElementById('fil'), grid=document.getElementById('grid');
+const fmt=s=>Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+const SLOW=()=>document.getElementById('slow').checked;
+function setDur(){document.documentElement.style.setProperty('--t',(SLOW()?.9:.25)+'s')}
+function cardBg(it){return it.img?`background-image:url(${it.img})`:''}
+function cardInner(it){
+  const web=it.cls==='g-web'?'<div class="bar"></div><div class="bd">'+it.txt+'</div>':'';
+  const cmp=it.cls==='g-cmp'?`<div style="position:absolute;inset:0;padding:16px;color:#fff;font-weight:600;font-size:20px;line-height:1.1">${it.txt}</div>`:'';
+  return web+cmp;
+}
+function slotEl(it){
+  const s=document.createElement('div');s.className='slot';s.dataset.id=it.id;s.dataset.d=it.d;
+  s.innerHTML=`<div class="card ${it.cls||''}" style="${cardBg(it)}">${cardInner(it)}<span class="num"></span><span class="ty">${it.t}</span>
+    <div class="hv"><svg class="gr" width="22" height="22"><use href="#i-grip"/></svg><button class="set" title="Régler"><svg width="22" height="22"><use href="#i-tune"/></svg></button><button class="x" title="Supprimer"><svg width="16" height="16"><use href="#i-trash"/></svg></button></div>
+    <div class="ft"><div class="nm">${it.n}<small>${it.t}</small></div><span class="dur"><svg width="12" height="12"><use href="#i-clock"/></svg><span class="mono">${fmt(it.d)}</span></span></div></div>
+    <div class="when"></div>`;
+  return s;
+}
+const endEl=document.createElement('div');endEl.className='endslot';
+endEl.innerHTML='<div class="end"><svg width="22" height="22"><use href="#i-plus"/></svg><span>Glissez un contenu de la bibliothèque pour l\'ajouter à la fin</span></div>';
+function slots(){return [...fil.children].filter(e=>e.classList.contains('slot'))}
+function relabel(){
+  let t=0,n=0;
+  slots().forEach(s=>{
+    const d=+s.dataset.d; const ph=s.classList.contains('ph');
+    const w=s.querySelector('.when'); if(w) w.textContent='passe à '+fmt(t);
+    const nu=s.querySelector('.num'); if(nu) nu.textContent=++n;
+    t+=d;
+  });
+  document.getElementById('tot').textContent=fmt(t);
+  document.getElementById('cnt').textContent=slots().length;
+}
+function build(){
+  fil.innerHTML='';items.forEach(it=>fil.appendChild(slotEl(it)));fil.appendChild(endEl);relabel();
+  grid.innerHTML='';LIB.forEach((it,i)=>{
+    const t=document.createElement('div');t.className='tile';t.dataset.i=i;
+    t.innerHTML=`<div class="tb ${it.cls||''}" style="${cardBg(it)};position:relative">${it.cls==='g-cmp'?`<div style="position:absolute;inset:0;padding:12px;color:#fff;font-weight:600;font-size:17px">${it.txt}</div>`:''}</div><div class="tn">${it.n}</div>`;
+    grid.appendChild(t);
+  });
+}
+
+/* ---------- animation FLIP : les autres cartes glissent vers leur nouvelle place ---------- */
+function snapshot(){const m=new Map();slots().concat([endEl]).forEach(e=>m.set(e,e.getBoundingClientRect().left));return m}
+function play(before){
+  const dur=SLOW()?900:250;
+  slots().concat([endEl]).forEach(e=>{
+    if(!before.has(e)) return;
+    const dx=before.get(e)-e.getBoundingClientRect().left;
+    if(Math.abs(dx)<1) return;
+    e.getAnimations().forEach(a=>a.cancel());
+    e.animate([{transform:`translateX(${dx}px)`},{transform:'none'}],{duration:dur,easing:'cubic-bezier(.2,.8,.2,1)'});
+  });
+}
+function move(ph,ref){const b=snapshot();fil.insertBefore(ph,ref||endEl);play(b);relabel()}
+function refFor(ph,x){
+  // première carte (hors vide) dont le milieu est à droite du pointeur ; sinon la fin du fil
+  const fr=fil.getBoundingClientRect();
+  for(const s of slots()){
+    if(s===ph) continue;
+    const mid=s.offsetLeft-fil.scrollLeft+fr.left+34+86;   // milieu de la carte (hors transformation en cours)
+    if(x<mid) return s;
+  }
+  return endEl;
+}
+
+/* ---------- glisser ---------- */
+let drag=null, raf=0, px=0, py=0;
+function startGhost(node,x,y,cls){
+  const g=document.createElement('div');g.className='ghost '+(cls||'');g.appendChild(node);document.body.appendChild(g);return g;
+}
+function place(g,x,y,ox,oy){g.style.transform=`translate(${x-ox}px,${y-oy}px)`}
+function inFil(x,y){const r=fil.getBoundingClientRect();return x>r.left-30&&x<r.right+30&&y>r.top-50&&y<r.bottom+50}
+
+document.addEventListener('pointerdown',e=>{
+  if(e.button!==0||e.target.closest('button')) return;
+  const card=e.target.closest('.slot .card'), tile=e.target.closest('.tile');
+  if(card){
+    const slot=card.closest('.slot'); const r=card.getBoundingClientRect();
+    drag={kind:'move',slot,x0:e.clientX,y0:e.clientY,ox:e.clientX-r.left,oy:e.clientY-r.top,started:false,id:e.pointerId};
+  }else if(tile){
+    const r=tile.querySelector('.tb').getBoundingClientRect();
+    drag={kind:'lib',tile,x0:e.clientX,y0:e.clientY,ox:Math.min(65,e.clientX-r.left),oy:Math.min(65,e.clientY-r.top),started:false,id:e.pointerId};
+  }
+});
+document.addEventListener('pointermove',e=>{
+  if(!drag) return;
+  px=e.clientX;py=e.clientY;
+  if(!drag.started){
+    if(Math.hypot(px-drag.x0,py-drag.y0)<5) return;
+    begin();
+  }
+  place(drag.ghost,px,py,drag.ox,drag.oy);
+  update();
+});
+function begin(){
+  drag.started=true;document.body.classList.add('dragging');
+  if(drag.kind==='move'){
+    const s=drag.slot, c=s.querySelector('.card').cloneNode(true);
+    const r=s.querySelector('.card').getBoundingClientRect();c.style.width=r.width+'px';c.style.height=r.height+'px';
+    c.querySelector('.hv').remove();
+    drag.ghost=startGhost(c,0,0);
+    s.classList.add('ph','in');
+  }else{
+    const it=LIB[+drag.tile.dataset.i];
+    const t=document.createElement('div');t.className='tb '+(it.cls||'');t.style.cssText=cardBg(it)+';aspect-ratio:1;border-radius:10px;background-size:cover;position:relative;'+(it.cls?'background-image:linear-gradient(135deg,#123A6B,#2C64B8)':'');
+    if(it.cls) t.innerHTML=`<div style="position:absolute;inset:0;padding:12px;color:#fff;font-weight:600;font-size:17px">${it.txt}</div>`;
+    drag.ghost=startGhost(t,0,0,'tile');
+    drag.item=it;drag.tile.classList.add('used');
+  }
+  tick();
+}
+function update(){
+  const over=inFil(px,py);fil.classList.toggle('over',over&&drag.kind==='lib');
+  if(drag.kind==='move'){
+    if(!over) return;   // hors du fil : la carte reste où elle est
+    const ph=drag.slot, ref=refFor(ph,px);
+    if(ph.nextSibling!==ref) move(ph,ref);
+  }else{
+    if(over){
+      if(!drag.ph){const it=drag.item;const ph=slotEl({id:'ph',n:'',t:'',d:it.d});ph.classList.add('ph','in');drag.ph=ph;ph.dataset.d=it.d;const b=snapshot();fil.insertBefore(ph,refFor(null,px));play(b);relabel()}
+      else{const ref=refFor(drag.ph,px);if(drag.ph.nextSibling!==ref) move(drag.ph,ref)}
+    }else if(drag.ph){const b=snapshot();drag.ph.remove();drag.ph=null;play(b);relabel()}
+  }
+}
+/* défilement automatique aux bords du fil */
+function tick(){
+  if(!drag||!drag.started) return;
+  if(document.getElementById('auto').checked&&inFil(px,py)){
+    const r=fil.getBoundingClientRect();let v=0;
+    if(px<r.left+80) v=-(80-(px-r.left))/5; else if(px>r.right-80) v=(80-(r.right-px))/5;
+    if(v){fil.scrollLeft+=v;update()}
+  }
+  raf=requestAnimationFrame(tick);
+}
+document.addEventListener('pointerup',end);
+document.addEventListener('pointercancel',end);
+function end(){
+  if(!drag){return}
+  const d=drag;drag=null;cancelAnimationFrame(raf);document.body.classList.remove('dragging');fil.classList.remove('over');
+  if(!d.started) return;
+  const g=d.ghost;
+  if(d.kind==='move'){
+    const r=d.slot.getBoundingClientRect(), tx=r.left+34, ty=r.top;
+    g.classList.add('land');g.style.transform=`translate(${tx}px,${ty}px)`;
+    setTimeout(()=>{g.remove();d.slot.classList.remove('ph','in');relabel();sync()},SLOW()?900:230);
+  }else{
+    d.tile.classList.remove('used');
+    if(d.ph){
+      const r=d.ph.getBoundingClientRect();
+      g.classList.add('land');g.style.transform=`translate(${r.left+34}px,${r.top}px)`;
+      setTimeout(()=>{g.remove();const it=Object.assign({},d.item,{id:++seq});const s=slotEl(it);s.classList.add('pop');fil.replaceChild(s,d.ph);relabel();sync()},SLOW()?900:230);
+    }else{g.classList.add('fade');setTimeout(()=>g.remove(),220)}
+  }
+}
+function sync(){items=slots().map(s=>items.find(i=>i.id==s.dataset.id)||null).filter(Boolean)}
+
+/* supprimer : le trou se referme en glissant */
+fil.addEventListener('click',e=>{
+  const x=e.target.closest('.x');if(!x) return;
+  const s=x.closest('.slot');const b=snapshot();
+  s.remove();play(b);relabel();
+});
+document.getElementById('slow').onchange=setDur;
+build();setDur();
+</script>
+</body>
+</html>
