@@ -124,8 +124,28 @@ public static class Planning
     public static Zone? ZoneOf(Area? area, Screen s) => area?.Zones.FirstOrDefault(z => z.Id == s.ZoneId);
 
     /// <summary>Créneaux qui s'appliquent à l'écran, par priorité : les siens (s'il a un planning propre), puis ceux de sa zone, puis ceux de l'aire.</summary>
+    /// Depuis les Programmations (5 nov. 2026) : les créneaux du calendrier assigné, déjà dans l'ordre de priorité et terminés par sa liste par défaut ;
+    /// un écran de mur garde le planning de son mur ; sinon, aucun planning.
     public static List<Slot> Effective(Area? area, Screen s) =>
-        (s.OwnPlanning ? Order(s.Slots) : new List<Slot>()).Concat(Order(ZoneOf(area, s)?.Slots)).Concat(Order(area?.Slots)).ToList();
+        s.CalendarId != null ? s.Slots.ToList()
+        : ZoneOf(area, s) is { IsWall: true } w ? Order(w.Slots).Concat(Order(area?.Slots)).ToList()
+        : new List<Slot>();
+
+    /// <summary>Extinction programmée active à cet instant (heure locale de l'aire) ?</summary>
+    public static bool IsOff(Tenant t, Area? area, Screen s, DateTime nowUtc)
+    {
+        if (s.CalendarId == null || s.OffSlots.Count == 0) return false;
+        var l = LocalNow(t, area, nowUtc);
+        return Pick(s.OffSlots, DateOnly.FromDateTime(l), l.Hour * 60 + l.Minute) != null;
+    }
+
+    /// <summary>Extinctions programmées pour le player : { tz, slots: [{ days, from, to, dateFrom, dateTo }] } ; null : aucune.</summary>
+    public static object? OffForPlayer(Tenant t, Area? area, Screen s) =>
+        s.CalendarId == null || s.OffSlots.Count == 0 ? null : new
+        {
+            tz = Sleep.TimeZone(t, area),
+            slots = s.OffSlots.Select(x => new { days = x.Days, from = x.From, to = x.To, dateFrom = x.DateFrom, dateTo = x.DateTo }).ToList()
+        };
 
     public static bool HasOwn(Zone z) => z.OwnPlanning || z.Slots.Count > 0;
     public static bool HasOwn(Area a) => a.OwnPlanning || a.Slots.Count > 0;
@@ -183,8 +203,10 @@ public static class Planning
     {
         var area = areas.FirstOrDefault(a => a.Id == s.AreaId);
         var slots = Effective(area, s);
-        if (slots.Count == 0 && s.PublishedLists.Count == 0) return "";   // aucun planning : la révision ne change pas
-        var raw = string.Join(";", slots.Select(x => $"{x.PlaylistId:N}/{x.Days}/{x.From}/{x.To}/{x.DateFrom}/{x.DateTo}/{s.PublishedLists.ContainsKey(x.PlaylistId)}")) + "|" + area?.SleepTz + "|" + s.PlanningRevision;
+        var off = s.CalendarId != null ? s.OffSlots : new List<Slot>();
+        if (slots.Count == 0 && off.Count == 0 && s.PublishedLists.Count == 0) return "";   // aucun planning : la révision ne change pas
+        var raw = string.Join(";", slots.Select(x => $"{x.PlaylistId:N}/{x.Days}/{x.From}/{x.To}/{x.DateFrom}/{x.DateTo}/{s.PublishedLists.ContainsKey(x.PlaylistId)}"))
+            + "|off:" + string.Join(";", off.Select(x => $"{x.Days}/{x.From}/{x.To}/{x.DateFrom}/{x.DateTo}")) + "|" + area?.SleepTz + "|" + s.PlanningRevision;
         return "|pn" + Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(raw)))[..8];
     }
 

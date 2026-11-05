@@ -124,17 +124,25 @@ public static class PlaylistShape
 
 public static class PlaylistUses
 {
-    public static Dictionary<Guid, PlaylistUse> Of(IEnumerable<Playlist> lists, IReadOnlyCollection<Screen> screens, IEnumerable<Area> areas)
+    public static Dictionary<Guid, PlaylistUse> Of(IEnumerable<Playlist> lists, IReadOnlyCollection<Screen> screens, IEnumerable<Area> areas, IEnumerable<ScreenCalendar>? calendars = null)
     {
         var zones = areas.SelectMany(a => a.Zones).ToList();
+        var cals = calendars?.ToList() ?? new();
         var result = new Dictionary<Guid, PlaylistUse>();
         foreach (var p in lists)
         {
             var chosen = screens.Where(s => s.ZonePlaylists().Contains(p.Id)).ToList();
             var pending = chosen.Count(s => !PublishedWith(s, p))
                 + screens.Count(s => !chosen.Contains(s) && s.PublishedListRevs.TryGetValue(p.Id, out var rev) && rev != p.Revision);   // liste du planning modifiée depuis son instantané
-            var slots = areas.SelectMany(a => a.Slots).Concat(zones.SelectMany(z => z.Slots)).Concat(screens.SelectMany(s => s.Slots)).Where(x => x.PlaylistId == p.Id).ToList();
-            result[p.Id] = new PlaylistUse(chosen.Count, pending, slots.Count, slots.Count > 0 ? Planning.Describe(slots[0]) : null);
+            // planning des murs (zones), puis calendriers des Programmations (événements et liste par défaut)
+            var slots = areas.SelectMany(a => a.Slots).Concat(zones.SelectMany(z => z.Slots)).Concat(screens.Where(s => s.CalendarId == null).SelectMany(s => s.Slots))
+                .Where(x => x.PlaylistId == p.Id).Select(Planning.Describe).ToList();
+            foreach (var c in cals)
+            {
+                slots.AddRange(c.Events.Where(e => e.Kind == CalEvent.Play && e.PlaylistId == p.Id).Select(e => $"{c.Name} · {Calendars.Describe(e)}"));
+                if (c.DefaultPlaylistId == p.Id) slots.Add($"{c.Name} · liste par défaut");
+            }
+            result[p.Id] = new PlaylistUse(chosen.Count, pending, slots.Count, slots.FirstOrDefault());
         }
         return result;
     }
@@ -152,8 +160,14 @@ public static class PlaylistUses
     }
 
     /// <summary>Ce que retirerait <see cref="PlaylistOps.Remove"/> : les écrans qui les ont choisies (ils gardent leur instantané) et les créneaux de planning.</summary>
-    public static PlaylistDeleteImpact Impact(IReadOnlyCollection<Guid> ids, IEnumerable<Screen> screens, IEnumerable<Area> areas)
+    public static PlaylistDeleteImpact Impact(IReadOnlyCollection<Guid> ids, IEnumerable<Screen> screens, IEnumerable<Area> areas, IEnumerable<ScreenCalendar>? calendars = null)
     {
+        var calSlots = new List<string>();
+        foreach (var c in calendars ?? Enumerable.Empty<ScreenCalendar>())
+        {
+            calSlots.AddRange(c.Events.Where(e => e.Kind == CalEvent.Play && e.PlaylistId is { } pid && ids.Contains(pid)).Select(e => $"calendrier « {c.Name} » · {Calendars.Describe(e)}"));
+            if (ids.Contains(c.DefaultPlaylistId)) calSlots.Add($"calendrier « {c.Name} » · liste par défaut (à remplacer)");
+        }
         var set = ids.ToHashSet();
         var list = screens.ToList();
         var chosen = list.Where(s => s.ZonePlaylists().Any(z => z is { } zid && set.Contains(zid))).Select(s => s.Name).ToList();
@@ -162,8 +176,9 @@ public static class PlaylistUses
             slots.AddRange(a.Slots.Where(x => set.Contains(x.PlaylistId)).Select(x => $"aire « {a.Name} » · {Planning.Describe(x)}"));
         foreach (var z in areas.SelectMany(a => a.Zones))
             slots.AddRange(z.Slots.Where(x => set.Contains(x.PlaylistId)).Select(x => $"zone « {z.Name} » · {Planning.Describe(x)}"));
-        foreach (var s in list)
+        foreach (var s in list.Where(s => s.CalendarId == null))   // les créneaux d'un calendrier sont comptés avec lui
             slots.AddRange(s.Slots.Where(x => set.Contains(x.PlaylistId)).Select(x => $"écran « {s.Name} » · {Planning.Describe(x)}"));
+        slots.AddRange(calSlots);
         return new PlaylistDeleteImpact(chosen, slots);
     }
 }

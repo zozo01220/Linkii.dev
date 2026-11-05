@@ -84,6 +84,7 @@ public static class PlayerFeed
             ["settings"] = new { timezone = t.Timezone, reloadHour = t.ReloadHour, techPin = TechPin.ForPlayer(t) },
             ["schedule"] = Planning.ForPlayer(t, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, Sync),   // créneaux du planning de diffusion (null : aucun)
             ["sleep"] = Sleep.ForPlayer(t, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, wall != null),   // plages de mise en veille (null : aucune)
+            ["off"] = Planning.OffForPlayer(t, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s),   // extinctions du calendrier assigné (null : aucune)
             ["dim"] = Dim.ForPlayer(t, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, wall != null),   // luminosité et contraste selon l'heure (null : aucun réglage)
             ["device"] = device ? DeviceConfig.ForPlayer(db.Screens, s) : null,   // paramètres de l'appareil (démarrage automatique, fenêtre, moniteur, écrans à ouvrir sur ce PC)
             ["kiosk"] = s.PublishedKiosk?.ForPlayer(),   // borne interactive : menu de tuiles et réglages (null : écran de diffusion)

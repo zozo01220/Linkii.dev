@@ -160,7 +160,6 @@
         </FilterMenu>
         @if (area != null && ShowZones && OpenZone is { } pz)
         {
-            @if (Modes.Expert) { <a class="tb-btn" href="planning?zone=@pz.Id" title="Planning de diffusion de @(pz.IsWall ? "ce mur" : "cette zone")"><Ico Name="calendar" Size="14" /> Planning @if (pz.Slots.Count > 0) { <span class="tb-n">@pz.Slots.Count</span> }</a> }
         }
         @if (Modes.Expert) { <ViewToggle StorageKey="screens-arbre" Tree="!isApp" @bind-Value="view" /> }
     </div>
@@ -433,6 +432,7 @@ else
                     <div class="grow"><b>Plein écran</b><small>Coupé : sur un PC Windows, le player passe en fenêtre à la taille de la résolution dès l'appairage. Pratique pour tester plusieurs écrans sur un PC.</small></div>
                     <button type="button" class="switch navy @(pairFull ? "on" : "")" role="switch" aria-checked="@(pairFull ? "true" : "false")" aria-label="Plein écran" @onclick="() => pairFull = !pairFull"><span></span></button>
                 </div>
+                @if (Modes.Expert) { <CalendarPick Calendars="calendars" @bind-Value="pairCal" PlaylistName="PlName" Id="pair-cal" Class="wide" Style="" Empty="Facultatif : l'écran suivra ce calendrier ; hors programmation, sa liste par défaut." /> }
             </div>
             @if (pairPrice is { } pp) { <p class="hint" style="margin:12px 0 0"><Ico Name="info" Size="14" /> @pp</p> }
             @if (error != null) { <div class="err">@error</div> }
@@ -858,6 +858,22 @@ else if (wallEdit is { } wid)
 
     private void CloseLive() { liveFor = null; liveWall = null; liveAction = null; Reload(); }
 
+    /// <summary>Pastille « calendrier actif » (Programmations) : nom du calendrier ; au survol, ce qui passe maintenant et la suite. Null : pas de calendrier.</summary>
+    private (Guid Id, string Name, string Tip)? CalPill(Screen s)
+    {
+        if (s.CalendarId is not { } cid || calendars.FirstOrDefault(c => c.Id == cid) is not { } cal) return null;
+        var l = Planning.LocalNow(tenant, area, DateTime.UtcNow);
+        var date = DateOnly.FromDateTime(l);
+        var min = l.Hour * 60 + l.Minute;
+        string Name(Guid id) => playlists.FirstOrDefault(p => p.Id == id)?.Name ?? "liste supprimée";
+        var tip = $"Calendrier « {cal.Name} »";
+        if (Planning.Pick(s.OffSlots, date, min) is { } off) return (cal.Id, cal.Name, tip + " · écran éteint jusqu'à " + Planning.Hm(off.To % Planning.Day));
+        if (Planning.Pick(s.Slots, date, min) is { } hit) tip += " · maintenant : " + Name(hit.PlaylistId) + (hit.Id == cal.Id ? " (par défaut)" : " jusqu'à " + Planning.Hm(hit.To % Planning.Day));
+        if (Planning.Next(s.Slots.Where(x => x.Id != cal.Id), date, min) is { } n)
+            tip += " · prochain : " + Name(n.Slot.PlaylistId) + " à " + (n.Date == date ? "" : Planning.DayNames[((int)n.Date.DayOfWeek + 6) % 7] + " ") + Planning.Hm(n.Slot.From);
+        return (cal.Id, cal.Name, tip);
+    }
+
     /// <summary>Pastille de planning d'une carte écran : le créneau en cours (jusqu'à quand) ou le prochain ; null si l'écran n'a aucun créneau à venir.</summary>
     private (bool Live, string Text, string Tip)? PlanPill(Screen s)
     {
@@ -924,6 +940,9 @@ else if (wallEdit is { } wid)
     private string? zoneFilter;   // null : toutes les zones ; sinon l'Id de la zone
     private string pairZone = "", zoneTo = "";
     private ScreenSpec pairSpec = new();
+    private Guid? pairCal;   // appairage : calendrier des Programmations (facultatif, mode expert)
+    private List<ScreenCalendar> calendars = new();
+    private string PlName(Guid id) => playlists.FirstOrDefault(p => p.Id == id)?.Name ?? "(liste supprimée)";
     private bool pairFull = true;   // appairage : plein écran (coupé : fenêtre de test sur un PC Windows)
     private List<(Guid Id, string Name)>? areaMove;   // écrans à déplacer vers une autre aire
 
@@ -1607,7 +1626,12 @@ else if (wallEdit is { } wid)
                             }
                         </div>
                         <button type="button" class="gc-hit" tabindex="-1" aria-hidden="true" @onclick="() => Edit(gs)"></button>
-                        @if (PlanPill(gs) is { } gpp) { <span class="gc-plan @(gpp.Live ? "live" : "idle")" title="@gpp.Tip"><Ico Name="calendar" Size="13" />@gpp.Text</span> }
+                        @if (CalPill(gs) is { } gcp)
+                        {
+                            @if (Modes.Expert) { <button type="button" class="gc-plan idle cal" title="@gcp.Tip" @onclick='() => Nav.NavigateTo($"programmations?id={gcp.Id}")' @onclick:stopPropagation><Ico Name="calendar" Size="13" />@gcp.Name</button> }
+                            else { <span class="gc-plan idle cal ro" title="@gcp.Tip"><Ico Name="calendar" Size="13" />@gcp.Name</span> }
+                        }
+                        else if (PlanPill(gs) is { } gpp) { <span class="gc-plan @(gpp.Live ? "live" : "idle")" title="@gpp.Tip"><Ico Name="calendar" Size="13" />@gpp.Text</span> }
                         <span class="gc-pill @(!gonline && !gsl.Asleep && !gpaused ? "off" : "")" title="@(gsl.Asleep ? "Mise en veille : l'écran est éteint" : gst)"><span class="gc-d @gcls"></span>@(gsl.Asleep ? "En veille" + (gsl.Wake is { } wake ? " · réveil " + wake : "") : gpaused ? "En pause" + (gs.PausedUntilUtc is { } pu ? " · reprise " + LocalTime(pu) : "") : !gonline ? OfflineSince(gs, gnow) : gst)</span>
                         @if (gpending || gdl != null)
                         {
@@ -1665,7 +1689,7 @@ else if (wallEdit is { } wid)
                                 @if (!HCtx.IsClientMember) { <button type="button" role="menuitem" class="pc-quick" @onclick='() => { menuFor = null; Nav.NavigateTo($"history?screen={gs.Id}"); }'><Ico Name="clock" Size="16" /> Historique</button> }
                                 @PcItems(gs)
                                 <button type="button" role="menuitem" class="pc-quick" @onclick="() => { menuFor = null; simScreen = gs.Id; }"><Ico Name="play" Size="16" /> Simuler</button>
-                                @if (Modes.Expert) { <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"planning?screen={gs.Id}")'><Ico Name="calendar" Size="16" /> Planning de cet écran…</button> }
+                                @if (Modes.Expert && gs.CalendarId is { } gcal) { <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"programmations?id={gcal}")'><Ico Name="calendar" Size="16" /> Ouvrir son calendrier…</button> }
                                 <button type="button" role="menuitem" @onclick="() => OpenRename(gs)"><Ico Name="edit" Size="16" /> Renommer</button>
 
                                 @if (FolderOps) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (gs.Id, gs.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
@@ -1746,7 +1770,6 @@ else if (wallEdit is { } wid)
                                     @if (CanDevAny(members, DevicePower.ScreenOff) && members.Any(x => !IsAsleep(x, true))) { <button type="button" role="menuitem" disabled="@(!Growth || !wOnl)" title="@(!Growth ? Plans.LockedHint : wOnl ? null : "Aucun écran du mur n'est en ligne")" @onclick="async () => { CloseMenu(); await SleepNow(members); }"><Ico Name="moon" Size="16" /> Éteindre les écrans</button> }
                                     <button type="button" role="menuitem" @onclick="() => { CloseMenu(); AskPublish(members.Select(x => x.Id).ToList()); }"><Ico Name="upload" Size="16" /> Publier le mur</button>
                                     @if (placed) { <button type="button" role="menuitem" @onclick="() => { CloseMenu(); simWall = w.Id; }"><Ico Name="play" Size="16" /> Simuler le mur</button> }
-                                    @if (Modes.Expert) { <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"planning?zone={w.Id}")'><Ico Name="calendar" Size="16" /> Planning du mur…</button> }
                                     <button type="button" role="menuitem" @onclick="() => IdentifyWall(w, members)"><Ico Name="monitor" Size="16" /> Identifier sur les écrans</button>
                                     @if (Modes.Expert) { <button type="button" role="menuitem" disabled="@(!Growth || !wOnl)" title="@(!Growth ? Plans.LockedHint : !wOnl ? "Aucun écran du mur n'est en ligne" : null)" @onclick='() => { CloseMenu(); OpenWallLive(w, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer les players</button> }
                                     @PowerItems(members, wOnl)
@@ -1891,7 +1914,7 @@ else if (wallEdit is { } wid)
                                 @if (!HCtx.IsClientMember) { <button type="button" role="menuitem" @onclick='() => { menuFor = null; Nav.NavigateTo($"history?screen={sc.Id}"); }'><Ico Name="clock" Size="16" /> Historique</button> }
                                 @PcItems(sc)
                                 <button type="button" role="menuitem" @onclick="() => { menuFor = null; simScreen = sc.Id; }"><Ico Name="play" Size="16" /> Simuler</button>
-                                @if (Modes.Expert) { <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"planning?screen={sc.Id}")'><Ico Name="calendar" Size="16" /> Planning de cet écran…</button> }
+                                @if (Modes.Expert && sc.CalendarId is { } scal) { <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"programmations?id={scal}")'><Ico Name="calendar" Size="16" /> Ouvrir son calendrier…</button> }
                                 <button type="button" role="menuitem" @onclick="() => OpenRename(sc)"><Ico Name="edit" Size="16" /> Renommer</button>
 
                                 @if (FolderOps) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (sc.Id, sc.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
@@ -1969,6 +1992,11 @@ else if (wallEdit is { } wid)
             <button type="button" class="sc-sim" title="Voir ce qu'affiche l'écran" aria-label="Simuler « @sc.Name »" @onclick="() => simScreen = sc.Id"><Ico Name="play" Size="14" /> Simuler</button>
             </div>
             <div class="sc-foot">
+                @if (CalPill(sc) is { } lcp)
+                {
+                    @if (Modes.Expert) { <button type="button" class="sc-cal" title="@lcp.Tip" @onclick='() => Nav.NavigateTo($"programmations?id={lcp.Id}")'><Ico Name="calendar" Size="12" /> @lcp.Name</button> }
+                    else { <span class="sc-cal" title="@lcp.Tip"><Ico Name="calendar" Size="12" /> @lcp.Name</span> }
+                }
                 @if (sc.ZoneCount == 1)
                 {
                     <label class="sc-lbl" for="pl-@sc.Id">@(sc.Kiosk != null ? "En inactivité" : "En diffusion")</label>
@@ -2455,7 +2483,7 @@ else if (wallEdit is { } wid)
                 @if (c.Pend > 0) { <span class="pend">@c.Pend à publier</span> }
             </span>
             <span class="grow"></span>
-            <a class="tb-btn" href="@(zz != null ? $"planning?zone={zz.Zone.Id}" : "planning")"><Ico Name="calendar" Size="14" /> Planning</a>
+            <a class="tb-btn" href="programmations"><Ico Name="calendar" Size="14" /> Programmations</a>
             @if (pend.Count > 0) { <button type="button" class="btn sm" @onclick="() => AskPublish(pend)"><Ico Name="upload" Size="14" /> Publier (@pend.Count)</button> }
             <div class="kebab">
                 <button type="button" class="kebab-btn" aria-label="Actions" aria-haspopup="menu" aria-expanded="@(openMenu == "tree" ? "true" : "false")" @onclick='() => Toggle("tree")'><Ico Name="dots-v" Size="18" /></button>
@@ -2694,6 +2722,7 @@ else if (wallEdit is { } wid)
         selectedIds.IntersectWith(screens.Select(s => s.Id));
         synced = zones.Where(z => z.Sync).SelectMany(z => Helpers.SyncedScreens(screens.Where(s => ZoneOf(s)?.Id == z.Id))).ToHashSet();
         playlists = Store.Read(d => PlaylistOps.Choosable(d));   // listes que la personne voit, et celles déjà en place
+        calendars = Store.Read(d => d.Calendars.OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
         interactiveLists = Store.Read(d => d.InteractiveLists.ToList());
         LoadGroups();
@@ -2727,7 +2756,7 @@ else if (wallEdit is { } wid)
     private static string PickMeta(PlayerDownloads.Item? i, string ext) => i == null ? "Indisponible" : $"v{i.Version} · {ext}";
     private bool pairKiosk;   // « Borne interactive » : l'écran connecté reçoit un menu de tuiles (Screen.Kiosk)
     private void OpenPairKiosk() { OpenPair(); pairKiosk = true; pairSpec.Orientation = "portrait"; }
-    private void OpenPair() { winPlayer = PlayerDownloads.Latest("windows"); androidPlayer = PlayerDownloads.Latest("android"); linuxPlayer = PlayerDownloads.Latest("linux"); pairKiosk = false; SetPairPrice(); pairAreas = Store.Read(AreaFilter.Visible); code = name = ""; pairFull = true; playlistId = null; error = null; pairSpec = ScreenSpec.From(tenant); pairSpec.Resolution = "auto"; pairZone = (FreeZones.FirstOrDefault(z => z.Id.ToString() == zoneFilter) ?? zones.FirstOrDefault(z => z.IsDefault) ?? FreeZones.FirstOrDefault())?.Id.ToString() ?? ""; showPair = true; }
+    private void OpenPair() { winPlayer = PlayerDownloads.Latest("windows"); androidPlayer = PlayerDownloads.Latest("android"); linuxPlayer = PlayerDownloads.Latest("linux"); pairKiosk = false; SetPairPrice(); pairAreas = Store.Read(AreaFilter.Visible); code = name = ""; pairFull = true; pairCal = null; playlistId = null; error = null; pairSpec = ScreenSpec.From(tenant); pairSpec.Resolution = "auto"; pairZone = (FreeZones.FirstOrDefault(z => z.Id.ToString() == zoneFilter) ?? zones.FirstOrDefault(z => z.IsDefault) ?? FreeZones.FirstOrDefault())?.Id.ToString() ?? ""; showPair = true; }
 
     private Guid? kioskOpen;   // tiroir de la borne ouverte (KioskDrawer)
     private void CloseKiosk() { kioskOpen = null; Reload(); }
@@ -2855,6 +2884,7 @@ else if (wallEdit is { } wid)
         error = null;
         var spec = pairSpec;
         var full = pairFull;
+        var cal = pairCal;
         var pid = playlistId;
         var screenName = name;
         var kiosk = pairKiosk;
@@ -2879,6 +2909,7 @@ else if (wallEdit is { } wid)
                 d.InteractiveLists.Add(starter);
                 s.Kiosk.ListId = starter.Id;
             }
+            if (cal is { } cid && d.Calendars.FirstOrDefault(c => c.Id == cid) is { } calendar) Calendars.Stamp(s, calendar);   // calendrier choisi à la connexion
             d.Tenant.FirstScreen = FirstScreen.Done;   // un écran relié : l'assistant du premier écran ne revient plus
             return s.Id;
         });

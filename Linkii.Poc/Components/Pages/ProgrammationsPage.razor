@@ -1,0 +1,503 @@
+@page "/programmations"
+@page "/planning"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:planning")]
+@using System.Globalization
+@using Plan = Linkii.Poc.Planning
+@inject TenantStore Store
+@inject AppService Svc
+@inject Notifier Notifier
+@inject NavigationManager Nav
+@inject Toaster Toast
+
+@* Programmations (mode expert, maquette programmations-calendriers.html) : des calendriers, chacun avec une liste par défaut obligatoire et des événements
+   « Diffuser une liste » ou « Éteindre l'écran », créés dans un tiroir du haut. Un calendrier s'assigne depuis le tiroir d'un écran ou d'une borne.
+   Toute modification part aussitôt sur les écrans assignés (comme l'ancien planning). Voir Calendars. *@
+
+@if (Cal == null)
+{
+    <div class="page-head">
+        <div><h1>Programmations</h1>
+            <p class="sub sc-intro">@(calendars.Count == 0 ? "Aucun calendrier" : $"{calendars.Count} calendrier{(calendars.Count > 1 ? "s" : "")}") · un calendrier s'assigne à un écran ou à une borne depuis son tiroir.</p></div>
+        @if (playlists.Count > 0)
+        {
+            <div class="row head-actions"><button class="btn" data-fab="Nouveau calendrier" @onclick="OpenNewCalendar"><Ico Name="plus" Size="16" /> Nouveau calendrier</button></div>
+        }
+    </div>
+
+    @if (playlists.Count == 0)
+    {
+        <div class="card empty"><div class="big">Aucune liste de diffusion</div><p>Un calendrier joue des listes de diffusion : créez-en d'abord une, puis revenez ici.</p><a class="btn" href="playlists">Aller aux listes de diffusion</a></div>
+    }
+    else if (calendars.Count == 0)
+    {
+        <div class="pt-empty">
+            <h3>Aucun calendrier pour l'instant</h3>
+            <p>Un calendrier choisit ce que diffusent vos écrans selon l'heure, et quand ils s'éteignent. Hors programmation, il joue sa liste par défaut. Assignez-le ensuite à un écran ou à une borne depuis son tiroir.</p>
+            <button class="btn" @onclick="OpenNewCalendar"><Ico Name="plus" Size="16" /> Nouveau calendrier</button>
+        </div>
+    }
+    else
+    {
+        <table class="pg-tbl">
+            <thead><tr><th>Calendrier</th><th>Semaine</th><th>Utilisé par</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var c in calendars)
+                {
+                    var cal = c;
+                    var used = screens.Where(s => s.CalendarId == cal.Id).ToList();
+                    <tr class="click" @onclick="() => Open(cal.Id)">
+                        <td><div class="pg-name"><span class="pg-ic"><Ico Name="calendar" Size="17" /></span><div>@cal.Name<small>@Summary(cal)</small></div></div></td>
+                        <td><div class="pg-mini" title="Cette semaine, du lundi au dimanche">
+                            @for (var d = 0; d < 7; d++) { var (play, off) = Coverage(cal, thisMonday.AddDays(d)); <i class="@(off > play ? "o" : "")" style="height:@(3 + (int)Math.Round(Math.Min(1.0, Math.Max(play, off) / 720.0) * 19))px"></i> }
+                        </div></td>
+                        <td>
+                            @if (used.Count == 0) { <span class="pg-empty">Aucun écran</span> }
+                            else { <div class="pg-tags">@foreach (var s in used.Take(4)) { <span class="pg-tag"><Ico Name="@(s.Kiosk != null ? "hand" : "monitor")" Size="12" /> @s.Name</span> }@if (used.Count > 4) { <span class="pg-tag">+@(used.Count - 4)</span> }</div> }
+                        </td>
+                        <td class="pg-go"><button type="button" class="btn ghost sm icon" aria-label="Ouvrir « @cal.Name »" title="Ouvrir" @onclick="() => Open(cal.Id)" @onclick:stopPropagation><Ico Name="chevron-right" Size="16" /></button></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <p class="pt-legend">Hors programmation, un écran diffuse la liste par défaut de son calendrier ; sans calendrier, sa propre liste.</p>
+    }
+}
+else
+{
+    var used = screens.Where(s => s.CalendarId == Cal.Id).ToList();
+    <div class="page-head pn-head">
+        <div>
+            <div class="pt-crumb"><a href="programmations" @onclick="Back" @onclick:preventDefault>Programmations</a> › @Cal.Name</div>
+            <h1>@Cal.Name</h1>
+            <p class="sub sc-intro">Hors programmation : <b>@(Cal.DefaultPlaylistId == Guid.Empty ? "aucune liste par défaut (à choisir)" : PlaylistName(Cal.DefaultPlaylistId))</b>, la liste par défaut.</p>
+        </div>
+        <div class="row head-actions pg-acts">
+            <button class="btn ghost" @onclick="OpenEditCalendar"><Ico Name="edit" Size="15" /> Modifier</button>
+            <button class="btn" aria-haspopup="menu" aria-expanded="@(addMenu ? "true" : "false")" @onclick="() => addMenu = !addMenu"><Ico Name="plus" Size="16" /> Ajouter <Ico Name="chevron" Size="14" /></button>
+            @if (addMenu)
+            {
+                <div class="pg-veil" @onclick="() => addMenu = false"></div>
+                <div class="pg-menu" role="menu">
+                    <button type="button" role="menuitem" @onclick="() => NewEvent(CalEvent.Play, null, null)"><span class="mi"><Ico Name="play-box" Size="16" /></span><span><b>Diffuser une liste</b><small>Une liste de diffusion, toujours ou sur une période</small></span></button>
+                    <button type="button" role="menuitem" @onclick="() => NewEvent(CalEvent.Off, null, null)"><span class="mi o"><Ico Name="power" Size="16" /></span><span><b>Éteindre l'écran</b><small>Écran éteint sur une période (pas la mise en veille)</small></span></button>
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (Cal.DefaultPlaylistId == Guid.Empty)
+    {
+        <div class="pn-warn" style="margin-bottom:12px">La liste par défaut de ce calendrier a été supprimée : <button type="button" class="btn link sm" @onclick="OpenEditCalendar">choisissez-en une autre</button>.</div>
+    }
+    <div class="pg-assign"><Ico Name="calendar" Size="16" /><span>Assigné à</span>
+        @if (used.Count == 0) { <span class="pg-empty">aucun écran</span> }
+        else { @foreach (var s in used) { <span class="pg-tag"><Ico Name="@(s.Kiosk != null ? "hand" : "monitor")" Size="12" /> @s.Name</span> } }
+        <span class="grow"></span><span class="pg-hint">L'assignation se fait dans le tiroir de chaque écran ou borne.</span></div>
+
+    <div class="pn-row pn-row3">
+        <div class="pn-nav">
+            <button class="btn ghost sm" aria-label="Semaine précédente" @onclick="() => weekStart = weekStart.AddDays(-7)">‹</button>
+            <b>@WeekLabel</b>
+            <button class="btn ghost sm" aria-label="Semaine suivante" @onclick="() => weekStart = weekStart.AddDays(7)">›</button>
+            <button class="btn link sm" @onclick="() => weekStart = thisMonday">Aujourd'hui</button>
+        </div>
+    </div>
+
+    var playSlots = Calendars.PlaySlots(Cal).Where(x => x.Id != Cal.Id).ToList();   // sans la liste par défaut
+    var offSlots = Calendars.OffSlots(Cal);
+    <div class="pn-cal pn-fill">
+        <div class="pn-ch"><div></div>@for (var d = 0; d < 7; d++) { var day = weekStart.AddDays(d); <div class="@(day == today ? "today" : "")">@Plan.DayNames[d]<b>@day.Day</b></div> }</div>
+        <div class="pn-cb">
+            <div class="pn-hrs">@for (var h = 0; h < 24; h++) { <span style="top:@(Pct(h * 60))%">@h.ToString("00"):00</span> }</div>
+            @for (var d = 0; d < 7; d++)
+            {
+                var di = d; var date = weekStart.AddDays(d);
+                <div class="pn-col" style="--rows:24">
+                    @for (var q = 0; q < 48; q++) { var qm = q * 30; <div class="pn-cell" title="Diffuser une liste à partir de @Plan.Hm(qm)" @onclick="() => NewEvent(CalEvent.Play, date, qm)"></div> }
+                    @foreach (var sg in Plan.Segments(playSlots, date).Where(x => x.Slot != null))
+                    {
+                        var ev = Cal.Events.FirstOrDefault(e => e.Id == sg.Slot!.Id);
+                        <div class="pn-ev @Color(sg.Slot!.PlaylistId)" style="@Pos(sg.From, sg.To)" role="button" tabindex="0" title="@(ev != null ? Calendars.Describe(ev) : "")" @onclick="() => EditEvent(ev)" @onclick:stopPropagation>
+                            <b>@PlaylistName(sg.Slot.PlaylistId)</b><small>@Plan.Hm(sg.From) – @Plan.Hm(sg.To)</small>
+                        </div>
+                    }
+                    @foreach (var sg in Plan.Segments(offSlots, date).Where(x => x.Slot != null))
+                    {
+                        var ev = Cal.Events.FirstOrDefault(e => e.Id == sg.Slot!.Id);
+                        <div class="pn-ev off" style="@Pos(sg.From, sg.To)" role="button" tabindex="0" title="@(ev != null ? Calendars.Describe(ev) : "")" @onclick="() => EditEvent(ev)" @onclick:stopPropagation>
+                            <b>Écran éteint</b><small>@Plan.Hm(sg.From) – @Plan.Hm(sg.To)</small>
+                        </div>
+                    }
+                </div>
+            }
+            @if (weekStart <= today && today < weekStart.AddDays(7)) { <div class="pn-now" style="top:@(Pct(nowMin))%"></div> }
+        </div>
+        <div class="pn-legend">
+            @foreach (var p in UsedPlaylists) { <span><i class="@Color(p.Id)"></i>@p.Name</span> }
+            @if (Cal.Events.Any(e => e.Kind == CalEvent.Off)) { <span><i class="off"></i>Écran éteint</span> }
+            <span class="pn-dflt"><i class="hatch"></i>Hors programmation : <b>@(Cal.DefaultPlaylistId == Guid.Empty ? "aucune liste" : PlaylistName(Cal.DefaultPlaylistId))</b></span>
+        </div>
+    </div>
+    <p class="pt-legend">Cliquez dans la grille pour diffuser une liste à cette heure, ou sur un événement pour le modifier. Une extinction passe devant une diffusion ; entre deux diffusions, une période datée passe devant une récurrence, puis la plus récente gagne.</p>
+}
+
+@if (calDlg)
+{
+    @* nouveau calendrier, ou modification du nom et de la liste par défaut *@
+    <div class="modal-backdrop" @onclick="() => calDlg = false"></div>
+    <div class="modal app-modal pn-modal" role="dialog" aria-modal="true" aria-labelledby="pg-ct">
+        <div class="modal-head"><div class="grow"><h3 id="pg-ct">@(calNew ? "Nouveau calendrier" : "Modifier le calendrier")</h3></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => calDlg = false"><Ico Name="x" Size="20" /></button></div>
+        <div class="modal-body">
+            <div class="pn-f"><label class="lbl" for="pg-name">Nom</label><input id="pg-name" style="width:100%" maxlength="80" placeholder="Ex. Horaires accueil" @bind="calName" @bind:event="oninput" /></div>
+            <div class="pn-f"><label class="lbl" for="pg-def">Liste de diffusion par défaut</label>
+                <select id="pg-def" @bind="calDefault">
+                    @if (calDefault == Guid.Empty) { <option value="@Guid.Empty">— Choisir une liste —</option> }
+                    @foreach (var p in playlists) { <option value="@p.Id">@p.Name — @DurationOf(p)</option> }
+                </select>
+                <p class="hint">Obligatoire : elle passe en dehors des diffusions programmées dans le calendrier.</p></div>
+            @if (calError != null) { <div class="err">@calError</div> }
+        </div>
+        <div class="modal-foot pn-foot">
+            @if (!calNew)
+            {
+                @if (confirmDelete) { <button type="button" class="btn danger" @onclick="DeleteCalendar">Supprimer ?</button> <button type="button" class="btn ghost" @onclick="() => confirmDelete = false">Non</button> }
+                else { <button type="button" class="btn ghost" @onclick="() => confirmDelete = true"><Ico Name="trash" Size="15" /> Supprimer</button> }
+            }
+            <span class="grow"></span>
+            <button type="button" class="btn ghost" @onclick="() => calDlg = false">Annuler</button>
+            <button type="button" class="btn" @onclick="SaveCalendar">@(calNew ? "Créer le calendrier" : "Enregistrer")</button>
+        </div>
+    </div>
+}
+
+@if (draft != null)
+{
+    @* tiroir du haut : diffuser une liste, ou éteindre l'écran (le type se change en haut à droite) *@
+    var diff = draft.Kind == CalEvent.Play;
+    <div class="modal-backdrop" @onclick="CloseDraft"></div>
+    <div class="cw-top ev-top" role="dialog" aria-modal="true" aria-labelledby="ev-title">
+        <div class="cw-wrap">
+            <div class="cw-head">
+                <span class="ev-ic @(diff ? "" : "o")"><Ico Name="@(diff ? "play-box" : "power")" Size="18" /></span>
+                <div class="grow"><h3 id="ev-title">@(diff ? "Diffuser une liste" : "Éteindre l'écran")</h3><small>Calendrier « @Cal?.Name »</small></div>
+                <div class="ev-type" role="group" aria-label="Type d'événement">
+                    <button type="button" class="@(diff ? "on" : "")" @onclick="() => SetKind(CalEvent.Play)"><Ico Name="play-box" Size="15" /> Diffuser une liste</button>
+                    <button type="button" class="@(diff ? "" : "on")" @onclick="() => SetKind(CalEvent.Off)"><Ico Name="power" Size="15" /> Éteindre l'écran</button>
+                </div>
+            </div>
+            <div class="ev-body">
+                @if (diff)
+                {
+                    <div class="ev-f full"><label class="lbl" for="ev-list">Liste de diffusion</label>
+                        <select id="ev-list" value="@draft.PlaylistId" @onchange="e => draft.PlaylistId = Guid.TryParse(e.Value?.ToString(), out var g) ? g : null">
+                            @foreach (var p in playlists) { <option value="@p.Id">@p.Name — @DurationOf(p)</option> }
+                            @if (draft.PlaylistId is { } pid && playlists.All(p => p.Id != pid)) { <option value="@pid">(liste supprimée)</option> }
+                        </select>
+                        <div class="ev-hint">Durée totale d'un tour de la liste, après le tiret.</div></div>
+                    <div class="ev-f full"><span class="ev-lbl">Période de diffusion</span>
+                        <div class="ev-seg"><button type="button" class="@(draft.Always ? "on" : "")" @onclick="() => draft.Always = true">Toujours</button><button type="button" class="@(draft.Always ? "" : "on")" @onclick="() => draft.Always = false">Du … au …</button></div>
+                        @if (!draft.Always) { @Period() }
+                    </div>
+                }
+                else
+                {
+                    <div class="ev-f full"><span class="ev-lbl">Période d'extinction</span>@Period()</div>
+                }
+                <div class="ev-f full"><span class="ev-lbl">Récurrence</span>
+                    <div class="ev-seg"><button type="button" class="@(draft.Repeat ? "" : "on")" @onclick="() => draft.Repeat = false">Ne se répète pas</button><button type="button" class="@(draft.Repeat ? "on" : "")" @onclick="SetRepeat">Certains jours</button></div>
+                    @if (draft.Repeat)
+                    {
+                        <div class="pn-days" style="margin-top:10px">@for (var d = 0; d < 7; d++) { var di = d; <button type="button" class="@(Plan.HasDay(draft.Days, di) ? "on" : "")" aria-pressed="@(Plan.HasDay(draft.Days, di) ? "true" : "false")" @onclick="() => draft.Days ^= Plan.Bit(di)">@Plan.DayNames[d]</button> }</div>
+                        <div class="ev-hint">@(draft.Always ? "Chaque semaine, ces jours-là, toute la journée." : "Chaque semaine, ces jours-là, aux heures de la période. Les dates bornent la répétition ; laissez-les vides pour qu'elle ne s'arrête jamais.")</div>
+                    }
+                </div>
+                @if (Calendars.Check(draft) is null)
+                {
+                    <div class="ev-sum full"><Ico Name="info" Size="16" /><span>@(diff ? $"« {PlaylistName(draft.PlaylistId)} » : " : "Écran éteint : ")<b>@Calendars.Describe(draft)</b>.@(diff ? "" : " C'est une extinction, différente de la mise en veille.")</span></div>
+                }
+                @if (draftError != null) { <div class="err full">@draftError</div> }
+            </div>
+            <div class="cw-foot">
+                <button type="button" class="btn ghost" @onclick="CloseDraft">Annuler</button>
+                @if (!draftNew)
+                {
+                    @if (confirmEvDelete) { <button type="button" class="btn danger" @onclick="DeleteEvent">Supprimer ?</button> <button type="button" class="btn ghost" @onclick="() => confirmEvDelete = false">Non</button> }
+                    else { <button type="button" class="btn ghost" @onclick="() => confirmEvDelete = true"><Ico Name="trash" Size="15" /> Supprimer</button> }
+                }
+                <span class="grow"></span>
+                <button type="button" class="btn" @onclick="SaveEvent">@(draftNew ? "Ajouter au calendrier" : "Enregistrer")</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "id")] public string? IdParam { get; set; }
+    [SupplyParameterFromQuery(Name = "screen")] public string? ScreenParam { get; set; }
+
+    private static readonly CultureInfo Fr = CultureInfo.GetCultureInfo("fr-CH");
+
+    private List<ScreenCalendar> calendars = new();
+    private List<Playlist> playlists = new();
+    private List<Screen> screens = new();
+    private List<MediaItem> media = new();
+    private Guid? openId;
+    private string? lastQuery;
+    private DateOnly today, thisMonday, weekStart;
+    private int nowMin;
+    private bool addMenu;
+
+    private bool calDlg, calNew, confirmDelete;
+    private string calName = "";
+    private Guid calDefault;
+    private string? calError;
+
+    private CalEvent? draft;
+    private bool draftNew, confirmEvDelete;
+    private string? draftError;
+
+    private ScreenCalendar? Cal => openId is { } id ? calendars.FirstOrDefault(c => c.Id == id) : null;
+
+    protected override void OnInitialized()
+    {
+        Load();
+        weekStart = thisMonday;
+    }
+
+    protected override void OnParametersSet()
+    {
+        var q = IdParam + "|" + ScreenParam;
+        if (q == lastQuery) return;
+        lastQuery = q;
+        if (Guid.TryParse(IdParam, out var id) && calendars.Any(c => c.Id == id)) openId = id;
+        else if (Guid.TryParse(ScreenParam, out var sid) && screens.FirstOrDefault(s => s.Id == sid)?.CalendarId is { } cid) openId = cid;
+        else openId = null;
+    }
+
+    private void Load()
+    {
+        (calendars, playlists, screens, media, var tenant) = Store.Read(d => (
+            d.Calendars.OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
+            PlaylistOps.Choosable(d),
+            d.AllScreens.Where(s => s.Token != null).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ToList(),
+            d.Media.Where(m => m.Status == null).ToList(),
+            d.Tenant));
+        var l = Plan.LocalNow(tenant, null, DateTime.UtcNow);
+        today = DateOnly.FromDateTime(l);
+        nowMin = l.Hour * 60 + l.Minute;
+        thisMonday = today.AddDays(-(((int)today.DayOfWeek + 6) % 7));
+    }
+
+    private void Open(Guid id) { openId = id; addMenu = false; weekStart = thisMonday; Nav.NavigateTo($"programmations?id={id}"); }
+    private void Back() { openId = null; addMenu = false; Nav.NavigateTo("programmations"); }
+
+    // ---------- textes ----------
+
+    private string PlaylistName(Guid? id) => playlists.FirstOrDefault(p => p.Id == id)?.Name ?? "(liste supprimée)";
+    private string Color(Guid playlistId) => "c" + (Math.Max(0, playlists.FindIndex(p => p.Id == playlistId)) % 6 + 1);
+
+    private string DurationOf(Playlist p)
+    {
+        var sec = p.Draft.Where(i => i.Placement == "full" && !i.Off).Sum(i =>
+        {
+            var m = media.FirstOrDefault(x => x.Id == i.MediaId);
+            return Svc.IsIncomplete(m) ? 0 : Helpers.ItemSeconds(i, m, Svc.Find(m?.AppId), media);
+        });
+        if (sec <= 0) return "vide";
+        var (h, mn, s) = (sec / 3600, sec % 3600 / 60, sec % 60);
+        return h > 0 ? $"{h} h {mn:00} min" : mn > 0 ? (s > 0 ? $"{mn} min {s:00} s" : $"{mn} min") : $"{s} s";
+    }
+
+    private string Summary(ScreenCalendar c)
+    {
+        var plays = c.Events.Count(e => e.Kind == CalEvent.Play);
+        var offs = c.Events.Count(e => e.Kind == CalEvent.Off);
+        var parts = new List<string> { "Par défaut : " + (c.DefaultPlaylistId == Guid.Empty ? "à choisir" : PlaylistName(c.DefaultPlaylistId)) };
+        if (plays > 0) parts.Add($"{plays} diffusion{(plays > 1 ? "s" : "")}");
+        if (offs > 0) parts.Add($"{offs} extinction{(offs > 1 ? "s" : "")}");
+        return string.Join(" · ", parts);
+    }
+
+    /// <summary>Minutes de diffusion programmée (hors liste par défaut) et d'extinction ce jour-là.</summary>
+    private static (int Play, int Off) Coverage(ScreenCalendar c, DateOnly date)
+    {
+        int Sum(List<Slot> l) => Plan.Segments(l, date).Where(x => x.Slot != null).Sum(x => x.To - x.From);
+        return (Sum(Calendars.PlaySlots(c).Where(x => x.Id != c.Id).ToList()), Sum(Calendars.OffSlots(c)));
+    }
+
+    private IEnumerable<Playlist> UsedPlaylists
+    {
+        get
+        {
+            var ids = Cal!.Events.Where(e => e.Kind == CalEvent.Play && e.PlaylistId != null).Select(e => e.PlaylistId!.Value).ToHashSet();
+            return playlists.Where(p => ids.Contains(p.Id));
+        }
+    }
+
+    private static string Inv(double v) => v.ToString("0.###", CultureInfo.InvariantCulture);
+    private static string Pct(int min) => Inv(min * 100.0 / 1440);
+    private static string Pos(int from, int to) => $"top:{Pct(from)}%;height:{Inv(Math.Max(2.0, (to - from) * 100.0 / 1440))}%";
+
+    private string WeekLabel
+    {
+        get
+        {
+            var end = weekStart.AddDays(6);
+            return weekStart.Month == end.Month ? $"{weekStart.Day} – {end.Day} {end.ToString("MMMM yyyy", Fr)}" : $"{weekStart.Day} {weekStart.ToString("MMM", Fr)} – {end.Day} {end.ToString("MMM yyyy", Fr)}";
+        }
+    }
+
+    // ---------- calendrier : création, modification, suppression ----------
+
+    private void OpenNewCalendar()
+    {
+        calNew = true; calName = ""; calDefault = playlists.FirstOrDefault()?.Id ?? Guid.Empty; calError = null; confirmDelete = false; calDlg = true;
+    }
+
+    private void OpenEditCalendar()
+    {
+        if (Cal == null) return;
+        calNew = false; calName = Cal.Name; calDefault = Cal.DefaultPlaylistId; calError = null; confirmDelete = false; calDlg = true; addMenu = false;
+    }
+
+    private async Task SaveCalendar()
+    {
+        var name = calName.Trim();
+        if (name.Length == 0) { calError = "Donnez un nom au calendrier."; return; }
+        if (calDefault == Guid.Empty || playlists.All(p => p.Id != calDefault)) { calError = "Choisissez la liste de diffusion par défaut."; return; }
+        var dflt = calDefault;
+        if (calNew)
+        {
+            var c = new ScreenCalendar { Name = name, DefaultPlaylistId = dflt };
+            Store.Write(d => d.Calendars.Add(c));
+            calDlg = false;
+            Load();
+            Toast.Ok($"Calendrier « {name} » créé. Ajoutez-lui des diffusions, puis assignez-le à un écran depuis son tiroir.");
+            Open(c.Id);
+            return;
+        }
+        var id = Cal!.Id;
+        var ids = Store.Write(d =>
+        {
+            var c = d.Calendars.First(x => x.Id == id);
+            c.Name = name; c.DefaultPlaylistId = dflt;
+            return Calendars.Apply(d, c);
+        });
+        calDlg = false;
+        await Notifier.PublishPlanning(ids);
+        Load();
+        Toast.Ok($"Calendrier « {name} » enregistré.");
+    }
+
+    private async Task DeleteCalendar()
+    {
+        if (Cal == null) return;
+        var (id, name) = (Cal.Id, Cal.Name);
+        var ids = Store.Write(d =>
+        {
+            var res = new List<Guid>();
+            foreach (var s in Calendars.ScreensOf(d, id)) { Calendars.Stamp(s, null); if (s.Token != null) res.Add(s.Id); }
+            d.Calendars.RemoveAll(c => c.Id == id);
+            return res;
+        });
+        calDlg = false;
+        await Notifier.PublishPlanning(ids);
+        Load();
+        Back();
+        Toast.Ok(ids.Count > 0 ? $"Calendrier « {name} » supprimé : ses écrans reprennent leur propre liste." : $"Calendrier « {name} » supprimé.");
+    }
+
+    // ---------- événements : tiroir du haut ----------
+
+    private void NewEvent(string kind, DateOnly? date, int? minute)
+    {
+        addMenu = false;
+        // diffusion : une heure à partir de la case cliquée (08:00 par défaut) ; extinction : de 19:00 au lendemain 07:00
+        var start = (date ?? today).ToDateTime(TimeOnly.MinValue).AddMinutes(minute ?? (kind == CalEvent.Off ? 19 * 60 : 8 * 60));
+        var end = start.AddMinutes(kind == CalEvent.Off ? 12 * 60 : 60);
+        draft = new CalEvent
+        {
+            Kind = kind,
+            PlaylistId = kind == CalEvent.Play ? playlists.FirstOrDefault(p => p.Id != Cal?.DefaultPlaylistId)?.Id ?? playlists.FirstOrDefault()?.Id : null,
+            StartDate = start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), StartTime = start.ToString("HH:mm", CultureInfo.InvariantCulture),
+            EndDate = end.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), EndTime = end.ToString("HH:mm", CultureInfo.InvariantCulture),
+            Days = 31
+        };
+        draftNew = true; draftError = null; confirmEvDelete = false;
+    }
+
+    private void EditEvent(CalEvent? e)
+    {
+        if (e == null) return;
+        draft = e.Copy(); draftNew = false; draftError = null; confirmEvDelete = false;
+    }
+
+    private void CloseDraft() { draft = null; draftError = null; }
+
+    private void SetKind(string kind)
+    {
+        if (draft == null || draft.Kind == kind) return;
+        draft.Kind = kind;
+        if (kind == CalEvent.Off) draft.Always = false;
+        else draft.PlaylistId ??= playlists.FirstOrDefault()?.Id;
+    }
+
+    private void SetRepeat()
+    {
+        if (draft == null) return;
+        if (draft.Repeat) return;
+        draft.Repeat = true;
+        draft.EndDate = null;   // la date de fin bornerait la répétition : vide = sans limite (l'heure de fin reste celle de chaque jour)
+        if ((draft.Days & 127) == 0) draft.Days = 31;
+    }
+
+    private RenderFragment Period() => __builder =>
+    {
+        <div class="ev-dt">
+            <span>Début</span><input type="date" aria-label="Date de début" value="@draft!.StartDate" @onchange="e => draft!.StartDate = e.Value?.ToString()" /><input type="time" aria-label="Heure de début" value="@draft.StartTime" @onchange="e => draft!.StartTime = e.Value?.ToString()" />
+            <span>Fin</span><input type="date" aria-label="Date de fin" value="@draft.EndDate" @onchange="e => draft!.EndDate = e.Value?.ToString()" /><input type="time" aria-label="Heure de fin" value="@draft.EndTime" @onchange="e => draft!.EndTime = e.Value?.ToString()" />
+        </div>
+    };
+
+    private async Task SaveEvent()
+    {
+        if (draft == null || Cal == null) return;
+        var e = draft.Copy();
+        if (e.Kind == CalEvent.Off) { e.Always = false; e.PlaylistId = null; }
+        if (e.Always) { e.StartDate = e.EndDate = null; e.StartTime = e.EndTime = null; }
+        if (!e.Repeat) e.Days = 0;
+        e.Days &= 127;
+        if (Calendars.Check(e) is { } bad) { draftError = bad; return; }
+        if (e.Kind == CalEvent.Play && playlists.All(p => p.Id != e.PlaylistId)) { draftError = "Choisissez une liste de diffusion."; return; }
+        var id = Cal.Id;
+        var isNew = draftNew;
+        var ids = Store.Write(d =>
+        {
+            var c = d.Calendars.First(x => x.Id == id);
+            var at = c.Events.FindIndex(x => x.Id == e.Id);
+            if (at >= 0) c.Events[at] = e; else { e.CreatedUtc = DateTime.UtcNow; c.Events.Add(e); }
+            return Calendars.Apply(d, c);
+        });
+        draft = null;
+        await Notifier.PublishPlanning(ids);
+        Load();
+        Toast.Ok((isNew ? "Ajouté au calendrier" : "Enregistré") + (ids.Count > 0 ? $" : {ids.Count} écran{(ids.Count > 1 ? "s" : "")} mis à jour." : "."));
+    }
+
+    private async Task DeleteEvent()
+    {
+        if (draft == null || Cal == null) return;
+        var (id, eid) = (Cal.Id, draft.Id);
+        var ids = Store.Write(d =>
+        {
+            var c = d.Calendars.First(x => x.Id == id);
+            c.Events.RemoveAll(x => x.Id == eid);
+            return Calendars.Apply(d, c);
+        });
+        draft = null;
+        await Notifier.PublishPlanning(ids);
+        Load();
+        Toast.Ok("Événement supprimé.");
+    }
+}

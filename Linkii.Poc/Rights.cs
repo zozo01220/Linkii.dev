@@ -18,14 +18,14 @@ public static class LevelPages
 
     public static string Label(string page) => page switch
     {
-        Screens => "Écrans", Playlists => "Listes de lecture", Planning => "Planning", Media => "Médiathèque",
+        Screens => "Écrans", Playlists => "Listes de lecture", Planning => "Programmations", Media => "Médiathèque",
         Integrations => "Intégrations", Widgets => "Widgets", Zones => "Zones", Compositions => "Compositions", _ => page
     };
 
     /// <summary>Adresse d'une page, pour renvoyer un membre vers la première qui lui est ouverte.</summary>
     public static string Path(string page) => page switch
     {
-        Screens => "/", Playlists => "/playlists", Planning => "/planning", Media => "/media",
+        Screens => "/", Playlists => "/playlists", Planning => "/programmations", Media => "/media",
         Integrations => "/integrations", Widgets => "/widgets", Zones => "/zones", Compositions => "/compositions", _ => "/"
     };
 }

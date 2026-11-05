@@ -139,7 +139,7 @@ public class MenuBadges(JsonStore root, TenantStore store, TenantContext ctx, Pl
         pl.AddRange(lists.Folders().Select(r => new Item(r.Folder.Id, r.Folder.OwnerId, r.Tab, true)));
         res[Playlists] = Eval(Playlists, pl, true);
         // listes modifiées depuis leur publication (« À publier » de la page Listes) : horloge orange du menu (§178)
-        res[ListsToPublish] = new Badge(store.Read(d => PlaylistUses.Of(d.Playlists.Where(p => rights.GetValueOrDefault(p.Id) != FolderRight.None).ToList(), d.AllScreens.Where(s => s.Token != null).ToList(), d.Areas.ToList()).Values.Count(u => u.Pending > 0)), 0, 0);
+        res[ListsToPublish] = new Badge(store.Read(d => PlaylistUses.Of(d.Playlists.Where(p => rights.GetValueOrDefault(p.Id) != FolderRight.None).ToList(), d.AllScreens.Where(s => s.Token != null).ToList(), d.Areas.ToList(), d.Calendars.ToList()).Values.Count(u => u.Pending > 0)), 0, 0);
 
         var fileTabs = media.FileTabs();
         var files = media.Entries().Select(m => new Item(m.Id, m.OwnerId, fileTabs.GetValueOrDefault(m.Id), false)).ToList();

@@ -311,6 +311,7 @@
     if (window.LinkiiKiosk) LinkiiKiosk.apply(pl.kiosk || null, kioskHooks());   // borne interactive : menu de tuiles au toucher (null : écran de diffusion)
     if (pl.dim !== undefined) cfg.dim = pl.dim || null;
     if (pl.sleep !== undefined) cfg.sleep = pl.sleep || null;   // plages de veille (et veille manuelle) de la version qui devient courante
+    if (pl.off !== undefined) cfg.off = pl.off || null;         // extinctions du calendrier (Programmations)
     layout();
     sleepTick();
     dimTick();
@@ -1550,16 +1551,27 @@
     var w = localWeekMinute(ms, sl.tz);
     return sl.ranges.some(function (r) { return (w >= r[0] && w < r[1]) || (w + WEEK_MIN >= r[0] && w + WEEK_MIN < r[1]); });
   }
+  // Extinctions du calendrier : { tz, slots: [{ days, from, to, dateFrom, dateTo }] }, mêmes règles que les créneaux du planning.
+  function isOff(o, ms) {
+    if (!o || !o.slots || !o.slots.length) return false;
+    var w = localWeekMinute(ms, o.tz), day = Math.floor(w / 1440), min = w % 1440, iso;
+    try { iso = new Date(ms).toLocaleDateString('sv-SE', { timeZone: o.tz }); } catch (e) { iso = todayIso(); }
+    return o.slots.some(function (s) {
+      return ((s.days >> day) & 1) && min >= s.from && min < s.to && !(s.dateFrom && iso < s.dateFrom) && !(s.dateTo && iso > s.dateTo);
+    });
+  }
   function sleepTick() {
     if (PREVIEW) return;
     // une nouvelle plage s'applique aussitôt, sans attendre la fin du contenu en cours
     if (state.pending && state.pending.sleep !== undefined) cfg.sleep = state.pending.sleep || null;
+    if (state.pending && state.pending.off !== undefined) cfg.off = state.pending.off || null;
     var sl = state.emergency ? null : cfg.sleep, sig = sl ? JSON.stringify(sl) : '';
     if (sig !== sleepSig && window.LinkiiNative && typeof window.LinkiiNative.sleepSchedule === 'function') {
       sleepSig = sig;
       try { window.LinkiiNative.sleepSchedule(sig); } catch (e) {}
     }
-    var want = !!sl && isAsleep(sl, serverNow());
+    // extinction programmée (calendrier) : même effet que la veille ici (écran noir, affichage coupé quand l'appareil le sait)
+    var want = (!!sl && isAsleep(sl, serverNow())) || (!state.emergency && isOff(cfg.off, serverNow()));
     // Windows et Raspberry : la veille coupe vraiment l'affichage (écran noir en plus, au cas où l'appareil ne sait pas le faire).
     // L'ordre est renvoyé aussi quand l'état n'a pas changé mais que cette page ne l'a pas encore donné (page rechargée ou player redémarré
     // pendant la veille : l'affichage est resté coupé alors que le player croit être éveillé).

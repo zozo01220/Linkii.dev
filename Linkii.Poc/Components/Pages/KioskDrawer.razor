@@ -61,7 +61,6 @@ else
                 <small>Modifier la borne</small>
             </div>
             @* mode simple : pas de planning *@
-            @if (Modes.Expert) { <button type="button" class="modal-x" aria-label="Planning de la borne" title="Planning de la borne : quelle liste passe, quand" @onclick="() => planOpen = true"><Ico Name="calendar" Size="20" /></button> }
             <button type="button" class="modal-x" aria-label="Réglages de la borne" title="Réglages de la borne" @onclick="() => parOpen = true"><Ico Name="sliders" Size="20" /></button>
             <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
         </div>
@@ -201,6 +200,7 @@ else
                                 </select>
                             </div>
                             <span class="kp-h kd-hint">Affiché au centre tant que personne n'a touché la borne ; glissez-le sur l'aperçu pour le déplacer.@if (touchMoved) { <text> </text><button type="button" class="kd-link" @onclick="ResetTouch">Recentrer</button> }</span>
+                            @if (Modes.Expert) { <CalendarPick Calendars="calendars" @bind-Value="calendarId" PlaylistName="PlaylistName" Id="k-cal" Empty="Aucun : en inactivité, la borne diffuse toujours sa propre liste." /> }
                         </div>
                     </div>
                 }
@@ -268,27 +268,6 @@ else
         </div>
     </div>
 
-    @if (planOpen)
-    {
-        <div class="kp-veil over" @onclick="() => planOpen = false"></div>
-        <div class="kp-drawer over" role="dialog" aria-modal="true" aria-labelledby="kp-plan-t">
-            <div class="kp-dh"><h2 id="kp-plan-t">Planning de la borne</h2><button type="button" class="modal-x" aria-label="Fermer" @onclick="() => planOpen = false"><Ico Name="x" Size="20" /></button></div>
-            <div class="kp-db">
-                <p class="kp-h" style="margin-bottom:12px">Le planning ne se règle pas ici : il se gère dans le menu Planning, pour un écran, une borne, une zone ou une aire. Un visiteur qui touche l'écran passe toujours avant le planning ; à son départ, le créneau en cours reprend.</p>
-                @if (SlotRows.Count == 0) { <div class="kp-empty"><b>Aucun planning</b><p>La borne diffuse ses listes de lecture en permanence.</p></div> }
-                else
-                {
-                    <div class="kp-pl">
-                        @foreach (var r in SlotRows)
-                        {
-                            <div><span class="kp-src @r.Css">@r.Source</span><span>@r.Text</span><span class="kp-h">@r.Note</span></div>
-                        }
-                    </div>
-                }
-            </div>
-            <div class="kp-df"><button type="button" class="btn ghost" @onclick="() => planOpen = false">Fermer</button><a class="btn" href="/planning?screen=@Id">Gérer dans Planning →</a></div>
-        </div>
-    }
 
     @if (parOpen)
     {
@@ -370,7 +349,7 @@ else
                         <h4>Veille et démarrage</h4>
                         @Switch("Un toucher réveille la borne pendant la veille", "", k.WakeOnTouch, v => Edit(c => c.WakeOnTouch = v))
                         @Switch("Démarrer avec Windows", "La borne s'ouvre seule à l'allumage du PC.", autoStart, v => { autoStart = v; dirty = true; })
-                        @if (Modes.Expert) { <span class="kp-h kd-hint">La mise en veille et la luminosité se règlent dans les <button type="button" class="kd-link" @onclick="() => editor = true">paramètres de l'écran</button>.</span> }
+                        @if (Modes.Expert) { <span class="kp-h kd-hint">La luminosité se règle dans les <button type="button" class="kd-link" @onclick="() => editor = true">paramètres de l'écran</button> ; les extinctions, dans le calendrier de la borne.</span> }
                     </div>
                     @if (Modes.Expert)
                     {
@@ -428,7 +407,11 @@ else
     private bool dirty;
 
     private string tab = "screen", parTab = "vis", search = "";
-    private bool saving, confirmPublish, editor, sim, confirmOff, planOpen, parOpen;
+    private bool saving, confirmPublish, editor, sim, confirmOff, parOpen;
+    // calendrier assigné (Programmations) : appliqué à l'enregistrement
+    private List<ScreenCalendar> calendars = new();
+    private Guid? calendarId;
+    private string PlaylistName(Guid id) => playlists.FirstOrDefault(p => p.Id == id)?.Name ?? "(liste supprimée)";
     private bool needsApproval;   // la personne est soumise à approbation : « publier » dépose une demande (voir Approvals)
     private bool headRename;
     private string headValue = "";
@@ -551,12 +534,14 @@ else
         playlists = Store.Read(d => PlaylistOps.Choosable(d));
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
         lists = Store.Read(d => d.InteractiveLists.OrderBy(l => l.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
+        calendars = Store.Read(d => d.Calendars.OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
         if (loadedFor != Id) { ResetDraft(); loadedFor = Id; }
     }
 
     private void ResetDraft()
     {
         k = Copy(s!.Kiosk!);
+        calendarId = s.CalendarId;
         name = s.Name; orientation = s.Orientation; resolution = s.Resolution; autoStart = s.AutoStart; (mirrorH, mirrorV) = (s.MirrorH, s.MirrorV);
         layout = ScreenLayouts.Fit(ScreenLayouts.Find(s.Layout).Id, Spec);
         zonePl = s.ZonePlaylists().Take(ScreenLayouts.Find(layout).Sizes.Length).ToList();
@@ -682,6 +667,7 @@ else
                 ? m.Settings.Where(f => !f.IsSecret && AppCatalog.IsVisible(f, w.Settings)).ToDictionary(f => f.Key, f => (w.Settings.GetValueOrDefault(f.Key) ?? "").Trim())
                 : new(w.Settings)
         }).ToList();
+        var cal = calendarId; var calChanged = false;
         var kd = Copy(k); var (o, r, au, lay) = (orientation, resolution, autoStart, layout); var (mh, mv) = (mirrorH, mirrorV); var zones = zonePl.ToList();
         saving = true;
         ScreenPublisher.Result? pub = null;
@@ -696,8 +682,10 @@ else
                 sc.Layout = lay;   // autre découpage ou autre liste dans une zone = modification à publier
                 for (var z = 0; z < zones.Count; z++) sc.SetZonePlaylist(z, zones[z]);
                 if (!WidgetsEqual(sc.Widgets, wlist)) { sc.Widgets = wlist; sc.WidgetsRevision++; }   // modification à publier
+                if (sc.CalendarId != cal) calChanged = Calendars.Stamp(sc, cal is { } cid ? d.Calendars.FirstOrDefault(x => x.Id == cid) : null);   // calendrier assigné ou retiré
                 return changed;
             });
+            if (calChanged && !publish) await Notifier.PublishPlanning([Id]);   // le calendrier s'applique aussitôt
             if (publish) pub = await Publisher.Publish([Id]);
             else if (formatChanged) await Notifier.NotifyScreen(Id);   // le format s'applique sans attendre la publication
         }
@@ -714,21 +702,5 @@ else
         await Publisher.Initial(Id);   // la borne reçoit tout de suite sa configuration d'écran de diffusion (retour à la diffusion simple : rien à approuver)
         Toast.Ok("L'écran est repassé en diffusion simple.");   // la fenêtre se ferme : la borne passe dans l'onglet des écrans de diffusion
         await OnClose.InvokeAsync();
-    }
-
-    // ----- Planning appliqué (lecture seule) -----
-    private record SlotRow(string Source, string Css, string Text, string Note);
-    private List<SlotRow> SlotRows
-    {
-        get
-        {
-            if (s == null) return new();
-            var (area, zone) = Store.Read(d => { var a = d.Areas.FirstOrDefault(x => x.Id == s.AreaId); return (a, Plan.ZoneOf(a, s)); });
-            var source = s.OwnPlanning || s.Slots.Count > 0 ? ("Cette borne", "own", "Propre")
-                : zone != null && Plan.HasOwn(zone) ? ("Zone · " + zone.Name, "inh", "Hérité")
-                : area != null ? ("Aire · " + area.Name, "inh", "Hérité") : ("", "", "");
-            return Plan.Effective(area, s).Select(sl => new SlotRow(source.Item1, source.Item2,
-                Plan.Describe(sl) + " · " + (playlists.FirstOrDefault(p => p.Id == sl.PlaylistId)?.Name ?? "(liste supprimée)"), source.Item3)).ToList();
-        }
     }
 }

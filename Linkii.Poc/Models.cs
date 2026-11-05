@@ -37,6 +37,8 @@ public class Db
     public List<Notification> Notifications { get; set; } = new();
     /// <summary>Demandes d'approbation des publications (Pro, voir <see cref="Approvals"/>) : une ligne par demande et par organisation.</summary>
     public List<ApprovalRequest> ApprovalRequests { get; set; } = new();
+    /// <summary>Calendriers de la page Programmations (voir <see cref="Calendars"/>).</summary>
+    public List<ScreenCalendar> Calendars { get; set; } = new();
 
     /// <summary>Ancien format mono-client (avant le multi-tenant) : lu une fois pour migration, jamais réécrit.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
@@ -801,6 +803,9 @@ public class Screen : IClientOwned, IAreaOwned, IOwned
     /// <summary>Planning de diffusion propre à l'écran (<see cref="Slots"/>, prioritaires sur ceux de sa zone) ; sinon il suit celui de sa zone. Voir <see cref="Planning"/>.</summary>
     public bool OwnPlanning { get; set; }
     public List<Slot> Slots { get; set; } = new();
+    /// <summary>Calendrier assigné (page Programmations) : ses diffusions sont recopiées dans <see cref="Slots"/>, ses extinctions dans <see cref="OffSlots"/> (voir <see cref="Calendars"/>).</summary>
+    public Guid? CalendarId { get; set; }
+    public List<Slot> OffSlots { get; set; } = new();
     /// <summary>Instantané, par liste de lecture, des contenus que l'écran peut jouer selon son planning (publication de l'écran ou du planning).</summary>
     public Dictionary<Guid, List<PublishedItem>> PublishedLists { get; set; } = new();
     public Dictionary<Guid, int> PublishedListRevs { get; set; } = new();   // révision de chaque liste au moment de l'instantané : une liste modifiée ensuite est « à publier »

@@ -1,0 +1,36 @@
+@* Liste « Calendrier » des tiroirs d'écran et de borne (création comprise) : assigne un calendrier des Programmations (mode expert).
+   Hors programmation, l'écran joue la liste par défaut du calendrier ; sans calendrier, sa propre liste. *@
+<div class="dw-field dw-cal @Class" style="@Style">
+    <label for="@Id">Calendrier</label>
+    <select id="@Id" value="@(Value?.ToString() ?? "")" @onchange="OnChange">
+        <option value="">— Aucun calendrier —</option>
+        @foreach (var c in Calendars) { <option value="@c.Id">@c.Name</option> }
+    </select>
+    <small>
+        @if (Value is { } id && Calendars.FirstOrDefault(c => c.Id == id) is { } cal)
+        {
+            <text>Suit <b>« @cal.Name »</b> ; hors programmation : @(cal.DefaultPlaylistId == Guid.Empty ? "sa propre liste" : "« " + PlaylistName(cal.DefaultPlaylistId) + " »").</text>
+        }
+        else if (Calendars.Count == 0)
+        {
+            <text>Aucun calendrier pour l'instant : créez-en dans <a href="programmations">Programmations</a>.</text>
+        }
+        else
+        {
+            <text>@(Empty ?? "Aucun : l'écran diffuse toujours sa propre liste.")</text>
+        }
+    </small>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public List<ScreenCalendar> Calendars { get; set; } = new();
+    [Parameter] public Guid? Value { get; set; }
+    [Parameter] public EventCallback<Guid?> ValueChanged { get; set; }
+    [Parameter] public Func<Guid, string> PlaylistName { get; set; } = _ => "";
+    [Parameter] public string Id { get; set; } = "cal-pick";
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public string? Style { get; set; } = "margin-top:14px";
+    [Parameter] public string? Empty { get; set; }
+
+    private Task OnChange(ChangeEventArgs e) => ValueChanged.InvokeAsync(Guid.TryParse(e.Value?.ToString(), out var g) ? g : null);
+}

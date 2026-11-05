@@ -34,18 +34,11 @@
             }
             <small>Modifier l'écran</small>
         </div>
-        @* mode simple : ni luminosité, ni veille, ni planning ; il reste « Paramètres de l'écran » *@
+        @* mode simple : pas de luminosité ; il reste « Paramètres de l'écran ». Veille et planning ne sont plus ici : les extinctions et diffusions
+           programmées passent par le calendrier assigné (Programmations, liste « Calendrier » sous le découpage). *@
         @if (wall == null && dimOn && Modes.Expert)
         {
             <button type="button" class="modal-x @(DimActive ? "set" : "")" aria-label="Luminosité et contraste" title="Luminosité et contraste : @DimSummary" @onclick="OpenDimDialog"><Ico Name="@(DimActive ? "sun" : "sun-off")" Size="20" /></button>
-        }
-        @if (wall == null && sleepOn && Modes.Expert)
-        {
-            <button type="button" class="modal-x @(DimAsleep != null ? "set" : "")" aria-label="Mise en veille" title="Mise en veille : @SleepSummary" @onclick="OpenSleepDialog"><Ico Name="@(DimAsleep != null ? "moon" : "moon-off")" Size="20" /></button>
-        }
-        @if (wall == null && Modes.Expert)
-        {
-            <button type="button" class="modal-x" aria-label="Planning de l'écran" title="Planning de l'écran : quelle liste passe, quand" @onclick="OpenPlanning"><Ico Name="calendar" Size="20" /></button>
         }
         <button type="button" class="modal-x" aria-label="Paramètres de l'écran" title="Paramètres de l'écran" @onclick="() => advanced = true"><Ico Name="sliders" Size="20" /></button>
         <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
@@ -141,6 +134,10 @@
             @if (tab == "screen" || wall != null)
             {
                 <ScreenFormat Spec="spec" Layout="@layoutId" LayoutChanged="SetLayout" OnChange="StateHasChanged" Compact="true" />
+                @if (wall == null && Modes.Expert)
+                {
+                    <CalendarPick Calendars="calendars" @bind-Value="calendarId" PlaylistName="PlaylistName" Id="se-cal" />
+                }
             }
             else
             {
@@ -296,8 +293,10 @@
     private ScreenSpec spec = new();
     private bool saving, confirmPublish, mirrorH, mirrorV;
     private bool needsApproval;   // la personne est soumise à approbation : « publier » dépose une demande (voir Approvals)
-    /// <summary>Les créneaux se règlent dans la page Planning, ouverte sur cet écran.</summary>
-    private void OpenPlanning() => Nav.NavigateTo($"planning?screen={ScreenId}");
+    // calendrier assigné (Programmations) : appliqué à l'enregistrement, ses diffusions partent aussitôt
+    private List<ScreenCalendar> calendars = new();
+    private Guid? calendarId;
+    private string PlaylistName(Guid id) => playlists.FirstOrDefault(p => p.Id == id)?.Name ?? "(liste supprimée)";
 
     private bool dimDlg;
     private string draftDimMode = Dim.Own;      // copie de travail du formulaire de luminosité
@@ -385,6 +384,8 @@
         needsApproval = Store.Read(d => ApprovalOps.NeedsApproval(d.Root, d.Tenant, d.Access.UserId, new[] { ScreenId }));
         var s = Store.Read(d => d.Screens.First(x => x.Id == ScreenId));
         playlists = Store.Read(d => PlaylistOps.Choosable(d));   // listes que la personne voit, et celles déjà en place
+        calendars = Store.Read(d => d.Calendars.OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
+        calendarId = s.CalendarId;
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
         zones = Store.Read(d => d.Area?.Zones.OrderByDescending(z => z.IsDefault).ThenBy(z => z.Name, StringComparer.CurrentCultureIgnoreCase).ToList() ?? new());
         wall = zones.FirstOrDefault(z => z.Id == s.ZoneId && z.IsWall);
@@ -538,6 +539,7 @@
                 : new(w.Settings)
         }).ToList();
         Guid? zid = Guid.TryParse(zoneValue, out var zg) && this.zones.Any(z => z.Id == zg) ? zg : this.zones.FirstOrDefault(z => z.IsDefault)?.Id;
+        var cal = calendarId; var calChanged = false;
         var newName = name.Trim(); var sp = spec; var lay = layoutId; var zones = zonePl.ToList(); var (mh, mv) = (mirrorH, mirrorV);
         var (slMode, slGrid) = (sleepMode, Sleep.Valid(sleepGrid) ? sleepGrid : null);
         var (dmMode, dmPlan) = (dimMode, Dim.Valid(dimPlan) ? dimPlan!.Clone() : null);
@@ -575,9 +577,11 @@
                     for (var z = 0; z < zones.Count; z++) s.SetZonePlaylist(z, zones[z]);
                 }
                 s.ScreenType = sp.Type; s.Orientation = sp.Orientation; s.Resolution = sp.Resolution;
+                if (inWall == null && s.CalendarId != cal) calChanged = Calendars.Stamp(s, cal is { } cid ? d.Calendars.FirstOrDefault(c => c.Id == cid) : null);   // calendrier assigné ou retiré
                 if (!WidgetsEqual(s.Widgets, list)) { s.Widgets = list; s.WidgetsRevision++; }   // modification à publier
                 return changed;
             });
+            if (calChanged && !publish) await Notifier.PublishPlanning([ScreenId]);   // le calendrier s'applique aussitôt, comme ses modifications
             if (publish) pub = await Publisher.Publish([ScreenId]);
             else if (formatChanged) await Notifier.NotifyScreen(ScreenId);   // le format s'applique sans attendre la publication
         }

@@ -3,7 +3,7 @@ using Xunit;
 
 namespace Linkii.Poc.Tests;
 
-/// <summary>Planning de diffusion : créneaux par zone ou par écran, priorités, validation, empreinte.</summary>
+/// <summary>Créneaux du planning (outils communs aux calendriers et au planning des murs). Les calendriers des Programmations : voir CalendarsTests.</summary>
 public class PlanningTests
 {
     readonly Db db = new();
@@ -65,28 +65,6 @@ public class PlanningTests
     }
 
     [Fact]
-    public void A_screens_own_slots_win_over_its_zone_and_dated_wins_over_recurring()
-    {
-        var zoneSlot = Slot(menu, Weekdays, 11 * 60, 14 * 60);
-        stand.Slots.Add(zoneSlot);
-        var s = Sc("Grill", stand);
-        Assert.Equal(zoneSlot, Planning.Pick(Planning.Effective(lac, s), Wed, 12 * 60));   // suit sa zone
-
-        s.OwnPlanning = true;
-        var own = Slot(soir, Weekdays, 12 * 60, 13 * 60);
-        s.Slots.Add(own);
-        Assert.Equal(own, Planning.Pick(Planning.Effective(lac, s), Wed, 12 * 60 + 30));   // son créneau propre d'abord
-        Assert.Equal(zoneSlot, Planning.Pick(Planning.Effective(lac, s), Wed, 11 * 60 + 30));   // sinon celui de la zone
-        Assert.Null(Planning.Pick(Planning.Effective(lac, s), Wed, 15 * 60));              // sinon la liste par défaut
-
-        var dated = Slot(pub, 127, 11 * 60, 14 * 60, "2026-10-14", "2026-10-14");
-        stand.Slots.Insert(0, Slot(menu, 127, 0, Planning.Day));   // récurrent créé avant
-        stand.Slots.Add(dated);
-        var other = Sc("Wok", stand);
-        Assert.Equal(dated, Planning.Pick(Planning.Effective(lac, other), Wed, 12 * 60));  // le daté passe devant
-    }
-
-    [Fact]
     public void Saving_validates_the_list_and_copies_to_other_zones()
     {
         var d = As();
@@ -117,26 +95,6 @@ public class PlanningTests
         Assert.Null(PlanOps.RevertToZone(d, lac.Id, s.Id));
         Assert.False(s.OwnPlanning);
         Assert.Empty(s.Slots);
-    }
-
-    [Fact]
-    public void The_area_planning_applies_below_the_zone_and_the_screen_and_reaches_every_screen()
-    {
-        var d = As();
-        var s = Sc("Grill", stand);
-        var other = Sc("Hall", entree);
-        Assert.Null(PlanOps.CreateFor(d, lac.Id, lac.Id));
-        Assert.True(lac.OwnPlanning);
-        Assert.Null(PlanOps.Save(d, lac.Id, lac.Id, false, Slot(menu, Weekdays, 11 * 60, 14 * 60), new[] { entree.Id }));   // pas de copie vers les zones
-        Assert.Single(lac.Slots);
-        Assert.Empty(entree.Slots);
-        Assert.Equal(lac.Slots[0], Planning.Pick(Planning.Effective(lac, s), Wed, 12 * 60));   // l'écran suit l'aire
-
-        stand.Slots.Add(Slot(soir, Weekdays, 12 * 60, 13 * 60));   // la zone passe devant l'aire
-        Assert.Equal(soir.Id, Planning.Pick(Planning.Effective(lac, s), Wed, 12 * 60 + 30)!.PlaylistId);
-        Assert.Equal(menu.Id, Planning.Pick(Planning.Effective(lac, s), Wed, 11 * 60 + 30)!.PlaylistId);   // hors créneau de zone : l'aire
-        Assert.Equal(2, Planning.Affected(d, lac.Id, null, null).Count);
-        Assert.Contains(other, Planning.Affected(d, lac.Id, null, null));
     }
 
     [Fact]
@@ -234,42 +192,6 @@ public class PlanningTests
         var d = As();
         Assert.Equal(new[] { a.Id, b.Id }.OrderBy(x => x), Planning.Affected(d, lac.Id, stand.Id, null).Select(s => s.Id).OrderBy(x => x));
         Assert.Equal(c.Id, Assert.Single(Planning.Affected(d, lac.Id, null, c.Id)).Id);
-    }
-
-    [Fact]
-    public void Active_slot_uses_the_areas_local_time()
-    {
-        lac.SleepTz = "Etc/GMT-2";   // UTC+2 toute l'année
-        var s = Sc("Grill", stand);
-        var slot = Slot(menu, 127, 11 * 60, 14 * 60);
-        stand.Slots.Add(slot);
-        Assert.Equal(slot, Planning.Active(client, lac, s, new DateTime(2026, 10, 14, 9, 30, 0, DateTimeKind.Utc)));   // 11:30 sur place
-        Assert.Null(Planning.Active(client, lac, s, new DateTime(2026, 10, 14, 12, 30, 0, DateTimeKind.Utc)));        // 14:30 sur place : hors créneau
-    }
-
-    [Fact]
-    public void Player_feed_only_sends_slots_whose_list_was_published()
-    {
-        var s = Sc("Grill", stand);
-        stand.Slots.Add(Slot(menu, 127, 0, Planning.Day));
-        stand.Slots.Add(Slot(soir, 127, 0, Planning.Day));
-        s.PublishedLists[menu.Id] = new() { new PublishedItem { Id = Guid.NewGuid(), Type = "image", Url = "/media/x.jpg", DurationSec = 8 } };
-        var json = System.Text.Json.JsonSerializer.Serialize(Planning.ForPlayer(client, lac, s, l => l));
-        Assert.Contains("/media/x.jpg", json);
-        Assert.Single(System.Text.Json.JsonDocument.Parse(json).RootElement.GetProperty("slots").EnumerateArray());
-        Assert.Null(Planning.ForPlayer(client, lac, Sc("Wok", entree), l => l));   // zone sans planning
-    }
-
-    [Fact]
-    public void Stamp_changes_with_a_slot_and_is_empty_without_planning()
-    {
-        var s = Sc("Grill", stand);
-        Assert.Equal("", Planning.Stamp(db.Areas, s));
-        stand.Slots.Add(Slot(menu, 127, 0, Planning.Day));
-        var a = Planning.Stamp(db.Areas, s);
-        Assert.NotEqual("", a);
-        stand.Slots[0].To = 600;
-        Assert.NotEqual(a, Planning.Stamp(db.Areas, s));
     }
 
     [Fact]

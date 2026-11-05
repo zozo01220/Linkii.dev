@@ -157,6 +157,7 @@ public class ClientDb
         InteractiveListFolders = new(root.InteractiveListFolders, clientId, null, null, me, area);
         AppInstalls = new(root.AppInstalls, clientId);
         Areas = new(root.Areas, clientId);
+        Calendars = new(root.Calendars, clientId);
     }
 
     internal Db Root => _root;
@@ -180,6 +181,8 @@ public class ClientDb
     /// <summary>« Mes modèles » de compositions (voir <see cref="CompositionTemplate"/>).</summary>
     public ScopedList<CompositionTemplate> CompositionTemplates { get; }
     public ScopedList<Playlist> Playlists { get; }
+    /// <summary>Calendriers de la page Programmations (communs à l'organisation).</summary>
+    public ScopedList<ScreenCalendar> Calendars { get; }
     /// <summary>Listes interactives des bornes (voir <see cref="InteractiveList"/>) : communes à l'organisation.</summary>
     public ScopedList<InteractiveList> InteractiveLists { get; }
     public ScopedList<InteractiveListFolder> InteractiveListFolders { get; }
@@ -308,7 +311,7 @@ public class TenantStore(JsonStore root, TenantContext ctx, Microsoft.AspNetCore
             var first = path.Trim('/').Split('/')[0];
             return first switch
             {
-                "" or "planning" or "zones" => LevelPages.Screens,
+                "" or "planning" or "programmations" or "zones" => LevelPages.Screens,
                 "playlists" => LevelPages.Playlists,
                 "media" => LevelPages.Media,
                 _ => null
@@ -512,6 +515,7 @@ public static class Seed
             Subscriptions.MigrateResellerShare(db);
             Alerts.Migrate(db);
             NotificationCenter.Seed(db);
+            Calendars.Migrate(db);
 
             if (!db.Users.Any(u => u.Role == Roles.PlatformAdmin))
             {

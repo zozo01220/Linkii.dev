@@ -384,7 +384,7 @@ else
 @if (deletingFolder is { } df)
 {
     var inside = playlists.Where(p => p.FolderId == df.Folder.Id).ToList();
-    var impact = PlaylistUses.Impact(inside.Select(p => p.Id).ToList(), allScreens, areas);
+    var impact = PlaylistUses.Impact(inside.Select(p => p.Id).ToList(), allScreens, areas, calendars);
     <div class="modal-backdrop" @onclick="() => deletingFolder = null"></div>
     <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="dfp-title">
         <h3 id="dfp-title">Supprimer le dossier « @df.Folder.Name » ?</h3>
@@ -437,7 +437,7 @@ else
     // Seules les listes modifiables partent ; les autres sont nommées, pour qu'on ne croie pas les avoir supprimées.
     var gone = del.Where(CanDel).ToList();
     var kept = del.Where(x => !CanDel(x)).ToList();
-    var impact = PlaylistUses.Impact(gone.Select(x => x.Id).ToList(), allScreens, areas);
+    var impact = PlaylistUses.Impact(gone.Select(x => x.Id).ToList(), allScreens, areas, calendars);
     <div class="modal-backdrop" @onclick="() => deleting = null"></div>
     <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="del-title">
         @if (gone.Count == 0)
@@ -480,6 +480,7 @@ else
     private List<Screen> screens = new();      // écrans appairés : diffusion des listes
     private List<Screen> allScreens = new();   // tous les écrans : ce qu'une suppression touche
     private List<Area> areas = new();
+    private List<ScreenCalendar> calendars = new();   // Programmations : leurs diffusions comptent comme « programmée »
     private Dictionary<Guid, PlaylistUse> uses = new();
     private Guid? menuFor;
     private Guid? trying;   // « Aperçu » : simulateur de la liste
@@ -609,7 +610,8 @@ else
         allScreens = Store.Read(d => d.AllScreens.ToList());   // les listes n'ont pas d'aire : leurs écrans sont dans toutes les aires
         screens = allScreens.Where(s => s.Token != null).ToList();
         areas = Store.Read(d => d.Areas.ToList());
-        uses = PlaylistUses.Of(playlists, screens, areas);
+        calendars = Store.Read(d => d.Calendars.ToList());
+        uses = PlaylistUses.Of(playlists, screens, areas, calendars);
         subfolders = foldersOn
             ? folderRows.Where(r => folderId is { } fid ? r.Folder.ParentId == fid : tabFolders.Contains(r.Folder.Id) && (r.Folder.ParentId is not { } p || !tabFolders.Contains(p))).ToList()
             : new();

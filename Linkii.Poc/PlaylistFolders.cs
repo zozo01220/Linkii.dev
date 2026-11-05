@@ -64,7 +64,13 @@ public static class PlaylistOps
             for (var z = 0; z < s.ZonePlaylistIds.Count; z++) if (s.ZonePlaylistIds[z] is { } zid && ids.Contains(zid)) s.ZonePlaylistIds[z] = null;
         foreach (var a in d.Areas) a.Slots.RemoveAll(x => ids.Contains(x.PlaylistId));
         foreach (var z in d.Areas.SelectMany(a => a.Zones)) z.Slots.RemoveAll(x => ids.Contains(x.PlaylistId));   // plus programmées dans un planning
-        foreach (var s in screens) s.Slots.RemoveAll(x => ids.Contains(x.PlaylistId));
+        foreach (var s in screens.Where(s => s.CalendarId == null)) s.Slots.RemoveAll(x => ids.Contains(x.PlaylistId));
+        foreach (var c in d.Calendars)   // calendriers : leurs diffusions de ces listes disparaissent ; une liste par défaut supprimée est à remplacer
+        {
+            var n = c.Events.RemoveAll(e => e.Kind == CalEvent.Play && e.PlaylistId is { } pid && ids.Contains(pid));
+            if (ids.Contains(c.DefaultPlaylistId)) { c.DefaultPlaylistId = Guid.Empty; n++; }
+            if (n > 0) Calendars.Apply(d, c);
+        }
         d.Playlists.RemoveAll(x => ids.Contains(x.Id));
         ItemShareOps.Forget(d, ShareKind.Playlist, ids);
     }
