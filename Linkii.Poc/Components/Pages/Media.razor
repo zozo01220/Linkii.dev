@@ -884,11 +884,11 @@ else
 
         // Onglets : seul dans l'organisation ou en lecture seule, tout est affiché ; un utilisateur a ses médias et ses partages ; l'administrateur, en plus, toute l'organisation
         if (!multi || readAll) tab = LibraryTab.All;
-        else if (tab == LibraryTab.All && !isAdmin) tab = LibraryTab.Mine;
-        bool InTab(string t, MediaItem m) => fileTabs.TryGetValue(m.Id, out var i) ? LibraryTab.InTab(t, i, me, isAdmin) : t == LibraryTab.All;
+        else if (tab == LibraryTab.All && (!isAdmin || !Modes.Expert)) tab = LibraryTab.Mine;
+        bool InTab(string t, MediaItem m) => fileTabs.TryGetValue(m.Id, out var i) ? LibraryTab.InTab(t, i, me, isAdmin, !Modes.Expert) : t == LibraryTab.All;
         (HashSet<Guid> Folders, List<MediaItem> Files) Scope(string t)
         {
-            var fs = LibraryTab.Folders(t, folderRows.Select(r => (r.Folder.Id, r.Folder.ParentId, r.Tab)), me, isAdmin);
+            var fs = LibraryTab.Folders(t, folderRows.Select(r => (r.Folder.Id, r.Folder.ParentId, r.Tab)), me, isAdmin, !Modes.Expert);
             return (fs, allFiles.Where(m => InTab(t, m) || m.FolderId is { } f && fs.Contains(f)).ToList());
         }
         (tabFolders, scopeFiles) = Scope(tab);
@@ -907,7 +907,7 @@ else
         }
         Tabs = !multi || readAll ? new()
             : new List<TabItem> { new(LibraryTab.Mine, "Mes médias", 0), new(LibraryTab.Shared, "Partagés avec moi", sharedRoots) }
-                .Concat(isAdmin ? [new TabItem(LibraryTab.All, "Toute l'organisation", 0)] : Array.Empty<TabItem>()).ToList();
+                .Concat(isAdmin && Modes.Expert ? [new TabItem(LibraryTab.All, "Toute l'organisation", 0)] : Array.Empty<TabItem>()).ToList();   // mode simple : pas d'onglet « Toute l'organisation » (§180)
         crumbs = BuildCrumbs();
         drives = Library.DriveFolders();
         unused = Library.UnusedIds();

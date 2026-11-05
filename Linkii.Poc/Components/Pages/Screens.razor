@@ -773,7 +773,7 @@ else if (wallEdit is { } wid)
 
     private string Status(Screen s) => Store.Read(d => d.Status(s));
 
-    // ---------- Onglets : Mes écrans / Partagés avec moi / Toute l'organisation ----------
+    // ---------- Onglets : Mes écrans / Partagés avec moi (« Toute l'organisation » en mode expert seulement, §180) ----------
     // Un écran appartient à la personne qui l'a connecté (Screen.OwnerId). Il n'y a pas de partage d'écran : « Partagés avec moi » rassemble
     // ceux d'un collègue que la personne voit (attribués par un administrateur). Sans propriétaire connu (écrans d'avant), l'écran est à l'administrateur.
     private string tab = LibraryTab.All;
@@ -788,13 +788,13 @@ else if (wallEdit is { } wid)
         (meId, isAdminUser, multiUser, readAllScreens, orgUsers) = Store.Read(d => (d.Access.UserId, d.Access.IsOrgAdmin, d.Users.Count(u => !u.Disabled) > 1,
             !d.Access.IsOrgAdmin && d.Access.ModeOf(LevelPages.Screens) == PageMode.Read, d.Access.OrgUserIds.ToHashSet()));
         if (!multiUser || readAllScreens) tab = LibraryTab.All;   // seul dans l'organisation, ou en lecture seule : tout est affiché
-        else if (tab == LibraryTab.All && !isAdminUser) tab = LibraryTab.Mine;
+        else if (tab == LibraryTab.All && (!isAdminUser || !Modes.Expert)) tab = LibraryTab.Mine;
     }
 
     private bool InTab(string t, Screen s)
     {
         Guid? owner = s.OwnerId is { } x && orgUsers.Contains(x) ? x : null;   // un propriétaire hors de l'organisation (équipe Linkivi) vaut « l'organisation »
-        return LibraryTab.InTab(t, new LibraryTab.Info(owner, owner, false), meId, isAdminUser);
+        return LibraryTab.InTab(t, new LibraryTab.Info(owner, owner, false), meId, isAdminUser, !Modes.Expert);
     }
 
     // Les écrans de l'onglet ; un mur reste entier : il apparaît dès qu'un de ses écrans est dans l'onglet
@@ -814,7 +814,7 @@ else if (wallEdit is { } wid)
         groupAreas = groupAreas.Select(g => g.Area.Id == area?.Id ? g : g with { Screens = TabFilter(g.Screens, g.Area.Zones) }).ToList();
         Tabs = !multiUser || readAllScreens ? new()
             : new List<TabItem> { new(LibraryTab.Mine, "Mes écrans", 0), new(LibraryTab.Shared, "Partagés avec moi", sharedCount) }
-                .Concat(isAdminUser ? [new TabItem(LibraryTab.All, "Toute l'organisation", 0)] : Array.Empty<TabItem>()).ToList();
+                .Concat(isAdminUser && Modes.Expert ? [new TabItem(LibraryTab.All, "Toute l'organisation", 0)] : Array.Empty<TabItem>()).ToList();   // mode simple : pas d'onglet « Toute l'organisation » (§180)
     }
 
     // Dossiers de l'onglet : ceux qui contiennent un de ses écrans (et leurs parents) ; dans « Mes écrans », aussi les siens, même vides

@@ -3241,3 +3241,7 @@ Règles réunies dans `SimpleMode` (`ModeService.cs`) ; c'est un affichage, les 
 
 ## 179. Mode simple : plus d'onglet Widgets dans Contenus (5 novembre 2026) : compilé
 - Onglets du hub **Contenus** (Médiathèque, Compositions…) : **Widgets** seulement en mode expert ; même chose dans la feuille « Plus » de l'app. L'adresse `/widgets` reste en lecture seule en mode simple, comme avant.
+
+## 180. Mode simple : plus d'onglet « Toute l'organisation » (5 novembre 2026) : compilé ; **non vérifié dans le navigateur**
+- Écrans, Listes de diffusion et Médiathèque, **en mode simple seulement** : l'onglet « Toute l'organisation » des administrateurs disparaît ; pour ne rien perdre, leur onglet « Partagés avec moi » montre tout ce qui n'est pas à eux (paramètre `everyone` de `LibraryTab.InTab` / `Folders`). Mode expert inchangé ; Compositions inchangé.
+- Maquette suivante, non codée : `maquettes/cartes-pastille-partage.html` (onglets Mes… / Partagés avec moi mis à plat, pastille bleue « N partages » en bas à droite des cartes).

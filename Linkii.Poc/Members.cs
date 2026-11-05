@@ -216,10 +216,11 @@ public static class LibraryTab
 
     public static bool IsMine(Info i, Guid? me, bool admin) => i.Space == me || i.Owner == me || admin && i.Space == null;
 
-    public static bool InTab(string tab, Info i, Guid? me, bool admin) => tab switch
+    /// <param name="everyone">mode simple (§180) : pas d'onglet « Toute l'organisation », un administrateur trouve tout ce qui n'est pas à lui dans « Partagés avec moi ».</param>
+    public static bool InTab(string tab, Info i, Guid? me, bool admin, bool everyone = false) => tab switch
     {
         Mine => IsMine(i, me, admin),
-        Shared => !IsMine(i, me, admin) && (i.SharedIn || !admin),
+        Shared => !IsMine(i, me, admin) && (i.SharedIn || !admin || everyone),
         _ => true
     };
 
@@ -227,10 +228,10 @@ public static class LibraryTab
     /// Dossiers de l'onglet, avec tout ce qu'ils contiennent : on part des dossiers de l'onglet et on descend dans leurs sous-dossiers (visibles).
     /// Les dossiers « racines » de l'onglet sont ceux dont le parent n'en fait pas partie.
     /// </summary>
-    public static HashSet<Guid> Folders(string tab, IEnumerable<(Guid Id, Guid? Parent, Info Info)> folders, Guid? me, bool admin)
+    public static HashSet<Guid> Folders(string tab, IEnumerable<(Guid Id, Guid? Parent, Info Info)> folders, Guid? me, bool admin, bool everyone = false)
     {
         var list = folders.ToList();
-        var set = list.Where(f => InTab(tab, f.Info, me, admin)).Select(f => f.Id).ToHashSet();
+        var set = list.Where(f => InTab(tab, f.Info, me, admin, everyone)).Select(f => f.Id).ToHashSet();
         for (var grew = true; grew;)
         {
             grew = false;

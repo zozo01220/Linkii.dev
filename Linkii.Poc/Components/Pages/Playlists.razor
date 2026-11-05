@@ -579,11 +579,11 @@ else
 
         // Onglets : seul dans l'organisation ou en lecture seule, tout est affiché ; un utilisateur a ses listes et ses partages ; l'administrateur, en plus, toute l'organisation
         if (!multi || readAll) tab = LibraryTab.All;
-        else if (tab == LibraryTab.All && !isAdmin) tab = LibraryTab.Mine;
+        else if (tab == LibraryTab.All && (!isAdmin || !Modes.Expert)) tab = LibraryTab.Mine;
         (HashSet<Guid> Folders, List<Playlist> Lists) Scope(string t)
         {
-            var fs = LibraryTab.Folders(t, folderRows.Select(r => (r.Folder.Id, r.Folder.ParentId, r.Tab)), me, isAdmin);
-            return (fs, playlists.Where(p => (listTabs.TryGetValue(p.Id, out var i) ? LibraryTab.InTab(t, i, me, isAdmin) : t == LibraryTab.All) || p.FolderId is { } f && fs.Contains(f)).ToList());
+            var fs = LibraryTab.Folders(t, folderRows.Select(r => (r.Folder.Id, r.Folder.ParentId, r.Tab)), me, isAdmin, !Modes.Expert);
+            return (fs, playlists.Where(p => (listTabs.TryGetValue(p.Id, out var i) ? LibraryTab.InTab(t, i, me, isAdmin, !Modes.Expert) : t == LibraryTab.All) || p.FolderId is { } f && fs.Contains(f)).ToList());
         }
         (tabFolders, scopeLists) = Scope(tab);
         var sharedRoots = 0;
@@ -594,7 +594,7 @@ else
         }
         Tabs = !multi || readAll ? new()
             : new List<TabItem> { new(LibraryTab.Mine, "Mes listes", 0), new(LibraryTab.Shared, "Partagées avec moi", sharedRoots) }
-                .Concat(isAdmin ? [new TabItem(LibraryTab.All, "Toute l'organisation", 0)] : Array.Empty<TabItem>()).ToList();
+                .Concat(isAdmin && Modes.Expert ? [new TabItem(LibraryTab.All, "Toute l'organisation", 0)] : Array.Empty<TabItem>()).ToList();   // mode simple : pas d'onglet « Toute l'organisation » (§180)
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
         hidden = MediaLib.HiddenFileIds();   // fichiers des dossiers non accordés : jamais en vignette
         allScreens = Store.Read(d => d.AllScreens.ToList());   // les listes n'ont pas d'aire : leurs écrans sont dans toutes les aires
