@@ -155,8 +155,8 @@ public class MenuBadges(JsonStore root, TenantStore store, TenantContext ctx, Pl
 
         // Approbations (§162) : demandes en attente que la personne peut décider (orange)
         res[ApprovalsFam] = new Badge(store.Read(d => ApprovalOps.PendingFor(d.Root, d.ClientId, d.Access.UserId, d.Access.IsOrgAdmin)), 0, 0);
-        // publications de la personne qui attendent encore une décision (horloge orange sur Écrans, §178)
-        res[MyApprovals] = new Badge(store.Read(d => ApprovalOps.WaitingBy(d.Root, d.ClientId, d.Access.UserId)), 0, 0);
+        // publications d'écrans en attente que la personne voit (horloge orange sur Écrans, §178)
+        res[MyApprovals] = new Badge(store.Read(d => ApprovalOps.WaitingBy(d.Root, d.ClientId, d.Access.UserId, d.Access.IsOrgAdmin)), 0, 0);
 
         // Intégrations : seulement le nombre, celui de la page (sans les widgets d'écran ni les apps Agenda/Drive, qui n'ont pas de carte). Les apps de base s'ajoutent d'elles-mêmes à la première visite d'une organisation : ce ne sont pas des nouveautés.
         res[Integrations] = Eval(Integrations, store.Read(d => d.AppInstalls.Where(a => catalog.Find(a.AppId) is { ScreenWidget: false } app && app.Id is not ("agenda" or "drive")).Select(a => new Item(a.Id, null, null, false)).ToList()), false, track: false);

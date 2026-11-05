@@ -154,10 +154,13 @@ public static class ApprovalOps
         db.Clients.FirstOrDefault(c => c.Id == clientId) is { } t && Approvals.Active(t)
             ? db.ApprovalRequests.Count(r => r.ClientId == clientId && r.Open && CanDecide(db, t, r, userId, admin)) : 0;
 
-    /// <summary>Nombre de publications de la personne encore en attente d'approbation (horloge orange du menu, §178).</summary>
-    public static int WaitingBy(Db db, Guid clientId, Guid? userId) =>
-        userId is { } id && db.Clients.FirstOrDefault(c => c.Id == clientId) is { } t && Approvals.Active(t)
-            ? db.ApprovalRequests.Count(r => r.ClientId == clientId && r.Open && r.AuthorId == id) : 0;
+    /// <summary>
+    /// Publications d'écrans encore en attente d'approbation que la personne voit (horloge orange sur « Écrans », §178) :
+    /// toutes pour une administratrice (ou un accès de la console), sinon les siennes et celles qu'elle peut décider.
+    /// </summary>
+    public static int WaitingBy(Db db, Guid clientId, Guid? userId, bool admin) =>
+        db.Clients.FirstOrDefault(c => c.Id == clientId) is { } t && Approvals.Active(t)
+            ? db.ApprovalRequests.Count(r => r.ClientId == clientId && r.Open && (admin || userId is { } id && r.AuthorId == id || CanDecide(db, t, r, userId, false))) : 0;
 
     /// <summary>La brique concerne la personne : soumise, approbatrice ou administratrice, brique active (entrée « Approbations » du menu).</summary>
     public static bool Involved(Db db, Tenant t, Guid? userId, bool admin) =>
