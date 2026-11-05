@@ -3252,3 +3252,6 @@ Règles réunies dans `SimpleMode` (`ModeService.cs`) ; c'est un affichage, les 
 - Médiathèque : la pastille est dans la légende des cartes ; la vue Photos garde son petit badge sur la vignette.
 - Mode expert inchangé (onglets Mes… / Partagés avec moi / Toute l'organisation).
 - Suite (5 nov.) : en mode simple, plus de lien **Réglages** dans la fenêtre de la cloche, ni de bouton « Régler les alertes » sur la page Notifications (les Réglages n'existent pas en mode simple).
+
+## 182. Médiathèque : plus de ligne de métrique (5 novembre 2026) : compilé
+- Sous les onglets (les deux modes) : plus de « 78 médias · 223,38 Mo », ni « 2 médias non utilisés · Voir », ni l'astuce « Glissez des fichiers… ». Le filtre « Non utilisés » reste dans Filtres ; seul l'avertissement d'un dossier en lecture seule s'affiche encore.
