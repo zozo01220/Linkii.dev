@@ -30,7 +30,7 @@ public record Badge(int Count, int New, int Offline)
 /// </summary>
 public class MenuBadges(JsonStore root, TenantStore store, TenantContext ctx, PlaylistLibrary lists, MediaLibrary media, AppCatalog catalog) : IDisposable
 {
-    public const string Screens = "screens", Playlists = "playlists", MediaFam = "media", Compositions = "compositions", Members = "members", Integrations = "integrations", DataSources = "datasources", InteractiveLists = "ilists", Settings = "settings", ApprovalsFam = "approvals", MyApprovals = "approvals-mine";
+    public const string Screens = "screens", Playlists = "playlists", MediaFam = "media", Compositions = "compositions", Members = "members", Integrations = "integrations", DataSources = "datasources", InteractiveLists = "ilists", Settings = "settings", ApprovalsFam = "approvals", MyApprovals = "approvals-mine", ToPublish = "screens-topublish";
 
     private static readonly TimeSpan Debounce = TimeSpan.FromMilliseconds(500), Tick = TimeSpan.FromSeconds(20), BumpFor = TimeSpan.FromMilliseconds(900);
 
@@ -129,6 +129,8 @@ public class MenuBadges(JsonStore root, TenantStore store, TenantContext ctx, Pl
             return (all.Select(s => new Item(s.Id, s.OwnerId, new LibraryTab.Info(s.OwnerId, s.OwnerId, false), false)).ToList(), all.Count(Down));
         });
         res[Screens] = Eval(Screens, screens, true, offline);
+        // écrans dont les modifications attendent d'être publiées (bouton « Publier » de la page Écrans) : horloge orange du menu (§178)
+        res[ToPublish] = new Badge(store.Read(d => { var pls = PlaylistOps.Choosable(d); return d.AllScreens.Count(s => Helpers.HasPending(s, pls)); }), 0, 0);
 
         var rights = lists.PlaylistRights();
         var tabsOf = lists.ListTabs();
