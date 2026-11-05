@@ -1,6 +1,7 @@
-/* Fil d'une liste de lecture (§73) : glisser une app ou un média (§175) de la colonne de gauche dans le fil, ou déplacer un contenu du fil.
-   Un trait bleu montre l'endroit du dépôt (au-dessus / au-dessous en vue Lignes, à gauche / à droite en vue Cartes).
-   Au lâcher, la page enregistre : DropApp(appId, position) ou MoveItem(de, vers). Le DOM n'est jamais réordonné ici. */
+/* Fil d'une liste de diffusion (§73, refondu en fil horizontal §186) : glisser une vignette de la bibliothèque dans le fil, ou déplacer une carte du fil.
+   Un trait bleu montre l'endroit du dépôt (à gauche / à droite de la carte visée ; au-dessus / au-dessous dans un fil vertical).
+   Au lâcher, la page enregistre : DropAdd(clé, position) pour une vignette (« med:… », « cmp:… », « inst:… », « app:… »), MoveItem(de, vers) pour une carte.
+   Le DOM n'est jamais réordonné ici. */
 (function (w, d) {
   'use strict';
   var drag = null, target = null;
@@ -23,15 +24,13 @@
     }
 
     root.addEventListener('dragstart', function (e) {
-      var ap = e.target.closest && e.target.closest('.pf-app[data-app]');
-      var md = e.target.closest && e.target.closest('.pf-med[data-med]');
-      var u = e.target.closest && e.target.closest('.pf-u[data-i][draggable="true"]');
-      // média de l'onglet « Médias » : ajouté comme Image ou Vidéo (DropMedia)
-      if (md) { drag = { kind: 'media', id: md.getAttribute('data-med') }; md.classList.add('dragging'); var fm = flow(); if (fm) fm.classList.add('drag-app'); }
-      else if (ap) { drag = { kind: 'app', app: ap.getAttribute('data-app') }; ap.classList.add('dragging'); var f = flow(); if (f) f.classList.add('drag-app'); }
+      var t = e.target.closest ? e.target : e.target.parentElement;
+      var add = t && t.closest('[data-add]');
+      var u = t && t.closest('.pf-u[data-i][draggable="true"]');
+      if (add) { drag = { kind: 'add', key: add.getAttribute('data-add') }; add.classList.add('dragging'); var f = flow(); if (f) f.classList.add('drag-app'); }
       else if (u) { drag = { kind: 'item', i: +u.getAttribute('data-i') }; u.classList.add('dragging'); }
       else return;
-      e.dataTransfer.setData('text/plain', 'linkii');
+      e.dataTransfer.setData('text/plain', 'linkivi');
       e.dataTransfer.effectAllowed = drag.kind === 'item' ? 'move' : 'copy';
     });
     root.addEventListener('dragend', clear);
@@ -52,6 +51,9 @@
       var before = f.classList.contains('cards') ? e.clientX < r.left + r.width / 2 : e.clientY < r.top + r.height / 2;
       u.classList.add(before ? 'ins-before' : 'ins-after');
       target = before ? i : i + 1;
+      // près des bords du fil : il défile tout seul
+      var fr = f.getBoundingClientRect();
+      if (e.clientX < fr.left + 60) f.scrollLeft -= 14; else if (e.clientX > fr.right - 60) f.scrollLeft += 14;
     });
 
     root.addEventListener('drop', function (e) {
@@ -61,26 +63,39 @@
       var dr = drag, at = target;
       clear();
       if (at == null) return;
-      if (dr.kind === 'app') dotnet.invokeMethodAsync('DropApp', dr.app, at);
-      else if (dr.kind === 'media') dotnet.invokeMethodAsync('DropMedia', dr.id, at);
+      if (dr.kind === 'add') dotnet.invokeMethodAsync('DropAdd', dr.key, at);
       else if (at !== dr.i && at !== dr.i + 1) dotnet.invokeMethodAsync('MoveItem', dr.i, at);
     });
+
+    // molette verticale sur le fil : il défile à l'horizontale
+    root.addEventListener('wheel', function (e) {
+      var f = flow();
+      if (!f || !f.contains(e.target) || Math.abs(e.deltaY) <= Math.abs(e.deltaX) || f.scrollWidth <= f.clientWidth) return;
+      f.scrollLeft += e.deltaY;
+      e.preventDefault();
+    }, { passive: false });
   }
 
   // Amène un contenu à l'écran (clic sur la frise, contenu qui vient d'être ajouté)
   function reveal(id) {
     var el = d.querySelector('.pf-u[data-id="' + id + '"]');
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
   }
 
-  // Média qui vient d'être importé dans l'onglet « Médias » : la liste remonte pour le montrer (il est en tête)
+  // Média qui vient d'être importé : la bibliothèque remonte pour le montrer (il est en tête)
   function revealMedia() {
-    var el = d.querySelector('.pf-med[data-fresh]');
+    var el = d.querySelector('[data-fresh]');
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // Flèches du fil : environ trois cartes
+  function scroll(root, dir) {
+    var f = root && root.querySelector('.pf-flow');
+    if (f) f.scrollBy({ left: dir * Math.max(200, f.clientWidth * 0.7), behavior: 'smooth' });
   }
 
   // Champ de durée ouvert : focus et texte sélectionné, prêt à être remplacé
   function select(el) { if (el) { el.focus(); if (el.select) el.select(); } }
 
-  w.linkiiFlow = { init: init, reveal: reveal, revealMedia: revealMedia, select: select };
+  w.linkiiFlow = { init: init, reveal: reveal, revealMedia: revealMedia, scroll: scroll, select: select };
 })(window, document);

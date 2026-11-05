@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — Fil horizontal de la liste de diffusion</title>
+<style>
+:root{--bg:#F5F7FA;--ink:#0B1F3A;--muted:#5A6B80;--line:#DDE3EA;--line-2:#C5CED9;--row:#EDF1F5;--signal:#3B82C4;--side:#E4E8EE;--side-on:#CBD5E2;
+  --c-img:#E0912F;--c-vid:#7C62C9;--c-cmp:#4C6FD6;--c-pres:#1E8E5A;--c-web:#3E9AA0;--c-app:#C2577A;--danger:#C8372D;--ok:#1E8E5A;
+  --shadow-hover:0 8px 20px rgba(11,31,58,.16),0 2px 5px rgba(11,31,58,.08)}
+*{box-sizing:border-box}html,body{margin:0}
+body{font-family:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
+h1,h2,h3,p{margin:0;font-weight:500}p{font-weight:400}b{font-weight:500}button,input,select{font:inherit;color:inherit}
+svg{display:block;flex:none}
+.mono{font-family:"JetBrains Mono",Consolas,monospace;font-weight:500;font-variant-numeric:tabular-nums}
+
+/* ---------- bandeau maquette ---------- */
+.note{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#fff;border-bottom:1px dashed var(--line-2);padding:8px 16px;color:var(--muted);font-size:13px;position:sticky;top:0;z-index:50}
+.note b{color:var(--ink)}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:6px;overflow:hidden;flex-wrap:wrap}
+.seg button{border:0;border-right:1px solid var(--line);background:#fff;padding:4px 11px;cursor:pointer;font-size:13px}
+.seg button:last-child{border-right:0}
+.seg button.on{background:var(--ink);color:#fff}
+
+/* ---------- page derrière (Listes de diffusion) ---------- */
+.app{position:relative;height:940px;min-width:1180px;display:grid;grid-template-columns:250px minmax(0,1fr);overflow:hidden}
+.side{background:var(--side);padding:22px 12px;display:flex;flex-direction:column}
+.wm{font-size:40px;font-weight:500;letter-spacing:-.03em;line-height:1;padding:0 12px 28px}.wm i{color:#CC8400;font-style:normal}
+.nav{display:flex;align-items:center;gap:14px;padding:12px 16px;border-radius:14px;font-weight:500;margin-bottom:4px}
+.nav.on{background:var(--side-on)}
+.nav .r{margin-left:auto;background:var(--danger);color:#fff;border-radius:999px;font-size:12px;min-width:24px;height:24px;display:grid;place-items:center}
+.page{padding:26px 34px;background:var(--bg)}
+.page h1{font-size:24px}.page .sub{color:var(--muted);font-size:14px;margin:4px 0 18px}
+.lgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.lcard{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.lcard .th{aspect-ratio:16/8;background:#cfd8e3 center/cover}
+.lcard .tx{padding:10px 14px}.lcard .tx small{display:block;color:var(--muted);font-size:12.5px}
+.lcard.on{outline:2px solid var(--signal);outline-offset:-1px}
+
+/* ---------- tiroir bas ---------- */
+.scrim{position:absolute;inset:0 0 0 250px;background:rgba(11,31,58,.28)}
+.drawer{position:absolute;left:250px;right:0;bottom:0;height:820px;background:#fff;border-radius:16px 16px 0 0;box-shadow:0 -10px 30px rgba(11,31,58,.18);display:flex;flex-direction:column;transition:height .25s}
+.drawer.min{height:372px}
+.app:has(.drawer.min) .scrim{background:transparent}
+.drawer.min #minBtn svg{transform:rotate(180deg)}
+.grip{width:46px;height:5px;border-radius:9px;background:var(--line-2);margin:8px auto 0;cursor:ns-resize}
+.dhead{display:flex;align-items:center;gap:18px;padding:6px 26px 12px}
+.dtitle{display:flex;align-items:center;gap:8px}
+.dtitle h2{font-size:22px}
+.ibtn{width:34px;height:34px;border:1px solid transparent;border-radius:8px;background:none;display:grid;place-items:center;cursor:pointer;color:var(--muted)}
+.ibtn:hover{background:var(--row);color:var(--ink)}
+.dmeta{color:var(--muted);font-size:13.5px}
+.dmeta .live{color:var(--ok);font-weight:500}
+.total{margin-left:auto;display:flex;align-items:center;gap:12px;background:var(--ink);color:#fff;border-radius:12px;padding:6px 16px 6px 12px}
+.total .big{font-size:24px;line-height:1.1}
+.total small{display:block;font-size:11.5px;opacity:.75;line-height:1.2}
+.btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line-2);background:#fff;border-radius:8px;height:38px;padding:0 14px;cursor:pointer;font-weight:500;font-size:14px}
+.btn:hover{border-color:var(--ink)}
+.btn.pri{background:var(--signal);border-color:var(--signal);color:#fff}
+.btn.dark{background:var(--ink);border-color:var(--ink);color:#fff}
+
+/* frise proportionnelle */
+.frise{margin:0 26px;display:flex;align-items:center;gap:12px}
+.frise .bar{flex:1;display:flex;height:10px;border-radius:6px;overflow:hidden;gap:2px;background:#fff}
+.frise .bar span{display:block;height:100%;transition:filter .1s,transform .1s}
+.frise .bar span.hl{filter:brightness(1.15);transform:scaleY(1.6)}
+.frise small{font-size:12px;color:var(--muted);white-space:nowrap}
+
+/* le fil */
+.filwrap{position:relative;margin-top:8px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:linear-gradient(#FAFBFD,#F3F6FA)}
+.fil{display:flex;align-items:flex-start;gap:0;overflow-x:auto;padding:18px 26px 12px;scroll-behavior:smooth;scrollbar-width:thin}
+.slot{flex:none;display:flex;flex-direction:column;align-items:center;gap:6px}
+.card{position:relative;width:172px;height:172px;border-radius:12px;overflow:hidden;background:#cfd8e3;box-shadow:0 1px 2px rgba(11,31,58,.12);cursor:grab;transition:box-shadow .15s,transform .15s}
+.card .full{position:absolute;inset:0}
+.card .full img{width:100%;height:100%;object-fit:cover;display:block}
+.card .num{position:absolute;left:8px;top:8px;width:26px;height:26px;border-radius:50%;background:rgba(11,31,58,.82);color:#fff;font-size:13px;font-weight:500;display:grid;place-items:center;backdrop-filter:blur(4px)}
+.card .typ{position:absolute;right:8px;top:8px;height:24px;border-radius:12px;padding:0 8px 0 6px;color:#fff;font-size:11.5px;font-weight:500;display:flex;align-items:center;gap:4px;transition:opacity .12s}
+.card .foot{position:absolute;left:0;right:0;bottom:0;padding:26px 8px 8px 10px;background:linear-gradient(transparent,rgba(5,14,28,.82));color:#fff;display:flex;align-items:flex-end;gap:6px}
+.card .nm{flex:1;min-width:0;font-size:13px;font-weight:500;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card .nm small{display:block;font-weight:400;opacity:.8;font-size:11.5px}
+.dur{flex:none;display:inline-flex;align-items:center;gap:4px;background:#fff;color:var(--ink);border-radius:7px;height:26px;padding:0 7px;font-size:13px;cursor:text;border:1.5px solid transparent;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.dur:hover{border-color:var(--signal)}
+.dur svg{color:var(--muted)}
+.dur input{width:46px;border:0;outline:0;padding:0;font:inherit;font-family:"JetBrains Mono",Consolas,monospace;font-weight:500;text-align:center;background:none}
+.dur.edit{border-color:var(--signal);box-shadow:0 0 0 3px rgba(59,130,196,.3)}
+.dur .stp{display:none;flex-direction:column;margin-right:-3px}
+.dur.edit .stp{display:flex}
+.dur .stp b{font-size:8px;line-height:9px;cursor:pointer;color:var(--muted);padding:0 2px}
+/* survol : actions */
+.card .hov{position:absolute;inset:0;background:rgba(11,31,58,.38);opacity:0;transition:opacity .15s;display:grid;place-items:center;pointer-events:none}
+.card .edit-b{pointer-events:auto;width:48px;height:48px;border-radius:50%;background:#fff;border:0;display:grid;place-items:center;cursor:pointer;color:var(--ink);box-shadow:0 4px 12px rgba(0,0,0,.25);transform:scale(.85);transition:transform .15s}
+.card .edit-b:hover{transform:scale(1)!important;background:var(--signal);color:#fff}
+.card .drag{position:absolute;top:6px;left:50%;transform:translateX(-50%);color:#fff;opacity:.9}
+.card:hover,.card.fh{box-shadow:var(--shadow-hover);transform:translateY(-2px)}
+.card:hover .hov,.card.fh .hov{opacity:1}
+.card:hover .edit-b,.card.fh .edit-b{transform:scale(.95)}
+.card:hover .typ,.card.fh .typ{opacity:0}
+.card.sel{outline:3px solid var(--signal);outline-offset:2px}
+.card.ghost{opacity:.35}
+.when{font-size:12px;color:var(--muted)}
+.when b{color:var(--ink)}
+/* liaisons entre cartes */
+.link{flex:none;width:34px;height:172px;display:flex;align-items:center;justify-content:center;position:relative}
+.link::before{content:"";position:absolute;left:4px;right:4px;top:50%;border-top:2px dashed var(--line-2)}
+.link .plus{position:relative;width:22px;height:22px;border-radius:50%;background:#fff;border:1.5px solid var(--line-2);display:grid;place-items:center;color:var(--muted);cursor:pointer;transition:all .12s}
+.link:hover .plus{background:var(--signal);border-color:var(--signal);color:#fff;transform:scale(1.15)}
+.link.drop::after{content:"";position:absolute;top:-4px;bottom:-4px;left:50%;width:4px;margin-left:-2px;border-radius:3px;background:var(--signal);box-shadow:0 0 0 4px rgba(59,130,196,.2)}
+.link.drop .plus{opacity:0}
+.endzone{width:172px;height:172px;border:2px dashed var(--line-2);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--muted);font-size:13px;text-align:center;padding:12px;background:#fff}
+.endzone.drop{border-color:var(--signal);background:#EAF3FC;color:var(--signal)}
+.loop{width:110px;height:172px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--muted);font-size:12px;text-align:center}
+.loop .r{width:40px;height:40px;border-radius:50%;border:1.5px solid var(--line-2);display:grid;place-items:center;background:#fff}
+.filnav{position:absolute;top:84px;width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.12);display:grid;place-items:center;cursor:pointer;z-index:3}
+.filnav.l{left:6px}.filnav.r{right:6px}
+
+/* bibliothèque en onglets */
+.lib{flex:1;min-height:0;display:flex;flex-direction:column}
+.libhead{display:flex;align-items:flex-end;gap:16px;padding:0 26px;border-bottom:1px solid var(--line)}
+.tabs{display:flex;gap:2px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.tab{border:0;background:none;padding:12px 12px 10px;font-weight:500;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:7px;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;font-size:14.5px}
+.tab:hover{color:var(--ink)}
+.tab.on{color:var(--ink);border-bottom-color:var(--ink)}
+.tab .dot{width:8px;height:8px;border-radius:50%}
+.tab .c{font-size:11.5px;background:var(--row);border-radius:999px;padding:0 7px;color:var(--muted)}
+.tab.on .c{background:var(--ink);color:#fff}
+.libtools{display:flex;align-items:center;gap:10px;padding:12px 26px 6px}
+.search{display:flex;align-items:center;gap:8px;border:1px solid var(--line-2);border-radius:8px;padding:0 12px;height:38px;color:var(--muted);width:300px;background:#fff}
+.search input{border:0;outline:0;flex:1;min-width:0;background:none}
+.select{height:38px;border:1px solid var(--line-2);border-radius:8px;padding:0 10px;background:#fff;font-size:14px}
+.libtools .hint{color:var(--muted);font-size:12.5px;margin-left:6px}
+.libtools .sp{flex:1}
+.libgrid{flex:1;min-height:0;overflow-y:auto;padding:8px 26px 24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(136px,1fr));gap:16px 14px;align-content:start}
+.tile{cursor:grab;min-width:0}
+.tile .tb{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;background:#dfe5ec;border:1px solid var(--line);transition:box-shadow .15s,transform .15s}
+.tile .tb>.full{position:absolute;inset:0}
+.tile .tb img{width:100%;height:100%;object-fit:cover;display:block}
+.tile .add{position:absolute;inset:0;background:rgba(11,31,58,.45);display:grid;place-items:center;opacity:0;transition:opacity .12s}
+.tile .add span{background:#fff;border-radius:999px;padding:4px 12px;font-size:12.5px;font-weight:500;display:flex;align-items:center;gap:5px}
+.tile:hover .tb{box-shadow:var(--shadow-hover);transform:translateY(-2px)}
+.tile:hover .add{opacity:1}
+.tile .used{position:absolute;left:6px;top:6px;background:var(--ink);color:#fff;font-size:11px;border-radius:999px;padding:0 7px;font-weight:500}
+.tile .vd{position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.7);color:#fff;font-size:11px;border-radius:5px;padding:0 5px}
+.tile .tn{font-size:13px;font-weight:500;margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile .ts{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile.new .tb{border:2px dashed var(--line-2);background:#fff;display:grid;place-items:center;color:var(--muted)}
+.tile.new .tb div{display:flex;flex-direction:column;align-items:center;gap:6px;font-size:13px;text-align:center;padding:8px}
+.tile.lock .tb{filter:grayscale(1);opacity:.6}
+
+/* vignettes générées (pas d'image) */
+.g-cmp{background:linear-gradient(135deg,#123A6B,#2C64B8);color:#fff;display:flex;flex-direction:column;justify-content:center;padding:14%;font-weight:500}
+.g-cmp b{font-size:1.15em;line-height:1.15}.g-cmp small{opacity:.75;font-size:.7em;margin-top:4px}
+.g-web{background:#fff;display:flex;flex-direction:column}
+.g-web .bar{height:14%;background:#EDF1F5;display:flex;align-items:center;gap:3px;padding:0 7%}
+.g-web .bar i{width:5px;height:5px;border-radius:50%;background:#C5CED9}
+.g-web .bd{flex:1;display:grid;place-items:center;color:var(--c-web);font-weight:500;font-size:.85em}
+.g-pres{background:#F6F2EA;display:grid;place-items:center}
+.g-pres div{width:78%;aspect-ratio:16/10;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.18);border-radius:3px;display:flex;flex-direction:column;justify-content:center;padding:8%;font-family:Georgia,serif;font-size:.8em;color:#333;line-height:1.1}
+.g-app{display:grid;place-items:center;color:#fff}
+.g-app .ico{width:44%;height:44%;border-radius:22%;background:rgba(255,255,255,.18);display:grid;place-items:center}
+.g-logo{background:#fff;display:grid;place-items:center;font-weight:700;font-size:1.6em;letter-spacing:-.03em}
+
+/* ---------- fenêtre de réglage d'un contenu ---------- */
+.mscrim{position:absolute;inset:0;background:rgba(11,31,58,.45);display:none;align-items:center;justify-content:center;z-index:20}
+.mscrim.on{display:flex}
+.modal{width:900px;background:#fff;border-radius:14px;box-shadow:0 20px 50px rgba(0,0,0,.3);overflow:hidden;display:flex;flex-direction:column}
+.mhead{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line)}
+.mhead .num{width:28px;height:28px;border-radius:50%;background:var(--ink);color:#fff;display:grid;place-items:center;font-size:13px;font-weight:500}
+.mhead h3{font-size:18px}
+.mhead .pos{color:var(--muted);font-size:13px}
+.mhead .nv{margin-left:auto;display:flex;gap:4px}
+.mbody{display:grid;grid-template-columns:400px 1fr;gap:24px;padding:20px}
+.mprev{border-radius:10px;overflow:hidden;background:#111;aspect-ratio:16/9;position:relative}
+.mprev .full{position:absolute;inset:0}.mprev img{width:100%;height:100%;object-fit:cover}
+.mfacts{margin-top:12px;display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13px}
+.mfacts dt{color:var(--muted)}.mfacts dd{margin:0}
+.mrep{display:flex;gap:8px;margin-top:14px}
+.fld{margin-bottom:14px}
+.fld label{display:block;font-size:13px;font-weight:500;margin-bottom:5px}
+.fld input[type=text]{width:100%;height:38px;border:1px solid var(--line-2);border-radius:8px;padding:0 12px}
+.fld .help{font-size:12px;color:var(--muted);margin-top:4px}
+.durbox{display:flex;align-items:center;gap:10px}
+.durbox .in{display:flex;align-items:center;border:1px solid var(--line-2);border-radius:8px;height:38px;overflow:hidden}
+.durbox .in button{border:0;background:var(--row);width:34px;height:100%;cursor:pointer;font-size:16px}
+.durbox .in input{width:70px;border:0;text-align:center;outline:0;font-family:"JetBrains Mono",Consolas,monospace;font-weight:500;font-size:15px}
+.pills{display:flex;gap:6px;flex-wrap:wrap}
+.pill{border:1px solid var(--line-2);background:#fff;border-radius:999px;padding:4px 12px;font-size:13px;cursor:pointer}
+.pill.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.adv{border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:13.5px;display:flex;align-items:center;gap:10px;color:var(--muted)}
+.adv b{color:var(--ink)}
+.mfoot{display:flex;align-items:center;gap:8px;padding:14px 20px;border-top:1px solid var(--line);background:#FAFBFD}
+.mfoot .sp{flex:1}
+.btn.danger{color:var(--danger);border-color:#EBC3BF}
+
+/* annotations */
+.anno{position:absolute;z-index:30;background:#FFF3D6;color:#7A4F12;border:1px solid #EBCB8B;border-radius:8px;padding:6px 10px;font-size:12.5px;max-width:240px;box-shadow:0 4px 10px rgba(0,0,0,.08);pointer-events:none}
+.anno b{color:#5E3B08}
+.anno::before{content:attr(data-n);display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#B7791F;color:#fff;font-size:11px;font-weight:600;margin-right:6px;vertical-align:1px}
+body.noanno .anno{display:none}
+
+/* décisions */
+.dec{max-width:1180px;margin:24px auto 60px;padding:0 24px}
+.dec .box{background:#fff;border:1px solid var(--line);border-radius:10px;padding:18px 22px}
+.dec h2{font-size:17px;margin-bottom:8px}
+.dec ol{margin:0;padding-left:20px;font-size:14px;line-height:1.6}
+.dec li{margin:4px 0}
+.dec .q{color:var(--muted)}
+.dec .cols{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-img" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></symbol>
+  <symbol id="i-vid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="15" height="14" rx="2"/><path d="m17 10 5-3v10l-5-3z"/></symbol>
+  <symbol id="i-cmp" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12"/></symbol>
+  <symbol id="i-pres" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="13" rx="1.5"/><path d="M12 16v5M8 21h8"/></symbol>
+  <symbol id="i-web" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+  <symbol id="i-app" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-tune" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-grip" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="9" r="1.6"/><circle cx="12" cy="9" r="1.6"/><circle cx="16" cy="9" r="1.6"/><circle cx="8" cy="15" r="1.6"/><circle cx="12" cy="15" r="1.6"/><circle cx="16" cy="15" r="1.6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-loop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h14l-4-4M20 16H6l4 4"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+</svg>
+
+<div class="note">
+  <b>Maquette, rien n'est codé.</b>
+  <span>Vue :</span>
+  <div class="seg" id="scenes">
+    <button data-s="open" class="on">1 · Tiroir ouvert</button>
+    <button data-s="hover">2 · Survol d'une carte</button>
+    <button data-s="dur">3 · Durée modifiée sur la carte</button>
+    <button data-s="drag">4 · Glisser depuis la bibliothèque</button>
+    <button data-s="modal">5 · Fenêtre « Régler »</button>
+    <button data-s="apps">6 · Onglet Intégrations</button>
+    <button data-s="min">7 · Tiroir réduit</button>
+  </div>
+  <label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="annoT" checked> Annotations</label>
+  <span>Tout est cliquable : survolez, cliquez la durée, glissez une vignette dans le fil.</span>
+</div>
+
+<div class="app" id="app">
+  <aside class="side">
+    <div class="wm">linkiv<i>i</i></div>
+    <div class="nav"><svg width="20" height="20"><use href="#i-pres"/></svg>Écrans<span class="r">3</span></div>
+    <div class="nav on"><svg width="20" height="20"><use href="#i-loop"/></svg>Listes diffusion</div>
+    <div class="nav"><svg width="20" height="20"><use href="#i-img"/></svg>Contenus</div>
+    <div class="nav"><svg width="20" height="20"><use href="#i-cal"/></svg>Programmations</div>
+  </aside>
+  <main class="page">
+    <h1>Listes de diffusion</h1>
+    <div class="sub">Une liste de diffusion est une boucle de contenus : composez-la, puis choisissez-la sur vos écrans.</div>
+    <div class="lgrid">
+      <div class="lcard"><div class="th" style="background-image:url(../demo-images/04-cote-turquoise.jpg)"></div><div class="tx"><b>Google Slides</b><small>2 contenus · 0:40</small></div></div>
+      <div class="lcard on"><div class="th" style="background-image:url(../demo-images/02-lac-automne.jpg)"></div><div class="tx"><b>Vitrine</b><small>4 contenus · 1:18</small></div></div>
+      <div class="lcard"><div class="th" style="background-image:url(../demo-images/03-montagnes-neige.jpg)"></div><div class="tx"><b>Accueil</b><small>4 contenus · 2:20</small></div></div>
+    </div>
+  </main>
+
+  <div class="scrim"></div>
+
+  <section class="drawer" id="drawer">
+    <div class="grip" title="Tirer pour agrandir ou réduire"></div>
+    <div class="dhead">
+      <div>
+        <div class="dtitle"><h2>Vitrine</h2><button class="ibtn" title="Renommer"><svg width="16" height="16"><use href="#i-pen"/></svg></button></div>
+        <div class="dmeta"><span class="live">● Diffusée sur 2 écrans</span> · modifiée il y a 7 h</div>
+      </div>
+      <div class="total">
+        <svg width="22" height="22"><use href="#i-loop"/></svg>
+        <div><small>Durée totale de la boucle</small><span class="big mono" id="tot">1:18</span></div>
+        <div style="border-left:1px solid rgba(255,255,255,.25);padding-left:12px"><small>Contenus</small><span class="big mono" id="cnt">4</span></div>
+      </div>
+      <button class="btn"><svg width="14" height="14"><use href="#i-play"/></svg>Aperçu</button>
+      <button class="ibtn" id="minBtn" title="Réduire le tiroir au fil seul"><svg width="20" height="20"><use href="#i-chev"/></svg></button>
+      <button class="ibtn" title="Fermer"><svg width="20" height="20"><use href="#i-x"/></svg></button>
+    </div>
+
+    <div class="frise">
+      <small class="mono">0:00</small>
+      <div class="bar" id="bar"></div>
+      <small><span class="mono" id="tot2">1:18</span> puis recommence au contenu 1</small>
+    </div>
+
+    <div class="filwrap">
+      <button class="filnav l" title="Défiler"><svg width="18" height="18"><use href="#i-left"/></svg></button>
+      <div class="fil" id="fil"></div>
+      <button class="filnav r" title="Défiler"><svg width="18" height="18"><use href="#i-right"/></svg></button>
+    </div>
+
+    <div class="lib">
+      <div class="libhead"><div class="tabs" id="tabs"></div></div>
+      <div class="libtools" id="tools"></div>
+      <div class="libgrid" id="grid"></div>
+    </div>
+  </section>
+
+  <!-- fenêtre de réglage -->
+  <div class="mscrim" id="mscrim">
+    <div class="modal">
+      <div class="mhead">
+        <span class="num" id="mNum">2</span>
+        <div><h3 id="mTitle">329648</h3><div class="pos" id="mPos">Vidéo · contenu 2 sur 4 · passe à 0:08</div></div>
+        <div class="nv">
+          <button class="ibtn" id="mPrev" title="Contenu précédent"><svg width="18" height="18"><use href="#i-left"/></svg></button>
+          <button class="ibtn" id="mNext" title="Contenu suivant"><svg width="18" height="18"><use href="#i-right"/></svg></button>
+          <button class="ibtn" id="mClose" title="Fermer"><svg width="18" height="18"><use href="#i-x"/></svg></button>
+        </div>
+      </div>
+      <div class="mbody">
+        <div>
+          <div class="mprev" id="mPrev2"></div>
+          <dl class="mfacts" id="mFacts"></dl>
+          <div class="mrep">
+            <button class="btn"><svg width="14" height="14"><use href="#i-swap"/></svg>Remplacer…</button>
+            <button class="btn"><svg width="14" height="14"><use href="#i-copy"/></svg>Dupliquer</button>
+          </div>
+        </div>
+        <div>
+          <div class="fld"><label>Nom dans la liste</label><input type="text" id="mName" value="329648"><div class="help">Le fichier d'origine n'est pas renommé.</div></div>
+          <div class="fld"><label>Durée d'affichage</label>
+            <div class="durbox"><div class="in"><button id="mMinus">−</button><input id="mDur" value="0:30"><button id="mPlus">+</button></div>
+            <button class="pill" id="mFull">Vidéo entière (0:30)</button></div>
+          </div>
+          <div class="fld" id="fFit"><label>Cadrage</label><div class="pills"><span class="pill on">Remplir l'écran</span><span class="pill">Tout afficher</span><span class="pill">Étirer</span></div></div>
+          <div class="fld" id="fSnd"><label>Son</label><div class="pills"><span class="pill on">Muet</span><span class="pill">Avec le son</span></div></div>
+          <div class="fld"><label>Transition à l'arrivée</label><div class="pills"><span class="pill on">Fondu</span><span class="pill">Glissement</span><span class="pill">Aucune</span></div></div>
+          <div class="adv"><svg width="18" height="18"><use href="#i-cal"/></svg><div><b>Programmer ce contenu</b><br>Toujours affiché · cliquer pour limiter à des dates ou des heures</div></div>
+        </div>
+      </div>
+      <div class="mfoot">
+        <button class="btn danger" id="mDel"><svg width="14" height="14"><use href="#i-trash"/></svg>Retirer du fil</button>
+        <span class="sp"></span>
+        <button class="btn" id="mCancel">Annuler</button>
+        <button class="btn dark" id="mSave">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- annotations (positions ajustées par scène) -->
+  <div class="anno" data-n="1" style="left:940px;top:140px">La <b>durée totale</b> reste en vue et se met à jour à chaque changement.</div>
+  <div class="anno" data-n="2" style="left:480px;top:226px">La <b>frise</b> colorée par type est gardée ; survol d'une carte = son segment surligné.</div>
+  <div class="anno" data-n="3" style="left:1180px;top:452px">Sous chaque carte : <b>heure de passage</b> dans la boucle.</div>
+  <div class="anno" data-n="4" style="left:1180px;top:312px">La <b>durée</b> est toujours visible et se modifie d'un clic, sans ouvrir de fenêtre.</div>
+  <div class="anno" data-n="5" style="left:1180px;top:590px">Onglets par type, dont <b>Compositions</b> ; le bouton d'ajout change selon l'onglet.</div>
+</div>
+
+<div class="dec">
+  <div class="box">
+    <h2>Ce que la refonte change</h2>
+    <div class="cols">
+      <ol>
+        <li><b>Le tiroir monte du bas</b> sur toute la largeur de la page (le menu de gauche reste visible). Poignée pour l'agrandir ; chevron pour le <b>réduire au fil seul</b> et voir la page derrière.</li>
+        <li><b>Le fil est horizontal</b> : cartes carrées de 172 px, image pleine carte, défilement latéral (molette, flèches, glisser). Les tirets entre cartes portent un <b>+</b> pour insérer à cet endroit.</li>
+        <li><b>Toujours visible sur la carte</b> : numéro d'ordre, type (couleur de la frise), nom + type, <b>durée modifiable d'un clic</b> (saisie mm:ss ou flèches ▲▼), heure de passage dessous.</li>
+        <li><b>Au survol</b> : la carte se soulève, une poignée ⠿ indique qu'on peut la déplacer, et une seule icône <b>Régler</b> au centre ouvre la fenêtre de réglage. Plus de menu ⋮.</li>
+      </ol>
+      <ol start="5">
+        <li><b>Fenêtre « Régler »</b> : aperçu, nom dans la liste, durée (+ « vidéo entière »), cadrage, son, transition, programmation ; Remplacer, Dupliquer, Retirer du fil ; flèches ‹ › pour passer au contenu voisin sans fermer.</li>
+        <li><b>Bibliothèque en onglets</b> : Images, Vidéos, Compositions, Présentations, Pages web, Intégrations. Chaque onglet a sa recherche, son filtre de dossier et son bouton d'ajout (Importer / Nouvelle composition / Ajouter une page web / Store).</li>
+        <li>Un clic sur une vignette l'ajoute <b>à la fin</b> ; un glisser la place <b>où on veut</b>. Les vignettes déjà dans le fil portent « ×1 ».</li>
+        <li>La bascule <b>Lignes / Cartes</b> disparaît : le fil horizontal la remplace.</li>
+      </ol>
+    </div>
+    <h2 style="margin-top:14px">À valider</h2>
+    <ol class="q">
+      <li>Fenêtre de réglage <b>centrée (modale)</b> comme ici, ou tiroir latéral droit par-dessus le tiroir bas ?</li>
+      <li>Une intégration (Météo, YouTube…) ajoutée par clic : ouvrir d'abord sa configuration, ou l'ajouter avec ses réglages par défaut puis « Régler » ?</li>
+      <li>Les widgets restent hors du fil (comme aujourd'hui) — on garde ?</li>
+      <li>En mode simple : mêmes onglets, ou seulement Images, Vidéos, Pages web et les 6 intégrations du mode simple ?</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+const IMG='../demo-images/';
+const TYPES={
+  img:{lbl:'Image',tab:'Images',c:'var(--c-img)',i:'i-img'},
+  vid:{lbl:'Vidéo',tab:'Vidéos',c:'var(--c-vid)',i:'i-vid'},
+  cmp:{lbl:'Composition',tab:'Compositions',c:'var(--c-cmp)',i:'i-cmp'},
+  pres:{lbl:'Présentation',tab:'Présentations',c:'var(--c-pres)',i:'i-pres'},
+  web:{lbl:'Page web',tab:'Pages web',c:'var(--c-web)',i:'i-web'},
+  app:{lbl:'Intégration',tab:'Intégrations',c:'var(--c-app)',i:'i-app'}
+};
+const LIB={
+  img:[
+    {id:'a1',n:'Image',t:'img',img:'02-lac-automne.jpg',s:'1920 × 1080'},
+    {id:'a2',n:'4554245e38eda9e999aef90358ce409b',t:'img',img:'04-cote-turquoise.jpg',s:'588 × 698'},
+    {id:'a3',n:'lac-barque',t:'img',img:'01-lac-barque.jpg',s:'1920 × 1280'},
+    {id:'a4',n:'montagnes-neige',t:'img',img:'03-montagnes-neige.jpg',s:'1920 × 1280'},
+    {id:'a5',n:'UNIL-LOGOTYPE-BLACK-RGB',t:'img',logo:['Unil.','#000'],s:'4300 × 2000'},
+    {id:'a6',n:'UNIL-LOGOTYPE-BLUE-RGB',t:'img',logo:['Unil.','#1530E0'],s:'860 × 400'},
+    {id:'a7',n:'unil-logo',t:'img',logo:['Unil.','#e6e9ee'],s:'660 × 224'}
+  ],
+  vid:[
+    {id:'v1',n:'329648',t:'vid',img:'03-montagnes-neige.jpg',s:'0:30 · 1080p',len:30},
+    {id:'v2',n:'uhd_30fps',t:'vid',img:'01-lac-barque.jpg',s:'0:30 · 4K',len:30}
+  ],
+  cmp:[
+    {id:'c1',n:'Bienvenue',t:'cmp',g:['Bienvenue','Nous sommes ravis'],s:'Composition · 0:08'},
+    {id:'c2',n:'Menu Le Montagnard',t:'cmp',g:['Menu du jour','Le Montagnard'],s:'Composition · 0:10',bg:'linear-gradient(135deg,#5A2E12,#B3631E)'},
+    {id:'c3',n:'Segment client',t:'cmp',g:['Segment client','Tâches, gains, douleurs'],s:'Composition · 0:10',bg:'linear-gradient(135deg,#0B1F3A,#24466F)'},
+    {id:'c4',n:'Horaires accueil',t:'cmp',g:['Horaires','Lun–Ven 8h–18h'],s:'Composition · 0:10',bg:'linear-gradient(135deg,#145A3B,#2B9466)'}
+  ],
+  pres:[
+    {id:'p1',n:'Road trip côte ouest',t:'pres',g:'ROAD TRIP<br>CÔTE OUEST',s:'Google Slides · 2 pages'},
+    {id:'p2',n:'Linkivi_Module03',t:'pres',g:'Segment client',s:'PDF · 1 page'}
+  ],
+  web:[
+    {id:'w1',n:'unil.ch',t:'web',g:'unil.ch',s:'Page web · 1:00'},
+    {id:'w2',n:'Intranet',t:'web',g:'intranet',s:'Page web · 1:00'}
+  ],
+  app:[
+    {id:'i1',n:'Météo',t:'app',bg:'#2F78C8',s:'Lausanne · 12°'},
+    {id:'i2',n:'YouTube',t:'app',bg:'#D33A2C',s:'Vidéo ou playlist'},
+    {id:'i3',n:'Horloge',t:'app',bg:'#334155',s:'Heure et date'},
+    {id:'i4',n:'Flux RSS',t:'app',bg:'#E07A1F',s:'Actualités'},
+    {id:'i5',n:'Calendrier',t:'app',bg:'#1E8E5A',s:'Google / Microsoft'},
+    {id:'i6',n:'Réservation de salle',t:'app',bg:'#7C62C9',s:'Salle Jura'},
+    {id:'i7',n:'Alerte d\'urgence',t:'app',bg:'#C8372D',s:'4 modèles'},
+    {id:'i8',n:'Home Assistant',t:'app',bg:'#18A0D8',s:'Capteurs'},
+    {id:'i9',n:'Instagram',t:'app',bg:'#B13A8C',s:'Non connecté',lock:1}
+  ]
+};
+let fil=[
+  {k:1,n:'Image',t:'img',img:'02-lac-automne.jpg',d:8,src:'a1'},
+  {k:2,n:'329648',t:'vid',img:'03-montagnes-neige.jpg',d:30,len:30,src:'v1'},
+  {k:3,n:'uhd_30fps',t:'vid',img:'01-lac-barque.jpg',d:30,len:30,src:'v2'},
+  {k:4,n:'4554245e38eda9e999aef90358ce409b',t:'img',img:'04-cote-turquoise.jpg',d:10,src:'a2'}
+];
+let kSeq=10, curTab='img', editIdx=-1, forceHover=-1, durEdit=-1, dropAt=-1;
+
+const fmt=s=>Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+const parse=v=>{v=String(v).trim();if(v.includes(':')){const[a,b]=v.split(':');return (+a||0)*60+(+b||0)}return +v||0};
+function thumb(it){
+  if(it.img) return `<div class="full"><img src="${IMG+it.img}" alt=""></div>`;
+  if(it.logo) return `<div class="full g-logo" style="color:${it.logo[1]}">${it.logo[0]}</div>`;
+  if(it.t==='cmp') return `<div class="full g-cmp" style="${it.bg?'background:'+it.bg:''}"><b>${it.g[0]}</b><small>${it.g[1]}</small></div>`;
+  if(it.t==='pres') return `<div class="full g-pres"><div>${it.g}</div></div>`;
+  if(it.t==='web') return `<div class="full g-web"><div class="bar"><i></i><i></i><i></i></div><div class="bd">${it.g}</div></div>`;
+  if(it.t==='app') return `<div class="full g-app" style="background:${it.bg}"><div class="ico"><svg width="34" height="34"><use href="#${it.n==='Météo'?'i-web':it.n==='Horloge'?'i-clock':it.n==='YouTube'?'i-play':it.n.startsWith('Cal')||it.n.startsWith('Rés')?'i-cal':'i-app'}"/></svg></div></div>`;
+  return '';
+}
+function starts(){let a=0;return fil.map(f=>{const s=a;a+=f.d;return s})}
+function total(){return fil.reduce((a,f)=>a+f.d,0)}
+
+function renderFil(){
+  const st=starts(), el=document.getElementById('fil');
+  let h='';
+  fil.forEach((f,i)=>{
+    const T=TYPES[f.t];
+    h+=`<div class="link${dropAt===i?' drop':''}" data-gap="${i}"><span class="plus" title="Insérer ici"><svg width="12" height="12"><use href="#i-plus"/></svg></span></div>`;
+    h+=`<div class="slot">
+      <div class="card${i===forceHover?' fh':''}${i===editIdx?' sel':''}" draggable="true" data-i="${i}">
+        ${thumb(f)}
+        <span class="num">${i+1}</span>
+        <span class="typ" style="background:${T.c}"><svg width="13" height="13"><use href="#${T.i}"/></svg>${T.lbl}</span>
+        <div class="hov"><svg class="drag" width="22" height="22"><use href="#i-grip"/></svg><button class="edit-b" data-edit="${i}" title="Régler ce contenu"><svg width="22" height="22"><use href="#i-tune"/></svg></button></div>
+        <div class="foot">
+          <div class="nm" title="${f.n}">${f.n}<small>${T.lbl}</small></div>
+          <label class="dur${durEdit===i?' edit':''}" title="Durée d'affichage — cliquer pour modifier" data-dur="${i}">
+            <svg width="12" height="12"><use href="#i-clock"/></svg><input value="${fmt(f.d)}" data-durin="${i}">
+            <span class="stp"><b data-st="${i}" data-v="1">▲</b><b data-st="${i}" data-v="-1">▼</b></span>
+          </label>
+        </div>
+      </div>
+      <div class="when">passe à <b class="mono">${fmt(st[i])}</b></div>
+    </div>`;
+  });
+  h+=`<div class="link${dropAt===fil.length?' drop':''}" data-gap="${fil.length}"><span class="plus"><svg width="12" height="12"><use href="#i-plus"/></svg></span></div>`;
+  h+=`<div class="slot"><div class="endzone${dropAt===fil.length?' drop':''}" data-gap="${fil.length}"><svg width="22" height="22"><use href="#i-plus"/></svg>Glissez ou cliquez un contenu de la bibliothèque pour l'ajouter à la fin</div><div class="when">&nbsp;</div></div>`;
+  h+=`<div class="slot"><div class="loop"><span class="r"><svg width="20" height="20"><use href="#i-loop"/></svg></span>à <b class="mono" style="color:var(--ink)">${fmt(total())}</b><br>recommence au contenu 1</div></div>`;
+  el.innerHTML=h;
+  // frise + totaux
+  const T=total();
+  document.getElementById('bar').innerHTML=fil.map((f,i)=>`<span data-b="${i}" title="${i+1} · ${f.n} · ${fmt(f.d)}" style="flex:${f.d};background:${TYPES[f.t].c}"></span>`).join('');
+  ['tot','tot2'].forEach(id=>document.getElementById(id).textContent=fmt(T));
+  document.getElementById('cnt').textContent=fil.length;
+  renderTabs();renderGrid();
+}
+function renderTabs(){
+  document.getElementById('tabs').innerHTML=Object.entries(TYPES).map(([k,T])=>`<button class="tab${k===curTab?' on':''}" data-tab="${k}"><span class="dot" style="background:${T.c}"></span>${T.tab}<span class="c">${LIB[k].length}</span></button>`).join('');
+  const act={img:['Importer','i-up'],vid:['Importer','i-up'],cmp:['Nouvelle composition','i-plus'],pres:['Importer une présentation','i-up'],web:['Ajouter une page web','i-plus'],app:['Store des intégrations','i-app']}[curTab];
+  const hint={img:'Cliquez pour ajouter à la fin, ou glissez dans le fil',vid:'La durée proposée est celle de la vidéo',cmp:'Vos compositions, créées dans l\'éditeur',pres:'Chaque page devient une vue ; la durée totale = pages × durée par page',web:'La page est rechargée à chaque passage',app:'Vos intégrations activées ; la configuration s\'ouvre à l\'ajout'}[curTab];
+  document.getElementById('tools').innerHTML=`<div class="search"><svg width="16" height="16"><use href="#i-search"/></svg><input placeholder="Rechercher dans ${TYPES[curTab].tab.toLowerCase()}"></div>
+    ${curTab==='app'?'':'<select class="select"><option>Tous les dossiers</option></select>'}
+    <span class="hint">${hint}</span><span class="sp"></span>
+    <button class="btn pri"><svg width="14" height="14"><use href="#${act[1]}"/></svg>${act[0]}</button>`;
+}
+function renderGrid(){
+  const used={};fil.forEach(f=>used[f.src]=(used[f.src]||0)+1);
+  let h=LIB[curTab].map(it=>`<div class="tile${it.lock?' lock':''}" draggable="${!it.lock}" data-lib="${it.id}">
+      <div class="tb">${thumb(it)}${used[it.id]?`<span class="used">dans le fil ×${used[it.id]}</span>`:''}${it.len?`<span class="vd mono">${fmt(it.len)}</span>`:''}
+      <div class="add"><span>${it.lock?'Connecter le compte':'<svg width="12" height="12"><use href="#i-plus"/></svg>Ajouter à la fin'}</span></div></div>
+      <div class="tn" title="${it.n}">${it.n}</div><div class="ts">${it.s}</div></div>`).join('');
+  document.getElementById('grid').innerHTML=h;
+}
+function libItem(id){for(const k in LIB){const x=LIB[k].find(i=>i.id===id);if(x)return x}}
+function fromLib(it){const d=it.len||(it.t==='web'?60:it.t==='pres'?20:10);return Object.assign({},it,{k:++kSeq,d,src:it.id})}
+
+/* ---------- interactions ---------- */
+const app=document.getElementById('app');
+app.addEventListener('click',e=>{
+  const t=e.target.closest('[data-tab]');if(t){curTab=t.dataset.tab;renderTabs();renderGrid();return}
+  const ed=e.target.closest('[data-edit]');if(ed){openModal(+ed.dataset.edit);return}
+  const st=e.target.closest('[data-st]');if(st){const i=+st.dataset.st;fil[i].d=Math.max(1,fil[i].d+ +st.dataset.v);durEdit=i;renderFil();focusDur(i);return}
+  const tl=e.target.closest('.tile');if(tl&&!tl.classList.contains('lock')){fil.push(fromLib(libItem(tl.dataset.lib)));renderFil();const f=document.getElementById('fil');f.scrollLeft=f.scrollWidth;return}
+  const gp=e.target.closest('.link .plus');if(gp){const g=+gp.parentNode.dataset.gap;dropAt=g;renderFil();setTimeout(()=>{dropAt=-1;renderFil()},900);return}
+});
+app.addEventListener('focusin',e=>{const d=e.target.dataset.durin;if(d!==undefined){durEdit=+d;e.target.closest('.dur').classList.add('edit');e.target.select()}});
+app.addEventListener('focusout',e=>{const d=e.target.dataset.durin;if(d!==undefined){const v=parse(e.target.value);if(v>0)fil[+d].d=v;durEdit=-1;setTimeout(renderFil,0)}});
+app.addEventListener('keydown',e=>{if(e.target.dataset.durin!==undefined){if(e.key==='Enter')e.target.blur();if(e.key==='ArrowUp'||e.key==='ArrowDown'){e.preventDefault();const i=+e.target.dataset.durin;fil[i].d=Math.max(1,fil[i].d+(e.key==='ArrowUp'?1:-1));e.target.value=fmt(fil[i].d)}}});
+function focusDur(i){const x=document.querySelector(`[data-durin="${i}"]`);if(x){x.focus()}}
+app.addEventListener('mouseover',e=>{const c=e.target.closest('.card,[data-b]');document.querySelectorAll('.bar span').forEach(s=>s.classList.remove('hl'));if(c){const i=c.dataset.i??c.dataset.b;const b=document.querySelector(`[data-b="${i}"]`);b&&b.classList.add('hl')}});
+// glisser-déposer
+let drag=null;
+app.addEventListener('dragstart',e=>{const c=e.target.closest('.card');const tl=e.target.closest('.tile');if(c)drag={from:+c.dataset.i};else if(tl)drag={lib:tl.dataset.lib};e.dataTransfer.effectAllowed='move';if(c)setTimeout(()=>c.classList.add('ghost'),0)});
+app.addEventListener('dragover',e=>{if(!drag)return;const g=e.target.closest('[data-gap]')||e.target.closest('.card');if(!g)return;e.preventDefault();let at=g.dataset.gap!==undefined?+g.dataset.gap:(+g.dataset.i+(e.offsetX>86?1:0));if(at!==dropAt){dropAt=at;document.querySelectorAll('.link,.endzone').forEach(l=>l.classList.toggle('drop',+l.dataset.gap===at))}});
+app.addEventListener('drop',e=>{if(!drag||dropAt<0)return;e.preventDefault();let at=dropAt;if(drag.lib){fil.splice(at,0,fromLib(libItem(drag.lib)))}else{const[it]=fil.splice(drag.from,1);if(drag.from<at)at--;fil.splice(at,0,it)}drag=null;dropAt=-1;renderFil()});
+app.addEventListener('dragend',()=>{drag=null;dropAt=-1;renderFil()});
+document.querySelector('.filnav.l').onclick=()=>document.getElementById('fil').scrollBy({left:-400});
+document.querySelector('.filnav.r').onclick=()=>document.getElementById('fil').scrollBy({left:400});
+document.getElementById('minBtn').onclick=()=>document.getElementById('drawer').classList.toggle('min');
+
+/* ---------- fenêtre Régler ---------- */
+function openModal(i){
+  editIdx=i;const f=fil[i],T=TYPES[f.t],st=starts();
+  document.getElementById('mNum').textContent=i+1;
+  document.getElementById('mTitle').textContent=f.n;
+  document.getElementById('mPos').textContent=`${T.lbl} · contenu ${i+1} sur ${fil.length} · passe à ${fmt(st[i])}`;
+  document.getElementById('mName').value=f.n;
+  document.getElementById('mDur').value=fmt(f.d);
+  document.getElementById('mPrev2').innerHTML=thumb(f);
+  document.getElementById('mFull').style.display=f.len?'':'none';
+  document.getElementById('mFull').textContent=`Vidéo entière (${fmt(f.len||0)})`;
+  document.getElementById('mFull').classList.toggle('on',f.len===f.d);
+  document.getElementById('fSnd').style.display=f.t==='vid'?'':'none';
+  document.getElementById('fFit').style.display=(f.t==='img'||f.t==='vid')?'':'none';
+  const src=libItem(f.src)||f;
+  document.getElementById('mFacts').innerHTML=`<dt>Type</dt><dd>${T.lbl}</dd><dt>Source</dt><dd>${src.n}</dd><dt>Format</dt><dd>${src.s||'—'}</dd><dt>Dossier</dt><dd>Médiathèque › Vitrine</dd>`;
+  document.getElementById('mscrim').classList.add('on');renderFil();
+}
+function closeModal(){editIdx=-1;document.getElementById('mscrim').classList.remove('on');renderFil()}
+document.getElementById('mClose').onclick=closeModal;
+document.getElementById('mCancel').onclick=closeModal;
+document.getElementById('mSave').onclick=()=>{const f=fil[editIdx];f.n=document.getElementById('mName').value||f.n;const v=parse(document.getElementById('mDur').value);if(v>0)f.d=v;closeModal()};
+document.getElementById('mDel').onclick=()=>{fil.splice(editIdx,1);closeModal()};
+document.getElementById('mPrev').onclick=()=>openModal((editIdx-1+fil.length)%fil.length);
+document.getElementById('mNext').onclick=()=>openModal((editIdx+1)%fil.length);
+document.getElementById('mMinus').onclick=()=>{const x=document.getElementById('mDur');x.value=fmt(Math.max(1,parse(x.value)-1))};
+document.getElementById('mPlus').onclick=()=>{const x=document.getElementById('mDur');x.value=fmt(parse(x.value)+1)};
+document.getElementById('mFull').onclick=()=>{document.getElementById('mDur').value=fmt(fil[editIdx].len)};
+
+/* ---------- scènes ---------- */
+const ANNO={open:[1,2,3,4,5],hover:[4],dur:[1,4],drag:[5],modal:[],apps:[5],min:[1]};
+const base=JSON.stringify(fil);
+function scene(s){
+  document.querySelectorAll('#scenes button').forEach(b=>b.classList.toggle('on',b.dataset.s===s));
+  fil=JSON.parse(base);forceHover=-1;durEdit=-1;dropAt=-1;curTab='img';
+  document.getElementById('mscrim').classList.remove('on');editIdx=-1;
+  document.getElementById('drawer').classList.toggle('min',s==='min');
+  if(s==='hover')forceHover=1;
+  if(s==='apps')curTab='app';
+  if(s==='drag'){curTab='cmp';dropAt=2}
+  renderFil();
+  if(s==='dur'){fil[0].d=12;renderFil();const x=document.querySelector('[data-durin="0"]');x.closest('.dur').classList.add('edit');x.value='0:12'}
+  if(s==='drag'){const t=document.querySelector('[data-lib="c1"] .tb');t.style.cssText='transform:translateY(-2px) rotate(-3deg);box-shadow:var(--shadow-hover);opacity:.55;outline:2px solid var(--signal)'}
+  if(s==='modal')openModal(1);
+  document.querySelectorAll('.anno').forEach(a=>a.style.display=ANNO[s].includes(+a.dataset.n)?'':'none');
+  const a1=document.querySelector('.anno[data-n="1"]'),a3=document.querySelector('.anno[data-n="3"]');
+  a1.style.top=s==='min'?'500px':'140px';a3.style.top=s==='min'?'900px':'452px';
+}
+document.getElementById('scenes').onclick=e=>{const b=e.target.closest('button');if(b)scene(b.dataset.s)};
+document.getElementById('annoT').onchange=e=>document.body.classList.toggle('noanno',!e.target.checked);
+scene('open');
+</script>
+</body>
+</html>

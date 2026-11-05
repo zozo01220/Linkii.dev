@@ -3279,3 +3279,13 @@ Règles réunies dans `SimpleMode` (`ModeService.cs`) ; c'est un affichage, les 
 - Supprimer une liste retire ses diffusions des calendriers ; si c'était une liste par défaut, elle est à remplacer (avertissement sur le calendrier).
 - Tests : `CalendarsTests` (10), 5 anciens tests du modèle écran › zone › aire retirés de `PlanningTests`. Suite complète : mêmes 25 échecs qu'avant (apps, facturation, PWA…), aucun nouveau.
 - Pas fait : extinction matérielle Android via l'admin appareil (seulement écran noir + `displayPower`), murs d'écrans (gardent l'ancien planning, sans interface), jamais essayé sur un vrai écran.
+
+## 186. Liste de diffusion : tiroir du bas, fil horizontal, bibliothèque en onglets (5 novembre 2026) : d'après `maquettes/liste-diffusion-fil-horizontal.html` ; compilé, vérifié dans le navigateur
+- Le tiroir de la liste monte du bas (à droite du menu) au lieu de la droite. En-tête : nom (renommer), « Diffusée sur N écrans », durée totale de la boucle et nombre de contenus en permanence, Aperçu, chevron « Réduire au fil seul », Fermer. Frise colorée gardée dessous.
+- Fil horizontal de cartes carrées (172 px), image pleine carte : numéro, type, nom, période éventuelle, durée toujours visible et modifiable d'un clic (m:ss ou secondes, flèches ↑ ↓), heure de passage sous la carte. Au survol : poignée, « Régler » au centre, « Supprimer » (sans confirmation, « Annuler » dans le message). Plus de menu ⋮ ni de bascule Lignes / Cartes, dans les deux modes.
+- « + » entre deux cartes : le prochain contenu choisi s'insère là. Glisser une vignette ou une carte : trait bleu de dépôt, défilement aux bords, molette verticale = défilement horizontal (`playlist-flow.js`, `DropAdd(clé, position)`).
+- Bibliothèque en onglets : Images, Vidéos, Compositions, Présentations, Pages web, Intégrations (hors widgets). Bouton propre à l'onglet : Importer / Nouvelle composition / Nouvelle présentation / Nouvelle page web / Toutes les intégrations (expert). Une page web ou une présentation déjà dans une autre liste est copiée (ses réglages restent à elle).
+- Intégration ajoutée d'un clic avec ses réglages par défaut ; s'il manque une information, bandeau orange « À configurer » sur la carte (ouvre « Régler »).
+- Mode simple : toutes les intégrations attribuées à l'utilisateur + le standard (plus le filtre des 6 intégrations du mode simple dans ce tiroir).
+- Fenêtre « Régler » (centrée, par-dessus le tiroir) : flèches ‹ › vers le contenu voisin, et en pied Retirer du fil, Dupliquer, Désactiver / Réactiver.
+- Pas fait : redimensionnement du tiroir à la poignée (seulement réduit / agrandi), jamais essayé au doigt sur tablette.
