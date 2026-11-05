@@ -30,7 +30,7 @@ public record Badge(int Count, int New, int Offline)
 /// </summary>
 public class MenuBadges(JsonStore root, TenantStore store, TenantContext ctx, PlaylistLibrary lists, MediaLibrary media, AppCatalog catalog) : IDisposable
 {
-    public const string Screens = "screens", Playlists = "playlists", MediaFam = "media", Compositions = "compositions", Members = "members", Integrations = "integrations", DataSources = "datasources", InteractiveLists = "ilists", Settings = "settings", ApprovalsFam = "approvals", MyApprovals = "approvals-mine", ToPublish = "screens-topublish";
+    public const string Screens = "screens", Playlists = "playlists", MediaFam = "media", Compositions = "compositions", Members = "members", Integrations = "integrations", DataSources = "datasources", InteractiveLists = "ilists", Settings = "settings", ApprovalsFam = "approvals", MyApprovals = "approvals-mine", ToPublish = "screens-topublish", ListsToPublish = "playlists-topublish";
 
     private static readonly TimeSpan Debounce = TimeSpan.FromMilliseconds(500), Tick = TimeSpan.FromSeconds(20), BumpFor = TimeSpan.FromMilliseconds(900);
 
@@ -138,6 +138,8 @@ public class MenuBadges(JsonStore root, TenantStore store, TenantContext ctx, Pl
             .Select(p => new Item(p.Id, p.OwnerId, tabsOf.GetValueOrDefault(p.Id), false)).ToList());
         pl.AddRange(lists.Folders().Select(r => new Item(r.Folder.Id, r.Folder.OwnerId, r.Tab, true)));
         res[Playlists] = Eval(Playlists, pl, true);
+        // listes modifiées depuis leur publication (« À publier » de la page Listes) : horloge orange du menu (§178)
+        res[ListsToPublish] = new Badge(store.Read(d => PlaylistUses.Of(d.Playlists.Where(p => rights.GetValueOrDefault(p.Id) != FolderRight.None).ToList(), d.AllScreens.Where(s => s.Token != null).ToList(), d.Areas.ToList()).Values.Count(u => u.Pending > 0)), 0, 0);
 
         var fileTabs = media.FileTabs();
         var files = media.Entries().Select(m => new Item(m.Id, m.OwnerId, fileTabs.GetValueOrDefault(m.Id), false)).ToList();
