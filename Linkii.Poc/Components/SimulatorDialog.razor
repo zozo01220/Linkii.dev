@@ -346,15 +346,18 @@
             var walls = d.Areas.SelectMany(a => a.Zones).Where(z => z.IsWall && z.WallCols > 0 && z.WallRows > 0)
                 .Select(z => (Zone: z, First: d.Screens.Where(s => s.ZoneId == z.Id && s.Token != null && s.WallPos != null).OrderBy(s => s.WallPos).FirstOrDefault()))
                 .Where(x => x.First != null).ToList();
-            return new { p.Name, d.Tenant.Timezone, Screens = screens, Walls = walls };
+            // À l'ouverture, le format de la liste elle-même (portrait si ses contenus le sont, voir PlaylistShape).
+            var portrait = PlaylistShape.IsPortrait(p, id => d.Media.FirstOrDefault(m => m.Id == id), d.Screens);
+            return new { p.Name, d.Tenant.Timezone, Screens = screens, Walls = walls, Portrait = portrait };
         });
         if (info == null) { missing = true; title = "Aperçu"; return; }
         title = $"Aperçu · « {info.Name} »";
         likes = info.Screens.Select(s => ($"like:{s.Id}", $"{s.Name} · {(s.Orientation == "portrait" ? "portrait" : "paysage")}", s.Orientation, PlayerFeed.Resolution(s), 1, 1))
             .Concat(info.Walls.Select(x => ($"like:{x.Zone.Id}", $"{x.Zone.Name} · mur {x.Zone.WallCols} × {x.Zone.WallRows}", x.First!.Orientation, PlayerFeed.Resolution(x.First), x.Zone.WallCols, x.Zone.WallRows)))
             .ToList();
+        fmt = info.Portrait ? "port" : "land";
         ApplyFormat();
-        foot = "Joue la liste telle qu'elle est, même non publiée.";
+        foot ="Joue la liste telle qu'elle est, même non publiée.";
     }
 
     private void SetFormat(string key)

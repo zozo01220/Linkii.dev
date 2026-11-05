@@ -95,6 +95,33 @@ public record PlaylistUse(int Screens, int Pending, int Slots, string? FirstSlot
 /// <summary>Où une suppression de listes se fait sentir : écrans qui les ont choisies et créneaux de planning retirés (« zone « Rez » · Lun – Ven · 08:00 – 12:00 »).</summary>
 public record PlaylistDeleteImpact(List<string> Screens, List<string> Slots);
 
+/// <summary>
+/// Format d'une liste de diffusion (elle n'en a pas en propre) : celui de la plupart de ses contenus pleine page qui ont une taille
+/// (images, vidéos, compositions) ; à défaut, celui de la plupart des écrans qui la diffusent en plein écran ; sinon paysage.
+/// Sert à la carte (carrousel en portrait) et à l'ouverture de la fenêtre « Aperçu ».
+/// </summary>
+public static class PlaylistShape
+{
+    public static bool IsPortrait(Playlist p, Func<Guid, MediaItem?> media, IEnumerable<Screen> screens)
+    {
+        int port = 0, land = 0;
+        foreach (var i in p.Draft.Where(i => i.Placement == "full" && !i.Off))
+            switch (media(i.MediaId) is { } m ? Portrait(m) : null) { case true: port++; break; case false: land++; break; }
+        if (port + land == 0)
+            foreach (var s in screens.Where(s => s.PlaylistId == p.Id))
+                if (s.Orientation == "portrait") port++; else land++;
+        return port > land;
+    }
+
+    /// <summary>Un contenu en hauteur (true), en largeur (false), ou sans taille connue (null : apps, pages web…).</summary>
+    public static bool? Portrait(MediaItem m)
+    {
+        var size = m.AppId == Compositions.AppId ? Compositions.Size(m.Settings)
+            : m.Width is > 0 and var w && m.Height is > 0 and var h ? (w, h) : ((int W, int H)?)null;
+        return size is { } z && z.W != z.H ? z.H > z.W : null;
+    }
+}
+
 public static class PlaylistUses
 {
     public static Dictionary<Guid, PlaylistUse> Of(IEnumerable<Playlist> lists, IReadOnlyCollection<Screen> screens, IEnumerable<Area> areas)
