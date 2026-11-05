@@ -154,6 +154,11 @@ public static class ApprovalOps
         db.Clients.FirstOrDefault(c => c.Id == clientId) is { } t && Approvals.Active(t)
             ? db.ApprovalRequests.Count(r => r.ClientId == clientId && r.Open && CanDecide(db, t, r, userId, admin)) : 0;
 
+    /// <summary>Nombre de publications de la personne encore en attente d'approbation (horloge orange du menu, §178).</summary>
+    public static int WaitingBy(Db db, Guid clientId, Guid? userId) =>
+        userId is { } id && db.Clients.FirstOrDefault(c => c.Id == clientId) is { } t && Approvals.Active(t)
+            ? db.ApprovalRequests.Count(r => r.ClientId == clientId && r.Open && r.AuthorId == id) : 0;
+
     /// <summary>La brique concerne la personne : soumise, approbatrice ou administratrice, brique active (entrée « Approbations » du menu).</summary>
     public static bool Involved(Db db, Tenant t, Guid? userId, bool admin) =>
         Approvals.Active(t) && (admin || userId is { } id && db.Users.FirstOrDefault(u => u.Id == id) is { Rights: { } r } && (r.SubmitApproval || r.Approver));

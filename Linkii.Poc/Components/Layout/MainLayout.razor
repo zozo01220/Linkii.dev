@@ -20,13 +20,13 @@
             @if (PlanLabel is { } pls) { <span class="brand-plan plan-chip @(pls == "Pro" ? "pro" : "ess")" title="Plan de votre organisation"><Ico Name="@(pls == "Pro" ? "crown" : "bolt")" Size="11" />@pls</span> }
             @if (reseller == null || reseller.IsDefault)
             {
-                <span class="brand-logo" data-tip="Linkivi@(PlanLabel is { } pt ? " · " + pt : "") · v@(AppVersion.Short)"><img class="bl-long" src="brand/logo-long.png" alt="Linkivi" /><img class="bl-short" src="brand/logo-court.png" alt="" /></span>
+                <span class="brand-logo" data-tip="@BrandTip"><img class="bl-long" src="brand/logo-long.png" alt="Linkivi" /><img class="bl-short" src="brand/logo-court.png" alt="" /></span>
             }
             else
             {
                 <span class="brand-logo" data-tip="@reseller.DisplayName"><span class="bl-long"><BrandMark R="reseller" Size="30" /></span><span class="bl-short mark">@reseller.DisplayName[..1].ToUpperInvariant()</span></span>
             }
-            <span class="brand-meta">@if (PlanLabel is { } pl) { <span class="plan-tag @(pl == "Pro" ? "pro" : "")" title="Plan de votre organisation"><Ico Name="@(pl == "Pro" ? "crown" : "bolt")" Size="13" />@pl</span> }<span class="ver" title="@AppVersion.Full">v@(AppVersion.Short)</span></span>
+            <span class="brand-meta">@if (PlanLabel is { } pl) { <span class="plan-tag @(pl == "Pro" ? "pro" : "")" title="Plan de votre organisation"><Ico Name="@(pl == "Pro" ? "crown" : "bolt")" Size="13" />@pl</span> }@if (ShowVersion) { <span class="ver" title="@AppVersion.Full">v@(AppVersion.Short)</span> }</span>
             <button type="button" class="nav-fold" aria-label="Replier le menu" aria-expanded="true" data-tip="Déplier le menu"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6" /></svg></button>
         </div>
 
@@ -37,19 +37,19 @@
             @if (Sees(LevelPages.Screens))
             {
                 <NavLink class="nav" href="" Match="NavLinkMatch.All">
-                    <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></svg> Écrans @Pill("screens")
+                    <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></svg> Écrans @MenuPill("screens")
                 </NavLink>
             }
             @if (ProgTabs.Count > 0)
             {
                 <NavLink class="@HubClass(ProgTabs)" href="@ProgTabs[0].Path">
-                    <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg> Listes diffusion @Pill("playlists")
+                    <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg> Listes diffusion @MenuPill("playlists")
                 </NavLink>
             }
             @if (ContentTabs.Count > 0)
             {
                 <NavLink class="@HubClass(ContentTabs)" href="@ContentTabs[0].Path">
-                    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg> Contenus @Pill(MenuBadges.MediaFam, MenuBadges.Compositions)
+                    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg> Contenus @MenuPill(MenuBadges.MediaFam, MenuBadges.Compositions)
                 </NavLink>
             }
             @if (approvalsMenu)
@@ -90,7 +90,7 @@
             @if (Modes.Expert && orgAdmin)
             {
                 <NavLink class="nav" href="organisation">
-                    <Ico Name="team" Size="18" /> Organisation @Pill("members")
+                    <Ico Name="team" Size="18" /> Organisation @MenuPill("members")
                 </NavLink>
             }
             else if (Modes.Expert && Sees(LevelPages.Zones))
@@ -356,14 +356,47 @@
 
     private bool Sees(string page) => orgAdmin || pages.Contains(page);
     private bool approvalsMenu;   // approbation des publications active et la personne concernée (soumise, approbatrice ou administratrice)
+    // Approbations : horloge orange tant que des demandes attendent la décision de la personne (le nombre au survol, §178)
     private RenderFragment ApprovalPill() => builder =>
     {
         var n = Badges.Of(MenuBadges.ApprovalsFam).Count;
-        if (n == 0) return;
+        if (n > 0) builder.AddContent(0, WaitClock($"{n} demande{(n > 1 ? "s" : "")} à approuver"));
+    };
+    /// <summary>Icône orange « en attente » (horloge dans un rond), maquette menu-pastille-attente.html, option B (§178).</summary>
+    private static RenderFragment WaitClock(string tip) => builder =>
+    {
         builder.OpenElement(0, "span");
-        builder.AddAttribute(1, "class", "nbadge orange");
-        builder.AddAttribute(2, "title", $"{n} demande{(n > 1 ? "s" : "")} à approuver");
-        builder.AddContent(3, n > 999 ? "999+" : n.ToString());
+        builder.AddAttribute(1, "class", "nbadge wait");
+        builder.AddAttribute(2, "title", tip);
+        builder.AddAttribute(3, "role", "img");
+        builder.AddAttribute(4, "aria-label", tip);
+        builder.AddMarkupContent(5, "<svg viewBox='0 0 24 24' aria-hidden='true'><circle cx='12' cy='12' r='8.5'/><path d='M12 7.5V12l3 2'/></svg>");
+        builder.CloseElement();
+    };
+    // Version de l'app (en haut à gauche) : seulement sur l'instance de développement locale
+    private bool ShowVersion => new Uri(Nav.BaseUri).Authority.Equals("localhost:5080", StringComparison.OrdinalIgnoreCase);
+    private string BrandTip => "Linkivi" + (PlanLabel is { } pt ? " · " + pt : "") + (ShowVersion ? " · v" + AppVersion.Short : "");
+    /// <summary>
+    /// Pastille d'une entrée du menu latéral (§178) : plus de nombres ; seulement la pastille rouge des écrans hors ligne (avec leur nombre)
+    /// et, sur Écrans, l'horloge orange tant qu'une publication de la personne attend d'être approuvée. Les onglets des pages gardent leurs nombres (Pill).
+    /// </summary>
+    private RenderFragment MenuPill(string fam, params string[] more) => builder =>
+    {
+        var all = new[] { fam }.Concat(more).ToArray();
+        var off = all.Sum(f => Badges.Of(f).Offline);
+        var mine = fam == MenuBadges.Screens ? Badges.Of(MenuBadges.MyApprovals).Count : 0;
+        if (off == 0 && mine == 0) return;
+        builder.OpenElement(0, "span");
+        builder.AddAttribute(1, "class", "nbadges");
+        if (off > 0)
+        {
+            builder.OpenElement(2, "span");
+            builder.AddAttribute(3, "class", "nbadge off" + (all.Any(Badges.Bumping) ? " bump" : ""));
+            builder.AddAttribute(4, "title", $"{off} écran{(off > 1 ? "s" : "")} hors ligne");
+            builder.AddContent(5, off > 999 ? "999+" : off.ToString());
+            builder.CloseElement();
+        }
+        if (mine > 0) builder.AddContent(6, WaitClock($"{mine} publication{(mine > 1 ? "s" : "")} en attente d'approbation"));
         builder.CloseElement();
     };
     private bool compositionsOn;   // l'intégration « Compositions » est dans Mes intégrations
