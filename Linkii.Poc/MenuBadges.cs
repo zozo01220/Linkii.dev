@@ -196,7 +196,7 @@ public class MenuBadges(JsonStore root, TenantStore store, TenantContext ctx, Pl
             // lu : la page affiche l'onglet qui montre ces éléments (Membres, Intégrations : dès que la page est ouverte)
             var lookingHere = tabbed ? reading.Fam == fam : open == fam;
             var readTab = tabbed ? reading.Tab : null;
-            var read = !lookingHere ? new List<Item>() : news.Where(i => readTab == null || readTab == LibraryTab.All || TabOf(i) == readTab).ToList();
+            var read = !lookingHere ? new List<Item>() : news.Where(i => readTab == null || readTab == LibraryTab.All || readTab == LibraryTab.Flat || TabOf(i) == readTab).ToList();   // Flat : mode simple, tout est affiché (§181)
             if (read.Count > 0)
             {
                 var f = fresh.TryGetValue(fam, out var fl) ? fl : fresh[fam] = new();

@@ -60,12 +60,7 @@
 
 <ApprovalBanner />
 
-@* Deux familles d'écrans, jamais mélangées : les écrans de diffusion et les bornes interactives (écran tactile, menu de tuiles). *@
-<nav class="tabs int-tabs lx-utabs lx-ktabs" role="tablist" aria-label="Type d'écran">
-    <button type="button" role="tab" class="@(kindFilter == "" ? "on" : "")" aria-selected="@(kindFilter == "" ? "true" : "false")" @onclick='() => kindFilter = ""'>Tous <span class="cnt">@screens.Count</span></button>
-    <button type="button" role="tab" class="@(kindFilter == "broadcast" ? "on" : "")" aria-selected="@(kindFilter == "broadcast" ? "true" : "false")" @onclick='() => kindFilter = "broadcast"'>Écrans de diffusion <span class="cnt">@screens.Count(x => x.Kiosk == null)</span></button>
-    <button type="button" role="tab" class="@(kindFilter == "kiosk" ? "on" : "")" aria-selected="@(kindFilter == "kiosk" ? "true" : "false")" @onclick='() => kindFilter = "kiosk"'>Bornes interactives <span class="cnt">@screens.Count(x => x.Kiosk != null)</span></button>
-</nav>
+@* Deux familles d'écrans, jamais mélangées : les écrans de diffusion et les bornes interactives (écran tactile, menu de tuiles). Le choix est dans le menu « Filtres » (§181). *@
 @if (kindFilter == "kiosk" && !screens.Any(x => x.Kiosk != null) && canAdd)
 {
     <div class="card empty"><div class="big">Aucune borne interactive</div><p>Une borne est un écran tactile : le visiteur choisit ce qu'il veut voir dans un menu de tuiles. Sans toucher, elle diffuse comme un écran ordinaire.</p><button type="button" class="btn" @onclick="OpenPairKiosk"><Ico Name="hand" Size="16" /> Connecter une borne</button></div>
@@ -788,7 +783,9 @@ else if (wallEdit is { } wid)
         (meId, isAdminUser, multiUser, readAllScreens, orgUsers) = Store.Read(d => (d.Access.UserId, d.Access.IsOrgAdmin, d.Users.Count(u => !u.Disabled) > 1,
             !d.Access.IsOrgAdmin && d.Access.ModeOf(LevelPages.Screens) == PageMode.Read, d.Access.OrgUserIds.ToHashSet()));
         if (!multiUser || readAllScreens) tab = LibraryTab.All;   // seul dans l'organisation, ou en lecture seule : tout est affiché
-        else if (tab == LibraryTab.All && (!isAdminUser || !Modes.Expert)) tab = LibraryTab.Mine;
+        else if (!Modes.Expert) tab = LibraryTab.Flat;   // mode simple : mes écrans et ceux partagés avec moi, à plat (§181)
+        else if (tab == LibraryTab.Flat || tab == LibraryTab.All && !isAdminUser) tab = LibraryTab.Mine;
+        ownerNames = Store.Read(d => d.Users.Where(u => u.ClientId != null).ToDictionary(u => u.Id, u => u.Name));
     }
 
     private bool InTab(string t, Screen s)
@@ -812,7 +809,7 @@ else if (wallEdit is { } wid)
     {
         var sharedCount = groupAreas.SelectMany(g => g.Screens).Count(s => InTab(LibraryTab.Shared, s));
         groupAreas = groupAreas.Select(g => g.Area.Id == area?.Id ? g : g with { Screens = TabFilter(g.Screens, g.Area.Zones) }).ToList();
-        Tabs = !multiUser || readAllScreens ? new()
+        Tabs = !multiUser || readAllScreens || !Modes.Expert ? new()
             : new List<TabItem> { new(LibraryTab.Mine, "Mes écrans", 0), new(LibraryTab.Shared, "Partagés avec moi", sharedCount) }
                 .Concat(isAdminUser && Modes.Expert ? [new TabItem(LibraryTab.All, "Toute l'organisation", 0)] : Array.Empty<TabItem>()).ToList();   // mode simple : pas d'onglet « Toute l'organisation » (§180)
     }
@@ -825,7 +822,7 @@ else if (wallEdit is { } wid)
         var keep = new HashSet<Guid>();
         void Up(Guid? id) { for (var cur = id; cur is { } f && byId.TryGetValue(f, out var r) && keep.Add(f); cur = r.Folder.ParentId) { } }
         foreach (var s in screens) Up(s.FolderId);
-        if (tab == LibraryTab.Mine) foreach (var r in folderRows.Where(r => r.Folder.OwnerId == meId || isAdminUser && r.Folder.OwnerId == null)) Up(r.Folder.Id);
+        if (tab == LibraryTab.Mine || tab == LibraryTab.Flat) foreach (var r in folderRows.Where(r => r.Folder.OwnerId == meId || isAdminUser && r.Folder.OwnerId == null)) Up(r.Folder.Id);
         folderRows = folderRows.Where(r => keep.Contains(r.Folder.Id)).ToList();
     }
 
@@ -1189,6 +1186,14 @@ else if (wallEdit is { } wid)
     private Guid? dragFolder, dropOver;
 
     private ScreenFolderRow? currentRow => folderId is { } id ? folderRows.FirstOrDefault(r => r.Folder.Id == id) : null;
+    // Mode simple (§181) : pas d'onglets ; en bas à droite de la carte, « 2 partages » (bleu, les personnes qui gèrent l'écran) ou « De Anne » (bleu clair) pour l'écran d'un collègue
+    private bool Flat => tab == LibraryTab.Flat;
+    private Dictionary<Guid, string> ownerNames = new();
+    private RenderFragment FlatPill(Screen s) => __builder =>
+    {
+        if (s.OwnerId is { } o && o != meId && orgUsers.Contains(o) && ownerNames.TryGetValue(o, out var n) && !string.IsNullOrWhiteSpace(n)) { <div class="sh-row"><span class="share from" title="Écran de @n"><Ico Name="users" Size="13" /> De @First(n)</span></div> }
+        else if (screenShares.TryGetValue(s.Id, out var sum) && sum.Any) { <div class="sh-row"><SharePill Summary="sum" Blue="true" Clickable="canAssign" OnClick="() => assigning = s" /></div> }
+    };
     private static string First(string name) => name.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? name;
 
     // Le dossier d'un écran (null : racine, ou dossier que la personne ne voit pas) ; un écran de mur reste à la racine avec son mur
@@ -1871,7 +1876,7 @@ else if (wallEdit is { } wid)
                     <span class="sc-dot @cls @(paused ? "paused" : "")" title="@st"><span class="sr-only sc-st">@(paused ? "En pause" : st)</span></span>
                     <button type="button" class="pl-name linklike-name" title="Paramètres de l'écran « @sc.Name »" @onclick="() => Edit(sc)"><span class="sc-kind" title="@(sc.Kiosk != null ? "Borne interactive" : "Écran de diffusion")"><Ico Name="@(sc.Kiosk != null ? "hand" : "monitor")" Size="15" /></span>@sc.Name</button>
                     @if (sc.Kiosk != null) { <span class="badge neutre kiosk-tag" title="Borne interactive"><Ico Name="hand" Size="12" /> Borne</span> }
-                    @ScreenShare(sc)
+                    @if (!Flat) { @ScreenShare(sc) }
                     @if (paused) { <span class="badge mise-a-jour sc-paused-badge" title="@(sc.PausedUntilUtc is { } pu ? "Reprise automatique à " + LocalTime(pu) : "Reprise manuelle")">En pause</span> }
                     <div class="kebab">
                         <button type="button" class="kebab-btn" aria-label="Actions pour @sc.Name" aria-haspopup="menu" aria-expanded="@(menuFor == sc.Id ? "true" : "false")"
@@ -1979,6 +1984,7 @@ else if (wallEdit is { } wid)
                     <button type="button" class="sc-select sc-zones-btn" title="Choisir la liste de lecture de chaque zone" @onclick="() => Edit(sc)"><span class="zc">@sc.ZoneCount zones · </span>@ZonesSummary(sc)</button>
                 }
             </div>
+            @if (Flat) { @FlatPill(sc) }
             @* contrôle du direct (Pro) : verrouillé en licence Essential, avec une bulle au survol *@
             @if (Modes.Expert)
             {
@@ -2566,6 +2572,13 @@ else if (wallEdit is { } wid)
         get
         {
             var list = new List<FilterGroup>();
+            // type d'écran (§181) : ancien choix en onglets au-dessus de la page
+            list.Add(new("kind", "Type", kindFilter, new[]
+            {
+                new FilterOption("", "Tous", screens.Count),
+                new FilterOption("broadcast", "Écrans de diffusion", screens.Count(x => x.Kiosk == null)),
+                new FilterOption("kiosk", "Bornes interactives", screens.Count(x => x.Kiosk != null))
+            }.ToList()));
             if (area != null && ShowZones && OwnAreaVisible)
                 list.Add(new("zone", "Zone", zoneFilter ?? "", new[] { new FilterOption("", "Toutes", screens.Count) }
                     .Concat(zones.Select(z => new FilterOption(z.Id.ToString(), (z.IsWall ? "Mur " : "") + z.Name, screens.Count(x => ZoneOf(x)?.Id == z.Id)))).ToList()));
@@ -2577,11 +2590,12 @@ else if (wallEdit is { } wid)
     }
     private void PickFilter((string Key, string Value) p)
     {
+        if (p.Key == "kind") { kindFilter = p.Value; return; }
         if (p.Key == "area") PickArea(p.Value);
         else if (p.Key == "zone") PickZone(p.Value == "" ? null : zones.FirstOrDefault(z => z.Id.ToString() == p.Value)); else statusFilter = p.Value;
     }
     private void ClearFilter(string key) => PickFilter((key, ""));
-    private void ResetFilters() { areaFilter = ""; PickZone(null); statusFilter = ""; }
+    private void ResetFilters() { kindFilter = ""; areaFilter = ""; PickZone(null); statusFilter = ""; }
     private void PickArea(string id) { areaFilter = id; if (!OwnAreaVisible) zoneFilter = null; dissolveFor = null; CloseMenu(); }   // les zones sont celles de l'aire ouverte
 
     // Filtre « Aire » (24 octobre 2026) : une aire choisie est ouverte (ses zones, la connexion d'un écran) ; « Toutes » montre toutes les aires, groupées. Mémorisé par personne.

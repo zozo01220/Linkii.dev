@@ -3245,3 +3245,9 @@ Règles réunies dans `SimpleMode` (`ModeService.cs`) ; c'est un affichage, les 
 ## 180. Mode simple : plus d'onglet « Toute l'organisation » (5 novembre 2026) : compilé ; **non vérifié dans le navigateur**
 - Écrans, Listes de diffusion et Médiathèque, **en mode simple seulement** : l'onglet « Toute l'organisation » des administrateurs disparaît ; pour ne rien perdre, leur onglet « Partagés avec moi » montre tout ce qui n'est pas à eux (paramètre `everyone` de `LibraryTab.InTab` / `Folders`). Mode expert inchangé ; Compositions inchangé.
 - Maquette suivante, non codée : `maquettes/cartes-pastille-partage.html` (onglets Mes… / Partagés avec moi mis à plat, pastille bleue « N partages » en bas à droite des cartes).
+
+## 181. Écrans : type dans « Filtres » ; mode simple à plat avec pastille de partage (5 novembre 2026) : compilé ; **non vérifié dans le navigateur (tests par l'utilisateur)**
+- Page **Écrans** (les deux modes) : les onglets Tous / Écrans de diffusion / Bornes interactives deviennent le groupe **Type** du menu **Filtres** (avec leurs nombres) ; « Réinitialiser » le remet à Tous.
+- **Mode simple** (Écrans, Listes de diffusion, Médiathèque), d'après `maquettes/cartes-pastille-partage.html` : plus d'onglets, mes éléments et ceux partagés avec moi dans une seule liste (`LibraryTab.Flat`). En bas à droite de chaque carte : pastille **bleue** « 3 partages » / « Toute l'organisation » pour un élément à soi qui est partagé (survol : avec qui ; clic : partage, pour le propriétaire et l'administrateur), pastille **bleu clair** « De Anne » pour celui d'un collègue. L'ancienne pastille sombre sur l'aperçu et l'étiquette du prénom ne s'affichent plus en mode simple. Écrans : les « partages » sont les personnes qui gèrent l'écran.
+- Médiathèque : la pastille est dans la légende des cartes ; la vue Photos garde son petit badge sur la vignette.
+- Mode expert inchangé (onglets Mes… / Partagés avec moi / Toute l'organisation).

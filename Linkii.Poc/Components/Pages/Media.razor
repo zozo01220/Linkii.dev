@@ -435,7 +435,7 @@ else
                             @if (SourceLabel(item) is { } src) { <span class="lx-src" title="@(MediaLibrary.IsDrive(item) ? DriveTitle(DriveOf(item)) : null)">@if (MediaLibrary.IsDrive(item)) { <Ico Name="folder" Size="11" /> }@src</span> }
                             @if (item.Type == "video") { <span class="lx-badge"><Ico Name="play" Size="11" />@(Seconds(item) is { } s ? Helpers.FormatDuration(s) : "")</span> }
                             @if (unused.Contains(item.Id)) { <span class="lx-unused">Non utilisé</span> }
-                            @ShareBadge(item, "ph-share")
+                            @if (!Flat) { @ShareBadge(item, "ph-share") }
                             @RotBtns(item, false)
                         }
                     </div>
@@ -443,6 +443,7 @@ else
                     <div class="cap">
                         <div class="nm" title="@item.Name">@if (FoldersShown && item.FolderId is { } fid && rights.GetValueOrDefault(fid) == FolderRight.Read) { <Ico Name="lock" Size="12" /> }@item.Name</div>
                         <div class="mt">@(ShowPath ? PathOf(item) : Details(item))</div>
+                        @if (Flat && item.Status == null) { @FlatPill(item) }
                         @if (!failed && item.Status == null) { @CardMenu(item) }
                     </div>
                 </div>
@@ -776,6 +777,13 @@ else
     private void ShareFolder(FolderRow r) { sharingKind = ShareKind.MediaFolder; sharingMedia = new() { (r.Folder.Id, r.Folder.Name) }; }
 
     // Média d'un autre : nom de son propriétaire (null : le sien). Un média de l'organisation (sans propriétaire membre) est celui des administrateurs.
+    // Mode simple (§181) : pas d'onglets ; en bas à droite de la carte, « 3 partages » (bleu) pour un média à soi, « De Anne » (bleu clair) pour celui d'un collègue
+    private bool Flat => tab == LibraryTab.Flat;
+    private RenderFragment FlatPill(MediaItem m) => __builder =>
+    {
+        if (SharedBy(m) is { } by) { <div class="sh-row"><span class="share from" title="Média de @by"><Ico Name="users" Size="13" /> De @First(by)</span></div> }
+        else if (mediaShares.TryGetValue(m.Id, out var ms) && ms.Any) { <div class="sh-row"><SharePill Summary="ms" Blue="true" Clickable="false" /></div> }
+    };
     private string? SharedBy(MediaItem m) =>
         m.OwnerId is { } o && o == me ? null : m.OwnerId is { } o2 && people.TryGetValue(o2, out var n) ? n : isAdmin ? null : "l'organisation";
 
@@ -884,7 +892,8 @@ else
 
         // Onglets : seul dans l'organisation ou en lecture seule, tout est affiché ; un utilisateur a ses médias et ses partages ; l'administrateur, en plus, toute l'organisation
         if (!multi || readAll) tab = LibraryTab.All;
-        else if (tab == LibraryTab.All && (!isAdmin || !Modes.Expert)) tab = LibraryTab.Mine;
+        else if (!Modes.Expert) tab = LibraryTab.Flat;   // mode simple : mes médias et ceux partagés avec moi, à plat (§181)
+        else if (tab == LibraryTab.Flat || tab == LibraryTab.All && !isAdmin) tab = LibraryTab.Mine;
         bool InTab(string t, MediaItem m) => fileTabs.TryGetValue(m.Id, out var i) ? LibraryTab.InTab(t, i, me, isAdmin, !Modes.Expert) : t == LibraryTab.All;
         (HashSet<Guid> Folders, List<MediaItem> Files) Scope(string t)
         {
@@ -905,7 +914,7 @@ else
             var (sf, sfiles) = Scope(LibraryTab.Shared);
             sharedRoots = folderRows.Count(r => sf.Contains(r.Folder.Id) && (r.Folder.ParentId is not { } p || !sf.Contains(p))) + sfiles.Count(m => m.FolderId is not { } f || !sf.Contains(f));
         }
-        Tabs = !multi || readAll ? new()
+        Tabs = !multi || readAll || !Modes.Expert ? new()
             : new List<TabItem> { new(LibraryTab.Mine, "Mes médias", 0), new(LibraryTab.Shared, "Partagés avec moi", sharedRoots) }
                 .Concat(isAdmin && Modes.Expert ? [new TabItem(LibraryTab.All, "Toute l'organisation", 0)] : Array.Empty<TabItem>()).ToList();   // mode simple : pas d'onglet « Toute l'organisation » (§180)
         crumbs = BuildCrumbs();

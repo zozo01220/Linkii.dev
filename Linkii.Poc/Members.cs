@@ -209,7 +209,8 @@ public static class Ownership
 /// <summary>Où se range un élément dans les onglets d'une page : ses éléments, ceux qu'on lui partage, tout (administrateur, lecture seule).</summary>
 public static class LibraryTab
 {
-    public const string Mine = "mine", Shared = "shared", All = "all";
+    /// <summary>Flat : mode simple (§181), « Mes … » et « Partagés avec moi » réunis dans une seule liste, sans onglets.</summary>
+    public const string Mine = "mine", Shared = "shared", All = "all", Flat = "flat";
 
     /// <summary>Un élément (ou dossier) dans les onglets : son propriétaire, celui de son espace, et s'il est partagé avec la personne.</summary>
     public record Info(Guid? Owner, Guid? Space, bool SharedIn);
@@ -220,6 +221,7 @@ public static class LibraryTab
     public static bool InTab(string tab, Info i, Guid? me, bool admin, bool everyone = false) => tab switch
     {
         Mine => IsMine(i, me, admin),
+        Flat => IsMine(i, me, admin) || i.SharedIn || !admin || everyone,
         Shared => !IsMine(i, me, admin) && (i.SharedIn || !admin || everyone),
         _ => true
     };
