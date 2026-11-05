@@ -3238,3 +3238,6 @@ Règles réunies dans `SimpleMode` (`ModeService.cs`) ; c'est un affichage, les 
 - Inchangés : pastille de Réglages, nombres des onglets des pages (Listes de lecture, Médiathèque…).
 - **Version** (en haut à gauche, et dans l'infobulle du logo) : affichée seulement quand l'adresse est `localhost:5080`.
 - Suite (5 nov.) : horloge aussi sur **Listes diffusion** tant que des listes sont « À publier » (modifiées depuis leur publication, `PlaylistUses`, famille `playlists-topublish`) ; icône recentrée (les règles `.sidebar .nav svg` la forçaient en 24 px et la remplissaient sur l'entrée active).
+
+## 179. Mode simple : plus d'onglet Widgets dans Contenus (5 novembre 2026) : compilé
+- Onglets du hub **Contenus** (Médiathèque, Compositions…) : **Widgets** seulement en mode expert ; même chose dans la feuille « Plus » de l'app. L'adresse `/widgets` reste en lecture seule en mode simple, comme avant.
