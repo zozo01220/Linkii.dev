@@ -215,6 +215,7 @@ else
                         <a class="il-cov" href="/interactive/@il.Id?back=/interactive-lists" title="@(RightOf(il) >= FolderRight.Write ? "Modifier" : "Voir") « @il.Name »" @onclick:preventDefault="true" @onclick="() => Open(il)"><InteractiveListThumb List="il" Files="media" /></a>
                         @if (RightOf(il) == FolderRight.Read) { <span class="lx-lock" title="Lecture seule"><Ico Name="lock" Size="13" /></span> }
                         <span class="lx-cshare">@ListShare(il)</span>
+                        @if (il.Pages.Count > 0) { <button type="button" class="lx-play" title="Aperçu tactile" aria-label="Aperçu tactile de « @il.Name »" @onclick="() => trying = il.Id"><Ico Name="play" Size="22" /></button> }
                     </div>
                     <div class="lx-pbody">
                         <div class="grow">
@@ -325,6 +326,11 @@ else
     <ShareDialog Kind="@sharingKind" Items="shi" OnClose="() => sharingItems = null" OnShared="Load" />
 }
 
+@if (trying is { } tryId)
+{
+    <InteractivePreviewDialog ListId="tryId" OnClose="() => trying = null" />
+}
+
 @if (listMove is { } lm)
 {
     <InteractiveMoveDialog Items="lm" OnClose='n => { listMove = null; if (n > 0) { picked.Clear(); Toast.Ok(n > 1 ? $"{n} listes rangées." : "Liste rangée."); Load(); } }' />
@@ -367,6 +373,7 @@ else
     private Dictionary<Guid, ShareSummary> listShares = new(), folderShares = new();
     private bool canWrite, canRoot, multi;
     private Guid? me, folderId, menuFor;
+    private Guid? trying;   // aperçu tactile de la liste
     private string search = "", sort = "recent", view = "cards", newFolderName = "", renameFolderValue = "", renameValue = "", sharingKind = ShareKind.IList;
     private string? folderError;
     private bool newMenu, creatingFolder;
@@ -479,6 +486,7 @@ else
                 <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
                 <div class="kebab-menu" role="menu">
                     <button type="button" role="menuitem" @onclick="() => Open(l)"><Ico Name="pencil-square" Size="16" /> @(canEdit ? "Éditer" : "Voir")</button>
+                    @if (l.Pages.Count > 0) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; trying = l.Id; }"><Ico Name="play" Size="16" /> Aperçu tactile</button> }
                     @if (canEdit) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; renamingList = l; renameValue = l.Name; folderError = null; }"><Ico Name="edit" Size="16" /> Renommer</button> }
                     @if (canWrite) { <button type="button" role="menuitem" @onclick="() => Duplicate(l)"><Ico Name="copy" Size="16" /> Dupliquer</button> }
                     @if (multi && RightOf(l) == FolderRight.Owner) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; sharingKind = ShareKind.IList; sharingItems = new() { (l.Id, l.Name) }; }"><Ico Name="share" Size="16" /> Partager…</button> }

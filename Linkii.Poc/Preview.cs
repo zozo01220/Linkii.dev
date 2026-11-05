@@ -5,9 +5,9 @@ namespace Linkii.Poc;
 
 /// <summary>
 /// Ce que montre le simulateur : un écran (tel qu'il est publié), un mur entier, ou une liste de lecture dans son état actuel
-/// sur un format choisi (Cols × Rows écrans de ce format : plus d'un, c'est un mur).
+/// sur un format choisi (Cols × Rows écrans de ce format : plus d'un, c'est un mur), ou une liste interactive manipulée comme sur une borne (aperçu tactile).
 /// </summary>
-public record PreviewGrant(Guid ClientId, Guid? ScreenId, Guid? WallZoneId, Guid? PlaylistId, string Orientation, string Resolution, int Cols, int Rows);
+public record PreviewGrant(Guid ClientId, Guid? ScreenId, Guid? WallZoneId, Guid? PlaylistId, string Orientation, string Resolution, int Cols, int Rows, Guid? InteractiveListId = null);
 
 /// <summary>
 /// Jetons d'aperçu du simulateur : créés par le back-office pour une personne qui a accès à l'écran ou à la liste,
@@ -110,6 +110,28 @@ public static class PlayerFeed
             ["zones"] = Array.Empty<object>(),
             ["screen"] = new { orientation = g.Orientation, resolution = g.Resolution },
             ["settings"] = new { timezone = t.Timezone, reloadHour = t.ReloadHour },
+            ["brand"] = BrandDto.From(reseller)
+        };
+    }
+
+    /// <summary>Aperçu tactile d'une liste interactive : une borne sans liste de diffusion, qui s'ouvre sur l'accueil de la liste.</summary>
+    public static Dictionary<string, object?> ForInteractive(Db db, InteractiveList l, PublishedKiosk kiosk, PreviewGrant g)
+    {
+        var t = db.Clients.First(c => c.Id == l.ClientId);
+        var reseller = db.Resellers.FirstOrDefault(r => r.Id == t.ResellerId);
+        return new()
+        {
+            ["version"] = $"i{l.Id:N}:{l.Revision}:{l.UpdatedUtc.Ticks}|{g.Orientation}|{g.Resolution}|{t.Timezone}|{reseller?.BrandStamp}",
+            ["serverNow"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            ["sync"] = null,
+            ["wall"] = null,
+            ["items"] = Array.Empty<object>(),
+            ["layout"] = new { id = ScreenLayouts.Full, dir = g.Orientation == "portrait" ? "col" : "row", sizes = ScreenLayouts.Find(ScreenLayouts.Full).Sizes },
+            ["zones"] = Array.Empty<object>(),
+            ["screen"] = new { orientation = g.Orientation, resolution = g.Resolution },
+            ["settings"] = new { timezone = t.Timezone, reloadHour = t.ReloadHour },
+            ["kiosk"] = kiosk.ForPlayer(),
+            ["kioskPreview"] = true,   // veille sans « Rien à afficher » : seulement le bouton « Touchez l'écran »
             ["brand"] = BrandDto.From(reseller)
         };
     }

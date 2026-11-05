@@ -1,0 +1,172 @@
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject TenantStore Store
+@inject PreviewGrants Grants
+@inject IJSRuntime JS
+
+@* Aperçu tactile d'une liste interactive : le player en mode aperçu (sim.js › linkiiKPrev) affiche la borne dans son état actuel, même non publiée,
+   et la souris joue le doigt du visiteur. Rien n'est envoyé aux bornes ni compté dans leurs statistiques. *@
+<div class="modal-backdrop" @onclick="Close"></div>
+<div class="modal app-modal sim-dlg" role="dialog" aria-modal="true" aria-labelledby="kp-title">
+    <div class="modal-head">
+        <span class="app-ico" style="--app-c:#0B1F3A"><Ico Name="hand" Size="22" /></span>
+        <div class="grow sim-head">
+            <h3 id="kp-title">@title</h3>
+            @if (!missing) { <span class="badge neutre">Cliquez pour toucher</span> }
+        </div>
+        <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+    </div>
+    <div class="modal-body sim-body">
+        @if (missing)
+        {
+            <div class="empty"><div class="big">Rien à afficher</div><p>Cette liste interactive n'existe plus.</p></div>
+        }
+        else
+        {
+            <div class="sim-main"><div class="sim-host kp-host" @ref="host"></div></div>
+            <aside class="sim-side">
+                <section>
+                    <h4>Orientation</h4>
+                    <div class="sim-chips" role="group" aria-label="Orientation">
+                        <button type="button" class="chip @(fmt == "portrait" ? "on" : "")" @onclick='() => SetFormat("portrait")'>Portrait</button>
+                        <button type="button" class="chip @(fmt == "landscape" ? "on" : "")" @onclick='() => SetFormat("landscape")'>Paysage</button>
+                    </div>
+                    @if (likes.Count > 0)
+                    {
+                        <label class="lbl" for="kp-like">ou comme une borne existante</label>
+                        <select id="kp-like" class="full" value="@(fmt.StartsWith("like:") ? fmt : "")" @onchange='e => SetFormat(e.Value?.ToString() ?? "")'>
+                            <option value="">— Choisir une borne —</option>
+                            @foreach (var l in likes) { <option value="@l.Key">@l.Label</option> }
+                        </select>
+                    }
+                </section>
+                @if (pages.Count > 1)
+                {
+                    <section>
+                        <h4>Pages</h4>
+                        <div class="kp-pages">
+                            @for (var i = 0; i < pages.Count; i++)
+                            {
+                                var p = pages[i]; var n = i + 1;
+                                <button type="button" class="@(current == p.Id && state != "idle" ? "on" : "")" @onclick='() => Send(n == 1 ? "home" : "page", p.Id.ToString())'><span>@(string.IsNullOrWhiteSpace(p.Name) ? (n == 1 ? "Accueil" : $"Page {n}") : p.Name)</span><small>@n</small></button>
+                            }
+                        </div>
+                        <p class="muted sim-hint">Cliquez une page pour y sauter.</p>
+                    </section>
+                }
+                <section>
+                    <h4>Mise en veille</h4>
+                    <button type="button" class="chip @(state == "idle" ? "on" : "")" @onclick='() => Send("idle")'>Montrer l'écran de veille</button>
+                </section>
+            </aside>
+        }
+    </div>
+    <div class="modal-foot">
+        <span class="muted grow sim-foot">Joue la liste telle qu'elle est, même non publiée.</span>
+        @if (!missing) { <button type="button" class="btn ghost" @onclick='() => Send("home")'><Ico Name="refresh" Size="15" /> Recommencer</button> }
+        <button type="button" class="btn" @onclick="Close">Fermer</button>
+    </div>
+</div>
+
+@code {
+    [Parameter] public Guid ListId { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private ElementReference host;
+    private DotNetObjectReference<InteractivePreviewDialog>? self;
+    private bool missing, mounted, dirty = true;
+    private string title = "", fmt = "portrait", orientation = "portrait", resolution = "1920x1080", token = "", state = "home";
+    private Guid clientId;
+    private Guid? current;
+    private List<KioskPage> pages = new();
+    private List<(string Key, string Label, string Orientation, string Resolution)> likes = new();
+
+    protected override void OnInitialized()
+    {
+        clientId = Store.ClientId;
+        var info = Store.Read(d =>
+        {
+            var l = d.InteractiveLists.FirstOrDefault(x => x.Id == ListId);
+            if (l == null || InteractiveListOps.RightOf(d, l) == FolderRight.None) return null;
+            var kiosks = d.Screens.Where(s => s.Kiosk != null && s.Token != null).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase)
+                .Select(s => ($"like:{s.Id}", $"{s.Name} · {(s.Orientation == "portrait" ? "portrait" : "paysage")}", s.Orientation, PlayerFeed.Resolution(s))).ToList();
+            return new { l.Name, l.Orientation, Pages = l.Pages.ToList(), Kiosks = kiosks };
+        });
+        if (info == null) { missing = true; title = "Aperçu tactile"; return; }
+        title = $"Aperçu tactile · « {info.Name} »";
+        pages = info.Pages;
+        current = pages.FirstOrDefault()?.Id;
+        likes = info.Kiosks;
+        fmt = InteractiveLists.Portrait(info.Orientation) ? "portrait" : "landscape";
+        ApplyFormat();
+    }
+
+    private void SetFormat(string key)
+    {
+        if (key.Length == 0 || key == fmt) return;
+        fmt = key;
+        ApplyFormat();
+    }
+
+    private void ApplyFormat()
+    {
+        var like = likes.FirstOrDefault(x => x.Key == fmt);
+        (orientation, resolution) = like.Key != null ? (like.Orientation, like.Resolution) : (fmt == "portrait" ? "portrait" : "landscape", "1920x1080");
+        token = Grants.Create(new PreviewGrant(clientId, null, null, null, orientation, resolution, 1, 1, ListId));
+        dirty = true;
+    }
+
+    // Largeur sur hauteur de l'écran, dans son sens.
+    private double Ratio()
+    {
+        var p = resolution.Split('x');
+        int a = int.TryParse(p[0], out var x) ? x : 1920, b = p.Length > 1 && int.TryParse(p[1], out var y) ? y : 1080;
+        var (w, h) = orientation == "portrait" ? (Math.Min(a, b), Math.Max(a, b)) : (Math.Max(a, b), Math.Min(a, b));
+        return (double)w / h;
+    }
+
+    private async Task Send(string cmd, string? arg = null)
+    {
+        if (!mounted) return;
+        try { await JS.InvokeVoidAsync("linkiiKPrev.send", host, cmd, arg); }
+        catch (JSException) { }
+        catch (JSDisconnectedException) { }
+    }
+
+    /// <summary>La borne a changé d'état (veille, accueil, page) : la page affichée est surlignée dans la liste.</summary>
+    [JSInvokable]
+    public Task KioskState(string s, string? page)
+    {
+        state = s;
+        if (Guid.TryParse(page, out var id)) current = id;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (missing || !dirty) return;
+        dirty = false;
+        self ??= DotNetObjectReference.Create(this);
+        try
+        {
+            await JS.InvokeVoidAsync("linkiiKPrev.mount", host, self, "/player/?preview=" + token, Ratio());
+            mounted = true;
+        }
+        catch (JSException) { }
+        catch (JSDisconnectedException) { }
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    public async ValueTask DisposeAsync()
+    {
+        if (mounted)
+        {
+            try { await JS.InvokeVoidAsync("linkiiKPrev.unmount", host); }
+            catch (JSException) { }
+            catch (JSDisconnectedException) { }
+        }
+        self?.Dispose();
+    }
+}

@@ -117,7 +117,7 @@
       st.paused ? ['free', live ? "En pause · l'écran continue" : 'En pause', ''] :
       st.live ? ['live', "En direct · comme l'écran", "Même contenu, au même moment, que l'écran (lecture synchronisée)"] :
       st.synced ? ['free', 'Lecture libre', ''] :
-      live ? ['neutre', 'Liste publiée', "L'écran n'est pas synchronisé : il joue la même liste, à son propre rythme"] : ['neutre', 'Essai', ''];
+      live ? ['neutre', 'Liste publiée', "L'écran n'est pas synchronisé : il joue la même liste, à son propre rythme"] : ['neutre', 'Aperçu', ''];
     badge.className = 'badge sim-state ' + b[0];
     badge.textContent = b[1];
     badge.title = b[2];
@@ -158,6 +158,36 @@
     clearInterval(this.timer);
     w.removeEventListener('message', this.onMsg);
     this.frame.setAttribute('src', 'about:blank');
+  };
+
+  /* Aperçu tactile d'une liste interactive : le player en mode aperçu affiche la borne ; la souris y joue le doigt du visiteur.
+     La borne renvoie la page affichée (liste des pages de la fenêtre) ; la fenêtre lui envoie accueil, page choisie, veille. */
+  function KPrev(host, ref) {
+    this.host = host; this.ref = ref;
+    host.innerHTML = '<div class="sim-box"><div class="sim-frame"><iframe title="Aperçu tactile de la borne" allow="autoplay; fullscreen"></iframe></div></div>';
+    this.frame = host.querySelector('iframe');
+    var self = this;
+    this.onMsg = function (e) {
+      if (e.source !== self.frame.contentWindow || e.origin !== location.origin || !e.data || e.data.lk !== 'kiosk') return;
+      try { self.ref.invokeMethodAsync('KioskState', e.data.state || 'idle', e.data.page || null); } catch (x) {}
+    };
+    w.addEventListener('message', this.onMsg);
+  }
+  KPrev.prototype.update = function (src, ratio) {
+    var f = this.host.querySelector('.sim-frame');
+    f.style.aspectRatio = String(ratio);
+    f.style.setProperty('--ratio', String(ratio));
+    if (this.frame.getAttribute('src') !== src) this.frame.setAttribute('src', src);
+  };
+  KPrev.prototype.send = function (cmd, arg) {
+    try { this.frame.contentWindow.postMessage({ lk: 'kiosk', cmd: cmd, arg: arg || null }, location.origin); } catch (e) {}
+  };
+  KPrev.prototype.dispose = function () { w.removeEventListener('message', this.onMsg); this.frame.setAttribute('src', 'about:blank'); };
+
+  w.linkiiKPrev = {
+    mount: function (host, ref, src, ratio) { if (!host.__kp) host.__kp = new KPrev(host, ref); host.__kp.update(src, ratio); },
+    send: function (host, cmd, arg) { if (host && host.__kp) host.__kp.send(cmd, arg); },
+    unmount: function (host) { if (host && host.__kp) { host.__kp.dispose(); host.__kp = null; } }
   };
 
   w.linkiiSim = {

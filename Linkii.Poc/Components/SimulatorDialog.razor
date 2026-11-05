@@ -8,7 +8,7 @@
 
 @* Simulateur : le player des écrans en mode aperçu (sim.js), réduit dans une fenêtre. Trois usages :
    un écran (sa publication, au même moment s'il est synchronisé), un mur entier (une seule image, cadres tracés par-dessus),
-   ou une liste de lecture essayée avant publication (format et date au choix). Sans aucun effet sur les écrans,
+   ou l'aperçu d'une liste de lecture avant publication (format au choix, joué maintenant). Sans aucun effet sur les écrans,
    sauf « Appliquer » des réglages du mur : mêmes réglages (format, matériel, résolution) sur tous ses écrans. *@
 <div class="modal-backdrop @(Stacked ? "picker-backdrop" : "")" @onclick="Close"></div>
 <div class="modal app-modal sim-dlg" role="dialog" aria-modal="true" aria-labelledby="sim-title">
@@ -53,19 +53,6 @@
                         </select>
                     }
                 </section>
-                <section>
-                    <h4>Date et heure</h4>
-                    <div class="sim-chips" role="group" aria-label="Date et heure">
-                        <button type="button" class="chip @(!pickDate ? "on" : "")" @onclick="() => SetWhen(false)">Maintenant</button>
-                        <button type="button" class="chip @(pickDate ? "on" : "")" @onclick="() => SetWhen(true)">Choisir…</button>
-                    </div>
-                    @if (pickDate)
-                    {
-                        <input type="datetime-local" class="full" style="margin-top:8px" aria-label="Date et heure simulées" value="@when" @onchange="SetDate" />
-                        <p class="muted sim-hint">Heure de l'organisation (@tz). Les contenus hors de leur période de validité sont sautés.</p>
-                    }
-                </section>
-                <section><div class="wall-note" style="margin:0">Joue la liste <b>dans son état actuel</b>, même non publiée. Rien n'est envoyé aux écrans.</div></section>
             }
             else if (WallZoneId != null)
             {
@@ -127,7 +114,7 @@
                 </section>
             }
             @if (warn != null) { <div class="wall-note warn" style="margin:0 0 12px">@warn</div> }
-            @if (!Solo && (WallZoneId == null || tab != "reg")) { <div class="wall-note" style="margin:0">Aperçu sans effet : il ne compte pas dans les statistiques et ne change pas l'état de l'écran.</div> }
+            @if (!Solo && PlaylistId == null && (WallZoneId == null || tab != "reg")) { <div class="wall-note" style="margin:0">Aperçu sans effet : il ne compte pas dans les statistiques et ne change pas l'état de l'écran.</div> }
         </aside>
     </div>
     <div class="modal-foot">
@@ -183,9 +170,8 @@
     private bool nums = true, real;
     private List<object> cells = new();
 
-    // liste de lecture : format, date simulée (heure de l'organisation)
-    private string fmt = "land", when = "", tz = "Europe/Zurich";
-    private bool pickDate;
+    // liste de lecture : format essayé (joue toujours « maintenant »)
+    private string fmt = "land";
     private List<(string Key, string Label, string Orientation, string Resolution, int Cols, int Rows)> likes = new();
 
     private static readonly (string Key, string Label, string Orientation, string Resolution, int Cols, int Rows)[] Formats =
@@ -233,7 +219,7 @@
         facts.Add(("Liste", info.Wall != null ? info.Lists + " (liste du mur)" : info.Lists));
         if (info.Widgets > 0 && info.Wall == null) facts.Add(("Widgets", info.Widgets.ToString()));
         facts.Add(("Publiée", info.PublishedUtc is { } at ? at.ToLocalTime().ToString("d MMM 'à' HH:mm", new System.Globalization.CultureInfo("fr-CH")) : "jamais"));
-        if (info.Pending) warn = "Des modifications ne sont pas encore publiées : le simulateur montre ce que l'écran affiche. Pour essayer les modifications, ouvrez la liste de lecture et « Essayer sur… ».";
+        if (info.Pending) warn = "Des modifications ne sont pas encore publiées : le simulateur montre ce que l'écran affiche. Pour essayer les modifications, ouvrez l'aperçu de la liste de lecture.";
         foot = "Le simulateur montre la dernière publication de l'écran.";
     }
 
@@ -362,19 +348,14 @@
                 .Where(x => x.First != null).ToList();
             return new { p.Name, d.Tenant.Timezone, Screens = screens, Walls = walls };
         });
-        if (info == null) { missing = true; title = "Essayer"; return; }
-        title = $"Essayer · « {info.Name} »";
-        tz = info.Timezone;
+        if (info == null) { missing = true; title = "Aperçu"; return; }
+        title = $"Aperçu · « {info.Name} »";
         likes = info.Screens.Select(s => ($"like:{s.Id}", $"{s.Name} · {(s.Orientation == "portrait" ? "portrait" : "paysage")}", s.Orientation, PlayerFeed.Resolution(s), 1, 1))
             .Concat(info.Walls.Select(x => ($"like:{x.Zone.Id}", $"{x.Zone.Name} · mur {x.Zone.WallCols} × {x.Zone.WallRows}", x.First!.Orientation, PlayerFeed.Resolution(x.First), x.Zone.WallCols, x.Zone.WallRows)))
             .ToList();
-        when = LocalNow().ToString("yyyy-MM-dd'T'HH:mm");
         ApplyFormat();
-        foot = "La diffusion se publie écran par écran, depuis la page Écrans.";
+        foot = "Joue la liste telle qu'elle est, même non publiée.";
     }
-
-    private TimeZoneInfo Zone() { try { return TimeZoneInfo.FindSystemTimeZoneById(tz); } catch { return TimeZoneInfo.Local; } }
-    private DateTime LocalNow() => TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, Zone());
 
     private void SetFormat(string key)
     {
@@ -395,13 +376,6 @@
         cells = Enumerable.Range(0, cols * rows).Select(_ => (object)new { state = "ok", title = "" }).ToList();
     }
 
-    private void SetWhen(bool pick) { if (pickDate == pick) return; pickDate = pick; dirty = true; }
-
-    private void SetDate(ChangeEventArgs e)
-    {
-        if (e.Value?.ToString() is { Length: > 0 } v) { when = v; dirty = true; }
-    }
-
     private void Set(Action change) { change(); dirty = true; }
 
     // Largeur et hauteur d'un écran, en pixels, dans son sens.
@@ -418,16 +392,7 @@
         dirty = true;
     }
 
-    private string Src()
-    {
-        var src = "/player/?preview=" + token;
-        if (PlaylistId != null && pickDate && DateTime.TryParse(when, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var local))
-        {
-            var utc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), Zone());
-            src += "&at=" + new DateTimeOffset(utc).ToUnixTimeMilliseconds();
-        }
-        return src;
-    }
+    private string Src() => "/player/?preview=" + token;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

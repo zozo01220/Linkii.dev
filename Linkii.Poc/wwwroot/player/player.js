@@ -307,6 +307,7 @@
       try { window.LinkiiNative.config(JSON.stringify(pl.device)); } catch (e) {}
     }
     cfg.wall = pl.wall || null;
+    if (PREVIEW && pl.kiosk && pl.kioskPreview) pl.kiosk.preview = true;   // aperçu tactile d'une liste interactive (sans liste de diffusion)
     if (window.LinkiiKiosk) LinkiiKiosk.apply(pl.kiosk || null, kioskHooks());   // borne interactive : menu de tuiles au toucher (null : écran de diffusion)
     if (pl.dim !== undefined) cfg.dim = pl.dim || null;
     if (pl.sleep !== undefined) cfg.sleep = pl.sleep || null;   // plages de veille (et veille manuelle) de la version qui devient courante
@@ -1836,6 +1837,7 @@
   }
 
   function previewControl(e) {
+    if (e.origin === location.origin && e.data && e.data.lk === 'kiosk' && window.LinkiiKiosk) { LinkiiKiosk.control(e.data.cmd, e.data.arg); return; }   // aperçu tactile : accueil, page, veille
     if (e.origin !== location.origin || !e.data || e.data.lk !== 'sim' || !state.current) return;
     var c = e.data.cmd, slides = itemsOf(state.current).filter(isSlide).filter(isValidNow);
     if (c === 'pause' && !state.paused) {   // l'écran, lui, continue : le simulateur passe en lecture libre

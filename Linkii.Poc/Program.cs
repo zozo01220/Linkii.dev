@@ -1036,6 +1036,13 @@ static (Dictionary<string, object?> Feed, List<PublishedItem> Items)? PreviewFee
         var items = notifier.Items(db, p);   // état actuel de la liste, même non publié
         return (PlayerFeed.ForPlaylist(db, p, items, g), items);
     }
+    if (g.InteractiveListId is { } lid)   // aperçu tactile : la liste interactive dans son état actuel, sans borne
+    {
+        var l = db.InteractiveLists.FirstOrDefault(x => x.Id == lid && x.ClientId == g.ClientId);
+        if (l == null) return null;
+        var k = notifier.PreviewKiosk(db, l);
+        return (PlayerFeed.ForInteractive(db, l, k, g), k.Pages.SelectMany(p => p.Els).Select(e => e.Action.Item).OfType<PublishedItem>().ToList());
+    }
     var s = g.WallZoneId is { } zid   // mur : le premier écran placé donne la publication et la grille
         ? db.Screens.Where(x => x.ClientId == g.ClientId && x.ZoneId == zid && x.Token != null && x.WallPos != null).OrderBy(x => x.WallPos).FirstOrDefault()
         : db.Screens.FirstOrDefault(x => x.Id == g.ScreenId && x.ClientId == g.ClientId && x.Token != null);

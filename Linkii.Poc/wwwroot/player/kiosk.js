@@ -17,8 +17,10 @@
   var CSS =
     '#kiosk{position:absolute;left:0;top:0;right:0;bottom:0;z-index:20;display:none;font-family:inherit;-webkit-user-select:none;user-select:none;touch-action:manipulation}' +
     '#kiosk.on{display:block}' +
-    'body.k-open #idle{display:none!important}' +   /* l'écran « Rien à afficher » de la diffusion ne recouvre pas l'accueil */
+    'body.k-open #idle,body.k-prev #idle{display:none!important}' +   /* aperçu tactile (k-prev) : pas de liste de diffusion, la veille montre seulement « Touchez l’écran » */   /* l'écran « Rien à afficher » de la diffusion ne recouvre pas l'accueil */
     '#kiosk.nocursor,#kiosk.nocursor *{cursor:none!important}' +
+    '.k-tap{position:fixed;z-index:99;width:40px;height:40px;margin:-20px 0 0 -20px;border-radius:50%;background:rgba(255,255,255,.4);border:2px solid #fff;box-shadow:0 0 0 6px rgba(255,255,255,.18),0 2px 8px rgba(0,0,0,.3);pointer-events:none;animation:k-tap .6s ease-out forwards}' +
+    '@keyframes k-tap{0%{transform:scale(.6);opacity:1}100%{transform:scale(1.5);opacity:0}}' +
     '#k-touch{position:absolute;left:0;top:0;right:0;bottom:0;display:none;container-type:size}' +
     '.kt{position:absolute;left:0;top:0;right:0;bottom:0;pointer-events:none;overflow:hidden;container-type:size;--u:1cqmin}' +
     '.kt.kt-land{--u:.55cqmin}' +
@@ -168,6 +170,7 @@
     if (!root) { root = el('div'); root.id = 'kiosk'; H.stage.appendChild(root); }
     root.innerHTML = '';
     root.className = (cfg.hideCursor ? 'nocursor ' : '') + 'on';
+    document.body.classList.toggle('k-prev', !!(H && H.preview && cfg.preview));
     touchEl = el('div'); touchEl.id = 'k-touch';
     touchEl.innerHTML = touchHtml(cfg.touchStyle);
     // bouton déplacé dans l'éditeur : on décale tout le calque depuis le centre (la bande pleine largeur ne se déplace qu'en hauteur)
@@ -187,6 +190,7 @@
     drawHome();
     // un toucher n'importe où repart pour un tour de délai ; sur l'écran d'attente, il ouvre l'accueil
     root.addEventListener('pointerdown', function (e) {
+      if (H.preview) mark(e);
       if (state === 'idle') { e.preventDefault(); e.stopPropagation(); ev('touch'); openHome(true); return; }
       arm();
     }, true);
@@ -360,6 +364,27 @@
     if (lb) lb.textContent = (s === 'page' && (stack.length || curPage !== homeId())) || sub ? 'Retour' : 'Accueil';
     if (H.native) H.native('kioskState', s);
     arm();
+    report();
+  }
+
+  /* ---------- Aperçu tactile du back-office : page affichée renvoyée à la fenêtre, commandes reçues, point touché ---------- */
+  function report() {
+    if (!H || !H.preview || window.parent === window) return;
+    try { window.parent.postMessage({ lk: 'kiosk', ev: 'state', state: state, page: state === 'idle' ? null : curPage }, location.origin); } catch (e) {}
+  }
+  function control(cmd, arg) {
+    if (!cfg || !root) return;
+    if (cmd === 'home') { if (curTile) { stopPage(); curTile = null; } openHome(true); }
+    else if (cmd === 'page') { if (curTile) { stopPage(); curTile = null; } stack = []; curPage = arg; drawHome(); setState('home'); }
+    else if (cmd === 'idle') goIdle();
+    else if (cmd === 'state') report();
+  }
+  // rond blanc à l'endroit cliqué : la souris joue le doigt du visiteur
+  function mark(e) {
+    var d = el('div'); d.className = 'k-tap';
+    d.style.left = e.clientX + 'px'; d.style.top = e.clientY + 'px';
+    document.body.appendChild(d);
+    setTimeout(function () { if (d.parentNode) d.parentNode.removeChild(d); }, 650);
   }
 
   function arm() {
@@ -432,7 +457,7 @@
     if (root && root.parentNode) root.parentNode.removeChild(root);
     root = touchEl = mainEl = homeEl = pageEl = backEl = null;
     visit = null; state = 'idle';
-    document.body.classList.remove('k-open');
+    document.body.classList.remove('k-open', 'k-prev');
   }
 
   /* ---------- Entrée : configuration reçue (ou retirée : l'écran redevient un écran de diffusion) ---------- */
@@ -466,5 +491,5 @@
   /* Un toucher réveille la borne pendant la veille : le player la rallume (player.js), l'accueil s'ouvre au toucher suivant. */
   function active() { return !!cfg; }
 
-  w.LinkiiKiosk = { apply: apply, items: items, active: active, flush: flush };
+  w.LinkiiKiosk = { apply: apply, items: items, active: active, flush: flush, control: control };
 })(window);

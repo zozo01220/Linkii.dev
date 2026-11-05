@@ -88,9 +88,21 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
     private PublishedKiosk BuildKiosk(Db db, Screen s)
     {
         var k = s.Kiosk!;
-        var growth = db.Clients.FirstOrDefault(c => c.Id == s.ClientId)?.IsGrowth == true;
-        string? Url(Guid? id) => id == null ? null : db.Media.FirstOrDefault(m => m.Id == id && m.ClientId == s.ClientId && m.Type == "image" && m.Status == null && m.FileName != null) is { } m ? "/media/" + m.FileName : null;
         var list = db.InteractiveLists.FirstOrDefault(l => l.Id == k.ListId && l.ClientId == s.ClientId);
+        var cfg = System.Text.Json.JsonSerializer.Deserialize<KioskConfig>(System.Text.Json.JsonSerializer.Serialize(k))!;   // copie : modifier le brouillon ne change pas ce qui est publié
+        cfg.Tiles = new();
+        return new PublishedKiosk { Config = cfg, Pages = KioskPages(db, s.ClientId, list) };
+    }
+
+    /// <summary>Aperçu tactile d'une liste interactive dans son état actuel (même pas encore sur une borne) : réglages de borne par défaut,
+    /// curseur visible et sans verrou (c'est le back-office qui la manipule à la souris).</summary>
+    public PublishedKiosk PreviewKiosk(Db db, InteractiveList l) =>
+        new() { Config = new KioskConfig { Lock = false, HideCursor = false, NoZoom = false }, Pages = KioskPages(db, l.ClientId, l) };
+
+    private List<PublishedKioskPage> KioskPages(Db db, Guid clientId, InteractiveList? list)
+    {
+        var growth = db.Clients.FirstOrDefault(c => c.Id == clientId)?.IsGrowth == true;
+        string? Url(Guid? id) => id == null ? null : db.Media.FirstOrDefault(m => m.Id == id && m.ClientId == clientId && m.Type == "image" && m.Status == null && m.FileName != null) is { } m ? "/media/" + m.FileName : null;
         var pages = new List<PublishedKioskPage>();
         foreach (var p in list?.Pages ?? new())
         {
@@ -101,7 +113,7 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
                 if (e.Kind == "tile" && e.Action.Type == "media")
                 {
                     // une tuile dont le contenu a disparu, ou n'est pas prêt, n'est pas publiée : la borne n'affiche jamais de tuile cassée
-                    var m = db.Media.FirstOrDefault(x => x.Id == e.Action.MediaId && x.ClientId == s.ClientId);
+                    var m = db.Media.FirstOrDefault(x => x.Id == e.Action.MediaId && x.ClientId == clientId);
                     if (m == null || !Kiosk.CanOpen(m)) continue;
                     e.Action.Item.MediaId = m.Id;
                     e.Action.Item.Placement = "full";
@@ -118,9 +130,7 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
             }
             pages.Add(pp);
         }
-        var cfg = System.Text.Json.JsonSerializer.Deserialize<KioskConfig>(System.Text.Json.JsonSerializer.Serialize(k))!;   // copie : modifier le brouillon ne change pas ce qui est publié
-        cfg.Tiles = new();
-        return new PublishedKiosk { Config = cfg, Pages = pages };
+        return pages;
     }
 
     /// <summary>Instantané des listes que le planning de l'écran peut faire jouer (une liste supprimée n'y figure plus).</summary>
