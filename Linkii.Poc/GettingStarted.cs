@@ -11,7 +11,10 @@ public sealed class GettingStarted
     public bool IsOpen { get; private set; }
     public event Action? Changed;
 
-    public void Open() { IsOpen = true; Changed?.Invoke(); }
+    /// <summary>Panneau à montrer sous la zone de dépôt à l'ouverture (« cloud » : retour d'un assistant d'intégration, annulé ou terminé) ; lu une fois par l'assistant.</summary>
+    public string? Panel { get; set; }
+
+    public void Open(string? panel = null) { IsOpen = true; Panel = panel; Changed?.Invoke(); }
     public void Close() { IsOpen = false; Changed?.Invoke(); }
 
     /// <summary>Images d'exemple (wwwroot/samples/premiers-pas, licences libres : voir CREDITS.md) : fichier et nom dans la médiathèque.</summary>

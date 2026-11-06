@@ -296,8 +296,20 @@
         }
     }
 
+    // retour d'un assistant d'intégration (annulé ou terminé) : on reste à l'étape 1, panneau cloud rouvert
+    private void OnWelcomeChanged() => InvokeAsync(() =>
+    {
+        if (Welcome.Panel is not { } p) return;
+        Welcome.Panel = null;
+        step = 1; panel = p; error = null;
+        Reload();
+        StateHasChanged();
+    });
+
     protected override void OnInitialized()
     {
+        Welcome.Changed += OnWelcomeChanged;
+        if (Welcome.Panel is { } first) { panel = first; Welcome.Panel = null; }
         Reload();
         // assistant rouvert : la liste déjà créée garde son nom et la durée de ses images
         var list = Store.Read(d => d.Tenant.FirstScreenListId is { } lid ? d.Playlists.FirstOrDefault(p => p.Id == lid) : null);
@@ -635,5 +647,5 @@
         Nav.NavigateTo(hasScreen ? "/" : "/?connecter=1");
     }
 
-    public void Dispose() => self?.Dispose();
+    public void Dispose() { Welcome.Changed -= OnWelcomeChanged; self?.Dispose(); }
 }
