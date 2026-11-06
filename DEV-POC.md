@@ -3297,3 +3297,9 @@ Règles réunies dans `SimpleMode` (`ModeService.cs`) ; c'est un affichage, les 
 - Recherche de la bibliothèque sur toute la largeur ; la mention « Cliquez pour ajouter à la fin… » est retirée (reste le message d'insertion après un « + »).
 - Le fil est dans une bande grise en creux ; la bibliothèque a son titre « Ajouter au fil » et une ombre à sa limite haute.
 - Pas fait : jamais essayé au doigt sur une tablette (cartes en `touch-action: none`, vignettes en `pan-y`).
+
+## 188. Liste de diffusion : fil « pellicule », tiroir plein hauteur, transitions entre les contenus (6 novembre 2026) : compilé, vérifié dans le navigateur ; player non essayé sur écran réel
+- Tiroir de droite jusqu'au menu latéral (il suit le menu réduit) ; numéro de carte en rond centré au-dessus ; type de média = pastille ronde à l'icône seule ; « + » d'insertion retirés (maquette de comparaison : `maquettes/liste-diffusion-liste-diapos.html`, liste verticale non retenue).
+- Fil en décor « pellicule » : bande bleu nuit perforée, flèches entre les cartes, textes clairs.
+- Transitions : `PlaylistItem.Transition` (cut, fade par défaut, push-left/right/up/down, zoom) et `TransitionMs` (200 à 3000, 400 par défaut), classe `Transitions` (Models.cs) ; copiées à la duplication, publiées dans `PublishedItem` / `ForPlayer`. Le player (`swapLayers`, player.js) joue la transition à l'arrivée du contenu (Web Animations pour glissements et zoom, repli en fondu).
+- Réglage par transition (bouton rond entre deux cartes) : mode Expert seulement. Bouton « Transitions » de l'en-tête (simple et expert) : un même effet pour tous les contenus. Les listes existantes gardent leur fondu.

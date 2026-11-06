@@ -1234,6 +1234,37 @@
   }, 5000);
 
   /* ---------- Diffusion (double buffer) ---------- */
+  // Fait passer le calque `layer` au premier plan à la place de `old` selon la transition du contenu (aucune, fondu, glissement, zoom) ; renvoie sa durée en ms.
+  function swapLayers(layer, old, item) {
+    var tr = item.transition || 'fade', ms = Math.max(200, Math.min(3000, item.transitionMs > 0 ? item.transitionMs : 400));
+    [layer, old].forEach(function (l) { l.style.transition = ''; l.style.zIndex = ''; });
+    var dirs = { 'push-left': [100, 0], 'push-right': [-100, 0], 'push-up': [0, 100], 'push-down': [0, -100] };
+    if (tr !== 'cut' && tr !== 'fade' && tr !== 'zoom' && !dirs[tr]) tr = 'fade';
+    if (tr === 'cut') {
+      layer.style.transition = old.style.transition = 'none';
+      layer.classList.add('on'); old.classList.remove('on');
+      return 0;
+    }
+    if (tr === 'fade' || !layer.animate) {
+      layer.style.transition = old.style.transition = 'opacity ' + ms + 'ms';
+      layer.classList.add('on'); old.classList.remove('on');
+      return ms;
+    }
+    var opt = { duration: ms, easing: 'ease-in-out' };
+    layer.style.transition = old.style.transition = 'none';
+    layer.style.zIndex = '2'; old.style.zIndex = '1';
+    layer.classList.add('on');   // le nouveau calque passe devant, l'ancien reste affiché jusqu'à la fin du mouvement
+    if (dirs[tr]) {
+      var d = dirs[tr];
+      layer.animate([{ transform: 'translate(' + d[0] + '%,' + d[1] + '%)' }, { transform: 'none' }], opt);
+      old.animate([{ transform: 'none' }, { transform: 'translate(' + (-d[0]) + '%,' + (-d[1]) + '%)' }], opt);
+    } else {   // zoom
+      layer.animate([{ opacity: 0, transform: 'scale(1.15)' }, { opacity: 1, transform: 'none' }], opt);
+    }
+    setTimeout(function () { if (state.active !== old.id) old.classList.remove('on'); }, ms);
+    return ms;
+  }
+
   function next() {
     clearTimeout(state.timer); state.timer = null;
     adFinish(false, state.pending ? 'publish' : 'cut');   // un spot encore à l'écran (sans être allé au bout) : passage interrompu
@@ -1296,8 +1327,8 @@
 
     function show() {
       if (shown) return; shown = true;
-      layer.classList.add('on'); old.classList.remove('on');
-      setTimeout(function () { if (oldCleanup) oldCleanup(); old.innerHTML = ''; }, 400);
+      var trMs = swapLayers(layer, old, item);   // transition choisie dans la liste (fondu par défaut)
+      setTimeout(function () { if (oldCleanup) oldCleanup(); old.innerHTML = ''; }, trMs + 60);
       state.active = layerId; state.cleanup = newCleanup;
       state.shownItem = item;
       playStart(item);

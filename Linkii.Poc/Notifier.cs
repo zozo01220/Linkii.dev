@@ -168,6 +168,8 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
     {
         s.StartsAt = i.StartsAt;
         s.EndsAt = i.EndsAt;
+        s.Transition = Transitions.Valid(i.Transition);
+        s.TransitionMs = Transitions.ValidMs(i.TransitionMs <= 0 ? Transitions.DefaultMs : i.TransitionMs);
         return s;
     }
 

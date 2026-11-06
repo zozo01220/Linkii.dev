@@ -52,8 +52,8 @@
                 <span><small>Durée totale de la boucle</small><b class="mono">@Helpers.FormatDuration(total)</b></span>
                 <span class="sep"><small>Contenus</small><b class="mono">@active</b></span>
             </div>
+            @if (!readOnlyHere && pl.Draft.Count > 1) { <button type="button" class="btn ghost" title="Choisir l'effet de passage d'un contenu au suivant, pour tous les contenus" @onclick="() => trAll = true"><Ico Name="chevron-right" Size="16" /> Transitions</button> }
             @if (pl.Draft.Count > 0) { <button type="button" class="btn ghost" title="Voir la liste sur un écran ou un mur, sans rien publier" @onclick="() => trying = true"><Ico Name="play" Size="16" /> Aperçu</button> }
-            @if (!readOnlyHere) { <button type="button" class="pfx-ib pfx-fold" title="@(mini ? "Agrandir le tiroir" : "Réduire au fil seul")" aria-label="@(mini ? "Agrandir le tiroir" : "Réduire au fil seul")" aria-expanded="@(mini ? "false" : "true")" @onclick="() => mini = !mini"><Ico Name="chevron" Size="20" /></button> }
             <button type="button" class="pfx-ib" title="Fermer" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
         </header>
 
@@ -64,7 +64,11 @@
                 {
                     var row = r;
                     <div class="pf-u pfx-u @RowClass(row) @(pickAt == row.Index ? "pick" : "")" data-i="@row.Index" data-id="@row.It.Id" data-drag="@(Draggable(row) ? "1" : null)" @key="row.It">
-                        @if (!readOnlyHere) { <button type="button" class="pfx-ins" title="Insérer ici le prochain contenu choisi" aria-label="Insérer avant le contenu @(row.Index + 1)" @onclick="() => PickAt(row.Index)"><Ico Name="plus" Size="12" /></button> }
+                        @if (Modes.Expert && row.Index > 0 && row.It.Placement == "full")
+                        {
+                            @* transition jouée à l'arrivée de ce contenu, depuis le précédent *@
+                            <button type="button" class="pfx-tr @(row.It.Transition != Transitions.Default ? "set" : "")" title="Transition : @Transitions.Label(row.It.Transition)" aria-label="Transition avant le contenu @(row.Index + 1) : @Transitions.Label(row.It.Transition)" @onclick="() => trItem = row.It"><Ico Name="@TrIcon(row.It.Transition)" Size="14" /></button>
+                        }
                         @Card(row)
                         <div class="pfx-when @WhenClass(row)">@When(row)</div>
                     </div>
@@ -266,6 +270,36 @@ else
         <div class="modal-foot">
             <button class="btn ghost" @onclick="() => pickCompo = false">Annuler</button>
             <a class="btn" href="@NewCompositionUrl"><Ico Name="plus" Size="16" /> Créer une composition</a>
+        </div>
+    </div>
+}
+
+@if ((trItem != null || trAll) && Current is { } trpl)
+{
+    var src = trItem ?? trpl.Draft.Skip(1).FirstOrDefault() ?? trpl.Draft.FirstOrDefault();
+    var trNum = trpl.Draft.IndexOf(src!) + 1;
+    <div class="modal-backdrop" @onclick="CloseTransition"></div>
+    <div class="modal pfx-trm" role="dialog" aria-modal="true" aria-labelledby="tr-title" style="max-width:520px">
+        <div class="modal-head">
+            <div class="grow"><h3 id="tr-title">@(trAll ? "Transitions de la liste" : "Transition")</h3><small>@(trAll ? "Un même effet entre tous les contenus" : $"Entre le contenu {trNum - 1} et le contenu {trNum}")</small></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseTransition"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            <div class="pfx-trg" role="radiogroup" aria-label="Type de transition">
+                @foreach (var t in Transitions.All)
+                {
+                    var id = t.Id;
+                    <button type="button" role="radio" aria-checked="@(src!.Transition == id)" class="pfx-tro @(src.Transition == id ? "on" : "")" @onclick="() => SetTransition(trpl, src, id, null)"><span class="pfx-trp tr-@id"><i></i><i></i></span>@t.Label</button>
+                }
+            </div>
+            @if (src!.Transition != "cut")
+            {
+                <label class="pfx-trd">Durée <input type="range" min="@Transitions.MinMs" max="@Transitions.MaxMs" step="100" value="@src.TransitionMs" @onchange="e => SetTransition(trpl, src, src.Transition, int.TryParse(e.Value?.ToString(), out var ms) ? ms : null)" /> <b class="mono">@((src.TransitionMs / 1000.0).ToString("0.0")) s</b></label>
+            }
+        </div>
+        <div class="modal-foot">
+            @if (!trAll && Modes.Expert) { <button class="btn ghost" @onclick="() => ApplyTransitionToAll(trpl, src)">Appliquer à toutes les transitions</button> }
+            <button class="btn" @onclick="CloseTransition">OK</button>
         </div>
     </div>
 }
@@ -575,16 +609,16 @@ else
 
     // ---------- Carte du fil (§186) : carrée, image pleine carte ; numéro, type, nom, durée toujours visibles ; au survol Régler et Supprimer ----------
     private RenderFragment Card(FlowRow r) =>
-        @<div class="pfx-card">
+        @<text><span class="pfx-num">@r.Num</span>
+        <div class="pfx-card">
             <div class="pfx-th" style="@(r.Masked ? null : $"background:{r.Color}")">
                 @if (r.Masked) { <Ico Name="lock" Size="26" /> }
                 else if (r.M?.AppId == Compositions.AppId) { <CompositionThumb Item="r.M" Files="media" Contain="true" /> }
                 else if (r.M != null) { <MediaThumb Media="r.M" All="media" Wide="true" /> }
             </div>
-            <span class="pfx-num">@r.Num</span>
             @if (!r.Masked && r.M != null)
             {
-                <span class="pfx-type" style="background:@r.Color"><AppIcon Id="@r.AppId" Small="true" Tile="false" />@Kind(r.M)</span>
+                <span class="pfx-type" style="background:@r.Color" title="@Kind(r.M)" aria-label="@Kind(r.M)"><AppIcon Id="@r.AppId" Small="true" Tile="false" /></span>
             }
             @if (r.Incomplete && !r.Masked && Current is { } cpl)
             {
@@ -607,7 +641,7 @@ else
                 </div>
                 @DurChip(r)
             </div>
-        </div>;
+        </div></text>;
 
     // Sous la carte : un contenu qui ne passe pas en ce moment porte une pastille de couleur (hors période en orange, à configurer, désactivé)
     private static string WhenClass(FlowRow r) => r.Plays ? "" : r.It.Off ? "st off" : r.Hold ? "st hold" : r.Incomplete ? "st todo" : "";
@@ -905,7 +939,7 @@ else
     {
         var copy = new PlaylistItem
         {
-            MediaId = it.MediaId, DurationSec = it.DurationSec, DurationMode = it.DurationMode, Placement = it.Placement, Off = it.Off, StartsAt = it.StartsAt, EndsAt = it.EndsAt,
+            MediaId = it.MediaId, DurationSec = it.DurationSec, DurationMode = it.DurationMode, Placement = it.Placement, Off = it.Off, StartsAt = it.StartsAt, EndsAt = it.EndsAt, Transition = it.Transition, TransitionMs = it.TransitionMs,
             QrOn = it.QrOn, QrCode = it.QrOn ? QrTracking.NewCode() : null, QrUrl = it.QrUrl, QrLabel = it.QrLabel, QrBase = it.QrBase, QrX = it.QrX, QrY = it.QrY, QrSize = it.QrSize
         };
         WriteList(d =>
@@ -929,6 +963,38 @@ else
         });
         Reload();
         Flash(copy.Id);
+    }
+
+    // ---------- Transitions entre les contenus ----------
+    private PlaylistItem? trItem;
+    private bool trAll;   // fenêtre « Transitions de la liste » (simple et expert) : un même effet pour tous les contenus
+    private void CloseTransition() { trItem = null; trAll = false; }
+    private static string TrIcon(string t) => t switch { "cut" => "x", "push-left" => "chevron-left", "push-right" => "chevron-right", "zoom" => "plus", _ => "chevron-right" };
+
+    private void SetTransition(Playlist pl, PlaylistItem it, string type, int? ms)
+    {
+        var id = it.Id;
+        var all = trAll;
+        WriteList(d =>
+        {
+            foreach (var x in all ? pl.Draft : new List<PlaylistItem> { it })
+            {
+                x.Transition = Transitions.Valid(type);
+                x.TransitionMs = ms is { } m ? Transitions.ValidMs(m) : it.TransitionMs;
+            }
+            pl.Touch();
+        });
+        Reload();
+        if (!all) trItem = Current?.Draft.FirstOrDefault(x => x.Id == id);
+    }
+
+    private void ApplyTransitionToAll(Playlist pl, PlaylistItem from)
+    {
+        var tr = from.Transition; var ms = from.TransitionMs;
+        WriteList(d => { foreach (var i in pl.Draft) { i.Transition = tr; i.TransitionMs = ms; } pl.Touch(); });
+        trItem = null;
+        Toast.Ok("Transition appliquée à tous les contenus.");
+        Reload();
     }
 
     private void ToggleOff(Playlist pl, PlaylistItem it)

@@ -1056,6 +1056,9 @@ public class PlaylistItem
     /// <summary>Période de diffusion (onglet Programmation) : début et fin en aaaa-mm-ddTHH:mm, heure de l'organisation ; null = sans limite. Voir <see cref="ContentWindow"/>.</summary>
     public string? StartsAt { get; set; }
     public string? EndsAt { get; set; }
+    /// <summary>Transition à l'arrivée de ce contenu, depuis le précédent : « fade » (défaut), « cut », « push-left/right/up/down » ou « zoom » ; durée en ms (<see cref="Transitions"/>).</summary>
+    public string Transition { get; set; } = Transitions.Default;
+    public int TransitionMs { get; set; } = Transitions.DefaultMs;
 
     // Comptage des scans (licence Pro, contenus pleine page) : un QR code au premier plan, dont l'adresse courte /q/{code} compte puis redirige (voir QrTracking)
     public bool QrOn { get; set; }
@@ -1103,6 +1106,8 @@ public class PublishedItem
     public double? Scale { get; set; }
     public List<string>? Urls { get; set; }   // apps de la médiathèque (image, vidéo, diaporamas) : fichiers résolus à la publication, dans l'ordre
     public PublishedQr? Qr { get; set; }      // QR code de comptage des scans, affiché au premier plan du contenu (pleine page)
+    public string Transition { get; set; } = Transitions.Default;   // transition à l'arrivée du contenu (voir <see cref="Transitions"/>)
+    public int TransitionMs { get; set; } = Transitions.DefaultMs;
 
     public PublishedItem Clone() => (PublishedItem)MemberwiseClone();
 
@@ -1111,8 +1116,25 @@ public class PublishedItem
     {
         id = Id, type = Type, url = Url, durationSec = DurationSec, durationMode = DurationMode, placement = Placement, dataId = DataId,
         appId = AppId, appVersion = AppVersion, mediaId = MediaId, settings = Settings, validFrom = ValidFrom, validTo = ValidTo, startsAt = StartsAt, endsAt = EndsAt, x = X, y = Y, scale = Scale, urls = Urls,
-        qr = Qr == null ? null : new { d = Qr.Data, x = Qr.X, y = Qr.Y, size = Qr.Size, label = Qr.Label }
+        qr = Qr == null ? null : new { d = Qr.Data, x = Qr.X, y = Qr.Y, size = Qr.Size, label = Qr.Label },
+        transition = Transition, transitionMs = TransitionMs
     };
+}
+
+/// <summary>Transitions entre deux contenus d'une liste de diffusion : celle d'un contenu est jouée à son arrivée.</summary>
+public static class Transitions
+{
+    public const string Default = "fade";
+    public const int DefaultMs = 400;
+    public const int MinMs = 200, MaxMs = 3000;
+    public static readonly (string Id, string Label)[] All =
+    {
+        ("cut", "Aucune"), ("fade", "Fondu"), ("push-left", "Glisser vers la gauche"), ("push-right", "Glisser vers la droite"),
+        ("push-up", "Glisser vers le haut"), ("push-down", "Glisser vers le bas"), ("zoom", "Zoom")
+    };
+    public static string Label(string? id) => All.FirstOrDefault(t => t.Id == id).Label ?? "Fondu";
+    public static string Valid(string? id) => All.Any(t => t.Id == id) ? id! : Default;
+    public static int ValidMs(int ms) => Math.Clamp(ms, MinMs, MaxMs);
 }
 
 /// <summary>Une app du catalogue ajoutée par un client (le client choisit ses apps).</summary>
