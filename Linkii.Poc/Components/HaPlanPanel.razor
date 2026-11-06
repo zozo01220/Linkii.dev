@@ -1,47 +1,32 @@
-@page "/plans/nouveau"
-@page "/plans/{PlanId:guid}"
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:widgets")]
 @inject TenantStore Store
 @inject AppCatalog Catalog
 @inject HomeAssistantLive Live
 @inject Toaster Toast
 @inject NavigationManager Nav
-@inject ModeService Modes
 
-@* Page d'un plan du bâtiment (§202), d'après maquettes/plan-menus (validée) : tout part du plan.
-   Dessin et Appareils : l'éditeur du plan (§194-197), dans la page. Affichages : comment le montrer (Diffusion, Borne, Compact ; « vues » du §200).
-   Où il s'affiche : contenus, tuiles et widgets qui l'utilisent, et « Ajouter à… » qui les crée déjà reliés au plan et à l'affichage. *@
-<div class="page-head">
-    <div>
-        <div class="hpg-crumb"><a href="/plans">‹ Plans</a></div>
-        <h1>@(plan?.Name ?? "Nouveau plan")</h1>
-        <p class="sub sc-intro">@Stats</p>
-    </div>
+@* Un plan du bâtiment (§202, repris au §203) dans le tiroir de la page Plans, sur toute la largeur à droite du menu. Trois onglets :
+   Plan : l'éditeur (ses propres onglets Appareils et Étages et pièces), Affichages : comment le montrer (Diffusion, Borne, Compact),
+   Où il s'affiche : contenus, tuiles et widgets qui l'utilisent, et « Ajouter à… » qui les crée déjà reliés. *@
+<div class="dh hpd-h">
+    <span class="app-ico" style="--app-c:#41BDF5"><Ico Name="home" Size="20" /></span>
+    <div class="hpd-t"><b>@(plan?.Name ?? "Nouveau plan")</b><small>@Stats</small></div>
+    <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
 </div>
-
-@if (!Modes.Expert)
+<div class="hpd-b">
+@if (!IsNew && plan == null)
 {
-    <div class="card empty"><div class="big">Disponible en mode expert</div></div>
-}
-else if (account == null)
-{
-    <div class="card empty"><div class="big">Home Assistant n'est pas connecté</div><p>Connectez-le dans <a href="/integrations">Intégrations</a> pour dessiner vos plans.</p></div>
-}
-else if (!IsNew && plan == null)
-{
-    <div class="card empty"><div class="big">Plan introuvable</div><p>Il a peut-être été supprimé. <a href="/plans">Retour aux plans</a>.</p></div>
+    <div class="card empty"><div class="big">Plan introuvable</div><p>Il a peut-être été supprimé.</p></div>
 }
 else
 {
     <nav class="tabs int-tabs hpg-tabs" role="tablist" aria-label="Plan du bâtiment">
-        @Tab("dessin", "Dessin", null, false)
-        @Tab("appareils", "Appareils", plan == null ? null : parsed.Devices.Count, false)
+        @Tab("plan", "Plan", plan == null ? null : parsed.Devices.Count, false)
         @Tab("affichages", "Affichages", plan?.Views.Count, IsNew)
         @Tab("diffusion", "Où il s'affiche", plan == null ? null : uses.Count, IsNew)
     </nav>
 
-    <div hidden="@(!InEditor)">
-        <HaPlanEditor @key="editorKey" Inline="true" Panel="@(tab == "appareils" ? "devices" : "floors")" Name="@(plan?.Name ?? "")" Json="@(plan?.Json ?? "")" OnSave="Save" OnClose="ResetEditor" />
+    <div hidden="@(tab != "plan")">
+        <HaPlanEditor @key="editorKey" Inline="true" Name="@(plan?.Name ?? "")" Json="@(plan?.Json ?? "")" OnSave="Save" OnClose="ResetEditor" />
     </div>
 
     @if (tab == "affichages" && plan != null)
@@ -75,6 +60,7 @@ else
         }
     }
 }
+</div>
 
 @if (adding && plan != null)
 {
@@ -125,20 +111,23 @@ else
 }
 
 @code {
+    /// <summary>Plan ouvert ; null : nouveau plan.</summary>
     [Parameter] public Guid? PlanId { get; set; }
-    [SupplyParameterFromQuery(Name = "onglet")] public string? Onglet { get; set; }
+    /// <summary>Onglet demandé par l'adresse (?onglet=affichages | diffusion) ; sinon « Plan ».</summary>
+    [Parameter] public string? Onglet { get; set; }
+    /// <summary>Le plan a changé (enregistré, affichages, ajout) : la liste se met à jour.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
 
     private HaPlan? plan;
     private HomeAssistantRules.Plan parsed = new(new(), new());
     private HomeAssistantAccount? account;
     private List<HaPlanUses.Use> uses = new();
-    private string tab = "dessin";
+    private string tab = "plan";
     private Guid editorKey = Guid.NewGuid(), viewsKey = Guid.NewGuid();
     private bool adding;
     private string addKind = "list", addTarget = "", addView = "";
 
     private bool IsNew => PlanId == null;
-    private bool InEditor => tab is "dessin" or "appareils";
 
     private string Stats => plan == null ? "Dessinez les pièces de chaque étage, ou importez son plan, puis posez-y les appareils de Home Assistant."
         : $"{parsed.Floors.Count} étage{S(parsed.Floors.Count)} · {parsed.Floors.Sum(f => f.Rooms.Count)} pièce{S(parsed.Floors.Sum(f => f.Rooms.Count))} · {parsed.Devices.Count} appareil{S(parsed.Devices.Count)} · {(uses.Count == 0 ? "affiché nulle part" : $"affiché {uses.Count} fois")}";
@@ -146,7 +135,7 @@ else
 
     protected override void OnParametersSet()
     {
-        tab = Onglet is "appareils" or "affichages" or "diffusion" && !IsNew ? Onglet : Onglet == "appareils" ? "appareils" : "dessin";
+        tab = !IsNew && Onglet is "affichages" or "diffusion" ? Onglet! : "plan";
         Load();
     }
 
@@ -172,7 +161,7 @@ else
     private void Go(string key)
     {
         tab = key;
-        Nav.NavigateTo(Nav.GetUriWithQueryParameter("onglet", key == "dessin" ? null : key), replace: true);
+        Nav.NavigateTo(Nav.GetUriWithQueryParameter("onglet", key == "plan" ? null : key), replace: true);
     }
 
     private void Save((string Name, string Json) r)
@@ -192,9 +181,12 @@ else
         });
         Live.Nudge(Store.ClientId);   // les écrans qui affichent ce plan relisent ses appareils
         Toast.Ok($"Plan « {name} » enregistré.");
-        if (IsNew) { Nav.NavigateTo($"/plans/{id}", replace: true); return; }
+        if (IsNew) { Nav.NavigateTo($"/plans/{id}", replace: true); _ = OnChanged.InvokeAsync(); return; }
         Load();
+        _ = OnChanged.InvokeAsync();
     }
+
+    private void Close() => Nav.NavigateTo("/plans");
 
     /// <summary>« Annuler les modifications » : l'éditeur repart du plan enregistré (nouveau plan : retour à la liste).</summary>
     private void ResetEditor()
@@ -203,7 +195,7 @@ else
         editorKey = Guid.NewGuid();
     }
 
-    private void ViewsSaved() { Live.Nudge(Store.ClientId); viewsKey = Guid.NewGuid(); Load(); }
+    private void ViewsSaved() { Live.Nudge(Store.ClientId); viewsKey = Guid.NewGuid(); Load(); _ = OnChanged.InvokeAsync(); }
 
     // ---------- Où il s'affiche ----------
     private static string KindIcon(string k) => k switch { "list" => "play-box", "tile" => "hand", "kiosk" => "hand", _ => "monitor" };
@@ -278,5 +270,6 @@ else
             _ => $"Tuile « {p.Name} » ajoutée à la liste interactive de « {targetName} » : ajustez sa place, puis publiez la borne.",
         });
         Load();
+        _ = OnChanged.InvokeAsync();
     }
 }
