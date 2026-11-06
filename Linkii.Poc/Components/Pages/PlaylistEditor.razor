@@ -1176,8 +1176,41 @@ else
             Toast.Error("Saisissez l'adresse de destination du QR code (adresse web complète, par exemple https://www.exemple.ch).");
             return;
         }
+        ForkBuildingIfShared();
         if (mMedia?.AppId != null && itemForm != null) await itemForm.Save();
         else SaveSettings();
+    }
+
+    // « Vue du bâtiment » partagée entre plusieurs éléments (ou listes) : changer son affichage ne doit toucher que cet élément (une liste en Borne, l'autre en Diffusion).
+    // Le contenu est copié pour cet élément avant l'enregistrement.
+    private void ForkBuildingIfShared()
+    {
+        if (mItem is not { } it || mPlaylist is not { } pl || mMedia is not { AppId: HomeAssistantRules.BuildingApp } src || itemForm == null) return;
+        var changed = (itemForm.Value("viewId") ?? "") != (src.Settings.GetValueOrDefault("viewId") ?? "") || (itemForm.Value("planId") ?? "") != (src.Settings.GetValueOrDefault("planId") ?? "");
+        if (!changed) return;
+        Guid? forked = null;
+        WriteList(d =>
+        {
+            var shared = d.Playlists.SelectMany(p => p.Draft).Count(i => i.MediaId == src.Id && i.Id != it.Id) > 0
+                || d.InteractiveLists.Any(l => l.Pages.Any(p => p.Els.Any(e => e.Action.Type == "media" && e.Action.MediaId == src.Id)));
+            if (!shared) return;
+            var live = d.Media.FirstOrDefault(x => x.Id == src.Id) ?? src;
+            var name = live.Name.Length > 70 ? live.Name[..70] : live.Name;
+            var inst = new MediaItem
+            {
+                ClientId = live.ClientId, AreaId = live.AreaId, Name = name, Type = live.Type, AppId = live.AppId, AppVersion = live.AppVersion,
+                Settings = new(live.Settings), Secrets = new(live.Secrets), Info = new(live.Info), FolderId = live.FolderId, OwnerId = live.OwnerId, AddedUtc = DateTime.UtcNow
+            };
+            d.Media.Add(inst);
+            if (d.Playlists.SelectMany(p => p.Draft).FirstOrDefault(i => i.Id == it.Id) is { } target) target.MediaId = inst.Id;
+            it.MediaId = inst.Id;
+            pl.Touch();
+            forked = inst.Id;
+        });
+        if (forked is not { } fid) return;
+        Reload();
+        mMedia = media.FirstOrDefault(x => x.Id == fid) ?? mMedia;
+        itemForm.Rebind(fid);
     }
 
     // Un contenu d'app n'existe que pour ses listes de lecture : retiré de la dernière, il est supprimé (les fichiers de la médiathèque restent).
