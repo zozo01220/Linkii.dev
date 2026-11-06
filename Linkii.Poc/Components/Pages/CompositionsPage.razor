@@ -13,7 +13,7 @@
 
 @* Compositions (§80-81, §84) : Mes compositions, et les modèles (galerie Linkivi et « Mes modèles » de l'aire). La page n'existe que si l'intégration
    « Compositions » est dans Mes intégrations. Les compositions de « Mes compositions » se placent ensuite dans les listes de lecture. *@
-<HeadContent><link rel="stylesheet" href="compo-editor.css?v=10" /></HeadContent>
+<HeadContent><link rel="stylesheet" href="compo-editor.css?v=17" /></HeadContent>
 
 <div class="page-head">
     <div>
@@ -880,9 +880,22 @@ else
         if (tab != "models" || sub != "gallery" || galDrawn || !installed) return;
         galDrawn = true;
         self ??= DotNetObjectReference.Create(this);
-        try { await JS.InvokeVoidAsync("LinkiiCompoEditor.gallery", gal, self, DataSetsForGallery()); }
+        try { await JS.InvokeVoidAsync("LinkiiCompoEditor.gallery", gal, self, DataSetsForGallery(), HaForGallery()); }
         catch (JSDisconnectedException) { }
     }
+
+    /// <summary>
+    /// Entités Home Assistant pour le groupe « Maison connectée » de la galerie : seulement si l'intégration Home Assistant est installée
+    /// (compte de l'organisation connecté) ; sinon liste vide, pas de groupe. Tous les modes et toutes les licences : rien que de l'affichage.
+    /// </summary>
+    private object[] HaForGallery() =>
+        Store.Read(d => d.Tenant.HomeAssistant is { Url.Length: > 0 } ha
+            ? ha.Entities.Select(e => (object)new { id = e.Id, name = e.Name, domain = e.Domain, unit = e.Unit, dc = e.DeviceClass }).ToArray()
+            : Array.Empty<object>());
+
+    /// <summary>Un modèle « Maison connectée » avec les entités choisies pour ses emplacements : l'éditeur s'ouvre dessus (rien n'est enregistré avant « Enregistrer »).</summary>
+    [JSInvokable]
+    public void HaTemplate(int index, string picks) => Nav.NavigateTo($"/compositions/new?htpl={index}&ha={Uri.EscapeDataString(picks)}&back=%2Fcompositions");
 
     /// <summary>Jeux de données proposés par le groupe « Modèles de données » : seulement en mode expert, avec la licence Pro, et s'il y en a au moins un (sinon : liste vide, pas de groupe).</summary>
     private object[] DataSetsForGallery() =>

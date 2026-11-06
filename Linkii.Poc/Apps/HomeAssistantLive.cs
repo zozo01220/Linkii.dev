@@ -150,6 +150,7 @@ public class HomeAssistantLive(JsonStore store, HomeAssistantClient ha, IHubCont
         var used = new HashSet<string>();
         void Add(string? v) { foreach (var id in HomeAssistantRules.ParseEntities(v)) used.Add(id); }
         foreach (var m in db.Media.Where(m => m.ClientId == t.Id && HomeAssistantRules.IsHaApp(m.AppId))) Add(m.Settings.GetValueOrDefault("entities"));
+        foreach (var m in db.Media.Where(m => m.ClientId == t.Id && m.AppId == Compositions.AppId)) foreach (var id in Compositions.HaEntities(m.Settings.GetValueOrDefault("doc"))) used.Add(id);
         foreach (var s in db.Screens.Where(s => s.ClientId == t.Id))
         {
             foreach (var w in s.Widgets.Where(w => HomeAssistantRules.IsHaApp(w.AppId))) Add(w.Settings.GetValueOrDefault("entities"));
@@ -165,13 +166,18 @@ public class HomeAssistantLive(JsonStore store, HomeAssistantClient ha, IHubCont
     {
         var map = new Dictionary<string, List<(Guid, string)>>();
         foreach (var s in db.Screens.Where(s => s.ClientId == clientId && s.Token != null))
-            foreach (var i in PlayerFeed.DataItems(db, s).Where(i => HomeAssistantRules.IsHaApp(i.AppId)))
-                foreach (var id in HomeAssistantRules.ParseEntities(i.Settings.GetValueOrDefault("entities")))
+            foreach (var i in PlayerFeed.DataItems(db, s))
+            {
+                // widget : ses entités, relues par /api/data/{élément} ; composition : celles de sa source Home Assistant, relues par /api/data/{élément}/{source}
+                var raw = HomeAssistantRules.IsHaApp(i.AppId) ? i.Settings.GetValueOrDefault("entities") : i.AppId == Compositions.AppId ? i.Settings.GetValueOrDefault("ha") : null;
+                if (string.IsNullOrEmpty(raw)) continue;
+                var item = i.AppId == Compositions.AppId ? i.Id.ToString() : i.DataId ?? i.Id.ToString();
+                foreach (var id in HomeAssistantRules.ParseEntities(raw))
                 {
                     if (!map.TryGetValue(id, out var l)) map[id] = l = new();
-                    var item = i.DataId ?? i.Id.ToString();
                     if (!l.Contains((s.Id, item))) l.Add((s.Id, item));
                 }
+            }
         return map;
     }
 

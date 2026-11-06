@@ -12,11 +12,12 @@
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 @inject ModeService Modes
+@inject HomeAssistantLive HaLive
 
 @* Éditeur de compositions (DEV-POC.md §80, §84, §85) : l'interface est en JS (wwwroot/compo-editor.js, plein écran), le serveur garde le document,
    calcule les QR codes, liste et importe les images de la médiathèque, garde « Mes modèles », et lit les données des sources (blocs, champs reliés). Le rendu des calques est celui du player (player/composition.js).
    « /compositions/new » : rien n'est créé tant qu'on n'a pas enregistré (pas de composition vide laissée derrière soi). *@
-<HeadContent><link rel="stylesheet" href="compo-editor.css?v=16" /></HeadContent>
+<HeadContent><link rel="stylesheet" href="compo-editor.css?v=17" /></HeadContent>
 
 @if (!ready)
 {
@@ -45,6 +46,9 @@ else
     [SupplyParameterFromQuery(Name = "mytpl")] public Guid? MyTpl { get; set; }
     [SupplyParameterFromQuery(Name = "dtpl")] public int? Dtpl { get; set; }
     [SupplyParameterFromQuery(Name = "ds")] public string? Ds { get; set; }
+    /// <summary>Modèle « Maison connectée » de la galerie et les entités Home Assistant choisies pour ses emplacements (JSON).</summary>
+    [SupplyParameterFromQuery(Name = "htpl")] public int? Htpl { get; set; }
+    [SupplyParameterFromQuery(Name = "ha")] public string? HaPicks { get; set; }
     /// <summary>Liste de lecture où ajouter la composition dès son premier enregistrement (création depuis la liste), et la position visée.</summary>
     [SupplyParameterFromQuery(Name = "addTo")] public Guid? AddTo { get; set; }
     [SupplyParameterFromQuery(Name = "at")] public int? At { get; set; }
@@ -90,6 +94,8 @@ else
             tpl = Tpl,
             dtpl = Dtpl,   // modèle « jeux de données » de la galerie, relié au jeu Ds
             ds = Ds,
+            htpl = Htpl,   // modèle « Maison connectée », relié aux entités HaPicks
+            ha = HaPicks,
             myTemplates = Templates(),
             sources = Sources(),
             screens = ScreenChoices(),   // « Nouvelle composition » : écran concerné, sa résolution et son orientation
@@ -193,6 +199,13 @@ else
                 id = s.Id.ToString("N"), name = s.Name, app = "dataset",
                 cols = s.Columns.Select(c => new { key = c.Key, label = c.Label, type = c.Type, name = c.Name, hidden = c.Hidden })
             }));
+        // Home Assistant : source intégrée dès que le compte de l'organisation est connecté (champs « e:entité », blocs Capteurs), sans contenu à créer
+        if (Store.Read(d => d.Tenant.HomeAssistant?.Copy()) is { } ha)
+            list.Add(new
+            {
+                id = Compositions.HaSource.ToString("N"), name = "Home Assistant", app = Compositions.HaApp,
+                ents = ha.Entities.Select(e => new { id = e.Id, name = e.Name, domain = e.Domain, unit = e.Unit, dc = e.DeviceClass })
+            });
         var pars = screens.SelectMany(s => s.Item3).Where(p => p.Name.Trim().Length > 0).GroupBy(p => DataTables.Slug(p.Name)).Select(g => new { key = g.Key, label = g.First().Name.Trim() });
         list.Add(new
         {
@@ -214,6 +227,17 @@ else
         Guid? screenId = at > 0 && Guid.TryParse(id[(at + 1)..], out var sg) ? sg : null;
         if (at > 0) id = id[..at];
         if (!Guid.TryParse(id, out var g)) return new { error = "Source introuvable." };
+        if (g == Compositions.HaSource)   // toutes les entités du compte, avec leur état du moment
+        {
+            var (cid, account) = Store.Read(d => (d.ClientId, d.Tenant.HomeAssistant?.Copy()));
+            if (account == null) return new { error = "Compte Home Assistant non connecté." };
+            try
+            {
+                var (states, _) = await HaLive.States(cid, account);
+                return new { data = new { title = "", fetchedAt = DateTime.UtcNow, entities = account.Entities.Select(e => HomeAssistantProvider.Entity(e.Id, states.GetValueOrDefault(e.Id), false)).ToList() } };
+            }
+            catch (InvalidOperationException ex) { return new { error = ex.Message }; }
+        }
         if (g == Compositions.ScreenSource)
             return new { data = Store.Read(d => Compositions.ScreenData(d.Root, (screenId is { } sid ? d.AllScreens.FirstOrDefault(s => s.Id == sid) : null)
                 ?? d.AllScreens.FirstOrDefault(s => s.Params.Count > 0) ?? d.AllScreens.FirstOrDefault())) };

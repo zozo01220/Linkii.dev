@@ -112,11 +112,26 @@
     var s = Date.parse(e.start), t = e.allDay ? 'Journée' : hm(s, tz);
     return withDay && dayKey(s, tz) !== dayKey(Date.now(), tz) ? dayName(s, tz).replace(/ \d.*$/, '').slice(0, 3) + '. ' + t : t;
   }
+  /* Valeur lisible d'une entité Home Assistant (même texte que les widgets de l'écran, apps.js) : nombres au format suisse (1 décimale sous 100),
+     états des portes, lumières, volets, serrures et thermostats en français, dates en temps relatif. */
+  var HA_BIN = { door: ['Ouverte', 'Fermée'], garage_door: ['Ouverte', 'Fermée'], window: ['Ouverte', 'Fermée'], opening: ['Ouvert', 'Fermé'], motion: ['Mouvement', 'Calme'],
+    occupancy: ['Présence', 'Absence'], presence: ['Présent', 'Absent'], moisture: ['Humide', 'Sec'], smoke: ['Fumée !', 'OK'], gas: ['Gaz !', 'OK'], problem: ['Problème', 'OK'],
+    safety: ['Danger', 'OK'], battery: ['Faible', 'OK'], lock: ['Ouvert', 'Verrouillé'], connectivity: ['Connecté', 'Déconnecté'], plug: ['Branché', 'Débranché'], power: ['Sous tension', 'Coupé'] };
+  function haNum(v) { var n = Number(v); try { return n.toLocaleString('fr-CH', { maximumFractionDigits: Math.abs(n) < 100 ? 1 : 0 }); } catch (x) { return '' + Math.round(n * 10) / 10; } }
   function haVal(x) {
-    if (!x || x.state === 'absent' || x.state === 'unavailable' || x.state === 'unknown') return '—';
-    if (x.state === 'on' || x.state === 'off') return x.state === 'on' ? 'Activé' : 'Désactivé';
-    var n = parseFloat(x.state);
-    return (isFinite(n) && /^-?[\d.]+$/.test(x.state) ? (Math.round(n * 10) / 10 + '').replace('.', ',') : x.state) + (x.unit ? ' ' + x.unit : '');
+    if (!x || x.state === 'absent' || x.state === 'unavailable' || x.state === 'unknown' || x.available === false) return '—';
+    var d = x.domain || String(x.id || '').split('.')[0], st = x.state;
+    if (d === 'binary_sensor') { var l = HA_BIN[x.deviceClass] || ['Actif', 'Inactif']; return st === 'on' ? l[0] : l[1]; }
+    if (d === 'light' || d === 'switch' || d === 'input_boolean' || d === 'fan') return st === 'on' ? (d === 'light' && x.brightness != null ? 'Allumé ' + x.brightness + ' %' : 'Allumé') : 'Éteint';
+    if (d === 'cover') return ({ open: 'Ouvert', closed: 'Fermé', opening: 'S’ouvre…', closing: 'Se ferme…' })[st] + (x.position != null && st !== 'closed' ? ' ' + x.position + ' %' : '') || st;
+    if (d === 'lock') return ({ locked: 'Verrouillée', unlocked: 'Déverrouillée', jammed: 'Bloquée !', open: 'Ouverte' })[st] || st;
+    if (d === 'climate') return x.current != null ? haNum(x.current) + '°' : st;
+    if (x.deviceClass === 'timestamp' || /^\d{4}-\d{2}-\d{2}T/.test(st)) {
+      var t = Date.parse(st), m = Math.round((Date.now() - t) / 60000);
+      if (isFinite(t)) return m < 1 ? 'à l’instant' : m < 60 ? 'il y a ' + m + ' min' : m < 1440 ? 'il y a ' + Math.round(m / 60) + ' h' : new Date(t).toLocaleDateString('fr-CH', { day: 'numeric', month: 'short' });
+    }
+    if (st === 'on' || st === 'off') return st === 'on' ? 'Activé' : 'Désactivé';
+    return (/^-?\d+(\.\d+)?$/.test(st) ? haNum(st) : st) + (x.unit ? ' ' + x.unit : '');
   }
   /* ---------- Jeux de données et « Cet écran » (§139) ----------
      Jeu : { kind: 'table', columns: [{ key, label, type }], rows: [[…]], readAt } (valeurs en texte : nombres invariants, dates ISO, true/false).
@@ -401,7 +416,8 @@
       h = (d.title && e.head !== false ? '<div class="lc-ah">' + esc(d.title) + '</div>' : '') +
         '<div class="lc-rows">' + it.map(function (x) { return '<div class="lc-row lc-news"><b>•</b><span>' + esc(x.title) + '</span></div>'; }).join('') + '</div>';
     } else if (e.app === 'ha-sensors') {
-      h = '<div class="lc-rows">' + (d.entities || []).slice(0, rows).map(function (x) { return '<div class="lc-row"><span>' + esc(x.name || x.id) + '</span><b>' + esc(haVal(x)) + '</b></div>'; }).join('') + '</div>';
+      var hl = (d.entities || []).filter(function (x) { return !e.ents || e.ents.indexOf(x.id) >= 0; });   // source Home Assistant : les entités choisies pour ce bloc
+      h = '<div class="lc-rows">' + hl.slice(0, rows).map(function (x) { return '<div class="lc-row"><span>' + esc(x.name || x.id) + '</span><b>' + esc(haVal(x)) + '</b></div>'; }).join('') + '</div>';
     }
     return '<div class="' + cls + '" style="' + st + '">' + h + '</div>';
   }

@@ -239,6 +239,49 @@ public class HomeAssistantTests
         Assert.Equal("absent", gone.GetProperty("state").GetString());
     }
 
+    // ---------- compositions : source « Home Assistant » intégrée (modèles « Maison connectée ») ----------
+
+    static string HaDoc()
+    {
+        var n = Compositions.HaSource.ToString("N");
+        return "{\"w\":1920,\"h\":1080,\"els\":[" +
+            "{\"id\":\"e1\",\"type\":\"text\",\"text\":\"Salon : {{" + n + ":e:sensor.salon_temperature}}\",\"x\":0,\"y\":0,\"w\":600,\"h\":80}," +
+            "{\"id\":\"e2\",\"type\":\"app\",\"app\":\"ha-sensors\",\"source\":\"" + n + "\",\"ents\":[\"binary_sensor.porte\",\"lock.entree\"],\"x\":0,\"y\":100,\"w\":600,\"h\":300}]}";
+    }
+
+    [Fact]
+    public void Composition_lists_the_home_assistant_entities_it_shows() =>
+        Assert.Equal(new[] { "binary_sensor.porte", "lock.entree", "sensor.salon_temperature" }, Compositions.HaEntities(HaDoc()).OrderBy(x => x));
+
+    [Fact]
+    public void Published_composition_reads_its_entities_like_a_sensors_widget()
+    {
+        var r = Compositions.Publish(new Dictionary<string, string> { ["doc"] = HaDoc() }, _ => null, _ => null)!.Value;
+        Assert.Contains("\"ents\"", r.Settings["doc"]);   // le bloc reste, sans contenu à créer
+        var pub = new PublishedItem { Id = Guid.NewGuid(), AppId = Compositions.AppId, Settings = r.Settings };
+        var src = Compositions.SourceItem(pub, Compositions.HaSource);
+        Assert.NotNull(src);
+        Assert.Equal("ha-sensors", src!.AppId);
+        Assert.Equal("false", src.Settings["control"]);   // lecture seule
+        Assert.Equal(new[] { "binary_sensor.porte", "lock.entree", "sensor.salon_temperature" }, HomeAssistantRules.ParseEntities(src.Settings["entities"]).OrderBy(x => x));
+        Assert.Null(Compositions.SourceItem(new PublishedItem { AppId = Compositions.AppId, Settings = new() }, Compositions.HaSource));   // composition sans Home Assistant
+    }
+
+    [Fact]
+    public void Screens_showing_a_composition_are_told_when_its_entities_change()
+    {
+        var db = new Db();
+        var t = new Tenant { Name = "Maison" };
+        db.Clients.Add(t);
+        var r = Compositions.Publish(new Dictionary<string, string> { ["doc"] = HaDoc() }, _ => null, _ => null)!.Value;
+        var item = new PublishedItem { Id = Guid.NewGuid(), Type = "app", AppId = Compositions.AppId, Settings = r.Settings };
+        var screen = new Screen { ClientId = t.Id, Token = "jeton", PublishedVersion = 1, Published = { item } };
+        db.Screens.Add(screen);
+        var uses = HomeAssistantLive.Uses(db, t.Id);
+        Assert.Equal((screen.Id, item.Id.ToString()), Assert.Single(uses["lock.entree"]));   // l'écran relit /api/data/{composition}/{source}
+        Assert.Contains("sensor.salon_temperature", uses.Keys);
+    }
+
     [Fact]
     public void Used_entities_cover_widgets_contents_and_data_sets()
     {

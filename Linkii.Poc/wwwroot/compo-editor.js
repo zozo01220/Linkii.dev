@@ -149,10 +149,13 @@
     try { doc = o.doc ? JSON.parse(o.doc) : null; } catch (x) { doc = null; }
     const fresh = !doc || !Array.isArray(doc.els);
     const dt = fresh && expert && Number.isInteger(o.dtpl) && DTPL[o.dtpl] && chartSources().some(s => s.id === o.ds) ? DTPL[o.dtpl] : null;   // modèle « jeux de données » (§167) : relié au jeu choisi
-    const tpl = dt || (fresh && Number.isInteger(o.tpl) && TPL[o.tpl] ? TPL[o.tpl] : null);   // départ depuis la galerie de la page Compositions
+    const haSrc = sources.find(s => s.id === HAS);
+    const ht = !dt && fresh && Number.isInteger(o.htpl) && HTPL[o.htpl] && haSrc ? HTPL[o.htpl] : null;   // modèle « Maison connectée » : relié aux entités choisies
+    const tpl = dt || ht || (fresh && Number.isInteger(o.tpl) && TPL[o.tpl] ? TPL[o.tpl] : null);   // départ depuis la galerie de la page Compositions
     let dels = null;
     if (dt) { try { dels = dt.make(o.ds); } catch (x) { dels = []; } }   // jeu sans les colonnes voulues : page vide plutôt qu'une erreur
-    D = tpl ? { v: 1, w: tpl.w, h: tpl.h, bg: tpl.bg, els: dt ? dels : tpl.make() }
+    if (ht) { try { dels = ht.make(JSON.parse(o.ha || '{}'), haSrc.ents || []); } catch (x) { dels = []; } }
+    D = tpl ? { v: 1, w: tpl.w, h: tpl.h, bg: tpl.bg, els: dt || ht ? dels : tpl.make() }
       : fresh ? { v: 1, w: 1920, h: 1080, bg: '#FFFFFF', els: [] } : { v: 1, w: doc.w, h: doc.h, bg: doc.bg || '#FFFFFF', els: doc.els };
     if (tpl && !o.name) name = savedName = tpl.name;
     uid = 1 + D.els.reduce((m, e) => Math.max(m, parseInt(String(e.id || '').replace(/\D/g, ''), 10) || 0), 0);
@@ -780,6 +783,7 @@
       const src = sources.find(x => x.id === v) || { app: 'weather-slide' };
       const S = { 'weather-slide': [640, 250, 56], agenda: [900, 400, 40], rss: [900, 340, 38], 'ha-sensors': [620, 300, 40] }[src.app] || [600, 300, 40];
       e = { id: nid(), type: 'app', app: src.app, source: v, x: 0, y: 0, w: S[0], h: S[1], font: 'IBM Plex Sans', size: S[2], weight: 500, color: ink, align: 'left', ls: 0, lh: 1.2, italic: false, bg: 'none', view: 'days', rows: 4, opacity: 1 };
+      if (v === HAS) e.ents = (src.ents || []).filter(x => x.domain === 'sensor' || x.domain === 'binary_sensor').slice(0, 4).map(x => x.id);   // source Home Assistant : les entités du bloc
     }
     else if (kind === 'list') {   // liste reliée à un jeu de données (§139) : ses trois premières colonnes, 5 lignes, pages de 8 s
       e = { id: nid(), type: 'list', source: v, x: 0, y: 0, w: 1100, h: 520, font: 'IBM Plex Sans', size: 40, weight: 400, color: ink, align: 'left', ls: 0, lh: 1.2, italic: false,
@@ -2842,20 +2846,156 @@
     return out.length ? 'il manque ' + out.join(' et ') : '';
   }
 
+  // ---------- modèles « Maison connectée » (Home Assistant, §192) ----------
+  // Groupe de la galerie présent seulement si l'intégration Home Assistant est installée. Rien que de l'affichage : des champs de la source intégrée
+  // « Home Assistant » ({{source:e:entité}}) et des blocs Capteurs (« ents »). Une fenêtre demande l'entité de chaque emplacement, préremplie au mieux.
+  const HCAT = 'Maison connectée', HAS = '4a5e00004a5e4a00a000000000000000';
+  const hFld = id => '{{' + HAS + ':e:' + id + '}}';
+  const hIco = (icon, x, y, s, color) => ({ id: nid(), type: 'icon', icon, x, y, w: s, h: s, color, stroke: 'normal', fill: false, opacity: 1 });
+  const hCard = (x, y, w, h, fill) => R({ x, y, w, h, fill: fill || CARD, radius: 28 });
+  const hName = (ents, id) => ((ents || []).find(e => e.id === id) || {}).name || id;
+  /** Un emplacement : domaines acceptés, puis préférences (type de capteur, unité, mots dans l'identifiant ou le nom) pour le choix proposé. */
+  const hSlot = (key, label, o) => Object.assign({ key, label, dom: ['sensor'], dc: [], unit: null, words: null, opt: false }, o);
+  function hScore(s, e) {
+    if (s.dom.indexOf(e.domain) < 0) return -1;
+    let n = 1;
+    if (s.dc.length && s.dc.indexOf(e.dc) >= 0) n += 4;
+    if (s.unit && s.unit.test(e.unit || '')) n += 2;
+    if (s.words && s.words.test(e.id + ' ' + e.name)) n += 3;
+    if (s.not && s.not.test(e.id + ' ' + e.name)) n -= 3;
+    return n;
+  }
+  const hFits = (s, ents) => ents.filter(e => hScore(s, e) >= 0).sort((a, b) => hScore(s, b) - hScore(s, a) || a.name.localeCompare(b.name));
+  /** Choix proposés : le meilleur candidat de chaque emplacement, sans prendre deux fois la même entité. */
+  function hDefaults(t, ents) {
+    const used = new Set(), out = {};
+    t.slots.forEach(s => {
+      if (s.multi) { out[s.key] = hFits(s, ents).filter(e => !used.has(e.id) && (hScore(s, e) > 1 || e.domain !== s.dom[0])).slice(0, s.multi).map(e => e.id); return; }   // 1er domaine (capteurs binaires) : seulement le bon type ; serrures, volets : tous
+      const best = hFits(s, ents).find(e => !used.has(e.id) && (!s.opt || hScore(s, e) > 2));
+      out[s.key] = best ? best.id : ''; if (best) used.add(best.id);
+    });
+    return out;
+  }
+  /** Tuile « valeur » : icône, nom de l'entité, valeur en direct. */
+  function hTile(x, y, w, h, icon, ents, id, big) {
+    return [hCard(x, y, w, h), hIco(icon, x + 40, y + 40, 72, '#7FB3E6'),
+      T({ x: x + 40, y: y + 140, w: w - 80, text: hName(ents, id), size: 40, color: MUT, font: 'IBM Plex Sans' }),
+      T({ x: x + 40, y: y + 200, w: w - 80, text: hFld(id), size: big || 120, weight: 700, color: '#ffffff', font: 'Poppins' })];
+  }
+  const DOM_ALL = ['sensor', 'binary_sensor', 'switch', 'input_boolean', 'fan', 'light', 'climate', 'cover', 'lock'];
+  const HTPL = [
+    { name: 'Confort intérieur', cat: HCAT, w: 1920, h: 1080, bg: NIGHT, pv: 'comfort', d: 'Température, humidité et qualité de l\'air d\'une pièce, en grand et en direct.',
+      slots: [hSlot('t', 'Température', { dc: ['temperature'], unit: /°[CF]/, not: /ext|outdoor|dehors|jardin|balcon/i }), hSlot('h', 'Humidité', { dc: ['humidity'], unit: /%/ }),
+        hSlot('a', 'Qualité de l\'air (facultatif)', { dc: ['carbon_dioxide', 'pm25', 'aqi', 'volatile_organic_compounds'], unit: /ppm|µg/, opt: true })],
+      make: (p, ents) => {
+        const ids = [['thermometre', p.t], ['pluie', p.h], ['vent', p.a]].filter(x => x[1]), n = Math.max(1, ids.length), cw = Math.floor((1680 - (n - 1) * 40) / n);
+        return dTitle('Confort intérieur', 'Mis à jour en direct', '#ffffff', MUT)
+          .concat(...ids.map((x, i) => hTile(120 + i * (cw + 40), 300, cw, 520, x[0], ents, x[1], n > 2 ? 120 : 150))).concat(dClock(MUT, 940));
+      } },
+    { name: 'Tableau de bord maison', cat: HCAT, w: 1920, h: 1080, bg: NIGHT, pv: 'grid', d: 'Six valeurs au choix (capteurs, lumières, volets, serrures…) en tuiles, mises à jour en direct.',
+      slots: [1, 2, 3, 4, 5, 6].map(i => hSlot('v' + i, 'Tuile ' + i, { dom: DOM_ALL, dc: ['temperature', 'humidity', 'power', 'door', 'window'], opt: i > 1 })),
+      make: (p, ents) => {
+        const ids = [1, 2, 3, 4, 5, 6].map(i => p['v' + i]).filter(Boolean), els = dTitle('Ma maison', 'En direct', '#ffffff', MUT), cw = 533, ch = 330;
+        ids.forEach((id, i) => {
+          const x = 120 + (i % 3) * (cw + 40), y = 270 + Math.floor(i / 3) * (ch + 40), e = (ents || []).find(z => z.id === id) || {};
+          const ic = { light: 'ampoule', lock: 'cadenas', cover: 'maison', climate: 'thermometre', binary_sensor: 'attention', switch: 'reglages', input_boolean: 'reglages', fan: 'vent' }[e.domain]
+            || ({ temperature: 'thermometre', humidity: 'pluie', power: 'feu', energy: 'feu', illuminance: 'soleil' })[e.dc] || 'information';
+          els.push(hCard(x, y, cw, ch), hIco(ic, x + 36, y + 36, 60, '#7FB3E6'),
+            T({ x: x + 36, y: y + 116, w: cw - 72, text: hName(ents, id), size: 36, color: MUT, font: 'IBM Plex Sans' }),
+            T({ x: x + 36, y: y + 170, w: cw - 72, text: hFld(id), size: 84, weight: 700, color: '#ffffff', font: 'Poppins' }));
+        });
+        return els;
+      } },
+    { name: 'Énergie', cat: HCAT, w: 1920, h: 1080, bg: '#0E2A22', pv: 'energy', d: 'La consommation du moment en très grand, l\'énergie du jour et la production solaire.',
+      slots: [hSlot('w', 'Consommation (puissance)', { dc: ['power'], unit: /^k?W$/, not: /solar|solaire|pv|production/i }),
+        hSlot('e', 'Énergie du jour (facultatif)', { dc: ['energy'], unit: /Wh$/, words: /today|jour|daily/i, opt: true }),
+        hSlot('s', 'Production solaire (facultatif)', { dc: ['power'], unit: /^k?W$/, words: /solar|solaire|pv|production/i, opt: true })],
+      make: (p, ents) => {
+        const side = [['Aujourd\'hui', p.e], ['Production solaire', p.s]].filter(x => x[1]), els = dTitle('Énergie', 'Consommation en direct', '#ffffff', '#A8CDBE');
+        const bw = side.length ? 1060 : 1680;
+        els.push(hCard(120, 290, bw, 560, '#164034'), hIco('feu', 170, 340, 90, '#F2C14E'),
+          T({ x: 170, y: 460, w: bw - 100, text: 'En ce moment', size: 44, color: '#A8CDBE', font: 'IBM Plex Sans' }),
+          T({ x: 170, y: 530, w: bw - 100, text: p.w ? hFld(p.w) : '—', size: 200, weight: 700, color: '#ffffff', font: 'Poppins' }));
+        side.forEach((x, i) => els.push(hCard(1220, 290 + i * 290, 580, 270, '#164034'),
+          T({ x: 1260, y: 320 + i * 290, w: 500, text: x[0], size: 38, color: '#A8CDBE', font: 'IBM Plex Sans' }),
+          T({ x: 1260, y: 390 + i * 290, w: 500, text: hFld(x[1]), size: 96, weight: 700, color: '#ffffff', font: 'Poppins' })));
+        return els.concat(dClock('#A8CDBE', 940));
+      } },
+    { name: 'Portes et fenêtres', cat: HCAT, w: 1920, h: 1080, bg: NIGHT, pv: 'doors', d: 'L\'état des portes, fenêtres, volets et serrures choisis (8 au plus), en liste.',
+      slots: [hSlot('l', 'Entités affichées', { dom: ['binary_sensor', 'lock', 'cover'], dc: ['door', 'window', 'opening', 'garage_door', 'garage', 'shutter', 'blind'], multi: 8 })],
+      make: (p, ents) => dTitle('Portes et fenêtres', 'État en direct', '#ffffff', MUT).concat([hCard(120, 280, 1680, 640),
+        { id: nid(), type: 'app', app: 'ha-sensors', source: HAS, ents: (p.l || []).slice(0, 8), x: 180, y: 320, w: 1560, h: 560, font: 'IBM Plex Sans', size: 54, weight: 500, color: '#ffffff',
+          align: 'left', ls: 0, lh: 1.2, italic: false, bg: 'none', view: 'days', rows: 8, opacity: 1 }]) },
+    { name: 'Dehors et dedans', cat: HCAT, w: 1920, h: 1080, bg: '#13355E', pv: 'inout', d: 'Les températures extérieure et intérieure côte à côte, en très grand.',
+      slots: [hSlot('o', 'Température extérieure', { dc: ['temperature'], unit: /°[CF]/, words: /ext|outdoor|outside|dehors|jardin|balcon|terrasse/i }),
+        hSlot('i', 'Température intérieure', { dc: ['temperature'], unit: /°[CF]/, not: /ext|outdoor|outside|dehors|jardin|balcon|terrasse/i })],
+      make: (p, ents) => [R({ x: 0, y: 0, w: 960, h: 1080, fill: '#1B4A80' }), hIco('soleil', 120, 140, 110, '#F2C14E'), hIco('maison', 1080, 140, 110, '#7FB3E6'),
+        T({ x: 120, y: 300, w: 760, text: 'Dehors', size: 64, weight: 600, color: '#CFE0F5', font: 'Poppins' }),
+        T({ x: 120, y: 420, w: 760, text: p.o ? hFld(p.o) : '—', size: 220, weight: 700, color: '#ffffff', font: 'Poppins' }),
+        T({ x: 1080, y: 300, w: 760, text: 'Dedans', size: 64, weight: 600, color: '#CFE0F5', font: 'Poppins' }),
+        T({ x: 1080, y: 420, w: 760, text: p.i ? hFld(p.i) : '—', size: 220, weight: 700, color: '#ffffff', font: 'Poppins' })].concat(dClock('#CFE0F5', 960)) }
+  ];
+  /** Visuel stylisé d'un modèle « Maison connectée » dans la galerie (mêmes styles que les modèles de données). */
+  function hPreview(k) {
+    const hd = (t, s, c) => `<h4>${t}</h4><div class="dt"${c ? ` style="color:${c}"` : ''}>${s}</div>`;
+    const m = {
+      comfort: () => `<div class="t">${hd('Confort intérieur', 'Mis à jour en direct')}<div class="kp"><div><strong>21,4 °C</strong><span>Salon</span></div><div><strong>48 %</strong><span>Humidité</span></div><div><strong>620 ppm</strong><span>CO₂</span></div></div></div>`,
+      grid: () => `<div class="t ce-hgrid">${hd('Ma maison', 'En direct')}<div class="kp" style="grid-template-columns:repeat(3,1fr)"><div><strong>21,4 °C</strong><span>Salon</span></div><div><strong>Fermée</strong><span>Porte</span></div><div><strong>Allumé</strong><span>Bureau</span></div><div><strong>1 235 W</strong><span>Conso</span></div><div><strong>Ouvert 60 %</strong><span>Store</span></div><div><strong>Verrouillée</strong><span>Entrée</span></div></div></div>`,
+      energy: () => `<div class="t" style="background:#0E2A22">${hd('Énergie', 'Consommation en direct', '#A8CDBE')}<div class="kp"><div><strong style="font-size:9cqw">1,2 kW</strong><span>En ce moment</span></div><div><strong>8,6 kWh</strong><span>Aujourd'hui</span></div><div><strong>2,4 kW</strong><span>Solaire</span></div></div></div>`,
+      doors: () => `<div class="t">${hd('Portes et fenêtres', 'État en direct')}<table class="tb">${[['Porte d\'entrée', 'Fermée'], ['Fenêtre cuisine', 'Ouverte'], ['Garage', 'Fermée'], ['Serrure', 'Verrouillée']].map(r => `<tr><td>${r[0]}</td><td style="text-align:right">${r[1]}</td></tr>`).join('')}</table></div>`,
+      inout: () => `<div class="t" style="background:linear-gradient(90deg,#1B4A80 50%,#13355E 50%)"><div class="kp" style="margin:auto 0"><div><span>Dehors</span><strong style="font-size:10cqw">8°</strong></div><div><span>Dedans</span><strong style="font-size:10cqw">21°</strong></div></div></div>`
+    };
+    return m[k]();
+  }
+
   // Galerie de modèles de la page Compositions : dotnet.Template(index) ouvre l'éditeur sur le modèle choisi ;
   // dsets (jeux de données, vide si le groupe « Modèles de données » n'est pas permis) : dotnet.DataTemplate(index, jeu).
   let galCat = 'Tous';
-  function gallery(el, dotnet, dsets) {
+  function gallery(el, dotnet, dsets, ha) {
     LC().ensure(); ensureSamples();
-    dsets = dsets || [];
+    dsets = dsets || []; ha = ha || [];
     if (galCat === DCAT && !dsets.length) galCat = 'Tous';
+    if (galCat === HCAT && !ha.length) galCat = 'Tous';
+    const hThumb = (t, i) => `<div class="ce-thumb ce-mc" data-htpl="${i}" role="button" tabindex="0" aria-label="Choisir les entités de ${esc(t.name)}"><div class="ce-mcb"><div class="tv land"><div class="ce-dpv" style="background:${t.bg}">${hPreview(t.pv)}</div></div>
+      <div class="ce-mca"><button type="button" class="a p" tabindex="-1">Utiliser</button></div></div><div class="tn"><span>${esc(t.name)}</span></div></div>`;
+    /** Fenêtre « Entités Home Assistant » : une liste par emplacement (cases à cocher pour une liste d'entités), préremplie au mieux. */
+    const hPick = i => {
+      const t = HTPL[i], def = hDefaults(t, ha), ov = document.createElement('div'); ov.className = 'ce-dd';
+      const close = () => { ov.remove(); document.removeEventListener('keydown', onKey, true); };
+      const onKey = ev => { if (ev.key === 'Escape') { ev.stopPropagation(); close(); } };
+      const opt = (e, sel) => `<option value="${esc(e.id)}"${sel ? ' selected' : ''}>${esc(e.name)}${e.unit ? ' (' + esc(e.unit) + ')' : ''}</option>`;
+      const field = s => {
+        const fits = hFits(s, ha);
+        if (s.multi) return `<label>${esc(s.label)} <small>(${s.multi} au plus)</small></label><div class="ce-hl" data-k="${s.key}">${fits.length ? fits.map(e => `<label class="ce-hc"><input type="checkbox" value="${esc(e.id)}"${def[s.key].indexOf(e.id) >= 0 ? ' checked' : ''}> ${esc(e.name)}</label>`).join('') : '<p class="ce-ddw">Aucune entité de ce type.</p>'}</div>`;
+        return `<label for="ce-h-${s.key}">${esc(s.label)}</label><select id="ce-h-${s.key}" data-k="${s.key}"><option value="">${s.opt ? '— aucune —' : '— choisir —'}</option>${fits.map(e => opt(e, e.id === def[s.key])).join('')}</select>`;
+      };
+      ov.innerHTML = `<div class="ce-ddd" role="dialog" aria-modal="true" aria-labelledby="ce-ddt"><h2 id="ce-ddt">${esc(t.name)}</h2><p>${esc(t.d)} Les valeurs s'affichent seules, rien à toucher à l'écran.</p>
+        <div class="ce-hf">${t.slots.map(field).join('')}</div><p class="ce-ddw" id="ce-hw" hidden>Choisissez au moins une entité.</p>
+        <div class="ce-ddb"><button type="button" class="ce-ddg" data-d="close">Annuler</button><button type="button" class="ce-ddp" data-d="use">Utiliser ce modèle</button></div></div>`;
+      const read = () => {
+        const p = {};
+        ov.querySelectorAll('select[data-k]').forEach(s => { p[s.dataset.k] = s.value; });
+        ov.querySelectorAll('.ce-hl[data-k]').forEach(l => { p[l.dataset.k] = [...l.querySelectorAll('input:checked')].map(c => c.value).slice(0, (t.slots.find(s => s.key === l.dataset.k) || {}).multi || 8); });
+        return p;
+      };
+      ov.onclick = ev => {
+        if (ev.target === ov) { close(); return; }
+        const b = ev.target.closest('[data-d]'); if (!b) return;
+        if (b.dataset.d === 'close') { close(); return; }
+        const p = read(), any = Object.values(p).some(v => Array.isArray(v) ? v.length : v), needed = t.slots.filter(s => !s.opt && !s.multi).every(s => p[s.key]);
+        if (!any || !needed) { ov.querySelector('#ce-hw').hidden = false; return; }
+        close(); dotnet.invokeMethodAsync('HaTemplate', i, JSON.stringify(p));
+      };
+      document.body.appendChild(ov); document.addEventListener('keydown', onKey, true);
+      const first = ov.querySelector('select, input'); if (first) first.focus();
+    };
     const fitGal = () => el.querySelectorAll('.ce-mc .tv').forEach(tv => { const m = tv.firstElementChild; if (tv.clientWidth && m.dataset.w) m.style.transform = `scale(${tv.clientWidth / +m.dataset.w})`; });
     const dThumb = (t, i) => `<div class="ce-thumb ce-mc" data-dtpl="${i}" role="button" tabindex="0" aria-label="Choisir le jeu de données de ${esc(t.name)}"><div class="ce-mcb"><div class="tv land"><div class="ce-dpv" style="background:${t.bg}">${dPreview(t.pv)}</div></div>
       <div class="ce-mca"><button type="button" class="a p" data-act="dpick" tabindex="-1">Utiliser</button></div></div><div class="tn"><span>${esc(t.name)}</span></div></div>`;
     const draw = () => {
-      const cats = ['Tous', ...new Set(TPL.map(t => t.cat)), ...(dsets.length ? [DCAT] : [])];
-      el.innerHTML = `<div class="ce-chips">${cats.map(c => `<button type="button" data-cat="${c}" class="${c === DCAT ? 'dcat ' : ''}${c === galCat ? 'on' : ''}">${c}</button>`).join('')}</div>
-        <div class="ce-tgrid ce-gal">${galCat === DCAT ? DTPL.map(dThumb).join('') : tplIndexes(galCat).map(i => thumb(TPL[i], i, true)).join('')}</div>`;
+      const cats = ['Tous', ...new Set(TPL.map(t => t.cat)), ...(dsets.length ? [DCAT] : []), ...(ha.length ? [HCAT] : [])];
+      el.innerHTML = `<div class="ce-chips">${cats.map(c => `<button type="button" data-cat="${c}" class="${c === DCAT || c === HCAT ? 'dcat ' : ''}${c === galCat ? 'on' : ''}">${c}</button>`).join('')}</div>
+        <div class="ce-tgrid ce-gal">${galCat === DCAT ? DTPL.map(dThumb).join('') : galCat === HCAT ? HTPL.map(hThumb).join('') : tplIndexes(galCat).map(i => thumb(TPL[i], i, true)).join('')}</div>`;
       fitGal();
     };
     const open = i => { const l = tplIndexes(galCat); openPreview({ list: l, at: l.indexOf(i), use: n => { closePreview(); dotnet.invokeMethodAsync('Template', n); } }); };
@@ -2880,11 +3020,12 @@
     el.onclick = ev => {
       const c = ev.target.closest('[data-cat]'); if (c) { galCat = c.dataset.cat; draw(); return; }
       const dt = ev.target.closest('[data-dtpl]'); if (dt) { pick(+dt.dataset.dtpl); return; }
+      const ht = ev.target.closest('[data-htpl]'); if (ht) { hPick(+ht.dataset.htpl); return; }
       const t = ev.target.closest('[data-tpl]'); if (!t) return;
       const i = +t.dataset.tpl;
       if (ev.target.closest('[data-act=use]')) dotnet.invokeMethodAsync('Template', i); else open(i);
     };
-    el.onkeydown = ev => { const t = ev.target.closest && ev.target.closest('.ce-mc'); if (t && ev.target === t && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); if (t.dataset.dtpl != null) pick(+t.dataset.dtpl); else open(+t.dataset.tpl); } };
+    el.onkeydown = ev => { const t = ev.target.closest && ev.target.closest('.ce-mc'); if (t && ev.target === t && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); if (t.dataset.dtpl != null) pick(+t.dataset.dtpl); else if (t.dataset.htpl != null) hPick(+t.dataset.htpl); else open(+t.dataset.tpl); } };
     if (typeof ResizeObserver === 'function') new ResizeObserver(fitGal).observe(el);
     draw();
   }

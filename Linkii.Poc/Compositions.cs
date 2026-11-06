@@ -25,6 +25,38 @@ public static class Compositions
     /// </summary>
     public static readonly Guid ScreenSource = new("5c2ee000-5c2e-4e00-a000-000000000000");
 
+    /// <summary>
+    /// Source « Home Assistant » : le compte Home Assistant de l'organisation, sans contenu à créer. Champs {{…:e:sensor.salon}} (valeur d'une entité) et
+    /// blocs « Capteurs » (entités choisies dans « ents »). Lecture seule : rien à toucher à l'écran. À la publication, « ha » liste les entités
+    /// que l'écran lira ; elles arrivent en direct comme pour les widgets (HomeAssistantLive).
+    /// </summary>
+    public static readonly Guid HaSource = new("4a5e0000-4a5e-4a00-a000-000000000000");
+    public const string HaApp = "ha-sensors";
+
+    /// <summary>Entités Home Assistant qu'utilise un document : champs « e:… » de la source Home Assistant, blocs (« ents ») et « Afficher si… ».</summary>
+    public static List<string> HaEntities(string? json)
+    {
+        try { return JsonNode.Parse(json ?? "") is JsonObject d && d["els"] is JsonArray a ? HaEntities(a) : new(); }
+        catch (JsonException) { return new(); }
+    }
+
+    public static List<string> HaEntities(JsonArray els)
+    {
+        var n = HaSource.ToString("N");
+        var ids = new List<string>();
+        void Key(string? k) { if (k != null && k.StartsWith("e:") && HomeAssistantRules.IsSupported(k[2..]) && !ids.Contains(k[2..])) ids.Add(k[2..]); }
+        foreach (var e in els.OfType<JsonObject>())
+        {
+            if (Str(e, "type") == "app" && Str(e, "source") == n && e["ents"] is JsonArray ents)
+                foreach (var x in ents) Key("e:" + (x is JsonValue v && v.TryGetValue<string>(out var s) ? s : ""));
+            if (Str(e, "type") == "text" && Str(e, "text") is { } t)
+                foreach (Match f in FieldToken.Matches(t)) if (f.Groups[1].Value == n) Key(f.Groups[2].Value);
+            if (e["show"] is JsonArray sh)
+                foreach (var c in sh.OfType<JsonObject>()) if (Str(c, "source") == n) Key(Str(c, "key"));
+        }
+        return ids;
+    }
+
     /// <summary>Calques reliés à un jeu de données (§139) : liste reliée (« list », source = identifiant du jeu).</summary>
     public const string ListType = "list";
 
@@ -98,7 +130,7 @@ public static class Compositions
         var sets = new Dictionary<Guid, DataSet>();   // jeux de données (§139) : l'écran lit leur dernière copie, réduite aux colonnes utilisées
         foreach (var id in Sources(els))
         {
-            if (id == ScreenSource) continue;
+            if (id == ScreenSource || id == HaSource) continue;
             if (dataset?.Invoke(id) is { } ds) { sets[id] = ds; continue; }
             sources[id] = source?.Invoke(id) is { AppId: { } a } m && SourceApps.Contains(a) ? m : null;
         }
@@ -121,6 +153,7 @@ public static class Compositions
                     else els.Remove(e);
                     break;
                 case "app":
+                    if (Guid.TryParse(Str(e, "source"), out var hid) && hid == HaSource && Str(e, "app") == HaApp) break;   // bloc de la source Home Assistant
                     if (!Guid.TryParse(Str(e, "source"), out var sid) || sources.GetValueOrDefault(sid) is not { } src || src.AppId != Str(e, "app")) els.Remove(e);
                     break;
                 case ListType:
@@ -132,6 +165,7 @@ public static class Compositions
         var s = new Dictionary<string, string>(settings) { ["doc"] = doc.ToJsonString() };
         foreach (var (id, _) in sets) s["ds:" + id.ToString("N")] = JsonSerializer.Serialize(UsedColumns(els, id));
         if (Sources(els).Contains(ScreenSource)) s["scr"] = "1";
+        if (HaEntities(els) is { Count: > 0 } ha) s["ha"] = string.Join(',', ha);   // entités Home Assistant que l'écran lira
         var secrets = new Dictionary<string, string>();
         foreach (var (id, m) in sources)
         {
@@ -238,6 +272,9 @@ public static class Compositions
     /// </summary>
     public static PublishedItem? SourceItem(PublishedItem composition, Guid source)
     {
+        if (source == HaSource)   // Home Assistant : les entités figées à la publication, lues comme un widget « Capteurs »
+            return composition.AppId == AppId && composition.Settings.GetValueOrDefault("ha") is { Length: > 0 } ents
+                ? new PublishedItem { Id = composition.Id, Type = "app", AppId = HaApp, Settings = new() { ["entities"] = ents, ["control"] = "false" } } : null;
         var key = "src:" + source.ToString("N");
         if (composition.AppId != AppId || composition.Settings.GetValueOrDefault(key) is not { } raw) return null;
         SourceSnapshot? snap;
