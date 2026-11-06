@@ -31,7 +31,8 @@
                         }
                         @if (floors.Count < HomeAssistantRules.MaxPlanFloors)
                         {
-                            <button type="button" class="hpe-ft add" title="Ajouter un étage" @onclick="AddFloor"><Ico Name="plus" Size="14" /> Étage</button>
+                            <button type="button" class="hpe-ft add" title="Ajouter un étage au-dessus" @onclick="AddFloor"><Ico Name="plus" Size="14" /> Étage</button>
+                            <button type="button" class="hpe-ft add" title="Ajouter un étage sous le plus bas" @onclick="AddBasement"><Ico Name="plus" Size="14" /> Sous-sol</button>
                         }
                     </div>
                     @if (Floor is { } fl)
@@ -131,8 +132,9 @@
                     }
                     else
                     {
-                        <div class="hpe-note">Les étages sont rangés du bas vers le haut. Un étage se dessine pièce par pièce, ou reprend une image de la médiathèque (dessin, PDF converti, photo) ; en pièces dessinées, l'image sert de calque.</div>
-                        @for (var i = 0; i < floors.Count; i++)
+                        <div class="hpe-note">Les étages sont rangés comme dans le bâtiment : le plus haut en premier. « Monter » et « Descendre » changent leur ordre. Un étage se dessine pièce par pièce, ou reprend une image de la médiathèque (dessin, PDF converti, photo) ; en pièces dessinées, l'image sert de calque.</div>
+                        @if (floors.Count < HomeAssistantRules.MaxPlanFloors) { <button type="button" class="btn ghost sm hpe-addfl" @onclick="AddFloor"><Ico Name="arrow-up" Size="14" /> Ajouter un étage au-dessus</button> }
+                        @for (var i = floors.Count - 1; i >= 0; i--)
                         {
                             var idx = i; var f = floors[idx];
                             <div class="hpe-fl @(f.Id == floorId ? "on" : "")">
@@ -141,8 +143,8 @@
                                     <button type="button" class="btn ghost sm" @onclick="() => { PickFloor(f.Id); picking = true; }"><Ico Name="image" Size="14" /> @(f.Img == null ? (f.Kind == "rooms" ? "Importer un calque" : "Importer le plan") : "Changer l'image")</button>
                                     @if (f.Img != null) { <button type="button" class="btn ghost sm" @onclick="() => f.Img = null">Retirer l'image</button> }
                                     <span class="grow"></span>
-                                    <button type="button" class="btn ghost sm icon hpe-dn" aria-label="Descendre d'un étage" disabled="@(idx == 0)" @onclick="() => Move(idx, -1)"><Ico Name="arrow-up" Size="14" /></button>
-                                    <button type="button" class="btn ghost sm icon" aria-label="Monter d'un étage" disabled="@(idx == floors.Count - 1)" @onclick="() => Move(idx, 1)"><Ico Name="arrow-up" Size="14" /></button>
+                                    <button type="button" class="btn ghost sm" title="Placer cet étage au-dessus de « @(idx < floors.Count - 1 ? floors[idx + 1].Name : "") »" disabled="@(idx == floors.Count - 1)" @onclick="() => Move(idx, 1)"><Ico Name="arrow-up" Size="14" /> Monter</button>
+                                    <button type="button" class="btn ghost sm hpe-dn" title="Placer cet étage sous « @(idx > 0 ? floors[idx - 1].Name : "") »" disabled="@(idx == 0)" @onclick="() => Move(idx, -1)"><Ico Name="arrow-up" Size="14" /> Descendre</button>
                                     <button type="button" class="btn ghost sm icon" aria-label="Supprimer l'étage" disabled="@(floors.Count == 1)" @onclick="() => RemoveFloor(f.Id)"><Ico Name="trash" Size="14" /></button>
                                 </div>
                                 @if (f.Id == floorId && f.Kind == "rooms")
@@ -163,7 +165,7 @@
                                 }
                             </div>
                         }
-                        @if (floors.Count < HomeAssistantRules.MaxPlanFloors) { <button type="button" class="btn ghost" @onclick="AddFloor"><Ico Name="plus" Size="15" /> Ajouter un étage</button> }
+                        @if (floors.Count < HomeAssistantRules.MaxPlanFloors) { <button type="button" class="btn ghost sm hpe-addfl" @onclick="AddBasement"><Ico Name="arrow-down" Size="14" /> Ajouter un étage en dessous (sous-sol)</button> }
                     }
                 </aside>
             </div>
@@ -280,6 +282,17 @@
         var f = new EFloor { Id = NewId(), Name = floors.Count == 0 ? "Rez-de-chaussée" : floors.Count == 1 ? "Étage" : "Étage " + floors.Count };
         if (below is { Kind: "rooms" }) { f.W = below.W; f.H = below.H; }   // même grille que l'étage du dessous : les étages se superposent
         floors.Add(f); floorId = f.Id; selRoom = null; tool = "room";
+    }
+
+    /// <summary>Nouvel étage sous le plus bas (sous-sol), avec la même grille que lui.</summary>
+    private void AddBasement()
+    {
+        if (floors.Count >= HomeAssistantRules.MaxPlanFloors) return;
+        var above = floors.FirstOrDefault();
+        var n = floors.Count(x => x.Name.StartsWith("Sous-sol", StringComparison.OrdinalIgnoreCase));
+        var f = new EFloor { Id = NewId(), Name = n == 0 ? "Sous-sol" : "Sous-sol " + (n + 1) };
+        if (above is { Kind: "rooms" }) { f.W = above.W; f.H = above.H; }
+        floors.Insert(0, f); floorId = f.Id; selRoom = null; tool = "room";
     }
 
     private void RemoveFloor(string id)

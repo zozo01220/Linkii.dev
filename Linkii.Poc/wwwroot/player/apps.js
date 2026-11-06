@@ -387,7 +387,7 @@
       var PH = Math.round(PW / ratio);
       var drawn = plan.floors.filter(function (f) { return f.kind === 'rooms'; });
       P = drawn.length ? Math.min.apply(null, drawn.map(function (f) { return Math.min(PW / f.w, PH / f.h); })) : 40;
-      WH = Math.round(Math.min(1.15 * P, 60));
+      WH = Math.round(Math.min(1.5 * P, 78));   // hauteur des murs (relevée le 6 nov.) : les pièces se lisent sans cacher les pastilles
       world.style.width = PW + 'px'; world.style.height = PH + 'px';
       world.style.setProperty('--hpl-stem', (drawn.length ? WH + 12 : 26) + 'px');
       world.innerHTML = '';

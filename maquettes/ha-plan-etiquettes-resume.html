@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette – Plan du bâtiment : étiquettes, résumé, rotation</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root { --nuit:#0B1F3A; --acier:#5A6B80; --brume:#DDE3EA; --fond:#F5F7FA; --signal:#3B82C4; --bord2:#C5CED9; --orange:#C45A00; --lamp:#FFC24A; --mono:"JetBrains Mono",ui-monospace,Consolas,monospace; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:400 15px/1.5 "IBM Plex Sans","Segoe UI",sans-serif; color:var(--nuit); background:#8d97a6; padding:72px 24px 40px; -webkit-font-smoothing:antialiased; }
+  .ic { width:16px; height:16px; flex:none; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  button, select, input { font:inherit; }
+
+  /* ---- barre de démo ---- */
+  .demo { position:fixed; top:0; left:0; right:0; z-index:60; background:#fff; border-bottom:1px solid var(--bord2); padding:10px 14px; display:flex; gap:6px; align-items:center; flex-wrap:wrap; font-size:13px; color:var(--acier); }
+  .demo b { color:var(--nuit); margin:0 4px 0 12px; font-weight:500; } .demo b:first-child { margin-left:0; }
+  .demo button { font-size:13px; padding:5px 12px; border-radius:99px; border:1px solid var(--bord2); background:#fff; color:var(--acier); cursor:pointer; }
+  .demo button.on { background:var(--nuit); border-color:var(--nuit); color:#fff; }
+
+  .page { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:20px; max-width:1500px; margin:0 auto; align-items:start; }
+  .note { background:#fff; border-radius:6px; padding:16px 18px; font-size:14px; color:var(--acier); margin-bottom:16px; }
+  .note h2 { margin:0 0 6px; font-size:16px; font-weight:500; color:var(--nuit); }
+  .note ol { margin:6px 0 0; padding-left:20px; } .note li { margin:3px 0; } .note li b { color:var(--nuit); font-weight:500; }
+
+  /* ---- écran (TV) ---- */
+  .tv { background:#05101F; border-radius:10px; padding:14px; box-shadow:0 20px 60px rgba(11,31,58,.35); }
+  .screen { position:relative; aspect-ratio:16/9; overflow:hidden; border-radius:3px; background:radial-gradient(ellipse at 40% 42%,#1A3A66,#0B1F3A 72%); color:#DDE3EA; font-size:15px; }
+  .tv.corner .screen { background:#2a3340 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Crect width='40' height='40' fill='%232a3340'/%3E%3Cpath d='M0 40L40 0' stroke='%23323c4a' stroke-width='8'/%3E%3C/svg%3E"); }
+  .wdg { position:absolute; inset:0; display:flex; overflow:hidden; background:radial-gradient(ellipse at 40% 42%,#1A3A66,#0B1F3A 72%); }
+  .tv.corner .wdg { inset:auto 3% 4% auto; width:46%; height:52%; border-radius:8px; box-shadow:0 10px 30px rgba(0,0,0,.4); font-size:11px; }
+  .wdg.side-left { flex-direction:row-reverse; } .wdg.side-top { flex-direction:column-reverse; }
+  .view { position:relative; flex:1; min-width:0; min-height:0; perspective:2600px; perspective-origin:50% 30%; overflow:hidden; }
+  .world { position:absolute; left:50%; top:52%; width:480px; height:320px; transform-style:preserve-3d; transition:transform .8s cubic-bezier(.2,.7,.2,1); }
+  .fl { position:absolute; inset:0; transform-style:preserve-3d; }
+  .slab { position:absolute; inset:-8px; background:#0E2645; border:1px solid #2B4A74; transform:translateZ(-2px); }
+  .room { position:absolute; background:#21406A; box-shadow:inset 0 0 0 1px rgba(255,255,255,.08); }
+  .room.warm { background:#7a5a46; } .room.cold { background:#2a5b93; } .room.lit { background:#6d6247; }
+  .rn { position:absolute; left:7px; bottom:5px; font-size:10px; letter-spacing:.07em; text-transform:uppercase; color:#8DA0B8; white-space:nowrap; }
+  .wall { position:absolute; transform-origin:0 0; background:linear-gradient(to bottom,rgba(197,210,226,.12),rgba(197,210,226,.3)); border-bottom:2px solid rgba(235,242,250,.75); height:56px; }
+  .ftag { position:absolute; left:0; top:100%; transform-origin:0 0; transform:translate3d(-10px,8px,0) rotateZ(calc(var(--rz)*-1)) rotateX(calc(var(--rx)*-1)); }
+  .ftag span { position:absolute; right:0; top:0; white-space:nowrap; font-size:14px; color:#9AAABD; padding:3px 9px; border-left:2px solid var(--signal); background:rgba(11,31,58,.65); }
+  .pin { position:absolute; width:0; height:0; transform-origin:0 0; transform:rotateZ(calc(var(--rz)*-1)) rotateX(calc(var(--rx)*-1)); }
+  .pin-in { position:absolute; left:0; bottom:0; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; }
+  .stem { width:2px; height:68px; background:linear-gradient(rgba(221,227,234,.8),rgba(221,227,234,.05)); }
+  .chip { display:inline-flex; align-items:center; gap:5px; padding:4px 9px 4px 6px; border-radius:99px; background:rgba(11,31,58,.94); border:1px solid #3A5170; color:#DDE3EA; font-size:13px; font-weight:500; line-height:1.1; white-space:nowrap; }
+  .chip .ic { width:15px; height:15px; color:#9AAABD; }
+  .chip.on { background:#FFF3D1; color:#5B4200; border-color:var(--lamp); } .chip.on .ic { color:#B77A00; }
+  .chip.alert { background:var(--orange); border-color:#F6B47A; color:#fff; } .chip.alert .ic { color:#fff; }
+  .chip.off { opacity:.45; }
+  .chip.dot { padding:4px; }
+  .chip.room { padding:4px 10px; gap:8px; background:rgba(11,31,58,.86); }
+  .chip.room .n { color:#9AAABD; font-weight:400; }
+  .chip.room .g { display:inline-flex; align-items:center; gap:3px; }
+  .chip.room .g.on { color:#F5C451; } .chip.room .g.on .ic { color:#F5C451; }
+  .chip.room .g.alert { color:#F6B47A; } .chip.room .g.alert .ic { color:#F6B47A; }
+  .pin.small .stem { height:30px; }
+
+  /* résumé : panneau latéral */
+  .side { width:30%; max-width:300px; min-width:190px; background:rgba(5,16,31,.55); border-left:1px solid #23395A; display:flex; flex-direction:column; padding:14px; gap:12px; overflow:hidden; }
+  .wdg.side-left .side { border-left:0; border-right:1px solid #23395A; }
+  .side h3 { margin:0; font-size:16px; font-weight:500; color:#fff; display:flex; align-items:center; gap:8px; }
+  .side h3 small { margin-left:auto; font-size:11px; color:#8DA0B8; font-weight:400; }
+  .sec { display:grid; gap:4px; } .sec > span { font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:#8DA0B8; }
+  .it { display:flex; align-items:center; gap:8px; font-size:13px; padding:5px 8px; border-radius:4px; background:rgba(255,255,255,.04); }
+  .it .ic { color:#9AAABD; } .it b { margin-left:auto; font-weight:500; font-variant-numeric:tabular-nums; }
+  .it.on .ic, .it.on b { color:#F5C451; } .it.alert { background:var(--orange); color:#fff; } .it.alert .ic { color:#fff; }
+  .it small { color:#8DA0B8; }
+  .more { font-size:12px; color:#8DA0B8; padding-left:8px; }
+  .tv.corner .side { display:none; }
+
+  /* résumé : bandeau défilant en haut */
+  .ticker { height:2.4em; flex:none; display:flex; align-items:center; background:rgba(5,16,31,.6); border-bottom:1px solid #23395A; overflow:hidden; position:relative; }
+  .ticker .track { display:flex; gap:10px; white-space:nowrap; padding-left:10px; animation:tick 26s linear infinite; }
+  .ticker.still .track { animation:none; }
+  @keyframes tick { from { transform:translateX(0); } to { transform:translateX(-50%); } }
+  .tk { display:inline-flex; align-items:center; gap:6px; padding:.25em .7em; border-radius:4px; background:rgba(255,255,255,.06); font-size:.9em; }
+  .tk .ic { width:1.1em; height:1.1em; color:#9AAABD; }
+  .tk.on { color:#F5C451; } .tk.on .ic { color:#F5C451; } .tk.alert { background:var(--orange); color:#fff; } .tk.alert .ic { color:#fff; }
+  .ticker::after { content:""; position:absolute; right:0; top:0; bottom:0; width:40px; background:linear-gradient(90deg,transparent,#0b1a30); pointer-events:none; }
+
+  /* interrupteur de rotation, à l'écran */
+  .rot { position:absolute; top:10px; right:10px; z-index:4; display:inline-flex; align-items:center; gap:8px; padding:5px 8px 5px 10px; border-radius:99px; background:rgba(11,31,58,.85); border:1px solid #3A5170; font-size:12px; color:#DDE3EA; cursor:pointer; user-select:none; }
+  .wdg.side-top .rot { top:calc(2.4em + 10px); }
+  .tv.corner .rot { font-size:10px; padding:3px 6px 3px 8px; }
+  .sw { width:30px; height:17px; border-radius:99px; background:#3A5170; position:relative; transition:background .2s; flex:none; }
+  .sw::after { content:""; position:absolute; top:2px; left:2px; width:13px; height:13px; border-radius:50%; background:#fff; transition:left .2s; }
+  .on > .sw, .sw.on { background:var(--signal); } .on > .sw::after, .sw.on::after { left:15px; }
+  .rot[hidden] { display:none; }
+
+  /* ---- réglages du widget (back-office) ---- */
+  .cfg { background:#fff; border-radius:6px; box-shadow:0 10px 30px rgba(11,31,58,.25); overflow:hidden; position:sticky; top:72px; }
+  .cfg header { padding:14px 16px; border-bottom:1px solid var(--brume); font-weight:500; display:flex; align-items:center; gap:10px; }
+  .cfg header span { width:30px; height:30px; border-radius:50%; background:#41BDF5; color:#fff; display:grid; place-items:center; }
+  .cfg .body { padding:14px 16px; display:grid; gap:14px; max-height:calc(100vh - 160px); overflow:auto; }
+  .f { display:grid; gap:5px; } .f > label { font-size:13px; font-weight:500; } .f small { font-size:12px; color:var(--acier); line-height:1.4; }
+  .f select { padding:7px 9px; border:1px solid var(--bord2); border-radius:4px; background:#fff; }
+  .row { display:flex; align-items:center; gap:10px; cursor:pointer; } .row .t { flex:1; display:grid; } .row .t b { font-weight:500; font-size:13px; }
+  .new { font-size:10px; padding:1px 6px; border-radius:3px; background:#E1F0E8; color:#155A38; font-weight:500; margin-left:6px; letter-spacing:.03em; vertical-align:1px; }
+  .seg { display:grid; grid-template-columns:repeat(2,1fr); gap:6px; }
+  .seg button { border:1px solid var(--bord2); background:#fff; border-radius:4px; padding:7px 6px; font-size:12px; color:var(--acier); cursor:pointer; display:grid; gap:2px; text-align:left; }
+  .seg button b { color:var(--nuit); font-weight:500; font-size:13px; }
+  .seg button.on { border-color:var(--signal); box-shadow:0 0 0 1px var(--signal); background:#F7FAFD; }
+  hr { border:0; border-top:1px solid var(--brume); margin:0; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></symbol>
+  <symbol id="i-thermo" viewBox="0 0 24 24"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></symbol>
+  <symbol id="i-drop" viewBox="0 0 24 24"><path d="M12 2.7l5.7 5.6a8 8 0 1 1-11.4 0z"/></symbol>
+  <symbol id="i-cover" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M3 8h18M3 13h18M12 13v5"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/></symbol>
+  <symbol id="i-door" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="1"/><path d="M15 12v.01"/></symbol>
+  <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M12 14l4-4"/><path d="M3.3 19a10 10 0 1 1 17.4 0"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3L2 21h20z"/><path d="M12 10v4M12 17v.01"/></symbol>
+  <symbol id="i-rot" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></symbol>
+</svg>
+
+<div class="demo">
+  <b>Étiquettes</b>
+  <button data-lab="all">Toutes (aujourd'hui)</button><button data-lab="room" class="on">Par pièce (proposé)</button><button data-lab="active">Actifs seulement</button><button data-lab="icons">Icônes seules</button>
+  <b>Résumé</b>
+  <button data-sum="right" class="on">À droite</button><button data-sum="left">À gauche</button><button data-sum="top">En haut, défilant</button><button data-sum="none">Masqué</button>
+  <b>Widget</b>
+  <button data-size="full" class="on">Pleine page</button><button data-size="corner">Dans un coin</button>
+</div>
+
+<div class="page">
+  <div>
+    <div class="note">
+      <h2>Plan du bâtiment : moins d'étiquettes, résumé à côté, rotation réglable</h2>
+      <ol>
+        <li><b>Étiquettes par pièce</b> (réglage par défaut proposé) : une seule étiquette par pièce, avec le nom et ce qui compte (lumières allumées, température). Seules les alertes (porte ouverte, imprimante, serrure) gardent leur propre étiquette orange. Les autres choix restent possibles : toutes, actifs seulement, icônes seules.</li>
+        <li><b>Appareils indisponibles masqués</b> par défaut : « Indisponible » disparaît de la scène (ils restent comptés dans le résumé).</li>
+        <li><b>Résumé hors de la scène</b> : panneau à droite ou à gauche (lumières allumées, alertes, températures, ouvertures). Un widget trop étroit (dans un coin) passe tout seul en bandeau défilant en haut. Il n'y a plus rien en bas sur les étages.</li>
+        <li><b>Rotation lente</b> : réglage dans la config du widget, et interrupteur on/off à l'écran (écran tactile) en haut à droite. Coupée, la vue reste fixe sur le meilleur angle.</li>
+      </ol>
+    </div>
+    <div class="tv" id="tv"><div class="screen"><div class="wdg side-right" id="wdg">
+      <div class="view" id="view"><div class="world" id="world"></div>
+        <div class="rot on" id="rot" title="Rotation lente"><svg class="ic"><use href="#i-rot"/></svg> Rotation <span class="sw"></span></div>
+      </div>
+      <aside class="side" id="side"></aside>
+    </div></div></div>
+  </div>
+
+  <aside class="cfg">
+    <header><span><svg class="ic"><use href="#i-home"/></svg></span>Réglages du widget « Plan du bâtiment »</header>
+    <div class="body">
+      <div class="f"><label>Plan du bâtiment</label><select><option>Maison Gex · 2 étages, 31 appareils</option></select></div>
+      <hr>
+      <div class="f"><label>Étiquettes sur le plan <span class="new">modifié</span></label>
+        <div class="seg" id="cfgLab">
+          <button data-lab="room" class="on"><b>Par pièce</b>Une étiquette par pièce, alertes à part</button>
+          <button data-lab="active"><b>Actifs seulement</b>Allumés, ouverts, en alerte</button>
+          <button data-lab="all"><b>Toutes</b>Chaque appareil avec sa valeur</button>
+          <button data-lab="icons"><b>Icônes seules</b>Sans aucun texte</button>
+        </div>
+      </div>
+      <label class="row" id="cfgHide"><span class="t"><b>Masquer les appareils indisponibles <span class="new">nouveau</span></b><small>Ils restent comptés dans le résumé.</small></span><span class="sw on"></span></label>
+      <hr>
+      <div class="f"><label>Résumé <span class="new">nouveau</span></label>
+        <select id="cfgSum"><option value="right">Panneau à droite</option><option value="left">Panneau à gauche</option><option value="top">Bandeau en haut, défilant</option><option value="none">Masqué</option></select>
+        <small>Dans un widget étroit (coin, bandeau), le panneau devient un bandeau défilant.</small>
+      </div>
+      <hr>
+      <label class="row" id="cfgSpin"><span class="t"><b>Rotation lente</b><small>La vue tourne doucement. Coupée : vue fixe sur le meilleur angle.</small></span><span class="sw on"></span></label>
+      <label class="row" id="cfgSpinBtn"><span class="t"><b>Interrupteur de rotation à l'écran <span class="new">nouveau</span></b><small>Écrans tactiles : on/off en haut à droite du widget. Le choix revient au réglage au bout de 2 minutes sans toucher.</small></span><span class="sw on"></span></label>
+      <hr>
+      <label class="row"><span class="t"><b>Étages écartés</b><small>Chaque étage visible en entier.</small></span><span class="sw on"></span></label>
+      <label class="row"><span class="t"><b>Carte de chaleur</b><small>Pièces teintées selon leur température.</small></span><span class="sw on"></span></label>
+      <label class="row"><span class="t"><b>Montrer l'événement</b><small>Porte ouverte : l'étage concerné s'affiche quelques secondes.</small></span><span class="sw on"></span></label>
+    </div>
+  </aside>
+</div>
+
+<script>
+/* Données d'exemple reprises de la capture « Maison Gex » */
+const floors = [
+  { id:'ss', name:'Sous-sol garage', rooms:[
+      { id:'garage', name:'Garage', x:0, y:0, w:7, h:8 },
+      { id:'buand', name:'Buanderie', x:7, y:2, w:5, h:6, heat:'warm' } ] },
+  { id:'rdc', name:'Rez-de-chaussée', rooms:[
+      { id:'salon', name:'Salon', x:0, y:4, w:5, h:4, heat:'lit' },
+      { id:'sam', name:'Salle à manger', x:5, y:2, w:4, h:6, heat:'lit' },
+      { id:'entree', name:'Entrée', x:0, y:0, w:3, h:4 },
+      { id:'cuisine', name:'Cuisine', x:3, y:0, w:6, h:2 },
+      { id:'veranda', name:'Véranda', x:9, y:2, w:3, h:6, heat:'cold' } ] }
+];
+const devs = [
+  { f:'ss', r:'garage', x:3, y:2, ic:'bulb', v:'Indisponible', st:'off' },
+  { f:'ss', r:'buand', x:8.5, y:4, ic:'drop', v:'68 %', st:'' },
+  { f:'ss', r:'buand', x:10, y:4.5, ic:'thermo', v:'15 °C', st:'', t:15 },
+  { f:'ss', r:'buand', x:9, y:6, ic:'gauge', v:'Connecté', st:'alert', name:'BROTHER-HL-3140CW' },
+  { f:'ss', r:'buand', x:9.5, y:5, ic:'drop', v:'51,7 %', st:'' },
+  { f:'ss', r:'buand', x:11, y:5.5, ic:'thermo', v:'18 °C', st:'' },
+  { f:'ss', r:'buand', x:8, y:6.5, ic:'plug', v:'Éteint', st:'' },
+  { f:'rdc', r:'entree', x:1, y:1, ic:'cover', v:'Fermé', st:'' },
+  { f:'rdc', r:'entree', x:1.5, y:2.5, ic:'bulb', v:'Éteint', st:'' },
+  { f:'rdc', r:'entree', x:2.2, y:1.4, ic:'bulb', v:'Allumé', st:'on', name:'Entrée' },
+  { f:'rdc', r:'entree', x:.5, y:3.3, ic:'door', v:'Indisponible', st:'off' },
+  { f:'rdc', r:'cuisine', x:5, y:1, ic:'cover', v:'Fermé', st:'' },
+  { f:'rdc', r:'cuisine', x:6, y:1, ic:'bulb', v:'Éteint', st:'' },
+  { f:'rdc', r:'cuisine', x:7.5, y:1, ic:'bulb', v:'Indisponible', st:'off' },
+  { f:'rdc', r:'sam', x:7, y:3.5, ic:'bulb', v:'100 %', st:'on', name:'Salle à manger' },
+  { f:'rdc', r:'sam', x:7.5, y:3, ic:'cover', v:'Fermé', st:'' },
+  { f:'rdc', r:'sam', x:7.3, y:4.6, ic:'cover', v:'Ouvert', st:'' },
+  { f:'rdc', r:'sam', x:6, y:5.6, ic:'bulb', v:'Éteint', st:'' },
+  { f:'rdc', r:'salon', x:2.5, y:6, ic:'bulb', v:'100 %', st:'on', name:'Salon' },
+  { f:'rdc', r:'salon', x:1, y:5, ic:'thermo', v:'21,5 °C', st:'', t:21.5 },
+  { f:'rdc', r:'veranda', x:10.5, y:3, ic:'bulb', v:'Éteint', st:'' },
+  { f:'rdc', r:'veranda', x:10.5, y:5, ic:'bulb', v:'Éteint', st:'' },
+  { f:'rdc', r:'veranda', x:10, y:6.5, ic:'bulb', v:'Éteint', st:'' },
+  { f:'rdc', r:'veranda', x:11, y:4, ic:'thermo', v:'17,2 °C', st:'', t:17.2 },
+];
+const P = 40, state = { lab:'room', sum:'right', size:'full', spin:true, hideOff:true, rz:-30 };
+const ic = n => `<svg class="ic"><use href="#i-${n}"/></svg>`;
+
+function walls(rooms) {   // pourtours simplifiés (sans passages) : assez pour la maquette
+  const set = new Set();
+  rooms.forEach(r => { for (let i = 0; i < r.w; i++) { set.add(`h${r.x+i},${r.y}`); set.add(`h${r.x+i},${r.y+r.h}`); } for (let j = 0; j < r.h; j++) { set.add(`v${r.x},${r.y+j}`); set.add(`v${r.x+r.w},${r.y+j}`); } });
+  return [...set].map(k => { const h = k[0] === 'h', [a, b] = k.slice(1).split(',').map(Number); return { x:a, y:b, d:h ? 0 : 90 }; });
+}
+
+function chipsFor(f) {
+  const ds = devs.filter(d => d.f === f.id && !(state.hideOff && d.st === 'off'));
+  if (state.lab === 'all') return ds.map(d => ({ x:d.x, y:d.y, html:`<span class="chip ${d.st}">${ic(d.ic)}${d.v}</span>` }));
+  if (state.lab === 'icons') return ds.map(d => ({ x:d.x, y:d.y, small:true, html:`<span class="chip dot ${d.st}">${ic(d.ic)}</span>` }));
+  if (state.lab === 'active') return ds.map(d => d.st ? { x:d.x, y:d.y, html:`<span class="chip ${d.st}">${ic(d.ic)}${d.v}</span>` } : { x:d.x, y:d.y, small:true, html:`<span class="chip dot">${ic(d.ic)}</span>` });
+  // par pièce : une étiquette au centre de la pièce, alertes à part
+  const out = [];
+  f.rooms.forEach(r => {
+    const inR = ds.filter(d => d.r === r.id);
+    const lights = inR.filter(d => d.ic === 'bulb' && d.st === 'on').length, t = inR.find(d => d.t != null);
+    const alerts = inR.filter(d => d.st === 'alert');
+    let g = `<span class="n">${r.name}</span>`;
+    if (lights) g += `<span class="g on">${ic('bulb')}${lights}</span>`;
+    if (t) g += `<span class="g">${ic('thermo')}${t.v.replace(' °C','°')}</span>`;
+    if (lights || t || alerts.length) out.push({ x:r.x + r.w/2, y:r.y + r.h/2, html:`<span class="chip room">${g}</span>` });
+    alerts.forEach(a => out.push({ x:a.x, y:a.y - .8, html:`<span class="chip alert">${ic(a.ic)}${a.name || ''} · ${a.v}</span>` }));
+  });
+  return out;
+}
+
+function build() {
+  const world = document.getElementById('world');
+  let h = '';
+  floors.forEach((f, i) => {
+    h += `<div class="fl" style="transform:translateZ(${i * 200}px)"><div class="slab"></div>`;
+    f.rooms.forEach(r => h += `<div class="room ${r.heat || ''}" style="left:${r.x*P}px;top:${r.y*P}px;width:${r.w*P}px;height:${r.h*P}px"><span class="rn">${r.name}</span></div>`);
+    walls(f.rooms).forEach(w => h += `<div class="wall" style="left:${w.x*P}px;top:${w.y*P}px;width:${P}px;transform:rotateZ(${w.d}deg) rotateX(90deg)"></div>`);
+    chipsFor(f).forEach(c => h += `<div class="pin ${c.small ? 'small' : ''}" style="left:${c.x*P}px;top:${c.y*P}px"><div class="pin-in">${c.html}<i class="stem"></i></div></div>`);
+    h += `<div class="ftag"><span>${f.name}</span></div></div>`;
+  });
+  world.innerHTML = h;
+  camera();
+}
+
+function camera() {
+  const world = document.getElementById('world'), view = document.getElementById('view');
+  const rx = 62, w = view.clientWidth, hh = view.clientHeight, diag = Math.hypot(480, 320);
+  const need = diag * Math.cos(rx * Math.PI / 180) + 240 * Math.sin(rx * Math.PI / 180) + 90;
+  const sc = Math.min(w * .92 / diag, hh * .92 / need);
+  world.style.setProperty('--rz', state.rz + 'deg'); world.style.setProperty('--rx', rx + 'deg');
+  world.style.transform = `translate(-50%,-50%) scale(${sc.toFixed(3)}) rotateX(${rx}deg) rotateZ(${state.rz}deg) translateZ(-120px)`;
+}
+
+const summary = [
+  { k:'alert', ic:'gauge', t:'BROTHER-HL-3140CW', v:'Connecté', s:'Buanderie' },
+  { k:'on', ic:'bulb', t:'Salon', v:'100 %' }, { k:'on', ic:'bulb', t:'Salle à manger', v:'100 %' }, { k:'on', ic:'bulb', t:'Entrée', v:'Allumé' },
+  { k:'', ic:'thermo', t:'Salon', v:'21,5°' }, { k:'', ic:'thermo', t:'Véranda', v:'17,2°' }, { k:'', ic:'thermo', t:'Buanderie', v:'15°' },
+  { k:'', ic:'cover', t:'Volets', v:'1 ouvert · 3 fermés' },
+];
+function drawSummary() {
+  const wdg = document.getElementById('wdg'), side = document.getElementById('side');
+  wdg.querySelector('.ticker')?.remove();
+  const narrow = state.size === 'corner' && state.sum !== 'none';
+  const mode = narrow ? 'top' : state.sum;
+  wdg.className = 'wdg side-' + mode;
+  side.hidden = mode !== 'right' && mode !== 'left';
+  if (!side.hidden) {
+    const sec = (title, items, more) => `<div class="sec"><span>${title}</span>${items.map(i => `<div class="it ${i.k}">${ic(i.ic)}<span>${i.t}${i.s ? ` <small>· ${i.s}</small>` : ''}</span><b>${i.v}</b></div>`).join('')}${more ? `<div class="more">${more}</div>` : ''}</div>`;
+    side.innerHTML = `<h3>Maison Gex <small>en direct</small></h3>`
+      + sec('Alertes', summary.filter(i => i.k === 'alert'))
+      + sec('3 lumières allumées', summary.filter(i => i.k === 'on'))
+      + sec('Températures', summary.filter(i => i.ic === 'thermo'))
+      + sec('Ouvertures', summary.filter(i => i.ic === 'cover'), '3 appareils indisponibles');
+  }
+  if (mode === 'top') {
+    const items = [{ k:'alert', ic:'gauge', t:'BROTHER-HL-3140CW : connecté' }, { k:'on', ic:'bulb', t:'3 lumières allumées' }, { k:'', ic:'thermo', t:'Salon 21,5° · Véranda 17,2° · Buanderie 15°' }, { k:'', ic:'cover', t:'Volets : 1 ouvert, 3 fermés' }];
+    const one = items.map(i => `<span class="tk ${i.k}">${ic(i.ic)}${i.t}</span>`).join('');
+    const t = document.createElement('div'); t.className = 'ticker'; t.innerHTML = `<div class="track">${one}${one}</div>`;
+    wdg.appendChild(t);
+  }
+}
+
+function render() { drawSummary(); build(); sync(); }
+function sync() {
+  document.querySelectorAll('[data-lab]').forEach(b => b.classList.toggle('on', b.dataset.lab === state.lab));
+  document.querySelectorAll('[data-sum]').forEach(b => b.classList.toggle('on', b.dataset.sum === state.sum));
+  document.querySelectorAll('[data-size]').forEach(b => b.classList.toggle('on', b.dataset.size === state.size));
+  document.getElementById('cfgSum').value = state.sum;
+  document.getElementById('rot').classList.toggle('on', state.spin);
+  document.querySelector('#cfgSpin .sw').classList.toggle('on', state.spin);
+  document.querySelector('#cfgHide .sw').classList.toggle('on', state.hideOff);
+  document.getElementById('tv').classList.toggle('corner', state.size === 'corner');
+}
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('button, .row, #rot'); if (!b) return;
+  if (b.dataset.lab) state.lab = b.dataset.lab;
+  else if (b.dataset.sum) state.sum = b.dataset.sum;
+  else if (b.dataset.size) state.size = b.dataset.size;
+  else if (b.id === 'rot' || b.id === 'cfgSpin') state.spin = !state.spin;
+  else if (b.id === 'cfgHide') state.hideOff = !state.hideOff;
+  else if (b.id === 'cfgSpinBtn') { const s = b.querySelector('.sw'); s.classList.toggle('on'); document.getElementById('rot').hidden = !s.classList.contains('on'); return; }
+  else return;
+  render();
+});
+document.getElementById('cfgSum').addEventListener('change', e => { state.sum = e.target.value; render(); });
+new ResizeObserver(camera).observe(document.getElementById('view'));
+
+const t0 = Date.now();
+(function spin() { if (state.spin) { state.rz = -30 + 22 * Math.sin((Date.now() - t0) / 7000); camera(); } requestAnimationFrame(spin); })();
+render();
+</script>
+</body>
+</html>
