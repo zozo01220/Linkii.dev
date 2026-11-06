@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aperçu du plan</title>
+<style>
+  /* Aperçu de l'éditeur du plan du bâtiment (§196) : le vrai rendu du player (apps.js, haPlanApp), en pleine page, avec le plan non enregistré.
+     L'éditeur envoie les données par postMessage ({ type: 'hpl-preview', data }) ; même forme que /api/data pour le widget. */
+  html, body { margin: 0; height: 100%; background: #0B1F3A; color: #DDE3EA; font-family: "IBM Plex Sans", system-ui, sans-serif; overflow: hidden; }
+  #app { position: absolute; inset: 0; font-size: 16px; }
+  .ha-i { flex: none; width: 1.25em; height: 1.25em; fill: none; stroke: #9AAABD; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .wait { position: absolute; inset: 0; display: grid; place-items: center; color: #9AAABD; }
+</style>
+<link rel="stylesheet" href="haplan.css?v=2">
+</head>
+<body>
+<div id="app" class="widget p-full"><div class="wait">Préparation de l'aperçu…</div></div>
+<script src="apps.js?v=195"></script>
+<script>
+(function () {
+  'use strict';
+  var el = document.getElementById('app'), timers = [], stops = [], draw = null, pending = null;
+  function stop() {
+    timers.forEach(clearInterval); timers = [];
+    stops.forEach(function (f) { try { f(); } catch (e) {} }); stops = [];
+  }
+  function start() {
+    stop();
+    el.className = 'widget p-full'; el.innerHTML = '';
+    var host = {
+      el: el, item: { appId: 'ha-plan' }, settings: {}, place: 'full', compact: false, cfg: {},
+      every: function (fn, ms) { timers.push(setInterval(fn, ms)); },
+      data: function (fn) { draw = fn; if (pending) fn(pending); },
+      onStop: function (fn) { stops.push(fn); },
+      command: function () { return Promise.resolve(); },   // l'aperçu ne commande rien
+      fit: function () {}, note: function () {},
+      esc: function (s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); },
+      pad: function (n) { return (n < 10 ? '0' : '') + n; }
+    };
+    window.LinkiiApps.get('ha-plan')(host);
+  }
+  window.addEventListener('message', function (ev) {
+    if (ev.origin !== location.origin || !ev.data || ev.data.type !== 'hpl-preview') return;
+    pending = ev.data.data;
+    // une nouvelle forme du plan (options d'affichage comprises) : la scène repart de zéro
+    start();
+  });
+  if (window.parent !== window) window.parent.postMessage({ type: 'hpl-preview-ready' }, location.origin);
+})();
+</script>
+</body>
+</html>

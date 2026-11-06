@@ -377,32 +377,69 @@
       clearTimeout(toastTimer); toastTimer = setTimeout(function () { toast.className = 'hpl-toast'; }, ms || 5000);
     }
 
-    /* ----- construction de la scène (à chaque changement du plan) ----- */
+    /* ----- construction de la scène (à chaque changement du plan) -----
+       Étage en image : une plaque avec le plan. Étage dessiné (§195) : dalle, pièces, murs debout (passages et ouvertures déjà retirés par le serveur),
+       portes / fenêtres / volets dans leur mur ; une même échelle (P px par mètre) pour tous les étages dessinés. */
+    var P = 40, WH = 44;
     function build(plan) {
       var ratio = 1.6, i;
       for (i = 0; i < plan.floors.length; i++) ratio = i === 0 ? plan.floors[i].ratio : Math.max(ratio, plan.floors[i].ratio);
       var PH = Math.round(PW / ratio);
+      var drawn = plan.floors.filter(function (f) { return f.kind === 'rooms'; });
+      P = drawn.length ? Math.min.apply(null, drawn.map(function (f) { return Math.min(PW / f.w, PH / f.h); })) : 40;
+      WH = Math.round(Math.min(1.15 * P, 60));
       world.style.width = PW + 'px'; world.style.height = PH + 'px';
+      world.style.setProperty('--hpl-stem', (drawn.length ? WH + 12 : 26) + 'px');
       world.innerHTML = '';
       plan.floors.forEach(function (f, n) {
         var fl = document.createElement('div');
         fl.className = 'hpl-floor'; fl.setAttribute('data-f', f.id);
-        var pl = document.createElement('div');
-        pl.className = 'hpl-plate' + (f.img ? ' has-img' : '');
-        if (f.img) { var im = document.createElement('div'); im.className = 'hpl-img'; im.style.backgroundImage = 'url("' + f.img.replace(/"/g, '') + '")'; pl.appendChild(im); }
-        else { var nm = document.createElement('span'); nm.className = 'hpl-fname'; nm.textContent = f.name; pl.appendChild(nm); }
-        fl.appendChild(pl);
+        var host = fl;
+        if (f.kind === 'rooms') {
+          var gw = f.w * P, gh = f.h * P, gr = document.createElement('div');
+          gr.className = 'hpl-grid';
+          gr.style.left = (PW - gw) / 2 + 'px'; gr.style.top = (PH - gh) / 2 + 'px'; gr.style.width = gw + 'px'; gr.style.height = gh + 'px';
+          var slab = document.createElement('div'); slab.className = 'hpl-plate hpl-slab'; gr.appendChild(slab);
+          (f.rooms || []).forEach(function (r) {
+            var rm = document.createElement('div'); rm.className = 'hpl-room'; rm.setAttribute('data-room', r.id);
+            rm.style.left = r.x * P + 'px'; rm.style.top = r.y * P + 'px'; rm.style.width = r.w * P + 'px'; rm.style.height = r.h * P + 'px';
+            var rn = document.createElement('span'); rn.className = 'hpl-rn'; rn.textContent = r.name; rm.appendChild(rn);
+            gr.appendChild(rm);
+          });
+          function standing(cls, s) {   // élément debout sur un segment de mur
+            var w = document.createElement('div'); w.className = cls;
+            w.style.left = s.x * P + 'px'; w.style.top = s.y * P + 'px'; w.style.width = s.len * P + 'px'; w.style.height = WH + 'px';
+            w.style.transform = 'rotateZ(' + s.d + 'deg) rotateX(90deg)';
+            gr.appendChild(w); return w;
+          }
+          (f.walls || []).forEach(function (s) { standing('hpl-wall', s); });
+          plan.devices.filter(function (d) { return d.floor === f.id && d.seg; }).forEach(function (d) {
+            var o = standing('hpl-op ' + d.seg.kind, d.seg); o.setAttribute('data-o', d.id);
+            if (d.seg.kind === 'door') {
+              var leaf = document.createElement('div'); leaf.className = 'hpl-leaf';
+              leaf.style.setProperty('--swing', ((d.seg.d === 0 ? d.seg.s : -d.seg.s) * 72) + 'deg');
+              o.appendChild(leaf);
+            } else o.innerHTML = '<div class="hpl-glass">' + (d.seg.kind === 'cover' ? '<div class="hpl-shut"></div>' : '') + '</div>';
+          });
+          fl.appendChild(gr); host = gr;
+        } else {
+          var pl = document.createElement('div');
+          pl.className = 'hpl-plate' + (f.img ? ' has-img' : '');
+          if (f.img) { var im = document.createElement('div'); im.className = 'hpl-img'; im.style.backgroundImage = 'url("' + f.img.replace(/"/g, '') + '")'; pl.appendChild(im); }
+          else { var nm = document.createElement('span'); nm.className = 'hpl-fname'; nm.textContent = f.name; pl.appendChild(nm); }
+          fl.appendChild(pl);
+        }
         var tag = document.createElement('div');
         tag.className = 'hpl-ftag'; tag.innerHTML = '<span></span>'; tag.firstChild.textContent = f.name;
         fl.appendChild(tag);
         plan.devices.filter(function (d) { return d.floor === f.id; }).forEach(function (d) {
           var g = document.createElement('div'); g.className = 'hpl-glow'; g.setAttribute('data-g', d.id);
           g.style.left = d.x * 100 + '%'; g.style.top = d.y * 100 + '%';
-          fl.appendChild(g);
+          host.appendChild(g);
           var pin = document.createElement('div'); pin.className = 'hpl-pin'; pin.setAttribute('data-p', d.id);
           pin.style.left = d.x * 100 + '%'; pin.style.top = d.y * 100 + '%';
           pin.innerHTML = '<div class="hpl-pin-in"><button type="button" class="hpl-chip"></button><i class="hpl-stem"></i></div>';
-          fl.appendChild(pin);
+          host.appendChild(pin);
         });
         world.appendChild(fl);
       });
@@ -411,7 +448,7 @@
       drawBar();
     }
 
-    function floorZ(i) { return last.plan.explode ? i * GAP : i * FLAT; }
+    function floorZ(i) { var drawn = last.plan.floors.some(function (f) { return f.kind === 'rooms'; }); return last.plan.explode ? i * (GAP + (drawn ? WH : 0)) : i * (drawn ? WH + 2 : FLAT); }
     function camera() {
       if (!last || !last.plan) return;
       var floors = last.plan.floors, selI = cam.sel === 'all' ? -1 : floors.findIndex(function (f) { return f.id === cam.sel; });
@@ -422,7 +459,7 @@
         fe.className = 'hpl-floor' + (selI >= 0 && i < selI ? ' ghost' : '') + (selI >= 0 && i > selI ? ' hide' : '');
         if (selI < 0 || i <= selI) zs.push(floorZ(i));
       });
-      var z0 = Math.min.apply(null, zs), z1 = Math.max.apply(null, zs) + 40;
+      var z0 = Math.min.apply(null, zs), z1 = Math.max.apply(null, zs) + Math.max(40, WH);
       var rx = cam.rx * Math.PI / 180, diag = Math.sqrt(PW * PW + PH * PH);
       var w = view.clientWidth || 640, hh = view.clientHeight || 360;
       var need = diag * Math.cos(rx) + (z1 - z0) * Math.sin(rx) + 90;
@@ -449,15 +486,60 @@
         var g = world.querySelector('[data-g="' + d.id + '"]');
         if (g) {
           if (e.domain === 'light' && e.on && e.available !== false) {
-            var b = e.brightness == null ? 100 : e.brightness, R = (0.07 + 0.11 * b / 100) * PW, col = e.color || '#FFC870';
+            var b = e.brightness == null ? 100 : e.brightness, col = e.color || '#FFC870';
+            var R = g.parentNode.classList.contains('hpl-grid') ? (1.2 + 1.8 * b / 100) * P : (0.07 + 0.11 * b / 100) * PW;
             g.style.width = g.style.height = 2 * R + 'px'; g.style.marginLeft = g.style.marginTop = -R + 'px';
             g.style.background = 'radial-gradient(circle, ' + haRgba(col, 0.7) + ' 0%, ' + haRgba(col, 0.22) + ' 45%, ' + haRgba(col, 0) + ' 70%)'; g.style.opacity = 1;
           } else g.style.opacity = 0;
         }
+        var op = d.seg && world.querySelector('[data-o="' + d.id + '"]');
+        if (op) {   // volet qui descend, fenêtre ou porte ouverte (la porte pivote)
+          var opened = e.domain === 'binary_sensor' ? !!e.on : e.state === 'open' || e.state === 'opening';
+          op.classList.toggle('open', opened && e.available !== false);
+          var sh = op.querySelector('.hpl-shut');
+          if (sh) sh.style.height = (e.position != null ? 100 - e.position : e.state === 'closed' || e.state === 'closing' ? 100 : 0) + '%';
+        }
       });
+      paintRooms();
       drawSummary();
       if (panelId) drawSheet();
     }
+    /* pièces dessinées : teinte selon la température (carte de chaleur) et lueur des lumières allumées dans la pièce */
+    function haMix(a, b, k) {
+      var p = function (h) { var n = parseInt(String(h).replace('#', ''), 16); if (isNaN(n)) n = 0; return [n >> 16, (n >> 8) & 255, n & 255]; };
+      var A = p(a), B = p(b);
+      return 'rgb(' + A.map(function (v, i) { return Math.round(v + (B[i] - v) * k); }).join(',') + ')';
+    }
+    function roomTemp(e) {
+      if (!e || e.available === false) return null;
+      if (e.domain === 'climate') return e.current;
+      if (e.domain === 'sensor' && (e.deviceClass === 'temperature' || /°[CF]$/.test(e.unit || ''))) { var t = parseFloat(e.state); return isNaN(t) ? null : t; }
+      return null;
+    }
+    function paintRooms() {
+      var BASE = '#21406A', heat = !!last.plan.heat, rooms = {};
+      last.plan.devices.forEach(function (d) {
+        if (!d.room) return;
+        var raw = byId[d.id]; if (!raw || raw.state === 'absent') return;
+        var e = eView(raw), r = rooms[d.floor + '/' + d.room] || (rooms[d.floor + '/' + d.room] = { t: null, light: 0, col: null });
+        var t = roomTemp(e); if (t != null && r.t == null) r.t = t;
+        if (e.domain === 'light' && e.on && e.available !== false) {
+          var b = e.brightness == null ? 100 : e.brightness;
+          if (b >= r.light) { r.light = b; r.col = e.color || '#FFC870'; }
+        }
+      });
+      last.plan.floors.forEach(function (f) {
+        (f.rooms || []).forEach(function (rm) {
+          var el = world.querySelector('.hpl-floor[data-f="' + f.id + '"] [data-room="' + rm.id + '"]'); if (!el) return;
+          var r = rooms[f.id + '/' + rm.id] || {}, c = BASE;
+          if (heat && r.t != null) c = r.t < 21 ? haMix(BASE, '#2F78C4', Math.min(1, (21 - r.t) / 3) * .85) : haMix(BASE, '#C8582C', Math.min(1, (r.t - 21) / 3) * .85);
+          if (r.light) c = haMix(c.charAt(0) === '#' ? c : rgbHex(c), r.col, .18 + .32 * r.light / 100);
+          el.style.background = c;
+          el.classList.toggle('lit', !!r.light);
+        });
+      });
+    }
+    function rgbHex(c) { var m = String(c).match(/\d+/g) || [0, 0, 0]; return '#' + m.slice(0, 3).map(function (v) { return ('0' + (+v).toString(16)).slice(-2); }).join(''); }
     function haRgba(hex, a) { var n = parseInt(String(hex).replace('#', ''), 16); if (isNaN(n)) n = 0xFFC870; return 'rgba(' + (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')'; }
 
     function drawSummary() {

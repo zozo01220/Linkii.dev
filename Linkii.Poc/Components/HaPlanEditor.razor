@@ -3,11 +3,13 @@
 @inject TenantStore Store
 @inject IJSRuntime JS
 @inject Toaster Toast
+@inject HomeAssistantLive Live
 @implements IAsyncDisposable
 
-@* Éditeur d'un plan de bâtiment (§194) : fenêtre au-dessus de la page Plans. Étages du bas vers le haut ; chaque étage a un plan (image de la médiathèque)
-   sur lequel on pose les appareils du compte Home Assistant. Les positions sont des fractions du plan : l'écran garde les mêmes proportions quelle que soit sa taille.
-   Rien n'est enregistré avant « Enregistrer » : le parent reçoit le nom et le plan nettoyé. *@
+@* Éditeur d'un plan de bâtiment (§194, pièces dessinées §195) : fenêtre au-dessus de la page Plans. Étages du bas vers le haut ; chaque étage est soit une image
+   du plan (médiathèque), soit des pièces dessinées sur une grille d'un mètre : les murs se montent tout seuls, avec un passage entre pièces voisines, et
+   portes, fenêtres et volets se collent au mur le plus proche. Les positions des appareils sont des fractions du plan ou de la grille : l'écran garde les mêmes
+   proportions quelle que soit sa taille. Rien n'est enregistré avant « Enregistrer » : le parent reçoit le nom et le plan nettoyé. *@
 @if (open)
 {
     <SectionContent SectionName="overlay">
@@ -15,7 +17,7 @@
         <div class="modal app-modal picker hpe" role="dialog" aria-modal="true" aria-label="Plan du bâtiment">
             <div class="modal-head">
                 <span class="app-ico" style="--app-c:#41BDF5"><Ico Name="home" Size="22" /></span>
-                <div class="grow"><h3>@(IsNew ? "Nouveau plan" : "Plan du bâtiment")</h3><small>Un plan par étage : glissez-y les appareils de Home Assistant.</small></div>
+                <div class="grow"><h3>@(IsNew ? "Nouveau plan" : "Plan du bâtiment")</h3><small>Dessinez les pièces de chaque étage ou importez son plan, puis glissez-y les appareils de Home Assistant.</small></div>
                 <button type="button" class="modal-x" aria-label="Fermer" @onclick="Cancel"><Ico Name="x" Size="20" /></button>
             </div>
             <div class="modal-body hpe-body" @ref="root">
@@ -32,29 +34,56 @@
                             <button type="button" class="hpe-ft add" title="Ajouter un étage" @onclick="AddFloor"><Ico Name="plus" Size="14" /> Étage</button>
                         }
                     </div>
-                    <div class="hpe-stage">
-                        @if (Floor is { } fl)
-                        {
-                            <div class="hpe-plan @(fl.Img == null ? "blank" : "")" style="--r:@fl.Ratio.ToString("0.####", Inv)">
-                                @if (fl.Img != null) { <div class="hpe-img" style="background-image:url('@fl.Img')"></div> }
-                                else { <div class="hpe-blank"><b>@fl.Name</b><span>Aucun plan importé. Posez les appareils sur la grille, ou importez une image du plan.</span></div> }
-                                @foreach (var d in devs.Where(d => d.Floor == fl.Id))
-                                {
-                                    var e = Entity(d.Id);
-                                    <div class="hpe-pin @(d.Id == selId ? "sel" : "") @(e == null ? "lost" : "")" data-hp-drag="@d.Id" style="left:@((d.X * 100).ToString("0.##", Inv))%;top:@((d.Y * 100).ToString("0.##", Inv))%" title="@(e?.Name ?? d.Id)">
-                                        @Icon(e)
-                                        @if (d.Id == selId) { <span class="hpe-lab">@(e?.Name ?? d.Id)</span> }
-                                    </div>
-                                }
+                    @if (Floor is { } fl)
+                    {
+                        <div class="hpe-tb">
+                            <div class="hpe-seg" role="group" aria-label="Forme de l'étage">
+                                <button type="button" class="@(fl.Kind == "rooms" ? "on" : "")" @onclick='() => SetKind(fl, "rooms")'><Ico Name="grid" Size="14" /> Pièces dessinées</button>
+                                <button type="button" class="@(fl.Kind == "image" ? "on" : "")" @onclick='() => SetKind(fl, "image")'><Ico Name="image" Size="14" /> Image du plan</button>
                             </div>
-                            <div class="hpe-hint">Glissez un appareil de la liste sur le plan, ou glissez une pastille pour la déplacer.</div>
+                            @if (fl.Kind == "rooms")
+                            {
+                                <div class="hpe-seg" role="group" aria-label="Outil">
+                                    <button type="button" class="@(tool == "select" ? "on" : "")" title="Sélectionner, déplacer une pièce ou un appareil" @onclick='() => tool = "select"'><Ico Name="hand" Size="14" /> Sélection</button>
+                                    <button type="button" class="@(tool == "room" ? "on" : "")" title="Glisser sur la grille pour dessiner une pièce" @onclick='() => tool = "room"'><Ico Name="plus" Size="14" /> Pièce</button>
+                                    <button type="button" class="@(tool == "gap" ? "on" : "")" title="Cliquer sur un mur pour y ouvrir ou fermer un passage" @onclick='() => tool = "gap"'><Ico Name="arrow-right" Size="14" /> Passage</button>
+                                </div>
+                                <span class="grow"></span>
+                                <label class="hpe-size">Grille
+                                    <input type="number" min="@PlanGeometry.MinSize" max="@PlanGeometry.MaxSize" value="@fl.W" aria-label="Largeur en mètres" @onchange="e => Resize(fl, e, true)" />
+                                    ×
+                                    <input type="number" min="@PlanGeometry.MinSize" max="@PlanGeometry.MaxSize" value="@fl.H" aria-label="Profondeur en mètres" @onchange="e => Resize(fl, e, false)" /> m
+                                </label>
+                                @if (fl.Img != null)
+                                {
+                                    <label class="hpe-trace"><input type="checkbox" @bind="trace" /> Calque</label>
+                                }
+                            }
+                        </div>
+                    }
+                    <div class="hpe-stage">
+                        @if (Floor is { } fl2)
+                        {
+                            @if (fl2.Kind == "rooms") { @Drawn(fl2) }
+                            else
+                            {
+                                <div class="hpe-plan @(fl2.Img == null ? "blank" : "")" style="--r:@fl2.Ratio.ToString("0.####", Inv)">
+                                    @if (fl2.Img != null) { <div class="hpe-img" style="background-image:url('@fl2.Img')"></div> }
+                                    else
+                                    {
+                                        <div class="hpe-blank"><b>@fl2.Name</b><span>Aucun plan importé. Importez une image du plan dans l'onglet « Étages et pièces », ou dessinez les pièces.</span></div>
+                                    }
+                                    @foreach (var d in devs.Where(d => d.Floor == fl2.Id)) { @Pin(d) }
+                                </div>
+                                <div class="hpe-hint">Glissez un appareil de la liste sur le plan, ou glissez une pastille pour la déplacer.</div>
+                            }
                         }
                     </div>
                 </div>
                 <aside class="hpe-side">
                     <div class="hpe-stabs">
                         <button type="button" class="@(tab == "devices" ? "on" : "")" @onclick='() => tab = "devices"'>Appareils</button>
-                        <button type="button" class="@(tab == "floors" ? "on" : "")" @onclick='() => tab = "floors"'>Étages</button>
+                        <button type="button" class="@(tab == "floors" ? "on" : "")" @onclick='() => tab = "floors"'>Étages et pièces</button>
                     </div>
                     @if (tab == "devices")
                     {
@@ -67,9 +96,10 @@
                             @if (selDev is { } sd)
                             {
                                 var se = Entity(sd.Id);
+                                var room = RoomOfDev(sd);
                                 <div class="hpe-card">
                                     <span class="hpe-ic">@Icon(se)</span>
-                                    <div class="hpe-t"><b>@(se?.Name ?? sd.Id)</b><small>@sd.Id · @FloorName(sd.Floor)@(se == null ? " · introuvable dans Home Assistant" : "")</small></div>
+                                    <div class="hpe-t"><b>@(se?.Name ?? sd.Id)</b><small>@sd.Id · @FloorName(sd.Floor)@(room != null ? " · " + room.Name : "")@(sd.Seg != null ? " · sur le mur" : "")@(se == null ? " · introuvable dans Home Assistant" : "")</small></div>
                                     <button type="button" class="btn ghost sm" @onclick="() => Unplace(sd.Id)">Retirer du plan</button>
                                 </div>
                             }
@@ -86,30 +116,51 @@
                             var shown = Filtered().ToList();
                             var todo = shown.Where(e => !onPlan.Contains(e.Id)).ToList();
                             var placed = shown.Where(e => onPlan.Contains(e.Id)).ToList();
-                            <div class="hpe-sec">À placer <b>@todo.Count</b></div>
+                            <div class="hpe-sec"><span>À placer <b>@todo.Count</b></span>
+                                @if (todo.Count > 0 && floors.Any(f => f.Kind == "rooms" && f.Rooms.Count > 0))
+                                {
+                                    <button type="button" class="btn ghost sm" title="Chaque appareil dont le nom contient celui d'une pièce dessinée y est posé" @onclick="AutoPlace"><Ico Name="map-pin" Size="14" /> Placer dans leur pièce</button>
+                                }
+                            </div>
                             @if (todo.Count == 0) { <div class="hpe-none">@(shown.Count == 0 ? "Aucun appareil ne correspond." : "Tout est placé.")</div> }
                             @foreach (var e in todo.Take(Limit)) { @Row(e) }
                             @if (todo.Count > Limit) { <div class="hpe-none">@(todo.Count - Limit) autres : affinez la recherche.</div> }
-                            <div class="hpe-sec">Sur le plan <b>@placed.Count</b></div>
+                            <div class="hpe-sec"><span>Sur le plan <b>@placed.Count</b></span></div>
                             @foreach (var e in placed.Take(Limit)) { @Row(e) }
                         }
                     }
                     else
                     {
-                        <div class="hpe-note">Les étages sont rangés du bas vers le haut. Un plan est une image de la médiathèque (dessin, PDF converti, photo).</div>
+                        <div class="hpe-note">Les étages sont rangés du bas vers le haut. Un étage se dessine pièce par pièce, ou reprend une image de la médiathèque (dessin, PDF converti, photo) ; en pièces dessinées, l'image sert de calque.</div>
                         @for (var i = 0; i < floors.Count; i++)
                         {
                             var idx = i; var f = floors[idx];
                             <div class="hpe-fl @(f.Id == floorId ? "on" : "")">
                                 <input type="text" maxlength="40" value="@f.Name" aria-label="Nom de l'étage" @onchange="e => Rename(f, e)" @onfocus="() => PickFloor(f.Id)" />
                                 <div class="hpe-fa">
-                                    <button type="button" class="btn ghost sm" @onclick="() => { PickFloor(f.Id); picking = true; }"><Ico Name="image" Size="14" /> @(f.Img == null ? "Importer le plan" : "Changer le plan")</button>
+                                    <button type="button" class="btn ghost sm" @onclick="() => { PickFloor(f.Id); picking = true; }"><Ico Name="image" Size="14" /> @(f.Img == null ? (f.Kind == "rooms" ? "Importer un calque" : "Importer le plan") : "Changer l'image")</button>
                                     @if (f.Img != null) { <button type="button" class="btn ghost sm" @onclick="() => f.Img = null">Retirer l'image</button> }
                                     <span class="grow"></span>
                                     <button type="button" class="btn ghost sm icon hpe-dn" aria-label="Descendre d'un étage" disabled="@(idx == 0)" @onclick="() => Move(idx, -1)"><Ico Name="arrow-up" Size="14" /></button>
                                     <button type="button" class="btn ghost sm icon" aria-label="Monter d'un étage" disabled="@(idx == floors.Count - 1)" @onclick="() => Move(idx, 1)"><Ico Name="arrow-up" Size="14" /></button>
                                     <button type="button" class="btn ghost sm icon" aria-label="Supprimer l'étage" disabled="@(floors.Count == 1)" @onclick="() => RemoveFloor(f.Id)"><Ico Name="trash" Size="14" /></button>
                                 </div>
+                                @if (f.Id == floorId && f.Kind == "rooms")
+                                {
+                                    <div class="hpe-rooms">
+                                        <div class="hpe-sec"><span>Pièces <b>@f.Rooms.Count</b></span></div>
+                                        @if (f.Rooms.Count == 0) { <div class="hpe-none">Outil « Pièce » au-dessus du plan : glissez sur la grille pour dessiner une pièce.</div> }
+                                        @foreach (var r in f.Rooms)
+                                        {
+                                            var rr = r;
+                                            <div class="hpe-rrow @(rr.Id == selRoom ? "sel" : "")" @onclick="() => { selRoom = rr.Id; selId = null; }">
+                                                <input type="text" maxlength="30" value="@rr.Name" aria-label="Nom de la pièce" autofocus="@(rr.Id == fresh)" @onchange="e => RenameRoom(f, rr.Id, e)" />
+                                                <small>@rr.W × @rr.H m</small>
+                                                <button type="button" class="btn ghost sm icon" aria-label="Supprimer la pièce" @onclick:stopPropagation="true" @onclick="() => DeleteRoom(f, rr.Id)"><Ico Name="x" Size="14" /></button>
+                                            </div>
+                                        }
+                                    </div>
+                                }
                             </div>
                         }
                         @if (floors.Count < HomeAssistantRules.MaxPlanFloors) { <button type="button" class="btn ghost" @onclick="AddFloor"><Ico Name="plus" Size="15" /> Ajouter un étage</button> }
@@ -119,10 +170,26 @@
             <div class="modal-foot">
                 <span class="hpe-count">@devs.Count appareil@(devs.Count > 1 ? "s" : "") sur @floors.Count étage@(floors.Count > 1 ? "s" : "")</span>
                 <span class="grow"></span>
+                <button type="button" class="btn ghost" title="Voir le plan tel que l'écran l'affichera, avant d'enregistrer" disabled="@(devs.Count == 0 && floors.All(f => f.Kind != "rooms" || f.Rooms.Count == 0) && floors.All(f => f.Img == null))" @onclick="OpenPreview"><Ico Name="play" Size="15" /> Aperçu</button>
                 <button type="button" class="btn" @onclick="Cancel">Annuler</button>
                 <button type="button" class="btn primary" disabled="@(name.Trim().Length == 0)" @onclick="Apply">Enregistrer</button>
             </div>
         </div>
+        @if (previewing)
+        {
+            @* aperçu (§196) : le vrai rendu de l'écran (player/plan-preview.html, apps.js), avec le plan tel qu'il est dans l'éditeur, non enregistré *@
+            <div class="modal-backdrop hpv-backdrop" @onclick="ClosePreview"></div>
+            <div class="modal hpv" role="dialog" aria-modal="true" aria-label="Aperçu du plan">
+                <div class="modal-head">
+                    <div class="grow"><h3>Aperçu · @(name.Trim().Length > 0 ? name.Trim() : "Plan du bâtiment")</h3><small>@previewNote</small></div>
+                    <label class="hpv-opt"><input type="checkbox" checked="@pvExplode" @onchange="e => PreviewOpt(ref pvExplode, e)" /> Étages écartés</label>
+                    <label class="hpv-opt"><input type="checkbox" checked="@pvHeat" @onchange="e => PreviewOpt(ref pvHeat, e)" /> Carte de chaleur</label>
+                    <label class="hpv-opt"><input type="checkbox" checked="@pvSpin" @onchange="e => PreviewOpt(ref pvSpin, e)" /> Rotation lente</label>
+                    <button type="button" class="modal-x" aria-label="Fermer l'aperçu" @onclick="ClosePreview"><Ico Name="x" Size="20" /></button>
+                </div>
+                <div class="hpv-body"><iframe @ref="previewFrame" src="/player/plan-preview.html?v=196" title="Aperçu du plan du bâtiment"></iframe></div>
+            </div>
+        }
         @if (picking)
         {
             <MediaPicker Accept="image" Multiple="false" OnPicked="Picked" OnClose="() => picking = false" />
@@ -139,17 +206,25 @@
     [Parameter] public EventCallback OnClose { get; set; }
 
     private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
-    private static readonly (string, string)[] Cats = { ("all", "Tous"), ("light", "Lumières"), ("plug", "Prises"), ("climate", "Thermostats"), ("cover", "Volets"), ("sensor", "Capteurs"), ("lock", "Serrures") };
+    private static readonly (string, string)[] Cats = { ("all", "Tous"), ("light", "Lumières"), ("plug", "Prises"), ("climate", "Thermostats"), ("opening", "Ouvertures"), ("sensor", "Capteurs"), ("lock", "Serrures") };
     private const int Limit = 80;
 
-    private sealed class EFloor { public string Id = ""; public string Name = ""; public string? Img; public double Ratio = 1.6; }
-    private sealed class EDev { public string Id = ""; public string Floor = ""; public double X = .5, Y = .5; }
+    private sealed class EFloor
+    {
+        public string Id = ""; public string Name = ""; public string? Img; public double Ratio = 1.6;
+        public string Kind = "rooms"; public int W = PlanGeometry.DefaultW, H = PlanGeometry.DefaultH;
+        public List<PlanRoom> Rooms = new(); public List<PlanSeg> Gaps = new();
+    }
+    private sealed class EDev { public string Id = ""; public string Floor = ""; public double X = .5, Y = .5; public PlanSeg? Seg; }
 
-    private bool open, picking, inited;
+    private bool open, picking, inited, trace = true;
+    private bool previewing, pvExplode = true, pvHeat, pvSpin = true, pvSent;
+    private string previewNote = "";
+    private ElementReference previewFrame;
     private bool IsNew => string.IsNullOrWhiteSpace(Json);
     private string name = "";
-    private string tab = "devices", cat = "all", search = "", floorId = "";
-    private string? selId;
+    private string tab = "devices", cat = "all", search = "", floorId = "", tool = "select";
+    private string? selId, selRoom, fresh;
     private List<EFloor> floors = new();
     private List<EDev> devs = new();
     private List<HomeAssistantEntity> entities = new();
@@ -164,16 +239,21 @@
     private HomeAssistantEntity? Entity(string id) => entities.FirstOrDefault(e => e.Id == id);
     private int Count(string fid) => devs.Count(d => d.Floor == fid);
     private string FloorName(string fid) => floors.FirstOrDefault(f => f.Id == fid)?.Name ?? "";
+    private EFloor? FloorOf(string fid) => floors.FirstOrDefault(f => f.Id == fid);
+    private PlanRoom? RoomOfDev(EDev d) => FloorOf(d.Floor) is { Kind: "rooms" } f ? PlanGeometry.RoomAt(f.Rooms, d.X * f.W, d.Y * f.H) : null;
 
     private void Open()
     {
         var plan = HomeAssistantRules.ParsePlan(Json);
         name = Name;
-        floors = plan.Floors.Select(f => new EFloor { Id = f.Id, Name = f.Name, Img = f.Img, Ratio = f.Ratio }).ToList();
-        devs = plan.Devices.Select(d => new EDev { Id = d.Id, Floor = d.Floor, X = d.X, Y = d.Y }).ToList();
-        if (floors.Count == 0) floors.Add(new EFloor { Id = NewId(), Name = "Rez-de-chaussée" });
+        floors = plan.Floors.Select(f => new EFloor
+        {
+            Id = f.Id, Name = f.Name, Img = f.Img, Ratio = f.Ratio, Kind = f.Kind, W = f.W, H = f.H, Rooms = f.Rooms.ToList(), Gaps = f.Gaps.ToList(),
+        }).ToList();
+        devs = plan.Devices.Select(d => new EDev { Id = d.Id, Floor = d.Floor, X = d.X, Y = d.Y, Seg = d.Seg }).ToList();
+        if (floors.Count == 0) floors.Add(new EFloor { Id = NewId(), Name = "Rez-de-chaussée" });   // un nouvel étage se dessine : pas besoin d'importer de plan
         floorId = floors[0].Id;
-        selId = null; search = ""; cat = "all"; tab = "devices"; picking = false;
+        selId = null; selRoom = null; search = ""; cat = "all"; tab = "devices"; tool = floors[0].Kind == "rooms" && floors[0].Rooms.Count == 0 ? "room" : "select"; picking = false;
         // scènes et scripts n'ont pas de place sur un plan ; les entités déjà posées mais disparues de Home Assistant restent listées (en rouge)
         entities = (Store.Read(d => d.Tenant.HomeAssistant)?.Entities ?? new())
             .Where(e => e.Domain is not (HomeAssistantRules.Scene or HomeAssistantRules.Script)).OrderBy(e => e.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
@@ -184,15 +264,22 @@
     private static string NewId() => "f" + Guid.NewGuid().ToString("N")[..6];
     private void Sync() => onPlan = devs.Select(d => d.Id).ToHashSet();
 
-    private void PickFloor(string id) { floorId = id; }
+    private void PickFloor(string id)
+    {
+        if (floorId == id) return;
+        floorId = id; selRoom = null;
+        if (Floor is { Kind: "rooms" } f && f.Rooms.Count == 0) tool = "room"; else tool = "select";
+    }
 
     private static void Rename(EFloor f, ChangeEventArgs e) { var n = (e.Value?.ToString() ?? "").Trim(); if (n.Length > 0) f.Name = n; }
 
     private void AddFloor()
     {
         if (floors.Count >= HomeAssistantRules.MaxPlanFloors) return;
+        var below = floors.LastOrDefault();
         var f = new EFloor { Id = NewId(), Name = floors.Count == 0 ? "Rez-de-chaussée" : floors.Count == 1 ? "Étage" : "Étage " + floors.Count };
-        floors.Add(f); floorId = f.Id;
+        if (below is { Kind: "rooms" }) { f.W = below.W; f.H = below.H; }   // même grille que l'étage du dessous : les étages se superposent
+        floors.Add(f); floorId = f.Id; selRoom = null; tool = "room";
     }
 
     private void RemoveFloor(string id)
@@ -202,6 +289,7 @@
         devs.RemoveAll(d => d.Floor == id);
         if (floorId == id) floorId = floors[0].Id;
         if (selId != null && !devs.Any(d => d.Id == selId)) selId = null;
+        selRoom = null;
         Sync();
     }
 
@@ -212,12 +300,50 @@
         (floors[i], floors[j]) = (floors[j], floors[i]);
     }
 
+    /// <summary>Change la forme d'un étage. Les pièces restent en mémoire : on peut revenir aux pièces dessinées avant d'enregistrer.</summary>
+    private void SetKind(EFloor f, string kind)
+    {
+        if (f.Kind == kind) return;
+        f.Kind = kind;
+        if (kind == "rooms")
+        {
+            if (f.Rooms.Count == 0 && f.Img != null) f.H = Math.Clamp((int)Math.Round(f.W / f.Ratio), PlanGeometry.MinSize, PlanGeometry.MaxSize);   // grille au format du calque
+            tool = f.Rooms.Count == 0 ? "room" : "select";
+        }
+        else
+        {
+            foreach (var d in devs.Where(d => d.Floor == f.Id)) d.Seg = null;   // les ouvertures redeviennent des pastilles, à la même place
+            tool = "select";
+            if (f.Rooms.Count > 0) Toast.Ok("Les pièces dessinées ne sont pas gardées pour un étage en image du plan.");
+        }
+        selRoom = null;
+    }
+
+    /// <summary>Taille de la grille : jamais plus petite que les pièces ; les appareils gardent leur place en mètres.</summary>
+    private void Resize(EFloor f, ChangeEventArgs e, bool width)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var v)) return;
+        var min = Math.Max(PlanGeometry.MinSize, f.Rooms.Count == 0 ? 0 : width ? f.Rooms.Max(r => r.X + r.W) : f.Rooms.Max(r => r.Y + r.H));
+        v = Math.Clamp(v, min, PlanGeometry.MaxSize);
+        var old = width ? f.W : f.H;
+        foreach (var d in devs.Where(d => d.Floor == f.Id))
+            if (width) d.X = Math.Clamp(Math.Round(d.X * old / v, 4), 0, 1); else d.Y = Math.Clamp(Math.Round(d.Y * old / v, 4), 0, 1);
+        if (width) f.W = v; else f.H = v;
+        f.Ratio = Math.Round((double)f.W / f.H, 4);
+    }
+
     private void Picked(List<MediaItem> items)
     {
         picking = false;
         if (items.Count == 0 || items[0].FileName is not { Length: > 0 } fn || Floor is not { } f) return;
         f.Img = "/media/" + fn;
-        f.Ratio = items[0].Width is > 0 && items[0].Height is > 0 ? Math.Round((double)items[0].Width!.Value / items[0].Height!.Value, 4) : 1.6;
+        var ratio = items[0].Width is > 0 && items[0].Height is > 0 ? Math.Round((double)items[0].Width!.Value / items[0].Height!.Value, 4) : 1.6;
+        if (f.Kind == "rooms")
+        {
+            trace = true;
+            if (f.Rooms.Count == 0) { f.H = Math.Clamp((int)Math.Round(f.W / ratio), PlanGeometry.MinSize, PlanGeometry.MaxSize); f.Ratio = Math.Round((double)f.W / f.H, 4); }
+        }
+        else f.Ratio = ratio;
     }
 
     private void Unplace(string id) { devs.RemoveAll(d => d.Id == id); selId = null; Sync(); }
@@ -225,31 +351,109 @@
     private IEnumerable<HomeAssistantEntity> Filtered()
     {
         var q = search.Trim();
-        return entities.Where(e => (cat == "all" || CatOf(e.Domain) == cat)
+        return entities.Where(e => (cat == "all" || CatOf(e) == cat)
             && (q.Length == 0 || e.Name.Contains(q, StringComparison.OrdinalIgnoreCase) || e.Id.Contains(q, StringComparison.OrdinalIgnoreCase)));
     }
 
-    private static string CatOf(string domain) => domain switch
+    private static string CatOf(HomeAssistantEntity e) => PlanGeometry.OpeningKind(e.Domain, e.DeviceClass) != null ? "opening" : e.Domain switch
     {
         HomeAssistantRules.Light => "light",
         HomeAssistantRules.Switch or HomeAssistantRules.InputBoolean or HomeAssistantRules.Fan => "plug",
         HomeAssistantRules.Climate => "climate",
-        HomeAssistantRules.Cover => "cover",
         HomeAssistantRules.Lock => "lock",
         _ => "sensor",
     };
+
+    // ---------- pièces et ouvertures ----------
+    private string? OpeningOf(string id) => Entity(id) is { } e ? PlanGeometry.OpeningKind(e.Domain, e.DeviceClass) : null;
+
+    /// <summary>Pose un appareil à un endroit (mètres) d'un étage dessiné : une ouverture se colle au mur libre le plus proche, le reste se pose au point.</summary>
+    private void PlaceDrawn(EDev d, EFloor f, double mx, double my)
+    {
+        d.Floor = f.Id;
+        if (OpeningOf(d.Id) != null && Entity(d.Id) is { } e && f.Rooms.Count > 0)
+        {
+            var taken = f.Gaps.Concat(devs.Where(o => o != d && o.Floor == f.Id && o.Seg != null).Select(o => o.Seg!)).ToList();
+            if (PlanGeometry.Snap(f.Rooms, taken, mx, my, PlanGeometry.OpeningLen(e.Domain, e.DeviceClass)) is { } s)
+            {
+                d.Seg = s;
+                var (px, py) = PlanGeometry.Pin(s, s.S);
+                d.X = Math.Round(Math.Clamp(px / f.W, 0, 1), 4); d.Y = Math.Round(Math.Clamp(py / f.H, 0, 1), 4);
+                return;
+            }
+        }
+        d.Seg = null;
+        d.X = Math.Round(Math.Clamp(Math.Round(mx * 4) / 4 / f.W, 0, 1), 4); d.Y = Math.Round(Math.Clamp(Math.Round(my * 4) / 4 / f.H, 0, 1), 4);
+    }
+
+    private static bool Fits(EFloor f, PlanRoom r) =>
+        r.X >= 0 && r.Y >= 0 && r.W >= 1 && r.H >= 1 && r.X + r.W <= f.W && r.Y + r.H <= f.H && !f.Rooms.Any(o => o.Id != r.Id && PlanGeometry.Overlap(o, r));
+
+    /// <summary>Après un changement de pièces : passages et ouvertures qui ne sont plus sur un mur retirés (l'ouverture redevient une pastille).</summary>
+    private void Prune(EFloor f)
+    {
+        var edges = PlanGeometry.EdgeUnits(f.Rooms);
+        f.Gaps.RemoveAll(g => !PlanGeometry.Units(g).All(edges.Contains));
+        foreach (var d in devs.Where(d => d.Floor == f.Id && d.Seg != null && !PlanGeometry.Units(d.Seg).All(edges.Contains))) d.Seg = null;
+    }
+
+    private void AddAutoGaps(EFloor f, PlanRoom r)
+    {
+        var used = devs.Where(d => d.Floor == f.Id && d.Seg != null).SelectMany(d => PlanGeometry.Units(d.Seg!)).ToHashSet();
+        f.Gaps.AddRange(PlanGeometry.AutoGaps(r, f.Rooms, f.Gaps).Where(g => !PlanGeometry.Units(g).Any(used.Contains)));
+    }
+
+
+    private void RenameRoom(EFloor f, string id, ChangeEventArgs e)
+    {
+        var n = (e.Value?.ToString() ?? "").Trim();
+        var i = f.Rooms.FindIndex(r => r.Id == id);
+        if (n.Length > 0 && i >= 0) f.Rooms[i] = f.Rooms[i] with { Name = n.Length > 30 ? n[..30] : n };
+    }
+
+    private void DeleteRoom(EFloor f, string id)
+    {
+        f.Rooms.RemoveAll(r => r.Id == id);
+        if (selRoom == id) selRoom = null;
+        Prune(f);
+    }
+
+    private void AutoPlace()
+    {
+        var rooms = floors.Where(f => f.Kind == "rooms").SelectMany(f => f.Rooms.Select(r => (f, r))).ToList();
+        int n = 0, left = 0;
+        foreach (var e in Filtered().Where(e => !onPlan.Contains(e.Id)).ToList())
+        {
+            var at = PlanGeometry.MatchRoom(e.Id, e.Name, rooms.Select(x => x.r.Name).ToList());
+            if (at < 0) { left++; continue; }
+            var (f, r) = rooms[at];
+            if (!CanAdd()) break;
+            var k = devs.Count(d => d.Floor == f.Id && RoomOfDev(d)?.Id == r.Id);
+            // autour du centre de la pièce, sur deux rangées de trois, sans sortir de la pièce
+            var cx = Math.Clamp(r.X + r.W / 2.0 + (k % 3 - 1) * Math.Min(.9, r.W / 3.5), r.X + .3, r.X + r.W - .3);
+            var cy = Math.Clamp(r.Y + r.H / 2.0 + (k / 3 % 2 == 0 ? -.5 : .5) * Math.Min(1, r.H / 3.0), r.Y + .3, r.Y + r.H - .3);
+            var d = new EDev { Id = e.Id };
+            PlaceDrawn(d, f, OpeningOf(e.Id) != null ? r.X + r.W / 2.0 : cx, OpeningOf(e.Id) != null ? r.Y + r.H / 2.0 : cy);
+            devs.Add(d); n++;
+        }
+        Sync();
+        if (n == 0) Toast.Ok(left > 0 ? "Aucun appareil ne porte le nom d'une pièce dessinée." : "Rien à placer.");
+        else Toast.Ok($"{n} appareil{(n > 1 ? "s" : "")} placé{(n > 1 ? "s" : "")}" + (left > 0 ? $" · {left} sans pièce correspondante" : ""));
+    }
 
     // ---------- appelé par haplan.js ----------
     [JSInvokable]
     public Task Clicked(string id)
     {
-        if (devs.FirstOrDefault(d => d.Id == id) is { } d) { selId = id; floorId = d.Floor; tab = "devices"; }
+        if (devs.FirstOrDefault(d => d.Id == id) is { } d) { selId = id; selRoom = null; PickFloor(d.Floor); tool = "select"; tab = "devices"; }
         else if (Entity(id) != null && Floor is { } f)
         {
             if (!CanAdd()) return InvokeAsync(StateHasChanged);
             var n = devs.Count(x => x.Floor == f.Id);   // un clic pose l'appareil au centre, décalé pour ne pas empiler les pastilles
-            devs.Add(new EDev { Id = id, Floor = f.Id, X = Math.Clamp(.2 + (n % 6) * .12, 0, 1), Y = Math.Clamp(.35 + (n / 6 % 4) * .1, 0, 1) });
-            selId = id; Sync();
+            var nd = new EDev { Id = id, Floor = f.Id, X = Math.Clamp(.2 + (n % 6) * .12, 0, 1), Y = Math.Clamp(.35 + (n / 6 % 4) * .1, 0, 1) };
+            if (f.Kind == "rooms") PlaceDrawn(nd, f, nd.X * f.W, nd.Y * f.H);
+            devs.Add(nd);
+            selId = id; selRoom = null; Sync();
         }
         return InvokeAsync(StateHasChanged);
     }
@@ -258,14 +462,110 @@
     public Task Dropped(string id, double x, double y)
     {
         x = Math.Clamp(x, 0, 1); y = Math.Clamp(y, 0, 1);
-        if (devs.FirstOrDefault(d => d.Id == id) is { } d) { d.X = x; d.Y = y; }
-        else if (Entity(id) != null && Floor is { } f)
+        if (Floor is not { } f) return InvokeAsync(StateHasChanged);
+        var d = devs.FirstOrDefault(d => d.Id == id);
+        if (d == null)
         {
-            if (!CanAdd()) return InvokeAsync(StateHasChanged);
-            devs.Add(new EDev { Id = id, Floor = f.Id, X = x, Y = y });
+            if (Entity(id) == null || !CanAdd()) return InvokeAsync(StateHasChanged);
+            d = new EDev { Id = id, Floor = f.Id };
+            devs.Add(d);
             Sync();
         }
-        selId = id;
+        if (f.Kind == "rooms") PlaceDrawn(d, f, x * f.W, y * f.H);
+        else { d.Floor = f.Id; d.X = x; d.Y = y; d.Seg = null; }
+        selId = id; selRoom = null;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Pièce tracée avec l'outil « Pièce » (mètres entiers).</summary>
+    [JSInvokable]
+    public Task RoomDrawn(int x, int y, int w, int h)
+    {
+        if (Floor is not { Kind: "rooms" } f) return Task.CompletedTask;
+        if (f.Rooms.Count >= PlanGeometry.MaxRooms) { Toast.Error($"{PlanGeometry.MaxRooms} pièces au plus par étage."); return InvokeAsync(StateHasChanged); }
+        var r = new PlanRoom("r" + Guid.NewGuid().ToString("N")[..6], "Pièce " + (f.Rooms.Count + 1), x, y, w, h);
+        if (!Fits(f, r)) { Toast.Error("Une pièce ne peut pas en chevaucher une autre ni sortir de la grille."); return InvokeAsync(StateHasChanged); }
+        f.Rooms.Add(r);
+        AddAutoGaps(f, r);
+        selRoom = r.Id; selId = null; fresh = r.Id; tab = "floors"; tool = "select";
+        return InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Pièce déplacée (outil « Sélection ») : ses appareils et ses ouvertures la suivent, ses passages sont refaits avec ses nouvelles voisines.</summary>
+    [JSInvokable]
+    public Task RoomMoved(string id, int x, int y)
+    {
+        if (Floor is not { Kind: "rooms" } f) return InvokeAsync(StateHasChanged);
+        var i = f.Rooms.FindIndex(r => r.Id == id);
+        if (i < 0) return InvokeAsync(StateHasChanged);
+        var old = f.Rooms[i];
+        var moved = old with { X = x, Y = y };
+        if (moved == old) return InvokeAsync(StateHasChanged);
+        if (!Fits(f, moved)) { Toast.Error("Une pièce ne peut pas en chevaucher une autre ni sortir de la grille."); return InvokeAsync(StateHasChanged); }
+        int dx = x - old.X, dy = y - old.Y;
+        var edges = PlanGeometry.Edges(old).ToHashSet();
+        var others = PlanGeometry.EdgeUnits(f.Rooms.Where(r => r.Id != id));
+        foreach (var d in devs.Where(d => d.Floor == f.Id))
+        {
+            if (d.Seg is { } s)
+            {
+                // une ouverture du pourtour suit la pièce, sauf si elle est sur un mur commun (elle reste à la voisine)
+                if (PlanGeometry.Units(s).All(edges.Contains) && !PlanGeometry.Units(s).All(others.Contains))
+                {
+                    d.Seg = s with { X = s.X + dx, Y = s.Y + dy };
+                    d.X = Math.Clamp(Math.Round(d.X + (double)dx / f.W, 4), 0, 1); d.Y = Math.Clamp(Math.Round(d.Y + (double)dy / f.H, 4), 0, 1);
+                }
+            }
+            else if (old.Contains(d.X * f.W, d.Y * f.H) && PlanGeometry.RoomAt(f.Rooms, d.X * f.W, d.Y * f.H)?.Id == id)
+            {
+                d.X = Math.Clamp(Math.Round(d.X + (double)dx / f.W, 4), 0, 1); d.Y = Math.Clamp(Math.Round(d.Y + (double)dy / f.H, 4), 0, 1);
+            }
+        }
+        f.Gaps.RemoveAll(g => PlanGeometry.Units(g).All(edges.Contains) && PlanGeometry.Units(g).All(others.Contains));   // passages vers les anciennes voisines
+        f.Gaps = f.Gaps.Select(g => PlanGeometry.Units(g).All(edges.Contains) ? g with { X = g.X + dx, Y = g.Y + dy } : g).ToList();
+        f.Rooms[i] = moved;
+        Prune(f);
+        AddAutoGaps(f, moved);
+        selRoom = id;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Pièce agrandie ou réduite par sa poignée (coin bas-droit).</summary>
+    [JSInvokable]
+    public Task RoomResized(string id, int w, int h)
+    {
+        if (Floor is not { Kind: "rooms" } f) return InvokeAsync(StateHasChanged);
+        var i = f.Rooms.FindIndex(r => r.Id == id);
+        if (i < 0) return InvokeAsync(StateHasChanged);
+        var r = f.Rooms[i] with { W = w, H = h };
+        if (r == f.Rooms[i]) return InvokeAsync(StateHasChanged);
+        if (!Fits(f, r)) { Toast.Error("Une pièce ne peut pas en chevaucher une autre ni sortir de la grille."); return InvokeAsync(StateHasChanged); }
+        f.Rooms[i] = r;
+        Prune(f);
+        AddAutoGaps(f, r);
+        selRoom = id;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task RoomClicked(string id)
+    {
+        selRoom = string.IsNullOrEmpty(id) ? null : id;
+        if (selRoom != null) { selId = null; tab = "floors"; }
+        else selId = null;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Outil « Passage » : un clic sur un mur y ouvre un passage d'un mètre, ou referme celui qui y est.</summary>
+    [JSInvokable]
+    public Task WallClicked(double x, double y)
+    {
+        if (Floor is not { Kind: "rooms" } f) return Task.CompletedTask;
+        if (PlanGeometry.NearestEdge(f.Rooms, x, y) is not { } u) return InvokeAsync(StateHasChanged);
+        var gap = f.Gaps.FirstOrDefault(g => PlanGeometry.Units(g).Contains(u));
+        if (gap != null) f.Gaps.Remove(gap);
+        else if (devs.Any(d => d.Floor == f.Id && d.Seg != null && PlanGeometry.Units(d.Seg).Contains(u))) Toast.Ok("Une porte, une fenêtre ou un volet est posé sur ce mur.");
+        else if (f.Gaps.Count < PlanGeometry.MaxGaps) f.Gaps.Add(u.H ? new PlanSeg(u.A, u.B, 0, 1) : new PlanSeg(u.A, u.B, 90, 1));
         return InvokeAsync(StateHasChanged);
     }
 
@@ -278,23 +578,86 @@
         return false;
     }
 
+    // ---------- aperçu (§196) ----------
+    private void OpenPreview() { previewing = true; pvSent = false; previewNote = "Lecture des états de Home Assistant…"; }
+    private void ClosePreview() { previewing = false; pvSent = false; }
+
+    private void PreviewOpt(ref bool opt, ChangeEventArgs e)
+    {
+        opt = e.Value is true || e.Value?.ToString() == "true";
+        _ = SendPreview();
+    }
+
+    /// <summary>
+    /// Envoie à la page d'aperçu ce que l'écran recevrait (même forme que le fournisseur Home Assistant), avec le plan de l'éditeur et l'état du moment.
+    /// Une entité que Home Assistant ne donne pas (instance injoignable, entité disparue) est montrée grisée.
+    /// </summary>
+    private async Task SendPreview()
+    {
+        var plan = HomeAssistantRules.ParsePlan(CurrentJson());
+        IReadOnlyDictionary<string, HaState> states = new Dictionary<string, HaState>();
+        var reached = false;
+        if (Store.Read(d => d.Tenant.HomeAssistant) is { } account)
+        {
+            try
+            {
+                var read = Live.States(Store.ClientId, account);
+                if (await Task.WhenAny(read, Task.Delay(6000)) == read) { states = read.Result.States; reached = states.Count > 0; }
+            }
+            catch (Exception) { /* injoignable : appareils grisés */ }
+        }
+        var empty = new Dictionary<string, JsonElement>();
+        var all = plan.Devices.ToDictionary(d => d.Id, d => states.GetValueOrDefault(d.Id)
+            ?? (Entity(d.Id) is { } e ? new HaState(d.Id, "unavailable", e.Name, e.Unit, e.DeviceClass, empty, null) : null));
+        var view = new Dictionary<string, HaState>(all.Where(x => x.Value != null).Select(x => KeyValuePair.Create(x.Key, x.Value!)));
+        var data = new
+        {
+            title = name.Trim(), fetchedAt = DateTime.UtcNow, live = reached, decimals = "auto", dimmer = true, colors = false,
+            entities = plan.Devices.Select(d => HomeAssistantProvider.Entity(d.Id, view.GetValueOrDefault(d.Id), false)).ToList(),
+            plan = HomeAssistantProvider.PlanView(plan, view, k => k switch
+            {
+                "explode" => pvExplode ? "true" : "false", "heat" => pvHeat ? "true" : "false", "spin" => pvSpin ? "true" : "false", _ => null,
+            }),
+        };
+        previewNote = reached ? "État actuel de vos appareils · rien n'est enregistré ni commandé" : "Home Assistant injoignable : appareils grisés · rien n'est enregistré";
+        try { await JS.InvokeVoidAsync("haPlanDrag.preview", previewFrame, JsonSerializer.Serialize(data, new JsonSerializerOptions(JsonSerializerDefaults.Web))); }
+        catch (Exception x) when (x is JSException or JSDisconnectedException or InvalidOperationException) { }
+        await InvokeAsync(StateHasChanged);
+    }
+
     // ---------- enregistrement ----------
     private async Task Apply()
     {
-        var json = JsonSerializer.Serialize(new
-        {
-            floors = floors.Select(f => new { id = f.Id, name = f.Name, img = f.Img ?? "", ratio = f.Ratio }),
-            devices = devs.Select(d => new { id = d.Id, floor = d.Floor, x = d.X, y = d.Y }),
-        });
-        var (clean, _) = HomeAssistantRules.NormalizePlan(json);
+        var (clean, _) = HomeAssistantRules.NormalizePlan(CurrentJson());
         if (name.Trim().Length == 0) return;
         await OnSave.InvokeAsync((name.Trim(), clean));
+    }
+
+    /// <summary>Plan de l'éditeur en JSON (avant nettoyage).</summary>
+    private string CurrentJson()
+    {
+        return JsonSerializer.Serialize(new
+        {
+            floors = floors.Select(f => f.Kind == "rooms"
+                ? (object)new
+                {
+                    id = f.Id, name = f.Name, img = f.Img ?? "", ratio = f.Ratio, kind = "rooms", w = f.W, h = f.H,
+                    rooms = f.Rooms.Select(r => new { id = r.Id, name = r.Name, x = r.X, y = r.Y, w = r.W, h = r.H }),
+                    gaps = f.Gaps.Select(g => new { x = g.X, y = g.Y, d = g.D, len = g.Len }),
+                }
+                : new { id = f.Id, name = f.Name, img = f.Img ?? "", ratio = f.Ratio }),
+            devices = devs.Select(d => d.Seg is { } s
+                ? (object)new { id = d.Id, floor = d.Floor, x = d.X, y = d.Y, seg = new { x = s.X, y = s.Y, d = s.D, len = s.Len, s = s.S } }
+                : new { id = d.Id, floor = d.Floor, x = d.X, y = d.Y }),
+        });
     }
 
     private Task Cancel() => OnClose.InvokeAsync();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        fresh = null;
+        if (previewing && !pvSent) { pvSent = true; await SendPreview(); }
         if (!open || inited) return;
         try
         {
@@ -320,10 +683,56 @@
     }
 
     // ---------- éléments d'affichage ----------
+    private static string P(double v) => v.ToString("0.###", Inv);
+
+    /// <summary>Étage dessiné : grille, calque, pièces, murs, passages, ouvertures et pastilles. Toutes les positions sont en % de la grille.</summary>
+    private RenderFragment Drawn(EFloor f) => __builder =>
+    {
+        var walls = PlanGeometry.Walls(f.Rooms, f.Gaps, devs.Where(d => d.Floor == f.Id && d.Seg != null).Select(d => d.Seg!));
+        <div class="hpe-plan drawn tool-@tool @(f.Img != null && trace ? "traced" : "")" style="--r:@P((double)f.W / f.H);--gw:@f.W;--gh:@f.H" data-gw="@f.W" data-gh="@f.H">
+            @if (f.Img != null && trace) { <div class="hpe-img hpe-calque" style="background-image:url('@f.Img')"></div> }
+            @foreach (var r in f.Rooms)
+            {
+                <div class="hpe-room @(r.Id == selRoom ? "sel" : "")" data-hp-room="@r.Id" data-x="@r.X" data-y="@r.Y" data-w="@r.W" data-h="@r.H"
+                     style="left:@P(100.0 * r.X / f.W)%;top:@P(100.0 * r.Y / f.H)%;width:@P(100.0 * r.W / f.W)%;height:@P(100.0 * r.H / f.H)%">
+                    <span class="hpe-rn"><b>@r.Name</b><small>@r.W × @r.H m</small></span>
+                    @if (r.Id == selRoom && tool == "select") { <span class="hpe-rh" data-hp-resize="@r.Id" title="Glisser pour agrandir ou réduire"></span> }
+                </div>
+            }
+            @foreach (var w in walls) { @Seg(f, w, "hpe-wall", null) }
+            @if (tool == "gap") { foreach (var g in f.Gaps) { @Seg(f, g, "hpe-gap", null) } }
+            @foreach (var d in devs.Where(d => d.Floor == f.Id && d.Seg != null)) { @Seg(f, d.Seg!, "hpe-op " + (OpeningOf(d.Id) ?? "window"), d.Id) }
+            @foreach (var d in devs.Where(d => d.Floor == f.Id)) { @Pin(d) }
+            @if (f.Rooms.Count == 0)
+            {
+                <div class="hpe-blank"><b>@f.Name</b><span>Glissez sur la grille pour dessiner la première pièce (pas d'un mètre). Les murs se montent tout seuls.</span></div>
+            }
+        </div>
+        <div class="hpe-hint">@(tool switch
+        {
+            "room" => "Glissez sur la grille pour dessiner une pièce. Deux pièces voisines ont un passage au milieu de leur mur commun.",
+            "gap" => "Cliquez sur un mur pour y ouvrir un passage d'un mètre, ou sur un passage (en pointillés) pour le refermer.",
+            _ => "Glissez une pièce pour la déplacer, sa poignée pour la redimensionner. Portes, fenêtres et volets se collent au mur le plus proche.",
+        })</div>
+    };
+
+    private RenderFragment Seg(EFloor f, PlanSeg s, string cls, string? id) =>
+        @<i class="@cls @(s.D == 0 ? "h" : "v") @(id != null && id == selId ? "sel" : "")" title="@(id != null ? Entity(id)?.Name ?? id : null)"
+            style="left:@P(100.0 * s.X / f.W)%;top:@P(100.0 * s.Y / f.H)%;@(s.D == 0 ? $"width:{P(100.0 * s.Len / f.W)}%" : $"height:{P(100.0 * s.Len / f.H)}%")"></i>;
+
+    private RenderFragment Pin(EDev d)
+    {
+        var e = Entity(d.Id);
+        return @<div class="hpe-pin @(d.Id == selId ? "sel" : "") @(e == null ? "lost" : "") @(d.Seg != null ? "wall" : "")" data-hp-drag="@d.Id" style="left:@P(d.X * 100)%;top:@P(d.Y * 100)%" title="@(e?.Name ?? d.Id)">
+            @Icon(e)
+            @if (d.Id == selId) { <span class="hpe-lab">@(e?.Name ?? d.Id)</span> }
+        </div>;
+    }
+
     private RenderFragment Row(HomeAssistantEntity e) => @<div class="hpe-row @(onPlan.Contains(e.Id) ? "" : "todo") @(e.Id == selId ? "sel" : "")" data-hp-drag="@e.Id">
         <span class="hpe-ic">@Icon(e)</span>
         <span class="hpe-t"><b>@e.Name</b><small>@e.Id</small></span>
-        @if (onPlan.Contains(e.Id)) { <span class="hpe-where">@FloorName(devs.First(d => d.Id == e.Id).Floor)</span> }
+        @if (onPlan.Contains(e.Id) && devs.First(d => d.Id == e.Id) is var pd) { <span class="hpe-where">@(RoomOfDev(pd)?.Name ?? FloorName(pd.Floor))</span> }
     </div>;
 
     // même pictogrammes que le player (apps.js, haIcon)

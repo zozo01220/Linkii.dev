@@ -47,11 +47,26 @@ public static class HomeAssistantRules
     /// <summary>Tous les widgets Home Assistant : les sept familles et le plan du bâtiment.</summary>
     public static readonly string[] AllApps = AppIds.Append(PlanApp).ToArray();
 
-    /// <summary>Étages d'un plan : identifiant, nom, image du plan (adresse /media/…) et rapport largeur / hauteur.</summary>
-    public sealed record PlanFloor(string Id, string Name, string? Img, double Ratio);
+    /// <summary>
+    /// Étage d'un plan : identifiant, nom, image du plan (adresse /media/…) et rapport largeur / hauteur.
+    /// Kind (§195) : « image » (plan importé, appareils posés dessus) ou « rooms » (pièces dessinées sur une grille de W × H mètres ; l'image éventuelle n'est
+    /// qu'un calque dans l'éditeur). Gaps : passages entre pièces (murs ouverts sans capteur).
+    /// </summary>
+    public sealed record PlanFloor(string Id, string Name, string? Img, double Ratio)
+    {
+        public string Kind { get; init; } = "image";
+        public int W { get; init; } = PlanGeometry.DefaultW;
+        public int H { get; init; } = PlanGeometry.DefaultH;
+        public List<PlanRoom> Rooms { get; init; } = new();
+        public List<PlanSeg> Gaps { get; init; } = new();
+        public bool Drawn => Kind == "rooms";
+    }
 
-    /// <summary>Appareil posé sur un étage : position en fraction (0 à 1) de la largeur et de la hauteur du plan.</summary>
-    public sealed record PlanDevice(string Id, string Floor, double X, double Y);
+    /// <summary>Appareil posé sur un étage : position en fraction (0 à 1) de la largeur et de la hauteur du plan. Seg (étage dessiné) : mur où se colle une porte, une fenêtre ou un volet.</summary>
+    public sealed record PlanDevice(string Id, string Floor, double X, double Y)
+    {
+        public PlanSeg? Seg { get; init; }
+    }
 
     public sealed record Plan(List<PlanFloor> Floors, List<PlanDevice> Devices);
 
@@ -59,7 +74,8 @@ public static class HomeAssistantRules
 
     /// <summary>
     /// Lit un plan enregistré ; rend toujours un plan valide : étages et appareils inconnus ou en trop retirés, positions ramenées dans le plan,
-    /// image gardée seulement si c'est une adresse /media/ du site.
+    /// image gardée seulement si c'est une adresse /media/ du site. Étage dessiné : pièces hors de la grille ou qui en chevauchent une autre écartées,
+    /// passages et ouvertures gardés seulement sur un mur de pièce.
     /// </summary>
     public static Plan ParsePlan(string? json)
     {
@@ -80,17 +96,58 @@ public static class HomeAssistantRules
                         if (!img.StartsWith("/media/", StringComparison.Ordinal) || img.Contains("..") || img.Contains('?') || img.Length > 200) img = "";
                         var ratio = f.TryGetProperty("ratio", out var r) && r.ValueKind == JsonValueKind.Number && r.TryGetDouble(out var rv) ? Math.Clamp(rv, 0.5, 3) : 1.6;
                         var name = Str(f, "name").Trim();
-                        floors.Add(new(id, name.Length == 0 ? "Étage" : name.Length > 40 ? name[..40] : name, img.Length == 0 ? null : img, ratio));
+                        var floor = new PlanFloor(id, name.Length == 0 ? "Étage" : name.Length > 40 ? name[..40] : name, img.Length == 0 ? null : img, ratio);
+                        if (Str(f, "kind") == "rooms")
+                        {
+                            int gw = Math.Clamp(Int(f, "w", PlanGeometry.DefaultW), PlanGeometry.MinSize, PlanGeometry.MaxSize);
+                            int gh = Math.Clamp(Int(f, "h", PlanGeometry.DefaultH), PlanGeometry.MinSize, PlanGeometry.MaxSize);
+                            var rooms = new List<PlanRoom>();
+                            if (f.TryGetProperty("rooms", out var rs) && rs.ValueKind == JsonValueKind.Array)
+                                foreach (var x in rs.EnumerateArray())
+                                {
+                                    if (rooms.Count >= PlanGeometry.MaxRooms) break;
+                                    var rid = Str(x, "id");
+                                    var rn = Str(x, "name").Trim();
+                                    var room = new PlanRoom(rid, rn.Length == 0 ? "Pièce" : rn.Length > 30 ? rn[..30] : rn, Int(x, "x", -1), Int(x, "y", -1), Int(x, "w", 0), Int(x, "h", 0));
+                                    if (rid.Length == 0 || rid.Length > 24 || rooms.Any(o => o.Id == rid) || room.X < 0 || room.Y < 0 || room.W < 1 || room.H < 1
+                                        || room.X + room.W > gw || room.Y + room.H > gh || rooms.Any(o => PlanGeometry.Overlap(o, room))) continue;
+                                    rooms.Add(room);
+                                }
+                            var edges = PlanGeometry.EdgeUnits(rooms);
+                            var gaps = new List<PlanSeg>();
+                            var used = new HashSet<PlanGeometry.Unit>();
+                            if (f.TryGetProperty("gaps", out var gs) && gs.ValueKind == JsonValueKind.Array)
+                                foreach (var g in gs.EnumerateArray())
+                                {
+                                    if (gaps.Count >= PlanGeometry.MaxGaps) break;
+                                    if (Seg(g) is not { } s) continue;
+                                    var units = PlanGeometry.Units(s).ToList();
+                                    if (!units.All(edges.Contains) || units.Any(used.Contains)) continue;
+                                    used.UnionWith(units);
+                                    gaps.Add(s with { S = 1 });
+                                }
+                            floor = floor with { Kind = "rooms", W = gw, H = gh, Ratio = Math.Round((double)gw / gh, 4), Rooms = rooms, Gaps = gaps };
+                        }
+                        floors.Add(floor);
                     }
                 if (root.TryGetProperty("devices", out var ds) && ds.ValueKind == JsonValueKind.Array)
                     foreach (var d in ds.EnumerateArray())
                     {
                         if (devices.Count >= MaxPlanDevices) break;
                         var id = Str(d, "id");
-                        var floor = Str(d, "floor");
-                        if (!IsSupported(id) || devices.Any(x => x.Id == id) || floors.All(x => x.Id != floor)) continue;
+                        var fid = Str(d, "floor");
+                        var floor = floors.FirstOrDefault(x => x.Id == fid);
+                        if (!IsSupported(id) || devices.Any(x => x.Id == id) || floor == null) continue;
                         double Num(string k) => d.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out var n) && !double.IsNaN(n) ? Math.Clamp(n, 0, 1) : 0.5;
-                        devices.Add(new(id, floor, Math.Round(Num("x"), 4), Math.Round(Num("y"), 4)));
+                        PlanSeg? seg = null;
+                        // une ouverture n'existe que sur un étage dessiné, pour un volet ou un capteur, sur un mur libre (ni passage, ni autre ouverture)
+                        if (floor.Drawn && Domain(id) is Cover or BinarySensor && d.TryGetProperty("seg", out var sv) && Seg(sv) is { } s0)
+                        {
+                            var free = PlanGeometry.EdgeUnits(floor.Rooms);
+                            foreach (var u in floor.Gaps.Concat(devices.Where(o => o.Floor == floor.Id && o.Seg != null).Select(o => o.Seg!)).SelectMany(PlanGeometry.Units)) free.Remove(u);
+                            if (PlanGeometry.Units(s0).All(free.Contains)) seg = s0;
+                        }
+                        devices.Add(new(id, floor.Id, Math.Round(Num("x"), 4), Math.Round(Num("y"), 4)) { Seg = seg });
                     }
             }
         }
@@ -98,7 +155,37 @@ public static class HomeAssistantRules
         return new(floors, devices);
 
         static string Str(JsonElement e, string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+        static int Int(JsonElement e, string k, int def) =>
+            e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out var n) && !double.IsNaN(n) && Math.Abs(n) < 10000 ? (int)Math.Round(n) : def;
+        static PlanSeg? Seg(JsonElement g)
+        {
+            if (g.ValueKind != JsonValueKind.Object) return null;
+            int x = Int(g, "x", -1), y = Int(g, "y", -1), dd = Int(g, "d", -1), len = Int(g, "len", 1), side = Int(g, "s", 1);
+            if (x < 0 || y < 0 || dd is not (0 or 90) || len is < 1 or > PlanGeometry.MaxSize) return null;
+            return new PlanSeg(x, y, dd, len, side < 0 ? -1 : 1);
+        }
     }
+
+    /// <summary>Forme JSON d'un étage, telle qu'elle est enregistrée (les écrans reçoivent en plus les murs, voir le fournisseur).</summary>
+    public static object FloorJson(PlanFloor f) => f.Drawn
+        ? new
+        {
+            id = f.Id, name = f.Name, img = f.Img ?? "", ratio = f.Ratio, kind = f.Kind, w = f.W, h = f.H,
+            rooms = f.Rooms.Select(r => new { id = r.Id, name = r.Name, x = r.X, y = r.Y, w = r.W, h = r.H }),
+            gaps = f.Gaps.Select(g => new { x = g.X, y = g.Y, d = g.D, len = g.Len }),
+        }
+        : new { id = f.Id, name = f.Name, img = f.Img ?? "", ratio = f.Ratio };
+
+    public static object DeviceJson(PlanDevice d) => d.Seg is { } s
+        ? new { id = d.Id, floor = d.Floor, x = d.X, y = d.Y, seg = new { x = s.X, y = s.Y, d = s.D, len = s.Len, s = s.S } }
+        : new { id = d.Id, floor = d.Floor, x = d.X, y = d.Y };
+
+    /// <summary>Murs d'un étage dessiné, une fois retirés les passages et les ouvertures posées.</summary>
+    public static List<PlanSeg> WallsOf(PlanFloor f, IEnumerable<PlanDevice> devices) =>
+        f.Drawn ? PlanGeometry.Walls(f.Rooms, f.Gaps, devices.Where(d => d.Floor == f.Id && d.Seg != null).Select(d => d.Seg!)) : new();
+
+    /// <summary>Pièce où se trouve un appareil (étage dessiné), d'après sa position.</summary>
+    public static PlanRoom? RoomOf(PlanFloor f, PlanDevice d) => f.Drawn ? PlanGeometry.RoomAt(f.Rooms, d.X * f.W, d.Y * f.H) : null;
 
     /// <summary>Plan choisi par un widget « Plan du bâtiment » (réglage planId) dans les plans de l'organisation ; null s'il n'en a pas ou s'il a été supprimé.</summary>
     public static Plan? PlanOf(Tenant t, IReadOnlyDictionary<string, string>? settings) =>
@@ -114,8 +201,8 @@ public static class HomeAssistantRules
         var p = ParsePlan(json);
         var clean = JsonSerializer.Serialize(new
         {
-            floors = p.Floors.Select(f => new { id = f.Id, name = f.Name, img = f.Img ?? "", ratio = f.Ratio }),
-            devices = p.Devices.Select(d => new { id = d.Id, floor = d.Floor, x = d.X, y = d.Y }),
+            floors = p.Floors.Select(FloorJson),
+            devices = p.Devices.Select(DeviceJson),
         });
         return (p.Floors.Count == 0 ? "" : clean, string.Join(',', p.Devices.Select(d => d.Id)));
     }
@@ -665,13 +752,41 @@ public class HomeAssistantProvider(HomeAssistantClient ha, HomeAssistantLive liv
             title = rt.Get("title"), fetchedAt = DateTime.UtcNow, live = isLive,
             decimals = rt.Get("decimals", "auto"), dimmer = rt.Get("dimmer", "true") != "false", colors = rt.Get("colors") == "true",
             entities = configured.Select(id => Entity(id, states.GetValueOrDefault(id), control)).ToList(),
-            plan = plan == null ? null : new
-            {
-                floors = plan.Floors.Select(f => new { id = f.Id, name = f.Name, img = f.Img, ratio = f.Ratio }),
-                devices = plan.Devices.Select(d => new { id = d.Id, floor = d.Floor, x = d.X, y = d.Y }),
-                spin = rt.Get("spin", "true") != "false", explode = rt.Get("explode", "true") != "false", focus = rt.Get("focus", "true") != "false", labels = rt.Get("labels", "all"),
-            },
+            plan = plan == null ? null : PlanView(plan, states, k => rt.Values.GetValueOrDefault(k)),
         };
+    }
+
+    /// <summary>
+    /// Plan tel que l'écran le reçoit (aussi pour l'aperçu de l'éditeur, §196) : étages, pièces et murs calculés, appareils avec leur pièce et leur ouverture,
+    /// options d'affichage lues par <paramref name="get"/> (réglages du widget).
+    /// </summary>
+    public static object PlanView(HomeAssistantRules.Plan plan, IReadOnlyDictionary<string, HaState> states, Func<string, string?> get)
+    {
+        string Opt(string k, string def) => get(k) is { Length: > 0 } v ? v : def;
+        return new
+            {
+                // étage dessiné (§195) : pièces et murs déjà calculés (passages et ouvertures retirés) ; l'image n'y est qu'un calque de l'éditeur
+                floors = plan.Floors.Select(f => f.Drawn
+                    ? (object)new
+                    {
+                        id = f.Id, name = f.Name, img = (string?)null, ratio = f.Ratio, kind = f.Kind, w = f.W, h = f.H,
+                        rooms = f.Rooms.Select(r => new { id = r.Id, name = r.Name, x = r.X, y = r.Y, w = r.W, h = r.H }),
+                        walls = HomeAssistantRules.WallsOf(f, plan.Devices).Select(w => new { x = w.X, y = w.Y, d = w.D, len = w.Len }),
+                    }
+                    : new { id = f.Id, name = f.Name, img = f.Img, ratio = f.Ratio, kind = "image" }),
+                devices = plan.Devices.Select(d =>
+                {
+                    var f = plan.Floors.First(x => x.Id == d.Floor);
+                    var op = d.Seg == null ? null : PlanGeometry.OpeningKind(HomeAssistantRules.Domain(d.Id), states.GetValueOrDefault(d.Id)?.DeviceClass);
+                    return new
+                    {
+                        id = d.Id, floor = d.Floor, x = d.X, y = d.Y, room = HomeAssistantRules.RoomOf(f, d)?.Id,
+                        seg = d.Seg is { } s && op != null ? new { x = s.X, y = s.Y, d = s.D, len = s.Len, s = s.S, kind = op } : null,
+                    };
+                }),
+                heat = Opt("heat", "false") == "true",
+                spin = Opt("spin", "true") != "false", explode = Opt("explode", "true") != "false", focus = Opt("focus", "true") != "false", labels = Opt("labels", "all"),
+            };
     }
 
     /// <summary>Ce que l'écran reçoit pour une entité : état, valeurs utiles à son affichage, commandes permises. Absente : state « absent », rien à commander.</summary>
