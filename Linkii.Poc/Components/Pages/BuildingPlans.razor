@@ -49,7 +49,7 @@ else
                 <div class="hpp-t">
                     <b>@p.Name</b>
                     <small>@plan.Floors.Count étage@(plan.Floors.Count > 1 ? "s" : "") · @plan.Devices.Count appareil@(plan.Devices.Count > 1 ? "s" : "")</small>
-                    <small class="hpp-used"><Ico Name="monitor" Size="13" /> @(n == 0 ? "Aucun écran" : $"{n} écran{(n > 1 ? "s" : "")}")</small>
+                    <small class="hpp-used"><Ico Name="monitor" Size="13" /> @(n == 0 ? "Utilisé nulle part" : $"{n} écran{(n > 1 ? "s" : "")} ou contenu{(n > 1 ? "s" : "")}")</small>
                 </div>
                 <div class="hpp-a">
                     @if (confirmDelete == id)
@@ -61,6 +61,7 @@ else
                     else
                     {
                         <button type="button" class="btn sm" @onclick="() => Edit(p)"><Ico Name="edit" Size="14" /> Modifier</button>
+                        <button type="button" class="btn sm" title="Diffusion, borne : comment montrer ce plan" @onclick="() => viewsOf = id"><Ico Name="monitor" Size="14" /> Vues · @Math.Max(p.Views.Count, 2)</button>
                         <button type="button" class="btn ghost sm" @onclick="() => Duplicate(p)">Dupliquer</button>
                         <button type="button" class="btn ghost sm icon" title="Supprimer « @p.Name »" aria-label="Supprimer « @p.Name »" @onclick="() => confirmDelete = id"><Ico Name="trash" Size="14" /></button>
                     }
@@ -68,6 +69,11 @@ else
             </article>
         }
     </div>
+}
+
+@if (viewsOf is { } vp)
+{
+    <HaViewsEditor @key="vp" PlanId="vp" OnClose="() => viewsOf = null" OnSaved="ViewsSaved" />
 }
 
 @if (editing)
@@ -82,7 +88,9 @@ else
     private bool editing;
     private Guid? editId;
     private string editName = "", editJson = "";
-    private Guid? confirmDelete;
+    private Guid? confirmDelete, viewsOf;
+
+    private void ViewsSaved() { viewsOf = null; Live.Nudge(Store.ClientId); Load(); }
 
     protected override void OnInitialized() => Load();
 
@@ -101,6 +109,8 @@ else
         return Root.Read(db => db.Screens.Where(s => s.ClientId == cid)
             .SelectMany(s => s.Widgets.Where(w => w.AppId == HomeAssistantRules.PlanApp && Guid.TryParse(w.Settings.GetValueOrDefault("planId"), out _))
                 .Select(w => Guid.Parse(w.Settings["planId"])).Distinct())
+            .Concat(db.Media.Where(m => m.ClientId == cid && m.AppId == HomeAssistantRules.BuildingApp && Guid.TryParse(m.Settings.GetValueOrDefault("planId"), out _))
+                .Select(m => Guid.Parse(m.Settings["planId"])))   // contenus « Vue du bâtiment » (§200)
             .GroupBy(id => id).ToDictionary(g => g.Key, g => g.Count()));
     }
 
@@ -118,8 +128,11 @@ else
         var json = r.Json;
         Store.Write(d =>
         {
-            if (d.Tenant.HaPlans.FirstOrDefault(p => p.Id == id) is { } p) { p.Name = name; p.Json = json; p.UpdatedUtc = DateTime.UtcNow; }
-            else d.Tenant.HaPlans.Add(new HaPlan { Id = id, Name = name, Json = json });
+            if (d.Tenant.HaPlans.FirstOrDefault(p => p.Id == id) is not { } p) d.Tenant.HaPlans.Add(p = new HaPlan { Id = id, Name = name, Json = json });
+            p.Name = name; p.Json = json; p.UpdatedUtc = DateTime.UtcNow;
+            HaViews.Ensure(p);
+            var parsed = HomeAssistantRules.ParsePlan(json);
+            p.Views = p.Views.Select(v => HaViews.Normalize(v, parsed)).ToList();
         });
         Live.Nudge(Store.ClientId);   // les écrans qui affichent ce plan relisent ses appareils
         Toast.Ok($"Plan « {name} » enregistré.");
@@ -130,7 +143,7 @@ else
     private void Duplicate(HaPlan p)
     {
         var name = $"{p.Name} (copie)";
-        var copy = new HaPlan { Name = name, Json = p.Json };
+        var copy = new HaPlan { Name = name, Json = p.Json, Views = p.Views.Select(v => { var c = HaViews.Normalize(v, HomeAssistantRules.ParsePlan(p.Json)); c.Id = Guid.NewGuid(); return c; }).ToList() };
         Store.Write(d => d.Tenant.HaPlans.Add(copy));
         Toast.Ok($"Plan « {name} » créé.");
         Load();
@@ -139,7 +152,7 @@ else
     private void Delete(HaPlan p)
     {
         confirmDelete = null;
-        if (used.GetValueOrDefault(p.Id) is var n && n > 0) { Toast.Error($"« {p.Name} » est affiché sur {n} écran{(n > 1 ? "s" : "")} : changez leur plan d'abord."); return; }
+        if (used.GetValueOrDefault(p.Id) is var n && n > 0) { Toast.Error($"« {p.Name} » sert à {n} écran{(n > 1 ? "s" : "")} ou contenu{(n > 1 ? "s" : "")} : changez leur plan d'abord."); return; }
         Store.Write(d => d.Tenant.HaPlans.RemoveAll(x => x.Id == p.Id));
         Toast.Ok($"Plan « {p.Name} » supprimé.");
         Load();

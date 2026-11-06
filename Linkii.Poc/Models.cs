@@ -628,6 +628,38 @@ public class HaPlan
     public string Name { get; set; } = "";
     public string Json { get; set; } = "";
     public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
+    /// <summary>Façons de montrer le plan (§200) : un contenu « Vue du bâtiment » choisit plan + vue. Voir <see cref="HaViews"/>.</summary>
+    public List<HaPlanView> Views { get; set; } = new();
+}
+
+/// <summary>
+/// Vue enregistrée d'un plan du bâtiment (§200) : diffusion (visite automatique, rien à toucher) ou interactive (borne : on explore et on commande).
+/// Modifiée une fois, elle se met à jour sur tous les écrans qui l'utilisent.
+/// </summary>
+public class HaPlanView
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Name { get; set; } = "";
+    /// <summary>« signage » (diffusion) ou « interactive » (borne).</summary>
+    public string Mode { get; set; } = "signage";
+    /// <summary>Visite de la diffusion : étapes jouées en boucle ; Floor null = vue d'ensemble qui tourne.</summary>
+    public List<HaTourStep> Tour { get; set; } = new();
+    /// <summary>Étiquettes : « all » (valeur, ampoule, halo ; par défaut), « active », « room » (regroupées par pièce), « none ».</summary>
+    public string Labels { get; set; } = "all";
+    /// <summary>Résumé : right | left | top | none.</summary>
+    public string Summary { get; set; } = "right";
+    public bool Heat { get; set; }
+    public bool HideOff { get; set; } = true;
+    public bool Focus { get; set; } = true;
+    public bool Explode { get; set; } = true;
+    /// <summary>Familles commandables en mode interactif : light, switch (prises, interrupteurs), climate, cover, lock.</summary>
+    public List<string> Control { get; set; } = new() { "light", "cover", "climate" };
+}
+
+public class HaTourStep
+{
+    public string? Floor { get; set; }
+    public int Sec { get; set; } = 10;
 }
 
 public class HomeAssistantEntity

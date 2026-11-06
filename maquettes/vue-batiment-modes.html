@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette – Vue du bâtiment : vues, diffusion, borne</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root { --nuit:#0B1F3A; --acier:#5A6B80; --brume:#DDE3EA; --fond:#F5F7FA; --signal:#3B82C4; --bord2:#C5CED9; --orange:#C45A00; --lamp:#FFC24A; --ok:#1E8E5A; --mono:"JetBrains Mono",ui-monospace,Consolas,monospace; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:400 15px/1.5 "IBM Plex Sans","Segoe UI",sans-serif; color:var(--nuit); background:#8d97a6; padding:70px 24px 40px; -webkit-font-smoothing:antialiased; }
+  .ic { width:16px; height:16px; flex:none; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  button, select, input { font:inherit; }
+  [hidden] { display:none !important; }
+
+  .demo { position:fixed; top:0; left:0; right:0; z-index:60; background:#fff; border-bottom:1px solid var(--bord2); padding:10px 14px; display:flex; gap:6px; align-items:center; flex-wrap:wrap; font-size:13px; color:var(--acier); }
+  .demo b { color:var(--nuit); margin:0 6px 0 0; font-weight:500; }
+  .demo button { font-size:13px; padding:5px 12px; border-radius:99px; border:1px solid var(--bord2); background:#fff; color:var(--acier); cursor:pointer; }
+  .demo button.on { background:var(--nuit); border-color:var(--nuit); color:#fff; }
+  .demo .sp { flex:1; }
+  .demo .act { border-color:var(--orange); color:var(--orange); }
+
+  .wrap { max-width:1440px; margin:0 auto; }
+  .note { background:#fff; border-radius:6px; padding:14px 18px; font-size:14px; color:var(--acier); margin-bottom:16px; }
+  .note h2 { margin:0 0 4px; font-size:16px; font-weight:500; color:var(--nuit); }
+  .note ul { margin:6px 0 0; padding-left:20px; } .note li { margin:2px 0; } .note li b { color:var(--nuit); font-weight:500; }
+
+  /* ================= back-office : vues du plan ================= */
+  .bo { background:#fff; border-radius:6px; box-shadow:0 20px 60px rgba(11,31,58,.3); overflow:hidden; }
+  .bo-head { display:flex; align-items:center; gap:12px; padding:14px 18px; border-bottom:1px solid var(--brume); }
+  .bo-head .t { flex:1; } .bo-head h1 { margin:0; font-size:18px; font-weight:500; } .bo-head small { color:var(--acier); }
+  .tabs { display:flex; gap:2px; padding:0 18px; border-bottom:1px solid var(--brume); }
+  .tabs span { padding:11px 14px; font-size:14px; color:var(--acier); border-bottom:2px solid transparent; }
+  .tabs span.on { color:var(--nuit); border-color:var(--nuit); font-weight:500; }
+  .bo-body { display:grid; grid-template-columns:minmax(0,1fr) 420px; min-height:620px; }
+  .views { padding:18px; display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:14px; align-content:start; }
+  .vcard { border:1px solid var(--brume); border-radius:6px; overflow:hidden; cursor:pointer; background:#fff; }
+  .vcard.sel { border-color:var(--signal); box-shadow:0 0 0 1px var(--signal); }
+  .vcard .th { height:120px; background:radial-gradient(ellipse at 50% 40%,#1A3A66,#0B1F3A 72%); position:relative; display:grid; place-items:center; color:#8DA0B8; }
+  .vcard .th > svg { width:150px; height:90px; }
+  .vcard .tag { position:absolute; left:8px; top:8px; font-size:11px; padding:2px 8px; border-radius:3px; background:rgba(255,255,255,.12); color:#fff; display:inline-flex; gap:5px; align-items:center; }
+  .vcard .tag.k { background:var(--signal); }
+  .vcard .b { padding:10px 12px; } .vcard .b b { font-weight:500; display:block; } .vcard .b small { color:var(--acier); font-size:12px; line-height:1.4; display:block; }
+  .vcard .used { font-size:12px; color:var(--ok); margin-top:6px; display:flex; gap:6px; align-items:center; }
+  .vcard.new { border-style:dashed; display:grid; place-items:center; min-height:200px; color:var(--acier); }
+  .drawer { border-left:1px solid var(--brume); padding:16px 18px; display:grid; gap:14px; align-content:start; background:#fff; max-height:760px; overflow:auto; }
+  .drawer h3 { margin:0; font-size:16px; font-weight:500; display:flex; align-items:center; gap:8px; }
+  .f { display:grid; gap:5px; } .f > label { font-size:13px; font-weight:500; } .f small { font-size:12px; color:var(--acier); }
+  .f input[type=text], .f select { padding:7px 9px; border:1px solid var(--bord2); border-radius:4px; background:#fff; }
+  .seg2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .seg2 button { text-align:left; border:1px solid var(--bord2); background:#fff; border-radius:6px; padding:10px; cursor:pointer; display:grid; gap:3px; font-size:12px; color:var(--acier); }
+  .seg2 button b { font-size:14px; font-weight:500; color:var(--nuit); display:flex; gap:6px; align-items:center; }
+  .seg2 button.on { border-color:var(--signal); box-shadow:0 0 0 1px var(--signal); background:#F7FAFD; }
+  .steps { display:grid; gap:6px; }
+  .step { display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid var(--brume); border-radius:4px; font-size:13px; }
+  .step .n { font-family:var(--mono); font-size:11px; color:var(--acier); width:16px; }
+  .step .g { flex:1; } .step input { width:52px; padding:3px 6px; border:1px solid var(--bord2); border-radius:4px; text-align:right; }
+  .row { display:flex; align-items:center; gap:10px; } .row .t { flex:1; display:grid; } .row .t b { font-weight:500; font-size:13px; } .row .t small { font-size:12px; color:var(--acier); }
+  .sw { width:30px; height:17px; border-radius:99px; background:#C5CED9; position:relative; flex:none; }
+  .sw::after { content:""; position:absolute; top:2px; left:2px; width:13px; height:13px; border-radius:50%; background:#fff; }
+  .sw.on { background:var(--signal); } .sw.on::after { left:15px; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chips span { font-size:12px; padding:3px 9px; border-radius:99px; border:1px solid var(--bord2); color:var(--acier); display:inline-flex; gap:5px; align-items:center; }
+  .chips span.on { background:var(--nuit); border-color:var(--nuit); color:#fff; }
+  .chips span.lock { border-color:var(--orange); color:var(--orange); }
+  hr { border:0; border-top:1px solid var(--brume); margin:0; }
+  .where { font-size:12px; color:var(--acier); background:var(--fond); border-radius:4px; padding:8px 10px; line-height:1.5; }
+
+  /* ================= écrans ================= */
+  .frame { background:#05101F; border-radius:12px; padding:14px; box-shadow:0 20px 60px rgba(11,31,58,.35); }
+  .frame.kiosk { border-radius:22px; padding:18px; max-width:1180px; margin:0 auto; }
+  .screen { position:relative; aspect-ratio:16/9; overflow:hidden; border-radius:4px; background:radial-gradient(ellipse at 40% 42%,#1A3A66,#0B1F3A 72%); color:#DDE3EA; }
+  .frame.kiosk .screen { aspect-ratio:16/10; }
+  .stage { position:absolute; inset:0; right:28%; perspective:2600px; perspective-origin:50% 30%; overflow:hidden; }
+  .world { position:absolute; left:50%; top:52%; width:480px; height:320px; transform-style:preserve-3d; transition:transform 1.1s cubic-bezier(.2,.7,.2,1); }
+  .fl { position:absolute; inset:0; transform-style:preserve-3d; transition:opacity .6s, transform 1.1s cubic-bezier(.2,.7,.2,1); }
+  .fl.ghost { opacity:.15; } .fl.gone { opacity:0; }
+  .slab { position:absolute; inset:-8px; background:#0E2645; border:1px solid #2B4A74; transform:translateZ(-2px); }
+  .room { position:absolute; background:#21406A; box-shadow:inset 0 0 0 1px rgba(255,255,255,.08); transition:background .6s, box-shadow .4s; cursor:pointer; }
+  .room.lit { background:#6d6247; } .room.cold { background:#2a5b93; } .room.warm { background:#7a5a46; }
+  .room.sel { box-shadow:inset 0 0 0 3px #8CC0EE; }
+  .rn { position:absolute; left:7px; bottom:5px; font-size:10px; letter-spacing:.07em; text-transform:uppercase; color:#8DA0B8; white-space:nowrap; pointer-events:none; }
+  .wall { position:absolute; transform-origin:0 0; background:linear-gradient(to bottom,rgba(197,210,226,.12),rgba(197,210,226,.3)); border-bottom:2px solid rgba(235,242,250,.75); height:58px; pointer-events:none; }
+  .door { position:absolute; transform-origin:0 0; height:58px; pointer-events:none; }
+  .door i { position:absolute; left:6%; right:6%; top:0; bottom:8%; background:#8FA3BC; transform-origin:0 50%; transition:transform .7s, background .4s; }
+  .door.open i { background:#E07A2A; transform:rotateY(70deg); }
+  .ftag { position:absolute; left:0; top:100%; transform-origin:0 0; transform:translate3d(-10px,8px,0) rotateZ(calc(var(--rz)*-1)) rotateX(calc(var(--rx)*-1)); pointer-events:none; }
+  .ftag span { position:absolute; right:0; top:0; white-space:nowrap; font-size:14px; color:#9AAABD; padding:3px 9px; border-left:2px solid var(--signal); background:rgba(11,31,58,.65); }
+  .pin { position:absolute; width:0; height:0; transform-origin:0 0; transform:rotateZ(calc(var(--rz)*-1)) rotateX(calc(var(--rx)*-1)); }
+  .pin-in { position:absolute; left:0; bottom:0; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; }
+  .stem { width:2px; height:70px; background:linear-gradient(rgba(221,227,234,.8),rgba(221,227,234,.05)); }
+  .chip { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:99px; background:rgba(11,31,58,.9); border:1px solid #3A5170; color:#DDE3EA; font-size:13px; font-weight:500; white-space:nowrap; cursor:pointer; }
+  .chip .ic { width:15px; height:15px; color:#9AAABD; }
+  .chip .n { color:#9AAABD; font-weight:400; }
+  .chip .g.on, .chip .g.on .ic { color:#F5C451; }
+  .chip.on { background:#FFF3D1; color:#5B4200; border-color:var(--lamp); } .chip.on .ic { color:#B77A00; }
+  .chip.dim { opacity:.35; }
+  .glow { position:absolute; border-radius:50%; transform:translateZ(1px); pointer-events:none; transition:opacity .6s; }
+  .k-up { border:0; background:#fff; color:var(--nuit); font-size:16px; font-weight:500; padding:9px 16px 9px 12px; border-radius:6px; cursor:pointer; }
+  .chip.alert { background:var(--orange); border-color:#F6B47A; color:#fff; } .chip.alert .ic { color:#fff; }
+  .chip.big { font-size:16px; padding:7px 14px; }
+  .chip.pulse { animation:pulse 1s ease-out infinite; }
+  @keyframes pulse { 0% { box-shadow:0 0 0 0 rgba(240,140,60,.85); } 100% { box-shadow:0 0 0 22px rgba(240,140,60,0); } }
+
+  .side { position:absolute; top:0; right:0; bottom:0; width:28%; background:rgba(5,16,31,.6); border-left:1px solid #23395A; padding:16px; display:flex; flex-direction:column; gap:12px; overflow:hidden; }
+  .side h3 { margin:0; font-size:17px; font-weight:500; color:#fff; display:flex; align-items:baseline; gap:8px; }
+  .side h3 small { margin-left:auto; font-size:11px; color:#8DA0B8; font-weight:400; }
+  .sec { display:grid; gap:4px; } .sec > span { font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:#8DA0B8; }
+  .it { display:flex; align-items:center; gap:8px; font-size:13px; padding:6px 8px; border-radius:4px; background:rgba(255,255,255,.05); }
+  .it .ic { color:#9AAABD; } .it b { margin-left:auto; font-weight:500; }
+  .it.on .ic, .it.on b { color:#F5C451; } .it.alert { background:var(--orange); color:#fff; } .it.alert .ic { color:#fff; }
+
+  /* diffusion : étapes de la visite et prise de parole d'un événement */
+  .tour { position:absolute; left:14px; bottom:14px; display:flex; gap:6px; z-index:3; }
+  .tour span { font-size:12px; padding:4px 10px; border-radius:99px; background:rgba(11,31,58,.75); border:1px solid #23395A; color:#8DA0B8; position:relative; overflow:hidden; }
+  .tour span.on { color:#fff; border-color:#3B82C4; }
+  .tour span.on::after { content:""; position:absolute; left:0; bottom:0; height:2px; background:#3B82C4; animation:prog var(--d,4s) linear forwards; }
+  @keyframes prog { from { width:0; } to { width:100%; } }
+  .title { position:absolute; left:16px; top:14px; z-index:3; }
+  .title b { display:block; font-size:22px; font-weight:500; color:#fff; } .title small { color:#8DA0B8; font-size:13px; }
+  .banner { position:absolute; left:0; right:28%; top:0; z-index:4; background:var(--orange); color:#fff; padding:12px 18px; display:flex; align-items:center; gap:12px; font-size:18px; transform:translateY(-100%); transition:transform .5s; }
+  .banner.show { transform:none; } .banner .ic { width:24px; height:24px; } .banner small { margin-left:auto; font-size:13px; opacity:.85; }
+
+  /* borne */
+  .k-attract { position:absolute; inset:0; z-index:5; display:grid; place-items:end center; padding-bottom:7%; background:linear-gradient(transparent 55%,rgba(5,16,31,.75)); cursor:pointer; }
+  .k-cta { display:flex; align-items:center; gap:14px; padding:16px 28px; border-radius:99px; background:#fff; color:var(--nuit); font-size:20px; font-weight:500; box-shadow:0 10px 40px rgba(0,0,0,.4); animation:breathe 2.4s ease-in-out infinite; }
+  .k-cta .ic { width:26px; height:26px; }
+  @keyframes breathe { 50% { transform:scale(1.04); } }
+  .k-top { position:absolute; left:0; right:28%; top:0; z-index:4; display:flex; align-items:center; gap:10px; padding:12px 14px; }
+  .crumbs { display:flex; align-items:center; gap:4px; font-size:15px; }
+  .crumbs button { border:0; background:rgba(11,31,58,.8); color:#DDE3EA; padding:8px 12px; border-radius:6px; cursor:pointer; font-size:15px; }
+  .crumbs button.cur { background:#fff; color:var(--nuit); font-weight:500; }
+  .crumbs i { color:#5C7599; font-style:normal; }
+  .k-top .sp { flex:1; }
+  .idle { font-size:12px; color:#8DA0B8; background:rgba(11,31,58,.8); border:1px solid #23395A; padding:6px 10px; border-radius:99px; display:flex; gap:6px; align-items:center; }
+  .idle b { color:#fff; font-family:var(--mono); font-weight:500; }
+  .k-rail { position:absolute; left:14px; bottom:14px; z-index:4; display:flex; flex-direction:column; gap:6px; }
+  .k-rail button { min-width:150px; text-align:left; border:1px solid #3A5170; background:rgba(11,31,58,.85); color:#DDE3EA; padding:12px 14px; border-radius:8px; font-size:15px; cursor:pointer; display:flex; justify-content:space-between; gap:10px; }
+  .k-rail button small { color:#8DA0B8; } .k-rail button.on { background:#fff; color:var(--nuit); border-color:#fff; } .k-rail button.on small { color:var(--acier); }
+  .k-panel { position:absolute; top:0; right:0; bottom:0; width:28%; background:#F5F7FA; color:var(--nuit); padding:16px; display:flex; flex-direction:column; gap:10px; overflow:auto; }
+  .k-panel h3 { margin:0; font-size:19px; font-weight:500; display:flex; align-items:center; gap:8px; }
+  .k-panel .hint { font-size:13px; color:var(--acier); }
+  .k-row { display:flex; align-items:center; gap:10px; padding:12px; border-radius:8px; background:#fff; border:1px solid var(--brume); cursor:pointer; font-size:15px; min-height:52px; }
+  .k-row .ic { width:20px; height:20px; color:var(--acier); } .k-row b { margin-left:auto; font-weight:500; font-size:14px; }
+  .k-row.on { border-color:var(--lamp); } .k-row.on .ic, .k-row.on b { color:#B77A00; }
+  .k-row.alert { border-color:var(--orange); } .k-row.alert b { color:var(--orange); }
+  .k-row .tg { width:46px; height:26px; border-radius:99px; background:#C5CED9; position:relative; margin-left:auto; flex:none; }
+  .k-row .tg::after { content:""; position:absolute; top:3px; left:3px; width:20px; height:20px; border-radius:50%; background:#fff; transition:left .2s; }
+  .k-row .tg.on { background:var(--signal); } .k-row .tg.on::after { left:23px; }
+  .k-big { display:grid; gap:10px; }
+  .k-val { font-size:40px; font-weight:500; text-align:center; padding:10px 0; }
+  .k-btns { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .k-btn { padding:16px; border-radius:8px; border:1px solid var(--bord2); background:#fff; font-size:17px; font-weight:500; cursor:pointer; }
+  .k-btn.pri { background:var(--nuit); color:#fff; border-color:var(--nuit); }
+  .hold { position:relative; overflow:hidden; padding:18px; border-radius:8px; border:0; background:var(--orange); color:#fff; font-size:17px; font-weight:500; cursor:pointer; user-select:none; }
+  .hold i { position:absolute; left:0; top:0; bottom:0; width:0; background:rgba(255,255,255,.28); }
+  .hold.go i { width:100%; transition:width 1.5s linear; }
+  .back { align-self:flex-start; border:0; background:none; color:var(--signal); cursor:pointer; padding:0; font-size:14px; }
+  .vtitle { color:#fff; font-size:12px; margin:22px 0 8px; letter-spacing:.06em; text-transform:uppercase; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></symbol>
+  <symbol id="i-thermo" viewBox="0 0 24 24"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></symbol>
+  <symbol id="i-cover" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M3 8h18M3 13h18M12 13v5"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/></symbol>
+  <symbol id="i-door" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="1"/><path d="M15 12v.01"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-tv" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="1"/><path d="M8 21h8"/></symbol>
+  <symbol id="i-hand" viewBox="0 0 24 24"><path d="M8 13V5a2 2 0 0 1 4 0v6M12 11V4a2 2 0 0 1 4 0v7M16 11V6a2 2 0 0 1 4 0v8a7 7 0 0 1-7 7h-1a7 7 0 0 1-6-3l-3-5a2 2 0 0 1 3-2l2 2"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></symbol>
+</svg>
+
+<div class="demo">
+  <b>Volet</b>
+  <button data-v="bo" class="on">1. Vues du plan (back-office)</button><button data-v="tv">2. Diffusion (TV)</button><button data-v="kiosk">3. Borne (tactile)</button>
+  <span class="sp"></span>
+  <button class="act" id="evt">Simuler : porte d'entrée ouverte</button>
+</div>
+
+<div class="wrap">
+  <!-- ===================== 1. back-office ===================== -->
+  <section id="v-bo">
+    <div class="note">
+      <h2>1. Des « vues » enregistrées sur le plan</h2>
+      Le plan reste la seule source (étages, pièces, appareils). On lui ajoute des vues nommées : chacune dit <b>comment</b> le montrer. Un écran, une liste de diffusion ou une borne choisit « plan + vue ». On règle une fois, on réutilise partout ; modifier la vue met à jour tous les écrans qui l'utilisent.
+    </div>
+    <div class="bo">
+      <div class="bo-head"><div class="t"><h1>Maison Gex</h1><small>2 étages · 7 pièces · 31 appareils</small></div><button class="k-btn" style="padding:8px 14px;font-size:14px">Modifier le plan</button></div>
+      <div class="tabs"><span>Plan</span><span class="on">Vues · 3</span><span>Où il est affiché · 4 écrans</span></div>
+      <div class="bo-body">
+        <div class="views">
+          <div class="vcard sel"><div class="th"><span class="tag"><svg class="ic"><use href="#i-tv"/></svg> Diffusion</span><svg viewBox="0 0 150 90"><g fill="#21406A" stroke="#8DA0B8" stroke-width="1"><path d="M20 40l55-22 55 22-55 22z"/><path d="M20 62l55-22 55 22-55 22z" opacity=".55"/></g></svg></div>
+            <div class="b"><b>TV accueil</b><small>Visite : ensemble 12 s → Rez 10 s → Sous-sol 8 s · étiquettes par appareil · résumé à droite</small><div class="used"><svg class="ic"><use href="#i-check"/></svg> Liste « Hall d'entrée » · 2 écrans</div></div></div>
+          <div class="vcard"><div class="th"><span class="tag k"><svg class="ic"><use href="#i-hand"/></svg> Interactive</span><svg viewBox="0 0 150 90"><g fill="#21406A" stroke="#8DA0B8" stroke-width="1"><path d="M20 50l55-22 55 22-55 22z"/></g><rect x="60" y="40" width="30" height="16" rx="8" fill="#fff"/></svg></div>
+            <div class="b"><b>Borne du hall</b><small>Pièce par pièce · lumières, volets, thermostats · serrure avec appui maintenu · retour à l'accueil après 60 s</small><div class="used"><svg class="ic"><use href="#i-check"/></svg> Borne « Hall » · 1 écran</div></div></div>
+          <div class="vcard"><div class="th"><span class="tag"><svg class="ic"><use href="#i-tv"/></svg> Diffusion</span><svg viewBox="0 0 150 90"><rect x="35" y="25" width="80" height="40" fill="#2a5b93" stroke="#8DA0B8"/><rect x="35" y="25" width="40" height="40" fill="#7a5a46"/></svg></div>
+            <div class="b"><b>Chaleur du Rez</b><small>Un seul étage, vue de dessus fixe · carte de chaleur · sans résumé</small><div class="used" style="color:var(--acier)">Widget dans un coin · 1 écran</div></div></div>
+          <div class="vcard new"><span style="display:flex;gap:8px;align-items:center"><svg class="ic"><use href="#i-plus"/></svg> Nouvelle vue</span></div>
+        </div>
+        <aside class="drawer">
+          <h3>TV accueil</h3>
+          <div class="f"><label>Nom de la vue</label><input type="text" value="TV accueil"></div>
+          <div class="f"><label>Usage</label>
+            <div class="seg2"><button class="on"><b><svg class="ic"><use href="#i-tv"/></svg> Diffusion</b>Écran sans toucher : visite automatique, lisible de loin</button>
+            <button><b><svg class="ic"><use href="#i-hand"/></svg> Interactive</b>Borne tactile : on explore et on commande ; attente = diffusion</button></div></div>
+          <div class="f"><label>Visite</label>
+            <div class="steps">
+              <div class="step"><span class="n">1</span><span class="g">Vue d'ensemble · rotation lente</span><input value="12"> s</div>
+              <div class="step"><span class="n">2</span><span class="g">Rez-de-chaussée</span><input value="10"> s</div>
+              <div class="step"><span class="n">3</span><span class="g">Sous-sol garage</span><input value="8"> s</div>
+            </div>
+            <small>Glisser pour réordonner · « + Étape » : un étage, une pièce zoomée, ou la vue d'ensemble.</small></div>
+          <div class="row"><span class="t"><b>Montrer l'événement</b><small>Porte ouverte, fumée, mouvement : bandeau et zoom sur l'étage 8 s, puis la visite reprend.</small></span><span class="sw on"></span></div>
+          <hr>
+          <div class="f"><label>Étiquettes</label><select><option>Toutes : valeur, ampoule, halo</option><option>Actifs seulement</option><option>Par pièce (regroupées)</option><option>Icônes seules</option></select></div>
+          <div class="f"><label>Résumé</label><select><option>Panneau à droite</option><option>Panneau à gauche</option><option>Bandeau défilant</option><option>Masqué</option></select></div>
+          <div class="row"><span class="t"><b>Carte de chaleur</b><small>Pièces teintées selon leur température.</small></span><span class="sw"></span></div>
+          <div class="row"><span class="t"><b>Masquer les indisponibles</b></span><span class="sw on"></span></div>
+          <hr>
+          <div class="f"><label>Appareils commandables <small>(vues interactives)</small></label>
+            <div class="chips"><span class="on">Lumières</span><span class="on">Volets</span><span class="on">Thermostats</span><span>Prises</span><span class="lock"><svg class="ic"><use href="#i-lock"/></svg> Serrures · appui 1,5 s</span></div></div>
+          <div class="where"><b>Où l'utiliser</b> : contenu « Vue du bâtiment » d'une liste de diffusion (durée = visite complète, 30 s), widget d'écran (version compacte selon la taille), ou borne interactive.</div>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== 2. diffusion ===================== -->
+  <section id="v-tv" hidden>
+    <div class="note">
+      <h2>2. Mode diffusion : une visite scénarisée</h2>
+      <ul>
+        <li><b>Contenu de liste « Vue du bâtiment »</b> en pleine page, avec sa durée (la visite complète), comme une composition. Plus de 3D tassée dans un coin.</li>
+        <li><b>Visite</b> : vue d'ensemble qui tourne doucement, puis chaque étage vu de près, puis on recommence. Les étapes en bas montrent où on en est.</li>
+        <li><b>Événement</b> (bouton orange en haut) : bandeau, zoom sur l'étage concerné, pastille qui pulse ; la visite reprend 8 s plus tard.</li>
+        <li>Étiquettes par appareil comme aujourd'hui : pourcentage, ampoule allumée ou éteinte, halo des lumières ; résumé à droite.</li>
+      </ul>
+    </div>
+    <div class="frame"><div class="screen" id="tv">
+      <div class="stage"><div class="world"></div></div>
+      <div class="title"><b>Maison Gex</b><small>en direct</small></div>
+      <div class="banner"><svg class="ic"><use href="#i-door"/></svg> Porte d'entrée ouverte <small>Rez-de-chaussée · il y a 2 s</small></div>
+      <div class="tour"></div>
+      <aside class="side"></aside>
+    </div></div>
+  </section>
+
+  <!-- ===================== 3. borne ===================== -->
+  <section id="v-kiosk" hidden>
+    <div class="note">
+      <h2>3. Mode interactif : la borne</h2>
+      <ul>
+        <li><b>Attente</b> = la visite de diffusion, avec « Touchez l'écran ». Touchez pour entrer.</li>
+        <li><b>Parcours</b> : Maison → étage (rail à gauche) → pièce (toucher une pièce sur le plan ou dans la liste) → appareil. Bouton <b>‹ Retour</b> en haut à gauche (remonte d'un niveau : appareil → pièce → étage → accueil), fil d'Ariane à côté, et rail des étages toujours visible pour changer d'étage depuis une pièce.</li>
+        <li><b>Commandes</b> à la taille du doigt ; la serrure demande un <b>appui maintenu 1,5 s</b> (comme le bouton d'urgence). Seuls les appareils cochés dans la vue sont commandables.</li>
+        <li><b>Retour à l'accueil</b> après 60 s sans toucher (compte à rebours en haut à droite) ; accéléré à 15 s dans la maquette.</li>
+      </ul>
+    </div>
+    <div class="frame kiosk"><div class="screen" id="ks">
+      <div class="stage"><div class="world"></div></div>
+      <div class="k-top" hidden><button class="k-up" data-k="up">‹ Retour</button><div class="crumbs"></div><span class="sp"></span><span class="idle"><svg class="ic"><use href="#i-clock"/></svg> Accueil dans <b>15</b> s</span></div>
+      <div class="k-rail" hidden></div>
+      <aside class="side"></aside>
+      <aside class="k-panel" hidden></aside>
+      <div class="k-attract"><span class="k-cta"><svg class="ic"><use href="#i-hand"/></svg> Touchez l'écran pour piloter la maison</span></div>
+    </div></div>
+  </section>
+</div>
+
+<script>
+/* ---------- données d'exemple : Maison Gex ---------- */
+const floors = [
+  { id:'ss', name:'Sous-sol garage', rooms:[ { id:'garage', name:'Garage', x:0, y:0, w:7, h:8 }, { id:'buand', name:'Buanderie', x:7, y:2, w:5, h:6 } ] },
+  { id:'rdc', name:'Rez-de-chaussée', rooms:[ { id:'entree', name:'Entrée', x:0, y:0, w:3, h:4 }, { id:'cuisine', name:'Cuisine', x:3, y:0, w:6, h:2 },
+      { id:'sam', name:'Salle à manger', x:5, y:2, w:4, h:6 }, { id:'salon', name:'Salon', x:0, y:4, w:5, h:4 }, { id:'ver', name:'Véranda', x:9, y:2, w:3, h:6 } ] }
+];
+const devs = [
+  { id:'l-entree', x:1.5, y:1.4, bri:70, f:'rdc', r:'entree', ic:'bulb', name:'Entrée', kind:'light', on:true },
+  { id:'porte', x:0.4, y:1.5, f:'rdc', r:'entree', ic:'door', name:"Porte d'entrée", kind:'door', open:false },
+  { id:'serrure', x:1.2, y:3, f:'rdc', r:'entree', ic:'lock', name:"Serrure d'entrée", kind:'lock', locked:true },
+  { id:'l-cuis', x:6, y:1, f:'rdc', r:'cuisine', ic:'bulb', name:'Spots cuisine', kind:'light', on:false },
+  { id:'v-cuis', x:4.2, y:0.5, f:'rdc', r:'cuisine', ic:'cover', name:'Volet cuisine', kind:'cover', pos:0 },
+  { id:'l-sam', x:7, y:4.5, bri:100, f:'rdc', r:'sam', ic:'bulb', name:'Suspension', kind:'light', on:true },
+  { id:'v-sam', x:7, y:7.4, f:'rdc', r:'sam', ic:'cover', name:'Volet salle à manger', kind:'cover', pos:100 },
+  { id:'l-salon', x:2.5, y:6, bri:80, f:'rdc', r:'salon', ic:'bulb', name:'Lampadaire', kind:'light', on:true },
+  { id:'t-salon', x:1, y:5, f:'rdc', r:'salon', ic:'thermo', name:'Thermostat salon', kind:'climate', cur:21.5, set:21 },
+  { id:'t-ver', x:10.5, y:6.5, f:'rdc', r:'ver', ic:'thermo', name:'Température véranda', kind:'temp', cur:17.2 },
+  { id:'l-ver', x:10.5, y:3.5, f:'rdc', r:'ver', ic:'bulb', name:'Véranda', kind:'light', on:false },
+  { id:'l-gar', x:3.5, y:3, f:'ss', r:'garage', ic:'bulb', name:'Garage', kind:'light', on:false },
+  { id:'t-buand', x:9.5, y:4, f:'ss', r:'buand', ic:'thermo', name:'Température buanderie', kind:'temp', cur:15 },
+  { id:'p-buand', x:9, y:6.5, f:'ss', r:'buand', ic:'plug', name:'Lave-linge', kind:'plug', on:true },
+];
+const P = 40, ic = n => `<svg class="ic"><use href="#i-${n}"/></svg>`;
+const fl = id => floors.find(f => f.id === id), room = (f, r) => fl(f).rooms.find(x => x.id === r);
+const fmt = n => String(n).replace('.', ',');
+function val(d) {
+  switch (d.kind) {
+    case 'light': return d.on ? (d.bri != null ? d.bri + ' %' : 'Allumé') : 'Éteint';
+    case 'plug': return d.on ? 'Allumé' : 'Éteint';
+    case 'door': return d.open ? 'Ouverte' : 'Fermée';
+    case 'lock': return d.locked ? 'Verrouillée' : 'Déverrouillée';
+    case 'cover': return d.pos === 0 ? 'Fermé' : d.pos === 100 ? 'Ouvert' : d.pos + ' %';
+    default: return fmt(d.cur) + '°';
+  }
+}
+function roomInfo(f, r) {
+  const ds = devs.filter(d => d.f === f && d.r === r);
+  return { lights: ds.filter(d => d.kind === 'light' && d.on).length, t: (ds.find(d => d.cur != null) || {}).cur, alert: ds.filter(d => (d.kind === 'door' && d.open) || (d.kind === 'lock' && !d.locked)) };
+}
+
+/* ---------- scène 3D (simplifiée) ---------- */
+function scene(host) {
+  const world = host.querySelector('.world'), stage = host.querySelector('.stage');
+  const cam = { rz:-30, rx:60, focus:null, room:null };
+  function walls(rooms) {
+    const set = new Set();
+    rooms.forEach(r => { for (let i = 0; i < r.w; i++) { set.add(`h${r.x+i},${r.y}`); set.add(`h${r.x+i},${r.y+r.h}`); } for (let j = 0; j < r.h; j++) { set.add(`v${r.x},${r.y+j}`); set.add(`v${r.x+r.w},${r.y+j}`); } });
+    set.delete('v0,1'); ['v3,1','h1,4','v5,5','h6,2','v9,4','v7,4'].forEach(k => set.delete(k));   // passages et porte
+    return [...set].map(k => { const h = k[0] === 'h', [a, b] = k.slice(1).split(',').map(Number); return { x:a, y:b, d:h ? 0 : 90 }; });
+  }
+  function build() {
+    let h = '';
+    floors.forEach((f, i) => {
+      h += `<div class="fl" data-f="${f.id}"><div class="slab"></div>`;
+      f.rooms.forEach(r => h += `<div class="room" data-r="${f.id}/${r.id}" style="left:${r.x*P}px;top:${r.y*P}px;width:${r.w*P}px;height:${r.h*P}px"><span class="rn">${r.name}</span></div>`);
+      walls(f.rooms).forEach(w => h += `<div class="wall" style="left:${w.x*P}px;top:${w.y*P}px;width:${P}px;transform:rotateZ(${w.d}deg) rotateX(90deg)"></div>`);
+      if (f.id === 'rdc') h += `<div class="door" data-door style="left:0;top:${P}px;width:${P}px;transform:rotateZ(90deg) rotateX(90deg)"><i></i></div>`;
+      devs.filter(d => d.f === f.id).forEach(d => {
+        if (d.kind === 'light') h += `<div class="glow" data-g="${d.id}" style="left:${d.x*P}px;top:${d.y*P}px"></div>`;
+        h += `<div class="pin" data-pin="${d.id}" style="left:${d.x*P}px;top:${d.y*P}px"><div class="pin-in"><span class="chip" data-d="${d.id}"></span><i class="stem"></i></div></div>`;
+      });
+      h += `<div class="ftag"><span>${f.name}</span></div></div>`;
+    });
+    world.innerHTML = h;
+  }
+  function paint() {
+    floors.forEach(f => f.rooms.forEach(r => {
+      const info = roomInfo(f.id, r.id), el = world.querySelector(`[data-r="${f.id}/${r.id}"]`);
+      el.className = 'room' + (info.lights ? ' lit' : info.t != null && info.t < 19 ? ' cold' : '') + (cam.room === `${f.id}/${r.id}` ? ' sel' : '');
+    }));
+    devs.forEach(d => {   // comme aujourd'hui : une pastille par appareil avec sa valeur, ampoule allumée en jaune, halo des lumières
+      const chip = world.querySelector(`[data-d="${d.id}"]`), alert = (d.kind === 'door' && d.open) || (d.kind === 'lock' && !d.locked);
+      const st = alert ? 'alert pulse' : (d.kind === 'light' || d.kind === 'plug') && d.on ? 'on' : '';
+      const other = cam.room && `${d.f}/${d.r}` !== cam.room;
+      chip.className = 'chip ' + st + (cam.focus && !cam.room ? ' big' : '') + (other ? ' dim' : '');
+      chip.innerHTML = ic(d.ic) + (alert ? d.name + ' · ' : '') + val(d);
+      const g = world.querySelector(`[data-g="${d.id}"]`);
+      if (g) { const R = (1.1 + 1.8 * (d.bri || 100) / 100) * P; g.style.cssText += `;width:${2*R}px;height:${2*R}px;margin:${-R}px 0 0 ${-R}px;background:radial-gradient(circle,rgba(255,200,112,.7) 0%,rgba(255,200,112,.22) 45%,rgba(255,200,112,0) 70%);opacity:${d.on ? 1 : 0}`; }
+    });
+    const door = world.querySelector('[data-door]'); if (door) door.classList.toggle('open', devs.find(d => d.id === 'porte').open);
+  }
+  function camera() {
+    const f = cam.focus, idx = f ? floors.findIndex(x => x.id === f) : -1;
+    floors.forEach((x, i) => {
+      const el = world.querySelector(`[data-f="${x.id}"]`);
+      el.style.transform = `translateZ(${f ? 0 : i * 230}px)`;
+      el.className = 'fl' + (f && x.id !== f ? (i < idx ? ' gone' : ' gone') : '');
+    });
+    const w = stage.clientWidth, hh = stage.clientHeight, diag = Math.hypot(480, 320);
+    const rx = f ? 48 : cam.rx, need = diag * Math.cos(rx * Math.PI / 180) + (f ? 60 : 290) * Math.sin(rx * Math.PI / 180) + 90;
+    let sc = Math.min(w * .9 / diag, hh * .9 / need) * (f ? 1.15 : 1);
+    let tx = 0, ty = 0;
+    if (cam.room) { const [fid, rid] = cam.room.split('/'), r = room(fid, rid); sc *= 1; tx = 240 - (r.x + r.w/2) * P; ty = 160 - (r.y + r.h/2) * P; }
+    world.style.setProperty('--rz', cam.rz + 'deg'); world.style.setProperty('--rx', rx + 'deg');
+    world.style.transform = `translate(-50%,-50%) scale(${sc.toFixed(3)}) rotateX(${rx}deg) rotateZ(${cam.rz}deg) translate(${tx}px,${ty}px) translateZ(${f ? -30 : -140}px)`;
+  }
+  build(); paint(); camera();
+  return { cam, paint, camera, world };
+}
+
+function summary(side, title) {
+  const lights = devs.filter(d => d.kind === 'light' && d.on), alerts = devs.filter(d => (d.kind === 'door' && d.open) || (d.kind === 'lock' && !d.locked));
+  side.innerHTML = `<h3>${title}<small>en direct</small></h3>`
+    + (alerts.length ? `<div class="sec"><span>Alertes</span>${alerts.map(d => `<div class="it alert">${ic(d.ic)}${d.name}<b>${val(d)}</b></div>`).join('')}</div>` : '')
+    + `<div class="sec"><span>${lights.length} lumières allumées</span>${lights.map(d => `<div class="it on">${ic('bulb')}${room(d.f, d.r).name}<b>Allumé</b></div>`).join('')}</div>`
+    + `<div class="sec"><span>Températures</span>${devs.filter(d => d.cur != null).map(d => `<div class="it">${ic('thermo')}${room(d.f, d.r).name}<b>${fmt(d.cur)}°</b></div>`).join('')}</div>`
+    + `<div class="sec"><span>Ouvertures</span><div class="it">${ic('cover')}Volets<b>1 ouvert · 1 fermé</b></div></div>`;
+}
+
+/* ---------- 2. diffusion : visite ---------- */
+const TOUR = [ { label:"Vue d'ensemble", focus:null, s:6 }, { label:'Rez-de-chaussée', focus:'rdc', s:4 }, { label:'Sous-sol garage', focus:'ss', s:4 } ];
+const tv = scene(document.getElementById('tv'));
+let tvStep = 0, tvTimer = 0, tvEvent = false;
+function tvGo(i) {
+  tvStep = i % TOUR.length; const st = TOUR[tvStep];
+  tv.cam.focus = st.focus; tv.camera(); tv.paint();
+  const tour = document.querySelector('#tv .tour');
+  tour.innerHTML = TOUR.map((t, k) => `<span class="${k === tvStep ? 'on' : ''}" style="--d:${t.s}s">${t.label}</span>`).join('');
+  clearTimeout(tvTimer); tvTimer = setTimeout(() => { if (!tvEvent) tvGo(tvStep + 1); }, st.s * 1000);
+}
+
+/* ---------- 3. borne ---------- */
+const KS = document.getElementById('ks'), ks = scene(KS);
+const K = { on:false, floor:null, room:null, dev:null, idle:15, timer:0 };
+function kTouch() { K.idle = 15; }
+function kEnter() { K.on = true; K.floor = 'rdc'; K.room = null; K.dev = null; kTouch(); kRender(); }
+function kHome() { K.on = false; K.floor = K.room = K.dev = null; kRender(); }
+function kRender() {
+  KS.querySelector('.k-attract').hidden = K.on;
+  KS.querySelector('.k-top').hidden = !K.on; KS.querySelector('.k-rail').hidden = !K.on; KS.querySelector('.k-panel').hidden = !K.on;
+  KS.querySelector('.side').hidden = K.on;
+  ks.cam.focus = K.on ? K.floor : null; ks.cam.room = K.on && K.room ? `${K.floor}/${K.room}` : null; ks.camera(); ks.paint();
+  if (!K.on) { summary(KS.querySelector('.side'), 'Maison Gex'); return; }
+  const crumbs = [`<button data-k="home">Maison</button>`];
+  crumbs.push(`<i>›</i><button data-k="floor" class="${!K.room ? 'cur' : ''}">${fl(K.floor).name}</button>`);
+  if (K.room) crumbs.push(`<i>›</i><button data-k="room" class="${!K.dev ? 'cur' : ''}">${room(K.floor, K.room).name}</button>`);
+  if (K.dev) crumbs.push(`<i>›</i><button class="cur">${devs.find(d => d.id === K.dev).name}</button>`);
+  KS.querySelector('.crumbs').innerHTML = crumbs.join('');
+  KS.querySelector('.k-rail').innerHTML = floors.slice().reverse().map(f => `<button data-floor="${f.id}" class="${f.id === K.floor ? 'on' : ''}">${f.name}<small>${f.rooms.length} pièces</small></button>`).join('');
+  const p = KS.querySelector('.k-panel');
+  if (K.dev) p.innerHTML = devPanel(devs.find(d => d.id === K.dev));
+  else if (K.room) p.innerHTML = `<button class="back" data-k="floor">‹ ${fl(K.floor).name}</button><h3>${room(K.floor, K.room).name}</h3><span class="hint">Touchez un appareil pour le commander.</span>` + devs.filter(d => d.f === K.floor && d.r === K.room).map(devRow).join('');
+  else p.innerHTML = `<h3>${fl(K.floor).name}</h3><span class="hint">Touchez une pièce, ici ou sur le plan.</span>` + fl(K.floor).rooms.map(r => {
+      const i = roomInfo(K.floor, r.id);
+      return `<div class="k-row ${i.alert.length ? 'alert' : i.lights ? 'on' : ''}" data-room="${r.id}">${ic(i.alert.length ? 'door' : i.lights ? 'bulb' : 'thermo')}${r.name}<b>${i.alert.length ? i.alert[0].name + ' ouverte' : [i.lights ? i.lights + ' allumée' + (i.lights > 1 ? 's' : '') : '', i.t != null ? fmt(i.t) + '°' : ''].filter(Boolean).join(' · ') || '—'}</b></div>`;
+    }).join('');
+}
+function devRow(d) {
+  const quick = d.kind === 'light' || d.kind === 'plug';
+  return `<div class="k-row ${d.on ? 'on' : ''} ${(d.kind === 'door' && d.open) || (d.kind === 'lock' && !d.locked) ? 'alert' : ''}" data-dev="${d.id}">${ic(d.ic)}${d.name}${quick ? `<span class="tg ${d.on ? 'on' : ''}" data-toggle="${d.id}"></span>` : `<b>${val(d)}</b>`}</div>`;
+}
+function devPanel(d) {
+  let h = `<button class="back" data-k="room">‹ ${room(d.f, d.r).name}</button><h3>${ic(d.ic)}${d.name}</h3>`;
+  if (d.kind === 'climate') h += `<div class="k-big"><span class="hint">Température de la pièce ${fmt(d.cur)}°</span><div class="k-val">${fmt(d.set)}°</div><div class="k-btns"><button class="k-btn" data-set="-0.5">−</button><button class="k-btn" data-set="0.5">+</button></div></div>`;
+  else if (d.kind === 'cover') h += `<div class="k-big"><div class="k-val">${val(d)}</div><div class="k-btns"><button class="k-btn" data-pos="100">▲ Ouvrir</button><button class="k-btn" data-pos="0">▼ Fermer</button></div></div>`;
+  else if (d.kind === 'lock') h += `<div class="k-big"><div class="k-val" style="font-size:26px">${val(d)}</div><button class="hold" data-hold="${d.id}"><i></i>Maintenir 1,5 s pour ${d.locked ? 'déverrouiller' : 'verrouiller'}</button><span class="hint">Commande protégée : appui maintenu, enregistrée dans le journal.</span></div>`;
+  else if (d.kind === 'door') h += `<div class="k-big"><div class="k-val" style="font-size:26px">${val(d)}</div><span class="hint">Capteur : lecture seule.</span></div>`;
+  else h += `<div class="k-big"><div class="k-val">${val(d)}</div><button class="k-btn pri" data-toggle="${d.id}">${d.on ? 'Éteindre' : 'Allumer'}</button></div>`;
+  return h;
+}
+KS.addEventListener('pointerdown', e => {
+  if (!K.on) { kEnter(); return; }
+  kTouch();
+  const t = e.target, k = t.closest('[data-k]'), fb = t.closest('[data-floor]'), rr = t.closest('[data-room]'), rm = t.closest('.room'), tg = t.closest('[data-toggle]'), dv = t.closest('[data-dev]'), hold = t.closest('[data-hold]');
+  if (hold) { hold.classList.add('go'); hold._t = setTimeout(() => { const d = devs.find(x => x.id === hold.dataset.hold); d.locked = !d.locked; kRender(); }, 1500); return; }
+  if (tg) { const d = devs.find(x => x.id === tg.dataset.toggle); d.on = !d.on; return kRender(); }
+  if (t.closest('[data-set]')) { const d = devs.find(x => x.id === K.dev); d.set = Math.round((d.set + +t.closest('[data-set]').dataset.set) * 10) / 10; return kRender(); }
+  if (t.closest('[data-pos]')) { devs.find(x => x.id === K.dev).pos = +t.closest('[data-pos]').dataset.pos; return kRender(); }
+  if (k) { const v = k.dataset.k; if (v === 'up') { if (K.dev) K.dev = null; else if (K.room) K.room = null; else return kHome(); return kRender(); } if (v === 'home') kHome(); else if (v === 'floor') { K.room = K.dev = null; kRender(); } else { K.dev = null; kRender(); } return; }
+  if (fb) { K.floor = fb.dataset.floor; K.room = K.dev = null; return kRender(); }
+  if (rr) { K.room = rr.dataset.room; K.dev = null; return kRender(); }
+  if (dv) { K.dev = dv.dataset.dev; return kRender(); }
+  const chipEl = t.closest('[data-d]');
+  if (chipEl) { const d = devs.find(x => x.id === chipEl.dataset.d); K.floor = d.f; K.room = d.r; K.dev = d.id; return kRender(); }
+  if (rm) { const [f, r] = rm.dataset.r.split('/'); if (f === K.floor) { K.room = r; K.dev = null; kRender(); } }
+});
+KS.addEventListener('pointerup', () => { const h = KS.querySelector('.hold.go'); if (h) { clearTimeout(h._t); h.classList.remove('go'); } });
+setInterval(() => {
+  if (!K.on) return;
+  K.idle--; const b = KS.querySelector('.idle b'); if (b) b.textContent = K.idle;
+  if (K.idle <= 0) kHome();
+}, 1000);
+
+/* ---------- attente de la borne : même visite que la TV ---------- */
+let kStep = 0;
+setInterval(() => { if (K.on) return; kStep = (kStep + 1) % TOUR.length; ks.cam.focus = TOUR[kStep].focus; ks.camera(); ks.paint(); }, 4000);
+
+/* ---------- rotation lente en vue d'ensemble ---------- */
+const t0 = Date.now();
+(function spin() {
+  [tv, ks].forEach(s => { if (!s.cam.focus) { s.cam.rz = -30 + 20 * Math.sin((Date.now() - t0) / 7000); s.camera(); } });
+  requestAnimationFrame(spin);
+})();
+
+/* ---------- événement simulé ---------- */
+document.getElementById('evt').addEventListener('click', () => {
+  const porte = devs.find(d => d.id === 'porte');
+  porte.open = true; tvEvent = true;
+  document.querySelector('#tv .banner').classList.add('show');
+  tv.cam.focus = 'rdc'; tv.camera(); tv.paint(); ks.paint(); if (K.on) kRender(); summary(document.querySelector('#tv .side'), 'Maison Gex');
+  setTimeout(() => {
+    document.querySelector('#tv .banner').classList.remove('show');
+    porte.open = false; tvEvent = false; tv.paint(); summary(document.querySelector('#tv .side'), 'Maison Gex'); if (K.on) kRender(); tvGo(0);
+  }, 8000);
+});
+
+/* ---------- volets de la maquette ---------- */
+document.querySelectorAll('[data-v]').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('[data-v]').forEach(x => x.classList.toggle('on', x === b));
+  ['bo', 'tv', 'kiosk'].forEach(v => document.getElementById('v-' + v).hidden = v !== b.dataset.v);
+  setTimeout(() => { tv.camera(); ks.camera(); }, 30);
+}));
+new ResizeObserver(() => { tv.camera(); ks.camera(); }).observe(document.body);
+summary(document.querySelector('#tv .side'), 'Maison Gex');
+tvGo(0); kRender();
+</script>
+</body>
+</html>

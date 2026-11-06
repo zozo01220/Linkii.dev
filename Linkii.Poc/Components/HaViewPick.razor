@@ -1,0 +1,53 @@
+@inject TenantStore Store
+
+@* Champ « vue » d'un contenu « Vue du bâtiment » (§200) : une des vues du plan choisi juste au-dessus (réglage planId). Un plan sans vue reçoit les deux vues
+   proposées d'office (Diffusion, Borne). Les vues se règlent dans Contenus › Plans › Vues. *@
+@if (plan == null)
+{
+    <div class="dw-note">Choisissez d'abord un plan.</div>
+}
+else
+{
+    <select @bind="Values[Field.Key]" @bind:after="Changed">
+        <option value="">— Choisir une vue —</option>
+        @foreach (var v in plan.Views)
+        {
+            <option value="@v.Id">@v.Name · @(v.Mode == "interactive" ? "interactive (borne)" : "diffusion")</option>
+        }
+        @if (Values[Field.Key].Length > 0 && plan.Views.All(v => v.Id.ToString() != Values[Field.Key])) { <option value="@Values[Field.Key]">Vue supprimée</option> }
+    </select>
+    @if (Current is { Mode: "interactive" })
+    {
+        <small>Vue interactive : à ouvrir depuis une borne (tuile ou liste interactive). Dans une liste de diffusion, elle montre le plan sans commande.</small>
+    }
+    else
+    {
+        <small>Une vue manque ou doit changer ? <a href="/plans">Contenus › Plans › Vues</a>.</small>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public AppField Field { get; set; } = default!;
+    [Parameter, EditorRequired] public Dictionary<string, string> Values { get; set; } = default!;
+    [Parameter] public EventCallback OnChange { get; set; }
+
+    private HaPlan? plan;
+    private string planKey = "";
+    private HaPlanView? Current => plan?.Views.FirstOrDefault(v => v.Id.ToString() == Values.GetValueOrDefault(Field.Key));
+
+    protected override void OnParametersSet()
+    {
+        Values.TryAdd(Field.Key, "");
+        var pid = Values.GetValueOrDefault("planId") ?? "";
+        if (pid == planKey) return;
+        planKey = pid;
+        plan = null;
+        if (!Guid.TryParse(pid, out var id)) return;
+        // un plan sans vue reçoit les vues proposées d'office
+        plan = Store.Write<HaPlan?>(d => { var p = d.Tenant.HaPlans.FirstOrDefault(x => x.Id == id); if (p == null) return null; HaViews.Ensure(p); return new HaPlan { Id = p.Id, Name = p.Name, Views = p.Views.ToList() }; });
+        if (plan != null && plan.Views.All(v => v.Id.ToString() != Values[Field.Key]))
+            Values[Field.Key] = plan.Views.FirstOrDefault()?.Id.ToString() ?? "";   // plan changé : sa première vue
+    }
+
+    private Task Changed() => OnChange.InvokeAsync();
+}

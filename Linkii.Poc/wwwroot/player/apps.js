@@ -251,12 +251,15 @@
 
   /* ---------- Home Assistant : plan du bâtiment (§193-199) ----------
      Le rendu est le moteur « vue du bâtiment » (building-view.js, LinkiiBuilding) : le widget ne fait que lui passer les données et ses commandes. */
-  A.register('ha-plan', function (h) {
+  /* le widget « Plan du bâtiment » et le contenu de liste « Vue du bâtiment » (§200 : la vue choisie dit diffusion ou borne) ont le même rendu */
+  function buildingApp(h) {
     if (!w.LinkiiBuilding) { h.note('Vue du bâtiment indisponible : rechargez le player.'); return; }
     var vb = w.LinkiiBuilding.mount(h.el, { command: function (body) { return h.command('ha', body); }, now: h.now });
     h.data(function (d) { vb.setData(d); }, 60 * 1000);
     h.onStop(vb.destroy);
-  });
+  }
+  A.register('ha-plan', buildingApp);
+  A.register('ha-building', buildingApp);
 
   /* ---------- Agenda en bandeau (pleine page et angles : liste, voir player.js) ---------- */
   A.register('agenda', function (h) {

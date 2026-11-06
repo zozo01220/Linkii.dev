@@ -128,3 +128,38 @@ test('formatage commun (ha-format.js)', () => {
   assert.equal(Ha.deg(21), '21°');
   assert.match(Ha.icon({ domain: 'light' }), /^<svg class="ha-i"/);
 });
+
+test('visite de la diffusion : étape en cours et temps restant, en boucle', () => {
+  const tour = [{ floor: null, sec: 12 }, { floor: 'rdc', sec: 8 }, { floor: 'ss', sec: 8 }];
+  assert.equal(L.tourAt(tour, 0).i, 0);
+  assert.equal(L.tourAt(tour, 11999).left, 1);
+  assert.equal(L.tourAt(tour, 12000).step.floor, 'rdc');
+  assert.equal(L.tourAt(tour, 27999).i, 2);
+  assert.equal(L.tourAt(tour, 28000).i, 0);                              // la visite recommence
+  assert.equal(L.tourAt([], 5000), null);
+});
+
+test('borne : étage d\'accueil et retour d\'un niveau', () => {
+  assert.equal(L.homeFloor(plan), 'rdc');                                // l'étage qui porte le plus d'appareils
+  assert.deepEqual(L.navUp({ floor: 'rdc', room: 'salon', dev: 'light.salon' }, plan), { floor: 'rdc', room: 'salon', dev: null });
+  assert.deepEqual(L.navUp({ floor: 'rdc', room: 'salon', dev: null }, plan), { floor: 'rdc', room: null, dev: null });
+  assert.deepEqual(L.navUp({ floor: 'e1', room: null, dev: 'switch.prise' }, plan), { floor: 'e1', room: null, dev: null });   // appareil hors pièce : retour à l'étage
+  const n = { floor: 'rdc', room: null, dev: null };
+  assert.equal(L.navUp(n, plan), n);                                     // à l'étage : la borne a son propre retour
+});
+
+test('borne : la pièce choisie est surlignée, les autres appareils s\'estompent', () => {
+  const sc = L.scene(plan, ents, { labels: 'all', now: NOW, room: 'rdc/salon', panelId: 'light.salon' });
+  assert.equal(sc.rooms['rdc/salon'].sel, true);
+  assert.equal(sc.rooms['rdc/entree'].sel, false);
+  assert.equal(sc.pins['light.salon'].dim, false);
+  assert.equal(sc.pins['light.salon'].sel, true);
+  assert.equal(sc.pins['binary_sensor.porte'].dim, true);
+});
+
+test('widget dans une petite case : le résumé seul', () => {
+  assert.equal(L.layoutMode('right', 360, 300), 'only');
+  assert.equal(L.layoutMode('right', 500, 200), 'only');
+  assert.equal(L.layoutMode('none', 300, 200), 'none');                  // résumé masqué : la 3D reste
+  assert.equal(L.layoutMode('right', 500, 400), 'top');
+});

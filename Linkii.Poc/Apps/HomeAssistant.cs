@@ -44,8 +44,14 @@ public static class HomeAssistantRules
     /// <summary>Widget « Plan du bâtiment » (§193) : étages empilés, appareils de tous les domaines posés sur chaque plan. Hors <see cref="Families"/> : pas d'onglet dans les listes.</summary>
     public const string PlanApp = "ha-plan";
 
-    /// <summary>Tous les widgets Home Assistant : les sept familles et le plan du bâtiment.</summary>
-    public static readonly string[] AllApps = AppIds.Append(PlanApp).ToArray();
+    /// <summary>Contenu de liste « Vue du bâtiment » (§200) : un plan montré selon une de ses vues (diffusion ou borne interactive).</summary>
+    public const string BuildingApp = "ha-building";
+
+    /// <summary>Applis qui montrent un plan du bâtiment (réglage planId).</summary>
+    public static bool IsPlanApp(string? appId) => appId is PlanApp or BuildingApp;
+
+    /// <summary>Toutes les applis Home Assistant : les sept familles, le plan du bâtiment et la vue du bâtiment.</summary>
+    public static readonly string[] AllApps = AppIds.Append(PlanApp).Append(BuildingApp).ToArray();
 
     /// <summary>
     /// Étage d'un plan : identifiant, nom, image du plan (adresse /media/…) et rapport largeur / hauteur.
@@ -193,7 +199,7 @@ public static class HomeAssistantRules
 
     /// <summary>Entités qu'un widget Home Assistant lit : celles de son plan (widget plan), sinon celles qu'on y a choisies.</summary>
     public static List<string> EntitiesOf(Tenant t, string? appId, IReadOnlyDictionary<string, string> settings) =>
-        appId == PlanApp ? PlanOf(t, settings)?.Devices.Select(d => d.Id).ToList() ?? new() : ParseEntities(settings.GetValueOrDefault("entities"));
+        IsPlanApp(appId) ? PlanOf(t, settings)?.Devices.Select(d => d.Id).ToList() ?? new() : ParseEntities(settings.GetValueOrDefault("entities"));
 
     /// <summary>Plan nettoyé, prêt à être enregistré, et entités qu'il utilise (séparées par des virgules).</summary>
     public static (string Json, string Entities) NormalizePlan(string? json)
@@ -244,7 +250,7 @@ public static class HomeAssistantRules
 
     /// <summary>Commande autorisée : l'entité est d'un domaine du widget, et ce domaine accepte cette commande.</summary>
     public static bool Commandable(string appId, string entityId, string action = "on") =>
-        EntityIdPattern.IsMatch(entityId) && (appId == PlanApp ? Domains.Contains(Domain(entityId)) : FamilyOf(appId) is { } f && f.Domains.Contains(Domain(entityId)))
+        EntityIdPattern.IsMatch(entityId) && (IsPlanApp(appId) ? Domains.Contains(Domain(entityId)) : FamilyOf(appId) is { } f && f.Domains.Contains(Domain(entityId)))
         && Actions.TryGetValue(Domain(entityId), out var a) && a.Contains(action);
 
     /// <summary>Commandes à proposer à l'écran pour une entité (aucune si « Commande à l'écran » est coupée).</summary>
@@ -745,14 +751,19 @@ public class HomeAssistantProvider(HomeAssistantClient ha, HomeAssistantLive liv
         var isPlan = rt.Values.ContainsKey("planId");
         var plan = isPlan ? HomeAssistantRules.PlanOf(rt.Client, rt.Values) ?? new HomeAssistantRules.Plan(new(), new()) : null;
         var configured = plan != null ? plan.Devices.Select(d => d.Id).ToList() : HomeAssistantRules.ParseEntities(rt.Get("entities"));
-        var control = rt.Get("control", "true") != "false";
+        // vue du bâtiment (§200) : réglages et commandes viennent de la vue choisie ; en diffusion, rien à commander
+        var building = rt.Values.ContainsKey("viewId");
+        var view = building ? HaViews.Of(rt.Client, rt.Values) : null;
+        if (building && view == null) throw new InvalidOperationException("Choisissez un plan et une de ses vues.");
+        var control = building ? view!.Mode == "interactive" : rt.Get("control", "true") != "false";
         var (states, isLive) = await live.States(rt.Client.Id, account);
+        var planName = building && Guid.TryParse(rt.Get("planId"), out var pid) ? rt.Client.HaPlans.FirstOrDefault(p => p.Id == pid)?.Name : null;
         return new
         {
-            title = rt.Get("title"), fetchedAt = DateTime.UtcNow, live = isLive,
+            title = building ? planName ?? "" : rt.Get("title"), fetchedAt = DateTime.UtcNow, live = isLive,
             decimals = rt.Get("decimals", "auto"), dimmer = rt.Get("dimmer", "true") != "false", colors = rt.Get("colors") == "true",
-            entities = configured.Select(id => Entity(id, states.GetValueOrDefault(id), control)).ToList(),
-            plan = plan == null ? null : PlanView(plan, states, k => rt.Values.GetValueOrDefault(k)),
+            entities = configured.Select(id => Entity(id, states.GetValueOrDefault(id), control && (!building || HaViews.Allows(view, id)))).ToList(),
+            plan = plan == null ? null : view != null ? PlanView(plan, states, HaViews.Options(view), view) : PlanView(plan, states, k => rt.Values.GetValueOrDefault(k)),
         };
     }
 
@@ -760,7 +771,7 @@ public class HomeAssistantProvider(HomeAssistantClient ha, HomeAssistantLive liv
     /// Plan tel que l'écran le reçoit (aussi pour l'aperçu de l'éditeur, §196) : étages, pièces et murs calculés, appareils avec leur pièce et leur ouverture,
     /// options d'affichage lues par <paramref name="get"/> (réglages du widget).
     /// </summary>
-    public static object PlanView(HomeAssistantRules.Plan plan, IReadOnlyDictionary<string, HaState> states, Func<string, string?> get)
+    public static object PlanView(HomeAssistantRules.Plan plan, IReadOnlyDictionary<string, HaState> states, Func<string, string?> get, HaPlanView? view = null)
     {
         string Opt(string k, string def) => get(k) is { Length: > 0 } v ? v : def;
         return new
@@ -791,6 +802,9 @@ public class HomeAssistantProvider(HomeAssistantClient ha, HomeAssistantLive liv
                 hideOff = Opt("hideOff", "true") != "false",
                 summary = Opt("summary", "right") is "right" or "left" or "top" or "none" ? Opt("summary", "right") : "right",
                 spinSwitch = Opt("spinSwitch", "true") != "false",
+                // vue enregistrée (§200) : diffusion avec sa visite, ou borne interactive
+                mode = view?.Mode,
+                tour = view?.Tour.Select(t => new { floor = t.Floor, sec = t.Sec }),
             };
     }
 

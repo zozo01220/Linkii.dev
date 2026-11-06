@@ -9,7 +9,7 @@ public static class HomeAssistantSetup
 {
     public const string ConnectionName = "Home Assistant";
     /// <summary>Version de la mise en place : un compte déjà mis en place n'est pas repris au démarrage (une source supprimée exprès ne revient pas).</summary>
-    public const int Version = 3;
+    public const int Version = 4;   // 4 : contenu « Vue du bâtiment » (§200)
     public const string StatesSetName = "Home Assistant — états";
 
     /// <summary>Widgets activés et source de données créée pour une organisation (base entière : migration au démarrage).</summary>

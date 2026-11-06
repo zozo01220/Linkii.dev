@@ -198,3 +198,81 @@ public static class PlanGeometry
         return string.Join(' ', sb.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries));
     }
 }
+
+/// <summary>
+/// Vues enregistrées d'un plan (§200) : nettoyage, vues proposées d'office, réglages envoyés à l'écran, familles commandables.
+/// Un contenu « Vue du bâtiment » (<see cref="HomeAssistantRules.BuildingApp"/>) choisit plan + vue.
+/// </summary>
+public static class HaViews
+{
+    public const int MaxViews = 12, MaxSteps = 12, MinSec = 3, MaxSec = 120;
+    public static readonly string[] Families = { "light", "switch", "climate", "cover", "lock" };
+    public static readonly string[] LabelModes = { "all", "active", "room", "none" };
+    public static readonly string[] SummaryModes = { "right", "left", "top", "none" };
+
+    /// <summary>Famille de commande d'un domaine (null : rien à commander, capteurs).</summary>
+    public static string? FamilyOf(string domain) => domain switch
+    {
+        HomeAssistantRules.Light => "light",
+        HomeAssistantRules.Switch or HomeAssistantRules.InputBoolean or HomeAssistantRules.Fan => "switch",
+        HomeAssistantRules.Climate => "climate",
+        HomeAssistantRules.Cover => "cover",
+        HomeAssistantRules.Lock => "lock",
+        _ => null,
+    };
+
+    /// <summary>La vue permet-elle de commander cette entité ? Seulement en mode interactif, et pour une famille cochée.</summary>
+    public static bool Allows(HaPlanView? v, string entityId) =>
+        v is { Mode: "interactive" } && FamilyOf(HomeAssistantRules.Domain(entityId)) is { } f && v.Control.Contains(f);
+
+    /// <summary>Vue nettoyée : nom, mode, étapes de visite sur des étages existants (durées bornées), réglages connus seulement.</summary>
+    public static HaPlanView Normalize(HaPlanView v, HomeAssistantRules.Plan plan)
+    {
+        var name = (v.Name ?? "").Trim();
+        var floors = plan.Floors.Select(f => f.Id).ToHashSet();
+        var tour = (v.Tour ?? new()).Where(s => s.Floor == null || floors.Contains(s.Floor)).Take(MaxSteps)
+            .Select(s => new HaTourStep { Floor = s.Floor, Sec = Math.Clamp(s.Sec, MinSec, MaxSec) }).ToList();
+        return new HaPlanView
+        {
+            Id = v.Id == Guid.Empty ? Guid.NewGuid() : v.Id,
+            Name = name.Length == 0 ? "Vue" : name.Length > 40 ? name[..40] : name,
+            Mode = v.Mode == "interactive" ? "interactive" : "signage",
+            Tour = tour.Count > 0 ? tour : DefaultTour(plan),
+            Labels = LabelModes.Contains(v.Labels) ? v.Labels : "all",
+            Summary = SummaryModes.Contains(v.Summary) ? v.Summary : "right",
+            Heat = v.Heat, HideOff = v.HideOff, Focus = v.Focus, Explode = v.Explode,
+            Control = (v.Control ?? new()).Where(Families.Contains).Distinct().ToList(),
+        };
+    }
+
+    /// <summary>Visite proposée : vue d'ensemble 12 s, puis chaque étage du haut vers le bas, 8 s.</summary>
+    public static List<HaTourStep> DefaultTour(HomeAssistantRules.Plan plan) =>
+        new[] { new HaTourStep { Floor = null, Sec = 12 } }
+            .Concat(plan.Floors.AsEnumerable().Reverse().Select(f => new HaTourStep { Floor = f.Id, Sec = 8 })).ToList();
+
+    /// <summary>Vues d'un plan qui n'en a pas encore : « Diffusion » (visite) et « Borne » (interactive : lumières, volets, thermostats).</summary>
+    public static bool Ensure(HaPlan p)
+    {
+        if (p.Views.Count > 0) return false;
+        var plan = HomeAssistantRules.ParsePlan(p.Json);
+        p.Views.Add(new HaPlanView { Name = "Diffusion", Mode = "signage", Tour = DefaultTour(plan) });
+        p.Views.Add(new HaPlanView { Name = "Borne", Mode = "interactive", Tour = DefaultTour(plan), Summary = "right" });
+        return true;
+    }
+
+    /// <summary>Vue choisie par un contenu (réglage viewId), sinon la première du plan ; null sans plan ni vue.</summary>
+    public static HaPlanView? Of(Tenant t, IReadOnlyDictionary<string, string>? settings)
+    {
+        if (settings == null || !Guid.TryParse(settings.GetValueOrDefault("planId"), out var pid) || t.HaPlans.FirstOrDefault(p => p.Id == pid) is not { } p) return null;
+        return Guid.TryParse(settings.GetValueOrDefault("viewId"), out var vid) && p.Views.FirstOrDefault(v => v.Id == vid) is { } v ? v : p.Views.FirstOrDefault();
+    }
+
+    /// <summary>Réglages d'affichage d'une vue, sous la forme lue par <see cref="HomeAssistantProvider.PlanView"/>.</summary>
+    public static Func<string, string?> Options(HaPlanView v) => k => k switch
+    {
+        "labels" => v.Labels, "summary" => v.Summary, "heat" => v.Heat ? "true" : "false", "hideOff" => v.HideOff ? "true" : "false",
+        "focus" => v.Focus ? "true" : "false", "explode" => v.Explode ? "true" : "false",
+        "spin" => "true", "spinSwitch" => "false",
+        _ => null,
+    };
+}
