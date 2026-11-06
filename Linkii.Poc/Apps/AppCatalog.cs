@@ -258,3 +258,17 @@ public class AppCatalog
     public static bool IsHttpUrl(string v) =>
         Uri.TryCreate(v, UriKind.Absolute, out var u) && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps) && string.IsNullOrEmpty(u.UserInfo);
 }
+
+/// <summary>Rangement des widgets par catégorie du manifeste (listes de l'édition des écrans et des bornes, page Widgets) : « Général » d'abord, puis les autres par ordre alphabétique.</summary>
+public static class WidgetCategories
+{
+    public const string General = "Widget d'écran";
+
+    public static string Label(string? category) => string.IsNullOrWhiteSpace(category) || category == General ? "Général" : category;
+
+    /// <summary>Widgets groupés par catégorie, chaque groupe trié par nom ; les groupes vides n'existent pas.</summary>
+    public static List<(string Title, List<AppManifest> Apps)> Group(IEnumerable<AppManifest> apps) =>
+        apps.GroupBy(a => Label(a.Category))
+            .OrderBy(g => g.Key == "Général" ? 0 : 1).ThenBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase)
+            .Select(g => (g.Key, g.OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList())).ToList();
+}

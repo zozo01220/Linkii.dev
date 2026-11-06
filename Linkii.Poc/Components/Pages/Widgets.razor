@@ -26,7 +26,7 @@
     <ViewToggle StorageKey="widgets" @bind-Value="view" />
 </div>
 
-@if (Groups[0].Items.Count == 0)
+@if (Groups.Count == 0)
 {
     <div class="card empty"><div class="big">Aucun widget trouvé</div></div>
 }
@@ -44,9 +44,13 @@ else if (view == "list")
 }
 else
 {
-    <div class="wg-grid">
-        @foreach (var e in Groups[0].Items) { @WidgetCard(e) }
-    </div>
+    @foreach (var g in Groups)
+    {
+        <h2 class="wg-cat">@g.Title<span>@g.Items.Count</span></h2>
+        <div class="wg-grid">
+            @foreach (var e in g.Items) { @WidgetCard(e) }
+        </div>
+    }
 }
 
 @if (detail is { } d)
@@ -81,15 +85,14 @@ else
     private string? menuId;                          // carte dont le menu ⋮ est ouvert
     private CatalogView.Entry? detail;               // widget dont le tiroir Détails est ouvert
 
-    private List<CatalogView.Group> Groups => new()
-    {
-        new(null, Svc.Catalog.Where(a => a.ScreenWidget && (admin || enabled.Contains(a.Id)))
-            .Where(a => filter == "" || (filter == "on") == enabled.Contains(a.Id))
-            .Where(a => search.Length == 0 || (a.Name + " " + a.Summary).Contains(search, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase)
-            .Select(a => enabled.Contains(a.Id) ? CatalogView.Entry.Of(a, "Actif", "en-ligne", false) : CatalogView.Entry.Of(a, "Inactif", "inactif", true))
-            .ToList())
-    };
+    // un groupe par catégorie du manifeste (Général, Maison connectée…)
+    private List<CatalogView.Group> Groups => WidgetCategories.Group(
+            Svc.Catalog.Where(a => a.ScreenWidget && (admin || enabled.Contains(a.Id)))
+                .Where(a => filter == "" || (filter == "on") == enabled.Contains(a.Id))
+                .Where(a => search.Length == 0 || (a.Name + " " + a.Summary).Contains(search, StringComparison.OrdinalIgnoreCase)))
+        .Select(g => new CatalogView.Group(g.Title, g.Apps
+            .Select(a => enabled.Contains(a.Id) ? CatalogView.Entry.Of(a, "Actif", "en-ligne", false) : CatalogView.Entry.Of(a, "Inactif", "inactif", true)).ToList()))
+        .ToList();
 
     protected override void OnInitialized() { admin = Store.Read(d => d.Access.IsOrgAdmin); Load(); }
 
