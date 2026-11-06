@@ -59,6 +59,24 @@
                     <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></svg> Programmations
                 </NavLink>
             }
+            @if (IntegrationPages.Count > 0)
+            {
+                @* Pages de paramétrage des intégrations (mode expert) : groupe repliable après un trait ; chaque intégration y ajoute la sienne (aujourd'hui : plans de Home Assistant, §205) *@
+                <div class="nav-sep" role="separator"></div>
+                <button type="button" class="nav nav-group @(IntegrationsOpen ? "open" : "") @(InIntegrations ? "active" : "")" aria-expanded="@(IntegrationsOpen ? "true" : "false")" data-tip="Intégrations" @onclick="() => intOpen = !IntegrationsOpen">
+                    <Ico Name="link" Size="18" /> Intégrations
+                    <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg>
+                </button>
+                @if (IntegrationsOpen)
+                {
+                    <div class="nav-sub">
+                        @foreach (var t in IntegrationPages)
+                        {
+                            <NavLink class="nav" href="@t.Path"><Ico Name="@t.Icon" Size="16" /> @t.Label<small>@t.Fam</small></NavLink>
+                        }
+                    </div>
+                }
+            }
             @if (approvalsMenu)
             {
                 @* Approbation des publications (§162, plan Pro) : demandes à décider (orange), ou demandes de la personne soumise *@
@@ -270,7 +288,8 @@
                         @if (Modes.Expert && !orgAdmin && Sees(LevelPages.Zones)) { <NavLink href="zones" @onclick="CloseMore"><span class="ic"><Ico Name="box" Size="22" /></span>Zones</NavLink> }
                         @if (CompositionsMenu) { <NavLink href="compositions" @onclick="CloseMore"><span class="ic"><Ico Name="images" Size="22" /></span>Compositions</NavLink> }
                         @if (Sees(LevelPages.Widgets) && Modes.Expert) { <NavLink href="widgets" @onclick="CloseMore"><span class="ic"><Ico Name="grid" Size="22" /></span>Widgets</NavLink> }
-                        @if (Modes.Expert && Sees(LevelPages.Integrations)) { <NavLink href="integrations" @onclick="CloseMore"><span class="ic"><Ico Name="link" Size="22" /></span>Intégrations</NavLink> }
+                        @foreach (var t in IntegrationPages) { <NavLink href="@t.Path" @onclick="CloseMore"><span class="ic"><Ico Name="@t.Icon" Size="22" /></span>@t.Label</NavLink> }
+                        @if (Sees(LevelPages.Integrations)) { <NavLink href="integrations" @onclick="CloseMore"><span class="ic"><Ico Name="link" Size="22" /></span>Intégrations</NavLink> }
                         @if (Modes.Expert && orgAdmin) { <NavLink href="datasources" @onclick="CloseMore"><span class="ic"><Ico Name="database" Size="22" /></span>Sources de données</NavLink> }
                         @if (Modes.Expert && orgAdmin) { <NavLink href="apiwebhooks" @onclick="CloseMore"><span class="ic"><Ico Name="link" Size="22" /></span>API et webhooks</NavLink> }
                         @if (Modes.Expert) { <NavLink href="stats" @onclick="CloseMore"><span class="ic n"><Ico Name="chart" Size="22" /></span>Statistiques</NavLink> }
@@ -446,16 +465,23 @@
         Sees(LevelPages.Media) ? new HubTab("media", "Médiathèque", MenuBadges.MediaFam) : null,
         CompositionsMenu ? new HubTab("compositions", "Compositions", MenuBadges.Compositions) : null,
         Sees(LevelPages.Widgets) && Modes.Expert ? new HubTab("widgets", "Widgets", null) : null,   // mode simple : pas d'onglet Widgets (§179)
-        Sees(LevelPages.Widgets) && Modes.Expert && HaInstalled ? new HubTab("plans", "Plans", null) : null,   // plans de bâtiment : seulement avec Home Assistant connecté (§194)
-        Sees(LevelPages.Integrations) && Modes.Expert ? new HubTab("integrations", "Intégrations", MenuBadges.Integrations, "store") : null,
+        Sees(LevelPages.Integrations) ? new HubTab("integrations", "Intégrations", MenuBadges.Integrations, "store") : null,
         orgAdmin && Modes.Expert ? new HubTab("datasources", "Sources de données", MenuBadges.DataSources) : null,
         orgAdmin && Modes.Expert ? new HubTab("apiwebhooks", "API et webhooks", null) : null
     }.OfType<HubTab>().ToList();
+    // Groupe « Intégrations » du menu (§205) : une page de paramétrage par intégration qui en a besoin.
+    private bool? intOpen;
+    private List<HubTab> IntegrationPages => Ctx.ClientId == null ? new() : new[]
+    {
+        Sees(LevelPages.Widgets) && Modes.Expert && HaInstalled ? new HubTab("plans", "Plans du bâtiment", "Home Assistant", "layers") : null
+    }.OfType<HubTab>().ToList();
+    private bool InIntegrations => IntegrationPages.Any(t => CurrentPath == t.Path || CurrentPath.StartsWith(t.Path + "/"));
+    private bool IntegrationsOpen => intOpen ?? InIntegrations;
     private string HubClass(List<HubTab> tabs) => InHub(tabs) ? "nav active" : "nav";
     private bool InHub(List<HubTab> tabs) => tabs.Any(t => t.Path == CurrentPath.Split('/')[0]);
     // Onglets à afficher : seulement sur la page d'un onglet elle-même (pas dans un éditeur) et si le hub a au moins deux pages.
     private List<HubTab>? CurrentHub => Ctx.ClientId == null ? null
-        : new[] { ProgTabs, ContentTabs }.FirstOrDefault(h => h.Count > 1 && h.Any(t => t.Path == CurrentPath || (t.Path == "plans" && CurrentPath.StartsWith("plans/"))));   // la page d'un plan (§202) garde les onglets de Contenus
+        : new[] { ProgTabs, ContentTabs }.FirstOrDefault(h => h.Count > 1 && h.Any(t => t.Path == CurrentPath));
 
     private void ToggleMode() => Modes.Switch(!Modes.Expert);
     private void OnModeChanged() => InvokeAsync(StateHasChanged);
