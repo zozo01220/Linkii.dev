@@ -2,7 +2,10 @@
 @if (Floor is { Drawn: true } f)
 {
     var walls = HomeAssistantRules.WallsOf(f, Devices ?? new());
-    <svg class="hpl-thumb @Class" viewBox="-0.3 -0.3 @(f.W + .6) @(f.H + .6)" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+    // cadré sur les pièces dessinées (pas sur toute la grille : quelques pièces dans un coin d'une grande grille restaient minuscules)
+    var x0 = f.Rooms.Count > 0 ? f.Rooms.Min(r => r.X) : 0; var y0 = f.Rooms.Count > 0 ? f.Rooms.Min(r => r.Y) : 0;
+    var x1 = f.Rooms.Count > 0 ? f.Rooms.Max(r => r.X + r.W) : f.W; var y1 = f.Rooms.Count > 0 ? f.Rooms.Max(r => r.Y + r.H) : f.H;
+    <svg class="hpl-thumb @Class" viewBox="@V(x0 - .3) @V(y0 - .3) @V(x1 - x0 + .6) @V(y1 - y0 + .6)" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
         @foreach (var r in f.Rooms)
         {
             <rect class="r" x="@r.X" y="@r.Y" width="@r.W" height="@r.H" />
@@ -18,4 +21,10 @@
     [Parameter] public HomeAssistantRules.PlanFloor? Floor { get; set; }
     [Parameter] public List<HomeAssistantRules.PlanDevice>? Devices { get; set; }
     [Parameter] public string? Class { get; set; }
+
+    private static string V(double v) => v.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>Étage montré en vignette : le dessiné qui a le plus de pièces (puis d'appareils), en général le rez.</summary>
+    public static HomeAssistantRules.PlanFloor? Best(HomeAssistantRules.Plan p) =>
+        p.Floors.Where(f => f.Drawn && f.Rooms.Count > 0).OrderByDescending(f => f.Rooms.Count).ThenByDescending(f => p.Devices.Count(d => d.Floor == f.Id)).FirstOrDefault();
 }
