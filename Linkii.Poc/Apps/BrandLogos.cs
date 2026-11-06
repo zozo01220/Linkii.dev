@@ -10,7 +10,7 @@ public static class BrandLogos
     private static readonly Dictionary<string, string> Map = new()
     {
         ["microsoft"] = "microsoft", ["google"] = "google", ["facebook"] = "facebook", ["youtube"] = "youtube", ["canva"] = "canva",
-        ["homeassistant"] = "ha", ["ha-sensors"] = "ha", ["ha-switches"] = "ha", ["ha-lights"] = "ha", ["ha-climate"] = "ha", ["ha-covers"] = "ha", ["ha-scenes"] = "ha", ["ha-locks"] = "ha", ["ha-home"] = "ha",
+        ["homeassistant"] = "ha", ["ha-sensors"] = "ha", ["ha-switches"] = "ha", ["ha-lights"] = "ha", ["ha-climate"] = "ha", ["ha-covers"] = "ha", ["ha-scenes"] = "ha", ["ha-locks"] = "ha", ["ha-plan"] = "ha", ["ha-home"] = "ha",
         ["google-slides"] = "gslides", ["google-docs"] = "gdocs", ["google-sheets"] = "gsheets", ["ms-powerpoint"] = "ppt", ["rss"] = "rss", ["rss-widget"] = "rss",
         ["weather"] = "weather", ["weather-slide"] = "weather", ["pdf"] = "pdf",
         ["image"] = "image", ["slideshow-images"] = "images", ["video"] = "video", ["slideshow-videos"] = "videos", ["webpage"] = "web", ["composition"] = "compo",

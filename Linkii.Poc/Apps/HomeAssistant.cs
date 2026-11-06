@@ -38,8 +38,79 @@ public static class HomeAssistantRules
     /// <summary>Domaines qu'un compte Home Assistant expose aux widgets et aux jeux de données.</summary>
     public static readonly string[] Domains = Families.SelectMany(f => f.Domains).ToArray();
 
-    /// <summary>Widgets Home Assistant.</summary>
+    /// <summary>Widgets Home Assistant par famille d'entités.</summary>
     public static readonly string[] AppIds = Families.Select(f => f.App).ToArray();
+
+    /// <summary>Widget « Plan du bâtiment » (§193) : étages empilés, appareils de tous les domaines posés sur chaque plan. Hors <see cref="Families"/> : pas d'onglet dans les listes.</summary>
+    public const string PlanApp = "ha-plan";
+
+    /// <summary>Tous les widgets Home Assistant : les sept familles et le plan du bâtiment.</summary>
+    public static readonly string[] AllApps = AppIds.Append(PlanApp).ToArray();
+
+    /// <summary>Étages d'un plan : identifiant, nom, image du plan (adresse /media/…) et rapport largeur / hauteur.</summary>
+    public sealed record PlanFloor(string Id, string Name, string? Img, double Ratio);
+
+    /// <summary>Appareil posé sur un étage : position en fraction (0 à 1) de la largeur et de la hauteur du plan.</summary>
+    public sealed record PlanDevice(string Id, string Floor, double X, double Y);
+
+    public sealed record Plan(List<PlanFloor> Floors, List<PlanDevice> Devices);
+
+    public const int MaxPlanFloors = 8, MaxPlanDevices = 120;
+
+    /// <summary>
+    /// Lit un plan enregistré ; rend toujours un plan valide : étages et appareils inconnus ou en trop retirés, positions ramenées dans le plan,
+    /// image gardée seulement si c'est une adresse /media/ du site.
+    /// </summary>
+    public static Plan ParsePlan(string? json)
+    {
+        var floors = new List<PlanFloor>();
+        var devices = new List<PlanDevice>();
+        try
+        {
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Object)
+            {
+                if (root.TryGetProperty("floors", out var fs) && fs.ValueKind == JsonValueKind.Array)
+                    foreach (var f in fs.EnumerateArray().Take(MaxPlanFloors))
+                    {
+                        var id = Str(f, "id");
+                        if (id.Length == 0 || floors.Any(x => x.Id == id)) continue;
+                        var img = Str(f, "img");
+                        if (!img.StartsWith("/media/", StringComparison.Ordinal) || img.Contains("..") || img.Contains('?') || img.Length > 200) img = "";
+                        var ratio = f.TryGetProperty("ratio", out var r) && r.ValueKind == JsonValueKind.Number && r.TryGetDouble(out var rv) ? Math.Clamp(rv, 0.5, 3) : 1.6;
+                        var name = Str(f, "name").Trim();
+                        floors.Add(new(id, name.Length == 0 ? "Étage" : name.Length > 40 ? name[..40] : name, img.Length == 0 ? null : img, ratio));
+                    }
+                if (root.TryGetProperty("devices", out var ds) && ds.ValueKind == JsonValueKind.Array)
+                    foreach (var d in ds.EnumerateArray())
+                    {
+                        if (devices.Count >= MaxPlanDevices) break;
+                        var id = Str(d, "id");
+                        var floor = Str(d, "floor");
+                        if (!IsSupported(id) || devices.Any(x => x.Id == id) || floors.All(x => x.Id != floor)) continue;
+                        double Num(string k) => d.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out var n) && !double.IsNaN(n) ? Math.Clamp(n, 0, 1) : 0.5;
+                        devices.Add(new(id, floor, Math.Round(Num("x"), 4), Math.Round(Num("y"), 4)));
+                    }
+            }
+        }
+        catch (JsonException) { /* plan illisible : plan vide */ }
+        return new(floors, devices);
+
+        static string Str(JsonElement e, string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+    }
+
+    /// <summary>Plan nettoyé, prêt à être enregistré, et entités qu'il utilise (séparées par des virgules).</summary>
+    public static (string Json, string Entities) NormalizePlan(string? json)
+    {
+        var p = ParsePlan(json);
+        var clean = JsonSerializer.Serialize(new
+        {
+            floors = p.Floors.Select(f => new { id = f.Id, name = f.Name, img = f.Img ?? "", ratio = f.Ratio }),
+            devices = p.Devices.Select(d => new { id = d.Id, floor = d.Floor, x = d.X, y = d.Y }),
+        });
+        return (p.Floors.Count == 0 ? "" : clean, string.Join(',', p.Devices.Select(d => d.Id)));
+    }
 
     /// <summary>Commandes possibles par domaine (rien pour les capteurs).</summary>
     public static readonly IReadOnlyDictionary<string, string[]> Actions = new Dictionary<string, string[]>
@@ -59,7 +130,7 @@ public static class HomeAssistantRules
     private static readonly Regex HexColor = new("^#?([0-9a-fA-F]{6})$");
     private static readonly char[] Separators = { ',', ';', ' ', '\n', '\r', '\t' };
 
-    public static bool IsHaApp(string? appId) => appId != null && AppIds.Contains(appId);
+    public static bool IsHaApp(string? appId) => appId != null && AllApps.Contains(appId);
 
     public static Family? FamilyOf(string? appId) => Families.FirstOrDefault(f => f.App == appId);
 
@@ -78,7 +149,7 @@ public static class HomeAssistantRules
 
     /// <summary>Commande autorisée : l'entité est d'un domaine du widget, et ce domaine accepte cette commande.</summary>
     public static bool Commandable(string appId, string entityId, string action = "on") =>
-        EntityIdPattern.IsMatch(entityId) && FamilyOf(appId) is { } f && f.Domains.Contains(Domain(entityId))
+        EntityIdPattern.IsMatch(entityId) && (appId == PlanApp ? Domains.Contains(Domain(entityId)) : FamilyOf(appId) is { } f && f.Domains.Contains(Domain(entityId)))
         && Actions.TryGetValue(Domain(entityId), out var a) && a.Contains(action);
 
     /// <summary>Commandes à proposer à l'écran pour une entité (aucune si « Commande à l'écran » est coupée).</summary>
@@ -575,7 +646,9 @@ public class HomeAssistantProvider(HomeAssistantClient ha, HomeAssistantLive liv
     public async Task<object?> Fetch(AppRuntime rt)
     {
         var account = rt.Client.HomeAssistant ?? throw new InvalidOperationException("Compte Home Assistant non connecté.");
-        var configured = HomeAssistantRules.ParseEntities(rt.Get("entities"));
+        // plan du bâtiment : les entités sont celles posées sur le plan, et le plan est renvoyé nettoyé (l'écran ne lit jamais le réglage brut)
+        var plan = rt.Get("plan") is { Length: > 0 } rawPlan ? HomeAssistantRules.ParsePlan(rawPlan) : null;
+        var configured = plan != null ? plan.Devices.Select(d => d.Id).ToList() : HomeAssistantRules.ParseEntities(rt.Get("entities"));
         var control = rt.Get("control", "true") != "false";
         var (states, isLive) = await live.States(rt.Client.Id, account);
         return new
@@ -583,6 +656,12 @@ public class HomeAssistantProvider(HomeAssistantClient ha, HomeAssistantLive liv
             title = rt.Get("title"), fetchedAt = DateTime.UtcNow, live = isLive,
             decimals = rt.Get("decimals", "auto"), dimmer = rt.Get("dimmer", "true") != "false", colors = rt.Get("colors") == "true",
             entities = configured.Select(id => Entity(id, states.GetValueOrDefault(id), control)).ToList(),
+            plan = plan == null ? null : new
+            {
+                floors = plan.Floors.Select(f => new { id = f.Id, name = f.Name, img = f.Img, ratio = f.Ratio }),
+                devices = plan.Devices.Select(d => new { id = d.Id, floor = d.Floor, x = d.X, y = d.Y }),
+                spin = rt.Get("spin", "true") != "false", explode = rt.Get("explode", "true") != "false", focus = rt.Get("focus", "true") != "false", labels = rt.Get("labels", "all"),
+            },
         };
     }
 
@@ -616,8 +695,8 @@ public class HomeAssistantProvider(HomeAssistantClient ha, HomeAssistantLive liv
     public async Task<string> Test(AppRuntime rt)
     {
         var account = rt.Client.HomeAssistant ?? throw new InvalidOperationException("Connectez d'abord le compte Home Assistant dans Intégrations.");
-        var configured = HomeAssistantRules.ParseEntities(rt.Get("entities"));
-        if (configured.Count == 0) throw new InvalidOperationException("Choisissez au moins une entité.");
+        var configured = rt.Get("plan") is { Length: > 0 } rawPlan ? HomeAssistantRules.ParsePlan(rawPlan).Devices.Select(d => d.Id).ToList() : HomeAssistantRules.ParseEntities(rt.Get("entities"));
+        if (configured.Count == 0) throw new InvalidOperationException(rt.Get("plan").Length > 0 ? "Posez au moins un appareil sur le plan." : "Choisissez au moins une entité.");
         var states = await ha.States(ha.Conn(rt.Client.Id, account), fresh: true);
         var missing = configured.Where(id => !states.ContainsKey(id)).ToList();
         var msg = $"{configured.Count - missing.Count} entité(s) disponible(s).";

@@ -1,0 +1,1175 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette – Plan du bâtiment en 3D (Home Assistant)</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root { --nuit:#0B1F3A; --acier:#5A6B80; --brume:#DDE3EA; --fond:#F5F7FA; --signal:#3B82C4; --bord2:#C5CED9; --ok:#1E8E5A; --ok-bg:#E1F0E8; --ok-ink:#155A38; --warn-bg:#FBF0DC; --warn-ink:#7A4F12; --danger:#C8372D; --danger-bg:#FBE4E2; --orange:#C45A00; --ha:#18BCF2; --lamp:#FFC24A; --mono:"JetBrains Mono",ui-monospace,Consolas,monospace; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; font:400 15px/1.5 "IBM Plex Sans","Segoe UI",sans-serif; color:var(--nuit); background:#8d97a6; padding:64px 24px 40px; -webkit-font-smoothing:antialiased; }
+  [hidden] { display:none !important; }
+  .ic { width:18px; height:18px; flex:none; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  button { font:inherit; }
+
+  /* ---- barre de démo ---- */
+  .demo { position:fixed; top:0; left:0; right:0; z-index:60; background:#fff; border-bottom:1px solid var(--bord2); padding:10px 14px; display:flex; gap:6px; align-items:center; flex-wrap:wrap; font-size:13px; color:var(--acier); }
+  .demo button { font-size:13px; padding:5px 12px; border-radius:99px; border:1px solid var(--bord2); background:#fff; color:var(--acier); cursor:pointer; }
+  .demo button.on { background:var(--nuit); border-color:var(--nuit); color:#fff; } .demo b { color:var(--nuit); margin-left:8px; font-weight:500; }
+
+  /* ---- fenêtre du back-office ---- */
+  .win { position:relative; width:min(1360px,100%); margin:0 auto; background:#fff; border-radius:6px; overflow:hidden; box-shadow:0 20px 60px rgba(11,31,58,.35); }
+  .head { display:flex; align-items:center; gap:12px; padding:14px 18px; border-bottom:1px solid var(--brume); }
+  .hico { width:40px; height:40px; border-radius:50%; background:var(--ha); color:#fff; display:grid; place-items:center; flex:none; }
+  .hico .ic { width:22px; height:22px; stroke-width:2; }
+  .ttl { flex:1; min-width:0; } .ttl .r { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .ttl h1 { margin:0; font-size:18px; font-weight:500; } .ttl small { color:var(--acier); font-size:13px; }
+  .badge { font-size:12px; padding:2px 10px; border-radius:4px; background:var(--ok-bg); color:var(--ok-ink); font-weight:500; display:inline-flex; align-items:center; gap:6px; }
+  .badge::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--ok); }
+  .badge.n { background:var(--fond); color:var(--acier); border:1px solid var(--brume); } .badge.n::before { display:none; }
+  .x { border:0; background:none; color:var(--acier); cursor:pointer; padding:7px; border-radius:4px; display:grid; place-items:center; } .x:hover { background:var(--fond); color:var(--nuit); }
+  .btn { font-weight:500; padding:9px 16px; border-radius:4px; border:1px solid var(--bord2); background:#fff; color:var(--nuit); cursor:pointer; white-space:nowrap; display:inline-flex; align-items:center; gap:8px; }
+  .btn.sm { padding:5px 10px; font-size:13px; } .btn.pri { background:var(--nuit); border-color:var(--nuit); color:#fff; }
+  .btn .ic { width:16px; height:16px; }
+  .foot { display:flex; justify-content:flex-end; gap:10px; padding:14px 18px; border-top:1px solid var(--brume); background:var(--fond); }
+  .ed { display:grid; grid-template-columns:minmax(0,1fr) 380px; min-height:640px; }
+
+  /* barre d'outils du plan */
+  .canvas { display:flex; flex-direction:column; min-width:0; }
+  .tb { display:flex; align-items:center; gap:10px; padding:14px 18px; flex-wrap:wrap; }
+  .tb .sp { flex:1; }
+  .segc { display:inline-flex; border:1px solid var(--bord2); border-radius:4px; overflow:hidden; background:#fff; }
+  .segc button { border:0; background:#fff; color:var(--acier); padding:6px 12px; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; border-left:1px solid var(--brume); }
+  .segc button:first-child { border-left:0; }
+  .segc button.on { background:var(--nuit); color:#fff; }
+  .segc button:disabled { opacity:.4; cursor:default; }
+  .segc .ic { width:15px; height:15px; }
+  .plan-host { position:relative; flex:1; min-height:540px; margin:0 18px 18px; border:1px solid var(--brume); border-radius:4px; overflow:hidden; background:var(--fond); touch-action:none; }
+  .plan-host.dark { background:radial-gradient(ellipse at 50% 40%,#1A3A66,#0B1F3A 72%); border-color:#1d3558; }
+  .plan-host.drop { outline:2px dashed var(--signal); outline-offset:-4px; }
+  .plan-host svg.plan { position:absolute; inset:0; width:100%; height:100%; }
+  .plan-host.room-tool svg.plan { cursor:crosshair; }
+  .ed-hint { position:absolute; left:12px; bottom:10px; font-size:12px; color:var(--acier); background:rgba(255,255,255,.9); border:1px solid var(--brume); border-radius:4px; padding:4px 10px; pointer-events:none; }
+  .plan-host.dark .ed-hint { background:rgba(11,31,58,.8); color:#9AAABD; border-color:#23395A; }
+  .toast { position:absolute; left:50%; top:14px; transform:translate(-50%,-10px); opacity:0; transition:.3s; z-index:20; background:var(--nuit); color:#fff; font-size:13px; padding:8px 14px; border-radius:4px; pointer-events:none; white-space:nowrap; display:flex; align-items:center; gap:8px; }
+  .toast.show { opacity:1; transform:translate(-50%,0); }
+  .toast.alert { background:var(--orange); }
+
+  /* plan 2D (SVG) */
+  .g2 { stroke:#E3E8EE; stroke-width:1; }
+  .lim2 { fill:none; stroke:var(--bord2); stroke-dasharray:4 4; }
+  .r2 rect { fill:#fff; }
+  .r2.sel rect { fill:#EAF2FB; }
+  .r2 .rn2 { font-size:13px; fill:var(--nuit); font-weight:500; text-anchor:middle; pointer-events:none; }
+  .r2 .rd2 { font-size:11px; fill:var(--acier); text-anchor:middle; font-family:var(--mono); pointer-events:none; }
+  .r2.heat rect { transition:fill .4s; }
+  .trace { fill:none; stroke:#B9C3CF; stroke-width:1; stroke-dasharray:2 3; }
+  .trace-t { font-size:10px; fill:#9AA6B4; font-family:var(--mono); }
+  .w2 { stroke:var(--nuit); stroke-width:5; stroke-linecap:square; }
+  .op2-win { fill:#D6E8F8; stroke:var(--signal); stroke-width:1.2; }
+  .op2-win.open { fill:#F6D2B6; stroke:var(--orange); }
+  .op2-shut { fill:#5A6B80; }
+  .op2-door { fill:none; stroke:var(--acier); stroke-width:1.4; }
+  .op2-door.arc { stroke-dasharray:3 3; }
+  .op2-door.open { stroke:var(--orange); }
+  .p2 { cursor:grab; }
+  .p2 circle { fill:#fff; stroke:var(--acier); stroke-width:1.4; }
+  .p2 use { color:var(--nuit); }
+  .p2.on circle { fill:#FFF3D1; stroke:#D99A00; }
+  .p2.alert circle { fill:#FBE3CF; stroke:var(--orange); }
+  .p2.move circle { fill:#DCEBF8; stroke:var(--signal); }
+  .p2.sel circle { stroke:var(--signal); stroke-width:3; }
+  .p2 .lab { font-size:12px; fill:var(--nuit); text-anchor:middle; paint-order:stroke; stroke:#fff; stroke-width:4px; stroke-linejoin:round; font-weight:500; }
+  .drawrect { fill:rgba(59,130,196,.12); stroke:var(--signal); stroke-width:2; stroke-dasharray:6 4; }
+
+  /* ---- panneau de droite ---- */
+  .side { border-left:1px solid var(--brume); display:flex; flex-direction:column; min-width:0; min-height:0; }
+  .tabs { display:flex; border-bottom:1px solid var(--brume); }
+  .tab { flex:1; border:0; background:none; padding:13px 6px 11px; font-size:14px; color:var(--acier); cursor:pointer; border-bottom:2px solid transparent; }
+  .tab.on { color:var(--nuit); border-bottom-color:var(--nuit); font-weight:500; }
+  .sb { padding:16px; overflow:auto; max-height:700px; flex:1; }
+  .sb h4 { margin:18px 0 8px; font-size:12px; font-weight:500; letter-spacing:.06em; text-transform:uppercase; color:var(--acier); display:flex; align-items:baseline; gap:8px; }
+  .sb h4:first-child { margin-top:0; }
+  .sb h4 small { text-transform:none; letter-spacing:0; font-size:12px; font-weight:400; }
+  .search { display:flex; align-items:center; gap:8px; border:1px solid var(--bord2); border-radius:4px; padding:7px 10px; color:var(--acier); }
+  .search input { border:0; outline:0; font:inherit; font-size:14px; flex:1; min-width:0; color:var(--nuit); }
+  .fchips { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 4px; }
+  .fchips button { font-size:12px; padding:3px 10px; border-radius:4px; border:1px solid var(--brume); background:#fff; color:var(--acier); cursor:pointer; }
+  .fchips button.on { background:var(--nuit); border-color:var(--nuit); color:#fff; }
+  .sec-h { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:16px 0 8px; font-size:12px; font-weight:500; letter-spacing:.06em; text-transform:uppercase; color:var(--acier); }
+  .sec-h em { font-style:normal; font-family:var(--mono); color:var(--nuit); margin-left:4px; }
+  .grp { font-size:12px; color:var(--acier); margin:12px 0 6px; padding-bottom:4px; border-bottom:1px solid var(--brume); }
+  .di { display:flex; align-items:center; gap:10px; padding:7px 8px; border:1px solid var(--brume); border-radius:4px; background:#fff; cursor:grab; margin-bottom:6px; touch-action:none; user-select:none; }
+  .di:hover { border-color:var(--bord2); }
+  .di.sel { border-color:var(--signal); box-shadow:0 0 0 1px var(--signal); }
+  .di.todo { border-style:dashed; border-color:var(--bord2); background:var(--fond); }
+  .dic { width:30px; height:30px; border-radius:4px; background:var(--fond); border:1px solid var(--brume); display:grid; place-items:center; flex:none; color:var(--nuit); }
+  .dic .ic { width:16px; height:16px; }
+  .dic.on { background:#FFF3D1; border-color:#F2D58A; }
+  .dic.alert { background:#FBE3CF; border-color:#F0B98C; color:var(--orange); }
+  .dic.move { background:#DCEBF8; border-color:#A9CBEA; color:var(--signal); }
+  .dt { flex:1; min-width:0; line-height:1.25; }
+  .dt b { display:block; font-weight:500; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .dt small { font-family:var(--mono); font-size:11px; color:var(--acier); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:block; }
+  .dr { font-size:12px; color:var(--acier); white-space:nowrap; }
+  .dr.warn { color:var(--orange); }
+  .rm { border:0; background:none; color:var(--acier); cursor:pointer; border-radius:4px; padding:3px; display:grid; place-items:center; }
+  .rm:hover { background:var(--danger-bg); color:var(--danger); }
+  .rm .ic { width:14px; height:14px; }
+  .link { border:0; background:none; color:var(--signal); cursor:pointer; padding:4px 0; font-size:14px; }
+  .selcard { border:1px solid var(--signal); border-radius:4px; padding:12px; margin-bottom:14px; background:#F7FAFD; }
+  .selcard .r { display:flex; gap:10px; align-items:center; }
+  .selcard .kv { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; font-size:13px; margin:10px 0; }
+  .selcard .kv span:nth-child(odd) { color:var(--acier); }
+  .selcard .mem { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+  .selcard .mem span { font-size:12px; border:1px solid var(--brume); background:#fff; border-radius:4px; padding:2px 8px; }
+  .modes { display:grid; gap:8px; }
+  .mode { display:flex; gap:12px; align-items:flex-start; text-align:left; border:1px solid var(--brume); border-radius:4px; padding:10px 12px; background:#fff; cursor:pointer; color:var(--nuit); }
+  .mode.on { border-color:var(--nuit); box-shadow:0 0 0 1px var(--nuit); }
+  .mode .ic { width:22px; height:22px; margin-top:2px; color:var(--acier); }
+  .mode.on .ic { color:var(--nuit); }
+  .mode b { font-weight:500; display:block; } .mode small { color:var(--acier); font-size:13px; line-height:1.35; display:block; }
+  .frow { display:flex; align-items:center; gap:10px; padding:9px 10px; border:1px solid var(--brume); border-radius:4px; margin-bottom:6px; cursor:pointer; }
+  .frow.on { border-color:var(--signal); background:#F7FAFD; }
+  .frow b { font-weight:500; flex:1; } .frow small { color:var(--acier); font-size:12px; }
+  .rrow { display:grid; grid-template-columns:1fr 1fr auto; gap:6px; margin-bottom:6px; align-items:center; }
+  .rrow.sel input { border-color:var(--signal); }
+  .rrow input, .rrow select, .fld select { font:inherit; font-size:13px; padding:5px 8px; border:1px solid var(--bord2); border-radius:4px; background:#fff; color:var(--nuit); min-width:0; width:100%; }
+  .rrow select.none { color:var(--orange); }
+  .hintp { font-size:13px; color:var(--acier); margin:8px 0; }
+  .calque { display:flex; align-items:center; gap:8px; font-size:13px; padding:8px 10px; background:var(--fond); border:1px solid var(--brume); border-radius:4px; }
+  .calque span { flex:1; font-family:var(--mono); font-size:12px; }
+  .opt { display:flex; gap:12px; align-items:flex-start; padding:10px 0; border-bottom:1px solid var(--brume); }
+  .opt div { flex:1; } .opt b { font-weight:500; display:block; font-size:14px; } .opt small { color:var(--acier); font-size:13px; line-height:1.35; display:block; }
+  .sw { position:relative; width:36px; height:20px; flex:none; margin-top:2px; }
+  .sw input { position:absolute; opacity:0; inset:0; margin:0; cursor:pointer; z-index:1; }
+  .sw i { position:absolute; inset:0; border-radius:99px; background:var(--bord2); transition:.2s; }
+  .sw i::after { content:""; position:absolute; left:2px; top:2px; width:16px; height:16px; border-radius:50%; background:#fff; transition:.2s; }
+  .sw input:checked + i { background:var(--nuit); }
+  .sw input:checked + i::after { transform:translateX(16px); }
+  .fld { margin:14px 0 4px; } .fld label { display:block; font-size:13px; color:var(--acier); margin-bottom:4px; }
+
+  /* ---- notes de maquette ---- */
+  .notes { width:min(1360px,100%); margin:18px auto 0; background:#fff; border-radius:6px; padding:16px 20px; font-size:14px; display:grid; grid-template-columns:1fr 1fr; gap:8px 32px; }
+  .notes h3 { margin:0 0 6px; font-size:12px; font-weight:500; letter-spacing:.06em; text-transform:uppercase; color:var(--acier); }
+  .notes ul { margin:0; padding-left:18px; } .notes li { margin:3px 0; }
+
+  /* ---- écrans (TV / borne) ---- */
+  .tvwrap { width:min(1180px,100%); margin:0 auto; }
+  .bezel { background:#121417; padding:12px; border-radius:10px; box-shadow:0 24px 60px rgba(11,31,58,.45); }
+  .bezel.kiosk { padding:18px; border-radius:18px; background:#1b1e22; }
+  .screen { position:relative; aspect-ratio:16/9; background:radial-gradient(ellipse at 50% 42%,#1A3A66,#0B1F3A 72%); overflow:hidden; border-radius:3px; color:#fff; }
+  .stand { width:180px; height:16px; margin:0 auto; background:#2a2e33; border-radius:0 0 8px 8px; }
+  .ov-top { position:absolute; left:0; right:0; top:0; display:flex; align-items:flex-start; justify-content:space-between; padding:18px 22px; pointer-events:none; z-index:5; }
+  .ov-top h2 { margin:0; font-size:22px; font-weight:500; } .ov-top .live { font-size:13px; color:#9AAABD; display:flex; align-items:center; gap:7px; }
+  .ov-top .live::before { content:""; width:8px; height:8px; border-radius:50%; background:#3CC983; box-shadow:0 0 0 3px rgba(60,201,131,.25); }
+  .clock { font:500 30px/1 var(--mono); color:#DDE3EA; }
+  .ov-bot { position:absolute; left:0; right:0; bottom:0; display:flex; gap:10px; padding:16px 22px; flex-wrap:wrap; pointer-events:none; z-index:5; }
+  .sum { display:inline-flex; align-items:center; gap:8px; padding:7px 12px; border-radius:4px; background:rgba(11,31,58,.75); border:1px solid #23395A; font-size:14px; color:#DDE3EA; }
+  .sum .ic { width:16px; height:16px; }
+  .sum.on .ic { color:var(--lamp); } .sum.alert { background:var(--orange); border-color:#F0A060; color:#fff; }
+  .kbar { position:absolute; top:16px; left:18px; right:18px; display:flex; gap:8px; align-items:center; z-index:6; flex-wrap:wrap; }
+  .kbar .sp { flex:1; }
+  .kbtn { display:inline-flex; align-items:center; gap:8px; padding:9px 14px; border-radius:4px; background:rgba(11,31,58,.82); border:1px solid #3A5170; color:#DDE3EA; font-size:14px; cursor:pointer; }
+  .kbtn.on { background:#fff; color:var(--nuit); border-color:#fff; }
+  .kbtn .ic { width:18px; height:18px; }
+  .khint { position:absolute; left:18px; bottom:16px; font-size:13px; color:#9AAABD; z-index:5; pointer-events:none; }
+
+  /* ---- scène 3D ---- */
+  .scene3d { position:absolute; inset:0; perspective:2600px; perspective-origin:50% 30%; overflow:hidden; cursor:grab; touch-action:none; }
+  .scene3d.grabbing { cursor:grabbing; }
+  .world { position:absolute; left:50%; top:54%; transform-style:preserve-3d; }
+  .world.ease { transition:transform .8s cubic-bezier(.2,.7,.2,1); }
+  .floor3 { position:absolute; left:0; top:0; width:100%; height:100%; transform-style:preserve-3d; transition:transform .8s cubic-bezier(.2,.7,.2,1); }
+  .slab { position:absolute; inset:-8px; background:#0E2645; border:1px solid #2B4A74; transform:translateZ(-2px); }
+  .room3 { position:absolute; background:#21406A; box-shadow:inset 0 0 0 1px rgba(255,255,255,.07); transition:background .6s; }
+  .room3 .rn { position:absolute; left:7px; bottom:5px; font-size:10px; letter-spacing:.07em; text-transform:uppercase; color:#8DA0B8; white-space:nowrap; }
+  .wall { position:absolute; transform-origin:0 0; background:linear-gradient(to bottom, rgba(197,210,226,.14), rgba(197,210,226,.32)); border-bottom:2px solid rgba(235,242,250,.8); }
+  .op3 { position:absolute; transform-origin:0 0; transition:transform .7s cubic-bezier(.2,.7,.2,1); }
+  .op3.window, .op3.cover { background:rgba(197,210,226,.22); border-bottom:2px solid rgba(235,242,250,.8); }
+  .op3 .glass { position:absolute; left:7%; right:7%; top:30%; height:62%; background:rgba(120,180,240,.32); border:1px solid rgba(170,210,250,.75); overflow:hidden; transition:background .4s; }
+  .op3 .shut { position:absolute; left:0; right:0; bottom:0; background:repeating-linear-gradient(to bottom,#6a7c93 0 3px,#4b5c71 3px 5px); transition:height .7s; }
+  .op3.window.open .glass { background:rgba(196,90,0,.6); border-color:#F0A060; }
+  .op3.door .leaf { position:absolute; left:5%; right:5%; top:0; bottom:8%; background:#8FA3BC; border:1px solid #C5D2E2; transition:background .4s; }
+  .op3.door.open .leaf { background:#E07A2A; border-color:#F6B47A; }
+  .glow { position:absolute; border-radius:50%; transform:translateZ(1px); transition:opacity .6s, width .6s, height .6s, margin .6s; pointer-events:none; }
+  .pin { position:absolute; left:0; top:0; width:0; height:0; transform-origin:0 0; }
+  .pin-in { position:absolute; left:0; bottom:0; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; pointer-events:none; }
+  .chip { pointer-events:auto; display:inline-flex; align-items:center; gap:5px; padding:4px 9px 4px 6px; border-radius:99px; background:rgba(11,31,58,.92); border:1px solid #3A5170; color:#DDE3EA; font:500 12px/1.1 "IBM Plex Sans",sans-serif; white-space:nowrap; cursor:pointer; transition:background .3s, border-color .3s, color .3s; }
+  .chip .ic { width:15px; height:15px; }
+  .chip .v:empty { display:none; }
+  .chip.novals { padding:5px; } .chip.novals .v { display:none; }
+  .chip.on { background:#FFF3D1; color:#5B4200; border-color:var(--lamp); }
+  .chip.alert { background:var(--orange); border-color:#F6B47A; color:#fff; }
+  .chip.move { background:var(--signal); border-color:#8CC0EE; color:#fff; }
+  .chip.sel { box-shadow:0 0 0 3px rgba(59,130,196,.7); }
+  .stem { width:2px; height:var(--stem,44px); background:linear-gradient(rgba(221,227,234,.75),rgba(221,227,234,.08)); }
+  .pin.pulse .chip { animation:pulse 1s ease-out infinite; }
+  @keyframes pulse { 0% { box-shadow:0 0 0 0 rgba(240,140,60,.85); } 100% { box-shadow:0 0 0 18px rgba(240,140,60,0); } }
+  .flabel { position:absolute; left:0; top:0; width:0; height:0; transform-origin:0 0; }
+  .flabel span { position:absolute; right:0; bottom:0; white-space:nowrap; font-size:13px; color:#9AAABD; padding:3px 8px; border-left:2px solid #3B82C4; background:rgba(11,31,58,.6); }
+  .floor3.ghost .room3, .floor3.ghost .wall, .floor3.ghost .op3, .floor3.ghost .slab { opacity:.22; }
+  .floor3.ghost .pin, .floor3.ghost .glow, .floor3.ghost .flabel { display:none; }
+  .floor3.hide { display:none; }
+
+  /* panneau de commande de la borne */
+  .kp { position:absolute; top:70px; right:18px; bottom:18px; width:310px; background:#fff; color:var(--nuit); border-radius:6px; padding:16px; z-index:8; transform:translateX(360px); transition:transform .35s cubic-bezier(.2,.7,.2,1); overflow:auto; }
+  .kp.open { transform:none; }
+  .kp-h { display:flex; gap:10px; align-items:center; margin-bottom:14px; }
+  .kp-h .dic { width:40px; height:40px; } .kp-h .dic .ic { width:22px; height:22px; }
+  .kp-h div { flex:1; min-width:0; } .kp-h b { display:block; font-weight:500; font-size:16px; } .kp-h small { color:var(--acier); font-size:13px; }
+  .big { font:500 34px/1.1 var(--mono); margin:4px 0 2px; }
+  .kp .lbl { font-size:13px; color:var(--acier); margin:14px 0 6px; display:flex; justify-content:space-between; }
+  .kp input[type=range] { width:100%; accent-color:var(--nuit); }
+  .tog { width:100%; padding:12px; border-radius:4px; border:1px solid var(--bord2); background:#fff; font-size:15px; font-weight:500; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; }
+  .tog.on { background:var(--nuit); color:#fff; border-color:var(--nuit); }
+  .cols { display:flex; gap:8px; flex-wrap:wrap; }
+  .cols button { width:30px; height:30px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 0 1px var(--bord2); cursor:pointer; }
+  .cols button.on { box-shadow:0 0 0 2px var(--nuit); }
+  .stepper { display:flex; align-items:center; gap:10px; }
+  .stepper button { width:44px; height:44px; border-radius:4px; border:1px solid var(--bord2); background:#fff; font-size:22px; cursor:pointer; }
+  .stepper span { flex:1; text-align:center; font:500 24px var(--mono); }
+  .row3 { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .row3 button { padding:9px 4px; border-radius:4px; border:1px solid var(--bord2); background:#fff; cursor:pointer; font-size:13px; }
+  .row3 button.on { background:var(--nuit); color:#fff; border-color:var(--nuit); }
+  .memb { display:flex; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--brume); font-size:14px; }
+  .ro { font-size:13px; color:var(--acier); background:var(--fond); border:1px solid var(--brume); border-radius:4px; padding:8px 10px; margin-top:12px; }
+  .hold { position:relative; overflow:hidden; width:100%; padding:14px; border-radius:4px; border:1px solid var(--orange); color:var(--orange); background:#fff; font-size:15px; font-weight:500; cursor:pointer; user-select:none; touch-action:none; }
+  .hold::before { content:""; position:absolute; left:0; top:0; bottom:0; width:0; background:rgba(196,90,0,.16); }
+  .hold.holding::before { width:100%; transition:width 1.5s linear; }
+
+  @media (max-width:980px) {
+    .ed { grid-template-columns:1fr; } .side { border-left:0; border-top:1px solid var(--brume); }
+    .notes { grid-template-columns:1fr; }
+    body { padding:96px 12px 32px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="demo">
+  Vue :
+  <button data-view="editor" class="on">Éditeur du plan</button>
+  <button data-view="tv">Écran (diffusion)</button>
+  <button data-view="kiosk">Borne tactile</button>
+  <b>Simuler :</b>
+  <button data-ev="door">Porte ouverte</button>
+  <button data-ev="motion">Mouvement</button>
+  <button data-ev="light">Lumière allumée</button>
+</div>
+
+<!-- ======================= ÉDITEUR ======================= -->
+<section id="v-editor">
+  <div class="win">
+    <div class="head">
+      <div class="hico"><svg class="ic"><use href="#i-house"/></svg></div>
+      <div class="ttl">
+        <div class="r"><h1>Plan du bâtiment</h1><span class="badge">Home Assistant connecté</span><span class="badge n" id="countBadge"></span></div>
+        <small>Widget Home Assistant · placez les appareils sur le plan, l'écran montre leur état en direct</small>
+      </div>
+      <button class="x" title="Fermer"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="ed">
+      <div class="canvas">
+        <div class="tb" id="edToolbar"></div>
+        <div class="plan-host" id="planHost"></div>
+      </div>
+      <aside class="side">
+        <div class="tabs" id="sideTabs"></div>
+        <div class="sb" id="sideBody"></div>
+      </aside>
+    </div>
+    <div class="foot"><button class="btn">Annuler</button><button class="btn pri">Enregistrer</button></div>
+  </div>
+  <div class="notes">
+    <div>
+      <h3>Ce que montre l'éditeur</h3>
+      <ul>
+        <li>Les étages et les pièces sont repris de Home Assistant ; le plan importé sert de calque.</li>
+        <li>Outil « Pièce » : glisser sur la grille (pas de 1 m). Les murs se montent tout seuls ; un passage entre deux pièces est une ouverture sans capteur.</li>
+        <li>Glisser un appareil depuis la liste ou sur le plan ; portes, fenêtres et volets se collent au mur le plus proche.</li>
+        <li>« Placer dans leur pièce » utilise la pièce Home Assistant de chaque appareil (le Garage n'existe pas sur le plan : il reste à placer).</li>
+      </ul>
+    </div>
+    <div>
+      <h3>À trancher</h3>
+      <ul>
+        <li>Forme proposée par défaut : image du plan, pièces dessinées ou modèle 3D (seules les pièces dessinées sont simulées ici).</li>
+        <li>Nom du widget : « Plan du bâtiment » (générique) plutôt que « Maison 3D ».</li>
+        <li>Un seul plan par organisation, ou un plan par widget (plusieurs bâtiments) ?</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= ÉCRAN (TV) ======================= -->
+<section id="v-tv" hidden>
+  <div class="tvwrap">
+    <div class="bezel"><div class="screen" id="tvScreen"></div></div>
+    <div class="stand"></div>
+  </div>
+  <div class="notes">
+    <div>
+      <h3>Écran sans toucher</h3>
+      <ul>
+        <li>Rotation lente, valeurs en direct (lumières en halo de leur couleur, volets qui descendent, portes qui s'ouvrent).</li>
+        <li>Un événement (porte, fenêtre, mouvement) montre l'étage concerné quelques secondes, puis la vue revient.</li>
+        <li>Faire glisser la vue la fait tourner (ici pour la démo ; sur un vrai écran, rien n'est touchable).</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Players modestes</h3>
+      <ul>
+        <li>Même rendu en « 2,5D » à angles fixes si l'appareil ne tient pas la 3D (réglage « Rendu » dans Affichage).</li>
+        <li>Bandeau du bas : lumières allumées, ouvertures, température du salon, consommation des prises.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= BORNE ======================= -->
+<section id="v-kiosk" hidden>
+  <div class="tvwrap">
+    <div class="bezel kiosk"><div class="screen" id="kioskScreen"></div></div>
+  </div>
+  <div class="notes">
+    <div>
+      <h3>Borne tactile</h3>
+      <ul>
+        <li>Toucher un appareil ouvre son panneau : allumer, intensité, couleur, consigne, position du volet.</li>
+        <li>Un groupe de lumières se commande d'un coup ou lampe par lampe.</li>
+        <li>Serrure : appui maintenu 1,5 s pour déverrouiller (comme le bouton d'urgence).</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Navigation</h3>
+      <ul>
+        <li>Choix de l'étage, rotation au doigt ou par les flèches, vue éclatée.</li>
+        <li>Capteurs (portes, fenêtres, mouvement, température) : lecture seule.</li>
+        <li>Si « Commande à l'écran » est coupée dans Affichage, les panneaux ne montrent que l'état.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.4 1.1 2.2h5c0-.8.4-1.6 1.1-2.2A6 6 0 0 0 12 3z"/></symbol>
+    <symbol id="i-group" viewBox="0 0 24 24"><circle cx="8" cy="9" r="4"/><circle cx="16" cy="9" r="4"/><path d="M6.5 16h3M14.5 16h3M7 19.5h2M15 19.5h2"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0V8zM12 17v4"/></symbol>
+    <symbol id="i-thermo" viewBox="0 0 24 24"><path d="M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0z"/><path d="M12 11v6"/></symbol>
+    <symbol id="i-climate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 12l3.5-3.5M12 5.5v1.5M5.5 12H7M17 12h1.5"/></symbol>
+    <symbol id="i-blind" viewBox="0 0 24 24"><path d="M3 4h18M5 4v12M19 4v12M5 8h14M5 12h14M5 16h14M12 16v4"/></symbol>
+    <symbol id="i-window" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="1"/><path d="M12 3v18M5 12h14"/></symbol>
+    <symbol id="i-door" viewBox="0 0 24 24"><path d="M6 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17M3 21h18"/><path d="M14.5 12h.01"/></symbol>
+    <symbol id="i-motion" viewBox="0 0 24 24"><circle cx="13.5" cy="4.5" r="1.8"/><path d="M8 21l2.5-6 3 2.5V21M10.5 15l1-5-3 1.5L7 14M11.5 10l3 2.5 3-1"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-unlock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/></symbol>
+    <symbol id="i-house" viewBox="0 0 24 24"><path d="M3 11l9-7 9 7M5.5 9.5V20h13V9.5M10 20v-5h4v5"/></symbol>
+    <symbol id="i-rotl" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 3.5v4h4"/></symbol>
+    <symbol id="i-rotr" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 3.5v4h-4"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5"/></symbol>
+    <symbol id="i-cursor" viewBox="0 0 24 24"><path d="M5 3l14 7-6 2-2.5 6.5z"/></symbol>
+    <symbol id="i-room" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1" stroke-dasharray="3 2.5"/><path d="M12 9v6M9 12h6"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></symbol>
+    <symbol id="i-sync" viewBox="0 0 24 24"><path d="M19.5 9A8 8 0 0 0 5.6 6.4M4.5 3.5v3.5H8M4.5 15a8 8 0 0 0 13.9 2.6M19.5 20.5V17H16"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-cube" viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="1"/><circle cx="9" cy="10" r="1.5"/><path d="M21 16l-5-5-8 8"/></symbol>
+    <symbol id="i-plan" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M3 12h8v9M11 3v5M15 12h6"/></symbol>
+    <symbol id="i-wand" viewBox="0 0 24 24"><path d="M4 20L15 9M13 7l4 4M18 3v3M21 6h-3M19.5 4.5l1-1"/></symbol>
+  </defs>
+</svg>
+
+<script>
+/* ================== Données (Home Assistant simulé) ================== */
+const P3 = 40, WALL = 46, GAP = 150, P2 = 44, FW = 12, FH = 8;
+
+const floors = [
+  { id:'rdc', name:'Rez-de-chaussée', rooms:[
+      { id:'salon',   name:'Salon',          area:'Salon',          x:0, y:0, w:7, h:5 },
+      { id:'cuisine', name:'Cuisine',        area:'Cuisine',        x:7, y:0, w:5, h:4 },
+      { id:'entree',  name:'Entrée',         area:'Entrée',         x:7, y:4, w:2, h:4 },
+      { id:'bureau',  name:'Bureau',         area:'Bureau',         x:9, y:4, w:3, h:4 },
+      { id:'sam',     name:'Salle à manger', area:'Salle à manger', x:0, y:5, w:7, h:3 } ],
+    gaps:[ {x:7,y:4,d:90,len:1}, {x:7,y:6,d:90,len:1}, {x:8,y:4,d:0,len:1}, {x:9,y:6,d:90,len:1}, {x:2,y:5,d:0,len:3} ] },
+  { id:'e1', name:'Étage', rooms:[
+      { id:'ch1',    name:'Chambre 1',     area:'Chambre 1',     x:0, y:0, w:5, h:4 },
+      { id:'ch2',    name:'Chambre 2',     area:'Chambre 2',     x:0, y:4, w:5, h:4 },
+      { id:'couloir',name:'Couloir',       area:'Couloir',       x:5, y:0, w:2, h:8 },
+      { id:'sdb',    name:'Salle de bain', area:'Salle de bain', x:7, y:0, w:5, h:3 },
+      { id:'ch3',    name:'Chambre 3',     area:'Chambre 3',     x:7, y:3, w:5, h:5 } ],
+    gaps:[ {x:5,y:1,d:90,len:1}, {x:5,y:5,d:90,len:1}, {x:7,y:1,d:90,len:1}, {x:7,y:5,d:90,len:1} ] }
+];
+const HA_AREAS = ['Salon','Cuisine','Entrée','Bureau','Salle à manger','Garage','Chambre 1','Chambre 2','Chambre 3','Couloir','Salle de bain','Jardin'];
+
+const devices = [
+  { id:'light.salon', name:'Salon', fam:'group', area:'Salon', floor:'rdc', x:3.5, y:2.3, bri:80, col:'#FFC870',
+    members:[ {n:'Plafonnier', on:true}, {n:'Lampadaire', on:true}, {n:'Applique', on:false} ] },
+  { id:'light.salle_a_manger', name:'Suspension', fam:'light', area:'Salle à manger', floor:'rdc', x:3.5, y:6.6, on:false, bri:70, col:'#FFD08A' },
+  { id:'light.cuisine', name:'Spots cuisine', fam:'light', area:'Cuisine', floor:'rdc', x:9.5, y:1.8, on:true, bri:100, col:'#DCE8FF' },
+  { id:'light.entree', name:'Entrée', fam:'light', area:'Entrée', floor:'rdc', x:8, y:5.8, on:false, bri:60, col:'#FFE2B0' },
+  { id:'switch.prise_tv', name:'Prise TV', fam:'plug', area:'Salon', floor:'rdc', x:0.9, y:4.1, on:true, w:85 },
+  { id:'switch.prise_cafetiere', name:'Prise cafetière', fam:'plug', area:'Cuisine', floor:'rdc', x:11.2, y:3.3, on:false, w:0 },
+  { id:'climate.salon', name:'Thermostat salon', fam:'climate', area:'Salon', floor:'rdc', x:6.2, y:0.8, cur:21.5, set:21, mode:'heat' },
+  { id:'sensor.temperature_cuisine', name:'Température cuisine', fam:'temp', area:'Cuisine', floor:'rdc', x:11.2, y:0.8, cur:22.8 },
+  { id:'cover.volet_salon', name:'Volet salon', fam:'cover', area:'Salon', floor:'rdc', seg:{x:0,y:1,d:90,len:2}, pos:60 },
+  { id:'cover.volet_salle_a_manger', name:'Volet salle à manger', fam:'cover', area:'Salle à manger', floor:'rdc', seg:{x:2,y:8,d:0,len:2}, pos:100 },
+  { id:'binary_sensor.fenetre_cuisine', name:'Fenêtre cuisine', fam:'window', area:'Cuisine', floor:'rdc', seg:{x:12,y:1,d:90,len:1}, open:false },
+  { id:'binary_sensor.porte_entree', name:"Porte d'entrée", fam:'door', area:'Entrée', floor:'rdc', seg:{x:7,y:8,d:0,len:1}, open:false },
+  { id:'lock.porte_entree', name:"Serrure d'entrée", fam:'lock', area:'Entrée', floor:'rdc', x:8.4, y:7.2, locked:true },
+  { id:'binary_sensor.mouvement_entree', name:'Mouvement entrée', fam:'motion', area:'Entrée', floor:'rdc', x:7.6, y:4.6, on:false },
+
+  { id:'light.chambre_1', name:'Plafonnier chambre 1', fam:'light', area:'Chambre 1', floor:'e1', x:2.5, y:2, on:false, bri:70, col:'#FFD08A' },
+  { id:'light.chambre_2', name:'Chevet', fam:'light', area:'Chambre 2', floor:'e1', x:2.5, y:6, on:true, bri:40, col:'#FFB46B' },
+  { id:'light.couloir', name:'Couloir', fam:'light', area:'Couloir', floor:'e1', x:6, y:4, on:true, bri:60, col:'#FFE2B0' },
+  { id:'light.chambre_3', name:'Plafonnier chambre 3', fam:'light', area:'Chambre 3', floor:'e1', x:9.5, y:5.5, on:false, bri:80, col:'#FFE2B0' },
+  { id:'switch.seche_serviettes', name:'Sèche-serviettes', fam:'plug', area:'Salle de bain', floor:'e1', x:11.2, y:1.6, on:true, w:450 },
+  { id:'climate.chambres', name:'Thermostat chambres', fam:'climate', area:'Chambre 2', floor:'e1', x:4.2, y:7.2, cur:19.4, set:19, mode:'eco' },
+  { id:'sensor.temperature_sdb', name:'Température salle de bain', fam:'temp', area:'Salle de bain', floor:'e1', x:8, y:0.8, cur:23.6 },
+  { id:'sensor.temperature_chambre_3', name:'Température chambre 3', fam:'temp', area:'Chambre 3', floor:'e1', x:11.2, y:7.2, cur:18.2 },
+  { id:'cover.volet_chambre_1', name:'Volet chambre 1', fam:'cover', area:'Chambre 1', floor:'e1', seg:{x:0,y:1,d:90,len:2}, pos:0 },
+  { id:'cover.volet_chambre_3', name:'Volet chambre 3', fam:'cover', area:'Chambre 3', floor:'e1', seg:{x:9,y:8,d:0,len:2}, pos:30 },
+  { id:'binary_sensor.fenetre_sdb', name:'Fenêtre salle de bain', fam:'window', area:'Salle de bain', floor:'e1', seg:{x:9,y:0,d:0,len:1}, open:false },
+
+  { id:'light.bureau', name:'Lampe bureau', fam:'light', area:'Bureau', floor:null, on:false, bri:80, col:'#FFE2B0' },
+  { id:'switch.prise_bureau', name:'Prise bureau', fam:'plug', area:'Bureau', floor:null, on:true, w:62 },
+  { id:'sensor.temperature_bureau', name:'Température bureau', fam:'temp', area:'Bureau', floor:null, cur:20.1 },
+  { id:'binary_sensor.porte_garage', name:'Porte du garage', fam:'door', area:'Garage', floor:null, open:false, len:2 }
+];
+
+const FAM = {
+  light:  { l:'Lumière',            ic:'bulb',    cat:'light' },
+  group:  { l:'Groupe de lumières', ic:'group',   cat:'light' },
+  plug:   { l:'Prise',              ic:'plug',    cat:'plug' },
+  climate:{ l:'Thermostat',         ic:'climate', cat:'climate' },
+  temp:   { l:'Température',        ic:'thermo',  cat:'sensor' },
+  cover:  { l:'Volet',              ic:'blind',   cat:'opening' },
+  window: { l:'Fenêtre (capteur)',  ic:'window',  cat:'opening' },
+  door:   { l:'Porte (capteur)',    ic:'door',    cat:'opening' },
+  motion: { l:'Mouvement',          ic:'motion',  cat:'sensor' },
+  lock:   { l:'Serrure',            ic:'lock',    cat:'lock' }
+};
+const CATS = [['all','Tous'],['light','Lumières'],['plug','Prises'],['climate','Climat'],['opening','Ouvertures'],['sensor','Capteurs'],['lock','Serrures']];
+
+const state = {
+  view:'editor', edFloor:'rdc', edMode:'2d', tool:'select', tab:'devices', sel:null, selRoom:null,
+  q:'', cat:'all', shape:'rooms', trace:true,
+  opts:{ autoRotate:true, explode:true, heat:false, focus:true, control:true, labels:'all', start:'all', render:'auto' }
+};
+
+/* ================== Utilitaires ================== */
+const $ = (s, r=document) => r.querySelector(s);
+const fl = id => floors.find(f => f.id === id);
+const dev = id => devices.find(d => d.id === id);
+const isSeg = d => d.fam === 'cover' || d.fam === 'window' || d.fam === 'door';
+const fmt1 = n => n.toFixed(1).replace('.', ',');
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const icon = (n, cls='ic') => `<svg class="${cls}"><use href="#i-${n}"/></svg>`;
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+function famIcon(d) { if (d.fam === 'lock' && !d.locked) return 'unlock'; return FAM[d.fam].ic; }
+function isOn(d) { return d.fam === 'group' ? d.members.some(m => m.on) : !!d.on; }
+
+function segMid(s) { return s.d === 0 ? { x:s.x + s.len/2, y:s.y } : { x:s.x, y:s.y + s.len/2 }; }
+function inward(s) { const m = segMid(s); return s.d === 0 ? { x:0, y: m.y < FH/2 ? 1 : -1 } : { x: m.x < FW/2 ? 1 : -1, y:0 }; }
+function pinPos(d, off) { if (d.seg) { const m = segMid(d.seg), n = inward(d.seg); return { x:m.x + n.x*off, y:m.y + n.y*off }; } return { x:d.x, y:d.y }; }
+function roomAt(fid, x, y) { const f = fl(fid); return f && f.rooms.find(r => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h); }
+function roomOf(d) { if (!d.floor) return null; const p = pinPos(d, 0.3); return roomAt(d.floor, p.x, p.y); }
+
+function state3(d) {          // '' | on | alert | move
+  switch (d.fam) {
+    case 'light': case 'group': case 'plug': return isOn(d) ? 'on' : '';
+    case 'window': case 'door': return d.open ? 'alert' : '';
+    case 'lock': return d.locked ? '' : 'alert';
+    case 'motion': return d.on ? 'move' : '';
+    default: return '';
+  }
+}
+function val(d) {
+  switch (d.fam) {
+    case 'light': return d.on ? d.bri + ' %' : 'Éteinte';
+    case 'group': { const n = d.members.filter(m => m.on).length; return n ? n + '/' + d.members.length + ' allumées' : 'Éteintes'; }
+    case 'plug': return d.on ? d.w + ' W' : 'Éteinte';
+    case 'climate': return fmt1(d.cur) + '°';
+    case 'temp': return fmt1(d.cur) + '°';
+    case 'cover': return d.pos === 0 ? 'Fermé' : d.pos === 100 ? 'Ouvert' : d.pos + ' %';
+    case 'window': case 'door': return d.open ? 'Ouverte' : 'Fermée';
+    case 'motion': return d.on ? 'Mouvement' : 'Calme';
+    case 'lock': return d.locked ? 'Verrouillée' : 'Déverrouillée';
+  }
+  return '';
+}
+function roomTemp(fid, r) {
+  const t = devices.find(d => d.floor === fid && (d.fam === 'climate' || d.fam === 'temp') && roomOf(d) === r);
+  return t ? t.cur : null;
+}
+function mix(a, b, k) { const p = h => [1,3,5].map(i => parseInt(h.substr(i,2),16)); const A = p(a), B = p(b); return 'rgb(' + A.map((v,i) => Math.round(v + (B[i]-v)*k)).join(',') + ')'; }
+function heatColor(t, base) {
+  if (t == null) return base;
+  if (t < 21) return mix(base, '#2F78C4', clamp((21 - t) / 3, 0, 1) * .85);
+  return mix(base, '#C8582C', clamp((t - 21) / 3, 0, 1) * .85);
+}
+function hexA(h, a) { const n = parseInt(h.slice(1),16); return `rgba(${n>>16},${(n>>8)&255},${n&255},${a})`; }
+
+/* ---- murs : arêtes des pièces, moins passages et ouvertures, fusionnées ---- */
+function roomKeys(r) { const k = []; for (let i=0;i<r.w;i++){ k.push('h:'+(r.x+i)+','+r.y); k.push('h:'+(r.x+i)+','+(r.y+r.h)); } for (let j=0;j<r.h;j++){ k.push('v:'+r.x+','+(r.y+j)); k.push('v:'+(r.x+r.w)+','+(r.y+j)); } return k; }
+function segKeys(s) { const k = []; for (let i=0;i<s.len;i++) k.push(s.d === 0 ? 'h:'+(s.x+i)+','+s.y : 'v:'+s.x+','+(s.y+i)); return k; }
+function wallUnits(f) { const set = new Set(); f.rooms.forEach(r => roomKeys(r).forEach(k => set.add(k))); f.gaps.forEach(g => segKeys(g).forEach(k => set.delete(k))); return set; }
+function walls(f) {
+  const set = wallUnits(f);
+  devices.filter(d => d.floor === f.id && d.seg).forEach(d => segKeys(d.seg).forEach(k => set.delete(k)));
+  const hs = {}, vs = {};
+  set.forEach(k => { const [t, c] = k.split(':'); const [a, b] = c.split(',').map(Number); if (t === 'h') (hs[b] = hs[b] || []).push(a); else (vs[a] = vs[a] || []).push(b); });
+  const out = [];
+  const merge = (arr, mk) => { arr.sort((p,q) => p-q); let s = arr[0], p = arr[0]; for (let i=1;i<=arr.length;i++){ if (arr[i] === p+1) { p = arr[i]; continue; } out.push(mk(s, p-s+1)); s = p = arr[i]; } };
+  for (const y in hs) merge(hs[y], (s, len) => ({ x:s, y:+y, d:0, len }));
+  for (const x in vs) merge(vs[x], (s, len) => ({ x:+x, y:s, d:90, len }));
+  return out;
+}
+function snapSeg(f, d, x, y) {
+  const len = (d.seg && d.seg.len) || d.len || (d.fam === 'cover' ? 2 : 1);
+  const free = wallUnits(f);
+  devices.filter(o => o !== d && o.floor === f.id && o.seg).forEach(o => segKeys(o.seg).forEach(k => free.delete(k)));
+  let best = null, bd = 1e9;
+  free.forEach(k => {
+    const [t, c] = k.split(':'); const [a, b] = c.split(',').map(Number);
+    const s = { x:a, y:b, d: t === 'h' ? 0 : 90, len };
+    if (!segKeys(s).every(kk => free.has(kk))) return;
+    const m = segMid(s), dist = Math.hypot(m.x - x, m.y - y);
+    if (dist < bd) { bd = dist; best = s; }
+  });
+  return best;
+}
+
+/* ================== Rendu 3D (CSS 3D, sans bibliothèque) ================== */
+function build3D(host, mode, cam) {
+  host.querySelector('.scene3d')?.remove();
+  const scene = document.createElement('div'); scene.className = 'scene3d';
+  const world = document.createElement('div'); world.className = 'world';
+  world.style.width = FW*P3 + 'px'; world.style.height = FH*P3 + 'px';
+  scene.appendChild(world); host.prepend(scene);
+  const bb = 'rotateZ(calc(var(--rz) * -1)) rotateX(calc(var(--rx) * -1))';
+  let html = '';
+  floors.forEach((f, i) => {
+    html += `<div class="floor3" data-f="${f.id}"><div class="slab"></div>`;
+    f.rooms.forEach(r => html += `<div class="room3" data-room="${r.id}" style="left:${r.x*P3}px;top:${r.y*P3}px;width:${r.w*P3}px;height:${r.h*P3}px"><span class="rn">${esc(r.name)}</span></div>`);
+    devices.filter(d => d.floor === f.id && (d.fam === 'light' || d.fam === 'group')).forEach(d => html += `<div class="glow" data-g="${d.id}" style="left:${d.x*P3}px;top:${d.y*P3}px"></div>`);
+    walls(f).forEach(w => html += `<div class="wall" style="left:${w.x*P3}px;top:${w.y*P3}px;width:${w.len*P3}px;height:${WALL}px;transform:rotateZ(${w.d}deg) rotateX(90deg)"></div>`);
+    devices.filter(d => d.floor === f.id && d.seg).forEach(d => {
+      const s = d.seg, inner = d.fam === 'door' ? '<div class="leaf"></div>' : `<div class="glass">${d.fam === 'cover' ? '<div class="shut"></div>' : ''}</div>`;
+      html += `<div class="op3 ${d.fam}" data-o="${d.id}" style="left:${s.x*P3}px;top:${s.y*P3}px;width:${s.len*P3}px;height:${WALL}px;transform:rotateZ(${s.d}deg) rotateX(90deg)">${inner}</div>`;
+    });
+    devices.filter(d => d.floor === f.id).forEach(d => {
+      const p = pinPos(d, 0.35);
+      html += `<div class="pin" data-p="${d.id}" style="transform:translate3d(${p.x*P3}px,${p.y*P3}px,0) ${bb}"><div class="pin-in"><button class="chip" data-id="${d.id}">${icon(famIcon(d))}<span class="v"></span></button><i class="stem"></i></div></div>`;
+    });
+    html += `<div class="flabel" style="transform:translate3d(-14px,${FH*P3 + 6}px,0) ${bb}"><span>${esc(f.name)}</span></div></div>`;
+  });
+  world.innerHTML = html;
+  const ctx = { host, scene, world, mode, cam, focus:null };
+  host._ctx = ctx;
+  bind3D(ctx);
+  update3D(ctx);
+  camera3D(ctx, false);
+  return ctx;
+}
+
+function floorZ(ctx, i) { return ctx.cam.explode ? i * (WALL + GAP) : i * (WALL + 2); }
+
+function camera3D(ctx, ease) {
+  const { world, host, cam } = ctx;
+  world.classList.toggle('ease', !!ease);
+  const selI = cam.sel === 'all' ? -1 : floors.findIndex(f => f.id === cam.sel);
+  floors.forEach((f, i) => {
+    const el = world.querySelector(`.floor3[data-f="${f.id}"]`);
+    el.style.transform = `translateZ(${floorZ(ctx, i)}px)`;
+    el.classList.toggle('ghost', selI >= 0 && i < selI);
+    el.classList.toggle('hide', selI >= 0 && i > selI);
+  });
+  const zs = selI >= 0 ? [floorZ(ctx, selI)] : floors.map((f, i) => floorZ(ctx, i));
+  const z0 = Math.min(...zs), z1 = Math.max(...zs) + WALL;
+  const rx = cam.rx * Math.PI / 180, diag = Math.hypot(FW*P3, FH*P3);
+  const r = host.getBoundingClientRect();
+  const needH = diag * Math.cos(rx) + (z1 - z0) * Math.sin(rx) + 70;
+  const sc = Math.min(r.width * (ctx.mode === "editor" ? .8 : 1.05) / diag, r.height * (ctx.mode === "editor" ? .86 : .9) / needH);
+  world.style.setProperty('--rz', cam.rz + 'deg');
+  world.style.setProperty('--rx', cam.rx + 'deg');
+  world.style.setProperty('--stem', Math.round(WALL * Math.sin(rx) + 10) + 'px');
+  world.style.transform = `translate(-50%,-50%) scale(${sc.toFixed(3)}) rotateX(${cam.rx}deg) rotateZ(${cam.rz}deg) translateZ(${-(z0 + z1) / 2}px)`;
+}
+
+function update3D(ctx) {
+  const { world } = ctx;
+  floors.forEach(f => f.rooms.forEach(r => {
+    const el = world.querySelector(`.room3[data-room="${r.id}"]`); if (!el) return;
+    el.style.background = state.opts.heat ? heatColor(roomTemp(f.id, r), '#21406A') : '#21406A';
+  }));
+  devices.forEach(d => {
+    const chip = world.querySelector(`.chip[data-id="${CSS.escape(d.id)}"]`);
+    if (chip) {
+      const st = state3(d), lab = state.opts.labels;
+      chip.className = 'chip ' + st + (ctx.mode === 'editor' && state.sel === d.id ? ' sel' : '') + ((lab === 'none' || (lab === 'active' && !st)) ? ' novals' : '');
+      chip.querySelector('.v').textContent = val(d);
+      chip.querySelector('use').setAttribute('href', '#i-' + famIcon(d));
+      chip.closest('.pin').classList.toggle('pulse', ctx.focus === d.id);
+    }
+    const g = world.querySelector(`.glow[data-g="${CSS.escape(d.id)}"]`);
+    if (g) {
+      const on = isOn(d), share = d.fam === 'group' ? d.members.filter(m => m.on).length / d.members.length : 1;
+      const R = (1.3 + 2.2 * d.bri / 100 * (d.fam === 'group' ? .6 + share : 1)) * P3;
+      g.style.width = g.style.height = 2*R + 'px'; g.style.margin = -R + 'px 0 0 ' + -R + 'px';
+      g.style.background = `radial-gradient(circle, ${hexA(d.col, .55 + d.bri/400)} 0%, ${hexA(d.col, .18)} 45%, ${hexA(d.col, 0)} 70%)`;
+      g.style.opacity = on ? 1 : 0;
+    }
+    const o = world.querySelector(`.op3[data-o="${CSS.escape(d.id)}"]`);
+    if (o) {
+      const s = d.seg;
+      o.classList.toggle('open', !!d.open);
+      if (d.fam === 'door') {
+        const n = inward(s), t = s.d === 0 ? { x:1, y:0 } : { x:0, y:1 };
+        const sign = (t.x * n.y - t.y * n.x) > 0 ? 1 : -1;
+        o.style.transform = `rotateZ(${s.d + (d.open ? sign * 72 : 0)}deg) rotateX(90deg)`;
+      }
+      if (d.fam === 'cover') o.querySelector('.shut').style.height = (100 - d.pos) + '%';
+    }
+  });
+}
+
+function bind3D(ctx) {
+  const { scene } = ctx;
+  let drag = null;
+  scene.addEventListener('pointerdown', e => {
+    const chip = e.target.closest('.chip');
+    drag = { x:e.clientX, y:e.clientY, rz:ctx.cam.rz, rx:ctx.cam.rx, chip: chip && chip.dataset.id, moved:false };
+    scene.setPointerCapture(e.pointerId);
+  });
+  scene.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!drag.moved && Math.hypot(dx, dy) < 5) return;
+    drag.moved = true; scene.classList.add('grabbing');
+    ctx.cam.rz = drag.rz + dx * .35; ctx.cam.rx = clamp(drag.rx - dy * .2, 32, 76);
+    ctx.userUntil = performance.now() + 5000;
+    camera3D(ctx, false);
+  });
+  const end = () => {
+    if (!drag) return;
+    scene.classList.remove('grabbing');
+    if (!drag.moved && drag.chip) onChip(ctx, drag.chip);
+    else if (!drag.moved && ctx.mode === 'kiosk') closePanel();
+    drag = null;
+  };
+  scene.addEventListener('pointerup', end);
+  scene.addEventListener('pointercancel', end);
+}
+
+function onChip(ctx, id) {
+  if (ctx.mode === 'editor') { state.sel = id; state.tab = 'devices'; renderSide(); update3D(ctx); }
+  else if (ctx.mode === 'kiosk') openPanel(id);
+}
+
+/* ================== Éditeur ================== */
+const planHost = $('#planHost');
+let edCtx = null;
+
+function renderEditor() {
+  const tb = $('#edToolbar');
+  const d2 = state.edMode === '2d';
+  tb.innerHTML = `
+    <div class="segc">${floors.map(f => `<button data-floor="${f.id}" class="${f.id === state.edFloor ? 'on' : ''}" ${d2 ? '' : 'disabled'}>${esc(f.name)}</button>`).join('')}<button data-act="addfloor" title="Ajouter un étage" ${d2 ? '' : 'disabled'}>+</button></div>
+    <div class="segc"><button data-mode="2d" class="${d2 ? 'on' : ''}">${icon('plan')} Plan</button><button data-mode="3d" class="${d2 ? '' : 'on'}">${icon('cube')} 3D</button></div>
+    <span class="sp"></span>
+    <div class="segc"><button data-tool="select" class="${state.tool === 'select' ? 'on' : ''}" ${d2 ? '' : 'disabled'}>${icon('cursor')} Sélection</button><button data-tool="room" class="${state.tool === 'room' ? 'on' : ''}" ${d2 ? '' : 'disabled'}>${icon('room')} Pièce</button></div>`;
+  const placed = devices.filter(d => d.floor).length;
+  $('#countBadge').textContent = `${floors.length} étages · ${placed} appareils placés sur ${devices.length}`;
+  renderPlan();
+}
+
+function renderPlan() {
+  planHost.classList.toggle('dark', state.edMode === '3d');
+  planHost.classList.toggle('room-tool', state.tool === 'room');
+  if (state.edMode === '3d') {
+    planHost.querySelector('svg.plan')?.remove();
+    if (!edCtx || !planHost.contains(edCtx.scene)) edCtx = build3D(planHost, 'editor', { rz:-32, rx:56, sel:'all', explode:true });
+    else update3D(edCtx);
+    setHint('Faites glisser pour tourner la vue · touchez un appareil pour le sélectionner');
+    return;
+  }
+  planHost.querySelector('.scene3d')?.remove(); edCtx = null;
+  const f = fl(state.edFloor), P = P2, pad = 30, W = FW*P, H = FH*P;
+  let s = `<svg class="plan" viewBox="${-pad} ${-pad} ${W + 2*pad} ${H + 2*pad}" preserveAspectRatio="xMidYMid meet">`;
+  for (let x = 0; x <= FW; x++) s += `<line class="g2" x1="${x*P}" y1="0" x2="${x*P}" y2="${H}"/>`;
+  for (let y = 0; y <= FH; y++) s += `<line class="g2" x1="0" y1="${y*P}" x2="${W}" y2="${y*P}"/>`;
+  s += `<rect class="lim2" x="0" y="0" width="${W}" height="${H}"/>`;
+  f.rooms.forEach(r => {
+    const t = roomTemp(f.id, r), fill = state.opts.heat ? `style="fill:${heatColor(t, '#FFFFFF')}"` : '';
+    s += `<g class="r2 ${state.selRoom === r.id ? 'sel' : ''}" data-room="${r.id}"><rect x="${r.x*P}" y="${r.y*P}" width="${r.w*P}" height="${r.h*P}" ${fill}/>
+      <text class="rn2" x="${(r.x + r.w/2)*P}" y="${(r.y + r.h/2)*P - 2}">${esc(r.name)}</text>
+      <text class="rd2" x="${(r.x + r.w/2)*P}" y="${(r.y + r.h/2)*P + 15}">${r.w} × ${r.h} m</text></g>`;
+  });
+  if (state.trace) {   // calque : plan importé, légèrement décalé
+    f.rooms.forEach(r => s += `<rect class="trace" x="${r.x*P + 3}" y="${r.y*P + 2}" width="${r.w*P - 2}" height="${r.h*P - 3}"/>`);
+    s += `<text class="trace-t" x="${W - 4}" y="${H + 20}" text-anchor="end">calque : plan-${f.id}.pdf · 1:100</text>`;
+  }
+  walls(f).forEach(w => {
+    const x2 = w.d === 0 ? w.x + w.len : w.x, y2 = w.d === 0 ? w.y : w.y + w.len;
+    s += `<line class="w2" x1="${w.x*P}" y1="${w.y*P}" x2="${x2*P}" y2="${y2*P}"/>`;
+  });
+  devices.filter(d => d.floor === f.id && d.seg).forEach(d => {
+    const sg = d.seg, L = sg.len * P, x = sg.x*P, y = sg.y*P;
+    if (d.fam === 'door') {
+      const n = inward(sg), t = sg.d === 0 ? { x:1, y:0 } : { x:0, y:1 };
+      const lx = x + n.x*L, ly = y + n.y*L, bx = x + t.x*L, by = y + t.y*L;
+      const sweep = (n.x*t.y - n.y*t.x) > 0 ? 1 : 0;
+      s += `<line class="op2-door ${d.open ? 'open' : ''}" x1="${x}" y1="${y}" x2="${lx}" y2="${ly}"/><path class="op2-door arc ${d.open ? 'open' : ''}" d="M${lx} ${ly} A${L} ${L} 0 0 ${sweep} ${bx} ${by}"/>`;
+    } else {
+      const rx = sg.d === 0 ? x : x - 4, ry = sg.d === 0 ? y - 4 : y, rw = sg.d === 0 ? L : 8, rh = sg.d === 0 ? 8 : L;
+      s += `<rect class="op2-win ${d.open ? 'open' : ''}" x="${rx}" y="${ry}" width="${rw}" height="${rh}"/>`;
+      if (d.fam === 'cover') { const k = (100 - d.pos) / 100; s += `<rect class="op2-shut" x="${rx}" y="${ry}" width="${sg.d === 0 ? rw*k : rw}" height="${sg.d === 0 ? rh : rh*k}"/>`; }
+    }
+  });
+  devices.filter(d => d.floor === f.id).forEach(d => {
+    const p = pinPos(d, 0.45), sel = state.sel === d.id;
+    s += `<g class="p2 ${state3(d)} ${sel ? 'sel' : ''}" data-id="${d.id}" transform="translate(${p.x*P} ${p.y*P})"><title>${esc(d.name)} · ${esc(val(d))}</title>
+      <circle r="14"/><use href="#i-${famIcon(d)}" x="-8" y="-8" width="16" height="16" class="ic" style="stroke-width:1.9"/>
+      ${sel ? `<text class="lab" y="-21">${esc(d.name)}</text>` : ''}</g>`;
+  });
+  if (state.draw) {
+    const a = state.draw, x = Math.min(a.x0, a.x1), y = Math.min(a.y0, a.y1), w = Math.abs(a.x1 - a.x0), h = Math.abs(a.y1 - a.y0);
+    s += `<rect class="drawrect" x="${x*P}" y="${y*P}" width="${w*P}" height="${h*P}"/>`;
+    if (w && h) s += `<text class="rd2" x="${(x + w/2)*P}" y="${(y + h/2)*P}" text-anchor="middle">${w} × ${h} m</text>`;
+  }
+  s += '</svg>';
+  planHost.querySelector('svg.plan')?.remove();
+  planHost.insertAdjacentHTML('afterbegin', s);
+  setHint(state.tool === 'room' ? 'Glissez sur la grille pour dessiner une pièce (pas de 1 m)' : 'Glissez les appareils pour les déplacer · portes, fenêtres et volets se collent au mur');
+}
+
+function setHint(t) { let h = planHost.querySelector('.ed-hint'); if (!h) { h = document.createElement('div'); h.className = 'ed-hint'; planHost.appendChild(h); } h.textContent = t; }
+
+function svgPt(e) {
+  const svg = planHost.querySelector('svg.plan'); const p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
+  const q = p.matrixTransform(svg.getScreenCTM().inverse()); return { x:q.x / P2, y:q.y / P2 };
+}
+function placeAt(d, fid, x, y) {
+  const f = fl(fid);
+  if (isSeg(d)) { const s = snapSeg(f, d, x, y); if (!s) return false; d.seg = s; }
+  else { d.x = clamp(Math.round(x * 4) / 4, .3, FW - .3); d.y = clamp(Math.round(y * 4) / 4, .3, FH - .3); }
+  d.floor = fid; return true;
+}
+
+planHost.addEventListener('pointerdown', e => {
+  if (state.edMode !== '2d' || !planHost.querySelector('svg.plan')) return;
+  const m = svgPt(e), pin = e.target.closest('.p2');
+  if (pin && state.tool === 'select') {
+    state.sel = pin.dataset.id; state.selRoom = null; state.drag = { id:pin.dataset.id };
+    planHost.setPointerCapture(e.pointerId); state.tab = 'devices'; renderPlan(); renderSide(); return;
+  }
+  if (state.tool === 'room') {
+    const x = clamp(Math.round(m.x), 0, FW), y = clamp(Math.round(m.y), 0, FH);
+    state.draw = { x0:x, y0:y, x1:x, y1:y }; planHost.setPointerCapture(e.pointerId); renderPlan(); return;
+  }
+  const r = e.target.closest('.r2');
+  state.selRoom = r ? r.dataset.room : null; state.sel = null;
+  if (r) state.tab = 'floors';
+  renderPlan(); renderSide();
+});
+planHost.addEventListener('pointermove', e => {
+  if (state.drag) { const d = dev(state.drag.id), m = svgPt(e); placeAt(d, state.edFloor, m.x, m.y); renderPlan(); }
+  else if (state.draw) { const m = svgPt(e); state.draw.x1 = clamp(Math.round(m.x), 0, FW); state.draw.y1 = clamp(Math.round(m.y), 0, FH); renderPlan(); }
+});
+planHost.addEventListener('pointerup', () => {
+  if (state.drag) { state.drag = null; renderSide(); }
+  if (state.draw) {
+    const a = state.draw, x = Math.min(a.x0, a.x1), y = Math.min(a.y0, a.y1), w = Math.abs(a.x1 - a.x0), h = Math.abs(a.y1 - a.y0);
+    state.draw = null;
+    if (w >= 1 && h >= 1) {
+      const f = fl(state.edFloor), id = 'p' + Date.now();
+      f.rooms.push({ id, name:'Nouvelle pièce', area:null, x, y, w, h });
+      state.selRoom = id; state.tab = 'floors'; state.tool = 'select';
+      renderEditor(); renderSide(); toast('Pièce ajoutée : nommez-la et reliez-la à une pièce Home Assistant');
+      setTimeout(() => $(`.rrow[data-room="${id}"] input`)?.select(), 50);
+      return;
+    }
+    renderPlan();
+  }
+});
+
+/* ---- panneau de droite ---- */
+function renderSide() {
+  $('#sideTabs').innerHTML = [['floors','Étages et pièces'],['devices','Appareils'],['display','Affichage']]
+    .map(([k, l]) => `<button class="tab ${state.tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('');
+  const b = $('#sideBody');
+  if (state.tab === 'floors') b.innerHTML = sideFloors();
+  else if (state.tab === 'devices') { b.innerHTML = sideDevices(); renderDevList(); }
+  else b.innerHTML = sideDisplay();
+}
+
+function sideFloors() {
+  const f = fl(state.edFloor);
+  const modes = [
+    ['image','image','Image du plan','Importez le plan de chaque étage (image ou PDF). Rapide, rendu à plat.'],
+    ['rooms','plan','Pièces dessinées','Tracez les pièces sur le plan importé ; les murs se montent tout seuls.'],
+    ['model','cube','Modèle 3D','Importez un fichier .glb (Sweet Home 3D, SketchUp, Blender…).']
+  ];
+  return `<h4>Forme des étages</h4>
+    <div class="modes">${modes.map(([k, ic, t, s]) => `<button class="mode ${state.shape === k ? 'on' : ''}" data-shape="${k}">${icon(ic)}<span><b>${t}</b><small>${s}</small></span></button>`).join('')}</div>
+    <h4>Étages <small>repris de Home Assistant</small></h4>
+    ${floors.slice().reverse().map(x => `<div class="frow ${x.id === state.edFloor ? 'on' : ''}" data-floor="${x.id}">${icon('layers')}<b>${esc(x.name)}</b><small>${x.rooms.length} pièces · ${devices.filter(d => d.floor === x.id).length} appareils</small></div>`).join('')}
+    <button class="btn sm" data-act="sync">${icon('sync')} Synchroniser avec Home Assistant</button>
+    <h4>Pièces · ${esc(f.name)}</h4>
+    ${f.rooms.map(r => `<div class="rrow ${state.selRoom === r.id ? 'sel' : ''}" data-room="${r.id}">
+        <input value="${esc(r.name)}" data-rname="${r.id}" aria-label="Nom de la pièce">
+        <select data-rarea="${r.id}" class="${r.area ? '' : 'none'}" aria-label="Pièce Home Assistant"><option value="">Non reliée</option>${HA_AREAS.map(a => `<option ${a === r.area ? 'selected' : ''}>${a}</option>`).join('')}</select>
+        <button class="rm" data-act="delroom" data-id="${r.id}" title="Supprimer la pièce">${icon('x')}</button></div>`).join('')}
+    <p class="hintp">Outil « Pièce » au-dessus du plan : glissez sur la grille pour en dessiner une autre.</p>
+    <div class="calque">${icon('image')}<span>plan-${f.id}.pdf</span><button class="link" data-act="replace">Remplacer</button>
+      <label class="sw" title="Afficher le calque"><input type="checkbox" data-act="trace" ${state.trace ? 'checked' : ''}><i></i></label></div>`;
+}
+
+function sideDevices() {
+  let sel = '';
+  const d = state.sel && dev(state.sel);
+  if (d) {
+    const r = roomOf(d);
+    sel = `<div class="selcard"><div class="r"><span class="dic ${state3(d)}">${icon(famIcon(d))}</span><div class="dt"><b>${esc(d.name)}</b><small>${d.id}</small></div><button class="rm" data-act="desel" title="Fermer">${icon('x')}</button></div>
+      <div class="kv"><span>Type</span><span>${FAM[d.fam].l}</span><span>Emplacement</span><span>${d.floor ? esc(fl(d.floor).name) + ' › ' + esc(r ? r.name : d.area) : 'À placer'}</span><span>État</span><span>${esc(val(d))}</span></div>
+      ${d.fam === 'group' ? `<div class="mem">${d.members.map(m => `<span>${m.n}</span>`).join('')}</div>` : ''}
+      ${d.floor ? `<button class="btn sm" data-act="unplace" data-id="${d.id}">Retirer du plan</button>` : ''}
+      ${d.fam === 'group' ? ` <button class="btn sm" data-act="newgroup">Modifier le groupe</button>` : ''}</div>`;
+  }
+  return sel + `<div class="search">${icon('search')}<input id="q" placeholder="Rechercher un appareil ou une entité" value="${esc(state.q)}"></div>
+    <div class="fchips">${CATS.map(([k, l]) => `<button data-cat="${k}" class="${state.cat === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+    <div id="devList"></div>
+    <button class="link" data-act="newgroup">+ Grouper des lumières</button>`;
+}
+
+function devItem(d) {
+  const r = roomOf(d), miss = !d.floor && !floors.some(f => f.rooms.some(x => x.area === d.area));
+  const where = d.floor ? esc(r ? r.name : '—') : miss ? `« ${esc(d.area)} » absente du plan` : esc(d.area);
+  return `<div class="di ${d.floor ? '' : 'todo'} ${state.sel === d.id ? 'sel' : ''}" data-id="${d.id}">
+    <span class="dic ${state3(d)}">${icon(famIcon(d))}</span>
+    <div class="dt"><b>${esc(d.name)}</b><small>${d.id}</small></div>
+    <span class="dr ${miss ? 'warn' : ''}">${where}</span>
+    ${d.floor ? `<button class="rm" data-act="unplace" data-id="${d.id}" title="Retirer du plan">${icon('x')}</button>` : ''}</div>`;
+}
+function renderDevList() {
+  const q = state.q.trim().toLowerCase();
+  const list = devices.filter(d => (state.cat === 'all' || FAM[d.fam].cat === state.cat) && (!q || (d.name + ' ' + d.id + ' ' + d.area).toLowerCase().includes(q)));
+  const todo = list.filter(d => !d.floor);
+  let h = `<div class="sec-h"><span>À placer<em>${todo.length}</em></span>${todo.length ? `<button class="btn sm" data-act="auto">${icon('wand')} Placer dans leur pièce</button>` : ''}</div>`;
+  h += todo.length ? todo.map(devItem).join('') : '<p class="hintp">Tout est placé.</p>';
+  h += `<div class="sec-h"><span>Sur le plan<em>${list.length - todo.length}</em></span></div>`;
+  floors.slice().reverse().forEach(f => {
+    const xs = list.filter(d => d.floor === f.id);
+    if (xs.length) h += `<div class="grp">${esc(f.name)}</div>` + xs.map(devItem).join('');
+  });
+  $('#devList').innerHTML = h;
+}
+
+function sideDisplay() {
+  const o = state.opts;
+  const sw = (k, t, s) => `<div class="opt"><div><b>${t}</b><small>${s}</small></div><label class="sw"><input type="checkbox" data-opt="${k}" ${o[k] ? 'checked' : ''}><i></i></label></div>`;
+  return `<h4>Sur les écrans</h4>
+    ${sw('autoRotate', 'Rotation lente', 'Sur les écrans sans toucher, la vue tourne doucement.')}
+    ${sw('explode', 'Étages écartés', 'Vue éclatée : chaque étage est visible en entier.')}
+    ${sw('heat', 'Carte de chaleur', 'Teinte les pièces selon leur température (bleu froid, orange chaud).')}
+    ${sw('focus', 'Montrer l\'événement', 'Porte, fenêtre ou mouvement : l\'étage concerné s\'affiche quelques secondes.')}
+    ${sw('control', 'Commande à l\'écran', 'Sur les bornes tactiles. Serrures et portes de garage : appui maintenu 1,5 s.')}
+    <div class="fld"><label>Valeurs affichées</label><select data-sel="labels">
+      <option value="all" ${o.labels === 'all' ? 'selected' : ''}>Toujours</option>
+      <option value="active" ${o.labels === 'active' ? 'selected' : ''}>Appareils actifs seulement</option>
+      <option value="none" ${o.labels === 'none' ? 'selected' : ''}>Jamais (icônes seules)</option></select></div>
+    <div class="fld"><label>Vue au démarrage</label><select data-sel="start">
+      <option value="all" ${o.start === 'all' ? 'selected' : ''}>Tous les étages</option>${floors.map(f => `<option value="${f.id}" ${o.start === f.id ? 'selected' : ''}>${esc(f.name)}</option>`).join('')}</select></div>
+    <div class="fld"><label>Rendu</label><select data-sel="render">
+      <option value="auto" ${o.render === 'auto' ? 'selected' : ''}>Automatique (3D si l'appareil le permet, sinon 2,5D)</option>
+      <option value="iso" ${o.render === 'iso' ? 'selected' : ''}>Toujours 2,5D (angles fixes, players modestes)</option></select></div>`;
+}
+
+/* ---- événements du panneau de droite ---- */
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-tab],[data-floor],[data-mode],[data-tool],[data-cat],[data-shape],[data-act],[data-view],[data-ev]');
+  if (!t) return;
+  if (t.dataset.view) return setView(t.dataset.view);
+  if (t.dataset.ev) return simulate(t.dataset.ev);
+  if (t.dataset.tab) { state.tab = t.dataset.tab; return renderSide(); }
+  if (t.dataset.floor && !t.closest('.kbar')) { state.edFloor = t.dataset.floor; state.selRoom = null; renderEditor(); return renderSide(); }
+  if (t.dataset.mode) { state.edMode = t.dataset.mode; return renderEditor(); }
+  if (t.dataset.tool) { state.tool = t.dataset.tool; return renderEditor(); }
+  if (t.dataset.cat) { state.cat = t.dataset.cat; $('.fchips').querySelectorAll('button').forEach(b => b.classList.toggle('on', b === t)); return renderDevList(); }
+  if (t.dataset.shape) { state.shape = t.dataset.shape; renderSide(); if (t.dataset.shape !== 'rooms') toast('Maquette : seules les « Pièces dessinées » sont simulées'); return; }
+  const a = t.dataset.act;
+  if (a === 'auto') return autoPlace();
+  if (a === 'unplace') { const d = dev(t.dataset.id); d.floor = null; if (state.sel === d.id) state.sel = null; renderEditor(); renderSide(); return; }
+  if (a === 'desel') { state.sel = null; renderPlan(); return renderSide(); }
+  if (a === 'delroom') { const f = fl(state.edFloor); f.rooms = f.rooms.filter(r => r.id !== t.dataset.id); renderEditor(); return renderSide(); }
+  if (a === 'sync') return toast('Étages et pièces relus dans Home Assistant : rien de nouveau');
+  if (a === 'replace') return toast('Maquette : choix d\'une image ou d\'un PDF');
+  if (a === 'newgroup') return toast('Maquette : choisir les lumières à réunir en une seule pastille');
+  if (a === 'addfloor') return toast('Maquette : ajout d\'un étage (ou repris de Home Assistant)');
+});
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.dataset.opt) { state.opts[t.dataset.opt] = t.checked; refreshAll(); }
+  if (t.dataset.sel) { state.opts[t.dataset.sel] = t.value; refreshAll(); }
+  if (t.dataset.act === 'trace') { state.trace = t.checked; renderPlan(); }
+  if (t.dataset.rarea) { const r = fl(state.edFloor).rooms.find(x => x.id === t.dataset.rarea); r.area = t.value || null; t.classList.toggle('none', !r.area); }
+});
+document.addEventListener('input', e => {
+  const t = e.target;
+  if (t.id === 'q') { state.q = t.value; renderDevList(); }
+  if (t.dataset.rname) { fl(state.edFloor).rooms.find(x => x.id === t.dataset.rname).name = t.value; renderPlan(); }
+});
+
+function autoPlace() {
+  let n = 0, left = 0;
+  devices.filter(d => !d.floor).forEach(d => {
+    let target = null;
+    floors.forEach(f => f.rooms.forEach(r => { if (r.area === d.area) target = { f, r }; }));
+    if (!target) { left++; return; }
+    const { f, r } = target, k = devices.filter(o => o.floor === f.id && roomOf(o) === r).length;
+    const cx = r.x + r.w/2 + ((k % 3) - 1) * .8, cy = r.y + r.h/2 + (Math.floor(k / 3) % 2 ? .8 : -.6);
+    if (placeAt(d, f.id, cx, cy)) n++;
+  });
+  renderEditor(); renderSide();
+  toast(`${n} appareil${n > 1 ? 's' : ''} placé${n > 1 ? 's' : ''}` + (left ? ` · ${left} sans pièce sur le plan` : ''));
+}
+
+/* ---- glisser depuis la liste vers le plan ---- */
+let ldrag = null;
+document.addEventListener('pointerdown', e => {
+  const it = e.target.closest('.di'); if (!it || e.target.closest('button')) return;
+  ldrag = { id:it.dataset.id, x0:e.clientX, y0:e.clientY, ghost:null };
+});
+document.addEventListener('pointermove', e => {
+  if (!ldrag) return;
+  if (!ldrag.ghost) {
+    if (Math.hypot(e.clientX - ldrag.x0, e.clientY - ldrag.y0) < 6) return;
+    const d = dev(ldrag.id);
+    ldrag.ghost = document.createElement('div'); ldrag.ghost.className = 'di';
+    ldrag.ghost.style.cssText = 'position:fixed;z-index:99;pointer-events:none;width:240px;box-shadow:0 10px 30px rgba(11,31,58,.3)';
+    ldrag.ghost.innerHTML = `<span class="dic ${state3(d)}">${icon(famIcon(d))}</span><div class="dt"><b>${esc(d.name)}</b><small>${d.id}</small></div>`;
+    document.body.appendChild(ldrag.ghost);
+  }
+  ldrag.ghost.style.left = e.clientX + 12 + 'px'; ldrag.ghost.style.top = e.clientY + 8 + 'px';
+  const r = planHost.getBoundingClientRect();
+  planHost.classList.toggle('drop', e.clientX > r.left && e.clientX < r.right && e.clientY > r.top && e.clientY < r.bottom);
+});
+document.addEventListener('pointerup', e => {
+  const L = ldrag; ldrag = null; if (!L) return;
+  const d = dev(L.id);
+  if (!L.ghost) {     // simple clic : sélection
+    state.sel = d.id; if (d.floor && state.edMode === '2d') state.edFloor = d.floor;
+    renderEditor(); renderSide(); return;
+  }
+  L.ghost.remove(); planHost.classList.remove('drop');
+  const r = planHost.getBoundingClientRect();
+  if (!(e.clientX > r.left && e.clientX < r.right && e.clientY > r.top && e.clientY < r.bottom)) return;
+  if (state.edMode !== '2d') return toast('Passez en vue « Plan » pour placer un appareil');
+  const m = svgPt(e);
+  if (placeAt(d, state.edFloor, m.x, m.y)) {
+    state.sel = d.id; renderEditor(); renderSide();
+    const rm = roomOf(d); toast(`${d.name} placé${rm ? ' · ' + rm.name : ''}`);
+  }
+});
+
+/* ================== Écran (TV) et borne ================== */
+let tvCtx = null, kCtx = null, raf = 0;
+
+function buildTV() {
+  const host = $('#tvScreen');
+  host.innerHTML = `<div class="ov-top"><div><h2>Maison</h2><div class="live">En direct · Home Assistant</div></div><div class="clock" id="tvClock"></div></div>
+    <div class="ov-bot" id="tvSum"></div><div class="toast" id="tvToast"></div>`;
+  tvCtx = build3D(host, 'tv', { rz:-32, rx:56, sel:state.opts.start, explode:state.opts.explode, base:-32 });
+  summary();
+  cancelAnimationFrame(raf);
+  const loop = t => {
+    if (state.view !== 'tv') return;
+    if (state.opts.autoRotate && !tvCtx.focusing && !(tvCtx.userUntil > performance.now())) {
+      tvCtx.cam.rz = tvCtx.cam.base + 24 * Math.sin(t / 7000); camera3D(tvCtx, false);
+    }
+    raf = requestAnimationFrame(loop);
+  };
+  raf = requestAnimationFrame(loop);
+}
+function summary() {
+  const el = $('#tvSum'); if (!el) return;
+  const lights = devices.filter(d => d.floor && (d.fam === 'light' || d.fam === 'group')).reduce((n, d) => n + (d.fam === 'group' ? d.members.filter(m => m.on).length : d.on ? 1 : 0), 0);
+  const opens = devices.filter(d => d.floor && (d.fam === 'door' || d.fam === 'window') && d.open);
+  const watts = devices.filter(d => d.floor && d.fam === 'plug' && d.on).reduce((n, d) => n + d.w, 0);
+  const cl = dev('climate.salon');
+  el.innerHTML = `<span class="sum on">${icon('bulb')} ${lights} lumière${lights > 1 ? 's' : ''} allumée${lights > 1 ? 's' : ''}</span>
+    <span class="sum ${opens.length ? 'alert' : ''}">${icon('door')} ${opens.length ? opens.map(d => d.name).join(', ') + ' : ouverte' : 'Portes et fenêtres fermées'}</span>
+    <span class="sum">${icon('thermo')} Salon ${fmt1(cl.cur)} °C</span>
+    <span class="sum">${icon('plug')} ${watts} W</span>`;
+}
+
+function buildKiosk() {
+  const host = $('#kioskScreen');
+  host.innerHTML = `<div class="kbar" id="kbar"></div><div class="khint">Touchez un appareil pour le commander · glissez pour tourner</div>
+    <div class="kp" id="kp"></div><div class="toast" id="kToast"></div>`;
+  kCtx = build3D(host, 'kiosk', { rz:-32, rx:56, sel:state.opts.start, explode:state.opts.explode });
+  kbar();
+}
+function kbar() {
+  const c = kCtx.cam;
+  $('#kbar').innerHTML = `<button class="kbtn ${c.sel === 'all' ? 'on' : ''}" data-k="all">${icon('layers')} Tous les étages</button>
+    ${floors.slice().reverse().map(f => `<button class="kbtn ${c.sel === f.id ? 'on' : ''}" data-k="${f.id}">${esc(f.name)}</button>`).join('')}
+    <span class="sp"></span>
+    <button class="kbtn" data-k="rotl" title="Tourner à gauche">${icon('rotl')}</button>
+    <button class="kbtn" data-k="rotr" title="Tourner à droite">${icon('rotr')}</button>
+    <button class="kbtn ${c.explode ? 'on' : ''}" data-k="explode">Vue éclatée</button>`;
+}
+$('#kioskScreen').addEventListener('click', e => {
+  const b = e.target.closest('[data-k]'); if (!b) return;
+  const k = b.dataset.k, c = kCtx.cam;
+  if (k === 'rotl') c.rz -= 45; else if (k === 'rotr') c.rz += 45;
+  else if (k === 'explode') c.explode = !c.explode;
+  else c.sel = k;
+  camera3D(kCtx, true); kbar();
+});
+
+/* ---- panneau de commande ---- */
+let panelId = null;
+function openPanel(id) { panelId = id; renderPanel(); $('#kp').classList.add('open'); }
+function closePanel() { panelId = null; $('#kp')?.classList.remove('open'); }
+function renderPanel() {
+  const d = dev(panelId); if (!d) return;
+  const r = roomOf(d), ctl = state.opts.control;
+  let h = `<div class="kp-h"><span class="dic ${state3(d)}">${icon(famIcon(d))}</span><div><b>${esc(d.name)}</b><small>${esc(r ? r.name : d.area)} · ${FAM[d.fam].l}</small></div><button class="x" data-p="close">${icon('x')}</button></div>`;
+  const ro = msg => `<div class="ro">${msg}</div>`;
+  if (!ctl && !['window','door','motion','temp'].includes(d.fam)) h += `<div class="big">${esc(val(d))}</div>` + ro('Commande à l\'écran désactivée dans les réglages du widget.');
+  else switch (d.fam) {
+    case 'light': case 'group': {
+      const on = isOn(d);
+      h += `<button class="tog ${on ? 'on' : ''}" data-p="toggle">${icon('bulb')} ${on ? (d.fam === 'group' ? 'Allumées' : 'Allumée') : 'Éteint' + (d.fam === 'group' ? 'es' : 'e')}</button>
+        <div class="lbl"><span>Intensité</span><span>${d.bri} %</span></div><input type="range" min="5" max="100" value="${d.bri}" data-p="bri">
+        <div class="lbl"><span>Couleur</span></div><div class="cols">${['#FFB46B','#FFC870','#FFE2B0','#DCE8FF','#8EC5FF','#C49BFF','#FF8A8A'].map(c => `<button style="background:${c}" class="${c === d.col ? 'on' : ''}" data-p="col" data-c="${c}"></button>`).join('')}</div>`;
+      if (d.fam === 'group') h += `<div class="lbl"><span>Lampes du groupe</span></div>` + d.members.map((m, i) => `<div class="memb"><span>${m.n}</span><label class="sw"><input type="checkbox" data-p="mem" data-i="${i}" ${m.on ? 'checked' : ''}><i></i></label></div>`).join('');
+      break; }
+    case 'plug':
+      h += `<button class="tog ${d.on ? 'on' : ''}" data-p="toggle">${icon('plug')} ${d.on ? 'Allumée' : 'Éteinte'}</button><div class="lbl"><span>Consommation</span><span>${d.on ? d.w : 0} W</span></div>`; break;
+    case 'climate':
+      h += `<div class="lbl"><span>Température de la pièce</span></div><div class="big">${fmt1(d.cur)} °C</div>
+        <div class="lbl"><span>Consigne</span></div><div class="stepper"><button data-p="minus">−</button><span>${fmt1(d.set)}°</span><button data-p="plus">+</button></div>
+        <div class="lbl"><span>Mode</span></div><div class="row3">${[['heat','Chauffage'],['eco','Éco'],['off','Arrêt']].map(([k, l]) => `<button class="${d.mode === k ? 'on' : ''}" data-p="mode" data-m="${k}">${l}</button>`).join('')}</div>`; break;
+    case 'cover':
+      h += `<div class="big">${esc(val(d))}</div><div class="lbl"><span>Position</span><span>${d.pos} %</span></div><input type="range" min="0" max="100" step="5" value="${d.pos}" data-p="pos">
+        <div class="row3" style="margin-top:12px"><button data-p="cov" data-v="100">Ouvrir</button><button data-p="cov" data-v="stop">Stop</button><button data-p="cov" data-v="0">Fermer</button></div>`; break;
+    case 'lock':
+      h += `<div class="big">${esc(val(d))}</div>` + (d.locked
+        ? `<button class="hold" data-p="hold">Maintenir pour déverrouiller</button>`
+        : `<button class="tog on" data-p="lock">${icon('lock')} Verrouiller</button>`); break;
+    default:
+      h += `<div class="big">${esc(val(d))}</div>` + ro('Capteur : lecture seule. Dernier changement il y a 2 min.');
+  }
+  $('#kp').innerHTML = h;
+}
+const kp = () => $('#kp');
+document.addEventListener('click', e => {
+  const t = e.target.closest('#kp [data-p]'); if (!t) return;
+  const d = dev(panelId), p = t.dataset.p;
+  if (p === 'close') return closePanel();
+  if (p === 'toggle') { if (d.fam === 'group') { const on = !isOn(d); d.members.forEach(m => m.on = on); } else d.on = !d.on; if (d.fam === 'plug') d.w = d.on ? (d.id.includes('tv') ? 85 : 1200) : 0; }
+  if (p === 'col') d.col = t.dataset.c;
+  if (p === 'minus') d.set = Math.max(7, d.set - .5);
+  if (p === 'plus') d.set = Math.min(28, d.set + .5);
+  if (p === 'mode') d.mode = t.dataset.m;
+  if (p === 'cov' && t.dataset.v !== 'stop') d.pos = +t.dataset.v;
+  if (p === 'lock') d.locked = true;
+  if (['mem','bri','pos','hold'].includes(p)) return;
+  renderPanel(); refreshAll();
+});
+document.addEventListener('input', e => {
+  const t = e.target.closest('#kp [data-p]'); if (!t) return;
+  const d = dev(panelId);
+  if (t.dataset.p === 'bri') { d.bri = +t.value; t.previousElementSibling.lastElementChild.textContent = d.bri + ' %'; }
+  if (t.dataset.p === 'pos') { d.pos = +t.value; t.previousElementSibling.lastElementChild.textContent = d.pos + ' %'; }
+  refreshAll();
+});
+document.addEventListener('change', e => {
+  const t = e.target.closest('#kp [data-p="mem"]'); if (!t) return;
+  dev(panelId).members[+t.dataset.i].on = t.checked; renderPanel(); refreshAll();
+});
+let holdT = 0;
+document.addEventListener('pointerdown', e => {
+  const t = e.target.closest('#kp [data-p="hold"]'); if (!t) return;
+  t.classList.add('holding');
+  holdT = setTimeout(() => { dev(panelId).locked = false; renderPanel(); refreshAll(); showToast('#kToast', "Serrure d'entrée déverrouillée", true); }, 1500);
+});
+['pointerup','pointerleave','pointercancel'].forEach(ev => document.addEventListener(ev, e => {
+  const t = e.target.closest && e.target.closest('#kp [data-p="hold"]'); if (!t) return;
+  clearTimeout(holdT); t.classList.remove('holding');
+}, true));
+
+/* ================== Simulation temps réel ================== */
+function refreshAll() {
+  if (state.view === 'editor') { if (edCtx) update3D(edCtx); else renderPlan(); if (state.tab === 'devices' && !state.drag) { const l = $('#devList'); if (l) renderDevList(); } }
+  if (state.view === 'tv' && tvCtx) { tvCtx.cam.explode = state.opts.explode; update3D(tvCtx); camera3D(tvCtx, true); summary(); }
+  if (state.view === 'kiosk' && kCtx) update3D(kCtx);
+}
+function showToast(sel, msg, alert) {
+  const t = $(sel); if (!t) return;
+  t.innerHTML = msg; t.classList.toggle('alert', !!alert); t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 3800);
+}
+function toast(msg) {
+  let t = planHost.querySelector('.toast'); if (!t) { t = document.createElement('div'); t.className = 'toast'; planHost.appendChild(t); }
+  t.textContent = msg; t.classList.remove('alert'); t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+function focusOn(d, ms) {
+  const ctx = state.view === 'tv' ? tvCtx : state.view === 'kiosk' ? kCtx : edCtx;
+  if (!ctx) return;
+  ctx.focus = d.id; update3D(ctx);
+  if (state.opts.focus && ctx.mode !== 'editor') {
+    const prev = ctx.cam.sel; ctx.focusing = true; ctx.cam.sel = d.floor; camera3D(ctx, true); if (ctx === kCtx) kbar();
+    setTimeout(() => { ctx.focusing = false; ctx.focus = null; ctx.cam.sel = prev; camera3D(ctx, true); update3D(ctx); if (ctx === kCtx) kbar(); }, ms);
+  } else setTimeout(() => { ctx.focus = null; update3D(ctx); }, ms);
+}
+function simulate(kind) {
+  const ts = state.view === 'kiosk' ? '#kToast' : '#tvToast';
+  const say = (m, a) => state.view === 'editor' ? toast(m) : showToast(ts, m, a);
+  if (kind === 'door') {
+    const d = dev('binary_sensor.porte_entree'); d.open = true; refreshAll();
+    say(`${icon('door')} Porte d'entrée ouverte · Rez-de-chaussée`, true); focusOn(d, 6000);
+    setTimeout(() => { d.open = false; refreshAll(); }, 6500);
+  }
+  if (kind === 'motion') {
+    const d = dev('binary_sensor.mouvement_entree'); d.on = true; refreshAll();
+    say(`${icon('motion')} Mouvement détecté · Entrée`); focusOn(d, 4500);
+    setTimeout(() => { d.on = false; refreshAll(); }, 5000);
+  }
+  if (kind === 'light') {
+    const d = dev('light.chambre_3'); d.on = !d.on; refreshAll();
+    say(`${icon('bulb')} Chambre 3 : lumière ${d.on ? 'allumée' : 'éteinte'}`);
+  }
+}
+setInterval(() => {           // petites variations, comme un vrai flux
+  devices.forEach(d => {
+    if (d.fam === 'climate' || d.fam === 'temp') d.cur = Math.round((d.cur + (Math.random() - .5) * .2) * 10) / 10;
+    if (d.fam === 'plug' && d.on) d.w = Math.max(1, Math.round(d.w * (1 + (Math.random() - .5) * .06)));
+  });
+  if (state.view !== 'editor') refreshAll();
+  else if (edCtx) update3D(edCtx);
+}, 3000);
+setInterval(() => { const c = $('#tvClock'); if (c) c.textContent = new Date().toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' }); }, 1000);
+
+/* ================== Vues ================== */
+function setView(v) {
+  state.view = v; closePanel();
+  document.querySelectorAll('.demo [data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === v));
+  ['editor','tv','kiosk'].forEach(k => $('#v-' + k).hidden = k !== v);
+  if (v === 'editor') { edCtx = null; renderEditor(); renderSide(); }
+  if (v === 'tv') { buildTV(); $('#tvClock').textContent = new Date().toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' }); }
+  if (v === 'kiosk') buildKiosk();
+}
+window.addEventListener('resize', () => { [edCtx, tvCtx, kCtx].forEach(c => c && c.host.offsetParent && camera3D(c, false)); });
+
+setView('editor');
+</script>
+</body>
+</html>

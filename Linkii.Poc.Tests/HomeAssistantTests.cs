@@ -18,6 +18,84 @@ public class HomeAssistantTests
 {
     readonly AppCatalog catalog = new(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Linkii.Poc", "Apps"), NullLogger.Instance);
 
+    // ---------- plan du bâtiment (§193) ----------
+
+    [Fact]
+    public void Plan_app_is_a_home_assistant_widget_outside_the_families()
+    {
+        Assert.True(HomeAssistantRules.IsHaApp("ha-plan"));
+        Assert.DoesNotContain(HomeAssistantRules.Families, f => f.App == "ha-plan");
+        Assert.Contains("ha-plan", HomeAssistantRules.AllApps);
+        var m = catalog.Find("ha-plan");
+        Assert.NotNull(m);
+        Assert.True(m!.ScreenWidget);
+        Assert.Equal("homeassistant", m.Provider);
+    }
+
+    [Theory]
+    [InlineData("light.bureau", "on", true)]
+    [InlineData("cover.store_sud", "position", true)]
+    [InlineData("climate.salon", "temp", true)]
+    [InlineData("lock.entree", "unlock", true)]
+    [InlineData("sensor.salon_temperature", "on", false)]
+    [InlineData("binary_sensor.porte", "on", false)]
+    [InlineData("light.bureau", "temp", false)]
+    [InlineData("camera.jardin", "on", false)]
+    public void Plan_widget_commands_any_domain_but_only_what_the_domain_accepts(string entity, string action, bool allowed) =>
+        Assert.Equal(allowed, HomeAssistantRules.Commandable("ha-plan", entity, action));
+
+    [Fact]
+    public void Plan_is_cleaned_when_read()
+    {
+        var json = """
+            {"floors":[{"id":"rdc","name":"  Rez ","img":"/media/a.png","ratio":1.5},{"id":"rdc","name":"Doublon"},
+                       {"id":"e1","name":"Étage","img":"https://evil.example/x.png","ratio":99},{"id":"","name":"Sans id"}],
+             "devices":[{"id":"light.salon","floor":"rdc","x":0.25,"y":1.7},{"id":"light.salon","floor":"e1","x":0.1,"y":0.1},
+                        {"id":"camera.jardin","floor":"rdc","x":0.5,"y":0.5},{"id":"switch.tv","floor":"inconnu","x":0.5,"y":0.5},
+                        {"id":"cover.volet","floor":"e1","x":-3,"y":0.4}]}
+            """;
+        var p = HomeAssistantRules.ParsePlan(json);
+        Assert.Equal(new[] { "rdc", "e1" }, p.Floors.Select(f => f.Id));
+        Assert.Equal("/media/a.png", p.Floors[0].Img);
+        Assert.Null(p.Floors[1].Img);                 // seule une image /media/ du site est gardée
+        Assert.Equal(3, p.Floors[1].Ratio);           // rapport ramené dans les bornes
+        Assert.Equal(new[] { "light.salon", "cover.volet" }, p.Devices.Select(d => d.Id));   // doublon, domaine inconnu et étage inconnu écartés
+        Assert.Equal(1, p.Devices[0].Y);              // position ramenée dans le plan
+        Assert.Equal(0, p.Devices[1].X);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("pas du json")]
+    [InlineData("[1,2]")]
+    public void Unreadable_plan_is_empty(string? json)
+    {
+        var p = HomeAssistantRules.ParsePlan(json);
+        Assert.Empty(p.Floors);
+        Assert.Empty(p.Devices);
+        Assert.Equal(("", ""), HomeAssistantRules.NormalizePlan(json));
+    }
+
+    [Fact]
+    public void Plan_is_limited_in_floors_and_devices()
+    {
+        var floors = string.Join(',', Enumerable.Range(0, 12).Select(i => $"{{\"id\":\"f{i}\",\"name\":\"E{i}\"}}"));
+        var devices = string.Join(',', Enumerable.Range(0, 200).Select(i => $"{{\"id\":\"light.l{i}\",\"floor\":\"f0\",\"x\":0.5,\"y\":0.5}}"));
+        var p = HomeAssistantRules.ParsePlan($"{{\"floors\":[{floors}],\"devices\":[{devices}]}}");
+        Assert.Equal(HomeAssistantRules.MaxPlanFloors, p.Floors.Count);
+        Assert.Equal(HomeAssistantRules.MaxPlanDevices, p.Devices.Count);
+    }
+
+    [Fact]
+    public void Normalized_plan_gives_the_entities_it_uses_and_validates()
+    {
+        var (json, ents) = HomeAssistantRules.NormalizePlan("""{"floors":[{"id":"a","name":"RDC"}],"devices":[{"id":"light.salon","floor":"a","x":0.2,"y":0.3},{"id":"lock.porte","floor":"a","x":0.6,"y":0.3}]}""");
+        Assert.Equal("light.salon,lock.porte", ents);
+        Assert.Empty(AppCatalog.Validate(catalog.Find("ha-plan")!, new Dictionary<string, string> { ["plan"] = json, ["entities"] = ents }, new HashSet<string>()));
+        Assert.NotEmpty(AppCatalog.Validate(catalog.Find("ha-plan")!, new Dictionary<string, string> { ["plan"] = "{\"floors\":[]}" }, new HashSet<string>()));
+    }
+
     // ---------- règles ----------
 
     [Fact]
@@ -306,7 +384,7 @@ public class HomeAssistantTests
         db.Clients.Add(t);
         HomeAssistantSetup.Apply(db, t, catalog);
         HomeAssistantSetup.Apply(db, t, catalog);
-        Assert.Equal(HomeAssistantRules.AppIds.OrderBy(x => x), db.AppInstalls.Where(a => a.ClientId == t.Id).Select(a => a.AppId).OrderBy(x => x));
+        Assert.Equal(HomeAssistantRules.AllApps.OrderBy(x => x), db.AppInstalls.Where(a => a.ClientId == t.Id).Select(a => a.AppId).OrderBy(x => x));
         var conn = Assert.Single(t.DataConnections);
         Assert.Equal(DataKinds.Ha, conn.Kind);
         Assert.Equal("states:*", Assert.Single(t.DataSets).Path);

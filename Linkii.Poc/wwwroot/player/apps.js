@@ -331,6 +331,300 @@
   }
   for (var hai = 0; hai < HA_APPS.length; hai++) A.register(HA_APPS[hai], haApp);
 
+  /* ---------- Home Assistant : plan du bâtiment (§193) ----------
+     Les étages sont des plaques empilées en 3D (CSS, sans bibliothèque : tient sur les petits appareils) ; chaque appareil est une pastille posée sur son plan,
+     toujours face à l'écran. Le serveur renvoie le plan nettoyé (d.plan) et l'état de chaque entité ; une commande suit les mêmes règles que haApp. */
+  function haPlanState(e) {   // '' | on | alert | move | off : couleur de la pastille
+    if (e.available === false) return 'off';
+    var d = e.domain, dc = e.deviceClass || '';
+    if (d === 'binary_sensor') { if (!e.on) return ''; return dc === 'motion' || dc === 'occupancy' || dc === 'presence' ? 'move' : 'alert'; }
+    if (d === 'lock') return e.on ? 'alert' : '';
+    if (d === 'light' || d === 'switch' || d === 'input_boolean' || d === 'fan') return e.on ? 'on' : '';
+    if (d === 'climate') return e.hvac === 'heating' ? 'on' : '';
+    return '';
+  }
+  function haPlanApp(h) {
+    var el = h.el, now = function () { return h.now ? h.now() : Date.now(); };
+    el.className += ' hpl';
+    el.innerHTML = '<div class="hpl-view"><div class="hpl-world"></div></div><div class="hpl-bar"></div><div class="hpl-toast"></div><div class="hpl-sum"></div><div class="hpl-sheet"></div>';
+    var view = el.querySelector('.hpl-view'), world = el.querySelector('.hpl-world'), bar = el.querySelector('.hpl-bar'), toast = el.querySelector('.hpl-toast'),
+      sum = el.querySelector('.hpl-sum'), sheet = el.querySelector('.hpl-sheet');
+    var PW = 480, GAP = 175, FLAT = 14, RX_MIN = 40, RX_MAX = 78;
+    var last = null, built = '', byId = {}, pending = {}, confirm = {}, panelId = null, holding = false, prev = null;
+    var cam = { rz: -32, rx: 62, sel: 'all' }, userUntil = 0, focusUntil = 0, focusTimer = 0, toastTimer = 0, pulseId = null, scale = 1;
+
+    function eView(e) {   // état affiché : celui qu'on vient de commander, jusqu'à confirmation de Home Assistant (8 s au plus)
+      var p = pending[e.id];
+      if (p && (Date.now() > p.until || e[p.field] === p.value)) { delete pending[e.id]; p = null; }
+      if (!p) return e;
+      var v = {}, k; for (k in e) v[k] = e[k];
+      v[p.field] = p.value;
+      if (p.field === 'state' && e.domain === 'lock') v.on = p.value === 'unlocked';
+      return v;
+    }
+    function send(e, body, field, value) {
+      if (field) pending[e.id] = { field: field, value: value, until: Date.now() + 8000 };
+      body.entityId = e.id;
+      refresh();
+      return h.command('ha', body).then(function () { setTimeout(refresh, 8100); }, function () {
+        delete pending[e.id];
+        say('Commande non envoyée. Réessayez.', true);
+        refresh();
+      });
+    }
+    function say(text, bad, ms) {
+      toast.textContent = text; toast.className = 'hpl-toast show' + (bad ? ' bad' : '');
+      clearTimeout(toastTimer); toastTimer = setTimeout(function () { toast.className = 'hpl-toast'; }, ms || 5000);
+    }
+
+    /* ----- construction de la scène (à chaque changement du plan) ----- */
+    function build(plan) {
+      var ratio = 1.6, i;
+      for (i = 0; i < plan.floors.length; i++) ratio = i === 0 ? plan.floors[i].ratio : Math.max(ratio, plan.floors[i].ratio);
+      var PH = Math.round(PW / ratio);
+      world.style.width = PW + 'px'; world.style.height = PH + 'px';
+      world.innerHTML = '';
+      plan.floors.forEach(function (f, n) {
+        var fl = document.createElement('div');
+        fl.className = 'hpl-floor'; fl.setAttribute('data-f', f.id);
+        var pl = document.createElement('div');
+        pl.className = 'hpl-plate' + (f.img ? ' has-img' : '');
+        if (f.img) { var im = document.createElement('div'); im.className = 'hpl-img'; im.style.backgroundImage = 'url("' + f.img.replace(/"/g, '') + '")'; pl.appendChild(im); }
+        else { var nm = document.createElement('span'); nm.className = 'hpl-fname'; nm.textContent = f.name; pl.appendChild(nm); }
+        fl.appendChild(pl);
+        var tag = document.createElement('div');
+        tag.className = 'hpl-ftag'; tag.innerHTML = '<span></span>'; tag.firstChild.textContent = f.name;
+        fl.appendChild(tag);
+        plan.devices.filter(function (d) { return d.floor === f.id; }).forEach(function (d) {
+          var g = document.createElement('div'); g.className = 'hpl-glow'; g.setAttribute('data-g', d.id);
+          g.style.left = d.x * 100 + '%'; g.style.top = d.y * 100 + '%';
+          fl.appendChild(g);
+          var pin = document.createElement('div'); pin.className = 'hpl-pin'; pin.setAttribute('data-p', d.id);
+          pin.style.left = d.x * 100 + '%'; pin.style.top = d.y * 100 + '%';
+          pin.innerHTML = '<div class="hpl-pin-in"><button type="button" class="hpl-chip"></button><i class="hpl-stem"></i></div>';
+          fl.appendChild(pin);
+        });
+        world.appendChild(fl);
+      });
+      cam.sel = plan.floors.some(function (f) { return f.id === cam.sel; }) ? cam.sel : 'all';
+      camera(false);
+      drawBar();
+    }
+
+    function floorZ(i) { return last.plan.explode ? i * GAP : i * FLAT; }
+    function camera() {
+      if (!last || !last.plan) return;
+      var floors = last.plan.floors, selI = cam.sel === 'all' ? -1 : floors.findIndex(function (f) { return f.id === cam.sel; });
+      var zs = [], PH = world.offsetHeight || PW / 1.6;
+      floors.forEach(function (f, i) {
+        var fe = world.querySelector('.hpl-floor[data-f="' + f.id + '"]'); if (!fe) return;
+        fe.style.transform = 'translateZ(' + floorZ(i) + 'px)';
+        fe.className = 'hpl-floor' + (selI >= 0 && i < selI ? ' ghost' : '') + (selI >= 0 && i > selI ? ' hide' : '');
+        if (selI < 0 || i <= selI) zs.push(floorZ(i));
+      });
+      var z0 = Math.min.apply(null, zs), z1 = Math.max.apply(null, zs) + 40;
+      var rx = cam.rx * Math.PI / 180, diag = Math.sqrt(PW * PW + PH * PH);
+      var w = view.clientWidth || 640, hh = view.clientHeight || 360;
+      var need = diag * Math.cos(rx) + (z1 - z0) * Math.sin(rx) + 90;
+      scale = Math.min(w * 0.92 / diag, hh * 0.92 / need);
+      world.classList.toggle("all", selI < 0 && floors.length > 1);
+      world.style.setProperty('--rz', cam.rz + 'deg'); world.style.setProperty('--rx', cam.rx + 'deg');
+      world.style.transform = 'translate(-50%,-50%) scale(' + scale.toFixed(3) + ') rotateX(' + cam.rx + 'deg) rotateZ(' + cam.rz + 'deg) translateZ(' + (-(z0 + z1) / 2) + 'px)';
+    }
+
+    /* ----- états ----- */
+    function update() {
+      if (!last || !last.plan) return;
+      var lab = last.plan.labels || 'all';
+      last.plan.devices.forEach(function (d) {
+        var raw = byId[d.id]; if (!raw || raw.state === 'absent') { var gone = world.querySelector('[data-p="' + d.id + '"]'); if (gone) gone.style.display = 'none'; return; }
+        var e = eView(raw), st = haPlanState(e);
+        var pin = world.querySelector('[data-p="' + d.id + '"]'); if (!pin) return;
+        pin.style.display = '';
+        var chip = pin.querySelector('.hpl-chip');
+        chip.className = 'hpl-chip ' + st + (lab === 'none' || (lab === 'active' && !st) ? ' novals' : '') + (pulseId === d.id ? ' pulse' : '');
+        chip.setAttribute('aria-label', e.name);
+        chip.innerHTML = haIcon(e) + '<span class="hpl-v"></span>';
+        chip.querySelector('.hpl-v').textContent = haValue(e, last.decimals, now());
+        var g = world.querySelector('[data-g="' + d.id + '"]');
+        if (g) {
+          if (e.domain === 'light' && e.on && e.available !== false) {
+            var b = e.brightness == null ? 100 : e.brightness, R = (0.07 + 0.11 * b / 100) * PW, col = e.color || '#FFC870';
+            g.style.width = g.style.height = 2 * R + 'px'; g.style.marginLeft = g.style.marginTop = -R + 'px';
+            g.style.background = 'radial-gradient(circle, ' + haRgba(col, 0.7) + ' 0%, ' + haRgba(col, 0.22) + ' 45%, ' + haRgba(col, 0) + ' 70%)'; g.style.opacity = 1;
+          } else g.style.opacity = 0;
+        }
+      });
+      drawSummary();
+      if (panelId) drawSheet();
+    }
+    function haRgba(hex, a) { var n = parseInt(String(hex).replace('#', ''), 16); if (isNaN(n)) n = 0xFFC870; return 'rgba(' + (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')'; }
+
+    function drawSummary() {
+      var ents = last.plan.devices.map(function (d) { return byId[d.id]; }).filter(function (e) { return e && e.state !== 'absent'; }).map(eView);
+      var lights = ents.filter(function (e) { return e.domain === 'light' && e.on; }).length;
+      var open = ents.filter(function (e) { return e.domain === 'binary_sensor' && e.on && haPlanState(e) === 'alert'; });
+      var temps = ents.filter(function (e) { return e.domain === 'climate' && e.current != null; });
+      var avg = temps.length ? temps.reduce(function (s, e) { return s + e.current; }, 0) / temps.length : null;
+      var h2 = '<span class="hpl-s' + (lights ? ' on' : '') + '">' + lights + (lights > 1 ? ' lumières allumées' : lights ? ' lumière allumée' : ' lumière allumée') + '</span>';
+      h2 += '<span class="hpl-s' + (open.length ? ' alert' : '') + '"></span>';
+      if (avg != null) h2 += '<span class="hpl-s">Température ' + haDeg(Math.round(avg * 10) / 10) + '</span>';
+      sum.innerHTML = h2;
+      var o = sum.children[1];
+      o.textContent = open.length ? open.map(function (e) { return e.name; }).slice(0, 3).join(', ') + (open.length > 1 ? ' : ouverts' : ' : ouvert') : 'Portes et fenêtres fermées';
+    }
+
+    /* ----- barre du haut (étages, rotation) : seulement avec la commande à l'écran ----- */
+    function drawBar() {
+      bar.innerHTML = '';
+      if (!last || !last.plan || !last.plan.touch) return;   // écran sans commande : ni boutons ni panneau
+      function b(label, key, on) {
+        var x = document.createElement('button'); x.type = 'button'; x.className = 'hpl-k' + (on ? ' on' : ''); x.textContent = label;
+        x.onclick = function () { pick(key); }; return x;
+      }
+      bar.appendChild(b('Tous', 'all', cam.sel === 'all'));
+      last.plan.floors.slice().reverse().forEach(function (f) { bar.appendChild(b(f.name, f.id, cam.sel === f.id)); });
+      var sp = document.createElement('span'); sp.className = 'hpl-sp'; bar.appendChild(sp);
+      bar.appendChild(b('⟲', 'rl', false)); bar.appendChild(b('⟳', 'rr', false));
+    }
+    function pick(key) {
+      userUntil = Date.now() + 8000;
+      if (key === 'rl') cam.rz -= 45; else if (key === 'rr') cam.rz += 45; else cam.sel = key;
+      world.classList.add('ease'); camera(); setTimeout(function () { world.classList.remove('ease'); }, 900); drawBar();
+    }
+
+    /* ----- panneau de commande d'un appareil ----- */
+    function drawSheet() {
+      var raw = byId[panelId]; if (!raw || raw.state === 'absent') { closeSheet(); return; }
+      if (holding) return;
+      var e = eView(raw), d = e.domain, c = function (a) { return haCan(raw, a); };
+      sheet.className = 'hpl-sheet open'; sheet.innerHTML = '';
+      function add(tag, cls, text) { var x = document.createElement(tag); x.className = cls; if (text != null) x.textContent = text; sheet.appendChild(x); return x; }
+      function rowBtn(cls, label, fn, disabled) { var x = add('button', 'hpl-sb ' + cls, label); x.type = 'button'; if (disabled) x.disabled = true; x.onclick = fn; return x; }
+      function range(value, min, action, label) {
+        var r = add('input', 'hpl-range'); r.type = 'range'; r.min = min; r.max = 100; r.step = 1; r.value = value == null ? 0 : value; r.setAttribute('aria-label', label);
+        r.onpointerdown = function () { holding = true; }; r.ontouchstart = function () { holding = true; };
+        r.onchange = function () { holding = false; send(raw, { action: action, value: +r.value }, action === 'brightness' ? 'brightness' : 'position', +r.value); };
+        r.onblur = function () { holding = false; };
+      }
+      var head = add('div', 'hpl-sh');
+      head.innerHTML = haIcon(e) + '<span class="hpl-sn"></span><span class="hpl-sv"></span><button type="button" class="hpl-sx" aria-label="Fermer">×</button>';
+      head.querySelector('.hpl-sn').textContent = e.name;
+      head.querySelector('.hpl-sv').textContent = haValue(e, last.decimals, now());
+      head.querySelector('.hpl-sx').onclick = closeSheet;
+      if (raw.available === false) return;
+      if (d === 'switch' || d === 'input_boolean' || d === 'fan' || d === 'light') {
+        if (c('on')) rowBtn(e.on ? 'on' : '', e.on ? 'Allumé · éteindre' : 'Éteint · allumer', function () { send(raw, { action: e.on ? 'off' : 'on' }, 'on', !e.on); }, !!pending[raw.id]);
+        if (d === 'light' && e.on && c('brightness') && last.dimmer && raw.dimmable) { add('div', 'hpl-sl', 'Intensité'); range(e.brightness, 1, 'brightness', 'Intensité de ' + e.name); }
+        if (d === 'light' && e.on && c('color') && raw.colorable) {
+          var dots = add('div', 'hpl-dots');
+          HA_COLORS.forEach(function (col) {
+            var x = document.createElement('button'); x.type = 'button'; x.className = 'hpl-dot' + (raw.color && raw.color.toUpperCase() === col ? ' sel' : ''); x.style.background = col;
+            x.setAttribute('aria-label', 'Couleur ' + col); x.onclick = function () { send(raw, { action: 'color', color: col }); }; dots.appendChild(x);
+          });
+        }
+      } else if (d === 'climate') {
+        add('div', 'hpl-sl', 'Consigne ' + haDeg(e.target) + (raw.hvac && HA_HVAC[raw.hvac] ? ' · ' + HA_HVAC[raw.hvac] : ''));
+        if (c('temp') && e.target != null) {
+          var step = raw.step || 0.5, lo = raw.min == null ? 5 : raw.min, hi = raw.max == null ? 30 : raw.max, row = add('div', 'hpl-two');
+          var m = document.createElement('button'); m.type = 'button'; m.className = 'hpl-sb'; m.textContent = '−'; m.disabled = e.target <= lo;
+          m.onclick = function () { var v = Math.max(lo, Math.round((e.target - step) * 10) / 10); send(raw, { action: 'temp', value: v }, 'target', v); };
+          var p = document.createElement('button'); p.type = 'button'; p.className = 'hpl-sb'; p.textContent = '+'; p.disabled = e.target >= hi;
+          p.onclick = function () { var v = Math.min(hi, Math.round((e.target + step) * 10) / 10); send(raw, { action: 'temp', value: v }, 'target', v); };
+          row.appendChild(m); row.appendChild(p);
+        }
+      } else if (d === 'cover') {
+        if (c('open')) {
+          var r3 = add('div', 'hpl-two');
+          [['▲ Ouvrir', 'open', 'open', raw.state === 'open' && (raw.position == null || raw.position >= 100)], ['■', 'stop', null, !raw.stoppable], ['▼ Fermer', 'close', 'closed', raw.state === 'closed']].forEach(function (a) {
+            if (a[1] === 'stop' && !raw.stoppable) return;
+            var x = document.createElement('button'); x.type = 'button'; x.className = 'hpl-sb'; x.textContent = a[0]; x.disabled = !!a[3];
+            x.onclick = function () { send(raw, { action: a[1] }, a[2] ? 'state' : null, a[2]); }; r3.appendChild(x);
+          });
+        }
+        if (c('position') && raw.positionable) { add('div', 'hpl-sl', 'Position'); range(e.position, 0, 'position', 'Position de ' + e.name); }
+      } else if (d === 'lock') {
+        var act = e.state === 'locked' ? 'unlock' : 'lock';
+        if (c(act) && raw.state !== 'jammed') {
+          var asking = confirm[raw.id] > Date.now();
+          rowBtn(asking ? 'ask' : '', asking ? 'Confirmer ?' : act === 'lock' ? 'Verrouiller' : 'Déverrouiller', function () {
+            if (!(confirm[raw.id] > Date.now())) { confirm[raw.id] = Date.now() + 4000; drawSheet(); setTimeout(drawSheet, 4100); return; }
+            delete confirm[raw.id];
+            send(raw, { action: act }, 'state', act === 'lock' ? 'locked' : 'unlocked');
+          });
+        }
+      }
+    }
+    function closeSheet() { panelId = null; holding = false; sheet.className = 'hpl-sheet'; sheet.innerHTML = ''; }
+    function openSheet(id) { panelId = id; drawSheet(); }
+
+    /* ----- rotation au doigt, toucher d'une pastille ----- */
+    var drag = null;
+    view.addEventListener('pointerdown', function (ev) {
+      var chip = ev.target.closest && ev.target.closest('.hpl-chip');
+      drag = { x: ev.clientX, y: ev.clientY, rz: cam.rz, rx: cam.rx, id: chip ? chip.parentNode.parentNode.getAttribute('data-p') : null, moved: false };
+      try { view.setPointerCapture(ev.pointerId); } catch (x) {}
+    });
+    view.addEventListener('pointermove', function (ev) {
+      if (!drag) return;
+      var dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+      if (!drag.moved && Math.sqrt(dx * dx + dy * dy) < 6) return;
+      drag.moved = true; userUntil = Date.now() + 6000;
+      cam.rz = drag.rz + dx * 0.35; cam.rx = Math.max(RX_MIN, Math.min(RX_MAX, drag.rx - dy * 0.2)); camera();
+    });
+    function endDrag() {
+      if (!drag) return;
+      if (!drag.moved) { if (drag.id) { if (last && last.plan && last.plan.touch) openSheet(drag.id); } else closeSheet(); }
+      drag = null;
+    }
+    view.addEventListener('pointerup', endDrag); view.addEventListener('pointercancel', function () { drag = null; });
+
+    /* ----- événements : porte, fenêtre ou mouvement qui change ----- */
+    function events() {
+      var snap = {};
+      (last.entities || []).forEach(function (e) { snap[e.id] = haPlanState(e); });
+      if (prev && last.plan.focus !== false) {
+        last.plan.devices.forEach(function (d) {
+          var e = byId[d.id], was = prev[d.id], now2 = snap[d.id];
+          if (!e || (now2 !== 'alert' && now2 !== 'move') || was === now2) return;
+          say((e.domain === 'lock' ? e.name + ' : déverrouillée' : e.domain === 'binary_sensor' && now2 === 'move' ? e.name + ' : mouvement' : e.name + ' : ouvert'), now2 === 'alert');
+          pulseId = d.id; setTimeout(function () { if (pulseId === d.id) { pulseId = null; update(); } }, 6000);
+          if (!panelId && Date.now() > userUntil) {   // l'écran montre l'étage concerné quelques secondes
+            var back = cam.sel; cam.sel = d.floor; focusUntil = Date.now() + 6000;
+            world.classList.add('ease'); camera();
+            clearTimeout(focusTimer);
+            focusTimer = setTimeout(function () { cam.sel = back; focusUntil = 0; camera(); setTimeout(function () { world.classList.remove('ease'); }, 900); }, 6000);
+          }
+        });
+      }
+      prev = snap;
+    }
+
+    function refresh() { update(); }
+    h.data(function (d) {
+      if (!d || !d.plan) { if (!last) { sum.textContent = ''; world.innerHTML = '<div class="hpl-none">Plan non configuré</div>'; } return; }
+      last = d; byId = {};
+      (d.entities || []).forEach(function (e) { byId[e.id] = e; });
+      d.plan.touch = (d.entities || []).some(function (e) { return (e.ctrl || []).length; });
+      var sig = JSON.stringify([d.plan.floors, d.plan.devices]);
+      if (sig !== built) { built = sig; build(d.plan); }
+      events(); update();
+      camera();
+    }, 60 * 1000);
+    h.every(function () { if (!holding && last) update(); }, 30 * 1000);
+
+    var t0 = Date.now(), raf = 0, dead = false;
+    function spin() {
+      if (dead) return;
+      if (last && last.plan && last.plan.spin && !last.plan.touch && Date.now() > userUntil && !focusUntil) { cam.rz = -32 + 24 * Math.sin((Date.now() - t0) / 7000); camera(); }
+      raf = requestAnimationFrame(spin);
+    }
+    raf = requestAnimationFrame(spin);
+    if (window.ResizeObserver) { var ro = new ResizeObserver(function () { camera(); }); ro.observe(view); h.onStop(function () { ro.disconnect(); }); }
+    h.onStop(function () { dead = true; cancelAnimationFrame(raf); clearTimeout(toastTimer); clearTimeout(focusTimer); });
+  }
+  A.register('ha-plan', haPlanApp);
+
   /* ---------- Agenda en bandeau (pleine page et angles : liste, voir player.js) ---------- */
   A.register('agenda', function (h) {
     var title = h.settings.title || 'Agenda';

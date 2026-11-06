@@ -9,14 +9,14 @@ public static class HomeAssistantSetup
 {
     public const string ConnectionName = "Home Assistant";
     /// <summary>Version de la mise en place : un compte déjà mis en place n'est pas repris au démarrage (une source supprimée exprès ne revient pas).</summary>
-    public const int Version = 2;
+    public const int Version = 3;
     public const string StatesSetName = "Home Assistant — états";
 
     /// <summary>Widgets activés et source de données créée pour une organisation (base entière : migration au démarrage).</summary>
     public static bool Apply(Db db, Tenant t, AppCatalog catalog)
     {
         var changed = false;
-        foreach (var id in HomeAssistantRules.AppIds)
+        foreach (var id in HomeAssistantRules.AllApps)
         {
             if (catalog.Find(id) is not { } m || db.AppInstalls.Any(a => a.ClientId == t.Id && a.AppId == id)) continue;
             db.AppInstalls.Add(new AppInstall { ClientId = t.Id, AppId = id, Version = m.Version });
@@ -39,7 +39,7 @@ public static class HomeAssistantSetup
     /// <summary>Connexion depuis le back-office : mêmes effets pour l'organisation de la page.</summary>
     public static void Install(AppService svc, TenantStore store)
     {
-        foreach (var id in HomeAssistantRules.AppIds) svc.Enable(id);
+        foreach (var id in HomeAssistantRules.AllApps) svc.Enable(id);
         store.Write(d =>
         {
             EnsureDataConnection(d.Tenant);
@@ -53,7 +53,7 @@ public static class HomeAssistantSetup
     public static void Uninstall(AppService svc, TenantStore store)
     {
         var placed = store.Read(d => d.Screens.SelectMany(s => s.Widgets).Select(w => w.AppId).Where(HomeAssistantRules.IsHaApp).ToHashSet());
-        foreach (var id in HomeAssistantRules.AppIds.Where(id => !placed.Contains(id))) svc.Disable(id);
+        foreach (var id in HomeAssistantRules.AllApps.Where(id => !placed.Contains(id))) svc.Disable(id);
         store.Write(d =>
         {
             foreach (var c in d.Tenant.DataConnections.Where(c => c.Kind == DataKinds.Ha).ToList())
