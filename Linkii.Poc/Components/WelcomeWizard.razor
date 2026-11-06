@@ -14,7 +14,7 @@
 @inject IWebHostEnvironment Env
 
 @* masqué (sans perdre son état) pendant l'aperçu, qui s'ouvre en plein écran *@
-<div class="fs-wiz pp-wiz" style="@(previewing ? "display:none" : null)">
+<div class="fs-wiz pp-wiz" style="@(previewing || Away ? "display:none" : null)">
 <div class="fs-modal pp-modal s@(step)" role="dialog" aria-modal="true" aria-labelledby="pp-q">
     <div class="fs-top">
         <Logo Size="26" />
@@ -306,8 +306,13 @@
         StateHasChanged();
     });
 
+    // Sur la page Intégrations (assistant d'ajout d'une source cloud, « Utiliser »), l'assistant s'efface : son tiroir est au premier plan, et son annulation ramène ici
+    private bool Away => Nav.ToBaseRelativePath(Nav.Uri).Split('?')[0].Trim('/').StartsWith("integrations");
+    private void OnLocation(object? s, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) => InvokeAsync(StateHasChanged);
+
     protected override void OnInitialized()
     {
+        Nav.LocationChanged += OnLocation;
         Welcome.Changed += OnWelcomeChanged;
         if (Welcome.Panel is { } first) { panel = first; Welcome.Panel = null; }
         Reload();
@@ -647,5 +652,5 @@
         Nav.NavigateTo(hasScreen ? "/" : "/?connecter=1");
     }
 
-    public void Dispose() { Welcome.Changed -= OnWelcomeChanged; self?.Dispose(); }
+    public void Dispose() { Nav.LocationChanged -= OnLocation; Welcome.Changed -= OnWelcomeChanged; self?.Dispose(); }
 }
