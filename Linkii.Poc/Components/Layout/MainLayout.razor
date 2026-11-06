@@ -221,6 +221,8 @@
                   ShowOrganisation="@(Ctx.ClientId != null && orgAdmin && Modes.Expert)"
                   ShowNotifications="@(Ctx.ClientId != null && (orgAdmin || approvalsMenu))"
                   ShowEmergency="@(Ctx.ClientId != null && orgAdmin && !Ctx.IsImpersonating)"
+                  ShowGettingStarted="@(Ctx.ClientId != null && CanGetStarted)"
+                  ShowConnect="@(Ctx.ClientId != null && writable.Contains(LevelPages.Screens))"
                   SettingsHref="@(Ctx.ClientId != null && orgAdmin && Modes.Expert ? "settings" : null)"
                   SettingsBadge="@(Pill("settings"))" />
         @if (Ctx.ClientId != null && orgAdmin && !Ctx.IsImpersonating) { <EmergencyDock /> }   @* alerte d'urgence : bandeau rouge et bouton flottant du mobile (intégration installée) *@
@@ -251,6 +253,7 @@
         @* Fenêtres empilées au-dessus d'une autre (sélecteur de médias) : rendues ici, hors de la fenêtre parente (son transform décalerait position: fixed). *@
         <SectionOutlet SectionName="overlay" />
         @if (playerOpen) { <PlayerInstallDialog OnClose="() => playerOpen = false" /> }
+        @if (Ctx.ClientId != null && Welcome.IsOpen && CanGetStarted) { <WelcomeWizard /> }   @* Premiers pas (§190) : reste ouvert d'une page à l'autre *@
         @if (Ctx.ClientId != null && orgAdmin && !Ctx.IsImpersonating) { <EmergencyDrawer /> }
         <Toasts />
         @if (Ctx.ClientId != null)
@@ -453,9 +456,24 @@
 
     private void ToggleMode() => Modes.Switch(!Modes.Expert);
     private void OnModeChanged() => InvokeAsync(StateHasChanged);
+
+    // ---------- Premiers pas (§190) ----------
+    [Inject] private GettingStarted Welcome { get; set; } = default!;
+    /// <summary>Ajouter des médias et créer une liste : il faut pouvoir modifier la médiathèque et les listes.</summary>
+    private bool CanGetStarted => writable.Contains(LevelPages.Media) && writable.Contains(LevelPages.Playlists);
+    private void OnWelcomeChanged() => InvokeAsync(StateHasChanged);
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender || Ctx.ClientId == null || Ctx.IsImpersonating || !CanGetStarted || Welcome.IsOpen) return;
+        // compte neuf (rien décidé, aucun écran) : les Premiers pas s'ouvrent seuls, sur la médiathèque
+        if (!Services.GetRequiredService<TenantStore>().Read(FirstScreen.ShouldOpen)) return;
+        Welcome.Open();
+        if (CurrentPath.Length == 0) Nav.NavigateTo("media", replace: true);
+    }
     // Ajout ou retrait d'une intégration (page Intégrations) : le menu se met à jour sans recharger.
     private void OnInstallsChanged() => InvokeAsync(() => { if (Ctx.ClientId != null) { LoadAreas(); Badges.Start(() => BadgeFamily, CompositionsMenu, orgAdmin); } StateHasChanged(); });
-    public void Dispose() { Modes.Changed -= OnModeChanged; Nav.LocationChanged -= OnLocationForBadges; Badges.Changed -= OnBadgesChanged; if (apps != null) apps.InstallsChanged -= OnInstallsChanged; }
+    public void Dispose() { Modes.Changed -= OnModeChanged; Welcome.Changed -= OnWelcomeChanged;Nav.LocationChanged -= OnLocationForBadges; Badges.Changed -= OnBadgesChanged; if (apps != null) apps.InstallsChanged -= OnInstallsChanged; }
 
     // Pastilles du menu : nombre d'éléments (clair), nouveau depuis la dernière visite (rouge), écran hors ligne (orange). Elles se mettent à jour seules (voir MenuBadges).
     private static readonly Dictionary<string, string> BadgePaths = new()
@@ -553,6 +571,7 @@
     protected override void OnInitialized()
     {
         Modes.Changed += OnModeChanged;
+        Welcome.Changed += OnWelcomeChanged;
         reseller = Ctx.Reseller;
         brand = reseller?.BrandColor ?? brand;
         var cid = Ctx.ClientId;

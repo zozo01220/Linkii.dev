@@ -13,6 +13,7 @@
 @inject HistoryLog Hist
 @inject TenantContext HCtx
 @inject ScreenControl Control
+@inject GettingStarted Welcome
 @using Microsoft.JSInterop
 
 <div class="page-head">
@@ -38,14 +39,14 @@
                 {
                     <div class="kebab-backdrop" @onclick="() => newMenu = false"></div>
                     <div class="kebab-menu lx-add-menu" role="menu">
-                        <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenPair(); }"><Ico Name="monitor" Size="18" /><span><b>Écran de diffusion</b><small>Avec le code affiché sur l'écran</small></span></button>
+                        <button type="button" role="menuitem" @onclick="OpenConnect"><Ico Name="monitor" Size="18" /><span><b>Écran de diffusion</b><small>Avec le code affiché sur l'écran</small></span></button>
                         <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenPairKiosk(); }"><Ico Name="hand" Size="18" /><span><b>Borne interactive <span class="kiosk-new">Nouveau</span></b><small>Borne à écran tactile</small></span></button>
                         @if (FolderOps) { <span class="sep" role="separator"></span> }
                         @if (FolderOps) { <button type="button" role="menuitem" @onclick="OpenNewFolder"><Ico Name="folder" Size="18" /><span><b>Nouveau dossier@(currentRow is { } cf ? $" dans « {cf.Folder.Name} »" : "")</b></span></button> }
                     </div>
                 }
                 <span class="lx-fabsrc" aria-hidden="true">
-                    <button type="button" tabindex="-1" data-fab="Connecter un écran" @onclick="OpenPair"><Ico Name="plus" Size="16" /></button>
+                    <button type="button" tabindex="-1" data-fab="Connecter un écran" @onclick="OpenConnect"><Ico Name="plus" Size="16" /></button>
                     @if (FolderOps) { <button type="button" tabindex="-1" data-fab="Nouveau dossier" @onclick="OpenNewFolder"><Ico Name="folder" Size="16" /></button> }
                 </span>
             </div>
@@ -195,8 +196,8 @@
     @if (Shown.Count + OtherShown.Count == 0 && !NothingToShow)
     {
         @if (Filtering) { <div class="empty"><div class="big">Aucun écran trouvé</div></div> }
-        else if (currentRow is { } fe) { <div class="empty compact"><div class="big">Ce dossier est vide</div><p>Glissez-y des écrans, ou rangez-en depuis leur menu ⋮ « Ranger dans un dossier… ».</p>@if (canAdd && OwnAreaVisible) { <button class="btn" @onclick="OpenPair"><Ico Name="plus" Size="16" /> Connecter un écran</button> }</div> }
-        else { <div class="empty compact"><div class="big">Aucun écran à la racine</div><p>Vos écrans sont rangés dans les dossiers ci-dessus.</p>@if (canAdd && OwnAreaVisible) { <button class="btn" @onclick="OpenPair"><Ico Name="plus" Size="16" /> Connecter un écran</button> }</div> }
+        else if (currentRow is { } fe) { <div class="empty compact"><div class="big">Ce dossier est vide</div><p>Glissez-y des écrans, ou rangez-en depuis leur menu ⋮ « Ranger dans un dossier… ».</p>@if (canAdd && OwnAreaVisible) { <button class="btn" @onclick="OpenConnect"><Ico Name="plus" Size="16" /> Connecter un écran</button> }</div> }
+        else { <div class="empty compact"><div class="big">Aucun écran à la racine</div><p>Vos écrans sont rangés dans les dossiers ci-dessus.</p>@if (canAdd && OwnAreaVisible) { <button class="btn" @onclick="OpenConnect"><Ico Name="plus" Size="16" /> Connecter un écran</button> }</div> }
     }
 }
 else if (Modes.Expert && !noArea)
@@ -215,26 +216,41 @@ else if (Modes.Expert && !noArea)
 else if (!noArea && NothingToShow)
 {
     @* Rien n'est affiché (aucun filtre) : avec le droit d'ajouter un écran dans l'aire, on explique comment en connecter un ; sinon simple constat, sans bouton *@
-    @if (canAdd && OtherAll.Count == 0 && firstLater)
+    @if (canAdd && OtherAll.Count == 0 && !hasAnyScreen)
     {
-        @* Assistant du premier écran remis à plus tard : on reprend là où la personne s'est arrêtée *@
-        <div class="fs-resume">
-            <span class="fs-resume-ic"><Ico Name="monitor" Size="26" /></span>
-            <div class="grow">
-                @if (firstReady)
+        @* Aucun écran dans l'organisation (§190) : la liste des Premiers pas est prête -> on connecte le premier écran ; sinon on commence par les contenus *@
+        <section class="pp-first">
+            <div class="tx">
+                @if (firstList is { } fl)
                 {
-                    <h3>Votre contenu est prêt, il ne manque que l'écran</h3>
-                    <p>Allumez l'écran, ouvrez <b>@(new Uri(Nav.BaseUri).Authority)/player</b> et recopiez le code. Ça prend une minute.</p>
+                    <span class="kick"><Ico Name="check" Size="15" /> « @fl.Name » est prête</span>
+                    <h3>Connectez votre premier écran</h3>
+                    <p>Allumez l'écran, ouvrez Linkivi dessus : il affiche un code. Recopiez-le ici, la liste s'affiche aussitôt.</p>
+                    <div class="row2">
+                        <button type="button" class="btn go" @onclick="() => OpenWizard(fl.Id)"><Ico Name="monitor" Size="16" /> Connecter mon premier écran</button>
+                    </div>
                 }
                 else
                 {
                     <h3>Votre premier écran en deux minutes</h3>
-                    <p>Choisissez ce qu'il affiche, puis reliez-le avec le code qu'il montre.</p>
+                    <p>Choisissez d'abord ce qu'il montrera, puis reliez-le avec le code qu'il affiche. Vous pouvez aussi le relier tout de suite : il montrera l'écran d'accueil Linkivi en attendant.</p>
+                    <div class="row2">
+                        @if (canContent) { <button type="button" class="btn go" @onclick="StartContents"><Ico Name="upload" Size="16" /> Ajouter mes contenus</button> }
+                        <button type="button" class="btn @(canContent ? "ghost" : "go")" @onclick="() => OpenWizard(DefaultList())"><Ico Name="monitor" Size="16" /> Connecter un écran tout de suite</button>
+                    </div>
                 }
+                <div class="devs"><PlayerLogo Kind="Navigateur" Size="16" /> Navigateur <PlayerLogo Kind="Android" Size="16" /> Android <PlayerLogo Kind="Windows" Size="16" /> Windows <PlayerLogo Kind="Linux" Size="16" /> Linux</div>
             </div>
-            @if (firstReady) { <button class="btn ghost" @onclick="() => OpenWizard(1)">Modifier le contenu</button> }
-            <button class="btn" @onclick="() => OpenWizard(firstReady ? 2 : 1)">@(firstReady ? "Relier mon écran" : "Commencer")</button>
-        </div>
+            <div class="vis" aria-hidden="true"><div><div class="fs-tv"><div class="fs-scr fs-player"><span class="pw">linkivi</span><span class="pc"><span>4</span><span>8</span><span>1</span><span>2</span><span>9</span><span>3</span></span><small>Le code apparaît sur l'écran</small></div><div class="fs-tvfoot"></div></div><div class="fs-stand"></div></div></div>
+        </section>
+        @if (firstList is { } ml)
+        {
+            <div class="pp-mini">
+                <span class="th">@if (FirstMedia(ml) is { } mlThumb) { <MediaThumb Media="mlThumb" All="media" /> }</span>
+                <div class="grow"><b>@ml.Name</b><small>@ml.Draft.Count contenu@(ml.Draft.Count > 1 ? "s" : "") · pas encore diffusée</small></div>
+                <a class="btn ghost sm" href="playlists/@ml.Id">Modifier la liste</a>
+            </div>
+        }
     }
     else if (canAdd)
     {
@@ -249,7 +265,7 @@ else if (!noArea && NothingToShow)
                 <div class="big">Aucun écran dans « @area?.Name »</div>
                 <p>Connectez ici un écran qui appartiendra à « @area?.Name ».</p>
             }
-            <button class="btn" @onclick="OpenPair"><Ico Name="plus" Size="16" /> Connecter un écran</button>
+            <button class="btn" @onclick="OpenConnect"><Ico Name="plus" Size="16" /> Connecter un écran</button>
         </div>
     }
     else
@@ -355,11 +371,11 @@ else
     </div>
 }
 
-@* Premier écran d'un nouveau compte : l'assistant couvre la page (masqué pendant une fenêtre de paiement, sans perdre son état) *@
+@* Assistant de l'écran (§190) : premier écran de l'organisation, ou « Ajouter › Écran de diffusion » ; masqué pendant une fenêtre de paiement, sans perdre son état *@
 @if (wizardOpen)
 {
     <div style="@(screenPay != null ? "display:none" : null)">
-        <FirstScreenWizard @ref="wizard" StartStep="wizardStart" Pair="PairFromWizard" OnClose="CloseWizard" />
+        <FirstScreenWizard @ref="wizard" First="wizardFirst" ListId="wizardList" Pair="PairFromWizard" OnClose="CloseWizard" OnMoreOptions="MoreOptions" />
     </div>
 }
 
@@ -715,24 +731,51 @@ else if (wallEdit is { } wid)
     private string? error;
     private bool showPair;
 
-    // ---------- Premier écran (assistant, voir FirstScreen) ----------
-    private bool wizardOpen, wizardPairing, firstLater, firstReady;
-    private int wizardStart = 1;
+    // ---------- Assistant de l'écran et Premiers pas (§190, voir FirstScreen et GettingStarted) ----------
+    private bool wizardOpen, wizardPairing, wizardFirst, hasAnyScreen, canContent;
+    private Guid? wizardList;
+    private Playlist? firstList;   // liste des Premiers pas, prête (au moins un contenu)
     private FirstScreenWizard? wizard;
 
-    private void LoadFirstScreen() => (firstLater, firstReady) = Store.Read(d => (d.Tenant.FirstScreen == FirstScreen.Later && !FirstScreen.HasScreen(d),
-        d.Tenant.FirstScreenListId is { } id && d.Playlists.Any(p => p.Id == id)));
+    private void LoadFirstScreen()
+    {
+        (hasAnyScreen, canContent) = Store.Read(d => (FirstScreen.HasScreen(d), d.Access.CanWrite(LevelPages.Media) && d.Access.CanWrite(LevelPages.Playlists)));
+        firstList = Store.Read(d => FirstScreen.ReadyList(d) is { } id ? d.Playlists.FirstOrDefault(p => p.Id == id) : null);
+    }
 
-    private void OpenWizard(int step) { wizardStart = step; wizardOpen = true; }
+    private MediaItem? FirstMedia(Playlist p) => p.Draft.Select(i => media.FirstOrDefault(m => m.Id == i.MediaId)).FirstOrDefault(m => m != null);
+
+    /// <summary>Liste proposée d'office à un écran qu'on connecte : celle des Premiers pas, sinon la dernière modifiée ; null : écran d'accueil Linkivi.</summary>
+    private Guid? DefaultList() => Store.Read(d => FirstScreen.ReadyList(d)
+        ?? d.Playlists.Where(p => p.Draft.Count > 0 && PlaylistOps.RightOf(d, p) != FolderRight.None).OrderByDescending(p => p.UpdatedAt).FirstOrDefault()?.Id);
+
+    private void OpenWizard(Guid? list) { wizardFirst = !hasAnyScreen; wizardList = list; wizardOpen = true; }
+
+    /// <summary>« Ajouter › Écran de diffusion » et les boutons « Connecter un écran » : l'assistant de l'écran (le tiroir complet reste dans « Plus d'options »).</summary>
+    private void OpenConnect() { newMenu = false; LoadFirstScreen(); OpenWizard(DefaultList()); }
+
+    private void MoreOptions() { wizardOpen = false; OpenPair(); }
+
+    /// <summary>Nom d'un écran de plus connecté par l'assistant : « Écran 2 », « Écran 3 »… (renommable ensuite).</summary>
+    private string NextScreenName()
+    {
+        var taken = Store.Read(d => d.Root.Screens.Where(s => s.ClientId == d.ClientId).Select(s => s.Name).ToHashSet());
+        var n = taken.Count + 1;
+        while (taken.Contains($"Écran {n}")) n++;
+        return $"Écran {n}";
+    }
+
+    private void StartContents() { Welcome.Open(); Nav.NavigateTo("media"); }
 
     private void CloseWizard() { wizardOpen = false; wizardPairing = false; Reload(); }
 
     /// <summary>Appairage demandé par l'assistant : mêmes règles que le tiroir (code vérifié, facturation, publication). Null si l'écran est relié.</summary>
-    private async Task<string?> PairFromWizard(string c, Guid listId)
+    private async Task<string?> PairFromWizard(string c, Guid? listId)
     {
         OpenPair();   // valeurs par défaut du tiroir (zone, format, plein écran), sans l'afficher
         showPair = false;
-        code = c; name = "Mon écran"; playlistId = listId;
+        code = c; playlistId = listId;
+        name = hasAnyScreen ? NextScreenName() : "Mon écran";
         wizardPairing = true;
         await Pair();
         if (screenPay != null) return "Validez le paiement de l'écran pour le relier.";   // la fenêtre de paiement s'affiche ; PairNow préviendra l'assistant
@@ -755,7 +798,9 @@ else if (wallEdit is { } wid)
         tenant = Store.Read(d => d.Tenant);
         tab = Store.Read(d => d.Users.FirstOrDefault(u => u.Id == d.Access.UserId)?.LibraryTabs.GetValueOrDefault("screens")) ?? LibraryTab.Mine;   // onglet retenu (corrigé par LoadTabs selon la personne)
         Reload();
-        wizardOpen = canAdd && !noArea && Store.Read(FirstScreen.ShouldOpen);   // nouveau compte sans écran : l'assistant du premier écran
+        // « Connecter un écran » demandé d'ailleurs (Premiers pas, menu Aide) : l'assistant de l'écran s'ouvre, avec la liste demandée ou celle d'office
+        var cq = System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query);
+        if (cq["connecter"] != null && canAdd && !noArea) { cleanQuery = true; OpenWizard(Guid.TryParse(cq["liste"], out var cl) ? cl : DefaultList()); }
         areaFilter = Store.Read(d => d.Users.FirstOrDefault(u => u.Id == d.Access.UserId)?.LibraryTabs.GetValueOrDefault("screens-area")) == "one" ? area?.Id.ToString() ?? "" : "";   // filtre « Aire » retenu (par défaut : toutes)
         // « Ouvrir cette aire » depuis un écran d'une autre aire : après le changement d'aire, l'écran choisi s'ouvre directement en édition
         var qs = System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query);
@@ -3009,7 +3054,7 @@ else if (wallEdit is { } wid)
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (cleanQuery && !firstRender) { cleanQuery = false; Nav.NavigateTo(Nav.GetUriWithQueryParameters(new Dictionary<string, object?> { ["edit"] = null, ["arbre"] = null, ["zone"] = null }), replace: true); }
+        if (cleanQuery && !firstRender) { cleanQuery = false; Nav.NavigateTo(Nav.GetUriWithQueryParameters(new Dictionary<string, object?> { ["edit"] = null, ["arbre"] = null, ["zone"] = null, ["connecter"] = null, ["liste"] = null }), replace: true); }
         if (firstRender)
         {
             // look app : pas d'arborescence ; densité Vignettes / Lignes mémorisée dans le navigateur

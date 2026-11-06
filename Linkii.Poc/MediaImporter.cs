@@ -59,6 +59,14 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
     /// <summary>Fichier lu par le serveur (synchronisation d'un Drive) : mêmes règles que l'import, conversion vidéo comprise.</summary>
     public Task<Result> ImportStream(Stream input, string name, Guid clientId, CancellationToken ct, IProgress<long>? progress = null) => Import(input, name, clientId, progress, ct, null);   // fichiers d'un dossier Drive : communs à toutes les aires
 
+    /// <summary>Fichier fourni par l'application (images d'exemple de l'assistant « Premiers pas ») : importé comme un fichier de l'ordinateur.</summary>
+    public async Task<Result> ImportFile(string path, string name, Guid clientId, Guid? areaId, Guid? ownerId, CancellationToken ct = default)
+    {
+        if (!File.Exists(path)) return new(null, $"« {name} » est introuvable sur le serveur.");
+        await using var s = File.OpenRead(path);
+        return await Import(s, name, clientId, null, ct, areaId, null, ownerId);
+    }
+
     // Nom du fichier : en-tête Content-Disposition, sinon fin de l'adresse ; extension déduite du type si elle manque.
     private static string FileNameFor(HttpResponseMessage res, string url)
     {

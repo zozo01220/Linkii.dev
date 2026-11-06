@@ -704,8 +704,13 @@ else
     // Retour de l'assistant d'ajout d'une intégration lancé depuis le tiroir « Depuis le cloud » : le tiroir se rouvre
     [SupplyParameterFromQuery(Name = "import")] public string? ImportParam { get; set; }
 
+    // Premiers pas (§190) ouverts par-dessus la page : à leur fermeture, la médiathèque montre ce qui vient d'être ajouté
+    [Inject] private GettingStarted Welcome { get; set; } = default!;
+    private void OnWelcomeChanged() => InvokeAsync(() => { if (!Welcome.IsOpen) { Reload(); StateHasChanged(); } });
+
     protected override void OnInitialized()
     {
+        Welcome.Changed += OnWelcomeChanged;
         if (ImportParam == "cloud") showUpload = true;
         tab = Store.Read(d => d.Users.FirstOrDefault(u => u.Id == d.Access.UserId)?.LibraryTabs.GetValueOrDefault("media")) ?? LibraryTab.Mine;
         Reload();
@@ -1396,6 +1401,7 @@ else
     public async ValueTask DisposeAsync()
     {
         Drives.ProgressChanged -= OnDriveProgress;
+        Welcome.Changed -= OnWelcomeChanged;
         refreshTimer?.Dispose();
         if (selfRef == null) return;
         try { await JS.InvokeVoidAsync("linkiiLibrary.detach", selfRef); } catch (JSException) { } catch (JSDisconnectedException) { } catch (InvalidOperationException) { }

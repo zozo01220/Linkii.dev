@@ -59,7 +59,34 @@
         </button>
     }
     <span class="sep2" aria-hidden="true"></span>
-    @if (SiteUrl.Length > 0)
+    @if (ShowGettingStarted || ShowConnect)
+    {
+        @* Aide (§190) : on rouvre les Premiers pas ou l'assistant de l'écran à tout moment, puis le centre d'aide du site *@
+        <div class="qb-wrap">
+            <button type="button" class="qb-btn @(menu == "help" ? "on" : "")" data-t="Aide" aria-label="Aide" aria-haspopup="menu" aria-expanded="@(menu == "help" ? "true" : "false")" @onclick='() => Toggle("help")'><Ico Name="help" Size="19" /></button>
+            @if (menu == "help")
+            {
+                <div class="qb-back" @onclick="Shut"></div>
+                <div class="qb-pop" role="menu" style="width:300px">
+                    <div class="lab">Aide</div>
+                    @if (ShowGettingStarted)
+                    {
+                        <button type="button" class="pi" role="menuitem" @onclick="OpenGettingStarted"><Ico Name="star" Size="18" /><div><b>Premiers pas</b><small>Ajouter vos contenus et créer une liste</small></div></button>
+                    }
+                    @if (ShowConnect)
+                    {
+                        <a class="pi" role="menuitem" href="/?connecter=1" @onclick="Shut"><Ico Name="monitor" Size="18" /><div><b>Connecter un écran</b><small>Avec le code affiché sur l'écran</small></div></a>
+                    }
+                    @if (SiteUrl.Length > 0)
+                    {
+                        <hr />
+                        <a class="pi" role="menuitem" href="@SiteUrl" target="_blank" rel="noopener" @onclick="Shut"><Ico Name="external" Size="18" /><div><b>Centre d'aide</b><small>@SiteHost</small></div></a>
+                    }
+                </div>
+            }
+        </div>
+    }
+    else if (SiteUrl.Length > 0)
     {
         <a class="qb-btn" data-t="Aide" aria-label="Aide" href="@SiteUrl" target="_blank" rel="noopener"><Ico Name="help" Size="19" /></a>
     }
@@ -111,6 +138,22 @@
     [Parameter] public bool ShowNotifications { get; set; }
     /// <summary>Intégration « Alerte d'urgence » : bouton rouge « Urgence » (le composant décide si elle est installée).</summary>
     [Parameter] public bool ShowEmergency { get; set; }
+    /// <summary>Menu Aide : « Premiers pas » (ajouter des contenus et créer une liste).</summary>
+    [Parameter] public bool ShowGettingStarted { get; set; }
+    /// <summary>Menu Aide : « Connecter un écran » (assistant de l'écran, page Écrans).</summary>
+    [Parameter] public bool ShowConnect { get; set; }
+    [Inject] private GettingStarted Welcome { get; set; } = default!;
+
+    private string SiteHost => Uri.TryCreate(SiteUrl, UriKind.Absolute, out var u) ? u.Host.Replace("www.", "") : SiteUrl;
+
+    private void OpenGettingStarted()
+    {
+        menu = null;
+        Welcome.Open();
+        // la médiathèque derrière l'assistant : on voit les fichiers arriver en le fermant
+        if (!new Uri(Nav.Uri).AbsolutePath.StartsWith("/media")) Nav.NavigateTo("media");
+    }
+
     /// <summary>Adresse de la page Réglages ; null : pas de bouton.</summary>
     [Parameter] public string? SettingsHref { get; set; }
     /// <summary>Pastille de Réglages (nouveauté, spots à valider), la même que dans le menu latéral.</summary>

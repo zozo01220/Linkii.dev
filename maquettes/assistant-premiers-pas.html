@@ -1,0 +1,701 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Assistant Premiers pas</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="../Linkii.Poc/wwwroot/app.css">
+<style>
+/* ===== bandeau de la maquette (hors application) ===== */
+.mk-note{position:fixed;left:0;right:0;top:0;z-index:2000;display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#fff;border-bottom:1px dashed var(--line-2);padding:7px 16px;color:var(--muted);font-size:13px}
+.mk-note b{color:var(--ink);font-weight:500}
+.mk-seg{display:inline-flex;border:1px solid var(--line-2);border-radius:6px;overflow:hidden}
+.mk-seg button{border:0;background:#fff;padding:4px 11px;cursor:pointer;font:inherit;font-size:13px;color:var(--ink)}
+.mk-seg button+button{border-left:1px solid var(--line-2)}
+.mk-seg button.on{background:var(--ink);color:#fff}
+.mk-grp{display:inline-flex;align-items:center;gap:6px}
+.mk-grp>span{font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+body{padding-top:var(--mk-h,42px)}
+.shell{min-height:calc(100vh - var(--mk-h,42px))}
+.fs-wiz{top:var(--mk-h,42px);animation:none}
+.fs-modal{animation:none}
+svg.i{fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.mk-off{display:none!important}
+/* page Écrans avec 1 écran : menus ouverts dans la maquette */
+.pp-addwrap{position:relative}
+.pp-addwrap .kebab-menu{display:block;position:absolute;right:0;top:calc(100% + 6px);z-index:30;min-width:290px}
+.pp-addwrap .kebab-menu .mk-new{outline:2px dashed var(--signal);outline-offset:-2px;border-radius:5px}
+.qb-wrap.pp-help{position:relative}
+.qb-wrap.pp-help .qb-pop{width:300px}
+.qb-pop .pi.mk-new{outline:2px dashed var(--signal);outline-offset:-2px}
+.pp-one .pl-grid{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+.gc-mon .pp-mon{position:absolute;inset:0;background:center/cover}
+.pp-addwrap .kebab-menu[hidden],.qb-pop[hidden]{display:none!important}
+
+/* ===== en-tête de l'assistant : étapes nommées ===== */
+.pp-steps{display:flex;align-items:center;gap:6px;margin:0 auto;font-size:13px;color:var(--muted)}
+.pp-steps span{display:inline-flex;align-items:center;gap:7px;padding:4px 10px 4px 5px;border-radius:999px}
+.pp-steps i{font-style:normal;width:22px;height:22px;border-radius:50%;border:1px solid var(--line-2);display:grid;place-items:center;font-size:12px;font-weight:500;color:var(--muted);background:#fff}
+.pp-steps .on{color:var(--ink);font-weight:500;background:var(--bg)}
+.pp-steps .on i{background:var(--ink);border-color:var(--ink);color:#fff}
+.pp-steps .done i{background:var(--ok-bg);border-color:transparent;color:var(--ok)}
+.pp-steps b{display:block;width:18px;height:1px;background:var(--line-2)}
+.fs-top img.lg{height:26px;display:block}
+
+/* ===== étape 1 : ajouter des contenus ===== */
+.pp-drop{width:100%;max-width:860px;border:2px dashed var(--line-2);border-radius:14px;background:var(--bg);padding:26px 24px 24px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;transition:border-color .15s,background .15s}
+.pp-drop.hot{border-color:var(--signal);background:#EAF2FA}
+.pp-drop .ic{width:54px;height:54px;border-radius:50%;background:#fff;border:1px solid var(--line);display:grid;place-items:center;color:var(--ink);margin-bottom:6px}
+.pp-drop h3{font-size:18px;font-weight:500;margin:0}
+.pp-drop p{color:var(--muted);font-size:14px;margin:0}
+.pp-srcs{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:14px}
+.pp-srcs .btn{gap:8px}
+.pp-logos{display:inline-flex;gap:3px;margin-left:2px}
+.pp-logos svg{width:16px;height:16px}
+.pp-drop.compact{flex-direction:row;text-align:left;padding:14px 18px;gap:14px}
+.pp-drop.compact .ic{width:42px;height:42px;margin:0}
+.pp-drop.compact h3{font-size:15px}
+.pp-drop.compact .pp-srcs{margin:0 0 0 auto}
+.pp-drop.compact .btn{padding:7px 12px;font-size:14px}
+.pp-or{width:100%;max-width:860px;display:flex;align-items:center;gap:12px;color:var(--muted);font-size:13px;margin:18px 0 10px}
+.pp-or::before,.pp-or::after{content:"";flex:1;border-top:1px solid var(--line)}
+.pp-starts{width:100%;max-width:860px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.pp-start{border:1px solid var(--line);border-radius:10px;background:#fff;padding:0;overflow:hidden;cursor:pointer;text-align:left;font:inherit;color:var(--ink);display:flex;flex-direction:column;transition:border-color .15s,box-shadow .15s}
+.pp-start:hover{border-color:var(--signal);box-shadow:0 0 0 1px var(--signal)}
+.pp-start .th{aspect-ratio:16/9;position:relative;overflow:hidden;color:#fff;display:flex;flex-direction:column;justify-content:flex-end;padding:8px 10px;background:#0B1F3A center/cover}
+.pp-start .th::after{content:"";position:absolute;inset:0;background:linear-gradient(transparent 30%,rgba(5,14,28,.7))}
+.pp-start .th>*{position:relative;z-index:1}
+.pp-start .th b{font-size:13px;font-weight:500;line-height:1.15}
+.pp-start .th small{font-size:10px;opacity:.85}
+.pp-start .nm{padding:7px 10px 8px;font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px}
+.pp-start .nm small{margin-left:auto;color:var(--muted);font-weight:400;font-size:12px}
+.pp-start.ex .th{background:#E9EDF2;display:grid;grid-template-columns:1fr 1fr;gap:3px;padding:6px}
+.pp-start.ex .th::after{display:none}
+.pp-start.ex .th i{background:center/cover;border-radius:3px}
+
+.pp-added{width:100%;max-width:860px;margin-top:18px}
+.pp-addh{display:flex;align-items:center;gap:10px;font-size:14px;margin-bottom:10px}
+.pp-addh b{font-weight:500}
+.pp-addh .ok{display:inline-flex;align-items:center;gap:6px;color:var(--ok);font-size:13px}
+.pp-addh .grow{flex:1}
+.pp-addh a{color:var(--muted);font-size:13px;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+.pp-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.pp-tile{position:relative}
+.pp-tile .tb{aspect-ratio:16/10;border-radius:8px;background:#E9EDF2 center/cover;position:relative;overflow:hidden;border:1px solid var(--line)}
+.pp-tile .tn{display:block;font-size:13px;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pp-tile .ts{display:block;font-size:12px;color:var(--muted)}
+.pp-tile .ck{position:absolute;left:7px;top:7px;width:22px;height:22px;border-radius:50%;background:var(--ok);color:#fff;display:grid;place-items:center;box-shadow:0 0 0 2px #fff}
+.pp-tile .ty{position:absolute;right:7px;bottom:7px;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;box-shadow:0 0 0 2px #fff}
+.pp-tile .ty svg{width:16px;height:16px}
+.pp-tile .rm{position:absolute;right:6px;top:6px;width:26px;height:26px;border-radius:7px;border:0;background:rgba(255,255,255,.95);color:var(--danger);display:grid;place-items:center;opacity:0;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.2)}
+.pp-tile:hover .rm{opacity:1}
+.pp-tile.up .tb::after{content:"";position:absolute;inset:0;background:rgba(11,31,58,.45)}
+.pp-prog{position:absolute;left:10px;right:10px;bottom:10px;height:5px;border-radius:3px;background:rgba(255,255,255,.35);z-index:1;overflow:hidden}
+.pp-prog i{display:block;height:100%;width:64%;background:#fff;border-radius:3px}
+.pp-pct{position:absolute;inset:0;display:grid;place-items:center;color:#fff;font-family:var(--mono);font-weight:500;font-size:15px;z-index:1}
+.pp-doc{position:absolute;inset:0;background:#fff;display:flex;flex-direction:column;gap:4px;padding:10px 12px}
+.pp-doc i{display:block;height:5px;border-radius:2px;background:#DDE3EA}
+.pp-doc i.h{height:9px;width:60%;background:#0B1F3A}
+.pp-doc .pg{position:absolute;left:8px;bottom:8px;background:var(--ink);color:#fff;font-size:11px;border-radius:4px;padding:0 6px}
+
+.pp-act{margin-top:24px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:center}
+.pp-act .btn.fs-big,.fs-big{padding:12px 22px;font-size:16px;gap:10px}
+.pp-act .hint{color:var(--muted);font-size:13px}
+.pp-lib{display:inline-flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;margin-top:12px}
+.pp-lib svg{color:var(--signal)}
+
+/* ===== étape 2 : la liste ===== */
+.pp-lhead{width:100%;display:flex;align-items:center;gap:14px;margin:0 0 14px;padding:0 16px}
+.pp-name{display:flex;flex-direction:column;gap:2px;min-width:0}
+.pp-name label{font-size:12px;color:var(--muted)}
+.pp-name .in{display:flex;align-items:center;gap:8px;border:1px solid var(--line-2);border-radius:var(--radius);padding:6px 10px;min-width:300px;font-size:17px;font-weight:500;background:#fff}
+.pp-name .in svg{color:var(--muted);margin-left:auto}
+.pp-lhead .grow{flex:1}
+.pp-modal-wide{width:min(1200px,100%)!important}
+.pp-film{width:100%}
+.pp-film .pfx-filwrap{margin:0}
+.pp-film .pfx-fil.pf-flow.cards{padding-top:22px}
+.pp-opts{width:100%;display:flex;align-items:center;gap:22px;flex-wrap:wrap;margin-top:14px;padding:12px 16px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:14px}
+.pp-opt{display:flex;align-items:center;gap:10px}
+.pp-opt>span{color:var(--muted)}
+.pp-step{display:inline-flex;align-items:center;border:1px solid var(--line-2);border-radius:var(--radius);overflow:hidden}
+.pp-step button{border:0;background:#fff;width:30px;height:32px;cursor:pointer;font:inherit;color:var(--muted)}
+.pp-step b{min-width:52px;text-align:center;font-family:var(--mono);font-weight:500;border-left:1px solid var(--line-2);border-right:1px solid var(--line-2);line-height:32px}
+.pp-sel{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line-2);border-radius:var(--radius);padding:5px 10px;background:#fff}
+.pp-opts .grow{flex:1}
+.pp-more{display:inline-flex;align-items:center;gap:8px;border:1px dashed var(--line-2);border-radius:var(--radius);padding:7px 12px;color:var(--ink);background:#fff;font:inherit;font-size:14px;cursor:pointer}
+.pp-more:hover{border-color:var(--signal);color:var(--signal)}
+.pp-hint2{display:flex;align-items:center;gap:6px;color:#B9C7DA;font-size:12.5px;position:absolute;left:16px;top:7px;z-index:2;pointer-events:none}
+/* déplacement des cartes (comme l'éditeur réel : fantôme .pfx-ghost, emplacement en pointillés) */
+.pp-film .pfx-card{cursor:grab;touch-action:none;user-select:none}
+.pp-film .pfx-hov{pointer-events:none}
+.pp-film .pfx-hov{display:flex;align-items:center;justify-content:center;gap:10px}
+.pp-film .pfx-hov .pfx-x{position:absolute;right:8px;top:8px}
+.pp-film .pfx-grip{width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.18);border:1.5px solid rgba(255,255,255,.6);display:grid;place-items:center}
+.pfx-u.hole .pfx-card{background:rgba(59,130,196,.14);box-shadow:none;outline:2px dashed #7FB2E0;outline-offset:-2px;transform:none}
+.pfx-u.hole .pfx-card>*{visibility:hidden}
+.pfx-u.hole .pfx-num,.pfx-u.hole .pfx-when{opacity:.35}
+.pp-film.dragging .pfx-card{cursor:grabbing}
+.pp-film.dragging .pfx-card:hover{transform:none;box-shadow:0 1px 3px rgba(11,31,58,.14)}
+.pp-film.dragging .pfx-card:hover .pfx-hov{opacity:0}
+.pp-film.dragging .pfx-card:hover .pfx-type{opacity:1}
+.pfx-u{transition:transform .18s cubic-bezier(.2,.8,.2,1)}
+body.pp-grabbing,body.pp-grabbing *{cursor:grabbing!important}
+
+/* ===== étape 3 : prête ===== */
+.pp-ready{width:100%;max-width:880px;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:30px;align-items:center}
+.pp-run{position:absolute;left:0;right:0;bottom:0;display:flex;gap:4px;padding:0 10px 10px;z-index:2}
+.pp-run i{flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.35)}
+.pp-run i.on{background:#fff}
+.pp-run i.half{background:linear-gradient(90deg,#fff 55%,rgba(255,255,255,.35) 55%)}
+.pp-cap{position:absolute;left:12px;top:10px;z-index:2;background:rgba(5,14,28,.6);color:#fff;font-size:12px;border-radius:4px;padding:2px 8px;display:flex;gap:6px;align-items:center}
+.fs-photo.clear::after{background:linear-gradient(transparent 70%,rgba(0,0,0,.35))}
+.pp-sum{font-size:14px;color:var(--muted);text-align:center;margin-top:12px}
+.pp-sum b{color:var(--ink);font-weight:500}
+.pp-next{display:flex;flex-direction:column;gap:12px}
+.pp-card{border:1px solid var(--line);border-radius:12px;padding:18px;background:#fff;display:flex;flex-direction:column;gap:6px}
+.pp-card.main{border:2px solid var(--signal);background:#F4F8FC;padding:17px}
+.pp-card .hd{display:flex;align-items:center;gap:12px}
+.pp-card .ci{width:42px;height:42px;border-radius:50%;background:var(--brand-tint);color:var(--ink);display:grid;place-items:center;flex:none}
+.pp-card.main .ci{background:var(--ink);color:#fff}
+.pp-card h3{font-size:17px;font-weight:500;margin:0}
+.pp-card p{color:var(--muted);font-size:14px;margin:0}
+.pp-card .devs{display:flex;gap:10px;align-items:center;color:var(--muted);font-size:12.5px;margin:4px 0 6px}
+.pp-card .devs svg{width:18px;height:18px}
+.pp-card .btn{align-self:flex-start;margin-top:6px}
+.pp-card.main .btn{background:var(--signal);border-color:var(--signal);color:#fff;box-shadow:0 2px 8px color-mix(in srgb,var(--signal) 35%,transparent)}
+.pp-links{display:flex;gap:18px;justify-content:center;font-size:14px}
+.pp-links a{color:var(--muted);text-decoration:none;display:inline-flex;gap:6px;align-items:center}
+.pp-links a:hover{color:var(--ink)}
+
+/* ===== page Écrans sans écran ===== */
+.pp-first{background:#fff;border:1px solid var(--line);border-radius:var(--card-radius);padding:0;display:grid;grid-template-columns:minmax(0,1fr) 360px;overflow:hidden;margin-top:8px}
+.pp-first .tx{padding:26px 28px;display:flex;flex-direction:column;gap:8px;justify-content:center}
+.pp-first .kick{display:inline-flex;align-items:center;gap:7px;color:var(--ok);font-size:13px;font-weight:500}
+.pp-first h3{font-size:22px;font-weight:500;margin:0;line-height:1.25}
+.pp-first p{color:var(--muted);margin:0;font-size:14.5px}
+.pp-first .row2{display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap}
+.pp-first .row2 .btn.go{background:var(--signal);border-color:var(--signal);color:#fff}
+.pp-first .devs{display:flex;gap:12px;align-items:center;color:var(--muted);font-size:12.5px;margin-top:4px}
+.pp-first .devs svg{width:16px;height:16px}
+.pp-first .vis{background:linear-gradient(180deg,#14305A,#0B1F3A);display:grid;place-items:center;padding:24px}
+.pp-first .vis .fs-tv{width:100%}
+.pp-mini{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:10px 14px;margin-top:14px;font-size:14px}
+.pp-mini .th{width:72px;height:44px;border-radius:5px;background:center/cover;flex:none}
+.pp-mini small{display:block;color:var(--muted);font-size:12.5px}
+.pp-mini .grow{flex:1}
+
+/* ===== assistant du premier écran ===== */
+.fs-where[hidden]{display:none!important}
+.fs-where a.btn.pp-oscta{gap:10px;text-decoration:none}
+.pp-osb{width:28px;height:28px;border-radius:50%;background:#fff;display:grid;place-items:center;flex:none;margin-left:-6px}
+.pp-osb svg{display:block}
+.pp-fmt{color:#fff!important;font-size:11.5px;font-weight:500;border:1px solid rgba(255,255,255,.55);border-radius:4px;padding:0 5px;opacity:.9;margin-left:2px}
+.pp-show{margin-top:18px;padding:14px 16px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+.pp-show label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:8px}
+.pp-pick{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--line-2);border-radius:var(--radius);padding:7px 10px;cursor:pointer}
+.pp-pick .th{width:64px;height:38px;border-radius:4px;background:center/cover;flex:none}
+.pp-pick b{font-weight:500;display:block;font-size:14.5px}
+.pp-pick small{color:var(--muted);font-size:12.5px}
+.pp-pick svg{margin-left:auto;color:var(--muted)}
+</style></head>
+<body data-view="c1">
+
+<!-- pictogrammes -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-up" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></symbol>
+<symbol id="i-cloud" viewBox="0 0 24 24"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></symbol>
+<symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></symbol>
+<symbol id="i-right" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
+<symbol id="i-left" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+<symbol id="i-loop" viewBox="0 0 24 24"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></symbol>
+<symbol id="i-mon" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-pen" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
+<symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/></symbol>
+<symbol id="i-set" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/></symbol>
+<symbol id="i-tpl" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+<symbol id="i-trans" viewBox="0 0 24 24"><path d="M3 6v12l8-6zM21 6v12l-8-6z"/></symbol>
+<symbol id="i-img" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></symbol>
+<symbol id="i-lib" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+<symbol id="i-ext" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></symbol>
+<symbol id="i-win" viewBox="0 0 24 24"><path d="M2 4.6 10.3 3.5v7.7H2zM11.5 3.3 22 1.8v9.4H11.5zM2 12.4h8.3v7.8L2 19.1zM11.5 12.4H22v9.8l-10.5-1.5z" fill="#0078D4" stroke="none"/></symbol>
+<symbol id="i-and" viewBox="0 0 24 24"><path d="M18.44 5.56c-.68 1.17-1.35 2.33-2.03 3.5-1.86-.74-3.56-.85-4.53-.83-1.86.02-3.35.46-4.26.82C7.54 8.9 5.87 6.03 5.6 5.56c-.33-.36-.9-.49-1.38-.2-.48.28-.71.94-.39 1.5 1.95 3.37 1.95 3.36 1.95 3.36C2.9 12.18.45 14.77 0 18.99h24c-.12-1.11-.37-2.1-.75-3.07-.74-1.91-1.84-3.29-2.74-4.18a12 12 0 0 0-2.13-1.69c.66-1.12 1.31-2.26 1.96-3.38.53-.92-.67-2.03-1.9-1.11zM17.4 14.02c.4.59.32 1.33-.16 1.65-.48.32-1.19.1-1.58-.5-.4-.59-.32-1.33.16-1.65.47-.31 1.18-.1 1.58.5zM7.2 13.53c.48.32.55 1.06.16 1.65-.4.59-1.1.81-1.59.49-.48-.32-.55-1.06-.15-1.65.4-.6 1.1-.81 1.58-.49z" fill="#3DDC84" stroke="none"/></symbol>
+<symbol id="i-store" viewBox="0 0 24 24"><path d="M3 9l1.5-5h15L21 9"/><path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/><path d="M5 12v8h14v-8"/><path d="M10 20v-5h4v5"/></symbol>
+<symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="M9.5 9.3a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.2-2.5 3.8M12 17.5h.01"/></symbol>
+<symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+<symbol id="i-flag" viewBox="0 0 24 24"><path d="M4 22V4M4 4h12l-2 4 2 4H4"/></symbol>
+<symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M10 8.5v7l5.5-3.5z"/></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+<symbol id="i-edit2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"/></symbol>
+<symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+<symbol id="i-kebab" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></symbol>
+<symbol id="i-touch" viewBox="0 0 24 24"><path d="M9 11V6a2 2 0 014 0v5l5 1v4a4 4 0 01-4 4h-3l-5-5 1-2z"/></symbol>
+<symbol id="i-lin"viewBox="0 0 24 24"><path fill="#0B1F3A" stroke="none" d="M12.504 0c-.155 0-.315.008-.48.021-4.226.333-3.105 4.807-3.17 6.298-.076 1.092-.3 1.953-1.05 3.02-.885 1.051-2.127 2.75-2.716 4.521-.278.832-.41 1.684-.287 2.489a.424.424 0 00-.11.135c-.26.268-.45.6-.663.839-.199.199-.485.267-.797.4-.313.136-.658.269-.864.68-.09.189-.136.394-.132.602 0 .199.027.4.055.536.058.399.116.728.04.97-.249.68-.28 1.145-.106 1.484.174.334.535.47.94.601.81.2 1.91.135 2.774.6.926.466 1.866.67 2.616.47.526-.116.97-.464 1.208-.946.587-.003 1.23-.269 2.26-.334.699-.058 1.574.267 2.577.2.025.134.063.198.114.333l.003.003c.391.778 1.113 1.132 1.884 1.071.771-.06 1.592-.536 2.257-1.306.631-.765 1.683-1.084 2.378-1.503.348-.199.629-.469.649-.853.023-.4-.2-.811-.714-1.376v-.097l-.003-.003c-.17-.2-.25-.535-.338-.926-.085-.401-.182-.786-.492-1.046h-.003c-.059-.054-.123-.067-.188-.135a.357.357 0 00-.19-.064c.431-1.278.264-2.55-.173-3.694-.533-1.41-1.465-2.638-2.175-3.483-.796-1.005-1.576-1.957-1.56-3.368.026-2.152.236-6.133-3.544-6.139zm.529 3.405h.013c.213 0 .396.062.584.198.19.135.33.332.438.533.105.259.158.459.166.724 0-.02.006-.04.006-.06v.105a.086.086 0 01-.004-.021l-.004-.024a1.807 1.807 0 01-.15.706.953.953 0 01-.213.335.71.71 0 00-.088-.042c-.104-.045-.198-.064-.284-.133a1.312 1.312 0 00-.22-.066c.05-.06.146-.133.183-.198.053-.128.082-.264.088-.402v-.02a1.21 1.21 0 00-.061-.4c-.045-.134-.101-.2-.183-.333-.084-.066-.167-.132-.267-.132h-.016c-.093 0-.176.03-.262.132a.8.8 0 00-.205.334 1.18 1.18 0 00-.09.4v.019c.002.089.008.179.02.267-.193-.067-.438-.135-.607-.202a1.635 1.635 0 01-.018-.2v-.02a1.772 1.772 0 01.15-.768c.082-.22.232-.406.43-.533a.985.985 0 01.594-.2zm-2.962.059h.036c.142 0 .27.048.399.135.146.129.264.288.344.465.09.199.14.4.153.667v.004c.007.134.006.2-.002.266v.08c-.03.007-.056.018-.083.024-.152.055-.274.135-.393.2.012-.09.013-.18.003-.267v-.015c-.012-.133-.04-.2-.082-.333a.613.613 0 00-.166-.267.248.248 0 00-.183-.064h-.021c-.071.006-.13.04-.186.132a.552.552 0 00-.12.27.944.944 0 00-.023.33v.015c.012.135.037.2.08.334.046.134.098.2.166.268.01.009.02.018.034.024-.07.057-.117.07-.176.136a.304.304 0 01-.131.068 2.62 2.62 0 01-.275-.402 1.772 1.772 0 01-.155-.667 1.759 1.759 0 01.08-.668 1.43 1.43 0 01.283-.535c.128-.133.26-.2.418-.2zm1.37 1.706c.332 0 .733.065 1.216.399.293.2.523.269 1.052.468h.003c.255.136.405.266.478.399v-.131a.571.571 0 01.016.47c-.123.31-.516.643-1.063.842v.002c-.268.135-.501.333-.775.465-.276.135-.588.292-1.012.267a1.139 1.139 0 01-.448-.067 3.566 3.566 0 01-.322-.198c-.195-.135-.363-.332-.612-.465v-.005h-.005c-.4-.246-.616-.512-.686-.71-.07-.268-.005-.47.193-.6.224-.135.38-.271.483-.336.104-.074.143-.102.176-.131h.002v-.003c.169-.202.436-.47.839-.601.139-.036.294-.065.466-.065zm2.8 2.142c.358 1.417 1.196 3.475 1.735 4.473.286.534.855 1.659 1.102 3.024.156-.005.33.018.513.064.646-1.671-.546-3.467-1.089-3.966-.22-.2-.232-.335-.123-.335.59.534 1.365 1.572 1.646 2.757.13.535.16 1.104.021 1.67.067.028.135.06.205.067 1.032.534 1.413.938 1.23 1.537v-.043c-.06-.003-.12 0-.18 0h-.016c.151-.467-.182-.825-1.065-1.224-.915-.4-1.646-.336-1.77.465-.008.043-.013.066-.018.135-.068.023-.139.053-.209.064-.43.268-.662.669-.793 1.187-.13.533-.17 1.156-.205 1.869v.003c-.02.334-.17.838-.319 1.35-1.5 1.072-3.58 1.538-5.348.334a2.645 2.645 0 00-.402-.533 1.45 1.45 0 00-.275-.333c.182 0 .338-.03.465-.067a.615.615 0 00.314-.334c.108-.267 0-.697-.345-1.163-.345-.467-.931-.995-1.788-1.521-.63-.4-.986-.87-1.15-1.396-.165-.534-.143-1.085-.015-1.645.245-1.07.873-2.11 1.274-2.763.107-.065.037.135-.408.974-.396.751-1.14 2.497-.122 3.854a8.123 8.123 0 01.647-2.876c.564-1.278 1.743-3.504 1.836-5.268.048.036.217.135.289.202.218.133.38.333.59.465.21.201.477.335.876.335.039.003.075.006.11.006.412 0 .73-.134.997-.268.29-.134.52-.334.74-.4h.005c.467-.135.835-.402 1.044-.7zm2.185 8.958c.037.6.343 1.245.882 1.377.588.134 1.434-.333 1.791-.765l.211-.01c.315-.007.577.01.847.268l.003.003c.208.199.305.53.391.876.085.4.154.78.409 1.066.486.527.645.906.636 1.14l.003-.007v.018l-.003-.012c-.015.262-.185.396-.498.595-.63.401-1.746.712-2.457 1.57-.618.737-1.37 1.14-2.036 1.191-.664.053-1.237-.2-1.574-.898l-.005-.003c-.21-.4-.12-1.025.056-1.69.176-.668.428-1.344.463-1.897.037-.714.076-1.335.195-1.814.12-.465.308-.797.641-.984l.045-.022zm-10.814.049h.01c.053 0 .105.005.157.014.376.055.706.333 1.023.752l.91 1.664.003.003c.243.533.754 1.064 1.189 1.637.434.598.77 1.131.729 1.57v.006c-.057.744-.48 1.148-1.125 1.294-.645.135-1.52.002-2.395-.464-.968-.536-2.118-.469-2.857-.602-.369-.066-.61-.2-.723-.4-.11-.2-.113-.602.123-1.23v-.004l.002-.003c.117-.334.03-.752-.027-1.118-.055-.401-.083-.71.043-.94.16-.334.396-.4.69-.533.294-.135.64-.202.915-.47h.002v-.002c.256-.268.445-.601.668-.838.19-.201.38-.336.663-.336z"/></symbol>
+<symbol id="i-chr"viewBox="0 0 24 24"><path d="M12 0C8.21 0 4.83 1.76 2.63 4.5l3.95 6.85A5.45 5.45 0 0 1 12 6.55h10.69A12 12 0 0 0 12 0zM1.93 5.47A11.94 11.94 0 0 0 0 12c0 6.01 4.42 10.99 10.19 11.86l3.95-6.84a5.45 5.45 0 0 1-6.86-2.29zm13.34 2.17a5.45 5.45 0 0 1 1.45 7.09l-5.34 9.25c.2.01.41.02.62.02 6.63 0 12-5.37 12-12 0-1.54-.29-3.01-.82-4.36zM12 16.36a4.36 4.36 0 1 1 0-8.72 4.36 4.36 0 0 1 0 8.72z" fill="#4285F4" stroke="none"/></symbol>
+</svg>
+
+<!-- ===== bandeau maquette ===== -->
+<div class="mk-note">
+  <b>Maquette · nouvel assistant</b>
+  <span class="mk-grp"><span>Premiers pas</span>
+    <span class="mk-seg" id="seg">
+      <button data-go="c1" class="on">1 · Contenus</button><button data-go="c2">2 · Liste</button><button data-go="c3">3 · Prête</button>
+    </span></span>
+  <span class="mk-grp"><span>Écrans</span>
+    <span class="mk-seg">
+      <button data-go="ecr0">0 écran · rien préparé</button><button data-go="ecr">0 écran · liste prête</button><button data-go="ecr1">1 écran</button>
+    </span></span>
+  <span class="mk-grp"><span>Assistant écran</span>
+    <span class="mk-seg">
+      <button data-go="e1">Code</button><button data-go="e2">En ligne</button><button data-go="e1b">2ᵉ écran</button>
+    </span></span>
+  <span class="mk-grp" data-v="ecr1"><span>Menu</span><span class="mk-seg" id="mn"><button data-mn="add" class="on">+ Ajouter</button><button data-mn="help">Aide ?</button></span></span>
+  <span class="mk-grp" data-v="c1"><span>État</span><span class="mk-seg" id="st"><button data-st="empty">Vide</button><button data-st="full" class="on">Avec fichiers</button></span></span>
+</div>
+
+<div class="shell has-tabs">
+<aside class="sidebar"><div class="brand"><span class="brand-logo"><img class="bl-long" src="../Linkii.Poc/wwwroot/brand/logo-long.png" alt="Linkivi"><img class="bl-short" src="../Linkii.Poc/wwwroot/brand/logo-court.png" alt=""></span><span class="brand-meta"><span class="plan-tag" title="Essai">Essai · 14 j</span></span>
+  <button type="button" class="nav-fold" aria-label="Replier le menu"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"></path></svg></button></div>
+  <a class="nav" data-v="ecr ecr0 ecr1 e1 e1b e2" style="background:#D5E4F7;color:#0A2A4A"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"></rect><path d="M8 21h8M12 17v4"></path></svg> Écrans</a>
+  <a class="nav" data-v="c1 c2 c3"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"></rect><path d="M8 21h8M12 17v4"></path></svg> Écrans</a>
+  <a class="nav"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"></path></svg> Listes diffusion</a>
+  <a class="nav" data-v="c1 c2 c3" style="background:#D5E4F7;color:#0A2A4A"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><path d="M21 15l-5-5L5 21"></path></svg> Contenus</a>
+  <a class="nav" data-v="ecr ecr0 ecr1 e1 e1b e2"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><path d="M21 15l-5-5L5 21"></path></svg> Contenus</a>
+  <div class="spacer"></div>
+  <a class="nav"><svg viewBox="0 0 24 24"><path d="M3 3v18h18"></path><path d="M7 15l4-4 3 3 6-6"></path></svg> Statistiques</a>
+</aside>
+
+<div class="main-col">
+  <header class="topbar"><div class="org">Boulangerie Martin</div></header>
+  <header class="qbar"><div class="org">Boulangerie Martin</div><div class="grow"></div>
+    <button type="button" class="qb-btn store"><svg class="i" width="19" height="19"><use href="#i-store"/></svg><span>Store</span></button><span class="sep2" aria-hidden="true"></span>
+    <div class="qb-wrap pp-help"><button type="button" class="qb-btn" aria-label="Aide"><svg class="i" width="19" height="19"><use href="#i-help"/></svg></button>
+      <div class="qb-pop" id="pp-helpmenu" hidden>
+        <div class="lab">Aide</div>
+        <button class="pi mk-new" data-go="c1"><svg class="i" width="18" height="18"><use href="#i-flag"/></svg><span><b style="font-weight:500">Premiers pas</b><small>Ajouter vos contenus et créer une liste</small></span></button>
+        <button class="pi" data-go="e1b"><svg class="i" width="18" height="18"><use href="#i-mon"/></svg><span><b style="font-weight:500">Connecter un écran</b><small>Avec le code affiché sur l'écran</small></span></button>
+        <hr>
+        <a class="pi"><svg class="i" width="18" height="18"><use href="#i-ext"/></svg><span><b style="font-weight:500">Centre d'aide</b><small>linkivi.com</small></span></a>
+      </div></div>
+    <a class="qb-btn" aria-label="Réglages"><svg class="i" width="19" height="19"><use href="#i-gear"/></svg></a>
+    <div class="qb-wrap"><button type="button" class="qb-me"><span class="avatar">BM</span></button></div></header>
+
+  <!-- page derrière l'assistant : Médiathèque d'un compte neuf -->
+  <main class="content" data-v="c1 c2 c3">
+    <nav class="hub-tabs"><a class="hub-tab active">Médiathèque</a><a class="hub-tab">Compositions</a></nav>
+    <div class="lx-top"><div class="lx-title"><h1><span>Médiathèque</span></h1><p class="sub">Vos images, vidéos et documents, importés une fois et réutilisables dans toutes vos listes de lecture.</p></div><span class="grow"></span>
+      <div class="btns"><button class="btn lx-add-btn"><svg class="i" width="16" height="16"><use href="#i-plus"/></svg> Ajouter <svg class="i" width="16" height="16"><use href="#i-down"/></svg></button></div></div>
+    <div class="empty" style="margin-top:24px"><div class="big">Votre médiathèque est vide</div><p>Glissez des fichiers n'importe où sur la page pour les importer.</p></div>
+  </main>
+
+  <!-- page Écrans -->
+  <main class="content" data-v="ecr ecr0 ecr1 e1 e1b e2">
+    <div class="page-head"><div><h1 class="cmp-h1"><span>Vos écrans</span><span class="scr-count" data-v="ecr1 e1b">1</span></h1>
+      <p class="sub sc-intro">Choisissez la liste de lecture et les widgets de chaque écran, puis publiez : chaque écran se met à jour indépendamment.</p></div>
+      <div class="row head-actions" data-v="ecr1 e1b"><div class="lx-add pp-addwrap"><button type="button" class="btn lx-add-btn"><svg class="i" width="16" height="16"><use href="#i-plus"/></svg> Ajouter <svg class="i" width="14" height="14"><use href="#i-down"/></svg></button>
+        <div class="kebab-menu lx-add-menu" role="menu" id="pp-addmenu">
+          <button type="button" role="menuitem" class="mk-new" data-go="e1b"><svg class="i" width="18" height="18"><use href="#i-mon"/></svg><span><b>Écran de diffusion</b><small>Avec le code affiché sur l'écran</small></span></button>
+          <button type="button" role="menuitem"><svg class="i" width="18" height="18"><use href="#i-touch"/></svg><span><b>Borne interactive</b><small>Borne à écran tactile</small></span></button>
+          <span class="sep" role="separator"></span>
+          <button type="button" role="menuitem"><svg class="i" width="18" height="18"><use href="#i-lib"/></svg><span><b>Nouveau dossier</b></span></button>
+        </div></div></div>
+    </div>
+
+    <!-- 0 écran, rien préparé (Premiers pas remis à plus tard) -->
+    <section class="pp-first" data-v="ecr0">
+      <div class="tx">
+        <h3>Votre premier écran en deux minutes</h3>
+        <p>Choisissez d'abord ce qu'il montrera, puis reliez-le avec le code qu'il affiche. Vous pouvez aussi le relier tout de suite : il montrera l'écran d'accueil Linkivi en attendant.</p>
+        <div class="row2">
+          <button class="btn go" data-go="c1"><svg class="i" width="16" height="16"><use href="#i-up"/></svg> Ajouter mes contenus</button>
+          <button class="btn ghost" data-go="e1"><svg class="i" width="16" height="16"><use href="#i-mon"/></svg> Connecter un écran tout de suite</button>
+        </div>
+        <div class="devs"><svg width="16" height="16"><use href="#i-chr"/></svg> Navigateur <svg width="16" height="16"><use href="#i-and"/></svg> Android <svg width="16" height="16"><use href="#i-win"/></svg> Windows <svg width="16" height="16"><use href="#i-lin"/></svg> Linux</div>
+      </div>
+      <div class="vis"><div style="width:100%"><div class="fs-tv"><div class="fs-scr fs-player"><span class="pw">linkivi</span><span class="pc"><span>4</span><span>8</span><span>1</span><span>2</span><span>9</span><span>3</span></span><small>Le code apparaît sur l'écran</small></div><div class="fs-tvfoot"></div></div><div class="fs-stand" style="background:#2A4166"></div></div></div>
+    </section>
+
+    <!-- 1 écran : la page normale, plus d'encart -->
+    <section class="lx-blk lx-blk-main pp-one" data-v="ecr1 e1b">
+      <div class="lx-bh"><svg class="i" width="16" height="16"><use href="#i-mon"/></svg> <span>Écrans</span> <small>1</small></div>
+      <div class="pl-grid">
+        <div class="pl-card gc is-on"><div class="gc-top"><div class="gc-stage"><div class="gc-mon"><span class="pp-mon" style="background-image:url(../demo-images/01-lac-barque.jpg)"></span></div>
+          <button type="button" class="gc-hit" tabindex="-1" aria-hidden="true"></button>
+          <span class="gc-pill"><span class="gc-d ok"></span>En ligne</span><span class="gc-pills-r"><span class="gc-pill dl ok"><span class="gc-d"></span>À jour</span></span></div>
+          <div class="gc-ctl"><div class="gc-sel"><svg class="i" width="16" height="16"><use href="#i-cal"/></svg><select aria-label="Liste de lecture"><option selected>Ma première liste</option></select> <span class="gc-chev"><svg class="i" width="16" height="16"><use href="#i-down"/></svg></span></div>
+            <div class="sc-live gc-live"><button type="button" class="act" aria-label="Aperçu"><svg class="i" width="16" height="16"><use href="#i-eye"/></svg></button> <button type="button" class="act" aria-label="Pause"><svg class="i" width="16" height="16"><use href="#i-pause"/></svg></button></div></div>
+          <span class="gc-badges"><span class="gc-os"><svg class="dev-logo" width="20" height="20"><use href="#i-chr"/></svg></span></span>
+          <div class="gc-quick"><button type="button" class="gc-q" title="Simuler"><svg class="i" width="16" height="16"><use href="#i-play"/></svg></button> <button type="button" class="gc-q" title="Éditer"><svg class="i" width="16" height="16"><use href="#i-edit2"/></svg></button><button type="button" class="gc-q" title="Publier"><svg class="i" width="16" height="16"><use href="#i-up"/></svg></button><button type="button" class="gc-q" title="Éteindre l'écran"><svg class="i" width="16" height="16"><use href="#i-moon"/></svg></button></div></div>
+          <div class="gc-body"><div class="gc-name"><span class="gc-type diff"><svg class="i" width="16" height="16"><use href="#i-mon"/></svg></span><button type="button" class="gc-nm linklike-name">Écran vitrine</button><div class="kebab"><button type="button" class="kebab-btn"><svg class="i" width="16" height="16"><use href="#i-kebab"/></svg></button></div></div>
+            <div class="gc-sub"><b>Navigateur</b><span class="sep">·</span> Chrome 156<span class="sep"> · </span><span class="gc-pl"><svg class="i" width="13" height="13"><use href="#i-cal"/></svg> Ma première liste</span></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 0 écran, liste prête -->
+    <section class="pp-first" data-v="ecr e1 e2">
+      <div class="tx">
+        <span class="kick"><svg class="i" width="15" height="15"><use href="#i-check"/></svg> « Ma première liste » est prête</span>
+        <h3>Connectez votre premier écran</h3>
+        <p>Allumez l'écran, ouvrez Linkivi dessus : il affiche un code. Recopiez-le ici, la liste s'affiche aussitôt.</p>
+        <div class="devs"><svg width="16" height="16"><use href="#i-chr"/></svg> Navigateur <svg width="16" height="16"><use href="#i-and"/></svg> Android <svg width="16" height="16"><use href="#i-win"/></svg> Windows</div>
+        <div class="row2">
+          <button class="btn go" data-go="e1"><svg class="i" width="16" height="16"><use href="#i-mon"/></svg> Connecter mon premier écran</button>
+          <button class="btn ghost"><svg class="i" width="16" height="16"><use href="#i-play"/></svg> Simuler un écran</button>
+        </div>
+      </div>
+      <div class="vis"><div style="width:100%"><div class="fs-tv"><div class="fs-scr fs-player"><span class="pw">linkivi</span><span class="pc"><span>4</span><span>8</span><span>1</span><span>2</span><span>9</span><span>3</span></span><small>Le code apparaît sur l'écran</small></div><div class="fs-tvfoot"></div></div><div class="fs-stand" style="background:#2A4166"></div></div></div>
+    </section>
+    <div class="pp-mini" data-v="ecr e1 e2">
+      <span class="th" style="background-image:url(../demo-images/01-lac-barque.jpg)"></span>
+      <div class="grow"><b style="font-weight:500">Ma première liste</b><small>5 contenus · boucle de 1:12 · pas encore diffusée</small></div>
+      <a class="btn ghost sm">Modifier la liste</a>
+    </div>
+  </main>
+</div>
+</div>
+
+<!-- ====================================================================== -->
+<!-- ÉTAPE 1 · CONTENUS                                                      -->
+<!-- ====================================================================== -->
+<div class="fs-wiz" data-v="c1">
+<div class="fs-modal pp-modal-wide" role="dialog" aria-modal="true" style="width:min(1000px,100%)!important">
+  <div class="fs-top">
+    <img class="lg" src="../Linkii.Poc/wwwroot/brand/logo-long.png" alt="Linkivi">
+    <div class="pp-steps"><span class="on"><i>1</i>Vos contenus</span><b></b><span><i>2</i>Votre liste</span><b></b><span><i>3</i>C'est prêt</span></div>
+    <button type="button" class="fs-later">Plus tard <svg class="i" width="16" height="16"><use href="#i-x"/></svg></button>
+  </div>
+
+  <div class="fs-q">
+    <h1>Qu'allez-vous montrer sur vos écrans ?</h1>
+    <p>Ajoutez vos images, vidéos ou présentations. Elles rejoignent votre médiathèque.</p>
+  </div>
+
+  <!-- vide : grande zone de dépôt -->
+  <div class="pp-drop st-empty">
+    <span class="ic"><svg class="i" width="24" height="24"><use href="#i-up"/></svg></span>
+    <h3>Glissez vos fichiers ici</h3>
+    <p>Images, vidéos, PDF, PowerPoint · plusieurs à la fois</p>
+    <div class="pp-srcs">
+      <button class="btn"><svg class="i" width="16" height="16"><use href="#i-up"/></svg> Depuis l'ordinateur</button>
+      <button class="btn ghost"><svg class="i" width="16" height="16"><use href="#i-cloud"/></svg> Depuis le cloud
+        <span class="pp-logos"><svg><use href="../Linkii.Poc/wwwroot/brand-logos.svg#gdrive"/></svg><svg><use href="../Linkii.Poc/wwwroot/brand-logos.svg#onedrive"/></svg><svg><use href="../Linkii.Poc/wwwroot/brand-logos.svg#dropbox"/></svg><svg><use href="../Linkii.Poc/wwwroot/brand-logos.svg#canva"/></svg></span></button>
+      <button class="btn ghost"><svg class="i" width="16" height="16"><use href="#i-link"/></svg> Page web ou lien</button>
+    </div>
+  </div>
+  <div class="pp-or st-empty">ou partez d'un modèle, à personnaliser ensuite</div>
+  <div class="pp-starts st-empty">
+    <button class="pp-start"><span class="th" style="background-image:url(../demo-images/02-lac-automne.jpg)"><small>BIENVENUE</small><b>Nous sommes ravis de vous recevoir</b></span><span class="nm"><svg class="i" width="14" height="14"><use href="#i-tpl"/></svg> Accueil</span></button>
+    <button class="pp-start"><span class="th" style="background:#7A3E1D"><small>AUJOURD'HUI</small><b>Formule midi · 14,50</b></span><span class="nm"><svg class="i" width="14" height="14"><use href="#i-tpl"/></svg> Offre du jour</span></button>
+    <button class="pp-start"><span class="th" style="background:#1F5C93"><small>À NOTER</small><b>Fermé le 11 novembre</b></span><span class="nm"><svg class="i" width="14" height="14"><use href="#i-tpl"/></svg> Annonce</span></button>
+    <button class="pp-start ex"><span class="th"><i style="background-image:url(../demo-images/01-lac-barque.jpg)"></i><i style="background-image:url(../demo-images/03-montagnes-neige.jpg)"></i><i style="background-image:url(../demo-images/04-cote-turquoise.jpg)"></i><i style="background-image:url(../demo-images/02-lac-automne.jpg)"></i></span><span class="nm"><svg class="i" width="14" height="14"><use href="#i-img"/></svg> Images d'exemple</span></button>
+  </div>
+
+  <!-- avec fichiers : zone compacte + ce qui est arrivé -->
+  <div class="pp-drop compact st-full">
+    <span class="ic"><svg class="i" width="20" height="20"><use href="#i-up"/></svg></span>
+    <div><h3>Glissez d'autres fichiers ici</h3><p>Images, vidéos, PDF, PowerPoint</p></div>
+    <div class="pp-srcs">
+      <button class="btn ghost"><svg class="i" width="16" height="16"><use href="#i-up"/></svg> Ordinateur</button>
+      <button class="btn ghost"><svg class="i" width="16" height="16"><use href="#i-cloud"/></svg> Cloud</button>
+      <button class="btn ghost"><svg class="i" width="16" height="16"><use href="#i-link"/></svg> Lien</button>
+      <button class="btn ghost"><svg class="i" width="16" height="16"><use href="#i-tpl"/></svg> Modèle</button>
+    </div>
+  </div>
+  <div class="pp-added st-full">
+    <div class="pp-addh"><b>Ajoutés</b><span class="ok"><svg class="i" width="14" height="14"><use href="#i-check"/></svg> 4 dans votre médiathèque</span><span class="grow"></span><span style="color:var(--muted);font-size:13px">1 en cours…</span></div>
+    <div class="pp-grid">
+      <div class="pp-tile"><div class="tb" style="background-image:url(../demo-images/01-lac-barque.jpg)"><span class="ck"><svg class="i" width="13" height="13" style="stroke-width:2.4"><use href="#i-check"/></svg></span><span class="ty" style="background:#E0912F"><svg><use href="../Linkii.Poc/wwwroot/brand-logos.svg#image"/></svg></span><button class="rm" title="Retirer"><svg class="i" width="15" height="15"><use href="#i-trash"/></svg></button></div><span class="tn">lac-barque.jpg</span><span class="ts">Image · 3840 × 2160</span></div>
+      <div class="pp-tile"><div class="tb" style="background-image:url(../demo-images/03-montagnes-neige.jpg)"><span class="ck"><svg class="i" width="13" height="13" style="stroke-width:2.4"><use href="#i-check"/></svg></span><span class="ty" style="background:#E0912F"><svg><use href="../Linkii.Poc/wwwroot/brand-logos.svg#image"/></svg></span></div><span class="tn">montagnes-neige.jpg</span><span class="ts">Image · 2400 × 1600</span></div>
+      <div class="pp-tile"><div class="tb"><div class="pp-doc"><i class="h"></i><i></i><i style="width:80%"></i><i style="width:70%"></i><span class="pg">12 pages</span></div><span class="ck"><svg class="i" width="13" height="13" style="stroke-width:2.4"><use href="#i-check"/></svg></span><span class="ty" style="background:#C8372D"><svg><use href="../Linkii.Poc/wwwroot/brand-logos.svg#pdf"/></svg></span></div><span class="tn">Carte-des-saisons.pdf</span><span class="ts">Présentation · 12 pages</span></div>
+      <div class="pp-tile"><div class="tb" style="background-image:url(../demo-images/04-cote-turquoise.jpg)"><span class="ck"><svg class="i" width="13" height="13" style="stroke-width:2.4"><use href="#i-check"/></svg></span><span class="ty" style="background:#E0912F"><svg><use href="../Linkii.Poc/wwwroot/brand-logos.svg#image"/></svg></span></div><span class="tn">cote-turquoise.jpg</span><span class="ts">Image · 1920 × 1080</span></div>
+      <div class="pp-tile up"><div class="tb" style="background-image:url(../demo-images/02-lac-automne.jpg)"><span class="pp-pct">64 %</span><span class="pp-prog"><i></i></span></div><span class="tn">visite-atelier.mp4</span><span class="ts">Vidéo · envoi en cours</span></div>
+    </div>
+  </div>
+
+  <div class="pp-act">
+    <button class="btn fs-big st-empty" disabled>Continuer <svg class="i" width="16" height="16"><use href="#i-right"/></svg></button>
+    <button class="btn fs-big st-full" data-go="c2">Mettre ces 5 contenus dans une liste <svg class="i" width="16" height="16"><use href="#i-right"/></svg></button>
+  </div>
+</div>
+</div>
+
+<!-- ====================================================================== -->
+<!-- ÉTAPE 2 · LA LISTE                                                      -->
+<!-- ====================================================================== -->
+<div class="fs-wiz" data-v="c2">
+<div class="fs-modal pp-modal-wide" role="dialog" aria-modal="true">
+  <div class="fs-top">
+    <img class="lg" src="../Linkii.Poc/wwwroot/brand/logo-long.png" alt="Linkivi">
+    <div class="pp-steps"><span class="done"><i><svg class="i" width="12" height="12" style="stroke-width:2.4"><use href="#i-check"/></svg></i>Vos contenus</span><b></b><span class="on"><i>2</i>Votre liste</span><b></b><span><i>3</i>C'est prêt</span></div>
+    <button type="button" class="fs-later">Plus tard <svg class="i" width="16" height="16"><use href="#i-x"/></svg></button>
+  </div>
+
+  <div class="fs-q">
+    <h1>Dans quel ordre les montrer ?</h1>
+    <p>Glissez les cartes pour changer l'ordre. L'écran les passera en boucle, l'un après l'autre.</p>
+  </div>
+
+  <div class="pp-lhead">
+    <div class="pp-name"><label>Nom de la liste</label><div class="in">Ma première liste <svg class="i" width="16" height="16"><use href="#i-pen"/></svg></div></div>
+    <span class="grow"></span>
+    <div class="pfx-total"><svg class="i" width="20" height="20"><use href="#i-loop"/></svg><span><small>Durée totale de la boucle</small><b class="mono">1:12</b></span><span class="sep"><small>Contenus</small><b class="mono">5</b></span></div>
+    <button type="button" class="btn ghost"><svg class="i" width="16" height="16"><use href="#i-play"/></svg> Aperçu</button>
+  </div>
+
+  <div class="pp-film">
+    <div class="pfx-filwrap">      <div class="pfx-fil pf-flow cards">
+        <div class="pf-u pfx-u" data-drag="1"><span class="pfx-num">1</span><div class="pfx-card"><div class="pfx-th"><img src="../demo-images/01-lac-barque.jpg" alt=""></div><span class="pfx-type" style="background:#E0912F"><span class="app-ico is-brand sm" style="--bs:24px"><svg class="brand-logo" width="24" height="24"><use href="../Linkii.Poc/wwwroot/brand-logos.svg#image" width="100%" height="100%"/></svg></span></span>
+          <div class="pfx-hov"><span class="pfx-grip"><svg class="i" width="18" height="18"><use href="#i-grip"/></svg></span><button class="pfx-x"><svg class="i" width="16" height="16"><use href="#i-trash"/></svg></button></div>
+          <div class="pfx-foot"><div class="pfx-nm">lac-barque <small>Image</small></div><span class="pfx-dur"><button><svg class="i" width="14" height="14"><use href="#i-clock"/></svg><span class="mono">0:08</span></button></span></div></div><div class="pfx-when">passe à 0:00</div></div>
+
+        <div class="pf-u pfx-u" data-drag="1"><span class="pfx-num">2</span><div class="pfx-card"><div class="pfx-th"><img src="../demo-images/03-montagnes-neige.jpg" alt=""></div><span class="pfx-type" style="background:#E0912F"><span class="app-ico is-brand sm" style="--bs:24px"><svg class="brand-logo" width="24" height="24"><use href="../Linkii.Poc/wwwroot/brand-logos.svg#image" width="100%" height="100%"/></svg></span></span>
+          <div class="pfx-foot"><div class="pfx-nm">montagnes-neige <small>Image</small></div><span class="pfx-dur"><button><svg class="i" width="14" height="14"><use href="#i-clock"/></svg><span class="mono">0:08</span></button></span></div></div><div class="pfx-when">passe à 0:08</div></div>
+
+        <div class="pf-u pfx-u" data-drag="1"><span class="pfx-num">3</span><div class="pfx-card"><div class="pfx-th" style="background:#fff"><div class="pp-doc" style="padding:18px"><i class="h"></i><i></i><i style="width:80%"></i><i style="width:70%"></i><i></i><i style="width:55%"></i></div></div><span class="pfx-type" style="background:#C8372D"><span class="app-ico is-brand sm" style="--bs:24px"><svg class="brand-logo" width="24" height="24"><use href="../Linkii.Poc/wwwroot/brand-logos.svg#pdf" width="100%" height="100%"/></svg></span></span>
+          <div class="pfx-foot"><div class="pfx-nm">Carte des saisons <small>Présentation · 12 pages</small></div><span class="pfx-dur"><button><svg class="i" width="14" height="14"><use href="#i-clock"/></svg><span class="mono">0:24</span></button></span></div></div><div class="pfx-when">passe à 0:16</div></div>
+
+        <div class="pf-u pfx-u" data-drag="1"><span class="pfx-num">4</span><div class="pfx-card"><div class="pfx-th"><img src="../demo-images/04-cote-turquoise.jpg" alt=""></div><span class="pfx-type" style="background:#E0912F"><span class="app-ico is-brand sm" style="--bs:24px"><svg class="brand-logo" width="24" height="24"><use href="../Linkii.Poc/wwwroot/brand-logos.svg#image" width="100%" height="100%"/></svg></span></span>
+          <div class="pfx-foot"><div class="pfx-nm">cote-turquoise <small>Image</small></div><span class="pfx-dur"><button><svg class="i" width="14" height="14"><use href="#i-clock"/></svg><span class="mono">0:08</span></button></span></div></div><div class="pfx-when">passe à 0:40</div></div>
+
+        <div class="pf-u pfx-u" data-drag="1"><span class="pfx-num">5</span><div class="pfx-card"><div class="pfx-th"><img src="../demo-images/02-lac-automne.jpg" alt=""></div><span class="pfx-type" style="background:#7C62C9"><span class="app-ico is-brand sm" style="--bs:24px"><svg class="brand-logo" width="24" height="24"><use href="../Linkii.Poc/wwwroot/brand-logos.svg#video" width="100%" height="100%"/></svg></span></span>
+          <div class="pfx-foot"><div class="pfx-nm">visite-atelier <small>Vidéo</small></div><span class="pfx-dur"><span class="ro"><svg class="i" width="14" height="14"><use href="#i-clock"/></svg><span class="mono">0:24</span></span></span></div></div><div class="pfx-when">passe à 0:48</div></div>
+
+        <div class="pfx-loop"><span class="r"><svg class="i" width="18" height="18"><use href="#i-loop"/></svg></span>à <b class="mono">1:12</b><br>recommence au contenu 1</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="pp-opts">
+    <div class="pp-opt"><span>Chaque image reste</span><span class="pp-step"><button>−</button><b>8 s</b><button>+</button></span></div>
+    <div class="pp-opt"><span>Passage d'un contenu au suivant</span><span class="pp-sel"><svg class="i" width="15" height="15"><use href="#i-trans"/></svg> Fondu <svg class="i" width="14" height="14"><use href="#i-down"/></svg></span></div>
+    <span class="grow"></span>
+    <button class="pp-more" data-go="c1"><svg class="i" width="15" height="15"><use href="#i-plus"/></svg> Ajouter d'autres contenus</button>
+  </div>
+
+  <div class="pp-act">
+    <button class="fs-later" data-go="c1"><svg class="i" width="15" height="15"><use href="#i-left"/></svg> Retour</button>
+    <button class="btn fs-big" data-go="c3">Enregistrer ma liste <svg class="i" width="16" height="16"><use href="#i-right"/></svg></button>
+  </div>
+</div>
+</div>
+
+<!-- ====================================================================== -->
+<!-- ÉTAPE 3 · C'EST PRÊT                                                    -->
+<!-- ====================================================================== -->
+<div class="fs-wiz" data-v="c3">
+<div class="fs-modal" role="dialog" aria-modal="true" style="width:min(1000px,100%)">
+  <div class="fs-top">
+    <img class="lg" src="../Linkii.Poc/wwwroot/brand/logo-long.png" alt="Linkivi">
+    <div class="pp-steps"><span class="done"><i><svg class="i" width="12" height="12" style="stroke-width:2.4"><use href="#i-check"/></svg></i>Vos contenus</span><b></b><span class="done"><i><svg class="i" width="12" height="12" style="stroke-width:2.4"><use href="#i-check"/></svg></i>Votre liste</span><b></b><span class="on"><i>3</i>C'est prêt</span></div>
+    <button type="button" class="fs-later">Fermer <svg class="i" width="16" height="16"><use href="#i-x"/></svg></button>
+  </div>
+
+  <div class="fs-q">
+    <div class="fs-ok"><svg class="i" width="26" height="26"><use href="#i-check"/></svg></div>
+    <h1>Votre liste est prête</h1>
+    <p>Il ne reste qu'à la montrer sur un écran.</p>
+  </div>
+
+  <div class="pp-ready">
+    <div>
+      <div class="fs-tv"><div class="fs-scr"><div class="fs-photo clear" style="background-image:url(../demo-images/04-cote-turquoise.jpg)"></div>
+        <span class="pp-cap"><svg class="i" width="12" height="12"><use href="#i-play"/></svg> Aperçu · 2 / 5</span>
+        <div class="pp-run"><i class="on"></i><i class="half"></i><i></i><i></i><i></i></div></div><div class="fs-tvfoot"></div></div>
+      <div class="fs-stand"></div>
+      <div class="pp-sum"><b>Ma première liste</b> · 5 contenus · boucle de 1:12</div>
+    </div>
+    <div class="pp-next">
+      <div class="pp-card main">
+        <div class="hd"><span class="ci"><svg class="i" width="20" height="20"><use href="#i-mon"/></svg></span><h3>Connecter mon premier écran</h3></div>
+        <p>Une TV, un PC ou un boîtier : allumez-le, recopiez le code qu'il affiche. Deux minutes.</p>
+        <div class="devs"><svg><use href="#i-chr"/></svg> Navigateur <svg><use href="#i-and"/></svg> Android <svg><use href="#i-win"/></svg> Windows</div>
+        <button class="btn" data-go="e1">Connecter un écran <svg class="i" width="16" height="16"><use href="#i-right"/></svg></button>
+      </div>
+      <div class="pp-card">
+        <div class="hd"><span class="ci"><svg class="i" width="20" height="20"><use href="#i-play"/></svg></span><h3>Pas d'écran sous la main ?</h3></div>
+        <p>Regardez la liste tourner ici, en plein écran, comme sur une TV.</p>
+        <button class="btn ghost">Voir l'aperçu</button>
+      </div>
+      <div class="pp-links"><a data-go="ecr"><svg class="i" width="15" height="15"><use href="#i-lib"/></svg> Je le ferai plus tard</a></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ====================================================================== -->
+<!-- ASSISTANT DU PREMIER ÉCRAN · 1 (dédié, seulement s'il n'y a aucun écran) -->
+<!-- ====================================================================== -->
+<div class="fs-wiz" data-v="e1 e1b">
+<div class="fs-modal s2" role="dialog" aria-modal="true">
+  <div class="fs-top">
+    <img class="lg" src="../Linkii.Poc/wwwroot/brand/logo-long.png" alt="Linkivi">
+    <div class="pp-steps"><span class="on"><i>1</i>Relier l'écran</span><b></b><span><i>2</i>En ligne</span></div>
+    <button type="button" class="fs-later" data-go="ecr" data-v="e1">Plus tard <svg class="i" width="16" height="16"><use href="#i-x"/></svg></button>
+    <button type="button" class="fs-later" data-go="ecr1" data-v="e1b">Annuler <svg class="i" width="16" height="16"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="fs-q"><h1><span data-v="e1">Allumez votre écran</span><span data-v="e1b">Connecter un nouvel écran</span></h1><p>Il va vous montrer un code. Recopiez-le ici, c'est tout.</p></div>
+  <div class="fs-pair">
+    <div>
+      <div class="fs-tv"><div class="fs-scr fs-player"><span class="pw">linkivi</span><span class="pc"><span>4</span><span>8</span><span>1</span><span>2</span><span>9</span><span>3</span></span><small>Ce que vous verrez sur l'écran</small></div><div class="fs-tvfoot"></div></div>
+      <div class="fs-stand"></div>
+      <div class="fs-ask">Sur quel appareil s'affiche votre écran ?</div>
+      <div class="fs-devs" role="tablist" id="pp-devs">
+        <button type="button" class="on" data-dev="web"><span class="fs-tag">Le plus simple</span><svg class="dev-logo" width="30" height="30"><use href="#i-chr"/></svg><b>Navigateur</b><small>TV connectée</small></button>
+        <button type="button" data-dev="android"><svg class="dev-logo" width="30" height="30"><use href="#i-and"/></svg><b>TV Android</b><small>Application</small></button>
+        <button type="button" data-dev="windows"><svg class="dev-logo" width="30" height="30"><use href="#i-win"/></svg><b>PC Windows</b><small>Installateur</small></button>
+        <button type="button" data-dev="linux"><svg class="dev-logo" width="30" height="30"><use href="#i-lin"/></svg><b>Linux</b><small>Raspberry Pi</small></button>
+      </div>
+      <!-- Navigateur : on ouvre directement le player, à la bonne adresse -->
+      <div class="fs-where" data-where="web">
+        <a class="btn fs-cta pp-oscta" href="#" title="Ouvre linkivi.duckdns.org/player dans un nouvel onglet"><span class="pp-osb"><svg width="18" height="18"><use href="#i-chr"/></svg></span> Ouvrir le player dans le navigateur <svg class="i" width="16" height="16"><use href="#i-ext"/></svg></a>
+        <div class="fs-st"><span class="fs-n">1</span><span>Sur l'écran lui-même ? Cliquez ci-dessus. Sinon, ouvrez son navigateur à cette adresse :</span></div>
+        <div class="fs-addrbox"><code>linkivi.duckdns.org/player</code><button type="button" class="fs-copy">Copier</button></div>
+        <div class="fs-st"><span class="fs-n">2</span><span>Recopiez le code à 6 chiffres affiché</span></div>
+      </div>
+      <div class="fs-where" data-where="android" hidden>
+        <div class="fs-st"><span class="fs-n">1</span><span>Sur la TV ou le boîtier Android, installez l'app <b>Linkivi Player</b>.</span></div>
+        <a class="btn fs-cta pp-oscta" href="#"><span class="pp-osb"><svg width="18" height="18"><use href="#i-and"/></svg></span> Télécharger pour Android <small class="pp-fmt">APK</small></a>
+        <div class="fs-st"><span class="fs-n">2</span><span>Lancez-la, puis recopiez le code à 6 chiffres</span></div>
+      </div>
+      <div class="fs-where" data-where="windows" hidden>
+        <div class="fs-st"><span class="fs-n">1</span><span>Sur le PC, installez <b>Linkivi Player pour Windows</b>. Il démarre ensuite avec le PC.</span></div>
+        <a class="btn fs-cta pp-oscta" href="#"><span class="pp-osb"><svg width="18" height="18"><use href="#i-win"/></svg></span> Télécharger pour Windows <small class="pp-fmt">MSI</small></a>
+        <div class="fs-st"><span class="fs-n">2</span><span>Lancez-le, puis recopiez le code à 6 chiffres</span></div>
+      </div>
+      <div class="fs-where" data-where="linux" hidden>
+        <div class="fs-st"><span class="fs-n">1</span><span>Sur le Raspberry Pi ou le mini-PC, installez <b>Linkivi Player pour Linux</b>.</span></div>
+        <a class="btn fs-cta pp-oscta" href="#"><span class="pp-osb"><svg width="18" height="18"><use href="#i-lin"/></svg></span> Télécharger pour Linux <small class="pp-fmt">DEB</small></a>
+        <div class="fs-st"><span class="fs-n">2</span><span>Lancez-le, puis recopiez le code à 6 chiffres</span></div>
+      </div>
+    </div>
+    <div class="fs-enter">
+      <h2>Le code de votre écran</h2>
+      <p>Les 6 chiffres affichés sur l'écran.</p>
+      <div class="fs-code"><input value="4"><input value="8"><input value="1"><input value=""><input value=""><input value=""></div>
+      <div class="fs-state"><span>L'écran se relie dès que le code est complet.</span></div>
+      <div class="pp-show">
+        <label>Ce qu'il affichera</label>
+        <div class="pp-pick"><span class="th" style="background-image:url(../demo-images/01-lac-barque.jpg)"></span><span><b>Ma première liste</b><small>5 contenus · 1:12</small></span><svg class="i" width="16" height="16"><use href="#i-down"/></svg></div>
+      </div>
+      <div class="fs-noscreen" data-v="e1">Pas d'écran sous la main ? <button type="button" class="fs-linkbtn" data-go="ecr">Je le relierai plus tard</button>.</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ====================================================================== -->
+<!-- ASSISTANT DU PREMIER ÉCRAN · 2                                          -->
+<!-- ====================================================================== -->
+<div class="fs-wiz" data-v="e2">
+<div class="fs-modal" role="dialog" aria-modal="true">
+  <div class="fs-top">
+    <img class="lg" src="../Linkii.Poc/wwwroot/brand/logo-long.png" alt="Linkivi">
+    <div class="pp-steps"><span class="done"><i><svg class="i" width="12" height="12" style="stroke-width:2.4"><use href="#i-check"/></svg></i>Relier l'écran</span><b></b><span class="on"><i>2</i>En ligne</span></div>
+    <button type="button" class="fs-later">Fermer <svg class="i" width="16" height="16"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="fs-q"><div class="fs-ok"><svg class="i" width="26" height="26"><use href="#i-check"/></svg></div><h1>C'est en ligne !</h1><p>Regardez votre écran : il affiche maintenant « Ma première liste ».</p></div>
+  <div class="fs-tvw"><div class="fs-tv"><div class="fs-scr"><div class="fs-photo clear" style="background-image:url(../demo-images/01-lac-barque.jpg)"></div><span class="fs-live"><i></i> En direct</span><div class="pp-run"><i class="half"></i><i></i><i></i><i></i><i></i></div></div><div class="fs-tvfoot"></div></div><div class="fs-stand"></div></div>
+  <div class="fs-after">
+    <button class="btn">Aller à mes écrans</button>
+    <button class="btn ghost">Relier un autre écran</button>
+    <button class="btn ghost">Inviter un collègue</button>
+  </div>
+</div>
+</div>
+
+<script>
+const body=document.body;
+function go(v){body.dataset.view=v;
+  document.querySelectorAll('[data-v]').forEach(el=>el.classList.toggle('mk-off',!el.dataset.v.split(' ').includes(v)));
+  document.querySelectorAll('.mk-seg [data-go]').forEach(b=>b.classList.toggle('on',b.dataset.go===v));
+  if(typeof mn==='function'){const a=document.getElementById('pp-addmenu'),h=document.getElementById('pp-helpmenu');
+    if(v==='ecr1')mn(menuSel);else{a.hidden=true;h.hidden=true;}}}
+function mn(m){document.getElementById('pp-addmenu').hidden=m!=='add';document.getElementById('pp-helpmenu').hidden=m!=='help';
+  document.querySelectorAll('#mn button').forEach(b=>b.classList.toggle('on',b.dataset.mn===m));}
+document.querySelectorAll('#mn button').forEach(b=>b.onclick=()=>mn(b.dataset.mn));
+let menuSel='add';
+document.querySelectorAll('#mn button').forEach(b=>b.addEventListener('click',()=>menuSel=b.dataset.mn));
+document.addEventListener('click',e=>{const b=e.target.closest('[data-go]');if(b){e.preventDefault();go(b.dataset.go);}});
+function st(s){document.querySelectorAll('.st-empty').forEach(x=>x.style.display=s==='empty'?'':'none');document.querySelectorAll('.st-full').forEach(x=>x.style.display=s==='full'?'':'none');document.querySelectorAll('#st button').forEach(b=>b.classList.toggle('on',b.dataset.st===s));}
+document.querySelectorAll('#st button').forEach(b=>b.onclick=()=>st(b.dataset.st));
+st('full');
+go('c1');
+const fitNote=()=>document.documentElement.style.setProperty('--mk-h',document.querySelector('.mk-note').offsetHeight+'px');fitNote();addEventListener('resize',fitNote);new ResizeObserver(fitNote).observe(document.querySelector('.mk-note'));
+
+/* ===== premier écran : choix de l'appareil ===== */
+document.querySelectorAll('#pp-devs button').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('#pp-devs button').forEach(x=>x.classList.toggle('on',x===b));
+  document.querySelectorAll('[data-where]').forEach(w=>w.hidden=w.dataset.where!==b.dataset.dev);
+}));
+
+/* ===== étape 2 : déplacer et retirer les cartes du fil ===== */
+(function(){
+  const film=document.querySelector('.pp-film'), fil=film.querySelector('.pfx-fil'), loop=fil.querySelector('.pfx-loop');
+  const HOV='<div class="pfx-hov"><span class="pfx-grip"><svg class="i" width="18" height="18"><use href="#i-grip"/></svg></span><button class="pfx-x" title="Retirer de la liste"><svg class="i" width="16" height="16"><use href="#i-trash"/></svg></button></div>';
+  const units=()=>[...fil.querySelectorAll('.pfx-u')];
+  const fmt=s=>Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+  units().forEach(u=>{
+    const c=u.querySelector('.pfx-card');
+    if(!c.querySelector('.pfx-hov')) c.querySelector('.pfx-type').insertAdjacentHTML('afterend',HOV);
+    const [m,s]=c.querySelector('.pfx-dur .mono').textContent.split(':').map(Number); u.dataset.dur=m*60+s;
+    u.querySelectorAll('img').forEach(i=>i.draggable=false);
+  });
+  function renumber(){
+    let t=0; const us=units();
+    us.forEach((u,i)=>{u.querySelector('.pfx-num').textContent=i+1;u.querySelector('.pfx-when').textContent='passe à '+fmt(t);t+=+u.dataset.dur;});
+    const tot=document.querySelectorAll('[data-v~="c2"] .pfx-total b');tot[0].textContent=fmt(t);tot[1].textContent=us.length;
+    loop.querySelector('b').textContent=fmt(t);  }
+  // retirer
+  fil.addEventListener('click',e=>{const x=e.target.closest('.pfx-x');if(!x)return;const u=x.closest('.pfx-u');u.style.transition='opacity .15s';u.style.opacity='0';setTimeout(()=>{u.remove();renumber();},150);});
+
+  // glisser-déposer : fantôme qui suit le pointeur, emplacement en pointillés, les autres cartes glissent (FLIP)
+  let drag=null;
+  fil.addEventListener('pointerdown',e=>{
+    const card=e.target.closest('.pfx-card'); if(!card||e.button!==0||(e.target.closest('button')&&!e.target.closest('.pfx-dur')))return;
+    const r=card.getBoundingClientRect();
+    drag={u:card.closest('.pfx-u'),card,x0:e.clientX,y0:e.clientY,ox:e.clientX-r.left,oy:e.clientY-r.top,on:false,id:e.pointerId};
+  });
+  function flip(fn){
+    const us=units(), before=new Map(us.map(u=>[u,u.getBoundingClientRect().left]));
+    fn();
+    us.forEach(u=>{const d=before.get(u)-u.getBoundingClientRect().left;if(d){u.style.transition='none';u.style.transform=`translateX(${d}px)`;requestAnimationFrame(()=>{u.style.transition='';u.style.transform='';});}});
+  }
+  addEventListener('pointermove',e=>{
+    if(!drag||e.pointerId!==drag.id)return;
+    if(!drag.on){
+      if(Math.hypot(e.clientX-drag.x0,e.clientY-drag.y0)<5)return;
+      drag.on=true;
+      const g=document.createElement('div');g.className='pfx-ghost';g.appendChild(drag.card.cloneNode(true));document.body.appendChild(g);drag.g=g;
+      drag.u.classList.add('hole');film.classList.add('dragging');document.body.classList.add('pp-grabbing');
+    }
+    drag.g.style.transform=`translate(${e.clientX-drag.ox}px,${e.clientY-drag.oy}px)`;
+    // emplacement : avant la première carte dont le centre est à droite du pointeur
+    const others=units().filter(u=>u!==drag.u);
+    let before=loop;
+    for(const u of others){const r=u.querySelector('.pfx-card').getBoundingClientRect();if(e.clientX<r.left+r.width/2){before=u;break;}}
+    if(drag.u.nextElementSibling!==before) flip(()=>fil.insertBefore(drag.u,before));
+    // défilement automatique près des bords
+    const fr=fil.getBoundingClientRect();
+    drag.auto=e.clientX<fr.left+60?-12:e.clientX>fr.right-60?12:0;
+    if(drag.auto&&!drag.raf){const step=()=>{if(!drag||!drag.auto){if(drag)drag.raf=0;return;}fil.scrollLeft+=drag.auto;drag.raf=requestAnimationFrame(step);};drag.raf=requestAnimationFrame(step);}
+  });
+  function end(e){
+    if(!drag||e.pointerId!==drag.id)return;
+    const d=drag;drag=null;
+    if(!d.on)return;
+    renumber();
+    const r=d.u.querySelector('.pfx-card').getBoundingClientRect();
+    d.g.classList.add('land');d.g.style.transform=`translate(${r.left}px,${r.top}px)`;
+    setTimeout(()=>{d.g.remove();d.u.classList.remove('hole');film.classList.remove('dragging');document.body.classList.remove('pp-grabbing');
+      d.u.classList.add('fresh');setTimeout(()=>d.u.classList.remove('fresh'),900);},230);
+  }
+  addEventListener('pointerup',end);addEventListener('pointercancel',end);
+  renumber();
+})();
+</script>
+</body></html>

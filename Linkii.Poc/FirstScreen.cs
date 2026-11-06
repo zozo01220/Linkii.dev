@@ -4,10 +4,11 @@ using System.Text.Json.Nodes;
 namespace Linkii.Poc;
 
 /// <summary>
-/// Premier écran d'un nouveau compte (DEV-POC.md §126) : un assistant en deux étapes remplace la page Écrans vide.
-/// 1. « Que doit afficher votre écran ? » : un modèle (composition 1920×1080 : surtitre, titre, sous-titre, horloge), une photo en fond, ou une page web.
-/// 2. « Allumez votre écran » : le code d'appairage, l'écran reçoit aussitôt « Ma première liste ».
-/// L'état est gardé sur l'organisation (<see cref="Tenant.FirstScreen"/>) : remis à plus tard, la page Écrans propose de reprendre.
+/// Premiers pas d'un nouveau compte (DEV-POC.md §126, refait au §190) : l'assistant « Premiers pas » (<see cref="GettingStarted"/>) remplit la
+/// médiathèque et crée « Ma première liste » ; l'assistant de l'écran (code d'appairage) vient ensuite, proposé par la page Écrans tant qu'il n'y a aucun écran.
+/// Les modèles ci-dessous (composition 1920×1080 : surtitre, titre, sous-titre, horloge) sont les points de départ des Premiers pas.
+/// L'état est gardé sur l'organisation (<see cref="Tenant.FirstScreen"/>) : null = Premiers pas pas encore vus (ils s'ouvrent tout seuls),
+/// « later » = fermés, « done » = un écran est relié.
 /// </summary>
 public static class FirstScreen
 {
@@ -74,27 +75,12 @@ public static class FirstScreen
         ["color"] = "#ffffff", ["align"] = "left", ["ls"] = 0, ["lh"] = lh, ["italic"] = false, ["opacity"] = opacity,
     };
 
-    /// <summary>« Ma première liste » ne contient que le contenu de l'assistant (créée au premier passage, remplie à nouveau ensuite). Renvoie son identifiant.</summary>
-    public static Guid PutInList(ClientDb d, Guid contentId)
-    {
-        var list = d.Tenant.FirstScreenListId is { } lid ? d.Playlists.FirstOrDefault(p => p.Id == lid) : null;
-        if (list == null)
-        {
-            list = new Playlist { Name = ListName, UpdatedAt = DateTime.UtcNow };
-            d.Playlists.Add(list);
-            d.Tenant.FirstScreenListId = list.Id;
-        }
-        if (list.Draft.Count != 1 || list.Draft[0].MediaId != contentId)
-        {
-            list.Draft.Clear();
-            list.Draft.Add(new PlaylistItem { MediaId = contentId, DurationSec = d.Tenant.DefaultDurationSec, Placement = "full" });
-        }
-        list.Touch();
-        return list.Id;
-    }
-
-    /// <summary>L'assistant s'ouvre tout seul : rien n'a encore été décidé et l'organisation n'a aucun écran relié.</summary>
+    /// <summary>Les Premiers pas s'ouvrent tout seuls : rien n'a encore été décidé et l'organisation n'a aucun écran relié.</summary>
     public static bool ShouldOpen(ClientDb d) => d.Tenant.FirstScreen == null && !HasScreen(d);
+
+    /// <summary>La liste des Premiers pas existe encore et contient au moins un contenu : la page Écrans la propose pour le premier écran.</summary>
+    public static Guid? ReadyList(ClientDb d) =>
+        d.Tenant.FirstScreenListId is { } lid && d.Playlists.FirstOrDefault(p => p.Id == lid) is { Draft.Count: > 0 } pl ? pl.Id : null;
 
     /// <summary>Au moins un écran relié dans toute l'organisation (quel que soit ce que la personne voit).</summary>
     public static bool HasScreen(ClientDb d) => d.Root.Screens.Any(s => s.ClientId == d.ClientId && s.Token != null);

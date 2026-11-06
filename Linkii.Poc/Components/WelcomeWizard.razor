@@ -1,0 +1,639 @@
+@* Assistant « Premiers pas » (DEV-POC.md §190, maquette maquettes/assistant-premiers-pas.html) : 1. enrichir la médiathèque (ordinateur, cloud,
+   lien, modèle, images d'exemple) ; 2. ranger ces contenus dans une liste de diffusion (fil « pellicule » de l'éditeur, glisser pour l'ordre) ;
+   3. la liste est prête : connecter un écran se fait ensuite, dans l'assistant du premier écran (page Écrans). Ouvert par MainLayout (GettingStarted). *@
+@implements IDisposable
+@using Microsoft.JSInterop
+@inject TenantStore Store
+@inject AppService Svc
+@inject MediaImporter Importer
+@inject MediaLibrary MediaLib
+@inject GettingStarted Welcome
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject Toaster Toast
+@inject IWebHostEnvironment Env
+
+@* masqué (sans perdre son état) pendant l'aperçu, qui s'ouvre en plein écran *@
+<div class="fs-wiz pp-wiz" style="@(previewing ? "display:none" : null)">
+<div class="fs-modal pp-modal s@(step)" role="dialog" aria-modal="true" aria-labelledby="pp-q">
+    <div class="fs-top">
+        <Logo Size="26" />
+        <div class="pp-steps" aria-label="Étape @step sur 3">
+            @StepPill(1, "Vos contenus")<b></b>@StepPill(2, "Votre liste")<b></b>@StepPill(3, "C'est prêt")
+        </div>
+        <button type="button" class="fs-later" title="@(step == 3 ? "Fermer" : "Fermer, je reprendrai plus tard (menu Aide › Premiers pas)")" @onclick="Later">@(step == 3 ? "Fermer" : "Plus tard") <Ico Name="x" Size="16" /></button>
+    </div>
+
+    @* le champ de fichiers caché sert à « Depuis l'ordinateur » et à la zone de dépôt ; il reste monté pour que les envois continuent *@
+    <MediaUploader InputId="pp-files" OnImported="FileImported" ShowJobs="false" Changed="StateHasChanged" @ref="uploader" />
+
+    @if (step == 1)
+    {
+        var running = Jobs.Count(j => j.State == "running");
+        var empty = entries.Count == 0 && Jobs.Count == 0;
+        <div class="fs-q">
+            <h1 id="pp-q">Qu'allez-vous montrer sur vos écrans ?</h1>
+            <p>Ajoutez vos images, vidéos ou présentations. Elles rejoignent votre médiathèque.</p>
+        </div>
+
+        <div class="pp-drop @(empty ? "" : "compact") @(hot ? "hot" : "")" @ondragenter="() => hot = true">
+            <InputFile class="pp-dropin" OnChange="Dropped" multiple title="" aria-label="Déposer des fichiers" @ondragleave="() => hot = false" @ondrop="() => hot = false" />
+            <span class="ic"><Ico Name="upload" Size="@(empty ? 24 : 20)" /></span>
+            @if (empty) { <h3>Glissez vos fichiers ici</h3><p>@Formats · plusieurs à la fois</p> }
+            else { <div class="tx"><h3>Glissez d'autres fichiers ici</h3><p>@Formats</p></div> }
+            <div class="pp-srcs">
+                <label class="btn @(empty ? "" : "ghost")" for="pp-files"><Ico Name="upload" Size="16" /> @(empty ? "Depuis l'ordinateur" : "Ordinateur")</label>
+                <button type="button" class="btn ghost @(panel == "cloud" ? "on" : "")" aria-expanded="@(panel == "cloud" ? "true" : "false")" @onclick='() => Toggle("cloud")'>
+                    <Ico Name="cloud" Size="16" /> @(empty ? "Depuis le cloud" : "Cloud")
+                    @if (empty) { <span class="pp-logos" aria-hidden="true">@foreach (var b in new[] { "gdrive", "onedrive", "dropbox", "canva" }) { <svg width="16" height="16"><use href="/brand-logos.svg#@b" width="100%" height="100%"></use></svg> }</span> }
+                </button>
+                <button type="button" class="btn ghost @(panel == "link" ? "on" : "")" aria-expanded="@(panel == "link" ? "true" : "false")" @onclick='() => Toggle("link")'><Ico Name="link" Size="16" /> @(empty ? "Page web ou lien" : "Lien")</button>
+                @if (!empty) { <button type="button" class="btn ghost @(panel == "tpl" ? "on" : "")" aria-expanded="@(panel == "tpl" ? "true" : "false")" @onclick='() => Toggle("tpl")'><Ico Name="grid" Size="16" /> Modèle</button> }
+            </div>
+        </div>
+
+        @if (panel == "cloud")
+        {
+            <div class="pp-panel"><DocumentImporter OnImported="DocImported" /></div>
+        }
+        else if (panel == "link")
+        {
+            <form class="pp-panel pp-link" @onsubmit="AddLink" @onsubmit:preventDefault>
+                <input type="text" inputmode="url" autocomplete="url" @bind="linkUrl" @bind:event="oninput" placeholder="Collez une adresse : site web, image ou vidéo en ligne" aria-label="Adresse web" />
+                <button type="submit" class="btn" disabled="@busy">Ajouter</button>
+            </form>
+        }
+        else if (panel == "tpl" && !empty)
+        {
+            <div class="pp-panel pp-starts">@Starts(false)</div>
+        }
+        @if (error != null) { <div class="err fs-err">@error</div> }
+
+        @if (empty)
+        {
+            <div class="pp-or">ou partez d'un modèle, à personnaliser ensuite</div>
+            <div class="pp-starts">@Starts(true)</div>
+        }
+        else
+        {
+            <div class="pp-added">
+                <div class="pp-addh">
+                    <b>Ajoutés</b>
+                    @if (entries.Count > 0) { <span class="ok"><Ico Name="check" Size="14" /> @entries.Count dans votre médiathèque</span> }
+                    <span class="grow"></span>
+                    @if (running > 0) { <span class="muted">@running en cours…</span> }
+                </div>
+                <div class="pp-grid">
+                    @foreach (var j in Jobs.Where(j => j.State is "running" or "error"))
+                    {
+                        var job = j;
+                        <div class="pp-tile up @(job.State == "error" ? "bad" : "")" title="@(job.Error ?? job.Name)">
+                            <div class="tb">
+                                @if (job.State == "error") { <span class="pp-pct"><Ico Name="alert" Size="22" /></span> }
+                                else { <span class="pp-pct">@(job.Note ?? $"{MediaUploader.Pct(job)} %")</span><span class="pp-prog"><i style="width:@(MediaUploader.Pct(job))%"></i></span> }
+                                <button type="button" class="rm" title="@(job.State == "running" ? "Annuler l'envoi" : "Retirer")" @onclick="() => DropJob(job)"><Ico Name="x" Size="15" /></button>
+                            </div>
+                            <span class="tn">@job.Name</span><span class="ts">@(job.State == "error" ? job.Error : "Envoi en cours")</span>
+                        </div>
+                    }
+                    @foreach (var e in entries)
+                    {
+                        var en = e;
+                        if (Item(en.Id) is not { } m) { continue; }
+                        var look = Look(m);
+                        <div class="pp-tile">
+                            <div class="tb">
+                                @Thumb(m, false)
+                                <span class="ck"><Ico Name="check" Size="13" /></span>
+                                <span class="ty" style="background:@AppIcon.LookOf(look).Color"><AppIcon Id="@look" Small="true" Tile="false" /></span>
+                                <button type="button" class="rm" title="Retirer (le fichier reste dans la médiathèque)" @onclick="() => RemoveEntry(en)"><Ico Name="trash" Size="15" /></button>
+                            </div>
+                            <span class="tn" title="@m.Name">@m.Name</span><span class="ts">@Meta(m)</span>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        @if (Library.Count > 0)
+        {
+            <div class="pp-lib">
+                <div class="pp-addh"><b>Déjà dans votre médiathèque</b><span class="muted">Cliquez pour l'ajouter</span></div>
+                <div class="pp-libs">
+                    @foreach (var f in Library)
+                    {
+                        var file = f;
+                        <button type="button" class="pp-libt" title="Ajouter « @file.Name »" @onclick="() => AddExisting(file)"><span class="tb">@Thumb(file, false)</span><span class="tn">@file.Name</span></button>
+                    }
+                </div>
+            </div>
+        }
+
+        <div class="pp-act">
+            @if (empty) { <button class="btn fs-big" disabled>Continuer <Ico Name="arrow-right" Size="16" /></button> }
+            else
+            {
+                <button class="btn fs-big" disabled="@(saving || running > 0 || entries.Count == 0)" @onclick="ToList">
+                    @(saving ? "Préparation de la liste…" : running > 0 ? "Envoi en cours…" : $"Mettre {(entries.Count > 1 ? $"ces {entries.Count} contenus" : "ce contenu")} dans une liste") <Ico Name="arrow-right" Size="16" />
+                </button>
+            }
+        </div>
+    }
+    else if (step == 2 && List is { } pl)
+    {
+        var rows = Rows(pl);
+        var total = rows.Sum(r => r.Secs);
+        <div class="fs-q">
+            <h1 id="pp-q">Dans quel ordre les montrer ?</h1>
+            <p>Glissez les cartes pour changer l'ordre. L'écran les passera en boucle, l'un après l'autre.</p>
+        </div>
+        <div class="pp-lhead">
+            <label class="pp-name"><span>Nom de la liste</span>
+                <span class="in"><input @bind="listName" @bind:after="Rename" maxlength="80" aria-label="Nom de la liste" /><Ico Name="edit" Size="16" /></span>
+            </label>
+            <span class="grow"></span>
+            <div class="pfx-total" role="status" aria-label="Durée totale de la boucle"><Ico Name="refresh" Size="20" /><span><small>Durée totale de la boucle</small><b class="mono">@Helpers.FormatDuration(total)</b></span><span class="sep"><small>Contenus</small><b class="mono">@rows.Count</b></span></div>
+            <button type="button" class="btn ghost" disabled="@(rows.Count == 0)" @onclick="() => previewing = true"><Ico Name="play" Size="16" /> Aperçu</button>
+        </div>
+
+        <div class="pp-film" @ref="flowRoot">
+            <div class="pfx-filwrap">
+                <div class="pfx-fil pf-flow cards">
+                    @foreach (var r in rows)
+                    {
+                        var row = r;
+                        var look = Look(row.M);
+                        var color = AppIcon.LookOf(look).Color;
+                        <div class="pf-u pfx-u @(row.It.Id == freshId ? "fresh" : "")" data-i="@row.I" data-id="@row.It.Id" data-drag="1" @key="row.It.Id">
+                            <span class="pfx-num">@(row.I + 1)</span>
+                            <div class="pfx-card">
+                                <div class="pfx-th" style="background:@color">@if (row.M != null) { @Thumb(row.M, true) }</div>
+                                @if (row.M != null) { <span class="pfx-type" style="background:@color" title="@Kind(row.M)"><AppIcon Id="@look" Small="true" Tile="false" /></span> }
+                                <div class="pfx-hov">
+                                    <span class="pfx-grip" aria-hidden="true"><Ico Name="grip" Size="18" /></span>
+                                    <button type="button" class="pfx-x" title="Retirer de la liste" aria-label="Retirer @row.M?.Name de la liste" @onclick="() => RemoveItem(row.It)"><Ico Name="trash" Size="16" /></button>
+                                </div>
+                                <div class="pfx-foot">
+                                    <div class="pfx-nm" title="@row.M?.Name">@(row.M?.Name ?? "(supprimé)")<small>@(row.M != null ? Kind(row.M) : "")</small></div>
+                                    <span class="pfx-dur"><span class="ro"><Ico Name="clock" Size="12" /><span class="mono">@Helpers.FormatDuration(row.Secs)</span></span></span>
+                                </div>
+                            </div>
+                            <div class="pfx-when">passe à @Helpers.FormatDuration(row.Start)</div>
+                        </div>
+                    }
+                    @if (rows.Count > 0) { <div class="pfx-loop"><span class="r"><Ico Name="refresh" Size="18" /></span>à <b class="mono">@Helpers.FormatDuration(total)</b><br />recommence au contenu 1</div> }
+                </div>
+                @if (rows.Count == 0) { <div class="pp-filempty">La liste est vide : ajoutez des contenus.</div> }
+            </div>
+        </div>
+
+        <div class="pp-opts">
+            @if (rows.Any(r => GettingStarted.UsesImageDuration(r.M)))
+            {
+                <div class="pp-opt"><span>Chaque image reste</span>
+                    <span class="pp-step"><button type="button" aria-label="Une seconde de moins" disabled="@(imageSec <= MinSec)" @onclick="() => SetImageSec(imageSec - 1)">−</button><b>@imageSec s</b><button type="button" aria-label="Une seconde de plus" disabled="@(imageSec >= MaxSec)" @onclick="() => SetImageSec(imageSec + 1)">+</button></span>
+                </div>
+            }
+            <label class="pp-opt"><span>Passage d'un contenu au suivant</span>
+                <span class="pp-sel"><Ico Name="transition" Size="15" />
+                    <select value="@transition" @onchange="SetTransition" aria-label="Transition entre les contenus">
+                        @foreach (var t in Transitions.All) { <option value="@t.Id">@t.Label</option> }
+                    </select>
+                </span>
+            </label>
+            <span class="grow"></span>
+            <button type="button" class="pp-more" @onclick="() => { step = 1; panel = null; }"><Ico Name="plus" Size="15" /> Ajouter d'autres contenus</button>
+        </div>
+
+        <div class="pp-act">
+            <button type="button" class="fs-later" @onclick="() => { step = 1; panel = null; }"><span class="fs-flip"><Ico Name="arrow-right" Size="15" /></span> Retour</button>
+            <button class="btn fs-big" disabled="@(rows.Count == 0)" @onclick="() => step = 3">Enregistrer ma liste <Ico Name="arrow-right" Size="16" /></button>
+        </div>
+    }
+    else if (step == 3 && List is { } done)
+    {
+        var rows = Rows(done);
+        var first = rows.FirstOrDefault()?.M;
+        <div class="fs-q">
+            <div class="fs-ok"><Ico Name="check" Size="26" /></div>
+            <h1 id="pp-q">Votre liste est prête</h1>
+            <p>@(hasScreen ? "Choisissez-la sur un écran pour la diffuser." : "Il ne reste qu'à la montrer sur un écran.")</p>
+        </div>
+        <div class="pp-ready">
+            <div>
+                <div class="fs-tv"><div class="fs-scr pp-scr">
+                    @if (first != null) { <div class="pp-scrth">@Thumb(first, true)</div> }
+                    <span class="pp-cap"><Ico Name="play" Size="12" /> Aperçu · 1 / @rows.Count</span>
+                    <div class="pp-run">@for (var i = 0; i < rows.Count; i++) { <i class="@(i == 0 ? "half" : "")"></i> }</div>
+                </div><div class="fs-tvfoot"></div></div>
+                <div class="fs-stand"></div>
+                <div class="pp-sum"><b>@done.Name</b> · @rows.Count contenu@(rows.Count > 1 ? "s" : "") · boucle de @Helpers.FormatDuration(rows.Sum(r => r.Secs))</div>
+            </div>
+            <div class="pp-next">
+                <div class="pp-card main">
+                    <div class="hd"><span class="ci"><Ico Name="monitor" Size="20" /></span><h3>@(hasScreen ? "La diffuser sur un écran" : "Connecter mon premier écran")</h3></div>
+                    @if (hasScreen) { <p>Dans la page Écrans, choisissez « @done.Name » sur la carte de l'écran, puis publiez.</p> }
+                    else
+                    {
+                        <p>Une TV, un PC ou un boîtier : allumez-le, recopiez le code qu'il affiche. Deux minutes.</p>
+                        <div class="devs"><PlayerLogo Kind="Navigateur" Size="18" /> Navigateur <PlayerLogo Kind="Android" Size="18" /> Android <PlayerLogo Kind="Windows" Size="18" /> Windows <PlayerLogo Kind="Linux" Size="18" /> Linux</div>
+                    }
+                    <button type="button" class="btn" @onclick="ConnectScreen">@(hasScreen ? "Aller à mes écrans" : "Connecter un écran") <Ico Name="arrow-right" Size="16" /></button>
+                </div>
+                <div class="pp-card">
+                    <div class="hd"><span class="ci"><Ico Name="play" Size="20" /></span><h3>@(hasScreen ? "La voir tourner" : "Pas d'écran sous la main ?")</h3></div>
+                    <p>Regardez la liste tourner ici, en plein écran, comme sur une TV.</p>
+                    <button type="button" class="btn ghost" @onclick="() => previewing = true">Voir l'aperçu</button>
+                </div>
+                <div class="pp-links"><button type="button" class="fs-linkbtn muted" @onclick="LaterToScreens"><Ico Name="folder" Size="15" /> Je le ferai plus tard</button></div>
+            </div>
+        </div>
+    }
+</div>
+</div>
+
+@if (previewing && listId is { } pid)
+{
+    <SimulatorDialog PlaylistId="pid" OnClose="() => previewing = false" />
+}
+
+@code {
+    /// <summary>Un contenu ajouté à l'étape 1 : un fichier de la médiathèque (image, vidéo) ou un contenu déjà prêt (présentation, modèle, page web).</summary>
+    private sealed record Entry(Guid Id);
+
+    private const int MinSec = 3, MaxSec = 300;
+    private int step = 1;
+    private string? panel, error;   // panneau ouvert sous la zone de dépôt : cloud | link | tpl
+    private bool hot, busy, saving, previewing, hasScreen;
+    private string linkUrl = "";
+    private readonly List<Entry> entries = new();
+    private readonly Dictionary<Guid, Guid> placed = new();   // contenu de l'étape 1 -> élément de la liste
+    private List<MediaItem> all = new();
+    private Guid? listId;
+    private string listName = "Ma première liste";
+    private int imageSec = 8;
+    private string transition = Transitions.Default;
+    private Guid? freshId;
+    private MediaUploader? uploader;
+    private ElementReference flowRoot;
+    private string? flowInitId;
+    private DotNetObjectReference<WelcomeWizard>? self;
+
+    private IReadOnlyList<MediaUploader.UploadJob> Jobs => uploader?.Jobs ?? Array.Empty<MediaUploader.UploadJob>();
+    private Playlist? List => listId is { } id ? Store.Read(d => d.Playlists.FirstOrDefault(p => p.Id == id)) : null;
+    private MediaItem? Item(Guid id) => all.FirstOrDefault(m => m.Id == id);
+    private string Formats => LocalDocuments.FormatsText(Svc.IsInstalled).Length > 0 ? "Images, vidéos, PDF, PowerPoint" : "Images et vidéos";
+
+    /// <summary>Fichiers prêts de la médiathèque, pas encore ajoutés ici : on peut les reprendre d'un clic (assistant rouvert plus tard).</summary>
+    private List<MediaItem> Library
+    {
+        get
+        {
+            var used = InList();
+            return MediaLib.PickableFiles()
+                .Where(m => m.Type is "image" or "video" && m.Status == null && m.FileName != null && entries.All(e => e.Id != m.Id) && !used.Contains(m.Id))
+                .OrderByDescending(m => m.AddedUtc).Take(12).ToList();
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Reload();
+        // assistant rouvert : la liste déjà créée garde son nom et la durée de ses images
+        var list = Store.Read(d => d.Tenant.FirstScreenListId is { } lid ? d.Playlists.FirstOrDefault(p => p.Id == lid) : null);
+        (imageSec, hasScreen) = Store.Read(d => (d.Tenant.DefaultDurationSec, FirstScreen.HasScreen(d)));
+        if (list != null)
+        {
+            listName = list.Name;
+            if (list.Draft.FirstOrDefault(i => GettingStarted.UsesImageDuration(Item(i.MediaId))) is { } img) imageSec = img.DurationSec;
+            if (list.Draft.FirstOrDefault() is { } firstIt) transition = Transitions.Valid(firstIt.Transition);
+        }
+        imageSec = Math.Clamp(imageSec, MinSec, MaxSec);
+    }
+
+    /// <summary>Fichiers déjà montrés par la liste de l'assistant (contenus « Image » et « Vidéo » qui les reprennent).</summary>
+    private HashSet<Guid> InList() => Store.Read(d => d.Tenant.FirstScreenListId is { } lid && d.Playlists.FirstOrDefault(p => p.Id == lid) is { } pl
+        ? pl.Draft.Select(i => all.FirstOrDefault(m => m.Id == i.MediaId)?.Settings.GetValueOrDefault("media")).OfType<string>().Select(s => Guid.TryParse(s, out var g) ? g : Guid.Empty).ToHashSet()
+        : new HashSet<Guid>());
+
+    private void Reload() => all = Store.Read(d => d.Media.ToList());
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // fil de l'étape 2 : glisser-déplacer de l'éditeur de liste (playlist-flow.js, MoveItem)
+        if (step == 2 && flowRoot.Context != null && flowRoot.Id != flowInitId)
+        {
+            flowInitId = flowRoot.Id;
+            self ??= DotNetObjectReference.Create(this);
+            try { await JS.InvokeVoidAsync("linkiiFlow.init", flowRoot, self); } catch (JSException) { } catch (JSDisconnectedException) { }
+        }
+    }
+
+    private RenderFragment StepPill(int n, string label) => __builder =>
+    {
+        <span class="@(step == n ? "on" : step > n ? "done" : "")"><i>@if (step > n) { <Ico Name="check" Size="12" /> } else { @n }</i>@label</span>
+    };
+
+    private RenderFragment Thumb(MediaItem m, bool wide) => __builder =>
+    {
+        if (m.AppId == Compositions.AppId) { <CompositionThumb Item="m" Files="all" Contain="true" /> }
+        else { <MediaThumb Media="m" All="all" Wide="wide" /> }
+    };
+
+    // Point de départ : trois modèles (compositions à personnaliser) et, dans la grande zone vide, les images d'exemple
+    private RenderFragment Starts(bool withSamples) => __builder =>
+    {
+        foreach (var tt in FirstScreen.Templates.Where(t => t.Id is "accueil" or "menu" or "annonce"))
+        {
+            var t = tt;
+            <button type="button" class="pp-start" disabled="@busy" @onclick="() => AddTemplate(t)">
+                <span class="th" style="background:@t.Bg"><small>@t.Kick</small><b>@t.Title</b></span>
+                <span class="nm"><Ico Name="grid" Size="14" /> @t.Name</span>
+            </button>
+        }
+        if (withSamples)
+        {
+            <button type="button" class="pp-start ex" disabled="@busy" @onclick="AddSamples">
+                <span class="th">@foreach (var s in GettingStarted.Samples) { <i style="background-image:url('samples/premiers-pas/@s.File')"></i> }</span>
+                <span class="nm"><Ico Name="images" Size="14" /> @(busy ? "Ajout…" : "Images d'exemple")</span>
+            </button>
+        }
+    };
+
+    private static string? Look(MediaItem? m) => m == null ? null : m.AppId ?? (m.Type == "video" ? "video" : "image");
+    private string Kind(MediaItem m) => m.AppId != null ? Svc.Find(m.AppId)?.Name ?? "Contenu" : m.Type == "video" ? "Vidéo" : "Image";
+    private string Meta(MediaItem m) => m.AppId != null ? Kind(m) : m.Type == "video" ? (m.Status == "processing" ? "Vidéo · conversion en cours" : "Vidéo") : "Image";
+
+    private void Toggle(string p) { error = null; panel = panel == p ? null : p; }
+
+    // ---------- Étape 1 : ajouter des contenus ----------
+    private void Add(Guid id)
+    {
+        if (entries.Any(e => e.Id == id)) return;
+        entries.Add(new Entry(id));
+        Reload();
+    }
+
+    private void FileImported(MediaItem m) { Add(m.Id); StateHasChanged(); }
+
+    private async Task Dropped(InputFileChangeEventArgs e) { hot = false; if (uploader != null) await uploader.AddFiles(e); }
+
+    private void DocImported(Guid? id)
+    {
+        panel = null;
+        if (id is { } g) { Reload(); if (Item(g) != null) Add(g); }
+        StateHasChanged();
+    }
+
+    private void DropJob(MediaUploader.UploadJob job) { if (job.State == "running") uploader?.Cancel(job); else uploader?.Dismiss(job); }
+
+    private void AddExisting(MediaItem m) => Add(m.Id);
+
+    private void RemoveEntry(Entry e)
+    {
+        entries.Remove(e);
+        if (placed.Remove(e.Id, out var itemId) && listId is { } lid) RemoveFromList(lid, itemId);
+    }
+
+    /// <summary>L'intégration est activée, ou on l'active (administrateur) ; sinon un message.</summary>
+    private bool Ready(string appId)
+    {
+        if (Svc.IsInstalled(appId)) return true;
+        if (!Store.Read(d => d.Access.IsOrgAdmin)) { error = $"Demandez à un administrateur d'activer l'intégration « {Svc.Find(appId)?.Name ?? appId} »."; return false; }
+        Svc.Install(appId);
+        return true;
+    }
+
+    private async Task AddLink()
+    {
+        error = null;
+        var u = linkUrl.Trim();
+        if (u.Length == 0) return;
+        if (!u.Contains("://")) u = "https://" + u;
+        if (!Uri.TryCreate(u, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) { error = "Cette adresse n'est pas valable."; return; }
+        linkUrl = ""; panel = null;
+        // une image ou une vidéo en ligne entre dans la médiathèque ; toute autre adresse devient une page web affichée en plein écran
+        if (MediaImporter.IsSupported(Uri.UnescapeDataString(Path.GetFileName(uri.AbsolutePath))))
+        {
+            if (uploader != null) await uploader.ImportUrl(u);
+            return;
+        }
+        if (!Ready("webpage")) return;
+        var name = uri.Host.Replace("www.", "");
+        var (item, errors) = Svc.SaveInstance("webpage", null, name.Length > 80 ? name[..80] : name, new Dictionary<string, string> { ["url"] = u, ["refreshMin"] = "0" });
+        if (item == null) { error = string.Join(" ", errors); return; }
+        Add(item.Id);
+    }
+
+    private void AddTemplate(FirstScreen.Template t)
+    {
+        error = null;
+        if (!Ready(Compositions.AppId)) return;
+        if (Compositions.Clean(FirstScreen.Doc(FirstScreen.Draft.From(t))) is not { } c) { error = "Le modèle n'a pas pu être préparé."; return; }
+        var (item, errors) = Svc.SaveInstance(Compositions.AppId, null, t.Name, new Dictionary<string, string> { ["doc"] = c.Doc, ["images"] = string.Join(",", c.Images) });
+        if (item == null) { error = string.Join(" ", errors); return; }
+        panel = null;
+        Add(item.Id);
+        Toast.Ok($"Modèle « {t.Name} » ajouté : modifiez ses textes plus tard dans Contenus › Compositions.");
+    }
+
+    private async Task AddSamples()
+    {
+        error = null; busy = true;
+        StateHasChanged();
+        try
+        {
+            foreach (var (file, name) in GettingStarted.Samples)
+            {
+                var r = await Importer.ImportFile(Path.Combine(Env.WebRootPath, "samples", "premiers-pas", file), name + ".jpg", Store.ClientId, Store.AreaId, Store.UserId);
+                if (r.Item != null) Add(r.Item.Id); else error = r.Error;
+            }
+        }
+        finally { busy = false; }
+    }
+
+    // ---------- Étape 1 -> 2 : les contenus rejoignent la liste ----------
+    private async Task ToList()
+    {
+        error = null; saving = true;
+        await Task.Yield();
+        try
+        {
+            foreach (var e in entries.Where(e => !placed.ContainsKey(e.Id)).ToList())
+            {
+                if (Item(e.Id) is not { } m) continue;
+                Guid? content; int dur; string mode;
+                if (m.AppId == null)
+                {
+                    // fichier : contenu « Image » ou « Vidéo », comme un média glissé dans le fil de l'éditeur
+                    if (!Ready(m.Type == "video" ? "video" : "image")) return;
+                    content = Svc.CreateFromMedia(m)?.Id;
+                    dur = m.Type == "video" ? Helpers.VideoSeconds(m) ?? 30 : imageSec;
+                    mode = "fixed";
+                }
+                else
+                {
+                    content = m.AppId == Compositions.AppId ? m.Id : ReuseOrCopy(m);
+                    dur = imageSec; mode = "content";
+                }
+                if (content is not { } cid) { error = $"« {m.Name} » ne peut pas être ajouté à la liste."; continue; }
+                var row = new PlaylistItem { MediaId = cid, DurationSec = dur, DurationMode = mode, Placement = "full", Transition = transition };
+                listId = Store.Write(d =>
+                {
+                    var pl = GettingStarted.ListFor(d, string.IsNullOrWhiteSpace(listName) ? FirstScreen.ListName : listName.Trim());
+                    pl.Draft.Add(row);
+                    pl.Touch();
+                    return pl.Id;
+                });
+                placed[e.Id] = row.Id;
+            }
+            // assistant rouvert alors que la liste existe déjà et que tout y est : on la retrouve
+            listId ??= Store.Read(d => d.Tenant.FirstScreenListId is { } lid && d.Playlists.Any(p => p.Id == lid) ? lid : (Guid?)null);
+            if (listId == null) { error ??= "La liste n'a pas pu être créée."; return; }
+            listName = List?.Name ?? listName;
+            Reload();
+            step = 2;
+        }
+        finally { saving = false; }
+    }
+
+    /// <summary>Présentation ou page web : utilisée telle quelle si aucune liste ne l'a encore, sinon une copie à elle (comme dans l'éditeur de liste).</summary>
+    private Guid? ReuseOrCopy(MediaItem src)
+    {
+        if (Svc.PlaylistsUsing(src.Id).Count == 0) return src.Id;
+        return Store.Write(d =>
+        {
+            if (d.Media.FirstOrDefault(x => x.Id == src.Id && x.AppId != null) is not { } s) return (Guid?)null;
+            var copy = new MediaItem
+            {
+                ClientId = s.ClientId, AreaId = s.AreaId, Name = s.Name.Length > 80 ? s.Name[..80] : s.Name, Type = s.Type, AppId = s.AppId, AppVersion = s.AppVersion,
+                Settings = new(s.Settings), Secrets = new(s.Secrets), Info = new(s.Info), FolderId = s.FolderId, OwnerId = s.OwnerId, AddedUtc = DateTime.UtcNow
+            };
+            d.Media.Add(copy);
+            return copy.Id;
+        });
+    }
+
+    // ---------- Étape 2 : la liste ----------
+    private sealed record Row(int I, PlaylistItem It, MediaItem? M, int Secs, int Start);
+
+    private List<Row> Rows(Playlist pl)
+    {
+        var rows = new List<Row>();
+        var t = 0;
+        for (var i = 0; i < pl.Draft.Count; i++)
+        {
+            var it = pl.Draft[i];
+            var m = all.FirstOrDefault(x => x.Id == it.MediaId);
+            var secs = m == null ? 0 : Helpers.ItemSeconds(it, m, Svc.Find(m.AppId), all);
+            rows.Add(new(i, it, m, secs, t));
+            t += secs;
+        }
+        return rows;
+    }
+
+    private void Rename()
+    {
+        var n = listName.Trim();
+        if (n.Length == 0 || listId is not { } id) { listName = List?.Name ?? FirstScreen.ListName; return; }
+        Store.Write(d => { if (d.Playlists.FirstOrDefault(p => p.Id == id) is { } pl && pl.Name != n) { pl.Name = n; pl.UpdatedAt = DateTime.UtcNow; } });
+    }
+
+    /// <summary>Carte glissée dans le fil (playlist-flow.js) : « at » est compté avant le retrait de la carte.</summary>
+    [JSInvokable]
+    public Task MoveItem(int from, int at)
+    {
+        if (listId is { } id)
+        {
+            var moved = Store.Write(d =>
+            {
+                if (d.Playlists.FirstOrDefault(p => p.Id == id) is not { } pl || from < 0 || from >= pl.Draft.Count || at < 0 || at > pl.Draft.Count || at == from || at == from + 1) return (Guid?)null;
+                var it = pl.Draft[from];
+                pl.Draft.RemoveAt(from);
+                pl.Draft.Insert(from < at ? at - 1 : at, it);
+                pl.Touch();
+                return it.Id;
+            });
+            if (moved is { } mid) Flash(mid);
+        }
+        return InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Pas de bibliothèque dans le fil de l'assistant : rien à déposer.</summary>
+    [JSInvokable]
+    public Task DropAdd(string key, int at) => Task.CompletedTask;
+
+    private void Flash(Guid id)
+    {
+        freshId = id;
+        _ = Task.Delay(1800).ContinueWith(_ => InvokeAsync(() => { if (freshId == id) { freshId = null; StateHasChanged(); } }));
+    }
+
+    private void RemoveItem(PlaylistItem it)
+    {
+        if (listId is not { } lid) return;
+        RemoveFromList(lid, it.Id);
+        foreach (var source in placed.Where(p => p.Value == it.Id).Select(p => p.Key).ToList())
+        {
+            placed.Remove(source, out _);
+            entries.RemoveAll(e => e.Id == source);
+        }
+    }
+
+    /// <summary>Retire l'élément de la liste ; le contenu « Image » ou « Vidéo » créé pour lui disparaît s'il ne sert plus (le fichier reste dans la médiathèque).</summary>
+    private void RemoveFromList(Guid lid, Guid itemId)
+    {
+        Store.Write(d =>
+        {
+            if (d.Playlists.FirstOrDefault(p => p.Id == lid) is not { } pl || pl.Draft.FirstOrDefault(i => i.Id == itemId) is not { } it) return;
+            pl.Draft.Remove(it);
+            pl.Touch();
+            if (d.Media.FirstOrDefault(m => m.Id == it.MediaId) is { AppId: "image" or "video" } wrap && !d.Playlists.Any(p => p.Draft.Any(i => i.MediaId == wrap.Id)))
+                d.Media.RemoveAll(m => m.Id == wrap.Id);
+        });
+        Reload();
+    }
+
+    private void SetImageSec(int s)
+    {
+        imageSec = Math.Clamp(s, MinSec, MaxSec);
+        if (listId is not { } id) return;
+        var images = all.Where(GettingStarted.UsesImageDuration).Select(m => m.Id).ToHashSet();
+        Store.Write(d =>
+        {
+            if (d.Playlists.FirstOrDefault(p => p.Id == id) is not { } pl) return;
+            foreach (var it in pl.Draft.Where(i => images.Contains(i.MediaId))) { it.DurationSec = imageSec; it.DurationMode = "fixed"; }
+            pl.Touch();
+        });
+    }
+
+    private void SetTransition(ChangeEventArgs e)
+    {
+        transition = Transitions.Valid(e.Value?.ToString());
+        if (listId is not { } id) return;
+        Store.Write(d =>
+        {
+            if (d.Playlists.FirstOrDefault(p => p.Id == id) is not { } pl) return;
+            foreach (var it in pl.Draft) it.Transition = transition;
+            pl.Touch();
+        });
+    }
+
+    // ---------- Sortie ----------
+    /// <summary>Fermé avant la fin : il ne s'ouvrira plus tout seul (menu Aide › Premiers pas pour le reprendre).</summary>
+    private void Later()
+    {
+        Store.Write(d => { if (d.Tenant.FirstScreen == null) d.Tenant.FirstScreen = FirstScreen.Later; });
+        Welcome.Close();
+    }
+
+    private void LaterToScreens() { Later(); Nav.NavigateTo("/"); }
+
+    private void ConnectScreen()
+    {
+        Later();
+        Nav.NavigateTo(hasScreen ? "/" : "/?connecter=1");
+    }
+
+    public void Dispose() => self?.Dispose();
+}
