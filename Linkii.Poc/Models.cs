@@ -1132,6 +1132,7 @@ public static class Transitions
         ("cut", "Aucune"), ("fade", "Fondu"), ("push-left", "Glisser vers la gauche"), ("push-right", "Glisser vers la droite"),
         ("push-up", "Glisser vers le haut"), ("push-down", "Glisser vers le bas"), ("zoom", "Zoom")
     };
+    public static string Short(string? id) => id switch { "cut" => "Aucune", "push-left" => "Gauche", "push-right" => "Droite", "push-up" => "Haut", "push-down" => "Bas", "zoom" => "Zoom", _ => "Fondu" };
     public static string Label(string? id) => All.FirstOrDefault(t => t.Id == id).Label ?? "Fondu";
     public static string Valid(string? id) => All.Any(t => t.Id == id) ? id! : Default;
     public static int ValidMs(int ms) => Math.Clamp(ms, MinMs, MaxMs);
