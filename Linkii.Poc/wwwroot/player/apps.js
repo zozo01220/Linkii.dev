@@ -334,10 +334,15 @@
   /* ---------- Home Assistant : plan du bâtiment (§193) ----------
      Les étages sont des plaques empilées en 3D (CSS, sans bibliothèque : tient sur les petits appareils) ; chaque appareil est une pastille posée sur son plan,
      toujours face à l'écran. Le serveur renvoie le plan nettoyé (d.plan) et l'état de chaque entité ; une commande suit les mêmes règles que haApp. */
+  var HA_ALERT_DC = ['door', 'garage_door', 'opening', 'window', 'smoke', 'gas', 'carbon_monoxide', 'moisture', 'problem', 'safety', 'tamper', 'lock', 'heat', 'cold', 'battery'];
   function haPlanState(e) {   // '' | on | alert | move | off : couleur de la pastille
     if (e.available === false) return 'off';
     var d = e.domain, dc = e.deviceClass || '';
-    if (d === 'binary_sensor') { if (!e.on) return ''; return dc === 'motion' || dc === 'occupancy' || dc === 'presence' ? 'move' : 'alert'; }
+    if (d === 'binary_sensor') {   // seuls les vrais signaux sont des alertes : « Connecté », « Branché », « En marche » restent neutres (§198)
+      if (!e.on) return '';
+      if (dc === 'motion' || dc === 'occupancy' || dc === 'presence' || dc === 'moving' || dc === 'vibration' || dc === 'sound') return 'move';
+      return HA_ALERT_DC.indexOf(dc) >= 0 ? 'alert' : '';
+    }
     if (d === 'lock') return e.on ? 'alert' : '';
     if (d === 'light' || d === 'switch' || d === 'input_boolean' || d === 'fan') return e.on ? 'on' : '';
     if (d === 'climate') return e.hvac === 'heating' ? 'on' : '';
@@ -346,12 +351,30 @@
   function haPlanApp(h) {
     var el = h.el, now = function () { return h.now ? h.now() : Date.now(); };
     el.className += ' hpl';
-    el.innerHTML = '<div class="hpl-view"><div class="hpl-world"></div></div><div class="hpl-bar"></div><div class="hpl-toast"></div><div class="hpl-sum"></div><div class="hpl-sheet"></div>';
+    // la scène (vue 3D, barre, message, panneau de commande) et, à côté, le résumé (§198) : panneau à droite / à gauche ou bandeau défilant en haut
+    el.innerHTML = '<div class="hpl-stage"><div class="hpl-view"><div class="hpl-world"></div></div><div class="hpl-bar"></div><div class="hpl-toast"></div><div class="hpl-sheet"></div></div><div class="hpl-sum"></div>';
     var view = el.querySelector('.hpl-view'), world = el.querySelector('.hpl-world'), bar = el.querySelector('.hpl-bar'), toast = el.querySelector('.hpl-toast'),
       sum = el.querySelector('.hpl-sum'), sheet = el.querySelector('.hpl-sheet');
     var PW = 480, GAP = 175, FLAT = 14, RX_MIN = 40, RX_MAX = 78;
-    var last = null, built = '', byId = {}, pending = {}, confirm = {}, panelId = null, holding = false, prev = null;
+    var last = null, built = '', byId = {}, pending = {}, confirm = {}, panelId = null, holding = false, prev = null, sumHtml = '', layoutMode = '';
     var cam = { rz: -32, rx: 62, sel: 'all' }, userUntil = 0, focusUntil = 0, focusTimer = 0, toastTimer = 0, pulseId = null, scale = 1;
+    var spinOverride = null, spinUntil = 0;   // interrupteur de rotation à l'écran : vaut 2 minutes, puis le réglage reprend
+    function spinning() { return Date.now() < spinUntil ? spinOverride : !!(last && last.plan && last.plan.spin); }
+    function roomsOf(fid) { var f = last && last.plan.floors.filter(function (x) { return x.id === fid; })[0]; return (f && f.rooms) || []; }
+    function roomName(d) { if (!d.room) return ''; var r = roomsOf(d.floor).filter(function (x) { return x.id === d.room; })[0]; return r ? r.name : ''; }
+    function hiddenOff(e) { return last.plan.hideOff !== false && (e.available === false || e.state === 'absent'); }
+    function alerting(st) { return st === 'alert' || st === 'move'; }
+
+    /* ----- disposition : où va le résumé ; un widget étroit passe en bandeau ----- */
+    function layout() {
+      if (!last || !last.plan) return;
+      var mode = last.plan.summary || 'right';
+      if ((mode === 'right' || mode === 'left') && el.clientWidth && el.clientWidth < 560) mode = 'top';
+      if (mode === layoutMode) return;
+      layoutMode = mode; sumHtml = '';
+      el.classList.remove('s-right', 's-left', 's-top', 's-none');
+      el.classList.add('s-' + mode);
+    }
 
     function eView(e) {   // état affiché : celui qu'on vient de commander, jusqu'à confirmation de Home Assistant (8 s au plus)
       var p = pending[e.id];
@@ -441,6 +464,13 @@
           pin.innerHTML = '<div class="hpl-pin-in"><button type="button" class="hpl-chip"></button><i class="hpl-stem"></i></div>';
           host.appendChild(pin);
         });
+        // étiquette d'une pièce dessinée (mode « Par pièce ») : au centre de la pièce, remplie par update()
+        if (f.kind === 'rooms') (f.rooms || []).forEach(function (r) {
+          var rp = document.createElement('div'); rp.className = 'hpl-pin hpl-rpin'; rp.setAttribute('data-rp', f.id + '/' + r.id);
+          rp.style.left = (r.x + r.w / 2) * P + 'px'; rp.style.top = (r.y + r.h / 2) * P + 'px';
+          rp.innerHTML = '<div class="hpl-pin-in"><button type="button" class="hpl-chip hpl-room-chip"></button><i class="hpl-stem"></i></div>';
+          host.appendChild(rp);
+        });
         world.appendChild(fl);
       });
       cam.sel = plan.floors.some(function (f) { return f.id === cam.sel; }) ? cam.sel : 'all';
@@ -472,17 +502,31 @@
     /* ----- états ----- */
     function update() {
       if (!last || !last.plan) return;
-      var lab = last.plan.labels || 'all';
+      /* étiquettes (§198) : « room » = une étiquette par pièce dessinée, seuls les appareils en alerte (ou en mouvement) gardent la leur, avec leur nom ;
+         un appareil hors pièce (étage en image) se comporte comme en « active ». Indisponibles masqués si hideOff. */
+      var lab = last.plan.labels || 'room', rooms = {};
       last.plan.devices.forEach(function (d) {
-        var raw = byId[d.id]; if (!raw || raw.state === 'absent') { var gone = world.querySelector('[data-p="' + d.id + '"]'); if (gone) gone.style.display = 'none'; return; }
+        var raw = byId[d.id], pin = world.querySelector('[data-p="' + d.id + '"]');
+        if (!raw || raw.state === 'absent' || hiddenOff(raw)) { if (pin) pin.style.display = 'none'; if (!raw || raw.state === 'absent') return; }
         var e = eView(raw), st = haPlanState(e);
-        var pin = world.querySelector('[data-p="' + d.id + '"]'); if (!pin) return;
-        pin.style.display = '';
-        var chip = pin.querySelector('.hpl-chip');
-        chip.className = 'hpl-chip ' + st + (lab === 'none' || (lab === 'active' && !st) ? ' novals' : '') + (pulseId === d.id ? ' pulse' : '');
-        chip.setAttribute('aria-label', e.name);
-        chip.innerHTML = haIcon(e) + '<span class="hpl-v"></span>';
-        chip.querySelector('.hpl-v').textContent = haValue(e, last.decimals, now());
+        if (d.room && e.available !== false) {   // ce que l'étiquette de la pièce résume
+          var rk = d.floor + '/' + d.room, r = rooms[rk] || (rooms[rk] = { lights: 0, t: null, ids: [] });
+          r.ids.push(d.id);
+          if (e.domain === 'light' && e.on) r.lights++;
+          if (r.t == null) r.t = roomTemp(e);
+        } else if (d.room) { var rk2 = d.floor + '/' + d.room; (rooms[rk2] || (rooms[rk2] = { lights: 0, t: null, ids: [] })).ids.push(d.id); }
+        if (pin && !hiddenOff(raw)) {
+          var own = alerting(st) || pulseId === d.id || panelId === d.id;
+          var show = lab === 'room' && d.room ? own : true;
+          pin.style.display = show ? '' : 'none';
+          var chip = pin.querySelector('.hpl-chip');
+          var bare = lab === 'none' || ((lab === 'active' || lab === 'room') && !st);
+          chip.className = 'hpl-chip ' + st + (bare ? ' novals' : '') + (pulseId === d.id ? ' pulse' : '');
+          chip.setAttribute('aria-label', e.name);
+          chip.innerHTML = haIcon(e) + '<span class="hpl-v"></span>';
+          chip.querySelector('.hpl-v').textContent = (lab === 'room' && own && st ? e.name + ' · ' : '') + haValue(e, last.decimals, now());
+          pin.classList.toggle('small', bare);
+        }
         var g = world.querySelector('[data-g="' + d.id + '"]');
         if (g) {
           if (e.domain === 'light' && e.on && e.available !== false) {
@@ -500,6 +544,20 @@
           if (sh) sh.style.height = (e.position != null ? 100 - e.position : e.state === 'closed' || e.state === 'closing' ? 100 : 0) + '%';
         }
       });
+      // étiquettes des pièces : nom, lumières allumées, température ; cachées hors du mode « Par pièce » ou quand il n'y a rien à dire
+      var rps = world.querySelectorAll('.hpl-rpin');
+      for (var ri = 0; ri < rps.length; ri++) {
+        var rp = rps[ri], key = rp.getAttribute('data-rp'), info = rooms[key], parts = key.split('/');
+        var rn = (roomsOf(parts[0]).filter(function (x) { return x.id === parts[1]; })[0] || {}).name || '';
+        var say2 = lab === 'room' && info && (info.lights || info.t != null);
+        rp.style.display = say2 ? '' : 'none';
+        if (!say2) continue;
+        var rc = rp.querySelector('.hpl-chip'), html = '<span class="hpl-rn2"></span>';
+        if (info.lights) html += '<span class="hpl-g on">' + haIcon({ domain: 'light', on: true }) + info.lights + '</span>';
+        if (info.t != null) html += '<span class="hpl-g">' + haIcon({ domain: 'climate' }) + haDeg(Math.round(info.t * 10) / 10) + '</span>';
+        rc.innerHTML = html; rc.querySelector('.hpl-rn2').textContent = rn;
+        rc.setAttribute('aria-label', rn);
+      }
       paintRooms();
       drawSummary();
       if (panelId) drawSheet();
@@ -542,18 +600,60 @@
     function rgbHex(c) { var m = String(c).match(/\d+/g) || [0, 0, 0]; return '#' + m.slice(0, 3).map(function (v) { return ('0' + (+v).toString(16)).slice(-2); }).join(''); }
     function haRgba(hex, a) { var n = parseInt(String(hex).replace('#', ''), 16); if (isNaN(n)) n = 0xFFC870; return 'rgba(' + (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')'; }
 
+    /* ----- résumé (§198) : hors de la scène, panneau à droite / à gauche (Alertes, Lumières allumées, Températures, Ouvertures)
+       ou bandeau en haut qui défile s'il est plus large que le widget ; réécrit seulement quand son contenu change ----- */
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+    function summaryData() {
+      var alerts = [], lights = [], temps = [], seen = {}, covers = { open: 0, closed: 0 }, off = 0;
+      last.plan.devices.forEach(function (d) {
+        var raw = byId[d.id]; if (!raw) return;
+        if (raw.state === 'absent' || raw.available === false) { off++; return; }
+        var e = eView(raw), st = haPlanState(e), where = roomName(d);
+        if (st === 'alert') alerts.push({ ic: haIcon(e), t: e.name, s: where, v: haValue(e, last.decimals, now()) });
+        if (e.domain === 'light' && e.on) lights.push({ ic: haIcon(e), t: where || e.name, s: where && e.name !== where ? e.name : '', v: haValue(e, last.decimals, now()), cls: 'on' });
+        var t = roomTemp(e);
+        if (t != null) { var k = d.room ? d.floor + '/' + d.room : d.id; if (!seen[k]) { seen[k] = 1; temps.push({ ic: haIcon({ domain: 'climate' }), t: where || e.name, v: haDeg(Math.round(t * 10) / 10) }); } }
+        if (e.domain === 'cover') { if (e.state === 'closed' || e.state === 'closing' || e.position === 0) covers.closed++; else covers.open++; }
+      });
+      return { alerts: alerts, lights: lights, temps: temps, covers: covers, off: off };
+    }
     function drawSummary() {
-      var ents = last.plan.devices.map(function (d) { return byId[d.id]; }).filter(function (e) { return e && e.state !== 'absent'; }).map(eView);
-      var lights = ents.filter(function (e) { return e.domain === 'light' && e.on; }).length;
-      var open = ents.filter(function (e) { return e.domain === 'binary_sensor' && e.on && haPlanState(e) === 'alert'; });
-      var temps = ents.filter(function (e) { return e.domain === 'climate' && e.current != null; });
-      var avg = temps.length ? temps.reduce(function (s, e) { return s + e.current; }, 0) / temps.length : null;
-      var h2 = '<span class="hpl-s' + (lights ? ' on' : '') + '">' + lights + (lights > 1 ? ' lumières allumées' : lights ? ' lumière allumée' : ' lumière allumée') + '</span>';
-      h2 += '<span class="hpl-s' + (open.length ? ' alert' : '') + '"></span>';
-      if (avg != null) h2 += '<span class="hpl-s">Température ' + haDeg(Math.round(avg * 10) / 10) + '</span>';
-      sum.innerHTML = h2;
-      var o = sum.children[1];
-      o.textContent = open.length ? open.map(function (e) { return e.name; }).slice(0, 3).join(', ') + (open.length > 1 ? ' : ouverts' : ' : ouvert') : 'Portes et fenêtres fermées';
+      layout();
+      if (layoutMode === 'none') { if (sumHtml !== '-') { sum.innerHTML = ''; sumHtml = '-'; } return; }
+      var s = summaryData(), html = '', MAX = 5;
+      function row(i, cls) { return '<div class="hpl-it ' + (cls || i.cls || '') + '">' + i.ic + '<span class="hpl-it-t">' + esc(i.t) + (i.s ? ' <small>· ' + esc(i.s) + '</small>' : '') + '</span><b>' + esc(i.v) + '</b></div>'; }
+      function sec(title, items, cls, more) {
+        if (!items.length && !more) return '';
+        return '<div class="hpl-sec"><span>' + esc(title) + '</span>' + items.slice(0, MAX).map(function (i) { return row(i, cls); }).join('')
+          + (items.length > MAX ? '<div class="hpl-more">+ ' + (items.length - MAX) + ' autres</div>' : '') + (more || '') + '</div>';
+      }
+      var nl = s.lights.length, cov = s.covers.open + s.covers.closed;
+      var covTxt = cov ? (s.covers.open ? s.covers.open + ' ouvert' + (s.covers.open > 1 ? 's' : '') : '') + (s.covers.open && s.covers.closed ? ' · ' : '') + (s.covers.closed ? s.covers.closed + ' fermé' + (s.covers.closed > 1 ? 's' : '') : '') : '';
+      if (layoutMode === 'top') {
+        var tk = [];
+        s.alerts.forEach(function (i) { tk.push('<span class="hpl-tk alert">' + i.ic + esc(i.t + ' : ' + i.v) + '</span>'); });
+        tk.push('<span class="hpl-tk' + (nl ? ' on' : '') + '">' + haIcon({ domain: 'light' }) + (nl ? nl + (nl > 1 ? ' lumières allumées' : ' lumière allumée') : 'Lumières éteintes') + '</span>');
+        if (s.temps.length) tk.push('<span class="hpl-tk">' + haIcon({ domain: 'climate' }) + esc(s.temps.slice(0, 6).map(function (i) { return i.t + ' ' + i.v; }).join(' · ')) + '</span>');
+        if (cov) tk.push('<span class="hpl-tk">' + haIcon({ domain: 'cover' }) + esc('Volets : ' + covTxt) + '</span>');
+        html = '<div class="hpl-track">' + tk.join('') + '</div>';
+      } else {
+        html = '<h3>' + esc(last.title || 'Bâtiment') + (last.live ? '<small>en direct</small>' : '') + '</h3>'
+          + sec('Alertes', s.alerts, 'alert')
+          + sec(nl ? nl + (nl > 1 ? ' lumières allumées' : ' lumière allumée') : 'Lumières', s.lights, 'on', nl ? '' : '<div class="hpl-more">Toutes éteintes</div>')
+          + sec('Températures', s.temps)
+          + (cov ? sec('Ouvertures', [{ ic: haIcon({ domain: 'cover' }), t: 'Volets', v: covTxt }]) : '')
+          + (s.off ? '<div class="hpl-more">' + s.off + ' appareil' + (s.off > 1 ? 's' : '') + ' indisponible' + (s.off > 1 ? 's' : '') + '</div>' : '');
+      }
+      if (html === sumHtml) return;
+      sumHtml = html; sum.innerHTML = html;
+      if (layoutMode === 'top') {   // défile seulement si le bandeau déborde ; la piste est doublée pour boucler sans saut
+        var track = sum.firstChild;
+        if (track.scrollWidth > sum.clientWidth) {
+          track.innerHTML += track.innerHTML;
+          track.style.animationDuration = Math.max(12, Math.round(track.scrollWidth / 2 / 40)) + 's';
+          track.classList.add('run');
+        }
+      }
     }
 
     /* ----- barre du haut (étages, rotation) : seulement avec la commande à l'écran ----- */
@@ -568,6 +668,13 @@
       last.plan.floors.slice().reverse().forEach(function (f) { bar.appendChild(b(f.name, f.id, cam.sel === f.id)); });
       var sp = document.createElement('span'); sp.className = 'hpl-sp'; bar.appendChild(sp);
       bar.appendChild(b('⟲', 'rl', false)); bar.appendChild(b('⟳', 'rr', false));
+      if (last.plan.spinSwitch !== false) {   // interrupteur de rotation (§198) : vaut 2 minutes, puis le réglage du widget reprend
+        var on = spinning(), x = document.createElement('button');
+        x.type = 'button'; x.className = 'hpl-k hpl-rot' + (on ? ' on' : ''); x.setAttribute('aria-pressed', on ? 'true' : 'false');
+        x.innerHTML = 'Rotation <i class="hpl-sw"></i>';
+        x.onclick = function () { spinOverride = !spinning(); spinUntil = Date.now() + 120000; userUntil = 0; drawBar(); };
+        bar.appendChild(x);
+      }
     }
     function pick(key) {
       userUntil = Date.now() + 8000;
@@ -576,7 +683,27 @@
     }
 
     /* ----- panneau de commande d'un appareil ----- */
+    /* toucher l'étiquette d'une pièce : la liste de ses appareils, chacun ouvre son panneau de commande */
+    function drawRoomSheet() {
+      var key = panelId.slice(5), parts = key.split('/'), r = roomsOf(parts[0]).filter(function (x) { return x.id === parts[1]; })[0];
+      var ds = last.plan.devices.filter(function (d) { return d.floor === parts[0] && d.room === parts[1] && byId[d.id] && byId[d.id].state !== 'absent' && !hiddenOff(byId[d.id]); });
+      if (!r || !ds.length) { closeSheet(); return; }
+      sheet.className = 'hpl-sheet open'; sheet.innerHTML = '';
+      var head = document.createElement('div'); head.className = 'hpl-sh';
+      head.innerHTML = '<span class="hpl-sn"></span><button type="button" class="hpl-sx" aria-label="Fermer">×</button>';
+      head.querySelector('.hpl-sn').textContent = r.name; head.querySelector('.hpl-sx').onclick = closeSheet;
+      sheet.appendChild(head);
+      ds.forEach(function (d) {
+        var e = eView(byId[d.id]), x = document.createElement('button');
+        x.type = 'button'; x.className = 'hpl-sb hpl-srow ' + haPlanState(e);
+        x.innerHTML = haIcon(e) + '<span class="hpl-sn"></span><span class="hpl-sv"></span>';
+        x.querySelector('.hpl-sn').textContent = e.name; x.querySelector('.hpl-sv').textContent = haValue(e, last.decimals, now());
+        x.onclick = function () { openSheet(d.id); };
+        sheet.appendChild(x);
+      });
+    }
     function drawSheet() {
+      if (panelId && panelId.indexOf('room:') === 0) { drawRoomSheet(); return; }
       var raw = byId[panelId]; if (!raw || raw.state === 'absent') { closeSheet(); return; }
       if (holding) return;
       var e = eView(raw), d = e.domain, c = function (a) { return haCan(raw, a); };
@@ -643,8 +770,10 @@
     /* ----- rotation au doigt, toucher d'une pastille ----- */
     var drag = null;
     view.addEventListener('pointerdown', function (ev) {
-      var chip = ev.target.closest && ev.target.closest('.hpl-chip');
-      drag = { x: ev.clientX, y: ev.clientY, rz: cam.rz, rx: cam.rx, id: chip ? chip.parentNode.parentNode.getAttribute('data-p') : null, moved: false };
+      var chip = ev.target.closest && ev.target.closest('.hpl-chip'), pin = chip && chip.closest('.hpl-pin');
+      var id = pin ? (pin.getAttribute('data-p') || 'room:' + pin.getAttribute('data-rp')) : null;
+      drag = { x: ev.clientX, y: ev.clientY, rz: cam.rz, rx: cam.rx, id: id, moved: false };
+      userUntil = Date.now() + 20000;   // on touche l'écran : la rotation s'arrête le temps de viser une pastille
       try { view.setPointerCapture(ev.pointerId); } catch (x) {}
     });
     view.addEventListener('pointermove', function (ev) {
@@ -688,7 +817,8 @@
       last = d; byId = {};
       (d.entities || []).forEach(function (e) { byId[e.id] = e; });
       d.plan.touch = (d.entities || []).some(function (e) { return (e.ctrl || []).length; });
-      var sig = JSON.stringify([d.plan.floors, d.plan.devices]);
+      var sig = JSON.stringify([d.plan.floors, d.plan.devices, d.plan.spinSwitch]);
+      layout();
       if (sig !== built) { built = sig; build(d.plan); }
       events(); update();
       camera();
@@ -698,11 +828,15 @@
     var t0 = Date.now(), raf = 0, dead = false;
     function spin() {
       if (dead) return;
-      if (last && last.plan && last.plan.spin && !last.plan.touch && Date.now() > userUntil && !focusUntil) { cam.rz = -32 + 24 * Math.sin((Date.now() - t0) / 7000); camera(); }
+      if (spinOverride !== null && Date.now() >= spinUntil) { spinOverride = null; drawBar(); }   // l'interrupteur rend la main au réglage
+      if (last && last.plan && spinning() && !panelId && Date.now() > userUntil && !focusUntil) { cam.rz = -32 + 24 * Math.sin((Date.now() - t0) / 7000); camera(); }
       raf = requestAnimationFrame(spin);
     }
     raf = requestAnimationFrame(spin);
-    if (window.ResizeObserver) { var ro = new ResizeObserver(function () { camera(); }); ro.observe(view); h.onStop(function () { ro.disconnect(); }); }
+    if (window.ResizeObserver) {
+      var ro = new ResizeObserver(function () { if (last) { var m = layoutMode; layout(); if (m !== layoutMode) drawSummary(); } camera(); });
+      ro.observe(view); ro.observe(el); h.onStop(function () { ro.disconnect(); });
+    }
     h.onStop(function () { dead = true; cancelAnimationFrame(raf); clearTimeout(toastTimer); clearTimeout(focusTimer); });
   }
   A.register('ha-plan', haPlanApp);

@@ -785,7 +785,12 @@ public class HomeAssistantProvider(HomeAssistantClient ha, HomeAssistantLive liv
                     };
                 }),
                 heat = Opt("heat", "false") == "true",
-                spin = Opt("spin", "true") != "false", explode = Opt("explode", "true") != "false", focus = Opt("focus", "true") != "false", labels = Opt("labels", "all"),
+                spin = Opt("spin", "true") != "false", explode = Opt("explode", "true") != "false", focus = Opt("focus", "true") != "false",
+                // affichage allégé (§198) : étiquettes par pièce, indisponibles masqués, résumé hors de la scène, interrupteur de rotation
+                labels = Opt("labels", "room") is "room" or "active" or "all" or "none" ? Opt("labels", "room") : "room",
+                hideOff = Opt("hideOff", "true") != "false",
+                summary = Opt("summary", "right") is "right" or "left" or "top" or "none" ? Opt("summary", "right") : "right",
+                spinSwitch = Opt("spinSwitch", "true") != "false",
             };
     }
 
