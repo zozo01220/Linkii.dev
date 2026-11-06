@@ -55,7 +55,7 @@ public static class ConnectedAccounts
         new(Nextcloud, "Nextcloud", "Dossiers d'un serveur Nextcloud ou ownCloud", ["drv-nextcloud"]),
         new(Sftp, "Serveur SFTP", "Dossiers d'un serveur SFTP", ["drv-sftp"]),
         new(Dropbox, "Dropbox", "Dossiers de votre compte Dropbox", ["drv-dropbox"]),
-        new(HomeAssistant, "Home Assistant", "Capteurs, interrupteurs et lumières de votre maison", ["ha-home"]),
+        new(HomeAssistant, "Home Assistant", "Capteurs, interrupteurs, lumières, thermostats, volets, scènes et serrures", ["ha-home"]),
     };
 
     public static KindDef Kind(string id) => Kinds.First(k => k.Id == id);

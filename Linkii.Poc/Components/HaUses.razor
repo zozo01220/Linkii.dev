@@ -1,0 +1,40 @@
+@inject TenantStore Store
+@inject ModeService Modes
+
+@* Ce que l'intégration Home Assistant met à disposition, visible dès la connexion : les sept widgets (activés) et la source de données
+   « Home Assistant » (états et historique pour les compositions : champs, listes, graphiques, indicateurs ; mode expert, plan Pro). *@
+<div class="ha-uses">
+    <a class="ha-use" href="/widgets">
+        <Ico Name="home" Size="16" />
+        <span><b>@HomeAssistantRules.Families.Length widgets</b><small>@string.Join(", ", HomeAssistantRules.Families.Select(f => f.Noun)) · proposés dans l'édition des écrans et des bornes@(screens > 0 ? $" · sur {screens} écran{(screens > 1 ? "s" : "")}" : "")</small></span>
+    </a>
+    @if (growth && Modes.Expert)
+    {
+        <a class="ha-use" href="/datasources">
+            <Ico Name="bolt" Size="16" />
+            <span><b>Source de données « Home Assistant »</b><small>@sets jeu(x) · états actuels ou historique, pour les champs, listes, graphiques et indicateurs des compositions</small></span>
+        </a>
+    }
+    else
+    {
+        <div class="ha-use dim">
+            <Ico Name="bolt" Size="16" />
+            <span><b>Graphiques et historique</b><small>@(growth ? "Passez en mode expert pour utiliser la source de données « Home Assistant » dans les compositions." : "Avec le plan Pro : états et historique dans les compositions (graphiques, indicateurs).")</small></span>
+        </div>
+    }
+</div>
+
+@code {
+    private int screens, sets;
+    private bool growth;
+
+    protected override void OnInitialized()
+    {
+        (screens, sets, growth) = Store.Read(d =>
+        {
+            var n = d.Screens.Count(s => s.Widgets.Any(w => HomeAssistantRules.IsHaApp(w.AppId)));
+            var conns = d.Tenant.DataConnections.Where(c => c.Kind == DataKinds.Ha).Select(c => c.Id).ToHashSet();
+            return (n, d.Tenant.DataSets.Count(x => conns.Contains(x.ConnectionId)), d.Tenant.IsGrowth);
+        });
+    }
+}

@@ -141,7 +141,7 @@ public class AppCatalog
             if (f.Type == "gfile" && f.Accept is not ("presentation" or "document" or "powerpoint")) p.Add($"fichier sans type accepté (presentation, document ou powerpoint) : {f.Key}");
             if (f.Zone is not ("source" or "main" or "advanced")) p.Add($"zone inconnue (source, main ou advanced) : {f.Key}");
             if (f.Ui != null && !(f.Ui == "segmented" && f.Type == "select")) p.Add($"« ui » n'existe que pour un select segmented : {f.Key}");
-            if (f.Type == "haentity" && (f.Domains.Count == 0 || f.Domains.Any(d => !HomeAssistantRules.Domains.Contains(d)))) p.Add($"entités Home Assistant sans domaine valide (sensor, switch, light) : {f.Key}");
+            if (f.Type == "haentity" && (f.Domains.Count == 0 || f.Domains.Any(d => !HomeAssistantRules.Domains.Contains(d)))) p.Add($"entités Home Assistant sans domaine valide ({string.Join(", ", HomeAssistantRules.Domains)}) : {f.Key}");
         }
         return p;
     }

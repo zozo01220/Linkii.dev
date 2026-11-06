@@ -60,7 +60,8 @@ else if (HomeAssistantRules.IsHaApp(wid.AppId))
        valeurs en direct sur l'écran seulement. La taille doit rester celle du vrai widget : c'est elle qui borne la position au glisser-déposer. *@
     var haIds = HomeAssistantRules.ParseEntities(wid.Settings.GetValueOrDefault("entities"));
     var haTitle = wid.Settings.GetValueOrDefault("title") ?? "";
-    var haSwitch = wid.AppId != "ha-sensors";
+    var haCtrl = wid.Settings.GetValueOrDefault("control") != "false";
+    var haKnown = Store.Read(d => d.Tenant.HomeAssistant?.Entities.ToDictionary(e => e.Id, e => e.Copy())) ?? new();
     <div class="wg-ha">
         @if (haTitle.Length > 0) { <div class="wg-ha-t">@haTitle</div> }
         @if (haIds.Count == 0)
@@ -72,10 +73,29 @@ else if (HomeAssistantRules.IsHaApp(wid.AppId))
             <div class="wg-ha-list">
                 @foreach (var id in haIds)
                 {
-                    <div class="wg-ha-row">
-                        <span class="wg-ha-n">@HaName(id)</span>
-                        <span class="wg-ha-v">@HaValue(wid.AppId, id)</span>
-                        @if (haSwitch) { <span class="wg-ha-sw"></span> }
+                    var known = haKnown.GetValueOrDefault(id);
+                    var dom = HomeAssistantRules.Domain(id);
+                    <div class="wg-ha-row @(known == null ? "lost" : "")" title="@(known == null ? "Introuvable dans Home Assistant (supprimée ou renommée) : l'écran ne l'affiche pas." : id)">
+                        <span class="wg-ha-n">@(known?.Name ?? id)</span>
+                        @if (known == null)
+                        {
+                            <span class="wg-ha-v wg-ha-lost">Introuvable</span>
+                        }
+                        else
+                        {
+                            <span class="wg-ha-v">@HaValue(dom, known.Unit)</span>
+                            @if (haCtrl)
+                            {
+                                @switch (dom)
+                                {
+                                    case HomeAssistantRules.Switch or HomeAssistantRules.InputBoolean or HomeAssistantRules.Fan or HomeAssistantRules.Light: <span class="wg-ha-sw"></span> break;
+                                    case HomeAssistantRules.Climate: <span class="wg-ha-sq">−</span><span class="wg-ha-sq">+</span> break;
+                                    case HomeAssistantRules.Cover: <span class="wg-ha-sq">▲</span><span class="wg-ha-sq">▼</span> break;
+                                    case HomeAssistantRules.Scene or HomeAssistantRules.Script: <span class="wg-ha-go">Lancer</span> break;
+                                    case HomeAssistantRules.Lock: <span class="wg-ha-go">Déverrouiller</span> break;
+                                }
+                            }
+                        }
                     </div>
                 }
             </div>
@@ -97,17 +117,17 @@ else
     private static readonly System.Globalization.CultureInfo Fr = new("fr-CH");
     private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
 
-    /// <summary>Nom d'une entité Home Assistant, d'après le cache du compte de l'organisation (l'identifiant sinon).</summary>
-    private string HaName(string entityId) =>
-        Store.Read(d => d.Tenant.HomeAssistant)?.Entities.FirstOrDefault(e => e.Id == entityId)?.Name ?? entityId;
-
-    /// <summary>Valeur d'exemple d'une entité dans l'aperçu : même encombrement que sur l'écran (« Éteint » pour une commande, « — » et l'unité pour un capteur).</summary>
-    private string HaValue(string appId, string entityId)
+    /// <summary>Valeur d'exemple d'une entité dans l'aperçu : même encombrement que sur l'écran (valeurs en direct sur l'écran seulement).</summary>
+    private static string HaValue(string domain, string unit) => domain switch
     {
-        if (appId != "ha-sensors") return "Éteint";
-        var unit = Store.Read(d => d.Tenant.HomeAssistant)?.Entities.FirstOrDefault(e => e.Id == entityId)?.Unit ?? "";
-        return unit.Length > 0 ? "— " + unit : "—";
-    }
+        HomeAssistantRules.Switch or HomeAssistantRules.InputBoolean or HomeAssistantRules.Fan or HomeAssistantRules.Light => "Éteint",
+        HomeAssistantRules.Climate => "—°",
+        HomeAssistantRules.Cover => "Fermé",
+        HomeAssistantRules.Lock => "Verrouillée",
+        HomeAssistantRules.BinarySensor => "—",
+        HomeAssistantRules.Scene or HomeAssistantRules.Script => "",
+        _ => unit.Length > 0 ? "— " + unit : "—",
+    };
 
     // Texte libre : largeur, couleurs et alignement choisis (couleurs vérifiées : on les écrit dans un style).
     public static string TextStyle(ScreenWidget w)

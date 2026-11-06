@@ -11,7 +11,7 @@
 <div class="modal-backdrop" @onclick="Close"></div>
 <div class="modal app-modal dsx-dlg dsx-wide" role="dialog" aria-modal="true" aria-labelledby="dsd-title">
     <div class="modal-head">
-        <span class="dsx-ico @Connection.Kind">@(Connection.Kind == DataKinds.Api ? "{ }" : Connection.Kind == DataKinds.Db ? "SQL" : Connection.Kind == DataKinds.Push ? "→" : "CSV")</span>
+        <span class="dsx-ico @Connection.Kind">@(Connection.Kind == DataKinds.Api ? "{ }" : Connection.Kind == DataKinds.Db ? "SQL" : Connection.Kind == DataKinds.Push ? "→" : Connection.Kind == DataKinds.Ha ? "HA" : "CSV")</span>
         <div class="grow" style="min-width:0">
             <input id="dsd-title" class="dsx-title" @bind="D.Name" maxlength="80" placeholder="Nom du jeu de données" aria-label="Nom du jeu de données" />
             <small>Jeu de données · @Connection.Name</small>
@@ -81,6 +81,54 @@ POST @Nav.BaseUri.TrimEnd('/')/api/v1/datasets/@D.Id/rows   (ajoute ; ?key=colon
                                 <textarea id="dsd-sql" class="dsx-sql-in" rows="9" spellcheck="false" @bind="D.Sql" @bind:event="oninput" placeholder="SELECT salle, etage, statut, prochaine_reunion&#10;FROM dbo.v_occupation_salles&#10;WHERE statut <> 'Fermée'&#10;ORDER BY salle"></textarea>
                                 <small class="@(D.Sql.Trim().Length > 0 && DataSql.Check(D.Sql) != null ? "dsx-warn" : "")">@(D.Sql.Trim().Length > 0 && DataSql.Check(D.Sql) is { } why ? why : "Une seule instruction SELECT (ou WITH … SELECT), exécutée en lecture seule, 10 s et " + DataKinds.MaxRows.ToString("N0") + " lignes au plus.")</small>
                             </div>
+                        }
+                    }
+                    else if (Connection.Kind == DataKinds.Ha)
+                    {
+                        @* Home Assistant : états actuels (une ligne par entité) ou historique numérique (heure, entité, valeur) pour les graphiques et indicateurs *@
+                        <div class="dsx-seg" role="radiogroup" style="margin-bottom:12px">
+                            <button type="button" role="radio" aria-checked="@(haMode == "states" ? "true" : "false")" class="@(haMode == "states" ? "on" : "")" @onclick='() => HaSet("states")'>États actuels</button>
+                            <button type="button" role="radio" aria-checked="@(haMode == "history" ? "true" : "false")" class="@(haMode == "history" ? "on" : "")" @onclick='() => HaSet("history")'>Historique</button>
+                        </div>
+                        @if (haAccount == null)
+                        {
+                            <p class="dsx-muted">Aucun compte Home Assistant : connectez-le dans <a href="/integrations">Intégrations › Home Assistant</a>.</p>
+                        }
+                        else
+                        {
+                            @if (haMode == "states")
+                            {
+                                <label class="dw-check"><input type="checkbox" class="ios" checked="@haAll" @onchange="e => { haAll = (bool)e.Value!; HaSync(); }" /> Toutes les entités (@haAccount.Entities.Count)</label>
+                            }
+                            else
+                            {
+                                <div class="dw-field"><label for="dsd-hah">Période</label>
+                                    <select id="dsd-hah" value="@haHours" @onchange="e => { haHours = int.TryParse(e.Value?.ToString(), out var h) ? h : 24; HaSync(); }">
+                                        @foreach (var h in HomeAssistantRules.HistoryHours) { <option value="@h">@(h < 24 ? $"{h} dernières heures" : h == 24 ? "24 dernières heures" : $"{h / 24} derniers jours")</option> }
+                                    </select>
+                                    <small>Valeurs moyennées : 240 points au plus par entité. 10 entités au plus.</small>
+                                </div>
+                            }
+                            @if (haMode == "history" || !haAll)
+                            {
+                                <div class="hp">
+                                    @if (haIds.Count > 0)
+                                    {
+                                        <div class="hp-chips">@foreach (var id in haIds) { var iid = id; <span class="hp-chip">@(haAccount.Entities.FirstOrDefault(x => x.Id == iid)?.Name ?? iid)<button type="button" aria-label="Retirer" @onclick="() => HaToggle(iid)">×</button></span> }</div>
+                                    }
+                                    <div class="hp-bar"><input type="search" class="hp-search" placeholder="Rechercher une entité" aria-label="Rechercher une entité" @bind="haSearch" @bind:event="oninput" /><span class="hp-count">@haIds.Count choisie(s)</span></div>
+                                    <div class="hp-list" style="max-height:220px;overflow-y:auto">
+                                        @foreach (var e in HaChoices().Take(80))
+                                        {
+                                            var on = haIds.Contains(e.Id);
+                                            <div class="hp-row">
+                                                <span class="hp-txt"><span class="hp-name">@e.Name</span><span class="hp-id">@e.Id</span></span>
+                                                <button type="button" class="switch @(on ? "on" : "")" role="switch" aria-checked="@(on ? "true" : "false")" aria-label="@e.Name" @onclick="() => HaToggle(e.Id)"><span></span></button>
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            }
                         }
                     }
                     else
@@ -256,10 +304,33 @@ POST @Nav.BaseUri.TrimEnd('/')/api/v1/datasets/@D.Id/rows   (ajoute ; ?key=colon
 
     private List<DataColumn> Cols => table?.Columns ?? D.Columns;
 
+    // Home Assistant : mode, entités choisies, période ; le chemin du jeu en est déduit (HomeAssistantRules.DataPathOf)
+    private HomeAssistantAccount? haAccount;
+    private string haMode = "states", haSearch = "";
+    private bool haAll = true;
+    private int haHours = 24;
+    private List<string> haIds = new();
+
+    private void HaSet(string mode) { if (mode != haMode) { D.Columns.Clear(); table = null; raw = null; } haMode = mode; HaSync(); }   // autre mode : autres colonnes, types détectés de nouveau
+    private void HaToggle(string id) { if (!haIds.Remove(id) && (haMode != "history" || haIds.Count < 10)) haIds.Add(id); HaSync(); }
+    private void HaSync() => D.Path = HomeAssistantRules.DataPathOf(haMode, haMode == "states" && haAll ? Array.Empty<string>() : haIds, haHours);
+
+    /// <summary>Entités proposées : toutes pour les états ; pour l'historique, celles qui ont des valeurs à tracer.</summary>
+    private IEnumerable<HomeAssistantEntity> HaChoices() => (haAccount?.Entities ?? new())
+        .Where(e => haMode == "states" || e.Domain is HomeAssistantRules.Sensor or HomeAssistantRules.BinarySensor or HomeAssistantRules.Climate or HomeAssistantRules.Cover or HomeAssistantRules.Light or HomeAssistantRules.Switch)
+        .Where(e => haSearch.Trim().Length == 0 || e.Name.Contains(haSearch.Trim(), StringComparison.OrdinalIgnoreCase) || e.Id.Contains(haSearch.Trim(), StringComparison.OrdinalIgnoreCase));
+
     protected override async Task OnInitializedAsync()
     {
         D = DataSet.Copy();
         clientId = Store.ClientId;
+        if (Connection.Kind == DataKinds.Ha)
+        {
+            haAccount = Store.Read(d => d.Tenant.HomeAssistant?.Copy());
+            var p = HomeAssistantRules.ParseDataPath(D.Path);
+            haMode = p.Mode; haAll = p.All; haIds = p.Ids; haHours = p.Mode == "history" ? p.Hours : 24;
+            if (D.Path.Length == 0) HaSync();
+        }
         history = Data.History(clientId, D.Id);
         used = Store.Read(d => DataSourceOps.UsedBy(d, D.Id).Select(m => (m.Id, m.Name)).ToList());
         sqlMode = D.Sql.Length > 0;

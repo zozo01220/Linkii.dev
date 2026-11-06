@@ -12,6 +12,8 @@
 @inject MicrosoftAuth MsAuth
 @inject DropboxAuth DropboxAuth
 @inject FacebookAuth FacebookAuth
+@inject HomeAssistantClient HaClient
+@inject HomeAssistantLive HaLive
 @using Microsoft.JSInterop
 @inject IJSRuntime JS
 
@@ -953,9 +955,11 @@ else
     {
         var ha = tenant.HomeAssistant;
         (string status, string css, string? why) = ha == null ? ("À connecter", "mise-a-jour", (string?)null)
-            : ha.LastError.Length > 0 ? ("Erreur de connexion", "hors-ligne", ha.LastError)
-            : ("Connecté", "en-ligne", (string?)null);
-        return new("ha-home", "Home Assistant", "Maison connectée", "Capteurs, interrupteurs et lumières de votre Home Assistant.", "homeassistant", null, status, css, ha == null, why);
+            : ha.LastError.Length > 0 ? ("Injoignable", "hors-ligne", ha.LastError + " Les écrans gardent la dernière valeur.")
+            : ha.Missing.Count > 0 ? ($"{ha.Missing.Count} entité{(ha.Missing.Count > 1 ? "s" : "")} introuvable{(ha.Missing.Count > 1 ? "s" : "")}", "mise-a-jour",
+                $"{string.Join(", ", ha.Missing.Take(4))}{(ha.Missing.Count > 4 ? "…" : "")} : supprimée(s) ou renommée(s) dans Home Assistant, encore choisie(s) dans un widget ou un jeu de données.")
+            : (HaLive.Mode(Store.ClientId) ?? "Connecté", "en-ligne", (string?)null);
+        return new("ha-home", "Home Assistant", "Maison connectée", "Capteurs, interrupteurs, lumières, thermostats, volets, scènes et serrures de votre Home Assistant.", "homeassistant", null, status, css, ha == null, why);
     }
 
     // ---------- Intégrations utilisées par les comptes ----------
@@ -1093,7 +1097,7 @@ else
             case ConnectedAccounts.Dropbox: await DropboxAuth.Disconnect(Store.ClientId); break;
             case ConnectedAccounts.Facebook: FacebookAuth.Disconnect(Store.ClientId); break;
             case ConnectedAccounts.Nextcloud or ConnectedAccounts.Sftp: Store.Write(d => d.Tenant.DriveAccounts.RemoveAll(x => x.Source == id)); break;
-            case ConnectedAccounts.HomeAssistant: Store.Write(d => { d.Tenant.HomeAssistant = null; }); break;
+            case ConnectedAccounts.HomeAssistant: await HaClient.Disconnect(Store.ClientId, Store); break;
             default:
                 Store.Write(d =>
                 {

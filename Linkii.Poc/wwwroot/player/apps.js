@@ -103,77 +103,233 @@
     }, 10 * 60 * 1000);
   });
 
-  /* ---------- Home Assistant : capteurs (lecture) et interrupteurs (touchés à l'écran) ---------- */
-  var HA_BINARY = { door: ['Ouverte', 'Fermée'], window: ['Ouverte', 'Fermée'], motion: ['Mouvement', 'Calme'],
-    occupancy: ['Présence', 'Absence'], presence: ['Présent', 'Absent'], opening: ['Ouvert', 'Fermé'] };
-  function haValue(e) {
-    if (e.state === 'absent') return '?';
-    if (e.state === 'unavailable' || e.state === 'unknown') return '—';
-    if (e.domain === 'binary_sensor') { var l = HA_BINARY[e.deviceClass] || ['Actif', 'Inactif']; return e.on ? l[0] : l[1]; }
-    if (e.domain === 'switch' || e.domain === 'light' || e.domain === 'input_boolean') return e.on ? 'Allumé' : 'Éteint';
-    return e.state + (e.unit ? ' ' + e.unit : '');
+  /* ---------- Home Assistant : capteurs, interrupteurs, lumières, thermostats, volets, scènes, serrures ----------
+     Un seul rendu pour les sept widgets : le serveur décrit chaque entité (état, valeurs utiles, commandes permises « ctrl »).
+     Les données arrivent en direct (le serveur prévient l'écran quand une entité change) ; le sondage de 60 s reste une sécurité.
+     Une commande affiche tout de suite l'état voulu et le garde jusqu'à ce que Home Assistant le confirme (8 s au plus). */
+  var HA_ICONS = {
+    thermo: '<path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/>',
+    drop: '<path d="M12 2.7l5.7 5.6a8 8 0 1 1-11.4 0z"/>',
+    bolt: '<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>',
+    battery: '<rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 11v2"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    air: '<path d="M9.6 4.6A2 2 0 1 1 11 8H2M12.6 19.4A2 2 0 1 0 14 16H2M17.7 7.7A2.5 2.5 0 1 1 19.5 12H2"/>',
+    gauge: '<path d="M12 14l4-4"/><path d="M3.3 19a10 10 0 1 1 17.4 0"/>',
+    door: '<rect x="5" y="3" width="14" height="18" rx="1"/><path d="M15 12v.01"/>',
+    window: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18M3 12h18"/>',
+    motion: '<circle cx="13" cy="4" r="2"/><path d="M7 21l3-6 3 3v3M10 15l1-5 4 3 3-1M8 9l3-1"/>',
+    person: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    alert: '<path d="M12 3L2 21h20z"/><path d="M12 10v4M12 17v.01"/>',
+    bulb: '<path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/>',
+    plug: '<path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/>',
+    toggle: '<rect x="2" y="7" width="20" height="10" rx="5"/><circle cx="16" cy="12" r="3"/>',
+    fan: '<circle cx="12" cy="12" r="2"/><path d="M12 10c0-4 1-7 4-7s3 4-2 7M14 12c4 0 7 1 7 4s-4 3-7-2M12 14c0 4-1 7-4 7s-3-4 2-7M10 12c-4 0-7-1-7-4s4-3 7 2"/>',
+    cover: '<rect x="3" y="3" width="18" height="18" rx="1"/><path d="M3 8h18M3 13h18M12 13v5"/>',
+    scene: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/>',
+    script: '<path d="M7 4l13 8-13 8z"/>',
+    lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    unlock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>'
+  };
+  var HA_BINARY = { door: ['Ouverte', 'Fermée'], garage_door: ['Ouverte', 'Fermée'], window: ['Ouverte', 'Fermée'], opening: ['Ouvert', 'Fermé'],
+    motion: ['Mouvement', 'Calme'], occupancy: ['Présence', 'Absence'], presence: ['Présent', 'Absent'], moisture: ['Humide', 'Sec'],
+    smoke: ['Fumée !', 'OK'], gas: ['Gaz !', 'OK'], problem: ['Problème', 'OK'], safety: ['Danger', 'OK'], battery: ['Faible', 'OK'],
+    lock: ['Ouvert', 'Verrouillé'], connectivity: ['Connecté', 'Déconnecté'], plug: ['Branché', 'Débranché'], power: ['Sous tension', 'Coupé'],
+    running: ['En marche', 'Arrêté'], vibration: ['Vibration', 'Calme'], light: ['Lumière', 'Sombre'] };
+  var HA_COVER = { open: 'Ouvert', closed: 'Fermé', opening: 'S’ouvre…', closing: 'Se ferme…' };
+  var HA_LOCK = { locked: 'Verrouillée', unlocked: 'Déverrouillée', locking: 'Verrouillage…', unlocking: 'Déverrouillage…', jammed: 'Bloquée !', open: 'Ouverte', opening: 'Ouverture…' };
+  var HA_HVAC = { heating: 'chauffe', cooling: 'refroidit', idle: 'au repos', off: 'arrêté', drying: 'déshumidifie', fan: 'ventile', preheating: 'préchauffe' };
+  var HA_COLORS = ['#FFFFFF', '#FFC27A', '#FF5A4D', '#FFD93D', '#4CD964', '#3B8BD4', '#A66CFF'];
+  var HA_APPS = ['ha-sensors', 'ha-switches', 'ha-lights', 'ha-climate', 'ha-covers', 'ha-scenes', 'ha-locks'];
+
+  function haIcon(e) {
+    var dc = e.deviceClass || '', u = e.unit || '', d = e.domain, k;
+    if (d === 'light') k = 'bulb';
+    else if (d === 'switch') k = 'plug';
+    else if (d === 'input_boolean') k = 'toggle';
+    else if (d === 'fan') k = 'fan';
+    else if (d === 'climate') k = 'thermo';
+    else if (d === 'cover') k = dc === 'window' ? 'window' : dc === 'door' || dc === 'garage' || dc === 'gate' ? 'door' : 'cover';
+    else if (d === 'scene') k = 'scene';
+    else if (d === 'script') k = 'script';
+    else if (d === 'lock') k = e.on ? 'unlock' : 'lock';
+    else if (d === 'binary_sensor') k = ({ door: 'door', garage_door: 'door', opening: 'door', window: 'window', motion: 'motion', occupancy: 'person', presence: 'person',
+      moisture: 'drop', smoke: 'alert', gas: 'alert', problem: 'alert', safety: 'alert', battery: 'battery', lock: 'lock', plug: 'plug', power: 'bolt', light: 'sun' })[dc] || 'gauge';
+    else k = ({ temperature: 'thermo', humidity: 'drop', moisture: 'drop', power: 'bolt', energy: 'bolt', current: 'bolt', voltage: 'bolt', apparent_power: 'bolt',
+      battery: 'battery', illuminance: 'sun', irradiance: 'sun', carbon_dioxide: 'air', pm25: 'air', pm10: 'air', aqi: 'air', volatile_organic_compounds: 'air',
+      pressure: 'gauge', atmospheric_pressure: 'gauge' })[dc] || (/°[CF]$/.test(u) ? 'thermo' : /^(k?W|kWh|Wh|V|A|mA)$/.test(u) ? 'bolt' : /^(lx|lm)$/.test(u) ? 'sun' : /ppm|µg/.test(u) ? 'air' : 'gauge');
+    return '<svg class="ha-i" viewBox="0 0 24 24" aria-hidden="true">' + HA_ICONS[k] + '</svg>';
   }
-  /* Un seul rendu pour les trois widgets : le serveur dit pour chaque entité si elle s'actionne (interrupteur ou lumière) ou se lit (capteur). */
+  /** Nombre au format suisse : « auto » = une décimale sous 100, aucune au-delà (zéros inutiles retirés). */
+  function haNum(v, dec) {
+    var n = Number(v), auto = dec === 'auto' || dec == null || dec === '', d = auto ? (Math.abs(n) < 100 ? 1 : 0) : +dec;
+    try { return n.toLocaleString('fr-CH', { minimumFractionDigits: auto ? 0 : d, maximumFractionDigits: d }); } catch (x) { return n.toFixed(d); }
+  }
+  function haRel(iso, now) {
+    var t = Date.parse(iso); if (isNaN(t)) return iso;
+    var s = Math.round((t - now) / 1000), a = Math.abs(s);
+    try {
+      var rf = new Intl.RelativeTimeFormat('fr', { numeric: 'auto' });
+      if (a < 60) return rf.format(s, 'second');
+      if (a < 3600) return rf.format(Math.round(s / 60), 'minute');
+      if (a < 86400) return rf.format(Math.round(s / 3600), 'hour');
+      if (a < 7 * 86400) return rf.format(Math.round(s / 86400), 'day');
+    } catch (x) {}
+    return new Date(t).toLocaleDateString('fr-CH', { day: 'numeric', month: 'short' });
+  }
+  function haDeg(v) { return v == null ? '—' : haNum(v, Math.round(v) === v ? 0 : 1) + '°'; }
+  /** Texte de la valeur d'une entité (capteur, ou état lisible des autres domaines). */
+  function haValue(e, dec, now) {
+    if (e.available === false) return 'Indisponible';
+    var d = e.domain, st = e.state;
+    if (d === 'binary_sensor') { var l = HA_BINARY[e.deviceClass] || ['Actif', 'Inactif']; return e.on ? l[0] : l[1]; }
+    if (d === 'switch' || d === 'light' || d === 'input_boolean' || d === 'fan') return e.on ? (d === 'light' && e.brightness != null ? e.brightness + ' %' : 'Allumé') : 'Éteint';
+    if (d === 'climate') return haDeg(e.current);
+    if (d === 'cover') return (HA_COVER[st] || st) + (e.position != null && st !== 'closed' ? ' ' + e.position + ' %' : '');
+    if (d === 'lock') return HA_LOCK[st] || st;
+    if (d === 'scene' || d === 'script') return '';
+    if (e.deviceClass === 'timestamp' || /^\d{4}-\d{2}-\d{2}T/.test(st)) return haRel(st, now);
+    if (st !== '' && !isNaN(Number(st))) return haNum(st, dec) + (e.unit ? ' ' + e.unit : '');
+    return st + (e.unit ? ' ' + e.unit : '');
+  }
+  function haCan(e, a) { return (e.ctrl || []).indexOf(a) >= 0; }
+
   function haApp(h) {
-    var s = h.settings, el = h.el;
+    var s = h.settings, el = h.el, now = function () { return h.now ? h.now() : Date.now(); };
     el.className += ' ha';
-    el.innerHTML = (s.title ? '<div class="ha-t"></div>' : '') + '<div class="ha-list"></div><div class="ha-err"></div>';
-    var titleEl = el.querySelector('.ha-t'), list = el.querySelector('.ha-list'), err = el.querySelector('.ha-err');
+    el.innerHTML = (s.title ? '<div class="ha-t"></div>' : '') + '<div class="ha-list"></div><div class="ha-err"></div><div class="ha-age"></div>';
+    var titleEl = el.querySelector('.ha-t'), list = el.querySelector('.ha-list'), err = el.querySelector('.ha-err'), age = el.querySelector('.ha-age');
     if (titleEl) titleEl.textContent = s.title;
-    var pending = {};   // interrupteur touché : état voulu, affiché le temps que Home Assistant l'applique
-    function paint(row, e, on) {
-      var sw = row.querySelector('.ha-sw');
-      sw.className = 'ha-sw' + (on ? ' on' : '');
-      sw.setAttribute('aria-pressed', on ? 'true' : 'false');
-      row.querySelector('.ha-v').textContent = on ? 'Allumé' : 'Éteint';
+    var last = null, pending = {}, confirm = {}, holding = false;
+
+    /* état voulu en attente de confirmation : { field, value, until } ; oublié dès que Home Assistant le confirme, ou après 8 s */
+    function want(e) {
+      var p = pending[e.id];
+      if (p && (Date.now() > p.until || e[p.field] === p.value)) { delete pending[e.id]; p = null; }
+      return p;
     }
-    /* La liste est redessinée à chaque lecture des données : on retrouve la ligne au moment du clic, pas celle de la liste d'origine. */
-    function rowOf(id) { return list.querySelector('.ha-row[data-id="' + id + '"]'); }
-    function toggle(e) {
-      return function () {
-        var row = rowOf(e.id), sw = row && row.querySelector('.ha-sw');
-        if (!sw || sw.disabled) return;
-        var current = pending.hasOwnProperty(e.id) ? pending[e.id] : e.on;
-        var want = !current;
-        pending[e.id] = want; paint(row, e, want); sw.disabled = true; err.textContent = '';
-        h.command('switch', { entityId: e.id, on: want }).catch(function () {
-          delete pending[e.id];
-          var r = rowOf(e.id);
-          if (r) paint(r, e, current);
-          err.textContent = 'Commande non envoyée. Réessayez.';
-        }).then(function () {
-          var r = rowOf(e.id);
-          if (r) r.querySelector('.ha-sw').disabled = false;
-          delete pending[e.id];
-        });
-      };
-    }
-    h.data(function (d) {
-      if (!d) return;
-      list.innerHTML = '';
-      (d.entities || []).forEach(function (e) {
-        var row = document.createElement('div');
-        row.className = 'ha-row';
-        row.setAttribute('data-id', e.id);
-        row.innerHTML = '<span class="ha-n"></span>';
-        row.firstChild.textContent = e.name;
-        if (e.switchable) {
-          var on = pending.hasOwnProperty(e.id) ? pending[e.id] : e.on;
-          row.innerHTML += '<span class="ha-v"></span><button class="ha-sw" type="button" role="switch"><i></i></button>';
-          row.querySelector('.ha-sw').setAttribute('aria-label', e.name);
-          row.querySelector('.ha-sw').onclick = toggle(e);
-          paint(row, e, on);
-        } else {
-          row.innerHTML += '<span class="ha-v"></span>';
-          row.querySelector('.ha-v').textContent = haValue(e);
-        }
-        list.appendChild(row);
+    function send(e, body, field, value) {
+      if (field) pending[e.id] = { field: field, value: value, until: Date.now() + 8000 };
+      err.textContent = '';
+      body.entityId = e.id;
+      draw();
+      return h.command('ha', body).then(function () { setTimeout(draw, 8100); }, function () {
+        delete pending[e.id];
+        err.textContent = 'Commande non envoyée. Réessayez.';
+        draw();
       });
-    }, 10 * 1000);
+    }
+    function btn(cls, label, aria, fn, disabled) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'ha-b ' + cls; b.textContent = label; b.setAttribute('aria-label', aria);
+      if (disabled) b.disabled = true;
+      b.onclick = fn;
+      return b;
+    }
+    function toggle(e, on) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'ha-sw' + (on ? ' on' : ''); b.setAttribute('role', 'switch');
+      b.setAttribute('aria-checked', on ? 'true' : 'false'); b.setAttribute('aria-label', e.name); b.innerHTML = '<i></i>';
+      if (pending[e.id]) b.disabled = true;
+      b.onclick = function () { send(e, { action: on ? 'off' : 'on' }, 'on', !on); };
+      return b;
+    }
+    function slider(e, value, action, label) {
+      var r = document.createElement('input');
+      r.type = 'range'; r.min = action === 'brightness' ? 1 : 0; r.max = 100; r.step = 1; r.value = value == null ? 0 : value;
+      r.className = 'ha-range'; r.setAttribute('aria-label', label);
+      r.onpointerdown = function () { holding = true; };
+      r.ontouchstart = function () { holding = true; };
+      r.onchange = function () { holding = false; send(e, { action: action, value: +r.value }, action, +r.value); };
+      r.onblur = function () { holding = false; };
+      return r;
+    }
+
+    function row(e) {
+      var p = want(e), view = {}, k;
+      for (k in e) view[k] = e[k];
+      if (p) { view[p.field] = p.value; if (p.field === 'state' && e.domain === 'lock') view.on = p.value === 'unlocked'; }
+      var on = view.on, d = e.domain;
+      var r = document.createElement('div');
+      r.className = 'ha-row' + (e.available === false ? ' off' : '') + (on ? ' is-on' : '');
+      r.setAttribute('data-id', e.id);
+      var main = document.createElement('div');
+      main.className = 'ha-main';
+      main.innerHTML = haIcon(view) + '<span class="ha-n"></span><span class="ha-v"></span><span class="ha-c"></span>';
+      main.querySelector('.ha-n').textContent = e.name;
+      main.querySelector('.ha-v').textContent = haValue(view, last && last.decimals, now());
+      var c = main.querySelector('.ha-c');
+      if (d === 'switch' || d === 'input_boolean' || d === 'fan' || d === 'light') {
+        if (haCan(e, 'on')) c.appendChild(toggle(e, on));
+      } else if (d === 'climate') {
+        var sub = document.createElement('small');
+        sub.className = 'ha-sub';
+        sub.textContent = 'Consigne ' + haDeg(view.target) + (e.hvac && HA_HVAC[e.hvac] ? ' · ' + HA_HVAC[e.hvac] : '');
+        main.querySelector('.ha-n').appendChild(sub);
+        if (haCan(e, 'temp') && view.target != null) {
+          var step = e.step || 0.5, lo = e.min == null ? 5 : e.min, hi = e.max == null ? 30 : e.max;
+          c.appendChild(btn('ha-sq', '−', 'Baisser la consigne', function () { var v = Math.max(lo, Math.round((view.target - step) * 10) / 10); send(e, { action: 'temp', value: v }, 'target', v); }, view.target <= lo));
+          c.appendChild(btn('ha-sq', '+', 'Monter la consigne', function () { var v = Math.min(hi, Math.round((view.target + step) * 10) / 10); send(e, { action: 'temp', value: v }, 'target', v); }, view.target >= hi));
+        }
+      } else if (d === 'cover') {
+        if (haCan(e, 'open')) {
+          c.appendChild(btn('ha-sq', '▲', 'Ouvrir', function () { send(e, { action: 'open' }, 'state', 'open'); }, e.state === 'open' && (e.position == null || e.position >= 100)));
+          if (e.stoppable) c.appendChild(btn('ha-sq', '■', 'Arrêter', function () { send(e, { action: 'stop' }); }));
+          c.appendChild(btn('ha-sq', '▼', 'Fermer', function () { send(e, { action: 'close' }, 'state', 'closed'); }, e.state === 'closed'));
+        }
+      } else if (d === 'scene' || d === 'script') {
+        if (haCan(e, 'activate')) {
+          var go = btn('ha-go', 'Lancer', 'Lancer ' + e.name, function () {
+            go.disabled = true; go.textContent = 'Lancé ✓';
+            h.command('ha', { entityId: e.id, action: 'activate' }).then(function () { setTimeout(draw, 2500); }, function () { err.textContent = 'Commande non envoyée. Réessayez.'; draw(); });
+          });
+          c.appendChild(go);
+        }
+      } else if (d === 'lock') {
+        var act = view.state === 'locked' ? 'unlock' : 'lock';
+        if (haCan(e, act) && e.state !== 'jammed') {
+          var asking = confirm[e.id] > Date.now();
+          c.appendChild(btn('ha-go' + (asking ? ' ask' : ''), asking ? 'Confirmer ?' : act === 'lock' ? 'Verrouiller' : 'Déverrouiller', (act === 'lock' ? 'Verrouiller ' : 'Déverrouiller ') + e.name, function () {
+            if (!(confirm[e.id] > Date.now())) { confirm[e.id] = Date.now() + 4000; draw(); setTimeout(draw, 4100); return; }   // premier appui : on demande confirmation
+            delete confirm[e.id];
+            send(e, { action: act }, 'state', act === 'lock' ? 'locked' : 'unlocked');   // affiché tout de suite, jusqu'à la confirmation
+          }));
+        }
+      }
+      r.appendChild(main);
+      // ligne de réglage : intensité, couleurs, position
+      if (d === 'light' && on && haCan(e, 'brightness') && last.dimmer && e.dimmable) {
+        var dim = document.createElement('div'); dim.className = 'ha-more';
+        dim.appendChild(slider(e, view.brightness, 'brightness', 'Intensité de ' + e.name));
+        r.appendChild(dim);
+      }
+      if (d === 'light' && on && haCan(e, 'color') && last.colors && e.colorable) {
+        var dots = document.createElement('div'); dots.className = 'ha-more ha-dots';
+        HA_COLORS.forEach(function (col) {
+          var b = btn('ha-dot' + (e.color && e.color.toUpperCase() === col ? ' sel' : ''), '', 'Couleur ' + col, function () { send(e, { action: 'color', color: col }); });
+          b.style.background = col;
+          dots.appendChild(b);
+        });
+        r.appendChild(dots);
+      }
+      if (d === 'cover' && haCan(e, 'position') && e.positionable) {
+        var pos = document.createElement('div'); pos.className = 'ha-more';
+        pos.appendChild(slider(e, view.position, 'position', 'Position de ' + e.name));
+        r.appendChild(pos);
+      }
+      return r;
+    }
+
+    function draw() {
+      if (!last || holding) return;
+      list.innerHTML = '';
+      (last.entities || []).forEach(function (e) { if (e.state !== 'absent') list.appendChild(row(e)); });   // entité supprimée ou renommée : signalée dans le back-office, pas à l'écran
+      var t = Date.parse(last.fetchedAt), m = isNaN(t) ? 0 : Math.floor((now() - t) / 60000);
+      age.textContent = m >= 2 ? 'Dernière valeur il y a ' + (m < 60 ? m + ' min' : Math.floor(m / 60) + ' h') : '';
+    }
+    h.data(function (d) { if (!d) return; last = d; draw(); }, 60 * 1000);
+    h.every(function () { if (!holding) draw(); }, 30 * 1000);   // « il y a … » et dates relatives
   }
-  A.register('ha-sensors', haApp);
-  A.register('ha-switches', haApp);
-  A.register('ha-lights', haApp);
+  for (var hai = 0; hai < HA_APPS.length; hai++) A.register(HA_APPS[hai], haApp);
 
   /* ---------- Agenda en bandeau (pleine page et angles : liste, voir player.js) ---------- */
   A.register('agenda', function (h) {

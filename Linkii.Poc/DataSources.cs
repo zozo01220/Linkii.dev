@@ -26,6 +26,8 @@ public static class DataKinds
     public const string Db = "db";
     /// <summary>Envoi direct (API, §153) : le système du client pousse ses lignes (<c>PUT/POST /api/v1/datasets/{id}/rows</c>) ; Linkii ne lit rien.</summary>
     public const string Push = "push";
+    /// <summary>Home Assistant de l'organisation (créée d'office avec l'intégration) : états actuels ou historique d'entités choisies, sans réglage de connexion.</summary>
+    public const string Ha = "ha";
 
     public const int MaxConnections = 20, MaxDataSets = 25;
     public const int MaxRows = 5000, MaxColumns = 60, MaxCell = 2000, MaxBytes = 2_000_000;
@@ -590,7 +592,10 @@ public class DataSetService
 
     private readonly IEventPublisher? events;
 
-    public DataSetService(JsonStore store, SafeHttp http, SecretBox box, RelayBroker relays, IEventPublisher? events = null) { this.store = store; this.http = http; this.box = box; this.relays = relays; this.events = events; }
+    private readonly HomeAssistantClient? ha;
+
+    public DataSetService(JsonStore store, SafeHttp http, SecretBox box, RelayBroker relays, IEventPublisher? events = null, HomeAssistantClient? ha = null)
+    { this.store = store; this.http = http; this.box = box; this.relays = relays; this.events = events; this.ha = ha; }
 
     public static string Dir(Guid clientId) => Path.Combine(Root, clientId.ToString("N"));
     public static string FilesDir(Guid clientId) => Path.Combine(Dir(clientId), "files");
@@ -647,6 +652,7 @@ public class DataSetService
         cts.CancelAfter(limit);
         try
         {
+            if (c.Kind == DataKinds.Ha) return await HomeAssistant(clientId, ds.Path, cts.Token);
             if (c.Kind == DataKinds.Db)
             {
                 var r = await Sql(clientId, c, "read", ds.Path, ds.Sql, cts.Token);
@@ -656,6 +662,29 @@ public class DataSetService
             return DataTables.Parse(bytes, c.Kind == DataKinds.File ? ds.Path : null, ds.RowsPath, c.Delimiter);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new InvalidOperationException($"Délai dépassé ({limit.TotalSeconds:0} s) : la source n'a pas répondu à temps."); }
+    }
+
+    /// <summary>Jeu Home Assistant : états actuels des entités choisies (toutes : « states:* »), ou leur historique numérique sur les dernières heures.</summary>
+    private async Task<RawTable> HomeAssistant(Guid clientId, string path, CancellationToken ct)
+    {
+        if (ha == null) throw new InvalidOperationException("Home Assistant n'est pas disponible sur ce serveur.");
+        var account = store.Read(db => db.Clients.FirstOrDefault(t => t.Id == clientId)?.HomeAssistant?.Copy())
+            ?? throw new InvalidOperationException("Compte Home Assistant non connecté : connectez-le dans Intégrations › Home Assistant.");
+        var conn = ha.Conn(clientId, account);
+        var p = HomeAssistantRules.ParseDataPath(path);
+        if (p.Mode == "history")
+        {
+            if (p.Ids.Count == 0) throw new InvalidOperationException("Choisissez au moins une entité pour l'historique.");
+            var to = DateTime.UtcNow;
+            var from = to.AddHours(-p.Hours);
+            var series = await ha.History(conn, p.Ids, from, to, ct);
+            var names = account.Entities.GroupBy(e => e.Id).ToDictionary(g => g.Key, g => g.First().Name);
+            return HomeAssistantRules.HistoryTable(series, names, from, to);
+        }
+        var states = await ha.States(conn, ct: ct);
+        var chosen = p.All ? states.Values.Where(s => HomeAssistantRules.IsSupported(s.Id)).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ToList()
+            : p.Ids.Select(id => states.GetValueOrDefault(id)).OfType<HaState>().ToList();
+        return HomeAssistantRules.StatesTable(chosen);
     }
 
     /// <summary>Contenu brut : réponse de l'API (adresse de base + chemin), fichier importé, ou fichier lu à son adresse.</summary>
@@ -1194,6 +1223,7 @@ public static class DataSourceOps
             else if (c.FileName.Length == 0) return "Importez un fichier CSV, JSON ou Excel.";
         }
         else if (c.Kind == DataKinds.Push) { c.Via = "direct"; c.RelayId = null; }   // envoi direct : aucun réglage de lecture
+        else if (c.Kind == DataKinds.Ha) { c.Via = "direct"; c.RelayId = null; c.Auth = "none"; }   // Home Assistant : l'accès est celui du compte de l'organisation
         else return "Type de connexion inconnu.";
         if (c.Kind == DataKinds.File && c.FileMode == "upload") c.Via = "direct";   // fichier importé : déjà sur le serveur
         if (c.Via != "relay") { c.Via = "direct"; c.RelayId = null; }
@@ -1211,7 +1241,7 @@ public static class DataSourceOps
         ds.MaxRows = Math.Clamp(ds.MaxRows, 0, DataKinds.MaxRows);
         ds.StaleHours = Math.Clamp(ds.StaleHours, 0, 720);
         ds.Hide = ds.Hide.Where(f => f.Key.Length > 0 && DataKinds.Ops.Any(o => o.Id == f.Op)).Take(10).ToList();
-        if (ds.Path.Length > 500 || ds.RowsPath.Length > 200) return "Chemin trop long.";
+        if (ds.Path.Length > 2000 || ds.RowsPath.Length > 200) return "Chemin trop long.";
         ds.Sql = ds.Sql.Trim();
         if (ds.Sql.Length > 0 && DataSql.Check(ds.Sql) is { } bad) return bad;
         return null;

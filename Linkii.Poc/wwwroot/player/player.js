@@ -65,6 +65,21 @@
   /* ---------- HTTP ---------- */
   var PLAYLIST_API = PREVIEW ? '/api/preview/playlist' : '/api/player/playlist';
   var DATA_API = PREVIEW ? '/api/preview/data/' : '/api/data/';
+  /* Flux de données ouverts (adresse /api/data/… → fonctions de relecture) : « DataChanged » relit ceux des éléments nommés, une fois par élément. */
+  var dataWatchers = {};
+  function watchData(path, load, ivs) {
+    (dataWatchers[path] = dataWatchers[path] || []).push(load);
+    ivs.push(function () { var l = dataWatchers[path]; if (!l) return; var i = l.indexOf(load); if (i >= 0) l.splice(i, 1); if (!l.length) delete dataWatchers[path]; });
+  }
+  function dataChanged(ids) {
+    (ids || []).forEach(function (id) {
+      id = String(id);
+      Object.keys(dataWatchers).forEach(function (p) {
+        if (p === id || p.indexOf(id + '/') === 0) dataWatchers[p].slice().forEach(function (fn) { try { fn(); } catch (e) {} });
+      });
+    });
+  }
+
   function api(path, opts) {
     opts = opts || {};
     opts.headers = opts.headers || {};
@@ -824,7 +839,7 @@
 
     var host = {
       el: el, item: item, settings: settings, place: place, compact: place !== 'full', cfg: cfg,
-      esc: esc, pad: pad, cap: cap, opts: opts,
+      esc: esc, pad: pad, cap: cap, opts: opts, now: serverNow,
       fmtT: fmtT, fmtDay: fmtDay, dayKey: dayKey,
       // Bandeau défilant. Idempotent : le texte inchangé n'est pas redessiné (le défilement ne repart pas à zéro).
       // always = true : défile toujours ; sinon seulement si le texte est plus large que le bandeau (sinon centré, immobile).
@@ -872,6 +887,7 @@
       run(); load();
       ivs.push(setInterval(load, refreshMs || 60000));
       ivs.push(setInterval(run, 15000));
+      watchData(path, load, ivs);   // le serveur prévient quand les données changent (Home Assistant en direct) : relues aussitôt
     }
     try { render(host); } catch (e) { el.textContent = ''; }
     return { el: el, stop: stop };
@@ -1785,6 +1801,7 @@
     conn.on('Identify', function (label) { identify(String(label)); });
     conn.on('Command', function (c) { handleCommand(c); });
     conn.on('Emergency', function (e) { if (window.LinkiiEmergency) LinkiiEmergency.apply(e || null); });   // urgence : affichée ou retirée sans attendre le sondage
+    conn.on('DataChanged', function (ids) { dataChanged(ids); });   // données d'éléments publiés changées (Home Assistant) : relues sans attendre le sondage
     conn.onreconnecting(markOffline);
     conn.onreconnected(function () { setOnline(true); refresh(); });
     function start() {

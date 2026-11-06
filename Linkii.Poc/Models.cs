@@ -586,29 +586,48 @@ public class Tenant
 public class HomeAssistantAccount
 {
     public string Url { get; set; } = "";
+    /// <summary>direct (le serveur Linkivi joint l'instance sur internet, en https) | relay (un relais Linkii du réseau local l'appelle : http et adresses locales acceptés).</summary>
+    public string Via { get; set; } = "direct";
+    public Guid? RelayId { get; set; }
     public string AuthMode { get; set; } = "token";
     public string User { get; set; } = "";
     public string Secret { get; set; } = "";
+    /// <summary>Connexion par mot de passe : jeton de renouvellement rendu par Home Assistant (chiffré). Une seule session par compte, renouvelée sans se reconnecter.</summary>
+    public string Refresh { get; set; } = "";
     public DateTime? ConnectedUtc { get; set; }
+    /// <summary>Dernière erreur de l'instance (connexion, lecture des états, commande) ; vide quand tout va bien.</summary>
     public string LastError { get; set; } = "";
+    /// <summary>Depuis quand l'instance est en échec (alerte « Intégrations » après quelques minutes) ; null quand elle répond.</summary>
+    public DateTime? FailingSinceUtc { get; set; }
+    public DateTime? LastOkUtc { get; set; }
+    /// <summary>L'alerte de panne a été envoyée (une seule fois par panne, la bonne nouvelle au retour).</summary>
+    public bool AlertSent { get; set; }
     public DateTime? EntitiesUtc { get; set; }
     public List<HomeAssistantEntity> Entities { get; set; } = new();
+    /// <summary>Entités choisies dans des widgets ou des jeux de données, mais absentes de l'instance à la dernière actualisation (supprimées ou renommées).</summary>
+    public List<string> Missing { get; set; } = new();
+    /// <summary>Version de la mise en place (widgets activés, source de données créée) déjà appliquée à ce compte : la migration au démarrage ne la refait pas.</summary>
+    public int SetupVersion { get; set; }
 
     /// <summary>Copie pour modification : la donnée lue dans le magasin n'est jamais changée en place.</summary>
     public HomeAssistantAccount Copy() => new()
     {
-        Url = Url, AuthMode = AuthMode, User = User, Secret = Secret, ConnectedUtc = ConnectedUtc, LastError = LastError,
-        EntitiesUtc = EntitiesUtc, Entities = Entities.Select(e => new HomeAssistantEntity { Id = e.Id, Name = e.Name, Domain = e.Domain, Unit = e.Unit }).ToList(),
+        Url = Url, Via = Via, RelayId = RelayId, AuthMode = AuthMode, User = User, Secret = Secret, Refresh = Refresh, ConnectedUtc = ConnectedUtc, LastError = LastError,
+        FailingSinceUtc = FailingSinceUtc, LastOkUtc = LastOkUtc, AlertSent = AlertSent, EntitiesUtc = EntitiesUtc, Missing = Missing.ToList(), SetupVersion = SetupVersion,
+        Entities = Entities.Select(e => e.Copy()).ToList(),
     };
 }
 
-/// <summary>Une entité du compte Home Assistant (capteur, interrupteur ou lumière).</summary>
+/// <summary>Une entité du compte Home Assistant (capteur, interrupteur, lumière, thermostat, volet…).</summary>
 public class HomeAssistantEntity
 {
     public string Id { get; set; } = "";
     public string Name { get; set; } = "";
     public string Domain { get; set; } = "";
     public string Unit { get; set; } = "";
+    public string DeviceClass { get; set; } = "";
+
+    public HomeAssistantEntity Copy() => new() { Id = Id, Name = Name, Domain = Domain, Unit = Unit, DeviceClass = DeviceClass };
 }
 
 /// <summary>

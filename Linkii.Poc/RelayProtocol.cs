@@ -11,7 +11,7 @@ namespace Linkii.Poc;
 public record RelayJob
 {
     public Guid Id { get; init; } = Guid.NewGuid();
-    /// <summary>sql (base de données) | http (API ou fichier à une adresse du réseau interne).</summary>
+    /// <summary>sql (base de données) | http (API ou fichier à une adresse du réseau interne) | ha (Home Assistant du réseau local : lecture, connexion et commandes ; relais 1.3 et plus).</summary>
     public string Kind { get; init; } = "sql";
     /// <summary>test | discover | read.</summary>
     public string Op { get; init; } = "read";

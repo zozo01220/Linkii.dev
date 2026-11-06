@@ -67,7 +67,7 @@ else
         else
         {
             <button type="button" class="chip @(filter == "" ? "on" : "")" aria-pressed="@(filter == "" ? "true" : "false")" @onclick='() => filter = ""'>Toutes <small>@connections.Count</small></button>
-            @foreach (var k in new[] { DataKinds.Api, DataKinds.Db, DataKinds.File, DataKinds.Push })
+            @foreach (var k in new[] { DataKinds.Api, DataKinds.Db, DataKinds.File, DataKinds.Push, DataKinds.Ha })
             {
                 var kind = k;
                 var n = connections.Count(c => c.Kind == kind);
@@ -255,6 +255,10 @@ else
 {
     <DataConnectionDialog Connection="editConn" OnClose="CloseDialogs" OnSaved="ConnectionSaved" />
 }
+@if (haOpen)
+{
+    <HaAccountDialog Open="true" OnClose="() => haOpen = false" OnChanged="Reload" />
+}
 @if (editSet != null && setConn != null)
 {
     <DataSetDialog DataSet="editSet" Connection="setConn" IsNew="setIsNew" OnClose="CloseDialogs" OnSaved="Reload" />
@@ -334,7 +338,9 @@ else
     private void CloseRelay() { relayOpen = false; Reload(); }
     private void RelayChanged(Guid? id) { relayId = id; Reload(); }
 
-    private void OpenConnection(DataConnection? c) => editConn = c?.Copy() ?? new DataConnection();
+    // La source « Home Assistant » n'a pas de réglage propre : son accès est le compte Home Assistant de l'organisation (fenêtre du compte).
+    private void OpenConnection(DataConnection? c) { if (c?.Kind == DataKinds.Ha) { haOpen = true; return; } editConn = c?.Copy() ?? new DataConnection(); }
+    private bool haOpen;
     private void OpenDataSet(DataSet ds, DataConnection? c) { if (c == null) return; editSet = ds.Copy(); setConn = c.Copy(); setIsNew = false; }
     private void NewDataSet(DataConnection c) { editSet = new DataSet { ConnectionId = c.Id, Name = dataSets.Any(d => d.ConnectionId == c.Id) ? "" : c.Name }; setConn = c.Copy(); setIsNew = true; }
     private void CloseDialogs() { editConn = null; editSet = null; setConn = null; Reload(); }
@@ -495,8 +501,8 @@ else
     }
 
     private bool Match(string text) => search.Trim().Length == 0 || text.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase);
-    private static string KindLabel(string kind) => kind == DataKinds.Api ? "API web" : kind == DataKinds.Db ? "Base de données" : kind == DataKinds.Push ? "Envoi direct" : "Fichier";
-    private static string IcoText(DataConnection c) => c.Kind == DataKinds.Api ? "{ }" : c.Kind == DataKinds.Db ? "SQL" : c.Kind == DataKinds.Push ? "→" : FileExt(c);
+    private static string KindLabel(string kind) => kind == DataKinds.Api ? "API web" : kind == DataKinds.Db ? "Base de données" : kind == DataKinds.Push ? "Envoi direct" : kind == DataKinds.Ha ? "Home Assistant" : "Fichier";
+    private static string IcoText(DataConnection c) => c.Kind == DataKinds.Api ? "{ }" : c.Kind == DataKinds.Db ? "SQL" : c.Kind == DataKinds.Push ? "→" : c.Kind == DataKinds.Ha ? "HA" : FileExt(c);
 
     private static string StateText(DataConnection c, string level) =>
         c.LastError.Length > 0 ? "Erreur" : level == "bad" ? "Lecture en échec" : level == "warn" ? "Copie conservée" : "Connectée";
@@ -516,6 +522,7 @@ else
         DataKinds.Api => "API web · " + (c.Auth switch { "key" => "clé API", "bearer" => "jeton", "basic" => "utilisateur et mot de passe", "login" => "identifiants puis jeton", _ => "sans authentification" }),
         DataKinds.Db => DataSql.Engines.FirstOrDefault(e => e.Id == c.Engine).Label + (c.Database.Length > 0 ? " · " + c.Database : ""),
         DataKinds.Push => "Envoi direct · votre système envoie ses lignes par l'API",
+        DataKinds.Ha => "Home Assistant · compte de l'organisation (Intégrations › Home Assistant)",
         _ => c.FileMode == "url" ? "Fichier · lu à son adresse" : "Fichier importé · " + c.FileLabel
     }) + (withRelay && c.Via == "relay" ? " · par " + (relays.FirstOrDefault(r => r.Id == c.RelayId)?.Name ?? "un relais supprimé") : "");
 

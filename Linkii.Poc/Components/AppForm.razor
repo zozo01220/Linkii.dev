@@ -1,6 +1,6 @@
 @inject TenantStore Store
 @inject GraphService Graph
-@inject HomeAssistantClient Ha
+@inject HomeAssistantLive HaLive
 @inject Toaster Toast
 
 @* Formulaire de paramétrage généré à partir du manifeste de l'app. Values : une entrée par champ. *@
@@ -150,7 +150,8 @@
                                     <div class="hp-chips">
                                         @foreach (var id in chosen)
                                         {
-                                            <span class="hp-chip">@HaLabel(choices, id)<button type="button" aria-label="Retirer @HaLabel(choices, id)" @onclick="() => HaToggle(k, id, false)">×</button></span>
+                                            var lost = !acc.Entities.Any(x => x.Id == id);
+                                            <span class="hp-chip @(lost ? "lost" : "")" title="@(lost ? "Introuvable dans Home Assistant (supprimée ou renommée) : l'écran l'ignore. Retirez-la et choisissez-en une autre." : id)">@if (lost) { <Ico Name="alert" Size="12" /> }@HaLabel(choices, id)<button type="button" aria-label="Retirer @HaLabel(choices, id)" @onclick="() => HaToggle(k, id, false)">×</button></span>
                                         }
                                     </div>
                                 }
@@ -263,11 +264,10 @@ case "mailbox":
         haBusy = true;
         try
         {
-            var fresh = await Ha.Refresh(acc);
-            Store.Write(d => { d.Tenant.HomeAssistant = fresh; });
+            await HaLive.RefreshEntities(Store.ClientId);   // note aussi les entités utilisées devenues introuvables
             await Changed();
         }
-        catch (Exception ex) { Toast.Error("Liste non actualisée : " + ex.Message); }
+        catch (InvalidOperationException ex) { Toast.Error("Liste non actualisée : " + ex.Message); }
         finally { haBusy = false; }
     }
     private Task Pick(string key, string value) { Values[key] = value; return Changed(); }

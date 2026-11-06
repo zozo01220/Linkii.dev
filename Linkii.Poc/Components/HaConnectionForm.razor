@@ -1,0 +1,125 @@
+@inject TenantStore Store
+@inject HomeAssistantClient Ha
+@inject AppService Svc
+@inject RelayBroker Relays
+
+@* Connexion du compte Home Assistant de l'organisation, commune à l'assistant d'ajout et à la fenêtre du compte : adresse, accès (direct ou par le relais
+   Linkii pour une instance du réseau local), jeton ou identifiant. « Enregistrer et tester » vérifie la connexion avant d'enregistrer, charge les entités,
+   puis active les widgets Home Assistant et crée la source de données « Home Assistant » (tout est visible tout de suite). *@
+<HeadContent><link rel="stylesheet" href="data-sources.css?v=7" /></HeadContent>   @* choix de l'accès, relais : mêmes styles que les sources de données *@
+<div class="dw">
+    <div class="dw-field">
+        <label>Accès à Home Assistant</label>
+        <div class="dsx-reach">
+            <button type="button" class="dsx-type @(via != "relay" ? "on" : "")" aria-pressed="@(via != "relay" ? "true" : "false")" @onclick='() => via = "direct"'><b>Directement</b><small>Adresse https joignable depuis internet (Nabu Casa, nom de domaine).</small></button>
+            <button type="button" class="dsx-type @(via == "relay" ? "on" : "")" aria-pressed="@(via == "relay" ? "true" : "false")" @onclick="UseRelay"><b>Par le relais Linkii</b><small>Home Assistant reste dans votre réseau (homeassistant.local) ; un relais installé chez vous l'appelle.</small></button>
+        </div>
+        @if (via == "relay")
+        {
+            @if (relays.Count == 0)
+            {
+                <div class="dsx-relaybox"><span class="grow">Aucun relais installé dans ce réseau.</span><button type="button" class="btn ghost sm" @onclick="() => relayOpen = true">Installer un relais</button></div>
+            }
+            else
+            {
+                <div class="dsx-relaybox">
+                    <select aria-label="Relais" @bind="RelayPick">@foreach (var x in relays) { <option value="@x.Id">@x.Name@(Relays.Online(x.Id) ? " · en ligne" : x.TokenHash.Length == 0 ? " · en attente" : " · hors ligne")</option> }</select>
+                    @if (relayId is { } rid) { @DataSourcesTab.StatePill(Relays.Online(rid) ? "ok" : "bad", Relays.Online(rid) ? "En ligne" : "Hors ligne") }
+                    <button type="button" class="dsx-link" @onclick="() => relayOpen = true">Installer un autre relais</button>
+                </div>
+                <small class="ha-relay-hint">Relais Linkii 1.3 ou plus récent.</small>
+            }
+        }
+    </div>
+    <div class="dw-field"><label for="@($"{Prefix}-url")">Adresse de Home Assistant</label><input id="@($"{Prefix}-url")" class="mono" @bind="url" spellcheck="false" autocomplete="off" placeholder="@(via == "relay" ? "http://homeassistant.local:8123" : "https://maison.exemple.ch")" /><small>@(via == "relay" ? "Adresse vue depuis le relais, http ou https." : "Adresse https joignable depuis internet, sans / final.")</small></div>
+    <div class="dw-field"><label for="@($"{Prefix}-auth")">Connexion</label>
+        <select id="@($"{Prefix}-auth")" @bind="auth">
+            <option value="token">Jeton d'accès longue durée</option>
+            <option value="password">Identifiant et mot de passe</option>
+        </select>
+    </div>
+    @if (auth == "password")
+    {
+        <div class="dw-field"><label for="@($"{Prefix}-user")">Identifiant Home Assistant</label><input id="@($"{Prefix}-user")" @bind="user" autocomplete="off" /></div>
+        <div class="dw-field"><label for="@($"{Prefix}-pwd")">Mot de passe</label><input id="@($"{Prefix}-pwd")" type="password" @bind="secret" autocomplete="new-password" placeholder="@SecretPlaceholder" /><small>Une seule session Linkivi apparaît dans votre profil Home Assistant ; elle est fermée à la déconnexion.</small></div>
+    }
+    else
+    {
+        <div class="dw-field"><label for="@($"{Prefix}-token")">Jeton d'accès</label><input id="@($"{Prefix}-token")" type="password" @bind="secret" autocomplete="new-password" placeholder="@SecretPlaceholder" /><small>Profil Home Assistant › Sécurité › Jetons d'accès longue durée.</small></div>
+    }
+    @if (error != null) { <div class="err">@error</div> }
+    <div class="dw-actions">
+        @if (CanCancel) { <button type="button" class="btn ghost sm" disabled="@busy" @onclick="OnCancel">Annuler</button> }
+        <button type="button" class="btn sm" disabled="@busy" @onclick="Save">@(busy ? "Test en cours…" : Account != null ? "Mettre à jour et tester" : "Enregistrer et tester")</button>
+    </div>
+</div>
+<p class="csd-shared"><Ico Name="lock" Size="14" /> Identifiants chiffrés sur le serveur Linkivi. @(via == "relay" ? "Le relais appelle Home Assistant dans votre réseau : rien à ouvrir dans le pare-feu." : "Home Assistant doit être joignable depuis internet (https).")</p>
+
+@if (relayOpen)
+{
+    <RelayDialog Over="true" OnClose="RelayClosed" OnChanged="RelayChanged" />
+}
+
+@code {
+    /// <summary>Compte enregistré (null : première connexion).</summary>
+    [Parameter] public HomeAssistantAccount? Account { get; set; }
+    [Parameter] public string Prefix { get; set; } = "ha";
+    [Parameter] public bool CanCancel { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+    /// <summary>Connexion réussie et enregistrée : le compte à jour.</summary>
+    [Parameter] public EventCallback<HomeAssistantAccount> OnSaved { get; set; }
+
+    private string url = "", via = "direct", auth = "token", user = "", secret = "";
+    private Guid? relayId;
+    private string? error;
+    private bool busy, relayOpen, loaded;
+    private List<DataRelay> relays = new();
+
+    private Guid RelayPick { get => relayId ?? Guid.Empty; set => relayId = value == Guid.Empty ? null : value; }
+    private string SecretPlaceholder => Account is { Secret.Length: > 0 } ? "Laissez vide pour garder le secret enregistré" : "";
+
+    protected override void OnParametersSet()
+    {
+        if (loaded) return;
+        loaded = true;
+        url = Account?.Url ?? ""; via = Account?.Via ?? "direct"; relayId = Account?.RelayId; auth = Account?.AuthMode ?? "token"; user = Account?.User ?? "";
+        LoadRelays();
+    }
+
+    private void LoadRelays() => relays = Store.Read(d => d.Tenant.DataRelays.Select(r => r.Copy()).OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
+
+    private void UseRelay()
+    {
+        via = "relay";
+        if (relayId == null || !relays.Any(r => r.Id == relayId)) relayId = relays.FirstOrDefault(r => Relays.Online(r.Id))?.Id ?? relays.FirstOrDefault()?.Id;
+    }
+    private void RelayChanged(Guid? id) { LoadRelays(); if (id is { } g && via == "relay") relayId = g; }
+    private void RelayClosed() { relayOpen = false; LoadRelays(); if (via == "relay" && relayId == null) UseRelay(); }
+
+    private async Task Save()
+    {
+        error = null;
+        var server = HomeAssistantRules.BaseUrl(url);
+        if (HomeAssistantRules.CheckUrl(server, via) is { } bad) { error = bad; return; }
+        if (via == "relay" && (relayId == null || !relays.Any(r => r.Id == relayId))) { error = "Choisissez le relais qui appelle Home Assistant."; return; }
+        if (auth == "password" && user.Trim().Length == 0) { error = "Saisissez l'identifiant Home Assistant."; return; }
+
+        // Secret laissé vide : on garde celui d'avant, seulement si l'instance et l'identifiant ne changent pas.
+        var same = Account != null && HomeAssistantRules.BaseUrl(Account.Url) == server && Account.AuthMode == auth && Account.User == (auth == "password" ? user.Trim() : "");
+        var plain = secret.Length > 0 ? secret : same ? Ha.Conn(Store.ClientId, Account!).Secret : "";
+        if (plain.Length == 0) { error = auth == "password" ? "Saisissez le mot de passe." : "Saisissez le jeton d'accès."; return; }
+
+        busy = true;
+        try
+        {
+            var fresh = await Ha.Connect(Store.ClientId, server, via, relayId, auth, user, plain, Account);
+            if (Account != null) { fresh.Missing = Account.Missing.Where(id => !fresh.Entities.Any(e => e.Id == id)).ToList(); fresh.SetupVersion = Account.SetupVersion; }
+            Store.Write(d => { d.Tenant.HomeAssistant = fresh; });
+            if (fresh.SetupVersion < HomeAssistantSetup.Version) HomeAssistantSetup.Install(Svc, Store);   // première connexion : widgets activés, source de données créée, visibles tout de suite
+            secret = "";
+            await OnSaved.InvokeAsync(fresh);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or TaskCanceledException) { error = HomeAssistantLive.Readable(ex); }
+        finally { busy = false; }
+    }
+}

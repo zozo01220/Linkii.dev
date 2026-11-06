@@ -76,7 +76,10 @@ builder.Services.AddSingleton<IAppProvider, RssProvider>();
 builder.Services.AddSingleton<IAppProvider, FacebookProvider>();
 builder.Services.AddSingleton<IAppProvider, WebPageProvider>();
 builder.Services.AddSingleton<IAppProvider, YouTubeProvider>();
-builder.Services.AddSingleton<HomeAssistantClient>();   // Home Assistant : compte de l'organisation, états, commandes (voir Apps/HomeAssistant.cs)
+builder.Services.AddSingleton<IHaTransport, HaTransport>();   // Home Assistant : appels directs (https public) ou par le relais Linkii (réseau local)
+builder.Services.AddSingleton<HomeAssistantClient>();   // Home Assistant : compte de l'organisation, états, commandes, historique (voir Apps/HomeAssistant.cs)
+builder.Services.AddSingleton<HomeAssistantLive>();   // temps réel (WebSocket ou relevé), écrans prévenus par SignalR, santé et alertes
+builder.Services.AddHostedService(sp => sp.GetRequiredService<HomeAssistantLive>());
 builder.Services.AddSingleton<IAppProvider, HomeAssistantProvider>();
 builder.Services.AddSingleton<AppProviders>();
 builder.Services.AddSingleton<GoogleAuth>();   // « Se connecter avec Google » (Calendar et Drive, lecture seule)
@@ -196,6 +199,10 @@ var store0 = app.Services.GetRequiredService<JsonStore>();
 Seed.Run(store0, app.Configuration, store0.Path, app.Logger);
 Seed.PurgeRetiredApps(store0, app.Services.GetRequiredService<AppCatalog>(), store0.Path, app.Logger);
 Seed.PurgeOldCalendars(store0, store0.Path, app.Logger);
+// Home Assistant : identifiant de l'application présenté à l'instance (profil › jetons de rafraîchissement), puis widgets et source de données des comptes déjà connectés
+HomeAssistantRules.ClientId = app.Configuration["Linkii:HomeAssistant:ClientId"] is { Length: > 0 } haId ? haId
+    : (app.Configuration["Linkii:SiteUrl"] is { Length: > 0 } site ? site.TrimEnd('/') : "https://www.linkivi.com") + "/";
+HomeAssistantSetup.Migrate(store0, app.Services.GetRequiredService<AppCatalog>());
 app.Logger.LogInformation("Google (Calendar, Drive) : « Se connecter avec Google » {State}.", app.Services.GetRequiredService<GoogleAuth>().IsConfigured
     ? "disponible" : "indisponible (Linkii:Google:ClientId et Linkii:Google:ClientSecret absents de la configuration)");
 app.Logger.LogInformation("Microsoft (Microsoft 365, OneDrive) : « Se connecter avec Microsoft » {State}.", app.Services.GetRequiredService<MicrosoftAuth>().IsConfigured
@@ -998,31 +1005,40 @@ api.MapPost("/relay/reply", (HttpRequest req, RelayReply body, RelayBroker relay
     return relays.Complete(who.Relay, body) ? Results.Ok() : Results.NotFound();   // tâche inconnue, expirée, ou d'un autre relais
 });   // corps : 30 Mo par défaut (Kestrel), assez pour un fichier de 10 Mo en base64
 
-// Interrupteur ou lumière d'un widget Home Assistant, actionné depuis l'écran tactile. Seule une entité choisie dans ce widget peut être commandée,
-// et seulement dans son domaine (interrupteurs pour « ha-switches », lumières pour « ha-lights »).
-api.MapPost("/player/app/{id:guid}/switch", async (HttpRequest req, Guid id, HaSwitchDto body, JsonStore store, HomeAssistantClient ha) =>
+// Commande d'un widget Home Assistant depuis l'écran tactile (interrupteur, lumière, thermostat, volet, scène, serrure). Seule une entité choisie dans ce widget
+// peut être commandée, seulement si son domaine appartient au widget et accepte cette commande, et jamais si « Commande à l'écran » est coupée.
+// « switch » : ancienne adresse ({ entityId, on }), gardée pour les écrans pas encore rechargés.
+async Task<IResult> HaCommand(HttpRequest req, Guid id, HaCommandDto body, JsonStore store, HomeAssistantClient ha, HomeAssistantLive live)
 {
-    var (denied, account, published) = store.Read<(IResult?, HomeAssistantAccount?, PublishedItem?)>(db =>
+    var (denied, clientId, account, published) = store.Read<(IResult?, Guid, HomeAssistantAccount?, PublishedItem?)>(db =>
     {
         var s = Auth(req, db);
         var gate = Gate(s, db);
-        if (gate != null) return (gate, null, null);
+        if (gate != null) return (gate, Guid.Empty, null, null);
         var pub = PlayerFeed.DataItems(db, s!).FirstOrDefault(x => x.Id == id && HomeAssistantRules.IsHaApp(x.AppId));
-        return ((IResult?)null, db.Clients.First(c => c.Id == s!.ClientId).HomeAssistant, pub);
+        return ((IResult?)null, s!.ClientId, db.Clients.First(c => c.Id == s!.ClientId).HomeAssistant?.Copy(), pub);
     });
     if (denied != null) return denied;
     if (published == null) return Results.NotFound();
     var entityId = body.EntityId ?? "";
-    if (!HomeAssistantRules.ParseEntities(published.Settings.GetValueOrDefault("entities")).Contains(entityId) || !HomeAssistantRules.Commandable(published.AppId!, entityId))
+    var action = HomeAssistantRules.ActionOf(body);
+    if (published.Settings.GetValueOrDefault("control") == "false"
+        || !HomeAssistantRules.ParseEntities(published.Settings.GetValueOrDefault("entities")).Contains(entityId) || !HomeAssistantRules.Commandable(published.AppId!, entityId, action))
         return Results.BadRequest(new { error = "Entité non configurée ou non actionnable." });
     if (account == null) return Results.Json(new { error = "Compte Home Assistant non connecté." }, statusCode: 409);
     try
     {
-        await ha.SetState(ha.Conn(account), entityId, body.On);
+        await ha.Command(ha.Conn(clientId, account), entityId, action, body.Value, body.Color);
+        live.Nudge(clientId);
         return Results.Ok();
     }
-    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
-});
+    catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or TaskCanceledException)
+    {
+        return Results.Json(new { error = HomeAssistantLive.Readable(ex) }, statusCode: 502);
+    }
+}
+api.MapPost("/player/app/{id:guid}/ha", HaCommand);
+api.MapPost("/player/app/{id:guid}/switch", HaCommand);
 
 // ---------- Simulateur du back-office : le player en mode aperçu ----------
 // Jeton d'aperçu (en-tête X-Preview) créé par le back-office pour un écran, un mur ou une liste de lecture auxquels la personne a accès.

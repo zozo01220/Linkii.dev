@@ -224,11 +224,14 @@ public class RelayWorker : BackgroundService
                     return new RelayReply { Id = job.Id, Ok = true, Headers = r.Headers, Rows = r.Rows };
             }
         }
-        if (job.Kind == "http")
+        if (job.Kind is "http" or "ha")
         {
             if (!Uri.TryCreate(job.Url, UriKind.Absolute, out var u) || u.Scheme is not ("http" or "https")) throw new InvalidOperationException("Adresse invalide.");
             if (!cfg.Allows(u.Host)) throw new InvalidOperationException($"Hôte « {u.Host} » non autorisé par ce relais (AllowedHosts de relay.json).");
-            var login = job.Op == "login" && job.Method == "POST";   // seul POST accepté : l'appel de connexion d'une API (utilisateur, mot de passe → jeton)
+            // http : seul POST accepté, l'appel de connexion d'une API (utilisateur, mot de passe → jeton).
+            // ha (Home Assistant) : lecture de /api/…, et POST seulement pour la connexion (/auth/…) et les commandes des écrans (/api/services/…).
+            var login = job.Kind == "http" ? job.Op == "login" && job.Method == "POST" : job.Method == "POST" && HaPostAllowed(u.AbsolutePath);
+            if (job.Kind == "ha" && job.Method == "GET" && !u.AbsolutePath.StartsWith("/api/", StringComparison.Ordinal)) throw new InvalidOperationException("Adresse Home Assistant non autorisée.");
             if (job.Method != "GET" && !login) throw new InvalidOperationException("Méthode non autorisée : le relais ne fait que lire.");
             using var req = new HttpRequestMessage(login ? HttpMethod.Post : HttpMethod.Get, u);
             foreach (var (k, v) in job.Headers ?? new()) req.Headers.TryAddWithoutValidation(k, v);
@@ -247,4 +250,8 @@ public class RelayWorker : BackgroundService
         }
         throw new InvalidOperationException("Tâche inconnue.");
     }
+
+    /// <summary>Appels POST permis vers Home Assistant : connexion (flux, jeton, révocation) et services (commandes des widgets des écrans).</summary>
+    public static bool HaPostAllowed(string path) =>
+        path.StartsWith("/auth/login_flow", StringComparison.Ordinal) || path is "/auth/token" or "/auth/revoke" || path.StartsWith("/api/services/", StringComparison.Ordinal);
 }

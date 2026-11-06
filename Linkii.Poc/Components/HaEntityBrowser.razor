@@ -1,0 +1,88 @@
+@* Entités d'un compte Home Assistant, commune à l'assistant d'ajout et à la fenêtre du compte : un onglet par famille (celles qui ont des entités),
+   recherche, et en tête les entités utilisées par un widget ou un jeu de données mais introuvables dans l'instance (supprimées ou renommées). *@
+@if (Account.Missing.Count > 0)
+{
+    <div class="ha-missing" role="status">
+        <Ico Name="alert" Size="15" />
+        <span><b>@(Account.Missing.Count == 1 ? "1 entité utilisée est introuvable" : $"{Account.Missing.Count} entités utilisées sont introuvables")</b>
+            dans Home Assistant (supprimée ou renommée) : @string.Join(", ", Account.Missing.Take(6))@(Account.Missing.Count > 6 ? "…" : "").
+            Les écrans l'ignorent ; choisissez-en une autre dans les widgets concernés.</span>
+    </div>
+}
+<div class="hac-tabs" role="tablist">
+    @foreach (var f in Families)
+    {
+        var app = f.App;
+        <button type="button" role="tab" class="@(tab == app ? "on" : "")" aria-selected="@(tab == app ? "true" : "false")" @onclick="() => tab = app">@f.Label <small>@CountOf(f)</small></button>
+    }
+</div>
+@if (Searchable)
+{
+    <div class="hac-bar">
+        <input type="search" placeholder="Rechercher une entité" aria-label="Rechercher une entité" @bind="search" @bind:event="oninput" />
+        <span class="hac-count">@Shown().Count sur @CountOf(Current)</span>
+    </div>
+}
+@if (CountOf(Current) == 0)
+{
+    <p class="hac-empty">Aucune entité de ce type dans cette instance. Ajoutez-en dans Home Assistant, puis actualisez la liste.</p>
+}
+else if (Shown().Count == 0)
+{
+    <p class="hac-empty">Aucune entité ne correspond à la recherche.</p>
+}
+else
+{
+    <div class="hac-list">
+        @foreach (var e in Shown().Take(Limit ?? int.MaxValue))
+        {
+            <div class="hac-row">
+                <span class="hac-txt">
+                    <span class="hac-name">@e.Name</span>
+                    <span class="hac-id">@e.Id</span>
+                </span>
+                @if (e.Unit.Length > 0)
+                {
+                    <span class="hac-unit">@e.Unit</span>
+                }
+            </div>
+        }
+    </div>
+    @if (Limit is { } l && Shown().Count > l)
+    {
+        <p class="hac-note">… et @(Shown().Count - l) autre(s).</p>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public HomeAssistantAccount Account { get; set; } = default!;
+    [Parameter] public int? Limit { get; set; }
+    [Parameter] public bool Searchable { get; set; } = true;
+
+    private string? tab;
+    private string search = "";
+
+    /// <summary>Familles qui ont au moins une entité (toutes si l'instance est vide).</summary>
+    private List<HomeAssistantRules.Family> Families
+    {
+        get
+        {
+            var withAny = HomeAssistantRules.Families.Where(f => CountOf(f) > 0).ToList();
+            return withAny.Count > 0 ? withAny : HomeAssistantRules.Families.ToList();
+        }
+    }
+
+    private HomeAssistantRules.Family Current => Families.FirstOrDefault(f => f.App == tab) ?? Families[0];
+
+    private int CountOf(HomeAssistantRules.Family f) => Account.Entities.Count(e => f.Domains.Contains(e.Domain));
+
+    private List<HomeAssistantEntity> Shown()
+    {
+        var q = search.Trim();
+        var f = Current;
+        return Account.Entities.Where(e => f.Domains.Contains(e.Domain)
+            && (q.Length == 0 || e.Name.Contains(q, StringComparison.OrdinalIgnoreCase) || e.Id.Contains(q, StringComparison.OrdinalIgnoreCase))).ToList();
+    }
+
+    protected override void OnParametersSet() { tab ??= Families[0].App; }
+}
