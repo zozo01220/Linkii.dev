@@ -566,7 +566,8 @@
     function relayout() {
       if (!last || !last.plan) return false;
       // borne : le plan sur tout l'écran, la feuille passe par-dessus ; diffusion : le résumé en pastilles dans le coin (§201)
-      var m = navMode() ? 'full' : tvMode() ? (last.plan.summary === 'none' ? 'none' : 'pills') : Logic.layoutMode(last.plan.summary, el.clientWidth, el.clientHeight);
+      // affichage « Compact » (§202) : le résumé seul, quelle que soit la taille
+      var m = navMode() ? 'full' : tvMode() ? (last.plan.summary === 'none' ? 'none' : 'pills') : last.plan.mode === 'compact' ? 'only' : Logic.layoutMode(last.plan.summary, el.clientWidth, el.clientHeight);
       if (m === layout) return false;
       layout = m; sumHtml = '';
       el.classList.remove('s-right', 's-left', 's-top', 's-none', 's-only', 's-full', 's-pills');

@@ -1,0 +1,282 @@
+@page "/plans/nouveau"
+@page "/plans/{PlanId:guid}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:widgets")]
+@inject TenantStore Store
+@inject AppCatalog Catalog
+@inject HomeAssistantLive Live
+@inject Toaster Toast
+@inject NavigationManager Nav
+@inject ModeService Modes
+
+@* Page d'un plan du bâtiment (§202), d'après maquettes/plan-menus (validée) : tout part du plan.
+   Dessin et Appareils : l'éditeur du plan (§194-197), dans la page. Affichages : comment le montrer (Diffusion, Borne, Compact ; « vues » du §200).
+   Où il s'affiche : contenus, tuiles et widgets qui l'utilisent, et « Ajouter à… » qui les crée déjà reliés au plan et à l'affichage. *@
+<div class="page-head">
+    <div>
+        <div class="hpg-crumb"><a href="/plans">‹ Plans</a></div>
+        <h1>@(plan?.Name ?? "Nouveau plan")</h1>
+        <p class="sub sc-intro">@Stats</p>
+    </div>
+</div>
+
+@if (!Modes.Expert)
+{
+    <div class="card empty"><div class="big">Disponible en mode expert</div></div>
+}
+else if (account == null)
+{
+    <div class="card empty"><div class="big">Home Assistant n'est pas connecté</div><p>Connectez-le dans <a href="/integrations">Intégrations</a> pour dessiner vos plans.</p></div>
+}
+else if (!IsNew && plan == null)
+{
+    <div class="card empty"><div class="big">Plan introuvable</div><p>Il a peut-être été supprimé. <a href="/plans">Retour aux plans</a>.</p></div>
+}
+else
+{
+    <nav class="tabs int-tabs hpg-tabs" role="tablist" aria-label="Plan du bâtiment">
+        @Tab("dessin", "Dessin", null, false)
+        @Tab("appareils", "Appareils", plan == null ? null : parsed.Devices.Count, false)
+        @Tab("affichages", "Affichages", plan?.Views.Count, IsNew)
+        @Tab("diffusion", "Où il s'affiche", plan == null ? null : uses.Count, IsNew)
+    </nav>
+
+    <div hidden="@(!InEditor)">
+        <HaPlanEditor @key="editorKey" Inline="true" Panel="@(tab == "appareils" ? "devices" : "floors")" Name="@(plan?.Name ?? "")" Json="@(plan?.Json ?? "")" OnSave="Save" OnClose="ResetEditor" />
+    </div>
+
+    @if (tab == "affichages" && plan != null)
+    {
+        <HaViewsEditor @key="viewsKey" PlanId="plan.Id" Inline="true" OnSaved="ViewsSaved" OnClose="() => viewsKey = Guid.NewGuid()" />
+    }
+    else if (tab == "diffusion" && plan != null)
+    {
+        <div class="hpg-uses-head">
+            <div class="grow"><b>Où il s'affiche</b><small>Modifier le plan ou un de ses affichages met à jour tous ces écrans.</small></div>
+            <button type="button" class="btn" @onclick="OpenAdd"><Ico Name="plus" Size="16" /> Ajouter à…</button>
+        </div>
+        @if (uses.Count == 0)
+        {
+            <div class="card empty"><div class="big">Ce plan ne s'affiche encore nulle part</div><p>« Ajouter à… » le met dans une liste de diffusion, sur un écran ou sur une borne, déjà réglé.</p></div>
+        }
+        else
+        {
+            <div class="hpg-uses" role="table">
+                <div class="hpg-ur hd" role="row"><span>Où</span><span>Affichage</span><span>Diffusé</span><span></span></div>
+                @foreach (var u in uses)
+                {
+                    <div class="hpg-ur" role="row">
+                        <span class="hpg-un"><Ico Name="@KindIcon(u.Kind)" Size="17" /><span><b>@u.Name</b><small>@KindLabel(u.Kind)</small></span></span>
+                        <span><span class="hpg-pill">@ViewName(u.ViewId)</span></span>
+                        <span class="hpg-uw">@u.Where</span>
+                        <span>@if (UseHref(u) is { } href) { <a class="btn ghost sm" href="@href">Ouvrir</a> }</span>
+                    </div>
+                }
+            </div>
+        }
+    }
+}
+
+@if (adding && plan != null)
+{
+    <SectionContent SectionName="overlay">
+        <div class="modal-backdrop" @onclick="() => adding = false"></div>
+        <div class="modal app-modal hpg-add" role="dialog" aria-modal="true" aria-label="Ajouter le plan">
+            <div class="modal-head">
+                <span class="app-ico" style="--app-c:#41BDF5"><Ico Name="home" Size="22" /></span>
+                <div class="grow"><h3>Ajouter « @plan.Name » à…</h3><small>Le contenu, le widget ou la tuile est créé déjà relié au plan et à l'affichage.</small></div>
+                <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => adding = false"><Ico Name="x" Size="20" /></button>
+            </div>
+            <div class="modal-body">
+                <div class="hpg-where">
+                    @Where("list", "play-box", "Une liste de diffusion", "Contenu « Vue du bâtiment » ajouté à la fin du fil")
+                    @Where("screen", "monitor", "Un écran", "Widget posé sur l'écran, à placer ensuite")
+                    @Where("kiosk", "hand", "Une borne", "Tuile qui ouvre le plan en grand")
+                </div>
+                @{ var targets = Targets(); }
+                <div class="hpg-f">
+                    <label for="hpg-target">@(addKind == "list" ? "Quelle liste ?" : addKind == "screen" ? "Quel écran ?" : "Quelle borne ?")</label>
+                    @if (targets.Count == 0)
+                    {
+                        <div class="dw-note">@(addKind == "list" ? "Aucune liste de diffusion." : addKind == "screen" ? "Aucun écran." : "Aucune borne interactive.")</div>
+                    }
+                    else
+                    {
+                        <select id="hpg-target" @bind="addTarget">
+                            @foreach (var (id, label) in targets) { <option value="@id">@label</option> }
+                        </select>
+                    }
+                </div>
+                <div class="hpg-f">
+                    <label for="hpg-view">Affichage</label>
+                    <select id="hpg-view" @bind="addView">
+                        @if (addKind == "screen") { <option value="">Auto : selon la taille de la case</option> }
+                        @foreach (var v in plan.Views) { <option value="@v.Id">@v.Name · @HaViews.ModeLabel(v.Mode).ToLowerInvariant()</option> }
+                    </select>
+                    <small>@AddNote</small>
+                </div>
+            </div>
+            <div class="modal-foot">
+                <span class="grow"></span>
+                <button type="button" class="btn" @onclick="() => adding = false">Annuler</button>
+                <button type="button" class="btn primary" disabled="@(targets.Count == 0)" @onclick="Add"><Ico Name="plus" Size="15" /> Ajouter</button>
+            </div>
+        </div>
+    </SectionContent>
+}
+
+@code {
+    [Parameter] public Guid? PlanId { get; set; }
+    [SupplyParameterFromQuery(Name = "onglet")] public string? Onglet { get; set; }
+
+    private HaPlan? plan;
+    private HomeAssistantRules.Plan parsed = new(new(), new());
+    private HomeAssistantAccount? account;
+    private List<HaPlanUses.Use> uses = new();
+    private string tab = "dessin";
+    private Guid editorKey = Guid.NewGuid(), viewsKey = Guid.NewGuid();
+    private bool adding;
+    private string addKind = "list", addTarget = "", addView = "";
+
+    private bool IsNew => PlanId == null;
+    private bool InEditor => tab is "dessin" or "appareils";
+
+    private string Stats => plan == null ? "Dessinez les pièces de chaque étage, ou importez son plan, puis posez-y les appareils de Home Assistant."
+        : $"{parsed.Floors.Count} étage{S(parsed.Floors.Count)} · {parsed.Floors.Sum(f => f.Rooms.Count)} pièce{S(parsed.Floors.Sum(f => f.Rooms.Count))} · {parsed.Devices.Count} appareil{S(parsed.Devices.Count)} · {(uses.Count == 0 ? "affiché nulle part" : $"affiché {uses.Count} fois")}";
+    private static string S(int n) => n > 1 ? "s" : "";
+
+    protected override void OnParametersSet()
+    {
+        tab = Onglet is "appareils" or "affichages" or "diffusion" && !IsNew ? Onglet : Onglet == "appareils" ? "appareils" : "dessin";
+        Load();
+    }
+
+    private void Load()
+    {
+        account = Store.Read(d => d.Tenant.HomeAssistant);
+        if (PlanId is not { } id) { plan = null; return; }
+        // un plan reçoit une fois les affichages proposés d'office (Diffusion, Borne, Compact)
+        plan = Store.Write<HaPlan?>(d =>
+        {
+            var p = d.Tenant.HaPlans.FirstOrDefault(x => x.Id == id);
+            if (p == null) return null;
+            HaViews.Ensure(p);
+            return new HaPlan { Id = p.Id, Name = p.Name, Json = p.Json, UpdatedUtc = p.UpdatedUtc, Views = p.Views.ToList(), ViewsVersion = p.ViewsVersion };
+        });
+        parsed = HomeAssistantRules.ParsePlan(plan?.Json);
+        uses = plan == null ? new() : Store.Read(d => HaPlanUses.Of(d, id));
+    }
+
+    private RenderFragment Tab(string key, string label, int? count, bool disabled) => @<button type="button" role="tab" class="@(tab == key ? "on" : "")" aria-selected="@(tab == key ? "true" : "false")" disabled="@disabled"
+        title="@(disabled ? "Enregistrez d'abord le plan" : null)" @onclick="() => Go(key)">@label@if (count is { } n) { <span class="cat-count">@n</span> }</button>;
+
+    private void Go(string key)
+    {
+        tab = key;
+        Nav.NavigateTo(Nav.GetUriWithQueryParameter("onglet", key == "dessin" ? null : key), replace: true);
+    }
+
+    private void Save((string Name, string Json) r)
+    {
+        var id = plan?.Id ?? Guid.NewGuid();
+        var name = r.Name.Trim();
+        var taken = Store.Read(d => d.Tenant.HaPlans.Any(p => p.Id != id && p.Name.Equals(name, StringComparison.CurrentCultureIgnoreCase)));
+        if (taken) { Toast.Error($"Un plan « {name} » existe déjà."); return; }
+        var json = r.Json;
+        Store.Write(d =>
+        {
+            if (d.Tenant.HaPlans.FirstOrDefault(p => p.Id == id) is not { } p) d.Tenant.HaPlans.Add(p = new HaPlan { Id = id, Name = name, Json = json });
+            p.Name = name; p.Json = json; p.UpdatedUtc = DateTime.UtcNow;
+            HaViews.Ensure(p);
+            var pp = HomeAssistantRules.ParsePlan(json);
+            p.Views = p.Views.Select(v => HaViews.Normalize(v, pp)).ToList();
+        });
+        Live.Nudge(Store.ClientId);   // les écrans qui affichent ce plan relisent ses appareils
+        Toast.Ok($"Plan « {name} » enregistré.");
+        if (IsNew) { Nav.NavigateTo($"/plans/{id}", replace: true); return; }
+        Load();
+    }
+
+    /// <summary>« Annuler les modifications » : l'éditeur repart du plan enregistré (nouveau plan : retour à la liste).</summary>
+    private void ResetEditor()
+    {
+        if (IsNew) { Nav.NavigateTo("/plans"); return; }
+        editorKey = Guid.NewGuid();
+    }
+
+    private void ViewsSaved() { Live.Nudge(Store.ClientId); viewsKey = Guid.NewGuid(); Load(); }
+
+    // ---------- Où il s'affiche ----------
+    private static string KindIcon(string k) => k switch { "list" => "play-box", "tile" => "hand", "kiosk" => "hand", _ => "monitor" };
+    private static string KindLabel(string k) => k switch { "list" => "Contenu de liste", "tile" => "Tuile de borne", "kiosk" => "Widget de borne", _ => "Widget d'écran" };
+    private string ViewName(Guid? id) => id is { } v && plan?.Views.FirstOrDefault(x => x.Id == v) is { } vv ? vv.Name : id == null ? "Auto" : "Affichage supprimé";
+    private static string? UseHref(HaPlanUses.Use u) => u.Kind switch
+    {
+        "list" when u.PlaylistId is { } p => $"/playlists/{p}",
+        "tile" when u.ListId is { } l => $"/interactive/{l}",
+        "screen" or "kiosk" when u.ScreenId is { } s => $"/?edit={s}",
+        _ => null,
+    };
+
+    private RenderFragment Where(string key, string icon, string title, string text) => @<button type="button" class="@(addKind == key ? "on" : "")" @onclick="() => PickKind(key)">
+        <b><Ico Name="@icon" Size="17" /> @title</b><span>@text</span></button>;
+
+    private void OpenAdd() { adding = true; PickKind("list"); }
+
+    private void PickKind(string k)
+    {
+        addKind = k;
+        addTarget = Targets().FirstOrDefault().Id.ToString();
+        // affichage proposé selon l'endroit : diffusion dans une liste, borne sur une borne, auto sur un écran
+        var mode = k == "list" ? "signage" : k == "kiosk" ? "interactive" : null;
+        addView = mode == null ? "" : (plan?.Views.FirstOrDefault(v => v.Mode == mode) ?? plan?.Views.FirstOrDefault())?.Id.ToString() ?? "";
+    }
+
+    private List<(Guid Id, string Label)> Targets() => Store.Read(d => addKind switch
+    {
+        "list" => d.Playlists.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).Select(p => (p.Id, p.Name)).ToList(),
+        "screen" => d.Screens.Where(s => s.Kiosk == null).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).Select(s => (s.Id, s.Name)).ToList(),
+        _ => d.Screens.Where(s => s.Kiosk != null).OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).Select(s => (s.Id, s.Name)).ToList(),
+    });
+
+    private HaPlanView? AddViewSel => plan?.Views.FirstOrDefault(v => v.Id.ToString() == addView);
+
+    private string AddNote => addKind switch
+    {
+        "list" => AddViewSel is { } v && HaViews.TourSeconds(v) is { } sec ? $"Durée dans la liste : {sec} s, la visite complète." : "Durée dans la liste : la durée par défaut (réglable dans le fil).",
+        "screen" => AddViewSel == null ? "Auto : le résumé seul dans une petite case, le plan dès qu'il y a la place." : "Le widget suit cet affichage ; ses autres réglages ne servent plus.",
+        _ => "La tuile est ajoutée à la première page de la liste interactive de la borne ; ajustez sa place, puis publiez la borne.",
+    };
+
+    private void Add()
+    {
+        if (plan == null || !Guid.TryParse(addTarget, out var target)) return;
+        var view = AddViewSel;
+        var targetName = Targets().FirstOrDefault(t => t.Id == target).Label;
+        var p = plan;
+        string? err = Store.Write<string?>(d =>
+        {
+            switch (addKind)
+            {
+                case "list":
+                    if (view == null) return "Choisissez un affichage.";
+                    if (HaPlanUses.NewContent(d, Catalog, p, view) is not { } c) return "Le contenu « Vue du bâtiment » n'est pas disponible : activez Home Assistant dans Intégrations.";
+                    return HaPlanUses.AddToList(d, target, c, view);
+                case "screen":
+                    return HaPlanUses.AddWidget(d, Catalog, target, p.Id, view?.Id);
+                default:
+                    if (view == null) return "Choisissez un affichage.";
+                    if (HaPlanUses.NewContent(d, Catalog, p, view) is not { } k) return "Le contenu « Vue du bâtiment » n'est pas disponible : activez Home Assistant dans Intégrations.";
+                    return HaPlanUses.AddTile(d, target, k, p.Name);
+            }
+        });
+        if (err != null) { Toast.Error(err); return; }
+        adding = false;
+        Toast.Ok(addKind switch
+        {
+            "list" => $"Ajouté à la fin de la liste « {targetName} ». Les écrans qui la diffusent sont à publier.",
+            "screen" => $"Widget posé sur « {targetName} », en haut à gauche : placez-le dans l'éditeur de l'écran, puis publiez.",
+            _ => $"Tuile « {p.Name} » ajoutée à la liste interactive de « {targetName} » : ajustez sa place, puis publiez la borne.",
+        });
+        Load();
+    }
+}

@@ -24,7 +24,7 @@ public class HaViewsTests
         var (_, p) = Maison();
         Assert.True(HaViews.Ensure(p));
         Assert.False(HaViews.Ensure(p));                                       // une seule fois
-        Assert.Equal(new[] { ("Diffusion", "signage"), ("Borne", "interactive") }, p.Views.Select(v => (v.Name, v.Mode)));
+        Assert.Equal(new[] { ("Diffusion", "signage"), ("Borne", "interactive"), ("Compact", "compact") }, p.Views.Select(v => (v.Name, v.Mode)));   // §202 : trois affichages
         // visite proposée : vue d'ensemble, puis les étages du haut vers le bas
         Assert.Equal(new string?[] { null, "rdc", "ss" }, p.Views[0].Tour.Select(t => t.Floor));
         Assert.Equal(new[] { 12, 8, 8 }, p.Views[0].Tour.Select(t => t.Sec));

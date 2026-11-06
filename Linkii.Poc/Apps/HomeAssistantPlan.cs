@@ -225,6 +225,18 @@ public static class HaViews
     public static bool Allows(HaPlanView? v, string entityId) =>
         v is { Mode: "interactive" } && FamilyOf(HomeAssistantRules.Domain(entityId)) is { } f && v.Control.Contains(f);
 
+    public static readonly string[] Modes = { "signage", "interactive", "compact" };
+
+    /// <summary>Nom de l'usage d'un affichage, tel que le back-office le montre (§202).</summary>
+    public static string ModeLabel(string? mode) => mode switch { "interactive" => "Borne", "compact" => "Compact", _ => "Diffusion" };
+
+    /// <summary>Durée d'une visite complète (s) : celle que prend un contenu de liste avec cet affichage ; null sans visite (borne, compact).</summary>
+    public static int? TourSeconds(HaPlanView v) => v.Mode == "signage" && v.Tour.Count > 0 ? v.Tour.Sum(t => t.Sec) : null;
+
+    /// <summary>Le contenu ou le widget suit-il un affichage du plan ? (le widget « Plan du bâtiment » sans affichage choisi garde ses propres réglages : « Auto »).</summary>
+    public static bool Chosen(string? appId, IReadOnlyDictionary<string, string>? settings) =>
+        appId == HomeAssistantRules.BuildingApp || Guid.TryParse(settings?.GetValueOrDefault("viewId"), out _);
+
     /// <summary>Vue nettoyée : nom, mode, étapes de visite sur des étages existants (durées bornées), réglages connus seulement.</summary>
     public static HaPlanView Normalize(HaPlanView v, HomeAssistantRules.Plan plan)
     {
@@ -236,7 +248,7 @@ public static class HaViews
         {
             Id = v.Id == Guid.Empty ? Guid.NewGuid() : v.Id,
             Name = name.Length == 0 ? "Vue" : name.Length > 40 ? name[..40] : name,
-            Mode = v.Mode == "interactive" ? "interactive" : "signage",
+            Mode = Modes.Contains(v.Mode) ? v.Mode : "signage",
             Tour = tour.Count > 0 ? tour : DefaultTour(plan),
             Labels = LabelModes.Contains(v.Labels) ? v.Labels : "all",
             Summary = SummaryModes.Contains(v.Summary) ? v.Summary : "right",
@@ -250,13 +262,22 @@ public static class HaViews
         new[] { new HaTourStep { Floor = null, Sec = 12 } }
             .Concat(plan.Floors.AsEnumerable().Reverse().Select(f => new HaTourStep { Floor = f.Id, Sec = 8 })).ToList();
 
-    /// <summary>Vues d'un plan qui n'en a pas encore : « Diffusion » (visite) et « Borne » (interactive : lumières, volets, thermostats).</summary>
+    /// <summary>
+    /// Affichages proposés d'office : « Diffusion » (visite), « Borne » (interactive : lumières, volets, thermostats) et « Compact » (le résumé seul, §202).
+    /// Un plan qui a déjà ses affichages reçoit une seule fois ce qui lui manque (<see cref="HaPlan.ViewsVersion"/>) : un affichage supprimé exprès ne revient pas.
+    /// </summary>
     public static bool Ensure(HaPlan p)
     {
-        if (p.Views.Count > 0) return false;
+        if (p.Views.Count > 0 && p.ViewsVersion >= 1) return false;
         var plan = HomeAssistantRules.ParsePlan(p.Json);
-        p.Views.Add(new HaPlanView { Name = "Diffusion", Mode = "signage", Tour = DefaultTour(plan) });
-        p.Views.Add(new HaPlanView { Name = "Borne", Mode = "interactive", Tour = DefaultTour(plan), Summary = "right" });
+        if (p.Views.Count == 0)
+        {
+            p.Views.Add(new HaPlanView { Name = "Diffusion", Mode = "signage", Tour = DefaultTour(plan) });
+            p.Views.Add(new HaPlanView { Name = "Borne", Mode = "interactive", Tour = DefaultTour(plan), Summary = "right" });
+        }
+        if (p.Views.All(v => v.Mode != "compact") && p.Views.Count < MaxViews && p.Views.All(v => !v.Name.Equals("Compact", StringComparison.CurrentCultureIgnoreCase)))
+            p.Views.Add(new HaPlanView { Name = "Compact", Mode = "compact", Tour = DefaultTour(plan), Control = new() });
+        p.ViewsVersion = 1;
         return true;
     }
 

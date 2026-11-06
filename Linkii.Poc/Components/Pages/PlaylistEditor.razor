@@ -7,6 +7,7 @@
 @inject Toaster Toast
 @inject MediaLibrary MediaLib
 @inject ModeService Modes
+@inject AppCatalog Catalog
 @using Microsoft.JSInterop
 @implements IDisposable
 
@@ -237,6 +238,11 @@ else
     </div>
 }
 
+@if (pickBuilding)
+{
+    <HaBuildingPick OnPick="AddBuilding" OnClose="() => { pickBuilding = false; insertAt = null; }" />
+}
+
 @if (pickCompo && Current is { } cpl)
 {
     @* Compositions (§80) : celles de « Mes compositions » se choisissent ici ; une nouvelle s'ajoute dès son premier enregistrement. *@
@@ -429,6 +435,7 @@ else
     {
         if (Current is not { } pl) return;
         if (app.Id == Compositions.AppId) { OpenCompositionPicker(position); return; }   // on choisit une composition existante, ou on en crée une
+        if (app.Id == HomeAssistantRules.BuildingApp) { insertAt = position; pickBuilding = true; return; }   // plan + affichage d'abord (§202)
         if (Svc.CreateEmpty(app.Id) is not { } item) { Toast.Error("Activez d'abord cette intégration dans la page Intégrations."); return; }
         var dur = Store.Read(d => d.Tenant.DefaultDurationSec);
         var placement = PlacementsFor(item).Select(o => o.Id).DefaultIfEmpty("full").Contains("full") ? "full" : PlacementsFor(item).First().Id;
@@ -1208,6 +1215,30 @@ else
 
     // ---------- Compositions : choix dans « Mes compositions » ----------
     private bool pickCompo;
+    private bool pickBuilding;
+
+    /// <summary>« Vue du bâtiment » choisie (plan + affichage) : contenu créé déjà relié, durée de la visite, inséré à la place demandée.</summary>
+    private void AddBuilding((Guid PlanId, Guid ViewId) r)
+    {
+        pickBuilding = false;
+        if (Current is not { } pl) return;
+        var at = insertAt is { } i && i >= 0 && i < pl.Draft.Count ? i : pl.Draft.Count;
+        insertAt = null;
+        string? err = null; PlaylistItem? row = null; string name = "";
+        WriteList(d =>
+        {
+            if (d.Tenant.HaPlans.FirstOrDefault(p => p.Id == r.PlanId) is not { } p || p.Views.FirstOrDefault(v => v.Id == r.ViewId) is not { } v) { err = "Plan ou affichage introuvable."; return; }
+            if (HaPlanUses.NewContent(d, Catalog, p, v) is not { } c) { err = "Activez d'abord Home Assistant dans la page Intégrations."; return; }
+            row = new PlaylistItem { MediaId = c.Id, DurationSec = HaViews.TourSeconds(v) ?? d.Tenant.DefaultDurationSec, Placement = "full" };
+            name = c.Name;
+            pl.Draft.Insert(at, row);
+            pl.Touch();
+        });
+        if (err != null) { Toast.Error(err); return; }
+        Toast.Ok($"« {name} » ajouté en position {at + 1}.");
+        Reload();
+        if (row != null) Flash(row.Id);
+    }
     private List<MediaItem> compoItems = new(), compoFiles = new();
     private string NewCompositionUrl => $"/compositions/new?back={Uri.EscapeDataString($"/playlists/{Id}")}&addTo={Id}&at={insertAt?.ToString() ?? ""}";
 

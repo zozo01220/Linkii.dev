@@ -1019,14 +1019,15 @@ async Task<IResult> HaCommand(HttpRequest req, Guid id, HaCommandDto body, JsonS
         var tenant = db.Clients.First(c => c.Id == s!.ClientId);
         var ids = pub == null ? new() : HomeAssistantRules.EntitiesOf(tenant, pub.AppId, pub.Settings);   // plan : les appareils du plan d'aujourd'hui, même modifié depuis la publication
         // vue du bâtiment (§200) : seulement une vue interactive, et seulement les familles qu'elle coche (la vue d'aujourd'hui, même modifiée depuis la publication)
-        if (pub?.AppId == HomeAssistantRules.BuildingApp) { var v = HaViews.Of(tenant, pub.Settings); ids = ids.Where(e => HaViews.Allows(v, e)).ToList(); }
+        // (§202 : aussi le widget « Plan du bâtiment » dont l'affichage est choisi)
+        if (pub != null && HaViews.Chosen(pub.AppId, pub.Settings)) { var v = HaViews.Of(tenant, pub.Settings); ids = ids.Where(e => HaViews.Allows(v, e)).ToList(); }
         return ((IResult?)null, s!.ClientId, tenant.HomeAssistant?.Copy(), pub, ids);
     });
     if (denied != null) return denied;
     if (published == null) return Results.NotFound();
     var entityId = body.EntityId ?? "";
     var action = HomeAssistantRules.ActionOf(body);
-    if (published.Settings.GetValueOrDefault("control") == "false"
+    if ((published.Settings.GetValueOrDefault("control") == "false" && !HaViews.Chosen(published.AppId, published.Settings))   // affichage choisi : c'est lui qui décide
         || !allowed.Contains(entityId) || !HomeAssistantRules.Commandable(published.AppId!, entityId, action))
         return Results.BadRequest(new { error = "Entité non configurée ou non actionnable." });
     if (account == null) return Results.Json(new { error = "Compte Home Assistant non connecté." }, statusCode: 409);

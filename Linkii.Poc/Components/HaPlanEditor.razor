@@ -12,14 +12,17 @@
    proportions quelle que soit sa taille. Rien n'est enregistré avant « Enregistrer » : le parent reçoit le nom et le plan nettoyé. *@
 @if (open)
 {
-    <SectionContent SectionName="overlay">
-        <div class="modal-backdrop picker-backdrop" @onclick="Cancel"></div>
-        <div class="modal app-modal picker hpe" role="dialog" aria-modal="true" aria-label="Plan du bâtiment">
-            <div class="modal-head">
-                <span class="app-ico" style="--app-c:#41BDF5"><Ico Name="home" Size="22" /></span>
-                <div class="grow"><h3>@(IsNew ? "Nouveau plan" : "Plan du bâtiment")</h3><small>Dessinez les pièces de chaque étage ou importez son plan, puis glissez-y les appareils de Home Assistant.</small></div>
-                <button type="button" class="modal-x" aria-label="Fermer" @onclick="Cancel"><Ico Name="x" Size="20" /></button>
-            </div>
+    <OverlayOr Inline="Inline">
+        @if (!Inline) { <div class="modal-backdrop picker-backdrop" @onclick="Cancel"></div> }
+        <div class="modal app-modal picker hpe @(Inline ? "inline" : "")" role="@(Inline ? "region" : "dialog")" aria-modal="@(Inline ? "false" : "true")" aria-label="Plan du bâtiment">
+            @if (!Inline)
+            {
+                <div class="modal-head">
+                    <span class="app-ico" style="--app-c:#41BDF5"><Ico Name="home" Size="22" /></span>
+                    <div class="grow"><h3>@(IsNew ? "Nouveau plan" : "Plan du bâtiment")</h3><small>Dessinez les pièces de chaque étage ou importez son plan, puis glissez-y les appareils de Home Assistant.</small></div>
+                    <button type="button" class="modal-x" aria-label="Fermer" @onclick="Cancel"><Ico Name="x" Size="20" /></button>
+                </div>
+            }
             <div class="modal-body hpe-body" @ref="root">
                 <div class="hpe-main">
                     <div class="hpe-name"><label for="hpe-name">Nom du plan</label><input id="hpe-name" type="text" maxlength="60" placeholder="Maison, Bureaux, Atelier…" @bind="name" @bind:event="oninput" /></div>
@@ -82,7 +85,7 @@
                     </div>
                 </div>
                 <aside class="hpe-side">
-                    <div class="hpe-stabs">
+                    <div class="hpe-stabs" hidden="@Inline">
                         <button type="button" class="@(tab == "devices" ? "on" : "")" @onclick='() => tab = "devices"'>Appareils</button>
                         <button type="button" class="@(tab == "floors" ? "on" : "")" @onclick='() => tab = "floors"'>Étages et pièces</button>
                     </div>
@@ -173,7 +176,7 @@
                 <span class="hpe-count">@devs.Count appareil@(devs.Count > 1 ? "s" : "") sur @floors.Count étage@(floors.Count > 1 ? "s" : "")</span>
                 <span class="grow"></span>
                 <button type="button" class="btn ghost" title="Voir le plan tel que l'écran l'affichera, avant d'enregistrer" disabled="@(devs.Count == 0 && floors.All(f => f.Kind != "rooms" || f.Rooms.Count == 0) && floors.All(f => f.Img == null))" @onclick="OpenPreview"><Ico Name="play" Size="15" /> Aperçu</button>
-                <button type="button" class="btn" @onclick="Cancel">Annuler</button>
+                <button type="button" class="btn" @onclick="Cancel">@(Inline ? "Annuler les modifications" : "Annuler")</button>
                 <button type="button" class="btn primary" disabled="@(name.Trim().Length == 0)" @onclick="Apply">Enregistrer</button>
             </div>
         </div>
@@ -196,7 +199,7 @@
         {
             <MediaPicker Accept="image" Multiple="false" OnPicked="Picked" OnClose="() => picking = false" />
         }
-    </SectionContent>
+    </OverlayOr>
 }
 
 @code {
@@ -206,6 +209,9 @@
     /// <summary>Enregistrer : nom et plan nettoyé. Le parent écrit dans l'organisation et ferme l'éditeur.</summary>
     [Parameter] public EventCallback<(string Name, string Json)> OnSave { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>Dans la page du plan (§202) plutôt qu'en fenêtre : ni en-tête ni fond ; Panel choisit la colonne de droite (devices | floors).</summary>
+    [Parameter] public bool Inline { get; set; }
+    [Parameter] public string? Panel { get; set; }
 
     private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
     private static readonly (string, string)[] Cats = { ("all", "Tous"), ("light", "Lumières"), ("plug", "Prises"), ("climate", "Thermostats"), ("opening", "Ouvertures"), ("sensor", "Capteurs"), ("lock", "Serrures") };
@@ -235,6 +241,8 @@
     private DotNetObjectReference<HaPlanEditor>? self;
 
     protected override void OnInitialized() => Open();
+
+    protected override void OnParametersSet() { if (Inline && Panel is "devices" or "floors") tab = Panel; }
 
     private EFloor? Floor => floors.FirstOrDefault(f => f.Id == floorId);
     private EDev? selDev => selId == null ? null : devs.FirstOrDefault(d => d.Id == selId);

@@ -1,0 +1,94 @@
+@inject TenantStore Store
+
+@* « Vue du bâtiment » ajoutée au fil d'une liste (§202) : une petite fenêtre « plan + affichage », la même partout. Le contenu est créé déjà relié ;
+   sa durée est celle de la visite (diffusion). Un plan se crée sur place (« Nouveau plan » ouvre sa page). *@
+<SectionContent SectionName="overlay">
+    <div class="modal-backdrop" @onclick="Close"></div>
+    <div class="modal app-modal hpg-pick" role="dialog" aria-modal="true" aria-label="Vue du bâtiment">
+        <div class="modal-head">
+            <span class="app-ico" style="--app-c:#41BDF5"><Ico Name="home" Size="22" /></span>
+            <div class="grow"><h3>Vue du bâtiment</h3><small>Choisissez le plan et son affichage.</small></div>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
+        </div>
+        <div class="modal-body">
+            @if (plans.Count == 0)
+            {
+                <div class="dw-note">Aucun plan du bâtiment pour l'instant. <a href="/plans/nouveau">Créez-en un</a> : il pourra ensuite s'afficher ici.</div>
+            }
+            else
+            {
+                <div class="hpg-f"><label>Quel plan ?</label>
+                    <div class="hpg-plans">
+                        @foreach (var p in plans)
+                        {
+                            var pp = p; var parsed = HomeAssistantRules.ParsePlan(p.Json);
+                            <button type="button" class="hpg-pc @(p.Id == planId ? "on" : "")" @onclick="() => PickPlan(pp)">
+                                <span class="hpg-th">
+                                    @if (parsed.Floors.FirstOrDefault(f => f.Drawn && f.Rooms.Count > 0) is { } df) { <HaPlanThumb Floor="df" Devices="parsed.Devices" /> }
+                                    else { <Ico Name="home" Size="26" /> }
+                                </span>
+                                <b>@p.Name</b><small>@parsed.Floors.Count étage@(parsed.Floors.Count > 1 ? "s" : "") · @parsed.Devices.Count appareil@(parsed.Devices.Count > 1 ? "s" : "")</small>
+                            </button>
+                        }
+                        <a class="hpg-pc add" href="/plans/nouveau"><Ico Name="plus" Size="18" /> Nouveau plan</a>
+                    </div>
+                </div>
+                @if (Plan is { } cur)
+                {
+                    <div class="hpg-f"><label>Affichage</label>
+                        <div class="hpg-views">
+                            @foreach (var v in cur.Views)
+                            {
+                                var vv = v;
+                                <button type="button" class="@(v.Id == viewId ? "on" : "")" @onclick="() => viewId = vv.Id"><b>@v.Name</b><span>@HaViews.ModeLabel(v.Mode)</span></button>
+                            }
+                        </div>
+                        <small>@Note</small>
+                    </div>
+                }
+            }
+        </div>
+        <div class="modal-foot">
+            <span class="grow"></span>
+            <button type="button" class="btn" @onclick="Close">Annuler</button>
+            <button type="button" class="btn primary" disabled="@(View == null)" @onclick="Pick"><Ico Name="plus" Size="15" /> Ajouter au fil</button>
+        </div>
+    </div>
+</SectionContent>
+
+@code {
+    /// <summary>Plan et affichage choisis : le parent crée le contenu et l'insère dans le fil.</summary>
+    [Parameter] public EventCallback<(Guid PlanId, Guid ViewId)> OnPick { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private List<HaPlan> plans = new();
+    private Guid planId, viewId;
+    private HaPlan? Plan => plans.FirstOrDefault(p => p.Id == planId);
+    private HaPlanView? View => Plan?.Views.FirstOrDefault(v => v.Id == viewId);
+
+    private string Note => View is { } v
+        ? (HaViews.TourSeconds(v) is { } sec ? $"Durée dans la liste : {sec} s, la visite complète (vue d'ensemble puis chaque étage)."
+            : v.Mode == "interactive" ? "Borne : dans une liste de diffusion, le plan s'affiche sans commande. Durée : la durée par défaut." : "Durée dans la liste : la durée par défaut.")
+        : "";
+
+    protected override void OnInitialized()
+    {
+        // chaque plan reçoit une fois ses affichages proposés d'office (Diffusion, Borne, Compact)
+        plans = Store.Write(d =>
+        {
+            foreach (var p in d.Tenant.HaPlans) HaViews.Ensure(p);
+            return d.Tenant.HaPlans.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase)
+                .Select(p => new HaPlan { Id = p.Id, Name = p.Name, Json = p.Json, Views = p.Views.ToList() }).ToList();
+        });
+        if (plans.FirstOrDefault() is { } first) PickPlan(first);
+    }
+
+    private void PickPlan(HaPlan p)
+    {
+        planId = p.Id;
+        viewId = (p.Views.FirstOrDefault(v => v.Mode == "signage") ?? p.Views.FirstOrDefault())?.Id ?? Guid.Empty;   // dans une liste : la diffusion
+    }
+
+    private Task Pick() => View is { } v ? OnPick.InvokeAsync((planId, v.Id)) : Task.CompletedTask;
+    private Task Close() => OnClose.InvokeAsync();
+}

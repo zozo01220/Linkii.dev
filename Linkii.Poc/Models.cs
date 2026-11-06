@@ -628,8 +628,10 @@ public class HaPlan
     public string Name { get; set; } = "";
     public string Json { get; set; } = "";
     public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
-    /// <summary>Façons de montrer le plan (§200) : un contenu « Vue du bâtiment » choisit plan + vue. Voir <see cref="HaViews"/>.</summary>
+    /// <summary>Façons de montrer le plan (§200), appelées « affichages » depuis le §202 : un contenu « Vue du bâtiment » ou le widget choisit plan + affichage. Voir <see cref="HaViews"/>.</summary>
     public List<HaPlanView> Views { get; set; } = new();
+    /// <summary>Version des affichages proposés d'office (1 : Diffusion, Borne et Compact, §202) ; un plan plus ancien reçoit une fois ce qui lui manque.</summary>
+    public int ViewsVersion { get; set; }
 }
 
 /// <summary>
@@ -640,7 +642,7 @@ public class HaPlanView
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "";
-    /// <summary>« signage » (diffusion) ou « interactive » (borne).</summary>
+    /// <summary>« signage » (diffusion), « interactive » (borne) ou « compact » (le résumé seul, pour un petit widget, §202).</summary>
     public string Mode { get; set; } = "signage";
     /// <summary>Visite de la diffusion : étapes jouées en boucle ; Floor null = vue d'ensemble qui tourne.</summary>
     public List<HaTourStep> Tour { get; set; } = new();

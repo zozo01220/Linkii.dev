@@ -1,17 +1,16 @@
 @page "/plans"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:widgets")]
 @inject TenantStore Store
-@inject JsonStore Root
-@inject HomeAssistantLive Live
 @inject Toaster Toast
 @inject ModeService Modes
+@inject NavigationManager Nav
 
-@* Plans du bâtiment (§194) : créés et modifiés ici, une seule fois ; le widget « Plan du bâtiment » en choisit un. Un plan modifié se met à jour sur tous les écrans qui
-   l'affichent. La page n'existe que si Home Assistant est connecté (onglet de Contenus, mode expert). *@
+@* Plans du bâtiment (§194) : la liste. Un plan s'ouvre dans sa page (§202) : dessin, appareils, affichages et « où il s'affiche ». Un plan modifié se met à jour
+   sur tous les écrans qui l'affichent. La page n'existe que si Home Assistant est connecté (onglet de Contenus, mode expert). *@
 <div class="page-head">
     <div>
         <h1>Plans du bâtiment<span class="lx-cntpill">@plans.Count</span></h1>
-        <p class="sub sc-intro">Vos étages, leurs plans et les appareils Home Assistant posés dessus. Choisissez un plan dans le widget « Plan du bâtiment » d'un écran : les modifications s'y répercutent partout.</p>
+        <p class="sub sc-intro">Vos plans de bâtiment. Ouvrez un plan pour le dessiner, régler ses affichages (diffusion, borne, compact) et choisir où il s'affiche.</p>
     </div>
     @if (account != null) { <div class="head-actions"><button type="button" class="btn" @onclick="NewPlan"><Ico Name="plus" Size="16" /> Nouveau plan</button></div> }
 </div>
@@ -41,7 +40,7 @@ else
             var id = p.Id;
             var n = used.GetValueOrDefault(id);
             <article class="hpp-card">
-                <button type="button" class="hpp-th" aria-label="Modifier « @p.Name »" @onclick="() => Edit(p)">
+                <button type="button" class="hpp-th" aria-label="Ouvrir « @p.Name »" @onclick="() => Open(p)">
                     @if (plan.Floors.FirstOrDefault(f => f.Drawn && f.Rooms.Count > 0) is { } df) { <HaPlanThumb Floor="df" Devices="plan.Devices" /> }
                     else if (plan.Floors.FirstOrDefault(f => f.Img != null)?.Img is { } img) { <span style="background-image:url('@img')"></span> }
                     else { <Ico Name="home" Size="34" /> }
@@ -49,7 +48,7 @@ else
                 <div class="hpp-t">
                     <b>@p.Name</b>
                     <small>@plan.Floors.Count étage@(plan.Floors.Count > 1 ? "s" : "") · @plan.Devices.Count appareil@(plan.Devices.Count > 1 ? "s" : "")</small>
-                    <small class="hpp-used"><Ico Name="monitor" Size="13" /> @(n == 0 ? "Utilisé nulle part" : $"{n} écran{(n > 1 ? "s" : "")} ou contenu{(n > 1 ? "s" : "")}")</small>
+                    <small class="hpp-used"><Ico Name="monitor" Size="13" /> @Math.Max(p.Views.Count, 3) affichages · @(n == 0 ? "affiché nulle part" : $"affiché {n} fois")</small>
                 </div>
                 <div class="hpp-a">
                     @if (confirmDelete == id)
@@ -60,8 +59,7 @@ else
                     }
                     else
                     {
-                        <button type="button" class="btn sm" @onclick="() => Edit(p)"><Ico Name="edit" Size="14" /> Modifier</button>
-                        <button type="button" class="btn sm" title="Diffusion, borne : comment montrer ce plan" @onclick="() => viewsOf = id"><Ico Name="monitor" Size="14" /> Vues · @Math.Max(p.Views.Count, 2)</button>
+                        <button type="button" class="btn sm" @onclick="() => Open(p)">Ouvrir le plan</button>
                         <button type="button" class="btn ghost sm" @onclick="() => Duplicate(p)">Dupliquer</button>
                         <button type="button" class="btn ghost sm icon" title="Supprimer « @p.Name »" aria-label="Supprimer « @p.Name »" @onclick="() => confirmDelete = id"><Ico Name="trash" Size="14" /></button>
                     }
@@ -71,26 +69,11 @@ else
     </div>
 }
 
-@if (viewsOf is { } vp)
-{
-    <HaViewsEditor @key="vp" PlanId="vp" OnClose="() => viewsOf = null" OnSaved="ViewsSaved" />
-}
-
-@if (editing)
-{
-    <HaPlanEditor @key="editId" Name="@editName" Json="@editJson" OnSave="Save" OnClose="CloseEditor" />
-}
-
 @code {
     private List<HaPlan> plans = new();
     private HomeAssistantAccount? account;
     private Dictionary<Guid, int> used = new();
-    private bool editing;
-    private Guid? editId;
-    private string editName = "", editJson = "";
-    private Guid? confirmDelete, viewsOf;
-
-    private void ViewsSaved() { viewsOf = null; Live.Nudge(Store.ClientId); Load(); }
+    private Guid? confirmDelete;
 
     protected override void OnInitialized() => Load();
 
@@ -102,48 +85,17 @@ else
         used = UsageOf();
     }
 
-    /// <summary>Plan → nombre d'écrans qui portent au moins un widget qui le choisit (tous les écrans de l'organisation, même hors du périmètre de la personne).</summary>
-    private Dictionary<Guid, int> UsageOf()
-    {
-        var cid = Store.ClientId;
-        return Root.Read(db => db.Screens.Where(s => s.ClientId == cid)
-            .SelectMany(s => s.Widgets.Where(w => w.AppId == HomeAssistantRules.PlanApp && Guid.TryParse(w.Settings.GetValueOrDefault("planId"), out _))
-                .Select(w => Guid.Parse(w.Settings["planId"])).Distinct())
-            .Concat(db.Media.Where(m => m.ClientId == cid && m.AppId == HomeAssistantRules.BuildingApp && Guid.TryParse(m.Settings.GetValueOrDefault("planId"), out _))
-                .Select(m => Guid.Parse(m.Settings["planId"])))   // contenus « Vue du bâtiment » (§200)
-            .GroupBy(id => id).ToDictionary(g => g.Key, g => g.Count()));
-    }
+    /// <summary>Plan → nombre d'utilisations : contenus de liste, tuiles de borne, widgets des écrans et des bornes (toute l'organisation, §202).</summary>
+    private Dictionary<Guid, int> UsageOf() => Store.Read(d => HaPlanUses.CountByPlan(d));
 
-    private void NewPlan() { editId = Guid.NewGuid(); editName = ""; editJson = ""; editing = true; }
+    private void NewPlan() => Nav.NavigateTo("/plans/nouveau");
 
-    private void Edit(HaPlan p) { editId = p.Id; editName = p.Name; editJson = p.Json; editing = true; }
-
-    private void CloseEditor() { editing = false; editId = null; }
-
-    private void Save((string Name, string Json) r)
-    {
-        var id = editId ?? Guid.NewGuid();
-        var name = r.Name.Trim();
-        if (plans.Any(p => p.Id != id && p.Name.Equals(name, StringComparison.CurrentCultureIgnoreCase))) { Toast.Error($"Un plan « {name} » existe déjà."); return; }
-        var json = r.Json;
-        Store.Write(d =>
-        {
-            if (d.Tenant.HaPlans.FirstOrDefault(p => p.Id == id) is not { } p) d.Tenant.HaPlans.Add(p = new HaPlan { Id = id, Name = name, Json = json });
-            p.Name = name; p.Json = json; p.UpdatedUtc = DateTime.UtcNow;
-            HaViews.Ensure(p);
-            var parsed = HomeAssistantRules.ParsePlan(json);
-            p.Views = p.Views.Select(v => HaViews.Normalize(v, parsed)).ToList();
-        });
-        Live.Nudge(Store.ClientId);   // les écrans qui affichent ce plan relisent ses appareils
-        Toast.Ok($"Plan « {name} » enregistré.");
-        CloseEditor();
-        Load();
-    }
+    private void Open(HaPlan p) => Nav.NavigateTo($"/plans/{p.Id}");
 
     private void Duplicate(HaPlan p)
     {
         var name = $"{p.Name} (copie)";
-        var copy = new HaPlan { Name = name, Json = p.Json, Views = p.Views.Select(v => { var c = HaViews.Normalize(v, HomeAssistantRules.ParsePlan(p.Json)); c.Id = Guid.NewGuid(); return c; }).ToList() };
+        var copy = new HaPlan { Name = name, Json = p.Json, ViewsVersion = p.ViewsVersion, Views = p.Views.Select(v => { var c = HaViews.Normalize(v, HomeAssistantRules.ParsePlan(p.Json)); c.Id = Guid.NewGuid(); return c; }).ToList() };
         Store.Write(d => d.Tenant.HaPlans.Add(copy));
         Toast.Ok($"Plan « {name} » créé.");
         Load();
@@ -152,7 +104,7 @@ else
     private void Delete(HaPlan p)
     {
         confirmDelete = null;
-        if (used.GetValueOrDefault(p.Id) is var n && n > 0) { Toast.Error($"« {p.Name} » sert à {n} écran{(n > 1 ? "s" : "")} ou contenu{(n > 1 ? "s" : "")} : changez leur plan d'abord."); return; }
+        if (used.GetValueOrDefault(p.Id) is var n && n > 0) { Toast.Error($"« {p.Name} » est affiché {n} fois : retirez-le de ces écrans, listes et bornes d'abord (onglet « Où il s'affiche » du plan)."); return; }
         Store.Write(d => d.Tenant.HaPlans.RemoveAll(x => x.Id == p.Id));
         Toast.Ok($"Plan « {p.Name} » supprimé.");
         Load();

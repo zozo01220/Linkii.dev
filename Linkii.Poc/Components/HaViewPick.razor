@@ -1,7 +1,8 @@
 @inject TenantStore Store
 
-@* Champ « vue » d'un contenu « Vue du bâtiment » (§200) : une des vues du plan choisi juste au-dessus (réglage planId). Un plan sans vue reçoit les deux vues
-   proposées d'office (Diffusion, Borne). Les vues se règlent dans Contenus › Plans › Vues. *@
+@* Champ « affichage » (§200, renommé au §202) : un des affichages du plan choisi juste au-dessus (réglage planId) : Diffusion, Borne, Compact…
+   Contenu « Vue du bâtiment » : obligatoire. Widget « Plan du bâtiment » : facultatif, « Auto » garde les réglages propres du widget.
+   Un plan sans affichage reçoit ceux proposés d'office. Les affichages se règlent dans Contenus › Plans › (le plan) › Affichages. *@
 @if (plan == null)
 {
     <div class="dw-note">Choisissez d'abord un plan.</div>
@@ -9,20 +10,21 @@
 else
 {
     <select @bind="Values[Field.Key]" @bind:after="Changed">
-        <option value="">— Choisir une vue —</option>
+        @if (Field.Required) { <option value="">— Choisir un affichage —</option> }
+        else { <option value="">Auto : selon la taille de la case</option> }
         @foreach (var v in plan.Views)
         {
-            <option value="@v.Id">@v.Name · @(v.Mode == "interactive" ? "interactive (borne)" : "diffusion")</option>
+            <option value="@v.Id">@v.Name · @HaViews.ModeLabel(v.Mode).ToLowerInvariant()</option>
         }
-        @if (Values[Field.Key].Length > 0 && plan.Views.All(v => v.Id.ToString() != Values[Field.Key])) { <option value="@Values[Field.Key]">Vue supprimée</option> }
+        @if (Values[Field.Key].Length > 0 && plan.Views.All(v => v.Id.ToString() != Values[Field.Key])) { <option value="@Values[Field.Key]">Affichage supprimé</option> }
     </select>
     @if (Current is { Mode: "interactive" })
     {
-        <small>Vue interactive : à ouvrir depuis une borne (tuile ou liste interactive). Dans une liste de diffusion, elle montre le plan sans commande.</small>
+        <small>Borne : à ouvrir depuis une borne (tuile ou liste interactive). Sur un écran sans toucher, le plan s'affiche sans commande.</small>
     }
     else
     {
-        <small>Une vue manque ou doit changer ? <a href="/plans">Contenus › Plans › Vues</a>.</small>
+        <small>Un affichage manque ou doit changer ? <a href="/plans/@plan.Id?onglet=affichages">Réglez les affichages du plan</a>.</small>
     }
 }
 
@@ -43,10 +45,10 @@ else
         planKey = pid;
         plan = null;
         if (!Guid.TryParse(pid, out var id)) return;
-        // un plan sans vue reçoit les vues proposées d'office
+        // un plan sans affichage reçoit ceux proposés d'office
         plan = Store.Write<HaPlan?>(d => { var p = d.Tenant.HaPlans.FirstOrDefault(x => x.Id == id); if (p == null) return null; HaViews.Ensure(p); return new HaPlan { Id = p.Id, Name = p.Name, Views = p.Views.ToList() }; });
         if (plan != null && plan.Views.All(v => v.Id.ToString() != Values[Field.Key]))
-            Values[Field.Key] = plan.Views.FirstOrDefault()?.Id.ToString() ?? "";   // plan changé : sa première vue
+            Values[Field.Key] = Field.Required ? plan.Views.FirstOrDefault()?.Id.ToString() ?? "" : "";   // plan changé : sa première vue (contenu) ou « Auto » (widget)
     }
 
     private Task Changed() => OnChange.InvokeAsync();

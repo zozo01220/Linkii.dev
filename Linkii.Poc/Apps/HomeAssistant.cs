@@ -752,7 +752,9 @@ public class HomeAssistantProvider(HomeAssistantClient ha, HomeAssistantLive liv
         var plan = isPlan ? HomeAssistantRules.PlanOf(rt.Client, rt.Values) ?? new HomeAssistantRules.Plan(new(), new()) : null;
         var configured = plan != null ? plan.Devices.Select(d => d.Id).ToList() : HomeAssistantRules.ParseEntities(rt.Get("entities"));
         // vue du bâtiment (§200) : réglages et commandes viennent de la vue choisie ; en diffusion, rien à commander
-        var building = rt.Values.ContainsKey("viewId");
+        // contenu « Vue du bâtiment », ou widget dont l'affichage est choisi (§202) ; widget en « Auto » : ses propres réglages, comme avant
+        // (le contenu n'a pas de réglages d'affichage propres : pas de clé « labels »)
+        var building = Guid.TryParse(rt.Get("viewId"), out _) || (rt.Values.ContainsKey("viewId") && !rt.Values.ContainsKey("labels"));
         var view = building ? HaViews.Of(rt.Client, rt.Values) : null;
         if (building && view == null) throw new InvalidOperationException("Choisissez un plan et une de ses vues.");
         var control = building ? view!.Mode == "interactive" : rt.Get("control", "true") != "false";
