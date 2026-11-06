@@ -144,8 +144,54 @@ test('borne : étage d\'accueil et retour d\'un niveau', () => {
   assert.deepEqual(L.navUp({ floor: 'rdc', room: 'salon', dev: 'light.salon' }, plan), { floor: 'rdc', room: 'salon', dev: null });
   assert.deepEqual(L.navUp({ floor: 'rdc', room: 'salon', dev: null }, plan), { floor: 'rdc', room: null, dev: null });
   assert.deepEqual(L.navUp({ floor: 'e1', room: null, dev: 'switch.prise' }, plan), { floor: 'e1', room: null, dev: null });   // appareil hors pièce : retour à l'étage
-  const n = { floor: 'rdc', room: null, dev: null };
-  assert.equal(L.navUp(n, plan), n);                                     // à l'étage : la borne a son propre retour
+  assert.deepEqual(L.navUp({ floor: 'rdc', room: null, dev: null }, plan), { floor: 'all', room: null, dev: null });   // étage → vue d'ensemble (§201)
+  const all = { floor: 'all', room: null, dev: null };
+  assert.equal(L.navUp(all, plan), all);                                 // vue d'ensemble : la borne a son propre retour
+  const one = { floors: [plan.floors[0]], devices: [] }, n = { floor: 'rdc', room: null, dev: null };
+  assert.equal(L.navUp(n, one), n);                                      // un seul étage : pas de vue d'ensemble
+});
+
+test('borne plein écran : une étiquette par pièce à l\'étage, gros boutons dans la pièce, rien sur la vue d\'ensemble', () => {
+  const fl = L.scene(plan, ents, { labels: 'all', now: NOW, kiosk: 'floor' });
+  assert.equal(fl.rooms['rdc/entree'].show, true);                       // même sans rien à dire…
+  assert.equal(fl.rooms['rdc/entree'].quiet, true);                      // … en discret
+  assert.equal(fl.rooms['rdc/salon'].quiet, false);
+  assert.equal(fl.pins['light.salon'].show, false);                      // résumé par la pièce, quel que soit le réglage de la vue
+  assert.equal(fl.pins['binary_sensor.porte'].show, true);               // alerte : sa propre étiquette
+  const rm = L.scene(plan, ents, { labels: 'all', now: NOW, kiosk: 'room', room: 'rdc/salon' });
+  assert.equal(rm.pins['light.salon'].big, true);
+  assert.equal(rm.pins['light.salon'].text, '80 %');                     // valeur seule : le nom est à côté
+  assert.equal(rm.pins['binary_sensor.porte'].show, false);              // autre pièce : masqué
+  assert.equal(rm.rooms['rdc/salon'].show, false);                       // plus d'étiquette de pièce une fois dedans
+  const all = L.scene(plan, ents, { labels: 'all', now: NOW, kiosk: 'all' });
+  assert.equal(Object.values(all.pins).some(p => p.show), false);
+});
+
+test('plein écran : cadrage dans la zone libre', () => {
+  const area = { w: 1000, h: 400 };
+  assert.equal(L.fit({ w: 500, h: 400 }, 0, 0, 0, area), 1);             // vue de dessus : la boîte remplit la zone
+  const flat = L.fit({ w: 500, h: 300 }, 0, 0, 0, area), tilted = L.fit({ w: 500, h: 300 }, 0, 60, 0, area);
+  assert.ok(tilted > flat);                                              // inclinée : elle s'écrase en hauteur, on peut grossir…
+  assert.ok(L.fit({ w: 500, h: 300 }, 0, 60, 200, area) < tilted);       // … sauf s'il faut voir les murs
+  assert.ok(L.fit({ w: 500, h: 300 }, 30, 40, 0, area, true) <= L.fit({ w: 500, h: 300 }, 30, 40, 0, area));   // qui tourne : cadré pour tous les angles
+  assert.equal(L.uiSize(1180, 820, 'kiosk'), 19);
+  assert.equal(L.uiSize(600, 400, 'kiosk'), 17);                         // jamais sous 17 px à la borne
+  assert.equal(L.uiSize(1920, 1080, 'tv'), 28);
+  assert.equal(L.uiSize(3840, 2160, 'tv'), 34);
+});
+
+test('borne : toucher direct seulement pour ce qui s\'allume et se commande', () => {
+  assert.equal(L.quick(Object.assign({}, ents['light.salon'], { ctrl: ['on'] })), true);
+  assert.equal(L.quick(ents['light.salon']), false);                     // pas de commande permise par la vue
+  assert.equal(L.quick(Object.assign({}, ents['cover.volet'], { ctrl: ['open'] })), false);
+  assert.equal(L.quick(Object.assign({}, ents['light.garage'], { ctrl: ['on'] })), false);   // indisponible
+});
+
+test('diffusion plein écran : résumé en pastilles', () => {
+  const html = L.pillsHtml(L.summary(plan, ents, { decimals: 'auto', now: NOW }));
+  assert.match(html, /class="hpl-pl alert"/);
+  assert.match(html, /2 lumières allumées/);
+  assert.match(html, /18,2°/);
 });
 
 test('borne : la pièce choisie est surlignée, les autres appareils s\'estompent', () => {

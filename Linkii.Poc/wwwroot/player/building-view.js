@@ -72,7 +72,9 @@
    * un appareil hors pièce (étage en image) se comporte comme en « active ». Indisponibles masqués si hideOff.
    */
   function scene(plan, ents, o) {
-    var lab = o.labels || 'room', hideOff = o.hideOff !== false, pins = {}, rooms = {};
+    // borne plein écran (§201) : o.kiosk = niveau montré. « floor » : une étiquette par pièce (même sans rien à dire), alertes à part ;
+    // « room » : les appareils de la pièce choisie seulement, en gros boutons ; « all » (bâtiment) : aucune pastille.
+    var K = o.kiosk || null, lab = K ? 'room' : o.labels || 'room', hideOff = o.hideOff !== false, pins = {}, rooms = {};
     plan.devices.forEach(function (d) {
       var e = ents[d.id];
       if (absent(e)) { pins[d.id] = { show: false }; return; }
@@ -92,10 +94,13 @@
       if (hideOff && e.available === false) { pins[d.id] = { show: false }; return; }
       var own = alerting(st) || o.pulseId === d.id || o.panelId === d.id;
       var bare = lab === 'none' || ((lab === 'active' || lab === 'room') && !st);
+      var show = lab === 'room' && d.room ? own : true, big = false;
+      if (K === 'room') { big = !!d.room && d.floor + '/' + d.room === o.room; show = big; bare = false; }
+      else if (K === 'all') show = false;
       pins[d.id] = {
-        show: lab === 'room' && d.room ? own : true, bare: bare, st: st, pulse: o.pulseId === d.id,
-        dim: !!o.room && d.floor + '/' + d.room !== o.room, sel: o.panelId === d.id,   // borne : une pièce choisie, les autres appareils s'estompent
-        text: (lab === 'room' && own && st ? e.name + ' · ' : '') + Ha.value(e, o.decimals, o.now),
+        show: show, big: big, bare: bare, st: st, pulse: o.pulseId === d.id,
+        dim: !K && !!o.room && d.floor + '/' + d.room !== o.room, sel: o.panelId === d.id,   // une pièce choisie, les autres appareils s'estompent
+        text: big ? Ha.value(e, o.decimals, o.now) : (lab === 'room' && own && st ? e.name + ' · ' : '') + Ha.value(e, o.decimals, o.now),
         glow: e.domain === 'light' && e.on && e.available !== false ? { b: e.brightness == null ? 100 : e.brightness, col: e.color || '#ffc870' } : null,
         open: d.seg ? (e.available !== false && (e.domain === 'binary_sensor' ? !!e.on : e.state === 'open' || e.state === 'opening')) : false,
         shut: d.seg && d.seg.kind === 'cover' ? (e.position != null ? 100 - e.position : e.state === 'closed' || e.state === 'closing' ? 100 : 0) : null
@@ -104,9 +109,9 @@
     var labels = {};
     plan.floors.forEach(function (f) {
       (f.rooms || []).forEach(function (r) {
-        var k = f.id + '/' + r.id, info = rooms[k];
+        var k = f.id + '/' + r.id, info = rooms[k], says = !!info && (info.lights > 0 || info.t != null);
         labels[k] = {
-          name: r.name, show: lab === 'room' && !!info && (info.lights > 0 || info.t != null), sel: o.room === k,
+          name: r.name, show: K ? K === 'floor' : lab === 'room' && says, quiet: !says, sel: o.room === k,
           lights: info ? info.lights : 0, t: info ? info.t : null, color: roomColor(info, !!o.heat), lit: !!(info && info.light)
         };
       });
@@ -124,7 +129,7 @@
       if (st === 'alert') alerts.push({ id: d.id, e: e, t: e.name, s: where, v: Ha.value(e, o.decimals, o.now) });
       if (e.domain === 'light' && e.on) lights.push({ id: d.id, e: e, t: where || e.name, s: where && e.name !== where ? e.name : '', v: Ha.value(e, o.decimals, o.now) });
       var t = roomTemp(e);
-      if (t != null) { var k = d.room ? d.floor + '/' + d.room : d.id; if (!seen[k]) { seen[k] = 1; temps.push({ id: d.id, t: where || e.name, v: Ha.deg(Math.round(t * 10) / 10) }); } }
+      if (t != null) { var k = d.room ? d.floor + '/' + d.room : d.id; if (!seen[k]) { seen[k] = 1; temps.push({ id: d.id, t: where || e.name, v: Ha.deg(Math.round(t * 10) / 10), n: t }); } }
       if (e.domain === 'cover') { if (e.state === 'closed' || e.state === 'closing' || e.position === 0) covers.closed++; else covers.open++; }
     });
     return { alerts: alerts, lights: lights, temps: temps, covers: covers, off: off };
@@ -173,14 +178,51 @@
     return best;
   }
 
-  /** Remonter d'un niveau à la borne : appareil → pièce (ou étage si l'appareil est hors pièce) → étage. */
+  /** Remonter d'un niveau à la borne : appareil → pièce (ou étage si l'appareil est hors pièce) → étage → bâtiment (floor « all », §201). */
   function navUp(nav, plan) {
     if (nav.dev) {
       var d = plan.devices.filter(function (x) { return x.id === nav.dev; })[0];
       return { floor: nav.floor, room: d && d.room && nav.room ? nav.room : null, dev: null };
     }
     if (nav.room) return { floor: nav.floor, room: null, dev: null };
+    if (nav.floor !== 'all' && plan.floors.length > 1) return { floor: 'all', room: null, dev: null };
     return nav;
+  }
+
+  /**
+   * Plein écran (§201) : échelle qui fait tenir une boîte du plan (px du plan) dans la zone libre, vue sous l'angle de la caméra.
+   * box { w, h }, rz / rx en degrés, depth : hauteur (murs, étages empilés), area { w, h } ; spin : la caméra tourne, on cadre pour tous les angles.
+   */
+  function fit(box, rz, rx, depth, area, spin) {
+    var a = rz * Math.PI / 180, b = rx * Math.PI / 180, ca = Math.abs(Math.cos(a)), sa = Math.abs(Math.sin(a));
+    var diag = Math.sqrt(box.w * box.w + box.h * box.h);
+    var bw = spin ? diag : box.w * ca + box.h * sa, bd = spin ? diag : box.w * sa + box.h * ca;
+    var bh = bd * Math.cos(b) + (depth || 0) * Math.sin(b);
+    return Math.max(0.05, Math.min(area.w / Math.max(1, bw), area.h / Math.max(1, bh)));
+  }
+
+  /** Taille des textes (px) calée sur l'écran : borne entre 17 et 24 px, diffusion entre 16 et 34 px (lisible de loin). */
+  function uiSize(w, h, kind) {
+    var m = Math.min(w || 0, h || 0);
+    return kind === 'tv' ? Math.max(16, Math.min(34, Math.round(m / 38))) : Math.max(17, Math.min(24, Math.round(m / 44)));
+  }
+
+  /** Appareil qu'un toucher allume ou éteint directement à la borne (lumière, prise, interrupteur, ventilateur commandables). */
+  function quick(e) {
+    return !!e && e.available !== false && Ha.can(e, 'on') && ['light', 'switch', 'input_boolean', 'fan'].indexOf(e.domain) >= 0;
+  }
+
+  /** Diffusion plein écran (§201) : le résumé en pastilles dans le coin (lumières, température moyenne, alertes). */
+  function pillsHtml(s) {
+    var nl = s.lights.length, p = [];
+    s.alerts.forEach(function (i) { p.push('<span class="hpl-pl alert">' + Ha.icon(i.e) + esc(i.t + ' · ' + i.v) + '</span>'); });
+    p.push('<span class="hpl-pl' + (nl ? ' on' : '') + '">' + Ha.icon({ domain: 'light' }) + (nl ? plural(nl, 'lumière allumée', 'lumières allumées') : 'Lumières éteintes') + '</span>');
+    var ts = s.temps.filter(function (i) { return i.n != null; });
+    if (ts.length) {
+      var avg = ts.reduce(function (a, i) { return a + i.n; }, 0) / ts.length;
+      p.push('<span class="hpl-pl">' + Ha.icon({ domain: 'climate' }) + esc(Ha.deg(Math.round(avg * 10) / 10) + (ts.length > 1 ? ' en moyenne' : '')) + '</span>');
+    }
+    return p.join('');
   }
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
@@ -220,7 +262,7 @@
   var Logic = {
     ALERT_DC: ALERT_DC, state: state, roomTemp: roomTemp, mix: mix, roomColor: roomColor, scene: scene, summary: summary,
     summaryHtml: summaryHtml, coversText: coversText, layoutMode: layoutMode, eventText: eventText, roomName: roomName,
-    tourAt: tourAt, homeFloor: homeFloor, navUp: navUp
+    tourAt: tourAt, homeFloor: homeFloor, navUp: navUp, fit: fit, uiSize: uiSize, quick: quick, pillsHtml: pillsHtml
   };
 
   /* =============================== rendu 3D CSS ===============================
@@ -241,6 +283,7 @@
       WH = Math.round(Math.min(1.5 * P, 78));   // hauteur des murs : les pièces se lisent sans cacher les pastilles (§197)
       world.style.width = PW + 'px'; world.style.height = PH + 'px';
       world.style.setProperty('--hpl-stem', (drawn.length ? WH + 12 : 26) + 'px');
+      world.style.setProperty('--hpl-lift', (drawn.length ? WH + 6 : 6) + 'px');   // plein écran : étiquettes posées au-dessus des murs
       world.innerHTML = '';
       p.floors.forEach(function (f) {
         var fl = document.createElement('div');
@@ -322,6 +365,8 @@
       });
       if (!zs.length) zs.push(0);
       var z0 = Math.min.apply(null, zs), z1 = Math.max.apply(null, zs) + Math.max(40, WH);
+      if (cam.fit) { fitCamera(cam, ease, selI, z0, z1); return; }
+      world.style.setProperty('--is', 1);
       var rx = cam.rx * Math.PI / 180, diag = Math.sqrt(PW * PW + PH * PH);
       var w = view.clientWidth || 640, hh = view.clientHeight || 360;
       var need = diag * Math.cos(rx) + (z1 - z0) * Math.sin(rx) + 90;
@@ -341,6 +386,50 @@
       } else if (!cam.solo || selI < 0) { world.style.left = ''; world.style.top = ''; }
     }
 
+    /**
+     * Plein écran (diffusion, borne, §201) : cadré bord à bord sur ce qu'on montre (bâtiment, étage dessiné, pièce choisie), dans la zone libre
+     * cam.area (sans les commandes posées par-dessus ni la feuille ouverte). cam.room : pièce zoomée ; cam.flat : vue de dessus (2D) ; cam.zoom : pincer.
+     * Les étiquettes gardent leur taille à l'écran (--is = 1 / échelle).
+     */
+    function fitCamera(cam, ease, selI, z0, z1) {
+      var flat = !!cam.flat, rx = flat ? 0 : cam.rx, rz = flat ? 0 : cam.rz, PH = world.offsetHeight || PW / 1.6;
+      var A = cam.area || { x: 0, y: 0, w: view.clientWidth || 640, h: view.clientHeight || 360 };
+      var fe = selI >= 0 ? world.querySelector('.hpl-floor[data-f="' + plan.floors[selI].id + '"]') : null;
+      var box = { x: 0, y: 0, w: PW, h: PH }, target = null, depth = z1 - z0;
+      if (fe && cam.room) {
+        target = fe.querySelector('[data-room="' + cam.room + '"]');
+        if (target) {
+          var g = target.parentNode, pad = P * 0.5;
+          box = { x: g.offsetLeft + target.offsetLeft - pad, y: g.offsetTop + target.offsetTop - pad, w: target.offsetWidth + 2 * pad, h: target.offsetHeight + 2 * pad };
+          depth = WH;
+        }
+      }
+      if (fe && !target) {
+        target = fe.querySelector('.hpl-grid') || fe.querySelector('.hpl-plate');
+        if (target && target.classList.contains('hpl-grid')) box = { x: target.offsetLeft - 8, y: target.offsetTop - 8, w: target.offsetWidth + 16, h: target.offsetHeight + 16 };
+      }
+      if (flat) depth = 0;
+      var scale = Logic.fit(box, rz, rx, depth, A, !!cam.spin) * (flat ? 0.96 : 0.9) * (cam.zoom || 1);
+      var dx = box.x + box.w / 2 - PW / 2, dy = box.y + box.h / 2 - PH / 2, cx = A.x + A.w / 2, cy = A.y + A.h / 2;
+      world.classList.toggle('all', selI < 0 && plan.floors.length > 1);
+      world.style.setProperty('--rz', rz + 'deg'); world.style.setProperty('--rx', rx + 'deg'); world.style.setProperty('--is', (1 / scale).toFixed(4));
+      view.style.perspectiveOrigin = cx + 'px ' + cy + 'px';
+      // caméra éloignée à l'échelle de l'écran : un plan très agrandi garde ses proportions (sinon le bord proche déborde)
+      view.style.perspective = Math.round(Math.max(2600, 3.5 * Math.max(view.clientWidth || 0, view.clientHeight || 0))) + 'px';
+      world.style.left = cx + 'px'; world.style.top = cy + 'px';
+      world.style.transform = 'translate(-50%,-50%) scale(' + scale.toFixed(4) + ') rotateX(' + rx + 'deg) rotateZ(' + rz + 'deg) translateZ(' + (-(z0 + z1) / 2) + 'px) translate(' + (-dx) + 'px,' + (-dy) + 'px)';
+      // la perspective décale un plan incliné : on mesure où tombe ce qu'on cadre et on le recentre (pas pendant une transition : l'appel suivant corrige)
+      if (target && !ease) {
+        var r = target.getBoundingClientRect(), v = view.getBoundingClientRect();
+        if (r.width && v.width) {
+          // mesures ramenées aux px de la vue : le player peut être agrandi ou réduit (transform, zoom) autour du widget
+          var kx = v.width / (view.clientWidth || v.width), ky = v.height / (view.clientHeight || v.height);
+          var mx = Math.round((r.left + r.width / 2 - v.left) / kx - cx), my = Math.round((r.top + r.height / 2 - v.top) / ky - cy);
+          world.style.left = (cx - mx) + 'px'; world.style.top = (cy - my) + 'px';
+        }
+      }
+    }
+
     /** Applique ce que Logic.scene a décidé ; ents sert aux icônes. */
     function paint(sc, ents) {
       plan.devices.forEach(function (d) {
@@ -349,11 +438,19 @@
           pin.style.display = v.show ? '' : 'none';
           if (v.show) {
             var chip = pin.querySelector('.hpl-chip');
-            chip.className = 'hpl-chip ' + v.st + (v.bare ? ' novals' : '') + (v.pulse ? ' pulse' : '') + (v.dim ? ' dim' : '') + (v.sel ? ' sel' : '');
             chip.setAttribute('aria-label', e.name);
-            chip.innerHTML = Ha.icon(e) + '<span class="hpl-v"></span>';
-            chip.querySelector('.hpl-v').textContent = v.text;
-            pin.classList.toggle('small', !!v.bare);
+            if (v.big) {   // borne, pièce zoomée : gros bouton rond + nom et valeur
+              chip.className = 'hpl-chip big ' + v.st + (v.pulse ? ' pulse' : '') + (v.sel ? ' sel' : '');
+              chip.innerHTML = '<span class="hpl-bi">' + Ha.icon(e) + '</span><span class="hpl-bl"><span></span><small></small></span>';
+              chip.querySelector('.hpl-bl span').textContent = e.name;
+              chip.querySelector('.hpl-bl small').textContent = v.text;
+            } else {
+              chip.className = 'hpl-chip ' + v.st + (v.bare ? ' novals' : '') + (v.pulse ? ' pulse' : '') + (v.dim ? ' dim' : '') + (v.sel ? ' sel' : '');
+              chip.innerHTML = Ha.icon(e) + '<span class="hpl-v"></span>';
+              chip.querySelector('.hpl-v').textContent = v.text;
+            }
+            pin.classList.toggle('small', !!v.bare && !v.big);
+            pin.classList.toggle('bigpin', !!v.big);
           }
         }
         var g = world.querySelector('[data-g="' + d.id + '"]');
@@ -380,6 +477,7 @@
           rp.style.display = info.show ? '' : 'none';
           if (!info.show) return;
           var rc = rp.querySelector('.hpl-chip'), html = '<span class="hpl-rn2"></span>';
+          rc.className = 'hpl-chip hpl-room-chip' + (info.quiet ? ' quiet' : '') + (info.lights ? ' lit' : '');
           if (info.lights) html += '<span class="hpl-g on">' + Ha.icon({ domain: 'light', on: true }) + info.lights + '</span>';
           if (info.t != null) html += '<span class="hpl-g">' + Ha.icon({ domain: 'climate' }) + Ha.deg(Math.round(info.t * 10) / 10) + '</span>';
           rc.innerHTML = html; rc.querySelector('.hpl-rn2').textContent = info.name; rc.setAttribute('aria-label', info.name);
@@ -392,8 +490,9 @@
       if (!target.closest) return null;
       var chip = target.closest('.hpl-chip'), pin = chip && chip.closest('.hpl-pin');
       if (pin) return pin.getAttribute('data-p') || 'room:' + pin.getAttribute('data-rp');
-      var rm = target.closest('.hpl-room'), fl = rm && rm.closest('.hpl-floor');
-      return rm && fl ? 'room:' + fl.getAttribute('data-f') + '/' + rm.getAttribute('data-room') : null;
+      var rm = target.closest('.hpl-room'), fl = target.closest('.hpl-floor');
+      if (rm && fl) return 'room:' + fl.getAttribute('data-f') + '/' + rm.getAttribute('data-room');
+      return fl ? 'floor:' + fl.getAttribute('data-f') : null;   // vue d'ensemble de la borne : toucher un étage l'ouvre
     }
 
     function empty(text) { plan = null; world.innerHTML = '<div class="hpl-none"></div>'; world.firstChild.textContent = text; }
@@ -413,19 +512,23 @@
     opts = opts || {};
     var now = function () { return opts.now ? opts.now() : Date.now(); };
     el.classList.add('hpl');
-    el.innerHTML = '<div class="hpl-stage"><div class="hpl-view"></div><div class="hpl-bar"></div><div class="hpl-top"></div><div class="hpl-rail"></div>'
+    el.innerHTML = '<div class="hpl-stage"><div class="hpl-view"></div><div class="hpl-bar"></div><div class="hpl-top"></div><div class="hpl-tr"></div><div class="hpl-rail"></div>'
       + '<div class="hpl-tour"></div><div class="hpl-toast"></div><div class="hpl-sheet"></div></div><div class="hpl-sum"></div>';
     var view = el.querySelector('.hpl-view'), bar = el.querySelector('.hpl-bar'), toast = el.querySelector('.hpl-toast'), top = el.querySelector('.hpl-top'),
-      rail = el.querySelector('.hpl-rail'), tourEl = el.querySelector('.hpl-tour'), sum = el.querySelector('.hpl-sum'), sheet = el.querySelector('.hpl-sheet');
+      rail = el.querySelector('.hpl-rail'), tourEl = el.querySelector('.hpl-tour'), sum = el.querySelector('.hpl-sum'), sheet = el.querySelector('.hpl-sheet'),
+      tr = el.querySelector('.hpl-tr');
     var R = renderers[opts.renderer] ? renderers[opts.renderer](view) : css3d(view);
-    var RX_MIN = 40, RX_MAX = 78, NAV_IDLE = 60000, HOLD_MS = 1500;
+    var RX_MIN = 40, RX_MAX = 78, NAV_IDLE = 60000, HOLD_MS = 1500, LONG_MS = 550, RZ0 = -24;
     var last = null, built = '', byId = {}, pending = {}, confirm = {}, panelId = null, holding = false, prev = null, sumHtml = '', layout = '';
-    var cam = { rz: -32, rx: 62, sel: 'all' }, userUntil = 0, focusUntil = 0, focusTimer = 0, toastTimer = 0, pulseId = null;
+    var cam = { rz: -32, rx: 62, sel: 'all', zoom: 1 }, userUntil = 0, focusUntil = 0, focusTimer = 0, toastTimer = 0, pulseId = null;
     var spinOverride = null, spinUntil = 0, dead = false, timers = [];
-    var tour0 = Date.now(), tourKey = '', nav = null, navTouched = 0;
+    var tour0 = Date.now(), tourKey = '', nav = null, navTouched = 0, sheetOpen = false, flat = false, uiKey = '';
 
     function interactive() { return opts.mode === 'interactive' || (opts.mode !== 'signage' && !!(last && last.plan && (last.plan.mode === 'interactive' || (!last.plan.mode && last.plan.touch)))); }
     function navMode() { return !!(last && last.plan && last.plan.mode === 'interactive' && opts.mode !== 'signage'); }
+    function tvMode() { return !!(last && last.plan && last.plan.mode === 'signage'); }
+    function fitMode() { return navMode() || tvMode(); }   // vues enregistrées : plein écran (§201) ; le widget sans vue garde son cadrage
+    function port() { return el.clientHeight > el.clientWidth; }
     function touring() { return !!(last && last.plan && last.plan.mode === 'signage' && last.plan.tour && last.plan.tour.length); }
     function spinning() {
       if (navMode()) return false;
@@ -462,26 +565,60 @@
 
     function relayout() {
       if (!last || !last.plan) return false;
-      var m = navMode() ? 'right' : Logic.layoutMode(last.plan.summary, el.clientWidth, el.clientHeight);
+      // borne : le plan sur tout l'écran, la feuille passe par-dessus ; diffusion : le résumé en pastilles dans le coin (§201)
+      var m = navMode() ? 'full' : tvMode() ? (last.plan.summary === 'none' ? 'none' : 'pills') : Logic.layoutMode(last.plan.summary, el.clientWidth, el.clientHeight);
       if (m === layout) return false;
       layout = m; sumHtml = '';
-      el.classList.remove('s-right', 's-left', 's-top', 's-none', 's-only');
+      el.classList.remove('s-right', 's-left', 's-top', 's-none', 's-only', 's-full', 's-pills');
       el.classList.add('s-' + m);
       return true;
     }
+    /** Taille des textes et orientation (borne, diffusion) : tout grandit avec l'écran. */
+    function sizeUi() {
+      var kind = navMode() ? 'kiosk' : tvMode() ? 'tv' : '', k = kind + el.clientWidth + 'x' + el.clientHeight;
+      if (k === uiKey) return;
+      uiKey = k;
+      el.style.fontSize = kind ? Logic.uiSize(el.clientWidth, el.clientHeight, kind) + 'px' : '';
+      el.classList.toggle('hpl-port', !!kind && port());
+    }
+    /** Zone libre du plan (px de la vue) : l'écran moins les commandes posées par-dessus et la feuille ouverte. */
+    function area() {
+      var W = view.clientWidth || 640, H = view.clientHeight || 360, fs = parseFloat(root.getComputedStyle ? root.getComputedStyle(el).fontSize : 16) || 16, m = fs * 0.8;
+      // en 3D, les coins du plan incliné laissent la place à la barre des étages ; en vue de dessus (rectangle plein), on la réserve
+      var A = { x: m, y: m + fs * 2.4, w: W - 2 * m, h: H - 2 * m - fs * (navMode() && flat && !(sheetOpen && port()) ? 7 : 4) };
+      if (navMode() && sheetOpen) {
+        if (port()) A.h = H - sum.offsetHeight - A.y - (nav && nav.room ? m : fs * 4.6);
+        else A.w = W - sum.offsetWidth - 2 * m;
+      }
+      A.w = Math.max(80, A.w); A.h = Math.max(80, A.h);
+      return A;
+    }
     function camera(ease) {
       if (!last || !last.plan) return;
-      cam.solo = navMode() || touring();
+      cam.solo = (navMode() && !!nav && nav.floor !== 'all') || touring();
+      cam.fit = fitMode();
+      cam.area = cam.fit ? area() : null;
+      cam.room = navMode() && nav && nav.room && nav.floor !== 'all' ? nav.room : null;
+      cam.flat = navMode() && flat;
+      cam.spin = spinning();
+      el.classList.toggle('flat', !!cam.flat);
       R.camera(cam, ease);
       if (ease) setTimeout(function () { if (!dead) R.camera(cam, false); }, 900);
     }
+    function ensureNav() {
+      if (!navMode()) return;
+      if (!nav || (nav.floor !== 'all' && !last.plan.floors.some(function (f) { return f.id === nav.floor; }))) nav = { floor: Logic.homeFloor(last.plan), room: null, dev: null };
+    }
+    function kioskLevel() { return !nav ? 'floor' : nav.floor === 'all' ? 'all' : nav.room ? 'room' : 'floor'; }
 
     function update() {
       if (!last || !last.plan || dead) return;
+      ensureNav();
       var ents = shown();
       R.paint(Logic.scene(last.plan, ents, {
         labels: last.plan.labels, hideOff: last.plan.hideOff, heat: last.plan.heat, decimals: last.decimals, now: now(), pulseId: pulseId,
-        panelId: navMode() ? nav && nav.dev : panelId, room: navMode() && nav && nav.room ? nav.floor + '/' + nav.room : null
+        panelId: navMode() ? nav && nav.dev : panelId, room: navMode() && nav && nav.room ? nav.floor + '/' + nav.room : null,
+        kiosk: navMode() ? kioskLevel() : tvMode() && cam.sel === 'all' ? 'all' : null   // diffusion, vue d'ensemble : les noms des étages seuls
       }), ents);
       if (navMode()) drawNav(ents); else drawSummary(ents);
       if (panelId && !navMode()) drawSheet();
@@ -490,6 +627,11 @@
     function drawSummary(ents) {
       relayout();
       if (layout === 'none') { if (sumHtml !== '-') { sum.innerHTML = ''; sumHtml = '-'; } return; }
+      if (layout === 'pills') {   // diffusion plein écran : pastilles dans le coin
+        var ph = Logic.pillsHtml(Logic.summary(last.plan, ents, { decimals: last.decimals, now: now() }));
+        if (ph !== sumHtml) { sumHtml = ph; sum.innerHTML = ph; }
+        return;
+      }
       var html = Logic.summaryHtml(Logic.summary(last.plan, ents, { decimals: last.decimals, now: now() }), layout === 'only' ? 'right' : layout, last.title, last.live);
       if (html === sumHtml) return;   // réécrit seulement quand il change : le bandeau ne repart pas à zéro
       sumHtml = html; sum.innerHTML = html;
@@ -509,6 +651,11 @@
       if (key === tourKey) return;
       tourKey = key;
       tourEl.innerHTML = '';
+      if (tvMode()) {   // diffusion plein écran : nom du plan et étape en cours, en haut à gauche
+        top.innerHTML = '<div class="hpl-ttl"><b></b><span></span></div>';
+        top.querySelector('b').textContent = last.title || 'Bâtiment';
+        top.querySelector('span').textContent = at ? (at.step.floor ? floorName(at.step.floor) : "Vue d'ensemble") : '';
+      }
       if (!at) return;
       steps.forEach(function (s, i) {
         var x = document.createElement('span');
@@ -523,7 +670,7 @@
       if (!touring()) { if (tourKey) { tourKey = ''; tourEl.innerHTML = ''; } return; }
       if (focusUntil) return;   // un événement a la main ; la visite reprend après
       var at = Logic.tourAt(last.plan.tour, Date.now() - tour0), sel = at.step.floor || 'all';
-      if (sel !== cam.sel) { cam.sel = sel; camera(true); }
+      if (sel !== cam.sel) { cam.sel = sel; update(); camera(true); }
       drawTour(at);
     }
 
@@ -666,105 +813,189 @@
       return x;
     }
 
-    /* ----- borne : navigation étage → pièce → appareil ----- */
+    /* ----- borne plein écran (§201) : bâtiment → étage → pièce (zoom) → appareil ----- */
     function touch() { navTouched = Date.now(); }
-    function go(n) { nav = n; touch(); cam.sel = nav.floor; camera(true); update(); }
+    function go(n) {
+      nav = n; touch();
+      cam.sel = nav.floor; cam.zoom = 1;
+      cam.rx = nav.floor === 'all' ? 56 : nav.room ? 34 : 46;   // pièce : vue plus plongeante ; étage : moins incliné qu'avant pour gagner de la place
+      sheetOpen = !!(nav.room || nav.dev);                       // la liste ne vient que lorsqu'on en a besoin
+      update(); camera(true);
+    }
     function navTo(id) {
-      if (id.indexOf('room:') === 0) { var p = id.slice(5).split('/'); go({ floor: p[0], room: p[1], dev: null }); return; }
+      if (id.indexOf('floor:') === 0) { go({ floor: id.slice(6), room: null, dev: null }); return; }
+      if (id.indexOf('room:') === 0) {
+        var p = id.slice(5).split('/');
+        go(nav && nav.floor === 'all' ? { floor: p[0], room: null, dev: null } : { floor: p[0], room: p[1], dev: null });
+        return;
+      }
       var d = last.plan.devices.filter(function (x) { return x.id === id; })[0];
       if (d) go({ floor: d.floor, room: d.room || null, dev: d.id });
     }
+    /** Toucher sur le plan : un étage (vue d'ensemble), une pièce (zoom) ; dans la pièce, une lumière ou une prise s'allume ou s'éteint, un autre appareil s'ouvre. */
+    function tapNav(id) {
+      if (!id) return;
+      if (nav && nav.floor === 'all') { var f = id.indexOf('floor:') === 0 ? id.slice(6) : id.indexOf('room:') === 0 ? id.slice(5).split('/')[0] : null; if (f) go({ floor: f, room: null, dev: null }); return; }
+      if (id.indexOf('floor:') === 0) return;
+      var d = id.indexOf('room:') === 0 ? null : last.plan.devices.filter(function (x) { return x.id === id; })[0];
+      if (d && nav && nav.room && d.room === nav.room && Logic.quick(byId[id])) { toggle(byId[id]); return; }
+      navTo(id);
+    }
+    function toggle(raw) {
+      var e = eView(raw);
+      send(raw, { action: e.on ? 'off' : 'on' }, 'on', !e.on);
+      say(e.name + (e.on ? ' : éteint' : ' : allumé'), false, 1600);
+    }
+    /** Allumer ou éteindre d'un coup les lumières commandables d'une pièce ou d'un étage. */
+    function switchAll(ds, on) {
+      ds.forEach(function (d) { var raw = byId[d.id]; if (raw.domain === 'light' && Logic.quick(raw) && !!eView(raw).on !== on) send(raw, { action: on ? 'on' : 'off' }, 'on', on); });
+    }
+    function lightsOn(ds) { return ds.filter(function (d) { var e = eView(byId[d.id]); return e.domain === 'light' && e.on && Logic.quick(byId[d.id]); }).length; }
     function crumb(label, cur, fn) {
       var b = document.createElement('button'); b.type = 'button'; b.className = 'hpl-cr' + (cur ? ' cur' : ''); b.textContent = label;
       if (fn) b.onclick = fn; return b;
     }
+    function btn(cls, html, fn) { var b = document.createElement('button'); b.type = 'button'; b.className = cls; b.innerHTML = html; b.onclick = fn; return b; }
+    function roomOf(fid, rid) { return roomsOf(last.plan, fid).filter(function (r) { return r.id === rid; })[0]; }
+    function floorAlerts(fid) { return devicesIn(fid).filter(function (d) { return state(eView(byId[d.id])) === 'alert'; }); }
+
     function drawNav(ents) {
-      relayout();
-      if (!nav || !last.plan.floors.some(function (f) { return f.id === nav.floor; })) nav = { floor: Logic.homeFloor(last.plan), room: null, dev: null };
-      // haut : Retour (pas à l'étage d'accueil de la vue : la borne a son propre retour) et fil d'Ariane
+      relayout(); ensureNav();
+      var lvl = kioskLevel(), rname = nav.room ? (roomOf(nav.floor, nav.room) || {}).name : null;
+      el.classList.toggle('sheet', sheetOpen);
+      el.classList.toggle('in-room', lvl === 'room');
+      // haut à gauche : Retour (pas sur la vue d'ensemble) et fil d'Ariane
       top.innerHTML = '';
-      if (nav.room || nav.dev) { var up = crumb('‹ Retour', false, function () { go(Logic.navUp(nav, last.plan)); }); up.className = 'hpl-up'; top.appendChild(up); }
+      if (lvl !== 'all' || nav.dev) top.appendChild(btn('hpl-up', '‹ Retour', function () { go(Logic.navUp(nav, last.plan)); }));
       var trail = document.createElement('div'); trail.className = 'hpl-crumbs'; top.appendChild(trail);
-      var rname = nav.room ? (roomsOf(last.plan, nav.floor).filter(function (r) { return r.id === nav.room; })[0] || {}).name : null;
-      trail.appendChild(crumb(floorName(nav.floor), !nav.room && !nav.dev, function () { go({ floor: nav.floor, room: null, dev: null }); }));
-      if (rname) { trail.appendChild(document.createTextNode('›')); trail.appendChild(crumb(rname, !nav.dev, function () { go({ floor: nav.floor, room: nav.room, dev: null }); })); }
-      if (nav.dev && byId[nav.dev]) { trail.appendChild(document.createTextNode('›')); trail.appendChild(crumb(byId[nav.dev].name, true)); }
-      // rail : les étages, du haut vers le bas, toujours visibles pour changer d'étage depuis une pièce
+      var sep = function () { var i = document.createElement('i'); i.textContent = '›'; trail.appendChild(i); };
+      trail.appendChild(crumb(last.title || 'Bâtiment', lvl === 'all', last.plan.floors.length > 1 ? function () { go({ floor: 'all', room: null, dev: null }); } : null));
+      if (lvl !== 'all') { sep(); trail.appendChild(crumb(floorName(nav.floor), lvl === 'floor' && !nav.dev, function () { go({ floor: nav.floor, room: null, dev: null }); })); }
+      if (rname) { sep(); trail.appendChild(crumb(rname, !nav.dev, function () { go({ floor: nav.floor, room: nav.room, dev: null }); })); }
+      if (nav.dev && byId[nav.dev]) { sep(); trail.appendChild(crumb(byId[nav.dev].name, true)); }
+      // haut à droite : ouvrir la liste, vue 3D / 2D
+      tr.innerHTML = '';
+      if (!sheetOpen) tr.appendChild(btn('hpl-tb', '☰ <span></span>', function () { sheetOpen = true; touch(); update(); camera(true); }));
+      if (!sheetOpen) tr.lastChild.querySelector('span').textContent = lvl === 'all' ? 'Étages' : lvl === 'room' ? 'Appareils' : 'Pièces';
+      var seg = document.createElement('div'); seg.className = 'hpl-seg';
+      seg.appendChild(btn(flat ? '' : 'on', '3D', function () { flat = false; touch(); update(); camera(true); }));
+      seg.appendChild(btn(flat ? 'on' : '', '2D', function () { flat = true; touch(); update(); camera(true); }));
+      tr.appendChild(seg);
+      // bas à gauche : la vue d'ensemble et les étages, du haut vers le bas
       rail.innerHTML = '';
+      if (last.plan.floors.length > 1) rail.appendChild(btn('hpl-fl' + (lvl === 'all' ? ' on' : ''), '<span>Tout</span><small>' + plural(last.plan.floors.length, 'étage', 'étages') + '</small>', function () { go({ floor: 'all', room: null, dev: null }); }));
       last.plan.floors.slice().reverse().forEach(function (f) {
-        var b = document.createElement('button'); b.type = 'button'; b.className = 'hpl-fl' + (f.id === nav.floor ? ' on' : '');
-        b.innerHTML = '<span></span><small></small>';
+        var nr = (f.rooms || []).length, nd = last.plan.devices.filter(function (d) { return d.floor === f.id; }).length, na = floorAlerts(f.id).length;
+        var b = btn('hpl-fl' + (lvl !== 'all' && f.id === nav.floor ? ' on' : ''), '<span></span><small></small>', function () { go({ floor: f.id, room: null, dev: null }); });
         b.firstChild.textContent = f.name;
-        var nr = (f.rooms || []).length, nd = last.plan.devices.filter(function (d) { return d.floor === f.id; }).length;
-        b.lastChild.textContent = nr ? nr + ' pièce' + (nr > 1 ? 's' : '') : nd + ' appareil' + (nd > 1 ? 's' : '');
-        b.onclick = function () { go({ floor: f.id, room: null, dev: null }); };
+        b.lastChild.textContent = (nr ? plural(nr, 'pièce', 'pièces') : plural(nd, 'appareil', 'appareils')) + (na ? ' · ⚠ ' + na : '');
         rail.appendChild(b);
       });
-      if (holding) return;   // un curseur ou une serrure en cours : le panneau ne bouge pas
-      // panneau de droite
+      if (holding) return;   // un curseur ou une serrure en cours : la feuille ne bouge pas
+      // feuille (à droite en paysage, en bas en portrait), par-dessus le plan
       sum.innerHTML = ''; sumHtml = 'nav';
       var box = document.createElement('div'); box.className = 'hpl-nav'; sum.appendChild(box);
-      function back(label, fn) { var b = document.createElement('button'); b.type = 'button'; b.className = 'hpl-back'; b.textContent = '‹ ' + label; b.onclick = fn; box.appendChild(b); }
-      function h3(text, iconHtml) { var h = document.createElement('h3'); h.innerHTML = (iconHtml || '') + '<span></span>'; h.lastChild.textContent = text; box.appendChild(h); }
-      function hint(text) { var s = document.createElement('div'); s.className = 'hpl-hint'; s.textContent = text; box.appendChild(s); }
+      var head = document.createElement('div'); head.className = 'hpl-nh'; box.appendChild(head);
+      var body = document.createElement('div'); body.className = 'hpl-nb'; box.appendChild(body);
+      function title(text, sub, iconHtml) {
+        head.innerHTML = '<div class="hpl-nt"><h3>' + (iconHtml || '') + '<span></span></h3><small></small></div>';
+        head.querySelector('h3 span').textContent = text; head.querySelector('small').textContent = sub || '';
+        head.appendChild(btn('hpl-nx', '×', function () { sheetOpen = false; if (nav.dev) nav = Logic.navUp(nav, last.plan); touch(); update(); camera(true); }));
+        head.lastChild.setAttribute('aria-label', 'Fermer');
+      }
+      function wide(label, fn) { body.appendChild(btn('hpl-sb hpl-wide', '', fn)); body.lastChild.textContent = label; }
       if (nav.dev && byId[nav.dev]) {
         var raw = byId[nav.dev], e = eView(raw);
-        back(rname || floorName(nav.floor), function () { go(Logic.navUp(nav, last.plan)); });
-        h3(e.name, Ha.icon(e));
-        var big = document.createElement('div'); big.className = 'hpl-big'; big.textContent = Ha.value(e, last.decimals, now()); box.appendChild(big);
-        controls(box, raw, true);
-      } else if (nav.room) {
-        back(floorName(nav.floor), function () { go({ floor: nav.floor, room: null, dev: null }); });
-        h3(rname || '');
-        var ds = devicesIn(nav.floor, nav.room);
-        hint(ds.length ? 'Touchez un appareil pour le commander.' : 'Aucun appareil dans cette pièce.');
-        ds.forEach(function (d) { var x = deviceRow(d, true); x.onclick = function () { go({ floor: nav.floor, room: nav.room, dev: d.id }); }; box.appendChild(x); });
-      } else {
-        h3(floorName(nav.floor));
+        title(e.name, [rname, floorName(nav.floor)].filter(Boolean).join(' · '), Ha.icon(e));
+        var big = document.createElement('div'); big.className = 'hpl-big'; big.textContent = Ha.value(e, last.decimals, now()); body.appendChild(big);
+        controls(body, raw, true);
+        if (nav.room) wide('‹ Tous les appareils de la pièce', function () { go({ floor: nav.floor, room: nav.room, dev: null }); });
+      } else if (lvl === 'room') {
+        var ds = devicesIn(nav.floor, nav.room), lit = lightsOn(ds);
+        title(rname || '', floorName(nav.floor) + ' · ' + plural(ds.length, 'appareil', 'appareils'));
+        if (!ds.length) { var h0 = document.createElement('div'); h0.className = 'hpl-hint'; h0.textContent = 'Aucun appareil dans cette pièce.'; body.appendChild(h0); }
+        ds.forEach(function (d) { var x = deviceRow(d, true); x.onclick = function () { go({ floor: nav.floor, room: nav.room, dev: d.id }); }; body.appendChild(x); });
+        var nl = ds.filter(function (d) { return byId[d.id].domain === 'light' && Logic.quick(byId[d.id]); }).length;
+        if (nl > 1) wide(lit ? 'Éteindre la pièce' : 'Allumer la pièce', function () { touch(); switchAll(ds, !lit); });
+      } else if (lvl === 'floor') {
+        title(floorName(nav.floor), 'Touchez une pièce, ici ou sur le plan.');
         var rooms = roomsOf(last.plan, nav.floor), sc = Logic.scene(last.plan, ents, { labels: 'room', hideOff: last.plan.hideOff, now: now() });
-        hint(rooms.length ? 'Touchez une pièce, ici ou sur le plan.' : 'Touchez un appareil, ici ou sur le plan.');
+        floorAlerts(nav.floor).forEach(function (d) { var x = deviceRow(d, false); x.onclick = function () { navTo(d.id); }; body.appendChild(x); });
         rooms.forEach(function (r) {
-          var info = sc.rooms[nav.floor + '/' + r.id] || {}, alerts = devicesIn(nav.floor, r.id).filter(function (d) { return state(eView(byId[d.id])) === 'alert'; });
-          var x = document.createElement('button'); x.type = 'button';
-          x.className = 'hpl-sb hpl-srow ' + (alerts.length ? 'alert' : info.lights ? 'on' : '');
-          x.innerHTML = Ha.icon(alerts.length ? eView(byId[alerts[0].id]) : { domain: info.lights ? 'light' : 'climate' }) + '<span class="hpl-sn"></span><span class="hpl-sv"></span>';
+          var info = sc.rooms[nav.floor + '/' + r.id] || {};
+          var x = btn('hpl-sb hpl-srow ' + (info.lights ? 'on' : ''), Ha.icon({ domain: info.lights ? 'light' : 'climate', on: !!info.lights }) + '<span class="hpl-sn"></span><span class="hpl-sv"></span>', function () { go({ floor: nav.floor, room: r.id, dev: null }); });
           x.querySelector('.hpl-sn').textContent = r.name;
-          x.querySelector('.hpl-sv').textContent = alerts.length ? byId[alerts[0].id].name + ' · ' + Ha.value(eView(byId[alerts[0].id]), last.decimals, now())
-            : [info.lights ? info.lights + ' allumée' + (info.lights > 1 ? 's' : '') : '', info.t != null ? Ha.deg(Math.round(info.t * 10) / 10) : ''].filter(Boolean).join(' · ') || '—';
-          x.onclick = function () { go({ floor: nav.floor, room: r.id, dev: null }); };
-          box.appendChild(x);
+          x.querySelector('.hpl-sv').textContent = [info.lights ? plural(info.lights, 'allumée', 'allumées') : '', info.t != null ? Ha.deg(Math.round(info.t * 10) / 10) : ''].filter(Boolean).join(' · ') || '—';
+          body.appendChild(x);
         });
-        devicesIn(nav.floor, null).forEach(function (d) { var x = deviceRow(d, true); x.onclick = function () { go({ floor: nav.floor, room: null, dev: d.id }); }; box.appendChild(x); });
+        devicesIn(nav.floor, null).forEach(function (d) { var x = deviceRow(d, true); x.onclick = function () { go({ floor: nav.floor, room: null, dev: d.id }); }; body.appendChild(x); });
+        var fl = lightsOn(devicesIn(nav.floor));
+        if (fl) wide("Éteindre l'étage (" + fl + ')', function () { touch(); switchAll(devicesIn(nav.floor), false); });
+      } else {
+        title(last.title || 'Bâtiment', 'Touchez un étage.');
+        last.plan.floors.slice().reverse().forEach(function (f) {
+          var fa = floorAlerts(f.id), fl2 = lightsOn(devicesIn(f.id)) + devicesIn(f.id).filter(function (d) { var x = eView(byId[d.id]); return x.domain === 'light' && x.on && !Logic.quick(byId[d.id]); }).length;
+          var x = btn('hpl-sb hpl-srow ' + (fa.length ? 'alert' : fl2 ? 'on' : ''), Ha.icon(fa.length ? eView(byId[fa[0].id]) : { domain: 'light', on: !!fl2 }) + '<span class="hpl-sn"></span><span class="hpl-sv"></span>', function () { go({ floor: f.id, room: null, dev: null }); });
+          x.querySelector('.hpl-sn').textContent = f.name;
+          x.querySelector('.hpl-sv').textContent = fa.length ? fa.map(function (d) { return byId[d.id].name; }).join(', ') : fl2 ? plural(fl2, 'allumée', 'allumées') : '—';
+          body.appendChild(x);
+        });
       }
     }
 
     /* ----- rotation au doigt, toucher d'une pastille ou d'une pièce ----- */
-    var drag = null;
+    var drag = null, pts = {}, pinch = null;
+    function npts() { return Object.keys(pts).length; }
+    function spread() { var k = Object.keys(pts), a = pts[k[0]], b = pts[k[1]]; return Math.sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)) || 1; }
     function down(ev) {
-      drag = { x: ev.clientX, y: ev.clientY, rz: cam.rz, rx: cam.rx, id: R.hit(ev.target), moved: false };
+      pts[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
       userUntil = Date.now() + 20000;   // on touche l'écran : la rotation s'arrête le temps de viser une pastille
       touch();
       try { view.setPointerCapture(ev.pointerId); } catch (x) {}
+      if (npts() === 2 && navMode()) {   // borne : pincer pour zoomer
+        if (drag) clearTimeout(drag.lp);
+        drag = null; pinch = { d: spread(), z: cam.zoom || 1 }; return;
+      }
+      if (npts() > 1) return;
+      drag = { x: ev.clientX, y: ev.clientY, rz: cam.rz, rx: cam.rx, id: R.hit(ev.target), moved: false, long: false };
+      if (navMode() && drag.id && drag.id.indexOf(':') < 0) {   // appui long sur un appareil : ses commandes
+        var d0 = drag;
+        d0.lp = setTimeout(function () { if (drag === d0 && !d0.moved) { d0.long = true; navTo(d0.id); } }, LONG_MS);
+      }
     }
     function move(ev) {
+      if (pts[ev.pointerId]) pts[ev.pointerId] = { x: ev.clientX, y: ev.clientY };
+      if (pinch) { cam.zoom = Math.max(0.7, Math.min(2.6, pinch.z * spread() / pinch.d)); camera(false); return; }
       if (!drag) return;
       var dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
-      if (!drag.moved && Math.sqrt(dx * dx + dy * dy) < 6) return;
-      drag.moved = true; userUntil = Date.now() + 6000;
-      cam.rz = drag.rz + dx * 0.35; cam.rx = Math.max(RX_MIN, Math.min(RX_MAX, drag.rx - dy * 0.2)); camera(false);
+      if (!drag.moved && Math.sqrt(dx * dx + dy * dy) < 8) return;
+      drag.moved = true; clearTimeout(drag.lp); userUntil = Date.now() + 6000;
+      if (navMode() && flat) return;   // vue de dessus : rien à tourner
+      var lo = navMode() ? 20 : RX_MIN;
+      cam.rz = drag.rz + dx * 0.35; cam.rx = Math.max(lo, Math.min(RX_MAX, drag.rx - dy * 0.2)); camera(false);
     }
-    function up() {
+    function up(ev) {
+      if (ev) delete pts[ev.pointerId];
+      if (pinch) { if (npts() < 2) pinch = null; drag = null; return; }
       if (!drag) return;
-      if (!drag.moved) {
-        if (navMode()) { if (drag.id) navTo(drag.id); }
-        else if (drag.id) { if (interactive()) openSheet(drag.id); }
+      clearTimeout(drag.lp);
+      if (!drag.moved && !drag.long) {
+        if (navMode()) tapNav(drag.id);
+        else if (drag.id && drag.id.indexOf('floor:') !== 0) { if (interactive()) openSheet(drag.id); }
         else closeSheet();
       }
       drag = null;
     }
-    function cancel() { drag = null; }
+    function cancel(ev) { if (ev) delete pts[ev.pointerId]; if (drag) clearTimeout(drag.lp); drag = null; pinch = null; }
+    function wheel(ev) {
+      if (!navMode()) return;
+      ev.preventDefault(); touch();
+      cam.zoom = Math.max(0.7, Math.min(2.6, (cam.zoom || 1) * (ev.deltaY < 0 ? 1.1 : 0.9))); camera(false);
+    }
+    function recenter() { if (!navMode()) return; touch(); cam.zoom = 1; cam.rz = RZ0; camera(true); }   // double toucher : recadrer
     view.addEventListener('pointerdown', down); view.addEventListener('pointermove', move);
     view.addEventListener('pointerup', up); view.addEventListener('pointercancel', cancel);
+    view.addEventListener('wheel', wheel, { passive: false }); view.addEventListener('dblclick', recenter);
     el.addEventListener('pointerdown', touch, true);
 
     /* ----- événements : porte, fenêtre ou mouvement qui change → message, pastille qui pulse, étage montré 6 s ----- */
@@ -796,13 +1027,17 @@
       (d.entities || []).forEach(function (e) { byId[e.id] = e; });
       d.plan.touch = (d.entities || []).some(function (e) { return (e.ctrl || []).length; });
       el.classList.toggle('hpl-navmode', navMode());
+      el.classList.toggle('hpl-tv', tvMode());
+      el.classList.toggle('hpl-fit', fitMode());
+      sizeUi();
       relayout();
       var sig = JSON.stringify([d.plan.floors, d.plan.devices, d.plan.explode, d.plan.spinSwitch, d.plan.mode, interactive()]);
       if (sig !== built) {
         built = sig; R.build(d.plan);
-        if (was !== d.plan.mode) { nav = null; tour0 = Date.now(); tourKey = ''; }
-        cam.sel = navMode() ? (nav ? nav.floor : Logic.homeFloor(d.plan)) : d.plan.floors.some(function (f) { return f.id === cam.sel; }) ? cam.sel : 'all';
-        if (navMode()) { cam.rx = 56; }
+        if (was !== d.plan.mode) { nav = null; tour0 = Date.now(); tourKey = ''; sheetOpen = false; }
+        ensureNav();
+        cam.sel = navMode() ? nav.floor : d.plan.floors.some(function (f) { return f.id === cam.sel; }) ? cam.sel : 'all';
+        if (navMode()) { cam.rx = nav.floor === 'all' ? 56 : nav.room ? 34 : 46; cam.rz = RZ0; }
         drawBar();
       }
       events(); update(); tourTick(); camera(false);
@@ -813,7 +1048,7 @@
     timers.push(setInterval(function () {   // borne : 60 s sans toucher, retour à l'étage d'accueil de la vue
       if (!last || !navMode() || !nav || holding || Date.now() - navTouched < NAV_IDLE) return;
       var home = Logic.homeFloor(last.plan);
-      if (nav.floor !== home || nav.room || nav.dev) { nav = { floor: home, room: null, dev: null }; cam.sel = home; camera(true); update(); }
+      if (nav.floor !== home || nav.room || nav.dev || sheetOpen || cam.zoom !== 1) { cam.rz = RZ0; go({ floor: home, room: null, dev: null }); }
     }, 2000));
     var t0 = Date.now(), raf = 0;
     function spin() {
@@ -825,7 +1060,12 @@
     }
     raf = requestAnimationFrame(spin);
     var ro = null;
-    function resize() { if (relayout() && last) { if (navMode()) update(); else drawSummary(shown()); } camera(false); }
+    function resize() {
+      var k = uiKey; sizeUi();
+      if ((relayout() || k !== uiKey) && last && last.plan) { if (navMode()) update(); else drawSummary(shown()); }
+      camera(false);
+    }
+    if (root.addEventListener) root.addEventListener('resize', resize);
     if (root.ResizeObserver) { ro = new ResizeObserver(resize); ro.observe(view); ro.observe(el); }
 
     function destroy() {
@@ -834,8 +1074,10 @@
       cancelAnimationFrame(raf); clearTimeout(toastTimer); clearTimeout(focusTimer);
       timers.forEach(clearInterval); timers = [];
       if (ro) ro.disconnect();
+      if (root.removeEventListener) root.removeEventListener('resize', resize);
       view.removeEventListener('pointerdown', down); view.removeEventListener('pointermove', move);
       view.removeEventListener('pointerup', up); view.removeEventListener('pointercancel', cancel);
+      view.removeEventListener('wheel', wheel); view.removeEventListener('dblclick', recenter);
       el.removeEventListener('pointerdown', touch, true);
     }
 
