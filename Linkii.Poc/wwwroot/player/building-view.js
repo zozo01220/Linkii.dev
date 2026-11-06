@@ -1030,6 +1030,13 @@
       el.classList.toggle('hpl-navmode', navMode());
       el.classList.toggle('hpl-tv', tvMode());
       el.classList.toggle('hpl-fit', fitMode());
+      // l'affichage a changé d'usage (borne → diffusion…) sans recharger l'écran : on retire les commandes de la borne
+      if (!navMode()) {
+        tr.innerHTML = ''; rail.innerHTML = '';
+        el.classList.remove('sheet', 'in-room', 'flat');
+        if (!tvMode()) top.innerHTML = '';
+        if (sumHtml === 'nav') { sum.innerHTML = ''; sumHtml = ''; }
+      }
       sizeUi();
       relayout();
       var sig = JSON.stringify([d.plan.floors, d.plan.devices, d.plan.explode, d.plan.spinSwitch, d.plan.mode, interactive()]);
