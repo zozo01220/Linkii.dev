@@ -540,6 +540,8 @@ public class Tenant
 
     /// <summary>Compte Home Assistant de l'organisation (un par organisation) : capteurs, interrupteurs et lumières des widgets Home Assistant. Null : pas connecté.</summary>
     public HomeAssistantAccount? HomeAssistant { get; set; }
+    /// <summary>Plans de bâtiment (§194) : créés une fois dans Contenus › Plans, choisis par les widgets « Plan du bâtiment ». Seulement avec Home Assistant connecté.</summary>
+    public List<HaPlan> HaPlans { get; set; } = new();
 
     /// <summary>Intégrations personnalisées (§139) : connexions aux systèmes de l'organisation (API web, fichiers) et jeux de données lus. Voir <see cref="DataSetService"/>.</summary>
     public List<DataConnection> DataConnections { get; set; } = new();
@@ -619,6 +621,15 @@ public class HomeAssistantAccount
 }
 
 /// <summary>Une entité du compte Home Assistant (capteur, interrupteur, lumière, thermostat, volet…).</summary>
+/// <summary>Plan de bâtiment partagé : étages, plans importés et appareils posés (JSON nettoyé par <see cref="HomeAssistantRules.NormalizePlan"/>).</summary>
+public class HaPlan
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Name { get; set; } = "";
+    public string Json { get; set; } = "";
+    public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
+}
+
 public class HomeAssistantEntity
 {
     public string Id { get; set; } = "";

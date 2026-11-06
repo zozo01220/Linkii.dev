@@ -148,13 +148,13 @@ public class HomeAssistantLive(JsonStore store, HomeAssistantClient ha, IHubCont
     public static HashSet<string> Used(Db db, Tenant t)
     {
         var used = new HashSet<string>();
-        void Add(string? v) { foreach (var id in HomeAssistantRules.ParseEntities(v)) used.Add(id); }
-        foreach (var m in db.Media.Where(m => m.ClientId == t.Id && HomeAssistantRules.IsHaApp(m.AppId))) Add(m.Settings.GetValueOrDefault("entities"));
+        void Add(string? appId, Dictionary<string, string> settings) { foreach (var id in HomeAssistantRules.EntitiesOf(t, appId, settings)) used.Add(id); }
+        foreach (var m in db.Media.Where(m => m.ClientId == t.Id && HomeAssistantRules.IsHaApp(m.AppId))) Add(m.AppId, m.Settings);
         foreach (var m in db.Media.Where(m => m.ClientId == t.Id && m.AppId == Compositions.AppId)) foreach (var id in Compositions.HaEntities(m.Settings.GetValueOrDefault("doc"))) used.Add(id);
         foreach (var s in db.Screens.Where(s => s.ClientId == t.Id))
         {
-            foreach (var w in s.Widgets.Where(w => HomeAssistantRules.IsHaApp(w.AppId))) Add(w.Settings.GetValueOrDefault("entities"));
-            foreach (var i in PlayerFeed.DataItems(db, s).Where(i => HomeAssistantRules.IsHaApp(i.AppId))) Add(i.Settings.GetValueOrDefault("entities"));
+            foreach (var w in s.Widgets.Where(w => HomeAssistantRules.IsHaApp(w.AppId))) Add(w.AppId, w.Settings);
+            foreach (var i in PlayerFeed.DataItems(db, s).Where(i => HomeAssistantRules.IsHaApp(i.AppId))) Add(i.AppId, i.Settings);
         }
         var haConns = t.DataConnections.Where(c => c.Kind == DataKinds.Ha).Select(c => c.Id).ToHashSet();
         foreach (var ds in t.DataSets.Where(d => haConns.Contains(d.ConnectionId))) foreach (var id in HomeAssistantRules.ParseDataPath(ds.Path).Ids) used.Add(id);
@@ -165,14 +165,16 @@ public class HomeAssistantLive(JsonStore store, HomeAssistantClient ha, IHubCont
     public static Dictionary<string, List<(Guid Screen, string Item)>> Uses(Db db, Guid clientId)
     {
         var map = new Dictionary<string, List<(Guid, string)>>();
+        var tenant = db.Clients.FirstOrDefault(c => c.Id == clientId);
         foreach (var s in db.Screens.Where(s => s.ClientId == clientId && s.Token != null))
             foreach (var i in PlayerFeed.DataItems(db, s))
             {
                 // widget : ses entités, relues par /api/data/{élément} ; composition : celles de sa source Home Assistant, relues par /api/data/{élément}/{source}
-                var raw = HomeAssistantRules.IsHaApp(i.AppId) ? i.Settings.GetValueOrDefault("entities") : i.AppId == Compositions.AppId ? i.Settings.GetValueOrDefault("ha") : null;
-                if (string.IsNullOrEmpty(raw)) continue;
+                var ids = HomeAssistantRules.IsHaApp(i.AppId) && tenant != null ? HomeAssistantRules.EntitiesOf(tenant, i.AppId, i.Settings)
+                    : i.AppId == Compositions.AppId ? HomeAssistantRules.ParseEntities(i.Settings.GetValueOrDefault("ha")) : new List<string>();
+                if (ids.Count == 0) continue;
                 var item = i.AppId == Compositions.AppId ? i.Id.ToString() : i.DataId ?? i.Id.ToString();
-                foreach (var id in HomeAssistantRules.ParseEntities(raw))
+                foreach (var id in ids)
                 {
                     if (!map.TryGetValue(id, out var l)) map[id] = l = new();
                     if (!l.Contains((s.Id, item))) l.Add((s.Id, item));

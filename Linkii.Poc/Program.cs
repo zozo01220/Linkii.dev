@@ -1010,20 +1010,21 @@ api.MapPost("/relay/reply", (HttpRequest req, RelayReply body, RelayBroker relay
 // « switch » : ancienne adresse ({ entityId, on }), gardée pour les écrans pas encore rechargés.
 async Task<IResult> HaCommand(HttpRequest req, Guid id, HaCommandDto body, JsonStore store, HomeAssistantClient ha, HomeAssistantLive live)
 {
-    var (denied, clientId, account, published) = store.Read<(IResult?, Guid, HomeAssistantAccount?, PublishedItem?)>(db =>
+    var (denied, clientId, account, published, allowed) = store.Read<(IResult?, Guid, HomeAssistantAccount?, PublishedItem?, List<string>)>(db =>
     {
         var s = Auth(req, db);
         var gate = Gate(s, db);
-        if (gate != null) return (gate, Guid.Empty, null, null);
+        if (gate != null) return (gate, Guid.Empty, null, null, new());
         var pub = PlayerFeed.DataItems(db, s!).FirstOrDefault(x => x.Id == id && HomeAssistantRules.IsHaApp(x.AppId));
-        return ((IResult?)null, s!.ClientId, db.Clients.First(c => c.Id == s!.ClientId).HomeAssistant?.Copy(), pub);
+        var tenant = db.Clients.First(c => c.Id == s!.ClientId);
+        return ((IResult?)null, s!.ClientId, tenant.HomeAssistant?.Copy(), pub, pub == null ? new() : HomeAssistantRules.EntitiesOf(tenant, pub.AppId, pub.Settings));   // plan : les appareils du plan d'aujourd'hui, même modifié depuis la publication
     });
     if (denied != null) return denied;
     if (published == null) return Results.NotFound();
     var entityId = body.EntityId ?? "";
     var action = HomeAssistantRules.ActionOf(body);
     if (published.Settings.GetValueOrDefault("control") == "false"
-        || !HomeAssistantRules.ParseEntities(published.Settings.GetValueOrDefault("entities")).Contains(entityId) || !HomeAssistantRules.Commandable(published.AppId!, entityId, action))
+        || !allowed.Contains(entityId) || !HomeAssistantRules.Commandable(published.AppId!, entityId, action))
         return Results.BadRequest(new { error = "Entité non configurée ou non actionnable." });
     if (account == null) return Results.Json(new { error = "Compte Home Assistant non connecté." }, statusCode: 409);
     try

@@ -5,17 +5,9 @@
 @inject Toaster Toast
 @implements IAsyncDisposable
 
-@* Champ « plan du bâtiment » du widget Home Assistant (§193) : résumé du plan et fenêtre d'édition.
-   Étages dans l'ordre du bas vers le haut ; chaque étage a un plan (image de la médiathèque) sur lequel on pose les appareils du compte Home Assistant.
-   Les positions sont des fractions du plan : l'écran garde les mêmes proportions quelle que soit sa taille. L'enregistrement écrit « plan » et « entities ». *@
-<div class="ci-pick">
-    <span class="ci-pick-sum">
-        @if (Saved.Floors.Count == 0) { <span class="muted">Aucun plan</span> }
-        else { <b>@Saved.Floors.Count étage@(Saved.Floors.Count > 1 ? "s" : "") · @Saved.Devices.Count appareil@(Saved.Devices.Count > 1 ? "s" : "")</b> }
-    </span>
-    <button type="button" class="btn @(Saved.Floors.Count == 0 ? "" : "ghost")" @onclick="Open"><Ico Name="home" Size="15" /> @(Saved.Floors.Count == 0 ? "Créer le plan" : "Modifier le plan")</button>
-</div>
-
+@* Éditeur d'un plan de bâtiment (§194) : fenêtre au-dessus de la page Plans. Étages du bas vers le haut ; chaque étage a un plan (image de la médiathèque)
+   sur lequel on pose les appareils du compte Home Assistant. Les positions sont des fractions du plan : l'écran garde les mêmes proportions quelle que soit sa taille.
+   Rien n'est enregistré avant « Enregistrer » : le parent reçoit le nom et le plan nettoyé. *@
 @if (open)
 {
     <SectionContent SectionName="overlay">
@@ -23,11 +15,12 @@
         <div class="modal app-modal picker hpe" role="dialog" aria-modal="true" aria-label="Plan du bâtiment">
             <div class="modal-head">
                 <span class="app-ico" style="--app-c:#41BDF5"><Ico Name="home" Size="22" /></span>
-                <div class="grow"><h3>Plan du bâtiment</h3><small>Un plan par étage : glissez-y les appareils de Home Assistant.</small></div>
+                <div class="grow"><h3>@(IsNew ? "Nouveau plan" : "Plan du bâtiment")</h3><small>Un plan par étage : glissez-y les appareils de Home Assistant.</small></div>
                 <button type="button" class="modal-x" aria-label="Fermer" @onclick="Cancel"><Ico Name="x" Size="20" /></button>
             </div>
             <div class="modal-body hpe-body" @ref="root">
                 <div class="hpe-main">
+                    <div class="hpe-name"><label for="hpe-name">Nom du plan</label><input id="hpe-name" type="text" maxlength="60" placeholder="Maison, Bureaux, Atelier…" @bind="name" @bind:event="oninput" /></div>
                     <div class="hpe-tabs" role="tablist" aria-label="Étages">
                         @foreach (var f in floors.AsEnumerable().Reverse())
                         {
@@ -127,7 +120,7 @@
                 <span class="hpe-count">@devs.Count appareil@(devs.Count > 1 ? "s" : "") sur @floors.Count étage@(floors.Count > 1 ? "s" : "")</span>
                 <span class="grow"></span>
                 <button type="button" class="btn" @onclick="Cancel">Annuler</button>
-                <button type="button" class="btn primary" @onclick="Apply">Appliquer</button>
+                <button type="button" class="btn primary" disabled="@(name.Trim().Length == 0)" @onclick="Apply">Enregistrer</button>
             </div>
         </div>
         @if (picking)
@@ -138,8 +131,12 @@
 }
 
 @code {
-    [Parameter, EditorRequired] public Dictionary<string, string> Values { get; set; } = default!;
-    [Parameter] public EventCallback OnChange { get; set; }
+    /// <summary>Plan à modifier (nom et JSON) ; vide : nouveau plan.</summary>
+    [Parameter] public string Name { get; set; } = "";
+    [Parameter] public string? Json { get; set; }
+    /// <summary>Enregistrer : nom et plan nettoyé. Le parent écrit dans l'organisation et ferme l'éditeur.</summary>
+    [Parameter] public EventCallback<(string Name, string Json)> OnSave { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
 
     private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
     private static readonly (string, string)[] Cats = { ("all", "Tous"), ("light", "Lumières"), ("plug", "Prises"), ("climate", "Thermostats"), ("cover", "Volets"), ("sensor", "Capteurs"), ("lock", "Serrures") };
@@ -149,6 +146,8 @@
     private sealed class EDev { public string Id = ""; public string Floor = ""; public double X = .5, Y = .5; }
 
     private bool open, picking, inited;
+    private bool IsNew => string.IsNullOrWhiteSpace(Json);
+    private string name = "";
     private string tab = "devices", cat = "all", search = "", floorId = "";
     private string? selId;
     private List<EFloor> floors = new();
@@ -156,9 +155,10 @@
     private List<HomeAssistantEntity> entities = new();
     private HashSet<string> onPlan = new();
     private ElementReference root;
-    private DotNetObjectReference<HaPlanField>? self;
+    private DotNetObjectReference<HaPlanEditor>? self;
 
-    private HomeAssistantRules.Plan Saved => HomeAssistantRules.ParsePlan(Values.GetValueOrDefault("plan"));
+    protected override void OnInitialized() => Open();
+
     private EFloor? Floor => floors.FirstOrDefault(f => f.Id == floorId);
     private EDev? selDev => selId == null ? null : devs.FirstOrDefault(d => d.Id == selId);
     private HomeAssistantEntity? Entity(string id) => entities.FirstOrDefault(e => e.Id == id);
@@ -167,7 +167,8 @@
 
     private void Open()
     {
-        var plan = Saved;
+        var plan = HomeAssistantRules.ParsePlan(Json);
+        name = Name;
         floors = plan.Floors.Select(f => new EFloor { Id = f.Id, Name = f.Name, Img = f.Img, Ratio = f.Ratio }).ToList();
         devs = plan.Devices.Select(d => new EDev { Id = d.Id, Floor = d.Floor, X = d.X, Y = d.Y }).ToList();
         if (floors.Count == 0) floors.Add(new EFloor { Id = NewId(), Name = "Rez-de-chaussée" });
@@ -285,20 +286,12 @@
             floors = floors.Select(f => new { id = f.Id, name = f.Name, img = f.Img ?? "", ratio = f.Ratio }),
             devices = devs.Select(d => new { id = d.Id, floor = d.Floor, x = d.X, y = d.Y }),
         });
-        var (clean, ents) = HomeAssistantRules.NormalizePlan(json);
-        Values["plan"] = clean;
-        Values["entities"] = ents;
-        await Close();
-        await OnChange.InvokeAsync();
+        var (clean, _) = HomeAssistantRules.NormalizePlan(json);
+        if (name.Trim().Length == 0) return;
+        await OnSave.InvokeAsync((name.Trim(), clean));
     }
 
-    private Task Cancel() => Close();
-
-    private async Task Close()
-    {
-        open = false; picking = false;
-        await Dispose2();
-    }
+    private Task Cancel() => OnClose.InvokeAsync();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

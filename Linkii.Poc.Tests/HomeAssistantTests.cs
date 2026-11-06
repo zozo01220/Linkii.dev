@@ -88,12 +88,33 @@ public class HomeAssistantTests
     }
 
     [Fact]
-    public void Normalized_plan_gives_the_entities_it_uses_and_validates()
+    public void Normalized_plan_gives_the_entities_it_uses()
     {
         var (json, ents) = HomeAssistantRules.NormalizePlan("""{"floors":[{"id":"a","name":"RDC"}],"devices":[{"id":"light.salon","floor":"a","x":0.2,"y":0.3},{"id":"lock.porte","floor":"a","x":0.6,"y":0.3}]}""");
         Assert.Equal("light.salon,lock.porte", ents);
-        Assert.Empty(AppCatalog.Validate(catalog.Find("ha-plan")!, new Dictionary<string, string> { ["plan"] = json, ["entities"] = ents }, new HashSet<string>()));
-        Assert.NotEmpty(AppCatalog.Validate(catalog.Find("ha-plan")!, new Dictionary<string, string> { ["plan"] = "{\"floors\":[]}" }, new HashSet<string>()));
+        Assert.Contains("light.salon", json);
+    }
+
+    [Fact]
+    public void Plan_widget_reads_a_shared_plan_of_the_organisation()
+    {
+        var (json, _) = HomeAssistantRules.NormalizePlan("""{"floors":[{"id":"a","name":"RDC"}],"devices":[{"id":"light.salon","floor":"a","x":0.2,"y":0.3},{"id":"cover.volet","floor":"a","x":0.6,"y":0.3}]}""");
+        var plan = new HaPlan { Name = "Maison", Json = json };
+        var t = new Tenant { Name = "Maison", HaPlans = { plan } };
+        var m = catalog.Find("ha-plan")!;
+        var settings = new Dictionary<string, string> { ["planId"] = plan.Id.ToString() };
+        Assert.Empty(AppCatalog.Validate(m, settings, new HashSet<string>()));
+        Assert.NotEmpty(AppCatalog.Validate(m, new Dictionary<string, string> { ["planId"] = "" }, new HashSet<string>()));
+        Assert.NotEmpty(AppCatalog.Validate(m, new Dictionary<string, string> { ["planId"] = "pas un guid" }, new HashSet<string>()));
+        Assert.Equal(new[] { "light.salon", "cover.volet" }, HomeAssistantRules.EntitiesOf(t, "ha-plan", settings));
+        // le plan est relu à chaque fois : modifié, les écrans suivent ; supprimé, le widget n'affiche plus rien
+        plan.Json = HomeAssistantRules.NormalizePlan("""{"floors":[{"id":"a","name":"RDC"}],"devices":[{"id":"lock.porte","floor":"a","x":0.5,"y":0.5}]}""").Json;
+        Assert.Equal(new[] { "lock.porte" }, HomeAssistantRules.EntitiesOf(t, "ha-plan", settings));
+        t.HaPlans.Clear();
+        Assert.Empty(HomeAssistantRules.EntitiesOf(t, "ha-plan", settings));
+        Assert.Null(HomeAssistantRules.PlanOf(t, settings));
+        // les autres widgets gardent leurs entités choisies
+        Assert.Equal(new[] { "light.bureau" }, HomeAssistantRules.EntitiesOf(t, "ha-lights", new Dictionary<string, string> { ["entities"] = "light.bureau" }));
     }
 
     // ---------- règles ----------

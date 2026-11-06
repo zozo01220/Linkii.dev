@@ -419,13 +419,15 @@
             }.OfType<string>()), publish: topub > 0));
         builder.CloseElement();
     };
+    /// <summary>Home Assistant est connecté pour cette organisation : l'onglet « Plans » existe.</summary>
+    private bool HaInstalled => Ctx.ClientId != null && Services.GetRequiredService<TenantStore>().Read(d => d.Tenant.HomeAssistant is { Url.Length: > 0 });
     private bool compositionsOn;   // l'intégration « Compositions » est dans Mes intégrations
     private bool CompositionsMenu => Ctx.ClientId != null && compositionsOn && Sees(LevelPages.Compositions);
     // Console Linkivi ou espace revendeur (hors espace client) : barre du bas et feuille « Plus » dans l'app
     private bool AdminSpace => Ctx.ClientId == null && (Ctx.IsPlatformAdmin || Ctx.IsResellerAdmin);
 
     // Pages du mode expert : en mode simple, leur adresse directe affiche « Disponible en mode expert ».
-    private static readonly string[] ExpertPaths = { "planning", "programmations", "organisation", "areas", "zones", "members", "stats", "datasources", "apiwebhooks" };
+    private static readonly string[] ExpertPaths = { "planning", "programmations", "organisation", "areas", "zones", "members", "stats", "datasources", "apiwebhooks", "plans" };
     private string CurrentPath => Nav.ToBaseRelativePath(Nav.Uri).Split('?')[0].Trim('/');
     private bool ExpertOnlyHere => !Modes.Expert && Ctx.ClientId != null && ExpertPaths.Any(p => CurrentPath == p || CurrentPath.StartsWith(p + "/"));
     private static readonly string[] SimpleReadOnlyPaths = { "widgets" };
@@ -444,6 +446,7 @@
         Sees(LevelPages.Media) ? new HubTab("media", "Médiathèque", MenuBadges.MediaFam) : null,
         CompositionsMenu ? new HubTab("compositions", "Compositions", MenuBadges.Compositions) : null,
         Sees(LevelPages.Widgets) && Modes.Expert ? new HubTab("widgets", "Widgets", null) : null,   // mode simple : pas d'onglet Widgets (§179)
+        Sees(LevelPages.Widgets) && Modes.Expert && HaInstalled ? new HubTab("plans", "Plans", null) : null,   // plans de bâtiment : seulement avec Home Assistant connecté (§194)
         Sees(LevelPages.Integrations) && Modes.Expert ? new HubTab("integrations", "Intégrations", MenuBadges.Integrations, "store") : null,
         orgAdmin && Modes.Expert ? new HubTab("datasources", "Sources de données", MenuBadges.DataSources) : null,
         orgAdmin && Modes.Expert ? new HubTab("apiwebhooks", "API et webhooks", null) : null

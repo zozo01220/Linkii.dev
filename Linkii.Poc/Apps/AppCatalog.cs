@@ -96,7 +96,7 @@ public class AppCatalog
 {
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
     private static readonly string[] AllPlacements = { "full", "top-left", "top-right", "bottom-left", "bottom-right", "top", "bottom" };
-    private static readonly string[] FieldTypes = { "text", "textarea", "number", "select", "bool", "color", "url", "secret", "date", "mailbox", "youtube", "city", "textfile", "hidden", "media", "medias", "canva", "pdf", "gfile", "calendar", "drive", "facebookpage", "haentity", "haplan" };
+    private static readonly string[] FieldTypes = { "text", "textarea", "number", "select", "bool", "color", "url", "secret", "date", "mailbox", "youtube", "city", "textfile", "hidden", "media", "medias", "canva", "pdf", "gfile", "calendar", "drive", "facebookpage", "haentity", "haplanpick" };
     private readonly List<AppManifest> _apps = new();
 
     public IReadOnlyList<AppManifest> All => _apps;
@@ -240,8 +240,8 @@ public class AppCatalog
                     if (parts.Any(x => !Guid.TryParse(x, out _))) errors.Add($"« {f.Label} » : sélection invalide.");
                     else if (f.Type == "media" && parts.Length > 1) errors.Add($"« {f.Label} » : un seul fichier attendu.");
                     break;
-                case "haplan":
-                    if (HomeAssistantRules.ParsePlan(v).Floors.Count == 0) errors.Add($"« {f.Label} » : ajoutez au moins un étage.");
+                case "haplanpick":
+                    if (!Guid.TryParse(v, out _)) errors.Add($"« {f.Label} » : choisissez un plan.");
                     break;
                 case "url":
                     if (!IsHttpUrl(v)) errors.Add($"« {f.Label} » doit être une adresse http:// ou https://.");

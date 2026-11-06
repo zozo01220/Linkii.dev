@@ -100,6 +100,14 @@ public static class HomeAssistantRules
         static string Str(JsonElement e, string k) => e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
     }
 
+    /// <summary>Plan choisi par un widget « Plan du bâtiment » (réglage planId) dans les plans de l'organisation ; null s'il n'en a pas ou s'il a été supprimé.</summary>
+    public static Plan? PlanOf(Tenant t, IReadOnlyDictionary<string, string>? settings) =>
+        settings != null && settings.TryGetValue("planId", out var v) && Guid.TryParse(v, out var id) && t.HaPlans.FirstOrDefault(p => p.Id == id) is { } p ? ParsePlan(p.Json) : null;
+
+    /// <summary>Entités qu'un widget Home Assistant lit : celles de son plan (widget plan), sinon celles qu'on y a choisies.</summary>
+    public static List<string> EntitiesOf(Tenant t, string? appId, IReadOnlyDictionary<string, string> settings) =>
+        appId == PlanApp ? PlanOf(t, settings)?.Devices.Select(d => d.Id).ToList() ?? new() : ParseEntities(settings.GetValueOrDefault("entities"));
+
     /// <summary>Plan nettoyé, prêt à être enregistré, et entités qu'il utilise (séparées par des virgules).</summary>
     public static (string Json, string Entities) NormalizePlan(string? json)
     {
@@ -647,7 +655,8 @@ public class HomeAssistantProvider(HomeAssistantClient ha, HomeAssistantLive liv
     {
         var account = rt.Client.HomeAssistant ?? throw new InvalidOperationException("Compte Home Assistant non connecté.");
         // plan du bâtiment : les entités sont celles posées sur le plan, et le plan est renvoyé nettoyé (l'écran ne lit jamais le réglage brut)
-        var plan = rt.Get("plan") is { Length: > 0 } rawPlan ? HomeAssistantRules.ParsePlan(rawPlan) : null;
+        var isPlan = rt.Values.ContainsKey("planId");
+        var plan = isPlan ? HomeAssistantRules.PlanOf(rt.Client, rt.Values) ?? new HomeAssistantRules.Plan(new(), new()) : null;
         var configured = plan != null ? plan.Devices.Select(d => d.Id).ToList() : HomeAssistantRules.ParseEntities(rt.Get("entities"));
         var control = rt.Get("control", "true") != "false";
         var (states, isLive) = await live.States(rt.Client.Id, account);
@@ -695,8 +704,9 @@ public class HomeAssistantProvider(HomeAssistantClient ha, HomeAssistantLive liv
     public async Task<string> Test(AppRuntime rt)
     {
         var account = rt.Client.HomeAssistant ?? throw new InvalidOperationException("Connectez d'abord le compte Home Assistant dans Intégrations.");
-        var configured = rt.Get("plan") is { Length: > 0 } rawPlan ? HomeAssistantRules.ParsePlan(rawPlan).Devices.Select(d => d.Id).ToList() : HomeAssistantRules.ParseEntities(rt.Get("entities"));
-        if (configured.Count == 0) throw new InvalidOperationException(rt.Get("plan").Length > 0 ? "Posez au moins un appareil sur le plan." : "Choisissez au moins une entité.");
+        var isPlan = rt.Values.ContainsKey("planId");
+        var configured = isPlan ? HomeAssistantRules.PlanOf(rt.Client, rt.Values)?.Devices.Select(d => d.Id).ToList() ?? new() : HomeAssistantRules.ParseEntities(rt.Get("entities"));
+        if (configured.Count == 0) throw new InvalidOperationException(isPlan ? "Choisissez un plan où des appareils sont posés." : "Choisissez au moins une entité.");
         var states = await ha.States(ha.Conn(rt.Client.Id, account), fresh: true);
         var missing = configured.Where(id => !states.ContainsKey(id)).ToList();
         var msg = $"{configured.Count - missing.Count} entité(s) disponible(s).";

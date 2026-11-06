@@ -1,0 +1,34 @@
+@inject TenantStore Store
+
+@* Champ « plan du bâtiment » d'un widget (§194) : choix parmi les plans de l'organisation. Les plans se créent et se modifient dans Contenus › Plans ;
+   un plan modifié se met à jour sur tous les écrans qui l'affichent. *@
+@if (plans.Count == 0)
+{
+    <div class="dw-note">Aucun plan pour l'instant. <a href="/plans">Créez-en un dans Contenus › Plans</a>.</div>
+}
+else
+{
+    <select @bind="Values[Field.Key]" @bind:after="Changed">
+        <option value="">— Choisir un plan —</option>
+        @foreach (var p in plans)
+        {
+            var d = HomeAssistantRules.ParsePlan(p.Json);
+            <option value="@p.Id">@p.Name · @d.Floors.Count étage@(d.Floors.Count > 1 ? "s" : ""), @d.Devices.Count appareil@(d.Devices.Count > 1 ? "s" : "")</option>
+        }
+        @if (Values[Field.Key].Length > 0 && plans.All(p => p.Id.ToString() != Values[Field.Key])) { <option value="@Values[Field.Key]">Plan supprimé</option> }
+    </select>
+    <small>Un plan manque ou doit changer ? <a href="/plans">Gérez les plans dans Contenus › Plans</a>.</small>
+}
+
+@code {
+    [Parameter, EditorRequired] public AppField Field { get; set; } = default!;
+    [Parameter, EditorRequired] public Dictionary<string, string> Values { get; set; } = default!;
+    [Parameter] public EventCallback OnChange { get; set; }
+
+    private List<HaPlan> plans = new();
+
+    protected override void OnInitialized() =>
+        plans = Store.Read(d => d.Tenant.HaPlans).OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+
+    private Task Changed() => OnChange.InvokeAsync();
+}
