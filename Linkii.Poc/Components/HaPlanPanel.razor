@@ -1,66 +1,101 @@
+@using Microsoft.JSInterop
 @inject TenantStore Store
 @inject AppCatalog Catalog
 @inject HomeAssistantLive Live
 @inject Toaster Toast
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
-@* Un plan du bâtiment (§202, repris au §203) dans le tiroir de la page Plans, sur toute la largeur à droite du menu. Trois onglets :
-   Plan : l'éditeur (ses propres onglets Appareils et Étages et pièces), Affichages : comment le montrer (Diffusion, Borne, Compact),
-   Où il s'affiche : contenus, tuiles et widgets qui l'utilisent, et « Ajouter à… » qui les crée déjà reliés. *@
-<div class="dh hpd-h">
-    <span class="app-ico" style="--app-c:#41BDF5"><Ico Name="home" Size="20" /></span>
-    <div class="hpd-t"><b>@(plan?.Name ?? "Nouveau plan")</b><small>@Stats</small></div>
-    <button type="button" class="modal-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
-</div>
-<div class="hpd-b">
-@if (!IsNew && plan == null)
-{
-    <div class="card empty"><div class="big">Plan introuvable</div><p>Il a peut-être été supprimé.</p></div>
-}
-else
-{
-    <nav class="tabs int-tabs hpg-tabs" role="tablist" aria-label="Plan du bâtiment">
+@* Un plan du bâtiment dans le tiroir de la page Plans (§202, §203), restructuré au §204 d'après maquettes/plan-tiroir-edition.html : une colonne de hauteur fixe,
+   trois bandes, rien ne défile sauf les listes.
+   - en-tête d'une ligne : identité (nom du plan modifiable sur place), onglets Plan / Affichages / Où il s'affiche, fermer ;
+   - corps : l'éditeur (HaPlanEditor), les affichages (HaViewsEditor) ou « où il s'affiche » ;
+   - pied toujours visible : état, Aperçu, Annuler les modifications, Enregistrer (selon l'onglet). *@
+<header class="hpd-h">
+    <span class="hpd-logo"><Ico Name="home" Size="18" /></span>
+    <div class="hpd-t">
+        <input type="text" class="hpd-name" maxlength="60" placeholder="Nom du plan (Maison, Bureaux…)" aria-label="Nom du plan" @bind="nameValue" @bind:event="oninput" />
+        <small>@Stats</small>
+    </div>
+    <nav class="hpd-tabs" role="tablist" aria-label="Plan du bâtiment">
         @Tab("plan", "Plan", plan == null ? null : parsed.Devices.Count, false)
         @Tab("affichages", "Affichages", plan?.Views.Count, IsNew)
         @Tab("diffusion", "Où il s'affiche", plan == null ? null : uses.Count, IsNew)
     </nav>
+    <span class="grow"></span>
+    <button type="button" class="hpd-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="18" /></button>
+</header>
 
-    <div hidden="@(tab != "plan")">
-        <HaPlanEditor @key="editorKey" Inline="true" Name="@(plan?.Name ?? "")" Json="@(plan?.Json ?? "")" OnSave="Save" OnClose="ResetEditor" />
-    </div>
-
-    @if (tab == "affichages" && plan != null)
+<div class="hpd-b">
+    @if (!IsNew && plan == null)
     {
-        <HaViewsEditor @key="viewsKey" PlanId="plan.Id" Inline="true" OnSaved="ViewsSaved" OnClose="() => viewsKey = Guid.NewGuid()" />
+        <div class="card empty"><div class="big">Plan introuvable</div><p>Il a peut-être été supprimé.</p></div>
     }
-    else if (tab == "diffusion" && plan != null)
+    else
     {
-        <div class="hpg-uses-head">
-            <div class="grow"><b>Où il s'affiche</b><small>Modifier le plan ou un de ses affichages met à jour tous ces écrans.</small></div>
-            <button type="button" class="btn" @onclick="OpenAdd"><Ico Name="plus" Size="16" /> Ajouter à…</button>
+        <div class="hpd-pane" hidden="@(tab != "plan")">
+            <HaPlanEditor @ref="ed" @key="editorKey" Name="@nameValue" Json="@(plan?.Json ?? "")" OnSave="Save" OnState="Refresh" />
         </div>
-        @if (uses.Count == 0)
+        @if (tab == "affichages" && plan != null)
         {
-            <div class="card empty"><div class="big">Ce plan ne s'affiche encore nulle part</div><p>« Ajouter à… » le met dans une liste de diffusion, sur un écran ou sur une borne, déjà réglé.</p></div>
+            <div class="hpd-pane"><HaViewsEditor @ref="vw" @key="viewsKey" PlanId="plan.Id" OnSaved="ViewsSaved" OnState="Refresh" /></div>
         }
-        else
+        else if (tab == "diffusion" && plan != null)
         {
-            <div class="hpg-uses" role="table">
-                <div class="hpg-ur hd" role="row"><span>Où</span><span>Affichage</span><span>Diffusé</span><span></span></div>
-                @foreach (var u in uses)
-                {
-                    <div class="hpg-ur" role="row">
-                        <span class="hpg-un"><Ico Name="@KindIcon(u.Kind)" Size="17" /><span><b>@u.Name</b><small>@KindLabel(u.Kind)</small></span></span>
-                        <span><span class="hpg-pill">@ViewName(u.ViewId)</span></span>
-                        <span class="hpg-uw">@u.Where</span>
-                        <span>@if (UseHref(u) is { } href) { <a class="btn ghost sm" href="@href">Ouvrir</a> }</span>
-                    </div>
-                }
+            <div class="hpd-pane col">
+                <div class="hpg-uses-head">
+                    <div class="grow"><b>Où il s'affiche</b> <small>Modifier le plan ou un de ses affichages met à jour tous ces écrans.</small></div>
+                    <button type="button" class="btn primary" @onclick="OpenAdd"><Ico Name="plus" Size="16" /> Ajouter à…</button>
+                </div>
+                <div class="hpg-utab">
+                    @if (uses.Count == 0)
+                    {
+                        <div class="card empty"><div class="big">Ce plan ne s'affiche encore nulle part</div><p>« Ajouter à… » le met dans une liste de diffusion, sur un écran ou sur une borne, déjà réglé.</p></div>
+                    }
+                    else
+                    {
+                        <div class="hpg-uses" role="table">
+                            <div class="hpg-ur hd" role="row"><span>Où</span><span>Affichage</span><span>Diffusé</span><span></span></div>
+                            @foreach (var u in uses)
+                            {
+                                <div class="hpg-ur" role="row">
+                                    <span class="hpg-un"><Ico Name="@KindIcon(u.Kind)" Size="17" /><span><b>@u.Name</b><small>@KindLabel(u.Kind)</small></span></span>
+                                    <span><span class="hpg-pill">@ViewName(u.ViewId)</span></span>
+                                    <span class="hpg-uw">@u.Where</span>
+                                    <span>@if (UseHref(u) is { } href) { <a class="btn ghost sm" href="@href">Ouvrir</a> }</span>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
             </div>
         }
     }
-}
 </div>
+
+<footer class="hpd-f">
+    <div class="hpd-st">
+        @if (tab == "plan") { if (PlanDirty) { <i class="hpd-dot"></i><span>Modifications non enregistrées</span> } else { <span>@(IsNew ? "Nouveau plan : donnez-lui un nom, dessinez, puis enregistrez" : "Aucune modification")</span> } }
+        else if (tab == "affichages") { if (vw?.Dirty == true) { <i class="hpd-dot"></i><span>Modifications non enregistrées</span> } else { <span>Aucune modification</span> } }
+        else { <span>@uses.Count utilisation@(uses.Count > 1 ? "s" : "")</span> }
+    </div>
+    <span class="grow"></span>
+    @if (tab == "plan")
+    {
+        <button type="button" class="btn" title="Voir le plan tel que l'écran l'affichera, avant d'enregistrer" disabled="@(ed?.CanPreview != true)" @onclick="() => ed?.TogglePreview()"><Ico Name="play" Size="15" /> @(ed?.Previewing == true ? "Fermer l'aperçu" : "Aperçu")</button>
+        <button type="button" class="btn" disabled="@(!IsNew && !PlanDirty)" @onclick="ResetEditor">Annuler les modifications</button>
+        <button type="button" class="btn primary" disabled="@(nameValue.Trim().Length == 0 || (!IsNew && !PlanDirty))" @onclick="SaveClick">Enregistrer</button>
+    }
+    else if (tab == "affichages")
+    {
+        <button type="button" class="btn" disabled="@(vw?.Dirty != true)" @onclick="() => viewsKey = Guid.NewGuid()">Annuler les modifications</button>
+        <button type="button" class="btn primary" disabled="@(vw?.Dirty != true)" @onclick="SaveViews">Enregistrer les affichages</button>
+    }
+    else
+    {
+        <button type="button" class="btn primary" @onclick="Close">Fermer</button>
+    }
+</footer>
 
 @if (adding && plan != null)
 {
@@ -119,6 +154,11 @@ else
     [Parameter] public EventCallback OnChanged { get; set; }
 
     private HaPlan? plan;
+    private HaPlanEditor? ed;
+    private HaViewsEditor? vw;
+    private string nameValue = "", loadedFor = "";
+    private bool PlanDirty => ed?.Dirty == true;
+    private void Refresh() { }   // un état de l'éditeur a changé : le pied suit (l'appel d'un EventCallback redessine le tiroir)
     private HomeAssistantRules.Plan parsed = new(new(), new());
     private HomeAssistantAccount? account;
     private List<HaPlanUses.Use> uses = new();
@@ -137,6 +177,8 @@ else
     {
         tab = !IsNew && Onglet is "affichages" or "diffusion" ? Onglet! : "plan";
         Load();
+        var key = PlanId?.ToString() ?? "nouveau";
+        if (loadedFor != key) { loadedFor = key; nameValue = plan?.Name ?? ""; }   // le nom saisi n'est pas écrasé quand le parent se redessine
     }
 
     private void Load()
@@ -156,7 +198,7 @@ else
     }
 
     private RenderFragment Tab(string key, string label, int? count, bool disabled) => @<button type="button" role="tab" class="@(tab == key ? "on" : "")" aria-selected="@(tab == key ? "true" : "false")" disabled="@disabled"
-        title="@(disabled ? "Enregistrez d'abord le plan" : null)" @onclick="() => Go(key)">@label@if (count is { } n) { <span class="cat-count">@n</span> }</button>;
+        title="@(disabled ? "Enregistrez d'abord le plan" : null)" @onclick="() => Go(key)">@label@if (count is { } n) { <span class="n">@n</span> }</button>;
 
     private void Go(string key)
     {
@@ -181,17 +223,28 @@ else
         });
         Live.Nudge(Store.ClientId);   // les écrans qui affichent ce plan relisent ses appareils
         Toast.Ok($"Plan « {name} » enregistré.");
+        nameValue = name;
         if (IsNew) { Nav.NavigateTo($"/plans/{id}", replace: true); _ = OnChanged.InvokeAsync(); return; }
         Load();
+        editorKey = Guid.NewGuid();   // l'éditeur repart du plan enregistré : plus de modifications en attente
         _ = OnChanged.InvokeAsync();
     }
 
-    private void Close() => Nav.NavigateTo("/plans");
+    private Task SaveClick() => ed == null ? Task.CompletedTask : ed.Apply();
+    private Task SaveViews() => vw == null ? Task.CompletedTask : vw.SaveAsync();
 
-    /// <summary>« Annuler les modifications » : l'éditeur repart du plan enregistré (nouveau plan : retour à la liste).</summary>
+    /// <summary>Fermer le tiroir ; des modifications en attente demandent confirmation.</summary>
+    private async Task Close()
+    {
+        if ((PlanDirty || vw?.Dirty == true) && !await JS.InvokeAsync<bool>("confirm", "Des modifications ne sont pas enregistrées. Fermer quand même ?")) return;
+        Nav.NavigateTo("/plans");
+    }
+
+    /// <summary>« Annuler les modifications » : l'éditeur repart du plan enregistré, le nom aussi (nouveau plan : retour à la liste).</summary>
     private void ResetEditor()
     {
-        if (IsNew) { Nav.NavigateTo("/plans"); return; }
+        if (IsNew && !PlanDirty) { Nav.NavigateTo("/plans"); return; }
+        nameValue = plan?.Name ?? "";
         editorKey = Guid.NewGuid();
     }
 

@@ -1,97 +1,94 @@
 @inject TenantStore Store
-@inject JsonStore Root
 @inject Toaster Toast
 
-@* Affichages d'un plan du bâtiment (« vues » au §200, renommées au §202) : liste à gauche, réglages de l'affichage choisi à droite. En fenêtre, ou dans l'onglet
-   « Affichages » de la page du plan (Inline).
+@* Affichages d'un plan du bâtiment (« vues » au §200, renommées au §202), dans l'onglet « Affichages » du tiroir du plan (§204, d'après maquettes/plan-tiroir-edition.html) :
+   liste étroite à gauche, formulaire de l'affichage choisi sur trois colonnes (Affichage, Visite ou appareils commandables, Rendu). Le pied du tiroir porte
+   « Annuler » et « Enregistrer » (SaveAsync, Dirty).
    Diffusion : visite (étapes réordonnables, durée de chacune), événements, étiquettes, résumé, carte de chaleur.
    Borne (interactive) : familles d'appareils commandables (serrures : appui maintenu). Compact : le résumé seul, pour un petit widget.
    Rien n'est écrit avant « Enregistrer ». *@
-<OverlayOr Inline="Inline">
-    @if (!Inline) { <div class="modal-backdrop picker-backdrop" @onclick="Cancel"></div> }
-    <div class="modal app-modal picker hve @(Inline ? "inline" : "")" role="@(Inline ? "region" : "dialog")" aria-modal="@(Inline ? "false" : "true")" aria-label="Affichages du plan">
-        @if (!Inline)
+<div class="hve" role="region" aria-label="Affichages du plan">
+    <div class="hve-list">
+        @foreach (var v in views)
         {
-            <div class="modal-head">
-                <span class="app-ico" style="--app-c:#41BDF5"><Ico Name="monitor" Size="22" /></span>
-                <div class="grow"><h3>Affichages · @PlanName</h3><small>Un affichage dit comment montrer le plan. Un contenu de liste ou un widget choisit plan + affichage ; le modifier met à jour tous les écrans qui l'utilisent.</small></div>
-                <button type="button" class="modal-x" aria-label="Fermer" @onclick="Cancel"><Ico Name="x" Size="20" /></button>
-            </div>
+            var vv = v;
+            var n = uses.GetValueOrDefault(v.Id);
+            <button type="button" class="hve-card @(v.Id == selId ? "sel" : "")" @onclick="() => selId = vv.Id">
+                <span class="hve-tag @(v.Mode == "interactive" ? "k" : "")">@HaViews.ModeLabel(v.Mode)</span>
+                <b>@v.Name</b>
+                <small>@Describe(v)</small>
+                <small class="hve-used">@(n == 0 ? "Utilisé nulle part" : $"Utilisé {n} fois")</small>
+            </button>
         }
-        <div class="modal-body hve-body">
-            <div class="hve-list">
-                @foreach (var v in views)
+        @if (views.Count < HaViews.MaxViews)
+        {
+            <button type="button" class="hve-card new" @onclick="Add"><Ico Name="plus" Size="16" /> Autre affichage</button>
+        }
+    </div>
+    @if (Sel is { } s)
+    {
+        <div class="hve-form">
+            <div class="hve-col">
+                <h5>Affichage</h5>
+                <div class="f"><label for="hve-name">Nom</label><input id="hve-name" type="text" maxlength="40" @bind="s.Name" @bind:event="oninput" /></div>
+                <div class="f"><label>Usage</label>
+                    <div class="hve-seg">
+                        <button type="button" class="@(s.Mode == "signage" ? "on" : "")" @onclick='() => s.Mode = "signage"'><b><Ico Name="monitor" Size="15" /> Diffusion</b><span>Visite automatique en plein écran, sans toucher.</span></button>
+                        <button type="button" class="@(s.Mode == "interactive" ? "on" : "")" @onclick='() => s.Mode = "interactive"'><b><Ico Name="hand" Size="15" /> Borne</b><span>Tactile : étage, pièce, appareil ; on commande.</span></button>
+                        <button type="button" class="@(s.Mode == "compact" ? "on" : "")" @onclick='() => s.Mode = "compact"'><b><Ico Name="menu" Size="15" /> Compact</b><span>Le résumé seul, pour un petit widget.</span></button>
+                    </div>
+                </div>
+                @if (views.Count > 1)
                 {
-                    var vv = v;
-                    var n = uses.GetValueOrDefault(v.Id);
-                    <button type="button" class="hve-card @(v.Id == selId ? "sel" : "")" @onclick="() => selId = vv.Id">
-                        <span class="hve-tag @(v.Mode == "interactive" ? "k" : "")"><Ico Name="@ModeIcon(v.Mode)" Size="13" /> @HaViews.ModeLabel(v.Mode)</span>
-                        <b>@v.Name</b>
-                        <small>@Describe(v)</small>
-                        <small class="hve-used">@(n == 0 ? "Utilisé nulle part" : $"Utilisé {n} fois")</small>
-                    </button>
-                }
-                @if (views.Count < HaViews.MaxViews)
-                {
-                    <button type="button" class="hve-card new" @onclick="Add"><Ico Name="plus" Size="16" /> Autre affichage</button>
+                    <div class="hve-del"><button type="button" class="btn ghost sm" @onclick="() => Remove(s)"><Ico Name="trash" Size="14" /> Supprimer cet affichage</button></div>
                 }
             </div>
-            @if (Sel is { } s)
-            {
-                <div class="hve-form">
-                    <div class="f"><label for="hve-name">Nom de l'affichage</label><input id="hve-name" type="text" maxlength="40" @bind="s.Name" @bind:event="oninput" /></div>
-                    <div class="f"><label>Usage</label>
-                        <div class="hve-seg">
-                            <button type="button" class="@(s.Mode == "signage" ? "on" : "")" @onclick='() => s.Mode = "signage"'><b><Ico Name="monitor" Size="15" /> Diffusion</b><span>Écran sans toucher : visite automatique en plein écran, lisible de loin.</span></button>
-                            <button type="button" class="@(s.Mode == "interactive" ? "on" : "")" @onclick='() => s.Mode = "interactive"'><b><Ico Name="hand" Size="15" /> Borne</b><span>Tactile, plein écran : étage, pièce, appareil ; on commande.</span></button>
-                            <button type="button" class="@(s.Mode == "compact" ? "on" : "")" @onclick='() => s.Mode = "compact"'><b><Ico Name="menu" Size="15" /> Compact</b><span>Le résumé seul (lumières, températures, alertes), pour un petit widget.</span></button>
-                        </div>
+            <div class="hve-col">
+                @if (s.Mode == "signage")
+                {
+                    <h5>Visite</h5>
+                    <div class="hve-steps">
+                        @for (var i = 0; i < s.Tour.Count; i++)
+                        {
+                            var idx = i; var st = s.Tour[idx];
+                            <div class="hve-step">
+                                <span class="n">@(idx + 1)</span>
+                                <select value="@(st.Floor ?? "")" @onchange="e => st.Floor = e.Value?.ToString() is { Length: > 0 } f ? f : null" aria-label="Étape @(idx + 1)">
+                                    <option value="">Vue d'ensemble (rotation lente)</option>
+                                    @foreach (var f in floors.AsEnumerable().Reverse()) { <option value="@f.Id">@f.Name</option> }
+                                </select>
+                                <input type="number" min="@HaViews.MinSec" max="@HaViews.MaxSec" value="@st.Sec" @onchange="e => st.Sec = int.TryParse(e.Value?.ToString(), out var x) ? Math.Clamp(x, HaViews.MinSec, HaViews.MaxSec) : st.Sec" aria-label="Durée en secondes" /> s
+                                <button type="button" class="btn ghost sm icon" aria-label="Monter l'étape" disabled="@(idx == 0)" @onclick="() => MoveStep(s, idx, -1)"><Ico Name="arrow-up" Size="13" /></button>
+                                <button type="button" class="btn ghost sm icon hpe-dn" aria-label="Descendre l'étape" disabled="@(idx == s.Tour.Count - 1)" @onclick="() => MoveStep(s, idx, 1)"><Ico Name="arrow-up" Size="13" /></button>
+                                <button type="button" class="btn ghost sm icon" aria-label="Retirer l'étape" disabled="@(s.Tour.Count == 1)" @onclick="() => s.Tour.RemoveAt(idx)"><Ico Name="x" Size="13" /></button>
+                            </div>
+                        }
+                        @if (s.Tour.Count < HaViews.MaxSteps) { <button type="button" class="btn sm hpe-addfl" @onclick="() => s.Tour.Add(new HaTourStep { Floor = floors.FirstOrDefault()?.Id, Sec = 8 })"><Ico Name="plus" Size="13" /> Étape</button> }
                     </div>
-                    @if (s.Mode == "signage")
-                    {
-                        <div class="f"><label>Visite</label>
-                            <div class="hve-steps">
-                                @for (var i = 0; i < s.Tour.Count; i++)
-                                {
-                                    var idx = i; var st = s.Tour[idx];
-                                    <div class="hve-step">
-                                        <span class="n">@(idx + 1)</span>
-                                        <select value="@(st.Floor ?? "")" @onchange="e => st.Floor = e.Value?.ToString() is { Length: > 0 } f ? f : null" aria-label="Étape @(idx + 1)">
-                                            <option value="">Vue d'ensemble (rotation lente)</option>
-                                            @foreach (var f in floors.AsEnumerable().Reverse()) { <option value="@f.Id">@f.Name</option> }
-                                        </select>
-                                        <input type="number" min="@HaViews.MinSec" max="@HaViews.MaxSec" value="@st.Sec" @onchange="e => st.Sec = int.TryParse(e.Value?.ToString(), out var x) ? Math.Clamp(x, HaViews.MinSec, HaViews.MaxSec) : st.Sec" aria-label="Durée en secondes" /> s
-                                        <button type="button" class="btn ghost sm icon" aria-label="Monter l'étape" disabled="@(idx == 0)" @onclick="() => MoveStep(s, idx, -1)"><Ico Name="arrow-up" Size="13" /></button>
-                                        <button type="button" class="btn ghost sm icon hpe-dn" aria-label="Descendre l'étape" disabled="@(idx == s.Tour.Count - 1)" @onclick="() => MoveStep(s, idx, 1)"><Ico Name="arrow-up" Size="13" /></button>
-                                        <button type="button" class="btn ghost sm icon" aria-label="Retirer l'étape" disabled="@(s.Tour.Count == 1)" @onclick="() => s.Tour.RemoveAt(idx)"><Ico Name="x" Size="13" /></button>
-                                    </div>
-                                }
-                                @if (s.Tour.Count < HaViews.MaxSteps) { <button type="button" class="btn ghost sm hpe-addfl" @onclick="() => s.Tour.Add(new HaTourStep { Floor = floors.FirstOrDefault()?.Id, Sec = 8 })"><Ico Name="plus" Size="13" /> Étape</button> }
-                            </div>
-                            <small>Durée totale de la visite : @s.Tour.Sum(t => t.Sec) s. Donnez cette durée au contenu dans la liste de diffusion pour une visite complète.</small>
-                        </div>
-                        <label class="hve-row"><span><b>Montrer l'événement</b><small>Porte ouverte, fumée, mouvement : message et zoom sur l'étage quelques secondes, puis la visite reprend.</small></span><input type="checkbox" class="sw" @bind="s.Focus" /></label>
-                    }
-                    else if (s.Mode == "interactive")
-                    {
-                        <div class="f"><label>Appareils commandables à la borne</label>
-                            <div class="hve-chips">
-                                @foreach (var (k, l) in Families)
-                                {
-                                    var key = k;
-                                    <button type="button" class="@(s.Control.Contains(key) ? "on" : "") @(key == "lock" ? "lock" : "")" @onclick="() => Toggle(s, key)">@(key == "lock" ? "🔒 " : "")@l</button>
-                                }
-                            </div>
-                            <small>Les capteurs (température, portes, mouvement) restent en lecture. Serrures : appui maintenu 1,5 s. Après un moment sans toucher, la borne revient à son accueil (réglage de la borne).</small>
-                        </div>
-                    }
-                    <hr />
-                    @if (s.Mode == "compact")
-                    {
-                        <small class="hve-note">Compact : le résumé du bâtiment, sans le plan. Rien d'autre à régler.</small>
-                    }
-                    else
-                    {
+                    <small class="hve-note">Durée totale : @s.Tour.Sum(t => t.Sec) s (reprise par les listes de diffusion).</small>
+                }
+                else if (s.Mode == "interactive")
+                {
+                    <h5>Appareils commandables</h5>
+                    <div class="hve-chips">
+                        @foreach (var (k, l) in Families)
+                        {
+                            var key = k;
+                            <button type="button" class="@(s.Control.Contains(key) ? "on" : "") @(key == "lock" ? "lock" : "")" @onclick="() => Toggle(s, key)">@(key == "lock" ? "🔒 " : "")@l</button>
+                        }
+                    </div>
+                    <small class="hve-note">Les capteurs (température, portes, mouvement) restent en lecture. Serrures : appui maintenu 1,5 s. Après un moment sans toucher, la borne revient à son accueil (réglage de la borne).</small>
+                }
+                else
+                {
+                    <h5>Compact</h5>
+                    <small class="hve-note">Le résumé du bâtiment (lumières allumées, températures, alertes), sans le plan. Rien d'autre à régler.</small>
+                }
+            </div>
+            <div class="hve-col">
+                @if (s.Mode != "compact")
+                {
+                    <h5>Rendu</h5>
                     <div class="f"><label for="hve-lab">Étiquettes</label>
                         <select id="hve-lab" @bind="s.Labels">
                             <option value="all">Toutes : valeur, ampoule, halo</option>
@@ -102,43 +99,40 @@
                     </div>
                     <div class="f"><label for="hve-sum">Résumé</label>
                         <select id="hve-sum" @bind="s.Summary">
-                            <option value="right">Panneau à droite</option>
-                            <option value="left">Panneau à gauche</option>
-                            <option value="top">Bandeau en haut, défilant</option>
+                            <option value="right">Pastilles dans le coin</option>
                             <option value="none">Masqué</option>
                         </select>
                         @if (s.Mode == "interactive") { <small>À la borne, le plan prend tout l'écran : étiquettes et résumé ne servent qu'à la diffusion.</small> }
-                        else { <small>En diffusion plein écran, le résumé devient des pastilles dans le coin (masqué : aucune).</small> }
                     </div>
-                    <label class="hve-row"><span><b>Carte de chaleur</b><small>Pièces teintées selon leur température.</small></span><input type="checkbox" class="sw" @bind="s.Heat" /></label>
-                    <label class="hve-row"><span><b>Masquer les appareils indisponibles</b><small>Ils restent comptés dans le résumé.</small></span><input type="checkbox" class="sw" @bind="s.HideOff" /></label>
-                    <label class="hve-row"><span><b>Étages écartés</b><small>Chaque étage visible en entier dans la vue d'ensemble.</small></span><input type="checkbox" class="sw" @bind="s.Explode" /></label>
+                    @if (s.Mode == "signage")
+                    {
+                        <label class="hve-row"><span><b>Montrer l'événement</b><small>Porte ouverte, mouvement…</small></span><input type="checkbox" class="sw" @bind="s.Focus" /></label>
                     }
-                    <div class="hve-del">
-                        @if (views.Count > 1)
-                        {
-                            <button type="button" class="btn ghost sm" @onclick="() => Remove(s)"><Ico Name="trash" Size="14" /> Supprimer cet affichage</button>
-                        }
-                    </div>
-                </div>
-            }
+                    <label class="hve-row"><span><b>Carte de chaleur</b><small>Pièces teintées par température</small></span><input type="checkbox" class="sw" @bind="s.Heat" /></label>
+                    <label class="hve-row"><span><b>Masquer les indisponibles</b><small>Ils restent comptés dans le résumé</small></span><input type="checkbox" class="sw" @bind="s.HideOff" /></label>
+                    <label class="hve-row"><span><b>Étages écartés</b><small>Vue d'ensemble</small></span><input type="checkbox" class="sw" @bind="s.Explode" /></label>
+                }
+            </div>
         </div>
-        <div class="modal-foot">
-            <span class="grow"></span>
-            <button type="button" class="btn" @onclick="Cancel">@(Inline ? "Annuler les modifications" : "Annuler")</button>
-            <button type="button" class="btn primary" @onclick="Save">Enregistrer</button>
-        </div>
-    </div>
-</OverlayOr>
+    }
+</div>
 
 @code {
     [Parameter, EditorRequired] public Guid PlanId { get; set; }
-    [Parameter] public EventCallback OnClose { get; set; }
     /// <summary>Après l'enregistrement (le parent prévient les écrans).</summary>
     [Parameter] public EventCallback OnSaved { get; set; }
-    /// <summary>Dans l'onglet « Affichages » de la page du plan (§202) plutôt qu'en fenêtre.</summary>
-    [Parameter] public bool Inline { get; set; }
+    /// <summary>Modifications non enregistrées ou non : le pied du tiroir se met à jour.</summary>
+    [Parameter] public EventCallback OnState { get; set; }
 
+    private string baseSig = "", lastSig = "";
+    private string Sig() => System.Text.Json.JsonSerializer.Serialize(views);
+    public bool Dirty => Sig() != baseSig;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        var sig = Dirty.ToString();
+        if (sig != lastSig) { lastSig = sig; await OnState.InvokeAsync(); }
+    }
     private static string ModeIcon(string mode) => mode switch { "interactive" => "hand", "compact" => "menu", _ => "monitor" };
 
     private static readonly (string, string)[] Families = { ("light", "Lumières"), ("cover", "Volets"), ("climate", "Thermostats"), ("switch", "Prises et interrupteurs"), ("lock", "Serrures") };
@@ -158,6 +152,7 @@
         views = p.Views;
         floors = HomeAssistantRules.ParsePlan(p.Json).Floors;
         selId = views.FirstOrDefault()?.Id ?? Guid.Empty;
+        baseSig = Sig();
         uses = Store.Read(d => HaPlanUses.ByView(d, PlanId));   // contenus de liste, tuiles de borne et widgets des écrans et bornes (§202)
     }
 
@@ -192,7 +187,7 @@
 
     private static void Toggle(HaPlanView v, string f) { if (!v.Control.Remove(f)) v.Control.Add(f); }
 
-    private async Task Save()
+    public async Task SaveAsync()
     {
         var plan = new HomeAssistantRules.Plan(floors, new());
         var clean = views.Select(v => HaViews.Normalize(v, plan)).ToList();
@@ -202,5 +197,4 @@
         await OnSaved.InvokeAsync();
     }
 
-    private Task Cancel() => OnClose.InvokeAsync();
 }
