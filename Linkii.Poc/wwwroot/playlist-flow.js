@@ -17,12 +17,14 @@
     if (!root || root.__lkFlow) return;
     root.__lkFlow = true;
 
+    root.addEventListener('dragstart', function (e) { if (e.target && e.target.closest && e.target.closest('.pfx-card, .pfx-tile')) e.preventDefault(); });   // jamais de glisser natif d'image ou de texte
     root.addEventListener('pointerdown', function (e) {
       if (drag || (e.pointerType === 'mouse' && e.button !== 0)) return;
       var t = e.target;
       if (!t || !t.closest) return;
       var inter = t.closest('button, input, select, textarea, a, label');
-      if (inter && !inter.classList.contains('pfx-tile')) return;   // boutons d'une carte (Régler, Supprimer, durée…) : pas de glisser
+      // seuls Régler, Supprimer, À configurer et la saisie de durée gardent leur geste ; partout ailleurs sur la carte (image, nom, durée, pastilles) on peut saisir la carte
+      if (inter && !inter.classList.contains('pfx-tile') && !(inter.tagName === 'BUTTON' && inter.closest('.pfx-dur'))) return;
       var card = t.closest('.pfx-u[data-drag] .pfx-card');
       var tile = !card && t.closest('.pfx-tile[data-add]');
       var fil = root.querySelector('.pfx-fil');

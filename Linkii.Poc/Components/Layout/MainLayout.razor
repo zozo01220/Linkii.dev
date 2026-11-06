@@ -370,14 +370,17 @@
         if (n > 0) builder.AddContent(0, WaitClock($"{n} demande{(n > 1 ? "s" : "")} à approuver"));
     };
     /// <summary>Icône orange « en attente » (horloge dans un rond), maquette menu-pastille-attente.html, option B (§178).</summary>
-    private static RenderFragment WaitClock(string tip) => builder =>
+    private static RenderFragment WaitClock(string tip, bool publish = false) => builder =>
     {
         builder.OpenElement(0, "span");
         builder.AddAttribute(1, "class", "nbadge wait");
         builder.AddAttribute(2, "title", tip);
         builder.AddAttribute(3, "role", "img");
         builder.AddAttribute(4, "aria-label", tip);
-        builder.AddMarkupContent(5, "<svg viewBox='0 0 24 24' aria-hidden='true'><circle cx='12' cy='12' r='8.5'/><path d='M12 7.5V12l3 2'/></svg>");
+        // Modifications à publier : l'icône du bouton orange Publier ; approbation en attente seule : l'horloge
+        builder.AddMarkupContent(5, publish
+            ? "<svg viewBox='0 0 24 24' aria-hidden='true'><path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12'/></svg>"
+            : "<svg viewBox='0 0 24 24' aria-hidden='true'><circle cx='12' cy='12' r='8.5'/><path d='M12 7.5V12l3 2'/></svg>");
         builder.CloseElement();
     };
     // Version de l'app (en haut à gauche) : seulement sur l'instance de développement locale
@@ -393,8 +396,8 @@
         var off = all.Sum(f => Badges.Of(f).Offline);
         var mine = fam == MenuBadges.Screens ? Badges.Of(MenuBadges.MyApprovals).Count : 0;
         var topub = fam == MenuBadges.Screens ? Badges.Of(MenuBadges.ToPublish).Count : 0;   // modifications pas encore publiées
-        var lists = fam == MenuBadges.Playlists ? Badges.Of(MenuBadges.ListsToPublish).Count : 0;   // listes modifiées depuis leur publication
-        if (off == 0 && mine == 0 && topub == 0 && lists == 0) return;
+        // Listes de diffusion : plus de pastille orange — une liste modifiée fait déjà apparaître « à publier » devant Écrans
+        if (off == 0 && mine == 0 && topub == 0) return;
         builder.OpenElement(0, "span");
         builder.AddAttribute(1, "class", "nbadges");
         if (off > 0)
@@ -405,13 +408,12 @@
             builder.AddContent(5, off > 999 ? "999+" : off.ToString());
             builder.CloseElement();
         }
-        if (mine > 0 || topub > 0 || lists > 0)
+        if (mine > 0 || topub > 0)
             builder.AddContent(6, WaitClock(string.Join(" · ", new[]
             {
                 topub > 0 ? $"{topub} écran{(topub > 1 ? "s" : "")} à publier" : null,
-                lists > 0 ? $"{lists} liste{(lists > 1 ? "s" : "")} à publier" : null,
                 mine > 0 ? $"{mine} publication{(mine > 1 ? "s" : "")} en attente d'approbation" : null
-            }.OfType<string>())));
+            }.OfType<string>()), publish: topub > 0));
         builder.CloseElement();
     };
     private bool compositionsOn;   // l'intégration « Compositions » est dans Mes intégrations
