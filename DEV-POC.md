@@ -3537,3 +3537,9 @@ Retour de l'utilisateur sur le tiroir du §203 : « rien n'est structuré », pa
 - Les paramètres d'un contenu (ville de la météo…) restent par contenu : pas de stockage de paramètres par application.
 - Un contenu désactivé déjà placé dans une liste y reste (non publié) ; retirer une application ne supprime pas ses contenus désactivés.
 - Glisser-déposer de l'ordre du menu.
+
+## 207. Cosmétique : trait dans le menu, Compositions sans onglets, fenêtre des modèles (7 novembre 2026) : demande de l'utilisateur ; compilé, vérifié dans le navigateur (instance de test : page Compositions, fenêtre Modèles, réouverture)
+- **Menu latéral** (`MainLayout.razor`) : un trait (`nav-sep`) sépare Contenus et Programmations. Il n'existe qu'avec Programmations (mode expert).
+- **Compositions** (`CompositionsPage.razor`) : l'onglet « Modèles » est supprimé. Comme la Médiathèque, la barre d'onglets n'apparaît que s'il y a plusieurs onglets (Mes compositions, Partagées avec moi, Toute l'organisation pour l'administrateur). Seul dans l'organisation ou en lecture seule : les compositions sont à la racine de la page, sans onglet. Un ancien onglet « models » retenu sur le compte retombe sur « Mes compositions ».
+- **Bouton « Modèles »** (bleu, `btn btn-share cmp-models-btn`) à gauche de « + Ajouter » : il ouvre une fenêtre centrée (`.modal.app-modal.cmp-models`, 1180 × 860 au plus, feuille du bas sur smartphone) avec Galerie (filtres par catégorie de `LinkiiCompoEditor.gallery`), Mes modèles et Partagés avec moi. « Depuis un modèle » (menu Ajouter) et « Voir les modèles » (page vide) ouvrent la même fenêtre. La galerie se redessine à chaque ouverture (`showModels`, `OpenModels`, `CloseModels`).
+- **Centrage** : la règle « Tiroirs » d'`app.css` (≥ 901 px) ouvre toute `.app-modal` à droite ; `.cmp-models` y est ajouté aux exceptions, comme `.sim-dlg`. Une modale `app-modal` qui doit rester centrée doit être ajoutée à cette exception.

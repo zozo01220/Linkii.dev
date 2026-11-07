@@ -18,7 +18,7 @@
 <div class="page-head">
     <div>
         <h1 class="cmp-h1">
-            @if (tab != "models" && currentRow is { } cur)
+            @if (currentRow is { } cur)
             {
                 <button type="button" class="lx-crumb @(dropOver == RootDrop ? "drop-target" : "")" @onclick="() => OpenFolder(null)"
                         @ondragover="() => { }" @ondragover:preventDefault="true" @ondragenter="() => { if (dragIds.Count > 0) dropOver = RootDrop; }" @ondragleave="() => { if (dropOver == RootDrop) dropOver = null; }" @ondrop:preventDefault="true" @ondrop="() => DropOn(null)">Compositions</button>
@@ -44,12 +44,14 @@
     @if (installed && (CanCreateHere || CanCreateFolderHere || (multi && currentRow is { Right: FolderRight.Owner })))
     {
         <div class="row head-actions">
-            @if (multi && tab != "models" && currentRow is { Right: FolderRight.Owner } here)
+            @if (multi && currentRow is { Right: FolderRight.Owner } here)
             {
                 <button type="button" class="btn btn-share lx-share" @onclick="() => ShareFolder(here)"><Ico Name="users" Size="16" /> Partager…</button>
             }
             @if (CanCreateHere)
             {
+                @* Modèles (7 novembre 2026) : plus d'onglet, une fenêtre avec la galerie (filtres par catégorie), Mes modèles et Partagés avec moi *@
+                <button type="button" class="btn btn-share cmp-models-btn" aria-haspopup="dialog" @onclick='() => OpenModels("gallery")'><Ico Name="images" Size="16" /> Modèles</button>
                 @* Un seul bouton « Ajouter » (même menu que la médiathèque). Look « app » : bouton flottant via les sources [data-fab]. *@
                 <div class="lx-add">
                     <button type="button" class="btn lx-add-btn" aria-haspopup="menu" aria-expanded="@(newMenu ? "true" : "false")" @onclick="() => newMenu = !newMenu"><Ico Name="plus" Size="16" /> Ajouter <Ico Name="chevron" Size="14" /></button>
@@ -58,7 +60,7 @@
                         <div class="kebab-backdrop" @onclick="() => newMenu = false"></div>
                         <div class="kebab-menu lx-add-menu" role="menu">
                             <button type="button" role="menuitem" @onclick="() => { newMenu = false; Create(); }"><Ico Name="grid" Size="18" /><span><b>Nouvelle composition</b><small>À partir d'une page vierge</small></span></button>
-                            <button type="button" role="menuitem" @onclick='() => { newMenu = false; SetTab("models"); SetSub("gallery"); }'><Ico Name="images" Size="18" /><span><b>Depuis un modèle</b><small>Galerie de modèles par secteur</small></span></button>
+                            <button type="button" role="menuitem" @onclick='() => { newMenu = false; OpenModels("gallery"); }'><Ico Name="images" Size="18" /><span><b>Depuis un modèle</b><small>Galerie de modèles par secteur</small></span></button>
                             @if (CanCreateFolderHere)
                             {
                                 <span class="sep" role="separator"></span>
@@ -87,79 +89,23 @@
 }
 else
 {
-    @* Onglets (24 octobre 2026) : ses compositions, celles qu'on lui partage, et pour l'administrateur toute l'organisation ; puis les modèles.
-       Seul dans l'organisation ou en lecture seule : un seul onglet « Compositions » (tout). *@
-    <nav class="tabs" role="tablist" aria-label="Compositions et modèles">
-        @foreach (var t in Tabs)
-        {
-            var key = t.Key;
-            <button type="button" role="tab" class="@(tab == key ? "on" : "")" aria-selected="@(tab == key ? "true" : "false")" @onclick="() => SetTab(key)">@t.Label @if (t.Count > 0) { <span class="cat-count">@t.Count</span> }<TabNew Family="compositions" Tab="@key" /></button>
-        }
-        <button type="button" role="tab" class="tab-feature @(tab == "models" ? "on" : "")" aria-selected="@(tab == "models" ? "true" : "false")" @onclick='() => SetTab("models")'>Modèles</button>
-    </nav>
-
-    @if (tab != "models") { <NewMark Family="compositions" Tab="@tab" Ids="@items.Select(c => c.Id).Concat(folderRows.Select(r => r.Folder.Id))" /> }
-    else if (sub != "gallery") { <NewMark Kind="template" Ids="@templates.Select(t => t.Id)" /> }
-
-    @if (tab == "models")
+    @* Onglets (24 octobre 2026) : comme la Médiathèque, seulement s'il y en a plusieurs (ses compositions, celles qu'on lui partage,
+       et pour l'administrateur toute l'organisation). Seul dans l'organisation : les compositions à la racine, sans onglet.
+       Les modèles ne sont plus un onglet : bouton « Modèles » et fenêtre (7 novembre 2026). *@
+    @if (Tabs.Count > 1)
     {
-        <div class="cmp-sub" role="tablist" aria-label="Galerie et Mes modèles">
-            <button type="button" role="tab" class="@(sub == "gallery" ? "on" : "")" aria-selected="@(sub == "gallery" ? "true" : "false")" @onclick='() => SetSub("gallery")'>Galerie</button>
-            <button type="button" role="tab" class="@(sub == "mine" ? "on" : "")" aria-selected="@(sub == "mine" ? "true" : "false")" @onclick='() => SetSub("mine")'>Mes modèles <span class="cat-count">@MyTemplates.Count</span></button>
-            @if (SharedTemplates.Count > 0) { <button type="button" role="tab" class="@(sub == "shared" ? "on" : "")" aria-selected="@(sub == "shared" ? "true" : "false")" @onclick='() => SetSub("shared")'>Partagés avec moi <span class="cat-count">@SharedTemplates.Count</span></button> }
-        </div>
-        @if (sub == "gallery")
-        {
-            <p class="hint cmp-hint">Choisissez un modèle pour démarrer : tout reste modifiable, et rien n'est enregistré tant que vous ne l'avez pas fait.</p>
-            <div @key="galKey" @ref="gal"></div>
-        }
-        else if (ShownTemplates.Count == 0)
-        {
-            <div class="empty">
-                <div class="big">Aucun modèle pour l'instant</div>
-                <p>Enregistrez une composition comme modèle (menu ⋮ d'une composition, ou « Enregistrer ▾ › Enregistrer comme modèle… » dans l'éditeur) pour la réutiliser comme point de départ.</p>
-            </div>
-        }
-        else
-        {
-            <p class="hint cmp-hint">@(sub == "shared" ? "Les modèles que des collègues vous partagent." : "Vos modèles.") Partir d'un modèle crée une nouvelle composition ; le modèle ne change pas.</p>
-            <div class="cmp-grid">
-                @foreach (var t in ShownTemplates)
-                {
-                    var tp = t;
-                    var tr = tplRights.GetValueOrDefault(tp.Id);
-                    var tsum = tplShares.GetValueOrDefault(tp.Id, ShareSummary.None);
-                    var tsize = Compositions.Size(new Dictionary<string, string> { ["doc"] = tp.Doc });
-                    <article class="cmp-card" data-nid="@tp.Id">
-                        <button type="button" class="cmp-open cmp-use" @onclick="() => UseTemplate(tp)" aria-label="Créer une composition à partir de « @tp.Name »"><CompositionThumb Item="TemplateItem(tp)" Files="files" Contain Label="@("Aperçu de " + tp.Name)" /></button>
-                        <div class="cmp-info">
-                            <div class="cmp-t">
-                                <b title="@tp.Name">@tp.Name</b>
-                                <div class="kebab">
-                                    <button type="button" class="kebab-btn" aria-label="Actions pour le modèle @tp.Name" aria-haspopup="menu" aria-expanded="@(menuFor == tp.Id ? "true" : "false")" @onclick="() => menuFor = menuFor == tp.Id ? null : tp.Id"><Ico Name="dots-v" Size="18" /></button>
-                                    @if (menuFor == tp.Id)
-                                    {
-                                        <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
-                                        <div class="kebab-menu" role="menu">
-                                            <button type="button" role="menuitem" @onclick="() => UseTemplate(tp)"><Ico Name="plus" Size="16" /> Créer une composition</button>
-                                            @if (multi && tr == FolderRight.Owner) { <button type="button" role="menuitem" @onclick="() => Share(ShareKind.Template, tp.Id, tp.Name)"><Ico Name="share" Size="16" /> Partager…</button> }
-                                            @if (tr >= FolderRight.Write) { <button type="button" role="menuitem" @onclick="() => StartRename(tp.Id, tp.Name, true)"><Ico Name="edit" Size="16" /> Renommer…</button> }
-                                            @if (sub == "shared") { <button type="button" role="menuitem" class="danger" @onclick="() => Leave(ShareKind.Template, tp.Id, tp.Name)"><Ico Name="eye-off" Size="16" /> Ne plus voir</button> }
-                                            @if (tr == FolderRight.Owner) { <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deletingTpl = tp; }"><Ico Name="trash" Size="16" /> Supprimer…</button> }
-                                        </div>
-                                    }
-                                </div>
-                            </div>
-                            <span class="cmp-m">@(tsize is { } ts ? $"{ts.W} × {ts.H}" : "Format inconnu") · ajouté le @tp.CreatedUtc.ToLocalTime().ToString("d MMMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("fr-CH"))</span>
-                            @if (OwnerName(tp.OwnerId) is { } tow) { <span class="lx-chip cmp-own" title="Modèle de @tow"><Ico Name="users" Size="12" /> @First(tow)</span> }
-                            else if (tsum.Any) { <SharePill Summary="tsum" Clickable="multi && tr == FolderRight.Owner" OnClick="() => Share(ShareKind.Template, tp.Id, tp.Name)" /> }
-                        </div>
-                    </article>
-                }
-            </div>
-        }
+        <nav class="tabs int-tabs lx-utabs" role="tablist" aria-label="Compositions affichées">
+            @foreach (var t in Tabs)
+            {
+                var key = t.Key;
+                <button type="button" role="tab" class="@(tab == key ? "on" : "")" aria-selected="@(tab == key ? "true" : "false")" @onclick="() => SetTab(key)">@t.Label @if (t.Count > 0) { <span class="cat-count">@t.Count</span> }<TabNew Family="compositions" Tab="@key" /></button>
+            }
+        </nav>
     }
-    else if (scopeItems.Count == 0 && subfolders.Count == 0 && folderId == null && tab == LibraryTab.Shared)
+
+    <NewMark Family="compositions" Tab="@tab" Ids="@items.Select(c => c.Id).Concat(folderRows.Select(r => r.Folder.Id))" />
+
+    @if (scopeItems.Count == 0 && subfolders.Count == 0 && folderId == null && tab == LibraryTab.Shared)
     {
         <div class="empty">
             <div class="big">Rien n'a encore été partagé avec vous</div>
@@ -173,7 +119,7 @@ else
             <p>Créez une page vide ou partez d'un modèle (horaires d'ouverture, accueil, orientation, annonce…). Vos compositions apparaîtront ici et pourront être ajoutées à vos listes de lecture.</p>
             <div class="row" style="justify-content:center;gap:10px">
                 <button type="button" class="btn" @onclick="Create"><Ico Name="plus" Size="16" /> Créer une composition</button>
-                <button type="button" class="btn ghost" @onclick='() => SetTab("models")'>Voir les modèles</button>
+                <button type="button" class="btn btn-share" @onclick='() => OpenModels("gallery")'>Voir les modèles</button>
             </div>
         </div>
     }
@@ -364,7 +310,7 @@ else
     }
 }
 
-@if (picked.Count > 0 && tab != "models")
+@if (picked.Count > 0)
 {
     <div class="lx-selbar" role="region" aria-label="Sélection">
         <b>@picked.Count sélectionnée@(picked.Count > 1 ? "s" : "")</b>
@@ -376,6 +322,76 @@ else
         <button type="button" class="del" disabled="@(pickedOwner.Count == 0)" @onclick="() => deletingMany = pickedOwner.Select(x => x.Id).ToList()"><Ico Name="trash" Size="15" /> Supprimer</button>
         <span class="vr"></span>
         <button type="button" title="Tout désélectionner" aria-label="Tout désélectionner" @onclick="() => picked.Clear()"><Ico Name="x" Size="15" /></button>
+    </div>
+}
+
+@if (showModels)
+{
+    @* Fenêtre des modèles (7 novembre 2026) : remplace l'onglet « Modèles ». Galerie (filtres par catégorie), Mes modèles, Partagés avec moi. *@
+    <div class="modal-backdrop" @onclick="CloseModels"></div>
+    <div class="modal app-modal cmp-models" role="dialog" aria-modal="true" aria-labelledby="cmp-models-title">
+        <div class="modal-head">
+            <h3 id="cmp-models-title" style="flex:1">Modèles</h3>
+            <button type="button" class="modal-x" aria-label="Fermer" @onclick="CloseModels"><Ico Name="x" Size="18" /></button>
+        </div>
+        <div class="modal-body">
+            @if (sub != "gallery") { <NewMark Kind="template" Ids="@templates.Select(t => t.Id)" /> }
+            <div class="cmp-sub" role="tablist" aria-label="Galerie et Mes modèles">
+                <button type="button" role="tab" class="@(sub == "gallery" ? "on" : "")" aria-selected="@(sub == "gallery" ? "true" : "false")" @onclick='() => SetSub("gallery")'>Galerie</button>
+                <button type="button" role="tab" class="@(sub == "mine" ? "on" : "")" aria-selected="@(sub == "mine" ? "true" : "false")" @onclick='() => SetSub("mine")'>Mes modèles <span class="cat-count">@MyTemplates.Count</span></button>
+                @if (SharedTemplates.Count > 0) { <button type="button" role="tab" class="@(sub == "shared" ? "on" : "")" aria-selected="@(sub == "shared" ? "true" : "false")" @onclick='() => SetSub("shared")'>Partagés avec moi <span class="cat-count">@SharedTemplates.Count</span></button> }
+            </div>
+            @if (sub == "gallery")
+            {
+                <p class="hint cmp-hint">Choisissez un modèle pour démarrer : tout reste modifiable, et rien n'est enregistré tant que vous ne l'avez pas fait.</p>
+                <div @key="galKey" @ref="gal"></div>
+            }
+            else if (ShownTemplates.Count == 0)
+            {
+                <div class="empty">
+                    <div class="big">Aucun modèle pour l'instant</div>
+                    <p>Enregistrez une composition comme modèle (menu ⋮ d'une composition, ou « Enregistrer ▾ › Enregistrer comme modèle… » dans l'éditeur) pour la réutiliser comme point de départ.</p>
+                </div>
+            }
+            else
+            {
+                <p class="hint cmp-hint">@(sub == "shared" ? "Les modèles que des collègues vous partagent." : "Vos modèles.") Partir d'un modèle crée une nouvelle composition ; le modèle ne change pas.</p>
+                <div class="cmp-grid">
+                    @foreach (var t in ShownTemplates)
+                    {
+                        var tp = t;
+                        var tr = tplRights.GetValueOrDefault(tp.Id);
+                        var tsum = tplShares.GetValueOrDefault(tp.Id, ShareSummary.None);
+                        var tsize = Compositions.Size(new Dictionary<string, string> { ["doc"] = tp.Doc });
+                        <article class="cmp-card" data-nid="@tp.Id">
+                            <button type="button" class="cmp-open cmp-use" @onclick="() => UseTemplate(tp)" aria-label="Créer une composition à partir de « @tp.Name »"><CompositionThumb Item="TemplateItem(tp)" Files="files" Contain Label="@("Aperçu de " + tp.Name)" /></button>
+                            <div class="cmp-info">
+                                <div class="cmp-t">
+                                    <b title="@tp.Name">@tp.Name</b>
+                                    <div class="kebab">
+                                        <button type="button" class="kebab-btn" aria-label="Actions pour le modèle @tp.Name" aria-haspopup="menu" aria-expanded="@(menuFor == tp.Id ? "true" : "false")" @onclick="() => menuFor = menuFor == tp.Id ? null : tp.Id"><Ico Name="dots-v" Size="18" /></button>
+                                        @if (menuFor == tp.Id)
+                                        {
+                                            <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
+                                            <div class="kebab-menu" role="menu">
+                                                <button type="button" role="menuitem" @onclick="() => UseTemplate(tp)"><Ico Name="plus" Size="16" /> Créer une composition</button>
+                                                @if (multi && tr == FolderRight.Owner) { <button type="button" role="menuitem" @onclick="() => Share(ShareKind.Template, tp.Id, tp.Name)"><Ico Name="share" Size="16" /> Partager…</button> }
+                                                @if (tr >= FolderRight.Write) { <button type="button" role="menuitem" @onclick="() => StartRename(tp.Id, tp.Name, true)"><Ico Name="edit" Size="16" /> Renommer…</button> }
+                                                @if (sub == "shared") { <button type="button" role="menuitem" class="danger" @onclick="() => Leave(ShareKind.Template, tp.Id, tp.Name)"><Ico Name="eye-off" Size="16" /> Ne plus voir</button> }
+                                                @if (tr == FolderRight.Owner) { <button type="button" role="menuitem" class="danger" @onclick="() => { menuFor = null; deletingTpl = tp; }"><Ico Name="trash" Size="16" /> Supprimer…</button> }
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                                <span class="cmp-m">@(tsize is { } ts ? $"{ts.W} × {ts.H}" : "Format inconnu") · ajouté le @tp.CreatedUtc.ToLocalTime().ToString("d MMMM yyyy", System.Globalization.CultureInfo.GetCultureInfo("fr-CH"))</span>
+                                @if (OwnerName(tp.OwnerId) is { } tow) { <span class="lx-chip cmp-own" title="Modèle de @tow"><Ico Name="users" Size="12" /> @First(tow)</span> }
+                                else if (tsum.Any) { <SharePill Summary="tsum" Clickable="multi && tr == FolderRight.Owner" OnClick="() => Share(ShareKind.Template, tp.Id, tp.Name)" /> }
+                            </div>
+                        </article>
+                    }
+                </div>
+            }
+        </div>
     </div>
 }
 
@@ -536,7 +552,7 @@ else
     private CompositionFolderRow? currentRow => folderId is { } id ? folderRows.FirstOrDefault(r => r.Folder.Id == id) : null;
     // Une composition se crée à la racine comme avant ; dans un dossier, il faut y écrire. Rien ne se crée à la racine de « Partagées avec moi » (dossiers).
     private bool CanCreateHere => canWrite && (folderId is null || currentRow is { } c && c.Right >= FolderRight.Write);
-    private bool CanCreateFolderHere => Modes.Expert && tab != "models" && (folderId is null ? canCreateRoot && tab != LibraryTab.Shared : currentRow is { } c && c.Right >= FolderRight.Write);
+    private bool CanCreateFolderHere => Modes.Expert && (folderId is null ? canCreateRoot && tab != LibraryTab.Shared : currentRow is { } c && c.Right >= FolderRight.Write);
 
     private ShareSummary FolderSum(Guid id) => folderShares.GetValueOrDefault(id, ShareSummary.None);
     private void ShareFolder(CompositionFolderRow r) => Share(ShareKind.CompositionFolder, r.Folder.Id, r.Folder.Name);
@@ -583,7 +599,6 @@ else
     // Ce qui dépend de l'onglet et du dossier ouvert : dossiers de l'onglet, compositions de sa portée, dossiers affichés et fil d'Ariane
     private void Rebuild()
     {
-        if (tab == "models") { tabFolders = new(); scopeItems = new(); subfolders = new(); crumbs = new(); return; }
         (HashSet<Guid> Folders, List<MediaItem> Items) Scope(string t)
         {
             var fs = LibraryTab.Folders(t, folderRows.Select(r => (r.Folder.Id, r.Folder.ParentId, r.Tab)), me, isAdmin);
@@ -840,11 +855,8 @@ else
             templates.ToDictionary(t => t.Id, t => CompositionRights.RightOf(d, t)),
             templates.ToDictionary(t => t.Id, t => CompositionRights.TabOf(d, ShareKind.Template, t.Id, t.OwnerId)),
             ItemShareOps.Summaries(d, ShareKind.Template)));
-        if (tab != "models")
-        {
-            if (!multi || readAll) tab = LibraryTab.All;
-            else if (tab == LibraryTab.All && !isAdmin) tab = LibraryTab.Mine;
-        }
+        if (!multi || readAll) tab = LibraryTab.All;
+        else if (tab == "models" || tab == LibraryTab.All && !isAdmin) tab = LibraryTab.Mine;   // « models » : ancien onglet
         if (sub == "shared" && SharedTemplates.Count == 0) sub = "mine";
         canCreateRoot = Store.Read(CompositionFolderOps.CanCreateAtRoot);
         (folderRows, folderShares) = Store.Read(d => (CompositionFolderOps.Rows(d), ItemShareOps.Summaries(d, ShareKind.CompositionFolder)));
@@ -861,13 +873,17 @@ else
 
     private void SetTab(string t)
     {
-        tab = t; menuFor = null; galDrawn = false; galKey++; folderId = null; picked.Clear();
+        tab = t; menuFor = null; folderId = null; picked.Clear();
         Rebuild();
-        if (t == "models") return;
         try { Store.Write(d => { if (d.Users.FirstOrDefault(u => u.Id == d.Access.UserId) is { } u) u.LibraryTabs["compositions"] = t; }); }
         catch (UnauthorizedAccessException) { }   // lecture seule : l'onglet n'est pas retenu
     }
     private void SetSub(string s) { sub = s; menuFor = null; galDrawn = false; galKey++; }
+
+    // Fenêtre des modèles : la galerie se redessine à chaque ouverture (OnAfterRenderAsync)
+    private bool showModels;
+    private void OpenModels(string s) { newMenu = false; showModels = true; SetSub(s); }
+    private void CloseModels() { showModels = false; menuFor = null; galDrawn = false; }
 
     private void Create() => Nav.NavigateTo("/compositions/new?back=%2Fcompositions" + (folderId is { } f ? "&folder=" + f : ""));
 
@@ -877,7 +893,7 @@ else
         {
             try { inApp = await JS.InvokeAsync<bool>("linkiiPrefs.isApp"); if (inApp) StateHasChanged(); } catch (JSException) { } catch (InvalidOperationException) { } catch (JSDisconnectedException) { }
         }
-        if (tab != "models" || sub != "gallery" || galDrawn || !installed) return;
+        if (!showModels || sub != "gallery" || galDrawn || !installed) return;
         galDrawn = true;
         self ??= DotNetObjectReference.Create(this);
         try { await JS.InvokeVoidAsync("LinkiiCompoEditor.gallery", gal, self, DataSetsForGallery(), HaForGallery()); }
