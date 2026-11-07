@@ -20,7 +20,12 @@
 {
     <div class="hac-bar">
         <input type="search" placeholder="Rechercher une entité" aria-label="Rechercher une entité" @bind="search" @bind:event="oninput" />
-        <span class="hac-count">@Shown().Count sur @CountOf(Current)</span>
+        @if (Chosen != null)
+        {
+            <span class="hac-count"><b>@Chosen.Count</b> sélectionnée@(Chosen.Count > 1 ? "s" : "") sur @Account.Entities.Count</span>
+            <button type="button" class="btn ghost sm" @onclick="ToggleShown">@(Shown().All(e => Chosen.Contains(e.Id)) ? "Tout désélectionner" : "Tout sélectionner")</button>
+        }
+        else { <span class="hac-count">@Shown().Count sur @CountOf(Current)</span> }
     </div>
 }
 @if (CountOf(Current) == 0)
@@ -36,7 +41,8 @@ else
     <div class="hac-list">
         @foreach (var e in Shown().Take(Limit ?? int.MaxValue))
         {
-            <div class="hac-row">
+            <div class="hac-row @(Chosen != null ? "hac-pick" : "")" @onclick="() => Toggle(e.Id)">
+                @if (Chosen != null) { var on = Chosen.Contains(e.Id); <span class="cw-ck @(on ? "on" : "")">@(on ? "✓" : "")</span> }
                 <span class="hac-txt">
                     <span class="hac-name">@e.Name</span>
                     <span class="hac-id">@e.Id</span>
@@ -58,6 +64,21 @@ else
     [Parameter, EditorRequired] public HomeAssistantAccount Account { get; set; } = default!;
     [Parameter] public int? Limit { get; set; }
     [Parameter] public bool Searchable { get; set; } = true;
+    /// <summary>Assistant d'ajout : identifiants des entités cochées. Non nul, chaque ligne a une case et toutes les entités sont listées (désactivées comprises).</summary>
+    [Parameter] public HashSet<string>? Chosen { get; set; }
+
+    private void Toggle(string id)
+    {
+        if (Chosen == null) return;
+        if (!Chosen.Remove(id)) Chosen.Add(id);
+    }
+
+    private void ToggleShown()
+    {
+        if (Chosen == null) return;
+        var ids = Shown().Select(e => e.Id).ToList();
+        if (ids.All(Chosen.Contains)) foreach (var id in ids) Chosen.Remove(id); else Chosen.UnionWith(ids);
+    }
 
     private string? tab;
     private string search = "";
@@ -80,7 +101,7 @@ else
     {
         var q = search.Trim();
         var f = Current;
-        return Account.Active().Where(e => f.Domains.Contains(e.Domain)
+        return (Chosen != null ? Account.Entities : Account.Active()).Where(e => f.Domains.Contains(e.Domain)
             && (q.Length == 0 || e.Name.Contains(q, StringComparison.OrdinalIgnoreCase) || e.Id.Contains(q, StringComparison.OrdinalIgnoreCase))).ToList();
     }
 

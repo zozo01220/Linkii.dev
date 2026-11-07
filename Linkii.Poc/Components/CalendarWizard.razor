@@ -13,8 +13,8 @@
    2. choix des calendriers, avec l'aperçu de leurs événements des 7 prochains jours ; 3. validation : calendriers, événements, puis ajout.
    Rien n'est gardé avant « Ajouter » : la source n'est activée et les calendriers ne sont enregistrés qu'à ce moment ; Annuler déconnecte le compte
    connecté pendant l'assistant. Rouvert depuis le menu de la carte, il sert à gérer les calendriers (étape 2) ou à changer de compte (étape 1). *@
-<WizardShell Icon="@("cal-" + Source)" Title="@(Adding ? "Ajouter " + Def.Name : Def.Name)" Subtitle="@StepLine" Labels="@Labels" Step="step" Done="done" Running="done"
-             CanBack="@(step > 1 && !done)" Hint="@Hint" NextLabel="@NextLabel" NextDisabled="NextDisabled"
+<WizardShell Icon="@("cal-" + Source)" Title="@(Adding ? "Ajouter " + Def.Name : Def.Name)" Labels="@Labels" Step="step" Done="done" Running="done"
+             CanBack="@(step == 2)" Hint="@Hint" NextLabel="@NextLabel" NextDisabled="NextDisabled"
              OnCancel="Cancel" OnClose="Close" OnBack="Back" OnNext="Next">
     @if (step == 1)
     {
@@ -52,100 +52,57 @@
     else if (step == 2)
     {
         <div class="cw-body">
-            <div class="cw-pick">
-                <div class="cw-tree">
-                    @if (loading) { <div class="dfp-empty">Chargement…</div> }
-                    @if (Source is "caldav" or "ews")
+            <h2 class="cw-h">Quels calendriers voulez-vous ajouter ?</h2>
+            <p class="cw-lead">Cochez ceux à proposer sur vos écrans.</p>
+            @if (AllListed().Any())
+            {
+                <div class="cw-tools">
+                    <span class="cw-count"><b>@chosen.Count</b> sur @AllListed().Count() sélectionné@(chosen.Count > 1 ? "s" : "")</span>
+                    <button type="button" class="btn ghost sm" @onclick="ToggleAll">@(AllListed().All(c => chosen.ContainsKey(c.Ref)) ? "Tout désélectionner" : "Tout sélectionner")</button>
+                </div>
+            }
+            @if (loading) { <div class="dfp-empty">Chargement…</div> }
+            @if (previewError != null) { <div class="dfp-empty err">@previewError</div> }
+            @if (Source is "caldav" or "ews")
+            {
+                    <div class="cw-add">
+                        <input aria-label="Nom affiché" placeholder="Nom affiché (facultatif)" maxlength="80" @bind="newName" />
+                        <input aria-label="@Def.RefLabel" class="mono" placeholder="@Def.RefPlaceholder" @bind="newRef" spellcheck="false" autocomplete="off" />
+                        <button type="button" class="btn ghost sm" @onclick="AddManual"><Ico Name="plus" Size="14" /> Ajouter</button>
+                        @if (addError != null) { <small class="cal-err">@addError</small> }
+                    </div>
+            }
+            <div class="cw-lists">
+                @foreach (var group in Groups)
+                {
+                    @if (group.Items.Count > 0)
                     {
-                        <div class="cw-add">
-                            <input aria-label="Nom affiché" placeholder="Nom affiché (facultatif)" maxlength="80" @bind="newName" />
-                            <input aria-label="@Def.RefLabel" class="mono" placeholder="@Def.RefPlaceholder" @bind="newRef" spellcheck="false" autocomplete="off" />
-                            <button type="button" class="btn ghost sm" @onclick="AddManual"><Ico Name="plus" Size="14" /> Ajouter</button>
-                            @if (addError != null) { <small class="cal-err">@addError</small> }
-                        </div>
-                    }
-                    @foreach (var group in Groups)
-                    {
-                        @if (group.Items.Count > 0)
-                        {
-                            <div class="cw-sect">@group.Title · @group.Items.Count</div>
+                        <div class="cw-sect">@group.Title · @group.Items.Count</div>
+                        <div class="cw-rows">
                             @foreach (var c in group.Items)
                             {
                                 var cal = c;
-                                <div class="cw-node @(focus == cal.Ref ? "sel" : "") @(chosen.ContainsKey(cal.Ref) ? "on" : "")">
-                                    <input type="checkbox" class="cw-chk" checked="@chosen.ContainsKey(cal.Ref)" aria-label="Partager « @cal.Name »" @onchange="() => Check(cal)" />
-                                    <button type="button" class="cw-nm" @onclick="() => Focus(cal)"><Ico Name="calendar" Size="16" /> @cal.Name</button>
-                                    @if (cal.Hint.Length > 0) { <span class="cw-n" title="@cal.Hint">@cal.Hint</span> }
-                                    @if (Origin(cal) is { Length: > 0 } origin) { <span class="badge neutre" title="Reconnu comme salle par @Provider">@origin</span> }
-                                    @if (chosen.ContainsKey(cal.Ref))
-                                    {
-                                        var room = Draft(cal).Room;
-                                        <span class="cal-roomsw" title="Utiliser ce calendrier comme salle pour les compositions de réservation de salle">
-                                            <span>Salle</span>
-                                            <button type="button" class="switch @(room ? "on" : "")" role="switch" aria-checked="@(room ? "true" : "false")" aria-label="Utiliser @cal.Name comme salle" @onclick="() => ToggleRoom(cal)"><span></span></button>
-                                        </span>
-                                    }
-                                </div>
+                                var on = chosen.ContainsKey(cal.Ref);
+                                <button type="button" class="cw-row @(on ? "on" : "")" @onclick="() => Check(cal)">
+                                    <span class="cw-av"><Ico Name="calendar" Size="16" /></span>
+                                    <b>@cal.Name</b>
+                                    @if (cal.Hint.Length > 0) { <small class="cw-n" title="@cal.Hint">@cal.Hint</small> }
+                                    <span class="cw-ck">@(on ? "✓" : "")</span>
+                                </button>
                             }
-                        }
+                        </div>
                     }
-                    @if (!loading && Groups.All(g => g.Items.Count == 0)) { <div class="dfp-empty">@(Source is "caldav" or "ews" ? "Ajoutez l'adresse d'un calendrier." : "Aucun agenda trouvé pour ce compte.")</div> }
-                </div>
-                <div class="cw-prev">
-                    @if (focus == null) { <div class="dfp-empty">Sélectionnez un calendrier pour voir ses prochains événements.</div> }
-                    else
-                    {
-                        @if (FocusCal is { } fc && chosen.ContainsKey(fc.Ref) && Draft(fc) is { Room: true } d)
-                        {
-                            <div class="cal-room cw-room">
-                                <label>Nom de la salle<input maxlength="60" placeholder="@fc.Name" @bind="d.RoomName" /></label>
-                                <label>Capacité<input type="number" min="0" max="5000" placeholder="personnes" @bind="d.RoomCap" /></label>
-                                <label>Lieu (facultatif)<input maxlength="80" @bind="d.RoomPlace" /></label>
-                                <label>Bientôt occupé
-                                    <select @bind="d.RoomSoon">
-                                        <option value="10">10 minutes avant</option>
-                                        <option value="5">5 minutes avant</option>
-                                        <option value="0">Jamais</option>
-                                    </select>
-                                </label>
-                                <div class="cal-room-sw"><span>Les événements sur la journée entière rendent la salle occupée</span>
-                                    <button type="button" class="switch @(d.RoomAllDay ? "on" : "")" role="switch" aria-checked="@(d.RoomAllDay ? "true" : "false")" aria-label="Journée entière : salle occupée" @onclick="() => d.RoomAllDay = !d.RoomAllDay"><span></span></button></div>
-                                <div class="cal-room-sw"><span>Afficher le titre des réunions sur l'écran <small>Sinon seulement « Occupé » : les titres ne quittent jamais le serveur.</small></span>
-                                    <button type="button" class="switch @(d.RoomTitles ? "on" : "")" role="switch" aria-checked="@(d.RoomTitles ? "true" : "false")" aria-label="Afficher le titre des réunions" @onclick="() => d.RoomTitles = !d.RoomTitles"><span></span></button></div>
-                            </div>
-                        }
-                        <div class="cw-crumb">Aperçu · <b>@FocusName</b> — 7 prochains jours</div>
-                        @if (previewing) { <div class="dfp-empty">Lecture du calendrier…</div> }
-                        else if (previewError != null) { <div class="dfp-empty err">@previewError</div> }
-                        else if (events.Count == 0) { <div class="dfp-empty">Aucun événement dans les 7 prochains jours.</div> }
-                        else { @EventRows(events) }
-                    }
-                </div>
+                }
+                @if (!loading && Groups.All(g => g.Items.Count == 0)) { <div class="dfp-empty">@(Source is "caldav" or "ews" ? "Ajoutez l'adresse d'un calendrier." : "Aucun agenda trouvé pour ce compte.")</div> }
             </div>
         </div>
     }
     else
     {
-        <div class="cw-body">
-            @if (planning) { <div class="dfp-empty">Lecture des calendriers…</div> }
-            else
-            {
-                <div class="cw-kpis">
-                    <div><b>@chosen.Count</b><small>calendrier@(chosen.Count > 1 ? "s" : "") choisi@(chosen.Count > 1 ? "s" : "")</small></div>
-                    <div><b>@planEvents.Count</b><small>événement@(planEvents.Count > 1 ? "s" : "") sur 7 jours</small></div>
-                    <div><b>@Removed.Count</b><small>calendrier@(Removed.Count > 1 ? "s" : "") retiré@(Removed.Count > 1 ? "s" : "")</small></div>
-                    <div><b>immédiat</b><small>aucun fichier à copier</small></div>
-                </div>
-                <p class="cw-dest">Les calendriers sont proposés dans l'app « Calendrier partagé » des listes de lecture ; les écrans lisent leurs événements en direct.</p>
-                @if (chosen.Values.Where(c => Draft(c).Room).ToList() is { Count: > 0 } roomCals)
-                {
-                    <p class="cw-dest"><b>Utilisés comme salle</b> (@roomCals.Count) : @string.Join(", ", roomCals.Select(c => SharedCalendarSources.RoomName(Draft(c)))). Ils sont proposés comme « Calendrier de la salle » dans les réglages des écrans.</p>
-                }
-                @if (Removed.Count > 0) { <p class="cw-dest"><b>Seront retirés</b> : @string.Join(", ", Removed.Select(r => r.Name)).</p> }
-                @foreach (var e in planErrors) { <small class="cal-err">@e</small> }
-                @if (done) { <div class="cw-run"><span>Terminé : @chosen.Count calendrier@(chosen.Count > 1 ? "s" : "") proposé@(chosen.Count > 1 ? "s" : "") dans les listes de lecture.</span><span>100 %</span></div><div class="cw-bar"><i class="ok" style="width:100%"></i></div> }
-                @if (planEvents.Count > 0) { <div class="cw-sect">Prochains événements</div>@EventRows(planEvents.Take(12).ToList()) }
-            }
+        <div class="cw-body cw-final">
+            <div class="cw-bigok">✓</div>
+            <h2 class="cw-h">@Def.Name est prêt</h2>
+            <p class="cw-lead">@chosen.Count calendrier@(chosen.Count > 1 ? "s" : "") proposé@(chosen.Count > 1 ? "s" : "") dans vos listes de lecture.</p>
         </div>
     }
 </WizardShell>
@@ -160,18 +117,17 @@
     [Parameter] public EventCallback OnChanged { get; set; }
 
     private record Group(string Title, List<SharedCalendar> Items);
-    private record Ev(string Calendar, EventDto E);
 
-    private static readonly string[] Labels = { "Connexion", "Calendriers", "Validation" };
+    private static readonly string[] Labels = { "Compte", "Sélection", "Terminé" };
     private CalendarSourceDef Def => SharedCalendarSources.Find(Source)!;
     private string Kind => Source switch { "google" => ConnectedAccounts.Google, "m365" => ConnectedAccounts.Microsoft, _ => Source };
     private string Provider => Source switch { "google" => "Google", "m365" => "Microsoft", _ => Def.Name };
     private string ConnectUrl => Source == "google" ? "/google/connect?for=calendar&wiz=cal-google" : "/microsoft/connect?for=calendar&wiz=cal-m365";
 
     private int step = 1;
-    private bool ready, connected, loading, planning, done, previewing;
+    private bool ready, connected, loading, done;
     private string user = "", Missing = "", url = "", secret = "", newName = "", newRef = "";
-    private string? formError, addError, previewError, focus;
+    private string? formError, addError, previewError;
     private bool hasSecret;
     private DateTime? since;
     private List<SharedCalendar> existing = new();
@@ -180,25 +136,14 @@
     private List<GoogleConnector.GoogleCalendarInfo> googleCalendars = new();
     private List<GraphService.CalendarInfo> msCalendars = new();
     private List<GraphService.RoomInfo> rooms = new();
-    private List<Ev> events = new();
-    private List<Ev> planEvents = new();
-    private List<string> planErrors = new();
     private List<SharedCalendar> Removed => existing.Where(e => !chosen.ContainsKey(e.Ref)).ToList();
-    private string FocusName => AllListed().FirstOrDefault(c => c.Ref == focus)?.Name ?? "";
 
-    private string StepLine => step switch
-    {
-        1 => "Étape 1 sur 3 — connectez votre compte",
-        2 => "Étape 2 sur 3 — choisissez les calendriers à partager",
-        _ => done ? "Étape 3 sur 3 — terminé" : "Étape 3 sur 3 — vérifiez, puis ajoutez les calendriers"
-    };
-
-    private bool NextDisabled => step switch { 1 => !connected, 2 => chosen.Count == 0 && existing.Count == 0, _ => planning || (!done && chosen.Count == 0 && Removed.Count == 0) };
-    private string NextLabel => step < 3 ? "Suivant" : done ? "Terminer" : "Ajouter";
+    private bool NextDisabled => step switch { 1 => !connected, 2 => chosen.Count == 0 && existing.Count == 0, _ => false };
+    private string NextLabel => step == 1 ? "Suivant" : chosen.Count > 0 ? $"Ajouter {chosen.Count} calendrier{(chosen.Count > 1 ? "s" : "")}" : "Enregistrer";
     private string Hint => step switch
     {
         1 => connected ? "" : Source is "caldav" or "ews" ? "Enregistrez la connexion pour continuer." : "Connectez un compte pour continuer.",
-        2 => chosen.Count == 0 ? "Cochez au moins un calendrier." : $"{chosen.Count} calendrier{(chosen.Count > 1 ? "s" : "")} coché{(chosen.Count > 1 ? "s" : "")}",
+        2 => chosen.Count == 0 ? "Cochez au moins un calendrier." : Removed.Count > 0 ? $"{Removed.Count} calendrier{(Removed.Count > 1 ? "s" : "")} sera retiré." : Adding ? "Rien n'est enregistré tant que vous n'avez pas ajouté." : "",
         _ => ""
     };
 
@@ -256,8 +201,7 @@
     private async Task Next()
     {
         if (step == 1) { step = 2; await EnterStep2(); }
-        else if (step == 2) { step = 3; await Prepare(); }
-        else if (!done) await Run();
+        else if (step == 2) { step = 3; await Run(); }
         else await Close();
     }
 
@@ -328,46 +272,14 @@
         if (!chosen.Remove(c.Ref)) chosen[c.Ref] = c;
     }
 
-    // ---------- Salle : réglages gardés ici jusqu'à « Ajouter » ----------
-
-    private readonly Dictionary<string, SharedCalendar> drafts = new(StringComparer.OrdinalIgnoreCase);
-    private SharedCalendar? FocusCal => focus == null ? null : AllListed().FirstOrDefault(c => c.Ref == focus);
+    private void ToggleAll()
+    {
+        var all = AllListed().ToList();
+        if (all.All(c => chosen.ContainsKey(c.Ref))) { foreach (var c in all) chosen.Remove(c.Ref); }
+        else foreach (var c in all) chosen.TryAdd(c.Ref, c);
+    }
 
     private static bool IsGoogleResource(string id) => id.EndsWith("@resource.calendar.google.com", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>Salle d'office : ressource Google Workspace ou salle de l'annuaire Microsoft (si le calendrier n'est pas déjà enregistré).</summary>
-    private string Origin(SharedCalendar c) => Source switch
-    {
-        "google" when IsGoogleResource(c.Ref) => "Ressource",
-        "m365" when rooms.Any(r => string.Equals(r.Email, c.Ref, StringComparison.OrdinalIgnoreCase)) => "Annuaire",
-        _ => ""
-    };
-
-    private SharedCalendar Draft(SharedCalendar c)
-    {
-        if (drafts.TryGetValue(c.Ref, out var d)) return d;
-        d = new SharedCalendar { Name = c.Name, Ref = c.Ref, Room = c.Room, RoomName = c.RoomName, RoomCap = c.RoomCap, RoomPlace = c.RoomPlace, RoomAllDay = c.RoomAllDay, RoomSoon = c.RoomSoon, RoomTitles = c.RoomTitles };
-        if (!existing.Any(e => e.Ref == c.Ref) && Origin(c).Length > 0)
-        {
-            d.Room = true;
-            if (Source == "m365" && rooms.FirstOrDefault(r => string.Equals(r.Email, c.Ref, StringComparison.OrdinalIgnoreCase)) is { } r)
-                (d.RoomCap, d.RoomPlace) = (r.Capacity ?? 0, r.Building ?? "");
-        }
-        return drafts[c.Ref] = d;
-    }
-
-    private void ToggleRoom(SharedCalendar c)
-    {
-        var d = Draft(c);
-        d.Room = !d.Room;
-    }
-
-    private void ApplyRoom(SharedCalendar target)
-    {
-        if (!drafts.TryGetValue(target.Ref, out var d)) return;
-        (target.Room, target.RoomName, target.RoomCap, target.RoomPlace, target.RoomAllDay, target.RoomSoon, target.RoomTitles) =
-            (d.Room, d.RoomName.Trim(), Math.Clamp(d.RoomCap, 0, 5000), d.RoomPlace.Trim(), d.RoomAllDay, d.RoomSoon is 0 or 5 ? d.RoomSoon : 10, d.RoomTitles);
-    }
 
     private void AddManual()
     {
@@ -386,65 +298,16 @@
         manual.Add(cal);
         chosen[cal.Ref] = cal;
         newName = newRef = "";
-        _ = Focus(cal);
     }
 
-    private async Task Focus(SharedCalendar c)
-    {
-        focus = c.Ref;
-        events = new(); previewError = null; previewing = true;
-        StateHasChanged();
-        try { events = await EventsOf(c); }
-        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or TaskCanceledException) { previewError = ex.Message; }
-        previewing = false;
-    }
-
-    private async Task<List<Ev>> EventsOf(SharedCalendar c)
-    {
-        var t = Store.Read(d => d.Tenant);
-        var from = DateTime.UtcNow.Date;
-        var list = await Calendars.GetEvents(SharedCalendarSources.Resolve(t, c, Box), t, from, from.AddDays(7));
-        return list.OrderBy(e => e.StartUtc).Select(e => new Ev(c.Name, e)).ToList();
-    }
-
-    private RenderFragment EventRows(List<Ev> list) => __builder =>
-    {
-        <ul class="cw-events">
-            @foreach (var x in list)
-            {
-                <li><span class="cw-when">@(x.E.AllDay ? x.E.StartUtc.ToLocalTime().ToString("ddd dd.MM") + " · journée" : x.E.StartUtc.ToLocalTime().ToString("ddd dd.MM · HH:mm"))</span><span class="cw-ttl">@x.E.Title</span><small>@x.Calendar@(x.E.Location is { Length: > 0 } l ? " · " + l : "")</small></li>
-            }
-        </ul>
-    };
-
-    // ---------- Étape 3 : validation ----------
-
-    private async Task Prepare()
-    {
-        planning = true; planEvents = new(); planErrors = new();
-        StateHasChanged();
-        foreach (var c in chosen.Values)
-        {
-            try { planEvents.AddRange(await EventsOf(c)); }
-            catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or TaskCanceledException) { planErrors.Add($"« {c.Name} » : {ex.Message}"); }
-        }
-        planEvents = planEvents.OrderBy(e => e.E.StartUtc).ToList();
-        planning = false;
-    }
+    // ---------- Étape 3 : ajout ----------
 
     private async Task Run()
     {
         foreach (var c in chosen.Values)
         {
-            if (existing.Any(e => e.Ref == c.Ref))
-            {
-                if (!drafts.ContainsKey(c.Ref)) continue;
-                var id = c.Id;
-                Store.Write(d => { if (d.Tenant.SharedCalendars.FirstOrDefault(x => x.Id == id) is { } x) ApplyRoom(x); });
-                continue;
-            }
+            if (existing.Any(e => e.Ref == c.Ref)) continue;
             var cal = new SharedCalendar { Source = Source, Name = c.Name, Ref = c.Ref, Hint = c.Hint };
-            ApplyRoom(cal);
             Store.Write(d => d.Tenant.SharedCalendars.Add(cal));
         }
         var gone = Removed.Select(r => r.Id).ToHashSet();

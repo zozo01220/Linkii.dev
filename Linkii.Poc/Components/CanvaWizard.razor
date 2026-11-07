@@ -8,8 +8,8 @@
    1. Connexion du compte Canva ; 2. choix des dossiers, avec l'aperçu de leurs designs ;
    3. validation, puis import avec aperçu : chaque design est exporté en images à la racine de la médiathèque.
    Rouvert depuis le menu de la carte, il sert aussi à gérer les dossiers (étape 2) ou à changer de compte (étape 1). *@
-<WizardShell Icon="canva" Title="@(folders.Count > 0 ? "Canva" : "Ajouter Canva")" Subtitle="@StepLine" Labels="@Labels" Step="step" Done="done" Running="running"
-             CanBack="@(step > 1 && !running)" Hint="@Hint" NextLabel="@NextLabel" NextDisabled="NextDisabled"
+<WizardShell Icon="canva" Title="@(folders.Count > 0 ? "Canva" : "Ajouter Canva")" Labels="@Labels" Step="step" Done="done" Running="running"
+             CanBack="@(step == 2 || step == 3 && !running && !planning)" Hint="@Hint" NextLabel="@NextLabel" NextDisabled="NextDisabled"
              OnCancel="Cancel" OnClose="Close" OnBack="Back" OnNext="Next">
     @if (step == 1)
     {
@@ -20,65 +20,44 @@
     else if (step == 2)
     {
         <div class="cw-body">
-            <div class="cw-pick">
-                <div class="cw-tree" role="tree">@Node("root", "Tous les designs", "Tous les designs", 0)</div>
-                <div class="cw-prev">
-                    @if (treeError != null) { <div class="dfp-empty err">@treeError</div> }
-                    else if (Current == null) { <div class="dfp-empty">Chargement…</div> }
-                    else
-                    {
-                        <div class="cw-crumb">Aperçu · <b>@Current.Name</b> — @Current.Designs design@(Current.Designs > 1 ? "s" : "") directs, @Current.Folders.Count sous-dossier@(Current.Folders.Count > 1 ? "s" : "")</div>
-                        <div class="cw-sect">À la racine · @Current.Designs design@(Current.Designs > 1 ? "s" : "")</div>
-                        @if (Current.Items.Count == 0) { <div class="dfp-empty">Aucun design directement dans ce dossier.</div> }
-                        else { <div class="cw-grid">@foreach (var d in Current.Items.Take(8)) { @Thumb(d) }</div> }
-                        @foreach (var f in Current.Folders.Take(6))
-                        {
-                            var fo = f;
-                            var l = cache.GetValueOrDefault(fo.Id);
-                            <div class="cw-sect"><button type="button" class="cw-link" @onclick="() => Show(fo.Id, fo.Name, null)">@fo.Name</button> · @(l == null ? "…" : $"{l.Designs} design{(l.Designs > 1 ? "s" : "")}")</div>
-                            @if (l != null && l.Items.Count > 0) { <div class="cw-grid">@foreach (var d in l.Items.Take(5)) { @Thumb(d) }</div> }
-                        }
-                        <div class="cw-skip">ℹ Les images téléversées dans Canva ne sont pas copiées, seulement les designs. @chosen.Count dossier@(chosen.Count > 1 ? "s" : "") coché@(chosen.Count > 1 ? "s" : "").</div>
-                    }
-                </div>
+            <h2 class="cw-h">Quels dossiers voulez-vous ajouter ?</h2>
+            <p class="cw-lead">Cochez les dossiers dont vous voulez copier les designs dans votre Médiathèque.</p>
+            <div class="cw-tools">
+                <span class="cw-count"><b>@chosen.Count</b> dossier@(chosen.Count > 1 ? "s" : "") coché@(chosen.Count > 1 ? "s" : "")</span>
+                <button type="button" class="btn ghost sm" @onclick="ToggleAll">@(chosen.ContainsKey("root") ? "Tout désélectionner" : "Tout sélectionner")</button>
             </div>
-            <label class="dfp-opt cw-opt">
+            <div class="cw-tree2" role="tree">
+                @if (treeError != null) { <div class="dfp-empty err">@treeError</div> }
+                else if (!cache.ContainsKey("root")) { <div class="dfp-empty">Chargement…</div> }
+                else { @Node("root", "Tous les designs", "Tous les designs", 0) }
+            </div>
+            <label class="cw-subopt">
                 <input type="checkbox" class="ios" checked="@sub" @onchange="e => sub = e.Value is true" />
-                <span><b>Inclure les sous-dossiers</b> des dossiers cochés <small>@CanvaService.MaxDesigns designs au plus par dossier</small></span>
+                <span><b>Inclure les sous-dossiers</b><small>@CanvaService.MaxDesigns designs au plus par dossier</small></span>
             </label>
         </div>
     }
     else
     {
-        <div class="cw-body">
-            @if (planning) { <div class="dfp-empty">Lecture des dossiers…</div> }
+        <div class="cw-body cw-final">
+            @if (planning) { <div class="cw-spin"></div><h2 class="cw-h">Lecture des dossiers…</h2> }
             else if (planError != null) { <div class="dfp-empty err">@planError</div> }
-            else
+            else if (done)
             {
-                <div class="cw-kpis">
-                    <div><b>@plan.Count</b><small>dossier@(plan.Count > 1 ? "s" : "") choisi@(plan.Count > 1 ? "s" : "")</small></div>
-                    <div><b>@plan.Sum(p => p.Designs.Count)</b><small>designs à importer</small></div>
-                    <div><b>~ @plan.Sum(p => p.Designs.Sum(d => d.Pages ?? 1))</b><small>images (pages)</small></div>
-                    <div><b>~ @Minutes min</b><small>durée estimée</small></div>
-                </div>
-                <p class="cw-dest">Destination : racine de la médiathèque · l'import continue en arrière-plan si vous fermez ce tiroir.</p>
-                @if (Removed.Count > 0) { <p class="cw-dest"><b>Seront retirés</b> avec leurs fichiers : @string.Join(", ", Removed.Select(r => r.Name)).</p> }
-                @foreach (var p in plan.Where(p => p.Skipped > 0)) { <div class="dsd-warn">« @p.Name » : limite de @CanvaService.MaxDesigns designs atteinte, @p.Skipped ne seront pas copiés.</div> }
-                @if (running)
-                {
-                    <div class="cw-run"><span>@(done ? $"Import terminé : {plan.Sum(p => p.Designs.Count)} designs, {importedCount} image{(importedCount > 1 ? "s" : "")}" : $"Import en cours : design {Math.Min(doneNow + 1, Math.Max(totalNow, 1))} / {Math.Max(totalNow, 1)}")</span><span>@Percent %</span></div>
-                    <div class="cw-bar"><i class="@(done ? "ok" : "")" style="width:@Percent%"></i></div>
-                    @foreach (var f in folders.Where(f => f.LastError.Length > 0)) { <small class="cal-err">@f.Name : @f.LastError</small> }
-                    <div class="cw-grid">
-                        @foreach (var m in imported) { <div class="cw-th"><div class="cw-im"><MediaThumb Media="m" /></div><span>@m.Name</span></div> }
-                        @for (var i = imported.Count; i < Math.Min(18, Math.Max(totalImages, imported.Count)) && !done; i++) { <div class="cw-th wait"><div class="cw-im"></div><span>En attente</span></div> }
-                    </div>
-                }
-                else
-                {
-                    <div class="cw-grid">@foreach (var d in plan.SelectMany(p => p.Designs).Take(18)) { @Thumb(d) }</div>
-                }
+                <div class="cw-bigok">✓</div>
+                <h2 class="cw-h">Canva est prêt</h2>
+                <p class="cw-lead">@plan.Sum(p => p.Designs.Count) design@(plan.Sum(p => p.Designs.Count) > 1 ? "s" : "") ajouté@(plan.Sum(p => p.Designs.Count) > 1 ? "s" : "") à votre Médiathèque (@importedCount image@(importedCount > 1 ? "s" : "")).</p>
             }
+            else if (running)
+            {
+                <div class="cw-spin"></div>
+                <h2 class="cw-h">Ajout en cours…</h2>
+                <p class="cw-lead">Design @Math.Min(doneNow + 1, Math.Max(totalNow, 1)) sur @Math.Max(totalNow, 1) · vous pouvez fermer, l'import continue en arrière-plan.</p>
+                <div class="cw-bar"><i style="width:@Percent%"></i></div>
+            }
+            @foreach (var p in plan.Where(p => p.Skipped > 0)) { <div class="dsd-warn">« @p.Name » : limite de @CanvaService.MaxDesigns designs atteinte, @p.Skipped ne seront pas copiés.</div> }
+            @foreach (var f in folders.Where(f => f.LastError.Length > 0)) { <small class="cal-err">@f.Name : @f.LastError</small> }
+            @if (imported.Count > 0) { <div class="cw-grid">@foreach (var m in imported.Take(12)) { <div class="cw-th"><div class="cw-im"><MediaThumb Media="m" /></div><span>@m.Name</span></div> }</div> }
         </div>
     }
 </WizardShell>
@@ -101,7 +80,6 @@
     private readonly Dictionary<string, CanvaService.CanvaListing> cache = new();
     private readonly HashSet<string> open = new() { "root" };
     private readonly Dictionary<string, (string Name, string Location)> chosen = new();
-    private string currentId = "root";
     private string? treeError;
     private bool sub;
 
@@ -114,27 +92,20 @@
     private List<MediaItem> imported = new();
     private int importedCount, doneNow, totalNow, totalImages;
     private Timer? timer;
-    private static readonly string[] Labels = { "Connexion", "Dossiers", "Import" };
-    private int Minutes => Math.Max(1, (int)Math.Ceiling(plan.Sum(p => p.Designs.Count) * 6 / 60.0));   // ~ 6 s par design (export chez Canva)
+    private static readonly string[] Labels = { "Compte", "Sélection", "Terminé" };
 
-    private CanvaService.CanvaListing? Current => cache.GetValueOrDefault(currentId);
     private List<CanvaFolder> Removed => folders.Where(f => !chosen.ContainsKey(f.CanvaId)).ToList();
     private int Percent => done ? 100 : totalNow == 0 ? 0 : Math.Min(99, doneNow * 100 / totalNow);
 
-    private string StepLine => step switch
-    {
-        1 => "Étape 1 sur 3 — connectez votre compte",
-        2 => "Étape 2 sur 3 — choisissez les dossiers à copier dans la médiathèque",
-        _ => running ? "Étape 3 sur 3 — import" : "Étape 3 sur 3 — vérifiez, puis lancez l'import"
-    };
-
-    private bool NextDisabled => step switch { 1 => !connected, 2 => chosen.Count == 0 && folders.Count == 0, _ => planning || planError != null || (running && !done) || (!running && plan.Count == 0 && Removed.Count == 0) };
-    private string NextLabel => step < 3 ? "Suivant" : done ? "Terminer" : running ? "Import…" : "Importer";
+    private bool NextDisabled => step switch { 1 => !connected, 2 => chosen.Count == 0 && folders.Count == 0, _ => !done };
+    private string NextLabel => step == 1 ? "Suivant"
+        : step == 2 ? (chosen.Count > 0 ? $"Ajouter {chosen.Count} dossier{(chosen.Count > 1 ? "s" : "")}" : "Enregistrer")
+        : planning ? "Lecture…" : "Ajout en cours…";
     private string Hint => step switch
     {
         1 => connected ? "" : "Connectez un compte pour continuer.",
-        2 => chosen.Count == 0 ? "Cochez au moins un dossier." : $"{chosen.Count} dossier{(chosen.Count > 1 ? "s" : "")} coché{(chosen.Count > 1 ? "s" : "")}",
-        _ => running && !done ? "Vous pouvez fermer : l'import continue en arrière-plan." : done ? "Les designs sont dans la médiathèque." : ""
+        2 => chosen.Count == 0 ? "Cochez au moins un dossier." : Removed.Count > 0 ? $"{Removed.Count} dossier{(Removed.Count > 1 ? "s" : "")} sera retiré avec ses fichiers." : Adding ? "Rien n'est enregistré tant que vous n'avez pas ajouté." : "",
+        _ => ""
     };
 
     protected override async Task OnInitializedAsync()
@@ -170,8 +141,12 @@
     private async Task Next()
     {
         if (step == 1) { step = 2; await EnterStep2(); }
-        else if (step == 2) { step = 3; await Prepare(); }
-        else if (!running) await Run();
+        else if (step == 2)
+        {
+            step = 3;
+            await Prepare();
+            if (planError == null) await Run();
+        }
         else if (done) await Close();
     }
 
@@ -183,7 +158,6 @@
     {
         if (cache.ContainsKey("root")) return;
         await Load("root");
-        currentId = "root";
     }
 
     private async Task Load(string id)
@@ -196,14 +170,6 @@
         StateHasChanged();
     }
 
-    private async Task Show(string id, string name, string? location)
-    {
-        currentId = id;
-        open.Add(id);
-        await Load(id);
-        if (cache.GetValueOrDefault(id) is { } l) foreach (var k in l.Folders.Take(6)) await Load(k.Id);   // aperçu des sous-dossiers
-    }
-
     private async Task Toggle(string id, string name, string location)
     {
         if (!open.Remove(id)) { open.Add(id); await Load(id); }
@@ -214,27 +180,31 @@
         if (!chosen.Remove(id)) chosen[id] = (name, location);
     }
 
+    private void ToggleAll()
+    {
+        if (chosen.ContainsKey("root")) { chosen.Clear(); return; }
+        chosen.Clear();
+        chosen["root"] = ("Tous les designs", "Tous les designs");
+        sub = true;
+    }
+
     private RenderFragment Node(string id, string name, string location, int depth) => __builder =>
     {
         var isOpen = open.Contains(id);
         var kids = cache.GetValueOrDefault(id)?.Folders;
-        <div class="cw-node @(currentId == id ? "sel" : "") @(chosen.ContainsKey(id) ? "on" : "")" style="--d:@depth" role="treeitem" aria-expanded="@(isOpen ? "true" : "false")">
-            <button type="button" class="cw-exp" aria-label="@(isOpen ? "Réduire" : "Développer") @name" @onclick="() => Toggle(id, name, location)">@(isOpen ? "▾" : "▸")</button>
-            <input type="checkbox" class="cw-chk" checked="@chosen.ContainsKey(id)" aria-label="Copier « @name »" @onchange="() => Check(id, name, location)" />
-            <button type="button" class="cw-nm" @onclick="() => Show(id, name, location)"><Ico Name="folder" Size="16" /> @name</button>
-            @if (cache.GetValueOrDefault(id) is { } l) { <span class="cw-n">@l.Designs</span> }
+        var on = chosen.ContainsKey(id);
+        <div class="cw-tn @(on ? "on" : "")" style="--d:@depth" role="treeitem" aria-expanded="@(isOpen ? "true" : "false")" @onclick="() => Check(id, name, location)">
+            <span class="cw-ex" role="button" aria-label="@(isOpen ? "Réduire" : "Développer") @name" @onclick="() => Toggle(id, name, location)" @onclick:stopPropagation="true">@(isOpen ? "▾" : "▸")</span>
+            <i class="cw-bx @(on ? "on" : "")">@(on ? "✓" : "")</i>
+            <Ico Name="folder" Size="16" />
+            <span class="cw-nm2">@name</span>
+            @if (cache.GetValueOrDefault(id) is { } l) { <small class="cw-n">@l.Designs design@(l.Designs > 1 ? "s" : "")</small> }
         </div>
         @if (isOpen && kids != null)
         {
             @foreach (var k in kids) { @Node(k.Id, k.Name, location + " › " + k.Name, depth + 1) }
         }
     };
-
-    private RenderFragment Thumb(CanvaService.Design d) => @<div class="cw-th" title="@d.Title">
-        <div class="cw-im">@if (d.Thumbnail != null) { <img src="@d.Thumbnail" alt="" loading="lazy" referrerpolicy="no-referrer" /> }</div>
-        <span>@d.Title</span>
-        @if (d.Pages is > 1) { <b class="cw-ps">@d.Pages p.</b> }
-    </div>;
 
     // ---------- Étape 3 : validation et import ----------
 

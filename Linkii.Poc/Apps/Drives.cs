@@ -637,6 +637,7 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
                 else if (Playable(i, folder.Source) && seen.Add(i.Id)) files.Add(i with { Path = next.Path + i.Name });
             }
         }
+        if (folder.OnlyFiles.Count > 0) files.RemoveAll(f => !f.Path.Contains('/') && !folder.OnlyFiles.Contains(f.Id));   // le filtre ne vise que les fichiers directs du dossier
         files.Sort((a, b) => string.Compare(a.Path, b.Path, StringComparison.CurrentCultureIgnoreCase));
         return new(files.Take(MaxFiles).ToList(), Math.Max(0, files.Count - MaxFiles), subfolders);
     }

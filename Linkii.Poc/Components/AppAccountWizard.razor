@@ -7,17 +7,17 @@
 @inject FacebookAuth FacebookAuth
 @inject CloudFileService Importer
 
-@* Applications › Google Slides, Google Docs, Microsoft PowerPoint, Facebook : assistant d'ajout, dans un tiroir du haut (maquette canva-assistant-ajout.html).
-   1. Connexion du compte ; 2. fichiers du Drive à importer (cochés : ils entrent dans la médiathèque) ou Pages Facebook ;
-   3. validation, puis ajout et import. Rien n'est gardé avant « Ajouter » ; Annuler déconnecte le compte connecté pendant l'assistant
+@* Applications › Google Slides, Google Docs, Microsoft PowerPoint, Facebook : assistant d'ajout, fenêtre centrée (maquette assistant-ajout-simplifie.html).
+   1. Compte ; 2. fichiers du Drive à ajouter (cochés : ils entrent dans la médiathèque) ou Pages Facebook, « Ajouter » lance l'import ;
+   3. progression puis « prêt » (seul Fermer reste). Rien n'est gardé avant « Ajouter » ; Annuler déconnecte le compte connecté pendant l'assistant
    (sauf s'il sert à une autre application). *@
-<WizardShell Icon="@AppId" Title="@(Adding ? "Ajouter " + Name : Name)" Subtitle="@StepLine" Labels="@Labels" Step="step" Done="done" Running="done"
-             CanBack="@(step > 1 && !done)" Hint="@Hint" NextLabel="@NextLabel" NextDisabled="NextDisabled"
+<WizardShell Icon="@AppId" Title="@(Adding ? "Ajouter " + Name : Name)" Labels="@Labels" Step="step" Done="done" Running="importing || done"
+             CanBack="@(step == 2 && !importing)" Hint="@Hint" NextLabel="@NextLabel" NextDisabled="NextDisabled"
              OnCancel="Cancel" OnClose="Close" OnBack="Back" OnNext="Next">
     @if (step == 1)
     {
         <WizardAccount Kind="@Kind" Provider="@Provider" Ready="ready" Connected="connected" Lost="lost" User="@user" Since="since" ConnectUrl="@ConnectUrl"
-                       Missing="@Missing" Permissions="@Permissions" />
+                       Missing="@Missing" Permissions="@Permissions" CanDo="@CanDo" CannotDo="@CannotDo" />
     }
     else if (step == 2)
     {
@@ -26,37 +26,70 @@
             else if (error != null) { <div class="dfp-empty err">@error</div> }
             else if (AppId == "facebook")
             {
-                <div class="cw-crumb">Aperçu · <b>Pages Facebook</b> — @pages.Count Page@(pages.Count > 1 ? "s" : "") administrée@(pages.Count > 1 ? "s" : "") par ce compte</div>
+                <h2 class="cw-h">Vos Pages Facebook</h2>
+                <p class="cw-lead">@(pages.Count == 0 ? "Nous n'avons trouvé aucune Page." : $"Nous avons trouvé {pages.Count} Page{(pages.Count > 1 ? "s" : "")} dans votre compte.")</p>
                 @if (pages.Count == 0) { <div class="dfp-empty">Ce compte n'administre aucune Page (ou n'a pas accordé l'accès aux Pages). Reconnectez-vous en cochant vos Pages.</div> }
                 else
                 {
-                    <ul class="cw-events">@foreach (var p in pages) { <li><span class="cw-when">Page</span><span class="cw-ttl">@p.Name</span></li> }</ul>
+                    <div class="cw-tools">
+                        <span class="cw-count"><b>@chosenPages.Count</b> sur @pages.Count sélectionnée@(chosenPages.Count > 1 ? "s" : "")</span>
+                        <button type="button" class="btn ghost sm" @onclick="ToggleAllPages">@(chosenPages.Count == pages.Count ? "Tout désélectionner" : "Tout sélectionner")</button>
+                    </div>
+                    <div class="cw-rows">
+                        @foreach (var p in pages)
+                        {
+                            var pid = p.Id;
+                            var on = chosenPages.Contains(pid);
+                            <button type="button" class="cw-row @(on ? "on" : "")" @onclick="() => TogglePage(pid)"><span class="cw-av">@(p.Name.Length > 0 ? p.Name[..1] : "?")</span><b>@p.Name</b><span class="cw-ck">@(on ? "✓" : "")</span></button>
+                        }
+                    </div>
                 }
+                <div class="cw-after"><span>ℹ</span><span>Les Pages cochées seront proposées dans vos listes de lecture.</span></div>
             }
             else
             {
-                <div class="cw-crumb">Aperçu · <b>@FileNoun</b> de votre @(Cloud.IsGoogle ? "Google Drive" : "OneDrive") — @files.Count trouvé@(files.Count > 1 ? "s" : "") à la racine@(more ? " et plus" : "")</div>
-                @if (files.Count == 0) { <div class="dfp-empty">Aucun fichier de ce type à la racine. Vous pourrez chercher dans tous vos dossiers depuis une liste de lecture.</div> }
+                <h2 class="cw-h">Que voulez-vous ajouter ?</h2>
+                <p class="cw-lead">@(files.Count == 0 ? $"Aucun fichier de ce type n'a été trouvé à la racine de votre {(Cloud.IsGoogle ? "Google Drive" : "OneDrive")}." : $"Nous avons trouvé {files.Count}{(more ? " ou plus" : "")} {Noun(files.Count)} dans votre {(Cloud.IsGoogle ? "Google Drive" : "OneDrive")}.")</p>
+                @if (files.Count == 0) { <div class="dfp-empty">Vous pourrez chercher dans tous vos dossiers depuis une liste de lecture.</div> }
                 else
                 {
-                    <ul class="cw-events">@foreach (var f in files.Take(20)) { var fr = f.Ref; <li><label style="display:flex;gap:10px;align-items:center;cursor:pointer"><input type="checkbox" class="sc-check" checked="@chosen.Contains(fr)" @onchange="() => Toggle(fr)" /><span class="cw-when">@f.Info</span><span class="cw-ttl">@f.Name</span></label></li> }</ul>
+                    var shown = files.Take(20).ToList();
+                    <div class="cw-tools">
+                        <span class="cw-count"><b>@chosen.Count</b> sur @shown.Count sélectionné@(chosen.Count > 1 ? "s" : "")</span>
+                        <button type="button" class="btn ghost sm" @onclick="ToggleAll">@(chosen.Count == shown.Count ? "Tout désélectionner" : "Tout sélectionner")</button>
+                    </div>
+                    <div class="cw-cards">
+                        @foreach (var f in shown)
+                        {
+                            var fr = f.Ref;
+                            var on = chosen.Contains(fr);
+                            <button type="button" class="cw-card @(on ? "on" : "")" @onclick="() => Toggle(fr)">
+                                <span class="cw-ck">@(on ? "✓" : "")</span>
+                                <b>@f.Name</b><small>@f.Info</small>
+                            </button>
+                        }
+                    </div>
                 }
+                <div class="cw-after"><span>ℹ</span><span>Les fichiers cochés sont copiés dans votre Médiathèque et convertis en images, lues même hors ligne. Vos originaux ne sont pas modifiés.</span></div>
             }
-            <div class="cw-skip">ℹ @(AppId == "facebook" ? "Vous choisirez la Page à afficher depuis une liste de lecture." : "Les fichiers cochés sont importés dans la médiathèque : Linkivi les convertit en images, lues même hors ligne.")</div>
         </div>
     }
     else
     {
-        <div class="cw-body">
-            <div class="cw-kpis">
-                <div><b>1</b><small>compte @Provider</small></div>
-                <div><b>@(AppId == "facebook" ? pages.Count : files.Count)</b><small>@(AppId == "facebook" ? "Page" : FileNoun.ToLowerInvariant())@((AppId == "facebook" ? pages.Count : files.Count) > 1 ? "s" : "") visible@((AppId == "facebook" ? pages.Count : files.Count) > 1 ? "s" : "")</small></div>
-                <div><b>@(AppId == "facebook" ? 0 : chosen.Count)</b><small>@(chosen.Count > 1 ? "fichiers importés" : "fichier importé") maintenant</small></div>
-                <div><b>immédiat</b><small>prêt à l'emploi</small></div>
-            </div>
-            <p class="cw-dest">Compte : <b>@(user.Length > 0 ? user : Provider)</b> · lecture seule. @Name sera proposé dans les listes de lecture.</p>
-            @if (importing) { <div class="cw-run"><span>@status</span><span></span></div> }
-            @if (done) { <div class="cw-run"><span>Terminé : @Name est dans Mes applications.</span><span>100 %</span></div><div class="cw-bar"><i class="ok" style="width:100%"></i></div> }
+        <div class="cw-body cw-final">
+            @if (done)
+            {
+                <div class="cw-bigok">✓</div>
+                <h2 class="cw-h">@Name est prêt</h2>
+                <p class="cw-lead">@(AppId == "facebook" ? $"{chosenPages.Count} Page{(chosenPages.Count > 1 ? "s" : "")} prête{(chosenPages.Count > 1 ? "s" : "")} à être affichée{(chosenPages.Count > 1 ? "s" : "")}." : chosen.Count == 0 ? "Vous pourrez ajouter vos fichiers depuis une liste de lecture." : $"{chosen.Count - importErrors.Count} {Noun(chosen.Count - importErrors.Count)} ajoutée{(chosen.Count - importErrors.Count > 1 ? "s" : "")} à votre Médiathèque.")</p>
+            }
+            else
+            {
+                <div class="cw-spin"></div>
+                <h2 class="cw-h">Ajout en cours…</h2>
+                <p class="cw-lead">@status</p>
+                <div class="cw-bar"><i style="width:@(Progress)%"></i></div>
+            }
             @foreach (var e in importErrors) { <div class="dfp-empty err">@e</div> }
         </div>
     }
@@ -71,13 +104,14 @@
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback OnChanged { get; set; }
 
-    private static readonly string[] Labels = { "Connexion", "Aperçu", "Validation" };
+    private static readonly string[] Labels = { "Compte", "Sélection", "Terminé" };
     private CloudFileKind Cloud => CloudFileKind.Of(AppId)!;
     private string Name => Svc.Find(AppId)?.Name ?? AppId;
     private string Kind => AppId == "facebook" ? ConnectedAccounts.Facebook : Cloud.IsGoogle ? ConnectedAccounts.Google : ConnectedAccounts.Microsoft;
     private string Provider => AppId == "facebook" ? "Facebook" : Cloud.IsGoogle ? "Google" : "Microsoft";
     private string ConnectUrl => AppId == "facebook" ? "/facebook/connect?wiz=facebook"
         : Cloud.IsGoogle ? $"/google/connect?for=drive&wiz={AppId}" : $"/microsoft/connect?for=drive&wiz={AppId}";
+    private string Noun(int n) => AppId switch { "google-slides" => n > 1 ? "présentations" : "présentation", "google-docs" => n > 1 ? "documents" : "document", _ => n > 1 ? "présentations PowerPoint" : "présentation PowerPoint" };
     private string FileNoun => AppId switch { "google-slides" => "Présentations", "google-docs" => "Documents", _ => "Présentations PowerPoint" };
     private string[] Permissions => AppId == "facebook"
         ? new[] { "Lire la liste des Pages que vous administrez", "Lire les publications de ces Pages" }
@@ -94,16 +128,20 @@
     private List<DriveNode> files = new();
     private bool more;
     private List<FacebookPageAccess> pages = new();
+    private readonly HashSet<string> chosenPages = new();
 
-    private string StepLine => step switch
-    {
-        1 => "Étape 1 sur 3 — connectez votre compte",
-        2 => "Étape 2 sur 3 — ce que votre compte donne",
-        _ => done ? "Étape 3 sur 3 — terminé" : "Étape 3 sur 3 — vérifiez, puis ajoutez l'application"
-    };
-    private bool NextDisabled => importing || step == 1 && !connected || step == 2 && (loading || error != null);
-    private string NextLabel => step < 3 ? "Suivant" : done ? "Terminer" : "Ajouter";
-    private string Hint => step == 1 && !connected ? "Connectez un compte pour continuer." : "";
+    private void TogglePage(string id) { if (!chosenPages.Remove(id)) chosenPages.Add(id); }
+    private void ToggleAllPages() { if (chosenPages.Count == pages.Count) chosenPages.Clear(); else chosenPages.UnionWith(pages.Select(p => p.Id)); }
+
+    private bool NextDisabled => importing || step == 1 && !connected || step == 2 && (loading || error != null || (AppId == "facebook" ? pages.Count > 0 && chosenPages.Count == 0 : chosen.Count == 0 && files.Count > 0));
+    private string NextLabel => step == 1 ? "Suivant"
+        : step == 2 ? (AppId == "facebook" ? (chosenPages.Count > 0 ? $"Ajouter {chosenPages.Count} Page{(chosenPages.Count > 1 ? "s" : "")}" : "Ajouter Facebook") : chosen.Count > 0 ? $"Ajouter {chosen.Count} {Noun(chosen.Count)}" : "Ajouter " + Name)
+        : "Ajout en cours…";
+    private string Hint => step == 3 ? "" : Adding ? "Rien n'est enregistré tant que vous n'avez pas ajouté." : "";
+    private int Progress => doneCount * 100 / Math.Max(1, chosen.Count);
+    private int doneCount;
+    private string[]? CanDo => AppId == "facebook" ? new[] { "Voir la liste de vos Pages", "Afficher leurs publications sur vos écrans" } : null;
+    private string[]? CannotDo => AppId == "facebook" ? new[] { "Publier à votre place", "Voir votre profil personnel" } : null;
 
     protected override async Task OnInitializedAsync()
     {
@@ -150,7 +188,7 @@
         var t = Store.Read(d => d.Tenant);
         try
         {
-            if (AppId == "facebook") pages = FacebookAuth.Pages(t);
+            if (AppId == "facebook") { pages = FacebookAuth.Pages(t); chosenPages.Clear(); chosenPages.UnionWith(pages.Where(p => !p.Off).Select(p => p.Id)); }
             else
             {
                 var l = await Drives.BrowseFiles(t, Cloud, DriveSources.Roots(Cloud.Source)[0].Key, null);
@@ -175,11 +213,16 @@
 
     private void Toggle(string fileRef) { if (!chosen.Remove(fileRef)) chosen.Add(fileRef); }
 
+    private void ToggleAll()
+    {
+        var all = files.Take(20).Select(f => f.Ref).ToList();
+        if (chosen.Count == all.Count) chosen.Clear(); else chosen.UnionWith(all);
+    }
+
     private async Task Next()
     {
         if (step == 1) { step = 2; await Load(); }
-        else if (step == 2) step = 3;
-        else if (!done) await Run();
+        else if (step == 2) { step = 3; await Run(); }
         else await Close();
     }
 
@@ -187,12 +230,18 @@
     {
         if (Adding) { Svc.Mark(AppId); await OnAdded.InvokeAsync(); }
         Svc.Enable(AppId);
+        if (AppId == "facebook")
+        {
+            Svc.SetContentsOn(pages.Where(p => chosenPages.Contains(p.Id)).Select(p => ("page", p.Id)), true);
+            Svc.SetContentsOn(pages.Where(p => !chosenPages.Contains(p.Id)).Select(p => ("page", p.Id)), false);
+        }
         if (AppId != "facebook" && chosen.Count > 0)
         {
-            importing = true; importErrors.Clear();
+            importing = true; importErrors.Clear(); doneCount = 0; var k = 0;
             var tenant = Store.Read(d => d.Tenant);
             foreach (var node in files.Where(f => chosen.Contains(f.Ref)).ToList())
             {
+                doneCount = k++;
                 status = $"Import de « {node.Name} »…";
                 StateHasChanged();
                 var src = Cloud.SrcOf(node.Name);

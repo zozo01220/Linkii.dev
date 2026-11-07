@@ -6,8 +6,8 @@
    1. Connexion (HaConnectionForm : direct ou par le relais, testée à l'enregistrement) ; 2. entités trouvées par famille ; 3. validation, puis ajout.
    Dès la connexion, les widgets Home Assistant sont activés et la source de données « Home Assistant » est créée.
    Annuler pendant un ajout déconnecte le compte saisi et retire ce que la connexion avait mis en place : rien ne reste. *@
-<WizardShell Icon="homeassistant" Title="@(Adding ? "Ajouter Home Assistant" : "Home Assistant")" Subtitle="@StepLine" Labels="@Labels" Step="step" Done="done" Running="done"
-             CanBack="@(step > 1 && !done)" Hint="@Hint" NextLabel="@NextLabel" NextDisabled="NextDisabled"
+<WizardShell Icon="homeassistant" Title="@(Adding ? "Ajouter Home Assistant" : "Home Assistant")" Labels="@Labels" Step="step" Done="done" Running="done"
+             CanBack="@(step == 2)" Hint="@Hint" NextLabel="@NextLabel" NextDisabled="NextDisabled"
              OnCancel="Cancel" OnClose="Close" OnBack="Back" OnNext="Next">
     @if (step == 1)
     {
@@ -22,21 +22,17 @@
     else if (step == 2 && account != null)
     {
         <div class="cw-body">
-            <div class="cw-crumb">Aperçu · <b>@account.Entities.Count entités</b> trouvées sur @account.Url</div>
-            <HaEntityBrowser Account="account" Limit="60" Searchable="false" />
+            <h2 class="cw-h">Que voulez-vous utiliser ?</h2>
+            <p class="cw-lead">Nous avons trouvé @account.Entities.Count entités sur votre Home Assistant. Décochez celles que vous ne voulez pas proposer sur vos écrans.</p>
+            <HaEntityBrowser Account="account" Chosen="chosen" />
         </div>
     }
     else if (account != null)
     {
-        <div class="cw-body">
-            <div class="cw-kpis">
-                @foreach (var f in HomeAssistantRules.Families.Where(f => CountOf(f) > 0).Take(4))
-                {
-                    <div><b>@CountOf(f)</b><small>@f.Noun</small></div>
-                }
-            </div>
-            <HaUses />
-            @if (done) { <div class="cw-run"><span>Terminé : Home Assistant est dans Mes applications.</span><span>100 %</span></div><div class="cw-bar"><i class="ok" style="width:100%"></i></div> }
+        <div class="cw-body cw-final">
+            <div class="cw-bigok">✓</div>
+            <h2 class="cw-h">Home Assistant est prêt</h2>
+            <p class="cw-lead">@chosen.Count entité@(chosen.Count > 1 ? "s" : "") disponible@(chosen.Count > 1 ? "s" : "") pour vos widgets et vos écrans.</p>
         </div>
     }
 </WizardShell>
@@ -48,33 +44,35 @@
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback OnChanged { get; set; }
 
-    private static readonly string[] Labels = { "Connexion", "Entités", "Validation" };
+    private static readonly string[] Labels = { "Connexion", "Sélection", "Terminé" };
 
     private int step = 1;
     private bool done, connectedHere;
     private HomeAssistantAccount? account;
 
     private bool Connected => account is { LastError.Length: 0 };
-    private int CountOf(HomeAssistantRules.Family f) => account?.Entities.Count(e => f.Domains.Contains(e.Domain)) ?? 0;
-    private string StepLine => step switch
-    {
-        1 => "Étape 1 sur 3 — connectez votre Home Assistant",
-        2 => "Étape 2 sur 3 — entités trouvées",
-        _ => done ? "Étape 3 sur 3 — terminé" : "Étape 3 sur 3 — vérifiez, puis ajoutez l'application"
-    };
-    private bool NextDisabled => step == 1 && !Connected;
-    private string NextLabel => step < 3 ? "Suivant" : done ? "Terminer" : "Ajouter";
-    private string Hint => step == 1 && !Connected ? "Enregistrez la connexion pour continuer." : "";
+    private readonly HashSet<string> chosen = new();
+    private bool NextDisabled => step == 1 && !Connected || step == 2 && chosen.Count == 0;
+    private string NextLabel => step == 1 ? "Suivant" : $"Ajouter {chosen.Count} entité{(chosen.Count > 1 ? "s" : "")}";
+    private string Hint => step == 1 && !Connected ? "Enregistrez la connexion pour continuer." : step == 2 && Adding ? "Rien n'est enregistré tant que vous n'avez pas ajouté." : "";
 
     protected override void OnInitialized()
     {
         account = Store.Read(d => d.Tenant.HomeAssistant?.Copy());
         step = !Connected ? 1 : Math.Clamp(StartStep, 1, 2);
+        ResetChosen();
+    }
+
+    private void ResetChosen()
+    {
+        chosen.Clear();
+        if (account != null) chosen.UnionWith(account.Entities.Where(e => !e.Off).Select(e => e.Id));
     }
 
     private async Task Saved(HomeAssistantAccount fresh)
     {
         account = fresh;
+        ResetChosen();
         connectedHere = true;
         await OnChanged.InvokeAsync();
     }
@@ -95,14 +93,17 @@
 
     private async Task Next()
     {
-        if (step < 3) step++;
-        else if (!done) await Run();
+        if (step == 1) step = 2;
+        else if (step == 2) { step = 3; await Run(); }
         else await Close();
     }
 
     private async Task Run()
     {
         if (Adding) { Svc.Mark("ha-home"); await OnAdded.InvokeAsync(); }
+        var all = account!.Entities.Select(e => e.Id).Distinct().ToList();
+        Svc.SetContentsOn(all.Where(chosen.Contains).Select(id => ("entity", id)), true);
+        Svc.SetContentsOn(all.Where(id => !chosen.Contains(id)).Select(id => ("entity", id)), false);
         done = true;
         await OnChanged.InvokeAsync();
     }

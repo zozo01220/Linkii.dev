@@ -1,22 +1,48 @@
-@* Étape « Connexion » d'un compte OAuth, identique pour toutes les applications (maquette canva-assistant-ajout.html) :
-   carte du compte (avatar, nom, état), bouton de connexion ou « Changer de compte », droits demandés, note sur le mot de passe. *@
+@* Étape « Compte » d'un compte OAuth, identique pour toutes les applications (maquette assistant-ajout-simplifie.html) :
+   grand bouton de connexion, ce que Linkivi fait et ne fait jamais, détails techniques repliés ; compte déjà connecté : carte + « Utiliser un autre compte ». *@
 <div class="cw-body">
-    <div class="cvs-account">
-        <AccountLogo Kind="@Kind" />
-        <div class="grow">
-            <b>@(Connected ? (User.Length > 0 ? User : Provider) : Lost ? "Connexion expirée" : "Aucun compte connecté")</b>
-            <small>@(Connected ? $"Connecté{(Since is { } s ? $" le {s.ToLocalTime():dd.MM.yyyy}" : "")} · lecture seule : rien n'est modifié chez {Provider}." : Lost ? $"Reconnectez votre compte {Provider}." : Missing)</small>
+    @if (Connected)
+    {
+        <h2 class="cw-h">Votre compte @Provider est connecté</h2>
+        <p class="cw-lead">Linkivi l'utilisera pour cette application.</p>
+        <div class="cw-acct">
+            <AccountLogo Kind="@Kind" />
+            <div class="grow">
+                <b>@(User.Length > 0 ? User : Provider)</b>
+                <small>Connecté@(Since is { } s ? $" le {s.ToLocalTime():dd.MM.yyyy}" : "")</small>
+            </div>
+            <span class="cw-okmark">✓ Prêt</span>
         </div>
-        @if (Ready)
-        {
-            <a class="btn @(Connected ? "ghost" : "") sm" href="@ConnectUrl" target="_top">@(Connected ? "Changer de compte" : Lost ? $"Reconnecter {Provider}" : $"Se connecter avec {Provider}")</a>
-        }
-    </div>
-    @if (!Ready) { <div class="dw-note">@Provider n'est pas encore disponible sur cette plateforme (connexion @Provider à configurer par l'administrateur Linkivi).</div> }
+        @if (Ready) { <p><a class="cw-sub" href="@ConnectUrl" target="_top">Utiliser un autre compte</a></p> }
+    }
+    else if (!Ready)
+    {
+        <h2 class="cw-h">Connectez votre compte @Provider</h2>
+        <div class="dw-note">@Provider n'est pas encore disponible sur cette plateforme (connexion @Provider à configurer par l'administrateur Linkivi).</div>
+    }
     else
     {
-        <ul class="cw-perm">@foreach (var p in Permissions) { <li>@p</li> }<li>Rien n'est modifié ni supprimé chez @Provider</li></ul>
-        <p class="csd-shared"><Ico Name="lock" Size="14" /> Vous passez par la page de connexion de @Provider : Linkivi ne voit jamais votre mot de passe.</p>
+        <h2 class="cw-h">@(Lost ? "Reconnectez votre compte " + Provider : "Connectez votre compte " + Provider)</h2>
+        <p class="cw-lead">@(Lost ? "La connexion a expiré : une nouvelle autorisation est nécessaire." : Missing)</p>
+        <div class="cw-connect">
+            <AccountLogo Kind="@Kind" />
+            <a class="cw-bigbtn" href="@ConnectUrl" target="_top">Continuer avec @Provider</a>
+            <small>Une fenêtre @Provider s'ouvre pour confirmer. Vous reviendrez ici ensuite.</small>
+        </div>
+    }
+    @if (Ready)
+    {
+        <div class="cw-can">
+            <div>@foreach (var t in Does) { <div class="y"><i>✓</i>@t</div> }</div>
+            <div>@foreach (var t in Never) { <div class="n"><i>✕</i>@t</div> }</div>
+        </div>
+        <p class="csd-shared"><Ico Name="lock" Size="14" /> Vous pouvez retirer l'accès à tout moment depuis Réglages › Connexions. Linkivi ne voit jamais votre mot de passe.</p>
+        @if (Permissions.Length > 0)
+        {
+            <details class="cw-tech"><summary>Voir les détails techniques</summary>
+                <ul>@foreach (var p in Permissions) { <li>@p</li> }<li>Rien n'est modifié ni supprimé chez @Provider</li></ul>
+            </details>
+        }
     }
 </div>
 
@@ -32,4 +58,8 @@
     [Parameter] public string ConnectUrl { get; set; } = "";
     [Parameter] public string Missing { get; set; } = "";
     [Parameter] public string[] Permissions { get; set; } = Array.Empty<string>();
+    [Parameter] public string[]? CanDo { get; set; }
+    [Parameter] public string[]? CannotDo { get; set; }
+    private string[] Does => CanDo ?? new[] { "Voir vos contenus " + Provider, "Les afficher sur vos écrans" };
+    private string[] Never => CannotDo ?? new[] { "Modifier ou supprimer vos fichiers", "Publier à votre place" };
 }

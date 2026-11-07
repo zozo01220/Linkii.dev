@@ -1,0 +1,364 @@
+@inject TenantStore Store
+@inject DriveService Drives
+@implements IDisposable
+
+@* Choix des dossiers d'un Drive dans l'assistant d'ajout (maquette assistant-drive-selection.html, proposition A) : une arborescence à cocher.
+   Cocher un dossier prend tout ce qu'il contient, sous-dossiers compris ; décocher un sous-dossier d'un dossier coché remplace le dossier par ses autres
+   éléments (case partielle). La liste Chosen de l'assistant est la seule source de vérité : chaque case la modifie directement. *@
+<div class="cw-tools">
+    @if (DriveSources.CanSearch(Source))
+    {
+        <input class="cw-search" type="search" placeholder="Rechercher un dossier" aria-label="Rechercher un dossier" value="@query" @oninput="OnSearch" />
+    }
+    else { <span class="cw-count grow"></span> }
+    @if (!Searching && sections.Any(s => s.Kids is { Count: > 0 } || s.RootNode != null))
+    {
+        <button type="button" class="btn ghost sm" @onclick="ToggleAll">@(AllOn ? "Tout désélectionner" : "Tout sélectionner")</button>
+    }
+</div>
+<div class="cw-tree2">
+    @if (error != null) { <div class="dfp-empty err">@error</div> }
+    @if (Searching)
+    {
+        @if (results == null) { <div class="dfp-empty">Recherche…</div> }
+        else if (results.Count == 0) { <div class="dfp-empty">Aucun dossier ne contient « @query.Trim() ».</div> }
+        else
+        {
+            @foreach (var r in results)
+            {
+                var node = new Node(r, r.Location ?? r.Name, "", null);
+                var st = State(node);
+                <div class="cw-tn @(st == "on" ? "on" : "")" @onclick="() => Toggle(node)">
+                    <span class="cw-ex"></span><i class="cw-bx @st">@Mark(st)</i><Ico Name="folder" Size="16" /><span class="cw-nm2">@r.Name</span><small class="cw-n">@(r.Location ?? r.Info)</small>
+                </div>
+            }
+        }
+    }
+    else
+    {
+        @foreach (var s in sections)
+        {
+            @if (s.Root.Link)
+            {
+                <div class="cw-sect">@s.Root.Label</div>
+                <div class="cw-sp">
+                    <input class="mono" placeholder="https://organisation.sharepoint.com/sites/…" aria-label="Lien SharePoint" @bind="spLink" @bind:event="oninput" spellcheck="false" autocomplete="off" />
+                    <button type="button" class="btn ghost sm" disabled="@(spLink.Trim().Length == 0 || linking)" @onclick="() => OpenLink(s)">@(linking ? "Ouverture…" : "Ajouter la bibliothèque")</button>
+                </div>
+            }
+            else if (sections.Count > 1) { <div class="cw-sect">@s.Root.Label</div> }
+            @if (s.RootNode is { } rn)
+            {
+                var st = RootState(s);
+                <div class="cw-tn @(st == "on" ? "on" : "")" @onclick="() => ToggleRootFiles(s)">
+                    <span class="cw-ex" role="button" aria-label="@(s.RootOpen ? "Réduire" : "Développer") les fichiers" @onclick="() => s.RootOpen = !s.RootOpen" @onclick:stopPropagation="true">@(s.RootOpen ? "▾" : "▸")</span>
+                    <i class="cw-bx @st">@Mark(st)</i><Ico Name="image" Size="16" /><span class="cw-nm2">Fichiers à la racine</span><small class="cw-n">@rn.Info.Info</small>
+                </div>
+                @if (s.RootOpen)
+                {
+                    @foreach (var f in s.RootFileList) { @FileRow(rn, s.RootFileList, f, 1) }
+                }
+            }
+            @if (s.Kids == null) { <div class="dfp-empty">Chargement…</div> }
+            else if (s.Kids.Count == 0 && !s.Root.Link && s.RootNode == null) { <div class="dfp-empty">Aucun dossier ici.</div> }
+            else foreach (var n in s.Kids) { @Row(n, s, 0) }
+        }
+    }
+</div>
+<div class="cw-sel">
+    <div class="cw-sel-t"><b>@Chosen.Count dossier@(Chosen.Count > 1 ? "s" : "")</b><span>@(Chosen.Count == 0 ? "· aucun dossier coché" : "· sous-dossiers compris sauf indication")</span></div>
+    @if (Chosen.Count > 0)
+    {
+        <div class="cw-chips">
+            @foreach (var c in Chosen.ToList())
+            {
+                var folder = c;
+                <span class="cw-chip">@folder.Name@ChipNote(folder)<button type="button" aria-label="Retirer @folder.Name" @onclick="() => Remove(folder)">✕</button></span>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Source { get; set; } = "";
+    /// <summary>Dossiers choisis (modifiée ici) : ajoutés ou mis à jour dans l'assistant, rien n'est enregistré avant « Ajouter ».</summary>
+    [Parameter, EditorRequired] public List<DriveFolder> Chosen { get; set; } = default!;
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private sealed class Node
+    {
+        public Node(DriveNode info, string location, string root, Node? parent) { Info = info; Location = location; Root = root; Parent = parent; }
+        public DriveNode Info { get; }
+        public string Location { get; }
+        public string Root { get; }
+        public Node? Parent { get; }
+        public List<Node>? Kids { get; set; }
+        public List<DriveNode>? Files { get; set; }
+        public bool Open, Loading;
+    }
+
+    private sealed class Section
+    {
+        public Section(DriveRoot root) { Root = root; }
+        public DriveRoot Root { get; }
+        public List<Node>? Kids { get; set; }
+        /// <summary>Les images et vidéos posées directement à la racine : le dossier racine lui-même, sans ses sous-dossiers.</summary>
+        public Node? RootNode { get; set; }
+        public List<DriveNode> RootFileList { get; set; } = new();
+        public bool RootOpen { get; set; }
+    }
+
+    private readonly List<Section> sections = new();
+    private string query = "", spLink = "";
+    private List<DriveNode>? results;
+    private string? error;
+    private bool linking;
+    private CancellationTokenSource? searchCts;
+
+    private bool Searching => query.Trim().Length > 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        foreach (var r in DriveSources.Roots(Source)) sections.Add(new Section(r) { Kids = r.Link ? new() : null });
+        foreach (var s in sections.Where(s => !s.Root.Link))
+        {
+            try
+            {
+                var l = await Drives.Browse(Store.Read(d => d.Tenant), Source, s.Root.Key, null);
+                s.Kids = l.Folders.Select(f => new Node(f, s.Root.Location + " › " + f.Name, s.Root.Key, null)).ToList();
+                if (l.Ref != null && (l.Files.Count > 0 || l.More))
+                {
+                    s.RootFileList = l.Files;
+                    s.RootOpen = l.Files.Count <= 12;
+                    s.RootNode = new Node(new DriveNode(l.Ref, s.Root.Label, "folder", $"{l.Files.Count}{(l.More ? "+" : "")} image{(l.Files.Count > 1 ? "s" : "")} ou vidéo{(l.Files.Count > 1 ? "s" : "")}", l.WebUrl), s.Root.Location, s.Root.Key, null);
+                }
+            }
+            catch (Exception ex) when (Known(ex)) { error = ex.Message; s.Kids = new(); }
+        }
+    }
+
+    private static bool Known(Exception ex) => ex is InvalidOperationException or HttpRequestException or System.Text.Json.JsonException or KeyNotFoundException or TaskCanceledException;
+
+    // ---------- État des cases ----------
+
+    private DriveFolder? Find(Node n) => Chosen.FirstOrDefault(c => DriveSources.SameRemote(Source, c.RemoteId, n.Info.Ref));
+
+    private string State(Node n)
+    {
+        var e = Find(n);
+        if (e is { Subfolders: true }) return e.OnlyFiles.Count == 0 ? "on" : "part";
+        if (Covered(n)) return "on";
+        return e != null || SelectedBelow(n) ? "part" : "off";
+    }
+
+    private bool Covered(Node n)
+    {
+        for (var p = n.Parent; p != null; p = p.Parent) if (Find(p) is { Subfolders: true }) return true;
+        return false;
+    }
+
+    private bool FileOn(Node f, string id) => Find(f) is { } e ? e.OnlyFiles.Count == 0 || e.OnlyFiles.Contains(id) : Covered(f);
+
+    private bool SelectedBelow(Node n) => n.Kids != null && n.Kids.Any(k => Find(k) != null || SelectedBelow(k));
+
+    private static string ChipNote(DriveFolder f)
+    {
+        var n = f.OnlyFiles.Count(x => x != DriveFolder.NoFiles);
+        if (f.OnlyFiles.Count > 0) return n == 0 ? " (sous-dossiers seulement)" : $" ({n} fichier{(n > 1 ? "s" : "")}{(f.Subfolders ? " + sous-dossiers" : "")})";
+        return f.Subfolders ? "" : " (ses fichiers)";
+    }
+
+    private static string Mark(string st) => st == "on" ? "✓" : st == "part" ? "–" : "";
+
+    private IEnumerable<Node> RootFiles => sections.Where(s => s.RootNode != null).Select(s => s.RootNode!);
+
+    private bool AllOn => sections.Where(s => !s.Root.Link).SelectMany(s => s.Kids ?? new()).All(n => State(n) == "on") && sections.Where(s => s.RootNode != null).All(s => RootState(s) == "on");
+
+    // ---------- Actions ----------
+
+    private DriveFolder NewFolder(Node n, bool sub, List<string>? only = null) => new()
+    {
+        OnlyFiles = only ?? new(),
+        Source = Source, Name = n.Info.Name.Length > 80 ? n.Info.Name[..80] : n.Info.Name, RemoteId = n.Info.Ref,
+        Location = n.Location, WebUrl = n.Info.WebUrl, Subfolders = sub, AreaId = Store.AreaId
+    };
+
+    private IEnumerable<Node> Below(Node n) => (n.Kids ?? new()).SelectMany(k => Below(k).Prepend(k));
+
+    private async Task Toggle(Node n)
+    {
+        var st = State(n);
+        if (st == "on")
+        {
+            if (Find(n) is { Subfolders: true } own) Chosen.Remove(own);
+            else Exclude(n);
+        }
+        else Select(n);
+        await OnChanged.InvokeAsync();
+    }
+
+    /// <summary>Coche un dossier : tout son contenu ; ce qui était coché dessous devient inutile.</summary>
+    private void Select(Node n)
+    {
+        foreach (var d in Below(n)) if (Find(d) is { } e) Chosen.Remove(e);
+        if (Find(n) is { } cur) { cur.Subfolders = true; cur.OnlyFiles.Clear(); }
+        else Chosen.Add(NewFolder(n, true));
+    }
+
+    /// <summary>Décoche un dossier couvert par un parent coché : le parent ne garde que ses propres fichiers et le reste de l'arbre est coché à côté.</summary>
+    private void Exclude(Node d, List<string>? ownFiles = null)
+    {
+        var chain = new List<Node>();
+        for (var p = d; p != null; p = p.Parent)
+        {
+            chain.Insert(0, p);
+            if (p != d && Find(p) is { Subfolders: true }) break;
+        }
+        for (var i = 0; i < chain.Count - 1; i++)
+        {
+            var x = chain[i];
+            if (Find(x) is { } e) e.Subfolders = false; else Chosen.Add(NewFolder(x, false));
+            foreach (var k in x.Kids ?? new())
+                if (k != chain[i + 1] && Find(k) == null) Chosen.Add(NewFolder(k, true));
+        }
+        if (ownFiles != null && Find(d) == null)   // le dossier reste coché avec ses sous-dossiers, mais seulement certains de ses fichiers
+        {
+            var keep = NewFolder(d, true);
+            keep.OnlyFiles = ownFiles.Count == 0 ? new() { DriveFolder.NoFiles } : ownFiles;
+            Chosen.Add(keep);
+        }
+    }
+
+    private async Task Remove(DriveFolder f)
+    {
+        Chosen.Remove(f);
+        await OnChanged.InvokeAsync();
+    }
+
+    private string RootState(Section s)
+    {
+        if (Find(s.RootNode!) is not { } e) return "off";
+        return e.OnlyFiles.Count == 0 ? "on" : "part";
+    }
+
+    /// <summary>Case du dossier racine : tous ses fichiers, ou aucun.</summary>
+    private async Task ToggleRootFiles(Section s)
+    {
+        var st = RootState(s);
+        if (Find(s.RootNode!) is { } e) { if (st == "on") Chosen.Remove(e); else e.OnlyFiles.Clear(); }
+        else Chosen.Add(NewFolder(s.RootNode!, false));
+        await OnChanged.InvokeAsync();
+    }
+
+    /// <summary>Case d'un fichier : met à jour les fichiers retenus du dossier (tous cochés : « tous », aucun : le dossier est retiré, ou ne garde que ses sous-dossiers).</summary>
+    private async Task ToggleFile(Node f, List<DriveNode> files, DriveNode file)
+    {
+        var all = files.Select(x => x.Ref).ToList();
+        var e = Find(f);
+        var current = e != null ? (e.OnlyFiles.Count == 0 ? all.ToList() : e.OnlyFiles.Where(all.Contains).ToList()) : Covered(f) ? all.ToList() : new List<string>();
+        if (!current.Remove(file.Ref)) current.Add(file.Ref);
+        var full = current.Count >= all.Count && all.All(current.Contains);
+        if (e != null)
+        {
+            if (current.Count == 0) { if (e.Subfolders) e.OnlyFiles = new() { DriveFolder.NoFiles }; else Chosen.Remove(e); }
+            else e.OnlyFiles = full ? new() : current;
+        }
+        else if (Covered(f)) Exclude(f, current);
+        else Chosen.Add(NewFolder(f, false, full ? new() : current));
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task ToggleAll()
+    {
+        var tops = sections.Where(s => !s.Root.Link).SelectMany(s => s.Kids ?? new()).ToList();
+        if (AllOn)
+        {
+            foreach (var n in tops) { foreach (var d in Below(n)) if (Find(d) is { } e) Chosen.Remove(e); if (Find(n) is { } c) Chosen.Remove(c); }
+            foreach (var r in RootFiles) if (Find(r) is { } c) Chosen.Remove(c);
+        }
+        else
+        {
+            foreach (var n in tops) Select(n);
+            foreach (var r in RootFiles) { if (Find(r) is { } c) c.OnlyFiles.Clear(); else Chosen.Add(NewFolder(r, false)); }
+        }
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task Expand(Node n)
+    {
+        n.Open = !n.Open;
+        if (!n.Open || n.Kids != null) return;
+        n.Loading = true;
+        try
+        {
+            var l = await Drives.Browse(Store.Read(d => d.Tenant), Source, n.Root, n.Info.Ref);
+            n.Kids = l.Folders.Select(f => new Node(f, n.Location + " › " + f.Name, n.Root, n)).ToList();
+            n.Files = l.Files;
+        }
+        catch (Exception ex) when (Known(ex)) { error = ex.Message; n.Kids = new(); }
+        n.Loading = false;
+    }
+
+    private async Task OpenLink(Section s)
+    {
+        linking = true; error = null;
+        try
+        {
+            var (remoteId, name, location, web) = await Drives.Resolve(Store.Read(d => d.Tenant), Source, spLink);
+            spLink = "";
+            if (s.Kids!.All(k => !DriveSources.SameRemote(Source, k.Info.Ref, remoteId)))
+                s.Kids!.Add(new Node(new DriveNode(remoteId, name, "folder", "", web, location), location, s.Root.Key, null));
+        }
+        catch (Exception ex) when (Known(ex)) { error = ex.Message; }
+        finally { linking = false; }
+    }
+
+    private async Task OnSearch(ChangeEventArgs e)
+    {
+        query = e.Value?.ToString() ?? "";
+        error = null; results = null;
+        searchCts?.Cancel();
+        if (!Searching) return;
+        var cts = searchCts = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(350, cts.Token);
+            var found = await Drives.SearchFolders(Store.Read(d => d.Tenant), Source, query);
+            if (!cts.IsCancellationRequested) results = found;
+        }
+        catch (TaskCanceledException) { }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or System.Text.Json.JsonException or KeyNotFoundException)
+        {
+            if (!cts.IsCancellationRequested) error = ex.Message;
+        }
+    }
+
+    public void Dispose() => searchCts?.Cancel();
+
+    private RenderFragment Row(Node n, Section s, int depth) => __builder =>
+    {
+        var st = State(n);
+        <div class="cw-tn @(st == "on" ? "on" : "")" style="--d:@depth" @onclick="() => Toggle(n)">
+            <span class="cw-ex" role="button" aria-label="@(n.Open ? "Réduire" : "Développer") @n.Info.Name" @onclick="() => Expand(n)" @onclick:stopPropagation="true">@(n.Loading ? "…" : n.Kids is { Count: 0 } && n.Files is { Count: 0 } ? "" : n.Open ? "▾" : "▸")</span>
+            <i class="cw-bx @st">@Mark(st)</i>
+            <Ico Name="folder" Size="16" />
+            <span class="cw-nm2">@n.Info.Name</span>
+            @if (st == "on" && n.Kids is { Count: > 0 }) { <small class="cw-all">avec sous-dossiers</small> }
+            @if (n.Info.Info.Length > 0) { <small class="cw-n">@n.Info.Info</small> }
+        </div>
+        @if (n.Open && n.Kids != null) { foreach (var k in n.Kids) { @Row(k, s, depth + 1) } }
+        @if (n.Open && n.Files != null)
+        {
+            foreach (var f in n.Files.Take(80)) { @FileRow(n, n.Files, f, depth + 1) }
+            @if (n.Files.Count > 80) { <div class="cw-tn" style="--d:@(depth + 1)"><small class="cw-n">… et @(n.Files.Count - 80) autres : cochez le dossier pour tous les prendre.</small></div> }
+        }
+    };
+
+    private RenderFragment FileRow(Node folder, List<DriveNode> files, DriveNode file, int depth) => __builder =>
+    {
+        var on = FileOn(folder, file.Ref);
+        <div class="cw-tn @(on ? "on" : "")" style="--d:@depth" @onclick="() => ToggleFile(folder, files, file)">
+            <span class="cw-ex"></span><i class="cw-bx @(on ? "on" : "")">@(on ? "✓" : "")</i><Ico Name="@(file.Kind == "video" ? "play" : "image")" Size="16" /><span class="cw-nm2">@file.Name</span><small class="cw-n">@file.Info</small>
+        </div>
+    };
+}

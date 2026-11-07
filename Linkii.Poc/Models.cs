@@ -735,6 +735,8 @@ public class CanvaFolder
     public string CanvaId { get; set; } = "";     // identifiant du dossier chez Canva (« root » : tout le compte)
     public string Name { get; set; } = "";
     public string Location { get; set; } = "";    // affichage : chemin du dossier dans Canva
+    public List<string> OnlyFiles { get; set; } = new();   // seuls fichiers directs du dossier retenus (identifiants, choisis un à un) ; vide : tous ; NoFiles : aucun (les sous-dossiers ne sont pas filtrés)
+    public const string NoFiles = "::aucun";
     public bool Subfolders { get; set; }
     public int DesignCount { get; set; }
     public int Skipped { get; set; }              // designs laissés de côté au-delà de CanvaService.MaxDesigns
