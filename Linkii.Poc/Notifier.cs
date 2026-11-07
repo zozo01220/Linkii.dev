@@ -113,7 +113,7 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
                 if (e.Kind == "tile" && e.Action.Type == "media")
                 {
                     // une tuile dont le contenu a disparu, ou n'est pas prêt, n'est pas publiée : la borne n'affiche jamais de tuile cassée
-                    var m = db.Media.FirstOrDefault(x => x.Id == e.Action.MediaId && x.ClientId == clientId);
+                    var m = db.Media.FirstOrDefault(x => x.Id == e.Action.MediaId && x.ClientId == clientId && !x.Off);
                     if (m == null || !Kiosk.CanOpen(m)) continue;
                     e.Action.Item.MediaId = m.Id;
                     e.Action.Item.Placement = "full";
@@ -156,7 +156,7 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
         var growth = db.Clients.FirstOrDefault(c => c.Id == p.ClientId)?.IsGrowth == true;   // QR code de comptage des scans : licence Pro
         return p.Draft
             .Where(i => !i.Off)   // désactivé dans la liste : gardé dans le brouillon, jamais publié
-            .Select(i => (i, m: db.Media.FirstOrDefault(x => x.Id == i.MediaId && x.ClientId == p.ClientId)))   // jamais un média d'un autre client
+            .Select(i => (i, m: db.Media.FirstOrDefault(x => x.Id == i.MediaId && x.ClientId == p.ClientId && !x.Off)))   // jamais un média d'un autre client ; un contenu désactivé n'est pas publié
             .Where(t => t.m != null && t.m.Status == null)   // une vidéo en cours de conversion n'est pas publiée
             .Select(t => Snapshot(db, t.i, t.m!, growth) is { } s ? Windowed(s, t.i) : null)
             .OfType<PublishedItem>()

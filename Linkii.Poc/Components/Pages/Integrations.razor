@@ -19,21 +19,24 @@
 @using Microsoft.JSInterop
 @inject IJSRuntime JS
 
-@* Page Applications (« Gérer mes applications ») : Mes applications et Store. Embed = "accounts" : la même page réduite aux comptes connectés,
-   affichée dans Réglages › Connexions › Comptes (maquettes/menu-applications-refonte.html). *@
+@* Deux pages distinctes, sans onglets : /applications (« Mes applications » : gérer les applications installées, menu, ordre) et /store (le Store).
+   Embed = "accounts" : la même page réduite aux comptes connectés, affichée dans Réglages › Connexions › Comptes (maquettes/menu-applications-refonte.html). *@
+@if (Mode != "app")
+{
 <div class="page-head @(Embed != null ? "emb-head" : "")">
     <div>
-        @if (Embed == null)
+        @if (Embed == null && tab == "store")
         {
-            <h1>Applications</h1>
-            <p class="sub sc-intro">Vos applications installées et le Store. Choisissez celles qui apparaissent dans le menu, et leur ordre.</p>
+            <h1>Store</h1>
+            <p class="sub sc-intro">Les applications que vous pouvez ajouter. « Utiliser » l'installe et la configure.</p>
         }
-        else
+        else if (Embed == null)
         {
-            <p class="sub sc-intro">Les comptes de l'organisation utilisés par vos applications. Un seul compte par fournisseur.</p>
+            <h1>Mes applications</h1>
+            <p class="sub sc-intro">Vos applications installées : leur état, leur configuration, et celles qui apparaissent dans le menu.</p>
         }
     </div>
-    @if (admin && accountsTab && Addable.Any())
+    @if (admin && accountsTab && Embed == null && Addable.Any())
     {
       <div class="row head-actions int-ha">
         <div class="kebab add-menu">
@@ -61,17 +64,6 @@
       </div>
     }
 </div>
-
-@if (admin && Embed == null)
-{
-<nav class="tabs int-tabs" role="tablist" aria-label="Mes applications et Store">
-    <button type="button" role="tab" class="@(tab == "mine" ? "on" : "")" aria-selected="@(tab == "mine" ? "true" : "false")" @onclick='() => SetTab("mine")'>
-        Mes applications <span class="cat-count">@MineCount</span>
-        @if (MineHasError) { <span class="tab-alert" title="Une application est en erreur"><span class="sr-only">Une application est en erreur</span></span> }
-    </button>
-    <button type="button" role="tab" class="@(tab == "store" ? "on" : "")" aria-selected="@(tab == "store" ? "true" : "false")" @onclick='() => SetTab("store")'><Ico Name="store" Size="16" /> Store <span class="cat-count">@StoreCount</span></button>
-</nav>
-}
 
 @if (!accountsTab)
 {
@@ -180,7 +172,7 @@ else
                         <b id="acc-@a.Id">@a.Kind</b>
                         <small class="acc-user"><span class="acc-dot @state.Css" title="@state.Label"></span><span class="sr-only">@state.Label : </span>@a.User</small>
                     </div>
-                    @{ var nInt = ConnectedAccounts.Kind(a.Id).Integrations.Count(); }
+                    @{ var nInt = ConnectedAccounts.Kind(a.Id).Integrations.Count(Enabled); }
                     <span class="acc-count">@nInt application@(nInt > 1 ? "s" : "")</span>
                     @* Look app : le bouton Reconnecter se voit sans ouvrir la carte quand le compte demande de l'attention *@
                     @if (a.Lost && oauth) { <a class="acc-reco" href="@Cu(ReconnectUrl(a))" target="_top" @onclick="() => { }" @onclick:stopPropagation="true">Reconnecter</a> }
@@ -219,7 +211,7 @@ else
                         <button type="button" class="btn danger sm" @onclick="() => EditConnection(a.Id)">Vérifier la connexion</button>
                     </div>
                 }
-                @foreach (var p in a.Permissions.Where(p => !p.Granted && p.Purpose != null && !a.Lost))
+                @foreach (var p in a.Permissions.Where(p => !p.Granted && p.Purpose != null && !a.Lost && Enabled(IntegrationFor(a.Id, p.Purpose))))
                 {
                     <div class="acc-alert">
                         <span class="grow">@PermName(p) : accès non autorisé</span>
@@ -227,19 +219,19 @@ else
                     </div>
                 }
                 <div class="acc-uses">
-                    @foreach (var id in ConnectedAccounts.Kind(a.Id).Integrations)
+                    @foreach (var id in ConnectedAccounts.Kind(a.Id).Integrations.Where(Enabled))
                     {
                         var intId = id;
                         <button type="button" class="acc-use" title="Gérer @IntegrationName(intId)" @onclick="() => Manage(intId)">
                             <AppIcon Id="@intId" Small="true" />
                             <span class="grow">@IntegrationName(intId)</span>
-                            <small>@(Enabled(intId) ? UsageText(intId) : "Inactive")</small>
+                            <small>@UsageText(intId)</small>
                         </button>
                     }
                 </div>
                 <div class="acc-foot">
                     <span class="acc-perms">Lecture :
-                        @foreach (var p in a.Permissions)
+                        @foreach (var p in a.Permissions.Where(p => p.Granted))
                         {
                             <span class="acc-perm @(p.Granted ? "" : "no")" title="@p.Label"><Ico Name="@(p.Granted ? "check" : "x")" Size="14" />@PermName(p)</span>
                         }
@@ -251,6 +243,7 @@ else
         }
     </div>
     <p class="acc-aside"><Ico Name="lock" Size="14" /><span>Ces comptes appartiennent à l'organisation et ne donnent qu'un accès en lecture. Se connecter à Linkivi avec Google ou Microsoft est autre chose : cela se règle dans <a href="account">Mon compte</a> et ne donne accès à aucun fichier ni agenda.</span></p>
+}
 }
 
 @if (calSource != null)
@@ -401,8 +394,7 @@ else
             {
             <div class="int-drawer-use">
                 <span>@UsageText(did)</span>
-                @if (did == Compositions.AppId) { <a class="btn ghost sm" href="/compositions">Ouvrir Compositions</a> }
-                else { <a class="btn ghost sm" href="/apps/@did">Voir les contenus</a> }
+                <a class="btn ghost sm" href="/apps/@did">Page de l'application</a>
             </div>
             }
         </div>
@@ -694,7 +686,7 @@ else
         if (id == "canva")
         {
             var c = Canva.Impact(Store.ClientId);
-            lines.Add((N(c.Files, "image", "images") + " dans la médiathèque", $"{N(c.Designs, "design", "designs")}, dossier « {CanvaService.MediaFolderName} » et dossiers synchronisés compris"));
+            lines.Add((N(c.Files, "image", "images") + " dans la médiathèque", $"{N(c.Designs, "design", "designs")}, dossiers synchronisés compris"));
             lines.Add(Usage(c.Playlists));
         }
         else
@@ -1031,9 +1023,7 @@ else
 
     private void Manage(string integrationId)
     {
-        if (integrationId.StartsWith("cal-")) calSource = integrationId[4..];
-        else if (integrationId.StartsWith("drv-")) driveSource = integrationId[4..];
-        else if (integrationId == "canva") cvOpen = true;
+        Nav.NavigateTo("/apps/" + integrationId);
     }
 
     // ---------- Comptes connectés ----------
@@ -1079,9 +1069,7 @@ else
     /// <summary>« Modifier la connexion » d'un serveur : la fenêtre de sa source (agendas, ou Drive pour Nextcloud et SFTP).</summary>
     private void EditConnection(string kind)
     {
-        if (ConnectedAccounts.IsDriveForm(kind)) driveSource = kind;
-        else if (kind == ConnectedAccounts.HomeAssistant) haOpen = true;
-        else calSource = kind;
+        if (ConnectedAccounts.Kind(kind).Integrations.FirstOrDefault() is { } id) Nav.NavigateTo("/apps/" + id);   // la connexion se modifie depuis la page de l'application (Configurer)
     }
 
     /// <summary>Le compte se gère dans la carte de son application (menu ⋮ › Reconnecter ou changer de compte) : on ouvre l'assistant à l'étape Connexion.</summary>
@@ -1164,25 +1152,37 @@ else
             }
         }
         else tab = "accounts";
-        if (TabParam == "store" && admin && Embed == null) tab = "store";   // lien « Ouvrir le Store complet » du tiroir de la barre du haut, ou entrée Store du menu
+        if (TabParam == "store" && Embed == null) { Nav.NavigateTo("/store", replace: true); return; }   // ancien lien vers l'onglet Store : c'est une page
         Load();
         CanvaReturn();
         GoogleReturn();
         MicrosoftReturn();
         DropboxReturn();
         FacebookReturn();
-        if (Embed != null) return;
+        if (Embed != null || Mode == "app") return;
         AddFromLink();
         // ?gerer=<application> (entrée du menu, page d'une application) : sa fenêtre de configuration ; ?retirer=<application> : la confirmation du retrait
+        if (MontrerParam is { Length: > 0 } mo) { flashInt = mo; revealPending = true; }   // retour du Store après « Utiliser »
         if (admin && GererParam is { Length: > 0 } g && AllRows().FirstOrDefault(r => r.E.Id == g) is { } gr) OpenFor(gr.E);
         if (admin && RetirerParam is { Length: > 0 } rt && AllRows().FirstOrDefault(r => r.E.Id == rt) is { } rr && CanRetire(rt)) Retire(rr.E);
     }
 
     [SupplyParameterFromQuery(Name = "gerer")] public string? GererParam { get; set; }
+    [SupplyParameterFromQuery(Name = "montrer")] public string? MontrerParam { get; set; }
     [SupplyParameterFromQuery(Name = "retirer")] public string? RetirerParam { get; set; }
 
     /// <summary>« accounts » : la page réduite aux comptes connectés, dans Réglages › Connexions.</summary>
     [Parameter] public string? Embed { get; set; }
+
+    /// <summary>« store » : la page Store (/store, StorePage) ; « app » : seulement les fenêtres (configuration, retrait), pour la page d'une application ; sinon Mes applications.</summary>
+    [Parameter] public string? Mode { get; set; }
+
+    /// <summary>Quelque chose a changé (configuration, retrait, compte) : la page d'une application se relit.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    public void ConfigureById(string id) { if (EntryOf(id) is { } e) { OpenDialogFor(e); StateHasChanged(); } }
+    public async Task RetireById(string id) { if (EntryOf(id) is { } e) { await Retire(e); StateHasChanged(); } }
+    public void SyncById(string id) => Resync(id);
 
     /// <summary>Connexion lancée depuis Réglages › Connexions : le retour s'y fait (AccountPurposes.ReturnPage).</summary>
     private string Cu(string url) => Embed != null ? url + "&from=settings" : url;
@@ -1193,6 +1193,7 @@ else
     // ---------- Groupe « Applications » du menu ----------
 
     private List<string> menuIds = new();
+    private bool loaded;
     private bool InMenu(string id) => menuIds.Contains(id);
     private int MenuIndex(string id) => menuIds.IndexOf(id);
     private void SetMenu(string id, bool on)
@@ -1218,6 +1219,12 @@ else
     // « Utiliser » du tiroir Store de la barre du haut : le même geste que le bouton du Store, sur l'application demandée.
     protected override void OnParametersSet()
     {
+        // /store (StorePage, Mode = "store") et /applications : deux pages distinctes
+        if (Embed == null)
+        {
+            var t = Mode == "store" && admin ? "store" : "mine";
+            if (t != tab) SetTab(t);
+        }
         if (UseParam is not { Length: > 0 } id || id == usedParam) return;
         usedParam = id;
         if (!admin || AllRows().FirstOrDefault(r => r.E.Id == id) is not { } row || InMine(row)) return;
@@ -1261,6 +1268,8 @@ else
         enabled = Svc.Installed().Select(a => a.AppId).ToHashSet();
         added = Store.Read(d => d.Tenant.IntegrationsAdded.ToHashSet());
         menuIds = Store.Read(d => AppMenu.Ids(d.Tenant).ToList());
+        if (loaded) { Svc.NotifyChanged(); _ = OnChanged.InvokeAsync(); }   // retrait, déconnexion : le menu et la page d'une application suivent sans recharger
+        loaded = true;
         counts = Store.Read(d => d.Media.Where(m => m.AppId != null).GroupBy(m => m.AppId!).ToDictionary(g => g.Key, g => g.Count()));
         tenant = Store.Read(d => d.Tenant);
         accounts = ConnectedAccounts.Of(tenant);
@@ -1340,7 +1349,7 @@ else
         : id == "facebook" ? "Voir les Pages…" : id == "ha-home" ? "Voir les entités…" : "Voir les fichiers…";
 
     /// <summary>Applications qui copient du contenu dans la médiathèque : « Resynchroniser maintenant ».</summary>
-    private static bool HasSync(string id) => id == "canva" || id.StartsWith("drv-");
+    public static bool HasSync(string id) => id == "canva" || id.StartsWith("drv-");
 
     private string CurrentAccount(string id) => ConnectedAccounts.For(id) is { } k ? AccountOf(k)?.User ?? "" : "";
 
@@ -1353,7 +1362,7 @@ else
         Toast.Ok("Synchronisation lancée : les fichiers arrivent dans la médiathèque.");
     }
 
-    private static bool HasWizard(string id) => id == "canva" || id.StartsWith("drv-") || id is "cal-google" or "cal-m365" or "cal-caldav" or "cal-ews" or "google-slides" or "google-docs" or "ms-powerpoint" or "facebook" or "ha-home";
+    public static bool HasWizard(string id) => id == "canva" || id.StartsWith("drv-") || id is "cal-google" or "cal-m365" or "cal-caldav" or "cal-ews" or "google-slides" or "google-docs" or "ms-powerpoint" or "facebook" or "ha-home";
 
     private void OpenWizard(string id, int step, bool adding) { pendingUse = null; wizId = id; wizStep = step; wizAdding = adding; }
 
@@ -1407,6 +1416,12 @@ else
     /// <summary>« Gérer » / « Corriger » d'une carte de Mes applications : le tiroir de sa configuration.</summary>
     private void OpenFor(CatalogView.Entry e)
     {
+        if (Mode != "app") { Nav.NavigateTo("/apps/" + e.Id); return; }   // la configuration s'ouvre depuis la page de l'application, bouton Configurer
+        OpenDialogFor(e);
+    }
+
+    private void OpenDialogFor(CatalogView.Entry e)
+    {
         pendingUse = null;
         if (HasWizard(e.Id)) OpenWizard(e.Id, 2, false);
         else if (CalSource(e) is { } cal) calSource = cal;
@@ -1419,8 +1434,10 @@ else
         Load();
         if (pendingUse is not { } id) return;
         pendingUse = null;
-        tab = "mine"; filter = string.Empty; search = string.Empty;
+        filter = string.Empty; search = string.Empty;
         flashInt = id; revealPending = true;
+        if (tab == "store") Nav.NavigateTo("/applications?montrer=" + Uri.EscapeDataString(id));   // le Store est une page à part : on passe sur Mes applications, l'application mise en évidence
+        else tab = "mine";
     }
 
     private void RetireApp(AppManifest m)

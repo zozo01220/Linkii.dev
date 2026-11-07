@@ -121,12 +121,11 @@ public class LocalDocuments(PdfService pdf, OfficeConverter office, JsonStore st
 
             if (res.Presentation is { } pres) return (new(pres, source, res, src, reused), null);
 
-            // une seule page : une image ordinaire, rangée elle aussi dans « intégration_médias » ; le PDF d'origine n'a plus d'usage
+            // une seule page : une image ordinaire, à la racine de la médiathèque ; le PDF d'origine n'a plus d'usage
             var image = store.Write(d =>
             {
-                var folder = Pres.FolderFor(d, clientId, areaId ?? Guid.Empty, src);
                 var live = d.Media.First(m => m.Id == res.Files[0].Id);
-                live.FolderId = folder;
+                live.FolderId = null;
                 return live;
             });
             pdf.Release(source.Id);

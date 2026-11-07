@@ -609,6 +609,8 @@ public class HomeAssistantAccount
     public bool AlertSent { get; set; }
     public DateTime? EntitiesUtc { get; set; }
     public List<HomeAssistantEntity> Entities { get; set; } = new();
+    /// <summary>Entités proposées dans les choix : celles qui ne sont pas désactivées.</summary>
+    public List<HomeAssistantEntity> Active() => Entities.Where(e => !e.Off).ToList();
     /// <summary>Entités choisies dans des widgets ou des jeux de données, mais absentes de l'instance à la dernière actualisation (supprimées ou renommées).</summary>
     public List<string> Missing { get; set; } = new();
     /// <summary>Version de la mise en place (widgets activés, source de données créée) déjà appliquée à ce compte : la migration au démarrage ne la refait pas.</summary>
@@ -674,8 +676,9 @@ public class HomeAssistantEntity
     public string Domain { get; set; } = "";
     public string Unit { get; set; } = "";
     public string DeviceClass { get; set; } = "";
+    public bool Off { get; set; }   // désactivée dans la page de l'application : n'est plus proposée (widgets, plans, jeux de données, compositions)
 
-    public HomeAssistantEntity Copy() => new() { Id = Id, Name = Name, Domain = Domain, Unit = Unit, DeviceClass = DeviceClass };
+    public HomeAssistantEntity Copy() => new() { Id = Id, Name = Name, Domain = Domain, Unit = Unit, DeviceClass = DeviceClass, Off = Off };
 }
 
 /// <summary>
@@ -704,6 +707,7 @@ public class FacebookPageAccess
     public string Id { get; set; } = "";
     public string Name { get; set; } = "";
     public string Token { get; set; } = "";
+    public bool Off { get; set; }   // désactivée dans la page de l'application : n'est plus proposée
 }
 
 /// <summary>Un dossier d'un Drive (Google Drive, OneDrive / SharePoint, Nextcloud, SFTP, Dropbox), copié dans la médiathèque (fichiers masqués, Info["drive"] = Id) et affiché par l'app « Dossier Drive ».</summary>
@@ -759,6 +763,7 @@ public class SharedCalendar
     public string Name { get; set; } = "";
     public string Ref { get; set; } = "";         // adresse de la boîte, ID Google, chemin CalDAV ; lien ICS : chiffré
     public string Hint { get; set; } = "";        // affichage (le lien ICS n'est jamais réaffiché en entier)
+    public bool Off { get; set; }                 // désactivé dans la page de son application : n'est plus proposé pour un contenu
 
     // Réservation de salle : le calendrier est une salle. Réglé sur la ligne du calendrier (Applications), sans contenu intermédiaire.
     public bool Room { get; set; }
@@ -1025,6 +1030,8 @@ public class MediaItem : IClientOwned, IAreaOwned, IOwned
     public int? Height { get; set; }
     /// <summary>Compteur de rotations du fichier : ajouté aux adresses des miniatures pour que les navigateurs les rechargent.</summary>
     public int Rev { get; set; }
+    /// <summary>Contenu désactivé (interrupteur de la page de son application) : absent de la médiathèque, des compositions, des listes de lecture et de la diffusion.</summary>
+    public bool Off { get; set; }
     public DateTime? AddedUtc { get; set; }
     /// <summary>Dossier de la médiathèque (null : racine de l'aire). Voir <see cref="MediaFolder"/>.</summary>
     public Guid? FolderId { get; set; }

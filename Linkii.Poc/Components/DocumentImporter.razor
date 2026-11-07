@@ -128,21 +128,19 @@
 
     private async Task Finish(PdfService.Source source, PdfService.ConvertResult res, string src, bool reused, bool updated)
     {
-        var folder = Pres.FolderName(src);
         if (res.Presentation == null)
         {
-            // une seule page : une image ordinaire, rangée elle aussi dans « intégration_médias » ; le PDF d'origine n'a plus d'usage
+            // une seule page : une image ordinaire, à la racine de la médiathèque ; le PDF d'origine n'a plus d'usage
             Store.Write(d =>
             {
-                var f = Pres.FolderFor(d.Root, Store.ClientId, Store.AreaId ?? Guid.Empty, src);
-                foreach (var img in res.Files) if (d.Media.FirstOrDefault(m => m.Id == img.Id) is { } live) live.FolderId = f;
+                foreach (var img in res.Files) if (d.Media.FirstOrDefault(m => m.Id == img.Id) is { } live) live.FolderId = null;
             });
             Pdf.Release(source.Id);
-            Toast.Ok($"« {source.Title} » importé : 1 image dans la médiathèque › {folder}.");
+            Toast.Ok($"« {source.Title} » importé : 1 image dans la médiathèque.");
         }
         else if (reused) Toast.Ok($"« {source.Title} » est déjà dans la médiathèque : réutilisé.");
         else if (updated) Toast.Ok($"« {source.Title} » avait changé : mis à jour.");
-        else Toast.Ok($"« {source.Title} » importé : {source.Pages} page{(source.Pages > 1 ? "s" : "")} dans la médiathèque › {folder}.");
+        else Toast.Ok($"« {source.Title} » importé : {source.Pages} page{(source.Pages > 1 ? "s" : "")} dans la médiathèque.");
         await OnImported.InvokeAsync(res.Presentation?.Id ?? res.Files.FirstOrDefault()?.Id);
     }
 

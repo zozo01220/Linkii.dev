@@ -51,18 +51,15 @@ public static class AppMenu
     /// <summary>Entrées affichées dans le menu : celles encore installées, dans l'ordre.</summary>
     public static List<string> Shown(ClientDb d) => Ids(d.Tenant).Where(id => Installed(d, id)).ToList();
 
-    /// <summary>Page ouverte par l'entrée du menu.</summary>
+    /// <summary>Page ouverte par l'entrée du menu : la page de l'application (/apps/{id}), où se trouve sa configuration.</summary>
     public static string Href(string id) => id switch
     {
-        Home => "plans",
-        Compositions.AppId => "compositions",
-        _ when id.StartsWith("cal-") || id.StartsWith("drv-") => "applications?gerer=" + id,
         _ => "apps/" + id
     };
 
     /// <summary>Nom affiché dans le menu.</summary>
     public static string Label(string id, AppCatalog catalog) =>
-        id == Home ? "Plans du bâtiment"
+        id == Home ? "Home Assistant"
         : id.StartsWith("cal-") ? SharedCalendarSources.Find(id[4..])?.Name ?? id
         : id.StartsWith("drv-") ? DriveSources.Find(id[4..])?.Name ?? id
         : catalog.Find(id)?.Name ?? id;

@@ -93,11 +93,11 @@ public class FacebookAuth(IConfiguration config, JsonStore store, SecretBox box,
     {
         var c = d.Clients.FirstOrDefault(x => x.Id == clientId);
         if (c == null || c.FacebookConnectedUtc == null) return;
-        c.FacebookLostUtc = DateTime.UtcNow; c.FacebookPages = c.FacebookPages.Select(x => new FacebookPageAccess { Id = x.Id, Name = x.Name }).ToList();
+        c.FacebookLostUtc = DateTime.UtcNow; c.FacebookPages = c.FacebookPages.Select(x => new FacebookPageAccess { Id = x.Id, Name = x.Name, Off = x.Off }).ToList();
     });
 
     /// <summary>Pages administrées par le compte connecté (vide s'il n'est pas connecté ou perdu).</summary>
-    public static List<FacebookPageAccess> Pages(Tenant t) => Has(t) ? t.FacebookPages.Where(p => p.Token.Length > 0).ToList() : new();
+    public static List<FacebookPageAccess> Pages(Tenant t) => Has(t) ? t.FacebookPages.Where(p => p.Token.Length > 0 && !p.Off).ToList() : new();
 
     /// <summary>Jeton de Page déchiffré, ou null si cette Page n'est pas administrée par le compte connecté.</summary>
     public string? PageToken(Tenant t, string pageId) =>

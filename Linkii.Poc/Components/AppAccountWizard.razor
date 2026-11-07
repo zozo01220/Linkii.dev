@@ -5,10 +5,11 @@
 @inject GoogleAuth GoogleAuth
 @inject MicrosoftAuth MsAuth
 @inject FacebookAuth FacebookAuth
+@inject CloudFileService Importer
 
 @* Applications › Google Slides, Google Docs, Microsoft PowerPoint, Facebook : assistant d'ajout, dans un tiroir du haut (maquette canva-assistant-ajout.html).
-   1. Connexion du compte ; 2. aperçu de ce que le compte donne (fichiers du Drive, Pages Facebook) : le choix se fait ensuite dans une liste de lecture ;
-   3. validation, puis ajout. Rien n'est gardé avant « Ajouter » ; Annuler déconnecte le compte connecté pendant l'assistant
+   1. Connexion du compte ; 2. fichiers du Drive à importer (cochés : ils entrent dans la médiathèque) ou Pages Facebook ;
+   3. validation, puis ajout et import. Rien n'est gardé avant « Ajouter » ; Annuler déconnecte le compte connecté pendant l'assistant
    (sauf s'il sert à une autre application). *@
 <WizardShell Icon="@AppId" Title="@(Adding ? "Ajouter " + Name : Name)" Subtitle="@StepLine" Labels="@Labels" Step="step" Done="done" Running="done"
              CanBack="@(step > 1 && !done)" Hint="@Hint" NextLabel="@NextLabel" NextDisabled="NextDisabled"
@@ -38,10 +39,10 @@
                 @if (files.Count == 0) { <div class="dfp-empty">Aucun fichier de ce type à la racine. Vous pourrez chercher dans tous vos dossiers depuis une liste de lecture.</div> }
                 else
                 {
-                    <ul class="cw-events">@foreach (var f in files.Take(20)) { <li><span class="cw-when">@f.Info</span><span class="cw-ttl">@f.Name</span></li> }</ul>
+                    <ul class="cw-events">@foreach (var f in files.Take(20)) { var fr = f.Ref; <li><label style="display:flex;gap:10px;align-items:center;cursor:pointer"><input type="checkbox" class="sc-check" checked="@chosen.Contains(fr)" @onchange="() => Toggle(fr)" /><span class="cw-when">@f.Info</span><span class="cw-ttl">@f.Name</span></label></li> }</ul>
                 }
             }
-            <div class="cw-skip">ℹ @(AppId == "facebook" ? "Vous choisirez la Page à afficher depuis une liste de lecture." : "Vous choisirez le fichier à diffuser depuis une liste de lecture : Linkivi le convertit en images, lues même hors ligne.")</div>
+            <div class="cw-skip">ℹ @(AppId == "facebook" ? "Vous choisirez la Page à afficher depuis une liste de lecture." : "Les fichiers cochés sont importés dans la médiathèque : Linkivi les convertit en images, lues même hors ligne.")</div>
         </div>
     }
     else
@@ -50,11 +51,13 @@
             <div class="cw-kpis">
                 <div><b>1</b><small>compte @Provider</small></div>
                 <div><b>@(AppId == "facebook" ? pages.Count : files.Count)</b><small>@(AppId == "facebook" ? "Page" : FileNoun.ToLowerInvariant())@((AppId == "facebook" ? pages.Count : files.Count) > 1 ? "s" : "") visible@((AppId == "facebook" ? pages.Count : files.Count) > 1 ? "s" : "")</small></div>
-                <div><b>0</b><small>fichier copié maintenant</small></div>
+                <div><b>@(AppId == "facebook" ? 0 : chosen.Count)</b><small>@(chosen.Count > 1 ? "fichiers importés" : "fichier importé") maintenant</small></div>
                 <div><b>immédiat</b><small>prêt à l'emploi</small></div>
             </div>
             <p class="cw-dest">Compte : <b>@(user.Length > 0 ? user : Provider)</b> · lecture seule. @Name sera proposé dans les listes de lecture.</p>
+            @if (importing) { <div class="cw-run"><span>@status</span><span></span></div> }
             @if (done) { <div class="cw-run"><span>Terminé : @Name est dans Mes applications.</span><span>100 %</span></div><div class="cw-bar"><i class="ok" style="width:100%"></i></div> }
+            @foreach (var e in importErrors) { <div class="dfp-empty err">@e</div> }
         </div>
     }
 </WizardShell>
@@ -81,7 +84,10 @@
         : new[] { "Lire vos fichiers (" + FileNoun.ToLowerInvariant() + ")", "Les convertir en images pour vos écrans", "Lire le nom de votre profil" };
 
     private int step = 1;
-    private bool ready, connected, lost, loading, done;
+    private bool ready, connected, lost, loading, done, importing;
+    private readonly HashSet<string> chosen = new();
+    private readonly List<string> importErrors = new();
+    private string status = "";
     private string user = "", Missing = "";
     private string? error;
     private DateTime? since;
@@ -95,7 +101,7 @@
         2 => "Étape 2 sur 3 — ce que votre compte donne",
         _ => done ? "Étape 3 sur 3 — terminé" : "Étape 3 sur 3 — vérifiez, puis ajoutez l'application"
     };
-    private bool NextDisabled => step == 1 && !connected || step == 2 && (loading || error != null);
+    private bool NextDisabled => importing || step == 1 && !connected || step == 2 && (loading || error != null);
     private string NextLabel => step < 3 ? "Suivant" : done ? "Terminer" : "Ajouter";
     private string Hint => step == 1 && !connected ? "Connectez un compte pour continuer." : "";
 
@@ -149,6 +155,7 @@
             {
                 var l = await Drives.BrowseFiles(t, Cloud, DriveSources.Roots(Cloud.Source)[0].Key, null);
                 files = l.Files; more = l.More;
+                chosen.Clear(); chosen.UnionWith(files.Take(20).Select(f => f.Ref));   // tout est coché : on décoche ce qu'on ne veut pas
             }
         }
         catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or System.Text.Json.JsonException or KeyNotFoundException or TaskCanceledException) { error = ex.Message; }
@@ -164,7 +171,9 @@
         await OnClose.InvokeAsync();
     }
 
-    private void Back() { if (step > 1) step--; }
+    private void Back() { if (step > 1 && !importing) step--; }
+
+    private void Toggle(string fileRef) { if (!chosen.Remove(fileRef)) chosen.Add(fileRef); }
 
     private async Task Next()
     {
@@ -178,6 +187,27 @@
     {
         if (Adding) { Svc.Mark(AppId); await OnAdded.InvokeAsync(); }
         Svc.Enable(AppId);
+        if (AppId != "facebook" && chosen.Count > 0)
+        {
+            importing = true; importErrors.Clear();
+            var tenant = Store.Read(d => d.Tenant);
+            foreach (var node in files.Where(f => chosen.Contains(f.Ref)).ToList())
+            {
+                status = $"Import de « {node.Name} »…";
+                StateHasChanged();
+                var src = Cloud.SrcOf(node.Name);
+                try
+                {
+                    var (imported, err) = await Importer.Import(tenant, Store.ClientId, Store.AreaId, Cloud, node.Ref, null,
+                        new PdfService.Options("", "none", "landscape", Pres.Unit(src), src), new Progress<string>(s => { status = $"« {node.Name} » : {s}"; _ = InvokeAsync(StateHasChanged); }));
+                    if (imported == null) { importErrors.Add($"« {node.Name} » : {err ?? "import impossible."}"); continue; }
+                    if (imported.Result.Presentation == null)   // une seule page : une image ordinaire, à la racine, rattachée au fichier d'origine
+                        Store.Write(d => { foreach (var img in imported.Result.Files) if (d.Media.FirstOrDefault(m => m.Id == img.Id) is { } live) { live.FolderId = null; live.Info["key"] = Cloud.KeyOf(node.Ref); live.Info["src"] = src; live.Info["file"] = node.Name; } });
+                }
+                catch (Exception ex) { importErrors.Add($"« {node.Name} » : {ex.Message}"); }
+            }
+            importing = false;
+        }
         done = true;
         await OnChanged.InvokeAsync();
     }

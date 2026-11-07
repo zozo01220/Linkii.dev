@@ -347,7 +347,6 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
             var name = design.Title.Length > 120 ? design.Title[..120] : design.Title;
             pres = new MediaItem { Id = presId, ClientId = clientId, AreaId = areaId ?? Guid.Empty, Name = name, Type = Pres.Type, AddedUtc = DateTime.UtcNow, Width = files[0].Width, Height = files[0].Height };
             pres.Info["src"] = "canva";
-            pres.FolderId = Pres.FolderFor(d, clientId, pres.AreaId, "canva");   // « Canva_médias »
             d.Media.Add(pres);
         }
         foreach (var f in files) f.FolderId = pres.FolderId;   // les pages suivent la carte
@@ -399,7 +398,6 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
     // ---------- Dossiers Canva synchronisés ----------
 
     public const int MaxDesigns = 60;               // par dossier, sous-dossiers compris : chaque design est un export chez Canva
-    public const string MediaFolderName = "Canva_médias";
 
     public record CanvaNode(string Id, string Name);
     public record CanvaListing(string Id, string Name, List<CanvaNode> Folders, int Designs, List<Design> Items);
@@ -496,17 +494,6 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
 
     private static string Stamp(Design d) => d.Updated is { } u ? new DateTimeOffset(u, TimeSpan.Zero).ToUnixTimeSeconds().ToString() : "";
 
-    /// <summary>Dossier « Canva_médias » de la médiathèque : retrouvé ou créé à la racine de l'aire.</summary>
-    private Guid MediaFolderFor(Guid clientId, Guid? areaId) => store.Write(d =>
-    {
-        var t = d.Clients.First(c => c.Id == clientId);
-        if (t.CanvaMediaFolderId is { } id && d.MediaFolders.Any(f => f.ClientId == clientId && f.Id == id)) return id;
-        var same = d.MediaFolders.FirstOrDefault(f => f.ClientId == clientId && f.AreaId == (areaId ?? Guid.Empty) && f.ParentId == null && f.Name == MediaFolderName);
-        if (same == null) { same = new MediaFolder { ClientId = clientId, AreaId = areaId ?? Guid.Empty, Name = MediaFolderName }; d.MediaFolders.Add(same); }
-        t.CanvaMediaFolderId = same.Id;
-        return same.Id;
-    });
-
     private void Mark(Guid clientId, Guid folderId, Action<CanvaFolder> change) =>
         store.Write(d => { if (d.Clients.FirstOrDefault(c => c.Id == clientId)?.CanvaFolders.FirstOrDefault(f => f.Id == folderId) is { } f) change(f); });
 
@@ -530,7 +517,6 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
             DeleteFiles(clientId, local.Where(m => !ids.Contains(m.Info.GetValueOrDefault("canvaDesign") ?? "")).Select(m => m.Id), synced: true);   // sortis du dossier
 
             var todo = designs.Where(d => !local.Any(m => m.Info.GetValueOrDefault("canvaDesign") == d.Id && m.Info.GetValueOrDefault("canvaUpdated") == Stamp(d))).ToList();
-            var target = MediaFolderFor(clientId, areaId);
             for (var i = 0; i < todo.Count; i++)
             {
                 if (ct.IsCancellationRequested) break;
@@ -539,7 +525,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
                 var res = await Export(clientId, design, "images", null, ct, areaId);
                 if (res.Error != null) { error ??= $"« {design.Title} » : {res.Error}"; continue; }
                 var old = local.Where(m => m.Info.GetValueOrDefault("canvaDesign") == design.Id).ToList();   // version précédente : remplacée, dans le même dossier de la médiathèque
-                var shelf = old.FirstOrDefault(m => m.FolderId != null)?.FolderId ?? target;
+                var shelf = old.FirstOrDefault(m => m.FolderId != null)?.FolderId;
                 var fresh = res.Files.Select(f => f.Id).ToHashSet();
                 store.Write(d =>
                 {

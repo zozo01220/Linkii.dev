@@ -16,6 +16,18 @@ public static class Pres
 
     public static bool Is(MediaItem m) => m.Type == Type && m.AppId == null;
 
+    /// <summary>Contenu rangé sous une application (onglet Contenus de sa page) : ses contenus, les présentations qu'elle a importées et, pour Canva, les fichiers synchronisés.</summary>
+    public static bool Belongs(MediaItem m, string appId)
+    {
+        if (m.AppId == appId) return true;
+        if (m.Info.ContainsKey("pres")) return false;   // page d'une présentation
+        var src = m.Info.GetValueOrDefault("src");
+        if (appId == "canva") return m.Info.ContainsKey("canvaFolder") || m.Info.ContainsKey("canva") || Is(m) && src == "canva";
+        if (appId == "pdf") return Is(m) && src == "pdf";
+        var kind = CloudFileKind.ForPresentation(m)?.AppId;
+        return kind == appId || appId == "ms-powerpoint" && kind == "ms-document" || appId == "google-docs" && kind == "google-sheets";
+    }
+
     /// <summary>Image d'une page de présentation (cachée de la grille de la médiathèque).</summary>
     public static bool IsPage(MediaItem m) => m.AppId == null && m.Type == "image" && m.Info.ContainsKey("pres");
 
@@ -32,27 +44,6 @@ public static class Pres
 
     /// <summary>Pastille de source dans l'aperçu de la carte.</summary>
     public static string Label(string? src) => src switch { "ppt" => "PPT", "gslides" => "GSlides", "gdocs" => "GDocs", "gsheets" => "GSheets", "doc" => "DOC", "xls" => "XLS", "pdf" => "PDF", "canva" => "Canva", _ => "" };
-
-    /// <summary>Nom du dossier de la médiathèque qui reçoit les présentations d'une source (comme « Canva_médias » et « OneDrive_médias »).</summary>
-    public static string FolderName(string? src) => src switch { "ppt" => "PowerPoint", "gslides" => "GoogleSlides", "gdocs" => "GoogleDocs", "gsheets" => "GoogleSheets", "doc" => "Word", "xls" => "Excel", "canva" => "Canva", _ => "PDF" } + "_médias";
-
-    /// <summary>
-    /// Dossier « intégration_médias » de la médiathèque pour une source : retrouvé (même renommé) ou créé à la racine de l'aire, comme pour Canva et les Drives.
-    /// </summary>
-    public static Guid FolderFor(Db db, Guid clientId, Guid areaId, string? src)
-    {
-        var t = db.Clients.First(c => c.Id == clientId);
-        var area = areaId != Guid.Empty ? areaId : db.Areas.FirstOrDefault(a => a.ClientId == clientId)?.Id ?? Guid.Empty;
-        if (src == "canva" && t.CanvaMediaFolderId is { } cid && db.MediaFolders.Any(f => f.ClientId == clientId && f.Id == cid)) return cid;   // le dossier de Canva est déjà celui des exports
-        var key = "pres-" + (src ?? "pdf") + "-" + area;
-        if (t.IntegrationMediaFolders.TryGetValue(key, out var id) && db.MediaFolders.Any(f => f.ClientId == clientId && f.Id == id)) return id;
-        var name = FolderName(src);
-        var same = db.MediaFolders.FirstOrDefault(f => f.ClientId == clientId && f.AreaId == area && f.ParentId == null && f.Name == name);
-        if (same == null) { same = new MediaFolder { ClientId = clientId, AreaId = area, Name = name }; db.MediaFolders.Add(same); }
-        t.IntegrationMediaFolders[key] = same.Id;
-        if (src == "canva") t.CanvaMediaFolderId = same.Id;
-        return same.Id;
-    }
 
     public static string Unit(string? src) => src is "ppt" or "gslides" ? "diapositive" : "page";
 

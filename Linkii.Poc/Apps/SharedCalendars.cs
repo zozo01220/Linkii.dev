@@ -45,7 +45,7 @@ public static class SharedCalendarSources
 
     /// <summary>Calendriers proposés pour un nouveau contenu : ceux des sources actives et configurées.</summary>
     public static IEnumerable<SharedCalendar> Offered(Tenant t) => t.SharedCalendars
-        .Where(c => Enabled(t, c.Source) && Configured(t, c.Source))
+        .Where(c => !c.Off && Enabled(t, c.Source) && Configured(t, c.Source))
         .OrderBy(c => Order(c.Source)).ThenBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase);
 
     /// <summary>
@@ -91,7 +91,7 @@ public static class SharedCalendarSources
     };
 
     public static string RoomName(SharedCalendar c) => c.RoomName.Trim().Length > 0 ? c.RoomName.Trim() : c.Name;
-    public static List<MediaItem> RoomContents(Tenant t) => t.SharedCalendars.Where(c => c.Room).OrderBy(c => RoomName(c), StringComparer.CurrentCultureIgnoreCase).Select(c => RoomContent(t, c)).ToList();
+    public static List<MediaItem> RoomContents(Tenant t) => t.SharedCalendars.Where(c => c.Room && !c.Off).OrderBy(c => RoomName(c), StringComparer.CurrentCultureIgnoreCase).Select(c => RoomContent(t, c)).ToList();
     public static MediaItem? RoomContent(Tenant? t, Guid id) => t != null && t.SharedCalendars.FirstOrDefault(c => c.Id == id && c.Room) is { } c ? RoomContent(t, c) : null;
 
     /// <summary>Lien ICS raccourci pour l'affichage : domaine et fin du chemin, jamais le jeton complet.</summary>

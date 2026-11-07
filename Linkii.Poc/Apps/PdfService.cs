@@ -269,7 +269,6 @@ public class PdfService(JsonStore store, ILogger<PdfService> log)
                 var name = source.Title.Length > 120 ? source.Title[..120] : source.Title;
                 p = new MediaItem { Id = presId, ClientId = clientId, AreaId = areaId ?? Guid.Empty, Name = name, Type = Pres.Type, AddedUtc = DateTime.UtcNow, Width = made.FirstOrDefault(m => Pres.PageOf(m) == 1)?.Width ?? made.FirstOrDefault()?.Width, Height = made.FirstOrDefault(m => Pres.PageOf(m) == 1)?.Height ?? made.FirstOrDefault()?.Height };
                 p.Info["src"] = options.Src; p.Info["pdfId"] = source.Id; p.Info["gen"] = gen; p.Info["synced"] = DateTime.UtcNow.ToString("o");
-                p.FolderId = Pres.FolderFor(d, clientId, p.AreaId, options.Src);   // rangée dans « intégration_médias » (comme Canva)
                 d.Media.Add(p);
             }
             foreach (var f in made) f.FolderId = p.FolderId;   // ses images suivent sa carte

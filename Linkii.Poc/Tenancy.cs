@@ -146,7 +146,8 @@ public class ClientDb
         // ce qu'une personne de l'organisation crée lui appartient ; l'équipe Linkivi ou un revendeur qui entre dans l'espace crée pour l'organisation.
         // Médias, listes, dossiers et modèles n'ont plus d'aire : ils sont à leur propriétaire (rangés dans l'aire ouverte, sans effet).
         var me = Me = Access.UserId is { } uid && root.Users.Any(u => u.Id == uid && u.ClientId == clientId) ? uid : (Guid?)null;
-        Media = new(root.Media, clientId, null, null, me, area);
+        Media = new(root.Media, clientId, null, m => !m.Off, me, area);   // un contenu désactivé n'existe plus pour le reste de l'application
+        AllMedia = new(root.Media, clientId, null, null, me, area);
         MediaFolders = new(root.MediaFolders, clientId, null, null, me, area);
         PlaylistFolders = new(root.PlaylistFolders, clientId, null, null, me, area);
         CompositionFolders = new(root.CompositionFolders, clientId, null, null, me, area);
@@ -170,6 +171,8 @@ public class ClientDb
     /// <summary>Écrans de toutes les aires que la personne voit (diffusion d'une liste, utilisation d'un média…).</summary>
     public ScopedList<Screen> AllScreens { get; }
     public ScopedList<MediaItem> Media { get; }
+    /// <summary>Tous les médias, désactivés compris (page de l'application qui les a importés).</summary>
+    public ScopedList<MediaItem> AllMedia { get; }
     /// <summary>Dossiers de la médiathèque (voir <see cref="MediaFolder"/>).</summary>
     public ScopedList<MediaFolder> MediaFolders { get; }
     /// <summary>Dossiers des listes de lecture (voir <see cref="PlaylistFolder"/>).</summary>

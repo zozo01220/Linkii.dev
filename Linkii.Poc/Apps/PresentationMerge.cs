@@ -80,7 +80,6 @@ public class PresentationMerge(JsonStore store, ILogger<PresentationMerge> log)
             if (!isCanva) pres.Info["pdfId"] = pdfId;
             if (c.Settings.GetValueOrDefault("gfileMod") is { Length: > 0 } mod) pres.Info["mod"] = mod;
             if ((c.Settings.GetValueOrDefault("gfileName") ?? title) is { Length: > 0 } file) pres.Info["file"] = file;
-            pres.FolderId = Pres.FolderFor(d, clientId, pres.AreaId, pres.Info["src"]);   // rangée dans « intégration_médias »
             d.Media.Add(pres);
             for (var i = 0; i < Math.Min(images.Count, pgs.Count); i++)
             {

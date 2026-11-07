@@ -50,6 +50,22 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
 
     /// <summary>Groupe « Applications » du menu : afficher ou retirer une application (AppMenu). Le menu se met à jour sans recharger.</summary>
     public void SetMenu(string id, bool on) { store.Write(d => { RequireAdmin(d); AppMenu.Set(d.Tenant, id, on); }); InstallsChanged?.Invoke(); }
+    /// <summary>Interrupteur d'un contenu de la page d'une application. kind : media | calendar | page | entity. Désactivé, il disparaît des choix (médiathèque, compositions, listes de lecture, diffusion).</summary>
+    public void SetContentOn(string kind, string id, bool on) => store.Write(d =>
+    {
+        RequireAdmin(d);
+        switch (kind)
+        {
+            case "media": if (Guid.TryParse(id, out var mid) && d.AllMedia.FirstOrDefault(m => m.Id == mid) is { } m) m.Off = !on; break;
+            case "calendar": if (Guid.TryParse(id, out var cid) && d.Tenant.SharedCalendars.FirstOrDefault(c => c.Id == cid) is { } c) c.Off = !on; break;
+            case "page": if (d.Tenant.FacebookPages.FirstOrDefault(p => p.Id == id) is { } p) p.Off = !on; break;
+            case "entity": if (d.Tenant.HomeAssistant?.Entities.FirstOrDefault(e => e.Id == id) is { } e) e.Off = !on; break;
+        }
+    });
+
+
+    /// <summary>Une application ou un compte a changé ailleurs (retrait, déconnexion de Home Assistant…) : le menu relit ses entrées.</summary>
+    public void NotifyChanged() => InstallsChanged?.Invoke();
 
     /// <summary>Monte (-1) ou descend (+1) une application dans le groupe « Applications » du menu.</summary>
     public void MoveMenu(string id, int delta) { store.Write(d => { RequireAdmin(d); AppMenu.Move(d.Tenant, id, delta); }); InstallsChanged?.Invoke(); }
@@ -78,10 +94,10 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
     public void Enable(string appId) => Install(appId);
 
     /// <summary>Range une application dans « Mes applications » (prise dans le Store) : elle y reste même désactivée.</summary>
-    public void Mark(string integrationId) => store.Write(d => { RequireAdmin(d); if (!d.Tenant.IntegrationsAdded.Contains(integrationId)) d.Tenant.IntegrationsAdded.Add(integrationId); });
+    public void Mark(string integrationId) => store.Write(d => { RequireAdmin(d); if (!d.Tenant.IntegrationsAdded.Contains(integrationId)) { d.Tenant.IntegrationsAdded.Add(integrationId); if (d.Tenant.MenuApps is { } m && !m.Contains(integrationId)) m.Add(integrationId); } });   // une application ajoutée entre dans le menu, même si l'ordre du menu a déjà été réglé
 
     /// <summary>Remet une application dans le Store.</summary>
-    public void Unmark(string integrationId) => store.Write(d => { RequireAdmin(d); d.Tenant.IntegrationsAdded.Remove(integrationId); });
+    public void Unmark(string integrationId) => store.Write(d => { RequireAdmin(d); d.Tenant.IntegrationsAdded.Remove(integrationId); d.Tenant.MenuApps?.Remove(integrationId); });
 
     /// <summary>Retire l'app des choix proposés. Non destructif : les contenus et widgets déjà en place restent à l'antenne.</summary>
     private void Remember(string title, string level, string appId, string? name) { if (history != null && hctx != null) history.By(hctx, History.Integrations, title, level, null, "app", null, name, "integrations"); }

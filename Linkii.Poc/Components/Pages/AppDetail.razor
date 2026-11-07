@@ -4,10 +4,12 @@
 @inject TenantStore Store
 @inject NavigationManager Nav
 @inject Toaster Toast
+@inject CloudFileService Cloud
+@inject ModeService Modes
 
-@* Page d'une application (maquettes/menu-applications-refonte.html) : ouverte par son entrée du menu « Applications ».
-   Installée : onglets Contenus (créés avec elle), Configuration (compte, réglages) et Infos ; « Nouveau contenu » et « Désinstaller » en haut.
-   Pas encore installée : sa fiche, avec le bouton pour l'activer. *@
+@* Page d'une application : ouverte par son entrée du menu « Applications » (applications du catalogue, Drives, calendriers partagés, Home Assistant).
+   Onglets : Contenus (seulement s'il y a des contenus ou des fichiers importés : liste), Configuration (compte, bouton Configurer, menu), Infos.
+   En haut : Synchroniser (compte cloud) et Désinstaller. Configurer, retrait et synchronisation s'ouvrent ici (Integrations en Mode="app"). *@
 @if (app == null)
 {
     <div class="empty"><div class="big">Application introuvable</div><a class="btn" href="/applications">Retour aux applications</a></div>
@@ -19,15 +21,16 @@ else if (!installed)
             <AppIcon Id="@app.Id" />
             <div>
                 <h1>@app.Name</h1>
-                <p class="sub">@app.Category · version @app.Version</p>
+                <p class="sub">@app.Category@(app.Version.Length > 0 ? " · version " + app.Version : "")</p>
             </div>
         </div>
         <div class="row">
             <a class="btn ghost" href="@Back">@(app.ScreenWidget ? "Retour aux widgets" : "Retour aux applications")</a>
-            <button class="btn" @onclick="Install">@(app.ScreenWidget ? "Activer le widget" : "Activer l'application")</button>
+            @if (isVirtual) { <a class="btn" href="/store">Ouvrir le Store</a> }
+            else { <button class="btn" @onclick="Install">@(app.ScreenWidget ? "Activer le widget" : "Activer l'application")</button> }
         </div>
     </div>
-    <div class="card" style="max-width:720px"><AppDetailBody App="app" /></div>
+    <div class="card">@if (isVirtual) { <p>@app.Summary</p> } else { <AppDetailBody App="app" /> }</div>
 }
 else
 {
@@ -36,46 +39,51 @@ else
             <AppIcon Id="@app.Id" />
             <div>
                 <h1>@app.Name</h1>
-                <p class="sub">@app.Category · version @app.Version@(installedOn is { } on ? $" · installée le {on.ToLocalTime():dd.MM.yyyy}" : "")</p>
+                <p class="sub">@app.Category@(app.Version.Length > 0 ? " · version " + app.Version : "")@(installedOn is { } on ? $" · installée le {on.ToLocalTime():dd.MM.yyyy}" : "")</p>
             </div>
         </div>
         <div class="row head-actions">
             @if (app.ScreenWidget) { <a class="btn" href="/">Placer sur un écran</a> }
-            else if (!app.IsFeature) { <a class="btn" href="/apps/@app.Id/new"><Ico Name="plus" Size="16" /> Nouveau contenu</a> }
-            @if (!app.DefaultOn) { <a class="btn ghost danger-text" href="/applications?retirer=@app.Id">Désinstaller</a> }
+            @if (HasSync) { <button type="button" class="btn ghost" disabled="@(!CanSync || syncing)" title="@(CanSync ? "Récupère les nouveaux contenus du compte connecté" : "Le compte n'est pas connecté")" @onclick="Sync"><Ico Name="refresh" Size="16" /> Synchroniser</button> }
+            @if (!app.DefaultOn) { <button type="button" class="btn ghost danger-text" @onclick="Uninstall">Désinstaller</button> }
         </div>
     </div>
 
     <nav class="tabs int-tabs" role="tablist" aria-label="Contenus, configuration et infos">
-        @if (!app.IsFeature) { <button type="button" role="tab" class="@(tab == "contenus" ? "on" : "")" aria-selected="@(tab == "contenus" ? "true" : "false")" @onclick='() => tab = "contenus"'>Contenus <span class="cat-count">@items.Count</span></button> }
+        @if (items.Count > 0) { <button type="button" role="tab" class="@(tab == "contenus" ? "on" : "")" aria-selected="@(tab == "contenus" ? "true" : "false")" @onclick='() => tab = "contenus"'>Contenus <span class="cat-count">@items.Count</span></button> }
         <button type="button" role="tab" class="@(tab == "config" ? "on" : "")" aria-selected="@(tab == "config" ? "true" : "false")" @onclick='() => tab = "config"'>Configuration</button>
         <button type="button" role="tab" class="@(tab == "infos" ? "on" : "")" aria-selected="@(tab == "infos" ? "true" : "false")" @onclick='() => tab = "infos"'>Infos</button>
     </nav>
 
-    @if (tab == "contenus")
+    @if (tab == "contenus" && items.Count > 0)
     {
-        @if (items.Count == 0)
-        {
-            <div class="card empty">
-                <div class="big">Aucun contenu @app.Name</div>
-                <p>Créez-en un ici ou depuis une liste de lecture : il apparaîtra dans cette page.</p>
-                <a class="btn" href="/apps/@app.Id/new"><Ico Name="plus" Size="16" /> Nouveau contenu</a>
-            </div>
-        }
-        else
-        {
-            <div class="apd-grid">
-                @foreach (var it in items)
-                {
-                    <a class="apd-item" href="/apps/instance/@it.Id">
-                        <AppIcon Id="@app.Id" Small="true" />
-                        <span class="grow"><b>@it.Name</b><small>@(it.Uses == 0 ? "Dans aucune liste" : it.Uses == 1 ? "Dans 1 liste" : $"Dans {it.Uses} listes")</small></span>
-                        <Ico Name="chevron-right" Size="16" />
-                    </a>
-                }
-                <a class="apd-item apd-new" href="/apps/@app.Id/new"><Ico Name="plus" Size="18" /> Nouveau contenu</a>
-            </div>
-        }
+        var shown = items.Where(i => filter.Length == 0 || i.Name.Contains(filter, StringComparison.CurrentCultureIgnoreCase) || i.Type.Contains(filter, StringComparison.CurrentCultureIgnoreCase)).ToList();
+        <div class="apd-bar">
+            <span class="apd-sum">@items.Count contenu@(items.Count > 1 ? "s" : "") · @items.Count(i => i.On) actif@(items.Count(i => i.On) > 1 ? "s" : "")</span>
+            <span class="grow"></span>
+            @if (items.Count > 12) { <div class="search-box" style="margin:0;width:260px"><Ico Name="search" Size="16" /><input placeholder="Rechercher" aria-label="Rechercher un contenu" @bind="filter" @bind:event="oninput" /></div> }
+        </div>
+        <div class="lx-tbl-wrap">
+            <table class="lx-tbl">
+                <thead><tr><th>Contenu</th><th>Type</th><th>Listes de lecture</th><th class="num">Écrans</th><th>Ajouté le</th><th>État</th><th>Actif</th></tr></thead>
+                <tbody>
+                    @foreach (var it in shown.Take(300))
+                    {
+                        var row = it;
+                        <tr class="@(row.On ? "" : "off")">
+                            <td><div class="nm"><AppIcon Id="@app.Id" Small="true" />@if (row.Instance) { <a href="/apps/instance/@row.Key" title="Ouvrir @row.Name">@row.Name</a> } else { <span>@row.Name</span> }</div></td>
+                            <td><small>@row.Type</small></td>
+                            <td>@if (row.Kind != "media") { <small>—</small> } else if (row.Lists.Count == 0) { <small>Aucune</small> } else { @string.Join(", ", row.Lists.Take(2))@if (row.Lists.Count > 2) { <small> +@(row.Lists.Count - 2)</small> } }</td>
+                            <td class="num">@(row.Kind == "media" ? row.Screens.ToString() : "—")</td>
+                            <td><small>@(row.Added is { } ad ? ad.ToLocalTime().ToString("dd.MM.yyyy") : "—")</small></td>
+                            <td>@if (!row.On) { <span class="int-pill off"><i></i>Désactivé</span> } else if (row.Error is { Length: > 0 } er) { <span class="int-pill bad" title="@er"><i></i>Erreur</span> } else if (row.Kind != "media") { <span class="int-pill ok"><i></i>Disponible</span> } else if (row.Lists.Count == 0) { <span class="int-pill off"><i></i>Inutilisé</span> } else if (row.Screens == 0) { <span class="int-pill off"><i></i>Pas diffusé</span> } else { <span class="int-pill ok"><i></i>Diffusé</span> }</td>
+                            <td><button type="button" class="switch sm @(row.On ? "on" : "")" role="switch" aria-checked="@(row.On ? "true" : "false")" aria-label="@(row.On ? "Désactiver" : "Activer") @row.Name" @onclick="() => ToggleContent(row)"><span></span></button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (shown.Count > 300) { <p class="apd-sum" style="margin-top:8px">@shown.Count contenus : les 300 premiers sont affichés, utilisez la recherche.</p> }
     }
     else if (tab == "config")
     {
@@ -92,71 +100,163 @@ else
                     <a class="btn ghost sm" href="/settings?tab=connexions">Voir dans Connexions</a>
                 </div>
             }
-            else
-            {
-                <p class="hint">Cette application ne demande aucun compte.</p>
-            }
             <div class="apd-row">
-                <span class="grow"><b>Réglages de l'application</b><small>@(app.IsFeature ? "Ce que fait l'application et son état." : "Compte, dossiers, calendriers ou options selon l'application.")</small></span>
-                <a class="btn sm" href="/applications?gerer=@app.Id">Configurer</a>
+                <span class="grow"><b>Configuration de l'application</b><small>@ConfigHint</small></span>
+                <button type="button" class="btn sm" @onclick="Configure">Configurer</button>
             </div>
             <div class="apd-row">
                 <span class="grow"><b>Dans le menu</b><small>L'application apparaît dans le groupe « Applications » du menu de gauche.</small></span>
                 <button type="button" class="switch @(inMenu ? "on" : "")" role="switch" aria-checked="@(inMenu ? "true" : "false")" aria-label="Afficher dans le menu" @onclick="ToggleMenu"><span></span></button>
             </div>
-            <small class="note-line">Les modifications d'un contenu ne partent sur un écran qu'à sa prochaine publication (page Écrans).</small>
+            @if (AppId == AppMenu.Home && Modes.Expert)
+            {
+                <div class="apd-row">
+                    <span class="grow"><b>Plans du bâtiment</b><small>Dessiner vos plans et choisir où ils s'affichent.</small></span>
+                    <a class="btn sm" href="/plans">Ouvrir</a>
+                </div>
+            }
+            @if (!isVirtual && app.Settings.Count > 0)
+            {
+                <div class="apd-row apd-fields">
+                    <span class="grow"><b>Paramètres de ses contenus</b><small>@string.Join(" · ", app.Settings.Select(f => f.Label))</small></span>
+                </div>
+            }
         </div>
     }
     else
     {
         <div class="card apd-card">
-            <AppDetailBody App="app" />
+            @if (isVirtual) { <p>@app.Summary</p> } else { <AppDetailBody App="app" /> }
             <dl class="int-kv">
                 <dt>Catégorie</dt><dd>@app.Category</dd>
-                <dt>Version</dt><dd>@app.Version</dd>
+                @if (app.Version.Length > 0) { <dt>Version</dt><dd>@app.Version</dd> }
                 <dt>Installée</dt><dd>@(installedOn is { } d ? d.ToLocalTime().ToString("dd.MM.yyyy") : "—")@(app.DefaultOn ? " · application de base" : "")</dd>
                 <dt>Compte requis</dt><dd>@(account is { } k ? ConnectedAccounts.Kind(k).Name : "Aucun")</dd>
-                <dt>Contenus</dt><dd>@items.Count · dans @items.Count(i => i.Uses > 0) liste@(items.Count(i => i.Uses > 0) > 1 ? "s" : "") de lecture</dd>
+                <dt>Contenus</dt><dd>@items.Count · @items.Count(i => i.Screens > 0) diffusé@(items.Count(i => i.Screens > 0) > 1 ? "s" : "")</dd>
             </dl>
         </div>
     }
 }
 
+@if (app != null)
+{
+    <Integrations Mode="app" @ref="integ" OnChanged="Reload" />
+}
+
 @code {
     [Parameter] public string AppId { get; set; } = "";
     private AppManifest? app;
-    private bool installed, inMenu;
+    private bool installed, inMenu, isVirtual, syncing;
     private DateTime? installedOn;
-    private string tab = "contenus";
+    private string tab = "config";
     private string? account;   // type de compte demandé (Google, Microsoft…), ou null
     private List<ConnectedAccount> accounts = new();
-    private record Item(Guid Id, string Name, int Uses);
+    private record Item(string Kind, string Key, string Name, string Type, bool Instance, List<string> Lists, int Screens, DateTime? Added, string? Error, bool On);
+    private string filter = "";
     private List<Item> items = new();
+    private Integrations? integ;
 
     private string Back => app?.ScreenWidget == true ? "/widgets" : "/applications";
+    private static bool IsCloudFiles(string id) => id is "google-docs" or "google-slides" or "ms-powerpoint";
+    private bool HasSync => Integrations.HasSync(AppId) || IsCloudFiles(AppId);
+    private bool CanSync => account is { } k && accounts.FirstOrDefault(a => a.Id == k) is { Lost: false };
+    private string ConfigHint => AppId.StartsWith("drv-") || AppId == "canva" ? "Les dossiers synchronisés et la connexion."
+        : AppId.StartsWith("cal-") ? "La connexion et les calendriers."
+        : IsCloudFiles(AppId) ? "Le compte et les fichiers importés."
+        : "Les réglages de l'application.";
+
+    private AppManifest? Resolve()
+    {
+        if (Svc.Find(AppId) is { } m) return m;
+        if (AppId.StartsWith("drv-") && DriveSources.Find(AppId[4..]) is { } dr) return new AppManifest { Id = AppId, Name = dr.Name, Category = "Drive", Version = "", Summary = dr.Summary };
+        if (AppId.StartsWith("cal-") && SharedCalendarSources.Find(AppId[4..]) is { } ca) return new AppManifest { Id = AppId, Name = ca.Name, Category = "Calendrier partagé", Version = "", Summary = ca.Summary };
+        if (AppId == AppMenu.Home) return new AppManifest { Id = AppId, Name = "Home Assistant", Category = "Maison connectée", Version = "", Summary = "Capteurs, interrupteurs, lumières, thermostats, volets, scènes et serrures de votre Home Assistant." };
+        return null;
+    }
 
     protected override void OnParametersSet()
     {
-        app = Svc.Find(AppId);
-        installed = app != null && Svc.IsInstalled(app.Id);
+        app = Resolve();
         if (app == null) return;
-        tab = app.IsFeature ? "config" : "contenus";
+        Reload();
+        tab = items.Count > 0 ? "contenus" : "config";
+    }
+
+    private void Reload()
+    {
+        app = Resolve();
+        if (app == null) return;
+        isVirtual = Svc.Find(AppId) == null;
+        installed = isVirtual ? Store.Read(d => AppMenu.Installed(d, AppId)) : Svc.IsInstalled(app.Id);
         account = ConnectedAccounts.For(app.Id);
-        (installedOn, inMenu, accounts, items) = Store.Read(d => (
-            d.AppInstalls.FirstOrDefault(a => a.AppId == AppId)?.InstalledUtc,
-            AppMenu.Has(d.Tenant, AppId),
-            ConnectedAccounts.Of(d.Tenant),
-            d.Media.Where(m => m.AppId == AppId)
-                .OrderBy(m => m.Name, StringComparer.CurrentCultureIgnoreCase)
-                .Select(m => new Item(m.Id, m.Name.Length > 0 ? m.Name : "Sans nom", d.Playlists.Count(p => p.Draft.Any(i => i.MediaId == m.Id))))
-                .ToList()));
+        (installedOn, inMenu, accounts, items) = Store.Read(d =>
+        {
+            var driveKeys = AppId.StartsWith("drv-") ? d.Tenant.DriveFolders.Where(f => f.Source == AppId[4..]).Select(f => f.Id.ToString()).ToHashSet() : null;
+            var rows = new List<Item>();
+            // fichiers importés et contenus de l'application (désactivés compris)
+            rows.AddRange(d.AllMedia.Where(m => driveKeys != null ? m.Info.TryGetValue("drive", out var dk) && driveKeys.Contains(dk) : !isVirtual && Pres.Belongs(m, AppId))
+                .Select(m =>
+                {
+                    var lists = d.Playlists.Where(p => p.Draft.Any(i => i.MediaId == m.Id)).ToList();
+                    var ids = lists.Select(p => p.Id).ToHashSet();
+                    var type = m.Type switch { "presentation" => "Présentation", "image" => "Image", "video" => "Vidéo", _ => app!.Name };
+                    return new Item("media", m.Id.ToString(), m.Name.Length > 0 ? m.Name : "Sans nom", type, m.AppId == AppId, lists.Select(p => p.Name).ToList(),
+                        d.Screens.Count(s => s.PlaylistId is { } pid && ids.Contains(pid)), m.AddedUtc, m.Error, !m.Off);
+                }));
+            // ce que le compte donne : calendriers, Pages Facebook, entités Home Assistant
+            if (AppId.StartsWith("cal-"))
+                rows.AddRange(d.Tenant.SharedCalendars.Where(c => c.Source == AppId[4..]).Select(c => new Item("calendar", c.Id.ToString(), c.Name, "Calendrier", false, new(), 0, null, null, !c.Off)));
+            else if (AppId == "facebook")
+                rows.AddRange(d.Tenant.FacebookPages.Select(p => new Item("page", p.Id, p.Name, "Page", false, new(), 0, null, null, !p.Off)));
+            else if (AppId == AppMenu.Home && d.Tenant.HomeAssistant is { } ha)
+                rows.AddRange(ha.Entities.Select(e => new Item("entity", e.Id, e.Name.Length > 0 ? e.Name : e.Id, HomeAssistantRules.FamilyOfDomain(e.Domain)?.Noun ?? e.Domain, false, new(), 0, null, null, !e.Off)));
+            return (
+                d.AppInstalls.FirstOrDefault(a => a.AppId == AppId)?.InstalledUtc,
+                AppMenu.Has(d.Tenant, AppId),
+                ConnectedAccounts.Of(d.Tenant),
+                rows.OrderBy(r => r.Type, StringComparer.CurrentCultureIgnoreCase).ThenBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
+        });
+        if (tab == "contenus" && items.Count == 0) tab = "config";
     }
 
     private void Install()
     {
         Svc.Install(AppId);
-        installed = true;   // elle apparaît maintenant dans le panneau Apps des listes de lecture (ou dans l'édition des écrans)
-        OnParametersSet();
+        OnParametersSet();   // elle apparaît maintenant dans le panneau Apps des listes de lecture (ou dans l'édition des écrans)
+    }
+
+    private void Configure() => integ?.ConfigureById(AppId);
+
+    private async Task Sync()
+    {
+        if (!IsCloudFiles(AppId)) { integ?.SyncById(AppId); return; }
+        syncing = true;
+        var tenant = Store.Read(d => d.Tenant);
+        var files = Store.Read(d => d.AllMedia.Where(m => Pres.Belongs(m, AppId)).ToList());
+        var updated = 0;
+        string? error = null;
+        foreach (var p in files)
+        {
+            if (CloudFileKind.ForPresentation(p) is not { } kind || CloudFileKind.RefOf(p) is not { Length: > 0 } fileRef) continue;
+            var src = p.Info.GetValueOrDefault("src") ?? "pdf";
+            var (done, err) = await Cloud.Import(tenant, p.ClientId, p.AreaId == Guid.Empty ? null : p.AreaId, kind, fileRef, p.Info.GetValueOrDefault("pdfId"), new PdfService.Options("", "none", "landscape", Pres.Unit(src), src));
+            if (done == null) error ??= err ?? "Conversion impossible."; else updated++;
+        }
+        syncing = false;
+        Reload();
+        if (error != null) Toast.Error(error); else Toast.Ok(updated == 0 ? "Rien à synchroniser." : "Synchronisation terminée : les fichiers sont à jour.");
+    }
+
+    private void ToggleContent(Item row)
+    {
+        Svc.SetContentOn(row.Kind, row.Key, !row.On);
+        Reload();
+    }
+
+    private async Task Uninstall()
+    {
+        if (app is { ScreenWidget: true }) { Svc.Disable(AppId); Reload(); return; }
+        if (integ != null) await integ.RetireById(AppId);
     }
 
     private void ToggleMenu()
