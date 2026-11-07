@@ -1,7 +1,7 @@
 namespace Linkii.Poc;
 
 /// <summary>
-/// Assistant « Premiers pas » (DEV-POC.md §190) : enrichir la médiathèque, puis ranger ces contenus dans une liste de diffusion.
+/// Assistant « Premiers pas » (DEV-POC.md §190) : enrichir la médiathèque, puis ranger ces contenus dans une liste de lecture.
 /// La connexion d'un écran n'en fait plus partie : elle a son propre assistant (<see cref="Components.FirstScreenWizard"/>), proposé tant
 /// que l'organisation n'a aucun écran. L'assistant vit dans la mise en page (MainLayout) : il reste ouvert d'une page à l'autre et
 /// s'ouvre depuis le menu Aide, la page Écrans, ou tout seul à la première connexion d'un compte neuf.
@@ -11,7 +11,7 @@ public sealed class GettingStarted
     public bool IsOpen { get; private set; }
     public event Action? Changed;
 
-    /// <summary>Panneau à montrer sous la zone de dépôt à l'ouverture (« cloud » : retour d'un assistant d'intégration, annulé ou terminé) ; lu une fois par l'assistant.</summary>
+    /// <summary>Panneau à montrer sous la zone de dépôt à l'ouverture (« cloud » : retour d'un assistant d'application, annulé ou terminé) ; lu une fois par l'assistant.</summary>
     public string? Panel { get; set; }
 
     public void Open(string? panel = null) { IsOpen = true; Panel = panel; Changed?.Invoke(); }

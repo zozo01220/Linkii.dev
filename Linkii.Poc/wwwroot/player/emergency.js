@@ -1,4 +1,4 @@
-/* Urgence (intégration « Alerte d'urgence », §159, maquettes/urgence.html).
+/* Urgence (application « Alerte d'urgence », §159, maquettes/urgence.html).
    Plein écran rouge, par-dessus tout : titre en capitales, message, heure de début, cadre qui clignote doucement. Pas de son, pas de bouton.
    Il reste affiché jusqu'à ce que le serveur dise qu'il n'y en a plus (le back-office ou l'API la lève) ; seul l'essai (un écran, « ESSAI ») s'arrête seul.
    Hors ligne, il reste affiché avec « Connexion perdue depuis hh:mm ». JS volontairement « ancien » (var, pas d'async) pour les WebView anciennes.

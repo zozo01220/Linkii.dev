@@ -57,7 +57,7 @@ public class FacebookAuth(IConfiguration config, JsonStore store, SecretBox box,
     /// <summary>Retour de Facebook : échange du code, lecture des Pages administrées. Rend l'adresse où renvoyer l'utilisateur (?facebook=ok ou une erreur).</summary>
     public async Task<string> CompleteAsync(string? state, string? code, string? error)
     {
-        if (string.IsNullOrEmpty(state) || !pending.TryRemove(state, out var p) || p.Expires < DateTime.UtcNow) return "/integrations?facebook=expired";
+        if (string.IsNullOrEmpty(state) || !pending.TryRemove(state, out var p) || p.Expires < DateTime.UtcNow) return "/applications?facebook=expired";
         var back = p.ReturnUrl + (p.ReturnUrl.Contains('?') ? "&" : "?") + "facebook=";
         if (!string.IsNullOrEmpty(error) || string.IsNullOrEmpty(code)) return back + "denied";
         try
@@ -81,7 +81,7 @@ public class FacebookAuth(IConfiguration config, JsonStore store, SecretBox box,
         }
     }
 
-    /// <summary>Oublie le compte et les jetons de Page : les contenus Facebook gardent leur dernière version. (L'accès reste listé chez Facebook, dans les intégrations du compte.)</summary>
+    /// <summary>Oublie le compte et les jetons de Page : les contenus Facebook gardent leur dernière version. (L'accès reste listé chez Facebook, dans les applications du compte.)</summary>
     public void Disconnect(Guid clientId) => store.Write(d =>
     {
         var c = d.Clients.First(x => x.Id == clientId);

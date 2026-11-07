@@ -11,6 +11,7 @@
 <HeadContent>
     <style>:root { --brand: @brand; }</style>
 </HeadContent>
+<PageTitle>@PageName</PageTitle>
 
 <div class="shell @(Ctx.ClientId != null || AdminSpace ? "has-tabs" : "")">
     @if (navOpen) { <div class="nav-backdrop" @onclick="() => { navOpen = false; open = false; }"></div> }
@@ -32,7 +33,7 @@
 
         @if (Ctx.ClientId != null)
         {
-            @* Menu en hubs : Écrans, Programmation (listes de lecture + planning), Contenus (médiathèque, compositions, widgets, intégrations), Statistiques.
+            @* Menu en hubs : Écrans, Programmation (listes de lecture + planning), Contenus (médiathèque, compositions, widgets, applications), Statistiques.
                Un hub s'ouvre sur sa première page ; ses pages sont des onglets au-dessus du contenu (voir HubBar). Pages ouvertes par le niveau de droits du membre. *@
             @if (Sees(LevelPages.Screens))
             {
@@ -43,7 +44,7 @@
             @if (ProgTabs.Count > 0)
             {
                 <NavLink class="@HubClass(ProgTabs)" href="@ProgTabs[0].Path">
-                    <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg> Listes diffusion @MenuPill("playlists")
+                    <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg> Listes de lecture @MenuPill("playlists")
                 </NavLink>
             }
             @if (ContentTabs.Count > 0)
@@ -59,12 +60,13 @@
                     <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></svg> Programmations
                 </NavLink>
             }
-            @if (IntegrationPages.Count > 0)
+            @if (Sees(LevelPages.Integrations))
             {
-                @* Pages de paramétrage des intégrations (mode expert) : groupe repliable après un trait ; chaque intégration y ajoute la sienne (aujourd'hui : plans de Home Assistant, §205) *@
+                @* Groupe « Applications » (maquettes/menu-applications-refonte.html) : les applications choisies dans « Mes applications », dans leur ordre,
+                   puis le Store et « Gérer mes applications ». Visible aussi en mode simple : c'est la vitrine du produit. Déplié par défaut. *@
                 <div class="nav-sep" role="separator"></div>
-                <button type="button" class="nav nav-group @(IntegrationsOpen ? "open" : "") @(InIntegrations ? "active" : "")" aria-expanded="@(IntegrationsOpen ? "true" : "false")" data-tip="Intégrations" @onclick="() => intOpen = !IntegrationsOpen">
-                    <Ico Name="link" Size="18" /> Intégrations
+                <button type="button" class="nav nav-group @(IntegrationsOpen ? "open" : "") @(InIntegrations ? "active" : "")" aria-expanded="@(IntegrationsOpen ? "true" : "false")" data-tip="Applications" @onclick="() => intOpen = !IntegrationsOpen">
+                    <Ico Name="apps" Size="18" /> Applications
                     <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg>
                 </button>
                 @if (IntegrationsOpen)
@@ -72,8 +74,10 @@
                     <div class="nav-sub">
                         @foreach (var t in IntegrationPages)
                         {
-                            <NavLink class="nav" href="@t.Path"><Ico Name="@t.Icon" Size="16" /> @t.Label<small>@t.Fam</small></NavLink>
+                            <NavLink class="nav nav-app" href="@t.Path" data-tip="@t.Label"><AppIcon Id="@t.Icon" Tile="false" Size="18" /> @t.Label</NavLink>
                         }
+                        @if (orgAdmin) { <a class="nav nav-store" href="applications?tab=store" data-tip="Store"><Ico Name="store" Size="16" /> Store</a> }
+                        <NavLink class="nav nav-manage" href="applications" Match="NavLinkMatch.All" data-tip="Gérer mes applications"><Ico Name="sliders" Size="16" /> Gérer mes applications</NavLink>
                     </div>
                 }
             }
@@ -150,7 +154,7 @@
         {
             @* Installer le player : panneau avec les installeurs Windows, Android et le player web. Sur ordinateur, le menu « Player » de la barre des accès rapides le remplace. *@
             @if (Modes.Expert) { <button type="button" class="nav nav-legacy" @onclick="() => playerOpen = true"><Ico Name="monitor-down" Size="18" /> Installer le player</button> }   @* mode simple : pas d'installation du player *@
-            @* Mode d'utilisation : au-dessus du compte. Simple masque la planification, l'administration et les intégrations. *@
+            @* Mode d'utilisation : au-dessus du compte. Simple masque la planification, l'administration et les applications. *@
             <button type="button" class="nav mode-switch" role="switch" aria-checked="@(Modes.Expert ? "true" : "false")" @onclick="ToggleMode">
                 <svg class="mode-ic" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10" /></svg>
                 <span>Mode expert</span>
@@ -243,7 +247,7 @@
                   ShowConnect="@(Ctx.ClientId != null && writable.Contains(LevelPages.Screens))"
                   SettingsHref="@(Ctx.ClientId != null && orgAdmin && Modes.Expert ? "settings" : null)"
                   SettingsBadge="@(Pill("settings"))" />
-        @if (Ctx.ClientId != null && orgAdmin && !Ctx.IsImpersonating) { <EmergencyDock /> }   @* alerte d'urgence : bandeau rouge et bouton flottant du mobile (intégration installée) *@
+        @if (Ctx.ClientId != null && orgAdmin && !Ctx.IsImpersonating) { <EmergencyDock /> }   @* alerte d'urgence : bandeau rouge et bouton flottant du mobile (application installée) *@
         @{ var roDomain = ReadOnlyDomain; }
         @if (readOnly) { <div class="trial-bar"><Ico Name="lock" Size="16" /><span>Vous êtes en <b>lecture seule</b> : vous voyez tout ce que possède l'organisation, sans rien modifier ni publier.</span></div> }
         else if (roDomain != null) { <div class="trial-bar"><Ico Name="lock" Size="16" /><span><b>Lecture seule</b> : vous voyez @(roDomain == LevelPages.Media ? "tous les médias de l'organisation, sans les modifier" : roDomain == LevelPages.Playlists ? "toutes les listes de l'organisation, sans les modifier" : "tous les écrans de l'organisation, sans les modifier ni les publier").</span></div> }
@@ -261,7 +265,7 @@
             }
             @if (ExpertOnlyHere)
             {
-                <div class="card empty"><div class="big">Disponible en mode expert</div><p>Cette page fait partie des fonctions avancées (programmations, aires de gestion, zones, membres, intégrations, widgets). Elle n'est pas affichée en mode simple.</p><button type="button" class="btn" @onclick="() => Modes.Switch(true)">Passer en mode expert</button></div>
+                <div class="card empty"><div class="big">Disponible en mode expert</div><p>Cette page fait partie des fonctions avancées (programmations, aires de gestion, zones, membres, applications, widgets). Elle n'est pas affichée en mode simple.</p><button type="button" class="btn" @onclick="() => Modes.Switch(true)">Passer en mode expert</button></div>
             }
             else
             {
@@ -288,10 +292,8 @@
                         @if (Modes.Expert && !orgAdmin && Sees(LevelPages.Zones)) { <NavLink href="zones" @onclick="CloseMore"><span class="ic"><Ico Name="box" Size="22" /></span>Zones</NavLink> }
                         @if (CompositionsMenu) { <NavLink href="compositions" @onclick="CloseMore"><span class="ic"><Ico Name="images" Size="22" /></span>Compositions</NavLink> }
                         @if (Sees(LevelPages.Widgets) && Modes.Expert) { <NavLink href="widgets" @onclick="CloseMore"><span class="ic"><Ico Name="grid" Size="22" /></span>Widgets</NavLink> }
-                        @foreach (var t in IntegrationPages) { <NavLink href="@t.Path" @onclick="CloseMore"><span class="ic"><Ico Name="@t.Icon" Size="22" /></span>@t.Label</NavLink> }
-                        @if (Sees(LevelPages.Integrations)) { <NavLink href="integrations" @onclick="CloseMore"><span class="ic"><Ico Name="link" Size="22" /></span>Intégrations</NavLink> }
-                        @if (Modes.Expert && orgAdmin) { <NavLink href="datasources" @onclick="CloseMore"><span class="ic"><Ico Name="database" Size="22" /></span>Sources de données</NavLink> }
-                        @if (Modes.Expert && orgAdmin) { <NavLink href="apiwebhooks" @onclick="CloseMore"><span class="ic"><Ico Name="link" Size="22" /></span>API et webhooks</NavLink> }
+                        @foreach (var t in IntegrationPages) { <NavLink href="@t.Path" @onclick="CloseMore"><span class="ic"><AppIcon Id="@t.Icon" Small="true" /></span>@t.Label</NavLink> }
+                        @if (Sees(LevelPages.Integrations)) { <NavLink href="applications" Match="NavLinkMatch.All" @onclick="CloseMore"><span class="ic"><Ico Name="apps" Size="22" /></span>Applications</NavLink> }
                         @if (Modes.Expert) { <NavLink href="stats" @onclick="CloseMore"><span class="ic n"><Ico Name="chart" Size="22" /></span>Statistiques</NavLink> }
                         @if (Modes.Expert && orgAdmin) { <NavLink href="history" @onclick="CloseMore"><span class="ic n"><Ico Name="clock" Size="22" /></span>Historique</NavLink> }
                     </div>
@@ -362,7 +364,7 @@
                 <li><b>Programmations</b> · des calendriers de diffusion et d'extinction, assignés à vos écrans.</li>
                 <li><b>Organisation</b> · vos aires, leurs zones, et qui y a accès avec quels droits.</li>
                 <li><b>Membres</b> · inviter des personnes et définir leurs droits.</li>
-                <li><b>Intégrations</b> · relier Google, Microsoft, Facebook et les autres sources.</li>
+                <li><b>Réglages › Connexions et Développeurs</b> · comptes connectés, sources de données, API et webhooks.</li>
                 <li><b>Widgets</b> · ajouter horloge, météo et autres contenus animés.</li>
             </ul>
         </div>
@@ -418,7 +420,7 @@
         var off = all.Sum(f => Badges.Of(f).Offline);
         var mine = fam == MenuBadges.Screens ? Badges.Of(MenuBadges.MyApprovals).Count : 0;
         var topub = fam == MenuBadges.Screens ? Badges.Of(MenuBadges.ToPublish).Count : 0;   // modifications pas encore publiées
-        // Listes de diffusion : plus de pastille orange — une liste modifiée fait déjà apparaître « à publier » devant Écrans
+        // Listes de lecture : plus de pastille orange — une liste modifiée fait déjà apparaître « à publier » devant Écrans
         if (off == 0 && mine == 0 && topub == 0) return;
         builder.OpenElement(0, "span");
         builder.AddAttribute(1, "class", "nbadges");
@@ -440,7 +442,7 @@
     };
     /// <summary>Home Assistant est connecté pour cette organisation : l'onglet « Plans » existe.</summary>
     private bool HaInstalled => Ctx.ClientId != null && Services.GetRequiredService<TenantStore>().Read(d => d.Tenant.HomeAssistant is { Url.Length: > 0 });
-    private bool compositionsOn;   // l'intégration « Compositions » est dans Mes intégrations
+    private bool compositionsOn;   // l'application « Compositions » est dans Mes applications
     private bool CompositionsMenu => Ctx.ClientId != null && compositionsOn && Sees(LevelPages.Compositions);
     // Console Linkivi ou espace revendeur (hors espace client) : barre du bas et feuille « Plus » dans l'app
     private bool AdminSpace => Ctx.ClientId == null && (Ctx.IsPlatformAdmin || Ctx.IsResellerAdmin);
@@ -457,31 +459,53 @@
     private record HubTab(string Path, string Label, string? Fam, string? Icon = null);
     private List<HubTab> ProgTabs => Ctx.ClientId == null ? new() : new[]
     {
-        Sees(LevelPages.Playlists) ? new HubTab("playlists", "Listes de diffusion", MenuBadges.Playlists) : null,
+        Sees(LevelPages.Playlists) ? new HubTab("playlists", "Listes de lecture", MenuBadges.Playlists) : null,
         Sees(LevelPages.Playlists) ? new HubTab("interactive-lists", "Listes interactives", MenuBadges.InteractiveLists) : null
     }.OfType<HubTab>().ToList();
     private List<HubTab> ContentTabs => Ctx.ClientId == null ? new() : new[]
     {
         Sees(LevelPages.Media) ? new HubTab("media", "Médiathèque", MenuBadges.MediaFam) : null,
         CompositionsMenu ? new HubTab("compositions", "Compositions", MenuBadges.Compositions) : null,
-        Sees(LevelPages.Widgets) && Modes.Expert ? new HubTab("widgets", "Widgets", null) : null,   // mode simple : pas d'onglet Widgets (§179)
-        Sees(LevelPages.Integrations) ? new HubTab("integrations", "Intégrations", MenuBadges.Integrations, "store") : null,
-        orgAdmin && Modes.Expert ? new HubTab("datasources", "Sources de données", MenuBadges.DataSources) : null,
-        orgAdmin && Modes.Expert ? new HubTab("apiwebhooks", "API et webhooks", null) : null
+        Sees(LevelPages.Widgets) && Modes.Expert ? new HubTab("widgets", "Widgets", null) : null   // mode simple : pas d'onglet Widgets (§179)
+        // Applications : groupe du menu ; Sources de données et API et webhooks : Réglages › Connexions et Développeurs
     }.OfType<HubTab>().ToList();
-    // Groupe « Intégrations » du menu (§205) : une page de paramétrage par intégration qui en a besoin.
+    // Groupe « Applications » du menu : les applications choisies dans « Mes applications » (AppMenu), chacune vers sa page.
     private bool? intOpen;
-    private List<HubTab> IntegrationPages => Ctx.ClientId == null ? new() : new[]
-    {
-        Sees(LevelPages.Widgets) && Modes.Expert && HaInstalled ? new HubTab("plans", "Plans du bâtiment", "Home Assistant", "layers") : null
-    }.OfType<HubTab>().ToList();
-    private bool InIntegrations => IntegrationPages.Any(t => CurrentPath == t.Path || CurrentPath.StartsWith(t.Path + "/"));
-    private bool IntegrationsOpen => intOpen ?? InIntegrations;
+    private List<string> menuApps = new();
+    private List<HubTab> IntegrationPages => Ctx.ClientId == null ? new() : menuApps
+        .Where(id => id == AppMenu.Home ? Sees(LevelPages.Widgets) && Modes.Expert
+                   : id == Compositions.AppId ? CompositionsMenu
+                   : orgAdmin)
+        .Select(id => new HubTab(AppMenu.Href(id), AppMenu.Label(id, Catalog), null, AppMenu.Icon(id)))
+        .ToList();
+    private bool InIntegrations => CurrentPath.StartsWith("applications") || CurrentPath.StartsWith("apps/")
+        || IntegrationPages.Any(t => CurrentPath == t.Path || CurrentPath.StartsWith(t.Path + "/"));
+    private bool IntegrationsOpen => intOpen ?? true;
     private string HubClass(List<HubTab> tabs) => InHub(tabs) ? "nav active" : "nav";
     private bool InHub(List<HubTab> tabs) => tabs.Any(t => t.Path == CurrentPath.Split('/')[0]);
     // Onglets à afficher : seulement sur la page d'un onglet elle-même (pas dans un éditeur) et si le hub a au moins deux pages.
     private List<HubTab>? CurrentHub => Ctx.ClientId == null ? null
         : new[] { ProgTabs, ContentTabs }.FirstOrDefault(h => h.Count > 1 && h.Any(t => t.Path == CurrentPath));
+
+    // Titre de l'onglet du navigateur : la page ouverte, puis la marque (Linkivi ou le revendeur).
+    private static readonly Dictionary<string, string> Titles = new()
+    {
+        [""] = "Écrans", ["playlists"] = "Listes de lecture", ["interactive-lists"] = "Listes interactives", ["interactive"] = "Listes interactives",
+        ["media"] = "Médiathèque", ["compositions"] = "Compositions", ["widgets"] = "Widgets", ["programmations"] = "Programmations", ["planning"] = "Programmations",
+        ["applications"] = "Applications", ["integrations"] = "Applications", ["plans"] = "Plans du bâtiment", ["approvals"] = "Approbations",
+        ["organisation"] = "Organisation", ["zones"] = "Zones", ["stats"] = "Statistiques", ["history"] = "Historique", ["notifications"] = "Notifications",
+        ["settings"] = "Réglages", ["account"] = "Mon compte", ["admin"] = "Console", ["reseller"] = "Espace revendeur"
+    };
+    private string PageName
+    {
+        get
+        {
+            var brandName = reseller is { IsDefault: false } r ? r.DisplayName : "Linkivi";
+            var parts = CurrentPath.Split('/');
+            var page = parts[0] == "apps" && parts.Length > 1 && Catalog.Find(parts[1]) is { } app ? app.Name : Titles.GetValueOrDefault(parts[0]);
+            return page == null ? brandName : $"{page} · {brandName}";
+        }
+    }
 
     private void ToggleMode() => Modes.Switch(!Modes.Expert);
     private void OnModeChanged() => InvokeAsync(StateHasChanged);
@@ -500,7 +524,7 @@
         Welcome.Open();
         if (CurrentPath.Length == 0) Nav.NavigateTo("media", replace: true);
     }
-    // Ajout ou retrait d'une intégration (page Intégrations) : le menu se met à jour sans recharger.
+    // Ajout ou retrait d'une application (page Applications) : le menu se met à jour sans recharger.
     private void OnInstallsChanged() => InvokeAsync(() => { if (Ctx.ClientId != null) { LoadAreas(); Badges.Start(() => BadgeFamily, CompositionsMenu, orgAdmin); } StateHasChanged(); });
     public void Dispose() { Modes.Changed -= OnModeChanged; Welcome.Changed -= OnWelcomeChanged;Nav.LocationChanged -= OnLocationForBadges; Badges.Changed -= OnBadgesChanged; if (apps != null) apps.InstallsChanged -= OnInstallsChanged; }
 
@@ -508,7 +532,7 @@
     private static readonly Dictionary<string, string> BadgePaths = new()
     {
         [""] = MenuBadges.Screens, ["playlists"] = MenuBadges.Playlists, ["media"] = MenuBadges.MediaFam, ["compositions"] = MenuBadges.Compositions,
-        ["organisation"] = MenuBadges.Members, ["integrations"] = MenuBadges.Integrations, ["datasources"] = MenuBadges.DataSources, ["interactive-lists"] = MenuBadges.InteractiveLists, ["settings"] = MenuBadges.Settings
+        ["organisation"] = MenuBadges.Members, ["integrations"] = MenuBadges.Integrations, ["applications"] = MenuBadges.Integrations, ["datasources"] = MenuBadges.DataSources, ["interactive-lists"] = MenuBadges.InteractiveLists, ["settings"] = MenuBadges.Settings
     };
     private string? BadgeFamily => BadgePaths.GetValueOrDefault(CurrentPath.Split('/')[0]);
     private void OnBadgesChanged()
@@ -577,6 +601,7 @@
         var store = Services.GetRequiredService<TenantStore>();
         (orgAdmin, readOnly, pages) = store.Read(d => (d.Access.IsOrgAdmin, d.Access.ReadOnly, LevelPages.All.Where(p => d.Access.CanSee(p, Catalog)).ToHashSet()));
         compositionsOn = store.Read(d => d.AppInstalls.Any(a => a.AppId == Compositions.AppId));
+        menuApps = store.Read(AppMenu.Shown);
         approvalsMenu = store.Read(d => ApprovalOps.Involved(d.Root, d.Tenant, d.Access.UserId, d.Access.IsOrgAdmin));
         writable = store.Read(d => new[] { LevelPages.Screens, LevelPages.Playlists, LevelPages.Media }.Where(d.Access.CanWrite).ToHashSet());
     }

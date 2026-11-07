@@ -48,7 +48,7 @@ public static class History
 
     public static readonly (string Id, string Label)[] ActivityCats =
     {
-        (Publish, "Publications"), (Media, "Médias"), (Members, "Membres"), (Integrations, "Intégrations"), (Account, "Compte"), (Settings, "Réglages"),
+        (Publish, "Publications"), (Media, "Médias"), (Members, "Membres"), (Integrations, "Applications"), (Account, "Compte"), (Settings, "Réglages"),
     };
 
     public static readonly (string Id, string Label)[] ScreenCats =
@@ -58,12 +58,12 @@ public static class History
 
     public static string Label(string cat) => cat switch
     {
-        Publish => "Publications", Media => "Médias", Members => "Membres", Integrations => "Intégrations", Account => "Compte", Settings => "Réglages",
+        Publish => "Publications", Media => "Médias", Members => "Membres", Integrations => "Applications", Account => "Compte", Settings => "Réglages",
         Offline => "Hors ligne", Sleep => "Veille / réveil", Player => "Player", Battery => "Batterie", Sync => "Synchronisation", Emergency => "Urgence",
         Data => "Données", Approval => "Approbations", Login => "Connexions", Server => "Serveur", _ => cat,
     };
 
-    /// <summary>La catégorie qui range une ligne dans le filtre « Intégrations » (synchro et données en font partie).</summary>
+    /// <summary>La catégorie qui range une ligne dans le filtre « Applications » (synchro et données en font partie).</summary>
     public static string Filter(string cat) => cat is Sync or Data ? Integrations : cat is Approval ? Publish : cat is Emergency ? Publish : cat is Login ? Members : cat;
 
     public static string Mark(string level) => level switch { Notifs.Ok => "✓", Notifs.Warn => "!", Notifs.Error => "×", _ => "i" };

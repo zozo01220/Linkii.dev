@@ -67,7 +67,7 @@ public class MemberRights
             PlaylistsVisibility = LevelVisibility.Own, MediaVisibility = LevelVisibility.Own
         };
         l.Normalize();
-        // les contenus (intégrations, widgets, compositions) servent à remplir ses listes : toutes les apps dès qu'il crée quelque chose
+        // les contenus (applications, widgets, compositions) servent à remplir ses listes : toutes les apps dès qu'il crée quelque chose
         l.AllIntegrations = l.AllWidgets = !l.ReadOnly;
         return l;
     }

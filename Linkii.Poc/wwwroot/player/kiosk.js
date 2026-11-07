@@ -17,7 +17,7 @@
   var CSS =
     '#kiosk{position:absolute;left:0;top:0;right:0;bottom:0;z-index:20;display:none;font-family:inherit;-webkit-user-select:none;user-select:none;touch-action:manipulation}' +
     '#kiosk.on{display:block}' +
-    'body.k-open #idle,body.k-prev #idle{display:none!important}' +   /* aperçu tactile (k-prev) : pas de liste de diffusion, la veille montre seulement « Touchez l’écran » */   /* l'écran « Rien à afficher » de la diffusion ne recouvre pas l'accueil */
+    'body.k-open #idle,body.k-prev #idle{display:none!important}' +   /* aperçu tactile (k-prev) : pas de liste de lecture, la veille montre seulement « Touchez l’écran » */   /* l'écran « Rien à afficher » de la diffusion ne recouvre pas l'accueil */
     '#kiosk.nocursor,#kiosk.nocursor *{cursor:none!important}' +
     '.k-tap{position:fixed;z-index:99;width:40px;height:40px;margin:-20px 0 0 -20px;border-radius:50%;background:rgba(255,255,255,.4);border:2px solid #fff;box-shadow:0 0 0 6px rgba(255,255,255,.18),0 2px 8px rgba(0,0,0,.3);pointer-events:none;animation:k-tap .6s ease-out forwards}' +
     '@keyframes k-tap{0%{transform:scale(.6);opacity:1}100%{transform:scale(1.5);opacity:0}}' +

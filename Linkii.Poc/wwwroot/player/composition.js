@@ -3,7 +3,7 @@
    Une composition : { w, h, bg, els: [ … ] }, positions et tailles en pixels de la page ; l'appelant met la scène à l'échelle.
    Calques : text | shape (rect, circle, line, arrow) | image (media : identifiant ; src : adresse posée à la publication)
              | qr (url ; qr : « côté|tracé » calculé par le serveur) | widget (clock, date, ticker, countdown)
-             | app (§85 : bloc d'une intégration de Mes intégrations ; source : identifiant du contenu, app : son intégration).
+             | app (§85 : bloc d'une application de Mes applications ; source : identifiant du contenu, app : son application).
    Un texte peut contenir des champs reliés « {{source:clé}} » : valeur lue dans les données de la source (o.data[source]), sinon la valeur de secours.
    Toutes les valeurs venant du document sont filtrées ici (couleurs, polices, nombres) : rien n'est injecté tel quel. */
 (function (w) {
@@ -391,7 +391,7 @@
   function hasFields(e) { TOKEN.lastIndex = 0; return e.type === 'text' && TOKEN.test(String(e.text || '')); }
 
   function block(e, o) {
-    var d = o.data && o.data[e.source], meta = SRC[e.app] || { name: 'Intégration', icon: '◇' }, tz = o.tz, h = '';
+    var d = o.data && o.data[e.source], meta = SRC[e.app] || { name: 'Application', icon: '◇' }, tz = o.tz, h = '';
     var cls = 'lc-app' + (e.bg === 'light' || e.bg === 'dark' ? ' bg-' + e.bg : ''), st = txs(e).replace(/text-align:[a-z]+;/, '');
     if (!d || d.error) {
       var msg = d && d.error ? 'Données indisponibles' : o.player ? '' : 'Chargement des données…';

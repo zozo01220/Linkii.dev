@@ -1,9 +1,9 @@
 namespace Linkii.Poc;
 
 /// <summary>
-/// Connexion et déconnexion des comptes de l'organisation, quel que soit le fournisseur. Sert à Intégrations (Comptes connectés),
-/// à l'annulation d'un assistant d'ajout (rien ne reste) et au retrait d'une intégration (le compte part avec elle).
-/// Un compte Google ou Microsoft est partagé par plusieurs intégrations : il ne part qu'avec la dernière (<see cref="UsedByOthers"/>).
+/// Connexion et déconnexion des comptes de l'organisation, quel que soit le fournisseur. Sert à Applications (Comptes connectés),
+/// à l'annulation d'un assistant d'ajout (rien ne reste) et au retrait d'une application (le compte part avec elle).
+/// Un compte Google ou Microsoft est partagé par plusieurs applications : il ne part qu'avec la dernière (<see cref="UsedByOthers"/>).
 /// </summary>
 public class AccountManager(TenantStore store, MicrosoftAuth ms, GoogleAuth google, CanvaService canva, DropboxAuth dropbox, FacebookAuth facebook, HistoryLog history, TenantContext hctx, HomeAssistantClient ha)
 {
@@ -33,7 +33,7 @@ public class AccountManager(TenantStore store, MicrosoftAuth ms, GoogleAuth goog
         }
     }
 
-    /// <summary>Une autre intégration que <paramref name="integrationId"/>, déjà dans Mes intégrations, utilise ce compte.</summary>
+    /// <summary>Une autre application que <paramref name="integrationId"/>, déjà dans Mes applications, utilise ce compte.</summary>
     public bool UsedByOthers(string kind, string integrationId, IReadOnlySet<string> inMine) =>
         ConnectedAccounts.Kind(kind).Integrations.Any(i => i != integrationId && inMine.Contains(i));
 }

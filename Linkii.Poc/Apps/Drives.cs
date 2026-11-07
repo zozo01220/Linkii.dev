@@ -8,7 +8,7 @@ using Item = Linkii.Poc.DriveItem;
 namespace Linkii.Poc;
 
 /// <summary>
-/// Une source Drive : ce qu'on affiche dans Intégrations. PasteLabel et PasteAria : le champ qui ajoute un dossier sans le parcourir
+/// Une source Drive : ce qu'on affiche dans Applications. PasteLabel et PasteAria : le champ qui ajoute un dossier sans le parcourir
 /// (lien de partage, ou chemin pour Nextcloud, SFTP et Dropbox).
 /// </summary>
 public record DriveSourceDef(string Id, string Name, string Summary, string LinkPlaceholder,
@@ -437,7 +437,7 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
                 403 when body.Contains("exportSizeLimitExceeded") => "Ce fichier est trop volumineux pour être exporté par Google (10 Mo au plus).",
                 403 => $"{provider} refuse l'export de ce fichier : le propriétaire a peut-être interdit le téléchargement, ou le compte {user} n'y a pas accès.",
                 404 => $"Fichier introuvable : vérifiez qu'il existe et que le compte {user} y a accès.",
-                401 => $"{provider} a refusé l'accès : reconnectez votre compte dans Intégrations › Comptes connectés.",
+                401 => $"{provider} a refusé l'accès : reconnectez votre compte dans Réglages › Connexions.",
                 400 or 415 when !kind.IsGoogle => "Microsoft n'a pas pu convertir ce fichier en PDF (format non pris en charge, ou fichier protégé).",
                 _ => $"{provider} n'a pas pu exporter le fichier ({status})."
             });
@@ -770,7 +770,7 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
     // Google Drive : avec le compte Google connecté par l'organisation (jeton OAuth, lecture seule).
     private async Task<Dictionary<string, string>> GoogleHeaders(Tenant t, Dictionary<string, string> headers)
     {
-        if (!GoogleAuth.Has(t, GoogleAuth.DriveScope)) throw new InvalidOperationException("Google Drive n'est pas connecté : connectez votre compte Google dans Intégrations › Google Drive.");
+        if (!GoogleAuth.Has(t, GoogleAuth.DriveScope)) throw new InvalidOperationException("Google Drive n'est pas connecté : connectez votre compte Google dans Applications › Google Drive.");
         try { headers["Authorization"] = "Bearer " + await googleAuth.AccessToken(t); }
         catch (GoogleAuth.GoogleAuthException ex) { throw new InvalidOperationException(ex.Message); }
         return headers;
@@ -788,9 +788,9 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
         var (status, text) = await http.Request(HttpMethod.Get, url, headers: await GoogleHeaders(t, headers), maxBytes: 4_000_000);
         if (status is 404 or 403 && !text.Contains("accessNotConfigured") && !text.Contains("insufficient") && !text.Contains("rateLimit"))
             throw new InvalidOperationException($"{what} introuvable : vérifiez le lien et que le compte {(t.GoogleUser.Length > 0 ? t.GoogleUser : "Google connecté")} y a accès.");
-        if (status == 401) throw new InvalidOperationException("Google a refusé l'accès : reconnectez votre compte dans Intégrations › Google Drive.");
+        if (status == 401) throw new InvalidOperationException("Google a refusé l'accès : reconnectez votre compte dans Applications › Google Drive.");
         if (status == 403 && text.Contains("accessNotConfigured")) throw new InvalidOperationException("L'API Google Drive n'est pas activée pour l'application Google de la plateforme (administrateur Linkivi).");
-        if (status == 403 && text.Contains("insufficient")) throw new InvalidOperationException("Accès à Drive non accordé : reconnectez votre compte dans Intégrations › Google Drive.");
+        if (status == 403 && text.Contains("insufficient")) throw new InvalidOperationException("Accès à Drive non accordé : reconnectez votre compte dans Applications › Google Drive.");
         if (status != 200) throw new InvalidOperationException($"Google Drive ({status}) : {GoogleConnector.Describe(text)}");
         return JsonDocument.Parse(text);
     }
@@ -800,7 +800,7 @@ public class DriveService(JsonStore store, GoogleAuth googleAuth, GraphService g
         try { return await graph.Get(t, url); }
         catch (InvalidOperationException ex) when (ex.Message.Contains("(403)") || ex.Message.Contains("(401)"))
         {
-            throw new InvalidOperationException($"Accès refusé : vérifiez que le compte {(t.MsUser.Length > 0 ? t.MsUser : "Microsoft connecté")} a accès à ce dossier, ou reconnectez-le dans Intégrations › OneDrive et SharePoint.");
+            throw new InvalidOperationException($"Accès refusé : vérifiez que le compte {(t.MsUser.Length > 0 ? t.MsUser : "Microsoft connecté")} a accès à ce dossier, ou reconnectez-le dans Applications › OneDrive et SharePoint.");
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("(404)"))
         {

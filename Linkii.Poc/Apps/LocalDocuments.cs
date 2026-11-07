@@ -29,10 +29,10 @@ public class LocalDocuments(PdfService pdf, OfficeConverter office, JsonStore st
         return PowerPoint.Contains(ext) ? "ppt" : Word.Contains(ext) ? "doc" : Excel.Contains(ext) ? "xls" : "pdf";
     }
 
-    // ---------- Adapté aux intégrations installées ----------
+    // ---------- Adapté aux applications installées ----------
 
     /// <summary>
-    /// Intégrations qui savent afficher ce type de document : PowerPoint (ppt, pptx, odp…) ; Document PDF pour les PDF, Word et Excel (leurs pages sont des images).
+    /// Applications qui savent afficher ce type de document : PowerPoint (ppt, pptx, odp…) ; Document PDF pour les PDF, Word et Excel (leurs pages sont des images).
     /// Un type de document n'est accepté à l'import que si l'une d'elles est installée.
     /// </summary>
     public static string[] AppsFor(string src) => src == "ppt" ? new[] { "ms-powerpoint" } : new[] { "pdf" };
@@ -41,10 +41,10 @@ public class LocalDocuments(PdfService pdf, OfficeConverter office, JsonStore st
 
     public static bool Allowed(string fileName, Func<string, bool> installed) => IsDocument(fileName) && AppsFor(SrcOf(fileName)).Any(installed);
 
-    /// <summary>Extensions de documents acceptées pour les intégrations installées (champ de fichiers, glisser-déposer).</summary>
+    /// <summary>Extensions de documents acceptées pour les applications installées (champ de fichiers, glisser-déposer).</summary>
     public static List<string> AllowedExtensions(Func<string, bool> installed) => AllExtensions.Where(e => Allowed("x" + e, installed)).ToList();
 
-    /// <summary>Formats acceptés, en clair (« PowerPoint · PDF, Word, Excel »), selon les intégrations installées.</summary>
+    /// <summary>Formats acceptés, en clair (« PowerPoint · PDF, Word, Excel »), selon les applications installées.</summary>
     public static string FormatsText(Func<string, bool> installed)
     {
         var parts = new List<string>();
@@ -53,9 +53,9 @@ public class LocalDocuments(PdfService pdf, OfficeConverter office, JsonStore st
         return string.Join(", ", parts);
     }
 
-    /// <summary>Message d'un document dont aucune intégration n'est installée.</summary>
+    /// <summary>Message d'un document dont aucune application n'est installée.</summary>
     public static string NotInstalled(string fileName) =>
-        $"Activez l'intégration « {AppName(AppsFor(SrcOf(fileName))[0])} » (page Intégrations) pour importer ce type de document.";
+        $"Activez l'application « {AppName(AppsFor(SrcOf(fileName))[0])} » (page Applications) pour importer ce type de document.";
 
     /// <param name="Item">Ce qui entre dans la médiathèque : la présentation, ou l'image d'un document d'une seule page.</param>
     public record Imported(MediaItem Item, PdfService.Source Source, PdfService.ConvertResult Result, string Src, bool Reused);

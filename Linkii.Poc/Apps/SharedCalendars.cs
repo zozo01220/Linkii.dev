@@ -1,10 +1,10 @@
 namespace Linkii.Poc;
 
-/// <summary>Une source de calendriers partagés : ce qu'on affiche dans Intégrations et ce qu'on demande pour ajouter un calendrier.</summary>
+/// <summary>Une source de calendriers partagés : ce qu'on affiche dans Applications et ce qu'on demande pour ajouter un calendrier.</summary>
 public record CalendarSourceDef(string Id, string Name, string Summary, string RefLabel, string RefPlaceholder, string RefHelp);
 
 /// <summary>
-/// Calendriers partagés : la connexion se règle une fois par source (Intégrations), les contenus « Calendrier partagé »
+/// Calendriers partagés : la connexion se règle une fois par source (Applications), les contenus « Calendrier partagé »
 /// ne désignent qu'un calendrier. Tout est résolu côté serveur : secrets et liens ne vont jamais sur un écran.
 /// </summary>
 public static class SharedCalendarSources
@@ -50,11 +50,11 @@ public static class SharedCalendarSources
 
     /// <summary>
     /// Ce qu'il faut au connecteur pour lire ce calendrier. Une source désactivée continue de servir les contenus existants
-    /// (comme une intégration désactivée) ; un calendrier supprimé ne s'affiche plus.
+    /// (comme une application désactivée) ; un calendrier supprimé ne s'affiche plus.
     /// </summary>
     public static CalendarSource Resolve(Tenant t, Guid calendarId, SecretBox box) =>
         Resolve(t, t.SharedCalendars.FirstOrDefault(x => x.Id == calendarId)
-            ?? throw new InvalidOperationException("Ce calendrier a été retiré des calendriers partagés (Intégrations)."), box);
+            ?? throw new InvalidOperationException("Ce calendrier a été retiré des calendriers partagés (Applications)."), box);
 
     /// <summary>Même chose pour un calendrier pas encore enregistré (aperçu de l'assistant d'ajout).</summary>
     public static CalendarSource Resolve(Tenant t, SharedCalendar c, SecretBox box)
@@ -76,7 +76,7 @@ public static class SharedCalendarSources
         AppCatalog.IsHttpUrl(path) || server.Length == 0 ? path : server.TrimEnd('/') + "/" + path.TrimStart('/');
 
     /// <summary>
-    /// Une salle est un calendrier dont l'interrupteur « Salle » est activé (Intégrations). Pour les compositions et les écrans elle se présente comme un
+    /// Une salle est un calendrier dont l'interrupteur « Salle » est activé (Applications). Pour les compositions et les écrans elle se présente comme un
     /// contenu « Calendrier partagé » (même identifiant que le calendrier) : le reste du code lit ses données comme celles de n'importe quelle source.
     /// </summary>
     public static MediaItem RoomContent(Tenant t, SharedCalendar c) => new()

@@ -8,7 +8,7 @@ namespace Linkii.Poc;
 
 /// <summary>
 /// Compte Microsoft (professionnel, scolaire ou personnel) d'une organisation (« Se connecter avec Microsoft », OAuth 2 + PKCE, permissions déléguées en lecture seule),
-/// partagé par les calendriers Microsoft 365 et OneDrive / SharePoint. Même principe que <see cref="GoogleAuth"/> : chaque intégration
+/// partagé par les calendriers Microsoft 365 et OneDrive / SharePoint. Même principe que <see cref="GoogleAuth"/> : chaque application
 /// demande son accès (agendas, fichiers) ; les accès déjà accordés sont conservés.
 /// L'application Entra ID est celle de la plateforme Linkivi (multilocataire, comptes personnels acceptés) : Linkii:Microsoft:ClientId, Linkii:Microsoft:ClientSecret et,
 /// en production, Linkii:Microsoft:RedirectUri (adresse déclarée dans Entra ; à défaut, l'adresse du back-office + /microsoft/callback).
@@ -22,7 +22,7 @@ public class MicrosoftAuth(IConfiguration config, JsonStore store, SecretBox box
     public const string CalendarScope = "Calendars.Read";
 
     /// <summary>
-    /// Accès demandés selon ce qui lance la connexion : une intégration (« drive » ou « calendar ») ou Comptes connectés (« all » : les deux). Tous en lecture seule, et tous disponibles
+    /// Accès demandés selon ce qui lance la connexion : une application (« drive » ou « calendar ») ou Comptes connectés (« all » : les deux). Tous en lecture seule, et tous disponibles
     /// pour les comptes personnels : ni Place.Read.All (annuaire des salles) ni Sites.Read.All (bibliothèques SharePoint) n'existent pour eux,
     /// et les demander ferait refuser la connexion. Files.Read.All couvre les fichiers SharePoint auxquels le compte a accès.
     /// </summary>
@@ -33,7 +33,7 @@ public class MicrosoftAuth(IConfiguration config, JsonStore store, SecretBox box
         _ => [DriveScope]
     };
 
-    /// <summary>Accès sans lesquels la connexion ne sert à rien : celui de l'intégration, ou l'un des deux depuis Comptes connectés.</summary>
+    /// <summary>Accès sans lesquels la connexion ne sert à rien : celui de l'application, ou l'un des deux depuis Comptes connectés.</summary>
     public static string[] RequiredScopes(string purpose) => purpose switch
     {
         AccountPurposes.Calendar => [CalendarScope],
@@ -96,7 +96,7 @@ public class MicrosoftAuth(IConfiguration config, JsonStore store, SecretBox box
     /// </summary>
     public async Task<string> CompleteAsync(string? state, string? code, string? error, string? errorDescription = null)
     {
-        if (string.IsNullOrEmpty(state) || !pending.TryRemove(state, out var p) || p.Expires < DateTime.UtcNow) return "/integrations?microsoft=expired";
+        if (string.IsNullOrEmpty(state) || !pending.TryRemove(state, out var p) || p.Expires < DateTime.UtcNow) return "/applications?microsoft=expired";
         var back = p.ReturnUrl + (p.ReturnUrl.Contains('?') ? "&" : "?") + "for=" + p.Purpose + "&microsoft=";
         if (!string.IsNullOrEmpty(error) || string.IsNullOrEmpty(code)) return back + (NeedsAdmin(error, errorDescription) ? "admin" : "denied");
         try
@@ -117,7 +117,7 @@ public class MicrosoftAuth(IConfiguration config, JsonStore store, SecretBox box
             store.Write(d =>
             {
                 var c = d.Clients.First(x => x.Id == p.ClientId);
-                // même compte : les accès déjà accordés à l'autre intégration sont conservés (on cumule) ; autre compte : on repart de ceux-ci
+                // même compte : les accès déjà accordés à l'autre application sont conservés (on cumule) ; autre compte : on repart de ceux-ci
                 var same = user.Length == 0 || string.Equals(user, c.MsUser, StringComparison.OrdinalIgnoreCase);
                 c.MsRefreshToken = refresh;
                 c.MsScopes = string.Join(' ', (same ? c.MsScopes.Split(' ', StringSplitOptions.RemoveEmptyEntries) : []).Concat(granted).Distinct(StringComparer.OrdinalIgnoreCase));
@@ -188,7 +188,7 @@ public class MicrosoftAuth(IConfiguration config, JsonStore store, SecretBox box
         {
             if (access.TryGetValue(t.Id, out a) && a.Expires > DateTime.UtcNow) return a.Token;   // renouvelé entre-temps
             var (stored, scopes) = store.Read(d => d.Clients.FirstOrDefault(c => c.Id == t.Id) is { } c ? (c.MsRefreshToken, c.MsScopes) : ("", ""));
-            if (stored.Length == 0) throw new MicrosoftAuthException("Aucun compte Microsoft connecté : connectez-le dans Intégrations › Comptes connectés.");
+            if (stored.Length == 0) throw new MicrosoftAuthException("Aucun compte Microsoft connecté : connectez-le dans Réglages › Connexions.");
             TokenResponse r;
             try
             {
@@ -203,7 +203,7 @@ public class MicrosoftAuth(IConfiguration config, JsonStore store, SecretBox box
             catch (MicrosoftAuthException ex) when (ex.Revoked)
             {
                 Expire(t.Id);   // accès retiré, mot de passe changé ou session révoquée : il faut se reconnecter
-                throw new MicrosoftAuthException("La connexion au compte Microsoft a expiré. Reconnectez-le dans Intégrations › Comptes connectés.");
+                throw new MicrosoftAuthException("La connexion au compte Microsoft a expiré. Reconnectez-le dans Réglages › Connexions.");
             }
             access[t.Id] = new Access(r.AccessToken, DateTime.UtcNow.AddSeconds(Math.Max(60, r.ExpiresIn) - 60));
             if (r.RefreshToken.Length > 0)   // Microsoft fait tourner le jeton de renouvellement : le nouveau remplace l'ancien

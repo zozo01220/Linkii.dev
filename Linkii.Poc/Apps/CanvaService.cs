@@ -10,7 +10,7 @@ namespace Linkii.Poc;
 /// <summary>
 /// Canva (Connect API) : connexion du compte Canva d'un client (OAuth 2 + PKCE), liste de ses designs,
 /// export d'un design (PNG par page ou MP4) importé dans la médiathèque pour une lecture hors ligne.
-/// L'intégration Canva est celle de la plateforme Linkivi : Linkii:Canva:ClientId, Linkii:Canva:ClientSecret et, en production,
+/// L'application Canva est celle de la plateforme Linkivi : Linkii:Canva:ClientId, Linkii:Canva:ClientSecret et, en production,
 /// Linkii:Canva:RedirectUri (adresse déclarée chez Canva ; à défaut, https://{Linkii:BaseDomain}/canva/callback).
 /// </summary>
 public class CanvaService(IConfiguration config, JsonStore store, SecretBox box, IHttpClientFactory httpFactory, MediaImporter importer, ILogger<CanvaService> log)
@@ -19,7 +19,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
     private const string Api = "https://api.canva.com/rest/v1";
     private const string Scopes = "design:meta:read design:content:read folder:read profile:read";
 
-    // Intégration Canva (portail développeurs) : celle de la plateforme Linkivi, identique pour tous les clients
+    // Application Canva (portail développeurs) : celle de la plateforme Linkivi, identique pour tous les clients
     // (Linkii:Canva:ClientId / ClientSecret / RedirectUri sur le serveur).
     private record Creds(string Id, string Secret, string Redirect);
 
@@ -27,7 +27,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
 
     private string ServerRedirect => config["Linkii:Canva:RedirectUri"] is { Length: > 0 } r ? r : $"https://{config["Linkii:BaseDomain"] ?? "linkivi.com"}/canva/callback";
 
-    /// <summary>Intégration de la plateforme utilisable : identifiant et secret présents dans la configuration du serveur.</summary>
+    /// <summary>Application de la plateforme utilisable : identifiant et secret présents dans la configuration du serveur.</summary>
     public bool IsConfigured => PlatformCreds is { Id.Length: > 0, Secret.Length: > 0 };
 
     public record Connection(bool Connected, string User, DateTime? Since);
@@ -68,7 +68,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
     /// <summary>Retour de Canva : échange du code contre les jetons. Retourne l'adresse où renvoyer l'utilisateur (avec ?canva=ok ou une erreur).</summary>
     public async Task<string> CompleteAsync(string? state, string? code, string? error)
     {
-        if (string.IsNullOrEmpty(state) || !pending.TryRemove(state, out var p) || p.Expires < DateTime.UtcNow) return "/integrations?canva=expired";
+        if (string.IsNullOrEmpty(state) || !pending.TryRemove(state, out var p) || p.Expires < DateTime.UtcNow) return "/applications?canva=expired";
         var back = p.ReturnUrl + (p.ReturnUrl.Contains('?') ? "&" : "?");
         if (!string.IsNullOrEmpty(error) || string.IsNullOrEmpty(code)) return back + "canva=denied";
         try
@@ -161,13 +161,13 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
         {
             if (access.TryGetValue(clientId, out a) && a.Expires > DateTime.UtcNow) return a.Token;   // renouvelé entre-temps
             var stored = store.Read(d => d.Clients.FirstOrDefault(c => c.Id == clientId)?.CanvaRefreshToken ?? "");
-            if (stored.Length == 0) throw new CanvaException("Canva n'est pas connecté. Connectez-le dans Intégrations › Comptes connectés.");
+            if (stored.Length == 0) throw new CanvaException("Canva n'est pas connecté. Connectez-le dans Réglages › Connexions.");
             TokenResponse t;
             try { t = await TokenRequest(clientId, new() { ["grant_type"] = "refresh_token", ["refresh_token"] = box.Unprotect(stored) }); }
             catch (CanvaException)
             {
                 Expire(clientId);   // accès retiré dans Canva, ou jeton déjà utilisé : il faut se reconnecter
-                throw new CanvaException("La connexion à Canva a expiré. Reconnectez Canva dans Intégrations › Comptes connectés.");
+                throw new CanvaException("La connexion à Canva a expiré. Reconnectez Canva dans Réglages › Connexions.");
             }
             Remember(clientId, t);
             return t.AccessToken;
@@ -205,7 +205,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
         if (body != null) req.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
         using var res = await Http.SendAsync(req);
         var text = await res.Content.ReadAsStringAsync();
-        if ((int)res.StatusCode == 401) { access.TryRemove(clientId, out _); throw new CanvaException("Canva a refusé l'accès. Reconnectez Canva dans Intégrations › Comptes connectés."); }
+        if ((int)res.StatusCode == 401) { access.TryRemove(clientId, out _); throw new CanvaException("Canva a refusé l'accès. Reconnectez Canva dans Réglages › Connexions."); }
         if ((int)res.StatusCode == 429) throw new CanvaException("Trop de demandes envoyées à Canva. Réessayez dans une minute.");
         if (!res.IsSuccessStatusCode) throw new CanvaException($"Canva a répondu {(int)res.StatusCode}{MessageOf(text)}.");
         return JsonDocument.Parse(text);
@@ -411,7 +411,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
     public SyncState? Syncing(Guid folderId) => syncing.GetValueOrDefault(folderId);
 
     private static CanvaException ScopeError(CanvaException ex) =>
-        ex.Message.Contains(" 403") ? new("Canva n'autorise pas encore la lecture des dossiers. Reconnectez Canva dans Intégrations › Comptes connectés pour l'accorder.") : ex;
+        ex.Message.Contains(" 403") ? new("Canva n'autorise pas encore la lecture des dossiers. Reconnectez Canva dans Réglages › Connexions pour l'accorder.") : ex;
 
     /// <summary>Sous-dossiers d'un dossier Canva (« root » : la racine du compte) et nombre de designs directs, pour le sélecteur.</summary>
     public async Task<CanvaListing> ListFolder(Guid clientId, string folderId)
@@ -577,7 +577,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
         DeleteFiles(clientId, store.Read(d => d.Media.Where(m => m.ClientId == clientId && m.Info.GetValueOrDefault("canvaFolder") == key).Select(m => m.Id).ToList()), synced: true);
     }
 
-    /// <summary>Ce qu'emporte le retrait de l'intégration : fichiers de la médiathèque, listes de lecture touchées, nom du compte.</summary>
+    /// <summary>Ce qu'emporte le retrait de l'application : fichiers de la médiathèque, listes de lecture touchées, nom du compte.</summary>
     public record RemovalImpact(int Files, int Designs, List<string> Playlists, string User);
 
     public RemovalImpact Impact(Guid clientId) => store.Read(d =>
@@ -590,7 +590,7 @@ public class CanvaService(IConfiguration config, JsonStore store, SecretBox box,
         return new RemovalImpact(files.Count, files.Select(m => m.Info.GetValueOrDefault("canvaDesign") ?? m.Info.GetValueOrDefault("canva") ?? m.Id.ToString()).Distinct().Count(), lists, t?.CanvaUser ?? "");
     });
 
-    /// <summary>Retrait de l'intégration Canva : tous les dossiers synchronisés et leurs fichiers.</summary>
+    /// <summary>Retrait de l'application Canva : tous les dossiers synchronisés et leurs fichiers.</summary>
     public void RemoveAllFolders(Guid clientId)
     {
         foreach (var id in store.Read(d => d.Clients.First(c => c.Id == clientId).CanvaFolders.Select(f => f.Id).ToList())) RemoveFolder(clientId, id);

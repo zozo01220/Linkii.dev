@@ -91,7 +91,7 @@ public class GoogleConnector(SafeHttp http, GoogleAuth auth) : ICalendarConnecto
 
     private async Task<Dictionary<string, string>> Bearer(Tenant t)
     {
-        if (!GoogleAuth.Has(t, GoogleAuth.CalendarScope)) throw new InvalidOperationException("Google Calendar n'est pas connecté : connectez votre compte Google dans Intégrations › Google Calendar.");
+        if (!GoogleAuth.Has(t, GoogleAuth.CalendarScope)) throw new InvalidOperationException("Google Calendar n'est pas connecté : connectez votre compte Google dans Applications › Google Calendar.");
         try { return new() { ["Authorization"] = "Bearer " + await auth.AccessToken(t) }; }
         catch (GoogleAuth.GoogleAuthException ex) { throw new InvalidOperationException(ex.Message); }
     }

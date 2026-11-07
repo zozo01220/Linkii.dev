@@ -10,7 +10,7 @@ using System.Xml.Linq;
 namespace Linkii.Poc;
 
 /// <summary>
-/// Intégrations personnalisées (DEV-POC.md §139, maquette maquettes/sources-de-donnees-architecture.html) : l'organisation branche ses propres données.
+/// Applications personnalisées (DEV-POC.md §139, maquette maquettes/sources-de-donnees-architecture.html) : l'organisation branche ses propres données.
 /// Trois niveaux : une <see cref="DataConnection"/> (où sont les données, comment y entrer : saisie une fois, secret chiffré), des <see cref="DataSet"/>
 /// (ce qu'on lit : toujours une table aux colonnes typées) et leur liaison dans les compositions (champs, listes reliées).
 /// L'écran ne lit jamais la source : le serveur la lit (<see cref="DataSetService"/>), garde la dernière copie valable sur disque
@@ -26,7 +26,7 @@ public static class DataKinds
     public const string Db = "db";
     /// <summary>Envoi direct (API, §153) : le système du client pousse ses lignes (<c>PUT/POST /api/v1/datasets/{id}/rows</c>) ; Linkii ne lit rien.</summary>
     public const string Push = "push";
-    /// <summary>Home Assistant de l'organisation (créée d'office avec l'intégration) : états actuels ou historique d'entités choisies, sans réglage de connexion.</summary>
+    /// <summary>Home Assistant de l'organisation (créée d'office avec l'application) : états actuels ou historique d'entités choisies, sans réglage de connexion.</summary>
     public const string Ha = "ha";
 
     public const int MaxConnections = 20, MaxDataSets = 25;
@@ -669,7 +669,7 @@ public class DataSetService
     {
         if (ha == null) throw new InvalidOperationException("Home Assistant n'est pas disponible sur ce serveur.");
         var account = store.Read(db => db.Clients.FirstOrDefault(t => t.Id == clientId)?.HomeAssistant?.Copy())
-            ?? throw new InvalidOperationException("Compte Home Assistant non connecté : connectez-le dans Intégrations › Home Assistant.");
+            ?? throw new InvalidOperationException("Compte Home Assistant non connecté : connectez-le dans Applications › Home Assistant.");
         var conn = ha.Conn(clientId, account);
         var p = HomeAssistantRules.ParseDataPath(path);
         if (p.Mode == "history")

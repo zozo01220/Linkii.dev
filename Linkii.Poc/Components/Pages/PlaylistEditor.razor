@@ -24,14 +24,14 @@
     var total = rows.Where(r => r.Plays).Sum(r => r.Seconds);
     var active = pl.Draft.Count(i => !i.Off);
     @* Tiroir du bas (maquette liste-diffusion-fil-horizontal.html, §186) : en-tête avec la durée totale, frise de la boucle,
-       fil horizontal de cartes carrées, puis la bibliothèque en onglets par type (Images, Vidéos, Compositions, Présentations, Pages web, Intégrations). *@
+       fil horizontal de cartes carrées, puis la bibliothèque en onglets par type (Images, Vidéos, Compositions, Présentations, Pages web, Applications). *@
     <div class="pfx @(mini ? "mini" : "")" @ref="flowRoot">
         <header class="pfx-head">
             <div class="pfx-title">
                 @if (renaming)
                 {
                     <div class="row rename-row">
-                        <input class="grow" style="min-width:0" @ref="renameInput" @bind="renameValue" @bind:event="oninput" @onkeydown="e => OnRenameKey(e, pl)" aria-label="Nom de la liste de diffusion" />
+                        <input class="grow" style="min-width:0" @ref="renameInput" @bind="renameValue" @bind:event="oninput" @onkeydown="e => OnRenameKey(e, pl)" aria-label="Nom de la liste de lecture" />
                         <button class="btn sm" @onclick="() => Rename(pl)">Enregistrer</button>
                         <button class="btn ghost sm" @onclick="() => renaming = false">Annuler</button>
                     </div>
@@ -40,7 +40,7 @@
                 {
                     <div class="pfx-name">
                         <h2>@pl.Name</h2>
-                        @if (!readOnlyHere) { <button class="btn ghost sm icon" title="Renommer" aria-label="Renommer la liste de diffusion" @onclick="() => StartRename(pl)"><Ico Name="edit" Size="16" /></button> }
+                        @if (!readOnlyHere) { <button class="btn ghost sm icon" title="Renommer" aria-label="Renommer la liste de lecture" @onclick="() => StartRename(pl)"><Ico Name="edit" Size="16" /></button> }
                     </div>
                 }
                 <p class="pfx-meta">
@@ -139,7 +139,7 @@
 }
 else
 {
-    <div class="card empty"><div class="big">Liste de diffusion introuvable</div><p>Elle a peut-être été supprimée. <button type="button" class="back" @onclick="Close">Revenir aux listes de diffusion</button></p></div>
+    <div class="card empty"><div class="big">Liste de lecture introuvable</div><p>Elle a peut-être été supprimée. <button type="button" class="back" @onclick="Close">Revenir aux listes de lecture</button></p></div>
 }
 
 @{
@@ -371,7 +371,7 @@ else
                 <div class="dw-field"><label>Durée d'affichage (secondes)</label><input type="number" min="1" max="86400" @bind="mSeconds" /></div>
             }
             </div>;
-            RenderFragment appExtra = @<section class="ci-listset" aria-label="Dans cette liste de diffusion"><h4 class="ci-t">Dans cette liste de diffusion</h4>@listSettings</section>;
+            RenderFragment appExtra = @<section class="ci-listset" aria-label="Dans cette liste de lecture"><h4 class="ci-t">Dans cette liste de lecture</h4>@listSettings</section>;
         }
         @if (isApp)
         {
@@ -436,7 +436,7 @@ else
         if (Current is not { } pl) return;
         if (app.Id == Compositions.AppId) { OpenCompositionPicker(position); return; }   // on choisit une composition existante, ou on en crée une
         if (app.Id == HomeAssistantRules.BuildingApp) { insertAt = position; pickBuilding = true; return; }   // plan + affichage d'abord (§202)
-        if (Svc.CreateEmpty(app.Id) is not { } item) { Toast.Error("Activez d'abord cette intégration dans la page Intégrations."); return; }
+        if (Svc.CreateEmpty(app.Id) is not { } item) { Toast.Error("Activez d'abord cette application dans la page Applications."); return; }
         var dur = Store.Read(d => d.Tenant.DefaultDurationSec);
         var placement = PlacementsFor(item).Select(o => o.Id).DefaultIfEmpty("full").Contains("full") ? "full" : PlacementsFor(item).First().Id;
         var at = position is { } i && i >= 0 && i < pl.Draft.Count ? i : pl.Draft.Count;
@@ -529,7 +529,7 @@ else
     {
         if (Current is not { } pl) return;
         var appId = file.Type == "video" ? "video" : "image";
-        if (!enabledApps.Any(a => a.Id == appId)) { Toast.Error($"L'intégration « {(appId == "video" ? "Vidéo" : "Image")} » n'est pas disponible."); return; }
+        if (!enabledApps.Any(a => a.Id == appId)) { Toast.Error($"L'application « {(appId == "video" ? "Vidéo" : "Image")} » n'est pas disponible."); return; }
         if (Svc.CreateFromMedia(file) is not { } item) { Toast.Error("Ce média ne peut pas être ajouté."); return; }
         var dur = file.Type == "video" ? Helpers.VideoSeconds(file) ?? 30 : Store.Read(d => d.Tenant.DefaultDurationSec);
         var at = position is { } i && i >= 0 && i < pl.Draft.Count ? i : pl.Draft.Count;
@@ -629,7 +629,7 @@ else
             }
             @if (r.Incomplete && !r.Masked && Current is { } cpl)
             {
-                @* intégration ajoutée sans tout ce qu'il lui faut : un bandeau orange invite à finir sa configuration *@
+                @* application ajoutée sans tout ce qu'il lui faut : un bandeau orange invite à finir sa configuration *@
                 <button type="button" class="pfx-todo" title="Il manque une information à ce contenu : il ne passe pas tant qu'il n'est pas configuré" @onclick="() => OpenSettings(cpl, r.It, r.M)"><Ico Name="alert" Size="14" /> À configurer</button>
             }
             else if (ScanOn(r)) { <span class="pfx-scan">@Scan(r)</span> }
@@ -728,7 +728,7 @@ else
         if (Has(Compositions.AppId)) yield return new("cmp", "Compositions", AppIcon.LookOf(Compositions.AppId).Color, compoItems.Count);
         if (PresApps.Any(Has)) yield return new("pres", "Présentations", AppIcon.LookOf("ms-powerpoint").Color, presItems.Count);
         if (Has("webpage")) yield return new("web", "Pages web", AppIcon.LookOf("webpage").Color, webItems.Count);
-        yield return new("app", "Intégrations", "var(--muted)", OtherApps.Count());
+        yield return new("app", "Applications", "var(--muted)", OtherApps.Count());
     }
 
     // Bouton d'ajout propre à l'onglet
@@ -751,7 +751,7 @@ else
                 </div>
             }
         </span>,
-        _ => Modes.Expert ? @<a class="btn ghost sm" href="/integrations"><Ico Name="store" Size="15" /> Toutes les intégrations</a> : @<span></span>
+        _ => Modes.Expert ? @<a class="btn ghost sm" href="/applications"><Ico Name="store" Size="15" /> Toutes les applications</a> : @<span></span>
     };
 
     private RenderFragment ImportButton() => !canImport ? @<span></span> : Modes.Simple
@@ -794,7 +794,7 @@ else
     private int UsedApp(string appId) => Current?.Draft.Count(i => media.FirstOrDefault(x => x.Id == i.MediaId)?.AppId == appId) ?? 0;
 
     // Vignette de la bibliothèque : un clic ajoute (à la fin, ou à l'endroit choisi par « + »), on peut aussi la glisser dans le fil.
-    // Aperçu : l'icône de l'intégration (appId), une composition, ou la vignette du média ou du contenu.
+    // Aperçu : l'icône de l'application (appId), une composition, ou la vignette du média ou du contenu.
     private RenderFragment Tile(string drag, string name, string sub, MediaItem? m, string? appId, Action add, int used, bool busy = false, bool fresh = false, string? len = null) =>
         @<button type="button" class="pfx-tile @(fresh ? "fresh" : "") @(busy ? "busy" : "")" data-add="@(busy ? null : drag)" data-fresh="@(fresh ? "1" : null)" disabled="@busy"
                  title="@(busy ? "Conversion en cours : le média sera ajoutable dans un instant" : $"Ajouter « {name} »{(pickAt is { } p ? $" en position {p + 1}" : " à la fin")}")" @onclick="add">
@@ -839,7 +839,7 @@ else
                 var app = a;
                 @Tile("app:" + app.Id, app.Name, app.Summary ?? app.Category ?? "", null, app.Id, () => AddEmpty(app, TakePick()), UsedApp(app.Id))
             }
-            @if (!OtherApps.Any()) { <p class="hint pfx-empty">Aucune autre intégration ne vous est attribuée.@(Modes.Expert ? " Activez-en dans la page Intégrations." : "")</p> }
+            @if (!OtherApps.Any()) { <p class="hint pfx-empty">Aucune autre application ne vous est attribuée.@(Modes.Expert ? " Activez-en dans la page Applications." : "")</p> }
         </text>;
 
     private RenderFragment MediaGrid(string type) =>
@@ -1122,7 +1122,7 @@ else
         // (une vidéo importée depuis le tiroir reste visible pendant sa conversion)
         pickFiles = MediaLib.PickableFiles().Where(m => m.Type is "image" or "video" && (m.Status == null || m.Status == "processing" && freshFiles.Contains(m.Id)) && !hidden.Contains(m.Id)).OrderByDescending(m => m.AddedUtc).ToList();
         canImport = !readOnlyHere && Store.Read(d => d.Access.CanWrite(LevelPages.Media));
-        enabledApps = Svc.Installed().Select(i => Svc.Find(i.AppId)).OfType<AppManifest>().Where(a => !a.ScreenWidget && !a.IsFeature).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();   // les deux modes : toutes les intégrations attribuées (hors widgets d'écran), §186
+        enabledApps = Svc.Installed().Select(i => Svc.Find(i.AppId)).OfType<AppManifest>().Where(a => !a.ScreenWidget && !a.IsFeature).OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase).ToList();   // les deux modes : toutes les applications attribuées (hors widgets d'écran), §186
         compoItems = Svc.Instances(Compositions.AppId);
         compoFiles = MediaLib.PickableFiles().Where(m => m.Type == "image" && m.Status == null && m.FileName != null).ToList();
         // pages web et présentations déjà réglées (un contenu ajouté à vide et jamais fini n'est pas proposé)
@@ -1261,7 +1261,7 @@ else
         WriteList(d =>
         {
             if (d.Tenant.HaPlans.FirstOrDefault(p => p.Id == r.PlanId) is not { } p || p.Views.FirstOrDefault(v => v.Id == r.ViewId) is not { } v) { err = "Plan ou affichage introuvable."; return; }
-            if (HaPlanUses.NewContent(d, Catalog, p, v) is not { } c) { err = "Activez d'abord Home Assistant dans la page Intégrations."; return; }
+            if (HaPlanUses.NewContent(d, Catalog, p, v) is not { } c) { err = "Activez d'abord Home Assistant dans la page Applications."; return; }
             row = new PlaylistItem { MediaId = c.Id, DurationSec = HaViews.TourSeconds(v) ?? d.Tenant.DefaultDurationSec, Placement = "full" };
             name = c.Name;
             pl.Draft.Insert(at, row);

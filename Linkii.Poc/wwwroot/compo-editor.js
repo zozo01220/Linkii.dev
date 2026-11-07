@@ -2,8 +2,8 @@
    Maquette validée : maquettes/editeur-compositions.html. Rendu des calques : player/composition.js, le même que sur l'écran.
    Appels au serveur (DotNetObjectReference) : Save(nom, document) -> message d'erreur ou null, Qr(texte) -> « côté|tracé »,
    Images() -> images de la médiathèque, Leave() -> retour à la page d'origine.
-   Étape 3 (§85, maquette editeur-compositions-etape3.html) : Sources() -> contenus de Mes intégrations utilisables (météo, calendrier, RSS, capteurs),
-   SourceData(id) -> { data, error } : leurs données actuelles, pour les blocs d'intégration et les champs reliés des textes. */
+   Étape 3 (§85, maquette editeur-compositions-etape3.html) : Sources() -> contenus de Mes applications utilisables (météo, calendrier, RSS, capteurs),
+   SourceData(id) -> { data, error } : leurs données actuelles, pour les blocs d'application et les champs reliés des textes. */
 (function (w) {
   'use strict';
   const WEIGHTS = [[300, 'Léger'], [400, 'Normal'], [500, 'Moyen'], [600, 'Demi-gras'], [700, 'Gras'], [800, 'Extra-gras'], [900, 'Noir']];
@@ -779,7 +779,7 @@
     }
     else if (kind === 'vid') { const m = videos.find(x => x.id === v), r = m && m.w && m.h ? m.h / m.w : .5625; e = { id: nid(), type: 'video', media: v, x: 0, y: 0, w: 960, h: Math.round(960 * r), fit: 'cover', loop: true, radius: 0, vstart: 0, vend: 0, opacity: 1 }; }
     else if (kind === 'qr') e = Q({});
-    else if (kind === 'app') {   // bloc d'une intégration de Mes intégrations (§85)
+    else if (kind === 'app') {   // bloc d'une application de Mes applications (§85)
       const src = sources.find(x => x.id === v) || { app: 'weather-slide' };
       const S = { 'weather-slide': [640, 250, 56], agenda: [900, 400, 40], rss: [900, 340, 38], 'ha-sensors': [620, 300, 40] }[src.app] || [600, 300, 40];
       e = { id: nid(), type: 'app', app: src.app, source: v, x: 0, y: 0, w: S[0], h: S[1], font: 'IBM Plex Sans', size: S[2], weight: 500, color: ink, align: 'left', ls: 0, lh: 1.2, italic: false, bg: 'none', view: 'days', rows: 4, opacity: 1 };
@@ -1086,12 +1086,12 @@
       searchBox('Chercher un champ ou une valeur…') +
       '<p class="ce-help" style="margin:0">Ouvrez une source pour voir ses champs et leurs valeurs, puis glissez-les sur la page. Sur l\'écran, tout se met à jour seul ; sans connexion, l\'écran garde la dernière copie reçue.</p>';
     h += `<div class="ce-grp">Jeux de données${sets.length ? `<small>${sets.length}</small>` : ''}</div>` + (sets.length ? sets.map(dsCard).join('')
-      : '<div class="ce-empty">Aucun jeu de données.<br>Branchez une API, une base ou un fichier dans <a href="/datasources" target="_blank" rel="noopener">Sources de données</a> (plan Pro).</div>');
+      : '<div class="ce-empty">Aucun jeu de données.<br>Branchez une API, une base ou un fichier dans <a href="/settings?tab=connexions&vue=sources" target="_blank" rel="noopener">Sources de données</a> (plan Pro).</div>');
     if (scr) h += `<div class="ce-grp">Cet écran</div><button class="ce-dsrc" data-dset="${scr.id}">${wi(LC().SRC.screen)}<span class="t"><b><span>Valeurs de l'écran</span></b><small>Nom, zone, paramètres… de l'écran qui affiche la composition</small></span><span class="chev">›</span></button>`;
-    if (apps.length) h += `<div class="ce-grp">Intégrations</div>${apps.map(appCard).join('')}`;
+    if (apps.length) h += `<div class="ce-grp">Applications</div>${apps.map(appCard).join('')}`;
     if (missing) h += `<div class="ce-note">${missing} source${missing > 1 ? 's' : ''} introuvable${missing > 1 ? 's' : ''} (supprimée ou d'une autre aire) : ses blocs et listes ne sont pas diffusés, ses champs affichent leur valeur de secours.</div>`;
-    return h + `<div class="ce-row" style="margin-top:14px"><a class="ce-btn ghost" href="/datasources" target="_blank" rel="noopener">+ Ajouter une source</a></div>
-      <p class="ce-help">Intégrations : contenus de Mes intégrations (Météo, Calendrier partagé, Flux RSS, Capteurs). Jeux de données : vos API, bases et fichiers. Les modifier change toutes les compositions qui les utilisent.</p>`;
+    return h + `<div class="ce-row" style="margin-top:14px"><a class="ce-btn ghost" href="/settings?tab=connexions&vue=sources" target="_blank" rel="noopener">+ Ajouter une source</a></div>
+      <p class="ce-help">Applications : contenus de Mes applications (Météo, Calendrier partagé, Flux RSS, Capteurs). Jeux de données : vos API, bases et fichiers. Les modifier change toutes les compositions qui les utilisent.</p>`;
   }
   function setPanel(id) {
     const s = sources.find(x => x.id === id), d = srcData[id], cs = colsOf(id), rows = (d && !d.error && d.rows) || [];
@@ -1243,7 +1243,7 @@
       <div class="ce-lcard"><div class="lch"><span class="g">T</span><div><small>Texte sélectionné</small><b>${esc(shown.length > 120 ? shown.slice(0, 120) + '…' : shown)}</b></div></div>
         <div class="ce-srow static"><span class="k">Champs</span><span class="v">${fs.length ? '<span class="ce-tchips">' + fs.map(([id, key, nfs], n) => isNumField(id, key) ? `<button class="ce-chipf${fd && fd.n === n ? ' on' : ''}" data-fdchip="${n}" title="Régler le format de ce nombre">${esc(fieldLabel(id, key))}<span class="f">${esc(LC().fieldText(id, key, opts({ names: false }), e.fb || '—', nfs))}</span><span>⚙</span></button>` : `<span>${esc(fieldLabel(id, key))}</span>`).join('') + '</span>' + (fs.some(x => isNumField(x[0], x[1])) ? '<small>Cliquez un nombre pour régler son format</small>' : '') : 'Aucun : le texte est fixe.'}</span><span></span></div></div>
       <button class="ce-btn ghost ce-wide" data-fptext="1" style="margin-top:10px" ${sources.length ? '' : 'disabled'}>+ Insérer un champ…</button>
-      <p class="ce-help" style="margin-top:18px">${sources.length ? 'Un champ affiche une valeur de la source à la place du texte fixe. Sur l\'écran, elle se met à jour seule.' : 'Aucune source : ajoutez un jeu de données (Sources de données) ou une intégration (Météo, Calendrier partagé, Flux RSS, Capteurs).'}</p>`;
+      <p class="ce-help" style="margin-top:18px">${sources.length ? 'Un champ affiche une valeur de la source à la place du texte fixe. Sur l\'écran, elle se met à jour seule.' : 'Aucune source : ajoutez un jeu de données (Sources de données) ou une application (Météo, Calendrier partagé, Flux RSS, Capteurs).'}</p>`;
   }
 
   // ---------- format des nombres (§142, maquette formats-nombres.html) : le même bloc pour une colonne de liste et pour un champ de texte ----------
@@ -2016,11 +2016,11 @@
         ['ticker', '#4F6BED', '⇢', 'Bandeau défilant', 'Texte qui défile en continu'], ['countdown', '#E8590C', '⏳', 'Compte à rebours', "Jours restants jusqu'à une date"]];
       h = '<div class="ce-grp" style="margin-top:0">Widgets</div>' + L.map(([key, c, i, n, d]) => `<button class="ce-wrow" draggable="true" data-add="w:${key}"><span class="wi" style="background:${c}">${i}</span><span><b>${n}</b><small>${d}</small></span></button>`).join('') +
         `<button class="ce-wrow" draggable="true" data-add="qr:"><span class="wi" style="background:#5A6B80">▣</span><span><b>QR code</b><small>Lien au choix. Pour compter les scans : onglet « QR code » du contenu, dans la liste de lecture</small></span></button>
-        <div class="ce-grp">Mes intégrations <small>déjà configurées</small></div>
+        <div class="ce-grp">Mes applications <small>déjà configurées</small></div>
         <p class="ce-help" style="margin:0 0 10px">Posées comme un bloc : les données se mettent à jour seules sur l'écran. La source garde ses réglages (ville, calendrier…).</p>
         ${sources.length ? sources.map(s => { const m = SM[s.app] || {}; return `<button class="ce-wrow" draggable="true" data-add="app:${esc(s.id)}">${wi(m)}<span><b>${esc(s.name)}</b><small>${esc(m.name)}</small></span><em class="ce-btag">bloc</em></button>`; }).join('')
-          : '<div class="ce-empty">Aucune intégration à poser.<br>Ajoutez une Météo, un Calendrier partagé, un Flux RSS ou des Capteurs Home Assistant dans Mes intégrations.</div>'}
-        <a class="ce-link" href="/integrations" target="_blank" rel="noopener">+ Ajouter une intégration depuis le Store</a>
+          : '<div class="ce-empty">Aucune application à poser.<br>Ajoutez une Météo, un Calendrier partagé, un Flux RSS ou des Capteurs Home Assistant dans Mes applications.</div>'}
+        <a class="ce-link" href="/applications" target="_blank" rel="noopener">+ Ajouter une application depuis le Store</a>
         <div class="ce-grp">Plein écran seulement</div>
         <div class="ce-wrow soon"><span class="wi" style="background:#8A97A8">⌁</span><span><b>Page web, Facebook</b><small>Ne se posent pas dans une composition</small></span></div>`;
     }
@@ -2033,7 +2033,7 @@
     if (panelName === 'modeles' && tplTab === 'mine') LC().images(p, (u, cb) => cb(u + '?w=320'));
   }
   // ---------- réservation de salle : menu Salles (visible seulement si un calendrier est utilisé comme salle), porte, pastille, plan, tableau ----------
-  // Une salle = un calendrier (Intégrations › Calendrier partagé) dont l'interrupteur « Salle » est activé. L'état se calcule dans composition.js (roomState).
+  // Une salle = un calendrier (Applications › Calendrier partagé) dont l'interrupteur « Salle » est activé. L'état se calcule dans composition.js (roomState).
   const ROOMK = { door: 'Porte de salle', dot: 'Pastille d’état', rect: 'Forme · rectangle', circle: 'Forme · cercle', board: 'Tableau des salles' };
   const roomSrcs = () => sources.filter(x => x.room);
   const roomLabel = x => x.roomName || x.name;
@@ -2065,7 +2065,7 @@
       <p class="ce-help">Une seule composition « Porte de salle » sert toutes les tablettes : chaque écran lit son calendrier (Paramètres de l’écran › Calendrier de la salle). Pour un plan : posez l’image du plan en fond (menu Médias), puis une forme par salle.</p>
       <div class="ce-grp">Salles utilisables<small>${rs.length}</small></div>
       ${rs.map(x => `<button class="ce-lst" data-add="room:rect@${x.id}" title="Ajouter une forme pour cette salle"><span class="g" style="background:none"><i class="ce-dot" style="background:${roomDot(x.id)}"></i></span><span class="t"><b>${esc(roomLabel(x))}</b><small>Calendrier ${esc(x.name)}</small></span><span class="chev">+</span></button>`).join('')}
-      <p class="ce-help">Ce sont vos calendriers utilisés comme salle (interrupteur « Salle » sur le calendrier, dans Intégrations). Cliquez une salle pour poser sa forme sur la page.</p>`;
+      <p class="ce-help">Ce sont vos calendriers utilisés comme salle (interrupteur « Salle » sur le calendrier, dans Applications). Cliquez une salle pour poser sa forme sur la page.</p>`;
   }
   function roomListPop(anchor) {
     const e = cur(); if (!e || e.type !== 'room') return;
@@ -2263,7 +2263,7 @@
     const fam = ce ? famOf(ce) : panelName, ind = fam === 'indicateurs', W1 = FAMW[fam], T1 = ind ? 'Indicateurs' : 'Graphiques', ks = kindsOf(fam), mine = charts().filter(x => famOf(x) === fam);
     if (!ce) {
       return `<div class="ce-ph"><b>${T1}</b></div>
-        ${ds.length ? '' : `<div class="ce-note" style="margin-bottom:10px">Aucun jeu de données. Branchez une API, une base ou un fichier dans <a href="/datasources" target="_blank" rel="noopener">Sources de données</a> pour poser un ${W1}.</div>`}
+        ${ds.length ? '' : `<div class="ce-note" style="margin-bottom:10px">Aucun jeu de données. Branchez une API, une base ou un fichier dans <a href="/settings?tab=connexions&vue=sources" target="_blank" rel="noopener">Sources de données</a> pour poser un ${W1}.</div>`}
         <div class="ce-grp" style="margin-top:0">Ajouter un ${W1}<small>${ks.length} types</small></div>
         <div class="ce-ctypes${ds.length ? '' : ' off'}">${ks.map(k => `<button class="ce-ctile" ${ds.length ? 'draggable="true"' : 'disabled'} data-add="chart:${k}" title="Glissez sur la page, ou cliquez"><span class="pv">${chartPreview(k)}</span><b>${CK[k][0]}</b><small>${CK[k][1]}</small></button>`).join('')}</div>
         <p class="ce-help">${ind ? 'Après l\'ajout, l\'indicateur se relie à une source : colonne, calcul (somme, moyenne, dernière valeur…) et lignes prises en compte. Il se met à jour tout seul.' : 'Après l\'ajout, le graphique se relie à une source : choisissez la source, la colonne des catégories et celle des valeurs.'}</p>
@@ -2496,7 +2496,7 @@
   }
   function label(e) {
     if (e.type === 'text') return String(e.text || '').replace(LC().TOKEN, (m, id, key) => LC().fieldText(id, key, opts({ names: true }))).replace(/\n/g, ' ') || 'Texte';
-    if (e.type === 'app') { const s = sources.find(x => x.id === e.source); return 'Bloc · ' + (s ? s.name : (LC().SRC[e.app] || {}).name || 'intégration'); }
+    if (e.type === 'app') { const s = sources.find(x => x.id === e.source); return 'Bloc · ' + (s ? s.name : (LC().SRC[e.app] || {}).name || 'application'); }
     if (e.type === 'list') { const s = sources.find(x => x.id === e.source); return 'Liste · ' + (e.name || (s ? s.name : 'jeu introuvable')); }
     if (e.type === 'chart') return e.name || 'Graphique';
     if (e.type === 'room') { const s0 = sources.find(x => x.id === e.source); return (ROOMK[e.kind] || 'Salle') + ' · ' + (e.kind === 'board' ? (e.scope === 'list' ? (e.list || []).length + ' salles' : 'toutes les salles') : e.source === 'screen' ? 'salle de l’écran' : s0 ? roomLabel(s0) : 'salle introuvable'); }
@@ -2847,7 +2847,7 @@
   }
 
   // ---------- modèles « Maison connectée » (Home Assistant, §192) ----------
-  // Groupe de la galerie présent seulement si l'intégration Home Assistant est installée. Rien que de l'affichage : des champs de la source intégrée
+  // Groupe de la galerie présent seulement si l'application Home Assistant est installée. Rien que de l'affichage : des champs de la source intégrée
   // « Home Assistant » ({{source:e:entité}}) et des blocs Capteurs (« ents »). Une fenêtre demande l'entité de chaque emplacement, préremplie au mieux.
   const HCAT = 'Maison connectée', HAS = '4a5e00004a5e4a00a000000000000000';
   const hFld = id => '{{' + HAS + ':e:' + id + '}}';

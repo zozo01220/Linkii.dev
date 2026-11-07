@@ -1,13 +1,18 @@
 @page "/apps/{AppId}"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientAdmin")]
 @inject AppService Svc
+@inject TenantStore Store
 @inject NavigationManager Nav
+@inject Toaster Toast
 
+@* Page d'une application (maquettes/menu-applications-refonte.html) : ouverte par son entrée du menu « Applications ».
+   Installée : onglets Contenus (créés avec elle), Configuration (compte, réglages) et Infos ; « Nouveau contenu » et « Désinstaller » en haut.
+   Pas encore installée : sa fiche, avec le bouton pour l'activer. *@
 @if (app == null)
 {
-    <div class="empty"><div class="big">App introuvable</div><a class="btn" href="/integrations">Retour aux intégrations</a></div>
+    <div class="empty"><div class="big">Application introuvable</div><a class="btn" href="/applications">Retour aux applications</a></div>
 }
-else
+else if (!installed)
 {
     <div class="page-head">
         <div class="row" style="gap:16px">
@@ -18,32 +23,146 @@ else
             </div>
         </div>
         <div class="row">
-            <a class="btn ghost" href="@Back">@(app.ScreenWidget ? "Retour aux widgets" : "Retour aux intégrations")</a>
-            @if (!installed) { <button class="btn" @onclick="Install">@(app.ScreenWidget ? "Activer le widget" : "Activer l'intégration")</button> }
-            else if (app.ScreenWidget) { <a class="btn" href="/">Placer sur un écran</a> }
-            else { <a class="btn" href="/playlists">Utiliser dans une liste de lecture</a> }
+            <a class="btn ghost" href="@Back">@(app.ScreenWidget ? "Retour aux widgets" : "Retour aux applications")</a>
+            <button class="btn" @onclick="Install">@(app.ScreenWidget ? "Activer le widget" : "Activer l'application")</button>
+        </div>
+    </div>
+    <div class="card" style="max-width:720px"><AppDetailBody App="app" /></div>
+}
+else
+{
+    <div class="page-head">
+        <div class="row" style="gap:16px">
+            <AppIcon Id="@app.Id" />
+            <div>
+                <h1>@app.Name</h1>
+                <p class="sub">@app.Category · version @app.Version@(installedOn is { } on ? $" · installée le {on.ToLocalTime():dd.MM.yyyy}" : "")</p>
+            </div>
+        </div>
+        <div class="row head-actions">
+            @if (app.ScreenWidget) { <a class="btn" href="/">Placer sur un écran</a> }
+            else if (!app.IsFeature) { <a class="btn" href="/apps/@app.Id/new"><Ico Name="plus" Size="16" /> Nouveau contenu</a> }
+            @if (!app.DefaultOn) { <a class="btn ghost danger-text" href="/applications?retirer=@app.Id">Désinstaller</a> }
         </div>
     </div>
 
-    <div class="card" style="max-width:720px"><AppDetailBody App="app" /></div>
+    <nav class="tabs int-tabs" role="tablist" aria-label="Contenus, configuration et infos">
+        @if (!app.IsFeature) { <button type="button" role="tab" class="@(tab == "contenus" ? "on" : "")" aria-selected="@(tab == "contenus" ? "true" : "false")" @onclick='() => tab = "contenus"'>Contenus <span class="cat-count">@items.Count</span></button> }
+        <button type="button" role="tab" class="@(tab == "config" ? "on" : "")" aria-selected="@(tab == "config" ? "true" : "false")" @onclick='() => tab = "config"'>Configuration</button>
+        <button type="button" role="tab" class="@(tab == "infos" ? "on" : "")" aria-selected="@(tab == "infos" ? "true" : "false")" @onclick='() => tab = "infos"'>Infos</button>
+    </nav>
+
+    @if (tab == "contenus")
+    {
+        @if (items.Count == 0)
+        {
+            <div class="card empty">
+                <div class="big">Aucun contenu @app.Name</div>
+                <p>Créez-en un ici ou depuis une liste de lecture : il apparaîtra dans cette page.</p>
+                <a class="btn" href="/apps/@app.Id/new"><Ico Name="plus" Size="16" /> Nouveau contenu</a>
+            </div>
+        }
+        else
+        {
+            <div class="apd-grid">
+                @foreach (var it in items)
+                {
+                    <a class="apd-item" href="/apps/instance/@it.Id">
+                        <AppIcon Id="@app.Id" Small="true" />
+                        <span class="grow"><b>@it.Name</b><small>@(it.Uses == 0 ? "Dans aucune liste" : it.Uses == 1 ? "Dans 1 liste" : $"Dans {it.Uses} listes")</small></span>
+                        <Ico Name="chevron-right" Size="16" />
+                    </a>
+                }
+                <a class="apd-item apd-new" href="/apps/@app.Id/new"><Ico Name="plus" Size="18" /> Nouveau contenu</a>
+            </div>
+        }
+    }
+    else if (tab == "config")
+    {
+        <div class="card apd-card">
+            @if (account is { } kind)
+            {
+                var acc = accounts.FirstOrDefault(a => a.Id == kind);
+                <div class="cvs-account">
+                    <AccountLogo Kind="@kind" />
+                    <div class="grow">
+                        <b>@(acc?.User ?? $"Aucun compte {ConnectedAccounts.Kind(kind).Name} connecté")</b>
+                        <small>@(acc == null ? $"Nécessaire pour utiliser {app.Name}." : acc.Lost ? "Connexion expirée : reconnectez le compte." : "Compte de l'organisation, partagé avec les autres applications qui l'utilisent.")</small>
+                    </div>
+                    <a class="btn ghost sm" href="/settings?tab=connexions">Voir dans Connexions</a>
+                </div>
+            }
+            else
+            {
+                <p class="hint">Cette application ne demande aucun compte.</p>
+            }
+            <div class="apd-row">
+                <span class="grow"><b>Réglages de l'application</b><small>@(app.IsFeature ? "Ce que fait l'application et son état." : "Compte, dossiers, calendriers ou options selon l'application.")</small></span>
+                <a class="btn sm" href="/applications?gerer=@app.Id">Configurer</a>
+            </div>
+            <div class="apd-row">
+                <span class="grow"><b>Dans le menu</b><small>L'application apparaît dans le groupe « Applications » du menu de gauche.</small></span>
+                <button type="button" class="switch @(inMenu ? "on" : "")" role="switch" aria-checked="@(inMenu ? "true" : "false")" aria-label="Afficher dans le menu" @onclick="ToggleMenu"><span></span></button>
+            </div>
+            <small class="note-line">Les modifications d'un contenu ne partent sur un écran qu'à sa prochaine publication (page Écrans).</small>
+        </div>
+    }
+    else
+    {
+        <div class="card apd-card">
+            <AppDetailBody App="app" />
+            <dl class="int-kv">
+                <dt>Catégorie</dt><dd>@app.Category</dd>
+                <dt>Version</dt><dd>@app.Version</dd>
+                <dt>Installée</dt><dd>@(installedOn is { } d ? d.ToLocalTime().ToString("dd.MM.yyyy") : "—")@(app.DefaultOn ? " · application de base" : "")</dd>
+                <dt>Compte requis</dt><dd>@(account is { } k ? ConnectedAccounts.Kind(k).Name : "Aucun")</dd>
+                <dt>Contenus</dt><dd>@items.Count · dans @items.Count(i => i.Uses > 0) liste@(items.Count(i => i.Uses > 0) > 1 ? "s" : "") de lecture</dd>
+            </dl>
+        </div>
+    }
 }
 
 @code {
     [Parameter] public string AppId { get; set; } = "";
     private AppManifest? app;
-    private bool installed;
+    private bool installed, inMenu;
+    private DateTime? installedOn;
+    private string tab = "contenus";
+    private string? account;   // type de compte demandé (Google, Microsoft…), ou null
+    private List<ConnectedAccount> accounts = new();
+    private record Item(Guid Id, string Name, int Uses);
+    private List<Item> items = new();
 
-    private string Back => app?.ScreenWidget == true ? "/widgets" : "/integrations";
+    private string Back => app?.ScreenWidget == true ? "/widgets" : "/applications";
 
     protected override void OnParametersSet()
     {
         app = Svc.Find(AppId);
         installed = app != null && Svc.IsInstalled(app.Id);
+        if (app == null) return;
+        tab = app.IsFeature ? "config" : "contenus";
+        account = ConnectedAccounts.For(app.Id);
+        (installedOn, inMenu, accounts, items) = Store.Read(d => (
+            d.AppInstalls.FirstOrDefault(a => a.AppId == AppId)?.InstalledUtc,
+            AppMenu.Has(d.Tenant, AppId),
+            ConnectedAccounts.Of(d.Tenant),
+            d.Media.Where(m => m.AppId == AppId)
+                .OrderBy(m => m.Name, StringComparer.CurrentCultureIgnoreCase)
+                .Select(m => new Item(m.Id, m.Name.Length > 0 ? m.Name : "Sans nom", d.Playlists.Count(p => p.Draft.Any(i => i.MediaId == m.Id))))
+                .ToList()));
     }
 
     private void Install()
     {
         Svc.Install(AppId);
         installed = true;   // elle apparaît maintenant dans le panneau Apps des listes de lecture (ou dans l'édition des écrans)
+        OnParametersSet();
+    }
+
+    private void ToggleMenu()
+    {
+        inMenu = !inMenu;
+        Svc.SetMenu(AppId, inMenu);
+        Toast.Ok(inMenu ? $"« {app?.Name} » est dans le menu." : $"« {app?.Name} » n'est plus dans le menu.");
     }
 }

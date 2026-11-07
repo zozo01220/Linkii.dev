@@ -7,7 +7,7 @@ namespace Linkii.Poc;
 
 /// <summary>
 /// « Continuer avec Microsoft / Google / LinkedIn / GitHub » sur la page de connexion : création d'un espace ou connexion, identité seulement (openid, e-mail, nom),
-/// aucun accès aux fichiers ni aux agendas (ceux-ci restent demandés dans Intégrations).
+/// aucun accès aux fichiers ni aux agendas (ceux-ci restent demandés dans Applications).
 /// Réutilise les applications OAuth de la plateforme et leurs adresses de retour (/google/callback, /microsoft/callback) : aucune déclaration
 /// supplémentaire chez Google ni dans Entra. Le retour peut arriver sur le domaine principal : l'identité est confiée à un ticket à usage unique,
 /// repris sur le domaine du revendeur d'origine (/login/sso/finish), où le cookie de session est posé.
@@ -64,7 +64,7 @@ public class ExternalLogin(IConfiguration config, IHttpClientFactory httpFactory
         return p.AuthorizeUrl + "?" + string.Join("&", query.Select(kv => kv.Key + "=" + Uri.EscapeDataString(kv.Value)));
     }
 
-    /// <summary>Ce retour (state) appartient à une connexion de la page de connexion, pas à une intégration.</summary>
+    /// <summary>Ce retour (state) appartient à une connexion de la page de connexion, pas à une application.</summary>
     public bool Owns(string? state) => !string.IsNullOrEmpty(state) && pending.ContainsKey(state);
 
     /// <summary>Retour du fournisseur : rend l'adresse où renvoyer le navigateur (ticket sur le domaine d'origine, ou page de connexion avec l'erreur).</summary>

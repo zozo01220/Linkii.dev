@@ -26,7 +26,7 @@ public record Badge(int Count, int New, int Offline)
 /// une liste à la racine). Il compte dans l'onglet qui le montre (« Partagés avec moi », sinon « Toute l'organisation »). Il est lu quand la page affiche cet onglet
 /// (<see cref="View"/>, appelé par <c>NewMark</c>), qui le fait alors rebondir (<see cref="TakeFresh"/>).</para>
 /// <para>Orange (Écrans) : un écran qui a déjà été connecté ne répond plus. Réglages : point rouge quand l'application a changé de version.
-/// Membres (pas d'onglets) est lu dès que la page est ouverte ; Intégrations n'a que le nombre.</para>
+/// Membres (pas d'onglets) est lu dès que la page est ouverte ; Applications n'a que le nombre.</para>
 /// </summary>
 public class MenuBadges(JsonStore root, TenantStore store, TenantContext ctx, PlaylistLibrary lists, MediaLibrary media, AppCatalog catalog) : IDisposable
 {
@@ -162,7 +162,7 @@ public class MenuBadges(JsonStore root, TenantStore store, TenantContext ctx, Pl
         // publications d'écrans en attente que la personne voit (horloge orange sur Écrans, §178)
         res[MyApprovals] = new Badge(store.Read(d => ApprovalOps.WaitingBy(d.Root, d.ClientId, d.Access.UserId, d.Access.IsOrgAdmin)), 0, 0);
 
-        // Intégrations : seulement le nombre, celui de la page (sans les widgets d'écran ni les apps Agenda/Drive, qui n'ont pas de carte). Les apps de base s'ajoutent d'elles-mêmes à la première visite d'une organisation : ce ne sont pas des nouveautés.
+        // Applications : seulement le nombre, celui de la page (sans les widgets d'écran ni les apps Agenda/Drive, qui n'ont pas de carte). Les apps de base s'ajoutent d'elles-mêmes à la première visite d'une organisation : ce ne sont pas des nouveautés.
         res[Integrations] = Eval(Integrations, store.Read(d => d.AppInstalls.Where(a => catalog.Find(a.AppId) is { ScreenWidget: false } app && app.Id is not ("agenda" or "drive")).Select(a => new Item(a.Id, null, null, false)).ToList()), false, track: false);
 
         // Listes interactives (§168) : le nombre, comme les sources de données
@@ -193,7 +193,7 @@ public class MenuBadges(JsonStore root, TenantStore store, TenantContext ctx, Pl
             var seenShared = row.Shared ?? sharedIds;   // ancien enregistrement : les partages actuels sont déjà vus
             var news = items.Where(i => i.Owner != me && (!row.Ids.Contains(i.Id) || i.Info?.SharedIn == true && !seenShared.Contains(i.Id))).ToList();
 
-            // lu : la page affiche l'onglet qui montre ces éléments (Membres, Intégrations : dès que la page est ouverte)
+            // lu : la page affiche l'onglet qui montre ces éléments (Membres, Applications : dès que la page est ouverte)
             var lookingHere = tabbed ? reading.Fam == fam : open == fam;
             var readTab = tabbed ? reading.Tab : null;
             var read = !lookingHere ? new List<Item>() : news.Where(i => readTab == null || readTab == LibraryTab.All || readTab == LibraryTab.Flat || TabOf(i) == readTab).ToList();   // Flat : mode simple, tout est affiché (§181)

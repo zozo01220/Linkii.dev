@@ -84,7 +84,7 @@ public class AreaAccess
     public bool CanUse(AppManifest a) => IsOrgAdmin || Level?.CanUse(a) == true;
     public bool CanUse(AppCatalog catalog, string appId) => IsOrgAdmin || catalog.Find(appId) is { } m && CanUse(m);
 
-    /// <summary>Les pages Intégrations et Widgets sont visibles dès qu'une app (ou un widget) est autorisée.</summary>
+    /// <summary>Les pages Applications et Widgets sont visibles dès qu'une app (ou un widget) est autorisée.</summary>
     public bool CanSee(string page, AppCatalog catalog) => IsOrgAdmin || Level != null && page switch
     {
         LevelPages.Integrations => catalog.All.Any(a => !a.ScreenWidget && Level.CanUse(a)),
@@ -565,7 +565,7 @@ public static class Seed
     }
 
     /// <summary>
-    /// Calendrier partagé (8 octobre 2026) : la connexion se règle une fois par source dans Intégrations, plus dans chaque contenu.
+    /// Calendrier partagé (8 octobre 2026) : la connexion se règle une fois par source dans Applications, plus dans chaque contenu.
     /// Les contenus « Agenda » réglés à l'ancienne sont supprimés, avec leurs éléments déjà publiés. Les clients qui avaient l'app
     /// retrouvent les liens ICS (et Microsoft 365, s'il était configuré) activés. Sauvegarde : data.json.pre-calendriers.bak.
     /// </summary>

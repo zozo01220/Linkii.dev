@@ -56,15 +56,15 @@ public class ModeService(JsonStore root, TenantContext ctx, NavigationManager na
 
 /// <summary>
 /// Règles du mode simple (4 novembre 2026), réunies ici pour les ajuster facilement : c'est un affichage, les droits ne changent pas.
-/// Intégrations limitées à la liste ci-dessous, affichage en cartes seulement, pas de dossiers (tout est montré à plat),
+/// Applications limitées à la liste ci-dessous, affichage en cartes seulement, pas de dossiers (tout est montré à plat),
 /// ajout depuis l'ordinateur seulement, ni Réglages, ni Player, ni Abonnement, ni commandes de l'appareil, veille, luminosité ou planning.
 /// Les contenus déjà créés en mode expert restent diffusés ; les plannings tournent sans être visibles.
 /// </summary>
 public static class SimpleMode
 {
-    /// <summary>Intégrations proposées en mode simple.</summary>
+    /// <summary>Applications proposées en mode simple.</summary>
     public static readonly IReadOnlySet<string> Apps = new HashSet<string> { "image", "video", "slideshow-images", "slideshow-videos", "webpage", Compositions.AppId };
 
-    /// <summary>L'intégration est proposée dans ce mode.</summary>
+    /// <summary>L'application est proposée dans ce mode.</summary>
     public static bool Offers(bool expert, string? appId) => expert || appId != null && Apps.Contains(appId);
 }

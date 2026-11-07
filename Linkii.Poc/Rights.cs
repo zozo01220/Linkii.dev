@@ -3,12 +3,12 @@ using Microsoft.AspNetCore.Authorization;
 
 namespace Linkii.Poc;
 
-/// <summary>Pages que l'on peut offrir à un niveau de droits. Intégrations et Widgets ne se cochent pas : leur page apparaît dès qu'une app (ou un widget) est autorisée.</summary>
+/// <summary>Pages que l'on peut offrir à un niveau de droits. Applications et Widgets ne se cochent pas : leur page apparaît dès qu'une app (ou un widget) est autorisée.</summary>
 public static class LevelPages
 {
     public const string Screens = "screens", Playlists = "playlists", Planning = "planning", Media = "media";
     public const string Integrations = "integrations", Widgets = "widgets", Zones = "zones";
-    /// <summary>Page du menu qui n'apparaît que si l'intégration « Compositions » est dans Mes intégrations et que le niveau peut l'utiliser.</summary>
+    /// <summary>Page du menu qui n'apparaît que si l'application « Compositions » est dans Mes applications et que le niveau peut l'utiliser.</summary>
     public const string Compositions = "compositions";
 
     /// <summary>Cases du niveau, dans l'ordre du menu.</summary>
@@ -19,14 +19,14 @@ public static class LevelPages
     public static string Label(string page) => page switch
     {
         Screens => "Écrans", Playlists => "Listes de lecture", Planning => "Programmations", Media => "Médiathèque",
-        Integrations => "Intégrations", Widgets => "Widgets", Zones => "Zones", Compositions => "Compositions", _ => page
+        Integrations => "Applications", Widgets => "Widgets", Zones => "Zones", Compositions => "Compositions", _ => page
     };
 
     /// <summary>Adresse d'une page, pour renvoyer un membre vers la première qui lui est ouverte.</summary>
     public static string Path(string page) => page switch
     {
         Screens => "/", Playlists => "/playlists", Planning => "/programmations", Media => "/media",
-        Integrations => "/integrations", Widgets => "/widgets", Zones => "/zones", Compositions => "/compositions", _ => "/"
+        Integrations => "/applications", Widgets => "/widgets", Zones => "/zones", Compositions => "/compositions", _ => "/"
     };
 }
 
@@ -86,10 +86,10 @@ public class AccessLevel : IPerimeter
     public string? Kind { get; set; }
     /// <summary>Pages cochées (<see cref="LevelPages.Offered"/>).</summary>
     public List<string> Pages { get; set; } = new();
-    /// <summary>Toutes les intégrations / tous les widgets, y compris ceux ajoutés plus tard au catalogue.</summary>
+    /// <summary>Toutes les applications / tous les widgets, y compris ceux ajoutés plus tard au catalogue.</summary>
     public bool AllIntegrations { get; set; }
     public bool AllWidgets { get; set; }
-    /// <summary>Identifiants des apps (intégrations et widgets) autorisées une à une.</summary>
+    /// <summary>Identifiants des apps (applications et widgets) autorisées une à une.</summary>
     public List<string> Apps { get; set; } = new();
     /// <summary>Voir sans modifier ni publier.</summary>
     public bool ReadOnly { get; set; }

@@ -1,3 +1,4 @@
+@page "/applications"
 @page "/integrations"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:integrations")]
 @inject TenantStore Store
@@ -18,10 +19,19 @@
 @using Microsoft.JSInterop
 @inject IJSRuntime JS
 
-<div class="page-head">
+@* Page Applications (« Gérer mes applications ») : Mes applications et Store. Embed = "accounts" : la même page réduite aux comptes connectés,
+   affichée dans Réglages › Connexions › Comptes (maquettes/menu-applications-refonte.html). *@
+<div class="page-head @(Embed != null ? "emb-head" : "")">
     <div>
-        <h1>Intégrations</h1>
-        <p class="sub sc-intro">Les sources de contenus de vos listes de lecture et les comptes qui y donnent accès.</p>
+        @if (Embed == null)
+        {
+            <h1>Applications</h1>
+            <p class="sub sc-intro">Vos applications installées et le Store. Choisissez celles qui apparaissent dans le menu, et leur ordre.</p>
+        }
+        else
+        {
+            <p class="sub sc-intro">Les comptes de l'organisation utilisés par vos applications. Un seul compte par fournisseur.</p>
+        }
     </div>
     @if (admin && accountsTab && Addable.Any())
     {
@@ -38,7 +48,7 @@
                         var ready = Available(kind.Id);
                         @if (kind.Id is ConnectedAccounts.Canva or ConnectedAccounts.Dropbox or ConnectedAccounts.Facebook && ready)
                         {
-                            <a role="menuitem" href="@ConnectedAccounts.ConnectUrl(kind.Id)" target="_top"><AccountLogo Kind="@kind.Id" Size="20" /><span><b>@kind.Name</b><small>@kind.Summary</small></span></a>
+                            <a role="menuitem" href="@Cu(ConnectedAccounts.ConnectUrl(kind.Id))" target="_top"><AccountLogo Kind="@kind.Id" Size="20" /><span><b>@kind.Name</b><small>@kind.Summary</small></span></a>
                         }
                         else
                         {
@@ -52,12 +62,12 @@
     }
 </div>
 
-@if (admin)
+@if (admin && Embed == null)
 {
-<nav class="tabs int-tabs" role="tablist" aria-label="Mes intégrations, Store et comptes connectés">
+<nav class="tabs int-tabs" role="tablist" aria-label="Mes applications et Store">
     <button type="button" role="tab" class="@(tab == "mine" ? "on" : "")" aria-selected="@(tab == "mine" ? "true" : "false")" @onclick='() => SetTab("mine")'>
-        Mes intégrations <span class="cat-count">@MineCount</span>
-        @if (MineHasError) { <span class="tab-alert" title="Une intégration est en erreur"><span class="sr-only">Une intégration est en erreur</span></span> }
+        Mes applications <span class="cat-count">@MineCount</span>
+        @if (MineHasError) { <span class="tab-alert" title="Une application est en erreur"><span class="sr-only">Une application est en erreur</span></span> }
     </button>
     <button type="button" role="tab" class="@(tab == "store" ? "on" : "")" aria-selected="@(tab == "store" ? "true" : "false")" @onclick='() => SetTab("store")'><Ico Name="store" Size="16" /> Store <span class="cat-count">@StoreCount</span></button>
 </nav>
@@ -71,7 +81,7 @@
     <div class="lib-tools">
         <div class="search-box grow" style="margin:0">
             <Ico Name="search" Size="16" />
-            <input placeholder="Rechercher une intégration" aria-label="Rechercher une intégration" @bind="search" @bind:event="oninput" />
+            <input placeholder="Rechercher une application" aria-label="Rechercher une application" @bind="search" @bind:event="oninput" />
         </div>
         <ViewToggle StorageKey="integrations" @bind-Value="view" />
     </div>
@@ -87,8 +97,8 @@
     @if (groups.Count == 0)
     {
         <div class="card empty">
-            <div class="big">@(store && search.Length == 0 && filter.Length == 0 ? "Tout le Store est déjà dans Mes intégrations" : "Aucune intégration trouvée")</div>
-            @if (store && search.Length == 0 && filter.Length == 0) { <p>Vous utilisez toutes les intégrations disponibles.</p> }
+            <div class="big">@(store && search.Length == 0 && filter.Length == 0 ? "Tout le Store est déjà dans Mes applications" : "Aucune application trouvée")</div>
+            @if (store && search.Length == 0 && filter.Length == 0) { <p>Vous utilisez toutes les applications disponibles.</p> }
         </div>
     }
     else
@@ -101,7 +111,7 @@
             <div class="int-list">
                 <div class="int-row int-hd" aria-hidden="@(pickable ? "false" : "true")">
                     <span>@if (pickable) { <input type="checkbox" class="sc-check" checked="@(picked.Count == visible.Count && visible.Count > 0)" @onchange="() => PickAll(visible)" aria-label="Tout sélectionner" /> }</span>
-                    <span></span><span>Intégration</span><span class="int-c-use">@(store ? "Prérequis" : "Utilisation")</span><span class="int-c-cat">Catégorie</span><span></span>
+                    <span></span><span>Application</span><span class="int-c-use">@(store ? "Prérequis" : "Utilisation")</span><span class="int-c-cat">Catégorie</span><span></span>
                 </div>
                 @foreach (var g in groups)
                 {
@@ -127,7 +137,7 @@
                 <span class="vr"></span>
                 <button type="button" @onclick="() => BulkSet(picked, true)">Activer</button>
                 <button type="button" @onclick="() => BulkSet(picked, false)">Désactiver</button>
-                <button type="button" disabled="@(removable == 0)" title="@(removable == 0 ? "Les intégrations de base ne se retirent pas : désactivez-les." : "Les remet dans le Store ; leurs contenus restent diffusés.")" @onclick="() => BulkRetire(picked)">Retirer@(removable > 0 && removable < picked.Count ? $" ({removable})" : "")</button>
+                <button type="button" disabled="@(removable == 0)" title="@(removable == 0 ? "Les applications de base ne se retirent pas : désactivez-les." : "Les remet dans le Store ; leurs contenus restent diffusés.")" @onclick="() => BulkRetire(picked)">Retirer@(removable > 0 && removable < picked.Count ? $" ({removable})" : "")</button>
                 <span class="vr"></span>
                 <button type="button" title="Tout désélectionner" aria-label="Tout désélectionner" @onclick="() => selected.Clear()"><Ico Name="x" Size="15" /></button>
             </div>
@@ -165,15 +175,15 @@ else
                      @oncontextmenu="() => { if (inApp) accMenu = a.Id; }" @oncontextmenu:preventDefault="inApp">
                 <div class="acc-head" @onclick="() => ToggleAcc(a.Id)">
                     <AccountLogo Kind="@a.Id" Size="28" />
-                    <button type="button" class="acc-chev" aria-expanded="@(openAcc.Contains(a.Id) ? "true" : "false")" aria-label="@(openAcc.Contains(a.Id) ? "Masquer" : "Voir") les intégrations du compte @a.Kind" @onclick="() => ToggleAcc(a.Id)" @onclick:stopPropagation="true"><Ico Name="chevron" Size="14" /></button>
+                    <button type="button" class="acc-chev" aria-expanded="@(openAcc.Contains(a.Id) ? "true" : "false")" aria-label="@(openAcc.Contains(a.Id) ? "Masquer" : "Voir") les applications du compte @a.Kind" @onclick="() => ToggleAcc(a.Id)" @onclick:stopPropagation="true"><Ico Name="chevron" Size="14" /></button>
                     <div class="acc-id">
                         <b id="acc-@a.Id">@a.Kind</b>
                         <small class="acc-user"><span class="acc-dot @state.Css" title="@state.Label"></span><span class="sr-only">@state.Label : </span>@a.User</small>
                     </div>
                     @{ var nInt = ConnectedAccounts.Kind(a.Id).Integrations.Count(); }
-                    <span class="acc-count">@nInt intégration@(nInt > 1 ? "s" : "")</span>
+                    <span class="acc-count">@nInt application@(nInt > 1 ? "s" : "")</span>
                     @* Look app : le bouton Reconnecter se voit sans ouvrir la carte quand le compte demande de l'attention *@
-                    @if (a.Lost && oauth) { <a class="acc-reco" href="@ReconnectUrl(a)" target="_top" @onclick="() => { }" @onclick:stopPropagation="true">Reconnecter</a> }
+                    @if (a.Lost && oauth) { <a class="acc-reco" href="@Cu(ReconnectUrl(a))" target="_top" @onclick="() => { }" @onclick:stopPropagation="true">Reconnecter</a> }
                     else if (a.Lost || a.Error.Length > 0) { <button type="button" class="acc-reco" @onclick="() => EditConnection(a.Id)" @onclick:stopPropagation="true">Vérifier</button> }
                     <div class="kebab" @onclick:stopPropagation="true">
                         <button type="button" class="kebab-btn" aria-haspopup="menu" aria-expanded="@(accMenu == a.Id ? "true" : "false")" aria-label="Actions pour le compte @a.Kind" @onclick="() => accMenu = accMenu == a.Id ? null : a.Id"><Ico Name="dots-v" Size="18" /></button>
@@ -183,7 +193,7 @@ else
                             <div class="kebab-menu" role="menu">
                                 @if (oauth)
                                 {
-                                    <a role="menuitem" href="@ReconnectUrl(a)" target="_top"><Ico Name="refresh" Size="16" /> Reconnecter ou changer de compte</a>
+                                    <a role="menuitem" href="@Cu(ReconnectUrl(a))" target="_top"><Ico Name="refresh" Size="16" /> Reconnecter ou changer de compte</a>
                                 }
                                 else
                                 {
@@ -199,7 +209,7 @@ else
                 {
                     <div class="acc-alert">
                         <span class="grow">La connexion à ce compte a expiré ou a été retirée chez @a.Kind : ses contenus ne sont plus mis à jour.</span>
-                        <a class="btn danger sm" href="@ReconnectUrl(a)" target="_top">Reconnecter @a.Kind</a>
+                        <a class="btn danger sm" href="@Cu(ReconnectUrl(a))" target="_top">Reconnecter @a.Kind</a>
                     </div>
                 }
                 else if (a.Error.Length > 0)
@@ -213,7 +223,7 @@ else
                 {
                     <div class="acc-alert">
                         <span class="grow">@PermName(p) : accès non autorisé</span>
-                        <a class="btn danger sm" href="@ConnectedAccounts.ConnectUrl(a.Id, p.Purpose ?? AccountPurposes.All)" target="_top">Autoriser</a>
+                        <a class="btn danger sm" href="@Cu(ConnectedAccounts.ConnectUrl(a.Id, p.Purpose ?? AccountPurposes.All))" target="_top">Autoriser</a>
                     </div>
                 }
                 <div class="acc-uses">
@@ -258,7 +268,7 @@ else
 
 @if (wizId is { } wid)
 {
-    @* Assistant d'ajout d'une intégration avec compte (maquette canva-assistant-ajout.html) : tiroir du haut ; n'enregistre rien avant son dernier pas *@
+    @* Assistant d'ajout d'une application avec compte (maquette canva-assistant-ajout.html) : tiroir du haut ; n'enregistre rien avant son dernier pas *@
     @if (wid == "canva")
     {
         <CanvaWizard StartStep="wizStep" Adding="wizAdding" OnAdded="() => pendingUse = wid" OnClose="CloseWizard" OnChanged="Load" />
@@ -287,13 +297,13 @@ else
     <div class="modal app-modal sm" role="alertdialog" aria-modal="true" aria-labelledby="rc-title">
         <div class="modal-head">
             <AppIcon Id="@ri.Icon" />
-            <div class="grow"><h3 id="rc-title">Retirer l'intégration @ri.Name ?</h3><small>Tout ce que cette intégration a apporté dans Linkivi est retiré en une fois.</small></div>
+            <div class="grow"><h3 id="rc-title">Retirer l'application @ri.Name ?</h3><small>Tout ce que cette application a apporté dans Linkivi est retiré en une fois.</small></div>
         </div>
         <div class="modal-body">
             <ul class="cw-list">
                 @foreach (var l in ri.Lines) { <li><b>@l.Title</b>@if (l.Note.Length > 0) { <small>@l.Note</small> }</li> }
             </ul>
-            <p class="acc-hint">Rien n'est supprimé chez le fournisseur. Vous pourrez ajouter l'intégration de nouveau depuis le Store.</p>
+            <p class="acc-hint">Rien n'est supprimé chez le fournisseur. Vous pourrez ajouter l'application de nouveau depuis le Store.</p>
         </div>
         <div class="modal-foot">
             <button class="btn ghost" @onclick="() => retireInfo = null">Annuler</button>
@@ -304,7 +314,7 @@ else
 
 @if (detailId is { } dtId && DetailsHref(dtId) is { } dtHref && Svc.Find(dtHref["/apps/".Length..]) is { } dt)
 {
-    @* Fiche de l'intégration : tiroir du haut, moitié centrée, un seul bouton centré en bas *@
+    @* Fiche de l'application : tiroir du haut, moitié centrée, un seul bouton centré en bas *@
     <div class="modal-backdrop" @onclick="CloseDetails"></div>
     <div class="cw-top cw-half" role="dialog" aria-modal="true" aria-labelledby="dt-title">
         <div class="cw-wrap">
@@ -338,7 +348,7 @@ else
 
 @if (appDrawer is { } did && Svc.Find(did) is { } dm)
 {
-    @* Tiroir d'une intégration simple : ce qu'elle fait, le compte qu'elle demande, et son usage. Ouvert par « Utiliser » (Store) ou « Gérer » / « Corriger » (Mes intégrations). *@
+    @* Tiroir d'une application simple : ce qu'elle fait, le compte qu'elle demande, et son usage. Ouvert par « Utiliser » (Store) ou « Gérer » / « Corriger » (Mes applications). *@
     var dKind = ConnectedAccounts.For(did);
     var dAcc = dKind == null ? null : AccountOf(dKind);
     var dRow = AllRows().FirstOrDefault(r => r.E.Id == did);
@@ -374,17 +384,17 @@ else
             }
             else if (dm.IsFeature)
             {
-                <div class="int-drawer-note">Installée : le bouton rouge <b>« Urgence »</b> est maintenant dans la barre du haut, sur toutes les pages. Pour déclencher une urgence depuis une alarme ou un script, créez une clé du gabarit « Alerte d'urgence seule » dans <a href="/apiwebhooks">API et webhooks</a>. Réservée au plan Pro.</div>
+                <div class="int-drawer-note">Installée : le bouton rouge <b>« Urgence »</b> est maintenant dans la barre du haut, sur toutes les pages. Pour déclencher une urgence depuis une alarme ou un script, créez une clé du gabarit « Alerte d'urgence seule » dans <a href="/settings?tab=developpeurs">API et webhooks</a>. Réservée au plan Pro.</div>
             }
             else
             {
-                <div class="int-drawer-note">Cette intégration ne demande aucun compte : elle est prête à l'emploi. Désactivez-la avec l'interrupteur pour ne plus la proposer dans les listes de lecture.</div>
+                <div class="int-drawer-note">Cette application ne demande aucun compte : elle est prête à l'emploi. Désactivez-la avec l'interrupteur pour ne plus la proposer dans les listes de lecture.</div>
             }
             @if (dm.IsFeature)
             {
                 <div class="int-drawer-use">
                     <span>@(Emergency.Active(tenant.Id).Count(e => !e.Test) is var n and > 0 ? $"{n} urgence{(n > 1 ? "s" : "")} en cours" : "Aucune urgence en cours")</span>
-                    <a class="btn ghost sm" href="/apiwebhooks">Clés d'API</a>
+                    <a class="btn ghost sm" href="/settings?tab=developpeurs">Clés d'API</a>
                 </div>
             }
             else
@@ -397,7 +407,7 @@ else
             }
         </div>
         <div class="modal-foot">
-            @if (!dm.DefaultOn) { <button type="button" class="int-remove" @onclick="() => RetireApp(dm)">Retirer de Mes intégrations</button> }
+            @if (!dm.DefaultOn) { <button type="button" class="int-remove" @onclick="() => RetireApp(dm)">Retirer de Mes applications</button> }
             <button class="btn" @onclick="CloseAppDrawer">Fermer</button>
         </div>
     </div>
@@ -428,7 +438,7 @@ else
             <button class="btn ghost" @onclick="() => connectKind = null">Annuler</button>
             @if (wantCalendars || wantFiles)
             {
-                <a class="btn" href="@ConnectedAccounts.ConnectUrl(connectKind, wantCalendars && wantFiles ? AccountPurposes.All : wantCalendars ? AccountPurposes.Calendar : AccountPurposes.Drive)" target="_top">Continuer avec @def.Name</a>
+                <a class="btn" href="@Cu(ConnectedAccounts.ConnectUrl(connectKind, wantCalendars && wantFiles ? AccountPurposes.All : wantCalendars ? AccountPurposes.Calendar : AccountPurposes.Drive))" target="_top">Continuer avec @def.Name</a>
             }
             else { <button class="btn" disabled>Continuer avec @def.Name</button> }
         </div>
@@ -467,7 +477,7 @@ else
 }
 
 @code {
-    // Catégories affichées, dans l'ordre (boutons de filtre et titres des groupes), dans « Mes intégrations » comme dans le Store.
+    // Catégories affichées, dans l'ordre (boutons de filtre et titres des groupes), dans « Mes applications » comme dans le Store.
     // Calendriers et Drives sont des familles de sources, pas des apps.
     internal const string CalendarsGroup = "Calendriers", DrivesGroup = "Fichiers et Drives", HomeGroup = "Maison connectée";
     internal static readonly string[] Sections = { "Médias", "Web", "Documents et design", CalendarsGroup, DrivesGroup, "Réseaux sociaux", HomeGroup, "Sécurité", "Autres" };
@@ -495,12 +505,12 @@ else
     private string tab = "mine";   // mine | store | accounts | data (sources de données, §139)
     private bool accountsTab { get => tab == "accounts"; set { if (value) tab = "accounts"; else if (tab == "accounts") tab = "mine"; } }
     private int wizStep = 1;
-    private bool wizAdding;   // assistant Canva ouvert pour ajouter l'intégration (pas encore dans Mes intégrations)
+    private bool wizAdding;   // assistant Canva ouvert pour ajouter l'application (pas encore dans Mes applications)
     private RetireInfo? retireInfo;
     private ConnectedAccount? canvaAcc;
-    private string? wizId;   // intégration dont l'assistant d'ajout est ouvert
+    private string? wizId;   // application dont l'assistant d'ajout est ouvert
     private bool cvOpen { get => wizId == "canva"; set { if (value) wizId = "canva"; else if (wizId == "canva") wizId = null; } }
-    private bool addMenu, canvaReady, admin = true;   // admin : activation, comptes et connexions ; un membre voit seulement les intégrations de son niveau
+    private bool addMenu, canvaReady, admin = true;   // admin : activation, comptes et connexions ; un membre voit seulement les applications de son niveau
     private string? calSource;     // source de calendriers dont la fenêtre « Gérer » est ouverte
     private string? driveSource;   // source Drive dont la fenêtre « Gérer » est ouverte
     private bool haOpen;           // compte Home Assistant : fenêtre de connexion ouverte
@@ -517,13 +527,13 @@ else
         (accFilter == "" || a.Id == accFilter) &&
         (accSearch.Trim().Length == 0 || a.Kind.Contains(accSearch.Trim(), StringComparison.OrdinalIgnoreCase) || a.User.Contains(accSearch.Trim(), StringComparison.OrdinalIgnoreCase)));
     private string? flash;              // compte mis en évidence après « Voir le compte »
-    private HashSet<string> added = new();   // intégrations prises dans le Store (Tenant.IntegrationsAdded)
-    private string? pendingUse;         // intégration que « Utiliser » vient d'ouvrir : à la fermeture du tiroir, on la montre dans Mes intégrations
-    private string? flashInt;           // intégration mise en évidence un instant dans Mes intégrations
+    private HashSet<string> added = new();   // applications prises dans le Store (Tenant.IntegrationsAdded)
+    private string? pendingUse;         // application que « Utiliser » vient d'ouvrir : à la fermeture du tiroir, on la montre dans Mes applications
+    private string? flashInt;           // application mise en évidence un instant dans Mes applications
     private bool revealPending;
     private string? detailId;          // entrée dont le tiroir « Détails » (fiche de l'app) est ouvert
     private CatalogView.Entry? detailEntry;   // la même entrée, pour sa pastille d'état ou son bouton Utiliser
-    private string? appDrawer;          // intégration simple (app) dont le tiroir est ouvert
+    private string? appDrawer;          // application simple (app) dont le tiroir est ouvert
     private bool focusPending;
     private readonly Dictionary<string, ElementReference> accRefs = new();
 
@@ -535,7 +545,7 @@ else
 
     private record Row(string Section, CatalogView.Entry E, bool Base);
 
-    /// <summary>Toutes les intégrations visibles, dans l'ordre : catégorie, puis ordre des apps, puis les sources dans leur ordre.</summary>
+    /// <summary>Toutes les applications visibles, dans l'ordre : catégorie, puis ordre des apps, puis les sources dans leur ordre.</summary>
     private List<Row> AllRows()
     {
         // les apps « Calendrier partagé » et « Dossier Drive » n'ont pas de carte : elles suivent leurs sources (actives dès qu'une source l'est)
@@ -554,7 +564,7 @@ else
             .ToList();
     }
 
-    /// <summary>Dans « Mes intégrations » : celles de base, celles prises dans le Store (même désactivées) et toute intégration active.</summary>
+    /// <summary>Dans « Mes applications » : celles de base, celles prises dans le Store (même désactivées) et toute application active.</summary>
     private bool InMine(Row r) => r.Base || added.Contains(r.E.Id) || !r.E.Off;
 
     private List<Row> TabRows(bool store) => AllRows().Where(r => InMine(r) != store).ToList();
@@ -563,7 +573,7 @@ else
     private int StoreCount => TabRows(true).Count;
     private bool MineHasError => TabRows(false).Any(r => MineEntry(r.E).StatusCss == "hors-ligne" && !r.E.Off);
 
-    /// <summary>Une intégration prise mais pas en ordre (compte non connecté, accès à autoriser, connexion à configurer) apparaît en rouge.</summary>
+    /// <summary>Une application prise mais pas en ordre (compte non connecté, accès à autoriser, connexion à configurer) apparaît en rouge.</summary>
     private static CatalogView.Entry MineEntry(CatalogView.Entry e) => e.Off || e.StatusCss != "mise-a-jour"
         ? e
         : e with
@@ -571,7 +581,7 @@ else
             StatusCss = "hors-ligne",
             StatusTitle = e.StatusTitle ?? e.Status switch
             {
-                "À connecter" => "Le compte n'est pas connecté : connectez-le pour utiliser cette intégration.",
+                "À connecter" => "Le compte n'est pas connecté : connectez-le pour utiliser cette application.",
                 "À configurer" => "La connexion n'est pas encore configurée : saisissez-la puis testez-la.",
                 _ => "La configuration est à terminer."
             }
@@ -584,7 +594,7 @@ else
             .Select(g => new CatalogView.Group(g.Key, g.Select(r => store ? r.E with { Off = false, StatusCss = "en-ligne" } : MineEntry(r.E)).ToList()))
             .ToList();
 
-    /// <summary>Ce que demande une intégration du Store avant d'être utilisable.</summary>
+    /// <summary>Ce que demande une application du Store avant d'être utilisable.</summary>
     private static string Need(string id) => id == "cal-ics" ? "Lien à renseigner"
         : ConnectedAccounts.For(id) is not { } kind ? "Aucun compte requis"
         : kind is ConnectedAccounts.Microsoft or ConnectedAccounts.Google or ConnectedAccounts.Canva or ConnectedAccounts.Dropbox or ConnectedAccounts.Facebook
@@ -594,16 +604,16 @@ else
 
     // ---------- Cartes, liste et sélection ----------
 
-    private readonly HashSet<string> selected = new();   // cases cochées dans Mes intégrations
+    private readonly HashSet<string> selected = new();   // cases cochées dans Mes applications
     private string? menuId;                               // carte ou ligne dont le menu ⋯ est ouvert
 
     private void TogglePick(string id) { if (!selected.Remove(id)) selected.Add(id); }
     private void PickAll(List<string> visible) { if (visible.All(selected.Contains)) selected.ExceptWith(visible); else selected.UnionWith(visible); }
 
-    /// <summary>Les intégrations de base ne se retirent pas (on les désactive) ; Home Assistant se gère par son compte.</summary>
+    /// <summary>Les applications de base ne se retirent pas (on les désactive) ; Home Assistant se gère par son compte.</summary>
     private bool CanRetire(string id) => admin && Svc.Find(id) is not { DefaultOn: true };
 
-    /// <summary>Active ou désactive une intégration, quelle que soit sa famille (app, source de calendriers, source Drive).</summary>
+    /// <summary>Active ou désactive une application, quelle que soit sa famille (app, source de calendriers, source Drive).</summary>
     private void SetOn(string id, bool on)
     {
         if (id.StartsWith("cal-")) Svc.SetCalendarSource(id[4..], on);
@@ -621,7 +631,7 @@ else
         {
             if (EntryOf(id) is not { } e || id == "ha-home") continue;
             if (on && Unavailable(e) != null) { refused++; continue; }
-            if (Svc.Find(id) is not { DefaultOn: true }) Svc.Mark(id);   // désactivée, elle reste dans Mes intégrations
+            if (Svc.Find(id) is not { DefaultOn: true }) Svc.Mark(id);   // désactivée, elle reste dans Mes applications
             SetOn(id, on);
             done++;
         }
@@ -629,7 +639,7 @@ else
         Load();
         var extra = refused > 0 ? $" {refused} n'a pas pu être activée : connexion du fournisseur non configurée sur cette plateforme." : "";
         if (done == 0 && refused > 0) Toast.Error(extra.Trim());
-        else Toast.Ok($"{done} intégration{(done > 1 ? "s" : "")} {(on ? "activée" : "désactivée")}{(done > 1 ? "s" : "")}.{extra}");
+        else Toast.Ok($"{done} application{(done > 1 ? "s" : "")} {(on ? "activée" : "désactivée")}{(done > 1 ? "s" : "")}.{extra}");
     }
 
     private async Task BulkRetire(List<string> ids)
@@ -638,13 +648,13 @@ else
         foreach (var id in gone) await RetireCore(id);
         selected.Clear();
         Load();
-        Toast.Ok($"{gone.Count} intégration{(gone.Count > 1 ? "s retirées" : " retirée")} de Mes intégrations. Les contenus restent diffusés ; {(gone.Count > 1 ? "elles sont" : "elle est")} de nouveau dans le Store.");
+        Toast.Ok($"{gone.Count} application{(gone.Count > 1 ? "s retirées" : " retirée")} de Mes applications. Les contenus restent diffusés ; {(gone.Count > 1 ? "elles sont" : "elle est")} de nouveau dans le Store.");
     }
 
-    /// <summary>Retire l'intégration ; une source Drive emporte ses dossiers et les fichiers qu'elle avait copiés dans la médiathèque.</summary>
+    /// <summary>Retire l'application ; une source Drive emporte ses dossiers et les fichiers qu'elle avait copiés dans la médiathèque.</summary>
     private async Task RetireCore(string id)
     {
-        var keepAccount = AccountShared(id);   // calculé avant le retrait : un compte Google ou Microsoft peut servir à une autre intégration
+        var keepAccount = AccountShared(id);   // calculé avant le retrait : un compte Google ou Microsoft peut servir à une autre application
         if (id == "canva") { Canva.RemoveAllFolders(Store.ClientId); Svc.Uninstall("canva"); }
         else if (id.StartsWith("drv-"))
         {
@@ -656,7 +666,7 @@ else
         else if (id is "google-slides" or "google-docs" or "ms-powerpoint" or "facebook") Svc.Uninstall(id);   // contenus et images converties
         if (id != "ha-home") SetOn(id, false);
         Svc.Unmark(id);
-        if (ConnectedAccounts.For(id) is { } kind && !keepAccount) await Accounts.Disconnect(kind);   // le compte part avec l'intégration
+        if (ConnectedAccounts.For(id) is { } kind && !keepAccount) await Accounts.Disconnect(kind);   // le compte part avec l'application
     }
 
     private async Task ConfirmRetire()
@@ -674,7 +684,7 @@ else
 
     private static string N(int n, string one, string many) => $"{n} {(n > 1 ? many : one)}";
 
-    /// <summary>Ce qui part avec l'intégration : fichiers de la médiathèque, contenus et listes de lecture touchés, compte déconnecté.</summary>
+    /// <summary>Ce qui part avec l'application : fichiers de la médiathèque, contenus et listes de lecture touchés, compte déconnecté.</summary>
     private RetireInfo ImpactOf(CatalogView.Entry e)
     {
         var id = e.Id;
@@ -719,11 +729,11 @@ else
             });
             if (files > 0 || id.StartsWith("drv-")) lines.Add((N(files, "fichier", "fichiers") + " dans la médiathèque", note));
             else if (note.Length > 0) lines.Add((note, ""));
-            if (contents > 0) lines.Add((N(contents, "contenu", "contenus") + " dans les listes de lecture", "ils sont supprimés avec l'intégration"));
+            if (contents > 0) lines.Add((N(contents, "contenu", "contenus") + " dans les listes de lecture", "ils sont supprimés avec l'application"));
             lines.Add(Usage(lists));
         }
         if (gone) lines.Add(((user.Length > 0 ? $"Compte de {user}" : "Compte") + " déconnecté", "L'accès donné à Linkivi est supprimé."));
-        else if (ConnectedAccounts.For(id) != null) lines.Add(("Compte conservé", "Une autre intégration l'utilise encore."));
+        else if (ConnectedAccounts.For(id) != null) lines.Add(("Compte conservé", "Une autre application l'utilise encore."));
         return new(id, e.Name, e.Icon, lines, gone);
 
         (string, string) Usage(List<string> pl) => pl.Count == 0 ? ("Aucune liste de lecture touchée", "")
@@ -737,17 +747,17 @@ else
         await RetireCore(e.Id);
         selected.Remove(e.Id);
         Load();
-        Toast.Ok($"« {e.Name} » retirée de Mes intégrations : elle est de nouveau dans le Store. Ses contenus restent diffusés.");
+        Toast.Ok($"« {e.Name} » retirée de Mes applications : elle est de nouveau dans le Store. Ses contenus restent diffusés.");
     }
 
-    /// <summary>Usage de l'intégration, suivi du compte connecté qu'elle utilise.</summary>
+    /// <summary>Usage de l'application, suivi du compte connecté qu'elle utilise.</summary>
     private string UsageLine(string id)
     {
         var acc = ConnectedAccounts.For(id) is { } k ? AccountOf(k) : null;
         return acc is { Lost: false, User.Length: > 0 } ? $"{UsageText(id)} · {acc.User}" : UsageText(id);
     }
 
-    /// <summary>Icône de l'intégration sur une tuile arrondie à sa couleur.</summary>
+    /// <summary>Icône de l'application sur une tuile arrondie à sa couleur.</summary>
     private RenderFragment TileOf(CatalogView.Entry e)
     {
         var look = AppIcon.LookOf(e.Icon);
@@ -755,7 +765,7 @@ else
         return @<span class="int-tile" style="--c:@look.Color">@if (look.Icon is { } ic) { <Ico Name="@ic" Size="32" /> } else { <span class="int-emoji">@(Svc.Find(e.Icon)?.Icon ?? "🧩")</span> }</span>;
     }
 
-    /// <summary>Page descriptive de l'intégration (null : elle n'en a pas, comme Home Assistant).</summary>
+    /// <summary>Page descriptive de l'application (null : elle n'en a pas, comme Home Assistant).</summary>
     private static string? DetailsHref(string id) => id switch
     {
         "ha-home" => null,
@@ -780,6 +790,18 @@ else
                     <button type="button" role="menuitem" @onclick="() => { menuId = null; OpenFor(e); }"><Ico Name="edit" Size="16" /> Gérer</button>
                 }
                 @if (e.Id == "ha-home" && Modes.Expert) { <button type="button" role="menuitem" @onclick='() => { menuId = null; Nav.NavigateTo("/plans"); }'><Ico Name="layers" Size="16" /> Plans du bâtiment</button> }
+                @if (admin)
+                {
+                    @* Groupe « Applications » du menu de gauche : afficher, retirer, ordre *@
+                    <hr />
+                    @if (InMenu(e.Id))
+                    {
+                        <button type="button" role="menuitem" @onclick="() => SetMenu(e.Id, false)"><Ico Name="eye-off" Size="16" /> Retirer du menu</button>
+                        @if (MenuIndex(e.Id) > 0) { <button type="button" role="menuitem" @onclick="() => MoveMenu(e.Id, -1)"><Ico Name="arrow-up" Size="16" /> Monter dans le menu</button> }
+                        @if (MenuIndex(e.Id) < menuIds.Count - 1) { <button type="button" role="menuitem" @onclick="() => MoveMenu(e.Id, 1)"><Ico Name="arrow-down" Size="16" /> Descendre dans le menu</button> }
+                    }
+                    else { <button type="button" role="menuitem" @onclick="() => SetMenu(e.Id, true)"><Ico Name="eye" Size="16" /> Afficher dans le menu</button> }
+                }
                 @if (e.Id != "ha-home" && admin) { <hr /> }
                 @ToggleItemOf(e)
                 @if (CanRetire(e.Id)) { <hr /><button type="button" role="menuitem" class="danger" @onclick="() => Retire(e)"><Ico Name="x" Size="16" /> Retirer</button> }
@@ -802,13 +824,13 @@ else
         <span class="int-dot @css" title="@label" role="img" aria-label="@label"></span>
     </text>;
 
-    /// <summary>Nom : lien vers le détail dans le Store, simple texte dans Mes intégrations (le détail est dans le menu ⋯).</summary>
+    /// <summary>Nom : lien vers le détail dans le Store, simple texte dans Mes applications (le détail est dans le menu ⋯).</summary>
     private RenderFragment NameOf(CatalogView.Entry e, bool store) => @<text>
         @if (store && DetailsHref(e.Id) is { } href) { <a class="cat-name int-link" href="@href" title="Voir le détail de @e.Name" @onclick="() => OpenDetails(e)" @onclick:preventDefault="true">@e.Name</a> }
         else { <span class="cat-name">@e.Name</span> }
     </text>;
 
-    /// <summary>Ouvre le tiroir Détails d'une intégration (bouton i de la carte, ou nom dans la liste du Store).</summary>
+    /// <summary>Ouvre le tiroir Détails d'une application (bouton i de la carte, ou nom dans la liste du Store).</summary>
     private void OpenDetails(CatalogView.Entry e) { menuId = null; detailId = e.Id; detailEntry = e; }
 
     private void CloseDetails() { detailId = null; detailEntry = null; }
@@ -838,6 +860,7 @@ else
                     <div class="int-sub" title="@sub">@sub</div>
                 </div>
                 @if (DetailsHref(e.Id) is not null) { <button type="button" class="int-info" title="Détails" aria-label="Détails de @e.Name" @onclick="() => OpenDetails(e)">i</button> }
+                @if (!store && admin) { @MenuPin(e) }
                 @if (!store && pickable) { @KebabOf(e) }
             </div>
             <div class="int-foot">
@@ -893,6 +916,7 @@ else
                 else if (admin)
                 {
                     @if (err) { <button type="button" class="btn danger-solid sm" @onclick="() => OpenFor(e)">Corriger</button> }
+                    @MenuPin(e)
                     @KebabOf(e)
                 }
             </span>
@@ -901,7 +925,7 @@ else
 
     private ConnectedAccount? AccountOf(string kind) => kind == ConnectedAccounts.Canva ? canvaAcc : accounts.FirstOrDefault(a => a.Id == kind);
 
-    /// <summary>État d'une intégration qui passe par un compte Google, Microsoft ou Canva (null : le compte est en ordre).</summary>
+    /// <summary>État d'une application qui passe par un compte Google, Microsoft ou Canva (null : le compte est en ordre).</summary>
     private (string, string, string?)? AccountProblem(string kind, bool configured) => AccountOf(kind) switch
     {
         { Lost: true } a => ("Compte à reconnecter", "hors-ligne", $"La connexion au compte {a.Kind} a expiré : reconnectez-le dans Comptes connectés."),
@@ -926,7 +950,7 @@ else
             var drive = AccountOf(kind)?.Permissions.Any(x => x.Purpose == AccountPurposes.Drive && x.Granted) == true;
             if (AccountProblem(kind, drive) is { } p) return CatalogView.Entry.Of(a, p.Item1, p.Item2, false) with { StatusTitle = p.Item3 };
         }
-        if (a.Id == "facebook" && AccountOf(ConnectedAccounts.Facebook) is { Lost: true } fb)   // sans compte, l'intégration marche encore avec un jeton collé à la main
+        if (a.Id == "facebook" && AccountOf(ConnectedAccounts.Facebook) is { Lost: true } fb)   // sans compte, l'application marche encore avec un jeton collé à la main
             return CatalogView.Entry.Of(a, "Compte à reconnecter", "hors-ligne", false) with { StatusTitle = $"La connexion au compte {fb.Kind} a expiré : reconnectez-le dans Comptes connectés." };
         return CatalogView.Entry.Of(a, "Active", "en-ligne", false);
     }
@@ -973,7 +997,7 @@ else
         return new("ha-home", "Home Assistant", "Maison connectée", "Capteurs, interrupteurs, lumières, thermostats, volets, scènes et serrures de votre Home Assistant.", "homeassistant", null, status, css, ha == null, why);
     }
 
-    // ---------- Intégrations utilisées par les comptes ----------
+    // ---------- Applications utilisées par les comptes ----------
 
     private bool Enabled(string integrationId) =>
         integrationId.StartsWith("cal-") ? SharedCalendarSources.Enabled(tenant, integrationId[4..])
@@ -986,7 +1010,7 @@ else
         : integrationId.StartsWith("drv-") ? DriveSources.Find(integrationId[4..])?.Name ?? integrationId
         : Svc.Catalog.FirstOrDefault(a => a.Id == integrationId)?.Name ?? integrationId;
 
-    /// <summary>Microsoft et Google : l'intégration qui demande cet accès (agendas, fichiers).</summary>
+    /// <summary>Microsoft et Google : l'application qui demande cet accès (agendas, fichiers).</summary>
     private static string IntegrationFor(string kind, string purpose) => ConnectedAccounts.Kind(kind).Integrations[purpose == AccountPurposes.Calendar ? 0 : 1];
 
     private string UsageText(string integrationId)
@@ -1060,7 +1084,7 @@ else
         else calSource = kind;
     }
 
-    /// <summary>Le compte se gère dans la carte de son intégration (menu ⋮ › Reconnecter ou changer de compte) : on ouvre l'assistant à l'étape Connexion.</summary>
+    /// <summary>Le compte se gère dans la carte de son application (menu ⋮ › Reconnecter ou changer de compte) : on ouvre l'assistant à l'étape Connexion.</summary>
     private void ShowAccount(string kind)
     {
         calSource = driveSource = null;
@@ -1128,23 +1152,70 @@ else
     protected override void OnInitialized()
     {
         admin = Store.Read(d => d.Access.IsOrgAdmin);
-        if (TabParam == "data") { Nav.NavigateTo("/datasources", replace: true); return; }   // ancien lien : les Sources de données ont leur propre onglet
-        if (TabParam == "store" && admin) tab = "store";   // lien « Ouvrir le Store complet » du tiroir de la barre du haut
+        if (Embed == null)
+        {
+            // anciens liens : Sources de données et Comptes connectés sont dans Réglages › Connexions (la suite de l'adresse est gardée : retour d'une connexion)
+            if (TabParam == "data") { Nav.NavigateTo("/settings?tab=connexions&vue=sources", replace: true); return; }
+            if (TabParam == ConnectedAccounts.Tab)
+            {
+                var rest = string.Join("&", System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query).AllKeys.Where(k => k is not null and not "tab").Select(k => k + "=" + Uri.EscapeDataString(System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query)[k] ?? "")));
+                Nav.NavigateTo("/settings?tab=connexions" + (rest.Length > 0 ? "&" + rest : ""), replace: true);
+                return;
+            }
+        }
+        else tab = "accounts";
+        if (TabParam == "store" && admin && Embed == null) tab = "store";   // lien « Ouvrir le Store complet » du tiroir de la barre du haut, ou entrée Store du menu
         Load();
         CanvaReturn();
         GoogleReturn();
         MicrosoftReturn();
         DropboxReturn();
         FacebookReturn();
+        if (Embed != null) return;
         AddFromLink();
+        // ?gerer=<application> (entrée du menu, page d'une application) : sa fenêtre de configuration ; ?retirer=<application> : la confirmation du retrait
+        if (admin && GererParam is { Length: > 0 } g && AllRows().FirstOrDefault(r => r.E.Id == g) is { } gr) OpenFor(gr.E);
+        if (admin && RetirerParam is { Length: > 0 } rt && AllRows().FirstOrDefault(r => r.E.Id == rt) is { } rr && CanRetire(rt)) Retire(rr.E);
     }
 
-    // ---------- Store en accès rapide (barre du haut) : ?utiliser=<intégration> ----------
+    [SupplyParameterFromQuery(Name = "gerer")] public string? GererParam { get; set; }
+    [SupplyParameterFromQuery(Name = "retirer")] public string? RetirerParam { get; set; }
+
+    /// <summary>« accounts » : la page réduite aux comptes connectés, dans Réglages › Connexions.</summary>
+    [Parameter] public string? Embed { get; set; }
+
+    /// <summary>Connexion lancée depuis Réglages › Connexions : le retour s'y fait (AccountPurposes.ReturnPage).</summary>
+    private string Cu(string url) => Embed != null ? url + "&from=settings" : url;
+
+    /// <summary>Compte qui vient d'être connecté : mis en évidence dans la liste.</summary>
+    private void FlashAccount(string kind) { flash = kind; openAcc.Add(kind); }
+
+    // ---------- Groupe « Applications » du menu ----------
+
+    private List<string> menuIds = new();
+    private bool InMenu(string id) => menuIds.Contains(id);
+    private int MenuIndex(string id) => menuIds.IndexOf(id);
+    private void SetMenu(string id, bool on)
+    {
+        menuId = null;
+        Svc.SetMenu(id, on);
+        menuIds = Store.Read(d => AppMenu.Ids(d.Tenant).ToList());
+        var name = AllRows().FirstOrDefault(r => r.E.Id == id)?.E.Name ?? id;
+        Toast.Ok(on ? $"« {name} » est dans le menu, groupe Applications." : $"« {name} » n'est plus dans le menu. Vous la retrouvez ici.");
+    }
+    private void MoveMenu(string id, int delta) { menuId = null; Svc.MoveMenu(id, delta); menuIds = Store.Read(d => AppMenu.Ids(d.Tenant).ToList()); }
+
+    /// <summary>Bouton « Dans le menu » d'une carte ou d'une ligne de Mes applications.</summary>
+    private RenderFragment MenuPin(CatalogView.Entry e) => @<button type="button" class="int-pin @(InMenu(e.Id) ? "on" : "")" aria-pressed="@(InMenu(e.Id) ? "true" : "false")"
+        title="@(InMenu(e.Id) ? "Dans le menu : cliquer pour l'en retirer" : "Afficher dans le menu")" aria-label="@(InMenu(e.Id) ? $"Retirer {e.Name} du menu" : $"Afficher {e.Name} dans le menu")"
+        @onclick="() => SetMenu(e.Id, !InMenu(e.Id))" @onclick:stopPropagation="true"><Ico Name="apps" Size="16" /></button>;
+
+    // ---------- Store en accès rapide (barre du haut) : ?utiliser=<application> ----------
 
     [SupplyParameterFromQuery(Name = "utiliser")] public string? UseParam { get; set; }
     private string? usedParam;
 
-    // « Utiliser » du tiroir Store de la barre du haut : le même geste que le bouton du Store, sur l'intégration demandée.
+    // « Utiliser » du tiroir Store de la barre du haut : le même geste que le bouton du Store, sur l'application demandée.
     protected override void OnParametersSet()
     {
         if (UseParam is not { Length: > 0 } id || id == usedParam) return;
@@ -1161,7 +1232,7 @@ else
     private const string BackKey = "linkii-wizard-back";
     private bool rememberBack;
 
-    // ?ajouter=<intégration>&etape=1|2&retour=media : l'assistant s'ouvre ; sa fermeture ramène à la médiathèque, tiroir ouvert
+    // ?ajouter=<application>&etape=1|2&retour=media : l'assistant s'ouvre ; sa fermeture ramène à la médiathèque, tiroir ouvert
     private void AddFromLink()
     {
         if (AddParam is not { } id || !HasWizard(id)) return;
@@ -1189,10 +1260,11 @@ else
     {
         enabled = Svc.Installed().Select(a => a.AppId).ToHashSet();
         added = Store.Read(d => d.Tenant.IntegrationsAdded.ToHashSet());
+        menuIds = Store.Read(d => AppMenu.Ids(d.Tenant).ToList());
         counts = Store.Read(d => d.Media.Where(m => m.AppId != null).GroupBy(m => m.AppId!).ToDictionary(g => g.Key, g => g.Count()));
         tenant = Store.Read(d => d.Tenant);
         accounts = ConnectedAccounts.Of(tenant);
-        canvaAcc = accounts.FirstOrDefault(a => a.Id == ConnectedAccounts.Canva);   // le compte Canva se gère dans la carte de l'intégration, pas dans Comptes connectés
+        canvaAcc = accounts.FirstOrDefault(a => a.Id == ConnectedAccounts.Canva);   // le compte Canva se gère dans la carte de l'application, pas dans Comptes connectés
         accounts.RemoveAll(a => a.Id == ConnectedAccounts.Canva);
         canvaReady = Canva.IsConfigured;
     }
@@ -1201,7 +1273,7 @@ else
     private void Toggle(CatalogView.Entry a)
     {
         var on = !enabled.Contains(a.Id);
-        if (Svc.Find(a.Id) is not { DefaultOn: true }) Svc.Mark(a.Id);   // désactivée, elle reste dans Mes intégrations
+        if (Svc.Find(a.Id) is not { DefaultOn: true }) Svc.Mark(a.Id);   // désactivée, elle reste dans Mes applications
         if (on) Svc.Enable(a.Id); else Svc.Disable(a.Id);
         var n = counts.GetValueOrDefault(a.Id);
         Toast.Ok(on ? $"« {a.Name} » activée : elle est proposée dans les listes de lecture."
@@ -1261,13 +1333,13 @@ else
     private Task CloseCanva() => CloseWizard();
     private async Task CloseWizard() { var closed = wizId; wizId = null; Load(); EndUse(); await BackIfAsked(closed); }
 
-    /// <summary>Intégrations qui s'ajoutent par l'assistant (compte connecté, étapes Connexion › contenu › Import).</summary>
+    /// <summary>Applications qui s'ajoutent par l'assistant (compte connecté, étapes Connexion › contenu › Import).</summary>
     private static string Initials(string user) => user.Trim().Length == 0 ? "?" : string.Concat(user.Split([' ', '@', '.'], StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpperInvariant(p[0])));
 
     private static string ManageLabel(string id) => id == "canva" || id.StartsWith("drv-") ? "Gérer les dossiers…" : id.StartsWith("cal-") ? "Gérer les calendriers…"
         : id == "facebook" ? "Voir les Pages…" : id == "ha-home" ? "Voir les entités…" : "Voir les fichiers…";
 
-    /// <summary>Intégrations qui copient du contenu dans la médiathèque : « Resynchroniser maintenant ».</summary>
+    /// <summary>Applications qui copient du contenu dans la médiathèque : « Resynchroniser maintenant ».</summary>
     private static bool HasSync(string id) => id == "canva" || id.StartsWith("drv-");
 
     private string CurrentAccount(string id) => ConnectedAccounts.For(id) is { } k ? AccountOf(k)?.User ?? "" : "";
@@ -1287,11 +1359,11 @@ else
 
     private bool InMineId(string id) => AllRows().Any(r => r.E.Id == id && InMine(r));
 
-    /// <summary>Une autre intégration de Mes intégrations utilise le même compte (Google, Microsoft) : annuler un ajout ne le déconnecte pas.</summary>
+    /// <summary>Une autre application de Mes applications utilise le même compte (Google, Microsoft) : annuler un ajout ne le déconnecte pas.</summary>
     private bool AccountShared(string id) => ConnectedAccounts.For(id) is { } k && ConnectedAccounts.Kind(k).Integrations.Any(i => i != id && InMineId(i));
     private void CloseAppDrawer() { appDrawer = null; EndUse(); }
 
-    /// <summary>Plateforme sans connexion au fournisseur (identifiants de l'application à configurer par l'administrateur Linkivi) : null si l'intégration est utilisable.</summary>
+    /// <summary>Plateforme sans connexion au fournisseur (identifiants de l'application à configurer par l'administrateur Linkivi) : null si l'application est utilisable.</summary>
     private string? Unavailable(CatalogView.Entry e)
     {
         if (Svc.Find(e.Id) is { Plan: Plans.Growth } paid && !tenant.IsGrowth) return $"« {paid.Name} » fait partie du plan Pro.";
@@ -1302,13 +1374,13 @@ else
     }
 
     /// <summary>
-    /// Bouton « Utiliser » du Store : l'intégration entre dans Mes intégrations et son tiroir de configuration s'ouvre.
+    /// Bouton « Utiliser » du Store : l'application entre dans Mes applications et son tiroir de configuration s'ouvre.
     /// Avec ou sans succès de la configuration, elle y reste : en rouge tant que son compte ou sa connexion n'est pas en ordre.
     /// </summary>
     private void Use(CatalogView.Entry e)
     {
         if (Unavailable(e) is { } why) { Toast.Error(why); return; }
-        if (HasWizard(e.Id)) { OpenWizard(e.Id, 1, true); return; }   // n'entre dans Mes intégrations qu'au lancement de l'import
+        if (HasWizard(e.Id)) { OpenWizard(e.Id, 1, true); return; }   // n'entre dans Mes applications qu'au lancement de l'import
         pendingUse = e.Id;
         if (CalSource(e) is { } cal)
         {
@@ -1332,7 +1404,7 @@ else
         }
     }
 
-    /// <summary>« Gérer » / « Corriger » d'une carte de Mes intégrations : le tiroir de sa configuration.</summary>
+    /// <summary>« Gérer » / « Corriger » d'une carte de Mes applications : le tiroir de sa configuration.</summary>
     private void OpenFor(CatalogView.Entry e)
     {
         pendingUse = null;
@@ -1341,7 +1413,7 @@ else
         else appDrawer = e.Id;
     }
 
-    /// <summary>Tiroir d'un « Utiliser » refermé : on montre l'intégration dans Mes intégrations, sans regarder si la configuration a réussi.</summary>
+    /// <summary>Tiroir d'un « Utiliser » refermé : on montre l'application dans Mes applications, sans regarder si la configuration a réussi.</summary>
     private void EndUse()
     {
         Load();
@@ -1357,12 +1429,12 @@ else
         Svc.Disable(m.Id);
         Svc.Unmark(m.Id);
         Load();
-        Toast.Ok($"« {m.Name} » retirée de Mes intégrations : elle est de nouveau dans le Store. Ses contenus restent diffusés.");
+        Toast.Ok($"« {m.Name} » retirée de Mes applications : elle est de nouveau dans le Store. Ses contenus restent diffusés.");
     }
 
     // ---------- Retours de connexion ----------
 
-    // Retour de la connexion Canva (/canva/callback) : résultat affiché, et l'intégration activée si besoin.
+    // Retour de la connexion Canva (/canva/callback) : résultat affiché, et l'application activée si besoin.
     private void CanvaReturn()
     {
         var q = System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query)["canva"];
@@ -1381,8 +1453,8 @@ else
     }
 
     /// <summary>
-    /// Connexion Google ou Microsoft réussie : les intégrations dont l'accès a été accordé sont activées.
-    /// Lancée depuis une intégration : sa fenêtre est rouverte pour ajouter des agendas ou des dossiers ; depuis Comptes connectés : le compte est montré.
+    /// Connexion Google ou Microsoft réussie : les applications dont l'accès a été accordé sont activées.
+    /// Lancée depuis une application : sa fenêtre est rouverte pour ajouter des agendas ou des dossiers ; depuis Comptes connectés : le compte est montré.
     /// </summary>
     private string? WizParam => System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query)["wiz"];
 
@@ -1392,7 +1464,7 @@ else
         var name = ConnectedAccounts.Kind(kind).Name;
         var granted = string.Join(" et ", new[] { hasCalendars ? "agendas" : null, hasFiles ? "fichiers" : null }.OfType<string>());
         Toast.Ok($"Compte {name} connecté{(user.Length > 0 ? $" ({user})" : "")}{(granted.Length > 0 ? $" : {granted} autorisés" : "")}.");
-        if (accountsTab) ShowAccount(kind);
+        if (accountsTab) FlashAccount(kind);
         else if (WizParam is { } w && HasWizard(w)) OpenWizard(w, 2, !InMineId(w));
         else if (purpose == AccountPurposes.Calendar) OpenWizard("cal-" + calendarSource, 2, !InMineId("cal-" + calendarSource));
         else if (purpose != AccountPurposes.Calendar) OpenWizard("drv-" + driveSourceId, 2, !InMineId("drv-" + driveSourceId));
@@ -1434,7 +1506,7 @@ else
                 Load();
                 var user = AccountOf(ConnectedAccounts.Dropbox)?.User;
                 Toast.Ok($"Dropbox connecté{(user is { Length: > 0 } ? $" ({user})" : "")}. Ajoutez vos dossiers.");
-                if (accountsTab) ShowAccount(ConnectedAccounts.Dropbox); else OpenWizard("drv-dropbox", 2, !InMineId("drv-dropbox"));
+                if (accountsTab) FlashAccount(ConnectedAccounts.Dropbox); else OpenWizard("drv-dropbox", 2, !InMineId("drv-dropbox"));
                 break;
             case "denied": Toast.Error("Connexion à Dropbox annulée."); break;
             case "scope": Toast.Error("Les autorisations de lecture des fichiers n'ont pas été accordées : vérifiez les permissions de l'application Dropbox (files.metadata.read, files.content.read)."); break;
@@ -1444,7 +1516,7 @@ else
         }
     }
 
-    // Retour de « Se connecter avec Facebook » (/facebook/callback) : l'intégration Facebook est activée et le compte montré.
+    // Retour de « Se connecter avec Facebook » (/facebook/callback) : l'application Facebook est activée et le compte montré.
     private void FacebookReturn()
     {
         var q = System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query)["facebook"];
@@ -1455,7 +1527,7 @@ else
                 var user = AccountOf(ConnectedAccounts.Facebook)?.User;
                 if (q == "ok") Toast.Ok($"Facebook connecté{(user is { Length: > 0 } ? $" ({user})" : "")}. Choisissez une de ses Pages depuis une liste de lecture.");
                 else Toast.Error("Facebook est connecté, mais ce compte n'administre aucune Page (ou n'a pas accordé l'accès aux Pages). Reconnectez-vous en cochant vos Pages.");
-                if (accountsTab) ShowAccount(ConnectedAccounts.Facebook);
+                if (accountsTab) FlashAccount(ConnectedAccounts.Facebook);
                 else OpenWizard("facebook", 2, !InMineId("facebook"));
                 break;
             case "denied": Toast.Error("Connexion à Facebook annulée."); break;

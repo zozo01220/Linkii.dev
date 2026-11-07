@@ -1,20 +1,21 @@
 namespace Linkii.Poc;
 
-/// <summary>Ce qui lance une connexion Google ou Microsoft : une intégration (agendas ou fichiers) ou Comptes connectés (les deux).</summary>
+/// <summary>Ce qui lance une connexion Google ou Microsoft : une application (agendas ou fichiers) ou Comptes connectés (les deux).</summary>
 public static class AccountPurposes
 {
     public const string Calendar = "calendar", Drive = "drive", All = "all";
 
     public static string Parse(string? value) => value is Calendar or All ? value : Drive;
 
-    /// <summary>Page où revenir après la connexion : l'onglet Comptes connectés s'il l'a lancée (?tab=comptes), sinon Intégrations ; l'assistant d'ajout qui l'a lancée (?wiz=) se rouvre.</summary>
+    /// <summary>Page où revenir après la connexion : l'onglet Comptes connectés s'il l'a lancée (?tab=comptes), sinon Applications ; l'assistant d'ajout qui l'a lancée (?wiz=) se rouvre.</summary>
     public static string ReturnPage(HttpRequest req)
     {
+        // lancée depuis Réglages › Connexions (&from=settings) : retour sur cet onglet, compte mis en évidence
+        if (req.Query["from"] == "settings") return "/settings?tab=connexions";
         var parts = new List<string>();
-        if (req.Query["tab"] == ConnectedAccounts.Tab) parts.Add("tab=" + ConnectedAccounts.Tab);
-        var wiz = req.Query["wiz"].ToString();   // assistant d'ajout à rouvrir au retour (identifiant d'intégration)
+        var wiz = req.Query["wiz"].ToString();   // assistant d'ajout à rouvrir au retour (identifiant d'application)
         if (wiz.Length is > 0 and <= 40 && wiz.All(c => char.IsAsciiLetterOrDigit(c) || c == '-')) parts.Add("wiz=" + wiz);
-        return "/integrations" + (parts.Count > 0 ? "?" + string.Join("&", parts) : "");
+        return "/applications" + (parts.Count > 0 ? "?" + string.Join("&", parts) : "");
     }
 }
 
@@ -22,14 +23,14 @@ public static class AccountPurposes
 public record AccountPermission(string Label, bool Granted, string? Purpose);
 
 /// <summary>
-/// Compte connecté par l'organisation, affiché dans Intégrations › Comptes connectés. Lost : accès retiré chez le fournisseur, à reconnecter.
+/// Compte connecté par l'organisation, affiché dans Réglages › Connexions. Lost : accès retiré chez le fournisseur, à reconnecter.
 /// Error : dernier test en échec (serveurs CalDAV et Exchange).
 /// </summary>
 public record ConnectedAccount(string Id, string Kind, string User, string Detail, DateTime? Since, bool Lost, string Error, List<AccountPermission> Permissions);
 
 /// <summary>
 /// Comptes connectés : Microsoft, Google, Canva, serveurs CalDAV et Exchange. Un compte par fournisseur, propre à l'organisation ;
-/// plusieurs intégrations peuvent l'utiliser (le compte Google sert à Google Calendar et à Google Drive).
+/// plusieurs applications peuvent l'utiliser (le compte Google sert à Google Calendar et à Google Drive).
 /// Vue calculée sur les champs du client (jetons Google, Microsoft et Canva, connexions des sources de calendriers).
 /// </summary>
 public static class ConnectedAccounts
@@ -37,12 +38,12 @@ public static class ConnectedAccounts
     public const string Microsoft = "microsoft", Google = "google", Canva = "canva", CalDav = "caldav", Exchange = "ews",
                         Nextcloud = "nextcloud", Sftp = "sftp", Dropbox = "dropbox", Facebook = "facebook", HomeAssistant = "homeassistant";
 
-    /// <summary>Onglet de la page Intégrations (?tab=comptes).</summary>
+    /// <summary>Onglet de la page Applications (?tab=comptes).</summary>
     public const string Tab = "comptes";
 
     public record KindDef(string Id, string Name, string Summary, string[] Integrations);
 
-    /// <summary>Types de comptes, dans l'ordre d'affichage, avec les intégrations qui les utilisent (identifiants des cartes d'Intégrations).</summary>
+    /// <summary>Types de comptes, dans l'ordre d'affichage, avec les applications qui les utilisent (identifiants des cartes d'Applications).</summary>
     public static readonly KindDef[] Kinds =
     {
         new(Microsoft, "Microsoft", "Microsoft 365, OneDrive, SharePoint et PowerPoint", ["cal-m365", "drv-onedrive", "ms-powerpoint"]),
@@ -60,7 +61,7 @@ public static class ConnectedAccounts
 
     public static KindDef Kind(string id) => Kinds.First(k => k.Id == id);
 
-    /// <summary>Compte utilisé par une intégration (carte d'Intégrations), ou null si elle n'en demande pas.</summary>
+    /// <summary>Compte utilisé par une application (carte d'Applications), ou null si elle n'en demande pas.</summary>
     public static string? For(string integrationId) => Kinds.FirstOrDefault(k => k.Integrations.Contains(integrationId))?.Id;
 
     /// <summary>Comptes connectés, ou perdus (à reconnecter), dans l'ordre des types.</summary>

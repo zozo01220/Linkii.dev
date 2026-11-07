@@ -75,8 +75,8 @@
                 <section class="rg-sec">
                     <h5>Connexions</h5>
                     <div class="rg-tiles three">
-                        <a class="rg-tile" href="/integrations?tab=@ConnectedAccounts.Tab"><span class="top">Comptes connectés</span><span class="n">@accountCount</span><span class="d">@(accountNames.Length > 0 ? accountNames : "aucun compte")</span><span class="go">Voir les comptes →</span></a>
-                        <a class="rg-tile" href="/integrations"><span class="top">Intégrations utilisées</span><span class="n">@integrationCount <small>/ @integrationTotal</small></span><span class="d">@(integrationNames.Length > 0 ? integrationNames : "aucune intégration")</span><span class="go">Voir les intégrations →</span></a>
+                        <a class="rg-tile" href="/settings?tab=connexions"><span class="top">Comptes connectés</span><span class="n">@accountCount</span><span class="d">@(accountNames.Length > 0 ? accountNames : "aucun compte")</span><span class="go">Voir les comptes →</span></a>
+                        <a class="rg-tile" href="/applications"><span class="top">Applications utilisées</span><span class="n">@integrationCount <small>/ @integrationTotal</small></span><span class="d">@(integrationNames.Length > 0 ? integrationNames : "aucune application")</span><span class="go">Voir les applications →</span></a>
                     </div>
                 </section>
                 break;
@@ -298,6 +298,18 @@
         }
         </div>
 
+        @* Connexions et Développeurs : hors de la zone d'enregistrement commun (chaque action s'enregistre d'elle-même) *@
+        @if (Tab == "connexions")
+        {
+            <div class="rg-ph"><h2>Connexions</h2><p>Ce que Linkivi relie à vos comptes et à vos systèmes. Vos applications s'en servent.</p></div>
+            <DataSources Embedded="true" />
+        }
+        else if (Tab == "developpeurs")
+        {
+            <div class="rg-ph"><h2>Développeurs</h2><p>Clés d'accès à l'API et adresses de webhook, pour relier Linkivi à vos outils.</p></div>
+            <ApiWebhooks Embedded="true" />
+        }
+
         @if (Tab == "supervision" && alertDlg)
         {
             @* hors de la zone d'enregistrement commun : le choix travaille sur une copie, « Valider » l'applique *@
@@ -378,7 +390,7 @@
                 </div>
                 <div class="rg-card rg-mode">
                     <header><h3>Mode d'utilisation</h3><small>@(Modes.Expert ? "Expert : toutes les fonctions." : "Simple : vue réduite.")</small></header>
-                    <div class="sv-row"><div class="t"><b>@(Modes.Expert ? "Passer en mode simple" : "Passer en mode expert")</b><small>Planning, aires de gestion, membres, intégrations et widgets.</small></div>
+                    <div class="sv-row"><div class="t"><b>@(Modes.Expert ? "Passer en mode simple" : "Passer en mode expert")</b><small>Planning, aires de gestion, membres, applications et widgets.</small></div>
                         <div class="ctl"><button type="button" class="switch @(Modes.Expert ? "on" : "")" role="switch" aria-checked="@(Modes.Expert ? "true" : "false")" aria-label="Passer en mode expert" @onclick="() => Modes.Switch(!Modes.Expert)"><span></span></button></div></div>
                 </div>
                 <ConsentPrefs />
@@ -415,6 +427,7 @@
         ("Diffusion", new[] { new NavItem("diffusion", "Contenus et écrans", "monitor"), new NavItem("veille", "Veille et luminosité", "moon") }),
         ("Suivi", new[] { new NavItem("supervision", "Alertes et pause", "bell", Growth: true), new NavItem("approbation", "Approbation", "shield", Growth: true) }),
         ("Revenus", new[] { new NavItem("publicite", "Publicité", "megaphone", Growth: true) }),
+        ("Connexions et API", new[] { new NavItem("connexions", "Connexions", "link"), new NavItem("developpeurs", "Développeurs", "tool") }),   // mode expert seulement (absents de SimpleTabs)
         ("Abonnement", new[] { new NavItem("abonnement", "Plan et paiement", "file") }),
         ("Mon compte", new[] { new NavItem("compte", "Compte et confidentialité", "user") }),
     };
@@ -488,8 +501,8 @@
 
     protected override void OnInitialized()
     {
-        // Ancien onglet « Applications » (liens enregistrés, retour de Canva) : devenu la page Intégrations.
-        if (TabParam == "applications") { Nav.NavigateTo("/integrations" + new Uri(Nav.Uri).Query.Replace("tab=applications&", "").Replace("?tab=applications", ""), replace: true); return; }
+        // Ancien onglet « Applications » (liens enregistrés, retour de Canva) : devenu la page Applications.
+        if (TabParam == "applications") { Nav.NavigateTo("/applications" + new Uri(Nav.Uri).Query.Replace("tab=applications&", "").Replace("?tab=applications", ""), replace: true); return; }
         var t = Store.Read(d => d.Tenant);
         name = t.Name; timezone = t.Timezone; duration = t.DefaultDurationSec; reloadHour = t.ReloadHour;
         growth = t.IsGrowth; (alertsOn, alertMail, alertPush, alertTypes) = (t.AlertsOn, t.AlertMail, t.AlertPush, t.AlertTypes.ToHashSet());
@@ -591,7 +604,7 @@
         try { await Task.Delay(300, ct); } catch (TaskCanceledException) { return; }
         await InvokeAsync(async () =>
         {
-            if (!dirty || saving || Tab is "utilisation" or "compte" or "abonnement" or "publicite") return;
+            if (!dirty || saving || Tab is "utilisation" or "compte" or "abonnement" or "publicite" or "connexions" or "developpeurs") return;
             saving = true;
             try { await Save(); } finally { saving = false; }
             StateHasChanged();

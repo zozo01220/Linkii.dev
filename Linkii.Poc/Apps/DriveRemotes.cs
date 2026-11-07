@@ -85,8 +85,8 @@ public class RemoteDrives(JsonStore store, SecretBox box, SafeHttp http, Dropbox
             default:
                 throw new InvalidOperationException(source switch
                 {
-                    "dropbox" => "Dropbox n'est pas connecté : connectez votre compte dans Intégrations › Dropbox.",
-                    _ => $"{DriveSources.Find(source)?.Name ?? source} n'est pas configuré : renseignez la connexion dans Intégrations.",
+                    "dropbox" => "Dropbox n'est pas connecté : connectez votre compte dans Applications › Dropbox.",
+                    _ => $"{DriveSources.Find(source)?.Name ?? source} n'est pas configuré : renseignez la connexion dans Applications.",
                 });
         }
     }
@@ -392,7 +392,7 @@ public sealed class DropboxSession(SafeHttp http, string accessToken) : RemoteSe
     {
         var (status, text) = await http.Request(HttpMethod.Post, Api + endpoint, body == null ? null : JsonSerializer.Serialize(body), body == null ? null : "application/json",
             Auth, maxBytes: 8_000_000, ct: ct);
-        if (status == 401) throw new InvalidOperationException("Dropbox a refusé l'accès : reconnectez votre compte dans Intégrations › Comptes connectés.");
+        if (status == 401) throw new InvalidOperationException("Dropbox a refusé l'accès : reconnectez votre compte dans Réglages › Connexions.");
         if (status == 409)
         {
             if (text.Contains("not_found")) throw new InvalidOperationException("Dossier introuvable dans Dropbox : il a peut-être été déplacé ou supprimé.");

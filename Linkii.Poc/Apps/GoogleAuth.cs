@@ -8,7 +8,7 @@ namespace Linkii.Poc;
 
 /// <summary>
 /// Compte Google d'une organisation (« Se connecter avec Google », OAuth 2 + PKCE, lecture seule), partagé par Google Calendar et Google Drive.
-/// Chaque intégration demande son accès (agendas, fichiers Drive) ; les accès déjà accordés sont conservés (autorisation incrémentale).
+/// Chaque application demande son accès (agendas, fichiers Drive) ; les accès déjà accordés sont conservés (autorisation incrémentale).
 /// L'application OAuth est celle de la plateforme Linkivi : Linkii:Google:ClientId, Linkii:Google:ClientSecret et, en production,
 /// Linkii:Google:RedirectUri (adresse de retour déclarée dans Google Cloud ; à défaut, l'adresse du back-office + /google/callback).
 /// </summary>
@@ -20,7 +20,7 @@ public class GoogleAuth(IConfiguration config, JsonStore store, SecretBox box, I
     public const string DriveScope = "https://www.googleapis.com/auth/drive.readonly";
     public const string CalendarScope = "https://www.googleapis.com/auth/calendar.readonly";
 
-    /// <summary>Accès demandés selon ce qui lance la connexion : une intégration (« drive » ou « calendar ») ou Comptes connectés (« all » : les deux).</summary>
+    /// <summary>Accès demandés selon ce qui lance la connexion : une application (« drive » ou « calendar ») ou Comptes connectés (« all » : les deux).</summary>
     public static string[] ScopesFor(string purpose) => purpose switch
     {
         AccountPurposes.Calendar => [CalendarScope],
@@ -65,7 +65,7 @@ public class GoogleAuth(IConfiguration config, JsonStore store, SecretBox box, I
             ["scope"] = string.Join(' ', ScopesFor(purpose)) + " openid email",   // email : afficher quel compte est connecté
             ["access_type"] = "offline",                       // jeton de renouvellement : synchronisation sans l'utilisateur
             ["prompt"] = "consent select_account",
-            ["include_granted_scopes"] = "true",               // l'accès déjà accordé à l'autre intégration est conservé
+            ["include_granted_scopes"] = "true",               // l'accès déjà accordé à l'autre application est conservé
             ["code_challenge"] = challenge,
             ["code_challenge_method"] = "S256",
             ["state"] = state
@@ -75,7 +75,7 @@ public class GoogleAuth(IConfiguration config, JsonStore store, SecretBox box, I
     /// <summary>Retour de Google : échange du code contre les jetons. Rend l'adresse où renvoyer l'utilisateur (?google=ok&amp;for=… ou une erreur).</summary>
     public async Task<string> CompleteAsync(string? state, string? code, string? error)
     {
-        if (string.IsNullOrEmpty(state) || !pending.TryRemove(state, out var p) || p.Expires < DateTime.UtcNow) return "/integrations?google=expired";
+        if (string.IsNullOrEmpty(state) || !pending.TryRemove(state, out var p) || p.Expires < DateTime.UtcNow) return "/applications?google=expired";
         var back = p.ReturnUrl + (p.ReturnUrl.Contains('?') ? "&" : "?") + "for=" + p.Purpose + "&google=";
         if (!string.IsNullOrEmpty(error) || string.IsNullOrEmpty(code)) return back + "denied";
         try
@@ -165,13 +165,13 @@ public class GoogleAuth(IConfiguration config, JsonStore store, SecretBox box, I
         {
             if (access.TryGetValue(t.Id, out a) && a.Expires > DateTime.UtcNow) return a.Token;   // renouvelé entre-temps
             var stored = store.Read(d => d.Clients.FirstOrDefault(c => c.Id == t.Id)?.GoogleRefreshToken ?? "");
-            if (stored.Length == 0) throw new GoogleAuthException("Aucun compte Google connecté : connectez-le dans Intégrations › Comptes connectés.");
+            if (stored.Length == 0) throw new GoogleAuthException("Aucun compte Google connecté : connectez-le dans Réglages › Connexions.");
             TokenResponse r;
             try { r = await TokenRequest(new() { ["grant_type"] = "refresh_token", ["refresh_token"] = box.Unprotect(stored) }); }
             catch (GoogleAuthException)
             {
                 Expire(t.Id);   // accès retiré dans le compte Google, ou mot de passe changé : il faut se reconnecter
-                throw new GoogleAuthException("La connexion au compte Google a expiré. Reconnectez-le dans Intégrations › Comptes connectés.");
+                throw new GoogleAuthException("La connexion au compte Google a expiré. Reconnectez-le dans Réglages › Connexions.");
             }
             access[t.Id] = new Access(r.AccessToken, DateTime.UtcNow.AddSeconds(Math.Max(60, r.ExpiresIn) - 60));
             return r.AccessToken;

@@ -21,10 +21,9 @@
    Journal des livraisons. Les accès, gabarits et événements viennent du registre (ApiRegistry) : une fonction qui s'ajoute apparaît ici sans toucher cette page. *@
 <HeadContent><link rel="stylesheet" href="api-webhooks.css?v=1" /></HeadContent>
 
-<div class="page-head">
+<div class="page-head @(Embedded ? "emb-head" : "")">
     <div>
-        <h1>API et webhooks</h1>
-        <p class="sub">Clés d'accès et adresses de webhook de votre organisation.</p>
+        @if (!Embedded) { <h1>Développeurs</h1><p class="sub">Clés d'accès à l'API et adresses de webhook de votre organisation.</p> }
     </div>
     @if (allowed)
     {
@@ -80,8 +79,13 @@ else
 
     [SupplyParameterFromQuery(Name = "tab")] public string? TabParam { get; set; }
 
+    /// <summary>Affichée dans Réglages › Développeurs (l'ancienne adresse /apiwebhooks y renvoie).</summary>
+    [Parameter] public bool Embedded { get; set; }
+    [SupplyParameterFromQuery(Name = "vue")] public string? VueParam { get; set; }
+
     protected override void OnInitialized()
     {
+        if (!Embedded) { Nav.NavigateTo("/settings?tab=developpeurs" + (TabParam is "keys" or "hooks" or "log" ? "&vue=" + TabParam : ""), replace: true); return; }
         clientId = Store.ClientId;
         Reload();
         timer = new Timer(_ => InvokeAsync(() => { if (sect == "log" || delivery != null || hkOpen) { Reload(); StateHasChanged(); } }), null, 4000, 4000);
@@ -89,7 +93,7 @@ else
 
     protected override void OnParametersSet()
     {
-        if (TabParam is "keys" or "hooks" or "log") sect = TabParam;
+        if (VueParam is "keys" or "hooks" or "log") sect = VueParam;
     }
 
     public void Dispose() => timer?.Dispose();
@@ -102,7 +106,7 @@ else
         owners = Root.Read(db => db.Users.Where(u => u.ClientId == clientId).ToDictionary(u => u.Id, u => string.IsNullOrWhiteSpace(u.Name) ? u.Email : u.Name));
     }
 
-    private void SetSect(string s) { sect = s; CloseAll(); Nav.NavigateTo("/apiwebhooks?tab=" + s, replace: true); }
+    private void SetSect(string s) { sect = s; CloseAll(); Nav.NavigateTo("/settings?tab=developpeurs&vue=" + s, replace: true); }
     private void CloseAll() { openKey = null; mkOpen = false; hkOpen = false; delivery = null; confirmRevoke = false; confirmDelete = false; }
     private string Ago(DateTime? utc) => utc == null ? "—" : Notifs.When(utc.Value, DateTime.UtcNow, tz);
     private string Owner(Guid? id) => id is { } g && owners.TryGetValue(g, out var n) ? n : "—";

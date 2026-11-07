@@ -322,7 +322,7 @@
       try { window.LinkiiNative.config(JSON.stringify(pl.device)); } catch (e) {}
     }
     cfg.wall = pl.wall || null;
-    if (PREVIEW && pl.kiosk && pl.kioskPreview) pl.kiosk.preview = true;   // aperçu tactile d'une liste interactive (sans liste de diffusion)
+    if (PREVIEW && pl.kiosk && pl.kioskPreview) pl.kiosk.preview = true;   // aperçu tactile d'une liste interactive (sans liste de lecture)
     if (window.LinkiiKiosk) LinkiiKiosk.apply(pl.kiosk || null, kioskHooks());   // borne interactive : menu de tuiles au toucher (null : écran de diffusion)
     if (pl.dim !== undefined) cfg.dim = pl.dim || null;
     if (pl.sleep !== undefined) cfg.sleep = pl.sleep || null;   // plages de veille (et veille manuelle) de la version qui devient courante
@@ -714,7 +714,7 @@
     setTimeout(function () { if (ytCallbacks) { var q = ytCallbacks; ytCallbacks = null; for (var i = 0; i < q.length; i++) q[i](null); ytTried = false; } }, 12000);
   }
 
-  var YT_ERRORS = { 2: 'lien invalide', 5: 'erreur du lecteur', 100: 'vidéo introuvable ou privée', 101: 'intégration désactivée par le propriétaire', 150: 'intégration désactivée par le propriétaire', 153: 'configuration du lecteur' };
+  var YT_ERRORS = { 2: 'lien invalide', 5: 'erreur du lecteur', 100: 'vidéo introuvable ou privée', 101: 'application désactivée par le propriétaire', 150: 'application désactivée par le propriétaire', 153: 'configuration du lecteur' };
 
   // o : { videoId | playlistId, sound, start, end } ; opts : { onEnded, onFailed } (diaporama) — sans opts, la vidéo boucle.
   function makeYoutube(el, o, ivs, opts) {

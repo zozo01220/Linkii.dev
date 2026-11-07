@@ -1,13 +1,13 @@
 namespace Linkii.Poc;
 
 /// <summary>
-/// Où s'affiche un plan du bâtiment (§202), et « Ajouter à… » : contenus « Vue du bâtiment » des listes de diffusion et des listes interactives (tuiles de borne),
+/// Où s'affiche un plan du bâtiment (§202), et « Ajouter à… » : contenus « Vue du bâtiment » des listes de lecture et des listes interactives (tuiles de borne),
 /// widgets « Plan du bâtiment » des écrans et des bornes. Tout part de la page du plan : on n'a plus à rechoisir le plan ailleurs.
 /// </summary>
 public static class HaPlanUses
 {
     /// <summary>
-    /// Une utilisation. Kind : « list » (contenu, dans des listes de diffusion), « tile » (contenu ouvert par une tuile de borne),
+    /// Une utilisation. Kind : « list » (contenu, dans des listes de lecture), « tile » (contenu ouvert par une tuile de borne),
     /// « screen » (widget d'un écran), « kiosk » (widget d'une borne, quand elle diffuse). ViewId null : widget en « Auto ».
     /// </summary>
     public sealed record Use(string Kind, string Name, Guid? ViewId, string Where, Guid? ScreenId = null, Guid? MediaId = null, Guid? PlaylistId = null, Guid? ListId = null);
@@ -41,7 +41,7 @@ public static class HaPlanUses
     /// <summary>Nombre d'utilisations de chaque plan de l'organisation (cartes de la page Plans).</summary>
     public static Dictionary<Guid, int> CountByPlan(ClientDb d) => d.Tenant.HaPlans.ToDictionary(p => p.Id, p => Of(d, p.Id).Count);
 
-    /// <summary>Contenu « Vue du bâtiment » déjà relié (plan + affichage), nommé « Plan · Affichage ». Null si l'intégration n'est pas utilisable.</summary>
+    /// <summary>Contenu « Vue du bâtiment » déjà relié (plan + affichage), nommé « Plan · Affichage ». Null si l'application n'est pas utilisable.</summary>
     public static MediaItem? NewContent(ClientDb d, AppCatalog catalog, HaPlan plan, HaPlanView view)
     {
         if (catalog.Find(HomeAssistantRules.BuildingApp) is not { } m || !d.AppInstalls.Any(a => a.AppId == m.Id) || !d.Access.CanUse(m)) return null;
@@ -52,7 +52,7 @@ public static class HaPlanUses
         return item;
     }
 
-    /// <summary>Ajoute un contenu à la fin d'une liste de diffusion ; la durée est celle de la visite (diffusion), sinon la durée par défaut.</summary>
+    /// <summary>Ajoute un contenu à la fin d'une liste de lecture ; la durée est celle de la visite (diffusion), sinon la durée par défaut.</summary>
     public static string? AddToList(ClientDb d, Guid playlistId, MediaItem content, HaPlanView view)
     {
         if (d.Playlists.FirstOrDefault(p => p.Id == playlistId) is not { } pl) return "Liste introuvable.";
@@ -65,7 +65,7 @@ public static class HaPlanUses
     public static string? AddWidget(ClientDb d, AppCatalog catalog, Guid screenId, Guid planId, Guid? viewId)
     {
         if (d.Screens.FirstOrDefault(s => s.Id == screenId) is not { } s) return "Écran introuvable.";
-        if (catalog.Find(HomeAssistantRules.PlanApp) is not { } m || !d.AppInstalls.Any(a => a.AppId == m.Id)) return "Le widget « Plan du bâtiment » n'est pas activé (Intégrations › Home Assistant).";
+        if (catalog.Find(HomeAssistantRules.PlanApp) is not { } m || !d.AppInstalls.Any(a => a.AppId == m.Id)) return "Le widget « Plan du bâtiment » n'est pas activé (Applications › Home Assistant).";
         var settings = AppCatalog.WithDefaults(m, null);
         settings["planId"] = planId.ToString(); settings["viewId"] = viewId?.ToString() ?? "";
         s.Widgets.Add(new ScreenWidget { AppId = m.Id, Settings = settings, X = 4, Y = 4, Scale = 1 });

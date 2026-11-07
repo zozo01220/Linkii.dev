@@ -8,7 +8,7 @@ namespace Linkii.Poc;
 /// Compositions (éditeur de compositions, voir DEV-POC.md §80) : une page faite de calques (textes, formes, images, QR codes, horloge…),
 /// enregistrée dans le paramètre « doc » d'un contenu de l'app « composition ». Document : { v, w, h, bg, els: [ … ] }, positions en pixels
 /// de la page (w × h). Le rendu est commun à l'éditeur et au player : wwwroot/player/composition.js.
-/// Étape 3 (§85) : un calque « app » pose un bloc d'une intégration de Mes intégrations (source : identifiant du contenu), et un texte peut contenir
+/// Étape 3 (§85) : un calque « app » pose un bloc d'une application de Mes applications (source : identifiant du contenu), et un texte peut contenir
 /// des champs « {{source:clé}} » (température, prochain événement…) remplis sur l'écran avec les données de cette source.
 /// </summary>
 public static class Compositions
@@ -16,7 +16,7 @@ public static class Compositions
     public const string AppId = "composition";
     public const int MaxDocLength = 400_000, MaxElements = 400, MinSide = 320, MaxSide = 7680;
 
-    /// <summary>Intégrations utilisables comme source d'un bloc ou de champs : celles qui fournissent des données à l'écran.</summary>
+    /// <summary>Applications utilisables comme source d'un bloc ou de champs : celles qui fournissent des données à l'écran.</summary>
     public static readonly IReadOnlySet<string> SourceApps = new HashSet<string> { "weather-slide", "agenda", "rss", "ha-sensors" };
 
     /// <summary>
@@ -124,7 +124,7 @@ public static class Compositions
             else ids = Guid.TryParse(Str(e, "source"), out var one) && allRooms.Contains(one) ? new[] { one } : Array.Empty<Guid>();
             e["roomIds"] = new JsonArray(ids.Distinct().Select(g => (JsonNode)JsonValue.Create(g.ToString("N"))).ToArray());
         }
-        // Sources (blocs et champs) : réglages figés à la publication, comme un contenu d'intégration ; l'écran lit leurs données par /api/data/{élément}/{source}.
+        // Sources (blocs et champs) : réglages figés à la publication, comme un contenu d'application ; l'écran lit leurs données par /api/data/{élément}/{source}.
         // Une source introuvable (supprimée, d'un autre client) retire ses blocs ; ses champs affichent leur valeur de secours.
         var sources = new Dictionary<Guid, MediaItem?>();
         var sets = new Dictionary<Guid, DataSet>();   // jeux de données (§139) : l'écran lit leur dernière copie, réduite aux colonnes utilisées
@@ -268,7 +268,7 @@ public static class Compositions
 
     /// <summary>
     /// Élément publié d'une source d'une composition publiée (réglages et secrets figés à la publication), pour lire ses données comme un contenu
-    /// d'intégration ordinaire. Null si la composition n'utilisait pas cette source.
+    /// d'application ordinaire. Null si la composition n'utilisait pas cette source.
     /// </summary>
     public static PublishedItem? SourceItem(PublishedItem composition, Guid source)
     {
@@ -342,7 +342,7 @@ public class CompositionTemplate : IClientOwned, IAreaOwned, IOwned
 /// <summary>
 /// Droits sur les compositions et « Mes modèles » (24 octobre 2026) : comme les médias, chacun a les siens, plus ceux qu'on lui partage
 /// (« Peut utiliser » : les mettre dans ses listes, partir d'un modèle ; « Peut modifier » : les changer). Aucun filtre d'aire.
-/// Les autres contenus d'intégrations ne sont pas concernés.
+/// Les autres contenus d'applications ne sont pas concernés.
 /// </summary>
 public static class CompositionRights
 {

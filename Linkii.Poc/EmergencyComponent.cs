@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Components;
 
 namespace Linkii.Poc;
 
-/// <summary>État de l'urgence pour l'organisation, tel que l'interface le montre : l'intégration est-elle utilisable, laquelle est en cours, combien d'écrans l'affichent.</summary>
+/// <summary>État de l'urgence pour l'organisation, tel que l'interface le montre : l'application est-elle utilisable, laquelle est en cours, combien d'écrans l'affichent.</summary>
 public record EmergencySnapshot(bool Enabled, Emergency? Main, int ActiveCount, int Displayed, int Targeted)
 {
     public static readonly EmergencySnapshot None = new(false, null, 0, 0, 0);
@@ -32,7 +32,7 @@ public abstract class EmergencyComponent : ComponentBase, IDisposable
     private void OnUi() => Refresh();
     private void OnStore()
     {
-        // une écriture de données (intégration installée ou retirée, plan changé…) : un seul rafraîchissement dans la demi-seconde
+        // une écriture de données (application installée ou retirée, plan changé…) : un seul rafraîchissement dans la demi-seconde
         if (Interlocked.Exchange(ref pending, 1) == 1) return;
         _ = Task.Delay(500).ContinueWith(_ => { Interlocked.Exchange(ref pending, 0); Refresh(); });
     }

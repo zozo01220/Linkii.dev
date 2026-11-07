@@ -1,46 +1,71 @@
 @page "/datasources"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ClientAdmin")]
 @inject TenantStore Store
+@inject NavigationManager Nav
 
-@* Sources de données (§139, maquettes/sources-de-donnees-hub.html) : onglet du hub Contenus, mode expert ; sous-onglets Sources et Relais. *@
-<div class="page-head">
-    <div>
-        <h1>Sources de données</h1>
-        <p class="sub sc-intro">Vos données externes, lues par Linkii et utilisables dans les compositions.</p>
-    </div>
-    @if (allowed)
+@* Réglages › Connexions (maquettes/menu-applications-refonte.html) : sous-onglets Comptes (comptes connectés de l'organisation), Sources de données et Relais (§139).
+   L'ancienne adresse /datasources renvoie ici. *@
+@if (Embedded)
+{
+    <nav class="tabs int-tabs" role="tablist" aria-label="Comptes, sources de données et relais">
+        <button type="button" role="tab" class="@(sect == "comptes" ? "on" : "")" aria-selected="@(sect == "comptes" ? "true" : "false")" @onclick='() => Go("comptes")'>Comptes <span class="cat-count">@accountCount</span></button>
+        <button type="button" role="tab" class="@(sect == "sources" ? "on" : "")" aria-selected="@(sect == "sources" ? "true" : "false")" @onclick='() => Go("sources")'>Sources de données <span class="cat-count">@sourceCount</span></button>
+        <button type="button" role="tab" class="@(sect == "relays" ? "on" : "")" aria-selected="@(sect == "relays" ? "true" : "false")" @onclick='() => Go("relays")'>Relais <span class="cat-count">@relayCount</span></button>
+    </nav>
+
+    @if (sect == "comptes")
     {
-        <div class="row head-actions int-ha">
-            @if (sect == "relays")
+        <Integrations Embed="accounts" />
+    }
+    else
+    {
+        <div class="page-head emb-head">
+            <div><p class="sub sc-intro">@(sect == "relays" ? "Les relais installés sur vos réseaux, pour lire des données qui ne sont pas sur Internet." : "Vos données externes (API, fichiers, bases), utilisables dans les compositions.")</p></div>
+            @if (allowed)
             {
-                <button class="btn" data-fab="Installer un relais" disabled="@(tabRef?.CanAddRelay != true)" @onclick="() => tabRef?.AddRelay()"><Ico Name="plus" Size="16" /> Installer un relais</button>
-            }
-            else
-            {
-                <button class="btn" data-fab="Connecter une source" disabled="@(tabRef?.CanAddSource != true)" @onclick="() => tabRef?.AddSource()"><Ico Name="plus" Size="16" /> Connecter une source</button>
+                <div class="row head-actions int-ha">
+                    @if (sect == "relays")
+                    {
+                        <button class="btn" data-fab="Installer un relais" disabled="@(tabRef?.CanAddRelay != true)" @onclick="() => tabRef?.AddRelay()"><Ico Name="plus" Size="16" /> Installer un relais</button>
+                    }
+                    else
+                    {
+                        <button class="btn" data-fab="Connecter une source" disabled="@(tabRef?.CanAddSource != true)" @onclick="() => tabRef?.AddSource()"><Ico Name="plus" Size="16" /> Connecter une source</button>
+                    }
+                </div>
             }
         </div>
+        <DataSourcesTab @ref="tabRef" Section="@sect" OnCountChanged="Recount" />
     }
-</div>
-
-<nav class="tabs int-tabs" role="tablist" aria-label="Sources et relais">
-    <button type="button" role="tab" class="@(sect == "sources" ? "on" : "")" aria-selected="@(sect == "sources" ? "true" : "false")" @onclick='() => sect = "sources"'>Sources <span class="cat-count">@sourceCount</span></button>
-    <button type="button" role="tab" class="@(sect == "relays" ? "on" : "")" aria-selected="@(sect == "relays" ? "true" : "false")" @onclick='() => sect = "relays"'>Relais <span class="cat-count">@relayCount</span></button>
-</nav>
-
-<DataSourcesTab @ref="tabRef" Section="@sect" OnCountChanged="Recount" />
+}
 
 @code {
-    private string sect = "sources";   // sources | relays
+    /// <summary>Affichée dans Réglages › Connexions.</summary>
+    [Parameter] public bool Embedded { get; set; }
+    [SupplyParameterFromQuery(Name = "vue")] public string? VueParam { get; set; }
+
+    private string sect = "comptes";   // comptes | sources | relays
     private bool allowed;
-    private int sourceCount, relayCount;
+    private int sourceCount, relayCount, accountCount;
     private DataSourcesTab? tabRef;
 
-    protected override void OnInitialized() => Recount();
+    protected override void OnInitialized()
+    {
+        if (!Embedded) { Nav.NavigateTo("/settings?tab=connexions&vue=sources", replace: true); return; }
+        if (VueParam is "sources" or "relays") sect = VueParam;
+        Recount();
+    }
+
+    private void Go(string s)
+    {
+        sect = s;
+        Nav.NavigateTo("/settings?tab=connexions&vue=" + s, replace: true);
+    }
 
     private void Recount()
     {
-        (allowed, sourceCount, relayCount) = Store.Read(d => (DataSourceOps.Allowed(d.Tenant), d.Tenant.DataConnections.Count, d.Tenant.DataRelays.Count));
+        (allowed, sourceCount, relayCount, accountCount) = Store.Read(d => (DataSourceOps.Allowed(d.Tenant), d.Tenant.DataConnections.Count, d.Tenant.DataRelays.Count,
+            ConnectedAccounts.Of(d.Tenant).Count(a => a.Id != ConnectedAccounts.Canva)));
         StateHasChanged();
     }
 

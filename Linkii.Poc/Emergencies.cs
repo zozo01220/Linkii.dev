@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.SignalR;
 namespace Linkii.Poc;
 
 /// <summary>
-/// Une urgence (intégration « Alerte d'urgence », §159) : un message plein écran rouge, affiché par tous les écrans visés jusqu'à ce qu'on la lève
+/// Une urgence (application « Alerte d'urgence », §159) : un message plein écran rouge, affiché par tous les écrans visés jusqu'à ce qu'on la lève
 /// (back-office ou API). Pas d'expiration, sauf l'essai (un seul écran, 30 secondes). L'historique est gardé un an.
 /// </summary>
 public class Emergency
@@ -71,7 +71,7 @@ public static class Emergencies
 
     public static readonly string[] Kinds = { "all", "areas", "zones", "screens" };
 
-    /// <summary>L'intégration est utilisable : plan Pro, espace actif, et « Alerte d'urgence » installée dans le Store.</summary>
+    /// <summary>L'application est utilisable : plan Pro, espace actif, et « Alerte d'urgence » installée dans le Store.</summary>
     public static bool Enabled(Db db, Tenant t) => t.IsGrowth && !t.IsCut && db.AppInstalls.Any(a => a.ClientId == t.Id && a.AppId == AppId);
 
     public static bool Matches(Emergency e, Screen s) => e.TargetKind switch
@@ -122,7 +122,7 @@ public static class Emergencies
             return new EmergencyLine(s.Id, s.Name, state, woke, s.EmergencyAckId == e.Id ? s.EmergencyAckUtc : null);
         }).ToList());
 
-    /// <summary>Met fin à toutes les urgences en cours (intégration retirée).</summary>
+    /// <summary>Met fin à toutes les urgences en cours (application retirée).</summary>
     public static void EndAll(Tenant t, DateTime now, string by)
     {
         foreach (var e in t.Emergencies.Where(e => e.EndedUtc == null)) { e.EndedUtc = now; e.EndedBy = by; }
@@ -199,7 +199,7 @@ public class EmergencyService(JsonStore store, IEmergencyPush push, IEventPublis
             if (t == null) { error = "Organisation introuvable."; code = Invalid; return; }
             if (t.IsCut) { error = "L'espace de cette organisation est suspendu."; code = Suspended; return; }
             if (!t.IsGrowth) { error = "L'alerte d'urgence fait partie du plan Pro."; code = PlanRequired; return; }
-            if (!Emergencies.Enabled(db, t)) { error = "Installez l'intégration « Alerte d'urgence » dans le Store."; code = NotInstalled; return; }
+            if (!Emergencies.Enabled(db, t)) { error = "Installez l'application « Alerte d'urgence » dans le Store."; code = NotInstalled; return; }
             var ids = r.TargetIds.Distinct().ToList();
             if (r.TargetKind == "areas" && ids.Any(i => !db.Areas.Any(a => a.Id == i && a.ClientId == clientId))) { error = "Aire inconnue."; code = Invalid; return; }
             if (r.TargetKind == "zones" && ids.Any(i => !db.Areas.Where(a => a.ClientId == clientId).SelectMany(a => a.Zones).Any(z => z.Id == i))) { error = "Zone inconnue."; code = Invalid; return; }

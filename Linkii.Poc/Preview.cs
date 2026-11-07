@@ -115,7 +115,7 @@ public static class PlayerFeed
         };
     }
 
-    /// <summary>Aperçu tactile d'une liste interactive : une borne sans liste de diffusion, qui s'ouvre sur l'accueil de la liste.</summary>
+    /// <summary>Aperçu tactile d'une liste interactive : une borne sans liste de lecture, qui s'ouvre sur l'accueil de la liste.</summary>
     public static Dictionary<string, object?> ForInteractive(Db db, InteractiveList l, PublishedKiosk kiosk, PreviewGrant g)
     {
         var t = db.Clients.First(c => c.Id == l.ClientId);

@@ -15,7 +15,7 @@ public static class Alerts
         (Sync, "Synchronisations", "Un dossier connecté n'a pas pu être synchronisé."),
         (Members, "Équipe et partage", "Une personne est ajoutée à l'organisation."),
         (Billing, "Abonnement", "Fin d'essai proche ou terminée, paiement refusé, espace suspendu."),
-        (Integrations, "Intégrations et API", "Adresse de webhook désactivée, clé d'API qui expire."),
+        (Integrations, "Applications et API", "Adresse de webhook désactivée, clé d'API qui expire."),
         (News, "Nouveautés et système", "Nouvelles fonctions de Linkivi, maintenance, incident en cours."),
     };
 
@@ -134,7 +134,7 @@ public class AlertService(JsonStore store, Mailer mail, PushService push, Notifi
 
     /// <summary>
     /// Toute alerte entre dans l'historique, que l'organisation l'ait demandée ou non. Les écrans y entrent par <see cref="ScreenHistory"/> (qui date la panne sans attendre le délai d'alerte).
-    /// Synchronisations et intégrations sont aussi des lignes du diagnostic.
+    /// Synchronisations et applications sont aussi des lignes du diagnostic.
     /// </summary>
     private void Remember(Guid clientId, string kind, string title, string body, string path, string? severity, bool good)
     {

@@ -39,8 +39,8 @@ builder.Services.AddSingleton<ApprovalService>();
 builder.Services.AddScoped<ScreenPublisher>();   // toute publication d'écran faite pour une personne passe ici (demande d'approbation si elle y est soumise)
 builder.Services.AddHostedService<ApprovalWorker>();   // rappel après 24 h, péremption après 7 jours, refus si la brique n'agit plus
 builder.Services.AddSingleton<AlertService>();  // alertes de l'organisation : e-mail et/ou notification selon les Réglages
-builder.Services.AddSingleton<IApiAlerts, ApiAlerts>();   // API et webhooks (§154) : alertes « Intégrations et API »
-builder.Services.AddSingleton<IEmergencyPush, HubEmergencyPush>();   // intégration « Alerte d'urgence » (§159) : message temps réel vers les écrans
+builder.Services.AddSingleton<IApiAlerts, ApiAlerts>();   // API et webhooks (§154) : alertes « Applications et API »
+builder.Services.AddSingleton<IEmergencyPush, HubEmergencyPush>();   // application « Alerte d'urgence » (§159) : message temps réel vers les écrans
 builder.Services.AddSingleton<IEmergencyNotices, EmergencyNotices>();
 builder.Services.AddSingleton<EmergencyService>();
 builder.Services.AddScoped<EmergencyUi>();   // état du bouton, du bandeau et du tiroir d'urgence du back-office
@@ -56,7 +56,7 @@ builder.Services.AddSingleton<WeatherService>();
 builder.Services.AddSingleton<GraphService>();
 builder.Services.AddSingleton<ICalendarConnector, M365Connector>();
 builder.Services.AddSingleton<ICalendarConnector, IcsConnector>();
-builder.Services.AddSingleton<GoogleConnector>();   // aussi utilisé par Intégrations (liste des agendas du compte Google)
+builder.Services.AddSingleton<GoogleConnector>();   // aussi utilisé par Applications (liste des agendas du compte Google)
 builder.Services.AddSingleton<ICalendarConnector>(sp => sp.GetRequiredService<GoogleConnector>());
 builder.Services.AddSingleton<ICalendarConnector, CalDavConnector>();
 builder.Services.AddSingleton<ICalendarConnector, EwsConnector>();
@@ -102,7 +102,7 @@ builder.Services.AddSingleton<ScanLog>();   // scans des QR codes de comptage (P
 builder.Services.AddSingleton<AdLog>();   // passages des spots de publicité (§45) : journal par client, 13 mois
 builder.Services.AddHostedService<AdWorker>();   // publicité : rappel aux propriétaires 24 h avant l'échéance de validation d'un spot
 builder.Services.AddSingleton<RelayBroker>();   // relais Linkii (§139, lot 4) : tâches confiées aux relais du réseau des clients
-builder.Services.AddSingleton<DataSetService>();   // intégrations personnalisées (§139) : lecture des jeux de données, copie et historique
+builder.Services.AddSingleton<DataSetService>();   // applications personnalisées (§139) : lecture des jeux de données, copie et historique
 builder.Services.AddHostedService<DataSyncWorker>();   // jeux de données relus à leur fréquence (plan Pro)
 builder.Services.AddScoped<AppService>();
 builder.Services.AddScoped<MediaLibrary>();
@@ -146,7 +146,7 @@ static async Task<IResult> AccountLinked(HttpContext ctx, string provider, Task<
 builder.Services.AddAuthorization(o =>
 {
     o.AddPolicy("ClientSpace", p => p.RequireClaim(Claims.Client));
-    // Réglages, intégrations, widgets, aires : administrateurs de l'organisation (et équipe Linkivi / revendeur qui entrent dans l'espace), pas les membres
+    // Réglages, applications, widgets, aires : administrateurs de l'organisation (et équipe Linkivi / revendeur qui entrent dans l'espace), pas les membres
     o.AddPolicy("ClientAdmin", p => p.RequireAssertion(c => c.User.GetGuid(Claims.Client) != null && !c.User.IsInRole(Roles.ClientMember)));
     // Pages d'un membre : ouvertes par son niveau de droits (relu à chaque navigation) ; les administrateurs y accèdent toujours
     foreach (var page in LevelPages.All) o.AddPolicy("Page:" + page, p => p.RequireClaim(Claims.Client).AddRequirements(new PageRequirement(page)));
@@ -360,7 +360,7 @@ app.MapGet("/manifest.webmanifest", (HttpContext ctx) =>
     return Results.Json(new
     {
         id = "/", name, short_name = name.Length > 12 ? name[..12].TrimEnd() : name,
-        description = "Pilotez vos écrans d'affichage : listes de lecture, médiathèque et intégrations.",
+        description = "Pilotez vos écrans d'affichage : listes de lecture, médiathèque et applications.",
         lang = "fr", start_url = "/", scope = "/", display = "standalone", orientation = "any",
         background_color = "#F5F7FA", theme_color = color,
         icons = new object[]
@@ -372,28 +372,28 @@ app.MapGet("/manifest.webmanifest", (HttpContext ctx) =>
     }, contentType: "application/manifest+json");
 });
 
-// Canva : connexion du compte Canva d'un client. Départ depuis la page Intégrations (utilisateur connecté à un espace client),
+// Canva : connexion du compte Canva d'un client. Départ depuis la page Applications (utilisateur connecté à un espace client),
 // retour de Canva sur l'adresse déclarée dans le portail développeurs (un seul domaine), puis renvoi vers le domaine d'origine.
 app.MapGet("/canva/connect", (HttpContext ctx, CanvaService canva) =>
 {
     var cid = ctx.User.GetGuid(Claims.Client);
     if (cid == null) return Results.Redirect("/");
-    if (!canva.IsConfigured) return Results.Redirect("/integrations?canva=unconfigured");
+    if (!canva.IsConfigured) return Results.Redirect("/applications?canva=unconfigured");
     var back = $"{ctx.Request.Scheme}://{ctx.Request.Host}" + AccountPurposes.ReturnPage(ctx.Request);
     return Results.Redirect(canva.StartAuthorization(cid.Value, back));
 });
 app.MapGet("/canva/callback", async (HttpContext ctx, HttpRequest req, CanvaService canva) =>
     await AccountLinked(ctx, "Canva", canva.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
 
-// Compte Google : « Se connecter avec Google » depuis Intégrations › Google Calendar (?for=calendar), Google Drive (?for=drive)
+// Compte Google : « Se connecter avec Google » depuis Applications › Google Calendar (?for=calendar), Google Drive (?for=drive)
 // ou Comptes connectés (?for=all&tab=comptes : retour sur cet onglet),
-// application OAuth de la plateforme, lecture seule. Un seul compte par organisation ; chaque intégration ajoute son accès.
+// application OAuth de la plateforme, lecture seule. Un seul compte par organisation ; chaque application ajoute son accès.
 app.MapGet("/google/connect", (HttpContext ctx, GoogleAuth google) =>
 {
     var cid = ctx.User.GetGuid(Claims.Client);
     if (cid == null) return Results.Redirect("/");
     var purpose = AccountPurposes.Parse(ctx.Request.Query["for"]);
-    if (!google.IsConfigured) return Results.Redirect($"/integrations?for={purpose}&google=unconfigured");
+    if (!google.IsConfigured) return Results.Redirect($"/applications?for={purpose}&google=unconfigured");
     var here = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
     return Results.Redirect(google.StartAuthorization(cid.Value, purpose, here + AccountPurposes.ReturnPage(ctx.Request), here));
 });
@@ -402,41 +402,41 @@ app.MapGet("/google/callback", async (HttpContext ctx, HttpRequest req, GoogleAu
         ? Results.Redirect(await sso.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"], req.Query["error_description"]))
         : await AccountLinked(ctx, "Google", google.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
 
-// Compte Dropbox : « Se connecter avec Dropbox » depuis Intégrations › Dropbox ou Comptes connectés (?tab=comptes : retour sur cet onglet),
+// Compte Dropbox : « Se connecter avec Dropbox » depuis Applications › Dropbox ou Comptes connectés (?tab=comptes : retour sur cet onglet),
 // application OAuth de la plateforme, lecture seule. Un seul compte par organisation.
 app.MapGet("/dropbox/connect", (HttpContext ctx, DropboxAuth dropbox) =>
 {
     var cid = ctx.User.GetGuid(Claims.Client);
     if (cid == null) return Results.Redirect("/");
-    if (!dropbox.IsConfigured) return Results.Redirect("/integrations?dropbox=unconfigured");
+    if (!dropbox.IsConfigured) return Results.Redirect("/applications?dropbox=unconfigured");
     var here = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
     return Results.Redirect(dropbox.StartAuthorization(cid.Value, here + AccountPurposes.ReturnPage(ctx.Request), here));
 });
 app.MapGet("/dropbox/callback", async (HttpContext ctx, HttpRequest req, DropboxAuth dropbox) =>
     await AccountLinked(ctx, "Dropbox", dropbox.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
 
-// Compte Facebook : « Se connecter avec Facebook » depuis Intégrations › Comptes connectés (retour sur cet onglet) ou la fenêtre d'un contenu Facebook,
+// Compte Facebook : « Se connecter avec Facebook » depuis Réglages › Connexions (retour sur cet onglet) ou la fenêtre d'un contenu Facebook,
 // application Meta de la plateforme, lecture seule des Pages administrées. Un seul compte par organisation.
 app.MapGet("/facebook/connect", (HttpContext ctx, FacebookAuth facebook) =>
 {
     var cid = ctx.User.GetGuid(Claims.Client);
     if (cid == null) return Results.Redirect("/");
-    if (!facebook.IsConfigured) return Results.Redirect("/integrations?facebook=unconfigured");
+    if (!facebook.IsConfigured) return Results.Redirect("/applications?facebook=unconfigured");
     var here = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
     return Results.Redirect(facebook.StartAuthorization(cid.Value, here + AccountPurposes.ReturnPage(ctx.Request), here));
 });
 app.MapGet("/facebook/callback", async (HttpContext ctx, HttpRequest req, FacebookAuth facebook) =>
     await AccountLinked(ctx, "Facebook", facebook.CompleteAsync(req.Query["state"], req.Query["code"], req.Query["error"])));
 
-// Compte Microsoft : « Se connecter avec Microsoft » depuis Intégrations › Microsoft 365 (?for=calendar), OneDrive et SharePoint (?for=drive)
+// Compte Microsoft : « Se connecter avec Microsoft » depuis Applications › Microsoft 365 (?for=calendar), OneDrive et SharePoint (?for=drive)
 // ou Comptes connectés (?for=all&tab=comptes : retour sur cet onglet),
-// application Entra ID de la plateforme, lecture seule. Un seul compte par organisation ; chaque intégration ajoute son accès.
+// application Entra ID de la plateforme, lecture seule. Un seul compte par organisation ; chaque application ajoute son accès.
 app.MapGet("/microsoft/connect", (HttpContext ctx, MicrosoftAuth microsoft) =>
 {
     var cid = ctx.User.GetGuid(Claims.Client);
     if (cid == null) return Results.Redirect("/");
     var purpose = AccountPurposes.Parse(ctx.Request.Query["for"]);
-    if (!microsoft.IsConfigured) return Results.Redirect($"/integrations?for={purpose}&microsoft=unconfigured");
+    if (!microsoft.IsConfigured) return Results.Redirect($"/applications?for={purpose}&microsoft=unconfigured");
     var here = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
     return Results.Redirect(microsoft.StartAuthorization(cid.Value, purpose, here + AccountPurposes.ReturnPage(ctx.Request), here));
 });
@@ -962,7 +962,7 @@ api.MapGet("/data/{id:guid}/{src:guid}", async (HttpRequest req, Guid id, Guid s
 });
 
 // Sources d'une composition servies par Linkii lui-même (§139) : « Cet écran » (nom, zone, paramètres) et jeux de données (dernière copie,
-// réduite aux colonnes utilisées). Null : la source est un contenu d'intégration ordinaire (météo, RSS…).
+// réduite aux colonnes utilisées). Null : la source est un contenu d'application ordinaire (météo, RSS…).
 static IResult? CompositionData(Db db, Tenant t, PublishedItem pub, Guid src, Screen? screen, DataSetService data)
 {
     if (Compositions.UsesScreen(pub, src)) return Results.Ok(Compositions.ScreenData(db, screen));
@@ -990,7 +990,7 @@ static async Task<IResult> AppData(PublishedItem published, Tenant tenant, AppCa
 
 // ---------- Relais Linkii (§139, lot 4) : le relais appelle le serveur, jamais l'inverse (voir RelayProtocol.cs) ----------
 api.MapPost("/relay/pair", (RelayPairRequest body, RelayBroker relays) =>
-    relays.Pair(body) is { } r ? Results.Ok(r) : Results.Json(new { error = "Code inconnu ou expiré : créez-en un nouveau dans Intégrations › Sources de données › Relais." }, statusCode: 404));
+    relays.Pair(body) is { } r ? Results.Ok(r) : Results.Json(new { error = "Code inconnu ou expiré : créez-en un nouveau dans Réglages › Connexions › Relais." }, statusCode: 404));
 
 api.MapGet("/relay/next", async (HttpRequest req, RelayBroker relays, CancellationToken ct) =>
 {

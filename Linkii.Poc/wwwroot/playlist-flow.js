@@ -1,4 +1,4 @@
-/* Fil d'une liste de diffusion (§73, fil horizontal §186, glisser fluide §187) : glisser une vignette de la bibliothèque dans le fil, ou déplacer une carte du fil.
+/* Fil d'une liste de lecture (§73, fil horizontal §186, glisser fluide §187) : glisser une vignette de la bibliothèque dans le fil, ou déplacer une carte du fil.
    Glisser aux événements pointeur (souris, doigt, stylet), d'après maquettes/liste-diffusion-glisser-deplacer.html :
    - la carte (ou la vignette) saisie est portée par le pointeur (légère inclinaison, ombre) ; un vide en pointillés bleus marque l'endroit d'arrivée ;
    - dès qu'elle dépasse le milieu d'une autre carte, celle-ci glisse d'un cran (transform, 0,25 s) ; le vide suit ;

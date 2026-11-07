@@ -96,7 +96,7 @@ public record PlaylistUse(int Screens, int Pending, int Slots, string? FirstSlot
 public record PlaylistDeleteImpact(List<string> Screens, List<string> Slots);
 
 /// <summary>
-/// Format d'une liste de diffusion (elle n'en a pas en propre) : celui de la plupart de ses contenus pleine page qui ont une taille
+/// Format d'une liste de lecture (elle n'en a pas en propre) : celui de la plupart de ses contenus pleine page qui ont une taille
 /// (images, vidéos, compositions) ; à défaut, celui de la plupart des écrans qui la diffusent en plein écran ; sinon paysage.
 /// Sert à la carte (carrousel en portrait) et à l'ouverture de la fenêtre « Aperçu ».
 /// </summary>

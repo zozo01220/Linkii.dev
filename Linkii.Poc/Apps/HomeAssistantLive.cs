@@ -13,7 +13,7 @@ namespace Linkii.Poc;
 /// En direct : une connexion WebSocket par organisation (/api/websocket : états, puis chaque changement d'état) ; si l'instance refuse le WebSocket
 /// (proxy), ou par le relais Linkii : les états sont relus toutes les 5 secondes. Dès qu'une entité affichée change, les écrans concernés
 /// sont prévenus par SignalR (« DataChanged ») et relisent leurs données aussitôt ; leur sondage reste une sécurité (60 s).
-/// Suit aussi la santé de l'instance (erreur enregistrée dans le compte, alerte « Intégrations » après 5 minutes de panne, bonne nouvelle au retour)
+/// Suit aussi la santé de l'instance (erreur enregistrée dans le compte, alerte « Applications » après 5 minutes de panne, bonne nouvelle au retour)
 /// et relit la liste des entités une fois par jour (entités utilisées mais introuvables : signalées dans le back-office et par une alerte).
 /// </summary>
 public class HomeAssistantLive(JsonStore store, HomeAssistantClient ha, IHubContext<ScreenHub> hub, AlertService alerts, ILogger<HomeAssistantLive> log) : BackgroundService
@@ -95,7 +95,7 @@ public class HomeAssistantLive(JsonStore store, HomeAssistantClient ha, IHubCont
             return alerted;
         });
         if (wasAlerted)
-            _ = alerts.Raise(clientId, Alerts.Integrations, "Home Assistant de nouveau joignable", "Les widgets Home Assistant des écrans affichent de nouveau les valeurs en direct.", "/integrations", severity: Notifs.Ok, good: true);
+            _ = alerts.Raise(clientId, Alerts.Integrations, "Home Assistant de nouveau joignable", "Les widgets Home Assistant des écrans affichent de nouveau les valeurs en direct.", "/applications", severity: Notifs.Ok, good: true);
     }
 
     public void ReportFail(Guid clientId, string error)
@@ -140,7 +140,7 @@ public class HomeAssistantLive(JsonStore store, HomeAssistantClient ha, IHubCont
         if (added.Count > 0)
             _ = alerts.Raise(clientId, Alerts.Integrations, added.Count == 1 ? "Une entité Home Assistant est introuvable" : $"{added.Count} entités Home Assistant sont introuvables",
                 $"{string.Join(", ", added.Take(5))}{(added.Count > 5 ? "…" : "")} : supprimée(s) ou renommée(s) dans Home Assistant. Les widgets qui les affichent les ignorent : choisissez-en d'autres.",
-                "/integrations", severity: Notifs.Warn, dedupe: "ha-missing:" + string.Join(',', added));
+                "/applications", severity: Notifs.Warn, dedupe: "ha-missing:" + string.Join(',', added));
         return saved ?? fresh;
     }
 
@@ -230,8 +230,8 @@ public class HomeAssistantLive(JsonStore store, HomeAssistantClient ha, IHubCont
             {
                 store.Write(db => { if (db.Clients.FirstOrDefault(t => t.Id == id)?.HomeAssistant is { } a) a.AlertSent = true; });
                 _ = alerts.Raise(id, Alerts.Integrations, "Home Assistant injoignable",
-                    $"{account.LastError} Les écrans gardent la dernière valeur connue. Vérifiez l'instance{(account.Via == "relay" ? " et le relais Linkii" : "")}, puis Intégrations › Home Assistant.",
-                    "/integrations", severity: Notifs.Error, dedupe: "ha-down");
+                    $"{account.LastError} Les écrans gardent la dernière valeur connue. Vérifiez l'instance{(account.Via == "relay" ? " et le relais Linkii" : "")}, puis Applications › Home Assistant.",
+                    "/applications", severity: Notifs.Error, dedupe: "ha-down");
             }
 
             // liste des entités relue une fois par jour

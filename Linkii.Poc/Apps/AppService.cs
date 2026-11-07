@@ -9,12 +9,12 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
     public IReadOnlyList<AppManifest> Catalog => catalog.All;
     public AppManifest? Find(string? appId) => catalog.Find(appId);
 
-    // Un membre ne voit que les apps de son niveau de droits (intégrations et widgets) ; un administrateur les voit toutes.
+    // Un membre ne voit que les apps de son niveau de droits (applications et widgets) ; un administrateur les voit toutes.
     public List<AppInstall> Installed() { ApplyDefaults(); return store.Read(d => d.AppInstalls.Where(a => d.Access.CanUse(catalog, a.AppId)).OrderBy(a => a.InstalledUtc).ToList()); }
     public bool IsInstalled(string appId) { ApplyDefaults(); return store.Read(d => d.Access.CanUse(catalog, appId) && d.AppInstalls.Any(a => a.AppId == appId)); }
 
     /// <summary>Activer, désactiver et retirer une app, ses sources et ses connexions : administrateurs de l'organisation seuls.</summary>
-    private static void RequireAdmin(ClientDb d) { if (!d.Access.IsOrgAdmin) throw new UnauthorizedAccessException("Seul un administrateur de l'organisation gère les intégrations."); }
+    private static void RequireAdmin(ClientDb d) { if (!d.Access.IsOrgAdmin) throw new UnauthorizedAccessException("Seul un administrateur de l'organisation gère les applications."); }
 
     /// <summary>
     /// Active les apps « par défaut » (Image, Vidéo, Diaporamas, widgets) une seule fois par client, espaces existants compris.
@@ -48,6 +48,12 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
     /// <summary>Les apps du client ont changé (ajout, retrait) : le menu latéral (ex. Compositions) se met à jour sans recharger la page. Même session seulement.</summary>
     public event Action? InstallsChanged;
 
+    /// <summary>Groupe « Applications » du menu : afficher ou retirer une application (AppMenu). Le menu se met à jour sans recharger.</summary>
+    public void SetMenu(string id, bool on) { store.Write(d => { RequireAdmin(d); AppMenu.Set(d.Tenant, id, on); }); InstallsChanged?.Invoke(); }
+
+    /// <summary>Monte (-1) ou descend (+1) une application dans le groupe « Applications » du menu.</summary>
+    public void MoveMenu(string id, int delta) { store.Write(d => { RequireAdmin(d); AppMenu.Move(d.Tenant, id, delta); }); InstallsChanged?.Invoke(); }
+
     /// <summary>Ajoute l'app au client (sans effet si elle l'est déjà).</summary>
     public AppInstall Install(string appId)
     {
@@ -64,17 +70,17 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
             added = true;
             return a;
         });
-        if (added) { Remember($"Intégration « {m.Name} » activée", Notifs.Info, appId, m.Name); InstallsChanged?.Invoke(); }
+        if (added) { Remember($"Application « {m.Name} » activée", Notifs.Info, appId, m.Name); InstallsChanged?.Invoke(); }
         return install;
     }
 
-    /// <summary>Rend l'app disponible dans les listes de lecture (page Intégrations), ou le widget dans l'édition des écrans (page Widgets).</summary>
+    /// <summary>Rend l'app disponible dans les listes de lecture (page Applications), ou le widget dans l'édition des écrans (page Widgets).</summary>
     public void Enable(string appId) => Install(appId);
 
-    /// <summary>Range une intégration dans « Mes intégrations » (prise dans le Store) : elle y reste même désactivée.</summary>
+    /// <summary>Range une application dans « Mes applications » (prise dans le Store) : elle y reste même désactivée.</summary>
     public void Mark(string integrationId) => store.Write(d => { RequireAdmin(d); if (!d.Tenant.IntegrationsAdded.Contains(integrationId)) d.Tenant.IntegrationsAdded.Add(integrationId); });
 
-    /// <summary>Remet une intégration dans le Store.</summary>
+    /// <summary>Remet une application dans le Store.</summary>
     public void Unmark(string integrationId) => store.Write(d => { RequireAdmin(d); d.Tenant.IntegrationsAdded.Remove(integrationId); });
 
     /// <summary>Retire l'app des choix proposés. Non destructif : les contenus et widgets déjà en place restent à l'antenne.</summary>
@@ -82,13 +88,13 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
 
     public void Disable(string appId)
     {
-        store.Write(d => { RequireAdmin(d); d.AppInstalls.RemoveAll(a => a.AppId == appId); if (appId == Emergencies.AppId) Emergencies.EndAll(d.Tenant, DateTime.UtcNow, "intégration retirée"); });
-        Remember($"Intégration « {catalog.Find(appId)?.Name ?? appId} » désactivée", Notifs.Warn, appId, catalog.Find(appId)?.Name);
+        store.Write(d => { RequireAdmin(d); d.AppInstalls.RemoveAll(a => a.AppId == appId); if (appId == Emergencies.AppId) Emergencies.EndAll(d.Tenant, DateTime.UtcNow, "application retirée"); });
+        Remember($"Application « {catalog.Find(appId)?.Name ?? appId} » désactivée", Notifs.Warn, appId, catalog.Find(appId)?.Name);
         InstallsChanged?.Invoke();
     }
 
     /// <summary>
-    /// Active ou désactive une source de calendriers partagés (Intégrations). L'app « Calendrier partagé » est proposée
+    /// Active ou désactive une source de calendriers partagés (Applications). L'app « Calendrier partagé » est proposée
     /// dans les listes de lecture tant qu'au moins une source est active ; les contenus existants restent diffusés.
     /// </summary>
     public void SetCalendarSource(string source, bool on)
@@ -146,7 +152,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         return store.Write<string?>(d =>
         {
             if (d.Media.FirstOrDefault(m => m.Id == mediaId && m.AppId != null) is not { } m) return "Contenu introuvable.";
-            if (catalog.Find(m.AppId) is { } app && !d.Access.CanUse(app)) return "Vous êtes en lecture seule : vous ne pouvez pas utiliser cette intégration.";
+            if (catalog.Find(m.AppId) is { } app && !d.Access.CanUse(app)) return "Vous êtes en lecture seule : vous ne pouvez pas utiliser cette application.";
             if (CompositionRights.RightOf(d, m) < FolderRight.Write) return "Cette composition ne vous appartient pas : vous ne pouvez pas la renommer.";
             m.Name = name;
             return null;
@@ -207,7 +213,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         if (m != null) m.Info[key] = value;
     });
 
-    /// <summary>Sources possibles d'un bloc ou de champs de composition (§85) : contenus configurés des intégrations à données (météo, calendrier, RSS, capteurs).</summary>
+    /// <summary>Sources possibles d'un bloc ou de champs de composition (§85) : contenus configurés des applications à données (météo, calendrier, RSS, capteurs).</summary>
     public List<MediaItem> CompositionSources() =>
         store.Read(d => d.Media.Where(m => m.AppId != null && Compositions.SourceApps.Contains(m.AppId) && d.Access.CanUse(catalog, m.AppId)).OrderBy(m => m.Name).ToList()
             .Where(m => !IsIncomplete(m)).Concat(SharedCalendarSources.RoomContents(d.Tenant)).ToList());
@@ -263,7 +269,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
 
     /// <summary>
     /// Contenu « Image » ou « Vidéo » déjà rempli avec un fichier de la médiathèque (média glissé dans le fil d'une liste de lecture) :
-    /// même instance que celle qu'on obtiendrait en ajoutant l'intégration puis en choisissant le fichier. Null si l'intégration n'est pas utilisable.
+    /// même instance que celle qu'on obtiendrait en ajoutant l'application puis en choisissant le fichier. Null si l'application n'est pas utilisable.
     /// </summary>
     public MediaItem? CreateFromMedia(MediaItem file)
     {
@@ -301,8 +307,8 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         var oldPdfs = new List<string>();
         var result = store.Write<(MediaItem?, List<string>)>(d =>
         {
-            if (!d.Access.CanUse(m)) return (null, new List<string> { "Vous êtes en lecture seule : vous ne pouvez pas utiliser cette intégration." });
-            if (instanceId == null && !d.AppInstalls.Any(a => a.AppId == appId)) return (null, new List<string> { "Activez d'abord cette intégration dans la page Intégrations." });   // une app désactivée garde ses contenus modifiables
+            if (!d.Access.CanUse(m)) return (null, new List<string> { "Vous êtes en lecture seule : vous ne pouvez pas utiliser cette application." });
+            if (instanceId == null && !d.AppInstalls.Any(a => a.AppId == appId)) return (null, new List<string> { "Activez d'abord cette application dans la page Applications." });   // une app désactivée garde ses contenus modifiables
             var item = instanceId is { } id ? d.Media.FirstOrDefault(x => x.Id == id && x.AppId == appId) : new MediaItem { Type = "app", AppId = appId };
             if (item == null) return (null, new List<string> { "Instance introuvable." });
             if (instanceId != null && CompositionRights.RightOf(d, item) < FolderRight.Write) return (null, new List<string> { "Cette composition vous est partagée en « Peut utiliser » : dupliquez-la pour la modifier." });
@@ -364,7 +370,7 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
         }
         if (instance != null)   // secrets enregistrés hors formulaire (jeton d'une connexion OAuth)
             foreach (var (k, enc) in instance.Secrets) if (!v.ContainsKey(k)) v[k] = box.Unprotect(enc);
-        if (m.Id == "agenda")   // réglages de salle : posés par le calendrier (Intégrations), absents du formulaire du contenu
+        if (m.Id == "agenda")   // réglages de salle : posés par le calendrier (Applications), absents du formulaire du contenu
             foreach (var (k, raw) in values) if (k.StartsWith("room", StringComparison.Ordinal) && !v.ContainsKey(k)) v[k] = raw.Trim();
         return v;
     }

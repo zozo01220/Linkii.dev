@@ -3,7 +3,7 @@ using System.Globalization;
 namespace Linkii.Poc;
 
 /// <summary>
-/// Calendrier de programmation (page Programmations, mode Expert) : une liste de diffusion par défaut, obligatoire, et des événements
+/// Calendrier de programmation (page Programmations, mode Expert) : une liste de lecture par défaut, obligatoire, et des événements
 /// « diffuser une liste » ou « éteindre l'écran ». Un calendrier s'assigne à un écran ou à une borne depuis son tiroir (<see cref="Screen.CalendarId"/>) ;
 /// hors événements, l'écran joue la liste par défaut du calendrier.
 /// À l'enregistrement, le calendrier est « compilé » en créneaux (<see cref="Slot"/>) copiés sur chaque écran assigné (<see cref="Screen.Slots"/>,
@@ -59,7 +59,7 @@ public static class Calendars
     public static string? Check(CalEvent e)
     {
         if (e.Kind != CalEvent.Play && e.Kind != CalEvent.Off) return "Type d'événement inconnu.";
-        if (e.Kind == CalEvent.Play && (e.PlaylistId == null || e.PlaylistId == Guid.Empty)) return "Choisissez une liste de diffusion.";
+        if (e.Kind == CalEvent.Play && (e.PlaylistId == null || e.PlaylistId == Guid.Empty)) return "Choisissez une liste de lecture.";
         if (e.Repeat && (e.Days & 127) == 0) return "Choisissez au moins un jour.";
         if (e.Kind == CalEvent.Play && e.Always) return null;
         if (M(e.StartTime) is not { } from || M(e.EndTime) is not { } to) return "Indiquez l'heure de début et l'heure de fin.";

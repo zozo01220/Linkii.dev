@@ -110,7 +110,7 @@ public class CalendarProvider(CalendarService calendars, SecretBox box) : IAppPr
         return (start, start.AddDays(days));
     }
 
-    // Le contenu ne désigne qu'un calendrier partagé : la connexion est lue dans Intégrations au moment de l'appel.
+    // Le contenu ne désigne qu'un calendrier partagé : la connexion est lue dans Applications au moment de l'appel.
     private CalendarSource Source(AppRuntime rt) => Guid.TryParse(rt.Get("calendar"), out var id)
         ? SharedCalendarSources.Resolve(rt.Client, id, box)
         : throw new InvalidOperationException("Choisissez un calendrier.");
@@ -259,7 +259,7 @@ public class WebPageProvider(SafeHttp http) : IAppProvider
 // ---------------------------------------------------------------------------------------------
 /// <summary>
 /// YouTube : le player utilise l'API IFrame de YouTube ; côté serveur, le test interroge oEmbed (sans clé d'API) pour savoir si la vidéo
-/// ou la playlist existe et si son propriétaire autorise l'intégration.
+/// ou la playlist existe et si son propriétaire autorise l'application.
 /// </summary>
 public class YouTubeProvider(SafeHttp http) : IAppProvider
 {
@@ -302,7 +302,7 @@ public class YouTubeProvider(SafeHttp http) : IAppProvider
         return ratio;
     }
 
-    /// <summary>Interprète la réponse d'oEmbed : 200 = intégrable, 401 / 403 = privée ou intégration désactivée, 404 = introuvable.</summary>
+    /// <summary>Interprète la réponse d'oEmbed : 200 = intégrable, 401 / 403 = privée ou application désactivée, 404 = introuvable.</summary>
     public static string Describe(int status, string body, bool playlist)
     {
         var what = playlist ? "Playlist" : "Vidéo";
@@ -353,7 +353,7 @@ public class FacebookProvider(SafeHttp http, FacebookAuth account) : IAppProvide
         if (token.Length == 0)
             throw new InvalidOperationException(FacebookAuth.Has(rt.Client)
                 ? "Cette Page n'est pas administrée par le compte Facebook connecté : choisissez une de ses Pages, ou collez un jeton dans les options avancées."
-                : "Aucun compte Facebook connecté : connectez-le dans Intégrations › Comptes connectés, ou collez un jeton de Page dans les options avancées.");
+                : "Aucun compte Facebook connecté : connectez-le dans Réglages › Connexions, ou collez un jeton de Page dans les options avancées.");
         if (!TokenPattern.IsMatch(token)) throw new InvalidOperationException("Jeton d'accès invalide.");
         var count = rt.GetInt("count", 6, 1, 12);
         var key = $"{page}|{count}|{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)))[..16]}";   // le jeton fait partie de la clé : un autre client n'hérite pas des publications d'un autre

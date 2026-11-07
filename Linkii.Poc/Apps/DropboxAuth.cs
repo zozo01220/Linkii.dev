@@ -61,7 +61,7 @@ public class DropboxAuth(IConfiguration config, JsonStore store, SecretBox box, 
     /// <summary>Retour de Dropbox : échange du code contre les jetons. Rend l'adresse où renvoyer l'utilisateur (?dropbox=ok ou une erreur).</summary>
     public async Task<string> CompleteAsync(string? state, string? code, string? error)
     {
-        if (string.IsNullOrEmpty(state) || !pending.TryRemove(state, out var p) || p.Expires < DateTime.UtcNow) return "/integrations?dropbox=expired";
+        if (string.IsNullOrEmpty(state) || !pending.TryRemove(state, out var p) || p.Expires < DateTime.UtcNow) return "/applications?dropbox=expired";
         var back = p.ReturnUrl + (p.ReturnUrl.Contains('?') ? "&" : "?") + "dropbox=";
         if (!string.IsNullOrEmpty(error) || string.IsNullOrEmpty(code)) return back + "denied";
         try
@@ -139,13 +139,13 @@ public class DropboxAuth(IConfiguration config, JsonStore store, SecretBox box, 
         {
             if (access.TryGetValue(t.Id, out a) && a.Expires > DateTime.UtcNow) return a.Token;   // renouvelé entre-temps
             var stored = store.Read(d => d.Clients.FirstOrDefault(c => c.Id == t.Id)?.DriveAccounts.FirstOrDefault(x => x.Source == "dropbox")?.Secret ?? "");
-            if (stored.Length == 0) throw new InvalidOperationException("Aucun compte Dropbox connecté : connectez-le dans Intégrations › Comptes connectés.");
+            if (stored.Length == 0) throw new InvalidOperationException("Aucun compte Dropbox connecté : connectez-le dans Réglages › Connexions.");
             TokenResponse r;
             try { r = await TokenRequest(new() { ["grant_type"] = "refresh_token", ["refresh_token"] = box.Unprotect(stored) }); }
             catch (DropboxAuthException)
             {
                 Expire(t.Id);   // accès retiré dans le compte Dropbox : il faut se reconnecter
-                throw new InvalidOperationException("La connexion au compte Dropbox a expiré. Reconnectez-le dans Intégrations › Comptes connectés.");
+                throw new InvalidOperationException("La connexion au compte Dropbox a expiré. Reconnectez-le dans Réglages › Connexions.");
             }
             access[t.Id] = new Access(r.AccessToken, DateTime.UtcNow.AddSeconds(Math.Max(60, r.ExpiresIn) - 60));
             return r.AccessToken;

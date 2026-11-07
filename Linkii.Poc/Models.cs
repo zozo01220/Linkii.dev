@@ -422,8 +422,11 @@ public class Tenant
     /// <summary>Apps « activées par défaut » déjà activées une fois pour ce client : s'il les désactive ensuite, elles ne se réactivent pas.</summary>
     public List<string> DefaultAppsApplied { get; set; } = new();
 
-    /// <summary>Intégrations prises dans le Store (identifiants de la page Intégrations) : elles restent dans « Mes intégrations » même désactivées. Les intégrations de base y sont d'office.</summary>
+    /// <summary>Applications prises dans le Store (identifiants de la page Applications) : elles restent dans « Mes applications » même désactivées. Les applications de base y sont d'office.</summary>
     public List<string> IntegrationsAdded { get; set; } = new();
+
+    /// <summary>Applications affichées dans le groupe « Applications » du menu, dans l'ordre (identifiants de la page Applications). Null : réglage par défaut (voir AppMenu).</summary>
+    public List<string>? MenuApps { get; set; }
 
     public string Name { get; set; } = "";
 
@@ -473,7 +476,7 @@ public class Tenant
     public bool AlertPush { get; set; }   // « Par notification » : la cloche de l'application et les téléphones des administrateurs
     public bool AlertGood { get; set; }   // aussi les bonnes nouvelles (retour en ligne, synchronisation rétablie)
     public List<string> AlertTypes { get; set; } = new(Alerts.Defaults);   // types suivis ; au départ ceux de Alerts.Defaults
-    public int AlertsVersion { get; set; }   // 1 : réglages d'alertes migrés ; 3 : catégorie « Intégrations et API » ; 2 : types par défaut posés (voir Alerts.Migrate)
+    public int AlertsVersion { get; set; }   // 1 : réglages d'alertes migrés ; 3 : catégorie « Applications et API » ; 2 : types par défaut posés (voir Alerts.Migrate)
     /// <summary>Ancien interrupteur « Prévenir quand un écran tombe » (avant le 18 octobre 2026) : lu une fois par <see cref="Alerts.Migrate"/>.</summary>
     public bool AlertOffline { get; set; }
     /// <summary>Délai avant l'alerte « écran hors ligne ».</summary>
@@ -522,18 +525,18 @@ public class Tenant
     /// <summary>Accès retiré par Microsoft (jeton refusé) : le compte reste affiché « à reconnecter », avec ses accès d'avant.</summary>
     public DateTime? MsLostUtc { get; set; }
 
-    // Calendriers partagés (Intégrations) : une connexion par source, puis les calendriers proposés dans les listes de lecture.
+    // Calendriers partagés (Applications) : une connexion par source, puis les calendriers proposés dans les listes de lecture.
     public List<CalendarAccount> CalendarAccounts { get; set; } = new();
     public List<SharedCalendar> SharedCalendars { get; set; } = new();
 
-    // Drives (Intégrations) : sources actives (gdrive | onedrive) et dossiers synchronisés. La connexion est celle des calendriers (Google, Microsoft 365).
+    // Drives (Applications) : sources actives (gdrive | onedrive) et dossiers synchronisés. La connexion est celle des calendriers (Google, Microsoft 365).
     public List<string> DrivesEnabled { get; set; } = new();
     public List<DriveFolder> DriveFolders { get; set; } = new();
-    /// <summary>Dossiers Canva synchronisés (Intégrations › Canva) : leurs designs sont exportés dans la médiathèque, dossier « Canva_médias ».</summary>
+    /// <summary>Dossiers Canva synchronisés (Applications › Canva) : leurs designs sont exportés dans la médiathèque, dossier « Canva_médias ».</summary>
     public List<CanvaFolder> CanvaFolders { get; set; } = new();
     /// <summary>Dossier de la médiathèque qui reçoit les designs Canva synchronisés (créé à la première synchronisation, renommable).</summary>
     public Guid? CanvaMediaFolderId { get; set; }
-    /// <summary>Dossier de la médiathèque de chaque intégration qui y copie des fichiers (clé : « drv-onedrive »…) : « OneDrive_médias »… ; créé à la première synchronisation, renommable.</summary>
+    /// <summary>Dossier de la médiathèque de chaque application qui y copie des fichiers (clé : « drv-onedrive »…) : « OneDrive_médias »… ; créé à la première synchronisation, renommable.</summary>
     public Dictionary<string, Guid> IntegrationMediaFolders { get; set; } = new();
     /// <summary>Connexions des Drives qui n'ont pas de compte Google ou Microsoft : Nextcloud, SFTP (identifiants saisis), Dropbox (OAuth).</summary>
     public List<DriveAccount> DriveAccounts { get; set; } = new();
@@ -543,7 +546,7 @@ public class Tenant
     /// <summary>Plans de bâtiment (§194) : créés une fois dans Contenus › Plans, choisis par les widgets « Plan du bâtiment ». Seulement avec Home Assistant connecté.</summary>
     public List<HaPlan> HaPlans { get; set; } = new();
 
-    /// <summary>Intégrations personnalisées (§139) : connexions aux systèmes de l'organisation (API web, fichiers) et jeux de données lus. Voir <see cref="DataSetService"/>.</summary>
+    /// <summary>Applications personnalisées (§139) : connexions aux systèmes de l'organisation (API web, fichiers) et jeux de données lus. Voir <see cref="DataSetService"/>.</summary>
     public List<DataConnection> DataConnections { get; set; } = new();
     public List<DataSet> DataSets { get; set; } = new();
     /// <summary>Relais Linkii installés dans le réseau de l'organisation (§139, lot 4) : lisent ses bases et API internes pour Linkii.</summary>
@@ -552,7 +555,7 @@ public class Tenant
     /// <summary>API publique et webhooks (§154) : clés d'accès et adresses qui reçoivent les événements de l'organisation. Voir <see cref="ApiKeyService"/>, <see cref="WebhookService"/>.</summary>
     public List<ApiKey> ApiKeys { get; set; } = new();
     public List<WebhookEndpoint> Webhooks { get; set; } = new();
-    /// <summary>Urgences de l'organisation (intégration « Alerte d'urgence », §159) : en cours et historique d'un an. Voir <see cref="EmergencyService"/>.</summary>
+    /// <summary>Urgences de l'organisation (application « Alerte d'urgence », §159) : en cours et historique d'un an. Voir <see cref="EmergencyService"/>.</summary>
     public List<Emergency> Emergencies { get; set; } = new();
     /// <summary>Modèles de message d'urgence de l'organisation (rédigés une fois, un clic les place dans le formulaire). Null : jamais ouverts, les modèles de base de <see cref="Linkii.Poc.Emergencies.DefaultTemplates"/> sont créés à la première lecture.</summary>
     public List<EmergencyTemplate>? EmergencyTemplates { get; set; }
@@ -599,7 +602,7 @@ public class HomeAssistantAccount
     public DateTime? ConnectedUtc { get; set; }
     /// <summary>Dernière erreur de l'instance (connexion, lecture des états, commande) ; vide quand tout va bien.</summary>
     public string LastError { get; set; } = "";
-    /// <summary>Depuis quand l'instance est en échec (alerte « Intégrations » après quelques minutes) ; null quand elle répond.</summary>
+    /// <summary>Depuis quand l'instance est en échec (alerte « Applications » après quelques minutes) ; null quand elle répond.</summary>
     public DateTime? FailingSinceUtc { get; set; }
     public DateTime? LastOkUtc { get; set; }
     /// <summary>L'alerte de panne a été envoyée (une seule fois par panne, la bonne nouvelle au retour).</summary>
@@ -757,7 +760,7 @@ public class SharedCalendar
     public string Ref { get; set; } = "";         // adresse de la boîte, ID Google, chemin CalDAV ; lien ICS : chiffré
     public string Hint { get; set; } = "";        // affichage (le lien ICS n'est jamais réaffiché en entier)
 
-    // Réservation de salle : le calendrier est une salle. Réglé sur la ligne du calendrier (Intégrations), sans contenu intermédiaire.
+    // Réservation de salle : le calendrier est une salle. Réglé sur la ligne du calendrier (Applications), sans contenu intermédiaire.
     public bool Room { get; set; }
     public string RoomName { get; set; } = "";    // vide : le nom du calendrier
     public int RoomCap { get; set; }
@@ -1185,7 +1188,7 @@ public class PublishedItem
     };
 }
 
-/// <summary>Transitions entre deux contenus d'une liste de diffusion : celle d'un contenu est jouée à son arrivée.</summary>
+/// <summary>Transitions entre deux contenus d'une liste de lecture : celle d'un contenu est jouée à son arrivée.</summary>
 public static class Transitions
 {
     public const string Default = "fade";

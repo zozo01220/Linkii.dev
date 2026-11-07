@@ -8,7 +8,7 @@ using System.Text.RegularExpressions;
 
 namespace Linkii.Poc;
 
-/// <summary>Règles de l'intégration Home Assistant, sans accès réseau (testables seules).</summary>
+/// <summary>Règles de l'application Home Assistant, sans accès réseau (testables seules).</summary>
 public static class HomeAssistantRules
 {
     /// <summary>
@@ -839,7 +839,7 @@ public class HomeAssistantProvider(HomeAssistantClient ha, HomeAssistantLive liv
 
     public async Task<string> Test(AppRuntime rt)
     {
-        var account = rt.Client.HomeAssistant ?? throw new InvalidOperationException("Connectez d'abord le compte Home Assistant dans Intégrations.");
+        var account = rt.Client.HomeAssistant ?? throw new InvalidOperationException("Connectez d'abord le compte Home Assistant dans Applications.");
         var isPlan = rt.Values.ContainsKey("planId");
         var configured = isPlan ? HomeAssistantRules.PlanOf(rt.Client, rt.Values)?.Devices.Select(d => d.Id).ToList() ?? new() : HomeAssistantRules.ParseEntities(rt.Get("entities"));
         if (configured.Count == 0) throw new InvalidOperationException(isPlan ? "Choisissez un plan où des appareils sont posés." : "Choisissez au moins une entité.");
