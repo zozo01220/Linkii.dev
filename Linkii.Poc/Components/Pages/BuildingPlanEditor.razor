@@ -1,0 +1,32 @@
+@page "/plans/nouveau"
+@page "/plans/{PlanId:guid}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "Page:widgets")]
+@inject TenantStore Store
+@inject ModeService Modes
+
+@* Éditeur d'un plan du bâtiment en pleine page (§208), comme l'éditeur de compositions : barre du haut (← Quitter, nom, onglets, Aperçu, Annuler,
+   Enregistrer), le reste de l'écran pour le plan. « back » : page d'où l'on vient, où Quitter ramène. *@
+<HeadContent><link rel="stylesheet" href="compo-editor.css?v=17" /></HeadContent>
+
+@if (!Modes.Expert || account == null)
+{
+    <div class="page-head"><div><h1>Plan du bâtiment</h1><p class="sub">@(!Modes.Expert ? "Disponible en mode expert." : "Home Assistant n'est pas connecté.")</p></div></div>
+    <a class="btn ghost" href="@Back">← Retour</a>
+}
+else
+{
+    <div class="hpx hpd">
+        <HaPlanPanel @key="@(PlanId?.ToString() ?? "nouveau")" PlanId="PlanId" Onglet="@Onglet" Back="@Back" />
+    </div>
+}
+
+@code {
+    [Parameter] public Guid? PlanId { get; set; }
+    [SupplyParameterFromQuery(Name = "onglet")] public string? Onglet { get; set; }
+    [SupplyParameterFromQuery(Name = "back")] public string? BackParam { get; set; }
+    private HomeAssistantAccount? account;
+
+    private string Back => BackParam is { Length: > 1 } b && b.StartsWith('/') && !b.StartsWith("//") && !b.Contains('\\') ? b : "/plans";
+
+    protected override void OnParametersSet() => account = Store.Read(d => d.Tenant.HomeAssistant);
+}

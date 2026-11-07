@@ -6,24 +6,24 @@
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 
-@* Un plan du bâtiment dans le tiroir de la page Plans (§202, §203), restructuré au §204 d'après maquettes/plan-tiroir-edition.html : une colonne de hauteur fixe,
-   trois bandes, rien ne défile sauf les listes.
-   - en-tête d'une ligne : identité (nom du plan modifiable sur place), onglets Plan / Affichages / Où il s'affiche, fermer ;
-   - corps : l'éditeur (HaPlanEditor), les affichages (HaViewsEditor) ou « où il s'affiche » ;
-   - pied toujours visible : état, Aperçu, Annuler les modifications, Enregistrer (selon l'onglet). *@
-<header class="hpd-h">
-    <span class="hpd-logo"><Ico Name="home" Size="18" /></span>
-    <div class="hpd-t">
-        <input type="text" class="hpd-name" maxlength="60" placeholder="Nom du plan (Maison, Bureaux…)" aria-label="Nom du plan" @bind="nameValue" @bind:event="oninput" />
-        <small>@Stats</small>
-    </div>
+@* Un plan du bâtiment en pleine page (§208, BuildingPlanEditor), d'abord dans le tiroir de la page Plans (§202-§204) :
+   - barre du haut calquée sur l'éditeur de compositions : ← Quitter, nom du plan modifiable sur place, onglets Plan / Affichages / Où il s'affiche,
+     puis à droite l'état, Aperçu, Annuler, Enregistrer (selon l'onglet) ;
+   - corps : l'éditeur (HaPlanEditor), les affichages (HaViewsEditor) ou « où il s'affiche ». *@
+<header class="ce-top hpx-top">
+    <button type="button" class="ce-tb ce-back" title="Quitter" aria-label="Quitter" @onclick="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M11 6l-6 6 6 6" /></svg></button>
+    <input type="text" class="ce-name" maxlength="60" placeholder="Nom du plan (Maison, Bureaux…)" aria-label="Nom du plan" title="@Stats" @bind="nameValue" @bind:event="oninput" />
+    <span class="ce-sep"></span>
     <nav class="hpd-tabs" role="tablist" aria-label="Plan du bâtiment">
         @Tab("plan", "Plan", plan == null ? null : parsed.Devices.Count, false)
         @Tab("affichages", "Affichages", plan?.Views.Count, IsNew)
         @Tab("diffusion", "Où il s'affiche", plan == null ? null : uses.Count, IsNew)
     </nav>
-    <span class="grow"></span>
-    <button type="button" class="hpd-x" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="18" /></button>
+    <span style="flex:1"></span>
+    <span class="ce-dirty">@Status</span>
+    <button type="button" class="ce-btn ghost" title="Voir le plan tel que l'écran l'affichera, avant d'enregistrer" disabled="@(tab != "plan" || ed?.CanPreview != true)" @onclick="() => ed?.TogglePreview()"><Ico Name="eye" Size="17" />@(tab == "plan" && ed?.Previewing == true ? "Fermer l'aperçu" : "Aperçu")</button>
+    <button type="button" class="ce-btn ghost" disabled="@(!CanRevert)" @onclick="Revert">Annuler</button>
+    <button type="button" class="ce-btn" disabled="@(!CanSave)" @onclick="SaveTop">Enregistrer</button>
 </header>
 
 <div class="hpd-b">
@@ -72,30 +72,6 @@
         }
     }
 </div>
-
-<footer class="hpd-f">
-    <div class="hpd-st">
-        @if (tab == "plan") { if (PlanDirty) { <i class="hpd-dot"></i><span>Modifications non enregistrées</span> } else { <span>@(IsNew ? "Nouveau plan : donnez-lui un nom, dessinez, puis enregistrez" : "Aucune modification")</span> } }
-        else if (tab == "affichages") { if (vw?.Dirty == true) { <i class="hpd-dot"></i><span>Modifications non enregistrées</span> } else { <span>Aucune modification</span> } }
-        else { <span>@uses.Count utilisation@(uses.Count > 1 ? "s" : "")</span> }
-    </div>
-    <span class="grow"></span>
-    @if (tab == "plan")
-    {
-        <button type="button" class="btn" title="Voir le plan tel que l'écran l'affichera, avant d'enregistrer" disabled="@(ed?.CanPreview != true)" @onclick="() => ed?.TogglePreview()"><Ico Name="play" Size="15" /> @(ed?.Previewing == true ? "Fermer l'aperçu" : "Aperçu")</button>
-        <button type="button" class="btn" disabled="@(!IsNew && !PlanDirty)" @onclick="ResetEditor">Annuler les modifications</button>
-        <button type="button" class="btn primary" disabled="@(nameValue.Trim().Length == 0 || (!IsNew && !PlanDirty))" @onclick="SaveClick">Enregistrer</button>
-    }
-    else if (tab == "affichages")
-    {
-        <button type="button" class="btn" disabled="@(vw?.Dirty != true)" @onclick="() => viewsKey = Guid.NewGuid()">Annuler les modifications</button>
-        <button type="button" class="btn primary" disabled="@(vw?.Dirty != true)" @onclick="SaveViews">Enregistrer les affichages</button>
-    }
-    else
-    {
-        <button type="button" class="btn primary" @onclick="Close">Fermer</button>
-    }
-</footer>
 
 @if (adding && plan != null)
 {
@@ -150,8 +126,10 @@
     [Parameter] public Guid? PlanId { get; set; }
     /// <summary>Onglet demandé par l'adresse (?onglet=affichages | diffusion) ; sinon « Plan ».</summary>
     [Parameter] public string? Onglet { get; set; }
-    /// <summary>Le plan a changé (enregistré, affichages, ajout) : la liste se met à jour.</summary>
+    /// <summary>Le plan a changé (enregistré, affichages, ajout).</summary>
     [Parameter] public EventCallback OnChanged { get; set; }
+    /// <summary>Page d'où l'on vient : Quitter y ramène.</summary>
+    [Parameter] public string Back { get; set; } = "/plans";
 
     private HaPlan? plan;
     private HaPlanEditor? ed;
@@ -172,6 +150,17 @@
     private string Stats => plan == null ? "Dessinez les pièces de chaque étage, ou importez son plan, puis posez-y les appareils de Home Assistant."
         : $"{parsed.Floors.Count} étage{S(parsed.Floors.Count)} · {parsed.Floors.Sum(f => f.Rooms.Count)} pièce{S(parsed.Floors.Sum(f => f.Rooms.Count))} · {parsed.Devices.Count} appareil{S(parsed.Devices.Count)} · {(uses.Count == 0 ? "affiché nulle part" : $"affiché {uses.Count} fois")}";
     private static string S(int n) => n > 1 ? "s" : "";
+
+    private string Status => tab switch
+    {
+        "plan" => PlanDirty ? "Modifications non enregistrées" : IsNew ? "Nouveau plan : nommez-le, dessinez, puis enregistrez" : "",
+        "affichages" => vw?.Dirty == true ? "Modifications non enregistrées" : "",
+        _ => "",
+    };
+    private bool CanRevert => tab switch { "plan" => IsNew || PlanDirty, "affichages" => vw?.Dirty == true, _ => false };
+    private bool CanSave => tab switch { "plan" => nameValue.Trim().Length > 0 && (IsNew || PlanDirty), "affichages" => vw?.Dirty == true, _ => false };
+    private Task SaveTop() => tab == "affichages" ? SaveViews() : SaveClick();
+    private void Revert() { if (tab == "affichages") viewsKey = Guid.NewGuid(); else ResetEditor(); }
 
     protected override void OnParametersSet()
     {
@@ -224,7 +213,7 @@
         Live.Nudge(Store.ClientId);   // les écrans qui affichent ce plan relisent ses appareils
         Toast.Ok($"Plan « {name} » enregistré.");
         nameValue = name;
-        if (IsNew) { Nav.NavigateTo($"/plans/{id}", replace: true); _ = OnChanged.InvokeAsync(); return; }
+        if (IsNew) { Nav.NavigateTo($"/plans/{id}{(Back == "/plans" ? "" : "?back=" + Uri.EscapeDataString(Back))}", replace: true); _ = OnChanged.InvokeAsync(); return; }
         Load();
         editorKey = Guid.NewGuid();   // l'éditeur repart du plan enregistré : plus de modifications en attente
         _ = OnChanged.InvokeAsync();
@@ -233,17 +222,17 @@
     private Task SaveClick() => ed == null ? Task.CompletedTask : ed.Apply();
     private Task SaveViews() => vw == null ? Task.CompletedTask : vw.SaveAsync();
 
-    /// <summary>Fermer le tiroir ; des modifications en attente demandent confirmation.</summary>
+    /// <summary>Quitter : retour à la page d'où l'on vient ; des modifications en attente demandent confirmation.</summary>
     private async Task Close()
     {
-        if ((PlanDirty || vw?.Dirty == true) && !await JS.InvokeAsync<bool>("confirm", "Des modifications ne sont pas enregistrées. Fermer quand même ?")) return;
-        Nav.NavigateTo("/plans");
+        if ((PlanDirty || vw?.Dirty == true) && !await JS.InvokeAsync<bool>("confirm", "Quitter sans enregistrer vos modifications ?")) return;
+        Nav.NavigateTo(Back);
     }
 
     /// <summary>« Annuler les modifications » : l'éditeur repart du plan enregistré, le nom aussi (nouveau plan : retour à la liste).</summary>
     private void ResetEditor()
     {
-        if (IsNew && !PlanDirty) { Nav.NavigateTo("/plans"); return; }
+        if (IsNew && !PlanDirty) { Nav.NavigateTo(Back); return; }
         nameValue = plan?.Name ?? "";
         editorKey = Guid.NewGuid();
     }
