@@ -84,17 +84,7 @@
 </div>
 
 
-@if (Tabs.Count > 1)
-{
-    @* Onglets (24 octobre 2026) : ses listes, celles qu'on lui partage, et pour l'administrateur toute l'organisation. Jamais mélangées. *@
-    <nav class="tabs int-tabs lx-utabs" role="tablist" aria-label="Listes affichées">
-        @foreach (var t in Tabs)
-        {
-            var key = t.Key;
-            <button type="button" role="tab" class="@(tab == key ? "on" : "")" aria-selected="@(tab == key ? "true" : "false")" @onclick="() => SetTab(key)">@t.Label@if (t.Count > 0) { <span class="cat-count">@t.Count</span> }<TabNew Family="playlists" Tab="@key" /></button>
-        }
-    </nav>
-}
+@* Plus d'onglets « Mes listes / Partagées avec moi / Toute l'organisation » (8 novembre 2026, §212) : c'est le critère « Afficher » du menu Filtres *@
 
 <div class="lx-status">
     <span class="lx-appoff">@Plural(playlists.Count, "liste", "listes")@(foldersOn && folderRows.Count > 0 ? $" · {Plural(folderRows.Count, "dossier", "dossiers")}" : "")</span>
@@ -108,11 +98,12 @@
     }
 </div>
 
-@if (scopeLists.Count == 0 && subfolders.Count == 0 && folderId == null)
+@* filtre « Afficher » posé : jamais cet état vide, qui cache la barre des filtres (voir plus bas « Rien n'a encore été partagé avec vous ») *@
+@if (scopeLists.Count == 0 && subfolders.Count == 0 && folderId == null && !OwnerOn)
 {
     <div class="empty">
-        <div class="big">@(tab == LibraryTab.Shared ? "Rien n'a encore été partagé avec vous" : "Aucune liste de lecture")</div>
-        <p>@(tab == LibraryTab.Shared ? "Quand un collègue vous partage une liste ou un dossier, il apparaît ici. Vous pouvez la diffuser sur vos écrans." : "Une liste de lecture est une boucle de contenus (images, vidéos, apps). Composez-la, puis choisissez-la sur vos écrans et publiez.")</p>
+        <div class="big">Aucune liste de lecture</div>
+        <p>Une liste de lecture est une boucle de contenus (images, vidéos, apps). Composez-la, puis choisissez-la sur vos écrans et publiez.</p>
         @if (CanCreateListHere) { <button class="btn" @onclick="OpenCreate"><Ico Name="plus" Size="16" /> Nouvelle liste</button> }
     </div>
 }
@@ -202,7 +193,16 @@ else
 
     @if (!Sorted.Any())
     {
-        @if (Active) { <div class="empty"><div class="big">Aucune liste ne correspond</div><button class="btn ghost sm" @onclick='() => { search = ""; filter = ""; }'>Effacer la recherche et les filtres</button></div> }
+        @if (!Active && OwnerOn && folderId == null && subfolders.Count == 0)
+        {
+            @* seul le filtre « Afficher » est posé, et il ne montre rien *@
+            <div class="empty">
+                <div class="big">@(tab == LibraryTab.Shared ? "Rien n'a encore été partagé avec vous" : "Vous n'avez encore aucune liste")</div>
+                @if (tab == LibraryTab.Shared) { <p>Quand un collègue vous partage une liste ou un dossier, il apparaît ici. Vous pouvez la diffuser sur vos écrans.</p> }
+                <button class="btn ghost sm" @onclick="ClearAll">Afficher toutes les listes</button>
+            </div>
+        }
+        else if (Active) { <div class="empty"><div class="big">Aucune liste ne correspond</div><button class="btn ghost sm" @onclick="ClearAll">Effacer la recherche et les filtres</button></div> }
         else if (subfolders.Count == 0 && currentRow is { } fe)
         {
             <div class="empty compact">
@@ -507,18 +507,18 @@ else
     private List<(Guid Id, string Name)>? listMove;
     private static readonly Guid RootDrop = Guid.Empty;       // cible « racine » du glisser-déposer (fil d'Ariane)
 
-    // ---------- Onglets et partage entre personnes (24 octobre 2026) ----------
+    // ---------- Filtre « Afficher » et partage entre personnes (onglets jusqu'au 8 novembre 2026, §212) ----------
     private Guid? me;
     private bool multi, readAll;                               // plus d'une personne ; listes en « Voit tout · lecture seule »
-    private string tab = LibraryTab.All;
-    private HashSet<Guid> tabFolders = new();                  // dossiers de l'onglet ouvert (et leurs sous-dossiers)
-    private List<Playlist> scopeLists = new();                 // listes de l'onglet ouvert, dossiers de l'onglet compris
+    private string tab = LibraryTab.All;                       // filtre « Afficher » : All (défaut), Mine ou Shared ; jamais retenu, comme les autres filtres
+    private bool OwnerOn => tab != LibraryTab.All;             // le filtre « Afficher » restreint la vue
+    private int mineCount, sharedCount;                        // listes de « Mes listes » et de « Partagées avec moi » (nombres du filtre)
+    private HashSet<Guid> tabFolders = new();                  // dossiers montrés par le filtre (et leurs sous-dossiers)
+    private List<Playlist> scopeLists = new();                 // listes montrées par le filtre, dossiers compris
     private Dictionary<Guid, LibraryTab.Info> listTabs = new();
     private Dictionary<Guid, ShareSummary> folderShares = new(), listShares = new();
     private RenderFragment ListShare(Playlist p) => listShares.TryGetValue(p.Id, out var sum) && sum.Any ? @<SharePill Summary="sum" Clickable="multi && RightOfList(p) == FolderRight.Owner" OnClick="() => { sharingKind = ShareKind.Playlist; sharingItems = new() { (p.Id, p.Name) }; }" /> : (b => { });
     private Dictionary<Guid, string> people = new();
-    private record TabItem(string Key, string Label, int Count);
-    private List<TabItem> Tabs = new();
 
     private ShareSummary FolderSum(Guid id) => folderShares.GetValueOrDefault(id, ShareSummary.None);
     private static string First(string name) => name.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? name;
@@ -527,8 +527,8 @@ else
     private string? OwnerOf(Playlist p) =>
         p.OwnerId is { } o && o == me ? null : p.OwnerId is { } o2 && people.TryGetValue(o2, out var n) ? n : isAdmin || !multi ? null : "l'organisation";
     private bool CanDel(Playlist p) => Ownership.CanDelete(RightOfList(p), p.FolderId);
-    // Mode simple (§181) : pas d'onglets ; en bas à droite de la carte, « 3 partages » (bleu) pour une liste à soi, « De Anne » (bleu clair) pour celle d'un collègue
-    private bool Flat => tab == LibraryTab.Flat;
+    // Mode simple (§181) : en bas à droite de la carte, « 3 partages » (bleu) pour une liste à soi, « De Anne » (bleu clair) pour celle d'un collègue
+    private bool Flat => Modes.Simple && multi && !readAll;
     private RenderFragment FlatPill(Playlist p) => __builder =>
     {
         if (OwnerOf(p) is { } ow) { <div class="sh-row"><span class="share from" title="@OwnerTitle(p, ow)"><Ico Name="users" Size="13" /> De @First(ow)</span></div> }
@@ -539,14 +539,11 @@ else
     private void SetTab(string t)
     {
         tab = t; folderId = null; picked.Clear(); menuFor = null; scopeAll = true;
-        try { Store.Write(d => { if (d.Users.FirstOrDefault(u => u.Id == d.Access.UserId) is { } u) u.LibraryTabs["playlists"] = t; }); }
-        catch (UnauthorizedAccessException) { }   // lecture seule : l'onglet n'est pas retenu
         Load();
     }
 
     protected override void OnInitialized()
     {
-        tab = Store.Read(d => d.Users.FirstOrDefault(u => u.Id == d.Access.UserId)?.LibraryTabs.GetValueOrDefault("playlists")) ?? LibraryTab.Mine;
         Load();
         shownId = Id;
     }
@@ -589,25 +586,16 @@ else
         // les siennes, celles qu'on lui partage (ou toutes en lecture seule)
         playlists = Store.Read(d => d.Playlists.Where(p => rights.GetValueOrDefault(p.Id) != FolderRight.None).ToList());
 
-        // Onglets : seul dans l'organisation ou en lecture seule, tout est affiché ; un utilisateur a ses listes et ses partages ; l'administrateur, en plus, toute l'organisation
-        if (!multi || readAll) tab = LibraryTab.All;
-        else if (!Modes.Expert) tab = LibraryTab.Flat;   // mode simple : mes listes et celles partagées avec moi, à plat (§181)
-        else if (tab == LibraryTab.Flat || tab == LibraryTab.All && !isAdmin) tab = LibraryTab.Mine;
+        // Filtre « Afficher » (§212, modes simple et expert) : tout ce que la personne voit (défaut), ses listes, ou celles qu'on lui partage.
+        // Seul dans l'organisation ou en lecture seule : pas de filtre, tout est affiché. Pour un membre, « Toutes » = ses listes + ses partages ; pour l'administrateur, toute l'organisation.
+        if (!multi || readAll || tab != LibraryTab.Mine && tab != LibraryTab.Shared) tab = LibraryTab.All;
         (HashSet<Guid> Folders, List<Playlist> Lists) Scope(string t)
         {
-            var fs = LibraryTab.Folders(t, folderRows.Select(r => (r.Folder.Id, r.Folder.ParentId, r.Tab)), me, isAdmin, !Modes.Expert);
-            return (fs, playlists.Where(p => (listTabs.TryGetValue(p.Id, out var i) ? LibraryTab.InTab(t, i, me, isAdmin, !Modes.Expert) : t == LibraryTab.All) || p.FolderId is { } f && fs.Contains(f)).ToList());
+            var fs = LibraryTab.Folders(t, folderRows.Select(r => (r.Folder.Id, r.Folder.ParentId, r.Tab)), me, isAdmin);
+            return (fs, playlists.Where(p => (listTabs.TryGetValue(p.Id, out var i) ? LibraryTab.InTab(t, i, me, isAdmin) : t == LibraryTab.All) || p.FolderId is { } f && fs.Contains(f)).ToList());
         }
         (tabFolders, scopeLists) = Scope(tab);
-        var sharedRoots = 0;
-        if (multi && !readAll)
-        {
-            var (sf, sl) = Scope(LibraryTab.Shared);
-            sharedRoots = folderRows.Count(r => sf.Contains(r.Folder.Id) && (r.Folder.ParentId is not { } p || !sf.Contains(p))) + sl.Count(p => p.FolderId is not { } f || !sf.Contains(f));
-        }
-        Tabs = !multi || readAll || !Modes.Expert ? new()
-            : new List<TabItem> { new(LibraryTab.Mine, "Mes listes", 0), new(LibraryTab.Shared, "Partagées avec moi", sharedRoots) }
-                .Concat(isAdmin && Modes.Expert ? [new TabItem(LibraryTab.All, "Toute l'organisation", 0)] : Array.Empty<TabItem>()).ToList();   // mode simple : pas d'onglet « Toute l'organisation » (§180)
+        (mineCount, sharedCount) = multi && !readAll ? (Scope(LibraryTab.Mine).Lists.Count, Scope(LibraryTab.Shared).Lists.Count) : (0, 0);
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
         hidden = MediaLib.HiddenFileIds();   // fichiers des dossiers non accordés : jamais en vignette
         allScreens = Store.Read(d => d.AllScreens.ToList());   // les listes n'ont pas d'aire : leurs écrans sont dans toutes les aires
@@ -659,21 +647,35 @@ else
 
     private void SetFilter(string f) { filter = f; picked.Clear(); }
 
-    // Menu « Filtres » : utilisation (« À publier » seulement s'il y en a)
+    // Menu « Filtres » : afficher (à plusieurs dans l'organisation), utilisation (« À publier » seulement s'il y en a)
     private IReadOnlyList<FilterGroup> FilterGroups
     {
         get
         {
+            var list = new List<FilterGroup>();
+            if (multi && !readAll)
+                list.Add(new("owner", "Afficher", OwnerOn ? tab : "", new FilterOption[]
+                {
+                    new("", isAdmin ? "Toute l'organisation" : "Toutes"),   // un membre ne voit que ses listes et celles qu'on lui partage
+                    new(LibraryTab.Mine, "Mes listes", mineCount),
+                    new(LibraryTab.Shared, "Partagées avec moi", sharedCount)
+                }));
             var opts = new List<FilterOption> { new("", "Toutes"), new("used", "Utilisées", playlists.Count(p => Use(p).Used), "Choisies sur un écran ou programmées dans un planning") };
             if (PendingCount > 0 || filter == "pending") opts.Add(new("pending", "À publier", PendingCount, "Modifiées depuis leur publication : les écrans diffusent encore l'ancienne version"));
             opts.Add(new("unused", "Non utilisées", playlists.Count(p => !Use(p).Used)));
-            return new[] { new FilterGroup("use", "Utilisation", filter, opts) };
+            list.Add(new FilterGroup("use", "Utilisation", filter, opts));
+            return list;
         }
     }
     private IReadOnlyList<FilterExtra> FilterExtras => foldersOn && folderId != null && !scopeAll ? new[] { new FilterExtra("Dans : ce dossier", () => scopeAll = true) } : Array.Empty<FilterExtra>();
-    private void PickFilter((string Key, string Value) p) => SetFilter(p.Value);
-    private void ClearFilter(string key) => SetFilter("");
-    private void ResetFilters() { scopeAll = true; SetFilter(""); }
+    private void PickFilter((string Key, string Value) p)
+    {
+        if (p.Key == "owner") { var t = p.Value == "" ? LibraryTab.All : p.Value; if (t != tab) SetTab(t); }
+        else SetFilter(p.Value);
+    }
+    private void ClearFilter(string key) => PickFilter((key, ""));
+    private void ResetFilters() { scopeAll = true; SetFilter(""); if (OwnerOn) SetTab(LibraryTab.All); }
+    private void ClearAll() { search = ""; ResetFilters(); }
 
     private bool Matches(Playlist p) => filter switch
     {

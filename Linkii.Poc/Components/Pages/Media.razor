@@ -103,17 +103,7 @@
     </div>
 </div>
 
-@if (Tabs.Count > 1)
-{
-    @* Onglets (24 octobre 2026) : ses médias, ceux qu'on lui partage, et pour l'administrateur toute l'organisation. Jamais mélangés. *@
-    <nav class="tabs int-tabs lx-utabs" role="tablist" aria-label="Médias affichés">
-        @foreach (var t in Tabs)
-        {
-            var key = t.Key;
-            <button type="button" role="tab" class="@(tab == key ? "on" : "")" aria-selected="@(tab == key ? "true" : "false")" @onclick="() => SetTab(key)">@t.Label@if (t.Count > 0) { <span class="cat-count">@t.Count</span> }<TabNew Family="media" Tab="@key" /></button>
-        }
-    </nav>
-}
+@* Plus d'onglets « Mes médias / Partagés avec moi / Toute l'organisation » (8 novembre 2026, §212) : c'est le critère « Afficher » du menu Filtres *@
 
 @* mode simple : plus de ligne de métrique (nombre, taille, non utilisés, astuce de dépôt) sous les onglets (§182) ; reste l'avertissement d'un dossier en lecture seule *@
 @if (Modes.Expert)
@@ -141,11 +131,11 @@ else if (currentRow is { Right: FolderRight.Read })
 
 <DriveSyncBar />
 
-@if (files.Count == 0 && Jobs.Count == 0 && subfolders.Count == 0 && !Active)
+@* filtre « Afficher » à la racine : jamais cet état vide, qui cache la barre des filtres (voir plus bas « Rien n'a encore été partagé avec vous ») *@
+@if (files.Count == 0 && Jobs.Count == 0 && subfolders.Count == 0 && !Active && (!OwnerOn || folderId != null))
 {
     <div class="empty">
-        <div class="big">@(folderId != null ? "Ce dossier est vide" : tab == LibraryTab.Shared ? "Rien n'a encore été partagé avec vous" : "Votre médiathèque est vide")</div>
-        @if (tab == LibraryTab.Shared && folderId == null) { <p>Quand un collègue vous partage un média ou un dossier, il apparaît ici. Vous pouvez l'utiliser dans vos listes de lecture.</p> }
+        <div class="big">@(folderId != null ? "Ce dossier est vide" : "Votre médiathèque est vide")</div>
         @if (CanUploadHere)
         {
             @if (currentRow is { } fe)
@@ -246,7 +236,16 @@ else
 
     @if (!Visible.Any() && Jobs.Count == 0)
     {
-        @if (Active || type != "" || source != "") { <div class="empty"><div class="big">Aucun média ne correspond</div><button class="btn ghost sm" @onclick='() => { search = ""; filter = ""; type = ""; source = ""; }'>Effacer la recherche et les filtres</button></div> }
+        @if (!Active && type == "" && source == "" && OwnerOn && folderId == null && subfolders.Count == 0)
+        {
+            @* seul le filtre « Afficher » est posé, et il ne montre rien *@
+            <div class="empty">
+                <div class="big">@(tab == LibraryTab.Shared ? "Rien n'a encore été partagé avec vous" : "Vous n'avez encore aucun média")</div>
+                @if (tab == LibraryTab.Shared) { <p>Quand un collègue vous partage un média ou un dossier, il apparaît ici. Vous pouvez l'utiliser dans vos listes de lecture.</p> }
+                <button class="btn ghost sm" @onclick="ClearAll">Afficher tous les médias</button>
+            </div>
+        }
+        else if (Active || type != "" || source != "") { <div class="empty"><div class="big">Aucun média ne correspond</div><button class="btn ghost sm" @onclick="ClearAll">Effacer la recherche et les filtres</button></div> }
         else
         {
             @* rien à cet endroit, mais des dossiers au-dessus : on le dit, avec le bouton d'import *@
@@ -713,7 +712,6 @@ else
         Welcome.Changed += OnWelcomeChanged;
         // retour d'un assistant d'application : avec les Premiers pas ouverts, on revient dans l'assistant (panneau cloud), jamais le tiroir du bas par-dessus
         if (ImportParam == "cloud") { if (Welcome.IsOpen) Welcome.Open("cloud"); else showUpload = true; }
-        tab = Store.Read(d => d.Users.FirstOrDefault(u => u.Id == d.Access.UserId)?.LibraryTabs.GetValueOrDefault("media")) ?? LibraryTab.Mine;
         Reload();
         // pendant une conversion vidéo, la liste se rafraîchit seule
         refreshTimer = new System.Threading.Timer(_ => InvokeAsync(() =>
@@ -772,27 +770,26 @@ else
     private List<(Guid Id, string Name)>? folderMove;
     private static readonly Guid RootDrop = Guid.Empty;       // cible « racine » du glisser-déposer (fil d'Ariane)
 
-    // ---------- Onglets et partage entre personnes (24 octobre 2026) ----------
+    // ---------- Filtre « Afficher » et partage entre personnes (onglets jusqu'au 8 novembre 2026, §212) ----------
     private Guid? me;
-    private bool multi;                                        // plus d'une personne dans l'organisation : partage et onglets
+    private bool multi;                                        // plus d'une personne dans l'organisation : partage et filtre « Afficher »
     private bool readAll;                                      // médiathèque en « Voit tout · lecture seule »
-    private string tab = LibraryTab.All;
-    private HashSet<Guid> tabFolders = new();                  // dossiers de l'onglet ouvert (et leurs sous-dossiers)
+    private string tab = LibraryTab.All;                       // filtre « Afficher » : All (défaut), Mine ou Shared ; jamais retenu, comme les autres filtres
+    private HashSet<Guid> tabFolders = new();                  // dossiers montrés par le filtre (et leurs sous-dossiers)
     private Dictionary<Guid, LibraryTab.Info> fileTabs = new();
     private Dictionary<Guid, FolderRight> fileRights = new();
     private Dictionary<Guid, ShareSummary> mediaShares = new(), folderShares = new();
     private Dictionary<Guid, string> people = new();          // personnes de l'organisation → nom
-
-    private record TabItem(string Key, string Label, int Count);
-    private List<TabItem> Tabs = new();
+    private int mineCount, sharedCount;                        // médias de « Mes médias » et de « Partagés avec moi » (nombres du filtre)
+    private bool OwnerOn => tab != LibraryTab.All;             // le filtre « Afficher » restreint la vue
 
     private ShareSummary FolderSum(Guid id) => folderShares.GetValueOrDefault(id, ShareSummary.None);
     private static string First(string name) => name.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? name;
     private void ShareFolder(FolderRow r) { sharingKind = ShareKind.MediaFolder; sharingMedia = new() { (r.Folder.Id, r.Folder.Name) }; }
 
     // Média d'un autre : nom de son propriétaire (null : le sien). Un média de l'organisation (sans propriétaire membre) est celui des administrateurs.
-    // Mode simple (§181) : pas d'onglets ; en bas à droite de la carte, « 3 partages » (bleu) pour un média à soi, « De Anne » (bleu clair) pour celui d'un collègue
-    private bool Flat => tab == LibraryTab.Flat;
+    // Mode simple (§181) : en bas à droite de la carte, « 3 partages » (bleu) pour un média à soi, « De Anne » (bleu clair) pour celui d'un collègue
+    private bool Flat => Modes.Simple && multi && !readAll;
     private RenderFragment FlatPill(MediaItem m) => __builder =>
     {
         if (SharedBy(m) is { } by) { <div class="sh-row"><span class="share from" title="Média de @by"><Ico Name="users" Size="13" /> De @First(by)</span></div> }
@@ -804,8 +801,6 @@ else
     private void SetTab(string t)
     {
         tab = t; folderId = null; picked.Clear(); openId = null; menuFor = null; scopeAll = true;
-        try { Store.Write(d => { if (d.Users.FirstOrDefault(u => u.Id == d.Access.UserId) is { } u) u.LibraryTabs["media"] = t; }); }
-        catch (UnauthorizedAccessException) { }   // lecture seule : l'onglet n'est pas retenu
         Reload();
         _ = SetDrop();
     }
@@ -861,16 +856,21 @@ else
 
     private void SetFilter(string f) { filter = f; picked.Clear(); }
 
-    // Menu « Filtres » : type, utilisation, source (la source seulement s'il y en a plusieurs)
+    // Menu « Filtres » : afficher (à plusieurs dans l'organisation), type, utilisation, source (la source seulement s'il y en a plusieurs)
     private IReadOnlyList<FilterGroup> FilterGroups
     {
         get
         {
-            var list = new List<FilterGroup>
-            {
-                new("type", "Type", type, new FilterOption[] { new("", "Tous"), new("image", "Images", BySource.Count(m => m.Type == "image")), new("video", "Vidéos", BySource.Count(m => m.Type == "video")) }),
-                new("use", "Utilisation", filter, new FilterOption[] { new("", "Tous"), new("unused", "Non utilisés", Pool.Count(m => unused.Contains(m.Id)), "Dans aucune liste de lecture, aucun contenu et sur aucun écran") }),
-            };
+            var list = new List<FilterGroup>();
+            if (multi && !readAll)
+                list.Add(new("owner", "Afficher", OwnerOn ? tab : "", new FilterOption[]
+                {
+                    new("", isAdmin ? "Toute l'organisation" : "Tous"),   // un membre ne voit que ses médias et ceux qu'on lui partage
+                    new(LibraryTab.Mine, "Mes médias", mineCount),
+                    new(LibraryTab.Shared, "Partagés avec moi", sharedCount)
+                }));
+            list.Add(new("type", "Type", type, new FilterOption[] { new("", "Tous"), new("image", "Images", BySource.Count(m => m.Type == "image")), new("video", "Vidéos", BySource.Count(m => m.Type == "video")) }));
+            list.Add(new("use", "Utilisation", filter, new FilterOption[] { new("", "Tous"), new("unused", "Non utilisés", Pool.Count(m => unused.Contains(m.Id)), "Dans aucune liste de lecture, aucun contenu et sur aucun écran") }));
             if (Sources.Count(s => Pool.Any(m => SourceOf(m) == s.Key)) > 1 || source != "")
                 list.Add(new("source", "Source", source, new[] { new FilterOption("", "Toutes") }
                     .Concat(Sources.Select(s => (s.Key, s.Label, N: ByType.Count(m => SourceOf(m) == s.Key))).Where(s => s.N > 0 || source == s.Key).Select(s => new FilterOption(s.Key, s.Label, s.N))).ToList()));
@@ -880,10 +880,17 @@ else
     private IReadOnlyList<FilterExtra> FilterExtras => FoldersShown && folderId != null && !scopeAll ? new[] { new FilterExtra("Dans : ce dossier", () => scopeAll = true) } : Array.Empty<FilterExtra>();
     private void PickFilter((string Key, string Value) p)
     {
-        switch (p.Key) { case "type": type = p.Value; break; case "use": SetFilter(p.Value); break; case "source": source = p.Value; break; }
+        switch (p.Key)
+        {
+            case "owner": var t = p.Value == "" ? LibraryTab.All : p.Value; if (t != tab) SetTab(t); break;
+            case "type": type = p.Value; break;
+            case "use": SetFilter(p.Value); break;
+            case "source": source = p.Value; break;
+        }
     }
     private void ClearFilter(string key) => PickFilter((key, ""));
-    private void ResetFilters() { type = ""; source = ""; scopeAll = true; SetFilter(""); }
+    private void ResetFilters() { type = ""; source = ""; scopeAll = true; SetFilter(""); if (OwnerOn) SetTab(LibraryTab.All); }
+    private void ClearAll() { search = ""; ResetFilters(); }
 
     private void Reload()
     {
@@ -904,14 +911,13 @@ else
         covers = Library.PresentationCovers();
         presUses = Library.PresentationUseCounts();
 
-        // Onglets : seul dans l'organisation ou en lecture seule, tout est affiché ; un utilisateur a ses médias et ses partages ; l'administrateur, en plus, toute l'organisation
-        if (!multi || readAll) tab = LibraryTab.All;
-        else if (!Modes.Expert) tab = LibraryTab.Flat;   // mode simple : mes médias et ceux partagés avec moi, à plat (§181)
-        else if (tab == LibraryTab.Flat || tab == LibraryTab.All && !isAdmin) tab = LibraryTab.Mine;
-        bool InTab(string t, MediaItem m) => fileTabs.TryGetValue(m.Id, out var i) ? LibraryTab.InTab(t, i, me, isAdmin, !Modes.Expert) : t == LibraryTab.All;
+        // Filtre « Afficher » (§212, modes simple et expert) : tout ce que la personne voit (défaut), ses médias, ou ceux qu'on lui partage.
+        // Seul dans l'organisation ou en lecture seule : pas de filtre, tout est affiché. Pour un membre, « Tous » = ses médias + ses partages ; pour l'administrateur, toute l'organisation.
+        if (!multi || readAll || tab != LibraryTab.Mine && tab != LibraryTab.Shared) tab = LibraryTab.All;
+        bool InTab(string t, MediaItem m) => fileTabs.TryGetValue(m.Id, out var i) ? LibraryTab.InTab(t, i, me, isAdmin) : t == LibraryTab.All;
         (HashSet<Guid> Folders, List<MediaItem> Files) Scope(string t)
         {
-            var fs = LibraryTab.Folders(t, folderRows.Select(r => (r.Folder.Id, r.Folder.ParentId, r.Tab)), me, isAdmin, !Modes.Expert);
+            var fs = LibraryTab.Folders(t, folderRows.Select(r => (r.Folder.Id, r.Folder.ParentId, r.Tab)), me, isAdmin);
             return (fs, allFiles.Where(m => InTab(t, m) || m.FolderId is { } f && fs.Contains(f)).ToList());
         }
         (tabFolders, scopeFiles) = Scope(tab);
@@ -922,15 +928,7 @@ else
         subfolders = FoldersShown
             ? folderRows.Where(r => folderId is { } fid ? r.Folder.ParentId == fid : tabFolders.Contains(r.Folder.Id) && (r.Folder.ParentId is not { } p || !tabFolders.Contains(p))).ToList()
             : new();
-        var sharedRoots = 0;
-        if (multi && !readAll)
-        {
-            var (sf, sfiles) = Scope(LibraryTab.Shared);
-            sharedRoots = folderRows.Count(r => sf.Contains(r.Folder.Id) && (r.Folder.ParentId is not { } p || !sf.Contains(p))) + sfiles.Count(m => m.FolderId is not { } f || !sf.Contains(f));
-        }
-        Tabs = !multi || readAll || !Modes.Expert ? new()
-            : new List<TabItem> { new(LibraryTab.Mine, "Mes médias", 0), new(LibraryTab.Shared, "Partagés avec moi", sharedRoots) }
-                .Concat(isAdmin && Modes.Expert ? [new TabItem(LibraryTab.All, "Toute l'organisation", 0)] : Array.Empty<TabItem>()).ToList();   // mode simple : pas d'onglet « Toute l'organisation » (§180)
+        (mineCount, sharedCount) = multi && !readAll ? (Scope(LibraryTab.Mine).Files.Count, Scope(LibraryTab.Shared).Files.Count) : (0, 0);
         crumbs = BuildCrumbs();
         drives = Library.DriveFolders();
         unused = Library.UnusedIds();
