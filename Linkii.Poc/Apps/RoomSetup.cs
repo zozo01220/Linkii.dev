@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 
 namespace Linkii.Poc;
 
@@ -48,8 +49,13 @@ public class RoomSetupDrafts
         drafts[(clientId, userId)] = (DateTime.UtcNow, d);
     }
 
-    public RoomSetupDraft? Take(Guid clientId, Guid userId) =>
-        drafts.TryRemove((clientId, userId), out var v) && DateTime.UtcNow - v.At < TimeSpan.FromMinutes(30) ? v.Draft : null;
+    /// <summary>
+    /// Copie du brouillon, qui reste gardé : au retour de Microsoft ou Google la page est rendue deux fois (pré-rendu, puis connexion interactive),
+    /// chaque rendu repart du même brouillon intact. Il est retiré à la fin ou à l'abandon de l'assistant (Drop).
+    /// </summary>
+    public RoomSetupDraft? Peek(Guid clientId, Guid userId) =>
+        drafts.TryGetValue((clientId, userId), out var v) && DateTime.UtcNow - v.At < TimeSpan.FromMinutes(30)
+            ? JsonSerializer.Deserialize<RoomSetupDraft>(JsonSerializer.Serialize(v.Draft)) : null;
 
     public void Drop(Guid clientId, Guid userId) => drafts.TryRemove((clientId, userId), out _);
 }

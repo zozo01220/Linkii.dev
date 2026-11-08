@@ -281,7 +281,7 @@ else
     }
     else if (wid == RoomRules.AppId)
     {
-        <RoomAppWizard StartStep="wizStep" Adding="wizAdding" OnAdded="() => pendingUse = wid" OnClose="CloseWizard" OnChanged="Load" />
+        <RoomAppWizard StartStep="wizStep" Adding="wizAdding" Resume="wizResume" OnAdded="() => pendingUse = wid" OnClose="CloseWizard" OnChanged="Load" />
     }
     else
     {
@@ -504,6 +504,7 @@ else
     private bool accountsTab { get => tab == "accounts"; set { if (value) tab = "accounts"; else if (tab == "accounts") tab = "mine"; } }
     private int wizStep = 1;
     private bool wizAdding;   // assistant Canva ouvert pour ajouter l'application (pas encore dans Mes applications)
+    private bool wizResume;   // assistant rouvert au retour d'une connexion (?wiz=) : il reprend son brouillon (Réservation de salle)
     private RetireInfo? retireInfo;
     private ConnectedAccount? canvaAcc;
     private string? wizId;   // application dont l'assistant d'ajout est ouvert
@@ -1182,7 +1183,7 @@ else
         DropboxReturn();
         FacebookReturn();
         // Réservation de salle : retour d'une connexion lancée par son assistant (réussie ou non), il reprend où il était (brouillon gardé)
-        if (Embed == null && Mode != "app" && admin && WizParam == RoomRules.AppId && wizId == null) OpenWizard(RoomRules.AppId, 2, !InMineId(RoomRules.AppId));
+        if (Embed == null && Mode != "app" && admin && WizParam == RoomRules.AppId && wizId == null) OpenWizard(RoomRules.AppId, 2, !InMineId(RoomRules.AppId), resume: true);
         if (Embed != null || Mode == "app") return;
         AddFromLink();
         // ?gerer=<application> (entrée du menu, page d'une application) : sa fenêtre de configuration ; ?retirer=<application> : la confirmation du retrait
@@ -1390,7 +1391,7 @@ else
 
     public static bool HasWizard(string id) => id == "canva" || id.StartsWith("drv-") || id is "cal-google" or "cal-m365" or "cal-caldav" or "cal-ews" or "google-slides" or "google-docs" or "ms-powerpoint" or "facebook" or "ha-home" or RoomRules.AppId;
 
-    private void OpenWizard(string id, int step, bool adding) { pendingUse = null; wizId = id; wizStep = step; wizAdding = adding; }
+    private void OpenWizard(string id, int step, bool adding, bool resume = false) { pendingUse = null; wizId = id; wizStep = step; wizAdding = adding; wizResume = resume; }
 
     private bool InMineId(string id) => AllRows().Any(r => r.E.Id == id && InMine(r));
 
@@ -1508,7 +1509,7 @@ else
         var granted = string.Join(" et ", new[] { hasCalendars ? "agendas" : null, hasFiles ? "fichiers" : null }.OfType<string>());
         Toast.Ok($"Compte {name} connecté{(user.Length > 0 ? $" ({user})" : "")}{(granted.Length > 0 ? $" : {granted} autorisés" : "")}.");
         if (accountsTab) FlashAccount(kind);
-        else if (WizParam is { } w && HasWizard(w)) OpenWizard(w, 2, !InMineId(w));
+        else if (WizParam is { } w && HasWizard(w)) OpenWizard(w, 2, !InMineId(w), resume: true);
         else if (purpose == AccountPurposes.Calendar) OpenWizard("cal-" + calendarSource, 2, !InMineId("cal-" + calendarSource));
         else if (purpose != AccountPurposes.Calendar) OpenWizard("drv-" + driveSourceId, 2, !InMineId("drv-" + driveSourceId));
     }

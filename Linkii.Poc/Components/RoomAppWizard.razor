@@ -12,7 +12,8 @@
 
 @* Application « Réservation de salle » : assistant d'installation (maquettes/salle-app-parcours.html, vue 2) — Bienvenue › Agendas › Salles › Réservation › Règles › Terminé.
    Rien n'est enregistré avant « Installer », sauf ce qui sert aussi ailleurs : le compte connecté et l'application d'agenda installée à l'étape Agendas.
-   Pendant une connexion chez Microsoft ou Google, l'état est gardé dans un brouillon (RoomSetupDrafts) et l'assistant reprend à la même étape.
+   Pendant une connexion chez Microsoft ou Google, l'état est gardé dans un brouillon (RoomSetupDrafts) et l'assistant reprend à la même étape
+   (Resume) ; le brouillon est lu sans être retiré, car la page de retour est rendue deux fois (pré-rendu puis interactif), et retiré à la fin.
    Rouvert depuis la page de l'application (Gérer les salles, + Ajouter un agenda) : Agendas › Salles › Réservation › Terminé, les règles ne changent pas. *@
 <WizardShell Icon="@RoomRules.AppId" Title="@(Adding ? "Installer · " + LabelOf(key) : "Réservation de salle · " + LabelOf(key))" Labels="@Labels" Step="StepNo" Done="done" Running="done"
              CanBack="@(StepNo > 1 && key != "done")" Hint="@Hint" NextLabel="@NextLabel" NextDisabled="NextDisabled"
@@ -128,14 +129,14 @@
                         else if (!RoomRules.SourceCanWrite(src))
                         {
                             <div class="grow"><b>@name</b><small>Les écrans affichent libre / occupé, sans réservation.</small></div>
-                            <div class="seg"><button type="button" class="on">Afficher seulement</button><button type="button" disabled title="Bientôt">Afficher et réserver · Bientôt</button></div>
+                            <div class="seg rb-seg"><button type="button" class="on">Afficher seulement</button><button type="button" disabled title="Bientôt">Afficher et réserver · Bientôt</button></div>
                         }
                         else
                         {
                             var write = dr.Perms.GetValueOrDefault(src) == RoomPerms.Write;
                             var ok = RoomSetup.HasWriteRight(tenant, src);
                             <div class="grow"><b>@name</b><small>@(write ? ok ? "Autorisé : créer des rendez-vous dans vos salles (jamais modifier ceux qui existent)" : "Autorisation requise auprès de " + name : "Les écrans affichent libre / occupé, sans réservation")</small></div>
-                            <div class="seg">
+                            <div class="seg rb-seg" role="group" aria-label="Réservation depuis @name">
                                 <button type="button" class="@(write ? "" : "on")" @onclick="() => dr.Perms[src] = RoomPerms.Read">Afficher seulement</button>
                                 <button type="button" class="@(write ? "on" : "")" @onclick="() => dr.Perms[src] = RoomPerms.Write">Afficher et réserver</button>
                             </div>
@@ -195,6 +196,8 @@
 @code {
     [Parameter] public int StartStep { get; set; } = 1;
     [Parameter] public bool Adding { get; set; }
+    /// <summary>Rouvert au retour d'une connexion Microsoft ou Google (?wiz=room-booking) : reprend le brouillon gardé avant de partir.</summary>
+    [Parameter] public bool Resume { get; set; }
     [Parameter] public EventCallback OnAdded { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback OnChanged { get; set; }
@@ -252,7 +255,8 @@
     {
         foreach (var def in SharedCalendarSources.All) { addName[def.Id] = ""; addRef[def.Id] = ""; }   // champs « Ajouter par adresse » de chaque source
         tenant = Store.Read(d => d.Tenant);
-        if (Drafts.Take(Who.Client, Who.User) is { } saved)
+        if (!Resume) Drafts.Drop(Who.Client, Who.User);   // ouvert depuis la page : on repart de zéro (un brouillon abandonné ne revient pas)
+        if (Resume && Drafts.Peek(Who.Client, Who.User) is { } saved)
         {
             dr = saved;
             key = Keys.Contains(saved.StepKey) ? saved.StepKey : Keys[0];
