@@ -534,6 +534,10 @@ public class Tenant
     // Calendriers partagés (Applications) : une connexion par source, puis les calendriers proposés dans les listes de lecture.
     public List<CalendarAccount> CalendarAccounts { get; set; } = new();
     public List<SharedCalendar> SharedCalendars { get; set; } = new();
+    /// <summary>Application « Réservation de salle » : règles et choix par source (null : jamais installée). Voir <see cref="RoomSetup"/>.</summary>
+    public RoomAppSettings? RoomApp { get; set; }
+    /// <summary>Réservations faites sur les écrans de salle (journal de 90 jours ; réservations locales des liens ICS).</summary>
+    public List<RoomBooking> RoomBookings { get; set; } = new();
 
     // Drives (Applications) : sources actives (gdrive | onedrive) et dossiers synchronisés. La connexion est celle des calendriers (Google, Microsoft 365).
     public List<string> DrivesEnabled { get; set; } = new();
@@ -791,6 +795,10 @@ public class SharedCalendar
     public bool RoomAllDay { get; set; }          // un événement sur la journée entière rend la salle occupée
     public int RoomSoon { get; set; } = 10;       // « bientôt occupé » : minutes avant (0 : jamais)
     public bool RoomTitles { get; set; }          // false : seulement « Occupé » (les titres ne quittent pas le serveur)
+    /// <summary>Application « Réservation de salle » : comment Linkivi crée un rendez-vous dans cette salle (<see cref="RoomModes"/>). Recalculé par <see cref="RoomSetup"/>.</summary>
+    public string RoomWriteMode { get; set; } = RoomModes.None;
+    /// <summary>Google : accès du compte à cet agenda (owner, writer, reader…), lu à l'installation ou à la synchronisation ; null : inconnu.</summary>
+    public string? RoomAccess { get; set; }
 }
 
 /// <summary>Format du POC mono-client : le compte administrateur vivait dans le tenant.</summary>
@@ -911,6 +919,11 @@ public class Screen : IClientOwned, IAreaOwned, IOwned
     public KioskConfig? Kiosk { get; set; }
     public int KioskRevision { get; set; }             // +1 à chaque modification du menu ou des réglages : la borne a alors des modifications à publier
     public PublishedKiosk? PublishedKiosk { get; set; } // ce que la borne affiche depuis sa dernière publication
+
+    /// <summary>Écran de salle (application « Réservation de salle ») : la porte de la salle <see cref="RoomCalendarId"/>, sans publication. Null : autre type d'écran.</summary>
+    public RoomScreen? Room { get; set; }
+    /// <summary>L'appareil a un écran tactile (remonté par le player ; null : on ne sait pas).</summary>
+    public bool? DeviceTouch { get; set; }
 
     // Publication propre à l'écran : instantané de sa playlist + de ses widgets. Les autres écrans de la même playlist ne bougent pas.
     public List<PublishedItem> Published { get; set; } = new();   // zone 1 (ou écran entier) + widgets
@@ -1375,12 +1388,12 @@ public static class Helpers
 
     /// <summary>L'écran diffuse une version antérieure à sa configuration actuelle (playlist modifiée, autre playlist, découpage, widgets).</summary>
     public static bool HasPending(Screen s, IEnumerable<Playlist> playlists) =>
-        s.PublishedStamp != PublishStamp(s, playlists)
+        s.Room == null && s.PublishedStamp != PublishStamp(s, playlists)   // écran de salle : rien à publier, il suit sa salle
         || s.PublishedListRevs.Any(kv => playlists.FirstOrDefault(p => p.Id == kv.Key) is { } p && p.Revision != kv.Value);   // une liste du planning a changé depuis son instantané
 
     /// <summary>Identifie ce que l'écran doit afficher : playlist publiée + configuration (format, fuseau, redémarrage).</summary>
     public static string Revision(Playlist? p, Screen s, Tenant t, Reseller? r, string sync = "") =>
-        $"{(s.PublishedVersion > 0 ? "s" + s.PublishedVersion : p == null ? "none" : p.Id.ToString("N") + ":" + p.PublishedVersion)}|{s.Orientation}|{s.Resolution}|{t.Timezone}|{t.ReloadHour}|{r?.BrandStamp}{(t.SleepEnabled ? "|sl" : "")}{(t.DimEnabled ? "|dm" : "")}|tp{TechPin.Stamp(t)}{sync}";
+        $"{(s.PublishedVersion > 0 ? "s" + s.PublishedVersion : p == null ? "none" : p.Id.ToString("N") + ":" + p.PublishedVersion)}|{s.Orientation}|{s.Resolution}|{t.Timezone}|{t.ReloadHour}|{r?.BrandStamp}{(t.SleepEnabled ? "|sl" : "")}{(t.DimEnabled ? "|dm" : "")}|tp{TechPin.Stamp(t)}{sync}{RoomDoor.Stamp(s, t)}";
 
     public static string Status(Screen s, Playlist? p, Tenant t, Reseller? r, string sync = "")
     {

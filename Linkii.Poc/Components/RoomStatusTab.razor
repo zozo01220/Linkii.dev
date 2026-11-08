@@ -1,0 +1,88 @@
+@implements IDisposable
+@inject TenantStore Store
+@inject RoomStatusService Status
+
+@* Réservation de salle › Réservations (maquette vue 3) : statut des salles aujourd'hui, en lecture seule. Frise horaire + section « Maintenant ».
+   Aucun titre, aucun nom, aucune action : les rendez-vous vivent dans les agendas (Microsoft, Google…) et se modifient là-bas. Rafraîchi toutes les 60 s. *@
+<div class="rb-tl-tools">
+    <span class="chip on">Aujourd'hui</span>
+    <span class="grow"></span>
+    <select class="rb-sel" @bind="filter" aria-label="Salles affichées">
+        <option value="">Toutes les salles</option>
+        @foreach (var r in rows) { <option value="@r.Room.Id">@SharedCalendarSources.RoomName(r.Room)</option> }
+    </select>
+</div>
+<div class="rb-tl">
+    <div class="rb-tlh"><div></div><div style="grid-template-columns:repeat(@(toH - fromH),minmax(0,1fr))">@for (var h = fromH; h < toH; h++) { <span>@(toH - fromH > 14 && h % 2 == 1 ? "" : h + "h")</span> }</div></div>
+    @foreach (var r in Shown)
+    {
+        <div class="rb-tlr">
+            <div><b>@SharedCalendarSources.RoomName(r.Room)</b><small>@(r.Room.RoomCap > 0 ? $"{r.Room.RoomCap} places" : "")</small></div>
+            <div class="rb-lane" style="--n:@(toH - fromH)">
+                @foreach (var e in r.Today)
+                {
+                    <span class="rb-ev" style="left:@Css(Pct(e.StartUtc))%;width:@Css(Pct(e.EndUtc) - Pct(e.StartUtc))%" title="Occupée de @RoomRules.Hm(e.StartUtc, tz) à @RoomRules.Hm(e.EndUtc, tz)">@RoomRules.Hm(e.StartUtc, tz)–@RoomRules.Hm(e.EndUtc, tz)</span>
+                }
+                @if (NowPct is { } np) { <span class="rb-now" style="left:@Css(np)%"></span> }
+            </div>
+        </div>
+    }
+</div>
+<div class="rb-leg"><span><i class="ev"></i>Occupée</span><span><i class="free"></i>Libre</span><span><i class="now"></i>Maintenant @RoomRules.Hm(now, tz)</span></div>
+<div class="rb-grp">Maintenant</div>
+<div class="rb-list">
+    @foreach (var r in Shown)
+    {
+        <div class="rb-row">
+            <div class="grow"><b>@SharedCalendarSources.RoomName(r.Room)</b></div>
+            @if (r.Now is { } st) { <span class="rb-st"><i class="rb-dot @st.State"></i>@RoomRules.NowText(st, r.All, now, r.Room.RoomAllDay, tz)</span> }
+            else { <span class="rb-st"><i class="rb-dot off"></i>Agenda illisible</span> }
+        </div>
+    }
+    @if (rows.Count == 0) { <div class="empty compact"><div class="big">Aucune salle active</div></div> }
+</div>
+<div class="rb-note">Lecture seule : les rendez-vous vivent dans vos agendas (Microsoft, Google…) et se modifient là-bas. Linkivi n'affiche que le statut des salles. Les titres ne sont pas montrés.</div>
+
+@code {
+    private record Row(SharedCalendar Room, RoomNow? Now, List<RoomInterval> All, List<RoomInterval> Today);
+    private List<Row> rows = new();
+    private string filter = "";
+    private TimeZoneInfo tz = TimeZoneInfo.Utc;
+    private DateTime now = DateTime.UtcNow, dayStart;
+    private int fromH = 8, toH = 18;
+    private Timer? timer;
+
+    private IEnumerable<Row> Shown => filter.Length == 0 ? rows : rows.Where(r => r.Room.Id.ToString() == filter);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+        timer = new Timer(_ => InvokeAsync(async () => { await Load(); StateHasChanged(); }), null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
+    }
+
+    public void Dispose() => timer?.Dispose();
+
+    private async Task Load()
+    {
+        var (t, rooms) = Store.Read(d => (d.Tenant, RoomSetup.Rooms(d.Tenant).Where(r => !r.Off).ToList()));
+        tz = RoomRules.Zone(t.Timezone);
+        now = DateTime.UtcNow;
+        dayStart = RoomRules.DayStartUtc(now, tz);
+        var rules = t.RoomApp ?? new RoomAppSettings();
+        fromH = Math.Min(8, rules.FromMin / 60);
+        toH = Math.Max(18, (rules.ToMin + 59) / 60);
+        var snaps = await Status.ReadMany(Store.ClientId, rooms.Select(r => r.Id));
+        var lo = dayStart.AddHours(fromH); var hi = dayStart.AddHours(toH);
+        rows = rooms.Select(r =>
+        {
+            snaps.TryGetValue(r.Id, out var s);
+            var all = (s?.Events ?? new()).Where(e => !e.AllDay || r.RoomAllDay).ToList();
+            var today = all.Where(e => e.EndUtc > lo && e.StartUtc < hi).Select(e => e with { StartUtc = e.StartUtc < lo ? lo : e.StartUtc, EndUtc = e.EndUtc > hi ? hi : e.EndUtc, Title = "" }).ToList();
+            return new Row(r, RoomStatusService.StateOf(s, r, tz, now), all, today);
+        }).ToList();
+    }
+
+    private double Pct(DateTime utc) => Math.Round(Math.Clamp((utc - dayStart.AddHours(fromH)).TotalMinutes / ((toH - fromH) * 60.0) * 100, 0, 100), 2);
+    private static string Css(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    private double? NowPct => now >= dayStart.AddHours(fromH) && now <= dayStart.AddHours(toH) ? Pct(now) : null;
+}

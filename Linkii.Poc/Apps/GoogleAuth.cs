@@ -19,11 +19,14 @@ public class GoogleAuth(IConfiguration config, JsonStore store, SecretBox box, I
     private const string RevokeUrl = "https://oauth2.googleapis.com/revoke";
     public const string DriveScope = "https://www.googleapis.com/auth/drive.readonly";
     public const string CalendarScope = "https://www.googleapis.com/auth/calendar.readonly";
+    /// <summary>Créer des rendez-vous (application « Réservation de salle ») : accès « sensible » pour Google, l'application OAuth devra être vérifiée avant la production.</summary>
+    public const string EventsScope = "https://www.googleapis.com/auth/calendar.events";
 
     /// <summary>Accès demandés selon ce qui lance la connexion : une application (« drive » ou « calendar ») ou Comptes connectés (« all » : les deux).</summary>
     public static string[] ScopesFor(string purpose) => purpose switch
     {
         AccountPurposes.Calendar => [CalendarScope],
+        AccountPurposes.Rooms => [CalendarScope, EventsScope],
         AccountPurposes.All => [CalendarScope, DriveScope],
         _ => [DriveScope]
     };

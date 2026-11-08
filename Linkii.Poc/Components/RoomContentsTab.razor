@@ -1,0 +1,97 @@
+@implements IDisposable
+@inject TenantStore Store
+@inject AppService Svc
+@inject RoomStatusService Status
+@inject Notifier Notifier
+@inject NavigationManager Nav
+@inject Toaster Toast
+
+@* Réservation de salle › Contenus : les salles en liste (maquette vue 3) — agenda, état en direct, écran associé, interrupteur Actif.
+   Pas de « Nouveau contenu » : les salles viennent des agendas (Configuration › Gérer les salles). Rafraîchi toutes les 60 s. *@
+<div class="apd-bar">
+    <span class="apd-sum">@rows.Count salle@(rows.Count > 1 ? "s" : "") · @rows.Count(r => r.Room.Off == false) active@(rows.Count(r => !r.Room.Off) > 1 ? "s" : "")</span>
+    <span class="grow"></span>
+    <small class="apd-sum">Les salles viennent de vos agendas : Configuration › Gérer les salles.</small>
+</div>
+<div class="lx-tbl-wrap">
+    <table class="lx-tbl apd-tbl rb-tbl">
+        <thead><tr><th>Salle</th><th>État</th><th>Écran</th><th>Actif</th></tr></thead>
+        <tbody>
+            @foreach (var r in rows)
+            {
+                var row = r;
+                <tr class="@(row.Room.Off ? "off" : "")">
+                    <td><div class="nm"><AppIcon Id="@("cal-" + row.Room.Source)" Small="true" /><span><b>@SharedCalendarSources.RoomName(row.Room)</b><small>@Desc(row.Room)</small></span></div></td>
+                    <td>
+                        @if (row.Room.Off) { <span class="rb-st"><i class="rb-dot off"></i>Désactivée</span><small>Écran : « Salle indisponible »</small> }
+                        else if (row.Now is { } st)
+                        {
+                            <span class="rb-st"><i class="rb-dot @st.State"></i>@RoomRules.StateText(st, tz)</span>
+                            @if (st.Next.FirstOrDefault() is { } nx) { <small>Ensuite : @RoomRules.Hm(nx.StartUtc, tz)@(row.Room.RoomTitles && nx.Title.Length > 0 ? " " + nx.Title : "")</small> }
+                        }
+                        else if (row.Error is { } er) { <span class="rb-st" title="@er"><i class="rb-dot off"></i>Agenda illisible</span><small>@er</small> }
+                        else { <span class="rb-st"><i class="rb-dot off"></i>Lecture…</span> }
+                    </td>
+                    <td>
+                        @if (row.Screens.Count > 0)
+                        {
+                            var first = row.Screens[0];
+                            <span class="int-pill @(Online(first) ? "ok" : "bad")" title="@(Online(first) ? "En ligne" : "Hors ligne")"><i></i>@first.Name@(row.Screens.Count > 1 ? $" +{row.Screens.Count - 1}" : "")</span>
+                        }
+                        else if (!row.Room.Off) { <button type="button" class="btn ghost sm" @onclick="() => CreateScreen(row.Room.Id)">Créer l'écran</button> }
+                        else { <small>—</small> }
+                    </td>
+                    <td><button type="button" class="switch sm @(row.Room.Off ? "" : "on")" role="switch" aria-checked="@(row.Room.Off ? "false" : "true")" aria-label="@(row.Room.Off ? "Activer" : "Désactiver") @SharedCalendarSources.RoomName(row.Room)" @onclick="() => Toggle(row.Room)"><span></span></button></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private record Row(SharedCalendar Room, RoomNow? Now, string? Error, List<Screen> Screens);
+    private List<Row> rows = new();
+    private TimeZoneInfo tz = TimeZoneInfo.Utc;
+    private Timer? timer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+        timer = new Timer(_ => InvokeAsync(async () => { await Load(); StateHasChanged(); }), null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
+    }
+
+    public void Dispose() => timer?.Dispose();
+
+    private async Task Load()
+    {
+        var (t, rooms, screens) = Store.Read(d => (d.Tenant, RoomSetup.Rooms(d.Tenant), d.AllScreens.Where(s => s.Room != null).ToList()));
+        tz = RoomRules.Zone(t.Timezone);
+        var snaps = await Status.ReadMany(Store.ClientId, rooms.Where(r => !r.Off).Select(r => r.Id));
+        var now = DateTime.UtcNow;
+        rows = rooms.Select(r =>
+        {
+            snaps.TryGetValue(r.Id, out var s);
+            return new Row(r, RoomStatusService.StateOf(s, r, tz, now), s?.Error, screens.Where(x => x.RoomCalendarId == r.Id).OrderBy(x => x.Name).ToList());
+        }).ToList();
+    }
+
+    private static string Desc(SharedCalendar r) =>
+        string.Join(" · ", new[] { r.RoomCap > 0 ? $"{r.RoomCap} places" : null, r.RoomPlace.Length > 0 ? r.RoomPlace : null, r.Source == "ics" ? "ICS" : null }.OfType<string>());
+
+    private static bool Online(Screen s) => s.LastSeenUtc is { } ls && DateTime.UtcNow - ls < TimeSpan.FromSeconds(90);
+
+    private async Task Toggle(SharedCalendar r)
+    {
+        var on = r.Off;   // désactivée : on la réactive
+        Svc.SetContentOn("calendar", r.Id.ToString(), on);
+        Store.Write(d => { if (d.Tenant.RoomApp is { } a) a.Revision++; });
+        await Notifier.NotifyClient(Store.ClientId);   // ses écrans : « Salle indisponible », ou de nouveau la porte
+        await Load();
+        Toast.Ok(on ? $"« {SharedCalendarSources.RoomName(r)} » est de nouveau active." : $"« {SharedCalendarSources.RoomName(r)} » est désactivée : ses écrans affichent « Salle indisponible ».");
+        await OnChanged.InvokeAsync();
+    }
+
+    private void CreateScreen(Guid roomId) => Nav.NavigateTo($"/?salle=nouveau&id={roomId:N}");
+}

@@ -6,6 +6,9 @@
 @inject Toaster Toast
 @inject CloudFileService Cloud
 @inject ModeService Modes
+@inject GoogleConnector Google
+@inject RoomStatusService RoomStatus
+@inject Notifier Notifier
 
 @* Page d'une application : ouverte par son entrée du menu « Applications » (applications du catalogue, Drives, calendriers partagés, Home Assistant).
    Onglets : Contenus (seulement s'il y a des contenus ou des fichiers importés : liste), Configuration (compte, bouton Configurer, menu), Infos.
@@ -27,6 +30,7 @@ else if (!installed)
         <div class="row">
             <a class="btn ghost" href="@Back">@(app.ScreenWidget ? "Retour aux widgets" : "Retour aux applications")</a>
             @if (isVirtual) { <a class="btn" href="/store">Ouvrir le Store</a> }
+            else if (IsRooms) { <button class="btn" @onclick="() => integ?.WizardById(AppId, 1)">Installer</button> }   @* l'installation passe par son assistant (agendas, salles, règles) *@
             else { <button class="btn" @onclick="Install">@(app.ScreenWidget ? "Activer le widget" : "Activer l'application")</button> }
         </div>
     </div>
@@ -45,6 +49,7 @@ else
         <div class="row head-actions">
             @if (IsPlans && Modes.Expert && haOn) { <a class="btn" href="/plans/nouveau?back=@PlanBack"><Ico Name="plus" Size="16" /> Nouveau plan</a> }
             @if (app.ScreenWidget) { <a class="btn" href="/">Placer sur un écran</a> }
+            @if (IsRooms) { <button type="button" class="btn ghost" disabled="@syncing" title="Relit vos agendas : nouvelles salles, droits, états" @onclick="SyncRooms"><Ico Name="refresh" Size="16" /> Synchroniser</button> }
             @if (HasSync) { <button type="button" class="btn ghost" disabled="@(!CanSync || syncing)" title="@(CanSync ? "Récupère les nouveaux contenus du compte connecté" : "Le compte n'est pas connecté")" @onclick="Sync"><Ico Name="refresh" Size="16" /> Synchroniser</button> }
             @if (!app.DefaultOn) { <button type="button" class="btn ghost danger-text" @onclick="Uninstall">Désinstaller</button> }
         </div>
@@ -52,11 +57,30 @@ else
 
     <nav class="tabs int-tabs" role="tablist" aria-label="Contenus, configuration et infos">
         @if (items.Count > 0 || IsPlans) { <button type="button" role="tab" class="@(tab == "contenus" ? "on" : "")" aria-selected="@(tab == "contenus" ? "true" : "false")" @onclick='() => tab = "contenus"'>Contenus <span class="cat-count">@items.Count</span></button> }
+        @if (IsRooms && items.Count > 0) { <button type="button" role="tab" class="@(tab == "resa" ? "on" : "")" aria-selected="@(tab == "resa" ? "true" : "false")" @onclick='() => tab = "resa"'>Réservations <span class="badge neutre">statut seul</span></button> }
         <button type="button" role="tab" class="@(tab == "config" ? "on" : "")" aria-selected="@(tab == "config" ? "true" : "false")" @onclick='() => tab = "config"'>Configuration</button>
         <button type="button" role="tab" class="@(tab == "infos" ? "on" : "")" aria-selected="@(tab == "infos" ? "true" : "false")" @onclick='() => tab = "infos"'>Infos</button>
     </nav>
 
-    @if (tab == "contenus" && IsPlans && items.Count == 0)
+    @if (IsRooms && tab == "contenus" && items.Count > 0)
+    {
+        <RoomContentsTab OnChanged="Reload" />
+    }
+    else if (IsRooms && tab == "resa")
+    {
+        <RoomStatusTab />
+    }
+    else if (IsRooms && tab == "config")
+    {
+        <RoomConfigTab OnManage="ManageRooms" OnChanged="Reload" />
+        <div class="card apd-card">
+            <div class="apd-row">
+                <span class="grow"><b>Dans le menu</b><small>L'application apparaît dans le groupe « Applications » du menu de gauche.</small></span>
+                <button type="button" class="switch @(inMenu ? "on" : "")" role="switch" aria-checked="@(inMenu ? "true" : "false")" aria-label="Afficher dans le menu" @onclick="ToggleMenu"><span></span></button>
+            </div>
+        </div>
+    }
+    else if (tab == "contenus" && IsPlans && items.Count == 0)
     {
         <div class="card empty">
             @if (!Modes.Expert) { <div class="big">Disponible en mode expert</div> }
@@ -208,8 +232,18 @@ else
                 <dt>Catégorie</dt><dd>@app.Category</dd>
                 @if (app.Version.Length > 0) { <dt>Version</dt><dd>@app.Version</dd> }
                 <dt>Installée</dt><dd>@(installedOn is { } d ? d.ToLocalTime().ToString("dd.MM.yyyy") : "—")@(app.DefaultOn ? " · application de base" : "")</dd>
+                @if (IsRooms)
+                {
+                    <dt>Plans</dt><dd>Tous les plans</dd>
+                    <dt>Agendas utilisés</dt><dd>@(string.Join(", ", roomSources.Select(s => SharedCalendarSources.Find(s)?.Name ?? s)) is { Length: > 0 } us ? us : "Aucun")</dd>
+                    <dt>Type d'écran</dt><dd>Ajoute « Écran de salle » (@roomScreens écran@(roomScreens > 1 ? "s" : ""))</dd>
+                    <dt>Salles</dt><dd>@items.Count · @items.Count(i => i.On) active@(items.Count(i => i.On) > 1 ? "s" : "")</dd>
+                }
+                else
+                {
                 <dt>Compte requis</dt><dd>@(account is { } k ? ConnectedAccounts.Kind(k).Name : "Aucun")</dd>
                 <dt>Contenus</dt><dd>@items.Count · @items.Count(i => i.Screens > 0) diffusé@(items.Count(i => i.Screens > 0) > 1 ? "s" : "")</dd>
+                }
             </dl>
         </div>
     }
@@ -227,6 +261,10 @@ else
     private bool installed, inMenu, isVirtual, syncing, haOn;
     /// <summary>« Vue du bâtiment » : l'onglet Contenus montre les plans du bâtiment, et « Nouveau plan » est en haut de la page.</summary>
     private bool IsPlans => AppId == AppMenu.Plans;
+    /// <summary>« Réservation de salle » : ses contenus sont les salles ; onglet Réservations propre ; Configuration et Synchroniser propres.</summary>
+    private bool IsRooms => AppId == RoomRules.AppId;
+    private List<string> roomSources = new();
+    private int roomScreens;
     private DateTime? installedOn;
     private string tab = "config";
     private string? account;   // type de compte demandé (Google, Microsoft…), ou null
@@ -300,6 +338,12 @@ else
                     return new Item("plan", pl.Id.ToString(), pl.Name.Length > 0 ? pl.Name : "Sans nom", "Plan", false, info, uses.GetValueOrDefault(pl.Id), pl.UpdatedUtc, null, true);
                 }));
             }
+            else if (IsRooms)
+            {
+                rows.AddRange(RoomSetup.Rooms(d.Tenant).Select(c => new Item("calendar", c.Id.ToString(), SharedCalendarSources.RoomName(c), "Salle", false, new(), 0, null, null, !c.Off)));
+                roomSources = SharedCalendarSources.All.Select(s => s.Id).Where(s => d.Tenant.SharedCalendars.Any(c => c.Room && c.Source == s)).ToList();
+                roomScreens = d.AllScreens.Count(s => s.Room != null);
+            }
             else if (AppId == AppMenu.Home && d.Tenant.HomeAssistant is { } ha)
                 rows.AddRange(ha.Entities.Select(e => new Item("entity", e.Id, e.Name.Length > 0 ? e.Name : e.Id, HomeAssistantRules.FamilyOfDomain(e.Domain)?.Noun ?? e.Domain, false, new(), 0, null, null, !e.Off)));
             haOn = d.Tenant.HomeAssistant is { Url.Length: > 0 };
@@ -309,7 +353,35 @@ else
                 ConnectedAccounts.Of(d.Tenant),
                 rows.OrderBy(r => r.Type, StringComparer.CurrentCultureIgnoreCase).ThenBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
         });
-        if (tab == "contenus" && items.Count == 0 && !IsPlans) tab = "config";
+        if (tab is "contenus" or "resa" && items.Count == 0 && !IsPlans) tab = "config";
+    }
+
+    // ---- Réservation de salle ----
+
+    private void ManageRooms(int step) => integ?.WizardById(AppId, step);
+
+    /// <summary>Relit les agendas : accès Google de chaque salle, modes d'écriture, états ; les tablettes relisent leur salle.</summary>
+    private async Task SyncRooms()
+    {
+        syncing = true;
+        var t = Store.Read(d => d.Tenant);
+        Dictionary<string, string>? roles = null;
+        if (t.SharedCalendars.Any(c => c.Room && c.Source == "google") && GoogleAuth.Has(t, GoogleAuth.CalendarScope))
+        {
+            try { roles = (await Google.ListCalendars(t)).GroupBy(g => g.Id).ToDictionary(g => g.Key, g => g.First().Role); }
+            catch (InvalidOperationException ex) { Toast.Error(ex.Message); }
+        }
+        var ids = Store.Write(d =>
+        {
+            if (roles != null) foreach (var c in d.Tenant.SharedCalendars.Where(c => c.Room && c.Source == "google")) if (roles.TryGetValue(c.Ref, out var r) && r.Length > 0) c.RoomAccess = r;
+            RoomSetup.Recompute(d.Tenant);
+            return d.Tenant.SharedCalendars.Where(c => c.Room).Select(c => c.Id).ToList();
+        });
+        foreach (var id in ids) RoomStatus.Forget(id);
+        await Notifier.NotifyClient(Store.ClientId);
+        syncing = false;
+        Reload();
+        Toast.Ok("Salles synchronisées : droits et états relus.");
     }
 
     private void Install()

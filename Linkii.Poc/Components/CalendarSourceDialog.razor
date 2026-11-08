@@ -124,6 +124,7 @@
         }
 
         <h4 class="pe-sub @(Source == "ics" ? "csd-first" : "")">Calendriers <span class="cat-count">@cals.Count</span></h4>
+        @if (!roomApp) { <p class="acc-hint">Pour afficher une salle libre ou occupée à sa porte : installez l'application <a href="/store">Réservation de salle</a> depuis le Store.</p> }
         <div class="cal-list">
             @foreach (var c in cals)
             {
@@ -132,10 +133,8 @@
                 <div class="cal-row">
                     <Ico Name="calendar" Size="16" />
                     <div class="cal-id"><b>@cal.Name</b><small title="@cal.Hint">@cal.Hint</small></div>
-                    <span class="cal-roomsw" title="Utiliser ce calendrier comme salle pour les compositions de réservation de salle">
-                        <span>Salle</span>
-                        <button type="button" class="switch @(cal.Room ? "on" : "")" role="switch" aria-checked="@(cal.Room ? "true" : "false")" aria-label="Utiliser @cal.Name comme salle" @onclick="() => ToggleRoom(cal)"><span></span></button>
-                    </span>
+                    @* Les salles se gèrent dans l'application « Réservation de salle » (D5) : plus d'interrupteur ici *@
+                    @if (cal.Room) { <a class="badge sync" href="/apps/@RoomRules.AppId" title="Les salles se choisissent dans Réservation de salle › Configuration › Gérer les salles">Gérée par Réservation de salle</a> }
                     <span class="badge neutre">@(lists > 0 ? $"{lists} liste{(lists > 1 ? "s" : "")}" : contents > 0 ? $"{contents} contenu{(contents > 1 ? "s" : "")}" : "Non utilisé")</span>
                     <button type="button" class="kebab-btn" title="Retirer" aria-label="Retirer @cal.Name" @onclick="() => confirmId = cal.Id"><Ico Name="trash" Size="16" /></button>
                     @if (cal.Room)
@@ -255,6 +254,7 @@
     protected override async Task OnInitializedAsync()
     {
         var t = Store.Read(d => d.Tenant);
+        roomApp = Store.Read(d => RoomSetup.Installed(d));
         var a = SharedCalendarSources.Account(t, Source);
         url = a?.Url ?? ""; user = a?.User ?? ""; hasSecret = a is { Secret.Length: > 0 }; label = a?.Label ?? "";
         Load();
@@ -283,11 +283,7 @@
         });
     }
 
-    private async Task ToggleRoom(SharedCalendar c)
-    {
-        c.Room = !c.Room;
-        await SaveRoom(c);
-    }
+    private bool roomApp;   // « Réservation de salle » installée
 
     /// <summary>Réglages de salle du calendrier : enregistrés tout de suite ; les écrans et les compositions les lisent à la prochaine lecture / publication.</summary>
     private async Task SaveRoom(SharedCalendar c)
@@ -297,6 +293,7 @@
         {
             if (d.Tenant.SharedCalendars.FirstOrDefault(x => x.Id == c.Id) is not { } x) return;
             (x.Room, x.RoomName, x.RoomCap, x.RoomPlace, x.RoomAllDay, x.RoomSoon, x.RoomTitles) = (room, name, cap, place, allDay, soon, titles);
+            if (d.Tenant.RoomApp is { } app) app.Revision++;   // les portes des tablettes relisent leur salle
         });
         await Changed();
     }

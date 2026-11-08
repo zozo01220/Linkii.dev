@@ -87,7 +87,8 @@ public class GoogleConnector(SafeHttp http, GoogleAuth auth) : ICalendarConnecto
     public string Id => "google";
     private const string Api = "https://www.googleapis.com/calendar/v3";
 
-    public record GoogleCalendarInfo(string Id, string Name, bool Primary);
+    /// <param name="Role">Accès du compte (owner, writer, reader, freeBusyReader) : dit si Linkivi peut y créer une réservation.</param>
+    public record GoogleCalendarInfo(string Id, string Name, bool Primary, string Role = "");
 
     private async Task<Dictionary<string, string>> Bearer(Tenant t)
     {
@@ -99,7 +100,7 @@ public class GoogleConnector(SafeHttp http, GoogleAuth auth) : ICalendarConnecto
     /// <summary>Agendas du compte connecté (les siens et ceux auxquels il est abonné), l'agenda principal d'abord.</summary>
     public async Task<List<GoogleCalendarInfo>> ListCalendars(Tenant t)
     {
-        var (status, text) = await http.Request(HttpMethod.Get, Api + "/users/me/calendarList?minAccessRole=reader&maxResults=250&fields=items(id,summary,summaryOverride,primary)",
+        var (status, text) = await http.Request(HttpMethod.Get, Api + "/users/me/calendarList?minAccessRole=reader&maxResults=250&fields=items(id,summary,summaryOverride,primary,accessRole)",
             headers: await Bearer(t), maxBytes: 4_000_000);
         if (status != 200) throw new InvalidOperationException($"Google Calendar ({status}) : {Describe(text)}");
         using var doc = JsonDocument.Parse(text);
@@ -107,7 +108,8 @@ public class GoogleConnector(SafeHttp http, GoogleAuth auth) : ICalendarConnecto
         return items.EnumerateArray().Select(c => new GoogleCalendarInfo(
                 c.GetProperty("id").GetString() ?? "",
                 (c.TryGetProperty("summaryOverride", out var o) ? o.GetString() : null) ?? (c.TryGetProperty("summary", out var s) ? s.GetString() : null) ?? "",
-                c.TryGetProperty("primary", out var p) && p.GetBoolean()))
+                c.TryGetProperty("primary", out var p) && p.GetBoolean(),
+                c.TryGetProperty("accessRole", out var ar) ? ar.GetString() ?? "" : ""))
             .Where(c => c.Id.Length > 0)
             .OrderByDescending(c => c.Primary).ThenBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToList();

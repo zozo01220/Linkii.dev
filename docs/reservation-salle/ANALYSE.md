@@ -1,6 +1,7 @@
 # Réservation de salle sur place — analyse complète (installation → configuration finale)
 
-> **⚠ Remplacée en partie par `ANALYSE-v2.md` (8 nov. 2026).** Le produit, le parcours et les plans y sont redéfinis (application « Réservation de salle » du Store + type d'écran « Écran de salle », **tous les plans** : la recommandation « Pro » ci-dessous est annulée). Ici restent valables : §2 (existant), §4 (où écrire), §6 (règles métier), §7 (architecture), §8 (sécurité), §9 (données) et §11 (vérifications).
+> **⚠ Remplacée par `ANALYSE-v3.md` (8 nov. 2026), seule référence pour coder.** Ce qui suit est l'historique.
+> **(Ancien avertissement) Remplacée en partie par `ANALYSE-v2.md` (8 nov. 2026).** Le produit, le parcours et les plans y sont redéfinis (application « Réservation de salle » du Store + type d'écran « Écran de salle », **tous les plans** : la recommandation « Pro » ci-dessous est annulée). Ici restent valables : §2 (existant), §4 (où écrire), §6 (règles métier), §7 (architecture), §8 (sécurité), §9 (données) et §11 (vérifications).
 
 > Document de reprise. Rédigé le 8 novembre 2026. **Aucun code n'a été écrit** : ce document décrit l'existant (vérifié dans le code), l'écart avec le besoin, le parcours cible, les décisions à prendre et le découpage en lots.
 > Visuels associés : `maquettes/salle-reservation-sur-place.html` (l'écran et le téléphone, interactif) et `maquettes/salle-parcours-complet.html` (parcours complet, phase par phase).

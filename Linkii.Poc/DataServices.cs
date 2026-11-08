@@ -41,6 +41,13 @@ public class CalendarService(IEnumerable<ICalendarConnector> connectors, Provide
         return (provider, events);
     }
 
+    /// <summary>Oublie ce qui a été lu pour ce calendrier : la prochaine lecture interroge le fournisseur (réservation qui vient d'être écrite).</summary>
+    public void Forget(CalendarSource src)
+    {
+        var prefix = src.CacheKey + "|";
+        foreach (var k in _cache.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToList()) _cache.TryRemove(k, out _);
+    }
+
     /// <summary>Lit un fichier ICS (récurrences et fuseaux inclus) et renvoie les occurrences de la fenêtre demandée.</summary>
     public static List<EventDto> ParseIcs(string text, DateTime fromUtc, DateTime toUtc)
     {
@@ -103,6 +110,21 @@ public class GraphService(IHttpClientFactory httpFactory, MicrosoftAuth auth)
         var body = await resp.Content.ReadAsStringAsync();
         if (!resp.IsSuccessStatusCode) throw new InvalidOperationException($"Microsoft Graph ({(int)resp.StatusCode}) : {Describe(body)}");
         return JsonDocument.Parse(body);
+    }
+
+    /// <summary>Écriture Graph (POST, DELETE) avec le compte connecté : statut et corps de la réponse, sans lever d'exception sur un refus de Graph.</summary>
+    public async Task<(int Status, string Body)> Send(Tenant t, HttpMethod method, string url, string? json = null)
+    {
+        string token;
+        try { token = await auth.AccessToken(t); }
+        catch (MicrosoftAuth.MicrosoftAuthException ex) { throw new CalendarWriteException(ex.Message, rights: true); }
+        var http = httpFactory.CreateClient();
+        http.Timeout = TimeSpan.FromSeconds(12);
+        using var req = new HttpRequestMessage(method, url);
+        req.Headers.Authorization = new("Bearer", token);
+        if (json != null) req.Content = new StringContent(json, Encoding.UTF8, "application/json");
+        var resp = await http.SendAsync(req);
+        return ((int)resp.StatusCode, await resp.Content.ReadAsStringAsync());
     }
 
     /// <param name="calendarRef">« cal:{id} » : un calendrier du compte connecté ; sinon l'adresse d'une boîte ou d'une salle.</param>

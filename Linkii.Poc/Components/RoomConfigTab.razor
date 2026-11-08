@@ -1,0 +1,148 @@
+@inject TenantStore Store
+@inject RoomBookingService Rooms
+@inject Notifier Notifier
+@inject ModeService Modes
+@inject Toaster Toast
+@inject NavigationManager Nav
+
+@* Réservation de salle › Configuration (maquette vue 3) : agendas utilisés et leur mode (Gérer les salles, + Ajouter un agenda), règles par défaut (Configurer),
+   santé (test de réservation). Un droit d'écrire retiré chez Microsoft ou Google est signalé ici, avec « Autoriser à nouveau ». *@
+<div class="card apd-card">
+    <div class="rb-grp">Agendas</div>
+    @foreach (var s in sources)
+    {
+        var src = s;
+        var lost = app.LostRights.Contains(src) || RoomSetup.PermOf(app, src) == RoomPerms.Write && RoomRules.SourceCanWrite(src) && !RoomSetup.HasWriteRight(tenant, src);
+        <div class="apd-row">
+            <AppIcon Id="@("cal-" + src)" Small="true" />
+            <span class="grow"><b>@SharedCalendarSources.Find(src)?.Name</b><small>@Account(src) · @ModeLabel(src, lost) · @RoomSetup.RoomsUsing(tenant, src) salle@(RoomSetup.RoomsUsing(tenant, src) > 1 ? "s" : "")</small></span>
+            @if (lost) { <a class="btn sm" href="@($"/{(src == "m365" ? "microsoft" : "google")}/connect?for={AccountPurposes.Rooms}&wiz={RoomRules.AppId}")">Autoriser à nouveau</a> }
+            <button type="button" class="btn ghost sm" @onclick="() => OnManage.InvokeAsync(3)">Gérer les salles</button>
+        </div>
+        @if (lost) { <div class="rb-warn">Le droit de créer des rendez-vous a été retiré : les salles de @SharedCalendarSources.Find(src)?.Name sont en affichage seul.</div> }
+    }
+    <div class="rb-addline"><button type="button" class="btn ghost sm" @onclick="() => OnManage.InvokeAsync(2)">+ Ajouter un agenda</button></div>
+
+    <div class="rb-grp">Règles par défaut</div>
+    <div class="apd-row">
+        <span class="grow"><b>Durées, durée maximale, horaires</b><small>@RoomRules.Summary(app)@(app.BufferMin > 0 ? $" — {app.BufferMin} min libres avant la réunion suivante" : "")</small></span>
+        <button type="button" class="btn sm" @onclick="OpenRules">Configurer</button>
+    </div>
+
+    <div class="rb-grp">Santé</div>
+    <div class="apd-row">
+        <span class="grow"><b>Test de réservation</b><small>Crée puis supprime un rendez-vous de 15 min, demain à 02:00, dans chaque salle réservable.</small></span>
+        <button type="button" class="btn ghost sm" disabled="@testing" @onclick="RunTest">@(testing ? "Test en cours…" : "Tester")</button>
+    </div>
+    @if (testLines != null)
+    {
+        <ul class="rb-test">@foreach (var l in testLines) { <li class="@(l.Ok ? "ok" : "bad")"><b>@l.Room</b> · @l.Message</li> }</ul>
+    }
+    <div class="@(Bad.Count == 0 ? "rb-ok" : "rb-warn")">@Health</div>
+</div>
+
+@if (rules != null)
+{
+    <div class="modal-backdrop"></div>
+    <div class="cw-top cw-half" role="dialog" aria-modal="true" aria-labelledby="rb-rules-t">
+        <div class="cw-wrap">
+            <div class="cw-head"><AppIcon Id="@RoomRules.AppId" /><div class="grow"><h3 id="rb-rules-t">Règles de réservation</h3><small>Valables pour toutes les salles.</small></div></div>
+            <div class="cw-body"><RoomRulesForm Rules="rules" Preset="@preset" PresetChanged="p => preset = p" Expert="Modes.Expert" /></div>
+            <div class="cw-foot">
+                <button type="button" class="btn ghost" @onclick="() => rules = null">Annuler</button>
+                <span class="grow"></span>
+                <button type="button" class="btn" disabled="@(rules.Durations.Count == 0 || rules.Days == 0 || rules.ToMin <= rules.FromMin)" @onclick="SaveRules">Enregistrer</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Ouvre l'assistant en gestion : 2 = Agendas, 3 = Salles.</summary>
+    [Parameter] public EventCallback<int> OnManage { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private Tenant tenant = new();
+    private RoomAppSettings app = new();
+    private List<string> sources = new();
+    private RoomAppSettings? rules;
+    private string preset = "";
+    private bool testing;
+    private List<RoomBookingService.TestLine>? testLines;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // droit d'écrire accordé de nouveau (« Autoriser à nouveau ») : les salles de la source redeviennent réservables
+        var healed = Store.Write(d =>
+        {
+            if (d.Tenant.RoomApp is not { } a) return false;
+            var back = a.LostRights.Where(s => RoomSetup.HasWriteRight(d.Tenant, s)).ToList();
+            foreach (var s in back) a.LostRights.Remove(s);
+            if (back.Count == 0) return false;
+            RoomSetup.Recompute(d.Tenant);
+            return true;
+        });
+        if (healed) { await Notifier.NotifyClient(Store.ClientId); Toast.Ok("Réservation autorisée de nouveau : les salles sont réservables."); }
+        Load();
+    }
+
+    private void Load()
+    {
+        tenant = Store.Read(d => d.Tenant);
+        app = tenant.RoomApp ?? new RoomAppSettings();
+        var used = tenant.SharedCalendars.Where(c => c.Room).Select(c => c.Source).Concat(app.Sources.Keys).ToHashSet();
+        sources = SharedCalendarSources.All.Select(s => s.Id).Where(used.Contains).ToList();
+    }
+
+    private string Account(string s) => s switch
+    {
+        "m365" => tenant.MsUser.Length > 0 ? tenant.MsUser : "compte Microsoft",
+        "google" => tenant.GoogleUser.Length > 0 ? tenant.GoogleUser : "compte Google",
+        "ics" => "sans compte",
+        _ => SharedCalendarSources.Account(tenant, s)?.User is { Length: > 0 } u ? u : "serveur"
+    };
+
+    private string ModeLabel(string s, bool lost) => s == "ics" ? "Réservations Linkivi" : lost ? "Affichage seul (droit retiré)" : RoomSetup.PermOf(app, s) == RoomPerms.Write ? "Afficher et réserver" : "Afficher seulement";
+
+    private List<SharedCalendar> Bad => RoomSetup.Rooms(tenant).Where(r => !r.Off && !RoomModes.CanBook(r.RoomWriteMode)).ToList();
+
+    private string Health
+    {
+        get
+        {
+            var active = RoomSetup.Rooms(tenant).Where(r => !r.Off).ToList();
+            var ok = active.Count(r => RoomModes.CanBook(r.RoomWriteMode));
+            var head = $"{(Bad.Count == 0 ? "✔" : "⚠")} {ok} salle{(ok > 1 ? "s" : "")} réservable{(ok > 1 ? "s" : "")}";
+            return Bad.Count == 0 ? head : head + " · " + string.Join(" · ", Bad.Take(3).Select(r => $"« {SharedCalendarSources.RoomName(r)} » : affichage seul")) + (Bad.Count > 3 ? "…" : "");
+        }
+    }
+
+    private void OpenRules() { rules = app.Copy(); preset = ""; }
+
+    private async Task SaveRules()
+    {
+        if (rules == null) return;
+        var clean = RoomRules.Clean(rules);
+        Store.Write(d =>
+        {
+            var a = d.Tenant.RoomApp ??= new RoomAppSettings();
+            (a.Durations, a.MaxMin, a.Days, a.FromMin, a.ToMin, a.BufferMin, a.BookTitle) = (clean.Durations, clean.MaxMin, clean.Days, clean.FromMin, clean.ToMin, clean.BufferMin, clean.BookTitle);
+            a.Revision++;
+        });
+        rules = null;
+        Load();
+        await Notifier.NotifyClient(Store.ClientId);
+        Toast.Ok("Règles enregistrées : les tablettes les appliquent tout de suite.");
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task RunTest()
+    {
+        testing = true;
+        testLines = null;
+        StateHasChanged();
+        try { testLines = await Rooms.Test(Store.ClientId); }
+        finally { testing = false; }
+        if (testLines.Count == 0) Toast.Ok("Aucune salle active à tester.");
+    }
+}

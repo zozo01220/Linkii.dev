@@ -3,9 +3,10 @@ namespace Linkii.Poc;
 /// <summary>Ce qui lance une connexion Google ou Microsoft : une application (agendas ou fichiers) ou Comptes connectés (les deux).</summary>
 public static class AccountPurposes
 {
-    public const string Calendar = "calendar", Drive = "drive", All = "all";
+    /// <summary>Rooms : agendas en lecture + création de rendez-vous (application « Réservation de salle », source en « Afficher et réserver »).</summary>
+    public const string Calendar = "calendar", Drive = "drive", All = "all", Rooms = "rooms";
 
-    public static string Parse(string? value) => value is Calendar or All ? value : Drive;
+    public static string Parse(string? value) => value is Calendar or All or Rooms ? value : Drive;
 
     /// <summary>Page où revenir après la connexion : l'onglet Comptes connectés s'il l'a lancée (?tab=comptes), sinon Applications ; l'assistant d'ajout qui l'a lancée (?wiz=) se rouvre.</summary>
     public static string ReturnPage(HttpRequest req)
@@ -76,6 +77,7 @@ public static class ConnectedAccounts
             [
                 new("Agendas, salles et boîtes partagées (lecture)", Has(MicrosoftAuth.CalendarScope), AccountPurposes.Calendar),
                 new("Fichiers OneDrive et SharePoint (lecture)", Has(MicrosoftAuth.DriveScope), AccountPurposes.Drive),
+                .. Has(MicrosoftAuth.WriteScope) ? new AccountPermission[] { new("Agendas (réservation : créer des rendez-vous)", true, AccountPurposes.Rooms) } : [],
             ]));
         }
         if (t.GoogleRefreshToken.Length > 0 || t.GoogleLostUtc != null)
@@ -85,6 +87,7 @@ public static class ConnectedAccounts
             [
                 new("Agendas (lecture)", scopes.Contains(GoogleAuth.CalendarScope), AccountPurposes.Calendar),
                 new("Fichiers Drive (lecture)", scopes.Contains(GoogleAuth.DriveScope), AccountPurposes.Drive),
+                .. scopes.Contains(GoogleAuth.EventsScope) ? new AccountPermission[] { new("Agendas (réservation : créer des rendez-vous)", true, AccountPurposes.Rooms) } : [],
             ]));
         }
         if (t.CanvaRefreshToken.Length > 0 || t.CanvaLostUtc != null)
@@ -125,6 +128,7 @@ public static class ConnectedAccounts
     public static string ReconnectPurpose(ConnectedAccount a)
     {
         var granted = a.Permissions.Where(p => p.Granted && p.Purpose != null).Select(p => p.Purpose!).ToList();
+        if (granted.Contains(AccountPurposes.Rooms) && !granted.Contains(AccountPurposes.Drive)) return AccountPurposes.Rooms;   // réservation : garder le droit d'écrire
         return granted.Count == 1 ? granted[0] : AccountPurposes.All;
     }
 

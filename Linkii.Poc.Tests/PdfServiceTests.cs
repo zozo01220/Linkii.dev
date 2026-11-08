@@ -191,9 +191,6 @@ public class PdfServiceTests : IDisposable
         Assert.Equal(folder.Id, a.Presentation!.FolderId);
         Assert.Equal(folder.Id, b.Presentation!.FolderId);
         Assert.All(a.Files.Concat(b.Files), f => Assert.Equal(folder.Id, f.FolderId));   // les pages suivent la carte
-        Assert.Equal("PowerPoint_médias", Pres.FolderName("ppt"));
-        Assert.Equal("GoogleSlides_médias", Pres.FolderName("gslides"));
-        Assert.Equal("Canva_médias", Pres.FolderName("canva"));
     }
 
     [Fact]

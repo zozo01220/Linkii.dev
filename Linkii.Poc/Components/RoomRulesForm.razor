@@ -1,0 +1,89 @@
+@* Règles de réservation de l'application « Réservation de salle » (étape Règles de l'assistant, fenêtre Configurer de la page de l'application) :
+   préréglages, durées proposées, durée maximale, horaires réservables ; en mode expert, tampon et titre du rendez-vous créé. Modifie Rules en place. *@
+<div class="rb-rules">
+    <div class="seg rb-presets" role="group" aria-label="Préréglages">
+        @foreach (var (id, label) in Presets)
+        {
+            var p = id;
+            <button type="button" class="@(Preset == p ? "on" : "")" @onclick="() => ApplyPreset(p)">@label</button>
+        }
+    </div>
+    <div class="rb-row">
+        <div class="grow"><b>Durées proposées</b><small>Sur la tablette</small></div>
+        <div class="rb-chips">
+            @foreach (var d in RoomRules.AllDurations)
+            {
+                var m = d;
+                <button type="button" class="chip @(Rules.Durations.Contains(m) ? "on" : "")" aria-pressed="@(Rules.Durations.Contains(m) ? "true" : "false")" @onclick="() => ToggleDuration(m)">@RoomRules.Label(m)</button>
+            }
+        </div>
+    </div>
+    <div class="rb-row">
+        <div class="grow"><b>Durée maximale</b></div>
+        <select class="rb-sel" value="@Rules.MaxMin" @onchange="e => { Rules.MaxMin = int.TryParse(e.Value?.ToString(), out var n) ? n : 120; Preset = Custom; }" aria-label="Durée maximale">
+            @foreach (var m in RoomRules.MaxChoices) { <option value="@m">@RoomRules.MaxLabel(m)</option> }
+        </select>
+    </div>
+    <div class="rb-row rb-hours">
+        <div class="grow"><b>Horaires réservables</b><small>@RoomRules.DaysLabel(Rules.Days) @RoomRules.Hours(Rules.FromMin)-@RoomRules.Hours(Rules.ToMin)</small></div>
+        <div class="rb-chips">
+            @for (var i = 0; i < 7; i++)
+            {
+                var bit = 1 << i;
+                <button type="button" class="chip sm @((Rules.Days & bit) != 0 ? "on" : "")" aria-pressed="@((Rules.Days & bit) != 0 ? "true" : "false")" @onclick="() => Rules.Days ^= bit">@Days[i]</button>
+            }
+        </div>
+        <div class="rb-chips">
+            <select class="rb-sel" value="@Rules.FromMin" @onchange="e => Rules.FromMin = int.TryParse(e.Value?.ToString(), out var n) ? n : Rules.FromMin" aria-label="De">
+                @foreach (var m in Times.Where(t => t < 24 * 60)) { <option value="@m">@RoomRules.Hours(m)</option> }
+            </select>
+            <span>à</span>
+            <select class="rb-sel" value="@Rules.ToMin" @onchange="e => Rules.ToMin = int.TryParse(e.Value?.ToString(), out var n) ? n : Rules.ToMin" aria-label="À">
+                @foreach (var m in Times.Where(t => t > 0)) { <option value="@m">@(m == 24 * 60 ? "24:00" : RoomRules.Hours(m))</option> }
+            </select>
+        </div>
+    </div>
+    @if (Rules.ToMin <= Rules.FromMin) { <p class="form-error">L'heure de fin doit suivre l'heure de début.</p> }
+    @if (Rules.Days == 0) { <p class="form-error">Choisissez au moins un jour.</p> }
+    @if (Expert)
+    {
+        <div class="rb-row">
+            <div class="grow"><b>Temps libre avant la réunion suivante</b><small>Une réservation se termine au moins ce temps-là avant le rendez-vous suivant.</small></div>
+            <select class="rb-sel" value="@Rules.BufferMin" @onchange="e => Rules.BufferMin = int.TryParse(e.Value?.ToString(), out var n) ? n : 0" aria-label="Temps libre">
+                @foreach (var m in new[] { 0, 5, 10, 15 }) { <option value="@m">@(m == 0 ? "Aucun" : m + " min")</option> }
+            </select>
+        </div>
+        <div class="rb-row">
+            <div class="grow"><b>Titre du rendez-vous créé</b><small>Ce que l'on voit dans Outlook ou Google Agenda.</small></div>
+            <input class="rb-inp" @bind="Rules.BookTitle" maxlength="60" aria-label="Titre du rendez-vous créé" />
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public RoomAppSettings Rules { get; set; } = new();
+    [Parameter] public string Preset { get; set; } = "std";
+    [Parameter] public EventCallback<string> PresetChanged { get; set; }
+    [Parameter] public bool Expert { get; set; }
+
+    private const string Custom = "";
+    private static readonly (string, string)[] Presets = { ("std", "Standard"), ("court", "Réunions courtes"), ("jour", "Salles à la journée") };
+    private static readonly string[] Days = { "lun", "mar", "mer", "jeu", "ven", "sam", "dim" };
+    private static readonly int[] Times = Enumerable.Range(0, 49).Select(i => i * 30).ToArray();
+
+    private async Task ApplyPreset(string id)
+    {
+        var (durations, max) = RoomRules.Preset(id);
+        Rules.Durations = durations;
+        Rules.MaxMin = max;
+        Preset = id;
+        await PresetChanged.InvokeAsync(id);
+    }
+
+    private async Task ToggleDuration(int m)
+    {
+        if (!Rules.Durations.Remove(m)) { Rules.Durations.Add(m); Rules.Durations.Sort(); }
+        Preset = Custom;
+        await PresetChanged.InvokeAsync(Custom);
+    }
+}

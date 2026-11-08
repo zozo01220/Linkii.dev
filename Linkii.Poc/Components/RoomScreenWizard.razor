@@ -1,0 +1,291 @@
+@implements IDisposable
+@inject TenantStore Store
+@inject RoomStatusService Status
+@inject Notifier Notifier
+@inject Toaster Toast
+
+@* Écrans › Ajouter › Écran de salle (maquettes/salle-app-parcours.html, vue 4, scène C) : Code › Salle › Affichage › Terminé, sans étape « appareil ».
+   Le code relie la tablette tout de suite (facturée comme tout écran ajouté) : elle affiche « Appairée · en attente de configuration » ;
+   le type d'appareil et le tactile sont reconnus au rapport du player. Rien à publier : l'écran suit sa salle et les règles de l'application.
+   ScreenId renseigné : « Modifier l'écran de salle » (Salle › Affichage), ou « Choisir la salle » d'un écran laissé sans salle. *@
+<WizardShell Icon="@RoomRules.AppId" Title="@(edit ? "Modifier l'écran de salle" : "Nouvel écran de salle · " + Labels[Math.Clamp(step, 1, Labels.Length) - 1])" Labels="@Labels" Step="step" Done="done" Running="done || screenId != null && !edit"
+             CanBack="@CanBack" Hint="@Hint" NextLabel="@NextLabel" NextDisabled="NextDisabled"
+             OnCancel="Cancel" OnClose="Cancel" OnBack="() => step--" OnNext="Next">
+    @if (Key == "code")
+    {
+        <div class="cw-body">
+            <h2 class="cw-h">Saisissez le code de la tablette</h2>
+            <p class="cw-lead">Le player est installé sur la tablette de la salle : il affiche un code à 6 chiffres.</p>
+            <div class="rb-code">
+                <input class="mono" inputmode="numeric" maxlength="7" placeholder="000 000" aria-label="Code d'appairage" @bind="code" @bind:event="oninput" disabled="@(screenId != null)" />
+                <button type="button" class="btn" disabled="@(Digits.Length != 6 || pairing || screenId != null)" @onclick="Pair">@(pairing ? "Connexion…" : screenId != null ? "Tablette connectée" : "Connecter la tablette")</button>
+            </div>
+            @if (pairError != null) { <p class="form-error rb-center">@pairError</p> }
+            @if (screenId != null) { <div class="rb-ok rb-center">✔ @DeviceText Elle affiche « Appairée · en attente de configuration ».</div> }
+            <div class="rb-note rb-center">Pas encore de player sur la tablette ? <b>Installer le player</b> (menu Écrans) : Android, depuis l'adresse affichée. L'appareil est reconnu à l'appairage, on ne vous demande pas son type.</div>
+        </div>
+    }
+    else if (Key == "room")
+    {
+        <div class="cw-body">
+            <h2 class="cw-h">Pour quelle salle ?</h2>
+            <p class="cw-lead">Les salles de l'application. Une salle peut avoir plusieurs écrans (porte, accueil).</p>
+            @if (rooms.Count == 0) { <div class="rb-warn">Aucune salle active : ajoutez-en dans Réservation de salle › Configuration › Gérer les salles.</div> }
+            <div class="cw-rows">
+                @foreach (var r in rooms)
+                {
+                    var room = r;
+                    var n = screensOf.GetValueOrDefault(room.Id);
+                    <button type="button" class="cw-row @(roomId == room.Id ? "on" : "")" @onclick="() => PickRoom(room)">
+                        <AppIcon Id="@("cal-" + room.Source)" Small="true" />
+                        <b>@SharedCalendarSources.RoomName(room)<small class="rb-sub">@Desc(room)</small></b>
+                        <span class="badge @(n == 0 ? "sync" : "neutre")">@(n == 0 ? "Sans écran" : $"{n} écran{(n > 1 ? "s" : "")}")</span>
+                    </button>
+                }
+            </div>
+        </div>
+    }
+    else if (Key == "look")
+    {
+        var room = rooms.FirstOrDefault(r => r.Id == roomId);
+        var canBook = room != null && RoomModes.CanBook(room.RoomWriteMode);
+        <div class="cw-body">
+            <h2 class="cw-h">Comment doit-il s'afficher ?</h2>
+            <p class="cw-lead">Un modèle prêt à l'emploi, sans éditeur.</p>
+            <div class="rb-look">
+                <div>
+                    @MiniDoor(room, canBook && buttons)
+                    <div class="seg rb-theme" role="group" aria-label="Thème"><button type="button" class="@(theme == "light" ? "on" : "")" @onclick='() => theme = "light"'>Clair</button><button type="button" class="@(theme == "dark" ? "on" : "")" @onclick='() => theme = "dark"'>Sombre</button></div>
+                </div>
+                <div>
+                    @if (canBook)
+                    {
+                        <div class="rb-row"><div class="grow"><b>Boutons de durée</b><small>@(touch == true ? "Tablette tactile détectée" : touch == false ? "Écran non tactile : à laisser désactivé" : "Réserver depuis la tablette")</small></div>
+                            <button type="button" class="switch @(buttons ? "on" : "")" role="switch" aria-checked="@(buttons ? "true" : "false")" aria-label="Boutons de durée" @onclick="() => buttons = !buttons"><span></span></button></div>
+                    }
+                    else { <div class="rb-row"><div class="grow"><b>Affichage seul</b><small>Cette salle n'est pas réservable depuis la tablette (Réservation de salle › Configuration).</small></div></div> }
+                    <div class="rb-row"><div class="grow"><b>Titre des réunions</b><small>Sinon : seulement « Occupé »</small></div>
+                        <button type="button" class="switch @(titles ? "on" : "")" role="switch" aria-checked="@(titles ? "true" : "false")" aria-label="Titre des réunions" @onclick="() => titles = !titles"><span></span></button></div>
+                    <div class="rb-row"><div class="grow"><b>Nom de l'écran</b></div><input class="rb-inp" @bind="name" maxlength="80" aria-label="Nom de l'écran" /></div>
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="cw-body cw-final">
+            <div class="cw-bigok">✓</div>
+            <h2 class="cw-h">Écran de salle créé</h2>
+            <p class="cw-lead">La tablette affiche maintenant « @(rooms.FirstOrDefault(r => r.Id == roomId) is { } dr ? SharedCalendarSources.RoomName(dr) : "") ». Rien à publier : l'écran suit la salle et ses règles.</p>
+            <div class="@(online ? "rb-ok" : "rb-warn") rb-center">● @(online ? "En ligne" : "Hors ligne pour le moment") · @name</div>
+        </div>
+    }
+</WizardShell>
+
+@if (confirmClose)
+{
+    <div class="modal-backdrop rb-over"></div>
+    <div class="modal app-modal sm rb-over" role="alertdialog" aria-modal="true" aria-labelledby="rsw-cc">
+        <div class="modal-head"><div class="grow"><h3 id="rsw-cc">Fermer sans choisir de salle ?</h3><small>La tablette est connectée : elle affiche « Appairée · en attente de configuration ». Sa carte propose ensuite « Choisir la salle ».</small></div></div>
+        <div class="modal-foot">
+            <button type="button" class="btn ghost" @onclick="() => confirmClose = false">Continuer</button>
+            <button type="button" class="btn" @onclick="() => { confirmClose = false; return OnClose.InvokeAsync(); }">Fermer</button>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Écran existant (modification) ; null : nouvel écran de salle.</summary>
+    [Parameter] public Guid? ScreenId { get; set; }
+    /// <summary>Salle déjà choisie (« Créer l'écran » de la page de l'application).</summary>
+    [Parameter] public Guid? RoomId { get; set; }
+    /// <summary>Relie la tablette (code) : facturation et appairage par la page Écrans, qui rappelle <see cref="Paired"/> ou <see cref="PairFailed"/>.</summary>
+    [Parameter] public Func<string, Task>? OnPair { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private int step = 1;
+    private bool edit, done, pairing, confirmClose, online;
+    private bool buttons = true, titles;
+    private bool? touch;
+    private string code = "", name = "", theme = "light";
+    private string? pairError;
+    private Guid? screenId, roomId;
+    private string? deviceKind;
+    private int? w, h;
+    private List<SharedCalendar> rooms = new();
+    private Dictionary<Guid, int> screensOf = new();
+    private Tenant tenant = new();
+    private RoomNow? previewState;
+    private Timer? poll;
+
+    private string[] Labels => edit ? new[] { "Salle", "Affichage" } : new[] { "Code", "Salle", "Affichage", "Terminé" };
+    private string Key => edit ? (step == 1 ? "room" : "look") : step switch { 1 => "code", 2 => "room", 3 => "look", _ => "done" };
+    private string Digits => new(code.Where(char.IsDigit).ToArray());
+    private bool CanBack => !done && step > 1;
+    private bool NextDisabled => Key switch { "code" => screenId == null, "room" => roomId == null, "look" => name.Trim().Length == 0, _ => false };
+    private string NextLabel => Key switch { "look" => edit ? "Enregistrer" : "Créer l'écran", _ => "Continuer" };
+    private string Hint => Key switch { "code" when screenId == null => "Connectez la tablette pour continuer.", "room" when roomId == null => "Choisissez la salle.", _ => "" };
+
+    private string DeviceText
+    {
+        get
+        {
+            if (deviceKind == null) return "Tablette connectée.";
+            var kind = deviceKind switch { "android" => "Android", "androidtv" => "Android TV", "windows" => "Windows", "raspberrypi" => "Raspberry Pi", _ => "Navigateur" };
+            var ori = w is > 0 && h is > 0 ? (w >= h ? "paysage" : "portrait") : null;
+            return "Tablette détectée : " + string.Join(" · ", new[] { kind, ori, touch == true ? "tactile" : touch == false ? "non tactile" : null }.OfType<string>()) + ".";
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Refresh();
+        roomId = RoomId;
+        if (ScreenId is { } sid && Store.Read(d => d.AllScreens.FirstOrDefault(s => s.Id == sid)) is { Room: { } rs } s)
+        {
+            edit = true;
+            screenId = sid;
+            roomId = s.RoomCalendarId ?? RoomId;
+            (buttons, titles, theme, name, touch) = (rs.Buttons, rs.Titles, rs.Theme, s.Name, s.DeviceTouch);
+        }
+        if (roomId != null && !rooms.Any(r => r.Id == roomId)) roomId = null;
+        await LoadPreview();
+    }
+
+    public void Dispose() => poll?.Dispose();
+
+    private void Refresh()
+    {
+        (tenant, rooms, screensOf) = Store.Read(d => (d.Tenant, RoomSetup.Rooms(d.Tenant).Where(r => !r.Off).ToList(),
+            d.AllScreens.Where(s => s.Room != null && s.RoomCalendarId != null && s.Id != ScreenId).GroupBy(s => s.RoomCalendarId!.Value).ToDictionary(g => g.Key, g => g.Count())));
+    }
+
+    private static string Desc(SharedCalendar r) => string.Join(" · ", new[] { r.RoomCap > 0 ? $"{r.RoomCap} places" : null, r.RoomPlace.Length > 0 ? r.RoomPlace : null }.OfType<string>());
+
+    private async Task PickRoom(SharedCalendar r)
+    {
+        roomId = r.Id;
+        if (!edit && (name.Length == 0 || name.StartsWith("Porte ") || name.StartsWith("Écran de salle"))) name = "Porte " + System.Text.RegularExpressions.Regex.Replace(SharedCalendarSources.RoomName(r), "^Salle ", "");
+        titles = edit ? titles : r.RoomTitles;
+        await LoadPreview();
+    }
+
+    private async Task LoadPreview()
+    {
+        previewState = null;
+        if (roomId is not { } id || rooms.FirstOrDefault(r => r.Id == id) is not { } room) return;
+        var snap = await Status.Read(Store.ClientId, id);
+        previewState = RoomStatusService.StateOf(snap, room, RoomRules.Zone(tenant.Timezone), DateTime.UtcNow);
+    }
+
+    // ---------- Code ----------
+
+    private async Task Pair()
+    {
+        pairError = null;
+        pairing = true;
+        if (OnPair != null) await OnPair(Digits);
+        else pairing = false;
+    }
+
+    /// <summary>La page Écrans a relié la tablette : on attend son rapport (type, tactile) quelques secondes.</summary>
+    public void Paired(Guid id)
+    {
+        pairing = false;
+        screenId = id;
+        name = "Écran de salle " + Digits;
+        var n = 0;
+        poll?.Dispose();
+        poll = new Timer(_ => InvokeAsync(() =>
+        {
+            var s = Store.Read(d => d.AllScreens.FirstOrDefault(x => x.Id == id));
+            if (s != null) (deviceKind, touch, w, h, online) = (s.DeviceKind, s.DeviceTouch, s.DetectedW, s.DetectedH, s.LastSeenUtc is { } ls && DateTime.UtcNow - ls < TimeSpan.FromSeconds(90));
+            if (touch != null && !edit) buttons = touch.Value;
+            if (++n >= 10 && deviceKind != null || n >= 30) poll?.Change(Timeout.Infinite, Timeout.Infinite);
+            StateHasChanged();
+        }), null, 1000, 1000);
+        StateHasChanged();
+    }
+
+    public void PairFailed(string? error)
+    {
+        pairing = false;
+        pairError = error;
+        StateHasChanged();
+    }
+
+    // ---------- Navigation ----------
+
+    private async Task Next()
+    {
+        if (Key == "done") { await OnClose.InvokeAsync(); return; }
+        if (Key == "look") { await Save(); return; }
+        step++;
+        if (Key == "look") await LoadPreview();
+    }
+
+    private async Task Save()
+    {
+        if (screenId is not { } sid || roomId is not { } rid) return;
+        var n = name.Trim();
+        if (n.Length > 80) n = n[..80];
+        var (b, t, th) = (buttons, titles, theme == "dark" ? "dark" : "light");
+        var ok = Store.Write(d =>
+        {
+            if (d.AllScreens.FirstOrDefault(s => s.Id == sid) is not { } s) return false;
+            s.Room ??= new RoomScreen();
+            s.RoomCalendarId = rid;
+            (s.Room.Buttons, s.Room.Titles, s.Room.Theme) = (b, t, th);
+            s.Room.Revision++;
+            s.Name = n;
+            return true;
+        });
+        if (!ok) { Toast.Error("Écran introuvable."); return; }
+        await Notifier.NotifyScreen(sid);   // la tablette affiche aussitôt la porte de la salle
+        await OnSaved.InvokeAsync();
+        if (edit) { Toast.Ok($"« {n} » enregistré : la tablette suit la salle."); await OnClose.InvokeAsync(); return; }
+        online = Store.Read(d => d.AllScreens.FirstOrDefault(s => s.Id == sid)?.LastSeenUtc is { } ls && DateTime.UtcNow - ls < TimeSpan.FromSeconds(90));
+        step = 4;
+        done = true;
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private Task Cancel()
+    {
+        if (!edit && screenId != null && !done) { confirmClose = true; return Task.CompletedTask; }
+        return OnClose.InvokeAsync();
+    }
+
+    // ---------- Aperçu de la porte (maquette : panneau d'état + journée) ----------
+
+    private RenderFragment MiniDoor(SharedCalendar? room, bool showButtons) => __builder =>
+    {
+        var tz = RoomRules.Zone(tenant.Timezone);
+        var st = previewState;
+        var cls = st?.State ?? "free";
+        var word = st == null ? "Libre" : st.State == "busy" ? "Occupé" : st.State == "soon" ? "Bientôt occupé" : "Libre";
+        var sub = st == null ? "" : st.State == "busy" ? "jusqu'à " + RoomRules.Hm(st.UntilUtc!.Value, tz) : st.State == "soon" ? "à " + RoomRules.Hm(st.UntilUtc!.Value, tz) : st.UntilUtc is { } u ? "jusqu'à " + RoomRules.Hm(u, tz) : "toute la journée";
+        <div class="rb-mini @(theme == "dark" ? "dark" : "")">
+            <div class="a @cls">
+                <span>@(room != null ? SharedCalendarSources.RoomName(room) : "Salle")@(room is { RoomCap: > 0 } ? $" · {room.RoomCap} places" : "")</span>
+                <b>@word</b><span>@sub</span>
+                @if (showButtons && cls != "busy")
+                {
+                    <div class="lab">RÉSERVER POUR…</div>
+                    <div>@foreach (var d in (tenant.RoomApp ?? new()).Durations.Take(3)) { <span class="c">@RoomRules.Label(d)</span> }</div>
+                }
+            </div>
+            <div class="z">
+                <b>@RoomRules.Hm(DateTime.UtcNow, tz)</b>
+                <div class="day">AUJOURD'HUI</div>
+                @if (st != null)
+                {
+                    @foreach (var e in st.Next.Take(3)) { <div class="sl"><b>@RoomRules.Hm(e.StartUtc, tz)</b> @(titles && e.Title.Length > 0 ? e.Title : e.Linkivi ? "Réservé sur place" : "Occupé")</div> }
+                    @if (st.Next.Count == 0) { <div class="sl">Rien d'autre aujourd'hui</div> }
+                }
+            </div>
+        </div>
+    };
+}

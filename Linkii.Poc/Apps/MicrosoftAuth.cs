@@ -20,6 +20,8 @@ public class MicrosoftAuth(IConfiguration config, JsonStore store, SecretBox box
     private const string GraphPrefix = "https://graph.microsoft.com/";
     public const string DriveScope = "Files.Read.All";
     public const string CalendarScope = "Calendars.Read";
+    /// <summary>Créer des rendez-vous (application « Réservation de salle ») : seulement si une source est en « Afficher et réserver ».</summary>
+    public const string WriteScope = "Calendars.ReadWrite";
 
     /// <summary>
     /// Accès demandés selon ce qui lance la connexion : une application (« drive » ou « calendar ») ou Comptes connectés (« all » : les deux). Tous en lecture seule, et tous disponibles
@@ -29,6 +31,7 @@ public class MicrosoftAuth(IConfiguration config, JsonStore store, SecretBox box
     public static string[] ScopesFor(string purpose) => purpose switch
     {
         AccountPurposes.Calendar => [CalendarScope, "Calendars.Read.Shared"],
+        AccountPurposes.Rooms => [CalendarScope, "Calendars.Read.Shared", WriteScope, "Calendars.ReadWrite.Shared"],
         AccountPurposes.All => [CalendarScope, "Calendars.Read.Shared", DriveScope],
         _ => [DriveScope]
     };
@@ -37,6 +40,7 @@ public class MicrosoftAuth(IConfiguration config, JsonStore store, SecretBox box
     public static string[] RequiredScopes(string purpose) => purpose switch
     {
         AccountPurposes.Calendar => [CalendarScope],
+        AccountPurposes.Rooms => [WriteScope],
         AccountPurposes.All => [CalendarScope, DriveScope],
         _ => [DriveScope]
     };

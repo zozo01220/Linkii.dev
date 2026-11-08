@@ -1,0 +1,492 @@
+@inject TenantStore Store
+@inject AppService Svc
+@inject SecretBox Box
+@inject GraphService Graph
+@inject GoogleConnector Google
+@inject GoogleAuth GoogleAuth
+@inject MicrosoftAuth MsAuth
+@inject RoomSetupDrafts Drafts
+@inject Notifier Notifier
+@inject NavigationManager Nav
+@inject Toaster Toast
+
+@* Application « Réservation de salle » : assistant d'installation (maquettes/salle-app-parcours.html, vue 2) — Bienvenue › Agendas › Salles › Réservation › Règles › Terminé.
+   Rien n'est enregistré avant « Installer », sauf ce qui sert aussi ailleurs : le compte connecté et l'application d'agenda installée à l'étape Agendas.
+   Pendant une connexion chez Microsoft ou Google, l'état est gardé dans un brouillon (RoomSetupDrafts) et l'assistant reprend à la même étape.
+   Rouvert depuis la page de l'application (Gérer les salles, + Ajouter un agenda) : Agendas › Salles › Réservation › Terminé, les règles ne changent pas. *@
+<WizardShell Icon="@RoomRules.AppId" Title="@(Adding ? "Installer · " + LabelOf(key) : "Réservation de salle · " + LabelOf(key))" Labels="@Labels" Step="StepNo" Done="done" Running="done"
+             CanBack="@(StepNo > 1 && key != "done")" Hint="@Hint" NextLabel="@NextLabel" NextDisabled="NextDisabled"
+             OnCancel="Cancel" OnClose="Close" OnBack="Back" OnNext="Next">
+    @if (key == "welcome")
+    {
+        <div class="cw-body">
+            <h2 class="cw-h">Réservation de salle</h2>
+            <p class="cw-lead">Chaque salle a sa tablette à la porte : libre ou occupé, prochains créneaux, réservation d'un geste.</p>
+            <div class="rb-steps">
+                <div><b>① Vos agendas</b><small>On importe vos salles depuis Google, Microsoft, ICS…</small></div>
+                <div><b>② Vos règles</b><small>Durées, durée maximale, horaires.</small></div>
+                <div><b>③ Vos écrans</b><small>Ensuite, créez un « Écran de salle » dans Écrans.</small></div>
+            </div>
+            <div class="rb-note">Il vous faut au moins un agenda. Vous pourrez en ajouter d'autres plus tard dans la configuration de l'application.</div>
+        </div>
+    }
+    else if (key == "sources")
+    {
+        <div class="cw-body">
+            <h2 class="cw-h">D'où viennent vos agendas ?</h2>
+            <p class="cw-lead">Choisissez les applications d'agenda à utiliser. Celles qui ne sont pas installées se connectent ici.</p>
+            <div class="rb-list">
+                @foreach (var def in SharedCalendarSources.All)
+                {
+                    var s = def.Id;
+                    var on = Connected(s);
+                    <div class="rb-row">
+                        <AppIcon Id="@("cal-" + s)" Small="true" />
+                        <div class="grow"><b>@def.Name</b><small>@SourceState(s)</small></div>
+                        @if (on)
+                        {
+                            <span class="badge en-ligne">@(s == "ics" ? "Prête" : "Connecté")</span>
+                            <button type="button" class="switch @(dr.Use.Contains(s) ? "on" : "")" role="switch" aria-checked="@(dr.Use.Contains(s) ? "true" : "false")" aria-label="Utiliser @def.Name" @onclick="() => ToggleUse(s)"><span></span></button>
+                        }
+                        else if (s is "m365" or "google" && !Ready(s))
+                        {
+                            <span class="badge neutre">Indisponible sur cette plateforme</span>
+                        }
+                        else
+                        {
+                            <button type="button" class="btn ghost sm" @onclick="() => Connect(s)">@(formFor == s ? "Fermer" : "Installer et connecter")</button>
+                        }
+                    </div>
+                    @if (formFor == s)
+                    {
+                        <div class="rb-form">
+                            <div class="dw-field"><label for="rbf-url">@(s == "ews" ? "Adresse du service EWS" : "Adresse du serveur")</label><input id="rbf-url" class="mono" @bind="fUrl" spellcheck="false" placeholder="@(s == "ews" ? "https://mail.organisation.ch/EWS/Exchange.asmx" : "https://cloud.organisation.ch/remote.php/dav/")" /></div>
+                            <div class="dw-field"><label for="rbf-user">@(s == "ews" ? "Compte de service" : "Identifiant")</label><input id="rbf-user" @bind="fUser" autocomplete="off" /></div>
+                            <div class="dw-field"><label for="rbf-pwd">Mot de passe</label><input id="rbf-pwd" type="password" @bind="fSecret" autocomplete="new-password" /></div>
+                            @if (formError != null) { <p class="form-error">@formError</p> }
+                            <button type="button" class="btn sm" @onclick="() => SaveServer(s)">Enregistrer la connexion</button>
+                        </div>
+                    }
+                }
+            </div>
+            @if (!dr.Use.Any(Connected)) { <div class="rb-warn">Choisissez au moins un agenda pour continuer.</div> }
+        </div>
+    }
+    else if (key == "rooms")
+    {
+        <div class="cw-body">
+            <h2 class="cw-h">Quelles sont vos salles ?</h2>
+            <p class="cw-lead">Nous avons trouvé ces agendas. Les salles détectées sont déjà cochées ; ajustez nom, capacité et lieu.</p>
+            @if (loading) { <p class="cw-lead">Lecture de vos agendas…</p> }
+            @foreach (var s in UsedSources)
+            {
+                var src = s;
+                <div class="rb-grp">@SharedCalendarSources.Find(src)?.Name</div>
+                @if (loadErrors.TryGetValue(src, out var le)) { <div class="rb-warn">@le</div> }
+                @foreach (var p in dr.Picks.Where(p => p.Source == src))
+                {
+                    var pick = p;
+                    <div class="rb-row rb-room @(pick.On ? "" : "off")">
+                        <div class="grow rb-fields">
+                            <input class="rb-inp rb-nm" @bind="pick.Name" aria-label="Nom de la salle" maxlength="80" />
+                            <input class="rb-inp rb-places" type="number" min="0" max="5000" value="@(pick.Cap > 0 ? pick.Cap.ToString() : "")" placeholder="Places" aria-label="Places" @onchange="e => pick.Cap = int.TryParse(e.Value?.ToString(), out var n) ? Math.Max(0, n) : 0" />
+                            <input class="rb-inp rb-pl" @bind="pick.Place" placeholder="Lieu" aria-label="Lieu" maxlength="80" />
+                            @if (pick.Detected) { <span class="badge sync">Salle détectée</span> }
+                            @if (src == "ics") { <span class="badge neutre">Lecture seule</span> }
+                            else if (src == "google" && pick.Role is "reader" or "freeBusyReader" && !pick.Detected) { <span class="badge neutre">Affichage seul</span> }
+                        </div>
+                        <button type="button" class="switch @(pick.On ? "on" : "")" role="switch" aria-checked="@(pick.On ? "true" : "false")" aria-label="Utiliser @pick.Name comme salle" @onclick="() => pick.On = !pick.On"><span></span></button>
+                    </div>
+                }
+                <div class="rb-add">
+                    <input class="rb-inp" @bind="addName[src]" placeholder="Nom (facultatif)" aria-label="Nom" maxlength="80" />
+                    <input class="rb-inp mono grow" @bind="addRef[src]" placeholder="@AddPlaceholder(src)" aria-label="@AddLabel(src)" spellcheck="false" />
+                    <button type="button" class="btn ghost sm" @onclick="() => AddByAddress(src)">Ajouter par adresse</button>
+                </div>
+                @if (addErrors.TryGetValue(src, out var ae)) { <p class="form-error">@ae</p> }
+            }
+            <p class="rb-cap"><b>@ChosenCount</b> salle@(ChosenCount > 1 ? "s" : "") sélectionnée@(ChosenCount > 1 ? "s" : ""). Elles apparaîtront dans l'onglet Contenus de l'application.</p>
+        </div>
+    }
+    else if (key == "perms")
+    {
+        <div class="cw-body">
+            <h2 class="cw-h">Afficher seulement, ou aussi réserver ?</h2>
+            <p class="cw-lead">Pour réserver depuis la tablette, Linkivi doit pouvoir créer des rendez-vous dans l'agenda de la salle.</p>
+            <div class="rb-list">
+                @foreach (var s in UsedSources)
+                {
+                    var src = s;
+                    var name = SharedCalendarSources.Find(src)?.Name ?? src;
+                    <div class="rb-row">
+                        <AppIcon Id="@("cal-" + src)" Small="true" />
+                        @if (src == "ics")
+                        {
+                            <div class="grow"><b>@name</b><small>Un lien ICS ne se modifie pas : les réservations faites sur la tablette restent dans Linkivi (visibles sur les écrans, pas dans Outlook ni Google).</small></div>
+                            <span class="badge neutre">Réservations Linkivi</span>
+                        }
+                        else if (!RoomRules.SourceCanWrite(src))
+                        {
+                            <div class="grow"><b>@name</b><small>Les écrans affichent libre / occupé, sans réservation.</small></div>
+                            <div class="seg"><button type="button" class="on">Afficher seulement</button><button type="button" disabled title="Bientôt">Afficher et réserver · Bientôt</button></div>
+                        }
+                        else
+                        {
+                            var write = dr.Perms.GetValueOrDefault(src) == RoomPerms.Write;
+                            var ok = RoomSetup.HasWriteRight(tenant, src);
+                            <div class="grow"><b>@name</b><small>@(write ? ok ? "Autorisé : créer des rendez-vous dans vos salles (jamais modifier ceux qui existent)" : "Autorisation requise auprès de " + name : "Les écrans affichent libre / occupé, sans réservation")</small></div>
+                            <div class="seg">
+                                <button type="button" class="@(write ? "" : "on")" @onclick="() => dr.Perms[src] = RoomPerms.Read">Afficher seulement</button>
+                                <button type="button" class="@(write ? "on" : "")" @onclick="() => dr.Perms[src] = RoomPerms.Write">Afficher et réserver</button>
+                            </div>
+                            @if (write && !ok) { <button type="button" class="btn sm" @onclick="() => Authorize(src)">Autoriser</button> }
+                            else if (write) { <span class="badge en-ligne">✓</span> }
+                        }
+                    </div>
+                }
+            </div>
+            <div class="rb-note">Linkivi n'écrit que dans les salles que vous avez choisies, et seulement pour une réservation faite sur la tablette. Vous pouvez retirer l'autorisation à tout moment chez Google ou Microsoft.</div>
+        </div>
+    }
+    else if (key == "rules")
+    {
+        <div class="cw-body">
+            <h2 class="cw-h">@(AnyBooking ? "Vos règles de réservation" : "L'affichage de vos salles")</h2>
+            <p class="cw-lead">Valables pour toutes les salles ; modifiables ensuite dans la configuration de l'application.</p>
+            @if (AnyBooking)
+            {
+                <RoomRulesForm Rules="dr.Rules" Preset="@dr.Preset" PresetChanged="p => dr.Preset = p" Expert="false" />
+            }
+            <div class="rb-row">
+                <div class="grow"><b>Afficher le titre des réunions</b><small>Sinon : seulement « Occupé »</small></div>
+                <button type="button" class="switch @(dr.Titles ? "on" : "")" role="switch" aria-checked="@(dr.Titles ? "true" : "false")" aria-label="Afficher le titre des réunions" @onclick="() => dr.Titles = !dr.Titles"><span></span></button>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="cw-body cw-final">
+            <div class="cw-bigok">✓</div>
+            <h2 class="cw-h">@(Adding ? "Réservation de salle est installée" : "Salles enregistrées")</h2>
+            <p class="cw-lead">@result.Rooms salle@(result.Rooms > 1 ? "s" : "") @(Adding ? "importée" : "enregistrée")@(result.Rooms > 1 ? "s" : "") depuis @result.Sources agenda@(result.Sources > 1 ? "s" : ""). Elles sont dans l'onglet Contenus de l'application.</p>
+            @if (Adding)
+            {
+                <div class="rb-next">
+                    <div><b>Étape suivante</b><small>Créer l'écran de la première salle : une tablette à la porte.</small><button type="button" class="btn go" @onclick="CreateScreen">Créer un écran de salle</button></div>
+                    <div><b>Plus tard</b><small>Ouvrir l'application, vérifier les salles, régler les détails.</small><button type="button" class="btn ghost" @onclick="OpenApp">Ouvrir l'application</button></div>
+                </div>
+            }
+        </div>
+    }
+</WizardShell>
+
+@if (confirmCancel)
+{
+    <div class="modal-backdrop rb-over"></div>
+    <div class="modal app-modal sm rb-over" role="alertdialog" aria-modal="true" aria-labelledby="rb-cc">
+        <div class="modal-head"><div class="grow"><h3 id="rb-cc">Abandonner l'installation ?</h3><small>Rien n'est enregistré : vos agendas restent tels quels.</small></div></div>
+        <div class="modal-foot">
+            <button type="button" class="btn ghost" @onclick="() => confirmCancel = false">Continuer l'installation</button>
+            <button type="button" class="btn danger" @onclick="Abandon">Abandonner</button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int StartStep { get; set; } = 1;
+    [Parameter] public bool Adding { get; set; }
+    [Parameter] public EventCallback OnAdded { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private RoomSetupDraft dr = new();
+    private string key = "welcome";
+    private bool done, loading, confirmCancel;
+    private (int Rooms, int Sources) result;
+    private Tenant tenant = new();
+    private string? formFor, formError;
+    private string fUrl = "", fUser = "", fSecret = "";
+    private readonly Dictionary<string, string> loadErrors = new(), addErrors = new();
+    private readonly Dictionary<string, string> addName = new(), addRef = new();
+
+    private List<string> Keys => Adding ? new() { "welcome", "sources", "rooms", "perms", "rules", "done" } : new() { "sources", "rooms", "perms", "done" };
+    private int StepNo => Keys.IndexOf(key) + 1;
+    private string[] Labels => Keys.Select(LabelOf).ToArray();
+    private static string LabelOf(string k) => k switch { "welcome" => "Bienvenue", "sources" => "Agendas", "rooms" => "Salles", "perms" => "Réservation", "rules" => "Règles", _ => "Terminé" };
+
+    private IEnumerable<string> UsedSources => SharedCalendarSources.All.Select(s => s.Id).Where(s => dr.Use.Contains(s) && Connected(s));
+    private int ChosenCount => dr.Picks.Count(p => p.On && UsedSources.Contains(p.Source));
+    private bool AnyBooking => UsedSources.Any(s => s == "ics" || RoomRules.SourceCanWrite(s) && dr.Perms.GetValueOrDefault(s) == RoomPerms.Write);
+    private bool PermsBlocked => UsedSources.Any(s => RoomRules.SourceCanWrite(s) && dr.Perms.GetValueOrDefault(s) == RoomPerms.Write && !RoomSetup.HasWriteRight(tenant, s));
+
+    private bool NextDisabled => key switch
+    {
+        "sources" => !dr.Use.Any(Connected),
+        "rooms" => loading || ChosenCount == 0,
+        "perms" => PermsBlocked,
+        "rules" => dr.Rules.Durations.Count == 0,
+        _ => false
+    };
+
+    private string NextLabel => key switch
+    {
+        "welcome" => "Commencer",
+        "rules" => "Installer",
+        "perms" when !Adding => "Enregistrer",
+        _ => "Continuer"
+    };
+
+    private string Hint => key switch
+    {
+        "sources" when !dr.Use.Any(Connected) => "Il vous faut au moins un agenda.",
+        "rooms" when ChosenCount == 0 && !loading => "Choisissez au moins une salle.",
+        "rooms" => "Vous pourrez changer cela plus tard.",
+        "perms" when PermsBlocked => "Autorisez la réservation, ou repassez en « Afficher seulement ».",
+        "rules" => "Rien n'est enregistré tant que vous n'avez pas installé.",
+        _ => ""
+    };
+
+    private (Guid Client, Guid User) Who => (Store.ClientId, Store.Read(d => d.Access.UserId) ?? Guid.Empty);
+
+    protected override async Task OnInitializedAsync()
+    {
+        foreach (var def in SharedCalendarSources.All) { addName[def.Id] = ""; addRef[def.Id] = ""; }   // champs « Ajouter par adresse » de chaque source
+        tenant = Store.Read(d => d.Tenant);
+        if (Drafts.Take(Who.Client, Who.User) is { } saved)
+        {
+            dr = saved;
+            key = Keys.Contains(saved.StepKey) ? saved.StepKey : Keys[0];
+            if (dr.Connecting is { } s)
+            {
+                if (Connected(s)) { InstallSource(s); dr.Use.Add(s); dr.Loaded.Remove(s); Toast.Ok($"{SharedCalendarSources.Find(s)?.Name} est connecté."); }
+                dr.Connecting = null;
+            }
+        }
+        else
+        {
+            var app = tenant.RoomApp;
+            var withRooms = tenant.SharedCalendars.Where(c => c.Room).Select(c => c.Source).ToHashSet();
+            foreach (var s in SharedCalendarSources.All.Select(x => x.Id))
+            {
+                if (withRooms.Contains(s) || Adding && withRooms.Count == 0 && s is "m365" or "google" && Connected(s)) dr.Use.Add(s);
+                dr.Perms[s] = app?.Sources.GetValueOrDefault(s) is { } p ? p : s == "ics" ? RoomPerms.Local : RoomRules.SourceCanWrite(s) ? RoomPerms.Write : RoomPerms.Read;
+            }
+            if (app != null) { dr.Rules = app.Copy(); dr.Titles = tenant.SharedCalendars.Any(c => c.Room && c.RoomTitles); }
+            key = Adding ? (StartStep >= 2 ? "sources" : "welcome") : (StartStep >= 3 ? "rooms" : "sources");
+        }
+        if (key == "rooms") await LoadRooms();
+    }
+
+    // ---------- Étape Agendas ----------
+
+    private bool Ready(string s) => s switch { "m365" => MsAuth.IsConfigured, "google" => GoogleAuth.IsConfigured, _ => true };
+
+    /// <summary>La source est installée et sa connexion permet de lire les agendas.</summary>
+    private bool Connected(string s) => s switch
+    {
+        "ics" => SharedCalendarSources.Enabled(tenant, "ics") || tenant.IntegrationsAdded.Contains("cal-ics"),
+        "caldav" => SharedCalendarSources.Account(tenant, "caldav") is { Url.Length: > 0 } a && a.LastError.Length == 0,
+        _ => SharedCalendarSources.Configured(tenant, s)
+    };
+
+    private string SourceState(string s)
+    {
+        if (!Connected(s)) return "Application non installée";
+        return s switch
+        {
+            "m365" => "Connecté · " + (tenant.MsUser.Length > 0 ? tenant.MsUser : "compte Microsoft"),
+            "google" => "Connecté · " + (tenant.GoogleUser.Length > 0 ? tenant.GoogleUser : "compte Google"),
+            "ics" => "Sans compte",
+            _ => "Connecté · " + (SharedCalendarSources.Account(tenant, s)?.Url ?? "")
+        };
+    }
+
+    private void ToggleUse(string s) { if (!dr.Use.Remove(s)) dr.Use.Add(s); }
+
+    private void InstallSource(string s)
+    {
+        Svc.Mark("cal-" + s);
+        Svc.SetCalendarSource(s, true);
+        tenant = Store.Read(d => d.Tenant);
+    }
+
+    private void Connect(string s)
+    {
+        formError = null;
+        switch (s)
+        {
+            case "m365" or "google":
+                Leave(s, $"/{(s == "m365" ? "microsoft" : "google")}/connect?for={AccountPurposes.Calendar}&wiz={RoomRules.AppId}");
+                break;
+            case "ics":
+                InstallSource("ics");
+                dr.Use.Add("ics");
+                break;
+            default:
+                if (formFor == s) { formFor = null; return; }
+                formFor = s;
+                var a = SharedCalendarSources.Account(tenant, s);
+                (fUrl, fUser, fSecret) = (a?.Url ?? "", a?.User ?? "", "");
+                break;
+        }
+    }
+
+    /// <summary>CalDAV, Exchange : adresse et identifiants enregistrés (comme dans l'assistant de l'application d'agenda), puis la source est installée.</summary>
+    private void SaveServer(string s)
+    {
+        formError = null;
+        var u = fUrl.Trim(); var usr = fUser.Trim(); var pw = fSecret.Trim();
+        var hasSecret = SharedCalendarSources.Account(tenant, s) is { Secret.Length: > 0 };
+        if (!AppCatalog.IsHttpUrl(u)) { formError = "L'adresse doit commencer par https:// (ou http://)."; return; }
+        if (s == "ews" && usr.Length == 0) { formError = "Renseignez le compte de service Exchange."; return; }
+        if (s == "ews" && pw.Length == 0 && !hasSecret) { formError = "Renseignez le mot de passe."; return; }
+        Store.Write(d =>
+        {
+            var a = d.Tenant.CalendarAccounts.FirstOrDefault(x => x.Source == s);
+            if (a == null) d.Tenant.CalendarAccounts.Add(a = new CalendarAccount { Source = s });
+            a.Url = u; a.User = usr;
+            if (pw.Length > 0) a.Secret = Box.Protect(pw);
+            a.LastError = "";
+        });
+        fSecret = "";
+        InstallSource(s);
+        formFor = null;
+        dr.Use.Add(s);
+    }
+
+    /// <summary>Connexion chez Microsoft ou Google : l'assistant est gardé, puis rouvert au retour (page Applications, ?wiz=room-booking).</summary>
+    private void Leave(string source, string url)
+    {
+        dr.StepKey = key;
+        dr.Connecting = source;
+        Drafts.Keep(Who.Client, Who.User, dr);
+        Nav.NavigateTo(url, forceLoad: true);
+    }
+
+    // ---------- Étape Salles ----------
+
+    private async Task LoadRooms()
+    {
+        loading = true;
+        StateHasChanged();
+        tenant = Store.Read(d => d.Tenant);
+        foreach (var s in UsedSources.ToList())
+        {
+            if (dr.Loaded.Contains(s)) continue;
+            loadErrors.Remove(s);
+            foreach (var c in tenant.SharedCalendars.Where(c => c.Source == s).OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase))
+                if (!dr.Picks.Any(p => p.Source == s && p.Ref == c.Ref))
+                    dr.Picks.Add(new RoomPick { Source = s, Ref = c.Ref, Hint = c.Hint, Id = c.Id, Name = SharedCalendarSources.RoomName(c), Cap = c.RoomCap, Place = c.RoomPlace, On = c.Room, Role = c.RoomAccess });
+            try
+            {
+                if (s == "m365")
+                {
+                    foreach (var c in await Graph.ListCalendars(tenant)) Found(s, GraphService.CalendarRefPrefix + c.Id, c.Name, c.Owner ?? "", false, 0, "", null);
+                    try { foreach (var r in await Graph.ListRooms(tenant)) Found(s, r.Email, r.Name, r.Email, true, r.Capacity ?? 0, r.Building ?? "", null); }
+                    catch (InvalidOperationException) { /* annuaire des salles inaccessible : agendas du compte et ajout par adresse */ }
+                }
+                else if (s == "google")
+                {
+                    foreach (var g in await Google.ListCalendars(tenant))
+                        Found(s, g.Id, g.Name, g.Primary ? "principal" : "", g.Id.EndsWith(RoomRules.GoogleResourceSuffix, StringComparison.OrdinalIgnoreCase), 0, "", g.Role);
+                }
+                dr.Loaded.Add(s);
+            }
+            catch (InvalidOperationException ex) { loadErrors[s] = ex.Message; }
+        }
+        loading = false;
+    }
+
+    private void Found(string s, string r, string name, string hint, bool detected, int cap, string place, string? role)
+    {
+        if (dr.Picks.FirstOrDefault(p => p.Source == s && string.Equals(p.Ref, r, StringComparison.OrdinalIgnoreCase)) is { } known)
+        {
+            known.Detected |= detected;
+            if (role is { Length: > 0 }) known.Role = role;
+            if (detected && Adding && known.Id == null) known.On = true;
+            return;
+        }
+        dr.Picks.Add(new RoomPick { Source = s, Ref = r, Hint = hint, Name = name, Detected = detected, Cap = cap, Place = place, Role = role, On = detected });
+    }
+
+    private static string AddLabel(string s) => SharedCalendarSources.Find(s)?.RefLabel ?? "Adresse";
+    private static string AddPlaceholder(string s) => SharedCalendarSources.Find(s)?.RefPlaceholder ?? "";
+
+    private void AddByAddress(string s)
+    {
+        addErrors.Remove(s);
+        var r = (addRef.GetValueOrDefault(s) ?? "").Trim();
+        var name = (addName.GetValueOrDefault(s) ?? "").Trim();
+        if (r.StartsWith("webcal://", StringComparison.OrdinalIgnoreCase)) r = "https://" + r["webcal://".Length..];
+        if (r.Length == 0) { addErrors[s] = $"Renseignez le champ « {AddLabel(s)} »."; return; }
+        if (s is "m365" or "ews" && !r.Contains('@')) { addErrors[s] = "Saisissez une adresse e-mail (ex. salle-a101@organisation.ch)."; return; }
+        if (s == "ics" && !AppCatalog.IsHttpUrl(r)) { addErrors[s] = "Le lien ICS doit commencer par https:// (ou webcal://)."; return; }
+        if (s == "caldav" && r.Contains("://") && !AppCatalog.IsHttpUrl(r)) { addErrors[s] = "L'adresse doit commencer par https:// (ou http://)."; return; }
+        if (s != "ics" && dr.Picks.Any(p => p.Source == s && string.Equals(p.Ref, r, StringComparison.OrdinalIgnoreCase))) { addErrors[s] = "Cet agenda est déjà dans la liste."; return; }
+        var pick = new RoomPick { Source = s, On = true, Detected = false };
+        if (s == "ics") { pick.Ref = Box.Protect(r); pick.Hint = SharedCalendarSources.ShortLink(r); }
+        else { pick.Ref = r; pick.Hint = r; }
+        pick.Name = name.Length > 0 ? name : s == "ics" ? "Salle" : r;
+        if (pick.Name.Length > 80) pick.Name = pick.Name[..80];
+        dr.Picks.Add(pick);
+        addRef[s] = ""; addName[s] = "";
+    }
+
+    // ---------- Étape Réservation ----------
+
+    private void Authorize(string s)
+    {
+        dr.Perms[s] = RoomPerms.Write;
+        Leave(s, $"/{(s == "m365" ? "microsoft" : "google")}/connect?for={AccountPurposes.Rooms}&wiz={RoomRules.AppId}");
+    }
+
+    // ---------- Navigation ----------
+
+    private void Back()
+    {
+        var i = Keys.IndexOf(key);
+        if (i > 0) key = Keys[i - 1];
+    }
+
+    private async Task Next()
+    {
+        if (key == "done") { await Close(); return; }
+        var next = Keys[Keys.IndexOf(key) + 1];
+        if (key == "sources") dr.Use.RemoveWhere(s => !Connected(s));
+        if (next == "done") { await Finish(); return; }
+        key = next;
+        if (key == "rooms") await LoadRooms();
+    }
+
+    private async Task Finish()
+    {
+        try
+        {
+            result = RoomSetup.Install(Store, Svc, dr, manage: !Adding);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException)
+        {
+            Toast.Error(ex.Message);
+            return;
+        }
+        Drafts.Drop(Who.Client, Who.User);
+        key = "done";
+        done = true;
+        if (Adding) await OnAdded.InvokeAsync();
+        await OnChanged.InvokeAsync();
+        await Notifier.NotifyClient(Store.ClientId);   // les écrans de salle relisent leur salle et ses règles
+    }
+
+    private Task Close() { Drafts.Drop(Who.Client, Who.User); return OnClose.InvokeAsync(); }
+
+    private Task Cancel()
+    {
+        if (Adding && key != "welcome") { confirmCancel = true; return Task.CompletedTask; }
+        return Close();
+    }
+
+    private Task Abandon() { confirmCancel = false; return Close(); }
+
+    private void CreateScreen() => Nav.NavigateTo("/?salle=nouveau");
+    private void OpenApp() => Nav.NavigateTo("/apps/" + RoomRules.AppId);
+}

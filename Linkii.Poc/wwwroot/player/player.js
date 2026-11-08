@@ -306,6 +306,25 @@
     };
   }
 
+  /* Ce que la porte d'un écran de salle (room-door.js) emprunte au player : ses données, la réservation, l'heure du serveur, le réseau, la mémoire locale. */
+  function roomHooks() {
+    return {
+      preview: !!PREVIEW,
+      data: function () { return api(PREVIEW ? '/api/preview/room' : '/api/player/room'); },
+      book: function (minutes) {
+        var o = { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Token': state.token || '' }, body: JSON.stringify({ minutes: minutes }) };
+        return fetch('/api/player/room/book', o).then(function (r) {   // la réponse d'erreur (409, 502…) est lue : la porte dit pourquoi
+          setOnline(true);
+          return r.text().then(function (t) { var b = null; try { b = t ? JSON.parse(t) : null; } catch (e) {} return { status: r.status, body: b }; });
+        }, function (e) { setOnline(false); throw e; });
+      },
+      tz: function () { return cfg.timezone; },
+      now: function () { return serverNow(); },
+      online: function () { return netFails < 2 && navigator.onLine !== false; },
+      store: function (k, v) { try { if (arguments.length > 1) { LS.setItem(k, v); return v; } return LS.getItem(k); } catch (e) { return null; } }
+    };
+  }
+
   function applyConfig(pl) {
     if (!pl) return;
     if (pl.screen) {
@@ -324,6 +343,7 @@
     cfg.wall = pl.wall || null;
     if (PREVIEW && pl.kiosk && pl.kioskPreview) pl.kiosk.preview = true;   // aperçu tactile d'une liste interactive (sans liste de lecture)
     if (window.LinkiiKiosk) LinkiiKiosk.apply(pl.kiosk || null, kioskHooks());   // borne interactive : menu de tuiles au toucher (null : écran de diffusion)
+    if (window.LinkiiRoom) LinkiiRoom.apply(pl.room || null, roomHooks());       // écran de salle : la porte de sa salle (null : autre type d'écran)
     if (pl.dim !== undefined) cfg.dim = pl.dim || null;
     if (pl.sleep !== undefined) cfg.sleep = pl.sleep || null;   // plages de veille (et veille manuelle) de la version qui devient courante
     if (pl.off !== undefined) cfg.off = pl.off || null;         // extinctions du calendrier (Programmations)
@@ -1241,7 +1261,7 @@
   // Écran dont le contenu principal dure longtemps (zone fixe d'un écran découpé, contenu unique) : aucune « fin de contenu » ne vient déclencher le spot.
   // Toutes les 5 s, si un spot est dû (rythme en minutes, ou contenus des autres zones) et que la fin du contenu en cours est loin, il passe maintenant.
   setInterval(function () {
-    if (PREVIEW || adNow || !state.current || !state.current.ads || state.current.kiosk || state.pending || state.paused || state.hold || state.asleep || state.emergency) return;
+    if (PREVIEW || adNow || !state.current || !state.current.ads || state.current.kiosk || state.current.room || state.pending || state.paused || state.hold || state.asleep || state.emergency) return;
     if (!(state.slideEnd - Date.now() > 45000)) return;   // un contenu se termine bientôt : le spot passera entre deux contenus comme d'habitude
     var l = adCandidates('between');
     if (!l.length || !adDue(l)) return;
@@ -1787,7 +1807,9 @@
     if (PREVIEW) return;
     var d = null;
     try { if (window.LinkiiNative && typeof window.LinkiiNative.deviceInfo === 'function') d = JSON.parse(window.LinkiiNative.deviceInfo()); } catch (e) {}
-    api('/api/player/device', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d || webDevice()) }).catch(function () {});
+    d = d || webDevice();
+    if (d.touch == null) d.touch = !!('ontouchstart' in window || navigator.maxTouchPoints > 0);   // écran tactile : boutons de durée d'un écran de salle
+    api('/api/player/device', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) }).catch(function () {});
   }
 
   /* ---------- Temps réel : SignalR + filet de sécurité 60 s ---------- */
@@ -1802,6 +1824,7 @@
     conn.on('Command', function (c) { handleCommand(c); });
     conn.on('Emergency', function (e) { if (window.LinkiiEmergency) LinkiiEmergency.apply(e || null); });   // urgence : affichée ou retirée sans attendre le sondage
     conn.on('DataChanged', function (ids) { dataChanged(ids); });   // données d'éléments publiés changées (Home Assistant) : relues sans attendre le sondage
+    conn.on('RoomChanged', function () { if (window.LinkiiRoom) LinkiiRoom.changed(); });   // écran de salle : un créneau a changé (réservation, invitation refusée)
     conn.onreconnecting(markOffline);
     conn.onreconnected(function () { setOnline(true); refresh(); });
     function start() {

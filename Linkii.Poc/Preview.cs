@@ -88,6 +88,7 @@ public static class PlayerFeed
             ["dim"] = Dim.ForPlayer(t, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, wall != null),   // luminosité et contraste selon l'heure (null : aucun réglage)
             ["device"] = device ? DeviceConfig.ForPlayer(db.Screens, s) : null,   // paramètres de l'appareil (démarrage automatique, fenêtre, moniteur, écrans à ouvrir sur ce PC)
             ["kiosk"] = s.PublishedKiosk?.ForPlayer(),   // borne interactive : menu de tuiles et réglages (null : écran de diffusion)
+            ["room"] = RoomDoor.Config(db, t, s),        // écran de salle : la porte de sa salle, sans publication (null : autre type d'écran)
             ["ads"] = device ? Ads.ForPlayer(db, t, s, DateTime.UtcNow) : null,   // spots de publicité (§45) : jamais dans le simulateur, rien n'y est diffusé ni compté
             ["brand"] = BrandDto.From(reseller)
         };

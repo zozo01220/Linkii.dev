@@ -1,5 +1,7 @@
 # Réservation de salle — analyse v2 : une application du Store + un type d'écran
 
+> **⚠ Remplacée par `ANALYSE-v3.md` (8 nov. 2026), seule référence pour coder** : V1 complète jusqu'à la réservation sur la tablette, points « à vérifier » résolus dans le code. Ce qui suit est l'historique.
+
 > Rédigée le 8 novembre 2026. **Aucun code écrit.** Cette v2 **remplace la v1** (`ANALYSE.md`) pour le produit, le parcours et les plans. La v1 reste valable pour le **moteur technique** : écriture dans les agendas (§4), règles de disponibilité (§6), architecture serveur (§7), sécurité (§8).
 > Maquette de référence (interactive, à valider avant tout code d'interface) : `maquettes/salle-app-parcours.html` (5 vues : Store, installation, page de l'application, Écrans, vue d'ensemble). Les maquettes `salle-reservation-sur-place.html` (dessin de la porte) et `salle-parcours-complet.html` (v1) restent des références secondaires.
 > Document pensé pour qu'une autre session Claude implémente sans le contexte de celle-ci. Lire §0 d'abord.

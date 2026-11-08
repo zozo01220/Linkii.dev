@@ -62,8 +62,15 @@ builder.Services.AddSingleton<GoogleConnector>();   // aussi utilisé par Applic
 builder.Services.AddSingleton<ICalendarConnector>(sp => sp.GetRequiredService<GoogleConnector>());
 builder.Services.AddSingleton<ICalendarConnector, CalDavConnector>();
 builder.Services.AddSingleton<ICalendarConnector, EwsConnector>();
+// Réservation de salle : écriture dans les agendas (création des réservations faites sur la tablette, jamais la modification d'un rendez-vous)
+builder.Services.AddSingleton<IWritableCalendarConnector, M365Writer>();
+builder.Services.AddSingleton<IWritableCalendarConnector, GoogleWriter>();
 builder.Services.AddSingleton<ProviderDetector>();
 builder.Services.AddSingleton<CalendarService>();
+builder.Services.AddSingleton<RoomStatusService>();   // Réservation de salle : état des salles (porte, page de l'application, cartes), cache de 30 s
+builder.Services.AddSingleton<RoomSetupDrafts>();     // assistant d'installation : brouillon gardé pendant la connexion à Microsoft ou Google
+builder.Services.AddSingleton<RoomBookingService>();  // réservation depuis la tablette : le serveur vérifie, écrit, prévient les écrans de la salle
+builder.Services.AddHostedService<RoomWorker>();      // réponses des salles aux invitations, journal de 90 jours
 
 // Catalogue d'apps (manifestes du dossier Apps/), secrets chiffrés, appels sortants protégés, fournisseurs de données
 var dataDirEarly = builder.Configuration["Linkii:DataDir"] ?? builder.Environment.ContentRootPath;
@@ -205,6 +212,7 @@ Seed.PurgeOldCalendars(store0, store0.Path, app.Logger);
 HomeAssistantRules.ClientId = app.Configuration["Linkii:HomeAssistant:ClientId"] is { Length: > 0 } haId ? haId
     : (app.Configuration["Linkii:SiteUrl"] is { Length: > 0 } site ? site.TrimEnd('/') : "https://www.linkivi.com") + "/";
 HomeAssistantSetup.Migrate(store0, app.Services.GetRequiredService<AppCatalog>());
+RoomSetup.Migrate(store0, app.Services.GetRequiredService<AppCatalog>());   // Réservation de salle : les organisations qui ont déjà des salles reçoivent l'application (D11)
 app.Logger.LogInformation("Google (Calendar, Drive) : « Se connecter avec Google » {State}.", app.Services.GetRequiredService<GoogleAuth>().IsConfigured
     ? "disponible" : "indisponible (Linkii:Google:ClientId et Linkii:Google:ClientSecret absents de la configuration)");
 app.Logger.LogInformation("Microsoft (Microsoft 365, OneDrive) : « Se connecter avec Microsoft » {State}.", app.Services.GetRequiredService<MicrosoftAuth>().IsConfigured
@@ -788,8 +796,31 @@ api.MapPost("/player/device", (HttpRequest req, DeviceDto body, JsonStore store)
     if (s.DeviceKind == "android" && body.Battery is >= 0 and <= 100) { s.BatteryPct = body.Battery; s.BatteryCharging = body.Charging == true; }
     else { s.BatteryPct = null; s.BatteryCharging = false; s.BatteryAlertSent = false; }
     if (body.BootMs is > 0) s.DeviceBootUtc = DateTimeOffset.FromUnixTimeMilliseconds(body.BootMs.Value).UtcDateTime;
+    if (body.Touch != null) s.DeviceTouch = body.Touch;   // écran tactile : l'assistant « Nouvel écran de salle » propose les boutons de durée
     return Results.Ok();
 }));
+
+// Réservation de salle : la porte d'un écran de salle lit sa salle (créneaux, durées possibles, mode) et y réserve. Le serveur décide toujours.
+api.MapGet("/player/room", async (HttpRequest req, JsonStore store, RoomStatusService status) =>
+{
+    var (denied, s, t, room, installed) = store.Read<(IResult?, Screen?, Tenant?, SharedCalendar?, bool)>(db =>
+    {
+        var s = Auth(req, db);
+        if (Gate(s, db) is { } no) return (no, null, null, null, false);
+        var t = db.Clients.First(c => c.Id == s!.ClientId);
+        return (null, s, t, s!.RoomCalendarId is { } rid ? t.SharedCalendars.FirstOrDefault(c => c.Id == rid) : null, RoomSetup.Installed(db, t.Id));
+    });
+    if (denied != null) return denied;
+    if (s?.Room == null || t == null) return Results.NotFound();
+    return Results.Ok(await RoomDoor.Payload(status, t, s, room, installed, DateTime.UtcNow));
+});
+api.MapPost("/player/room/book", async (HttpRequest req, RoomBookDto body, JsonStore store, RoomBookingService rooms) =>
+{
+    var (denied, id) = store.Read<(IResult?, Guid?)>(db => { var s = Auth(req, db); return (Gate(s, db), s?.Id); });
+    if (denied != null) return denied;
+    var o = await rooms.Book(id!.Value, body.Minutes);
+    return o.Status == 200 ? Results.Ok(new { from = o.From, to = o.To }) : Results.Json(new { error = o.Error, code = o.Code }, statusCode: o.Status);
+});
 
 // Accusé d'une commande du back-office : reçue, exécutée ou en échec.
 api.MapPost("/player/command-ack", (HttpRequest req, CommandAckDto body, JsonStore store) => store.Write(db =>
@@ -1088,6 +1119,20 @@ api.MapGet("/preview/playlist", (HttpRequest req, JsonStore store, PreviewGrants
     });
 });
 
+// Simulateur d'un écran de salle : la porte avec les vraies données de la salle ; la réservation y est simulée (rien n'est écrit).
+api.MapGet("/preview/room", async (HttpRequest req, JsonStore store, PreviewGrants grants, RoomStatusService status) =>
+{
+    if (grants.Find(req.Headers["X-Preview"]) is not { } g) return Results.Unauthorized();
+    var (s, t, room, installed) = store.Read<(Screen?, Tenant?, SharedCalendar?, bool)>(db =>
+    {
+        var s = db.Screens.FirstOrDefault(x => x.Id == g.ScreenId && x.ClientId == g.ClientId && x.Token != null);
+        var t = db.Clients.FirstOrDefault(c => c.Id == g.ClientId);
+        return (s, t, s?.RoomCalendarId is { } rid ? t?.SharedCalendars.FirstOrDefault(c => c.Id == rid) : null, t != null && RoomSetup.Installed(db, t.Id));
+    });
+    if (s?.Room == null || t == null) return Results.NotFound();
+    return Results.Ok(await RoomDoor.Payload(status, t, s, room, installed, DateTime.UtcNow));
+});
+
 api.MapGet("/preview/data/{id:guid}", async (HttpRequest req, Guid id, JsonStore store, PreviewGrants grants, Notifier notifier, AppCatalog catalog, AppProviders providers, SecretBox box) =>
 {
     if (grants.Find(req.Headers["X-Preview"]) is not { } g) return Results.Unauthorized();
@@ -1170,7 +1215,8 @@ record QrHit(Guid ClientId, Guid ItemId, string? Destination, bool Counts);
 record PlayDto(Guid? MediaId, string? AppId, long Start, int Sec);
 record KioskEventDto(long At, string Type, Guid? Tile, string? Title, int Sec, string? How);
 record StartDto(int? W, int? H);
-record DeviceDto(string? Kind, string? Os, string? Model, string? App, long? BootMs, string? PinSig = null, string? Host = null, string? Instance = null, List<MonitorDto>? Monitors = null, int? Battery = null, bool? Charging = null, bool? Owner = null);
+record DeviceDto(string? Kind, string? Os, string? Model, string? App, long? BootMs, string? PinSig = null, string? Host = null, string? Instance = null, List<MonitorDto>? Monitors = null, int? Battery = null, bool? Charging = null, bool? Owner = null, bool? Touch = null);
+record RoomBookDto(int Minutes);
 record MonitorDto(int N, int W, int H, bool Primary);
 record CommandAckDto(Guid Id, string? Status, string? Detail);
 

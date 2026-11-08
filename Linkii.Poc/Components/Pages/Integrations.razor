@@ -16,6 +16,7 @@
 @inject HomeAssistantClient HaClient
 @inject HomeAssistantLive HaLive
 @inject ModeService Modes
+@inject Notifier Notifier
 @using Microsoft.JSInterop
 @inject IJSRuntime JS
 
@@ -278,6 +279,10 @@ else
     {
         <HaWizard StartStep="wizStep" Adding="wizAdding" OnAdded="() => pendingUse = wid" OnClose="CloseWizard" OnChanged="Load" />
     }
+    else if (wid == RoomRules.AppId)
+    {
+        <RoomAppWizard StartStep="wizStep" Adding="wizAdding" OnAdded="() => pendingUse = wid" OnClose="CloseWizard" OnChanged="Load" />
+    }
     else
     {
         <AppAccountWizard AppId="@wid" StartStep="wizStep" Adding="wizAdding" AccountShared="AccountShared(wid)" OnAdded="() => pendingUse = wid" OnClose="CloseWizard" OnChanged="Load" />
@@ -290,17 +295,17 @@ else
     <div class="modal app-modal sm" role="alertdialog" aria-modal="true" aria-labelledby="rc-title">
         <div class="modal-head">
             <AppIcon Id="@ri.Icon" />
-            <div class="grow"><h3 id="rc-title">Retirer l'application @ri.Name ?</h3><small>Tout ce que cette application a apporté dans Linkivi est retiré en une fois.</small></div>
+            <div class="grow"><h3 id="rc-title">Retirer l'application @ri.Name ?</h3><small>@(ri.Id == RoomRules.AppId ? "Les salles, leurs agendas et les règles sont gardés : une réinstallation retrouve tout." : "Tout ce que cette application a apporté dans Linkivi est retiré en une fois.")</small></div>
         </div>
         <div class="modal-body">
             <ul class="cw-list">
-                @foreach (var l in ri.Lines) { <li><b>@l.Title</b>@if (l.Note.Length > 0) { <small>@l.Note</small> }</li> }
+                @foreach (var l in ri.Lines.Where(l => ri.Id != RoomRules.AppId || !l.Title.StartsWith("Aucune liste"))) { <li><b>@l.Title</b>@if (l.Note.Length > 0) { <small>@l.Note</small> }</li> }
             </ul>
             <p class="acc-hint">Rien n'est supprimé chez le fournisseur. Vous pourrez ajouter l'application de nouveau depuis le Store.</p>
         </div>
         <div class="modal-foot">
             <button class="btn ghost" @onclick="() => retireInfo = null">Annuler</button>
-            <button class="btn danger-solid" @onclick="ConfirmRetire">Retirer et tout supprimer</button>
+            <button class="btn danger-solid" @onclick="ConfirmRetire">@(ri.Id == RoomRules.AppId ? "Désinstaller" : "Retirer et tout supprimer")</button>
         </div>
     </div>
 }
@@ -481,6 +486,7 @@ else
         "canva" or "google-slides" or "google-docs" or "ms-powerpoint" => "Documents et design",
         "facebook" => "Réseaux sociaux",
         "emergency" => "Sécurité",
+        RoomRules.AppId => CalendarsGroup,
         _ => "Autres"
     };
 
@@ -634,8 +640,15 @@ else
         else Toast.Ok($"{done} application{(done > 1 ? "s" : "")} {(on ? "activée" : "désactivée")}{(done > 1 ? "s" : "")}.{extra}");
     }
 
+    /// <summary>Une application d'agenda dont des salles de « Réservation de salle » dépendent ne se retire pas : message, ou null.</summary>
+    private string? RoomsBlock(string id) =>
+        id.StartsWith("cal-") && enabled.Contains(RoomRules.AppId) && RoomSetup.RoomsUsing(tenant, id[4..]) is var n and > 0
+            ? $"{n} salle{(n > 1 ? "s utilisent" : " utilise")} {SharedCalendarSources.Find(id[4..])?.Name ?? id} : retirez-{(n > 1 ? "les" : "la")} d'abord de « Réservation de salle » (Configuration › Gérer les salles)."
+            : null;
+
     private async Task BulkRetire(List<string> ids)
     {
+        if (ids.Select(RoomsBlock).FirstOrDefault(m => m != null) is { } block) { Toast.Error(block); return; }
         var gone = ids.Where(CanRetire).ToList();
         foreach (var id in gone) await RetireCore(id);
         selected.Clear();
@@ -656,6 +669,7 @@ else
         }
         else if (id.StartsWith("cal-")) { var source = id[4..]; Store.Write(d => { d.Tenant.SharedCalendars.RemoveAll(c => c.Source == source); }); }
         else if (id is "google-slides" or "google-docs" or "ms-powerpoint" or "facebook") Svc.Uninstall(id);   // contenus et images converties
+        else if (id == RoomRules.AppId) { RoomSetup.Uninstall(Store, Svc); await Notifier.NotifyClient(Store.ClientId); }   // salles et règles gardées ; portes « Application retirée »
         if (id != "ha-home") SetOn(id, false);
         Svc.Unmark(id);
         if (ConnectedAccounts.For(id) is { } kind && !keepAccount) await Accounts.Disconnect(kind);   // le compte part avec l'application
@@ -669,7 +683,8 @@ else
         await RetireCore(ri.Id);
         selected.Remove(ri.Id);
         Load();
-        Toast.Ok($"{ri.Name} retiré : ses fichiers sont supprimés de la médiathèque{(ri.AccountGoes ? " et le compte est déconnecté" : "")}.");
+        if (ri.Id == RoomRules.AppId) Toast.Ok("Réservation de salle retirée : les salles et leurs règles sont gardées, les écrans de salle affichent « Application retirée ».");
+        else Toast.Ok($"{ri.Name} retiré : ses fichiers sont supprimés de la médiathèque{(ri.AccountGoes ? " et le compte est déconnecté" : "")}.");
     }
 
     private record RetireInfo(string Id, string Name, string Icon, List<(string Title, string Note)> Lines, bool AccountGoes);
@@ -709,6 +724,12 @@ else
                     nt = N(refs.Count, "calendrier partagé", "calendriers partagés");
                 }
                 else if (id == "ha-home") { fileIds = new(); conts = new(); nt = ""; }
+                else if (id == RoomRules.AppId)
+                {
+                    var n = d.AllScreens.Count(s => s.Room != null);
+                    fileIds = new(); conts = new();
+                    nt = n == 0 ? "Aucun écran de salle" : $"{N(n, "écran de salle sera désactivé", "écrans de salle seront désactivés")} : ils affichent « Application retirée »";
+                }
                 else
                 {
                     conts = d.Media.Where(m => m.AppId == id).ToList();
@@ -735,6 +756,7 @@ else
     private async Task Retire(CatalogView.Entry e)
     {
         menuId = null;
+        if (RoomsBlock(e.Id) is { } block) { Toast.Error(block); return; }
         if (HasWizard(e.Id)) { retireInfo = ImpactOf(e); return; }
         await RetireCore(e.Id);
         selected.Remove(e.Id);
@@ -1159,6 +1181,8 @@ else
         MicrosoftReturn();
         DropboxReturn();
         FacebookReturn();
+        // Réservation de salle : retour d'une connexion lancée par son assistant (réussie ou non), il reprend où il était (brouillon gardé)
+        if (Embed == null && Mode != "app" && admin && WizParam == RoomRules.AppId && wizId == null) OpenWizard(RoomRules.AppId, 2, !InMineId(RoomRules.AppId));
         if (Embed != null || Mode == "app") return;
         AddFromLink();
         // ?gerer=<application> (entrée du menu, page d'une application) : sa fenêtre de configuration ; ?retirer=<application> : la confirmation du retrait
@@ -1181,6 +1205,8 @@ else
     [Parameter] public EventCallback OnChanged { get; set; }
 
     public void ConfigureById(string id) { if (EntryOf(id) is { } e) { OpenDialogFor(e); StateHasChanged(); } }
+    /// <summary>Assistant d'une application ouvert à une étape (Réservation de salle : 2 = Agendas, 3 = Salles), depuis la page de l'application.</summary>
+    public void WizardById(string id, int step) { if (HasWizard(id)) { OpenWizard(id, step, !InMineId(id)); StateHasChanged(); } }
     public async Task RetireById(string id) { if (EntryOf(id) is { } e) { await Retire(e); StateHasChanged(); } }
     public void SyncById(string id) => Resync(id);
 
@@ -1362,7 +1388,7 @@ else
         Toast.Ok("Synchronisation lancée : les fichiers arrivent dans la médiathèque.");
     }
 
-    public static bool HasWizard(string id) => id == "canva" || id.StartsWith("drv-") || id is "cal-google" or "cal-m365" or "cal-caldav" or "cal-ews" or "google-slides" or "google-docs" or "ms-powerpoint" or "facebook" or "ha-home";
+    public static bool HasWizard(string id) => id == "canva" || id.StartsWith("drv-") || id is "cal-google" or "cal-m365" or "cal-caldav" or "cal-ews" or "google-slides" or "google-docs" or "ms-powerpoint" or "facebook" or "ha-home" or RoomRules.AppId;
 
     private void OpenWizard(string id, int step, bool adding) { pendingUse = null; wizId = id; wizStep = step; wizAdding = adding; }
 

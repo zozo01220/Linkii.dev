@@ -14,6 +14,7 @@
 @inject TenantContext HCtx
 @inject ScreenControl Control
 @inject GettingStarted Welcome
+@inject RoomStatusService RoomStatus
 @using Microsoft.JSInterop
 
 <div class="page-head">
@@ -41,6 +42,16 @@
                     <div class="kebab-menu lx-add-menu" role="menu">
                         <button type="button" role="menuitem" @onclick="OpenConnect"><Ico Name="monitor" Size="18" /><span><b>Écran de diffusion</b><small>Avec le code affiché sur l'écran</small></span></button>
                         <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenPairKiosk(); }"><Ico Name="hand" Size="18" /><span><b>Borne interactive <span class="kiosk-new">Nouveau</span></b><small>Borne à écran tactile</small></span></button>
+                        @* Écran de salle : seulement avec l'application « Réservation de salle » ; sans elle, visible grisé (mode expert) avec le lien vers le Store *@
+                        @if (roomApp)
+                        {
+                            <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenRoomWizard(null, null); }"><Ico Name="door" Size="18" /><span><b>Écran de salle <span class="kiosk-new">Nouveau</span></b><small>Tablette à la porte d'une salle</small></span></button>
+                        }
+                        else if (Modes.Expert)
+                        {
+                            <button type="button" role="menuitem" disabled><Ico Name="door" Size="18" /><span><b>Écran de salle <span class="badge neutre">Application requise</span></b><small>Installez « Réservation de salle » pour créer des écrans de salle.</small></span></button>
+                            <div class="rb-store"><a class="btn go sm" href="/store">Ouvrir le Store</a></div>
+                        }
                         @if (FolderOps) { <span class="sep" role="separator"></span> }
                         @if (FolderOps) { <button type="button" role="menuitem" @onclick="OpenNewFolder"><Ico Name="folder" Size="18" /><span><b>Nouveau dossier@(currentRow is { } cf ? $" dans « {cf.Folder.Name} »" : "")</b></span></button> }
                     </div>
@@ -65,6 +76,10 @@
 @if (kindFilter == "kiosk" && !screens.Any(x => x.Kiosk != null) && canAdd)
 {
     <div class="card empty"><div class="big">Aucune borne interactive</div><p>Une borne est un écran tactile : le visiteur choisit ce qu'il veut voir dans un menu de tuiles. Sans toucher, elle diffuse comme un écran ordinaire.</p><button type="button" class="btn" @onclick="OpenPairKiosk"><Ico Name="hand" Size="16" /> Connecter une borne</button></div>
+}
+@if (kindFilter == "room" && !screens.Any(x => x.Room != null) && canAdd && roomApp)
+{
+    <div class="card empty"><div class="big">Aucun écran de salle</div><p>Un écran de salle est une tablette à la porte : elle affiche si la salle est libre ou occupée et permet de la réserver d'un geste.</p><button type="button" class="btn" @onclick="() => OpenRoomWizard(null, null)"><Ico Name="door" Size="16" /> Créer un écran de salle</button></div>
 }
 
 @if (Tabs.Count > 1)
@@ -640,6 +655,11 @@ else if (liveWall is { } liveWallId)
     <KioskDrawer Id="kioskId" OnClose="CloseKiosk" />
 }
 
+@if (roomWizardOpen)
+{
+    <RoomScreenWizard @ref="roomWizard" ScreenId="roomWizardScreen" RoomId="roomWizardRoom" OnPair="PairRoomScreen" OnClose="CloseRoomWizard" OnSaved="() => { Reload(); roomRead = DateTime.MinValue; }" />
+}
+
 @if (simScreen is { } simId)
 {
     <SimulatorDialog ScreenId="simId" OnClose="() => simScreen = null" />
@@ -803,6 +823,8 @@ else if (wallEdit is { } wid)
         // « Connecter un écran » demandé d'ailleurs (Premiers pas, menu Aide) : l'assistant de l'écran s'ouvre, avec la liste demandée ou celle d'office
         var cq = System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query);
         if (cq["connecter"] != null && canAdd && !noArea) { cleanQuery = true; OpenWizard(Guid.TryParse(cq["liste"], out var cl) ? cl : DefaultList()); }
+        // « Créer un écran de salle » (fin de l'installation de Réservation de salle, Contenus de l'application) : l'assistant de l'écran de salle s'ouvre
+        if (cq["salle"] == "nouveau" && canAdd && !noArea && roomApp) { cleanQuery = true; OpenRoomWizard(null, Guid.TryParse(cq["id"], out var rid) ? rid : null); }
         areaFilter = Store.Read(d => d.Users.FirstOrDefault(u => u.Id == d.Access.UserId)?.LibraryTabs.GetValueOrDefault("screens-area")) == "one" ? area?.Id.ToString() ?? "" : "";   // filtre « Aire » retenu (par défaut : toutes)
         // « Ouvrir cette aire » depuis un écran d'une autre aire : après le changement d'aire, l'écran choisi s'ouvre directement en édition
         var qs = System.Web.HttpUtility.ParseQueryString(new Uri(Nav.Uri).Query);
@@ -1011,7 +1033,7 @@ else if (wallEdit is { } wid)
     {
         get
         {
-            var q = InZone.Where(InPosition).Where(s => kindFilter switch { "kiosk" => s.Kiosk != null, "broadcast" => s.Kiosk == null, _ => true }).Where(s => statusFilter switch
+            var q = InZone.Where(InPosition).Where(s => kindFilter switch { "kiosk" => s.Kiosk != null, "room" => s.Room != null, "broadcast" => s.Kiosk == null && s.Room == null, _ => true }).Where(s => statusFilter switch
             {
                 "online" => !IsOffline(s),
                 "offline" => IsOffline(s),
@@ -1444,7 +1466,7 @@ else if (wallEdit is { } wid)
             </div>
             <div class="ec-bd">
                 <div class="ec-nm">
-                    <span class="ec-kd @(s.Kiosk != null ? "k" : "")" data-tip="@ltip" role="img" aria-label="@ltip"><Ico Name="@(s.Kiosk != null ? "hand" : "monitor")" Size="16" /></span>
+                    <span class="ec-kd @(s.Kiosk != null || s.Room != null ? "k" : "")" data-tip="@ltip" role="img" aria-label="@ltip"><Ico Name="@KindIcon(s)" Size="16" /></span>
                     <span class="ec-name">@s.Name</span>
                 </div>
                 <div class="ec-pl ro"><Ico Name="play-box" Size="14" /><span class="ec-pln">@listName</span></div>
@@ -1456,7 +1478,7 @@ else if (wallEdit is { } wid)
     /// <summary>Infobulle de l'icône du type sur la carte : type d'écran, puis l'appareil (système, application, navigateur, moniteur).</summary>
     private string DevTip(Screen s)
     {
-        var kind = s.Kiosk != null ? "Borne interactive" : "Écran de diffusion";
+        var kind = s.Room != null ? "Écran de salle" : s.Kiosk != null ? "Borne interactive" : "Écran de diffusion";
         if (s.DeviceKind == null) return kind + " · en attente des informations de l'écran";
         var parts = new List<string> { kind, s.DeviceOs ?? "Appareil" };
         if (s.DeviceApp is { Length: > 0 } da && s.DeviceApp != "web") parts.Add("App " + da);
@@ -1711,7 +1733,8 @@ else if (wallEdit is { } wid)
             // pied : un seul état de publication ; « Tout est à jour » sinon, pour que toutes les cartes aient la même hauteur
             string? gpsCls = null, gpsTxt = null, gpsTip = null;
             // une publication programmée reste lisible, même avec des modifications en attente (le bouton Publier est alors à côté)
-            if (gsched != null) { gpsCls = "sc"; gpsTxt = "Programmée le " + gsched; gpsTip = gpending ? "Publication programmée ; des modifications sont aussi en attente : « Publier » les envoie tout de suite" : "Publication programmée"; }
+            if (gs.Room != null) { gpsCls = "ok"; gpsTxt = "Rien à publier · suit la salle"; gpsTip = "Écran de salle : il affiche la porte de sa salle et suit les règles de l'application Réservation de salle, sans publication"; }
+            else if (gsched != null) { gpsCls = "sc"; gpsTxt = "Programmée le " + gsched; gpsTip = gpending ? "Publication programmée ; des modifications sont aussi en attente : « Publier » les envoie tout de suite" : "Publication programmée"; }
             else if (gpending) { gpsCls = "pe"; gpsTxt = "À publier"; gpsTip = "Liste de lecture, widgets ou choix de liste de lecture modifiés depuis la dernière publication (toutes zones)"; }
             else if (gdl is { State: "late" } && !gonline) { gpsCls = ""; gpsTxt = "Publiée à sa reconnexion"; gpsTip = "L'écran recevra la dernière publication dès qu'il se reconnecte"; }
             else if (gdl is { State: "wip" or "late" } gdp) { gpsCls = gdp.State == "late" ? "bad" : ""; gpsTxt = gdp.Label; gpsTip = gdp.Detail; }
@@ -1724,6 +1747,10 @@ else if (wallEdit is { } wid)
                                 @if (gpaused)
                                 {
                                     <span class="sc-pause-art"><b>☕</b><small>Petite pause</small></span>
+                                }
+                                else if (gs.Room != null)
+                                {
+                                    @RoomCard(gs)
                                 }
                                 else if (gs.Kiosk != null)
                                 {
@@ -1775,7 +1802,7 @@ else if (wallEdit is { } wid)
                 <div class="ec-bd">
                     <div class="ec-nm">
                         @* type d'écran ; l'appareil (système, navigateur, application) est dans l'infobulle *@
-                        <span class="ec-kd @(gs.Kiosk != null ? "k" : "")" data-tip="@gtip" tabindex="0" role="img" aria-label="@gtip"><Ico Name="@(gs.Kiosk != null ? "hand" : "monitor")" Size="16" /></span>
+                        <span class="ec-kd @(gs.Kiosk != null || gs.Room != null ? "k" : "")" data-tip="@gtip" tabindex="0" role="img" aria-label="@gtip"><Ico Name="@KindIcon(gs)" Size="16" /></span>
                         <button type="button" class="ec-name" title="@gs.Name" @onclick="() => Edit(gs)">@gs.Name</button>
                         <div class="kebab ec-kw">
                             <button type="button" class="kebab-btn" aria-label="Actions pour @gs.Name" aria-haspopup="menu" aria-expanded="@(menuFor == gs.Id ? "true" : "false")" @onclick="() => menuFor = menuFor == gs.Id ? null : gs.Id"><Ico Name="dots-v" Size="18" /></button>
@@ -1789,7 +1816,7 @@ else if (wallEdit is { } wid)
                                     <button type="button" role="menuitem" class="app-only" disabled="@(gwhy != null)" title="@gwhy" @onclick='() => { menuFor = null; OpenLive(gs, "preview"); }'><Ico Name="eye" Size="16" /> Aperçu en direct</button>
                                     <button type="button" role="menuitem" class="app-only" disabled="@(gwhy != null)" title="@gwhy" @onclick='() => { menuFor = null; OpenLive(gs, null); }'><Ico Name="@(gpaused ? "play" : "pause")" Size="16" /> @(gpaused ? "Reprendre" : "Mettre en pause")</button>
                                     @if (Modes.Expert && !HCtx.IsClientMember) { <button type="button" role="menuitem" @onclick='() => { menuFor = null; Nav.NavigateTo($"history?screen={gs.Id}"); }'><Ico Name="clock" Size="16" /> Historique</button> }
-                                    @if (Modes.Expert)
+                                    @if (Modes.Expert && gs.Room == null)
                                     {
                                         <hr />
                                         <button type="button" role="menuitem" disabled="@gbusy" @onclick="() => AskPublish(new() { gs.Id })"><Ico Name="upload" Size="16" /> Publier</button>
@@ -1815,8 +1842,16 @@ else if (wallEdit is { } wid)
                             }
                         </div>
                     </div>
-                    @* ce qui est diffusé : un clic change la liste de lecture (une par zone pour un écran découpé) *@
-                    @if (gs.ZoneCount == 1)
+                    @* ce qui est diffusé : un clic change la liste de lecture (une par zone pour un écran découpé) ; écran de salle : sa salle *@
+                    @if (gs.Room != null)
+                    {
+                        <button type="button" class="ec-pl" data-tip="@(gs.RoomCalendarId == null ? "Choisir la salle de cet écran" : "Changer de salle ou d'affichage")" @onclick="() => OpenRoomWizard(gs.Id, null)">
+                            <Ico Name="door" Size="14" />
+                            <span class="ec-pln">@RoomLine(gs)</span>
+                            <span class="ec-chev"><Ico Name="chevron" Size="14" /></span>
+                        </button>
+                    }
+                    else if (gs.ZoneCount == 1)
                     {
                         <label class="ec-pl" data-tip="Changer de liste de lecture">
                             <Ico Name="play-box" Size="14" />
@@ -2048,8 +2083,9 @@ else if (wallEdit is { } wid)
                 <div class="pl-title">
                     <input type="checkbox" class="sc-check" aria-label="Sélectionner @sc.Name" checked="@selectedIds.Contains(sc.Id)" @onchange="() => ToggleSelect(sc.Id)" />
                     <span class="sc-dot @cls @(paused ? "paused" : "")" title="@st"><span class="sr-only sc-st">@(paused ? "En pause" : st)</span></span>
-                    <button type="button" class="pl-name linklike-name" title="Paramètres de l'écran « @sc.Name »" @onclick="() => Edit(sc)"><span class="sc-kind" title="@(sc.Kiosk != null ? "Borne interactive" : "Écran de diffusion")"><Ico Name="@(sc.Kiosk != null ? "hand" : "monitor")" Size="15" /></span>@sc.Name</button>
+                    <button type="button" class="pl-name linklike-name" title="Paramètres de l'écran « @sc.Name »" @onclick="() => Edit(sc)"><span class="sc-kind" title="@(sc.Room != null ? "Écran de salle" : sc.Kiosk != null ? "Borne interactive" : "Écran de diffusion")"><Ico Name="@KindIcon(sc)" Size="15" /></span>@sc.Name</button>
                     @if (sc.Kiosk != null) { <span class="badge neutre kiosk-tag" title="Borne interactive"><Ico Name="hand" Size="12" /> Borne</span> }
+                    @if (sc.Room != null) { <span class="badge neutre kiosk-tag" title="Écran de salle"><Ico Name="door" Size="12" /> Salle</span> }
                     @if (!Flat) { @ScreenShare(sc) }
                     @if (paused) { <span class="badge mise-a-jour sc-paused-badge" title="@(sc.PausedUntilUtc is { } pu ? "Reprise automatique à " + LocalTime(pu) : "Reprise manuelle")">En pause</span> }
                     <div class="kebab">
@@ -2069,7 +2105,7 @@ else if (wallEdit is { } wid)
                                 <button type="button" role="menuitem" @onclick="() => OpenRename(sc)"><Ico Name="edit" Size="16" /> Renommer</button>
 
                                 @if (FolderOps) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (sc.Id, sc.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }
-                                @if (Modes.Expert) { <button type="button" role="menuitem" @onclick="() => AskPublish(new() { sc.Id })"><Ico Name="upload" Size="16" /> Publier</button> }
+                                @if (Modes.Expert && sc.Room == null) { <button type="button" role="menuitem" @onclick="() => AskPublish(new() { sc.Id })"><Ico Name="upload" Size="16" /> Publier</button> }
                                 @if (Modes.Expert) { <button type="button" role="menuitem" disabled="@(!Growth || !online)" title="@(!Growth ? Plans.LockedHint : !online ? "L'écran est hors ligne" : null)" @onclick='() => { menuFor = null; OpenLive(sc, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer le player</button> }
                                 @PowerItems(new[] { sc }, online)
                                 @if (CanRepair(sc)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; OpenRepair(sc); }"><Ico Name="monitor" Size="16" /> Associer un nouveau code…</button> }
@@ -2117,6 +2153,10 @@ else if (wallEdit is { } wid)
                     {
                         <span class="sc-pause-art"><b>☕</b><small>Petite pause</small></span>
                     }
+                    else if (sc.Room != null)
+                            {
+                                @RoomCard(sc)
+                            }
                     else if (sc.Kiosk != null)
                             {
                                 @KioskPreview(sc)
@@ -2148,7 +2188,12 @@ else if (wallEdit is { } wid)
                     @if (Modes.Expert) { <button type="button" class="sc-cal" title="@lcp.Tip" @onclick='() => Nav.NavigateTo($"programmations?id={lcp.Id}")'><Ico Name="calendar" Size="12" /> @lcp.Name</button> }
                     else { <span class="sc-cal" title="@lcp.Tip"><Ico Name="calendar" Size="12" /> @lcp.Name</span> }
                 }
-                @if (sc.ZoneCount == 1)
+                @if (sc.Room != null)
+                {
+                    <span class="sc-lbl">Salle</span>
+                    <button type="button" class="sc-select sc-zones-btn" title="Changer de salle ou d'affichage" @onclick="() => OpenRoomWizard(sc.Id, null)">@RoomLine(sc)</button>
+                }
+                else if (sc.ZoneCount == 1)
                 {
                     <label class="sc-lbl" for="pl-@sc.Id">@(sc.Kiosk != null ? "En inactivité" : "En diffusion")</label>
                     <select id="pl-@sc.Id" class="sc-select" @onchange="e => Assign(sc, e)">
@@ -2685,9 +2730,9 @@ else if (wallEdit is { } wid)
             list.Add(new("kind", "Type", kindFilter, new[]
             {
                 new FilterOption("", "Tous", screens.Count),
-                new FilterOption("broadcast", "Écrans de diffusion", screens.Count(x => x.Kiosk == null)),
+                new FilterOption("broadcast", "Écrans de diffusion", screens.Count(x => x.Kiosk == null && x.Room == null)),
                 new FilterOption("kiosk", "Bornes interactives", screens.Count(x => x.Kiosk != null))
-            }.ToList()));
+            }.Concat(screens.Any(x => x.Room != null) || kindFilter == "room" ? new[] { new FilterOption("room", "Écrans de salle", screens.Count(x => x.Room != null)) } : Array.Empty<FilterOption>()).ToList()));   // proposé s'il en existe
             if (area != null && ShowZones && OwnAreaVisible)
                 list.Add(new("zone", "Zone", zoneFilter ?? "", new[] { new FilterOption("", "Toutes", screens.Count) }
                     .Concat(zones.Select(z => new FilterOption(z.Id.ToString(), (z.IsWall ? "Mur " : "") + z.Name, screens.Count(x => ZoneOf(x)?.Id == z.Id)))).ToList()));
@@ -2810,6 +2855,7 @@ else if (wallEdit is { } wid)
         LoadGroups();
         treeData = TreeData();
         LoadFirstScreen();
+        LoadRoomStates();
     }
 
     private List<Area> pairAreas = new();
@@ -2842,7 +2888,107 @@ else if (wallEdit is { } wid)
 
     private Guid? kioskOpen;   // tiroir de la borne ouverte (KioskDrawer)
     private void CloseKiosk() { kioskOpen = null; Reload(); }
-    private void Edit(Screen s) { menuFor = null; if (s.Kiosk != null) { kioskOpen = s.Id; return; } editing = s.Id; }   // une borne s'ouvre dans son tiroir
+    private void Edit(Screen s) { menuFor = null; if (s.Room != null) { OpenRoomWizard(s.Id, null); return; } if (s.Kiosk != null) { kioskOpen = s.Id; return; } editing = s.Id; }   // une borne s'ouvre dans son tiroir ; un écran de salle dans « Modifier l'écran de salle »
+
+    // ---------- Écran de salle (application « Réservation de salle ») ----------
+    private bool roomApp;                       // application installée : « Écran de salle » dans le menu Ajouter
+    private bool roomWizardOpen, roomPairing;
+    private Guid? roomWizardScreen, roomWizardRoom;
+    private RoomScreenWizard? roomWizard;
+    private Dictionary<Guid, RoomNow?> roomNow = new();   // état de chaque salle (cartes)
+    private DateTime roomRead = DateTime.MinValue;
+
+    private static string KindIcon(Screen s) => s.Room != null ? "door" : s.Kiosk != null ? "hand" : "monitor";
+
+    private void OpenRoomWizard(Guid? screenId, Guid? roomId)
+    {
+        menuFor = null;
+        if (screenId == null && !roomApp) { Toast.Error("Installez « Réservation de salle » depuis le Store pour créer des écrans de salle."); return; }
+        if (screenId == null && !canAdd) { Toast.Error("Vous êtes en lecture seule sur les écrans : vous ne pouvez pas en connecter."); return; }
+        (roomWizardScreen, roomWizardRoom, roomWizardOpen) = (screenId, roomId, true);
+    }
+
+    private void CloseRoomWizard() { roomWizardOpen = false; roomWizard = null; roomRead = DateTime.MinValue; Reload(); }
+
+    /// <summary>Code saisi dans l'assistant : la tablette est reliée (facturée comme tout écran ajouté), puis l'assistant est rappelé.</summary>
+    private async Task PairRoomScreen(string code)
+    {
+        if (noArea) { roomWizard?.PairFailed("Aucune aire de gestion ne vous est confiée."); return; }
+        if (!Store.Read(d => d.Root.Screens.Any(x => x.Token == null && x.PairingCode == code))) { roomWizard?.PairFailed("Code inconnu : vérifiez celui qui s'affiche sur la tablette."); return; }
+        roomPairing = true;
+        await WithScreenCharge("Écran de salle " + code, async () =>
+        {
+            roomPairing = false;
+            var zid = (zones.FirstOrDefault(z => z.IsDefault) ?? FreeZones.FirstOrDefault())?.Id;
+            var spec = ScreenSpec.From(tenant);
+            var id = Store.Write(d =>
+            {
+                var s = d.ClaimScreen(code);
+                if (s == null) return (Guid?)null;
+                s.Name = "Écran de salle " + code;
+                s.PlaylistId = null;
+                if (zid != null) s.ZoneId = zid;
+                MemberOps.AdoptScreen(d, s.Id);
+                s.ScreenType = spec.Type;
+                s.Orientation = s.DetectedW is > 0 && s.DetectedH is > 0 && s.DetectedH > s.DetectedW ? "portrait" : "landscape";
+                s.Resolution = "auto";
+                s.AutoStart = d.Tenant.DefaultAutoStart;
+                s.Room = new RoomScreen();   // sans salle : la tablette affiche « Appairée · en attente de configuration »
+                s.Token = Guid.NewGuid().ToString("N");
+                s.PairingCode = null;
+                d.Tenant.FirstScreen = FirstScreen.Done;
+                return s.Id;
+            });
+            if (id == null) { roomWizard?.PairFailed("Code inconnu : vérifiez celui qui s'affiche sur la tablette."); return false; }
+            Hist.By(HCtx, History.Player, $"Écran de salle « Écran de salle {code} » connecté", Notifs.Info, null, "screen", id.Value, "Écran de salle " + code, channel: History.Screens);
+            Reload();
+            roomWizard?.Paired(id.Value);
+            return true;
+        });
+    }
+
+    /// <summary>Ligne de la carte : la salle de l'écran, ou « Choisir la salle ».</summary>
+    private string RoomLine(Screen s) =>
+        s.RoomCalendarId is { } id && tenant.SharedCalendars.FirstOrDefault(c => c.Id == id) is { } r ? SharedCalendarSources.RoomName(r) : "Choisir la salle";
+
+    /// <summary>États des salles des écrans affichés, relus toutes les 30 s (cache du serveur).</summary>
+    private void LoadRoomStates()
+    {
+        roomApp = Store.Read(d => RoomSetup.Installed(d));
+        var ids = screens.Where(s => s.Room != null && s.RoomCalendarId != null).Select(s => s.RoomCalendarId!.Value).Distinct().ToList();
+        if (ids.Count == 0 || DateTime.UtcNow - roomRead < TimeSpan.FromSeconds(30)) return;
+        roomRead = DateTime.UtcNow;
+        var clientId = Store.ClientId;
+        var t = tenant;
+        _ = Task.Run(async () =>
+        {
+            var snaps = await RoomStatus.ReadMany(clientId, ids);
+            var tz = RoomRules.Zone(t.Timezone);
+            var res = new Dictionary<Guid, RoomNow?>();
+            foreach (var id in ids)
+                if (t.SharedCalendars.FirstOrDefault(c => c.Id == id) is { } room) res[id] = RoomStatusService.StateOf(snaps.GetValueOrDefault(id), room, tz, DateTime.UtcNow);
+            roomNow = res;
+            await InvokeAsync(StateHasChanged);
+        });
+    }
+
+    /// <summary>Aperçu d'un écran de salle sur sa carte : l'état de sa salle (vert, orange, rouge), ou gris.</summary>
+    private RenderFragment RoomCard(Screen s) => __builder =>
+    {
+        var room = s.RoomCalendarId is { } rid ? tenant.SharedCalendars.FirstOrDefault(c => c.Id == rid) : null;
+        var state = RoomDoor.StateOf(roomApp, s, room);
+        var tz = RoomRules.Zone(tenant.Timezone);
+        var now = room != null ? roomNow.GetValueOrDefault(room.Id) : null;
+        var (cls, word, sub) = state switch
+        {
+            "retired" => ("grey", "Application retirée", ""),
+            "none" => ("grey", "Sans salle", "Choisissez la salle"),
+            "off" => ("grey", "Indisponible", "Salle désactivée"),
+            _ when now == null => ("grey", "Lecture…", ""),
+            _ => (now.State, now.State == "busy" ? "Occupé" : now.State == "soon" ? "Bientôt" : "Libre", RoomRules.StateText(now, tz))
+        };
+        <span class="rb-card @cls"><small>@(room != null ? SharedCalendarSources.RoomName(room) : "Écran de salle")</small><b>@word</b>@if (sub.Length > 0) { <small>@sub</small> }</span>
+    };
 
     // ---------- Paramètres de l'écran, plusieurs écrans sur un même PC ----------
     private Guid? settingsFor;
@@ -2946,6 +3092,7 @@ else if (wallEdit is { } wid)
     {
         var then = afterScreenPay;
         screenPay = null; afterScreenPay = null;
+        if (roomPairing && (o.Cancelled || !o.Paid)) { roomPairing = false; roomWizard?.PairFailed(o.Cancelled ? "Paiement annulé : la tablette n'est pas connectée." : "Paiement refusé : la tablette n'est pas connectée."); }
         if (o.Cancelled || then == null) return;
         if (!o.Paid) { Toast.Error("Paiement refusé (simulation) : l'écran n'a pas été connecté."); return; }
         await then();
