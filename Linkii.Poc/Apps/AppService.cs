@@ -51,17 +51,26 @@ public class AppService(TenantStore store, AppCatalog catalog, AppProviders prov
     /// <summary>Groupe « Applications » du menu : afficher ou retirer une application (AppMenu). Le menu se met à jour sans recharger.</summary>
     public void SetMenu(string id, bool on) { store.Write(d => { RequireAdmin(d); AppMenu.Set(d.Tenant, id, on); }); InstallsChanged?.Invoke(); }
     /// <summary>Interrupteur d'un contenu de la page d'une application. kind : media | calendar | page | entity. Désactivé, il disparaît des choix (médiathèque, compositions, listes de lecture, diffusion).</summary>
-    public void SetContentOn(string kind, string id, bool on) => store.Write(d =>
+    public void SetContentOn(string kind, string id, bool on) => SetContentsOn(new[] { (kind, id) }, on);
+
+    /// <summary>Active ou désactive plusieurs contenus d'un coup (« Tout activer », interrupteur d'un groupe) : une seule écriture.</summary>
+    public void SetContentsOn(IEnumerable<(string Kind, string Id)> rows, bool on) => store.Write(d =>
     {
         RequireAdmin(d);
+        var entities = d.Tenant.HomeAssistant?.Entities.GroupBy(e => e.Id).ToDictionary(g => g.Key, g => g.First());
+        foreach (var (kind, id) in rows) SetOne(d, entities, kind, id, on);
+    });
+
+    private static void SetOne(ClientDb d, Dictionary<string, HomeAssistantEntity>? entities, string kind, string id, bool on)
+    {
         switch (kind)
         {
             case "media": if (Guid.TryParse(id, out var mid) && d.AllMedia.FirstOrDefault(m => m.Id == mid) is { } m) m.Off = !on; break;
             case "calendar": if (Guid.TryParse(id, out var cid) && d.Tenant.SharedCalendars.FirstOrDefault(c => c.Id == cid) is { } c) c.Off = !on; break;
             case "page": if (d.Tenant.FacebookPages.FirstOrDefault(p => p.Id == id) is { } p) p.Off = !on; break;
-            case "entity": if (d.Tenant.HomeAssistant?.Entities.FirstOrDefault(e => e.Id == id) is { } e) e.Off = !on; break;
+            case "entity": if (entities != null && entities.TryGetValue(id, out var e)) e.Off = !on; break;
         }
-    });
+    }
 
 
     /// <summary>Une application ou un compte a changé ailleurs (retrait, déconnexion de Home Assistant…) : le menu relit ses entrées.</summary>

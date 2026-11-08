@@ -723,6 +723,8 @@ public class DriveFolder
     public string Location { get; set; } = "";    // affichage : emplacement du dossier
     public string WebUrl { get; set; } = "";      // « Ouvrir dans… » ; vide pour les dossiers ajoutés avant (Google : déduite de RemoteId)
     public bool Subfolders { get; set; }          // fichiers des sous-dossiers compris, tous niveaux
+    public List<string> OnlyFiles { get; set; } = new();   // seuls fichiers directs du dossier retenus (identifiants, choisis un à un) ; vide : tous ; NoFiles : aucun (les sous-dossiers ne sont pas filtrés)
+    public const string NoFiles = "::aucun";
     public int FileCount { get; set; }
     public int Skipped { get; set; }              // fichiers laissés de côté au-delà de DriveService.MaxFiles
     public int SubfolderCount { get; set; }       // sous-dossiers vus à la dernière synchronisation (directs seulement sans Subfolders)
@@ -737,8 +739,6 @@ public class CanvaFolder
     public string CanvaId { get; set; } = "";     // identifiant du dossier chez Canva (« root » : tout le compte)
     public string Name { get; set; } = "";
     public string Location { get; set; } = "";    // affichage : chemin du dossier dans Canva
-    public List<string> OnlyFiles { get; set; } = new();   // seuls fichiers directs du dossier retenus (identifiants, choisis un à un) ; vide : tous ; NoFiles : aucun (les sous-dossiers ne sont pas filtrés)
-    public const string NoFiles = "::aucun";
     public bool Subfolders { get; set; }
     public int DesignCount { get; set; }
     public int Skipped { get; set; }              // designs laissés de côté au-delà de CanvaService.MaxDesigns
