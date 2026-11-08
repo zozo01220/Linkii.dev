@@ -1,0 +1,90 @@
+@using System.Globalization
+
+@* Calendrier et heure (inchangés) pour la publication d'une liste.
+   - Un écran (colonne « Quand » de l'onglet Diffusion) : choisit son heure, rien n'est publié avant le bouton orange ; « Maintenant » efface l'heure.
+   - Tous les écrans activés (menu ▾ du bouton « Publier ») : une même heure pour tous, programmée aussitôt. *@
+@{
+    var cal = new DateTime(calY, calM, 1);
+    var first = ((int)cal.DayOfWeek + 6) % 7;
+    var days = DateTime.DaysInMonth(calY, calM);
+    var today = Model.Now().Date;
+    var n = Target != null ? 1 : Model.Chosen.Count;
+}
+<div class="modal-backdrop" @onclick="Close"></div>
+<div class="modal pp-modal" role="dialog" aria-modal="true" aria-labelledby="pp-when-title">
+    <h3 id="pp-when-title">@(Target != null ? $"Quand publier sur « {Target.S.Name} » ?" : $"Programmer · {n} écran{(n > 1 ? "s" : "")}")</h3>
+    <p class="muted">@(pickDay is { } pd ? $"Publication le {pd.ToString("d MMMM yyyy", Fr)} à {pickH:00}:{pickM:00}." : Target != null ? "Aucune date choisie : publication maintenant." : "Choisissez le jour et l'heure.")</p>
+    <div class="pp-cal">
+        <div class="pp-ch">
+            <button type="button" class="pp-clk" aria-label="Mois précédent" @onclick="() => Month(-1)"><Ico Name="chevron-left" Size="16" /></button>
+            <b>@cal.ToString("MMMM yyyy", Fr)</b>
+            <button type="button" class="pp-clk" aria-label="Mois suivant" @onclick="() => Month(1)"><Ico Name="chevron-right" Size="16" /></button>
+        </div>
+        <div class="pp-cg">
+            @foreach (var d in new[] { "L", "M", "M", "J", "V", "S", "D" }) { <i class="dw">@d</i> }
+            @for (var k = 0; k < first; k++) { <i></i> }
+            @for (var i = 1; i <= days; i++)
+            {
+                var day = new DateTime(calY, calM, i);
+                var past = day < today;
+                <button type="button" class="dy @(pickDay == day ? "on" : "")" disabled="@past" @onclick="() => pickDay = day">@i</button>
+            }
+        </div>
+    </div>
+    <div class="pp-tm">
+        <span>Heure</span>
+        <select @bind="pickH">@for (var h = 0; h < 24; h++) { <option value="@h">@h.ToString("00")</option> }</select>
+        <span>:</span>
+        <select @bind="pickM">@for (var m = 0; m < 60; m += 5) { <option value="@m">@m.ToString("00")</option> }</select>
+    </div>
+    <div class="pp-mf">
+        @if (Target != null) { <button type="button" class="btn ghost" @onclick="NowOne">Maintenant</button> }
+        <span class="grow"></span>
+        <button type="button" class="btn ghost" @onclick="Close">Annuler</button>
+        @if (Target != null)
+        {
+            <button type="button" class="btn" disabled="@(pickDay == null)" @onclick="SaveOne">Enregistrer</button>
+        }
+        else
+        {
+            <button type="button" class="btn" disabled="@(pickDay == null || Model.Busy)" @onclick="ProgramAll">Programmer</button>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public PlaylistDiffusion Model { get; set; } = default!;
+    [Parameter] public PlaylistDiffusion.ScreenRow? Target { get; set; }   // null : tous les écrans activés
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnDone { get; set; }   // heure choisie pour un écran, ou programmation faite
+
+    private static readonly CultureInfo Fr = CultureInfo.GetCultureInfo("fr-FR");
+    private int calY, calM; private DateTime? pickDay; private int pickH = 8, pickM;
+
+    protected override void OnInitialized()
+    {
+        var cur = Target?.When ?? Target?.Scheduled;
+        var basis = cur ?? Model.Now();
+        calY = basis.Year; calM = basis.Month;
+        pickDay = cur?.Date; pickH = cur?.Hour ?? 8; pickM = cur is { } c ? c.Minute / 5 * 5 : 0;
+    }
+
+    private DateTime? At() => pickDay is { } d ? d.AddHours(pickH).AddMinutes(pickM) : null;
+    private void Month(int by) { var d = new DateTime(calY, calM, 1).AddMonths(by); calY = d.Year; calM = d.Month; }
+    private Task Close() => OnClose.InvokeAsync();
+
+    private Task NowOne() { if (Target != null) Model.SetWhen(Target, null); return OnDone.InvokeAsync(); }
+
+    private Task SaveOne()
+    {
+        if (Target == null || At() is not { } at) return Task.CompletedTask;
+        Model.SetWhen(Target, at <= Model.Now() ? null : at);   // une heure déjà passée : maintenant
+        return OnDone.InvokeAsync();
+    }
+
+    private async Task ProgramAll()
+    {
+        if (At() is not { } at) return;
+        if (await Model.Publish(at)) await OnDone.InvokeAsync();
+    }
+}

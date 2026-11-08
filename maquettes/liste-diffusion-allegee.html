@@ -1,0 +1,1034 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Liste de diffusion allégée</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="../Linkii.Poc/wwwroot/app.css">
+<style>
+/* ===== bandeau de la maquette (hors application) ===== */
+.mk-note{position:fixed;left:0;right:0;top:0;z-index:2000;height:42px;display:flex;align-items:center;gap:12px;background:#fff;border-bottom:1px dashed var(--line-2);padding:0 16px;color:var(--muted);font-size:13px}
+.mk-note b{color:var(--ink);font-weight:500}
+.mk-note .grow{flex:1}
+.mk-btn{border:1px solid var(--line-2);background:#fff;border-radius:6px;padding:4px 11px;font:inherit;font-size:13px;cursor:pointer;color:var(--ink)}
+.mk-btn.on{background:var(--ink);border-color:var(--ink);color:#fff}
+.mk-seg{display:inline-flex}
+.mk-seg .mk-btn:first-child{border-radius:6px 0 0 6px}
+.mk-seg .mk-btn:last-child{border-radius:0 6px 6px 0;border-left:0}
+body{padding-top:42px}
+.shell{min-height:calc(100vh - 42px)}
+.sidebar{top:42px;height:calc(100vh - 42px)}
+.qbar{top:42px}
+.mk-why{position:fixed;right:16px;top:52px;z-index:1999;width:390px;max-height:calc(100vh - 70px);overflow:auto;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 18px 40px rgba(11,31,58,.18);padding:16px 18px 18px;font-size:13.5px;display:none}
+.mk-why.on{display:block}
+.mk-why h4{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:16px 0 6px;font-weight:500}
+.mk-why h4:first-child{margin-top:0}
+.mk-why ol{margin:0;padding-left:18px;display:grid;gap:6px}
+.mk-why li{line-height:1.4}
+.mk-toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--ink);color:#fff;border-radius:8px;padding:10px 16px;font-size:14px;opacity:0;transition:opacity .2s;z-index:3000;pointer-events:none}
+.mk-toast.on{opacity:1}
+
+/* ===== en-tête de la page ===== */
+.nx-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.nx-title{display:flex;align-items:center;gap:4px}
+.nx-title h1{font-size:28px;line-height:1.2;letter-spacing:-.01em;outline:0}
+.nx-title h1[contenteditable=true]{box-shadow:0 0 0 2px var(--signal);border-radius:4px;padding:0 4px}
+.nx-ren{opacity:0;border:0;background:none;color:var(--muted);width:32px;height:32px;border-radius:6px;display:grid;place-items:center;cursor:pointer;transition:opacity .12s}
+.nx-title:hover .nx-ren,.nx-ren:focus-visible{opacity:1}
+.nx-ren:hover{background:var(--row);color:var(--ink)}
+.nx-meta{font-size:14px;color:var(--muted);margin-top:4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.nx-live{color:var(--ok);font-weight:500;background:none;border:0;padding:0;font:inherit;cursor:pointer}
+.nx-live:hover{text-decoration:underline}
+.nx-act{display:flex;align-items:center;gap:12px}
+.nx-pend{font:inherit;font-size:13.5px;color:var(--warn-ink);display:inline-flex;align-items:center;gap:7px;background:none;border:0;padding:0;cursor:pointer}
+.nx-pend:hover{text-decoration:underline}
+.nx-pend::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--warn)}
+.nx-ok{font-size:13.5px;color:var(--ok);display:inline-flex;gap:6px;align-items:center;font-weight:500}
+.nx-split{display:inline-flex;position:relative}
+.nx-split .btn:first-child{border-radius:var(--radius) 0 0 var(--radius)}
+.nx-split .nx-caret{border-radius:0 var(--radius) var(--radius) 0;border-left-color:rgba(255,255,255,.4);padding:9px 9px}
+.nx-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:30;min-width:240px;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 30px rgba(11,31,58,.16);padding:6px}
+.nx-menu[hidden]{display:none}
+.nx-menu button{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;font:inherit;font-size:14px;padding:9px 10px;border-radius:6px;cursor:pointer;color:var(--ink);text-align:left}
+.nx-menu button:hover{background:var(--row)}
+.nx-menu small{display:block;color:var(--muted);font-size:12px}
+
+/* onglets : ceux de la page, avec l'action propre à l'onglet à droite */
+.nx-tabsrow{display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--line)}
+.nx-tabsrow .pfx-tabs{border-bottom:0;padding:0;flex:1}
+.nx-tabsrow .pfx-tabs button:first-child{padding-left:2px}
+.nx-pane[hidden],#trans[hidden]{display:none}
+
+/* ===== Fil de lecture : panneau teinté qui reste visible quand on fait défiler la bibliothèque ===== */
+.nx-filbox{position:sticky;top:102px;z-index:6;margin:20px 0 22px;background:linear-gradient(180deg,#EAF1FA,#E2EBF6);border:1px solid #CBD9EA;border-radius:14px;padding:14px 18px 4px;box-shadow:0 12px 22px -18px rgba(11,31,58,.45)}
+.nx-filhd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13.5px;color:var(--muted)}
+.nx-filhd .t{display:inline-flex;align-items:center;gap:8px;color:var(--ink);font-size:15.5px;font-weight:500}
+.nx-filhd .t .ico-svg{color:var(--signal)}
+.nx-filhd .grow{flex:1}
+.nx-filhd .btn.ghost{background:#fff}
+.nx-fil{position:relative;display:flex;gap:18px;align-items:flex-start;overflow-x:auto;padding:14px 2px 16px;scrollbar-width:thin}
+.nx-it,.nx-tile{user-select:none;-webkit-user-select:none;touch-action:pan-y}
+.nx-it,.nx-loop,.nx-addt{will-change:transform}
+/* glisser : mêmes effets que l'app (.pfx-ghost, .pfx-phold de app.css), appliqués aux cartes de la maquette */
+.pfx-ghost .nx-th,.pfx-ghost .nx-tb{transform:scale(1.05) rotate(3deg);box-shadow:0 18px 36px rgba(11,31,58,.32),0 4px 10px rgba(11,31,58,.18);transition:none}
+.pfx-ghost.land .nx-th,.pfx-ghost.land .nx-tb{transition:transform .22s cubic-bezier(.2,.8,.2,1),box-shadow .22s;transform:none;box-shadow:var(--shadow-hover)}
+.pfx-ghost .nx-tb{border:0}
+.pfx-phold{border-radius:10px}
+.nx-tile.dragging{opacity:.4}
+body.pfx-dragging .nx-it:hover .nx-th{transform:none;box-shadow:0 2px 6px rgba(11,31,58,.18)}
+body.pfx-dragging .nx-it:hover .nx-hv,body.pfx-dragging .nx-tile:hover .pfx-add{opacity:0}
+body.pfx-dragging .nx-tile:hover .nx-tb{transform:none;box-shadow:none}
+.nx-loop{flex:none;align-self:center;margin-top:-26px;display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--muted);font-size:12px;text-align:center;line-height:1.3;width:88px}
+.nx-loop i{width:36px;height:36px;border-radius:50%;background:#fff;border:1px solid #CBD9EA;display:grid;place-items:center;color:var(--signal)}
+.nx-it{flex:none;width:168px;cursor:grab}
+.nx-it.drag{opacity:.4}
+.nx-it.over .nx-th{box-shadow:-5px 0 0 var(--signal)}
+.nx-th{position:relative;width:168px;height:168px;border-radius:10px;overflow:hidden;background:var(--ink);box-shadow:0 2px 6px rgba(11,31,58,.18);transition:box-shadow .15s,transform .15s}
+.nx-it:hover .nx-th{box-shadow:var(--shadow-hover);transform:translateY(-2px)}
+.nx-n{position:absolute;left:8px;top:8px;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.94);color:var(--ink);font-size:12px;font-weight:600;display:grid;place-items:center;z-index:2}
+.nx-d{position:absolute;right:8px;bottom:8px;z-index:2;background:#fff;border-radius:6px;padding:0 7px;height:22px;font-size:12.5px;font-weight:500;display:inline-flex;align-items:center;color:var(--ink);border:1.5px solid transparent;cursor:text}
+.nx-d:hover{border-color:var(--signal)}
+.nx-hv{position:absolute;right:6px;top:6px;z-index:3;display:flex;gap:4px;opacity:0;transition:opacity .12s}
+.nx-it:hover .nx-hv{opacity:1}
+.nx-hv button{width:28px;height:28px;border-radius:50%;border:0;background:rgba(255,255,255,.94);display:grid;place-items:center;cursor:pointer;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.nx-hv button:hover{background:#fff;color:var(--signal)}
+.nx-nm{font-size:13.5px;font-weight:500;margin-top:8px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.nx-addt{flex:none;width:168px;height:168px;border:1.5px dashed #9FB4CC;border-radius:10px;background:rgba(255,255,255,.55);color:var(--muted);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font:inherit;font-size:14px;font-weight:500;cursor:pointer}
+.nx-addt:hover{border-color:var(--signal);color:var(--signal);background:#fff}
+
+/* état vide : une zone de dépôt qui dit quoi faire, et les 3 étapes de la page */
+.nx-empty.over{border-color:var(--signal);background:#EAF3FC}
+.nx-empty{transition:border-color .15s,background .15s;margin:14px 0 14px;border:2px dashed #9FB4CC;border-radius:12px;background:rgba(255,255,255,.6);padding:26px 28px 22px;display:grid;grid-template-columns:auto 1fr;gap:6px 22px;align-items:start}
+.nx-eico{grid-row:span 2;width:64px;height:64px;border-radius:16px;background:#fff;border:1px solid #CBD9EA;display:grid;place-items:center;color:var(--signal)}
+.nx-etx b{display:block;font-size:19px;font-weight:500;color:var(--ink)}
+.nx-etx p{color:var(--muted);margin-top:4px;max-width:640px}
+.nx-eact{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+.nx-steps{grid-column:1/-1;list-style:none;margin:18px 0 0;padding:14px 0 0;border-top:1px solid #CBD9EA;display:flex;gap:10px 26px;flex-wrap:wrap;font-size:13.5px;color:var(--muted)}
+.nx-steps li{display:inline-flex;align-items:center;gap:8px}
+.nx-steps i{font-style:normal;width:24px;height:24px;border-radius:50%;border:1px solid var(--line-2);background:#fff;display:grid;place-items:center;font-size:12px;font-weight:600}
+.nx-steps li.on{color:var(--ink);font-weight:500}
+.nx-steps li.on i{background:var(--ink);border-color:var(--ink);color:#fff}
+.nx-steps li + li::before{content:"";width:22px;height:1px;background:var(--line-2);margin-right:4px}
+.nx-here{display:none;align-items:center;gap:5px;font-size:12.5px;font-weight:500;color:var(--signal);background:#EAF1FA;border-radius:99px;padding:2px 10px 2px 7px}
+.nx-here .ico-svg{animation:nx-bob 1.2s ease-in-out infinite}
+.nx-lib.empty .nx-here{display:inline-flex}
+@keyframes nx-bob{50%{transform:translateY(3px)}}
+
+/* bibliothèque : titre, types, recherche et import sur une seule ligne */
+.nx-lib{padding-top:4px}
+.nx-libtop{display:flex;align-items:center;gap:6px 16px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.nx-libtop h3{font-size:16px;font-weight:500;margin-right:4px}
+.nx-libtop .pfx-tabs{border-bottom:0;padding:0;flex:1;min-width:0}
+.nx-libtop .search-box{width:240px;margin:0}
+.nx-libtop .search-box input{padding:7px 0}
+.nx-libtop .pf-imp-btn{height:34px;padding:0 14px;font-size:13px}
+.nx-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(122px,1fr));gap:16px 14px;padding:16px 0 10px}
+.nx-tile{display:flex;flex-direction:column;min-width:0;border:0;background:none;padding:0;font:inherit;color:inherit;text-align:left;cursor:pointer}
+.nx-tb{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;background:var(--row);border:1px solid var(--line);transition:box-shadow .15s,transform .15s}
+.nx-tile:hover .nx-tb{box-shadow:var(--shadow-hover);transform:translateY(-2px)}
+.nx-tb .pfx-used{z-index:2}
+.nx-tb .pfx-add{z-index:3}
+.nx-tile:hover .pfx-add{opacity:1}
+.nx-tn{font-size:13px;font-weight:500;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ===== Aperçu ===== */
+.nx-pv{padding-top:20px}
+.nx-stage{height:min(60vh,560px);min-height:380px;display:flex;align-items:center;justify-content:center;background:var(--row);border-radius:12px;padding:22px}
+.nx-scr{position:relative;background:#000;border:6px solid #11161f;border-radius:7px;box-shadow:0 14px 34px rgba(11,31,58,.22);overflow:hidden}
+.nx-bz{position:absolute;inset:0;pointer-events:none;z-index:4}
+.nx-bz i{position:absolute;background:#11161f}
+.nx-ctl{display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap}
+.nx-ib{width:36px;height:36px;border-radius:50%;border:1px solid var(--line-2);background:#fff;color:var(--ink);display:grid;place-items:center;cursor:pointer;flex:none}
+.nx-ib:hover{border-color:var(--muted)}
+.nx-ib.play{background:var(--ink);border-color:var(--ink);color:#fff;width:40px;height:40px}
+.nx-tl{flex:1;min-width:260px;display:flex;gap:4px;margin:0 8px}
+.nx-sg{min-width:0;border:0;background:none;padding:0;text-align:left;cursor:pointer;font:inherit}
+.nx-sg i{display:block;height:6px;border-radius:3px;background:var(--line-2);position:relative;overflow:hidden}
+.nx-sg i b{position:absolute;left:0;top:0;bottom:0;background:var(--ink);border-radius:3px}
+.nx-sg.done i{background:var(--ink)}
+.nx-sg span{display:block;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:5px}
+.nx-sg.on span{color:var(--ink);font-weight:500}
+.nx-sg:hover span{color:var(--ink)}
+.nx-time{font-size:13px;color:var(--muted);white-space:nowrap;margin-right:6px}
+.nx-fmt{display:inline-flex;align-items:center;gap:6px;color:var(--muted);border:1px solid var(--line-2);border-radius:18px;padding:0 4px 0 12px;height:36px;background:#fff}
+.nx-fmt select{border:0;background:transparent;font:inherit;font-size:13.5px;color:var(--ink);padding:0 6px 0 0;height:34px;cursor:pointer;box-shadow:none;width:auto}
+
+/* ===== Diffusion : tableau pleine largeur ===== */
+.nx-diff{padding-top:22px}
+.nx-table{background:#fff;border:1px solid var(--line);border-radius:var(--card-radius);overflow-x:auto}
+.nx-tr{display:grid;grid-template-columns:minmax(250px,2.2fr) minmax(140px,1fr) minmax(170px,1.2fr) minmax(200px,1.4fr) 190px 96px;align-items:center;gap:18px;padding:13px 20px;border-top:1px solid var(--row);min-width:1080px}
+.nx-tr.zone.pickz{cursor:pointer}
+.nx-when{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border:1px solid var(--line-2);border-radius:16px;background:#fff;color:var(--ink);font:inherit;font-size:13px;cursor:pointer;white-space:nowrap;max-width:100%}
+.nx-when span{overflow:hidden;text-overflow:ellipsis}
+.nx-when .ico-svg{color:var(--muted);flex:none}
+.nx-when:hover{border-color:var(--muted)}
+.nx-when.set{background:#EAF1FA;border-color:#BFD3EA;color:#2F6FAB}
+.nx-when.set .ico-svg{color:#2F6FAB}
+.nx-zpick{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);cursor:pointer}
+.nx-zpick input{accent-color:var(--signal);width:16px;height:16px;margin:0}
+.nx-all{font-size:13px;color:var(--muted)}
+.nx-mwrap{position:relative;display:inline-flex}
+.nx-more.on{opacity:1;background:var(--row);color:var(--ink)}
+.nx-more-gap{width:32px;flex:none}
+.nx-menu button.danger{color:var(--danger)}
+.nx-menu button.danger:hover{background:var(--danger-bg)}
+.nx-confirm{width:min(480px,calc(100vw - 32px))}
+.nx-seltx{flex:1 1 360px;min-width:0}
+.nx-chip.plan{display:inline-flex;align-items:center;gap:5px;background:#EAF1FA;color:#2F6FAB}
+.nx-tr:hover{background:#FAFBFD}
+.nx-tr.pick{cursor:pointer}
+.nx-tr.sel,.nx-tr.sel:hover{background:#F2F7FD}
+.nx-tr.zone{padding-top:7px;padding-bottom:7px;border-top:1px dashed #E3E9F0}
+.nx-tr.zone .nx-scn{padding-left:30px}
+.nx-tr.zone .nx-scn b{font-size:13.5px}
+.nx-c0{display:grid;place-items:center}
+.nx-cb{width:18px;height:18px;margin:0;accent-color:var(--signal);cursor:pointer}
+.nx-cb:disabled{cursor:not-allowed;opacity:.3}
+.nx-later{color:var(--muted);font-size:12px}
+.nx-selbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#F2F7FD;border:1px solid #CFE0F3;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:14px;color:var(--ink)}
+.nx-selbar>.ico-svg{color:var(--signal)}
+.nx-selbar.ok{background:var(--ok-bg);border-color:transparent;color:var(--ok-ink)}
+.nx-selbar.ok>.ico-svg{color:var(--ok)}
+.nx-selbar .grow{flex:1}
+.nx-legend{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
+.nx-legend b{width:12px;height:12px;border-radius:2px;background:var(--signal)}
+.nx-tr.hd{background:var(--bg);border-top:0;padding:10px 20px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:500}
+.nx-tr.hd:hover{background:var(--bg)}
+.nx-tr .r{justify-self:end}
+.nx-grp{padding:16px 20px 8px;font-size:13.5px;font-weight:500;color:var(--ink);border-top:1px solid var(--line);display:flex;gap:8px;min-width:1080px}
+.nx-grp span{color:var(--muted);font-family:var(--mono);font-weight:400}
+.nx-grp + .nx-tr{border-top:0}
+.nx-scn{display:flex;align-items:center;gap:12px;min-width:0}
+.nx-tv{flex:none;width:44px;display:grid;place-items:center}
+.nx-tv i{display:flex;gap:2px;width:40px;height:24px;border:3px solid #11161f;border-radius:3px;background:#11161f;overflow:hidden}
+.nx-tv.p i{width:18px;height:30px;flex-direction:column}
+.nx-tv i b{flex:var(--w) 1 0;background:#8FA3BC}
+.nx-tv i b.me{background:var(--signal)}
+.nx-tv i b.cur{background:#46566A}
+.nx-tv i b.dim{background:#D5DEE8}
+.nx-tv.sm i{width:30px;height:18px;border-width:2px;gap:1px}
+.nx-scn b{display:block;font-weight:500}
+.nx-scn small,.nx-st small{display:block;color:var(--muted);font-size:12.5px;line-height:1.35}
+.nx-st{font-size:14px}
+.nx-st span{display:inline-flex;align-items:center;gap:7px}
+.nx-now{font-size:14px;color:var(--muted)}
+.nx-now.me{color:var(--ink);font-weight:500}
+.nx-dot{width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none}
+.nx-dot.off{background:var(--danger)}
+.nx-chg{display:flex;flex-direction:column;align-items:flex-start;gap:3px;font-size:12.5px;color:var(--warn-ink)}
+.nx-chg .no{color:var(--line-2);font-size:14px}
+.nx-chip{font-size:12px;font-weight:500;border-radius:99px;padding:2px 10px;white-space:nowrap}
+.nx-chip.warn{background:var(--warn-bg);color:var(--warn-ink)}
+.nx-chip.gone{background:var(--row);color:var(--muted)}
+.nx-last{display:flex;align-items:center;justify-content:flex-end;gap:6px}
+.nx-dnote{display:flex;align-items:center;gap:10px;background:var(--warn-bg);color:var(--warn-ink);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:14px}
+.nx-dnote button{margin-left:auto}
+.nx-more{width:32px;height:32px;border:0;background:none;border-radius:6px;color:var(--muted);display:grid;place-items:center;cursor:pointer;opacity:0}
+.nx-tr:hover .nx-more,.nx-more:focus-visible{opacity:1}
+.nx-more:hover{background:var(--row);color:var(--ink)}
+
+/* ===== contenus dessinés (vignettes et aperçu) ===== */
+.art{position:absolute;inset:0;overflow:hidden;container-type:size}
+.a-dark{position:absolute;inset:0;background:#141414;display:grid;place-items:center}
+.a-cron{height:100%;aspect-ratio:9/16;max-width:100%;background:#151515;color:#fff;container-type:inline-size;padding:6cqw 4cqw;overflow:hidden;font-family:"IBM Plex Sans",sans-serif}
+.a-cron h5{margin:0 0 5cqw;font-size:10cqw;line-height:1.08;font-weight:700;text-align:center}
+.a-cron .s{display:block;font-size:3.8cqw;font-weight:600;margin:4cqw 0 1cqw}
+.a-cron .r{display:grid;grid-template-columns:1fr auto auto;gap:1.5cqw;align-items:center;font-size:2.7cqw;padding:2cqw 0;border-bottom:.35cqw solid #ddd}
+.a-cron .r.p{grid-template-columns:2.3fr 1.3fr 1.3fr .9fr}
+.a-cron .r.h{font-size:1.8cqw;color:#999;border:0;padding:0}
+.a-cron em{font-style:normal;font-size:2cqw;background:#1f9d55;padding:.3cqw 1cqw;border-radius:.5cqw;text-align:center}
+.a-cron em.e{background:#d64541}
+.a-cron span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.a-lac{position:absolute;inset:0;background:linear-gradient(hsl(var(--h) 55% 74%),hsl(var(--h) 45% 90%) 58%,hsl(var(--h) 45% 46%) 58%,hsl(var(--h) 55% 26%))}
+.a-lac i{position:absolute;display:block}
+.a-lac .sun{right:17%;top:13%;width:11cqmin;height:11cqmin;border-radius:50%;background:#fff7d1;box-shadow:0 0 8cqmin #fff1a8}
+.a-lac .m1{left:-5%;right:-5%;bottom:42%;height:36%;background:hsl(calc(var(--h) + 15) 16% 60%);clip-path:polygon(0 100%,12% 40%,22% 70%,35% 12%,48% 62%,60% 28%,74% 72%,86% 32%,100% 80%,100% 100%)}
+.a-lac .m2{left:-5%;right:-5%;bottom:42%;height:20%;background:hsl(calc(var(--h) + 15) 22% 36%);clip-path:polygon(0 100%,18% 30%,30% 70%,44% 18%,58% 80%,70% 40%,84% 75%,100% 35%,100% 100%)}
+.a-lac .lk{left:0;right:0;bottom:0;height:42%;background:repeating-linear-gradient(180deg,transparent 0 7%,rgba(255,255,255,.1) 7% 8%)}
+.a-met{position:absolute;inset:0;background:linear-gradient(160deg,#4B92D4,#0B1F3A);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1cqmin;font-family:"IBM Plex Sans",sans-serif}
+.a-met .w{display:flex;align-items:center;gap:5cqmin}
+.a-met .w i{width:20cqmin;height:20cqmin;border-radius:50%;background:#FFD45A;box-shadow:0 0 0 3cqmin rgba(255,212,90,.25)}
+.a-met b{font-size:28cqmin;font-weight:500;line-height:1}
+.a-met span{font-size:9cqmin;font-weight:500}
+.a-met small{font-size:6cqmin;opacity:.8}
+.a-vid{position:absolute;inset:0;background:radial-gradient(circle at 75% 30%,color-mix(in srgb,var(--c) 70%,#fff),var(--c) 45%,#120b2e);color:#fff;display:flex;flex-direction:column;justify-content:flex-end;padding:8cqmin;font-family:"IBM Plex Sans",sans-serif}
+.a-vid small{font-size:6cqmin;opacity:.85;text-transform:uppercase;letter-spacing:.08em}
+.a-vid b{font-size:10cqmin;line-height:1.08;font-weight:700}
+.a-vid .pl{position:absolute;left:8cqmin;top:8cqmin;width:16cqmin;height:16cqmin;border-radius:50%;background:rgba(255,255,255,.9);display:grid;place-items:center}
+.a-vid .pl::after{content:"";margin-left:1.5cqmin;border:4cqmin solid transparent;border-left:6cqmin solid #120b2e;border-right:0}
+.a-cmp{position:absolute;inset:0;background:var(--bg2,#fff);padding:9cqmin;display:flex;flex-direction:column;gap:4cqmin;font-family:"IBM Plex Sans",sans-serif}
+.a-cmp b{font-size:11cqmin;line-height:1.1;color:var(--c);font-weight:700}
+.a-cmp i{display:block;height:7cqmin;border-radius:2cqmin;background:color-mix(in srgb,var(--c) 18%,#fff)}
+.a-cmp i:nth-of-type(2){width:80%}.a-cmp i:nth-of-type(3){width:60%}
+.a-app{position:absolute;inset:0;background:linear-gradient(150deg,color-mix(in srgb,var(--c) 75%,#fff),var(--c));display:grid;place-items:center;color:#fff}
+.a-app svg{width:36cqmin;height:36cqmin;stroke-width:1.4}
+</style>
+</head>
+<body>
+
+<div class="mk-note">
+  <b>Maquette</b> · Liste de diffusion allégée — rien n'est codé
+  <span class="grow"></span>
+  <span>Voir la liste :</span>
+  <span class="mk-seg" id="mk-demo"><button type="button" class="mk-btn on" data-d="full">remplie</button><button type="button" class="mk-btn" data-d="empty">vide</button></span>
+  <button type="button" class="mk-btn" id="mk-why-btn">Ce qui change</button>
+</div>
+
+<aside class="mk-why" id="mk-why" aria-label="Ce qui change"></aside>
+<div class="mk-toast" id="toast"></div>
+
+<div class="shell has-tabs">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-logo"><img class="bl-long" src="../Linkii.Poc/wwwroot/brand/logo-long.png" alt="Linkivi"><img class="bl-short" src="../Linkii.Poc/wwwroot/brand/logo-court.png" alt=""></span>
+      <span class="brand-meta"><span class="plan-tag pro"><i data-i="crown" data-s="13"></i>Pro</span></span>
+      <button type="button" class="nav-fold" aria-label="Replier le menu"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"></path></svg></button>
+    </div>
+    <a href="#" class="nav"><i data-i="monitor"></i> Écrans <span class="nbadges"><span class="nbadge off">3</span></span></a>
+    <a href="#" class="nav active" aria-current="page"><i data-i="list"></i> Listes de diffusion</a>
+    <a href="#" class="nav"><i data-i="image"></i> Contenus</a>
+    <div class="nav-sep" role="separator"></div>
+    <a href="#" class="nav"><i data-i="calendar"></i> Programmations</a>
+    <div class="nav-sep" role="separator"></div>
+    <button type="button" class="nav nav-group open" aria-expanded="true"><i data-i="apps"></i> Applications <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"></path></svg></button>
+    <div class="nav-sub">
+      <a href="#" class="nav nav-app"><i data-i="layers" data-s="16"></i> Home Assistant</a>
+      <a href="#" class="nav nav-app"><i data-i="house" data-s="16"></i> Vue du bâtiment</a>
+      <a href="#" class="nav nav-app"><i data-i="slides" data-s="16"></i> Google Slides</a>
+      <a href="#" class="nav nav-app"><i data-i="slides" data-s="16"></i> Microsoft PowerPoint</a>
+      <a href="#" class="nav nav-store"><i data-i="store" data-s="16"></i> Store</a>
+      <a href="#" class="nav nav-manage"><i data-i="sliders" data-s="16"></i> Gérer mes applications</a>
+    </div>
+    <div class="spacer"></div>
+    <a href="#" class="nav"><i data-i="org"></i> Organisation</a>
+    <a href="#" class="nav"><i data-i="stats"></i> Statistiques</a>
+    <a href="#" class="nav"><i data-i="clock"></i> Historique</a>
+    <button type="button" class="nav mode-switch" role="switch" aria-checked="true"><svg class="mode-ic" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"></path></svg><span>Mode expert</span><span class="switch on"><span></span></span></button>
+  </aside>
+
+  <div class="main-col">
+    <header class="qbar" aria-label="Accès rapides">
+      <div class="org">LPR Unil</div>
+      <div class="grow"></div>
+      <button type="button" class="qb-btn"><i data-i="player" data-s="19"></i><span>Player</span></button>
+      <button type="button" class="qb-btn store"><i data-i="store" data-s="19"></i><span>Store</span></button>
+      <span class="sep2" aria-hidden="true"></span>
+      <button type="button" class="qb-btn" aria-label="Aide"><i data-i="help" data-s="19"></i></button>
+      <button type="button" class="qb-btn" aria-label="Notifications"><i data-i="bell" data-s="19"></i><span class="nt-dot">5</span></button>
+      <button type="button" class="qb-btn" aria-label="Réglages"><i data-i="gear" data-s="19"></i></button>
+      <button type="button" class="qb-me" aria-label="Compte"><span class="avatar">LU</span><i data-i="chev-down" data-s="16"></i></button>
+    </header>
+
+    <main class="content">
+      <header class="nx-head">
+        <div>
+          <div class="pt-crumb"><a href="#">Listes de diffusion</a> › <span id="crumb-name">Campus Cron Scheduler</span></div>
+          <div class="nx-title">
+            <h1 id="title">Campus Cron Scheduler</h1>
+            <button type="button" class="nx-ren" id="ren" title="Renommer" aria-label="Renommer la liste"><i data-i="edit" data-s="16"></i></button>
+          </div>
+          <p class="nx-meta" id="meta"></p>
+        </div>
+        <div class="nx-act" id="act"></div>
+      </header>
+
+      <div class="nx-tabsrow">
+        <nav class="pfx-tabs" role="tablist" aria-label="Liste de diffusion" id="tabs">
+          <button type="button" role="tab" data-t="fil" class="on" aria-selected="true">Fil de lecture<span class="c" id="tab-n">4</span></button>
+          <button type="button" role="tab" data-t="apercu" aria-selected="false">Aperçu</button>
+          <button type="button" role="tab" data-t="diff" aria-selected="false">Diffusion</button>
+        </nav>
+      </div>
+
+      <!-- Fil de lecture -->
+      <section class="nx-pane" data-p="fil">
+        <div class="nx-filbox">
+          <div class="nx-filhd" id="filhd"></div>
+          <div id="fil"></div>
+        </div>
+        <div class="nx-lib" id="lib">
+          <div class="nx-libtop">
+            <h3>Ajouter au fil</h3>
+            <span class="nx-here"><i data-i="arrow-down" data-s="14"></i> Choisissez ici</span>
+            <nav class="pfx-tabs" role="tablist" aria-label="Types de contenus" id="libtabs"></nav>
+            <label class="search-box"><i data-i="search" data-s="16"></i><input id="libq" placeholder="Rechercher" aria-label="Rechercher dans la bibliothèque"></label>
+            <span class="pf-imp"><button type="button" class="pf-imp-btn" id="imp"><i data-i="upload" data-s="15"></i> Importer <i data-i="chev-down" data-s="14"></i></button></span>
+          </div>
+          <div class="nx-grid" id="grid"></div>
+        </div>
+      </section>
+
+      <!-- Aperçu -->
+      <section class="nx-pane nx-pv" data-p="apercu" hidden>
+        <div class="nx-stage" id="stage"><div class="nx-scr" id="scr"><div id="scr-art"></div><div class="nx-bz" id="bz"></div></div></div>
+        <div class="nx-ctl">
+          <button type="button" class="nx-ib" id="pv-prev" title="Contenu précédent"><i data-i="prev" data-s="16"></i></button>
+          <button type="button" class="nx-ib play" id="pv-play" title="Pause"></button>
+          <button type="button" class="nx-ib" id="pv-next" title="Contenu suivant"><i data-i="next" data-s="16"></i></button>
+          <div class="nx-tl" id="pv-tl"></div>
+          <span class="nx-time mono" id="pv-time">0:00 / 0:00</span>
+          <label class="nx-fmt" title="Afficher l'aperçu au format de…"><i data-i="monitor" data-s="16"></i>
+            <select id="pv-fmt" aria-label="Format de l'aperçu">
+              <optgroup label="Vos écrans">
+                <option value="b" selected>Borne entrée Sud · portrait</option>
+                <option value="c">Écran Com · paysage</option>
+                <option value="m">Mon écran · paysage</option>
+              </optgroup>
+              <optgroup label="Formats">
+                <option value="L">Paysage</option>
+                <option value="P">Portrait</option>
+                <option value="W22">Mur 2 × 2</option>
+                <option value="W31">Mur 3 × 1</option>
+              </optgroup>
+            </select>
+          </label>
+          <button type="button" class="nx-ib" title="Son coupé : cliquer pour l'activer"><i data-i="mute" data-s="16"></i></button>
+          <button type="button" class="nx-ib" title="Plein écran"><i data-i="full" data-s="16"></i></button>
+        </div>
+      </section>
+
+      <!-- Diffusion -->
+      <section class="nx-pane nx-diff" data-p="diff" hidden>
+        <div id="dnote"></div>
+        <div id="dsel"></div>
+        <div id="dconfirm"></div>
+        <div class="nx-table" id="diff"></div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<script>
+/* ---------- icônes (même trait que l'app) ---------- */
+const P = {
+  monitor:'<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
+  list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  image:'<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>',
+  calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  apps:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/>',
+  layers:'<path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/>',
+  house:'<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>',
+  slides:'<rect x="7" y="3" width="14" height="14" rx="2"/><path d="M3 7v12a2 2 0 0 0 2 2h12"/><circle cx="12" cy="8" r="1.3"/><path d="M21 13l-4-4-6 6"/>',
+  store:'<path d="M3 9l1.5-5h15L21 9"/><path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/><path d="M5 12v8h14v-8"/><path d="M10 20v-5h4v5"/>',
+  sliders:'<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
+  org:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M9 5v14"/>',
+  stats:'<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 6-6"/>',
+  clock:'<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+  crown:'<path d="M3 19h18M4 6l4 4 4-6 4 6 4-4-2 13H6z"/>',
+  player:'<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4M12 6v6M9.5 9.5L12 12l2.5-2.5"/>',
+  help:'<circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  bell:'<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
+  gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  'chev-down':'<path d="M6 9l6 6 6-6"/>',
+  edit:'<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  x:'<path d="M18 6L6 18M6 6l12 12"/>',
+  tune:'<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
+  upload:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
+  transition:'<path d="M3 6l8 6-8 6z"/><path d="M21 6l-8 6 8 6z"/>',
+  prev:'<path d="M19 20L9 12l10-8z"/><path d="M5 19V5"/>',
+  next:'<path d="M5 4l10 8-10 8z"/><path d="M19 5v14"/>',
+  pause:'<path d="M9 5v14M15 5v14"/>',
+  play:'<path d="M7 4l13 8-13 8z"/>',
+  mute:'<path d="M11 5L6 9H2v6h4l5 4z"/><path d="M23 9l-6 6M17 9l6 6"/>',
+  full:'<path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>',
+  check:'<path d="M20 6L9 17l-5-5"/>',
+  more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  rss:'<path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/>',
+  sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  door:'<path d="M5 21V4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v17M3 21h18"/><path d="M15 12h.01"/>',
+  'arrow-down':'<path d="M12 5v14M19 12l-7 7-7-7"/>',
+  layout:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>',
+  refresh:'<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>'
+};
+const ico = (n, s = 18) => `<svg class="ico-svg" viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n] || ''}</svg>`;
+document.querySelectorAll('[data-i]').forEach(e => { e.outerHTML = ico(e.dataset.i, +(e.dataset.s || 18)); });
+const $ = s => document.querySelector(s);
+const fmt = s => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+let toastT;
+function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2200); }
+
+/* ---------- contenus dessinés ---------- */
+const CRON = `<div class="a-dark"><div class="a-cron"><h5>Campus<br>scheduled jobs</h5>
+  <b class="s">Connecteurs</b>
+  <div class="r"><span>Sql Server</span><em>Démarré</em><em>Actif</em></div>
+  <div class="r"><span>Swagger Campus Api</span><em>Démarré</em><em>Actif</em></div>
+  <b class="s">Plugins</b>
+  <div class="r p h"><span>Nom</span><span>Dernière exécution</span><span>Prochaine</span><span>Statut</span></div>
+  <div class="r p"><span>DatabaseBackupPlugin</span><span>00:15</span><span>demain 00:15</span><em>Succès</em></div>
+  <div class="r p"><span>PolyrightAssignBadge</span><span>16:00</span><span>16:15</span><em>Succès</em></div>
+  <div class="r p"><span>PolyrightAssignBVisit</span><span>16:00</span><span>16:15</span><em>Succès</em></div>
+  <div class="r p"><span>Tcpos2SapPlugin</span><span>04:35</span><span>demain 04:35</span><em>Succès</em></div>
+  <div class="r p"><span>SqlServerConnector</span><span>1 janv. 00:00</span><span>1 janv. 00:00</span><em class="e">Erreur</em></div>
+  <div class="r p"><span>SwaggerCampusApi</span><span>1 janv. 00:00</span><span>1 janv. 00:00</span><em class="e">Erreur</em></div>
+</div></div>`;
+function art(a, thumb) {
+  switch (a.k) {
+    case 'cron': return CRON;
+    case 'lac': return `<div class="a-lac" style="--h:${a.h}"><i class="sun"></i><i class="m1"></i><i class="m2"></i><i class="lk"></i></div>`;
+    case 'meteo': return `<div class="a-met"><div class="w"><i></i><b>10°</b></div><span>Lausanne</span><small>Ensoleillé · max 13°</small></div>`;
+    case 'vid': return `<div class="a-vid" style="--c:${a.c}"><small>${a.sub || 'Vidéo'}</small><b>${a.t}</b></div>`;
+    case 'cmp': return `<div class="a-cmp" style="--c:${a.c};--bg2:${a.bg || '#fff'}"><b>${a.t}</b><i></i><i></i><i></i></div>`;
+    case 'app': return `<div class="a-app" style="--c:${a.c}">${ico(a.i, 40)}</div>`;
+  }
+  return '';
+}
+
+/* ---------- données ---------- */
+const LIB = {
+  img: { label: 'Images', n: 78, items: [
+    { name: 'Lac Léman au printemps', dur: 10, a: { k: 'lac', h: 205 } },
+    { name: 'Campus Dorigny', dur: 10, a: { k: 'lac', h: 160 } },
+    { name: 'Coucher de soleil', dur: 10, a: { k: 'lac', h: 20 } },
+    { name: 'Jökulsárlón', dur: 10, a: { k: 'lac', h: 190 } },
+    { name: 'Raftsundet', dur: 10, a: { k: 'lac', h: 225 } },
+    { name: 'Bad Hindelang', dur: 10, a: { k: 'lac', h: 110 } },
+    { name: 'Forêt de Dorigny', dur: 10, a: { k: 'lac', h: 135 } },
+    { name: 'Rentrée 2026', dur: 10, a: { k: 'cmp', t: 'Rentrée 2026', c: '#E8590C', bg: '#FFF4EC' } },
+    { name: 'Bibliothèque Unithèque', dur: 10, a: { k: 'lac', h: 245 } },
+    { name: 'Sports universitaires', dur: 10, a: { k: 'cmp', t: 'Sports uni', c: '#1E8E5A', bg: '#ECF7F1' } },
+    { name: 'Quartier Mouline', dur: 10, a: { k: 'lac', h: 40 } },
+    { name: 'Amphimax', dur: 10, a: { k: 'lac', h: 265 } }
+  ] },
+  vid: { label: 'Vidéos', n: 4, items: [
+    { name: 'Annonces de la semaine', dur: 20, a: { k: 'vid', c: '#7B5CC4', t: 'Annonces de la semaine', sub: 'Semaine du 9 novembre' } },
+    { name: 'Visite du campus', dur: 45, a: { k: 'vid', c: '#2F6FC0', t: 'Visite du campus' } },
+    { name: 'Teaser rentrée', dur: 30, a: { k: 'vid', c: '#C0392B', t: 'Teaser rentrée' } },
+    { name: 'Time-lapse du lac', dur: 25, a: { k: 'vid', c: '#0E7490', t: 'Time-lapse du lac' } }
+  ] },
+  cmp: { label: 'Compositions', n: 12, items: [
+    { name: 'État Campus Scheduler Cron', dur: 8, a: { k: 'cron' } },
+    { name: 'Borne · Aide & services', dur: 10, a: { k: 'cmp', t: 'Aide &amp; services', c: '#0B1F3A', bg: '#EEF1F5' } },
+    { name: 'Menu de la cafétéria', dur: 12, a: { k: 'cmp', t: 'Menu du jour', c: '#B7791F', bg: '#FBF0DC' } },
+    { name: 'Agenda des conférences', dur: 12, a: { k: 'cmp', t: 'Agenda', c: '#4F6BED', bg: '#EEF1FD' } },
+    { name: 'Horaires de la bibliothèque', dur: 10, a: { k: 'cmp', t: 'Horaires', c: '#1E8E5A', bg: '#ECF7F1' } },
+    { name: 'Bienvenue visiteurs', dur: 10, a: { k: 'cmp', t: 'Bienvenue', c: '#C8372D', bg: '#FBE4E2' } }
+  ] },
+  app: { label: 'Applications', n: 6, items: [
+    { name: 'Météo Lausanne', dur: 15, a: { k: 'meteo' } },
+    { name: 'Flux RSS Unil', dur: 15, a: { k: 'app', c: '#E8590C', i: 'rss' } },
+    { name: 'Horloge', dur: 10, a: { k: 'app', c: '#0B1F3A', i: 'clock' } },
+    { name: 'Salle de réunion B12', dur: 15, a: { k: 'app', c: '#2F6FC0', i: 'door' } },
+    { name: 'Home Assistant · Hall', dur: 15, a: { k: 'app', c: '#18BCF2', i: 'house' } },
+    { name: 'Google Slides · Accueil', dur: 30, a: { k: 'app', c: '#F4B400', i: 'slides' } }
+  ] },
+  pres: { label: 'Présentations', n: 0, items: [] },
+  web: { label: 'Pages web', n: 0, items: [] }
+};
+['Vallée de Joux', 'Lavaux', 'Rhône', 'Jura', 'Chillon', 'Montreux', 'Gruyère', 'Aletsch', 'Zermatt', 'Engadine', 'Tessin', 'Neuchâtel', 'Morges', 'Rolle', 'Nyon', 'Vevey']
+  .forEach((name, i) => LIB.img.items.push({ name, dur: 10, a: { k: 'lac', h: (i * 37 + 15) % 360 } }));   // plus de vignettes, pour voir le fil rester en haut au défilement
+let items = [LIB.cmp.items[0], LIB.img.items[0], LIB.app.items[0], LIB.vid.items[0]].map(x => ({ ...x }));
+/* écrans : découpage en zones comme ScreenLayouts (pleine page, 50-50, 66-33, 33-33-33), zones côte à côte ;
+   pour chaque zone : la liste qu'elle joue sans celle-ci (plays), la liste y est publiée (init).
+   Choix de la personne par écran : on (reçoit la publication), when (heure choisie, sinon maintenant), target (zone qui recevra la liste) */
+const LAYOUTS = { full: [100], '50-50': [50, 50], '66-33': [66.7, 33.3], '33-33-33': [33.3, 33.4, 33.3] };
+const ZPOS = { '50-50': ['gauche', 'droite'], '66-33': ['grande, à gauche', 'étroite, à droite'], '33-33-33': ['gauche', 'milieu', 'droite'] };
+const WHEN = 'Le 9 novembre à 08:00';   // heure d'exemple : dans l'app, le calendrier actuel
+const screens = [
+  { id: 'b', name: 'Borne entrée Sud', o: 'p', online: false, lay: 'full', stale: true, zones: [{ plays: 'Vitrine', init: true }] },
+  { id: 'h', name: 'Hall Amphimax', o: 'l', online: true, lay: '33-33-33', stale: true, zones: [{ plays: 'Accueil', init: false }, { plays: 'Vitrine', init: true }, { plays: 'Météo', init: false }] },
+  { id: 'r', name: 'Réception Unithèque', o: 'l', online: true, lay: 'full', stale: true, zones: [{ plays: 'Accueil', init: true }] },
+  { id: 'c', name: 'Écran Com', o: 'l', online: true, lay: 'full', stale: false, zones: [{ plays: 'Annonces', init: false }] },
+  { id: 'k', name: 'Cafétéria', o: 'l', online: true, lay: '66-33', stale: false, zones: [{ plays: 'Menu du jour', init: false }, { plays: 'Infos pratiques', init: false }] },
+  { id: 'm', name: 'Mon écran', o: 'l', online: false, lay: 'full', stale: false, zones: [{ plays: 'Accueil', init: false }] }
+];
+const has = s => s.zones.some(z => z.init);                 // la liste y est publiée (au moins une zone)
+const deflt = s => has(s) && s.stale;                       // d'office : les écrans qui diffusent la liste et sont en retard
+function resetChoices(s) { s.on = deflt(s); s.when = null; s.target = 0; }
+screens.forEach(resetChoices);
+const ITEMS0 = items.map(x => ({ ...x })), SCREENS0 = JSON.stringify(screens);
+function touchFil() { screens.forEach(s => { if (has(s)) { s.stale = true; s.on = true; } }); }   // le fil a changé : les écrans qui le diffusent repassent dans la publication
+function setDemo(d) {
+  document.querySelectorAll('#mk-demo button').forEach(b => b.classList.toggle('on', b.dataset.d === d));
+  JSON.parse(SCREENS0).forEach((s0, i) => Object.assign(screens[i], s0));
+  if (d === 'empty') { items = []; screens.forEach(s => { s.stale = false; s.scheduled = null; s.zones.forEach(z => { z.init = false; }); }); }
+  else items = ITEMS0.map(x => ({ ...x }));
+  screens.forEach(resetChoices);
+  pv.t = 0; pv.k = -1; renderAll(); setTab('fil');
+}
+let tab = 'fil', libTab = 'img';
+
+const total = () => items.reduce((s, i) => s + i.dur, 0);
+const toUpdate = () => screens.filter(s => has(s) && s.stale);
+const chosen = () => screens.filter(s => s.on);
+const changed = () => screens.some(s => s.on !== deflt(s) || s.when || s.target);
+const shows = (s, i) => has(s) ? s.zones[i].init : s.on && i === s.target;   // la zone porte la liste (ou la recevra)
+const plural = (n, w) => `${n} ${w}${n > 1 ? 's' : ''}`;
+function btnLabel() {
+  const c = chosen(), n = c.length, l = c.filter(s => s.when).length, sc = plural(n, 'écran');
+  return !l || !n ? `Publier sur ${sc}` : l === n ? `Programmer sur ${sc}` : `Publier et programmer · ${sc}`;
+}
+
+/* ---------- en-tête ---------- */
+function renderHead() {
+  const n = screens.filter(has).length;
+  $('#meta').innerHTML = n ? `<button type="button" class="nx-live" data-go="diff">● Diffusée sur ${plural(n, 'écran')}</button>` : '<span>Non diffusée</span>';
+  const c = toUpdate().length, k = chosen().length;
+  const act = $('#act');
+  if (!items.length && !n && !k) {
+    act.innerHTML = '';
+  } else if (c > 0 || k > 0) {
+    act.innerHTML = (c ? `<button type="button" class="nx-pend" data-go="diff" title="Choisir les écrans à mettre à jour">${plural(c, 'écran')} à mettre à jour</button>` : '')
+      + (changed() ? '<button type="button" class="btn ghost" id="undo">Annuler</button>' : '')
+      + `<div class="nx-split"><button type="button" class="btn publish-btn" id="pub" ${k ? '' : 'disabled title="Activez au moins un écran dans l\'onglet Diffusion"'}>${ico('upload', 16)} ${btnLabel()}</button><button type="button" class="btn publish-btn nx-caret" id="pubm" ${k ? '' : 'disabled'} aria-label="Autres façons de publier" aria-haspopup="menu">${ico('chev-down', 16)}</button>
+         <div class="nx-menu" id="pubmenu" role="menu" hidden>
+           <button type="button" role="menuitem" data-m="now">${ico('upload', 16)}<span>Tout publier maintenant<small>Sans tenir compte des heures choisies</small></span></button>
+           <button type="button" role="menuitem" data-m="later">${ico('calendar', 16)}<span>Tout programmer…<small>Une même heure pour tous les écrans activés</small></span></button>
+         </div></div>`;
+  } else if (n > 0) {
+    act.innerHTML = `<span class="nx-ok">${ico('check', 16)} À jour sur ${plural(n, 'écran')}</span>`;
+  } else {
+    act.innerHTML = `<button type="button" class="btn ghost" data-go="diff">${ico('monitor', 16)} Choisir les écrans</button>`;
+  }
+  $('#tab-n').textContent = items.length;
+}
+document.addEventListener('click', e => {
+  const go = e.target.closest('[data-go]'); if (go) { setTab(go.dataset.go); return; }
+  if (e.target.closest('#pub')) { publish(); return; }
+  if (e.target.closest('#pubm')) { const m = $('#pubmenu'); m.hidden = !m.hidden; return; }
+  const mi = e.target.closest('#pubmenu [data-m]');
+  if (mi) { if (mi.dataset.m === 'now') publish('now'); else { toast('Ouvre le calendrier actuel (jour + heure) — inchangé'); publish(WHEN); } return; }
+  if (e.target.closest('#undo')) { screens.forEach(resetChoices); renderAll(); toast('Changements annulés'); return; }
+  if (!e.target.closest('.nx-split') && $('#pubmenu')) $('#pubmenu').hidden = true;
+});
+/* all : 'now' = tous maintenant ; une heure = tous à cette heure ; rien = chaque écran à son heure */
+function publish(all) {
+  const list = chosen(); if (!list.length) return;
+  let now = 0, later = 0;
+  list.forEach(s => {
+    const at = all === 'now' ? null : all || s.when;
+    if (at) { s.scheduled = at; later++; }
+    else {
+      if (!has(s)) s.zones.forEach((z, i) => { z.init = i === s.target; });   // l'écran reçoit la liste dans la zone choisie
+      s.stale = false; s.scheduled = null; now++;
+    }
+  });
+  screens.forEach(resetChoices);
+  const left = toUpdate().length;
+  renderAll();
+  const parts = [];
+  if (now) parts.push(`Publiée sur ${plural(now, 'écran')}`);
+  if (later) parts.push(`${now ? 'programmée' : 'Programmée'} sur ${plural(later, 'écran')}`);
+  toast(parts.join(' · ') + (left ? ` · ${plural(left, 'écran')} encore à mettre à jour` : ''));
+}
+
+/* ---------- onglets ---------- */
+function setTab(t) {
+  tab = t;
+  document.querySelectorAll('#tabs button').forEach(b => { const on = b.dataset.t === t; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); });
+  document.querySelectorAll('.nx-pane').forEach(p => p.hidden = p.dataset.p !== t);
+  renderHead(); renderWhy();
+  if (t === 'apercu') { layoutScreen(); showArt(true); }
+}
+$('#tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setTab(b.dataset.t); });
+document.addEventListener('click', e => {
+  if (e.target.closest('#trans')) toast('Ouvre la fenêtre Transitions — inchangée');
+  if (e.target.closest('#e-imp')) toast('Ouvre la fenêtre d\'import (ordinateur) — inchangée');
+  if (e.target.closest('#e-cmp')) toast('Ouvre l\'éditeur de compositions — inchangé');
+});
+
+/* ---------- renommer ---------- */
+$('#ren').addEventListener('click', () => { const h = $('#title'); h.contentEditable = true; h.focus(); document.getSelection().selectAllChildren(h); });
+$('#title').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } });
+$('#title').addEventListener('blur', e => { e.target.contentEditable = false; $('#crumb-name').textContent = e.target.textContent; });
+
+/* ---------- Fil de lecture ---------- */
+function renderFil() {
+  const n = items.length;
+  $('#filhd').innerHTML = `<span class="t">${ico('list', 18)} Ordre de passage</span>`
+    + (n ? `<span>· ${n} contenu${n > 1 ? 's' : ''} · boucle de <b class="mono" style="color:var(--ink)">${fmt(total())}</b></span>` : '')
+    + '<span class="grow"></span>'
+    + (n > 1 ? `<span>Glissez une carte pour changer l'ordre, ou une vignette à l'endroit voulu</span><button type="button" class="btn ghost sm" id="trans">${ico('transition', 15)} Transitions</button>` : '');
+  $('#lib').classList.toggle('empty', !n);
+  $('#fil').className = n ? 'nx-fil' : '';
+  if (!n) {
+    $('#fil').innerHTML = `<div class="nx-empty">
+      <span class="nx-eico">${ico('plus', 30)}</span>
+      <div class="nx-etx">
+        <b>Votre liste est vide</b>
+        <p>Cliquez sur un contenu de la bibliothèque ci-dessous, ou glissez-le ici. Les contenus passeront à l'écran dans cet ordre, en boucle.</p>
+      </div>
+      <div class="nx-eact"><button type="button" class="btn" id="e-imp">${ico('upload', 16)} Importer un fichier</button><button type="button" class="btn ghost" id="e-cmp">${ico('layout', 16)} Créer une composition</button></div>
+      <ol class="nx-steps"><li class="on"><i>1</i>Ajoutez des contenus</li><li><i>2</i>Vérifiez l'aperçu</li><li><i>3</i>Publiez sur vos écrans</li></ol>
+    </div>`;
+    return;
+  }
+  $('#fil').innerHTML = items.map((it, i) => `
+    <div class="nx-it" data-k="${i}">
+      <div class="nx-th"><div class="art">${art(it.a, true)}</div>
+        <span class="nx-n">${i + 1}</span>
+        <span class="nx-d mono" title="Durée d'affichage : cliquer pour modifier">${fmt(it.dur)}</span>
+        <div class="nx-hv"><button type="button" title="Régler ce contenu">${ico('tune', 15)}</button><button type="button" title="Retirer du fil" data-del="${i}">${ico('x', 15)}</button></div>
+      </div>
+      <div class="nx-nm" title="${esc(it.name)}">${it.name}</div>
+    </div>`).join('')
+    + `<button type="button" class="nx-addt" id="addt" title="Choisir un contenu dans la bibliothèque ci-dessous">${ico('plus', 22)}<span>Ajouter</span></button>`
+    + `<div class="nx-loop"><i>${ico('refresh', 18)}</i>puis reprend au n° 1</div>`;
+}
+$('#fil').addEventListener('click', e => {
+  const d = e.target.closest('[data-del]');
+  if (d) { const it = items.splice(+d.dataset.del, 1)[0]; touchFil(); renderAll(); toast(`« ${it.name} » retiré du fil`); return; }
+  if (e.target.closest('#addt')) { $('#lib').scrollIntoView({ behavior: 'smooth', block: 'start' }); setTimeout(() => $('#libq').focus(), 350); }
+});
+
+/* glisser-déplacer comme dans l'app (playlist-flow.js, §187) : la carte saisie suit le pointeur (inclinée, ombre), un vide en pointillés
+   bleus marque l'arrivée, les autres cartes s'écartent d'un cran, le fil défile seul près des bords, Échap annule ; au lâcher la carte
+   se pose en glissant. Une vignette de la bibliothèque se glisse de la même façon à l'endroit voulu du fil (un simple clic l'ajoute à la fin). */
+const EASE = 'cubic-bezier(.2,.8,.2,1)';
+let drag = null;
+function geo() {
+  const fil = $('#fil'), slots = [...fil.querySelectorAll('.nx-it')];
+  const end = fil.querySelector('.nx-addt'), loop = fil.querySelector('.nx-loop'), first = slots[0];
+  if (!first) return null;
+  const th = first.querySelector('.nx-th');
+  const W = slots.length > 1 ? slots[1].offsetLeft - first.offsetLeft : end.offsetLeft - first.offsetLeft;
+  return { fil, fr: fil.getBoundingClientRect(), slots, end, loop, first, W, cw: th.offsetWidth, ch: th.offsetHeight, top: th.getBoundingClientRect().top, scroll: fil.scrollLeft };
+}
+const centerOf = (g, s) => g.fr.left + s.offsetLeft - g.scroll + g.cw / 2;
+function shift(el, px) { if (!el) return; el.style.transition = `transform 250ms ${EASE}`; el.style.transform = px ? `translateX(${px}px)` : ''; }
+function startDrag(e) {
+  if (drag || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  if (e.target.closest('.nx-hv button, .nx-addt, .nx-empty button')) return;
+  const slot = e.target.closest('#fil .nx-it'), tile = !slot && e.target.closest('#grid .nx-tile');
+  if (!slot && !tile) return;
+  const box = (slot ? slot.querySelector('.nx-th') : tile.querySelector('.nx-tb')).getBoundingClientRect();
+  drag = { started: false, x0: e.clientX, y0: e.clientY, px: e.clientX, py: e.clientY, k: null, placed: undefined, over: false };
+  if (slot) Object.assign(drag, { kind: 'move', slot, from: +slot.dataset.k, k: +slot.dataset.k, ox: e.clientX - box.left, oy: e.clientY - box.top });
+  else Object.assign(drag, { kind: 'add', tile, idx: +tile.dataset.add, ox: Math.min(60, e.clientX - box.left), oy: Math.min(60, e.clientY - box.top) });
+  document.addEventListener('pointermove', onMove); document.addEventListener('pointerup', onUp);
+  document.addEventListener('pointercancel', onCancel); document.addEventListener('keydown', onKey);
+}
+$('#fil').addEventListener('pointerdown', startDrag);
+$('#grid').addEventListener('pointerdown', startDrag);
+['#fil', '#grid'].forEach(s => $(s).addEventListener('dragstart', e => e.preventDefault()));   // jamais de glisser natif d'image
+function begin() {
+  drag.started = true; document.body.classList.add('pfx-dragging');
+  const g = document.createElement('div');
+  if (drag.kind === 'move') {
+    const src = drag.slot.querySelector('.nx-th'), r = src.getBoundingClientRect(), c = src.cloneNode(true);
+    c.querySelector('.nx-hv')?.remove(); c.style.width = r.width + 'px'; c.style.height = r.height + 'px';
+    g.className = 'pfx-ghost'; g.appendChild(c);
+    drag.slot.style.visibility = 'hidden';
+  } else {
+    const t = drag.tile.querySelector('.nx-tb').cloneNode(true);
+    t.querySelectorAll('.pfx-add, .pfx-used').forEach(x => x.remove());
+    g.className = 'pfx-ghost tile'; g.appendChild(t);
+    drag.tile.classList.add('dragging');
+  }
+  document.body.appendChild(g); drag.ghost = g;
+  const ph = document.createElement('div'); ph.className = 'pfx-phold'; ph.style.display = 'none'; document.body.appendChild(ph); drag.ph = ph;
+  drag.raf = requestAnimationFrame(tick);
+}
+function update() {
+  const fil = $('#fil');
+  if (!items.length) {   // fil vide : toute la zone de dépôt s'allume
+    const z = fil.querySelector('.nx-empty'), r = z.getBoundingClientRect();
+    const over = drag.px > r.left && drag.px < r.right && drag.py > r.top - 30 && drag.py < r.bottom + 30;
+    drag.over = over; drag.k = over ? 0 : null; z.classList.toggle('over', over);
+    drag.target = over ? { x: r.left + 28, y: r.top + 26, cw: 168 } : null;
+    return;
+  }
+  const g = geo(), px = drag.px, py = drag.py, fr = g.fr;
+  const over = px > fr.left - 30 && px < fr.right + 30 && py > fr.top - 60 && py < fr.bottom + 60;
+  drag.over = over;
+  let k = drag.k;
+  if (over) { k = 0; g.slots.forEach(s => { if (s !== drag.slot && centerOf(g, s) < px) k++; }); }
+  else if (drag.kind === 'add') k = null;   // hors du fil : la vignette n'ajoute rien, les cartes se referment
+  const changed = k !== drag.placed;
+  if (changed) {
+    drag.placed = k;
+    g.slots.forEach((s, j) => {
+      let sh = 0;
+      if (drag.kind === 'move') { if (s !== drag.slot) { const m = j < drag.from ? j : j - 1, fin = m < k ? m : m + 1; sh = (fin - j) * g.W; } }
+      else if (k != null && j >= k) sh = g.W;
+      shift(s, sh);
+    });
+    const tail = drag.kind === 'add' && k != null ? g.W : 0;
+    shift(g.end, tail); shift(g.loop, tail);
+  }
+  drag.k = k;
+  const ph = drag.ph;
+  if (k == null) { ph.style.display = 'none'; drag.target = null; return; }
+  const left = fr.left + g.first.offsetLeft - g.scroll + k * g.W;
+  const cl = Math.max(0, fr.left - left), cr = Math.max(0, left + g.cw - fr.right);
+  if (cl >= g.cw || cr >= g.cw) { ph.style.display = 'none'; return; }
+  ph.style.display = ''; ph.style.width = g.cw + 'px'; ph.style.height = g.ch + 'px';
+  ph.style.clipPath = cl || cr ? `inset(0 ${cr}px 0 ${cl}px)` : '';
+  ph.style.transition = changed ? `transform 250ms ${EASE}` : 'none';
+  ph.style.transform = `translate(${left}px,${g.top}px)`;
+  drag.target = { x: left, y: g.top, cw: g.cw };
+}
+function onMove(e) {
+  if (!drag) return;
+  drag.px = e.clientX; drag.py = e.clientY;
+  if (!drag.started) { if (Math.hypot(drag.px - drag.x0, drag.py - drag.y0) < 5) return; begin(); }
+  e.preventDefault();
+  drag.ghost.style.transform = `translate(${drag.px - drag.ox}px,${drag.py - drag.oy}px)`;
+  update();
+}
+function tick() {   // le fil défile tout seul quand on approche de ses bords
+  if (!drag || !drag.started) return;
+  const f = $('#fil'), r = f.getBoundingClientRect(); let v = 0;
+  if (drag.over && items.length) {
+    if (drag.px < r.left + 80) v = -(80 - (drag.px - r.left)) / 5;
+    else if (drag.px > r.right - 80) v = (80 - (r.right - drag.px)) / 5;
+  }
+  if (v) { f.scrollLeft += v; update(); }
+  drag.raf = requestAnimationFrame(tick);
+}
+function stopListen() {
+  document.removeEventListener('pointermove', onMove); document.removeEventListener('pointerup', onUp);
+  document.removeEventListener('pointercancel', onCancel); document.removeEventListener('keydown', onKey);
+  if (drag && drag.raf) cancelAnimationFrame(drag.raf);
+}
+function cleanup(dr) {
+  dr.ghost?.remove(); dr.ph?.remove(); dr.tile?.classList.remove('dragging');
+  document.body.classList.remove('pfx-dragging');
+  renderAll();   // le fil est redessiné : plus aucun décalage
+}
+function swallowClick() {   // le clic qui suit un glisser n'ajoute rien
+  const h = ev => { ev.stopPropagation(); ev.preventDefault(); window.removeEventListener('click', h, true); };
+  window.addEventListener('click', h, true); setTimeout(() => window.removeEventListener('click', h, true), 0);
+}
+function land(dr, apply) {   // la carte vient se poser dans le vide, puis le fil est enregistré et redessiné
+  const t = dr.target, g = dr.ghost;
+  g.classList.add('land');
+  g.style.transform = dr.kind === 'add' ? `translate(${t.x}px,${t.y}px) scale(${t.cw / g.offsetWidth})` : `translate(${t.x}px,${t.y}px)`;
+  setTimeout(() => { apply(); cleanup(dr); }, 280);
+}
+function onUp() {
+  const dr = drag; if (!dr) return;
+  stopListen(); drag = null;
+  if (!dr.started) return;   // simple clic : le clic habituel suit (une vignette s'ajoute à la fin)
+  swallowClick();
+  if (dr.kind === 'move' && dr.target) {
+    land(dr, () => { if (dr.k !== dr.from) { const [m] = items.splice(dr.from, 1); items.splice(dr.k, 0, m); touchFil(); toast(`« ${m.name} » passe en position ${dr.k + 1}`); } });
+  } else if (dr.kind === 'add' && dr.k != null && dr.target) {
+    land(dr, () => addFromLib(dr.idx, dr.k));
+  } else { dr.ghost.classList.add('fade'); setTimeout(() => cleanup(dr), 220); }
+}
+function onCancel() { const dr = drag; if (!dr) return; stopListen(); drag = null; if (dr.started) { swallowClick(); cleanup(dr); } }
+function onKey(e) { if (e.key === 'Escape') onCancel(); }
+document.addEventListener('wheel', e => {   // molette verticale sur le fil : il défile à l'horizontale
+  const f = e.target.closest && e.target.closest('.nx-fil');
+  if (!f || Math.abs(e.deltaY) <= Math.abs(e.deltaX) || f.scrollWidth <= f.clientWidth) return;
+  f.scrollLeft += e.deltaY; e.preventDefault();
+}, { passive: false });
+
+/* bibliothèque */
+const used = name => items.filter(i => i.name === name).length;
+function renderLib() {
+  $('#libtabs').innerHTML = Object.entries(LIB).filter(([, v]) => v.n > 0)
+    .map(([k, v]) => `<button type="button" role="tab" class="${k === libTab ? 'on' : ''}" aria-selected="${k === libTab}" data-lt="${k}">${v.label}<span class="c">${v.n}</span></button>`).join('');
+  const q = $('#libq').value.trim().toLowerCase();
+  $('#grid').innerHTML = LIB[libTab].items.map((x, i) => ({ x, i })).filter(({ x }) => !q || x.name.toLowerCase().includes(q))
+    .map(({ x, i }) => { const u = used(x.name); return `
+      <button type="button" class="nx-tile" data-add="${i}" title="Cliquer : ajouter à la fin du fil · glisser : le poser à l'endroit voulu">
+        <span class="nx-tb"><span class="art">${art(x.a, true)}</span>${u ? `<span class="pfx-used">dans le fil${u > 1 ? ' ×' + u : ''}</span>` : ''}<span class="pfx-add" aria-hidden="true"><span>${ico('plus', 14)} Ajouter</span></span></span>
+        <span class="nx-tn">${x.name}</span>
+      </button>`; }).join('') || '<p style="color:var(--muted);grid-column:1/-1">Aucun contenu ne correspond.</p>';
+}
+$('#libtabs').addEventListener('click', e => { const b = e.target.closest('[data-lt]'); if (!b) return; libTab = b.dataset.lt; $('#libq').value = ''; renderLib(); });
+$('#libq').addEventListener('input', renderLib);
+$('#imp').addEventListener('click', () => toast('Menu Importer : ordinateur, adresse, cloud — inchangé'));
+function addFromLib(i, at) {
+  const x = LIB[libTab].items[i], end = at == null || at >= items.length;
+  if (end) items.push({ ...x }); else items.splice(at, 0, { ...x });
+  touchFil(); renderAll();
+  if (end) { const f = $('#fil'); f.scrollTo({ left: f.scrollWidth, behavior: 'smooth' }); }
+  toast(end ? `« ${x.name} » ajouté à la fin du fil` : `« ${x.name} » ajouté en position ${at + 1}`);
+}
+$('#grid').addEventListener('click', e => { const t = e.target.closest('[data-add]'); if (t) addFromLib(+t.dataset.add); });
+
+/* ---------- Aperçu ---------- */
+const FMT = { b: 'p', c: 'l', m: 'l', L: 'l', P: 'p', W22: 'w22', W31: 'w31' };
+const RATIO = { p: 9 / 16, l: 16 / 9, w22: 16 / 9, w31: 48 / 9 };
+let pv = { t: 0, playing: true, k: -1 };
+function layoutScreen() {
+  const f = FMT[$('#pv-fmt').value], st = $('#stage'), r = RATIO[f];
+  const W = st.clientWidth - 44, H = st.clientHeight - 44;
+  let w = W, h = w / r; if (h > H) { h = H; w = h * r; }
+  const s = $('#scr'); s.style.width = Math.round(w) + 'px'; s.style.height = Math.round(h) + 'px';
+  $('#bz').innerHTML = f === 'w22' ? '<i style="left:50%;top:0;bottom:0;width:5px;margin-left:-2px"></i><i style="top:50%;left:0;right:0;height:5px;margin-top:-2px"></i>'
+    : f === 'w31' ? '<i style="left:33.33%;top:0;bottom:0;width:5px"></i><i style="left:66.66%;top:0;bottom:0;width:5px"></i>' : '';
+}
+function cur() { let t = pv.t; for (let k = 0; k < items.length; k++) { if (t < items[k].dur) return { k, t }; t -= items[k].dur; } return { k: 0, t: 0 }; }
+function showArt(force) {
+  const { k } = cur();
+  if (force || k !== pv.k) { pv.k = k; $('#scr-art').innerHTML = items.length ? `<div class="art">${art(items[k].a, false)}</div>` : '<div class="art" style="display:grid;place-items:center;color:#9FB4CC;font-size:15px;text-align:center;padding:20px">Le fil est vide :<br>ajoutez un contenu pour voir l\'aperçu.</div>'; }
+}
+function renderTl() {
+  const { k, t } = cur();
+  $('#pv-tl').innerHTML = items.map((it, i) => `<button type="button" class="nx-sg ${i === k ? 'on' : ''} ${i < k ? 'done' : ''}" style="flex:${it.dur} 1 0" data-k="${i}" title="${esc(it.name)} · ${fmt(it.dur)}"><i><b style="width:${i === k ? (t / it.dur * 100).toFixed(1) : 0}%"></b></i><span>${it.name}</span></button>`).join('');
+  $('#pv-time').textContent = `${fmt(pv.t)} / ${fmt(total())}`;
+  $('#pv-play').innerHTML = ico(pv.playing ? 'pause' : 'play', 17);
+  $('#pv-play').title = pv.playing ? 'Pause' : 'Lecture';
+}
+function seekTo(k) { pv.t = items.slice(0, k).reduce((s, i) => s + i.dur, 0); showArt(); renderTl(); }
+$('#pv-tl').addEventListener('click', e => { const b = e.target.closest('[data-k]'); if (b) seekTo(+b.dataset.k); });
+$('#pv-play').addEventListener('click', () => { pv.playing = !pv.playing; renderTl(); });
+$('#pv-prev').addEventListener('click', () => { const { k, t } = cur(); seekTo(t > 1.5 ? k : (k - 1 + items.length) % items.length); });
+$('#pv-next').addEventListener('click', () => { seekTo((cur().k + 1) % items.length); });
+$('#pv-fmt').addEventListener('change', () => { layoutScreen(); showArt(true); });
+window.addEventListener('resize', () => { if (tab === 'apercu') layoutScreen(); });
+let last = performance.now(), acc = 0;
+(function loop(now) {
+  const dt = (now - last) / 1000; last = now;
+  if (tab === 'apercu' && pv.playing && items.length) {
+    pv.t = (pv.t + dt) % total(); acc += dt;
+    if (acc > .1) { acc = 0; showArt(); renderTl(); }
+  }
+  requestAnimationFrame(loop);
+})(last);
+
+/* ---------- Diffusion ---------- */
+/* L'interrupteur « Publier » choisit les écrans qui reçoivent la modification ; éteint, l'écran garde sa version actuelle : la liste n'en est
+   jamais retirée (retrait par le menu ⋯, avec confirmation). « Quand » : maintenant ou une heure choisie, écran par écran. */
+let menuFor = null, removing = null;
+/* dessin de l'écran : ses zones côte à côte, celles qui portent la liste en bleu ; sur une ligne de zone, la zone concernée ressort */
+function glyph(s, focus) {
+  const w = LAYOUTS[s.lay];
+  return `<span class="nx-tv ${s.o}${focus != null ? ' sm' : ''}"><i>${s.zones.map((z, i) => {
+    const on = shows(s, i);
+    return `<b style="--w:${w[i]}" class="${focus == null ? (on ? 'me' : '') : i === focus ? (on ? 'me' : 'cur') : 'dim'}"></b>`;
+  }).join('')}</i></span>`;
+}
+const nowHtml = z => z.init ? '<span class="nx-now me">Cette liste</span>' : z.plays ? `<span class="nx-now">« ${z.plays} »</span>` : '<span class="nx-now">Aucune liste</span>';
+function stateHtml(s) {
+  return s.online ? '<span><i class="nx-dot"></i>En ligne</span>'
+    : `<span><i class="nx-dot off"></i>Hors ligne</span>${s.on ? '<small>la recevra à sa reconnexion</small>' : ''}`;
+}
+function chgHtml(s) {
+  let h;
+  if (has(s) && s.stale) h = '<span class="nx-chip warn">Modifications à publier</span>' + (s.on ? '' : '<span class="nx-later">pas dans cette publication</span>');
+  else if (has(s) && s.on) h = '<span class="nx-chip gone">Republiée telle quelle</span>';
+  else if (s.on) h = '<span class="nx-chip warn">À ajouter</span>' + (s.zones.length > 1 ? `<span>en zone ${s.target + 1}</span>` : `<span>remplacera « ${s.zones[0].plays} »</span>`);
+  else h = s.scheduled ? '' : '<span class="no">—</span>';
+  return h + (s.scheduled ? `<span class="nx-chip plan" title="Publication déjà programmée">${ico('clock', 12)} Programmée ${s.scheduled.replace(/^Le /, 'le ')}</span>` : '');
+}
+const whenHtml = s => s.on ? `<button type="button" class="nx-when${s.when ? ' set' : ''}" data-when="${s.id}" title="Publier maintenant ou à une heure choisie">${ico('clock', 14)}<span>${s.when || 'Maintenant'}</span>${ico('chev-down', 12)}</button>` : '';
+function moreHtml(s) {
+  if (!has(s) && !s.scheduled) return '<span class="nx-more-gap"></span>';
+  const open = menuFor === s.id;
+  return `<span class="nx-mwrap"><button type="button" class="nx-more${open ? ' on' : ''}" title="Plus d'actions" data-more="${s.id}">${ico('more', 18)}</button>${open ? `<div class="nx-menu" role="menu">`
+    + (s.scheduled ? `<button type="button" role="menuitem" data-unsched="${s.id}">${ico('clock', 16)}<span>Retirer la programmation</span></button>` : '')
+    + (has(s) ? `<button type="button" role="menuitem" class="danger" data-rm="${s.id}">${ico('x', 16)}<span>Retirer la liste de cet écran…</span></button>` : '')
+    + '</div>' : ''}</span>`;
+}
+const swHtml = s => `<button type="button" class="switch ${s.on ? 'on' : ''}" role="switch" aria-checked="${s.on}" title="${has(s) ? 'Publier la modification sur ' : 'Publier la liste sur '}${s.name}" data-sw="${s.id}"><span></span></button>`;
+function rowHtml(s) {
+  const cls = `nx-tr scr${s.on ? ' sel' : ''}`;
+  if (s.zones.length === 1) {
+    return `<div class="${cls}">
+      <div class="nx-scn">${glyph(s)}<div><b>${s.name}</b><small>Monozone · ${s.o === 'p' ? 'portrait' : 'paysage'}</small></div></div>
+      <div class="nx-st">${stateHtml(s)}</div>
+      <div>${nowHtml(s.zones[0])}</div>
+      <div class="nx-chg">${chgHtml(s)}</div>
+      <div>${whenHtml(s)}</div>
+      <div class="nx-last">${moreHtml(s)}${swHtml(s)}</div>
+    </div>`;
+  }
+  const mine = s.zones.map((z, i) => z.init ? i + 1 : 0).filter(Boolean);
+  const picking = s.on && !has(s);   // l'écran reçoit la liste : on choisit sa zone
+  return `<div class="${cls} multi">
+      <div class="nx-scn">${glyph(s)}<div><b>${s.name}</b><small>Multizone · ${s.zones.length} zones</small></div></div>
+      <div class="nx-st">${stateHtml(s)}</div>
+      <div>${mine.length ? `<span class="nx-now me">Cette liste en zone ${mine.join(' et ')}</span>` : `<span class="nx-now">${s.zones.length} autres listes</span>`}</div>
+      <div class="nx-chg">${chgHtml(s)}</div>
+      <div>${whenHtml(s)}</div>
+      <div class="nx-last">${moreHtml(s)}${swHtml(s)}</div>
+    </div>`
+    + s.zones.map((z, i) => {
+      const target = picking && s.target === i;
+      return `<div class="nx-tr zone${s.on ? ' sel' : ''}${picking ? ' pickz' : ''}" ${picking ? `data-target="${s.id}:${i}"` : ''}>
+      <div class="nx-scn">${glyph(s, i)}<div><b>Zone ${i + 1}</b><small>${ZPOS[s.lay][i]}</small></div></div>
+      <div></div>
+      <div>${nowHtml(z)}</div>
+      <div class="nx-chg">${target ? `<span class="nx-chip warn">Recevra la liste</span><span>remplacera « ${z.plays} »</span>` : '<span class="no">—</span>'}</div>
+      <div></div>
+      <div class="nx-last">${picking ? `<label class="nx-zpick"><input type="radio" name="zone-${s.id}" ${target ? 'checked' : ''} data-target="${s.id}:${i}"> Ici</label>` : ''}</div>
+    </div>`;
+    }).join('');
+}
+function renderDiff() {
+  const a = screens.filter(has), b = screens.filter(s => !has(s));
+  const c = toUpdate().length, k = chosen().length;
+  $('#dnote').innerHTML = items.length ? '' : `<div class="nx-dnote">${ico('list', 18)} Le fil est vide : ajoutez d'abord des contenus, sinon les écrans choisis n'afficheront rien.<button type="button" class="btn ghost sm" data-go="fil">Aller au fil</button></div>`;
+  const legend = '<span class="nx-legend"><b></b> zone qui diffuse cette liste</span>';
+  $('#dsel').innerHTML = c || k
+    ? `<div class="nx-selbar">${ico('upload', 17)}<span class="nx-seltx"><b>${btnLabel()}</b>${c ? ` · ${c} à mettre à jour` : ''}. Activez les écrans qui reçoivent la modification, maintenant ou à l'heure choisie. Un écran éteint garde sa version actuelle : la liste n'en est jamais retirée.</span>`
+      + (a.length ? '<span class="nx-all"><button type="button" class="pf-link" data-all="1">Tous</button> · <button type="button" class="pf-link" data-all="0">Aucun</button></span>' : '') + legend + '</div>'
+    : `<div class="nx-selbar ok">${ico('check', 17)}<span class="nx-seltx">Tous les écrans sont à jour.</span>${legend}</div>`;
+  $('#diff').innerHTML = '<div class="nx-tr hd"><span>Écran</span><span>État</span><span>Diffuse actuellement</span><span>Changement</span><span>Quand</span><span class="r">Publier</span></div>'
+    + (a.length ? `<div class="nx-grp">Diffusée sur <span>${a.length}</span></div>${a.map(rowHtml).join('')}` : '')
+    + (b.length ? `<div class="nx-grp">Autres écrans <span>${b.length}</span></div>${b.map(rowHtml).join('')}` : '');
+  $('#dconfirm').innerHTML = removing ? `<div class="modal-backdrop" data-rmno="1"></div>
+    <div class="modal pp-modal nx-confirm" role="alertdialog" aria-modal="true"><h3>Retirer la liste de « ${removing.name} » ?</h3>
+      <p class="muted">L'écran n'affichera plus cette liste${removing.zones.length > 1 ? ` (zone ${removing.zones.map((z, i) => z.init ? i + 1 : 0).filter(Boolean).join(' et ')})` : ''} : il est publié aussitôt, sans elle.</p>
+      <div class="pp-mf"><span class="grow"></span><button type="button" class="btn ghost" data-rmno="1">Annuler</button><button type="button" class="btn danger-solid" data-rmyes="1">Retirer la liste</button></div></div>` : '';
+}
+const byId = id => screens.find(x => x.id === id);
+document.addEventListener('click', e => {
+  if (!e.target.closest('#diff, #dsel, #dconfirm')) { if (menuFor && !e.target.closest('.nx-mwrap')) { menuFor = null; renderDiff(); } return; }
+  const t = e.target.closest('[data-sw], [data-when], [data-more], [data-rm], [data-unsched], [data-target], [data-all], [data-rmno], [data-rmyes]');
+  if (!t) { if (menuFor) { menuFor = null; renderDiff(); } return; }
+  const d = t.dataset;
+  if (d.sw) { const s = byId(d.sw); s.on = !s.on; if (!s.on) s.when = null; }
+  else if (d.when) { const s = byId(d.when); s.when = s.when ? null : WHEN; toast(s.when ? 'Ouvre le calendrier actuel : ici, ' + WHEN : 'Maintenant'); }
+  else if (d.more) { menuFor = menuFor === d.more ? null : d.more; renderDiff(); return; }
+  else if (d.unsched) { const s = byId(d.unsched); s.scheduled = null; menuFor = null; toast('Programmation retirée · ' + s.name); }
+  else if (d.rm) { removing = byId(d.rm); menuFor = null; renderDiff(); return; }
+  else if (d.rmno) { removing = null; renderDiff(); return; }
+  else if (d.rmyes) { const s = removing; s.zones.forEach(z => z.init = false); s.stale = false; s.scheduled = null; resetChoices(s); removing = null; toast(`Liste retirée de « ${s.name} »`); }
+  else if (d.target) { const [id, i] = d.target.split(':'); byId(id).target = +i; }
+  else if (d.all) { screens.forEach(s => { if (d.all === '1') { if (has(s)) s.on = true; } else { s.on = false; s.when = null; } }); }
+  renderAll();
+});
+
+/* ---------- Ce qui change ---------- */
+const WHY = {
+  head: ['Le bloc bleu nuit « Durée totale / Contenus » disparaît : la durée et le nombre de contenus passent en tête du fil, le nombre reste aussi sur l\'onglet.',
+    'Un seul bouton orange, en haut à droite, visible depuis les 3 onglets, qui dit où il publie : « Publier sur 3 écrans ». Il n\'apparaît que s\'il y a quelque chose à publier ; sinon « ✓ À jour sur 3 écrans ». « 3 écrans à mettre à jour » mène à l\'onglet Diffusion.',
+    "La flèche ▾ du bouton : « Tout publier maintenant » ou « Tout programmer… » (une même heure pour tous les écrans activés).",
+    '« Diffusée sur 1 écran » est cliquable et mène à l\'onglet Diffusion.',
+    'Le crayon n\'apparaît qu\'au survol du titre ; le fil d\'Ariane dit « Listes de diffusion », comme le menu.'],
+  fil: ['Le fil est mis en avant : panneau bleuté « Ordre de passage », cartes plus grandes, et il <b>reste visible en haut</b> quand on fait défiler la bibliothèque (on voit le contenu arriver).',
+    'En tête du panneau : nombre de contenus, durée de la boucle, « Glissez pour changer l\'ordre » et Transitions. En fin de fil : « puis reprend au n° 1 ».',
+    '<b>Glisser-déplacer comme dans l\'app actuelle</b> : la carte suit le pointeur (inclinée, avec ombre), un emplacement en pointillés bleus montre où elle arrive, les autres cartes s\'écartent d\'un cran, le fil défile seul près des bords, la carte se pose en glissant ; Échap annule.',
+    'Une vignette de la bibliothèque se glisse <b>à l\'endroit voulu</b> du fil (un simple clic l\'ajoute à la fin) ; liste vide : toute la zone de dépôt s\'allume.',
+    'Plus de pellicule pointillée, de flèches entre les cartes ni de « passe à 0:00 » : numéro et durée sur la vignette, nom dessous, lisible en entier.',
+    '<b>Liste vide</b> (bouton « vide » du bandeau) : une grande zone de dépôt dit quoi faire, deux boutons (Importer un fichier, Créer une composition), les 3 étapes de la page, et « Choisissez ici » qui sautille sur la bibliothèque.',
+    'Bibliothèque en retrait (vignettes plus petites) : titre, types, recherche et Importer sur une seule ligne ; types vides masqués ; plus de dimensions sous les vignettes.'],
+  apercu: ['La colonne « Format » disparaît : un seul menu dans la barre, ouvert d\'office au format de l\'écran qui diffuse la liste.',
+    'Une seule ligne de commandes : lecture, frise des contenus (qui sert de barre de progression), temps, format, son, plein écran.',
+    'Retirés : badge « Aperçu », lien « Recommencer » (⏮ ou clic sur le 1er contenu suffit) et la phrase « Dimanche 8 novembre : 1 contenu joué » (affichée seulement si un contenu est sauté).'],
+  diff: [
+    "« Publication » devient <b>Diffusion</b> : on y choisit sur quels écrans publier la modification, et quand ; l’action Publier est en haut de page.",
+    "Un <b>tableau sur toute la largeur</b> : Écran · État · Diffuse actuellement · Changement · Quand · Publier. Deux groupes : « Diffusée sur » et « Autres écrans ». Les aires n’apparaissent que s’il y en a plusieurs.",
+    "<b>L’interrupteur « Publier » ne retire jamais la liste</b> : allumé, l’écran reçoit la modification ; éteint, il garde sa version actuelle (« pas dans cette publication »). Allumé d’office pour les écrans en retard ; « Tous » / « Aucun » au-dessus du tableau.",
+    "<b>Quand</b> : « Maintenant » ou une heure choisie (calendrier actuel), écran par écran. Le bouton du haut suit : « Publier sur 2 écrans », « Programmer sur 1 écran » ou « Publier et programmer · 2 écrans ».",
+    "<b>Retirer la liste d’un écran</b> : seulement par le menu ⋯ de sa ligne, avec une confirmation. Le même menu retire une publication programmée.",
+    "<b>Monozone et multizone</b> : un écran monozone tient sur une ligne. Un écran multizone a sa ligne (dessin de ses zones, celles qui portent la liste en bleu) puis une ligne par zone avec ce qu’elle diffuse ; un écran qui reçoit la liste choisit sa zone (« Ici »).",
+    "La colonne Changement ne parle que s’il y a quelque chose : « Modifications à publier », « Republiée telle quelle », « À ajouter · remplacera « Annonces » », « Programmée le … ».",
+    "Liste vide : un bandeau prévient que les écrans n’afficheraient rien, avec « Aller au fil »."]
+};
+const TABN = { fil: 'Fil de lecture', apercu: 'Aperçu', diff: 'Diffusion (ex-Publication)' };
+function renderWhy() {
+  $('#mk-why').innerHTML = `<h4>En-tête (les 3 onglets)</h4><ol>${WHY.head.map(x => `<li>${x}</li>`).join('')}</ol>`
+    + `<h4>Onglet ${TABN[tab]}</h4><ol>${WHY[tab].map(x => `<li>${x}</li>`).join('')}</ol>`;
+}
+$('#mk-demo').addEventListener('click', e => { const b = e.target.closest('[data-d]'); if (b) setDemo(b.dataset.d); });
+$('#mk-why-btn').addEventListener('click', e => { const w = $('#mk-why'); w.classList.toggle('on'); e.currentTarget.classList.toggle('on'); });
+
+function renderAll() {
+  renderHead(); renderFil(); renderLib(); renderDiff(); renderWhy();
+  if (pv.t >= total()) pv.t = 0;
+  if (tab === 'apercu') { showArt(true); renderTl(); }
+}
+renderAll(); renderTl();
+</script>
+</body>
+</html>

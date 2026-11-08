@@ -15,6 +15,16 @@
     sound: '<path d="M4 9h4l5-4v14l-5-4H4zM17 8a5 5 0 0 1 0 8M19.5 5.5a8.5 8.5 0 0 1 0 13"/>',
     full: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>'
   };
+  var ICX = {
+    prev: '<path d="M19 20L9 12l10-8z"/><path d="M5 19V5"/>',
+    next: '<path d="M5 4l10 8-10 8z"/><path d="M19 5v14"/>',
+    play: '<path d="M7 4l13 8-13 8z"/>',
+    pause: '<path d="M9 5v14M15 5v14"/>',
+    muted: '<path d="M11 5L6 9H2v6h4l5 4z"/><path d="M23 9l-6 6M17 9l6 6"/>',
+    sound: '<path d="M11 5L6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/>',
+    full: '<path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>'
+  };
+  function icx(n, size) { return '<svg viewBox="0 0 24 24" width="' + (size || 16) + '" height="' + (size || 16) + '" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICX[n] + '</svg>'; }
   function ico(n) { return '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICO[n] + '</svg>'; }
   function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
   function mmss(ms) { var s = Math.max(0, Math.floor(ms / 1000)); return Math.floor(s / 60) + ':' + ('0' + s % 60).slice(-2); }
@@ -27,7 +37,10 @@
 
   function Sim(host, o) {
     this.host = host; this.o = {}; this.st = null; this.at = 0; this.sound = false;
-    host.innerHTML =
+    this.ext = !!(o && o.ext) && !!host.closest('.nx-pv');
+    this.ui = this.ext ? host.closest('.nx-pv') : host;
+    if (this.ext) host.innerHTML = '<div class="sim-box"><div class="sim-frame"><iframe title="Aperçu de l\'écran" allow="autoplay; fullscreen"></iframe><div class="sim-grid" aria-hidden="true"></div></div></div>';
+    else host.innerHTML =
       '<div class="sim-box"><div class="sim-frame"><iframe title="Aperçu de l\'écran" allow="autoplay; fullscreen"></iframe><div class="sim-grid" aria-hidden="true"></div></div></div>' +
       '<div class="sim-bar">' +
         '<button type="button" class="sim-b" data-a="prev" title="Contenu précédent" aria-label="Contenu précédent">' + ico('prev') + '</button>' +
@@ -40,11 +53,17 @@
       '</div><div class="sim-tl" role="list" aria-label="Contenus de la boucle"></div><div class="sim-note"></div>';
     this.frame = host.querySelector('iframe');
     var self = this;
-    host.querySelector('.sim-bar').addEventListener('click', function (e) {
+    if (this.ext) {
+      var u = this.ui;
+      u.querySelector('[data-a=prev]').innerHTML = icx('prev');
+      u.querySelector('[data-a=next]').innerHTML = icx('next');
+      u.querySelector('[data-a=full]').innerHTML = icx('full');
+    }
+    this.ui.querySelector(this.ext ? '.nx-ctl' : '.sim-bar').addEventListener('click', function (e) {
       var b = e.target.closest('[data-a]');
       if (b) self.act(b.getAttribute('data-a'));
     });
-    host.querySelector('.sim-tl').addEventListener('click', function (e) {
+    this.ui.querySelector(this.ext ? '.nx-tl' : '.sim-tl').addEventListener('click', function (e) {
       var b = e.target.closest('[data-k]');
       if (b) self.send({ cmd: 'goto', index: +b.getAttribute('data-k') });
     });
@@ -80,9 +99,11 @@
   Sim.prototype.load = function () {
     var src = this.o.src + (this.sound ? '&sound=1' : '');
     if (this.frame.getAttribute('src') !== src) { this.st = null; this.frame.setAttribute('src', src); this.render(); }
-    var b = this.host.querySelector('[data-a=sound]');
-    b.innerHTML = this.sound ? ico('sound') + ' Son activé' : ico('muted') + ' Son coupé';
-    b.title = this.sound ? 'Couper le son' : 'Activer le son (la lecture reprend)';
+    var b = this.ui.querySelector('[data-a=sound]');
+    if (this.ext) b.innerHTML = icx(this.sound ? 'sound' : 'muted');
+    else b.innerHTML = this.sound ? ico('sound') + ' Son activé' : ico('muted') + ' Son coupé';
+    b.title = this.sound ? 'Couper le son' : this.ext ? "Son coupé : cliquer pour l'activer" : 'Activer le son (la lecture reprend)';
+    b.setAttribute('aria-label', b.title);
   };
 
   // opts : src, cols, rows, ratio (largeur / hauteur d'un écran), mode (live | try), view (img | sep), bezel (px), nums, real, cells [{state, title}]
@@ -108,6 +129,7 @@
   };
 
   Sim.prototype.render = function () {
+    if (this.ext) return this.renderExt();
     var st = this.st, live = this.o.mode !== 'try', h = this.host;
     var badge = h.querySelector('.sim-state'), link = h.querySelector('[data-a=live]'), play = h.querySelector('[data-a=play]');
     play.innerHTML = ico(st && st.paused ? 'play' : 'pause');
@@ -142,16 +164,39 @@
     this.tick();
   };
 
+  Sim.prototype.renderExt = function () {
+    var st = this.st, u = this.ui, play = u.querySelector('[data-a=play]');
+    play.innerHTML = icx(st && st.paused ? 'play' : 'pause', 17);
+    play.title = st && st.paused ? 'Lecture' : 'Pause';
+    play.setAttribute('aria-label', play.title);
+    var tl = u.querySelector('.nx-tl'), note = u.querySelector('.nx-note');
+    if (!st) { tl.innerHTML = ''; note.innerHTML = ''; note.hidden = true; return; }
+    tl.innerHTML = st.items.length ? st.items.map(function (it, k) {
+      var flex = it.content ? Math.min(it.sec, 60) : it.sec;
+      return '<button type="button" role="listitem" class="nx-sg' + (k === st.index ? ' on' : '') + (k < st.index ? ' done' : '') + '" data-k="' + k + '" style="flex:' + Math.max(1, flex) + ' 1 0" title="' +
+        esc(it.name) + ' · ' + (it.content ? "jusqu'à la fin" : mmss(it.sec * 1000)) + '"><i><b class="sim-fill"></b></i><span>' + esc(it.name) + '</span></button>';
+    }).join('') : '<span class="sim-empty">Aucun contenu à diffuser à ce moment.</span>';
+    var parts = [];
+    if (st.skipped.length) {
+      if (st.today) parts.push(esc(day(st.today, { weekday: 'long', day: 'numeric', month: 'long' }).replace(/^./, function (c) { return c.toUpperCase(); })) + ' : <b>' +
+        st.items.length + ' contenu' + (st.items.length > 1 ? 's' : '') + ' joué' + (st.items.length > 1 ? 's' : '') + '</b>, ' + st.skipped.length + ' sauté' + (st.skipped.length > 1 ? 's' : '') + ' (hors de sa période).');
+      st.skipped.forEach(function (i) { parts.push('Sauté à cette date : <s>' + esc(i.name) + '</s>' + (period(i) ? ' · valable ' + period(i) : '')); });
+    }
+    note.innerHTML = parts.join('<br>');
+    note.hidden = parts.length === 0;
+    this.tick();
+  };
+
   Sim.prototype.tick = function () {
-    var st = this.st;
-    if (!st || st.index < 0 || !st.items[st.index]) { this.host.querySelector('.sim-time').textContent = ''; return; }
+    var st = this.st, time = this.ui.querySelector(this.ext ? '.nx-time' : '.sim-time');
+    if (!st || st.index < 0 || !st.items[st.index]) { time.textContent = ''; return; }
     var spent = st.dur - st.left + (st.paused ? 0 : Date.now() - this.at);
     var p = st.dur > 0 ? Math.min(1, Math.max(0, spent / st.dur)) : 0;
-    var fill = this.host.querySelector('.sim-seg.on .sim-fill');
+    var fill = this.ui.querySelector(this.ext ? '.nx-sg.on .sim-fill' : '.sim-seg.on .sim-fill');
     if (fill) fill.style.width = (p * 100) + '%';
     var before = 0, total = 0;
     st.items.forEach(function (it, k) { total += it.sec * 1000; if (k < st.index) before += it.sec * 1000; });
-    this.host.querySelector('.sim-time').textContent = mmss(before + Math.min(spent, st.dur)) + ' / ' + mmss(total);
+    time.textContent = mmss(before + Math.min(spent, st.dur)) + ' / ' + mmss(total);
   };
 
   Sim.prototype.dispose = function () {

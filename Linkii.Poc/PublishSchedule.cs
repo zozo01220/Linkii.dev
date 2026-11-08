@@ -11,6 +11,7 @@ public class ScheduledPublication
     public Guid ScreenId { get; set; }
     public Guid? PlaylistId { get; set; }   // la liste concernée (null : ancien format, l'écran est retiré de sa liste)
     public bool Remove { get; set; }        // à l'heure dite, l'écran n'a plus cette liste (sinon il la reçoit)
+    public List<int>? Zones { get; set; }   // zones de l'écran qui auront la liste (0 = zone 1) ; null : ancien format (zone 1 si l'écran ne l'a nulle part)
     public DateTime DueUtc { get; set; }
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public Guid? CreatedBy { get; set; }
@@ -19,12 +20,12 @@ public class ScheduledPublication
 public class PublishSchedule(JsonStore store, Notifier notifier, ILogger<PublishSchedule> log)
 {
     /// <summary>Programme (ou reprogramme) la publication d'un écran. <paramref name="local"/> est l'heure de l'organisation (son fuseau).</summary>
-    public void Schedule(Guid clientId, Guid screenId, Guid? playlistId, DateTime local, Guid? by, bool remove = false) => store.Write(db =>
+    public void Schedule(Guid clientId, Guid screenId, Guid? playlistId, DateTime local, Guid? by, bool remove = false, List<int>? zones = null) => store.Write(db =>
     {
         var tz = Zone(db.Clients.FirstOrDefault(c => c.Id == clientId)?.Timezone);
         var due = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), tz);
         db.ScheduledPublications.RemoveAll(x => x.ClientId == clientId && x.ScreenId == screenId);
-        db.ScheduledPublications.Add(new ScheduledPublication { ClientId = clientId, ScreenId = screenId, PlaylistId = playlistId, Remove = remove, DueUtc = due, CreatedBy = by });
+        db.ScheduledPublications.Add(new ScheduledPublication { ClientId = clientId, ScreenId = screenId, PlaylistId = playlistId, Remove = remove, Zones = zones, DueUtc = due, CreatedBy = by });
     });
 
     public void Cancel(Guid clientId, Guid screenId) => store.Write(db => db.ScheduledPublications.RemoveAll(x => x.ClientId == clientId && x.ScreenId == screenId));
@@ -51,6 +52,16 @@ public class PublishSchedule(JsonStore store, Notifier notifier, ILogger<Publish
         for (var z = 0; z < s.ZoneCount; z++) if (s.ZonePlaylist(z) == playlistId) s.SetZonePlaylist(z, null);
     }
 
+    /// <summary>Met la liste exactement dans les zones données (0 = zone 1) et la retire des autres zones de l'écran (onglet Diffusion, écrans multizone).</summary>
+    public static void AssignZones(Screen s, Guid playlistId, IReadOnlyCollection<int> zones)
+    {
+        for (var z = 0; z < s.ZoneCount; z++)
+        {
+            if (zones.Contains(z)) s.SetZonePlaylist(z, playlistId);
+            else if (s.ZonePlaylist(z) == playlistId) s.SetZonePlaylist(z, null);
+        }
+    }
+
     /// <summary>Passe les publications arrivées à échéance.</summary>
     public async Task Tick(DateTime nowUtc)
     {
@@ -63,7 +74,8 @@ public class PublishSchedule(JsonStore store, Notifier notifier, ILogger<Publish
                 db.ScheduledPublications.Remove(x);
                 if (db.Screens.FirstOrDefault(s => s.Id == x.ScreenId && s.ClientId == x.ClientId) is not { } sc) continue;
                 if (x.PlaylistId is { } pid && !x.Remove && !db.Playlists.Any(p => p.Id == pid && p.ClientId == x.ClientId)) continue;   // la liste a été supprimée
-                if (x.PlaylistId is { } lid) Assign(sc, lid, !x.Remove); else sc.PlaylistId = null;
+                if (x.PlaylistId is { } lid && x.Zones != null) AssignZones(sc, lid, x.Remove ? Array.Empty<int>() : x.Zones);
+                else if (x.PlaylistId is { } lid2) Assign(sc, lid2, !x.Remove); else sc.PlaylistId = null;
                 ids.Add(sc.Id);
             }
             return ids;

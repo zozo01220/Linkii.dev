@@ -9,6 +9,10 @@
   'use strict';
   var EASE = 'cubic-bezier(.2,.8,.2,1)';
   var drag = null;
+  // Deux balisages : l'ancien fil (.pfx-*, encore utilisé par l'assistant Premiers pas) et la page d'une liste (.nx-*, maquette liste-diffusion-allegee.html)
+  var OLD = { nx: false, fil: '.pfx-fil', slot: '.pfx-u', card: '.pfx-card', tile: '.pfx-tile', tb: '.pfx-tb', dur: '.pfx-dur', end: '.pfx-endu', endCard: '.pfx-end', loop: '.pfx-loop', hov: '.pfx-hov', empty: null };
+  var NX = { nx: true, fil: '.nx-fil', slot: '.nx-it', card: '.nx-th', tile: '.nx-tile', tb: '.nx-tb', dur: '.nx-d', end: '.nx-addt', endCard: null, loop: '.nx-loop', hov: '.nx-hv', empty: '.nx-empty' };
+  function sel(root) { return root && root.classList && root.classList.contains('plx') ? NX : OLD; }
 
   function reduced() { return !!(w.matchMedia && w.matchMedia('(prefers-reduced-motion: reduce)').matches); }
   function ms() { return reduced() ? 0 : 250; }
@@ -17,22 +21,25 @@
     if (!root || root.__lkFlow) return;
     root.__lkFlow = true;
 
-    root.addEventListener('dragstart', function (e) { if (e.target && e.target.closest && e.target.closest('.pfx-card, .pfx-tile')) e.preventDefault(); });   // jamais de glisser natif d'image ou de texte
+    var S = sel(root);
+    root.addEventListener('dragstart', function (e) { if (e.target && e.target.closest && e.target.closest(S.card + ', ' + S.tile)) e.preventDefault(); });   // jamais de glisser natif d'image ou de texte
     root.addEventListener('pointerdown', function (e) {
       if (drag || (e.pointerType === 'mouse' && e.button !== 0)) return;
       var t = e.target;
       if (!t || !t.closest) return;
       var inter = t.closest('button, input, select, textarea, a, label');
       // seuls Régler, Supprimer, À configurer et la saisie de durée gardent leur geste ; partout ailleurs sur la carte (image, nom, durée, pastilles) on peut saisir la carte
-      if (inter && !inter.classList.contains('pfx-tile') && !(inter.tagName === 'BUTTON' && inter.closest('.pfx-dur'))) return;
-      var card = t.closest('.pfx-u[data-drag] .pfx-card');
-      var tile = !card && t.closest('.pfx-tile[data-add]');
-      var fil = root.querySelector('.pfx-fil');
-      if (!fil || (!card && !tile)) return;
-      var box = (card || tile.querySelector('.pfx-tb')).getBoundingClientRect();
-      drag = { root: root, dotnet: dotnet, fil: fil, started: false, x0: e.clientX, y0: e.clientY, px: e.clientX, py: e.clientY, k: null, over: false, raf: 0 };
+      if (inter && !inter.classList.contains(S.tile.slice(1)) && !(inter.tagName === 'BUTTON' && inter.closest(S.dur))) return;
+      if (S.nx && inter && inter.closest(S.hov)) return;
+      var card = t.closest(S.slot + '[data-drag] ' + S.card);
+      var tile = !card && t.closest(S.tile + '[data-add]');
+      var fil = root.querySelector(S.fil);
+      var empty = !fil && S.empty ? root.querySelector(S.empty) : null;   // liste vide : toute la zone de dépôt reçoit la vignette
+      if ((!fil && !empty) || (!card && !tile)) return;
+      var box = (card || tile.querySelector(S.tb)).getBoundingClientRect();
+      drag = { root: root, S: S, dotnet: dotnet, fil: fil || empty, empty: !!empty, started: false, x0: e.clientX, y0: e.clientY, px: e.clientX, py: e.clientY, k: null, over: false, raf: 0 };
       if (card) {
-        var slot = card.closest('.pfx-u');
+        var slot = card.closest(S.slot);
         drag.kind = 'move'; drag.slot = slot; drag.from = +slot.getAttribute('data-i'); drag.k = drag.from;
         drag.ox = e.clientX - box.left; drag.oy = e.clientY - box.top;
       } else {
@@ -48,17 +55,17 @@
 
   // ---------- géométrie du fil (positions de mise en page : les transform en cours ne les changent pas) ----------
   function geometry() {
-    var fil = drag.fil;
-    var slots = [].slice.call(fil.querySelectorAll('.pfx-u[data-i]'));
-    var end = fil.querySelector('.pfx-endu'), loop = fil.querySelector('.pfx-loop');
+    var fil = drag.fil, S = drag.S;
+    var slots = [].slice.call(fil.querySelectorAll(S.slot + '[data-i]'));
+    var end = fil.querySelector(S.end), loop = fil.querySelector(S.loop);
     var first = slots[0] || end;
-    var card = slots[0] ? slots[0].querySelector('.pfx-card') : end && end.querySelector('.pfx-end');
+    var card = slots[0] ? slots[0].querySelector(S.card) : end && (S.endCard ? end.querySelector(S.endCard) : end);
     if (!first || !card) return null;
-    var W = slots.length > 1 ? slots[1].offsetLeft - slots[0].offsetLeft : first.offsetWidth;
+    var W = slots.length > 1 ? slots[1].offsetLeft - slots[0].offsetLeft : end && end !== first ? end.offsetLeft - first.offsetLeft : first.offsetWidth;
     return { fr: fil.getBoundingClientRect(), slots: slots, end: end, loop: loop, first: first, W: W, pad: card.offsetLeft, cw: card.offsetWidth, ch: card.offsetHeight, top: card.getBoundingClientRect().top, scroll: fil.scrollLeft };
   }
   function centerOf(g, s) {
-    var c = s.querySelector('.pfx-card');
+    var c = s.querySelector(drag.S.card);
     return g.fr.left + s.offsetLeft + c.offsetLeft + c.offsetWidth / 2 - g.scroll;
   }
 
@@ -67,22 +74,25 @@
     d.body.classList.add('pfx-dragging');
     var g = document.createElement('div');
     if (drag.kind === 'move') {
-      var src = drag.slot.querySelector('.pfx-card'), r = src.getBoundingClientRect();
+      var src = drag.slot.querySelector(drag.S.card), r = src.getBoundingClientRect();
       var c = src.cloneNode(true);
-      var hov = c.querySelector('.pfx-hov'); if (hov) hov.remove();
+      var hov = c.querySelector(drag.S.hov); if (hov) hov.remove();
       c.style.width = r.width + 'px'; c.style.height = r.height + 'px';
       g.className = 'pfx-ghost'; g.appendChild(c);
-      src.style.visibility = 'hidden';
-      var wh = drag.slot.querySelector('.pfx-when'); if (wh) wh.style.visibility = 'hidden';
+      if (drag.S.nx) drag.slot.style.visibility = 'hidden';   // la carte et son nom
+      else {
+        src.style.visibility = 'hidden';
+        var wh = drag.slot.querySelector('.pfx-when'); if (wh) wh.style.visibility = 'hidden';
+      }
     } else {
-      var tb = drag.tile.querySelector('.pfx-tb'), t = tb.cloneNode(true);
-      [].forEach.call(t.querySelectorAll('.pfx-add, .pfx-used, .pfx-new'), function (x) { x.remove(); });
+      var tb = drag.tile.querySelector(drag.S.tb), t = tb.cloneNode(true);
+      [].forEach.call(t.querySelectorAll('.pfx-add, .pfx-used, .pfx-new, .pfx-len'), function (x) { x.remove(); });
       g.className = 'pfx-ghost tile'; g.appendChild(t);
       drag.tile.classList.add('dragging');
     }
     d.body.appendChild(g);
     drag.ghost = g;
-    var ph = document.createElement('div'); ph.className = 'pfx-phold'; ph.style.display = 'none';
+    var ph = document.createElement('div'); ph.className = 'pfx-phold' + (drag.S.nx ? ' nx' : ''); ph.style.display = 'none';
     d.body.appendChild(ph);
     drag.ph = ph;
     drag.raf = w.requestAnimationFrame(tick);
@@ -96,6 +106,14 @@
 
   // Place les cartes et le vide selon la position du pointeur
   function update() {
+    if (drag.empty) {   // liste vide : la zone de dépôt s'allume, la vignette s'y pose en position 1
+      var zr = drag.fil.getBoundingClientRect();
+      var inz = drag.px > zr.left && drag.px < zr.right && drag.py > zr.top - 30 && drag.py < zr.bottom + 30;
+      drag.over = inz; drag.k = inz ? 0 : null;
+      drag.fil.classList.toggle('over', inz);
+      drag.target = inz ? { x: zr.left + 28, y: zr.top + 26, cw: 168 } : null;
+      return;
+    }
     var g = geometry();
     if (!g) return;
     var fr = g.fr, px = drag.px, py = drag.py;
@@ -152,7 +170,7 @@
   function tick() {
     if (!drag || !drag.started) return;
     var r = drag.fil.getBoundingClientRect(), v = 0;
-    if (drag.over) {
+    if (drag.over && !drag.empty) {
       if (drag.px < r.left + 80) v = -(80 - (drag.px - r.left)) / 5;
       else if (drag.px > r.right - 80) v = (80 - (r.right - drag.px)) / 5;
     }
@@ -169,7 +187,7 @@
   }
 
   function clearShifts(dr) {
-    var els = [].slice.call(dr.fil.querySelectorAll('.pfx-u, .pfx-loop'));
+    var els = [].slice.call(dr.fil.querySelectorAll(dr.S.slot + ', ' + dr.S.loop + (dr.S.nx ? ', ' + dr.S.end : '')));
     els.forEach(function (el) { el.style.transition = 'none'; el.style.transform = ''; });
   }
 
@@ -178,12 +196,13 @@
     if (dr.ghost) dr.ghost.remove();
     if (dr.ph) dr.ph.remove();
     if (dr.slot) {
-      var c = dr.slot.querySelector('.pfx-card'), wh = dr.slot.querySelector('.pfx-when');
+      dr.slot.style.visibility = '';
+      var c = dr.slot.querySelector(dr.S.card), wh = dr.slot.querySelector('.pfx-when');
       if (c) c.style.visibility = ''; if (wh) wh.style.visibility = '';
     }
     if (dr.tile) dr.tile.classList.remove('dragging');
-    [].forEach.call(dr.fil.querySelectorAll('.pfx-u, .pfx-loop'), function (el) { el.style.transition = ''; });
-    dr.fil.classList.remove('pfx-over');
+    [].forEach.call(dr.fil.querySelectorAll(dr.S.slot + ', ' + dr.S.loop + (dr.S.nx ? ', ' + dr.S.end : '')), function (el) { el.style.transition = ''; });
+    dr.fil.classList.remove('pfx-over', 'over');
     d.body.classList.remove('pfx-dragging', 'pfx-landing');
   }
 
@@ -201,7 +220,7 @@
     setTimeout(function () { landed = true; tryDone(); }, ms() + 30);
     if (needPage) {
       var mo = new MutationObserver(function () { mo.disconnect(); clearShifts(dr); updated = true; tryDone(); });   // la page a redessiné : sa mise en page est déjà la bonne
-      mo.observe(dr.fil, { childList: true });
+      mo.observe(dr.empty ? dr.root : dr.fil, { childList: true, subtree: dr.empty });
       setTimeout(function () { mo.disconnect(); clearShifts(dr); updated = true; tryDone(); }, 900);
     }
   }
@@ -246,7 +265,7 @@
   // ---------- le reste du fil ----------
   // Amène un contenu à l'écran (contenu qui vient d'être ajouté ou déplacé)
   function reveal(id) {
-    var el = d.querySelector('.pf-u[data-id="' + id + '"]');
+    var el = d.querySelector('.pf-u[data-id="' + id + '"], .nx-it[data-id="' + id + '"]');
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
   }
 
@@ -258,7 +277,7 @@
 
   // Flèches du fil : environ trois cartes
   function scroll(root, dir) {
-    var f = root && root.querySelector('.pfx-fil');
+    var f = root && root.querySelector('.pfx-fil, .nx-fil');
     if (f) f.scrollBy({ left: dir * Math.max(200, f.clientWidth * 0.7), behavior: 'smooth' });
   }
 
@@ -267,11 +286,20 @@
 
   // molette verticale sur le fil : il défile à l'horizontale
   d.addEventListener('wheel', function (e) {
-    var f = e.target.closest && e.target.closest('.pfx-fil');
+    var f = e.target.closest && e.target.closest('.pfx-fil, .nx-fil');
     if (!f || Math.abs(e.deltaY) <= Math.abs(e.deltaX) || f.scrollWidth <= f.clientWidth) return;
     f.scrollLeft += e.deltaY;
     e.preventDefault();
   }, { passive: false });
 
-  w.linkiiFlow = { init: init, reveal: reveal, revealMedia: revealMedia, scroll: scroll, select: select };
+  // « + Ajouter » du fil : la bibliothèque remonte juste sous le fil (qui reste collé en haut), la recherche prend le curseur
+  function toLib(lib, input) {
+    if (!lib) return;
+    var fb = d.querySelector('.nx-filbox'), cs = fb ? w.getComputedStyle(fb) : null;
+    var stick = cs && cs.position === 'sticky' ? (parseFloat(cs.top) || 0) + fb.offsetHeight + 12 : 12;
+    w.scrollTo({ top: lib.getBoundingClientRect().top + w.scrollY - stick, behavior: reduced() ? 'auto' : 'smooth' });
+    if (input) setTimeout(function () { try { input.focus({ preventScroll: true }); } catch (e) {} }, 350);
+  }
+
+  w.linkiiFlow = { init: init, reveal: reveal, revealMedia: revealMedia, scroll: scroll, select: select, toLib: toLib };
 })(window, document);

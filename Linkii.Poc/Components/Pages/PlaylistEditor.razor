@@ -8,6 +8,8 @@
 @inject MediaLibrary MediaLib
 @inject ModeService Modes
 @inject AppCatalog Catalog
+@inject ScreenPublisher Publisher
+@inject PublishSchedule Sched
 @using Microsoft.JSInterop
 @implements IDisposable
 
@@ -23,114 +25,166 @@
     var rows = Rows(pl);
     var total = rows.Where(r => r.Plays).Sum(r => r.Seconds);
     var active = pl.Draft.Count(i => !i.Off);
-    @* Tiroir du bas (maquette liste-diffusion-fil-horizontal.html, §186) : en-tête avec la durée totale, frise de la boucle,
-       fil horizontal de cartes carrées, puis la bibliothèque en onglets par type (Images, Vidéos, Compositions, Présentations, Pages web, Applications). *@
-    <div class="pfx @(mini ? "mini" : "")" @ref="flowRoot">
-        @* même en-tête que la page d une programmation : fil d Ariane, titre, état, puis la durée de la boucle et Transitions à droite *@
-        <header class="page-head pn-head pl-head">
+    var air = diff.OnAir;
+    var pend = diff.ToUpdate.Count();
+    var chosen = diff.Chosen.Count;
+    @* Page d'une liste (maquette maquettes/liste-diffusion-allegee.html) : en-tête qui dit où en est la diffusion, avec un seul bouton orange
+       « Publier sur N écrans » visible depuis les trois onglets ; onglets Fil de lecture / Aperçu / Diffusion. Le fil est un panneau « Ordre de passage »
+       qui reste en haut quand on fait défiler la bibliothèque ; liste vide : une zone de dépôt dit quoi faire. *@
+    <div class="pfx plx @(mini ? "mini" : "")" @ref="flowRoot">
+        <header class="nx-head">
             <div>
-                <div class="pt-crumb"><a href="playlists" @onclick="Close" @onclick:preventDefault>Listes de lecture</a> › @pl.Name</div>
+                <div class="pt-crumb"><a href="playlists" @onclick="Close" @onclick:preventDefault>Listes de diffusion</a> › @pl.Name</div>
                 @if (renaming)
                 {
                     <div class="rename-row">
-                        <input style="min-width:0;width:300px" @ref="renameInput" @bind="renameValue" @bind:event="oninput" @onkeydown="e => OnRenameKey(e, pl)" aria-label="Nom de la liste de lecture" />
+                        <input style="min-width:0;width:300px" @ref="renameInput" @bind="renameValue" @bind:event="oninput" @onkeydown="e => OnRenameKey(e, pl)" aria-label="Nom de la liste" />
                         <button class="btn sm" @onclick="() => Rename(pl)">Enregistrer</button>
                         <button class="btn ghost sm" @onclick="() => renaming = false">Annuler</button>
                     </div>
                 }
                 else
                 {
-                    <h1>@pl.Name @if (!readOnlyHere) { <button class="btn ghost sm icon" title="Renommer" aria-label="Renommer la liste de lecture" @onclick="() => StartRename(pl)"><Ico Name="edit" Size="16" /></button> }</h1>
+                    <div class="nx-title">
+                        <h1>@pl.Name</h1>
+                        @if (!readOnlyHere) { <button type="button" class="nx-ren" title="Renommer" aria-label="Renommer la liste" @onclick="() => StartRename(pl)"><Ico Name="edit" Size="16" /></button> }
+                    </div>
                 }
-                <p class="sub sc-intro pfx-meta">
-                    @if (onScreens > 0) { <span class="live">● Diffusée sur @onScreens écran@(onScreens > 1 ? "s" : "")</span> } else { <span>Non diffusée</span> }
-                    @if (outside > 0) { <span title="Vos modifications les concerneront à leur prochaine publication."> · dont @outside hors de votre périmètre</span> }
+                <p class="nx-meta">
+                    @if (air > 0) { <button type="button" class="nx-live" title="@(diff.Outside > 0 ? $"Dont {diff.Outside} hors de votre périmètre" : null)" @onclick='() => ptab = "diff"'>● Diffusée sur @air écran@(air > 1 ? "s" : "")</button> }
+                    else { <span>Non diffusée</span> }
                 </p>
             </div>
-            <div class="row head-actions pg-acts">
-                <div class="pfx-total" role="status" aria-label="Durée totale de la boucle">
-                    <Ico Name="refresh" Size="20" />
-                    <span><small>Durée totale de la boucle</small><b class="mono">@Helpers.FormatDuration(total)</b></span>
-                    <span class="sep"><small>Contenus</small><b class="mono">@active</b></span>
-                </div>
-                @if (ptab == "fil" && !readOnlyHere && pl.Draft.Count > 1) { <button type="button" class="btn ghost" title="Choisir l effet de passage d un contenu au suivant, pour tous les contenus" @onclick="() => trAll = true"><Ico Name="transition" Size="16" /> Transitions</button> }
+            <div class="nx-act">
+                @if (pl.Draft.Count == 0 && air == 0 && chosen == 0)
+                {
+                }
+                else if (pend > 0 || chosen > 0)
+                {
+                    @if (pend > 0) { <button type="button" class="nx-pend" title="Choisir les écrans à mettre à jour" @onclick='() => ptab = "diff"'>@pend écran@(pend > 1 ? "s" : "") à mettre à jour</button> }
+                    @if (diff.Changed) { <button type="button" class="btn ghost" @onclick="() => diff.Undo()">Annuler</button> }
+                    <div class="nx-split">
+                        <button type="button" class="btn publish-btn" disabled="@(chosen == 0 || diff.Busy)" title="@(chosen == 0 ? "Activez au moins un écran dans l'onglet Diffusion" : null)" @onclick="() => PublishNow(null)"><Ico Name="upload" Size="16" /> @diff.ButtonLabel()</button>
+                        <button type="button" class="btn publish-btn nx-caret" disabled="@(chosen == 0 || diff.Busy)" aria-label="Autres façons de publier" aria-haspopup="menu" aria-expanded="@(pubMenu ? "true" : "false")" @onclick="() => pubMenu = !pubMenu"><Ico Name="chevron" Size="16" /></button>
+                        @if (pubMenu)
+                        {
+                            <div class="kebab-backdrop" @onclick="() => pubMenu = false"></div>
+                            <div class="nx-menu" role="menu">
+                                <button type="button" role="menuitem" @onclick="() => PublishNow(DateTime.MinValue)"><Ico Name="upload" Size="16" /><span>Tout publier maintenant<small>Sans tenir compte des heures choisies</small></span></button>
+                                <button type="button" role="menuitem" @onclick="() => { pubMenu = false; whenFor = null; whenOpen = true; }"><Ico Name="calendar" Size="16" /><span>Tout programmer…<small>Une même heure pour tous les écrans activés</small></span></button>
+                            </div>
+                        }
+                    </div>
+                }
+                else if (air > 0)
+                {
+                    <span class="nx-ok"><Ico Name="check" Size="16" /> À jour sur @air écran@(air > 1 ? "s" : "")</span>
+                }
+                else
+                {
+                    <button type="button" class="btn ghost" @onclick='() => ptab = "diff"'><Ico Name="monitor" Size="16" /> Choisir les écrans</button>
+                }
             </div>
         </header>
 
-        @* trois onglets pleine page (maquette liste-lecture-onglets.html) : Fil de lecture (fil + bibliothèque), Aperçu, Publication *@
-        <nav class="pfx-tabs pfx-ptabs" role="tablist" aria-label="Liste de lecture">
-            <button type="button" role="tab" aria-selected="@(ptab == "fil" ? "true" : "false")" class="@(ptab == "fil" ? "on" : "")" @onclick='() => ptab = "fil"'>Fil de lecture<span class="c">@active</span></button>
-            <button type="button" role="tab" aria-selected="@(ptab == "apercu" ? "true" : "false")" class="@(ptab == "apercu" ? "on" : "")" @onclick='() => ptab = "apercu"'>Aperçu</button>
-            <button type="button" role="tab" aria-selected="@(ptab == "pub" ? "true" : "false")" class="@(ptab == "pub" ? "on" : "")" @onclick='() => ptab = "pub"'>Publication</button>
-        </nav>
+        <div class="nx-tabsrow">
+            <nav class="pfx-tabs" role="tablist" aria-label="Liste de diffusion">
+                <button type="button" role="tab" aria-selected="@(ptab == "fil" ? "true" : "false")" class="@(ptab == "fil" ? "on" : "")" @onclick='() => ptab = "fil"'>Fil de lecture<span class="c">@active</span></button>
+                <button type="button" role="tab" aria-selected="@(ptab == "apercu" ? "true" : "false")" class="@(ptab == "apercu" ? "on" : "")" @onclick='() => ptab = "apercu"'>Aperçu</button>
+                <button type="button" role="tab" aria-selected="@(ptab == "diff" ? "true" : "false")" class="@(ptab == "diff" ? "on" : "")" @onclick='() => ptab = "diff"'>Diffusion</button>
+            </nav>
+        </div>
 
         @if (ptab == "apercu")
         {
             <SimulatorDialog PlaylistId="Id" Inline="true" />
         }
-        else if (ptab == "pub")
+        else if (ptab == "diff")
         {
-            <PlaylistPublish PlaylistId="Id" OnChanged="Refresh" />
+            <PlaylistPublish Model="diff" ItemsCount="pl.Draft.Count" OnChanged="StateHasChanged" OnGoFil='() => ptab = "fil"' OnProgram="ProgramOne" />
         }
         else
         {
-        <div class="pfx-filwrap">
-            <button type="button" class="pfx-nav l" aria-label="Défiler vers la gauche" @onclick='() => Scroll(-1)'><Ico Name="chevron-left" Size="18" /></button>
-            <div class="pfx-fil pf-flow cards">
-                @foreach (var r in rows)
-                {
-                    var row = r;
-                    <div class="pf-u pfx-u @RowClass(row) @(pickAt == row.Index ? "pick" : "")" data-i="@row.Index" data-id="@row.It.Id" data-drag="@(Draggable(row) ? "1" : null)" @key="row.It">
-                        @Card(row)
-                        <div class="pfx-when @WhenClass(row)">@When(row)</div>
-                    </div>
-                }
-                @if (!readOnlyHere)
-                {
-                    <div class="pf-u pf-end-row pfx-u pfx-endu @(pickAt == pl.Draft.Count ? "pick" : "")">
-                        <div class="pf-end pfx-end">
-                            <Ico Name="plus" Size="22" />
-                            <span>@(pl.Draft.Count == 0 ? "Glissez ou cliquez un contenu de la bibliothèque pour commencer la liste" : "Glissez ou cliquez un contenu de la bibliothèque pour l'ajouter à la fin")</span>
-                        </div>
-                        <div class="pfx-when">&nbsp;</div>
-                    </div>
-                }
-                @if (pl.Draft.Count > 0)
-                {
-                    <div class="pfx-loop"><span class="r"><Ico Name="refresh" Size="18" /></span>à <b class="mono">@Helpers.FormatDuration(total)</b><br />recommence au contenu 1</div>
-                }
-            </div>
-            <button type="button" class="pfx-nav r" aria-label="Défiler vers la droite" @onclick='() => Scroll(1)'><Ico Name="chevron-right" Size="18" /></button>
-        </div>
-
-        @if (!readOnlyHere && !mini)
-        {
-            var tabs = LibTabs().ToList();
-            if (!tabs.Any(t => t.Key == libTab) && tabs.Count > 0) libTab = tabs[0].Key;
-            <section class="pfx-lib" aria-label="Bibliothèque">
-                <div class="pfx-libh"><b>Ajouter au fil</b><span>Choisissez un type de contenu, puis cliquez ou glissez dans le fil.</span></div>
-                <div class="pfx-tabs" role="tablist" aria-label="Types de contenus">
-                    @foreach (var t in tabs)
+            <section class="nx-filbox" aria-label="Ordre de passage">
+                <div class="nx-filhd">
+                    <span class="t"><NxIco Name="list" Size="18" /> Ordre de passage</span>
+                    @if (pl.Draft.Count > 0) { <span>· @active contenu@(active > 1 ? "s" : "") · boucle de <b class="mono">@Helpers.FormatDuration(total)</b></span> }
+                    <span class="grow"></span>
+                    @if (!readOnlyHere && pl.Draft.Count > 1)
                     {
-                        var tab = t;
-                        <button type="button" role="tab" aria-selected="@(libTab == tab.Key ? "true" : "false")" class="@(libTab == tab.Key ? "on" : "")" @onclick='() => { libTab = tab.Key; libSearch = ""; }'>
-                            @tab.Label<span class="c">@tab.Count</span>
-                        </button>
+                        <span>Glissez une carte pour changer l'ordre, ou une vignette à l'endroit voulu</span>
+                        <button type="button" class="btn ghost sm" title="Choisir l'effet de passage d'un contenu au suivant, pour tous les contenus" @onclick="() => trAll = true"><Ico Name="transition" Size="15" /> Transitions</button>
                     }
                 </div>
-                <div class="pfx-tools">
-                    <label class="search-box"><Ico Name="search" Size="16" /><input placeholder="Rechercher" aria-label="Rechercher dans la bibliothèque" @bind="libSearch" @bind:event="oninput" /></label>
+                @if (pl.Draft.Count == 0)
+                {
+                    @if (readOnlyHere)
+                    {
+                        <p class="nx-ro-empty">Cette liste est vide.</p>
+                    }
+                    else
+                    {
+                        <div class="nx-empty">
+                            <span class="nx-eico"><Ico Name="plus" Size="30" /></span>
+                            <div class="nx-etx">
+                                <b>Votre liste est vide</b>
+                                <p>Cliquez sur un contenu de la bibliothèque ci-dessous, ou glissez-le ici. Les contenus passeront à l'écran dans cet ordre, en boucle.</p>
+                            </div>
+                            <div class="nx-eact">
+                                @if (canImport) { <label for="@ImportInputId" class="btn" role="button" tabindex="0"><Ico Name="upload" Size="16" /> Importer un fichier</label> }
+                                @if (Has(Compositions.AppId)) { <a class="btn ghost" href="@NewCompositionUrl"><NxIco Name="layout" Size="16" /> Créer une composition</a> }
+                            </div>
+                            <ol class="nx-steps"><li class="on"><i>1</i>Ajoutez des contenus</li><li><i>2</i>Vérifiez l'aperçu</li><li><i>3</i>Publiez sur vos écrans</li></ol>
+                        </div>
+                    }
+                }
+                else
+                {
+                    <div class="nx-fil">
+                        @foreach (var r in rows)
+                        {
+                            var row = r;
+                            <div class="nx-it @RowClass(row)" data-i="@row.Index" data-id="@row.It.Id" data-drag="@(Draggable(row) ? "1" : null)" @key="row.It">@Card(row)</div>
+                        }
+                        @if (!readOnlyHere) { <button type="button" class="nx-addt" title="Choisir un contenu dans la bibliothèque ci-dessous" @onclick="GoLibrary"><Ico Name="plus" Size="22" /><span>Ajouter</span></button> }
+                        <div class="nx-loop"><i><NxIco Name="loop" Size="18" /></i>puis reprend au n° 1</div>
+                    </div>
+                }
+            </section>
+
+            @if (!readOnlyHere && !mini)
+            {
+                var tabs = LibTabs().ToList();
+                var shown = tabs.Where(t => t.Count > 0).ToList();   // types vides masqués
+                if (shown.Count == 0 && tabs.Count > 0) shown.Add(tabs[0]);
+                if (!shown.Any(t => t.Key == libTab) && shown.Count > 0) libTab = shown[0].Key;
+                <section class="nx-lib @(pl.Draft.Count == 0 ? "empty" : "")" aria-label="Bibliothèque" @ref="libRoot">
+                    <div class="nx-libtop">
+                        <h3>Ajouter au fil</h3>
+                        <span class="nx-here"><Ico Name="arrow-down" Size="14" /> Choisissez ici</span>
+                        <nav class="pfx-tabs" role="tablist" aria-label="Types de contenus">
+                            @foreach (var t in shown)
+                            {
+                                var tab = t;
+                                <button type="button" role="tab" aria-selected="@(libTab == tab.Key ? "true" : "false")" class="@(libTab == tab.Key ? "on" : "")" @onclick='() => { libTab = tab.Key; libSearch = ""; }'>@tab.Label<span class="c">@tab.Count</span></button>
+                            }
+                        </nav>
+                        <label class="search-box"><Ico Name="search" Size="16" /><input @ref="libSearchInput" placeholder="Rechercher" aria-label="Rechercher dans la bibliothèque" @bind="libSearch" @bind:event="oninput" /></label>
+                        @LibAction()
+                    </div>
                     @if (pickAt is { } pa)
                     {
-                        <span class="pfx-hint"><b>Le prochain contenu choisi sera inséré en position @(pa + 1).</b> <button type="button" class="pf-link" @onclick="() => pickAt = null">Annuler</button></span>
+                        <p class="pfx-hint nx-pick"><b>Le prochain contenu choisi sera inséré en position @(pa + 1).</b> <button type="button" class="pf-link" @onclick="() => pickAt = null">Annuler</button></p>
                     }
-                    @LibAction()
-                </div>
-                <div class="pfx-grid">@LibGrid()</div>
-            </section>
-        }
+                    <div class="nx-grid">@LibGrid()</div>
+                </section>
+            }
         }
     </div>
+    @if (whenOpen)
+    {
+        <PublishWhen Model="diff" Target="whenFor" OnClose="() => whenOpen = false" OnDone="WhenDone" />
+    }
     @* import depuis les onglets Images / Vidéos : champ de fichiers caché (ouvert par « Importer ») et fenêtre « Depuis le cloud » (expert), gardés dans la page pour que l'import continue *@
     @if (canImport)
     {
@@ -433,7 +487,27 @@ else
     private List<Playlist> playlists = new();
     private List<MediaItem> media = new();
     private bool trying;   // « Aperçu » : simulateur de la liste
-    private string ptab = "fil";   // onglet ouvert : fil | apercu | pub
+    private string ptab = "fil";   // onglet ouvert : fil | apercu | diff
+
+    // ---------- Diffusion : état partagé par l'en-tête (« Publier sur N écrans ») et l'onglet Diffusion ----------
+    private PlaylistDiffusion diff = default!;
+    private bool pubMenu, whenOpen;
+    private PlaylistDiffusion.ScreenRow? whenFor;   // null : « Programmer… » des écrans cochés ; sinon menu ⋯ d'une ligne
+    private ElementReference libRoot, libSearchInput;
+
+    // null : chaque écran à son heure (maintenant si aucune) ; DateTime.MinValue : tous maintenant
+    private async Task PublishNow(DateTime? all)
+    {
+        pubMenu = false;
+        if (await diff.Publish(all)) Reload();
+    }
+
+    private void ProgramOne(PlaylistDiffusion.ScreenRow r) { whenFor = r; whenOpen = true; }
+
+    private void WhenDone() { whenOpen = false; whenFor = null; Reload(); }
+
+    // « + Ajouter » du fil : la bibliothèque remonte sous le fil et la recherche prend le curseur
+    private async Task GoLibrary() { try { await JS.InvokeVoidAsync("linkiiFlow.toLib", libRoot, libSearchInput); } catch (JSException) { } }
 
 
     // Ajout d'un contenu : colonne des apps activées (hors widgets d'écran), à glisser dans le fil ou à cliquer (ajout à la fin).
@@ -627,41 +701,46 @@ else
 
     private string Kind(MediaItem m) => m.AppId != null ? Svc.Find(m.AppId)?.Name ?? "App" : m.Type == "video" ? "Vidéo" : "Image";
 
-    // ---------- Carte du fil (§186) : carrée, image pleine carte ; numéro, type, nom, durée toujours visibles ; au survol Régler et Supprimer ----------
+    // ---------- Carte du fil (maquette liste-diffusion-allegee.html) : vignette carrée avec son numéro et sa durée, nom dessous ;
+    // au survol Régler et Retirer en haut à droite ; une pastille sous le nom seulement quand le contenu ne passe pas normalement ----------
     private RenderFragment Card(FlowRow r) =>
-        @<text><span class="pfx-num">@r.Num</span>
-        <div class="pfx-card">
-            <div class="pfx-th" style="@(r.Masked ? null : $"background:{r.Color}")">
-                @if (r.Masked) { <Ico Name="lock" Size="26" /> }
-                else if (r.M?.AppId == Compositions.AppId) { <CompositionThumb Item="r.M" Files="media" Contain="true" /> }
-                else if (r.M != null) { <MediaThumb Media="r.M" All="media" Wide="true" /> }
-            </div>
-            @if (!r.Masked && r.M != null)
-            {
-                <span class="pfx-type" style="background:@r.Color" title="@Kind(r.M)" aria-label="@Kind(r.M)"><AppIcon Id="@r.AppId" Small="true" Tile="false" /></span>
-            }
-            @if (r.Incomplete && !r.Masked && Current is { } cpl)
-            {
-                @* application ajoutée sans tout ce qu'il lui faut : un bandeau orange invite à finir sa configuration *@
-                <button type="button" class="pfx-todo" title="Il manque une information à ce contenu : il ne passe pas tant qu'il n'est pas configuré" @onclick="() => OpenSettings(cpl, r.It, r.M)"><Ico Name="alert" Size="14" /> À configurer</button>
-            }
-            else if (ScanOn(r)) { <span class="pfx-scan">@Scan(r)</span> }
+        @<text>
+        <div class="nx-th" style="@(r.Masked ? null : $"background:{r.Color}")">
+            @if (r.Masked) { <span class="nx-lock"><Ico Name="lock" Size="26" /></span> }
+            else if (r.M?.AppId == Compositions.AppId) { <CompositionThumb Item="r.M" Files="media" Contain="true" /> }
+            else if (r.M != null) { <MediaThumb Media="r.M" All="media" Wide="true" /> }
+            <span class="nx-n">@r.Num</span>
+            @if (ScanOn(r)) { <span class="nx-scan">@Scan(r)</span> }
+            @DurChip(r)
             @if (!r.Masked && r.M != null && !readOnlyHere && Current is { } hpl)
             {
-                <div class="pfx-hov">
-                    <span class="pfx-grip" aria-hidden="true"><Ico Name="grip" Size="18" /></span>
-                    <button type="button" class="pfx-set" title="Régler ce contenu" aria-label="Régler @r.M.Name" @onclick="() => OpenSettings(hpl, r.It, r.M)"><Ico Name="sliders" Size="22" /></button>
-                    <button type="button" class="pfx-x" title="Supprimer du fil" aria-label="Supprimer @r.M.Name du fil" @onclick="() => RemoveWithUndo(hpl, r.It)"><Ico Name="trash" Size="16" /></button>
+                <div class="nx-hv">
+                    <button type="button" title="Régler ce contenu" aria-label="Régler @r.M.Name" @onclick="() => OpenSettings(hpl, r.It, r.M)"><NxIco Name="tune" Size="15" /></button>
+                    <button type="button" title="Retirer du fil" aria-label="Retirer @r.M.Name du fil" @onclick="() => RemoveWithUndo(hpl, r.It)"><Ico Name="x" Size="15" /></button>
                 </div>
             }
-            <div class="pfx-foot">
-                <div class="pfx-nm" title="@(r.Masked ? "Contenu masqué" : r.M?.Name)">
-                    @(r.Masked ? "Contenu masqué" : r.M?.Name ?? "(supprimé)")
-                    <small>@(r.Masked ? "média non partagé" : r.Chip is { } chip && r.M != null ? chip.Text : r.M != null ? Kind(r.M) : "")</small>
-                </div>
-                @DurChip(r)
-            </div>
-        </div></text>;
+        </div>
+        <div class="nx-nm" title="@(r.Masked ? "Contenu masqué" : r.M?.Name)">@(r.Masked ? "Contenu masqué" : r.M?.Name ?? "(supprimé)")</div>
+        @if (r.Incomplete && !r.Masked && Current is { } cpl)
+        {
+            @* application ajoutée sans tout ce qu'il lui faut : la pastille orange ouvre son réglage *@
+            <button type="button" class="nx-state todo" title="Il manque une information à ce contenu : il ne passe pas tant qu'il n'est pas configuré" @onclick="() => OpenSettings(cpl, r.It, r.M)">À configurer</button>
+        }
+        else if (StateText(r) is { } st)
+        {
+            <span class="nx-state @StateClass(r)">@st</span>
+        }
+        </text>;
+
+    // Sous le nom : pourquoi le contenu ne passe pas normalement (désactivé, hors période, en continu), ou sa période ; rien sinon
+    private static string? StateText(FlowRow r) =>
+        r.Masked ? "média non partagé"
+        : r.It.Off ? "Désactivé"
+        : r.Hold ? "Hors période" + (r.Chip is { } c ? $" · {c.Text}" : "")
+        : r.M != null && r.It.Placement != "full" ? "Affiché en continu"
+        : r.Chip is { } chip ? chip.Text : null;
+
+    private static string StateClass(FlowRow r) => r.It.Off ? "off" : r.Hold ? "hold" : "per";
 
     // Sous la carte : un contenu qui ne passe pas en ce moment porte une pastille de couleur (hors période en orange, à configurer, désactivé)
     private static string WhenClass(FlowRow r) => r.Plays ? "" : r.It.Off ? "st off" : r.Hold ? "st hold" : r.Incomplete ? "st todo" : "";
@@ -676,20 +755,20 @@ else
 
     // Durée toujours visible ; un clic la rend modifiable (m:ss ou secondes, flèches ↑ ↓ pour une seconde de plus ou de moins)
     private RenderFragment DurChip(FlowRow r) =>
-        @<span class="pfx-dur @(durFor == r.It ? "edit" : "")">
+        @<text>
             @if (durFor == r.It)
             {
-                <Ico Name="clock" Size="12" /><input @ref="durInput" @bind="durValue" @bind:event="oninput" @onkeydown="DurKey" @onblur="SaveDur" aria-label="Durée (minutes:secondes ou secondes)" placeholder="0:08" />
+                <span class="nx-d edit"><input @ref="durInput" @bind="durValue" @bind:event="oninput" @onkeydown="DurKey" @onblur="SaveDur" aria-label="Durée (minutes:secondes ou secondes)" placeholder="0:08" /></span>
             }
             else if (!r.Masked && r.M != null && r.It.Placement == "full" && !readOnlyHere)
             {
-                <button type="button" title="Durée d'affichage : cliquer pour modifier" @onclick="() => StartDur(r.It)"><Ico Name="clock" Size="12" /><span class="mono">@DurationText(r)</span></button>
+                <button type="button" class="nx-d mono" title="Durée d'affichage : cliquer pour modifier" @onclick="() => StartDur(r.It)">@DurationText(r)</button>
             }
             else if (DurationText(r) is { Length: > 0 } t)
             {
-                <span class="ro"><Ico Name="clock" Size="12" /><span class="mono">@t</span></span>
+                <span class="nx-d ro mono">@t</span>
             }
-        </span>;
+        </text>;
 
     private RenderFragment Scan(FlowRow r)
     {
@@ -809,19 +888,18 @@ else
     // Vignette de la bibliothèque : un clic ajoute (à la fin, ou à l'endroit choisi par « + »), on peut aussi la glisser dans le fil.
     // Aperçu : l'icône de l'application (appId), une composition, ou la vignette du média ou du contenu.
     private RenderFragment Tile(string drag, string name, string sub, MediaItem? m, string? appId, Action add, int used, bool busy = false, bool fresh = false, string? len = null) =>
-        @<button type="button" class="pfx-tile @(fresh ? "fresh" : "") @(busy ? "busy" : "")" data-add="@(busy ? null : drag)" data-fresh="@(fresh ? "1" : null)" disabled="@busy"
-                 title="@(busy ? "Conversion en cours : le média sera ajoutable dans un instant" : $"Ajouter « {name} »{(pickAt is { } p ? $" en position {p + 1}" : " à la fin")}")" @onclick="add">
-            <span class="pfx-tb">
-                @if (appId != null) { <span class="pfx-app" style="background:@AppIcon.LookOf(appId).Color"><AppIcon Id="@appId" Tile="false" Size="34" /></span> }
+        @<button type="button" class="nx-tile @(fresh ? "fresh" : "") @(busy ? "busy" : "")" data-add="@(busy ? null : drag)" data-fresh="@(fresh ? "1" : null)" disabled="@busy"
+                 title="@(busy ? "Conversion en cours : le média sera ajoutable dans un instant" : pickAt is { } p ? $"Insérer « {name} » en position {p + 1}" : "Cliquer : ajouter à la fin du fil · glisser : le poser à l'endroit voulu")" @onclick="add">
+            <span class="nx-tb">
+                @if (appId != null) { <span class="nx-app" style="background:@AppIcon.LookOf(appId).Color"><AppIcon Id="@appId" Tile="false" Size="34" /></span> }
                 else if (m?.AppId == Compositions.AppId) { <CompositionThumb Item="m" Files="compoFiles" Contain="true" /> }
                 else if (m != null) { <MediaThumb Media="m" All="media" /> }
-                @if (used > 0) { <span class="pfx-used">dans le fil ×@used</span> }
+                @if (used > 0) { <span class="pfx-used">dans le fil@(used > 1 ? $" ×{used}" : "")</span> }
                 @if (fresh) { <span class="pfx-new">Nouveau</span> }
                 @if (len != null) { <span class="pfx-len mono">@len</span> }
-                <span class="pfx-add" aria-hidden="true"><span><Ico Name="plus" Size="12" /> @(pickAt is { } p2 ? $"Insérer en {p2 + 1}" : "Ajouter à la fin")</span></span>
+                <span class="pfx-add" aria-hidden="true"><span><Ico Name="plus" Size="14" /> @(pickAt is { } p2 ? $"Insérer en {p2 + 1}" : "Ajouter")</span></span>
             </span>
-            <span class="pfx-tn">@name</span>
-            <span class="pfx-ts">@sub</span>
+            <span class="nx-tn">@name</span>
         </button>;
 
     // Contenu de l'onglet ouvert, filtré par la recherche
@@ -861,9 +939,9 @@ else
             {
                 var job = j;
                 var failed = job.State == "error";
-                <div class="pfx-tile job @(failed ? "fail" : "")" role="status">
-                    <span class="pfx-tb">@if (failed) { <Ico Name="x" Size="20" /> } else { <span class="pf-med-bar" style="width:@(MediaUploader.Pct(job))%"></span> }</span>
-                    <span class="pfx-tn">@job.Name</span>
+                <div class="nx-tile job @(failed ? "fail" : "")" role="status">
+                    <span class="nx-tb">@if (failed) { <Ico Name="x" Size="20" /> } else { <span class="pf-med-bar" style="width:@(MediaUploader.Pct(job))%"></span> }</span>
+                    <span class="nx-tn">@job.Name</span>
                     <span class="pfx-ts">@(failed ? job.Error ?? "Échec de l'import" : job.Note ?? (job.Total is > 0 ? $"Import · {MediaUploader.Pct(job)} %" : "Import…")) · <button type="button" class="pf-link" @onclick="() => DismissImport(job)">@(failed ? "Retirer" : "Annuler")</button></span>
                 </div>
             }
@@ -1146,6 +1224,8 @@ else
         outside = Store.Read(d => d.Access.Sees is { } sees ? d.Root.Screens.Count(s => s.ClientId == d.ClientId && s.Token != null && !sees(s) && s.ZonePlaylists().Contains(Id)) : 0);
         portraitScreens = Store.Read(d => d.Root.Screens.Where(s => s.ClientId == d.ClientId && s.Token != null && s.ZonePlaylists().Contains(Id)).ToList() is { Count: > 0 } ps && ps.All(s => s.Orientation == "portrait"));
         scanCounts = growth ? Scans.Counts(Store.ClientId, DateTime.UtcNow.AddDays(-ScanLog.RetentionDays)) : new();
+        diff ??= new PlaylistDiffusion(Store, Publisher, Sched, Toast);
+        diff.Load(Id);
     }
 
     // Le contenu de l'app vient d'être créé avec ses réglages : il rejoint la liste de lecture à l'endroit choisi (par défaut, à la fin).

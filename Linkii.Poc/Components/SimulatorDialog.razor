@@ -10,6 +10,45 @@
    un écran (sa publication, au même moment s'il est synchronisé), un mur entier (une seule image, cadres tracés par-dessus),
    ou l'aperçu d'une liste de lecture avant publication (format au choix, joué maintenant). Sans aucun effet sur les écrans,
    sauf « Appliquer » des réglages du mur : mêmes réglages (format, matériel, résolution) sur tous ses écrans. *@
+@if (Inline && PlaylistId != null)
+{
+    @* Onglet « Aperçu » d'une liste (maquette maquettes/liste-diffusion-allegee.html) : la scène, puis une seule ligne de commandes — lecture, frise des
+       contenus (qui sert de barre de progression), temps, format, son, plein écran. Les boutons sont remplis par sim.js (mode « ext »). *@
+    <div class="sim-inline nx-pv" role="region" aria-label="Aperçu de la liste">
+        @if (missing)
+        {
+            <div class="empty"><div class="big">Rien à simuler</div><p>Cette liste n'existe plus.</p></div>
+        }
+        else
+        {
+            <div class="nx-stage">
+                @if (emptyList) { <div class="nx-blank">Le fil est vide :<br />ajoutez un contenu pour voir l'aperçu.</div> }
+                else { <div class="sim-host" @ref="host"></div> }
+            </div>
+            <div class="nx-ctl">
+                <button type="button" class="nx-ib" data-a="prev" title="Contenu précédent" aria-label="Contenu précédent"></button>
+                <button type="button" class="nx-ib play" data-a="play"></button>
+                <button type="button" class="nx-ib" data-a="next" title="Contenu suivant" aria-label="Contenu suivant"></button>
+                <div class="nx-tl" role="list" aria-label="Contenus de la boucle"></div>
+                <span class="nx-time mono">@(emptyList ? "0:00 / 0:00" : "")</span>
+                <label class="nx-fmt" title="Afficher l'aperçu au format de…"><Ico Name="monitor" Size="16" />
+                    <select aria-label="Format de l'aperçu" value="@fmt" @onchange='e => SetFormat(e.Value?.ToString() ?? "")'>
+                        @if (likes.Count > 0)
+                        {
+                            <optgroup label="Vos écrans">@foreach (var l in likes) { <option value="@l.Key">@l.Label</option> }</optgroup>
+                        }
+                        <optgroup label="Formats">@foreach (var f in Formats) { <option value="@f.Key">@f.Label</option> }</optgroup>
+                    </select>
+                </label>
+                <button type="button" class="nx-ib" data-a="sound"></button>
+                <button type="button" class="nx-ib" data-a="full" title="Plein écran" aria-label="Plein écran"></button>
+            </div>
+            <div class="nx-note sim-note" hidden></div>
+        }
+    </div>
+}
+else
+{
 @if (!Inline) { <div class="modal-backdrop @(Stacked ? "picker-backdrop" : "")" @onclick="Close"></div> }
 <div class="@(Inline ? "sim-inline" : "modal app-modal sim-dlg")" role="@(Inline ? "region" : "dialog")" aria-modal="@(Inline ? null : "true")" aria-labelledby="sim-title">
     @if (!Inline)
@@ -144,6 +183,7 @@
     </div>
     }
 </div>
+}
 
 @code {
     /// <summary>Un écran (sa publication).</summary>
@@ -162,6 +202,8 @@
     /// <summary>Aperçu d'un seul écran : pas de colonne de droite, l'aperçu prend toute la largeur.</summary>
     private bool Solo => PlaylistId == null && WallZoneId == null;
     private bool missing, mounted, dirty = true;
+    private bool emptyList;   // onglet Aperçu d'une liste vide : rien à jouer, la scène le dit
+    private bool Ext => Inline && PlaylistId != null;   // commandes de la page (sim.js « ext ») au lieu de la barre du simulateur
     private string title = "", foot = "", token = "";
     private string? warn;
     private readonly List<(string Css, string Text, string? Tip)> badges = new();
@@ -356,14 +398,17 @@
                 .Where(x => x.First != null).ToList();
             // À l'ouverture, le format de la liste elle-même (portrait si ses contenus le sont, voir PlaylistShape).
             var portrait = PlaylistShape.IsPortrait(p, id => d.Media.FirstOrDefault(m => m.Id == id), d.Screens);
-            return new { p.Name, d.Tenant.Timezone, Screens = screens, Walls = walls, Portrait = portrait };
+            // onglet Aperçu : ouvert d'office au format de l'écran qui diffuse la liste (en plein écran ou en zone 1)
+            var on = screens.FirstOrDefault(s => s.ZonePlaylist(0) == p.Id && s.ZoneCount == 1) ?? screens.FirstOrDefault(s => s.ZonePlaylists().Contains(p.Id));
+            return new { p.Name, d.Tenant.Timezone, Screens = screens, Walls = walls, Portrait = portrait, OnScreen = on?.Id, Empty = p.Draft.Count == 0 };
         });
         if (info == null) { missing = true; title = "Aperçu"; return; }
         title = $"Aperçu · « {info.Name} »";
         likes = info.Screens.Select(s => ($"like:{s.Id}", $"{s.Name} · {(s.Orientation == "portrait" ? "portrait" : "paysage")}", s.Orientation, PlayerFeed.Resolution(s), 1, 1))
             .Concat(info.Walls.Select(x => ($"like:{x.Zone.Id}", $"{x.Zone.Name} · mur {x.Zone.WallCols} × {x.Zone.WallRows}", x.First!.Orientation, PlayerFeed.Resolution(x.First), x.Zone.WallCols, x.Zone.WallRows)))
             .ToList();
-        fmt = info.Portrait ? "port" : "land";
+        fmt = Ext && info.OnScreen is { } sid ? $"like:{sid}" : info.Portrait ? "port" : "land";
+        emptyList = Ext && info.Empty;
         ApplyFormat();
         foot ="Joue la liste telle qu'elle est, même non publiée.";
     }
@@ -407,13 +452,13 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (missing || !dirty) return;
+        if (missing || !dirty || emptyList) return;
         dirty = false;
         var (w, h) = Size();
         var opts = new
         {
             src = Src(), cols, rows, ratio = (double)w / h, mode = PlaylistId != null ? "try" : "live",
-            view, bezel, nums, real = WallZoneId != null && real, cells
+            view, bezel, nums, real = WallZoneId != null && real, cells, ext = Ext
         };
         try
         {
