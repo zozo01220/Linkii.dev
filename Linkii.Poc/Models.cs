@@ -241,6 +241,8 @@ public class User
     public bool? ExpertMode { get; set; }
     /// <summary>Présentation du mode expert déjà fermée (« ne plus afficher »).</summary>
     public bool ExpertIntroSeen { get; set; }
+    /// <summary>Groupe « Applications » du menu latéral replié par la personne : l'état survit au rechargement (changement de mode, nouvelle visite).</summary>
+    public bool AppsMenuShut { get; set; }
     public bool IsExpert() => ExpertMode != false;
     public DateTime? CreatedUtc { get; set; }
 
@@ -429,6 +431,8 @@ public class Tenant
 
     /// <summary>Applications affichées dans le groupe « Applications » du menu, dans l'ordre (identifiants de la page Applications). Null : réglage par défaut (voir AppMenu).</summary>
     public List<string>? MenuApps { get; set; }
+    /// <summary>« Vue du bâtiment » retirée du menu par l'organisation (sinon elle suit Home Assistant dans le groupe « Applications »).</summary>
+    public bool PlansMenuOff { get; set; }
 
     public string Name { get; set; } = "";
 
@@ -617,12 +621,22 @@ public class HomeAssistantAccount
     public List<string> Missing { get; set; } = new();
     /// <summary>Version de la mise en place (widgets activés, source de données créée) déjà appliquée à ce compte : la migration au démarrage ne la refait pas.</summary>
     public int SetupVersion { get; set; }
+    /// <summary>Entités importées désactivées d'office (interrupteur « Activer les entités importées » de la connexion) : vaut pour le premier import et pour celles qui apparaissent ensuite.</summary>
+    public bool NewOff { get; set; }
+
+    /// <summary>Reprend l'interrupteur des entités déjà connues ; les nouvelles suivent <see cref="NewOff"/>.</summary>
+    public void KeepOff(IEnumerable<HomeAssistantEntity>? before)
+    {
+        var known = new Dictionary<string, bool>();
+        foreach (var e in before ?? Enumerable.Empty<HomeAssistantEntity>()) known.TryAdd(e.Id, e.Off);
+        foreach (var e in Entities) e.Off = known.TryGetValue(e.Id, out var off) ? off : NewOff;
+    }
 
     /// <summary>Copie pour modification : la donnée lue dans le magasin n'est jamais changée en place.</summary>
     public HomeAssistantAccount Copy() => new()
     {
         Url = Url, Via = Via, RelayId = RelayId, AuthMode = AuthMode, User = User, Secret = Secret, Refresh = Refresh, ConnectedUtc = ConnectedUtc, LastError = LastError,
-        FailingSinceUtc = FailingSinceUtc, LastOkUtc = LastOkUtc, AlertSent = AlertSent, EntitiesUtc = EntitiesUtc, Missing = Missing.ToList(), SetupVersion = SetupVersion,
+        FailingSinceUtc = FailingSinceUtc, LastOkUtc = LastOkUtc, AlertSent = AlertSent, EntitiesUtc = EntitiesUtc, Missing = Missing.ToList(), SetupVersion = SetupVersion, NewOff = NewOff,
         Entities = Entities.Select(e => e.Copy()).ToList(),
     };
 }

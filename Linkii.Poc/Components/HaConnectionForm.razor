@@ -47,6 +47,10 @@
     {
         <div class="dw-field"><label for="@($"{Prefix}-token")">Jeton d'accès</label><input id="@($"{Prefix}-token")" type="password" @bind="secret" autocomplete="new-password" placeholder="@SecretPlaceholder" /><small>Profil Home Assistant › Sécurité › Jetons d'accès longue durée.</small></div>
     }
+    <div class="dw-field ha-import-on">
+        <span class="grow"><b>Activer les entités importées</b><small>@(activate ? "Toutes les entités sont proposées tout de suite dans les widgets, plans et compositions." : "Les entités arrivent désactivées : activez celles qui vous servent dans l'onglet Contenus de l'application.") Vaut aussi pour celles qui apparaîtront plus tard.</small></span>
+        <button type="button" class="switch @(activate ? "on" : "")" role="switch" aria-checked="@(activate ? "true" : "false")" aria-label="Activer les entités importées" @onclick="() => activate = !activate"><span></span></button>
+    </div>
     @if (error != null) { <div class="err">@error</div> }
     <div class="dw-actions">
         @if (CanCancel) { <button type="button" class="btn ghost sm" disabled="@busy" @onclick="OnCancel">Annuler</button> }
@@ -72,7 +76,7 @@
     private string url = "", via = "direct", auth = "token", user = "", secret = "";
     private Guid? relayId;
     private string? error;
-    private bool busy, relayOpen, loaded;
+    private bool busy, relayOpen, loaded, activate = true;
     private List<DataRelay> relays = new();
 
     private Guid RelayPick { get => relayId ?? Guid.Empty; set => relayId = value == Guid.Empty ? null : value; }
@@ -82,7 +86,7 @@
     {
         if (loaded) return;
         loaded = true;
-        url = Account?.Url ?? ""; via = Account?.Via ?? "direct"; relayId = Account?.RelayId; auth = Account?.AuthMode ?? "token"; user = Account?.User ?? "";
+        url = Account?.Url ?? ""; via = Account?.Via ?? "direct"; relayId = Account?.RelayId; auth = Account?.AuthMode ?? "token"; user = Account?.User ?? ""; activate = !(Account?.NewOff ?? false);
         LoadRelays();
     }
 
@@ -113,6 +117,8 @@
         try
         {
             var fresh = await Ha.Connect(Store.ClientId, server, via, relayId, auth, user, plain, Account);
+            fresh.NewOff = !activate;
+            fresh.KeepOff(Account?.Entities);   // entités déjà connues : leur interrupteur est gardé ; les autres suivent « Activer les entités importées »
             if (Account != null) { fresh.Missing = Account.Missing.Where(id => !fresh.Entities.Any(e => e.Id == id)).ToList(); fresh.SetupVersion = Account.SetupVersion; }
             Store.Write(d => { d.Tenant.HomeAssistant = fresh; });
             if (fresh.SetupVersion < HomeAssistantSetup.Version) HomeAssistantSetup.Install(Svc, Store);   // première connexion : widgets activés, source de données créée, visibles tout de suite

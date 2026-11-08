@@ -43,6 +43,7 @@ else
             </div>
         </div>
         <div class="row head-actions">
+            @if (IsPlans && Modes.Expert && haOn) { <a class="btn" href="/plans/nouveau?back=@PlanBack"><Ico Name="plus" Size="16" /> Nouveau plan</a> }
             @if (app.ScreenWidget) { <a class="btn" href="/">Placer sur un écran</a> }
             @if (HasSync) { <button type="button" class="btn ghost" disabled="@(!CanSync || syncing)" title="@(CanSync ? "Récupère les nouveaux contenus du compte connecté" : "Le compte n'est pas connecté")" @onclick="Sync"><Ico Name="refresh" Size="16" /> Synchroniser</button> }
             @if (!app.DefaultOn) { <button type="button" class="btn ghost danger-text" @onclick="Uninstall">Désinstaller</button> }
@@ -50,40 +51,116 @@ else
     </div>
 
     <nav class="tabs int-tabs" role="tablist" aria-label="Contenus, configuration et infos">
-        @if (items.Count > 0) { <button type="button" role="tab" class="@(tab == "contenus" ? "on" : "")" aria-selected="@(tab == "contenus" ? "true" : "false")" @onclick='() => tab = "contenus"'>Contenus <span class="cat-count">@items.Count</span></button> }
+        @if (items.Count > 0 || IsPlans) { <button type="button" role="tab" class="@(tab == "contenus" ? "on" : "")" aria-selected="@(tab == "contenus" ? "true" : "false")" @onclick='() => tab = "contenus"'>Contenus <span class="cat-count">@items.Count</span></button> }
         <button type="button" role="tab" class="@(tab == "config" ? "on" : "")" aria-selected="@(tab == "config" ? "true" : "false")" @onclick='() => tab = "config"'>Configuration</button>
         <button type="button" role="tab" class="@(tab == "infos" ? "on" : "")" aria-selected="@(tab == "infos" ? "true" : "false")" @onclick='() => tab = "infos"'>Infos</button>
     </nav>
 
-    @if (tab == "contenus" && items.Count > 0)
+    @if (tab == "contenus" && IsPlans && items.Count == 0)
     {
-        var shown = items.Where(i => filter.Length == 0 || i.Name.Contains(filter, StringComparison.CurrentCultureIgnoreCase) || i.Type.Contains(filter, StringComparison.CurrentCultureIgnoreCase)).ToList();
+        <div class="card empty">
+            @if (!Modes.Expert) { <div class="big">Disponible en mode expert</div> }
+            else if (!haOn) { <div class="big">Home Assistant n'est pas connecté</div><p>Connectez-le pour dessiner vos plans du bâtiment.</p> }
+            else
+            {
+                <div class="big">Aucun plan</div>
+                <p>Un plan réunit vos étages et les appareils de Home Assistant. Créez-le une fois, affichez-le sur autant d'écrans que vous voulez.</p>
+                <a class="btn" href="/plans/nouveau?back=@PlanBack"><Ico Name="plus" Size="16" /> Créer un plan</a>
+            }
+        </div>
+    }
+    else if (tab == "contenus" && items.Count > 0)
+    {
+        var shown = Shown;
+        var types = Types;
+        var grouped = Grouped;
+        var narrowed = shown.Count != items.Count;
+        @if (items.Count > 12 || types.Count > 1)
+        {
+            <div class="apd-tools">
+                @if (items.Count > 12) { <div class="search-box"><Ico Name="search" Size="16" /><input placeholder="Rechercher" aria-label="Rechercher un contenu" @bind="filter" @bind:event="oninput" /></div> }
+                else { <span class="grow"></span> }
+                @if (types.Count > 1)
+                {
+                    <div class="kebab dd">
+                        <button type="button" class="dd-btn @(hidden.Count > 0 ? "act" : "")" aria-haspopup="menu" aria-expanded="@(typeMenu ? "true" : "false")" @onclick="() => typeMenu = !typeMenu">
+                            <Ico Name="filter" Size="16" /> <span>Filtrer par type</span>
+                            @if (hidden.Count > 0) { <span class="c">@(types.Count - hidden.Count)/@types.Count</span> } <Ico Name="chevron" Size="14" />
+                        </button>
+                        @if (typeMenu)
+                        {
+                            <div class="kebab-backdrop" @onclick="() => typeMenu = false"></div>
+                            <div class="kebab-menu dd-menu right apd-types" role="menu">
+                                <div class="apd-types-h"><span class="dd-h">Types de contenus</span><span class="grow"></span><button type="button" class="apd-link" @onclick="() => hidden.Clear()">Tous</button><button type="button" class="apd-link" @onclick="() => hidden = types.Select(t => t.Name).ToHashSet()">Aucun</button></div>
+                                <div class="apd-types-l">
+                                    @foreach (var t in types)
+                                    {
+                                        var name = t.Name;
+                                        <button type="button" role="menuitemcheckbox" aria-checked="@(hidden.Contains(name) ? "false" : "true")" class="@(hidden.Contains(name) ? "" : "sel")" @onclick="() => ToggleType(name)">
+                                            <span class="apd-chk"><Ico Name="check" Size="12" /></span>@Cap(name)<span class="n">@t.Count</span>
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
         <div class="apd-bar">
-            <span class="apd-sum">@items.Count contenu@(items.Count > 1 ? "s" : "") · @items.Count(i => i.On) actif@(items.Count(i => i.On) > 1 ? "s" : "")</span>
+            @if (IsPlans) { <span class="apd-sum">@items.Count plan@(items.Count > 1 ? "s" : "") · @items.Count(i => i.Screens > 0) affiché@(items.Count(i => i.Screens > 0) > 1 ? "s" : "")</span> }
+            else { <span class="apd-sum">@(narrowed ? $"{shown.Count} sur " : "")@items.Count contenu@(items.Count > 1 ? "s" : "") · @shown.Count(i => i.On) actif@(shown.Count(i => i.On) > 1 ? "s" : "")</span> }
             <span class="grow"></span>
-            @if (items.Count > 12) { <div class="search-box" style="margin:0;width:260px"><Ico Name="search" Size="16" /><input placeholder="Rechercher" aria-label="Rechercher un contenu" @bind="filter" @bind:event="oninput" /></div> }
+            @if (grouped && filter.Length == 0) { <button type="button" class="apd-link" @onclick="ToggleAllGroups">@(open.Count > 0 ? "Tout replier" : "Tout déplier")</button> }
+            @if (!IsPlans)
+            {
+            <button type="button" class="btn ghost sm" disabled="@(shown.All(i => i.On))" title="@(narrowed ? "Active les contenus affichés" : "Active tous les contenus")" @onclick="() => SetAll(shown, true)">@(narrowed ? "Activer les affichés" : "Tout activer")</button>
+            <button type="button" class="btn ghost sm" disabled="@(shown.All(i => !i.On))" title="@(narrowed ? "Désactive les contenus affichés" : "Désactive tous les contenus")" @onclick="() => SetAll(shown, false)">@(narrowed ? "Désactiver les affichés" : "Tout désactiver")</button>
+            }
         </div>
-        <div class="lx-tbl-wrap">
-            <table class="lx-tbl">
-                <thead><tr><th>Contenu</th><th>Type</th><th>Listes de lecture</th><th class="num">Écrans</th><th>Ajouté le</th><th>État</th><th>Actif</th></tr></thead>
-                <tbody>
-                    @foreach (var it in shown.Take(300))
+        @if (shown.Count == 0)
+        {
+            <div class="empty compact"><div class="big">Aucun contenu trouvé</div></div>
+        }
+        else
+        {
+            <div class="lx-tbl-wrap">
+                <table class="lx-tbl apd-tbl">
+                    @if (IsPlans) { <thead><tr><th>Plan</th><th>Étages</th><th>Appareils</th><th class="num">Affiché</th><th>Modifié le</th><th>État</th><th></th></tr></thead> }
+                    else { <thead><tr><th>Contenu</th><th>Type</th><th>Listes de lecture</th><th class="num">Écrans</th><th>Ajouté le</th><th>État</th><th>Actif</th></tr></thead> }
+                    @if (grouped)
                     {
-                        var row = it;
-                        <tr class="@(row.On ? "" : "off")">
-                            <td><div class="nm"><AppIcon Id="@app.Id" Small="true" />@if (row.Instance) { <a href="/apps/instance/@row.Key" title="Ouvrir @row.Name">@row.Name</a> } else { <span>@row.Name</span> }</div></td>
-                            <td><small>@row.Type</small></td>
-                            <td>@if (row.Kind != "media") { <small>—</small> } else if (row.Lists.Count == 0) { <small>Aucune</small> } else { @string.Join(", ", row.Lists.Take(2))@if (row.Lists.Count > 2) { <small> +@(row.Lists.Count - 2)</small> } }</td>
-                            <td class="num">@(row.Kind == "media" ? row.Screens.ToString() : "—")</td>
-                            <td><small>@(row.Added is { } ad ? ad.ToLocalTime().ToString("dd.MM.yyyy") : "—")</small></td>
-                            <td>@if (!row.On) { <span class="int-pill off"><i></i>Désactivé</span> } else if (row.Error is { Length: > 0 } er) { <span class="int-pill bad" title="@er"><i></i>Erreur</span> } else if (row.Kind != "media") { <span class="int-pill ok"><i></i>Disponible</span> } else if (row.Lists.Count == 0) { <span class="int-pill off"><i></i>Inutilisé</span> } else if (row.Screens == 0) { <span class="int-pill off"><i></i>Pas diffusé</span> } else { <span class="int-pill ok"><i></i>Diffusé</span> }</td>
-                            <td><button type="button" class="switch sm @(row.On ? "on" : "")" role="switch" aria-checked="@(row.On ? "true" : "false")" aria-label="@(row.On ? "Désactiver" : "Activer") @row.Name" @onclick="() => ToggleContent(row)"><span></span></button></td>
-                        </tr>
+                        @foreach (var g in shown.GroupBy(i => i.Type))
+                        {
+                            var grp = g.ToList();
+                            var key = g.Key;
+                            var isOpen = filter.Length > 0 || open.Contains(key);
+                            var nOn = grp.Count(i => i.On);
+                            <tbody class="apd-grp @(isOpen ? "open" : "")">
+                                <tr class="apd-grp-h">
+                                    <td colspan="6">
+                                        <button type="button" class="apd-grp-btn" aria-expanded="@(isOpen ? "true" : "false")" @onclick="() => ToggleGroup(key)">
+                                            <Ico Name="chevron" Size="16" /><b>@Cap(key)</b><span class="apd-grp-n">@grp.Count</span><small>@nOn actif@(nOn > 1 ? "s" : "")</small>
+                                        </button>
+                                    </td>
+                                    <td><button type="button" class="switch sm @(nOn == grp.Count ? "on" : "") @(nOn > 0 && nOn < grp.Count ? "mixed" : "")" role="switch" aria-checked="@(nOn == grp.Count ? "true" : nOn == 0 ? "false" : "mixed")" title="@(nOn == grp.Count ? "Tout désactiver" : "Tout activer") : @key" aria-label="@(nOn == grp.Count ? "Désactiver" : "Activer") tous les @key" @onclick="() => SetAll(grp, nOn < grp.Count)"><span></span></button></td>
+                                </tr>
+                                @if (isOpen)
+                                {
+                                    @foreach (var it in grp.Take(300)) { @RowView(it) }
+                                    @if (grp.Count > 300) { <tr><td colspan="7"><small class="apd-sum">@grp.Count contenus : les 300 premiers sont affichés, utilisez la recherche.</small></td></tr> }
+                                }
+                            </tbody>
+                        }
                     }
-                </tbody>
-            </table>
-        </div>
-        @if (shown.Count > 300) { <p class="apd-sum" style="margin-top:8px">@shown.Count contenus : les 300 premiers sont affichés, utilisez la recherche.</p> }
+                    else
+                    {
+                        <tbody>@foreach (var it in shown.Take(300)) { @RowView(it) }</tbody>
+                    }
+                </table>
+            </div>
+            @if (!grouped && shown.Count > 300) { <p class="apd-sum" style="margin-top:8px">@shown.Count contenus : les 300 premiers sont affichés, utilisez la recherche.</p> }
+        }
     }
     else if (tab == "config")
     {
@@ -112,7 +189,7 @@ else
             {
                 <div class="apd-row">
                     <span class="grow"><b>Plans du bâtiment</b><small>Dessiner vos plans et choisir où ils s'affichent.</small></span>
-                    <a class="btn sm" href="/plans">Ouvrir</a>
+                    <a class="btn sm" href="/apps/@AppMenu.Plans">Ouvrir</a>
                 </div>
             }
             @if (!isVirtual && app.Settings.Count > 0)
@@ -145,8 +222,11 @@ else
 
 @code {
     [Parameter] public string AppId { get; set; } = "";
+    private string PlanBack => Uri.EscapeDataString($"/apps/{AppId}");
     private AppManifest? app;
-    private bool installed, inMenu, isVirtual, syncing;
+    private bool installed, inMenu, isVirtual, syncing, haOn;
+    /// <summary>« Vue du bâtiment » : l'onglet Contenus montre les plans du bâtiment, et « Nouveau plan » est en haut de la page.</summary>
+    private bool IsPlans => AppId == AppMenu.Plans;
     private DateTime? installedOn;
     private string tab = "config";
     private string? account;   // type de compte demandé (Google, Microsoft…), ou null
@@ -178,8 +258,9 @@ else
     {
         app = Resolve();
         if (app == null) return;
+        if (shownId != AppId) { shownId = AppId; filter = ""; hidden.Clear(); open.Clear(); typeMenu = false; }
         Reload();
-        tab = items.Count > 0 ? "contenus" : "config";
+        tab = items.Count > 0 || IsPlans ? "contenus" : "config";
     }
 
     private void Reload()
@@ -194,7 +275,7 @@ else
             var driveKeys = AppId.StartsWith("drv-") ? d.Tenant.DriveFolders.Where(f => f.Source == AppId[4..]).Select(f => f.Id.ToString()).ToHashSet() : null;
             var rows = new List<Item>();
             // fichiers importés et contenus de l'application (désactivés compris)
-            rows.AddRange(d.AllMedia.Where(m => driveKeys != null ? m.Info.TryGetValue("drive", out var dk) && driveKeys.Contains(dk) : !isVirtual && Pres.Belongs(m, AppId))
+            rows.AddRange(d.AllMedia.Where(m => driveKeys != null ? m.Info.TryGetValue("drive", out var dk) && driveKeys.Contains(dk) : !isVirtual && !IsPlans && Pres.Belongs(m, AppId))
                 .Select(m =>
                 {
                     var lists = d.Playlists.Where(p => p.Draft.Any(i => i.MediaId == m.Id)).ToList();
@@ -208,15 +289,27 @@ else
                 rows.AddRange(d.Tenant.SharedCalendars.Where(c => c.Source == AppId[4..]).Select(c => new Item("calendar", c.Id.ToString(), c.Name, "Calendrier", false, new(), 0, null, null, !c.Off)));
             else if (AppId == "facebook")
                 rows.AddRange(d.Tenant.FacebookPages.Select(p => new Item("page", p.Id, p.Name, "Page", false, new(), 0, null, null, !p.Off)));
+            else if (IsPlans)
+            {
+                // Vue du bâtiment : ses contenus sont les plans du bâtiment (Lists porte « n étages » et « n appareils », Screens le nombre d'endroits où le plan s'affiche)
+                var uses = HaPlanUses.CountByPlan(d);
+                rows.AddRange(d.Tenant.HaPlans.Select(pl =>
+                {
+                    var parsed = HomeAssistantRules.ParsePlan(pl.Json);
+                    var info = new List<string> { $"{parsed.Floors.Count} étage{(parsed.Floors.Count > 1 ? "s" : "")}", $"{parsed.Devices.Count} appareil{(parsed.Devices.Count > 1 ? "s" : "")}" };
+                    return new Item("plan", pl.Id.ToString(), pl.Name.Length > 0 ? pl.Name : "Sans nom", "Plan", false, info, uses.GetValueOrDefault(pl.Id), pl.UpdatedUtc, null, true);
+                }));
+            }
             else if (AppId == AppMenu.Home && d.Tenant.HomeAssistant is { } ha)
                 rows.AddRange(ha.Entities.Select(e => new Item("entity", e.Id, e.Name.Length > 0 ? e.Name : e.Id, HomeAssistantRules.FamilyOfDomain(e.Domain)?.Noun ?? e.Domain, false, new(), 0, null, null, !e.Off)));
+            haOn = d.Tenant.HomeAssistant is { Url.Length: > 0 };
             return (
                 d.AppInstalls.FirstOrDefault(a => a.AppId == AppId)?.InstalledUtc,
                 AppMenu.Has(d.Tenant, AppId),
                 ConnectedAccounts.Of(d.Tenant),
                 rows.OrderBy(r => r.Type, StringComparer.CurrentCultureIgnoreCase).ThenBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
         });
-        if (tab == "contenus" && items.Count == 0) tab = "config";
+        if (tab == "contenus" && items.Count == 0 && !IsPlans) tab = "config";
     }
 
     private void Install()
@@ -252,6 +345,59 @@ else
         Svc.SetContentOn(row.Kind, row.Key, !row.On);
         Reload();
     }
+
+    // ---- Contenus : recherche, filtre par type, blocs pliables par type (pliés par défaut), tout activer / désactiver ----
+    private HashSet<string> hidden = new();   // types masqués par le filtre
+    private HashSet<string> open = new();     // blocs dépliés
+    private bool typeMenu;
+    private string? shownId;
+
+    private List<(string Name, int Count)> Types => items.GroupBy(i => i.Type).Select(g => (g.Key, g.Count())).ToList();
+    /// <summary>Blocs par type dès qu'il y a beaucoup de contenus de plusieurs types (Home Assistant : des centaines d'entités).</summary>
+    private bool Grouped => items.Count > 12 && items.Select(i => i.Type).Distinct().Skip(1).Any();
+    private List<Item> Shown => items.Where(i => !hidden.Contains(i.Type)
+        && (filter.Length == 0 || i.Name.Contains(filter, StringComparison.CurrentCultureIgnoreCase) || i.Type.Contains(filter, StringComparison.CurrentCultureIgnoreCase) || i.Key.Contains(filter, StringComparison.CurrentCultureIgnoreCase))).ToList();
+
+    private static string Cap(string s) => s.Length == 0 ? s : char.ToUpper(s[0]) + s[1..];
+
+    private void ToggleType(string t) { if (!hidden.Remove(t)) hidden.Add(t); }
+    private void ToggleGroup(string t) { if (filter.Length > 0) return; if (!open.Remove(t)) open.Add(t); }
+    private void ToggleAllGroups() { if (open.Count > 0) open.Clear(); else open = Shown.Select(i => i.Type).ToHashSet(); }
+
+    private void SetAll(List<Item> rows, bool on)
+    {
+        var todo = rows.Where(r => r.On != on).Select(r => (r.Kind, r.Key)).ToList();
+        if (todo.Count == 0) return;
+        Svc.SetContentsOn(todo, on);
+        Reload();
+        Toast.Ok($"{todo.Count} contenu{(todo.Count > 1 ? "s" : "")} {(on ? "activé" : "désactivé")}{(todo.Count > 1 ? "s" : "")}.");
+    }
+
+    private RenderFragment RowView(Item row) => __builder =>
+    {
+        if (row.Kind == "plan")
+        {
+            <tr>
+                <td><div class="nm"><AppIcon Id="@AppId" Small="true" /><a href="/plans/@(row.Key)?back=@PlanBack" title="Ouvrir @row.Name">@row.Name</a></div></td>
+                <td><small>@row.Lists.ElementAtOrDefault(0)</small></td>
+                <td><small>@row.Lists.ElementAtOrDefault(1)</small></td>
+                <td class="num">@row.Screens</td>
+                <td><small>@(row.Added is { } md ? md.ToLocalTime().ToString("dd.MM.yyyy") : "—")</small></td>
+                <td>@if (row.Screens > 0) { <span class="int-pill ok"><i></i>Affiché</span> } else { <span class="int-pill off"><i></i>Pas affiché</span> }</td>
+                <td><a class="btn ghost sm" href="/plans/@(row.Key)?back=@PlanBack">Ouvrir</a></td>
+            </tr>
+            return;
+        }
+        <tr class="@(row.On ? "" : "off")">
+            <td><div class="nm"><AppIcon Id="@AppId" Small="true" />@if (row.Instance) { <a href="/apps/instance/@row.Key" title="Ouvrir @row.Name">@row.Name</a> } else { <span>@row.Name</span> }</div></td>
+            <td><small>@row.Type</small></td>
+            <td>@if (row.Kind != "media") { <small>—</small> } else if (row.Lists.Count == 0) { <small>Aucune</small> } else { @string.Join(", ", row.Lists.Take(2))@if (row.Lists.Count > 2) { <small> +@(row.Lists.Count - 2)</small> } }</td>
+            <td class="num">@(row.Kind == "media" ? row.Screens.ToString() : "—")</td>
+            <td><small>@(row.Added is { } ad ? ad.ToLocalTime().ToString("dd.MM.yyyy") : "—")</small></td>
+            <td>@if (!row.On) { <span class="int-pill off"><i></i>Désactivé</span> } else if (row.Error is { Length: > 0 } er) { <span class="int-pill bad" title="@er"><i></i>Erreur</span> } else if (row.Kind != "media") { <span class="int-pill ok"><i></i>Disponible</span> } else if (row.Lists.Count == 0) { <span class="int-pill off"><i></i>Inutilisé</span> } else if (row.Screens == 0) { <span class="int-pill off"><i></i>Pas diffusé</span> } else { <span class="int-pill ok"><i></i>Diffusé</span> }</td>
+            <td><button type="button" class="switch sm @(row.On ? "on" : "")" role="switch" aria-checked="@(row.On ? "true" : "false")" aria-label="@(row.On ? "Désactiver" : "Activer") @row.Name" @onclick="() => ToggleContent(row)"><span></span></button></td>
+        </tr>
+    };
 
     private async Task Uninstall()
     {

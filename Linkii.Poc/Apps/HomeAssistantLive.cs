@@ -132,8 +132,8 @@ public class HomeAssistantLive(JsonStore store, HomeAssistantClient ha, IHubCont
             if (t?.HomeAssistant is not { } cur) return ((HomeAssistantAccount?)null, new List<string>());
             var missing = Used(db, t).Where(id => !known.Contains(id)).OrderBy(x => x).ToList();
             var newOnes = missing.Except(cur.Missing).ToList();
-            var off = cur.Entities.Where(e => e.Off).Select(e => e.Id).ToHashSet();   // l'interrupteur des entités survit à l'actualisation
-            foreach (var e in fresh.Entities) e.Off = off.Contains(e.Id);
+            fresh.NewOff = cur.NewOff;
+            fresh.KeepOff(cur.Entities);   // l'interrupteur des entités survit à l'actualisation ; les nouvelles suivent le réglage de l'import
             cur.Entities = fresh.Entities; cur.EntitiesUtc = fresh.EntitiesUtc; cur.Missing = missing;
             cur.LastError = ""; cur.FailingSinceUtc = null; cur.LastOkUtc = DateTime.UtcNow;
             return (cur.Copy(), newOnes);

@@ -66,7 +66,7 @@
                 @* Groupe « Applications » (maquettes/menu-applications-refonte.html) : les applications choisies dans « Mes applications », dans leur ordre,
                    puis le Store et « Gérer mes applications ». Visible aussi en mode simple : c'est la vitrine du produit. Déplié par défaut. *@
                 <div class="nav-sep" role="separator"></div>
-                <button type="button" class="nav nav-group @(IntegrationsOpen ? "open" : "") @(InIntegrations ? "active" : "")" aria-expanded="@(IntegrationsOpen ? "true" : "false")" data-tip="Applications" @onclick="() => intOpen = !IntegrationsOpen">
+                <button type="button" class="nav nav-group @(IntegrationsOpen ? "open" : "") @(InIntegrations ? "active" : "")" aria-expanded="@(IntegrationsOpen ? "true" : "false")" data-tip="Applications" @onclick="ToggleApps">
                     <Ico Name="apps" Size="18" /> Applications
                     <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg>
                 </button>
@@ -472,15 +472,23 @@
     }.OfType<HubTab>().ToList();
     // Groupe « Applications » du menu : les applications choisies dans « Mes applications » (AppMenu), chacune vers sa page.
     private bool? intOpen;
-    private static string MenuGlyph(string? id) => id == "homeassistant" ? "layers" : AppIcon.LookOf(id).Icon ?? "apps";
+    private static string MenuGlyph(string? id) => id == "homeassistant" ? "layers" : id == AppMenu.Plans ? "home" : AppIcon.LookOf(id).Icon ?? "apps";
     private List<string> menuApps = new();
     private List<HubTab> IntegrationPages => Ctx.ClientId == null ? new() : menuApps
         .Where(_ => orgAdmin)
+        .Where(id => Modes.Expert || !AppMenu.ExpertOnly(id))   // Vue du bâtiment (plans) : mode expert seulement
         .Select(id => new HubTab(AppMenu.Href(id), AppMenu.Label(id, Catalog), null, AppMenu.Icon(id)))
         .ToList();
     private bool InIntegrations => CurrentPath.StartsWith("applications") || CurrentPath == "store" || CurrentPath.StartsWith("apps/")
         || IntegrationPages.Any(t => CurrentPath == t.Path || CurrentPath.StartsWith(t.Path + "/"));
     private bool IntegrationsOpen => intOpen ?? true;
+    /// <summary>Plie ou déplie le groupe « Applications » et le retient sur le compte (le changement de mode recharge la page).</summary>
+    private void ToggleApps()
+    {
+        intOpen = !IntegrationsOpen;
+        var shut = intOpen == false;
+        if (Ctx.UserId is { } uid && !Ctx.IsImpersonating) Root.Write(d => { if (d.Users.FirstOrDefault(u => u.Id == uid) is { } u) u.AppsMenuShut = shut; });
+    }
     private string HubClass(List<HubTab> tabs) => InHub(tabs) ? "nav active" : "nav";
     private bool InHub(List<HubTab> tabs) => tabs.Any(t => t.Path == CurrentPath.Split('/')[0]);
     // Onglets à afficher : seulement sur la page d'un onglet elle-même (pas dans un éditeur) et si le hub a au moins deux pages.
@@ -627,6 +635,7 @@
     {
         Modes.Changed += OnModeChanged;
         Welcome.Changed += OnWelcomeChanged;
+        if (Ctx.UserId is { } me && Root.Read(d => d.Users.FirstOrDefault(u => u.Id == me)?.AppsMenuShut == true)) intOpen = false;   // groupe « Applications » laissé replié
         reseller = Ctx.Reseller;
         brand = reseller?.BrandColor ?? brand;
         var cid = Ctx.ClientId;

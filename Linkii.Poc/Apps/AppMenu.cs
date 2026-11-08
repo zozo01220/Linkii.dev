@@ -9,13 +9,15 @@ namespace Linkii.Poc;
 public static class AppMenu
 {
     public const string Home = "ha-home";
+    /// <summary>« Vue du bâtiment » (application du catalogue) : sa page montre les plans du bâtiment ; placée d'office juste après Home Assistant (mode expert).</summary>
+    public const string Plans = HomeAssistantRules.BuildingApp;
 
     /// <summary>Identifiants du menu, dans l'ordre (y compris ceux qui ne sont plus installés : voir <see cref="Shown"/>).</summary>
     public static List<string> Ids(Tenant t)
     {
-        if (t.MenuApps != null) return t.MenuApps;
-        var ids = t.IntegrationsAdded.ToList();
-        if (t.HomeAssistant is { Url.Length: > 0 } && !ids.Contains(Home)) ids.Add(Home);
+        var ids = t.MenuApps?.ToList() ?? t.IntegrationsAdded.ToList();
+        if (t.MenuApps == null && t.HomeAssistant is { Url.Length: > 0 } && !ids.Contains(Home)) ids.Add(Home);
+        if (!t.PlansMenuOff && !ids.Contains(Plans) && ids.IndexOf(Home) is var h && h >= 0) ids.Insert(h + 1, Plans);
         return ids;
     }
 
@@ -27,6 +29,7 @@ public static class AppMenu
         var ids = Ids(t).ToList();
         ids.Remove(id);
         if (on) ids.Add(id);
+        if (id == Plans) t.PlansMenuOff = !on;
         t.MenuApps = ids;
     }
 
@@ -44,6 +47,7 @@ public static class AppMenu
     /// <summary>L'application est encore dans « Mes applications » (installée, ou source active ou prise dans le Store).</summary>
     public static bool Installed(ClientDb d, string id) =>
         id == Home ? d.Tenant.HomeAssistant is { Url.Length: > 0 }
+        : id == Plans ? d.Tenant.HomeAssistant is { Url.Length: > 0 } && d.AppInstalls.Any(a => a.AppId == id)
         : id.StartsWith("cal-") ? SharedCalendarSources.Enabled(d.Tenant, id[4..]) || d.Tenant.IntegrationsAdded.Contains(id)
         : id.StartsWith("drv-") ? DriveSources.Enabled(d.Tenant, id[4..]) || d.Tenant.IntegrationsAdded.Contains(id)
         : d.AppInstalls.Any(a => a.AppId == id);
@@ -66,4 +70,7 @@ public static class AppMenu
 
     /// <summary>Icône (identifiant passé à AppIcon).</summary>
     public static string Icon(string id) => id == Home ? "homeassistant" : id;
+
+    /// <summary>Entrée réservée au mode expert.</summary>
+    public static bool ExpertOnly(string id) => id == Plans;
 }
