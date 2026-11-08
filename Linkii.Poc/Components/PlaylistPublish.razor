@@ -1,0 +1,348 @@
+@using System.Globalization
+@inject TenantStore Store
+@inject ScreenPublisher Publisher
+@inject PublishSchedule Sched
+@inject ModeService Modes
+@inject Toaster Toast
+
+@* Onglet « Publication » d'une liste de lecture (maquette liste-lecture-onglets.html) : un interrupteur par écran (par aire et par zone en mode expert, ils cochent tous
+   les écrans qu'ils contiennent), rien n'est publié avant le bouton orange. Une horloge (par écran en expert, pour l'ensemble en simple) programme la publication à une date
+   et une heure choisies dans un calendrier ; sans date, c'est maintenant. *@
+<div class="pp">
+    <section class="pp-card">
+        <header class="pp-head">
+            <div class="grow">
+                <h3>Où diffuser</h3>
+                <p>@(Modes.Expert ? "Activez les aires, zones ou écrans voulus, puis cliquez sur Publier." : "Activez les écrans voulus, puis cliquez sur Publier.")</p>
+            </div>
+            @if (Modes.Expert)
+            {
+                <button type="button" class="btn ghost" @onclick="OpenAdd"><Ico Name="plus" Size="16" /> Ajouter une cible</button>
+            }
+            @if (!Modes.Expert)
+            {
+                @if (allWhen != null) { <span class="pp-ws">À programmer : @Short(allWhen.Value)</span> }
+                <button type="button" class="pp-clk @(allWhen != null ? "set" : "")" title="Programmer la publication de tous les écrans" aria-label="Programmer la publication de tous les écrans" @onclick="() => OpenWhen(null)"><Ico Name="clock" Size="16" /></button>
+            }
+        </header>
+        @if (Shown.Count == 0)
+        {
+            <div class="pp-empty">@(rows.Count == 0 ? "Aucun écran connecté pour l'instant." : "Aucun écran ne diffuse cette liste pour l'instant. Ajoutez une cible : une aire, une zone ou un écran.")</div>
+        }
+        else if (Modes.Expert)
+        {
+            @foreach (var a in BuildTree(Shown))
+            {
+                var area = a;
+                var all = area.Zones.SelectMany(z => z.Rows).ToList();
+                <div class="pp-grp"><span>@area.Area.Name</span><button type="button" class="switch @(all.All(r => on.Contains(r.S.Id)) ? "on" : "")" role="switch" aria-checked="@(all.All(r => on.Contains(r.S.Id)) ? "true" : "false")" aria-label="Toute l'aire @area.Area.Name" @onclick="() => SetMany(all, !all.All(r => on.Contains(r.S.Id)))"><span></span></button></div>
+                @foreach (var z in area.Zones)
+                {
+                    var zone = z;
+                    var allOn = zone.Rows.All(r => on.Contains(r.S.Id));
+                    <div class="pp-grp z"><span>@zone.Zone.Name</span><button type="button" class="switch @(allOn ? "on" : "")" role="switch" aria-checked="@(allOn ? "true" : "false")" aria-label="Toute la zone @zone.Zone.Name" @onclick="() => SetMany(zone.Rows, !allOn)"><span></span></button></div>
+                    @foreach (var r in zone.Rows) { @Row(r, true) }
+                }
+            }
+        }
+        else
+        {
+            @foreach (var r in Shown) { @Row(r, false) }
+        }
+    </section>
+</div>
+
+<div class="pp-foot">
+    <span class="pp-st @(changes > 0 ? "pend" : done ? "ok" : "")">@StatusText()</span>
+    <span class="grow"></span>
+    <button type="button" class="btn ghost" @onclick="Reset">Annuler</button>
+    <button type="button" class="btn @(changes > 0 ? "publish-btn" : "")" disabled="@(changes == 0 || busy)" @onclick="Apply"><Ico Name="upload" Size="16" /> @ButtonLabel()</button>
+</div>
+
+@if (adding)
+{
+    <div class="modal-backdrop" @onclick="() => adding = false"></div>
+    <div class="modal pp-modal pp-add" role="dialog" aria-modal="true" aria-labelledby="pp-add-title">
+        <h3 id="pp-add-title">Ajouter une cible</h3>
+        <p class="muted">Choisissez à quel niveau diffuser. Un niveau inclut tout ce qu'il contient.</p>
+        <div class="pp-seg" role="tablist" aria-label="Niveau">
+            @foreach (var (k, l) in new[] { ("area", "Aire"), ("zone", "Zone"), ("screen", "Écran") })
+            {
+                var key = k;
+                <button type="button" role="tab" aria-selected="@(addLevel == key ? "true" : "false")" class="@(addLevel == key ? "on" : "")" @onclick="() => addLevel = key">@l</button>
+            }
+        </div>
+        <div class="pp-tree">
+            @foreach (var a in BuildTree(rows))
+            {
+                var ar = a;
+                var aall = ar.Zones.SelectMany(z => z.Rows).ToList();
+                @if (addLevel == "area") { @TRow(ar.Area.Name, $"{ar.Zones.Count} {(ar.Zones.Count > 1 ? "zones" : "zone")} · {aall.Count} {(aall.Count > 1 ? "écrans" : "écran")}", 0, aall) }
+                else
+                {
+                    <div class="pp-tl cap">@ar.Area.Name</div>
+                    @foreach (var z in ar.Zones)
+                    {
+                        var zz = z;
+                        @if (addLevel == "zone") { @TRow(zz.Zone.Name, $"{zz.Rows.Count} {(zz.Rows.Count > 1 ? "écrans" : "écran")}", 1, zz.Rows) }
+                        else { @foreach (var r in zz.Rows) { @TRow(r.S.Name, zz.Zone.Name, 1, new List<PRow> { r }) } }
+                    }
+                }
+            }
+        </div>
+        <div class="pp-mf">
+            <span class="grow"></span>
+            <button type="button" class="btn ghost" @onclick="() => adding = false">Annuler</button>
+            <button type="button" class="btn" @onclick="AddSelected">Ajouter</button>
+        </div>
+    </div>
+}
+
+@if (whenFor != null || whenAll)
+{
+    var cal = new DateTime(calY, calM, 1);
+    var first = ((int)cal.DayOfWeek + 6) % 7;
+    var days = DateTime.DaysInMonth(calY, calM);
+    var today = Now().Date;
+    <div class="modal-backdrop" @onclick="CloseWhen"></div>
+    <div class="modal pp-modal" role="dialog" aria-modal="true" aria-labelledby="pp-when-title">
+        <h3 id="pp-when-title">Programmer · @(whenFor != null ? whenFor.S.Name : "tous les écrans")</h3>
+        <p class="muted">@(pickDay is { } pd ? $"Publication le {pd.ToString("d MMMM yyyy", Fr)} à {pickH:00}:{pickM:00}." : "Aucune date choisie : publication maintenant.")</p>
+        <div class="pp-cal">
+            <div class="pp-ch">
+                <button type="button" class="pp-clk" aria-label="Mois précédent" @onclick="() => Month(-1)"><Ico Name="chevron-left" Size="16" /></button>
+                <b>@cal.ToString("MMMM yyyy", Fr)</b>
+                <button type="button" class="pp-clk" aria-label="Mois suivant" @onclick="() => Month(1)"><Ico Name="chevron-right" Size="16" /></button>
+            </div>
+            <div class="pp-cg">
+                @foreach (var d in new[] { "L", "M", "M", "J", "V", "S", "D" }) { <i class="dw">@d</i> }
+                @for (var k = 0; k < first; k++) { <i></i> }
+                @for (var n = 1; n <= days; n++)
+                {
+                    var day = new DateTime(calY, calM, n);
+                    var past = day < today;
+                    <button type="button" class="dy @(pickDay == day ? "on" : "")" disabled="@past" @onclick="() => pickDay = day">@n</button>
+                }
+            </div>
+        </div>
+        <div class="pp-tm">
+            <span>Heure</span>
+            <select @bind="pickH">@for (var h = 0; h < 24; h++) { <option value="@h">@h.ToString("00")</option> }</select>
+            <span>:</span>
+            <select @bind="pickM">@for (var m = 0; m < 60; m += 5) { <option value="@m">@m.ToString("00")</option> }</select>
+        </div>
+        <div class="pp-mf">
+            <button type="button" class="btn ghost" @onclick="ClearWhen">Publier maintenant</button>
+            <span class="grow"></span>
+            <button type="button" class="btn ghost" @onclick="CloseWhen">Annuler</button>
+            <button type="button" class="btn" @onclick="SaveWhen">Enregistrer</button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid PlaylistId { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private record PRow(Screen S, Area A, Zone Z);
+    private record PZone(Zone Zone, List<PRow> Rows);
+    private record PArea(Area Area, List<PZone> Zones);
+
+    private static readonly CultureInfo Fr = CultureInfo.GetCultureInfo("fr-FR");
+    private List<PRow> rows = new();
+    private List<PArea> tree = new();
+    private Dictionary<Guid, string> otherList = new();
+    private readonly HashSet<Guid> added = new();   // écrans ajoutés par « Ajouter une cible » (mode expert : on ne liste que les écrans qui ont déjà la liste)
+    private bool adding; private string addLevel = "area";
+    private readonly HashSet<Guid> msel = new();
+    private List<PRow> Shown => Modes.Expert ? rows.Where(r => init.Contains(r.S.Id) || schedFor.Contains(r.S.Id) || added.Contains(r.S.Id)).ToList() : rows;
+    private static List<PArea> BuildTree(IEnumerable<PRow> src) => src.GroupBy(r => r.A.Id).Select(g => new PArea(g.First().A, g.GroupBy(r => r.Z.Id).Select(zg => new PZone(zg.First().Z, zg.ToList())).ToList())).ToList();
+    private void OpenAdd() { msel.Clear(); foreach (var r in Shown) msel.Add(r.S.Id); adding = true; }
+    private void AddSelected()
+    {
+        var shown = Shown.Select(r => r.S.Id).ToHashSet();
+        foreach (var id in msel.Where(id => !shown.Contains(id))) { added.Add(id); on.Add(id); }
+        adding = false; done = false;
+    }
+    private void MSet(List<PRow> list, bool value) { foreach (var r in list) { if (value) msel.Add(r.S.Id); else msel.Remove(r.S.Id); } }
+    private RenderFragment TRow(string label, string sub, int indent, List<PRow> list) => @<div class="pp-tl" style="margin-left:@(indent * 20)px">
+        <span>@label @if (sub.Length > 0) { <small>· @sub</small> }</span>
+        <button type="button" class="switch @(list.All(r => msel.Contains(r.S.Id)) ? "on" : "")" role="switch" aria-checked="@(list.All(r => msel.Contains(r.S.Id)) ? "true" : "false")" aria-label="@label" @onclick="() => MSet(list, !list.All(r => msel.Contains(r.S.Id)))"><span></span></button>
+    </div>;
+    private HashSet<Guid> pend = new();   // écrans qui jouent cette liste avec des modifications pas encore publiées
+    private HashSet<Guid> schedFor = new();   // écrans qui recevront cette liste à l heure programmée
+    private Dictionary<Guid, DateTime> scheduled = new();   // programmations déjà enregistrées (heure de l'organisation)
+    private readonly HashSet<Guid> on = new();
+    private HashSet<Guid> init = new();
+    private readonly Dictionary<Guid, DateTime> when = new();   // programmation choisie, pas encore enregistrée
+    private readonly HashSet<Guid> cancelled = new();           // programmation retirée : l'écran est publié maintenant
+    private DateTime? allWhen;
+    private string tz = "Europe/Zurich";
+    private bool busy, done;
+
+    private Guid loaded;
+    protected override void OnParametersSet() { if (loaded != PlaylistId) { loaded = PlaylistId; Reset(); } }
+
+    private DateTime Now()
+    {
+        try { return TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(tz)); } catch { return DateTime.Now; }
+    }
+
+    private void Reset()
+    {
+        var (rs, ar, other, sch, zone, sf, pd) = Store.Read(d =>
+        {
+            var areas = d.Root.Areas.Where(a => a.ClientId == d.ClientId).ToList();
+            var list = new List<PRow>();
+            foreach (var s in d.AllScreens.Where(x => x.Token != null))
+            {
+                var a = areas.FirstOrDefault(x => x.Id == s.AreaId);
+                if (a == null) continue;
+                var z = a.Zones.FirstOrDefault(x => x.Id == s.ZoneId) ?? a.Zones.FirstOrDefault(x => x.IsDefault);
+                if (z == null || z.Kind == Zone.Wall) continue;   // un mur porte sa liste par sa zone : elle se règle depuis la page Écrans
+                list.Add(new PRow(s, a, z));
+            }
+            var others = list.Where(r => r.S.PlaylistId is { } pid && pid != PlaylistId && !r.S.ZonePlaylists().Contains(PlaylistId)).ToDictionary(r => r.S.Id, r => d.Playlists.FirstOrDefault(p => p.Id == r.S.PlaylistId)?.Name ?? "une autre liste");
+            var all = PublishSchedule.Of(d.Root, d.ClientId).Where(x => x.S.PlaylistId == PlaylistId || x.S.PlaylistId == null).ToList();
+            var sc = all.ToDictionary(x => x.S.ScreenId, x => x.Local);
+            var pls = d.Playlists.ToList();
+            var pending = list.Where(r => r.S.ZonePlaylists().Contains(PlaylistId) && Helpers.HasPending(r.S, pls)).Select(r => r.S.Id).ToHashSet();   // la liste (ou un réglage) a changé depuis la dernière publication de l'écran
+            return (list, areas, others, sc, d.Tenant.Timezone, all.Where(x => x.S.PlaylistId == PlaylistId).Select(x => x.S.ScreenId).ToHashSet(), pending);
+        });
+        tz = zone;
+        rows = rs.OrderBy(r => r.A.Name, StringComparer.CurrentCultureIgnoreCase).ThenBy(r => r.Z.IsDefault ? 0 : 1).ThenBy(r => r.Z.Name, StringComparer.CurrentCultureIgnoreCase).ThenBy(r => r.S.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        tree = rows.GroupBy(r => r.A.Id).Select(g => new PArea(g.First().A, g.GroupBy(r => r.Z.Id).Select(zg => new PZone(zg.First().Z, zg.ToList())).ToList())).ToList();
+        otherList = other;
+        scheduled = sch;
+        on.Clear();
+        schedFor = sf; pend = pd;
+        foreach (var r in rows.Where(r => HasList(r.S) || sf.Contains(r.S.Id))) on.Add(r.S.Id);   // un écran dont la publication est programmée est déjà « sur la liste »
+        init = on.ToHashSet();
+        when.Clear(); cancelled.Clear(); added.Clear(); adding = false; allWhen = null; done = false;
+    }
+
+    // ---------- Interrupteurs ----------
+    private void Toggle(PRow r) { if (!on.Add(r.S.Id)) on.Remove(r.S.Id); done = false; }
+    private void SetMany(List<PRow> list, bool value)
+    {
+        foreach (var r in list) { if (value) on.Add(r.S.Id); else on.Remove(r.S.Id); }
+        done = false;
+    }
+
+    private RenderFragment Row(PRow r, bool nested) => @<div class="pp-row @(nested ? "in" : "")">
+        <div class="pp-n">
+            <b>@r.S.Name</b>
+            @if (Offline(r.S)) { <span class="off">● hors ligne · publiée à sa reconnexion</span> } else { <span class="ok">● en ligne</span> }
+            @if (r.S.ZoneCount > 1 && HasList(r.S)) { <small title="Cet écran est découpé en plusieurs zones">multizone · zone @string.Join(" et ", Enumerable.Range(0, r.S.ZoneCount).Where(z => r.S.ZonePlaylist(z) == PlaylistId).Select(z => z + 1))</small> }
+            @if (otherList.TryGetValue(r.S.Id, out var o) && on.Contains(r.S.Id) && !init.Contains(r.S.Id)) { <small class="warn">remplacera « @o »</small> }
+            else if (otherList.TryGetValue(r.S.Id, out var o2)) { <small>joue « @o2 »</small> }
+        </div>
+        <span class="grow"></span>
+        @if (pend.Contains(r.S.Id) && on.Contains(r.S.Id)) { <span class="pp-pend" title="La liste a été modifiée depuis la dernière publication de cet écran">● Modifications à publier</span> }
+        @if (scheduled.TryGetValue(r.S.Id, out var sd) && !cancelled.Contains(r.S.Id)) { <span class="pp-pill" title="Publication programmée">⏲ Programmée le @Short(sd)</span> }
+        @if (when.TryGetValue(r.S.Id, out var wd)) { <span class="pp-ws">À programmer : @Short(wd)</span> }
+        @if (Modes.Expert)
+        {
+            <button type="button" class="pp-clk @(when.ContainsKey(r.S.Id) || (scheduled.ContainsKey(r.S.Id) && !cancelled.Contains(r.S.Id)) ? "set" : "")" title="Programmer la publication" aria-label="Programmer la publication de @r.S.Name" @onclick="() => OpenWhen(r)"><Ico Name="clock" Size="16" /></button>
+        }
+        <button type="button" class="switch @(on.Contains(r.S.Id) ? "on" : "")" role="switch" aria-checked="@(on.Contains(r.S.Id) ? "true" : "false")" aria-label="Diffuser sur @r.S.Name" @onclick="() => Toggle(r)"><span></span></button>
+    </div>;
+
+    /// <summary>L'écran joue cette liste dans l'une de ses zones (un écran multizone peut la jouer dans la zone 2 ou 3).</summary>
+    private bool HasList(Screen s) => s.ZonePlaylists().Contains(PlaylistId);
+
+    private static bool Offline(Screen s) => s.LastSeenUtc is null || DateTime.UtcNow - s.LastSeenUtc > TimeSpan.FromSeconds(90);
+    private static string Short(DateTime d) => d.ToString("d MMMM", Fr) + " à " + d.ToString("HH:mm");
+
+    // ---------- Changements et bouton ----------
+    private bool Changed(PRow r) => on.Contains(r.S.Id) != init.Contains(r.S.Id) || (on.Contains(r.S.Id) && pend.Contains(r.S.Id)) || when.ContainsKey(r.S.Id) || cancelled.Contains(r.S.Id) || (allWhen != null && on.Contains(r.S.Id));
+    private int changes => rows.Count(Changed);
+    private bool Later(PRow r) => when.ContainsKey(r.S.Id) || (allWhen != null && Modes.Expert == false && on.Contains(r.S.Id) && Changed(r));
+
+    private string ButtonLabel()
+    {
+        var ch = rows.Where(Changed).ToList();
+        var later = ch.Count(Later);
+        return later == 0 ? "Publier" : later == ch.Count ? "Programmer" : "Publier et programmer";
+    }
+
+    private string StatusText() => changes > 0 ? $"{changes} {(changes > 1 ? "changements à publier" : "changement à publier")}" : done ? msg : "Aucun changement à publier";
+    private string msg = "";
+
+    private async Task Apply()
+    {
+        var ch = rows.Where(Changed).ToList();
+        if (ch.Count == 0) return;
+        busy = true;
+        var now = new List<Guid>(); int later = 0, removed = 0; ScreenPublisher.Result? res = null;
+        try
+        {
+            var client = Store.ClientId; var user = Store.UserId;
+            foreach (var r in ch)
+            {
+                var id = r.S.Id; var want = on.Contains(id);
+                DateTime? at = when.TryGetValue(id, out var w) ? w : (!Modes.Expert && allWhen != null ? allWhen : null);
+                if (at is { } t && t > Now())
+                {
+                    Sched.Schedule(client, id, PlaylistId, t, user, remove: !want);
+                    later++;
+                    continue;
+                }
+                if (!want && schedFor.Contains(id) && !HasList(r.S)) { Sched.Cancel(client, id); removed++; continue; }   // seulement programmée : on retire la programmation
+                if (cancelled.Contains(id)) Sched.Cancel(client, id);
+                else if (scheduled.ContainsKey(id)) Sched.Cancel(client, id);   // une publication immédiate remplace la programmation
+                Store.Write(d => { if (d.AllScreens.FirstOrDefault(x => x.Id == id) is { } sc) PublishSchedule.Assign(sc, PlaylistId, want); });
+                now.Add(id);
+            }
+            if (now.Count > 0) res = await Publisher.Publish(now);
+        }
+        finally { busy = false; }
+        msg = res?.Pending == true ? "✓ Demande d'approbation envoyée" + (later > 0 ? $" · {later} programmée{(later > 1 ? "s" : "")}" : "")
+            : now.Count > 0 && later > 0 ? $"✓ Publiée · {later} programmée{(later > 1 ? "s" : "")}"
+            : now.Count == 0 && later == 0 && removed > 0 ? "✓ Programmation retirée"
+            : later > 0 ? (later > 1 ? "✓ Publications programmées" : "✓ Publication programmée") : "✓ Publiée à l'instant";
+        if (res?.Error != null) Toast.Error(res.Error); else Toast.Ok(msg.TrimStart('✓', ' '));
+        Reset(); done = true;
+        await OnChanged.InvokeAsync();
+    }
+
+    // ---------- Fenêtre de programmation ----------
+    private PRow? whenFor; private bool whenAll;
+    private int calY, calM; private DateTime? pickDay; private int pickH = 8, pickM;
+
+    private void OpenWhen(PRow? r)
+    {
+        whenFor = r; whenAll = r == null;
+        DateTime? cur = r == null ? allWhen : when.TryGetValue(r.S.Id, out var w) ? w : scheduled.TryGetValue(r.S.Id, out var s) && !cancelled.Contains(r.S.Id) ? s : null;
+        var basis = cur ?? Now();
+        calY = basis.Year; calM = basis.Month;
+        pickDay = cur?.Date; pickH = cur?.Hour ?? 8; pickM = cur is { } c ? c.Minute / 5 * 5 : 0;
+    }
+
+    private void Month(int by) { var d = new DateTime(calY, calM, 1).AddMonths(by); calY = d.Year; calM = d.Month; }
+    private void CloseWhen() { whenFor = null; whenAll = false; }
+
+    private void SaveWhen()
+    {
+        DateTime? at = pickDay is { } d ? d.AddHours(pickH).AddMinutes(pickM) : null;
+        if (whenFor is { } r)
+        {
+            if (at != null) { when[r.S.Id] = at.Value; cancelled.Remove(r.S.Id); }
+            else ClearOne(r);
+        }
+        else allWhen = at;
+        CloseWhen(); done = false;
+    }
+
+    private void ClearWhen()
+    {
+        if (whenFor is { } r) ClearOne(r); else allWhen = null;
+        CloseWhen(); done = false;
+    }
+
+    private void ClearOne(PRow r)
+    {
+        when.Remove(r.S.Id);
+        if (scheduled.ContainsKey(r.S.Id)) cancelled.Add(r.S.Id);   // la programmation en place est retirée : publication immédiate
+    }
+}

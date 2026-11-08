@@ -14,6 +14,8 @@
 
 @* Listes de lecture épurées (§51) : le fil d'Ariane est le titre, une ligne d'état, une ligne d'outils, les dossiers en puces,
    des cartes qui disent l'essentiel (une ligne de méta, un état de diffusion) et une barre de sélection flottante. *@
+@if (Id is null)
+{
 <div class="lx-top">
     <div class="lx-title">
     <h1>
@@ -279,7 +281,7 @@ else
                     }
                     else
                     {
-                        <PlaylistCover @key="pl.Id" Slides="slides" All="media" Href="@("/playlists/" + pl.Id)" Portrait="PlaylistShape.IsPortrait(pl, MediaById, screens)" />
+                        <PlaylistCover @key="pl.Id" Slides="slides" Count="pl.Draft.Count" Total="total" All="media" Href="@("/playlists/" + pl.Id)" Portrait="PlaylistShape.IsPortrait(pl, MediaById, screens)" />
                     }
                     @if (RightOfList(pl) == FolderRight.Read) { <span class="lx-lock" title="Dans un dossier partagé en lecture seule"><Ico Name="lock" Size="13" /></span> }
                     @if (!Flat) { <span class="lx-cshare">@ListShare(pl)</span> }
@@ -327,14 +329,14 @@ else
         </div>
     }
 }
+}
 
 @if (Id is { } openId)
 {
-    <div class="lx-drawer-veil" @onclick="CloseEditor"></div>
-    @* tiroir de droite : fil horizontal + bibliothèque (§186) ; « Fermer » est dans son en-tête *@
-    <aside class="lx-drawer pl-drawer pl-bottom" role="dialog" aria-label="Liste de lecture">
+    @* l éditeur d une liste est une page (onglets Fil de lecture, Aperçu, Publication), plus un tiroir *@
+    <div class="pl-page" role="region" aria-label="Liste de lecture">
         <PlaylistEditor @key="openId" Id="openId" OnClose="CloseEditor" />
-    </aside>
+    </div>
 }
 
 @if (creating)
@@ -728,8 +730,9 @@ else
 
     private string Meta(Playlist p, int total)
     {
-        var parts = new List<string> { p.Draft.Count == 0 ? "Vide" : Plural(p.Draft.Count, "contenu", "contenus") };
-        if (total > 0) parts.Add(Helpers.FormatDuration(total));
+        // le nombre de contenus et la durée sont sur la vignette (PlaylistCover) : la ligne ne garde que la date de modification
+        var parts = new List<string>();
+        if (p.Draft.Count == 0) parts.Add("Vide");
         if (Ago(p) is { } a) parts.Add("modifiée " + a);
         return string.Join(" · ", parts);
     }

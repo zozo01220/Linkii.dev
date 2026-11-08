@@ -38,6 +38,8 @@ builder.Services.AddSingleton<IApprovalNotices, ApprovalNotices>();   // approba
 builder.Services.AddSingleton<ApprovalService>();
 builder.Services.AddScoped<ScreenPublisher>();   // toute publication d'écran faite pour une personne passe ici (demande d'approbation si elle y est soumise)
 builder.Services.AddHostedService<ApprovalWorker>();   // rappel après 24 h, péremption après 7 jours, refus si la brique n'agit plus
+builder.Services.AddSingleton<PublishSchedule>();   // publications programmées par écran (onglet Publication d une liste)
+builder.Services.AddHostedService<PublishScheduleWorker>();
 builder.Services.AddSingleton<AlertService>();  // alertes de l'organisation : e-mail et/ou notification selon les Réglages
 builder.Services.AddSingleton<IApiAlerts, ApiAlerts>();   // API et webhooks (§154) : alertes « Applications et API »
 builder.Services.AddSingleton<IEmergencyPush, HubEmergencyPush>();   // application « Alerte d'urgence » (§159) : message temps réel vers les écrans

@@ -1,40 +1,17 @@
-@* Zone d'affichage d'une carte de liste de lecture. Un seul contenu : sa vignette en plein cadre. Plusieurs : carrousel 3D (maquette liste-lecture-carte-3d.html,
-   variante A) : le contenu en cours de face à 80 % de la largeur, ses deux voisins inclinés qui dépassent de chaque côté ; un clic sur un voisin ou les flèches
-   Seules les flèches < > font tourner (en boucle). Seules trois vignettes sont affichées à la fois. Les pastilles (type et durée du contenu, position) sont en bas à gauche.
-   Un clic n'importe où ailleurs (contenu du centre, voisins, fond) ouvre la liste. *@
+@* Zone d'affichage d'une carte de liste de diffusion (maquette liste-diffusion-carte-apercu.html, variante A) : une seule vignette fixe, celle du premier contenu,
+   en plein cadre, avec en bas à droite le nombre de contenus et la durée de la boucle. Plus de carrousel : l'aperçu animé est le bouton ▶ de la carte. Un clic ouvre la liste. *@
 @if (Slides.Count > 0)
 {
-    var s = Slides[Cur];
-    <div class="pl-cover single lx-cov @(Slides.Count > 1 ? "multi" : "") @(Portrait ? "port" : "")">
-        @if (Slides.Count == 1)
-        {
-            <a class="lx-cov-link" href="@Href" tabindex="-1" aria-hidden="true" title="@s.Media.Name"></a>
-            <div class="pl-tile lx-cov-flat">@Thumb(s, true)</div>
-        }
-        else
-        {
-            <a class="lx-cov-link" href="@Href" tabindex="-1" aria-hidden="true"></a>
-            @foreach (var d in Offsets)
-            {
-                var idx = (Cur + d + Slides.Count) % Slides.Count;
-                var sl = Slides[idx];
-                @* Portrait : vignettes en hauteur centrées (left: 50 %), les voisines décalées d'environ leur largeur. *@
-                var shift = Portrait ? (d < 0 ? "-135%" : "35%") : (d < 0 ? "-51%" : "51%");
-                var style = d == 0 ? null : $"transform: translate({shift}, -50%) translateZ(-70px) rotateY({(d < 0 ? "" : "-")}40deg) scale(.9)";
-                @* Centre et voisins : une seule balise (même élément réutilisé par @key quand le carrousel tourne, sinon Blazor perd la classe).
-                   Un voisin ouvre la liste comme le contenu du centre : seules les flèches font tourner le carrousel. *@
-                <a class="lx-cov-it @(d == 0 ? "on" : "side")" style="@style" href="@Href" tabindex="-1" aria-hidden="true" title="@sl.Media.Name" draggable="false" @key="idx"><span class="pl-tile">@Thumb(sl, d == 0)</span></a>
-            }
-        }
-        <div class="lx-cov-pills">
-            <span>@s.Label@(s.Seconds > 0 ? " · " + Helpers.FormatDuration(s.Seconds) : "")</span>
-            <span class="mono">@(Cur + 1) / @Slides.Count</span>
+    var s = Slides[0];
+    <div class="pl-cover single lx-cov @(Portrait ? "port" : "")">
+        <a class="lx-cov-link" href="@Href" tabindex="-1" aria-hidden="true" title="@s.Media.Name"></a>
+        <div class="pl-tile lx-cov-flat">
+            @if (s.Media.AppId == Compositions.AppId) { <CompositionThumb Item="s.Media" Files="All ?? Array.Empty<MediaItem>()" Contain="true" /> }
+            else { <MediaThumb Media="s.Media" All="All" Wide="true" /> }
         </div>
-        @if (Slides.Count > 1)
-        {
-            <button type="button" class="lx-cov-nav l" title="Contenu précédent" aria-label="Contenu précédent" draggable="false" @onclick="() => Go(-1)" @onclick:stopPropagation="true"><Ico Name="chevron-left" Size="16" /></button>
-            <button type="button" class="lx-cov-nav r" title="Contenu suivant" aria-label="Contenu suivant" draggable="false" @onclick="() => Go(1)" @onclick:stopPropagation="true"><Ico Name="chevron-right" Size="16" /></button>
-        }
+        <div class="lx-cov-pills">
+            <span>@(Count == 1 ? "1 contenu" : $"{Count} contenus")@(Total > 0 ? " · " + Helpers.FormatDuration(Total) : "")</span>
+        </div>
     </div>
 }
 
@@ -44,17 +21,9 @@
     [Parameter, EditorRequired] public IReadOnlyList<Slide> Slides { get; set; } = Array.Empty<Slide>();
     [Parameter] public IReadOnlyList<MediaItem>? All { get; set; }
     [Parameter] public string Href { get; set; } = "#";
-    /// <summary>Liste au format portrait (<see cref="PlaylistShape"/>) : le carrousel montre des vignettes en hauteur.</summary>
+    /// <summary>Liste au format portrait (<see cref="PlaylistShape"/>).</summary>
     [Parameter] public bool Portrait { get; set; }
-
-    private int cur;
-    private int Cur => Slides.Count == 0 ? 0 : Math.Min(cur, Slides.Count - 1);
-    private void Go(int d) => cur = (Cur + d + Slides.Count) % Slides.Count;
-    // Deux contenus : un seul voisin (à droite).
-    private int[] Offsets => Slides.Count == 2 ? new[] { 0, 1 } : new[] { -1, 0, 1 };
-
-    private RenderFragment Thumb(Slide s, bool wide) => @<text>
-        @if (s.Media.AppId == Compositions.AppId) { <CompositionThumb Item="s.Media" Files="All ?? Array.Empty<MediaItem>()" Contain="true" /> }
-        else { <MediaThumb Media="s.Media" All="All" Wide="wide" /> }
-    </text>;
+    /// <summary>Nombre de contenus de la liste et durée de la boucle (secondes), affichés sur la vignette.</summary>
+    [Parameter] public int Count { get; set; }
+    [Parameter] public int Total { get; set; }
 }

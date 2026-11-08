@@ -39,6 +39,8 @@ public class Db
     public List<ApprovalRequest> ApprovalRequests { get; set; } = new();
     /// <summary>Calendriers de la page Programmations (voir <see cref="Calendars"/>).</summary>
     public List<ScreenCalendar> Calendars { get; set; } = new();
+    /// <summary>Publications programmées par écran (voir <see cref="PublishSchedule"/>).</summary>
+    public List<ScheduledPublication> ScheduledPublications { get; set; } = new();
 
     /// <summary>Ancien format mono-client (avant le multi-tenant) : lu une fois pour migration, jamais réécrit.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]

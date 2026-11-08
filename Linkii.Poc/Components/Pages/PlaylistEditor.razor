@@ -26,38 +26,54 @@
     @* Tiroir du bas (maquette liste-diffusion-fil-horizontal.html, §186) : en-tête avec la durée totale, frise de la boucle,
        fil horizontal de cartes carrées, puis la bibliothèque en onglets par type (Images, Vidéos, Compositions, Présentations, Pages web, Applications). *@
     <div class="pfx @(mini ? "mini" : "")" @ref="flowRoot">
-        <header class="pfx-head">
-            <div class="pfx-title">
+        @* même en-tête que la page d une programmation : fil d Ariane, titre, état, puis la durée de la boucle et Transitions à droite *@
+        <header class="page-head pn-head pl-head">
+            <div>
+                <div class="pt-crumb"><a href="playlists" @onclick="Close" @onclick:preventDefault>Listes de lecture</a> › @pl.Name</div>
                 @if (renaming)
                 {
-                    <div class="row rename-row">
-                        <input class="grow" style="min-width:0" @ref="renameInput" @bind="renameValue" @bind:event="oninput" @onkeydown="e => OnRenameKey(e, pl)" aria-label="Nom de la liste de lecture" />
+                    <div class="rename-row">
+                        <input style="min-width:0;width:300px" @ref="renameInput" @bind="renameValue" @bind:event="oninput" @onkeydown="e => OnRenameKey(e, pl)" aria-label="Nom de la liste de lecture" />
                         <button class="btn sm" @onclick="() => Rename(pl)">Enregistrer</button>
                         <button class="btn ghost sm" @onclick="() => renaming = false">Annuler</button>
                     </div>
                 }
                 else
                 {
-                    <div class="pfx-name">
-                        <h2>@pl.Name</h2>
-                        @if (!readOnlyHere) { <button class="btn ghost sm icon" title="Renommer" aria-label="Renommer la liste de lecture" @onclick="() => StartRename(pl)"><Ico Name="edit" Size="16" /></button> }
-                    </div>
+                    <h1>@pl.Name @if (!readOnlyHere) { <button class="btn ghost sm icon" title="Renommer" aria-label="Renommer la liste de lecture" @onclick="() => StartRename(pl)"><Ico Name="edit" Size="16" /></button> }</h1>
                 }
-                <p class="pfx-meta">
+                <p class="sub sc-intro pfx-meta">
                     @if (onScreens > 0) { <span class="live">● Diffusée sur @onScreens écran@(onScreens > 1 ? "s" : "")</span> } else { <span>Non diffusée</span> }
                     @if (outside > 0) { <span title="Vos modifications les concerneront à leur prochaine publication."> · dont @outside hors de votre périmètre</span> }
                 </p>
             </div>
-            <div class="pfx-total" role="status" aria-label="Durée totale de la boucle">
-                <Ico Name="refresh" Size="20" />
-                <span><small>Durée totale de la boucle</small><b class="mono">@Helpers.FormatDuration(total)</b></span>
-                <span class="sep"><small>Contenus</small><b class="mono">@active</b></span>
+            <div class="row head-actions pg-acts">
+                <div class="pfx-total" role="status" aria-label="Durée totale de la boucle">
+                    <Ico Name="refresh" Size="20" />
+                    <span><small>Durée totale de la boucle</small><b class="mono">@Helpers.FormatDuration(total)</b></span>
+                    <span class="sep"><small>Contenus</small><b class="mono">@active</b></span>
+                </div>
+                @if (ptab == "fil" && !readOnlyHere && pl.Draft.Count > 1) { <button type="button" class="btn ghost" title="Choisir l effet de passage d un contenu au suivant, pour tous les contenus" @onclick="() => trAll = true"><Ico Name="transition" Size="16" /> Transitions</button> }
             </div>
-            @if (!readOnlyHere && pl.Draft.Count > 1) { <button type="button" class="btn ghost" title="Choisir l'effet de passage d'un contenu au suivant, pour tous les contenus" @onclick="() => trAll = true"><Ico Name="transition" Size="16" /> Transitions</button> }
-            @if (pl.Draft.Count > 0) { <button type="button" class="btn ghost" title="Voir la liste sur un écran ou un mur, sans rien publier" @onclick="() => trying = true"><Ico Name="play" Size="16" /> Aperçu</button> }
-            <button type="button" class="pfx-ib" title="Fermer" aria-label="Fermer" @onclick="Close"><Ico Name="x" Size="20" /></button>
         </header>
 
+        @* trois onglets pleine page (maquette liste-lecture-onglets.html) : Fil de lecture (fil + bibliothèque), Aperçu, Publication *@
+        <nav class="pfx-tabs pfx-ptabs" role="tablist" aria-label="Liste de lecture">
+            <button type="button" role="tab" aria-selected="@(ptab == "fil" ? "true" : "false")" class="@(ptab == "fil" ? "on" : "")" @onclick='() => ptab = "fil"'>Fil de lecture<span class="c">@active</span></button>
+            <button type="button" role="tab" aria-selected="@(ptab == "apercu" ? "true" : "false")" class="@(ptab == "apercu" ? "on" : "")" @onclick='() => ptab = "apercu"'>Aperçu</button>
+            <button type="button" role="tab" aria-selected="@(ptab == "pub" ? "true" : "false")" class="@(ptab == "pub" ? "on" : "")" @onclick='() => ptab = "pub"'>Publication</button>
+        </nav>
+
+        @if (ptab == "apercu")
+        {
+            <SimulatorDialog PlaylistId="Id" Inline="true" />
+        }
+        else if (ptab == "pub")
+        {
+            <PlaylistPublish PlaylistId="Id" OnChanged="Refresh" />
+        }
+        else
+        {
         <div class="pfx-filwrap">
             <button type="button" class="pfx-nav l" aria-label="Défiler vers la gauche" @onclick='() => Scroll(-1)'><Ico Name="chevron-left" Size="18" /></button>
             <div class="pfx-fil pf-flow cards">
@@ -65,11 +81,6 @@
                 {
                     var row = r;
                     <div class="pf-u pfx-u @RowClass(row) @(pickAt == row.Index ? "pick" : "")" data-i="@row.Index" data-id="@row.It.Id" data-drag="@(Draggable(row) ? "1" : null)" @key="row.It">
-                        @if (Modes.Expert && row.Index > 0 && row.It.Placement == "full")
-                        {
-                            @* transition jouée à l'arrivée de ce contenu, depuis le précédent *@
-                            <button type="button" class="pfx-tr @(row.It.Transition != Transitions.Default ? "set" : "")" title="Transition : @Transitions.Label(row.It.Transition)" aria-label="Transition avant le contenu @(row.Index + 1) : @Transitions.Label(row.It.Transition)" @onclick="() => trItem = row.It"><span class="b"><Ico Name="transition" Size="15" /></span><small>@Transitions.Short(row.It.Transition)</small></button>
-                        }
                         @Card(row)
                         <div class="pfx-when @WhenClass(row)">@When(row)</div>
                     </div>
@@ -117,6 +128,7 @@
                 </div>
                 <div class="pfx-grid">@LibGrid()</div>
             </section>
+        }
         }
     </div>
     @* import depuis les onglets Images / Vidéos : champ de fichiers caché (ouvert par « Importer ») et fenêtre « Depuis le cloud » (expert), gardés dans la page pour que l'import continue *@
@@ -421,6 +433,7 @@ else
     private List<Playlist> playlists = new();
     private List<MediaItem> media = new();
     private bool trying;   // « Aperçu » : simulateur de la liste
+    private string ptab = "fil";   // onglet ouvert : fil | apercu | pub
 
 
     // Ajout d'un contenu : colonne des apps activées (hors widgets d'écran), à glisser dans le fil ou à cliquer (ajout à la fin).
