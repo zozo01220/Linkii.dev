@@ -358,12 +358,13 @@ else
                 <div class="pw-alert"><Ico Name="alert" Size="16" /><span>Le PC de « @sh.Name » affiche aussi @string.Join(", ", others.Select(o => "« " + o.Name + " »")) : @(others.Count > 1 ? "ces écrans seront coupés aussi" : "cet écran sera coupé aussi").</span></div>
             }
             @if (powerKind == ScreenCommand.PowerOff) { <div class="pw-alert"><Ico Name="alert" Size="16" /><span>Linkivi ne pourra pas rallumer @(pwp.Targets.Count > 1 ? "ces appareils" : "cet appareil") : quelqu'un devra appuyer sur le bouton ou remettre le courant.</span></div> }
+            else if (powerKind == ScreenCommand.Unpair) { <div class="pw-alert"><Ico Name="alert" Size="16" /><span>L'appareil oublie son appairage et affiche un nouveau code. Saisissez ensuite ce code ici pour qu'il reprenne cet écran, avec ses réglages. Tant que ce n'est pas fait, l'écran ne diffuse plus.</span></div> }
             else { <p class="hint" style="margin:0">L'écran sera noir un moment, puis reprendra l'affichage tout seul.</p> }
             @if (pwp.Skipped.Count > 0) { <p class="hint" style="margin:8px 0 0">Ignoré : @string.Join(", ", pwp.Skipped.Select(x => "« " + x.Screen.Name + " »")).</p> }
         </div>
         <div class="modal-foot">
             <button type="button" class="btn ghost" @onclick="CancelPower">Annuler</button>
-            <button type="button" class="btn @(powerKind == ScreenCommand.PowerOff ? "danger-solid" : "")" disabled="@powerBusy" @onclick="RunPower">@(powerKind == ScreenCommand.PowerOff ? "Éteindre" : "Redémarrer")</button>
+            <button type="button" class="btn @(powerKind is ScreenCommand.PowerOff or ScreenCommand.Unpair ? "danger-solid" : "")" disabled="@powerBusy" @onclick="RunPower">@(powerKind == ScreenCommand.PowerOff ? "Éteindre" : powerKind == ScreenCommand.Unpair ? "Réinitialiser" : "Redémarrer")</button>
         </div>
     </div>
 }
@@ -806,7 +807,7 @@ else if (wallEdit is { } wid)
     }
 
     private Timer? timer;
-    private Guid? menuFor, editing;
+    private Guid? menuFor, editing, devSub;   // devSub : sous-menu « Appareil » ouvert (au toucher ; au survol, c'est le CSS)
     private bool cleanQuery;   // paramètre « edit » à retirer de l'adresse
     private Guid? simScreen, simWall;   // simulateur ouvert : un écran, ou un mur entier
     private List<Screen>? deleting;   // écrans en attente de confirmation de suppression
@@ -1106,12 +1107,14 @@ else if (wallEdit is { } wid)
     {
         var canR = CanDevAny(list, ScreenCommand.Reboot);
         var canO = CanDevAny(list, ScreenCommand.PowerOff);
-        if (!canR && !canO) return;
+        var canU = list.Count == 1 && CanDevAny(list, ScreenCommand.Unpair);   // réinitialiser : un seul appareil à la fois, administrateur
+        if (!canR && !canO && !canU) return;
         var why = !Growth ? Plans.LockedHint : !online ? (list.Count > 1 ? "Aucun écran du mur n'est en ligne" : "L'écran est hors ligne") : null;
         <hr />
         <div class="kebab-note" style="padding:6px 10px 2px;border:0;margin:0;text-transform:uppercase;letter-spacing:.06em;font-size:11px">Appareil</div>
         @if (canR) { <button type="button" role="menuitem" disabled="@(why != null)" title="@why" @onclick="() => { menuFor = null; CloseMenu(); _ = AskPower(ScreenCommand.Reboot, list); }"><Ico Name="refresh" Size="16" /> Redémarrer l'appareil</button> }
         @if (canO) { <button type="button" role="menuitem" class="danger" disabled="@(why != null)" title="@why" @onclick="() => { menuFor = null; CloseMenu(); _ = AskPower(ScreenCommand.PowerOff, list); }"><Ico Name="power" Size="16" /> Éteindre l'appareil…</button> }
+        @if (canU) { <button type="button" role="menuitem" disabled="@(why != null)" title="@why" @onclick="() => { menuFor = null; CloseMenu(); _ = AskPower(ScreenCommand.Unpair, list); }"><Ico Name="refresh" Size="16" /> Réinitialiser (nouveau code)…</button> }
         <hr />
     };
 
@@ -1121,7 +1124,7 @@ else if (wallEdit is { } wid)
         var plan = Store.Read(d => DevicePower.PlanFor(d, list.Select(s => s.Id), kind));
         if (!plan.Any) { Toast.Error(plan.Skipped.Count > 0 ? plan.Skipped[0].Why : "Aucun écran concerné."); return; }
         powerKind = kind; powerPlan = plan; powerBar = false;
-        if (kind != ScreenCommand.PowerOff && plan.Shared.Count == 0) await RunPower();
+        if (kind == ScreenCommand.Reboot && plan.Shared.Count == 0) await RunPower();
         StateHasChanged();
     }
 
@@ -1165,7 +1168,12 @@ else if (wallEdit is { } wid)
                 var r = await Control.Send(Store.ClientId, s.Id, kind, HCtx.DisplayName);
                 if (r.Ok) sent++; else error ??= $"« {s.Name} » : {r.Error}";
             }
-            if (sent > 0)
+            if (sent > 0 && kind == ScreenCommand.Unpair)
+            {
+                Toast.Ok($"« {plan.Targets[0].Name} » se réinitialise : saisissez le nouveau code qu'il affiche.");
+                OpenRepair(plan.Targets[0]);   // la saisie du code s'ouvre aussitôt
+            }
+            else if (sent > 0)
             {
                 var what = kind == ScreenCommand.PowerOff ? "Extinction" : "Redémarrage";
                 Toast.Ok(sent == 1 ? $"{what} de « {plan.Targets[0].Name} » demandé{(kind == ScreenCommand.PowerOff ? "e" : "")}." : $"{what} de {sent} appareils demandé{(kind == ScreenCommand.PowerOff ? "e" : "")}.");
@@ -1179,6 +1187,7 @@ else if (wallEdit is { } wid)
     private string PowerTitle(DevicePower.Plan p)
     {
         var n = p.Targets.Count;
+        if (powerKind == ScreenCommand.Unpair) return $"Réinitialiser l'appareil de « {p.Targets[0].Name} » ?";
         var what = powerKind == ScreenCommand.PowerOff ? "Éteindre" : "Redémarrer";
         return n == 1 ? $"{what} l'appareil de « {p.Targets[0].Name} » ?" : $"{what} {n} appareils ?";
     }
@@ -1805,7 +1814,7 @@ else if (wallEdit is { } wid)
                         <span class="ec-kd @(gs.Kiosk != null || gs.Room != null ? "k" : "")" data-tip="@gtip" tabindex="0" role="img" aria-label="@gtip"><Ico Name="@KindIcon(gs)" Size="16" /></span>
                         <button type="button" class="ec-name" title="@gs.Name" @onclick="() => Edit(gs)">@gs.Name</button>
                         <div class="kebab ec-kw">
-                            <button type="button" class="kebab-btn" aria-label="Actions pour @gs.Name" aria-haspopup="menu" aria-expanded="@(menuFor == gs.Id ? "true" : "false")" @onclick="() => menuFor = menuFor == gs.Id ? null : gs.Id"><Ico Name="dots-v" Size="18" /></button>
+                            <button type="button" class="kebab-btn" aria-label="Actions pour @gs.Name" aria-haspopup="menu" aria-expanded="@(menuFor == gs.Id ? "true" : "false")" @onclick="() => { devSub = null; menuFor = menuFor == gs.Id ? null : gs.Id; }"><Ico Name="dots-v" Size="18" /></button>
                             @if (menuFor == gs.Id)
                             {
                                 <div class="kebab-backdrop" @onclick="() => menuFor = null"></div>
@@ -1823,14 +1832,25 @@ else if (wallEdit is { } wid)
                                         @if (gs.CalendarId is { } gcal) { <button type="button" role="menuitem" @onclick='() => Nav.NavigateTo($"programmations?id={gcal}")'><Ico Name="calendar" Size="16" /> Ouvrir son calendrier…</button> }
                                     }
                                     <hr />
+                                    @if (Modes.Expert)
+                                    {
+                                    <div class="kebab-grp">
+                                        <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded="@(devSub == gs.Id ? "true" : "false")" @onclick="() => devSub = devSub == gs.Id ? null : gs.Id"><Ico Name="monitor" Size="16" /> Appareil <span class="chev">›</span></button>
+                                        <div class="kebab-sub @(devSub == gs.Id ? "open" : "")" role="menu">
                                     @if (gsl.Asleep && CanDev(gs, DevicePower.ScreenOff)) { <button type="button" role="menuitem" disabled="@(!Growth)" title="@(Growth ? null : Plans.LockedHint)" @onclick="async () => { menuFor = null; await Wake(new[] { gs }); }"><Ico Name="sun" Size="16" /> Réveiller</button> }
                                     else if (!gsl.Asleep && CanDev(gs, DevicePower.ScreenOff)) { <button type="button" role="menuitem" disabled="@(gwhy != null)" title="@gwhy" @onclick="async () => { menuFor = null; await SleepNow(new[] { gs }); }"><Ico Name="moon" Size="16" /> Éteindre l'écran</button> }
                                     @if (Modes.Expert) { <button type="button" role="menuitem" disabled="@(gwhy != null)" title="@gwhy" @onclick='() => { menuFor = null; OpenLive(gs, "restart"); }'><Ico Name="power" Size="16" /> Redémarrer le player</button> }
-                                    @if (CanRepair(gs)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; OpenRepair(gs); }"><Ico Name="key" Size="16" /> Associer un nouveau code…</button> }
-                                    <button type="button" role="menuitem" @onclick="() => { menuFor = null; settingsFor = gs.Id; }"><Ico Name="tool" Size="16" /> Paramètres de l'écran</button>
-                                    @if (DeviceConfig.IsPc(gs)) { <button type="button" role="menuitem" class="hl" @onclick="() => OpenAddOnPc(gs)"><Ico Name="plus" Size="16" /> <span>Ajouter un écran sur ce PC<small>Nouvel écran déjà appairé, sans code</small></span></button> }
+                                    <hr />
                                     @if (CanDevAny(new[] { gs }, ScreenCommand.Reboot)) { <button type="button" role="menuitem" disabled="@(gwhy != null)" title="@gwhy" @onclick="() => { menuFor = null; _ = AskPower(ScreenCommand.Reboot, new[] { gs }); }"><Ico Name="refresh" Size="16" /> Redémarrer l'appareil</button> }
                                     @if (CanDevAny(new[] { gs }, ScreenCommand.PowerOff)) { <button type="button" role="menuitem" class="danger" disabled="@(gwhy != null)" title="@gwhy" @onclick="() => { menuFor = null; _ = AskPower(ScreenCommand.PowerOff, new[] { gs }); }"><Ico Name="power" Size="16" /> Éteindre l'appareil…</button> }
+                                    @if (CanDevAny(new[] { gs }, ScreenCommand.Unpair)) { <button type="button" role="menuitem" disabled="@(gwhy != null)" title="@gwhy" @onclick="() => { menuFor = null; _ = AskPower(ScreenCommand.Unpair, new[] { gs }); }"><Ico Name="refresh" Size="16" /> Réinitialiser (nouveau code)…</button> }
+                                    <hr />
+                                    @if (CanRepair(gs)) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; OpenRepair(gs); }"><Ico Name="key" Size="16" /> Associer un nouveau code…</button> }
+                                        </div>
+                                    </div>
+                                    }
+                                    <button type="button" role="menuitem" @onclick="() => { menuFor = null; settingsFor = gs.Id; }"><Ico Name="tool" Size="16" /> Paramètres de l'écran</button>
+                                    @if (DeviceConfig.IsPc(gs)) { <button type="button" role="menuitem" class="hl" @onclick="() => OpenAddOnPc(gs)"><Ico Name="plus" Size="16" /> <span>Ajouter un écran sur ce PC<small>Nouvel écran déjà appairé, sans code</small></span></button> }
                                     <hr />
                                     <button type="button" role="menuitem" @onclick="() => OpenRename(gs)"><Ico Name="edit" Size="16" /> Renommer</button>
                                     @if (FolderOps) { <button type="button" role="menuitem" @onclick="() => { menuFor = null; folderMove = new() { (gs.Id, gs.Name) }; }"><Ico Name="folder" Size="16" /> Ranger dans un dossier…</button> }

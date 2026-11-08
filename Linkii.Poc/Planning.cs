@@ -134,7 +134,7 @@ public static class Planning
     /// <summary>Extinction programmée active à cet instant (heure locale de l'aire) ?</summary>
     public static bool IsOff(Tenant t, Area? area, Screen s, DateTime nowUtc)
     {
-        if (s.CalendarId == null || s.OffSlots.Count == 0) return false;
+        if (s.CalendarId == null || s.OffSlots.Count == 0 || Sleep.Woken(s, nowUtc)) return false;   // réveil manuel : éveillé malgré l'extinction
         var l = LocalNow(t, area, nowUtc);
         return Pick(s.OffSlots, DateOnly.FromDateTime(l), l.Hour * 60 + l.Minute) != null;
     }
@@ -144,6 +144,7 @@ public static class Planning
         s.CalendarId == null || s.OffSlots.Count == 0 ? null : new
         {
             tz = Sleep.TimeZone(t, area),
+            wakeUntil = Sleep.Woken(s, DateTime.UtcNow) ? Helpers.EpochMs(s.WakeUntilUtc!.Value) : 0L,   // réveil manuel en cours (0 : aucun)
             slots = s.OffSlots.Select(x => new { days = x.Days, from = x.From, to = x.To, dateFrom = x.DateFrom, dateTo = x.DateTo }).ToList()
         };
 

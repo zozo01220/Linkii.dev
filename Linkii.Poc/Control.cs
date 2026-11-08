@@ -42,7 +42,7 @@ public class ScreenControl(JsonStore store, IHubContext<ScreenHub> hub, HistoryL
                 return ("Une commande de pause est déjà en cours.", null);
             if (kind == ScreenCommand.Restart && s.Commands.Any(c => c.Kind == kind && c.Open))
                 return ("Un redémarrage est déjà en cours.", null);
-            if (kind is ScreenCommand.Reboot or ScreenCommand.PowerOff && s.Commands.Any(c => c.Kind is ScreenCommand.Reboot or ScreenCommand.PowerOff && c.Open))
+            if (kind is ScreenCommand.Reboot or ScreenCommand.PowerOff or ScreenCommand.Unpair && s.Commands.Any(c => c.Kind is ScreenCommand.Reboot or ScreenCommand.PowerOff or ScreenCommand.Unpair && c.Open))
                 return ("Une commande de l'appareil est déjà en cours.", null);
 
             var cmd = new ScreenCommand { Kind = kind, By = by, SentUtc = now };
@@ -59,7 +59,7 @@ public class ScreenControl(JsonStore store, IHubContext<ScreenHub> hub, HistoryL
                 case ScreenCommand.Resume:
                     s.PausedUtc = null; s.PausedUntilUtc = null;
                     break;
-                case ScreenCommand.Restart or ScreenCommand.Reload or ScreenCommand.Capture or ScreenCommand.Reboot:
+                case ScreenCommand.Restart or ScreenCommand.Reload or ScreenCommand.Capture or ScreenCommand.Reboot or ScreenCommand.Unpair:
                     break;
                 case ScreenCommand.PowerOff:
                     s.PoweredOffUtc = now.AddMinutes(2);   // l'écran va se taire : ce n'est pas une panne (voir PoweredOff)
@@ -73,11 +73,11 @@ public class ScreenControl(JsonStore store, IHubContext<ScreenHub> hub, HistoryL
         });
         if (r.Cmd is not { } c) return new(false, r.Error);
         var label = kind switch { ScreenCommand.Pause => "Pause", ScreenCommand.Resume => "Reprise", ScreenCommand.Restart => "Redémarrage", ScreenCommand.Reload => "Rechargement",
-            ScreenCommand.Reboot => "Redémarrage de l'appareil", ScreenCommand.PowerOff => "Extinction de l'appareil", _ => null };
+            ScreenCommand.Reboot => "Redémarrage de l'appareil", ScreenCommand.PowerOff => "Extinction de l'appareil", ScreenCommand.Unpair => "Réinitialisation de l'appareil", _ => null };
         if (label != null)
         {
             var name = store.Read(db => db.Screens.FirstOrDefault(x => x.Id == screenId)?.Name);
-            history.Record(clientId, History.Screens, History.Player, $"{label} demandé{(kind is ScreenCommand.Pause or ScreenCommand.Resume or ScreenCommand.PowerOff ? "e" : "")} sur « {name} »", kind is ScreenCommand.PowerOff ? Notifs.Warn : Notifs.Info, c.Detail, by,
+            history.Record(clientId, History.Screens, History.Player, $"{label} demandé{(kind is ScreenCommand.Pause or ScreenCommand.Resume or ScreenCommand.PowerOff or ScreenCommand.Unpair ? "e" : "")} sur « {name} »", kind is ScreenCommand.PowerOff ? Notifs.Warn : Notifs.Info, c.Detail, by,
                 targetKind: "screen", targetId: screenId, targetName: name);
         }
         await hub.Clients.Group(ScreenHub.Group(screenId)).SendAsync("Command", Payload(c));

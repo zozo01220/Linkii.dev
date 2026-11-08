@@ -960,6 +960,8 @@ public class ScreenCommand
     public const string Pause = "pause", Resume = "resume", Restart = "restart", Reload = "reload", Capture = "capture";
     /// <summary>Commandes de l'appareil (droits « Commandes de l'appareil », plan Pro) : redémarrer ou éteindre le matériel (l'écran, lui, passe par la veille).</summary>
     public const string Reboot = "reboot", PowerOff = "poweroff";
+    /// <summary>Réinitialisation (plan Pro, administrateur) : l'appareil oublie son appairage et affiche un nouveau code, à associer à l'écran existant.</summary>
+    public const string Unpair = "unpair";
     public const string Sent = "sent", Received = "received", Done = "done", Failed = "failed";
 
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -975,7 +977,7 @@ public class ScreenCommand
     public static string Label(string kind) => kind switch
     {
         Pause => "Pause", Resume => "Reprise de l'affichage", Restart => "Redémarrage de l'application",
-        Reload => "Rechargement des listes", Capture => "Aperçu du direct", Reboot => "Redémarrage de l'appareil", PowerOff => "Extinction de l'appareil", _ => kind
+        Reload => "Rechargement des listes", Capture => "Aperçu du direct", Reboot => "Redémarrage de l'appareil", PowerOff => "Extinction de l'appareil", Unpair => "Réinitialisation de l'appareil", _ => kind
     };
 }
 

@@ -174,10 +174,11 @@
   }
   try { applyBrand(JSON.parse(LS.getItem('lk_brand') || 'null')); } catch (e) {}
 
-  function unpair() {
+  function unpair(reset) {
     LS.removeItem('lk_token'); LS.removeItem('lk_screen'); LS.removeItem('lk_playlist'); LS.removeItem('lk_acked'); LS.removeItem('lk_brand');
     // écran supprimé : un écran ajouté sur un PC ferme sa fenêtre (l'application répond true) au lieu d'afficher un code d'appairage
-    try { if (window.LinkiiNative && typeof window.LinkiiNative.unpaired === 'function' && window.LinkiiNative.unpaired()) return; } catch (e) {}
+    // (réinitialisation demandée : la fenêtre reste, avec un nouveau code)
+    try { if (reset !== true && window.LinkiiNative && typeof window.LinkiiNative.unpaired === 'function' && window.LinkiiNative.unpaired()) return; } catch (e) {}
     location.reload();
   }
 
@@ -1540,6 +1541,9 @@
     } else if (c.kind === 'resume') {
       resumePlayer();
       cmdAck(c.id, 'done');
+    } else if (c.kind === 'unpair') {   // réinitialisation : le player oublie son appairage et affiche un nouveau code
+      cmdAck(c.id, 'done');
+      setTimeout(function () { try { LS.removeItem('lk_pause'); LS.removeItem('lk_cmds'); } catch (e) {} unpair(true); }, 800);
     } else if (c.kind === 'reload') {
       cmdAck(c.id, 'done');
       setTimeout(function () { location.reload(); }, 600);
@@ -1621,6 +1625,7 @@
   // Extinctions du calendrier : { tz, slots: [{ days, from, to, dateFrom, dateTo }] }, mêmes règles que les créneaux du planning.
   function isOff(o, ms) {
     if (!o || !o.slots || !o.slots.length) return false;
+    if (o.wakeUntil && ms < o.wakeUntil) return false;   // réveil manuel demandé depuis le back-office
     var w = localWeekMinute(ms, o.tz), day = Math.floor(w / 1440), min = w % 1440, iso;
     try { iso = new Date(ms).toLocaleDateString('sv-SE', { timeZone: o.tz }); } catch (e) { iso = todayIso(); }
     return o.slots.some(function (s) {
@@ -1664,9 +1669,26 @@
       el.style.display = 'block';
     } else {
       if (el) el.style.display = 'none';
-      if (!state.hold) next();
+      if (!state.hold) {
+        // Réveil : la veille a vidé les calques, les zones et les surimpressions ; on repart d'un décor propre, puis on relance la lecture.
+        state.shownItem = null; state.active = 'layerA'; state.ovSig = null;
+        ['layerA', 'layerB'].forEach(function (id) { var l = $(id); if (l) { l.classList.remove('on'); l.style.transition = ''; l.style.zIndex = ''; } });
+        if (!state.pending && state.current) { try { applyZones(state.current); } catch (e) {} }
+        next();
+        // Filet : si, quelques secondes plus tard, rien n'est à l'écran alors que l'écran est éveillé, on relance.
+        setTimeout(function () {
+          if (state.asleep || state.hold || state.emergency || state.paused || adNow || !state.current) return;
+          var shown = $('layerA').classList.contains('on') || $('layerB').classList.contains('on');
+          var idle = $('idle').style.display === 'flex';
+          if (!shown && !idle && !state.timer) { state.shownItem = null; next(); }
+        }, 4000);
+      }
     }
   }
+  // Le navigateur ralentit ou fige les minuteurs d'un onglet en veille : au retour, on réévalue la veille tout de suite.
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { sleepTick(); dimTick(); } });
+  window.addEventListener('focus', function () { sleepTick(); });
+  window.addEventListener('online', function () { try { refresh(); } catch (e) {} });
 
   /* ---------- Urgence (emergency.js) : le player lui prête la scène et arrête ou reprend les contenus ---------- */
   function emergencyInit() {

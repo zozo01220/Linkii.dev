@@ -14,7 +14,7 @@ public static class DevicePower
 
     public static string Label(string kind) => kind switch
     {
-        ScreenOff => "Éteindre l'écran", ScreenCommand.Reboot => "Redémarrer l'appareil", ScreenCommand.PowerOff => "Éteindre l'appareil", _ => kind
+        ScreenCommand.Unpair => "Réinitialiser l'appareil", ScreenOff => "Éteindre l'écran", ScreenCommand.Reboot => "Redémarrer l'appareil", ScreenCommand.PowerOff => "Éteindre l'appareil", _ => kind
     };
 
     /// <summary>La personne a-t-elle ce droit (sur au moins certains écrans) ?</summary>
@@ -39,7 +39,7 @@ public static class DevicePower
     /// Pourquoi l'appareil de cet écran ne sait pas faire la commande (null : il sait). Windows et Raspberry : tout. Android : redémarrer seulement s'il est propriétaire
     /// de l'appareil (mise en service dédiée), jamais l'éteindre. Navigateur : aucune commande.
     /// </summary>
-    public static string? Unsupported(Screen s, string kind) => kind == ScreenOff ? null : s.DeviceKind switch   // l'écran noir de la veille marche partout, navigateur compris
+    public static string? Unsupported(Screen s, string kind) => kind is ScreenOff or ScreenCommand.Unpair ? null : s.DeviceKind switch   // réinitialiser : tout player sait oublier son appairage   // l'écran noir de la veille marche partout, navigateur compris
     {
         "windows" or "raspberrypi" => null,
         "android" or "androidtv" => kind switch
