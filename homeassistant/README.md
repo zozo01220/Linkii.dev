@@ -36,16 +36,18 @@ Un écran de **mur** se commande en entier : un ordre sur un écran du mur part 
 
 ## La carte « Écrans Linkivi »
 
-L'intégration publie et charge elle-même une carte pour le tableau de bord : **rien à copier ni à déclarer dans les ressources**. Redémarrez Home Assistant après l'installation (ou la mise à jour), puis rechargez la page du navigateur (Ctrl+F5).
+Une carte pour le tableau de bord, fournie par l'intégration. Après l'installation (ou une mise à jour), **redémarrez Home Assistant**, puis rechargez la page avec Ctrl+F5.
 
-Modifier le tableau de bord › Ajouter une carte › **Écrans Linkivi**. Elle trouve toute seule les écrans de l'intégration, avec leurs noms, aires et appareils ; un écran ajouté plus tard dans Linkivi y apparaît seul. Elle reprend les couleurs du thème (clair ou sombre), en français ou en anglais selon votre profil.
+Si la carte n'apparaît pas toute seule (« Custom element doesn't exist »), déclarez-la une fois : Paramètres › Tableaux de bord › menu ⋮ › Ressources (mode avancé activé dans votre profil), puis ajoutez `/linkivi/linkivi-screens-card.js` en type **Module JavaScript**. Le fichier vient de l'intégration et se met à jour avec elle. Pour vérifier sans rien déclarer, ouvrez la console du navigateur (F12) et tapez `!!customElements.get("linkivi-screens-card")`.
+
+Modifier le tableau de bord › Ajouter une carte › **Écrans Linkivi**. Elle trouve toute seule les écrans de l'intégration, avec leurs noms, aires et appareils ; un écran ajouté plus tard dans Linkivi y apparaît seul. Elle reprend les couleurs du thème (clair ou sombre), en français ou en anglais selon votre profil. En en-tête, un anneau et un résumé du parc (« 5 en ligne · 1 hors ligne »), avec « Tout allumer » et « Tout éteindre » pour les écrans affichés.
 
 | Style | Rendu |
 |---|---|
-| `list` (par défaut) | Une ligne par écran : pastille d'état, nom, interrupteur « Écran », redémarrage du player, menu ⋮ (redémarrer ou éteindre l'appareil, avec confirmation). |
-| `cards` | Une carte par écran : grand bouton d'allumage puis les commandes ; se met en colonnes selon la largeur. |
+| `list` (par défaut) | « Verre » : une ligne givrée par écran sur un fond dégradé. Un médaillon dont la couleur dit l'état (vert allumé, bleu en veille, orange en cours, gris hors ligne), le redémarrage du player, le menu ⋮ (redémarrer ou éteindre l'appareil, avec confirmation) et un interrupteur lumineux « Écran ». |
+| `cards` | « Écrans » : chaque écran est une petite télé dont l'état se lit sur l'écran (bleu et reflet avec un voyant qui bat, noir en veille, hachuré hors ligne, roue pendant une commande). Dessous : le nom, le bouton d'allumage rond, le redémarrage du player et le menu ⋮. Se met en colonnes selon la largeur. |
 
-Le titre résume le parc (« 5 en ligne · 1 hors ligne ») et offre « Tout allumer » et « Tout éteindre » pour les écrans affichés. Une commande montre « en cours » aussitôt (l'état confirmé arrive au relevé suivant, 30 s au plus) ; si Linkivi refuse, sa raison s'affiche en notification.
+Une commande montre « en cours » aussitôt (l'état confirmé arrive au relevé suivant, 30 s au plus) ; si Linkivi refuse, sa raison s'affiche en notification. Les animations s'arrêtent si le système demande moins de mouvement.
 
 ```yaml
 type: custom:linkivi-screens-card   # tout le reste est facultatif
@@ -58,6 +60,7 @@ show_player_restart: true
 show_device_actions: true           # le menu ⋮ (ou les boutons Appareil / Éteindre)
 show_group_buttons: true            # Tout allumer / Tout éteindre
 hide_offline: false
+accent_color: "#2a86ee"             # couleur d'accent (bleu Linkivi par défaut)
 ```
 
 L'éditeur visuel permet les mêmes réglages. Si la carte n'apparaît pas dans la liste, rechargez la page sans le cache ; sinon, vérifiez dans les journaux de Home Assistant que l'intégration Linkivi est bien démarrée.
