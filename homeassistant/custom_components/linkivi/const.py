@@ -4,6 +4,11 @@ from datetime import timedelta
 
 DOMAIN = "linkivi"
 
+# Carte personnalisée « Écrans Linkivi » (www/linkivi-screens-card.js), publiée sous /linkivi/ et chargée par l'interface.
+CARD_FILE = "linkivi-screens-card.js"
+CARD_URL = f"/{DOMAIN}/{CARD_FILE}"
+CARD_VERSION = "1.1.0"
+
 # L'API publique de Linkivi (§154) : lecture des écrans toutes les 30 s (limite de 60 requêtes par minute et par clé).
 SCAN_INTERVAL = timedelta(seconds=30)
 API_PATH = "/api/v1"

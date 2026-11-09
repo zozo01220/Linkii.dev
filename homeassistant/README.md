@@ -34,6 +34,34 @@ Un bouton n'existe que si le matériel sait faire la commande :
 
 Un écran de **mur** se commande en entier : un ordre sur un écran du mur part sur tous.
 
+## La carte « Écrans Linkivi »
+
+L'intégration publie et charge elle-même une carte pour le tableau de bord : **rien à copier ni à déclarer dans les ressources**. Redémarrez Home Assistant après l'installation (ou la mise à jour), puis rechargez la page du navigateur (Ctrl+F5).
+
+Modifier le tableau de bord › Ajouter une carte › **Écrans Linkivi**. Elle trouve toute seule les écrans de l'intégration, avec leurs noms, aires et appareils ; un écran ajouté plus tard dans Linkivi y apparaît seul. Elle reprend les couleurs du thème (clair ou sombre), en français ou en anglais selon votre profil.
+
+| Style | Rendu |
+|---|---|
+| `list` (par défaut) | Une ligne par écran : pastille d'état, nom, interrupteur « Écran », redémarrage du player, menu ⋮ (redémarrer ou éteindre l'appareil, avec confirmation). |
+| `cards` | Une carte par écran : grand bouton d'allumage puis les commandes ; se met en colonnes selon la largeur. |
+
+Le titre résume le parc (« 5 en ligne · 1 hors ligne ») et offre « Tout allumer » et « Tout éteindre » pour les écrans affichés. Une commande montre « en cours » aussitôt (l'état confirmé arrive au relevé suivant, 30 s au plus) ; si Linkivi refuse, sa raison s'affiche en notification.
+
+```yaml
+type: custom:linkivi-screens-card   # tout le reste est facultatif
+title: Écrans Linkivi
+style: list                         # list | cards
+screens:                            # absent : tous les écrans (noms de Linkivi)
+  - Rpi borne 01
+  - Ecran photos
+show_player_restart: true
+show_device_actions: true           # le menu ⋮ (ou les boutons Appareil / Éteindre)
+show_group_buttons: true            # Tout allumer / Tout éteindre
+hide_offline: false
+```
+
+L'éditeur visuel permet les mêmes réglages. Si la carte n'apparaît pas dans la liste, rechargez la page sans le cache ; sinon, vérifiez dans les journaux de Home Assistant que l'intégration Linkivi est bien démarrée.
+
 ## Exemples
 
 ```yaml
@@ -76,4 +104,4 @@ Sans Home Assistant, ces appels servent aussi depuis un script (`curl -H "Author
 
 ## Pas encore essayé
 
-Écrit d'après l'API et la documentation de Home Assistant, **jamais lancé sur une vraie instance** : le code Python n'a même pas pu être exécuté (pas de Python sur le poste de développement). L'API de Linkivi, elle, est couverte par des tests (`ScreenCommandsApiTests`).
+Les entités de l'intégration ont été vues sur une vraie instance (six écrans). En revanche, le code Python n'a jamais été exécuté sur le poste de développement (pas de Python) et **les boutons et l'interrupteur n'ont pas encore été essayés en vrai** ; la carte, elle, a été essayée dans un faux Home Assistant (liste, cartes, menu, confirmations, erreurs, filtres) mais **pas dans le vrai** : l'enregistrement par l'intégration, l'éditeur visuel et le rendu sur votre thème sont à vérifier. L'API de Linkivi est couverte par des tests (`ScreenCommandsApiTests`).
