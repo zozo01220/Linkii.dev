@@ -335,6 +335,7 @@ app.Use(async (ctx, next) =>
     var open = p.StartsWithSegments("/login") || p.StartsWithSegments("/api") || p.StartsWithSegments("/hubs")
                || p.StartsWithSegments("/_framework") || p.StartsWithSegments("/_blazor") || p.StartsWithSegments("/logout")
                || p.StartsWithSegments("/internal") || p.StartsWithSegments("/media") || p.StartsWithSegments("/ads")   // /media et /ads font leur propre contrôle d'accès (jeton de l'écran ou session)
+               || p.StartsWithSegments("/salle")   // réservation par QR : scannée par le téléphone d'un visiteur, sans compte (code signé dans l'adresse)
                || p.StartsWithSegments("/q")   // adresse courte des QR codes de comptage : scannée par le téléphone d'un visiteur, sans compte
                || p.StartsWithSegments("/download")   // installeur du player Windows : téléchargé sur le PC de l'écran, souvent sans session
                || p.StartsWithSegments("/canva/callback")   // retour de Canva : identifié par son « state », sur le domaine principal
@@ -577,6 +578,50 @@ app.MapPost("/space/exit", async (HttpContext ctx, JsonStore store) =>
 // Caddy / Traefik (certificat à la demande) : n'émettre un certificat que pour un domaine déclaré par un revendeur actif.
 // QR code de comptage : le scan est compté (licence Pro, contenu activé, pas un robot) puis le visiteur est redirigé vers la destination.
 // La redirection a toujours lieu tant que le contenu existe, même si le suivi est coupé : un QR encore affiché ne doit jamais être cassé.
+// Réservation par QR : page du téléphone (choix de la durée, commentaire) puis confirmation. Sans compte : le code signé de l'adresse identifie l'écran de salle.
+app.MapGet("/salle/{code}", async (string code, JsonStore store, RoomStatusService status) =>
+{
+    var now = DateTime.UtcNow;
+    var (t, s, room) = store.Read<(Tenant?, Screen?, SharedCalendar?)>(db =>
+    {
+        var s = RoomQr.Resolve(db, code, now);
+        var t = s == null ? null : db.Clients.FirstOrDefault(c => c.Id == s.ClientId);
+        return (t, s, s?.RoomCalendarId is { } rid ? t?.SharedCalendars.FirstOrDefault(c => c.Id == rid) : null);
+    });
+    IResult Html(string h, int st = 200) => Results.Text(h, "text/html; charset=utf-8", statusCode: st);
+    if (t == null || s == null) return Html(RoomQr.Page(code, "", "", new(), "Ce QR n'est plus valable. Scannez celui qui est affiché sur l'écran de la salle."), 410);
+    var name = room != null ? SharedCalendarSources.RoomName(room) : "";
+    if (t.RoomApp?.Qr != true || room == null || s.Room?.Buttons != true || !RoomModes.CanBook(room.RoomWriteMode)) return Html(RoomQr.Page(code, name, "", new(), "La réservation par QR n'est pas proposée pour cette salle."));
+    var snap = await status.Read(t.Id, room.Id, fresh: true);
+    if (snap == null || snap.Error != null) return Html(RoomQr.Page(code, name, "", new(), "L'agenda de la salle ne répond pas : réessayez dans un instant."));
+    var tz = RoomRules.Zone(t.Timezone);
+    var opts = RoomRules.Options(now, snap.Events, t.RoomApp, room.RoomAllDay, tz);
+    var start = new DateTime(now.Ticks - now.Ticks % TimeSpan.TicksPerMinute, DateTimeKind.Utc);
+    var list = opts.Select(o => new RoomQr.Option(o.Minutes, RoomRules.Label(o.Minutes), o.Ok, o.Why, $"{RoomRules.Hm(o.Start ?? start, tz)} – {RoomRules.Hm(o.End ?? start.AddMinutes(o.Minutes), tz)}")).ToList();
+    var until = RoomRules.State(now, snap.Events, room.RoomSoon, room.RoomAllDay, tz);
+    var text = opts.Count == 0 ? "" : until.UntilUtc is { } u && until.State != "busy" ? $"Libre jusqu'à {RoomRules.Hm(u, tz)}." : "Libre.";
+    return Html(RoomQr.Page(code, name, text, list, opts.Count == 0 ? "La salle vient d'être prise." : null));
+});
+app.MapPost("/salle/{code}/book", async (string code, RoomQrBookDto body, JsonStore store, RoomBookingService rooms) =>
+{
+    var now = DateTime.UtcNow;
+    var (id, tz) = store.Read<(Guid?, TimeZoneInfo)>(db =>
+    {
+        var s = RoomQr.Resolve(db, code, now);
+        return (s?.Id, RoomRules.Zone(s == null ? null : db.Clients.FirstOrDefault(c => c.Id == s.ClientId)?.Timezone));
+    });
+    if (id == null) return Results.Json(new { error = "Ce QR n'est plus valable. Scannez celui qui est affiché sur l'écran de la salle.", code = "expired" }, statusCode: 410);
+    var o = await rooms.Book(id.Value, body.Minutes, body.Comment, viaQr: true);
+    return o.Status == 200 ? Results.Ok(new { id = o.Id, from = o.From, to = o.To, until = RoomRules.Hm(o.To!.Value, tz) }) : Results.Json(new { error = o.Error, code = o.Code }, statusCode: o.Status);
+});
+
+app.MapPost("/salle/{code}/cancel", async (string code, RoomCancelDto body, JsonStore store, RoomBookingService rooms) =>
+{
+    var id = store.Read(db => RoomQr.Resolve(db, code, DateTime.UtcNow)?.Id);
+    if (id == null) return Results.Json(new { error = "Ce QR n'est plus valable.", code = "expired" }, statusCode: 410);
+    var o = await rooms.Cancel(id.Value, body.Id);
+    return o.Status == 200 ? Results.Ok() : Results.Json(new { error = o.Error, code = o.Code }, statusCode: o.Status);
+});
 app.MapGet("/q/{code}", (string code, HttpContext ctx, JsonStore store, ScanLog scans) =>
 {
     if (!QrTracking.IsCode(code)) return Results.NotFound();
@@ -812,14 +857,21 @@ api.MapGet("/player/room", async (HttpRequest req, JsonStore store, RoomStatusSe
     });
     if (denied != null) return denied;
     if (s?.Room == null || t == null) return Results.NotFound();
-    return Results.Ok(await RoomDoor.Payload(status, t, s, room, installed, DateTime.UtcNow));
+    return Results.Ok(await RoomDoor.Payload(status, t, s, room, installed, DateTime.UtcNow, baseUrl: $"{req.Scheme}://{req.Host}"));
 });
 api.MapPost("/player/room/book", async (HttpRequest req, RoomBookDto body, JsonStore store, RoomBookingService rooms) =>
 {
     var (denied, id) = store.Read<(IResult?, Guid?)>(db => { var s = Auth(req, db); return (Gate(s, db), s?.Id); });
     if (denied != null) return denied;
     var o = await rooms.Book(id!.Value, body.Minutes);
-    return o.Status == 200 ? Results.Ok(new { from = o.From, to = o.To }) : Results.Json(new { error = o.Error, code = o.Code }, statusCode: o.Status);
+    return o.Status == 200 ? Results.Ok(new { from = o.From, to = o.To, id = o.Id }) : Results.Json(new { error = o.Error, code = o.Code }, statusCode: o.Status);
+});
+api.MapPost("/player/room/cancel", async (HttpRequest req, RoomCancelDto body, JsonStore store, RoomBookingService rooms) =>
+{
+    var (denied, id) = store.Read<(IResult?, Guid?)>(db => { var s = Auth(req, db); return (Gate(s, db), s?.Id); });
+    if (denied != null) return denied;
+    var o = await rooms.Cancel(id!.Value, body.Id);
+    return o.Status == 200 ? Results.Ok() : Results.Json(new { error = o.Error, code = o.Code }, statusCode: o.Status);
 });
 
 // Accusé d'une commande du back-office : reçue, exécutée ou en échec.
@@ -1130,7 +1182,7 @@ api.MapGet("/preview/room", async (HttpRequest req, JsonStore store, PreviewGran
         return (s, t, s?.RoomCalendarId is { } rid ? t?.SharedCalendars.FirstOrDefault(c => c.Id == rid) : null, t != null && RoomSetup.Installed(db, t.Id));
     });
     if (s?.Room == null || t == null) return Results.NotFound();
-    return Results.Ok(await RoomDoor.Payload(status, t, s, room, installed, DateTime.UtcNow));
+    return Results.Ok(await RoomDoor.Payload(status, t, s, room, installed, DateTime.UtcNow, baseUrl: $"{req.Scheme}://{req.Host}"));
 });
 
 api.MapGet("/preview/data/{id:guid}", async (HttpRequest req, Guid id, JsonStore store, PreviewGrants grants, Notifier notifier, AppCatalog catalog, AppProviders providers, SecretBox box) =>

@@ -795,7 +795,7 @@
 
   // ---------- Réservation de salle ----------
   // Une salle est un calendrier partagé (données « agenda » : événements + bloc « room » des réglages). L'état se calcule ici, avec l'heure de l'écran :
-  // occupé (un rendez-vous en cours), bientôt occupé (un rendez-vous commence dans les « soon » minutes), libre ; « none » : pas de calendrier ou pas de données.
+  // occupé (un rendez-vous en cours), bientôt occupée (un rendez-vous commence dans les « soon » minutes), libre ; « none » : pas de calendrier ou pas de données.
   // Le calcul se refait chaque seconde (tick), donc l'écran suit l'heure même sans nouvelle lecture du calendrier.
   var ROOM_COL = { free: '#1E8E5A', busy: '#C8372D', soon: '#D9822B', none: '#7A8696' };
   var ROOM_WORD = { free: 'LIBRE', busy: 'OCCUPÉ', soon: 'BIENTÔT OCCUPÉ', none: 'SALLE NON CHOISIE' };
@@ -861,7 +861,7 @@
       rows.forEach(function (r, i) {
         var st = r.st, c = C[st.st], nx = st.next[0];
         h += '<div style="' + cc + (i % 2 ? 'background:rgba(127,127,127,.12);' : '') + 'border-bottom:1px solid rgba(127,127,127,.3);font-size:' + fs + 'px"><span class="lc-lt">' + esc(r.name) + '</span>' +
-          '<span style="display:flex;align-items:center;gap:' + (fs * .4) + 'px"><i style="width:' + (fs * .8) + 'px;height:' + (fs * .8) + 'px;border-radius:50%;background:' + c + ';display:inline-block;flex:none"></i><b style="font-weight:600">' + esc({ free: 'Libre', busy: 'Occupé', soon: 'Bientôt occupé', none: '—' }[st.st]) + '</b></span>' +
+          '<span style="display:flex;align-items:center;gap:' + (fs * .4) + 'px"><i style="width:' + (fs * .8) + 'px;height:' + (fs * .8) + 'px;border-radius:50%;background:' + c + ';display:inline-block;flex:none"></i><b style="font-weight:600">' + esc({ free: 'Libre', busy: 'Occupée', soon: 'Bientôt occupée', none: '—' }[st.st]) + '</b></span>' +
           '<span>' + (st.until && st.st !== 'none' ? hhmm(st.until, tz) : '') + '</span><span class="lc-lt" style="opacity:.8;font-size:' + (fs * .85) + 'px">' + (nx ? hhmm(nx.from, tz) + ' ' + esc(nx.title) : '') + '</span></div>';
       });
       return '<div class="lc-room" style="width:100%;height:100%;' + fam + '">' + h + '</div>';
@@ -872,7 +872,7 @@
     if (e.kind === 'rect' || e.kind === 'circle') {
       var f2 = num(e.size, 24, 8, 400), tc = col(e.color, '#0B1F3A');
       return '<div class="lc-room" style="width:100%;height:100%;box-sizing:border-box;background:' + c + 'cc;border:' + Math.max(2, f2 * .16).toFixed(1) + 'px solid ' + c + ';border-radius:' + (e.kind === 'circle' ? '50%' : Math.min(14, H * .08) + 'px') + ';display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:' + tc + ';' + fam + '">' +
-        (e.label === false ? '' : '<div style="font-size:' + f2 + 'px;font-weight:600;line-height:1.1">' + esc(String(name).replace(/^Salle /, '')) + '</div><div style="font-size:' + (f2 * .75).toFixed(1) + 'px;opacity:.75">' + esc(({ free: 'Libre', busy: 'Occupé', soon: 'Bientôt', none: '—' })[st.st]) + '</div>') + '</div>';
+        (e.label === false ? '' : '<div style="font-size:' + f2 + 'px;font-weight:600;line-height:1.1">' + esc(String(name).replace(/^Salle /, '')) + '</div><div style="font-size:' + (f2 * .75).toFixed(1) + 'px;opacity:.75">' + esc(({ free: 'Libre', busy: 'Occupée', soon: 'Bientôt', none: '—' })[st.st]) + '</div>') + '</div>';
     }
     // porte de salle : plein cadre, couleur de l'état
     var tc2 = col(e.color, '#ffffff'), sub = '';
@@ -890,7 +890,7 @@
       (sub ? '<div style="position:absolute;left:' + P(74) + ';top:' + P(none ? 520 : long ? 410 : 480) + ';right:' + P(40) + ';font-size:' + P(none ? 34 : 40) + ';opacity:.95;line-height:1.25">' + sub + '</div>' : '') +
       (showN ? '<div style="position:absolute;left:0;right:0;bottom:0;height:' + P(170) + ';background:rgba(0,0,0,.22)"></div><div style="position:absolute;left:' + P(70) + ';bottom:' + P(104) + ';font-size:' + P(22) + ';letter-spacing:.08em;text-transform:uppercase;opacity:.75">Ensuite aujourd’hui</div>' +
         '<div style="position:absolute;left:' + P(70) + ';right:' + P(40) + ';bottom:' + P(34) + ';font-size:' + P(34) + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
-        (nx2.length ? nx2.map(function (x) { return hhmm(x.from, tz) + ' – ' + hhmm(x.to, tz) + ' &nbsp; ' + (e.showTitle && x.title ? esc(x.title) : 'Occupé'); }).join('&nbsp;&nbsp;&nbsp;·&nbsp;&nbsp;&nbsp;') : 'Plus de rendez-vous aujourd’hui') + '</div>' : '') + '</div>';
+        (nx2.length ? nx2.map(function (x) { return hhmm(x.from, tz) + ' – ' + hhmm(x.to, tz) + ' &nbsp; ' + (e.showTitle && x.title ? esc(x.title) : 'Occupée'); }).join('&nbsp;&nbsp;&nbsp;·&nbsp;&nbsp;&nbsp;') : 'Plus de rendez-vous aujourd’hui') + '</div>' : '') + '</div>';
   }
   function roomBlock(e, o) {
     roomReg[e.id] = { e: e, o: o };

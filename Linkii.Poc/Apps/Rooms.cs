@@ -46,6 +46,10 @@ public class RoomAppSettings
     public int BufferMin { get; set; }
     /// <summary>Titre du rendez-vous créé (mode expert).</summary>
     public string BookTitle { get; set; } = RoomRules.DefaultTitle;
+    /// <summary>Réservation par QR : sur une tablette non tactile, un QR ouvre sur le téléphone le choix de la durée (et un commentaire facultatif).</summary>
+    public bool Qr { get; set; }
+    /// <summary>Début et fin d'une réservation faite maintenant : real (heure et minute réelles), down (début au quart d'heure précédent), up (début au quart d'heure suivant), both (début au quart précédent, fin au quart suivant).</summary>
+    public string Rounding { get; set; } = RoomRounding.Real;
     /// <summary>Choix par source (m365, google…) : <see cref="RoomPerms"/>.</summary>
     public Dictionary<string, string> Sources { get; set; } = new();
     /// <summary>Sources dont le droit d'écrire a été perdu (jeton révoqué, accès retiré) : leurs salles sont en affichage seul jusqu'à une nouvelle autorisation.</summary>
@@ -56,7 +60,7 @@ public class RoomAppSettings
 
     public RoomAppSettings Copy() => new()
     {
-        Durations = Durations.ToList(), MaxMin = MaxMin, Days = Days, FromMin = FromMin, ToMin = ToMin, BufferMin = BufferMin, BookTitle = BookTitle,
+        Durations = Durations.ToList(), MaxMin = MaxMin, Days = Days, FromMin = FromMin, ToMin = ToMin, BufferMin = BufferMin, BookTitle = BookTitle, Qr = Qr, Rounding = Rounding,
         Sources = new(Sources), LostRights = LostRights.ToList(), Revision = Revision, InstalledUtc = InstalledUtc
     };
 }
@@ -68,7 +72,7 @@ public class RoomScreen
     public string Theme { get; set; } = "light";
     /// <summary>Boutons de durée sur la tablette (réservation).</summary>
     public bool Buttons { get; set; } = true;
-    /// <summary>Titre des réunions sur la porte (sinon seulement « Occupé »).</summary>
+    /// <summary>Titre des réunions sur la porte (sinon seulement « Occupée »).</summary>
     public bool Titles { get; set; }
     /// <summary>+1 à chaque modification : la tablette relit sa configuration.</summary>
     public int Revision { get; set; } = 1;
@@ -77,12 +81,14 @@ public class RoomScreen
 /// <summary>Réservation faite sur un écran de salle (journal de 90 jours ; seule trace des réservations locales d'un lien ICS).</summary>
 public class RoomBooking
 {
-    public const string Pending = "pending", Confirmed = "confirmed", Refused = "refused", Failed = "failed";
+    public const string Pending = "pending", Confirmed = "confirmed", Refused = "refused", Failed = "failed", Cancelled = "cancelled";
 
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid RoomId { get; set; }
     public Guid ScreenId { get; set; }
     public string ScreenName { get; set; } = "";
+    /// <summary>Commentaire saisi par la personne (réservation par QR) : il remplace « Réservé sur place » ; null : le titre des règles.</summary>
+    public string? Title { get; set; }
     public DateTime StartUtc { get; set; }
     public DateTime EndUtc { get; set; }
     public string Mode { get; set; } = RoomModes.Local;
@@ -105,7 +111,15 @@ public record RoomInterval(DateTime StartUtc, DateTime EndUtc, string Title, boo
 public record RoomNow(string State, DateTime? UntilUtc, string Title, List<RoomInterval> Next, bool Linkivi = false);
 
 /// <summary>Une durée proposée sur la tablette : possible, ou grisée avec la raison.</summary>
-public record RoomOption(int Minutes, bool Ok, string? Why);
+/// <summary>Arrondi du début et de la fin d'une réservation (réglage de l'application).</summary>
+public static class RoomRounding
+{
+    public const string Real = "real", Down = "down", Up = "up", Both = "both";
+    public static readonly string[] All = { Real, Down, Up, Both };
+    public static string Label(string r) => r switch { Down => "Au quart d'heure inférieur", Up => "Au quart d'heure supérieur", Both => "Quart d'heure inférieur et supérieur", _ => "Heure et minute réelles" };
+}
+
+public record RoomOption(int Minutes, bool Ok, string? Why, DateTime? Start = null, DateTime? End = null);
 
 /// <summary>Règles pures de l'application (testées) : état d'une salle, durées possibles, fusion des réservations, mode d'écriture.</summary>
 public static class RoomRules
@@ -160,6 +174,7 @@ public static class RoomRules
         c.FromMin = Math.Clamp(c.FromMin / 15 * 15, 0, 23 * 60 + 45);
         c.ToMin = Math.Clamp(c.ToMin / 15 * 15, 15, 24 * 60);
         if (c.ToMin <= c.FromMin) c.ToMin = Math.Min(24 * 60, c.FromMin + 60);
+        c.Rounding = RoomRounding.All.Contains(c.Rounding) ? c.Rounding : RoomRounding.Real;
         c.BufferMin = c.BufferMin is 0 or 5 or 10 or 15 ? c.BufferMin : 0;
         c.BookTitle = string.IsNullOrWhiteSpace(c.BookTitle) ? DefaultTitle : c.BookTitle.Trim().Length > 60 ? c.BookTitle.Trim()[..60] : c.BookTitle.Trim();
         return c;
@@ -183,8 +198,8 @@ public static class RoomRules
         foreach (var b in bookings.Where(b => b.Holds && b.EndUtc > b.StartUtc))
         {
             var i = list.FindIndex(e => Math.Abs((e.StartUtc - b.StartUtc).TotalMinutes) <= 2 && Math.Abs((e.EndUtc - b.EndUtc).TotalMinutes) <= 2);
-            if (i >= 0) list[i] = list[i] with { Title = bookTitle, Linkivi = true };
-            else list.Add(new RoomInterval(b.StartUtc, b.EndUtc, bookTitle, false, true));
+            if (i >= 0) list[i] = list[i] with { Title = b.Title ?? bookTitle, Linkivi = true };
+            else list.Add(new RoomInterval(b.StartUtc, b.EndUtc, b.Title ?? bookTitle, false, true));
         }
         return list.OrderBy(x => x.StartUtc).ThenBy(x => x.EndUtc).ToList();
     }
@@ -217,6 +232,23 @@ public static class RoomRules
     }
 
     /// <summary>
+    /// Début et fin d'une réservation de <paramref name="minutes"/> faite à l'instant now selon l'arrondi choisi (voir <see cref="RoomRounding"/>). Le début ne remonte jamais
+    /// avant la fin d'un rendez-vous qui vient de se terminer.
+    /// </summary>
+    public static (DateTime Start, DateTime End) Span(DateTime now, int minutes, string? rounding, IEnumerable<RoomInterval> blocking)
+    {
+        const long q = 15 * TimeSpan.TicksPerMinute;
+        static DateTime Floor(DateTime t) => new(t.Ticks - t.Ticks % q, DateTimeKind.Utc);
+        static DateTime Ceil(DateTime t) => t.Ticks % q == 0 ? t : Floor(t).AddMinutes(15);
+        var start = rounding is RoomRounding.Down or RoomRounding.Both ? Floor(now) : rounding == RoomRounding.Up ? Ceil(now) : now;
+        foreach (var e in blocking.OrderBy(e => e.EndUtc))
+            if (e.EndUtc > start && e.EndUtc <= now) start = e.EndUtc;   // un rendez-vous vient de finir : on ne réserve pas par-dessus
+        var end = rounding == RoomRounding.Both ? Ceil(now.AddMinutes(minutes)) : start.AddMinutes(minutes);
+        if (end <= start) end = start.AddMinutes(minutes);
+        return (start, end);
+    }
+
+    /// <summary>
     /// Durées proposées sur la tablette à l'instant now (début à la minute courante) : une durée D est possible si D ≤ durée max, si la réservation finit
     /// avant le rendez-vous suivant moins le tampon et dans les horaires réservables. Sinon elle est grisée avec la raison. Salle occupée : aucune durée.
     /// </summary>
@@ -229,16 +261,16 @@ public static class RoomRules
         var minute = (int)local.TimeOfDay.TotalMinutes;
         var open = (rules.Days & DayBit(local.DayOfWeek)) != 0 && minute >= rules.FromMin && minute < rules.ToMin;
         var closeUtc = Utc(local.Date.AddMinutes(rules.ToMin), tz);
-        var nx = list.FirstOrDefault(e => e.StartUtc > now);
         var res = new List<RoomOption>();
         foreach (var d in rules.Durations.Where(AllDurations.Contains).Distinct().OrderBy(d => d))
         {
             if (rules.MaxMin > 0 && d > rules.MaxMin) continue;   // au-delà de la durée maximale : pas proposée du tout
-            var end = now.AddMinutes(d);
-            if (!open) res.Add(new RoomOption(d, false, "Hors horaires"));
-            else if (nx != null && end > nx.StartUtc.AddMinutes(-rules.BufferMin)) res.Add(new RoomOption(d, false, "Conflit à " + Hm(nx.StartUtc, tz)));
-            else if (end > closeUtc) res.Add(new RoomOption(d, false, "Hors horaires"));
-            else res.Add(new RoomOption(d, true, null));
+            var (start, end) = Span(now, d, rules.Rounding, list);
+            var clash = list.FirstOrDefault(e => e.StartUtc < end.AddMinutes(rules.BufferMin) && e.EndUtc > start);
+            if (!open) res.Add(new RoomOption(d, false, "Hors horaires", start, end));
+            else if (clash != null) res.Add(new RoomOption(d, false, "Conflit à " + Hm(clash.StartUtc, tz), start, end));
+            else if (end > closeUtc) res.Add(new RoomOption(d, false, "Hors horaires", start, end));
+            else res.Add(new RoomOption(d, true, null, start, end));
         }
         return res;
     }
@@ -264,11 +296,11 @@ public static class RoomRules
     /// <summary>Les sources qui peuvent réserver en V1 (CalDAV et Exchange sur site : bientôt).</summary>
     public static bool SourceCanWrite(string source) => source is "m365" or "google";
 
-    /// <summary>Texte de l'état pour le back-office : « Libre jusqu'à 16:30 », « Occupé jusqu'à 15:00 », « Bientôt occupé · 14:15 », « Libre toute la journée ».</summary>
+    /// <summary>Texte de l'état pour le back-office : « Libre jusqu'à 16:30 », « Occupée jusqu'à 15:00 », « Bientôt occupée · 14:15 », « Libre toute la journée ».</summary>
     public static string StateText(RoomNow s, TimeZoneInfo tz) => s.State switch
     {
-        "busy" => "Occupé jusqu'à " + Hm(s.UntilUtc!.Value, tz),
-        "soon" => "Bientôt occupé · " + Hm(s.UntilUtc!.Value, tz),
+        "busy" => "Occupée jusqu'à " + Hm(s.UntilUtc!.Value, tz),
+        "soon" => "Bientôt occupée · " + Hm(s.UntilUtc!.Value, tz),
         _ => s.UntilUtc is { } u ? "Libre jusqu'à " + Hm(u, tz) : "Libre toute la journée"
     };
 

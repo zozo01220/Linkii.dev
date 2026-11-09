@@ -30,7 +30,7 @@ public static class RoomDoor
     }
 
     /// <summary>Données de la porte : créneaux (titres seulement si l'écran les affiche ; « Réservé sur place » toujours), durées possibles, mode, erreur de lecture.</summary>
-    public static async Task<Dictionary<string, object?>> Payload(RoomStatusService status, Tenant t, Screen s, SharedCalendar? room, bool installed, DateTime nowUtc, bool fresh = false)
+    public static async Task<Dictionary<string, object?>> Payload(RoomStatusService status, Tenant t, Screen s, SharedCalendar? room, bool installed, DateTime nowUtc, bool fresh = false, string? baseUrl = null)
     {
         var state = StateOf(installed, s, room);
         var res = new Dictionary<string, object?> { ["state"] = state, ["serverNow"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() };
@@ -44,8 +44,11 @@ public static class RoomDoor
         var refused = t.RoomBookings.Where(b => b.RoomId == room.Id && b.State == RoomBooking.Refused && nowUtc - b.CreatedUtc < TimeSpan.FromMinutes(15)).OrderByDescending(b => b.CreatedUtc).FirstOrDefault();
         res["room"] = new { name = SharedCalendarSources.RoomName(room), cap = room.RoomCap, place = room.RoomPlace, allDay = room.RoomAllDay, soon = room.RoomSoon };
         res["events"] = events.Select(e => new { title = e.Linkivi || s.Room.Titles ? e.Title : "", start = e.StartUtc, end = e.EndUtc, allDay = e.AllDay, linkivi = e.Linkivi });
-        res["options"] = canBook ? RoomRules.Options(nowUtc, events, t.RoomApp ?? new(), room.RoomAllDay, tz).Select(o => new { min = o.Minutes, ok = o.Ok, why = o.Why }) : Array.Empty<object>();
+        var opts = canBook ? RoomRules.Options(nowUtc, events, t.RoomApp ?? new(), room.RoomAllDay, tz) : new List<RoomOption>();
+        res["options"] = opts.Select(o => new { min = o.Minutes, ok = o.Ok, why = o.Why, from = o.Start is { } a ? new DateTimeOffset(a, TimeSpan.Zero).ToUnixTimeMilliseconds() : (long?)null, to = o.End is { } b ? new DateTimeOffset(b, TimeSpan.Zero).ToUnixTimeMilliseconds() : (long?)null });
         res["canBook"] = canBook;
+        // réservation par QR : la porte le dessine si la tablette n'est pas tactile (adresse signée, renouvelée toutes les 5 minutes)
+        res["qr"] = baseUrl != null && canBook && t.RoomApp?.Qr == true && opts.Any(o => o.Ok) ? QrCodes.Encode($"{baseUrl}/salle/{RoomQr.Code(s, nowUtc)}") : null;
         res["mode"] = mode;
         res["error"] = snap?.Error;
         res["stale"] = stale;
@@ -62,7 +65,7 @@ public static class RoomDoor
 public class RoomBookingService(JsonStore store, CalendarService calendars, RoomStatusService status, SecretBox box, IEnumerable<IWritableCalendarConnector> writers,
     IHubContext<ScreenHub> hub, AlertService alerts, ILogger<RoomBookingService> log)
 {
-    public record Outcome(int Status, string? Error, string? Code = null, DateTime? From = null, DateTime? To = null);
+    public record Outcome(int Status, string? Error, string? Code = null, DateTime? From = null, DateTime? To = null, Guid? Id = null);
 
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> locks = new();
     private readonly ConcurrentDictionary<Guid, List<DateTime>> recent = new();
@@ -85,7 +88,7 @@ public class RoomBookingService(JsonStore store, CalendarService calendars, Room
         }
     }
 
-    public async Task<Outcome> Book(Guid screenId, int minutes)
+    public async Task<Outcome> Book(Guid screenId, int minutes, string? comment = null, bool viaQr = false)
     {
         var now = DateTime.UtcNow;
         var ctx = store.Read<(Tenant? Tenant, Screen? Screen, SharedCalendar? Room, bool Installed, bool Buttons, string ScreenName)>(db =>
@@ -100,6 +103,7 @@ public class RoomBookingService(JsonStore store, CalendarService calendars, Room
         var state = RoomDoor.StateOf(ctx.Installed, ctx.Screen, ctx.Room);
         if (state != "ok" || ctx.Room == null) return new(403, state == "retired" ? "L'application Réservation de salle a été retirée." : "Salle indisponible.", state);
         if (!ctx.Buttons || !RoomModes.CanBook(ctx.Room.RoomWriteMode)) return new(403, "Cette salle s'affiche seulement : la réservation n'est pas proposée ici.", "read");
+        if (viaQr && ctx.Tenant.RoomApp?.Qr != true) return new(403, "La réservation par QR n'est pas activée.", "qr");
         if (!AppRules.ValidMinutes(minutes)) return new(400, "Durée non proposée.", "duration");
         if (!Allow(screenId, now)) return new(429, "Trop de réservations depuis cet écran : réessayez dans un instant.", "rate");
 
@@ -120,8 +124,9 @@ public class RoomBookingService(JsonStore store, CalendarService calendars, Room
             if (o == null) return new(400, "Durée non proposée.", "duration");
             if (!o.Ok) return new(409, o.Why == "Hors horaires" ? "Hors des horaires réservables." : $"Déjà réservée : {o.Why?.ToLowerInvariant()}.", "taken");
 
-            var start = new DateTime(now.Ticks - now.Ticks % TimeSpan.TicksPerMinute, DateTimeKind.Utc);
-            var booking = new RoomBooking { RoomId = room.Id, ScreenId = screenId, ScreenName = ctx.ScreenName, StartUtc = start, EndUtc = start.AddMinutes(minutes), Mode = room.RoomWriteMode };
+            var start = o.Start ?? new DateTime(now.Ticks - now.Ticks % TimeSpan.TicksPerMinute, DateTimeKind.Utc);
+            var finish = o.End ?? start.AddMinutes(minutes);
+            var booking = new RoomBooking { RoomId = room.Id, ScreenId = screenId, ScreenName = ctx.ScreenName, StartUtc = start, EndUtc = finish, Mode = room.RoomWriteMode, Title = RoomQr.CleanComment(comment) };
             Save(t.Id, booking, add: true);
             var src = SharedCalendarSources.Resolve(t, room, box);
             if (booking.Mode != RoomModes.Local)
@@ -130,7 +135,7 @@ public class RoomBookingService(JsonStore store, CalendarService calendars, Room
                 if (writer == null) { booking.State = RoomBooking.Failed; booking.Error = "Cet agenda ne s'écrit pas."; Save(t.Id, booking); return new(403, "Cette salle s'affiche seulement.", "read"); }
                 try
                 {
-                    booking.ProviderEventId = await writer.Create(src, t, new BookRequest(rules.BookTitle, $"Réservé depuis l'écran « {ctx.ScreenName} » (Linkivi).", booking.StartUtc, booking.EndUtc, booking.Id, SharedCalendarSources.RoomName(room), booking.Mode));
+                    booking.ProviderEventId = await writer.Create(src, t, new BookRequest(booking.Title ?? rules.BookTitle, $"Réservé depuis l'écran « {ctx.ScreenName} » (Linkivi).", booking.StartUtc, booking.EndUtc, booking.Id, SharedCalendarSources.RoomName(room), booking.Mode));
                 }
                 catch (Exception ex) when (ex is CalendarWriteException or HttpRequestException or TaskCanceledException or InvalidOperationException or System.Text.Json.JsonException)
                 {
@@ -148,9 +153,39 @@ public class RoomBookingService(JsonStore store, CalendarService calendars, Room
             calendars.Forget(src);
             status.Forget(room.Id);
             await NotifyRoom(room.Id);
-            return new(200, null, null, booking.StartUtc, booking.EndUtc);
+            return new(200, null, null, booking.StartUtc, booking.EndUtc, booking.Id);
         }
         finally { gate.Release(); }
+    }
+
+    /// <summary>Délai pendant lequel une réservation peut être annulée depuis l'écran qui l'a faite (une minute, plus une marge).</summary>
+    public static readonly TimeSpan CancelWindow = TimeSpan.FromSeconds(75);
+
+    /// <summary>Annule une réservation qui vient d'être faite (erreur de manipulation) : supprime l'événement chez le fournisseur, libère la salle, prévient les écrans.</summary>
+    public async Task<Outcome> Cancel(Guid screenId, Guid bookingId)
+    {
+        var now = DateTime.UtcNow;
+        var ctx = store.Read<(Tenant? Tenant, RoomBooking? Booking, SharedCalendar? Room)>(db =>
+        {
+            var s = db.Screens.FirstOrDefault(x => x.Id == screenId);
+            var t = s == null ? null : db.Clients.FirstOrDefault(c => c.Id == s.ClientId);
+            var b = t?.RoomBookings.FirstOrDefault(x => x.Id == bookingId && x.ScreenId == screenId);
+            return (t, b, b == null ? null : t!.SharedCalendars.FirstOrDefault(c => c.Id == b.RoomId));
+        });
+        if (ctx.Tenant == null || ctx.Booking is not { } b || ctx.Room == null) return new(404, "Réservation introuvable.", "none");
+        if (!b.Holds) return new(409, "Cette réservation est déjà annulée.", "gone");
+        if (now - b.CreatedUtc > CancelWindow) return new(409, "Le délai pour annuler est dépassé.", "late");
+        if (b.ProviderEventId != null && writers.FirstOrDefault(w => w.Id == ctx.Room.Source) is { } writer)
+        {
+            try { await writer.Delete(SharedCalendarSources.Resolve(ctx.Tenant, ctx.Room, box), ctx.Tenant, b.ProviderEventId, b.Mode); }
+            catch (Exception ex) when (ex is CalendarWriteException or HttpRequestException or TaskCanceledException or InvalidOperationException)
+            { log.LogWarning(ex, "Annulation refusée par le fournisseur pour la salle {Room}", ctx.Room.Id); return new(502, "Annulation impossible. Prévenez l'administrateur.", "provider"); }
+        }
+        store.Write(db => { if (db.Clients.FirstOrDefault(c => c.Id == ctx.Tenant.Id)?.RoomBookings.FirstOrDefault(x => x.Id == bookingId) is { } cur) cur.State = RoomBooking.Cancelled; });
+        calendars.Forget(SharedCalendarSources.Resolve(ctx.Tenant, ctx.Room, box));
+        status.Forget(ctx.Room.Id);
+        await NotifyRoom(ctx.Room.Id);
+        return new(200, null);
     }
 
     /// <summary>Enregistre la réservation (ajout, ou mise à jour de son état).</summary>

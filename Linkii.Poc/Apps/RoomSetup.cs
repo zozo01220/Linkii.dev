@@ -116,7 +116,7 @@ public static class RoomSetup
             if (!manage)
             {
                 var r = RoomRules.Clean(draft.Rules);
-                (app.Durations, app.MaxMin, app.Days, app.FromMin, app.ToMin) = (r.Durations, r.MaxMin, r.Days, r.FromMin, r.ToMin);
+                (app.Durations, app.MaxMin, app.Days, app.FromMin, app.ToMin, app.Qr, app.Rounding) = (r.Durations, r.MaxMin, r.Days, r.FromMin, r.ToMin, r.Qr, r.Rounding);
             }
             foreach (var s in draft.Use)
             {

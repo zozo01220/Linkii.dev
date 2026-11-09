@@ -53,8 +53,8 @@
     },
     /** Texte de l'état : mot et ligne « jusqu'à… » (titre montré seulement s'il a été envoyé). */
     words: function (st, tz) {
-      if (st.st === 'busy') return { word: 'OCCUPÉ', sub: (st.title ? st.title + ' · ' : '') + 'jusqu’à ' + L.hm(st.until, tz) };
-      if (st.st === 'soon') return { word: 'BIENTÔT OCCUPÉ', sub: 'à ' + L.hm(st.until, tz) + (st.title ? ' · ' + st.title : '') };
+      if (st.st === 'busy') return { word: 'OCCUPÉE', sub: (st.title ? st.title + ' · ' : '') + 'jusqu’à ' + L.hm(st.until, tz) };
+      if (st.st === 'soon') return { word: 'BIENTÔT OCCUPÉE', sub: 'à ' + L.hm(st.until, tz) + (st.title ? ' · ' + st.title : '') };
       return { word: 'LIBRE', sub: st.until ? 'jusqu’à ' + L.hm(st.until, tz) : 'toute la journée' };
     },
     /** Écran gris (pas de porte à afficher) : [mot, ligne] ou null. */
@@ -106,10 +106,14 @@
     '#roomdoor .rd-sl{display:flex;justify-content:space-between;gap:.6em;padding:.75em 0;border-bottom:1px solid #DDE3EA;font-size:1.2em}#roomdoor.dark .rd-sl{border-color:#26405F}' +
     '#roomdoor .rd-sl b{font-weight:500;white-space:nowrap}#roomdoor .rd-sl span{color:#5A6B80;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#roomdoor.dark .rd-sl span{color:#9FB0C4}' +
     '#roomdoor .rd-ov{position:absolute;left:0;top:0;right:0;bottom:0;background:rgba(30,142,90,.97);display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:2.3em;font-weight:600;z-index:3;gap:.3em;text-align:center;padding:1em}' +
+    '#roomdoor .rd-qrbk{display:flex;align-items:center;gap:1.4em}#roomdoor .rd-qr{background:#fff;border-radius:.7em;padding:.5em;width:11em;height:11em;flex:none}#roomdoor .rd-qr svg{display:block;width:100%;height:100%}#roomdoor .rd-qrt{font-size:1.25em;line-height:1.35}' +
+    '#roomdoor .rd-undo{font:inherit;margin-top:1em;align-self:flex-start;min-height:2.8em;padding:.4em 1.4em;border:.12em solid rgba(255,255,255,.85);background:rgba(255,255,255,.16);color:#fff;border-radius:.6em;font-size:1.1em;font-weight:600;cursor:pointer}' +
+    '#roomdoor .rd-ov .rd-undo{font-size:.45em;margin-top:1.4em;align-self:center}#roomdoor .rd-undo[disabled]{opacity:.6}' +
     '#roomdoor .rd-ov b{font-size:2.2em;line-height:1}#roomdoor .rd-ov small{font-size:.5em;font-weight:500;opacity:.9}' +
     '#roomdoor .rd-offb{position:absolute;left:0;top:0;right:0;background:rgba(0,0,0,.35);font-size:1em;padding:.3em 2.6em;z-index:2}';
 
   var H = null, cfg = null, sig = '', root = null, data = null, ticker = null, poller = null;
+  var last = null, undoTimer = null;   // dernière réservation faite ici : annulable pendant une minute
   var sel = null, selTimer = null, busy = false, msg = null, msgTimer = null, ok = null, okTimer = null, drawn = '';
 
   function tz() { return H && H.tz ? H.tz() : null; }
@@ -165,24 +169,27 @@
       selTimer = setTimeout(function () { sel = null; draw(true); }, 20000);   // choix oublié après 20 s sans toucher
       draw(true);
     } else if (b.getAttribute('data-act') === 'book' && sel) book(sel);
+    else if (b.getAttribute('data-act') === 'cancel') cancel();
   }
 
   function book(minutes) {
     busy = true; draw(true);
-    var start = now(), done = function () { busy = false; sel = null; clearTimeout(selTimer); };
+    var sp = spanOf(minutes, now()), start = sp.from, done = function () { busy = false; sel = null; clearTimeout(selTimer); };
     if (H.preview) {   // simulateur : rien n'est réservé
       setTimeout(function () {
         done();
-        if (data) data.events = (data.events || []).concat([{ title: 'Réservé sur place', start: new Date(start).toISOString(), end: new Date(start + minutes * 60000).toISOString(), linkivi: true }]);
-        confirmOk(start + minutes * 60000, 'Aperçu : rien n’est réservé');
+        if (data) data.events = (data.events || []).concat([{ title: 'Réservé sur place', start: new Date(start).toISOString(), end: new Date(sp.to).toISOString(), linkivi: true }]);
+        setLast('preview', start, sp.to);
+        confirmOk(sp.to, 'Aperçu : rien n’est réservé');
       }, 500);
       return;
     }
     H.book(minutes).then(function (r) {
       done();
       if (r.status === 200) {
-        var to = r.body && r.body.to ? Date.parse(r.body.to) : start + minutes * 60000;
+        var to = r.body && r.body.to ? Date.parse(r.body.to) : sp.to;
         if (data) data.events = (data.events || []).concat([{ title: 'Réservé sur place', start: r.body && r.body.from ? r.body.from : new Date(start).toISOString(), end: new Date(to).toISOString(), linkivi: true }]);
+        setLast(r.body && r.body.id, r.body && r.body.from ? Date.parse(r.body.from) : start, to);
         confirmOk(to);
         load();
       } else {
@@ -192,10 +199,42 @@
     }, function () { done(); say('Réservation impossible : la tablette ne joint pas le serveur.', 8000); });
   }
 
+  /** Début et fin d'une durée proposée : ceux du serveur (arrondi au quart d'heure selon les règles), sinon maintenant + durée. */
+  function spanOf(min, t) {
+    var o = data && data.options ? data.options.filter(function (x) { return x.min === min; })[0] : null;
+    return o && o.from ? { from: o.from, to: o.to } : { from: t, to: t + min * 60000 };
+  }
+  function touch() { return !H || !H.touch || H.touch() !== false; }
+  function qrSvg() {
+    var p = data && data.qr ? String(data.qr).split('|') : [], n = parseInt(p[0], 10);
+    return n > 0 && /^[0-9MhvzH\- ]+$/.test(p[1] || '') ? '<svg viewBox="0 0 ' + n + ' ' + n + '" shape-rendering="crispEdges"><path d="' + p[1] + '" fill="#0B1F3A"/></svg>' : '';
+  }
+  function setLast(id, from, to) {
+    clearTimeout(undoTimer);
+    last = id ? { id: id, from: from, to: to, till: Date.now() + 60000 } : null;
+    if (last) undoTimer = setTimeout(function () { last = null; draw(true); }, 60500);
+  }
+  function canUndo() { return !!last && Date.now() < last.till; }
+
+  /** Annule la réservation qui vient d'être faite (erreur de manipulation) : possible pendant une minute. */
+  function cancel() {
+    if (!canUndo() || busy) return;
+    var l = last;
+    busy = true; draw(true);
+    var drop = function () { if (data && data.events) data.events = data.events.filter(function (e) { return !(e.linkivi && Math.abs(Date.parse(e.start) - l.from) <= 120000 && Math.abs(Date.parse(e.end) - l.to) <= 120000); }); };
+    var finish = function () { busy = false; clearTimeout(undoTimer); last = null; ok = null; clearTimeout(okTimer); };
+    if (H.preview) { finish(); drop(); say('Aperçu : réservation annulée', 4000); return; }
+    H.cancel(l.id).then(function (r) {
+      if (r.status === 200) { finish(); drop(); say('Réservation annulée', 5000); }
+      else { busy = false; say((r.body && r.body.error) || 'Annulation impossible.', 8000); }
+      load();
+    }, function () { busy = false; say('Annulation impossible : la tablette ne joint pas le serveur.', 8000); });
+  }
+
   function confirmOk(to, note) {
     ok = { to: to, note: note || '' };
     clearTimeout(okTimer);
-    okTimer = setTimeout(function () { ok = null; draw(true); }, 4000);
+    okTimer = setTimeout(function () { ok = null; draw(true); }, canUndo() ? 8000 : 4000);
     draw(true);
   }
 
@@ -206,7 +245,7 @@
     var room = (data && data.room) || { name: cfg.name || '' };
     var st = grey ? null : L.state(data.events, t, room.soon, room.allDay, z);
     var canBook = !grey && L.bookable(data, st, cfg.buttons);
-    var key = [Math.floor(t / 60000), state, grey && grey[0], st && st.st, st && st.until, sel, busy, msg, ok && ok.to, net, canBook, data && data.readAt, data && data.error, cfg.theme].join('|');
+    var key = [Math.floor(t / 60000), state, grey && grey[0], st && st.st, st && st.until, sel, busy, msg, ok && ok.to, canUndo(), data && data.qr, net, canBook, data && data.readAt, data && data.error, cfg.theme].join('|');
     if (!force && key === drawn) return;
     drawn = key;
     root.className = (cfg.theme === 'dark' ? 'dark' : '') + (innerHeight > innerWidth ? ' portrait' : '');
@@ -218,7 +257,11 @@
     } else {
       var wd = L.words(st, z);
       h += '<div class="rd-pa ' + st.st + '"><div class="rd-rn">' + nameLine + '</div><div class="rd-st">' + wd.word + '</div><div class="rd-un">' + esc(wd.sub) + '</div>';
+      if (canUndo() && !ok && !busy) h += '<button type="button" class="rd-undo" data-act="cancel">Annuler ma réservation</button><div class="rd-small">Possible pendant une minute</div>';
       if (msg) h += '<div class="rd-msg">' + esc(msg) + '</div>';
+      else if (canBook && qrSvg() && !touch()) {   // tablette non tactile : un QR, la durée se choisit sur le téléphone
+        h += '<div class="rd-bk rd-qrbk"><div class="rd-qr">' + qrSvg() + '</div><div class="rd-qrt"><div class="rd-lab">Réserver maintenant</div>Scannez ce code, choisissez la durée sur votre téléphone, puis confirmez.</div></div>';
+      }
       else if (canBook) {
         h += '<div class="rd-bk"><div class="rd-lab">Réserver maintenant, pour…</div><div class="rd-du">';
         data.options.forEach(function (o) {
@@ -226,7 +269,7 @@
         });
         h += '</div>';
         if (!net) h += '<div class="rd-msg">Hors ligne : réservation impossible</div>';
-        else h += '<button type="button" class="rd-go" data-act="book"' + (sel && !busy ? '' : ' disabled') + '>' + (busy ? 'Réservation…' : sel ? 'Réserver ' + L.hm(t, z) + ' – ' + L.hm(t + sel * 60000, z) : 'Choisissez une durée') + '</button>';
+        else h += '<button type="button" class="rd-go" data-act="book"' + (sel && !busy ? '' : ' disabled') + '>' + (busy ? 'Réservation…' : sel ? 'Réserver ' + L.hm(spanOf(sel, t).from, z) + ' – ' + L.hm(spanOf(sel, t).to, z) : 'Choisissez une durée') + '</button>';
         h += '</div>';
       }
       if (data && data.error && !data.stale) h += '<div class="rd-small">Mise à jour impossible : dernière lecture à ' + (data.readAt ? L.hm(data.readAt, z) : '—') + '</div>';
@@ -236,10 +279,10 @@
     if (!grey) {
       var sl = L.slots(data.events, t, room.allDay, z);
       if (!sl.length) h += '<div class="rd-sl"><span>Rien d’autre aujourd’hui</span></div>';
-      sl.forEach(function (x) { h += '<div class="rd-sl"><b>' + L.hm(x.s, z) + ' – ' + L.hm(x.e, z) + '</b><span>' + esc(x.title || (x.lk ? 'Réservé sur place' : 'Occupé')) + '</span></div>'; });
+      sl.forEach(function (x) { h += '<div class="rd-sl"><b>' + L.hm(x.s, z) + ' – ' + L.hm(x.e, z) + '</b><span>' + esc(x.title || (x.lk ? 'Réservé sur place' : 'Occupée')) + '</span></div>'; });
     }
     h += '</div>';
-    if (ok) h += '<div class="rd-ov"><b>✓</b>Réservée jusqu’à ' + L.hm(ok.to, z) + (ok.note ? '<small>' + esc(ok.note) + '</small>' : '') + '</div>';
+    if (ok) h += '<div class="rd-ov"><b>✓</b>Réservée jusqu’à ' + L.hm(ok.to, z) + (ok.note ? '<small>' + esc(ok.note) + '</small>' : '') + (canUndo() ? '<button type="button" class="rd-undo" data-act="cancel"' + (busy ? ' disabled' : '') + '>Annuler la réservation</button>' : '') + '</div>';
     root.innerHTML = h;
   }
 

@@ -64,7 +64,7 @@ public static class History
     };
 
     /// <summary>La catégorie qui range une ligne dans le filtre « Applications » (synchro et données en font partie).</summary>
-    public static string Filter(string cat) => cat is Sync or Data ? Integrations : cat is Approval ? Publish : cat is Emergency ? Publish : cat is Login ? Members : cat;
+    public static string Filter(string cat) => cat is Sync or Data ? Integrations : cat is Approval ? Publish : cat == Emergency ? Publish : cat is Login ? Members : cat;
 
     public static string Mark(string level) => level switch { Notifs.Ok => "✓", Notifs.Warn => "!", Notifs.Error => "×", _ => "i" };
 }

@@ -1823,7 +1823,7 @@
         (e.kind === 'board' ? `<button class="ce-tb on" data-act="roomlist" title="Les salles du tableau">Salles : ${e.scope === 'list' ? (e.list || []).length : 'toutes'} ▾</button>`
           : pick('source', [['screen', 'Salle de cet écran']].concat(rs.map(x => [x.id, roomLabel(x)])), e.source || 'screen', 'Salle')) + sepH +
         fontSel(e) + sizeNum(e) + colorIn('color', e.color, 'Couleur du texte') + sepH +
-        col3('cFree', '#1E8E5A', 'Couleur : libre') + col3('cSoon', '#D9822B', 'Couleur : bientôt occupé') + col3('cBusy', '#C8372D', 'Couleur : occupé') +
+        col3('cFree', '#1E8E5A', 'Couleur : libre') + col3('cSoon', '#D9822B', 'Couleur : bientôt occupée') + col3('cBusy', '#C8372D', 'Couleur : occupée') +
         (dk ? sepH + `<button class="ce-tb ${e.showTitle ? 'on' : ''}" data-tog="showTitle" title="Montrer le titre des réunions (si le calendrier l'autorise : réglage « Sur l'écran » du calendrier)">Titre de la réunion</button>` + pick('nextN', [[0, 'Sans suite'], [1, 'Ensuite : 1'], [2, 'Ensuite : 2'], [3, 'Ensuite : 3']], e.nextN == null ? 2 : e.nextN, 'Rendez-vous suivants')
           : e.kind === 'rect' || e.kind === 'circle' ? sepH + `<button class="ce-tb ${e.label !== false ? 'on' : ''}" data-tog="label" title="Nom et état dans la forme">Nom et état</button>` : '');
     }
@@ -2058,7 +2058,7 @@
     const R = '#C8372D', G = '#1E8E5A', A = '#D9822B';
     return `<div class="ce-ph"><b>Salles</b></div>
       <div class="ce-grp" style="margin-top:0">Ajouter<small>4 modèles</small></div>
-      <div class="ce-ctypes">${tile('door', R, svg('<text x="46" y="34" text-anchor="middle" fill="#fff" font-size="15" font-weight="800">OCCUPÉ</text>'), 'Porte de salle', 'Plein écran de tablette : Libre ou Occupé. Lit le calendrier de l’écran')}
+      <div class="ce-ctypes">${tile('door', R, svg('<text x="46" y="34" text-anchor="middle" fill="#fff" font-size="15" font-weight="800">OCCUPÉE</text>'), 'Porte de salle', 'Plein écran de tablette : Libre ou Occupée. Lit le calendrier de l’écran')}
         ${tile('dot', '#0E1E38', svg(`<circle cx="46" cy="28" r="22" fill="${G}" opacity=".25"/><circle cx="46" cy="28" r="14" fill="${G}"/>`), 'Pastille d’état', 'Verte, orange ou rouge, pour une salle')}
         ${tile('rect', '#EEF2F7', svg(`<rect x="8" y="8" width="24" height="18" fill="${R}cc" stroke="${R}"/><rect x="36" y="8" width="20" height="18" fill="${G}cc" stroke="${G}"/><rect x="60" y="8" width="24" height="18" fill="${A}cc" stroke="${A}"/><rect x="8" y="32" width="34" height="16" fill="${G}cc" stroke="${G}"/>`), 'Forme sur un plan', 'Rectangle ou cercle qui change de couleur sur votre plan')}
         ${tile('board', '#0E1E38', svg(`${[R, G, A].map((c, i) => `<circle cx="14" cy="${14 + i * 14}" r="4" fill="${c}"/><rect x="26" y="${11 + i * 14}" width="${[50, 40, 46][i]}" height="6" rx="2" fill="#fff" opacity=".7"/>`).join('')}`), 'Tableau des salles', 'Plusieurs salles : état, jusqu’à, ensuite')}</div>
@@ -2086,7 +2086,7 @@
       on(box, 'click', ev => { const b = ev.target.closest('[data-simst]'); if (b) { simSt = b.dataset.simst; render(); } });
     }
     const rs = roomSrcs();
-    box.innerHTML = `<b>Simuler</b><select data-sim="room" aria-label="Salle simulée">${opt([['', 'Salle de l’écran en aperçu']].concat(rs.map(x => [x.id, roomLabel(x)])), simRoom)}</select><span class="ce-dirseg">${[['auto', 'Réel'], ['free', 'Libre'], ['soon', 'Bientôt'], ['busy', 'Occupé'], ['none', 'Non choisie']].map(([v, t]) => `<button data-simst="${v}" class="${simSt === v ? 'on' : ''}">${t}</button>`).join('')}</span><span class="ce-mut">éditeur seulement</span>`;
+    box.innerHTML = `<b>Simuler</b><select data-sim="room" aria-label="Salle simulée">${opt([['', 'Salle de l’écran en aperçu']].concat(rs.map(x => [x.id, roomLabel(x)])), simRoom)}</select><span class="ce-dirseg">${[['auto', 'Réel'], ['free', 'Libre'], ['soon', 'Bientôt'], ['busy', 'Occupée'], ['none', 'Non choisie']].map(([v, t]) => `<button data-simst="${v}" class="${simSt === v ? 'on' : ''}">${t}</button>`).join('')}</span><span class="ce-mut">éditeur seulement</span>`;
   }
 
   // ---------- bibliothèque d'icônes (panneau Éléments) : tracés de composition.js (ICONS), couleur, trait et remplissage réglés dans la barre ----------

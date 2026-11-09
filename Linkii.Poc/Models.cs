@@ -793,8 +793,8 @@ public class SharedCalendar
     public int RoomCap { get; set; }
     public string RoomPlace { get; set; } = "";
     public bool RoomAllDay { get; set; }          // un événement sur la journée entière rend la salle occupée
-    public int RoomSoon { get; set; } = 10;       // « bientôt occupé » : minutes avant (0 : jamais)
-    public bool RoomTitles { get; set; }          // false : seulement « Occupé » (les titres ne quittent pas le serveur)
+    public int RoomSoon { get; set; } = 10;       // « bientôt occupée » : minutes avant (0 : jamais)
+    public bool RoomTitles { get; set; }          // false : seulement « Occupée » (les titres ne quittent pas le serveur)
     /// <summary>Application « Réservation de salle » : comment Linkivi crée un rendez-vous dans cette salle (<see cref="RoomModes"/>). Recalculé par <see cref="RoomSetup"/>.</summary>
     public string RoomWriteMode { get; set; } = RoomModes.None;
     /// <summary>Google : accès du compte à cet agenda (owner, writer, reader…), lu à l'installation ou à la synchronisation ; null : inconnu.</summary>

@@ -319,6 +319,17 @@
           return r.text().then(function (t) { var b = null; try { b = t ? JSON.parse(t) : null; } catch (e) {} return { status: r.status, body: b }; });
         }, function (e) { setOnline(false); throw e; });
       },
+      cancel: function (id) {
+        var o = { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Token': state.token || '' }, body: JSON.stringify({ id: id }) };
+        return fetch('/api/player/room/cancel', o).then(function (r) {
+          setOnline(true);
+          return r.text().then(function (t) { var b = null; try { b = t ? JSON.parse(t) : null; } catch (e) {} return { status: r.status, body: b }; });
+        }, function (e) { setOnline(false); throw e; });
+      },
+      touch: function () {   // écran tactile ? (application : ce que l'appareil annonce ; sinon le navigateur)
+        try { if (window.LinkiiNative && typeof window.LinkiiNative.deviceInfo === 'function') { var d = JSON.parse(window.LinkiiNative.deviceInfo()); if (d && d.touch != null) return !!d.touch; } } catch (e) {}
+        return !!('ontouchstart' in window || navigator.maxTouchPoints > 0);
+      },
       tz: function () { return cfg.timezone; },
       now: function () { return serverNow(); },
       online: function () { return netFails < 2 && navigator.onLine !== false; },
