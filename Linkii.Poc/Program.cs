@@ -94,6 +94,7 @@ builder.Services.AddSingleton<AppProviders>();
 builder.Services.AddSingleton<GoogleAuth>();   // « Se connecter avec Google » (Calendar et Drive, lecture seule)
 builder.Services.AddSingleton<MicrosoftAuth>();   // « Se connecter avec Microsoft » (agendas Microsoft 365 et OneDrive / SharePoint, lecture seule)
 builder.Services.AddSingleton<ExternalLogin>();   // « Continuer avec Microsoft / Google » sur la page de connexion (identité seulement)
+builder.Services.AddSingleton<DeviceCommandService>();   // commandes d'appareil demandées de l'extérieur : API, Home Assistant (§221)
 builder.Services.AddSingleton<ScreenControl>();   // contrôle du direct (Pro) : pause, redémarrage, aperçu
 builder.Services.AddHostedService<ScreenWatchWorker>();   // commandes sans réponse, pauses terminées, alertes « écran hors ligne »
 builder.Services.AddHostedService<SubscriptionWorker>();   // comptes bloqués faute de paiement à la date anniversaire

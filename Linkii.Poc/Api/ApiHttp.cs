@@ -18,7 +18,7 @@ public static class ApiCodes
 {
     public const string MissingKey = "missing_key", InvalidKey = "invalid_key", KeyRevoked = "key_revoked", KeyExpired = "key_expired", IpNotAllowed = "ip_not_allowed",
         IntegrationMissing = "integration_missing", TooManyFailures = "too_many_failures", ScopeMissing = "scope_missing", PlanRequired = "plan_required", SpaceSuspended = "space_suspended", RateLimited = "rate_limited",
-        IdempotencyConflict = "idempotency_conflict", RequestInProgress = "request_in_progress", NotFound = "not_found", InvalidRequest = "invalid_request", LimitReached = "limit_reached";
+        ScreenUnavailable = "screen_unavailable", IdempotencyConflict = "idempotency_conflict", RequestInProgress = "request_in_progress", NotFound = "not_found", InvalidRequest = "invalid_request", LimitReached = "limit_reached";
 
     public static readonly (string Code, int Status, string Title)[] All =
     {
@@ -35,6 +35,7 @@ public static class ApiCodes
         (RateLimited, 429, "Trop de requêtes. Réessayez après le délai indiqué (en-tête Retry-After)."),
         (IdempotencyConflict, 422, "Cette Idempotency-Key a déjà servi pour une requête différente."),
         (RequestInProgress, 409, "Une requête avec la même Idempotency-Key est en cours."),
+        (ScreenUnavailable, 409, "L'écran ne peut pas recevoir la commande : hors ligne, appareil non compatible, commande déjà en cours ou droit manquant (le détail l'explique)."),
         (NotFound, 404, "Ressource introuvable."),
         (InvalidRequest, 422, "Requête invalide."),
         (LimitReached, 422, "Limite de l'organisation atteinte."),

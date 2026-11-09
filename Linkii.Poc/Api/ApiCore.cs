@@ -24,6 +24,7 @@ public class CoreApiModule : IApiModule
     {
         new ApiTemplate("Lecture seule", "Consulter les informations du compte", new[] { AccountRead }, 10),
         new ApiTemplate("Gestion des webhooks", "Gérer ses adresses de webhook", new[] { AccountRead, WebhooksManage }, 90),
+        new ApiTemplate("Home Assistant", "Voir les écrans et les commander depuis Home Assistant", new[] { AccountRead }, 40),   // les accès « Écrans » s'y ajoutent (ScreensApiModule)
     };
 
     public IEnumerable<EventType> Events { get; } = new[]
