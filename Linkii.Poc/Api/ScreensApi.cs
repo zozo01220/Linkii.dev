@@ -12,7 +12,7 @@ public class ScreensApiModule : IApiModule
     public IEnumerable<ApiScope> Scopes { get; } = new[]
     {
         new ApiScope(Read, "Écrans", "Lister les écrans et leur état"),
-        new ApiScope(Control, "Écrans", "Commander les écrans : redémarrer le player ou l'appareil, éteindre l'appareil, éteindre l'écran, le réveiller"),
+        new ApiScope(Control, "Écrans", "Commander les écrans : redémarrer le player ou l'appareil, éteindre l'appareil, éteindre l'écran, le réveiller, y afficher un message"),
     };
 
     public IEnumerable<ApiTemplate> Templates { get; } = new[]
@@ -38,9 +38,20 @@ public class ScreensApiModule : IApiModule
         "screen-off (éteindre l'écran, jusqu'au réveil), wake (réveiller l'écran pour une heure). Les commandes acceptées par l'appareil sont dans « commands » de l'écran. Un écran de mur entraîne tout le mur.",
         Body: "{ \"command\": \"restart-player\" }");
 
-    public IEnumerable<ApiRoute> Routes { get; } = new[] { List, One, Command };
+    public static readonly ApiRoute Display = new("POST", "/screens/{id}/display", Control, RateClass.Write,
+        "Afficher un message par-dessus la diffusion (Pro), puis revenir à la diffusion. « title » ou « message » (60 et 300 caractères), « look » : information (défaut) ou attention, " +
+        "« durationSeconds » de 5 à 3600 (30 par défaut), « wake » : réveiller l'écran s'il est en veille (sinon refusé). L'écran doit être en ligne ; le message suivant remplace le précédent.",
+        Body: "{ \"title\": \"Un visiteur est à l'accueil\", \"message\": \"Merci d'aller l'accueillir\", \"look\": \"information\", \"durationSeconds\": 30, \"wake\": false }");
+    public static readonly ApiRoute ClearDisplay = new("DELETE", "/screens/{id}/display", Control, RateClass.Write, "Retirer le message affiché (sans effet s'il n'y en a pas) : la diffusion reprend");
+
+    public IEnumerable<ApiRoute> Routes { get; } = new[] { List, One, Command, Display, ClearDisplay };
 
     public record CommandBody(string? Command);
+    public record DisplayBody(string? Title, string? Message, string? Look, int? DurationSeconds, bool? Wake);
+
+    private static string By(HttpContext ctx) => $"clé « {ctx.User.FindFirst(ApiAuth.KeyName)?.Value} »";
+    private static IResult Failed(HttpContext ctx, NoticeResult res) =>
+        ApiProblem.Result(ctx, res.Code switch { NoticeResult.NotFound => ApiCodes.NotFound, NoticeResult.Invalid => ApiCodes.InvalidRequest, _ => ApiCodes.ScreenUnavailable }, res.Error);
 
     public void Map(ApiRouter r)
     {
@@ -55,6 +66,18 @@ public class ScreensApiModule : IApiModule
                 command = body!.Command!.Trim().ToLowerInvariant(), accepted = res.Done,
                 skipped = res.Skipped.Select(x => new { id = x.Id, reason = x.Why })
             }, ApiJson.Options, statusCode: 202);
+        });
+
+        r.Map(Display, async (HttpContext ctx, NoticeService svc, Guid id, DisplayBody? body) =>
+        {
+            var res = await svc.Show(ctx.User.ClientId(), ctx.User.OwnerId(), id, body?.Title, body?.Message, body?.Look, body?.DurationSeconds, body?.Wake == true, By(ctx));
+            return res.Ok ? Results.Json(new { id, status = "displayed" }, ApiJson.Options, statusCode: 202) : Failed(ctx, res);
+        });
+
+        r.Map(ClearDisplay, async (HttpContext ctx, NoticeService svc, Guid id) =>
+        {
+            var res = await svc.Clear(ctx.User.ClientId(), ctx.User.OwnerId(), id, By(ctx));
+            return res.Ok ? Results.Json(new { id, status = "cleared" }, ApiJson.Options) : Failed(ctx, res);
         });
 
         r.Map(List, (HttpContext ctx, JsonStore store, int? limit, string? cursor, string? status, Guid? areaId) =>

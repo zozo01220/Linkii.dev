@@ -41,7 +41,7 @@ public static class History
     public const string Activity = "activity", Screens = "screens", Diag = "diag";
 
     public const string Publish = "publish", Media = "media", Members = "members", Integrations = "integrations", Account = "account", Settings = "settings",
-        Offline = "offline", Sleep = "sleep", Player = "player", Battery = "battery", Sync = "sync", Emergency = "emergency", Data = "data", Approval = "approval", Login = "login", Server = "server";
+        Offline = "offline", Sleep = "sleep", Player = "player", Battery = "battery", Sync = "sync", Emergency = "emergency", Notice = "notice", Data = "data", Approval = "approval", Login = "login", Server = "server";
 
     /// <summary>Conservation : l'activité et les écrans un an, le diagnostic 30 jours.</summary>
     public const int KeepDays = 365, KeepDiagDays = 30;
@@ -53,13 +53,13 @@ public static class History
 
     public static readonly (string Id, string Label)[] ScreenCats =
     {
-        (Offline, "Hors ligne"), (Sleep, "Veille / réveil"), (Player, "Player"), (Battery, "Batterie"),
+        (Offline, "Hors ligne"), (Sleep, "Veille / réveil"), (Player, "Player"), (Battery, "Batterie"), (Notice, "Messages"),
     };
 
     public static string Label(string cat) => cat switch
     {
         Publish => "Publications", Media => "Médias", Members => "Membres", Integrations => "Applications", Account => "Compte", Settings => "Réglages",
-        Offline => "Hors ligne", Sleep => "Veille / réveil", Player => "Player", Battery => "Batterie", Sync => "Synchronisation", Emergency => "Urgence",
+        Offline => "Hors ligne", Sleep => "Veille / réveil", Player => "Player", Battery => "Batterie", Sync => "Synchronisation", Emergency => "Urgence", Notice => "Messages",
         Data => "Données", Approval => "Approbations", Login => "Connexions", Server => "Serveur", _ => cat,
     };
 

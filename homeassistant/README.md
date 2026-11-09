@@ -1,6 +1,6 @@
 # Linkivi pour Home Assistant
 
-Voir et commander ses écrans Linkivi depuis Home Assistant : redémarrer le player, redémarrer l'appareil, éteindre l'appareil, éteindre l'écran et le réveiller.
+Voir et commander ses écrans Linkivi depuis Home Assistant : redémarrer le player, redémarrer l'appareil, éteindre l'appareil, éteindre l'écran, le réveiller, et **y afficher un message** (sonnette, lave-linge terminé…).
 Chaque écran devient un **appareil** Home Assistant. À ne pas confondre avec l'intégration Home Assistant **de** Linkivi (lire et commander les appareils d'une maison sur les écrans) : ici, c'est l'inverse.
 
 Prérequis : Home Assistant 2024.11 ou plus récent, organisation Linkivi au **plan Pro** (l'API et les commandes d'appareil en font partie).
@@ -65,6 +65,36 @@ accent_color: "#2a86ee"             # couleur d'accent (bleu Linkivi par défaut
 
 L'éditeur visuel permet les mêmes réglages. Si la carte n'apparaît pas dans la liste, rechargez la page sans le cache ; sinon, vérifiez dans les journaux de Home Assistant que l'intégration Linkivi est bien démarrée.
 
+## Afficher un message sur un écran
+
+Deux actions, dans l'éditeur d'automatisations (Ajouter une action › Linkivi) ou dans Outils de développement › Actions.
+
+| Action | Rôle |
+|---|---|
+| `linkivi.show_message` | Affiche un message par-dessus la diffusion des écrans choisis, puis la diffusion reprend avec le contenu suivant. |
+| `linkivi.clear_display` | Retire le message tout de suite. |
+
+Champs de `show_message` : `title` (60 caractères) ou `message` (300) au moins un des deux ; `look` : `information` (clair, par défaut) ou `attention` (ambre) ; `duration` en secondes, de 5 à 3600 (30 par défaut) ; `wake` : réveille un écran en veille pour la durée du message. Les écrans se choisissent comme n'importe quel appareil : un écran, une pièce (aire Home Assistant) ou plusieurs.
+
+Règles : l'écran doit être **en ligne** (un message de sonnette qui arrive trop tard ne sert à rien) et **éveillé**, sauf avec `wake: true` ; un nouveau message remplace le précédent ; une alerte d'urgence passe devant. Si Linkivi refuse, Home Assistant affiche la raison de chaque écran.
+
+```yaml
+automation:
+  - alias: Annoncer un visiteur
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.sonnette
+        to: "on"
+    action:
+      - action: linkivi.show_message
+        target:
+          area_id: accueil
+        data:
+          title: Un visiteur est à l'accueil
+          message: Merci d'aller l'accueillir
+          duration: 30
+```
+
 ## Exemples
 
 ```yaml
@@ -102,9 +132,11 @@ L'intégration n'appelle que l'API publique de Linkivi (voir `/docs/api` sur vot
 | `GET /api/v1/me` | `account:read` | Nom de l'organisation, au moment de l'ajout. |
 | `GET /api/v1/screens` | `screens:read` | État des écrans, toutes les 30 s. Chaque écran liste dans `commands` ce que son matériel sait faire. |
 | `POST /api/v1/screens/{id}/commands` | `screens:control` | `{"command": "restart-player" \| "reboot" \| "poweroff" \| "screen-off" \| "wake"}`, réponse `202`. |
+| `POST /api/v1/screens/{id}/display` | `screens:control` | `{"title", "message", "look", "durationSeconds", "wake"}`, réponse `202`. |
+| `DELETE /api/v1/screens/{id}/display` | `screens:control` | Retire le message. |
 
 Sans Home Assistant, ces appels servent aussi depuis un script (`curl -H "Authorization: Bearer lkv_…"`).
 
 ## Pas encore essayé
 
-Les entités de l'intégration ont été vues sur une vraie instance (six écrans). En revanche, le code Python n'a jamais été exécuté sur le poste de développement (pas de Python) et **les boutons et l'interrupteur n'ont pas encore été essayés en vrai** ; la carte, elle, a été essayée dans un faux Home Assistant (liste, cartes, menu, confirmations, erreurs, filtres) mais **pas dans le vrai** : l'enregistrement par l'intégration, l'éditeur visuel et le rendu sur votre thème sont à vérifier. L'API de Linkivi est couverte par des tests (`ScreenCommandsApiTests`).
+Les entités de l'intégration ont été vues sur une vraie instance (six écrans). En revanche, le code Python n'a jamais été exécuté sur le poste de développement (pas de Python) et **les boutons, l'interrupteur et l'action « Afficher un message » n'ont pas encore été essayés en vrai** (le serveur et l'affichage du message dans le player le sont par des tests et un essai dans le navigateur, pas sur un vrai écran) ; la carte, elle, a été essayée dans un faux Home Assistant (liste, cartes, menu, confirmations, erreurs, filtres) mais **pas dans le vrai** : l'enregistrement par l'intégration, l'éditeur visuel et le rendu sur votre thème sont à vérifier. L'API de Linkivi est couverte par des tests (`ScreenCommandsApiTests`).

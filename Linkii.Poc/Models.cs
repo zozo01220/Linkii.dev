@@ -896,6 +896,8 @@ public class Screen : IClientOwned, IAreaOwned, IOwned
     public string? HistWakeNote { get; set; }
     /// <summary>Dernière urgence que cet écran a confirmée afficher (rapport de réception, §159).</summary>
     public Guid? EmergencyAckId { get; set; }
+    /// <summary>Message affiché un moment par-dessus la diffusion (API, Home Assistant) ; périmé quand UntilUtc est passé.</summary>
+    public ScreenNotice? Notice { get; set; }
     public DateTime? EmergencyAckUtc { get; set; }
 
     /// <summary>Planning de diffusion propre à l'écran (<see cref="Slots"/>, prioritaires sur ceux de sa zone) ; sinon il suit celui de sa zone. Voir <see cref="Planning"/>.</summary>

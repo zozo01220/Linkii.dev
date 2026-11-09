@@ -94,6 +94,7 @@ builder.Services.AddSingleton<AppProviders>();
 builder.Services.AddSingleton<GoogleAuth>();   // « Se connecter avec Google » (Calendar et Drive, lecture seule)
 builder.Services.AddSingleton<MicrosoftAuth>();   // « Se connecter avec Microsoft » (agendas Microsoft 365 et OneDrive / SharePoint, lecture seule)
 builder.Services.AddSingleton<ExternalLogin>();   // « Continuer avec Microsoft / Google » sur la page de connexion (identité seulement)
+builder.Services.AddSingleton<NoticeService>();   // messages affichés un moment sur un écran, demandés de l'extérieur (§224)
 builder.Services.AddSingleton<DeviceCommandService>();   // commandes d'appareil demandées de l'extérieur : API, Home Assistant (§221)
 builder.Services.AddSingleton<ScreenControl>();   // contrôle du direct (Pro) : pause, redémarrage, aperçu
 builder.Services.AddHostedService<ScreenWatchWorker>();   // commandes sans réponse, pauses terminées, alertes « écran hors ligne »
@@ -810,7 +811,7 @@ api.MapGet("/player/version", (HttpRequest req, JsonStore store) => store.Read(d
     var s = Auth(req, db);
     if (Gate(s, db) is { } denied) return denied;
     // serverNow : horloge de référence du player (lecture synchronisée) ; commands : ordres du back-office pas encore accusés (filet si SignalR est coupé)
-    return Results.Ok(new { version = Notifier.Revision(db, s!), build = playerBuild, serverNow = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), commands = ScreenControl.Pending(s!, DateTime.UtcNow), wakeUntil = Math.Max(Sleep.Woken(s!, DateTime.UtcNow) ? Helpers.EpochMs(s!.WakeUntilUtc!.Value) : 0L, Emergencies.WakeUntilMs(db, s!, DateTime.UtcNow)), emergency = Emergencies.PayloadFor(db, s!, DateTime.UtcNow) });   // urgence : réveille l'écran et le message (null : aucun)   // wakeUntil : réveil manuel demandé (l'app Android le sonde pendant la veille)
+    return Results.Ok(new { version = Notifier.Revision(db, s!), build = playerBuild, serverNow = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), commands = ScreenControl.Pending(s!, DateTime.UtcNow), wakeUntil = Math.Max(Sleep.Woken(s!, DateTime.UtcNow) ? Helpers.EpochMs(s!.WakeUntilUtc!.Value) : 0L, Emergencies.WakeUntilMs(db, s!, DateTime.UtcNow)), emergency = Emergencies.PayloadFor(db, s!, DateTime.UtcNow), notice = Notices.PayloadFor(s!, DateTime.UtcNow) });   // urgence : réveille l'écran et le message (null : aucun)   // wakeUntil : réveil manuel demandé (l'app Android le sonde pendant la veille)
 }));
 
 // Urgence : l'écran confirme afficher le message (rapport de réception du back-office et de l'API).

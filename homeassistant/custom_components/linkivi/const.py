@@ -27,3 +27,8 @@ DEVICE_LABELS = {
     "androidtv": "Player Android TV",
     "web": "Player navigateur",
 }
+
+# Actions (services.py) : afficher un message sur des écrans, le retirer. Aspects acceptés par POST /screens/{id}/display.
+SERVICE_SHOW_MESSAGE = "show_message"
+SERVICE_CLEAR_DISPLAY = "clear_display"
+LOOKS = ["information", "attention"]

@@ -18,6 +18,7 @@ from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import LinkivApi, LinkivAuthError, LinkivError
+from .services import async_register_services
 from .const import CARD_FILE, CARD_URL, CARD_VERSION, DOMAIN, SCAN_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,6 +48,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     path = Path(__file__).parent / "www" / CARD_FILE
     await hass.http.async_register_static_paths([StaticPathConfig(CARD_URL, str(path), False)])
     add_extra_js_url(hass, f"{CARD_URL}?v={CARD_VERSION}")
+    await async_register_services(hass)
     return True
 
 

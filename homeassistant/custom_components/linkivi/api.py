@@ -18,7 +18,7 @@ class LinkivAuthError(LinkivError):
 
 
 class LinkivApi:
-    """Les trois appels dont l'intégration a besoin : /me, /screens et /screens/{id}/commands."""
+    """Les appels dont l'intégration a besoin : /me, /screens, /screens/{id}/commands et /screens/{id}/display."""
 
     def __init__(self, session: aiohttp.ClientSession, base_url: str, api_key: str) -> None:
         self._session = session
@@ -70,3 +70,25 @@ class LinkivApi:
     async def command(self, screen_id: str, command: str) -> dict[str, Any]:
         """Envoie une commande à un écran ; lève LinkivError avec la raison si Linkivi la refuse."""
         return await self._request("POST", f"/screens/{screen_id}/commands", json={"command": command})
+
+    async def display(
+        self,
+        screen_id: str,
+        *,
+        title: str | None,
+        message: str | None,
+        look: str,
+        duration: int,
+        wake: bool,
+    ) -> dict[str, Any]:
+        """Affiche un message un moment par-dessus la diffusion (accès screens:control) ; Linkivi dit pourquoi il refuse (écran hors ligne, en veille…)."""
+        body: dict[str, Any] = {"look": look, "durationSeconds": duration, "wake": wake}
+        if title:
+            body["title"] = title
+        if message:
+            body["message"] = message
+        return await self._request("POST", f"/screens/{screen_id}/display", json=body)
+
+    async def clear_display(self, screen_id: str) -> dict[str, Any]:
+        """Retire le message affiché : la diffusion reprend."""
+        return await self._request("DELETE", f"/screens/{screen_id}/display")
