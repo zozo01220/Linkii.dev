@@ -1,0 +1,891 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquette — L'IA dans Linkivi (trois premières pistes)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="../Linkii.Poc/wwwroot/app.css">
+<style>
+/* ---------- barre de la maquette (hors application) ---------- */
+.mock{position:fixed;top:0;left:0;right:0;z-index:300;background:#fff;border-bottom:1px dashed #CDD3DC;padding:8px 18px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;font:12px/1.4 "IBM Plex Sans",system-ui,sans-serif;color:#6B7686;min-height:45px}
+.mock b{color:#0B1F3A}.mock .lbl2{color:#8E98A8}
+.mseg{display:inline-flex;background:#E8EBF0;border-radius:8px;padding:2px}
+.mseg button{border:0;background:none;padding:5px 11px;border-radius:6px;color:#6B7686;font:inherit;cursor:pointer}
+.mseg button.on{background:#fff;color:#1B2433;box-shadow:0 1px 2px #0002;font-weight:600}
+.mbtn{border:1px solid #CDD3DC;background:#fff;border-radius:8px;padding:5px 11px;font:inherit;color:#1B2433;cursor:pointer;display:inline-flex;gap:6px;align-items:center}
+.mbtn:hover{border-color:#3B82C4}
+.mock .sp{flex:1}
+body{padding-top:45px}
+.shell{min-height:calc(100vh - 45px)}
+.sidebar{top:45px;height:calc(100vh - 45px)}
+.modal-backdrop{top:45px}
+.toasts{top:58px}
+.hint{color:var(--muted);font-size:13px}
+.mk-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:18px}
+.mk-cards div{height:250px;background:#fff;border:1px solid var(--line);border-radius:10px}
+
+/* ---------- IA : éléments communs (couleur = bleu signal de la charte) ---------- */
+.ai-ink{color:#1F5D99}
+.btn.sm{padding:5px 12px;font-size:13.5px;min-height:0}
+.ai-btn{display:inline-flex;align-items:center;gap:6px;border:1px solid #C9DDF0;background:#F2F7FC;color:#1F5D99;border-radius:999px;padding:4px 12px 4px 9px;font:inherit;font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap}
+.ai-btn:hover,.ai-btn[aria-expanded="true"]{border-color:var(--signal);background:#E8F1FA}
+.ai-dots{display:inline-flex;gap:3px;margin-left:2px}
+.ai-dots i{width:5px;height:5px;border-radius:50%;background:currentColor;animation:aidot 1s infinite}
+.ai-dots i:nth-child(2){animation-delay:.15s}.ai-dots i:nth-child(3){animation-delay:.3s}
+@keyframes aidot{0%,80%,100%{opacity:.25}40%{opacity:1}}
+.ai-help{margin:6px 0 0;font-size:12.5px;color:var(--muted);line-height:1.45;display:flex;gap:5px;align-items:flex-start}
+.ai-help svg{flex:none;margin-top:1px}
+
+/* ---------- 1 · écrire un texte ---------- */
+.ai-modal{width:min(660px,calc(100vw - 32px))}
+/* fenêtres centrées (au codage : ajouter .ai-modal aux exceptions de la règle « Tiroirs » d'app.css) */
+@media (min-width:901px){
+  .modal.app-modal.ai-modal{left:50%!important;top:calc(50% + 22px)!important;right:auto!important;bottom:auto!important;transform:translate(-50%,-50%)!important;height:auto!important;max-height:calc(100vh - 90px)!important;border-radius:12px!important;border-width:1px!important;box-shadow:0 24px 60px rgba(11,31,58,.28)!important;animation:none!important}
+}
+.ai-prev{display:flex;align-items:center;height:46px;background:#0B1F3A;color:#fff;border-radius:6px;overflow:hidden;margin-bottom:14px;font-size:17px}
+.ai-prev-l{flex:none;align-self:stretch;display:flex;align-items:center;padding:0 12px;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:#9FB2C8;border-right:1px solid rgba(255,255,255,.14)}
+.ai-tkw{flex:1;min-width:0;overflow:hidden;white-space:nowrap;-webkit-mask-image:linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent);mask-image:linear-gradient(90deg,transparent,#000 3%,#000 97%,transparent)}
+.ai-tkw span{display:inline-block;padding-left:100%;animation:aitk var(--dur,20s) linear infinite}
+@keyframes aitk{to{transform:translateX(-100%)}}
+.ai-field{position:relative}
+.ai-field textarea{width:100%;min-height:98px;padding:9px 11px;font:inherit;font-size:14.5px;line-height:1.45;resize:vertical;display:block}
+.ai-fbar{display:flex;align-items:center;gap:8px;margin-top:7px}
+.ai-meta{font-size:12.5px;color:var(--muted)}
+.ai-adj{display:inline-flex;gap:6px;flex-wrap:wrap}
+.ai-adj button{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line-2);background:#fff;border-radius:999px;padding:3px 11px;font:inherit;font-size:13px;color:var(--ink);cursor:pointer}
+.ai-adj button:hover{border-color:var(--signal);color:#1F5D99}
+.ai-sug{margin-top:12px;border:1px solid #C9DDF0;background:#F6FAFD;border-radius:8px;padding:12px 14px;display:grid;gap:9px}
+.ai-sug-h{display:flex;align-items:center;gap:6px;font-size:13px;color:#1F5D99}
+.ai-sug-h b{font-weight:600}
+.ai-sug-t{margin:0;font-size:15px;line-height:1.5;color:var(--ink)}
+.ai-sug-t ins{text-decoration:none;background:#D7EBDD;color:#0F4D2B;border-radius:2px;padding:0 1px}
+.ai-rv ins{text-decoration:none;background:#D7EBDD;color:#0F4D2B;border-radius:2px;padding:0 2px}
+.ai-sug-t del,.ai-rv del{color:#A2342A;background:#FBE3E0;border-radius:2px;padding:0 2px}
+.ai-sug-m{font-size:12.5px;color:var(--muted)}
+.ai-sug-a{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ai-sug-n{font-size:12px;color:var(--muted)}
+.ai-sug.loading,.ai-sug.none,.ai-sug.done{display:flex;align-items:center;gap:8px;font-size:13.5px;color:#1F5D99}
+.ai-sug.done,.ai-sug.none{border-color:#BFE0CB;background:#F1F9F4;color:var(--ok-ink)}
+.ai-row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+.ai-row2 select{width:100%;padding:7px 10px;font-size:14px}
+
+/* ---------- 2 · relire avant de publier ---------- */
+.ai-bar{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid #F3D2B3;background:#FFF7EF;border-radius:8px;margin:0 0 14px;font-size:14px;color:#7A3D0C}
+.ai-bar.ok{border-color:#BFE0CB;background:#F1F9F4;color:var(--ok-ink)}
+.ai-bar.run{border-color:#C9DDF0;background:#F6FAFD;color:#1F5D99}
+.ai-bar .grow{flex:1}
+.ai-cnt{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:#E8751A;color:#fff;font-size:12px;font-weight:600;margin-left:2px}
+.ai-fil{display:flex;gap:12px;overflow-x:auto;padding:4px 2px 14px}
+.ai-it{flex:none;width:172px;border:1px solid var(--line);border-radius:8px;background:#fff;overflow:hidden;position:relative}
+.ai-it.flagged{border-color:#F0B27A;box-shadow:0 0 0 1px #F0B27A}
+.ai-it .th{aspect-ratio:16/9;background:#E8EBF0;overflow:hidden;position:relative}
+.ai-it .th img{width:100%;height:100%;object-fit:cover;display:block}
+.ai-it .cap{padding:7px 9px 8px}
+.ai-it .nm{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ai-it .mt{font-size:12px;color:var(--muted)}
+.ai-it .no{position:absolute;top:6px;left:6px;font:500 11px/1 var(--mono);background:rgba(11,31,58,.7);color:#fff;padding:3px 5px;border-radius:3px}
+.ai-flag{position:absolute;top:6px;right:6px;min-width:22px;height:22px;border-radius:999px;background:#E8751A;color:#fff;display:grid;place-items:center;font-weight:600;font-size:12px;box-shadow:0 0 0 2px #fff;padding:0 5px}
+.ai-flag.ok{background:#1E8A54}
+.tile{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;gap:3px;padding:8px 11px;line-height:1.15;overflow:hidden}
+.tile.welcome{background:#0B1F3A;color:#fff}
+.tile.welcome b{font-size:14px;font-weight:500}
+.tile.welcome small{font-size:9px;opacity:.7}
+.tile.event{background:#E8751A;color:#fff}
+.tile.event b{font-size:15px;font-weight:600}
+.tile.event small{font-size:10px}
+.tile.menu{background:#fff;color:#0B1F3A;justify-content:flex-start;gap:2px}
+.tile.menu b{font-size:9px;font-weight:600;margin-bottom:2px}
+.tile.menu i{display:block;height:3px;border-radius:2px;background:#C5CED9;margin:1.5px 0}
+.ai-rv{display:grid;grid-template-columns:96px minmax(0,1fr) auto;gap:14px;align-items:center;padding:11px 0;border-top:1px solid var(--line)}
+.ai-rv:first-child{border-top:0;padding-top:2px}
+.ai-rv-th{width:96px;aspect-ratio:16/9;border-radius:4px;overflow:hidden;background:#E8EBF0;position:relative}
+.ai-rv-th img{width:100%;height:100%;object-fit:cover;display:block}
+.ai-rv-th .tile{padding:4px 6px}.ai-rv-th .tile b{font-size:9px}.ai-rv-th .tile small{font-size:7px}
+.ai-kind{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#B4541A}
+.ai-kind.red{color:#A2342A}
+.ai-rv b.nm{display:block;font-weight:500;font-size:14px;margin-top:2px}
+.ai-rv p{margin:2px 0 0;font-size:13.5px;color:var(--muted);line-height:1.45}
+.ai-rv q{color:var(--ink)}
+.ai-rv mark{background:#FFE7C7;color:#6B3A00;padding:0 2px;border-radius:2px}
+.ai-rv-a{display:flex;gap:10px;align-items:center;justify-content:flex-end}
+.ai-rv.res{opacity:.75}
+.ai-res{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;color:var(--ok-ink)}
+.ai-res.ign{color:var(--muted)}
+.ai-foot-n{margin-right:auto;align-self:center;font-size:12.5px;color:var(--muted);display:inline-flex;align-items:center;gap:6px}
+
+/* ---------- 3 · médiathèque ---------- */
+.ai-suggest{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--muted);margin:2px 0 14px}
+.ai-chip{border:1px solid var(--line-2);background:#fff;border-radius:999px;padding:3px 11px;font:inherit;font-size:13px;color:var(--ink);cursor:pointer}
+.ai-chip:hover{border-color:var(--signal)}
+.ai-sline{display:flex;align-items:center;gap:7px;font-size:13px;color:#1F5D99;margin:2px 0 14px}
+.ai-sline.off{color:var(--muted)}
+.lx-mc .th{position:relative}
+.ai-match{position:absolute;left:8px;bottom:8px;z-index:2;display:inline-flex;align-items:center;gap:4px;max-width:calc(100% - 16px);background:rgba(11,31,58,.8);color:#fff;font-size:11.5px;padding:2px 9px 2px 7px;border-radius:999px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ai-noresult{padding:28px;text-align:center;color:var(--muted);font-size:14px}
+.ai-dr-bd{position:fixed;inset:45px 0 0 0;background:rgba(11,31,58,.4);z-index:120}
+.hint .ico-svg{vertical-align:-2px}
+.ai-dr{position:fixed;top:45px;right:0;bottom:0;width:430px;max-width:100vw;background:#fff;border-left:1px solid var(--line);box-shadow:-10px 0 28px rgba(11,31,58,.16);z-index:121;display:flex;flex-direction:column;animation:aidr .18s ease-out}
+@keyframes aidr{from{transform:translateX(30px);opacity:.4}}
+.ai-dr-h{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line)}
+.ai-dr-h h3{margin:0;font-size:16px;font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ai-dr-b{overflow:auto;padding:16px 18px 28px;display:grid;gap:20px;align-content:start}
+.ai-dr-img{border-radius:6px;overflow:hidden;background:#E8EBF0;aspect-ratio:16/9}
+.ai-dr-img img{width:100%;height:100%;object-fit:cover;display:block}
+.ai-dr-meta{font-size:12.5px;color:var(--muted);margin-top:-12px}
+.ai-sec h4{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 8px}
+.ai-sec h4 .by{margin-left:auto;text-transform:none;letter-spacing:0;color:#1F5D99;font-size:12px;display:inline-flex;gap:4px;align-items:center;font-weight:400}
+.ai-tags{display:flex;flex-wrap:wrap;gap:6px}
+.ai-tag{display:inline-flex;align-items:center;gap:3px;padding:3px 4px 3px 10px;border-radius:999px;background:var(--row);font-size:13px;color:var(--ink)}
+.ai-tag button{border:0;background:none;color:var(--muted);cursor:pointer;width:18px;height:18px;border-radius:50%;display:grid;place-items:center;padding:0}
+.ai-tag button:hover{background:#D9E0E8;color:var(--ink)}
+.ai-tag.add{background:none;border:1px dashed var(--line-2);padding:3px 11px;color:var(--muted);cursor:pointer;font:inherit;font-size:13px;gap:5px}
+.ai-tag-in{width:150px;padding:3px 10px;border-radius:999px;font:inherit;font-size:13px}
+.ai-desc{width:100%;min-height:72px;font:inherit;font-size:14px;line-height:1.45;padding:8px 10px;resize:vertical;display:block}
+.ai-read{border:1px solid var(--line);border-radius:6px;padding:9px 11px;font-size:14px;line-height:1.5}
+.ai-read q{display:inline-block;margin-right:6px}
+.ai-read.none{color:var(--muted);font-size:13.5px;display:flex;gap:6px;align-items:flex-start}
+.ai-read .w{display:flex;gap:6px;align-items:flex-start;color:#B4541A;font-size:13px;margin-top:7px;line-height:1.4}
+.ai-read svg{flex:none;margin-top:2px}
+.ai-crop{display:flex;gap:16px;align-items:flex-end}
+.ai-crop figure{margin:0;display:grid;gap:5px;font-size:12px;color:var(--muted);text-align:center}
+.ai-crop .f{border-radius:4px;overflow:hidden;background:#0B1F3A;position:relative}
+.ai-crop .f img{width:100%;height:100%;object-fit:cover;display:block}
+.ai-crop .land{width:200px;aspect-ratio:16/9;cursor:crosshair}
+.ai-crop .port{width:66px;aspect-ratio:9/16;outline:2px solid var(--ink);outline-offset:1px}
+.ai-crop .box{position:absolute;top:0;bottom:0;border:2px solid #fff;box-shadow:0 0 0 999px rgba(11,31,58,.5);pointer-events:none;transition:left .2s}
+.ai-focus{position:absolute;top:50%;width:14px;height:14px;border-radius:50%;border:2px solid #fff;background:var(--signal);transform:translate(-50%,-50%);pointer-events:none;transition:left .2s}
+.ai-warnbox{display:flex;gap:8px;align-items:flex-start;padding:10px 12px;border:1px solid #F3D2B3;background:#FFF7EF;border-radius:6px;color:#7A3D0C;font-size:13.5px;line-height:1.45}
+.ai-warnbox svg{flex:none;margin-top:1px}
+.ai-btn.lock{border-color:var(--line-2);background:#fff;color:var(--ink)}
+.ai-btn .plan-tag{margin-left:2px;display:inline-flex;align-items:center;gap:3px;white-space:nowrap}
+.ai-btn,.ai-sug .btn,.ai-sug .linklike,.ai-bar .btn{white-space:nowrap}
+.ai-sug.up span:not(.grow){min-width:0}
+.ai-sug.up{display:flex;align-items:center;gap:10px;font-size:13.5px;color:var(--ink);border-color:#E7D3A2;background:#FFFAEB}
+.ai-sug.up svg{color:#B7791F;flex:none}
+.ai-sug.paused{border-color:#F3D2B3;background:#FFF7EF;color:#7A3D0C}
+.ai-bar.up{border-color:var(--line);background:#fff;color:var(--muted)}
+.ai-bar.up svg{color:#B7791F}
+.ai-sline.off svg{color:#B7791F;flex:none}
+.ai-lock{display:grid;gap:12px;justify-items:start;padding:22px}
+.ai-lock>svg{color:#B7791F}
+.ai-lock h3{margin:0;font-size:17px}
+.ai-lock ul{margin:0;padding-left:18px;color:var(--muted);font-size:14px;line-height:1.55}
+.ai-lock b{color:var(--ink);font-weight:500}
+.ai-adm{display:grid;gap:0;max-width:880px}
+.ai-adm-g{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.ai-adm-g select{width:100%;padding:7px 10px;font-size:14px}
+.ai-key{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.ai-key input{flex:1;min-width:220px;padding:7px 10px;font:inherit;font-size:14px}
+.ai-keyv{font:500 13px var(--mono);background:var(--row);padding:6px 10px;border-radius:4px}
+.ai-ok{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:var(--ok-ink)}
+.ai-tbl{width:100%;border-collapse:collapse;font-size:14px}
+.ai-tbl th{font-size:11.5px;font-weight:500;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+.ai-tbl td{padding:9px 8px;border-bottom:1px solid var(--line)}
+.ai-tbl tr:last-child td{border-bottom:0}
+.ai-tbl .r{text-align:right}
+.ai-no{color:var(--muted)}.ai-yes{color:var(--ok-ink);font-weight:500}
+.ai-n{width:90px;text-align:right;padding:5px 8px;font:inherit;font-size:14px}
+.ai-off{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:13.5px;border:1px dashed var(--line-2);border-radius:6px;padding:10px 12px}
+
+/* ---------- réglages ---------- */
+.ai-q{display:grid;gap:8px}
+.ai-q-n{font-size:14px}.ai-q-n b{font-size:20px;font-weight:600;margin-right:3px}
+.ai-q-bar{display:flex;height:10px;border-radius:999px;background:var(--row);overflow:hidden}
+.ai-q-bar i{display:block;height:100%}
+.ai-q-bar .c1,.ai-q-leg .c1{background:#2F6FAD}.ai-q-bar .c2,.ai-q-leg .c2{background:#E8751A}.ai-q-bar .c3,.ai-q-leg .c3{background:#1E8A54}
+.ai-q-leg{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+.ai-q-leg span{display:inline-flex;align-items:center;gap:6px}
+.ai-q-leg i{width:9px;height:9px;border-radius:2px;display:inline-block}
+.ai-priv{display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:13.5px;line-height:1.5}
+.ai-priv b{font-weight:500;display:flex;gap:6px;align-items:center;margin-bottom:4px}
+.ai-priv ul{margin:0;padding-left:18px;color:var(--muted)}
+.ai-priv .hint{grid-column:1/-1;margin:0}
+.ai-save{position:sticky;bottom:12px;z-index:30;display:flex;align-items:center;gap:10px;background:#0B1F3A;color:#fff;border-radius:8px;padding:10px 12px 10px 16px;box-shadow:0 10px 28px rgba(11,31,58,.25);font-size:14px;margin-top:8px}
+.ai-save .grow{flex:1}
+.ai-save .btn.ghost{color:#fff;border-color:rgba(255,255,255,.35);background:transparent}
+.ai-new{font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#1F5D99;background:#E8F1FA;border-radius:3px;padding:1px 5px;margin-left:auto}
+
+/* ---------- notes de la maquette ---------- */
+.mk-notes{position:fixed;top:45px;right:0;bottom:0;width:420px;z-index:310;background:#fff;border-left:1px solid var(--line);box-shadow:-8px 0 24px rgba(11,31,58,.18);overflow:auto;padding:16px 20px 28px;transform:translateX(105%);transition:transform .2s;font-size:13.5px;line-height:1.5}
+.mk-notes.open{transform:none}
+.mk-notes h3{font-size:16px;margin:0 0 2px}
+.mk-notes h4{font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:18px 0 6px;font-weight:500}
+.mk-notes ol,.mk-notes ul{padding-left:18px;margin:0}
+.mk-notes li{margin:5px 0}
+.mk-notes .x{position:absolute;top:10px;right:10px}
+.mk-notes .prop{color:var(--muted)}
+</style>
+</head>
+<body>
+
+<div class="mock" id="mock">
+  <b>Maquette</b><span>L'IA dans Linkivi</span>
+  <span class="lbl2">Piste :</span>
+  <span class="mseg" id="mk-scen">
+    <button data-scen="ecrire" class="on">1 · Écrire</button><button data-scen="relire">2 · Relire</button><button data-scen="media">3 · Médiathèque</button><button data-scen="reglages">Réglages client</button><button data-scen="admin">Admin Linkivi</button>
+  </span>
+  <span class="lbl2">Plan du client :</span>
+  <span class="mseg" id="mk-plan"><button data-plan="essential">Essential</button><button data-plan="trial">Essai gratuit</button><button data-plan="pro" class="on">Pro</button></span>
+  <label class="mbtn" style="cursor:pointer"><input type="checkbox" id="mk-quota"> Quota du mois atteint</label>
+  <span class="sp"></span>
+  <button class="mbtn" id="mk-reset" title="Remet la maquette dans son état de départ">Recommencer</button>
+  <button class="mbtn" id="mk-notes-btn">Décisions et notes</button>
+</div>
+
+<div class="shell has-tabs">
+<aside class="sidebar "><div class="brand"><span class="brand-plan plan-chip pro" title="Plan de votre organisation"><svg class="ico-svg" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 19h18M4 6l4 4 4-6 4 6 4-4-2 13H6z"></path></svg>Pro</span><span class="brand-logo" data-tip="Linkivi · Pro"><img class="bl-long" src="../Linkii.Poc/wwwroot/brand/logo-long.png" alt="Linkivi"><img class="bl-short" src="../Linkii.Poc/wwwroot/brand/logo-court.png" alt=""></span><span class="brand-meta"><span class="plan-tag pro" title="Plan de votre organisation"><svg class="ico-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 19h18M4 6l4 4 4-6 4 6 4-4-2 13H6z"></path></svg>Pro</span></span>
+<button type="button" class="nav-fold" aria-label="Replier le menu" aria-expanded="true" data-tip="Replier le menu"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"></path></svg></button></div><a class="nav active" aria-current="page" data-tip="Écrans"><svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"></rect><path d="M8 21h8M12 17v4"></path></svg> Écrans <span class="nbadges"><span class="nbadge off" title="3 écrans hors ligne">3</span></span></a><a class="nav" data-tip="Listes de diffusion"><svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"></path></svg> Listes de diffusion </a><a class="nav" data-tip="Contenus"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><path d="M21 15l-5-5L5 21"></path></svg> Contenus </a><div class="nav-sep" role="separator"></div>
+<a data-tip="Programmations" class="nav"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M3 10h18M8 3v4M16 3v4"></path></svg> Programmations</a><div class="nav-sep" role="separator"></div>
+<button type="button" class="nav nav-group open " aria-expanded="true" data-tip="Applications"><svg class="ico-svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><path d="M17.5 14v7M14 17.5h7"></path></svg> Applications <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"></path></svg></button><div class="nav-sub"><a data-tip="Google Slides" class="nav nav-app"><svg class="ico-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="3" width="14" height="14" rx="2"></rect><path d="M3 7v12a2 2 0 0 0 2 2h12"></path><circle cx="12" cy="8" r="1.3"></circle><path d="M21 13l-4-4-6 6"></path></svg> Google Slides</a><a data-tip="Home Assistant" class="nav nav-app"><svg class="ico-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8M5 9.5V21h14V9.5"></path><path d="M10 21v-6h4v6"></path></svg> Home Assistant</a><a data-tip="Store" class="nav nav-store"><svg class="ico-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l1.5-5h15L21 9"></path><path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"></path><path d="M5 12v8h14v-8"></path><path d="M10 20v-5h4v5"></path></svg> Store</a><a data-tip="Gérer mes applications" class="nav nav-manage"><svg class="ico-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"></path></svg> Gérer mes applications</a></div><div class="spacer"></div><a class="nav" data-tip="Organisation"><svg class="ico-svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 10h18M9 5v14"></path></svg> Organisation </a><a class="nav" data-tip="Statistiques"><svg viewBox="0 0 24 24"><path d="M3 3v18h18"></path><path d="M7 15l4-4 3 3 6-6"></path></svg> Statistiques</a><a class="nav" data-tip="Historique"><svg class="ico-svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg> Historique</a></aside>
+<div class="main-col">
+  <header class="qbar" aria-label="Accès rapides"><div class="org">Mon organisation</div> <div class="grow"></div><button type="button" class="qb-btn store" data-t="Store d'applications"><svg class="ico-svg" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l1.5-5h15L21 9"></path><path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"></path><path d="M5 12v8h14v-8"></path><path d="M10 20v-5h4v5"></path></svg><span>Store</span></button><span class="sep2" aria-hidden="true"></span><div class="qb-wrap"><button type="button" class="qb-btn" data-t="Aide" aria-label="Aide"><svg class="ico-svg" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"></circle><path d="M9.5 9.3a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.2-2.5 3.8M12 17.5h.01"></path></svg></button></div><div class="qb-wrap"><button type="button" class="qb-me" aria-label="Compte"><span class="avatar">MO</span><svg class="ico-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button></div></header>
+  <main class="content" id="page"></main>
+</div>
+</div>
+
+<aside class="mk-notes" id="mk-notes" aria-label="Notes de la maquette">
+  <button class="modal-x x" id="mk-notes-x" aria-label="Fermer">×</button>
+  <h3>L'IA dans Linkivi</h3>
+  <p class="hint" style="margin:0">Trois premières pistes, les moins risquées. Rien n'est codé.</p>
+
+  <h4>Règle n° 1 : extrêmement simple</h4>
+  <ul>
+    <li><b>Un clic, une proposition, deux choix.</b> « Améliorer » corrige et resserre d'un coup ; on répond Remplacer ou Ignorer. « Plus court » et « Traduire » n'apparaissent qu'après, pour qui en a besoin.</li>
+    <li><b>Rien à lancer.</b> La relecture et l'analyse des images se font toutes seules, en arrière-plan. L'utilisateur voit le résultat, jamais la machine.</li>
+    <li><b>Rien à régler.</b> Tout est activé d'office ; l'administrateur peut couper dans Réglages.</li>
+    <li><b>Pas de jargon.</b> Jamais « prompt », « modèle », « génératif » dans l'interface. Pas de zone « demande libre ».</li>
+    <li><b>Rien d'irréversible.</b> Chaque remplacement a son « Revenir à l'ancien », chaque remarque son « Annuler ».</li>
+  </ul>
+
+  <h4>Principes</h4>
+  <ul>
+    <li><b>L'IA propose, vous décidez.</b> Aucun texte remplacé, aucun contenu retiré, rien de publié sans un clic.</li>
+    <li><b>Back-office seulement.</b> Le player ne parle jamais à l'IA : il reste utilisable hors ligne.</li>
+    <li><b>Même bouton partout</b> (« ✦ Améliorer ») : textes de l'éditeur de compositions, bandeaux, messages.</li>
+    <li><b>Une fonction coupée disparaît</b> de l'interface (essayez dans l'onglet Réglages).</li>
+  </ul>
+
+  <h4>Clé, plans et quota (essayez la barre du haut)</h4>
+  <ul>
+    <li><b>Une seule clé pour toute la plateforme</b>, saisie une fois dans la console admin (onglet « Admin Linkivi »). Les clients n'ont rien à configurer.</li>
+    <li><b>Pro et Enterprise seulement.</b> Free et Essential voient « Améliorer » avec la pastille Pro, et un message « comprise dans le plan Pro » au clic (bouton « Plan du client : Essential »).</li>
+    <li><b>Quota par organisation</b> et plafond de dépense global. Quota atteint : l'IA se met en pause avec un message clair, le reste de Linkivi continue (case « Quota du mois atteint »).</li>
+    <li><b>Interrupteur d'urgence</b> dans la console admin pour couper l'IA chez tous les clients.</li>
+    <li>Fournisseur interchangeable : Anthropic direct, OpenRouter ou modèle sur notre serveur, sans rien changer d'autre.</li>
+  </ul>
+
+  <h4>Décisions ouvertes</h4>
+  <ol>
+    <li class="prop"><b>Décidé :</b> quotas de 1 000 (Pro) et 4 000 (Enterprise) demandes par mois ; plafond de dépense global de 25 $ par mois ; essai gratuit avec l'IA et un quota très bas (20 demandes au total, réglable, interrupteur dans la console admin).</li>
+    <li><b>Relecture :</b> seulement signaler <span class="prop">(proposé)</span>, ou bloquer la publication tant qu'une remarque n'est pas traitée ? Sans remarque, « Publier » publie tout de suite.</li>
+    <li><b>Activé d'office</b> <span class="prop">(proposé, plus simple)</span>, ou à activer par l'administrateur du client (plus prudent pour la confidentialité) ?</li>
+    <li><b>Mode Simple :</b> les trois fonctions <span class="prop">(proposé, puisque tout tient en un clic)</span> ?</li>
+    <li><b>Traduction :</b> remplacer le texte <span class="prop">(maquette)</span>, ou ajouter une deuxième langue qui alterne à l'écran ?</li>
+    <li><b>Ton (chaleureux, formel), demande libre :</b> écartés pour rester simple. Plus tard, ou jamais ?</li>
+    <li><b>Couleur de l'IA :</b> bleu signal de la charte <span class="prop">(maquette)</span>, ou une couleur à part ?</li>
+    <li><b>Fournisseur :</b> Anthropic direct <span class="prop">(proposé)</span> ou OpenRouter ; un choix propre aux clients Enterprise (Azure, etc.) plus tard ?</li>
+  </ol>
+
+  <h4>Coûts, ordre de grandeur</h4>
+  <ul>
+    <li>Réécrire un texte : de 0,0002 $ (modèle léger) à 0,01 $ (modèle haut de gamme).</li>
+    <li>Relire une liste de 10 contenus : de moins d'un centime à environ 0,10 $.</li>
+    <li>Analyser 1 000 images : environ 0,25 $ avec un modèle léger.</li>
+  </ul>
+
+  <h4>À vérifier</h4>
+  <ul>
+    <li>Le texte « ne servent pas à entraîner les modèles » (Réglages) : à confirmer dans le contrat du fournisseur retenu.</li>
+    <li>Le seuil « lisible à moins de 2 m » : règle simple (taille du texte, taille de l'écran) à caler sur de vrais écrans.</li>
+  </ul>
+
+  <h4>Hors maquette (2e vague)</h4>
+  <ul>
+    <li>Composition à partir d'une phrase ; Premiers pas à partir du site web de l'organisation.</li>
+    <li>Assistant qui agit (programmations, listes) via l'API, avec confirmation.</li>
+  </ul>
+</aside>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script>
+(function(){
+const $=s=>document.querySelector(s);
+const page=$('#page');
+const IMG='img-bandeaux/';
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* ---------- icônes (même trait que l'app) ---------- */
+const P={
+ spark:'<path d="M12 3.5l1.9 4.9 4.9 1.9-4.9 1.9L12 17.1l-1.9-4.9-4.9-1.9 4.9-1.9z"/><path d="M18.5 15.5l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z"/>',
+ x:'<path d="M6 6l12 12M18 6L6 18"/>',
+ check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+ send:'<path d="M4 12l16-8-6 16-2.5-6.5z"/>',
+ eye:'<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+ cal:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+ type:'<path d="M5 6V4h14v2M12 4v16M9 20h6"/>',
+ spell:'<path d="M4 16l4-10 4 10M5.5 12.5h5M14 15l2.5 2.5L21 12"/>',
+ search:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
+ image:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>',
+ plus:'<path d="M12 5v14M5 12h14"/>',
+ chev:'<path d="M6 9l6 6 6-6"/>',
+ short:'<path d="M4 7h16M4 12h10M4 17h6"/>',
+ smile:'<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5c1.8 2 5.2 2 7 0M9 9.5h.01M15 9.5h.01"/>',
+ tie:'<path d="M10 3h4l-1 3 2 11-3 4-3-4 2-11z"/>',
+ alert:'<path d="M12 3.5l9.5 16.5h-19z"/><path d="M12 10v4.5M12 17.5h.01"/>',
+ undo:'<path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
+ play:'<path d="M7 5l12 7-12 7z"/>',
+ chart:'<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+ building:'<rect x="4" y="3" width="16" height="18" rx="1"/><path d="M9 7h1M14 7h1M9 11h1M14 11h1M9 15h1M14 15h1M10 21v-3h4v3"/>',
+ monitor:'<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
+ moon:'<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+ bell:'<path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+ shield:'<path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z"/>',
+ mega:'<path d="M3 10v4h4l8 5V5L7 10z"/><path d="M18.5 8.5a5 5 0 0 1 0 7"/>',
+ link:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+ tool:'<path d="M14.5 6.5a4 4 0 0 0-5.3 5.3L3 18l3 3 6.2-6.2a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.5-2.5z"/>',
+ file:'<path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/>',
+ user:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/>',
+ lock:'<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+ send2:'<path d="M5 12h14M13 6l6 6-6 6"/>',
+ crown:'<path d="M3 19h18M4 6l4 4 4-6 4 6 4-4-2 13H6z"/>'
+};
+const I=(n,s=16)=>'<svg class="ico-svg" viewBox="0 0 24 24" width="'+s+'" height="'+s+'" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(P[n]||'')+'</svg>';
+
+function toast(msg){
+  const t=document.createElement('div');
+  t.className='toast'; t.style.background='#0B1F3A';
+  t.innerHTML='<span class="toast-text">'+msg+'</span>';
+  $('#toasts').append(t); setTimeout(()=>t.remove(),3400);
+}
+
+/* ---------- état de la maquette ---------- */
+const ORIG="bienvenu à tous nos visiteurs, la cafétéria est ouverte de 11h30 a 14h, pensez a réserver votre salle de réunion sur la borne du hall ou depuis votre téléphone en scannant le code QR qui se trouve à coté de l'acceuil";
+/* Un seul bouton « Améliorer » = corriger + rendre lisible à l'écran. Les ajustements n'apparaissent qu'après. */
+const VARS={
+ improve:{label:'Texte corrigé et resserré',diff:true,v:["Bienvenue à tous nos visiteurs ! La cafétéria est ouverte de 11 h 30 à 14 h. Réservez votre salle de réunion sur la borne du hall ou avec le code QR de l'accueil."]},
+ short:{label:'Plus court',v:["Bienvenue ! Cafétéria ouverte de 11 h 30 à 14 h · Réservez votre salle sur la borne du hall ou avec le code QR de l'accueil.","Bienvenue ! Cafétéria : 11 h 30 – 14 h · Salles : borne du hall ou code QR."]},
+ en:{label:'En anglais',v:["Welcome! The cafeteria is open from 11:30 am to 2 pm. Book a meeting room at the kiosk in the hall, or scan the QR code at reception."]},
+ de:{label:'En allemand',v:["Willkommen! Die Cafeteria ist von 11.30 bis 14 Uhr geöffnet. Besprechungsräume buchen Sie am Terminal in der Halle oder über den QR-Code am Empfang."]},
+ it:{label:'En italien',v:["Benvenuti! La caffetteria è aperta dalle 11:30 alle 14:00. Prenotate una sala riunioni al totem dell'atrio o con il codice QR della reception."]},
+ es:{label:'En espagnol',v:["¡Bienvenidos! La cafetería abre de 11:30 a 14:00. Reserve su sala de reuniones en el terminal del vestíbulo o con el código QR de la recepción."]}
+};
+
+const MEDIA=[
+ {id:'859601',f:'859601.jpg',name:'Coucher de soleil à Malibu',size:'386 Ko',tags:['plage','planche de surf','coucher de soleil','mer','texte'],desc:"Une planche de surf posée sur une plage au coucher du soleil, avec le titre « Coucher de soleil à Malibu ».",text:['Coucher de soleil à Malibu'],tpl:false,fx:null},
+ {id:'71c8ff',f:'71c8ff.jpg',name:'Nature et randonnée',size:'512 Ko',tags:['ponton','mer','randonneur','montagne','route','coucher de soleil','personne','texte'],desc:"Collage : un ponton en bois vers la mer, un randonneur en montagne, une route au coucher du soleil et un bloc de texte.",text:['Insérez votre texte ici'],tpl:true,fx:null},
+ {id:'62e697',f:'62e697.webp',name:'Road trip côte ouest',size:'148 Ko',tags:['rochers','mer','pont suspendu','brouillard','personne','titre','texte'],desc:"Diapositive de titre « Road trip côte ouest » avec trois photos : des rochers, une personne en baskets et un pont dans le brouillard.",text:['ROAD TRIP CÔTE OUEST','Votre Nom • Sept. 20XX'],tpl:true,fx:null},
+ {id:'3d19f7',f:'3d19f7.jpg',name:'Plage et bambous',size:'468 Ko',tags:['plage','vagues','mer','forêt','bambous','coucher de soleil','nature'],desc:"Deux photos côte à côte : des vagues sur une plage au soleil couchant et une forêt de bambous vue d'en bas.",text:[],fx:26,focus:'la plage'},
+ {id:'649bf2',f:'649bf2.jpg',name:'Triptyque bord de mer',size:'402 Ko',tags:['rochers','mer','vagues','personne','baskets','pont suspendu','brouillard'],desc:"Trois photos verticales : des rochers battus par les vagues, les jambes d'une personne en baskets blanches, un pont suspendu dans le brouillard.",text:[],fx:50,focus:'la personne'},
+ {id:'e4ecb8',f:'e4ecb8.jpg',name:'Nuit et désert',size:'355 Ko',tags:['ciel étoilé','nuit','mer','paddle','désert','personne'],desc:"Collage : un ciel étoilé, une personne en paddle au crépuscule et une femme qui danse dans un désert de pierres.",text:[],fx:72,focus:'la personne qui danse'}
+];
+const byId=id=>MEDIA.find(m=>m.id===id);
+
+const LIST=[
+ {k:'cmp',tile:'welcome',name:'Bienvenue',mt:'Composition · 10 s'},
+ {k:'img',f:'859601.jpg',name:'Coucher de soleil à Malibu',mt:'Image · 10 s'},
+ {k:'img',f:'62e697.webp',name:'Road trip côte ouest',mt:'Image · 10 s'},
+ {k:'cmp',tile:'event',name:"Soirée d'automne",mt:'Composition · 15 s'},
+ {k:'img',f:'71c8ff.jpg',name:'Nature et randonnée',mt:'Image · 10 s'},
+ {k:'cmp',tile:'menu',name:'Menu de la semaine',mt:'Composition · 20 s'},
+ {k:'img',f:'3d19f7.jpg',name:'Plage et bambous',mt:'Image · 10 s'},
+ {k:'img',f:'649bf2.jpg',name:'Triptyque bord de mer',mt:'Image · 10 s'},
+ {k:'img',f:'e4ecb8.jpg',name:'Nuit et désert',mt:'Image · 10 s'}
+];
+const REV=[
+ {i:3,kind:'Date passée',red:true,ico:'cal',p:"On lit : <q><mark>jeudi 15 octobre, 18 h</mark></q>. C'était il y a 26 jours.",acts:[['remove','Retirer de la liste']]},
+ {i:2,kind:'Texte de modèle oublié',ico:'type',p:"On lit sur l'image : <q><mark>Votre Nom • Sept. 20XX</mark></q>",acts:[['open','Ouvrir']]},
+ {i:4,kind:'Texte de modèle oublié',ico:'type',p:"On lit sur l'image : <q><mark>Insérez votre texte ici</mark></q>, six fois.",acts:[['open','Ouvrir']]},
+ {i:0,kind:"Faute d'orthographe",ico:'spell',p:"<q><del>Bienvenu</del> <ins>Bienvenue</ins> à tous nos visiteurs</q>",acts:[['fix','Corriger']]},
+ {i:5,kind:'Difficile à lire de loin',ico:'eye',p:"Texte de 14 px sur des écrans de 55 pouces : lisible à moins de 2 m environ.",acts:[['open','Ouvrir']]}
+];
+const RESLBL={remove:'Retiré de la liste',fix:'Corrigé',open:'Ouvert pour correction',ignore:'Ignoré'};
+
+let S;
+/* Plan et quota : l'IA n'existe qu'à partir de Pro ; au-delà du quota du mois elle se met en pause. */
+const isPro=()=>S.plan!=='essential';   // Pro, Enterprise et essai gratuit (quota très bas)
+const isTrial=()=>S.plan==='trial';
+const QUOTA=()=>isTrial()?20:1000;
+const rvOn=()=>S.review&&isPro()&&!S.quota;
+const mOn=()=>S.media&&isPro()&&!S.quota;
+const wOn=()=>S.write&&isPro()&&!S.quota;
+const resetDate='1er décembre';
+const pauseUntil=()=>isTrial()?"jusqu'au passage au plan Pro":"jusqu'au "+resetDate;
+function reset(){
+  S={scen:S?S.scen:'ecrire',plan:'pro',quota:false,
+     write:true,review:true,media:true, draft:null,
+     text:ORIG, prev:null, sug:null,
+     revRan:false, revOpen:false, res:{}, published:false,
+     q:'', open:null, adding:false,
+     tags:Object.fromEntries(MEDIA.map(m=>[m.id,m.tags.slice()])),
+     desc:Object.fromEntries(MEDIA.map(m=>[m.id,m.desc])),
+     fx:Object.fromEntries(MEDIA.map(m=>[m.id,m.fx]))};
+}
+reset();
+
+/* ---------- menu latéral : entrée active selon la piste ---------- */
+const NAV={ecrire:'Écrans',relire:'Listes de diffusion',media:'Contenus',reglages:null,admin:null};
+function setNav(){
+  const pl=S.plan==='pro'?'Pro':S.plan==='trial'?'Essai':'Essential';
+  document.querySelectorAll('.brand-plan,.plan-tag').forEach(el=>{const n=[...el.childNodes].reverse().find(x=>x.nodeType===3);if(n)n.textContent=pl;});
+  document.querySelectorAll('.sidebar a.nav').forEach(a=>{
+    const on=a.dataset.tip===NAV[S.scen];
+    a.classList.toggle('active',on);
+    if(on) a.setAttribute('aria-current','page'); else a.removeAttribute('aria-current');
+  });
+}
+
+function render(){
+  setNav();
+  document.querySelectorAll('#mk-scen button').forEach(b=>b.classList.toggle('on',b.dataset.scen===S.scen));
+  ({ecrire:rEcrire,relire:rRelire,media:rMedia,reglages:rReglages,admin:rAdmin})[S.scen]();
+}
+
+/* =====================================================================
+   1 · Écrire un texte
+   ===================================================================== */
+const secs=t=>Math.max(4,Math.round(t.length/12));
+function diff(a,b){
+  const cut=s=>s.split(/(\s+|[,.!?;:])/).filter(Boolean);
+  const A=cut(a),B=cut(b),n=A.length,m=B.length;
+  const dp=Array.from({length:n+1},()=>new Uint16Array(m+1));
+  for(let i=n-1;i>=0;i--)for(let j=m-1;j>=0;j--)dp[i][j]=A[i]===B[j]?dp[i+1][j+1]+1:Math.max(dp[i+1][j],dp[i][j+1]);
+  const ws=s=>/^\s+$/.test(s);let i=0,j=0,o='';
+  while(i<n&&j<m){
+    if(A[i]===B[j]){o+=esc(A[i]);i++;j++;}
+    else if(dp[i+1][j]>=dp[i][j+1]){i++;}
+    else{o+=ws(B[j])?esc(B[j]):'<ins>'+esc(B[j])+'</ins>';j++;}
+  }
+  for(;j<m;j++)o+=ws(B[j])?esc(B[j]):'<ins>'+esc(B[j])+'</ins>';
+  return o;
+}
+/* Proposition : le nouveau texte (mots changés surlignés), deux choix, puis de petits ajustements facultatifs. */
+function sugHtml(){
+  const g=S.sug; if(!g) return '';
+  if(g.locked) return '<div class="ai-sug up">'+I('crown',16)+'<span><b>L\'aide de l\'IA est comprise dans le plan Pro.</b> Elle corrige, raccourcit et traduit vos textes en un clic.</span><span class="grow"></span><button type="button" class="btn sm" data-s="plans">Voir les plans</button><button type="button" class="linklike" data-s="close">Plus tard</button></div>';
+  if(g.paused) return '<div class="ai-sug none paused">'+I('alert',16)+'<span>L\'aide de l\'IA est en pause '+pauseUntil()+' : le quota du mois est atteint. Vous pouvez continuer à écrire le texte vous-même.</span><span class="grow"></span><button type="button" class="linklike" data-s="close">Fermer</button></div>';
+  if(g.loading) return '<div class="ai-sug loading">'+I('spark',15)+"<span>L'IA écrit</span><span class=\"ai-dots\"><i></i><i></i><i></i></span></div>";
+  if(g.none) return '<div class="ai-sug none">'+I('check',15)+'<span>Rien à améliorer : le texte est déjà clair.</span><span class="grow"></span><button type="button" class="linklike" data-s="close">Fermer</button></div>';
+  if(g.applied) return '<div class="ai-sug done">'+I('check',15)+'<span>Texte remplacé.</span><span class="grow"></span><button type="button" class="linklike" data-s="undo">'+I('undo',14)+' Revenir à l\'ancien</button></div>';
+  const sb=secs(S.text),sa=secs(g.text);
+  return '<div class="ai-sug" role="region" aria-label="Proposition de l\'IA">'+
+    '<div class="ai-sug-h">'+I('spark',15)+'<b>'+esc(g.label)+'</b><span class="grow"></span><span class="ai-sug-m">'+(sa<sb?'défile en '+sa+' s au lieu de '+sb+' s':S.text.length+' → '+g.text.length+' caractères')+'</span></div>'+
+    '<p class="ai-sug-t">'+(g.diff?diff(S.text,g.text):esc(g.text))+'</p>'+
+    '<div class="ai-sug-a"><button type="button" class="btn sm" data-s="apply">'+I('check',15)+' Remplacer</button><button type="button" class="btn ghost sm" data-s="close">Ignorer</button>'+
+      '<span class="grow"></span>'+
+      (g.langs
+        ?'<span class="ai-adj">'+['en','de','it','es'].map(l=>'<button type="button" data-s="'+l+'">'+VARS[l].label.replace('En ','')+'</button>').join('')+'</span>'
+        :'<span class="ai-adj"><button type="button" data-s="short">'+I('short',13)+' Plus court</button><button type="button" data-s="langs">Traduire…</button></span>')+
+    '</div>'+
+  '</div>';
+}
+function rEcrire(){
+  const t=S.text;
+  page.innerHTML=
+  '<div class="page-head"><div><h1 class="cmp-h1"><span>Vos écrans</span><span class="scr-count">4</span></h1><p class="sub sc-intro">Choisissez la liste de lecture et les widgets de chaque écran, puis publiez : chaque écran se met à jour indépendamment.</p></div></div>'+
+  '<div class="mk-cards"><div></div><div></div><div></div></div>'+
+  '<div class="modal-backdrop"></div>'+
+  '<div class="modal app-modal ai-modal" role="dialog" aria-modal="true" aria-labelledby="w-t">'+
+    '<div class="modal-head"><div class="grow"><h3 id="w-t">Texte défilant</h3><small>Bandeau du bas · écran « Hall d\'entrée »</small></div><button type="button" class="modal-x" aria-label="Fermer" data-w="close">'+I('x',20)+'</button></div>'+
+    '<div class="modal-body">'+
+      '<div class="ai-prev" aria-label="Aperçu du bandeau"><span class="ai-prev-l">Aperçu</span><div class="ai-tkw"><span id="w-tk" style="--dur:'+Math.max(10,t.length/8)+'s">'+esc(t)+'</span></div></div>'+
+      '<div class="dw"><div class="dw-field"><label for="w-txt">Texte</label>'+
+        '<div class="ai-field">'+
+          '<textarea id="w-txt" rows="4">'+esc(t)+'</textarea>'+
+          '<div class="ai-fbar"><span class="ai-meta" id="w-meta">'+t.length+' caractères · défile en '+secs(t)+' s</span><span class="grow"></span>'+
+            (!isPro()?'<button type="button" class="ai-btn lock" id="w-ai">'+I('spark',15)+' Améliorer <span class="plan-tag pro" title="Disponible avec le plan Pro">'+I('crown',12)+'Pro</span></button>'
+              :S.write?'<button type="button" class="ai-btn" id="w-ai">'+I('spark',15)+' Améliorer</button>':'')+'</div>'+
+        '</div>'+
+      '</div></div>'+
+      '<div id="w-out">'+sugHtml()+'</div>'+
+      '<div class="ai-row2"><div class="dw-field"><label>Vitesse</label><select><option>Normale</option><option>Lente</option><option>Rapide</option></select></div><div class="dw-field"><label>Fond</label><select><option>Bleu nuit</option><option>Blanc</option><option>Noir</option></select></div></div>'+
+    '</div>'+
+    '<div class="modal-foot"><button type="button" class="btn ghost" data-w="close">Annuler</button><button type="button" class="btn" data-w="save">Enregistrer</button></div>'+
+  '</div>';
+  const ta=$('#w-txt'),btn=$('#w-ai');
+  ta.addEventListener('input',()=>{S.text=ta.value;syncText(false);});
+  if(btn) btn.addEventListener('click',()=>{
+    if(!isPro()){S.sug={locked:true};paintOut();}
+    else if(S.quota){S.sug={paused:true};paintOut();}
+    else ask('improve');
+  });
+  $('#w-out').addEventListener('click',e=>{
+    const b=e.target.closest('[data-s]');if(!b)return;const g=S.sug,a=b.dataset.s;
+    if(a==='apply'){S.prev=S.text;S.text=g.text;S.sug={applied:true};syncText(true);}
+    else if(a==='undo'){S.text=S.prev;S.sug=null;syncText(true);}
+    else if(a==='close'){S.sug=null;}
+    else if(a==='plans'){toast('Dans l\'application, ouvre Réglages › Plan et paiement.');return;}
+    else if(a==='langs'){g.langs=true;}
+    else if(a==='short'){const k=g.a==='short'?Math.min(g.i+1,VARS.short.v.length-1):0;propose('short',k);return;}
+    else if(VARS[a]){propose(a,0);return;}
+    paintOut();
+  });
+  page.querySelectorAll('[data-w]').forEach(b=>b.addEventListener('click',()=>{
+    toast(b.dataset.w==='save'?'Texte du bandeau enregistré.':'Dans l\'application, la fenêtre se ferme ici.');
+  }));
+}
+function syncText(toField){
+  const t=S.text;if(toField)$('#w-txt').value=t;
+  $('#w-meta').textContent=t.length+' caractères · défile en '+secs(t)+' s';
+  const tk=$('#w-tk');tk.textContent=t;tk.style.setProperty('--dur',Math.max(10,t.length/8)+'s');
+}
+function paintOut(){$('#w-out').innerHTML=sugHtml();}
+function ask(a){
+  /* maquette : les propositions sont écrites d'avance à partir du texte de départ */
+  if(S.text!==ORIG){S.sug={none:true};paintOut();return;}
+  propose(a,0);
+}
+function propose(a,k){
+  const V=VARS[a];S.sug={loading:true};paintOut();
+  setTimeout(()=>{S.sug={a:a,i:k,label:V.label,text:V.v[k],diff:!!V.diff};paintOut();},850);
+}
+
+/* =====================================================================
+   2 · Relire avant de publier
+   ===================================================================== */
+function tileHtml(it){
+  if(it.k==='img') return '<img src="'+IMG+it.f+'" alt="">';
+  if(it.tile==='welcome') return '<div class="tile welcome"><small>MON ORGANISATION</small><b>'+(S.res[3]==='fix'?'Bienvenue':'Bienvenu')+' à tous nos visiteurs</b></div>';
+  if(it.tile==='event') return '<div class="tile event"><b>Soirée d\'automne</b><small>Jeudi 15 octobre · 18 h · Cafétéria</small></div>';
+  return '<div class="tile menu"><b>Menu de la semaine</b><i style="width:90%"></i><i style="width:75%"></i><i style="width:85%"></i><i style="width:60%"></i><i style="width:80%"></i><i style="width:70%"></i></div>';
+}
+const pending=()=>rvOn()?REV.filter((r,k)=>!S.res[k]).length:0;
+function rRelire(){
+  const shown=LIST.map((it,i)=>({it:it,i:i})).filter(x=>!REV.some((r,k)=>r.i===x.i&&S.res[k]==='remove'));
+  const p=pending();
+  let bar='';
+  if(rvOn()){
+    if(!S.revRan) bar='<div class="ai-bar run">'+I('spark',16)+'<span>Relecture de la liste en cours</span><span class="ai-dots"><i></i><i></i><i></i></span></div>';
+    else if(p>0) bar='<div class="ai-bar">'+I('spark',16)+'<span><b>Relecture de l\'IA :</b> '+p+' remarque'+(p>1?'s':'')+' à regarder avant de publier.</span><span class="grow"></span><button type="button" class="btn ghost sm" data-r="open">Voir</button></div>';
+    else bar='<div class="ai-bar ok">'+I('check',16)+'<span><b>Relecture de l\'IA :</b> rien à signaler.</span></div>';
+  }else if(!isPro()) bar='<div class="ai-bar up">'+I('crown',16)+'<span>La relecture automatique avant publication est comprise dans le plan Pro.</span><span class="grow"></span><button type="button" class="btn ghost sm" data-r="plans">Voir les plans</button></div>';
+  else if(S.quota&&S.review) bar='<div class="ai-bar up">'+I('alert',16)+'<span>Relecture de l\'IA en pause '+pauseUntil()+' : '+(isTrial()?'quota d\'essai atteint':'quota du mois atteint')+'. Vous pouvez publier normalement.</span></div>';
+  page.innerHTML=
+  '<div class="page-head"><div><h1 class="cmp-h1"><span>Accueil – hall</span></h1><p class="sub">Liste de diffusion · '+shown.length+' contenus · diffusée sur 4 écrans'+(S.published?' · <span style="color:var(--ok-ink)">publiée à l\'instant</span>':' · modifiée, pas encore publiée')+'</p></div>'+
+  '<div class="row head-actions"><button type="button" class="btn ghost">'+I('play',15)+' Aperçu</button><button type="button" class="btn" id="pub">'+I('send2',16)+' Publier sur 4 écrans'+(S.revRan&&p>0?'<span class="ai-cnt" title="'+p+' remarques de la relecture">'+p+'</span>':'')+'</button></div></div>'+
+  bar+
+  '<div class="ai-fil" aria-label="Contenus de la liste">'+shown.map((x,n)=>{
+    const ks=REV.map((r,k)=>k).filter(k=>REV[k].i===x.i);
+    const open=rvOn()&&S.revRan?ks.filter(k=>!S.res[k]).length:0;
+    const done=rvOn()&&S.revRan&&ks.length&&!open&&ks.some(k=>S.res[k]==='fix'||S.res[k]==='open');
+    return '<div class="ai-it'+(open?' flagged':'')+'"><div class="th">'+tileHtml(x.it)+'<span class="no">'+(n+1)+'</span>'+
+      (open?'<span class="ai-flag" title="Remarque de la relecture">!</span>':done?'<span class="ai-flag ok" title="Corrigé">'+I('check',13)+'</span>':'')+
+      '</div><div class="cap"><div class="nm">'+esc(x.it.name)+'</div><div class="mt">'+x.it.mt+'</div></div></div>';
+  }).join('')+'</div>'+
+  (rvOn()?'<p class="hint">'+I('spark',13)+' La relecture repart après chaque modification de la liste. Elle signale, elle ne modifie rien seule.</p>':'')+
+  (S.revOpen?reviewModal():'');
+  if(rvOn()&&!S.revRan) setTimeout(()=>{if(S.scen==='relire'&&!S.revRan){S.revRan=true;rRelire();}},1400);
+  $('#pub').addEventListener('click',()=>{if(rvOn()&&S.revRan&&pending()>0){S.revOpen=true;rRelire();}else publish();});
+  page.addEventListener('click',onRelire);
+}
+function onRelire(e){
+  const b=e.target.closest('[data-r]');if(!b)return;
+  const v=b.dataset.r;
+  if(v==='open'){S.revOpen=true;}
+  else if(v==='close'){S.revOpen=false;}
+  else if(v==='publish'){publish();return;}
+  else if(v==='plans'){toast('Dans l\'application, ouvre Réglages › Plan et paiement.');return;}
+  else{
+    const [k,a]=v.split(':');
+    if(a==='undo') delete S.res[k]; else S.res[k]=a;
+    if(a==='open') toast('Dans l\'application, le contenu s\'ouvre dans son éditeur.');
+  }
+  page.removeEventListener('click',onRelire);rRelire();
+}
+function reviewModal(){
+  const p=pending();
+  return '<div class="modal-backdrop" data-r="close"></div>'+
+  '<div class="modal app-modal ai-modal" role="dialog" aria-modal="true" aria-labelledby="r-t" style="width:min(740px,calc(100vw - 32px))">'+
+    '<div class="modal-head"><div class="grow"><h3 id="r-t">Avant de publier</h3><small>L\'IA a relu les 9 contenus de « Accueil – hall ». Elle ne modifie rien sans vous.</small></div><button type="button" class="modal-x" aria-label="Fermer" data-r="close">'+I('x',20)+'</button></div>'+
+    '<div class="modal-body" style="display:block">'+REV.map((r,k)=>{
+      const it=LIST[r.i],res=S.res[k];
+      return '<div class="ai-rv'+(res?' res':'')+'">'+
+        '<div class="ai-rv-th">'+tileHtml(it)+'</div>'+
+        '<div><span class="ai-kind'+(r.red?' red':'')+'">'+I(r.ico,13)+esc(r.kind)+'</span><b class="nm">'+esc(it.name)+'</b><p>'+r.p+'</p></div>'+
+        '<div class="ai-rv-a">'+(res
+          ?'<span class="ai-res'+(res==='ignore'?' ign':'')+'">'+(res==='ignore'?'':I('check',15))+RESLBL[res]+'</span><button type="button" class="linklike" data-r="'+k+':undo">Annuler</button>'
+          :r.acts.map(a=>'<button type="button" class="btn ghost sm" data-r="'+k+':'+a[0]+'">'+a[1]+'</button>').join('')+'<button type="button" class="linklike" data-r="'+k+':ignore">Ignorer</button>')+
+        '</div></div>';
+    }).join('')+'</div>'+
+    '<div class="modal-foot"><span class="ai-foot-n">'+I('spark',14)+' Proposé par l\'IA, qui peut se tromper.</span><button type="button" class="btn ghost" data-r="close">Annuler</button><button type="button" class="btn" data-r="publish">'+(p>0?'Publier quand même':'Publier sur 4 écrans')+'</button></div>'+
+  '</div>';
+}
+function publish(){S.revOpen=false;S.published=true;page.removeEventListener('click',onRelire);rRelire();toast('Liste publiée sur 4 écrans.');}
+
+/* =====================================================================
+   3 · Médiathèque
+   ===================================================================== */
+const STOP=new Set(['avec','des','du','de','la','le','les','un','une','et','en','sur','photo','photos','image','images','qui','au','aux','d','l','a','y','il']);
+const SYN={gens:'personne',monde:'personne',personnes:'personne',quelqu:'personne',humain:'personne',soleil:'coucher de soleil',couchant:'coucher de soleil',coucher:'coucher de soleil',ocean:'mer',plages:'plage',textes:'texte',ecrit:'texte',etoiles:'ciel etoile',etoile:'ciel etoile',pont:'pont suspendu',foret:'foret',montagnes:'montagne'};
+const norm=s=>s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+function results(){
+  const q=S.q.trim();if(!q) return MEDIA.map(m=>({m:m,hit:null}));
+  if(!mOn()) return MEDIA.filter(m=>norm(m.name).includes(norm(q))).map(m=>({m:m,hit:null}));
+  const toks=norm(q).split(/[^a-z0-9]+/).filter(t=>t&&!STOP.has(t));
+  if(!toks.length) return MEDIA.map(m=>({m:m,hit:null}));
+  const terms=[...new Set(toks.map(t=>SYN[t]||t))];
+  return MEDIA.filter(m=>{const h=norm([m.name].concat(S.tags[m.id],[S.desc[m.id]],m.text).join(' '));return terms.every(t=>h.includes(t));})
+   .map(m=>{
+     if(terms.every(t=>norm(m.name).includes(t))) return {m:m,hit:null};
+     const tag=S.tags[m.id].find(x=>terms.some(t=>norm(x).includes(t)));
+     const txt=m.text.find(x=>terms.some(t=>norm(x).includes(t)));
+     return {m:m,hit:tag||(txt?'texte : « '+txt+' »':'description')};
+   });
+}
+function gridHtml(){
+  const r=results();
+  if(!r.length) return '<div class="ai-noresult">Aucun média ne correspond à « '+esc(S.q)+' ».</div>';
+  return '<div class="lx-mgrid">'+r.map(x=>{const m=x.m;return '<div class="lx-mc" role="button" tabindex="0" data-id="'+m.id+'" aria-label="Aperçu de '+esc(m.name)+'">'+
+    '<div class="th"><img src="'+IMG+m.f+'" alt="'+esc(S.desc[m.id])+'" loading="lazy">'+(x.hit?'<span class="ai-match">'+I('spark',11)+esc(x.hit)+'</span>':'')+'</div>'+
+    '<div class="cap"><div class="nm" title="'+esc(m.name)+'">'+esc(m.name)+'</div><div class="mt">Image · 1920 × 1080 · '+m.size+'</div></div></div>';}).join('')+'</div>';
+}
+function helpLine(){
+  if(!S.q.trim()) return mOn()?'<div class="ai-suggest">'+I('spark',14)+'<span>Cherchez avec vos mots, par exemple :</span>'+['coucher de soleil','photos avec des gens','texte sur l\'image','nuit'].map(q=>'<button type="button" class="ai-chip" data-q="'+esc(q)+'">'+esc(q)+'</button>').join('')+'</div>':upLine();
+  return mOn()?'<div class="ai-sline">'+I('spark',14)+'<span>Cherché aussi dans ce que montrent les images.</span></div>':upLine();
+}
+function upLine(){
+  if(!isPro()) return '<div class="ai-sline off">'+I('crown',14)+'<span>Avec le plan Pro, la recherche comprend aussi ce que montrent les images.</span></div>';
+  if(S.quota&&S.media) return '<div class="ai-sline off">'+I('alert',14)+'<span>Recherche par le contenu des images en pause '+pauseUntil()+' : '+(isTrial()?'quota d\'essai atteint':'quota du mois atteint')+'.</span></div>';
+  return '';
+}
+function rMedia(){
+  const r=results();
+  page.innerHTML=
+  '<div class="lx-top"><div class="lx-title"><h1><span>Médiathèque</span><span class="lx-cntpill" aria-label="6 médias">6</span></h1><p class="sub">Vos images, vidéos et documents, importés une fois et réutilisables dans toutes vos listes de lecture.</p></div><span class="grow"></span>'+
+  '<div class="btns"><div class="lx-add"><button class="btn lx-add-btn" type="button">'+I('plus',16)+' Ajouter '+I('chev',14)+'</button></div></div></div>'+
+  '<div class="lx-status"><span class="lx-appoff">6 médias · 2,2 Mo</span><span class="lx-desk">Glissez des fichiers n\'importe où sur la page pour les importer.</span></div>'+
+  '<section class="lx-blk lx-blk-main" aria-label="Médias"><div class="lx-bh">'+I('image',16)+' <span>Médias</span> <small id="m-n">'+r.length+'</small></div>'+
+  '<div class="lx-tools" role="region" aria-label="Recherche et filtres"><div class="search-box">'+I('search',16)+'<input id="m-q" placeholder="'+(mOn()?'Rechercher : un nom, ou ce que montre l\'image':'Rechercher dans la médiathèque')+'" aria-label="Rechercher des médias" value="'+esc(S.q)+'"></div>'+
+  '<span class="lx-count" id="m-c" aria-live="polite">'+(S.q.trim()?r.length+' résultat'+(r.length>1?'s':''):'')+'</span>'+
+  '<select class="tb-sort" aria-label="Trier"><option>Récents</option><option>Nom</option><option>Taille</option></select></div>'+
+  '<div id="m-help">'+helpLine()+'</div><div id="m-grid">'+gridHtml()+'</div></section>'+
+  (S.open?drawerHtml(byId(S.open)):'');
+  const q=$('#m-q');
+  q.addEventListener('input',()=>{S.q=q.value;paintGrid();});
+  page.addEventListener('click',onMedia);
+  page.addEventListener('keydown',onMediaKey);
+}
+function paintGrid(){
+  const r=results();$('#m-grid').innerHTML=gridHtml();$('#m-help').innerHTML=helpLine();
+  $('#m-n').textContent=r.length;$('#m-c').textContent=S.q.trim()?r.length+' résultat'+(r.length>1?'s':''):'';
+}
+function rerenderMedia(){page.removeEventListener('click',onMedia);page.removeEventListener('keydown',onMediaKey);rMedia();}
+function onMedia(e){
+  const chip=e.target.closest('[data-q]');
+  if(chip){S.q=chip.dataset.q;$('#m-q').value=S.q;paintGrid();return;}
+  const d=e.target.closest('[data-d]'),tag=e.target.closest('[data-tag]'),land=e.target.closest('.land');
+  if(d){
+    const a=d.dataset.d;
+    if(a==='close'){S.open=null;S.adding=false;}
+    else if(a==='add'){S.adding=true;rerenderMedia();const inp=$('#tag-in');inp.focus();
+      inp.addEventListener('keydown',ev=>{if(ev.key==='Enter'&&inp.value.trim()){S.tags[S.open].push(inp.value.trim());S.adding=false;rerenderMedia();}else if(ev.key==='Escape'){S.adding=false;rerenderMedia();}});
+      inp.addEventListener('blur',()=>{if(S.adding){S.adding=false;setTimeout(rerenderMedia,0);}});return;}
+    else if(a==='plans'){toast('Dans l\'application, ouvre Réglages › Plan et paiement.');return;}
+    else if(a==='crop-open'){S.cropOpen=true;}
+    else if(a==='crop-done'){S.cropOpen=false;}
+    rerenderMedia();return;
+  }
+  if(tag){S.tags[S.open].splice(+tag.dataset.tag,1);rerenderMedia();return;}
+  if(land){const r=land.getBoundingClientRect();S.fx[S.open]=Math.round((e.clientX-r.left)/r.width*100);rerenderMedia();return;}
+  const card=e.target.closest('.lx-mc');
+  if(card){S.open=card.dataset.id;S.adding=false;S.cropOpen=false;rerenderMedia();}
+}
+function onMediaKey(e){
+  const card=e.target.closest('.lx-mc');if(card&&e.key==='Enter'){S.open=card.dataset.id;rerenderMedia();}
+}
+/* Portrait : automatique. Une ligne et une vignette ; le réglage du cadre n'apparaît que sur « Modifier ». */
+function portraitHtml(m){
+  const fx=S.fx[m.id];
+  if(fx==null) return '<p class="ai-help" style="margin:0">L\'image contient du texte : elle reste affichée en entier, sans recadrage.</p>';
+  const W=81/256*100,left=Math.min(100-W,Math.max(0,fx-W/2)),pos=left/(100-W)*100;
+  const port='<div class="f port"><img src="'+IMG+m.f+'" alt="" style="object-position:'+pos+'% 50%"></div>';
+  if(!S.cropOpen) return '<div class="ai-crop" style="align-items:center">'+port+'<div><p style="margin:0 0 4px;font-size:14px">'+(fx===m.fx?'Recadrée toute seule sur '+m.focus+'.':'Recadrage choisi à la main.')+'</p><button type="button" class="linklike" data-d="crop-open">Modifier</button></div></div>';
+  return '<div class="ai-crop"><figure><div class="f land" title="Cliquez où mettre le centre"><img src="'+IMG+m.f+'" alt=""><span class="box" style="left:'+left+'%;width:'+W+'%"></span><span class="ai-focus" style="left:'+fx+'%"></span></div><figcaption>Cliquez où mettre le centre</figcaption></figure>'+
+   '<figure>'+port+'<figcaption>Résultat</figcaption></figure></div>'+
+   '<div style="margin-top:10px"><button type="button" class="btn sm" data-d="crop-done">Terminé</button></div>';
+}
+function drawerHtml(m){
+  const T=S.tags[m.id];
+  return '<div class="ai-dr-bd" data-d="close"></div>'+
+  '<aside class="ai-dr" role="dialog" aria-label="'+esc(m.name)+'">'+
+   '<div class="ai-dr-h"><h3>'+esc(m.name)+'</h3><button type="button" class="modal-x" data-d="close" aria-label="Fermer">'+I('x',20)+'</button></div>'+
+   '<div class="ai-dr-b">'+
+    '<div class="ai-dr-img"><img src="'+IMG+m.f+'" alt="'+esc(S.desc[m.id])+'"></div>'+
+    '<div class="ai-dr-meta">Image · 1920 × 1080 · '+m.size+' · importée le 4 nov. · utilisée dans 1 liste</div>'+
+    (mOn()?
+    (m.tpl?'<div class="ai-warnbox">'+I('alert',16)+'<span>On lit <q>'+esc(m.text[m.text.length-1])+'</q> sur l\'image : un texte de modèle oublié ? La relecture le signalera avant publication.</span></div>':'')+
+    '<div class="ai-sec"><h4>Ce que montre l\'image <span class="by">'+I('spark',13)+' Rempli par l\'IA</span></h4>'+
+      '<textarea class="ai-desc" id="d-desc" rows="3" aria-label="Ce que montre l\'image">'+esc(S.desc[m.id])+'</textarea>'+
+      '<div class="ai-tags" style="margin-top:10px">'+T.map((t,k)=>'<span class="ai-tag">'+esc(t)+'<button type="button" data-tag="'+k+'" aria-label="Retirer '+esc(t)+'">'+I('x',12)+'</button></span>').join('')+
+      (S.adding?'<input class="ai-tag-in" id="tag-in" placeholder="Mot-clé" aria-label="Nouveau mot-clé">':'<button type="button" class="ai-tag add" data-d="add">'+I('plus',12)+' Ajouter</button>')+'</div>'+
+      '<p class="ai-help">Sert à retrouver l\'image en cherchant. Rien à faire, sauf corriger si besoin.</p></div>'+
+    '<div class="ai-sec"><h4>Sur un écran portrait</h4>'+portraitHtml(m)+'</div>'
+    :!isPro()?'<div class="ai-sug up">'+I('crown',16)+'<span><b>Description, mots-clés et recadrage automatiques : plan Pro.</b> L\'IA remplit tout à l\'import, sans rien à faire.</span><span class="grow"></span><button type="button" class="btn sm" data-d="plans">Voir les plans</button></div>'
+    :S.quota&&S.media?'<div class="ai-off">'+I('alert',15)+' En pause '+pauseUntil()+' : '+(isTrial()?'quota d\'essai atteint':'quota du mois atteint')+'. Les nouvelles images seront analysées ensuite.</div>'
+    :'<div class="ai-off">'+I('lock',15)+' Médiathèque intelligente coupée dans Réglages : ni étiquettes, ni description, ni cadrage.</div>')+
+   '</div></aside>';
+}
+document.addEventListener('input',e=>{if(e.target.id==='d-desc')S.desc[S.open]=e.target.value;});
+
+/* =====================================================================
+   Réglages › Intelligence artificielle
+   ===================================================================== */
+function sw(key,label){const on=S.draft[key];return '<button type="button" class="switch '+(on?'on':'')+'" role="switch" aria-checked="'+on+'" aria-label="'+esc(label)+'" data-sw="'+key+'"><span></span></button>';}
+function rReglages(){
+  if(!S.draft) S.draft={write:S.write,review:S.review,media:S.media,warn:true};
+  const D=S.draft,dirty=D.write!==S.write||D.review!==S.review||D.media!==S.media;
+  const nav=[
+    ["Vue d'ensemble",[['chart','Utilisation']]],
+    ['Organisation',[['building','Identité et équipe']]],
+    ['Diffusion',[['monitor','Contenus et écrans'],['moon','Veille et luminosité']]],
+    ['Création',[['spark','Intelligence artificielle',1]]],
+    ['Suivi',[['bell','Alertes et pause',0,1],['shield','Approbation',0,1]]],
+    ['Revenus',[['mega','Publicité',0,1]]],
+    ['Connexions et API',[['link','Connexions'],['tool','Développeurs']]],
+    ['Abonnement',[['file','Plan et paiement']]],
+    ['Mon compte',[['user','Compte et confidentialité']]]
+  ];
+  const pro='<span class="rg-plan"><span class="plan-tag pro" title="Disponible avec le plan Pro">'+I('crown',12)+'</span></span>';
+  page.innerHTML=
+  '<div class="page-head"><div><h1>Réglages</h1><p class="sub sc-intro">Paramètres de votre organisation. Ils s\'appliquent à tous les écrans.</p></div></div>'+
+  '<div class="rg-layout sub"><nav class="rg-nav" aria-label="Sections des réglages">'+nav.map(g=>'<h4>'+g[0]+'</h4>'+g[1].map(t=>'<button type="button" class="'+(t[2]?'on':'')+'"'+(t[2]?' aria-current="page"':'')+'>'+I(t[0],16)+' <span>'+t[1]+'</span>'+(t[2]?'<span class="ai-new">Nouveau</span>':'')+(t[3]?pro:'')+'</button>').join('')).join('')+'</nav>'+
+  '<div class="rg-main">'+
+   '<div class="rg-ph"><h2>Intelligence artificielle</h2><p>Des aides pour écrire, relire et ranger. Fournie par Linkivi : rien à installer, aucune clé à saisir. Tout est activé d\'office. L\'IA propose ; rien ne change ni ne se publie sans vous.</p></div>'+
+   (!isPro()?
+   '<div class="rg-card"><div class="rg-body ai-lock">'+I('crown',28)+
+    '<h3>L\'intelligence artificielle est comprise dans le plan Pro</h3>'+
+    '<ul><li><b>Aide à l\'écriture</b> : un clic pour corriger, raccourcir ou traduire un texte.</li><li><b>Relecture avant publication</b> : fautes, dates passées, textes de modèle oubliés.</li><li><b>Médiathèque intelligente</b> : description, mots-clés et recadrage automatiques.</li></ul>'+
+    '<div><button type="button" class="btn" data-g="plans">Passer au plan Pro</button></div></div></div>'
+   :
+   '<div class="rg-card"><header><h3>Fonctions</h3><small>Activez seulement ce qui vous sert. Une fonction coupée disparaît de l\'interface.</small></header>'+
+    '<div class="sv-row"><div class="t"><b>Aide à l\'écriture</b><small>Bouton « Améliorer » dans les champs de texte : corrige et resserre en un clic, puis raccourcit ou traduit si on le demande.</small></div><div class="ctl">'+sw('write','Aide à l\'écriture')+'</div></div>'+
+    '<div class="sv-row"><div class="t"><b>Relecture avant publication</b><small>Signale les fautes, les dates passées, les textes de modèle oubliés et les textes trop petits.</small></div><div class="ctl">'+sw('review','Relecture avant publication')+'</div></div>'+
+    '<div class="sv-row"><div class="t"><b>Médiathèque intelligente</b><small>Étiquettes, description et cadrage portrait proposés à l\'import ; recherche par le contenu des images.</small></div><div class="ctl">'+sw('media','Médiathèque intelligente')+'</div></div>'+
+   '</div>'+
+   '<div class="rg-card"><header><h3>Consommation '+(isTrial()?'de l\'essai':'du mois')+'</h3><small>'+(isTrial()?'Essai gratuit : 20 demandes pour découvrir l\'IA. Elles continuent avec le plan Pro (1 000 par mois).':'Plan Pro : 1 000 demandes par mois, remises à zéro le 1<sup>er</sup>.')+'</small></header>'+
+    '<div class="rg-body"><div class="ai-q">'+(S.quota
+      ?'<div class="ai-q-n"><b>'+QUOTA().toLocaleString('fr-CH')+'</b> sur '+QUOTA().toLocaleString('fr-CH')+' demandes</div><div class="ai-q-bar" role="img" aria-label="Quota atteint"><i class="c1" style="width:70%"></i><i class="c2" style="width:20%"></i><i class="c3" style="width:10%"></i></div>'+
+        (isTrial()
+          ?'<div class="ai-sug up" style="margin:4px 0 0">'+I('crown',16)+'<span><b>Vous avez utilisé vos 20 demandes d\'essai.</b> Passez au plan Pro pour continuer.</span><span class="grow"></span><button type="button" class="btn sm" data-g="plans">Passer au plan Pro</button></div>'
+          :'<div class="ai-bar up" style="margin:4px 0 0">'+I('alert',16)+'<span>Quota atteint. L\'IA est en pause '+pauseUntil()+'. Le reste de Linkivi continue normalement.</span></div>')
+      :isTrial()
+        ?'<div class="ai-q-n"><b>14</b> sur 20 demandes</div><div class="ai-q-bar" role="img" aria-label="14 demandes sur 20"><i class="c1" style="width:45%"></i><i class="c2" style="width:15%"></i><i class="c3" style="width:10%"></i></div><div class="ai-q-leg"><span><i class="c1"></i>Écriture 9</span><span><i class="c2"></i>Relecture 3</span><span><i class="c3"></i>Médiathèque 2</span></div>'
+        :'<div class="ai-q-n"><b>212</b> sur 1 000 demandes</div>'+
+        '<div class="ai-q-bar" role="img" aria-label="212 demandes sur 1 000"><i class="c1" style="width:14.8%"></i><i class="c2" style="width:4.1%"></i><i class="c3" style="width:2.3%"></i></div>'+
+        '<div class="ai-q-leg"><span><i class="c1"></i>Écriture 148</span><span><i class="c2"></i>Relecture 41</span><span><i class="c3"></i>Médiathèque 23</span></div>')+'</div></div>'+
+    '<div class="sv-row"><div class="t"><b>Prévenir à 80 %</b><small>Par e-mail aux administrateurs. Au-delà du quota, les fonctions IA se mettent en pause jusqu\'au mois suivant ; le reste de Linkivi continue.</small></div><div class="ctl">'+sw('warn','Prévenir à 80 %')+'</div></div>'+
+   '</div>'+
+   '<div class="rg-card"><header><h3>Données et confidentialité</h3><small>Ce qui part chez le fournisseur d\'IA, et ce qui n\'y part jamais.</small></header>'+
+    '<div class="rg-body ai-priv">'+
+     '<div><b>'+I('send2',15)+' Envoyé, pour les fonctions activées</b><ul><li>le texte que vous demandez d\'améliorer ;</li><li>les textes et images d\'une liste, au moment de la relecture ;</li><li>les images importées dans la médiathèque.</li></ul></div>'+
+     '<div><b>'+I('lock',15)+' Jamais envoyé</b><ul><li>les données de Home Assistant, des sources de données et des réservations de salles ;</li><li>les noms et e-mails des membres.</li></ul></div>'+
+     '<p class="hint">Ces données ne servent pas à entraîner les modèles du fournisseur. Chaque demande est notée dans l\'Historique.</p>'+
+    '</div></div>')+
+   (isPro()&&dirty?'<div class="ai-save" role="region" aria-label="Modifications non enregistrées"><span>Modifications non enregistrées</span><span class="grow"></span><button type="button" class="btn ghost sm" data-g="cancel">Annuler</button><button type="button" class="btn sm" data-g="save">Enregistrer</button></div>':'')+
+  '</div></div>';
+  page.querySelectorAll('[data-sw]').forEach(b=>b.addEventListener('click',()=>{S.draft[b.dataset.sw]=!S.draft[b.dataset.sw];rReglages();}));
+  page.querySelectorAll('[data-g]').forEach(b=>b.addEventListener('click',()=>{
+    if(b.dataset.g==='plans'){toast('Dans l\'application, ouvre Réglages › Plan et paiement.');return;}
+    if(b.dataset.g==='save'){S.write=D.write;S.review=D.review;S.media=D.media;if(!S.review){S.revOpen=false;}toast('Réglages enregistrés. Passez sur les pistes 1 à 3 pour voir l\'effet.');}
+    S.draft=null;rReglages();
+  }));
+}
+
+/* =====================================================================
+   Console administrateur de Linkivi : la clé, saisie une seule fois pour tous les clients
+   ===================================================================== */
+const CLIENTS=[
+ ['Mairie de Lutry','Enterprise',3120,4000,'3,10 $'],
+ ['Groupe Hôtelier Léman','Pro',942,1000,'1,60 $'],
+ ['Clinique des Alpes','Pro',611,1000,'1,05 $'],
+ ['Boulangeries Martin','Pro',212,1000,'0,40 $'],
+ ['Atelier Rey','Essai gratuit',20,20,'0,03 $'],
+ ['Cabinet Dufour','Essai gratuit',14,20,'0,02 $']
+];
+function rAdmin(){
+  const a=S.adm||(S.adm={on:true,editKey:false});
+  const pct=(n,t)=>Math.round(n/t*100);
+  page.innerHTML=
+  '<div class="page-head"><div><h1>Intelligence artificielle</h1><p class="sub sc-intro">Console administrateur · Réglages. La clé est saisie une seule fois et sert à tous les clients des plans Pro et Enterprise.</p></div></div>'+
+  '<div class="ai-adm">'+
+   '<div class="rg-card"><header><h3>Connexion</h3><small>Le fournisseur et le modèle utilisés pour tous les clients. La clé reste chiffrée sur le serveur : personne ne la revoit après l\'avoir saisie.</small></header>'+
+    '<div class="rg-body ai-adm-g">'+
+     '<div class="dw-field"><label>Fournisseur</label><select><option>Anthropic (clé directe)</option><option>OpenRouter</option><option>Modèle sur notre serveur</option></select></div>'+
+     '<div class="dw-field"><label>Modèle</label><select><option>claude-haiku-5-5</option><option>claude-sonnet-5-5</option></select></div>'+
+     '<div class="dw-field" style="grid-column:1/-1"><label>Clé API</label>'+
+      (a.editKey?'<div class="ai-key"><input type="password" placeholder="Collez la nouvelle clé" autocomplete="off"><button type="button" class="btn sm" data-a="save-key">Enregistrer</button><button type="button" class="btn ghost sm" data-a="cancel-key">Annuler</button></div>'
+       :'<div class="ai-key"><span class="ai-keyv">sk-ant-••••••••••••3f9a</span><span class="ai-ok">'+I('check',14)+' Connectée · testée il y a 2 min</span><span class="grow"></span><button type="button" class="btn ghost sm" data-a="test">Tester</button><button type="button" class="btn ghost sm" data-a="edit-key">Remplacer</button></div>')+
+     '</div>'+
+    '</div></div>'+
+   '<div class="rg-card"><header><h3>Qui peut s\'en servir, et combien</h3><small>Quota de demandes par mois et par organisation. Au-delà, l\'IA se met en pause jusqu\'au 1<sup>er</sup> du mois suivant.</small></header>'+
+    '<div class="rg-body"><table class="ai-tbl"><thead><tr><th>Plan</th><th>Accès</th><th class="r">Demandes par mois</th></tr></thead><tbody>'+
+     '<tr><td>Free</td><td class="ai-no">Non</td><td class="r">—</td></tr>'+
+     '<tr><td>Essential</td><td class="ai-no">Non</td><td class="r">—</td></tr>'+
+     '<tr><td>Pro</td><td class="ai-yes">Oui</td><td class="r"><input class="ai-n" value="1 000" aria-label="Quota Pro"></td></tr>'+
+     '<tr><td>Enterprise</td><td class="ai-yes">Oui</td><td class="r"><input class="ai-n" value="4 000" aria-label="Quota Enterprise"></td></tr>'+
+     '<tr><td>Essai gratuit</td><td class="ai-yes">Oui, limité</td><td class="r"><input class="ai-n" value="20" aria-label="Quota de l\'essai"> <span class="ai-no">au total</span></td></tr>'+
+    '</tbody></table></div>'+
+    '<div class="sv-row"><div class="t"><b>Disponible pendant l\'essai gratuit</b><small>Les nouveaux comptes en essai peuvent essayer l\'IA, avec un quota très bas, pour découvrir le plan Pro. À l\'épuisement, une invitation à passer Pro s\'affiche.</small></div><div class="ctl"><button type="button" class="switch on" role="switch" aria-checked="true" aria-label="Disponible pendant l\'essai gratuit" data-a="trial"><span></span></button></div></div>'+
+   '</div>'+
+   '<div class="rg-card"><header><h3>Budget</h3><small>Filet de sécurité : si la dépense du mois atteint le plafond, l\'IA se met en pause pour tous.</small></header>'+
+    '<div class="rg-body"><div class="ai-q"><div class="ai-q-n"><b>6,20 $</b> sur 25 $ de plafond · 6 clients actifs</div>'+
+     '<div class="ai-q-bar" role="img" aria-label="25 % du plafond"><i class="c1" style="width:25%"></i></div>'+
+     '<div class="ai-q-leg"><span>Prévu fin de mois : 10 $ · tarif du modèle : 0,10 $ en entrée, 0,50 $ en sortie, par million de tokens</span></div></div></div>'+
+    '<div class="sv-row"><div class="t"><b>Prévenir à 80 % du plafond</b><small>Par e-mail à l\'administrateur de la plateforme.</small></div><div class="ctl"><button type="button" class="switch on" role="switch" aria-checked="true" aria-label="Prévenir à 80 %" data-a="warn"><span></span></button></div></div>'+
+    '<div class="sv-row"><div class="t"><b>L\'IA est active pour tous les clients</b><small>Interrupteur d\'urgence : coupe tout, sans rien supprimer.</small></div><div class="ctl"><button type="button" class="switch '+(a.on?'on':'')+'" role="switch" aria-checked="'+a.on+'" aria-label="IA active pour tous" data-a="master"><span></span></button></div></div>'+
+   '</div>'+
+   '<div class="rg-card"><header><h3>Consommation par client</h3><small>Ce mois-ci. Les textes ne sont pas conservés ici, seulement les compteurs.</small></header>'+
+    '<div class="rg-body"><table class="ai-tbl"><thead><tr><th>Client</th><th>Plan</th><th class="r">Demandes</th><th style="width:150px">Quota</th><th class="r">Coût</th></tr></thead><tbody>'+
+     CLIENTS.map(c=>{const p=pct(c[2],c[3]);return '<tr><td>'+esc(c[0])+'</td><td>'+c[1]+'</td><td class="r">'+c[2].toLocaleString('fr-CH')+' / '+c[3].toLocaleString('fr-CH')+'</td><td><div class="ai-q-bar" style="height:7px"><i class="'+(p>=90?'c2':'c1')+'" style="width:'+p+'%"></i></div></td><td class="r">'+c[4]+'</td></tr>';}).join('')+
+    '</tbody></table></div></div>'+
+  '</div>';
+  page.querySelectorAll('[data-a]').forEach(b=>b.addEventListener('click',()=>{
+    const v=b.dataset.a;
+    if(v==='edit-key'){a.editKey=true;rAdmin();}
+    else if(v==='cancel-key'){a.editKey=false;rAdmin();}
+    else if(v==='save-key'){a.editKey=false;rAdmin();toast('Clé enregistrée et testée : la connexion fonctionne.');}
+    else if(v==='test'){toast('Connexion testée : la clé fonctionne.');}
+    else if(v==='master'){a.on=!a.on;rAdmin();toast(a.on?'IA réactivée pour tous les clients.':'IA coupée pour tous les clients.');}
+    else{b.classList.toggle('on');b.setAttribute('aria-checked',String(b.classList.contains('on')));}
+  }));
+}
+
+/* ---------- barre de la maquette ---------- */
+$('#mk-plan').addEventListener('click',e=>{
+  const b=e.target.closest('[data-plan]');if(!b)return;
+  S.plan=b.dataset.plan;
+  document.querySelectorAll('#mk-plan button').forEach(x=>x.classList.toggle('on',x===b));
+  boot();
+});
+$('#mk-quota').addEventListener('change',e=>{S.quota=e.target.checked;boot();});
+/* Les écouteurs de page sont des fonctions nommées : les ajouter deux fois n'a pas d'effet. */
+$('#mk-scen').addEventListener('click',e=>{
+  const b=e.target.closest('[data-scen]');if(!b)return;
+  S.scen=b.dataset.scen;
+  try{history.replaceState(null,'','#'+S.scen);}catch(_){}
+  boot();
+});
+function boot(){
+  S.open=null;S.revOpen=false;S.draft=null;S.cropOpen=false;
+  render();window.scrollTo(0,0);
+}
+{const h=location.hash.slice(1);if(NAV.hasOwnProperty(h))S.scen=h;}
+$('#mk-reset').addEventListener('click',()=>{
+  reset();
+  document.querySelectorAll('#mk-plan button').forEach(x=>x.classList.toggle('on',x.dataset.plan==='pro'));
+  $('#mk-quota').checked=false;
+  boot();toast('Maquette remise à zéro.');
+});
+$('#mk-notes-btn').addEventListener('click',()=>$('#mk-notes').classList.toggle('open'));
+$('#mk-notes-x').addEventListener('click',()=>$('#mk-notes').classList.remove('open'));
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape')return;
+  if(S.scen==='media'&&S.open){S.open=null;rerenderMedia();return;}
+  if(S.scen==='relire'&&S.revOpen){S.revOpen=false;page.removeEventListener('click',onRelire);rRelire();}
+});
+boot();
+})();
+</script>
+</body>
+</html>

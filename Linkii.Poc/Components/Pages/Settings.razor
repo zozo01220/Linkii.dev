@@ -10,6 +10,7 @@
 @inject PresentationMerge Merge
 @inject ModeService Modes
 @inject HistoryLog Hist
+@inject AiService AiSvc
 
 @* Réglages : navigation latérale groupée, une carte par sujet, un réglage par ligne (libellé à gauche, contrôle à droite).
    Les modifications de toutes les sections s'enregistrent ensemble : la barre du bas n'apparaît qu'après un changement. « Utilisation » et « Compte » n'en ont pas besoin. *@
@@ -216,6 +217,52 @@
                         </div>
                     }
                 </div>
+                break;
+
+            case "ia":
+                @* Intelligence artificielle (maquette : maquettes/ia-pistes.html) : clé et quotas dans la console Linkivi, rien à saisir ici. Plan Essential : invitation à passer Pro. *@
+                <div class="rg-ph"><h2>Intelligence artificielle</h2><p>Une aide pour écrire vos textes. Fournie par Linkivi : rien à installer, aucune clé à saisir. L'IA propose ; rien ne change sans votre clic.</p></div>
+                @if (!growth)
+                {
+                    <div class="rg-card"><div class="rg-body ai-lock"><Ico Name="crown" Size="28" />
+                        <h3>L'intelligence artificielle est comprise dans le plan Pro</h3>
+                        <ul><li><b>Aide à l'écriture</b> : un clic pour corriger, raccourcir ou traduire un texte.</li><li><b>Relecture avant publication</b> : signale les dates passées, les textes de modèle oubliés, les fautes et les textes trop petits.</li></ul>
+                        <div><a class="btn" href="/settings?tab=abonnement">Voir les plans</a></div></div></div>
+                }
+                else if (aiState.Status == AiStatus.NeedsPro)
+                {
+                    <div class="sv-upsell"><Ico Name="lock" Size="18" /><span class="grow">L'IA n'est pas incluse dans l'essai gratuit. Elle est <b>comprise dans le plan Pro</b>, dès que vous choisissez votre plan.</span></div>
+                }
+                else
+                {
+                    <div class="rg-card"><header><h3>Fonctions</h3><small>Une fonction coupée disparaît de l'interface.</small></header>
+                        <div class="sv-row"><div class="t"><b>Aide à l'écriture</b><small>Bouton « Améliorer » sous les textes (bandeaux, compositions, messages) : corrige et resserre en un clic, puis raccourcit, change le ton ou traduit si on le demande.</small></div>
+                            <div class="ctl"><button type="button" class="switch @(aiWrite ? "on" : "")" role="switch" aria-checked="@(aiWrite ? "true" : "false")" aria-label="Aide à l'écriture" @onclick="() => { aiWrite = !aiWrite; dirty = true; }"><span></span></button></div></div>
+                        <div class="sv-row"><div class="t"><b>Relecture avant publication</b><small>Sur la page d'une liste de diffusion : signale les dates passées, les textes de modèle oubliés, les fautes et les textes trop petits. Elle signale, elle ne modifie rien.</small></div>
+                            <div class="ctl"><button type="button" class="switch @(aiReview ? "on" : "")" role="switch" aria-checked="@(aiReview ? "true" : "false")" aria-label="Relecture avant publication" @onclick="() => { aiReview = !aiReview; dirty = true; }"><span></span></button></div></div>
+                        <div class="sv-row"><div class="t"><b>Médiathèque intelligente</b><small>À l'import d'une image : description, mots-clés et cadrage portrait proposés. Dans la médiathèque, on cherche aussi par ce que montrent les images.</small></div>
+                            <div class="ctl"><button type="button" class="switch @(aiMedia ? "on" : "")" role="switch" aria-checked="@(aiMedia ? "true" : "false")" aria-label="Médiathèque intelligente" @onclick="() => { aiMedia = !aiMedia; dirty = true; }"><span></span></button></div></div>
+                        <div class="sv-row"><div class="t"><b>Assistant</b><small>Bouton « Assistant » en haut : répond sur l'état des écrans et propose des actions (afficher un message, redémarrer, éteindre l'écran). Rien n'est fait sans confirmation, et il ne publie rien.</small></div>
+                            <div class="ctl"><button type="button" class="switch @(aiAssistant ? "on" : "")" role="switch" aria-checked="@(aiAssistant ? "true" : "false")" aria-label="Assistant" @onclick="() => { aiAssistant = !aiAssistant; dirty = true; }"><span></span></button></div></div>
+                    </div>
+                    <div class="rg-card"><header><h3>Consommation @(aiState.Trial ? "de l'essai" : "du mois")</h3><small>@(aiState.Trial ? "Pendant l'essai, " + aiState.Quota.ToString("N0", Fr) + " demandes. Elles se poursuivent avec le plan Pro." : "Plan Pro : " + aiState.Quota.ToString("N0", Fr) + " demandes par mois, remises à zéro le 1er du mois.")</small></header>
+                        <div class="rg-body"><div class="ai-q">
+                            <div class="ai-q-n"><b>@aiState.Used.ToString("N0", Fr)</b> sur @aiState.Quota.ToString("N0", Fr) demandes</div>
+                            <div class="ai-q-bar" role="img" aria-label="@aiState.Used demandes sur @aiState.Quota"><i style="width:@(aiState.Quota == 0 ? 100 : Math.Min(100, aiState.Used * 100 / aiState.Quota))%;background:@Ai.LevelColor(Ai.Level(aiState.Used, aiState.Quota))"></i></div>
+                            @if (aiState.Status is AiStatus.Quota or AiStatus.Cap)
+                            {
+                                <div class="ai-sug none paused"><Ico Name="alert" Size="16" /><span>@AiService.Say(aiState)</span></div>
+                            }
+                        </div></div>
+                    </div>
+                    <div class="rg-card"><header><h3>Données et confidentialité</h3><small>Ce qui part chez le fournisseur d'IA, et ce qui n'y part jamais.</small></header>
+                        <div class="rg-body ai-priv">
+                            <div><b><Ico Name="arrow-right" Size="15" /> Envoyé, au moment où vous cliquez</b><ul><li>le texte que vous demandez d'améliorer ;</li><li>à la relecture d'une liste : ses textes et ses images (réduites).</li></ul></div>
+                            <div><b><Ico Name="lock" Size="15" /> Jamais envoyé</b><ul><li>le reste de vos médias, de vos listes et de vos écrans ;</li><li>les données de Home Assistant, des sources de données et des réservations de salles ;</li><li>les noms et e-mails des membres.</li></ul></div>
+                            <p class="hint">Linkivi ne garde pas vos textes : seulement le nombre de demandes du mois.</p>
+                        </div>
+                    </div>
+                }
                 break;
 
             case "supervision":
@@ -425,6 +472,7 @@
         ("Vue d'ensemble", new[] { new NavItem("utilisation", "Utilisation", "chart") }),
         ("Organisation", new[] { new NavItem("organisation", "Identité et équipe", "building") }),
         ("Diffusion", new[] { new NavItem("diffusion", "Contenus et écrans", "monitor"), new NavItem("veille", "Veille et luminosité", "moon") }),
+        ("Création", new[] { new NavItem("ia", "Intelligence artificielle", "spark", Growth: true) }),
         ("Suivi", new[] { new NavItem("supervision", "Alertes et pause", "bell", Growth: true), new NavItem("approbation", "Approbation", "shield", Growth: true) }),
         ("Revenus", new[] { new NavItem("publicite", "Publicité", "megaphone", Growth: true) }),
         ("Connexions et API", new[] { new NavItem("connexions", "Connexions", "link"), new NavItem("developpeurs", "Développeurs", "tool") }),   // mode expert seulement (absents de SimpleTabs)
@@ -456,7 +504,10 @@
     };
 
     // Mode simple : Utilisation, Veille et luminosité, Compte et confidentialité seulement (le reste est en mode expert).
-    private static readonly string[] SimpleTabs = { "utilisation", "veille", "publicite", "approbation", "abonnement", "compte" };   // Publicité : une fonction activable, comme la veille
+    private static readonly string[] SimpleTabs = { "utilisation", "veille", "ia", "publicite", "approbation", "abonnement", "compte" };
+    private bool aiWrite = true, aiReview = true, aiMedia = true, aiAssistant = true;   // aide à l'écriture de l'IA (réglage de l'organisation)
+    private AiState aiState = new(AiStatus.Off, 0, 0, false);
+    private static readonly System.Globalization.CultureInfo Fr = new("fr-CH");   // Publicité : une fonction activable, comme la veille
     private int adsPending;   // spots de publicité à valider (pastille de la rubrique)
     private IEnumerable<(string Group, NavItem[] Items)> VisibleGroups => Modes.Expert ? Groups
         : Groups.Select(g => (g.Group, Items: g.Items.Where(i => SimpleTabs.Contains(i.Id)).ToArray())).Where(g => g.Items.Length > 0);
@@ -522,6 +573,7 @@
         (sleepEnabled, dimEnabled) = (t.SleepEnabled, t.DimEnabled);
         (techPinOn, techPin, techPinLocal, techPinUtc, techPinBy) = (t.TechPinOn, t.TechPin, t.TechPinLocal, t.TechPinUtc, t.TechPinBy);
         autoStart = t.DefaultAutoStart; mergePres = t.MergePresentations;
+        aiWrite = t.AiWriteOn; aiReview = t.AiReviewOn; aiMedia = t.AiMediaOn; aiAssistant = t.AiAssistantOn; aiState = AiSvc.State(t.Id);
         LoadPinState(t);
         adsPending = Store.Read(d => Ads.PendingCount(d.Root, d.Tenant, DateTime.UtcNow));
         soleAreaId =areaCount == 1 ? Store.Read(d => d.Areas.First().Id) : Guid.Empty;
@@ -643,6 +695,7 @@
             t.DefaultScreenType = spec.Type; t.DefaultOrientation = spec.Orientation; t.DefaultResolution = spec.Resolution;
             mergeNow = mergePres && !t.MergePresentations;
             t.DefaultAutoStart = autoStart; t.MergePresentations = mergePres;
+            if (t.IsGrowth) { Diff("Aide de l'IA", t.AiWriteOn, aiWrite); t.AiWriteOn = aiWrite; Diff("Relecture de l'IA", t.AiReviewOn, aiReview); t.AiReviewOn = aiReview; Diff("Médiathèque intelligente", t.AiMediaOn, aiMedia); t.AiMediaOn = aiMedia; Diff("Assistant IA", t.AiAssistantOn, aiAssistant); t.AiAssistantOn = aiAssistant; }   // IA : licence Pro
             if (t.IsGrowth)   // alertes et pause : licence Pro (contrôlée ici aussi, pas seulement dans l'interface)
             {
                 t.AlertsOn = alertsOn; t.AlertMail = alertMail; t.AlertPush = alertPush; t.AlertGood = alertGood;

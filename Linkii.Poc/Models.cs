@@ -26,6 +26,8 @@ public class Db
     public List<Opportunity> Opportunities { get; set; } = new(); // demandes Enterprise (voir Enterprise)
     public List<License> Licenses { get; set; } = new();          // licences des installations sur site
     public PlatformSettings Platform { get; set; } = new();      // réglages communs à toutes les organisations (console › Réglages)
+    /// <summary>Intelligence artificielle : une ligne par organisation et par mois, tenue par <see cref="AiService"/>.</summary>
+    public List<AiUsage> AiUsage { get; set; } = new();
     public List<AdCampaign> AdCampaigns { get; set; } = new();   // publicité : campagnes de la régie Linkivi (voir <see cref="Ads"/>)
     public List<AdDecision> AdDecisions { get; set; } = new();   // réponses des propriétaires aux spots
     public List<AdStatement> AdStatements { get; set; } = new(); // relevés mensuels validés ou payés
@@ -113,6 +115,31 @@ public class PlatformSettings
     // Licences sur site : clé de signature (privée chiffrée, publique en clair), créée à la première licence
     public string LicensePrivateKey { get; set; } = "";
     public string LicensePublicKey { get; set; } = "";
+
+    // Intelligence artificielle (console › Réglages › Intelligence artificielle) : une seule clé pour toute la plateforme (voir AiService)
+    /// <summary>Interrupteur d'urgence : coupe l'IA chez tous les clients sans rien supprimer.</summary>
+    public bool AiEnabled { get; set; } = true;
+    /// <summary>Clé API du fournisseur (chiffrée, SecretBox), jamais réaffichée.</summary>
+    public string AiApiKey { get; set; } = "";
+    public string AiModel { get; set; } = Ai.DefaultModel;
+    /// <summary>Demandes par mois et par organisation Pro, puis pendant l'essai gratuit ; une organisation peut avoir son propre quota (<see cref="Tenant.AiQuota"/>).</summary>
+    public int AiQuotaPro { get; set; } = 1000;
+    public int AiQuotaTrial { get; set; } = 1000;
+    /// <summary>L'IA est disponible pendant l'essai gratuit (avec <see cref="AiQuotaTrial"/>).</summary>
+    public bool AiTrial { get; set; } = true;
+    /// <summary>Plafond de dépense du mois pour toute la plateforme (USD) : atteint, l'IA se met en pause pour tous jusqu'au mois suivant.</summary>
+    public decimal AiMonthlyCapUsd { get; set; } = 25m;
+}
+
+/// <summary>Consommation d'IA d'une organisation pour un mois (« 2026-11 », UTC) : demandes comptées pour le quota, jetons et coût estimé pour le plafond.</summary>
+public class AiUsage
+{
+    public Guid ClientId { get; set; }
+    public string Month { get; set; } = "";
+    public int Requests { get; set; }
+    public long InputTokens { get; set; }
+    public long OutputTokens { get; set; }
+    public decimal CostUsd { get; set; }
 }
 
 /// <summary>Code d'essai : un lien d'inscription ?code=SALON30 donne cette durée d'essai.</summary>
@@ -446,6 +473,17 @@ public class Tenant
     public bool SleepEnabled { get; set; }
     /// <summary>Fonction avancée « Luminosité et contraste » activée dans Réglages (voir <see cref="Dim"/>).</summary>
     public bool DimEnabled { get; set; }
+
+    // Intelligence artificielle (Pro, voir AiService) : l'aide à l'écriture est active d'office ; le quota du mois est celui de la console, sauf quota particulier
+    public bool AiWriteOn { get; set; } = true;
+    /// <summary>Relecture avant publication (voir <see cref="AiReview"/>).</summary>
+    public bool AiReviewOn { get; set; } = true;
+    /// <summary>Médiathèque intelligente : description, mots-clés et cadrage portrait des images (voir <see cref="AiMedia"/>).</summary>
+    public bool AiMediaOn { get; set; } = true;
+    /// <summary>Assistant : répond d'après l'état des écrans et propose des actions à confirmer (voir <see cref="AiAssistant"/>).</summary>
+    public bool AiAssistantOn { get; set; } = true;
+    /// <summary>Quota mensuel propre à cette organisation (Enterprise, accord particulier) ; null : celui de la console.</summary>
+    public int? AiQuota { get; set; }
 
     // Publicité rémunérée (Pro, voir Ads) : désactivée par défaut, réglée dans Réglages › Publicité
     public bool AdsOn { get; set; }
@@ -1074,6 +1112,15 @@ public class MediaItem : IClientOwned, IAreaOwned, IOwned
     public int Rev { get; set; }
     /// <summary>Contenu désactivé (interrupteur de la page de son application) : absent de la médiathèque, des compositions, des listes de lecture et de la diffusion.</summary>
     public bool Off { get; set; }
+    /// <summary>Médiathèque intelligente (Pro) : ce que montre l'image, mots-clés, texte lu sur l'image, centre du cadrage portrait (0-100 % de la largeur ; null : texte à garder entier). Rempli par l'IA à l'import, modifiable.</summary>
+    public string? AiDesc { get; set; }
+    public List<string> AiTags { get; set; } = new();
+    public List<string> AiText { get; set; } = new();
+    public int? AiFocus { get; set; }
+    /// <summary>Texte de modèle oublié repéré sur l'image (null : rien).</summary>
+    public string? AiTemplate { get; set; }
+    /// <summary>L'image a été analysée par l'IA.</summary>
+    public bool AiDone { get; set; }
     public DateTime? AddedUtc { get; set; }
     /// <summary>Dossier de la médiathèque (null : racine de l'aire). Voir <see cref="MediaFolder"/>.</summary>
     public Guid? FolderId { get; set; }
@@ -1134,6 +1181,8 @@ public class Playlist : IClientOwned, IAreaOwned, IOwned
     public bool DraftChanged { get; set; }
     public int Revision { get; set; }                              // +1 à chaque modification : un écran publié sur une révision antérieure a des modifications en attente
     public DateTime? UpdatedAt { get; set; }                       // dernière modification (UTC), affichée sur la carte de la playlist
+    /// <summary>Remarques de la relecture que la personne a choisi d'ignorer (voir <see cref="AiReview"/>) : elles ne reviennent pas.</summary>
+    public List<string> AiIgnored { get; set; } = new();
     public List<PlaylistItem> Draft { get; set; } = new();       // l'ordre de la liste = l'ordre de diffusion
     public List<PublishedItem> Published { get; set; } = new();  // ancien instantané : lu seulement par les écrans jamais publiés depuis
     public Guid? FolderId { get; set; }                            // dossier des listes de lecture (null : racine de l'aire). Voir <see cref="PlaylistFolder"/>

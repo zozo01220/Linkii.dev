@@ -10,6 +10,8 @@
 @inject AppCatalog Catalog
 @inject ScreenPublisher Publisher
 @inject PublishSchedule Sched
+@inject AiReview Review
+@inject AiService AiSvc
 @using Microsoft.JSInterop
 @implements IDisposable
 
@@ -64,7 +66,7 @@
                     @if (pend > 0) { <button type="button" class="nx-pend" title="Choisir les écrans à mettre à jour" @onclick='() => ptab = "diff"'>@pend écran@(pend > 1 ? "s" : "") à mettre à jour</button> }
                     @if (diff.Changed) { <button type="button" class="btn ghost" @onclick="() => diff.Undo()">Annuler</button> }
                     <div class="nx-split">
-                        <button type="button" class="btn publish-btn" disabled="@(chosen == 0 || diff.Busy)" title="@(chosen == 0 ? "Activez au moins un écran dans l'onglet Diffusion" : null)" @onclick="() => PublishNow(null)"><Ico Name="upload" Size="16" /> @diff.ButtonLabel()</button>
+                        <button type="button" class="btn publish-btn" disabled="@(chosen == 0 || diff.Busy)" title="@(chosen == 0 ? "Activez au moins un écran dans l'onglet Diffusion" : null)" @onclick="() => PublishNow(null)"><Ico Name="upload" Size="16" /> @diff.ButtonLabel()@if (RevPending(pl).Count > 0) { <span class="ai-cnt" title="Remarques de la relecture de l'IA">@RevPending(pl).Count</span> }</button>
                         <button type="button" class="btn publish-btn nx-caret" disabled="@(chosen == 0 || diff.Busy)" aria-label="Autres façons de publier" aria-haspopup="menu" aria-expanded="@(pubMenu ? "true" : "false")" @onclick="() => pubMenu = !pubMenu"><Ico Name="chevron" Size="16" /></button>
                         @if (pubMenu)
                         {
@@ -86,6 +88,61 @@
                 }
             </div>
         </header>
+
+        @* Relecture de l'IA avant publication (Pro) : bandeau, puis fenêtre « Avant de publier ». Maquette : maquettes/ia-pistes.html *@
+        @if (pl.Draft.Count > 0)
+        {
+            var pending = RevPending(pl);
+            @if (revState.Status == AiStatus.NeedsPro && pl.Draft.Any(i => !i.Off))
+            {
+                <div class="ai-bar up"><Ico Name="crown" Size="16" /><span>La relecture automatique avant publication est comprise dans le plan Pro.</span><span class="grow"></span><a class="btn ghost sm" href="/settings?tab=abonnement">Voir les plans</a></div>
+            }
+            else if (revState.Status is AiStatus.Quota or AiStatus.Cap)
+            {
+                <div class="ai-bar up"><Ico Name="alert" Size="16" /><span>Relecture de l'IA en pause : @(revState.Trial ? "les demandes de l'essai sont utilisées" : "quota du mois atteint"). Vous pouvez publier normalement.</span></div>
+            }
+            else if (revState.Available && revBusy && rev == null)
+            {
+                <div class="ai-bar run" role="status"><Ico Name="spark" Size="16" /><span>Relecture de la liste en cours</span><span class="ai-dots"><i></i><i></i><i></i></span></div>
+            }
+            else if (revState.Available && rev is { Ok: true })
+            {
+                if (pending.Count > 0)
+                {
+                    <div class="ai-bar"><Ico Name="spark" Size="16" /><span><b>Relecture de l'IA :</b> @pending.Count remarque@(pending.Count > 1 ? "s" : "") à regarder avant de publier.</span><span class="grow"></span><button type="button" class="btn ghost sm" @onclick="() => revOpen = true">Voir</button></div>
+                }
+                else
+                {
+                    <div class="ai-bar ok"><Ico Name="check" Size="16" /><span><b>Relecture de l'IA :</b> rien à signaler.</span></div>
+                }
+            }
+        }
+        @if (revOpen)
+        {
+            var rows0 = RevPending(pl);
+            <div class="modal-backdrop" @onclick="() => revOpen = false"></div>
+            <div class="modal app-modal ai-modal ai-review" role="dialog" aria-modal="true" aria-labelledby="rv-title">
+                <div class="modal-head"><div class="grow"><h3 id="rv-title">Avant de publier</h3><small>L'IA a relu « @pl.Name ». Elle ne modifie rien sans vous.</small></div><button type="button" class="modal-x" aria-label="Fermer" @onclick="() => revOpen = false"><Ico Name="x" Size="20" /></button></div>
+                <div class="modal-body">
+                    @if (rows0.Count == 0) { <p class="hint" style="margin:0">Plus aucune remarque.</p> }
+                    @foreach (var (f, it, m) in rows0)
+                    {
+                        var ff = f; var item = it; var med = m;
+                        <div class="ai-rv">
+                            <div class="ai-rv-th">@if (med?.AppId == Compositions.AppId) { <CompositionThumb Item="med" Files="media" Contain="true" /> } else if (med != null) { <MediaThumb Media="med" All="media" Wide="true" /> }</div>
+                            <div class="ai-rv-t"><span class="ai-kind @(ff.Kind == AiKinds.Date ? "red" : "")"><Ico Name="@AiKinds.Icon(ff.Kind)" Size="13" />@AiKinds.Label(ff.Kind)</span><b class="nm">@(med?.Name ?? "Contenu")</b>
+                                <p>@(ff.Kind == AiKinds.Small ? "Le texte" : "On lit") <q><mark>@ff.Quote</mark></q>@(ff.Advice.Length > 0 ? ". " + ff.Advice : "")</p></div>
+                            <div class="ai-rv-a">
+                                @if (!readOnlyHere && med != null) { <button type="button" class="btn ghost sm" @onclick="() => RevOpenItem(item, med)">Ouvrir</button> }
+                                @if (!readOnlyHere && (ff.Kind == AiKinds.Date || ff.Kind == AiKinds.Template)) { <button type="button" class="btn ghost sm" title="Le contenu garde sa place dans la liste mais n'est pas publié" @onclick="() => RevSkip(ff)">Ne pas publier</button> }
+                                <button type="button" class="linklike" @onclick="() => RevIgnore(ff)">Ignorer</button>
+                            </div>
+                        </div>
+                    }
+                </div>
+                <div class="modal-foot"><span class="ai-foot-n"><Ico Name="spark" Size="14" /> Proposé par l'IA, qui peut se tromper.</span><button type="button" class="btn ghost" @onclick="() => revOpen = false">Annuler</button><button type="button" class="btn" disabled="@(chosen == 0 || diff.Busy)" @onclick="PublishAnyway">@(rows0.Count > 0 ? "Publier quand même" : "Publier")</button></div>
+            </div>
+        }
 
         <div class="nx-tabsrow">
             <nav class="pfx-tabs" role="tablist" aria-label="Liste de diffusion">
@@ -499,7 +556,89 @@ else
     private async Task PublishNow(DateTime? all)
     {
         pubMenu = false;
+        // la relecture de l'IA a des remarques non traitées : on les montre d'abord (« Publier quand même » reste possible)
+        if (Current is { } cur && revState.Available && RevPending(cur).Count > 0) { revAll = all; revOpen = true; return; }
         if (await diff.Publish(all)) Reload();
+    }
+
+    private DateTime? revAll;
+    private async Task PublishAnyway()
+    {
+        revOpen = false;
+        if (await diff.Publish(revAll)) Reload();
+    }
+
+    // ---------- Relecture de l'IA avant publication (Pro) : dates passées, textes de modèle oubliés, fautes, textes trop petits ----------
+    private AiState revState = new(AiStatus.Off, 0, 0, false);
+    private AiReviewResult? rev;
+    private bool revBusy, revOpen;
+    private int revFor = -1;
+    private Guid revForList;
+    private CancellationTokenSource? revCts;
+
+    /// <summary>Lance la relecture (après un court délai) quand la liste a changé depuis la dernière ; sans changement, rien ne repart.</summary>
+    private void QueueReview()
+    {
+        if (Current is not { } pl) return;
+        var cid = Store.ClientId;
+        revState = AiSvc.State(cid, "review");
+        if (!revState.Available || pl.Draft.Count == 0) { rev = null; revBusy = false; revFor = -1; return; }
+        if (revForList == pl.Id && revFor == pl.Revision) return;
+        if (revForList != pl.Id) rev = null;
+        revForList = pl.Id; revFor = pl.Revision;
+        revCts?.Cancel();
+        var cts = revCts = new CancellationTokenSource();
+        revBusy = true;
+        _ = RunReview(cid, pl.Id, cts.Token);
+    }
+
+    private async Task RunReview(Guid cid, Guid listId, CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(1500, ct);
+            var r = await Review.Run(cid, listId, ct);
+            if (!ct.IsCancellationRequested) rev = r;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception) { if (!ct.IsCancellationRequested) rev = new AiReviewResult(false, new(), ""); }
+        if (ct.IsCancellationRequested) return;
+        revBusy = false;
+        await InvokeAsync(() => { revState = AiSvc.State(cid, "review"); StateHasChanged(); });
+    }
+
+    /// <summary>Remarques à regarder : celles que la personne n'a pas ignorées, sur des contenus encore publiés.</summary>
+    private List<(AiFinding F, PlaylistItem It, MediaItem? M)> RevPending(Playlist pl)
+    {
+        var res = new List<(AiFinding, PlaylistItem, MediaItem?)>();
+        if (!revState.Available || rev is not { Ok: true } r) return res;
+        foreach (var f in r.Findings)
+            if (!pl.AiIgnored.Contains(f.Key) && pl.Draft.FirstOrDefault(i => i.Id == f.ItemId) is { Off: false } it)
+                res.Add((f, it, media.FirstOrDefault(m => m.Id == it.MediaId)));
+        return res;
+    }
+
+    private void RevIgnore(AiFinding f)
+    {
+        WriteList(d => { if (d.Playlists.FirstOrDefault(p => p.Id == Id) is { } p && !p.AiIgnored.Contains(f.Key)) p.AiIgnored.Add(f.Key); });
+        Reload();
+    }
+
+    private void RevSkip(AiFinding f)
+    {
+        WriteList(d =>
+        {
+            if (d.Playlists.FirstOrDefault(p => p.Id == Id) is { } p && p.Draft.FirstOrDefault(i => i.Id == f.ItemId) is { } it) { it.Off = true; p.Touch(); }
+        });
+        if (Current is { } cur) revFor = cur.Revision;   // la relecture reste valable : un contenu en moins ne demande pas de nouvelle lecture
+        Reload();
+        Toast.Ok("Contenu désactivé dans la liste : il ne sera pas publié. Vous pouvez le réactiver à tout moment.");
+    }
+
+    private void RevOpenItem(PlaylistItem it, MediaItem m)
+    {
+        revOpen = false;
+        if (Current is { } cur) OpenSettings(cur, it, m);
     }
 
     private void ProgramOne(PlaylistDiffusion.ScreenRow r) { whenFor = r; whenOpen = true; }
@@ -1226,6 +1365,7 @@ else
         scanCounts = growth ? Scans.Counts(Store.ClientId, DateTime.UtcNow.AddDays(-ScanLog.RetentionDays)) : new();
         diff ??= new PlaylistDiffusion(Store, Publisher, Sched, Toast);
         diff.Load(Id);
+        QueueReview();
     }
 
     // Le contenu de l'app vient d'être créé avec ses réglages : il rejoint la liste de lecture à l'endroit choisi (par défaut, à la fin).
@@ -1511,7 +1651,7 @@ else
     }
 
 
-    public void Dispose() => selfRef?.Dispose();
+    public void Dispose() { revCts?.Cancel(); selfRef?.Dispose(); }
 
     // Temps alloué, affiché à droite de la ligne ; le détail se règle dans la fenêtre « Paramètres ».
     private string Duration(PlaylistItem it, MediaItem? m)

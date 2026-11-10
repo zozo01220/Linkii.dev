@@ -77,6 +77,11 @@ var dataDirEarly = builder.Configuration["Linkii:DataDir"] ?? builder.Environmen
 builder.Services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(dataDirEarly, "keys"))).SetApplicationName("Linkii");
 builder.Services.AddSingleton<AppCatalog>();
 builder.Services.AddSingleton<SecretBox>();
+builder.Services.AddSingleton<AiService>();   // intelligence artificielle : une clé pour toute la plateforme, quotas par organisation (voir Ai.cs)
+builder.Services.AddSingleton<AiReview>();   // relecture avant publication (piste 2) : dates passées, textes de modèle oubliés, fautes, textes trop petits
+builder.Services.AddSingleton<AiMedia>();   // médiathèque intelligente (piste 3) : description, mots-clés, cadrage des images
+builder.Services.AddSingleton<AiAssistant>();   // assistant : réponses et actions confirmées (piste 5)
+builder.Services.AddSingleton<AiCompose>();   // compositions créées par l IA : depuis une phrase, depuis le site web (piste 4)
 builder.Services.AddSingleton<SafeHttp>();
 builder.Services.AddSingleton<IAppProvider, WeatherProvider>();
 builder.Services.AddSingleton<IAppProvider, WeatherSlideProvider>();

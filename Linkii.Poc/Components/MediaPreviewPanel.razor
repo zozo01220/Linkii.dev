@@ -1,4 +1,7 @@
 @inject MediaLibrary Library
+@inject AiService AiSvc
+@inject AiMedia AiMed
+@inject TenantStore Store
 
 @* Aperçu d'un média de la médiathèque : tiroir « immersif » (§51) — le média en grand avec ses flèches et sa croix posées dessus, son nom et ses
    infos juste dessous, puis le partage (avec quelles aires, en lien vivant) et où il sert, enfin les actions. Ouvert par un clic sur la vignette ;
@@ -45,6 +48,60 @@
                     <div class="im-per"><span class="im-av">@Initials(sh.Label)</span><span class="grow"><b>@sh.Label</b></span><span class="pill @(sh.Edit ? "ok" : "blue")">@(sh.Edit ? "Peut modifier" : "Peut utiliser")</span></div>
                 }
                 <button type="button" class="im-add" @onclick="OnShare"><span class="im-av add"><Ico Name="plus" Size="13" /></span> @(ShareSum.Any ? "Modifier le partage" : "Partager avec…")</button>
+            </section>
+        }
+
+        @if (Item.Type == "image" && Item.AppId == null && Item.FileName != null && Item.Status == null && (Item.AiDone || aiState.Status != AiStatus.Off))
+        {
+            <section class="im-sec ai-sec">
+                @if (Item.AiDone)
+                {
+                    @if (Item.AiTemplate is { Length: > 0 } tpl)
+                    {
+                        <div class="ai-warnbox"><Ico Name="alert" Size="16" /><span>On lit « @tpl » sur l'image : un texte de modèle oublié ? La relecture le signalera avant publication.</span></div>
+                    }
+                    <h4 style="margin-top:@(Item.AiTemplate is { Length: > 0 } ? "14px" : "0")"><Ico Name="spark" Size="13" /> Ce que montre l'image <span class="by"><Ico Name="spark" Size="13" /> Rempli par l'IA</span></h4>
+                    @if (Editable)
+                    {
+                        <textarea class="ai-desc" rows="3" aria-label="Ce que montre l'image" value="@Item.AiDesc" @onchange="SetDesc"></textarea>
+                    }
+                    else { <p class="ai-help" style="margin:0;color:var(--ink);font-size:14px">@Item.AiDesc</p> }
+                    <div class="ai-tags" style="margin-top:10px">
+                        @for (var k = 0; k < Item.AiTags.Count; k++)
+                        {
+                            var i = k;
+                            <span class="ai-tag">@Item.AiTags[i]@if (Editable) { <button type="button" aria-label="Retirer @Item.AiTags[i]" @onclick="() => RemoveTag(i)"><Ico Name="x" Size="12" /></button> }</span>
+                        }
+                        @if (Editable)
+                        {
+                            @if (adding) { <input class="ai-tag-in" placeholder="Mot-clé" aria-label="Nouveau mot-clé" maxlength="40" @bind="newTag" @bind:event="oninput" @onkeydown="TagKey" @onblur="CommitTag" /> }
+                            else { <button type="button" class="ai-tag add" @onclick="() => adding = true"><Ico Name="plus" Size="12" /> Ajouter</button> }
+                        }
+                    </div>
+                    <p class="ai-help">Sert à retrouver l'image en cherchant@(Editable ? ". Rien à faire, sauf corriger si besoin" : "").</p>
+                }
+                else if (analyzing)
+                {
+                    <div class="ai-sline"><Ico Name="spark" Size="14" /><span>L'IA regarde l'image</span><span class="ai-dots"><i></i><i></i><i></i></span></div>
+                }
+                else if (aiMessage != null)
+                {
+                    <div class="ai-off"><Ico Name="alert" Size="15" /><span>@aiMessage</span></div>
+                }
+                else if (aiState.Status == AiStatus.Ok && Editable)
+                {
+                    <h4><Ico Name="spark" Size="13" /> Ce que montre l'image</h4>
+                    <button type="button" class="btn ghost sm" @onclick="Describe"><Ico Name="spark" Size="14" /> Décrire cette image</button>
+                    <p class="ai-help">L'IA écrit une description et des mots-clés, pour retrouver l'image en cherchant.</p>
+                }
+                else if (aiState.Status == AiStatus.NeedsPro)
+                {
+                    <div class="ai-off"><Ico Name="crown" Size="15" /><span>Description et mots-clés automatiques, pour retrouver les images en cherchant : plan Pro.</span></div>
+                }
+                else if (aiState.Status is AiStatus.Quota or AiStatus.Cap)
+                {
+                    <div class="ai-off"><Ico Name="alert" Size="15" /><span>@AiService.Say(aiState)</span></div>
+                }
             </section>
         }
 
@@ -118,6 +175,56 @@
     [Parameter] public EventCallback OnArea { get; set; }
     [Parameter] public EventCallback OnDelete { get; set; }
 
+    // ---------- Médiathèque intelligente : description, mots-clés, cadrage portrait ----------
+
+    private AiState aiState = new(AiStatus.Off, 0, 0, false);
+    private bool adding, analyzing;
+    private string newTag = "";
+    private string? aiMessage;
+
+    /// <summary>La personne peut corriger la description (son média, hors fichier Drive et média reçu).</summary>
+    private bool Editable => CanEdit && Drive == null && SharedBy == null;
+
+    private async Task Describe()
+    {
+        analyzing = true; aiMessage = null;
+        StateHasChanged();
+        var r = await AiMed.Analyze(Store.ClientId, Item.Id, CancellationToken.None);
+        analyzing = false;
+        if (!r.Ok) aiMessage = r.Message;
+        else if (Store.Read(d => d.Media.FirstOrDefault(m => m.Id == Item.Id)) is { AiDone: true } fresh)
+        {
+            Item.AiDesc = fresh.AiDesc; Item.AiTags = fresh.AiTags; Item.AiText = fresh.AiText; Item.AiTemplate = fresh.AiTemplate; Item.AiDone = true;
+        }
+        aiState = AiSvc.State(Store.ClientId, "media");
+    }
+
+    /// <summary>Enregistre une correction : les valeurs sont posées telles quelles (pas d'ajout), donc sans risque si l'objet est partagé avec le magasin.</summary>
+    private void Save(string? desc, List<string> tags)
+    {
+        Item.AiDesc = desc; Item.AiTags = tags;
+        var id = Item.Id;
+        Store.Write(d => { if (d.Media.FirstOrDefault(m => m.Id == id) is { } m) { m.AiDesc = desc; m.AiTags = tags.ToList(); } });
+    }
+
+    private void SetDesc(ChangeEventArgs e) => Save(((e.Value as string) ?? "").Trim() is { Length: > 0 } t ? (t.Length > 400 ? t[..400] : t) : Item.AiDesc, Item.AiTags);
+
+    private void RemoveTag(int i) { var t = Item.AiTags.ToList(); if (i >= 0 && i < t.Count) t.RemoveAt(i); Save(Item.AiDesc, t); }
+
+    private void TagKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") CommitTag();
+        else if (e.Key == "Escape") { adding = false; newTag = ""; }
+    }
+
+    private void CommitTag()
+    {
+        var t = newTag.Trim();
+        adding = false; newTag = "";
+        if (t.Length == 0 || Item.AiTags.Count >= 12 || Item.AiTags.Any(x => string.Equals(x, t, StringComparison.CurrentCultureIgnoreCase))) return;
+        Save(Item.AiDesc, Item.AiTags.Append(t).ToList());
+    }
+
     private MediaUses? uses;
     private Guid loadedFor;
 
@@ -126,6 +233,7 @@
         if (loadedFor == Item.Id && uses != null) return;
         loadedFor = Item.Id;
         uses = Library.Uses(Item.Id);
+        aiState = AiSvc.State(Store.ClientId, "media"); adding = analyzing = false; aiMessage = null;
     }
 
     private string? Ext => System.IO.Path.GetExtension(Item.FileName ?? Item.Name) is { Length: > 1 } e ? e[1..].ToUpperInvariant() : null;

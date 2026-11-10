@@ -10,6 +10,8 @@
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 @inject ModeService Modes
+@inject AiService AiSvc
+@inject AiCompose AiComp
 
 @* Compositions (§80-81, §84) : Mes compositions, et les modèles (galerie Linkivi et « Mes modèles » de l'aire). La page n'existe que si l'application
    « Compositions » est dans Mes applications. Les compositions de « Mes compositions » se placent ensuite dans les listes de lecture. *@
@@ -60,6 +62,10 @@
                         <div class="kebab-backdrop" @onclick="() => newMenu = false"></div>
                         <div class="kebab-menu lx-add-menu" role="menu">
                             <button type="button" role="menuitem" @onclick="() => { newMenu = false; Create(); }"><Ico Name="grid" Size="18" /><span><b>Nouvelle composition</b><small>À partir d'une page vierge</small></span></button>
+                            @if (AiSvc.State(Store.ClientId).Status != AiStatus.Off)
+                            {
+                                <button type="button" role="menuitem" @onclick="() => { newMenu = false; OpenAi(); }"><Ico Name="spark" Size="18" /><span><b>Créer avec l'IA</b><small>Décrivez-la en une phrase</small></span>@if (AiSvc.State(Store.ClientId).Status == AiStatus.NeedsPro) { <span class="plan-tag pro" title="Disponible avec le plan Pro"><Ico Name="crown" Size="12" />Pro</span> }</button>
+                            }
                             <button type="button" role="menuitem" @onclick='() => { newMenu = false; OpenModels("gallery"); }'><Ico Name="images" Size="18" /><span><b>Depuis un modèle</b><small>Galerie de modèles par secteur</small></span></button>
                             @if (CanCreateFolderHere)
                             {
@@ -410,6 +416,42 @@ else
     <ShareDialog Kind="@ShareKind.Composition" Items="smany" OnClose="() => sharingMany = null" OnShared="() => { picked.Clear(); Load(); }" />
 }
 
+@if (aiOpen)
+{
+    var aiSt = AiSvc.State(Store.ClientId);
+    <div class="modal-backdrop" @onclick="CloseAi"></div>
+    <div class="modal ai-modal" role="dialog" aria-modal="true" aria-labelledby="aic-title">
+        <h3 id="aic-title" style="display:flex;align-items:center;gap:8px"><Ico Name="spark" Size="18" /> <span>Créer avec l'IA</span></h3>
+        @if (aiSt.Status == AiStatus.NeedsPro)
+        {
+            <div class="ai-sug up"><Ico Name="crown" Size="16" /><span><b>La création par l'IA est comprise dans le plan Pro.</b> Décrivez votre affiche en une phrase : elle est dessinée pour vous, vous la retouchez ensuite.</span><span class="grow"></span><a class="btn sm" href="/settings?tab=abonnement">Voir les plans</a></div>
+        }
+        else if (!aiSt.Available)
+        {
+            <div class="ai-sug none paused"><Ico Name="alert" Size="16" /><span>@AiService.Say(aiSt)</span></div>
+        }
+        else
+        {
+            <p class="hint" style="margin:6px 0 10px">Décrivez ce que l'écran doit annoncer. Vous pourrez tout retoucher ensuite dans l'éditeur.</p>
+            <textarea style="width:100%;margin-top:4px" rows="4" maxlength="@AiCompose.MaxSentence" aria-label="Ce que l'écran doit annoncer" placeholder="Par exemple : Affiche pour la soirée d'automne de l'association, jeudi 15 octobre à 18 h à la cafétéria, entrée libre" @bind="aiText" @bind:event="oninput" disabled="@aiBusy"></textarea>
+            <div class="ai-suggest" style="margin:10px 0 0">
+                <span>Essayez :</span>
+                @foreach (var ex in AiExamples) { var e = ex; <button type="button" class="ai-chip" disabled="@aiBusy" @onclick="() => aiText = e">@e</button> }
+            </div>
+            <div class="seg" role="radiogroup" aria-label="Format de la page" style="margin-top:14px">
+                <button type="button" role="radio" aria-checked="@(!aiPortrait ? "true" : "false")" class="@(!aiPortrait ? "on" : "")" disabled="@aiBusy" @onclick="() => aiPortrait = false">Écran en largeur</button>
+                <button type="button" role="radio" aria-checked="@(aiPortrait ? "true" : "false")" class="@(aiPortrait ? "on" : "")" disabled="@aiBusy" @onclick="() => aiPortrait = true">Écran en hauteur</button>
+            </div>
+            @if (aiError != null) { <div class="err" role="alert" style="margin-top:12px">@aiError</div> }
+            <div class="modal-actions">
+                <button class="btn ghost" @onclick="CloseAi" disabled="@aiBusy">Annuler</button>
+                <button class="btn" disabled="@(aiBusy || aiText.Trim().Length < 4)" @onclick="CreateWithAi">@if (aiBusy) { <span>L'IA dessine</span><span class="ai-dots"><i></i><i></i><i></i></span> } else { <Ico Name="spark" Size="15" /> <span>Créer</span> }</button>
+            </div>
+            <p class="ai-help">Proposé par l'IA, qui peut se tromper : relisez les textes avant de publier.</p>
+        }
+    </div>
+}
+
 @if (creatingFolder)
 {
     <div class="modal-backdrop" @onclick="() => creatingFolder = false"></div>
@@ -531,6 +573,40 @@ else
     private List<MediaItem> scopeItems = new();              // compositions montrées par le filtre « Afficher », dossiers compris
     private Dictionary<Guid, ShareSummary> folderShares = new();
     private bool creatingFolder;
+
+    // ---------- Créer avec l'IA : une phrase, une composition à retoucher ----------
+
+    private bool aiOpen, aiBusy, aiPortrait;
+    private string aiText = "", aiError = "";
+    private static readonly string[] AiExamples =
+    {
+        "Menu du jour : soupe, poulet rôti, tarte aux pommes, 16.– le menu",
+        "Bienvenue à la réunion annuelle, vendredi 20 mars à 19 h",
+        "Fermé le lundi de Pâques, réouverture mardi à 8 h",
+    };
+
+    private void OpenAi() { aiOpen = true; aiError = ""; }
+    private void CloseAi() { if (!aiBusy) aiOpen = false; }
+
+    private async Task CreateWithAi()
+    {
+        aiBusy = true; aiError = "";
+        StateHasChanged();
+        try
+        {
+            var r = await AiComp.FromSentence(Store.ClientId, aiText, aiPortrait);
+            if (!r.Ok) { aiError = r.Message; return; }
+            var slide = r.Slides[0];
+            if (Compositions.Clean(slide.Doc) is not { } c) { aiError = "La composition n'a pas pu être préparée."; return; }
+            var (item, errors) = Svc.SaveInstance(Compositions.AppId, null, slide.Name, new Dictionary<string, string> { ["doc"] = c.Doc, ["images"] = string.Join(",", c.Images) });
+            if (item == null) { aiError = string.Join(" ", errors); return; }
+            Folders.PlaceNew(item.Id, folderId);
+            aiOpen = false;
+            Nav.NavigateTo("/compositions/" + item.Id + "?back=%2Fcompositions");
+        }
+        finally { aiBusy = false; }
+    }
+
     private string newFolderName = "", renameFolderValue = "";
     private string? folderError;
     private CompositionFolderRow? renamingFolder, deletingFolder;

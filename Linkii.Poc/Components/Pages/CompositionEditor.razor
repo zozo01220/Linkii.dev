@@ -13,6 +13,7 @@
 @inject NavigationManager Nav
 @inject ModeService Modes
 @inject HomeAssistantLive HaLive
+@inject AiService AiSvc
 
 @* Éditeur de compositions (DEV-POC.md §80, §84, §85) : l'interface est en JS (wwwroot/compo-editor.js, plein écran), le serveur garde le document,
    calcule les QR codes, liste et importe les images de la médiathèque, garde « Mes modèles », et lit les données des sources (blocs, champs reliés). Le rendu des calques est celui du player (player/composition.js).
@@ -99,10 +100,21 @@ else
             myTemplates = Templates(),
             sources = Sources(),
             screens = ScreenChoices(),   // « Nouvelle composition » : écran concerné, sa résolution et son orientation
+            ai = AiMode(),   // bouton « Améliorer » des textes : on | pro (invitation) | pause | off (absent)
             expert = Modes.Expert,   // menus Données et Graphiques : mode expert seulement
             canImport = Store.Read(d => d.Access.CanWrite(LevelPages.Media)),
             canEditData = Store.Read(d => d.Access.IsOrgAdmin)   // nom lisible et masquage des champs d'un jeu : comme la gestion des sources de données
         }, self);
+    }
+
+    private string AiMode() => AiSvc.State(Store.ClientId).Status switch { AiStatus.Ok => "on", AiStatus.NeedsPro => "pro", AiStatus.Quota or AiStatus.Cap => "pause", _ => "off" };
+
+    /// <summary>Réécriture d'un texte par l'IA (bouton « Améliorer » de la barre d'un texte) : { ok, text, message }.</summary>
+    [JSInvokable]
+    public async Task<Dictionary<string, object>> AiRewrite(string text, string mode)
+    {
+        var r = await AiSvc.Rewrite(Store.ClientId, text, mode, false);
+        return new Dictionary<string, object> { ["ok"] = r.Ok, ["text"] = r.Text, ["message"] = r.Message, ["mode"] = AiMode() };
     }
 
     /// <summary>Enregistre le nom et le document (crée la composition au premier enregistrement) ; rend le message d'erreur, ou null.</summary>

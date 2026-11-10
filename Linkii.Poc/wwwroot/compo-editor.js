@@ -143,7 +143,7 @@
     scrList = o.screens || [];
     sources = o.sources || []; srcData = {}; srcBusy = {}; srcAt = {}; names = false;
     myTpl = o.myTemplates || []; canImport = !!o.canImport; canEditData = !!o.canEditData; tplTab = 'galerie';
-    dv = { view: 'sources', set: null, row: 0, open: new Set(['@used']), hidden: false, q: '', ren: null }; sheet = null; ld = null; fp = null; fd = null; cd = null; expert = !!o.expert;
+    dv = { view: 'sources', set: null, row: 0, open: new Set(['@used']), hidden: false, q: '', ren: null }; sheet = null; ld = null; fp = null; fd = null; cd = null; expert = !!o.expert; aiOn = o.ai || 'off';
     name = savedName = o.name || 'Composition';
     let doc = null;
     try { doc = o.doc ? JSON.parse(o.doc) : null; } catch (x) { doc = null; }
@@ -1780,6 +1780,7 @@
       h = textTools(e);
       if (e.type === 'text') h += sepH + `<button class="ce-tb" data-act="field" title="Insérer un champ relié à une source (ou tapez « { » pendant l'écriture)">{ } Champ</button>` +
         (LC().sources({ els: [e] }).length ? '<button class="ce-tb" data-act="fb" title="Texte affiché quand la source n\'a pas de valeur">Valeur de secours…</button>' : '');
+      if (e.type === 'text' && aiOn !== 'off') h += `<button class="ce-tb ce-ai" data-act="ai" title="Corriger et resserrer ce texte avec l'IA">✦ Améliorer${aiOn === 'pro' ? ' <span class="plan-tag pro">Pro</span>' : ''}</button>`;
       if (e.kind === 'clock') h += sepH + `<button class="ce-tb ${e.sec ? 'on' : ''}" data-tog="sec">Secondes</button>`;
       if (e.kind === 'countdown') h += sepH + `<label class="ce-lbl">Jusqu'au<input type="date" data-k="until" value="${esc(e.until)}"></label>`;
     }
@@ -1850,6 +1851,7 @@
     else if (a === 'del') del();
     else if (a === 'replace') { mediaMode = 'replace'; if (e.type === 'video') mediaTab = 'vid'; openPanel('medias'); }
     else if (a === 'field') fieldMenu(b);
+    else if (a === 'ai') aiAsk(b, 'improve');
     else if (a === 'fb') { const v = prompt('Texte affiché à la place d\'un champ quand sa source n\'a pas de valeur :', e.fb || '—'); if (v != null) { e.fb = v.slice(0, 40); commit(); } }
     else if (a === 'lrows' || a === 'lcols' || a === 'lcolors') listPop(a.slice(1));
     else if (a === 'cdopen') openCd('data');
@@ -1938,6 +1940,36 @@
   }
 
   // ---------- menus ----------
+  // ---------- IA : « ✦ Améliorer » sur un texte (corriger et resserrer ; plus court, ton, traduction ensuite). L'IA propose, on remplace d'un clic. ----------
+  let aiOn = 'off';
+  const aiTok = t => (String(t).match(/{{[^}]*}}/g) || []).join('|');
+  async function aiAsk(anchor, mode) {
+    const e = cur(); if (!e || e.type !== 'text') return;
+    if (aiOn === 'pro') { aiPop(anchor, 'pro'); return; }
+    if (aiOn === 'pause') { aiPop(anchor, 'msg', null, "L'aide de l'IA est en pause : le quota du mois est atteint. Vous pouvez continuer à écrire vous-même."); return; }
+    if (!String(e.text || '').trim()) { aiPop(anchor, 'msg', null, "Écrivez d'abord un texte à améliorer."); return; }
+    aiPop(anchor, 'load');
+    let r; try { r = await net.invokeMethodAsync('AiRewrite', String(e.text), mode); } catch (x) { r = { ok: false, message: "L'aide de l'IA n'est pas disponible pour le moment." }; }
+    const a = q('[data-act=ai]') || anchor;
+    if (!r.ok) { aiPop(a, 'msg', null, r.message || "L'aide de l'IA n'est pas disponible pour le moment."); return; }
+    if (aiTok(r.text) !== aiTok(e.text)) { aiPop(a, 'msg', null, "L'IA a modifié un champ relié (entre accolades) : la proposition est écartée pour ne pas casser le texte."); return; }
+    aiPop(a, 'sug', { mode, text: r.text, id: e.id });
+  }
+  const AI_LBL = { improve: 'Texte corrigé et resserré', short: 'Plus court', warm: 'Ton plus chaleureux', formal: 'Ton plus formel', en: 'En anglais', de: 'En allemand', it: 'En italien', es: 'En espagnol' };
+  function aiPop(anchor, kind, s, msg) {
+    let h;
+    if (kind === 'load') h = '<div class="ai-sug loading" role="status">✦ <span>L\'IA écrit</span><span class="ai-dots"><i></i><i></i><i></i></span></div>';
+    else if (kind === 'pro') h = '<div class="ai-sug up"><span><b>L\'aide de l\'IA est comprise dans le plan Pro.</b> Elle corrige, raccourcit et traduit vos textes en un clic.</span><a class="btn sm" href="/settings?tab=abonnement" target="_blank">Voir les plans</a></div>';
+    else if (kind === 'msg') h = '<div class="ai-sug none paused" role="status"><span>' + esc(msg) + '</span><button class="linklike" data-o="close">Fermer</button></div>';
+    else h = '<div class="ai-sug" role="region" aria-label="Proposition de l\'IA"><div class="ai-sug-h"><b>✦ ' + AI_LBL[s.mode] + '</b></div><p class="ai-sug-t">' + esc(s.text) + '</p>' +
+      '<div class="ai-sug-a"><button class="btn sm" data-o="apply">Remplacer</button><button class="btn ghost sm" data-o="close">Ignorer</button></div>' +
+      '<div class="ai-adj"><button data-o="m:short" data-keep="1">Plus court</button><button data-o="m:warm" data-keep="1">Plus chaleureux</button><button data-o="m:formal" data-keep="1">Plus formel</button>' +
+      '<button data-o="m:en" data-keep="1">Anglais</button><button data-o="m:de" data-keep="1">Allemand</button><button data-o="m:it" data-keep="1">Italien</button><button data-o="m:es" data-keep="1">Espagnol</button></div></div>';
+    openPop(anchor, h, v => {
+      if (v === 'apply' && s) { const e = D.els.find(x => x.id === s.id); if (e) { e.text = s.text; commit(); renderCtx(); toast("Texte remplacé. Ctrl+Z pour revenir à l'ancien."); } }
+      else if (String(v).startsWith('m:')) { closePop(); aiAsk(q('[data-act=ai]') || anchor, v.slice(2)); }
+    });
+  }
   function openPop(anchor, html, cb) {
     closePop();
     const p = document.createElement('div'); p.className = 'ce-pop'; p.id = 'ce-pop'; p.innerHTML = html; root.appendChild(p);

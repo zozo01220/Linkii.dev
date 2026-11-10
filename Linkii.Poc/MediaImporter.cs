@@ -8,7 +8,7 @@ namespace Linkii.Poc;
 /// Les images et les MP4 d'au plus 1080p sont publiés tels quels ; toute autre vidéo (autre format, ou plus grande que 1080p) est convertie en arrière-plan en MP4 H.264 1080p max (statut « processing » puis prête).
 /// La progression est rapportée en octets reçus.
 /// </summary>
-public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp http, HistoryLog history)
+public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp http, HistoryLog history, AiMedia aiMedia)
 {
     public const long MaxBytes = 2_000_000_000;
 
@@ -144,6 +144,7 @@ public class MediaImporter(JsonStore store, VideoConverter converter, SafeHttp h
             var item = new MediaItem { ClientId = clientId, AreaId = areaId ?? Guid.Empty, FolderId = folderId, OwnerId = ownerId, Name = title, Type = isVideo ? "video" : "image", Dir = dir, FileName = id + ext, Size = written, Width = px?.W, Height = px?.H, AddedUtc = DateTime.UtcNow };
             store.Write(d => { d.Media.Add(item); });
             Remember(item, ownerId);
+            if (!isVideo) aiMedia.Queue(clientId, item.Id);   // médiathèque intelligente : description et mots-clés, en arrière-plan
             return new(item, null);
         }
 

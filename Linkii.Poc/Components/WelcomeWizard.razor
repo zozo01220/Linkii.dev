@@ -12,6 +12,8 @@
 @inject IJSRuntime JS
 @inject Toaster Toast
 @inject IWebHostEnvironment Env
+@inject AiService AiSvc
+@inject AiCompose AiComp
 
 @* masqué (sans perdre son état) pendant l'aperçu, qui s'ouvre en plein écran *@
 <div class="fs-wiz pp-wiz" style="@(previewing || Away ? "display:none" : null)">
@@ -48,6 +50,12 @@
                     @if (empty) { <span class="pp-logos" aria-hidden="true">@foreach (var b in new[] { "gdrive", "onedrive", "dropbox", "canva" }) { <svg width="16" height="16"><use href="/brand-logos.svg#@b" width="100%" height="100%"></use></svg> }</span> }
                 </button>
                 <button type="button" class="btn ghost @(panel == "link" ? "on" : "")" aria-expanded="@(panel == "link" ? "true" : "false")" @onclick='() => Toggle("link")'><Ico Name="link" Size="16" /> @(empty ? "Page web ou lien" : "Lien")</button>
+                @if (AiSvc.State(Store.ClientId).Status != AiStatus.Off)
+                {
+                    <button type="button" class="btn ghost @(panel == "site" ? "on" : "")" aria-expanded="@(panel == "site" ? "true" : "false")" @onclick='() => Toggle("site")'><Ico Name="spark" Size="16" /> <span>Mon site web</span>
+                        @if (AiSvc.State(Store.ClientId).Status == AiStatus.NeedsPro) { <span class="plan-tag pro" title="Disponible avec le plan Pro"><Ico Name="crown" Size="12" />Pro</span> }
+                    </button>
+                }
                 @if (!empty) { <button type="button" class="btn ghost @(panel == "tpl" ? "on" : "")" aria-expanded="@(panel == "tpl" ? "true" : "false")" @onclick='() => Toggle("tpl")'><Ico Name="grid" Size="16" /> Modèle</button> }
             </div>
         </div>
@@ -62,6 +70,26 @@
                 <input type="text" inputmode="url" autocomplete="url" @bind="linkUrl" @bind:event="oninput" placeholder="Collez une adresse : site web, image ou vidéo en ligne" aria-label="Adresse web" />
                 <button type="submit" class="btn" disabled="@busy">Ajouter</button>
             </form>
+        }
+        else if (panel == "site")
+        {
+            var siteSt = AiSvc.State(Store.ClientId);
+            if (siteSt.Status == AiStatus.NeedsPro)
+            {
+                <div class="pp-panel ai-sug up"><Ico Name="crown" Size="16" /><span><b>Vos pages à partir de votre site web : plan Pro.</b> Collez l'adresse de votre site, l'IA prépare un accueil, une présentation et les infos pratiques.</span><span class="grow"></span><a class="btn sm" href="/settings?tab=abonnement">Voir les plans</a></div>
+            }
+            else if (!siteSt.Available)
+            {
+                <div class="pp-panel ai-sug none paused"><Ico Name="alert" Size="16" /><span>@AiService.Say(siteSt)</span></div>
+            }
+            else
+            {
+                <form class="pp-panel pp-link" @onsubmit="AddFromSite" @onsubmit:preventDefault>
+                    <input type="text" inputmode="url" autocomplete="url" @bind="siteUrl" @bind:event="oninput" disabled="@busy" placeholder="Adresse de votre site web, par exemple www.mon-entreprise.ch" aria-label="Adresse de votre site web" />
+                    <button type="submit" class="btn" disabled="@(busy || siteUrl.Trim().Length < 4)">@if (busy) { <span>L'IA lit votre site</span><span class="ai-dots"><i></i><i></i><i></i></span> } else { <Ico Name="spark" Size="15" /> <span>Créer mes pages</span> }</button>
+                </form>
+                <p class="ai-help" style="margin:6px 4px 0">L'IA lit la page d'accueil de votre site et prépare trois pages (accueil, présentation, infos pratiques) avec votre photo. Vous les retouchez ensuite ; rien n'est publié sans vous.</p>
+            }
         }
         else if (panel == "tpl" && !empty)
         {
@@ -265,7 +293,7 @@
     private int step = 1;
     private string? panel, error;   // panneau ouvert sous la zone de dépôt : cloud | link | tpl
     private bool hot, busy, saving, previewing, hasScreen;
-    private string linkUrl = "";
+    private string linkUrl = "", siteUrl = "";
     private readonly List<Entry> entries = new();
     private readonly Dictionary<Guid, Guid> placed = new();   // contenu de l'étape 1 -> élément de la liste
     private List<MediaItem> all = new();
@@ -440,6 +468,34 @@
         var (item, errors) = Svc.SaveInstance("webpage", null, name.Length > 80 ? name[..80] : name, new Dictionary<string, string> { ["url"] = u, ["refreshMin"] = "0" });
         if (item == null) { error = string.Join(" ", errors); return; }
         Add(item.Id);
+    }
+
+    /// <summary>« Mon site web » : l'IA lit le site et crée trois compositions, qui rejoignent les contenus ajoutés (la photo du site entre dans la médiathèque).</summary>
+    private async Task AddFromSite()
+    {
+        error = null;
+        var u = siteUrl.Trim();
+        if (u.Length < 4 || !Ready(Compositions.AppId)) return;
+        busy = true;
+        StateHasChanged();
+        try
+        {
+            var r = await AiComp.FromSite(Store.ClientId, u, Store.AreaId, Store.UserId);
+            if (!r.Ok) { error = r.Message; return; }
+            var made = 0;
+            foreach (var slide in r.Slides)
+            {
+                if (Compositions.Clean(slide.Doc) is not { } c) continue;
+                var (item, errors) = Svc.SaveInstance(Compositions.AppId, null, slide.Name, new Dictionary<string, string> { ["doc"] = c.Doc, ["images"] = string.Join(",", c.Images) });
+                if (item == null) { error = string.Join(" ", errors); continue; }
+                Add(item.Id); made++;
+            }
+            if (made == 0) { error ??= "Les pages n'ont pas pu être créées."; return; }
+            panel = null; siteUrl = "";
+            Reload();
+            Toast.Ok(made == 1 ? "Une page créée à partir de votre site." : $"{made} pages créées à partir de votre site : retouchez-les plus tard dans Contenus › Compositions.");
+        }
+        finally { busy = false; }
     }
 
     private void AddTemplate(FirstScreen.Template t)

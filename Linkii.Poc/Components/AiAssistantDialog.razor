@@ -1,0 +1,135 @@
+@inject AiService AiSvc
+@inject AiAssistant Assistant
+@inject TenantStore Store
+@inject NavigationManager Nav
+
+@* Assistant (piste 5) : on écrit ce qu'on veut savoir ou faire, il répond d'après l'état des écrans et propose des actions. Rien ne part sans « Confirmer » :
+   les actions sont cochées une à une, et l'assistant ne publie ni ne supprime rien. *@
+<div class="modal-backdrop" @onclick="Close"></div>
+<div class="modal ai-modal" role="dialog" aria-modal="true" aria-labelledby="aia-title" style="width:min(560px, calc(100vw - 32px))">
+    <h3 id="aia-title" style="display:flex;align-items:center;gap:8px"><Ico Name="spark" Size="18" /> <span>Assistant</span></h3>
+    @if (state.Status == AiStatus.NeedsPro)
+    {
+        <div class="ai-sug up"><Ico Name="crown" Size="16" /><span><b>L'assistant est compris dans le plan Pro.</b> Dites ce que vous voulez (« affiche un message d'accueil dans le hall », « quels écrans sont hors ligne ? ») : il le fait après votre accord.</span><span class="grow"></span><a class="btn sm" href="/settings?tab=abonnement">Voir les plans</a></div>
+    }
+    else if (!state.Available)
+    {
+        <div class="ai-sug none paused"><Ico Name="alert" Size="16" /><span>@AiService.Say(state)</span></div>
+    }
+    else
+    {
+        <p class="hint" style="margin:6px 0 10px">Écrivez ce que vous voulez savoir ou faire sur vos écrans. Rien n'est fait sans votre accord.</p>
+        <textarea style="width:100%" rows="2" maxlength="500" aria-label="Votre demande" placeholder="Par exemple : Affiche « Réunion en salle 2 » pendant une minute sur l'écran du hall" @bind="text" @bind:event="oninput" disabled="@(busy || running)" @onkeydown="Key"></textarea>
+        @if (answer == null)
+        {
+            <div class="ai-suggest" style="margin:10px 0 0">
+                <span>Essayez :</span>
+                @foreach (var ex in Examples) { var e = ex; <button type="button" class="ai-chip" disabled="@busy" @onclick="() => text = e">@e</button> }
+            </div>
+        }
+        @if (error != null) { <div class="err" role="alert" style="margin-top:12px">@error</div> }
+
+        @if (answer is { } ans)
+        {
+            <div class="ai-sug" style="margin-top:14px" role="region" aria-label="Réponse de l'assistant">
+                <p class="ai-sug-t" style="margin:0">@ans.Say</p>
+                @if (ans.Actions.Count > 0)
+                {
+                    <ul style="list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px">
+                        @for (var k = 0; k < ans.Actions.Count; k++)
+                        {
+                            var i = k;
+                            <li style="display:flex;gap:10px;align-items:flex-start">
+                                @if (done.TryGetValue(i, out var res))
+                                {
+                                    @if (res == null) { <span style="color:#1E8E5A;flex:none"><Ico Name="check" Size="16" /></span> }
+                                    else { <span style="color:#C8372D;flex:none"><Ico Name="alert" Size="16" /></span> }
+                                    <span>@ans.Actions[i].Label
+                                        @if (res != null) { <small style="display:block;color:#C8372D">@res</small> }</span>
+                                }
+                                else
+                                {
+                                    <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer"><input type="checkbox" checked="@picked.Contains(i)" disabled="@running" @onchange="() => Toggle(i)" /> <span>@ans.Actions[i].Label</span></label>
+                                }
+                            </li>
+                        }
+                    </ul>
+                }
+                @if (ans.Link != null) { <p style="margin:12px 0 0"><button type="button" class="linklike" @onclick="GoLink">@ans.LinkLabel</button></p> }
+            </div>
+        }
+        <div class="modal-actions">
+            <button class="btn ghost" @onclick="Close" disabled="@running">@(answer != null && done.Count > 0 ? "Fermer" : "Annuler")</button>
+            @if (answer is { Actions.Count: > 0 } && PendingCount > 0)
+            {
+                <button class="btn" disabled="@(running || picked.Count == 0)" @onclick="Confirm">@if (running) { <span>En cours</span><span class="ai-dots"><i></i><i></i><i></i></span> } else { <Ico Name="check" Size="15" /> <span>Confirmer (@picked.Count)</span> }</button>
+            }
+            else
+            {
+                <button class="btn" disabled="@(busy || text.Trim().Length < 2)" @onclick="Send">@if (busy) { <span>L'assistant réfléchit</span><span class="ai-dots"><i></i><i></i><i></i></span> } else { <Ico Name="spark" Size="15" /> <span>Demander</span> }</button>
+            }
+        </div>
+        <p class="ai-help">Proposé par l'IA, qui peut se tromper : vérifiez les actions avant de confirmer.</p>
+    }
+</div>
+
+@code {
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private static readonly string[] Examples =
+    {
+        "Quels écrans sont hors ligne ?",
+        "Affiche « Bienvenue » pendant 2 minutes sur tous les écrans",
+        "Redémarre l'écran de l'accueil",
+    };
+
+    private AiState state = new(AiStatus.Off, 0, 0, false);
+    private string text = "";
+    private string? error;
+    private bool busy, running;
+    private AiAnswer? answer;
+    private readonly HashSet<int> picked = new();
+    private readonly Dictionary<int, string?> done = new();
+
+    private int PendingCount => answer == null ? 0 : answer.Actions.Count - done.Count;
+
+    protected override void OnInitialized() => state = AiSvc.State(Store.ClientId, "assistant");
+
+    private void Close() { if (!running) OnClose.InvokeAsync(); }
+
+    private async Task Key(KeyboardEventArgs e) { if (e.Key == "Enter" && !e.ShiftKey && !busy && answer == null && text.Trim().Length >= 2) await Send(); }
+
+    private async Task Send()
+    {
+        busy = true; error = null; answer = null; done.Clear(); picked.Clear();
+        StateHasChanged();
+        try
+        {
+            var r = await Assistant.Ask(Store.ClientId, text);
+            state = AiSvc.State(Store.ClientId, "assistant");
+            if (!r.Ok) { error = r.Message; return; }
+            answer = r;
+            for (var i = 0; i < r.Actions.Count; i++) picked.Add(i);
+        }
+        finally { busy = false; }
+    }
+
+    private void Toggle(int i) { if (!picked.Remove(i)) picked.Add(i); }
+
+    private async Task Confirm()
+    {
+        if (answer == null) return;
+        running = true;
+        StateHasChanged();
+        foreach (var i in picked.OrderBy(x => x).ToList())
+        {
+            done[i] = await Assistant.Run(Store.ClientId, Store.UserId, answer.Actions[i]);
+            StateHasChanged();
+        }
+        picked.Clear();
+        running = false;
+        state = AiSvc.State(Store.ClientId, "assistant");
+    }
+
+    private void GoLink() { if (answer?.Link is { } l) { OnClose.InvokeAsync(); Nav.NavigateTo(l); } }
+}

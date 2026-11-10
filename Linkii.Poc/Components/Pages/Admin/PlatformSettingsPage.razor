@@ -6,6 +6,7 @@
 @inject Mailer Mail
 @inject NpmProxy Npm
 @inject ResellerResolver Resolver
+@inject AiService AiSvc
 
 <div class="page-head">
     <div>
@@ -165,6 +166,52 @@
                 @if (npmTest != "") { <span class="adm-st @(npmTestOk ? "ok" : "bad")">@npmTest</span> }
                 <small>Enregistre les champs avant de tester.</small></div></div>
     }
+    else if (section == "ai")
+    {
+        if (!hasAiKey)
+        {
+            <div class="n-ban warn"><Ico Name="alert" Size="18" /><div><b>Aucune clé : l'IA n'apparaît pas chez les clients.</b> Saisissez la clé du fournisseur ci-dessous ; elle servira à toutes les organisations Pro.</div></div>
+        }
+        else if (!aiOn)
+        {
+            <div class="n-ban warn"><Ico Name="alert" Size="18" /><div><b>L'IA est coupée pour tous les clients.</b> Réactivez-la dans « Budget et sécurité ».</div></div>
+        }
+        else
+        {
+            <div class="n-ban ok"><Ico Name="check" Size="18" /><div><b>L'IA est active.</b> Les organisations Pro (essai compris, si vous l'autorisez) ont l'aide à l'écriture, dans la limite de leur quota.</div></div>
+        }
+        <div class="n-card"><p class="n-cardt">Connexion</p><p class="n-cardd">Une seule clé pour toute la plateforme : les clients n'ont rien à installer ni à saisir. Elle est chiffrée sur le serveur et jamais réaffichée.</p>
+            <div class="n-fields">
+                <div class="n-f"><label>Fournisseur</label><input class="full" value="Anthropic (Claude)" disabled aria-label="Fournisseur" /></div>
+                <div class="n-f"><label>Modèle</label>
+                    <select class="full" @bind="aiModel" aria-label="Modèle">
+                        @foreach (var (id, label) in Ai.Models) { <option value="@id">@label</option> }
+                    </select><small>Tarif : @Ai.Price(aiModel).In.ToString("0.##") $ en entrée et @Ai.Price(aiModel).Out.ToString("0.##") $ en sortie par million de jetons.</small></div>
+                <div class="n-f" style="grid-column:1/-1"><label>Clé API</label><input class="mono full" type="password" @bind="aiKey" autocomplete="new-password" name="ai-secret" placeholder="@(hasAiKey ? "Enregistrée : laisser vide pour la conserver" : "sk-ant-…")" aria-label="Clé API" /><small>À créer dans la console Anthropic (platform.claude.com) : facturée à l'usage, à part de tout abonnement Claude.</small></div>
+            </div>
+            <div class="n-test"><button type="button" class="btn ghost" @onclick="TestAi" disabled="@aiTesting">Tester la connexion</button>
+                @if (aiTest != "") { <span class="adm-st @(aiTestOk ? "ok" : "bad")">@aiTest</span> }
+                <small>Enregistre les champs avant de tester.</small></div></div>
+        <div class="n-card"><p class="n-cardt">Qui peut s'en servir, et combien</p><p class="n-cardd">Quota de demandes par mois et par organisation ; atteint, l'IA se met en pause chez elle jusqu'au 1<sup>er</sup> du mois suivant (le reste de Linkivi continue). Les organisations Essential n'y ont pas accès.</p>
+            <div class="n-fields">
+                <div class="n-f"><label>Pro</label><div class="u"><input type="number" min="0" max="1000000" class="mono" aria-label="Quota Pro" @bind="aiQuotaPro" /><span class="muted">demandes par mois</span></div></div>
+                <div class="n-f"><label>Essai gratuit</label><div class="u"><input type="number" min="0" max="1000000" class="mono" aria-label="Quota de l'essai" @bind="aiQuotaTrial" /><span class="muted">demandes par mois</span></div></div>
+            </div>
+            <div class="adm-row">
+                <div>Disponible pendant l'essai gratuit<small>Les nouveaux comptes peuvent essayer l'IA, avec le quota de l'essai. Coupé, ils voient « comprise dans le plan Pro ».</small></div>
+                <div class="val"><button type="button" class="switch @(aiTrial ? "on" : "")" role="switch" aria-checked="@(aiTrial ? "true" : "false")" aria-label="Disponible pendant l'essai gratuit" @onclick="() => aiTrial = !aiTrial"><span></span></button></div>
+            </div></div>
+        <div class="n-card"><p class="n-cardt">Budget et sécurité</p><p class="n-cardd">Filet de sécurité : si la dépense estimée du mois atteint le plafond, l'IA se met en pause pour tous les clients jusqu'au mois suivant.</p>
+            <div class="n-fields">
+                <div class="n-f"><label>Plafond de dépense du mois</label><div class="u"><input type="number" min="0" max="10000" step="1" class="mono" aria-label="Plafond en dollars" @bind="aiCap" /><span class="muted">$</span></div></div>
+            </div>
+            <div class="n-sim"><div class="t">Ce mois-ci</div><div><span>dépense estimée</span><b>@aiCost.ToString("0.00##") $</b></div><div><span>plafond</span><b>@aiCap.ToString("0.##") $</b></div><div><span>demandes</span><b>@aiUsed</b></div></div>
+            <div class="adm-row">
+                <div>L'IA est active pour tous les clients<small>Interrupteur d'urgence : coupe tout, sans rien supprimer ni modifier chez les clients.</small></div>
+                <div class="val"><button type="button" class="switch @(aiOn ? "on" : "")" role="switch" aria-checked="@(aiOn ? "true" : "false")" aria-label="IA active pour tous les clients" @onclick="() => aiOn = !aiOn"><span></span></button></div>
+            </div></div>
+        <div class="n-card"><p class="n-cardt">Consommation par client</p><p class="n-cardd">La consommation de chaque organisation et son quota particulier se voient dans <a href="admin/clients">Clients</a> (colonne « IA ce mois-ci » et fiche du client).</p></div>
+    }
     else if (section == "mail")
     {
         if (!Mail.Configured)
@@ -225,20 +272,28 @@
     {
         ("Clients", new[] { ("signup", "Inscription et essai", "user"), ("journey", "Parcours e-mails", "mail-send"), ("access", "Suspension et blocage", "lock") }),
         ("Argent", new[] { ("prices", "Tarifs et commissions", "chart"), ("pay", "Paiement en ligne", "card") }),
-        ("Plateforme", new[] { ("addr", "Adresses et NPM", "globe"), ("mail", "Serveur d'e-mails", "mail"), ("terms", "Conditions", "file") })
+        ("Plateforme", new[] { ("addr", "Adresses et NPM", "globe"), ("mail", "Serveur d'e-mails", "mail"), ("ai", "Intelligence artificielle", "spark"), ("terms", "Conditions", "file") })
     };
     private static readonly (string Id, string Label, string Icon)[] Sections = Groups.SelectMany(g => g.Items).ToArray();
 
     /// <summary>Pastille orange dans le menu : ce qui mérite attention (paiements simulés, aucun serveur d'e-mails).</summary>
-    private bool Attention(string id) => id == "pay" ? paymentMode == PaymentModes.Simulation : id == "mail" && !Mail.Configured;
-    private string AttentionTip(string id) => id == "pay" ? "Mode simulation" : "Aucun serveur d'e-mails";
+    private bool Attention(string id) => id == "pay" ? paymentMode == PaymentModes.Simulation : id == "mail" ? !Mail.Configured : id == "ai" && !hasAiKey;
+    private string AttentionTip(string id) => id == "pay" ? "Mode simulation" : id == "ai" ? "Aucune clé d'IA" : "Aucun serveur d'e-mails";
+
+    // Intelligence artificielle (voir AiService) : une clé pour toute la plateforme
+    private string aiModel = Ai.DefaultModel, aiKey = "", aiTest = "";
+    private int aiQuotaPro = 1000, aiQuotaTrial = 1000;
+    private decimal aiCap = 25, aiCost;
+    private bool aiOn = true, aiTrial = true, hasAiKey, aiTesting, aiTestOk;
+    private int aiUsed;   // demandes du mois, toutes organisations
 
     // « Enregistrer / Annuler » n'apparaissent que si un champ a changé depuis le chargement ou le dernier enregistrement
     private string savedSig = "";
     private bool Dirty => Sig() != savedSig;
     private string Sig() => string.Join("|", trialDays, linkHours, purgeDays, accepted, smtpPort, smtpHost, smtpUser, smtpPassword, smtpFrom, smtpSsl, baseDomain, sepChoice, npmUrl, npmUser, npmPassword, npmScheme, npmForwardHost, npmPort,
         annualPct, commissionPct, priceBase, priceGrowth, feePct, feeFixed, trialPlan, paymentMode, stripeKey, retentionDays, reminderDays, mailFirst, mailTips,
-        string.Join(",", codes.Select(c => $"{c.Code}:{c.Days}:{c.Active}")));
+        string.Join(",", codes.Select(c => $"{c.Code}:{c.Days}:{c.Active}")),
+        aiModel, aiKey, aiQuotaPro, aiQuotaTrial, aiCap, aiOn, aiTrial);
 
     // Essai, conservation, codes, parcours e-mails, paiement (voir Billing, Lifecycle)
     private string trialPlan = Plans.Growth, paymentMode = PaymentModes.Simulation, stripeKey = "", newCode = "";
@@ -300,6 +355,11 @@
         (trialPlan, retentionDays, reminderDays, mailFirst, mailTips, paymentMode, hasStripeKey) = (p.TrialPlan, p.RetentionDays, p.TrialReminderDays, p.MailFirstSteps, p.MailTips, p.PaymentMode, p.StripeSecretKey != "");
         codes = p.TrialCodes.Select(c => new TrialCode { Code = c.Code, Days = c.Days, Active = c.Active, Uses = c.Uses }).ToList();   // copie : rien n'est enregistré avant « Enregistrer »
         simulatedCount = Root.Read(d => d.Payments.Count(x => x.Simulated));
+        aiKey = "";
+        (aiModel, aiQuotaPro, aiQuotaTrial, aiCap, aiOn, aiTrial, hasAiKey) = (Ai.Models.Any(m => m.Id == p.AiModel) ? p.AiModel : Ai.DefaultModel, p.AiQuotaPro, p.AiQuotaTrial, p.AiMonthlyCapUsd, p.AiEnabled, p.AiTrial, p.AiApiKey != "");
+        var now = DateTime.UtcNow;
+        var month = Ai.Month(now);
+        (aiUsed, aiCost) = Root.Read(d => (d.AiUsage.Where(u => u.Month == month).Sum(u => u.Requests), AiService.MonthCost(d, now)));
         savedSig = Sig();
     }
 
@@ -322,6 +382,9 @@
         if (retentionDays is < 7 or > 365) { Toast.Error("La conservation doit être comprise entre 7 et 365 jours."); return false; }
         if (reminderDays is < 1 or > 14) { Toast.Error("Le rappel doit partir entre 1 et 14 jours avant la fin de l'essai."); return false; }
         if (codes.Any(c => c.Days is < 1 or > 365)) { Toast.Error("La durée d'un code doit être comprise entre 1 et 365 jours."); return false; }
+        if (aiQuotaPro is < 0 or > 1_000_000 || aiQuotaTrial is < 0 or > 1_000_000) { Toast.Error("Un quota d'IA doit être compris entre 0 et 1 000 000 de demandes par mois."); return false; }
+        if (aiCap is < 0 or > 10000) { Toast.Error("Le plafond de dépense de l'IA doit être compris entre 0 et 10 000 $."); return false; }
+        var aiEncrypted = aiKey.Trim() == "" ? null : Box.Protect(aiKey.Trim());
         var stripeEncrypted = stripeKey.Trim() == "" ? null : Box.Protect(stripeKey.Trim());
         var encrypted = smtpPassword == "" ? null : Box.Protect(smtpPassword);
         var npmEncrypted = npmPassword == "" ? null : Box.Protect(npmPassword);
@@ -343,11 +406,24 @@
             p.SmtpHost = smtpHost.Trim(); p.SmtpPort = smtpPort; p.SmtpSsl = smtpSsl; p.SmtpUser = smtpUser.Trim(); p.SmtpFrom = smtpFrom.Trim();
             if (p.SmtpHost == "") p.SmtpPassword = ""; else if (encrypted != null) p.SmtpPassword = encrypted;
             hasPassword = p.SmtpPassword != "";
+            p.AiEnabled = aiOn; p.AiTrial = aiTrial; p.AiModel = aiModel; p.AiQuotaPro = aiQuotaPro; p.AiQuotaTrial = aiQuotaTrial; p.AiMonthlyCapUsd = Math.Round(aiCap, 2);
+            if (aiEncrypted != null) p.AiApiKey = aiEncrypted;
+            hasAiKey = p.AiApiKey != "";
         });
+        aiKey = "";
         smtpPassword = ""; npmPassword = ""; stripeKey = ""; npmReady = Npm.Configured;
         savedSig = Sig();
         if (toast) Toast.Ok("Réglages de la plateforme enregistrés.");
         return true;
+    }
+
+    private async Task TestAi()
+    {
+        if (!SaveCore(false)) return;
+        aiTesting = true; aiTest = "Connexion en cours…"; aiTestOk = true; StateHasChanged();
+        (aiTestOk, aiTest) = await AiSvc.Test();
+        aiTesting = false;
+        Load();
     }
 
     private async Task TestNpm()

@@ -6,6 +6,7 @@
 @inject NavigationManager Nav
 @inject Toaster Toast
 @inject Notifier Screens
+@inject AiService AiSvc
 
 <div class="page-head">
     <div>
@@ -83,7 +84,7 @@
 <div class="adm-card" style="padding:0;overflow:hidden">
 <div class="tbl-scroll">
 <table class="adm-tbl adm-cards">
-    <thead><tr><th>Client</th><th>Licence</th><th>Écrans</th><th class="c">Utilisateurs</th><th>Back-office</th><th>État</th><th></th></tr></thead>
+    <thead><tr><th>Client</th><th>Licence</th><th>Écrans</th><th class="c">Utilisateurs</th><th>IA ce mois-ci</th><th>Back-office</th><th>État</th><th></th></tr></thead>
     <tbody>
     @foreach (var c in Filtered)
     {
@@ -101,12 +102,22 @@
                 <div class="adm-bar"><i style="width:@(c.Screens == 0 ? 0 : c.Online * 100 / c.Screens)%;background:@(c.Screens == 0 ? "#C5CED9" : c.Online == c.Screens ? "#1E8E5A" : c.Online > 0 ? "#D79A2B" : "#C8372D")"></i></div>
             </td>
             <td class="c m">@c.Users.Total<span class="u"> utilisateur@(c.Users.Total > 1 ? "s" : "")</span></td>
+            <td>
+                @{ var ai = AiOf(c.Client); }
+                @if (ai.Quota == 0) { <span class="muted" title="L'IA est comprise dans le plan Pro">—</span> }
+                else
+                {
+                    var lvl = Ai.Level(ai.Used, ai.Quota);
+                    <span class="m" style="color:@(lvl == "ok" ? "inherit" : Ai.LevelColor(lvl))" title="@(lvl == "bad" ? "90 % du quota ou plus" : lvl == "warn" ? "70 % du quota ou plus" : "")">@ai.Used.ToString("N0", FrCh)</span><span class="adm-sub" style="display:inline"> / @ai.Quota.ToString("N0", FrCh)</span>
+                    <div class="adm-bar"><i style="width:@(Math.Min(100, ai.Used * 100 / Math.Max(1, ai.Quota)))%;background:@Ai.LevelColor(lvl)"></i></div>
+                }
+            </td>
             <td><span class="adm-conn @(c.Connected ? "on" : "off")">@(c.Connected ? "Connecté" : "Non connecté")</span></td>
             <td class="st"><span class="adm-st @ClientStates.Css(c.State)">@c.State@(c.State == ClientStates.Trial ? $" · {c.Client.TrialDaysLeft(now)} j" : "")</span></td>
             <td class="r"><Ico Name="chevron-right" Size="16" /></td>
         </tr>
     }
-    @if (!Filtered.Any()) { <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:32px">@(clients.Count == 0 ? "Aucun client pour l'instant." : "Aucun client ne correspond à ces critères.")</td></tr> }
+    @if (!Filtered.Any()) { <tr><td colspan="8" style="text-align:center;color:var(--muted);padding:32px">@(clients.Count == 0 ? "Aucun client pour l'instant." : "Aucun client ne correspond à ces critères.")</td></tr> }
     </tbody>
 </table>
 </div>
@@ -196,6 +207,20 @@
                 <div class="adm-ln"><span>Requêtes par minute et par clé (défaut @ApiLimits.DefaultRatePerMinute)</span><input type="number" min="1" max="@ApiLimits.MaxRatePerMinute" style="width:90px" placeholder="@ApiLimits.DefaultRatePerMinute" @bind="apiRate" /></div>
                 <div class="adm-ln"><span>Jours de journal des livraisons (défaut @ApiLimits.DefaultJournalDays)</span><input type="number" min="1" max="365" style="width:90px" placeholder="@ApiLimits.DefaultJournalDays" @bind="apiDays" /></div>
                 <div class="adm-acts"><button type="button" class="btn ghost sm" @onclick="() => SaveApiLimits(c0.Client.Id)">Enregistrer les limites</button></div>
+            </div>
+
+            <div class="adm-sec">
+                <span class="lb">Intelligence artificielle</span>
+                @{ var aiD = AiOf(c0.Client); var aiCost = Root.Read(d => d.AiUsage.FirstOrDefault(u => u.ClientId == c0.Client.Id && u.Month == Ai.Month(DateTime.UtcNow))?.CostUsd ?? 0m); }
+                @if (!c0.Client.IsGrowth) { <div class="adm-note">L'IA est comprise dans la licence Pro : cette organisation n'y a pas accès.</div> }
+                else
+                {
+                    <div class="adm-ln"><span>Demandes ce mois-ci</span><span><b style="color:@(Ai.Level(aiD.Used, aiD.Quota) == "ok" ? "inherit" : Ai.LevelColor(Ai.Level(aiD.Used, aiD.Quota)))">@aiD.Used.ToString("N0", FrCh)</b> / @aiD.Quota.ToString("N0", FrCh) <span class="adm-sub">· @aiCost.ToString("0.00##") $ estimés</span></span></div>
+                    <div class="adm-bar" style="margin:4px 0 8px"><i style="width:@(Math.Min(100, aiD.Used * 100 / Math.Max(1, aiD.Quota)))%;background:@Ai.LevelColor(Ai.Level(aiD.Used, aiD.Quota))"></i></div>
+                    <div class="adm-note">Quota particulier (Enterprise, accord) : remplace celui du plan. Laissez vide pour le quota par défaut (@AiService.QuotaOf(Root.Read(d => d.Platform), new Tenant { TrialEndsUtc = c0.Client.TrialEndsUtc, NextRenewalUtc = c0.Client.NextRenewalUtc }, DateTime.UtcNow).ToString("N0", FrCh)).</div>
+                    <div class="adm-ln"><span>Quota particulier (demandes par mois)</span><input type="number" min="0" max="1000000" style="width:110px" placeholder="défaut" @bind="aiQuota" /></div>
+                    <div class="adm-acts"><button type="button" class="btn ghost sm" @onclick="() => SaveAiQuota(c0.Client.Id)">Enregistrer le quota</button></div>
+                }
             </div>
 
             <div class="adm-sec">
@@ -295,6 +320,21 @@
     // Fiche ouverte
     private Guid? selId;
     private string tab = "Aperçu";
+    private int? aiQuota;   // quota d'IA particulier de l'organisation ouverte (null : celui de la console)
+    private static readonly System.Globalization.CultureInfo FrCh = new("fr-CH");
+    /// <summary>Demandes d'IA du mois et quota de l'organisation (quota 0 : pas d'accès, licence Essential).</summary>
+    private (int Used, int Quota) AiOf(Tenant t)
+    {
+        if (!t.IsGrowth) return (0, 0);
+        var now = DateTime.UtcNow;
+        return Root.Read(d => (d.AiUsage.FirstOrDefault(u => u.ClientId == t.Id && u.Month == Ai.Month(now))?.Requests ?? 0, AiService.QuotaOf(d.Platform, t, now)));
+    }
+    private void SaveAiQuota(Guid clientId)
+    {
+        if (aiQuota is < 0 or > 1_000_000) { Toast.Error("Le quota doit être compris entre 0 et 1 000 000 de demandes par mois."); return; }
+        Root.Write(d => { if (d.Clients.FirstOrDefault(x => x.Id == clientId) is { } c) c.AiQuota = aiQuota; });
+        Toast.Ok(aiQuota == null ? "Quota par défaut rétabli." : "Quota d'IA enregistré.");
+    }
     private int? apiKeys, apiHooks, apiRate, apiDays;   // limites API de l'organisation ouverte (null : valeur par défaut)
     private List<ScreenLine> drawerScreens = new();
     private List<User> clientUsers = new();
@@ -382,6 +422,7 @@
     private void LoadDrawer()
     {
         var id = selId!.Value;
+        aiQuota = Root.Read(d => d.Clients.FirstOrDefault(x => x.Id == id)?.AiQuota);
         (apiKeys, apiHooks, apiRate, apiDays) = Root.Read(d => d.Clients.FirstOrDefault(x => x.Id == id) is { } t ? (t.ApiMaxKeys, t.ApiMaxWebhooks, t.ApiRatePerMinute, t.ApiJournalDays) : ((int?)null, (int?)null, (int?)null, (int?)null));
         (drawerScreens, clientUsers, clientLevels, drawerLog) = Root.Read(d =>
         {

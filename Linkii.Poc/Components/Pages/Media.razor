@@ -9,6 +9,8 @@
 @inject Toaster Toast
 @inject IJSRuntime JS
 @inject ModeService Modes
+@inject AiService AiSvc
+@inject AiMedia AiMed
 
 @* Médiathèque épurée (§51) : même squelette que les listes de lecture. Vignettes « galerie » (l'image d'abord), un clic ouvre l'aperçu
    (infos, où le média sert, actions), la case au survol sélectionne. On importe en déposant des fichiers n'importe où sur la page. *@
@@ -233,6 +235,7 @@ else
         <ViewToggle StorageKey="media" Photos="true" @bind-Value="view" />
     </div>
     <FilterChips Groups="FilterGroups" Extra="FilterExtras" OnClear="ClearFilter" OnResetAll="ResetFilters" />
+    @AiLine()
 
     @if (!Visible.Any() && Jobs.Count == 0)
     {
@@ -442,6 +445,7 @@ else
                             @if (SourceLabel(item) is { } src) { <span class="lx-src" title="@(MediaLibrary.IsDrive(item) ? DriveTitle(DriveOf(item)) : null)">@if (MediaLibrary.IsDrive(item)) { <Ico Name="folder" Size="11" /> }@src</span> }
                             @if (item.Type == "video") { <span class="lx-badge"><Ico Name="play" Size="11" />@(Seconds(item) is { } s ? Helpers.FormatDuration(s) : "")</span> }
                             @if (unused.Contains(item.Id)) { <span class="lx-unused">Non utilisé</span> }
+                            @if (search.Length > 0 && aiSearch && AiHit(item) is { } aih) { <span class="ai-match"><Ico Name="spark" Size="11" />@aih</span> }
                             @if (!Flat) { @ShareBadge(item, "ph-share") }
                             @RotBtns(item, false)
                         }
@@ -687,7 +691,7 @@ else
         {
             var q = ByType.Where(m => source == "" || SourceOf(m) == source)
                           .Where(m => filter != "unused" || unused.Contains(m.Id))
-                          .Where(m => search.Length == 0 || m.Name.Contains(search, StringComparison.OrdinalIgnoreCase));
+                          .Where(m => search.Length == 0 || (aiSearch ? AiMedia.Matches(m, searchTerms, out _) : m.Name.Contains(search, StringComparison.OrdinalIgnoreCase)));
             return sort switch
             {
                 "name" => q.OrderBy(m => m.Name, StringComparer.CurrentCultureIgnoreCase),
@@ -710,17 +714,75 @@ else
     protected override void OnInitialized()
     {
         Welcome.Changed += OnWelcomeChanged;
+        RefreshAi();
         // retour d'un assistant d'application : avec les Premiers pas ouverts, on revient dans l'assistant (panneau cloud), jamais le tiroir du bas par-dessus
         if (ImportParam == "cloud") { if (Welcome.IsOpen) Welcome.Open("cloud"); else showUpload = true; }
         Reload();
         // pendant une conversion vidéo, la liste se rafraîchit seule
         refreshTimer = new System.Threading.Timer(_ => InvokeAsync(() =>
         {
-            if (allFiles.Any(m => m.Status == "processing") || Drives.Running(Store.ClientId).Count > 0) { Reload(); StateHasChanged(); }   // import de dossier Drive : les fichiers arrivent au fil de l'eau
+            if (allFiles.Any(m => m.Status == "processing") || Drives.Running(Store.ClientId).Count > 0 || aiState.Status == AiStatus.Ok && allFiles.Any(m => m.Type == "image" && !m.AiDone && m.AddedUtc > DateTime.UtcNow.AddMinutes(-2))) { Reload(); StateHasChanged(); }   // import de dossier Drive : les fichiers arrivent au fil de l'eau
         }), null, 2000, 2000);
         Drives.ProgressChanged += OnDriveProgress;
     }
 
+
+    // ---------- Médiathèque intelligente : recherche par ce que montrent les images, analyse des images déjà importées ----------
+
+    private AiState aiState = new(AiStatus.Off, 0, 0, false);
+    private int aiPending;
+    private bool aiRunning;
+    private string? aiMessage;
+
+    /// <summary>Les descriptions déjà écrites servent à la recherche tant que la fonction est allumée (même en pause : lire ne coûte rien).</summary>
+    private bool aiSearch => aiState.Status is AiStatus.Ok or AiStatus.Quota or AiStatus.Cap;
+    private List<string> searchTerms => AiMedia.Terms(search);
+
+    private void RefreshAi() { aiState = AiSvc.State(Store.ClientId, "media"); aiPending = aiState.Status == AiStatus.Ok ? AiMed.Pending(Store.ClientId) : 0; }
+
+    private string? AiHit(MediaItem m) => AiMedia.Matches(m, searchTerms, out var hit) ? hit : null;
+
+    private async Task AnalyzeAll()
+    {
+        aiRunning = true; aiMessage = null;
+        StateHasChanged();
+        var (done, msg) = await AiMed.AnalyzeMissing(Store.ClientId, 25);
+        aiRunning = false;
+        aiMessage = msg.Length > 0 ? msg : null;
+        Reload(); RefreshAi();
+        if (msg.Length == 0) Toast.Ok(done == 1 ? "1 image analysée." : done + " images analysées.");
+        StateHasChanged();
+    }
+
+    private RenderFragment AiLine() => __builder =>
+    {
+        if (aiMessage != null)
+        {
+            <div class="ai-sline off"><Ico Name="alert" Size="14" /><span>@aiMessage</span></div>
+        }
+        else if (aiState.Status == AiStatus.NeedsPro)
+        {
+            if (search.Length > 0) { <div class="ai-sline off"><Ico Name="crown" Size="14" /><span>Avec le plan Pro, la recherche comprend aussi ce que montrent les images.</span></div> }
+        }
+        else if (aiRunning)
+        {
+            <div class="ai-sline"><Ico Name="spark" Size="14" /><span>L'IA regarde vos images</span><span class="ai-dots"><i></i><i></i><i></i></span></div>
+        }
+        else if (aiSearch && search.Length > 0)
+        {
+            <div class="ai-sline"><Ico Name="spark" Size="14" /><span>Cherché aussi dans ce que montrent les images.</span></div>
+        }
+        else if (aiSearch && aiPending > 0 && aiState.Status == AiStatus.Ok)
+        {
+            <div class="ai-sline"><Ico Name="spark" Size="14" /><span>@Plural(aiPending, "image n'a pas encore de description : la recherche ne la trouve que par son nom.", "images n'ont pas encore de description : la recherche ne les trouve que par leur nom.")</span><button type="button" class="linklike" @onclick="AnalyzeAll">Analyser mes images</button></div>
+        }
+        else if (aiSearch && AiTopTags().Count > 0)
+        {
+            <div class="ai-suggest"><Ico Name="spark" Size="14" /><span>Cherchez avec vos mots, par exemple :</span>@foreach (var tg in AiTopTags()) { var q = tg; <button type="button" class="ai-chip" @onclick="() => search = q">@q</button> }</div>
+        }
+    };
+
+    private List<string> AiTopTags() => allFiles.Where(m => m.AiDone).SelectMany(m => m.AiTags).GroupBy(t => t, StringComparer.CurrentCultureIgnoreCase).OrderByDescending(g => g.Count()).ThenBy(g => g.Key).Take(4).Select(g => g.Key).ToList();
 
     // ---------- Présentations (§103) : carte épurée, mêmes pastilles que les médias, dans l'aperçu ----------
 
@@ -906,6 +968,7 @@ else
         if (!FoldersShown) folderId = null;
         else if (folderId is { } open && !rights.ContainsKey(open)) folderId = null;   // dossier retiré ou supprimé entre-temps
         allFiles = Library.Entries();
+        RefreshAi();
         fileTabs = Library.FileTabs();
         fileRights = Library.FileRights();
         covers = Library.PresentationCovers();

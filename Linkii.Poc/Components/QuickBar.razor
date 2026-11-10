@@ -1,4 +1,6 @@
 @inject NavigationManager Nav
+@inject AiService AiSvc
+@inject TenantStore AiStore
 @implements IDisposable
 
 @* Barre des accès rapides (ordinateur seulement) : nom de l'organisation, puis Player, Store, Aide, Réglages et le compte.
@@ -51,6 +53,12 @@
                 </div>
             }
         </div>
+    }
+    @if (AssistantShown)
+    {
+        <button type="button" class="qb-btn" data-t="Assistant" aria-haspopup="dialog" @onclick="() => { menu = null; assistant = true; }">
+            <Ico Name="spark" Size="19" /><span>Assistant</span>
+        </button>
     }
     @if (ShowStore)
     {
@@ -121,6 +129,7 @@
 </header>
 
 @if (store) { <StoreDrawer OnClose="() => store = false" /> }
+@if (assistant) { <AiAssistantDialog OnClose="() => assistant = false" /> }
 
 @code {
     [Parameter] public string OrgName { get; set; } = "";
@@ -160,7 +169,10 @@
     [Parameter] public RenderFragment? SettingsBadge { get; set; }
 
     private string? menu;
-    private bool store;
+    private bool store, assistant;
+
+    /// <summary>Le bouton « Assistant » : IA allumée et plan Pro (sinon il invite à passer Pro) ; absent hors d'un espace client.</summary>
+    private bool AssistantShown { get { try { return AiSvc.State(AiStore.ClientId, "assistant").Status != AiStatus.Off; } catch (Exception) { return false; } } }
     private PlayerDownloads.Item? win, android, linux;
 
     protected override void OnInitialized()
