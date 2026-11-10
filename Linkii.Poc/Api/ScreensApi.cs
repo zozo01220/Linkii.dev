@@ -47,7 +47,7 @@ public class ScreensApiModule : IApiModule
     public IEnumerable<ApiRoute> Routes { get; } = new[] { List, One, Command, Display, ClearDisplay };
 
     public record CommandBody(string? Command);
-    public record DisplayBody(string? Title, string? Message, string? Look, int? DurationSeconds, bool? Wake);
+    public record DisplayBody(string? Title, string? Message, string? Look, int? DurationSeconds, bool? Wake, string? Place = null);
 
     private static string By(HttpContext ctx) => $"clé « {ctx.User.FindFirst(ApiAuth.KeyName)?.Value} »";
     private static IResult Failed(HttpContext ctx, NoticeResult res) =>
@@ -70,7 +70,7 @@ public class ScreensApiModule : IApiModule
 
         r.Map(Display, async (HttpContext ctx, NoticeService svc, Guid id, DisplayBody? body) =>
         {
-            var res = await svc.Show(ctx.User.ClientId(), ctx.User.OwnerId(), id, body?.Title, body?.Message, body?.Look, body?.DurationSeconds, body?.Wake == true, By(ctx));
+            var res = await svc.Show(ctx.User.ClientId(), ctx.User.OwnerId(), id, body?.Title, body?.Message, body?.Look, body?.DurationSeconds, body?.Wake == true, By(ctx), body?.Place);
             return res.Ok ? Results.Json(new { id, status = "displayed" }, ApiJson.Options, statusCode: 202) : Failed(ctx, res);
         });
 

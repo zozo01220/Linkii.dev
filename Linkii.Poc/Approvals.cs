@@ -47,6 +47,7 @@ public class ScreenSnapshot
     public Dictionary<Guid, List<PublishedItem>> Lists { get; set; } = new();
     public Dictionary<Guid, int> ListRevs { get; set; } = new();
     public PublishedKiosk? Kiosk { get; set; }
+    public ScreenBands? Bands { get; set; }
     public string Stamp { get; set; } = "";
 }
 

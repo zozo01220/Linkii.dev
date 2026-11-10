@@ -15,11 +15,13 @@ public class ScreenNotice
     /// <summary>L'écran a été réveillé pour l'occasion (réveil manuel jusqu'à la fin du message).</summary>
     public bool Wake { get; set; }
     public string By { get; set; } = "";
+    /// <summary>Où il s'affiche : « full » (plein écran) ou « banner » (case du bandeau qui reçoit les messages, si l'écran en a une).</summary>
+    public string Place { get; set; } = Notices.Full;
 }
 
 public static class Notices
 {
-    public const string Information = "information", Attention = "attention";
+    public const string Information = "information", Attention = "attention", Full = "full", Banner = "banner";
     public static readonly string[] Looks = [Information, Attention];
     public const int MinSeconds = 5, MaxSeconds = 3600, DefaultSeconds = 30, MaxTitle = 60, MaxMessage = 300;
 
@@ -30,7 +32,7 @@ public static class Notices
 
     public static object Payload(ScreenNotice n) => new
     {
-        id = n.Id, title = n.Title, message = n.Message, look = n.Look, wake = n.Wake,
+        id = n.Id, title = n.Title, message = n.Message, look = n.Look, wake = n.Wake, place = n.Place,
         startedAt = Helpers.EpochMs(n.StartedUtc), until = Helpers.EpochMs(n.UntilUtc),
     };
 }
@@ -48,7 +50,7 @@ public record NoticeResult(string? Error, string? Code = null)
 /// </summary>
 public class NoticeService(JsonStore store, IHubContext<ScreenHub> hub, Notifier notifier, HistoryLog history)
 {
-    public async Task<NoticeResult> Show(Guid clientId, Guid? ownerId, Guid screenId, string? title, string? message, string? look, int? seconds, bool wake, string by)
+    public async Task<NoticeResult> Show(Guid clientId, Guid? ownerId, Guid screenId, string? title, string? message, string? look, int? seconds, bool wake, string by, string? place = null)
     {
         title = (title ?? "").Trim(); message = (message ?? "").Trim(); look = string.IsNullOrWhiteSpace(look) ? Notices.Information : look.Trim().ToLowerInvariant();
         var secs = seconds ?? Notices.DefaultSeconds;
@@ -59,7 +61,7 @@ public class NoticeService(JsonStore store, IHubContext<ScreenHub> hub, Notifier
         if (secs < Notices.MinSeconds || secs > Notices.MaxSeconds) return new($"La durée va de {Notices.MinSeconds} secondes à {Notices.MaxSeconds / 60} minutes.", NoticeResult.Invalid);
 
         var now = DateTime.UtcNow;
-        var notice = new ScreenNotice { Title = title, Message = message, Look = look, StartedUtc = now, UntilUtc = now.AddSeconds(secs), Wake = wake, By = by };
+        var notice = new ScreenNotice { Place = place?.Trim().ToLowerInvariant() == Notices.Banner ? Notices.Banner : Notices.Full, Title = title, Message = message, Look = look, StartedUtc = now, UntilUtc = now.AddSeconds(secs), Wake = wake, By = by };
         string? name = null;
         var res = store.Write(db =>
         {
@@ -71,6 +73,7 @@ public class NoticeService(JsonStore store, IHubContext<ScreenHub> hub, Notifier
             if (!ScreenControl.Online(s, now)) return new NoticeResult("L'écran est hors ligne.", NoticeResult.Unavailable);
             var area = db.Areas.FirstOrDefault(a => a.Id == s.AreaId);
             if (!wake && Sleep.State(t, area, s, Helpers.Wall(db.Areas, s) != null, now).Asleep) return new NoticeResult("L'écran est en veille : demandez de le réveiller pour afficher le message.", NoticeResult.Unavailable);
+            if (notice.Place == Notices.Banner && !Bands.CanTakeMessage(db, s)) notice.Place = Notices.Full;   // pas de case qui reçoit les messages : plein écran
             s.Notice = notice;
             name = s.Name;
             if (wake)

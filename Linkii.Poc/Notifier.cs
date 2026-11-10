@@ -51,6 +51,7 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
             Zones = s.ZonePlaylists().Skip(1).Select(Zone).ToList(),   // zones 2 et 3 du découpage
             Lists = lists, ListRevs = revs,
             Kiosk = s.Kiosk == null ? null : BuildKiosk(db, s),   // borne interactive : menu de tuiles
+            Bands = wall || s.Bands == null ? null : BuildBands(db.Media, s.ClientId, s.Bands),   // bandeaux : ceux d'un écran de mur sont ceux du mur
             Stamp = Helpers.PublishStamp(s, own)
         };
     }
@@ -63,6 +64,7 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
         s.PublishedZones = snap.Zones;
         s.PublishedLists = snap.Lists; s.PublishedListRevs = snap.ListRevs; s.PlanningRevision++;
         s.PublishedKiosk = snap.Kiosk;
+        s.PublishedBands = snap.Bands;
         s.PublishedVersion++;
         s.PublishedStamp = snap.Stamp;
         s.PublishedUtc = DateTime.UtcNow;
@@ -174,6 +176,27 @@ public class Notifier(IHubContext<ScreenHub> hub, JsonStore store, AppCatalog ca
     }
 
     /// <summary>Widget d'écran : app en surimpression permanente, à la position libre choisie dans l'éditeur de l'écran.</summary>
+    /// <summary>
+    /// Bandeaux figés pour le player : les cases qui s'appuient sur une app du catalogue (météo, flux, agenda, donnée, QR, compte à rebours)
+    /// reçoivent leur instantané, la case logo l'adresse de son image. Une case dont le contenu a disparu est laissée vide.
+    /// </summary>
+    public ScreenBands BuildBands(IEnumerable<MediaItem> media, Guid clientId, ScreenBands draft)
+    {
+        var b = Bands.Clean(draft);
+        foreach (var c in b.Both.SelectMany(x => x.Cells))
+        {
+            var k = BandKinds.Find(c.Kind);
+            if (c.Kind == "logo" && Guid.TryParse(c.S("image"), out var mid) && media.FirstOrDefault(m => m.Id == mid && m.ClientId == clientId && m.Type == "image" && m.Status == null && m.FileName != null) is { } m)
+                c.ImageUrl = "/media/" + m.FileName;
+            if (k?.AppId == null || catalog.Find(k.AppId) is not { } app) continue;
+            var settings = new Dictionary<string, string>(c.Settings);
+            if (c.Kind == "clockwx") settings.Remove("text");
+            if (app.Id == "qrcode") settings["qr"] = QrCodes.Encode(c.S("content")) ?? "";
+            c.Item = new PublishedItem { Id = c.Id, Type = "app", AppId = app.Id, AppVersion = app.Version, Settings = AppCatalog.WithDefaults(app, settings), DataId = app.Data ? c.Id.ToString() : null };
+        }
+        return b;
+    }
+
     private PublishedItem? Widget(ScreenWidget w)
     {
         var app = catalog.Find(w.AppId);

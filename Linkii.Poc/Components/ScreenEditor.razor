@@ -47,7 +47,7 @@
         <div class="wg-stage-wrap" style="--z: @zoom.ToString(Inv)">
             <div class="wg-stage @(spec.Orientation == "portrait" ? "portrait" : "")" @ref="canvas">
                 @* Zones du découpage, sous les widgets : chacune reçoit sa liste de lecture par son « + » *@
-                <div class="wg-zones @(spec.Orientation == "portrait" ? "dir-col" : "dir-row")">
+                <div class="wg-zones @(spec.Orientation == "portrait" ? "dir-col" : "dir-row")" style="@ZonesInset">
                     @for (var z = 0; z < Def.Sizes.Length; z++)
                     {
                         var zone = z;
@@ -96,7 +96,8 @@
                         <WidgetBody Widget="wid" />
                     </div>
                 }
-                <button type="button" class="wg-sim" title="Voir ce qu'affiche l'écran (dernière publication)" @onclick="() => simulate = true" @onclick:stopPropagation="true" @onpointerdown:stopPropagation="true"><Ico Name="play" Size="14" /> Simuler</button>
+                @if (wall == null && !Phone) { <BandsOverlay State="bandsState" Short="ShortSide" OnChange="StateHasChanged" /> }
+                <button type="button" class="wg-sim" title="Voir ce qu'affiche l'écran (dernière publication)" style="top:calc(@TopInset + 8px)" @onclick="() => simulate = true" @onclick:stopPropagation="true" @onpointerdown:stopPropagation="true"><Ico Name="play" Size="14" /> Simuler</button>
             </div>
             @* zoom de l'aperçu : agrandit ou réduit l'écran dans la zone bleu nuit, la zone défile si besoin *@
             <div class="wg-zoom" role="group" aria-label="Zoom de l'aperçu">
@@ -127,6 +128,7 @@
             {
                 <div class="se-utabs" role="tablist">
                     <button type="button" role="tab" aria-selected="@(tab == "screen" ? "true" : "false")" class="@(tab == "screen" ? "on" : "")" @onclick='() => tab = "screen"'><Ico Name="monitor" Size="18" /> Écran</button>
+                    <button type="button" role="tab" aria-selected="@(tab == "bands" ? "true" : "false")" class="@(tab == "bands" ? "on" : "")" @onclick='() => tab = "bands"'><Ico Name="bands" Size="18" /> Bandeaux</button>
                     <button type="button" role="tab" aria-selected="@(tab == "widgets" ? "true" : "false")" class="@(tab == "widgets" ? "on" : "")" @onclick='() => tab = "widgets"'><Ico Name="grid" Size="18" /> Widgets <small>@widgets.Count</small></button>
                 </div>
             }
@@ -138,6 +140,10 @@
                 {
                     <CalendarPick Calendars="calendars" @bind-Value="calendarId" PlaylistName="PlaylistName" Id="se-cal" />
                 }
+            }
+            else if (tab == "bands")
+            {
+                <BandsPanel State="bandsState" Phone="Phone" Images="images" ListBands="ListBands" OnChange="StateHasChanged" OnSettings="() => advanced = true" />
             }
             else
             {
@@ -184,13 +190,13 @@
         {
             @if (needsApproval)
             {
-                <span class="confirm-line" role="alert">Demander l'approbation ? Un approbateur décide avant que l'écran n'affiche « @ZonesText »@(widgets.Count > 0 ? $" et {widgets.Count} widget{(widgets.Count > 1 ? "s" : "")}" : "") ; d'ici là il garde sa version.</span>
+                <span class="confirm-line" role="alert">Demander l'approbation ? Un approbateur décide avant que l'écran n'affiche « @ZonesText »@(widgets.Count > 0 ? $" et {widgets.Count} widget{(widgets.Count > 1 ? "s" : "")}" : "")@(BandCount > 0 ? $" et {BandCount} bandeau{(BandCount > 1 ? "x" : "")}" : "") ; d'ici là il garde sa version.</span>
                 <button class="btn ghost" @onclick="() => confirmPublish = false">Retour</button>
                 <button class="btn" disabled="@saving" @onclick="() => Save(true)"><Ico Name="shield" Size="16" /> Envoyer pour approbation</button>
             }
             else
             {
-                <span class="confirm-line" role="alert">Publier maintenant ? L'écran affichera aussitôt « @ZonesText »@(widgets.Count > 0 ? $" et {widgets.Count} widget{(widgets.Count > 1 ? "s" : "")}" : "").</span>
+                <span class="confirm-line" role="alert">Publier maintenant ? L'écran affichera aussitôt « @ZonesText »@(widgets.Count > 0 ? $" et {widgets.Count} widget{(widgets.Count > 1 ? "s" : "")}" : "")@(BandCount > 0 ? $" et {BandCount} bandeau{(BandCount > 1 ? "x" : "")}" : "")@(BandCount > 0 ? $" et {BandCount} bandeau{(BandCount > 1 ? "x" : "")}" : "").</span>
                 <button class="btn ghost" @onclick="() => confirmPublish = false">Retour</button>
                 <button class="btn" disabled="@saving" @onclick="() => Save(true)"><Ico Name="upload" Size="16" /> Confirmer la publication</button>
             }
@@ -377,6 +383,19 @@
     /// <summary>Veille qui s'applique à l'écran (pour hachurer ces heures dans l'éditeur de luminosité).</summary>
     private string? DimAsleep => !sleepOn ? null : sleepMode switch { Sleep.Never => null, Sleep.Own => Sleep.Any(sleepGrid) ? sleepGrid : null, _ => Sleep.Any(areaSleepGrid) ? areaSleepGrid : null };
 
+    // Bandeaux haut et bas (maquettes/ecran-bandeaux.html) : copie de travail, publiée avec l'écran ; aucun sur un smartphone.
+    private BandsState bandsState = new();
+    private List<MediaItem> images = new();
+    private bool Phone => spec.Type == "phone";
+    private double ShortSide => spec.Orientation == "portrait" ? 100 : 56.25;
+    private bool BandOn(string pos) => wall == null && !Phone && bandsState.Get(pos).On;
+    private string TopInset => BandOn("top") ? (Bands.Fraction(bandsState.Bands.Top.Size) * ShortSide).ToString("0.##", Inv) + "cqw" : "0px";
+    private string BottomInset => BandOn("bottom") ? (Bands.Fraction(bandsState.Bands.Bottom.Size) * ShortSide).ToString("0.##", Inv) + "cqw" : "0px";
+    private string ZonesInset => $"top:{TopInset};bottom:{BottomInset}";
+    private int BandCount => (BandOn("top") ? 1 : 0) + (BandOn("bottom") ? 1 : 0);
+    /// <summary>Une liste jouée par l'écran pose une app en bandeau : elle est masquée là où l'écran a le sien.</summary>
+    private bool ListBands => playlists.Where(p => zonePl.Take(Def.Sizes.Length).Contains(p.Id)).Any(p => p.Draft.Any(i => i.Placement is "top" or "bottom"));
+
     private ScreenWidget? Sel =>widgets.FirstOrDefault(w => w.Id == selected);
 
     protected override void OnInitialized()
@@ -391,6 +410,8 @@
         calendars = Store.Read(d => d.Calendars.OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
         calendarId = s.CalendarId;
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
+        images = media.Where(m => m.Type == "image").OrderBy(m => m.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        bandsState.Bands = Bands.Clean(s.Bands);
         zones = Store.Read(d => d.Area?.Zones.OrderByDescending(z => z.IsDefault).ThenBy(z => z.Name, StringComparer.CurrentCultureIgnoreCase).ToList() ?? new());
         wall = zones.FirstOrDefault(z => z.Id == s.ZoneId && z.IsWall);
         screenWallPos = s.WallPos;
@@ -535,6 +556,7 @@
             var errs = AppCatalog.Validate(m, w.Settings, new HashSet<string>());
             if (errs.Count > 0) { errors = errs.Select(x => $"{m.Name} : {x}").ToList(); Toast.Error(errors[0]); selected = w.Id; tab = "widgets"; settingsOpen = true; return; }
         }
+        var bandsSave = Bands.Clean(bandsState.Bands);
         var list = widgets.Select(w => new ScreenWidget
         {
             Id = w.Id, AppId = w.AppId, X = w.X, Y = w.Y, Scale = w.Scale,
@@ -583,6 +605,7 @@
                 s.ScreenType = sp.Type; s.Orientation = sp.Orientation; s.Resolution = sp.Resolution;
                 if (inWall == null && s.CalendarId != cal) calChanged = Calendars.Stamp(s, cal is { } cid ? d.Calendars.FirstOrDefault(c => c.Id == cid) : null);   // calendrier assigné ou retiré
                 if (!WidgetsEqual(s.Widgets, list)) { s.Widgets = list; s.WidgetsRevision++; }   // modification à publier
+                if (inWall == null && !Bands.Same(s.Bands, bandsSave)) { s.Bands = bandsSave; s.BandsRevision++; }   // modification à publier
                 return changed;
             });
             if (calChanged && !publish) await Notifier.PublishPlanning([ScreenId]);   // le calendrier s'applique aussitôt, comme ses modifications

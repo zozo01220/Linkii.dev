@@ -1,0 +1,119 @@
+@* Bandeaux dessinés sur l'aperçu d'un écran (ou d'un mur) : cliquer une case la règle, une case vide ouvre le choix du contenu.
+   Hauteurs en cqw (largeur de l'aperçu) : « Short » est le petit côté de l'écran, en cqw (56,25 en paysage, 100 en portrait). Maquette : maquettes/ecran-bandeaux.html *@
+@inject AppService Svc
+
+@if (State != null)
+{
+    var b = State.Bands;
+    @foreach (var pos in new[] { "top", "bottom" })
+    {
+        var band = State.Get(pos);
+        if (band.On)
+        {
+            <div class="bd-band @pos bg-@band.Bg" style="--h:@H(band)cqw">
+                @foreach (var c in new[] { "left", "center", "right" })
+                {
+                    var cell = State.Cell(pos, c); var cp = pos; var cc = c;
+                    <div class="bd-cell @c @(State.IsSel(pos, c) ? "sel" : "") @(cell == null ? "empty" : "")" title="@(cell == null ? "Choisir un contenu" : BandKinds.Find(cell.Kind)?.Name) · @Pos(c)"
+                         @onclick="() => Click(cp, cc)" @onclick:stopPropagation="true">
+                        @if (cell == null) { <span class="bd-plus"><Ico Name="plus" Size="14" /></span> }
+                        else { @Body(cell) }
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            var pp = pos;
+            <button type="button" class="bd-add @pos" @onclick="() => TurnOn(pp)" @onclick:stopPropagation="true"><Ico Name="plus" Size="14" /> Bandeau @(pos == "top" ? "en haut" : "en bas")</button>
+        }
+    }
+    @if (State.PickBand is { } pb && State.PickCell is { } pc)
+    {
+        var cur = State.Cell(pb, pc);
+        var st = (pb == "top" ? $"top:calc({H(State.Get(pb))}cqw + 6px);" : $"bottom:calc({H(State.Get(pb))}cqw + 6px);")
+               + (pc == "left" ? "left:8px;" : pc == "right" ? "right:8px;left:auto;" : "left:50%;transform:translateX(-50%);");
+        <div class="kebab-backdrop" @onclick="ClosePick"></div>
+        <div class="kebab-menu bd-menu" role="menu" style="@st">
+            @foreach (var g in BandKinds.All.GroupBy(k => k.Group))
+            {
+                <div class="cat">@g.Key</div>
+                @foreach (var k in g)
+                {
+                    var kk = k;
+                    <button type="button" role="menuitem" class="@(cur?.Kind == k.Id ? "on" : "")" @onclick="() => Choose(kk.Id)"><Ico Name="@k.Icon" Size="16" /> @k.Name</button>
+                }
+            }
+            @if (cur != null) { <button type="button" role="menuitem" class="danger" @onclick="Clear"><Ico Name="x" Size="16" /> Vider la case</button> }
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public BandsState? State { get; set; }
+    /// <summary>Petit côté de l'écran en cqw : 56,25 en paysage, 100 en portrait ; un mur compte une case (la moitié si 2 colonnes…).</summary>
+    [Parameter] public double Short { get; set; } = 56.25;
+    [Parameter] public EventCallback OnChange { get; set; }
+
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+
+    /// <summary>Hauteur d'un bandeau en cqw (texte invariant : un point décimal, jamais une virgule).</summary>
+    public string H(Band b) => (Bands.Fraction(b.Size) * Short).ToString("0.##", Inv);
+
+    private static string Pos(string c) => c switch { "left" => "gauche", "right" => "droite", _ => "centre" };
+
+    private async Task Click(string band, string cell)
+    {
+        if (State!.Cell(band, cell) == null) { State.PickBand = band; State.PickCell = cell; }
+        else { State.SelBand = band; State.SelCell = cell; State.PickBand = State.PickCell = null; }
+        await OnChange.InvokeAsync();
+    }
+
+    private async Task TurnOn(string band) { State!.Get(band).On = true; await OnChange.InvokeAsync(); }
+    private async Task ClosePick() { State!.PickBand = State.PickCell = null; await OnChange.InvokeAsync(); }
+
+    private async Task Choose(string kind)
+    {
+        var s = State!; var prev = s.Cell(s.PickBand!, s.PickCell!);
+        var c = BandKinds.NewCell(kind);
+        if (prev != null && prev.Ha && kind is "text" or "ticker") c.Ha = true;
+        s.SetCell(s.PickBand!, s.PickCell!, c);
+        (s.SelBand, s.SelCell) = (s.PickBand, s.PickCell);
+        s.PickBand = s.PickCell = null;
+        await OnChange.InvokeAsync();
+    }
+
+    private async Task Clear() { var s = State!; s.SetCell(s.PickBand!, s.PickCell!, null); s.PickBand = s.PickCell = null; await OnChange.InvokeAsync(); }
+
+    private RenderFragment Body(BandCell c) => __b =>
+    {
+        switch (c.Kind)
+        {
+            case "logo": __b.AddMarkupContent(0, $"<span class=\"bd-logo\"><span class=\"lg\">{Esc(Initial(c))}</span>{Esc(c.S("text"))}</span>"); break;
+            case "text": __b.AddMarkupContent(0, $"<span class=\"bd-txt\">{Esc(c.S("text"))}</span>"); break;
+            case "label": __b.AddMarkupContent(0, $"<span class=\"bd-tag c-{Esc(c.S("color", "orange"))}\">{Esc(c.S("text"))}</span>"); break;
+            case "ticker": __b.AddMarkupContent(0, Ticker(c.S("items").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), c.S("speed", "normal"))); break;
+            case "rss": __b.AddMarkupContent(0, Ticker(new[] { "Actualités du flux", "Titres du flux RSS" }, "normal")); break;
+            case "agenda": __b.AddMarkupContent(0, Ticker(new[] { "10:00 Comité de direction", "14:00 Réunion d'équipe", "16:30 Visite" }, "normal")); break;
+            case "clock": __b.AddMarkupContent(0, $"<b class=\"bd-time\">{Now()}</b><span class=\"bd-dim bd-date\">{Day()}</span>"); break;
+            case "weather": __b.AddMarkupContent(0, $"<span class=\"bd-ico\">☀</span><b>12°</b><span class=\"bd-dim\">{Esc(c.S("city"))}</span>"); break;
+            case "clockwx": __b.AddMarkupContent(0, $"<b class=\"bd-time\">{Now()}</b><span class=\"bd-dim bd-date\">{Day()}</span><span class=\"bd-sepd\">|</span><span class=\"bd-ico\">☀</span><b>12°</b>"); break;
+            case "data": __b.AddMarkupContent(0, $"<span class=\"bd-dot\"></span><span class=\"bd-dim\">{Esc(c.S("title", "Donnée en direct"))}</span><b>—</b>"); break;
+            case "countdown": __b.AddMarkupContent(0, $"<span class=\"bd-dim\">{Esc(c.S("label"))}</span><b>J-12</b>"); break;
+            case "qr": __b.AddMarkupContent(0, $"<span class=\"bd-qrm\"></span><span>{Esc(c.S("label"))}</span>"); break;
+        }
+    };
+
+    private static string Initial(BandCell c) => string.IsNullOrWhiteSpace(c.S("text")) ? "L" : c.S("text").Trim()[..1].ToUpperInvariant();
+    private static string Esc(string s) => System.Net.WebUtility.HtmlEncode(s);
+    private static string Now() => DateTime.Now.ToString("HH:mm");
+    private static string Day() => DateTime.Now.ToString("ddd d MMM", new System.Globalization.CultureInfo("fr-CH"));
+
+    private static string Ticker(string[] items, string speed)
+    {
+        var txt = string.Join("<i>•</i>", items.Select(Esc));
+        var len = string.Join(" ", items).Length;
+        var f = speed == "lente" ? 1.6 : speed == "rapide" ? .6 : 1;
+        return $"<span class=\"bd-tk\" style=\"--dur:{Math.Round((10 + len * .2) * f).ToString(Inv)}s\"><span>{(txt.Length == 0 ? "Aucun message" : txt)}</span></span>";
+    }
+}

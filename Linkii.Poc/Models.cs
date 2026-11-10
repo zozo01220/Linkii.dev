@@ -333,6 +333,8 @@ public class Zone
     /// <summary>Miroir du mur entier : les colonnes (ou les lignes) sont inversées et chaque image retournée.</summary>
     public bool MirrorH { get; set; }
     public bool MirrorV { get; set; }
+    /// <summary>Bandeaux du mur : un seul fil sur toute la largeur. Appliqués aussitôt (comme le miroir), sans publication.</summary>
+    public ScreenBands? Bands { get; set; }
 
     public bool IsWall => Kind == Wall;
 
@@ -917,6 +919,11 @@ public class Screen : IClientOwned, IAreaOwned, IOwned
     public List<ScreenWidget> Widgets { get; set; } = new();
     public int WidgetsRevision { get; set; }
 
+    /// <summary>Bandeaux haut et bas de l'écran (voir <see cref="Bands"/>) : brouillon, publié avec l'écran. Un écran de mur suit les bandeaux de son mur.</summary>
+    public ScreenBands? Bands { get; set; }
+    public int BandsRevision { get; set; }
+    public ScreenBands? PublishedBands { get; set; }
+
     /// <summary>Borne interactive (écran Windows tactile) : menu de tuiles et réglages. Null : écran de diffusion. Voir <see cref="KioskConfig"/>.</summary>
     public KioskConfig? Kiosk { get; set; }
     public int KioskRevision { get; set; }             // +1 à chaque modification du menu ou des réglages : la borne a alors des modifications à publier
@@ -1384,7 +1391,7 @@ public static class Helpers
     public static string PublishStamp(Screen s, IEnumerable<Playlist> playlists)
     {
         string Rev(Guid? id) => playlists.FirstOrDefault(p => p.Id == id)?.Revision.ToString() ?? "";
-        var stamp = $"{s.PlaylistId}:{Rev(s.PlaylistId)}:{s.WidgetsRevision}{Kiosk.Stamp(s)}";
+        var stamp = $"{s.PlaylistId}:{Rev(s.PlaylistId)}:{s.WidgetsRevision}{(s.BandsRevision > 0 ? ":b" + s.BandsRevision : "")}{Kiosk.Stamp(s)}";
         if (s.Layout != ScreenLayouts.Full)
             stamp += "|" + s.Layout + string.Concat(s.ZonePlaylists().Skip(1).Select(id => $"|{id}:{Rev(id)}"));
         return stamp;
@@ -1443,6 +1450,7 @@ public static class Helpers
         var m = Mirror(areas, s);
         return (SyncEpoch(areas, s) is { } e ? "|y" + e.Ticks : "") + (Wall(areas, s) is { } w ? $"|w{w.Cols}x{w.Rows}@{w.Col},{w.Row}" : "")   // un mur réorganisé recharge ses écrans
             + (m.H ? "|mh" : "") + (m.V ? "|mv" : "")   // un miroir changé aussi
+            + (Wall(areas, s) != null && ZoneOf(areas, s)?.Bands is { } wb ? "|wb" + Bands.Stamp(wb) : "")   // et les bandeaux du mur
             + Sleep.Stamp(areas, s)                       // une plage de mise en veille changée aussi
             + Dim.Stamp(areas, s)                         // et un réglage de luminosité ou de contraste
             + Planning.Stamp(areas, s);                   // et un créneau du planning

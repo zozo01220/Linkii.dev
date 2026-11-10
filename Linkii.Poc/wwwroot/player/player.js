@@ -277,6 +277,7 @@
       'translate(-50%, -50%)' + mirror + ' rotate(' + rot + 'deg) scale(' + s + ')' + (dx || dy ? ' translate(' + dx + 'px, ' + dy + 'px)' : '');
     cell.w = W; cell.h = H;
     sizeZones();
+    if (window.LinkiiBands) { LinkiiBands.place(); fitBands(); }   // les bandeaux suivent la taille d'un écran et réservent leur place
     placePause();
     if (window.LinkiiEmergency) LinkiiEmergency.place();
     if (window.LinkiiNotice) LinkiiNotice.place();
@@ -354,6 +355,7 @@
       try { window.LinkiiNative.config(JSON.stringify(pl.device)); } catch (e) {}
     }
     cfg.wall = pl.wall || null;
+    if (window.LinkiiBands) LinkiiBands.apply(pl.bands || null);   // bandeaux haut et bas (null : aucun, ou smartphone)
     if (PREVIEW && pl.kiosk && pl.kioskPreview) pl.kiosk.preview = true;   // aperçu tactile d'une liste interactive (sans liste de lecture)
     if (window.LinkiiKiosk) LinkiiKiosk.apply(pl.kiosk || null, kioskHooks());   // borne interactive : menu de tuiles au toucher (null : écran de diffusion)
     if (window.LinkiiRoom) LinkiiRoom.apply(pl.room || null, roomHooks());       // écran de salle : la porte de sa salle (null : autre type d'écran)
@@ -936,7 +938,8 @@
   function fitBands() {
     keepFreeInside();
     var gap = (parseFloat($("stage").style.fontSize) || 19) * 1.2;
-    var bt = zoneH("top"), bb = zoneH("bottom");
+    var bandT = window.LinkiiBands ? LinkiiBands.height("top") : 0, bandB = window.LinkiiBands ? LinkiiBands.height("bottom") : 0;   // bandeaux fixes de l'écran
+    var bt = zoneH("top") + bandT, bb = zoneH("bottom") + bandB;
     var ct = Math.max(zoneH("top-left"), zoneH("top-right"));
     var cb = Math.max(zoneH("bottom-left"), zoneH("bottom-right"));
     var pos = [["top-left", "top", bt], ["top-right", "top", bt], ["bottom-left", "bottom", bb], ["bottom-right", "bottom", bb]];
@@ -972,6 +975,8 @@
   }
 
   function isSlide(i) { return !i.placement || i.placement === 'full'; }
+  // Un bandeau posé par la liste est masqué là où l'écran a le sien (maquettes/ecran-bandeaux.html)
+  function listBandHidden(i) { return (i.placement === 'top' || i.placement === 'bottom') && !!window.LinkiiBands && LinkiiBands.has(i.placement); }
   // période de validité (aaaa-mm-jj, dans le fuseau de l'organisation) : hors période, l'élément n'est pas diffusé
   function isValidNow(i) {
     var t = todayIso();
@@ -988,7 +993,7 @@
     catch (e) { var d = new Date(); return todayIso() + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
   }
   function overlaySig(items) {
-    return items.filter(function (it) { return !isSlide(it) && it.type === 'app' && isValidNow(it); }).map(function (it) { return it.id || it.placement; }).join('|');
+    return items.filter(function (it) { return !isSlide(it) && !listBandHidden(it) && it.type === 'app' && isValidNow(it); }).map(function (it) { return it.id || it.placement; }).join('|');
   }
 
   // Apps en surimpression (angles / bandeaux) : permanents pendant toute la boucle
@@ -998,7 +1003,7 @@
     state.overlayStops = [];
     host.innerHTML = '';
     state.ovSig = overlaySig(items);
-    items.filter(function (it) { return !isSlide(it) && it.type === 'app' && isValidNow(it); }).forEach(function (it) {
+    items.filter(function (it) { return !isSlide(it) && !listBandHidden(it) && it.type === 'app' && isValidNow(it); }).forEach(function (it) {
       var w = makeApp(it, it.placement);
       if (it.placement === 'free') {   // widget d écran : sa propre zone, à la position choisie (ne réserve pas de place au contenu)
         var fz = document.createElement("div");
@@ -1728,12 +1733,24 @@
     });
   }
 
+  /* ---------- Bandeaux haut et bas (bands.js) : le player lui prête la scène, la taille d'un écran, l'heure du serveur et les apps du catalogue ---------- */
+  function bandsInit() {
+    if (!window.LinkiiBands) return;
+    LinkiiBands.init({
+      stage: $('stage'), preview: !!PREVIEW,
+      cell: function () { return cell; }, wall: function () { return cfg.wall; }, now: serverNow, tz: function () { return cfg.timezone; },
+      makeApp: function (item, place) { return makeApp(item, place); }
+    });
+  }
+
   /* ---------- Message affiché un moment (notice.js) : la diffusion s'arrête pendant le message, puis reprend avec le contenu suivant ---------- */
   function noticeInit() {
     if (!window.LinkiiNotice) return;
     LinkiiNotice.init({
       stage: $('stage'), preview: !!PREVIEW,
       cell: function () { return cell; }, wall: function () { return cfg.wall; }, now: serverNow,
+      // message demandé « dans le bandeau » : il prend la place de la case réceptrice, la diffusion continue
+      banner: { has: function () { return !!window.LinkiiBands && LinkiiBands.hasReceiver(); }, show: function (n) { if (window.LinkiiBands) LinkiiBands.notice(n); } },
       canShow: function (n) { return !state.emergency && (n.wake || !state.asleep); },   // l'urgence passe devant ; un écran en veille dort (sauf si le message l'a réveillé)
       enter: function (n) {
         state.notice = true; state.noticeWake = !!(n && n.wake);
@@ -1931,6 +1948,7 @@
       var saved = JSON.parse(LS.getItem('lk_playlist') || 'null');
       if (saved) { state.pending = saved; }   // passe par next() => config + apps appliquées
     } catch (e) {}
+    bandsInit();
     emergencyInit();
     noticeInit();
     layout();
@@ -2016,6 +2034,7 @@
     $('idle').querySelector('h1').textContent = 'Rien à afficher';
     $('idle').querySelector('p').textContent = 'Aucun contenu à diffuser à ce moment.';
     window.addEventListener('message', previewControl);
+    bandsInit();
     layout();
     refresh();
     setInterval(scheduleTick, 10000);

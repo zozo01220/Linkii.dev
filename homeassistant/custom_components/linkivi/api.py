@@ -80,9 +80,10 @@ class LinkivApi:
         look: str,
         duration: int,
         wake: bool,
+        place: str = "full",
     ) -> dict[str, Any]:
         """Affiche un message un moment par-dessus la diffusion (accès screens:control) ; Linkivi dit pourquoi il refuse (écran hors ligne, en veille…)."""
-        body: dict[str, Any] = {"look": look, "durationSeconds": duration, "wake": wake}
+        body: dict[str, Any] = {"look": look, "durationSeconds": duration, "wake": wake, "place": place}
         if title:
             body["title"] = title
         if message:

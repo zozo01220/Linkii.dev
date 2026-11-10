@@ -1,0 +1,221 @@
+@* Onglet « Bandeaux » d'un écran (ou d'un mur) : deux bandes fixes de trois cases, chacune avec sa hauteur et son fond. Maquette : maquettes/ecran-bandeaux.html *@
+@inject AppService Svc
+
+@if (Phone)
+{
+    <div class="wall-note warn" style="margin-top:0"><Ico Name="warn" Size="16" /> <b>Pas de bandeau sur un smartphone.</b> L'écran est trop petit pour que trois cases restent lisibles. Si cet appareil n'est pas un smartphone, changez son type dans <button type="button" class="linklike" @onclick="OnSettings">Paramètres de l'écran</button>.</div>
+    <p class="hint">Un écran qui devient smartphone garde ses bandeaux enregistrés, mais ne les affiche plus.</p>
+}
+else
+{
+    @if (Wall)
+    {
+        <p class="wall-note" style="margin-top:0"><Ico Name="grid" Size="15" /> Bandeaux du mur : <b>un seul fil traverse tous les écrans</b>. Le haut court sur la première rangée, le bas sur la dernière.</p>
+    }
+    else
+    {
+        <p class="hint bd-lead">Deux bandes fixes de trois cases. Elles restent affichées quelle que soit la liste de lecture ; la diffusion se réduit pour leur laisser la place.</p>
+        @if (ListBands)
+        {
+            <p class="dw-note bd-lead"><Ico Name="info" Size="15" /> Un bandeau posé par une liste de lecture est masqué sur cet écran tant qu'il a le sien au même endroit.</p>
+        }
+    }
+    @Section("top", "Bandeau du haut")
+    @Section("bottom", "Bandeau du bas")
+}
+
+@code {
+    [Parameter, EditorRequired] public BandsState State { get; set; } = default!;
+    [Parameter] public bool Phone { get; set; }
+    [Parameter] public bool Wall { get; set; }
+    /// <summary>Une liste jouée par l'écran pose une app en bandeau : elle est masquée là où l'écran a le sien.</summary>
+    [Parameter] public bool ListBands { get; set; }
+    [Parameter] public List<MediaItem> Images { get; set; } = new();
+    [Parameter] public EventCallback OnChange { get; set; }
+    [Parameter] public EventCallback OnSettings { get; set; }
+
+    private static string Pos(string c) => c switch { "left" => "Gauche", "right" => "Droite", _ => "Centre" };
+    private static readonly string[] Cells = { "left", "center", "right" };
+    private Task Changed() => OnChange.InvokeAsync();
+
+    private RenderFragment Section(string pos, string title) => __builder =>
+    {
+        var band = State.Get(pos);
+        <section class="bd-sec @(band.On ? "on" : "")">
+            <div class="bd-sec-h">
+                <span class="bd-mini @pos"><i></i></span><b>@title</b><span class="grow"></span>
+                <button type="button" class="switch sm @(band.On ? "on" : "")" role="switch" aria-checked="@(band.On ? "true" : "false")" aria-label="@title" @onclick="() => Toggle(pos)"><span></span></button>
+            </div>
+            @if (band.On)
+            {
+                <div class="bd-rows">
+                    @foreach (var c in Cells) { @Row(pos, c) }
+                </div>
+                <div class="bd-opts">
+                    <div>
+                        <label class="lbl">Hauteur</label>
+                        <div class="fmt-seg sm" role="group">
+                            @foreach (var (v, l) in new[] { ("fine", "Fine"), ("moyenne", "Moyenne"), ("large", "Large") })
+                            {
+                                var vv = v;
+                                <button type="button" class="@(band.Size == v ? "on" : "")" @onclick="() => SetSize(band, vv)">@l</button>
+                            }
+                        </div>
+                    </div>
+                    <div>
+                        <label class="lbl">Fond</label>
+                        <div class="bd-sw">
+                            @foreach (var (v, col, l) in new[] { ("nuit", "#0B1F3A", "Nuit"), ("blanc", "#FFFFFF", "Blanc"), ("signal", "#2F6FAD", "Bleu"), ("noir", "#000000", "Noir") })
+                            {
+                                var vv = v;
+                                <button type="button" class="@(band.Bg == v ? "on" : "")" style="background:@col" title="@l" aria-label="Fond @l" @onclick="() => SetBg(band, vv)"></button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </section>
+    };
+
+    private RenderFragment Row(string pos, string c) => __builder =>
+    {
+        var cell = State.Cell(pos, c); var sel = State.IsSel(pos, c);
+        if (cell == null)
+        {
+            <div class="bd-row empty"><span class="bd-pos">@Pos(c)</span><button type="button" class="bd-pick" @onclick="() => Pick(pos, c)"><Ico Name="plus" Size="15" /> Choisir un contenu</button></div>
+        }
+        else
+        {
+            var k = BandKinds.Find(cell.Kind);
+            <div class="bd-row @(sel ? "sel" : "")">
+                <button type="button" class="bd-rmain" title="Case @Pos(c).ToLowerInvariant() : régler" @onclick="() => Select(pos, c)">
+                    <span class="bd-ric"><Ico Name="@(k?.Icon ?? "grid")" Size="16" /></span>
+                    <span class="bd-t"><small class="bd-pos">@Pos(c)</small><b>@k?.Name</b><small>@Summary(cell)</small></span>
+                    @if (cell.Ha && State.Get(pos).On) { <span class="bd-hachip" title="Reçoit les messages de Home Assistant">HA</span> }
+                </button>
+                <button type="button" class="btn ghost sm icon" title="Vider la case" aria-label="Vider la case" @onclick="() => Clear(pos, c)"><Ico Name="trash" Size="15" /></button>
+            </div>
+            @if (sel) { @Settings(pos, c, cell) }
+        }
+    };
+
+    private string Summary(BandCell c) => c.Kind switch
+    {
+        "text" or "label" => c.Kind == "label" ? $"« {c.S("text")} »" : c.S("text"),
+        "ticker" => $"{c.S("items").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Length} message(s) · vitesse {c.S("speed", "normal")}",
+        "clock" => "Heure et jour",
+        "weather" or "clockwx" => c.S("city"),
+        "logo" => Images.FirstOrDefault(m => m.Id.ToString() == c.S("image"))?.Name ?? (c.S("text") == "" ? "Aucune image" : c.S("text")),
+        "rss" => c.S("url", "Adresse du flux à indiquer"),
+        "agenda" => c.S("calendar") == "" ? "Calendrier à choisir" : "Calendrier choisi",
+        "data" => c.S("title", "Donnée à choisir"),
+        "countdown" => c.S("label") + (c.S("date") == "" ? "" : " · " + c.S("date")),
+        "qr" => c.S("label"),
+        _ => ""
+    };
+
+    private RenderFragment Settings(string pos, string c, BandCell cell) => __builder =>
+    {
+        <div class="bd-set">
+            <div class="bd-set-h"><button type="button" class="btn ghost sm" @onclick="() => Pick(pos, c)"><Ico Name="swap" Size="15" /> Changer de contenu</button></div>
+            @switch (cell.Kind)
+            {
+                case "text":
+                    @Field(cell, "text", "Texte", 120)
+                    <small class="hint">Défile tout seul s'il est plus long que la case.</small>
+                    @HaBox(cell)
+                    break;
+                case "ticker":
+                    <div class="dw-field"><label>Messages <span class="hint">(un par ligne)</span></label>
+                        <textarea rows="4" maxlength="@Bands.MaxItems" value="@cell.S("items")" @oninput="e => SetItems(cell, e)"></textarea></div>
+                    <div class="dw-field"><label>Vitesse</label>
+                        <div class="fmt-seg sm" role="group">
+                            @foreach (var (v, l) in new[] { ("lente", "Lente"), ("normal", "Normale"), ("rapide", "Rapide") })
+                            {
+                                var vv = v;
+                                <button type="button" class="@(cell.S("speed", "normal") == v ? "on" : "")" @onclick="() => SetSpeed(cell, vv)">@l</button>
+                            }
+                        </div></div>
+                    @HaBox(cell)
+                    break;
+                case "label":
+                    @Field(cell, "text", "Texte", 24)
+                    <div class="dw-field"><label>Couleur</label>
+                        <div class="fmt-seg sm" role="group">
+                            @foreach (var (v, l) in new[] { ("orange", "Orange"), ("signal", "Bleu"), ("rouge", "Rouge") })
+                            {
+                                var vv = v;
+                                <button type="button" class="@(cell.S("color", "orange") == v ? "on" : "")" @onclick="() => SetColor(cell, vv)">@l</button>
+                            }
+                        </div></div>
+                    break;
+                case "clock":
+                    <p class="hint" style="margin:0">Heure et jour, au fuseau de l'organisation.</p>
+                    break;
+                case "weather": case "clockwx":
+                    @Field(cell, "city", "Ville", 80)
+                    break;
+                case "logo":
+                    <div class="dw-field"><label>Image</label>
+                        <select @onchange="e => SetImage(cell, e)">
+                            <option value="">— Aucune —</option>
+                            @foreach (var m in Images) { <option value="@m.Id" selected="@(m.Id.ToString() == cell.S("image"))">@m.Name</option> }
+                        </select>
+                        <small>Une image de la médiathèque (Contenus).</small></div>
+                    @Field(cell, "text", "Texte à côté (facultatif)", 40)
+                    break;
+                case "rss":
+                    @Field(cell, "url", "Adresse du flux", 300)
+                    break;
+                case "countdown":
+                    @Field(cell, "label", "Événement", 60)
+                    <div class="dw-field"><label>Date</label><input type="date" value="@cell.S("date")" @onchange="e => SetDate(cell, e)" /></div>
+                    break;
+                case "qr":
+                    @Field(cell, "content", "Adresse", 300)
+                    @Field(cell, "label", "Légende", 40)
+                    break;
+                case "agenda": case "data":
+                    @if (Svc.Find(BandKinds.Find(cell.Kind)?.AppId) is { } app) { <AppForm @key="cell.Id" Manifest="app" Values="cell.Settings" OnChange="Changed" /> }
+                    break;
+            }
+        </div>
+    };
+
+    private RenderFragment Field(BandCell cell, string key, string label, int max) => __builder =>
+    {
+        <div class="dw-field"><label>@label</label><input type="text" maxlength="@max" value="@cell.S(key)" @oninput="e => SetField(cell, key, e)" /></div>
+    };
+
+    /// <summary>Une seule case par écran reçoit les messages de Home Assistant : la cocher ailleurs la déplace.</summary>
+    private RenderFragment HaBox(BandCell cell) => __builder =>
+    {
+        var recv = State.Bands.Receiver;
+        var elsewhere = recv != null && recv != cell;
+        <label class="bd-check">
+            <input type="checkbox" class="ios" checked="@cell.Ha" @onchange="e => SetHa(cell, e.Value is true)" />
+            <span><b>Messages de Home Assistant</b><small>@(elsewhere ? "Une autre case les reçoit déjà : cocher ici les déplace." : "Un message envoyé par Home Assistant ou par l'API, avec l'emplacement « Bandeau », s'affiche ici à la place du texte, le temps indiqué, puis le fil reprend.")</small></span>
+        </label>
+    };
+
+    private async Task Toggle(string pos) { var b = State.Get(pos); b.On = !b.On; State.PickBand = State.PickCell = null; await Changed(); }
+    private async Task SetSize(Band b, string v) { b.Size = v; await Changed(); }
+    private async Task SetBg(Band b, string v) { b.Bg = v; await Changed(); }
+    private async Task Select(string pos, string c) { var same = State.IsSel(pos, c); (State.SelBand, State.SelCell) = same ? (null, null) : (pos, c); State.PickBand = State.PickCell = null; await Changed(); }
+    private async Task Pick(string pos, string c) { State.PickBand = pos; State.PickCell = c; await Changed(); }
+    private async Task Clear(string pos, string c) { State.SetCell(pos, c, null); if (State.IsSel(pos, c)) State.SelBand = State.SelCell = null; await Changed(); }
+    private Task SetSpeed(BandCell cell, string v) => Set(cell, "speed", v);
+    private Task SetColor(BandCell cell, string v) => Set(cell, "color", v);
+    private Task SetItems(BandCell cell, ChangeEventArgs e) => Set(cell, "items", e.Value?.ToString());
+    private Task SetImage(BandCell cell, ChangeEventArgs e) => Set(cell, "image", e.Value?.ToString());
+    private Task SetDate(BandCell cell, ChangeEventArgs e) => Set(cell, "date", e.Value?.ToString());
+    private Task SetField(BandCell cell, string key, ChangeEventArgs e) => Set(cell, key, e.Value?.ToString());
+    private async Task Set(BandCell cell, string key, string? v) { cell.Settings[key] = v ?? ""; await Changed(); }
+
+    private async Task SetHa(BandCell cell, bool on)
+    {
+        foreach (var b in State.Bands.Both) foreach (var x in b.Cells) x.Ha = false;
+        cell.Ha = on;
+        await Changed();
+    }
+}

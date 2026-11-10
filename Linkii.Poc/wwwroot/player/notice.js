@@ -41,6 +41,7 @@
   }
 
   function render() {
+    if (cur.banner) { hooks.banner.show(cur); return; }   // « dans le bandeau » : la case réceptrice affiche le message
     if (!el) {
       css();
       el = document.createElement('div');
@@ -59,6 +60,7 @@
 
   function clear() {
     clearTimeout(endTimer); endTimer = null;
+    if (cur && cur.banner && hooks.banner) hooks.banner.show(null);
     if (ticker) { clearInterval(ticker); ticker = null; }
     cur = null;
     if (el && el.parentNode) el.parentNode.removeChild(el);
@@ -77,19 +79,23 @@
     if (n && n.until && hooks.now() >= n.until) n = null;
     if (!n) {
       if (!cur) return;
+      var was = cur.banner;
       clear();
-      hooks.leave();
+      if (!was) hooks.leave();   // un message de bandeau n'a rien arrêté : rien à reprendre
       return;
     }
     if (cur && cur.id === n.id) return;
     if (!hooks.canShow(n)) return;
+    var wantBanner = n.place === 'banner' && !!hooks.banner && hooks.banner.has();
+    if (cur && !!cur.banner !== wantBanner) apply(null);   // autre emplacement : l'ancien message est retiré d'abord
     var first = !cur;
     cur = { id: n.id, title: n.title || '', message: n.message || '', look: n.look === 'attention' ? 'attention' : 'information', wake: !!n.wake, startedAt: n.startedAt || hooks.now(), until: n.until || (hooks.now() + 30000) };
+    cur.banner = wantBanner;
     clearTimeout(endTimer);
     endTimer = setTimeout(function () { apply(null); }, Math.max(0, cur.until - hooks.now()));
     if (!ticker) ticker = setInterval(tick, 1000);
     render();
-    if (first) hooks.enter(cur);
+    if (first && !cur.banner) hooks.enter(cur);
   }
 
   window.LinkiiNotice = {

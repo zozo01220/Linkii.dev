@@ -48,7 +48,8 @@ public static class PlayerFeed
 
     /// <summary>Contenus dont l'écran peut demander les données (/api/data) : ceux de ses listes, plus ceux ouverts par les tuiles de sa borne interactive (compositions reliées à des jeux de données, météo, calendrier…).</summary>
     public static List<PublishedItem> DataItems(Db db, Screen s) =>
-        AllItems(db, s).Concat(s.PublishedKiosk?.Pages.SelectMany(p => p.Els).Select(e => e.Action.Item).OfType<PublishedItem>() ?? Enumerable.Empty<PublishedItem>()).ToList();
+        AllItems(db, s).Concat(s.PublishedKiosk?.Pages.SelectMany(p => p.Els).Select(e => e.Action.Item).OfType<PublishedItem>() ?? Enumerable.Empty<PublishedItem>())
+            .Concat(Bands.Items(Bands.PublishedFor(db, s))).ToList();   // + cases des bandeaux
 
     /// <summary>Configuration et contenus publiés d'un écran. whole : le simulateur montre tout le mur dont l'écran fait partie.
     /// device : l'appareil lui-même (pas le simulateur) reçoit aussi ses paramètres d'appareil.</summary>
@@ -80,6 +81,7 @@ public static class PlayerFeed
             // découpage publié : tailles des zones (en %), côte à côte en paysage, empilées en portrait ; zones 2 et 3 avec leur propre liste
             ["layout"] = new { id = lay.Id, dir = s.Orientation == "portrait" ? "col" : "row", sizes = lay.Sizes },
             ["zones"] = (s.PublishedVersion > 0 ? s.PublishedZones : new List<List<PublishedItem>>()).Select(z => Sync(z).Select(i => i.ForPlayer())),
+            ["bands"] = Bands.ForPlayer(Bands.PublishedFor(db, s)),   // bandeaux haut et bas (null : aucun, ou smartphone)
             ["screen"] = new { orientation = s.Orientation, resolution = s.Resolution, mirrorH = mirror.H, mirrorV = mirror.V },
             ["settings"] = new { timezone = t.Timezone, reloadHour = t.ReloadHour, techPin = TechPin.ForPlayer(t) },
             ["schedule"] = Planning.ForPlayer(t, db.Areas.FirstOrDefault(a => a.Id == s.AreaId), s, Sync),   // créneaux du planning de diffusion (null : aucun)

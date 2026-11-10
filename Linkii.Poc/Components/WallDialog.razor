@@ -18,6 +18,32 @@
         <button type="button" class="modal-x" aria-label="Fermer" @onclick="() => OnClose.InvokeAsync(false)"><Ico Name="x" Size="20" /></button>
     </div>
     <div class="modal-body">
+        <div class="se-utabs" role="tablist">
+            <button type="button" role="tab" aria-selected="@(tab == "wall" ? "true" : "false")" class="@(tab == "wall" ? "on" : "")" @onclick='() => tab = "wall"'><Ico Name="grid" Size="18" /> Mur</button>
+            <button type="button" role="tab" aria-selected="@(tab == "bands" ? "true" : "false")" class="@(tab == "bands" ? "on" : "")" @onclick='() => tab = "bands"'><Ico Name="bands" Size="18" /> Bandeaux</button>
+        </div>
+        @if (tab == "bands")
+        {
+            <div class="wall-bands">
+                <div class="wall-bands-pv">
+                    <div class="wg-stage wall-bands-stage" style="aspect-ratio:@((16.0 * cols / (9.0 * rows)).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture))">
+                        <div class="wg-zones dir-row" style="top:@WallInset(bandsState.Bands.Top);bottom:@WallInset(bandsState.Bands.Bottom)">
+                            <div class="wg-zone @(thumb != null ? "has-img" : "")" style="flex:100 1 0">
+                                @if (thumb != null) { <span class="wg-zone-img"><MediaThumb Media="thumb" All="media" /></span> }
+                            </div>
+                        </div>
+                        <BandsOverlay State="bandsState" Short="WallShort" OnChange="StateHasChanged" />
+                        <div class="bd-seams">
+                            @for (var cx = 1; cx < cols; cx++) { <i class="v" style="left:calc(@Pc(cx * 100.0 / cols)% - 2px)"></i> }
+                            @for (var cy = 1; cy < rows; cy++) { <i class="h" style="top:calc(@Pc(cy * 100.0 / rows)% - 2px)"></i> }
+                        </div>
+                    </div>
+                </div>
+                <div class="wall-bands-side"><BandsPanel State="bandsState" Wall="true" Images="images" OnChange="StateHasChanged" /></div>
+            </div>
+        }
+        else
+        {
         @* une colonne, sans défilement : grille et conseil de résolution en haut, puis le mur à ses vraies proportions (borné en largeur et en hauteur) *@
         <div class="wall-opts">
             <div>
@@ -67,6 +93,7 @@
         @if (ZoneId == null)
         {
             <small class="muted" style="display:block;margin-top:12px">Les écrans jouent la liste du mur, en écran plein, et sont publiés aussitôt. Dissoudre le mur les remet dans la zone « @Zone.DefaultName ».</small>
+        }
         }
     </div>    <div class="modal-foot">
         <small class="muted grow">@order.Count écrans · @cols × @rows</small>
@@ -135,6 +162,15 @@
     private string name = "", playlistValue = "", zoneName = "", renameDraft = "";
     private bool renaming, advanced, renamed, mirrorBackH, mirrorBackV;   // renamed : nom choisi par l'utilisateur (le nom proposé suit la grille)
 
+    // Bandeaux du mur (maquettes/ecran-bandeaux.html) : un seul fil sur toute la largeur, appliqué aussitôt à l'enregistrement.
+    private string tab = "wall";
+    private BandsState bandsState = new();
+    private List<MediaItem> images = new();
+    private static string Pc(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    /// <summary>Petit côté d'un écran du mur, en cqw de la largeur de tout le mur.</summary>
+    private double WallShort => 100.0 * Math.Min(unitW, unitH) / (unitW * Math.Max(1, cols));
+    private string WallInset(Band b) => b.On ? Pc(Bands.Fraction(b.Size) * WallShort) + "cqw" : "0px";
+
     private string? error;
     private Guid areaId;
     private List<MediaItem> media = new();
@@ -180,6 +216,8 @@
             playlistValue = playlists.Any(p => p.Id == first) ? first.ToString()! : "";
         }
         media = Store.Read(d => d.Media.Where(m => m.Status == null).ToList());
+        images = media.Where(m => m.Type == "image").OrderBy(m => m.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        bandsState.Bands = Bands.Clean(ZoneId is { } bz ? Store.Read(d => d.Area?.Zones.FirstOrDefault(z => z.Id == bz)?.Bands) : null);
         var wallPlId = ZoneId is { } wz ? Store.Read(d => d.Area?.Zones.FirstOrDefault(z => z.Id == wz)?.PlaylistId) : Guid.TryParse(playlistValue, out var wp) ? wp : (Guid?)null;
         thumb = playlists.FirstOrDefault(p => p.Id == wallPlId)?.Draft.Where(i => i.Placement == "full").Select(i => media.FirstOrDefault(m => m.Id == i.MediaId)).FirstOrDefault(m => m != null);
         order = screens.Select(s => s.Id).ToList();
@@ -216,6 +254,14 @@
     }
 
     // Miroir du mur : les écrans le reçoivent avec leur place (révision), sans republier.
+    // Bandeaux du mur : figés pour le player (cases météo, flux… comprises) et reçus aussitôt, sans republier.
+    private void SetBands(Guid zoneId, Guid clientId)
+    {
+        var draft = bandsState.Bands;
+        Store.Write(d => { if (d.Area?.Zones.FirstOrDefault(z => z.Id == zoneId) is { } z) z.Bands = Notifier.BuildBands(d.Media, clientId, draft); });
+    }
+
+    /// <summary>Miroir du mur : les écrans le reçoivent avec leur place (révision), sans republier.</summary>
     private void SetMirror(Guid zoneId)
     {
         var (h, v) = (mirrorH, mirrorV);
@@ -229,6 +275,7 @@
         try
         {
             var ids = order.ToList(); var c = cols; var r = rows; var aid = areaId;
+            var clientId = Store.Read(d => d.Tenant.Id);
             if (ZoneId is { } zid)
             {
                 var newName = name.Trim();
@@ -240,6 +287,7 @@
                 });
                 if (error != null) return;
                 SetMirror(zid);
+                SetBands(zid, clientId);
                 await Notifier.NotifyZone(zid);   // nouvelle place : chaque écran recadre sa portion
                 Toast.Ok("Mur réorganisé.");
             }
@@ -250,6 +298,7 @@
                 var (zone, err) = Store.Write(d => AreaOps.CreateWall(d, aid, ids, c, r, pl, n));
                 if (zone == null) { error = err; return; }
                 if (mirrorH || mirrorV) SetMirror(zone.Id);
+                SetBands(zone.Id, clientId);
                 foreach (var id in ids) await Publisher.Initial(id);   // la liste du mur part aussitôt sur chaque écran (mur créé par un administrateur : rien à approuver)
                 Toast.Ok($"Mur « {zone.Name} » créé : {ids.Count} écrans.");
             }
