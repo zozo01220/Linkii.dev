@@ -6,7 +6,7 @@ Principe : l'IA propose, la personne décide. Rien n'est remplacé, publié ou e
 
 ## Fonctionnement commun
 
-- **Fournisseur** : Anthropic, SDK officiel NuGet `Anthropic` 13.8.0, modèle par défaut `claude-haiku-5-5` (réglable dans la console). Réflexion désactivée, effort faible. Adresse de l'API remplaçable par `Linkii:Ai:BaseUrl` (passerelle, serveur de test).
+- **Fournisseur** : Anthropic, SDK officiel NuGet `Anthropic` 13.8.0, modèle par défaut `claude-haiku-5-5` (réglable dans la console). Réflexion coupée selon le modèle (`Ai.ThinkingFor` : Haiku `disabled`, Sonnet 5.5 `between_tools`, Opus 5.5 et Fable rien à envoyer), effort faible. Adresse de l'API remplaçable par `Linkii:Ai:BaseUrl` (passerelle, serveur de test).
 - **Une seule clé pour toute la plateforme**, saisie une fois dans la console (Admin › Réglages › Intelligence artificielle), chiffrée avec `SecretBox`. Un interrupteur d'urgence coupe tout.
 - **Plans** : réservé à Pro et au-dessus. Essential voit les boutons avec la pastille Pro et une invitation. Essai gratuit : IA active, même quota que Pro (réglable, interrupteur dans la console).
 - **Quotas** : 1 000 demandes par mois et par organisation (Pro et essai), quota particulier par organisation dans sa fiche (Admin › Clients) pour Enterprise. Au-delà, l'IA se met en pause jusqu'au 1er du mois, le reste de Linkivi continue. Plafond de dépense global de la plateforme : 25 $ par mois. Cadence : 12 demandes par minute et par organisation.

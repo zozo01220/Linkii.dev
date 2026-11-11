@@ -30,6 +30,15 @@ public static class Ai
         ("claude-sonnet-5-5", "Claude Sonnet 5.5"),
     };
 
+    /// <summary>Réflexion coupée, comme chaque modèle l'accepte : Sonnet 5.5 veut « between_tools » (« disabled » y est refusé), Opus 5.5 et Fable réfléchissent toujours (rien à envoyer), les autres acceptent « disabled ».</summary>
+    public static ThinkingConfigParam? ThinkingFor(string model)
+    {
+        var m = (model ?? "").ToLowerInvariant();
+        if (m.Contains("sonnet-5-5")) return new ThinkingConfigBetweenTools();
+        if (m.Contains("opus-5-5") || m.Contains("fable") || m.Contains("mythos")) return null;
+        return new ThinkingConfigDisabled();
+    }
+
     /// <summary>Tarif en dollars par million de jetons (entrée, sortie), pour estimer le coût et le comparer au plafond.</summary>
     public static (decimal In, decimal Out) Price(string model) => model switch
     {
@@ -201,7 +210,7 @@ public class AiService(JsonStore root, SecretBox box, ILogger<AiService> log, IC
                 MaxTokens = maxTokens,
                 System = system,
                 Messages = [user],
-                Thinking = new ThinkingConfigDisabled(),
+                Thinking = Ai.ThinkingFor(model),
                 OutputConfig = new OutputConfig { Effort = Effort.Low },
             }, cancellationToken: cts.Token);
 
@@ -233,7 +242,7 @@ public class AiService(JsonStore root, SecretBox box, ILogger<AiService> log, IC
                 Model = model,
                 MaxTokens = 20,
                 Messages = [new UserMessageParam { Content = "Réponds seulement : OK" }],
-                Thinking = new ThinkingConfigDisabled(),
+                Thinking = Ai.ThinkingFor(model),
                 OutputConfig = new OutputConfig { Effort = Effort.Low },
             }, cancellationToken: cts.Token);
             return (true, $"Connexion réussie avec {model}.");
