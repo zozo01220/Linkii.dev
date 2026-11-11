@@ -29,6 +29,7 @@ builder.Services.AddScoped<TenantContext>();
 builder.Services.AddScoped<TenantStore>();
 builder.Services.AddScoped<AccountManager>();   // connexion et déconnexion des comptes de l'organisation
 builder.Services.AddScoped<ModeService>();
+builder.Services.AddScoped<AssistantPanel>();   // panneau de l'assistant : ouvert d'une page à l'autre, toute l'IA y passe (MainLayout)
 builder.Services.AddScoped<GettingStarted>();   // assistant « Premiers pas » : ouvert d'une page à l'autre (MainLayout)
 builder.Services.AddSingleton<Notifier>();
 builder.Services.AddSingleton<PushService>();   // notifications push (Firebase) vers l'app Android du back-office

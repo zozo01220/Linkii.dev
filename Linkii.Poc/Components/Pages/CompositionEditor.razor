@@ -14,6 +14,7 @@
 @inject ModeService Modes
 @inject HomeAssistantLive HaLive
 @inject AiService AiSvc
+@inject AssistantPanel Panel
 
 @* Éditeur de compositions (DEV-POC.md §80, §84, §85) : l'interface est en JS (wwwroot/compo-editor.js, plein écran), le serveur garde le document,
    calcule les QR codes, liste et importe les images de la médiathèque, garde « Mes modèles », et lit les données des sources (blocs, champs reliés). Le rendu des calques est celui du player (player/composition.js).
@@ -108,14 +109,6 @@ else
     }
 
     private string AiMode() => AiSvc.State(Store.ClientId).Status switch { AiStatus.Ok => "on", AiStatus.NeedsPro => "pro", AiStatus.Quota or AiStatus.Cap => "pause", _ => "off" };
-
-    /// <summary>Réécriture d'un texte par l'IA (bouton « Améliorer » de la barre d'un texte) : { ok, text, message }.</summary>
-    [JSInvokable]
-    public async Task<Dictionary<string, object>> AiRewrite(string text, string mode)
-    {
-        var r = await AiSvc.Rewrite(Store.ClientId, text, mode, false);
-        return new Dictionary<string, object> { ["ok"] = r.Ok, ["text"] = r.Text, ["message"] = r.Message, ["mode"] = AiMode() };
-    }
 
     /// <summary>Enregistre le nom et le document (crée la composition au premier enregistrement) ; rend le message d'erreur, ou null.</summary>
     [JSInvokable]
@@ -332,8 +325,93 @@ else
     [JSInvokable]
     public void Leave() => Nav.NavigateTo(Back);
 
+    // ---------- « ✦ Améliorer » d'un texte : la proposition s'affiche dans le panneau de l'assistant, « Remplacer » écrit dans le calque ----------
+    private readonly string aiKey = "compo-text-" + Guid.NewGuid().ToString("N");
+    private enum AiCardState { Loading, Suggest, Applied, Message }
+    private AiCardState aiCard;
+    private string aiEl = "", aiSource = "", aiMode = "improve", aiSuggestion = "", aiMessage = "", aiOutcome = "";
+
+    /// <summary>Appelé par l'éditeur (bouton « Améliorer » d'un texte) : la demande part dans le panneau de l'assistant.</summary>
+    [JSInvokable]
+    public async Task AiImprove(string elId, string text)
+    {
+        aiEl = elId; aiSource = text ?? ""; aiOutcome = "";
+        await AiAsk("improve");
+    }
+
+    private void AiShow() => Panel.Show(aiKey, "Améliorer ce texte", "Composition · Texte", AiCardView, AiSummary);
+
+    private static string Tokens(string t) => string.Join("|", System.Text.RegularExpressions.Regex.Matches(t ?? "", "{{[^}]*}}").Select(m => m.Value));
+
+    private async Task AiAsk(string mode)
+    {
+        aiCard = AiCardState.Loading; AiShow();
+        var r = await AiSvc.Rewrite(Store.ClientId, aiSource, mode, false);
+        if (!r.Ok) { aiMessage = r.Message; aiCard = AiCardState.Message; }
+        else if (Tokens(r.Text) != Tokens(aiSource)) { aiMessage = "L'IA a modifié un champ relié (entre accolades) : la proposition est écartée pour ne pas casser le texte."; aiCard = AiCardState.Message; }
+        else { aiMode = mode; aiSuggestion = r.Text; aiCard = AiCardState.Suggest; }
+        AiShow();
+    }
+
+    private async Task AiApply()
+    {
+        bool ok;
+        try { ok = await JS.InvokeAsync<bool>("LinkiiCompoEditor.applyAi", aiEl, aiSuggestion); }
+        catch (JSException) { ok = false; }
+        if (!ok) { aiMessage = "Le texte n'est plus dans la composition : rien n'a été remplacé."; aiCard = AiCardState.Message; Panel.Refresh(); return; }
+        aiCard = AiCardState.Applied; Panel.Save(); Panel.Refresh();
+    }
+
+    private async Task AiUndo()
+    {
+        try { await JS.InvokeAsync<bool>("LinkiiCompoEditor.applyAi", aiEl, aiSource); } catch (JSException) { }
+        AiClose("Ancien texte remis : « " + aiSource + " »");
+    }
+
+    private void AiClose(string why) { aiOutcome = why; Panel.Release(aiKey); }
+
+    private string AiSummary() => aiOutcome.Length > 0 ? aiOutcome : aiCard switch
+    {
+        AiCardState.Applied => "Texte remplacé par : « " + aiSuggestion + " »",
+        AiCardState.Suggest => Ai.ModeLabel(aiMode) + " : « " + aiSuggestion + " »",
+        AiCardState.Message => aiMessage,
+        _ => "Demande interrompue.",
+    };
+
+    private RenderFragment AiCardView => __builder =>
+    {
+        switch (aiCard)
+        {
+            case AiCardState.Loading:
+                <div class="ai-sug loading" role="status"><Ico Name="spark" Size="15" /><span>L'IA écrit</span><span class="ai-dots"><i></i><i></i><i></i></span></div>
+                break;
+            case AiCardState.Message:
+                <div class="ai-sug none paused" role="status"><Ico Name="alert" Size="16" /><span>@aiMessage</span><span class="grow"></span><button type="button" class="linklike" @onclick="() => AiClose(aiMessage)">Fermer</button></div>
+                break;
+            case AiCardState.Applied:
+                <div class="ai-sug none done" role="status"><Ico Name="check" Size="15" /><span>Texte remplacé dans la composition.</span><span class="grow"></span><button type="button" class="linklike" @onclick="AiUndo"><Ico Name="rotate-left" Size="14" /> Revenir à l'ancien</button></div>
+                <div><button type="button" class="linklike" @onclick='() => AiClose("Texte remplacé par : « " + aiSuggestion + " »")'>C'est bon</button></div>
+                break;
+            default:
+                <div class="ai-sug" role="region" aria-label="Proposition de l'IA">
+                    <div class="ai-sug-h"><Ico Name="spark" Size="15" /><b>@Ai.ModeLabel(aiMode)</b></div>
+                    <p class="ai-sug-t">@aiSuggestion</p>
+                    <div class="ai-sug-a">
+                        <button type="button" class="btn sm" @onclick="AiApply"><Ico Name="check" Size="15" /> Remplacer</button>
+                        <button type="button" class="btn ghost sm" @onclick='() => AiClose("Proposition ignorée.")'>Ignorer</button>
+                    </div>
+                    <span class="ai-adj">
+                        <button type="button" @onclick='() => AiAsk("short")'>Plus court</button><button type="button" @onclick='() => AiAsk("warm")'>Plus chaleureux</button><button type="button" @onclick='() => AiAsk("formal")'>Plus formel</button>
+                        @foreach (var (id, label) in Ai.Languages) { var l = id; <button type="button" @onclick="() => AiAsk(l)">@(char.ToUpper(label[0]) + label[1..])</button> }
+                    </span>
+                </div>
+                break;
+        }
+    };
+
     public async ValueTask DisposeAsync()
     {
+        Panel.Release(aiKey);
         try { await JS.InvokeVoidAsync("LinkiiCompoEditor.unmount"); }
         catch (JSDisconnectedException) { }
         catch (InvalidOperationException) { }   // rendu statique : pas de JS

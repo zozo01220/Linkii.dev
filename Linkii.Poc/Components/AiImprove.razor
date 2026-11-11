@@ -1,55 +1,28 @@
-@* Bouton « ✦ Améliorer » sous un champ de texte : corrige et resserre en un clic, puis propose « Plus court » et « Traduire… ».
-   L'IA propose, la personne décide : rien n'est remplacé sans « Remplacer », et « Revenir à l'ancien » défait. Maquette : maquettes/ia-pistes.html.
+@* Bouton « ✦ Améliorer » sous un champ de texte : la proposition s'affiche dans le panneau de l'assistant (toute l'IA y passe), le champ est
+   cerclé de bleu tant qu'il y est relié. L'IA propose, la personne décide : rien n'est remplacé sans « Remplacer », et « Revenir à l'ancien » défait.
+   « Plus court », « Traduire… » se font dans le panneau. Maquettes : maquettes/ia-pistes.html, maquettes/ia-assistant-panneau.html.
    Plan Essential : le bouton porte la pastille Pro et invite à passer Pro. Quota atteint : message de pause. Fonction coupée : le bouton disparaît. *@
 @using System.Text.RegularExpressions
+@implements IDisposable
 @inject AiService Svc
 @inject TenantStore Store
+@inject AssistantPanel Panel
 
 @if (state.Status != AiStatus.Off)
 {
-    <div class="ai-wrap">
+    <div class="ai-wrap @(linked ? "linked" : "")">
         <div class="ai-fbar">
-            <button type="button" class="ai-btn @(state.Status == AiStatus.NeedsPro ? "lock" : "")" disabled="@(card == Card.Loading)" @onclick="Start" aria-label="Améliorer le texte avec l'IA">
-                <Ico Name="spark" Size="15" /> <span>Améliorer</span>
+            <button type="button" class="ai-btn @(state.Status == AiStatus.NeedsPro ? "lock" : "") @(linked ? "on" : "")" disabled="@(card == Card.Loading)" @onclick="Start" aria-label="Améliorer le texte avec l'IA">
+                <Ico Name="spark" Size="15" /> <span>@(linked ? "Dans l'assistant" : "Améliorer")</span>
                 @if (state.Status == AiStatus.NeedsPro)
                 {
                     <span class="plan-tag pro" title="Disponible avec le plan Pro"><Ico Name="crown" Size="12" />Pro</span>
                 }
             </button>
         </div>
-        @switch (card)
+        @if (invite)
         {
-            case Card.Loading:
-                <div class="ai-sug loading" role="status"><Ico Name="spark" Size="15" /><span>L'IA écrit</span><span class="ai-dots"><i></i><i></i><i></i></span></div>
-                break;
-            case Card.Invite:
-                <div class="ai-sug up"><Ico Name="crown" Size="16" /><span><b>L'aide de l'IA est comprise dans le plan Pro.</b> Elle corrige, raccourcit et traduit vos textes en un clic.</span><span class="grow"></span><a class="btn sm" href="/settings?tab=abonnement">Voir les plans</a><button type="button" class="linklike" @onclick="Close">Plus tard</button></div>
-                break;
-            case Card.Message:
-                <div class="ai-sug none paused" role="status"><Ico Name="alert" Size="16" /><span>@message</span><span class="grow"></span><button type="button" class="linklike" @onclick="Close">Fermer</button></div>
-                break;
-            case Card.Applied:
-                <div class="ai-sug none done" role="status"><Ico Name="check" Size="15" /><span>Texte remplacé.</span><span class="grow"></span><button type="button" class="linklike" @onclick="Undo"><Ico Name="rotate-left" Size="14" /> Revenir à l'ancien</button></div>
-                break;
-            case Card.Suggest:
-                <div class="ai-sug" role="region" aria-label="Proposition de l'IA">
-                    <div class="ai-sug-h"><Ico Name="spark" Size="15" /><b>@Ai.ModeLabel(mode)</b></div>
-                    <p class="ai-sug-t">@(mode == "improve" ? Diff(source, suggestion) : new MarkupString(System.Net.WebUtility.HtmlEncode(suggestion)))</p>
-                    <div class="ai-sug-a">
-                        <button type="button" class="btn sm" @onclick="Apply"><Ico Name="check" Size="15" /> Remplacer</button>
-                        <button type="button" class="btn ghost sm" @onclick="Close">Ignorer</button>
-                        <span class="grow"></span>
-                        @if (langs)
-                        {
-                            <span class="ai-adj">@foreach (var (id, label) in Ai.Languages) { var l = id; <button type="button" @onclick="() => Ask(l)">@(char.ToUpper(label[0]) + label[1..])</button> }</span>
-                        }
-                        else
-                        {
-                            <span class="ai-adj"><button type="button" @onclick='() => Ask("short")'>Plus court</button><button type="button" @onclick='() => Ask("warm")'>Plus chaleureux</button><button type="button" @onclick='() => Ask("formal")'>Plus formel</button><button type="button" @onclick="() => langs = true">Traduire…</button></span>
-                        }
-                    </div>
-                </div>
-                break;
+            <div class="ai-sug up"><Ico Name="crown" Size="16" /><span><b>L'aide de l'IA est comprise dans le plan Pro.</b> Elle corrige, raccourcit et traduit vos textes en un clic.</span><span class="grow"></span><a class="btn sm" href="/settings?tab=abonnement">Voir les plans</a><button type="button" class="linklike" @onclick="() => invite = false">Plus tard</button></div>
         }
     </div>
 }
@@ -61,54 +34,127 @@
     [Parameter] public EventCallback<string> OnApply { get; set; }
     /// <summary>Le champ contient un message par ligne : l'IA garde le même nombre de lignes.</summary>
     [Parameter] public bool Lines { get; set; }
+    /// <summary>Nom du champ, montré dans le panneau au-dessus de la demande (« Bandeau · Message défilant »).</summary>
+    [Parameter] public string? Label { get; set; }
 
-    private enum Card { None, Loading, Invite, Message, Suggest, Applied }
+    private enum Card { None, Loading, Message, Suggest, Applied }
     private Card card;
     private AiState state = new(AiStatus.Off, 0, 0, false);
-    private string mode = "improve", suggestion = "", source = "", previous = "", message = "";
-    private bool langs;
+    private string mode = "improve", suggestion = "", source = "", previous = "", message = "", outcome = "";
+    private bool langs, invite, linked;
+    private readonly string key = "improve-" + Guid.NewGuid().ToString("N");
 
-    protected override void OnInitialized() => Refresh();
+    protected override void OnInitialized() { Refresh(); Panel.Changed += OnPanel; }
+
+    /// <summary>Le panneau a changé (nouvelle discussion, carte retirée) : le bouton redevient « Améliorer ».</summary>
+    private void OnPanel()
+    {
+        var now = Panel.Has(key);
+        if (now == linked) return;
+        linked = now;
+        if (!now) card = Card.None;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() { Panel.Changed -= OnPanel; Panel.Release(key); }
 
     private void Refresh() => state = Svc.State(Store.ClientId);
 
     private async Task Start()
     {
         Refresh();
-        langs = false;
-        if (state.Status == AiStatus.NeedsPro) { card = Card.Invite; return; }
+        langs = false; invite = false;
+        if (state.Status == AiStatus.NeedsPro) { invite = true; return; }
         if (!state.Available) { Say(AiService.Say(state)); return; }
         if (string.IsNullOrWhiteSpace(Text)) { Say("Écrivez d'abord un texte à améliorer."); return; }
         source = Text;
         await Ask("improve");
     }
 
+    private void Show() { linked = true; Panel.Show(key, "Améliorer ce texte", Label ?? "Champ de texte", CardView, Summary); }
+
     private async Task Ask(string m)
     {
-        card = Card.Loading;
-        StateHasChanged();
+        card = Card.Loading; langs = false;
+        Show();
         var r = await Svc.Rewrite(Store.ClientId, source, m, Lines);
         Refresh();
         if (!r.Ok) { Say(r.Message); return; }
         mode = m; suggestion = r.Text; card = Card.Suggest;
-        if (m == "improve") langs = false;
+        Show();
     }
 
-    private void Say(string text) { message = text; card = Card.Message; }
-    private void Close() { card = Card.None; langs = false; }
+    private void Say(string text) { message = text; card = Card.Message; Show(); }
+
+    private void Close(string why)
+    {
+        outcome = why;
+        card = Card.None; langs = false; linked = false;
+        Panel.Release(key);
+    }
 
     private async Task Apply()
     {
         previous = Text;
         await OnApply.InvokeAsync(suggestion);
         card = Card.Applied;
+        Panel.Save();
+        Panel.Refresh();
     }
 
     private async Task Undo()
     {
         await OnApply.InvokeAsync(previous);
-        card = Card.None;
+        Close("Ancien texte remis : « " + previous + " »");
     }
+
+    private void Langs() { langs = true; Panel.Refresh(); }
+
+    /// <summary>Ce qui reste de l'échange dans la discussion, une fois la carte retirée.</summary>
+    private string Summary() => card switch
+    {
+        Card.Applied => "Texte remplacé par : « " + suggestion + " »",
+        Card.Suggest => Ai.ModeLabel(mode) + " : « " + suggestion + " »",
+        Card.Message => message,
+        Card.Loading => "Demande interrompue.",
+        _ => outcome.Length > 0 ? outcome : "Proposition ignorée.",
+    };
+
+    /// <summary>La carte affichée dans le panneau : ses boutons agissent sur ce champ.</summary>
+    private RenderFragment CardView => __builder =>
+    {
+        switch (card)
+        {
+            case Card.Loading:
+                <div class="ai-sug loading" role="status"><Ico Name="spark" Size="15" /><span>L'IA écrit</span><span class="ai-dots"><i></i><i></i><i></i></span></div>
+                break;
+            case Card.Message:
+                <div class="ai-sug none paused" role="status"><Ico Name="alert" Size="16" /><span>@message</span><span class="grow"></span><button type="button" class="linklike" @onclick='() => Close(message)'>Fermer</button></div>
+                break;
+            case Card.Applied:
+                <div class="ai-sug none done" role="status"><Ico Name="check" Size="15" /><span>Texte remplacé dans le champ.</span><span class="grow"></span><button type="button" class="linklike" @onclick="Undo"><Ico Name="rotate-left" Size="14" /> Revenir à l'ancien</button></div>
+                <div><button type="button" class="linklike" @onclick='() => Close("Texte remplacé par : « " + suggestion + " »")'>C'est bon</button></div>
+                break;
+            case Card.Suggest:
+                <div class="ai-sug" role="region" aria-label="Proposition de l'IA">
+                    <div class="ai-sug-h"><Ico Name="spark" Size="15" /><b>@Ai.ModeLabel(mode)</b></div>
+                    <p class="ai-sug-t">@(mode == "improve" ? Diff(source, suggestion) : new MarkupString(System.Net.WebUtility.HtmlEncode(suggestion)))</p>
+                    <div class="ai-sug-a">
+                        <button type="button" class="btn sm" @onclick="Apply"><Ico Name="check" Size="15" /> Remplacer</button>
+                        <button type="button" class="btn ghost sm" @onclick='() => Close("Proposition ignorée.")'>Ignorer</button>
+                    </div>
+                    @if (langs)
+                    {
+                        <span class="ai-adj">@foreach (var (id, label) in Ai.Languages) { var l = id; <button type="button" @onclick="() => Ask(l)">@(char.ToUpper(label[0]) + label[1..])</button> }</span>
+                    }
+                    else
+                    {
+                        <span class="ai-adj"><button type="button" @onclick='() => Ask("short")'>Plus court</button><button type="button" @onclick='() => Ask("warm")'>Plus chaleureux</button><button type="button" @onclick='() => Ask("formal")'>Plus formel</button><button type="button" @onclick="Langs">Traduire…</button></span>
+                    }
+                </div>
+                break;
+        }
+    };
 
     /// <summary>Le nouveau texte, avec les mots ajoutés ou changés surlignés (les mots retirés ne sont pas montrés).</summary>
     private static MarkupString Diff(string a, string b)

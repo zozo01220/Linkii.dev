@@ -1,6 +1,7 @@
 @inject NavigationManager Nav
 @inject AiService AiSvc
 @inject TenantStore AiStore
+@inject AssistantPanel Panel
 @implements IDisposable
 
 @* Barre des accès rapides (ordinateur seulement) : nom de l'organisation, puis Player, Store, Aide, Réglages et le compte.
@@ -56,8 +57,8 @@
     }
     @if (AssistantShown)
     {
-        <button type="button" class="qb-btn" data-t="Assistant" aria-haspopup="dialog" @onclick="() => { menu = null; assistant = true; }">
-            <Ico Name="spark" Size="19" /><span>Assistant</span>
+        <button type="button" class="qb-btn qb-ai @(Panel.IsOpen ? "on" : "")" data-t="Assistant (Ctrl + J)" aria-pressed="@(Panel.IsOpen ? "true" : "false")" @onclick="() => { menu = null; Panel.Toggle(); }">
+            <Ico Name="spark" Size="19" /><span>Assistant</span>@if (Panel.Busy && !Panel.IsOpen) { <i class="qb-dot" aria-label="Demande en cours"></i> }@if (AiSvc.State(AiStore.ClientId, "assistant").Status == AiStatus.NeedsPro) { <span class="plan-tag pro" title="Disponible avec le plan Pro"><Ico Name="crown" Size="12" />Pro</span> }
         </button>
     }
     @if (ShowStore)
@@ -129,7 +130,7 @@
 </header>
 
 @if (store) { <StoreDrawer OnClose="() => store = false" /> }
-@if (assistant) { <AiAssistantDialog OnClose="() => assistant = false" /> }
+
 
 @code {
     [Parameter] public string OrgName { get; set; } = "";
@@ -169,7 +170,7 @@
     [Parameter] public RenderFragment? SettingsBadge { get; set; }
 
     private string? menu;
-    private bool store, assistant;
+    private bool store;
 
     /// <summary>Le bouton « Assistant » : IA allumée et plan Pro (sinon il invite à passer Pro) ; absent hors d'un espace client.</summary>
     private bool AssistantShown { get { try { return AiSvc.State(AiStore.ClientId, "assistant").Status != AiStatus.Off; } catch (Exception) { return false; } } }
@@ -181,10 +182,12 @@
         android = PlayerDownloads.Latest("android");
         linux = PlayerDownloads.Latest("linux");
         Nav.LocationChanged += OnNav;
+        Panel.Changed += OnPanel;
     }
 
     private void OnNav(object? s, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) => InvokeAsync(() => { menu = null; StateHasChanged(); });
-    public void Dispose() => Nav.LocationChanged -= OnNav;
+    private void OnPanel() => InvokeAsync(StateHasChanged);
+    public void Dispose() { Nav.LocationChanged -= OnNav; Panel.Changed -= OnPanel; }
 
     private void Toggle(string m) => menu = menu == m ? null : m;
     private void Shut() => menu = null;

@@ -1,0 +1,584 @@
+@inject AssistantPanel Panel
+@inject AiService AiSvc
+@inject AiAssistant Assistant
+@inject TenantStore Store
+@inject NavigationManager Nav
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+@implements IDisposable
+
+@* Panneau de l'assistant, ancré à droite (il pousse la page, rien n'est caché) : ouvert par « Assistant » de la barre des accès rapides ou Ctrl + J,
+   il reste ouvert d'une page à l'autre ; fermé au tout premier lancement, puis l'état et la largeur sont retenus par le navigateur.
+   Toute l'IA y passe : les demandes écrites, et les cartes posées par les pages (« Améliorer » d'un champ, relecture d'une liste, « Créer avec l'IA »).
+   Les discussions sont gardées 30 jours pour leur auteur seul (horloge : discussions récentes). Maquette : maquettes/ia-assistant-panneau.html. *@
+@if (Panel.IsOpen)
+{
+    <aside class="aip" aria-label="Assistant">
+        <div class="aip-grip" @ref="grip" title="Glisser pour élargir le panneau"></div>
+        <div class="aip-h">
+            @if (view == View.History)
+            {
+                <button type="button" class="aip-ib" aria-label="Retour à la discussion" title="Retour à la discussion" @onclick="() => view = View.Chat"><Ico Name="chevron-left" Size="17" /></button>
+                <div class="aip-t"><span>Discussions récentes</span></div>
+            }
+            else
+            {
+                <div class="aip-t"><Ico Name="spark" Size="17" /><span>Assistant</span>@if (Panel.Title.Length > 0) { <span class="sub">· @Panel.Title</span> }</div>
+            }
+            <button type="button" class="aip-ib @(view == View.History ? "on" : "")" aria-label="Discussions récentes" title="Discussions récentes" @onclick="ToggleHistory"><Ico Name="clock" Size="17" /></button>
+            <button type="button" class="aip-ib" aria-label="Nouvelle discussion" title="Nouvelle discussion" disabled="@(busy || running)" @onclick="NewChat"><Ico Name="plus" Size="17" /></button>
+            <button type="button" class="aip-ib" aria-label="Fermer l'assistant" title="Fermer (Ctrl + J)" disabled="@running" @onclick="Panel.Close"><Ico Name="x" Size="17" /></button>
+        </div>
+
+        @if (view == View.History)
+        {
+            <div class="aip-b" id="aip-b">
+                <label class="aip-search"><Ico Name="search" Size="15" /><input type="search" placeholder="Chercher dans vos discussions" aria-label="Chercher dans vos discussions" @bind="search" @bind:event="oninput" /></label>
+                @{ var found = Found(); }
+                @if (found.Count == 0)
+                {
+                    <p class="hint" style="margin:8px 2px">@(search.Trim().Length > 0 ? "Aucune discussion ne contient ces mots." : "Pas encore de discussion. Elles s'ajoutent ici dès votre première demande.")</p>
+                }
+                @foreach (var g in AiChats.Groups)
+                {
+                    var rows = found.Where(c => AiChats.Group(c, DateTime.Now, c.Updated.ToLocalTime()) == g).ToList();
+                    if (rows.Count == 0) continue;
+                    <div class="aip-hg">@g</div>
+                    <div class="aip-hl">
+                        @foreach (var c in rows)
+                        {
+                            var chat = c;
+                            <div class="aip-hi @(chat.Id == Panel.ChatId ? "cur" : "")">
+                                @if (renaming == chat.Id)
+                                {
+                                    <span class="ic"><Ico Name="@AreaIcon(chat.Area)" Size="15" /></span>
+                                    <input class="aip-ren" value="@renameText" aria-label="Nom de la discussion" maxlength="80" @oninput="e => renameText = e.Value?.ToString() ?? string.Empty" @onkeydown="e => RenameKey(e, chat)" @ref="renameInput" />
+                                    <button type="button" class="aip-ib sm" aria-label="Enregistrer le nom" title="Enregistrer" @onclick="() => RenameDone(chat)"><Ico Name="check" Size="15" /></button>
+                                }
+                                else if (deleting == chat.Id)
+                                {
+                                    <span class="ic"><Ico Name="trash" Size="15" /></span>
+                                    <span class="tx"><b>Effacer « @chat.Title » ?</b><small>Elle ne pourra pas être retrouvée.</small></span>
+                                    <button type="button" class="btn sm danger" @onclick="() => { Panel.Delete(chat.Id); deleting = null; }">Effacer</button>
+                                    <button type="button" class="btn ghost sm" @onclick="() => deleting = null">Garder</button>
+                                }
+                                else
+                                {
+                                    <button type="button" class="aip-ho" @onclick="() => Open(chat)">
+                                        <span class="ic"><Ico Name="@AreaIcon(chat.Area)" Size="15" /></span>
+                                        <span class="tx"><b>@chat.Title</b><small>@Meta(chat)</small></span>
+                                    </button>
+                                    @if (chat.Pinned) { <span class="pin" title="Épinglée : gardée sans limite de durée"><Ico Name="star" Size="13" /></span> }
+                                    <span class="aip-hx">
+                                        <button type="button" class="aip-ib sm" aria-label="@(chat.Pinned ? "Ne plus épingler" : "Épingler")" title="@(chat.Pinned ? "Ne plus épingler" : "Épingler : gardée sans limite de durée")" @onclick="() => Panel.Pin(chat.Id, !chat.Pinned)"><Ico Name="star" Size="14" /></button>
+                                        <button type="button" class="aip-ib sm" aria-label="Renommer" title="Renommer" @onclick="() => StartRename(chat)"><Ico Name="edit" Size="14" /></button>
+                                        <button type="button" class="aip-ib sm" aria-label="Effacer" title="Effacer" @onclick="() => deleting = chat.Id"><Ico Name="trash" Size="14" /></button>
+                                    </span>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+                <div class="aip-hf">
+                    Vos discussions sont gardées @AiChats.KeepDays jours et visibles par vous seul. Épinglez-en une pour la garder plus longtemps.
+                    @if (found.Count > 0 && search.Trim().Length == 0)
+                    {
+                        @if (wipe) { <span class="aip-wipe">Tout effacer ? <button type="button" class="linklike danger" @onclick="WipeAll">Oui, tout effacer</button> · <button type="button" class="linklike" @onclick="() => wipe = false">Non</button></span> }
+                        else { <button type="button" class="linklike" @onclick="() => wipe = true">Tout effacer</button> }
+                    }
+                </div>
+            </div>
+        }
+        else
+        {
+            @if (chatOn && Panel.Page.Length > 0)
+            {
+                <div class="aip-ctx">
+                    @if (noPage) { <span>L'assistant ne tient pas compte de la page.</span><button type="button" class="linklike" @onclick="() => noPage = false">Remettre</button> }
+                    else { <span>Sur cette page :</span><span class="aip-chip"><Ico Name="@AreaIcon(Panel.Path.Split('/')[0])" Size="13" /><span>@PageLabel</span><button type="button" aria-label="Ne pas tenir compte de la page" title="Ne pas tenir compte de la page" @onclick="() => noPage = true">×</button></span> }
+                </div>
+            }
+            <div class="aip-b" id="aip-b" aria-live="polite">
+                @if (state.Status == AiStatus.NeedsPro)
+                {
+                    <div class="ai-sug up"><Ico Name="crown" Size="16" /><span><b>L'assistant est compris dans le plan Pro.</b> Dites ce que vous voulez (« affiche un message d'accueil dans le hall », « corrige les textes de la liste Accueil ») : il le fait après votre accord.</span><span class="grow"></span><a class="btn sm" href="/settings?tab=abonnement">Voir les plans</a></div>
+                }
+                else if (state.Status != AiStatus.Off && !state.Available)
+                {
+                    <div class="ai-sug none paused"><Ico Name="alert" Size="16" /><span>@AiService.Say(state)</span></div>
+                }
+                @if (Panel.Turns.Count == 0 && !busy && state.Status != AiStatus.NeedsPro)
+                {
+                    <div class="aip-a">
+                        <div class="aw"><Ico Name="spark" Size="13" /> Assistant</div>
+                        @if (chatOn)
+                        {
+                            <p>Écrivez ce que vous voulez savoir ou faire : écrans, listes, compositions, images, calendriers. Rien n'est fait sans votre accord, et l'assistant ne publie pas.</p>
+                            <p class="hint" style="margin:0">Les boutons ✦ des pages (Améliorer un texte, relecture d'une liste, Créer avec l'IA) envoient aussi leurs propositions ici.</p>
+                        }
+                        else
+                        {
+                            <p>Les propositions de l'IA (Améliorer un texte, relecture d'une liste, Créer avec l'IA) s'affichent ici.</p>
+                        }
+                    </div>
+                }
+                @for (var t = 0; t < Panel.Turns.Count; t++)
+                {
+                    var turn = Panel.Turns[t];
+                    var last = t == Panel.Turns.Count - 1;
+                    @if (turn.Old && (t == 0 || !Panel.Turns[t - 1].Old || Panel.Turns[t - 1].At.ToLocalTime().Date != turn.At.ToLocalTime().Date))
+                    {
+                        <div class="aip-day">@Day(turn.At)</div>
+                    }
+                    @if (turn.Ask.Length > 0)
+                    {
+                        <div class="aip-u" id="@(last && turn.Answer != null ? "aip-q" : null)">@if (turn.From != null) { <span class="from"><Ico Name="spark" Size="11" /> @turn.From</span> }@turn.Ask</div>
+                    }
+                    @if (turn.Live)
+                    {
+                        <div class="aip-a" id="@(last ? "aip-card" : null)">
+                            <div class="aw"><Ico Name="spark" Size="13" /> Assistant</div>
+                            @turn.Card
+                        </div>
+                    }
+                    else if (turn.Answer is { } ans)
+                    {
+                        <div class="aip-a" role="region" aria-label="Réponse de l'assistant">
+                            <div class="aw"><Ico Name="spark" Size="13" /> Assistant</div>
+                            <p>@ans.Say</p>
+                            @if (last && turn.RunTotal > 0)
+                            {
+                                var fin = turn.RunDone;
+                                if (running)
+                                {
+                                    <div class="ai-run" role="status"><span>Action @Math.Min(fin + 1, turn.RunTotal) sur @turn.RunTotal</span><span class="ai-run-bar"><i style="width:@(fin * 100 / turn.RunTotal)%"></i></span></div>
+                                }
+                                else
+                                {
+                                    var failed = turn.Done.Values.Count(x => x.Error != null);
+                                    <div id="aip-sum" class="ai-run @(failed > 0 ? "bad" : "ok")" role="status"><Ico Name="@(failed > 0 ? "alert" : "check")" Size="15" /><span>@RunSummary(turn.Done.Count - failed, failed)</span></div>
+                                }
+                            }
+                            @if (ans.Actions.Count > 0)
+                            {
+                                var pending = last && Pending > 0 && !running;
+                                <div class="aip-acts">
+                                    @if (pending) { <div class="ah"><Ico Name="check" Size="13" /> À confirmer</div> }
+                                    @for (var k = 0; k < ans.Actions.Count; k++)
+                                    {
+                                        var i = k;
+                                        <div class="act" id="@(last && turn.Running == i ? "aip-run" : null)">
+                                            @if (turn.Done.TryGetValue(i, out var res))
+                                            {
+                                                @if (res.Error == null) { <span class="st ok"><Ico Name="check" Size="15" /></span> }
+                                                else { <span class="st bad"><Ico Name="alert" Size="15" /></span> }
+                                                <span class="lb">
+                                                    @ans.Actions[i].Label
+                                                    @if (res.Error != null) { <small class="bad">@res.Error</small> }
+                                                    else if (res.Info != null) { <small>@res.Info</small> }
+                                                    @if (turn.Undone.Contains(i)) { <small>Annulé.</small> }
+                                                </span>
+                                                @if (res.Error == null && res.Undo != null && !turn.Undone.Contains(i)) { <button type="button" class="linklike" disabled="@running" @onclick="() => Undo(turn, i)">Annuler</button> }
+                                            }
+                                            else if (last && running && turn.Picked.Contains(i))
+                                            {
+                                                @if (turn.Running == i)
+                                                {
+                                                    <i class="ai-spin"></i>
+                                                    <span class="lb">@ans.Actions[i].Label <small class="now">En cours · @Seconds(actionStarted) s@(AiAssistant.SlowHint(ans.Actions[i].Op) is { } hint ? " · " + hint : "")</small></span>
+                                                }
+                                                else
+                                                {
+                                                    <i class="ai-wait"></i>
+                                                    <span class="lb muted">@ans.Actions[i].Label <small>En attente</small></span>
+                                                }
+                                            }
+                                            else if (last)
+                                            {
+                                                <label class="lb pick"><input type="checkbox" checked="@turn.Picked.Contains(i)" disabled="@running" @onchange="() => Toggle(turn, i)" /> <span>@ans.Actions[i].Label</span></label>
+                                            }
+                                            else
+                                            {
+                                                <span class="lb muted">@ans.Actions[i].Label <small>Non confirmé</small></span>
+                                            }
+                                        </div>
+                                    }
+                                    @if (pending)
+                                    {
+                                        <div class="af"><button type="button" class="btn sm" disabled="@(busy || Picked == 0)" @onclick="Confirm"><Ico Name="check" Size="14" /> Confirmer (@Picked)</button><span class="grow"></span><small>Rien n'est fait sans votre accord.</small></div>
+                                    }
+                                </div>
+                            }
+                            @if (ans.Link != null) { <p><button type="button" class="linklike" @onclick="() => GoLink(ans)">@ans.LinkLabel</button></p> }
+                        </div>
+                    }
+                    else if (turn.Said is { Length: > 0 } || turn.Past is { Count: > 0 })
+                    {
+                        <div class="aip-a">
+                            <div class="aw"><Ico Name="spark" Size="13" /> Assistant</div>
+                            @if (turn.Said is { Length: > 0 } said) { <p>@said</p> }
+                            @if (turn.Past is { Count: > 0 } past)
+                            {
+                                <div class="aip-acts">
+                                    @foreach (var a in past)
+                                    {
+                                        <div class="act"><span class="st @(a.State == "fait" ? "ok" : a.State == "échec" ? "bad" : "")"><Ico Name="@(a.State == "fait" ? "check" : a.State == "échec" ? "alert" : "minus")" Size="15" /></span><span class="lb @(a.State == "fait" ? "" : "muted")">@a.Label <small>@StateLabel(a.State)</small></span></div>
+                                    }
+                                </div>
+                                @if (turn.Old && past.Any(a => a.State == "fait")) { <div class="aip-old"><Ico Name="clock" Size="14" /> Faites le @When(turn.At). Pour défaire, passez par la page Historique.</div> }
+                            }
+                        </div>
+                    }
+                }
+                @if (busy)
+                {
+                    <div class="aip-u">@asking</div>
+                    <div class="ai-sug ai-prog" role="status" aria-label="Avancement de la demande">
+                        <div class="ai-prog-h"><Ico Name="spark" Size="15" /><b>@Headline</b><span class="ai-prog-t">@Seconds(started) s</span><span class="grow"></span>
+                            <button type="button" class="linklike" style="font-size:13px" disabled="@(stop == null || stop.IsCancellationRequested)" @onclick="Stop">Arrêter</button></div>
+                        <ol class="ai-steps">
+                            @foreach (var (s, label) in Steps)
+                            {
+                                var st = StepState(s);
+                                <li class="@st">
+                                    <span class="ai-step-i">@if (st == "done") { <Ico Name="check" Size="12" /> } else if (st == "now") { <i class="ai-spin"></i> }</span>
+                                    <span class="ai-step-b">
+                                        <span>@label@if (s == AiStep.Writing && progress is { Ops.Count: > 0 } po) { <text> · @(po.Ops.Count == 1 ? "1 action repérée" : po.Ops.Count + " actions repérées")</text> }</span>
+                                        @if (s == AiStep.Reading && progress is { Read.Length: > 0 } pr) { <small>@pr.Read</small> }
+                                        @if (s == AiStep.Thinking && st == "now" && Seconds(started) >= 15) { <small>Un peu plus long que d'habitude : la réponse arrive en général en moins de 30 secondes.</small> }
+                                        @if (s == AiStep.Writing && progress is { Say.Length: > 0 } ps) { <span class="ai-say">@ps.Say</span> }
+                                        @if (s == AiStep.Writing && progress is { Ops.Count: > 0 } pg)
+                                        {
+                                            <ul class="ai-ops">@foreach (var g in pg.Ops.GroupBy(x => x)) { <li>@g.Key@(g.Count() > 1 ? $" × {g.Count()}" : "")</li> }</ul>
+                                        }
+                                    </span>
+                                </li>
+                            }
+                        </ol>
+                    </div>
+                }
+                @if (error != null) { <div class="err" role="alert">@error</div> }
+                <div id="aip-end" style="height:1px;flex:none"></div>
+            </div>
+            @if (chatOn)
+            {
+                <div class="aip-f">
+                    @if (Panel.Turns.Count == 0 && !busy)
+                    {
+                        <div class="aip-sugg">@foreach (var ex in Examples) { var e = ex; <button type="button" @onclick="() => text = e">@e</button> }</div>
+                    }
+                    <div class="aip-comp">
+                        <textarea rows="1" maxlength="600" aria-label="Votre demande" placeholder="@(Panel.Turns.Count == 0 ? "Demandez ou décrivez ce que vous voulez faire…" : "Votre réponse ou votre prochaine demande…")" @bind="text" @bind:event="oninput" disabled="@(busy || running)" @onkeydown="Key"></textarea>
+                        <button type="button" class="aip-send" aria-label="Envoyer" title="Envoyer (Entrée)" disabled="@(busy || running || text.Trim().Length < 2)" @onclick="Send"><Ico Name="arrow-up" Size="17" /></button>
+                    </div>
+                    <div class="aip-fn"><span>L'IA peut se tromper : rien n'est fait sans votre accord.</span>@if (state.Quota > 0) { <span>@state.Used / @state.Quota ce mois</span> }</div>
+                </div>
+            }
+        }
+    </aside>
+}
+
+@code {
+    /// <summary>Page ouverte (nom et adresse) : l'assistant sait où l'on est.</summary>
+    [Parameter] public string Page { get; set; } = "";
+    [Parameter] public string Path { get; set; } = "";
+
+    protected override void OnParametersSet() { Panel.Page = Page; Panel.Path = Path; }
+
+    private enum View { Chat, History }
+
+    private static readonly (AiStep Step, string Label)[] Steps =
+    {
+        (AiStep.Reading, "Lecture de vos écrans, listes et contenus"),
+        (AiStep.Thinking, "Envoi à l'IA et réflexion"),
+        (AiStep.Writing, "Réception de la réponse"),
+        (AiStep.Checking, "Vérification des actions proposées"),
+    };
+
+    private static readonly string[] Examples =
+    {
+        "Quels écrans sont hors ligne ?",
+        "Affiche « Bienvenue » pendant 2 minutes sur tous les écrans",
+        "Corrige les textes de la composition Menu du jour",
+    };
+
+    private View view;
+    private AiState state = new(AiStatus.Off, 0, 0, false);
+    private string text = "", search = "", renameText = "";
+    private string? error;
+    private bool busy, running, gone, noPage, wipe;
+    private Guid? renaming, deleting;
+    private ElementReference grip, renameInput;
+    private bool focusRename;
+    private DotNetObjectReference<AssistantDock>? self;
+    private bool? docked;
+    private Guid? chatSeen;
+
+    // suivi de la demande en cours
+    private string asking = "";
+    private AiProgress? progress;
+    private DateTime started, actionStarted, lastPaint;
+    private CancellationTokenSource? stop;
+    private string? reveal;
+    private int turnsSeen;
+
+    private bool chatOn => state.Status != AiStatus.Off;
+    private PanelTurn? Current => Panel.Turns.Count > 0 && Panel.Turns[^1].Answer != null ? Panel.Turns[^1] : null;
+    private int Pending => Current?.Answer is { } a ? a.Actions.Count - Current.Done.Count : 0;
+    private int Picked => Current == null ? 0 : Current.Picked.Count(i => !Current.Done.ContainsKey(i));
+
+    private string PageLabel { get { var p = Panel.Page; var i = p.IndexOf(" · ", StringComparison.Ordinal); return i > 0 ? p[..i] : p; } }
+
+    protected override void OnInitialized()
+    {
+        state = AiSvc.State(Store.ClientId, "assistant");
+        Panel.Changed += OnPanel;
+    }
+
+    private void OnPanel() => _ = InvokeAsync(() =>
+    {
+        if (gone) return;
+        if (Panel.IsOpen) state = AiSvc.State(Store.ClientId, "assistant");
+        // une carte vient d'arriver : la montrer
+        if (Panel.Turns.Count > turnsSeen && view == View.Chat) reveal = "aip-end";
+        if (Panel.Turns.Count > turnsSeen && view == View.History && Panel.Turns[^1].Live) view = View.Chat;
+        turnsSeen = Panel.Turns.Count;
+        StateHasChanged();
+    });
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (gone) return;
+        try
+        {
+            if (firstRender)
+            {
+                self = DotNetObjectReference.Create(this);
+                var pref = await JS.InvokeAsync<string?>("linkiiAiPanel.init", self);
+                // page rechargée : la dernière discussion revient (si elle est à cette personne, dans cette organisation, et pas trop ancienne)
+                if (Panel.Turns.Count == 0 && Guid.TryParse(await JS.InvokeAsync<string?>("linkiiPrefs.get", "aichat"), out var last)
+                    && Panel.History().FirstOrDefault(c => c.Id == last) is { } c && c.Updated > DateTime.UtcNow.AddHours(-12))
+                    Panel.Load(c.Id);
+                chatSeen = Panel.ChatId;
+                if (pref == "1" && !Panel.IsOpen) Panel.Restore(true);
+            }
+            if (chatSeen != Panel.ChatId)
+            {
+                chatSeen = Panel.ChatId;
+                await JS.InvokeVoidAsync("linkiiPrefs.set", "aichat", chatSeen?.ToString() ?? "");
+            }
+            if (docked != Panel.IsOpen)
+            {
+                docked = Panel.IsOpen;
+                await JS.InvokeVoidAsync("linkiiAiPanel.docked", Panel.IsOpen);
+            }
+            if (Panel.IsOpen) await JS.InvokeVoidAsync("linkiiAiPanel.grip", grip);
+            if (focusRename) { focusRename = false; await renameInput.FocusAsync(); }
+            if (reveal is { } id) { reveal = null; await JS.InvokeVoidAsync("linkiiPrefs.reveal", id); }
+        }
+        catch (JSException) { } catch (JSDisconnectedException) { } catch (InvalidOperationException) { } catch (TaskCanceledException) { }
+    }
+
+    /// <summary>Ctrl + J, depuis n'importe quelle page.</summary>
+    [JSInvokable] public void ToggleFromKey() => InvokeAsync(() => { if (!running) Panel.Toggle(); });
+
+    public void Dispose()
+    {
+        gone = true;
+        Panel.Changed -= OnPanel;
+        try { stop?.Cancel(); } catch (ObjectDisposedException) { }
+        self?.Dispose();
+    }
+
+    // ---------- discussions récentes ----------
+
+    private void ToggleHistory() { view = view == View.History ? View.Chat : View.History; search = ""; renaming = deleting = null; wipe = false; }
+
+    private List<AiChat> Found()
+    {
+        var all = Panel.History();
+        var q = AiMedia.Terms(search);
+        if (q.Count == 0) return all;
+        return all.Where(c =>
+        {
+            var hay = AiMedia.Norm(c.Title + " " + c.Page + " " + string.Join(" ", c.Lines.Select(l => l.Ask + " " + l.Say)));
+            return q.All(hay.Contains);
+        }).ToList();
+    }
+
+    private void Open(AiChat c)
+    {
+        if (busy || running) return;
+        if (c.Id != Panel.ChatId) Panel.Load(c.Id);
+        view = View.Chat; error = null; reveal = "aip-end";
+    }
+
+    private void NewChat() { Panel.New(); view = View.Chat; error = null; text = ""; noPage = false; }
+
+    private void StartRename(AiChat c) { renaming = c.Id; renameText = c.Title; deleting = null; focusRename = true; }
+    private void RenameDone(AiChat c) { Panel.Rename(c.Id, renameText); renaming = null; }
+    private void RenameKey(KeyboardEventArgs e, AiChat c) { if (e.Key == "Enter") RenameDone(c); else if (e.Key == "Escape") renaming = null; }
+    private void WipeAll() { Panel.DeleteAll(); wipe = false; }
+
+    private static string AreaIcon(string area) => area switch
+    {
+        "screens" or "screen" or "walls" => "monitor",
+        "playlists" => "play-box",
+        "compositions" => "images",
+        "media" => "image",
+        "schedules" or "programmations" or "calendars" => "calendar",
+        "" => "spark",
+        _ => "spark",
+    };
+
+    private static string Meta(AiChat c)
+    {
+        var done = c.Lines.Sum(l => l.Acts.Count(a => a.State == "fait"));
+        var parts = new List<string>();
+        if (c.Page.Length > 0) parts.Add(c.Page);
+        if (done > 0) parts.Add(done == 1 ? "1 action faite" : $"{done} actions faites");
+        parts.Add(When(c.Updated));
+        return string.Join(" · ", parts);
+    }
+
+    private static readonly System.Globalization.CultureInfo Fr = new("fr-FR");
+    private static string When(DateTime utc)
+    {
+        var l = utc.ToLocalTime();
+        var days = (DateTime.Now.Date - l.Date).Days;
+        var h = l.Minute == 0 ? $"{l.Hour} h" : $"{l.Hour} h {l.Minute:00}";
+        return days <= 0 ? h : days == 1 ? "hier, " + h : l.ToString("d MMM", Fr) + ", " + h;
+    }
+    private static string Day(DateTime utc)
+    {
+        var l = utc.ToLocalTime();
+        var days = (DateTime.Now.Date - l.Date).Days;
+        return days <= 0 ? "Aujourd'hui" : days == 1 ? "Hier" : l.ToString("dddd d MMMM", Fr);
+    }
+    private static string StateLabel(string s) => s switch { "fait" => "", "annulé" => "Annulé", "échec" => "Échec", _ => "Non confirmé" };
+
+    // ---------- demande à l'assistant ----------
+
+    private void Stop() { try { stop?.Cancel(); } catch (ObjectDisposedException) { } }
+
+    private static int Seconds(DateTime from) => Math.Max(0, (int)(DateTime.UtcNow - from).TotalSeconds);
+
+    private string Headline => progress?.Step switch
+    {
+        AiStep.Thinking => "L'IA réfléchit à votre demande",
+        AiStep.Writing => "L'IA répond",
+        AiStep.Checking => "Vérification des actions",
+        _ => "Lecture de votre organisation",
+    };
+
+    private string StepState(AiStep s)
+    {
+        var cur = progress?.Step ?? AiStep.Reading;
+        return s < cur ? "done" : s == cur ? "now" : "todo";
+    }
+
+    private static string RunSummary(int ok, int failed) =>
+        failed == 0 ? (ok == 1 ? "Terminé : 1 action faite." : $"Terminé : {ok} actions faites.")
+        : ok == 0 ? (failed == 1 ? "L'action n'a pas pu être faite." : $"Aucune des {failed} actions n'a pu être faite.")
+        : $"Terminé : {ok} faite{(ok > 1 ? "s" : "")}, {failed} en échec.";
+
+    private void Paint()
+    {
+        var now = DateTime.UtcNow;
+        if (gone || now - lastPaint < TimeSpan.FromMilliseconds(120)) return;
+        lastPaint = now;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task Tick()
+    {
+        while (!gone && (busy || running))
+        {
+            await Task.Delay(1000);
+            if (!gone && (busy || running)) await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task Key(KeyboardEventArgs e)
+    {
+        var enter = e.Key == "Enter" && !e.ShiftKey;
+        if (enter && !busy && !running && text.Trim().Length >= 2) await Send();
+    }
+
+    private void SetBusy(bool on) { if (Panel.Busy == on) return; Panel.Busy = on; Panel.Refresh(); }
+
+    private async Task Send()
+    {
+        var ask = text.Trim();
+        if (ask.Length < 2) return;
+        busy = true; error = null; asking = ask; progress = null; started = DateTime.UtcNow; reveal = "aip-end";
+        text = "";
+        var conversation = Panel.Conversation(!noPage);
+        stop = new CancellationTokenSource();
+        SetBusy(true);
+        StateHasChanged();
+        _ = Tick();
+        try
+        {
+            var r = await Assistant.Ask(ask, conversation, stop.Token, p =>
+            {
+                if (p.Step != progress?.Step || p.Ops.Count != progress.Ops.Count) reveal = "aip-end";
+                progress = p; Paint();
+            });
+            state = AiSvc.State(Store.ClientId, "assistant");
+            if (!r.Ok) { error = r.Message; text = ask; return; }
+            var turn = new PanelTurn { Ask = ask, Answer = r };
+            for (var i = 0; i < r.Actions.Count; i++) turn.Picked.Add(i);
+            Panel.Turns.Add(turn);
+            turnsSeen = Panel.Turns.Count;
+            Panel.Save();
+            reveal = "aip-q";
+        }
+        finally { busy = false; progress = null; stop.Dispose(); stop = null; SetBusy(false); }
+    }
+
+    private static void Toggle(PanelTurn t, int i) { if (!t.Picked.Remove(i)) t.Picked.Add(i); }
+
+    private async Task Confirm()
+    {
+        if (Current is not { Answer: { } ans } turn) return;
+        var todo = turn.Picked.Where(i => !turn.Done.ContainsKey(i)).OrderBy(x => x).ToList();
+        running = true; turn.RunTotal = todo.Count; turn.RunDone = 0;
+        SetBusy(true);
+        StateHasChanged();
+        _ = Tick();
+        try
+        {
+            foreach (var i in todo)
+            {
+                turn.Running = i; actionStarted = DateTime.UtcNow; reveal = "aip-run";
+                StateHasChanged();
+                turn.Done[i] = await Assistant.Run(ans.Actions[i]);
+                turn.RunDone++;
+            }
+        }
+        finally
+        {
+            turn.Running = null;
+            running = false;
+            reveal = "aip-sum";
+            state = AiSvc.State(Store.ClientId, "assistant");
+            Panel.Save();
+            SetBusy(false);
+        }
+    }
+
+    private async Task Undo(PanelTurn t, int i)
+    {
+        if (!t.Done.TryGetValue(i, out var r) || r.Undo == null) return;
+        running = true;
+        StateHasChanged();
+        var err = await r.Undo();
+        if (err == null) t.Undone.Add(i); else t.Done[i] = new AiRun(err);
+        running = false;
+        Panel.Save();
+    }
+
+    /// <summary>Lien de la réponse : la page s'ouvre, le panneau reste ouvert à côté.</summary>
+    private void GoLink(AiAnswer a) { if (a.Link is { } l) Nav.NavigateTo(l); }
+}

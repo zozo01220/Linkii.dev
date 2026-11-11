@@ -1948,12 +1948,18 @@
     if (aiOn === 'pro') { aiPop(anchor, 'pro'); return; }
     if (aiOn === 'pause') { aiPop(anchor, 'msg', null, "L'aide de l'IA est en pause : le quota du mois est atteint. Vous pouvez continuer à écrire vous-même."); return; }
     if (!String(e.text || '').trim()) { aiPop(anchor, 'msg', null, "Écrivez d'abord un texte à améliorer."); return; }
-    aiPop(anchor, 'load');
-    let r; try { r = await net.invokeMethodAsync('AiRewrite', String(e.text), mode); } catch (x) { r = { ok: false, message: "L'aide de l'IA n'est pas disponible pour le moment." }; }
-    const a = q('[data-act=ai]') || anchor;
-    if (!r.ok) { aiPop(a, 'msg', null, r.message || "L'aide de l'IA n'est pas disponible pour le moment."); return; }
-    if (aiTok(r.text) !== aiTok(e.text)) { aiPop(a, 'msg', null, "L'IA a modifié un champ relié (entre accolades) : la proposition est écartée pour ne pas casser le texte."); return; }
-    aiPop(a, 'sug', { mode, text: r.text, id: e.id });
+    // la proposition s'affiche dans le panneau de l'assistant (toute l'IA y passe) ; « Remplacer » revient par applyAi
+    closePop();
+    try { await net.invokeMethodAsync('AiImprove', e.id, String(e.text)); } catch (x) { aiPop(anchor, 'msg', null, "L'aide de l'IA n'est pas disponible pour le moment."); }
+  }
+  /** Texte proposé par l'IA et accepté dans le panneau (« Remplacer », ou « Revenir à l'ancien ») : rend false si le calque n'existe plus. */
+  function applyAi(id, text) {
+    if (!D || !root) return false;
+    const e = D.els.find(x => x.id === id);
+    if (!e || e.type !== 'text') return false;
+    e.text = String(text); commit(); renderCtx(); render();
+    toast("Texte remplacé. Ctrl+Z pour revenir à l'ancien.");
+    return true;
   }
   const AI_LBL = { improve: 'Texte corrigé et resserré', short: 'Plus court', warm: 'Ton plus chaleureux', formal: 'Ton plus formel', en: 'En anglais', de: 'En allemand', it: 'En italien', es: 'En espagnol' };
   function aiPop(anchor, kind, s, msg) {
@@ -3074,5 +3080,5 @@
     if (msg.trim()) toast(msg.trim(), !(ids && ids.length));
   }
 
-  w.LinkiiCompoEditor = { mount, unmount, gallery, importing, imported };
+  w.LinkiiCompoEditor = { mount, unmount, gallery, importing, imported, applyAi };
 })(window);

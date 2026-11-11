@@ -17,12 +17,12 @@
     st.id = CSS_ID;
     st.textContent =
       '#bands{position:absolute;left:0;top:0;right:0;bottom:0;z-index:6;pointer-events:none;font-family:"IBM Plex Sans","Segoe UI",Arial,sans-serif}' +
-      '#bands .bn{position:absolute;left:0;right:0;display:grid;grid-template-columns:auto minmax(0,1fr) auto;line-height:1.15;color:#fff;background:#0B1F3A;overflow:hidden}' +
+      '#bands .bn{position:absolute;left:0;right:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) minmax(0,1fr);line-height:1.15;color:#fff;background:#0B1F3A;overflow:hidden}' +
       '#bands .bn.top{top:0}#bands .bn.bottom{bottom:0}' +
       '#bands .bn.bg-blanc{background:#fff;color:#0B1F3A}#bands .bn.bg-signal{background:#2F6FAD}#bands .bn.bg-noir{background:#000}' +
-      '#bands .bc{position:relative;display:flex;align-items:center;gap:.5em;padding:0 .85em;min-width:0;max-width:36%;white-space:nowrap;overflow:hidden}' +
-      '#bands.port .bc{max-width:46%}#bands.port .bd-date{display:none}' +
-      '#bands .bc.center{max-width:none;justify-content:center}' +
+      '#bands .bc{position:relative;display:flex;align-items:center;gap:.5em;padding:0 .85em;min-width:0;white-space:nowrap;overflow:hidden}' +
+      '#bands.port .bn{grid-template-columns:minmax(0,1fr) minmax(0,1.3fr) minmax(0,1fr)}#bands.port .bd-date{display:none}' +
+      '#bands .bc.center{justify-content:center}' +
       '#bands .bc+.bc{border-left:1px solid rgba(255,255,255,.16)}#bands .bn.bg-blanc .bc+.bc{border-left-color:#DDE3EA}' +
       '#bands .bc .widget{position:relative;background:none;border:0;padding:0;gap:.5em;font-size:1em;color:inherit;min-width:0;flex:1 1 auto;justify-content:inherit}' +
       '#bands .bc .widget .time,#bands .bc .widget .temp,#bands .bc .widget .city{font-size:1em}' +
@@ -30,6 +30,10 @@
       '#bands .bc .widget .ico{font-size:1.15em}#bands .bc .widget .info{flex-direction:row;align-items:center;gap:.4em}#bands .bc .widget .rng{display:none}' +
       '#bands .bc .k-qrcode{flex-direction:row;background:none;padding:0;border:0}#bands .bc .k-qrcode svg{width:1.7em;height:1.7em;background:#fff;border-radius:.15em;padding:.1em}#bands .bc .k-qrcode .q-l{font-size:1em;max-width:none;text-align:left;white-space:nowrap;margin:0}' +
       '#bands .bc[data-kind=clockwx] .city{display:none}' +
+      '#bands .bc .widget{flex-direction:row!important;align-items:center!important;white-space:nowrap!important;text-align:left!important;gap:.5em!important}#bands .bc .widget *{font-size:1em!important;line-height:1.15!important;margin:0!important;padding:0!important;color:inherit;flex:none}#bands .bc .widget{flex:none!important;min-width:max-content!important}#bands .bc .widget .ico{font-size:1.15em!important}#bands .bc .widget [class*="-l"],#bands .bc .widget .cd-u{opacity:.7}#bands .bc .widget .cd-n{font-weight:600}#bands .bc .widget .cd-u:empty{display:none!important}' +
+      '#bands .bc .tk{font-size:1em;line-height:1.15;width:auto;flex:1;min-width:0}#bands .bc .tk em{font-size:1em}#bands .bc .tk b,#bands .bc .tk .tk-h{color:inherit;font-weight:600}#bands .bc .tk .sep{margin:0 .9em}' +
+      '#bands .bd-mq{flex:1;min-width:0;overflow:hidden;display:flex;align-items:center;-webkit-mask-image:linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent);mask-image:linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent)}' +
+      '#bands .bd-mqi{display:flex;align-items:center;gap:.5em;flex:none;white-space:nowrap;padding-left:100%;animation:lkbn-tk var(--dur,12s) linear infinite}' +
       '#bands .bc svg{width:1.1em;height:1.1em;flex:none}' +
       '#bands .bd-time{font-weight:500;font-variant-numeric:tabular-nums;letter-spacing:-.01em}' +
       '#bands .bd-dim{opacity:.7}#bands .bd-sepd{opacity:.35}' +
@@ -132,7 +136,32 @@
     });
     hooks.stage.appendChild(root);
     place();
+    fitCells(); timers.push(setTimeout(fitCells, 600)); timers.push(setInterval(fitCells, 2500));
     if (notice) showNotice(notice);
+  }
+
+  /* Une case dont le contenu dépasse défile : il est mis dans une piste qui traverse la case */
+  function fitCells() {
+    if (!root) return;
+    var cs = root.querySelectorAll('.bc');
+    for (var i = 0; i < cs.length; i++) {
+      var el = cs[i], kd = el.getAttribute('data-kind'), w = el.firstChild, key = el.clientWidth + '|' + el.style.fontSize + '|' + (el.parentNode.style.fontSize || '') + '|' + el.textContent.length;
+      if (el._fit === key && !el._dirty) continue;   // rien n'a changé : le défilement continue sans à-coup
+      el._fit = key;
+      if (w && w.className === 'bd-mq') {   // rendre le contenu avant de mesurer
+        var inn = w.firstChild;
+        while (inn.firstChild) el.insertBefore(inn.firstChild, w);
+        el.removeChild(w);
+      }
+      if (!kd || kd === 'ticker' || el.classList.contains('ha-on')) continue;
+      if (el.scrollWidth > el.clientWidth + 1) {
+        var mq = document.createElement('div'), mi = document.createElement('div');
+        mq.className = 'bd-mq'; mi.className = 'bd-mqi';
+        while (el.firstChild) mi.appendChild(el.firstChild);
+        mq.appendChild(mi); el.appendChild(mq);
+        mi.style.setProperty('--dur', Math.round(8 + (mi.scrollWidth - el.clientWidth) / Math.max(40, el.clientWidth) * 6 + mi.scrollWidth / 60) + 's');
+      }
+    }
   }
 
   /* Taille et position : la scène est tout le mur, la hauteur se calcule sur la case d'un écran */
@@ -148,6 +177,7 @@
       bn.style.fontSize = (h * 0.4) + 'px';
       H[pos] = h;
     });
+    fitCells();
   }
 
   /* Message d'API / Home Assistant dans la case réceptrice : prend la place du contenu, avec la barre du temps restant, puis le fil reprend */

@@ -101,7 +101,7 @@ else
 
     private string Summary(BandCell c) => c.Kind switch
     {
-        "text" or "label" => c.Kind == "label" ? $"« {c.S("text")} »" : c.S("text"),
+        "text" or "label" => c.Kind == "label" ? $"« {c.S("text")} »" : c.Ha && c.S("text") == "" ? "Reçoit les messages de Home Assistant" : c.S("text"),
         "ticker" => $"{c.S("items").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Length} message(s) · vitesse {c.S("speed", "normal")}",
         "clock" => "Heure et jour",
         "weather" or "clockwx" => c.S("city"),
@@ -122,14 +122,14 @@ else
             {
                 case "text":
                     @Field(cell, "text", "Texte", 120)
-                    <AiImprove @key="cell" Text="@cell.S("text")" OnApply='v => Set(cell, "text", v)' />
+                    <AiImprove @key="cell" Label="Bandeau · Texte" Text="@cell.S("text")" OnApply='v => Set(cell, "text", v)' />
                     <small class="hint">Défile tout seul s'il est plus long que la case.</small>
                     @HaBox(cell)
                     break;
                 case "ticker":
                     <div class="dw-field"><label>Messages <span class="hint">(un par ligne)</span></label>
                         <textarea rows="4" maxlength="@Bands.MaxItems" value="@cell.S("items")" @oninput="e => SetItems(cell, e)"></textarea>
-                        <AiImprove @key="cell" Lines="true" Text="@cell.S("items")" OnApply='v => Set(cell, "items", v)' /></div>
+                        <AiImprove @key="cell" Label="Bandeau · Messages défilants" Lines="true" Text="@cell.S("items")" OnApply='v => Set(cell, "items", v)' /></div>
                     <div class="dw-field"><label>Vitesse</label>
                         <div class="fmt-seg sm" role="group">
                             @foreach (var (v, l) in new[] { ("lente", "Lente"), ("normal", "Normale"), ("rapide", "Rapide") })
@@ -192,6 +192,7 @@ else
     /// <summary>Une seule case par écran reçoit les messages de Home Assistant : la cocher ailleurs la déplace.</summary>
     private RenderFragment HaBox(BandCell cell) => __builder =>
     {
+        if (!State.HaReady && !cell.Ha) return;
         var recv = State.Bands.Receiver;
         var elsewhere = recv != null && recv != cell;
         <label class="bd-check">

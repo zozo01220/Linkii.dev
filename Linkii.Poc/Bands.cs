@@ -67,6 +67,9 @@ public static class BandKinds
     public static readonly string[] Colors = { "orange", "signal", "rouge" };
     public static readonly string[] Speeds = { "lente", "normal", "rapide" };
 
+    /// <summary>Choix du menu qui n'est pas un type de case : une case de texte qui reçoit les messages de Home Assistant.</summary>
+    public const string HaMessage = "ha-message";
+
     public static Kind? Find(string? id) => All.FirstOrDefault(k => k.Id == id);
 
     /// <summary>Nouvelle case, avec des réglages par défaut.</summary>
@@ -188,6 +191,8 @@ public class BandsState
     public string? SelCell { get; set; }
     public string? PickBand { get; set; }
     public string? PickCell { get; set; }
+    /// <summary>Home Assistant est relié à l'organisation : le choix « Message Home Assistant » est proposé.</summary>
+    public bool HaReady { get; set; }
 
     public Band Get(string band) => band == "top" ? Bands.Top : Bands.Bottom;
 

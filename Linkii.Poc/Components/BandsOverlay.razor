@@ -1,6 +1,8 @@
 @* Bandeaux dessinés sur l'aperçu d'un écran (ou d'un mur) : cliquer une case la règle, une case vide ouvre le choix du contenu.
    Hauteurs en cqw (largeur de l'aperçu) : « Short » est le petit côté de l'écran, en cqw (56,25 en paysage, 100 en portrait). Maquette : maquettes/ecran-bandeaux.html *@
 @inject AppService Svc
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
 
 @if (State != null)
 {
@@ -17,7 +19,8 @@
                     <div class="bd-cell @c @(State.IsSel(pos, c) ? "sel" : "") @(cell == null ? "empty" : "")" title="@(cell == null ? "Choisir un contenu" : BandKinds.Find(cell.Kind)?.Name) · @Pos(c)"
                          @onclick="() => Click(cp, cc)" @onclick:stopPropagation="true">
                         @if (cell == null) { <span class="bd-plus"><Ico Name="plus" Size="14" /></span> }
-                        else { @Body(cell) }
+                        else if (cell.Kind == "ticker") { @Body(cell) }
+                        else { <span class="bd-mq"><span class="bd-mqi">@Body(cell)</span></span> }
                     </div>
                 }
             </div>
@@ -31,7 +34,7 @@
     @if (State.PickBand is { } pb && State.PickCell is { } pc)
     {
         var cur = State.Cell(pb, pc);
-        var st = (pb == "top" ? $"top:calc({H(State.Get(pb))}cqw + 6px);" : $"bottom:calc({H(State.Get(pb))}cqw + 6px);")
+        var st = (pb == "top" ? $"top:calc({H(State.Get(pb))}cqw + 6px);" : $"top:auto;bottom:calc({H(State.Get(pb))}cqw + 6px);")
                + (pc == "left" ? "left:8px;" : pc == "right" ? "right:8px;left:auto;" : "left:50%;transform:translateX(-50%);");
         <div class="kebab-backdrop" @onclick="ClosePick"></div>
         <div class="kebab-menu bd-menu" role="menu" style="@st">
@@ -44,12 +47,19 @@
                     <button type="button" role="menuitem" class="@(cur?.Kind == k.Id ? "on" : "")" @onclick="() => Choose(kk.Id)"><Ico Name="@k.Icon" Size="16" /> @k.Name</button>
                 }
             }
+            @if (State.HaReady || State.Bands.Receiver != null)
+            {
+                <div class="cat">Home Assistant</div>
+                <button type="button" role="menuitem" class="@(cur is { Ha: true } ? "on" : "")" @onclick="() => Choose(BandKinds.HaMessage)"><Ico Name="bell" Size="16" /> Message Home Assistant</button>
+            }
             @if (cur != null) { <button type="button" role="menuitem" class="danger" @onclick="Clear"><Ico Name="x" Size="16" /> Vider la case</button> }
         </div>
     }
 }
 
 @code {
+    protected override async Task OnAfterRenderAsync(bool first) { try { await JS.InvokeVoidAsync("bdFit"); } catch { } }
+
     [Parameter] public BandsState? State { get; set; }
     /// <summary>Petit côté de l'écran en cqw : 56,25 en paysage, 100 en portrait ; un mur compte une case (la moitié si 2 colonnes…).</summary>
     [Parameter] public double Short { get; set; } = 56.25;
@@ -75,8 +85,10 @@
     private async Task Choose(string kind)
     {
         var s = State!; var prev = s.Cell(s.PickBand!, s.PickCell!);
-        var c = BandKinds.NewCell(kind);
-        if (prev != null && prev.Ha && kind is "text" or "ticker") c.Ha = true;
+        var ha = kind == BandKinds.HaMessage;
+        var c = BandKinds.NewCell(ha ? "text" : kind);
+        if (ha) { c.Settings["text"] = ""; foreach (var b in s.Bands.Both) foreach (var x in b.Cells) x.Ha = false; c.Ha = true; }
+        if (prev != null && prev.Ha && kind is "text" or "ticker") { foreach (var b in s.Bands.Both) foreach (var x in b.Cells) x.Ha = false; c.Ha = true; }
         s.SetCell(s.PickBand!, s.PickCell!, c);
         (s.SelBand, s.SelCell) = (s.PickBand, s.PickCell);
         s.PickBand = s.PickCell = null;
@@ -90,7 +102,7 @@
         switch (c.Kind)
         {
             case "logo": __b.AddMarkupContent(0, $"<span class=\"bd-logo\"><span class=\"lg\">{Esc(Initial(c))}</span>{Esc(c.S("text"))}</span>"); break;
-            case "text": __b.AddMarkupContent(0, $"<span class=\"bd-txt\">{Esc(c.S("text"))}</span>"); break;
+            case "text": __b.AddMarkupContent(0, c.Ha && c.S("text") == "" ? "<span class=\"bd-hamsg\">Message Home Assistant</span>" : $"<span class=\"bd-txt\">{Esc(c.S("text"))}</span>"); break;
             case "label": __b.AddMarkupContent(0, $"<span class=\"bd-tag c-{Esc(c.S("color", "orange"))}\">{Esc(c.S("text"))}</span>"); break;
             case "ticker": __b.AddMarkupContent(0, Ticker(c.S("items").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), c.S("speed", "normal"))); break;
             case "rss": __b.AddMarkupContent(0, Ticker(new[] { "Actualités du flux", "Titres du flux RSS" }, "normal")); break;
